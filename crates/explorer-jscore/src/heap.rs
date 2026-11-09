@@ -51,10 +51,13 @@ pub(crate) const DEFAULT_MEM_LIMIT: usize = 512 * 1024 * 1024;
 /// args are the call arguments.
 pub type NativeFn = fn(&mut crate::Engine, Value, &[Value]) -> JsResult<Value>;
 
-/// A heap cell: either an immutable string or an object.
+/// A heap cell's payload. JS-C420 : les chaînes JS sont sorties
+/// de l'arène — `Value::Str` porte un `JsStr` (`Rc` + compteur
+/// d'octets `Engine::str_acct`) : leurs temporaries meurent au
+/// refcount mid-eval, jamais en cellules mortes non balayables.
+/// L'enum survit à une variante : la forme `CellData::Obj`
+/// est partout dans le code de trace/sweep.
 pub enum CellData {
-    /// String data (JS strings are immutable).
-    Str(String),
     /// Object data.
     Obj(Object),
 }
@@ -63,6 +66,11 @@ pub enum CellData {
 pub struct Cell {
     /// Payload.
     pub data: CellData,
+    /// Numéro d'alloc monotone (JS-C421) — le safepoint GC
+    /// intra-éval épargne les cellules `seq >= young_floor`
+    /// (possibles temporaires d'expression tenus par des
+    /// locaux Rust, invisibles aux racines).
+    pub seq: u64,
 }
 
 /// One arena slot — `None` = tombstone réutilisable.
@@ -90,17 +98,19 @@ pub struct Heap {
     /// un script hosti ne doit jamais pouvoir vider la machine —
     /// jusqu'ici la borne existait mais n'était armée nulle part,
     /// mesuré : challenge google + budget relevé = OOM station).
-    /// Le dépassement lève `over_mem` ; le kill doux est émis au
-    /// `tick` suivant (l'alloc elle-même ne peut pas échouer).
+    /// Le dépassement est lu au `tick` suivant par
+    /// `Engine::mem_over` (arène **+** `str_acct`, JS-C420) —
+    /// l'alloc elle-même ne peut pas échouer.
     mem_limit: usize,
-    /// `true` tant que `bytes > mem_limit` (borne non nulle).
-    over_mem: bool,
     /// Passes GC effectuées — métrique `heap_stats`.
     gc_runs: u64,
     /// Pic de cellules vivantes observé (post-sweep/alloc).
     peak_live: usize,
     /// Pic d'octets estimés.
     peak_bytes: usize,
+    /// Compteur monotone d'allocs — source des `Cell::seq`
+    /// (JS-C421).
+    alloc_seq: u64,
 }
 
 impl Heap {
@@ -114,10 +124,10 @@ impl Heap {
             allocated: 0,
             bytes: 0,
             mem_limit: DEFAULT_MEM_LIMIT,
-            over_mem: false,
             gc_runs: 0,
             peak_live: 0,
             peak_bytes: 0,
+            alloc_seq: 0,
         }
     }
 
@@ -130,22 +140,15 @@ impl Heap {
         if self.bytes > self.peak_bytes {
             self.peak_bytes = self.bytes;
         }
-        if self.mem_limit > 0 && self.bytes > self.mem_limit {
-            self.over_mem = true;
-        }
+        let seq = self.alloc_seq;
+        self.alloc_seq += 1;
         if let Some(idx) = self.free.pop() {
-            self.cells[idx as usize] = Some(Cell { data });
+            self.cells[idx as usize] = Some(Cell { data, seq });
             return idx;
         }
-        self.cells.push(Some(Cell { data }));
+        self.cells.push(Some(Cell { data, seq }));
         self.marks.push(false);
         (self.cells.len() - 1) as ObjId
-    }
-
-    /// Allocate a string, returning its id.
-    pub fn alloc_str(&mut self, s: impl Into<String>) -> ObjId {
-        crate::j17_tick(&crate::J17_STR_CELL);
-        self.alloc(CellData::Str(s.into()))
     }
 
     /// Allocate an object.
@@ -155,140 +158,12 @@ impl Heap {
         self.alloc(CellData::Obj(o))
     }
 
-    /// Longueur en octets sans cloner — la garde d'alloc en a
-    /// besoin avant toute matérialisation (§B-59 : `s += …`
-    /// clone l'opérande géante avant `alloc_guard` sinon).
-    pub fn str_len(&self, id: ObjId) -> Option<usize> {
-        match self.cells.get(id as usize) {
-            Some(Some(Cell {
-                data: CellData::Str(s),
-            })) => Some(s.len()),
-            _ => None,
-        }
-    }
-
-    /// Longueur en **code units UTF-16** sans cloner — le
-    /// `length` spec d'une Str (astral = 2) sans la copie que
-    /// `string()` imposerait (§B-59).
-    pub fn str_u16_len(&self, id: ObjId) -> Option<usize> {
-        match self.cells.get(id as usize) {
-            Some(Some(Cell {
-                data: CellData::Str(s),
-            })) => Some(s.encode_utf16().count()),
-            _ => None,
-        }
-    }
-
-    /// Égalité de contenu Str **sans clone** — `===`/`==` sur
-    /// chaînes clonait les deux opérandes entiers (`giant ===
-    /// giant` = 2 clones commit sans comptage, §B-59) ; la
-    /// comparaison en place est gratuite.
-    pub fn str_eq(&self, a: ObjId, b: ObjId) -> bool {
-        match (self.cells.get(a as usize), self.cells.get(b as usize)) {
-            (
-                Some(Some(Cell {
-                    data: CellData::Str(x),
-                })),
-                Some(Some(Cell {
-                    data: CellData::Str(y),
-                })),
-            ) => x == y,
-            _ => false,
-        }
-    }
-
-    /// Code unit UTF-16 à l'indice `i`, lu **en place** — les
-    /// `charCodeAt`/`at` en boucle clonaient la chaîne entière
-    /// par appel (churn commit sans comptage, §B-59 décodeur
-    /// Confiant `charAt` × N sur géante chaîne).
-    pub fn str_u16_at(&self, id: ObjId, i: usize) -> Option<u16> {
-        match self.cells.get(id as usize) {
-            Some(Some(Cell {
-                data: CellData::Str(s),
-            })) => s.encode_utf16().nth(i),
-            _ => None,
-        }
-    }
-
-    /// Offset octet du `u16_i`-ème code unit UTF-16 (frontière
-    /// de char, ou `s.len()` au-delà) — conversion units→bytes
-    /// sans matérialiser la vue (§B-59).
-    pub(crate) fn u16_pos_to_byte(s: &str, u16_i: usize) -> usize {
-        let mut u = 0usize;
-        for (b, c) in s.char_indices() {
-            if u >= u16_i {
-                return b;
-            }
-            u += c.len_utf16();
-        }
-        s.len()
-    }
-
-    /// `indexOf`/`lastIndexOf` en place — offset octet du
-    /// `from_u16`-ième unit, recherche `find`/`match_indices`
-    /// sur la tranche interne, reconversion units (§B-59).
-    pub fn str_index_of(&self, id: ObjId, needle: &str, from_u16: usize, last: bool) -> i64 {
-        let Some(Some(Cell {
-            data: CellData::Str(s),
-        })) = self.cells.get(id as usize)
-        else {
-            return -1;
-        };
-        let byte_from = Self::u16_pos_to_byte(s, from_u16);
-        let pos = if needle.len() > s.len() {
-            None
-        } else if last {
-            let limit = byte_from.min(s.len() - needle.len());
-            s.match_indices(needle)
-                .take_while(|(p, _)| *p <= limit)
-                .last()
-                .map(|(p, _)| p)
-        } else if byte_from > s.len() - needle.len() {
-            None
-        } else {
-            s[byte_from..].find(needle).map(|p| p + byte_from)
-        };
-        pos.map_or(-1, |b| s[..b].encode_utf16().count() as i64)
-    }
-
-    /// Tranche `[a, b)` en units → `String`, lue en place (§B-59
-    /// — `slice`/`substring`/`substr` en boucle sans clone plein).
-    pub fn str_slice_u16(&self, id: ObjId, a: usize, b: usize) -> Option<String> {
-        let Some(Some(Cell {
-            data: CellData::Str(s),
-        })) = self.cells.get(id as usize)
-        else {
-            return None;
-        };
-        // Tranche en code units (spec) — pas en octets :
-        // `u16_pos_to_byte` snappait à la frontière de char et
-        // avalait l'astral entier quand la coupe tombait dans
-        // une paire surrogate. On décode les units `[a,b)` à la
-        // volée ; surrogate isolé → U+FFFD (déviation documentée,
-        // `split('')`/`u16_to_string` idem) — régression JS-C263,
-        // verrou `c23_utf16_positions_and_slices`.
-        let units: Vec<u16> = s.encode_utf16().skip(a).take(b.saturating_sub(a)).collect();
-        Some(String::from_utf16_lossy(&units))
-    }
-
-    /// Borrow a string's contents (cloned — strings are short here).
-    pub fn string(&self, id: ObjId) -> Option<String> {
-        match self.cells.get(id as usize) {
-            Some(Some(Cell {
-                data: CellData::Str(s),
-            })) => {
-                crate::j17_tick(&crate::J17_STR_READ);
-                Some(s.clone())
-            }
-            _ => None,
-        }
-    }
-
     /// Borrow an object.
     pub fn obj(&self, id: ObjId) -> Option<&Object> {
         match self.cells.get(id as usize) {
             Some(Some(Cell {
                 data: CellData::Obj(o),
+                ..
             })) => Some(o),
             _ => None,
         }
@@ -299,6 +174,7 @@ impl Heap {
         match self.cells.get_mut(id as usize) {
             Some(Some(Cell {
                 data: CellData::Obj(o),
+                ..
             })) => Some(o),
             _ => None,
         }
@@ -328,7 +204,15 @@ impl Heap {
         self.cells.swap(a as usize, b as usize);
     }
 
-    /// Nombre de cellules vivantes (objets + chaînes).
+    /// Nombre de cellules vivantes — objets seuls depuis
+    /// JS-C420 (les chaînes `JsStr` vivent hors arène).
+    /// Compteur d'allocs monotone — source des `Cell::seq`, lu
+    /// par `Engine` pour borner le safepoint GC (`young_floor`,
+    /// JS-C421).
+    pub(crate) fn alloc_seq(&self) -> u64 {
+        self.alloc_seq
+    }
+
     pub fn live_count(&self) -> usize {
         self.cells.len() - self.free.len()
     }
@@ -374,17 +258,18 @@ impl Heap {
     pub(crate) fn trace_cell(&self, id: ObjId, out: &mut Vec<ObjId>, envs: &mut HashSet<usize>) {
         let Some(Some(Cell {
             data: CellData::Obj(o),
+            ..
         })) = self.cells.get(id as usize)
         else {
             return;
         };
-        push_value(out, o.proto);
+        push_value(out, &o.proto);
         for (_, p) in &o.props {
             match p {
-                Prop::Data { value, .. } => push_value(out, *value),
+                Prop::Data { value, .. } => push_value(out, value),
                 Prop::Acc { get, set, .. } => {
-                    push_value(out, *get);
-                    push_value(out, *set);
+                    push_value(out, get);
+                    push_value(out, set);
                 }
             }
         }
@@ -395,19 +280,19 @@ impl Heap {
         }
         match &o.kind {
             ObjKind::Array(elems) => {
-                for &v in elems {
+                for v in elems {
                     push_value(out, v);
                 }
             }
             ObjKind::Fun(fun) => match fun {
                 Fun::Script { env, lex_this, .. } => {
                     if let Some(t) = lex_this {
-                        push_value(out, *t);
+                        push_value(out, t);
                     }
                     trace_env(env, out, envs);
                 }
                 Fun::BoundNative { bound, .. } => {
-                    for &v in bound {
+                    for v in bound {
                         push_value(out, v);
                     }
                 }
@@ -416,9 +301,9 @@ impl Heap {
                     this,
                     bound,
                 } => {
-                    push_value(out, *target);
-                    push_value(out, *this);
-                    for &v in bound {
+                    push_value(out, target);
+                    push_value(out, this);
+                    for v in bound {
                         push_value(out, v);
                     }
                 }
@@ -426,14 +311,14 @@ impl Heap {
             },
             ObjKind::Host(h) => h.trace(out),
             ObjKind::Promise(p) => {
-                push_value(out, p.result);
-                push_value(out, p.resolve_fn);
-                push_value(out, p.reject_fn);
+                push_value(out, &p.result);
+                push_value(out, &p.resolve_fn);
+                push_value(out, &p.reject_fn);
                 for r in &p.reactions {
-                    push_value(out, r.on_fulfilled);
-                    push_value(out, r.on_rejected);
-                    match r.next {
-                        crate::promise::ThenSink::Native(id) => out.push(id),
+                    push_value(out, &r.on_fulfilled);
+                    push_value(out, &r.on_rejected);
+                    match &r.next {
+                        crate::promise::ThenSink::Native(id) => out.push(*id),
                         crate::promise::ThenSink::Foreign { resolve, reject } => {
                             push_value(out, resolve);
                             push_value(out, reject);
@@ -443,20 +328,20 @@ impl Heap {
             }
             ObjKind::Map(entries) => {
                 for (k, v) in entries {
-                    push_value(out, *k);
-                    push_value(out, *v);
+                    push_value(out, k);
+                    push_value(out, v);
                 }
             }
             ObjKind::Set(items) => {
-                for &v in items {
+                for v in items {
                     push_value(out, v);
                 }
             }
             ObjKind::Iter { items, ret, .. } => {
-                for &v in items {
+                for v in items {
                     push_value(out, v);
                 }
-                push_value(out, *ret);
+                push_value(out, ret);
             }
             ObjKind::GenLive { exec } => {
                 if let Ok(g) = exec.try_borrow() {
@@ -464,26 +349,26 @@ impl Heap {
                 }
             }
             ObjKind::Proxy { target, handler } => {
-                push_value(out, *target);
+                push_value(out, target);
                 if let Some(h) = handler {
-                    push_value(out, *h);
+                    push_value(out, h);
                 }
             }
             ObjKind::DataView { buffer, .. } | ObjKind::TypedArray { buffer, .. } => {
-                push_value(out, *buffer);
+                push_value(out, buffer);
             }
             ObjKind::FinReg { cb, entries } => {
-                push_value(out, *cb);
+                push_value(out, cb);
                 for en in entries {
-                    push_value(out, en.held);
-                    push_value(out, en.token);
+                    push_value(out, &en.held);
+                    push_value(out, &en.token);
                 }
             }
             ObjKind::DispStack { stack, .. } => {
                 for (f, t, v) in stack {
-                    push_value(out, *f);
-                    push_value(out, *t);
-                    push_value(out, *v);
+                    push_value(out, f);
+                    push_value(out, t);
+                    push_value(out, v);
                 }
             }
             // `WeakRef` : la cible n'est PAS tracée (c'est le
@@ -500,15 +385,26 @@ impl Heap {
         }
     }
 
-    /// Passe mark-sweep. `seed` sème les racines de l'Engine (la
-    /// table `roots` explicite est toujours incluse). Retourne le
-    /// nombre de cellules réclamées ; les host objects balayés
-    /// reçoivent [`Host::finalize`] avant libération.
-    pub fn collect<F>(&mut self, mut seed: F) -> usize
+    /// Passe mark-sweep à frontière d'âge (JS-C421). `seed` sème
+    /// les racines de l'Engine (la table `roots` explicite est
+    /// toujours incluse) ; les cellules non marquées avec
+    /// `seq >= young_seq` sont conservées — ce sont les
+    /// temporaires potentiels des locaux Rust d'éval (invisibles
+    /// aux racines). `u64::MAX` = passe pleine (frontière de job :
+    /// aucune cellule n'est « jeune »). Retourne le nombre de
+    /// cellules réclamées ; les host objects balayés reçoivent
+    /// [`Host::finalize`] avant libération.
+    pub(crate) fn collect_bounded<F>(&mut self, mut seed: F, young_seq: u64) -> usize
     where
         F: FnMut(&mut dyn FnMut(ObjId)),
     {
         // -- Mark --
+        // Invariant explicite : la passe repart de marques
+        // nettoyées (JS-C417 — `mark_live` laisse désormais ses
+        // marques chaudes au census `Str` des kills ; chaque
+        // phase mark se ré-initialise elle-même au lieu de
+        // présupposer la nettoyage du passant précédent).
+        self.marks.fill(false);
         let mut worklist: Vec<ObjId> = Vec::new();
         let mut envs: HashSet<usize> = HashSet::new();
         let mut discovered: Vec<ObjId> = Vec::new();
@@ -529,6 +425,13 @@ impl Heap {
         });
         // Drain itératif — `trace_cell` pousse les référencements
         // dans `discovered`, on les marque en remettant.
+        if crate::dlv_trace() {
+            tracing::info!(
+                "job: gc.mark cells={} roots={}",
+                self.cells.len(),
+                worklist.len()
+            );
+        }
         while let Some(id) = worklist.pop() {
             self.trace_cell(id, &mut discovered, &mut envs);
             for d in discovered.drain(..) {
@@ -538,13 +441,50 @@ impl Heap {
                 }
             }
         }
+        // §B-111 — morgue de la vague : une mort en cascade
+        // dans le sweep laisse le top-kinds des cellules mortes
+        // en dernière ligne (`GenLive` ? `Host` ? `Promise` ?) —
+        // le suspect de drop récursif est nommé sans per-cell log.
+        if crate::dlv_trace() {
+            let mut h: std::collections::HashMap<&'static str, usize> =
+                std::collections::HashMap::new();
+            let mut dead = 0usize;
+            for (i, slot) in self.cells.iter().enumerate() {
+                if !self.marks[i] {
+                    if let Some(c) = slot.as_ref() {
+                        *h.entry(cell_kind_name(&c.data)).or_default() += 1;
+                        dead += 1;
+                    }
+                }
+            }
+            let mut v: Vec<_> = h.into_iter().collect();
+            v.sort_by_key(|e| std::cmp::Reverse(e.1));
+            let kinds = v
+                .iter()
+                .take(6)
+                .map(|(k, n)| format!("{k}:{n}"))
+                .collect::<Vec<_>>()
+                .join(" ");
+            tracing::info!("job: gc.sweep dead={dead} {kinds}");
+        }
         // -- Sweep --
         let mut swept = 0usize;
         let mut live_bytes = 0usize;
         for (i, slot) in self.cells.iter_mut().enumerate() {
+            // JS-C421 : cellule jeune (allouée depuis la borne
+            // d'âge) non marquée — temporaire potentiel d'un
+            // local Rust : conservée, comptée vivante.
+            if slot.as_ref().is_some_and(|c| c.seq >= young_seq) {
+                if let Some(c) = slot.as_ref() {
+                    live_bytes += cell_bytes(&c.data);
+                }
+                self.marks[i] = false;
+                continue;
+            }
             if slot.is_some() && !self.marks[i] {
                 if let Some(Cell {
                     data: CellData::Obj(o),
+                    ..
                 }) = slot.as_ref()
                 {
                     if let ObjKind::Host(h) = &o.kind {
@@ -570,7 +510,6 @@ impl Heap {
         if self.bytes > self.peak_bytes {
             self.peak_bytes = self.bytes;
         }
-        self.over_mem = self.mem_limit > 0 && self.bytes > self.mem_limit;
         swept
     }
 
@@ -579,7 +518,7 @@ impl Heap {
     /// [`Heap::collect`]. Contrairement à `collect`, elle est
     /// sûre **pendant une évaluation** : rien n'est balayé, les
     /// temporaires de la pile d'appel (non racines) survivent —
-    /// c'est le garde-fou qui permet au `tick` `over_limit` de
+    /// c'est le garde-fou qui permet au `tick` `mem_over` de
     /// distinguer fuite réelle et simple déchets sans corrompre
     /// les `ObjId` des receveurs en vol (« `push` is not a
     /// function (on ?) », incapsula vol 161/162 — JS-C206).
@@ -625,7 +564,15 @@ impl Heap {
                 }
             }
         }
-        self.marks.fill(false);
+        // Marques laissées **chaudes** (JS-C417 / §B-114) : le
+        // kill `mem_over` émis juste après discrimine vivant
+        // retenu / déchets non balayables — le cas « rétention
+        // structurelle » vs « churn `s += c` » se lit alors au
+        // lieu d'être conjecturé. (Avant JS-C420 le census `Str`
+        // relisait ces marques ; les chaînes vivent désormais
+        // hors arène, leur vivant exact est `str_acct`.) La passe
+        // suivante (`collect`/`mark_live`) se ré-initialise en
+        // tête — invariant explicite, pas d'état partagé.
         (live, bytes)
     }
 
@@ -648,32 +595,8 @@ impl Heap {
         let mut h: std::collections::HashMap<&'static str, (usize, usize)> =
             std::collections::HashMap::new();
         for c in self.cells.iter().flatten() {
-            let (name, bytes) = match &c.data {
-                CellData::Str(s) => ("Str", std::mem::size_of::<Cell>() + s.len()),
-                CellData::Obj(o) => {
-                    let kind = match &o.kind {
-                        ObjKind::Ordinary => "Ordinary",
-                        ObjKind::Array(_) => "Array",
-                        ObjKind::Fun(_) => "Fun",
-                        ObjKind::Host(_) => "Host",
-                        ObjKind::RegExp(_) => "RegExp",
-                        ObjKind::Promise(_) => "Promise",
-                        ObjKind::Map(_) => "Map",
-                        ObjKind::Set(_) => "Set",
-                        ObjKind::Iter { .. } => "Iter",
-                        ObjKind::GenLive { .. } => "GenLive",
-                        ObjKind::Temp(_) => "Temp",
-                        ObjKind::WeakRef(_) => "WeakRef",
-                        ObjKind::Symbol { .. } => "Symbol",
-                        ObjKind::BigInt(_) => "BigInt",
-                        ObjKind::ByteBuf(_) => "ByteBuf",
-                        ObjKind::Blob { .. } => "Blob",
-                        _ => "other",
-                    };
-                    (kind, cell_bytes(&c.data))
-                }
-            };
-            let e = h.entry(name).or_default();
+            let bytes = cell_bytes(&c.data);
+            let e = h.entry(cell_kind_name(&c.data)).or_default();
             e.0 += 1;
             e.1 += bytes;
         }
@@ -688,7 +611,7 @@ impl Heap {
     /// repasser par `alloc` → l'estimé restait plat pendant
     /// que le RSS explosait (45 Mo comptés / 2,6 Go réels).
     /// Le `tick` l'appelle périodiquement : les bornes
-    /// (`over_limit`, cap dur) voient alors la vraie
+    /// (`mem_over`, cap dur) voient alors la vraie
     /// empreinte. O(cellules + props) — le rythme est borné
     /// côté appelant.
     pub fn refresh_estimate(&mut self) {
@@ -701,21 +624,14 @@ impl Heap {
         if self.bytes > self.peak_bytes {
             self.peak_bytes = self.bytes;
         }
-        self.over_mem = self.mem_limit > 0 && self.bytes > self.mem_limit;
     }
 
     /// Borne mémoire par contexte (ADR-0019) — `0` = illimité.
     /// Le dépassement n'empêche pas l'alloc (signature non
-    /// faillible) : il lève le drapeau `over_limit`, lu au `tick`
-    /// par l'interp pour un kill doux borné.
+    /// faillible) : il est lu au `tick` par `Engine::mem_over`
+    /// pour un kill doux borné.
     pub fn set_mem_limit(&mut self, bytes: usize) {
         self.mem_limit = bytes;
-        self.over_mem = bytes > 0 && self.bytes > bytes;
-    }
-
-    /// `true` tant que l'estimation dépasse la borne configurée.
-    pub fn over_limit(&self) -> bool {
-        self.over_mem
     }
 
     /// Borne mémoire configurée (`0` = illimité) — relue par la
@@ -752,15 +668,17 @@ pub struct HeapStats {
     pub gc_runs: u64,
 }
 
-/// Coût estimé d'une cellule — approximation documentée : le
-/// `String` compte sa longueur, l'`Object` son empreinte fixe plus
-/// la capacité de sa table de props (les clés `Rc<str>` sont
-/// mutualisées par l'interneur — le texte n'est compté nulle
-/// part ailleurs : borne grossière, pas mesure exacte).
+/// Coût estimé d'une cellule — approximation documentée : les
+/// chaînes ont quitté l'arène (JS-C420 — leur capacité est
+/// désormais comptée dans `Engine::str_acct` au fil du
+/// refcount, plus fine qu'un sweep), et l'`Object` compte
+/// son empreinte fixe plus la capacité de sa table
+/// de props (les clés `Rc<str>` sont mutualisées par
+/// l'interneur — le texte n'est compté nulle part ailleurs :
+/// borne grossière, pas mesure exacte).
 fn cell_bytes(data: &CellData) -> usize {
     let base = std::mem::size_of::<Cell>();
     match data {
-        CellData::Str(s) => base + s.len(),
         CellData::Obj(o) => {
             base + std::mem::size_of::<Object>()
                 + o.props.capacity() * std::mem::size_of::<(Rc<str>, Prop)>()
@@ -778,6 +696,11 @@ fn cell_bytes(data: &CellData) -> usize {
                 // actugaming : `arr.push` en boucle — croissance
                 // post-alloc invisible au compteur) : compter
                 // la capacité, relue à chaque mesure.
+                // JS-C411 : les kinds tombés dans `_ => 0`
+                // rendaient leurs réservoirs invisibles —
+                // `FetchBody` verbatim (segment MSE de dizaines
+                // de Mo non compté, §B-114 rumble), réactions de
+                // promesses, piles de générateurs suspendus.
                 + match &o.kind {
                     ObjKind::ByteBuf(b) => b.len(),
                     ObjKind::Blob { data, .. } => data.len(),
@@ -790,16 +713,47 @@ fn cell_bytes(data: &CellData) -> usize {
                     ObjKind::Iter { items, .. } => {
                         items.capacity() * std::mem::size_of::<Value>()
                     }
+                    ObjKind::FetchBody { body } => body.capacity(),
+                    ObjKind::Promise(p) => {
+                        p.reactions.capacity()
+                            * std::mem::size_of::<crate::promise::Reaction>()
+                    }
+                    ObjKind::FinReg { entries, .. } => {
+                        entries.capacity() * std::mem::size_of::<FinRegEntry>()
+                    }
+                    ObjKind::DispStack { stack, .. } => {
+                        stack.capacity()
+                            * std::mem::size_of::<(Value, Value, Value)>()
+                    }
+                    ObjKind::Symbol { desc, key } => {
+                        desc.as_ref().map_or(0, String::capacity)
+                            + key.capacity()
+                    }
+                    ObjKind::BigInt(b) => {
+                        usize::try_from(b.bits() / 8).unwrap_or(usize::MAX)
+                    }
+                    ObjKind::Fun(
+                        Fun::Bound { bound, .. } | Fun::BoundNative { bound, .. },
+                    ) => bound.capacity() * std::mem::size_of::<Value>(),
+                    ObjKind::GenLive { exec } => {
+                        exec.try_borrow().map_or(0, |g| g.mem_estimate())
+                    }
+                    // Partagés/opaques : `Fun::Script` (`Rc<FnLit>`
+                    // mutualisé — compter le corps par instance
+                    // doublerait), `Host`, `RegExp`, `Temp`,
+                    // `WeakRef`, `Proxy`, vues (`DataView`/
+                    // `TypedArray` — le `ByteBuf` porte le coût).
                     _ => 0,
                 }
         }
     }
 }
 
-/// Pousse l'`ObjId` d'un `Value` (no-op pour les scalaires).
-pub(crate) fn push_value(out: &mut Vec<ObjId>, v: Value) {
+/// Pousse l'`ObjId` d'un `Value` (no-op pour les scalaires —
+/// `Str` n'est plus une cellule, JS-C420).
+pub(crate) fn push_value(out: &mut Vec<ObjId>, v: &Value) {
     match v {
-        Value::Obj(i) | Value::Str(i) | Value::Big(i) => out.push(i),
+        Value::Obj(i) | Value::Big(i) => out.push(*i),
         _ => {}
     }
 }
@@ -821,15 +775,15 @@ pub(crate) fn trace_env(env: &EnvRef, out: &mut Vec<ObjId>, visited: &mut HashSe
                 EnvKind::Global(m) | EnvKind::Local(m) | EnvKind::Block(m) => {
                     for c in m.values() {
                         match c {
-                            EnvCell::Bind(b) => push_value(out, b.value),
+                            EnvCell::Bind(b) => push_value(out, &b.value),
                             // `arguments` paresseux : les valeurs
                             // captées à l'appel restent racines tant
                             // que la cellule n'est pas matérialisée.
                             EnvCell::LazyArgs(la) => {
                                 for v in la.args.borrow().iter() {
-                                    push_value(out, *v);
+                                    push_value(out, v);
                                 }
-                                push_value(out, la.f);
+                                push_value(out, &la.f);
                             }
                             // Alias d'import : l'env du module exporteur est
                             // aussi une racine — ses liaisons restent
@@ -839,7 +793,7 @@ pub(crate) fn trace_env(env: &EnvRef, out: &mut Vec<ObjId>, visited: &mut HashSe
                     }
                 }
                 // `with (o)` — l'objet-scope vit tant que le bloc.
-                EnvKind::With(oid) => push_value(out, Value::Obj(*oid)),
+                EnvKind::With(oid) => push_value(out, &Value::Obj(*oid)),
             }
             cur.clone_from(&borrowed.parent);
         }
@@ -882,7 +836,7 @@ impl PropAttrs {
 
 /// A property entry. `enumerable` gates `for-in` enumeration
 /// (builtins install themselves as non-enumerable).
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 pub enum Prop {
     /// Plain data property.
     Data {
@@ -930,7 +884,7 @@ impl Prop {
     /// those through the getter-invoking path).
     pub fn data_value(&self) -> Option<Value> {
         match self {
-            Prop::Data { value, .. } => Some(*value),
+            Prop::Data { value, .. } => Some(value.clone()),
             Prop::Acc { .. } => None,
         }
     }
@@ -962,9 +916,10 @@ pub struct Object {
     /// comptée dans `cell_bytes`. `OnceCell<Box>` : **8 o par
     /// objet** (niche du pointeur) — l'index est rare (≥24 props),
     /// les petits objets ne doivent pas payer sa place inline :
-    /// le heap de démarrage est à ~1 047 941 o, 635 o sous la
-    /// borne 1 Mio des tests mémoire — un champ inline plus large
-    /// armerait `over_mem` dès la première alloc post-init
+    /// le heap de démarrage est à ~540 551 o post-sweep (JS-C411,
+    /// comptage capacité) — un champ inline plus large
+    /// approcherait la borne `mem_over` dès la première alloc
+    /// post-init sur les contextes à borne serrée
     /// (`js_heap_limit_reaches_context`). `pub(crate)` : les
     /// littéraux `Object { … }` hors module le posent
     /// `OnceCell::new()` — jamais autre chose (invariant
@@ -1545,7 +1500,7 @@ impl Object {
     /// magic) — accessors come back as `Prop::Acc`.
     pub fn find(&self, key: &str) -> Option<Prop> {
         self.prop_pos(key)
-            .and_then(|i| self.props.get(i).map(|(_, p)| *p))
+            .and_then(|i| self.props.get(i).map(|(_, p)| p.clone()))
     }
 
     /// Own property lookup — data value only (`None` for accessors).
@@ -1951,6 +1906,38 @@ pub enum Fun {
     },
 }
 
+/// Nom de kind d'une cellule — partagé par [`Heap::kind_histogram`]
+/// (§B-59 vivant) et la morgue `gc.sweep` (§B-111 morts) : même
+/// vocabulaire des deux côtés de la frontière vie/mort.
+fn cell_kind_name(d: &CellData) -> &'static str {
+    match d {
+        CellData::Obj(o) => match &o.kind {
+            ObjKind::Ordinary => "Ordinary",
+            ObjKind::Array(_) => "Array",
+            ObjKind::Fun(_) => "Fun",
+            ObjKind::Host(_) => "Host",
+            ObjKind::RegExp(_) => "RegExp",
+            ObjKind::Promise(_) => "Promise",
+            ObjKind::Map(_) => "Map",
+            ObjKind::Set(_) => "Set",
+            ObjKind::Iter { .. } => "Iter",
+            ObjKind::GenLive { .. } => "GenLive",
+            ObjKind::Temp(_) => "Temp",
+            ObjKind::WeakRef(_) => "WeakRef",
+            ObjKind::Symbol { .. } => "Symbol",
+            ObjKind::BigInt(_) => "BigInt",
+            ObjKind::ByteBuf(_) => "ByteBuf",
+            ObjKind::Blob { .. } => "Blob",
+            ObjKind::Proxy { .. } => "Proxy",
+            ObjKind::FinReg { .. } => "FinReg",
+            ObjKind::DispStack { .. } => "DispStack",
+            ObjKind::DataView { .. } => "DataView",
+            ObjKind::TypedArray { .. } => "TypedArray",
+            ObjKind::FetchBody { .. } => "FetchBody",
+        },
+    }
+}
+
 /// Lexical environment. The global environment delegates its bindings
 /// to the global object's properties (so `foo` and `window.foo` are
 /// the same slot); local scopes are plain hash maps.
@@ -2134,7 +2121,7 @@ pub struct LazyArgs {
 /// sloppy) — sauf `sloppy_silent` (nom de `FunctionExpression`,
 /// `ReadOnly` ES3 §13 : échec silencieux en sloppy, `TypeError` en
 /// strict).
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 pub struct Binding {
     /// Stored value.
     pub value: Value,
@@ -2161,8 +2148,72 @@ pub fn envs_live() -> usize {
 }
 
 impl Drop for Env {
+    /// §B-111 — descente itérative de la chaîne de portées.
+    /// La libération d'une closure au sweep GC chaînait
+    /// `parent`→`parent`→… en récursion native ∝ profondeur
+    /// des scopes — `maybe_grow` ne couvre pas `Drop` →
+    /// overflow de pile **à charge égale** quelle que soit
+    /// `RUST_MIN_STACK` (vols 689/690 : `job: gc` dernier
+    /// breadcrumb avant `0xC00000FD`, 452 130 breadcrumbs —
+    /// ni callback ni rail : le sweep lui-même). Patron
+    /// R-24/JS-C41 : on ne poursuit que les maillons dont on
+    /// est le dernier détenteur — un env partagé brise la
+    /// descente ici. Seconde arête env→env : `EnvCell::Alias`
+    /// (live bindings d'import, chaînes de ré-exports) —
+    /// extraite avant la libération des liaisons, sinon le
+    /// drop de la `BindingMap` renichait la récursion à +1
+    /// par maillon.
     fn drop(&mut self) {
         ENVS_LIVE.with(|c| c.set(c.get().saturating_sub(1)));
+        let mut worklist: Vec<EnvRef> = Vec::new();
+        worklist.extend(self.parent.take());
+        take_env_edges(&mut self.kind, &mut worklist);
+        while let Some(rc) = worklist.pop() {
+            // Env partagé (autre closure, pile d'appel) : la
+            // décrémente de `rc` en sortie de boucle suffit,
+            // la chaîne amont appartient à d'autres vies.
+            if Rc::strong_count(&rc) != 1 {
+                continue;
+            }
+            // Emprunt en vol (pathologique à la frontière de
+            // job) : `rc` drop → `Env::drop` reprend la
+            // descente itérative un niveau plus bas — la
+            // profondeur ajoutée borne les emprunts réels.
+            let Ok(mut b) = rc.try_borrow_mut() else {
+                continue;
+            };
+            worklist.extend(b.parent.take());
+            take_env_edges(&mut b.kind, &mut worklist);
+            drop(b);
+            drop(rc);
+        }
+    }
+}
+
+/// Extrait les `EnvRef` référencés par les liaisons d'`env`
+/// (arête `EnvCell::Alias` — le parent est détaché par
+/// l'appelant) : la table vidée se libère ensuite sans
+/// décrémenter de portée — la récursion reste plate.
+fn take_env_edges(kind: &mut EnvKind, worklist: &mut Vec<EnvRef>) {
+    let map = match kind {
+        EnvKind::Global(m) | EnvKind::Local(m) | EnvKind::Block(m) => m,
+        EnvKind::With(_) => return,
+    };
+    match map {
+        BindingMap::Small(v) => {
+            for (_, c) in v.drain(..) {
+                if let EnvCell::Alias(target, _) = c {
+                    worklist.push(target);
+                }
+            }
+        }
+        BindingMap::Map(m) => {
+            for (_, c) in m.drain() {
+                if let EnvCell::Alias(target, _) = c {
+                    worklist.push(target);
+                }
+            }
+        }
     }
 }
 
@@ -2215,14 +2266,14 @@ impl Env {
 /// getters proto sont perdus (spec — mur terrain `TanStack`
 /// `e.id` → `undefined`).
 pub(crate) fn proto_has_accessor(heap: &Heap, sid: ObjId) -> bool {
-    let mut cur = heap.obj(sid).map_or(Value::Null, |o| o.proto);
+    let mut cur = heap.obj(sid).map_or(Value::Null, |o| o.proto.clone());
     for _ in 0..32 {
         let Value::Obj(id) = cur else { return false };
         let Some(o) = heap.obj(id) else { return false };
         if o.props.iter().any(|(_, p)| matches!(p, Prop::Acc { .. })) {
             return true;
         }
-        cur = o.proto;
+        cur = o.proto.clone();
     }
     false
 }
@@ -2240,7 +2291,7 @@ mod tests {
     fn mem_limit_armed_by_default() {
         let h = Heap::new();
         assert_eq!(h.mem_limit(), DEFAULT_MEM_LIMIT);
-        assert!(!h.over_limit());
+        assert!(h.bytes <= h.mem_limit());
     }
 
     /// `set_mem_limit(0)` reste le désarmement explicite — les
@@ -2252,5 +2303,105 @@ mod tests {
         assert_eq!(h.mem_limit(), 0);
         h.set_mem_limit(64);
         assert_eq!(h.mem_limit(), 64);
+    }
+
+    /// §B-111 — le drop d'une chaîne d'envs ne récurse jamais
+    /// en natif (vols 689/690 : `job: gc` dernier breadcrumb
+    /// avant `0xC00000FD` — le sweep libérait une closure au
+    /// sommet d'une chaîne de portées et `Drop` descendait
+    /// `parent`→`parent`→… hors de toute garde `maybe_grow`).
+    /// 50 000 maillons sur pile 2 Mio : sans la descente
+    /// itérative le test meurt en `0xC00000FD` — la signature
+    /// WER exacte du terrain.
+    #[test]
+    fn env_drop_deep_chain_iterative() {
+        std::thread::Builder::new()
+            .stack_size(2 * 1024 * 1024)
+            .spawn(|| {
+                let mut env = Env::global();
+                for _ in 0..50_000 {
+                    env = Env::local(env);
+                }
+                assert_eq!(envs_live(), 50_001);
+                drop(env);
+                assert_eq!(envs_live(), 0);
+            })
+            .unwrap()
+            .join()
+            .unwrap();
+    }
+
+    /// §B-111 — même classe par la seconde arête env→env :
+    /// `EnvCell::Alias` (live bindings d'import, chaînes de
+    /// ré-exports). La libération de la `BindingMap` devait
+    /// décrémenter chaque cible en nichant son drop — la
+    /// worklist extrait les arêtes avant libération.
+    #[test]
+    fn env_drop_alias_chain_iterative() {
+        std::thread::Builder::new()
+            .stack_size(2 * 1024 * 1024)
+            .spawn(|| {
+                let mut tail = Env::global();
+                for _ in 0..20_000 {
+                    let e = Env::local(Env::global());
+                    if let EnvKind::Local(m) = &mut e.borrow_mut().kind {
+                        m.insert("x", EnvCell::Alias(tail, "x".to_string()));
+                    }
+                    tail = e;
+                }
+                drop(tail);
+                assert_eq!(envs_live(), 0);
+            })
+            .unwrap()
+            .join()
+            .unwrap();
+    }
+
+    /// JS-C411 — l'estimé compte les réservoirs autrefois
+    /// invisibles (`_ => 0`) : `FetchBody` verbatim, réactions
+    /// de promesse, disposeurs, symboles, args liés, bigint.
+    /// §B-114 : un segment MSE de 30 Mo dans un `FetchBody`
+    /// passait sous le compteur. JS-C420 : les chaînes ne sont
+    /// plus des cellules — leur capacité est comptée côté
+    /// `Engine::str_acct`, pas ici.
+    #[test]
+    fn c411_cell_bytes_counts_capacity_and_payloads() {
+        let mk = |kind| Object::blank(Value::Null, kind);
+        let fb = cell_bytes(&CellData::Obj(mk(ObjKind::FetchBody {
+            body: vec![0u8; 512],
+        })));
+        assert!(fb >= 512, "FetchBody body compté : {fb}");
+
+        let mut p = crate::promise::JsPromise {
+            state: crate::promise::PromiseState::Pending,
+            result: Value::Undefined,
+            reactions: Vec::new(),
+            resolve_fn: Value::Undefined,
+            reject_fn: Value::Undefined,
+            handled: false,
+        };
+        p.reactions.reserve(64);
+        let pr = cell_bytes(&CellData::Obj(mk(ObjKind::Promise(p))));
+        assert!(
+            pr >= 64 * std::mem::size_of::<crate::promise::Reaction>(),
+            "reactions comptées : {pr}"
+        );
+
+        let ds = cell_bytes(&CellData::Obj(mk(ObjKind::DispStack {
+            disposed: false,
+            stack: Vec::with_capacity(32),
+        })));
+        assert!(ds >= 32 * 24, "DispStack compté : {ds}");
+
+        let sym = cell_bytes(&CellData::Obj(mk(ObjKind::Symbol {
+            desc: Some(String::with_capacity(64)),
+            key: String::with_capacity(16),
+        })));
+        assert!(sym >= 80, "Symbol compté : {sym}");
+
+        let bi = cell_bytes(&CellData::Obj(mk(ObjKind::BigInt(
+            num_bigint::BigInt::from(u128::MAX),
+        ))));
+        assert!(bi >= 16, "BigInt digits comptés : {bi}");
     }
 }

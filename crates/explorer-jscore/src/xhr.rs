@@ -193,13 +193,13 @@ impl XhrData {
     /// son `upload` et son `response` calculé en vie.
     pub(crate) fn listener_values(&self, out: &mut Vec<Value>) {
         for (_, cb, _) in &self.listeners {
-            out.push(*cb);
+            out.push(cb.clone());
         }
         if let Some(u) = self.upload {
             out.push(Value::Obj(u));
         }
-        if let Some(v) = self.cached_response {
-            out.push(v);
+        if let Some(ref v) = self.cached_response {
+            out.push(v.clone());
         }
     }
 }
@@ -224,7 +224,7 @@ impl Engine {
         self.xhr.transport = Some(transport);
         let v = self.native_fn("XMLHttpRequest", xhr_ctor);
         let g = self.global;
-        self.set_own(g, "XMLHttpRequest", v, false);
+        self.set_own(g, "XMLHttpRequest", v.clone(), false);
         // `XMLHttpRequest.prototype` réel (constant + méthodes en
         // bound `hostMethod` re-dispatchant `Host::invoke` sur le
         // receveur) : les bundles instrumentent le proto —
@@ -396,19 +396,19 @@ impl Engine {
             let o = self.new_object();
             let t = self.str_val(ty);
             self.set_own(o, "type", t, true);
-            self.set_own(o, "target", this, true);
+            self.set_own(o, "target", this.clone(), true);
             // `currentTarget`/`srcElement` (JS-C266) — sans eux,
             // `e.currentTarget.responseType` dans un hook
             // `load`/`readystatechange` lève `cannot read … of
             // Undefined` (Datadome qwant/soundcloud, vol 568).
-            self.set_own(o, "currentTarget", this, true);
-            self.set_own(o, "srcElement", this, true);
+            self.set_own(o, "currentTarget", this.clone(), true);
+            self.set_own(o, "srcElement", this.clone(), true);
             Value::Obj(o)
         };
         let key = format!("on{ty}");
         if let Some(f) = self.get_prop(wrapper, &key) {
-            if self.is_callable(f) {
-                self.call_value(f, this, &[ev])?;
+            if self.is_callable(f.clone()) {
+                self.call_value(f, this.clone(), std::slice::from_ref(&ev))?;
             }
         }
         let fns: Vec<Value> = data
@@ -416,11 +416,11 @@ impl Engine {
             .listeners
             .iter()
             .filter(|(t, _, _)| t == ty)
-            .map(|(_, f, _)| *f)
+            .map(|(_, f, _)| f.clone())
             .collect();
         for f in fns {
-            if self.is_callable(f) {
-                self.call_value(f, this, &[ev])?;
+            if self.is_callable(f.clone()) {
+                self.call_value(f, this.clone(), std::slice::from_ref(&ev))?;
             }
         }
         Ok(())
@@ -436,7 +436,7 @@ fn xhr_ctor(e: &mut Engine, _this: Value, _args: &[Value]) -> JsResult<Value> {
     // Chaîne `xhr → XMLHttpRequest.prototype` : `instanceof`,
     // `typeof xhr.send === 'function'` et l'override de méthode
     // par les instrumentation hooks (spec WebIDL).
-    if let (Value::Obj(id), Some(p)) = (v, e.xhr.xhr_proto) {
+    if let (Value::Obj(id), Some(p)) = (v.clone(), e.xhr.xhr_proto) {
         if let Some(o) = e.heap.obj_mut(id) {
             o.proto = Value::Obj(p);
         }
@@ -445,7 +445,7 @@ fn xhr_ctor(e: &mut Engine, _this: Value, _args: &[Value]) -> JsResult<Value> {
 }
 
 fn arg(args: &[Value], i: usize) -> Value {
-    args.get(i).copied().unwrap_or(Value::Undefined)
+    args.get(i).cloned().unwrap_or(Value::Undefined)
 }
 
 /// `bytes` décodés UTF-8 puis parsés en `Document` — partagé
@@ -507,8 +507,8 @@ impl Host for XhrHost {
                 if d.ready_state < 4 || d.status == 0 {
                     return Ok(Some(Value::Null));
                 }
-                if let Some(v) = d.cached_response {
-                    return Ok(Some(v));
+                if let Some(ref v) = d.cached_response {
+                    return Ok(Some(v.clone()));
                 }
                 let ct = d
                     .response_headers
@@ -561,7 +561,7 @@ impl Host for XhrHost {
                     }
                     _ => Value::Null,
                 };
-                self.data.borrow_mut().cached_response = Some(v);
+                self.data.borrow_mut().cached_response = Some(v.clone());
                 return Ok(Some(v));
             }
             // Spec : `responseXML` jette `InvalidStateError` si
@@ -580,13 +580,13 @@ impl Host for XhrHost {
                 if d.ready_state < 4 || d.status == 0 {
                     Value::Null
                 } else if d.response_type == "document" {
-                    if let Some(v) = d.cached_response {
-                        v
+                    if let Some(ref v) = d.cached_response {
+                        v.clone()
                     } else {
                         let bytes = d.response_bytes.clone();
                         drop(d);
                         let v = document_response(e, &bytes);
-                        self.data.borrow_mut().cached_response = Some(v);
+                        self.data.borrow_mut().cached_response = Some(v.clone());
                         v
                     }
                 } else {
@@ -849,7 +849,7 @@ impl Host for XhrHost {
                 let ty = e.to_js_string(arg(args, 0))?;
                 let f = arg(args, 1);
                 let capture = e.to_boolean(arg(args, 2));
-                if e.is_callable(f) {
+                if e.is_callable(f.clone()) {
                     self.data.borrow_mut().listeners.push((ty, f, capture));
                 }
                 Ok(Some(Value::Undefined))
@@ -861,7 +861,7 @@ impl Host for XhrHost {
                 self.data
                     .borrow_mut()
                     .listeners
-                    .retain(|(t, lf, c)| !(t == &ty && *c == capture && e.strict_eq(*lf, f)));
+                    .retain(|(t, lf, c)| !(t == &ty && *c == capture && e.strict_eq(lf, &f)));
                 Ok(Some(Value::Undefined))
             }
             _ => Ok(None),
@@ -896,7 +896,9 @@ impl Engine {
     pub fn install_fetch(&mut self) {
         if self.xhr.headers_proto.is_none() {
             let objp = Value::Obj(self.protos.object);
-            let hp = self.heap.alloc_obj(crate::heap::Object::ordinary(objp));
+            let hp = self
+                .heap
+                .alloc_obj(crate::heap::Object::ordinary(objp.clone()));
             self.add_method(hp, "append", h_append);
             self.add_method(hp, "set", h_set);
             self.add_method(hp, "delete", h_delete);
@@ -913,7 +915,9 @@ impl Engine {
             self.set_own(hp, crate::interp::SYM_ITERATOR, it, false);
             let tag = self.str_val("Headers");
             self.set_own(hp, crate::interp::SYM_TO_STRING_TAG, tag, false);
-            let qp = self.heap.alloc_obj(crate::heap::Object::ordinary(objp));
+            let qp = self
+                .heap
+                .alloc_obj(crate::heap::Object::ordinary(objp.clone()));
             let sp = self.heap.alloc_obj(crate::heap::Object::ordinary(objp));
             // Mixin `Body` + `clone()` partagé Request/Response.
             for p in [qp, sp] {
@@ -936,13 +940,13 @@ impl Engine {
         let v = self.native_fn("fetch", fetch_fn);
         self.set_own(g, "fetch", v, false);
         let hc = self.native_fn("Headers", headers_ctor);
-        self.link_ctor(hc, self.xhr.headers_proto);
+        self.link_ctor(hc.clone(), self.xhr.headers_proto);
         self.set_own(g, "Headers", hc, false);
         let rc = self.native_fn("Request", request_ctor);
-        self.link_ctor(rc, self.xhr.req_proto);
+        self.link_ctor(rc.clone(), self.xhr.req_proto);
         self.set_own(g, "Request", rc, false);
         let sc = self.native_fn("Response", response_ctor);
-        self.link_ctor(sc, self.xhr.res_proto);
+        self.link_ctor(sc.clone(), self.xhr.res_proto);
         if let Value::Obj(cid) = sc {
             self.add_method(cid, "error", response_error);
             self.add_method(cid, "redirect", response_redirect);
@@ -1087,7 +1091,7 @@ impl Engine {
             return;
         }
         let joined = match self.get_prop(id, &key) {
-            Some(v) => format!("{}, {}", self.heap_string_of(v).unwrap_or_default(), val),
+            Some(v) => format!("{}, {}", Self::heap_string_of(&v).unwrap_or_default(), val),
             None => val,
         };
         let s = self.str_val(joined);
@@ -1158,7 +1162,7 @@ fn headers_pairs(e: &mut Engine, v: Value) -> JsResult<Vec<(String, String)>> {
     if let Some(elems) = arr {
         let mut out = Vec::new();
         for el in elems {
-            let k = e.get_prop_value(el, "0")?;
+            let k = e.get_prop_value(el.clone(), "0")?;
             let v2 = e.get_prop_value(el, "1")?;
             let k = e.to_js_string(k)?;
             let v2 = h_value(e, v2)?;
@@ -1180,7 +1184,7 @@ fn headers_pairs(e: &mut Engine, v: Value) -> JsResult<Vec<(String, String)>> {
     };
     let mut out = Vec::new();
     for k in keys {
-        let vv = e.get_prop_value(v, &k)?;
+        let vv = e.get_prop_value(v.clone(), &k)?;
         out.push((k, h_value(e, vv)?));
     }
     Ok(out)
@@ -1282,7 +1286,7 @@ fn set_cookie_list(e: &Engine, id: crate::value::ObjId) -> Vec<String> {
         return Vec::new();
     };
     match e.heap.obj(aid).map(|o| &o.kind) {
-        Some(ObjKind::Array(elems)) => elems.iter().filter_map(|v| e.heap_string_of(*v)).collect(),
+        Some(ObjKind::Array(elems)) => elems.iter().filter_map(Engine::heap_string_of).collect(),
         _ => Vec::new(),
     }
 }
@@ -1320,13 +1324,13 @@ fn h_sorted(e: &mut Engine, this: Value) -> Vec<(String, String)> {
 fn h_for_each(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
     let cb = arg(args, 0);
     let ta = arg(args, 1);
-    if !e.is_callable(cb) {
+    if !e.is_callable(cb.clone()) {
         return Err(e.type_error("forEach: callback required"));
     }
-    for (k, v) in h_sorted(e, this) {
+    for (k, v) in h_sorted(e, this.clone()) {
         let vv = e.str_val(v);
         let kk = e.str_val(k);
-        e.call_value(cb, ta, &[vv, kk, this])?;
+        e.call_value(cb.clone(), ta.clone(), &[vv, kk, this.clone()])?;
     }
     Ok(Value::Undefined)
 }
@@ -1475,7 +1479,7 @@ fn body_formdata(e: &mut Engine, this: Value, _a: &[Value]) -> JsResult<Value> {
 /// arrayBuffer()}` (`type` = `Content-Type` ; ctor JS-C70).
 fn body_blob(e: &mut Engine, this: Value, _a: &[Value]) -> JsResult<Value> {
     let pid = e.new_promise();
-    match body_take(e, this)? {
+    match body_take(e, this.clone())? {
         Ok(b) => {
             let bl = blob_value(e, b, this);
             e.resolve_promise(pid, bl);
@@ -1497,7 +1501,7 @@ fn fetch_clone(e: &mut Engine, this: Value, _a: &[Value]) -> JsResult<Value> {
     }
     let (proto, body, props) = match e.heap.obj(id) {
         Some(o) => (
-            o.proto,
+            o.proto.clone(),
             match &o.kind {
                 ObjKind::FetchBody { body } => body.clone(),
                 _ => Vec::new(),
@@ -1522,7 +1526,7 @@ fn fetch_clone(e: &mut Engine, this: Value, _a: &[Value]) -> JsResult<Value> {
             continue;
         }
         if let crate::heap::Prop::Data { value, attrs } = p {
-            e.set_own(nid, k, *value, attrs.enumerable);
+            e.set_own(nid, k, value.clone(), attrs.enumerable);
         }
     }
     // `headers` frais — liste recopiée (spec `clone`).
@@ -1554,7 +1558,7 @@ fn is_request(e: &Engine, v: Value) -> bool {
     let (Value::Obj(id), Some(rp)) = (v, e.xhr.req_proto) else {
         return false;
     };
-    matches!(e.heap.obj(id).map(|o| o.proto), Some(Value::Obj(p)) if p == rp)
+    matches!(e.heap.obj(id).map(|o| o.proto.clone()), Some(Value::Obj(p)) if p == rp)
 }
 
 /// Méthode HTTP normalisée (spec : la liste canonique passe en
@@ -1592,7 +1596,8 @@ pub(crate) fn cache_entry_snapshot(e: &mut Engine, res: Value) -> JsResult<Optio
     };
     let url = e
         .get_prop(id, "url")
-        .and_then(|v| e.heap_string_of(v))
+        .as_ref()
+        .and_then(Engine::heap_string_of)
         .unwrap_or_default();
     let status = e
         .get_prop(id, "status")
@@ -1600,11 +1605,13 @@ pub(crate) fn cache_entry_snapshot(e: &mut Engine, res: Value) -> JsResult<Optio
         .unwrap_or(0.0) as u16;
     let status_text = e
         .get_prop(id, "statusText")
-        .and_then(|v| e.heap_string_of(v))
+        .as_ref()
+        .and_then(Engine::heap_string_of)
         .unwrap_or_default();
     let ty = e
         .get_prop(id, "type")
-        .and_then(|v| e.heap_string_of(v))
+        .as_ref()
+        .and_then(Engine::heap_string_of)
         .unwrap_or_else(|| "basic".into());
     let mut headers = match e.get_prop(id, "headers") {
         Some(h) => headers_pairs(e, h)?,
@@ -1732,7 +1739,7 @@ fn request_ctor(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
     // surchargés par `init`, défauts spec (JS-C77).
     let mut mode_s = "cors".to_string();
     let mut cred_s = "same-origin".to_string();
-    if is_request(e, input) {
+    if is_request(e, input.clone()) {
         let Value::Obj(rid) = input else {
             return Err(e.type_error("Request: bad input"));
         };
@@ -1742,20 +1749,27 @@ fn request_ctor(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
         input_signal = e.get_prop(rid, "signal").unwrap_or(Value::Undefined);
         url = e
             .get_prop(rid, "url")
-            .and_then(|v| e.heap_string_of(v))
+            .as_ref()
+            .and_then(Engine::heap_string_of)
             .unwrap_or_default();
-        if let Some(s) = e.get_prop(rid, "mode").and_then(|v| e.heap_string_of(v)) {
+        if let Some(s) = e
+            .get_prop(rid, "mode")
+            .as_ref()
+            .and_then(Engine::heap_string_of)
+        {
             mode_s = s;
         }
         if let Some(s) = e
             .get_prop(rid, "credentials")
-            .and_then(|v| e.heap_string_of(v))
+            .as_ref()
+            .and_then(Engine::heap_string_of)
         {
             cred_s = s;
         }
         method = e
             .get_prop(rid, "method")
-            .and_then(|v| e.heap_string_of(v))
+            .as_ref()
+            .and_then(Engine::heap_string_of)
             .unwrap_or_else(|| "GET".into());
         headers = match e.get_prop(rid, "headers") {
             Some(h) => headers_pairs(e, h)?,
@@ -2014,10 +2028,10 @@ fn response_json(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
     let (status, status_text, mut headers) = response_init(e, init, 200)?;
     let body = {
         let jv = e.get_prop(e.global, "JSON").unwrap_or(Value::Undefined);
-        let f = e.get_prop_value(jv, "stringify")?;
+        let f = e.get_prop_value(jv.clone(), "stringify")?;
         match e.call_value(f, jv, &[data])? {
             Value::Undefined => String::new(),
-            v => e.heap_string_of(v).unwrap_or_default(),
+            v => Engine::heap_string_of(&v).unwrap_or_default(),
         }
     };
     if !headers.iter().any(|(k, _)| k == "content-type") {
@@ -2046,7 +2060,8 @@ fn blob_value(e: &mut Engine, body: Vec<u8>, this: Value) -> Value {
             Some(h) => e
                 .get_prop_value(h, "content-type")
                 .ok()
-                .and_then(|v| e.heap_string_of(v))
+                .as_ref()
+                .and_then(Engine::heap_string_of)
                 .unwrap_or_default(),
             None => String::new(),
         },
@@ -2081,22 +2096,22 @@ pub(crate) fn body_init_bytes(e: &mut Engine, v: Value) -> JsResult<(Vec<u8>, Op
     };
     // `ArrayBuffer`/vues `TypedArray`/`DataView` — octets bruts
     // de la région vue (buffer détaché → 0 octet, jamais panic).
-    if let Some(bytes) = crate::typed_array::bytes_of_value(e, v) {
+    if let Some(bytes) = crate::typed_array::bytes_of_value(e, v.clone()) {
         return Ok((bytes, None));
     }
     // `Blob`/`File` (JS-C70) — octets partagés ; `Content-Type`
     // = `blob.type` si renseigné (spec).
-    if let Some((data, ty)) = crate::files::blob_parts(e, v) {
+    if let Some((data, ty)) = crate::files::blob_parts(e, v.clone()) {
         let ct = if ty.is_empty() { None } else { Some(ty) };
         return Ok(((*data).clone(), ct));
     }
-    if let Some(pairs) = crate::dom_host::formdata_pairs_of(e, v) {
+    if let Some(pairs) = crate::dom_host::formdata_pairs_of(e, v.clone()) {
         return Ok((
             encode(&pairs),
             Some("application/x-www-form-urlencoded".into()),
         ));
     }
-    if let Some(pairs) = crate::builtins::url::usp_pairs_of(e, v) {
+    if let Some(pairs) = crate::builtins::url::usp_pairs_of(e, v.clone()) {
         return Ok((
             encode(&pairs),
             Some("application/x-www-form-urlencoded;charset=UTF-8".into()),
@@ -2196,7 +2211,7 @@ pub(crate) fn fetch_fn(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Va
         ctx: e.cur_ctx,
     };
     let mut signal = Value::Undefined;
-    if is_request(e, input) {
+    if is_request(e, input.clone()) {
         let Value::Obj(rid) = input else {
             return Err(e.type_error("fetch: bad Request"));
         };
@@ -2211,11 +2226,13 @@ pub(crate) fn fetch_fn(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Va
         }
         req.url = e
             .get_prop(rid, "url")
-            .and_then(|v| e.heap_string_of(v))
+            .as_ref()
+            .and_then(Engine::heap_string_of)
             .unwrap_or_default();
         req.method = e
             .get_prop(rid, "method")
-            .and_then(|v| e.heap_string_of(v))
+            .as_ref()
+            .and_then(Engine::heap_string_of)
             .unwrap_or_else(|| "GET".into());
         if let Some(h) = e.get_prop(rid, "headers") {
             req.headers = headers_pairs(e, h)?;
@@ -2236,7 +2253,11 @@ pub(crate) fn fetch_fn(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Va
         // `mode`/`credentials` hérités du `Request` (props posées
         // par `request_ctor`, déjà validées — parse défensif si un
         // script les a réécrites par `Object.defineProperty`).
-        if let Some(ms) = e.get_prop(rid, "mode").and_then(|v| e.heap_string_of(v)) {
+        if let Some(ms) = e
+            .get_prop(rid, "mode")
+            .as_ref()
+            .and_then(Engine::heap_string_of)
+        {
             match fetch_mode_parse(&ms) {
                 Ok(m) => req.mode = m,
                 Err(msg) => return reject_fetch(e, pid, &msg),
@@ -2244,7 +2265,8 @@ pub(crate) fn fetch_fn(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Va
         }
         if let Some(cs) = e
             .get_prop(rid, "credentials")
-            .and_then(|v| e.heap_string_of(v))
+            .as_ref()
+            .and_then(Engine::heap_string_of)
         {
             match fetch_credentials_parse(&cs) {
                 Ok(c) => req.credentials = c,
@@ -2272,7 +2294,7 @@ pub(crate) fn fetch_fn(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Va
         }
         if let Some(hs) = e.get_prop(oid, "headers") {
             if !matches!(hs, Value::Undefined | Value::Null) {
-                req.headers = headers_pairs(e, hs)?;
+                req.headers = headers_pairs(e, hs.clone())?;
                 if let Value::Obj(hid) = hs {
                     for sc in set_cookie_list(e, hid) {
                         req.headers.push(("set-cookie".into(), sc));
@@ -2464,7 +2486,7 @@ impl Engine {
                 }
             }
             self.set_own(cid, "prototype", Value::Obj(p), false);
-            self.set_own(p, "constructor", asig, false);
+            self.set_own(p, "constructor", asig.clone(), false);
             // `AbortSignal.abort(reason?)` — signal déjà aborted.
             let f = self.native_fn("abort", abort_signal_static_abort);
             self.set_own(cid, "abort", f, false);
@@ -2498,7 +2520,7 @@ impl Host for AbortSignalHost {
             "reason" => {
                 let d = self.data.borrow();
                 if d.aborted {
-                    Some(d.reason)
+                    Some(d.reason.clone())
                 } else {
                     Some(Value::Undefined)
                 }
@@ -2518,7 +2540,7 @@ impl Host for AbortSignalHost {
             "addEventListener" => {
                 let ty = e.to_js_string(arg(args, 0))?;
                 let f = arg(args, 1);
-                if ty == "abort" && e.is_callable(f) {
+                if ty == "abort" && e.is_callable(f.clone()) {
                     let once = matches!(arg(args, 2), Value::Obj(o)
                         if matches!(e.get_prop(o, "once"), Some(Value::Bool(true))));
                     self.data.borrow_mut().listeners.push((f, once));
@@ -2537,7 +2559,7 @@ impl Host for AbortSignalHost {
             "throwIfAborted" => {
                 let r = {
                     let d = self.data.borrow();
-                    d.aborted.then_some(d.reason)
+                    d.aborted.then_some(d.reason.clone())
                 };
                 if let Some(r) = r {
                     return Err(crate::heap::Thrown(if matches!(r, Value::Undefined) {
@@ -2582,7 +2604,7 @@ impl Host for AbortSignalHost {
         let d = self.data.borrow();
         let o = e.new_object();
         e.set_own(o, "aborted", Value::Bool(d.aborted), true);
-        e.set_own(o, "reason", d.reason, true);
+        e.set_own(o, "reason", d.reason.clone(), true);
         Ok(Some(Value::Obj(o)))
     }
 }
@@ -2598,7 +2620,7 @@ fn abort_signal_ctor(e: &mut Engine, _t: Value, _a: &[Value]) -> JsResult<Value>
 fn abort_signal_static_abort(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
     let reason = arg(args, 0);
     let sig = abort_signal_value(e);
-    if let Some(data) = abort_data(e, sig) {
+    if let Some(data) = abort_data(e, sig.clone()) {
         let mut d = data.borrow_mut();
         d.aborted = true;
         d.reason = reason;
@@ -2614,7 +2636,7 @@ fn abort_signal_static_throw_if(e: &mut Engine, _t: Value, args: &[Value]) -> Js
     };
     let r = {
         let d = data.borrow();
-        d.aborted.then_some(d.reason)
+        d.aborted.then_some(d.reason.clone())
     };
     if let Some(r) = r {
         return Err(crate::heap::Thrown(if matches!(r, Value::Undefined) {
@@ -2635,7 +2657,7 @@ fn abort_signal_static_timeout(e: &mut Engine, _t: Value, args: &[Value]) -> JsR
         Value::Num(n) if n.is_finite() => n.max(0.0) as u64,
         _ => 0,
     };
-    let cb = e.bound_native("abort", abort_signal_timeout_fire, vec![sig]);
+    let cb = e.bound_native("abort", abort_signal_timeout_fire, vec![sig.clone()]);
     e.timers.schedule(cb, ms, false, Vec::new());
     Ok(sig)
 }
@@ -2678,7 +2700,7 @@ fn abort_signal_value(e: &mut Engine) -> Value {
 fn abort_controller_ctor(e: &mut Engine, _t: Value, _a: &[Value]) -> JsResult<Value> {
     let signal = abort_signal_value(e);
     let ctrl = e.new_object();
-    e.set_own(ctrl, "signal", signal, true);
+    e.set_own(ctrl, "signal", signal.clone(), true);
     let f = e.bound_native("abort", controller_abort, vec![signal]);
     e.set_own(ctrl, "abort", f, false);
     Ok(Value::Obj(ctrl))
@@ -2689,7 +2711,7 @@ fn abort_controller_ctor(e: &mut Engine, _t: Value, _a: &[Value]) -> JsResult<Va
 fn controller_abort(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
     let sig = arg(args, 0);
     let reason = arg(args, 1);
-    let Some(data) = abort_data(e, sig) else {
+    let Some(data) = abort_data(e, sig.clone()) else {
         return Ok(Value::Undefined);
     };
     {
@@ -2704,20 +2726,20 @@ fn controller_abort(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value
         let o = e.new_object();
         let t = e.str_val("abort");
         e.set_own(o, "type", t, true);
-        e.set_own(o, "target", sig, true);
+        e.set_own(o, "target", sig.clone(), true);
         Value::Obj(o)
     };
     if let Value::Obj(sid) = sig {
         if let Some(f) = e.get_prop(sid, "onabort") {
-            if e.is_callable(f) {
-                e.call_value(f, sig, &[ev])?;
+            if e.is_callable(f.clone()) {
+                e.call_value(f, sig.clone(), std::slice::from_ref(&ev))?;
             }
         }
     }
     let listeners = data.borrow().listeners.clone();
     for (f, once) in listeners {
-        if e.is_callable(f) {
-            e.call_value(f, sig, &[ev])?;
+        if e.is_callable(f.clone()) {
+            e.call_value(f.clone(), sig.clone(), std::slice::from_ref(&ev))?;
         }
         if once {
             data.borrow_mut().listeners.retain(|(g, _)| *g != f);

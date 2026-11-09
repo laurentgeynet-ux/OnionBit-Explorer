@@ -796,6 +796,18 @@ impl Dom {
         if parent == child || self.is_ancestor(child, parent)? {
             return Err(DomError::HierarchyRequest("cycle interdit"));
         }
+        // Spec DOM : `insertBefore(n, n)` ≡ insérer avant le
+        // frère suivant — no-op effectif. Sans cette
+        // normalisation, `unlink` efface les liens puis
+        // `link_child` coud `n.next_sibling = n` : anneau de
+        // frères d'un seul nœud — les marches de siblings ne
+        // terminent plus (JS-C400, §B-111).
+        let reference = match reference {
+            Some(r) if r == child && self.parent(child)? == Some(parent) => {
+                self.next_sibling(child)?
+            }
+            other => other,
+        };
         if let Some(reference) = reference {
             if self.parent(reference)? != Some(parent) {
                 return Err(DomError::HierarchyRequest(

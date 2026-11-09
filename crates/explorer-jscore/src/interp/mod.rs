@@ -19,7 +19,7 @@ use crate::heap::{
     Thrown,
 };
 use crate::parser;
-use crate::value::{num_to_js_string, to_uint32, ObjId, Value};
+use crate::value::{num_to_js_string, to_uint32, JsStr, ObjId, Value};
 use std::collections::HashSet;
 use std::rc::Rc;
 use std::sync::atomic::AtomicBool;
@@ -225,6 +225,15 @@ pub type EvalHook = Rc<dyn Fn(&str)>;
 #[allow(clippy::struct_excessive_bools)]
 pub struct Engine {
     pub(crate) heap: Heap,
+    /// Compteur partagé des octets de chaînes **vivantes**
+    /// (JS-C420 — `Value::Str` porte un `JsStr`/`Rc` hors
+    /// arène : chaque `StrBox` ajoute sa capacité à l'alloc
+    /// et la rend à sa mort — le churn `s += c` meurt au
+    /// refcount mid-eval, plus de déchets non balayables).
+    /// Additionné à `heap.bytes()` par [`Self::total_bytes`]
+    /// pour toutes les gardes mémoire (soft limit → GC
+    /// différée, cap dur → kill).
+    pub(crate) str_acct: Rc<std::cell::Cell<isize>>,
     pub(crate) global: ObjId,
     pub(crate) global_env: EnvRef,
     pub(crate) protos: Protos,
@@ -269,6 +278,15 @@ pub struct Engine {
     /// Voir `gen_proto` — variante `async function*`.
     pub(crate) async_gen_proto: Value,
     pub(crate) symbol_reg: std::collections::BTreeMap<String, Value>,
+    /// Cache `Num → Str` des petits entiers (§B-110, idiom V8) —
+    /// `num_strs[i]` = la boîte `Str` `"i"` ; rempli
+    /// paresseusement, raciné au GC (les Strs sont immuables,
+    /// le partage est transparent). Sans lui les coercitions
+    /// `String(i)`/`i+""`/`[i].join()` en boucle produisaient
+    /// une cellule par itération (mesuré SG : ~1,3 Gio de Strs
+    /// mortes) — JS-C420 : désormais un bump `Rc` par itération,
+    /// mort au refcount au lieu d'encombrer l'arène.
+    pub(crate) num_strs: Vec<Value>,
     call_depth: u32,
     call_depth_limit: u32,
     /// Pile d'appels des fonctions **script** en cours (JS-C47) —
@@ -351,6 +369,21 @@ pub struct Engine {
     last_parse_alloc: (u64, u64),
     last_exec_alloc: (u64, u64),
     eval_alloc_mark: (u64, u64),
+    /// JS-C423 — temps GC cumulé du moteur, en nanosecondes
+    /// (`collect_extra` est le funnel unique : checkpoints
+    /// job + safepoints JS-C421 inclus). Toujours armé — deux
+    /// `Instant` par collecte, événement ~ms : coût nul.
+    /// `eval_gc_mark` = snapshot à `reset_eval_split` →
+    /// `last_eval_gc_us` attribue la part GC d'une éval (le
+    /// span kevlar 303 s du vol 711 : exec ou mark/sweep ?).
+    gc_ns: std::cell::Cell<u64>,
+    eval_gc_mark: u64,
+    /// Part safepoint (sous-ensemble de `gc_ns`) — isole le
+    /// coût du mécanisme JS-C421 des collectes de frontière.
+    sp_ns: std::cell::Cell<u64>,
+    /// Snapshot `sp_ns` à `reset_eval_split` (même frontière
+    /// que `eval_gc_mark`).
+    eval_sp_mark: std::cell::Cell<u64>,
     /// Deadline wall-clock du batch courant (éval / drain timers
     /// / microtasks) — armée par `arm_eval_deadline` aux bornes
     /// publiques, vérifiée dans `tick` (J1 : une rafale post-apply
@@ -559,6 +592,15 @@ pub struct Engine {
     /// Côté WORKER : flag partagé vivant (le `WorkerHost` du
     /// parent le coupe à `terminate()`/GC).
     pub(crate) worker_alive: Arc<AtomicBool>,
+    /// JS-C422 — abandon d'une commande côté session : quand la
+    /// patience du canal (`recv_eval*`/`recv_eval_long`) expire,
+    /// l'adaptateur lève ce flag ; l'éval en vol meurt au tick
+    /// suivant (gate 256 ops) au lieu de brûler le thread moteur
+    /// jusqu'à sa deadline interne (vol 711 : 239 s de CPU
+    /// orphelines mesurées sur `kevlar_base`). Réarmé à chaque
+    /// commande par le worker — un flag posé entre deux jobs est
+    /// un no-op, il ne peut pas empoisonner la commande suivante.
+    pub(crate) interrupt: Arc<AtomicBool>,
     /// Pile de collecteurs `yield` des générateurs en cours
     /// (générateur eager : le corps tourne à l'appel et chaque
     /// `yield` pousse sur le collecteur du sommet — déviation
@@ -571,6 +613,28 @@ pub struct Engine {
     /// `using` disposal frames — une par corps contenant
     /// une décl `using` (ES2026) : `(dispose_fn, resource, is_async)`.
     pub(crate) using_stack: Vec<Vec<(Value, Value, bool)>>,
+    /// Racines de safepoint (JS-C421) — `Value`s tenues par des
+    /// frames Rust au-dessus d'un corps de statements en cours :
+    /// `safepoint_gc` peut balayer entre deux statements d'un
+    /// `exec_body`/`exec_program_in` sous pression (`gc_due`) ;
+    /// les sites qui portent un temporaire à travers l'appel
+    /// (callee/this/args d'un `call_value_impl`, `this` d'un
+    /// `exec_stmt`, jeton d'un `try`/`switch`, iterable d'un
+    /// `for`-in/of) le poussent ici pour la durée de l'appel.
+    pub(crate) safepoint_roots: Vec<Value>,
+    /// Pile d'envs safepoint (JS-C421) — chaque `exec_stmt` y
+    /// pousse son `env` : la chaîne parente du corps courant ne
+    /// couvre PAS les envs appelants (l'env d'une callee chaîne
+    /// sur son env de *définition*, pas celui de l'appelant) —
+    /// sans elle, un safepoint dans un corps appelé balayerait
+    /// les bindings vivants des frames au-dessus.
+    pub(crate) safepoint_envs: Vec<EnvRef>,
+    /// Borne d'âge safepoint (JS-C421) — min des `alloc_seq` des
+    /// statements actifs : les cellules allouées depuis sont des
+    /// temporaires potentiels de locaux Rust (`x + f()` — `x`
+    /// vit dans la frame de `BinOp` pendant que `f` safepointe).
+    /// `u64::MAX` hors éval — une passe de frontière balaie tout.
+    pub(crate) young_floor: u64,
     /// Le builtin `eval` — identité pour distinguer l'appel direct
     /// `eval(…)` (env appelant) de l'indirect (`(0,eval)`, `e=eval`
     /// → global), spec `PerformEval`.
@@ -637,7 +701,7 @@ pub struct Engine {
     /// `fn.prototype`).
     pub(crate) ctor_fresh: Option<ObjId>,
     /// Sweep GC différé : posé quand `tick` constate
-    /// `over_limit` alors que le **vivant** (mesuré par
+    /// `mem_over` alors que le **vivant** (mesuré par
     /// `mark_live`, sans libérer) est sous la borne — le
     /// sweep proprement dit attend la prochaine frontière
     /// de job (`maybe_collect`) puisque la pile d'appel
@@ -662,6 +726,25 @@ pub struct Engine {
     /// Seuil `bytes` du prochain re-marquage sous `gc_due`
     /// (voir ci-dessus). `0` = inactif.
     pub(crate) gc_cap: usize,
+    /// JS-C424 — ligne de basse du backoff safepoint :
+    /// `total_bytes()` mesuré à la fin de la dernière passe
+    /// safepoint (`usize::MAX` = jamais passé). Une nouvelle
+    /// passe n'est servie qu'après `gc_debt << gc_sp_shift`
+    /// octets de croissance **au-dessus de cette basse** — le
+    /// seuil absolu `total > gc_debt` réarmait `gc_due` en
+    /// permanence dès que le vivant + churn épinglé par
+    /// `young_floor` restaient au-dessus (vol 713 : 2 550
+    /// passes à ~45 Hz sur `kevlar_base`, 95,4 % du span en
+    /// mark/sweep sans rien récupérer). Glisse vers le bas si
+    /// `total` retombe sous la basse (collecte de frontière).
+    pub(crate) gc_sp_floor: usize,
+    /// Exposant du backoff safepoint — `0..=4` (×1 → ×16 la
+    /// dette). Incrémenté quand une passe libère moins que
+    /// `gc_debt/4` (futile : le churn est épinglé par
+    /// `young_floor` sous un appel monolithique) ; remis à 0
+    /// quand une passe libère vraiment (pression réelle — la
+    /// cadence normale se reprend).
+    pub(crate) gc_sp_shift: u8,
     /// Octets de source cumulés passés par `eval`/`Function`
     /// (§B-59 bras 3 : chaque éval dynamique retient son AST
     /// `Rc<FnLit>` via les cellules `Fun` — masse native hors
@@ -910,6 +993,7 @@ impl Engine {
             .map_or(0x9e37_79b9_7f4a_7c15, |d| d.as_nanos() as u64);
         let mut e = Engine {
             heap,
+            str_acct: Rc::new(std::cell::Cell::new(0)),
             global,
             global_env: Env::global(),
             protos: Protos {
@@ -957,6 +1041,7 @@ impl Engine {
             rng: seed | 1,
             t0: Instant::now(),
             symbol_reg: std::collections::BTreeMap::new(),
+            num_strs: Vec::new(),
             sym_seq: 0,
             sym_index: std::collections::BTreeMap::new(),
             finregs: Vec::new(),
@@ -1006,6 +1091,10 @@ impl Engine {
             last_parse_alloc: (0, 0),
             last_exec_alloc: (0, 0),
             eval_alloc_mark: (0, 0),
+            gc_ns: std::cell::Cell::new(0),
+            eval_gc_mark: 0,
+            sp_ns: std::cell::Cell::new(0),
+            eval_sp_mark: std::cell::Cell::new(0),
             timers: crate::timers::TimerQueue::default(),
             xhr: crate::xhr::XhrEngineState::default(),
             dom_ctx: None,
@@ -1054,9 +1143,13 @@ impl Engine {
             worker_loader: None,
             worker_close: false,
             worker_alive: Arc::new(AtomicBool::new(true)),
+            interrupt: Arc::new(AtomicBool::new(false)),
             gen_collect: Vec::new(),
             pending_labels: Vec::new(),
             using_stack: Vec::new(),
+            safepoint_roots: Vec::new(),
+            safepoint_envs: Vec::new(),
+            young_floor: u64::MAX,
             eval_fn: Value::Undefined,
             re_ctor: Value::Undefined,
             re_static: None,
@@ -1087,6 +1180,8 @@ impl Engine {
             rss_watch_last: 0,
             nat_stack: Vec::new(),
             gc_cap: 0,
+            gc_sp_floor: usize::MAX,
+            gc_sp_shift: 0,
             eval_src_bytes: 0,
             eval_src_cap: std::env::var("EXPLORER_JS_EVAL_SRC_CAP")
                 .ok()
@@ -1194,12 +1289,14 @@ impl Engine {
         };
         let hs = self.heap.stats();
         format!(
-            "cells={} heap_b={} gc={} | cbs={} regs={} timers={} \
+            "cells={} heap_b={} gc={} gc_us={} sp_us={} | cbs={} regs={} timers={} \
              | nodes={} muts={} oregs={} journal={} pend={} \
              | cache={} parked={} unhand={} micro={}",
             hs.live_cells,
             hs.estimated_bytes,
             hs.gc_runs,
+            self.gc_ns.get() / 1_000,
+            self.sp_ns.get() / 1_000,
             self.mutobs.b59_len(),
             self.obs.b59_len(),
             self.pending_timers(),
@@ -1794,6 +1891,11 @@ impl Engine {
                 });
             }
         }
+        // Sonde §B-108 — rail lazy-chunk : `req.dynscript`
+        // vs `dlv./err.` côté livraison (un chunk jamais
+        // demandé = runtime ne l'émet pas ; émis sans
+        // livraison = rail mort côté session).
+        self.sched_add("req.dynscript", out.len() as u64);
         out
     }
 
@@ -1813,27 +1915,28 @@ impl Engine {
         let Some((dom, cache)) = self.dom_ctx.clone() else {
             return;
         };
-        let ty = match body {
-            Some(text) => {
-                let prev = self.hooks.current_script;
-                self.hooks.current_script = Some(node);
-                // Un script qui jette n'empêche pas `load`
-                // (spec : `error` n'est que transport/CSP).
-                // `eval_named` (JS-C87) : la pile d'erreur
-                // attribue le chunk (`at fn (url:l:c)`) —
-                // src sinon étiquette seq. `currentScript`
-                // reste posé pendant le drain des microtasks
-                // (parité Chrome — cf. `eval_script_el`).
-                let label = {
-                    let d = dom.borrow();
-                    d.attr(node, "src")
-                        .map_or_else(|| format!("dyn:{seq}"), str::to_string)
-                };
-                let _ = self.eval_named(text, &label);
-                self.hooks.current_script = prev;
-                "load"
-            }
-            None => "error",
+        let ty = if let Some(text) = body {
+            let prev = self.hooks.current_script;
+            self.hooks.current_script = Some(node);
+            // Un script qui jette n'empêche pas `load`
+            // (spec : `error` n'est que transport/CSP).
+            // `eval_named` (JS-C87) : la pile d'erreur
+            // attribue le chunk (`at fn (url:l:c)`) —
+            // src sinon étiquette seq. `currentScript`
+            // reste posé pendant le drain des microtasks
+            // (parité Chrome — cf. `eval_script_el`).
+            let label = {
+                let d = dom.borrow();
+                d.attr(node, "src")
+                    .map_or_else(|| format!("dyn:{seq}"), str::to_string)
+            };
+            let _ = self.eval_named(text, &label);
+            self.hooks.current_script = prev;
+            self.sched_tick("dlv.dynscript");
+            "load"
+        } else {
+            self.sched_tick("err.dynscript");
+            "error"
         };
         let (bubbles, cancelable, composed) = crate::dom_host::platform_event_flags(ty);
         let ev = crate::dom_host::make_event_state(
@@ -2038,6 +2141,7 @@ impl Engine {
                 });
             }
         }
+        self.sched_add("req.img", out.len() as u64);
         out
     }
 
@@ -2050,6 +2154,7 @@ impl Engine {
         let Some(node) = self.hooks.dyn_img_nodes.remove(&seq) else {
             return;
         };
+        self.sched_tick(if ok { "dlv.img" } else { "err.img" });
         self.fire_el_load_error(node, ok);
     }
 
@@ -2407,7 +2512,7 @@ impl Engine {
         // `{targetOrigin, transfer}` ou absent (`targetOrigin`
         // défaut `"/"` = same-origin). Steam vol 115 appelle
         // `postMessage(msg)` 1-arg → SyntaxError intempestive.
-        let raw_origin = args.get(1).copied().unwrap_or(Value::Undefined);
+        let raw_origin = args.get(1).cloned().unwrap_or(Value::Undefined);
         let target_origin = match raw_origin {
             Value::Undefined => "/".to_string(),
             Value::Obj(oid) => {
@@ -2445,7 +2550,7 @@ impl Engine {
         if !origin_ok {
             return Ok(Value::Undefined);
         }
-        let wire = self.wire_encode(args[0])?;
+        let wire = self.wire_encode(args[0].clone())?;
         // `source`/`origin` = realm de l'APPELANT (spec
         // « incumbent settings object ») — `src` déjà résolu
         // pour le check `"/"` (native_caller = vrai appelant
@@ -2530,13 +2635,17 @@ impl Engine {
         };
         let ty = self
             .get_prop(ev_id, "type")
-            .and_then(|v| self.heap_string_of(v))
+            .as_ref()
+            .and_then(Self::heap_string_of)
             .unwrap_or_default();
         let on = format!("on{ty}");
         let g = self.global;
         if let Some(cb) = self.get_prop(g, &on) {
-            if self.is_callable(cb) {
-                let _ = self.call_value(cb, Value::Obj(g), &[ev])?;
+            if self.is_callable(cb.clone()) {
+                if crate::dlv_trace() {
+                    tracing::info!("job: ev {ty} cb={}", self.job_cb_desc(cb.clone()));
+                }
+                let _ = self.call_value(cb, Value::Obj(g), std::slice::from_ref(&ev))?;
             }
         }
         // Listeners `addEventListener` — sur le nœud racine du
@@ -2549,11 +2658,14 @@ impl Engine {
             .listeners
             .iter()
             .filter(|(t, _, _)| *t == ty)
-            .map(|(_, cb, _)| *cb)
+            .map(|(_, cb, _)| cb.clone())
             .collect();
 
         for cb in cbs {
-            let _ = self.call_value(cb, Value::Obj(g), &[ev])?;
+            if crate::dlv_trace() {
+                tracing::info!("job: ev {ty} cb={}", self.job_cb_desc(cb.clone()));
+            }
+            let _ = self.call_value(cb, Value::Obj(g), std::slice::from_ref(&ev))?;
         }
         Ok(())
     }
@@ -2571,11 +2683,20 @@ impl Engine {
         self.heap.is_rooted(id)
     }
 
-    /// Nombre de cellules vivantes (objets + chaînes) — métrique
-    /// pour embedders et tests.
+    /// Nombre de cellules vivantes de l'arène (objets — les
+    /// chaînes sont hors GC depuis JS-C420) — métrique pour
+    /// embedders et tests.
     #[must_use]
     pub fn live_count(&self) -> usize {
         self.heap.live_count()
+    }
+
+    /// Octets de **capacité** des boîtes `JsStr` encore handlées
+    /// — `str_acct`, exact au refcount (JS-C420) : les mortes
+    /// sont rendues au `Drop`, sans attendre un sweep.
+    #[must_use]
+    pub fn live_str_bytes(&self) -> usize {
+        self.str_acct.get().max(0) as usize
     }
 
     /// Passe GC mark-sweep (ADR-0008). À invoquer **entre deux
@@ -2612,31 +2733,52 @@ impl Engine {
     }
 
     pub fn collect(&mut self) -> usize {
+        self.collect_extra(Vec::new(), u64::MAX)
+    }
+
+    /// [`collect`] + racines supplémentaires — le safepoint
+    /// intra-éval (JS-C421) y ajoute l'env courant tracé, `this`
+    /// et ce que `safepoint_roots` couvre déjà via `gc_seed_ids`.
+    /// `young` = borne d'âge passée à `collect_bounded` : cellules
+    /// allouées depuis conservées (temporaires de locaux Rust).
+    pub(crate) fn collect_extra(&mut self, extra: Vec<ObjId>, young: u64) -> usize {
         // V-7 : temps cumulé marquage+balayage.
         let _t = crate::j17_scope(&crate::J17_GC_NS);
+        let gc_t0 = Instant::now();
         // 1. Rassemble les `ObjId` tenus par les structures
         //    annexes (RefCell/NodeCache — leurs borrows doivent
         //    être relâchés avant la passe).
-        let ids = self.gc_seed_ids();
+        crate::promise::job_rail(self.cur_ctx, "gc.seed");
+        let mut ids = self.gc_seed_ids();
+        ids.extend(extra);
         self.gc_due = false;
         self.gc_cap = 0;
         // 3. Mark-sweep.
-        let n = self.heap.collect(|mark| {
-            for &id in &ids {
-                mark(id);
-            }
-        });
+        crate::promise::job_rail(self.cur_ctx, "gc.marksweep");
+        let n = self.heap.collect_bounded(
+            |mark| {
+                for &id in &ids {
+                    mark(id);
+                }
+            },
+            young,
+        );
         // 4. §B-59 — entrées d'observers dont le wrapper vient
         //    d'être balayé : elles ne se vident pas toutes
         //    seules (`disconnect` JS n'est pas garanti) et
         //    continueraient à produire des records pour un
         //    objet mort. Purge + retrait des registrations Dom.
+        crate::promise::job_rail(self.cur_ctx, "gc.obspurge");
         let dead_mutobs = self.mutobs.purge_dead(&self.heap);
         if !dead_mutobs.is_empty() {
             if let Some((dom, _)) = &self.dom_ctx {
-                let mut d = dom.borrow_mut();
-                for id in dead_mutobs {
-                    d.disconnect_observer(id);
+                // `try_borrow` (JS-C421) — un safepoint mid-eval
+                // peut coexister avec un borrow natif en cours ;
+                // sauter plutôt que paniquer.
+                if let Ok(mut d) = dom.try_borrow_mut() {
+                    for id in dead_mutobs {
+                        d.disconnect_observer(id);
+                    }
                 }
             }
         }
@@ -2649,26 +2791,34 @@ impl Engine {
         // `alloc` (§B-59) sauf `dead_blocked` (rejeu journal
         // en attente — ADR-0033) ; le churn `innerHTML`
         // n'accumule plus attrs/texte/enfants.
+        crate::promise::job_rail(self.cur_ctx, "gc.domgc");
         if let Some((dom, cache)) = &self.dom_ctx {
-            let mut c = cache.borrow_mut();
-            c.retain(|_, &mut oid| self.heap.obj(oid).is_some());
-            let mut seeds: std::collections::HashSet<crate::dom::NodeId> =
-                c.keys().copied().collect();
-            drop(c);
-            seeds.extend(self.obs.live_target_ids());
-            dom.borrow_mut().collect_garbage(&seeds);
+            // `try_borrow` — même motif safepoint (JS-C421) :
+            // un borrow traversant l'éval rend domgc non licite,
+            // on le saute pour cette passe.
+            if let Ok(mut c) = cache.try_borrow_mut() {
+                c.retain(|_, &mut oid| self.heap.obj(oid).is_some());
+                let mut seeds: std::collections::HashSet<crate::dom::NodeId> =
+                    c.keys().copied().collect();
+                drop(c);
+                seeds.extend(self.obs.live_target_ids());
+                if let Ok(mut d) = dom.try_borrow_mut() {
+                    d.collect_garbage(&seeds);
+                }
+            }
         }
         // 4. `FinalizationRegistry` — purge des registres morts,
         //    puis cleanup en microtask pour les cibles balayées
         //    (spec `HostEnqueueFinalizationRegistryCleanupJob` :
         //    jamais synchrone).
+        crate::promise::job_rail(self.cur_ctx, "gc.finreg");
         let heap = &self.heap;
         self.finregs
             .retain(|&rid| matches!(heap.obj(rid).map(|o| &o.kind), Some(ObjKind::FinReg { .. })));
         let mut pending: Vec<(Value, Value)> = Vec::new();
         for &rid in &self.finregs {
             let Some((cb, entries)) = self.heap.obj_mut(rid).and_then(|o| match &mut o.kind {
-                ObjKind::FinReg { cb, entries } => Some((*cb, std::mem::take(entries))),
+                ObjKind::FinReg { cb, entries } => Some((cb.clone(), std::mem::take(entries))),
                 _ => None,
             }) else {
                 continue;
@@ -2678,7 +2828,7 @@ impl Engine {
                 if self.heap.obj(en.target).is_some() {
                     keep.push(en);
                 } else {
-                    pending.push((cb, en.held));
+                    pending.push((cb.clone(), en.held));
                 }
             }
             if let Some(o) = self.heap.obj_mut(rid) {
@@ -2746,6 +2896,8 @@ impl Engine {
                 std::collections::BTreeMap::new();
             let mut thens: std::collections::BTreeMap<String, u64> =
                 std::collections::BTreeMap::new();
+            let mut srcs: std::collections::HashMap<String, Rc<str>> =
+                std::collections::HashMap::new();
             let mut settled = 0u64;
             let mut settle_pairs: std::collections::BTreeMap<String, u64> =
                 std::collections::BTreeMap::new();
@@ -2762,6 +2914,13 @@ impl Engine {
                         *created.entry(pr.created.to_string()).or_default() += 1;
                         for t in &pr.thens {
                             *thens.entry(t.to_string()).or_default() += 1;
+                        }
+                        // JS-C412 — premier extrait vu par site
+                        // `created` (les executors répétés d'un
+                        // même site partagent leur source).
+                        if let Some(s) = &pr.src {
+                            srcs.entry(pr.created.to_string())
+                                .or_insert_with(|| s.clone());
                         }
                     }
                     crate::promise::PromiseState::Pending => {}
@@ -2783,12 +2942,29 @@ impl Engine {
                     }
                 }
             }
+            let created_top = top(created);
             tracing::info!(
                 target: "dom_probe",
                 site = "prom.pending",
                 n = pend,
-                created = ?top(created),
+                created = ?created_top,
                 thens = ?top(thens)
+            );
+            // JS-C412 — `prom.src` : le code des fabriques
+            // pendantes, ordonné par le top `created` — la
+            // condition que `resolve` attend est lue dans le
+            // log (extrait borné [`PROM_SRC_CHARS`] copié à la
+            // création, jamais le `Rc` du bundle).
+            let excerpts: Vec<String> = created_top
+                .iter()
+                .filter_map(|(c, _)| srcs.get(c).map(|s| format!("{c} => {s}")))
+                .take(crate::promise::PROM_SRC_SITES)
+                .collect();
+            tracing::info!(
+                target: "dom_probe",
+                site = "prom.src",
+                n = excerpts.len(),
+                excerpts = ?excerpts
             );
             // JS-C386 — `prom.settle` : qui règle les promesses
             // (paires `created → [F|R]site`) — l'absence d'un
@@ -2801,6 +2977,18 @@ impl Engine {
                 pairs = ?top(settle_pairs)
             );
         }
+        // §B-111 — la dernière ligne vivante de la passe : si
+        // `gc done` apparaît, `collect` est revenu sain et la
+        // mort post-collect vit dans le retour (drop de locals,
+        // `maybe_collect`, drain, glue session).
+        crate::promise::job_rail(self.cur_ctx, "gc done");
+        // JS-C423 — temps GC cumulé moteur (attribution par
+        // éval via `eval_gc_mark`).
+        self.gc_ns.set(
+            self.gc_ns
+                .get()
+                .saturating_add(u64::try_from(gc_t0.elapsed().as_nanos()).unwrap_or(u64::MAX)),
+        );
         n
     }
 
@@ -2816,14 +3004,14 @@ impl Engine {
         let mut vs = Vec::new();
         self.timers.roots(&mut vs);
         for v in vs {
-            crate::heap::push_value(&mut ids, v);
+            crate::heap::push_value(&mut ids, &v);
         }
         for (_, wrapper, data) in &self.xhr.live {
             ids.push(*wrapper);
             let mut cbs = Vec::new();
             data.borrow().listener_values(&mut cbs);
             for cb in cbs {
-                crate::heap::push_value(&mut ids, cb);
+                crate::heap::push_value(&mut ids, &cb);
             }
         }
         for (_, promise, _, _) in &self.xhr.fetches {
@@ -2862,16 +3050,16 @@ impl Engine {
         // `unhandledrejection` en attente (JS-C154) — promesse
         // + raison racines jusqu'au tir du checkpoint.
         for (p, r) in &self.pending_unhandled {
-            crate::heap::push_value(&mut ids, *p);
-            crate::heap::push_value(&mut ids, *r);
+            crate::heap::push_value(&mut ids, p);
+            crate::heap::push_value(&mut ids, r);
         }
         for (_, job) in &self.microtasks {
             match job {
                 crate::promise::Job::Reaction { cb, arg, next, .. } => {
-                    crate::heap::push_value(&mut ids, *cb);
-                    crate::heap::push_value(&mut ids, *arg);
-                    match *next {
-                        crate::promise::ThenSink::Native(id) => ids.push(id),
+                    crate::heap::push_value(&mut ids, cb);
+                    crate::heap::push_value(&mut ids, arg);
+                    match next {
+                        crate::promise::ThenSink::Native(id) => ids.push(*id),
                         crate::promise::ThenSink::Foreign { resolve, reject } => {
                             crate::heap::push_value(&mut ids, resolve);
                             crate::heap::push_value(&mut ids, reject);
@@ -2884,12 +3072,12 @@ impl Engine {
                     resolve,
                     reject,
                 } => {
-                    crate::heap::push_value(&mut ids, *then_fn);
-                    crate::heap::push_value(&mut ids, *this);
-                    crate::heap::push_value(&mut ids, *resolve);
-                    crate::heap::push_value(&mut ids, *reject);
+                    crate::heap::push_value(&mut ids, then_fn);
+                    crate::heap::push_value(&mut ids, this);
+                    crate::heap::push_value(&mut ids, resolve);
+                    crate::heap::push_value(&mut ids, reject);
                 }
-                crate::promise::Job::Plain(v) => crate::heap::push_value(&mut ids, *v),
+                crate::promise::Job::Plain(v) => crate::heap::push_value(&mut ids, v),
             }
         }
         // `MutationObserver` (JS-C26, §B-59) — wrapper raciné
@@ -2922,49 +3110,56 @@ impl Engine {
         self.mse.root_ids(&mut ids);
         self.misc.root_ids(&mut ids);
         if let Some((dom, cache)) = &self.dom_ctx {
-            let d = dom.borrow();
-            // §B-59 — le cache n'est plus raciné en bloc : un
-            // wrapper de nœud **détaché et non retenu** meurt
-            // avec ses expandos (déviation documentée vs
-            // Chrome qui le garde par weak-map — ici la borne
-            // mémoire prime). Les nœuds attachés, observés ou
-            // cités par des records en attente restent racinés.
-            let extra = d.extra_kept_nodes();
-            for (nid, &id) in cache.borrow().iter() {
-                if d.is_attached(*nid) || extra.contains(nid) {
-                    ids.push(id);
+            // `try_borrow` (JS-C421) — un safepoint mid-eval peut
+            // trouver le miroir emprunté par un natif : sauter le
+            // bloc DOM plutôt que paniquer (les racines DOM sont
+            // alors couvertes par les safepoint_roots/envs).
+            if let Ok(d) = dom.try_borrow() {
+                // §B-59 — le cache n'est plus raciné en bloc : un
+                // wrapper de nœud **détaché et non retenu** meurt
+                // avec ses expandos (déviation documentée vs
+                // Chrome qui le garde par weak-map — ici la borne
+                // mémoire prime). Les nœuds attachés, observés ou
+                // cités par des records en attente restent racinés.
+                let extra = d.extra_kept_nodes();
+                if let Ok(c) = cache.try_borrow() {
+                    for (nid, &id) in c.iter() {
+                        if d.is_attached(*nid) || extra.contains(nid) {
+                            ids.push(id);
+                        }
+                    }
                 }
-            }
-            for node in &d.nodes {
-                for (_, cb, _) in &node.listeners {
-                    crate::heap::push_value(&mut ids, *cb);
+                for node in &d.nodes {
+                    for (_, cb, _) in &node.listeners {
+                        crate::heap::push_value(&mut ids, cb);
+                    }
                 }
-            }
-            // Contextes 2D `<canvas>` (JS-C28) — détenus par la
-            // side-table du miroir, racines tant qu'il vit.
-            for v in dom.borrow().canvas_ctx_values() {
-                crate::heap::push_value(&mut ids, v);
-            }
-            // `customElements` (JS-C68) — ctors des définitions,
-            // promesses `whenDefined` pendantes.
-            for def in dom.borrow().ce.defs.values() {
-                crate::heap::push_value(&mut ids, def.ctor);
-            }
-            for list in dom.borrow().ce.pending.values() {
-                ids.extend(list.iter().copied());
-            }
-            // `adoptedStyleSheets` (CAP-195, ADR-0033) —
-            // `ObjId` des feuilles adoptées : racines tant que
-            // le document vit — sinon un GC réaffectait le
-            // slot et `adopted_sheets_css` lisait `cssRules`
-            // sur le mauvais objet.
-            for sid in dom.borrow().adopted_sheets.iter().copied() {
-                ids.push(sid);
+                // Contextes 2D `<canvas>` (JS-C28) — détenus par la
+                // side-table du miroir, racines tant qu'il vit.
+                for v in dom.borrow().canvas_ctx_values() {
+                    crate::heap::push_value(&mut ids, &v);
+                }
+                // `customElements` (JS-C68) — ctors des définitions,
+                // promesses `whenDefined` pendantes.
+                for def in dom.borrow().ce.defs.values() {
+                    crate::heap::push_value(&mut ids, &def.ctor);
+                }
+                for list in dom.borrow().ce.pending.values() {
+                    ids.extend(list.iter().copied());
+                }
+                // `adoptedStyleSheets` (CAP-195, ADR-0033) —
+                // `ObjId` des feuilles adoptées : racines tant que
+                // le document vit — sinon un GC réaffectait le
+                // slot et `adopted_sheets_css` lisait `cssRules`
+                // sur le mauvais objet.
+                for sid in d.adopted_sheets.iter().copied() {
+                    ids.push(sid);
+                }
             }
         }
         // Élément sous upgrade CE traversant `construct` — il
         // n'est encore rattaché à rien de traçable côté JS.
-        if let Some(v) = self.ce_upgrade_slot {
+        if let Some(v) = &self.ce_upgrade_slot {
             crate::heap::push_value(&mut ids, v);
         }
         if let Some(s) = self.hooks.screen_obj {
@@ -2973,25 +3168,53 @@ impl Engine {
         ids.push(self.global);
         ids.extend(self.protos.all());
         for v in self.symbol_reg.values() {
-            crate::heap::push_value(&mut ids, *v);
+            crate::heap::push_value(&mut ids, v);
+        }
+        for v in &self.num_strs {
+            crate::heap::push_value(&mut ids, v);
         }
         for id in self.sym_index.values() {
             ids.push(*id);
         }
-        crate::heap::push_value(&mut ids, self.gen_ctor);
-        crate::heap::push_value(&mut ids, self.async_gen_ctor);
-        crate::heap::push_value(&mut ids, self.async_ctor);
-        crate::heap::push_value(&mut ids, self.async_fn_proto);
-        crate::heap::push_value(&mut ids, self.gen_fn_proto);
-        crate::heap::push_value(&mut ids, self.gen_proto);
-        crate::heap::push_value(&mut ids, self.async_gen_fn_proto);
-        crate::heap::push_value(&mut ids, self.async_gen_proto);
-        crate::heap::push_value(&mut ids, self.completion);
+        crate::heap::push_value(&mut ids, &self.gen_ctor);
+        crate::heap::push_value(&mut ids, &self.async_gen_ctor);
+        crate::heap::push_value(&mut ids, &self.async_ctor);
+        crate::heap::push_value(&mut ids, &self.async_fn_proto);
+        crate::heap::push_value(&mut ids, &self.gen_fn_proto);
+        crate::heap::push_value(&mut ids, &self.gen_proto);
+        crate::heap::push_value(&mut ids, &self.async_gen_fn_proto);
+        crate::heap::push_value(&mut ids, &self.async_gen_proto);
+        crate::heap::push_value(&mut ids, &self.completion);
+        // `using` en cours (ES2026) — disposeur + ressource
+        // vivants tant que leur corps tourne ; mesure mid-eval
+        // et safepoint (JS-C421) passent par ici.
+        for frame in &self.using_stack {
+            for (d, r, _) in frame {
+                crate::heap::push_value(&mut ids, d);
+                crate::heap::push_value(&mut ids, r);
+            }
+        }
+        // Générateurs/async suspendus — valeurs des frames gelés.
+        for frame in &self.gen_collect {
+            for v in frame {
+                crate::heap::push_value(&mut ids, v);
+            }
+        }
+        // Racines de safepoint — `Value`s des frames Rust au-dessus
+        // du safepoint courant (JS-C421) ; vide hors éval.
+        for v in &self.safepoint_roots {
+            crate::heap::push_value(&mut ids, v);
+        }
         // 2. Env global — les bindings `let`/`const` ne vivent pas
         //    sur l'objet global — + envs de modules (leurs exports
         //    restent vivants tant que le graphe tient).
         let mut visited = HashSet::new();
         crate::heap::trace_env(&self.global_env, &mut ids, &mut visited);
+        // Envs safepoint — chaînes de portée des frames Rust
+        // en cours, appelants compris (JS-C421).
+        for e in &self.safepoint_envs {
+            crate::heap::trace_env(e, &mut ids, &mut visited);
+        }
         for m in &self.modules {
             crate::heap::trace_env(&m.env, &mut ids, &mut visited);
         }
@@ -3116,6 +3339,33 @@ impl Engine {
         self.heap.slab_overhead_bytes()
     }
 
+    /// Census `Str` aux deux kills heap — JS-C420 : les chaînes
+    /// ne sont plus des cellules (`JsStr`/`Rc` hors arène), le
+    /// census ne peut plus ni compter les déchets (ils meurent
+    /// au refcount, `dead_b` n'existe plus) ni nommer un
+    /// contenu/site par cellule. `str_live_b` = `str_acct` :
+    /// octets de **capacité** de toutes les boîtes encore
+    /// handlées — c'est le vivant exact, mieux que le census
+    /// par marques d'avant. Ligne `warn!` dédiée : elle survit
+    /// à une troncature du `RangeError`. `EXPLORER_J17_PROF=1`
+    /// : le snapshot compteurs suit sur la même émission.
+    fn log_str_census(&self) {
+        let live = self.str_acct.get().max(0) as usize;
+        let j17 = if crate::j17_on() {
+            crate::j17_snapshot()
+        } else {
+            String::new()
+        };
+        tracing::warn!(
+            target: "js_alloc",
+            str_total_b = live,
+            str_live_b = live,
+            str_dead_b = 0usize,
+            j17 = %j17,
+            "str_census_kill (cells gone — JsStr/Rc, JS-C420)"
+        );
+    }
+
     /// Split **alloc natif** de la dernière éval (§B-59, J17) :
     /// `(parse, exec)` chacun `(octets demandés, nb allocs)` —
     /// la phase exec couvre `exec_program` seul (le drain
@@ -3134,6 +3384,24 @@ impl Engine {
         self.last_parse_alloc = (0, 0);
         self.last_exec_alloc = (0, 0);
         self.eval_alloc_mark = alloc_snap();
+        self.eval_gc_mark = self.gc_ns.get();
+        self.eval_sp_mark.set(self.sp_ns.get());
+    }
+
+    /// Temps GC passé **dans la dernière entrée publique** (µs)
+    /// — safepoints + collectes de frontière confondues
+    /// (JS-C423 : décomposition du span kevlar 303 s du vol
+    /// 711 — exec pure vs mark/sweep sous pression).
+    #[must_use]
+    pub fn last_eval_gc_us(&self) -> u64 {
+        self.gc_ns.get().saturating_sub(self.eval_gc_mark) / 1_000
+    }
+
+    /// Part safepoint (`sp_ns`) de la même fenêtre (µs) —
+    /// isole le coût du mécanisme JS-C421.
+    #[must_use]
+    pub fn last_eval_sp_us(&self) -> u64 {
+        self.sp_ns.get().saturating_sub(self.eval_sp_mark.get()) / 1_000
     }
 
     pub(crate) fn note_parse(&mut self, start: Instant) {
@@ -3216,7 +3484,8 @@ impl Engine {
         if let Value::Obj(id) = v {
             if let Some(s) = self
                 .get_prop(id, "stack")
-                .and_then(|s| self.heap_string_of(s))
+                .as_ref()
+                .and_then(Self::heap_string_of)
             {
                 if !s.is_empty() {
                     return s;
@@ -3224,10 +3493,12 @@ impl Engine {
             }
             let name = self
                 .get_prop(id, "name")
-                .and_then(|n| self.heap_string_of(n));
+                .as_ref()
+                .and_then(Self::heap_string_of);
             let msg = self
                 .get_prop(id, "message")
-                .and_then(|m| self.heap_string_of(m));
+                .as_ref()
+                .and_then(Self::heap_string_of);
             if let (Some(n), Some(m)) = (name, msg) {
                 return format!("{n}: {m}");
             }
@@ -3254,9 +3525,12 @@ impl Engine {
         self.describe(v)
     }
 
-    pub(crate) fn heap_string_of(&self, v: Value) -> Option<String> {
+    /// `Some(contenu)` d'une `Value::Str` — JS-C420 : la lecture
+    /// est sur le handle `JsStr` lui-même, plus besoin du heap
+    /// (fonction associative, ne consomme ni `self` ni clone).
+    pub(crate) fn heap_string_of(v: &Value) -> Option<String> {
         match v {
-            Value::Str(id) => self.heap.string(id),
+            Value::Str(s) => Some(s.to_string()),
             _ => None,
         }
     }
@@ -3268,7 +3542,7 @@ impl Engine {
     /// nommage JS-C228 — §B-14 vol 529 hltb, payload opaque
     /// ×4). Zéro appel utilisateur dans le repli.
     pub(crate) fn describe_rejection(&mut self, v: Value) -> String {
-        let d = self.describe(v);
+        let d = self.describe(v.clone());
         if d != "[object Object]" {
             return d;
         }
@@ -3302,7 +3576,7 @@ impl Engine {
                 Some(Prop::Data {
                     value: Value::Str(s),
                     ..
-                }) => e.heap.string(s).filter(|n| !n.is_empty()),
+                }) => Some(s.to_string()).filter(|n| !n.is_empty()),
                 _ => None,
             }
         };
@@ -3322,8 +3596,8 @@ impl Engine {
                     ..
                 }) = self.find_own(cid, "name")
                 {
-                    if let Some(n) = self.heap.string(s).filter(|n| !n.is_empty()) {
-                        return n;
+                    if !s.is_empty() {
+                        return s.to_string();
                     }
                 }
             }
@@ -3333,9 +3607,72 @@ impl Engine {
 
     // -- allocation helpers -------------------------------------------
 
-    /// Allocate a JS string value.
+    /// Allocate a JS string value. `#[track_caller]` (JS-C419,
+    /// conservé — sans coût et utile si une future sonde
+    /// remonte le producteur à travers cet entonnoir).
+    #[track_caller]
     pub(crate) fn str_val(&mut self, s: impl Into<String>) -> Value {
-        Value::Str(self.heap.alloc_str(s))
+        Value::Str(JsStr::new(s, &self.str_acct))
+    }
+
+    /// Octets JS estimés **totaux** — cellules du heap **plus**
+    /// chaînes vivantes comptées au refcount (JS-C420). C'est
+    /// le compteur de toutes les gardes mémoire (`mem_over`
+    /// soft, cap dur `dead_hard`, dette `gc_debt`) : `heap.bytes()`
+    /// seul ne voit plus les chaînes depuis leur sortie d'arène.
+    pub(crate) fn total_bytes(&self) -> usize {
+        self.heap
+            .bytes()
+            .saturating_add(self.str_acct.get().max(0) as usize)
+    }
+
+    /// Borne soft franchie sur le **total** (heap + chaînes) —
+    /// l'ancien `heap.over_limit()` ne comptait plus les Str
+    /// après JS-C420 ; équivalent : `heap.bytes()` ne croît
+    /// qu'entre sweeps, `str_acct` est exact au refcount.
+    pub(crate) fn mem_over(&self) -> bool {
+        let lim = self.heap.mem_limit();
+        lim > 0 && self.total_bytes() > lim
+    }
+
+    /// Borne du cache `num_strs` (§B-110) — les entiers
+    /// `0..NUM_STR_CACHE` partagent leur cellule `"i"`.
+    pub(crate) const NUM_STR_CACHE: usize = 1024;
+
+    /// `Num` → `Str` avec cache borné des petits entiers
+    /// (§B-110) : `n` entier < [`Self::NUM_STR_CACHE`] retourne
+    /// la boîte partagée (immuabilité → partage transparent —
+    /// clone `Rc` depuis JS-C420, même économie qu'avant),
+    /// sinon allocation normale.
+    pub(crate) fn num_str_val(&mut self, n: f64) -> Value {
+        if n >= 0.0 && n.fract() == 0.0 && n < Self::NUM_STR_CACHE as f64 {
+            let i = n as usize;
+            while self.num_strs.len() <= i {
+                self.num_strs.push(Value::Undefined);
+            }
+            if matches!(self.num_strs[i], Value::Undefined) {
+                let s = num_to_js_string(n);
+                self.num_strs[i] = self.str_val(s);
+            }
+            self.num_strs[i].clone()
+        } else {
+            self.str_val(num_to_js_string(n))
+        }
+    }
+
+    /// `ToString` renvoyant une `Value` — fast-paths zéro-alloc
+    /// (§B-110) : `Str` → même cellule, `Num` → cache
+    /// petits-entiers. Le chemin général délègue à
+    /// [`Self::to_js_string`] puis alloue.
+    pub(crate) fn to_str_val(&mut self, v: Value) -> JsResult<Value> {
+        Ok(match v {
+            s @ Value::Str(_) => s,
+            Value::Num(n) => self.num_str_val(n),
+            _ => {
+                let s = self.to_js_string(v)?;
+                self.str_val(s)
+            }
+        })
     }
 
     /// Allocate a `bigint` primitive (`ObjKind::BigInt` cell,
@@ -3373,7 +3710,7 @@ impl Engine {
             Value::Big(_) => Ok(self.bigint_of(v).unwrap_or_default()),
             Value::Bool(b) => Ok(num_bigint::BigInt::from(u8::from(b))),
             Value::Str(id) => {
-                let s = self.read_str(id)?.unwrap_or_default();
+                let s = self.read_str(&id)?;
                 let t = s.trim();
                 if t.is_empty() {
                     return Ok(num_bigint::BigInt::zero());
@@ -3436,7 +3773,7 @@ impl Engine {
     /// et appel).
     pub(crate) fn host_method(&mut self, this: Value, args: &[Value]) -> JsResult<Value> {
         let name = match args.first() {
-            Some(Value::Str(s)) => self.read_str(*s)?.unwrap_or_default(),
+            Some(Value::Str(s)) => self.read_str(s)?,
             _ => return Ok(Value::Undefined),
         };
         let Value::Obj(id) = this else {
@@ -3490,7 +3827,7 @@ impl Engine {
                 };
             }
             own = false;
-            cur = match self.heap.obj(cid).map(|o| o.proto) {
+            cur = match self.heap.obj(cid).map(|o| o.proto.clone()) {
                 Some(Value::Obj(p)) => Some(p),
                 _ => None,
             };
@@ -3904,6 +4241,31 @@ impl Engine {
         self.eval_timeout_boot_ms = ms;
     }
 
+    /// Budget boot actuellement configuré (ms) — lu par
+    /// l'adaptateur `explorer-js` pour dimensionner la patience
+    /// du canal d'éval (JS-C422 : la session attend le budget
+    /// réellement armé + marge au lieu d'une constante 65 s
+    /// calée sur l'ancien défaut 60 s — vol 711).
+    #[must_use]
+    pub fn eval_timeout_boot_ms(&self) -> u64 {
+        self.eval_timeout_boot_ms
+    }
+
+    /// Poignée du flag d'abandon de commande (JS-C422) —
+    /// l'adaptateur la lève quand la session dépasse sa
+    /// patience ; le moteur la consomme au `tick` suivant.
+    #[must_use]
+    pub fn interrupt_handle(&self) -> Arc<AtomicBool> {
+        self.interrupt.clone()
+    }
+
+    /// Installe un flag d'abandon externe (l'adaptateur crée
+    /// l'`Arc` côté session et l'injecte au spawn worker) —
+    /// `Engine::new` en crée un par défaut sinon.
+    pub fn set_interrupt(&mut self, flag: Arc<AtomicBool>) {
+        self.interrupt = flag;
+    }
+
     pub fn set_eval_timeout_ms(&mut self, ms: u64) {
         self.eval_timeout_ms = ms;
         self.eval_timeout_boot_ms = ms;
@@ -3939,6 +4301,17 @@ impl Engine {
                     self.deadline_hit = true;
                     return Err(self.range_error("eval deadline exceeded"));
                 }
+            }
+            // JS-C422 — abandon session : l'éval en vol meurt au
+            // tick suivant au lieu de courir jusqu'à sa deadline
+            // interne en orphelin (`swap` consomme : un flag posé
+            // hors job est effacé par le worker à la prise de
+            // commande — il ne peut tomber que sur le job en cours).
+            if self
+                .interrupt
+                .swap(false, std::sync::atomic::Ordering::Relaxed)
+            {
+                return Err(self.range_error("eval interrupted (session abandoned)"));
             }
             // Breadcrumb + sondes RSS — échantillonnés 1/256 ops
             // dans ce gate : `format!` du breadcrumb et
@@ -4079,6 +4452,7 @@ impl Engine {
                             virt_mb = virt,
                             slab_o = self.heap.slab_overhead_bytes(),
                             heap_b = self.heap.bytes(),
+                            str_b = self.str_acct.get().max(0),
                             cells = self.heap.live_count(),
                             dom_nodes = dn,
                             dom_muts = dm,
@@ -4100,7 +4474,7 @@ impl Engine {
                 }
             }
         }
-        if self.heap.over_limit() {
+        if self.mem_over() {
             // Verrou J4 : tas déjà déclaré mort → échec immédiat
             // avec la **même** signature (une occurrence dans les
             // journaux, zéro GC rejouée par eval).
@@ -4108,7 +4482,7 @@ impl Engine {
                 return Err(self.range_error(msg.clone()));
             }
             let lim = self.heap.mem_limit();
-            if self.gc_due && self.heap.bytes() <= self.gc_cap {
+            if self.gc_due && self.total_bytes() <= self.gc_cap {
                 // Déjà mesuré sous la borne, cap non atteint —
                 // le sweep attend la frontière de job.
             } else {
@@ -4136,15 +4510,20 @@ impl Engine {
                         }
                     })
                 };
-                if lim > 0 && live_bytes > lim {
+                // `mark_live` ne voit plus que les cellules —
+                // les octets Str vivants sont `str_acct` (les
+                // handles `Rc` définissent le vivant, JS-C420).
+                let live_total = live_bytes.saturating_add(self.str_acct.get().max(0) as usize);
+                if lim > 0 && live_total > lim {
                     // Stats vivantes post-marque dans le message
                     // (J4 — la rafale « heap memory limit
                     // exceeded » nomme alors son gabarit : fuite
                     // si live croît, borne trop serrée si live
                     // < limite — mesuré marmiton/bookshop en
                     // rafale ×3/×14).
+                    self.log_str_census();
                     let msg = format!(
-                        "heap memory limit exceeded ({live} cells, {live_bytes} B live > {lim} B)"
+                        "heap memory limit exceeded ({live} cells, {live_total} B live > {lim} B)"
                     );
                     self.heap_dead = Some(msg.clone());
                     return Err(self.range_error(msg));
@@ -4152,24 +4531,51 @@ impl Engine {
                 // §B-59 — cap dur sur l'**estimé** (déchets
                 // retenus inclus) : le sweep est impossible
                 // mid-eval, un eval dont les cellules mortes
-                // dépassent `lim × GC_DEAD_MULT` est une bombe
+                // dépassent le cap dur est une bombe
                 // même à vivant petit — rien ne libèrera avant
                 // la fin de job. Sudouest : `s += c` en boucle
                 // retient O(n²) d'intermédiaires → 8-12 Go RSS
                 // → abort allocateur ; ici → RangeError borné.
-                let hard = lim
-                    .saturating_mul(Self::GC_DEAD_MULT)
-                    .max(Self::GC_DEAD_FLOOR);
-                if lim > 0 && self.heap.bytes() > hard {
-                    let b = self.heap.bytes();
+                // JS-C411 : slack garbage **absolu** au-delà
+                // des petites bornes (`dead_hard`).
+                let hard = Self::dead_hard(lim);
+                if lim > 0 && self.total_bytes() > hard {
+                    let b = self.total_bytes();
+                    // Top kinds à l'instant du kill — les déchets
+                    // non balayés dominent numériquement, le mix
+                    // nomme la source (§B-110 : PoW = garbage
+                    // d'un kind unique mitraillé en boucle).
+                    let mut hist = self.heap.kind_histogram();
+                    hist.truncate(4);
+                    let mut top = String::new();
+                    for (k, n, kb) in &hist {
+                        top.push_str(&format!(" {k}:{n}/{}MiB", kb / 1_048_576));
+                    }
+                    self.log_str_census();
                     let msg = format!(
-                        "heap memory limit exceeded ({live} cells, {b} B allocated > {hard} B hard cap — deferred GC unreachable)"
+                        "heap memory limit exceeded ({live} cells, {b} B allocated > {hard} B hard cap — deferred GC unreachable) |{top} |"
                     );
                     self.heap_dead = Some(msg.clone());
                     return Err(self.range_error(msg));
                 }
                 self.gc_due = true;
-                self.gc_cap = self.heap.bytes().saturating_mul(4).min(hard);
+                self.gc_cap = self.total_bytes().saturating_mul(4).min(hard);
+            }
+        } else {
+            // §B-114 (JS-C417) — dette de déchets **sous** la
+            // borne : le churn transitoire resté sous `lim`
+            // n'armait jamais `gc_due` — les checkpoints le
+            // traversaient sans balayer (vol 705 : 553 Mio de
+            // `Str` mortes = 99,6 % du tas au kill, vivant ~2
+            // Mio). Armer dès `gc_debt` fait balayer chaque
+            // frontière de job : la poubelle ne monte plus
+            // jusqu'au cap dur. `gc_cap` est **laissé** : le
+            // hissage ×4 n'est légitime qu'après une mesure
+            // `mark_live` réelle (la voie `mem_over`) — le
+            // poser ici éteindrait les kills suivants.
+            let lim = self.heap.mem_limit();
+            if lim > 0 && !self.gc_due && self.total_bytes() > Self::gc_debt(lim) {
+                self.gc_due = true;
             }
         }
         Ok(())
@@ -4193,15 +4599,56 @@ impl Engine {
     pub(crate) const GC_DEAD_MULT: usize = 4;
     /// Plancher absolu du cap dur — le kill sur estimé pur a
     /// tué des pages réelles (JS-C113, hubspot : déchet
-    /// transitoire à vivant petit). Le cap ne tire donc qu'au-
-    /// delà du **plus grand** de `lim × GC_DEAD_MULT` et ce
+    /// transitoire à vivant petit). Sous `lim ≤ 64 Mio` le cap
+    /// reste le **plus grand** de `lim × GC_DEAD_MULT` et ce
     /// plancher : des contextes à borne serrée (tests, iframes
-    /// confinées) conservent leur droit au churn transitoire,
-    /// et au-delà de 256 Mio de cellules mortes retenues dans
-    /// un seul eval l'RSS du processus est menacé quoi qu'il
-    /// arrive — le sweep mid-eval étant impossible, tuer est
-    /// la seule récupération sûre.
+    /// confinées) conservent leur droit au churn transitoire.
+    /// Au-delà, JS-C411 le convertit en **slack absolu**
+    /// (`lim + GC_DEAD_FLOOR`, voir [`Engine::dead_hard`]) :
+    /// 256 Mio de cellules mortes retenues dans un seul eval
+    /// menacent déjà le RSS du processus — au-delà, le sweep
+    /// mid-eval étant impossible, tuer est la seule
+    /// récupération sûre.
     pub(crate) const GC_DEAD_FLOOR: usize = 256 * 1024 * 1024;
+
+    /// Borne du backoff safepoint (JS-C424) : `gc_sp_shift`
+    /// plafonné ici → dette de réarmement ×16 max au-dessus de
+    /// la basse post-passe.
+    pub(crate) const GC_SP_SHIFT_MAX: u8 = 4;
+
+    /// Cap dur sur l'estimé pour une borne `lim` donnée —
+    /// extrait pour verrou (JS-C411). §B-114 : `lim × 4` sans
+    /// plafond tolérait 1,5 Gio de déchets estimés sous cap
+    /// 384 Mio — l'estimé sous-comptant déjà, le RSS réel
+    /// filait à 4,4 Go avant le kill. Le slack garbage est
+    /// désormais borné **absolument** au-delà des petites
+    /// limites : `lim + 256 Mio`. Sous `lim ≤ 64 Mio`, la
+    /// formule historique (`lim × 4`, plancher 256 Mio) est
+    /// inchangée — les tests et iframes confinés gardent leur
+    /// droit au churn mesuré JS-C113. `lim = 0` n'est jamais
+    /// passé (les appels sont gatés `lim > 0`).
+    pub(crate) fn dead_hard(lim: usize) -> usize {
+        if lim <= Self::GC_DEAD_FLOOR / Self::GC_DEAD_MULT {
+            lim.saturating_mul(Self::GC_DEAD_MULT)
+                .max(Self::GC_DEAD_FLOOR)
+        } else {
+            lim.saturating_add(Self::GC_DEAD_FLOOR)
+        }
+    }
+
+    /// Dette de déchets armant `gc_due` **sous** la borne —
+    /// §B-114 (vol 705 : 553 Mio de `Str` mortes = 99,6 % du
+    /// tas au kill, vivant réel ~2 Mio — « deferred GC
+    /// unreachable » au sens littéral). `mem_over` n'arme le
+    /// sweep différé qu'à `bytes > lim` : un churn transitoire
+    /// resté sous `lim` traversait les checkpoints sans jamais
+    /// être balayé et montait jusqu'au cap dur. Armer dès
+    /// `min(lim/4, GC_DEAD_FLOOR)` fait réclamer chaque
+    /// frontière de job — la poubelle reste bornée par la
+    /// cadence des checkpoints, pas par le cap de kill.
+    pub(crate) fn gc_debt(lim: usize) -> usize {
+        (lim / 4).min(Self::GC_DEAD_FLOOR)
+    }
 
     /// Recensement §B-59 des réservoirs natifs non comptés par
     /// `heap.bytes` : files, maps, Vecs et contextes garés —
@@ -4221,9 +4668,10 @@ impl Engine {
             let _ = write!(top, " {k}:{n}/{}MiB", b / 1_048_576);
         }
         format!(
-            "cells={} heap={}MiB envs? rss={rss} virt={virt} |{top} | {}",
+            "cells={} heap={}MiB str={}MiB envs? rss={rss} virt={virt} |{top} | {}",
             s.live_cells,
             s.estimated_bytes / 1_048_576,
+            self.str_acct.get().max(0) / 1_048_576,
             self.reservoir_report()
         )
     }
@@ -4390,25 +4838,129 @@ impl Engine {
         // réelle), le verrou tient et chaque job re-mesure.
         if self.heap_dead.is_some() {
             self.collect();
-            if !self.heap.over_limit() {
+            if !self.mem_over() {
                 self.heap_dead = None;
             }
         }
-        // `over_limit` aussi : la frontière de job est la première
+        // `mem_over` aussi : la frontière de job est la première
         // occasion sûre de recalculer `bytes` — si le sweep repasse
         // sous la borne, le drapeau retombe et le job suivant vit.
-        // `gc_due` : un `tick` a mesuré `over_limit` sur déchets
+        // `gc_due` : un `tick` a mesuré `mem_over` sur déchets
         // mid-eval et a différé le sweep ici (JS-C206).
         let due = self.gc_due;
         self.gc_due = false;
         self.gc_cap = 0;
-        if due
-            || self.heap.over_limit()
-            || (self.gc_threshold > 0 && self.heap.live_count() > self.gc_threshold)
-        {
-            self.collect()
+        if self.mem_over() {
+            return self.collect();
+        }
+        if !(due || (self.gc_threshold > 0 && self.heap.live_count() > self.gc_threshold)) {
+            return 0;
+        }
+        // JS-C426 — backoff de croissance aux frontières de job :
+        // `live_count > gc_threshold` reste vrai en permanence
+        // sur une page hydratée (le VIVANT ne descend pas en
+        // collectant — vol 717 §B-115 : ~30 passes/s, ~100 %
+        // du fil en mark-sweep, API affamée). Une passe
+        // opportuniste n'est re-servie qu'après `gc_debt<<shift`
+        // de croissance réelle au-dessus de sa basse post-passe
+        // — même mécanique que safepoint_gc (JS-C424) ; la
+        // basse et le shift sont partagés avec elle.
+        let lim = self.heap.mem_limit();
+        if lim > 0 && self.gc_sp_floor != usize::MAX {
+            if self.total_bytes() < self.gc_sp_floor {
+                self.gc_sp_floor = self.total_bytes();
+                self.gc_sp_shift = 0;
+            }
+            let debt = Self::gc_debt(lim).saturating_mul(1usize << self.gc_sp_shift);
+            if self.total_bytes().saturating_sub(self.gc_sp_floor) < debt {
+                return 0;
+            }
+        }
+        let before = self.total_bytes();
+        let n = self.collect();
+        let freed = before.saturating_sub(self.total_bytes());
+        self.gc_sp_floor = self.total_bytes();
+        if lim > 0 && freed < Self::gc_debt(lim) / 4 {
+            self.gc_sp_shift = (self.gc_sp_shift + 1).min(Self::GC_SP_SHIFT_MAX);
         } else {
-            0
+            self.gc_sp_shift = 0;
+        }
+        n
+    }
+
+    /// Safepoint GC intra-éval (JS-C421) — appelé **entre deux
+    /// statements** d'un corps (`exec_body`/`exec_program_in`) :
+    /// là, les seuls `Value` vivants hors `gc_seed_ids` sont la
+    /// chaîne d'env courante, `this` et ce que les frames Rust
+    /// englobantes ont poussé en `safepoint_roots` (callee/args
+    /// d'un appel, jeton `try`, discriminant `switch`, iterable
+    /// `for`-in/of…). Ne tourne QUE sous pression (`gc_due` armé
+    /// par `tick`/`gc_debt`, ou `mem_over`) — coût nominal : un
+    /// test booléen par statement, zéro hors pression.
+    ///
+    /// Sûreté : un safepoint n'est licite qu'à une frontière de
+    /// statements où aucun temporaire d'expression n'existe —
+    /// jamais dans `eval_expr` ni au sein d'une arm `exec_stmt`
+    /// entre deux `eval_*` (leurs locaux seraient invisibles).
+    pub(crate) fn safepoint_gc(&mut self, env: &EnvRef, this: &Value) {
+        if !self.gc_due && !self.mem_over() {
+            return;
+        }
+        let lim = self.heap.mem_limit();
+        if lim > 0 && self.gc_sp_floor != usize::MAX {
+            // JS-C424 — backoff de croissance : une passe n'est
+            // servie qu'après `gc_debt << shift` octets au-
+            // dessus de la basse post-passe. Le seuil absolu
+            // réarmait une passe vide à ~45 Hz quand
+            // `young_floor` épinglait le churn de l'appel
+            // monolithique (vol 713 : 95,4 % du span en
+            // mark/sweep). Couvre `gc_due` ET `mem_over` — les
+            // deux arment ce gate par statement.
+            if self.total_bytes() < self.gc_sp_floor {
+                // Libéré ailleurs (frontière de job / morts
+                // refcount) : la basse glisse, backoff levé.
+                self.gc_sp_floor = self.total_bytes();
+                self.gc_sp_shift = 0;
+            }
+            let debt = Self::gc_debt(lim).saturating_mul(1usize << self.gc_sp_shift);
+            if self.total_bytes().saturating_sub(self.gc_sp_floor) < debt {
+                return;
+            }
+        }
+        let before = self.total_bytes();
+        let mut ids = Vec::new();
+        let mut visited = HashSet::new();
+        crate::heap::trace_env(env, &mut ids, &mut visited);
+        crate::heap::push_value(&mut ids, this);
+        for v in &self.safepoint_roots {
+            crate::heap::push_value(&mut ids, v);
+        }
+        for e in &self.safepoint_envs {
+            crate::heap::trace_env(e, &mut ids, &mut visited);
+        }
+        // JS-C421 : épargne les cellules allouées depuis le plus
+        // ancien statement actif — temporaires d'expression des
+        // locaux Rust, invisibles aux racines.
+        // JS-C423 — part safepoint du temps GC : le delta de
+        // `gc_ns` autour de la passe (mesure partagée —
+        // `sp_us` ne peut pas dépasser `gc_us` sur l'éval).
+        let g0 = self.gc_ns.get();
+        self.collect_extra(ids, self.young_floor);
+        self.sp_ns.set(
+            self.sp_ns
+                .get()
+                .saturating_add(self.gc_ns.get().saturating_sub(g0)),
+        );
+        // JS-C424 — basse + backoff selon le rendement : une
+        // passe qui libère moins de `gc_debt/4` était futile
+        // (churn épinglé) → prochaine dette ×2 (borné ×16) ;
+        // une passe productive reprend la cadence normale.
+        let freed = before.saturating_sub(self.total_bytes());
+        self.gc_sp_floor = self.total_bytes();
+        if lim > 0 && freed < Self::gc_debt(lim) / 4 {
+            self.gc_sp_shift = (self.gc_sp_shift + 1).min(Self::GC_SP_SHIFT_MAX);
+        } else {
+            self.gc_sp_shift = 0;
         }
     }
 
@@ -4450,7 +5002,7 @@ impl Engine {
                 o.args_map = Some((env.clone(), std::rc::Rc::new(map)));
             }
             if !la.lit.strict {
-                self.set_own(aid, "callee", la.f, false);
+                self.set_own(aid, "callee", la.f.clone(), false);
             }
         }
         a
@@ -4516,13 +5068,13 @@ impl Engine {
                 let b = e.borrow();
                 match &b.kind {
                     EnvKind::Local(m) | EnvKind::Block(m) => match m.get(name) {
-                        Some(EnvCell::Bind(v)) => return Some(v.value),
+                        Some(EnvCell::Bind(v)) => return Some(v.value.clone()),
                         Some(EnvCell::Alias(t, n)) => Next::Alias(t.clone(), n.clone()),
                         Some(EnvCell::LazyArgs(la)) => Next::Lazy(la.clone()),
                         None => Next::Up(b.parent.clone()),
                     },
                     EnvKind::Global(m) => match m.get(name) {
-                        Some(EnvCell::Bind(v)) => return Some(v.value),
+                        Some(EnvCell::Bind(v)) => return Some(v.value.clone()),
                         Some(EnvCell::Alias(t, n)) => Next::Alias(t.clone(), n.clone()),
                         Some(EnvCell::LazyArgs(la)) => Next::Lazy(la.clone()),
                         None => {
@@ -4578,7 +5130,7 @@ impl Engine {
                     {
                         if let Some(cell) = m.get_mut(name) {
                             *cell = EnvCell::Bind(Binding {
-                                value: v,
+                                value: v.clone(),
                                 mutable: true,
                                 sloppy_silent: false,
                             });
@@ -4599,7 +5151,7 @@ impl Engine {
         let (proto, own_len, chars): (ObjId, Option<usize>, Option<Vec<String>>) = match v {
             Value::Obj(id) => return Ok(Some(id)),
             Value::Str(sid) => {
-                let s = self.read_str(sid)?.unwrap_or_default();
+                let s = self.read_str(&sid)?;
                 // Garde §B-59 : `with(str)` matérialisait par
                 // caractère une `String` (24 o) + une cellule
                 // `str_val` + une prop `set_own` (~200 o) —
@@ -5066,7 +5618,7 @@ impl Engine {
             Pat::Rest(p) => self.bind_pat(env, this, p, v, mode),
             Pat::Default(p, d) => {
                 let v = if matches!(v, Value::Undefined) {
-                    self.eval_expr(env, this, d)?
+                    self.eval_expr(env, this.clone(), d)?
                 } else {
                     v
                 };
@@ -5084,12 +5636,12 @@ impl Engine {
                             // panic (vol 339 finance perso).
                             let rest =
                                 self.new_array(items.get(i..).map_or_else(Vec::new, <[_]>::to_vec));
-                            self.bind_pat(env, this, p, rest, mode)?;
+                            self.bind_pat(env, this.clone(), p, rest, mode)?;
                             break;
                         }
                         Some(p) => {
-                            let sub = items.get(i).copied().unwrap_or(Value::Undefined);
-                            self.bind_pat(env, this, p, sub, mode)?;
+                            let sub = items.get(i).cloned().unwrap_or(Value::Undefined);
+                            self.bind_pat(env, this.clone(), p, sub, mode)?;
                         }
                     }
                 }
@@ -5101,18 +5653,18 @@ impl Engine {
                 }
                 let mut consumed = Vec::with_capacity(props.len());
                 for (k, p) in props {
-                    let ks = self.eval_prop_key(env, this, k)?;
-                    let sub = self.get_prop_value(v, &ks)?;
+                    let ks = self.eval_prop_key(env, this.clone(), k)?;
+                    let sub = self.get_prop_value(v.clone(), &ks)?;
                     consumed.push(ks);
-                    self.bind_pat(env, this, p, sub, mode)?;
+                    self.bind_pat(env, this.clone(), p, sub, mode)?;
                 }
                 if let Some(p) = rest {
                     // `{...rest}` — remaining enumerable own props.
                     let rest_obj = self.new_object();
-                    if let Value::Obj(id) = v {
+                    if let Value::Obj(id) = v.clone() {
                         for k in self.own_enum_keys_trapped(id)? {
                             if !consumed.iter().any(|c| **c == *k) {
-                                let sv = self.get_prop_value(v, &k)?;
+                                let sv = self.get_prop_value(v.clone(), &k)?;
                                 self.set_own(rest_obj, &k, sv, true);
                             }
                         }
@@ -5151,7 +5703,7 @@ impl Engine {
         match v {
             Value::Obj(id) => {
                 if let Some(m) = self.get_prop(id, SYM_ITERATOR) {
-                    if self.is_callable(m) {
+                    if self.is_callable(m.clone()) {
                         let it = self.call_value(m, v, &[])?;
                         let mut out = Vec::new();
                         loop {
@@ -5160,10 +5712,10 @@ impl Engine {
                             let Some(nf) = self.get_prop(iid, "next") else {
                                 break;
                             };
-                            if !self.is_callable(nf) {
+                            if !self.is_callable(nf.clone()) {
                                 break;
                             }
-                            let r = self.call_value(nf, it, &[])?;
+                            let r = self.call_value(nf, it.clone(), &[])?;
                             let Value::Obj(rid) = r else { break };
                             if self
                                 .get_prop(rid, "done")
@@ -5212,12 +5764,11 @@ impl Engine {
             }
             Value::Str(id) => {
                 // Garde : `f(...str)`/`[...str]` matérialisent
-                // ~1 cellule + ~160 o par caractère (String +
-                // cellule + internement), sans tick dans le
+                // ~1 `JsStr` + ~160 o par caractère (String +
+                // box + internement), sans tick dans le
                 // `collect` (§B-59 — spread de chaîne géante).
-                self.alloc_guard(self.heap.str_len(id).unwrap_or(0).saturating_mul(160))?;
-                let s = self.heap.string(id).unwrap_or_default();
-                Ok(s.chars().map(|c| self.str_val(c.to_string())).collect())
+                self.alloc_guard(id.len().saturating_mul(160))?;
+                Ok(id.chars().map(|c| self.str_val(c.to_string())).collect())
             }
             _ => Err(self.type_error("value is not iterable")),
         }
@@ -5236,7 +5787,7 @@ impl Engine {
     pub(crate) fn await_value(&mut self, v: Value) -> JsResult<Value> {
         if let Value::Obj(id) = v {
             if let Some(ObjKind::Promise(p)) = self.heap.obj(id).map(|o| &o.kind) {
-                let (state, result) = (p.state, p.result);
+                let (state, result) = (p.state, p.result.clone());
                 return match state {
                     crate::promise::PromiseState::Fulfilled => Ok(result),
                     crate::promise::PromiseState::Rejected => Err(Thrown(result)),
@@ -5253,9 +5804,9 @@ impl Engine {
             // peut pas suspendre — erreur nommée plutôt que bind
             // brut silencieux. Getter abrupt → la raison jette
             // au site (spec `await` : rejet du wrapper).
-            match self.get_prop_value(v, "then") {
+            match self.get_prop_value(v.clone(), "then") {
                 Err(Thrown(t)) => return Err(Thrown(t)),
-                Ok(f) if self.is_callable(f) => {
+                Ok(f) if self.is_callable(f.clone()) => {
                     return Err(
                         self.type_error("await on a foreign thenable is unsupported at this site")
                     );
@@ -5277,7 +5828,7 @@ impl Engine {
         crate::j17_tick(&crate::J17_ITER);
         if let Value::Obj(id) = v {
             if let Some(m) = self.get_prop(id, SYM_ASYNC_ITERATOR) {
-                if self.is_callable(m) {
+                if self.is_callable(m.clone()) {
                     let it = self.call_value(m, v, &[])?;
                     let mut out = Vec::new();
                     loop {
@@ -5286,10 +5837,10 @@ impl Engine {
                         let Some(nf) = self.get_prop(iid, "next") else {
                             break;
                         };
-                        if !self.is_callable(nf) {
+                        if !self.is_callable(nf.clone()) {
                             break;
                         }
-                        let r = self.call_value(nf, it, &[])?;
+                        let r = self.call_value(nf, it.clone(), &[])?;
                         let r = self.await_value(r)?;
                         let Value::Obj(rid) = r else { break };
                         if self
@@ -5331,7 +5882,7 @@ impl Engine {
         for a in arg_exprs {
             match a {
                 Expr::Spread(e) => {
-                    let v = self.eval_expr(env, this, e)?;
+                    let v = self.eval_expr(env, this.clone(), e)?;
                     let items = self.iter_values(v)?;
                     // `f(...a1,...a2,…)` — les spreads
                     // s'accumulent dans `out` sans tick (§B-59 :
@@ -5342,7 +5893,7 @@ impl Engine {
                     )?;
                     out.extend(items);
                 }
-                _ => out.push(self.eval_expr(env, this, a)?),
+                _ => out.push(self.eval_expr(env, this.clone(), a)?),
             }
         }
         Ok(out)
@@ -5355,7 +5906,10 @@ impl Engine {
     /// the ctor object for statics.
     pub(crate) fn super_base(&mut self, env: &EnvRef) -> JsResult<Value> {
         match self.env_get(env, HOME_BIND) {
-            Some(Value::Obj(home)) => Ok(self.heap.obj(home).map_or(Value::Undefined, |o| o.proto)),
+            Some(Value::Obj(home)) => Ok(self
+                .heap
+                .obj(home)
+                .map_or(Value::Undefined, |o| o.proto.clone())),
             _ => Err(self.type_error("`super` outside a class member")),
         }
     }
@@ -5375,8 +5929,8 @@ impl Engine {
         // Parent ctor + prototype object for `extends`.
         let (parent, parent_proto) = match &cl.super_ {
             Some(e) => {
-                let p = self.eval_expr(env, this, e)?;
-                if !self.is_callable(p) {
+                let p = self.eval_expr(env, this.clone(), e)?;
+                if !self.is_callable(p.clone()) {
                     return Err(self.type_error("class extends a non-constructor"));
                 }
                 let pp = match p {
@@ -5394,8 +5948,8 @@ impl Engine {
 
         // Class scope: hidden `super`/`home` names seen by members.
         let cenv = Env::local(env.clone());
-        if let Some(p) = parent {
-            Self::env_put(&cenv, SUPER_BIND, p, false);
+        if let Some(ref p) = parent {
+            Self::env_put(&cenv, SUPER_BIND, p.clone(), false);
         }
 
         // Constructor — explicit member or synthesized
@@ -5446,13 +6000,13 @@ impl Engine {
         } else {
             ctor_lit
         };
-        let ctor = self.make_function(&ctor_lit, &cenv, this);
+        let ctor = self.make_function(&ctor_lit, &cenv, this.clone());
         let Value::Obj(ctor_id) = ctor else {
             return Err(self.type_error("internal class error"));
         };
         // `new` path uses `ctor.prototype`; re-point it at ours.
         self.set_own(ctor_id, "prototype", Value::Obj(proto), false);
-        self.set_own(proto, "constructor", ctor, false);
+        self.set_own(proto, "constructor", ctor.clone(), false);
         // `[[HomeObject]]` du ctor = l'objet **prototype** de la
         // classe (spec `ClassDefinitionEvaluation`), pas le ctor
         // : `super.m()` dans un constructeur dérivé résout sur
@@ -5477,14 +6031,14 @@ impl Engine {
         // être réassigné : le binding interne le masque et reste
         // la classe.
         if let Some(name) = &cl.name {
-            Self::env_put(&cenv, name, ctor, false);
+            Self::env_put(&cenv, name, ctor.clone(), false);
         }
         // Derived ctor's [[Prototype]] is the parent constructor —
         // statics inherit (`Parent.sm()` reachable via `C.sm()`,
         // `super.sm()` inside statics resolves through it).
-        if let Some(p) = parent {
+        if let Some(ref p) = parent {
             if let Some(o) = self.heap.obj_mut(ctor_id) {
-                o.proto = p;
+                o.proto = p.clone();
             }
         }
 
@@ -5501,34 +6055,34 @@ impl Engine {
             let target = if m.static_ { ctor_id } else { proto };
             let menv = Env::local(cenv.clone());
             Self::env_put(&menv, HOME_BIND, Value::Obj(target), false);
-            let fv = self.make_function(&m.fun, &menv, this);
+            let fv = self.make_function(&m.fun, &menv, this.clone());
             match m.kind {
                 ClassMemberKind::Field if m.static_ => {
-                    let key = self.eval_prop_key(env, this, &m.key)?;
-                    let v = self.call_value(fv, ctor, &[])?;
+                    let key = self.eval_prop_key(env, this.clone(), &m.key)?;
+                    let v = self.call_value(fv, ctor.clone(), &[])?;
                     self.set_own(ctor_id, &key, v, !key.starts_with(PRIV_PREFIX));
                 }
                 ClassMemberKind::Field => {
-                    let key = self.eval_prop_key(env, this, &m.key)?;
+                    let key = self.eval_prop_key(env, this.clone(), &m.key)?;
                     let kv = self.prop_trap_key(&key);
                     let pair = self.new_array(vec![kv, fv]);
                     fields.push(pair);
                 }
                 ClassMemberKind::StaticBlock => {
-                    self.call_value(fv, ctor, &[])?;
+                    self.call_value(fv, ctor.clone(), &[])?;
                 }
                 ClassMemberKind::Method => {
-                    let key = self.eval_prop_key(env, this, &m.key)?;
+                    let key = self.eval_prop_key(env, this.clone(), &m.key)?;
                     self.set_own(target, &key, fv, false);
                 }
                 ClassMemberKind::Getter => {
-                    let key = self.eval_prop_key(env, this, &m.key)?;
+                    let key = self.eval_prop_key(env, this.clone(), &m.key)?;
                     if let Some(o) = self.heap.obj_mut(target) {
                         o.set_accessor(&key, fv, Value::Undefined, false);
                     }
                 }
                 ClassMemberKind::Setter => {
-                    let key = self.eval_prop_key(env, this, &m.key)?;
+                    let key = self.eval_prop_key(env, this.clone(), &m.key)?;
                     if let Some(o) = self.heap.obj_mut(target) {
                         o.set_accessor(&key, Value::Undefined, fv, false);
                     }
@@ -5576,7 +6130,7 @@ impl Engine {
             let k = self.get_prop(pid, "0").unwrap_or(Value::Undefined);
             let f = self.get_prop(pid, "1").unwrap_or(Value::Undefined);
             let key = self.prop_key(k)?;
-            let v = self.call_value_impl(f, this, &[], nt)?;
+            let v = self.call_value_impl(f, this.clone(), &[], nt.clone())?;
             let Value::Obj(tid) = this else {
                 return Err(self.type_error("field init without instance"));
             };
@@ -5635,7 +6189,7 @@ impl Engine {
             if let Some(i) = ai {
                 return elems
                     .get(i)
-                    .copied()
+                    .cloned()
                     .filter(|v| !v.is_hole())
                     .map(|value| Prop::Data {
                         value,
@@ -5678,7 +6232,7 @@ impl Engine {
             ObjKind::Fun(Fun::Native { name, .. } | Fun::BoundNative { name, .. }) => {
                 (Some(crate::intern(name)), None)
             }
-            ObjKind::Fun(Fun::Bound { target, .. }) => (None, Some(*target)),
+            ObjKind::Fun(Fun::Bound { target, .. }) => (None, Some(target.clone())),
             _ => (None, None),
         };
         let ta_tag = match &o.kind {
@@ -5709,7 +6263,7 @@ impl Engine {
                 buffer,
                 offset,
                 len,
-            } if ta.is_big() => Some((*ta, *buffer, *offset, *len)),
+            } if ta.is_big() => Some((*ta, buffer.clone(), *offset, *len)),
             _ => None,
         };
         if let (Some((ta, buffer, offset, len)), Some(i)) = (big, ai) {
@@ -5811,7 +6365,7 @@ impl Engine {
             } => match key {
                 "byteLength" => Some(fixed(Value::Num(*len as f64))),
                 "byteOffset" => Some(fixed(Value::Num(*offset as f64))),
-                "buffer" => Some(fixed(*buffer)),
+                "buffer" => Some(fixed(buffer.clone())),
                 _ => None,
             },
             ObjKind::TypedArray {
@@ -5823,7 +6377,7 @@ impl Engine {
                 "length" => Some(fixed(Value::Num(*len as f64))),
                 "byteLength" => Some(fixed(Value::Num((*len * ta.size()) as f64))),
                 "byteOffset" => Some(fixed(Value::Num(*offset as f64))),
-                "buffer" => Some(fixed(*buffer)),
+                "buffer" => Some(fixed(buffer.clone())),
                 _ => {
                     // Kinds big : résolus dans `find_own` (&mut —
                     // matérialise un `Value::Big`).
@@ -5891,7 +6445,7 @@ impl Engine {
             if let Some(p) = self.find_own_ai(cid, key, ai) {
                 return Some(p);
             }
-            cur = match self.heap.obj(cid).map(|o| o.proto) {
+            cur = match self.heap.obj(cid).map(|o| o.proto.clone()) {
                 Some(Value::Obj(p)) => Some(p),
                 _ => None,
             };
@@ -5909,7 +6463,7 @@ impl Engine {
     /// `None` for accessor props.
     pub(crate) fn get_prop(&mut self, id: ObjId, key: &str) -> Option<Value> {
         let v = self.find_prop(id, key).and_then(|p| p.data_value());
-        self.probe_lookup(id, key, v);
+        self.probe_lookup(id, key, v.clone());
         v
     }
 
@@ -5971,7 +6525,7 @@ impl Engine {
                 // visible ; pour les conteneurs tagués,
                 // `g.data response ty=undef` nomme une clé lue
                 // mais vide (signature du return-early).
-                let ty = v.map_or("miss", Self::probe_ty);
+                let ty = v.as_ref().map_or("miss", |x| Self::probe_ty(x.clone()));
                 if let Ok(mut d) = dom.try_borrow_mut() {
                     if d.ce.probe_seen.insert(format!("{label}:{key}:{ty}")) {
                         tracing::info!(target: "dom_probe", site = label, key = %key, ty = %ty);
@@ -6069,7 +6623,7 @@ impl Engine {
         // Rust hors `call_depth` (J2 : overflow natif, classe alpine).
         let mut depth = 0;
         while let Some((tid, target, handler)) = self.proxy_th(id)? {
-            let trap = self.proxy_trap(handler, "get")?;
+            let trap = self.proxy_trap(handler.clone(), "get")?;
             if matches!(trap, Value::Obj(_)) {
                 let kv = self.prop_trap_key(key);
                 let v = self.call_value(trap, handler, &[target, kv, recv])?;
@@ -6078,7 +6632,7 @@ impl Engine {
                 // non-config sans getter → `undefined` imposé.
                 match self.find_own(tid, key) {
                     Some(Prop::Data { value, attrs }) if !attrs.configurable && !attrs.writable => {
-                        if !self.strict_eq(v, value) {
+                        if !self.strict_eq(&v, &value) {
                             return Err(self.type_error(
                                 "proxy get: result differs from non-configurable non-writable prop",
                             ));
@@ -6102,11 +6656,11 @@ impl Engine {
         }
         match self.find_prop(id, key) {
             Some(Prop::Data { value, .. }) => {
-                self.probe_lookup(id, key, Some(value));
+                self.probe_lookup(id, key, Some(value.clone()));
                 Ok(value)
             }
             Some(Prop::Acc { get, .. }) => {
-                if self.is_callable(get) {
+                if self.is_callable(get.clone()) {
                     self.call_value(get, recv, &[])
                 } else {
                     Ok(Value::Undefined)
@@ -6144,7 +6698,7 @@ impl Engine {
             // maillon applique son propre `[[Set]]`).
             if let Some((tid, target, handler)) = self.proxy_th(cid)? {
                 if self
-                    .proxy_set_step(tid, target, handler, recv, key, v)?
+                    .proxy_set_step(tid, target, handler, recv.clone(), key, v.clone())?
                     .is_some()
                 {
                     return Ok(());
@@ -6163,7 +6717,7 @@ impl Engine {
             }
             match self.find_own_ai(cid, key, ai) {
                 Some(Prop::Acc { set, .. }) => {
-                    if self.is_callable(set) {
+                    if self.is_callable(set.clone()) {
                         self.call_value(set, recv, &[v])?;
                         return Ok(());
                     }
@@ -6178,7 +6732,7 @@ impl Engine {
                 Some(_) => break, // data writable → shadow with own write
                 None => {}
             }
-            cur = match self.heap.obj(cid).map(|o| o.proto) {
+            cur = match self.heap.obj(cid).map(|o| o.proto.clone()) {
                 Some(Value::Obj(p)) => Some(p),
                 _ => None,
             };
@@ -6211,18 +6765,18 @@ impl Engine {
         key: &str,
         v: Value,
     ) -> JsResult<Option<()>> {
-        let trap = self.proxy_trap(handler, "set")?;
+        let trap = self.proxy_trap(handler.clone(), "set")?;
         if !matches!(trap, Value::Obj(_)) {
             return Ok(None);
         }
         let kv = self.prop_trap_key(key);
-        let ok = self.call_value(trap, handler, &[target, kv, v, recv])?;
+        let ok = self.call_value(trap, handler, &[target, kv, v.clone(), recv])?;
         if !self.to_boolean(ok) {
             return self.write_refused(key).map(Some);
         }
         match self.find_own(tid, key) {
             Some(Prop::Data { value, attrs })
-                if !attrs.configurable && !attrs.writable && !self.strict_eq(v, value) =>
+                if !attrs.configurable && !attrs.writable && !self.strict_eq(&v, &value) =>
             {
                 return Err(self.type_error(
                     "proxy set: cannot report success on non-configurable non-writable prop",
@@ -6320,7 +6874,7 @@ impl Engine {
     /// d'un `[[ProxyHandler]]` nul lève).
     pub(crate) fn proxy_th(&mut self, id: ObjId) -> JsResult<Option<(ObjId, Value, Value)>> {
         let (target, handler) = match self.heap.obj(id).map(|o| &o.kind) {
-            Some(ObjKind::Proxy { target, handler }) => (*target, *handler),
+            Some(ObjKind::Proxy { target, handler }) => (target.clone(), handler.clone()),
             _ => return Ok(None),
         };
         let Some(handler) = handler else {
@@ -6338,7 +6892,7 @@ impl Engine {
         let f = self.get_prop_value(handler, name)?;
         match f {
             Value::Undefined | Value::Null => Ok(Value::Undefined),
-            _ if self.is_callable(f) => Ok(f),
+            _ if self.is_callable(f.clone()) => Ok(f),
             _ => Err(self.type_error(format!("proxy trap `{name}` is not callable"))),
         }
     }
@@ -6398,11 +6952,11 @@ impl Engine {
                 let h = self.host_of(id);
                 if let Some(h) = &h {
                     crate::host_mark(h.class_name(), key);
-                    if let Some(v) = h.get(self, base, key)? {
+                    if let Some(v) = h.get(self, base.clone(), key)? {
                         return Ok(v);
                     }
                 }
-                let v = self.read_prop(base, base, key)?;
+                let v = self.read_prop(base.clone(), base, key)?;
                 // Feature-detect : les méthodes host sont
                 // invoke-only — quand ni `get` ni la chaîne
                 // proto ne produisent de valeur, exposer le
@@ -6430,21 +6984,16 @@ impl Engine {
                 }
                 Ok(v)
             }
-            Value::Str(id) => {
+            Value::Str(ref id) => {
                 if key == "length" {
                     // Code units UTF-16 (spec) — astraux = 2,
                     // sans clone (§B-59).
-                    let n = self.heap.str_u16_len(id).unwrap_or(0);
-                    return Ok(Value::Num(n as f64));
+                    return Ok(Value::Num(id.u16_len() as f64));
                 }
                 if let Some(i) = array_index(key) {
                     // Indice en code units — surrogate isolé →
                     // U+FFFD (déviation documentée : UTF-8 natif).
-                    let c = self.heap.string(id).and_then(|s| {
-                        s.encode_utf16()
-                            .nth(i)
-                            .map(|u| String::from_utf16_lossy(&[u]))
-                    });
+                    let c = id.u16_at(i).map(|u| String::from_utf16_lossy(&[u]));
                     return Ok(match c {
                         Some(c) => self.str_val(c),
                         None => Value::Undefined,
@@ -6481,7 +7030,7 @@ impl Engine {
             Value::Obj(id) => {
                 if let Some(h) = self.host_of(id) {
                     crate::host_mark(h.class_name(), key);
-                    if h.set(self, base, key, v)? {
+                    if h.set(self, base.clone(), key, v.clone())? {
                         // Réactions CE synchrones (JS-C68) — un
                         // setter host a pu muter le miroir
                         // (`innerHTML`, `className`…).
@@ -6535,7 +7084,7 @@ impl Engine {
         loop {
             if let Some((tid, target, handler)) = self.proxy_th(cur)? {
                 if self
-                    .proxy_set_step(tid, target, handler, recv, key, v)?
+                    .proxy_set_step(tid, target, handler, recv.clone(), key, v.clone())?
                     .is_some()
                 {
                     return Ok(true);
@@ -6546,7 +7095,7 @@ impl Engine {
             } else {
                 match self.find_own_ai(cur, key, ai) {
                     Some(Prop::Acc { set, .. }) => {
-                        if self.is_callable(set) {
+                        if self.is_callable(set.clone()) {
                             self.call_value(set, recv, &[v])?;
                             return Ok(true);
                         }
@@ -6557,7 +7106,7 @@ impl Engine {
                     Some(Prop::Data { .. }) => return Ok(false),
                     None => {}
                 }
-                cur = match self.heap.obj(cur).map(|o| o.proto) {
+                cur = match self.heap.obj(cur).map(|o| o.proto.clone()) {
                     Some(Value::Obj(p)) => p,
                     _ => return Ok(false),
                 };
@@ -6573,7 +7122,7 @@ impl Engine {
     /// (non-writable, non-extensible, frozen). Le caller décide
     /// silence sloppy vs `TypeError` strict.
     pub(crate) fn set_prop(&mut self, id: ObjId, key: &str, v: Value) -> JsResult<bool> {
-        self.probe_store(id, key, v);
+        self.probe_store(id, key, v.clone());
         // Élément indexé d'une vue typée : la cible est le *buffer*
         // partagé, pas la vue ; hors-bornes canonique → ignoré
         // (spec `IntegerIndexedElementSet` retourne `true`).
@@ -6587,7 +7136,7 @@ impl Engine {
                 buffer,
                 offset,
                 len,
-            }) => array_index(key).map(|i| (*ta, *buffer, *offset, i, i < *len)),
+            }) => array_index(key).map(|i| (*ta, buffer.clone(), *offset, i, i < *len)),
             _ => None,
         };
         if let Some((ta, Value::Obj(bid), off, i, in_range)) = ta_t {
@@ -6745,11 +7294,11 @@ impl Engine {
         // Délégation bornée, même motif que `read_prop` (J2).
         let mut depth = 0;
         while let Some((tid, target, handler)) = self.proxy_th(id)? {
-            let trap = self.proxy_trap(handler, "has")?;
+            let trap = self.proxy_trap(handler.clone(), "has")?;
             if matches!(trap, Value::Obj(_)) {
                 let kv = self.prop_trap_key(key);
                 let r = self.call_value(trap, handler, &[target, kv])?;
-                if !self.to_boolean(r) {
+                if !self.to_boolean(r.clone()) {
                     // Invariants spec `[[HasProperty]]` : prop
                     // non-config ou cible non-extensible → la prop
                     // ne peut pas être cachée.
@@ -6839,7 +7388,7 @@ impl Engine {
         // Délégation bornée, même motif que `read_prop` (J2).
         let mut depth = 0;
         while let Some((tid, target, handler)) = self.proxy_th(id)? {
-            let trap = self.proxy_trap(handler, "deleteProperty")?;
+            let trap = self.proxy_trap(handler.clone(), "deleteProperty")?;
             let ok = if matches!(trap, Value::Obj(_)) {
                 let kv = self.prop_trap_key(key);
                 let r = self.call_value(trap, handler, &[target, kv])?;
@@ -6875,7 +7424,7 @@ impl Engine {
     }
 
     /// `===` exposed for builtins (no user code runs).
-    pub(crate) fn strict_eq(&self, l: Value, r: Value) -> bool {
+    pub(crate) fn strict_eq(&self, l: &Value, r: &Value) -> bool {
         strict_eq(l, r, &self.heap)
     }
 
@@ -6966,7 +7515,7 @@ impl Engine {
         // Délégation bornée, même motif que `read_prop` (J2).
         let mut depth = 0;
         while let Some((tid, target, handler)) = self.proxy_th(id)? {
-            let trap = self.proxy_trap(handler, "ownKeys")?;
+            let trap = self.proxy_trap(handler.clone(), "ownKeys")?;
             if matches!(trap, Value::Obj(_)) {
                 let r = self.call_value(trap, handler, &[target])?;
                 let Value::Obj(arr) = r else {
@@ -7026,7 +7575,7 @@ impl Engine {
         // Délégation bornée, même motif que `read_prop` (J2).
         let mut depth = 0;
         while let Some((tid, target, handler)) = self.proxy_th(id)? {
-            let trap = self.proxy_trap(handler, "getOwnPropertyDescriptor")?;
+            let trap = self.proxy_trap(handler.clone(), "getOwnPropertyDescriptor")?;
             if matches!(trap, Value::Obj(_)) {
                 let kv = self.prop_trap_key(key);
                 let r = self.call_value(trap, handler, &[target, kv])?;
@@ -7087,15 +7636,15 @@ impl Engine {
     pub(crate) fn prop_from_desc_obj(&mut self, d: ObjId) -> JsResult<Option<Prop>> {
         let dv = Value::Obj(d);
         let enumerable = {
-            let v = self.get_prop_value(dv, "enumerable")?;
+            let v = self.get_prop_value(dv.clone(), "enumerable")?;
             self.to_boolean(v)
         };
         let configurable = {
-            let v = self.get_prop_value(dv, "configurable")?;
+            let v = self.get_prop_value(dv.clone(), "configurable")?;
             self.to_boolean(v)
         };
-        let get = self.get_prop_value(dv, "get")?;
-        let set = self.get_prop_value(dv, "set")?;
+        let get = self.get_prop_value(dv.clone(), "get")?;
+        let set = self.get_prop_value(dv.clone(), "set")?;
         let is_acc = !matches!(get, Value::Undefined) || !matches!(set, Value::Undefined);
         if is_acc {
             return Ok(Some(Prop::Acc {
@@ -7108,7 +7657,7 @@ impl Engine {
                 },
             }));
         }
-        let value = self.get_prop_value(dv, "value")?;
+        let value = self.get_prop_value(dv.clone(), "value")?;
         let writable = {
             let v = self.get_prop_value(dv, "writable")?;
             self.to_boolean(v)
@@ -7174,7 +7723,7 @@ impl Engine {
                     }
                 }
                 cur = match self.proxy_th(cid)? {
-                    Some((tid, _, _)) => match self.heap.obj(tid).map(|o| o.proto) {
+                    Some((tid, _, _)) => match self.heap.obj(tid).map(|o| o.proto.clone()) {
                         Some(Value::Obj(p)) => Some(p),
                         _ => None,
                     },
@@ -7227,7 +7776,7 @@ impl Engine {
                 .bigint_of(v)
                 .is_some_and(|b| !num_traits::Zero::is_zero(&b)),
             // Truthiness sans clone (§B-59).
-            Value::Str(id) => self.heap.str_len(id).is_some_and(|n| n > 0),
+            Value::Str(id) => !id.is_empty(),
             Value::Obj(_) => true,
         }
     }
@@ -7270,7 +7819,7 @@ impl Engine {
         }
         // `@@toPrimitive(hint)` prend le pas (spec `ToPrimitive`).
         if let Some(f) = self.get_prop(id, SYM_TO_PRIMITIVE) {
-            if self.is_callable(f) {
+            if self.is_callable(f.clone()) {
                 let h = match hint {
                     PrimHint::String => "string",
                     PrimHint::Number => "number",
@@ -7296,9 +7845,9 @@ impl Engine {
             // `Object.prototype.toString` → "[object Location]"
             // → `new URL(".", location)` « Invalid base URL »
             // (motif assets svelte/fastapi/mkdocs).
-            let f = self.get_prop_value(v, m)?;
-            if self.is_callable(f) {
-                let r = self.call_value(f, v, &[])?;
+            let f = self.get_prop_value(v.clone(), m)?;
+            if self.is_callable(f.clone()) {
+                let r = self.call_value(f, v.clone(), &[])?;
                 if !r.is_object() {
                     return Ok(r);
                 }
@@ -7327,17 +7876,17 @@ impl Engine {
         let mut c = target;
         let mut depth = 0;
         loop {
-            let m = self.get_prop_value(c, SYM_HAS_INSTANCE)?;
-            if self.is_callable(m) {
+            let m = self.get_prop_value(c.clone(), SYM_HAS_INSTANCE)?;
+            if self.is_callable(m.clone()) {
                 let b = self.call_value(m, c, &[v])?;
                 return Ok(self.to_boolean(b));
             }
-            if !self.is_callable(c) {
+            if !self.is_callable(c.clone()) {
                 return Err(self.type_error("right side of `instanceof` is not callable"));
             }
             let bound = match c {
                 Value::Obj(id) => match self.heap.obj(id).map(|o| &o.kind) {
-                    Some(ObjKind::Fun(Fun::Bound { target, .. })) => Some(*target),
+                    Some(ObjKind::Fun(Fun::Bound { target, .. })) => Some(target.clone()),
                     _ => None,
                 },
                 _ => None,
@@ -7357,12 +7906,12 @@ impl Engine {
     /// via `InstanceofOperator` (spec `BoundFunction`
     /// `[[HasInstance]]`); `prototype` non-objet → `TypeError`.
     pub(crate) fn ordinary_has_instance(&mut self, c: Value, v: Value) -> JsResult<bool> {
-        if !self.is_callable(c) {
+        if !self.is_callable(c.clone()) {
             return Ok(false);
         }
         if let Value::Obj(id) = c {
             let bound = match self.heap.obj(id).map(|o| &o.kind) {
-                Some(ObjKind::Fun(Fun::Bound { target, .. })) => Some(*target),
+                Some(ObjKind::Fun(Fun::Bound { target, .. })) => Some(target.clone()),
                 _ => None,
             };
             if let Some(target) = bound {
@@ -7376,7 +7925,7 @@ impl Engine {
             return Err(self.type_error("constructor has no prototype"));
         };
         let mut cur = match v {
-            Value::Obj(id) => match self.heap.obj(id).map(|o| o.proto) {
+            Value::Obj(id) => match self.heap.obj(id).map(|o| o.proto.clone()) {
                 Some(Value::Obj(p)) => Some(p),
                 _ => None,
             },
@@ -7387,7 +7936,7 @@ impl Engine {
             if id == proto {
                 return Ok(true);
             }
-            cur = match self.heap.obj(id).map(|o| o.proto) {
+            cur = match self.heap.obj(id).map(|o| o.proto.clone()) {
                 Some(Value::Obj(p)) => Some(p),
                 _ => None,
             };
@@ -7413,7 +7962,7 @@ impl Engine {
                         if handler.is_none() {
                             return false;
                         }
-                        *target
+                        target.clone()
                     }
                     _ => return false,
                 },
@@ -7433,7 +7982,7 @@ impl Engine {
             Value::Null => 0.0,
             Value::Bool(b) => f64::from(u8::from(b)),
             Value::Num(n) => n,
-            Value::Str(id) => parse_js_number(&self.read_str(id)?.unwrap_or_default()),
+            Value::Str(id) => parse_js_number(&self.read_str(&id)?),
             // `ToNumber(bigint)` → TypeError (spec) — `Number(1n)`
             // passe par `to_numeric` côté builtin, pas ici.
             Value::Big(_) => return Err(self.type_error("cannot convert a BigInt to number")),
@@ -7452,14 +8001,16 @@ impl Engine {
     }
 
     /// `ToString`.
-    /// Lecture de chaîne **gardée** — §B-59 : `heap.string`
-    /// clone l'intégralité hors census ; tout appelant
-    /// `&mut self` passe par ici (`alloc_guard(len)` avant
-    /// le clone → `RangeError` nommé, pas ratchet de commit).
-    pub(crate) fn read_str(&mut self, id: ObjId) -> JsResult<Option<String>> {
-        let n = self.heap.str_len(id).unwrap_or(0);
-        self.alloc_guard(n)?;
-        Ok(self.heap.string(id))
+    /// Lecture de chaîne **gardée** — §B-59 : la copie en
+    /// `String` duplique l'intégralité hors compteur ; tout
+    /// appelant `&mut self` passe par ici (`alloc_guard(len)`
+    /// avant le clone → `RangeError` nommé, pas ratchet de
+    /// commit). JS-C420 : la lecture `&JsStr` ne peut plus
+    /// manquer (fin du `Option` — la boîte vit tant qu'un
+    /// handle existe).
+    pub(crate) fn read_str(&mut self, s: &JsStr) -> JsResult<String> {
+        self.alloc_guard(s.len())?;
+        Ok(s.to_string())
     }
 
     pub(crate) fn to_js_string(&mut self, v: Value) -> JsResult<String> {
@@ -7469,13 +8020,12 @@ impl Engine {
             Value::Bool(b) => if b { "true" } else { "false" }.into(),
             Value::Num(n) => num_to_js_string(n),
             Value::Str(id) => {
-                // Garde AVANT le clone : `heap.string` duplique
+                // Garde AVANT le clone : la copie duplique
                 // l'intégralité — un `s += x` sur une Str de S
                 // octets clone S avant l'`alloc_guard` du `+`
                 // (§B-59 : ratchet de clones géants rattrapés).
-                let n = self.heap.str_len(id).unwrap_or(0);
-                self.alloc_guard(n)?;
-                self.heap.string(id).unwrap_or_default()
+                self.alloc_guard(id.len())?;
+                id.to_string()
             }
             Value::Big(_) => self.bigint_of(v).map(|b| b.to_string()).unwrap_or_default(),
             Value::Obj(id) => {
@@ -7528,7 +8078,7 @@ impl Engine {
         let ObjKind::Array(elems) = &o.kind else {
             return None;
         };
-        let v = elems.get(n as usize).copied().filter(|v| !v.is_hole());
+        let v = elems.get(n as usize).cloned().filter(|v| !v.is_hole());
         if v.is_some() {
             crate::j17_tick(&crate::J17_ARR_IDX);
         }
@@ -7711,6 +8261,28 @@ impl Engine {
         if let Ok(mut g) = crate::LAST_PHASE.lock() {
             *g = "call";
         }
+        // JS-C421 : `f`/`this`/`args`/`nt` tenus par les frames
+        // Rust appelantes pendant tout le corps — les pousser
+        // racines pour les safepoints des corps en dessous.
+        let sr_mark = self.safepoint_roots.len();
+        self.safepoint_roots.push(f.clone());
+        self.safepoint_roots.push(this.clone());
+        self.safepoint_roots.push(nt.clone());
+        self.safepoint_roots.extend_from_slice(args);
+        let out = self.call_value_inner(f, this, args, nt);
+        self.safepoint_roots.truncate(sr_mark);
+        out
+    }
+
+    /// Corps de [`call_value_impl`] — séparé pour que le funnel
+    /// de racines safepoint (JS-C421) entoure tout le dispatch.
+    fn call_value_inner(
+        &mut self,
+        f: Value,
+        this: Value,
+        args: &[Value],
+        nt: Value,
+    ) -> JsResult<Value> {
         crate::CALL_N.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         crate::j17_tick(&crate::J17_CALL);
         let mut cur = f;
@@ -7719,7 +8291,7 @@ impl Engine {
         let mut depth = 0u32;
         while let Value::Obj(cid) = cur {
             if let Some((_, target, handler)) = self.proxy_th(cid)? {
-                let trap = self.proxy_trap(handler, "apply")?;
+                let trap = self.proxy_trap(handler.clone(), "apply")?;
                 if matches!(trap, Value::Obj(_)) {
                     let argv = self.new_array(args_owned.clone().unwrap_or_else(|| args.to_vec()));
                     return self.call_value(trap, handler, &[target, this, argv]);
@@ -7733,7 +8305,7 @@ impl Engine {
                     target,
                     this: bound_this,
                     bound,
-                })) => Some((*target, *bound_this, bound.clone())),
+                })) => Some((target.clone(), bound_this.clone(), bound.clone())),
                 _ => None,
             };
             let Some((target, bound_this, bound)) = bound_parts else {
@@ -7973,11 +8545,11 @@ impl Engine {
             let v = if p.rest {
                 self.new_array(args.get(i..).unwrap_or(&[]).to_vec())
             } else {
-                args.get(i).copied().unwrap_or(Value::Undefined)
+                args.get(i).cloned().unwrap_or(Value::Undefined)
             };
             // Param binding runs inside the new scope; a
             // destructuring/throwing default aborts the call.
-            if let Err(t) = self.bind_pat(&local, this, &p.pat, v, BindMode::Var) {
+            if let Err(t) = self.bind_pat(&local, this.clone(), &p.pat, v, BindMode::Var) {
                 self.call_depth -= 1;
                 self.call_stack.pop();
                 return Err(t);
@@ -8002,7 +8574,7 @@ impl Engine {
         if !lit.is_arrow {
             let la = std::rc::Rc::new(crate::heap::LazyArgs {
                 lit: lit.clone(),
-                f,
+                f: f.clone(),
                 args: std::cell::RefCell::new(args.to_vec()),
             });
             let mut b = local.borrow_mut();
@@ -8033,7 +8605,7 @@ impl Engine {
                 .clone()
                 .unwrap_or_else(|| crate::interp::lazy::lower_suspend_body(&body_rc));
             let it = crate::interp::lazy::gen_lazy_obj(self, local.clone(), this, body);
-            if let (Value::Obj(iid), Value::Obj(fid)) = (it, f) {
+            if let (Value::Obj(iid), Value::Obj(fid)) = (it.clone(), f.clone()) {
                 if let Some(proto) = self.get_prop(fid, "prototype") {
                     if let Some(o) = self.heap.obj_mut(iid) {
                         o.proto = proto;
@@ -8095,13 +8667,13 @@ impl Engine {
 
     /// `new F(args)` — `new.target` = `f`.
     pub(crate) fn construct(&mut self, f: Value, args: &[Value]) -> JsResult<Value> {
-        self.construct_nt(f, args, f)
+        self.construct_nt(f.clone(), args, f)
     }
 
     /// `Reflect.construct(F, args, newTarget)` — `new.target`
     /// explicite, partagé avec les sous-constructions.
     pub(crate) fn construct_nt(&mut self, f: Value, args: &[Value], nt: Value) -> JsResult<Value> {
-        if !self.is_callable(f) {
+        if !self.is_callable(f.clone()) {
             // Le callee est nommé — les sondes de sites réels
             // identifient l'API hôte manquante du premier coup.
             let d = self.describe(f);
@@ -8113,7 +8685,7 @@ impl Engine {
         };
         // Proxy : trap `construct` ou délégation à la cible.
         if let Some((_, target, handler)) = self.proxy_th(fid)? {
-            let trap = self.proxy_trap(handler, "construct")?;
+            let trap = self.proxy_trap(handler.clone(), "construct")?;
             if matches!(trap, Value::Obj(_)) {
                 let argv = self.new_array(args.to_vec());
                 return self.call_value(trap, handler, &[target, argv, nt]);
@@ -8127,7 +8699,7 @@ impl Engine {
             if let ObjKind::Fun(Fun::Bound { target, bound, .. }) = &o.kind {
                 let mut a = bound.clone();
                 a.extend_from_slice(args);
-                let target = *target;
+                let target = target.clone();
                 return self.construct_nt(target, &a, nt);
             }
         }
@@ -8185,7 +8757,7 @@ impl Engine {
         let obj = Value::Obj(self.heap.alloc_obj(Object::ordinary(proto)));
         // Champs d'instance d'une classe de base : installés à
         // l'entrée du corps (spec `DefineField` en tête de ctor).
-        self.install_class_fields(fid, FLD_FIELDS, obj, nt)?;
+        self.install_class_fields(fid, FLD_FIELDS, obj.clone(), nt.clone())?;
         // Marque l'objet frais — les natives-ctor
         // (`Boolean`/`String`/`Proxy`/…) reconnaissent `this`
         // construit même sous `newTarget` étranger
@@ -8195,7 +8767,7 @@ impl Engine {
             Value::Obj(id) => Some(id),
             _ => None,
         };
-        let r = self.call_value_ctor(f, obj, args, nt);
+        let r = self.call_value_ctor(f, obj.clone(), args, nt);
         self.ctor_fresh = prev_fresh;
         let r = r?;
         Ok(if r.is_object() { r } else { obj })
@@ -8208,16 +8780,19 @@ impl Engine {
         // l'initialisation des ctors cachés).
         let (proto, p_obj) = if lit.is_gen && self.gen_proto != Value::Undefined {
             let (fp, gp) = if lit.is_async {
-                (self.async_gen_fn_proto, self.async_gen_proto)
+                (
+                    self.async_gen_fn_proto.clone(),
+                    self.async_gen_proto.clone(),
+                )
             } else {
-                (self.gen_fn_proto, self.gen_proto)
+                (self.gen_fn_proto.clone(), self.gen_proto.clone())
             };
             (fp, gp)
         } else if lit.is_async && self.async_fn_proto != Value::Undefined {
             // `async function` → `%AsyncFunction.prototype%` :
             // `(async f).constructor` = `%AsyncFunction%` — la
             // voie que suit alpine pour `new AsyncFunction`.
-            (self.async_fn_proto, Value::Obj(self.protos.object))
+            (self.async_fn_proto.clone(), Value::Obj(self.protos.object))
         } else {
             (
                 Value::Obj(self.protos.function),
@@ -8242,8 +8817,8 @@ impl Engine {
         if lit.strict || lit.is_gen || lit.is_async {
             let thr = self.native_fn("restricted", crate::builtins::restricted_prop);
             if let Some(o) = self.heap.obj_mut(id) {
-                o.set_accessor("caller", thr, thr, false);
-                o.set_accessor("arguments", thr, thr, false);
+                o.set_accessor("caller", thr.clone(), thr.clone(), false);
+                o.set_accessor("arguments", thr.clone(), thr, false);
             }
         }
         Value::Obj(id)
@@ -8441,3 +9016,307 @@ pub(crate) mod lazy;
 mod ops;
 
 pub(crate) use ops::*;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// JS-C411 — le slack garbage du cap dur est borné
+    /// **absolument** au-delà des petites limites : `lim + 256
+    /// Mio`. §B-114 : `lim × 4` tolérait 1,5 Gio de déchets
+    /// estimés sous cap 384 Mio ; le RSS réel (estimé sous-
+    /// compté) filait à 4,4 Go avant le kill. Sous 64 Mio, la
+    /// formule historique (`×4`, plancher 256 Mio — droit au
+    /// churn JS-C113 des contextes confinés) est inchangée.
+    #[test]
+    fn c411_dead_hard_bounded_slack() {
+        // Petites bornes : formule et plancher historiques.
+        assert_eq!(Engine::dead_hard(8 << 20), 256 << 20);
+        assert_eq!(Engine::dead_hard(64 << 20), 256 << 20);
+        // Au-delà : slack absolu +256 Mio.
+        assert_eq!(Engine::dead_hard(65 << 20), 321 << 20);
+        assert_eq!(Engine::dead_hard(100 << 20), 356 << 20);
+        // §B-114 : 384 Mio → 640 Mio (était 1,5 Gio).
+        assert_eq!(Engine::dead_hard(384 << 20), 640 << 20);
+    }
+
+    /// JS-C417 — la dette `gc_due` s'arme **sous** `lim` (vol
+    /// 705 : 553 Mio de `Str` mortes sous-limite jamais
+    /// balayées aux checkpoints → kill `dead_hard`, vivant
+    /// réel ~2 Mio). Verrou : un churn sous-limite répété
+    /// survit — sans l'arme dette, l'estimé cumulait ~450 Kio
+    /// de morts par eval et le cap dur tuait en ~3 rounds ;
+    /// avec elle, chaque frontière de job réclame et `bytes`
+    /// retombe. `gc_cap` n'est pas hissé sans mesure — les
+    /// kills `mem_over` restent entiers.
+    #[test]
+    fn gc_debt_arms_sweep_below_soft_limit() {
+        let mut e = Engine::new();
+        // lim 1 Mio → dette 256 Kio, cap dur 1,25 Mio : chaque
+        // eval jette ~450 Kio de Str mortes — sous `lim`, la
+        // voie `mem_over` ne s'arme pas, seule la dette peut
+        // faire balayer.
+        e.heap.set_mem_limit(1024 * 1024);
+        e.collect();
+        let base = e.heap.bytes();
+        for _ in 0..8 {
+            let r = e.eval(
+                "(function(){var a=[];for(var i=0;i<4000;i++)a.push('s'+i+'-'+i);return a.length})()",
+            );
+            assert!(r.is_ok(), "churn sous-limite ne doit pas tuer : {r:?}");
+            // Frontière de job — la dette armée au tick fait
+            // balayer ici (no-op si le drain l'a déjà fait) :
+            // l'estimé n'a pas cumulé les ~450 Kio de morts du
+            // tour — sans l'arme, le 3ᵉ round croisait le cap.
+            e.maybe_collect();
+            assert!(
+                e.heap.bytes() < base + Engine::gc_debt(1024 * 1024),
+                "churn non balayé sous-limite : bytes={} B (base={})",
+                e.heap.bytes(),
+                base
+            );
+        }
+    }
+
+    /// JS-C421 — le safepoint intra-éval : sous pression, un
+    /// programme plat peut balayer les déchets de ses statements
+    /// **entre** statements (jamais avant : la frontière de job
+    /// était la seule occasion). Programme : K itérations qui
+    /// chacune jettent un objet + un tableau volumineux — sans
+    /// safepoint le cap dur tue mid-span ; avec, le tas stagne.
+    /// Les temporaires en vol (`acc`, `big`) survivent — la
+    /// borne d'âge `young_floor` les épargne.
+    #[test]
+    fn safepoint_sweeps_dead_cells_mid_span() {
+        let mut e = Engine::new();
+        // Borne serrée : la somme des déchets du span dépasse le
+        // cap dur — sans safepoint, kill `dead_hard` garanti.
+        e.heap.set_mem_limit(16 * 1024 * 1024);
+        e.collect();
+        let gc0 = e.heap.stats().gc_runs;
+        // ~8 000 objets complexes morts par bloc — cumul ≫ la
+        // dette qui arme `gc_due` (4 Mio à cette borne) : sans
+        // safepoint, `dead_hard` tue mid-span.
+        let r = e.eval(
+            "var acc=0;\
+             for(var i=0;i<8000;i++){\
+               { let big={x:i,y:[i,i+1,i+2],z:{a:i,b:i}}; acc+=big.x; }\
+             }\
+             acc",
+        );
+        match &r {
+            Ok(Value::Num(n)) => assert_eq!(*n, 8000.0 * 7999.0 / 2.0),
+            other => panic!("le span doit survivre sous safepoint : {other:?}"),
+        }
+        let gc1 = e.heap.stats().gc_runs;
+        assert!(
+            gc1 > gc0,
+            "le safepoint n'a balayé aucune fois dans le span (gc_runs {gc0}→{gc1})"
+        );
+        assert!(
+            e.heap.bytes() < 16 * 1024 * 1024,
+            "déchets cumulés au-delà de la borne : {}",
+            e.heap.bytes()
+        );
+    }
+
+    /// JS-C422 — abandon session : `interrupt` est relu au gate
+    /// 256-ops de `tick`. Un flag posé tue l'éval en vol au
+    /// prochain gate (la session abandonnée ne laisse pas le
+    /// thread brûler jusqu'à la deadline interne — vol 711 :
+    /// 239 s de CPU orphelines mesurées sur `kevlar_base` après
+    /// le timeout canal 65 s), et `swap(false)` le consomme :
+    /// l'éval suivante repart propre.
+    #[test]
+    fn interrupt_flag_kills_eval_at_tick_gate() {
+        let mut e = Engine::new();
+        let flag = e.interrupt_handle();
+        flag.store(true, std::sync::atomic::Ordering::Relaxed);
+        // Boucle sans borne — sans flag elle coure au budget ops
+        // entier ; le flag la tue au premier gate (256 ops).
+        let t0 = std::time::Instant::now();
+        let r = e.eval("var s=0; while(true){ s++; } s");
+        assert!(r.is_err(), "flag posé → l'éval doit mourir : {r:?}");
+        assert!(
+            t0.elapsed() < std::time::Duration::from_secs(5),
+            "l'éval doit mourir au gate, pas au budget : {:?}",
+            t0.elapsed()
+        );
+        // Consommé par `swap` — l'éval suivante n'est pas empoisonnée :
+        match e.eval("40+2") {
+            Ok(Value::Num(n)) => assert_eq!(n, 42.0),
+            other => panic!("éval post-abandon empoisonnée : {other:?}"),
+        }
+    }
+
+    /// JS-C423 — la décomposition GC du span est attribuée par
+    /// éval et **survit à la mort deadline/interruption** : le
+    /// mark est posé à `reset_eval_split`, `note_exec` court
+    /// même sur `Err`, la ligne `eval split` sort complète
+    /// (`us`/`parse_us`/`exec_us`/`gc_us`/`sp_us`) — une éval
+    /// tuée n'efface pas la mesure du temps qu'elle a brûlé.
+    #[test]
+    fn c423_gc_time_attributed_and_survives_kill() {
+        let mut e = Engine::new();
+        // Nominal : compteurs posés et cohérents (sp ⊆ gc).
+        e.eval("40+2").unwrap();
+        let gc0 = e.last_eval_gc_us();
+        let sp0 = e.last_eval_sp_us();
+        assert!(sp0 <= gc0, "sp ⊆ gc : sp={sp0} gc={gc0}");
+
+        // Churn sous borne serrée → safepoints réels (C421) ;
+        // gc_us doit refléter les collectes mid-span.
+        e.heap.set_mem_limit(1024 * 1024);
+        e.collect();
+        let r = e.eval(
+            "(function(){var a=[];for(var i=0;i<4000;i++)a.push('s'+i+'-'+i);return a.length})()",
+        );
+        assert!(r.is_ok(), "churn sous-limite : {r:?}");
+        let gc1 = e.last_eval_gc_us();
+        let sp1 = e.last_eval_sp_us();
+        assert!(
+            gc1 > 0,
+            "des safepoints ont tourné : gc_us={gc1} runs={} total={} floor={} due={} over={} live={}",
+            e.heap.stats().gc_runs,
+            e.total_bytes(),
+            e.gc_sp_floor,
+            e.gc_due,
+            e.mem_over(),
+            e.heap.live_count()
+        );
+        assert!(sp1 <= gc1, "sp ⊆ gc : sp={sp1} gc={gc1}");
+
+        // Mort par interruption : le profil survit — exec_us
+        // rempli (note_exec inconditionnel), gc/sp relisibles.
+        let flag = e.interrupt_handle();
+        flag.store(true, std::sync::atomic::Ordering::Relaxed);
+        let r = e.eval("var s=0; while(true){ s++; } s");
+        assert!(r.is_err(), "abandon : {r:?}");
+        let (_p, x) = e.last_eval_split();
+        assert!(x > 0, "exec_us renseigné même sur éval tuée");
+        let _ = (e.last_eval_gc_us(), e.last_eval_sp_us());
+    }
+
+    /// JS-C424 — backoff de croissance : après une passe
+    /// safepoint, aucune nouvelle passe n'est servie avant
+    /// `gc_debt << shift` octets de croissance au-dessus de la
+    /// basse — le seuil absolu transformait un churn épinglé
+    /// par `young_floor` en spin à ~45 Hz (vol 713 : 95,4 %
+    /// du span `kevlar_base` en sweeps vides). Le backoff
+    /// couvre `gc_due` ET `mem_over` ; une croissance réelle ≥
+    /// dette re-sert une passe.
+    #[test]
+    fn c424_safepoint_backoff_supprime_le_spin() {
+        let mut e = Engine::new();
+        e.heap.set_mem_limit(64 << 20); // dette = 16 Mio
+        let env = e.global_env.clone();
+        let v = Value::Num(1.0);
+
+        // Première passe : basse jamais posée → servie, pose
+        // la ligne de basse au total post-sweep.
+        e.gc_due = true;
+        e.safepoint_gc(&env, &v);
+        let runs0 = e.heap.stats().gc_runs;
+        assert!(runs0 > 0, "première passe inconditionnelle");
+
+        // Réarmements immédiats, 0 octet de croissance →
+        // supprimés (le spin qui brûlait la deadline).
+        e.gc_due = true;
+        e.safepoint_gc(&env, &v);
+        e.safepoint_gc(&env, &v);
+        e.safepoint_gc(&env, &v);
+        assert_eq!(
+            e.heap.stats().gc_runs,
+            runs0,
+            "sans croissance au-dessus de la basse, les réarmements sont supprimés"
+        );
+
+        // Croissance réelle au-dessus de la basse → passe
+        // servie. ~40 Mio de vivant (≈610 B/objet, cap 64 Mio),
+        // puis basse à 0 : l'éval traverse sa propre frontière
+        // de job (JS-C426 partage la basse) — le gate vérifie
+        // l'arithmétique croissance ≥ dette×shift.
+        e.eval("var __k=[]; for(var i=0;i<65000;i++) __k.push({x:i,y:i,z:i,w:i}); __k.length")
+            .unwrap();
+        let r_eval = e.heap.stats().gc_runs;
+        e.gc_sp_floor = 0;
+        e.gc_sp_shift = 0;
+        e.gc_due = true;
+        e.safepoint_gc(&env, &v);
+        assert!(
+            e.heap.stats().gc_runs > r_eval,
+            "croissance ≥ dette au-dessus de la basse → passe servie"
+        );
+    }
+
+    /// JS-C426 — la frontière de job applique le même backoff
+    /// de croissance : `live_count > gc_threshold` est vrai en
+    /// permanence sur une page hydratée (le vivant ne descend
+    /// pas en collectant), et `gc_due` réarmé à chaque tick
+    /// sous pression — sans borne, chaque `maybe_collect`
+    /// collectait (~30 passes/s, §B-115). `mem_over` reste
+    /// inconditionnel.
+    #[test]
+    fn c426_boundary_backoff_supprime_le_spin_frontiere() {
+        let mut e = Engine::new();
+        e.heap.set_mem_limit(64 << 20); // dette = 16 Mio
+                                        // `live_count > gc_threshold` permanent — le déclencheur
+                                        // opportuniste du wedge.
+        e.set_gc_threshold(64);
+        // L'éval traverse sa propre frontière de job : la basse
+        // est déjà posée quand on reprend la main.
+        e.eval("var __keep=[]; for(var i=0;i<200;i++) __keep.push({a:i}); __keep.length")
+            .unwrap();
+        let runs1 = e.heap.stats().gc_runs;
+
+        // Réarmements sans croissance réelle → supprimés.
+        e.gc_due = true;
+        e.maybe_collect();
+        e.maybe_collect();
+        e.gc_due = true;
+        e.maybe_collect();
+        assert_eq!(
+            e.heap.stats().gc_runs,
+            runs1,
+            "frontière : les réarmements sans croissance sont supprimés"
+        );
+
+        // Petites croissances répétées (~3 Mio/eval) : sans
+        // borne chaque frontière collecterait (+5 passes — le
+        // wedge §B-115) ; le cumul < dette×shift laisse ≤2.
+        let r2 = e.heap.stats().gc_runs;
+        for _ in 0..5 {
+            e.eval("for(var i=0;i<5000;i++) __keep.push({x:i,y:i,z:i,w:i}); __keep.length")
+                .unwrap();
+            e.gc_due = true;
+            e.maybe_collect();
+        }
+        let gained = e.heap.stats().gc_runs - r2;
+        assert!(
+            gained <= 2,
+            "5 frontières sous pression → {gained} passes (≤2 attendu, wedge sinon)"
+        );
+
+        // Croissance franche au-dessus de la basse → la passe
+        // est servie (basse abaissée manuellement pour simuler
+        // le delta — l'éval collecte elle-même à ses frontières
+        // internes, un seuil de basse est la seule variable).
+        e.eval("for(var i=0;i<60000;i++) __keep.push({x:i,y:i,z:i,w:i}); __keep.length")
+            .unwrap();
+        e.gc_sp_floor = 0; // total (>dette) ≫ basse → passe due
+        e.gc_sp_shift = 0;
+        let r3 = e.heap.stats().gc_runs;
+        e.gc_due = true;
+        e.maybe_collect();
+        assert!(
+            e.heap.stats().gc_runs > r3,
+            "croissance ≥ dette au-dessus de la basse → passe servie \
+             (runs {} vs {r3}, total {}, floor {}, live {}, thresh {})",
+            e.heap.stats().gc_runs,
+            e.total_bytes(),
+            e.gc_sp_floor,
+            e.heap.live_count(),
+            e.gc_threshold
+        );
+    }
+}

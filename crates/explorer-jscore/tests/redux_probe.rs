@@ -26,6 +26,7 @@ fn eval_or_panic(e: &mut Engine, src: &str) -> explorer_jscore::Value {
 }
 
 #[test]
+#[ignore = "sonde — fixtures _scratch non versionnées"]
 fn redux_thunk_chain_intercepts_function_actions() {
     let redux =
         std::fs::read_to_string("../../_scratch/redux_classic.js").expect("bundle redux absent");
@@ -45,6 +46,7 @@ fn redux_thunk_chain_intercepts_function_actions() {
 }
 
 #[test]
+#[ignore = "sonde — fixtures _scratch non versionnées"]
 fn redux_edge_forms_probe() {
     let redux =
         std::fs::read_to_string("../../_scratch/redux_classic.js").expect("bundle redux absent");
@@ -68,6 +70,7 @@ fn redux_edge_forms_probe() {
 /// puis dispatch d'une fonction-thunk — repro fidèle du mur
 /// mastodon `Minified Redux error #7`.
 #[test]
+#[ignore = "sonde — fixtures _scratch non versionnées"]
 fn rtk_configure_store_thunk_dispatch() {
     let read = |n: &str| {
         std::fs::read_to_string(format!("../../_scratch/{n}"))
@@ -118,6 +121,7 @@ globalThis.__r = out.join('\n');
 
 /// Bissecte la phase qui jette dans la chaîne RTK.
 #[test]
+#[ignore = "sonde — fixtures _scratch non versionnées"]
 fn rtk_phase_bisect() {
     let read = |n: &str| {
         std::fs::read_to_string(format!("../../_scratch/{n}"))
@@ -177,6 +181,7 @@ fn array_subclass_ctor_args() {
 /// §B-22 — bissecte le transport middleware : `MiddlewareArray`
 /// (sous-classe Array) → spread `...` → `.map` → `applyMiddleware`.
 #[test]
+#[ignore = "sonde — fixtures _scratch non versionnées"]
 fn rtk_middleware_array_transport() {
     let read = |n: &str| {
         std::fs::read_to_string(format!("../../_scratch/{n}"))
@@ -200,6 +205,7 @@ fn rtk_middleware_array_transport() {
 
 /// Bissecte immer `produce` + `configureStore({reducer: slice.reducer})`.
 #[test]
+#[ignore = "sonde — fixtures _scratch non versionnées"]
 fn rtk_immer_slice_bisect() {
     let read = |n: &str| {
         std::fs::read_to_string(format!("../../_scratch/{n}"))

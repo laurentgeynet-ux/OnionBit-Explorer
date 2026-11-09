@@ -793,7 +793,10 @@ fn wrap_children(children: Vec<LayoutBox>, style: &ComputedStyle, kind: BoxKind)
         // `display:initial` contenant un bloc — le motif
         // styled-components de bbc.com — verrait son contenu
         // hissé comme item auto-placé à 1 piste).
-        children.into_iter().map(blockify_item).collect()
+        children
+            .into_iter()
+            .map(|c| explorer_common::deep(|| blockify_item(c)))
+            .collect()
     } else {
         // §9.2.1.1 (2ᵉ moitié) : un bloc en flux niché dans une
         // boîte inline éclate celle-ci — hissage récursif au niveau
@@ -827,7 +830,8 @@ fn blockify_item(mut bx: LayoutBox) -> LayoutBox {
     if bx.kind == BoxKind::Inline {
         bx.kind = BoxKind::Block;
         let st = bx.style.clone();
-        bx.children = wrap_children(std::mem::take(&mut bx.children), &st, bx.kind);
+        bx.children =
+            explorer_common::deep(|| wrap_children(std::mem::take(&mut bx.children), &st, bx.kind));
     }
     bx
 }

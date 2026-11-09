@@ -522,7 +522,7 @@ fn collect_child(b: &LayoutBox, owner: usize, items: &mut Vec<Item>, aid: &mut u
         });
     }
     for c in &b.children {
-        collect_child(c, owner, items, aid);
+        explorer_common::deep(|| collect_child(c, owner, items, aid));
     }
     if margins {
         items.push(Item {

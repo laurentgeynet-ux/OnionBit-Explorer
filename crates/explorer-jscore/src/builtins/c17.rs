@@ -15,7 +15,7 @@ use super::*;
 /// `Array.prototype.copyWithin(target, start?, end?)` — copie
 /// interne relative (indices négatifs = depuis la fin, spec).
 pub(crate) fn array_copy_within(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
-    let id = this_array(e, this)?;
+    let id = this_array(e, this.clone())?;
     let rel = |v: Value, e: &mut Engine| -> JsResult<i64> { Ok(e.to_number(v)? as i64) };
     // Coercition d'args AVANT `take_elems` : un `valueOf` hostile
     // ne doit pas laisser le backing vidé (JS-C319). La
@@ -159,7 +159,7 @@ pub(crate) fn iterator_from(e: &mut Engine, _t: Value, args: &[Value]) -> JsResu
             return Ok(v);
         }
         if let Some(m) = e.get_prop(id, crate::interp::SYM_ITERATOR) {
-            if e.is_callable(m) {
+            if e.is_callable(m.clone()) {
                 return e.call_value(m, v, &[]);
             }
         }
@@ -178,7 +178,7 @@ pub(crate) fn iterator_from(e: &mut Engine, _t: Value, args: &[Value]) -> JsResu
 pub(crate) fn iterator_concat(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
     let mut items = Vec::new();
     for a in args {
-        items.extend(e.iter_values(*a)?);
+        items.extend(e.iter_values(a.clone())?);
     }
     Ok(crate::collections::iter_obj(e, items, e.protos.iter_helper))
 }
@@ -232,7 +232,7 @@ pub(crate) fn object_property_is_enumerable(
             Ok(Value::Bool(p.enumerable()))
         }
         Value::Str(sid) => {
-            let s = e.heap.string(sid).unwrap_or_default();
+            let s = sid.to_string();
             let ok = crate::interp::array_index(&key).is_some_and(|i| i < s.encode_utf16().count());
             Ok(Value::Bool(ok))
         }
@@ -257,7 +257,7 @@ pub(crate) fn define_accessor_annex(
     f: Value,
     is_get: bool,
 ) -> JsResult<Value> {
-    if !e.is_callable(f) {
+    if !e.is_callable(f.clone()) {
         return Err(e.type_error("__defineGetter__/__defineSetter__ needs a function"));
     }
     let Value::Obj(id) = this else {
@@ -328,7 +328,7 @@ pub(crate) fn lookup_accessor_annex(
 /// `Number.prototype`).
 pub(crate) fn proto_getter(e: &mut Engine, this: Value, _a: &[Value]) -> JsResult<Value> {
     match this {
-        Value::Obj(id) => Ok(e.heap.obj(id).map_or(Value::Null, |o| o.proto)),
+        Value::Obj(id) => Ok(e.heap.obj(id).map_or(Value::Null, |o| o.proto.clone())),
         Value::Str(_) => Ok(Value::Obj(e.protos.string)),
         Value::Num(_) => Ok(Value::Obj(e.protos.number)),
         Value::Bool(_) => Ok(Value::Obj(e.protos.boolean)),

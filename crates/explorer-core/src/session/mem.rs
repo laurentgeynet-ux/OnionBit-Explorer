@@ -164,7 +164,11 @@ pub struct MemReport {
 /// Compte les boîtes d'un arbre de layout (descente récursive
 /// — les `children` sont `pub`, contrat PIPE).
 fn count_boxes(b: &LayoutBox) -> usize {
-    1 + b.children.iter().map(count_boxes).sum::<usize>()
+    1 + b
+        .children
+        .iter()
+        .map(|c| explorer_common::deep(|| count_boxes(c)))
+        .sum::<usize>()
 }
 
 /// Ensemble de dédup bitmaps : `Arc::as_ptr` → `rgba.len()`

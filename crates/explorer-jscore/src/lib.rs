@@ -40,6 +40,12 @@
 // `to_*` methods deliberately take `&mut self`: coercion can run user
 // code (valueOf/toString). The names mirror the JS spec operations.
 #![allow(clippy::wrong_self_convention)]
+// `Value` is the engine's 16-octet tagged handle (JsStr = `Rc` bump,
+// JS-C420) : `NativeFn`'s fn-pointer signature `fn(&mut Engine, Value,
+// &[Value])` mandates `this: Value` in ~150 handlers, and reader
+// helpers keep the uniform by-value idiom — an `Rc` bump is cheaper
+// than the churn of a dual `&Value`/`Value` convention.
+#![allow(clippy::needless_pass_by_value)]
 
 mod ast;
 mod builtins;
@@ -53,6 +59,7 @@ mod dom_host;
 mod error;
 mod eventsource;
 mod files;
+mod fnat;
 mod geom;
 mod heap;
 mod idb;
@@ -97,6 +104,8 @@ pub use dom_host::{
 };
 pub use error::{Error, Result};
 pub use eventsource::{EsEvent, EsRequest, EsTransport};
+#[doc(hidden)]
+pub use fnat::{fn_chain_at, FnHit};
 pub use geom::{ElementGeom, GeoRect, GeomPosition, GeometryMap, GeometrySlot};
 pub use heap::{HeapStats, Host};
 pub use idb::{CacheEntry, CacheRegistry, IdbDb, IdbIndexDef, IdbRegistry, IdbStore};
@@ -212,7 +221,7 @@ pub static CALL_N: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::
 // (octets ≈ événement × taille type du site). Monotones — le banc
 // lit le delta avant/après. `Relaxed`, ~1-2 ns par bump.
 // ----------------------------------------------------------------
-/// Cellules `Str` créées (`Heap::alloc_str`) — 1 alloc buffer.
+/// Boîtes `JsStr` créées (`JsStr::new`, JS-C420) — 1 alloc `Rc`.
 pub static J17_STR_CELL: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 /// Cellules objet créées (`Heap::alloc_obj`) — +1 alloc `props`
 /// Vec par objet non vide, +1 `String` par clé (`J17_PROP_NEW`).
@@ -545,6 +554,18 @@ pub fn host_mark(class: &str, name: &str) {
 /// `EXPLORER_JS_RSS_WATCH` uniquement — `format!` par tick est
 /// trop cher hors diagnostic).
 pub static LAST_FRAME: std::sync::Mutex<String> = std::sync::Mutex::new(String::new());
+
+/// Sonde §B-111 — `EXPLORER_DLV_TRACE=1` logue chaque job
+/// **avant** invocation dans les drains (microtasks, timers,
+/// livraisons, GC de checkpoint) : la dernière ligne avant
+/// un overflow de pile nomme la callback fautive — le
+/// `.dmp` WER n'existe pas, la trace tient lieu de morgue
+/// (pendant moteur de la sonde par-op session, JS-C401).
+/// Désarmée : un booléen lu une fois.
+pub(crate) fn dlv_trace() -> bool {
+    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ON.get_or_init(|| std::env::var_os("EXPLORER_DLV_TRACE").is_some())
+}
 /// Phase de l'appelant JS — **inconditionnelle** (`&'static
 /// str`, ~20 ns) : écrite à l'entrée de `call_value_impl` et
 /// `exec_body`, là où aucun tick n'a encore couru. Vide à

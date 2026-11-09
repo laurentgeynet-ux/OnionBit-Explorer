@@ -6,7 +6,7 @@
 use super::*;
 use crate::ast::{AssignOp, Expr, ObjProp, Pat};
 use crate::heap::{Heap, ObjKind};
-use crate::value::Value;
+use crate::value::{JsStr, Value};
 
 /// `bigint == number` — égalité mathématique (spec `IsLooselyEqual`
 /// étape : le `number` doit être fini et entier).
@@ -48,23 +48,21 @@ pub(crate) fn big_cmp_num(b: &num_bigint::BigInt, n: f64) -> Option<std::cmp::Or
 }
 
 /// `===` (no user code runs).
-pub(crate) fn strict_eq(l: Value, r: Value, heap: &Heap) -> bool {
+pub(crate) fn strict_eq(l: &Value, r: &Value, heap: &Heap) -> bool {
     let (l, r) = (l.unhole(), r.unhole());
-    match (l, r) {
+    match (&l, &r) {
         (Value::Num(a), Value::Num(b)) => a == b, // NaN != NaN via f64 ==
         (Value::Str(a), Value::Str(b)) => {
-            if a == b {
-                true
-            } else {
-                heap.str_eq(a, b)
-            }
+            // `JsStr` : égalité de contenu — fast-path même
+            // boîte `Rc` d'abord (cache `num_strs`, aliasing).
+            JsStr::ptr_eq(a, b) || a == b
         }
         (Value::Big(a), Value::Big(b)) => {
             if a == b {
                 true
             } else {
                 matches!(
-                    (heap.obj(a).map(|o| &o.kind), heap.obj(b).map(|o| &o.kind)),
+                    (heap.obj(*a).map(|o| &o.kind), heap.obj(*b).map(|o| &o.kind)),
                     (Some(ObjKind::BigInt(x)), Some(ObjKind::BigInt(y))) if x == y
                 )
             }
@@ -161,6 +159,18 @@ pub(crate) fn array_index(key: &str) -> Option<usize> {
 /// expression isn't a valid pattern — the caller falls back to a
 /// plain-lvalue error.
 pub(crate) fn expr_to_pat(e: &Expr) -> Option<Pat> {
+    // JS-C400 — arête ∝ imbrication destructurante : l'appel
+    // arrive depuis `eval_expr_inner`/`exec_stmt_inner`, déjà
+    // dans un segment — `[[[[…]]]]` hostile débordait le reste
+    // de segment sans jamais pouvoir re-basculer (§B-111).
+    stacker::maybe_grow(
+        crate::parser::STACK_RED_ZONE,
+        crate::parser::STACK_GROW,
+        || expr_to_pat_inner(e),
+    )
+}
+
+fn expr_to_pat_inner(e: &Expr) -> Option<Pat> {
     match e {
         Expr::Ident(name) => Some(Pat::Ident(name.clone())),
         // `o.p`/`a[i]` destructuring targets assign through the

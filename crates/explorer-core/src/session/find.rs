@@ -62,7 +62,7 @@ fn collect_covered(bx: &LayoutBox, covered: &mut std::collections::HashSet<explo
         }
     }
     for c in &bx.children {
-        collect_covered(c, covered);
+        explorer_common::deep(|| collect_covered(c, covered));
     }
 }
 
@@ -114,7 +114,7 @@ fn find_into(
                 }
             }
         }
-        find_into(c, needle, covered, out);
+        explorer_common::deep(|| find_into(c, needle, covered, out));
     }
 }
 

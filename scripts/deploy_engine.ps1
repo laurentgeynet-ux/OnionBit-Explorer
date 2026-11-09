@@ -90,12 +90,12 @@ $destinations = @(
 ) + $ExtraDestinations | Select-Object -Unique
 
 # Sites audites mais JAMAIS ecrits — reliques de l'ancienne
-# config target-dir epinglee (D:\cargo-target) : signalees
+# config target-dir epinglee (C:\cargo-target) : signalees
 # DIVERGENT a chaque run tant qu'une copie orpheline y
 # traine ; suppression manuelle a la charge du projet.
 $auditOnly = @(
-    'D:\cargo-target\OnionBit-Explorer\debug',
-    'D:\cargo-target\OnionBit-Explorer\release'
+    'C:\cargo-target\OnionBit-Explorer\debug',
+    'C:\cargo-target\OnionBit-Explorer\release'
 )
 
 function Get-AbiVersion {

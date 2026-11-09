@@ -107,7 +107,7 @@ pub(crate) fn collect_geometry(
         }
     }
     for c in &bx.children {
-        collect_geometry(dom, c, fixed, out);
+        explorer_common::deep(|| collect_geometry(dom, c, fixed, out));
     }
 }
 
@@ -919,10 +919,19 @@ pub(crate) fn resolve_sizes(sizes: Option<&str>, vp_w: f32) -> f32 {
 /// pixels de la session (choix `w`/`x` de `pick_srcset`,
 /// `sizes` résolu par `resolve_sizes`).
 pub(crate) fn collect_images(dom: &Dom, img_w: f32, dpr: f32) -> Vec<(NodeId, String)> {
+    let probe = tracing::enabled!(target: "media_probe", tracing::Level::INFO);
+    let mut seen = 0usize;
+    let mut novar = 0usize;
+    let mut picture = 0usize;
+    let mut source = 0usize;
+    let mut novar_attrs: Vec<String> = Vec::new();
     let mut out = Vec::new();
     for n in dom.descendants(dom.document()).into_iter().flatten() {
         match dom.tag_name(n) {
+            Ok("picture") => picture += 1,
+            Ok("source") => source += 1,
             Ok("img") => {
+                seen += 1;
                 // `srcset` ET sa variante lazy `data-srcset`
                 // (§B-20 — la valeur `url 1x, url2 2x` résolue
                 // comme URL brute ne produisait rien : elle
@@ -970,6 +979,22 @@ pub(crate) fn collect_images(dom: &Dom, img_w: f32, dpr: f32) -> Vec<(NodeId, St
                     });
                 if let Some(src) = src {
                     out.push((n, src.clone()));
+                } else if probe {
+                    novar += 1;
+                    // §B-108 — census des attributs portés par
+                    // un `<img>` sans variante connue : un lazy
+                    // attr hors famille connue y apparaît nommé
+                    // (`data-initial-src`, etc.). Borné 16.
+                    if novar_attrs.len() < 16 {
+                        if let Ok(attrs) = dom.attributes(n) {
+                            for a in attrs.iter().take(12) {
+                                let name = a.name.as_str();
+                                if !novar_attrs.iter().any(|x| x == name) {
+                                    novar_attrs.push(name.to_string());
+                                }
+                            }
+                        }
+                    }
                 }
             }
             Ok("video") => {
@@ -980,6 +1005,29 @@ pub(crate) fn collect_images(dom: &Dom, img_w: f32, dpr: f32) -> Vec<(NodeId, St
                 }
             }
             _ => {}
+        }
+    }
+    // Sonde §B-108 — `img.collect` : `<img>` vues vs
+    // candidates livrées au fetch vs sans variante connue ;
+    // `picture`/`source` recensent le gap `<picture>` (non
+    // collecté) ; `img.attr` nomme les attrs des sans-
+    // variante — un lazy attr inconnu s'y lit directement.
+    if probe {
+        tracing::info!(
+            target: "media_probe",
+            site = "img.collect",
+            seen,
+            cand = out.len(),
+            novar,
+            picture,
+            source
+        );
+        if !novar_attrs.is_empty() {
+            tracing::info!(
+                target: "media_probe",
+                site = "img.attr",
+                names = ?novar_attrs
+            );
         }
     }
     out
@@ -1297,13 +1345,18 @@ pub(crate) fn box_y_of_node(root: &LayoutBox, target: NodeId) -> Option<f32> {
     best
 }
 
-/// Boîte posée de `node` — descente récursive de l'arbre de
-/// layout (chaque `LayoutBox` garde son `NodeId` source).
+/// Boîte posée de `node` — descente itérative de l'arbre de
+/// layout (chaque `LayoutBox` garde son `NodeId` source ;
+/// profondeur hostile = coût tas, R-24/JS-C400).
 pub(crate) fn box_rect(bx: &LayoutBox, node: NodeId) -> Option<Rect> {
-    if bx.node == Some(node) {
-        return Some(bx.rect);
+    let mut stack = vec![bx];
+    while let Some(b) = stack.pop() {
+        if b.node == Some(node) {
+            return Some(b.rect);
+        }
+        stack.extend(b.children.iter().rev());
     }
-    bx.children.iter().find_map(|c| box_rect(c, node))
+    None
 }
 
 /// Attribut en minuscules, `""` si absent.

@@ -702,9 +702,7 @@ fn dom_acc_get(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
     let Some(Value::Str(m)) = args.first() else {
         return Ok(Value::Undefined);
     };
-    let Some(prop) = e.heap.string(*m) else {
-        return Ok(Value::Undefined);
-    };
+    let prop = m.to_string();
     let Value::Obj(id) = this else {
         return Ok(Value::Undefined);
     };
@@ -727,9 +725,7 @@ fn dom_acc_set(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
     let Some(Value::Str(m)) = args.first() else {
         return Ok(Value::Undefined);
     };
-    let Some(prop) = e.heap.string(*m) else {
-        return Ok(Value::Undefined);
-    };
+    let prop = m.to_string();
     let v = arg(args, 1);
     let Value::Obj(id) = this else {
         return Ok(Value::Undefined);
@@ -980,6 +976,133 @@ const ELEMENT_NAV_GETTERS: &[&str] = &[
     "outerHTML",
 ];
 
+/// Méthodes spec `Element` posées **propres** sur
+/// `Element.prototype` (JS-C416, mur §B-97) — la récolte
+/// `ShadyDOM` `E(Element.prototype, "setAttribute getAttribute
+/// …".split(" "))` lit `Object.getOwnPropertyDescriptor` :
+/// propre **seulement**, les méthodes héritées de
+/// `Node.prototype` restent invisibles à la récolte →
+/// `nativeMethods.setAttribute` jamais peuplé → `TypeError`
+/// à l'init du polyfill → CE upgrades bloqués → squelettes
+/// `ytd-*` sans contenu (mesuré webcomponents-sd.js:152:259,
+/// vol 700). Sous-ensemble `NODE_METHODS` hors méthodes
+/// `Node`/`EventTarget` pures et hors impls dédiées déjà
+/// posées sur le proto (`matches`/`querySelector`/`attachShadow`…).
+const ELEMENT_PROTO_METHODS: &[&str] = &[
+    "append",
+    "prepend",
+    "before",
+    "after",
+    "remove",
+    "replaceWith",
+    "replaceChildren",
+    "setAttribute",
+    "getAttribute",
+    "hasAttribute",
+    "hasAttributes",
+    "getAttributeNames",
+    "removeAttribute",
+    "setAttributeNS",
+    "getAttributeNS",
+    "hasAttributeNS",
+    "removeAttributeNS",
+    "getAttributeNode",
+    "getAttributeNodeNS",
+    "setAttributeNode",
+    "setAttributeNodeNS",
+    "removeAttributeNode",
+    "toggleAttribute",
+    "insertAdjacentElement",
+    "insertAdjacentHTML",
+    "insertAdjacentText",
+    "getHTML",
+    "setHTMLUnsafe",
+    "parseHTMLUnsafe",
+    "checkVisibility",
+    "getClientRects",
+    "animate",
+    "getAnimations",
+    "attachInternals",
+    "focus",
+    "blur",
+    "click",
+];
+
+/// Méthodes spec `Document` posées **propres** sur
+/// `Document.prototype` (JS-C416) — même mécanisme de
+/// récolte `E(Document.prototype, […])` (mesuré
+/// `importNode`/`getElementById`/`elementFromPoint` +
+/// `ParentNode` `ab`). `DOC_METHODS` moins le trio
+/// `EventTarget` (propre sur `EventTarget.prototype`,
+/// hérité — fidèle `WebIDL`).
+const DOC_PROTO_METHODS: &[&str] = &[
+    "adoptNode",
+    "importNode",
+    "exitFullscreen",
+    "createRange",
+    "createTreeWalker",
+    "createNodeIterator",
+    "execCommand",
+    "getAnimations",
+    "startViewTransition",
+    "evaluate",
+    "createExpression",
+    "createNSResolver",
+    "hasStorageAccess",
+    "requestStorageAccess",
+    "elementFromPoint",
+    "elementsFromPoint",
+    "caretPositionFromPoint",
+    "getSelection",
+    "hasFocus",
+    "contains",
+    "getElementById",
+    "getElementsByTagName",
+    "getElementsByClassName",
+    "getElementsByName",
+    "querySelector",
+    "querySelectorAll",
+    "createElement",
+    "createElementNS",
+    "createAttribute",
+    "createAttributeNS",
+    "createTextNode",
+    "createComment",
+    "createDocumentFragment",
+    "createEvent",
+    "open",
+    "close",
+    "write",
+    "writeln",
+    "appendChild",
+    "append",
+    "prepend",
+    "insertBefore",
+    "removeChild",
+    "replaceChild",
+    "replaceChildren",
+    "hasChildNodes",
+];
+
+/// Surface spec `DocumentFragment` (JS-C416) — `ParentNode`
+/// et `NonElementParentNode.getElementById` : les accesseurs
+/// `Node` nav viennent de `Node.prototype` (chaîne déjà posée),
+/// les méthodes ci-dessous sont propres au fragment.
+const DOCFRAG_NAV_GETTERS: &[&str] = &[
+    "children",
+    "firstElementChild",
+    "lastElementChild",
+    "childElementCount",
+];
+const DOCFRAG_PROTO_METHODS: &[&str] = &[
+    "getElementById",
+    "querySelector",
+    "querySelectorAll",
+    "append",
+    "prepend",
+    "replaceChildren",
+];
+
 /// Setter des accesseurs de navigation inscriptibles
 /// (`textContent`/`innerText`/`nodeValue`/`innerHTML`) — `bound[0]`
 /// = nom de prop, `args[1]` = valeur. Écriture **brute** (pas de
@@ -988,9 +1111,7 @@ fn dom_nav_set(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
     let Some(Value::Str(m)) = args.first() else {
         return Ok(Value::Undefined);
     };
-    let Some(prop) = e.heap.string(*m) else {
-        return Ok(Value::Undefined);
-    };
+    let prop = m.to_string();
     let v = arg(args, 1);
     let Value::Obj(id) = this else {
         return Ok(Value::Undefined);
@@ -1045,7 +1166,7 @@ fn dom_nav_set(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
 /// qui invoquent le getter/setter scripté.
 fn proto_accessor_shadows(e: &mut Engine, id: ObjId, key: &str) -> bool {
     let mut cur = match e.heap.obj(id) {
-        Some(o) => o.proto,
+        Some(o) => o.proto.clone(),
         None => return false,
     };
     // Borne 32 — la chaîne DOM est courte ; un cycle proto
@@ -1067,7 +1188,7 @@ fn proto_accessor_shadows(e: &mut Engine, id: ObjId, key: &str) -> bool {
             }
         }
         cur = match e.heap.obj(cid) {
-            Some(o) => o.proto,
+            Some(o) => o.proto.clone(),
             None => break,
         };
     }
@@ -1081,9 +1202,7 @@ fn dom_nav_get(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
     let Some(Value::Str(m)) = args.first() else {
         return Ok(Value::Undefined);
     };
-    let Some(prop) = e.heap.string(*m) else {
-        return Ok(Value::Undefined);
-    };
+    let prop = m.to_string();
     let Value::Obj(id) = this else {
         return Ok(Value::Undefined);
     };
@@ -1109,7 +1228,7 @@ fn dom_nav_get(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
 fn install_dom_nav_accessors(e: &mut Engine, pid: ObjId, props: &[&'static str]) {
     for &prop in props {
         let nm = e.str_val(prop);
-        let g = e.bound_native("dom.navget", dom_nav_get, vec![nm]);
+        let g = e.bound_native("dom.navget", dom_nav_get, vec![nm.clone()]);
         let s = if NODE_NAV_SETTERS.contains(&prop) || prop == "innerHTML" {
             e.bound_native("dom.navset", dom_nav_set, vec![nm])
         } else {
@@ -1118,6 +1237,26 @@ fn install_dom_nav_accessors(e: &mut Engine, pid: ObjId, props: &[&'static str])
         if let Some(o) = e.heap.obj_mut(pid) {
             o.set_accessor(prop, g, s, false);
         }
+    }
+}
+
+/// Méthodes **propres** de prototype DOM — `bound[0]` = nom,
+/// receveur = le `this` de l'appel (`node_proto_method_trampoline`
+/// redispatche `Host::invoke` sur le receveur). JS-C416 / §B-97 :
+/// la récolte `ShadyDOM` `E(X.prototype, […])` lit
+/// `Object.getOwnPropertyDescriptor` — propre **seulement**, les
+/// méthodes héritées de `Node.prototype` restaient invisibles →
+/// table `nativeMethods` vide → `TypeError` à l'init du polyfill.
+/// Un nom déjà posé (impl dédiée — `attachShadow`, `querySelector`…)
+/// est conservé tel quel.
+fn install_dom_proto_methods(e: &mut Engine, pid: ObjId, names: &[&'static str]) {
+    for &name in names {
+        if e.heap.obj(pid).is_some_and(|o| o.find(name).is_some()) {
+            continue;
+        }
+        let nv = e.str_val(name);
+        let f = e.bound_native("node.method", node_proto_method_trampoline, vec![nv]);
+        e.set_own(pid, name, f, false);
     }
 }
 
@@ -1152,7 +1291,7 @@ impl Engine {
 
     pub(crate) fn dom_ctor(&mut self, class: &'static str) -> Value {
         if let Some(v) = self.dom_ctors.get(class) {
-            return *v;
+            return v.clone();
         }
         let pid = self.new_object();
         let proto = Value::Obj(pid);
@@ -1160,11 +1299,11 @@ impl Engine {
         let ctor = self.illegal_ctor_bound(class);
         if let Value::Obj(cid) = ctor {
             self.set_own(cid, "prototype", proto, false);
-            self.set_own(pid, "constructor", ctor, false);
+            self.set_own(pid, "constructor", ctor.clone(), false);
             self.add_root(cid);
             self.add_root(pid);
         }
-        self.dom_ctors.insert(class.to_string(), ctor);
+        self.dom_ctors.insert(class.to_string(), ctor.clone());
         ctor
     }
 
@@ -1184,7 +1323,7 @@ impl Engine {
         }
         for &prop in dom_acc_props(class) {
             let nm = self.str_val(prop);
-            let g = self.bound_native("dom.get", dom_acc_get, vec![nm]);
+            let g = self.bound_native("dom.get", dom_acc_get, vec![nm.clone()]);
             let s = self.bound_native("dom.set", dom_acc_set, vec![nm]);
             if let Some(o) = self.heap.obj_mut(pid) {
                 o.set_accessor(prop, g, s, false);
@@ -1511,17 +1650,17 @@ impl NodeHost {
     /// host nodes pass through, strings become text nodes (spec).
     fn norm_children(&self, e: &mut Engine, args: &[Value]) -> JsResult<Vec<NodeId>> {
         let mut out = Vec::with_capacity(args.len());
-        for &a in args {
-            if let Some(n) =
-                node_for_in(e, a, &self.dom).or_else(|| adopt_into(e, a, &self.dom, &self.cache))
+        for a in args {
+            if let Some(n) = node_for_in(e, a.clone(), &self.dom)
+                .or_else(|| adopt_into(e, a.clone(), &self.dom, &self.cache))
             {
                 out.push(n);
-            } else if node_for(e, a).is_some() {
+            } else if node_for(e, a.clone()).is_some() {
                 // Nœud d'une autre arène non adoptable (id invalide)
                 // — TypeError plutôt que texte fantaisiste inséré.
                 return Err(e.type_error("node is from a different document"));
             } else {
-                let s = e.to_js_string(a)?;
+                let s = e.to_js_string(a.clone())?;
                 out.push(self.dom.borrow_mut().create_text(&s));
             }
         }
@@ -2053,7 +2192,7 @@ fn dom_parent(dom: &DomRef, n: NodeId) -> Option<NodeId> {
 }
 
 pub(crate) fn arg(args: &[Value], i: usize) -> Value {
-    args.get(i).copied().unwrap_or(Value::Undefined)
+    args.get(i).cloned().unwrap_or(Value::Undefined)
 }
 
 /// `*AttributeNS` — l'arène ne trace pas les espaces de noms :
@@ -2087,7 +2226,7 @@ fn collection_item(e: &mut Engine, t: Value, args: &[Value]) -> JsResult<Value> 
     if let Value::Obj(id) = t {
         if let Some(o) = e.heap.obj(id) {
             if let ObjKind::Array(elems) = &o.kind {
-                return Ok(elems.get(i).copied().unwrap_or(Value::Null));
+                return Ok(elems.get(i).cloned().unwrap_or(Value::Null));
             }
         }
     }
@@ -2110,8 +2249,8 @@ fn collection_named_item(e: &mut Engine, t: Value, args: &[Value]) -> JsResult<V
         };
         for v in elems {
             for key in ["id", "name"] {
-                if let Ok(Value::Str(s)) = e.get_prop_value(v, key) {
-                    if e.heap.string(s).is_some_and(|v| v == name) {
+                if let Ok(Value::Str(s)) = e.get_prop_value(v.clone(), key) {
+                    if s.as_str() == name {
                         return Ok(v);
                     }
                 }
@@ -2195,11 +2334,11 @@ fn attr_value(e: &mut Engine, owner: Value, name: &str, value: &str) -> Value {
     let o = e.new_object();
     let (n, v) = (e.str_val(name.to_string()), e.str_val(value.to_string()));
     for (k, p) in [
-        ("name", n),
-        ("nodeName", n),
+        ("name", n.clone()),
+        ("nodeName", n.clone()),
         ("localName", n),
-        ("value", v),
-        ("nodeValue", v),
+        ("value", v.clone()),
+        ("nodeValue", v.clone()),
         ("textContent", v),
     ] {
         e.set_own(o, k, p, true);
@@ -2246,7 +2385,7 @@ impl Engine {
         }
         self.dom_ctx = Some((dom.clone(), cache.clone()));
         let g = self.global;
-        self.set_own(g, "document", doc, false);
+        self.set_own(g, "document", doc.clone(), false);
 
         // Fixed, low-fingerprint navigator — by design.
         let nav = self.new_object();
@@ -2280,7 +2419,8 @@ impl Engine {
         let en = self.str_val("en-US");
         let en2 = self.str_val("en");
         let langs = self.new_array(vec![en, en2]);
-        let _ = crate::builtins::object_freeze(self, Value::Undefined, &[langs]);
+        let _ =
+            crate::builtins::object_freeze(self, Value::Undefined, std::slice::from_ref(&langs));
         self.set_own(nav, "languages", langs, true);
         // `navigator.sendBeacon(url, data?)` — POST fire-and-forget
         // via le transport XHR (staple de télémétrie des pages
@@ -2381,12 +2521,12 @@ impl Engine {
                 // `error(err)` reçoit `GeolocationPositionError`
                 // {code:2,message} (spec), appelée async-borne.
                 if let Some(cb) = args.get(1).or_else(|| args.first()) {
-                    if e.is_callable(*cb) {
+                    if e.is_callable(cb.clone()) {
                         let err = e.new_object();
                         e.set_own(err, "code", Value::Num(2.0), true);
                         let msg = e.str_val("position unavailable");
                         e.set_own(err, "message", msg, true);
-                        let _ = e.call_value(*cb, Value::Undefined, &[Value::Obj(err)]);
+                        let _ = e.call_value(cb.clone(), Value::Undefined, &[Value::Obj(err)]);
                     }
                 }
                 Ok(Value::Num(0.0))
@@ -2408,8 +2548,8 @@ impl Engine {
         self.install_channel_ctor();
         // `window`/`self`/`globalThis` — the global object itself.
         let gv = Value::Obj(g);
-        self.set_own(g, "window", gv, false);
-        self.set_own(g, "self", gv, false);
+        self.set_own(g, "window", gv.clone(), false);
+        self.set_own(g, "self", gv.clone(), false);
         self.set_own(g, "globalThis", gv, false);
         // `top`/`parent`/`frames`/`length`/`closed`/`postMessage` —
         // accessors résolvant leur contexte depuis `this` (JS-C78) ;
@@ -2451,7 +2591,7 @@ impl Engine {
         self.set_own(hp, crate::interp::SYM_TO_STRING_TAG, htag, false);
         if let Value::Obj(hcid) = hf {
             self.set_own(hcid, "prototype", Value::Obj(hp), false);
-            self.set_own(hp, "constructor", hf, false);
+            self.set_own(hp, "constructor", hf.clone(), false);
         }
         if let Value::Obj(hid) = hist {
             if let Some(o) = self.heap.obj_mut(hid) {
@@ -2602,6 +2742,12 @@ impl Engine {
                 let m = self.native_fn(k, f2);
                 self.set_own(p, k, m, true);
             }
+            // JS-C416 / §B-97 — récolte ShadyDOM
+            // `E(HTMLElement.prototype, ["children","innerHTML",
+            // "className"])` : propres exigées (descripteurs
+            // accesseurs `dom.nav`/`dom.acc`).
+            install_dom_nav_accessors(self, p, &["children", "innerHTML"]);
+            self.install_dom_idl_accessors(p, "HTMLElement");
             self.set_own(fid, "prototype", Value::Obj(p), false);
             // Chaînage WebIDL `HTMLElement.prototype →
             // Element.prototype` différé juste après la boucle
@@ -2745,8 +2891,8 @@ impl Engine {
             "NodeList",
             "HTMLCollection",
             "NamedNodeMap",
-            "DOMRect",
-            "DOMRectReadOnly",
+            // `DOMRect`/`DOMRectReadOnly` — constructibles spec
+            // WebIDL, installés plus bas (JS-C427).
             "CSSStyleDeclaration",
             "CSSRule",
             "StyleSheet",
@@ -2849,9 +2995,72 @@ impl Engine {
                 // `dom_ctor` (React `inputValueTracking`,
                 // JS-C192).
                 self.install_dom_idl_accessors(p, name);
+                // JS-C416 / §B-97 — méthodes/accesseurs propres
+                // des protos non-élément récoltés par ShadyDOM
+                // (`E(Document.prototype, […])`, `E(DocumentFragment.
+                // prototype, …)`, `E(HTMLTemplateElement.prototype,
+                // ["innerHTML"])`) — `getOwnPropertyDescriptor`
+                // est propre-seulement, l'héritage `Node.prototype`
+                // ne suffit pas.
+                match name {
+                    "Document" => install_dom_proto_methods(self, p, DOC_PROTO_METHODS),
+                    "DocumentFragment" => {
+                        install_dom_nav_accessors(self, p, DOCFRAG_NAV_GETTERS);
+                        install_dom_proto_methods(self, p, DOCFRAG_PROTO_METHODS);
+                    }
+                    "HTMLTemplateElement" => {
+                        install_dom_nav_accessors(self, p, &["innerHTML"]);
+                    }
+                    _ => {}
+                }
                 // Spec WebIDL : `X.prototype.constructor === X`
                 // (`el.constructor`, `document.constructor`).
-                self.set_own(p, "constructor", f, false);
+                self.set_own(p, "constructor", f.clone(), false);
+            }
+            self.set_own(g, name, f, false);
+        }
+        // JS-C427 — `DOMRectReadOnly`/`DOMRect` constructibles
+        // (WebIDL `[Constructor]` — ima3/shaka `new DOMRect`,
+        // §B-112). `DOMRect.prototype` hérite `DOMRectReadOnly.
+        // prototype` ; `top/right/bottom/left` = getters dérivés
+        // (bords min/max pour w/h négatifs, spec) ; `toJSON` +
+        // `fromRect` complets ; les instances `x/y/width/height`
+        // sont readonly en RO, mutables en RW.
+        let ro_proto = self.new_object();
+        let ro_pv = Value::Obj(ro_proto);
+        for edge in ["top", "right", "bottom", "left"] {
+            let nm = self.str_val(edge);
+            let gg = self.bound_native("domrect.get", domrect_get, vec![nm]);
+            if let Some(o) = self.heap.obj_mut(ro_proto) {
+                o.set_accessor(edge, gg, Value::Undefined, false);
+            }
+        }
+        let tj = self.native_fn("toJSON", domrect_to_json);
+        self.set_own(ro_proto, "toJSON", tj.clone(), false);
+        let rw_proto = self.new_object();
+        if let Some(o) = self.heap.obj_mut(rw_proto) {
+            o.proto = ro_pv.clone();
+        }
+        self.set_own(rw_proto, "toJSON", tj, false);
+        for (name, proto, ro) in [
+            ("DOMRectReadOnly", ro_pv, true),
+            ("DOMRect", Value::Obj(rw_proto), false),
+        ] {
+            let flag = self.str_val(if ro { "ro" } else { "rw" });
+            let f = self.bound_native(name, domrect_ctor, vec![flag]);
+            if let Value::Obj(fid) = f {
+                self.set_own(fid, "length", Value::Num(0.0), false);
+                self.set_own(fid, "prototype", proto.clone(), false);
+                if let Value::Obj(pid) = proto.clone() {
+                    self.set_own(pid, "constructor", f.clone(), false);
+                }
+                let flag2 = self.str_val(if ro { "ro" } else { "rw" });
+                let from = self.bound_native("fromRect", domrect_from, vec![flag2, proto.clone()]);
+                self.set_own(fid, "fromRect", from, false);
+                self.add_root(fid);
+                if let Value::Obj(pid) = proto {
+                    self.add_root(pid);
+                }
             }
             self.set_own(g, name, f, false);
         }
@@ -2879,7 +3088,7 @@ impl Engine {
             let p = self.new_object();
             let tag = self.str_val("AudioContext");
             self.set_own(p, crate::interp::SYM_TO_STRING_TAG, tag, false);
-            self.set_own(p, "constructor", ac_f, false);
+            self.set_own(p, "constructor", ac_f.clone(), false);
             for name in ["resume", "close", "suspend"] {
                 let f = match name {
                     "resume" => audio_ctx_resume,
@@ -3085,7 +3294,7 @@ impl Engine {
                 }
             }
             self.set_own(cid, "prototype", Value::Obj(p), false);
-            self.set_own(p, "constructor", f, false);
+            self.set_own(p, "constructor", f.clone(), false);
         }
         self.set_own(g, "SharedWorker", f, false);
         // `NodeFilter` — constantes `SHOW_*`/`FILTER_*` lues
@@ -3159,6 +3368,15 @@ impl Engine {
                     let m = self.native_fn(k, f2);
                     self.set_own(pid, k, m, true);
                 }
+                // JS-C416 / §B-97 — méthodes spec `Element`
+                // propres restantes (attributs, insertion,
+                // focus…) : la récolte ShadyDOM exige des
+                // descripteurs PROPRES — `Node.prototype`
+                // hérité est invisible à
+                // `getOwnPropertyDescriptor(Element.prototype,
+                // "setAttribute")` → `nativeMethods.setAttribute`
+                // vide → `TypeError` init CE → squelettes.
+                install_dom_proto_methods(self, pid, ELEMENT_PROTO_METHODS);
             }
         }
         // `document` hérite de `HTMLDocument.prototype` (spec —
@@ -3225,7 +3443,7 @@ impl Engine {
                     self.set_own(pid, k, Value::Num(f64::from(v)), false);
                 }
             }
-            self.set_own(fid, "prototype", p, false);
+            self.set_own(fid, "prototype", p.clone(), false);
             event_proto = p;
         }
         self.set_own(g, "Event", event_f, false);
@@ -3276,7 +3494,7 @@ impl Engine {
                 let p = Value::Obj(self.new_object());
                 if let Value::Obj(pid) = p {
                     if let Some(o) = self.heap.obj_mut(pid) {
-                        o.proto = event_proto;
+                        o.proto = event_proto.clone();
                     }
                 }
                 self.set_own(fid, "prototype", p, false);
@@ -3604,7 +3822,7 @@ impl Engine {
                 let p = Value::Obj(self.new_object());
                 if let Value::Obj(pid) = p {
                     if let Some(o) = self.heap.obj_mut(pid) {
-                        o.proto = event_proto;
+                        o.proto = event_proto.clone();
                     }
                 }
                 self.set_own(fid, "prototype", p, false);
@@ -4059,7 +4277,7 @@ impl Engine {
         if let Some(pids) = pending {
             let msg = self.str_val("NotSupportedError: no supported media");
             for p in pids {
-                self.reject_promise(p, msg);
+                self.reject_promise(p, msg.clone());
             }
             let _ = self.run_microtasks();
         }
@@ -4254,7 +4472,7 @@ impl Engine {
         if rep.state == MediaState::Error {
             let msg = self.str_val(&err_msg);
             for p in pids {
-                self.reject_promise(p, msg);
+                self.reject_promise(p, msg.clone());
             }
         } else {
             for p in pids {
@@ -4374,9 +4592,9 @@ impl Engine {
                 let mut at = String::new();
                 for (k, v) in ev.props.borrow().iter() {
                     match k.as_str() {
-                        "message" => message = self.describe(*v),
-                        "filename" => at = self.describe(*v),
-                        "lineno" => at = format!("{at}:{}", self.describe(*v)),
+                        "message" => message = self.describe(v.clone()),
+                        "filename" => at = self.describe(v.clone()),
+                        "lineno" => at = format!("{at}:{}", self.describe(v.clone())),
                         _ => {}
                     }
                 }
@@ -4422,7 +4640,7 @@ impl Engine {
         // CAP-198 — `relatedTarget` retargeté comme `target` :
         // résolu ici, présenté par `fire_listeners` via
         // `adjusted_related` (lu par `EventHost::get`).
-        let rt = self.get_prop_value(ev_val, "relatedTarget")?;
+        let rt = self.get_prop_value(ev_val.clone(), "relatedTarget")?;
         ev.related_node.set(node_for_in(self, rt, dom));
         ev.adjusted.set(target);
         ev.adjusted_related.set(ev.related_node.get());
@@ -4512,19 +4730,23 @@ impl Engine {
         ev.adjusted.set(adjusted);
         ev.adjusted_related.set(related);
         let ty = ev.ty.borrow().clone();
-        let fns: Vec<Value> = {
+        let (fns, node_desc): (Vec<Value>, String) = {
             let d = dom.borrow();
-            d.nodes
-                .get(node as usize)
-                .map(|n| {
-                    n.listeners
-                        .iter()
-                        .filter(|(t, _, c)| t == &ty && *c == capture)
-                        .map(|(_, f, _)| *f)
-                        .collect()
-                })
-                .unwrap_or_default()
+            (
+                d.nodes
+                    .get(node as usize)
+                    .map(|n| {
+                        n.listeners
+                            .iter()
+                            .filter(|(t, _, c)| t == &ty && *c == capture)
+                            .map(|(_, f, _)| f.clone())
+                            .collect()
+                    })
+                    .unwrap_or_default(),
+                probe_node_desc(&d, node),
+            )
         };
+        let n_fns = fns.len();
         let this = node_value(self, dom, cache, node);
         for f in fns {
             // Spec : `stopPropagation` laisse finir les listeners
@@ -4532,8 +4754,8 @@ impl Engine {
             if ev.immediate.get() {
                 break;
             }
-            if self.is_callable(f) {
-                if let Err(th) = self.call_value(f, this, &[*ev_val]) {
+            if self.is_callable(f.clone()) {
+                if let Err(th) = self.call_value(f, this.clone(), std::slice::from_ref(ev_val)) {
                     // Sonde §B-97 — un listener qui jette nomme
                     // l'event dont le handler meurt (1×/type).
                     if tracing::enabled!(target: "dom_probe", tracing::Level::INFO) {
@@ -4547,25 +4769,35 @@ impl Engine {
                 }
             }
         }
+        // Sonde G-6 — premier nœud par type avec des listeners
+        // réellement invoqués : nomme la cible du callback (≠
+        // `el.listen` qui nomme l'enregistrement).
+        if n_fns > 0 && tracing::enabled!(target: "dom_probe", tracing::Level::INFO) {
+            if let Ok(mut d) = dom.try_borrow_mut() {
+                if d.ce.probe_seen.insert(format!("cb:{ty}")) {
+                    tracing::info!(target: "dom_probe", site = "ev.cb", ty = %ty, on = %node_desc, n = n_fns);
+                }
+            }
+        }
         if !capture && !ev.immediate.get() {
             let key = format!("on{ty}");
             // Prop scriptée (`el.onclick = f`) prioritaire —
             // dernier écrivain gagne, l'attribut est "écrit"
             // au parse ; sinon handler d'attribut compilé.
-            let prop = if let Value::Obj(id) = this {
-                self.get_prop(id, &key)
+            let prop = if let Value::Obj(id) = &this {
+                self.get_prop(*id, &key)
             } else {
                 None
             };
             let f = match prop {
-                Some(f) if self.is_callable(f) => Some(f),
+                Some(f) if self.is_callable(f.clone()) => Some(f),
                 _ => self.inline_handler(dom, node, &key)?,
             };
             if let Some(f) = f {
                 // Spec : un handler `on*` qui retourne `false`
                 // annule l'événement (≙ `preventDefault` — pattern
                 // `onsubmit="return check()"`).
-                match self.call_value(f, this, &[*ev_val]) {
+                match self.call_value(f, this, std::slice::from_ref(ev_val)) {
                     Ok(v) => {
                         if matches!(v, Value::Bool(false)) {
                             ev.prevented.set(true);
@@ -4618,7 +4850,7 @@ impl Engine {
             if let Some(n) = d.nodes.get(node as usize) {
                 if let Some((_, s, f)) = n.inline_handlers.iter().find(|(k, ..)| k == key) {
                     if s == &src {
-                        return Ok(Some(*f));
+                        return Ok(Some(f.clone()));
                     }
                 }
             }
@@ -4627,11 +4859,11 @@ impl Engine {
             "(function(event){{with(document||{{}}){{with(this.form||{{}}){{with(this){{{src}\n}}}}}}}})",
         );
         let f = self.eval_source(&wrapped)?;
-        if self.is_callable(f) {
+        if self.is_callable(f.clone()) {
             let mut d = dom.borrow_mut();
             if let Some(n) = d.nodes.get_mut(node as usize) {
                 n.inline_handlers.retain(|(k, ..)| k != key);
-                n.inline_handlers.push((key.to_string(), src, f));
+                n.inline_handlers.push((key.to_string(), src, f.clone()));
             }
             Ok(Some(f))
         } else {
@@ -4714,14 +4946,14 @@ impl Host for DocumentHost {
 
     fn trace(&self, out: &mut Vec<ObjId>) {
         trace_node_cache(&self.cache, out);
-        if let Some(v) = *self.implementation.borrow() {
-            crate::heap::push_value(out, v);
+        if let Some(v) = self.implementation.borrow().clone() {
+            crate::heap::push_value(out, &v);
         }
-        if let Some(v) = *self.fonts.borrow() {
-            crate::heap::push_value(out, v);
+        if let Some(v) = self.fonts.borrow().clone() {
+            crate::heap::push_value(out, &v);
         }
-        if let Some(v) = *self.adopted_sheets.borrow() {
-            crate::heap::push_value(out, v);
+        if let Some(v) = self.adopted_sheets.borrow().clone() {
+            crate::heap::push_value(out, &v);
         }
     }
 
@@ -4848,10 +5080,11 @@ impl Host for DocumentHost {
             // `===` stable spec), assignable via `set` ;
             // feuilles non appliquées (scoping = tranche 2).
             "adoptedStyleSheets" => {
-                let v = *self
+                let v = self
                     .adopted_sheets
                     .borrow_mut()
-                    .get_or_insert_with(|| e.new_array(Vec::new()));
+                    .get_or_insert_with(|| e.new_array(Vec::new()))
+                    .clone();
                 Ok(Some(v))
             }
             // `document.styleSheets` — mesuré terrain vaadin :
@@ -4912,11 +5145,15 @@ impl Host for DocumentHost {
                 // Garde GC — un `Value::Obj` balayé est recréé
                 // plutôt que rendu zombie (même logique que
                 // `node_value`).
-                if slot.is_some_and(|v| matches!(v, Value::Obj(id) if e.heap.obj(id).is_none())) {
+                if slot
+                    .as_ref()
+                    .is_some_and(|v| matches!(v, Value::Obj(id) if e.heap.obj(*id).is_none()))
+                {
                     *slot = None;
                 }
-                let v =
-                    *slot.get_or_insert_with(|| e.new_host_object(Rc::new(DomImplementationHost)));
+                let v = slot
+                    .get_or_insert_with(|| e.new_host_object(Rc::new(DomImplementationHost)))
+                    .clone();
                 Ok(Some(v))
             }
             "title" => {
@@ -5025,10 +5262,15 @@ impl Host for DocumentHost {
             // entre accès — excalidraw vol 222.
             "fonts" => {
                 let mut slot = self.fonts.borrow_mut();
-                if slot.is_some_and(|v| matches!(v, Value::Obj(id) if e.heap.obj(id).is_none())) {
+                if slot
+                    .as_ref()
+                    .is_some_and(|v| matches!(v, Value::Obj(id) if e.heap.obj(*id).is_none()))
+                {
                     *slot = None;
                 }
-                let v = *slot.get_or_insert_with(|| e.new_host_object(Rc::new(FontFaceSetHost)));
+                let v = slot
+                    .get_or_insert_with(|| e.new_host_object(Rc::new(FontFaceSetHost)))
+                    .clone();
                 Ok(Some(v))
             }
             // Page affichée = visible/active — pas d'onglet caché
@@ -5176,8 +5418,8 @@ impl Host for DocumentHost {
                 let ty = e.to_js_string(arg(args, 0))?;
                 let f = arg(args, 1);
                 let capture = e.to_boolean(arg(args, 2));
-                if e.is_callable(f) {
-                    probe_el_listen(&self.dom, &ty);
+                if e.is_callable(f.clone()) {
+                    probe_el_listen(&self.dom, &ty, "document");
                     let root = self.dom.borrow().root;
                     self.dom.borrow_mut().nodes[root as usize]
                         .listeners
@@ -5192,7 +5434,7 @@ impl Host for DocumentHost {
                 let root = self.dom.borrow().root;
                 self.dom.borrow_mut().nodes[root as usize]
                     .listeners
-                    .retain(|(t, lf, c)| !(t == &ty && *c == capture && e.strict_eq(*lf, f)));
+                    .retain(|(t, lf, c)| !(t == &ty && *c == capture && e.strict_eq(lf, &f)));
                 Ok(Some(Value::Undefined))
             }
             "dispatchEvent" => {
@@ -5384,9 +5626,9 @@ impl Host for DocumentHost {
             "importNode" => {
                 let v = arg(args, 0);
                 let deep = e.to_boolean(arg(args, 1));
-                let c = if let Some(src) = node_for_in(e, v, &self.dom) {
+                let c = if let Some(src) = node_for_in(e, v.clone(), &self.dom) {
                     self.dom.borrow_mut().clone_node(src, deep)
-                } else if let Some((src, src_dom)) = foreign_node_in(e, v, &self.dom) {
+                } else if let Some((src, src_dom)) = foreign_node_in(e, v.clone(), &self.dom) {
                     if deep {
                         let s = src_dom.borrow();
                         self.dom.borrow_mut().adopt_from(&s, src)
@@ -5394,7 +5636,7 @@ impl Host for DocumentHost {
                         let s = src_dom.borrow();
                         self.dom.borrow_mut().clone_shallow_from(&s, src)
                     }
-                } else if let Some((name, value, ns)) = attr_shape_in(e, v)? {
+                } else if let Some((name, value, ns)) = attr_shape_in(e, v.clone())? {
                     // §B-14 usnews REVALID5 — spec :
                     // `importNode(Attr)` rend un Attr cloné
                     // dans le document cible (nos porteurs
@@ -5611,7 +5853,7 @@ impl Host for DocumentHost {
             "write" | "writeln" => {
                 let mut s = String::new();
                 for a in args {
-                    s.push_str(&e.to_js_string(*a)?);
+                    s.push_str(&e.to_js_string(a.clone())?);
                 }
                 if name == "writeln" {
                     s.push('\n');
@@ -5667,9 +5909,9 @@ impl Host for DocumentHost {
             // `HierarchyRequestError` (JS-C208).
             "append" | "prepend" | "replaceChildren" => {
                 let mut kids = Vec::with_capacity(args.len());
-                for &a in args {
-                    let Some(n) = node_for_in(e, a, &self.dom)
-                        .or_else(|| adopt_into(e, a, &self.dom, &self.cache))
+                for a in args {
+                    let Some(n) = node_for_in(e, a.clone(), &self.dom)
+                        .or_else(|| adopt_into(e, a.clone(), &self.dom, &self.cache))
                     else {
                         // Chaîne → Text ; Text interdit sous
                         // Document (spec `HierarchyRequestError`).
@@ -6311,11 +6553,8 @@ fn host_method_trampoline(e: &mut Engine, _this: Value, args: &[Value]) -> JsRes
     let Some((Value::Str(m), rest)) = args.split_first() else {
         return Ok(Value::Undefined);
     };
-    let name = e.heap.string(*m);
-    let Some(name) = name else {
-        return Ok(Value::Undefined);
-    };
-    let Some(Value::Obj(id)) = rest.first().copied() else {
+    let name = m.to_string();
+    let Some(Value::Obj(id)) = rest.first().cloned() else {
         return Ok(Value::Undefined);
     };
     let Some(h) = e.host_of(id) else {
@@ -6338,9 +6577,7 @@ fn node_proto_method_trampoline(e: &mut Engine, this: Value, args: &[Value]) -> 
     let Some((Value::Str(m), call_args)) = args.split_first() else {
         return Ok(Value::Undefined);
     };
-    let Some(name) = e.heap.string(*m) else {
-        return Ok(Value::Undefined);
-    };
+    let name = m.to_string();
     let Value::Obj(id) = this else {
         return Ok(Value::Undefined);
     };
@@ -6985,7 +7222,11 @@ fn media_call_claimed(
         "fastSeek" => {
             let sec = match args.first() {
                 Some(Value::Num(n)) => *n,
-                Some(other) => e.to_js_string(*other)?.trim().parse::<f64>().unwrap_or(0.0),
+                Some(other) => e
+                    .to_js_string(other.clone())?
+                    .trim()
+                    .parse::<f64>()
+                    .unwrap_or(0.0),
                 None => 0.0,
             };
             let ms = (sec * 1000.0).max(0.0) as u64;
@@ -7052,7 +7293,7 @@ fn media_call_claimed(
             // ou non — la gate d'attach des players se joue
             // avant tout claim.
             let t = match args.first() {
-                Some(v) => e.to_js_string(*v)?,
+                Some(v) => e.to_js_string(v.clone())?,
                 None => String::new(),
             };
             Ok(Some(e.str_val(crate::mse::media_can_play_type(e, &t))))
@@ -7343,14 +7584,14 @@ impl Host for NodeHost {
                 // JS-C294). Repli : `defs.ctor` si le proto ne
                 // rend pas de fonction.
                 if let Value::Obj(eid) = this {
-                    if let Some(Value::Obj(pid)) = e.heap.obj(eid).map(|o| o.proto) {
+                    if let Some(Value::Obj(pid)) = e.heap.obj(eid).map(|o| o.proto.clone()) {
                         if let Some(v @ Value::Obj(_)) = e.get_prop(pid, "constructor") {
                             return Ok(Some(v));
                         }
                     }
                 }
                 if let Some(def) = self.dom.borrow().ce.defs.get(&name) {
-                    return Ok(Some(def.ctor));
+                    return Ok(Some(def.ctor.clone()));
                 }
             }
             // `div.constructor === HTMLDivElement` — spec :
@@ -8540,7 +8781,7 @@ impl Host for NodeHost {
                 let has = self.dom.borrow().has_attr(node, &k);
                 let want = match args.get(1) {
                     None | Some(Value::Undefined) => !has,
-                    Some(f) => e.to_boolean(*f),
+                    Some(f) => e.to_boolean(f.clone()),
                 };
                 if want != has {
                     let mut d = self.dom.borrow_mut();
@@ -8556,8 +8797,12 @@ impl Host for NodeHost {
                 let ty = e.to_js_string(arg(args, 0))?;
                 let f = arg(args, 1);
                 let capture = e.to_boolean(arg(args, 2));
-                if e.is_callable(f) {
-                    probe_el_listen(&self.dom, &ty);
+                if e.is_callable(f.clone()) {
+                    let on = {
+                        let d = self.dom.borrow();
+                        probe_node_desc(&d, node)
+                    };
+                    probe_el_listen(&self.dom, &ty, &on);
                     self.dom.borrow_mut().nodes[node as usize]
                         .listeners
                         .push((ty, f, capture));
@@ -8570,7 +8815,7 @@ impl Host for NodeHost {
                 let capture = e.to_boolean(arg(args, 2));
                 self.dom.borrow_mut().nodes[node as usize]
                     .listeners
-                    .retain(|(t, lf, c)| !(t == &ty && *c == capture && e.strict_eq(*lf, f)));
+                    .retain(|(t, lf, c)| !(t == &ty && *c == capture && e.strict_eq(lf, &f)));
                 Ok(Some(Value::Undefined))
             }
             // `el.dispatchEvent(ev)` — EventHost or plain {type:…}.
@@ -8831,7 +9076,7 @@ impl Host for NodeHost {
                     cache: self.cache.clone(),
                     node,
                 }));
-                self.dom.borrow_mut().set_canvas_ctx(node, v);
+                self.dom.borrow_mut().set_canvas_ctx(node, v.clone());
                 Ok(Some(v))
             }
             // `<canvas>.toDataURL()`/`toBlob()` — stub honnête
@@ -8852,7 +9097,7 @@ impl Host for NodeHost {
                     return Ok(None);
                 }
                 let cb = arg(args, 0);
-                if e.is_callable(cb) {
+                if e.is_callable(cb.clone()) {
                     let b = e.str_val("data:image/png;base64,");
                     e.call_value(cb, Value::Undefined, &[b])?;
                 }
@@ -9277,7 +9522,7 @@ impl Host for NodeHost {
                     // la capacité n'est pas déclarée.
                     "canPlayType" => {
                         let t = match args.first() {
-                            Some(v) => e.to_js_string(*v)?,
+                            Some(v) => e.to_js_string(v.clone())?,
                             None => String::new(),
                         };
                         Ok(Some(e.str_val(crate::mse::media_can_play_type(e, &t))))
@@ -9330,7 +9575,7 @@ impl Host for NodeHost {
                         // `undefined` → `returnValue` (spec).
                         if let Some(a) = args.first() {
                             if !matches!(a, Value::Undefined) {
-                                let rv = e.to_js_string(*a)?;
+                                let rv = e.to_js_string(a.clone())?;
                                 e.hooks.dialog_retval.insert(node, rv);
                             }
                         }
@@ -9514,16 +9759,16 @@ fn attr_shape_in(e: &mut Engine, v: Value) -> JsResult<Option<(String, String, O
     let Value::Obj(_) = v else {
         return Ok(None);
     };
-    let nt = e.get_prop_value(v, "nodeType")?;
+    let nt = e.get_prop_value(v.clone(), "nodeType")?;
     if !matches!(nt, Value::Num(n) if n == 2.0) {
         return Ok(None);
     }
-    let name_v = e.get_prop_value(v, "name")?;
+    let name_v = e.get_prop_value(v.clone(), "name")?;
     let name = e.to_js_string(name_v)?;
     if name.is_empty() {
         return Ok(None);
     }
-    let value_v = e.get_prop_value(v, "value")?;
+    let value_v = e.get_prop_value(v.clone(), "value")?;
     let value = e.to_js_string(value_v)?;
     let ns = e.get_prop_value(v, "namespaceURI")?;
     let ns = match ns {
@@ -9857,7 +10102,14 @@ fn point_candidate_paths(dom: &DomRef, x: f64, y: f64) -> Vec<Vec<(String, u32)>
 /// divergence miroir/session dégrade, ne plante pas).
 pub(crate) fn gbrect_shared(e: &mut Engine, dom: &DomRef, node: NodeId) -> Value {
     let (x, y, w, h) = element_geom_rect(dom, node).unwrap_or_default();
+    // JS-C427 — proto `DOMRect.prototype` : `r instanceof
+    // DOMRect` doit tenir (feature-detects de players).
     let r = e.new_object();
+    if let Some(p) = domrect_proto(e, "DOMRect") {
+        if let Some(o) = e.heap.obj_mut(r) {
+            o.proto = p;
+        }
+    }
     for (k, v) in [
         ("x", x),
         ("y", y),
@@ -9871,6 +10123,141 @@ pub(crate) fn gbrect_shared(e: &mut Engine, dom: &DomRef, node: NodeId) -> Value
         e.set_own(r, k, Value::Num(v), true);
     }
     Value::Obj(r)
+}
+
+/// `Ctor.prototype` résolu depuis le global (`DOMRect` /
+/// `DOMRectReadOnly`) — `None` si l'interface n'est pas
+/// installée (contexte sans DOM complet — graceful).
+pub(crate) fn domrect_proto(e: &mut Engine, name: &str) -> Option<Value> {
+    let g = e.global;
+    let ctor = e.get_prop(g, name)?;
+    let Value::Obj(cid) = ctor else { return None };
+    e.get_prop(cid, "prototype")
+}
+
+/// Remplit les 4 props de base d'un rect (`x`/`y`/`width`/
+/// `height`) — `writable` distingue `DOMRect` de sa version
+/// readonly (attributs `WebIDL` : enumerable + configurable).
+pub(crate) fn domrect_fill(e: &mut Engine, id: ObjId, x: f64, y: f64, w: f64, h: f64, rw: bool) {
+    let attrs = crate::heap::PropAttrs {
+        writable: rw,
+        enumerable: true,
+        configurable: true,
+    };
+    for (k, v) in [("x", x), ("y", y), ("width", w), ("height", h)] {
+        e.set_own_attrs(id, k, Value::Num(v), attrs);
+    }
+}
+
+/// JS-C427 — `new DOMRect(ReadOnly)(x, y, w, h)` — `bound[0]` =
+/// `"ro"`/`"rw"` ; appel fonctionnel = `TypeError` spec (les
+/// interfaces `WebIDL` sont ctor-only). `unrestricted double` :
+/// NaN/±Infinity passent sans `TypeError`.
+fn domrect_ctor(e: &mut Engine, this: Value, a: &[Value]) -> JsResult<Value> {
+    let rw = a
+        .first()
+        .and_then(|v| e.to_js_string(v.clone()).ok())
+        .is_some_and(|s| s == "rw");
+    let Value::Obj(id) = this.clone() else {
+        return Err(e.type_error("illegal constructor"));
+    };
+    if e.ctor_fresh != Some(id) {
+        return Err(e.type_error("illegal constructor"));
+    }
+    let num = |e: &mut Engine, i: usize| -> JsResult<f64> {
+        match a.get(i) {
+            Some(v) => e.to_number(v.clone()),
+            None => Ok(0.0),
+        }
+    };
+    let (x, y, w, h) = (num(e, 1)?, num(e, 2)?, num(e, 3)?, num(e, 4)?);
+    domrect_fill(e, id, x, y, w, h, rw);
+    Ok(this)
+}
+
+/// `DOMRect(ReadOnly).fromRect(init)` — bound[0] = `"ro"`/
+/// `"rw"`, bound[1] = proto : lit `x`/`y`/`width`/`height` du
+/// dict (repli `left`/`top`/`right`/`bottom`, `DOMRectInit`
+/// legacy) et produit l'instance du bon proto.
+fn domrect_from(e: &mut Engine, _this: Value, a: &[Value]) -> JsResult<Value> {
+    let rw = a
+        .first()
+        .and_then(|v| e.to_js_string(v.clone()).ok())
+        .is_some_and(|s| s == "rw");
+    let proto = a.get(1).cloned().unwrap_or(Value::Undefined);
+    let src = a.get(2).cloned().unwrap_or(Value::Undefined);
+    let rd = |e: &mut Engine, k: &str| -> Option<f64> {
+        match e.get_prop_value(src.clone(), k) {
+            Ok(Value::Num(n)) => Some(n),
+            _ => None,
+        }
+    };
+    let x = rd(e, "x").or_else(|| rd(e, "left")).unwrap_or(0.0);
+    let y = rd(e, "y").or_else(|| rd(e, "top")).unwrap_or(0.0);
+    let w = rd(e, "width")
+        .or_else(|| rd(e, "right").map(|r| r - x))
+        .unwrap_or(0.0);
+    let h = rd(e, "height")
+        .or_else(|| rd(e, "bottom").map(|b| b - y))
+        .unwrap_or(0.0);
+    let id = e.new_object();
+    if let Value::Obj(p) = proto {
+        if let Some(o) = e.heap.obj_mut(id) {
+            o.proto = Value::Obj(p);
+        }
+    }
+    domrect_fill(e, id, x, y, w, h, rw);
+    Ok(Value::Obj(id))
+}
+
+/// Getter de bord dérivé (`top`/`right`/`bottom`/`left`) —
+/// bound[0] = nom ; bords min/max pour `width`/`height`
+/// négatifs (spec `DOMRectReadOnly`).
+fn domrect_get(e: &mut Engine, this: Value, a: &[Value]) -> JsResult<Value> {
+    let edge = a
+        .first()
+        .and_then(|v| e.to_js_string(v.clone()).ok())
+        .unwrap_or_default();
+    let rd = |e: &mut Engine, k: &str| -> f64 {
+        e.get_prop_value(this.clone(), k)
+            .ok()
+            .and_then(|v| e.to_number(v).ok())
+            .unwrap_or(0.0)
+    };
+    let (x, y, w, h) = (rd(e, "x"), rd(e, "y"), rd(e, "width"), rd(e, "height"));
+    Ok(Value::Num(match edge.as_str() {
+        "top" => y.min(y + h),
+        "bottom" => y.max(y + h),
+        "left" => x.min(x + w),
+        "right" => x.max(x + w),
+        _ => 0.0,
+    }))
+}
+
+/// `toJSON` — `{x,y,width,height,top,right,bottom,left}`
+/// complet (spec `DOMRectReadOnly`).
+fn domrect_to_json(e: &mut Engine, this: Value, _a: &[Value]) -> JsResult<Value> {
+    let rd = |e: &mut Engine, k: &str| -> f64 {
+        e.get_prop_value(this.clone(), k)
+            .ok()
+            .and_then(|v| e.to_number(v).ok())
+            .unwrap_or(0.0)
+    };
+    let (x, y, w, h) = (rd(e, "x"), rd(e, "y"), rd(e, "width"), rd(e, "height"));
+    let o = e.new_object();
+    for (k, v) in [
+        ("x", x),
+        ("y", y),
+        ("width", w),
+        ("height", h),
+        ("top", y.min(y + h)),
+        ("bottom", y.max(y + h)),
+        ("left", x.min(x + w)),
+        ("right", x.max(x + w)),
+    ] {
+        e.set_own(o, k, Value::Num(v), true);
+    }
+    Ok(Value::Obj(o))
 }
 
 /// Resolve a `dispatchEvent` argument to event state: an `Event`
@@ -10033,7 +10420,7 @@ impl Host for EventHost {
     fn trace(&self, out: &mut Vec<ObjId>) {
         trace_node_cache(&self.cache, out);
         for (_, v) in self.state.props.borrow().iter() {
-            crate::heap::push_value(out, *v);
+            crate::heap::push_value(out, v);
         }
     }
 
@@ -10082,13 +10469,13 @@ impl Host for EventHost {
                         .iter()
                         .find(|(k, _)| k == "relatedTarget")
                     {
-                        Some((_, v)) => *v,
+                        Some((_, v)) => v.clone(),
                         None => Value::Null,
                     }
                 }
             }
             _ => match self.state.props.borrow().iter().find(|(k, _)| k == key) {
-                Some((_, v)) => *v,
+                Some((_, v)) => v.clone(),
                 None => return Ok(None),
             },
         }))
@@ -10649,7 +11036,11 @@ impl Host for ClassListHost {
                 let this_arg = arg(args, 1);
                 for (i, t) in self.tokens().into_iter().enumerate() {
                     let tv = e.str_val(t);
-                    e.call_value(cb, this_arg, &[tv, Value::Num(i as f64), this])?;
+                    e.call_value(
+                        cb.clone(),
+                        this_arg.clone(),
+                        &[tv, Value::Num(i as f64), this.clone()],
+                    )?;
                 }
                 return Ok(Some(Value::Undefined));
             }
@@ -10857,7 +11248,7 @@ impl Host for AttributesHost {
             }
             "setNamedItem" | "setNamedItemNS" => {
                 let attr = arg(args, usize::from(name.ends_with("NS")));
-                let nv = e.get_prop_value(attr, "name")?;
+                let nv = e.get_prop_value(attr.clone(), "name")?;
                 let vv = e.get_prop_value(attr, "value")?;
                 let k = e.to_js_string(nv)?;
                 let v = e.to_js_string(vv)?;
@@ -10977,10 +11368,10 @@ impl Host for CustomElementsHost {
                         &format!("customElements.define: invalid name {n:?}"),
                     ));
                 }
-                if !e.is_callable(ctor) {
+                if !e.is_callable(ctor.clone()) {
                     return Err(e.type_error("customElements.define: ctor is not a constructor"));
                 }
-                let proto = e.get_prop_value(ctor, "prototype")?;
+                let proto = e.get_prop_value(ctor.clone(), "prototype")?;
                 if !matches!(proto, Value::Obj(_)) {
                     return Err(
                         e.type_error("customElements.define: ctor.prototype is not an object")
@@ -10995,7 +11386,7 @@ impl Host for CustomElementsHost {
                             "custom element already defined",
                         ));
                     }
-                    if d.ce.defs.values().any(|def| e.strict_eq(def.ctor, ctor)) {
+                    if d.ce.defs.values().any(|def| e.strict_eq(&def.ctor, &ctor)) {
                         return Err(dom_exception(
                             e,
                             "NotSupportedError",
@@ -11005,7 +11396,7 @@ impl Host for CustomElementsHost {
                 }
                 // `observedAttributes` figé au define (spec).
                 let mut observed = Vec::new();
-                if let Value::Obj(oid) = e.get_prop_value(ctor, "observedAttributes")? {
+                if let Value::Obj(oid) = e.get_prop_value(ctor.clone(), "observedAttributes")? {
                     if let Some(ObjKind::Array(elems)) = e.heap.obj(oid).map(|o| &o.kind) {
                         for el in elems.clone() {
                             observed.push(e.to_js_string(el)?.to_lowercase());
@@ -11014,8 +11405,13 @@ impl Host for CustomElementsHost {
                 }
                 {
                     let mut d = self.dom.borrow_mut();
-                    d.ce.defs
-                        .insert(n.clone(), crate::dom::CeDef { ctor, observed });
+                    d.ce.defs.insert(
+                        n.clone(),
+                        crate::dom::CeDef {
+                            ctor: ctor.clone(),
+                            observed,
+                        },
+                    );
                     // `whenDefined` pendantes → résolues `undefined`.
                     if let Some(ps) = d.ce.pending.remove(&n) {
                         for p in ps {
@@ -11042,7 +11438,7 @@ impl Host for CustomElementsHost {
                         .ce
                         .defs
                         .get(&n)
-                        .map_or(Value::Undefined, |d| d.ctor),
+                        .map_or(Value::Undefined, |d| d.ctor.clone()),
                 ))
             }
             "getName" => {
@@ -11051,7 +11447,7 @@ impl Host for CustomElementsHost {
                 Ok(Some(
                     d.ce.defs
                         .iter()
-                        .find(|(_, def)| e.strict_eq(def.ctor, ctor))
+                        .find(|(_, def)| e.strict_eq(&def.ctor, &ctor))
                         .map_or(Value::Null, |(n, _)| e.str_val(n.clone())),
                 ))
             }
@@ -11129,7 +11525,7 @@ fn ce_def_of(dom: &DomRef, node: NodeId) -> Option<(String, Value, Vec<String>)>
         return None;
     }
     let def = d.ce.defs.get(&n.tag)?;
-    Some((n.tag.clone(), def.ctor, def.observed.clone()))
+    Some((n.tag.clone(), def.ctor.clone(), def.observed.clone()))
 }
 
 /// Upgrade d'un élément (JS-C68) : proto ← `Ctor.prototype`,
@@ -11148,7 +11544,7 @@ fn ce_upgrade_node(e: &mut Engine, dom: &DomRef, cache: &NodeCache, node: NodeId
     let el = node_value(e, dom, cache, node);
     // `el.__proto__ = Ctor.prototype` (validé objet à define).
     if let Value::Obj(eid) = el {
-        if let Value::Obj(p) = e.get_prop_value(ctor, "prototype")? {
+        if let Value::Obj(p) = e.get_prop_value(ctor.clone(), "prototype")? {
             if let Some(o) = e.heap.obj_mut(eid) {
                 o.proto = Value::Obj(p);
             }
@@ -11159,8 +11555,8 @@ fn ce_upgrade_node(e: &mut Engine, dom: &DomRef, cache: &NodeCache, node: NodeId
     // native `HTMLElement` qui rend l'élément via `ce_upgrade_slot`
     // (retour ignoré par `SuperCall`, `this` reste l'élément).
     // `new.target` = `ctor`.
-    let prev = e.ce_upgrade_slot.replace(el);
-    let r = e.call_value_ctor(ctor, el, &[], ctor);
+    let prev = e.ce_upgrade_slot.replace(el.clone());
+    let r = e.call_value_ctor(ctor.clone(), el.clone(), &[], ctor.clone());
     e.ce_upgrade_slot = prev;
     // Une **classe** doit prouver sa chaîne dérivée : `FLD_DONE`
     // n'est posé que par `super()` remontant à la native
@@ -11177,7 +11573,7 @@ fn ce_upgrade_node(e: &mut Engine, dom: &DomRef, cache: &NodeCache, node: NodeId
         matches!(ctor, Value::Obj(id) if e.find_own(id, crate::interp::CLASS_CTOR).is_some());
     let ok = match r {
         Ok(v) => {
-            let foreign = v.is_object() && !e.strict_eq(v, el);
+            let foreign = v.is_object() && !e.strict_eq(&v, &el);
             !foreign
                 && (!is_class
                     || matches!(el, Value::Obj(eid)
@@ -11222,7 +11618,7 @@ fn ce_upgrade_node(e: &mut Engine, dom: &DomRef, cache: &NodeCache, node: NodeId
             .collect()
     };
     for (k, v) in attr_hits {
-        ce_fire(e, el, "attributeChangedCallback", k, None, Some(v))?;
+        ce_fire(e, el.clone(), "attributeChangedCallback", k, None, Some(v))?;
     }
     if dom.borrow().is_attached(node) {
         ce_fire0(e, el, "connectedCallback")?;
@@ -11234,8 +11630,8 @@ fn ce_upgrade_node(e: &mut Engine, dom: &DomRef, cache: &NodeCache, node: NodeId
 /// de `Ctor.prototype` — `connectedCallback` & co n'ont pas de
 /// repli host).
 fn ce_call(e: &mut Engine, el: Value, cb_name: &str, args: &[Value]) -> JsResult<()> {
-    let cb = e.get_prop_value(el, cb_name)?;
-    if e.is_callable(cb) {
+    let cb = e.get_prop_value(el.clone(), cb_name)?;
+    if e.is_callable(cb.clone()) {
         e.call_value(cb, el, args)?;
     }
     Ok(())
@@ -11932,7 +12328,7 @@ fn nav_history_entry(e: &mut Engine) -> Value {
     let v = e.str_val(u);
     e.set_own(entry, "url", v, true);
     let v = e.str_val("0");
-    e.set_own(entry, "key", v, true);
+    e.set_own(entry, "key", v.clone(), true);
     e.set_own(entry, "id", v, true);
     e.set_own(entry, "index", Value::Num(0.0), true);
     e.set_own(entry, "sameDocument", Value::Bool(true), true);
@@ -11964,7 +12360,7 @@ fn nav_result(e: &mut Engine, ok: bool) -> JsResult<Value> {
     for k in ["committed", "finished"] {
         let pid = e.new_promise();
         if ok {
-            e.resolve_promise(pid, entry);
+            e.resolve_promise(pid, entry.clone());
         } else {
             let m = e.str_val("InvalidStateError: unknown navigation key");
             e.reject_promise(pid, m);
@@ -12159,10 +12555,16 @@ impl Host for FontFaceSetHost {
         match name {
             // `load(font, text?)` → Promise<FontFace[]> — résolu
             // avec un tableau vide : aucune fonte web déclarée.
+            // JS-C387 : `loading`/`loadingdone` sont tirés en
+            // microtask (spec : événement en tâche) — un gate
+            // `fonts.addEventListener('loadingdone', res)` voit
+            // la transition même si la charge est instantanée.
             "load" => {
                 let arr = e.new_array(Vec::new());
                 let pid = e.new_promise();
-                e.resolve_promise(pid, arr);
+                e.resolve_promise(pid, arr.clone());
+                ff_queue_event(e, t.clone(), "loading", arr.clone())?;
+                ff_queue_event(e, t.clone(), "loadingdone", arr)?;
                 Ok(Some(Value::Obj(pid)))
             }
             // `add(face)` — spec : retourne le set (chaînage),
@@ -12172,14 +12574,24 @@ impl Host for FontFaceSetHost {
             // `has` absent cassait la chaîne, `has` toujours
             // faux re-chargeait la fonte à l'infini).
             "add" => {
-                let mut faces = font_faces(e, t);
+                let mut faces = font_faces(e, t.clone());
                 let face = arg(args, 0);
-                if !faces.iter().any(|&f| e.strict_eq(f, face)) {
-                    faces.push(face);
+                if !faces.iter().any(|f| e.strict_eq(f, &face)) {
+                    faces.push(face.clone());
                     let arr = e.new_array(faces);
-                    if let Value::Obj(id) = t {
+                    if let Value::Obj(id) = t.clone() {
                         e.set_own(id, "__faces", arr, false);
                     }
+                    // JS-C387 — spec : `add()` charge la face
+                    // (statut → 'loaded') et tire `loading` +
+                    // `loadingdone` avec `fontfaces: [face]`.
+                    if let Value::Obj(fid) = face.clone() {
+                        let st = e.str_val("loaded");
+                        e.set_own(fid, "status", st, true);
+                    }
+                    let one = e.new_array(vec![face]);
+                    ff_queue_event(e, t.clone(), "loading", one.clone())?;
+                    ff_queue_event(e, t.clone(), "loadingdone", one)?;
                 }
                 Ok(Some(t))
             }
@@ -12188,14 +12600,14 @@ impl Host for FontFaceSetHost {
             "has" => {
                 let face = arg(args, 0);
                 Ok(Some(Value::Bool(
-                    font_faces(e, t).iter().any(|&f| e.strict_eq(f, face)),
+                    font_faces(e, t).iter().any(|f| e.strict_eq(f, &face)),
                 )))
             }
             "delete" => {
                 let face = arg(args, 0);
-                let mut faces = font_faces(e, t);
+                let mut faces = font_faces(e, t.clone());
                 let n = faces.len();
-                faces.retain(|&f| !e.strict_eq(f, face));
+                faces.retain(|f| !e.strict_eq(f, &face));
                 let removed = faces.len() != n;
                 let arr = e.new_array(faces);
                 if let Value::Obj(id) = t {
@@ -12213,9 +12625,9 @@ impl Host for FontFaceSetHost {
             // `forEach(cb, thisArg?)` — setlike : `cb(v, v, set)`.
             "forEach" => {
                 let cb = arg(args, 0);
-                let this_arg = args.get(1).copied().unwrap_or(Value::Undefined);
-                for f in font_faces(e, t) {
-                    e.call_value(cb, this_arg, &[f, f, t])?;
+                let this_arg = args.get(1).cloned().unwrap_or(Value::Undefined);
+                for f in font_faces(e, t.clone()) {
+                    e.call_value(cb.clone(), this_arg.clone(), &[f.clone(), f, t.clone()])?;
                 }
                 Ok(Some(Value::Undefined))
             }
@@ -12255,9 +12667,9 @@ fn win_add_event_listener(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult
     let ty = e.to_js_string(arg(args, 0))?;
     let f = arg(args, 1);
     let capture = e.to_boolean(arg(args, 2));
-    if e.is_callable(f) {
+    if e.is_callable(f.clone()) {
         if let Some((dom, _)) = &e.dom_ctx {
-            probe_el_listen(dom, &ty);
+            probe_el_listen(dom, &ty, "window");
             let root = dom.borrow().root;
             dom.borrow_mut().nodes[root as usize]
                 .listeners
@@ -12277,7 +12689,7 @@ fn win_remove_event_listener(e: &mut Engine, _t: Value, args: &[Value]) -> JsRes
         let root = dom.borrow().root;
         dom.borrow_mut().nodes[root as usize]
             .listeners
-            .retain(|(t, lf, c)| !(t == &ty && *c == capture && e.strict_eq(*lf, f)));
+            .retain(|(t, lf, c)| !(t == &ty && *c == capture && e.strict_eq(lf, &f)));
     }
     Ok(Value::Undefined)
 }
@@ -12432,7 +12844,7 @@ fn document_parse_html_unsafe(e: &mut Engine, _t: Value, args: &[Value]) -> JsRe
 fn illegal_ctor_named(e: &mut Engine, _t: Value, a: &[Value]) -> JsResult<Value> {
     let name = a
         .first()
-        .and_then(|v| e.to_js_string(*v).ok())
+        .and_then(|v| e.to_js_string(v.clone()).ok())
         .unwrap_or_else(|| "?".to_string());
     Err(e.type_error(format!("illegal constructor ({name})")))
 }
@@ -12444,8 +12856,8 @@ fn illegal_ctor_named(e: &mut Engine, _t: Value, a: &[Value]) -> JsResult<Value>
 /// construction, rendu comme résultat (rôle du mécanisme spec
 /// où `super()` produit l'élément — JS-C68).
 fn html_element_ctor(e: &mut Engine, _t: Value, _a: &[Value]) -> JsResult<Value> {
-    if let Some(el) = e.ce_upgrade_slot {
-        return Ok(el);
+    if let Some(ref el) = e.ce_upgrade_slot {
+        return Ok(el.clone());
     }
     Err(e.type_error("Illegal constructor"))
 }
@@ -12463,7 +12875,7 @@ fn image_ctor(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
     let n = dom.borrow_mut().create_element("img");
     for (i, attr) in ["width", "height"].into_iter().enumerate() {
         if let Some(v) = args.get(i).filter(|v| !matches!(v, Value::Undefined)) {
-            let s = e.to_js_string(*v)?;
+            let s = e.to_js_string(v.clone())?;
             dom.borrow_mut().set_attr(n, attr, &s);
         }
     }
@@ -12510,12 +12922,12 @@ fn media_el_ctor(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
         return Err(e.type_error("Audio/Video: no document"));
     };
     let tag = match args.first() {
-        Some(Value::Str(s)) => e.heap.string(*s).unwrap_or("audio".to_string()),
+        Some(Value::Str(s)) => s.to_string(),
         _ => "audio".to_string(),
     };
     let n = dom.borrow_mut().create_element(&tag);
     if let Some(v) = args.get(1).filter(|v| !matches!(v, Value::Undefined)) {
-        let s = e.to_js_string(*v)?;
+        let s = e.to_js_string(v.clone())?;
         dom.borrow_mut().set_attr(n, "src", &s);
     }
     Ok(node_value(e, &dom, &cache, n))
@@ -12548,11 +12960,11 @@ fn event_ctor(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
         _ => return Err(e.type_error("event init is not an object")),
     }
     let tv = e.str_val(ty);
-    e.set_prop_value(this, "type", tv)?;
+    e.set_prop_value(this.clone(), "type", tv)?;
     if matches!(init, Value::Obj(_)) {
         for k in ["bubbles", "cancelable", "composed"] {
-            let v = e.get_prop_value(init, k)?;
-            e.set_prop_value(this, k, Value::Bool(e.to_boolean(v)))?;
+            let v = e.get_prop_value(init.clone(), k)?;
+            e.set_prop_value(this.clone(), k, Value::Bool(e.to_boolean(v)))?;
         }
     } else {
         for (k, v) in [
@@ -12560,7 +12972,7 @@ fn event_ctor(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
             ("cancelable", Value::Bool(false)),
             ("composed", Value::Bool(false)),
         ] {
-            e.set_prop_value(this, k, v)?;
+            e.set_prop_value(this.clone(), k, v)?;
         }
     }
     // `CustomEvent`/`ErrorEvent`/`PromiseRejectionEvent`/
@@ -12629,9 +13041,9 @@ fn event_ctor(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
             "code",
             "reason",
         ] {
-            let v = e.get_prop_value(init, k)?;
+            let v = e.get_prop_value(init.clone(), k)?;
             if !matches!(v, Value::Undefined) {
-                e.set_prop_value(this, k, v)?;
+                e.set_prop_value(this.clone(), k, v)?;
             }
         }
     }
@@ -12646,7 +13058,7 @@ fn event_ctor(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
         ("eventPhase", Value::Num(0.0)),
         ("timeStamp", Value::Num(0.0)),
     ] {
-        e.set_prop_value(this, k, v)?;
+        e.set_prop_value(this.clone(), k, v)?;
     }
     // CAP-198 — `relatedTarget` est une clé d'init légitime
     // (`FocusEventInit`/`MouseEventInit`, copiée plus haut) :
@@ -12665,7 +13077,7 @@ fn event_ctor(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
 /// Sans eux `ev.button === 0` rate (`undefined`), ce qui tue le
 /// garde-fou des routers JS (React Router ignore le clic).
 fn mouse_event_ctor(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
-    event_ctor(e, this, args)?;
+    event_ctor(e, this.clone(), args)?;
     let init = arg(args, 1);
     for k in [
         "button",
@@ -12687,7 +13099,7 @@ fn mouse_event_ctor(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Val
         "layerY",
     ] {
         let v = if matches!(init, Value::Obj(_)) {
-            e.get_prop_value(init, k)?
+            e.get_prop_value(init.clone(), k)?
         } else {
             Value::Undefined
         };
@@ -12702,14 +13114,14 @@ fn mouse_event_ctor(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Val
                 }
             }
         };
-        e.set_prop_value(this, k, Value::Num(n))?;
+        e.set_prop_value(this.clone(), k, Value::Num(n))?;
     }
     for k in ["ctrlKey", "shiftKey", "altKey", "metaKey"] {
-        if !matches!(e.get_prop_value(this, k), Ok(v) if !matches!(v, Value::Undefined)) {
-            e.set_prop_value(this, k, Value::Bool(false))?;
+        if !matches!(e.get_prop_value(this.clone(), k), Ok(v) if !matches!(v, Value::Undefined)) {
+            e.set_prop_value(this.clone(), k, Value::Bool(false))?;
         }
     }
-    if !matches!(e.get_prop_value(this, "view"), Ok(v) if !matches!(v, Value::Undefined)) {
+    if !matches!(e.get_prop_value(this.clone(), "view"), Ok(v) if !matches!(v, Value::Undefined)) {
         e.set_prop_value(this, "view", Value::Null)?;
     }
     Ok(Value::Undefined)
@@ -12719,7 +13131,7 @@ fn mouse_event_ctor(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Val
 /// (`defaultPrevented`/`returnValue`), pas d'effet sur un event
 /// de dispatch (ceux-ci passent par `EventHost`).
 fn event_prevent_default(e: &mut Engine, this: Value, _a: &[Value]) -> JsResult<Value> {
-    e.set_prop_value(this, "defaultPrevented", Value::Bool(true))?;
+    e.set_prop_value(this.clone(), "defaultPrevented", Value::Bool(true))?;
     e.set_prop_value(this, "returnValue", Value::Bool(false))?;
     Ok(Value::Undefined)
 }
@@ -12930,8 +13342,12 @@ fn element_attach_internals(e: &mut Engine, this: Value, _args: &[Value]) -> JsR
 fn event_init(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
     let ty = e.to_js_string(arg(args, 0))?;
     let tv = e.str_val(ty);
-    e.set_prop_value(this, "type", tv)?;
-    e.set_prop_value(this, "bubbles", Value::Bool(e.to_boolean(arg(args, 1))))?;
+    e.set_prop_value(this.clone(), "type", tv)?;
+    e.set_prop_value(
+        this.clone(),
+        "bubbles",
+        Value::Bool(e.to_boolean(arg(args, 1))),
+    )?;
     e.set_prop_value(this, "cancelable", Value::Bool(e.to_boolean(arg(args, 2))))?;
     Ok(Value::Undefined)
 }
@@ -13003,11 +13419,11 @@ fn signal_fire(e: &mut Engine, sig: Value, reason: Value) -> JsResult<Value> {
         } else {
             reason
         };
-        e.set_prop_value(sig, "aborted", Value::Bool(true))?;
-        e.set_prop_value(sig, "reason", r)?;
-        let cb = e.get_prop_value(sig, "onabort")?;
-        if e.is_callable(cb) {
-            e.call_value(cb, sig, &[])?;
+        e.set_prop_value(sig.clone(), "aborted", Value::Bool(true))?;
+        e.set_prop_value(sig.clone(), "reason", r)?;
+        let cb = e.get_prop_value(sig.clone(), "onabort")?;
+        if e.is_callable(cb.clone()) {
+            e.call_value(cb, sig.clone(), &[])?;
         }
         let ls = match e.get_prop(sid, "__ls") {
             Some(Value::Obj(l)) => {
@@ -13022,8 +13438,8 @@ fn signal_fire(e: &mut Engine, sig: Value, reason: Value) -> JsResult<Value> {
             _ => Vec::new(),
         };
         for cb in ls {
-            if e.is_callable(cb) {
-                e.call_value(cb, sig, &[])?;
+            if e.is_callable(cb.clone()) {
+                e.call_value(cb, sig.clone(), &[])?;
             }
         }
     }
@@ -13225,9 +13641,8 @@ fn probe_event_ty(e: &mut Engine, v: Value) -> Option<String> {
         }
     }
     if let Some(Value::Str(sid)) = e.get_prop(id, "type") {
-        if let Some(ty) = e.heap.string(sid) {
-            return (!ty.is_empty()).then_some(ty);
-        }
+        let ty = sid.to_string();
+        return (!ty.is_empty()).then_some(ty);
     }
     None
 }
@@ -13258,7 +13673,7 @@ fn probe_ev_try(e: &mut Engine, dom: &DomRef, v: Value) {
 /// été dispatché (`ev:{ty}` présent) — les signaux une-fois
 /// (`spfready`, `yt-action`, `load`) ratés par un attach
 /// tardif nomment un émetteur jamais lancé.
-fn probe_el_listen(dom: &DomRef, ty: &str) {
+fn probe_el_listen(dom: &DomRef, ty: &str, on: &str) {
     if !tracing::enabled!(target: "dom_probe", tracing::Level::INFO) {
         return;
     }
@@ -13266,10 +13681,22 @@ fn probe_el_listen(dom: &DomRef, ty: &str) {
         return;
     };
     if d.ce.probe_seen.insert(format!("ls:{ty}")) {
-        tracing::info!(target: "dom_probe", site = "el.listen", ty = %ty);
+        tracing::info!(target: "dom_probe", site = "el.listen", ty = %ty, on = %on);
     }
     if d.ce.probe_seen.contains(&format!("ev:{ty}")) && d.ce.probe_seen.insert(format!("lt:{ty}")) {
         tracing::info!(target: "dom_probe", site = "ls.late", ty = %ty);
+    }
+}
+
+/// Descripteur court d'un nœud pour les sondes — `tag#id` quand
+/// l'élément porte un id, `tag` sinon.
+fn probe_node_desc(d: &Dom, node: NodeId) -> String {
+    let Some(n) = d.nodes.get(node as usize) else {
+        return "<?>".to_string();
+    };
+    match d.attr(node, "id") {
+        Some(id) if !id.is_empty() => format!("{}#{}", n.tag, id),
+        _ => n.tag.clone(),
     }
 }
 
@@ -13288,14 +13715,18 @@ fn probe_el_listen(dom: &DomRef, ty: &str) {
 pub(crate) fn et_add_listener(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
     let ty = e.to_js_string(arg(args, 0))?;
     let cb = arg(args, 1);
-    if !e.is_callable(cb) {
+    if !e.is_callable(cb.clone()) {
         return Ok(Value::Undefined); // spec : non-appelable ignoré
     }
     if let Some((dom, _)) = e.dom_ctx.clone() {
-        if let Some(node) = et_dom_target(e, this, &dom) {
+        if let Some(node) = et_dom_target(e, this.clone(), &dom) {
             let capture = e.to_boolean(arg(args, 2));
             // Sonde §B-97 — la greffe compte dans le recensement.
-            probe_el_listen(&dom, &ty);
+            let on = {
+                let d = dom.borrow();
+                probe_node_desc(&d, node)
+            };
+            probe_el_listen(&dom, &ty, &on);
             dom.borrow_mut().nodes[node as usize]
                 .listeners
                 .push((ty, cb, capture));
@@ -13312,12 +13743,25 @@ pub(crate) fn et_add_listener(e: &mut Engine, this: Value, args: &[Value]) -> Js
     if let Some(Value::Obj(map)) = e.get_prop(sid, "__et") {
         let list = e.get_prop(map, &ty).unwrap_or(Value::Undefined);
         if let Value::Obj(l) = list {
+            // JS-C387 : la liste est reconstruite — l'ancienne
+            // écrivait `l[i]`+`l.length` en props propres mais
+            // `length`/`get_prop` des arrays dérivent de
+            // `ObjKind::Array` → tout 2ᵉ listener `__et` était
+            // silencieusement perdu (FontFaceSet, IDBRequest,
+            // greffes EventTarget de polyfills).
             let len = match e.get_prop(l, "length") {
                 Some(Value::Num(n)) => n as usize,
                 _ => 0,
             };
-            e.set_own(l, &len.to_string(), cb, true);
-            e.set_own(l, "length", Value::Num((len + 1) as f64), true);
+            let mut keep = Vec::with_capacity(len + 1);
+            for i in 0..len {
+                if let Some(v) = e.get_prop(l, &i.to_string()) {
+                    keep.push(v);
+                }
+            }
+            keep.push(cb);
+            let arr = e.new_array(keep);
+            e.set_own(map, &ty, arr, true);
         } else {
             let l = e.new_array(vec![cb]);
             e.set_own(map, &ty, l, true);
@@ -13332,12 +13776,12 @@ pub(crate) fn et_add_listener(e: &mut Engine, this: Value, args: &[Value]) -> Js
 pub(crate) fn et_remove_listener(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
     let ty = e.to_js_string(arg(args, 0))?;
     if let Some((dom, _)) = e.dom_ctx.clone() {
-        if let Some(node) = et_dom_target(e, this, &dom) {
+        if let Some(node) = et_dom_target(e, this.clone(), &dom) {
             let cb = arg(args, 1);
             let capture = e.to_boolean(arg(args, 2));
             dom.borrow_mut().nodes[node as usize]
                 .listeners
-                .retain(|(t, lf, c)| !(t == &ty && *c == capture && e.strict_eq(*lf, cb)));
+                .retain(|(t, lf, c)| !(t == &ty && *c == capture && e.strict_eq(lf, &cb)));
             return Ok(Value::Undefined);
         }
     }
@@ -13383,7 +13827,7 @@ pub(crate) fn et_dispatch_event(e: &mut Engine, this: Value, args: &[Value]) -> 
     // `event_state_of` + `propagate_event` — capture/bubble,
     // `preventDefault` retourné à l'envers (spec).
     if let Some((dom, cache)) = e.dom_ctx.clone() {
-        if let Some(node) = et_dom_target(e, this, &dom) {
+        if let Some(node) = et_dom_target(e, this.clone(), &dom) {
             let Some(state) = event_state_of(e, node, &dom, &cache, arg(args, 0))? else {
                 return Ok(Value::Bool(false));
             };
@@ -13400,8 +13844,8 @@ pub(crate) fn et_dispatch_event(e: &mut Engine, this: Value, args: &[Value]) -> 
     };
     let ty = e.get_prop(evid, "type").unwrap_or(Value::Undefined);
     let ty = e.to_js_string(ty)?;
-    e.set_own(evid, "target", this, true);
-    e.set_own(evid, "currentTarget", this, true);
+    e.set_own(evid, "target", this.clone(), true);
+    e.set_own(evid, "currentTarget", this.clone(), true);
     if let Some(Value::Obj(map)) = e.get_prop(sid, "__et") {
         if let Some(Value::Obj(l)) = e.get_prop(map, &ty) {
             let len = match e.get_prop(l, "length") {
@@ -13410,8 +13854,8 @@ pub(crate) fn et_dispatch_event(e: &mut Engine, this: Value, args: &[Value]) -> 
             };
             for i in 0..len {
                 if let Some(cb) = e.get_prop(l, &i.to_string()) {
-                    if cb != Value::Undefined && e.is_callable(cb) {
-                        e.call_value(cb, this, &[ev])?;
+                    if cb != Value::Undefined && e.is_callable(cb.clone()) {
+                        e.call_value(cb, this.clone(), std::slice::from_ref(&ev))?;
                     }
                 }
             }
@@ -13503,7 +13947,7 @@ fn lazy_frame_ctx(
 pub(crate) fn event_proto(e: &mut Engine, o: ObjId, ctor: &str) {
     let g = Value::Obj(e.global);
     let proto = e
-        .get_prop_value(g, ctor)
+        .get_prop_value(g.clone(), ctor)
         .ok()
         .and_then(|c| e.get_prop_value(c, "prototype").ok())
         .or_else(|| {
@@ -13548,7 +13992,7 @@ fn signal_remove_listener(e: &mut Engine, this: Value, args: &[Value]) -> JsResu
 /// `AbortSignal.abort(reason?)` — signal pré-aborté.
 fn signal_static_abort(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
     let sig = new_signal(e);
-    signal_fire(e, sig, arg(args, 0))?;
+    signal_fire(e, sig.clone(), arg(args, 0))?;
     Ok(sig)
 }
 
@@ -13560,7 +14004,7 @@ fn signal_static_timeout(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<
         Value::Num(n) => n.max(0.0) as u64,
         _ => 0,
     };
-    let cb = e.bound_native("abort", signal_timeout_fire, vec![sig]);
+    let cb = e.bound_native("abort", signal_timeout_fire, vec![sig.clone()]);
     e.sched_tick("post.timer");
     e.timers.schedule(cb, ms, false, Vec::new());
     Ok(sig)
@@ -13580,11 +14024,11 @@ fn signal_static_any(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Valu
         if let Value::Obj(sid) = src {
             if matches!(e.get_prop(sid, "aborted"), Some(Value::Bool(true))) {
                 let r = e.get_prop(sid, "reason").unwrap_or(Value::Undefined);
-                signal_fire(e, out, r)?;
+                signal_fire(e, out.clone(), r)?;
                 return Ok(out);
             }
             if let Some(Value::Obj(l)) = e.get_prop(sid, "__ls") {
-                let cb = e.bound_native("abort", signal_any_fire, vec![out]);
+                let cb = e.bound_native("abort", signal_any_fire, vec![out.clone()]);
                 let len = match e.get_prop(l, "length") {
                     Some(Value::Num(n)) => n as usize,
                     _ => 0,
@@ -13703,7 +14147,7 @@ fn navigator_uad(e: &mut Engine) -> Value {
             let hints: Vec<String> = match args.first() {
                 Some(v @ Value::Obj(_)) => {
                     let len = e
-                        .get_prop_value(*v, "length")
+                        .get_prop_value(v.clone(), "length")
                         .ok()
                         .and_then(|l| match l {
                             Value::Num(n) => Some(n as u32),
@@ -13712,7 +14156,7 @@ fn navigator_uad(e: &mut Engine) -> Value {
                         .unwrap_or(0);
                     (0..len)
                         .filter_map(|i| {
-                            e.get_prop_value(*v, &i.to_string())
+                            e.get_prop_value(v.clone(), &i.to_string())
                                 .ok()
                                 .and_then(|x| e.to_js_string(x).ok())
                         })
@@ -13773,7 +14217,7 @@ pub(crate) fn install_worker_navigator(e: &mut Engine) {
     let en = e.str_val("en-US");
     let en2 = e.str_val("en");
     let langs = e.new_array(vec![en, en2]);
-    let _ = crate::builtins::object_freeze(e, Value::Undefined, &[langs]);
+    let _ = crate::builtins::object_freeze(e, Value::Undefined, std::slice::from_ref(&langs));
     e.set_own(nav, "languages", langs, true);
     // `sendBeacon` existe aussi sur `WorkerNavigator` (mixin
     // Navigator) — le beacon part par le transport worker.
@@ -13920,8 +14364,8 @@ fn creds_psa(e: &mut Engine, _t: Value, _a: &[Value]) -> JsResult<Value> {
 
 fn fmt_args(e: &mut Engine, args: &[Value]) -> JsResult<String> {
     let mut parts = Vec::with_capacity(args.len());
-    for &a in args {
-        parts.push(e.to_js_string(a)?);
+    for a in args {
+        parts.push(e.to_js_string(a.clone())?);
     }
     Ok(parts.join(" "))
 }
@@ -14847,9 +15291,9 @@ pub(crate) fn formdata_pairs_of(e: &mut Engine, v: Value) -> Option<Vec<(String,
                 // `File`/`Blob` (JS-C70) — la sérialisation
                 // urlencodée porte le nom de fichier (spec
                 // multipart `filename=` ; `Blob` nu → "blob").
-                let s = match crate::files::file_name_of(e, val) {
+                let s = match crate::files::file_name_of(e, val.clone()) {
                     Some(n) => n,
-                    None if crate::files::is_blob(e, val) => "blob".to_string(),
+                    None if crate::files::is_blob(e, val.clone()) => "blob".to_string(),
                     None => e.to_js_string(val).unwrap_or_default(),
                 };
                 (k, s)
@@ -14919,7 +15363,7 @@ pub(crate) fn install_formdata_global(e: &mut Engine) {
     if let Value::Obj(fid) = f {
         e.set_own(fid, "prototype", Value::Obj(p), false);
     }
-    e.set_own(p, "constructor", f, false);
+    e.set_own(p, "constructor", f.clone(), false);
     e.set_own(g, "FormData", f, false);
 }
 
@@ -14966,7 +15410,7 @@ fn fd_append(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
     let fname = arg(args, 2);
     if !matches!(fname, Value::Undefined) {
         let fn_str = e.to_js_string(fname)?;
-        if let Some(f) = crate::files::file_wrap_named(e, val, fn_str) {
+        if let Some(f) = crate::files::file_wrap_named(e, val.clone(), fn_str) {
             val = f;
         }
     }
@@ -14987,7 +15431,7 @@ fn fd_set(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
     let fname = arg(args, 2);
     if !matches!(fname, Value::Undefined) {
         let fn_str = e.to_js_string(fname)?;
-        if let Some(f) = crate::files::file_wrap_named(e, val, fn_str) {
+        if let Some(f) = crate::files::file_wrap_named(e, val.clone(), fn_str) {
             val = f;
         }
     }
@@ -14996,7 +15440,7 @@ fn fd_set(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
     for (k, v) in pairs {
         if k == name {
             if !inserted {
-                out.push((k, val));
+                out.push((k, val.clone()));
                 inserted = true;
             }
         } else {
@@ -15053,15 +15497,15 @@ fn fd_has(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
 
 /// `fd.forEach(cb, thisArg?)` — `(valeur, nom, fd)`.
 fn fd_for_each(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
-    let (_id, pairs) = fd_this(e, this)?;
+    let (_id, pairs) = fd_this(e, this.clone())?;
     let cb = arg(args, 0);
-    if !e.is_callable(cb) {
+    if !e.is_callable(cb.clone()) {
         return Err(e.type_error("FormData.forEach needs a function"));
     }
     let this_arg = arg(args, 1);
     for (k, v) in pairs {
         let kk = e.str_val(k);
-        e.call_value(cb, this_arg, &[v, kk, this])?;
+        e.call_value(cb.clone(), this_arg.clone(), &[v, kk, this.clone()])?;
     }
     Ok(Value::Undefined)
 }
@@ -15107,18 +15551,18 @@ fn option_ctor(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
     };
     let n = dom.borrow_mut().create_element("option");
     if let Some(v) = args.first().filter(|v| !matches!(v, Value::Undefined)) {
-        let s = e.to_js_string(*v)?;
+        let s = e.to_js_string(v.clone())?;
         dom.borrow_mut().set_attr(n, "label", &s);
         dom.borrow_mut().set_text(n, &s);
     }
     if let Some(v) = args.get(1).filter(|v| !matches!(v, Value::Undefined)) {
-        let s = e.to_js_string(*v)?;
+        let s = e.to_js_string(v.clone())?;
         dom.borrow_mut().set_attr(n, "value", &s);
     }
     // `defaultSelected`/`selected` posent tous deux l'attribut
     // `selected` (la distinction IDL/attr est hors miroir).
     for v in args.iter().skip(2).take(2) {
-        if e.to_boolean(*v) {
+        if e.to_boolean(v.clone()) {
             dom.borrow_mut().set_attr(n, "selected", "");
             break;
         }
@@ -15132,7 +15576,7 @@ fn dompoint_ctor(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
     let mut nums = [0.0f64; 4];
     for (i, slot) in nums.iter_mut().enumerate() {
         if let Some(v) = args.get(i).filter(|v| !matches!(v, Value::Undefined)) {
-            *slot = e.to_number(*v)?;
+            *slot = e.to_number(v.clone())?;
         }
     }
     let o = e.new_object();
@@ -15329,8 +15773,8 @@ fn matrix_obj(e: &mut Engine, m: [f64; 6]) -> Value {
 /// string, copie d'un objet `{a..f}`, ou identité.
 fn dommatrix_ctor(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
     let m = match args.first() {
-        Some(Value::Str(s)) => matrix_parse_str(&e.heap.string(*s).unwrap_or_default()),
-        Some(v @ Value::Obj(_)) => matrix_of(e, *v),
+        Some(Value::Str(s)) => matrix_parse_str(s.as_str()),
+        Some(v @ Value::Obj(_)) => matrix_of(e, v.clone()),
         _ => [1.0, 0.0, 0.0, 1.0, 0.0, 0.0],
     };
     Ok(matrix_obj(e, m))
@@ -15346,7 +15790,7 @@ fn dommatrix_scale(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Valu
     let m = matrix_of(e, this);
     let sx = e.to_number(arg(args, 0))?;
     let sy = match args.get(1) {
-        Some(v) if !matches!(v, Value::Undefined) => e.to_number(*v)?,
+        Some(v) if !matches!(v, Value::Undefined) => e.to_number(v.clone())?,
         _ => sx,
     };
     Ok(matrix_obj(e, matrix_mul(m, [sx, 0.0, 0.0, sy, 0.0, 0.0])))
@@ -15393,40 +15837,40 @@ fn matrix_write_self(e: &mut Engine, this: Value, m: [f64; 6]) {
 }
 
 fn dommatrix_multiply_self(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
-    let m = matrix_mul(matrix_of(e, this), matrix_of(e, arg(args, 0)));
-    matrix_write_self(e, this, m);
+    let m = matrix_mul(matrix_of(e, this.clone()), matrix_of(e, arg(args, 0)));
+    matrix_write_self(e, this.clone(), m);
     Ok(this)
 }
 
 fn dommatrix_translate_self(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
     let (x, y) = (e.to_number(arg(args, 0))?, e.to_number(arg(args, 1))?);
-    let m = matrix_mul(matrix_of(e, this), [1.0, 0.0, 0.0, 1.0, x, y]);
-    matrix_write_self(e, this, m);
+    let m = matrix_mul(matrix_of(e, this.clone()), [1.0, 0.0, 0.0, 1.0, x, y]);
+    matrix_write_self(e, this.clone(), m);
     Ok(this)
 }
 
 fn dommatrix_scale_self(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
     let sx = e.to_number(arg(args, 0))?;
     let sy = match args.get(1) {
-        Some(v) if !matches!(v, Value::Undefined) => e.to_number(*v)?,
+        Some(v) if !matches!(v, Value::Undefined) => e.to_number(v.clone())?,
         _ => sx,
     };
-    let m = matrix_mul(matrix_of(e, this), [sx, 0.0, 0.0, sy, 0.0, 0.0]);
-    matrix_write_self(e, this, m);
+    let m = matrix_mul(matrix_of(e, this.clone()), [sx, 0.0, 0.0, sy, 0.0, 0.0]);
+    matrix_write_self(e, this.clone(), m);
     Ok(this)
 }
 
 fn dommatrix_rotate_self(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
     let rad = e.to_number(arg(args, 0))?.to_radians();
     let (c, s) = (rad.cos(), rad.sin());
-    let m = matrix_mul(matrix_of(e, this), [c, s, -s, c, 0.0, 0.0]);
-    matrix_write_self(e, this, m);
+    let m = matrix_mul(matrix_of(e, this.clone()), [c, s, -s, c, 0.0, 0.0]);
+    matrix_write_self(e, this.clone(), m);
     Ok(this)
 }
 
 fn dommatrix_invert_self(e: &mut Engine, this: Value, _a: &[Value]) -> JsResult<Value> {
-    let m = matrix_of(e, this);
-    matrix_write_self(e, this, matrix_inv(m).unwrap_or(m));
+    let m = matrix_of(e, this.clone());
+    matrix_write_self(e, this.clone(), matrix_inv(m).unwrap_or(m));
     Ok(this)
 }
 
@@ -15521,19 +15965,20 @@ fn dommatrix_to_json(e: &mut Engine, this: Value, _a: &[Value]) -> JsResult<Valu
 /// longueur `w*h*4` ou erreur).
 fn imagedata_ctor(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
     let (w, h, data) = match args.first() {
-        Some(&v @ Value::Obj(_)) if crate::typed_array::bytes_of_value(e, v).is_some() => {
+        Some(v @ Value::Obj(_)) if crate::typed_array::bytes_of_value(e, v.clone()).is_some() => {
             let w = e.to_number(arg(args, 1))? as usize;
             let h = match args.get(2) {
-                Some(v) if !matches!(v, Value::Undefined) => e.to_number(*v)? as usize,
+                Some(v) if !matches!(v, Value::Undefined) => e.to_number(v.clone())? as usize,
                 _ => {
-                    let len = crate::typed_array::bytes_of_value(e, v).map_or(0, |b| b.len());
+                    let len =
+                        crate::typed_array::bytes_of_value(e, v.clone()).map_or(0, |b| b.len());
                     if w == 0 || len % (w * 4) != 0 {
                         return Err(e.type_error("ImageData: data size mismatch"));
                     }
                     len / (w * 4)
                 }
             };
-            (w, h, v)
+            (w, h, v.clone())
         }
         _ => {
             let (w, h) = (
@@ -15616,7 +16061,7 @@ impl crate::heap::Host for Path2dHost {
             if i > 0 {
                 s.push(',');
             }
-            if let Ok(n) = e.to_number(*a) {
+            if let Ok(n) = e.to_number(a.clone()) {
                 s.push_str(&n.to_string());
             }
         }
@@ -15639,8 +16084,7 @@ impl crate::heap::Host for Path2dHost {
 fn path2d_ctor(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
     let ops = std::cell::RefCell::new(Vec::new());
     if let Some(Value::Str(s)) = args.first() {
-        let d = e.heap.string(*s).unwrap_or_default();
-        ops.borrow_mut().push(format!("d({d})"));
+        ops.borrow_mut().push(format!("d({})", s.as_str()));
     }
     Ok(e.new_host_object(Rc::new(Path2dHost { ops })))
 }
@@ -15664,7 +16108,7 @@ fn offscreen_canvas_ctor(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<
         cache: cache.clone(),
         node: n,
     }));
-    dom.borrow_mut().set_canvas_ctx(n, ctx);
+    dom.borrow_mut().set_canvas_ctx(n, ctx.clone());
     let o = e.new_object();
     e.set_own(o, "width", Value::Num(w), true);
     e.set_own(o, "height", Value::Num(h), true);
@@ -15718,11 +16162,85 @@ fn fontface_ctor(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
 
 /// `fontface.load()` — promesse résolue `this` (aucune fonte
 /// distante n'est chargée — la promesse existe pour les
-/// loaders qui enchaînent `document.fonts.add(f)`).
+/// loaders qui enchaînent `document.fonts.add(f)`). JS-C387 :
+/// `status` bascule à `'loaded'` — la transition observable
+/// de la spec doit être lisible (`f.status` figé `unloaded`
+/// tuait tout gate applicatif qui attend `'loaded'`).
 fn fontface_load(e: &mut Engine, this: Value, _a: &[Value]) -> JsResult<Value> {
+    if let Value::Obj(fid) = this {
+        let st = e.str_val("loaded");
+        e.set_own(fid, "status", st, true);
+    }
     let id = e.new_promise();
     e.resolve_promise(id, this);
     Ok(Value::Obj(id))
+}
+
+/// JS-C387 — enfile un `FontFaceSetLoadEvent` synthétique
+/// `{type, fontfaces}` dans `__ff_ev` et arme le drain en
+/// microtask (spec : événement en tâche — un listener posé
+/// après `load()` dans le même tour le reçoit aussi). Repli :
+/// dispatch synchrone immédiat si `bind` est indisponible —
+/// l'événement part toujours.
+fn ff_queue_event(e: &mut Engine, set: Value, ty: &str, faces: Value) -> JsResult<()> {
+    let Value::Obj(sid) = set else {
+        return Ok(());
+    };
+    let ev = e.new_object();
+    let t2 = e.str_val(ty);
+    e.set_own(ev, "type", t2, true);
+    e.set_own(ev, "fontfaces", faces, true);
+    let mut evs = match e.get_prop(sid, "__ff_ev") {
+        Some(Value::Obj(a)) => match e.heap.obj(a).map(|o| &o.kind) {
+            Some(ObjKind::Array(v)) => v.clone(),
+            _ => Vec::new(),
+        },
+        _ => Vec::new(),
+    };
+    evs.push(Value::Obj(ev));
+    let arr = e.new_array(evs);
+    e.set_own(sid, "__ff_ev", arr, false);
+    if matches!(e.get_prop(sid, "__ff_q"), Some(Value::Bool(true))) {
+        return Ok(()); // drain déjà armé — ordre FIFO préservé
+    }
+    e.set_own(sid, "__ff_q", Value::Bool(true), false);
+    let flush = e.native_fn("ff_flush", ff_events_flush);
+    let bound = e
+        .get_prop_value(flush.clone(), "bind")
+        .ok()
+        .and_then(|b| e.call_value(b, flush, std::slice::from_ref(&set)).ok());
+    match bound {
+        Some(b) => e.enqueue_microtask(b),
+        None => {
+            let _ = ff_events_flush(e, set, &[])?;
+        }
+    }
+    Ok(())
+}
+
+/// JS-C387 — drain des événements `FontFaceSet` en file
+/// (`loading`/`loadingdone`/`loadingerror`), armé une fois par
+/// tour. Un listener qui jette n'interrompt pas les événements
+/// restants ni la file (tolérant — spec : chaque listener est
+/// rapporté indépendamment).
+fn ff_events_flush(e: &mut Engine, this: Value, _a: &[Value]) -> JsResult<Value> {
+    let Value::Obj(sid) = this else {
+        return Ok(Value::Undefined);
+    };
+    e.set_own(sid, "__ff_q", Value::Bool(false), false);
+    let evs = match e.get_prop(sid, "__ff_ev") {
+        Some(Value::Obj(a)) => match e.heap.obj(a).map(|o| &o.kind) {
+            Some(ObjKind::Array(v)) => v.clone(),
+            _ => Vec::new(),
+        },
+        _ => Vec::new(),
+    };
+    let empty = e.new_array(Vec::new());
+    e.set_own(sid, "__ff_ev", empty, false);
+    for ev in evs {
+        let _ = et_dispatch_event(e, this.clone(), &[ev]);
+    }
+    Ok(Value::Undefined)
 }
 
 /// `createImageBitmap(image, sx?, sy?, sw?, sh?)` — promesse
@@ -15820,7 +16338,7 @@ fn scheduler_yield(e: &mut Engine, _t: Value, _a: &[Value]) -> JsResult<Value> {
 /// `priority` accepté, ignoré (file FIFO unique).
 fn scheduler_post_task(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
     let cb = arg(args, 0);
-    if !e.is_callable(cb) {
+    if !e.is_callable(cb.clone()) {
         return Err(e.type_error("scheduler.postTask: callback is not a function"));
     }
     let mut delay = 0u64;

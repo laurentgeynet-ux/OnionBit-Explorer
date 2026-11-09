@@ -955,6 +955,14 @@ impl Lexer<'_> {
                 Some(c) if Some(c) == quote => return Ok(out),
                 Some('\\') => match self.bump() {
                     None => return Err(self.err("unterminated string escape")),
+                    // `\` + `<CR><LF>` = UNE LineTerminatorSequence —
+                    // consommer le LF pair sinon il frappe l'erreur
+                    // « newline in string literal » au tour suivant.
+                    Some('\r') => {
+                        if self.peek() == Some('\n') {
+                            self.bump();
+                        }
+                    }
                     Some(c) if is_line_term(c) => {} // line continuation
                     Some('n') => out.push('\n'),
                     Some('t') => out.push('\t'),
@@ -1058,7 +1066,14 @@ impl Lexer<'_> {
                     Some('u') => cur.push(self.read_unicode_escape()?),
                     Some('`') => cur.push('`'),
                     Some('$') => cur.push('$'),
-                    Some('\n') => {} // line continuation
+                    // Line continuation — `\`+`<CR><LF>` = une
+                    // séquence ; `\n`/LS/PS vides aussi (TRV ∅).
+                    Some('\r') => {
+                        if self.peek() == Some('\n') {
+                            self.bump();
+                        }
+                    }
+                    Some(c) if is_line_term(c) => {}
                     Some(c) => cur.push(c),
                 },
                 Some(c) => cur.push(c),

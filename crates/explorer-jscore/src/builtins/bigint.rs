@@ -132,11 +132,11 @@ pub(crate) fn bigint_as_uint_n(e: &mut Engine, _t: Value, args: &[Value]) -> JsR
 pub(crate) fn symbol_for(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
     let key = e.to_js_string(arg(args, 0))?;
     if let Some(v) = e.symbol_reg.get(&key) {
-        return Ok(*v);
+        return Ok(v.clone());
     }
     // `Symbol.for` symbols carry their key as description (spec).
     let sym = symbol_ctor(e, Value::Undefined, args)?;
-    e.symbol_reg.insert(key, sym);
+    e.symbol_reg.insert(key, sym.clone());
     Ok(sym)
 }
 
@@ -146,7 +146,7 @@ pub(crate) fn symbol_key_for(e: &mut Engine, _t: Value, args: &[Value]) -> JsRes
     let hit = e
         .symbol_reg
         .iter()
-        .find(|(_, v)| e.strict_eq(**v, sym))
+        .find(|(_, v)| e.strict_eq(v, &sym))
         .map(|(k, _)| k.clone());
     Ok(hit.map_or(Value::Undefined, |k| e.str_val(k)))
 }
@@ -170,7 +170,7 @@ pub(crate) fn symbol_to_string(e: &mut Engine, this: Value, _a: &[Value]) -> JsR
 }
 
 pub(crate) fn symbol_value_of(e: &mut Engine, this: Value, _a: &[Value]) -> JsResult<Value> {
-    if sym_desc(e, this).is_none() {
+    if sym_desc(e, this.clone()).is_none() {
         return Err(e.type_error("Symbol.prototype.valueOf on non-symbol"));
     }
     Ok(this)
@@ -267,7 +267,7 @@ pub(crate) fn reflect_construct(e: &mut Engine, _t: Value, args: &[Value]) -> Js
     // `newTarget` optionnel — `new.target` vu par `f` (spec :
     // défaut = la cible).
     let nt = match arg(args, 2) {
-        Value::Undefined | Value::Null => f,
+        Value::Undefined | Value::Null => f.clone(),
         v => v,
     };
     e.construct_nt(f, &list, nt)
@@ -399,7 +399,7 @@ pub(crate) fn new_proxy(e: &mut Engine, target: Value, handler: Value) -> JsResu
     // pour les marches `for-in`/`instanceof` qui ne passent pas
     // par la trap `getPrototypeOf`).
     let proto = match target {
-        Value::Obj(tid) => e.heap.obj(tid).map_or(Value::Null, |o| o.proto),
+        Value::Obj(tid) => e.heap.obj(tid).map_or(Value::Null, |o| o.proto.clone()),
         _ => Value::Null,
     };
     Ok(Value::Obj(e.heap.alloc_obj(Object {
@@ -430,7 +430,7 @@ pub(crate) fn proxy_ctor(e: &mut Engine, t: Value, args: &[Value]) -> JsResult<V
 /// native liée au proxy (`BoundNative`) qui nulle son handler.
 pub(crate) fn proxy_revocable(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
     let p = new_proxy(e, arg(args, 0), arg(args, 1))?;
-    let revoke = e.bound_native("revoke", proxy_revoke, vec![p]);
+    let revoke = e.bound_native("revoke", proxy_revoke, vec![p.clone()]);
     let out = e.new_object();
     e.set_own(out, "proxy", p, true);
     e.set_own(out, "revoke", revoke, true);
@@ -615,7 +615,7 @@ fn entry_num(e: &mut Engine, v: Value, key: &str) -> Option<f64> {
 
 fn entry_str_eq(e: &mut Engine, v: Value, key: &str, want: &str) -> bool {
     match entry_prop(e, v, key) {
-        Some(Value::Str(s)) => e.heap.string(s).as_deref() == Some(want),
+        Some(Value::Str(s)) => s.as_str() == want,
         _ => false,
     }
 }
@@ -624,14 +624,14 @@ fn entry_str_eq(e: &mut Engine, v: Value, key: &str, want: &str) -> bool {
 /// une entrée `mark` stockée (lisible via `getEntries*`).
 pub(crate) fn performance_mark(e: &mut Engine, this: Value, a: &[Value]) -> JsResult<Value> {
     let name = match a.first() {
-        Some(v) => e.to_js_string(*v)?,
+        Some(v) => e.to_js_string(v.clone())?,
         None => return Err(e.type_error("mark: name required")),
     };
     let entry = perf_entry(e, "mark", &name, perf_now(e), 0.0);
     if let Some(arr) = perf_slot(e, this, PERF_MARKS) {
         if let Some(o) = e.heap.obj_mut(arr) {
             if let ObjKind::Array(elems) = &mut o.kind {
-                elems.push(entry);
+                elems.push(entry.clone());
             }
         }
     }
@@ -643,7 +643,7 @@ pub(crate) fn performance_mark(e: &mut Engine, this: Value, a: &[Value]) -> JsRe
 /// end}` ou défaut (0 → now). Produit une entrée `measure`.
 pub(crate) fn performance_measure(e: &mut Engine, this: Value, a: &[Value]) -> JsResult<Value> {
     let name = match a.first() {
-        Some(v) => e.to_js_string(*v)?,
+        Some(v) => e.to_js_string(v.clone())?,
         None => return Err(e.type_error("measure: name required")),
     };
     let mark_time = |e: &mut Engine, this: Value, nm: &str| -> Option<f64> {
@@ -653,7 +653,7 @@ pub(crate) fn performance_measure(e: &mut Engine, this: Value, a: &[Value]) -> J
             _ => return None,
         };
         for m in elems {
-            if entry_str_eq(e, m, "name", nm) {
+            if entry_str_eq(e, m.clone(), "name", nm) {
                 return entry_num(e, m, "startTime");
             }
         }
@@ -663,12 +663,12 @@ pub(crate) fn performance_measure(e: &mut Engine, this: Value, a: &[Value]) -> J
     let (start, dur) = match a.get(1) {
         // `measure(name, startMark[, endMark])`.
         Some(v @ (Value::Str(_) | Value::Undefined)) => {
-            let start_nm = e.to_js_string(*v)?;
-            let s = mark_time(e, this, &start_nm).unwrap_or(0.0);
+            let start_nm = e.to_js_string(v.clone())?;
+            let s = mark_time(e, this.clone(), &start_nm).unwrap_or(0.0);
             let end = match a.get(2) {
                 Some(ee @ Value::Str(_)) => {
-                    let end_nm = e.to_js_string(*ee)?;
-                    mark_time(e, this, &end_nm).unwrap_or(now)
+                    let end_nm = e.to_js_string(ee.clone())?;
+                    mark_time(e, this.clone(), &end_nm).unwrap_or(now)
                 }
                 _ => now,
             };
@@ -676,9 +676,9 @@ pub(crate) fn performance_measure(e: &mut Engine, this: Value, a: &[Value]) -> J
         }
         // `measure(name, {start,duration,end})`.
         Some(v @ Value::Obj(_)) => {
-            let s = entry_num(e, *v, "start");
-            let d = entry_num(e, *v, "duration");
-            let en = entry_num(e, *v, "end");
+            let s = entry_num(e, v.clone(), "start");
+            let d = entry_num(e, v.clone(), "duration");
+            let en = entry_num(e, v.clone(), "end");
             match (s, d, en) {
                 (Some(s), _, Some(en)) => (s, en - s),
                 (Some(s), Some(d), _) => (s, d),
@@ -696,7 +696,7 @@ pub(crate) fn performance_measure(e: &mut Engine, this: Value, a: &[Value]) -> J
     if let Some(arr) = perf_slot(e, this, PERF_MEASURES) {
         if let Some(o) = e.heap.obj_mut(arr) {
             if let ObjKind::Array(elems) = &mut o.kind {
-                elems.push(entry);
+                elems.push(entry.clone());
             }
         }
     }
@@ -706,7 +706,7 @@ pub(crate) fn performance_measure(e: &mut Engine, this: Value, a: &[Value]) -> J
 /// Vide un slot User Timing (`name?` filtre, spec).
 fn perf_clear_slot(e: &mut Engine, this: Value, slot: &str, a: &[Value]) -> JsResult<()> {
     let filter_nm = match a.first() {
-        Some(v) => Some(e.to_js_string(*v)?),
+        Some(v) => Some(e.to_js_string(v.clone())?),
         None => None,
     };
     if let Some(arr) = perf_slot(e, this, slot) {
@@ -718,7 +718,7 @@ fn perf_clear_slot(e: &mut Engine, this: Value, slot: &str, a: &[Value]) -> JsRe
             None => Vec::new(),
             Some(nm) => cur
                 .into_iter()
-                .filter(|m| !entry_str_eq(e, *m, "name", nm))
+                .filter(|m| !entry_str_eq(e, m.clone(), "name", nm))
                 .collect(),
         };
         if let Some(o) = e.heap.obj_mut(arr) {
@@ -766,7 +766,7 @@ pub(crate) fn performance_get_entries(
     _a: &[Value],
 ) -> JsResult<Value> {
     let mut v = vec![perf_nav_entry(e)];
-    v.extend(perf_collect(e, this, PERF_MARKS));
+    v.extend(perf_collect(e, this.clone(), PERF_MARKS));
     v.extend(perf_collect(e, this, PERF_MEASURES));
     Ok(e.new_array(v))
 }
@@ -781,7 +781,7 @@ pub(crate) fn performance_get_entries_by_type(
     a: &[Value],
 ) -> JsResult<Value> {
     let ty = match a.first() {
-        Some(v) => e.to_js_string(*v)?,
+        Some(v) => e.to_js_string(v.clone())?,
         None => return Ok(e.new_array(Vec::new())),
     };
     let v = match ty.as_str() {
@@ -802,11 +802,11 @@ pub(crate) fn performance_get_entries_by_name(
     a: &[Value],
 ) -> JsResult<Value> {
     let nm = match a.first() {
-        Some(v) => e.to_js_string(*v)?,
+        Some(v) => e.to_js_string(v.clone())?,
         None => return Ok(e.new_array(Vec::new())),
     };
     let ty = match a.get(1) {
-        Some(Value::Str(_)) => Some(e.to_js_string(a[1])?),
+        Some(Value::Str(_)) => Some(e.to_js_string(a[1].clone())?),
         _ => None,
     };
     let mut v = match ty.as_deref() {
@@ -815,12 +815,12 @@ pub(crate) fn performance_get_entries_by_name(
         Some("navigation") => vec![perf_nav_entry(e)],
         _ => {
             let mut v = vec![perf_nav_entry(e)];
-            v.extend(perf_collect(e, this, PERF_MARKS));
+            v.extend(perf_collect(e, this.clone(), PERF_MARKS));
             v.extend(perf_collect(e, this, PERF_MEASURES));
             v
         }
     };
-    v.retain(|m| entry_str_eq(e, *m, "name", &nm));
+    v.retain(|m| entry_str_eq(e, m.clone(), "name", &nm));
     Ok(e.new_array(v))
 }
 
@@ -904,7 +904,7 @@ pub(crate) fn array_is_array(e: &mut Engine, _t: Value, args: &[Value]) -> JsRes
                 if handler.is_none() {
                     return Err(e.type_error("cannot perform operation on a revoked proxy"));
                 }
-                cur = *target;
+                cur = target.clone();
                 e.deleg_hop(&mut depth)?;
             }
             _ => return Ok(Value::Bool(false)),
@@ -918,11 +918,11 @@ pub(crate) fn array_from(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<
     let src = arg(args, 0);
     let mapfn = arg(args, 1);
     let has_map = !matches!(mapfn, Value::Undefined);
-    if has_map && !e.is_callable(mapfn) {
+    if has_map && !e.is_callable(mapfn.clone()) {
         return Err(e.type_error("Array.from mapfn is not callable"));
     }
     let t = arg(args, 2);
-    let mut items = if let Ok(v) = e.iter_values(src) {
+    let mut items = if let Ok(v) = e.iter_values(src.clone()) {
         v
     } else {
         // Spec : pas de @@iterator → array-like `length`-driven.
@@ -930,7 +930,7 @@ pub(crate) fn array_from(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<
         // distinction impossible ici (deviation : le repli
         // array-like est tenté dans les deux cas).
         {
-            let n = match e.get_prop_value(src, "length") {
+            let n = match e.get_prop_value(src.clone(), "length") {
                 Ok(l) => {
                     let n = e.to_number(l)?;
                     if n.is_finite() && n > 0.0 {
@@ -944,14 +944,14 @@ pub(crate) fn array_from(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<
             let mut out = Vec::with_capacity(n.min(1_000_000));
             for i in 0..n {
                 e.tick()?;
-                out.push(e.get_prop_value(src, &i.to_string())?);
+                out.push(e.get_prop_value(src.clone(), &i.to_string())?);
             }
             out
         }
     };
     if has_map {
         for (i, v) in items.iter_mut().enumerate() {
-            *v = e.call_value(mapfn, t, &[*v, Value::Num(i as f64)])?;
+            *v = e.call_value(mapfn.clone(), t.clone(), &[v.clone(), Value::Num(i as f64)])?;
         }
     }
     Ok(e.new_array(items))
@@ -962,9 +962,9 @@ pub(crate) fn array_includes(e: &mut Engine, this: Value, args: &[Value]) -> JsR
     let needle = arg(args, 0);
     let elems = take_elems(e, id)?;
     // SameValueZero (NaN matches itself here).
-    let found = elems.iter().any(|&v| {
-        e.strict_eq(v, needle)
-            || matches!((v, needle), (Value::Num(a), Value::Num(b)) if a.is_nan() && b.is_nan())
+    let found = elems.iter().any(|v| {
+        e.strict_eq(v, &needle)
+            || matches!((v, needle.clone()), (Value::Num(a), Value::Num(b)) if a.is_nan() && b.is_nan())
     });
     put_elems(e, id, elems)?;
     Ok(Value::Bool(found))
@@ -976,11 +976,15 @@ pub(crate) fn array_includes(e: &mut Engine, this: Value, args: &[Value]) -> JsR
 /// collectait tous les hits sur un backing détaché (§B-90) et
 /// ne court-circuitait jamais.
 pub(crate) fn array_find(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
-    let (id, cb, this_arg) = iter_cb(e, this, args, "find")?;
+    let (id, cb, this_arg) = iter_cb(e, this.clone(), args, "find")?;
     let len = iter_len(e, id)?;
     for i in 0..len {
         if let Some(v) = iter_get(e, id, i)? {
-            let r = e.call_value(cb, this_arg, &[v, Value::Num(i as f64), this])?;
+            let r = e.call_value(
+                cb.clone(),
+                this_arg.clone(),
+                &[v.clone(), Value::Num(i as f64), this.clone()],
+            )?;
             if e.to_boolean(r) {
                 return Ok(v);
             }
@@ -993,11 +997,15 @@ pub(crate) fn array_find(e: &mut Engine, this: Value, args: &[Value]) -> JsResul
 }
 
 pub(crate) fn array_find_index(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
-    let (id, cb, this_arg) = iter_cb(e, this, args, "findIndex")?;
+    let (id, cb, this_arg) = iter_cb(e, this.clone(), args, "findIndex")?;
     let len = iter_len(e, id)?;
     for i in 0..len {
         if let Some(v) = iter_get(e, id, i)? {
-            let r = e.call_value(cb, this_arg, &[v, Value::Num(i as f64), this])?;
+            let r = e.call_value(
+                cb.clone(),
+                this_arg.clone(),
+                &[v, Value::Num(i as f64), this.clone()],
+            )?;
             if e.to_boolean(r) {
                 return Ok(Value::Num(i as f64));
             }
@@ -1010,11 +1018,15 @@ pub(crate) fn array_find_index(e: &mut Engine, this: Value, args: &[Value]) -> J
 }
 
 pub(crate) fn array_some(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
-    let (id, cb, this_arg) = iter_cb(e, this, args, "some")?;
+    let (id, cb, this_arg) = iter_cb(e, this.clone(), args, "some")?;
     let len = iter_len(e, id)?;
     for i in 0..len {
         if let Some(v) = iter_get(e, id, i)? {
-            let r = e.call_value(cb, this_arg, &[v, Value::Num(i as f64), this])?;
+            let r = e.call_value(
+                cb.clone(),
+                this_arg.clone(),
+                &[v, Value::Num(i as f64), this.clone()],
+            )?;
             if e.to_boolean(r) {
                 return Ok(Value::Bool(true));
             }
@@ -1027,11 +1039,15 @@ pub(crate) fn array_some(e: &mut Engine, this: Value, args: &[Value]) -> JsResul
 }
 
 pub(crate) fn array_every(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
-    let (id, cb, this_arg) = iter_cb(e, this, args, "every")?;
+    let (id, cb, this_arg) = iter_cb(e, this.clone(), args, "every")?;
     let len = iter_len(e, id)?;
     for i in 0..len {
         if let Some(v) = iter_get(e, id, i)? {
-            let r = e.call_value(cb, this_arg, &[v, Value::Num(i as f64), this])?;
+            let r = e.call_value(
+                cb.clone(),
+                this_arg.clone(),
+                &[v, Value::Num(i as f64), this.clone()],
+            )?;
             // Les trous sont ignorés — le verdict porte sur les
             // éléments présents seulement (spec).
             if !e.to_boolean(r) {
@@ -1057,7 +1073,7 @@ pub(crate) fn string_includes(e: &mut Engine, this: Value, args: &[Value]) -> Js
     };
     // `contains` sur la tranche **octets** du `from`-ième unit —
     // zéro matérialisation de la vue u16 (§B-59).
-    let hay = &s[Heap::u16_pos_to_byte(&s, from)..];
+    let hay = &s[JsStr::u16_pos_to_byte(&s, from)..];
     Ok(Value::Bool(hay.contains(&needle)))
 }
 
@@ -1082,7 +1098,7 @@ pub(crate) fn string_starts_with(e: &mut Engine, this: Value, args: &[Value]) ->
     {
         return Ok(Value::Bool(false));
     }
-    let hay = &s[Heap::u16_pos_to_byte(&s, start)..];
+    let hay = &s[JsStr::u16_pos_to_byte(&s, start)..];
     Ok(Value::Bool(hay.starts_with(&needle)))
 }
 
@@ -1107,7 +1123,7 @@ pub(crate) fn string_ends_with(e: &mut Engine, this: Value, args: &[Value]) -> J
     {
         return Ok(Value::Bool(false));
     }
-    let hay = &s[..Heap::u16_pos_to_byte(&s, end)];
+    let hay = &s[..JsStr::u16_pos_to_byte(&s, end)];
     Ok(Value::Bool(hay.ends_with(&needle)))
 }
 
@@ -1207,7 +1223,7 @@ pub(crate) fn object_get_own_property_names(
         Value::Obj(id) => e.own_keys_trapped(id)?,
         // String-box : indices + `length` (spec `ToObject`).
         Value::Str(sid) => {
-            let n = e.heap.string(sid).map_or(0, |s| u16_len(&s));
+            let n = sid.u16_len();
             (0..n)
                 .map(|i| i.to_string())
                 .chain(["length".to_string()])
@@ -1282,7 +1298,7 @@ pub(crate) fn object_prevent_extensions(
         // récurait ici hors `call_depth` (J2, classe alpine).
         let mut depth = 0;
         while let Some((tid, target, handler)) = e.proxy_th(id)? {
-            let trap = e.proxy_trap(handler, "preventExtensions")?;
+            let trap = e.proxy_trap(handler.clone(), "preventExtensions")?;
             if matches!(trap, Value::Obj(_)) {
                 let ok = e.call_value(trap, handler, &[target])?;
                 if !e.to_boolean(ok) {
@@ -1310,7 +1326,7 @@ pub(crate) fn object_is_extensible(e: &mut Engine, _t: Value, args: &[Value]) ->
         // Délégation bornée — même motif que `object_prevent_extensions` (J2).
         let mut depth = 0;
         while let Some((tid, target, handler)) = e.proxy_th(id)? {
-            let trap = e.proxy_trap(handler, "isExtensible")?;
+            let trap = e.proxy_trap(handler.clone(), "isExtensible")?;
             if matches!(trap, Value::Obj(_)) {
                 let r = e.call_value(trap, handler, &[target])?;
                 let rb = e.to_boolean(r);

@@ -80,6 +80,44 @@ fn insert_before_ordre() {
     );
 }
 
+/// JS-C400 / §B-111 — `insertBefore(n, n)` est une no-op spec
+/// (référence := frère suivant), jamais un anneau frère.
+#[test]
+fn insert_before_soi_meme_noop() {
+    let mut dom = Dom::new();
+    let doc = dom.document();
+    let div = el(&mut dom, "div");
+    let (a, b) = (el(&mut dom, "a"), el(&mut dom, "b"));
+    dom.append_child(doc, div).expect("div");
+    dom.append_child(div, a).expect("a");
+    dom.append_child(div, b).expect("b");
+
+    // `insertBefore(a, a)` : no-op — `a` reste devant `b`, et la
+    // chaîne de siblings ne boucle pas (avant la garde :
+    // `a.next_sibling == a` → les marches `children`/`descendants`
+    // ne terminaient pas).
+    dom.insert_before(div, a, Some(a)).expect("self-ref noop");
+    assert_eq!(dom.children(div).expect("children"), vec![a, b]);
+    assert_eq!(dom.next_sibling(a), Ok(Some(b)));
+    assert_eq!(dom.prev_sibling(a), Ok(None));
+    // En dernier enfant : normalisé à `None` → fin de liste =
+    // no-op pareil.
+    dom.insert_before(div, b, Some(b)).expect("self-ref last");
+    assert_eq!(dom.children(div).expect("children"), vec![a, b]);
+    assert_eq!(dom.next_sibling(b), Ok(None));
+    // `n` n'est pas enfant du parent : la validation de
+    // référence rejette comme avant (pas de move sauvage).
+    let autre = el(&mut dom, "x");
+    let m = el(&mut dom, "m");
+    dom.append_child(autre, m).expect("m sous x");
+    assert_eq!(
+        dom.insert_before(div, m, Some(m)),
+        Err(DomError::HierarchyRequest(
+            "la référence n'est pas un enfant du parent"
+        ))
+    );
+}
+
 #[test]
 fn hierarchie_invalide() {
     let mut dom = Dom::new();

@@ -45,7 +45,7 @@ pub(crate) fn array_push(e: &mut Engine, this: Value, args: &[Value]) -> JsResul
                 // notation décimale — chemin rare, reste fidèle.
                 e.to_js_string(Value::Num(len + i as f64))?
             };
-            let _ = e.set_prop(id, &key, *a);
+            let _ = e.set_prop(id, &key, a.clone());
         }
         let _ = e.set_prop(id, "length", Value::Num(new_len));
         return Ok(Value::Num(new_len));
@@ -151,6 +151,22 @@ pub(crate) fn array_join(e: &mut Engine, this: Value, args: &[Value]) -> JsResul
     // `toString` d'un élément observe `this` peuplé — le backing
     // détaché de `with_elems` le lui masquait (§B-90).
     let len = iter_len(e, id)?;
+    // §B-110 : `join`/`toString` sur len ≤ 1 — spec `ToString`
+    // retourne l'élément lui-même ; pour une `Str` c'est la
+    // cellule existante (zéro alloc), pour `Num` le cache
+    // petits-entiers. Les prédicats obfusqués `[x]+""`/`[""]==0`
+    // churnent une Str par op sinon (mesuré SG : 1,3 Gio).
+    if len <= 1 {
+        return Ok(match iter_get(e, id, 0)? {
+            None | Some(Value::Undefined | Value::Null) => e.str_val(""),
+            Some(v @ Value::Str(_)) => v,
+            Some(Value::Num(n)) => e.num_str_val(n),
+            Some(v) => {
+                let s = e.to_js_string(v)?;
+                e.str_val(s)
+            }
+        });
+    }
     let mut parts = Vec::with_capacity(len.min(65_536));
     // `parts` et la sortie `join` sont des String natifs hors
     // compteur du heap — la taille cumulée est gardée en cours
@@ -188,7 +204,7 @@ pub(crate) fn array_index_of(e: &mut Engine, this: Value, args: &[Value]) -> JsR
     }
     let mut found = -1i64;
     for (i, v) in elems.iter().enumerate().skip(start as usize) {
-        if !v.is_hole() && e.strict_eq(*v, needle) {
+        if !v.is_hole() && e.strict_eq(v, &needle) {
             found = i as i64;
             break;
         }
@@ -203,7 +219,7 @@ pub(crate) fn array_last_index_of(e: &mut Engine, this: Value, args: &[Value]) -
     let elems = take_elems(e, id)?;
     let mut found = -1i64;
     for (i, v) in elems.iter().enumerate().rev() {
-        if !v.is_hole() && e.strict_eq(*v, needle) {
+        if !v.is_hole() && e.strict_eq(v, &needle) {
             found = i as i64;
             break;
         }
@@ -223,7 +239,7 @@ pub(crate) fn norm_idx(i: i64, len: i64) -> usize {
 pub(crate) fn array_slice(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
     // Méthode générique (spec) — array-likes via `length`+`Get`
     // (`Object.create(array)` mesuré github selector-observer).
-    let elems = this_array_like(e, this)?;
+    let elems = this_array_like(e, this.clone())?;
     let len = elems.len() as i64;
     let start = match arg(args, 0) {
         Value::Undefined => 0,
@@ -242,7 +258,7 @@ pub(crate) fn array_slice(e: &mut Engine, this: Value, args: &[Value]) -> JsResu
     // `ArraySpeciesCreate(this, out.len)` — sous-classes.
     let a_v = species_array(e, this, out.len())?;
     for (i, v) in out.iter().enumerate() {
-        e.set_prop_value(a_v, &i.to_string(), *v)?;
+        e.set_prop_value(a_v.clone(), &i.to_string(), v.clone())?;
     }
     Ok(a_v)
 }
@@ -269,7 +285,7 @@ pub(crate) fn array_concat(e: &mut Engine, this: Value, args: &[Value]) -> JsRes
             // hostile d'un array-like (`{length:1e9}`) : plafond
             // cohérent avec `array_from` + tick périodique — la
             // boucle de `Get` tourne sinon sans borne (JS-C55).
-            let len = match e.get_prop_value(*a, "length")? {
+            let len = match e.get_prop_value(a.clone(), "length")? {
                 Value::Num(n) => (n.max(0.0) as usize).min(1_000_000),
                 _ => 0,
             };
@@ -280,12 +296,12 @@ pub(crate) fn array_concat(e: &mut Engine, this: Value, args: &[Value]) -> JsRes
                 // densifiés en `undefined`.
                 let v = if let Value::Obj(aid) = a {
                     if e.has_prop(*aid, &k)? {
-                        e.get_prop_value(*a, &k)?
+                        e.get_prop_value(a.clone(), &k)?
                     } else {
                         Value::Hole
                     }
                 } else {
-                    e.get_prop_value(*a, &k)?
+                    e.get_prop_value(a.clone(), &k)?
                 };
                 out.push(v);
                 if i % 8192 == 0 {
@@ -293,18 +309,18 @@ pub(crate) fn array_concat(e: &mut Engine, this: Value, args: &[Value]) -> JsRes
                 }
             }
         } else {
-            out.push(*a);
+            out.push(a.clone());
         }
     }
     let a_v = species_array(e, this, out.len())?;
     for (i, v) in out.iter().enumerate() {
-        e.set_prop_value(a_v, &i.to_string(), *v)?;
+        e.set_prop_value(a_v.clone(), &i.to_string(), v.clone())?;
     }
     Ok(a_v)
 }
 
 pub(crate) fn array_reverse(e: &mut Engine, this: Value, _a: &[Value]) -> JsResult<Value> {
-    let id = this_array(e, this)?;
+    let id = this_array(e, this.clone())?;
     // `reverse` n'écrit que si len > 1 (spec — sinon aucun `Set`).
     if e.heap.obj(id).is_some_and(|o| {
         o.elem_integrity & 2 != 0 && matches!(&o.kind, ObjKind::Array(v) if v.len() > 1)
@@ -331,9 +347,9 @@ pub(crate) fn array_reverse(e: &mut Engine, this: Value, _a: &[Value]) -> JsResu
 }
 
 pub(crate) fn array_sort(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
-    let id = this_array(e, this)?;
+    let id = this_array(e, this.clone())?;
     let cmp = arg(args, 0);
-    let use_cmp = e.is_callable(cmp);
+    let use_cmp = e.is_callable(cmp.clone());
     // `sort` écrit chaque élément via `Set(throw)` → tableau gelé
     // non vide → `TypeError` même si l'ordre ne change pas (spec).
     if e.heap.obj(id).is_some_and(|o| {
@@ -371,24 +387,28 @@ pub(crate) fn array_sort(e: &mut Engine, this: Value, args: &[Value]) -> JsResul
                     let r = (i + 2 * width).min(n);
                     let (mut a, mut b, mut k) = (i, m, i);
                     while a < m && b < r {
-                        let cr = e.call_value(cmp, Value::Undefined, &[elems[a], elems[b]])?;
+                        let cr = e.call_value(
+                            cmp.clone(),
+                            Value::Undefined,
+                            &[elems[a].clone(), elems[b].clone()],
+                        )?;
                         let take_right = e.to_number(cr)? > 0.0;
                         if take_right {
-                            buf[k] = elems[b];
+                            buf[k] = elems[b].clone();
                             b += 1;
                         } else {
-                            buf[k] = elems[a];
+                            buf[k] = elems[a].clone();
                             a += 1;
                         }
                         k += 1;
                     }
                     while a < m {
-                        buf[k] = elems[a];
+                        buf[k] = elems[a].clone();
                         a += 1;
                         k += 1;
                     }
                     while b < r {
-                        buf[k] = elems[b];
+                        buf[k] = elems[b].clone();
                         b += 1;
                         k += 1;
                     }
@@ -403,8 +423,8 @@ pub(crate) fn array_sort(e: &mut Engine, this: Value, args: &[Value]) -> JsResul
             // l'insertion sort O(n²) appelait `to_js_string` par
             // comparaison (JS-C55).
             let mut keyed: Vec<(String, Value)> = Vec::with_capacity(elems.len());
-            for &v in elems.iter() {
-                keyed.push((e.to_js_string(v)?, v));
+            for v in elems.iter() {
+                keyed.push((e.to_js_string(v.clone())?, v.clone()));
             }
             keyed.sort_by(|a, b| a.0.cmp(&b.0));
             *elems = keyed.into_iter().map(|(_, v)| v).collect();
@@ -415,14 +435,18 @@ pub(crate) fn array_sort(e: &mut Engine, this: Value, args: &[Value]) -> JsResul
 }
 
 pub(crate) fn array_for_each(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
-    let (id, cb, this_arg) = iter_cb(e, this, args, "forEach")?;
+    let (id, cb, this_arg) = iter_cb(e, this.clone(), args, "forEach")?;
     // Itération vivante (`iter_get`, JS-C335) : `cb` reçoit le
     // tableau peuplé et observe les mutations des indices non
     // encore visités — `with_elems` le lui masquait (§B-90).
     let len = iter_len(e, id)?;
     for i in 0..len {
         if let Some(v) = iter_get(e, id, i)? {
-            e.call_value(cb, this_arg, &[v, Value::Num(i as f64), this])?;
+            e.call_value(
+                cb.clone(),
+                this_arg.clone(),
+                &[v, Value::Num(i as f64), this.clone()],
+            )?;
         }
         if i % 8192 == 0 {
             e.tick()?; // cb native : ops-limit relu ici (JS-C55)
@@ -432,14 +456,18 @@ pub(crate) fn array_for_each(e: &mut Engine, this: Value, args: &[Value]) -> JsR
 }
 
 pub(crate) fn array_map(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
-    let (id, cb, this_arg) = iter_cb(e, this, args, "map")?;
+    let (id, cb, this_arg) = iter_cb(e, this.clone(), args, "map")?;
     let len = iter_len(e, id)?;
     let mut out = Vec::with_capacity(len.min(1 << 20));
     for i in 0..len {
         // `map` préserve les trous (spec — `Array(3).map(f)`
         // reste épars, la cb n'est pas appelée).
         out.push(match iter_get(e, id, i)? {
-            Some(v) => e.call_value(cb, this_arg, &[v, Value::Num(i as f64), this])?,
+            Some(v) => e.call_value(
+                cb.clone(),
+                this_arg.clone(),
+                &[v, Value::Num(i as f64), this.clone()],
+            )?,
             None => Value::Hole,
         });
         if i % 8192 == 0 {
@@ -448,18 +476,22 @@ pub(crate) fn array_map(e: &mut Engine, this: Value, args: &[Value]) -> JsResult
     }
     let a_v = species_array(e, this, out.len())?;
     for (i, v) in out.iter().enumerate() {
-        e.set_prop_value(a_v, &i.to_string(), *v)?;
+        e.set_prop_value(a_v.clone(), &i.to_string(), v.clone())?;
     }
     Ok(a_v)
 }
 
 pub(crate) fn array_filter(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
-    let (id, cb, this_arg) = iter_cb(e, this, args, "filter")?;
+    let (id, cb, this_arg) = iter_cb(e, this.clone(), args, "filter")?;
     let len = iter_len(e, id)?;
     let mut out = Vec::new();
     for i in 0..len {
         if let Some(v) = iter_get(e, id, i)? {
-            let keep = e.call_value(cb, this_arg, &[v, Value::Num(i as f64), this])?;
+            let keep = e.call_value(
+                cb.clone(),
+                this_arg.clone(),
+                &[v.clone(), Value::Num(i as f64), this.clone()],
+            )?;
             if e.to_boolean(keep) {
                 out.push(v);
             }
@@ -470,16 +502,16 @@ pub(crate) fn array_filter(e: &mut Engine, this: Value, args: &[Value]) -> JsRes
     }
     let a_v = species_array(e, this, out.len())?;
     for (i, v) in out.iter().enumerate() {
-        e.set_prop_value(a_v, &i.to_string(), *v)?;
+        e.set_prop_value(a_v.clone(), &i.to_string(), v.clone())?;
     }
     Ok(a_v)
 }
 
 pub(crate) fn array_reduce(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
-    let (id, cb, _this_arg) = iter_cb(e, this, args, "reduce")?;
+    let (id, cb, _this_arg) = iter_cb(e, this.clone(), args, "reduce")?;
     let len = iter_len(e, id)?;
     let (mut acc, start) = if let Some(v) = args.get(1) {
-        (*v, 0)
+        (v.clone(), 0)
     } else {
         // Sans init, l'acc est le premier élément *présent* —
         // tout-trous ou vide → TypeError (spec).
@@ -502,7 +534,11 @@ pub(crate) fn array_reduce(e: &mut Engine, this: Value, args: &[Value]) -> JsRes
     };
     for i in start..len {
         if let Some(v) = iter_get(e, id, i)? {
-            acc = e.call_value(cb, Value::Undefined, &[acc, v, Value::Num(i as f64), this])?;
+            acc = e.call_value(
+                cb.clone(),
+                Value::Undefined,
+                &[acc, v, Value::Num(i as f64), this.clone()],
+            )?;
         }
         if i % 8192 == 0 {
             e.tick()?;

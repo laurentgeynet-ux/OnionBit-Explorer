@@ -32,7 +32,7 @@ pub(crate) fn install(e: &mut Engine) {
     ] {
         let p = e.new_object();
         let c = crate::builtins::ctor(e, name, f, p);
-        e.set_own(intl, name, c, false);
+        e.set_own(intl, name, c.clone(), false);
         // `supportedLocalesOf` statique (spec) sur chaque ctor.
         e.add_method(crate::builtins::c_id(c), "supportedLocalesOf", canonical);
     }
@@ -73,7 +73,7 @@ fn intl_obj(
     let id = e.heap.alloc_obj(o);
     let v = Value::Obj(id);
     for (n, f) in binds {
-        let bv = e.bound_native(n, *f, vec![v]);
+        let bv = e.bound_native(n, *f, vec![v.clone()]);
         e.set_own(id, n, bv, false);
     }
     v
@@ -100,7 +100,7 @@ fn self_id(e: &mut Engine, this: Value, args: &[Value], who: &str) -> JsResult<O
 /// Chaîne `__opts` de `id` (blob moteur).
 fn self_opts(e: &mut Engine, id: ObjId) -> String {
     match e.get_prop(id, "__opts") {
-        Some(Value::Str(sid)) => e.heap.string(sid).unwrap_or_default(),
+        Some(Value::Str(sid)) => sid.to_string(),
         _ => String::new(),
     }
 }
@@ -1920,9 +1920,9 @@ fn seg_segment(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
     let iv = e.str_val(input);
     e.set_own(seg, "__input", iv, false);
     let seg_v = Value::Obj(seg);
-    let it = e.bound_native("[Symbol.iterator]", segs_iter_new, vec![seg_v]);
+    let it = e.bound_native("[Symbol.iterator]", segs_iter_new, vec![seg_v.clone()]);
     e.set_own(seg, crate::interp::SYM_ITERATOR, it, false);
-    let cont = e.bound_native("containing", segs_containing, vec![seg_v]);
+    let cont = e.bound_native("containing", segs_containing, vec![seg_v.clone()]);
     e.set_own(seg, "containing", cont, true);
     Ok(seg_v)
 }
@@ -1938,7 +1938,7 @@ fn segs_iter_new(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
     e.set_own(it, "__i", Value::Num(0.0), false);
     e.set_own(it, "__segs", list, false);
     let it_v = Value::Obj(it);
-    let next = e.bound_native("next", segs_iter_next, vec![it_v]);
+    let next = e.bound_native("next", segs_iter_next, vec![it_v.clone()]);
     e.set_own(it, "next", next, true);
     Ok(it_v)
 }

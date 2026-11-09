@@ -19,7 +19,7 @@ use super::*;
 pub(crate) fn eval_fn(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
     match arg(args, 0) {
         Value::Str(id) => {
-            let src = e.heap.string(id).unwrap_or_default();
+            let src = id.to_string();
             e.eval_source(&src)
         }
         v => Ok(v),
@@ -54,14 +54,14 @@ fn function_ctor_kind(e: &mut Engine, _t: Value, args: &[Value], kw: &str) -> Js
     let body = if args.is_empty() {
         String::new()
     } else {
-        e.to_js_string(args[args.len() - 1])?
+        e.to_js_string(args[args.len() - 1].clone())?
     };
     let mut params = String::new();
     for p in &args[..args.len().saturating_sub(1)] {
         if !params.is_empty() {
             params.push(',');
         }
-        params.push_str(&e.to_js_string(*p)?);
+        params.push_str(&e.to_js_string(p.clone())?);
     }
     let src = format!("{kw} anonymous({params}) {{\n{body}\n}}");
     if let Some(h) = &e.eval_hook {
@@ -92,7 +92,7 @@ fn function_ctor_kind(e: &mut Engine, _t: Value, args: &[Value], kw: &str) -> Js
 
 /// `fn.bind(thisArg, ...bound)` → `Fun::Bound` wrapper.
 pub(crate) fn function_bind(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
-    if !e.is_callable(this) {
+    if !e.is_callable(this.clone()) {
         return Err(e.type_error("bind called on non-callable"));
     }
     let bound_this = arg(args, 0);
@@ -100,7 +100,7 @@ pub(crate) fn function_bind(e: &mut Engine, this: Value, args: &[Value]) -> JsRe
     let proto = Value::Obj(e.protos.function);
     let id = e.heap.alloc_obj(crate::heap::Object::fun(
         crate::heap::Fun::Bound {
-            target: this,
+            target: this.clone(),
             this: bound_this,
             bound: bound.clone(),
         },
@@ -109,7 +109,7 @@ pub(crate) fn function_bind(e: &mut Engine, this: Value, args: &[Value]) -> JsRe
     // Spec `BoundFunctionCreate` : `length` =
     // max(0, target.length − nArgs liés), `name` =
     // "bound " + target.name — props `{w:false, c:true}`.
-    let tl = match e.get_prop_value(this, "length")? {
+    let tl = match e.get_prop_value(this.clone(), "length")? {
         Value::Num(n) if n.is_finite() => n.max(0.0) as usize,
         _ => 0,
     };

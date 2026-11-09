@@ -277,7 +277,7 @@ fn websocket_ctor(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> 
         })),
     }));
     let p = ws_proto(e);
-    if let Value::Obj(id) = v {
+    if let Value::Obj(id) = v.clone() {
         if let Some(o) = e.heap.obj_mut(id) {
             o.proto = Value::Obj(p);
         }
@@ -290,7 +290,7 @@ fn websocket_ctor(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> 
                     protocols: seen,
                     ctx: e.cur_ctx,
                 });
-                if let Some(data) = ws_data(e, v) {
+                if let Some(data) = ws_data(e, v.clone()) {
                     data.borrow_mut().handle = Some(h);
                 }
                 e.ws.live.push((h, id));
@@ -453,13 +453,13 @@ impl Engine {
             crate::dom_host::event_proto(self, o, "MessageEvent");
             let t = self.str_val("message");
             self.set_own(o, "type", t, true);
-            self.set_own(o, "target", this, true);
+            self.set_own(o, "target", this.clone(), true);
             self.set_own(o, "data", payload, true);
             Value::Obj(o)
         };
         if let Some(f) = self.get_prop(wrapper, "onmessage") {
-            if self.is_callable(f) {
-                self.call_value(f, this, &[ev])?;
+            if self.is_callable(f.clone()) {
+                self.call_value(f, this.clone(), std::slice::from_ref(&ev))?;
             }
         }
         let fns: Vec<Value> = data
@@ -467,11 +467,11 @@ impl Engine {
             .listeners
             .iter()
             .filter(|(t, _, _)| t == "message")
-            .map(|(_, f, _)| *f)
+            .map(|(_, f, _)| f.clone())
             .collect();
         for f in fns {
-            if self.is_callable(f) {
-                self.call_value(f, this, &[ev])?;
+            if self.is_callable(f.clone()) {
+                self.call_value(f, this.clone(), std::slice::from_ref(&ev))?;
             }
         }
         Ok(())
@@ -502,7 +502,7 @@ impl Engine {
             let o = self.new_object();
             let t = self.str_val(ty);
             self.set_own(o, "type", t, true);
-            self.set_own(o, "target", this, true);
+            self.set_own(o, "target", this.clone(), true);
             if let Some((code, reason, clean)) = close {
                 self.set_own(o, "code", Value::Num(code), true);
                 let r = self.str_val(reason);
@@ -513,8 +513,8 @@ impl Engine {
         };
         let key = format!("on{ty}");
         if let Some(f) = self.get_prop(wrapper, &key) {
-            if self.is_callable(f) {
-                self.call_value(f, this, &[ev])?;
+            if self.is_callable(f.clone()) {
+                self.call_value(f, this.clone(), std::slice::from_ref(&ev))?;
             }
         }
         let fns: Vec<Value> = data
@@ -522,11 +522,11 @@ impl Engine {
             .listeners
             .iter()
             .filter(|(t, _, _)| t == ty)
-            .map(|(_, f, _)| *f)
+            .map(|(_, f, _)| f.clone())
             .collect();
         for f in fns {
-            if self.is_callable(f) {
-                self.call_value(f, this, &[ev])?;
+            if self.is_callable(f.clone()) {
+                self.call_value(f, this.clone(), std::slice::from_ref(&ev))?;
             }
         }
         Ok(())
@@ -634,7 +634,7 @@ impl Host for WebSocketHost {
                 if !matches!(code, Value::Undefined) {
                     // IDL `unsigned short` : tronqué — 1000
                     // ou 3000-4999, sinon `InvalidAccessError`.
-                    let c = e.to_number(code)? as i64;
+                    let c = e.to_number(code.clone())? as i64;
                     if !(c == 1000 || (3000..=4999).contains(&c)) {
                         return Err(crate::heap::Thrown(ws_err(
                             e,
@@ -646,7 +646,7 @@ impl Host for WebSocketHost {
                 let reason = arg(args, 1);
                 if !matches!(reason, Value::Undefined) {
                     // Spec : raison ≤ 123 octets UTF-8.
-                    if e.to_js_string(reason)?.len() > 123 {
+                    if e.to_js_string(reason.clone())?.len() > 123 {
                         return Err(e.syntax_error("WebSocket: close reason too long"));
                     }
                 }
@@ -686,7 +686,7 @@ impl Host for WebSocketHost {
                 let ty = e.to_js_string(arg(args, 0))?;
                 let f = arg(args, 1);
                 let capture = e.to_boolean(arg(args, 2));
-                if e.is_callable(f) {
+                if e.is_callable(f.clone()) {
                     self.data.borrow_mut().listeners.push((ty, f, capture));
                 }
                 Ok(Some(Value::Undefined))
@@ -697,14 +697,15 @@ impl Host for WebSocketHost {
                 self.data
                     .borrow_mut()
                     .listeners
-                    .retain(|(t, g, _)| !(*t == ty && e.strict_eq(*g, f)));
+                    .retain(|(t, g, _)| !(*t == ty && e.strict_eq(g, &f)));
                 Ok(Some(Value::Undefined))
             }
             "dispatchEvent" => {
                 let ev = arg(args, 0);
                 let ty = if let Value::Obj(id) = ev {
                     e.get_prop(id, "type")
-                        .and_then(|v| e.heap_string_of(v))
+                        .as_ref()
+                        .and_then(Engine::heap_string_of)
                         .unwrap_or_default()
                 } else {
                     String::new()
@@ -717,7 +718,9 @@ impl Host for WebSocketHost {
                             None
                         };
                         let reason = if let Value::Obj(id) = ev {
-                            e.get_prop(id, "reason").and_then(|v| e.heap_string_of(v))
+                            e.get_prop(id, "reason")
+                                .as_ref()
+                                .and_then(Engine::heap_string_of)
                         } else {
                             None
                         };
@@ -768,7 +771,7 @@ pub(crate) fn install_websocket(e: &mut Engine) {
     if let Value::Obj(cid) = sc {
         let p = ws_proto(e);
         e.set_own(cid, "prototype", Value::Obj(p), false);
-        e.set_own(p, "constructor", sc, false);
+        e.set_own(p, "constructor", sc.clone(), false);
         // Constantes statiques `WebSocket.CONNECTING/…`
         // (spec — doublon des props du proto et du host).
         for (k, n) in [
@@ -785,5 +788,5 @@ pub(crate) fn install_websocket(e: &mut Engine) {
 
 /// `args[i]` ou `Undefined` (mirroir du helper files.rs).
 fn arg(args: &[Value], i: usize) -> Value {
-    args.get(i).copied().unwrap_or(Value::Undefined)
+    args.get(i).cloned().unwrap_or(Value::Undefined)
 }

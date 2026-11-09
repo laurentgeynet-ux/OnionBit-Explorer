@@ -311,6 +311,8 @@ fn test_session_policy(
         js_stall_cooldown: std::time::Duration::ZERO,
         poll_net_budget: std::time::Duration::from_secs(2),
         event_tail_budget: std::time::Duration::from_secs(15),
+        rss_shed_mb: 0,
+        shed_retry_after_s: 5,
     })
 }
 
@@ -797,6 +799,8 @@ async fn download_url_bound_fails_mid_stream() {
         js_stall_cooldown: std::time::Duration::ZERO,
         poll_net_budget: std::time::Duration::from_secs(2),
         event_tail_budget: std::time::Duration::from_secs(15),
+        rss_shed_mb: 0,
+        shed_retry_after_s: 5,
     });
     let dir = std::env::temp_dir().join("explorer-dl-174-bound");
     let _ = std::fs::remove_dir_all(&dir);
@@ -4436,6 +4440,46 @@ async fn external_script_404_is_skipped() {
     assert!(s.frame_png(a).is_some());
 }
 
+/// §B-106 (vol 677) — `max_scripts` ≥ le nombre déclaré :
+/// les SPA réels déclarent >100 `<script src>` dont l'entrée
+/// webpack loin dans l'ordre document (twitch `core-*.js`
+/// ~#119). Borne 32 → entrée jamais fetchée → silence total.
+/// Verrou : 40 scripts, l'entrée en position #40.
+#[tokio::test]
+async fn many_scripts_entry_beyond_old_bound_runs() {
+    let (mut s, t) = test_session_with(SessionConfig {
+        max_scripts: 256,
+        js_stall_cooldown: std::time::Duration::ZERO,
+        ..SessionConfig::default()
+    });
+    let mut page = String::from("<!doctype html><html><body><div id=\"x\">avant</div>");
+    for i in 0..39 {
+        let _ = std::fmt::Write::write_fmt(
+            &mut page,
+            format_args!("<script src=\"/s{i}.js\"></script>"),
+        );
+    }
+    // L'entrée applicative, dernière — à 32 elle n'existait pas.
+    page.push_str("<script src=\"/entry.js\"></script></body></html>");
+    t.route_bin("/p", 200, page.into_bytes());
+    for i in 0..39 {
+        t.route(&format!("/s{i}.js"), 200, "void 0");
+    }
+    t.route(
+        "/entry.js",
+        200,
+        "document.getElementById('x').textContent='BOOT'",
+    );
+    s.set_js_factory(explorer_js::JscoreEngine::factory());
+    let a = s.open_tab();
+    s.navigate(a, "http://h.test/p").await.unwrap();
+    // Page + 40 scripts.
+    assert_eq!(t.calls(), 41);
+    // L'entrée #40 a évalué — l'ancienne borne 32 la sautait.
+    let dump = s.dom_dump(a).unwrap_or_default();
+    assert!(dump.contains("BOOT"), "entrée en #40 non évaluée : {dump}");
+}
+
 /// Sans fabrique JS, aucun `<script src>` n'est fetché
 /// (scripting désactivé — spec HTML).
 #[tokio::test]
@@ -7593,6 +7637,8 @@ async fn redirect_commits_final_url_and_fragment() {
             js_stall_cooldown: std::time::Duration::ZERO,
             poll_net_budget: std::time::Duration::from_secs(2),
             event_tail_budget: std::time::Duration::from_secs(15),
+            rss_shed_mb: 0,
+            shed_retry_after_s: 5,
         },
     );
 
@@ -11720,6 +11766,47 @@ async fn location_replace_rewrites_entry() {
     assert_eq!(s.tab_url(id).as_deref(), Some("http://h.test/a"));
 }
 
+/// G-4 (diag648, vol 681/682) : un `document.cookie` posé
+/// **dans le même tour de script** que `location.replace`
+/// doit figurer dans le `Cookie:` de la requête remplacée —
+/// la forme exacte du challenge `SG_SS` de Google Search
+/// Guard. L'écriture atterrit au jar partagé **synchronement**
+/// au setter (jar injecté dans le contexte JS) ; le
+/// `NavRequest` n'est drainé qu'au point de synchro suivant —
+/// l'ordre est garanti par construction. Session câblée
+/// « production » (`CookieTransport` + jar partagé) :
+/// l'assertion porte sur l'en-tête filaire, pas seulement
+/// sur le jar. Sans `CookieTransport` l'allégation « drain
+/// avant commit » serait indistinguable d'un jar vide.
+#[tokio::test]
+async fn cookie_set_before_location_replace_sent_on_target() {
+    let (mut s, t) = cookie_session_with(SessionConfig {
+        consent_policy: explorer_net::consent::ConsentPolicy::Honest,
+        ..SessionConfig::default()
+    });
+    t.route(
+        "/sg",
+        200,
+        "<!doctype html><html><body><script>\
+         document.cookie='SG_SS=tok;path=/';location.replace('/serp')\
+         </script></body></html>",
+    );
+    t.route("/serp", 200, "<html><body>serp</body></html>");
+    s.set_js_factory(explorer_js::JscoreEngine::factory());
+    let id = s.open_tab();
+    s.navigate(id, "http://h.test/sg").await.unwrap();
+    s.drain_script_nav(id).await;
+    assert_eq!(s.tab_url(id).as_deref(), Some("http://h.test/serp"));
+    // Le `Cookie:` de la requête remplacée porte le cookie
+    // posé par le script de la page précédente — le jar
+    // était déjà à jour quand le drain a émis le fetch.
+    assert_eq!(
+        t.req_header("/serp", "cookie").as_deref(),
+        Some("SG_SS=tok"),
+        "cookie script→jar→filaire sur la nav remplacée"
+    );
+}
+
 /// `location.reload` (CAP-152) : la requête de l'entrée
 /// est rejouée (`last_req`), aucune entrée nouvelle —
 /// `back` reste `EmptyDocument`.
@@ -12137,6 +12224,49 @@ async fn noscript_fallback_visible_without_js() {
     assert!(
         dump.contains("FALLBACK_TXT"),
         "scripting OFF : le fallback noscript peint : {dump}"
+    );
+}
+
+/// JS-C392 — §B-109 (vol 681, google.com) : le miroir jscore
+/// parsait `<noscript>` en éléments ; la sérialisation les
+/// transportait en `data-obreloc-prev` et `relocate_obreloc`
+/// les **resplicait dans le DOM session** → le
+/// `<style>table,div,span,p{display:none}</style>` de Google
+/// entrait en cascade → effondrement du rendu (13 boîtes,
+/// page blanche). Après synchro miroir→apply, le contenu
+/// noscript doit rester du **texte**, sans élément resplicé
+/// ni style collecté.
+#[tokio::test]
+async fn noscript_mirror_sync_no_style_leak() {
+    let (mut s, t) = test_session();
+    t.route(
+        "/",
+        200,
+        "<!doctype html><html><body>\
+         <noscript><style>table,div,span,p{display:none}</style>\
+         <b>FB</b></noscript>\
+         <div id=\"x\">stay</div>\
+         <script>setTimeout(function(){\
+         document.getElementById('x').setAttribute('data-ok','1')},40)</script>\
+         </body></html>",
+    );
+    s.set_js_factory(explorer_js::JscoreEngine::factory());
+    let id = s.open_tab();
+    s.navigate(id, "http://h.test/").await.unwrap();
+    // Forcer une synchro miroir → apply (mutation scriptée).
+    std::thread::sleep(std::time::Duration::from_millis(90));
+    s.pump_timers(id);
+    let dump = s.dom_dump(id).unwrap();
+    assert!(
+        !dump
+            .lines()
+            .any(|l| l.trim() == "<style>" || l.trim() == "<b>"),
+        "aucun enfant élément resplicé sous noscript : {dump}"
+    );
+    let lay = s.layout_dump(id).unwrap();
+    assert!(
+        lay.contains("stay"),
+        "le style noscript fuité ne doit pas masquer la page : {lay}"
     );
 }
 

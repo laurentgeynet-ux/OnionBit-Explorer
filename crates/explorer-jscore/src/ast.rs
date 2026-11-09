@@ -29,7 +29,7 @@ pub struct Program {
 }
 
 /// Statements.
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub enum Stmt {
     /// `;`
     Empty,
@@ -169,6 +169,118 @@ pub enum Stmt {
     Export(ExportDecl),
 }
 
+impl Clone for Stmt {
+    /// Clone dont chaque arête `Box<Stmt>`/`Expr`/`Pat`
+    /// rebascule sur un segment tas (JS-C400/§B-111 — le
+    /// `#[derive(Clone)]` descendait nu : `lower_suspend_fn`
+    /// clone le corps à chaque invocation, un AST profond
+    /// débordait le segment courant, pile native indifférente).
+    fn clone(&self) -> Self {
+        stacker::maybe_grow(
+            crate::parser::STACK_RED_ZONE,
+            crate::parser::STACK_GROW,
+            || self.clone_inner(),
+        )
+    }
+}
+
+impl Stmt {
+    fn clone_inner(&self) -> Self {
+        match self {
+            Self::Empty => Self::Empty,
+            Self::Expr(e) => Self::Expr(e.clone()),
+            Self::Var(ds) => Self::Var(ds.clone()),
+            Self::Lexical { decls, constant } => Self::Lexical {
+                decls: decls.clone(),
+                constant: *constant,
+            },
+            Self::FunctionDecl(l) => Self::FunctionDecl(l.clone()),
+            Self::ClassDecl(l) => Self::ClassDecl(l.clone()),
+            Self::Block(l) => Self::Block(l.clone()),
+            Self::If { cond, then, else_ } => Self::If {
+                cond: cond.clone(),
+                then: then.clone(),
+                else_: else_.clone(),
+            },
+            Self::While { cond, body } => Self::While {
+                cond: cond.clone(),
+                body: body.clone(),
+            },
+            Self::DoWhile { body, cond } => Self::DoWhile {
+                body: body.clone(),
+                cond: cond.clone(),
+            },
+            Self::For {
+                init,
+                test,
+                update,
+                body,
+            } => Self::For {
+                init: init.clone(),
+                test: test.clone(),
+                update: update.clone(),
+                body: body.clone(),
+            },
+            Self::ForIn {
+                target,
+                obj,
+                var_init,
+                body,
+            } => Self::ForIn {
+                target: target.clone(),
+                obj: obj.clone(),
+                var_init: var_init.clone(),
+                body: body.clone(),
+            },
+            Self::ForOf {
+                target,
+                iter,
+                body,
+                is_await,
+            } => Self::ForOf {
+                target: target.clone(),
+                iter: iter.clone(),
+                body: body.clone(),
+                is_await: *is_await,
+            },
+            Self::Using { decls, is_await } => Self::Using {
+                decls: decls.clone(),
+                is_await: *is_await,
+            },
+            Self::With { obj, body } => Self::With {
+                obj: obj.clone(),
+                body: body.clone(),
+            },
+            Self::Labeled { name, body } => Self::Labeled {
+                name: name.clone(),
+                body: body.clone(),
+            },
+            Self::Break(l) => Self::Break(l.clone()),
+            Self::Continue(l) => Self::Continue(l.clone()),
+            Self::Return(e) => Self::Return(e.clone()),
+            Self::Throw(e) => Self::Throw(e.clone()),
+            Self::Try {
+                block,
+                catch,
+                finally,
+            } => Self::Try {
+                block: block.clone(),
+                catch: catch.clone(),
+                finally: finally.clone(),
+            },
+            Self::Switch { disc, cases } => Self::Switch {
+                disc: disc.clone(),
+                cases: cases.clone(),
+            },
+            Self::Import { binds, source } => Self::Import {
+                binds: binds.clone(),
+                source: source.clone(),
+            },
+            Self::Export(d) => Self::Export(d.clone()),
+        }
+    }
+}
+
 /// One binding introduced by an `import` clause.
 #[derive(Debug, Clone)]
 pub enum ImportBind {
@@ -219,7 +331,7 @@ pub struct VarDecl {
 
 /// Binding pattern — declarations, parameters, `catch`, `for-in`/
 /// `for-of` targets and destructuring assignments.
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub enum Pat {
     /// `name` — binds in scope (`var`/`let`/`const`/param) or assigns
     /// (`[x] = …` destructuring without a declarator).
@@ -241,6 +353,36 @@ pub enum Pat {
         /// Trailing `...rest` (collects unconsumed enumerable keys).
         rest: Option<Box<Pat>>,
     },
+}
+
+impl Clone for Pat {
+    /// Clone dont chaque arête `Box<Pat>`/`Expr` rebascule sur
+    /// un segment tas (JS-C400/§B-111 — le `#[derive(Clone)]`
+    /// descendait nu : un motif profond débordait le segment
+    /// courant, pile native indifférente).
+    fn clone(&self) -> Self {
+        stacker::maybe_grow(
+            crate::parser::STACK_RED_ZONE,
+            crate::parser::STACK_GROW,
+            || self.clone_inner(),
+        )
+    }
+}
+
+impl Pat {
+    fn clone_inner(&self) -> Self {
+        match self {
+            Self::Ident(n) => Self::Ident(n.clone()),
+            Self::Lvalue(e) => Self::Lvalue(e.clone()),
+            Self::Rest(p) => Self::Rest(p.clone()),
+            Self::Default(p, e) => Self::Default(p.clone(), e.clone()),
+            Self::Array(items) => Self::Array(items.clone()),
+            Self::Object { props, rest } => Self::Object {
+                props: props.clone(),
+                rest: rest.clone(),
+            },
+        }
+    }
 }
 
 /// Object/class property key.
@@ -377,9 +519,20 @@ pub enum FnBody {
 /// éager (prologue de directives inclus).
 #[derive(Debug, Clone)]
 pub struct DeferredBody {
-    /// Tokens `{…}` du corps (accolades incluses) — payloads `Rc`,
-    /// la copie de slice au defer est un passage de refcounts.
+    /// Flux de tokens du **script parent**, partagé (V-5b) —
+    /// `[start..=end]` délimite le `{…}` du corps. Le defer ne
+    /// copie plus la tranche : un bump de refcount par corps.
     pub toks: Rc<[Token]>,
+    /// Index global du `{` d'ouverture dans `toks`.
+    pub start: usize,
+    /// Index global du `}` fermant (inclus) dans `toks`.
+    pub end: usize,
+    /// Table des délimiteurs appariés du flux parent, partagée
+    /// (V-5b) — `close_of` n'est plus reconstruite par corps :
+    /// ses entrées sont des index globaux, valides telles
+    /// quelles puisque `toks`/`pos` restent dans le repère
+    /// parent.
+    pub close: Rc<Vec<usize>>,
     /// Mode strict **hérité** au point du defer — le sous-parse
     /// repart de là puis `scan_directives` tranche le strict
     /// effectif (qui a déjà été fixé sur `FnLit.strict` par le
@@ -589,7 +742,7 @@ pub enum AssignOp {
 }
 
 /// Expressions.
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub enum Expr {
     /// Number literal.
     Num(f64),
@@ -697,6 +850,83 @@ pub enum Expr {
     /// `new.target` — `undefined` en appel ordinaire, le
     /// constructeur cible sous `new`/`Reflect.construct`.
     NewTarget,
+}
+
+impl Clone for Expr {
+    /// Clone dont chaque arête `Box<Expr>` rebascule sur un
+    /// segment tas (JS-C400/§B-111 — le `#[derive(Clone)]`
+    /// descendait nu : `lower_suspend_fn`/`expr_to_pat` clonent
+    /// l'AST à chaque invocation, un arbre profond débordait
+    /// le segment courant, pile native indifférente).
+    fn clone(&self) -> Self {
+        stacker::maybe_grow(
+            crate::parser::STACK_RED_ZONE,
+            crate::parser::STACK_GROW,
+            || self.clone_inner(),
+        )
+    }
+}
+
+impl Expr {
+    fn clone_inner(&self) -> Self {
+        match self {
+            Self::Num(n) => Self::Num(*n),
+            Self::BigInt(s) => Self::BigInt(s.clone()),
+            Self::Str(s) => Self::Str(s.clone()),
+            Self::Bool(b) => Self::Bool(*b),
+            Self::Null => Self::Null,
+            Self::Ident(n) => Self::Ident(n.clone()),
+            Self::This => Self::This,
+            Self::Array(items) => Self::Array(items.clone()),
+            Self::Object(props) => Self::Object(props.clone()),
+            Self::Function(l) => Self::Function(l.clone()),
+            Self::Class(l) => Self::Class(l.clone()),
+            Self::Unary(op, e) => Self::Unary(*op, e.clone()),
+            Self::Binary(op, l, r) => Self::Binary(*op, l.clone(), r.clone()),
+            Self::Assign(l, op, r) => Self::Assign(l.clone(), *op, r.clone()),
+            Self::Cond(c, t, e) => Self::Cond(c.clone(), t.clone(), e.clone()),
+            Self::Member(o, p) => Self::Member(o.clone(), p.clone()),
+            Self::Index(o, k) => Self::Index(o.clone(), k.clone()),
+            Self::Call(f, args) => Self::Call(f.clone(), args.clone()),
+            Self::New(f, args) => Self::New(f.clone(), args.clone()),
+            Self::Seq(items) => Self::Seq(items.clone()),
+            Self::Template { parts, exprs } => Self::Template {
+                parts: parts.clone(),
+                exprs: exprs.clone(),
+            },
+            Self::TaggedTemplate {
+                tag,
+                parts,
+                raws,
+                exprs,
+            } => Self::TaggedTemplate {
+                tag: tag.clone(),
+                parts: parts.clone(),
+                raws: raws.clone(),
+                exprs: exprs.clone(),
+            },
+            Self::Regex { pattern, flags } => Self::Regex {
+                pattern: pattern.clone(),
+                flags: flags.clone(),
+            },
+            Self::Chain { head, steps } => Self::Chain {
+                head: head.clone(),
+                steps: steps.clone(),
+            },
+            Self::Spread(e) => Self::Spread(e.clone()),
+            Self::SuperCall(args) => Self::SuperCall(args.clone()),
+            Self::SuperMember(n) => Self::SuperMember(n.clone()),
+            Self::SuperIndex(e) => Self::SuperIndex(e.clone()),
+            Self::Await(e) => Self::Await(e.clone()),
+            Self::Yield { arg, delegate } => Self::Yield {
+                arg: arg.clone(),
+                delegate: *delegate,
+            },
+            Self::ImportCall(e) => Self::ImportCall(e.clone()),
+            Self::ImportMeta => Self::ImportMeta,
+            Self::NewTarget => Self::NewTarget,
+        }
+    }
 }
 
 impl Expr {

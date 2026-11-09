@@ -113,8 +113,11 @@ impl ObsState {
                 ids.push(reg.wrapper);
             }
         }
-        for p in [self.proto_io, self.proto_ro].into_iter().flatten() {
-            crate::heap::push_value(ids, p);
+        for p in [self.proto_io.clone(), self.proto_ro.clone()]
+            .into_iter()
+            .flatten()
+        {
+            crate::heap::push_value(ids, &p);
         }
     }
 
@@ -187,7 +190,7 @@ impl Engine {
                     let f = self.bound_native("hostMethod", Self::host_method, vec![mv]);
                     self.set_own(p, m, f, true);
                 }
-                self.set_own(p, "constructor", fv, false);
+                self.set_own(p, "constructor", fv.clone(), false);
                 self.set_own(fid, "prototype", Value::Obj(p), false);
                 match kind {
                     ObsKind::Intersection => self.obs.proto_io = Some(Value::Obj(p)),
@@ -224,7 +227,7 @@ impl Engine {
                 };
                 (
                     reg.kind,
-                    reg.cb,
+                    reg.cb.clone(),
                     reg.wrapper,
                     reg.root,
                     reg.thresholds.clone(),
@@ -437,7 +440,7 @@ impl Engine {
                     "contentBoxSize",
                     "devicePixelContentBoxSize",
                 ] {
-                    let arr = self.new_array(vec![box_size]);
+                    let arr = self.new_array(vec![box_size.clone()]);
                     self.set_own(o, k, arr, true);
                 }
             }
@@ -485,8 +488,15 @@ impl Engine {
     /// Rect arbitraire `(x, y, w, h)` au format
     /// `DOMRectReadOnly` minimal — `x`/`left`/`top` etc.
     /// tous dérivés (spec : `bottom`/`right` = bords).
+    /// JS-C427 : proto `DOMRectReadOnly.prototype` posé quand
+    /// l'interface est installée — `instanceof` tient.
     fn rect_of(&mut self, x: f64, y: f64, w: f64, h: f64) -> Value {
         let r = self.new_object();
+        if let Some(p) = crate::dom_host::domrect_proto(self, "DOMRectReadOnly") {
+            if let Some(o) = self.heap.obj_mut(r) {
+                o.proto = p;
+            }
+        }
         for (k, v) in [
             ("x", x),
             ("y", y),
@@ -510,6 +520,11 @@ impl Engine {
     /// Rect du viewport `(0,0,vw,vh)` — `hooks.viewport`.
     fn viewport_rect(&mut self) -> Value {
         let r = self.new_object();
+        if let Some(p) = crate::dom_host::domrect_proto(self, "DOMRectReadOnly") {
+            if let Some(o) = self.heap.obj_mut(r) {
+                o.proto = p;
+            }
+        }
         let (w, h) = self.hooks.viewport;
         for (k, v) in [
             ("x", 0.0),
@@ -533,13 +548,13 @@ impl Engine {
 /// `rootMargin` au format `<len(px|%)>{1,4}` (spec
 /// `SyntaxError` — marge non appliquée, pas de géométrie).
 fn intersection_observer_ctor(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
-    let cb = args.first().copied().unwrap_or(Value::Undefined);
-    if !e.is_callable(cb) {
+    let cb = args.first().cloned().unwrap_or(Value::Undefined);
+    if !e.is_callable(cb.clone()) {
         return Err(e.type_error("IntersectionObserver: callback is not a function"));
     }
-    let opts = args.get(1).copied().unwrap_or(Value::Undefined);
-    let thresholds = obs_opt_thresholds(e, opts)?;
-    let root = match obs_opt(e, opts, "root") {
+    let opts = args.get(1).cloned().unwrap_or(Value::Undefined);
+    let thresholds = obs_opt_thresholds(e, opts.clone())?;
+    let root = match obs_opt(e, opts.clone(), "root") {
         Value::Undefined | Value::Null => None,
         v => {
             let Some((dom, _)) = e.dom_ctx.clone() else {
@@ -553,7 +568,7 @@ fn intersection_observer_ctor(e: &mut Engine, _t: Value, args: &[Value]) -> JsRe
     };
     let margin = obs_opt(e, opts, "rootMargin");
     if !matches!(margin, Value::Undefined) {
-        let m = e.to_js_string(margin)?;
+        let m = e.to_js_string(margin.clone())?;
         if !obs_valid_margin(&m) {
             return Err(e.type_error("IntersectionObserver: invalid rootMargin"));
         }
@@ -565,11 +580,11 @@ fn intersection_observer_ctor(e: &mut Engine, _t: Value, args: &[Value]) -> JsRe
 /// `options.box` ∈ `{content,border,device-pixel-content}-box`
 /// (spec `TypeError`) — non appliqué.
 fn resize_observer_ctor(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
-    let cb = args.first().copied().unwrap_or(Value::Undefined);
-    if !e.is_callable(cb) {
+    let cb = args.first().cloned().unwrap_or(Value::Undefined);
+    if !e.is_callable(cb.clone()) {
         return Err(e.type_error("ResizeObserver: callback is not a function"));
     }
-    let opts = args.get(1).copied().unwrap_or(Value::Undefined);
+    let opts = args.get(1).cloned().unwrap_or(Value::Undefined);
     match obs_opt(e, opts, "box") {
         Value::Undefined => {}
         v => {
@@ -665,7 +680,7 @@ fn new_obs(
         cache,
         id,
         kind,
-        cb,
+        cb: cb.clone(),
     }));
     let Value::Obj(oid) = v else {
         return Err(e.type_error("observer: allocation impossible"));
@@ -694,8 +709,8 @@ fn new_obs(
     // `window.X = wrapper` en amont ne déchaîne pas les
     // instances vers le proto nu du wrapper.
     let pp = match kind {
-        ObsKind::Intersection => e.obs.proto_io,
-        ObsKind::Resize => e.obs.proto_ro,
+        ObsKind::Intersection => e.obs.proto_io.clone(),
+        ObsKind::Resize => e.obs.proto_ro.clone(),
     };
     if let Some(pp) = pp {
         if let Some(o) = e.heap.obj_mut(oid) {
@@ -733,7 +748,7 @@ impl Host for ObsHost {
 
     fn trace(&self, out: &mut Vec<ObjId>) {
         crate::dom_host::trace_node_cache(&self.cache, out);
-        crate::heap::push_value(out, self.cb);
+        crate::heap::push_value(out, &self.cb);
     }
 
     fn get(&self, e: &mut Engine, _t: Value, key: &str) -> JsResult<Option<Value>> {
@@ -758,7 +773,7 @@ impl Host for ObsHost {
     ) -> JsResult<Option<Value>> {
         match name {
             "observe" => {
-                let target = args.first().copied().unwrap_or(Value::Undefined);
+                let target = args.first().cloned().unwrap_or(Value::Undefined);
                 let Some(node) = node_for_in(e, target, &self.dom) else {
                     return Err(e.type_error("observe: Element requis"));
                 };
@@ -778,7 +793,7 @@ impl Host for ObsHost {
                 Ok(Some(Value::Undefined))
             }
             "unobserve" => {
-                let target = args.first().copied().unwrap_or(Value::Undefined);
+                let target = args.first().cloned().unwrap_or(Value::Undefined);
                 let Some(node) = node_for_in(e, target, &self.dom) else {
                     return Err(e.type_error("unobserve: Element requis"));
                 };

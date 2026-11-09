@@ -170,7 +170,16 @@ $dpid = (Get-CimInstance Win32_Process `
   -Filter "ParentProcessId = $($proc.ProcessId)" `
   | Where-Object { $_.Name -eq 'explorer-daemon.exe' } `
   | Select-Object -First 1 -ExpandProperty ProcessId)
-if ($dpid) { Write-Output "daemon PID $dpid" }
+if ($dpid) {
+  # Pidfile `daemon-<port>.pid` : les vols visent le PID écrit
+  # ici (Get-Content), jamais un `taskkill` sur un PID lu
+  # ailleurs — le kill collatéral du vol 698 (PID 7392 = un
+  # AUTRE daemon de la machine) vient d'un taskkill à main
+  # levée. Le fichier est réécrit à chaque spawn du port.
+  $pidfile = Join-Path $LogDir "daemon-$Port.pid"
+  Set-Content -Path $pidfile -Value "$dpid" -NoNewline -Encoding ascii
+  Write-Output "daemon PID $dpid (pidfile $pidfile)"
+}
 
 if ($ok) {
   Write-Output "daemon $Port en ligne"

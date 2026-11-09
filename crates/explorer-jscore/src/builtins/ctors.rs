@@ -64,7 +64,7 @@ pub(crate) fn constructed_this(e: &Engine, this: Value, proto: ObjId) -> Option<
     if e.ctor_fresh == Some(id) {
         return Some(id);
     }
-    match e.heap.obj(id).map(|o| o.proto) {
+    match e.heap.obj(id).map(|o| o.proto.clone()) {
         Some(Value::Obj(p)) if p == proto => Some(id),
         _ => None,
     }
@@ -74,14 +74,14 @@ pub(crate) fn constructed_this(e: &Engine, this: Value, proto: ObjId) -> Option<
 /// wrapper construit sur `proto` ; sinon retourne `prim` (appel
 /// fonctionnel — `String(x)` produit une primitive).
 pub(crate) fn wrap_or_prim(e: &mut Engine, this: Value, proto: ObjId, prim: Value) -> Value {
-    match constructed_this(e, this, proto) {
+    match constructed_this(e, this.clone(), proto) {
         Some(id) => {
-            e.set_own(id, PRIM, prim, false);
+            e.set_own(id, PRIM, prim.clone(), false);
             // `new String(s)` a `length` propre non-writable
             // (spec `StringCreate` — code units UTF-16).
             if proto == e.protos.string {
                 if let Value::Str(sid) = prim {
-                    let n = e.heap.string(sid).map_or(0, |s| u16_len(&s));
+                    let n = sid.u16_len();
                     e.set_own_attrs(
                         id,
                         "length",
@@ -107,16 +107,15 @@ pub(crate) fn string_ctor(e: &mut Engine, t: Value, args: &[Value]) -> JsResult<
             Ok(wrap_or_prim(e, t, e.protos.string, prim))
         }
         v => {
-            let s = if let Some(d) = sym_desc(e, v) {
-                if d.is_empty() {
+            let prim = if let Some(d) = sym_desc(e, v.clone()) {
+                e.str_val(if d.is_empty() {
                     "Symbol()".to_string()
                 } else {
                     format!("Symbol({d})")
-                }
+                })
             } else {
-                e.to_js_string(v)?
+                e.to_str_val(v)?
             };
-            let prim = e.str_val(s);
             Ok(wrap_or_prim(e, t, e.protos.string, prim))
         }
     }
@@ -179,7 +178,7 @@ pub(crate) fn make_named_error(
     };
     let err = e.error_value(proto, name, &msg);
     // `new Error(msg, {cause})` → `err.cause` (own, non-énumérable).
-    if let (Value::Obj(eid), Value::Obj(opt)) = (err, arg(args, 1)) {
+    if let (Value::Obj(eid), Value::Obj(opt)) = (err.clone(), arg(args, 1)) {
         if let Some(c) = e.get_prop(opt, "cause") {
             e.set_own(eid, "cause", c, false);
         }
@@ -210,7 +209,7 @@ pub(crate) fn aggregate_error_ctor(e: &mut Engine, _t: Value, args: &[Value]) ->
 /// chez nous).
 pub(crate) fn error_is_error(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
     let mut cur = match arg(args, 0) {
-        Value::Obj(id) => match e.heap.obj(id).map(|o| o.proto) {
+        Value::Obj(id) => match e.heap.obj(id).map(|o| o.proto.clone()) {
             Some(Value::Obj(p)) => Some(p),
             _ => return Ok(Value::Bool(false)),
         },
@@ -222,7 +221,7 @@ pub(crate) fn error_is_error(e: &mut Engine, _t: Value, args: &[Value]) -> JsRes
         if id == target {
             return Ok(Value::Bool(true));
         }
-        cur = match e.heap.obj(id).map(|o| o.proto) {
+        cur = match e.heap.obj(id).map(|o| o.proto.clone()) {
             Some(Value::Obj(p)) => Some(p),
             _ => None,
         };

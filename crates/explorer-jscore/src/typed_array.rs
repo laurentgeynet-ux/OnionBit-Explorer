@@ -21,7 +21,7 @@ use crate::value::{ObjId, Value};
 use crate::Engine;
 
 fn arg(args: &[Value], i: usize) -> Value {
-    args.get(i).copied().unwrap_or(Value::Undefined)
+    args.get(i).cloned().unwrap_or(Value::Undefined)
 }
 
 fn c_id(v: Value) -> ObjId {
@@ -266,10 +266,10 @@ fn conv_vals(e: &mut Engine, ta: TaKind, vals: &[Value]) -> JsResult<Vec<Conv>> 
     let mut out = Vec::with_capacity(vals.len());
     for v in vals {
         out.push(if ta.is_big() {
-            Conv::B(e.to_bigint(*v)?)
+            Conv::B(e.to_bigint(v.clone())?)
         } else {
             // `ToNumber` propage : `new Int8Array([1n])` → TypeError.
-            Conv::N(e.to_number(*v)?)
+            Conv::N(e.to_number(v.clone())?)
         });
     }
     Ok(out)
@@ -326,7 +326,7 @@ pub(crate) fn src_vals(e: &mut Engine, src: Value) -> JsResult<Vec<Value>> {
             return Ok(e.ta_elements(ta, bid, off, len));
         }
         // Array / iterable / array-like.
-        if let Ok(items) = e.iter_values(src) {
+        if let Ok(items) = e.iter_values(src.clone()) {
             return Ok(items);
         }
         if let Some(Value::Num(n)) = e.get_prop(id, "length") {
@@ -393,9 +393,9 @@ pub(crate) fn install(e: &mut Engine) {
     e.add_method(abp, "transfer", ab_transfer);
     {
         let ab = e.native_fn("ArrayBuffer", ab_ctor);
-        let id = c_id(ab);
+        let id = c_id(ab.clone());
         e.set_own(id, "prototype", Value::Obj(abp), false);
-        e.set_own(abp, "constructor", ab, false);
+        e.set_own(abp, "constructor", ab.clone(), false);
         e.add_method(id, "isView", ab_is_view);
         e.set_own(g, "ArrayBuffer", ab, false);
     }
@@ -442,9 +442,9 @@ pub(crate) fn install(e: &mut Engine) {
         let tag = e.str_val("SharedArrayBuffer");
         e.set_own(sabp, crate::interp::SYM_TO_STRING_TAG, tag, false);
         let sab = e.native_fn("SharedArrayBuffer", sab_ctor);
-        let sid = c_id(sab);
+        let sid = c_id(sab.clone());
         e.set_own(sid, "prototype", Value::Obj(sabp), false);
-        e.set_own(sabp, "constructor", sab, false);
+        e.set_own(sabp, "constructor", sab.clone(), false);
         e.set_own(g, "SharedArrayBuffer", sab, false);
     }
 
@@ -491,9 +491,9 @@ pub(crate) fn install(e: &mut Engine) {
     }
     {
         let dv = e.native_fn("DataView", dv_ctor);
-        let id = c_id(dv);
+        let id = c_id(dv.clone());
         e.set_own(id, "prototype", Value::Obj(dvp), false);
-        e.set_own(dvp, "constructor", dv, false);
+        e.set_own(dvp, "constructor", dv.clone(), false);
         e.set_own(g, "DataView", dv, false);
     }
 
@@ -534,9 +534,9 @@ pub(crate) fn install(e: &mut Engine) {
         let proto = e.heap.alloc_obj(Object::ordinary(Value::Obj(tap)));
         e.set_const(proto, "BYTES_PER_ELEMENT", Value::Num(ta.size() as f64));
         let ctor = e.bound_native(ta.name(), ta_ctor, vec![Value::Num(ta.index() as f64)]);
-        let cid = c_id(ctor);
+        let cid = c_id(ctor.clone());
         e.set_own(cid, "prototype", Value::Obj(proto), false);
-        e.set_own(proto, "constructor", ctor, false);
+        e.set_own(proto, "constructor", ctor.clone(), false);
         e.set_const(cid, "BYTES_PER_ELEMENT", Value::Num(ta.size() as f64));
         let from = e.bound_native("from", ta_from, vec![Value::Num(ta.index() as f64)]);
         e.set_own(cid, "from", from, false);
@@ -1030,14 +1030,18 @@ fn ta_from(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
     let mut vals = src_vals(e, arg(args, 1))?;
     if let Value::Obj(_) = arg(args, 2) {
         let f = arg(args, 2);
-        if !e.is_callable(f) {
+        if !e.is_callable(f.clone()) {
             return Err(e.type_error("mapfn is not callable"));
         }
         let this_arg = arg(args, 3);
         for (i, v) in vals.iter_mut().enumerate() {
             // Le résultat du mapfn est stocké brut — la conversion
             // `ToNumber`/`ToBigInt` se fait dans `ta_from_vals`.
-            *v = e.call_value(f, this_arg, &[*v, Value::Num(i as f64)])?;
+            *v = e.call_value(
+                f.clone(),
+                this_arg.clone(),
+                &[v.clone(), Value::Num(i as f64)],
+            )?;
         }
     }
     ta_from_vals(e, ta, &vals)
@@ -1095,7 +1099,7 @@ fn ta_subarray(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
     };
     let (ta, bid, off, len) = ta_view(e, this)?;
     let (s, en) = rel_bounds(e, arg(args, 0), arg(args, 1), len)?;
-    let proto = e.heap.obj(id).map_or(Value::Null, |o| o.proto);
+    let proto = e.heap.obj(id).map_or(Value::Null, |o| o.proto.clone());
     Ok(Value::Obj(e.heap.alloc_obj(Object {
         proto,
         props: Vec::new(),
@@ -1114,7 +1118,7 @@ fn ta_subarray(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
 
 /// `ta.fill(v, start?, end?)`.
 fn ta_fill(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
-    let (ta, bid, voff, len) = ta_view(e, this)?;
+    let (ta, bid, voff, len) = ta_view(e, this.clone())?;
     let v = arg(args, 0);
     let (s, en) = rel_bounds(e, arg(args, 1), arg(args, 2), len)?;
     ta_write_back(e, ta, bid, voff, s, &vec![v; en - s])?;
@@ -1131,32 +1135,40 @@ fn ta_slice(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
 
 /// `ta.map(fn)` — nouvelle view du même kind.
 fn ta_map(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
-    let (ta, vals) = ta_vals(e, this)?;
+    let (ta, vals) = ta_vals(e, this.clone())?;
     let f = arg(args, 0);
-    if !e.is_callable(f) {
+    if !e.is_callable(f.clone()) {
         return Err(e.type_error("callback is not callable"));
     }
     let t = arg(args, 1);
     let mut out = Vec::with_capacity(vals.len());
     for (i, v) in vals.iter().enumerate() {
-        out.push(e.call_value(f, t, &[*v, Value::Num(i as f64), this])?);
+        out.push(e.call_value(
+            f.clone(),
+            t.clone(),
+            &[v.clone(), Value::Num(i as f64), this.clone()],
+        )?);
     }
     ta_from_vals(e, ta, &out)
 }
 
 /// `ta.filter(fn)` — nouvelle view du même kind.
 fn ta_filter(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
-    let (ta, vals) = ta_vals(e, this)?;
+    let (ta, vals) = ta_vals(e, this.clone())?;
     let f = arg(args, 0);
-    if !e.is_callable(f) {
+    if !e.is_callable(f.clone()) {
         return Err(e.type_error("callback is not callable"));
     }
     let t = arg(args, 1);
     let mut out = Vec::new();
     for (i, v) in vals.iter().enumerate() {
-        let r = e.call_value(f, t, &[*v, Value::Num(i as f64), this])?;
+        let r = e.call_value(
+            f.clone(),
+            t.clone(),
+            &[v.clone(), Value::Num(i as f64), this.clone()],
+        )?;
         if e.to_boolean(r) {
-            out.push(*v);
+            out.push(v.clone());
         }
     }
     ta_from_vals(e, ta, &out)
@@ -1164,14 +1176,18 @@ fn ta_filter(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
 
 /// `ta.forEach(fn)`.
 fn ta_for_each(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
-    let (_, vals) = ta_vals(e, this)?;
+    let (_, vals) = ta_vals(e, this.clone())?;
     let f = arg(args, 0);
-    if !e.is_callable(f) {
+    if !e.is_callable(f.clone()) {
         return Err(e.type_error("callback is not callable"));
     }
     let t = arg(args, 1);
     for (i, v) in vals.iter().enumerate() {
-        e.call_value(f, t, &[*v, Value::Num(i as f64), this])?;
+        e.call_value(
+            f.clone(),
+            t.clone(),
+            &[v.clone(), Value::Num(i as f64), this.clone()],
+        )?;
     }
     Ok(Value::Undefined)
 }
@@ -1188,7 +1204,7 @@ fn ta_join(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
         if i > 0 {
             out.push_str(&sep);
         }
-        let s = e.to_js_string(*v)?;
+        let s = e.to_js_string(v.clone())?;
         out.push_str(&s);
     }
     Ok(e.str_val(out))
@@ -1209,7 +1225,7 @@ fn ta_index_of(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
         from as usize
     };
     for (i, v) in vals.iter().enumerate().skip(start) {
-        if e.strict_eq(*v, needle) {
+        if e.strict_eq(v, &needle) {
             return Ok(Value::Num(i as f64));
         }
     }
@@ -1231,7 +1247,7 @@ fn ta_last_index_of(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Val
     };
     if start >= 0.0 {
         for i in (0..=start as usize).rev() {
-            if e.strict_eq(vals[i], needle) {
+            if e.strict_eq(&vals[i], &needle) {
                 return Ok(Value::Num(i as f64));
             }
         }
@@ -1253,9 +1269,8 @@ fn ta_includes(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
         from as usize
     };
     for v in vals.iter().skip(start) {
-        let nan =
-            matches!((*v, needle), (Value::Num(a), Value::Num(b)) if a.is_nan() && b.is_nan());
-        if nan || e.strict_eq(*v, needle) {
+        let nan = matches!((v.clone(), needle.clone()), (Value::Num(a), Value::Num(b)) if a.is_nan() && b.is_nan());
+        if nan || e.strict_eq(v, &needle) {
             return Ok(Value::Bool(true));
         }
     }
@@ -1264,14 +1279,18 @@ fn ta_includes(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
 
 /// `ta.every(fn)` — tous les éléments passent le prédicat.
 fn ta_every(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
-    let (_, vals) = ta_vals(e, this)?;
+    let (_, vals) = ta_vals(e, this.clone())?;
     let f = arg(args, 0);
-    if !e.is_callable(f) {
+    if !e.is_callable(f.clone()) {
         return Err(e.type_error("callback is not callable"));
     }
     let t = arg(args, 1);
     for (i, v) in vals.iter().enumerate() {
-        let r = e.call_value(f, t, &[*v, Value::Num(i as f64), this])?;
+        let r = e.call_value(
+            f.clone(),
+            t.clone(),
+            &[v.clone(), Value::Num(i as f64), this.clone()],
+        )?;
         if !e.to_boolean(r) {
             return Ok(Value::Bool(false));
         }
@@ -1281,14 +1300,18 @@ fn ta_every(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
 
 /// `ta.some(fn)`.
 fn ta_some(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
-    let (_, vals) = ta_vals(e, this)?;
+    let (_, vals) = ta_vals(e, this.clone())?;
     let f = arg(args, 0);
-    if !e.is_callable(f) {
+    if !e.is_callable(f.clone()) {
         return Err(e.type_error("callback is not callable"));
     }
     let t = arg(args, 1);
     for (i, v) in vals.iter().enumerate() {
-        let r = e.call_value(f, t, &[*v, Value::Num(i as f64), this])?;
+        let r = e.call_value(
+            f.clone(),
+            t.clone(),
+            &[v.clone(), Value::Num(i as f64), this.clone()],
+        )?;
         if e.to_boolean(r) {
             return Ok(Value::Bool(true));
         }
@@ -1298,16 +1321,20 @@ fn ta_some(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
 
 /// `ta.find(fn)` — premier élément passant le prédicat.
 fn ta_find(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
-    let (_, vals) = ta_vals(e, this)?;
+    let (_, vals) = ta_vals(e, this.clone())?;
     let f = arg(args, 0);
-    if !e.is_callable(f) {
+    if !e.is_callable(f.clone()) {
         return Err(e.type_error("callback is not callable"));
     }
     let t = arg(args, 1);
     for (i, v) in vals.iter().enumerate() {
-        let r = e.call_value(f, t, &[*v, Value::Num(i as f64), this])?;
+        let r = e.call_value(
+            f.clone(),
+            t.clone(),
+            &[v.clone(), Value::Num(i as f64), this.clone()],
+        )?;
         if e.to_boolean(r) {
-            return Ok(*v);
+            return Ok(v.clone());
         }
     }
     Ok(Value::Undefined)
@@ -1315,14 +1342,18 @@ fn ta_find(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
 
 /// `ta.findIndex(fn)`.
 fn ta_find_index(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
-    let (_, vals) = ta_vals(e, this)?;
+    let (_, vals) = ta_vals(e, this.clone())?;
     let f = arg(args, 0);
-    if !e.is_callable(f) {
+    if !e.is_callable(f.clone()) {
         return Err(e.type_error("callback is not callable"));
     }
     let t = arg(args, 1);
     for (i, v) in vals.iter().enumerate() {
-        let r = e.call_value(f, t, &[*v, Value::Num(i as f64), this])?;
+        let r = e.call_value(
+            f.clone(),
+            t.clone(),
+            &[v.clone(), Value::Num(i as f64), this.clone()],
+        )?;
         if e.to_boolean(r) {
             return Ok(Value::Num(i as f64));
         }
@@ -1336,7 +1367,7 @@ fn ta_at(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
     let n = e.to_number(arg(args, 0))?;
     let i = if n < 0.0 { vals.len() as f64 + n } else { n };
     if i >= 0.0 && i < vals.len() as f64 {
-        Ok(vals[i as usize])
+        Ok(vals[i as usize].clone())
     } else {
         Ok(Value::Undefined)
     }
@@ -1344,45 +1375,49 @@ fn ta_at(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
 
 /// `ta.reduce(fn, init?)` — `TypeError` sur vide sans init (spec).
 fn ta_reduce(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
-    let (_, vals) = ta_vals(e, this)?;
+    let (_, vals) = ta_vals(e, this.clone())?;
     let f = arg(args, 0);
-    if !e.is_callable(f) {
+    if !e.is_callable(f.clone()) {
         return Err(e.type_error("callback is not callable"));
     }
     let (mut acc, start) = if matches!(arg(args, 1), Value::Undefined) {
         if vals.is_empty() {
             return Err(e.type_error("reduce of empty typed array"));
         }
-        (vals[0], 1)
+        (vals[0].clone(), 1)
     } else {
         (arg(args, 1), 0)
     };
     for (i, v) in vals.iter().enumerate().skip(start) {
-        acc = e.call_value(f, Value::Undefined, &[acc, *v, Value::Num(i as f64), this])?;
+        acc = e.call_value(
+            f.clone(),
+            Value::Undefined,
+            &[acc, v.clone(), Value::Num(i as f64), this.clone()],
+        )?;
     }
     Ok(acc)
 }
 
 /// `ta.reduceRight(fn, init?)`.
 fn ta_reduce_right(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
-    let (_, vals) = ta_vals(e, this)?;
+    let (_, vals) = ta_vals(e, this.clone())?;
     let f = arg(args, 0);
-    if !e.is_callable(f) {
+    if !e.is_callable(f.clone()) {
         return Err(e.type_error("callback is not callable"));
     }
     let (mut acc, start) = if matches!(arg(args, 1), Value::Undefined) {
         if vals.is_empty() {
             return Err(e.type_error("reduce of empty typed array"));
         }
-        (vals[vals.len() - 1], vals.len() - 1)
+        (vals[vals.len() - 1].clone(), vals.len() - 1)
     } else {
         (arg(args, 1), vals.len())
     };
     for i in (0..start).rev() {
         acc = e.call_value(
-            f,
+            f.clone(),
             Value::Undefined,
-            &[acc, vals[i], Value::Num(i as f64), this],
+            &[acc, vals[i].clone(), Value::Num(i as f64), this.clone()],
         )?;
     }
     Ok(acc)
@@ -1392,7 +1427,7 @@ fn ta_reduce_right(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Valu
 /// (indifférent au kind, `Big` inclus).
 fn ta_reverse(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
     let _ = args;
-    let (ta, bid, voff, len) = ta_view(e, this)?;
+    let (ta, bid, voff, len) = ta_view(e, this.clone())?;
     let size = ta.size();
     if let Some(b) = e.heap.obj_mut(bid) {
         if let ObjKind::ByteBuf(bytes) = &mut b.kind {
@@ -1413,28 +1448,32 @@ fn ta_reverse(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
 /// `Array.sort` ; les kinds big comparent des `BigInt`),
 /// comparateur optionnel. In-place.
 fn ta_sort(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
-    let (ta, bid, voff, len) = ta_view(e, this)?;
+    let (ta, bid, voff, len) = ta_view(e, this.clone())?;
     let cmp = arg(args, 0);
     let mut vals = e.ta_elements(ta, bid, voff, len);
     if matches!(cmp, Value::Undefined) {
-        vals.sort_by(|a, b| match (*a, *b) {
+        vals.sort_by(|a, b| match (a.clone(), b.clone()) {
             (Value::Num(x), Value::Num(y)) => {
                 x.partial_cmp(&y).unwrap_or(std::cmp::Ordering::Equal)
             }
-            _ => match (e.bigint_of(*a), e.bigint_of(*b)) {
+            _ => match (e.bigint_of(a.clone()), e.bigint_of(b.clone())) {
                 (Some(x), Some(y)) => x.cmp(&y),
                 _ => std::cmp::Ordering::Equal,
             },
         });
     } else {
-        if !e.is_callable(cmp) {
+        if !e.is_callable(cmp.clone()) {
             return Err(e.type_error("comparator is not callable"));
         }
         // Tri par comparateur JS — insertion sort (éléments ≤ 64k).
         for i in 1..vals.len() {
             let mut j = i;
             while j > 0 {
-                let r = e.call_value(cmp, Value::Undefined, &[vals[j - 1], vals[j]])?;
+                let r = e.call_value(
+                    cmp.clone(),
+                    Value::Undefined,
+                    &[vals[j - 1].clone(), vals[j].clone()],
+                )?;
                 if e.to_number(r).unwrap_or(0.0) > 0.0 {
                     vals.swap(j - 1, j);
                     j -= 1;
@@ -1452,7 +1491,7 @@ fn ta_sort(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
 /// l'intérieur de la région de vue — `copy_within` au niveau octet
 /// (gère le chevauchement nativement, indifférent au kind).
 fn ta_copy_within(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
-    let (ta, bid, voff, len) = ta_view(e, this)?;
+    let (ta, bid, voff, len) = ta_view(e, this.clone())?;
     let to = e.to_number(arg(args, 0))?;
     let from = match arg(args, 1) {
         Value::Undefined => 0.0,
@@ -1495,7 +1534,7 @@ fn ta_entries(e: &mut Engine, this: Value, _a: &[Value]) -> JsResult<Value> {
     let (_, vals) = ta_vals(e, this)?;
     let mut items = Vec::with_capacity(vals.len());
     for (i, v) in vals.iter().enumerate() {
-        items.push(e.new_array(vec![Value::Num(i as f64), *v]));
+        items.push(e.new_array(vec![Value::Num(i as f64), v.clone()]));
     }
     Ok(crate::collections::iter_obj(e, items, e.protos.array_iter))
 }
@@ -1900,7 +1939,7 @@ fn atomics_add(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
     let (ta, bid, o) = atomic_access(e, arg(args, 0), arg(args, 1))?;
     if ta.is_big() {
         let old = atomic_read(e, ta, bid, o);
-        let a = e.to_bigint(old)?;
+        let a = e.to_bigint(old.clone())?;
         let b = e.to_bigint(arg(args, 2))?;
         atomic_write(e, ta, bid, o, AtomicVal::Big(a + b));
         return Ok(old);
@@ -1912,7 +1951,7 @@ fn atomics_sub(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
     let (ta, bid, o) = atomic_access(e, arg(args, 0), arg(args, 1))?;
     if ta.is_big() {
         let old = atomic_read(e, ta, bid, o);
-        let a = e.to_bigint(old)?;
+        let a = e.to_bigint(old.clone())?;
         let b = e.to_bigint(arg(args, 2))?;
         atomic_write(e, ta, bid, o, AtomicVal::Big(a - b));
         return Ok(old);
@@ -1924,7 +1963,7 @@ fn atomics_and(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
     let (ta, bid, o) = atomic_access(e, arg(args, 0), arg(args, 1))?;
     if ta.is_big() {
         let old = atomic_read(e, ta, bid, o);
-        let a = e.to_bigint(old)?;
+        let a = e.to_bigint(old.clone())?;
         let b = e.to_bigint(arg(args, 2))?;
         atomic_write(e, ta, bid, o, AtomicVal::Big(a & b));
         return Ok(old);
@@ -1936,7 +1975,7 @@ fn atomics_or(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
     let (ta, bid, o) = atomic_access(e, arg(args, 0), arg(args, 1))?;
     if ta.is_big() {
         let old = atomic_read(e, ta, bid, o);
-        let a = e.to_bigint(old)?;
+        let a = e.to_bigint(old.clone())?;
         let b = e.to_bigint(arg(args, 2))?;
         atomic_write(e, ta, bid, o, AtomicVal::Big(a | b));
         return Ok(old);
@@ -1948,7 +1987,7 @@ fn atomics_xor(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
     let (ta, bid, o) = atomic_access(e, arg(args, 0), arg(args, 1))?;
     if ta.is_big() {
         let old = atomic_read(e, ta, bid, o);
-        let a = e.to_bigint(old)?;
+        let a = e.to_bigint(old.clone())?;
         let b = e.to_bigint(arg(args, 2))?;
         atomic_write(e, ta, bid, o, AtomicVal::Big(a ^ b));
         return Ok(old);
@@ -1971,7 +2010,7 @@ fn atomics_compare_exchange(e: &mut Engine, _t: Value, args: &[Value]) -> JsResu
     let old = atomic_read(e, ta, bid, o);
     #[allow(clippy::float_cmp)] // égalité exacte spec `SameValue`.
     let eq = if ta.is_big() {
-        e.to_bigint(old)? == e.to_bigint(arg(args, 2))?
+        e.to_bigint(old.clone())? == e.to_bigint(arg(args, 2))?
     } else {
         matches!(old, Value::Num(n) if n == e.to_number(arg(args, 2))?)
     };

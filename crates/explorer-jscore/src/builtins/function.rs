@@ -41,13 +41,13 @@ pub(crate) fn function_apply(e: &mut Engine, this: Value, args: &[Value]) -> JsR
             if let Some(ObjKind::Array(elems)) = e.heap.obj(id).map(|o| &o.kind) {
                 elems.clone()
             } else {
-                let len = match e.get_prop_value(arr, "length")? {
+                let len = match e.get_prop_value(arr.clone(), "length")? {
                     Value::Num(n) => (n.max(0.0) as usize).min(1_000_000),
                     _ => 0,
                 };
                 let mut out = Vec::with_capacity(len.min(65_536));
                 for i in 0..len {
-                    out.push(e.get_prop_value(arr, &i.to_string())?);
+                    out.push(e.get_prop_value(arr.clone(), &i.to_string())?);
                     if i % 8192 == 0 {
                         e.tick()?;
                     }

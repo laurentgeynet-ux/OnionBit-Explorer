@@ -4,7 +4,7 @@
 
 #[allow(clippy::wildcard_imports)]
 use super::*;
-use crate::ast::{AssignOp, BinOp, ChainStep, Expr, ObjProp, UnOp};
+use crate::ast::{AssignOp, BinOp, ChainStep, Expr, ObjProp, PropKey, UnOp};
 use crate::heap::{Binding, Env, EnvCell, EnvKind, EnvRef, Fun, JsResult, ObjKind, Thrown};
 use crate::value::{to_int32, to_uint32, Value};
 
@@ -115,23 +115,25 @@ impl Engine {
         if spine.is_empty() {
             return self.eval_inner(env, this, cur);
         }
-        let mut acc = self.eval_expr(env, this, cur)?;
+        let mut acc = self.eval_expr(env, this.clone(), cur)?;
         for node in spine.into_iter().rev() {
             acc = match node {
                 Spine::Bin(op, r) => match op {
-                    BinOp::And if !self.to_boolean(acc) => acc,
-                    BinOp::Or if self.to_boolean(acc) => acc,
+                    BinOp::And if !self.to_boolean(acc.clone()) => acc,
+                    BinOp::Or if self.to_boolean(acc.clone()) => acc,
                     BinOp::Nullish if !matches!(acc, Value::Null | Value::Undefined) => acc,
-                    BinOp::And | BinOp::Or | BinOp::Nullish => self.eval_expr(env, this, r)?,
+                    BinOp::And | BinOp::Or | BinOp::Nullish => {
+                        self.eval_expr(env, this.clone(), r)?
+                    }
                     _ => {
-                        let rv = self.eval_expr(env, this, r)?;
+                        let rv = self.eval_expr(env, this.clone(), r)?;
                         self.binary_op(op, acc, rv)?
                     }
                 },
-                Spine::Member(name) => self.get_prop_value(acc, name)?,
+                Spine::Member(name) => self.get_prop_value(acc.clone(), name)?,
                 Spine::Index(k) => {
-                    let kv = self.eval_expr(env, this, k)?;
-                    if let Some(v) = self.arr_index_get(acc, kv) {
+                    let kv = self.eval_expr(env, this.clone(), k)?;
+                    if let Some(v) = self.arr_index_get(acc.clone(), kv.clone()) {
                         acc = v;
                         continue;
                     }
@@ -139,7 +141,7 @@ impl Engine {
                     self.get_prop_value(acc, &key)?
                 }
                 Spine::Call(arg_exprs) => {
-                    let args = self.eval_args(env, this, arg_exprs)?;
+                    let args = self.eval_args(env, this.clone(), arg_exprs)?;
                     self.call_value(acc, Value::Undefined, &args)?
                 }
             };
@@ -171,7 +173,7 @@ impl Engine {
                     match el {
                         // `[...a]` — iterate the source.
                         Some(Expr::Spread(e)) => {
-                            let sv = self.eval_expr(env, this, e)?;
+                            let sv = self.eval_expr(env, this.clone(), e)?;
                             let items = self.iter_values(sv)?;
                             // `[...a1,...a2,…]` — les spreads
                             // s'accumulent dans UN seul Vec sans
@@ -183,7 +185,7 @@ impl Engine {
                             )?;
                             v.extend(items);
                         }
-                        Some(e) => v.push(self.eval_expr(env, this, e)?),
+                        Some(e) => v.push(self.eval_expr(env, this.clone(), e)?),
                         None => v.push(Value::Hole),
                     }
                 }
@@ -194,13 +196,27 @@ impl Engine {
                 for p in props {
                     match p {
                         ObjProp::Prop(k, ve) => {
-                            let ks = self.eval_prop_key(env, this, k)?;
-                            let v = self.eval_expr(env, this, ve)?;
-                            self.set_own(id, &ks, v, true);
+                            let v = self.eval_expr(env, this.clone(), ve)?;
+                            // Spec `PropertyDefinition` : `__proto__:`
+                            // littéral (jamais `["__proto__"]` calculé)
+                            // règle [[Prototype]] au lieu de créer une
+                            // prop own — `{__proto__:null}` énumérable
+                            // nourrissait `for..in`/`each` d'un item
+                            // null (§B-105, crash `isForType` chart.umd).
+                            if matches!(k, PropKey::Name(n) if n.as_ref() == "__proto__") {
+                                if matches!(v, Value::Obj(_) | Value::Null) {
+                                    if let Some(o) = self.heap.obj_mut(id) {
+                                        o.proto = v;
+                                    }
+                                }
+                            } else {
+                                let ks = self.eval_prop_key(env, this.clone(), k)?;
+                                self.set_own(id, &ks, v, true);
+                            }
                         }
                         ObjProp::Spread(e) => {
                             // `{...o}` — enumerable own props only.
-                            let v = self.eval_expr(env, this, e)?;
+                            let v = self.eval_expr(env, this.clone(), e)?;
                             if let Value::Obj(sid) = v {
                                 // diag sonde (mur TanStack `e.id`) :
                                 // un clone sur objet à getters
@@ -210,14 +226,14 @@ impl Engine {
                                     self.diag("spread clone dropped proto getters");
                                 }
                                 for k in self.own_enum_keys_trapped(sid)? {
-                                    let sv = self.get_prop_value(v, &k)?;
+                                    let sv = self.get_prop_value(v.clone(), &k)?;
                                     self.set_own(id, &k, sv, true);
                                 }
                             }
                         }
                         ObjProp::Getter(k, f) | ObjProp::Setter(k, f) => {
-                            let ks = self.eval_prop_key(env, this, k)?;
-                            let fv = self.make_function(f, env, this);
+                            let ks = self.eval_prop_key(env, this.clone(), k)?;
+                            let fv = self.make_function(f, env, this.clone());
                             let (get, set) = if matches!(p, ObjProp::Getter(..)) {
                                 (fv, Value::Undefined)
                             } else {
@@ -245,7 +261,7 @@ impl Engine {
                         m.insert(
                             Self::intern(name),
                             EnvCell::Bind(Binding {
-                                value: fv,
+                                value: fv.clone(),
                                 mutable: false,
                                 sloppy_silent: true,
                             }),
@@ -262,7 +278,7 @@ impl Engine {
                     self.alloc_guard(out.len().saturating_add(part.len()))?;
                     out.push_str(part);
                     if let Some(e) = exprs.get(i) {
-                        let v = self.eval_expr(env, this, e)?;
+                        let v = self.eval_expr(env, this.clone(), e)?;
                         let sv = self.to_js_string(v)?;
                         self.alloc_guard(out.len().saturating_add(sv.len()))?;
                         out.push_str(&sv);
@@ -283,16 +299,16 @@ impl Engine {
             } => {
                 let (f, recv) = match &**tag {
                     Expr::Member(base, name) => {
-                        let b = self.eval_expr(env, this, base)?;
-                        (self.get_prop_value(b, name)?, b)
+                        let b = self.eval_expr(env, this.clone(), base)?;
+                        (self.get_prop_value(b.clone(), name)?, b)
                     }
                     Expr::Index(base, key) => {
-                        let b = self.eval_expr(env, this, base)?;
-                        let kv = self.eval_expr(env, this, key)?;
+                        let b = self.eval_expr(env, this.clone(), base)?;
+                        let kv = self.eval_expr(env, this.clone(), key)?;
                         let k = self.prop_key(kv)?;
-                        (self.get_prop_value(b, &k)?, b)
+                        (self.get_prop_value(b.clone(), &k)?, b)
                     }
-                    _ => (self.eval_expr(env, this, tag)?, Value::Undefined),
+                    _ => (self.eval_expr(env, this.clone(), tag)?, Value::Undefined),
                 };
                 let raw_vals: Vec<Value> = raws.iter().map(|s| self.str_val(s.clone())).collect();
                 let raw = self.new_array(raw_vals);
@@ -311,7 +327,7 @@ impl Engine {
                 }
                 let mut args = vec![strings];
                 for e in exprs {
-                    args.push(self.eval_expr(env, this, e)?);
+                    args.push(self.eval_expr(env, this.clone(), e)?);
                 }
                 self.call_value(f, recv, &args)
             }
@@ -405,7 +421,7 @@ impl Engine {
                 let Some(parent) = parent else {
                     return Err(self.type_error("`super()` outside a constructor"));
                 };
-                if !self.is_callable(parent) {
+                if !self.is_callable(parent.clone()) {
                     return Err(self.type_error("superclass is not a constructor"));
                 }
                 // Double `super()` → TypeError (spec, `this` déjà lié).
@@ -423,10 +439,10 @@ impl Engine {
                 // l'entrée de son corps — `super()` l'appelle comme
                 // fonction ordinaire, on pose la liste avant.
                 if let Value::Obj(pid) = parent {
-                    self.install_class_fields(pid, FLD_FIELDS, this, nt)?;
+                    self.install_class_fields(pid, FLD_FIELDS, this.clone(), nt.clone())?;
                 }
-                let args = self.eval_args(env, this, arg_exprs)?;
-                let res = self.call_value_ctor(parent, this, &args, nt)?;
+                let args = self.eval_args(env, this.clone(), arg_exprs)?;
+                let res = self.call_value_ctor(parent, this.clone(), &args, nt.clone())?;
                 // `this` pré-alloué (le modèle ne peut pas le
                 // rebind) — un parent *natif* (`Array`, `Map`,
                 // `Error`…) alloue son propre objet au lieu de
@@ -439,7 +455,10 @@ impl Engine {
                 // §B-22).
                 if let Value::Obj(rid) = res {
                     if rid != tid {
-                        let keep_proto = self.heap.obj(tid).map_or(Value::Undefined, |o| o.proto);
+                        let keep_proto = self
+                            .heap
+                            .obj(tid)
+                            .map_or(Value::Undefined, |o| o.proto.clone());
                         self.heap.swap_obj(tid, rid);
                         if let Some(to) = self.heap.obj_mut(tid) {
                             to.proto = keep_proto;
@@ -453,7 +472,7 @@ impl Engine {
                 // `HOME_BIND` = le proto depuis JS-C150).
                 let own_ctor = self.env_get(env, OWN_CTOR);
                 if let Some(Value::Obj(cid)) = own_ctor {
-                    self.install_class_fields(cid, FLD_FIELDS_D, this, nt)?;
+                    self.install_class_fields(cid, FLD_FIELDS_D, this.clone(), nt)?;
                 }
                 Ok(this)
             }
@@ -466,7 +485,7 @@ impl Engine {
             }
             Expr::SuperIndex(k) => {
                 let base = self.super_base(env)?;
-                let kv = self.eval_expr(env, this, k)?;
+                let kv = self.eval_expr(env, this.clone(), k)?;
                 let key = self.prop_key(kv)?;
                 self.read_prop(base, this, &key)
             }
@@ -475,9 +494,9 @@ impl Engine {
                 self.get_prop_value(b, name)
             }
             Expr::Index(base, key) => {
-                let b = self.eval_expr(env, this, base)?;
+                let b = self.eval_expr(env, this.clone(), base)?;
                 let k = self.eval_expr(env, this, key)?;
-                if let Some(v) = self.arr_index_get(b, k) {
+                if let Some(v) = self.arr_index_get(b.clone(), k.clone()) {
                     return Ok(v);
                 }
                 let k = self.prop_key(k)?;
@@ -499,39 +518,39 @@ impl Engine {
                 let direct_eval = matches!(&**callee, Expr::Ident(n) if &**n == "eval");
                 let callee = match &**callee {
                     Expr::Member(base, name) => {
-                        let b = self.eval_expr(env, this, base)?;
+                        let b = self.eval_expr(env, this.clone(), base)?;
                         crate::j17_tick(&crate::J17_MEMBER_KEY);
                         Callee::Member(b, name.clone())
                     }
                     Expr::Index(base, key) => {
-                        let b = self.eval_expr(env, this, base)?;
-                        let k = self.eval_expr(env, this, key)?;
+                        let b = self.eval_expr(env, this.clone(), base)?;
+                        let k = self.eval_expr(env, this.clone(), key)?;
                         crate::j17_tick(&crate::J17_MEMBER_KEY);
                         Callee::Member(b, Rc::from(self.prop_key(k)?))
                     }
                     Expr::SuperMember(name) => Callee::Super(name.clone()),
                     Expr::SuperIndex(key) => {
-                        let k = self.eval_expr(env, this, key)?;
+                        let k = self.eval_expr(env, this.clone(), key)?;
                         Callee::Super(Rc::from(self.prop_key(k)?))
                     }
-                    _ => Callee::Bare(self.eval_expr(env, this, callee)?),
+                    _ => Callee::Bare(self.eval_expr(env, this.clone(), callee)?),
                 };
-                let args = self.eval_args(env, this, arg_exprs)?;
+                let args = self.eval_args(env, this.clone(), arg_exprs)?;
                 match callee {
                     // Receiver `undefined` — le callee sloppy le
                     // coercera vers l'objet global, le strict le
                     // garde (spec `OrdinaryCallBindThis`).
                     Callee::Bare(f) => {
                         if direct_eval
-                            && matches!((f, self.eval_fn), (Value::Obj(a), Value::Obj(b)) if a == b)
+                            && matches!((f.clone(), self.eval_fn.clone()), (Value::Obj(a), Value::Obj(b)) if a == b)
                         {
                             return match args.first() {
                                 Some(Value::Str(sid)) => {
-                                    let src = self.heap.string(*sid).unwrap_or_default();
+                                    let src = sid.to_string();
                                     self.eval_source_in(env, this, &src)
                                 }
                                 // Non-string → rendu tel quel (spec).
-                                Some(v) => Ok(*v),
+                                Some(v) => Ok(v.clone()),
                                 None => Ok(Value::Undefined),
                             };
                         }
@@ -554,7 +573,7 @@ impl Engine {
                                 let shadowed = self.host_method_shadowed(bid, &name);
                                 if !shadowed {
                                     crate::host_mark(h.class_name(), &name);
-                                    if let Some(v) = h.invoke(self, recv, &name, &args)? {
+                                    if let Some(v) = h.invoke(self, recv.clone(), &name, &args)? {
                                         // Réactions CE synchrones
                                         // (JS-C68) — la méthode host a
                                         // pu muter le miroir.
@@ -564,16 +583,16 @@ impl Engine {
                                 }
                             }
                         }
-                        let f = self.get_prop_value(recv, &name)?;
-                        if !self.is_callable(f) {
+                        let f = self.get_prop_value(recv.clone(), &name)?;
+                        if !self.is_callable(f.clone()) {
                             // Diagnostic : nommer la méthode + le
                             // receveur — les erreurs de pages
                             // réelles pointent l'API manquante. Pour
                             // un objet JS ordinaire, le nom de son
                             // constructeur (`D7`…) identifie la
                             // classe fautive dans du code minifié.
-                            let recv_desc = match recv {
-                                Value::Obj(rid) => match self.heap.obj(rid).map(|o| &o.kind) {
+                            let recv_desc = match &recv {
+                                Value::Obj(rid) => match self.heap.obj(*rid).map(|o| &o.kind) {
                                     Some(ObjKind::Host(h)) => h.class_name().to_string(),
                                     // Un callable receveur : le nom du
                                     // FnLit identifie la fonction dont
@@ -589,16 +608,18 @@ impl Engine {
                                     )) => {
                                         format!("native {name}")
                                     }
-                                    Some(_) if self.is_callable(recv) => self
-                                        .get_prop(rid, "name")
-                                        .and_then(|n| self.heap_string_of(n))
+                                    Some(_) if self.is_callable(recv.clone()) => self
+                                        .get_prop(*rid, "name")
+                                        .as_ref()
+                                        .and_then(Self::heap_string_of)
                                         .filter(|n| !n.is_empty())
                                         .unwrap_or_else(|| "Function".to_string()),
                                     Some(_) => {
                                         let desc = self
-                                            .get_prop(rid, "constructor")
+                                            .get_prop(*rid, "constructor")
                                             .and_then(|c| self.get_prop_value(c, "name").ok())
-                                            .and_then(|n| self.heap_string_of(n))
+                                            .as_ref()
+                                            .and_then(Self::heap_string_of)
                                             .filter(|n| !n.is_empty())
                                             .unwrap_or_else(|| "Object".to_string());
                                         // « on Object » ne nomme rien —
@@ -608,13 +629,14 @@ impl Engine {
                                         // §B-14 kleinezeitung vol 343).
                                         if desc == "Object" {
                                             let tag = self
-                                                .get_prop(rid, SYM_TO_STRING_TAG)
-                                                .and_then(|t| self.heap_string_of(t))
+                                                .get_prop(*rid, SYM_TO_STRING_TAG)
+                                                .as_ref()
+                                                .and_then(Self::heap_string_of)
                                                 .filter(|t| !t.is_empty());
                                             if let Some(t) = tag {
                                                 format!("Object@@{t}")
                                             } else {
-                                                let keys = self.own_keys(rid);
+                                                let keys = self.own_keys(*rid);
                                                 let shown: Vec<&str> = keys
                                                     .iter()
                                                     .take(6)
@@ -627,7 +649,7 @@ impl Engine {
                                                         .iter()
                                                         .take(6)
                                                         .map(|k| {
-                                                            self.get_prop_value(recv, k)
+                                                            self.get_prop_value(recv.clone(), k)
                                                                 .map_or_else(
                                                                     |_| "?".into(),
                                                                     |v| self.describe_diag(v),
@@ -658,18 +680,18 @@ impl Engine {
                     }
                     Callee::Super(name) => {
                         let base = self.super_base(env)?;
-                        let f = self.read_prop(base, this, &name)?;
+                        let f = self.read_prop(base, this.clone(), &name)?;
                         self.call_value(f, this, &args)
                     }
                 }
             }
             Expr::New(callee, arg_exprs) => {
-                let f = self.eval_expr(env, this, callee)?;
+                let f = self.eval_expr(env, this.clone(), callee)?;
                 let args = self.eval_args(env, this, arg_exprs)?;
                 // `new` sur non-ctor : le callee est nommé —
                 // les sondes de sites réels identifient l'API
                 // hôte manquante du premier coup.
-                if !self.is_callable(f) {
+                if !self.is_callable(f.clone()) {
                     let who = match callee.as_ref() {
                         Expr::Ident(n) | Expr::Member(_, n) => &**n,
                         _ => "?",
@@ -684,12 +706,12 @@ impl Engine {
             Expr::Seq(parts) => {
                 let mut last = Value::Undefined;
                 for p in parts {
-                    last = self.eval_expr(env, this, p)?;
+                    last = self.eval_expr(env, this.clone(), p)?;
                 }
                 Ok(last)
             }
             Expr::Cond(c, t, f) => {
-                let c = self.eval_expr(env, this, c)?;
+                let c = self.eval_expr(env, this.clone(), c)?;
                 if self.to_boolean(c) {
                     self.eval_expr(env, this, t)
                 } else {
@@ -702,27 +724,27 @@ impl Engine {
                     // bord de `base`/`key`) s'évalue AVANT le RHS —
                     // `(..., install(), K).Wn = rhs()` sur du code
                     // réel (Google Closure) en dépend.
-                    if let Some(lv) = self.resolve_lvalue(env, this, lhs)? {
+                    if let Some(lv) = self.resolve_lvalue(env, this.clone(), lhs)? {
                         let v = self.eval_expr(env, this, rhs)?;
-                        self.store_lvalue(env, lv, v)?;
+                        self.store_lvalue(env, lv, v.clone())?;
                         return Ok(v);
                     }
-                    let v = self.eval_expr(env, this, rhs)?;
-                    self.write_lvalue(env, this, lhs, v)?;
+                    let v = self.eval_expr(env, this.clone(), rhs)?;
+                    self.write_lvalue(env, this, lhs, v.clone())?;
                     return Ok(v);
                 }
                 // Logical assignment: rhs evaluated only when needed.
-                if let Some(lv) = self.resolve_lvalue(env, this, lhs)? {
+                if let Some(lv) = self.resolve_lvalue(env, this.clone(), lhs)? {
                     let cur = self.read_lvalue_ref(env, &lv)?;
                     match op {
                         AssignOp::Nullish if !matches!(cur, Value::Null | Value::Undefined) => {
                             return Ok(cur)
                         }
-                        AssignOp::LogAnd if !self.to_boolean(cur) => return Ok(cur),
-                        AssignOp::LogOr if self.to_boolean(cur) => return Ok(cur),
+                        AssignOp::LogAnd if !self.to_boolean(cur.clone()) => return Ok(cur),
+                        AssignOp::LogOr if self.to_boolean(cur.clone()) => return Ok(cur),
                         AssignOp::Nullish | AssignOp::LogAnd | AssignOp::LogOr => {
                             let v = self.eval_expr(env, this, rhs)?;
-                            self.store_lvalue(env, lv, v)?;
+                            self.store_lvalue(env, lv, v.clone())?;
                             return Ok(v);
                         }
                         _ => {}
@@ -746,24 +768,24 @@ impl Engine {
                         }
                     };
                     let v = self.binary_op(bin, cur, rv)?;
-                    self.store_lvalue(env, lv, v)?;
+                    self.store_lvalue(env, lv, v.clone())?;
                     return Ok(v);
                 }
-                let cur = self.read_lvalue(env, this, lhs)?;
+                let cur = self.read_lvalue(env, this.clone(), lhs)?;
                 match op {
                     AssignOp::Nullish if !matches!(cur, Value::Null | Value::Undefined) => {
                         return Ok(cur)
                     }
-                    AssignOp::LogAnd if !self.to_boolean(cur) => return Ok(cur),
-                    AssignOp::LogOr if self.to_boolean(cur) => return Ok(cur),
+                    AssignOp::LogAnd if !self.to_boolean(cur.clone()) => return Ok(cur),
+                    AssignOp::LogOr if self.to_boolean(cur.clone()) => return Ok(cur),
                     AssignOp::Nullish | AssignOp::LogAnd | AssignOp::LogOr => {
-                        let v = self.eval_expr(env, this, rhs)?;
-                        self.write_lvalue(env, this, lhs, v)?;
+                        let v = self.eval_expr(env, this.clone(), rhs)?;
+                        self.write_lvalue(env, this, lhs, v.clone())?;
                         return Ok(v);
                     }
                     _ => {}
                 }
-                let rv = self.eval_expr(env, this, rhs)?;
+                let rv = self.eval_expr(env, this.clone(), rhs)?;
                 let bin = match op {
                     AssignOp::Add => BinOp::Add,
                     AssignOp::Sub => BinOp::Sub,
@@ -782,28 +804,28 @@ impl Engine {
                     }
                 };
                 let v = self.binary_op(bin, cur, rv)?;
-                self.write_lvalue(env, this, lhs, v)?;
+                self.write_lvalue(env, this, lhs, v.clone())?;
                 Ok(v)
             }
             Expr::Unary(op, operand) => self.unary_op(*op, env, this, operand),
             Expr::Binary(op, l, r) => {
                 match op {
                     BinOp::And => {
-                        let lv = self.eval_expr(env, this, l)?;
-                        if !self.to_boolean(lv) {
+                        let lv = self.eval_expr(env, this.clone(), l)?;
+                        if !self.to_boolean(lv.clone()) {
                             return Ok(lv);
                         }
                         return self.eval_expr(env, this, r);
                     }
                     BinOp::Or => {
-                        let lv = self.eval_expr(env, this, l)?;
-                        if self.to_boolean(lv) {
+                        let lv = self.eval_expr(env, this.clone(), l)?;
+                        if self.to_boolean(lv.clone()) {
                             return Ok(lv);
                         }
                         return self.eval_expr(env, this, r);
                     }
                     BinOp::Nullish => {
-                        let lv = self.eval_expr(env, this, l)?;
+                        let lv = self.eval_expr(env, this.clone(), l)?;
                         if matches!(lv, Value::Null | Value::Undefined) {
                             return self.eval_expr(env, this, r);
                         }
@@ -811,7 +833,7 @@ impl Engine {
                     }
                     _ => {}
                 }
-                let lv = self.eval_expr(env, this, l)?;
+                let lv = self.eval_expr(env, this.clone(), l)?;
                 let rv = self.eval_expr(env, this, r)?;
                 self.binary_op(*op, lv, rv)
             }
@@ -828,7 +850,7 @@ impl Engine {
                 self.get_prop_value(b, name)
             }
             Expr::Index(base, key) => {
-                let b = self.eval_expr(env, this, base)?;
+                let b = self.eval_expr(env, this.clone(), base)?;
                 let k = self.eval_expr(env, this, key)?;
                 let k = self.prop_key(k)?;
                 self.get_prop_value(b, &k)
@@ -839,7 +861,7 @@ impl Engine {
             }
             Expr::SuperIndex(k) => {
                 let base = self.super_base(env)?;
-                let kv = self.eval_expr(env, this, k)?;
+                let kv = self.eval_expr(env, this.clone(), k)?;
                 let key = self.prop_key(kv)?;
                 self.read_prop(base, this, &key)
             }
@@ -861,7 +883,7 @@ impl Engine {
                 self.set_prop_value(b, name, v)
             }
             Expr::Index(base, key) => {
-                let b = self.eval_expr(env, this, base)?;
+                let b = self.eval_expr(env, this.clone(), base)?;
                 let k = self.eval_expr(env, this, key)?;
                 let k = self.prop_key(k)?;
                 self.set_prop_value(b, &k, v)
@@ -883,7 +905,7 @@ impl Engine {
                 self.write_prop(base, this, name, v)
             }
             Expr::SuperIndex(k) => {
-                let kv = self.eval_expr(env, this, k)?;
+                let kv = self.eval_expr(env, this.clone(), k)?;
                 let key = self.prop_key(kv)?;
                 let Value::Obj(base) = self.super_base(env)? else {
                     return Err(self.type_error("invalid `super` base"));
@@ -912,7 +934,7 @@ impl Engine {
                 Some(LValueRef::Prop(b, name.clone()))
             }
             Expr::Index(base, key) => {
-                let b = self.eval_expr(env, this, base)?;
+                let b = self.eval_expr(env, this.clone(), base)?;
                 let k = self.eval_expr(env, this, key)?;
                 Some(LValueRef::Prop(b, Rc::from(self.prop_key(k)?)))
             }
@@ -925,7 +947,7 @@ impl Engine {
             LValueRef::Ident(name) => self
                 .env_get(env, name)
                 .ok_or_else(|| self.ref_error(format!("{name} is not defined"))),
-            LValueRef::Prop(b, k) => self.get_prop_value(*b, k),
+            LValueRef::Prop(b, k) => self.get_prop_value(b.clone(), k),
         }
     }
 
@@ -998,7 +1020,7 @@ impl Engine {
                     }
                 }
                 Expr::Index(base, key) => {
-                    let b = self.eval_expr(env, this, base)?;
+                    let b = self.eval_expr(env, this.clone(), base)?;
                     let k = self.eval_expr(env, this, key)?;
                     let k = self.prop_key(k)?;
                     if let Value::Obj(id) = b {
@@ -1028,18 +1050,18 @@ impl Engine {
                 }
             },
             UnOp::PreInc | UnOp::PreDec | UnOp::PostInc | UnOp::PostDec => {
-                let cur = self.read_lvalue(env, this, operand)?;
+                let cur = self.read_lvalue(env, this.clone(), operand)?;
                 // `++`/`--` sur un bigint : ±1n, sans passer par
                 // `ToNumber` (spec `Increment`/`Decrement`).
                 if let Value::Big(_) = cur {
-                    let b = self.to_bigint(cur)?;
+                    let b = self.to_bigint(cur.clone())?;
                     let d = if matches!(op, UnOp::PreInc | UnOp::PostInc) {
                         num_bigint::BigInt::from(1)
                     } else {
                         num_bigint::BigInt::from(-1)
                     };
                     let new = self.big_val(b + d);
-                    self.write_lvalue(env, this, operand, new)?;
+                    self.write_lvalue(env, this, operand, new.clone())?;
                     return Ok(if matches!(op, UnOp::PostInc | UnOp::PostDec) {
                         cur
                     } else {
@@ -1073,13 +1095,69 @@ impl Engine {
                 let lp = self.to_primitive(l, PrimHint::Default)?;
                 let rp = self.to_primitive(r, PrimHint::Default)?;
                 if matches!(lp, Value::Str(_)) || matches!(rp, Value::Str(_)) {
+                    // §B-110 : `x + ""`/`"" + x` en boucle
+                    // churnait une chaîne par op — une concat
+                    // avec "" est l'identité : la boîte `Str`
+                    // existante ou le cache petits-entiers
+                    // suffisent (et `to_js_string` clone la chaîne
+                    // — l'éviter épargne aussi le churn natif).
+                    if let Value::Str(rid) = &rp {
+                        if rid.is_empty() {
+                            return Ok(match lp {
+                                v @ Value::Str(_) => v,
+                                Value::Num(n) => self.num_str_val(n),
+                                v => {
+                                    let s = self.to_js_string(v)?;
+                                    self.str_val(s)
+                                }
+                            });
+                        }
+                    }
+                    if let Value::Str(lid) = &lp {
+                        if lid.is_empty() {
+                            return Ok(match rp {
+                                v @ Value::Str(_) => v,
+                                Value::Num(n) => self.num_str_val(n),
+                                v => {
+                                    let s = self.to_js_string(v)?;
+                                    self.str_val(s)
+                                }
+                            });
+                        }
+                    }
+                    if let Value::Str(mut a) = lp {
+                        // JS-C420 : boîte `Rc` détenue seule
+                        // (temporaire de concat en boucle) →
+                        // `push_str` en place au lieu de copier
+                        // l'opérande entière — le `format!`
+                        // O(n²) de `s += c` devient amorti O(1).
+                        let rs = match rp {
+                            Value::Str(b) => {
+                                // Deux chaînes — aucune copie
+                                // d'opérande (`try_append`
+                                // refuse si la boîte est
+                                // partagée, ex. `s + s`).
+                                self.alloc_guard(a.len().saturating_add(b.len()))?;
+                                if a.try_append(&b) {
+                                    return Ok(Value::Str(a));
+                                }
+                                return Ok(self.str_val(format!("{}{}", a.as_str(), b.as_str())));
+                            }
+                            _ => self.to_js_string(rp)?,
+                        };
+                        // §B-59 : `s = s + s` en boucle double la
+                        // chaîne — la demande d'alloc exacte 2³⁵
+                        // (`allocation of 34359738368 bytes failed`
+                        // mesuré terrain) doit être un RangeError,
+                        // pas un abort de l'allocateur.
+                        self.alloc_guard(a.len().saturating_add(rs.len()))?;
+                        if a.try_append(&rs) {
+                            return Ok(Value::Str(a));
+                        }
+                        return Ok(self.str_val(format!("{}{}", a.as_str(), rs)));
+                    }
                     let ls = self.to_js_string(lp)?;
                     let rs = self.to_js_string(rp)?;
-                    // §B-59 : `s = s + s` en boucle double la
-                    // chaîne — la demande d'alloc exacte 2³⁵
-                    // (`allocation of 34359738368 bytes failed`
-                    // mesuré terrain) doit être un RangeError,
-                    // pas un abort de l'allocateur.
                     self.alloc_guard(ls.len().saturating_add(rs.len()))?;
                     self.str_val(format!("{ls}{rs}"))
                 } else if matches!(lp, Value::Big(_)) || matches!(rp, Value::Big(_)) {
@@ -1129,12 +1207,10 @@ impl Engine {
                 let rp = self.to_primitive(r, PrimHint::Number)?;
                 let ord = if matches!(lp, Value::Big(_)) || matches!(rp, Value::Big(_)) {
                     self.big_rel(lp, rp)?
-                } else if let (Value::Str(a), Value::Str(b)) = (lp, rp) {
-                    // §B-59 : les deux opérandes clonent entiers —
-                    // `'a' < géante` = clone commit sans garde.
-                    let a = self.read_str(a)?.unwrap_or_default();
-                    let b = self.read_str(b)?.unwrap_or_default();
-                    Some(a.cmp(&b))
+                } else if let (Value::Str(a), Value::Str(b)) = (&lp, &rp) {
+                    // §B-59/JS-C420 : `&JsStr` = lecture en place —
+                    // les deux opérandes ne clonent plus.
+                    Some(a.as_str().cmp(b.as_str()))
                 } else {
                     let a = self.to_number(lp)?;
                     let b = self.to_number(rp)?;
@@ -1150,8 +1226,8 @@ impl Engine {
             }
             Eq => Value::Bool(self.loose_eq(l, r)?),
             Ne => Value::Bool(!self.loose_eq(l, r)?),
-            StrictEq => Value::Bool(strict_eq(l, r, &self.heap)),
-            StrictNe => Value::Bool(!strict_eq(l, r, &self.heap)),
+            StrictEq => Value::Bool(strict_eq(&l, &r, &self.heap)),
+            StrictNe => Value::Bool(!strict_eq(&l, &r, &self.heap)),
             In => {
                 let Value::Obj(id) = r else {
                     return Err(self.type_error("`in` requires an object"));
@@ -1175,7 +1251,7 @@ impl Engine {
         head: &Expr,
         steps: &[ChainStep],
     ) -> JsResult<Value> {
-        let mut cur = self.eval_expr(env, this, head)?;
+        let mut cur = self.eval_expr(env, this.clone(), head)?;
         // Receiver for `.m()`-style calls: the object the callee was
         // read from (plain calls get the global, per dynamic `this`),
         // plus the member key — a `hostObj?.m()` call dispatches to
@@ -1187,14 +1263,14 @@ impl Engine {
         for step in steps {
             match step {
                 ChainStep::Member(name) => {
-                    recv = cur;
+                    recv = cur.clone();
                     recv_key = Some(name.clone());
                     cur = self.get_prop_value(cur, name)?;
                 }
                 ChainStep::Index(k) => {
-                    let kv = self.eval_expr(env, this, k)?;
+                    let kv = self.eval_expr(env, this.clone(), k)?;
                     let key = self.prop_key(kv)?;
-                    recv = cur;
+                    recv = cur.clone();
                     recv_key = Some(Rc::from(&*key));
                     cur = self.get_prop_value(cur, &key)?;
                 }
@@ -1202,7 +1278,7 @@ impl Engine {
                     if matches!(cur, Value::Null | Value::Undefined) {
                         return Ok(Value::Undefined);
                     }
-                    recv = cur;
+                    recv = cur.clone();
                     recv_key = Some(name.clone());
                     cur = self.get_prop_value(cur, name)?;
                 }
@@ -1210,9 +1286,9 @@ impl Engine {
                     if matches!(cur, Value::Null | Value::Undefined) {
                         return Ok(Value::Undefined);
                     }
-                    let kv = self.eval_expr(env, this, k)?;
+                    let kv = self.eval_expr(env, this.clone(), k)?;
                     let key = self.prop_key(kv)?;
-                    recv = cur;
+                    recv = cur.clone();
                     recv_key = Some(Rc::from(&*key));
                     cur = self.get_prop_value(cur, &key)?;
                 }
@@ -1225,17 +1301,17 @@ impl Engine {
                     // `eval_args` étend les `...spread` — sinon
                     // `a?.b(...xs)` tombait sur
                     // « `...` outside a call or array literal » (J6).
-                    let args = self.eval_args(env, this, arg_exprs)?;
+                    let args = self.eval_args(env, this.clone(), arg_exprs)?;
                     // Même ordre que `Callee::Member` : `invoke` du
                     // host d'abord, la valeur lue ensuite (un host
                     // peut exposer les deux pour des noms distincts)
                     // — mêmes masques `host_method_shadowed`.
                     let mut done = false;
-                    if let (Some(key), Value::Obj(bid)) = (&recv_key, recv) {
+                    if let (Some(key), Value::Obj(bid)) = (&recv_key, recv.clone()) {
                         if let Some(h) = self.host_of(bid) {
                             if !self.host_method_shadowed(bid, key) {
                                 crate::host_mark(h.class_name(), key);
-                                if let Some(v) = h.invoke(self, recv, key, &args)? {
+                                if let Some(v) = h.invoke(self, recv.clone(), key, &args)? {
                                     cur = v;
                                     done = true;
                                     // Réactions CE synchrones (JS-C68).
@@ -1258,10 +1334,10 @@ impl Engine {
     /// `==` per ES5 §11.9.3.
     pub(crate) fn loose_eq(&mut self, l: Value, r: Value) -> JsResult<bool> {
         let (l, r) = (l.unhole(), r.unhole());
-        if strict_eq(l, r, &self.heap) {
+        if strict_eq(&l, &r, &self.heap) {
             return Ok(true);
         }
-        match (l, r) {
+        match (l.clone(), r.clone()) {
             (Value::Null, Value::Undefined) | (Value::Undefined, Value::Null) => Ok(true),
             // BigInt loose-eq (spec `IsLooselyEqual`) : Num →
             // égalité mathématique, Str → `StringToBigInt`,
@@ -1273,8 +1349,11 @@ impl Engine {
                 Ok(self.bigint_of(bv).is_some_and(|b| big_eq_num(&b, n)))
             }
             (Value::Big(_), Value::Str(_)) | (Value::Str(_), Value::Big(_)) => {
-                let bv = if matches!(l, Value::Big(_)) { l } else { r };
-                let sv = if matches!(l, Value::Str(_)) { l } else { r };
+                let (bv, sv) = if matches!(l, Value::Big(_)) {
+                    (l, r)
+                } else {
+                    (r, l)
+                };
                 match self.to_bigint(sv) {
                     Ok(sb) => Ok(self.bigint_of(bv).is_some_and(|b| b == sb)),
                     Err(_) => Ok(false), // `StringToBigInt` invalide → pas égal.
@@ -1397,7 +1476,7 @@ impl Engine {
             let n = e.to_number(o)?;
             Ok(big_cmp_num(&bv, n))
         };
-        match (l, r) {
+        match (l.clone(), r.clone()) {
             (Value::Big(_), Value::Big(_)) => {
                 let a = self.bigint_of(l).unwrap_or_default();
                 let b = self.bigint_of(r).unwrap_or_default();

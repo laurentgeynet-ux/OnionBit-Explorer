@@ -251,11 +251,11 @@ fn tcfapi(e: &mut Engine, t: Value, a: &[Value]) -> JsResult<Value> {
         return tcfapi_honest(e, t, a);
     }
     let cmd = match a.first() {
-        Some(v) => e.to_js_string(*v)?,
+        Some(v) => e.to_js_string(v.clone())?,
         None => String::new(),
     };
     let cb = arg(a, 2);
-    if !e.is_callable(cb) {
+    if !e.is_callable(cb.clone()) {
         return Ok(Value::Undefined);
     }
     match cmd.as_str() {
@@ -299,11 +299,11 @@ fn tcfapi(e: &mut Engine, t: Value, a: &[Value]) -> JsResult<Value> {
 /// `CmpPolicy::None`, inchangé.
 fn tcfapi_honest(e: &mut Engine, _t: Value, a: &[Value]) -> JsResult<Value> {
     let cmd = match a.first() {
-        Some(v) => e.to_js_string(*v)?,
+        Some(v) => e.to_js_string(v.clone())?,
         None => String::new(),
     };
     let cb = arg(a, 2);
-    if !e.is_callable(cb) {
+    if !e.is_callable(cb.clone()) {
         return Ok(Value::Undefined);
     }
     match cmd.as_str() {
@@ -511,11 +511,11 @@ fn gvl_stub(e: &mut Engine) -> ObjId {
 /// `getPublisherConsents` répondent la décision.
 fn cmp_v1(e: &mut Engine, _t: Value, a: &[Value]) -> JsResult<Value> {
     let cmd = match a.first() {
-        Some(v) => e.to_js_string(*v)?,
+        Some(v) => e.to_js_string(v.clone())?,
         None => String::new(),
     };
     let cb = arg(a, 2);
-    if !e.is_callable(cb) {
+    if !e.is_callable(cb.clone()) {
         return Ok(Value::Undefined);
     }
     let agreed = matches!(e.cmp.policy, CmpPolicy::AcceptAll);
@@ -556,11 +556,11 @@ fn cmp_v1(e: &mut Engine, _t: Value, a: &[Value]) -> JsResult<Value> {
 /// `getUSPData` rend la `uspString` de la politique.
 fn uspapi(e: &mut Engine, _t: Value, a: &[Value]) -> JsResult<Value> {
     let cmd = match a.first() {
-        Some(v) => e.to_js_string(*v)?,
+        Some(v) => e.to_js_string(v.clone())?,
         None => String::new(),
     };
     let cb = arg(a, 2);
-    if !e.is_callable(cb) {
+    if !e.is_callable(cb.clone()) {
         return Ok(Value::Undefined);
     }
     if cmd == "getUSPData" {
@@ -585,11 +585,11 @@ fn uspapi(e: &mut Engine, _t: Value, a: &[Value]) -> JsResult<Value> {
 /// autres sections → `(null,false)` honnête.
 fn gpp(e: &mut Engine, _t: Value, a: &[Value]) -> JsResult<Value> {
     let cmd = match a.first() {
-        Some(v) => e.to_js_string(*v)?,
+        Some(v) => e.to_js_string(v.clone())?,
         None => String::new(),
     };
     let cb = arg(a, 1);
-    if !e.is_callable(cb) {
+    if !e.is_callable(cb.clone()) {
         return Ok(Value::Undefined);
     }
     if cmd == "ping" {
@@ -626,7 +626,7 @@ fn gpp(e: &mut Engine, _t: Value, a: &[Value]) -> JsResult<Value> {
         // Sections non déclarées → `(null,false)` honnête ;
         // `uspv1` est servi (`1---` — voir `ping`).
         let param = match a.get(2) {
-            Some(v) => e.to_js_string(*v)?,
+            Some(v) => e.to_js_string(v.clone())?,
             None => String::new(),
         };
         match cmd.as_str() {
@@ -665,9 +665,9 @@ fn gpp(e: &mut Engine, _t: Value, a: &[Value]) -> JsResult<Value> {
 /// `OneTrust` le tirerait dès le chargement (consentement déjà
 /// décidé) → appel immédiat ; erreur dégradée.
 fn optanon_set(e: &mut Engine, _t: Value, a: &[Value]) -> JsResult<Value> {
-    if let Some(f) = a.first().copied() {
-        e.misc.cmp_optanon = Some(f);
-        if e.is_callable(f) {
+    if let Some(f) = a.first().cloned() {
+        e.misc.cmp_optanon = Some(f.clone());
+        if e.is_callable(f.clone()) {
             let _ = e.call_value(f, Value::Undefined, &[]);
         }
     }
@@ -676,7 +676,7 @@ fn optanon_set(e: &mut Engine, _t: Value, a: &[Value]) -> JsResult<Value> {
 
 /// Getter `OptanonWrapper` — la dernière valeur assignée.
 fn optanon_get(e: &mut Engine, _t: Value, _a: &[Value]) -> JsResult<Value> {
-    Ok(e.misc.cmp_optanon.unwrap_or(Value::Undefined))
+    Ok(e.misc.cmp_optanon.clone().unwrap_or(Value::Undefined))
 }
 
 // ------------------------------------------------------------------
@@ -714,7 +714,7 @@ fn absorb_prop(e: &mut Engine, obj: ObjId, key: &'static str, v: Value) {
 
 /// Getter absorbant — l'arg bound n°0 est la valeur servie.
 fn cmp_absorb_get(_e: &mut Engine, _t: Value, a: &[Value]) -> JsResult<Value> {
-    Ok(a.first().copied().unwrap_or(Value::Undefined))
+    Ok(a.first().cloned().unwrap_or(Value::Undefined))
 }
 
 /// Setter absorbant — écriture avalée, jamais de `TypeError`.
@@ -729,7 +729,7 @@ fn cmp_absorb_set(_e: &mut Engine, _t: Value, _a: &[Value]) -> JsResult<Value> {
 /// est avalé. Jamais de `TypeError`.
 fn didomi_onready_set(e: &mut Engine, _t: Value, a: &[Value]) -> JsResult<Value> {
     let v = arg(a, 0);
-    if e.is_callable(v) {
+    if e.is_callable(v.clone()) {
         let _ = e.call_value(v, Value::Undefined, &[]);
         return Ok(Value::Undefined);
     }
@@ -740,7 +740,7 @@ fn didomi_onready_set(e: &mut Engine, _t: Value, a: &[Value]) -> JsResult<Value>
         };
         for i in 0..n.min(DIDOMI_DRAIN_CAP) {
             if let Some(f) = e.get_prop(id, &i.to_string()) {
-                if e.is_callable(f) {
+                if e.is_callable(f.clone()) {
                     let _ = e.call_value(f, Value::Undefined, &[]);
                 }
             }
@@ -817,8 +817,8 @@ fn didomi_current_status(e: &mut Engine, _t: Value, _a: &[Value]) -> JsResult<Va
 fn didomi_push(e: &mut Engine, _t: Value, a: &[Value]) -> JsResult<Value> {
     let n = a.len() as f64;
     for f in a {
-        if e.is_callable(*f) {
-            let _ = e.call_value(*f, Value::Undefined, &[]);
+        if e.is_callable(f.clone()) {
+            let _ = e.call_value(f.clone(), Value::Undefined, &[]);
         }
     }
     Ok(Value::Num(n))
@@ -847,5 +847,5 @@ fn empty_obj(e: &mut Engine, _t: Value, _a: &[Value]) -> JsResult<Value> {
 
 /// `args[i]` ou `Undefined` (convention `xhr::arg`).
 fn arg(args: &[Value], i: usize) -> Value {
-    args.get(i).copied().unwrap_or(Value::Undefined)
+    args.get(i).cloned().unwrap_or(Value::Undefined)
 }

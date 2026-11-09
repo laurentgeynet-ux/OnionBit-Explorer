@@ -52,6 +52,38 @@ const MAX_STREAK_URLS: usize = 1_024;
 /// couples `(kind, host)` retenus ; au-delà, log direct.
 const MAX_NET_PROBE_SEEN: usize = 512;
 
+/// Étape 209 — cadence d'échantillonnage RSS du shed-load :
+/// `memory_stats()` est un appel système — une lecture par
+/// fenêtre, pas à chaque `poll_net`.
+const RSS_SHED_SAMPLE: std::time::Duration = std::time::Duration::from_millis(250);
+
+/// Marge de réarmement du shed (hysteresis) : l'épisode ne se
+/// lève que sous `seuil - max(seuil/8, 64 Mio)` — sinon le RSS
+/// en clapet à la frontière réarmerait la dégradation à chaque
+/// passe (les fetchs droppés ne reviennent pas).
+fn shed_margin(shed_mb: u32) -> u64 {
+    u64::from(shed_mb / 8).max(64)
+}
+
+/// JS-C415 — kind `net.drop` : `badr` si `url` ne résout pas
+/// contre `base` (base opaque/vide — le mur « host='' » réel :
+/// ctx né sous `about:`/`data:` — la relative n'a nulle part
+/// où aller), `blocked` si elle résout puis est refusée
+/// (mixed/CSP/méthode/mode same-origin).
+pub(crate) fn net_drop_kind(base: &Url, url: &str) -> &'static str {
+    if Url::resolve(base, url.trim()).is_err() {
+        "badr"
+    } else {
+        "blocked"
+    }
+}
+/// Borne de passes `after_script` déroulées par entrée
+/// (§B-111 — vol 695) : une tempête de livraisons qui
+/// re-marque à chaque passe cède la main sous verrou ; les
+/// onglets restants dans `after_script_again` sont repris à
+/// la prochaine entrée (la file persiste, rien n'est perdu).
+const AFTER_SCRIPT_MAX_PASSES: usize = 64;
+
 /// Variante d'un `NetError` en nom de sonde — la cause
 /// transport est nommée sans fuiter les détails (cible,
 /// source io) dans le journal.
@@ -76,6 +108,34 @@ fn net_err_kind(e: &explorer_net::error::NetError) -> &'static str {
         E::Http2(_) => "h2",
         E::Io(_) => "io",
     }
+}
+
+/// Sonde §B-108 — nomme le refus d'une livraison dyn-img
+/// (contexte mort / pas de source résoluble / mixed-content
+/// ou CSP `img-src`). `enabled!` = coût nul désarmé.
+fn img_dskip(reason: &'static str) {
+    if tracing::enabled!(target: "media_probe", tracing::Level::INFO) {
+        tracing::info!(target: "media_probe", site = "img.dskip", reason);
+    }
+}
+
+/// Source retenue d'un `DynImgReq` — `srcset` résolu par
+/// `sizes`/dpr prime sur `src` (spec), même pile que
+/// `collect_images`.
+fn dyn_img_src_key(d: &explorer_js::DynImgReq, img_w: f32, dpr: f32) -> Option<String> {
+    d.srcset
+        .as_deref()
+        .and_then(|ss| {
+            let eff_w = resolve_sizes(d.sizes.as_deref(), img_w);
+            pick_srcset(ss, eff_w, dpr)
+        })
+        .or_else(|| {
+            d.src
+                .as_deref()
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+                .map(str::to_string)
+        })
 }
 
 /// Délai de retenue §B-60 pour un streak donné —
@@ -303,8 +363,11 @@ impl Session {
                 evals += 1;
             }
         }
+        // §B-111 — paire `net:` (morgue C406) : la ligne
+        // d'entrée sans son `ret` nomme le drain fautif.
+        dlv_info!("net: scripts");
         let n = eng.run_pending();
-        tracing::trace!(tab, jobs = n, "jobs js exécutés");
+        dlv_info!("net: scripts ret n={n}");
         // Miroir muté ? → re-parse : le relayout qui suit
         // rend les modifications (dirty bit consommé côté
         // moteur).
@@ -1677,8 +1740,9 @@ impl Session {
             self.eval_module_graph(tab, eng.as_mut(), &ModEval { name, graph });
         }
         eng.deliver_dyn_module(ctx, seq, ok);
+        dlv_info!("net: module");
         let n = eng.run_pending();
-        tracing::trace!(tab, jobs = n, "jobs js après module dynamique");
+        dlv_info!("net: module ret n={n}");
         let mutated = Self::sync_for_apply(eng.as_mut());
         let mut eng = Some(eng);
         if let Some(entry) = self.tabs.get_mut(&tab) {
@@ -1711,12 +1775,15 @@ impl Session {
         seq: u64,
         body: Option<String>,
     ) {
-        if self.slow_eval_open(tab) {
-            // §B-1 (vol 221 : la rafale d'évals lentes
-            // passait ici — livraisons dyn, hors des deux
-            // sites couverts par Étape 161). Livrer
-            // `error` plutôt qu'évaluer : le script
-            // saute, le tour moteur continue.
+        // §B-1 (vol 221 : la rafale d'évals lentes passait
+        // ici — livraisons dyn, hors des deux sites couverts
+        // par Étape 161). Livrer `error` plutôt qu'évaluer :
+        // le script saute, le tour moteur continue. Un corps
+        // ≤ `SLOW_EVAL_PROBE_BYTES` peut sonder une fois par
+        // fenêtre (demi-ouvert, C397) ; `None` (fetch
+        // échoué — pas une éval) reste une erreur livrée.
+        let bytes = body.as_ref().map_or(usize::MAX, String::len);
+        if self.slow_eval_skip(tab, bytes) {
             let entry = self.tabs.get_mut(&tab);
             if let Some(eng) = entry.and_then(|e| e.js.as_mut()) {
                 eng.deliver_dyn_script(ctx, seq, None);
@@ -1737,8 +1804,9 @@ impl Session {
             let t = std::time::Instant::now();
             eng.deliver_dyn_script(ctx, seq, body);
             let eval_ms = t.elapsed().as_millis();
+            dlv_info!("net: script");
             let n = eng.run_pending();
-            tracing::trace!(tab, jobs = n, "jobs js après script dynamique");
+            dlv_info!("net: script ret n={n}");
             (Self::sync_for_apply(eng.as_mut()), eval_ms)
         };
         self.note_eval_ms(tab, eval_ms);
@@ -1901,27 +1969,15 @@ impl Session {
         let Some((req_page, req_base, doc_policy, csp, _opaque)) =
             self.ctx_net_origin(tab, d.ctx, page, base)
         else {
+            img_dskip("ctx");
             self.deliver_dyn_img_el(tab, d.ctx, d.seq, false);
             return;
         };
         // Choix de la source — `srcset` prime sur `src`
         // (spec) ; la clé est la chaîne telle que
         // `collect_images` la relira au prochain apply.
-        let src_key = d
-            .srcset
-            .as_deref()
-            .and_then(|ss| {
-                let eff_w = resolve_sizes(d.sizes.as_deref(), self.viewport.0);
-                pick_srcset(ss, eff_w, self.scale)
-            })
-            .or_else(|| {
-                d.src
-                    .as_deref()
-                    .map(str::trim)
-                    .filter(|s| !s.is_empty())
-                    .map(str::to_string)
-            });
-        let Some(src_key) = src_key else {
+        let Some(src_key) = dyn_img_src_key(d, self.viewport.0, self.scale) else {
+            img_dskip("nosrc");
             self.deliver_dyn_img_el(tab, d.ctx, d.seq, false);
             return;
         };
@@ -1944,6 +2000,7 @@ impl Session {
                 )
             })
         else {
+            img_dskip("blocked");
             self.deliver_dyn_img_el(tab, d.ctx, d.seq, false);
             return;
         };
@@ -2227,8 +2284,9 @@ impl Session {
                 return;
             };
             eng.deliver_dyn_link(ctx, seq, ok);
+            dlv_info!("net: link");
             let n = eng.run_pending();
-            tracing::trace!(tab, jobs = n, "jobs js après livraison link dyn");
+            dlv_info!("net: link ret n={n}");
             Self::sync_for_apply(eng.as_mut())
         };
         if let Some(s) = mutated {
@@ -2249,8 +2307,9 @@ impl Session {
                 return;
             };
             eng.deliver_dyn_img(ctx, seq, ok);
+            dlv_info!("net: img");
             let n = eng.run_pending();
-            tracing::trace!(tab, jobs = n, "jobs js après livraison img dyn");
+            dlv_info!("net: img ret n={n}");
             Self::sync_for_apply(eng.as_mut())
         };
         if let Some(s) = mutated {
@@ -2427,8 +2486,9 @@ impl Session {
                 return;
             };
             eng.deliver_dyn_frame(ctx, seq, ok);
+            dlv_info!("net: frame");
             let n = eng.run_pending();
-            tracing::trace!(tab, jobs = n, "jobs js après livraison iframe dyn");
+            dlv_info!("net: frame ret n={n}");
             Self::sync_for_apply(eng.as_mut())
         };
         if let Some(s) = mutated {
@@ -2549,9 +2609,30 @@ impl Session {
             mode,
             credentials,
         ) else {
-            self.note_net_drop("blocked", url);
+            // JS-C415 — discrimine le motif : `badr` = l'URL
+            // brute n'a pas résolu contre `req_base` (le mur
+            // réel « host='' » — base de ctx opaque/vide :
+            // une relative n'a nulle part où aller) ;
+            // `blocked` = résolue puis refusée (mixed/CSP/
+            // méthode/mode same-origin).
+            let kind = net_drop_kind(&req_base, url);
+            if kind == "badr" {
+                self.note_net_badr(&req_base, url, ctx);
+            }
+            self.note_net_drop(kind, url);
             return Err(());
         };
+        // JS-C415 — `net.host` : l'hôte **résolu** (dedup par
+        // host) — discrimine l'artefact `fetch.send host=""`
+        // (sonde moteur sur l'URL **brute** pré-résolution :
+        // toute relative logue "") d'une vraie résolution
+        // manquée — celle-ci apparaît en `net.badr`, jamais ici.
+        if tracing::enabled!(target: "media_probe", tracing::Level::INFO) {
+            let rhost = req.url.host();
+            if self.note_net_probe("host.res", &rhost) {
+                tracing::info!(target: "media_probe", site = "net.host", host = %rhost, cross, ctx);
+            }
+        }
         // Origine opaque : `null` (sérialisation spec) — ACAO
         // `*` reste admis, un `ACAO: <origine>` ne l'est pas.
         let page_origin = if opaque {
@@ -2825,8 +2906,9 @@ impl Session {
                     errs.push(e.to_string());
                 }
             }
+            dlv_info!("net: ws");
             let n = eng.run_pending();
-            tracing::trace!(tab, jobs = n, "jobs js après événement ws");
+            dlv_info!("net: ws ret n={n}");
             (Self::sync_for_apply(eng.as_mut()), errs)
         };
         let (mutated, errs) = mutated;
@@ -2938,6 +3020,144 @@ impl Session {
     /// (`ctx_dead`/`quota`/`blocked`) + l'hôte ; dedup
     /// `(kind, host)` — le décompte reste côté `fetch.rej`
     /// moteur, un motif est logué une fois par sorte.
+    /// Étape 209 / §B-114-b — garde **processus** RSS :
+    /// au-delà de `rss_shed_mb` (config, sous les seuils de
+    /// kill daemon `EXPLORER_RSS_LIMIT_MB`/`COMMIT_LIMIT_MB` —
+    /// opt-in, absents au vol 697 d'où la mort nue), la
+    /// session dégrade en gradins au lieu d'attendre le
+    /// crash. Échantillonné à `RSS_SHED_SAMPLE` de cadence
+    /// depuis `poll_net` et les entrées navigation.
+    pub(crate) fn maybe_rss_shed(&mut self) {
+        if self.rss_shed_mb == 0 || self.rss_shed_at.elapsed() < RSS_SHED_SAMPLE {
+            return;
+        }
+        self.rss_shed_at = std::time::Instant::now();
+        let Some(m) = memory_stats::memory_stats() else {
+            return;
+        };
+        // Même métrique que le watchdog daemon (main.rs :
+        // `physical_mem`) — les seuils sont comparables.
+        self.shed_evaluate((m.physical_mem / (1024 * 1024)) as u64);
+    }
+
+    /// Transition d'état du shed — séparée de l'échantillon
+    /// pour que les tests injectent `mb` directement
+    /// (`maybe_rss_shed` lit le vrai RSS).
+    pub(crate) fn shed_evaluate(&mut self, mb: u64) {
+        if self.rss_shed_mb == 0 {
+            return; // désarmé par config — jamais de transition
+        }
+        let over = if self.shed_active {
+            mb + shed_margin(self.rss_shed_mb) > u64::from(self.rss_shed_mb)
+        } else {
+            mb >= u64::from(self.rss_shed_mb)
+        };
+        if over == self.shed_active {
+            return;
+        }
+        self.shed_active = over;
+        if !over {
+            tracing::info!(mb, "rss_shed levé (sous marge)");
+            return;
+        }
+        tracing::warn!(
+            mb,
+            limit = self.rss_shed_mb,
+            "rss_shed : dégradation en gradins"
+        );
+        self.shed_apply();
+    }
+
+    /// `true` pendant un épisode shed — les navigations et
+    /// onglets neufs sont refusés (`CoreError::Overloaded` →
+    /// REST 503 + `Retry-After`).
+    #[must_use]
+    pub fn shed_active(&self) -> bool {
+        self.shed_active
+    }
+
+    /// `Some(retry_s)` pendant l'épisode — le refus 503 honnête
+    /// de la surface REST ; `None` hors épisode (ou shed
+    /// désarmé — `rss_shed_mb == 0` n'arme jamais le drapeau).
+    #[must_use]
+    pub fn shed_refusal(&self) -> Option<u32> {
+        self.shed_active.then_some(self.shed_retry_after_s)
+    }
+
+    /// Les gradins, dans l'ordre du moins douloureux :
+    /// 1. `fetch_held` + `pending_script_net` → `status:0`
+    ///    livrés — les promesses **rejettent proprement**,
+    ///    jamais pendantes (un drop muet recréerait le mur
+    ///    « resolve jamais invoqué » qu'on forensique
+    ///    ailleurs) ;
+    /// 2. `eng.gc()` demandé sur chaque onglet — **asynchrone**
+    ///    (file de commandes moteur, pas un `collect`
+    ///    synchrone) : le shed ne bloque pas la pompe ;
+    /// 3. bitmaps décodés évincés — `img_decoded`/`bg_decoded`
+    ///    seuls : les corps compressés `img_bodies` restent
+    ///    re-décodables (repli `alt` peint, dégradation bornée).
+    fn shed_apply(&mut self) {
+        // Collecte d'abord : `deliver_net_response` re-emprunte
+        // `self` pour le tour post-script.
+        let held: Vec<_> = self
+            .fetch_held
+            .drain(..)
+            .map(|h| (h.tab, h.handle))
+            .collect();
+        let pend: Vec<_> = self
+            .pending_script_net
+            .drain(..)
+            .map(|p| (p.tab, p.handle))
+            .collect();
+        let dropped = held.len() + pend.len();
+        for (tab, handle) in held.into_iter().chain(pend) {
+            self.shed_fail(tab, handle);
+        }
+        for e in self.tabs.values_mut() {
+            if let Some(eng) = e.js.as_mut() {
+                eng.gc();
+            }
+            e.img_decoded.clear();
+            e.bg_decoded.clear();
+        }
+        tracing::warn!(
+            dropped,
+            "rss_shed : fetchs basse priorité abandonnés (status:0), GC demandé, bitmaps évincés"
+        );
+    }
+
+    /// `status:0` livré à un fetch droppé par le shed — la
+    /// promesse moteur rejette au lieu d'attendre à l'infini.
+    fn shed_fail(&mut self, tab: TabId, handle: u64) {
+        self.deliver_net_response(
+            tab,
+            NetResponse {
+                handle,
+                status: 0,
+                status_text: String::new(),
+                headers: Vec::new(),
+                body: Vec::new(),
+            },
+        );
+    }
+
+    /// Sonde `net.badr` (JS-C415) — la résolution
+    /// `Url::resolve` elle-même a échoué : logue la **base**
+    /// du ctx (suspect n°1 du mur « host='' » — ctx né sous
+    /// `about:`/`data:`/base vide : une relative n'a nulle
+    /// part où aller) + extrait brut + `ctx`. Dedup par
+    /// (`badr`, base) — une ligne par population fautive.
+    fn note_net_badr(&mut self, base: &Url, url: &str, ctx: explorer_js::JsCtxId) {
+        if !tracing::enabled!(target: "media_probe", tracing::Level::INFO) {
+            return;
+        }
+        let b = base.as_str();
+        if self.note_net_probe("badr", &b) {
+            let raw = &url[..url.len().min(64)];
+            tracing::info!(target: "media_probe", site = "net.badr", base = %b, raw, ctx);
+        }
+    }
+
     fn note_net_drop(&mut self, kind: &'static str, url: &str) {
         if !tracing::enabled!(target: "media_probe", tracing::Level::INFO) {
             return;
@@ -3014,8 +3234,9 @@ impl Session {
                 tracing::debug!(tab, error = %e, "livraison réseau js");
                 emit_err = Some(e.to_string());
             }
+            dlv_info!("net: resp");
             let n = eng.run_pending();
-            tracing::trace!(tab, jobs = n, "jobs js après réponse réseau");
+            dlv_info!("net: resp ret n={n}");
             (Self::sync_for_apply(eng.as_mut()), emit_err)
         };
         let (mutated, emit_err) = mutated;
@@ -3053,8 +3274,9 @@ impl Session {
                 tracing::debug!(tab, error = %e, "livraison crypto js");
                 emit_err = Some(e.to_string());
             }
+            dlv_info!("net: crypto");
             let n = eng.run_pending();
-            tracing::trace!(tab, jobs = n, "jobs js après réponse crypto");
+            dlv_info!("net: crypto ret n={n}");
             (Self::sync_for_apply(eng.as_mut()), emit_err)
         };
         let (mutated, emit_err) = mutated;
@@ -3096,8 +3318,9 @@ impl Session {
                 tracing::debug!(tab, error = %e, "livraison eventsource js");
                 emit_err = Some(e.to_string());
             }
+            dlv_info!("net: es");
             let n = eng.run_pending();
-            tracing::trace!(tab, jobs = n, "jobs js après événement sse");
+            dlv_info!("net: es ret n={n}");
             (Self::sync_for_apply(eng.as_mut()), emit_err)
         };
         let (mutated, emit_err) = mutated;
@@ -3115,8 +3338,55 @@ impl Session {
     /// (`HttpOnly` filtré — non posable par un script), le
     /// `localStorage` vers la map d'origine + le profil, et
     /// les nouvelles requêtes réseau vers le scheduler.
-    #[allow(clippy::too_many_lines)] // drains séquentiels, chaque bras documenté
+    ///
+    /// §B-111 (vol 695) — **garde de classe, pas de site** :
+    /// la morgue C407 a compté 1 768 `net: dsn` non fermés —
+    /// `after_script` → `drain_script_net` → livraisons
+    /// `deliver_*` → `after_script` imbriquait une passe par
+    /// livraison (pile native ∝ file, `0xC00000FD` à charge
+    /// égale). Tout appel reçu pendant une passe se re-file
+    /// dans `after_script_again` et retourne immédiatement ;
+    /// la boucle externe déroule les redemandes à plat, quelle
+    /// que soit l'arête de ré-entrance (les voies silencieuses
+    /// — `element_path`, `el_dyn`, `frame_ctx_load_events` —
+    /// n'ont pas à être nommées : la classe est couverte par
+    /// construction).
     pub(crate) fn after_script(&mut self, tab: TabId) {
+        if self.in_after_script {
+            if self.after_script_again.insert(tab) {
+                dlv_info!("net: afs defer tab={tab}");
+            }
+            return;
+        }
+        self.in_after_script = true;
+        self.after_script_again.insert(tab);
+        let mut passes = 0_usize;
+        while let Some(t) = self.after_script_again.iter().next().copied() {
+            self.after_script_again.remove(&t);
+            passes += 1;
+            if passes > AFTER_SCRIPT_MAX_PASSES {
+                // Une tempête qui re-marque à chaque passe
+                // cède la main — le reste de la file persiste
+                // pour la prochaine entrée (`HashSet` non
+                // vidé), jamais perdu.
+                tracing::warn!("net: afs passes>{AFTER_SCRIPT_MAX_PASSES} tab={t}");
+                break;
+            }
+            self.after_script_pass(t);
+        }
+        self.in_after_script = false;
+    }
+
+    /// Corps d'une passe post-script — jamais appelé
+    /// directement hors [`Self::after_script`] (la garde
+    /// `in_after_script` doit être posée : un appel nu
+    /// réintroduirait la ré-entrance §B-111).
+    #[allow(clippy::too_many_lines)] // drains séquentiels, chaque bras documenté
+    fn after_script_pass(&mut self, tab: TabId) {
+        // §B-111 — `net:`/`fmir` (morgue C407) : le drain a
+        // retourné (`net: frame ret`), la mort vit dans cette
+        // queue post-script — chaque étape nommée.
+        dlv_info!("net: afs tab={tab}");
         if self.js_stalled(tab) {
             return;
         }
@@ -3180,6 +3450,7 @@ impl Session {
         // l'identité du parent. **Avant** `drain_script_net` :
         // un `document.cookie` suivi d'un `fetch` dans le même
         // script doit émettre le cookie — comme le top-level.
+        dlv_info!("net: sinks");
         let sinks: Vec<FrameSink> = self
             .tabs
             .get_mut(&tab)
@@ -3248,12 +3519,16 @@ impl Session {
                 }
             }
         }
+        dlv_info!("net: dsn");
         self.drain_script_net(tab);
+        dlv_info!("net: dsn done");
         // Étape 134 : les miroirs des contextes `<iframe>`
         // mutés par leurs scripts reviennent en
         // `SubFrame.dom` (le composite re-rend au relayout).
         self.sync_frame_mirrors(tab);
+        dlv_info!("net: media");
         self.drain_media_commands(tab);
+        dlv_info!("net: afs done");
     }
 
     /// Livre les réponses arrivées — synchrone, sans yield :
@@ -3267,6 +3542,10 @@ impl Session {
         if let Ok(mut g) = crate::LAST_DRAIN.lock() {
             *g = "poll_net";
         }
+        // Étape 209 — le shed RSS se jauge à cadence bornée
+        // en tête de pompe (le seul rail qui voit tout le
+        // trafic) ; les entrées nav le relisent aussi.
+        self.maybe_rss_shed();
         // Le budget est mesuré d'ici (Étape 151 / §B-54) : les
         // drains crypto/ES/WS précédant `drain_net_done`
         // comptent dans la même passe.
@@ -3597,6 +3876,77 @@ impl Session {
             + self.pending_script_net.len()
     }
 
+    /// Pipeline `<img>` de [`Self::plan_subresources`] —
+    /// résolution base, upgrade CSP, mixed-content +
+    /// `img-src`, dédup URL, borne `max_images`. Sonde
+    /// §B-108 `img.skip` : attribution des drops entre
+    /// collecte et fetch (la raison qui tue le candidat).
+    fn plan_img_urls(
+        &self,
+        dom: &Dom,
+        page: &Url,
+        base: &Url,
+        upg: &dyn Fn(Url) -> Url,
+        allow: &dyn Fn(explorer_net::http::FetchDest, &Url) -> bool,
+    ) -> Vec<Url> {
+        let mut seen_img = std::collections::HashSet::new();
+        let img_probe = tracing::enabled!(target: "media_probe", tracing::Level::INFO);
+        let mut noresolve = 0u64;
+        let mut nonhttp = 0u64;
+        let mut blocked = 0u64;
+        let mut dup = 0u64;
+        let img_cands = collect_images(dom, self.viewport.0, self.scale);
+        let img_cand_n = img_cands.len();
+        let imgs: Vec<Url> = img_cands
+            .into_iter()
+            .filter_map(|(_, src)| {
+                Url::resolve(base, &src).ok().or_else(|| {
+                    if img_probe {
+                        noresolve += 1;
+                    }
+                    None
+                })
+            })
+            .map(upg)
+            // `data:` (et autres non-http) ne se fetch pas —
+            // peints inline par `collect_data_images` (56f).
+            .filter(|u| {
+                let ok = matches!(u.scheme(), "http" | "https");
+                if !ok && img_probe {
+                    nonhttp += 1;
+                }
+                ok
+            })
+            .filter(|u| {
+                if is_mixed_content(page, u) || !allow(explorer_net::http::FetchDest::Image, u) {
+                    if img_probe {
+                        blocked += 1;
+                    }
+                    return false;
+                }
+                let fresh = seen_img.insert(u.as_str());
+                if !fresh && img_probe {
+                    dup += 1;
+                }
+                fresh
+            })
+            .take(self.max_images)
+            .collect();
+        if img_probe {
+            tracing::info!(
+                target: "media_probe",
+                site = "img.skip",
+                cand = img_cand_n,
+                noresolve,
+                nonhttp,
+                blocked,
+                dup,
+                fetch = imgs.len()
+            );
+        }
+        imgs
+    }
+
     /// Collecte des sous-ressources du document (étape 50) :
     /// URLs résolues ici (émission propre), mixed-content
     /// filtré, images dédupliquées — plan borné par la
@@ -3682,21 +4032,7 @@ impl Session {
         } else {
             Vec::new()
         };
-        let mut seen_img = std::collections::HashSet::new();
-        let imgs: Vec<Url> = collect_images(dom, self.viewport.0, self.scale)
-            .into_iter()
-            .filter_map(|(_, src)| Url::resolve(base, &src).ok())
-            .map(&upg)
-            // `data:` (et autres non-http) ne se fetch pas —
-            // peints inline par `collect_data_images` (56f).
-            .filter(|u| matches!(u.scheme(), "http" | "https"))
-            .filter(|u| {
-                !is_mixed_content(page, u)
-                    && allow(explorer_net::http::FetchDest::Image, u)
-                    && seen_img.insert(u.as_str())
-            })
-            .take(self.max_images)
-            .collect();
+        let imgs = self.plan_img_urls(dom, page, base, &upg, &allow);
         // `<iframe>` (étape 128 + CAP-142) — un sous-contexte
         // est un document complet : `src` = fetch http(s),
         // mixed-content filtré, dédup par URL résolue ;

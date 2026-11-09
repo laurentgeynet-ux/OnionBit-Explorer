@@ -50,6 +50,7 @@ class BrowserState {
     this.mediaAudio = const {},
     this.scrollY = const {},
     this.resubmit,
+    this.pipMedia,
   });
 
   final List<BrowserTab> tabs;
@@ -122,6 +123,9 @@ class BrowserState {
   /// avec `{"confirm":true}`. `null` dès décision prise.
   final ({String tabId, String method, String url})? resubmit;
 
+  /// Surface média active en mode Picture-in-Picture `(tabId, mediaId)` — null si inactif.
+  final ({String tabId, int mediaId})? pipMedia;
+
   /// Onglet actif, ou `null`.
   BrowserTab? get active {
     for (final t in tabs) {
@@ -146,6 +150,7 @@ class BrowserState {
     Map<String, bool>? mediaAudio,
     Map<String, double>? scrollY,
     ({String tabId, String method, String url})? Function()? resubmit,
+    ({String tabId, int mediaId})? Function()? pipMedia,
   }) => BrowserState(
     tabs: tabs ?? this.tabs,
     activeId: activeId ?? this.activeId,
@@ -162,6 +167,7 @@ class BrowserState {
     mediaAudio: mediaAudio ?? this.mediaAudio,
     scrollY: scrollY ?? this.scrollY,
     resubmit: resubmit != null ? resubmit() : this.resubmit,
+    pipMedia: pipMedia != null ? pipMedia() : this.pipMedia,
   );
 }
 
@@ -1206,6 +1212,33 @@ class BrowserController extends Notifier<BrowserState> {
     unawaited(p.stepFrame(dir));
   }
 
+  /// Bascule le mode Picture-in-Picture pour une surface média.
+  void mediaTogglePip(String tabId, int mediaId) {
+    if (state.pipMedia != null &&
+        state.pipMedia!.tabId == tabId &&
+        state.pipMedia!.mediaId == mediaId) {
+      state = state.copyWith(pipMedia: () => null);
+    } else {
+      state = state.copyWith(pipMedia: () => (tabId: tabId, mediaId: mediaId));
+    }
+  }
+
+  /// Ferme le mode Picture-in-Picture.
+  void mediaClosePip() {
+    if (state.pipMedia != null) {
+      state = state.copyWith(pipMedia: () => null);
+    }
+  }
+
+  /// Surface active en mode Picture-in-Picture, ou null.
+  ({String tabId, int mediaId})? get currentPip => state.pipMedia;
+
+  /// Vérifie si une surface donnée est en mode Picture-in-Picture.
+  bool isPipActive(String tabId, int mediaId) =>
+      state.pipMedia != null &&
+      state.pipMedia!.tabId == tabId &&
+      state.pipMedia!.mediaId == mediaId;
+
   /// Volume absolu `[0..1]` — dé-mute : monter le volume
   /// d'une surface mutée réactive le son (convention des
   /// barres natives).
@@ -1545,12 +1578,20 @@ class BrowserController extends Notifier<BrowserState> {
       final next = {...perTab}..remove(mediaId);
       state = state.copyWith(media: {...state.media, tabId: next});
     }
+    if (state.pipMedia != null &&
+        state.pipMedia!.tabId == tabId &&
+        state.pipMedia!.mediaId == mediaId) {
+      state = state.copyWith(pipMedia: () => null);
+    }
     // Indicateur 🔊 (étape 184) : la surface retirée peut
     // être la dernière qui jouait.
     _refreshMediaAudio(tabId);
   }
 
   void _dropAllMedia(String tabId) {
+    if (state.pipMedia?.tabId == tabId) {
+      state = state.copyWith(pipMedia: () => null);
+    }
     for (final mid in _players[tabId]?.keys.toList() ?? const <int>[]) {
       _dropMedia(tabId, mid);
     }

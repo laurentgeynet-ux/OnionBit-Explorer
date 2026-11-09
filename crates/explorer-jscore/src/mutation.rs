@@ -56,7 +56,7 @@ impl MutObsState {
                 ids.push(*wrapper);
             }
         }
-        if let Some(p) = self.proto {
+        if let Some(ref p) = self.proto {
             crate::heap::push_value(ids, p);
         }
     }
@@ -114,7 +114,7 @@ impl Engine {
                 self.set_own(p, name, f, true);
             }
             self.set_own(cid, "prototype", Value::Obj(p), false);
-            self.set_own(p, "constructor", v, false);
+            self.set_own(p, "constructor", v.clone(), false);
             self.mutobs.proto = Some(Value::Obj(p));
         }
         let g = self.global;
@@ -151,9 +151,10 @@ impl Engine {
                 .push(r);
         }
         for id in order {
-            let Some(&(cb, wrapper)) = self.mutobs.cbs.get(&id) else {
+            let Some(&(ref cb, wrapper)) = self.mutobs.cbs.get(&id) else {
                 continue;
             };
+            let cb = cb.clone();
             let Some(recs) = by_obs.get(&id) else {
                 continue;
             };
@@ -166,8 +167,8 @@ impl Engine {
 
 /// `new MutationObserver(callback)` — callback requis.
 fn mutobs_ctor(e: &mut Engine, _this: Value, args: &[Value]) -> JsResult<Value> {
-    let cb = args.first().copied().unwrap_or(Value::Undefined);
-    if !e.is_callable(cb) {
+    let cb = args.first().cloned().unwrap_or(Value::Undefined);
+    if !e.is_callable(cb.clone()) {
         return Err(e.type_error("MutationObserver: callback requis"));
     }
     let Some((dom, cache)) = e.dom_ctx.clone() else {
@@ -175,7 +176,12 @@ fn mutobs_ctor(e: &mut Engine, _this: Value, args: &[Value]) -> JsResult<Value> 
     };
     e.mutobs.next_id += 1;
     let id = e.mutobs.next_id;
-    let v = e.new_host_object(Rc::new(MutObsHost { dom, cache, id, cb }));
+    let v = e.new_host_object(Rc::new(MutObsHost {
+        dom,
+        cache,
+        id,
+        cb: cb.clone(),
+    }));
     if let Value::Obj(oid) = v {
         e.mutobs.cbs.insert(id, (cb, oid));
         // `mo instanceof MutationObserver` — proto capturé à
@@ -184,7 +190,7 @@ fn mutobs_ctor(e: &mut Engine, _this: Value, args: &[Value]) -> JsResult<Value> 
         // les instances réelles gardent le vrai proto, comme
         // dans Chrome où `new OrigCtor()` interne ne lit pas
         // la propriété globale).
-        if let Some(pp) = e.mutobs.proto {
+        if let Some(pp) = e.mutobs.proto.clone() {
             if let Some(o) = e.heap.obj_mut(oid) {
                 o.proto = pp;
             }
@@ -274,7 +280,7 @@ impl Host for MutObsHost {
 
     fn trace(&self, out: &mut Vec<ObjId>) {
         crate::dom_host::trace_node_cache(&self.cache, out);
-        crate::heap::push_value(out, self.cb);
+        crate::heap::push_value(out, &self.cb);
     }
 
     fn invoke(
@@ -286,22 +292,22 @@ impl Host for MutObsHost {
     ) -> JsResult<Option<Value>> {
         match name {
             "observe" => {
-                let target = args.first().copied().unwrap_or(Value::Undefined);
+                let target = args.first().cloned().unwrap_or(Value::Undefined);
                 let Some(node) = node_for_in(e, target, &self.dom) else {
                     return Err(e.type_error("observe: nœud requis"));
                 };
-                let opts = args.get(1).copied().unwrap_or(Value::Undefined);
-                let child_list = optb(e, opts, "childList");
+                let opts = args.get(1).cloned().unwrap_or(Value::Undefined);
+                let child_list = optb(e, opts.clone(), "childList");
                 // Spec : `attributeFilter`/`attributeOldValue`
                 // impliquent `attributes` ; idem `characterData`.
-                let attribute_filter = match opt(e, opts, "attributeFilter") {
+                let attribute_filter = match opt(e, opts.clone(), "attributeFilter") {
                     Value::Obj(o) => match e.heap.obj(o).map(|ob| &ob.kind) {
                         Some(ObjKind::Array(elems)) => {
                             let elems = elems.clone();
                             Some(
                                 elems
                                     .iter()
-                                    .filter_map(|v| e.to_js_string(*v).ok())
+                                    .filter_map(|v| e.to_js_string(v.clone()).ok())
                                     .collect(),
                             )
                         }
@@ -309,11 +315,11 @@ impl Host for MutObsHost {
                     },
                     _ => None,
                 };
-                let attributes = optb(e, opts, "attributes")
-                    || optb(e, opts, "attributeOldValue")
+                let attributes = optb(e, opts.clone(), "attributes")
+                    || optb(e, opts.clone(), "attributeOldValue")
                     || attribute_filter.is_some();
-                let character_data =
-                    optb(e, opts, "characterData") || optb(e, opts, "characterDataOldValue");
+                let character_data = optb(e, opts.clone(), "characterData")
+                    || optb(e, opts.clone(), "characterDataOldValue");
                 if !(child_list || attributes || character_data) {
                     return Err(e.type_error("observe: au moins un type à observer requis"));
                 }
@@ -322,9 +328,9 @@ impl Host for MutObsHost {
                     child_list,
                     attributes,
                     character_data,
-                    subtree: optb(e, opts, "subtree"),
+                    subtree: optb(e, opts.clone(), "subtree"),
                     attribute_filter,
-                    attribute_old_value: optb(e, opts, "attributeOldValue"),
+                    attribute_old_value: optb(e, opts.clone(), "attributeOldValue"),
                     character_data_old_value: optb(e, opts, "characterDataOldValue"),
                 };
                 self.dom.borrow_mut().observe_mutations(node, reg);

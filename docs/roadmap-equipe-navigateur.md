@@ -6681,7 +6681,7 @@ sortie : R-12 (layout incrémental) ou cadencement temporel.
   (sha256+abi+commit+utc) → audit
   re-hashé (divergence = échec) ;
   `$auditOnly` signale les
-  reliques `D:\cargo-target` sans
+  reliques `C:\cargo-target` sans
   les écrire. `build_terrain`/
   `build_dist` routés — plus de
   `Copy-Item` ad-hoc ; `target/
@@ -7207,6 +7207,82 @@ incrément.
   `etape208_journal_remove_
   reclame_l_arene` (live −2,
   bitmap purgée, marque ×2).
+
+- [x] **Étape 209. Shed-load RSS
+  session — dégrader plutôt que
+  mourir** (`explorer-core`
+  session net/mod/navigate/
+  shared/types/js_glue +
+  `explorer-api`, vol 697 rumble
+  — RSS 4,4 Go → `0xC0000409`
+  sans aucune couche dégradante
+  armée : les kills
+  `EXPLORER_*_KILL/LIMIT_MB`
+  existants sont opt-in « vols
+  §B-59 » et tous *tuent*,
+  aucun ne *shed*). Garde-fou
+  `SessionConfig.rss_shed_mb`
+  (défaut 4 096 — sous les
+  seuils de kill, `0` désarme
+  l'évaluation entière, pas
+  juste l'échantillonneur) +
+  `shed_retry_after_s` (défaut
+  5). `memory-stats` lit le
+  RSS process en tête de
+  `poll_net` ; au-delà du
+  seuil+hystérésis
+  (`max(seuil/8, 64 Mio)`) la
+  session arme `shed_active` :
+  les rails droppables sont
+  vidés **proprement** —
+  `fetch_held`/`pending_script_
+  net` livrés `status:0` (les
+  promesses rejettent, la page
+  voit un échec réseau, pas un
+  crash), `drain_dyn_imgs`
+  suspendu, `eng.gc()` (Cmd
+  asynchrone) demandé sur tous
+  les ctx. Cooldown avant
+  réévaluation ; le désarmement
+  exige le retour sous
+  `seuil − hystérésis`.
+  Pendant l'épisode :
+  `navigate`/`navigate_shared`/
+  `open_tab` →
+  `CoreError::Overloaded(retry)`
+  → REST **503 + `Retry-After`**
+  (`core_err`, `err_status`
+  étendu). `mem_diag` enrichi :
+  tailles des réservoirs
+  session + diag JS. Verrou
+  `etape209_rss_shed_degrades_
+  without_death` (synthétique
+  `HeldFetch`+pending : armé →
+  vidé sans mort, 503 honnête,
+  `rss_shed_mb=0` jamais armé —
+  invariant dans `shed_evaluate`
+  lui-même). Suites : core lib
+  106/106, api 33/33.
+
+- [x] **Étape 210. Picture-in-Picture (PiP) interactif & navigation frame-par-frame à la molette**
+  (`app/` presentation browser_controller/media_controls/pip_overlay/browser_page) —
+  innovation UX vidéo native :
+  - **Détachement PiP** : overlay 16:9 flottant draggable avec clamp aux bords
+    d'écran (`PipOverlay`), affichage direct de la texture native du player (`p.view`),
+    incrustation temps réel des sous-titres (`snap.subtitle`), placeholder élégant
+    sur la surface page avec bouton de rapatriement immédiat.
+  - **Navigation image par image à la molette** : interception de `PointerScrollEvent`
+    sur la vidéo en pause (haut = +1 frame via `stepFrame(1)`, bas = -1 frame via `stepFrame(-1)`),
+    boutons `[-1f]` et `[+1f]` ajoutés sur la barre de contrôle et sur l'overlay PiP,
+    s'appuyant sur le filaire `onionmedia_frame_step` / `onionmedia_frame_back_step`.
+  - **Contrôles PiP overlay** : header avec poignée de déplacement, bouton retour page
+    (`open_in_new`), bouton fermeture (`close`), footer avec lecture/pause, pas-à-pas,
+    scrubber de position et toggle muet.
+  - **Cycle de vie propre** : `BrowserController` gère `pipMedia: ({String tabId, int mediaId})?`,
+    fermeture explicite (`mediaClosePip`), bascule (`mediaTogglePip`), et purge automatique
+    sur `_dropMedia` / `_dropAllMedia`.
+  - Verrou : test contrôleur `210 — mediaTogglePip active, bascule et désactive le Picture-in-Picture`,
+    `flutter analyze` 0 issue, `flutter test` 83/83 pass.
 
 - [ ] **Écarts terrain — vol humain
   22/10 (release `39ab821`, FFI)** :
@@ -10233,6 +10309,237 @@ github.com — bundle > plafonds (JS-C41 livré le cadre).
   JS réfuté (pile vide = natif),
   return-early pur confirmé.
 
+<!-- Rattrapage JS-C361→C410 : livrés avant tenue de la
+     feuille (vols §B-97 → §B-111 + piste V) — entrées
+     reconstituées depuis le git log ; 362-364 et 407-408
+     sont des sauts de numérotation, pas des pertes. -->
+
+- [x] **JS-C361. Typage `ty=` des sondes `g.*`** (vol 663 —
+  la valeur lue/écrite sur les globals tagués devient
+  typée, pas seulement nommée).
+- [x] **JS-C365. Sondes disposition des livrées réseau**
+  (vol 666 — chaque `NetResponse` livrée est comptée par
+  bras : consommée/doublon/tardive/ctx mort).
+- [x] **JS-C366. Sondes de cause des `status:0` réseau
+  script** (`net.fail` transport/`cors_resp` + `net.drop`
+  — le `status:0` sec cesse d'être anonyme).
+- [x] **JS-C367. File d'attente du quota réseau script**
+  (l'excédent attend un slot FIFO par onglet plutôt qu'un
+  `status:0` — rafale `FontFace.load` kevlar ~200/16).
+- [x] **JS-C368. Banc de vérité eval V-1** — baselines de
+  résolution mesurées avant toute opt.
+- [x] **JS-C369. Compteurs de résolution J17** —
+  attribution V-2 par site (props/protos/scopes).
+- [x] **JS-C370. Gate `enabled!` sur le chemin armé des
+  sondes `g.*`** (fix V-2i — la sonde désarmée ne paye
+  plus son propre coût).
+- [x] **JS-C371. `ptr_eq` fast-path sur scans linéaires
+  de clés** (V-3a — même objet, zéro comparaison de
+  chaîne).
+- [x] **JS-C372. Gate `enabled!` généralisé à toutes les
+  sondes `probe_seen`**.
+- [x] **JS-C373. Hoist `array_index` hors des marches
+  proto** (V-3b — le coût de conversion n'est plus payé
+  par niveau de chaîne).
+- [x] **JS-C374. Décision V-3c non retenue** + sondes
+  `parse_call`/`parse_dup` (mesure avant geste).
+- [x] **JS-C375. Attribution V-2 finale** — porte V-4
+  différée, mur = parse (le goulot déplacé nommé).
+- [x] **JS-C376. Résidus soldés** — baseline
+  `kevlar_like`, `prop_scan` expliqué.
+- [x] **JS-C377. Instrumentation V-6** — mur = stmt
+  (68%) + clones Tok (le parse est le coût, pas
+  l'exécution).
+- [x] **JS-C378. Payloads `Tok` en `Rc` + décomposition
+  V-6 complète** — les gros variants ne copient plus.
+- [x] **JS-C379. Préallocation du `Vec` de tokens du
+  lexer**.
+- [x] **JS-C380. Corps de fonction différés
+  (`FnBody::Deferred`)** — eval BBC −60% : le parse est
+  paresseux, matérialisé à l'appel.
+- [x] **JS-C381. Lexer 100% `&str` byte-wise** —
+  `Vec<char>` supprimé (double matérialisation du
+  source éliminée).
+- [x] **JS-C382. Validation multi-fixtures du deferral
+  V-5a**.
+- [x] **JS-C383. Sonde `prom.pending`** — promesses
+  pendantes nommées par site de création (§B-97).
+- [x] **JS-C384. Reflets d'attributs tag-scopés** —
+  poison §B-103 éliminé.
+- [x] **JS-C385. Méthodes tag-scopées lisibles** —
+  poison §B-107 éliminé.
+- [x] **JS-C386. Sonde `prom.settle`** — qui règle les
+  promesses (§B-97 — le pendant de `prom.pending`).
+- [x] **JS-C387. Transitions fonts spec-fidèles** +
+  2ᵉ listener `__et` perdu (§B-97).
+- [x] **JS-C388. Verrou sémantique webpack JSONP** —
+  audit bootstrap §B-106 conclu sain.
+- [x] **JS-C389. `max_scripts` 32→256** — racine §B-106
+  éliminée (la file bootstrap s'écoule).
+- [x] **JS-C390. Sondes d'attribution §B-108** — rails
+  lazy nommés (quelle chaîne différée coûte).
+- [x] **JS-C391. Traversées session sous `deep`** —
+  fatalité §B-111 armée (récursions arbre bornées).
+- [x] **JS-C392. `noscript` rawtext au miroir** — fuite
+  style/meta DOM session §B-109.
+- [x] **JS-C393. Verrou G-4** — cookie script→jar→
+  filaire sur `location.replace`.
+- [x] **JS-C394. Suspend paresseux hissé sous garde** —
+  `&&`/`||`/`??`/`?:` retrouvent leur paresse.
+- [x] **JS-C395. Jumeaux PIPELINE sous `deep`** —
+  §B-111 acte II.
+- [x] **JS-C396. Sondes `el.listen on=`/`ev.cb`** —
+  cible des listeners nommée.
+- [x] **JS-C397. Disjoncteur §B-1 demi-ouvert** — petits
+  scripts sondent, la page récupère.
+- [x] **JS-C398. §B-110 nomme ses kinds** — top-kinds
+  dans le kill GC + sonde `b110`.
+- [x] **JS-C399. Mitigations churn §B-110** — `join`
+  len≤1, cache `num→str`, `+""` identité.
+- [x] **JS-C400. §B-111 acte III** — `derive(Clone)` sur
+  l'AST nu était le vrai site de l'overflow.
+- [x] **JS-C401. Sonde §B-111** — dernier nœud vu par
+  vague de mutations.
+- [x] **JS-C402. Sonde §B-111** — breadcrumb par job
+  dans le drain.
+- [x] **JS-C403. §B-111 résolu** — drop itératif des
+  chaînes d'envs au sweep GC (la récursion de drop est
+  morte).
+- [x] **JS-C404. Morgue `gc.*` subdivisée** +
+  histogramme des morts.
+- [x] **JS-C405. Morgue post-collect, rail `pump:`**.
+- [x] **JS-C406. Morgue `via=`** — paires `net:`/`pump:`
+  + pré-`apply:` début.
+- [x] **JS-C409. Morgue §B-111 sous `EXPLORER_DLV_
+  TRACE`** + audit de classe.
+- [x] **JS-C410 (V-1/V-2). URL mutable + `searchParams`
+  lié vivant**.
+
+- [x] **JS-C411. Comptage heap honnête + slack garbage borné
+  absolument** (`cell_bytes` : capacité `Str`, réservoirs
+  `FetchBody`/`Promise`/`FinReg`/`DispStack`/`Symbol`/
+  `BigInt`/`Bound`/`GenLive` ; `dead_hard(lim)` = `lim + 256
+  Mio` au-delà de 64 Mio — mur §B-114, overshoot rumble).
+  Verrous `c411_dead_hard_bounded_slack` +
+  `c411_cell_bytes_counts_capacity_and_payloads`.
+- [x] **JS-C412. `prom.src` — le code des fabriques
+  pendantes dans la sonde** (extrait ~200c **copié** de
+  l'executor à la création — jamais le `Rc` du bundle ;
+  émis top-`created` au checkpoint, §B-97/§B-113
+  forensique). Verrous `c412_prom_src_dumps_executor_
+  excerpt` + `c412_prom_src_disarmed_is_silent`.
+- [x] **JS-C413. `fnat` — « fonction à `l:c` »**
+  (`fn_chain_at` : chaîne `FnLit` englobants, corps
+  différés matérialisés à la demande — lire le code au
+  site nommé par les sondes ; binaire `fnat <fichier>
+  <l:c>`). Verrous `fnat_finds_enclosing_function`,
+  `fnat_top_level_is_empty`,
+  `fnat_materializes_deferred_bodies`.
+- [x] **JS-C414. `import()` inline : repli de résolution
+  sur la page** (`effective_referrer` — referrer opaque
+  `inline:N`/`blob:`/`about:` → `hooks.page_url`
+  hiérarchique ; couvre probe `module_sources`, loader
+  `resolve`/`load`, résolution finale. Mur « schéma non
+  supporté : inline » vimeo). Verrous
+  `c414_dyn_import_inline_referrer_falls_back_to_page`,
+  `c414_static_dep_from_inline_module_uses_page_base`.
+- [x] **JS-C415. Sondes `net.host`/`net.badr` — l'hôte
+  résolu derrière « `host=""` »** (l'artefact « host=''
+  = relative brute » séparé du mur réel : `badr` =
+  `Url::resolve` échoue sur base de ctx opaque/vide ;
+  `net.host` = hôte résolu dedup — audit des `host=""`
+  dash.js/rumble/vimeo). Verrou
+  `c415_net_drop_kind_discriminates_badr`.
+- [x] **JS-C416. Récolte ShadyDOM : les protos DOM possèdent
+  leurs méthodes spec en propre** (mur §B-97 prouvé par
+  `fnat` — `Kd webcomponents-sd.js:152:259` :
+  `nativeMethods.setAttribute` vide parce que
+  `getOwnPropertyDescriptor` est propre-seul et que
+  `setAttribute` & co. vivaient hérités de `Node.prototype`
+  ; `TypeError` à l'init → CE upgrades bloqués → squelettes
+  `ytd-*`. `install_dom_proto_methods` + listes
+  `ELEMENT`/`DOC`/`DOCFRAG_PROTO_METHODS` + accesseurs
+  `children`/`innerHTML`/`className` sur `HTMLElement`,
+  `innerHTML` sur `HTMLTemplateElement` — vol 700, le
+  `prom.pending` `_.C4` dominant étant l'état normal
+  Chrome). Verrou `c416_proto_harvest` (7 tests, `.call`
+  dispatch réel inclus).
+- [x] **JS-C417. Sonde `str_census_kill` — la rétention
+  `Str` nommée par contenu au kill** (§B-114, vols 703-704 :
+  `Str` croît jusqu'à tout cap → rétention structurelle.
+  `Heap::str_census` → `StrCensus` : total, **split
+  `live_b`/`dead_b` sur marques chaudes** (v2 — discrimine
+  rétention réelle / churn non balayable), seaux
+  ≥64 Kio/≥1 Mio, top-8 `(len, préfixe ASCII borné)` +
+  **snapshot `j17` joint sous `EXPLORER_J17_PROF=1`**
+  (n'avait aucun appelant en chemin daemon). Vol 704 :
+  556 Mio / 236 511 cellules — graphes JSON éclatés +
+  sources co-retenues ; clés de prop déjà internées
+  JS-C310). Verrou `str_census_ranks_and_sanitizes`.
+- [x] **JS-C418. Dette `gc_debt` — `gc_due` s'arme **sous**
+  la borne, la poubelle ne monte plus à `dead_hard`** (§B-114
+  tranché par vol 705 : 99,6 % du tas = déchets au kill,
+  vivant ~2 Mio — churn non balayable, pas rétention. Racine :
+  `gc_due` n'armé qu'à `bytes > lim` → le churn sous-limite
+  traversait les checkpoints sans sweep jusqu'au cap dur.
+  `gc_debt(lim) = min(lim/4, GC_DEAD_FLOOR)` arme au tick ;
+  `maybe_collect` balaye à la frontière de job — poubelle
+  bornée par la cadence des checkpoints. `gc_cap` jamais
+  hissé sans mesure `mark_live` réelle ; `dead_hard` reste
+  la borne de kill absolue ; sweep mid-eval toujours
+  interdit — pile Rust non racine). Verrou
+  `gc_debt_arms_sweep_below_soft_limit` (8 rounds × ~450 Kio
+  morts sous `lim` 1 Mio : survie + `bytes` retenu sous
+  `base + dette`).
+
+- [x] **JS-C419. Attribution site→volume des `Str` morts —
+  le producteur des déchets se nomme au kill** (§B-114 vols
+  706/707 : dead au kill **scale avec le cap** — 243 Mio
+  sous 640 → 555 sous 1 280 → span monolithique à déchets
+  non bornés entre checkpoints ; la coupe dépend du
+  producteur : `Rc<str>` ne libère qu'à la chute du dernier
+  ref, or « dead » inclut les stack-détenus mid-eval).
+  `#[track_caller]` sur `alloc_str` + `str_val` → site
+  producteur réel (701 appelants) enregistré par cellule
+  sous `j17_on()` ; `str_census` joint `dead_b` par site →
+  `top_sites` dans `str_census_kill`. Prochain kill `/watch`
+  tranche la matrice : temporaires droppés → `Rc<str>` ;
+  stack-détenus → fix structurel ; site chaud unique → fix
+  chirurgical. Verrou `str_census_names_dead_sites`.
+- [x] **JS-C420. Chaînes JS hors arène : `Value::Str(JsStr)`
+  refcount — les temporaries meurent mid-eval** (§B-114 —
+  tranché par JS-C419 : la concat `format!("{ls}{rs}")`
+  produisait ~99,99 % des octets morts, 555+ Mio entre
+  checkpoints, sweep impossible mid-eval). `JsStr` =
+  `Rc<StrBox>` + `Engine::str_acct` comptant la capacité
+  vivante, rendue exactement au `Drop` ; concat en place
+  `try_append` si la boîte est détenue seule. `Value`
+  non-`Copy` (16 o) → migration ~1 300 sites
+  `.clone()`/`&Value` ; `CellData::Str`/`alloc_str`/
+  `str_sites`/`str_census`/`over_limit` retirés ;
+  `mem_over`/`dead_hard`/`gc_debt` lisent `total_bytes()`
+  (heap + `str_acct`). Verrou `dead_cell_hard_cap_kills_eval`
+  réécrit : J4 tient tant que le vivant JsStr dépasse la
+  borne, `set_mem_limit(0)` ressuscite. Suites : lib 39/39,
+  lang 313/313, b59/b59b, clippy `-D warnings` propre.)
+- [x] **JS-C421. Safepoint GC intra-span — le mur §B-114 a
+  migré des `Str` aux cellules** (vol 709 : JsStr validé —
+  `str_dead_b` 555 Mio→0, live borné 3,02 Mio — MAIS le span
+  d'hydratation `/watch` produit ~1,21 M de cellules /
+  ~633 Mio de déchets non balayables : `Ordinary:510424/288
+  Mio Fun:403841/222 Mio Array:288479/119 Mio` → kill 671>
+  640 « deferred GC unreachable »). Les temporaires vivent
+  sur la pile Rust, invisibles pour `mark_live` → aucun
+  sweep possible avant la fin de job. Options ordonnées :
+  (a) **table de racines par frame d'éval** — les temporaires
+  `Value` s'enregistrent, `maybe_collect` devient appelable
+  à intervalles *dans* le span ; (b) marquage incrémental
+  (coloration à l'alloc + sweep par tranches) ; (c) réduire
+  les producteurs (`env_lvl=16,4 M`, `prop_scan=28,9 M` au
+  kill vol 709 — la machinerie env-record/propriété alloue
+  massivement). `Rc` inapplicable aux objets (graphes
+  cycliques) — contrairement à JS-C420.
+
 ## Tâches continues
 
 - **Spécialiste JS** : divergence miroir ↔ `explorer-dom` quand
@@ -10254,4 +10561,144 @@ github.com — bundle > plafonds (JS-C41 livré le cadre).
 
 Règle : les demandes d'API au domaine pur transitent par
 `docs/interface-equipes.md` — jamais de commit direct dans
-un crate PIPELINE.
+un crate PIPELINE.- [x] **JS-C422. Deadline honnête — canal session ↔ budget
+  moteur + abandon interruptible** (vols 710c/711 : figé
+  `kevlar_base` à 65 011 ms reproduit à l'identique — pas la
+  deadline moteur, le **canal** : `EVAL_CMD_TIMEOUT_EVAL=65 s`
+  dur calé sur l'ancien défaut 60 s, ignorant les env
+  `EXPLORER_JS_EVAL_*` et l'éval orpheline brûlait le thread
+  jusqu'à sa deadline interne, `exec_us`=303 s). `budget_tx`
+  par cmd éval (worker rapporte le budget armé, session attend
+  budget+marge) + flag `interrupt` relu au gate 256-ops (un
+  abandon tue au tick suivant). Effet vol attendu : le figé
+  devient honnêtement attribué (vraie deadline moteur) et le
+  thread ne brûle plus en orphelin.
+- [x] **JS-C423. Décomposition GC du span d'éval — `gc_us`/`sp_us`
+  attribués par entrée** (vol 711 : `kevlar_base` brûle ~303 s
+  d'exec sans mesure de la part mark/sweep — exec pure,
+  safepoints JS-C421, ou frontières ?). Compteurs toujours
+  armés (deux `Instant` par collecte — événement ~ms, coût
+  nul) : `Engine::gc_ns` accumulé dans `collect_extra` (funnel
+  unique : checkpoints + safepoints), `Engine::sp_ns` dans
+  `safepoint_gc` (part JS-C421), marks posés à
+  `reset_eval_split` → `last_eval_gc_us`/`last_eval_sp_us`.
+  La ligne `eval split` (`js_alloc`) gagne `gc_us`/`sp_us` —
+  émise aussi sur `ok:false` (deadline/interruption : le
+  profil de l'éval tuée survit, `note_exec` est
+  inconditionnel). `b59_diag` porte `gc_us`/`sp_us` cumulés.
+  Verrou : `c423_gc_time_attributed_and_survives_kill` (sp ⊆
+  gc, churn sous borne → gc_us > 0, abandon → profil lisible).
+- [x] **JS-C424. Backoff de croissance des safepoints — fin du
+  spin GC à 45 Hz** (vol 713 : `kevlar_base` `gc_us=60,04 s` =
+  95,4 % du span — `young_floor` épinglant le churn de l'appel
+  monolithique, `gc_due` réarmait sur le seuil absolu `total >
+  gc_debt` : 2 550 passes à ~45 Hz ne récupérant rien).
+  `safepoint_gc` gagne `gc_sp_floor` (basse `total_bytes`
+  post-passe, glisse vers le bas si libéré ailleurs) +
+  `gc_sp_shift` (backoff ×2 borné ×16 : passe libérant <
+  `gc_debt/4` = futile → shift++, productive → 0). Une passe
+  n'est re-servie qu'après `gc_debt << shift` de croissance
+  réelle — couvre `gc_due` et `mem_over`. Le churn épinglé
+  accumule jusqu'à la dette élargie / `dead_hard` honnête au
+  lieu de brûler le thread ; les passes productives gardent la
+  cadence. Verrou : `c424_safepoint_backoff_supprime_le_spin`.
+  Reste : (a) table de racines d'expressions (correction de
+  fond), (c) passe safepoint allégée (purges DOM/logs hors du
+  chemin chaud).
+- [x] **JS-C425. Attribution J17 par éval — `j17` dans `eval
+  split`** (vol 714 : `kevlar_base` complète en 5,8 s —
+  `alloc_exec 1,05 Gio/12,4 M` = mur mesurable suivant, il
+  faut nommer où vont les 5 s). `note_eval` émet
+  `j17_snapshot()` — cumulatif process-wide diffable entre
+  splits séquentiels ; vide hors `EXPLORER_J17_PROF`, 31
+  loads Relaxed par split = coût nul. Distorsion connue sous
+  PROF : `Instant` des `j17_scope` sur chemins chauds.
+
+- [x] **JS-C426. Backoff de croissance aux frontières de job —
+  fin du wedge §B-115** (vol 717 vimeo : ~9 200 collectes en
+  ~5 min, ~30/s — API affamée, nav pendante ; mécanisme :
+  `live_count > gc_threshold` permanent sur page hydratée →
+  chaque `maybe_collect` collectait). La frontière partage
+  la basse `gc_sp_floor`/`gc_sp_shift` du safepoint :
+  passe opportuniste re-servie seulement après
+  `gc_debt<<shift` de croissance réelle ; `heap_dead` /
+  `mem_over` inconditionnels. `sp_us` = delta de `gc_ns`
+  (invariant `sp ⊆ gc` structurel). Verrou c426 + c423/c424
+  durcis ; lib 44/44, clippy propre.
+
+- [x] **JS-C427. `DOMRect`/`DOMRectReadOnly` constructibles —
+  porte §B-112/§B-104** (`DOMRect illegal constructor` tuait
+  `ima3` chez castlabs/shaka (§B-112) ; `google.ima` absent
+  avalait `read 'settings' of Undefined` chez bitmovin
+  (§B-104)). WebIDL `[Constructor]` : `x`/`y`/`w`/`h` own
+  props (RO figées, RW mutables), `top/right/bottom/left`
+  getters min/max, `DOMRect → DOMRectReadOnly` en proto,
+  `toJSON`/`fromRect` (props `Num` seulement), `length=0`,
+  ctor-only `TypeError`. gbrect/observers posent le proto
+  → `instanceof` tient. Verrous `domrect_ctor.rs` ×5 ;
+  lib 44/44, clippy propre. **Re-flight MSE requis.**
+
+- [x] **JS-C428. §B-116 — conformité `URL`/`URLSearchParams`
+  contre la détection core-js** (`Invalid scheme` interne au
+  polyfill : f24, castlabs, explore.org). Gate empirique
+  `b116_url_gate.rs` (24 checks) → 6 divergences mesurées et
+  corrigées : `forEach`/itérateurs USP vivants (re-lecture
+  par pas, mutations visibles), `has`/`delete` arg `optional`
+  (absent ≠ `undefined`), encode-sets WHATWG par composant,
+  IDNA/UTS-46 au parse (`idna` workspace), strip `\t\n\r`
+  intégral. Sonde `url.ctor.fail` (arm+input+base). Verrou
+  gate 24/24 permanent ; lib 44/44, clippy propre.
+  **Re-flight 3 sites requis.**
+
+- [x] **JS-C429. §B-105 — `{__proto__:…}` littéral règle
+  [[Prototype]], jamais prop own énumérable** (`chart.umd`
+  `isForType` → `cannot read 'prototype' of Null` chez dash.js
+  + bitmovin — repro isolée stack-identique ; instrumentation
+  du bundle : `coll=0 key=__proto__`, le `registerables`
+  `{__proto__:null,…}` livrait un membre `null` à `register`
+  via `each`/`for..in`). Cause moteur : `Expr::Object`
+  appliquait `set_own` à `__proto__` au lieu de régler le
+  proto — divergence spec `PropertyDefinition` (clé littérale
+  seulement ; `['__proto__']` calculé = prop own normale).
+  Bras `ObjProp::Prop` : `PropKey::Name("__proto__")` →
+  `o.proto = v` si obj/`null`, ignoré sinon. Verrous :
+  `b105_proto_literal_n_est_pas_prop_own` + `b105_bundle_eval`
+  (chart.umd 205 Kio s'évalue, `Chart` posé). `lang`/`dom`/
+  `c313` 313+313+245, `hostile` 12/12, jscore release bout
+  en bout vert, clippy propre. **Re-flight dash.js + bitmovin
+  requis.**
+
+- [x] **JS-C430. §B-104 — livraison worker sous le realm
+  créateur** (mur bitmovin/HLS : `cannot read 'buffer' of
+  Null` au retour transmuxer — vols 725/727). Chaque realm a
+  ses intrinsics (`context_new` swappe `global`/`protos`) ;
+  `run_microtasks` itère tous les ctxs vivants puis
+  `pump_workers` livrait sous le **dernier itéré** — une
+  iframe ads (sodar/ima). `wire_decode`/`new_ta`
+  reconstruisaient `initSegment`/`data` avec le
+  `Uint8Array.prototype` de l'iframe → `getTypedArrayType`
+  (`instanceof` au realm principal) → `false` →
+  `ArrayHelper.append` → `null` → `t.data=null` → crash `Rz`.
+  `WorkerSlot.ctx` capture le créateur ; `pump_workers`
+  `switch_to(slot.ctx)` avant décodage+livraison (port =
+  realm propriétaire, spec). Télémétrie honnête : les
+  exceptions de pompe JS (`run_pending`, timers) remontées en
+  `warn` borné au lieu d'`unwrap_or(0)`/`Err→0` avalés —
+  bitmovin prouvait qu'un handler jeté = promesse pending
+  sans trace. Sondes durables `worker.*` : rail wire complet
+  `post/onmsg/out/in` + `in.shape` (kind + verdict
+  `instanceof` post-decode) + `in.fail` (erreur + forme).
+  Verrous : `b104_realm_worker_livre_sous_ctx_createur`
+  (rejoue `context_new`+drain → erreur exacte du vol sans
+  fix, `buf:true` avec), `b104_vrai_muxjs_segment_exploitable`
+  (vrai worker mux.js + vrai TS vidéo/audio cache vol),
+  `b104_transmux_wire` 2/2, worker 16/16, c78_contexts 20/20.
+  **Vol 730 : `ctx=0` aux livraisons, 0 `in.fail`, 21
+  `mse.appendBuffer` (~1,7 Mo), `updateend`/`progress`,
+  `duration=210`, `readyState=4`, `buffered=43,6 s`** — la
+  chaîne transmuxer→`v.Segment`→`SourceBuffer` traverse bout
+  en bout. Latent nommé : `drain_pending_msgs`/
+  `drain_port_msgs` partagent la même classe (postMessage/
+  MessageChannel sous dernier ctx) — même patron à appliquer
+  au premier cas réel.
+

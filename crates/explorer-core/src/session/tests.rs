@@ -3953,9 +3953,13 @@ fn slow_eval_streak_saute_la_rafale_lente() {
         "éval rapide referme la série"
     );
     // Au cap : l'éval est sautée, erreur pipeline émise,
-    // moteur jamais appelé (streak figé au cap).
+    // moteur jamais appelé (streak figé au cap). Le script
+    // est > `SLOW_EVAL_PROBE_BYTES` : les petits peuvent
+    // sonder en demi-ouvert depuis C397 — un sauté franc
+    // doit être gros.
     s.tabs.get_mut(&tab).unwrap().slow_eval_streak = crate::session::js_glue::SLOW_EVAL_CAP;
-    s.eval_or_report(tab, e, "4", None, None);
+    let big = "0;".repeat(crate::session::js_glue::SLOW_EVAL_PROBE_BYTES / 2 + 1);
+    s.eval_or_report(tab, e, &big, None, None);
     let mut seen = false;
     while let Ok(ev) = rx.try_recv() {
         if let CoreEvent::PipelineError { message, .. } = ev {
@@ -3968,6 +3972,45 @@ fn slow_eval_streak_saute_la_rafale_lente() {
         crate::session::js_glue::SLOW_EVAL_CAP,
         "sautée : streak inchangé (moteur non appelé)"
     );
+}
+
+/// §B-1 acte II (vol 683 vimeo — ~19 victimes `bytes≈883`
+/// parmi 63 sauts) : le circuit ouvert n'est plus une mort
+/// permanente. Demi-ouvert : les scripts ≤
+/// `SLOW_EVAL_PROBE_BYTES` sondent une fois par fenêtre
+/// `SLOW_EVAL_PROBE_MS` ; une éval rapide referme le streak.
+#[test]
+fn slow_eval_sonde_demi_ouverte_referme_le_circuit() {
+    use crate::session::js_glue::{SLOW_EVAL_CAP, SLOW_EVAL_PROBE_BYTES};
+    let mut s = Session::new(Arc::new(FailTransport), Arc::new(TestFont));
+    let tab = s.open_tab();
+    s.tabs.get_mut(&tab).unwrap().slow_eval_streak = SLOW_EVAL_CAP;
+    // Gros script : sauté même en demi-ouvert.
+    assert!(
+        s.slow_eval_skip(tab, SLOW_EVAL_PROBE_BYTES + 1),
+        "gros script sauté sous circuit ouvert"
+    );
+    // Petit script : admis en sonde — cadence fraîche.
+    assert!(
+        !s.slow_eval_skip(tab, 883),
+        "petit script admis en sonde (victime vimeo 883 o)"
+    );
+    // Cadence épuisée dans la fenêtre : second petit sauté.
+    assert!(
+        s.slow_eval_skip(tab, 883),
+        "sonde épuisée — cadence hostile bornée"
+    );
+    // Fenêtre écoulée : une nouvelle sonde est admise.
+    s.tabs.get_mut(&tab).unwrap().slow_probe_at =
+        std::time::Instant::now().checked_sub(std::time::Duration::from_secs(20));
+    assert!(
+        !s.slow_eval_skip(tab, 883),
+        "sonde ré-admise après la fenêtre"
+    );
+    // Sonde rapide : `note_eval_ms` referme le streak —
+    // tout repasse, gros compris (page saine sortie de rafale).
+    s.note_eval_ms(tab, 0);
+    assert!(!s.slow_eval_skip(tab, usize::MAX), "circuit refermé");
 }
 
 /// Contrat 139k : `loop`/`mseBuffers` de l'offre JSON (SSE +
@@ -4019,4 +4062,145 @@ fn media_offer_json_carries_loop_and_mse_buffers() {
     .expect("buffering accepté");
     assert_eq!(report.state, MediaHostState::Buffering);
     assert_eq!(media_host_state_str(report.state), "buffering");
+}
+
+#[test]
+fn after_script_reentry_defers_without_nesting() {
+    // §B-111 (vol 695) : la morgue C407 comptait 1 768
+    // `net: dsn` non fermés — `after_script` →
+    // `drain_script_net` → `deliver_*` → `after_script`
+    // empilait une passe par livraison. La garde re-file
+    // tout appel imbriqué : il entre dans `after_script_
+    // again`, jamais dans la pile.
+    let mut s = Session::new(Arc::new(FailTransport), Arc::new(TestFont));
+    s.in_after_script = true;
+    s.after_script(7);
+    assert!(s.after_script_again.contains(&7));
+    // Double marquage = une seule passe supplémentaire.
+    s.after_script(7);
+    assert_eq!(s.after_script_again.len(), 1);
+    // Flag relâché (fin de la passe externe) : l'entrée
+    // suivante dépile la file entière en boucle — les
+    // onglets inconnus dégradent en passes vides.
+    s.in_after_script = false;
+    s.after_script(9);
+    assert!(s.after_script_again.is_empty());
+    assert!(!s.in_after_script);
+}
+
+/// JS-C415 — le kind `net.drop` discrimine `badr` (résolution
+/// impossible — base opaque : le mur « host='' » réel) de
+/// `blocked` (résolue puis refusée mixed/CSP/méthode/mode).
+#[test]
+fn c415_net_drop_kind_discriminates_badr() {
+    use super::net::net_drop_kind;
+    let page = Url::parse("https://x.example/p").expect("url");
+    // Relative ou absolue sur base hiérarchique → résout,
+    // le refus est ailleurs → `blocked`.
+    assert_eq!(net_drop_kind(&page, "/data"), "blocked");
+    assert_eq!(net_drop_kind(&page, "https://y.example/a"), "blocked");
+    // Base opaque : relative n'a nulle part où aller → `badr`.
+    let blank = Url::parse("about:blank").expect("blank");
+    assert_eq!(net_drop_kind(&blank, "/data"), "badr");
+    assert_eq!(net_drop_kind(&blank, "rel/x.js"), "badr");
+    // Fragment seul résout même sur base opaque → pas badr.
+    assert_eq!(net_drop_kind(&blank, "#top"), "blocked");
+    // Absolu résout sans tenir compte de la base → pas badr.
+    assert_eq!(net_drop_kind(&blank, "https://a.example/"), "blocked");
+}
+
+/// Étape 209 / §B-114-b — le shed RSS dégrade **sans tuer** :
+/// files `fetch_held`/`pending_script_net` → `status:0`
+/// livrés (promesses rejetées, jamais pendantes), GC demandé
+/// par onglet, bitmaps décodés évincés, `shed_active` posé ;
+/// hysteresis au réarmement ; navigation refusée
+/// `CoreError::Overloaded` pendant l'épisode.
+#[tokio::test]
+async fn etape209_rss_shed_degrades_without_death() {
+    let cfg = SessionConfig {
+        rss_shed_mb: 4_096,
+        ..SessionConfig::default()
+    };
+    let mut s = Session::with_config(Arc::new(FailTransport), Arc::new(TestFont), cfg);
+    let tab = s.open_tab();
+    // Files basse priorité remplies — handles fictifs : la
+    // livraison `status:0` est tolérée aux ctx inconnus, elle
+    // ne doit simplement pas paniquer ni pendre.
+    let page = Url::parse("https://x.example/p").expect("page");
+    s.fetch_held.push_back(net_items::HeldFetch {
+        at: std::time::Instant::now(),
+        tab,
+        page: page.clone(),
+        base: page.clone(),
+        handle: 77,
+        method: "GET".to_string(),
+        url: "https://x.example/data".to_string(),
+        headers: Vec::new(),
+        body: None,
+        mode: explorer_js::FetchMode::Cors,
+        credentials: explorer_js::FetchCredentials::Omit,
+        ctx: explorer_js::JS_CTX_TOP,
+    });
+    s.pending_script_net.push_back(net_items::PendingFetch {
+        tab,
+        handle: 78,
+        req: explorer_net::http::Request::get(Url::parse("https://x.example/more").expect("u")),
+        cross: false,
+        page_origin: "https://x.example".to_string(),
+        credentials: explorer_net::http::FetchCredentials::Omit,
+        partition: None,
+        mode: explorer_net::http::FetchMode::Cors,
+    });
+    // Bitmap décodé retenu — le gradin 3 doit l'évincer.
+    let img = Arc::new(explorer_render::DecodedImage {
+        width: 2,
+        height: 2,
+        rgba: vec![0u8; 16],
+    });
+    s.tabs
+        .get_mut(&tab)
+        .expect("tab")
+        .img_decoded
+        .insert("k".to_string(), img);
+    // Passage au-dessus du seuil → épisode armé, gradins appliqués.
+    s.shed_evaluate(4_200);
+    assert!(s.shed_active());
+    assert!(s.fetch_held.is_empty(), "fetch_held droppée");
+    assert!(s.pending_script_net.is_empty(), "pending droppée");
+    assert!(
+        s.tabs
+            .get(&tab)
+            .is_some_and(|e| e.img_decoded.is_empty() && e.bg_decoded.is_empty()),
+        "bitmaps décodés évincés"
+    );
+    // Hysteresis : marge = max(4096/8, 64) = 512 — sous le
+    // seuil mais dans la marge (3 900 + 512 > 4 096) → actif.
+    s.shed_evaluate(3_900);
+    assert!(s.shed_active(), "sous seuil mais dans la marge");
+    // Sous la marge (3 500 + 512 ≤ 4 096) → levé.
+    s.shed_evaluate(3_500);
+    assert!(!s.shed_active());
+    // Ré-armement immédiat possible (pas de cooldown).
+    s.shed_evaluate(5_000);
+    assert!(s.shed_active());
+    // Navigation refusée pendant l'épisode.
+    let r = s.navigate(tab, "https://x.example/").await;
+    assert!(
+        matches!(r, Err(CoreError::Overloaded(_))),
+        "nav pendant shed doit être Overloaded : {r:?}"
+    );
+    // Levée → la navigation n'est plus refusée par le shed
+    // (le stub réseau échouera plus loin, jamais Overloaded).
+    s.shed_evaluate(1_000);
+    let r = s.navigate(tab, "https://x.example/").await;
+    assert!(!matches!(r, Err(CoreError::Overloaded(_))), "{r:?}");
+    // Désarmé (`rss_shed_mb = 0`) : shed_evaluate n'arme rien
+    // — le mécanisme est inerte hors config.
+    let cfg_off = SessionConfig {
+        rss_shed_mb: 0,
+        ..SessionConfig::default()
+    };
+    let mut s2 = Session::with_config(Arc::new(FailTransport), Arc::new(TestFont), cfg_off);
+    s2.shed_evaluate(99_999);
+    assert!(!s2.shed_active());
 }

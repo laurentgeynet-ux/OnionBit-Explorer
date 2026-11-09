@@ -90,8 +90,10 @@ fn dead_closures_release_their_env() {
     );
     let swept = e.collect();
     assert!(
-        swept >= 6,
-        "closure + env array + elements should go, swept {swept}"
+        swept >= 5,
+        "closure + env array + env record should go, swept {swept} \
+         (JS-C420 : les cellules Str autrefois comptées sont \
+         désormais des Rc hors arène)"
     );
 }
 
@@ -198,9 +200,26 @@ fn repeated_collect_on_stable_state_sweeps_nothing() {
 }
 
 #[test]
-fn collect_reclaims_strings_too() {
+fn dead_strings_die_at_refcount_not_gc() {
+    // JS-C420 : `Value::Str` = `Rc<StrBox>` hors arène — la mort
+    // d'une chaîne est un `Drop` au dernier handle, pas un sweep.
     let mut e = Engine::new();
-    ev(&mut e, "var s = 'a' + 'b' + 'c'; s = null;");
-    let swept = e.collect();
-    assert!(swept >= 1, "dead string cells must be swept");
+    let base = e.live_str_bytes();
+    ev(&mut e, "var s = 'a' + 'b' + 'c';");
+    assert!(
+        e.live_str_bytes() > base,
+        "la concat vivante est comptée (base {base})"
+    );
+    ev(&mut e, "s = null;");
+    assert_eq!(
+        e.live_str_bytes(),
+        base,
+        "le dernier handle rendu → octets rendus, avant tout sweep"
+    );
+    e.collect();
+    assert_eq!(
+        e.live_str_bytes(),
+        base,
+        "le GC ne réclame plus de cellules Str (il n'y en a plus)"
+    );
 }

@@ -227,7 +227,9 @@ fn eventsource_ctor(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value
     }));
     let v = e.new_host_object(Rc::new(EsHost { data }));
     let p = es_proto(e);
-    let Value::Obj(id) = v else { return Ok(v) };
+    let Value::Obj(id) = v else {
+        return Ok(v);
+    };
     if let Some(o) = e.heap.obj_mut(id) {
         o.proto = Value::Obj(p);
     }
@@ -237,7 +239,7 @@ fn eventsource_ctor(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value
             with_credentials: creds,
             ctx: e.cur_ctx,
         });
-        if let Some(d) = es_data(e, v) {
+        if let Some(d) = es_data(e, v.clone()) {
             d.borrow_mut().handle = Some(handle);
         }
         e.es.live.push((handle, id));
@@ -350,7 +352,7 @@ impl Engine {
             crate::dom_host::event_proto(self, o, "MessageEvent");
             let t = self.str_val(ty);
             self.set_own(o, "type", t, true);
-            self.set_own(o, "target", this, true);
+            self.set_own(o, "target", this.clone(), true);
             if let Some((body, id)) = msg {
                 let d = self.str_val(body);
                 self.set_own(o, "data", d, true);
@@ -368,8 +370,8 @@ impl Engine {
         };
         let key = format!("on{ty}");
         if let Some(f) = self.get_prop(wrapper, &key) {
-            if self.is_callable(f) {
-                self.call_value(f, this, &[ev])?;
+            if self.is_callable(f.clone()) {
+                self.call_value(f, this.clone(), std::slice::from_ref(&ev))?;
             }
         }
         let fns: Vec<Value> = data
@@ -377,11 +379,11 @@ impl Engine {
             .listeners
             .iter()
             .filter(|(t, _, _)| t == ty)
-            .map(|(_, f, _)| *f)
+            .map(|(_, f, _)| f.clone())
             .collect();
         for f in fns {
-            if self.is_callable(f) {
-                self.call_value(f, this, &[ev])?;
+            if self.is_callable(f.clone()) {
+                self.call_value(f, this.clone(), std::slice::from_ref(&ev))?;
             }
         }
         Ok(())
@@ -453,7 +455,7 @@ impl Host for EsHost {
                 let ty = e.to_js_string(arg(args, 0))?;
                 let f = arg(args, 1);
                 let capture = e.to_boolean(arg(args, 2));
-                if e.is_callable(f) {
+                if e.is_callable(f.clone()) {
                     self.data.borrow_mut().listeners.push((ty, f, capture));
                 }
                 Ok(Some(Value::Undefined))
@@ -464,14 +466,15 @@ impl Host for EsHost {
                 self.data
                     .borrow_mut()
                     .listeners
-                    .retain(|(t, g, _)| !(*t == ty && e.strict_eq(*g, f)));
+                    .retain(|(t, g, _)| !(*t == ty && e.strict_eq(g, &f)));
                 Ok(Some(Value::Undefined))
             }
             "dispatchEvent" => {
                 let ev = arg(args, 0);
                 let ty = if let Value::Obj(id) = ev {
                     e.get_prop(id, "type")
-                        .and_then(|v| e.heap_string_of(v))
+                        .as_ref()
+                        .and_then(Engine::heap_string_of)
                         .unwrap_or_default()
                 } else {
                     String::new()
@@ -512,11 +515,11 @@ pub(crate) fn install_eventsource(e: &mut Engine) {
         // instancier (`X.prototype.addEventListener` lu au boot).
         let p = es_proto(e);
         e.set_own(cid, "prototype", Value::Obj(p), false);
-        e.set_own(p, "constructor", ctor, false);
+        e.set_own(p, "constructor", ctor.clone(), false);
     }
     e.set_own(g, "EventSource", ctor, true);
 }
 
 fn arg(args: &[Value], i: usize) -> Value {
-    args.get(i).copied().unwrap_or(Value::Undefined)
+    args.get(i).cloned().unwrap_or(Value::Undefined)
 }

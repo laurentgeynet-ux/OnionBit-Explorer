@@ -80,9 +80,9 @@ pub(crate) fn ds_use(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Va
         _ => None,
     };
     match m {
-        Some(f) if e.is_callable(f) => {
+        Some(f) if e.is_callable(f.clone()) => {
             // `v[@@dispose]()` — `this` = la ressource, pas d'arg.
-            ds_push(e, id, f, v, Value::Undefined);
+            ds_push(e, id, f, v.clone(), Value::Undefined);
             Ok(v)
         }
         _ => Err(e.type_error("value has no [Symbol.dispose] method")),
@@ -94,7 +94,7 @@ pub(crate) fn ds_adopt(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<
     let id = ds_state(e, this)?;
     ds_live(e, id)?;
     let f = arg(args, 1);
-    if !e.is_callable(f) {
+    if !e.is_callable(f.clone()) {
         return Err(e.type_error("adopt onDispose is not callable"));
     }
     ds_push(e, id, f, Value::Undefined, arg(args, 0));
@@ -106,7 +106,7 @@ pub(crate) fn ds_defer(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<
     let id = ds_state(e, this)?;
     ds_live(e, id)?;
     let f = arg(args, 0);
-    if !e.is_callable(f) {
+    if !e.is_callable(f.clone()) {
         return Err(e.type_error("defer callback is not callable"));
     }
     ds_push(e, id, f, Value::Undefined, Value::Undefined);
@@ -207,8 +207,8 @@ pub(crate) fn ads_use(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<V
         _ => None,
     };
     match m {
-        Some(f) if e.is_callable(f) => {
-            ds_push(e, id, f, v, Value::Undefined);
+        Some(f) if e.is_callable(f.clone()) => {
+            ds_push(e, id, f, v.clone(), Value::Undefined);
             Ok(v)
         }
         _ => Err(e.type_error("value has no [Symbol.asyncDispose] method")),
@@ -220,7 +220,7 @@ pub(crate) fn ads_adopt(e: &mut Engine, this: Value, args: &[Value]) -> JsResult
     let id = ds_state(e, this)?;
     ds_live(e, id)?;
     let f = arg(args, 1);
-    if !e.is_callable(f) {
+    if !e.is_callable(f.clone()) {
         return Err(e.type_error("adopt onDisposeAsync is not callable"));
     }
     ds_push(e, id, f, Value::Undefined, arg(args, 0));
@@ -232,7 +232,7 @@ pub(crate) fn ads_defer(e: &mut Engine, this: Value, args: &[Value]) -> JsResult
     let id = ds_state(e, this)?;
     ds_live(e, id)?;
     let f = arg(args, 0);
-    if !e.is_callable(f) {
+    if !e.is_callable(f.clone()) {
         return Err(e.type_error("defer callback is not callable"));
     }
     ds_push(e, id, f, Value::Undefined, Value::Undefined);

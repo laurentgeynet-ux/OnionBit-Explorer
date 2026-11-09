@@ -19,7 +19,7 @@ pub(crate) fn number_to_string(e: &mut Engine, this: Value, args: &[Value]) -> J
         v => e.to_number(v)? as u32,
     };
     if radix == 10 || !(2..=36).contains(&radix) {
-        return Ok(e.str_val(num_to_js_string(n)));
+        return Ok(e.num_str_val(n));
     }
     if !n.is_finite() {
         return Ok(e.str_val(num_to_js_string(n)));

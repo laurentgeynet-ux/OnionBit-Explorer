@@ -19,6 +19,7 @@
 #![forbid(unsafe_code)]
 
 use std::collections::HashMap;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{channel, Receiver, RecvTimeoutError, Sender};
 use std::sync::Arc;
 use std::thread::JoinHandle;
@@ -1729,6 +1730,14 @@ enum Cmd {
         /// Étiquette de source (`JsEngine::eval_named`) —
         /// URL du script externe, `None` = script inline.
         name: Option<String>,
+        /// JS-C422 : le worker répond **avant** l'éval avec le
+        /// budget deadline réellement armé — la session attend
+        /// `budget + marge` au lieu de `EVAL_CMD_TIMEOUT_EVAL`
+        /// (65 s calé sur l'ancien défaut 60 s ; vol 711 : le
+        /// canal expirait pendant que le moteur travaillait
+        /// encore légitimement → `kevlar_base` figé à 65 s puis
+        /// 239 s de thread brûlé orphelin).
+        budget_tx: Sender<u64>,
         tx: Sender<Result<String, JsError>>,
     },
     RunPending {
@@ -1887,6 +1896,7 @@ enum Cmd {
         entry: String,
         sources: HashMap<String, String>,
         resolve: UrlResolver,
+        budget_tx: Sender<u64>,
         tx: Sender<Result<String, JsError>>,
     },
     SetImportMap {
@@ -2020,6 +2030,7 @@ enum Cmd {
         ctx: JsCtxId,
         src: String,
         name: Option<String>,
+        budget_tx: Sender<u64>,
         tx: Sender<Result<String, JsError>>,
     },
     EvalScriptEl {
@@ -2027,6 +2038,7 @@ enum Cmd {
         src: String,
         name: Option<String>,
         ord: usize,
+        budget_tx: Sender<u64>,
         tx: Sender<Result<String, JsError>>,
     },
     DrainDynImgs {
@@ -2109,6 +2121,11 @@ enum Cmd {
 pub struct JscoreEngine {
     tx: Sender<Cmd>,
     join: Option<JoinHandle<()>>,
+    /// JS-C422 — abandon d'une commande en vol : posé quand la
+    /// patience canal expire (`recv_eval*`) — le moteur le lit
+    /// au `tick` 256-ops et déroule l'éval abandonnée au lieu de
+    /// la laisser brûler le thread jusqu'à sa deadline interne.
+    interrupt: Arc<AtomicBool>,
     /// File `Send` des `WorkerLoad` (JS-C132) — alimentée
     /// depuis le thread moteur **et** les threads worker
     /// (là où `Rc<RefCell>` ne passe pas) ; drainée par
@@ -2123,6 +2140,8 @@ impl JscoreEngine {
     pub fn new() -> Self {
         let (tx, rx) = channel::<Cmd>();
         let (wtx, wrx) = std::sync::mpsc::channel::<NetRequest>();
+        let interrupt = Arc::new(AtomicBool::new(false));
+        let interrupt_w = interrupt.clone();
         let join = std::thread::Builder::new()
             .name("explorer-jscore".to_string())
             // Pile large : le parseur/évaluateur descendant coûte
@@ -2131,11 +2150,12 @@ impl JscoreEngine {
             // recourir aux segments tas de `maybe_grow` ; les
             // plafonds logiques sont relevés dans `worker`.
             .stack_size(32 * 1024 * 1024)
-            .spawn(move || Self::worker(&rx, &wtx));
+            .spawn(move || Self::worker(&rx, &wtx, &interrupt_w));
         match join {
             Ok(j) => Self {
                 tx,
                 join: Some(j),
+                interrupt,
                 worker_rx: wrx,
             },
             // Thread impossible (OS saturé) : moteur inerte —
@@ -2143,6 +2163,7 @@ impl JscoreEngine {
             Err(_) => Self {
                 tx,
                 join: None,
+                interrupt,
                 worker_rx: wrx,
             },
         }
@@ -2160,46 +2181,96 @@ impl JscoreEngine {
     /// interne (stall → disjoncteur muet). Pompes/drains
     /// restent à 30 s.
     const EVAL_CMD_TIMEOUT_EVAL: std::time::Duration = std::time::Duration::from_secs(65);
+    /// JS-C422 — marge ajoutée au budget deadline rapporté par le
+    /// worker : le moteur vérifie sa deadline tous les 256 ops,
+    /// l'overshoot + le déroulé d'erreur dépassent le budget nu.
+    const EVAL_BUDGET_SLACK_MS: u64 = 5_000;
 
-    fn recv_eval<T>(rx: &Receiver<T>) -> Result<T, JsError> {
-        rx.recv_timeout(Self::EVAL_CMD_TIMEOUT)
-            .map_err(|e| match e {
-                RecvTimeoutError::Timeout => JsError::Timeout,
-                RecvTimeoutError::Disconnected => JsError::Dead,
-            })
+    /// Abandon de la commande en vol : flag moteur + `Timeout`
+    /// — l'éval meurt au prochain tick 256-ops au lieu de courir
+    /// orpheline jusqu'à sa deadline interne (JS-C422, vol 711).
+    fn abandon(&self) -> JsError {
+        self.interrupt.store(true, Ordering::Relaxed);
+        JsError::Timeout
     }
 
-    /// les frames `error.stack` (`JsEngine::eval_named`).
-    fn recv_eval_long<T>(rx: &Receiver<T>) -> Result<T, JsError> {
-        rx.recv_timeout(Self::EVAL_CMD_TIMEOUT_EVAL)
+    /// Patience d'un `Eval`/`EvalModule`/`EvalCtx`/`EvalScriptEl`
+    /// = le budget deadline réellement armé côté moteur + marge
+    /// (JS-C422). `budget_ms == 0` = deadline désactivée → repli
+    /// `EVAL_CMD_TIMEOUT_EVAL` (la borne session reste le garde).
+    fn eval_patience(budget_ms: u64) -> std::time::Duration {
+        if budget_ms > 0 {
+            std::time::Duration::from_millis(budget_ms.saturating_add(Self::EVAL_BUDGET_SLACK_MS))
+        } else {
+            Self::EVAL_CMD_TIMEOUT_EVAL
+        }
+    }
+
+    /// Attente `budget_tx` : le worker le répond dès la prise de
+    /// commande — une attente longue ici = le moteur est déjà
+    /// bloqué dans la commande précédente (la session est de
+    /// toute façon sérialisée derrière).
+    fn recv_budget(rx: &Receiver<u64>) -> u64 {
+        rx.recv_timeout(Self::EVAL_CMD_TIMEOUT).unwrap_or(0)
+    }
+
+    /// `rx` = réponse du job ; `budget_rx` = budget armé rapporté
+    /// par le worker (`None` → patience constante historique).
+    fn recv_eval_job<T>(
+        &self,
+        rx: &Receiver<T>,
+        budget_rx: Option<&Receiver<u64>>,
+    ) -> Result<T, JsError> {
+        let patience = match budget_rx {
+            Some(brx) => Self::eval_patience(Self::recv_budget(brx)),
+            None => Self::EVAL_CMD_TIMEOUT_EVAL,
+        };
+        rx.recv_timeout(patience).map_err(|e| match e {
+            RecvTimeoutError::Timeout => self.abandon(),
+            RecvTimeoutError::Disconnected => JsError::Dead,
+        })
+    }
+
+    fn recv_eval<T>(&self, rx: &Receiver<T>) -> Result<T, JsError> {
+        rx.recv_timeout(Self::EVAL_CMD_TIMEOUT)
             .map_err(|e| match e {
-                RecvTimeoutError::Timeout => JsError::Timeout,
+                RecvTimeoutError::Timeout => self.abandon(),
                 RecvTimeoutError::Disconnected => JsError::Dead,
             })
     }
 
     fn eval_cmd(&mut self, source: &str, name: Option<&str>) -> Result<String, JsError> {
         let (tx, rx) = channel();
+        let (budget_tx, budget_rx) = channel();
         if self
             .tx
             .send(Cmd::Eval {
                 src: source.to_string(),
                 name: name.map(str::to_string),
+                budget_tx,
                 tx,
             })
             .is_err()
         {
             return Err(JsError::Dead);
         }
-        Self::recv_eval_long(&rx)?
+        self.recv_eval_job(&rx, Some(&budget_rx))?
     }
 
     /// Boucle du thread : possède le `explorer_jscore::Engine` (`!Send`)
     /// et sert les commandes jusqu'à `Shutdown` ou fermeture du
     /// canal (le `Sender` meurt avec le proxy).
     #[allow(clippy::too_many_lines)] // dispatch de commandes — grandir ne gagne rien
-    fn worker(rx: &Receiver<Cmd>, wtx: &std::sync::mpsc::Sender<NetRequest>) {
+    fn worker(
+        rx: &Receiver<Cmd>,
+        wtx: &std::sync::mpsc::Sender<NetRequest>,
+        interrupt: &Arc<AtomicBool>,
+    ) {
         let mut eng = explorer_jscore::Engine::new();
+        // JS-C422 — le flag d'abandon session s'installe avant
+        // tout service : un timeout canal côté adaptateur tue
+        // l'éval en vol au tick suivant (256 ops).
+        eng.set_interrupt(interrupt.clone());
         // JS-C100 — la session draine `import()` manquants
         // (`drain_dyn_imports` → fetch → `deliver_dyn_import`).
         eng.set_import_drain();
@@ -2282,6 +2353,11 @@ impl JscoreEngine {
         let crypto_next: std::rc::Rc<std::cell::Cell<u64>> =
             std::rc::Rc::new(std::cell::Cell::new(0));
         while let Ok(cmd) = rx.recv() {
+            // JS-C422 — le flag est scopé à la commande : un
+            // abandon posé pendant le service précédent est
+            // déjà consommé (ou tombe à côté s'il a atterri
+            // entre deux jobs) — jamais sur la commande neuve.
+            interrupt.store(false, Ordering::Relaxed);
             let mut stopped = false;
             {
                 // Confinement du panic au job (JS-C251) : un
@@ -2307,7 +2383,13 @@ impl JscoreEngine {
                 let xhr_next = &xhr_next;
                 let crypto_next = &crypto_next;
                 let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(move || match cmd {
-                    Cmd::Eval { src, name, tx } => {
+                    Cmd::Eval {
+                        src,
+                        name,
+                        budget_tx,
+                        tx,
+                    } => {
+                        let _ = budget_tx.send(eng.eval_timeout_boot_ms());
                         dump_eval_script("eval", name.as_deref(), &src);
                         let _ = explorer_common::alloc_delta();
                         let t0 = std::time::Instant::now();
@@ -2564,8 +2646,10 @@ impl JscoreEngine {
                         entry,
                         sources,
                         resolve,
+                        budget_tx,
                         tx,
                     } => {
+                        let _ = budget_tx.send(eng.eval_timeout_boot_ms());
                         let _ = explorer_common::alloc_delta();
                         let t0 = std::time::Instant::now();
                         let out = eval_module(eng, &entry, sources, resolve);
@@ -2698,10 +2782,17 @@ impl JscoreEngine {
                             eng.context_switch(prev);
                         }
                     }
-                    Cmd::EvalCtx { ctx, src, name, tx } => {
+                    Cmd::EvalCtx {
+                        ctx,
+                        src,
+                        name,
+                        budget_tx,
+                        tx,
+                    } => {
                         let prev = eng.current_context();
                         eng.context_switch(ctx);
                         let out = if eng.current_context() == ctx {
+                            let _ = budget_tx.send(eng.eval_timeout_boot_ms());
                             dump_eval_script("eval_ctx", name.as_deref(), &src);
                             let _ = explorer_common::alloc_delta();
                             let t0 = std::time::Instant::now();
@@ -2725,11 +2816,13 @@ impl JscoreEngine {
                         src,
                         name,
                         ord,
+                        budget_tx,
                         tx,
                     } => {
                         let prev = eng.current_context();
                         eng.context_switch(ctx);
                         let out = if eng.current_context() == ctx {
+                            let _ = budget_tx.send(eng.eval_timeout_boot_ms());
                             dump_eval_script("script_el", name.as_deref(), &src);
                             let _ = explorer_common::alloc_delta();
                             let t0 = std::time::Instant::now();
@@ -2925,7 +3018,7 @@ impl JsEngine for JscoreEngine {
         if self.tx.send(Cmd::RunPending { max_timers, tx }).is_err() {
             return Err(JsError::Dead);
         }
-        Self::recv_eval(&rx)?
+        self.recv_eval(&rx)?
     }
 
     fn next_timer_deadline(&mut self) -> Option<std::time::Duration> {
@@ -3106,19 +3199,21 @@ impl JsEngine for JscoreEngine {
         name: Option<&str>,
     ) -> Result<String, JsError> {
         let (tx, rx) = channel();
+        let (budget_tx, budget_rx) = channel();
         if self
             .tx
             .send(Cmd::EvalCtx {
                 ctx,
                 src: source.to_string(),
                 name: name.map(str::to_string),
+                budget_tx,
                 tx,
             })
             .is_err()
         {
             return Err(JsError::Dead);
         }
-        Self::recv_eval_long(&rx)?
+        self.recv_eval_job(&rx, Some(&budget_rx))?
     }
 
     fn eval_script_el(
@@ -3129,6 +3224,7 @@ impl JsEngine for JscoreEngine {
         script_ord: usize,
     ) -> Result<String, JsError> {
         let (tx, rx) = channel();
+        let (budget_tx, budget_rx) = channel();
         if self
             .tx
             .send(Cmd::EvalScriptEl {
@@ -3136,13 +3232,14 @@ impl JsEngine for JscoreEngine {
                 src: source.to_string(),
                 name: name.map(str::to_string),
                 ord: script_ord,
+                budget_tx,
                 tx,
             })
             .is_err()
         {
             return Err(JsError::Dead);
         }
-        Self::recv_eval_long(&rx)?
+        self.recv_eval_job(&rx, Some(&budget_rx))?
     }
 
     fn drain_dyn_scripts(&mut self) -> Vec<explorer_jscore::DynScriptReq> {
@@ -3267,7 +3364,7 @@ impl JsEngine for JscoreEngine {
         {
             return Err(JsError::Dead);
         }
-        Self::recv_eval(&rx)?
+        self.recv_eval(&rx)?
     }
 
     fn sync_dom_ctx(&mut self, ctx: JsCtxId) -> Option<String> {
@@ -3449,19 +3546,21 @@ impl JsEngine for JscoreEngine {
         resolve: UrlResolver,
     ) -> Result<String, JsError> {
         let (tx, rx) = channel();
+        let (budget_tx, budget_rx) = channel();
         if self
             .tx
             .send(Cmd::EvalModule {
                 entry: entry.to_string(),
                 sources,
                 resolve,
+                budget_tx,
                 tx,
             })
             .is_err()
         {
             return Err(JsError::Dead);
         }
-        Self::recv_eval_long(&rx)?
+        self.recv_eval_job(&rx, Some(&budget_rx))?
     }
 
     fn dispatch_event(&mut self, ty: &str, path: &[(String, u32)]) -> Result<bool, JsError> {
@@ -3487,7 +3586,7 @@ impl JsEngine for JscoreEngine {
         {
             return Err(JsError::Dead);
         }
-        Self::recv_eval(&rx)?
+        self.recv_eval(&rx)?
     }
 
     fn set_import_map(&mut self, json: &str) {
@@ -3525,7 +3624,7 @@ impl JsEngine for JscoreEngine {
         if self.tx.send(Cmd::DeliverNet { resp, tx }).is_err() {
             return Err(JsError::Dead);
         }
-        Self::recv_eval(&rx)?
+        self.recv_eval(&rx)?
     }
 
     fn deliver_es_event(
@@ -3547,7 +3646,7 @@ impl JsEngine for JscoreEngine {
         {
             return Err(JsError::Dead);
         }
-        Self::recv_eval(&rx)?
+        self.recv_eval(&rx)?
     }
 
     fn deliver_ws_event(
@@ -3569,7 +3668,7 @@ impl JsEngine for JscoreEngine {
         {
             return Err(JsError::Dead);
         }
-        Self::recv_eval(&rx)?
+        self.recv_eval(&rx)?
     }
 
     fn deliver_crypto_response(&mut self, resp: CryptoResponse) -> Result<(), JsError> {
@@ -3577,7 +3676,7 @@ impl JsEngine for JscoreEngine {
         if self.tx.send(Cmd::DeliverCrypto { resp, tx }).is_err() {
             return Err(JsError::Dead);
         }
-        Self::recv_eval(&rx)?
+        self.recv_eval(&rx)?
     }
 
     fn install_storage(&mut self, local: std::collections::BTreeMap<String, String>) {
@@ -3761,9 +3860,18 @@ fn note_eval(
     ok: bool,
 ) {
     let (parse_us, exec_us) = eng.last_eval_split();
+    let gc_us = eng.last_eval_gc_us();
+    let sp_us = eng.last_eval_sp_us();
     let (alloc_b, alloc_n) = explorer_common::alloc_delta().unwrap_or((0, 0));
     let ((alloc_parse_b, alloc_parse_n), (alloc_exec_b, alloc_exec_n)) =
         eng.last_eval_alloc_split();
+    // JS-C425 — attribution J17 par éval : le snapshot est
+    // cumulatif process-wide ; les lignes `eval split` sont
+    // séquentielles (worker mono-thread) → la différence de
+    // deux lignes consécutives attribue les compteurs à
+    // l'éval qui les sépare. Vide quand PROF désarmé — 31
+    // loads Relaxed par split, coût nul.
+    let j17 = explorer_jscore::j17_snapshot();
     tracing::info!(
         target: "js_alloc",
         kind,
@@ -3772,12 +3880,15 @@ fn note_eval(
         us = u64::try_from(t0.elapsed().as_micros()).unwrap_or(u64::MAX),
         parse_us,
         exec_us,
+        gc_us,
+        sp_us,
         alloc_b,
         alloc_n,
         alloc_parse_b,
         alloc_parse_n,
         alloc_exec_b,
         alloc_exec_n,
+        j17 = %j17,
         ok,
         "eval split"
     );

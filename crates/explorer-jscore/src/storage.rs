@@ -25,7 +25,7 @@ struct StorageHost {
 }
 
 fn arg(args: &[Value], i: usize) -> Value {
-    args.get(i).copied().unwrap_or(Value::Undefined)
+    args.get(i).cloned().unwrap_or(Value::Undefined)
 }
 
 impl Engine {
@@ -51,9 +51,9 @@ impl Engine {
         self.set_own(p, crate::interp::SYM_TO_STRING_TAG, tag, false);
         if let Value::Obj(cid) = f {
             self.set_own(cid, "prototype", Value::Obj(p), false);
-            self.set_own(p, "constructor", f, false);
+            self.set_own(p, "constructor", f.clone(), false);
         }
-        for v in [lv, sv] {
+        for v in [lv.clone(), sv.clone()] {
             if let Value::Obj(id) = v {
                 if let Some(o) = self.heap.obj_mut(id) {
                     o.proto = Value::Obj(p);

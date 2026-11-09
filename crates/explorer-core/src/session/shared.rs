@@ -83,6 +83,14 @@ pub async fn navigate_shared(
         if s.try_fragment_nav(tab, &req) {
             return Ok(());
         }
+        // Étape 209 — refus pendant épisode shed **après** les
+        // chemins gratuits (restauration bfcache/fragment ne
+        // fetch pas — les autoriser ne coûte rien et garde
+        // l'historique fluide).
+        s.maybe_rss_shed();
+        if let Some(retry) = s.shed_refusal() {
+            return Err(CoreError::Overloaded(retry));
+        }
         s.nav_begin(tab, req, push)?
     };
     let epoch = job.epoch;
@@ -541,11 +549,36 @@ pub async fn pump_timers_shared(sess: &tokio::sync::Mutex<Session>, tab: TabId) 
     // fenêtre de coalescence `sync_floor` la sérialisation
     // est sautée — le miroir accumule, l'API respire
     // (55g-suite).
+    // §B-111 — marqueurs `pump:` (morgue C405) : la mort
+    // `0xC00000FD` est post-collect **sur le worker**
+    // (`tokio-rt-worker` — le drain moteur vit sur le thread
+    // `explorer-jscore` derrière le canal `Cmd`). Chaque
+    // étape du chemin de retour est nommée : la dernière
+    // ligne vivante brackete le site fautif.
     let tb = Instant::now();
     let out = tokio::task::spawn_blocking(move || {
-        let jobs = eng.run_pending_bounded(max).unwrap_or(0);
+        dlv_info!("pump: run");
+        // §B-104 — l'exception d'un handler (worker `onmessage`,
+        // timer, thenable) remontait jusqu'ici et mourait dans
+        // `unwrap_or(0)` : promesse pendante sans témoin. Nommée.
+        let jobs = match eng.run_pending_bounded(max) {
+            Ok(n) => n,
+            Err(e) => {
+                if !matches!(e, explorer_js::JsError::Timeout) {
+                    tracing::warn!(
+                        tab,
+                        error = %e,
+                        "pump: exception dans un handler JS (avant : avalée)"
+                    );
+                }
+                0
+            }
+        };
+        dlv_info!("pump: js jobs={jobs}");
         let mutated = if sync_ok {
-            Session::sync_for_apply(&mut *eng)
+            let m = Session::sync_for_apply(&mut *eng);
+            dlv_info!("pump: sync mutated={}", m.is_some());
+            m
         } else {
             None
         };
@@ -555,14 +588,17 @@ pub async fn pump_timers_shared(sess: &tokio::sync::Mutex<Session>, tab: TabId) 
     sync_phase(tab, "pump.offlock", tb);
     let mut s = sess.lock().await;
     let tc = Instant::now();
+    dlv_info!("pump: commit");
     let jobs = s.commit_js_pump(tab, epoch, out.ok(), sync_ok);
     // 55e : les animations cadencées par ce battement.
+    dlv_info!("pump: anim");
     let _ = s.advance_animations(tab);
     sync_phase(tab, "pump.commit_lock", tc);
     drop(s);
     // 55h : la mutation rapportée par le miroir a été
     // enfilée — l'apply (re-parse → cascade → relayout →
     // repaint) tourne en `spawn_blocking` hors verrou.
+    dlv_info!("pump: dapply");
     drain_applies_shared(sess, tab).await;
     jobs
 }
@@ -614,7 +650,23 @@ pub async fn eval_shared(sess: &tokio::sync::Mutex<Session>, tab: TabId, src: St
         // L'éval a pu armer timers/microtasks (attribution
         // d'hydratation, setTimeout(0)…) — on les draine pour
         // que la valeur rendue reflète l'état stabilisé.
-        let jobs = eng.run_pending_bounded(max).unwrap_or(0);
+        dlv_info!("pump: evalrun");
+        // Même honnêteté que la pompe périodique : l'exception
+        // d'un handler drainé ici était avalée (`unwrap_or(0)`).
+        let jobs = match eng.run_pending_bounded(max) {
+            Ok(n) => n,
+            Err(e) => {
+                if !matches!(e, explorer_js::JsError::Timeout) {
+                    tracing::warn!(
+                        tab,
+                        error = %e,
+                        "pump: exception dans un handler JS après eval (avant : avalée)"
+                    );
+                }
+                0
+            }
+        };
+        dlv_info!("pump: evalret jobs={jobs}");
         let mutated = if sync_ok {
             Session::sync_for_apply(&mut *eng)
         } else {
@@ -672,10 +724,15 @@ pub async fn drain_applies_shared(sess: &tokio::sync::Mutex<Session>, _tab: TabI
         // le worker : un drain droppé en vol parque la
         // payload au lieu de la perdre (issue #23).
         let out = tokio::task::spawn_blocking(move || {
+            // §B-111 — brackette le segment worker avant
+            // `journal: apply` (morgue C405 : la mort
+            // post-collect vit sur `tokio-rt-worker`).
+            dlv_info!("pump: applyjob tab={tab}");
             // ADR-0025 : voie journal (rejeu en place) ou
             // re-parse ; le rejet est remonté, la session
             // re-enfile en mode baseline.
             let r = apply::run_apply_job(g.payload_mut(), &ctx, &job, old_title.as_deref());
+            dlv_info!("pump: applyjob_done tab={tab}");
             (g, r, job)
         })
         .await;

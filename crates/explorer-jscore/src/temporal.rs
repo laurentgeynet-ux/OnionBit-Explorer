@@ -633,7 +633,7 @@ fn parse_duration(s: &str) -> Option<[i64; 10]> {
 fn to_duration(e: &mut Engine, v: Value) -> JsResult<[i64; 10]> {
     match v {
         Value::Str(id) => {
-            let s = e.heap.string(id).unwrap_or_default();
+            let s = id.to_string();
             parse_duration(&s).ok_or_else(|| e.range_error("invalid duration string"))
         }
         Value::Obj(id) => {
@@ -824,7 +824,7 @@ fn to_pdate(e: &mut Engine, v: Value) -> JsResult<TempData> {
                     Some(x) => Some(x),
                     None => match e.get_prop(id, "monthCode") {
                         Some(Value::Str(sid)) => {
-                            let s = e.heap.string(sid).unwrap_or_default();
+                            let s = sid.to_string();
                             s.strip_prefix('M').and_then(|x| x.parse::<i64>().ok())
                         }
                         _ => None,
@@ -845,7 +845,7 @@ fn to_pdate(e: &mut Engine, v: Value) -> JsResult<TempData> {
             None => Err(e.type_error("PlainDate expected")),
         },
         Value::Str(id) => {
-            let s = e.heap.string(id).unwrap_or_default();
+            let s = id.to_string();
             let date = s.split(['T', ' ']).next().unwrap_or(&s);
             match parse_date_part(date) {
                 Some((y, m, d)) if valid_date(y, m, d) => Ok(TempData::PDate { y, m, d }),
@@ -906,7 +906,7 @@ fn to_ptime(e: &mut Engine, v: Value) -> JsResult<TempData> {
             None => Err(e.type_error("PlainTime expected")),
         },
         Value::Str(id) => {
-            let s = e.heap.string(id).unwrap_or_default();
+            let s = id.to_string();
             let s = s.strip_prefix('T').unwrap_or(&s);
             match parse_time_part(s) {
                 Some((h, mi, s_, ms, us, ns, _)) if h <= 23 && mi <= 59 && s_ <= 59 => {
@@ -983,7 +983,7 @@ fn to_pdatetime(e: &mut Engine, v: Value) -> JsResult<TempData> {
             None => Err(e.type_error("PlainDateTime expected")),
         },
         Value::Str(id) => {
-            let s = e.heap.string(id).unwrap_or_default();
+            let s = id.to_string();
             let (dp, tp) = s
                 .split_once(['T', ' '])
                 .map_or((s.as_str(), ""), |(a, b)| (a, b));
@@ -1022,7 +1022,7 @@ fn to_instant(e: &mut Engine, v: Value) -> JsResult<TempData> {
             _ => Err(e.type_error("Instant expected")),
         },
         Value::Str(id) => {
-            let s = e.heap.string(id).unwrap_or_default();
+            let s = id.to_string();
             let (dp, tp) = s
                 .split_once(['T', ' '])
                 .map_or((s.as_str(), ""), |(a, b)| (a, b));
@@ -1113,7 +1113,7 @@ fn to_pyearmonth(e: &mut Engine, v: Value) -> JsResult<TempData> {
             None => Err(e.type_error("PlainYearMonth expected")),
         },
         Value::Str(id) => {
-            let s = e.heap.string(id).unwrap_or_default();
+            let s = id.to_string();
             match parse_date_part(s.split(['T', ' ']).next().unwrap_or(&s)) {
                 Some((y, m, _d)) if (1..=12).contains(&m) => Ok(TempData::PYearMonth { y, m }),
                 _ => Err(e.range_error("invalid PlainYearMonth string")),
@@ -1139,7 +1139,7 @@ fn to_pmonthday(e: &mut Engine, v: Value) -> JsResult<TempData> {
             Some(_) => {
                 let mc = match e.get_prop(id, "monthCode") {
                     Some(Value::Str(sid)) => {
-                        let s = e.heap.string(sid).unwrap_or_default();
+                        let s = sid.to_string();
                         s.strip_prefix('M').and_then(|x| x.parse::<u8>().ok())
                     }
                     _ => field(e, id, "month")?.map(|x| x as u8),
@@ -1159,7 +1159,7 @@ fn to_pmonthday(e: &mut Engine, v: Value) -> JsResult<TempData> {
             None => Err(e.type_error("PlainMonthDay expected")),
         },
         Value::Str(id) => {
-            let s = e.heap.string(id).unwrap_or_default();
+            let s = id.to_string();
             // "MM-DD" ou date complète (on prend le mois/jour).
             let s = s.trim_start_matches(['T', ' ']);
             let (m, d) = if s.len() >= 5

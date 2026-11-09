@@ -16,15 +16,15 @@ use super::*;
 /// (sous-classes `Array.of.call(C, …)`), sinon un Array ordinaire.
 pub(crate) fn array_of(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
     let len = args.len();
-    let a = if e.is_callable(this) {
+    let a = if e.is_callable(this.clone()) {
         e.construct(this, &[Value::Num(len as f64)])?
     } else {
         e.new_array(vec![Value::Undefined; len])
     };
     for (i, v) in args.iter().enumerate() {
-        e.set_prop_value(a, &i.to_string(), *v)?;
+        e.set_prop_value(a.clone(), &i.to_string(), v.clone())?;
     }
-    e.set_prop_value(a, "length", Value::Num(len as f64))?;
+    e.set_prop_value(a.clone(), "length", Value::Num(len as f64))?;
     Ok(a)
 }
 
@@ -39,7 +39,7 @@ pub(crate) fn sym_method(
     let Value::Obj(id) = obj else { return Ok(None) };
     match e.get_prop(id, sym) {
         None | Some(Value::Undefined | Value::Null) => Ok(None),
-        Some(m) if e.is_callable(m) => e.call_value(m, obj, args).map(Some),
+        Some(m) if e.is_callable(m.clone()) => e.call_value(m, obj, args).map(Some),
         Some(_) => Err(e.type_error("symbol method is not callable")),
     }
 }

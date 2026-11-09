@@ -126,6 +126,30 @@ pub use shared::*;
 #[allow(clippy::wildcard_imports)]
 pub use types::*;
 
+/// Sondes §B-111 — `EXPLORER_DLV_TRACE=1` arme les marqueurs
+/// de morgue (`journal:`/`pump:`/`net:`/`fmir:`/`afs`) qui ont
+/// mené au fix C408 : la dernière ligne avant un overflow de
+/// pile nomme la phase fautive (le `.dmp` WER n'existe pas —
+/// abort Rust hors capture ; la trace tient lieu de morgue).
+/// Désarmées : un booléen lu une fois, zéro coût — les vols
+/// sains ne paient plus ~600 k lignes de stderr (JS-C409).
+pub(crate) fn dlv_trace() -> bool {
+    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ON.get_or_init(|| std::env::var_os("EXPLORER_DLV_TRACE").is_some())
+}
+
+/// Marqueur de morgue : `info!` émis seulement sous
+/// `EXPLORER_DLV_TRACE=1` — l'armement reste posé, le coût
+/// disparaît hors diagnostic.
+macro_rules! dlv_info {
+    ($($t:tt)*) => {
+        if crate::session::dlv_trace() {
+            tracing::info!($($t)*)
+        }
+    };
+}
+pub(crate) use dlv_info;
+
 /// Entrée d'historique d'onglet (étape 76) : la requête
 /// d'origine (rejouée à la traversée hors bfcache) + le
 /// marqueur « échec » — une navigation en échec pousse son
@@ -528,6 +552,11 @@ pub(crate) struct Tab {
     /// saute les suivantes (erreur pipeline, page dégradée
     /// mais API vivante) ; une éval rapide referme la série.
     slow_eval_streak: u32,
+    /// Dernière sonde admise sous circuit ouvert (demi-ouvert
+    /// §B-1 — vol 683 : victimes `bytes≈883` pendant la
+    /// fenêtre). Cadencée `SLOW_EVAL_PROBE_MS` ; une éval
+    /// rapide referme le streak via `note_eval_ms`.
+    slow_probe_at: Option<std::time::Instant>,
     /// §B-4(c) T2-bis — le WARN `evals_sans_mutation` a tiré
     /// pendant le commit : `sub_commit_tail` ré-échantillonne
     /// `boot_diag` post-`load` (le premier tir voit
@@ -975,6 +1004,22 @@ pub struct Session {
     /// Quota de requêtes script-initiées simultanées par
     /// onglet (`max_script_net` de config, ADR-0019).
     max_script_net: usize,
+    /// Seuil RSS processus du shed-load (Étape 209 /
+    /// §B-114-b — `SessionConfig::rss_shed_mb`, `0` =
+    /// désarmé). Sous les seuils de kill opt-in : la session
+    /// dégrade avant la mort, jamais à leur place.
+    rss_shed_mb: u32,
+    /// Épisode shed en cours — posé/levé par
+    /// `shed_evaluate` (hysteresis `shed_margin`) : les
+    /// navigations/onglets neufs sont refusés (`Overloaded`
+    /// → REST 503) tant qu'il dure.
+    shed_active: bool,
+    /// Dernier échantillon RSS (`maybe_rss_shed` borne la
+    /// cadence — `memory_stats()` est un appel système).
+    rss_shed_at: std::time::Instant,
+    /// `Retry-After` (s) porté par `CoreError::Overloaded`
+    /// pendant l'épisode (`SessionConfig::shed_retry_after_s`).
+    shed_retry_after_s: u32,
     /// Quota de callbacks de timers déclenchés par tick
     /// (`max_timer_jobs` de config, étape 52 — borne
     /// ADR-0019).
@@ -1097,6 +1142,23 @@ pub struct Session {
     /// verrou figeait l'API). Témoigne du déroutage pour
     /// les tests ; chaque incrément = un fil `js-engine-drop`.
     pub(crate) engines_dropped_offlock: usize,
+    /// §B-111 (vol 695) : garde de classe contre la
+    /// ré-entrance d'orchestration — `after_script` →
+    /// `drain_script_net` → livraisons `deliver_*` →
+    /// `after_script` empilait une passe imbriquée par
+    /// livraison (pile ∝ file, `0xC00000FD` à charge égale
+    /// sous pile ×16). Un appel imbriqué se re-file dans
+    /// `after_script_again` ; la passe la plus externe
+    /// déroule les redemandes en boucle, à plat — même
+    /// leçon que `Drop for Env` : on garde la classe de
+    /// récursion, pas le site.
+    pub(crate) in_after_script: bool,
+    /// Onglets dont une passe post-script a été redemandée
+    /// pendant une passe en cours — dépilés par la boucle
+    /// externe. `HashSet` : un onglet marqué n fois ne
+    /// produit qu'une passe supplémentaire ; l'ordre entre
+    /// onglets est sans importance (drains indépendants).
+    pub(crate) after_script_again: std::collections::HashSet<TabId>,
 }
 
 impl Session {
@@ -1196,6 +1258,10 @@ impl Session {
             fetch_fail_streak: HashMap::new(),
             fetch_held: std::collections::VecDeque::new(),
             pending_script_net: std::collections::VecDeque::new(),
+            rss_shed_mb: cfg.rss_shed_mb,
+            shed_active: false,
+            rss_shed_at: std::time::Instant::now(),
+            shed_retry_after_s: cfg.shed_retry_after_s,
             net_probe_seen: std::collections::HashSet::new(),
             max_script_net: cfg.max_script_net,
             max_timer_jobs: cfg.max_timer_jobs,
@@ -1234,6 +1300,8 @@ impl Session {
             max_download_bytes: cfg.max_download_bytes,
             color_scheme: cfg.color_scheme,
             consent_policy: cfg.consent_policy,
+            in_after_script: false,
+            after_script_again: std::collections::HashSet::new(),
         }
     }
 
@@ -1560,6 +1628,7 @@ impl Session {
                 js_detached: None,
                 js_stall_until: None,
                 slow_eval_streak: 0,
+                slow_probe_at: None,
                 boot_mute_warned: false,
                 cmp_rearmed: 0,
                 paint_detached: false,

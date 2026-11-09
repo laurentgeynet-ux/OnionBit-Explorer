@@ -16,14 +16,14 @@ use crate::Engine;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 pub(crate) fn arg(args: &[Value], i: usize) -> Value {
-    args.get(i).copied().unwrap_or(Value::Undefined)
+    args.get(i).cloned().unwrap_or(Value::Undefined)
 }
 
 /// Wire `Ctor.prototype = proto` and `proto.constructor = Ctor`.
 pub(crate) fn ctor(e: &mut Engine, name: &'static str, f: NativeFn, proto: ObjId) -> Value {
     let c = e.native_fn(name, f);
-    e.set_own(c_id(c), "prototype", Value::Obj(proto), false);
-    e.set_own(proto, "constructor", c, false);
+    e.set_own(c_id(c.clone()), "prototype", Value::Obj(proto), false);
+    e.set_own(proto, "constructor", c.clone(), false);
     c
 }
 
@@ -93,7 +93,7 @@ pub(crate) fn install(e: &mut Engine) {
     // caller's local scope is out of reach — documented deviation).
     {
         let ev = e.native_fn("eval", eval_fn);
-        e.set_own(g, "eval", ev, false);
+        e.set_own(g, "eval", ev.clone(), false);
         e.eval_fn = ev;
     }
     e.add_method(g, "structuredClone", structured_clone);
@@ -182,7 +182,7 @@ pub(crate) fn install(e: &mut Engine) {
             e.add_method(iid, "from", iterator_from);
             e.add_method(iid, "concat", iterator_concat);
         }
-        e.set_own(e.protos.iterator, "constructor", iter, false);
+        e.set_own(e.protos.iterator, "constructor", iter.clone(), false);
         e.set_own(g, "Iterator", iter, false);
     }
 
@@ -257,9 +257,96 @@ pub(crate) fn install(e: &mut Engine) {
     }
 
     {
+        // JS-V1/V-2 — props `URL` = accesseurs proto
+        // énumérables (spec WHATWG) : le href canonique vit en
+        // prop cachée `\u{f131}urlh` (source de vérité
+        // unique) ; `searchParams` lié vivant — mutations
+        // propagées dans les deux sens.
+        type UrlAcc = (
+            &'static str,
+            &'static str,
+            crate::heap::NativeFn,
+            Option<(&'static str, crate::heap::NativeFn)>,
+        );
         let up = e.protos.url;
         e.add_method(up, "toString", url_href_get);
         e.add_method(up, "toJSON", url_href_get);
+        let accs: [UrlAcc; 12] = [
+            (
+                "href",
+                "get href",
+                url_acc_href,
+                Some(("set href", url_set_href)),
+            ),
+            (
+                "protocol",
+                "get protocol",
+                url_acc_protocol,
+                Some(("set protocol", url_set_protocol)),
+            ),
+            (
+                "username",
+                "get username",
+                url_acc_username,
+                Some(("set username", url_set_username)),
+            ),
+            (
+                "password",
+                "get password",
+                url_acc_password,
+                Some(("set password", url_set_password)),
+            ),
+            (
+                "host",
+                "get host",
+                url_acc_host,
+                Some(("set host", url_set_host)),
+            ),
+            (
+                "hostname",
+                "get hostname",
+                url_acc_hostname,
+                Some(("set hostname", url_set_hostname)),
+            ),
+            (
+                "port",
+                "get port",
+                url_acc_port,
+                Some(("set port", url_set_port)),
+            ),
+            (
+                "pathname",
+                "get pathname",
+                url_acc_pathname,
+                Some(("set pathname", url_set_pathname)),
+            ),
+            (
+                "search",
+                "get search",
+                url_acc_search,
+                Some(("set search", url_set_search)),
+            ),
+            (
+                "hash",
+                "get hash",
+                url_acc_hash,
+                Some(("set hash", url_set_hash)),
+            ),
+            ("origin", "get origin", url_acc_origin, None),
+            (
+                "searchParams",
+                "get searchParams",
+                url_acc_search_params,
+                None,
+            ),
+        ];
+        for (key, gname, gf, sf) in accs {
+            let g = e.native_fn(gname, gf);
+            let s = sf.map_or(Value::Undefined, |(name, f)| e.native_fn(name, f));
+            if let Some(o) = e.heap.obj_mut(up) {
+                o.set_accessor(key, g, s, true);
+            }
+        }
         let pp = e.protos.url_params;
         e.add_method(pp, "get", usp_get);
         e.add_method(pp, "getAll", usp_get_all);
@@ -275,15 +362,20 @@ pub(crate) fn install(e: &mut Engine) {
         e.add_method(pp, "entries", usp_entries);
         let it = e.native_fn("entries", usp_entries);
         e.set_own(pp, crate::interp::SYM_ITERATOR, it, false);
+        // `.size` — spec 2023 (feature-detects core-js).
+        let sz = e.native_fn("get size", usp_size);
+        if let Some(o) = e.heap.obj_mut(pp) {
+            o.set_accessor("size", sz, Value::Undefined, true);
+        }
         let tag = e.str_val("URLSearchParams");
         e.set_own(pp, crate::interp::SYM_TO_STRING_TAG, tag, false);
         let tag = e.str_val("URL");
         e.set_own(up, crate::interp::SYM_TO_STRING_TAG, tag, false);
     }
-    e.set_own(g, "Object", object, false);
-    e.set_own(g, "Array", array, false);
-    e.set_own(g, "String", string, false);
-    e.set_own(g, "Number", number, false);
+    e.set_own(g, "Object", object.clone(), false);
+    e.set_own(g, "Array", array.clone(), false);
+    e.set_own(g, "String", string.clone(), false);
+    e.set_own(g, "Number", number.clone(), false);
     e.set_own(g, "Boolean", boolean, false);
     e.set_own(g, "Error", error, false);
     e.set_own(g, "TypeError", t_err, false);
@@ -293,7 +385,7 @@ pub(crate) fn install(e: &mut Engine) {
     e.set_own(g, "EvalError", ev_err, false);
     e.set_own(g, "RangeError", rg_err, false);
     e.set_own(g, "URIError", ur_err, false);
-    e.set_own(g, "Date", date, false);
+    e.set_own(g, "Date", date.clone(), false);
 
     // `WeakRef`/`FinalizationRegistry` (JS-C13) — vraies
     // références faibles : les cibles ne sont pas tracées par le
@@ -355,21 +447,27 @@ pub(crate) fn install(e: &mut Engine) {
     let fn_proto = Value::Obj(e.protos.function);
     let it_proto = Value::Obj(e.protos.iterator);
     for (ctor_v, tag) in [
-        (e.gen_ctor, "Generator"),
-        (e.async_gen_ctor, "AsyncGenerator"),
+        (e.gen_ctor.clone(), "Generator"),
+        (e.async_gen_ctor.clone(), "AsyncGenerator"),
     ] {
-        let gfp_v = Value::Obj(e.heap.alloc_obj(crate::heap::Object::ordinary(fn_proto)));
-        let gp_v = Value::Obj(e.heap.alloc_obj(crate::heap::Object::ordinary(it_proto)));
-        if let (Value::Obj(gfp), Value::Obj(gp)) = (gfp_v, gp_v) {
-            e.set_own(gfp, "constructor", ctor_v, false);
-            e.set_own(gfp, "prototype", gp_v, false);
-            e.set_own(gp, "constructor", gfp_v, false);
+        let gfp_v = Value::Obj(
+            e.heap
+                .alloc_obj(crate::heap::Object::ordinary(fn_proto.clone())),
+        );
+        let gp_v = Value::Obj(
+            e.heap
+                .alloc_obj(crate::heap::Object::ordinary(it_proto.clone())),
+        );
+        if let (Value::Obj(gfp), Value::Obj(gp)) = (gfp_v.clone(), gp_v.clone()) {
+            e.set_own(gfp, "constructor", ctor_v.clone(), false);
+            e.set_own(gfp, "prototype", gp_v.clone(), false);
+            e.set_own(gp, "constructor", gfp_v.clone(), false);
             let t = e.str_val(tag);
             e.set_own(gp, crate::interp::SYM_TO_STRING_TAG, t, false);
             let ft = e.str_val(format!("{tag}Function"));
             e.set_own(gfp, crate::interp::SYM_TO_STRING_TAG, ft, false);
             if let Value::Obj(cid) = ctor_v {
-                e.set_own(cid, "prototype", gfp_v, false);
+                e.set_own(cid, "prototype", gfp_v.clone(), false);
             }
             if tag == "Generator" {
                 e.gen_fn_proto = gfp_v;
@@ -389,7 +487,7 @@ pub(crate) fn install(e: &mut Engine) {
     //   — le nôtre reste posé par `make_function` (déviation
     //   inerte, même classe que les flèches).
     let afp = e.heap.alloc_obj(crate::heap::Object::ordinary(fn_proto));
-    e.set_own(afp, "constructor", e.async_ctor, false);
+    e.set_own(afp, "constructor", e.async_ctor.clone(), false);
     let at = e.str_val("AsyncFunction");
     e.set_own(afp, crate::interp::SYM_TO_STRING_TAG, at, false);
     if let Value::Obj(cid) = e.async_ctor {
@@ -868,7 +966,7 @@ pub(crate) fn install(e: &mut Engine) {
     if let Value::Obj(rid) = regexp {
         e.add_method(rid, "escape", regexp_escape);
     }
-    e.re_ctor = regexp;
+    e.re_ctor = regexp.clone();
     e.set_own(g, "RegExp", regexp, false);
 
     // Promise + queueMicrotask (JS-7c).
@@ -1037,13 +1135,13 @@ fn this_array_like(e: &mut Engine, this: Value) -> JsResult<Vec<Value>> {
             Err(e.type_error("array method called on null/undefined"))
         }
         _ => {
-            let len = match e.get_prop_value(this, "length")? {
+            let len = match e.get_prop_value(this.clone(), "length")? {
                 Value::Num(n) => (n.max(0.0) as usize).min(1_000_000),
                 _ => 0,
             };
             let mut out = Vec::with_capacity(len.min(65_536));
             for i in 0..len {
-                out.push(e.get_prop_value(this, &i.to_string())?);
+                out.push(e.get_prop_value(this.clone(), &i.to_string())?);
                 if i % 8192 == 0 {
                     e.tick()?;
                 }
@@ -1111,7 +1209,7 @@ fn put_elems(e: &mut Engine, id: ObjId, elems: Vec<Value>) -> JsResult<()> {
         };
         for (i, v) in elems.iter().enumerate() {
             e.tick()?;
-            let _ = e.set_prop(id, &i.to_string(), *v);
+            let _ = e.set_prop(id, &i.to_string(), v.clone());
         }
         for i in elems.len()..old_len {
             e.tick()?;
@@ -1157,7 +1255,7 @@ fn iter_cb(
 ) -> JsResult<(ObjId, Value, Value)> {
     let id = this_array(e, this)?;
     let cb = arg(args, 0);
-    if !e.is_callable(cb) {
+    if !e.is_callable(cb.clone()) {
         return Err(e.type_error(format!("{name} needs a function")));
     }
     Ok((id, cb, arg(args, 1)))
@@ -1201,7 +1299,7 @@ fn iter_get(e: &mut Engine, id: ObjId, k: usize) -> JsResult<Option<Value>> {
             if let ObjKind::Array(v) = &o.kind {
                 if let Some(v) = v.get(k) {
                     if !v.is_hole() {
-                        return Ok(Some(*v));
+                        return Ok(Some(v.clone()));
                     }
                 }
             }
@@ -1212,7 +1310,7 @@ fn iter_get(e: &mut Engine, id: ObjId, k: usize) -> JsResult<Option<Value>> {
     // `this` = l'objet itéré.
     match e.find_prop(id, &k.to_string()) {
         Some(Prop::Data { value, .. }) => Ok(Some(value)),
-        Some(Prop::Acc { get, .. }) => Ok(Some(if e.is_callable(get) {
+        Some(Prop::Acc { get, .. }) => Ok(Some(if e.is_callable(get.clone()) {
             e.call_value(get, Value::Obj(id), &[])?
         } else {
             Value::Undefined
@@ -1279,9 +1377,10 @@ fn chars_of(s: &str) -> Vec<char> {
     s.chars().collect()
 }
 
-/// Offset **octet** du `u16_i`-ème code unit UTF-16 — import
-/// de l'implémentation canonique du heap (§B-59).
-use crate::heap::Heap;
+/// Offset **octet** du `u16_i`-ème code unit UTF-16 —
+/// implémentation canonique : `JsStr::u16_pos_to_byte`
+/// (§B-59, JS-C420).
+use crate::value::JsStr;
 
 fn now_millis() -> f64 {
     SystemTime::now()

@@ -122,7 +122,7 @@ pub(crate) fn date_parse(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<
 pub(crate) fn date_utc(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
     let mut n = |i: usize| -> JsResult<i64> {
         Ok(match args.get(i) {
-            Some(v) => e.to_number(*v)? as i64,
+            Some(v) => e.to_number(v.clone())? as i64,
             None => 0,
         })
     };
@@ -142,7 +142,7 @@ pub(crate) fn date_ctor(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<V
         0 => now_millis(),
         1 => match arg(args, 0) {
             Value::Str(id) => {
-                let s = e.heap.string(id).unwrap_or_default();
+                let s = id.to_string();
                 parse_js_date(&s).unwrap_or(f64::NAN)
             }
             v => e.to_number(v)?,
@@ -150,7 +150,7 @@ pub(crate) fn date_ctor(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<V
         _ => {
             let mut n = |i: usize, dflt: i64| -> JsResult<i64> {
                 Ok(match args.get(i) {
-                    Some(v) => e.to_number(*v)? as i64,
+                    Some(v) => e.to_number(v.clone())? as i64,
                     None => dflt,
                 })
             };
@@ -384,12 +384,12 @@ pub(crate) fn date_to_time_string(e: &mut Engine, this: Value, _a: &[Value]) -> 
 /// `d.toJSON()` — spec `ToPrimitive` + appel `this.toISOString()`
 /// (dispatchée : un `toISOString` réécrit par le script prime).
 pub(crate) fn date_to_json(e: &mut Engine, this: Value, _a: &[Value]) -> JsResult<Value> {
-    let ms = date_ms(e, this)?;
+    let ms = date_ms(e, this.clone())?;
     if !ms.is_finite() {
         return Ok(Value::Null);
     }
-    let f = e.get_prop_value(this, "toISOString")?;
-    if !e.is_callable(f) {
+    let f = e.get_prop_value(this.clone(), "toISOString")?;
+    if !e.is_callable(f.clone()) {
         return Err(e.type_error("toJSON: toISOString is not callable"));
     }
     e.call_value(f, this, &[])

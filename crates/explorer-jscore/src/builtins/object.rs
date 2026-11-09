@@ -35,7 +35,7 @@ pub(crate) fn object_to_string(e: &mut Engine, this: Value, _a: &[Value]) -> JsR
     // les instances lisent leur tag propre ou hérité).
     if let Value::Obj(id) = this {
         if let Some(Value::Str(sid)) = e.get_prop(id, crate::interp::SYM_TO_STRING_TAG) {
-            let s = e.heap.string(sid).unwrap_or_default();
+            let s = sid.to_string();
             return Ok(e.str_val(format!("[object {s}]")));
         }
     }
@@ -73,9 +73,7 @@ pub(crate) fn has_own_property(e: &mut Engine, this: Value, args: &[Value]) -> J
         // Primitif string : `length` et les indices sont des
         // props propres du wrapper `ToObject` (spec).
         Value::Str(sid) => {
-            key == "length"
-                || crate::interp::array_index(&key)
-                    .is_some_and(|i| i < e.heap.string(sid).map_or(0, |s| u16_len(&s)))
+            key == "length" || crate::interp::array_index(&key).is_some_and(|i| i < sid.u16_len())
         }
         _ => false,
     };
@@ -96,13 +94,13 @@ pub(crate) fn object_is_prototype_of(
     let (Value::Obj(pid), Value::Obj(vid)) = (this, arg(args, 0)) else {
         return Ok(Value::Bool(false));
     };
-    let mut cur = e.heap.obj(vid).map(|o| o.proto);
+    let mut cur = e.heap.obj(vid).map(|o| o.proto.clone());
     let mut depth = 0;
     while let Some(Value::Obj(c)) = cur {
         if c == pid {
             return Ok(Value::Bool(true));
         }
-        cur = e.heap.obj(c).map(|o| o.proto);
+        cur = e.heap.obj(c).map(|o| o.proto.clone());
         depth += 1;
         if depth > 100 {
             break;
@@ -115,7 +113,7 @@ pub(crate) fn object_keys(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult
     // `Object.keys('ab')` → `['0','1']` — indices énumérables de
     // la string-box (spec `ToObject`).
     if let Value::Str(sid) = arg(args, 0) {
-        let n = e.heap.string(sid).map_or(0, |s| u16_len(&s));
+        let n = sid.u16_len();
         let vals: Vec<Value> = (0..n).map(|i| e.str_val(i.to_string())).collect();
         return Ok(arr_of(e, vals));
     }
@@ -144,7 +142,7 @@ pub(crate) fn object_get_proto(e: &mut Engine, _t: Value, args: &[Value]) -> JsR
         Value::Obj(mut id) => {
             let mut depth = 0;
             while let Some((tid, target, handler)) = e.proxy_th(id)? {
-                let trap = e.proxy_trap(handler, "getPrototypeOf")?;
+                let trap = e.proxy_trap(handler.clone(), "getPrototypeOf")?;
                 if matches!(trap, Value::Obj(_)) {
                     let r = e.call_value(trap, handler, &[target])?;
                     match r {
@@ -152,8 +150,8 @@ pub(crate) fn object_get_proto(e: &mut Engine, _t: Value, args: &[Value]) -> JsR
                             // Spec : cible non-extensible → le trap
                             // doit rendre le proto de la cible.
                             if !e.target_extensible(tid) {
-                                let tp = e.heap.obj(tid).map_or(Value::Null, |o| o.proto);
-                                if !e.strict_eq(r, tp) {
+                                let tp = e.heap.obj(tid).map_or(Value::Null, |o| o.proto.clone());
+                                if !e.strict_eq(&r, &tp) {
                                     return Err(e.type_error(
                                         "proxy getPrototypeOf trap must return the target's prototype",
                                     ));
@@ -171,7 +169,7 @@ pub(crate) fn object_get_proto(e: &mut Engine, _t: Value, args: &[Value]) -> JsR
                 id = tid;
                 e.deleg_hop(&mut depth)?;
             }
-            Ok(e.heap.obj(id).map_or(Value::Null, |o| o.proto))
+            Ok(e.heap.obj(id).map_or(Value::Null, |o| o.proto.clone()))
         }
         // Spec `ToObject` : `null`/`undefined` → `TypeError` ; les
         // primitives sont wrappées et remontent leur proto (github
@@ -205,17 +203,17 @@ pub(crate) fn object_set_proto(e: &mut Engine, _t: Value, args: &[Value]) -> JsR
     // récurait ici hors `call_depth` (J2, classe alpine).
     let mut depth = 0;
     while let Some((tid, tv, handler)) = e.proxy_th(id)? {
-        let trap = e.proxy_trap(handler, "setPrototypeOf")?;
+        let trap = e.proxy_trap(handler.clone(), "setPrototypeOf")?;
         if matches!(trap, Value::Obj(_)) {
-            let ok = e.call_value(trap, handler, &[tv, proto])?;
+            let ok = e.call_value(trap, handler, &[tv, proto.clone()])?;
             if !e.to_boolean(ok) {
                 return Err(e.type_error("proxy setPrototypeOf trap returned false"));
             }
             // Spec : cible non-extensible → le proto demandé doit
             // être identique à celui de la cible.
             if !e.target_extensible(tid) {
-                let tp = e.heap.obj(tid).map_or(Value::Null, |o| o.proto);
-                if !e.strict_eq(proto, tp) {
+                let tp = e.heap.obj(tid).map_or(Value::Null, |o| o.proto.clone());
+                if !e.strict_eq(&proto, &tp) {
                     return Err(e.type_error(
                         "proxy setPrototypeOf trap returned true without changing the prototype",
                     ));
@@ -230,12 +228,12 @@ pub(crate) fn object_set_proto(e: &mut Engine, _t: Value, args: &[Value]) -> JsR
         return Err(e.type_error("cannot set prototype of non-extensible object"));
     }
     // Cycle check : remonter la chaîne de `proto` jusqu'à `id`.
-    let mut cur = proto;
+    let mut cur = proto.clone();
     while let Value::Obj(cid) = cur {
         if cid == id {
             return Err(e.type_error("cyclic prototype value"));
         }
-        cur = e.heap.obj(cid).map_or(Value::Null, |o| o.proto);
+        cur = e.heap.obj(cid).map_or(Value::Null, |o| o.proto.clone());
     }
     if let Some(o) = e.heap.obj_mut(id) {
         o.proto = proto;
@@ -273,20 +271,20 @@ pub(crate) fn object_assign(e: &mut Engine, _t: Value, args: &[Value]) -> JsResu
                 e.diag("Object.assign dropped proto getters");
             }
             for k in e.own_enum_keys_trapped(*sid)? {
-                let v = match e.get_prop_value(*src, &k) {
+                let v = match e.get_prop_value(src.clone(), &k) {
                     Ok(v) => v,
                     Err(t) => {
                         crate::defprop_note(format!(
                             "assign #{sid} read `{k}` → {}",
-                            defprop_err_summary(e, t.0)
+                            defprop_err_summary(e, t.0.clone())
                         ));
                         return Err(t);
                     }
                 };
-                if let Err(t) = e.set_prop_value(target, &k, v) {
+                if let Err(t) = e.set_prop_value(target.clone(), &k, v) {
                     crate::defprop_note(format!(
                         "assign tgt={target:?} set `{k}` → {}",
-                        defprop_err_summary(e, t.0)
+                        defprop_err_summary(e, t.0.clone())
                     ));
                     return Err(t);
                 }
@@ -382,7 +380,7 @@ fn proto_ctor_name(e: &Engine, pid: ObjId) -> Option<String> {
     };
     let c = e.heap.obj(cid)?;
     let nv = c.find("name").and_then(|pr| pr.data_value())?;
-    e.heap_string_of(nv)
+    Engine::heap_string_of(&nv)
 }
 
 /// Résumé d'un `Thrown` — `stack`/`name`/`message` propres (lectures
@@ -390,7 +388,7 @@ fn proto_ctor_name(e: &Engine, pid: ObjId) -> Option<String> {
 fn defprop_err_summary(e: &Engine, v: Value) -> String {
     let Value::Obj(id) = v else {
         return match v {
-            Value::Str(sid) => e.heap.string(sid).unwrap_or_default(),
+            Value::Str(sid) => sid.to_string(),
             _ => format!("{v:?}"),
         };
     };
@@ -400,7 +398,8 @@ fn defprop_err_summary(e: &Engine, v: Value) -> String {
     let own = |k: &str| {
         o.find(k)
             .and_then(|p| p.data_value())
-            .and_then(|v| e.heap_string_of(v))
+            .as_ref()
+            .and_then(Engine::heap_string_of)
     };
     let mut out = own("stack")
         .filter(|s| !s.is_empty())
@@ -450,7 +449,7 @@ fn defprop_err_desc(e: &Engine, id: ObjId, key: &str, t: &crate::heap::Thrown) -
     );
     format!(
         "defprop {target} `{key}` cur={cur} → {}",
-        defprop_err_summary(e, t.0)
+        defprop_err_summary(e, t.0.clone())
     )
 }
 
@@ -459,7 +458,7 @@ fn define_one_prop_impl(e: &mut Engine, id: ObjId, key: &str, desc_id: ObjId) ->
     let mut id = id;
     let mut depth = 0;
     while let Some((tid, target, handler)) = e.proxy_th(id)? {
-        let trap = e.proxy_trap(handler, "defineProperty")?;
+        let trap = e.proxy_trap(handler.clone(), "defineProperty")?;
         if matches!(trap, Value::Obj(_)) {
             let kv = e.str_val(key);
             let r = e.call_value(trap, handler, &[target, kv, Value::Obj(desc_id)])?;
@@ -499,32 +498,35 @@ fn define_one_prop_impl(e: &mut Engine, id: ObjId, key: &str, desc_id: ObjId) ->
     // Flags absents du descripteur → valeur de la prop existante,
     // `false` sinon (spec `[[DefineOwnProperty]]`).
     let enumerable = if has_enumerable {
-        let v = e.get_prop_value(desc, "enumerable")?;
+        let v = e.get_prop_value(desc.clone(), "enumerable")?;
         e.to_boolean(v)
     } else {
-        cur.is_some_and(|p| p.enumerable())
+        cur.as_ref()
+            .is_some_and(super::super::heap::Prop::enumerable)
     };
     let configurable = if has_configurable {
-        let v = e.get_prop_value(desc, "configurable")?;
+        let v = e.get_prop_value(desc.clone(), "configurable")?;
         e.to_boolean(v)
     } else {
-        cur.is_some_and(|p| p.configurable())
+        cur.as_ref()
+            .is_some_and(super::super::heap::Prop::configurable)
     };
     let writable = if has_writable {
-        let v = e.get_prop_value(desc, "writable")?;
+        let v = e.get_prop_value(desc.clone(), "writable")?;
         e.to_boolean(v)
     } else {
-        cur.is_some_and(|p| matches!(p, crate::heap::Prop::Data { attrs, .. } if attrs.writable))
+        cur.as_ref()
+            .is_some_and(|p| matches!(p, crate::heap::Prop::Data { attrs, .. } if attrs.writable))
     };
-    let get = e.get_prop_value(desc, "get")?;
-    let set = e.get_prop_value(desc, "set")?;
+    let get = e.get_prop_value(desc.clone(), "get")?;
+    let set = e.get_prop_value(desc.clone(), "set")?;
     let has_acc = has_get || has_set;
     let has_data = has_value || has_writable;
     if has_acc && has_data {
         return Err(e.type_error("descriptor cannot be both data and accessor"));
     }
-    if has_acc && !matches!(get, Value::Undefined) && !e.is_callable(get)
-        || has_acc && !matches!(set, Value::Undefined) && !e.is_callable(set)
+    if has_acc && !matches!(get, Value::Undefined) && !e.is_callable(get.clone())
+        || has_acc && !matches!(set, Value::Undefined) && !e.is_callable(set.clone())
     {
         return Err(e.type_error("accessor descriptor `get`/`set` must be callable"));
     }
@@ -534,15 +536,18 @@ fn define_one_prop_impl(e: &mut Engine, id: ObjId, key: &str, desc_id: ObjId) ->
         configurable,
     };
     let v = if has_value {
-        e.get_prop_value(desc, "value")?
+        e.get_prop_value(desc.clone(), "value")?
     } else {
-        cur.and_then(|p| p.data_value()).unwrap_or(Value::Undefined)
+        cur.clone()
+            .and_then(|p| p.data_value())
+            .unwrap_or(Value::Undefined)
     };
     // Côté absent : getter/setter existant conservé.
-    let (g, s) = match cur {
-        Some(crate::heap::Prop::Acc { get: g, set: s, .. }) => {
-            (if has_get { get } else { g }, if has_set { set } else { s })
-        }
+    let (g, s) = match &cur {
+        Some(crate::heap::Prop::Acc { get: g, set: s, .. }) => (
+            if has_get { get } else { g.clone() },
+            if has_set { set } else { s.clone() },
+        ),
         _ => (get, set),
     };
     // Indice de tableau : l'élément vit dans `ObjKind::Array`,
@@ -616,7 +621,7 @@ fn define_one_prop_impl(e: &mut Engine, id: ObjId, key: &str, desc_id: ObjId) ->
                 .obj(id)
                 .map(|o| {
                     if let ObjKind::Array(elems) = &o.kind {
-                        (o.elem_integrity, elems.len(), elems.get(i).copied())
+                        (o.elem_integrity, elems.len(), elems.get(i).cloned())
                     } else {
                         (0, 0, None)
                     }
@@ -635,7 +640,7 @@ fn define_one_prop_impl(e: &mut Engine, id: ObjId, key: &str, desc_id: ObjId) ->
             if integ & 2 != 0 && has_writable && writable {
                 return Err(e.type_error("cannot reconfigure frozen array element"));
             }
-            if integ & 2 != 0 && has_value && !e.strict_eq(v, cur_v.unwrap_or(Value::Undefined)) {
+            if integ & 2 != 0 && has_value && !e.strict_eq(&v, &cur_v.unwrap_or(Value::Undefined)) {
                 return Err(e.type_error("cannot redefine frozen array element"));
             }
             // Hors-bornes → ajout interdit (cible non-extensible
@@ -695,12 +700,12 @@ pub(crate) fn define_props_from_map(e: &mut Engine, id: ObjId, map: Value) -> Js
         return Err(e.type_error("property map must be an object"));
     };
     for k in e.own_enum_keys_trapped(mid)? {
-        let dv = match e.get_prop_value(map, &k) {
+        let dv = match e.get_prop_value(map.clone(), &k) {
             Ok(dv) => dv,
             Err(t) => {
                 crate::defprop_note(format!(
                     "defprops #{id} `{k}` read-desc → {}",
-                    defprop_err_summary(e, t.0)
+                    defprop_err_summary(e, t.0.clone())
                 ));
                 return Err(t);
             }
@@ -727,7 +732,7 @@ pub(crate) fn object_get_own_property_descriptor(
     // Descripteurs propres de la string primitive (spec
     // `ToObject` + `StringGetOwnProperty`).
     if let Value::Str(sid) = target {
-        let n = e.heap.string(sid).map_or(0, |s| u16_len(&s));
+        let n = sid.u16_len();
         let d = e.new_object();
         if key == "length" {
             e.set_own(d, "value", Value::Num(n as f64), true);
@@ -738,11 +743,7 @@ pub(crate) fn object_get_own_property_descriptor(
         }
         if let Some(i) = crate::interp::array_index(&key) {
             if i < n {
-                let c = e
-                    .heap
-                    .string(sid)
-                    .and_then(|s| u16_at(&s, i))
-                    .unwrap_or_default();
+                let c = u16_at(&sid, i).unwrap_or_default();
                 let cv = e.str_val(c);
                 e.set_own(d, "value", cv, true);
                 e.set_own(d, "writable", Value::Bool(false), true);
@@ -874,13 +875,13 @@ pub(crate) fn object_is_frozen(e: &mut Engine, _t: Value, args: &[Value]) -> JsR
 /// `Object.is` — `SameValue` (`===` plus NaN and ±0 distinction).
 pub(crate) fn object_is(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
     let (a, b) = (arg(args, 0), arg(args, 1));
-    if let (Value::Num(x), Value::Num(y)) = (a, b) {
+    if let (Value::Num(x), Value::Num(y)) = (&a, &b) {
         if x.is_nan() && y.is_nan() {
             return Ok(Value::Bool(true));
         }
-        if x == 0.0 && y == 0.0 {
+        if *x == 0.0 && *y == 0.0 {
             return Ok(Value::Bool(x.is_sign_negative() == y.is_sign_negative()));
         }
     }
-    Ok(Value::Bool(e.strict_eq(a, b)))
+    Ok(Value::Bool(e.strict_eq(&a, &b)))
 }

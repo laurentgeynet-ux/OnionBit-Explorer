@@ -89,7 +89,7 @@ pub(crate) fn clone_deep(
         Some(ObjKind::Iter { .. }) => CloneShape::Err("iterator"),
         Some(ObjKind::FetchBody { .. }) => CloneShape::Err("Response"),
         Some(ObjKind::Blob { data, ty }) => {
-            let proto = e.heap.obj(id).map_or(Value::Null, |o| o.proto);
+            let proto = e.heap.obj(id).map_or(Value::Null, |o| o.proto.clone());
             CloneShape::Blb(data.clone(), ty.clone(), proto)
         }
         _ => CloneShape::Ordinary,
@@ -234,7 +234,7 @@ pub(crate) fn clone_deep(
         }
         CloneShape::Ordinary => {
             let (proto, props) = match e.heap.obj(id) {
-                Some(o) => (o.proto, o.props.clone()),
+                Some(o) => (o.proto.clone(), o.props.clone()),
                 _ => (Value::Obj(e.protos.object), Vec::new()),
             };
             let cid = e.heap.alloc_obj(Object::ordinary(proto));
@@ -260,18 +260,22 @@ pub(crate) fn clone_deep(
 pub(crate) fn object_group_by(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
     let items = e.iter_values(arg(args, 0))?;
     let f = arg(args, 1);
-    if !e.is_callable(f) {
+    if !e.is_callable(f.clone()) {
         return Err(e.type_error("groupBy callback is not callable"));
     }
     let out = e.heap.alloc_obj(Object::ordinary(Value::Null));
     for (i, v) in items.into_iter().enumerate() {
-        let k = e.call_value(f, Value::Undefined, &[v, Value::Num(i as f64)])?;
+        let k = e.call_value(
+            f.clone(),
+            Value::Undefined,
+            &[v.clone(), Value::Num(i as f64)],
+        )?;
         let key = e.to_js_string(k)?;
         let arr = if let Some(v @ Value::Obj(_)) = e.get_prop(out, &key) {
             v
         } else {
             let a = e.new_array(Vec::new());
-            e.set_own(out, &key, a, true);
+            e.set_own(out, &key, a.clone(), true);
             a
         };
         if let Value::Obj(aid) = arr {
@@ -292,20 +296,20 @@ pub(crate) fn array_from_async(e: &mut Engine, _t: Value, args: &[Value]) -> JsR
     let src = arg(args, 0);
     let f = arg(args, 1);
     let has_map = !matches!(f, Value::Undefined);
-    if has_map && !e.is_callable(f) {
+    if has_map && !e.is_callable(f.clone()) {
         return Err(e.type_error("fromAsync mapfn is not callable"));
     }
     let t = arg(args, 2);
     // Comme toute fonction async, `fromAsync` ne jette jamais
     // synchrone : les erreurs (itération, mapfn, rejet d'élément)
     // rejettent la promesse retournée.
-    let mut collect = || -> JsResult<Vec<Value>> {
+    let collect = || -> JsResult<Vec<Value>> {
         let vals = crate::typed_array::src_vals(e, src)?;
         let mut out = Vec::with_capacity(vals.len());
         for (i, v) in vals.iter().enumerate() {
-            let mut x = await_settled(e, *v)?;
+            let mut x = await_settled(e, v.clone())?;
             if has_map {
-                x = e.call_value(f, t, &[x, Value::Num(i as f64)])?;
+                x = e.call_value(f.clone(), t.clone(), &[x, Value::Num(i as f64)])?;
                 x = await_settled(e, x)?;
             }
             out.push(x);
@@ -375,7 +379,7 @@ pub(crate) fn weakref_deref(e: &mut Engine, this: Value, _a: &[Value]) -> JsResu
 /// requis (spec `TypeError` sinon).
 pub(crate) fn finreg_ctor(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
     let cb = arg(args, 0);
-    if !e.is_callable(cb) {
+    if !e.is_callable(cb.clone()) {
         return Err(e.type_error("FinalizationRegistry callback must be callable"));
     }
     let proto = match e.get_prop(e.global, "FinalizationRegistry") {
@@ -415,7 +419,7 @@ pub(crate) fn finreg_register(e: &mut Engine, this: Value, args: &[Value]) -> Js
     // — le jeton ne peut pas être la **cible** ; la valeur
     // tenue peut l'être (`fr.register(t, t, other)` est légal —
     // webpack/zone le font, §B-14 kickstarter vol 527).
-    if e.strict_eq(token, Value::Obj(tid)) {
+    if e.strict_eq(&token, &Value::Obj(tid)) {
         return Err(
             e.type_error("FinalizationRegistry unregisterToken must not be the same as target")
         );
@@ -449,7 +453,7 @@ pub(crate) fn finreg_unregister(e: &mut Engine, this: Value, args: &[Value]) -> 
     let before = entries.len();
     let mut keep = Vec::with_capacity(before);
     for en in entries {
-        if !e.strict_eq(en.token, token) {
+        if !e.strict_eq(&en.token, &token) {
             keep.push(en);
         }
     }

@@ -4,7 +4,7 @@
 > **Environnement d'exécution verrouillé (`AGENTS.md` §10.3)**
 > - **Worktree** : `C:\OninionBit-Explorer-YoutubeFix`
 > - **Branche** : `nav/youtube-fix` (basée sur `main` @ `b2340042`)
-> - **Isolation Cargo** : `$env:CARGO_TARGET_DIR = "D:/cargo-target/OninionBit-Explorer-YoutubeFix"`
+> - **Isolation Cargo** : `$env:CARGO_TARGET_DIR = "C:/cargo-target/OninionBit-Explorer-YoutubeFix"`
 > - **Discipline de livraison (`AGENTS.md` §4 & §5)** : **1 étape = 1 commit atomique** incluant le code, les tests de non-régression (rouges avant, verts après), l'entrée dans [`CHANGELOG.md`](file:///C:/OninionBit-Explorer-YoutubeFix/CHANGELOG.md) et la case cochée dans [`docs/roadmap-equipe-navigateur.md`](file:///C:/OninionBit-Explorer-YoutubeFix/docs/roadmap-equipe-navigateur.md).
 
 ---
@@ -95,7 +95,7 @@ flowchart TD
   - Adapter les assertions de type `Option<Vec<u8>>` dans [`crates/explorer-js/tests/adapter.rs`](file:///C:/OninionBit-Explorer-YoutubeFix/crates/explorer-js/tests/adapter.rs) et [`crates/explorer-core/src/session/tests.rs`](file:///C:/OninionBit-Explorer-YoutubeFix/crates/explorer-core/src/session/tests.rs).
 - **Commandes de validation** :
   ```powershell
-  $env:CARGO_TARGET_DIR = "D:/cargo-target/OninionBit-Explorer-YoutubeFix"
+  $env:CARGO_TARGET_DIR = "C:/cargo-target/OninionBit-Explorer-YoutubeFix"
   cargo test -p explorer-jscore --test xhr
   cargo test -p explorer-js --test adapter
   cargo test -p explorer-core
@@ -116,7 +116,7 @@ flowchart TD
     - `c339_video_playback_quality_unclaimed_returns_zero_object` : vérifie que `document.createElement('video').getVideoPlaybackQuality()` (hors de tout `set_media_claim`) renvoie un objet non-`undefined` avec `droppedVideoFrames === 0`, `totalVideoFrames === 0`, `corruptedVideoFrames === 0`.
 - **Commandes de validation** :
   ```powershell
-  $env:CARGO_TARGET_DIR = "D:/cargo-target/OninionBit-Explorer-YoutubeFix"
+  $env:CARGO_TARGET_DIR = "C:/cargo-target/OninionBit-Explorer-YoutubeFix"
   cargo test -p explorer-jscore --test media_events
   cargo clippy -p explorer-jscore --all-targets -- -D warnings
   ```
@@ -140,7 +140,7 @@ flowchart TD
     - `node_prototype_exposes_traversal_getters` : vérifie que `Object.getOwnPropertyDescriptor(Node.prototype, 'firstChild').get.call(div)` fonctionne comme dans ShadyDOM.
 - **Commandes de validation** :
   ```powershell
-  $env:CARGO_TARGET_DIR = "D:/cargo-target/OninionBit-Explorer-YoutubeFix"
+  $env:CARGO_TARGET_DIR = "C:/cargo-target/OninionBit-Explorer-YoutubeFix"
   cargo test -p explorer-jscore --test c340_treewalker_shadydom
   cargo test -p explorer-jscore --test dom
   cargo clippy -p explorer-jscore --all-targets -- -D warnings
@@ -163,7 +163,7 @@ flowchart TD
     - `unshadowed_node_append_child_still_calls_native` : vérifie que `div.appendChild(span)` et `Node.prototype.appendChild.call(div, span)` continuent d'appeler l'implémentation DOM native.
 - **Commandes de validation** :
   ```powershell
-  $env:CARGO_TARGET_DIR = "D:/cargo-target/OninionBit-Explorer-YoutubeFix"
+  $env:CARGO_TARGET_DIR = "C:/cargo-target/OninionBit-Explorer-YoutubeFix"
   cargo test -p explorer-jscore --test c341_shadow_proto_methods
   cargo test -p explorer-jscore --test dom
   cargo clippy -p explorer-jscore --all-targets -- -D warnings
@@ -191,7 +191,7 @@ flowchart TD
     - `custom_element_and_shadow_root_prototype_accessors_intercept_get_and_set` : définit un getter/setter sur `ShadowRoot.prototype` et sur une classe Custom Element (`title`, `data`, `innerHTML`), vérifie que `el.title = 'x'` et `el.data = {a:1}` invoquent les setters/getters du prototype.
 - **Commandes de validation** :
   ```powershell
-  $env:CARGO_TARGET_DIR = "D:/cargo-target/OninionBit-Explorer-YoutubeFix"
+  $env:CARGO_TARGET_DIR = "C:/cargo-target/OninionBit-Explorer-YoutubeFix"
   cargo test -p explorer-jscore --test c342_node_proto_accessors
   cargo test -p explorer-jscore --test c313_polymer_proto
   cargo test -p explorer-jscore --test dom
@@ -213,7 +213,7 @@ flowchart TD
     - `resize_observer_fires_when_geometry_map_changes_size` : observe un élément `div` (notification initiale `0x0`), appelle `set_geometry` avec `client_width: 1200, client_height: 800`, draine les microtasks/observers → vérifie que le callback `ResizeObserver` est rappelé avec `contentRect.width === 1200` et ne re-tire pas au drain suivant si la géométrie est inchangée.
 - **Commandes de validation** :
   ```powershell
-  $env:CARGO_TARGET_DIR = "D:/cargo-target/OninionBit-Explorer-YoutubeFix"
+  $env:CARGO_TARGET_DIR = "C:/cargo-target/OninionBit-Explorer-YoutubeFix"
   cargo test -p explorer-jscore --test c343_resize_observer_geometry
   cargo clippy -p explorer-jscore --all-targets -- -D warnings
   ```
@@ -232,7 +232,7 @@ flowchart TD
     - `throwing_custom_element_reaction_does_not_drop_sibling_reactions` : insère un conteneur avec `<bad-el>` (dont `connectedCallback` throw) suivi de `<good-el>` (dont `connectedCallback` pose `this.connected = true`) ; vérifie que `<good-el>` reçoit bien son `connectedCallback` malgré l'exception de `<bad-el>`.
 - **Commandes de validation** :
   ```powershell
-  $env:CARGO_TARGET_DIR = "D:/cargo-target/OninionBit-Explorer-YoutubeFix"
+  $env:CARGO_TARGET_DIR = "C:/cargo-target/OninionBit-Explorer-YoutubeFix"
   cargo test -p explorer-jscore --test c344_ce_reactions_resilience
   cargo clippy -p explorer-jscore --all-targets -- -D warnings
   ```
@@ -253,7 +253,7 @@ flowchart TD
     - `etape206_drain_anim_births_does_not_reenter_poll_net` : vérifie que `drain_anim_births` dispatche `animationstart`/`transitionend` et draine les `NetRequest` sortants sans déclencher la livraison synchrone d'un script dynamique en attente dans `net_rx`.
 - **Commandes de validation** :
   ```powershell
-  $env:CARGO_TARGET_DIR = "D:/cargo-target/OninionBit-Explorer-YoutubeFix"
+  $env:CARGO_TARGET_DIR = "C:/cargo-target/OninionBit-Explorer-YoutubeFix"
   cargo test -p explorer-core
   cargo clippy -p explorer-core --all-targets -- -D warnings
   ```
@@ -272,7 +272,7 @@ flowchart TD
     - `etape207_iframe_external_scripts_execute_in_frame_ctx` : vérifie qu'une `<iframe src="https://embed.example/player.html">` contenant `<script src="https://embed.example/app.js">` télécharge et exécute `app.js` dans le `FrameCtxId` de l'iframe et synchronise ses mutations DOM dans l'arbre du cadre.
 - **Commandes de validation** :
   ```powershell
-  $env:CARGO_TARGET_DIR = "D:/cargo-target/OninionBit-Explorer-YoutubeFix"
+  $env:CARGO_TARGET_DIR = "C:/cargo-target/OninionBit-Explorer-YoutubeFix"
   cargo test -p explorer-core
   cargo clippy -p explorer-core --all-targets -- -D warnings
   ```
@@ -334,7 +334,7 @@ flowchart TD
 
 1. **Build release frais (`AGENTS.md` §8 — « Verdict terrain = binaire frais »)** :
    ```powershell
-   $env:CARGO_TARGET_DIR = "D:/cargo-target/OninionBit-Explorer-YoutubeFix"
+   $env:CARGO_TARGET_DIR = "C:/cargo-target/OninionBit-Explorer-YoutubeFix"
    cargo build --release --bin explorer-daemon
    ```
 2. **Vol de vérification instrumenté sur YouTube** (avec `spawn_daemon.ps1` + `vol_joblimit.ps1` + `vol_memwatch.ps1` conformément à `docs/vol-agent.md` **et `docs/vol-youtube.md`** — protocole dédié : artefacts → `C:\OnionBit-vol\youtube\`) :
@@ -350,7 +350,7 @@ flowchart TD
      - Vérifier que l'iframe charge et exécute ses scripts externes avec `Referer` valide (pas d'`Erreur 153`).
 3. **Gate complet avant fusion sur `main` (`AGENTS.md` §3 & §10.3)** :
    ```powershell
-   $env:CARGO_TARGET_DIR = "D:/cargo-target/OninionBit-Explorer-YoutubeFix"
+   $env:CARGO_TARGET_DIR = "C:/cargo-target/OninionBit-Explorer-YoutubeFix"
    cargo fmt --all -- --check
    cargo clippy --workspace --all-targets -- -D warnings
    cargo test --workspace

@@ -39,7 +39,19 @@ fn dead_cell_hard_cap_kills_eval() {
         }
         Ok(_) => panic!("la bombe aurait dû être tuée par le cap dur"),
     }
-    // Moteur vivant post-kill — la session dégrade, ne meurt pas.
+    // JS-C420 : `a` (≈1 M `JsStr` `y` vivantes) et `s` retiennent
+    // leur mémoire — le vivant reste **réellement** au-dessus de
+    // la borne (avant, les cellules mortes balayées redescendaient
+    // `bytes` sous `lim`) → le verrou J4 persiste : le contexte
+    // est déclaré mort tant que le vivant ne repasse pas sous.
+    let post = format!("{}", e.eval("1+1").unwrap_err());
+    assert!(
+        post.contains("heap memory limit exceeded"),
+        "verrou J4 attendu, obtenu : {post}"
+    );
+    // Verrou réversible (JS-C251) — borne levée, le moteur revit :
+    // la session dégrade, ne meurt pas.
+    e.set_mem_limit(0);
     assert_eq!(e.eval("1+1").ok().map(|v| e.describe(v)), Some("2".into()));
 }
 

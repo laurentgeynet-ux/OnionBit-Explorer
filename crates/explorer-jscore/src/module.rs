@@ -176,9 +176,7 @@ impl Engine {
             .unwrap_or_default();
         for (key, val) in pairs {
             let Value::Str(id) = val else { continue };
-            let Some(target) = self.heap.string(id) else {
-                continue;
-            };
+            let target = id.to_string();
             if self.import_map.iter().all(|(k, _)| *k != key) {
                 self.import_map.push((key, target));
             }
@@ -199,8 +197,37 @@ impl Engine {
     /// par `ModuleLoader::resolve` (ou le spécificateur
     /// import-map à défaut) — identité du module pour
     /// `import.meta.url` et les référents aval.
+    /// Base de résolution d'un spécificateur de module : le
+    /// `referrer` s'il est **hiérarchique** (`url_has_origin` —
+    /// http(s)/file/…), sinon `hooks.page_url` si lui-même
+    /// hiérarchique, sinon le brut inchangé. Un referrer à
+    /// schéma opaque (`inline:N` — `import.meta.url` d'un
+    /// module inline — `blob:`/`about:`/`data:`) est absolu
+    /// mais ne peut pas servir de base : `url_parse` y
+    /// produisait `inline:/x.js`, refusé au transport
+    /// (« schéma non supporté » — vimeo). La base correcte
+    /// est celle du document que `import.meta.url` aurait dû
+    /// porter ; pour un script classique (`referrer` vide)
+    /// c'est aussi la base spec.
+    fn effective_referrer(&self, referrer: &str) -> String {
+        let hierarchical = |s: &str| {
+            crate::builtins::url::url_parse_absolute(s).is_some_and(|p| {
+                crate::builtins::url::url_has_origin(crate::builtins::url::url_scheme(&p))
+            })
+        };
+        if hierarchical(referrer) {
+            return referrer.to_string();
+        }
+        if hierarchical(&self.hooks.page_url) {
+            return self.hooks.page_url.clone();
+        }
+        referrer.to_string()
+    }
+
     fn load_source(&mut self, spec: &str, referrer: &str) -> JsResult<(String, String)> {
         let resolved = self.resolve_bare(spec).unwrap_or_else(|| spec.to_string());
+        // JS-C414 — base effective : `inline:N`/vide → page.
+        let eff = self.effective_referrer(referrer);
         // `data:` module — spec : résolu SANS réseau ni loader
         // (google SERP : le lazy-loader Closure avalait le rejet
         // « fetch échoué » puis mourait en silence — page vide).
@@ -240,7 +267,7 @@ impl Engine {
         } else if self.module_sources.contains_key(spec) {
             Some(spec.to_string())
         } else {
-            crate::builtins::url::url_parse_absolute(referrer)
+            crate::builtins::url::url_parse_absolute(&eff)
                 .and_then(|base| crate::builtins::url::url_parse(&resolved, Some(&base)))
                 .map(|abs| crate::builtins::url::url_href(&abs))
                 .filter(|href| self.module_sources.contains_key(href))
@@ -255,12 +282,12 @@ impl Engine {
         };
         let url = loader
             .borrow_mut()
-            .resolve(&resolved, referrer)
+            .resolve(&resolved, &eff)
             .unwrap_or_else(|| resolved.clone());
         if let Some(src) = self.module_sources.get(&url) {
             return Ok((url, src.clone()));
         }
-        let r = loader.borrow_mut().load(&resolved, referrer);
+        let r = loader.borrow_mut().load(&resolved, &eff);
         match r {
             Ok(src) => Ok((url, src)),
             Err(msg) => Err(self.type_error(format!("cannot load module `{spec}`: {msg}"))),
@@ -355,18 +382,23 @@ impl Engine {
     /// d'origine si le drain n'est pas branché.
     fn defer_import(&mut self, spec: &str, referrer: &str) -> JsResult<Value> {
         let resolved = self.resolve_bare(spec).unwrap_or_else(|| spec.to_string());
+        // JS-C414 — base effective : `inline:N`/opaque → page.
+        // Sans le repli, `url_parse("./x.js", inline:1)` rendait
+        // `inline:/x.js` — `DynImportReq.url` empoisonnée, refusée
+        // au transport (« schéma non supporté : inline »).
+        let eff = self.effective_referrer(referrer);
         let url = self
             .module_loader
             .clone()
-            .and_then(|l| l.borrow_mut().resolve(&resolved, referrer))
+            .and_then(|l| l.borrow_mut().resolve(&resolved, &eff))
             .unwrap_or_else(|| resolved.clone());
         // Spec `HostResolveImportedModule` : un spécificateur
         // relatif se résout contre l'URL du **module référent**
         // (import.meta.url — mastodon : `import('./chunk-x.js')`
         // depuis /packs/js/), pas la base document qu'applique
-        // la session. Referrer non absolu (script classique)
-        // → l'URL brute part telle quelle, repli inchangé.
-        let url = crate::builtins::url::url_parse_absolute(referrer)
+        // la session — sauf si ce referrer est opaque
+        // (`effective_referrer` replie alors sur la page).
+        let url = crate::builtins::url::url_parse_absolute(&eff)
             .and_then(|b| crate::builtins::url::url_parse(&url, Some(&b)))
             .map(|p| crate::builtins::url::url_href(&p))
             .unwrap_or(url);
@@ -387,6 +419,7 @@ impl Engine {
             ctx: self.cur_ctx,
             import_specs: self.import_map.clone(),
         });
+        self.sched_tick("req.import");
         Ok(Value::Obj(pid))
     }
 
@@ -404,6 +437,11 @@ impl Engine {
         let Some(p) = self.pending_imports.remove(&seq) else {
             return;
         };
+        self.sched_tick(if src.is_ok() {
+            "dlv.import"
+        } else {
+            "err.import"
+        });
         match src {
             Ok(s) => {
                 match self
@@ -975,7 +1013,7 @@ fn ns_get(e: &mut Engine, _this: Value, args: &[Value]) -> JsResult<Value> {
         return Ok(Value::Undefined);
     };
     let Some(name) = args.get(1).and_then(|v| match v {
-        Value::Str(id) => e.heap.string(*id),
+        Value::Str(id) => Some(id.to_string()),
         _ => None,
     }) else {
         return Ok(Value::Undefined);

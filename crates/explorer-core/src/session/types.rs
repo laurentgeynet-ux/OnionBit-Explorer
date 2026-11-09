@@ -1067,6 +1067,13 @@ pub enum CoreError {
     /// attente d'un détenteur mort en vol).
     #[error("attente expirée : {0}")]
     Timeout(String),
+    /// Session saturée (Étape 209 — épisode `rss_shed` actif :
+    /// la dégradation a déjà abandonné les fetchs basse
+    /// priorité ; la requête attend un souffle plutôt qu'une
+    /// place de plus dans la file). Porte le `Retry-After`
+    /// conseillé en secondes — REST → 503 + en-tête.
+    #[error("session saturée (rss_shed) — réessayer dans {0} s")]
+    Overloaded(u32),
 }
 
 /// Configuration de session — seuils et viewport initiaux
@@ -1128,6 +1135,11 @@ pub struct SessionConfig {
     pub max_fonts: usize,
     /// Nombre max de `<script src>` fetchés par document
     /// (étape 50 — une page peut en déclarer des centaines).
+    /// Défaut 256 : twitch en déclare ~108 dont l'entrée
+    /// webpack `core-*.js` ~#119 (§B-106, vol 677 — la borne
+    /// 32 collectait 32 src, l'entrée n'était jamais fetchée
+    /// → `e.O` muet à jamais) ; `max_inflight` et les
+    /// timeouts bornent encore la rafale hostile.
     pub max_scripts: usize,
     /// Nombre max de `<iframe src>` fetchés par document
     /// (étape 128 — un sous-contexte = un document complet ;
@@ -1257,6 +1269,23 @@ pub struct SessionConfig {
     /// conservé). `Duration::ZERO` = borne désactivée.
     /// Défaut 15 s.
     pub event_tail_budget: std::time::Duration,
+    /// Seuil RSS **processus** du shed-load (Étape 209 /
+    /// §B-114-b, env `EXPLORER_RSS_SHED_MB`), en Mio — mesuré
+    /// sur `physical_mem` comme le watchdog daemon. Placé
+    /// **sous** les seuils de kill (`EXPLORER_RSS_LIMIT_MB` /
+    /// `COMMIT_LIMIT_MB`, opt-in « vols §B-59 seulement ») :
+    /// la session dégrade en gradins (files fetch basse
+    /// priorité → `status:0`, GC moteur demandé, bitmaps
+    /// décodés évincés, navigations/onglets refusés 503)
+    /// plutôt que d'attendre la mort — c'est la première
+    /// couche **dégradante et permanente**, les kills restent
+    /// le dernier recours. `0` = shed désarmé. Défaut 4 096.
+    pub rss_shed_mb: u32,
+    /// `Retry-After` conseillé (secondes) porté par
+    /// [`CoreError::Overloaded`] pendant un épisode shed —
+    /// indice client : le shed se lève sur la marge RSS
+    /// réelle, pas sur cette durée.
+    pub shed_retry_after_s: u32,
 }
 
 impl Default for SessionConfig {
@@ -1277,7 +1306,7 @@ impl Default for SessionConfig {
             max_sheets: 32,
             max_imports: 16,
             max_fonts: 16,
-            max_scripts: 32,
+            max_scripts: 256,
             max_frames: 8,
             // Graphe statique réel : mastodon `application-*.js`
             // en compte >64 (axios = n°65+ → « module non chargé »,
@@ -1300,6 +1329,12 @@ impl Default for SessionConfig {
             js_stall_cooldown: std::time::Duration::from_secs(10),
             poll_net_budget: std::time::Duration::from_secs(2),
             event_tail_budget: std::time::Duration::from_secs(15),
+            // Sous le watchdog job (~5 Gio mesuré vol 697) et
+            // les kills opt-in : le shed dégrade avant toute
+            // mort — seuil par défaut armé (le trou du vol 697
+            // était précisément « rien d'armé »).
+            rss_shed_mb: 4_096,
+            shed_retry_after_s: 5,
         }
     }
 }
