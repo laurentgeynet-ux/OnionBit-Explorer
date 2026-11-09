@@ -3422,7 +3422,21 @@ déblocage/coût décroissant.
 > CHANGELOG), **pas séquentiels**. Ordre de travail :
 > R-197 → R-189 → R-192 → R-193 → R-191 → R-195 →
 > R-194 → R-196 → R-198 → R-190.
-- [ ] **R-197. `font_face` : woff/woff2** : raster fontes =
+- [x] **R-197. `font_face` : woff/woff2** : les octets sont
+  normalisés en sfnt à l'entrée des sources —
+  `decode_font_bytes` (`explorer-render` `fonts.rs`) lit
+  la signature : `wOFF` → `wuff::decompress_woff1` (tables
+  zlib), `wOF2` → `wuff::decompress_woff2` (brotli +
+  reconstruction des tables transformées `glyf`/`loca`/
+  `hmtx`) — `wuff` 0.2 pur Rust (bindings C++ exclus par
+  la règle de périmètre). Câblé à `WebFontSource::register`
+  (`@font-face` — Google Fonts/CDN) et `DirFontSource::new`
+  (extensions `.woff`/`.woff2`) ; enveloppe hostile →
+  refus sous `catch_unwind`, jamais de panic. Verrous
+  `woff1_decode_reconstruit_le_sfnt` (packer WOFF1 de
+  test), `register_accepte_face_woff1`,
+  `woff_hostile_refuse_sans_panic`. *Ancienne entrée :
+  raster fontes =
   truetype seul ; woff (sfnt compressé) absent →
   `@font-face` woff2 des CDN non décodés (Google Fonts ne
   sert que woff2 → quasi toutes les fontes du web réel

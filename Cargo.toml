@@ -137,6 +137,10 @@ sha2 = { version = "0.10", features = ["oid"] }
 # (transcodage charset WHATWG — la référence de Firefox).
 flate2 = { version = "1", default-features = false, features = ["rust_backend"] }
 brotli = "7"
+# Décodage fontes WOFF1/WOFF2 (R-197) — pur Rust, aucune
+# liaison C (les bindings `woff2` C++ sont exclus par la
+# règle 2).
+wuff = { version = "0.2", features = ["z", "brotli"] }
 encoding_rs = "0.8"
 # Cookies explorer-net (ADR-0002, étape 7) — Public Suffix List
 # embarquée : sans elle, un jar naïf accepte les supercookies

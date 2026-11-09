@@ -70,12 +70,20 @@ impl DirFontSource {
             for e in entries.flatten() {
                 let path = e.path();
                 let is_font = path.extension().and_then(|x| x.to_str()).is_some_and(|x| {
-                    matches!(x.to_ascii_lowercase().as_str(), "ttf" | "otf" | "ttc")
+                    matches!(
+                        x.to_ascii_lowercase().as_str(),
+                        "ttf" | "otf" | "ttc" | "woff" | "woff2"
+                    )
                 });
                 if !is_font {
                     continue;
                 }
                 let Ok(data) = std::fs::read(&path) else {
+                    continue;
+                };
+                // R-197 — `wOFF`/`wOF2` → sfnt reconstruit ;
+                // envelope hostile → fichier sauté.
+                let Some(data) = decode_font_bytes(&data) else {
                     continue;
                 };
                 let data = Arc::new(data);
@@ -263,6 +271,24 @@ impl FontSource for DirFontSource {
 /// hostile est borné avant l'itération (R-69).
 const MAX_TTC_FACES: u32 = 1024;
 
+/// R-197 — normalise les octets de fonte en **sfnt** : les
+/// signatures `wOFF` (WOFF1 — tables zlib, spec WOFF 1.0) et
+/// `wOF2` (WOFF2 — brotli + reconstruction des tables
+/// transformées `glyf`/`loca`/`hmtx`, spec WOFF 2.0) sont
+/// décodées par [`wuff`] (pur Rust — les bindings C++ `woff2`
+/// sont exclus par la règle de périmètre) ; le sfnt brut
+/// (`\0\x01\0\0`, `OTTO`, `ttcf`, `true`) et tout autre
+/// contenu passent tels quels — `ttf-parser` tranche en aval.
+/// `None` = enveloppe WOFF illisible/hostile (dégradation :
+/// la source est ignorée, pas d'erreur).
+fn decode_font_bytes(data: &[u8]) -> Option<Vec<u8>> {
+    match data.get(..4) {
+        Some(b"wOFF") => wuff::decompress_woff1(data).ok(),
+        Some(b"wOF2") => wuff::decompress_woff2(data).ok(),
+        _ => Some(data.to_vec()),
+    }
+}
+
 /// Nombre de faces déclaré dans `data` (`> 1` → `.ttc`),
 /// `None` si l'en-tête est illisible **ou panique** :
 /// `ttf-parser` affirme ses bornes en interne sur certaines
@@ -386,10 +412,22 @@ impl WebFontSource {
     /// Inscrit une face : validée par `ttf-parser`, bornée
     /// par `cap`. `false` = refusée (fonte illisible ou
     /// registre plein) — la page garde le repli local.
+    #[allow(clippy::needless_pass_by_value)]
     pub fn register(&mut self, family: &str, weight: u16, italic: bool, data: Vec<u8>) -> bool {
         if self.faces.len() >= self.cap || norm(family).is_empty() {
             return false;
         }
+        // R-197 — `wOFF`/`wOF2` (@font-face des CDN, Google
+        // Fonts = woff2) → sfnt reconstruit avant validation ;
+        // enveloppe hostile ou panic du décodeur → refus
+        // (même garde `catch_unwind` que `ttf-parser`, R-69).
+        let Some(data) =
+            std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| decode_font_bytes(&data)))
+                .ok()
+                .flatten()
+        else {
+            return false;
+        };
         // Garde `catch_unwind` : une fonte `@font-face`
         // hostile peut faire paniquer `ttf-parser` — refus,
         // pas crash (R-69).
@@ -692,5 +730,111 @@ mod tests {
             Some(fixture_ttf_face("Fam", 700, false, 0x0020, 0x00FF))
         );
         drop(std::fs::remove_dir_all(&dir));
+    }
+
+    /// R-197 — emballe un sfnt en enveloppe **WOFF1**
+    /// (spec WOFF 1.0) : tables zlib individuelles, raw si
+    /// la compression ne gagne rien. Packer de test — les
+    /// mêmes octets que produit un serveur réel.
+    #[allow(clippy::cast_possible_truncation)]
+    fn pack_woff1(ttf: &[u8]) -> Vec<u8> {
+        use flate2::write::ZlibEncoder;
+        use flate2::Compression;
+        use std::io::Write;
+        let be32 = |i: usize| u32::from_be_bytes(ttf[i..i + 4].try_into().unwrap());
+        let flavor = be32(0);
+        let num = u16::from_be_bytes(ttf[4..6].try_into().unwrap()) as usize;
+        // Directory sfnt : (tag, checksum, offset, length).
+        let mut tabs: Vec<(u32, u32, u32, u32)> = (0..num)
+            .map(|i| {
+                let d = 12 + i * 16;
+                (be32(d), be32(d + 4), be32(d + 8), be32(d + 12))
+            })
+            .collect();
+        tabs.sort_unstable(); // spec : répertoire trié par tag.
+        let mut body = Vec::new();
+        let mut dir = Vec::new();
+        for (tag, csum, off, len) in &tabs {
+            let raw = &ttf[*off as usize..*off as usize + *len as usize];
+            let mut enc = ZlibEncoder::new(Vec::new(), Compression::default());
+            enc.write_all(raw).unwrap();
+            let z = enc.finish().unwrap();
+            let (payload, comp_len) = if z.len() < raw.len() {
+                let l = z.len() as u32;
+                (z, l)
+            } else {
+                (raw.to_vec(), *len) // compLength == origLength → stocké
+            };
+            dir.extend_from_slice(&tag.to_be_bytes());
+            dir.extend_from_slice(&(44 + num as u32 * 20 + body.len() as u32).to_be_bytes());
+            dir.extend_from_slice(&comp_len.to_be_bytes());
+            dir.extend_from_slice(&len.to_be_bytes());
+            dir.extend_from_slice(&csum.to_be_bytes());
+            body.extend_from_slice(&payload);
+            while body.len() % 4 != 0 {
+                body.push(0); // tables alignées 4 octets.
+            }
+        }
+        let total = (44 + num * 20 + body.len()) as u32;
+        let mut out = Vec::with_capacity(total as usize);
+        out.extend_from_slice(b"wOFF");
+        out.extend_from_slice(&flavor.to_be_bytes());
+        out.extend_from_slice(&total.to_be_bytes());
+        out.extend_from_slice(&(num as u16).to_be_bytes());
+        out.extend_from_slice(&0u16.to_be_bytes()); // reserved
+        out.extend_from_slice(&(ttf.len() as u32).to_be_bytes()); // totalSfntSize
+        out.extend_from_slice(&0u32.to_be_bytes()); // major+minor
+        out.extend_from_slice(&[0; 20]); // meta*/priv* absents
+        out.extend_from_slice(&dir);
+        out.extend_from_slice(&body);
+        out
+    }
+
+    /// R-197 — `wOFF` : l'enveloppe est décodée et le sfnt
+    /// reconstruit parse comme l'original (mêmes noms de
+    /// famille que la fixture).
+    #[test]
+    fn woff1_decode_reconstruit_le_sfnt() {
+        let ttf = fixture_ttf();
+        let woff = pack_woff1(&ttf);
+        let decoded = decode_font_bytes(&woff).expect("woff1 décodé");
+        assert_ne!(decoded[..4], *b"wOFF", "enveloppe dépliée");
+        let face = ttf_parser::Face::parse(&decoded, 0).expect("sfnt valide");
+        let orig = ttf_parser::Face::parse(&ttf, 0).expect("orig valide");
+        let names = |f: &ttf_parser::Face| {
+            f.names()
+                .into_iter()
+                .filter(|n| n.name_id == 1)
+                .filter_map(|n| n.to_string())
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(names(&face), names(&orig));
+    }
+
+    /// R-197 — `register` accepte une fonte emballée WOFF1
+    /// (cas `@font-face` réel) et sert les octets sfnt
+    /// décodés aux requêtes.
+    #[test]
+    fn register_accepte_face_woff1() {
+        let mut w = WebFontSource::new(Arc::new(EmptyFont), 4);
+        let ttf = fixture_ttf();
+        assert!(w.register("Woffed", 400, false, pack_woff1(&ttf)));
+        let served = w
+            .font_data(&req(&["Woffed"], 400, false))
+            .expect("face servie");
+        assert!(ttf_parser::Face::parse(&served, 0).is_ok());
+    }
+
+    /// R-197 — enveloppe hostile : `wOFF`/`wOF2` tronqués ou
+    /// absurdités → `None`, jamais de panic (dégradation).
+    #[test]
+    fn woff_hostile_refuse_sans_panic() {
+        assert!(decode_font_bytes(b"wOFF").is_none());
+        assert!(decode_font_bytes(b"wOF2").is_none());
+        assert!(decode_font_bytes(b"wOFF\xff\xff\xff\xff\x01").is_none());
+        assert!(decode_font_bytes(b"wOF2\x00\x00\x01\x00").is_none());
+        // Non-WOFF : les octets passent tels quels —
+        // ttf-parser tranchera en aval.
+        assert_eq!(decode_font_bytes(&fixture_ttf()), Some(fixture_ttf()));
     }
 }
