@@ -245,7 +245,7 @@ arbitré ici :
   vers le slow path au lieu d'un slot fantôme (même
   philosophie que NIL/AR-15 : échec typé, jamais muet).
   Aucun `swap_remove`/`props.insert` trouvé (grep vérifié).
-- [ ] **V-4a.** ADR-0034 : design + mesures V-1/V-2 citées.
+- [x] **V-4a.** ADR-0034 : design + mesures V-1/V-2 citées — `docs/architecture/decisions/adr-0034-shapes-inline-cache.md` (JS-C459).
 - [ ] **V-4b.** `ShapeId` sur `JsObj` + table de transitions
   dans `push_prop` (J15 : le seul writer — point d'injection
   unique) + marquage GC des tables.

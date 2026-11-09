@@ -11391,3 +11391,9 @@ un crate PIPELINE.- [x] **JS-C422. Deadline honnête — canal session ↔ budge
   `fire_unhandled_rejections`. Frontière spec « report
   the exception » → `uncaught:` rapporté, file continue
   ; `deadline_hit` propage. `c458_microtask_throw` ×2.
+- [x] **JS-C459 (JT-15/V-4a). ADR-0034 — shapes + IC
+  global `(shape, clé) → slot`** — design structurel
+  posé : `ShapeId` + transitions `push_prop`, `find_own`
+  via cache global → O(1) monomorphe, dictionnaire +
+  `shape_epoch`. Mesures V-1 citées ; résidus `fn_body`/
+  `close_table` hors course → frontière = V-4b→f.

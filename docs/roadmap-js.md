@@ -152,17 +152,14 @@ surface minimale — jamais un stub qui ment.
 
 ## JT-E — Perf interprète (rappel — file tenue dans `roadmap-vitesse-js.md`)
 
-- [ ] **JT-15. Résidus vitesse nommés — `fn_body`
+- [x] **JT-15. Résidus vitesse nommés — `fn_body`
   sous-parse ~7 ms, `close_table` partagée ~1,7 ms** —
-  ferme les derniers sauts §B-1. **La file se tient
-  dans `docs/roadmap-vitesse-js.md`** (ouvrir l'étape
-  V-x correspondante) — JT-15 est le rappel ici que la
-  piste V a du résidu terrain, pas une duplication de
-  file. `close_table` partagée : la table `Rc<Vec>` est
-  reconstruite par sub-parse alors que le stream
-  `Rc<[Token]>` est déjà partagé — candidat : la porter
-  sur le `Program`/sub-parser au lieu de la rebâtir
-  (`parser.rs:31`, `:2477`).
+  **ouvert (JS-C459)** : les deux résidus sont « hors
+  course » d'après les mesures V (`close_table` = 4,3 ms /
+  2 % O(n) confirmé, `fn_body` = sous-parse borné au
+  premier appel) — la frontière réelle est **V-4
+  (shapes/IC)** : ADR-0034 écrit (V-4a livré), la file
+  V-4b→f reste dans `docs/roadmap-vitesse-js.md`.
 
 ## JT-F — GC/heap : résidus §B-114 + §B-110 (chantier long, `interp`/`heap`/marquage)
 
