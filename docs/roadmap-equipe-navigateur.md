@@ -11120,4 +11120,29 @@ un crate PIPELINE.- [x] **JS-C422. Deadline honnête — canal session ↔ budge
   porteur par `srcdoc`/URL (règle de
   `frame_context_plan`) — verrou
   `media_dyn_frame_video_offered_
-  with_carrier_rect`.
+  with_carrier_rect`. **Vol 764
+  (binaire `8030b875`) — rect
+  vérifié live : `1024×150 @ 466`
+  = boîte iframe exacte.**
+  Mesure soutenue 120 s : claim
+  tenu 14:50→14:53 mais le player
+  **ré-attache un MediaSource neuf
+  ~2 min après** (`loadstart`/
+  `sourceopen` à 14:52:51 en plein
+  claim — watchdog SABR probable :
+  `pos=0` aux premiers reports +
+  buffer-ahead borné par le
+  playhead) → l'url claimée devient
+  un cadavre figé → verdict
+  `frames=0, pcm=1 917 040`
+  (préfixe borné servi — même total
+  qu'au vol 763). Mur §B-104 nommé :
+  **churn de re-attach** — piste
+  côté hôte : boucle re-claim sur
+  l'id neuf + `open_mse_multi` ;
+  piste côté moteur : comprendre le
+  signal d'avancement que SABR
+  attend (`currentTime`/`timeupdate`
+  réels — livrés par
+  `deliver_media_state`, à mesurer
+  vs sa cadence).
