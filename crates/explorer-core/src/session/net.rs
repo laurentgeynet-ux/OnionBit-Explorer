@@ -3710,6 +3710,30 @@ impl Session {
         while let Ok(d) = self.net_rx.try_recv() {
             done.push(d);
         }
+        // §B-54 ph3 — un `NetDone` arrivé a déjà fini sa
+        // tâche transport : retirer `net_tasks` ici libère
+        // le slot `max_script_net` **à l'arrivée**, même si
+        // la livraison JS est différée par le budget — sinon
+        // les fetch garés (`pending_script_net`) attendent
+        // des slots tenus par des réponses en file, et le
+        // SPA les abort après son timeout (~20 s) : le
+        // `api/initial` du reload explore.org mourait en
+        // file sans jamais voir `net.go` (vol 769). Les
+        // sous-ressources vivent dans `dyn_tasks`, non
+        // concernées. `Abort` inchangé : la tâche finie
+        // n'était plus abortable, et `pending_net_done`
+        // n'était déjà pas purgé à l'annulation.
+        for d in &done {
+            if d.script.is_none()
+                && d.dyn_module.is_none()
+                && d.frame.is_none()
+                && d.img.is_none()
+                && d.link.is_none()
+                && d.import.is_none()
+            {
+                self.net_tasks.remove(&(d.tab, d.handle));
+            }
+        }
         // Retenues §B-60 échues : émises enfin sur le
         // transport (quota `max_script_net` re-vérifié au
         // spawn — saturé = retenue repoussée d'une base,

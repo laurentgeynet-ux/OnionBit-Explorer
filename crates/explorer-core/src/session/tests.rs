@@ -3951,6 +3951,60 @@ fn drain_net_done_priorise_les_fetch() {
     );
 }
 
+/// §B-54 ph3 (explore.org vol 769) — un `NetDone` arrivé
+/// libère son slot `max_script_net` **à l'arrivée**
+/// (`net_tasks` vidé en tête de `poll_net`), pas à la
+/// livraison JS : la livraison différée par le budget ne
+/// retient plus le slot — un fetch garé derrière partait
+/// jamais quand les slots restaient tenus par des réponses
+/// en file (`api/initial` reload → abort SPA).
+#[tokio::test(flavor = "current_thread")]
+async fn poll_net_libere_le_slot_a_l_arrivee() {
+    let mut s = Session::with_config(
+        Arc::new(FailTransport),
+        Arc::new(TestFont),
+        SessionConfig::default(),
+    );
+    let tab = s.open_tab();
+    // Tâche « vivante » factice — une future close ; le
+    // NetDone arrivé doit la faire sortir de `net_tasks`.
+    s.net_tasks.insert((tab, 7), tokio::spawn(async {}));
+    s.net_tx
+        .send(NetDone {
+            tab,
+            handle: 7,
+            cross: false,
+            mode: explorer_net::http::FetchMode::Cors,
+            credentials: explorer_net::http::FetchCredentials::Omit,
+            page_origin: "https://x.test".to_string(),
+            cors_unsafe: Vec::new(),
+            req_url: Url::parse("https://x.test/api").expect("url"),
+            partition: None,
+            out: Ok(explorer_net::http::Response {
+                status: 200,
+                reason: "ok".to_string(),
+                headers: Vec::new(),
+                body: Vec::new(),
+                reused_connection: false,
+                resolved_url: None,
+            }),
+            script: None,
+            frame: None,
+            img: None,
+            link: None,
+            dyn_module: None,
+            import: None,
+        })
+        .expect("send");
+    s.poll_net();
+    assert!(
+        !s.net_tasks.contains_key(&(tab, 7)),
+        "slot libéré à l'arrivée — la tâche était finie"
+    );
+    // La livraison elle-même s'est produite ou reste différée
+    // — le slot quota ne la dépend plus.
+}
+
 /// J4/§B-12 (bookshop vol 95) — une fois `heap_dead` armé,
 /// chaque éval suivante échoue avec la même signature « heap
 /// memory limit exceeded » mais une pile JS différente par
