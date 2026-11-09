@@ -170,9 +170,34 @@ pub(crate) fn math_sum_precise(e: &mut Engine, _t: Value, args: &[Value]) -> JsR
     Ok(Value::Num(hi + lo))
 }
 
-/// Accesseur poison `caller`/`arguments` (spec
-/// `AddRestrictedFunctionProperties`) — get/set → `TypeError`.
-pub(crate) fn restricted_prop(e: &mut Engine, _t: Value, _a: &[Value]) -> JsResult<Value> {
+/// Accesseurs poison `caller`/`arguments` sondés (spec
+/// `AddRestrictedFunctionProperties` — get/set → `TypeError`)
+/// ; §B-125 vol 734 : `uncaught TypeError` ×8+ persistant
+/// post-JS-C463 — strict flaggé juste ou lecture bénigne ?
+/// La sonde nomme la fonction source de l'accès pour trancher.
+pub(crate) fn restricted_caller(
+    e: &mut Engine,
+    _t: Value,
+    _a: &[Value],
+) -> JsResult<Value> {
+    restricted_probe(e, "caller")
+}
+
+/// Voir `restricted_caller` — variante `arguments`.
+pub(crate) fn restricted_arguments(
+    e: &mut Engine,
+    _t: Value,
+    _a: &[Value],
+) -> JsResult<Value> {
+    restricted_probe(e, "arguments")
+}
+
+/// Sonde commune : `dom_probe site=fn.restricted` nomme le
+/// frame script le plus proche (l'appelant de l'accesseur),
+/// puis sert le `TypeError` spec inchangé.
+fn restricted_probe(e: &mut Engine, prop: &'static str) -> JsResult<Value> {
+    let src = e.stack_top_fn_src(140);
+    tracing::info!(target: "dom_probe", site = "fn.restricted", "prop={prop} src={src}");
     Err(e.type_error("caller/arguments are restricted function properties"))
 }
 

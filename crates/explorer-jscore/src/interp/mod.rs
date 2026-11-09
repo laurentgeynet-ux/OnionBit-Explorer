@@ -9114,10 +9114,15 @@ impl Engine {
         // strictes, les générateurs et l'async (sloppy : absents —
         // `f.caller` → `undefined`, déviation vs le `null` de V8).
         if lit.strict || lit.is_gen || lit.is_async {
-            let thr = self.native_fn("restricted", crate::builtins::restricted_prop);
+            // JS-C463 — natives sondées par prop : le site
+            // de l'accès est nommé (`fn.restricted`) pour
+            // trancher §B-125 (strict juste vs lecture
+            // bénigne) sans changer la sémantique.
+            let tc = self.native_fn("restricted.caller", crate::builtins::restricted_caller);
+            let ta = self.native_fn("restricted.arguments", crate::builtins::restricted_arguments);
             if let Some(o) = self.heap.obj_mut(id) {
-                o.set_accessor("caller", thr.clone(), thr.clone(), false);
-                o.set_accessor("arguments", thr.clone(), thr, false);
+                o.set_accessor("caller", tc.clone(), tc, false);
+                o.set_accessor("arguments", ta.clone(), ta, false);
             }
         }
         Value::Obj(id)
