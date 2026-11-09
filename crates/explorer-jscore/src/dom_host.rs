@@ -2951,7 +2951,16 @@ impl Engine {
             // — détection seule, jamais construit.
             "Window",
         ] {
-            let f = self.illegal_ctor_bound(name);
+            // JS-C447 — `DocumentFragment` est `[Constructor]`
+            // WebIDL (gitlab : `illegal constructor
+            // DocumentFragment` abortait le bootstrap) — le
+            // vrai ctor remplace le bouchon ; proto, chaîne
+            // `Node` et récolte ShadyDOM inchangés.
+            let f = if name == "DocumentFragment" {
+                self.native_fn(name, docfrag_ctor)
+            } else {
+                self.illegal_ctor_bound(name)
+            };
             if let Value::Obj(fid) = f {
                 let p = self.new_object();
                 // Chaîne d'héritage des protos DOM (J5) —
@@ -10306,6 +10315,27 @@ pub(crate) fn domrect_fill(e: &mut Engine, id: ObjId, x: f64, y: f64, w: f64, h:
     for (k, v) in [("x", x), ("y", y), ("width", w), ("height", h)] {
         e.set_own_attrs(id, k, Value::Num(v), attrs);
     }
+}
+
+/// JS-C447 — `new DocumentFragment()` (`WebIDL` `[Constructor]`)
+/// : fragment détaché, identique à
+/// `document.createDocumentFragment()` (spec — son insertion
+/// dans un parent éclate ses enfants). Retourne le **wrapper
+/// du nœud**, pas `this` (spec `[[Construct]]` : un retour
+/// objet prime). Appel fonctionnel = `TypeError` (interfaces
+/// ctor-only). Même classe que JS-C427.
+fn docfrag_ctor(e: &mut Engine, this: Value, _a: &[Value]) -> JsResult<Value> {
+    let Value::Obj(id) = this else {
+        return Err(e.type_error("illegal constructor"));
+    };
+    if e.ctor_fresh != Some(id) {
+        return Err(e.type_error("illegal constructor"));
+    }
+    let Some((dom, cache)) = e.dom_ctx.clone() else {
+        return Err(e.type_error("DocumentFragment: no document"));
+    };
+    let n = dom.borrow_mut().create_fragment();
+    Ok(node_value(e, &dom, &cache, n))
 }
 
 /// JS-C427 — `new DOMRect(ReadOnly)(x, y, w, h)` — `bound[0]` =

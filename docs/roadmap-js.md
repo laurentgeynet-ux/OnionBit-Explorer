@@ -51,14 +51,15 @@ en branche courte sans invalider les étapes courtes.
   `port.drop_ctx`/microtasks). Verrou synthétique
   `c446_msgs_realm` ×3 — post cross-realm rouge sans fix
   (`false|20` → `true|20`).
-- [ ] **JT-2. `DocumentFragment` constructible** —
-  `illegal constructor DocumentFragment` (gitlab) :
-  `[Constructor]` WebIDL absent alors que le nœud existe
-  (`createDocumentFragment` fonctionne). Ctor sans args,
-  `instanceof` honnête — recette éprouvée JS-C427
-  (`DOMRect`/`DOMRectReadOnly`, même classe « illegal
-  constructor »). Fichier : `dom_host.rs` /
-  `misc_apis.rs`.
+- [x] **JT-2. `DocumentFragment` constructible** —
+  `illegal constructor DocumentFragment` (gitlab) —
+  **livré (JS-C447)** : vrai ctor dans la boucle
+  d'interfaces (recette JS-C427) — `docfrag_ctor`
+  retourne le wrapper du nœud `create_fragment()`
+  (retour objet prime, spec `[[Construct]]`) ;
+  `instanceof` gratuit via le mapping `Fragment →
+  "DocumentFragment"`, chaîne `ShadowRoot` préservée.
+  Verrous `c447_docfrag_ctor` ×5.
 - [ ] **JT-3. Globals CommonJS honnêtes en sandbox**
   (résidu §B-105 — `builtins`, scope exec) —
   `module`/`exports`/`require` : les wrappers UMD

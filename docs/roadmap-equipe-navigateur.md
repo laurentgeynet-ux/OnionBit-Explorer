@@ -11275,3 +11275,20 @@ un crate PIPELINE.- [x] **JS-C422. Deadline honnête — canal session ↔ budge
   sans fix (`false|20` → `true|20`), same-realm
   et fenêtre→enfant inchangés ; c78 20/20,
   b4 16/16, worker 16/16 verts.
+- [x] **JS-C447 (JT-2). `DocumentFragment`
+  constructible** — `illegal constructor
+  DocumentFragment` abortait le bootstrap gitlab :
+  `WebIDL` `[Constructor]` absent alors que le nœud
+  existe (`createDocumentFragment`). Vrai
+  `docfrag_ctor` dans la boucle d'interfaces
+  (recette JS-C427) — retourne le wrapper du nœud
+  `create_fragment()` (un retour objet prime sur
+  `this`, spec `[[Construct]]`) ; `instanceof
+  DocumentFragment`/`Node` gratuit via le mapping
+  `Fragment → "DocumentFragment"` de `node_value`,
+  chaîne `ShadowRoot → DocumentFragment` et
+  récolte ShadyDOM JS-C416 préservées. Verrous
+  `c447_docfrag_ctor` ×5 (détaché `nodeType 11`,
+  ctor-only `TypeError`, splice des enfants,
+  chaîne proto, `getElementById` sur instance) ;
+  dom 245/245, b14 52/52 verts.
