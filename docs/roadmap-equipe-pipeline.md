@@ -2966,6 +2966,195 @@ Sortie de palier : **WPT reftests ≥ 35/40**.
   profond 0,18 ms. Verrou interne `Node` = 96 o, 28/28 +
   454/454 verts, clippy `-D warnings`.
 
+## Palier R-L — Compat web patrimonial (corpus legacy)
+
+Piste ouverte 2026-11-08 sur la demande « les sites vieux/
+standard ne s'affichent pas correctement ». Corpus de mesure :
+`sites-legacy.txt` (30 sites — pré-doctype/quirks, tables +
+`<font>`, neocities/frames, forums 2000s, wayback) ;
+premier triage `site_smoke` : 28 OK / 2 FAIL (réseau, hors
+moteur). Ordre = ratio impact/effort mesuré ; la tranche
+NAV-dominante (framesets, image maps, `:hover`/`:focus`,
+scroll interne `overflow:auto`) est loguée au journal.
+
+- [x] **R-152. `background-image` multi-`url()` : image par
+  couche** : la collecte ne fetch que le premier `url()`
+  (`backgrounds` clé `NodeId → image`) mais `emit_bg_layers`
+  repeignait cette bitmap sur **chaque** couche `url()` —
+  mesuré `w3.org/TR/REC-html32` : le filigrane `no-repeat`
+  retilé par la couche texture `repeat` → page illisible.
+  Livré : l'image stockée n'est affectée qu'à la première
+  couche `url()`, les suivantes sautées (fix complet =
+  fetch multi-url côté NAV, journalisé). Verrou +
+  vérification terrain.
+- [x] **R-153. `text-decoration` peint** : cascadé + UA
+  (`a[href]`/`u`/`del`) mais aucun `DisplayItem` ne le
+  consommait — aucun lien souligné sur ~25 sites du corpus.
+  Livré : déco **résolue au fragment** à l'itemisation —
+  pile des ancêtres inline déclarants dans `collect_child`,
+  snapshot `TextDeco{lignes, couleur du déclarant}` sur les
+  fragments (§16.3.1 : `<a>` rouge souligne `<b>` bleu en
+  rouge, saut des remplacés, seed conteneur bloc). Paint =
+  `FillRect` (under/over sous l'encre, through après).
+  Approximations : métriques en fractions d'em, `solid`
+  seul, `blink` ignoré, `-color`/`-style`/`-thickness`
+  hors scope. Verrous ×5 + terrain (Drudge, REC-html32).
+- [x] **R-154. `<font>` présentationnel** : `face` →
+  `font-family`, `color` → `color` via `legacy_color()`
+  (hex nu `ffcc00` → `#ffcc00`, règles HTML Standard) —
+  le normalizer sera étendu à `bgcolor`/`text` en R-155.
+  `size` `1..7` → mots-clés absolus, `±N` → index table du
+  parent (px calculée → index proche sur `env.font_size_
+  base`) ; px réels produits par `normalize_font_size`
+  (R-17), aucun changement layout. `basefont` non-fait.
+  Verrous ×3 + terrain (heavensgate, toastytech).
+- [x] **R-155. Couleurs legacy sans `#`** : `legacy_color()`
+  (règles HTML Standard, livrée en R-154 pour `font[color]`)
+  étendue aux hints `bgcolor` et `body[text]` — hex nu
+  3/6 digits normalisé, nommées/modernes inchangées.
+  Verrou `hint_couleurs_legacy_bgcolor_et_text`.
+- [x] **R-156. Hints image/table** : `img[align]`→float/
+  valign, `hspace`/`vspace`→marges, `img[border]`→filet
+  solid, `table[align]`→float/`margin:auto`, `td/th[nowrap]`
+  →white-space, `background` attr→`background-image`,
+  `hr[align|noshade|color]`, `br[clear]`→clear. Fusionné
+  dans les bras `table`/`td|th` existants (cellspacing/
+  cellpadding intacts). Verrous ×2.
+- [x] **R-157. Attributs `<body>`** : `link` → couleur
+  des liens lue sur le body ancêtre (`a[href]`/`area[href]`,
+  `:link` structurel) ; `marginwidth`/`marginheight`/
+  `topmargin`… → marges. Les défauts UA `color:#00e` et
+  `margin:8px` passent en hint (les règles UA primer les
+  attributs sinon — pattern `-webkit-link`). `vlink`
+  documenté non-fait (`:visited` vie privée) ; `alink`
+  reporté (`:active`, couture NAV — journal). Verrou.
+- [x] **R-158. Trous UA sans dépendance** : `big`→larger,
+  `small`→smaller, `nobr`→nowrap, `mark`→fond jaune,
+  `figure`→`1em 40px`, `fieldset`→`2px groove`+padding
+  (groove rendu solide — vraies 3D = R-166), `legend`→
+  padding latéral. `sub`/`sup`/`abbr` liés à R-161.
+  Verrou `ua_big_small_nobr_mark_figure_fieldset`.
+- [x] **R-159. `border-spacing` consommé en `separate`** :
+  `sh`/`sv` dans la largeur intrinsèque (`frame`), le
+  budget colonnes (`cols_budget`), `col_x`/`cw` (cellules
+  enjambées = colonnes + spacing traversé §17.6.1),
+  `gap.fill(sv)` vertical + bords externes. Ignorée sous
+  `collapse`. Verrous ×2 + 5 attentes pré-spacing mises
+  aux valeurs spec.
+- [x] **R-160. `vertical-align` cellules** : `middle`/
+  `bottom` décalent le contenu posé (`shift_subtree_y`,
+  cellule garde sa géométrie peinte) ; `tr[valign]` relayé
+  aux cellules. `baseline`/`top` = en haut (vraie baseline
+  = R-161). Verrou middle/bottom sur rangée.
+- [x] **R-161. `vertical-align` inline** : lu sur tous les
+  fragments — `sub`/`super` (fractions de font-size), px,
+  `%` (strut ≈ line-height). Règles UA livrées : `sub`/
+  `sup`→smaller+décalage, `abbr[title]`/`acronym[title]`
+  →souligné. `text-top`/`text-bottom`/`middle` ≈ ligne.
+  Verrou baseline décalée.
+- [x] **R-162. `text-transform`** : appliqué à la chaîne
+  dans `text_item` entre white-space et UAX #14 —
+  uppercase/lowercase Unicode, `capitalize` = 1re lettre
+  par mot (le reste inchangé). Hérité via la cascade.
+  Verrou 3 valeurs + héritage inline.
+- [x] **R-163. `input[type=password]`→puces +
+  `type=image`→remplacé** : `•`×len(value) via
+  `control_paint` ; `img_box` réutilisé (repli `alt` tant
+  que `src` absent de `sizes` — fetch = journal NAV).
+  Verrou puces + repli alt.
+- [x] **R-164. Détails tables** : `empty-cells:hide`
+  (cellule vide = ni fond ni bordure, `separate` seul) ;
+  `caption-side:left|right` en vis-à-vis. Collapse
+  vertical/hidden/couleurs : corpus ne l'exige pas.
+  Verrous ×2.
+- [x] **R-165. `<wbr>`** : sentinelle U+200B (classe ZW
+  UAX #14 → coupure souple permise) ; strippée avant
+  shaping — pas de glyphe. Miroir `br`→U+2028, sans saut
+  dur. Verrou coupure + ZWSP non peinte.
+- [x] **R-166. Bordures 3D réelles** : `Inset`/`Outset`/
+  `Groove`/`Ridge` = demi-teintes par côté (sombre ×½ vers
+  noir / clair mix blanc), `groove`/`ridge` en moitiés,
+  `double` = 2 liserés + tiers vide — bandes fractionnées
+  `side_bands`/`paint_border_band`. Verrou 6 styles.
+- [x] **R-167. `border-radius`** : shorthand → 4 coins
+  (elliptique `h/v` → rayon horizontal seul) ; `radii`
+  sur `Border`/`FillRect` (% du petit côté, borné moitié) ;
+  chemin arrondi κ≈0.5523 — fond arrondi + anneau EvenOdd
+  bordure `solid` uniforme ; clip `overflow` reste rect
+  (reporté). Verrou valeurs + `50%`.
+- [x] **R-168. `word-spacing` + `attr()` + `list-style-image`
+  + `noframes`** : `+ws` par espace à l'itemisation ;
+  `attr(name)` résolu dans `content` (ordre du flux) ;
+  bitmap de marqueur depuis `backgrounds` (repli type si
+  absente) ; `noframes` rend naturellement. Tranche NAV
+  journalée : `frameset`→grille d'iframes, image maps
+  `usemap`, `:hover`/`:focus` session, `overflow:auto`
+  scrollbars, `a[name]` ancres.
+- [x] **R-169. `counter-*`/`counter()` dans `content`** :
+  `compute_counter_envs` (pré-passe doc-order, reset→
+  increment→snapshot ; portée aplatis) via worker
+  `build_box_tree_env` ; `counter(name[,style])` +
+  `counters()` résolus — `decimal`/`alpha`/`roman`.
+  Verrou increment+reset.
+
+## Palier R-M — Rendu web moderne
+
+Trous restants pour les sites récents : `flex`/`grid`/`var()`
+/`is()`/`mask` déjà là — le rendu (ombres, fit, effets) est
+la dette, pas le layout.
+
+- [x] **R-M1. Dégradés CSS** — **déjà livré à R-104** :
+  `gradient.rs` (`decode_linear`/`radial`/`conic` +
+  `repeating-*`) câblé dans `emit_bg_layers` par couche.
+  Résidu : commentaire d'en-tête périmé à corriger.
+- [x] **R-M2. `box-shadow`** : `DisplayItem::BoxShadow`
+  émis avant le fond (`offset`/`blur`/`spread`/`color`,
+  multi-couches paren-aware, `none` géré, `inset` sauté —
+  approx.) ; rayons `border-radius` suivis ; flou
+  approximé en 8 bandes alpha concentriques (documenté,
+  pas de gaussien). Verrou valeurs + `none`.
+- [x] **R-M3. `object-fit`** — **déjà livré** :
+  `object_fit_dst` couvre `cover`/`contain`/`fill`/
+  `none`/`scale-down` + `object-position` + clip.
+- [x] **R-M4. `text-shadow`** : fantômes `Text` par
+  couche (`x y [blur] [color]`, `none` géré) sous le
+  texte réel — blur ≈ 4 fantômes croisés ±blur/2 à
+  alpha/3 (documenté, pas de gaussien). Verrou offset+
+  couleur+`none`.
+- [x] **R-M5. `filter`** : `FilterOp` + bracket
+  `PushFilter`/`PopFilter` sur toute la sous-arbre —
+  9 ops couleurs par pixel + `blur` en box blur
+  séparable, `drop-shadow()`/`url()` hors scope ;
+  `backdrop-filter` à part. Verrou ops + `none`.
+- [x] **R-M6. `position:sticky`** — **déjà livré** à
+  R-6/R-134 : `Position::Sticky`, `sticky_offset`
+  (`layout::hit`), `sticky_deltas` + `PushTransform` au
+  display, seuils `left`/`right`. Aucune action.
+- [x] **R-M7. `transform` complet + `transition`/
+  `animation`** — **déjà livré** : `PushTransform`
+  (matrice affine empilée), `explorer_css::transition`
+  (interpolate + `Timing` cubic-bezier), `animation.rs`
+  (`@keyframes`), moteur `session/anim.rs` (étape 45).
+  Aucune action.
+- [x] **R-M8. `clip-path` + `aspect-ratio`** —
+  **déjà livré** à R-58 (`inset`/`circle`/`ellipse`/
+  `polygon` v1) et R-123 (`aspect-ratio` sizing).
+  **Reste** : clip `overflow` arrondi (reliquat R-167)
+  et `line-clamp`.
+- [x] **R-M9a. Clip `overflow` arrondi** (reliquat
+  R-167) : `PushClipRounded {rect, radii}` émis quand
+  `border-radius` > 0 — le `Mask` raster suit
+  `rounded_rect_path`. Verrou + repli rect.
+- [x] **R-M9b. `backdrop-filter`** : la région peinte
+  sous `rect` reçoit les ops puis le contenu se peint
+  par-dessus (offscreen composité — même mécanique
+  R-M5). Verrou ops + ordre + `none`.
+- [ ] **R-M9c. Résidus restants** :
+  `scroll-snap`/`scroll-behavior` (session) ;
+  font fallback par glyphe (`.ttc`, tofu CJK) ;
+  `line-clamp` ; `inert`/`dialog`/`popover`/
+  `:focus-visible` (session).
+
 ## Palier R-B — Contenu étranger, animation, canvas
 
 - [x] **R-8. Foreign-content dans `explorer-html`** (ex-60a) :
@@ -3157,10 +3346,12 @@ trigger site réel) :**
 - `display:contents` — repli `Block` ; flatten des enfants
   comme items flex/grid et UA sur `<slot>` non portés.
 - `radial-`/`conic-gradient` — parsés, non peints.
-- `background` shorthand multi-couches : première couche
-  seulement (borne R-94) ; `background-origin`/`-clip` émis
-  au parse, non consommés au paint. (Le multi-couches de
-  `background-image` longhand est, lui, peint — R-73.)
+- `background-image` multi-`url()` : la collecte ne fetch
+  que le premier `url()` (`backgrounds` clé `NodeId →
+  image`) — les couches `url()` suivantes sont sautées au
+  paint depuis R-152 ; le fix complet (fetch par couche)
+  est logué au journal pour NAV. (La couche dégradé et la
+  première couche url peignent — R-73/R-152.)
 - `light-dark()` — non implémenté (R-59 hors scope v1).
 - Marqueurs textuels (`decimal`, alpha, roman) — non peints,
   la display list ne shape pas ; `list-style-position:

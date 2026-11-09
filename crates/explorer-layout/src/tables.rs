@@ -40,7 +40,9 @@
 //! `col`, `border-spacing`, `display: table-column`,
 //! `caption`.
 
-use crate::block::{border_px, css_px, font_size_px, layout_block, side_px, BlockCtx, FloatCtx};
+use crate::block::{
+    border_px, css_px, font_size_px, layout_block, raw_length_px, side_px, BlockCtx, FloatCtx,
+};
 use crate::boxtree::{LayoutBox, Rect};
 use explorer_css::ComputedStyle;
 
@@ -73,15 +75,20 @@ enum RowClass {
 }
 
 /// Légendes `table-caption` repérées dans l'arbre (§17.4 :
-/// posées au-dessus ou au-dessous de la grille selon
-/// `caption-side`, pleine largeur de table). Hors périmètre
-/// documenté : `caption-side: left|right`.
+/// `top`/`bottom` posées au-dessus/dessous de la grille,
+/// pleine largeur ; `left`/`right` posées en vis-à-vis —
+/// au bord latéral de la boîte table, alignées en haut
+/// (R-164, ancien align HTML).
 #[derive(Default)]
 struct Captions {
     /// `caption-side: top` (défaut).
     top: Vec<Vec<usize>>,
     /// `caption-side: bottom`.
     bottom: Vec<Vec<usize>>,
+    /// `caption-side: left` (vis-à-vis gauche, R-164).
+    left: Vec<Vec<usize>>,
+    /// `caption-side: right` (vis-à-vis droit, R-164).
+    right: Vec<Vec<usize>>,
 }
 
 /// Un rang `table-row` repéré : chemin d'indices depuis la
@@ -204,10 +211,11 @@ fn collect_grid(bx: &LayoutBox) -> (Vec<Row>, Captions) {
                 "table-caption" => {
                     let mut p = prefix.clone();
                     p.push(i);
-                    if c.style.get("caption-side") == Some("bottom") {
-                        caps.bottom.push(p);
-                    } else {
-                        caps.top.push(p);
+                    match c.style.get("caption-side") {
+                        Some("bottom") => caps.bottom.push(p),
+                        Some("left") => caps.left.push(p),
+                        Some("right") => caps.right.push(p),
+                        _ => caps.top.push(p),
                     }
                 }
                 "table-row" => {
@@ -490,7 +498,20 @@ pub(crate) fn layout_table(
     // cadre rognerait les colonnes.
     let total_pref: f32 = pref_w.iter().sum();
     let total_min: f32 = min_w.iter().sum();
-    let frame = il + ir;
+    // §17.6.1 `border-spacing` (R-159) — consommé seulement
+    // en `separate` : `sh` entre colonnes + bords externes,
+    // `sv` entre rangs + bords externes. Le `collapse`
+    // §17.6.2 ignore la propriété (ses arêtes fusionnent).
+    let (sh, sv) = if st
+        .get("border-collapse")
+        .is_some_and(|v| v.trim() == "collapse")
+    {
+        (0.0_f32, 0.0_f32)
+    } else {
+        border_spacing(&st, cb_w, fs, ctx)
+    };
+    let spacing_x = sh * u16::try_from(ncols + 1).map_or(0.0, f32::from);
+    let frame = il + ir + spacing_x;
     // En `table-layout:fixed`, une largeur `auto` s'évalue
     // sur les colonnes spécifiées (`col` + premier rang),
     // jamais sur le contenu (§17.5.2.1) — les colonnes
@@ -505,6 +526,11 @@ pub(crate) fn layout_table(
         .min(cb_w);
     let table_w = table_w.max((total_min + frame).min(cb_w));
     let grid_w = (table_w - il - ir).max(0.0);
+    // Budget des colonnes = grid moins les espacements
+    // `border-spacing` (`sh` inter-colonnes + bords
+    // externes, R-159) — `cols_budget` alimente la distribution,
+    // `grid_w` garde la pleine largeur pour les captions.
+    let cols_budget = (grid_w - spacing_x).max(0.0);
 
     // Distribution (§17.5.2.2) : une `width` de cellule cloue
     // sa colonne ; le reste va aux colonnes auto au prorata
@@ -513,18 +539,18 @@ pub(crate) fn layout_table(
     // réduction proportionnelle).
     let fixed_sum: f32 = spec_w.iter().sum();
     let mut col_w = vec![0.0_f32; ncols];
-    if fixed_sum >= grid_w && fixed_sum > 0.0 {
+    if fixed_sum >= cols_budget && fixed_sum > 0.0 {
         for (i, w) in col_w.iter_mut().enumerate() {
             *w = if spec_w[i] > 0.0 {
-                spec_w[i] * grid_w / fixed_sum
+                spec_w[i] * cols_budget / fixed_sum
             } else {
-                min_w[i].min(grid_w)
+                min_w[i].min(cols_budget)
             };
         }
     } else {
-        let mut left = grid_w;
+        let mut left = cols_budget;
         for (i, w) in col_w.iter_mut().enumerate() {
-            *w = spec_w[i].min(grid_w);
+            *w = spec_w[i].min(cols_budget);
             left -= *w;
         }
         let auto_pref: f32 = (0..ncols)
@@ -624,6 +650,11 @@ pub(crate) fn layout_table(
             gap[k] = bot_w[k - 1].max(top_w[k]);
         }
         gap[nrows] = (bot_w[nrows - 1] - bb).max(0.0);
+    } else {
+        // `separate` (§17.6.1 / R-159) : `sv` entre chaque
+        // rang ET aux bords externes — `gap[0]`/`gap[nrows]`
+        // couvrent les extrémités comme sous `collapse`.
+        gap.fill(sv);
     }
 
     // Pose : chaque cellule est un bloc dans sa colonne ;
@@ -657,13 +688,21 @@ pub(crate) fn layout_table(
     }
     let mut row_tops = Vec::new();
     let mut row_fixed = vec![false; nrows];
+    // Hauteurs posées par cellule — consommées par le
+    // `vertical-align` de la passe 2 (R-160).
+    let mut cell_used: Vec<Vec<f32>> = Vec::with_capacity(nrows);
     for (k, row) in rows.iter().enumerate() {
         let mut row_h = 0.0_f32;
+        let mut used_list = Vec::with_capacity(row.cells.len());
         for cell in &row.cells {
-            let col_x: f32 = x + il + col_w[..cell.col].iter().sum::<f32>();
+            let col_x: f32 = x
+                + il
+                + sh * u16::try_from(cell.col + 1).map_or(0.0, f32::from)
+                + col_w[..cell.col].iter().sum::<f32>();
             // `colspan` : la cellule occupe la somme des
             // colonnes couvertes (R-47).
-            let cw: f32 = col_w[cell.col..cell.col + cell.cols].iter().sum();
+            let cw: f32 = col_w[cell.col..cell.col + cell.cols].iter().sum::<f32>()
+                + sh * u16::try_from(cell.cols - 1).map_or(0.0, f32::from);
             // Cellule positionnée → conteneur pour ses absolus.
             let cell_cb = Rect {
                 x: col_x,
@@ -672,6 +711,7 @@ pub(crate) fn layout_table(
                 height: 0.0,
             };
             let Some(cell_box) = at_path(bx, &cell.path) else {
+                used_list.push(0.0);
                 continue;
             };
             if cell_box
@@ -696,7 +736,9 @@ pub(crate) fn layout_table(
                 &mut FloatCtx::default(),
             );
             row_h = row_h.max(used);
+            used_list.push(used);
         }
+        cell_used.push(used_list);
         row_tops.push((cursor_y, row_h));
         cursor_y += row_h + gap[k + 1];
     }
@@ -734,7 +776,16 @@ pub(crate) fn layout_table(
     // `border-top|bottom` peignent les lignes fusionnées).
     for (k, row) in rows.iter().enumerate() {
         let (ry, rh) = row_tops[k];
-        for cell in &row.cells {
+        // `tr[valign]` (R-160) : lu sur la rangée — la
+        // cellule spécifiée prime (vertical-align n'est pas
+        // hérité ; le hint tr existe mais n'atteint pas les
+        // cellules sinon).
+        let tr_va: Option<String> = row
+            .path
+            .as_ref()
+            .and_then(|p| at_path(bx, p))
+            .and_then(|t| t.style.get("vertical-align").map(str::to_string));
+        for (ci, cell) in row.cells.iter().enumerate() {
             let Some(cell_box) = at_path(bx, &cell.path) else {
                 continue;
             };
@@ -747,6 +798,30 @@ pub(crate) fn layout_table(
                 + gap[k + 1..last].iter().sum::<f32>();
             cell_box.rect.height = cell_box.rect.height.max(span_h.max(rh));
             cell_box.rect.y = ry;
+            // `vertical-align` cellule (R-160, §17.5.3.1) :
+            // `middle`/`bottom` décalent le contenu posé dans
+            // la hauteur finale (fonds/bordures couvrent
+            // toute la rangée). `baseline`/`top` = pas de
+            // décalage (baseline réel = lot suivant).
+            let cell_h = cell_box.rect.height;
+            let used = cell_used
+                .get(k)
+                .and_then(|r| r.get(ci))
+                .copied()
+                .unwrap_or(0.0);
+            let va = cell_box
+                .style
+                .get("vertical-align")
+                .or(tr_va.as_deref())
+                .unwrap_or("baseline");
+            let dy = match va {
+                "middle" => (cell_h - used) / 2.0,
+                "bottom" => cell_h - used,
+                _ => 0.0,
+            };
+            if dy > 0.01 {
+                shift_subtree_y(cell_box, dy);
+            }
         }
         let mut cur = &mut *bx;
         let Some(rpath) = &row.path else {
@@ -819,6 +894,37 @@ pub(crate) fn layout_table(
             &mut FloatCtx::default(),
         );
     }
+    // R-164 — `caption-side: left|right` : la légende se
+    // pose en vis-à-vis du bord externe de la table, alignée
+    // haut (largeur = sa préférée, bornée à 40% de la
+    // table). Elle n'entre pas dans `h` (spec : posée à
+    // côté de la boîte bordure — ici bord interne).
+    for (side, caps_side) in [(-1.0_f32, &caps.left), (1.0_f32, &caps.right)] {
+        for p in caps_side {
+            let Some(cap) = at_path(bx, p) else {
+                continue;
+            };
+            let cap_w = (table_w * 0.4).min(grid_w);
+            let cap_x = if side < 0.0 { x - cap_w } else { x + table_w };
+            let cap_cb = Rect {
+                x: cap_x,
+                y: y + it,
+                width: cap_w,
+                height: 0.0,
+            };
+            layout_block(
+                cap,
+                cap_x,
+                y + it,
+                cap_w,
+                None,
+                ctx,
+                fs,
+                cap_cb,
+                &mut FloatCtx::default(),
+            );
+        }
+    }
     let h = cursor_y - y + ib;
     bx.rect = Rect {
         x,
@@ -864,4 +970,40 @@ fn cell_widths(bx: &LayoutBox, cell_path: &[usize], ctx: &BlockCtx, fs: f32) -> 
         + border_px(st, "border-left-width", 0.0, fs, ctx)
         + border_px(st, "border-right-width", 0.0, fs, ctx);
     (longest + extras, pref + extras, 0.0)
+}
+
+/// `border-spacing` → `(horizontal, vertical)` — deux
+/// longueurs ou une (la seconde = la première, §17.6.1).
+/// `0`/invalide → `0` — consommé seulement en `separate`
+/// (R-159 ; `collapse` fusionne via `gap[]` §17.6.2).
+fn border_spacing(st: &ComputedStyle, cb_w: f32, fs: f32, ctx: &BlockCtx) -> (f32, f32) {
+    let mut it = st
+        .get("border-spacing")
+        .into_iter()
+        .flat_map(|v| v.split_whitespace());
+    let h = it.next().and_then(|t| raw_length_px(t, cb_w, fs, ctx));
+    let v = it.next().and_then(|t| raw_length_px(t, cb_w, fs, ctx));
+    match (h, v) {
+        (Some(h), Some(v)) => (h, v),
+        (Some(h), None) => (h, h),
+        _ => (0.0, 0.0),
+    }
+}
+
+/// Décale `dy` tout le contenu posé d'une boîte — lignes
+/// inline (fragments) et sous-arbres enfants, récursif.
+/// La boîte elle-même garde sa géométrie : fonds et
+/// bordures couvrent la rangée entière — utilisé par
+/// `vertical-align` de cellule (R-160, §17.5.3.1).
+fn shift_subtree_y(bx: &mut LayoutBox, dy: f32) {
+    for line in &mut bx.lines {
+        line.rect.y += dy;
+        for frag in &mut line.fragments {
+            frag.rect.y += dy;
+        }
+    }
+    for child in &mut bx.children {
+        child.rect.y += dy;
+        shift_subtree_y(child, dy);
+    }
 }

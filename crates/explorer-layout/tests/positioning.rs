@@ -106,16 +106,19 @@ fn table_colonnes_egales_sans_largeurs() {
     );
     let a = find(&bx, by_id(&dom, "a"));
     let b = find(&bx, by_id(&dom, "b"));
+    // `border-spacing:2px` par défaut UA (R-159) : 2px entre
+    // les cellules, 6px au total rognent le budget colonnes
+    // → parts égales de (200 - 6) = 97.
     assert!(
-        (b.rect.x - (a.rect.x + a.rect.width)).abs() < 0.01,
-        "cellules adjacentes : a {:?} b {:?}",
+        (b.rect.x - (a.rect.x + a.rect.width) - 2.0).abs() < 0.01,
+        "cellules espacées de 2px : a {:?} b {:?}",
         a.rect,
         b.rect
     );
     assert!((a.rect.width - b.rect.width).abs() < 0.01);
     assert!(
-        (a.rect.width - 100.0).abs() < 0.5,
-        "colonne ≈ moitié de la table : {}",
+        (a.rect.width - 97.0).abs() < 0.5,
+        "colonne ≈ moitié de la table moins spacing : {}",
         a.rect.width
     );
 }
@@ -191,9 +194,11 @@ fn table_colspan_mesure_repartie_sur_les_colonnes() {
     let w = find(&bx, by_id(&dom, "w"));
     let a = find(&bx, by_id(&dom, "a"));
     let b = find(&bx, by_id(&dom, "b"));
-    // La cellule enjambée couvre exactement les deux colonnes.
+    // La cellule enjambée couvre les deux colonnes PLUS le
+    // `border-spacing` interne (2px par défaut UA, §17.6.1 —
+    // la cellule enjambée absorbe l'espacement traversé).
     assert!(
-        (w.rect.width - (a.rect.width + b.rect.width)).abs() < 0.01,
+        (w.rect.width - (a.rect.width + b.rect.width + 2.0)).abs() < 0.01,
         "w={:?} a={:?} b={:?}",
         w.rect,
         a.rect,
@@ -243,9 +248,15 @@ fn table_spans_malformes_degradent() {
     let a = find(&bx, by_id(&dom, "a"));
     let b = find(&bx, by_id(&dom, "b"));
     let c = find(&bx, by_id(&dom, "c"));
-    for (n, r) in [("a", a), ("b", b), ("c", c)] {
-        assert!(r.rect.width > 0.0, "{n} posée : {r:?}");
+    // `colspan=999999999` → 1000 (borne HTML) : le spacing
+    // par défaut (2px × ~1000 colonnes, R-159) excède alors
+    // toute la table — les cellules à 1 colonne tombent à
+    // 0 (rendu honnête, identique aux navigateurs), la
+    // cellule enjambée capte ses espacements internes.
+    for (n, r) in [("a", a), ("b", b)] {
+        assert!(r.rect.width >= 0.0, "{n} posée : {r:?}");
     }
+    assert!(c.rect.width > 0.0, "c posée : {c:?}");
     assert!(b.rect.x >= a.rect.x + a.rect.width - 0.01);
 }
 

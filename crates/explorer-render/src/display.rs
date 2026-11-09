@@ -30,6 +30,31 @@ use explorer_layout::{
 };
 
 /// Une primitive de dessin, dans l'ordre de peinture.
+/// Opération `filter` CSS (R-M5) — `drop-shadow()`
+/// volontairement absent (ombre déjà portée par
+/// `box-shadow`/`text-shadow` ; `url()` SVG hors scope).
+#[derive(Debug, Clone, PartialEq)]
+pub enum FilterOp {
+    /// `blur(<longueur>)` — rayon px.
+    Blur(f32),
+    /// `brightness(<f|%>)` — facteur.
+    Brightness(f32),
+    /// `contrast(<f|%>)` — facteur.
+    Contrast(f32),
+    /// `grayscale(<f|%>)` — part 0..1.
+    Grayscale(f32),
+    /// `invert(<f|%>)` — part 0..1.
+    Invert(f32),
+    /// `opacity(<f|%>)` — facteur alpha.
+    Opacity(f32),
+    /// `saturate(<f|%>)` — facteur.
+    Saturate(f32),
+    /// `sepia(<f|%>)` — part 0..1.
+    Sepia(f32),
+    /// `hue-rotate(<angle>)` — degrés.
+    HueRotate(f32),
+}
+
 #[derive(Debug, Clone)]
 pub enum DisplayItem {
     /// Rectangle plein (fond, côté de bordure, placeholder).
@@ -38,6 +63,27 @@ pub enum DisplayItem {
         rect: Rect,
         /// Couleur RGBA.
         color: Color,
+        /// Rayons des 4 coins [tl,tr,br,bl] px (R-167) —
+        /// 0 = rectangle franc.
+        radii: [f32; 4],
+    },
+    /// Ombre portée d'une boîte (`box-shadow`, R-M2) —
+    /// peinte SOUS le fond/bordure de son élément (App. E).
+    BoxShadow {
+        /// Border box de l'élément (avant offset/spread).
+        rect: Rect,
+        /// Décalage `(dx, dy)` de l'ombre.
+        offset: (f32, f32),
+        /// Rayon de flou px (approx. en bandes alpha au
+        /// raster — pas de blur gaussien).
+        blur: f32,
+        /// Expansion px de la boîte d'ombre.
+        spread: f32,
+        /// Couleur de l'ombre.
+        color: Color,
+        /// Rayons des coins `[tl,tr,br,bl]` (suivent
+        /// `border-radius`, R-167).
+        radii: [f32; 4],
     },
     /// Bordure d'une boîte — 4 côtés uniformisés en un item.
     Border {
@@ -49,6 +95,8 @@ pub enum DisplayItem {
         colors: [Color; 4],
         /// Style (`solid`/`dashed`/`dotted`/…) par côté.
         styles: [BorderStyle; 4],
+        /// Rayons des 4 coins [tl,tr,br,bl] px (R-167).
+        radii: [f32; 4],
     },
     /// Run de glyphes shapés, posé depuis l'origine
     /// baseline (`x`, `y` = ligne de base).
@@ -129,6 +177,15 @@ pub enum DisplayItem {
     },
     /// Entrée de zone de clipping (`overflow` ≠ `visible`).
     PushClip(Rect),
+    /// Entrée de zone de clipping arrondie (R-M9) :
+    /// `overflow` ≠ `visible` + `border-radius` > 0 — la
+    /// géométrie suit `rounded_rect_path` au raster.
+    PushClipRounded {
+        /// Zone de clipping (border box de la boîte).
+        rect: Rect,
+        /// Rayons des 4 coins `[tl,tr,br,bl]` px.
+        radii: [f32; 4],
+    },
     /// Sortie de la zone de clipping correspondante.
     PopClip,
     /// `transform: …` — matrice affine (origine déjà résolue
@@ -137,6 +194,23 @@ pub enum DisplayItem {
     PushTransform(tiny_skia::Transform),
     /// Fin de portée du dernier `PushTransform`.
     PopTransform,
+    /// Début d'un groupe filtré (`filter`, R-M5) : les
+    /// items jusqu'à `PopFilter` se peignent hors-écran
+    /// puis reçoivent les ops avant composite.
+    PushFilter(Vec<FilterOp>),
+    /// Fin du groupe filtré — composite du tampon avec
+    /// les ops appliquées.
+    PopFilter,
+    /// `backdrop-filter` (R-M9b) : les pixels DÉJÀ peints
+    /// sous `rect` reçoivent les ops, le contenu de la
+    /// boîte se peint ensuite par-dessus.
+    BackdropFilter {
+        /// Zone filtrée (border box de l'élément).
+        rect: Rect,
+        /// Ops `<filter-function-list>` (mêmes que
+        /// `filter` — `drop-shadow`/`url` hors scope).
+        ops: Vec<FilterOp>,
+    },
     /// Marqueur d'une boîte `display: list-item`
     /// (`list-style-type` ≠ `none`, issue #9) — forme
     /// primitive rasterisée directement (pas de shaping :
@@ -191,6 +265,14 @@ pub enum BorderStyle {
     Dotted,
     /// Double liseré.
     Double,
+    /// Effet 3D enfoncé (R-166 : demi-teintes par côté).
+    Inset,
+    /// Effet 3D en relief (R-166 : demi-teintes par côté).
+    Outset,
+    /// Rainure 3D — moitié externe `inset`, interne `outset`.
+    Groove,
+    /// Crête 3D — moitié externe `outset`, interne `inset`.
+    Ridge,
 }
 
 /// La frame prête à rasteriser : items + taille du viewport.
@@ -294,7 +376,7 @@ impl DisplayList {
         for item in &self.items {
             use std::fmt::Write as _;
             match item {
-                DisplayItem::FillRect { rect, color } => {
+                DisplayItem::FillRect { rect, color, .. } => {
                     let _ = writeln!(out, "fill {rect:?} #{color:?}");
                 }
                 DisplayItem::Border { rect, .. } => {
@@ -321,6 +403,9 @@ impl DisplayList {
                 DisplayItem::MaskedFill { rect, mask, .. } => {
                     let _ = writeln!(out, "masked-fill {}x{} {rect:?}", mask.width, mask.height);
                 }
+                DisplayItem::BoxShadow { rect, .. } => {
+                    let _ = writeln!(out, "box-shadow {rect:?}");
+                }
                 DisplayItem::Marker { rect, kind, .. } => {
                     let _ = writeln!(out, "marker {kind:?} {rect:?}");
                 }
@@ -330,11 +415,19 @@ impl DisplayList {
                 DisplayItem::PushClip(r) => {
                     let _ = writeln!(out, "push-clip {r:?}");
                 }
+                DisplayItem::PushClipRounded { rect, radii } => {
+                    let _ = writeln!(out, "push-clip-rounded {rect:?} {radii:?}");
+                }
                 DisplayItem::PopClip => out.push_str("pop-clip\n"),
                 DisplayItem::PushTransform(m) => {
                     let _ = writeln!(out, "push-transform {m:?}");
                 }
                 DisplayItem::PopTransform => out.push_str("pop-transform\n"),
+                DisplayItem::PushFilter(_) => out.push_str("push-filter\n"),
+                DisplayItem::PopFilter => out.push_str("pop-filter\n"),
+                DisplayItem::BackdropFilter { rect, .. } => {
+                    let _ = writeln!(out, "backdrop-filter {rect:?}");
+                }
             }
         }
         out
@@ -429,7 +522,25 @@ fn item_bounds(item: &DisplayItem) -> Option<Rect> {
         | DisplayItem::Image { rect, .. }
         | DisplayItem::MaskedFill { rect, .. }
         | DisplayItem::Marker { rect, .. }
+        | DisplayItem::BackdropFilter { rect, .. }
         | DisplayItem::BackgroundImage { rect, .. } => Some(*rect),
+        // L'ombre déborde sa boîte (offset + spread +
+        // blur) — borne propre pour le dirty-tracking.
+        DisplayItem::BoxShadow {
+            rect,
+            offset,
+            blur,
+            spread,
+            ..
+        } => {
+            let g = blur + spread.max(0.0);
+            Some(Rect {
+                x: rect.x + offset.0 - g,
+                y: rect.y + offset.1 - g,
+                width: rect.width + 2.0 * g,
+                height: rect.height + 2.0 * g,
+            })
+        }
         // Pas de fonte résolue ici — borne approchée :
         // ~0.6em/caractère de large, 1.2em de haut au-dessus de
         // la baseline.
@@ -464,9 +575,12 @@ fn item_bounds(item: &DisplayItem) -> Option<Rect> {
             },
         }),
         DisplayItem::PushClip(_)
+        | DisplayItem::PushClipRounded { .. }
         | DisplayItem::PopClip
         | DisplayItem::PushTransform(_)
-        | DisplayItem::PopTransform => None,
+        | DisplayItem::PopTransform
+        | DisplayItem::PushFilter(_)
+        | DisplayItem::PopFilter => None,
     }
 }
 
@@ -506,29 +620,45 @@ fn item_eq(a: &DisplayItem, b: &DisplayItem) -> bool {
     use DisplayItem as D;
     match (a, b) {
         (
+            D::BoxShadow {
+                rect: r1,
+                color: c1,
+                ..
+            },
+            D::BoxShadow {
+                rect: r2,
+                color: c2,
+                ..
+            },
+        ) => r1 == r2 && c1 == c2,
+        (
             D::FillRect {
                 rect: r1,
                 color: c1,
+                radii: ra1,
             },
             D::FillRect {
                 rect: r2,
                 color: c2,
+                radii: ra2,
             },
-        ) => r1 == r2 && c1 == c2,
+        ) => r1 == r2 && c1 == c2 && ra1 == ra2,
         (
             D::Border {
                 rect: r1,
                 widths: w1,
                 colors: c1,
                 styles: s1,
+                radii: ra1,
             },
             D::Border {
                 rect: r2,
                 widths: w2,
                 colors: c2,
                 styles: s2,
+                radii: ra2,
             },
-        ) => r1 == r2 && w1 == w2 && c1 == c2 && s1 == s2,
+        ) => r1 == r2 && w1 == w2 && c1 == c2 && s1 == s2 && ra1 == ra2,
         (
             D::Text {
                 origin: o1,
@@ -617,6 +747,20 @@ fn item_eq(a: &DisplayItem, b: &DisplayItem) -> bool {
             },
         ) => o1 == o2 && t1 == t2 && f1 == f2 && c1 == c2 && s1 == s2,
         (D::PushClip(r1), D::PushClip(r2)) => r1 == r2,
+        (
+            D::PushClipRounded {
+                rect: r1,
+                radii: a1,
+            },
+            D::PushClipRounded {
+                rect: r2,
+                radii: a2,
+            },
+        ) => r1 == r2 && a1 == a2,
+        (D::PushFilter(o1), D::PushFilter(o2)) => o1 == o2,
+        (D::BackdropFilter { rect: r1, ops: o1 }, D::BackdropFilter { rect: r2, ops: o2 }) => {
+            r1 == r2 && o1 == o2
+        }
         (D::PushTransform(m1), D::PushTransform(m2)) => {
             (m1.sx, m1.ky, m1.kx, m1.sy, m1.tx, m1.ty) == (m2.sx, m2.ky, m2.kx, m2.sy, m2.tx, m2.ty)
         }
@@ -868,6 +1012,7 @@ fn emit_canvas_bg(
             items.push(DisplayItem::FillRect {
                 rect: canvas,
                 color: c,
+                radii: [0.0; 4],
             });
         }
     }
@@ -1205,7 +1350,11 @@ fn border_style(v: Option<&str>) -> BorderStyle {
     match v {
         Some("solid") => BorderStyle::Solid,
         Some("dotted" | "dashed") => BorderStyle::Dotted,
-        Some("double" | "groove" | "ridge" | "inset" | "outset") => BorderStyle::Double,
+        Some("double") => BorderStyle::Double,
+        Some("groove") => BorderStyle::Groove,
+        Some("ridge") => BorderStyle::Ridge,
+        Some("inset") => BorderStyle::Inset,
+        Some("outset") => BorderStyle::Outset,
         _ => BorderStyle::None,
     }
 }
@@ -1215,6 +1364,101 @@ fn border_style(v: Option<&str>) -> BorderStyle {
 /// (`thin`/`medium`/`thick`) valent 1/3/5 px ; `em`/`rem` et
 /// pourcents sont hors portée ici (pas de contexte de fonte)
 /// → repli `fallback`.
+/// `border-<coin>-radius` → px (R-167) : `%` du plus petit
+/// côté de la boîte (approximation — la spec résout x% sur
+/// la largeur, y% sur la hauteur pour les rayons elliptiques ;
+/// ici rayon circulaire par coin), unité absolue sinon, 0 si
+/// absent/invalide.
+#[allow(clippy::cast_possible_truncation)]
+fn radius_px(raw: Option<&str>, basis: f32) -> f32 {
+    let Some(v) = raw.map(str::trim) else {
+        return 0.0;
+    };
+    if let Some(p) = v.strip_suffix('%') {
+        return p.trim().parse::<f32>().unwrap_or(0.0) / 100.0 * basis;
+    }
+    parse_length(v)
+        .and_then(|l| l.unit.px_factor().map(|f| l.value * f))
+        .unwrap_or(0.0) as f32
+}
+
+/// Rayons des 4 coins `[tl, tr, br, bl]` en px, bornés à la
+/// moitié du plus petit côté (§ couvercle — deux rayons
+/// adjacents ne se chevauchent pas, approximation).
+fn corner_radii(st: &explorer_css::ComputedStyle, rect: &Rect) -> [f32; 4] {
+    let basis = rect.width.min(rect.height).max(0.0);
+    let cap = basis / 2.0;
+    [
+        radius_px(st.get("border-top-left-radius"), basis).min(cap),
+        radius_px(st.get("border-top-right-radius"), basis).min(cap),
+        radius_px(st.get("border-bottom-right-radius"), basis).min(cap),
+        radius_px(st.get("border-bottom-left-radius"), basis).min(cap),
+    ]
+}
+
+/// Une couche `box-shadow` : `inset? x y [blur [spread]]
+/// [color]` dans n'importe quel ordre (spec : 2 à 4
+/// longueurs consécutives + couleur optionnelle).
+#[allow(clippy::cast_possible_truncation, clippy::type_complexity)]
+fn parse_box_shadow_layer(raw: &str) -> Option<((f32, f32), f32, f32, Color, bool)> {
+    let mut lens = Vec::with_capacity(4);
+    let mut color = None;
+    let mut inset = false;
+    for tok in raw.split_whitespace() {
+        if tok.eq_ignore_ascii_case("inset") {
+            inset = true;
+        } else if let Some(l) = parse_length(tok) {
+            lens.push(l.unit.px_factor().map_or(0.0, |f| l.value * f) as f32);
+        } else if let Some(c) = parse_color(tok) {
+            color = Some(c);
+        }
+        // Fonctions couleur (`rgb(…)`, `var(…)`) déjà
+        // résolues en cascade quand supportées.
+    }
+    if lens.len() < 2 {
+        return None;
+    }
+    let blur = lens.get(2).copied().unwrap_or(0.0).max(0.0);
+    let spread = lens.get(3).copied().unwrap_or(0.0);
+    Some((
+        (lens[0], lens[1]),
+        blur,
+        spread,
+        color.unwrap_or(Color::BLACK),
+        inset,
+    ))
+}
+
+/// `box-shadow` → un `DisplayItem::BoxShadow` par couche
+/// (`none`/couches sans 2 longueurs = sautés ; `inset`
+/// documenté non peint — ombres externes seulement).
+fn emit_box_shadows(st: &explorer_css::ComputedStyle, rect: &Rect, items: &mut Vec<DisplayItem>) {
+    let Some(v) = st.get("box-shadow") else {
+        return;
+    };
+    if v.trim().eq_ignore_ascii_case("none") {
+        return;
+    }
+    let radii = corner_radii(st, rect);
+    for layer in bg_layers(v) {
+        let Some((offset, blur, spread, color, inset)) = parse_box_shadow_layer(layer.trim())
+        else {
+            continue;
+        };
+        if inset {
+            continue; // ombre interne non peinte (approx.).
+        }
+        items.push(DisplayItem::BoxShadow {
+            rect: *rect,
+            offset,
+            blur,
+            spread,
+            color,
+            radii,
+        });
+    }
+}
+
 #[allow(clippy::cast_possible_truncation)]
 fn prop_px(st: &explorer_css::ComputedStyle, prop: &str, fallback: f32) -> f32 {
     let raw = st.get_or(prop, "");
@@ -1346,7 +1590,18 @@ fn emit_bg_layers(
             .filter(|s| !s.is_empty())
     };
     let fs = font_size_of(style);
-    for (i, layer) in bg_layers(v).iter().enumerate().rev() {
+    let layers = bg_layers(v);
+    // La table `backgrounds` est clé `NodeId → image` et la
+    // collecte ne fetch que le **premier** `url()` du style
+    // calculé : l'image stockée appartient à la première
+    // couche url — la donner aux couches suivantes
+    // repeindrait cette même bitmap avec leurs paramètres
+    // (mesuré : w3.org/TR/REC-html32 — le filigrane
+    // `no-repeat` était retilé sur tout le viewport par la
+    // couche texture `repeat`). Les autres couches url sont
+    // sautées tant que la session ne fetch pas leurs urls.
+    let first_url = layers.iter().position(|l| bg_has_url(l));
+    for (i, layer) in layers.iter().enumerate().rev() {
         let clip = match layer_value("background-clip", i).as_deref() {
             Some("content-box") => content,
             Some("padding-box") => padding,
@@ -1367,7 +1622,11 @@ fn emit_bg_layers(
             _ => (true, true), // `repeat` = défaut.
         };
         let img = if bg_has_url(layer) {
-            node.and_then(|n| images.backgrounds.get(&n)).cloned()
+            if Some(i) == first_url {
+                node.and_then(|n| images.backgrounds.get(&n)).cloned()
+            } else {
+                None // url non fetchée — couche sautée.
+            }
         } else if bg_has_gradient(layer) {
             crate::gradient::decode_gradient(layer, l_area.0, l_area.1, fs).map(std::sync::Arc::new)
         } else {
@@ -1422,6 +1681,79 @@ fn emit_bg_layers(
     }
 }
 
+/// R-M4 — émission des fantômes `text-shadow` pour un
+/// fragment : une run par couche sous le texte ; `blur`
+/// ≈ 4 fantômes croisés ±blur/2 à alpha/3 (documenté,
+/// pas de gaussien).
+#[allow(clippy::too_many_arguments)]
+fn emit_text_shadows(
+    st: &explorer_css::ComputedStyle,
+    x: f32,
+    base_y: f32,
+    run: &std::sync::Arc<ShapedRun>,
+    fs: f32,
+    ink: Color,
+    items: &mut Vec<DisplayItem>,
+) {
+    for (soff, sblur, scolor) in text_shadows(st, ink) {
+        let mut ghost = |dx: f32, dy: f32, a: u8| {
+            let mut c = scolor;
+            c.a = a;
+            items.push(DisplayItem::Text {
+                origin: (x + soff.0 + dx, base_y + soff.1 + dy),
+                run: run.clone(),
+                font: font_request(st),
+                color: c,
+                size_px: fs,
+            });
+        };
+        if sblur > 0.0 {
+            ghost(sblur / 2.0, 0.0, scolor.a / 3);
+            ghost(-sblur / 2.0, 0.0, scolor.a / 3);
+            ghost(0.0, sblur / 2.0, scolor.a / 3);
+            ghost(0.0, -sblur / 2.0, scolor.a / 3);
+        } else {
+            ghost(0.0, 0.0, scolor.a);
+        }
+    }
+}
+
+/// `text-shadow` → couches `(offset, blur, color)`
+/// (R-M4) : `x y [blur] [color]` par virgule de niveau
+/// 0 ; `none` → vide. Le flou est rendu en fantômes
+/// croisés à l'émission (approx. documentée).
+#[allow(clippy::cast_possible_truncation)]
+fn text_shadows(st: &explorer_css::ComputedStyle, default: Color) -> Vec<((f32, f32), f32, Color)> {
+    let Some(v) = st.get("text-shadow") else {
+        return Vec::new();
+    };
+    if v.trim().eq_ignore_ascii_case("none") {
+        return Vec::new();
+    }
+    bg_layers(v)
+        .iter()
+        .filter_map(|layer| {
+            let mut lens = Vec::with_capacity(3);
+            let mut color = None;
+            for tok in layer.split_whitespace() {
+                if let Some(l) = parse_length(tok) {
+                    lens.push(l.unit.px_factor().map_or(0.0, |f| l.value * f) as f32);
+                } else if let Some(c) = parse_color(tok) {
+                    color = Some(c);
+                }
+            }
+            if lens.len() < 2 {
+                return None;
+            }
+            Some((
+                (lens[0], lens[1]),
+                lens.get(2).copied().unwrap_or(0.0).max(0.0),
+                color.unwrap_or(default),
+            ))
+        })
+        .collect()
+}
+
 /// Marqueur de `display: list-item` (issue #9) : la puce se
 /// peint dans la gouttière avant la content box
 /// (`list-style-position: outside` — l'espace est laissé par
@@ -1430,8 +1762,123 @@ fn emit_bg_layers(
 /// §marker). Émise après le fond de la boîte et avant ses
 /// lignes → sous le texte. `inside` dessine au début du
 /// contenu (le texte n'est pas décalé — résidu).
-fn emit_list_marker(bx: &LayoutBox, items: &mut Vec<DisplayItem>, off: (f32, f32)) {
+/// `filter` → ops (R-M5) : tokens `fn(arg)` de la
+/// valeur ; `none`/aucune op connue → vide (pas de
+/// bracket émis). `drop-shadow()`/`url()` sautés.
+#[allow(clippy::cast_possible_truncation)]
+fn parse_filter(st: &explorer_css::ComputedStyle) -> Vec<FilterOp> {
+    let Some(v) = st.get("filter") else {
+        return Vec::new();
+    };
+    if v.trim().eq_ignore_ascii_case("none") {
+        return Vec::new();
+    }
+    // `1.2` → 1.2 ; `120%` → 1.2 (facteurs) ; `50%`/`0.5`
+    // → 0.5 (parts 0..1) — mêmes tables pour les deux.
+    let num_or_pct = |a: &str| -> Option<f32> {
+        let t = a.trim();
+        t.strip_suffix('%')
+            .and_then(|p| p.parse::<f32>().ok())
+            .map(|v| v / 100.0)
+            .or_else(|| t.parse::<f32>().ok())
+    };
+    let mut out = Vec::new();
+    let mut rest = v;
+    while let Some(p) = rest.find('(') {
+        let name = rest[..p].trim().to_ascii_lowercase();
+        let inner = &rest[p + 1..];
+        let Some(q) = inner.find(')') else {
+            break;
+        };
+        let arg = inner[..q].trim();
+        let op = match name.as_str() {
+            "blur" => parse_length(arg)
+                .and_then(|l| l.unit.px_factor().map(|f| (l.value * f) as f32))
+                .map(|r| FilterOp::Blur(r.max(0.0))),
+            "brightness" => num_or_pct(arg).map(FilterOp::Brightness),
+            "contrast" => num_or_pct(arg).map(FilterOp::Contrast),
+            "grayscale" => num_or_pct(arg).map(FilterOp::Grayscale),
+            "invert" => num_or_pct(arg).map(FilterOp::Invert),
+            "opacity" => num_or_pct(arg).map(FilterOp::Opacity),
+            "saturate" => num_or_pct(arg).map(FilterOp::Saturate),
+            "sepia" => num_or_pct(arg).map(FilterOp::Sepia),
+            "hue-rotate" => arg
+                .strip_suffix("deg")
+                .and_then(|d| d.trim().parse::<f32>().ok())
+                .map(FilterOp::HueRotate),
+            // `drop-shadow()`/`url()` : hors scope R-M5.
+            _ => None,
+        };
+        if let Some(o) = op {
+            out.push(o);
+        }
+        rest = &inner[q + 1..];
+    }
+    out
+}
+
+/// R-168 — `list-style-image` : la bitmap est fetchée
+/// comme les `url()` CSS (clé `NodeId` → `backgrounds`)
+/// et peinte dans la gouttière à la place du marqueur —
+/// absent/`none` → `false`, repli `list-style-type`
+/// (spec).
+#[allow(clippy::cast_possible_truncation, clippy::cast_precision_loss)]
+fn emit_image_marker(
+    bx: &LayoutBox,
+    items: &mut Vec<DisplayItem>,
+    off: (f32, f32),
+    images: &crate::PaintImages,
+) -> bool {
+    if !bx
+        .style
+        .get("list-style-image")
+        .is_some_and(|v| v.contains("url("))
+    {
+        return false;
+    }
+    let Some(img) = bx.node.and_then(|n| images.backgrounds.get(&n)) else {
+        return false;
+    };
+    let fs = font_size_of(&bx.style) as f32;
+    let iw = img.width as f32;
+    let ih = img.height as f32;
+    let baseline_y = bx
+        .lines
+        .first()
+        .map_or_else(|| bx.rect.y + fs, |l| l.rect.y + l.baseline);
+    let cy = baseline_y - fs * 0.3;
+    let content_x = content_rect(bx).x;
+    let inside = bx
+        .style
+        .get("list-style-position")
+        .is_some_and(|p| p.trim() == "inside");
+    let cx = if inside {
+        content_x + iw / 2.0
+    } else {
+        content_x - fs * 0.34 - iw / 2.0
+    };
+    items.push(DisplayItem::Image {
+        rect: Rect {
+            x: cx - iw / 2.0 + off.0,
+            y: cy - ih / 2.0 + off.1,
+            width: iw,
+            height: ih,
+        },
+        img: std::sync::Arc::clone(img),
+    });
+    true
+}
+
+fn emit_list_marker(
+    bx: &LayoutBox,
+    items: &mut Vec<DisplayItem>,
+    off: (f32, f32),
+    images: &crate::PaintImages,
+) {
     if bx.kind != BoxKind::ListItem {
+        return;
+    }
+    if emit_image_marker(bx, items, off, images) {
         return;
     }
     let kind = match bx.style.get("list-style-type").map(str::trim) {
@@ -1980,7 +2427,52 @@ fn paint_self(
     // source propagée — `None != None` sautait le fond de
     // tout pseudo (`:after{…gradient}` text.npr.org, R-74).
     let bg_propagated = bx.node.is_some_and(|n| canvas_bg_src == Some(n));
-    if !anonymous && !inline_flow && !bg_propagated {
+    // R-164 — `empty-cells:hide` (§17.6.1.1) : sous le
+    // modèle `separate`, une cellule sans contenu (ni
+    // enfants ni lignes — `&nbsp;` compte comme contenu)
+    // ne peint ni fond ni bordure.
+    let empty_hidden = bx
+        .style
+        .get("display")
+        .is_some_and(|v| v.trim() == "table-cell")
+        && bx
+            .style
+            .get("empty-cells")
+            .is_some_and(|v| v.trim() == "hide")
+        && bx
+            .style
+            .get("border-collapse")
+            .is_none_or(|v| v.trim() != "collapse")
+        && bx.children.is_empty()
+        && bx.lines.is_empty();
+    // R-M9b — `backdrop-filter` : la zone déjà peinte
+    // sous la boîte reçoit les ops AVANT que fond/contenu
+    // ne s'affichent par-dessus (raster : extract →
+    // ops → recompose la région).
+    if !anonymous && !inline_flow {
+        let bops = bx.style.get("backdrop-filter");
+        if let Some(v) = bops {
+            if !v.trim().eq_ignore_ascii_case("none") {
+                let mut st = bx.style.clone();
+                // `parse_filter` lit `filter` — même
+                // grammaire `<filter-function-list>` :
+                // injecter la valeur `backdrop-filter`.
+                st.set("filter", v);
+                let ops = parse_filter(&st);
+                if !ops.is_empty() {
+                    items.push(DisplayItem::BackdropFilter { rect, ops });
+                }
+            }
+        }
+    }
+    // R-M2 — `box-shadow` : une ombre par couche, émise
+    // AVANT le fond de la boîte (sous lui dans l'ordre de
+    // peinture). `inset` non porté (bordure interne
+    // d'ombre = approximation documentée, sautée).
+    if !anonymous && !inline_flow && !empty_hidden {
+        emit_box_shadows(&bx.style, &rect, items);
+    }
+    if !anonymous && !inline_flow && !bg_propagated && !empty_hidden {
         if let Some(c) = bx.style.get("background-color").and_then(parse_color) {
             if c.a > 0 {
                 // R-52 — `mask-image` présent : la couleur ne
@@ -2026,7 +2518,11 @@ fn paint_self(
                         repeat: mask_repeat(&bx.style),
                     });
                 } else {
-                    items.push(DisplayItem::FillRect { rect, color: c });
+                    items.push(DisplayItem::FillRect {
+                        rect,
+                        color: c,
+                        radii: corner_radii(&bx.style, &rect),
+                    });
                 }
             }
         }
@@ -2061,7 +2557,7 @@ fn paint_self(
     // si le style du côté est déclaré non-`none` — l'initiale
     // `medium` vaut alors 3 px (`border: solid` sans épaisseur
     // peint 3 px).
-    let widths = if anonymous || inline_flow {
+    let widths = if anonymous || inline_flow || empty_hidden {
         [0.0; 4]
     } else {
         [
@@ -2088,6 +2584,7 @@ fn paint_self(
                 border_style(bx.style.get("border-bottom-style")),
                 border_style(bx.style.get("border-left-style")),
             ],
+            radii: corner_radii(&bx.style, &rect),
         });
     }
     // (Les fragments `bx.lines` sont émis par `paint_lines`,
@@ -2111,6 +2608,7 @@ fn paint_self(
                     height: side,
                 },
                 color: ink,
+                radii: [0.0; 4],
             });
         }
     }
@@ -2139,6 +2637,7 @@ fn is_inline_flow(bx: &LayoutBox) -> bool {
         && bx.display() != "inline-table"
 }
 
+#[allow(clippy::too_many_lines)]
 fn paint_lines(bx: &LayoutBox, items: &mut Vec<DisplayItem>, off: (f32, f32)) {
     // Deux passes (R-70) : TOUTES les décorations inline
     // d'abord, TOUS les textes ensuite — un fond émis entre
@@ -2204,13 +2703,63 @@ fn paint_lines(bx: &LayoutBox, items: &mut Vec<DisplayItem>, off: (f32, f32)) {
                     .get("color")
                     .and_then(parse_color)
                     .unwrap_or(Color::BLACK);
+                let fs = prop_px(&frag.style, "font-size", 16.0);
+                // §16.3.1 / R-153 : `text-decoration` résolue
+                // à l'itemisation (`frag.deco`, couleur du
+                // déclarant). `under`/`over` sous l'encre,
+                // `through` après le Text — elle barre les
+                // glyphes. Épaisseur ≈ 1/16 d'em, positions
+                // usuelles (approx. métriques fonte absente).
+                let th = (fs * 0.0625).max(1.0);
+                let base_y = frag.rect.y + frag.baseline + off.1;
+                let deco_rect = |dy: f32| Rect {
+                    x: frag.rect.x + off.0,
+                    y: dy,
+                    width: frag.rect.width,
+                    height: th,
+                };
+                for d in &frag.deco {
+                    let color = d.color.unwrap_or(ink);
+                    if d.lines & explorer_layout::inline::DECO_UNDERLINE != 0 {
+                        items.push(DisplayItem::FillRect {
+                            rect: deco_rect(base_y + (fs * 0.1).max(1.0)),
+                            color,
+                            radii: [0.0; 4],
+                        });
+                    }
+                    if d.lines & explorer_layout::inline::DECO_OVERLINE != 0 {
+                        items.push(DisplayItem::FillRect {
+                            rect: deco_rect(base_y - fs * 0.85),
+                            color,
+                            radii: [0.0; 4],
+                        });
+                    }
+                }
+                emit_text_shadows(
+                    &frag.style,
+                    frag.rect.x + off.0,
+                    base_y,
+                    run,
+                    fs,
+                    ink,
+                    items,
+                );
                 items.push(DisplayItem::Text {
-                    origin: (frag.rect.x + off.0, frag.rect.y + frag.baseline + off.1),
+                    origin: (frag.rect.x + off.0, base_y),
                     run: run.clone(),
                     font: font_request(&frag.style),
                     color: ink,
-                    size_px: prop_px(&frag.style, "font-size", 16.0),
+                    size_px: fs,
                 });
+                for d in &frag.deco {
+                    if d.lines & explorer_layout::inline::DECO_LINE_THROUGH != 0 {
+                        items.push(DisplayItem::FillRect {
+                            rect: deco_rect(base_y - fs * 0.3 - th / 2.0),
+                            color: d.color.unwrap_or(ink),
+                            radii: [0.0; 4],
+                        });
+                    }
+                }
             }
         }
     }
@@ -2260,6 +2809,7 @@ fn paint_inline_deco(
             items.push(DisplayItem::FillRect {
                 rect: outer,
                 color: c,
+                radii: [0.0; 4],
             });
         }
     }
@@ -2287,6 +2837,7 @@ fn paint_inline_deco(
                 border_style(st.get("border-bottom-style")),
                 border_style(st.get("border-left-style")),
             ],
+            radii: corner_radii(st, &outer),
         });
     }
 }
@@ -2896,26 +3447,45 @@ fn box_sig(bx: &LayoutBox) -> u64 {
 
 /// Item translaté de `d` — utilisé par les copies de plage
 /// incrémentales. `d = (0,0)` → clone simple.
+#[allow(clippy::too_many_lines)]
 fn translate_item(it: &DisplayItem, d: (f32, f32)) -> DisplayItem {
     use DisplayItem as D;
     if d == (0.0, 0.0) {
         return it.clone();
     }
     match it {
-        D::FillRect { rect, color } => D::FillRect {
+        D::FillRect { rect, color, radii } => D::FillRect {
             rect: shifted(*rect, d),
             color: *color,
+            radii: *radii,
+        },
+        D::BoxShadow {
+            rect,
+            offset,
+            blur,
+            spread,
+            color,
+            radii,
+        } => D::BoxShadow {
+            rect: shifted(*rect, d),
+            offset: *offset,
+            blur: *blur,
+            spread: *spread,
+            color: *color,
+            radii: *radii,
         },
         D::Border {
             rect,
             widths,
             colors,
             styles,
+            radii,
         } => D::Border {
             rect: shifted(*rect, d),
             widths: *widths,
             colors: *colors,
             styles: *styles,
+            radii: *radii,
         },
         D::Text {
             origin,
@@ -2981,13 +3551,21 @@ fn translate_item(it: &DisplayItem, d: (f32, f32)) -> DisplayItem {
             size_px: *size_px,
         },
         D::PushClip(r) => D::PushClip(shifted(*r, d)),
+        D::PushClipRounded { rect, radii } => D::PushClipRounded {
+            rect: shifted(*rect, d),
+            radii: *radii,
+        },
         D::PushTransform(m) => {
             let mut m = *m;
             m.tx += d.0;
             m.ty += d.1;
             D::PushTransform(m)
         }
-        D::PopClip | D::PopTransform => it.clone(),
+        D::PopClip | D::PopTransform | D::PushFilter(_) | D::PopFilter => it.clone(),
+        D::BackdropFilter { rect, ops } => D::BackdropFilter {
+            rect: shifted(*rect, d),
+            ops: ops.clone(),
+        },
     }
 }
 
@@ -3355,9 +3933,36 @@ fn legacy_clip_rect(v: &str, r: Rect, px: &dyn Fn(&str, f32) -> Option<f32>) -> 
     })
 }
 
+fn paint_box<'a>(
+    bx: &'a LayoutBox,
+    items: &mut Vec<DisplayItem>,
+    off: (f32, f32),
+    cx: &mut PaintCx<'a>,
+    defer: &mut Vec<(Vec<u16>, &'a LayoutBox)>,
+    pos_defer: &mut Vec<(Vec<u16>, &'a LayoutBox)>,
+    fixed_defer: &mut Vec<(Vec<u16>, &'a LayoutBox)>,
+) {
+    // R-M5 — `filter` encadre TOUTE la sous-arbre de la
+    // boîte (contenu + descendants) : bracket hors-écran
+    // `PushFilter`…`PopFilter` ; la récursion des enfants
+    // bracket le leur à leur tour (imbrication correct).
+    // `drop-shadow()`/`url()` non portés.
+    let fops = parse_filter(&bx.style);
+    let filtered = !fops.is_empty();
+    if filtered {
+        items.push(DisplayItem::PushFilter(fops));
+    }
+    paint_box_impl(bx, items, off, cx, defer, pos_defer, fixed_defer);
+    if filtered {
+        items.push(DisplayItem::PopFilter);
+    }
+}
+
+/// Corps de [`paint_box`] — le wrapper pose le bracket
+/// `filter` (R-M5) autour de tout le sous-arbre.
 #[allow(clippy::too_many_lines)]
 #[allow(clippy::too_many_arguments)]
-fn paint_box<'a>(
+fn paint_box_impl<'a>(
     bx: &'a LayoutBox,
     items: &mut Vec<DisplayItem>,
     off: (f32, f32),
@@ -3435,7 +4040,19 @@ fn paint_box<'a>(
         // l'axe y est devenu `auto`, scrollable).
         let clipped = bx.overflow != Overflow::Visible || bx.overflow_x != Overflow::Visible;
         if clipped {
-            items.push(DisplayItem::PushClip(shifted(bx.rect, off)));
+            // R-M9 — `border-radius` > 0 → clip arrondi,
+            // géométrie arrondie au raster (plus d'excès
+            // angulaire de contenu hors des coins).
+            let clip_rect = shifted(bx.rect, off);
+            let radii = corner_radii(&bx.style, &clip_rect);
+            if radii.iter().any(|r| *r > 0.0) {
+                items.push(DisplayItem::PushClipRounded {
+                    rect: clip_rect,
+                    radii,
+                });
+            } else {
+                items.push(DisplayItem::PushClip(clip_rect));
+            }
         }
         // Les `fixed` descendants remontent à la file RACINE
         // (`fixed_defer`, drainée hors de tout clip) : leur bloc
@@ -3449,7 +4066,7 @@ fn paint_box<'a>(
         // contenu → DANS le clip, pas avec les décorations de
         // `paint_self` émises avant (R-55).
         if !hidden {
-            emit_list_marker(bx, items, off);
+            emit_list_marker(bx, items, off, cx.images);
             paint_lines(bx, items, off);
         }
         // Ordre App. E au sein des non positionnés : (a)

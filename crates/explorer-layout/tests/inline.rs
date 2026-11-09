@@ -71,6 +71,19 @@ fn by_tag(dom: &Dom, tag: &str) -> NodeId {
     panic!("<{tag}> absent")
 }
 
+fn by_id(dom: &Dom, id: &str) -> NodeId {
+    let mut queue = vec![dom.document()];
+    while let Some(n) = queue.pop() {
+        if dom.attribute_str(n, "id").is_ok_and(|v| v == Some(id)) {
+            return n;
+        }
+        if let Ok(ch) = dom.children(n) {
+            queue.extend(ch.iter().rev());
+        }
+    }
+    panic!("#{id} absent")
+}
+
 fn find(b: &LayoutBox, id: NodeId) -> &LayoutBox {
     if b.node == Some(id) {
         return b;
@@ -321,6 +334,7 @@ fn fragment_sub_rect_glyph_metrics() {
         marg_t: 0.0,
         marg_b: 0.0,
         style: explorer_css::ComputedStyle::default(),
+        deco: Vec::new(),
     };
 
     // Tranche "bc" (octets 1..3) : x = 10 + 5 = 15, w = 10.
@@ -584,4 +598,223 @@ fn text_overflow_ellipsis_sans_clip_inerte() {
     let p = find(&bx, by_tag(&dom, "p"));
     let last = p.children[0].lines[0].fragments.last().expect("frag");
     assert_ne!(last.text, "…", "visible : pas de suspension");
+}
+
+/// R-161 — `sup`/`sub`/`vertical-align:px`/`%` : la
+/// baseline des runs concernés se décale (les autres
+/// restent sur la baseline commune).
+#[test]
+fn vertical_align_sub_super_px_pct_decale_la_baseline() {
+    let (dom, bx) = laid_w(
+        "<!doctype html><p>x<sup>2</sup>y<sub>i</sub>\
+         <span style=\"vertical-align:4px\">z</span>\
+         <span style=\"vertical-align:-20%\">w</span></p>",
+        "body { margin: 0 } p { font-size: 20px; margin: 0 }",
+        800.0,
+    );
+    let p = find(&bx, by_tag(&dom, "p"));
+    let frags = &p.children[0].lines[0].fragments;
+    let fy = |needle: &str| -> f32 {
+        frags
+            .iter()
+            .find(|f| f.text.trim() == needle)
+            .map_or(f32::NAN, |f| f.rect.y)
+    };
+    let base_y = fy("x");
+    // Le texte courant peut fusionner « x » au voisin — la
+    // baseline de référence = un fragment sans décalage.
+    let ref_y = frags
+        .iter()
+        .filter(|f| f.text.contains('y') || f.text.contains('x'))
+        .map(|f| f.rect.y)
+        .fold(f32::INFINITY, f32::min);
+    assert!(ref_y.is_finite(), "ligne sans texte courant ?");
+    let up = fy("2");
+    let lo = fy("i");
+    let px = fy("z");
+    let pct = fy("w");
+    assert!(up < ref_y - 2.0, "sup doit monter : up={up} ref={ref_y}");
+    assert!(lo > ref_y + 2.0, "sub doit descendre : lo={lo} ref={ref_y}");
+    assert!(px < ref_y - 3.0, "4px doit monter : px={px} ref={ref_y}");
+    assert!(
+        pct > ref_y + 2.0,
+        "-20% doit descendre : pct={pct} ref={ref_y}"
+    );
+    let _ = base_y;
+}
+
+/// R-162 — `text-transform` appliqué avant itemisation :
+/// `uppercase`/`lowercase` sur tout le texte, `capitalize`
+/// par mot, hérité aux éléments descendants.
+#[test]
+fn text_transform_applique_avant_itemisation() {
+    let (dom, bx) = laid_w(
+        "<!doctype html><p id=u>hello WORLD</p><p id=l>HELLO World</p>\
+         <p id=c>bonjour le monde</p><div id=d><span id=s>abc def</span></div>",
+        "body { margin: 0 } #u { text-transform: uppercase; margin: 0 } \
+         #l { text-transform: lowercase; margin: 0 } \
+         #c { text-transform: capitalize; margin: 0 } \
+         #d { text-transform: uppercase } span { margin: 0 }",
+        800.0,
+    );
+    let text = |id: &str| -> String {
+        let b = find(&bx, by_id(&dom, id));
+        b.children[0]
+            .lines
+            .iter()
+            .flat_map(|l| l.fragments.iter())
+            .map(|f| f.text.as_str())
+            .collect()
+    };
+    assert!(text("u").contains("HELLO WORLD"), "u={}", text("u"));
+    assert!(text("l").contains("hello world"), "l={}", text("l"));
+    assert!(text("c").contains("Bonjour Le Monde"), "c={}", text("c"));
+    // Hérité au descendant `span` (§16.5 — la propriété
+    // descend l'arbre comme `color`).
+    assert!(text("d").contains("ABC DEF"), "d={}", text("d"));
+}
+
+/// R-163 — `input[type=password]` : la valeur rend une
+/// puce par caractère, jamais le texte clair ;
+/// `input[type=image]` : même boîte qu'un `img` — repli
+/// `alt` tant que `src` n'est pas dans `sizes` (le fetch
+/// reste la couture NAV).
+#[test]
+fn input_password_puces_et_type_image_replie_alt() {
+    let (dom, bx) = laid_w(
+        "<!doctype html><input id=pw type=password value=secret>\
+         <input id=im type=image src=btn.png alt=Envoyer>",
+        "body { margin: 0 } input { margin: 0 }",
+        800.0,
+    );
+    // La boîte contrôle enveloppe l'enfant Text dans un
+    // bloc anonyme — collecte récursive du texte.
+    let all_text = |b: &LayoutBox| -> String {
+        let mut out = String::new();
+        let mut stack = vec![b];
+        while let Some(x) = stack.pop() {
+            if let Some(t) = &x.text {
+                out.push_str(t);
+            }
+            stack.extend(x.children.iter());
+        }
+        out
+    };
+    let pw = find(&bx, by_id(&dom, "pw"));
+    let t = all_text(pw);
+    // 6 caractères → 6 puces, jamais le texte clair.
+    assert_eq!(
+        t, "\u{2022}\u{2022}\u{2022}\u{2022}\u{2022}\u{2022}",
+        "pw={t}"
+    );
+    assert!(!t.contains('s'), "le texte clair fuit : {t}");
+    // `type=image` sans `sizes` → repli `alt` (chemin img_box).
+    let im = find(&bx, by_id(&dom, "im"));
+    assert_eq!(all_text(im), "Envoyer");
+}
+
+/// R-165 — `<wbr>` : opportunité de coupure souple à
+/// l'itemisation — un mot insecable se coupe au point
+/// `<wbr>` quand la bande est étroite, sans rien peindre
+/// (la sentinelle ZWSP est strippée avant le shaping).
+#[test]
+fn wbr_opportunite_de_coupure_souple() {
+    let (dom, bx) = laid_w(
+        "<!doctype html><p>mot_insecable<wbr>suite_du_mot</p>",
+        "body { margin: 0 } p { font-size: 20px; margin: 0; width: 110px }",
+        400.0,
+    );
+    let p = find(&bx, by_tag(&dom, "p"));
+    let lines = &p.children[0].lines;
+    assert!(
+        lines.len() >= 2,
+        "le mot devrait couper au wbr : {} lignes",
+        lines.len()
+    );
+    // La sentinelle ne peint rien : aucun fragment ne
+    // porte U+200B.
+    for l in lines {
+        for f in &l.fragments {
+            assert!(!f.text.contains('\u{200B}'), "zwsp peinte : {:?}", f.text);
+        }
+    }
+}
+
+/// R-168 — `word-spacing` : chaque espace U+0020 gagne
+/// le supplément — le fragment texte « a b c » (2 espaces)
+/// s'élargit de 2×ws vs `normal`.
+#[test]
+fn word_spacing_ajoute_par_espace() {
+    let w = |css: &str| -> f32 {
+        let (dom, bx) = laid_w(
+            "<!doctype html><p>a b c</p>",
+            &format!("body {{ margin: 0 }} p {{ margin: 0; font-size: 20px; {css} }}"),
+            800.0,
+        );
+        let p = find(&bx, by_tag(&dom, "p"));
+        p.children[0].lines[0].rect.width
+    };
+    let base = w("word-spacing: normal");
+    let plus = w("word-spacing: 10px");
+    assert!(
+        plus - base > 19.0 && plus - base < 21.0,
+        "2 espaces ×10px attendus : base={base} plus={plus}"
+    );
+}
+
+/// R-168 — `content: attr(name)` : la valeur de
+/// l'attribut de l'élément entre dans le texte généré
+/// du pseudo-élément (concaténée entre les chaînes).
+#[test]
+fn attr_dans_content_pseudo() {
+    let (dom, bx) = laid_w(
+        "<!doctype html><a href=https://ex.fr>lien</a>",
+        "a::after { content: \" [\" attr(href) \"]\" }",
+        800.0,
+    );
+    let a = find(&bx, by_tag(&dom, "a"));
+    // Le pseudo `::after` est le dernier enfant ; son
+    // enfant Text porte la chaîne générée.
+    let mut found = String::new();
+    let mut stack = vec![a];
+    while let Some(b) = stack.pop() {
+        if let Some(t) = &b.text {
+            found.push_str(t);
+        }
+        stack.extend(b.children.iter());
+    }
+    assert!(
+        found.contains("https://ex.fr"),
+        "attr(href) absent du texte généré : {found:?}"
+    );
+}
+
+/// R-169 — `counter-reset`/`counter-increment`/`counter()` :
+/// la valeur de l'env des compteurs entre dans `content`
+/// (incrément par élément, reset à zéro).
+#[test]
+fn counter_increment_reset_dans_content() {
+    let (dom, bx) = laid_w(
+        "<!doctype html><div><h2>a</h2><h2>b</h2></div>",
+        "body { margin: 0 } div { counter-reset: ch 0 } \
+         h2 { counter-increment: ch } h2::before { content: counter(ch) \". \" } h2 { margin: 0 }",
+        800.0,
+    );
+    let texts = || -> Vec<String> {
+        let mut out = Vec::new();
+        let mut stack = vec![bx.clone()];
+        while let Some(b) = stack.pop() {
+            if let Some(t) = &b.text {
+                out.push(t.clone());
+            }
+            stack.extend(b.children.iter().cloned());
+        }
+        out
+    };
+    let all = texts().join("");
+    assert!(
+        all.contains("1. ") && all.contains("2. "),
+        "compteurs : {all:?}"
+    );
+    let _ = dom;
 }

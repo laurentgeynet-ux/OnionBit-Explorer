@@ -24,12 +24,61 @@
 
 use std::collections::HashMap;
 
-use explorer_css::ComputedStyle;
+use explorer_css::{value::Color, ComputedStyle};
 
-use crate::block::{css_px, font_size_px, layout_block, measure_fn, side_px, BlockCtx, FloatCtx};
+use crate::block::{
+    css_px, font_size_px, layout_block, measure_fn, raw_length_px, side_px, BlockCtx, FloatCtx,
+};
 use crate::boxtree::{BoxKind, LayoutBox, Rect};
 use crate::font::{self, ShapedRun};
 use crate::text::{self, Direction};
+
+/// Ligne `text-decoration` sous le texte (R-153).
+pub const DECO_UNDERLINE: u8 = 0b001;
+/// Ligne `text-decoration` au-dessus du texte (R-153).
+pub const DECO_OVERLINE: u8 = 0b010;
+/// Ligne `text-decoration` barrant le texte (R-153).
+pub const DECO_LINE_THROUGH: u8 = 0b100;
+
+/// `text-decoration` **résolue** portée par un [`Fragment`]
+/// (R-153) : l'entrée appartient à l'élément **déclarant** —
+/// sa couleur vient de son style à lui, pas de celui du
+/// fragment traversé (§16.3.1 : la déco enjambe les inlines
+/// descendants, en couleur de déclarant même si les
+/// descendants ont un `color` différent).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct TextDeco {
+    /// Lignes actives — masque [`DECO_UNDERLINE`] /
+    /// [`DECO_OVERLINE`] / [`DECO_LINE_THROUGH`].
+    pub lines: u8,
+    /// `color` de l'élément déclarant ; `None` → l'encre
+    /// du fragment au paint (repli currentcolor).
+    pub color: Option<Color>,
+}
+
+/// `text-decoration` de `st` → entrée résolue, `None` si
+/// absente/`none`. Mots inconnus tolérés (`blink`, styles et
+/// couleurs du shorthand Level 4 — ignorés, jamais d'échec).
+fn text_deco(st: &ComputedStyle) -> Option<TextDeco> {
+    let v = st.get("text-decoration")?;
+    let mut lines = 0u8;
+    for t in v.split_ascii_whitespace() {
+        if t.eq_ignore_ascii_case("underline") {
+            lines |= DECO_UNDERLINE;
+        } else if t.eq_ignore_ascii_case("overline") {
+            lines |= DECO_OVERLINE;
+        } else if t.eq_ignore_ascii_case("line-through") {
+            lines |= DECO_LINE_THROUGH;
+        }
+    }
+    if lines == 0 {
+        return None;
+    }
+    Some(TextDeco {
+        lines,
+        color: st.color("color"),
+    })
+}
 
 /// Fragment posé dans une ligne : tranche de texte shapé, ou
 /// boîte atomique `inline-block` (`atomic`, `text` vide).
@@ -79,6 +128,11 @@ pub struct Fragment {
     /// `color`/`font-*` ICI, pas sur la boîte des lignes :
     /// `a{color}`/`span{color}` doit colorer ses runs (R-18).
     pub style: ComputedStyle,
+    /// `text-decoration` résolues des ancêtres déclarants
+    /// (R-153, ordre ancêtre → descendant) — vide sans déco,
+    /// vide aussi sur les atomes : la propagation saute les
+    /// remplacés (§16.3.1).
+    pub deco: Vec<TextDeco>,
 }
 
 /// Une ligne de contenu en-ligne posée.
@@ -111,6 +165,10 @@ struct Item {
     /// (ouverture ou fermeture) — porte les marges
     /// horizontales de l'élément (§8.3/§9.4.2).
     marker: Option<Marker>,
+    /// Décos résolues au moment de l'itemisation (R-153) —
+    /// snapshot de la pile des ancêtres déclarants ; vide
+    /// pour atomes et marqueurs.
+    deco: Vec<TextDeco>,
 }
 
 /// Borne d'élément en-ligne : `Open` applique `margin-left`,
@@ -226,12 +284,12 @@ fn apply_text_overflow(
         }
         // L'ellipsis prend la fonte du dernier fragment texte
         // (spec : mise en forme de l'élément qui déborde).
-        let Some((est, enode, eowner, ebase)) = line
+        let Some((est, enode, eowner, ebase, edeco)) = line
             .fragments
             .iter()
             .rev()
             .find(|f| !f.atomic)
-            .map(|f| (f.style.clone(), f.node, f.owner, f.baseline))
+            .map(|f| (f.style.clone(), f.node, f.owner, f.baseline, f.deco.clone()))
         else {
             continue;
         };
@@ -278,6 +336,7 @@ fn apply_text_overflow(
             marg_t: 0.0,
             marg_b: 0.0,
             style: est,
+            deco: edeco,
         });
         line.rect.width = (cut + ell_w - line.rect.x).max(0.0);
     }
@@ -464,13 +523,25 @@ fn size_atomics_walk(
 fn collect_items(bx: &LayoutBox) -> Vec<Item> {
     let mut items = Vec::new();
     let mut aid = 0usize;
+    // §16.3.1 / R-153 : une déco posée sur le CONTENEUR
+    // enjambe son propre contenu en-ligne — la pile des
+    // déclarants démarre avec la sienne (`<div style=
+    // "text-decoration:underline">`). Les descendants la
+    // complètent à l'entrée de chaque élément inline.
+    let mut decos: Vec<TextDeco> = text_deco(&bx.style).into_iter().collect();
     for (owner, child) in bx.children.iter().enumerate() {
-        collect_child(child, owner, &mut items, &mut aid);
+        collect_child(child, owner, &mut items, &mut aid, &mut decos);
     }
     items
 }
 
-fn collect_child(b: &LayoutBox, owner: usize, items: &mut Vec<Item>, aid: &mut usize) {
+fn collect_child(
+    b: &LayoutBox,
+    owner: usize,
+    items: &mut Vec<Item>,
+    aid: &mut usize,
+    decos: &mut Vec<TextDeco>,
+) {
     // Hors-flux : `absolute`/`fixed` est posé par
     // `resolve_absolutes` — son contenu n'entre jamais dans
     // les items de la ligne, sinon son texte serait posé une
@@ -486,7 +557,7 @@ fn collect_child(b: &LayoutBox, owner: usize, items: &mut Vec<Item>, aid: &mut u
     // `display: inline-block` — l'atomicité ne vaut que pour
     // les conteneurs.
     if let Some(t) = &b.text {
-        items.push(text_item(b, owner, t));
+        items.push(text_item(b, owner, t, decos));
         return;
     }
     if is_atomic(b) {
@@ -499,6 +570,10 @@ fn collect_child(b: &LayoutBox, owner: usize, items: &mut Vec<Item>, aid: &mut u
             pieces: Vec::new(),
             aid: Some(id),
             marker: None,
+            // §16.3.1 : la déco ne propage pas dans un
+            // remplacé/atomique — `deco` reste vide même si
+            // des ancêtres déclarent (`<a><img></a>`).
+            deco: Vec::new(),
         });
         return;
     }
@@ -511,6 +586,18 @@ fn collect_child(b: &LayoutBox, owner: usize, items: &mut Vec<Item>, aid: &mut u
     // « marge » copiée n'est pas la leur : transparentes.
     let margins = b.kind == BoxKind::Inline
         && (b.style.get("margin-left").is_some() || b.style.get("margin-right").is_some());
+    // Élément en-ligne déclarant (§16.3.1 / R-153) : sa déco
+    // enjambe le contenu descendant — empilée pour les items
+    // produits par la descente, dépilée à la fermeture.
+    // `AnonymousBlock` n'est pas un déclarant : son style
+    // cloné porte la déco du conteneur, déjà seedée par
+    // `collect_items` — la repousser la doublerait.
+    let pushed = (b.kind == BoxKind::Inline)
+        .then(|| text_deco(&b.style))
+        .flatten();
+    if let Some(d) = pushed {
+        decos.push(d);
+    }
     if margins {
         items.push(Item {
             owner,
@@ -519,10 +606,14 @@ fn collect_child(b: &LayoutBox, owner: usize, items: &mut Vec<Item>, aid: &mut u
             pieces: Vec::new(),
             aid: None,
             marker: Some(Marker::Open),
+            deco: Vec::new(),
         });
     }
     for c in &b.children {
-        explorer_common::deep(|| collect_child(c, owner, items, aid));
+        explorer_common::deep(|| collect_child(c, owner, items, aid, decos));
+    }
+    if pushed.is_some() {
+        decos.pop();
     }
     if margins {
         items.push(Item {
@@ -532,12 +623,15 @@ fn collect_child(b: &LayoutBox, owner: usize, items: &mut Vec<Item>, aid: &mut u
             pieces: Vec::new(),
             aid: None,
             marker: Some(Marker::Close),
+            deco: Vec::new(),
         });
     }
 }
 
 /// Item texte : runs itemisés → pièces entre opportunités.
-fn text_item(b: &LayoutBox, owner: usize, t: &str) -> Item {
+/// `decos` = pile des décos déclarées par les ancêtres
+/// en-ligne (R-153) — copiée en snapshot sur l'item.
+fn text_item(b: &LayoutBox, owner: usize, t: &str, decos: &[TextDeco]) -> Item {
     // §16.6.1 white-space processing : `normal`/`nowrap` effondrent
     // toute suite de blancs en une espace ; `pre-line` effondre les
     // espaces/tabs mais garde `\n` (saut forcé) ; `pre`/`pre-wrap`
@@ -554,6 +648,26 @@ fn text_item(b: &LayoutBox, owner: usize, t: &str) -> Item {
             collapsed = collapse_ws(t);
             &collapsed
         }
+    };
+    // R-162 — text-transform : applique a la chaine avant
+    // itemisation/segmentation UAX #14 (§16.5) — les
+    // lettres changent, la ponctuation et les espaces non ;
+    // herite via le style calcule.
+    let transformed;
+    let src = match b.style.get("text-transform").map(str::trim) {
+        Some("uppercase") => {
+            transformed = src.to_uppercase();
+            &transformed
+        }
+        Some("lowercase") => {
+            transformed = src.to_lowercase();
+            &transformed
+        }
+        Some("capitalize") => {
+            transformed = capitalize_words(src);
+            &transformed
+        }
+        _ => src,
     };
     let mut pieces = Vec::new();
     for run in text::itemize(src) {
@@ -592,6 +706,7 @@ fn text_item(b: &LayoutBox, owner: usize, t: &str) -> Item {
         pieces,
         aid: None,
         marker: None,
+        deco: decos.to_vec(),
     }
 }
 
@@ -639,7 +754,7 @@ fn strip_break_chars(p: &str) -> &str {
     p.trim_end_matches(|c| {
         matches!(
             c,
-            '\n' | '\r' | '\u{85}' | '\u{B}' | '\u{C}' | '\u{2028}' | '\u{2029}'
+            '\n' | '\r' | '\u{85}' | '\u{B}' | '\u{C}' | '\u{2028}' | '\u{2029}' | '\u{200B}'
         )
     })
 }
@@ -689,7 +804,7 @@ impl LineAcc {
 
     /// Ferme la ligne à `y` : aligne les fragments sur la
     /// baseline commune, calcule le rect.
-    fn close(&mut self, y: &mut f32, lines: &mut Vec<LineBox>) {
+    fn close(&mut self, y: &mut f32, lines: &mut Vec<LineBox>, ctx: &BlockCtx) {
         // §16.6.1 : les espaces en FIN de ligne sont retirées
         // (elles ne rendent rien et ne comptent pas dans la
         // largeur — `text-align` mesure sans elles).
@@ -732,16 +847,28 @@ impl LineAcc {
             // (approximation — la spec centre sur x-height/2
             // au-dessus de la baseline). Texte et autres clés
             // : baseline.
-            let va = if f.atomic {
-                f.style.get("vertical-align").unwrap_or("baseline")
-            } else {
-                "baseline"
+            let va = f.style.get("vertical-align").unwrap_or("baseline");
+            // R-161 — décalages de baseline sur tout fragment
+            // : / en fractions de font-size
+            // (métriques fonte hors périmètre), longueur en
+            // px négative = monte,  de la hauteur de strut
+            // (approxime la line-height, §10.8).
+            let fs_px = f
+                .style
+                .get("font-size")
+                .and_then(|v| v.strip_suffix("px"))
+                .and_then(|t| t.trim().parse::<f32>().ok())
+                .unwrap_or(self.strut_lh);
+            let dy = match va {
+                "sub" => fs_px * 0.2,
+                "super" => -(fs_px * 0.33),
+                _ => raw_length_px(va, self.strut_lh, fs_px, ctx).map_or(0.0, |l| -l),
             };
             f.rect.y = match va {
                 "top" | "text-top" => *y + f.marg_t,
                 "bottom" | "text-bottom" => *y + h - (f.rect.height + f.marg_b),
                 "middle" => *y + (h - f.rect.height - f.marg_t - f.marg_b) / 2.0 + f.marg_t,
-                _ => *y + (base - f.baseline),
+                _ => *y + (base - f.baseline) + dy,
             };
         }
         lines.push(LineBox {
@@ -826,7 +953,7 @@ fn break_into_lines(
     // suivant (les flottants peuvent avoir commencé/fini).
     macro_rules! new_line {
         () => {{
-            acc.close(&mut cursor_y, &mut lines);
+            acc.close(&mut cursor_y, &mut lines, ctx);
             (line_x, line_w) = fl.band(cursor_y, x, w);
             cursor_x = line_x;
         }};
@@ -837,6 +964,23 @@ fn break_into_lines(
         let lh = line_height_of(&item.style, fs, ctx);
         let font_req = font::request_of(&item.style, ctx);
         let measure = measure_fn(&item.style, fs, ctx);
+        // R-168 — `word-spacing` : supplément par caractère
+        // espace (% de l'avance de l'espace, §16.4.7 —
+        // `normal` → 0, donc inerte).
+        let ws = item
+            .style
+            .get("word-spacing")
+            .and_then(|v| raw_length_px(v, measure(" "), fs, ctx))
+            .unwrap_or(0.0);
+        let measure = move |s: &str| -> f32 {
+            let w = measure(s);
+            if ws.abs() < f32::EPSILON {
+                w
+            } else {
+                let spaces: u16 = s.matches(' ').count().try_into().unwrap_or(u16::MAX);
+                w + ws * f32::from(spaces)
+            }
+        };
 
         // Boîte atomique : coule comme une pièce incassable.
         // Ses marges horizontales font partie de sa boîte
@@ -910,6 +1054,7 @@ fn break_into_lines(
                 marg_r: mr,
                 marg_t: mt,
                 marg_b: mb,
+                deco: Vec::new(),
             });
             // (`rect.y = y + base - h`), `mb` allonge la ligne.
             acc.max_lh = acc.max_lh.max(mt + r.height + mb);
@@ -956,6 +1101,7 @@ fn break_into_lines(
                     marg_r,
                     marg_t: 0.0,
                     marg_b: 0.0,
+                    deco: Vec::new(),
                 });
                 cursor_x += m;
             }
@@ -1008,6 +1154,7 @@ fn break_into_lines(
                         marg_r: 0.0,
                         marg_t: 0.0,
                         marg_b: 0.0,
+                        deco: Vec::new(),
                     });
                     acc.max_lh = acc.max_lh.max(lh);
                     acc.max_base = acc.max_base.max(fs * 0.8);
@@ -1094,6 +1241,7 @@ fn break_into_lines(
                     marg_r: 0.0,
                     marg_t: 0.0,
                     marg_b: 0.0,
+                    deco: item.deco.clone(),
                 });
                 acc.max_lh = acc.max_lh.max(lh);
                 acc.max_base = acc.max_base.max(baseline);
@@ -1104,7 +1252,7 @@ fn break_into_lines(
             }
         }
     }
-    acc.close(&mut cursor_y, &mut lines);
+    acc.close(&mut cursor_y, &mut lines, ctx);
     lines
 }
 
@@ -1438,4 +1586,25 @@ fn split_to_fit<'a>(
         segs.push(rest);
     }
     segs
+}
+
+/// capitalize (R-162) : premiere lettre de chaque mot en
+/// capitale, le reste inchange (approximation UAX #29 —
+/// un mot = suite alphanumerique ; un chiffre en tete
+/// garde le mot ouvert : «2abc» → «2Abc»).
+fn capitalize_words(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    let mut boundary = true;
+    for c in s.chars() {
+        if boundary && c.is_alphabetic() {
+            out.extend(c.to_uppercase());
+            boundary = false;
+        } else {
+            out.push(c);
+            if !c.is_alphanumeric() {
+                boundary = true;
+            }
+        }
+    }
+    out
 }

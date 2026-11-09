@@ -1415,7 +1415,7 @@ impl StyleEngine {
         // appliqués seulement si la propriété n'est pas déjà
         // fixée par une vraie règle ou l'attribut `style`).
         if pseudo.is_none() {
-            apply_presentational_hints(dom, node, &mut props);
+            apply_presentational_hints(dom, node, parent, env, &mut props);
         }
         // 3. Héritage : propriétés héritées non déclarées.
         if let Some(p) = parent {
@@ -1980,7 +1980,13 @@ fn resolve_font_size(raw: &str, parent_fs: f32, env: &StyleEnv, rem_base: f32) -
 /// non analysable → ignorée (contenu hostile → dégradation).
 /// Jamais au-dessus d'une vraie déclaration : `insert` si
 /// la propriété est absente uniquement.
-fn apply_presentational_hints(dom: &Dom, node: NodeId, props: &mut HashMap<String, String>) {
+fn apply_presentational_hints(
+    dom: &Dom,
+    node: NodeId,
+    parent: Option<&ComputedStyle>,
+    env: &StyleEnv,
+    props: &mut HashMap<String, String>,
+) {
     let Ok(tag) = dom.tag_name(node) else {
         return;
     };
@@ -2056,7 +2062,107 @@ fn apply_presentational_hints(dom: &Dom, node: NodeId, props: &mut HashMap<Strin
         }
         _ => {}
     }
-    legacy_presentational_hints(dom, node, tag, props);
+    legacy_presentational_hints(dom, node, tag, parent, env, props);
+}
+
+/// `<font>` (HTML 3.2/4.01 — la moitié du corpus legacy)
+/// — mots-clés `font-size` en index de table absolue.
+const FONT_SIZE_KW: [&str; 7] = [
+    "xx-small", "x-small", "small", "medium", "large", "x-large", "xx-large",
+];
+
+/// Facteur de chaque mot-clé sur la base utilisateur —
+/// même ordre que [`FONT_SIZE_KW`], même échelle ×1.2 que
+/// [`resolve_font_size`] (sert au mapping px→index du
+/// parent pour `size=±N`).
+const FONT_SIZE_FACTOR: [f32; 7] = [1.0 / 1.728, 1.0 / 1.44, 1.0 / 1.2, 1.0, 1.2, 1.44, 1.728];
+
+/// `size` de `<font>` → mot-clé `font-size` : absolu `1..7`
+/// → `xx-small`…`xx-large` ; `+N`/`-N` relatif à l'index du
+/// parent (HTML — `3` = medium si le parent n'est pas un
+/// mot-clé, sa taille px est arrondie à l'index le plus
+/// proche). Invalide → `None`.
+fn font_size_hint(
+    a: Option<&str>,
+    parent: Option<&ComputedStyle>,
+    env: &StyleEnv,
+) -> Option<String> {
+    let t = a?.trim();
+    if let Some(rest) = t.strip_prefix(['+', '-']) {
+        let n = rest.trim().parse::<i32>().ok()?;
+        let n = if t.starts_with('-') { -n } else { n };
+        // Index du parent : mot-clé direct, ou font-size
+        // **calculée** (px absolu — `normalize_font_size`
+        // l'a déjà résolue) ramenée à l'index le plus proche
+        // sur la base utilisateur ; relatif/inconnu → 3
+        // (medium — base HTML des tailles `<font>`).
+        let pidx = i32::try_from(
+            parent
+                .and_then(|p| p.get("font-size"))
+                .and_then(|v| {
+                    let v = v.trim();
+                    FONT_SIZE_KW
+                        .iter()
+                        .position(|kw| v.eq_ignore_ascii_case(kw))
+                        .or_else(|| {
+                            let len = parse_length(v)?;
+                            let fs =
+                                (len.value * len.unit.px_factor()?) / f64::from(env.font_size_base);
+                            FONT_SIZE_FACTOR
+                                .iter()
+                                .enumerate()
+                                .min_by(|(_, a), (_, b)| {
+                                    (fs - f64::from(**a))
+                                        .abs()
+                                        .partial_cmp(&(fs - f64::from(**b)).abs())
+                                        .unwrap_or(std::cmp::Ordering::Equal)
+                                })
+                                .map(|(i, _)| i)
+                        })
+                })
+                .unwrap_or(3),
+        )
+        .unwrap_or(3);
+        let idx = usize::try_from((pidx + n).clamp(0, 6)).unwrap_or(3);
+        return Some(FONT_SIZE_KW[idx].to_string());
+    }
+    let n: usize = t.parse().ok()?;
+    (1..=7)
+        .contains(&n)
+        .then(|| FONT_SIZE_KW[n - 1].to_string())
+}
+
+/// Couleur d'attribut HTML → valeur CSS (`#rrggbb` ou
+/// syntaxe moderne). Règles « legacy color » du HTML
+/// Standard : si la valeur n'est pas déjà une couleur CSS,
+/// les caractères non-hex deviennent `0`, la chaîne est
+/// complétée à un multiple de 3 puis chaque tiers tronqué
+/// à 2 digits — `bgcolor="ffcc00"` / `color="f0f"` vivent
+/// ainsi (R-154/155). `None` = vide/`transparent`.
+fn legacy_color(v: &str) -> Option<String> {
+    let t = v.trim();
+    if t.is_empty() || t.eq_ignore_ascii_case("transparent") {
+        return None;
+    }
+    if parse_color(t).is_some() {
+        return Some(t.to_string());
+    }
+    let mut s: String = t
+        .chars()
+        .map(|c| if c.is_ascii_hexdigit() { c } else { '0' })
+        .collect();
+    while s.len() < 3 || s.len() % 3 != 0 {
+        s.push('0');
+    }
+    let third = s.len() / 3;
+    let mut out = String::from("#");
+    for i in 0..3 {
+        let part = &s[i * third..(i + 1) * third];
+        let mut it = part.chars();
+        out.push(it.next().unwrap_or('0'));
+        out.push(it.next().unwrap_or('0'));
+    }
+    Some(out)
 }
 
 /// Dépose `prop = val` dans `props` si la propriété n'est
@@ -2146,9 +2252,17 @@ fn hint_align(a: Option<&str>) -> Option<String> {
 /// imbriquée : une cellule relève de SA table, trouvée en
 /// remontant — `tr`/`tbody` intermédiaires ne comptent pas).
 fn ancestor_table_attr<'a>(dom: &'a Dom, node: NodeId, name: &str) -> Option<&'a str> {
+    ancestor_elem_attr(dom, node, "table", name)
+}
+
+/// Attribut `name` de l'ancêtre `<tag>` le plus proche
+/// (`cellpadding` sur `table`, `link` sur `body` —
+/// R-157). La **première** occurrence en remontant fait
+/// foi.
+fn ancestor_elem_attr<'a>(dom: &'a Dom, node: NodeId, tag: &str, name: &str) -> Option<&'a str> {
     let mut n = dom.parent(node).ok()?;
     while let Some(id) = n {
-        if dom.tag_name(id).is_ok_and(|t| t == "table") {
+        if dom.tag_name(id).is_ok_and(|t| t == tag) {
             return dom.attribute_str(id, name).ok().flatten();
         }
         n = dom.parent(id).ok()?;
@@ -2163,6 +2277,8 @@ fn legacy_presentational_hints(
     dom: &Dom,
     node: NodeId,
     tag: &str,
+    parent: Option<&ComputedStyle>,
+    env: &StyleEnv,
     props: &mut HashMap<String, String>,
 ) {
     match tag {
@@ -2171,7 +2287,19 @@ fn legacy_presentational_hints(
             hint(
                 props,
                 "background-color",
-                hint_attr(dom, node, "bgcolor").map(|v| v.trim().to_string()),
+                hint_attr(dom, node, "bgcolor").and_then(legacy_color),
+            );
+        }
+        _ => {}
+    }
+    match tag {
+        "body" | "table" | "thead" | "tbody" | "tfoot" | "tr" | "td" | "th" => {
+            // Attribut `background` (R-156, HTML Rendering) :
+            // url d'arrière-plan → `background-image`.
+            hint(
+                props,
+                "background-image",
+                hint_attr(dom, node, "background").map(|v| format!("url(\"{}\")", v.trim())),
             );
         }
         _ => {}
@@ -2215,6 +2343,16 @@ fn legacy_presentational_hints(
                 hint(props, "border-width", Some(bw));
                 hint(props, "border-style", Some("outset".to_string()));
             }
+            // `align` (R-156) : left/right → `float` ;
+            // `center` → marges auto (HTML Rendering).
+            match hint_attr(dom, node, "align").map(|v| v.trim().to_ascii_lowercase()) {
+                Some(v) if v == "left" || v == "right" => hint(props, "float", Some(v)),
+                Some(v) if v == "center" => {
+                    hint(props, "margin-left", Some("auto".to_string()));
+                    hint(props, "margin-right", Some("auto".to_string()));
+                }
+                _ => {}
+            }
         }
         "td" | "th" => {
             // `cellpadding` de la table ancêtre → padding des
@@ -2235,16 +2373,166 @@ fn legacy_presentational_hints(
             // au layout table via des clés internes.
             hint(props, "-x-colspan", span(hint_attr(dom, node, "colspan")));
             hint(props, "-x-rowspan", span(hint_attr(dom, node, "rowspan")));
+            // `nowrap` (R-156) → white-space (HTML Rendering).
+            if hint_attr(dom, node, "nowrap").is_some() {
+                hint(props, "white-space", Some("nowrap".to_string()));
+            }
         }
-        "body" => {
-            hint(
-                props,
-                "color",
-                hint_attr(dom, node, "text").map(|v| v.trim().to_string()),
-            );
+        "body" => hint_body(dom, node, props),
+        "a" | "area" => hint_link(dom, node, props),
+        "img" => hint_img(dom, node, props),
+        "hr" => hint_hr(dom, node, props),
+        "br" => hint_br(dom, node, props),
+        "font" => hint_font(dom, node, parent, env, props),
+        _ => {}
+    }
+}
+
+/// `<body>` présentationnel : `text` → `color` ;
+/// marges historiques (R-157, HTML Rendering) :
+/// `topmargin`/`leftmargin`/`rightmargin`/`bottommargin` →
+/// côté homonyme ; `marginwidth`/`marginheight` → paires.
+/// Le défaut UA `8px` est émis ici en hint : une vraie
+/// règle `body{margin:8px}` primerait les attributs
+/// (rang 0 < règle) — l'auteur reste prioritaire.
+fn hint_body(dom: &Dom, node: NodeId, props: &mut HashMap<String, String>) {
+    hint(
+        props,
+        "color",
+        hint_attr(dom, node, "text").and_then(legacy_color),
+    );
+    let mw = dim(hint_attr(dom, node, "marginwidth"));
+    let mh = dim(hint_attr(dom, node, "marginheight"));
+    for (attr, prop, pair) in [
+        ("topmargin", "margin-top", &mh),
+        ("leftmargin", "margin-left", &mw),
+        ("rightmargin", "margin-right", &mw),
+        ("bottommargin", "margin-bottom", &mh),
+    ] {
+        hint(
+            props,
+            prop,
+            dim(hint_attr(dom, node, attr))
+                .or_else(|| pair.clone())
+                .or_else(|| Some("8px".to_string())),
+        );
+    }
+}
+
+/// `a[href]`/`area[href]` (R-157) : `body[link]` → couleur
+/// des liens, lue sur le body ancêtre (`:link` structurel).
+/// Le défaut `#00e` est émis ici en hint — une vraie règle
+/// UA primerait `body[link]` sinon ; l'auteur prime toujours
+/// via `props` rempli. `vlink` documenté non-fait
+/// (`:visited` toujours faux, vie privée — R-19) ; `alink`
+/// exige le filage `:active` (NAV, journal).
+fn hint_link(dom: &Dom, node: NodeId, props: &mut HashMap<String, String>) {
+    if hint_attr(dom, node, "href").is_some() {
+        hint(
+            props,
+            "color",
+            ancestor_elem_attr(dom, node, "body", "link")
+                .and_then(legacy_color)
+                .or_else(|| Some("#00e".to_string())),
+        );
+    }
+}
+
+/// `<font>` (R-154 — signature du vieux web) : `face`/
+/// `color`/`size` 1-7 + `±N` relatif à l'index table du
+/// parent (§ font element, HTML Rendering). `basefont`
+/// documenté non-fait (rare, mécanisme distinct).
+fn hint_font(
+    dom: &Dom,
+    node: NodeId,
+    parent: Option<&ComputedStyle>,
+    env: &StyleEnv,
+    props: &mut HashMap<String, String>,
+) {
+    hint(
+        props,
+        "font-family",
+        hint_attr(dom, node, "face").map(|v| v.trim().to_string()),
+    );
+    hint(
+        props,
+        "color",
+        hint_attr(dom, node, "color").and_then(legacy_color),
+    );
+    hint(
+        props,
+        "font-size",
+        font_size_hint(hint_attr(dom, node, "size"), parent, env),
+    );
+}
+
+/// `<img>` présentationnel (R-156) : `align` left/right →
+/// `float`, autres valeurs → `vertical-align` (HTML
+/// Rendering) ; `hspace`/`vspace` → marges ; `border` →
+/// filet solide (le bleu des images-liées vient de `color`
+/// héritée de `<a>` — `border-color` currentcolor).
+fn hint_img(dom: &Dom, node: NodeId, props: &mut HashMap<String, String>) {
+    match hint_attr(dom, node, "align").map(|v| v.trim().to_ascii_lowercase()) {
+        Some(v) if v == "left" || v == "right" => hint(props, "float", Some(v)),
+        Some(v) => {
+            let va = match v.as_str() {
+                "top" => "top",
+                "middle" | "absmiddle" => "middle",
+                "baseline" => "baseline",
+                "texttop" => "text-top",
+                _ => "bottom",
+            };
+            hint(props, "vertical-align", Some(va.to_string()));
+        }
+        None => {}
+    }
+    hint(props, "margin-left", dim(hint_attr(dom, node, "hspace")));
+    hint(props, "margin-right", dim(hint_attr(dom, node, "hspace")));
+    hint(props, "margin-top", dim(hint_attr(dom, node, "vspace")));
+    hint(props, "margin-bottom", dim(hint_attr(dom, node, "vspace")));
+    if let Some(bw) = dim(hint_attr(dom, node, "border")) {
+        hint(props, "border-width", Some(bw));
+        hint(props, "border-style", Some("solid".to_string()));
+    }
+}
+
+/// `<hr>` présentationnel (R-156) : `align` → marges auto
+/// par côté ; `noshade` → filet plein (vs `inset` UA) ;
+/// `color` → `color` (la bordure UA est currentcolor).
+fn hint_hr(dom: &Dom, node: NodeId, props: &mut HashMap<String, String>) {
+    match hint_attr(dom, node, "align").map(|v| v.trim().to_ascii_lowercase()) {
+        Some(v) if v == "left" => {
+            hint(props, "margin-right", Some("auto".to_string()));
+        }
+        Some(v) if v == "right" => {
+            hint(props, "margin-left", Some("auto".to_string()));
+        }
+        Some(v) if v == "center" => {
+            hint(props, "margin-left", Some("auto".to_string()));
+            hint(props, "margin-right", Some("auto".to_string()));
         }
         _ => {}
     }
+    if hint_attr(dom, node, "noshade").is_some() {
+        hint(props, "border-style", Some("solid".to_string()));
+    }
+    hint(
+        props,
+        "color",
+        hint_attr(dom, node, "color").and_then(legacy_color),
+    );
+}
+
+/// `br[clear]` (R-156, HTML Rendering) : `all` → `both`,
+/// `left`/`right`/`none` → homonyme.
+fn hint_br(dom: &Dom, node: NodeId, props: &mut HashMap<String, String>) {
+    let lowered = hint_attr(dom, node, "clear").map(|v| v.trim().to_ascii_lowercase());
+    let c = match lowered.as_deref() {
+        Some("all") => Some("both"),
+        Some(v @ ("left" | "right" | "none")) => Some(v),
+        _ => None,
+    };
+    hint(props, "clear", c.map(str::to_string));
 }
 
 /// Substitue les `var(--name[, fallback])` de `text` depuis
@@ -2532,6 +2820,16 @@ b, strong { font-weight: bold }
 i, em, cite, dfn, var, address { font-style: italic }
 u, ins { text-decoration: underline }
 s, del, strike { text-decoration: line-through }
+big { font-size: larger }
+small, sub, sup { font-size: smaller }
+nobr { white-space: nowrap }
+sub { vertical-align: sub }
+sup { vertical-align: super }
+abbr[title], acronym[title] { text-decoration: underline }
+mark { background-color: yellow; color: black }
+figure { margin-top: 1em; margin-bottom: 1em; margin-left: 40px; margin-right: 40px }
+fieldset { border-width: 2px; border-style: groove; margin-left: 2px; margin-right: 2px; padding: 0.35em 0.75em 0.625em }
+legend { padding-left: 2px; padding-right: 2px }
 code, kbd, pre, samp, tt, listing, plaintext, xmp { font-family: monospace }
 pre, textarea { white-space: pre-wrap }
 listing, plaintext, xmp { white-space: pre }
@@ -2542,13 +2840,12 @@ h4 { font-size: 1em; font-weight: bold; margin-top: 1.33em; margin-bottom: 1.33e
 h5 { font-size: 0.83em; font-weight: bold; margin-top: 1.67em; margin-bottom: 1.67em }
 h6 { font-size: 0.67em; font-weight: bold; margin-top: 2.33em; margin-bottom: 2.33em }
 p { margin-top: 1em; margin-bottom: 1em }
-body { margin: 8px }
 ul, ol, menu, dir, dl, dd { margin-top: 1em; margin-bottom: 1em }
 ul, ol, menu, dir { padding-left: 40px }
 dd { margin-left: 40px }
 blockquote { margin: 1em 40px }
 hr { border-top-width: 1px; border-style: inset }
-a[href] { color: #00e; text-decoration: underline }
+a[href] { text-decoration: underline }
 table { border-collapse: separate }
 th { font-weight: bold; text-align: center }
 input, textarea, select, button, img, svg, canvas { display: inline-block }

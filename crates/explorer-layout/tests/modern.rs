@@ -755,9 +755,12 @@ fn table_width_cellule_cloue_colonne() {
     );
     let a = find(&bx, by_id(&dom, "a"));
     let b = find(&bx, by_id(&dom, "b"));
+    // `border-spacing:2px` par défaut (UA, R-159) : 6px de
+    // spacing horizontal (bords externes + inter-colonne)
+    // rognent le budget colonnes → b : x=104, w=294.
     assert!(approx(a.rect.width, 100.0), "{}", a.rect.width);
-    assert!(approx(b.rect.x, 100.0), "{}", b.rect.x);
-    assert!(approx(b.rect.width, 300.0), "{}", b.rect.width);
+    assert!(approx(b.rect.x, 104.0), "{}", b.rect.x);
+    assert!(approx(b.rect.width, 294.0), "{}", b.rect.width);
 }
 
 #[test]
@@ -770,8 +773,10 @@ fn table_height_excedent_distribue() {
          tr:first-child td { height: 30px }",
     );
     let b = find(&bx, by_id(&dom, "b"));
-    // rang2 = 100 - 30 = 70 (rang1 fixé à 30).
-    assert!(approx(b.rect.height, 70.0), "{}", b.rect.height);
+    // rang2 = 100 - 30 - 6 = 64 (rang1 fixé à 30 ; les 6px
+    // de `border-spacing` vertical — 2px par défaut UA,
+    // R-159 — rognent l'excédent : bords + inter-rang).
+    assert!(approx(b.rect.height, 64.0), "{}", b.rect.height);
 }
 
 #[test]
@@ -1170,4 +1175,118 @@ fn min_avec_calc_imbrique() {
     );
     let a = find(&bx, by_id(&dom, "a"));
     assert!(approx(a.rect.width, 500.0), "min(calc) : {}", a.rect.width);
+}
+
+#[test]
+fn border_spacing_separate_espace_colonnes_et_rangs() {
+    // R-159 : `border-spacing` en `separate` — `sh` entre
+    // colonnes + bords externes, `sv` entre rangs + bords.
+    // Table 400px, 2 col a|b, spacing `10px 4px` :
+    //   cols_budget = 400 - 10*(2+1) = 370 → b.x = 10 + 100
+    //   + 10 = 120... attendu via la formule pose :
+    //   b.x = sh*(col+1) + col_w[a] = 20 + 100... non :
+    //   b.x = il + sh*(1+1) + col_w[0] = 0 + 20 + ... il faut
+    //   col_w[0]. Distribution : spec 100px cloue col a,
+    //   b = 370 - 100 = 270 → b.x = 20 + 100 = 120,
+    //   b.w = 270 + sh*(cols-1=0) = 270.
+    let (dom, bx) = laid(
+        "<!doctype html><table><tr><td id=\"a\">a</td><td id=\"b\">b</td></tr>\
+         <tr><td id=\"c\">c</td><td>d</td></tr></table>",
+        "body { margin: 0 } table { width: 400px; border-spacing: 10px 4px } \
+         #a { width: 100px }",
+    );
+    let a = find(&bx, by_id(&dom, "a"));
+    let b = find(&bx, by_id(&dom, "b"));
+    let c = find(&bx, by_id(&dom, "c"));
+    assert!(approx(a.rect.x, 10.0), "a.x={}", a.rect.x);
+    assert!(approx(a.rect.width, 100.0), "a.w={}", a.rect.width);
+    assert!(approx(b.rect.x, 120.0), "b.x={}", b.rect.x);
+    assert!(approx(b.rect.width, 270.0), "b.w={}", b.rect.width);
+    // Rang 2 démarre après rang1 + sv — c.y = a.y + rh + 4.
+    assert!(
+        approx(c.rect.y, a.rect.y + a.rect.height + 4.0),
+        "c.y={} (a.y={} a.h={})",
+        c.rect.y,
+        a.rect.y,
+        a.rect.height
+    );
+}
+
+#[test]
+fn border_spacing_collapse_les_gaps_reviennent_zero() {
+    // Sous `collapse`, `border-spacing` est ignorée (§17.6.2)
+    // — les arêtes fusionnent, cellules adjacentes.
+    let (dom, bx) = laid(
+        "<!doctype html><table><tr><td id=\"a\">a</td><td id=\"b\">b</td></tr></table>",
+        "body { margin: 0 } table { width: 400px; border-collapse: collapse; \
+         border-spacing: 10px } #a { width: 100px }",
+    );
+    let a = find(&bx, by_id(&dom, "a"));
+    let b = find(&bx, by_id(&dom, "b"));
+    assert!(
+        approx(b.rect.x, a.rect.x + a.rect.width),
+        "b.x={}",
+        b.rect.x
+    );
+}
+
+#[test]
+fn table_cell_vertical_align_decale_le_contenu() {
+    // R-160 : `valign=middle`/`bottom` sur une cellule
+    // décale son contenu dans la hauteur de rangée
+    // (fonds/bordures couvrent toute la rangée ; baseline
+    // et top = en haut — baseline réel = lot suivant).
+    let (dom, bx) = laid(
+        "<!doctype html><table><tr><td id=\"m\" valign=\"middle\"><p id=\"pm\">x</p></td>\
+         <td id=\"b\" valign=\"bottom\"><p id=\"pb\">y</p></td>\
+         <td id=\"t\"><div style=\"height:60px\"></div></td></tr></table>",
+        "body { margin: 0 } table { width: 300px } p { margin: 0; height: 10px }",
+    );
+    let m = find(&bx, by_id(&dom, "m"));
+    let b = find(&bx, by_id(&dom, "b"));
+    let t = find(&bx, by_id(&dom, "t"));
+    // Rangée = 60px (la grande cellule) ; pésente 10px.
+    let row_h = m.rect.height;
+    assert!(row_h >= 60.0, "rangée {row_h}");
+    let pm = find(&bx, by_id(&dom, "pm"));
+    let pb = find(&bx, by_id(&dom, "pb"));
+    // middle : contenu centré → pm.y ≈ m.y + (60-10)/2.
+    let mid_y = m.rect.y + (row_h - 10.0) / 2.0;
+    assert!(
+        (pm.rect.y - mid_y).abs() < 1.5,
+        "middle : pm.y={} attendu ~{mid_y}",
+        pm.rect.y
+    );
+    // bottom : contenu en bas → pb.y ≈ b.y + row_h - 10.
+    let bot_y = b.rect.y + row_h - 10.0;
+    assert!(
+        (pb.rect.y - bot_y).abs() < 1.5,
+        "bottom : pb.y={} attendu ~{bot_y}",
+        pb.rect.y
+    );
+    // t (pas de valign) : contenu reste en haut.
+    let _ = t;
+}
+
+#[test]
+fn caption_side_left_right_posee_en_vis_a_vis() {
+    // R-164 — `caption-side:left|right` : la légende se pose
+    // en vis-à-vis du bord latéral de la table, alignée haut
+    // (ne décale pas la hauteur de la table).
+    let (dom, bx) = laid(
+        "<!doctype html><table><caption id=cap>titre</caption>\
+         <tr><td>x</td></tr></table>",
+        "body { margin: 0 } table { width: 200px; margin-left: 100px } \
+         caption { caption-side: left }",
+    );
+    let cap = find(&bx, by_id(&dom, "cap"));
+    let tbl = find(&bx, by_tag(&dom, "table"));
+    // La légende est à GAUCHE de la boîte table (x négatif
+    // ou < tbl.x) — pas au-dessus comme le défaut `top`.
+    assert!(
+        cap.rect.x + cap.rect.width <= tbl.rect.x + 1.0,
+        "caption pas à gauche : cap={:?} tbl={:?}",
+        cap.rect,
+        tbl.rect
+    );
 }

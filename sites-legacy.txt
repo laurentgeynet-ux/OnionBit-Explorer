@@ -1,0 +1,50 @@
+# This file is part of Explorer.
+# Copyright (C) 2026 Laurent Geynet
+# SPDX-License-Identifier: MIT OR Apache-2.0
+#
+# Corpus « vieux / standard » pour scripts/site_smoke.ps1 —
+# complément du corpus embarqué (moderne). Une URL par ligne,
+# '#' = commentaire. Triage attendu par famille :
+#   pré-doctype / tables+font / neocities / 2000s / wayback.
+
+# --- Pré-doctype / HTML 1.x-3.2 -----------------------------------
+https://info.cern.ch/hypertext/WWW/TheProject.html
+https://stallman.org/
+https://tldp.org/HOWTO/Bash-Prog-Intro-HOWTO.html
+https://www.gnu.org/software/bash/manual/bash.html
+https://www.w3.org/TR/REC-html32-19970114
+https://www.w3.org/TR/html401/
+
+# --- Tables + font tags (le pain quotidien des 90s) ---------------
+https://www.drudgereport.com/
+http://www.paulgraham.com/articles.html
+https://www.craigslist.org/
+http://www.heavensgate.com/
+https://lite.duckduckgo.com/lite/
+https://news.ycombinator.com/
+
+# --- Geocities / neocities (font, marquee, bg tiles, frames) ------
+https://sadgrl.online/
+https://melonking.net/
+https://oocities.org/
+https://wiby.me/
+
+# --- Années 2000 « standard » (collapse, sprites, forums) ---------
+https://old.reddit.com/
+https://slashdot.org/
+https://www.vogons.org/
+https://www.phpbb.com/community/
+https://www.tvtropes.org/
+https://www.debian.org/
+https://lists.debian.org/debian-user/
+https://datatracker.ietf.org/doc/html/rfc2616
+
+# --- Hostile / robustesse -----------------------------------------
+https://www.lingscars.com/
+http://zombo.com/
+http://toastytech.com/
+
+# --- Wayback (HTML 1996-1999 figé — probes, JS bannière dégradé) --
+https://web.archive.org/web/19981202230410/http://www.google.com/
+https://web.archive.org/web/19961022175352/http://www.microsoft.com/
+https://web.archive.org/web/19970401000000/http://www.yahoo.com/

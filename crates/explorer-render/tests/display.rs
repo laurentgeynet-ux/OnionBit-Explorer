@@ -1264,6 +1264,39 @@ fn background_image_multicouche_peint_la_couche_url() {
 }
 
 #[test]
+fn multicouche_url_seule_la_premiere_peint_limage_stockee() {
+    // Mesuré : w3.org/TR/REC-html32 — `background:` à deux
+    // couches `url()` (filigrane `no-repeat` + texture
+    // `repeat`). La table `backgrounds` est clé `NodeId →
+    // image` et la collecte ne fetch que le premier url :
+    // la couche texture repeignait le filigrane en tuilage,
+    // recouvrant tout le viewport. Seule la **première**
+    // couche `url()` peut légitimement peindre l'image
+    // stockée ; les suivantes sont sautées (dégradation
+    // gracieuse — leurs urls seront fetchées par la session,
+    // étape multi-couches complète).
+    let list = bg_div("background:url(strip) no-repeat,url(tex)");
+    let n = list
+        .items
+        .iter()
+        .filter(|i| matches!(i, DisplayItem::BackgroundImage { .. }))
+        .count();
+    assert_eq!(
+        n, 1,
+        "seule la 1re couche url peint l'image stockée — la couche repeat doit être sautée"
+    );
+    let repeat = list
+        .items
+        .iter()
+        .find_map(|i| match i {
+            DisplayItem::BackgroundImage { repeat, .. } => Some(*repeat),
+            _ => None,
+        })
+        .expect("item fond");
+    assert_eq!(repeat, (false, false), "couche no-repeat conservée");
+}
+
+#[test]
 fn linear_gradient_peint_un_degrade_reel() {
     // Issue #10 : la couche `linear-gradient` est rasterisée
     // à la taille de la zone de positionnement puis peinte —
@@ -1378,7 +1411,7 @@ fn deco_inline_peinte_par_fragment_pas_par_union() {
     let fills: Vec<(f32, f32)> = items
         .iter()
         .filter_map(|i| match i {
-            DisplayItem::FillRect { rect, color } if color.g > 200 => {
+            DisplayItem::FillRect { rect, color, .. } if color.g > 200 => {
                 Some((rect.width, rect.height))
             }
             _ => None,
@@ -2036,4 +2069,396 @@ fn svg_use_cross_ilot_transitif() {
     assert!(src.contains("id=\"sym\""), "symbol injecté : {src}");
     assert!(src.contains("id=\"inner\""), "ref transitive : {src}");
     assert!(src.contains("id=\"p1\""), "contenu symbol : {src}");
+}
+
+// ── R-153 : `text-decoration` peint ─────────────────────────
+
+/// Runs texte `(origine_x, baseline_y, encre)` de la liste.
+fn texts(items: &[DisplayItem]) -> Vec<(f32, f32, explorer_css::value::Color)> {
+    items
+        .iter()
+        .filter_map(|i| match i {
+            DisplayItem::Text { origin, color, .. } => Some((origin.0, origin.1, *color)),
+            _ => None,
+        })
+        .collect()
+}
+
+/// `FillRect` de soulignement : rect plein dont le haut tombe
+/// entre la baseline `b` et `b + 8` px (sous l'encre).
+fn underlines(items: &[DisplayItem], baseline: f32) -> Vec<(f32, explorer_css::value::Color)> {
+    items
+        .iter()
+        .filter_map(|i| match i {
+            DisplayItem::FillRect { rect, color, .. }
+                if rect.y >= baseline - 0.5 && rect.y <= baseline + 8.0 =>
+            {
+                Some((rect.x, *color))
+            }
+            _ => None,
+        })
+        .collect()
+}
+
+#[test]
+fn text_decoration_u_souligne_sous_la_baseline() {
+    // R-153 : `u` (UA underline) produit un FillRect fin sous
+    // la baseline de son run — avant : rien n'était peint.
+    let (_dom, _bx, items) = dl("<p><u>hello</u></p>", "p{margin:0}");
+    let t = texts(&items);
+    assert_eq!(t.len(), 1, "un run attendu : {t:?}");
+    let u = underlines(&items, t[0].1);
+    assert_eq!(u.len(), 1, "un souligné attendu : {u:?}");
+}
+
+#[test]
+fn text_decoration_couleur_du_declarant_pas_du_fragment() {
+    // §16.3.1 (piège du lead) : la déco enjambe les inlines
+    // descendants avec la couleur de l'élément DÉCLARANT —
+    // `<a>` rouge souligne le `<b>` bleu EN ROUGE. Un « le
+    // fragment peint sa propre déco » naïf donnerait bleu.
+    let (_dom, _bx, items) = dl(
+        "<p><a href=\"#\"><b>x</b></a></p>",
+        "p{margin:0} a{color:#ff0000} b{color:#0000ff}",
+    );
+    let t = texts(&items);
+    assert_eq!(t.len(), 1, "un run attendu : {t:?}");
+    assert_eq!((t[0].2.r, t[0].2.b), (0, 255), "encre = bleu b");
+    let u = underlines(&items, t[0].1);
+    assert_eq!(u.len(), 1, "un souligné attendu : {u:?}");
+    assert_eq!(
+        (u[0].1.r, u[0].1.g, u[0].1.b),
+        (255, 0, 0),
+        "souligné = rouge de `a` (déclarant), pas bleu de `b`"
+    );
+}
+
+#[test]
+fn text_decoration_saute_les_remplaces() {
+    // §16.3.1 : la propagation saute les atomiques —
+    // l'inline-block descendant d'un `<a>` n'est pas souligné
+    // par la déco du lien (un seul FillRect : celui de « a »).
+    let (_dom, _bx, items) = dl(
+        "<p><a href=\"#\">a<span class=\"i\">b</span></a></p>",
+        "p{margin:0} .i{display:inline-block}",
+    );
+    let t = texts(&items);
+    let rects: Vec<_> = items
+        .iter()
+        .filter(|i| matches!(i, DisplayItem::FillRect { .. }))
+        .collect();
+    assert_eq!(t.len(), 2, "runs « a » + « b » : {t:?}");
+    assert_eq!(rects.len(), 1, "un seul souligné : {rects:?}");
+}
+
+#[test]
+fn text_decoration_del_barre_apres_l_encre() {
+    // `del` → line-through : le FillRect est AU-DESSUS de la
+    // baseline et émis APRÈS le Text (il barre les glyphes).
+    let (_dom, _bx, items) = dl("<p><del>x</del></p>", "p{margin:0}");
+    let t = texts(&items);
+    assert_eq!(t.len(), 1, "un run attendu : {t:?}");
+    let pos_text = items
+        .iter()
+        .position(|i| matches!(i, DisplayItem::Text { .. }))
+        .expect("texte");
+    let pos_strike = items
+        .iter()
+        .position(|i| match i {
+            DisplayItem::FillRect { rect, .. } => rect.y < t[0].1,
+            _ => false,
+        })
+        .expect("barré au-dessus de la baseline");
+    assert!(pos_strike > pos_text, "le barré peint après l'encre");
+}
+
+#[test]
+fn text_decoration_enjambe_depuis_le_conteneur_bloc() {
+    // §16.3.1 : `text-decoration` posée sur le bloc conteneur
+    // enjambe son propre contenu en-ligne (seed de la pile
+    // à `collect_items`) — `<div style=…>x</div>` souligné.
+    let (_dom, _bx, items) = dl(
+        "<div style=\"text-decoration:underline\">x</div>",
+        "div{margin:0}",
+    );
+    let t = texts(&items);
+    assert_eq!(t.len(), 1, "un run attendu : {t:?}");
+    assert_eq!(underlines(&items, t[0].1).len(), 1, "un souligné");
+}
+
+#[test]
+fn empty_cells_hide_ne_peint_ni_fond_ni_bordure() {
+    // R-164 — `empty-cells:hide` : sous le modèle `separate`,
+    // une cellule vide ne peint ni fond ni bordure (§17.6.1.1)
+    // ; `&nbsp;` compte comme contenu. `collapse` → inerte.
+    let (dom, _bx, items) = dl(
+        "<table><tr><td id=pleine>x</td><td id=vide></td>\
+         <td id=nbsp>&nbsp;</td></tr></table>",
+        "table { empty-cells: hide; border-spacing: 4px } \
+         td { border: 2px solid black; background: red; width: 40px }",
+    );
+    // 2 cellules peinent (pleine + nbsp) ; la vide saute.
+    let borders = items
+        .iter()
+        .filter(|i| matches!(i, DisplayItem::Border { .. }))
+        .count();
+    assert_eq!(borders, 2, "cellules bordées peintes : {borders}");
+    // Contrôle `collapse` : la cellule vide re-peint (modèle
+    // hors périmètre de empty-cells).
+    let (_d2, _b2, items2) = dl(
+        "<table><tr><td id=pleine>x</td><td id=vide></td></tr></table>",
+        "table { empty-cells: hide; border-collapse: collapse } \
+         td { border: 2px solid black }",
+    );
+    let borders2 = items2
+        .iter()
+        .filter(|i| matches!(i, DisplayItem::Border { .. }))
+        .count();
+    assert_eq!(borders2, 2, "collapse : empty-cells inerte : {borders2}");
+    let _ = dom;
+}
+
+#[test]
+fn styles_3d_mappees_aux_variantes_reelles() {
+    // R-166 — `inset`/`outset`/`groove`/`ridge`/`double`
+    // ne sont plus rabattus sur `Double` : la display list
+    // porte la variante réelle pour le bevel par côté.
+    let cases = [
+        ("outset", BorderStyle::Outset),
+        ("inset", BorderStyle::Inset),
+        ("groove", BorderStyle::Groove),
+        ("ridge", BorderStyle::Ridge),
+        ("double", BorderStyle::Double),
+        ("solid", BorderStyle::Solid),
+    ];
+    for (kw, want) in cases {
+        let (_d, _b, items) = dl(
+            "<div>x</div>",
+            &format!("div {{ border: 6px {kw} #888; width: 40px }}"),
+        );
+        let got = items.iter().find_map(|i| match i {
+            DisplayItem::Border { styles, .. } => Some(styles[0]),
+            _ => None,
+        });
+        assert_eq!(got, Some(want), "{kw}");
+    }
+}
+
+#[test]
+fn border_radius_shorthand_et_radii_sur_items() {
+    // R-167 — `border-radius` éclate en 4 coins, arrive en
+    // `radii` sur `Border` ET `FillRect` (fond arrondi) ;
+    // `%` du plus petit côté, borné à la moitié.
+    let (_d, _b, items) = dl(
+        "<div>x</div>",
+        "div { border: 4px solid black; background: #ccc; \
+         border-radius: 10px 20px; width: 80px; height: 60px }",
+    );
+    let border = items.iter().find_map(|i| match i {
+        DisplayItem::Border { radii, .. } => Some(*radii),
+        _ => None,
+    });
+    assert_eq!(
+        border,
+        Some([10.0, 20.0, 10.0, 20.0]),
+        "radii border : {border:?}"
+    );
+    let fill = items.iter().find_map(|i| match i {
+        DisplayItem::FillRect { radii, .. } => Some(*radii),
+        _ => None,
+    });
+    assert_eq!(
+        fill,
+        Some([10.0, 20.0, 10.0, 20.0]),
+        "radii fond : {fill:?}"
+    );
+    // `50%` → moitié du plus petit côté (60→30px).
+    let (_d2, _b2, items2) = dl(
+        "<div>x</div>",
+        "div { border: 2px solid black; border-radius: 50%; \
+         width: 80px; height: 60px }",
+    );
+    let r2 = items2.iter().find_map(|i| match i {
+        DisplayItem::Border { radii, .. } => Some(*radii),
+        _ => None,
+    });
+    assert_eq!(r2, Some([32.0; 4]), "50% : {r2:?}");
+}
+
+#[test]
+fn box_shadow_parsed_sur_item() {
+    // R-M2 — `box-shadow` → `DisplayItem::BoxShadow` par
+    // couche : offset/blur/spread/color ; `inset` sauté
+    // (approx. documentée) ; `none` → rien.
+    let (_d, _b, items) = dl(
+        "<div>x</div>",
+        "div { width: 40px; height: 20px; \
+         box-shadow: 4px 4px 8px 2px rgba(255,0,0,.5), -2px -2px blue }",
+    );
+    let mut sh = items.iter().filter_map(|i| match i {
+        DisplayItem::BoxShadow {
+            offset,
+            blur,
+            spread,
+            color,
+            ..
+        } => Some((*offset, *blur, *spread, *color)),
+        _ => None,
+    });
+    let a = sh.next().expect("ombre 1");
+    assert_eq!(a.0, (4.0, 4.0));
+    assert!((a.1 - 8.0).abs() < 0.01 && (a.2 - 2.0).abs() < 0.01);
+    assert_eq!((a.3.r, a.3.g, a.3.b), (255, 0, 0));
+    let b = sh.next().expect("ombre 2");
+    assert_eq!(b.0, (-2.0, -2.0));
+    let (_d2, _b2, items2) = dl("<div>x</div>", "div { box-shadow: none }");
+    assert!(
+        !items2
+            .iter()
+            .any(|i| matches!(i, DisplayItem::BoxShadow { .. })),
+        "none → aucun item"
+    );
+}
+
+#[test]
+fn text_shadow_fantomes_sous_texte() {
+    // R-M4 — `text-shadow: 3px 2px red` : une run fantôme
+    // décalée (origin+offset, couleur de l'ombre) émise
+    // AVANT le texte réel ; `none` → aucun fantôme.
+    let (_d, _b, items) = dl(
+        "<div>ombre</div>",
+        "div { font-size: 20px; text-shadow: 3px 2px red }",
+    );
+    let texts: Vec<_> = items
+        .iter()
+        .filter_map(|i| match i {
+            DisplayItem::Text { origin, color, .. } => Some((*origin, *color)),
+            _ => None,
+        })
+        .collect();
+    assert!(texts.len() >= 2, "fantôme + texte attendus : {texts:?}");
+    let ghost = &texts[0];
+    let real = &texts[1];
+    assert_eq!(ghost.1.r, 255);
+    assert!(
+        (ghost.0 .0 - real.0 .0 - 3.0).abs() < 0.5 && (ghost.0 .1 - real.0 .1 - 2.0).abs() < 0.5,
+        "offset fantôme : {ghost:?} vs {real:?}"
+    );
+    let (_d2, _b2, items2) = dl("<div>x</div>", "div { text-shadow: none }");
+    assert_eq!(
+        items2
+            .iter()
+            .filter(|i| matches!(i, DisplayItem::Text { .. }))
+            .count(),
+        1,
+        "none → texte seul"
+    );
+}
+
+#[test]
+fn filter_bracket_et_ops_parsed() {
+    // R-M5 — `filter:blur(4px) brightness(2)` →
+    // `PushFilter([Blur(4),Brightness(2)])`…`PopFilter`
+    // encadrant le sous-arbre ; `none` → rien.
+    let (_d, _b, items) = dl(
+        "<div>x</div>",
+        "div { filter: blur(4px) brightness(2) grayscale(50%) }",
+    );
+    let ops = items.iter().find_map(|i| match i {
+        DisplayItem::PushFilter(ops) => Some(ops),
+        _ => None,
+    });
+    match ops {
+        Some(ops) => {
+            assert_eq!(ops.len(), 3, "ops : {ops:?}");
+            assert_eq!(ops[0], explorer_render::display::FilterOp::Blur(4.0));
+            assert_eq!(ops[1], explorer_render::display::FilterOp::Brightness(2.0));
+            assert_eq!(ops[2], explorer_render::display::FilterOp::Grayscale(0.5));
+        }
+        None => panic!("pas de PushFilter : {items:?}"),
+    }
+    assert!(
+        items.iter().any(|i| matches!(i, DisplayItem::PopFilter)),
+        "PopFilter manquant"
+    );
+    let (_d2, _b2, items2) = dl("<div>x</div>", "div { filter: none }");
+    assert!(
+        !items2
+            .iter()
+            .any(|i| matches!(i, DisplayItem::PushFilter(_))),
+        "none → aucun bracket"
+    );
+}
+
+#[test]
+fn overflow_arrondi_emet_pushcliprounded() {
+    // R-M9 — `overflow:hidden` + `border-radius` : le clip
+    // porte les rayons (`PushClipRounded`) au lieu du
+    // `PushClip` rectangulaire (le contenu ne déborde plus
+    // des coins).
+    let (_d, _b, items) = dl(
+        "<div>x</div>",
+        "div { overflow: hidden; border-radius: 8px; \
+         width: 30px; height: 10px }",
+    );
+    let radii = items.iter().find_map(|i| match i {
+        DisplayItem::PushClipRounded { radii, .. } => Some(*radii),
+        _ => None,
+    });
+    assert_eq!(radii, Some([5.0; 4]), "radii clip : {radii:?}");
+    assert!(
+        !items.iter().any(|i| matches!(i, DisplayItem::PushClip(_))),
+        "PushClip rect en trop"
+    );
+    // Sans rayon : `PushClip` rect inchangé.
+    let (_d2, _b2, items2) = dl(
+        "<div>x</div>",
+        "div { overflow: hidden; width: 30px; height: 10px }",
+    );
+    assert!(
+        items2.iter().any(|i| matches!(i, DisplayItem::PushClip(_))),
+        "PushClip attendu sans radius"
+    );
+}
+
+#[test]
+fn backdrop_filter_item_et_ops() {
+    // R-M9b — `backdrop-filter:blur(6px) grayscale(1)` →
+    // `BackdropFilter {rect, ops}` émis avant le fond de la
+    // boîte (les pixels peints sous `rect` reçoivent les
+    // ops au raster, le contenu se peint par-dessus) ;
+    // `none` → rien.
+    let (_d, _b, items) = dl(
+        "<div>x</div>",
+        "div { width: 40px; height: 20px; \
+         backdrop-filter: blur(6px) grayscale(1) }",
+    );
+    let pos = items
+        .iter()
+        .position(|i| matches!(i, DisplayItem::BackdropFilter { .. }));
+    assert!(pos.is_some(), "BackdropFilter absent : {items:?}");
+    let p = pos.unwrap();
+    match &items[p] {
+        DisplayItem::BackdropFilter { ops, .. } => {
+            assert_eq!(ops.len(), 2, "ops : {ops:?}");
+            assert_eq!(ops[0], explorer_render::display::FilterOp::Blur(6.0));
+            assert_eq!(ops[1], explorer_render::display::FilterOp::Grayscale(1.0));
+        }
+        _ => unreachable!(),
+    }
+    // Émis avant le fond (fond lui suit).
+    let bg = items.iter().position(|i| {
+        matches!(
+            i,
+            DisplayItem::FillRect { .. } | DisplayItem::BoxShadow { .. }
+        )
+    });
+    assert!(bg.is_none_or(|b| b > p), "ordre : filtre avant fond");
+    let (_d2, _b2, items2) = dl("<div>x</div>", "div { backdrop-filter: none }");
+    assert!(
+        !items2
+            .iter()
+            .any(|i| matches!(i, DisplayItem::BackdropFilter { .. })),
+        "none → aucun item"
+    );
 }

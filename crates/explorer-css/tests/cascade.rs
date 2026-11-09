@@ -2629,3 +2629,256 @@ fn b75_multi_feuilles_atomiques_s_appliquent() {
         "display:flex attendu : {dbg}"
     );
 }
+
+// ── `<font>` présentationnel (R-154) ────────────────────────
+
+/// `font-size` calculée → px (la valeur calculée est une
+/// longueur absolue — R-17 normalise à la cascade).
+fn fs_px(s: &ComputedStyle) -> f32 {
+    s.get("font-size")
+        .and_then(|v| v.trim().trim_end_matches("px").parse::<f32>().ok())
+        .expect("font-size calculée en px")
+}
+
+#[test]
+fn hint_font_face_color_size() {
+    let f = fixture();
+    let e = StyleEngine::new();
+    let mut dom = f.dom;
+    let n = el(
+        &mut dom,
+        f.body,
+        "font",
+        &[("face", "Verdana"), ("color", "#ff6600"), ("size", "4")],
+    );
+    let s = e.compute(&dom, n, &env());
+    assert_eq!(s.get("font-family"), Some("Verdana"), "face → font-family");
+    assert_eq!(s.get("color"), Some("#ff6600"), "color → color");
+    assert!((fs_px(&s) - 16.0).abs() < 0.05, "size=4 → medium 16px");
+}
+
+#[test]
+fn hint_font_size_absolu_et_relatif() {
+    let f = fixture();
+    let e = StyleEngine::new();
+    let mut dom = f.dom;
+    // Table absolue (échelle ×1.2, base 16) : 1→9.26, 2→11.1,
+    // 3→13.3, 5→19.2, 7→27.6 — résolue en px à la cascade.
+    for (attr, px) in [
+        ("1", 16.0 / 1.728),
+        ("2", 16.0 / 1.44),
+        ("3", 16.0 / 1.2),
+        ("5", 19.2),
+        ("7", 27.648),
+    ] {
+        let n = el(&mut dom, f.body, "font", &[("size", attr)]);
+        let got = fs_px(&e.compute(&dom, n, &env()));
+        assert!((got - px).abs() < 0.05, "size={attr} → {px}px, eu {got}");
+    }
+    // Invalide → pas de hint.
+    let bad = el(&mut dom, f.body, "font", &[("size", "9")]);
+    assert_eq!(e.compute(&dom, bad, &env()).get("font-size"), None);
+    // `±N` relatif à l'index du parent — body sans taille
+    // déclarée → base 3 (medium) : +1 → large 19.2, -2 →
+    // x-small 11.1.
+    let up = el(&mut dom, f.body, "font", &[("size", "+1")]);
+    assert!((fs_px(&e.compute(&dom, up, &env())) - 19.2).abs() < 0.05);
+    let down = el(&mut dom, f.body, "font", &[("size", "-2")]);
+    assert!((fs_px(&e.compute(&dom, down, &env())) - 16.0 / 1.44).abs() < 0.05);
+    // Imbriqué : `<font size=7>` (27.648px calculée → index
+    // 6) dont le fils déclare -1 → index 5 = x-large 23.04.
+    let outer = el(&mut dom, f.body, "font", &[("size", "7")]);
+    let inner = el(&mut dom, outer, "font", &[("size", "-1")]);
+    let got = fs_px(&e.compute(&dom, inner, &env()));
+    assert!((got - 23.04).abs() < 0.05, "relatif parent font : {got}");
+}
+
+#[test]
+fn hint_font_color_couleur_legacy_sans_diese() {
+    // Règles « legacy color » (HTML Standard) : `color` nu
+    // sans `#` devient un hex — `ffcc00` → #ffcc00, nommées
+    // et syntaxes modernes inchangées.
+    let f = fixture();
+    let e = StyleEngine::new();
+    let mut dom = f.dom;
+    let hex = el(&mut dom, f.body, "font", &[("color", "ffcc00")]);
+    assert_eq!(
+        e.compute(&dom, hex, &env()).get("color"),
+        Some("#ffcc00"),
+        "hex nu → #rrggbb"
+    );
+    let named = el(&mut dom, f.body, "font", &[("color", "red")]);
+    assert_eq!(e.compute(&dom, named, &env()).get("color"), Some("red"));
+    // Hint de rang zéro : la règle auteur prime l'attribut.
+    let e2 = {
+        let mut eng = StyleEngine::new();
+        eng.add_css("font{color:#0000ff}", Origin::Author);
+        eng
+    };
+    assert_eq!(
+        e2.compute(&dom, named, &env()).get("color"),
+        Some("#0000ff"),
+        "auteur > hint color"
+    );
+}
+
+#[test]
+fn hint_couleurs_legacy_bgcolor_et_text() {
+    // R-155 : `legacy_color()` appliquée aux hints couleur
+    // existants — `bgcolor="ffcc00"`/`text="00ff00"` du web
+    // 90s mouraient dans `parse_color` (sans `#`).
+    let f = fixture();
+    let e = StyleEngine::new();
+    let mut dom = f.dom;
+    let td = el(&mut dom, f.body, "td", &[("bgcolor", "ffcc00")]);
+    assert_eq!(
+        e.compute(&dom, td, &env()).get("background-color"),
+        Some("#ffcc00"),
+        "bgcolor nu → #rrggbb"
+    );
+    // Hex 3 digits nu : padding legacy → #f0f000… —
+    // la forme exacte importe moins que « couleur valide ».
+    let td3 = el(&mut dom, f.body, "td", &[("bgcolor", "f0f")]);
+    let binding = e.compute(&dom, td3, &env());
+    let v = binding.get("background-color");
+    assert!(
+        v.is_some_and(|v| v.starts_with('#')),
+        "bgcolor 3 digits → #…, eu {v:?}"
+    );
+    // Nommées et syntaxes modernes inchangées.
+    let td2 = el(&mut dom, f.body, "td", &[("bgcolor", "blue")]);
+    assert_eq!(
+        e.compute(&dom, td2, &env()).get("background-color"),
+        Some("blue")
+    );
+}
+
+#[test]
+fn hint_img_align_hspace_border() {
+    // R-156 : `align` left/right → float, top/middle →
+    // vertical-align ; `hspace`/`vspace` → marges ;
+    // `border` → filet solide (le bleu image-liée vient de
+    // `color` héritée via currentcolor).
+    let f = fixture();
+    let eng = StyleEngine::new();
+    let mut dom = f.dom;
+    let img_l = el(&mut dom, f.body, "img", &[("align", "left")]);
+    assert_eq!(eng.compute(&dom, img_l, &env()).get("float"), Some("left"));
+    let img_m = el(&mut dom, f.body, "img", &[("align", "middle")]);
+    assert_eq!(
+        eng.compute(&dom, img_m, &env()).get("vertical-align"),
+        Some("middle")
+    );
+    let img_s = el(
+        &mut dom,
+        f.body,
+        "img",
+        &[("hspace", "10"), ("vspace", "4"), ("border", "2")],
+    );
+    let st = eng.compute(&dom, img_s, &env());
+    assert_eq!(st.get("margin-left"), Some("10px"), "hspace → margin-l/r");
+    assert_eq!(st.get("margin-bottom"), Some("4px"), "vspace → margin-t/b");
+    assert_eq!(st.get("border-width"), Some("2px"));
+    assert_eq!(st.get("border-style"), Some("solid"));
+}
+
+#[test]
+fn hint_table_td_hr_br_legacy() {
+    let f = fixture();
+    let e = StyleEngine::new();
+    let mut dom = f.dom;
+    // table[align=center] → marges auto ; [right] → float.
+    let c = el(&mut dom, f.body, "table", &[("align", "center")]);
+    assert_eq!(e.compute(&dom, c, &env()).get("margin-left"), Some("auto"));
+    let r = el(&mut dom, f.body, "table", &[("align", "right")]);
+    assert_eq!(e.compute(&dom, r, &env()).get("float"), Some("right"));
+    // td[nowrap] → white-space: nowrap.
+    let td = el(&mut dom, f.body, "td", &[("nowrap", "")]);
+    assert_eq!(
+        e.compute(&dom, td, &env()).get("white-space"),
+        Some("nowrap")
+    );
+    // hr : noshade → solid (vs inset UA), color nu → color.
+    let hr = el(
+        &mut dom,
+        f.body,
+        "hr",
+        &[("noshade", ""), ("color", "ff0000")],
+    );
+    let hcs = e.compute(&dom, hr, &env());
+    assert_eq!(hcs.get("border-style"), Some("solid"));
+    assert_eq!(hcs.get("color"), Some("#ff0000"));
+    // br[clear=all] → both ; [left] → left.
+    let br = el(&mut dom, f.body, "br", &[("clear", "all")]);
+    assert_eq!(e.compute(&dom, br, &env()).get("clear"), Some("both"));
+    // Attribut background → url(...) sur body/td.
+    let td2 = el(&mut dom, f.body, "td", &[("background", "bg.png")]);
+    assert_eq!(
+        e.compute(&dom, td2, &env()).get("background-image"),
+        Some("url(\"bg.png\")")
+    );
+}
+
+#[test]
+fn hint_body_link_marges_et_ancetre() {
+    // R-157 : `body[link]` → couleur des `<a href>`/`area`
+    // (lue sur le body ancêtre — `:link` structurel) ;
+    // `topmargin`/`marginwidth`/`marginheight` → marges.
+    // `vlink` documenté non-fait (vie privée), `alink` NAV.
+    let f = fixture();
+    let e = StyleEngine::new();
+    let mut dom = f.dom;
+    dom.set_attribute(f.body, "link", "ff0000").unwrap();
+    dom.set_attribute(f.body, "topmargin", "20").unwrap();
+    dom.set_attribute(f.body, "marginwidth", "40").unwrap();
+    let a = el(&mut dom, f.body, "a", &[("href", "#")]);
+    assert_eq!(
+        e.compute(&dom, a, &env()).get("color"),
+        Some("#ff0000"),
+        "body[link] → couleur du lien (hex nu normalisé)"
+    );
+    // Sans href : pas de lien → pas de hint.
+    let a2 = el(&mut dom, f.body, "a", &[]);
+    assert_ne!(
+        e.compute(&dom, a2, &env()).get("color"),
+        Some("#ff0000"),
+        "<a> sans href non affecté"
+    );
+    let bs = e.compute(&dom, f.body, &env());
+    assert_eq!(bs.get("margin-top"), Some("20px"), "topmargin");
+    assert_eq!(bs.get("margin-left"), Some("40px"), "marginwidth→left");
+    assert_eq!(bs.get("margin-right"), Some("40px"), "marginwidth→right");
+}
+
+#[test]
+fn ua_big_small_nobr_mark_figure_fieldset() {
+    // R-158 : trous UA sans dépendance — `big`/`small`
+    // (larger/smaller, résolus par R-17), `nobr` nowrap,
+    // `mark` surligné, `figure` marges 1em/40px,
+    // `fieldset` chrome 2px groove + padding (groove rendu
+    // solide aujourd'hui — vraies 3D = R-166),
+    // `legend` padding latéral.
+    let f = fixture();
+    let eng = StyleEngine::new();
+    let mut dom = f.dom;
+    let big = el(&mut dom, f.body, "big", &[]);
+    assert!((fs_px(&eng.compute(&dom, big, &env())) - 19.2).abs() < 0.05);
+    let small = el(&mut dom, f.body, "small", &[]);
+    assert!((fs_px(&eng.compute(&dom, small, &env())) - 16.0 / 1.2).abs() < 0.05);
+    let nobr = el(&mut dom, f.body, "nobr", &[]);
+    assert_eq!(
+        eng.compute(&dom, nobr, &env()).get("white-space"),
+        Some("nowrap")
+    );
+    let mk = el(&mut dom, f.body, "mark", &[]);
+    let mst = eng.compute(&dom, mk, &env());
+    assert_eq!(mst.get("background-color"), Some("yellow"));
+    let fig = el(&mut dom, f.body, "figure", &[]);
+    let fst = eng.compute(&dom, fig, &env());
+    assert_eq!(fst.get("margin-left"), Some("40px"));
+    let fs = el(&mut dom, f.body, "fieldset", &[]);
+    let fss = eng.compute(&dom, fs, &env());
+    // `border-style`/`border-width` éclatent en longhands.
+    assert_eq!(fss.get("border-top-style"), Some("groove"));
+    assert_eq!(fss.get("border-top-width"), Some("2px"));
+}

@@ -21,7 +21,7 @@ use explorer_css::value::Color;
 use explorer_layout::font::{FontRequest, FontSource, Glyph, ShapedRun};
 use tiny_skia::{FillRule, Mask, Paint, PathBuilder, Pixmap, Point, Rect, Stroke, Transform};
 
-use crate::display::{BorderStyle, DisplayItem, DisplayList, MarkerKind};
+use crate::display::{BorderStyle, DisplayItem, DisplayList, FilterOp, MarkerKind};
 use crate::glyph_cache::GlyphCache;
 use owned_ttf_parser::{AsFaceRef, OwnedFace};
 
@@ -827,6 +827,11 @@ pub fn rasterize_dirty_cached(
 /// sémantique de pile) n'intersecte pas `window` est sauté ;
 /// les items d'état (`Push*/Pop*`) sont toujours rejoués —
 /// la pile doit refléter l'emplacement de chaque item.
+#[allow(
+    clippy::too_many_lines,
+    clippy::cast_possible_truncation,
+    clippy::cast_sign_loss
+)]
 fn replay_items(
     pixmap: &mut Pixmap,
     items: &[DisplayItem],
@@ -837,6 +842,10 @@ fn replay_items(
     filter: Option<(&[Option<explorer_layout::Rect>], explorer_layout::Rect)>,
 ) {
     let mut clips: Vec<Mask> = Vec::new();
+    // R-M5 — `filter` : les items d'un groupe
+    // `PushFilter`…`PopFilter` se peignent dans un tampon
+    // offscreen puis reçoivent les ops et se compositent.
+    let mut filtered: Vec<(Pixmap, Vec<FilterOp>)> = Vec::new();
     // Pile des `transform` CSS : `cur` = dpi · produit des
     // matrices actives — recomposé à chaque push/pop (peu de
     // niveaux en pratique).
@@ -878,6 +887,35 @@ fn replay_items(
                     clips.push(mask);
                 }
             }
+            // R-M9 — clip arrondi (`overflow` + `border-radius`) :
+            // même grille de pixels que `PushClip`, le chemin de
+            // masque suit les rayons (`rounded_rect_path`).
+            DisplayItem::PushClipRounded { rect: r, radii } => {
+                if let Some(mut mask) = Mask::new(pixmap.width(), pixmap.height()) {
+                    if let Some(phys) = Rect::from_xywh(r.x, r.y, r.width, r.height)
+                        .and_then(|rr| rr.transform(cur))
+                    {
+                        let dom = Rect::from_ltrb(-SAFE_COORD, -SAFE_COORD, SAFE_COORD, SAFE_COORD);
+                        if let Some(clamped) = dom.and_then(|d| phys.intersect(&d)) {
+                            if let Some(path) = rounded_rect_path(
+                                clamped.left(),
+                                clamped.top(),
+                                clamped.right(),
+                                clamped.bottom(),
+                                radii,
+                            ) {
+                                mask.fill_path(
+                                    &path,
+                                    FillRule::Winding,
+                                    true,
+                                    Transform::default(),
+                                );
+                            }
+                        }
+                    }
+                    clips.push(mask);
+                }
+            }
             DisplayItem::PopClip => {
                 clips.pop();
             }
@@ -888,6 +926,55 @@ fn replay_items(
             DisplayItem::PopTransform => {
                 tfs.pop();
                 cur = tfs.iter().fold(dpi, |acc, t| acc.pre_concat(*t));
+            }
+            DisplayItem::PushFilter(ops) => {
+                if let Some(buf) = Pixmap::new(pixmap.width(), pixmap.height()) {
+                    filtered.push((buf, ops.clone()));
+                }
+            }
+            DisplayItem::PopFilter => {
+                if let Some((mut buf, ops)) = filtered.pop() {
+                    apply_filter_ops(&mut buf, &ops);
+                    let dst = filtered.last_mut().map_or(&mut *pixmap, |(b, _)| b);
+                    dst.draw_pixmap(
+                        0,
+                        0,
+                        buf.as_ref(),
+                        &tiny_skia::PixmapPaint::default(),
+                        Transform::default(),
+                        clips.last(),
+                    );
+                }
+            }
+            // R-M9b — `backdrop-filter` : la région déjà
+            // peinte sous `rect` reçoit les ops, le contenu
+            // se peint ensuite par-dessus.
+            DisplayItem::BackdropFilter { rect: r, ops } => {
+                #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+                let (bw, bh) = (r.width.ceil() as u32, r.height.ceil() as u32);
+                if bw > 0 && bh > 0 {
+                    if let Some(mut buf) = Pixmap::new(bw, bh) {
+                        let src = filtered.last().map_or(pixmap.as_ref(), |(b, _)| b.as_ref());
+                        buf.draw_pixmap(
+                            0,
+                            0,
+                            src,
+                            &tiny_skia::PixmapPaint::default(),
+                            Transform::from_translate(-r.x, -r.y),
+                            None,
+                        );
+                        apply_filter_ops(&mut buf, ops);
+                        let dst = filtered.last_mut().map_or(&mut *pixmap, |(b, _)| b);
+                        dst.draw_pixmap(
+                            r.x.round() as i32,
+                            r.y.round() as i32,
+                            buf.as_ref(),
+                            &tiny_skia::PixmapPaint::default(),
+                            Transform::default(),
+                            clips.last(),
+                        );
+                    }
+                }
             }
             _ => {
                 // Fenêtre sale : item dont la bounds résolue
@@ -905,7 +992,8 @@ fn replay_items(
                             .is_none_or(|b| rects_overlap(b, win))
                     });
                 if draw {
-                    paint_item(pixmap, item, cur, fonts, gc, clips.last());
+                    let dst = filtered.last_mut().map_or(&mut *pixmap, |(b, _)| b);
+                    paint_item(dst, item, cur, fonts, gc, clips.last());
                 }
             }
         }
@@ -920,6 +1008,218 @@ fn rects_overlap(a: explorer_layout::Rect, b: explorer_layout::Rect) -> bool {
 
 /// Peint un item de dessin (les clips sont gérés par
 /// `rasterize` directement).
+/// R-167 — un `FillRect` : rayon > 0 → fill du chemin
+/// arrondi ; sinon rect pixel-snappé (`fill_guarded`).
+fn fill_rect_item(
+    pixmap: &mut Pixmap,
+    rect: &explorer_layout::Rect,
+    color: Color,
+    radii: &[f32; 4],
+    dpi: Transform,
+    clip: Option<&Mask>,
+) {
+    let mut paint = Paint {
+        anti_alias: true,
+        ..Paint::default()
+    };
+    paint.set_color(skia_color(color));
+    if radii.iter().any(|r| *r > 0.0) {
+        if let Some(path) = rounded_rect_path(
+            rect.x,
+            rect.y,
+            rect.x + rect.width,
+            rect.y + rect.height,
+            radii,
+        ) {
+            pixmap.fill_path(&path, &paint, FillRule::Winding, dpi, clip);
+        }
+    } else if let Some(r) = Rect::from_xywh(rect.x, rect.y, rect.width, rect.height) {
+        fill_guarded(pixmap, &r, &paint, dpi, clip);
+    }
+}
+
+/// R-M5 — ops `filter` sur un tampon RGBA premultiplié :
+/// chaque op dans l'ordre déclaré (spec) — par-pixel pour
+/// les couleurs, passe séparable pour `blur`. Les
+/// approximations premultipliées sont documentées.
+fn apply_filter_ops(buf: &mut Pixmap, ops: &[FilterOp]) {
+    for op in ops {
+        match op {
+            FilterOp::Blur(r) => box_blur(buf, (*r).max(0.5)),
+            _ => apply_pixel_op(buf, op),
+        }
+    }
+}
+
+/// Op de couleur sur chaque pixel du tampon —
+/// `mix(x,y,t)` linéaire ; les matrices agissent sur les
+/// canaux RGB premultipliés (approx. : le canal alpha
+/// n'entre pas dans le mélange, luminosité alpha-composée).
+#[allow(
+    clippy::cast_possible_truncation,
+    clippy::cast_sign_loss,
+    clippy::many_single_char_names
+)]
+fn apply_pixel_op(buf: &mut Pixmap, op: &FilterOp) {
+    let px = buf.data_mut();
+    for c in px.chunks_exact_mut(4) {
+        let (r, g, b, a) = (
+            f32::from(c[0]),
+            f32::from(c[1]),
+            f32::from(c[2]),
+            f32::from(c[3]),
+        );
+        let lum = 0.2126 * r + 0.7152 * g + 0.0722 * b;
+        let mix = |x: f32, y: f32, t: f32| x + (y - x) * t;
+        let (nr, ng, nb, na) = match op {
+            FilterOp::Brightness(f) => (r * f, g * f, b * f, a),
+            FilterOp::Contrast(f) => {
+                let k = |x: f32| (x - 127.5) * f + 127.5;
+                (k(r), k(g), k(b), a)
+            }
+            FilterOp::Grayscale(t) => (mix(r, lum, *t), mix(g, lum, *t), mix(b, lum, *t), a),
+            FilterOp::Invert(t) => (mix(r, a - r, *t), mix(g, a - g, *t), mix(b, a - b, *t), a),
+            FilterOp::Opacity(t) => (r * t, g * t, b * t, a * t),
+            FilterOp::Sepia(t) => {
+                let sr = 0.393 * r + 0.769 * g + 0.189 * b;
+                let sg = 0.349 * r + 0.686 * g + 0.168 * b;
+                let sb = 0.272 * r + 0.534 * g + 0.131 * b;
+                (mix(r, sr, *t), mix(g, sg, *t), mix(b, sb, *t), a)
+            }
+            FilterOp::Saturate(s) => (
+                lum + (r - lum) * s,
+                lum + (g - lum) * s,
+                lum + (b - lum) * s,
+                a,
+            ),
+            FilterOp::HueRotate(d) => {
+                let rad = d.to_radians();
+                let (c1, c2) = (rad.cos(), rad.sin());
+                (
+                    r * (0.213 + c1 * 0.787 - c2 * 0.213)
+                        + g * (0.715 - c1 * 0.715 - c2 * 0.715)
+                        + b * (0.072 - c1 * 0.072 + c2 * 0.928),
+                    r * (0.213 - c1 * 0.213 + c2 * 0.143)
+                        + g * (0.715 + c1 * 0.285 + c2 * 0.140)
+                        + b * (0.072 - c1 * 0.072 - c2 * 0.283),
+                    r * (0.213 - c1 * 0.213 - c2 * 0.787)
+                        + g * (0.715 - c1 * 0.715 + c2 * 0.715)
+                        + b * (0.072 + c1 * 0.928 + c2 * 0.072),
+                    a,
+                )
+            }
+            FilterOp::Blur(_) => (r, g, b, a),
+        };
+        c[0] = nr.clamp(0.0, 255.0) as u8;
+        c[1] = ng.clamp(0.0, 255.0) as u8;
+        c[2] = nb.clamp(0.0, 255.0) as u8;
+        c[3] = na.clamp(0.0, 255.0) as u8;
+    }
+}
+
+/// Box blur séparable (2 passes fenêtre) — approximation
+/// du gaussien de `blur()`, documentée (R-M5).
+#[allow(
+    clippy::cast_possible_truncation,
+    clippy::many_single_char_names,
+    clippy::cast_sign_loss
+)]
+fn box_blur(buf: &mut Pixmap, radius: f32) {
+    let (w, h) = (buf.width() as usize, buf.height() as usize);
+    let r = radius.max(0.0) as usize;
+    if w == 0 || h == 0 || r == 0 {
+        return;
+    }
+    let mut tmp = buf.data().to_vec();
+    let dst = buf.data_mut();
+    for y in 0..h {
+        for x in 0..w {
+            let mut acc = [0u32; 4];
+            let (x0, x1) = (x.saturating_sub(r), (x + r + 1).min(w));
+            for xs in x0..x1 {
+                let i = (y * w + xs) * 4;
+                acc[0] += u32::from(tmp[i]);
+                acc[1] += u32::from(tmp[i + 1]);
+                acc[2] += u32::from(tmp[i + 2]);
+                acc[3] += u32::from(tmp[i + 3]);
+            }
+            let n = (x1 - x0) as u32;
+            let o = (y * w + x) * 4;
+            for (ch, dstb) in dst[o..o + 4].iter_mut().enumerate() {
+                *dstb = (acc[ch] / n) as u8;
+            }
+        }
+    }
+    tmp.copy_from_slice(dst);
+    for y in 0..h {
+        for x in 0..w {
+            let mut acc = [0u32; 4];
+            let (y0, y1) = (y.saturating_sub(r), (y + r + 1).min(h));
+            for ys in y0..y1 {
+                let i = (ys * w + x) * 4;
+                acc[0] += u32::from(tmp[i]);
+                acc[1] += u32::from(tmp[i + 1]);
+                acc[2] += u32::from(tmp[i + 2]);
+                acc[3] += u32::from(tmp[i + 3]);
+            }
+            let n = (y1 - y0) as u32;
+            let o = (y * w + x) * 4;
+            for (ch, dstb) in dst[o..o + 4].iter_mut().enumerate() {
+                *dstb = (acc[ch] / n) as u8;
+            }
+        }
+    }
+}
+
+/// R-M2 — `box-shadow` externe : rect décalé + spread,
+/// flou approximé en bandes alpha concentriques (rampe
+/// lissée, pas de gaussien — documenté). Les rayons
+/// suivent `border-radius` (déjà dans `radii`).
+#[allow(
+    clippy::too_many_arguments,
+    clippy::cast_sign_loss,
+    clippy::cast_possible_truncation
+)]
+fn paint_box_shadow(
+    pixmap: &mut Pixmap,
+    rect: &explorer_layout::Rect,
+    offset: (f32, f32),
+    blur: f32,
+    spread: f32,
+    color: Color,
+    radii: &[f32; 4],
+    dpi: Transform,
+    clip: Option<&Mask>,
+) {
+    let steps: u16 = if blur > 0.0 { 8 } else { 1 };
+    for i in (0..steps).rev() {
+        let grow = spread + blur * f32::from(i) / f32::from(steps);
+        let mut paint = Paint {
+            anti_alias: true,
+            ..Paint::default()
+        };
+        let mut c = color;
+        c.a = (f32::from(c.a) * (1.0 - f32::from(i) / f32::from(steps)))
+            .round()
+            .clamp(0.0, 255.0) as u8;
+        paint.set_color(skia_color(c));
+        let (x0, y0) = (rect.x + offset.0 - grow, rect.y + offset.1 - grow);
+        let (x1, y1) = (
+            rect.x + offset.0 + rect.width + grow,
+            rect.y + offset.1 + rect.height + grow,
+        );
+        let rr: [f32; 4] = [
+            radii[0] + grow,
+            radii[1] + grow,
+            radii[2] + grow,
+            radii[3] + grow,
+        ];
+        if let Some(path) = rounded_rect_path(x0, y0, x1, y1, &rr) {
+            pixmap.fill_path(&path, &paint, FillRule::Winding, dpi, clip);
+        }
+    }
+}
+
 fn paint_item(
     pixmap: &mut Pixmap,
     item: &DisplayItem,
@@ -929,23 +1229,29 @@ fn paint_item(
     clip: Option<&Mask>,
 ) {
     match item {
-        DisplayItem::FillRect { rect, color } => {
-            let mut paint = Paint {
-                anti_alias: true,
-                ..Paint::default()
-            };
-            paint.set_color(skia_color(*color));
-            if let Some(r) = Rect::from_xywh(rect.x, rect.y, rect.width, rect.height) {
-                fill_guarded(pixmap, &r, &paint, dpi, clip);
-            }
+        DisplayItem::FillRect { rect, color, radii } => {
+            fill_rect_item(pixmap, rect, *color, radii, dpi, clip);
+        }
+        DisplayItem::BoxShadow {
+            rect,
+            offset,
+            blur,
+            spread,
+            color,
+            radii,
+        } => {
+            paint_box_shadow(
+                pixmap, rect, *offset, *blur, *spread, *color, radii, dpi, clip,
+            );
         }
         DisplayItem::Border {
             rect,
             widths,
             colors,
             styles,
+            radii,
         } => {
-            paint_border(pixmap, rect, widths, colors, *styles, dpi, clip);
+            paint_border(pixmap, rect, widths, colors, *styles, radii, dpi, clip);
         }
         DisplayItem::Text {
             origin,
@@ -1010,8 +1316,12 @@ fn paint_item(
             pixmap, *origin, text, font, *color, *size_px, dpi, fonts, gc, clip,
         ),
         DisplayItem::PushClip(_)
+        | DisplayItem::PushClipRounded { .. }
         | DisplayItem::PopClip
         | DisplayItem::PushTransform(_)
+        | DisplayItem::PushFilter(_)
+        | DisplayItem::PopFilter
+        | DisplayItem::BackdropFilter { .. }
         | DisplayItem::PopTransform => {}
     }
 }
@@ -1502,7 +1812,98 @@ fn paint_tiled(
     }
 }
 
-/// Bordure : 4 côtés pleins (pattern dashed/dotted reporté —
+/// R-167 — chemin d'un rectangle aux 4 coins arrondis
+/// (cubiques Bézier κ≈0.5523 par coin, rayons 0 = coin
+/// droit ; approximation circulaire — l'elliptique `h/v`
+/// n'est pas encore supporté).
+fn rounded_rect_path(
+    x0: f32,
+    y0: f32,
+    x1: f32,
+    y1: f32,
+    radii: &[f32; 4],
+) -> Option<tiny_skia::Path> {
+    const K: f32 = 0.552_284_8;
+    let [rtl, rtr, rbr, rbl] = *radii;
+    let mut pb = PathBuilder::new();
+    pb.move_to(x0 + rtl, y0);
+    pb.line_to(x1 - rtr, y0);
+    if rtr > 0.0 {
+        pb.cubic_to(x1 - rtr + K * rtr, y0, x1, y0 + rtr - K * rtr, x1, y0 + rtr);
+    }
+    pb.line_to(x1, y1 - rbr);
+    if rbr > 0.0 {
+        pb.cubic_to(x1, y1 - rbr + K * rbr, x1 - rbr + K * rbr, y1, x1 - rbr, y1);
+    }
+    pb.line_to(x0 + rbl, y1);
+    if rbl > 0.0 {
+        pb.cubic_to(x0 + rbl - K * rbl, y1, x0, y1 - rbl + K * rbl, x0, y1 - rbl);
+    }
+    pb.line_to(x0, y0 + rtl);
+    if rtl > 0.0 {
+        pb.cubic_to(x0, y0 + rtl - K * rtl, x0 + rtl - K * rtl, y0, x0 + rtl, y0);
+    }
+    pb.close();
+    pb.finish()
+}
+
+/// R-166 — demi-teinte sombre d'une couleur de bordure
+/// (moitié vers le noir) pour les styles 3D.
+fn shade_dark(c: Color) -> Color {
+    Color {
+        r: c.r / 2,
+        g: c.g / 2,
+        b: c.b / 2,
+        a: c.a,
+    }
+}
+
+/// R-166 — demi-teinte claire (moitié vers le blanc) —
+/// le mix blanc donne le relief aussi sur teinte foncée.
+fn shade_light(c: Color) -> Color {
+    Color {
+        r: u8::midpoint(c.r, 255),
+        g: u8::midpoint(c.g, 255),
+        b: u8::midpoint(c.b, 255),
+        a: c.a,
+    }
+}
+
+/// Bandes d'un côté : fractions [f0,f1) le long de
+/// l'épaisseur vers l'intérieur + couleur de la bande.
+/// `inset` = haut/gauche foncés ; `outset` l'inverse ;
+/// `groove`/`ridge` = bande externe/interne échangées ;
+/// `double` = deux liserés pleins séparés d'un tiers vide
+/// (approximation du bevel Win95, R-166).
+fn side_bands(side: usize, c: Color, s: BorderStyle) -> Vec<(f32, f32, Color)> {
+    let tl = matches!(side, 0 | 3);
+    match s {
+        BorderStyle::Inset => {
+            vec![(0.0, 1.0, if tl { shade_dark(c) } else { shade_light(c) })]
+        }
+        BorderStyle::Outset => {
+            vec![(0.0, 1.0, if tl { shade_light(c) } else { shade_dark(c) })]
+        }
+        BorderStyle::Groove => {
+            if tl {
+                vec![(0.0, 0.5, shade_dark(c)), (0.5, 1.0, shade_light(c))]
+            } else {
+                vec![(0.0, 0.5, shade_light(c)), (0.5, 1.0, shade_dark(c))]
+            }
+        }
+        BorderStyle::Ridge => {
+            if tl {
+                vec![(0.0, 0.5, shade_light(c)), (0.5, 1.0, shade_dark(c))]
+            } else {
+                vec![(0.0, 0.5, shade_dark(c)), (0.5, 1.0, shade_light(c))]
+            }
+        }
+        BorderStyle::Double => vec![(0.0, 1.0 / 3.0, c), (2.0 / 3.0, 1.0, c)],
+        _ => vec![(0.0, 1.0, c)],
+    }
+}
+
+/// Bordure : 4 côtés (pattern dashed/dotted reporté —
 /// documenté en `DisplayItem`). Quand les côtés peints ont
 /// des couleurs différentes, chaque côté est le **trapèze**
 /// entre l'arête externe et l'arête de la padding box — le
@@ -1511,29 +1912,81 @@ fn paint_tiled(
 /// les vrais triangles `border-*` à `height:0` (Acid2 nose).
 /// Couleur uniforme → anneau par rectangles pixel-snapés
 /// (arêtes dures, pas de couture AA sur la diagonale).
+/// R-166 : styles 3D et `double` → bandes `side_bands` —
+/// demi-teintes par côté (`inset`/`outset`) ou en moitiés
+/// (`groove`/`ridge`) / liserés en tiers (`double`).
+#[allow(clippy::too_many_arguments)]
 fn paint_border(
     pixmap: &mut Pixmap,
     rect: &explorer_layout::Rect,
     widths: &[f32; 4],
     colors: &[Color; 4],
     styles: [BorderStyle; 4],
+    radii: &[f32; 4],
     dpi: Transform,
     clip: Option<&Mask>,
 ) {
+    // R-167 — coins arrondis : anneau unique externe−interne
+    // (EvenOdd) pour une bordure uniforme pleine — le cas
+    // commun `border-radius + solid` (boutons, navs). Les
+    // variantes de style ou de couleur retombent sur la
+    // peinture plate par bandes (approximation documentée).
+    if radii.iter().any(|r| *r > 0.0)
+        && styles
+            .iter()
+            .all(|s| *s == BorderStyle::Solid || *s == BorderStyle::None)
+        && colors.iter().all(|c| *c == colors[0])
+    {
+        let (ox0, oy0) = (rect.x, rect.y);
+        let (ox1, oy1) = (rect.x + rect.width, rect.y + rect.height);
+        let ix0 = ox0 + widths[3];
+        let iy0 = oy0 + widths[0];
+        let ix1 = ox1 - widths[1];
+        let iy1 = oy1 - widths[2];
+        let inner_r: [f32; 4] = [
+            (radii[0] - widths[0].max(widths[3])).max(0.0),
+            (radii[1] - widths[0].max(widths[1])).max(0.0),
+            (radii[2] - widths[2].max(widths[1])).max(0.0),
+            (radii[3] - widths[2].max(widths[3])).max(0.0),
+        ];
+        let mut pb = PathBuilder::new();
+        if let Some(outer) = rounded_rect_path(ox0, oy0, ox1, oy1, radii) {
+            pb.push_path(&outer);
+        }
+        if let Some(inner) = rounded_rect_path(ix0, iy0, ix1, iy1, &inner_r) {
+            pb.push_path(&inner);
+        }
+        if let Some(ring) = pb.finish() {
+            let mut paint = Paint {
+                anti_alias: true,
+                ..Paint::default()
+            };
+            paint.set_color(skia_color(colors[0]));
+            pixmap.fill_path(&ring, &paint, FillRule::EvenOdd, dpi, clip);
+        }
+        return;
+    }
     let painted = |i: usize| styles[i] != BorderStyle::None && widths[i] > 0.0;
-    let uniform = (0..4)
-        .filter(|&i| painted(i))
-        .map(|i| colors[i])
-        .collect::<Vec<_>>()
-        .windows(2)
-        .all(|w| w[0] == w[1]);
-    let (x0, y0) = (rect.x, rect.y);
-    let (x1, y1) = (rect.x + rect.width, rect.y + rect.height);
-    // Coins internes (padding box). `widths` = [t, r, b, l].
-    let itl = (x0 + widths[3], y0 + widths[0]);
-    let itr = (x1 - widths[1], y0 + widths[0]);
-    let ibr = (x1 - widths[1], y1 - widths[2]);
-    let ibl = (x0 + widths[3], y1 - widths[2]);
+    // R-166 — styles 3D / multi-bandes : la couleur réelle
+    // d'une bande est dérivée (demi-teintes) — le chemin
+    // « rect uniforme » ne s'applique qu'aux styles plats.
+    let has_bands = styles.iter().any(|s| {
+        matches!(
+            s,
+            BorderStyle::Double
+                | BorderStyle::Inset
+                | BorderStyle::Outset
+                | BorderStyle::Groove
+                | BorderStyle::Ridge
+        )
+    });
+    let uniform = !has_bands
+        && (0..4)
+            .filter(|&i| painted(i))
+            .map(|i| colors[i])
+            .collect::<Vec<_>>()
+            .windows(2)
+            .all(|w| w[0] == w[1]);
     for (side, (bw, (c, s))) in widths
         .iter()
         .zip(colors.iter().zip(styles.iter()))
@@ -1542,50 +1995,121 @@ fn paint_border(
         if *s == BorderStyle::None || *bw <= 0.0 {
             continue;
         }
-        let mut paint = Paint::default();
-        paint.set_color(skia_color(*c));
-        // Un côté sans voisin peint n'a pas de coin mitré : sa
-        // bande est un rectangle — passer par `fill_guarded`
-        // (pixel-snap des fonds, comme un background ; sinon un
-        // reftest à `border-top/bottom` non uniformes gardait
-        // des arêtes AA d'un pixel face aux fills snappés —
-        // margin-collapse-003).
-        let neighbors_painted = painted((side + 3) % 4) || painted((side + 1) % 4);
-        if uniform || !neighbors_painted {
-            let r = match side {
-                0 => Rect::from_xywh(rect.x, rect.y, rect.width, *bw),
-                1 => Rect::from_xywh(rect.x + rect.width - *bw, rect.y, *bw, rect.height),
-                2 => Rect::from_xywh(rect.x, rect.y + rect.height - *bw, rect.width, *bw),
-                _ => Rect::from_xywh(rect.x, rect.y, *bw, rect.height),
-            };
-            if let Some(r) = r {
-                fill_guarded(pixmap, &r, &paint, dpi, clip);
-            }
-            continue;
+        // Un côté sans voisin peint n'a pas de coin mitré :
+        // bande rectangulaire (shortcut `fill_guarded`).
+        let rect_shortcut = uniform || !(painted((side + 3) % 4) || painted((side + 1) % 4));
+        for (f0, f1, band_color) in side_bands(side, *c, *s) {
+            paint_border_band(
+                pixmap,
+                rect,
+                widths,
+                side,
+                *bw,
+                f0,
+                f1,
+                band_color,
+                rect_shortcut,
+                dpi,
+                clip,
+            );
         }
-        // Trapèze du côté : arête externe + arête interne de
-        // la padding box. Ordre des sommets = sens horaire.
-        let quad: [(f32, f32); 4] = match side {
-            0 => [(x0, y0), (x1, y0), itr, itl],
-            1 => [(x1, y0), (x1, y1), ibr, itr],
-            2 => [(x1, y1), (x0, y1), ibl, ibr],
-            _ => [(x0, y1), (x0, y0), itl, ibl],
+    }
+}
+
+/// R-166 — une bande d'un côté de bordure : rect
+/// pixel-snappé (`fill_guarded`, margin-collapse-003)
+/// quand le côté n'a pas de voisin peint ou que la
+/// bordure est uniforme ; sinon trapèze entre les coins
+/// externes (fraction f0) et internes (fraction f1) de la
+/// padding box — les sommets tournent dans le sens horaire.
+#[allow(clippy::too_many_arguments)]
+fn paint_border_band(
+    pixmap: &mut Pixmap,
+    rect: &explorer_layout::Rect,
+    widths: &[f32; 4],
+    side: usize,
+    bw: f32,
+    f0: f32,
+    f1: f32,
+    band_color: Color,
+    rect_shortcut: bool,
+    dpi: Transform,
+    clip: Option<&Mask>,
+) {
+    let mut paint = Paint::default();
+    paint.set_color(skia_color(band_color));
+    if rect_shortcut {
+        let r = match side {
+            0 => Rect::from_xywh(rect.x, rect.y + f0 * bw, rect.width, (f1 - f0) * bw),
+            1 => Rect::from_xywh(
+                rect.x + rect.width - f1 * bw,
+                rect.y,
+                (f1 - f0) * bw,
+                rect.height,
+            ),
+            2 => Rect::from_xywh(
+                rect.x,
+                rect.y + rect.height - f1 * bw,
+                rect.width,
+                (f1 - f0) * bw,
+            ),
+            _ => Rect::from_xywh(rect.x + f0 * bw, rect.y, (f1 - f0) * bw, rect.height),
         };
-        let mut pb = PathBuilder::new();
-        pb.move_to(quad[0].0, quad[0].1);
-        for p in &quad[1..] {
-            pb.line_to(p.0, p.1);
+        if let Some(r) = r {
+            fill_guarded(pixmap, &r, &paint, dpi, clip);
         }
-        pb.close();
-        if let Some(path) = pb.finish() {
-            // La boîte englobante du quad ⊆ `rect` → le garde
-            // de domaine device s'y applique tel quel.
-            let domain = Rect::from_ltrb(-SAFE_COORD, -SAFE_COORD, SAFE_COORD, SAFE_COORD);
-            let outer = Rect::from_xywh(rect.x, rect.y, rect.width, rect.height);
-            if let (Some(d), Some(o)) = (domain, outer) {
-                if device_bbox(&o, dpi).is_some_and(|b| d.intersect(&b).is_some()) {
-                    pixmap.fill_path(&path, &paint, FillRule::Winding, dpi, clip);
-                }
+        return;
+    }
+    let (x0, y0) = (rect.x, rect.y);
+    let (x1, y1) = (rect.x + rect.width, rect.y + rect.height);
+    // Coins internes (padding box). `widths` = [t, r, b, l].
+    let itl = (x0 + widths[3], y0 + widths[0]);
+    let itr = (x1 - widths[1], y0 + widths[0]);
+    let ibr = (x1 - widths[1], y1 - widths[2]);
+    let ibl = (x0 + widths[3], y1 - widths[2]);
+    let lerp_pt = |o: (f32, f32), i: (f32, f32), f: f32| -> (f32, f32) {
+        (o.0 + (i.0 - o.0) * f, o.1 + (i.1 - o.1) * f)
+    };
+    let quad: [(f32, f32); 4] = match side {
+        0 => [
+            lerp_pt((x0, y0), itl, f0),
+            lerp_pt((x1, y0), itr, f0),
+            lerp_pt((x1, y0), itr, f1),
+            lerp_pt((x0, y0), itl, f1),
+        ],
+        1 => [
+            lerp_pt((x1, y0), itr, f0),
+            lerp_pt((x1, y1), ibr, f0),
+            lerp_pt((x1, y1), ibr, f1),
+            lerp_pt((x1, y0), itr, f1),
+        ],
+        2 => [
+            lerp_pt((x1, y1), ibr, f0),
+            lerp_pt((x0, y1), ibl, f0),
+            lerp_pt((x0, y1), ibl, f1),
+            lerp_pt((x1, y1), ibr, f1),
+        ],
+        _ => [
+            lerp_pt((x0, y1), ibl, f0),
+            lerp_pt((x0, y0), itl, f0),
+            lerp_pt((x0, y0), itl, f1),
+            lerp_pt((x0, y1), ibl, f1),
+        ],
+    };
+    let mut pb = PathBuilder::new();
+    pb.move_to(quad[0].0, quad[0].1);
+    for p in &quad[1..] {
+        pb.line_to(p.0, p.1);
+    }
+    pb.close();
+    if let Some(path) = pb.finish() {
+        // La boîte englobante du quad ⊆ `rect` → le garde
+        // de domaine device s'y applique tel quel.
+        let domain = Rect::from_ltrb(-SAFE_COORD, -SAFE_COORD, SAFE_COORD, SAFE_COORD);
+        let outer = Rect::from_xywh(rect.x, rect.y, rect.width, rect.height);
+        if let (Some(d), Some(o)) = (domain, outer) {
+            if device_bbox(&o, dpi).is_some_and(|b| d.intersect(&b).is_some()) {
+                pixmap.fill_path(&path, &paint, FillRule::Winding, dpi, clip);
             }
         }
     }
