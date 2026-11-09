@@ -1102,6 +1102,6 @@ fn shift_subtree_y(bx: &mut LayoutBox, dy: f32) {
     }
     for child in &mut bx.children {
         child.rect.y += dy;
-        shift_subtree_y(child, dy);
+        explorer_common::deep(|| shift_subtree_y(child, dy));
     }
 }

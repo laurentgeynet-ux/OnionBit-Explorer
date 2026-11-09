@@ -1811,7 +1811,7 @@ fn text_clip_rects(bx: &LayoutBox) -> Vec<Rect> {
             }
         }
         for c in &b.children {
-            walk(c, out);
+            explorer_common::deep(|| walk(c, out));
         }
     }
     let mut out = Vec::new();

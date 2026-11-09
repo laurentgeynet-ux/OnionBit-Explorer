@@ -2966,3 +2966,62 @@ fn transform_box_content_box_change_la_reference() {
         "border-box={tx_bb} content-box={tx_cb} — delta attendu 10"
     );
 }
+
+/// Audit — diagnostic portée ancêtre : un descendant
+/// `position:absolute` d'un ancêtre `transform`é doit se
+/// peindre DANS la matrice (spec : transform s'applique à
+/// tout le rendu de la boîte, descendants positionnés
+/// inclus).
+#[test]
+fn transform_ancetre_englobe_enfant_positionne() {
+    use explorer_render::DisplayItem;
+    let (_, _, items) = dl(
+        "<div id=t><div id=a>x</div></div>",
+        "#t{transform:translate(10px, 5px);width:20px;height:20px}\
+         #a{position:absolute;top:0;left:0}",
+    );
+    let push = items
+        .iter()
+        .position(|i| matches!(i, DisplayItem::PushTransform(_)));
+    let pop = items
+        .iter()
+        .rposition(|i| matches!(i, DisplayItem::PopTransform));
+    let text = items
+        .iter()
+        .position(|i| matches!(i, DisplayItem::Text { .. }));
+    let (Some(p), Some(q), Some(t)) = (push, pop, text) else {
+        panic!("brackets/texte manquants : {items:?}");
+    };
+    assert!(
+        p < t && t < q,
+        "texte positionné hors de la transform ancêtre : push={p} text={t} pop={q}"
+    );
+}
+
+/// Audit — diagnostic portée ancêtre (2) : même cas mais le
+/// descendant positionné porte `z-index` → file `pos_defer`.
+#[test]
+fn transform_ancetre_englobe_positionne_z() {
+    use explorer_render::DisplayItem;
+    let (_, _, items) = dl(
+        "<div id=t><div id=a>x</div></div>",
+        "#t{transform:translate(10px, 5px);width:20px;height:20px}\
+         #a{position:absolute;top:0;left:0;z-index:1}",
+    );
+    let push = items
+        .iter()
+        .position(|i| matches!(i, DisplayItem::PushTransform(_)));
+    let pop = items
+        .iter()
+        .rposition(|i| matches!(i, DisplayItem::PopTransform));
+    let text = items
+        .iter()
+        .position(|i| matches!(i, DisplayItem::Text { .. }));
+    let (Some(p), Some(q), Some(t)) = (push, pop, text) else {
+        panic!("brackets/texte manquants : {items:?}");
+    };
+    assert!(
+        p < t && t < q,
+        "texte z-positionné hors de la transform ancêtre : push={p} text={t} pop={q}"
+    );
+}
