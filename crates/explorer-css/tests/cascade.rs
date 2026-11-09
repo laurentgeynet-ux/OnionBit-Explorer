@@ -3189,3 +3189,42 @@ fn webkit_box_alias_flex_moderne() {
         Some("row-reverse")
     );
 }
+
+/// R-193 — `<basefont>` : hints `size`/`color`/`face` sur la
+/// racine en quirks (hérités partout), ignoré en standards.
+#[test]
+fn basefont_hints_racine_quirks_seulement() {
+    // Quirks (pas de doctype) : la fonte de base monte à la
+    // racine → `color`/`font-size` hérités du hint.
+    let q = TreeBuilder::parse("<html><basefont size=6 color=red><body><p>x</p>");
+    let html = q
+        .children(q.document())
+        .into_iter()
+        .flatten()
+        .find(|&n| q.element(n).is_ok())
+        .expect("html");
+    let map = StyleEngine::new().compute_tree(&q, html, &env());
+    let root = map.get(html).expect("style racine");
+    assert_eq!(root.get("color"), Some("red"), "color=red héritée");
+    // `size=6` → index table xx-large (≠ défaut medium 16px).
+    assert_ne!(
+        root.get("font-size"),
+        Some("16px"),
+        "font-size remontée : {root:?}"
+    );
+    assert!(root.get("font-size").is_some(), "font-size hintée");
+    // Standards (doctype) : `<basefont>` ignoré.
+    let s = TreeBuilder::parse("<!doctype html><basefont color=red><p>x</p>");
+    let shtml = s
+        .children(s.document())
+        .into_iter()
+        .flatten()
+        .find(|&n| s.element(n).is_ok())
+        .expect("html");
+    let smap = StyleEngine::new().compute_tree(&s, shtml, &env());
+    assert_ne!(
+        smap.get(shtml).and_then(|c| c.get("color")),
+        Some("red"),
+        "standards : basefont inerte"
+    );
+}

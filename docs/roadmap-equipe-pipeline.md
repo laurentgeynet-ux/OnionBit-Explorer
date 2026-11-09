@@ -3471,8 +3471,14 @@ déblocage/coût décroissant.
   approximation documentée) — la prop moderne déclarée prime.
   Props ajoutées à `SUPPORTED_PROPS`. `line-clamp` livré MVP
   (R-M10). Verrou `webkit_box_alias_flex_moderne`.
-- [ ] **R-193. `<basefont>`** : taille/couleur face de base —
-  hint documenté non implémenté ; rare mais trivial à cadrer.
+- [x] **R-193. `<basefont>`** : `size`/`color`/`face` portent
+  la fonte de base du document en **quirks** (`hint_basefont`,
+  `explorer-css` `cascade.rs`) — hints sur la racine
+  (héritage à tout le sous-arbre : les `<font size=±N>` fils
+  directs deviennent base-relatifs). Premier `<basefont>` en
+  ordre document (approximation uniforme documentée).
+  Ignoré en standards. Verrou `basefont_hints_racine_quirks_
+  seulement`.
 - [ ] **R-191. `display:contents` — résidus** : le cœur est
   **déjà livré** (R-103 — l'élément ne génère aucune boîte,
   enfants promus, pseudos générés). Résidu à vérifier :

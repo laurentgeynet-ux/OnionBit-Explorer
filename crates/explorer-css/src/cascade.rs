@@ -2601,6 +2601,13 @@ fn apply_presentational_hints(
         },
     );
     legacy_presentational_hints(dom, node, tag, parent, env, props);
+    // R-193 — `<basefont>` : la fonte de base du document
+    // est un hint de la **racine** (héritage sur tout le
+    // sous-arbre — descendants `<font size=±N>` fils
+    // directs inclus).
+    if parent.is_none() {
+        hint_basefont(dom, props);
+    }
 }
 
 /// `<font>` (HTML 3.2/4.01 — la moitié du corpus legacy)
@@ -3126,8 +3133,7 @@ fn hint_link(dom: &Dom, node: NodeId, props: &mut HashMap<String, String>) {
 
 /// `<font>` (R-154 — signature du vieux web) : `face`/
 /// `color`/`size` 1-7 + `±N` relatif à l'index table du
-/// parent (§ font element, HTML Rendering). `basefont`
-/// documenté non-fait (rare, mécanisme distinct).
+/// parent (§ font element, HTML Rendering).
 fn hint_font(
     dom: &Dom,
     node: NodeId,
@@ -3150,6 +3156,57 @@ fn hint_font(
         "font-size",
         font_size_hint(hint_attr(dom, node, "size"), parent, env),
     );
+}
+
+/// `<basefont>` (R-193 — HTML 3.2, quirks seulement) :
+/// `size`/`color`/`face` portent la **fonte de base** du
+/// document — hints sur la racine (l'héritage propage à
+/// tous les descendants, y compris l'index table des
+/// `<font size=±N>` fils directs, désormais base-relatif
+/// pour eux). Premier `<basefont>` en ordre document
+/// (spec : s'applique au contenu suivant — approximation
+/// uniforme sur tout le document, la plupart des corpus
+/// legacy n'en déclare qu'un).
+fn hint_basefont(dom: &Dom, props: &mut HashMap<String, String>) {
+    if !matches!(dom.document_mode(), explorer_dom::DocumentMode::Quirks) {
+        return;
+    }
+    let Some(bf) = first_elem_by_tag(dom, "basefont") else {
+        return;
+    };
+    hint(
+        props,
+        "font-size",
+        hint_attr(dom, bf, "size")
+            .and_then(|v| v.trim().parse::<i64>().ok())
+            .map(|n| {
+                let i = usize::try_from(n.clamp(1, 7) - 1).unwrap_or(2);
+                FONT_SIZE_KW[i].to_string()
+            }),
+    );
+    hint(
+        props,
+        "color",
+        hint_attr(dom, bf, "color").and_then(legacy_color),
+    );
+    hint(
+        props,
+        "font-family",
+        hint_attr(dom, bf, "face").map(|v| v.trim().to_string()),
+    );
+}
+
+/// Premier élément portant `tag` en ordre document (DFS) —
+/// `None` si absent (`<basefont>` est rare).
+fn first_elem_by_tag(dom: &Dom, tag: &str) -> Option<NodeId> {
+    let mut stack: Vec<NodeId> = vec![dom.document()];
+    while let Some(n) = stack.pop() {
+        if dom.tag_name(n).is_ok_and(|t| t.eq_ignore_ascii_case(tag)) {
+            return Some(n);
+        }
+        stack.extend(dom.children(n).into_iter().flatten());
+    }
+    None
 }
 
 /// `<img>` présentationnel (R-156) : `align` left/right →
