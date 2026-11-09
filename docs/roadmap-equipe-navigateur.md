@@ -11328,3 +11328,12 @@ un crate PIPELINE.- [x] **JS-C422. Deadline honnête — canal session ↔ budge
   jQuery/mw tombait sur `Undefined`). Reflet §B-103
   intact ailleurs. Verrous `c449_doc_string_props` ×3 ;
   dom 245/245, b14 52/52.
+- [x] **JS-C450 (JT-5). Surface `querySelector(All)`
+  prouvée complète — le gap vol n'est pas l'API** —
+  Document/Element/DocumentFragment/ShadowRoot (hérit.
+  `DocumentFragment.prototype`) + sélecteurs attribut/
+  descendant/enfant direct/liste verts, `tagName`
+  majuscule spec. `categories of Null` (jwplayer
+  archive.org) = lecture de config `item.categories`
+  sur null — interne player, à sonder au prochain vol.
+  Verrous `c450_qsa_surface` ×2.
