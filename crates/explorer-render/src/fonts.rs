@@ -574,7 +574,7 @@ mod tests {
             ],
             generics: HashMap::new(),
             fallback: Some(0),
-};
+        };
         src.map_generics();
         let f = src
             .resolve(&req(&["serif"], 400, false))

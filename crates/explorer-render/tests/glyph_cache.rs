@@ -189,10 +189,10 @@ fn meme_requete_meme_face() {
         families: vec!["x".into()],
         weight: 400,
         italic: false,
-            caps: 0,
+        caps: 0,
         kern_off: false,
         stretch: 100,
-};
+    };
     let a = gc.face(fonts(), &req).expect("face");
     let b = gc.face(fonts(), &req).expect("face");
     assert!(Arc::ptr_eq(&a, &b), "même face partagée");
