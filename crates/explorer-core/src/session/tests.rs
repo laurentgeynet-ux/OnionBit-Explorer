@@ -4210,3 +4210,67 @@ async fn etape209_rss_shed_degrades_without_death() {
     s2.shed_evaluate(99_999);
     assert!(!s2.shed_active());
 }
+
+/// §B-117 (vol 731) — la liste « forbidden header names » est
+/// WHATWG-complète : `cookie2`/`dnt` (spec) + `set-cookie`/
+/// `set-cookie2` (Chrome strippe en requête). Un nom ni
+/// forbidden ni safelisté posé par le script (SABR dans
+/// `Headers`) tombait dans `unsafe_headers` → preflight
+/// `OPTIONS` là où Chrome n'en émet aucun → 403 gvs.
+#[test]
+fn forbidden_headers_complete_sabre_safe() {
+    use crate::session::net_items::forbidden_request_header as forb;
+    for n in [
+        "DNT",
+        "cookie2",
+        "Set-Cookie",
+        "set-cookie2",
+        "Sec-Fetch-Dest",
+        "proxy-authorization",
+        "origin",
+        "cookie",
+    ] {
+        assert!(forb(n), "{n} doit être forbidden");
+    }
+    for n in ["x-goog-request-info", "authorization", "content-type"] {
+        assert!(!forb(n), "{n} est un vrai en-tête auteur");
+    }
+}
+
+/// §B-117 — un en-tête forbidden dans `Headers` ne déclenche
+/// pas de preflight : filtré à l'émission **et** exclu de
+/// `unsafe_headers` → `OPTIONS` jamais émis (CORS-simple).
+/// Un en-tête authentiquement non safelisté préfligte toujours.
+#[test]
+fn cors_unsafe_headers_excludes_forbidden() {
+    let page = Url::parse("https://www.youtube.com/watch?v=x").unwrap();
+    let hdrs: Vec<(String, String)> = [
+        ("set-cookie", "SID=x"),
+        ("dnt", "1"),
+        ("cookie2", "$Version=1"),
+    ]
+    .iter()
+    .map(|(k, v)| (k.to_string(), v.to_string()))
+    .collect();
+    let c = net_items::cors_request_for(
+        &page,
+        &hdrs,
+        false,
+        explorer_net::http::FetchCredentials::Include,
+    );
+    assert!(
+        c.unsafe_headers.is_empty(),
+        "noms forbidden → zero unsafe → pas de preflight : {:?}",
+        c.unsafe_headers
+    );
+    // Un vrai non-safelisté reste unsafe → preflight préservé.
+    let hdrs2: Vec<(String, String)> =
+        vec![("x-goog-request-info".to_string(), "eJxNkDEO".to_string())];
+    let c2 = net_items::cors_request_for(
+        &page,
+        &hdrs2,
+        false,
+        explorer_net::http::FetchCredentials::Include,
+    );
+    assert_eq!(c2.unsafe_headers, vec!["x-goog-request-info".to_string()]);
+}

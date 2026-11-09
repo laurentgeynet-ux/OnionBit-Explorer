@@ -10729,3 +10729,35 @@ un crate PIPELINE.- [x] **JS-C422. Deadline honnête — canal session ↔ budge
   MessageChannel sous dernier ctx) — même patron à appliquer
   au premier cas réel.
 
+- [x] **JS-C432. §B-117 — fix `forbidden_request_header`
+  WHATWG-complet : un nom filtré par Chrome tombait dans
+  `unsafe_headers` → preflight là où Chrome n'en émet
+  aucun** (mur googlevideo `/videoplayback`, vol 731 →
+  vol 732). Liste étendue : `cookie2`/`dnt` (Fetch spec)
+  + `set-cookie`/`set-cookie2` (noms de réponse interdits —
+  Chrome les strippe aussi en requête couche réseau).
+  Mécanisme : un de ces noms posé par SABR dans `Headers`
+  → ni forbidden ni safelisté → `unsafe_headers` → OPTIONS
+  → **403 universel gvs** (mesuré 4 edges, JS-C431).
+  Chrome : droppe au guard Headers → requête CORS-simple
+  → POST direct → 200+ACAO. Le filtre s'applique aux deux
+  bords : émission filaire (`navigate.rs`) **et** calcul
+  `unsafe_headers` (`net_items.rs`) — header strippé du
+  fil ET preflight pas déclenché. `body_init_bytes`
+  audité : `ArrayBuffer`/`Uint8Array` → `(bytes, None)` —
+  **aucun CT injecté** sur corps binaire SABR (hypothèse
+  jumelle éliminée). Verrous :
+  `forbidden_headers_complete_sabre_safe` (liste reconnue
+  + vrais auteurs préservés) + `cors_unsafe_headers_excludes_forbidden`
+  (forbidden → `unsafe_headers` vide → zéro preflight ;
+  `x-goog-request-info` reste unsafe → preflight préservé).
+  **Vol 732 verdict** (`9f89bc0f`+fix, daemon avec
+  `EXPLORER_MEDIA_CODECS`) : record reconfirmé à
+  l'identique — `kevlar_base` 4,3 s `ok`, chaîne MSE
+  Σ 255 393/223 711 à l'octet près, vidéo `rs:4`
+  `buf:18,9/19,0` `paused:false` blob `916×687`, frame
+  1,88 Mo — **0 `net.fail`, 0 `fetch.rej`, 9
+  `videoplayback` tous CORS-simple** : le déclencheur
+  du 731 ne s'est pas reproduit cette session (variance
+  SABR) ; la sonde `why`/`uh`/`creds` nommera la branche
+  exacte à la prochaine occurrence.

@@ -1935,9 +1935,16 @@ pub(crate) fn cors_safelisted_header(name: &str) -> bool {
 }
 
 /// En-têtes interdits au script (Fetch « forbidden header
-/// names », sous-ensemble) — le navigateur garde le contrôle
+/// names », WHATWG complet) — le navigateur garde le contrôle
 /// de `Referer`/`Origin`/`Cookie`/`Host`…, jamais posés par
 /// la page (filtrés silencieusement à l'émission).
+/// `set-cookie`/`set-cookie2` sont des noms de **réponse**
+/// interdits à la lecture ; Chrome les strippe aussi en
+/// requête (couche réseau) — aligné ici : sinon un nom ni
+/// forbidden ni safelisté tomberait dans `unsafe_headers`
+/// → preflight `OPTIONS` là où Chrome n'en émet aucun
+/// (§B-117, vol 731 : googlevideo répond 403 à tout
+/// preflight — un sur-déclenchement tue le fetch).
 pub(crate) fn forbidden_request_header(name: &str) -> bool {
     let n = name.trim().to_ascii_lowercase();
     n.starts_with("sec-")
@@ -1951,12 +1958,16 @@ pub(crate) fn forbidden_request_header(name: &str) -> bool {
                 | "connection"
                 | "content-length"
                 | "cookie"
+                | "cookie2"
                 | "date"
+                | "dnt"
                 | "expect"
                 | "host"
                 | "keep-alive"
                 | "origin"
                 | "referer"
+                | "set-cookie"
+                | "set-cookie2"
                 | "te"
                 | "trailer"
                 | "transfer-encoding"
