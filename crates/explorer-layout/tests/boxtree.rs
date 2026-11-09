@@ -593,3 +593,51 @@ fn commentaire_ne_peint_pas() {
         "texte perdu : {texts:?}"
     );
 }
+
+/// R-191 — `display:contents` sur un interne de table ne
+/// s'aplatit PAS (la promotion d'enfants dans un contexte
+/// table corromprait la structure — approx. MVP documentée).
+#[test]
+fn display_contents_interne_table_preservee() {
+    let (dom, bx) = tree(
+        "<html><body><table><tr><td id=c style=\"display:contents\">x</td></tr></table></body></html>",
+    );
+    let c = {
+        let mut q = vec![dom.document()];
+        let mut f = None;
+        while let Some(n) = q.pop() {
+            if dom.attribute(n, "id").ok().flatten().as_deref() == Some("c") {
+                f = Some(n);
+            }
+            if let Ok(ch) = dom.children(n) {
+                q.extend(ch.iter().rev());
+            }
+        }
+        f.expect("td#c")
+    };
+    assert!(find(&bx, c).is_some(), "td contents garde sa boîte");
+}
+
+/// R-191 — `display:contents` sur un élément ordinaire
+/// continue de s'aplatir (contrôle — le borne ne retire
+/// que les internes table).
+#[test]
+fn display_contents_ordinaire_toujours_aplati() {
+    let (dom, bx) = tree(
+        "<html><body><div><div id=c style=\"display:contents\"><p id=k>x</p></div></div></body></html>",
+    );
+    let c = {
+        let mut q = vec![dom.document()];
+        let mut f = None;
+        while let Some(n) = q.pop() {
+            if dom.attribute(n, "id").ok().flatten().as_deref() == Some("c") {
+                f = Some(n);
+            }
+            if let Ok(ch) = dom.children(n) {
+                q.extend(ch.iter().rev());
+            }
+        }
+        f.expect("div#c")
+    };
+    assert!(find(&bx, c).is_none(), "div contents → aucune boîte");
+}

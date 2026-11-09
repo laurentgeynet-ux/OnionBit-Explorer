@@ -3479,12 +3479,16 @@ déblocage/coût décroissant.
   ordre document (approximation uniforme documentée).
   Ignoré en standards. Verrou `basefont_hints_racine_quirks_
   seulement`.
-- [ ] **R-191. `display:contents` — résidus** : le cœur est
-  **déjà livré** (R-103 — l'élément ne génère aucune boîte,
-  enfants promus, pseudos générés). Résidu à vérifier :
-  éléments à structure interne (`button`/`fieldset`/
-  `legend`/`select`/internes table) où la spec impose un
-  rendu particulier — notre flattening est uniforme.
+- [x] **R-191. `display:contents` — résidus** : le cœur était
+  déjà livré (R-103) ; le résidu interne est borné : les
+  **internes table** (`tr`/`td`/`th`/`thead`/`tbody`/`tfoot`/
+  `caption`/`colgroup`/`col`) ne s'aplatissent plus —
+  promouvoir leurs enfants dans un contexte table corromprait
+  la structure (promotion anonymous-box hors MVP,
+  approx. documentée). Éléments ordinaires et form controls
+  (`button`/`fieldset`/`select`/`img`…) : flattening déjà
+  spec-conforme. Verrous `display_contents_interne_table_
+  preservee`, `display_contents_ordinaire_toujours_aplati`.
 - [ ] **R-195. `<picture><source>` + `srcset` densité/taille**
   dans la sélection source : `dom_helpers` ne lit que `img`
   (type=/media/srcset ignorés). **Demande NAV journalisée**

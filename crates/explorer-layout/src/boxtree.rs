@@ -699,9 +699,28 @@ fn child_boxes<S: ::std::hash::BuildHasher>(
             // de-bloc et les items flex/grid se font sur eux).
             // `child_boxes` émet aussi `::before`/`::after` de
             // l'élément aplati — les pseudos génèrent toujours.
-            if styles
-                .get(child)
-                .is_some_and(|s| s.get("display") == Some("contents"))
+            // R-191 : les **internes table** ne s'aplatissent
+            // pas — promouvoir leurs enfants dans un contexte
+            // qui attend des cellules/lignes corrompt la
+            // structure (la promotion anonymous-box reste
+            // hors MVP — approx. documentée).
+            let table_internal = dom.tag_name(child).is_ok_and(|t| {
+                matches!(
+                    t,
+                    "tr" | "td"
+                        | "th"
+                        | "thead"
+                        | "tbody"
+                        | "tfoot"
+                        | "caption"
+                        | "colgroup"
+                        | "col"
+                )
+            });
+            if !table_internal
+                && styles
+                    .get(child)
+                    .is_some_and(|s| s.get("display") == Some("contents"))
             {
                 let inner = explorer_common::deep(|| {
                     child_boxes(
