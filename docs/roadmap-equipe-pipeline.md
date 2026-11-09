@@ -3149,11 +3149,20 @@ la dette, pas le layout.
   sous `rect` reçoit les ops puis le contenu se peint
   par-dessus (offscreen composité — même mécanique
   R-M5). Verrou ops + ordre + `none`.
+- [x] **R-M10. `line-clamp`** : `-webkit-line-clamp`
+  et `line-clamp` entiers lus au layout — seules les `n`
+  premières lignes d'un bloc conteneur d'inline sont
+  gardées, la dernière suspendue « … » (mécanisme
+  `ellipsize_line` partagé avec `text-overflow`,
+  lignes excédentaires détruites — `continue:discard`).
+  MVP LTR : pas de `display:-webkit-box`/
+  `-webkit-box-orient` exigé, `block-ellipsis` hors
+  périmètre. Verrou `line_clamp_tronque_les_lignes_` `et_suspend`.
 - [ ] **R-M9c. Résidus restants** :
   `scroll-snap`/`scroll-behavior` (session) ;
   font fallback par glyphe (`.ttc`, tofu CJK) ;
-  `line-clamp` ; `inert`/`dialog`/`popover`/
-  `:focus-visible` (session).
+  `inert`/`dialog`/`popover`/`:focus-visible`
+  (session).
 
 ## Palier R-B — Contenu étranger, animation, canvas
 

@@ -233,6 +233,8 @@ pub(crate) fn layout_inline(
     let mut lines = break_into_lines(&items, &atomics, x, y, w, ctx, fs, fl, strut_lh, indent);
     align_lines(&st, &mut lines, x, w, fl, indent);
     apply_text_overflow(&st, &mut lines, x + w, ctx, fs);
+    apply_line_clamp(&st, &mut lines, x + w, ctx, fs);
+    apply_line_clamp(&st, &mut lines, x + w, ctx, fs);
     // Atomes d'abord : leur sous-arbre a été posé en (0,0)
     // par `size_atomics` — translation au rect du fragment
     // (R-23 : sans elle, les enfants d'un atome — valeur d'un
@@ -282,64 +284,100 @@ fn apply_text_overflow(
         if line.rect.x + line.rect.width <= right + 0.01 {
             continue;
         }
-        // L'ellipsis prend la fonte du dernier fragment texte
-        // (spec : mise en forme de l'élément qui déborde).
-        let Some((est, enode, eowner, ebase, edeco)) = line
-            .fragments
-            .iter()
-            .rev()
-            .find(|f| !f.atomic)
-            .map(|f| (f.style.clone(), f.node, f.owner, f.baseline, f.deco.clone()))
-        else {
-            continue;
-        };
-        let efs = font_size_px(&est, fs, ctx);
-        let ell_w = crate::block::measure_fn(&est, efs, ctx)("…");
-        // Point de coupure : le « … » doit tenir dans le bloc.
-        let cut = right - ell_w;
-        // Fragments entièrement au-delà : supprimés (ils
-        // seraient clippés de toute façon ; les enlever garde
-        // le hit-test et les unions de rect propres).
-        line.fragments.retain(|f| f.rect.x < cut);
-        // Le fragment chevauchant la coupe est rogné à la
-        // mesure réelle de sa fonte (retrait caractère par
-        // caractère — `pop` est sûr Unicode).
-        if let Some(f) = line.fragments.last_mut() {
-            if f.rect.x + f.rect.width > cut {
-                let avail = (cut - f.rect.x).max(0.0);
-                let ffs = font_size_px(&f.style, fs, ctx);
-                let fm = crate::block::measure_fn(&f.style, ffs, ctx);
-                while !f.text.is_empty() && fm(&f.text) > avail {
-                    f.text.pop();
-                }
-                f.rect.width = fm(&f.text).min(avail).max(0.0);
-                f.trail_w = 0.0;
-            }
-        }
-        line.fragments.push(Fragment {
-            node: enode,
-            owner: eowner,
-            text: "…".to_string(),
-            atomic: false,
-            aid: None,
-            rect: Rect {
-                x: cut,
-                y: line.rect.y + (line.baseline - ebase),
-                width: ell_w,
-                height: line.rect.height,
-            },
-            baseline: ebase,
-            shaped: None,
-            trail_w: 0.0,
-            marg_l: 0.0,
-            marg_r: 0.0,
-            marg_t: 0.0,
-            marg_b: 0.0,
-            style: est,
-            deco: edeco,
-        });
-        line.rect.width = (cut + ell_w - line.rect.x).max(0.0);
+        ellipsize_line(line, right, ctx, fs);
     }
+}
+/// `line-clamp` / `-webkit-line-clamp` (entier > 0 —
+/// l'entrée `max-lines` d'Overflow-4) : ne garde que les `n`
+/// premières lignes de la boîte et suspend la dernière par
+/// « … ». Lignes excédentaires détruites — équivalent
+/// `overflow:hidden` + `continue:discard`. MVP LTR :
+/// appliqué à tout bloc conteneur d'inline sans exiger
+/// `display:-webkit-box` ni `-webkit-box-orient` —
+/// approximation terrain acceptée (les pages cibles la
+/// posent sur des `<p>`/cartes ordinaires). `block-ellipsis`
+/// (chaîne autre que « … ») hors périmètre.
+fn apply_line_clamp(
+    st: &ComputedStyle,
+    lines: &mut Vec<LineBox>,
+    right: f32,
+    ctx: &BlockCtx,
+    fs: f32,
+) {
+    let Some(n) = st
+        .get("line-clamp")
+        .or_else(|| st.get("-webkit-line-clamp"))
+        .and_then(|v| v.trim().parse::<usize>().ok())
+    else {
+        return;
+    };
+    if n == 0 || lines.len() <= n {
+        return;
+    }
+    lines.truncate(n);
+    if let Some(last) = lines.last_mut() {
+        ellipsize_line(last, right, ctx, fs);
+    }
+}
+
+/// Tronque `line` à `right` et insère « … » au point de
+/// coupe (partagé `text-overflow` / `line-clamp`) :
+/// l'ellipsis prend la fonte du dernier fragment texte
+/// (spec : mise en forme de l'élément qui déborde), les
+/// fragments entièrement au-delà sont supprimés (le hit-test
+/// et les unions de rect restent propres), le fragment
+/// chevauchant la coupe est rogné à la mesure réelle de sa
+/// fonte — retrait caractère par caractère, `pop` est sûr
+/// Unicode.
+fn ellipsize_line(line: &mut LineBox, right: f32, ctx: &BlockCtx, fs: f32) {
+    let Some((est, enode, eowner, ebase, edeco)) = line
+        .fragments
+        .iter()
+        .rev()
+        .find(|f| !f.atomic)
+        .map(|f| (f.style.clone(), f.node, f.owner, f.baseline, f.deco.clone()))
+    else {
+        return;
+    };
+    let efs = font_size_px(&est, fs, ctx);
+    let ell_w = crate::block::measure_fn(&est, efs, ctx)("…");
+    let cut = right - ell_w;
+    line.fragments.retain(|f| f.rect.x < cut);
+    if let Some(f) = line.fragments.last_mut() {
+        if f.rect.x + f.rect.width > cut {
+            let avail = (cut - f.rect.x).max(0.0);
+            let ffs = font_size_px(&f.style, fs, ctx);
+            let fm = crate::block::measure_fn(&f.style, ffs, ctx);
+            while !f.text.is_empty() && fm(&f.text) > avail {
+                f.text.pop();
+            }
+            f.rect.width = fm(&f.text).min(avail).max(0.0);
+            f.trail_w = 0.0;
+        }
+    }
+    line.fragments.push(Fragment {
+        node: enode,
+        owner: eowner,
+        text: "…".to_string(),
+        atomic: false,
+        aid: None,
+        rect: Rect {
+            x: cut,
+            y: line.rect.y + (line.baseline - ebase),
+            width: ell_w,
+            height: line.rect.height,
+        },
+        baseline: ebase,
+        shaped: None,
+        trail_w: 0.0,
+        marg_l: 0.0,
+        marg_r: 0.0,
+        marg_t: 0.0,
+        marg_b: 0.0,
+        style: est,
+        deco: edeco,
+    });
+    line.rect.width = (cut + ell_w - line.rect.x).max(0.0);
 }
 
 /// `true` si la boîte coule en ligne comme un atome :

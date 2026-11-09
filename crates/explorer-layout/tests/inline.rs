@@ -818,3 +818,46 @@ fn counter_increment_reset_dans_content() {
     );
     let _ = dom;
 }
+
+/// `line-clamp` / `-webkit-line-clamp` : ne garde que les
+/// n premières lignes + « … » sur la dernière — la hauteur
+/// de la boîte suit (mêmes lignes, mêmes fragments).
+#[test]
+fn line_clamp_tronque_les_lignes_et_suspend() {
+    let long = "mot ".repeat(60);
+    // Contrôle : sans clamp, le texte fait > 3 lignes.
+    let (dom0, bx0) = laid_w(
+        &format!("<!doctype html><p>{long}</p>"),
+        "body { margin: 0 } p { width: 100px; font-size: 10px }",
+        800.0,
+    );
+    let (dom1, bx1) = laid_w(
+        &format!("<!doctype html><p>{long}</p>"),
+        "body { margin: 0 } p { width: 100px; font-size: 10px; -webkit-line-clamp: 2 }",
+        800.0,
+    );
+    let lines0 = find(&bx0, by_tag(&dom0, "p")).children[0].lines.len();
+    let lines1 = find(&bx1, by_tag(&dom1, "p")).children[0].lines.len();
+    assert!(lines0 > 3, "contrôle : >3 lignes ({lines0})");
+    assert_eq!(lines1, 2, "clamped : 2 lignes ({lines1})");
+    let last = find(&bx1, by_tag(&dom1, "p")).children[0].lines[1]
+        .fragments
+        .last()
+        .expect("fragment ellipsis");
+    assert_eq!(last.text, "…", "dernier fragment = suspension");
+    // La hauteur de la boîte suit les lignes restantes.
+    let h_full = find(&bx0, by_tag(&dom0, "p")).rect.height;
+    let h_clamped = find(&bx1, by_tag(&dom1, "p")).rect.height;
+    assert!(
+        h_clamped < h_full,
+        "hauteur réduite : {h_clamped} vs {h_full}"
+    );
+    // `line-clamp` (nom moderne) a le même effet.
+    let (dom2, bx2) = laid_w(
+        &format!("<!doctype html><p>{long}</p>"),
+        "body { margin: 0 } p { width: 100px; font-size: 10px; line-clamp: 1 }",
+        800.0,
+    );
+    let lines2 = find(&bx2, by_tag(&dom2, "p")).children[0].lines.len();
+    assert_eq!(lines2, 1, "line-clamp:1 → une ligne ({lines2})");
+}
