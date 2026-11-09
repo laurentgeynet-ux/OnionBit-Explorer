@@ -10844,23 +10844,65 @@ un crate PIPELINE.- [x] **JS-C422. Deadline honnête — canal session ↔ budge
   pile réseau livre les 75 552 octets complets. §B-120
   clos : le DOM n'est pas perdu, React le vide
   légitimement — la question migre à §B-121.
-- [ ] **§B-121 — `hydrateRoot` baille puis le client-render
-  commite un arbre vide** (explore.org/arte.tv, vols
-  739-741). Faits : racine `HostRoot tag:3, child:null`
-  committée ; `element=<StrictMode><Context.Provider>…` —
-  `$$typeof=react.transitional.element` valide,
-  `Symbol.for` sain ; flux `__next_f`→`enqueue` délivre
-  **17 819 octets intacts** (rows `1:"$Sreact.fragment"`,
-  `4:"/_next/…"`) puis `close` propre (JS-C436) ;
-  `prom.pending=0`, `stream_reads=1410`, rAF fonctionnel,
-  zéro exception/console.error/unhandledrejection. Le
-  silence est le mur : tout le front est sain, le modèle
-  flight résout « rien ». Pistes ordonnées : (a)
-  suspension racine sur ref flight non résolue (children
-  `type` objet `react.context` — refs client à résoudre
-  via la map de modules turbopack) ; (b) bail-out
-  hydratation sur marqueur racine (placement `<!--$-->`/
-  doctype — comparer vs DOM Chrome) ; (c) repro minimal
-  Next/RSC pour bissection hors production. Gates de tri
-  avant fix : instrumenter `Chunk._status`/wakeable ou
-  rejouer le payload en harnais.
+- [x] **§B-121 — `hydrateRoot` baille puis le client-render
+  commite un arbre vide : cause racine = `getRootNode`
+  → `Undefined` ; résolu, explore.org HYDRATE et REND**
+  (explore.org/arte.tv, vols 739-750). Faits initiaux :
+  racine `HostRoot tag:3, child:null` committée ;
+  `element=<StrictMode><Context.Provider>…` valide ;
+  flux `__next_f`→`enqueue` intègre (17 819 octets,
+  `close` propre — JS-C436) ; `prom.pending=0`, rAF
+  fonctionnel, zéro exception/console.error visible.
+  Piste (a) explorée : refs client `$L`/`react.lazy`
+  toutes `resolved_module`/`fulfilled`, zéro chunk
+  `pending`/`blocked`, `next.router` initialisé —
+  la suspension n'était PAS sur les refs.
+  **La vraie chaîne (vols 743-746)** : `post.port=6`
+  vs `dlv.ports=1` — les `onmessage` du scheduler
+  MessageChannel de React **jetaient** (`port.throw_cb`,
+  JS-C437-quater) : `TypeError: cannot read nodeType
+  of Undefined` dans `fu` = le `getRootNode` de React —
+  `document.getRootNode()` rendait `Undefined` car
+  `NodeHost` lisait `get_prop(e.global,"document")` avec
+  `e.global` ≠ `window` (deux magasins de globals) ;
+  et `DOC_METHODS` annonçait `getRootNode` que
+  `DocumentHost::invoke` n'implémentait pas → trampoline
+  → `Undefined`. Double fix : JS-C438 (`NodeHost`
+  `getRootNode`/`ownerDocument` via le cache d'identité
+  `node_value`) + JS-C438-bis (`DocumentHost::invoke`
+  couvre `getRootNode` = `this` + `isSameNode`/
+  `isEqualNode`/`compareDocumentPosition` annoncés).
+  **Vol 749** : `dlv.ports=169/169`, `throw_cb=0` — la
+  boucle React tourne enfin, mais éval suivante :
+  `heap memory limit exceeded (405 Mo > 384 MiB)` —
+  l'arbre réel d'hydratation dépasse le budget par
+  défaut. **Vol 750 (`EXPLORER_JS_MEM_MIB=768`)** :
+  hydratation COMPLÈTE — `fiberChild=1`, 128 divs,
+  `main#main-content` repeuplé, body h=1683px,
+  `dlv.ports=192/192`, `prom.settled=1484/1496`,
+  `left_now=0`, zéro throw ; frame PNG : logo explore,
+  nav LIVECAMS, search bar, carousel + flèches, login
+  — **la structure réelle de la page rend**. §B-121
+  clos : le mur n'était ni le parse ni le flight ni les
+  refs — c'était un `getRootNode` hôte qui rendait
+  `Undefined` et tuait chaque commit React dans
+  l'œuf.
+- [ ] **§B-122 — post-hydratation : budget tas par défaut
+  trop juste + tempête `setTimeout`** (vol 750). Faits :
+  l'arbre hydraté d'explore.org exige ~405 Mo vivants >
+  384 MiB du budget défaut → `RangeError` en navigation
+  courante ; à 768 MiB la page hydrate complète. Reste
+  à trancher : (a) relever le défaut ou profiler la
+  rétention (arbre React + wrappers DOM + wakeables —
+  `prom.settled` 1484/1496 sain, `dlv.dynscript` 19/20)
+  ; (b) **tempête timers** : `fire.timer` ≈ 1,31 M en
+  ~90 s (~262k/cycle tally) — boucle `setTimeout(0)`
+  permanente, post=fire (chaque timer tiré une fois,
+  pas de ré-armement fantôme) ; suspect : heartbeat
+  analytics ou boucle retry dont la condition n'arrive
+  jamais vraie — nommer le producteur via `timer.src` ;
+  (c) **images absentes** : `req.img=1`/`err.img=1`
+  seulement — les vignettes lazy du carousel ne
+  déclenchent pas de fetch (IntersectionObserver/
+  `loading=lazy` à vérifier) ; frame montre les
+  placeholders gris correctement layoutés.
