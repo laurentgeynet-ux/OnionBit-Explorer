@@ -411,28 +411,37 @@ fn rs_get_reader(e: &mut Engine, this: Value, _a: &[Value]) -> JsResult<Value> {
 }
 
 /// `rs.cancel(reason?)` — purge + `source.cancel(reason)`.
+/// `rs.cancel(reason)` — promesse (spec §3.4.4 : résolue
+/// après `source.cancel`). §B-122(e) : rendait `undefined` —
+/// ky fait `body.cancel().catch(()=>{})` en `finally` de
+/// chaque requête → `TypeError` → la réponse 200 rejetée →
+/// `TanStack` Query en erreur → « Camera not found » explore.org.
 fn rs_cancel(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
     let Some(d) = rs_data(e, this) else {
         return Err(e.type_error("cancel on incompatible receiver"));
     };
-    cancel_stream(e, &d, arg(args, 0))?;
-    Ok(Value::Undefined)
+    let pid = e.new_promise();
+    let r = cancel_stream(e, &d, arg(args, 0));
+    settle_from(e, pid, &r);
+    Ok(Value::Obj(pid))
 }
 
 /// Annulation partagée `rs.cancel`/`reader.cancel` — purge la
-/// queue, `closed`, appelle `source.cancel`.
-fn cancel_stream(e: &mut Engine, d: &Rc<RefCell<RsData>>, reason: Value) -> JsResult<()> {
+/// queue, `closed`, appelle `source.cancel` ; rend sa valeur
+/// de retour (la promesse `cancel()` adopte son état, spec).
+fn cancel_stream(e: &mut Engine, d: &Rc<RefCell<RsData>>, reason: Value) -> JsResult<Value> {
     let (cancel, source) = {
         let mut dd = d.borrow_mut();
         dd.queue.clear();
         dd.closed = true;
         (dd.cancel.clone(), dd.source.clone())
     };
-    if let Some(f) = cancel {
-        e.call_value(f, source, &[reason])?;
-    }
+    let r = match cancel {
+        Some(f) => e.call_value(f, source, &[reason]),
+        None => Ok(Value::Undefined),
+    };
     drain_pending(e, d);
-    Ok(())
+    r
 }
 
 /// `reader.releaseLock()` — déverrouille (lectures pendantes
@@ -452,10 +461,8 @@ fn reader_cancel(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value>
         return Err(e.type_error("cancel on incompatible receiver"));
     };
     let pid = e.new_promise();
-    match cancel_stream(e, &d, arg(args, 0)) {
-        Ok(()) => e.resolve_promise(pid, Value::Undefined),
-        Err(crate::heap::Thrown(v)) => e.reject_promise(pid, v),
-    }
+    let r = cancel_stream(e, &d, arg(args, 0));
+    settle_from(e, pid, &r);
     Ok(Value::Obj(pid))
 }
 

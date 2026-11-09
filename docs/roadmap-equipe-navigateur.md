@@ -10926,5 +10926,19 @@ un crate PIPELINE.- [x] **JS-C422. Deadline honnête — canal session ↔ budge
   profiler la rétention (~405 Mo) ; (d) images lazy
   absentes (`req.img=1`/`err.img=1` — Intersection-
   Observer/`loading=lazy` à vérifier, placeholders
-  gris layoutés correctement sur la frame) ; (e) API
-  cam non livrée → nommer le fetch fautif.
+  gris layoutés correctement sur la frame) ; (e) « Camera
+  not found » → **`rs.cancel()` rendait `undefined` au lieu
+  d'une promesse** (JS-C441, vol 755) : ky appelle
+  `body.cancel().catch(()=>{})` en `finally` de chaque
+  requête → `TypeError: catch of Undefined` → la réponse
+  200 CORS-propre était rejetée → `TanStack` Query en
+  erreur → store `camGroups`/`defaultLivecam` vide →
+  rendu honnête du fallback. Traçabilité : sondes
+  `net.pend`/`net.go`/`net.arr` (par handle) +
+  `fetch.send` path complet ont exclu park/spawn/fail —
+  `unhandledrejection` + `promise.reject` ont nommé la
+  frame exacte (`#J` ky → `#K` finally). `cancel_stream`
+  rend le résultat de `source.cancel`, `settle_from`
+  adopte les thenables ; verrous `b122_stream_cancel`
+  4/4 (thenable+résolution, adoption retour, rejet
+  source, `reader.cancel` inchangé).
