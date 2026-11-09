@@ -408,7 +408,12 @@ impl Engine {
                         self.call_value(cb, m.dest.clone(), std::slice::from_ref(&evv))
                     {
                         if std::env::var("EXPLORER_PORT_TRACE").is_ok() {
-                            eprintln!("[port-throw-cb] dest={:?} err={:?}", m.dest, e);
+                            let msg = self.describe_diag(e.0.clone());
+                            let fn_src = self.stack_top_fn_src(300);
+                            eprintln!(
+                                "[port-throw-cb] dest={:?} err={:?} msg={:?} cur={:?} fn_src={}",
+                                m.dest, e, msg, self.hooks.current_script, fn_src
+                            );
                         }
                         self.sched_tick("port.throw_cb");
                         return Err(e);
