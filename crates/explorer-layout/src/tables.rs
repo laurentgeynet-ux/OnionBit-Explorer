@@ -657,6 +657,53 @@ pub(crate) fn layout_table(
         gap.fill(sv);
     }
 
+    // R-179 — arêtes VERTICALES (colonnes) sous `collapse` :
+    // `cg[c]` précède la colonne `c`, mêmes règles que
+    // `gap[k]` — `max` des `border-right` des cellules finissant
+    // en `c-1` et des `border-left` de celles commençant en `c`,
+    // bords externes soustraits de la bordure propre de la
+    // table (déjà dans `il`/`ir`). Sous `separate`, `sh` (R-159).
+    let ncols = col_w.len();
+    let mut cg = vec![0.0_f32; ncols + 1];
+    if collapse {
+        let mut left_w = vec![0.0_f32; ncols];
+        let mut right_w = vec![0.0_f32; ncols];
+        for row in &rows {
+            for cell in &row.cells {
+                let mut cc = &*bx;
+                let mut ok = true;
+                for &i in &cell.path {
+                    let Some(n) = cc.children.get(i) else {
+                        ok = false;
+                        break;
+                    };
+                    cc = n;
+                }
+                if ok {
+                    left_w[cell.col] = left_w[cell.col].max(border_px(
+                        &cc.style,
+                        "border-left-width",
+                        cb_w,
+                        fs,
+                        ctx,
+                    ));
+                    let end = cell.col + cell.cols - 1;
+                    right_w[end] =
+                        right_w[end].max(border_px(&cc.style, "border-right-width", cb_w, fs, ctx));
+                }
+            }
+        }
+        let bl = border_px(&st, "border-left-width", cb_w, fs, ctx);
+        let br = border_px(&st, "border-right-width", cb_w, fs, ctx);
+        cg[0] = (left_w[0] - bl).max(0.0);
+        for c in 1..ncols {
+            cg[c] = right_w[c - 1].max(left_w[c]);
+        }
+        cg[ncols] = (right_w[ncols - 1] - br).max(0.0);
+    } else {
+        cg.fill(sh);
+    }
+
     // Pose : chaque cellule est un bloc dans sa colonne ;
     // hauteur de rangée = max des hauteurs posées. La grille
     // démarre au bord interne (bordure+padding de la table).
@@ -697,12 +744,12 @@ pub(crate) fn layout_table(
         for cell in &row.cells {
             let col_x: f32 = x
                 + il
-                + sh * u16::try_from(cell.col + 1).map_or(0.0, f32::from)
+                + cg[..=cell.col].iter().sum::<f32>()
                 + col_w[..cell.col].iter().sum::<f32>();
             // `colspan` : la cellule occupe la somme des
-            // colonnes couvertes (R-47).
+            // colonnes couvertes (R-47) + les arêtes internes.
             let cw: f32 = col_w[cell.col..cell.col + cell.cols].iter().sum::<f32>()
-                + sh * u16::try_from(cell.cols - 1).map_or(0.0, f32::from);
+                + cg[cell.col + 1..cell.col + cell.cols].iter().sum::<f32>();
             // Cellule positionnée → conteneur pour ses absolus.
             let cell_cb = Rect {
                 x: col_x,
@@ -785,10 +832,40 @@ pub(crate) fn layout_table(
             .as_ref()
             .and_then(|p| at_path(bx, p))
             .and_then(|t| t.style.get("vertical-align").map(str::to_string));
+        // R-179 — baseline de rangée (§17.5.3.1) : max des
+        // baselines de 1re ligne des cellules `baseline` —
+        // une cellule sans ligne aligne sur son bas.
+        let row_baseline = {
+            let mut b = 0.0_f32;
+            for cell in &row.cells {
+                let Some(cb) = at_path(bx, &cell.path) else {
+                    continue;
+                };
+                let va = cb
+                    .style
+                    .get("vertical-align")
+                    .or(tr_va.as_deref())
+                    .unwrap_or("baseline");
+                if va == "baseline" {
+                    // Lignes sur le conteneur ou son premier
+                    // bloc anonyme enfant ; sans ligne, le bas
+                    // de la boîte fait baseline (§17.5.3.1).
+                    let l = cb
+                        .lines
+                        .first()
+                        .or_else(|| cb.children.iter().find_map(|c| c.lines.first()));
+                    b = b.max(
+                        l.map_or(cb.rect.y + cb.rect.height, |l| l.rect.y + l.baseline) - cb.rect.y,
+                    );
+                }
+            }
+            b
+        };
         for (ci, cell) in row.cells.iter().enumerate() {
             let Some(cell_box) = at_path(bx, &cell.path) else {
                 continue;
             };
+            let p1_top = cell_box.rect.y;
             // `rowspan` : la boîte peinte couvre la somme des
             // rangs traversés + les arêtes partagées internes
             // (R-47 — la distribution de la hauteur de
@@ -797,6 +874,15 @@ pub(crate) fn layout_table(
             let span_h: f32 = row_tops[k..last].iter().map(|t| t.1).sum::<f32>()
                 + gap[k + 1..last].iter().sum::<f32>();
             cell_box.rect.height = cell_box.rect.height.max(span_h.max(rh));
+            // R-179 — sous `collapse`, la bordure de cellule
+            // couvre l'arête partagée entière : les filets des
+            // voisins coïncident (1 px exact, ≈ une arête plus
+            // épaisse au-delà — le vainqueur spec n'est pas
+            // départagé). Le contenu reste à sa place posée.
+            if collapse {
+                cell_box.rect.x -= cg[cell.col];
+                cell_box.rect.width += cg[cell.col] + cg[cell.col + cell.cols];
+            }
             cell_box.rect.y = ry;
             // `vertical-align` cellule (R-160, §17.5.3.1) :
             // `middle`/`bottom` décalent le contenu posé dans
@@ -817,6 +903,18 @@ pub(crate) fn layout_table(
             let dy = match va {
                 "middle" => (cell_h - used) / 2.0,
                 "bottom" => cell_h - used,
+                // R-179 — `baseline` réel : la 1re ligne de la
+                // cellule se cale sur la baseline de rangée
+                // (le rang ne grandit pas — approximation si
+                // la ligne poussée déborde).
+                "baseline" => {
+                    let l = cell_box
+                        .lines
+                        .first()
+                        .or_else(|| cell_box.children.iter().find_map(|c| c.lines.first()));
+                    let bl = l.map_or(used, |l| l.rect.y + l.baseline - p1_top);
+                    (row_baseline - bl).max(0.0)
+                }
                 _ => 0.0,
             };
             if dy > 0.01 {

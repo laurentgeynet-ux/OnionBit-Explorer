@@ -2855,3 +2855,48 @@ fn hit_test_overlay_fixed_sous_wrapper_statique_gagne() {
         "overlay fixed sous wrapper statique : {hit:?}"
     );
 }
+
+/// R-179 — `border-collapse` vertical : les arêtes
+/// partagées entre colonnes sont réservées (`cg`), les
+/// cellules s'y étendent → bordures coïncidentes, plus de
+/// double filet. Et `vertical-align:baseline` de rangée :
+/// les 1res lignes des cellules `baseline` partagent la
+/// même baseline.
+#[test]
+fn table_collapse_colonnes_et_baseline() {
+    let (dom, bx) = laid(
+        "<table><tr><td id=a>x</td><td id=b>y</td></tr></table>",
+        "table{border-collapse:collapse} td{border:1px solid #000;padding:0}",
+    );
+    let a = find(&bx, by_id(&dom, "a"));
+    let b = find(&bx, by_id(&dom, "b"));
+    // L'arête partagée (1 px) : la bordure droite de `a` et la
+    // bordure gauche de `b` peignent sur la même zone — les
+    // border-box se recouvrent de la largeur de l'arête.
+    let a_right = a.rect.x + a.rect.width;
+    let overlap = a_right - b.rect.x;
+    assert!(
+        (overlap - 1.0).abs() < 0.5,
+        "arête partagée coïncidente : recouvrement {overlap} px"
+    );
+    // Baseline : deux tailles, mêmes lignes de base attendues.
+    let (dom2, bx2) = laid(
+        "<table><tr><td id=g>Big</td><td id=p>small</td></tr></table>",
+        "table{border-collapse:collapse} #g{font-size:24px} \
+         #p{font-size:8px;vertical-align:baseline}",
+    );
+    let g = find(&bx2, by_id(&dom2, "g"));
+    let p = find(&bx2, by_id(&dom2, "p"));
+    let bl = |cell: &explorer_layout::LayoutBox| -> f32 {
+        cell.children
+            .iter()
+            .find_map(|c| c.lines.first())
+            .map_or(cell.rect.y + cell.rect.height, |l| l.rect.y + l.baseline)
+    };
+    assert!(
+        (bl(g) - bl(p)).abs() < 1.0,
+        "baselines alignées : {:?} vs {:?}",
+        bl(g),
+        bl(p)
+    );
+}

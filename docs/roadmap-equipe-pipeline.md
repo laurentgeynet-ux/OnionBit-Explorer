@@ -3376,7 +3376,7 @@ déblocage/coût décroissant.
   `double`/`wavy` peints `solid` ; `text-decoration-thickness`,
   `text-underline-offset`, `text-decoration-skip-ink` ignorés —
   patterns de stroke dans `raster.rs`.
-- [ ] **R-179. `border-collapse` vertical + baseline de rangée**
+- [x] **R-179. `border-collapse` vertical + baseline de rangée**
   : collapse MVP horizontal seul (`tables.rs`) → doubles filets
   sous `<td border=1>` ; `vertical-align:baseline` de rangée =
   top approximé.
