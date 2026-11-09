@@ -125,16 +125,12 @@ surface minimale — jamais un stub qui ment.
   `digest` calcule au lieu de rejeter. Verrous
   `c453_subtle_digest_fallback` ×3 + c79 15/15
   (test rejet basculé sur KAT repli).
-- [ ] **JT-10. `VTTCue`** — « chaîne suivante » nommée
-  vol 722 : la classe est absente → `ReferenceError`
-  sur les players qui pistonnent les sous-titres
-  (videojs/jwplayer). Surface : `TextTrackCue` base +
-  ctor `VTTCue(startTime, endTime, text)`, props spec
-  (`vertical`/`snapToLines`/`line`/`position`/
-  `positionAlign`/`size`/`align`), `getCueAsHTML()`
-  minimal honnête, `onenter`/`onexit` stockés. Pas de
-  moteur de rendu cue — présence API + état, la
-  rasterisation n'est pas de ce périmètre.
+- [x] **JT-10. `VTTCue`** — **livré (JS-C454)** :
+  ctor + props spec + `getCueAsHTML` (fragment +
+  texte, tags bornés) ; `addTextTrack` → vraie
+  `TextTrack` (`addCue`/`removeCue`/`cues`/
+  `activeCues` = snapshot, pas d'horloge) greffée
+  à `textTracks`. Verrous `c454_vttcue` ×3.
 - [ ] **JT-11. i18n bindings YouTube
   `[[getSimpleString]]`/`[[countryCode]]`** — résidu
   nommé vol 701, post-§B-97 : slots internes du binding

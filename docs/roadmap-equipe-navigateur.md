@@ -11360,3 +11360,10 @@ un crate PIPELINE.- [x] **JS-C422. Deadline honnête — canal session ↔ budge
   `crypto_transport` est absent — `digest` n'a besoin
   d'aucun backend. Transport injecté prioritaire. Test
   `c79` rejet → KAT repli. Verrous `c453` ×3 + c79 15/15.
+- [x] **JS-C454 (JT-10). `VTTCue`/`TextTrack` — surface
+  minimale** — vol 722 : `new VTTCue(start,end,text)`
+  + props spec + `getCueAsHTML` (fragment + nœud
+  texte, tags de cue bornés) ; `addTextTrack` → vraie
+  `TextTrack` (`addCue`/`removeCue`/`cues`/`activeCues`
+  snapshot — pas d'horloge) greffée à `textTracks`.
+  Verrous `c454_vttcue` ×3 ; dom 245/245, mse5 5/5.

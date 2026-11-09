@@ -3119,6 +3119,24 @@ impl Engine {
             }
             self.set_own(g, name, f, false);
         }
+        // JS-C454 — `VTTCue` : ctor réel + prototype porteur
+        // de `getCueAsHTML`/`onenter`/`onexit` (vol 722 —
+        // l'interface était absente, `new VTTCue(...)` mort
+        // en `illegal constructor`/`not defined`).
+        let ctor = self.native_fn("VTTCue", vttcue_ctor);
+        if let Value::Obj(fid) = ctor.clone() {
+            let proto = self.new_object();
+            let gah = self.native_fn("getCueAsHTML", vttcue_as_html);
+            self.set_own(proto, "getCueAsHTML", gah, false);
+            self.set_own(fid, "prototype", Value::Obj(proto), false);
+            self.set_own(fid, "length", Value::Num(3.0), false);
+            if let Some(o) = self.heap.obj_mut(proto) {
+                o.set_own("constructor", ctor.clone(), false);
+            }
+            self.add_root(fid);
+            self.add_root(proto);
+        }
+        self.set_own(g, "VTTCue", ctor, false);
         // `HTMLElement.prototype` est posé AVANT `Element`
         // (install manuelle ci-dessus) — chaînage WebIDL
         // `HTMLElement.prototype → Element.prototype` ici, une
@@ -6895,10 +6913,8 @@ fn text_track_list(e: &mut Engine) -> ObjId {
     o
 }
 
-/// `list.item(i)` → `null` (liste vide — spec).
-fn text_track_item(_e: &mut Engine, _t: Value, _a: &[Value]) -> JsResult<Value> {
-    Ok(Value::Null)
-}
+/// `list.item(i)` — piste `__items[i]` ou `null` (spec).
+/// `__items` est peuplé par `media.addTextTrack` (JS-C454).
 
 /// `true` si `node` est `<dialog>` — gate des méthodes/props
 /// `HTMLDialogElement` (CAP-176).
@@ -7409,7 +7425,15 @@ fn media_call_claimed(
             e.reject_promise(pid, msg);
             Ok(Some(Value::Obj(pid)))
         }
-        "addTextTrack" | "captureStream" => Ok(Some(Value::Null)),
+        // JS-C454 — vraie `TextTrack` greffée à
+        // `media.textTracks` (la liste `__tt` partagée
+        // avec le getter). `captureStream` reste un
+        // repli honnête.
+        "addTextTrack" => {
+            let elv = node_value(e, dom, cache, node);
+            media_add_text_track(e, elv, args).map(Some)
+        }
+        "captureStream" => Ok(Some(Value::Null)),
         _ => Ok(Some(Value::Undefined)),
     }
 }
@@ -9736,7 +9760,10 @@ impl Host for NodeHost {
                     "getVideoPlaybackQuality" => {
                         media_call_claimed(e, &self.dom, &self.cache, node, name, args)
                     }
-                    "addTextTrack" | "captureStream" => Ok(Some(Value::Null)),
+                    // JS-C454 — vraie `TextTrack` (même
+                    // chemin que le bras non claimé).
+                    "addTextTrack" => media_add_text_track(e, this.clone(), args).map(Some),
+                    "captureStream" => Ok(Some(Value::Null)),
                     _ => Ok(Some(Value::Undefined)),
                 }
             }
@@ -10347,6 +10374,255 @@ pub(crate) fn domrect_fill(e: &mut Engine, id: ObjId, x: f64, y: f64, w: f64, h:
     for (k, v) in [("x", x), ("y", y), ("width", w), ("height", h)] {
         e.set_own_attrs(id, k, Value::Num(v), attrs);
     }
+}
+
+/// JS-C454 — `new VTTCue(startTime, endTime, text)` —
+/// surface `TextTrackCue` minimale (vol 722 — l'interface
+/// était absente). Retourne l'objet rempli (retour objet
+/// prime, même motif que `docfrag_ctor`) ; proto
+/// `VTTCue.prototype` résolu sur le global. Appel
+/// fonctionnel = `TypeError` (interfaces ctor-only).
+fn vttcue_ctor(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
+    let Value::Obj(id) = this else {
+        return Err(e.type_error("illegal constructor"));
+    };
+    if e.ctor_fresh != Some(id) {
+        return Err(e.type_error("illegal constructor"));
+    }
+    let start = e.to_number(arg(args, 0))?;
+    let end = e.to_number(arg(args, 1))?;
+    let text = e.to_js_string(arg(args, 2))?;
+    let g = e.global;
+    let o = e.new_object();
+    if let Some(Value::Obj(cid)) = e.get_prop(g, "VTTCue") {
+        if let Some(p @ Value::Obj(_)) = e.get_prop(cid, "prototype") {
+            if let Some(ho) = e.heap.obj_mut(o) {
+                ho.proto = p;
+            }
+        }
+    }
+    e.set_own(o, "startTime", Value::Num(start), true);
+    e.set_own(o, "endTime", Value::Num(end), true);
+    let t = e.str_val(text);
+    e.set_own(o, "text", t, true);
+    let empty = e.str_val("");
+    let auto = e.str_val("auto");
+    let start_al = e.str_val("start");
+    let center = e.str_val("center");
+    e.set_own(o, "id", empty.clone(), true);
+    e.set_own(o, "pauseOnExit", Value::Bool(false), true);
+    e.set_own(o, "region", Value::Null, true);
+    e.set_own(o, "snapToLines", Value::Bool(true), true);
+    e.set_own(o, "line", auto.clone(), true);
+    e.set_own(o, "lineAlign", start_al, true);
+    e.set_own(o, "position", auto.clone(), true);
+    e.set_own(o, "positionAlign", auto.clone(), true);
+    e.set_own(o, "size", Value::Num(100.0), true);
+    e.set_own(o, "align", center.clone(), true);
+    e.set_own(o, "textAlign", center, true);
+    e.set_own(o, "vertical", empty, true);
+    e.set_own(o, "onenter", Value::Null, true);
+    e.set_own(o, "onexit", Value::Null, true);
+    Ok(Value::Obj(o))
+}
+
+/// `cue.getCueAsHTML()` → `DocumentFragment` portant le
+/// texte de la cue (borné : pas de parsing des tags de cue
+/// `<v>`/`<b>`/`<i>` — le texte va tel quel en nœud texte,
+/// borne documentée de la surface VTTCue).
+fn vttcue_as_html(e: &mut Engine, this: Value, _a: &[Value]) -> JsResult<Value> {
+    let text = match this {
+        Value::Obj(id) => e.get_prop_value(Value::Obj(id), "text")?,
+        _ => Value::Undefined,
+    };
+    let text = e.to_js_string(text)?;
+    let Some((dom, cache)) = e.dom_ctx.clone() else {
+        return Err(e.type_error("VTTCue.getCueAsHTML: no document"));
+    };
+    let frag = dom.borrow_mut().create_fragment();
+    let tn = dom.borrow_mut().create_text(&text);
+    dom.borrow_mut().append(frag, tn);
+    Ok(node_value(e, &dom, &cache, frag))
+}
+
+/// `track.addCue(cue)`/`removeCue(cue)` — la liste vit dans
+/// `__cues` (propre, non énumérable), posée par
+/// [`text_track_obj`]. `cue` objet requis — `null`/
+/// primitive → `TypeError` (spec).
+fn text_track_add_cue(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
+    let Value::Obj(id) = this else {
+        return Err(e.type_error("addCue: not a TextTrack"));
+    };
+    let cue = arg(args, 0);
+    let Value::Obj(_) = cue else {
+        return Err(e.type_error("addCue: cue must be a TextTrackCue"));
+    };
+    let Some(Value::Obj(arr)) = e.get_prop(id, "__cues") else {
+        return Err(e.type_error("addCue: track sans liste"));
+    };
+    let n = e
+        .get_prop(arr, "length")
+        .and_then(|v| e.to_number(v).ok())
+        .unwrap_or(0.0) as usize;
+    let mut items = Vec::with_capacity(n + 1);
+    for i in 0..n {
+        if let Some(v) = e.get_prop(arr, &i.to_string()) {
+            items.push(v);
+        }
+    }
+    items.push(cue);
+    let fresh = e.new_array(items);
+    e.set_own(id, "__cues", fresh, false);
+    Ok(Value::Undefined)
+}
+
+/// `track.removeCue(cue)` — retire par identité d'objet.
+fn text_track_remove_cue(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
+    let Value::Obj(id) = this else {
+        return Err(e.type_error("removeCue: not a TextTrack"));
+    };
+    let cue = arg(args, 0);
+    let Some(Value::Obj(arr)) = e.get_prop(id, "__cues") else {
+        return Ok(Value::Undefined);
+    };
+    let n = e
+        .get_prop(arr, "length")
+        .and_then(|v| e.to_number(v).ok())
+        .unwrap_or(0.0) as usize;
+    let mut kept = Vec::with_capacity(n);
+    for i in 0..n {
+        if let Some(v) = e.get_prop(arr, &i.to_string()) {
+            if !e.strict_eq(&v, &cue) {
+                kept.push(v);
+            }
+        }
+    }
+    let fresh = e.new_array(kept);
+    e.set_own(id, "__cues", fresh, false);
+    Ok(Value::Undefined)
+}
+
+/// Getter `cues`/`activeCues` — lit `__cues` propre.
+/// `activeCues` = même snapshot (pas d'horloge de lecture
+/// dans le miroir — borne documentée).
+fn text_track_cues_get(e: &mut Engine, this: Value, _a: &[Value]) -> JsResult<Value> {
+    let Value::Obj(id) = this else {
+        return Ok(Value::Null);
+    };
+    Ok(e.get_prop(id, "__cues").unwrap_or(Value::Null))
+}
+
+/// Objet `TextTrack` réel (JS-C454) — `kind`/`label`/
+/// `language`/`mode` + `__cues` + méthodes de la spec
+/// (`addCue`/`removeCue`, getters `cues`/`activeCues`,
+/// EventTarget) — créé par `addTextTrack` sur les
+/// éléments média.
+fn text_track_obj(e: &mut Engine, kind: &str, label: &str, language: &str) -> ObjId {
+    let o = e.new_object();
+    let tag = e.str_val("TextTrack");
+    let kind_v = e.str_val(kind);
+    let label_v = e.str_val(label);
+    let lang_v = e.str_val(language);
+    let empty_v = e.str_val("");
+    let disabled_v = e.str_val("disabled");
+    let cues_arr = e.new_array(Vec::new());
+    e.set_own(o, crate::interp::SYM_TO_STRING_TAG, tag, false);
+    e.set_own(o, "kind", kind_v, true);
+    e.set_own(o, "label", label_v, true);
+    e.set_own(o, "language", lang_v, true);
+    e.set_own(o, "id", empty_v.clone(), true);
+    e.set_own(o, "mode", disabled_v, true);
+    e.set_own(o, "inBandMetadataTrackDispatchType", empty_v, true);
+    e.set_own(o, "__cues", cues_arr, false);
+    e.add_method(o, "addEventListener", et_add_listener);
+    e.add_method(o, "removeEventListener", et_remove_listener);
+    e.add_method(o, "dispatchEvent", et_dispatch_event);
+    e.add_method(o, "addCue", text_track_add_cue);
+    e.add_method(o, "removeCue", text_track_remove_cue);
+    for k in ["cues", "activeCues"] {
+        let gg = e.bound_native("textTrack.cues", text_track_cues_get, vec![]);
+        if let Some(ho) = e.heap.obj_mut(o) {
+            ho.set_accessor(k, gg, Value::Undefined, false);
+        }
+    }
+    e.set_own(o, "oncuechange", Value::Null, true);
+    o
+}
+
+/// `media.addTextTrack(kind, label?, language?)` — vraie
+/// `TextTrack` (JS-C454) ajoutée à `media.textTracks` (la
+/// liste `__tt` est celle que le getter `textTracks` met en
+/// cache — `length`/`item` lus dans `__items`).
+fn media_add_text_track(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
+    let Value::Obj(this_id) = this else {
+        return Err(e.type_error("addTextTrack: receiver is not a media element"));
+    };
+    let kind = e.to_js_string(arg(args, 0))?;
+    let label = arg(args, 1);
+    let label = if matches!(label, Value::Undefined) {
+        String::new()
+    } else {
+        e.to_js_string(label)?
+    };
+    let language = arg(args, 2);
+    let language = if matches!(language, Value::Undefined) {
+        String::new()
+    } else {
+        e.to_js_string(language)?
+    };
+    // Liste `__tt` — la même que le getter `textTracks`.
+    let list = match e.get_prop(this_id, "__tt") {
+        Some(v @ Value::Obj(_)) => v,
+        _ => {
+            let l = text_track_list(e);
+            let lv = Value::Obj(l);
+            e.set_own(this_id, "__tt", lv.clone(), false);
+            lv
+        }
+    };
+    let Value::Obj(list_id) = list else {
+        return Err(e.type_error("addTextTrack: no list"));
+    };
+    let track = Value::Obj(text_track_obj(e, &kind, &label, &language));
+    // `__items` sur la liste — `item(i)`/`length` le lisent.
+    let items = match e.get_prop(list_id, "__items") {
+        Some(v @ Value::Obj(_)) => v,
+        _ => {
+            let a = e.new_array(Vec::new());
+            e.set_own(list_id, "__items", a.clone(), false);
+            a
+        }
+    };
+    let Value::Obj(arr) = items else {
+        return Err(e.type_error("addTextTrack: no items"));
+    };
+    let n = e
+        .get_prop(arr, "length")
+        .and_then(|v| e.to_number(v).ok())
+        .unwrap_or(0.0) as usize;
+    let mut items_v = Vec::with_capacity(n + 1);
+    for i in 0..n {
+        if let Some(v) = e.get_prop(arr, &i.to_string()) {
+            items_v.push(v);
+        }
+    }
+    items_v.push(track.clone());
+    let fresh = e.new_array(items_v);
+    e.set_own(list_id, "__items", fresh, false);
+    e.set_own(list_id, "length", Value::Num(n as f64 + 1.0), true);
+    Ok(track)
+}
+
+/// `list.item(i)` — piste `__items[i]` ou `null` (spec).
+fn text_track_item(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
+    let Value::Obj(id) = this else {
+        return Ok(Value::Null);
+    };
+    let i = e.to_number(arg(args, 0)).unwrap_or(0.0) as usize;
+    if let Some(Value::Obj(arr)) = e.get_prop(id, "__items") {
+        return Ok(e.get_prop(arr, &i.to_string()).unwrap_or(Value::Null));
+    }
+    Ok(Value::Null)
 }
 
 /// JS-C447 — `new DocumentFragment()` (`WebIDL` `[Constructor]`)
