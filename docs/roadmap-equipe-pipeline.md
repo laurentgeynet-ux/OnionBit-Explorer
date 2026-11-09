@@ -3427,18 +3427,20 @@ déblocage/coût décroissant.
   annoncé absent — `cascade.rs`). Deuxième passe : tailles de
   conteneur après layout → rematch des règles
   (`container-type`/`container-name`).
-- [ ] **R-191. `display:contents`** : flattening de la boîte
-  (invisible mais enfants présents) — retombe `Block` via
-  fallback, faux pour les composants/wrappers.
+- [ ] **R-191. `display:contents` — résidus** : le cœur est
+  **déjà livré** (R-103 — l'élément ne génère aucune boîte,
+  enfants promus, pseudos générés). Résidu à vérifier :
+  éléments à structure interne (`button`/`fieldset`/
+  `legend`/`select`/internes table) où la spec impose un
+  rendu particulier — notre flattening est uniforme.
 - [ ] **R-192. `display:-webkit-box` + `-webkit-line-clamp`
   contexte** : vieux flexbox → bloc ; `line-clamp` est livré
   MVP sans exiger la famille `-webkit-box`.
 - [ ] **R-193. `<basefont>`** : taille/couleur face de base —
   hint documenté non implémenté ; rare mais trivial à cadrer.
-- [ ] **R-194. `@scope` + `light-dark()` + `@starting-style`**
-  : fonctions/at-rules 2024+ — `light-dark()` gâte les sites
-  qui déclarent leur bi-thème explicitement (sinon mêmes
-  couleurs doublées).
+- [ ] **R-194. `@scope` + `@starting-style`** : at-rules
+  2024+ absentes. `light-dark()` **déjà livré** (R-105 —
+  branche claire/sombre résolue à la cascade).
 - [ ] **R-195. `<picture><source>` + `srcset` densité/taille**
   dans la sélection source : `dom_helpers` ne lit que `img`
   (type=/media/srcset ignorés). **Demande NAV journalisée**
@@ -3446,11 +3448,11 @@ déblocage/coût décroissant.
   résolution de source vit dans le périmètre NAV.
 - [ ] **R-196. `subgrid`** : pistes imbriquées héritées —
   documenté hors scope de la livraison grid MVP.
-- [ ] **R-197. `font_face` collections : woff/woff2/TTC/otf**
-  : raster fontes = truetype seul ; woff (sfnt compressé) et
-  TTC multi-faces absents → `@font-face` woff2 des CDN servis
-  non décodés. `ttf-parser` ou décompression woff (zlib déjà
-  lié) + indexation TTC.
+- [ ] **R-197. `font_face` : woff/woff2** : raster fontes =
+  truetype seul ; woff (sfnt compressé) absent →
+  `@font-face` woff2 des CDN non décodés. **TTC multi-faces
+  déjà livré** (R-69 — `font_face` porte l'index de face).
+  Décompression woff (zlib déjà lié) + format().
 
 ## Tâches continues
 
