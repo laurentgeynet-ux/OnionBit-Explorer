@@ -145,6 +145,7 @@ pub(crate) fn to_canvas_op(rec: &CanvasOpRecord) -> CanvasOp {
 pub(crate) fn display_item_bounds(item: &DisplayItem) -> Option<Rect> {
     match item {
         DisplayItem::FillRect { rect, .. }
+        | DisplayItem::DecoRect { rect, .. }
         | DisplayItem::Border { rect, .. }
         | DisplayItem::Placeholder { rect, .. }
         | DisplayItem::Image { rect, .. }
