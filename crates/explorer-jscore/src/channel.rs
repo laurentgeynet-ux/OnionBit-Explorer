@@ -163,8 +163,17 @@ impl Host for PortHost {
                     return Ok(Some(Value::Undefined));
                 }
                 e.sched_tick("post.port");
+                let dest = self.peer.borrow().clone();
+                if std::env::var("EXPLORER_PORT_TRACE").is_ok() {
+                    eprintln!(
+                        "[port-post] dest={:?} ctx={} queue={}",
+                        dest,
+                        e.current_context(),
+                        e.port_msgs.len() + 1
+                    );
+                }
                 e.port_msgs.push_back(PortMsg {
-                    dest: self.peer.borrow().clone(),
+                    dest,
                     data,
                     ctx: e.current_context(),
                 });
@@ -341,6 +350,12 @@ impl Engine {
     pub(crate) fn drain_port_msgs(&mut self) -> JsResult<usize> {
         let mut n = 0usize;
         while let Some(m) = self.port_msgs.pop_front() {
+            if std::env::var("EXPLORER_PORT_TRACE").is_ok() {
+                eprintln!(
+                    "[port-drain] dest={:?} ctx={} cur={}",
+                    m.dest, m.ctx, self.cur_ctx
+                );
+            }
             self.switch_to(m.ctx);
             if self.cur_ctx != m.ctx {
                 self.sched_tick("port.drop_ctx");
