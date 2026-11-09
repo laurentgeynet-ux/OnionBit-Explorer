@@ -404,8 +404,7 @@ impl Engine {
             // ici l'IDL précède, déviation mineure).
             if let Some(cb) = self.get_prop(id, "onmessage") {
                 if self.is_callable(cb.clone()) {
-                    if let Err(e) =
-                        self.call_value(cb, m.dest.clone(), std::slice::from_ref(&evv))
+                    if let Err(e) = self.call_value(cb, m.dest.clone(), std::slice::from_ref(&evv))
                     {
                         if std::env::var("EXPLORER_PORT_TRACE").is_ok() {
                             let msg = self.describe_diag(e.0.clone());
@@ -422,9 +421,7 @@ impl Engine {
             }
             for f in listeners {
                 if self.is_callable(f.clone()) {
-                    if let Err(e) =
-                        self.call_value(f, m.dest.clone(), std::slice::from_ref(&evv))
-                    {
+                    if let Err(e) = self.call_value(f, m.dest.clone(), std::slice::from_ref(&evv)) {
                         if std::env::var("EXPLORER_PORT_TRACE").is_ok() {
                             eprintln!("[port-throw-lis] dest={:?} err={:?}", m.dest, e);
                         }
