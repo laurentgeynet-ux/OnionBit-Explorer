@@ -11146,3 +11146,36 @@ un crate PIPELINE.- [x] **JS-C422. Deadline honnête — canal session ↔ budge
   réels — livrés par
   `deliver_media_state`, à mesurer
   vs sa cadence).
+  **Sonde claim vol 764c** —
+  `y.api` polluée pendant le claim
+  #3 : `st=1→3` jamais stable,
+  `ct=3 853 829` FIGÉ (modèle
+  interne SABR, pas notre getter —
+  `v.currentTime` = `rep.position_
+  ms/1000` = 0 quand l'hôte
+  reporte pos=0), `frac=0`. Le
+  watchdog SABR voit donc : lecture
+  jamais avancée + rien chargé →
+  re-attach ~2-3 min (surface #4
+  créée en plein claim #3 —
+  `loadstart`+`sourceopen` log).
+  Verdict #3 : `frames=0`,
+  `pcm=1 917 040` — **3e total
+  identique au bit près** : le
+  pull sert la fenêtre bornée du
+  cadavre (préfixe appendé avant
+  que le buffer-ahead ne se ferme)
+  — le churn n'est pas claim-
+  spécifique (vols non-claimés
+  ré-attachent pareil). Seam
+  moteur vérifiée saine :
+  `v.currentTime`/`v.buffered`
+  (union MSE réelle)/events/
+  commandes répondent tous. Mur =
+  **sémantique des reports** :
+  `pos`/`buf` honnêtes-mais-rampe
+  (0 pendant le pull → SABR
+  affamé). Cran « lecture
+  soutenue » = boucle hôte
+  re-claim + reports d'avancement
+  précoces.
