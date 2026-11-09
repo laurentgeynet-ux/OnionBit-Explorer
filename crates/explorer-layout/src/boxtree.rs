@@ -337,8 +337,69 @@ pub fn build_box_tree_sized<S: ::std::hash::BuildHasher>(
         b.first_line = styles.pseudo(root, PseudoElement::FirstLine).cloned();
         b.first_letter = styles.pseudo(root, PseudoElement::FirstLetter).cloned();
         lend_first_pseudos(b);
+        inject_inside_markers(b);
     }
     bx
+}
+
+/// R-180 — `list-style-position: inside` : la puce devient le
+/// premier mot en-ligne de la boîte — un `Text` « libellé +
+/// espace » injecté en tête des enfants du `list-item` (le
+/// paint externe est désactivé côté display). Glyphes usuels
+/// disc/circle/square en caractères ; compteurs via
+/// [`marker_label`] ; `none` → rien. Style : `::marker` figé
+/// s'il existe, sinon celui de l'élément.
+fn inject_inside_markers(bx: &mut LayoutBox) {
+    if bx.kind == BoxKind::ListItem
+        && bx
+            .style
+            .get("list-style-position")
+            .is_some_and(|p| p.trim() == "inside")
+    {
+        let ty = bx.style.get("list-style-type").map_or("disc", str::trim);
+        if ty != "none" {
+            let glyph = match ty {
+                "disc" => "\u{2022}".to_string(),
+                "circle" => "\u{25e6}".to_string(),
+                "square" => "\u{25aa}".to_string(),
+                _ => ty
+                    .strip_prefix('"')
+                    .and_then(|v| v.strip_suffix('"'))
+                    .or_else(|| ty.strip_prefix('\'').and_then(|v| v.strip_suffix('\'')))
+                    .map_or_else(|| marker_label(ty, bx.marker_ordinal), str::to_string),
+            };
+            let mstyle = bx.marker_style.clone().unwrap_or_else(|| bx.style.clone());
+            bx.children.insert(
+                0,
+                LayoutBox {
+                    kind: BoxKind::Text,
+                    node: bx.node,
+                    style: mstyle,
+                    text: Some(format!("{glyph} ")),
+                    children: Vec::new(),
+                    lines: Vec::new(),
+                    rect: Rect::default(),
+                    position: Position::Static,
+                    float: Float::None,
+                    overflow: Overflow::Visible,
+                    overflow_x: Overflow::Visible,
+                    z_index: 0,
+                    intrinsic: None,
+                    control_checked: false,
+                    slot: BoxSlot::default(),
+                    height_raised: false,
+                    fc_root: false,
+                    marker_ordinal: 0,
+                    marker_style: None,
+                    first_line: None,
+                    first_letter: None,
+                },
+            );
+        }
+    }
+    for c in &mut bx.children {
+        explorer_common::deep(|| inject_inside_markers(c));
+    }
 }
 
 /// R-177 — `::first-line`/`::first-letter` appartiennent à
@@ -707,6 +768,84 @@ fn child_boxes<S: ::std::hash::BuildHasher>(
     // `reversed` décrémente, `li[value]` ancrape la série).
     assign_marker_ordinals(dom, parent, &mut out);
     out
+}
+
+/// Libellé du marqueur pour `list-style-type` + ordinal
+/// (R-108) — `decimal`, `decimal-leading-zero`, alpha et
+/// romain ; le `.` final est la ponctuation spec du marqueur.
+/// R-180 : déplacé ici — le layout en a besoin pour le texte
+/// inline des marqueurs `list-style-position: inside`.
+#[must_use]
+pub fn marker_label(ty: &str, n: i32) -> String {
+    let body = match ty {
+        "decimal" | "decimal-leading-zero" => {
+            if ty.starts_with("decimal-leading") && (0..10).contains(&n) {
+                format!("0{n}")
+            } else {
+                n.to_string()
+            }
+        }
+        "lower-alpha" | "lower-latin" => alpha_label(n, false),
+        "upper-alpha" | "upper-latin" => alpha_label(n, true),
+        "lower-roman" => roman_label(n).to_lowercase(),
+        "upper-roman" => roman_label(n),
+        // Style inconnu → repli decimal (css-counter-styles-3).
+        _ => n.to_string(),
+    };
+    format!("{body}.")
+}
+
+/// `lower-alpha` / `upper-alpha` : colonne de lettres
+/// (1→a…26→z, 27→aa…), base 26 sans zéro. `n ≤ 0` → le
+/// nombre tel quel.
+fn alpha_label(n: i32, upper: bool) -> String {
+    if n <= 0 {
+        return n.to_string();
+    }
+    let mut s = Vec::new();
+    let mut v = n;
+    while v > 0 {
+        v -= 1;
+        s.push((b'a' + u8::try_from(v % 26).unwrap_or(0)) as char);
+        v /= 26;
+    }
+    let s: String = s.into_iter().rev().collect();
+    if upper {
+        s.to_uppercase()
+    } else {
+        s
+    }
+}
+
+/// Chiffres romains (subtractive, ≤ 3999 — au-delà, décimal).
+fn roman_label(n: i32) -> String {
+    const T: &[(i32, &str)] = &[
+        (1000, "M"),
+        (900, "CM"),
+        (500, "D"),
+        (400, "CD"),
+        (100, "C"),
+        (90, "XC"),
+        (50, "L"),
+        (40, "XL"),
+        (10, "X"),
+        (9, "IX"),
+        (5, "V"),
+        (4, "IV"),
+        (1, "I"),
+    ];
+    if !(0..4000).contains(&n) {
+        return n.to_string();
+    }
+    let mut s = String::new();
+    let mut v = n;
+    for (val, sym) in T {
+        while v >= *val {
+            s.push_str(sym);
+            v -= *val;
+        }
+    }
+    s
 }
 
 /// Ordinaux de liste sur les fils `list-item` de `parent`

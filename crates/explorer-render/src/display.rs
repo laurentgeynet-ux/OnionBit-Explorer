@@ -1970,6 +1970,16 @@ fn emit_list_marker(
     off: (f32, f32),
     images: &crate::PaintImages,
 ) {
+    // R-180 — `inside` : la puce est un `Text` injecté en
+    // tête de ligne au layout — aucun marqueur externe à
+    // peindre (il chevaucherait le texte décalé).
+    if bx
+        .style
+        .get("list-style-position")
+        .is_some_and(|p| p.trim() == "inside")
+    {
+        return;
+    }
     if bx.kind != BoxKind::ListItem {
         return;
     }
@@ -2067,7 +2077,7 @@ fn emit_text_marker(bx: &LayoutBox, items: &mut Vec<DisplayItem>, off: (f32, f32
     {
         s.to_string()
     } else {
-        marker_label(ty, bx.marker_ordinal)
+        explorer_layout::marker_label(ty, bx.marker_ordinal)
     };
     let baseline_y = bx.lines.first().map_or_else(
         || {
@@ -2105,80 +2115,6 @@ fn emit_text_marker(bx: &LayoutBox, items: &mut Vec<DisplayItem>, off: (f32, f32
     });
 }
 
-/// Libellé du marqueur pour `list-style-type` + ordinal
-/// (R-108) — `decimal`, `decimal-leading-zero`, alpha et
-/// romain ; le `.` final est la ponctuation spec du marqueur.
-fn marker_label(ty: &str, n: i32) -> String {
-    let body = match ty {
-        "decimal" | "decimal-leading-zero" => {
-            if ty.starts_with("decimal-leading") && (0..10).contains(&n) {
-                format!("0{n}")
-            } else {
-                n.to_string()
-            }
-        }
-        "lower-alpha" | "lower-latin" => alpha_label(n, false),
-        "upper-alpha" | "upper-latin" => alpha_label(n, true),
-        "lower-roman" => roman_label(n).to_lowercase(),
-        "upper-roman" => roman_label(n),
-        // Style inconnu → repli decimal (css-counter-styles-3).
-        _ => n.to_string(),
-    };
-    format!("{body}.")
-}
-
-/// `lower-alpha` / `upper-alpha` : colonne de lettres
-/// (1→a…26→z, 27→aa…), base 26 sans zéro. `n ≤ 0` → le
-/// nombre tel quel.
-fn alpha_label(n: i32, upper: bool) -> String {
-    if n <= 0 {
-        return n.to_string();
-    }
-    let mut s = Vec::new();
-    let mut v = n;
-    while v > 0 {
-        v -= 1;
-        s.push((b'a' + u8::try_from(v % 26).unwrap_or(0)) as char);
-        v /= 26;
-    }
-    let s: String = s.into_iter().rev().collect();
-    if upper {
-        s.to_uppercase()
-    } else {
-        s
-    }
-}
-
-/// Chiffres romains (subtractive, ≤ 3999 — au-delà, décimal).
-fn roman_label(n: i32) -> String {
-    const T: &[(i32, &str)] = &[
-        (1000, "M"),
-        (900, "CM"),
-        (500, "D"),
-        (400, "CD"),
-        (100, "C"),
-        (90, "XC"),
-        (50, "L"),
-        (40, "XL"),
-        (10, "X"),
-        (9, "IX"),
-        (5, "V"),
-        (4, "IV"),
-        (1, "I"),
-    ];
-    if !(1..4000).contains(&n) {
-        return n.to_string();
-    }
-    let mut v = n;
-    let mut out = String::new();
-    for &(val, s) in T {
-        while v >= val {
-            out.push_str(s);
-            v -= val;
-        }
-    }
-    out
-}
 
 /// La boîte déclare un fond : `background-color` non
 /// transparente ou `background-image` avec une couche

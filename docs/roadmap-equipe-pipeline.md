@@ -3380,7 +3380,7 @@ déblocage/coût décroissant.
   : collapse MVP horizontal seul (`tables.rs`) → doubles filets
   sous `<td border=1>` ; `vertical-align:baseline` de rangée =
   top approximé.
-- [ ] **R-180. `list-style-position:inside`** : puce peinte sans
+- [x] **R-180. `list-style-position:inside`** : puce peinte sans
   décalage du texte — la ligne doit s'indenter comme si la puce
   était le premier mot.
 - [ ] **R-181. Fragmentation multicol** : `column-rule`

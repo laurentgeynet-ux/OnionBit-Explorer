@@ -2900,3 +2900,38 @@ fn table_collapse_colonnes_et_baseline() {
         bl(p)
     );
 }
+
+/// R-180 — `list-style-position:inside` : la puce devient un
+/// `Text` « glyphe + espace » en tête des enfants du
+/// `list-item` — la ligne s'indente comme si c'était le
+/// premier mot (le paint externe est désactivé côté display).
+#[test]
+fn list_style_position_inside_indente_la_ligne() {
+    let (dom, bx) = laid(
+        "<ul><li id=i>item</li></ul>",
+        "li{list-style-position:inside;list-style-type:decimal}",
+    );
+    let li = find(&bx, by_id(&dom, "i"));
+    let first = &li.children[0];
+    assert!(
+        first.text.as_deref().is_some_and(|t| t.starts_with('1')),
+        "puce « 1. » en tête : {:?}",
+        first.text
+    );
+    // La ligne du contenu commence après la puce injectée.
+    let line = li
+        .children
+        .iter()
+        .find_map(|c| c.lines.first())
+        .or_else(|| li.lines.first());
+    assert!(line.is_some(), "une ligne posée dans le li");
+    let (dom2, bx2) = laid(
+        "<ul><li id=i>item</li></ul>",
+        "li{list-style-position:outside;list-style-type:decimal}",
+    );
+    let li2 = find(&bx2, by_id(&dom2, "i"));
+    assert!(
+        li2.children[0].text.is_none(),
+        "outside : pas de puce en ligne"
+    );
+}
