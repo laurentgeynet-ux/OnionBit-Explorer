@@ -2389,3 +2389,34 @@ fn filter_bracket_et_ops_parsed() {
         "none → aucun bracket"
     );
 }
+
+#[test]
+fn overflow_arrondi_emet_pushcliprounded() {
+    // R-M9 — `overflow:hidden` + `border-radius` : le clip
+    // porte les rayons (`PushClipRounded`) au lieu du
+    // `PushClip` rectangulaire (le contenu ne déborde plus
+    // des coins).
+    let (_d, _b, items) = dl(
+        "<div>x</div>",
+        "div { overflow: hidden; border-radius: 8px; \
+         width: 30px; height: 10px }",
+    );
+    let radii = items.iter().find_map(|i| match i {
+        DisplayItem::PushClipRounded { radii, .. } => Some(*radii),
+        _ => None,
+    });
+    assert_eq!(radii, Some([5.0; 4]), "radii clip : {radii:?}");
+    assert!(
+        !items.iter().any(|i| matches!(i, DisplayItem::PushClip(_))),
+        "PushClip rect en trop"
+    );
+    // Sans rayon : `PushClip` rect inchangé.
+    let (_d2, _b2, items2) = dl(
+        "<div>x</div>",
+        "div { overflow: hidden; width: 30px; height: 10px }",
+    );
+    assert!(
+        items2.iter().any(|i| matches!(i, DisplayItem::PushClip(_))),
+        "PushClip attendu sans radius"
+    );
+}

@@ -3141,8 +3141,12 @@ la dette, pas le layout.
   `polygon` v1) et R-123 (`aspect-ratio` sizing).
   **Reste** : clip `overflow` arrondi (reliquat R-167)
   et `line-clamp`.
-- [ ] **R-M9. Résidus** : clip `overflow` arrondi
-  (reliquat R-167) ; `backdrop-filter` ;
+- [x] **R-M9a. Clip `overflow` arrondi** (reliquat
+  R-167) : `PushClipRounded {rect, radii}` émis quand
+  `border-radius` > 0 — le `Mask` raster suit
+  `rounded_rect_path`. Verrou + repli rect.
+- [ ] **R-M9b. Résidus restants** : `backdrop-filter`
+  (zone derrière l'élément → offscreen composité) ;
   `scroll-snap`/`scroll-behavior` (session) ;
   font fallback par glyphe (`.ttc`, tofu CJK) ;
   `line-clamp` ; `inert`/`dialog`/`popover`/

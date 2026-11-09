@@ -882,6 +882,35 @@ fn replay_items(
                     clips.push(mask);
                 }
             }
+            // R-M9 — clip arrondi (`overflow` + `border-radius`) :
+            // même grille de pixels que `PushClip`, le chemin de
+            // masque suit les rayons (`rounded_rect_path`).
+            DisplayItem::PushClipRounded { rect: r, radii } => {
+                if let Some(mut mask) = Mask::new(pixmap.width(), pixmap.height()) {
+                    if let Some(phys) = Rect::from_xywh(r.x, r.y, r.width, r.height)
+                        .and_then(|rr| rr.transform(cur))
+                    {
+                        let dom = Rect::from_ltrb(-SAFE_COORD, -SAFE_COORD, SAFE_COORD, SAFE_COORD);
+                        if let Some(clamped) = dom.and_then(|d| phys.intersect(&d)) {
+                            if let Some(path) = rounded_rect_path(
+                                clamped.left(),
+                                clamped.top(),
+                                clamped.right(),
+                                clamped.bottom(),
+                                radii,
+                            ) {
+                                mask.fill_path(
+                                    &path,
+                                    FillRule::Winding,
+                                    true,
+                                    Transform::default(),
+                                );
+                            }
+                        }
+                    }
+                    clips.push(mask);
+                }
+            }
             DisplayItem::PopClip => {
                 clips.pop();
             }
@@ -1252,6 +1281,7 @@ fn paint_item(
             pixmap, *origin, text, font, *color, *size_px, dpi, fonts, gc, clip,
         ),
         DisplayItem::PushClip(_)
+        | DisplayItem::PushClipRounded { .. }
         | DisplayItem::PopClip
         | DisplayItem::PushTransform(_)
         | DisplayItem::PushFilter(_)

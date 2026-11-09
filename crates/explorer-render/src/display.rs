@@ -177,6 +177,15 @@ pub enum DisplayItem {
     },
     /// Entrée de zone de clipping (`overflow` ≠ `visible`).
     PushClip(Rect),
+    /// Entrée de zone de clipping arrondie (R-M9) :
+    /// `overflow` ≠ `visible` + `border-radius` > 0 — la
+    /// géométrie suit `rounded_rect_path` au raster.
+    PushClipRounded {
+        /// Zone de clipping (border box de la boîte).
+        rect: Rect,
+        /// Rayons des 4 coins `[tl,tr,br,bl]` px.
+        radii: [f32; 4],
+    },
     /// Sortie de la zone de clipping correspondante.
     PopClip,
     /// `transform: …` — matrice affine (origine déjà résolue
@@ -396,6 +405,9 @@ impl DisplayList {
                 DisplayItem::PushClip(r) => {
                     let _ = writeln!(out, "push-clip {r:?}");
                 }
+                DisplayItem::PushClipRounded { rect, radii } => {
+                    let _ = writeln!(out, "push-clip-rounded {rect:?} {radii:?}");
+                }
                 DisplayItem::PopClip => out.push_str("pop-clip\n"),
                 DisplayItem::PushTransform(m) => {
                     let _ = writeln!(out, "push-transform {m:?}");
@@ -549,6 +561,7 @@ fn item_bounds(item: &DisplayItem) -> Option<Rect> {
             },
         }),
         DisplayItem::PushClip(_)
+        | DisplayItem::PushClipRounded { .. }
         | DisplayItem::PopClip
         | DisplayItem::PushTransform(_)
         | DisplayItem::PopTransform
@@ -720,6 +733,16 @@ fn item_eq(a: &DisplayItem, b: &DisplayItem) -> bool {
             },
         ) => o1 == o2 && t1 == t2 && f1 == f2 && c1 == c2 && s1 == s2,
         (D::PushClip(r1), D::PushClip(r2)) => r1 == r2,
+        (
+            D::PushClipRounded {
+                rect: r1,
+                radii: a1,
+            },
+            D::PushClipRounded {
+                rect: r2,
+                radii: a2,
+            },
+        ) => r1 == r2 && a1 == a2,
         (D::PushFilter(o1), D::PushFilter(o2)) => o1 == o2,
         (D::PushTransform(m1), D::PushTransform(m2)) => {
             (m1.sx, m1.ky, m1.kx, m1.sy, m1.tx, m1.ty) == (m2.sx, m2.ky, m2.kx, m2.sy, m2.tx, m2.ty)
@@ -3491,6 +3514,10 @@ fn translate_item(it: &DisplayItem, d: (f32, f32)) -> DisplayItem {
             size_px: *size_px,
         },
         D::PushClip(r) => D::PushClip(shifted(*r, d)),
+        D::PushClipRounded { rect, radii } => D::PushClipRounded {
+            rect: shifted(*rect, d),
+            radii: *radii,
+        },
         D::PushTransform(m) => {
             let mut m = *m;
             m.tx += d.0;
@@ -3972,7 +3999,19 @@ fn paint_box_impl<'a>(
         // l'axe y est devenu `auto`, scrollable).
         let clipped = bx.overflow != Overflow::Visible || bx.overflow_x != Overflow::Visible;
         if clipped {
-            items.push(DisplayItem::PushClip(shifted(bx.rect, off)));
+            // R-M9 — `border-radius` > 0 → clip arrondi,
+            // géométrie arrondie au raster (plus d'excès
+            // angulaire de contenu hors des coins).
+            let clip_rect = shifted(bx.rect, off);
+            let radii = corner_radii(&bx.style, &clip_rect);
+            if radii.iter().any(|r| *r > 0.0) {
+                items.push(DisplayItem::PushClipRounded {
+                    rect: clip_rect,
+                    radii,
+                });
+            } else {
+                items.push(DisplayItem::PushClip(clip_rect));
+            }
         }
         // Les `fixed` descendants remontent à la file RACINE
         // (`fixed_defer`, drainée hors de tout clip) : leur bloc
