@@ -106,6 +106,15 @@ pub enum AtKind {
         /// Règles imbriquées.
         rules: Vec<Rule>,
     },
+    /// `@scope (<root>) [to (<borne>)] { rules }` — css-cascade-6
+    /// (R-194) : les règles sont **désucrées au parse** — chaque
+    /// prélude `S` devient `R S` (`:scope` → `:is(R)`), et une
+    /// borne `to (B)` ajoute `:not(B *)` — la cascade itère le
+    /// contenu comme un groupe ordinaire.
+    Scope {
+        /// Règles désucrées (préludes déjà préfixés).
+        rules: Vec<Rule>,
+    },
     /// Sans bloc : `@name prelude ;` (`@import`, `@charset`,
     /// `@namespace`, `@supports` sans cas nominal ici, etc.) —
     /// le prélude est conservé brut.
@@ -472,6 +481,23 @@ impl<'t> Parser<'t> {
                             },
                             rules,
                         }
+                    }
+                    "scope" => {
+                        // `@scope (R) [to (B)] { … }` — R-194 :
+                        // règles parsées puis préludes
+                        // réécrits `R S` (+ `:not(B *)`).
+                        let mut rules = if self.nest_depth >= MAX_NESTING {
+                            self.skip_block();
+                            Vec::new()
+                        } else {
+                            self.nest_depth += 1;
+                            let r = self.nested_rules();
+                            self.nest_depth -= 1;
+                            r
+                        };
+                        let (root, bound) = parse_scope_prelude(&prelude);
+                        scope_wrap_rules(&mut rules, &root, bound.as_deref());
+                        AtKind::Scope { rules }
                     }
                     "font-face" | "page" | "viewport" | "counter-style" | "property" => {
                         AtKind::Declarations {
@@ -1151,6 +1177,139 @@ fn substitute_ampersand(nested: &str, parent: &str) -> String {
         }
     }
     out.join(", ")
+}
+
+/// R-194 — `@scope (R) [to (B)]` : extrait la racine `R` et
+/// la borne `B` du prélude (parenthèses suivies ; préfixe
+/// `(…)` requis — sinon tout le prélude hors `to (…)` fait
+/// office de racine, tolérance malformée).
+fn parse_scope_prelude(prelude: &str) -> (String, Option<String>) {
+    /// Coupe un `(` en tête : (contenu interne, reste après `)`).
+    fn take_paren(s: &str) -> Option<(&str, &str)> {
+        let inner = s.strip_prefix('(')?;
+        let mut depth = 1i32;
+        for (i, c) in inner.char_indices() {
+            match c {
+                '(' => depth += 1,
+                ')' => {
+                    depth -= 1;
+                    if depth == 0 {
+                        return Some((&inner[..i], &inner[i + 1..]));
+                    }
+                }
+                _ => {}
+            }
+        }
+        None
+    }
+    let p = prelude.trim();
+    let (root, rest) = match take_paren(p) {
+        Some((inner, rest)) => (inner.trim().to_string(), rest.trim()),
+        None => (p.to_string(), ""),
+    };
+    let bound = rest
+        .strip_prefix("to")
+        .map(str::trim)
+        .and_then(take_paren)
+        .map(|(inner, _)| inner.trim().to_string());
+    (root, bound)
+}
+
+/// R-194 — réécrit les préludes des règles d'un `@scope` :
+/// `R S` (sélecteur scopé descendant de la racine), `&` et
+/// `:scope` → `:is(R)` (déjà ancrés — pas de préfixe alors),
+/// borne `B` → `:not(B *)` sur l'élément cible. Récursif
+/// dans les at-rules imbriquées.
+fn scope_wrap_rules(rules: &mut [Rule], root: &str, bound: Option<&str>) {
+    /// Remplace les `&` et `:scope` hors chaînes par `rep`.
+    fn subst_anchor(s: &str, rep: &str) -> String {
+        let mut out = String::with_capacity(s.len() + rep.len());
+        let (mut quote, mut esc) = ('\0', false);
+        let mut it = s.char_indices().peekable();
+        while let Some((_, c)) = it.next() {
+            if esc {
+                out.push(c);
+                esc = false;
+                continue;
+            }
+            match c {
+                '\\' => {
+                    out.push(c);
+                    esc = true;
+                }
+                '"' | '\'' if quote == '\0' => {
+                    quote = c;
+                    out.push(c);
+                }
+                c if c == quote => {
+                    quote = '\0';
+                    out.push(c);
+                }
+                '&' if quote == '\0' => out.push_str(rep),
+                ':' if quote == '\0' => {
+                    // `:scope` suivi d'une borne non-ident.
+                    let rest: String = it.clone().take(5).map(|(_, c)| c).collect();
+                    let after = it.clone().nth(5).map(|(_, c)| c);
+                    if rest == "scope"
+                        && !after.is_some_and(|c| c.is_alphanumeric() || c == '_' || c == '-')
+                    {
+                        out.push_str(rep);
+                        for _ in 0..5 {
+                            it.next();
+                        }
+                    } else {
+                        out.push(':');
+                    }
+                }
+                _ => out.push(c),
+            }
+        }
+        out
+    }
+    for rule in rules.iter_mut() {
+        match rule {
+            Rule::Qualified(q) => {
+                let rep = format!(":is({})", root.trim());
+                let mut parts: Vec<String> = Vec::new();
+                'outer: for s in split_top_commas(&q.prelude) {
+                    let s = s.trim();
+                    if s.is_empty() {
+                        continue;
+                    }
+                    let anchored = s.contains('&') || s.contains(":scope");
+                    let s2 = subst_anchor(s, &rep);
+                    for r in split_top_commas(root) {
+                        let r = r.trim();
+                        if r.is_empty() {
+                            continue;
+                        }
+                        let mut p = if anchored {
+                            s2.clone()
+                        } else {
+                            format!("{r} {s2}")
+                        };
+                        if let Some(b) = bound {
+                            p.push_str(":not(");
+                            p.push_str(b.trim());
+                            p.push_str(" *)");
+                        }
+                        parts.push(p);
+                        if parts.len() >= MAX_NEST_PARTS {
+                            break 'outer;
+                        }
+                    }
+                }
+                q.prelude = parts.join(", ");
+            }
+            Rule::At(at) => match &mut at.kind {
+                AtKind::Media { rules, .. }
+                | AtKind::Layer { rules, .. }
+                | AtKind::Container { rules, .. }
+                | AtKind::Scope { rules } => scope_wrap_rules(rules, root, bound),
+                _ => {}
+            },
+        }
+    }
 }
 
 fn parse_import(prelude: &str) -> ImportRule {

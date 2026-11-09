@@ -1356,6 +1356,10 @@ impl StyleEngine {
                             layer: layer.to_vec(),
                             rules: rules.clone(),
                         });
+                    } else if let AtKind::Scope { rules } = &at.kind {
+                        // `@scope` (R-194) : préludes déjà
+                        // désucrés au parse — groupe ordinaire.
+                        self.collect_rules_into(rules, origin, media, layer, quirks, scope);
                     } else if let AtKind::Keyframes { name, frames } = &at.kind {
                         // `@media` englobant appliqué ? La table
                         // des keyframes ne porte pas de media

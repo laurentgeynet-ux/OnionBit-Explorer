@@ -432,3 +432,62 @@ fn nesting_hostile_tolere() {
     assert_eq!(s2.rules.len(), 2);
     assert_eq!(prelude_of(&s2.rules[0]), "p");
 }
+
+// ---------- R-194 — @scope : désucrage au parse ----------
+
+/// `@scope (R) { S }` → prélude `R S` ; la cascade itère le
+/// bloc comme un groupe ordinaire.
+#[test]
+fn scope_desucre_descendant() {
+    let s = parse_stylesheet("@scope (.card){.x{a:1}}");
+    match &s.rules[0] {
+        Rule::At(at) => {
+            assert_eq!(at.name, "scope");
+            if let AtKind::Scope { rules } = &at.kind {
+                assert_eq!(rules.len(), 1);
+                assert_eq!(prelude_of(&rules[0]), ".card .x");
+            } else {
+                panic!("attendu AtKind::Scope");
+            }
+        }
+        _ => panic!("attendu At"),
+    }
+}
+
+/// Borne `to (B)` → `:not(B *)` sur l'élément cible.
+#[test]
+fn scope_borne_donut() {
+    let s = parse_stylesheet("@scope (.card) to (.inner){.x{a:1}}");
+    if let Rule::At(at) = &s.rules[0] {
+        if let AtKind::Scope { rules } = &at.kind {
+            assert_eq!(prelude_of(&rules[0]), ".card .x:not(.inner *)");
+        } else {
+            panic!();
+        }
+    }
+}
+
+/// `&` et `:scope` sont déjà ancrés à la racine — substitués
+/// `:is(R)` sans préfixe descendant.
+#[test]
+fn scope_ancres_esperluette() {
+    let s = parse_stylesheet("@scope (.card){& .x{a:1}}");
+    if let Rule::At(at) = &s.rules[0] {
+        if let AtKind::Scope { rules } = &at.kind {
+            assert_eq!(prelude_of(&rules[0]), ":is(.card) .x");
+        } else {
+            panic!();
+        }
+    }
+}
+
+/// Hostile : scope vide, borne absente, prélude non parenthésé
+/// → toléré, jamais panic.
+#[test]
+fn scope_hostile_tolere() {
+    let s = parse_stylesheet("@scope{}@scope (.a){}p{x:1}");
+    assert!(s
+        .rules
+        .iter()
+        .all(|r| matches!(r, Rule::At(_)) || prelude_of(r) == "p"));
+}

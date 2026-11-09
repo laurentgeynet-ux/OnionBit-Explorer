@@ -3495,10 +3495,14 @@ déblocage/coût décroissant.
   (`explorer-core`, interface-equipes.md 2026-11-09) — la
   résolution de source vit dans le périmètre NAV ; à
   ordonnancer avec NAVIGATEUR dès que la couture est vivante.
-- [ ] **R-194. `@scope`** : at-rule 2024+ absente — dépend
-  de la machinerie `&`/scope de R-189. `@starting-style`
-  reporté : inerte tant que les transitions ne sont pas
-  portées.
+- [x] **R-194. `@scope`** : désucrage au parse (`explorer-css`
+  `parser.rs`, `AtKind::Scope`) — `@scope (R) [to (B)] { S }`
+  devient `R S` (`:scope`/`&` → `:is(R)`, déjà ancrés), borne
+  `to (B)` → `:not(B *)` sur la cible, listes × parties en
+  produit cartésien borné 64, récursif dans les at-rules
+  imbriquées ; la cascade itère le bloc comme groupe
+  ordinaire. `@starting-style` reporté (inerte sans
+  transitions R-119). Verrous `scope_*` ×4 (`tests/parser.rs`).
 - [ ] **R-196. `subgrid`** : pistes imbriquées héritées —
   documenté hors scope de la livraison grid MVP ; fréquence
   terrain faible, extension algo circonscrite.
