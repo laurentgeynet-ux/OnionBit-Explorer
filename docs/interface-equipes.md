@@ -1013,3 +1013,20 @@ journal « livré ».
   (déjà workspace via `explorer-net`). Aucun contrat cassé :
   variantes utf-8/16/1252 inchangées, labels inconnus → 1252.
   | PIPE→NAV **retouche bornée livrée** |
+| 2026-11-09 | relié `display`/`state`/scroll — **Reliquat
+  NAV constaté à l'audit PIPE (post R-170)** | Trous trouvés
+  côté PIPE dont le livrable vit dans le périmètre NAV —
+  déclarés ici, non committés directement : états dynamiques
+  (`DynState`/`compute_with_state` reçoivent `|_| false` —
+  `:hover`/`:focus`/`:active`/`:visited` jamais matchés,
+  menus CSS purs morts ; câblage pointer-tracking + restyle),
+  frameset → grille d'iframes (tranche déjà journalisée,
+  non livrée), image maps `usemap` hit-test, scroll interne
+  (`overflow:auto/scroll` clippe sans scrollport/barres,
+  `scroll-snap`/`scroll-behavior`/`overscroll`, `resize`),
+  `<dialog open>`/`[popover]` top-layer + interactions,
+  `a[name]`/ancres & scroll-position, `vlink`/`alink` état,
+  `<picture><source>` (`type`/`media`/`srcset` jamais lus
+  dans `dom_helpers` — cf. R-195 roadmap PIPE), appearance/
+  startup-JS menus (surface JS-Cxx). | PIPE→NAV **demande
+  déclarée** |

@@ -3322,6 +3322,136 @@ la dette, pas le layout.
   conception), anneaux des yeux et rangées parser/`ul` à
   l'affûtage pixel près.
 
+## Palier R-N — File des trous confirmés (audit code 2026-11-09)
+
+Audit source direct (pas la doc) — chaque item est vérifiable au
+code : propriété parsée jamais consommée, élément sans traitement,
+ou approximation documentée qui diverge du rendu attendu. Les
+items NAV (filage session/pointeur/réseau) sont déclarés au
+journal `interface-equipes.md`, pas ici. Ordre = ratio
+déblocage/coût décroissant.
+
+- [ ] **R-171. `dir`/`direction` → réordonnancement visuel
+  bidi** : `dir` n'est jamais mappé vers `direction` (ni hint ni
+  règle UA) et `BidiInfo::new(text, None)` déduit le niveau de
+  base seul (`text.rs`) ; les runs segmentés par niveau sont
+  posés en ordre logique sans `reorder_line` (`inline.rs`) →
+  arabe/hébreu cassés dans les segments mixtes. Hint `dir`→
+  `direction` + repli `dir`→niveau de base + réordonnancement
+  des fragments par niveau sur chaque ligne.
+- [ ] **R-172. `overflow:clip`** : mappe actuellement à
+  `Visible` (`block.rs`) → contenu clip-attendu déborde. Une
+  ligne : variant `Clip` alié `Hidden` (pas de scroll interne
+  de toute façon — journalisé).
+- [ ] **R-173. `position:fixed` sous ancêtre transformé** : le
+  CB des `fixed` est toujours le viewport (`resolve_absolutes`)
+  — spec : `transform`/`filter`/`perspective`/`will-change`
+  créent un containing block (modal/drawer dans un shell animé
+  mal positionné). Reuse de la machinerie `absolute` avec CB =
+  padding box de l'ancêtre transformé.
+- [ ] **R-174. Features MQ manquantes** : `(hover)`, `(pointer)`
+  (et `any-`), `(resolution)`/`min/max-resolution` + `dppx`/
+  `-webkit-min-device-pixel-ratio`, `(aspect-ratio)`, `(update)`,
+  `(color-gamut)`, `(forced-colors)`, `(display-mode)`,
+  `(monochrome)`, `(color)`, `(prefers-reduced-motion)` → toutes
+  `false` (`condition_matches`, `cascade.rs`) → les styles gâtés
+  `@media (hover:hover) and (pointer:fine)` meurent. Ajout de
+  cas + `StyleEnv` gagnant `dpr`/`viewport`-aspects.
+- [ ] **R-175. Grid : pistes implicites + alignment conteneur +
+  shorthands** : `grid-auto-rows`/`grid-auto-columns` jamais lus
+  (pistes implicites = `auto` — carrousels `auto-flow:column`),
+  `justify-content`/`align-content`/`justify-self`/`align-self`
+  du conteneur ignorés, `grid`/`grid-template`/`grid-gap` (ASCII
+  art + slash) jamais expansés. `grid.rs` + `value.rs`.
+- [ ] **R-176. `unicode-bidi` + niveau de base** : propriété
+  ignorée (`bidi-override`/`isolate`/`isolate-override`/
+  `plaintext`/`normal`) ; niveau de base issu de `direction`
+  héritée au lieu de l'auto-détection — pendant de R-171.
+- [ ] **R-177. Pseudos appliqués** : `::first-line`,
+  `::first-letter`, `::selection`, `::marker`, `::backdrop` —
+  parsés-tolérés (`selector.rs`, never-matched volontairement)
+  mais jamais générés : drop caps, sélection colorée, stylage
+  des puces et marqueur `<details>` absents.
+- [ ] **R-178. `text-decoration` styles** : `dotted`/`dashed`/
+  `double`/`wavy` peints `solid` ; `text-decoration-thickness`,
+  `text-underline-offset`, `text-decoration-skip-ink` ignorés —
+  patterns de stroke dans `raster.rs`.
+- [ ] **R-179. `border-collapse` vertical + baseline de rangée**
+  : collapse MVP horizontal seul (`tables.rs`) → doubles filets
+  sous `<td border=1>` ; `vertical-align:baseline` de rangée =
+  top approximé.
+- [ ] **R-180. `list-style-position:inside`** : puce peinte sans
+  décalage du texte — la ligne doit s'indenter comme si la puce
+  était le premier mot.
+- [ ] **R-181. Fragmentation multicol** : `column-rule`
+  (décoratif), `column-span`, `column-fill`/`break-inside`/
+  `break-before`/`break-after` ignorés (`columns.rs` range,
+  `in-flow` absent du constructeur).
+- [ ] **R-182. Quirks profond** : unitless lengths (`td
+  width=2`), hex sans `#` dans `style=` (le `legacy_color` ne
+  couvre que les attributs), `%`-height traversant les ancêtres
+  `auto`, sélecteurs classe/id ASCII-insensibles, baseline quirks
+  des images en cellule.
+- [ ] **R-183. `writing-mode` vertical** : `vertical-rl`/
+  `vertical-lr`/`sideways-*` + `text-orientation`/`text-combine-upright`
+  absents — `horizontal-tb` seul (`value.rs` le documente) ;
+  toute la chaîne (inline/block/props logiques physiques/
+  display list) en sens alterné. Tategaki + labels latéraux.
+- [ ] **R-184. `background-clip:text` + `background-blend-mode`**
+  : texte rempli de dégradé (motif de héro fréquent) et
+  fusion des couches de fond — `display.rs`/`raster.rs`.
+- [ ] **R-185. `mix-blend-mode`/`isolation` + `will-change`/
+  `contain`** : fusion du groupe filtré avec le fond accumulé ;
+  les contextes de pilement induits manquants.
+- [ ] **R-186. Typo longue traîne** : `font-stretch`,
+  `font-variant` (small-caps expansé jamais appliqué),
+  `font-size-adjust`, `font-synthesis`, `text-emphasis`,
+  `text-underline-offset`, `text-wrap:balance/pretty`,
+  `hyphens`, `initial-letter`, `ruby` amélioré.
+- [ ] **R-187. `clip-path` `path()`/`url()` + `filter:url()`** :
+  seules les formes box (`inset`/`circle`/`ellipse`/`polygon`)
+  sont livrées ; la voie `reference-box`/SVG absence.
+- [ ] **R-188. Transforms 3D + props individuelles** :
+  `perspective`, `transform-style:preserve-3d`,
+  `backface-visibility`, `transform-box`/`transform-origin` 3D,
+  `translate`/`rotate`/`scale` individuelles → aujourd'hui
+  aplaties 2D.
+- [ ] **R-189. CSS nesting** : `&`, règles de style imbriquées,
+  `@media`/`@supports` imbriqués dans un bloc de déclarations —
+  tout est avalé par `recover_decl` → règles modernes perdues
+  en silence (CSS 2023+, composants, thèmes). `parser.rs` doit
+  émettre des règles imbriquées + résolution `&`/ordre dans
+  `cascade.rs`.
+- [ ] **R-190. `@container` évalué** : `CollectedContainer`
+  collecté, jamais consommé (`container_rules_matching`
+  annoncé absent — `cascade.rs`). Deuxième passe : tailles de
+  conteneur après layout → rematch des règles
+  (`container-type`/`container-name`).
+- [ ] **R-191. `display:contents`** : flattening de la boîte
+  (invisible mais enfants présents) — retombe `Block` via
+  fallback, faux pour les composants/wrappers.
+- [ ] **R-192. `display:-webkit-box` + `-webkit-line-clamp`
+  contexte** : vieux flexbox → bloc ; `line-clamp` est livré
+  MVP sans exiger la famille `-webkit-box`.
+- [ ] **R-193. `<basefont>`** : taille/couleur face de base —
+  hint documenté non implémenté ; rare mais trivial à cadrer.
+- [ ] **R-194. `@scope` + `light-dark()` + `@starting-style`**
+  : fonctions/at-rules 2024+ — `light-dark()` gâte les sites
+  qui déclarent leur bi-thème explicitement (sinon mêmes
+  couleurs doublées).
+- [ ] **R-195. `<picture><source>` + `srcset` densité/taille**
+  dans la sélection source : `dom_helpers` ne lit que `img`
+  (type=/media/srcset ignorés). **Demande NAV journalisée**
+  (`explorer-core`, interface-equipes.md 2026-11-09) — la
+  résolution de source vit dans le périmètre NAV.
+- [ ] **R-196. `subgrid`** : pistes imbriquées héritées —
+  documenté hors scope de la livraison grid MVP.
+- [ ] **R-197. `font_face` collections : woff/woff2/TTC/otf**
+  : raster fontes = truetype seul ; woff (sfnt compressé) et
+  TTC multi-faces absents → `@font-face` woff2 des CDN servis
+  non décodés. `ttf-parser` ou décompression woff (zlib déjà
+  lié) + indexation TTC.
+
 ## Tâches continues
 
 - **Triage rendu** des échecs `site_smoke.ps1` : les écarts
