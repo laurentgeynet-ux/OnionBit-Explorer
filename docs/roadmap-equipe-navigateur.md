@@ -11344,3 +11344,12 @@ un crate PIPELINE.- [x] **JS-C422. Deadline honnête — canal session ↔ budge
   `undefined` = pas de jeton, `SameValue(target,
   token)` inchangé. Tests `lang` basculés en tokens
   objet. Verrous `c451_finreg_token` ×2 ; lang 313/313.
+- [x] **JS-C452 (JT-7+JT-8). `TypeError` d'appel sur
+  callee `Undefined` nomme la prop lue** — framatube
+  `call of Undefined` / Vercel `value is not a
+  function` = même funnel `call_value_impl`. Les
+  appels `o.m()` nommaient déjà tout ; les nus (`x()`,
+  `(0, o.y)()` minifié) mouraient muets —
+  `callee_label` + suffixe ` (call of `x`)` sur
+  `message` ET `stack` (lu en premier, figé JS-C47).
+  Verrous `c452_call_undef_named` ×4 ; lang 313/313.

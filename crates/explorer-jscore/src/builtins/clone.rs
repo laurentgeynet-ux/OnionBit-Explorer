@@ -420,9 +420,9 @@ pub(crate) fn finreg_register(e: &mut Engine, this: Value, args: &[Value]) -> Js
     // = pas de jeton, objets/symboles légaux). Validé avant
     // `SameValue` (odysee, JS-C451).
     if !matches!(token, Value::Undefined | Value::Obj(_)) {
-        return Err(e.type_error(
-            "FinalizationRegistry unregisterToken must be an object or undefined",
-        ));
+        return Err(
+            e.type_error("FinalizationRegistry unregisterToken must be an object or undefined")
+        );
     }
     // Spec : TypeError quand `SameValue(target, unregisterToken)`
     // — le jeton ne peut pas être la **cible** ; la valeur

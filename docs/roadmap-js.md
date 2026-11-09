@@ -103,16 +103,18 @@ surface minimale — jamais un stub qui ment.
   `SameValue` intact. Deux tests `lang` basculés en
   tokens objet (acceptation non-spec des chaînes
   corrigée). Verrous `c451_finreg_token` ×2.
-- [ ] **JT-7. `call of Undefined` core-js (framatube)** —
-  invocation sur `Undefined` : nommer la cible (méthode
-  builtin ou entrée miroir manquante) — core-js feature-
-  détecte en appelant ; un `typeof` honnête suffit
-  souvent à désarmer le chemin.
-- [ ] **JT-8. `value is not a function` adapter Vercel
-  (videojs)** — même classe que JT-7, surface adapter
-  Vercel : l'objet exposé n'est pas callable là où le
-  site attend une fonction (getter installé en valeur
-  au lieu d'une natfn, ou méthode absente).
+- [x] **JT-7. `call of Undefined` (core-js framatube)**
+  — **livré (JS-C452, partagé avec JT-8)** : le callee nu
+  se nomme désormais dans le `TypeError` (`x()`,
+  `(0, o.y)()` minifié) — `stack` ET `message`
+  suffixés ` (call of `x`)`. Aucune API énumérable ne se
+  justifiait sans la ligne exacte ; le prochain vol
+  nomme le site. Verrous `c452_call_undef_named` ×4.
+- [x] **JT-8. `value is not a function` (adapter
+  Vercel/video.js)** — **livré (JS-C452, même mur que
+  JT-7)** : même instrumentation callee-labellisé. Les
+  deux erreurs de vol sont le même `call_value_impl` —
+  elles recevront le même nommage au prochain vol.
 
 ## JT-C — Surfaces builtins auto-contenues
 

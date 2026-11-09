@@ -14,7 +14,9 @@ use std::rc::Rc;
 
 fn engine() -> Engine {
     let mut e = Engine::new();
-    e.install_dom(&Rc::new(RefCell::new(Dom::from_html("<html><body></body></html>"))));
+    e.install_dom(&Rc::new(RefCell::new(Dom::from_html(
+        "<html><body></body></html>",
+    ))));
     e
 }
 
@@ -32,7 +34,9 @@ fn c451_unregister_token_must_be_object_or_undefined() {
     for bad in ["'str'", "42", "true", "null"] {
         let r = ev(
             &mut e,
-            &format!("var f=new FinalizationRegistry(function(){{}});f.register({{}},0,{bad});'ok'"),
+            &format!(
+                "var f=new FinalizationRegistry(function(){{}});f.register({{}},0,{bad});'ok'"
+            ),
         );
         assert!(r.starts_with("ERR:"), "{bad} -> {r}");
         assert!(r.contains("must be an object or undefined"), "{bad} -> {r}");

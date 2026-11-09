@@ -9,6 +9,60 @@ use crate::heap::{Binding, Env, EnvCell, EnvKind, EnvRef, Fun, JsResult, ObjKind
 use crate::value::{to_int32, to_uint32, Value};
 
 impl Engine {
+    /// Étiquette du callee nu pour le diagnostic « value is
+    /// not a function » (JS-C452) : `x` pour `x()`, `y` pour
+    /// `(0, o.y)()` (forme indirecte minifiée — le membre
+    /// survit au `Seq`). `None` quand rien de nommable.
+    fn callee_label(e: &Expr) -> Option<Rc<str>> {
+        match e {
+            Expr::Ident(n) | Expr::Member(_, n) => Some(n.clone()),
+            Expr::Seq(items) => items.last().and_then(Self::callee_label),
+            _ => None,
+        }
+    }
+
+    /// Re-étiquette un « value is not a function » de callee
+    /// nu avec la prop lue pour l'appel — le message d'origine
+    /// est préservé et suffixé (` (call of `x`)`) : le vol
+    /// suivant nomme l'API manquante au lieu d'un
+    /// « undefined » muet (`call of Undefined`, « value is
+    /// not a function » — framatube/Vercel).
+    fn tag_call_undef(&mut self, t: Thrown, label: &str) -> Thrown {
+        let Thrown(Value::Obj(id)) = t else {
+            return t;
+        };
+        let Some(msg) = self
+            .get_prop(id, "message")
+            .as_ref()
+            .and_then(Self::heap_string_of)
+        else {
+            return t;
+        };
+        if !msg.contains("is not a function") {
+            return t;
+        }
+        let m = self.str_val(format!("{msg} (call of `{label}`)"));
+        self.set_own(id, "message", m, true);
+        // `describe` lit `stack` en premier — le texte est figé
+        // à la construction (JS-C47) : la ligne tête
+        // `name: msg` reçoit le suffixe aussi, sinon le rendu
+        // rapporté reste muet.
+        if let Some(s) = self
+            .get_prop(id, "stack")
+            .as_ref()
+            .and_then(Self::heap_string_of)
+        {
+            let st = match s.split_once('\n') {
+                Some((head, tail)) => format!("{head} (call of `{label}`)\n{tail}"),
+                None if !s.is_empty() => format!("{s} (call of `{label}`)"),
+                None => return t,
+            };
+            let st = self.str_val(st);
+            self.set_own(id, "stack", st, false);
+        }
+        t
+    }
+
     pub(crate) fn eval_expr(&mut self, env: &EnvRef, this: Value, e: &Expr) -> JsResult<Value> {
         // Breadcrumb §B-59 : le `Expr` en cours nommé à l'abort
         // (`rss_guard`), discriminant eval-side vs natif.
@@ -516,6 +570,15 @@ impl Engine {
                 // `PerformEval`) : la callee résolue doit être *le*
                 // builtin `eval` global, pas un homonyme local.
                 let direct_eval = matches!(&**callee, Expr::Ident(n) if &**n == "eval");
+                // JS-C452 — étiquette du callee pour le
+                // diagnostic `value is not a function` :
+                // `x` pour `x()`, `y` pour `(0, o.y)()`
+                // (forme indirecte minifiée — le membre survit
+                // au `Seq`). Les appels `Member` nomment déjà
+                // leur méthode ; les appels nus de bundle
+                // mouraient « undefined » sans dire quelle
+                // prop a été lue.
+                let callee_lbl = Self::callee_label(callee);
                 let callee = match &**callee {
                     Expr::Member(base, name) => {
                         let b = self.eval_expr(env, this.clone(), base)?;
@@ -554,7 +617,16 @@ impl Engine {
                                 None => Ok(Value::Undefined),
                             };
                         }
-                        self.call_value(f, Value::Undefined, &args)
+                        let r = self.call_value(f.clone(), Value::Undefined, &args);
+                        match r {
+                            Err(t) if matches!(f, Value::Undefined | Value::Null) => {
+                                Err(match &callee_lbl {
+                                    Some(l) => self.tag_call_undef(t, l),
+                                    None => t,
+                                })
+                            }
+                            _ => r,
+                        }
                     }
                     Callee::Member(recv, name) => {
                         // Host method dispatch first: `hostObj.m(…)`
@@ -681,7 +753,13 @@ impl Engine {
                     Callee::Super(name) => {
                         let base = self.super_base(env)?;
                         let f = self.read_prop(base, this.clone(), &name)?;
-                        self.call_value(f, this, &args)
+                        let r = self.call_value(f.clone(), this.clone(), &args);
+                        match r {
+                            Err(t) if matches!(f, Value::Undefined | Value::Null) => {
+                                Err(self.tag_call_undef(t, &name))
+                            }
+                            _ => r,
+                        }
                     }
                 }
             }

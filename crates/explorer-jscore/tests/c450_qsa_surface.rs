@@ -40,7 +40,10 @@ fn c450_qsa_all_dom_receivers() {
         ev(&mut e, "document.querySelectorAll('.jw video').length"),
         "1"
     );
-    assert_eq!(ev(&mut e, "document.querySelectorAll('p, video').length"), "2");
+    assert_eq!(
+        ev(&mut e, "document.querySelectorAll('p, video').length"),
+        "2"
+    );
     // DocumentFragment — ParentNode complet.
     assert_eq!(
         ev(
@@ -67,8 +70,14 @@ fn c450_qsa_all_dom_receivers() {
 #[test]
 fn c450_qsa_selector_classes_and_tagname() {
     let mut e = engine();
-    assert_eq!(ev(&mut e, "document.querySelectorAll('video[src]').length"), "1");
-    assert_eq!(ev(&mut e, "document.querySelectorAll('div > p').length"), "1");
+    assert_eq!(
+        ev(&mut e, "document.querySelectorAll('video[src]').length"),
+        "1"
+    );
+    assert_eq!(
+        ev(&mut e, "document.querySelectorAll('div > p').length"),
+        "1"
+    );
     assert_eq!(
         ev(&mut e, "document.querySelectorAll('video')[0].tagName"),
         "VIDEO"
