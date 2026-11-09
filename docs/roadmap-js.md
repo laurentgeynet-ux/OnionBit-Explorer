@@ -87,12 +87,15 @@ surface minimale — jamais un stub qui ment.
   `el.type.toUpperCase()` mourait sur `Undefined`).
   Reflet tag-restreint §B-103 intact. Verrous
   `c449_doc_string_props` ×3.
-- [ ] **JT-5. `querySelectorAll` / `categories of Null`
-  (jwplayer archive.org)** — deux symptômes : qsa absent
-  ou non routé sur la cible visée ; `categories` lu sur
-  `Null`. Sonder l'objet porteur (config player jwplayer)
-  — le gap peut être un JSON de config mal ponté, pas
-  une API DOM.
+- [x] **JT-5. `querySelectorAll` / `categories of Null`
+  (jwplayer archive.org)** — **mesuré (JS-C450)** : qsa
+  complet sur Document/Element/DocumentFragment/
+  ShadowRoot, sélecteurs attr/complexe/liste —
+  **le gap n'est pas l'API**. `categories of Null` =
+  lecture de config interne (`item.categories` sur
+  playlist item null) — à sonder au prochain vol,
+  jamais fixé à l'aveugle. Verrous `c450_qsa_surface`
+  ×2.
 - [ ] **JT-6. `FinalizationRegistry.unregisterToken`
   (odysee) — vérifier vs spec V8** : `register` valide
   déjà `SameValue(target, unregisterToken)`
