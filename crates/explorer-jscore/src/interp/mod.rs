@@ -664,6 +664,9 @@ pub struct Engine {
     /// (`run_microtasks`), chaque livraison switchant vers le
     /// contexte destinataire.
     pub(crate) pending_msgs: crate::context::PendingMsgs,
+    /// Dédup de la sonde `msg.*` (§B-122(g)) — une ligne par
+    /// paire (src,target,issue) ; borné par le carré des ctx.
+    pub(crate) msg_probe_seen: std::collections::HashSet<u64>,
     /// Messages `MessageChannel` en file (JS-C81) — drainés à
     /// la même frontière de job que `pending_msgs`.
     pub(crate) port_msgs: std::collections::VecDeque<crate::channel::PortMsg>,
@@ -1168,6 +1171,7 @@ impl Engine {
             }],
             parked: std::collections::HashMap::new(),
             pending_msgs: std::collections::VecDeque::new(),
+            msg_probe_seen: std::collections::HashSet::new(),
             port_msgs: std::collections::VecDeque::new(),
             dom_ctors: std::collections::HashMap::new(),
             native_caller: Vec::new(),
@@ -2533,6 +2537,13 @@ impl Engine {
             ));
         }
         if !self.ctxs[target as usize].alive {
+            if tracing::enabled!(target: "dom_probe", tracing::Level::INFO) {
+                let src = self.native_caller.last().copied().unwrap_or(self.cur_ctx);
+                let k = ((src as u64) << 40) | ((target as u64) << 8) | 9u64;
+                if self.msg_probe_seen.insert(k) {
+                    tracing::info!(target: "dom_probe", site = "msg.drop", why = "ctx-mort", src, target);
+                }
+            }
             return Ok(Value::Undefined);
         }
         // `'*'` (spec) = livrer sans vérification d'origine —
@@ -2547,6 +2558,24 @@ impl Engine {
             "/" => dest_origin == self.ctx_origin(src),
             _ => dest_origin == target_origin,
         };
+        // Sonde §B-122(g) — la frontière postMessage nomme
+        // src/target/origines/issue (handshake YT embed :
+        // « émis » vs « livré » vs « tué au check d'origine »).
+        if tracing::enabled!(target: "dom_probe", tracing::Level::INFO) {
+            let k = ((src as u64) << 40) | ((target as u64) << 8) | u64::from(origin_ok);
+            if self.msg_probe_seen.insert(k) {
+                let head = self
+                    .to_js_string(args[0].clone())
+                    .unwrap_or_default()
+                    .chars()
+                    .take(90)
+                    .collect::<String>();
+                tracing::info!(
+                    target: "dom_probe", site = "msg.post", src, target,
+                    src_o = %self.ctx_origin(src), dst_o = %dest_origin,
+                    torigin = %target_origin, ok = origin_ok, data = %head);
+            }
+        }
         if !origin_ok {
             return Ok(Value::Undefined);
         }
@@ -2587,14 +2616,32 @@ impl Engine {
             // même parse est raté — mesuré : scripts inline de
             // l'iframe évalués avant ceux du parent).
             if !m.alive {
+                if tracing::enabled!(target: "dom_probe", tracing::Level::INFO) {
+                    let k = ((msg.source as u64) << 40) | ((msg.target as u64) << 8) | 8u64;
+                    if self.msg_probe_seen.insert(k) {
+                        tracing::info!(target: "dom_probe", site = "msg.drop", why = "ctx-mort", src = msg.source, target = msg.target);
+                    }
+                }
                 continue;
             }
             if m.defer_msgs {
+                if tracing::enabled!(target: "dom_probe", tracing::Level::INFO) {
+                    let k = ((msg.source as u64) << 40) | ((msg.target as u64) << 8) | 7u64;
+                    if self.msg_probe_seen.insert(k) {
+                        tracing::info!(target: "dom_probe", site = "msg.defer", src = msg.source, target = msg.target);
+                    }
+                }
                 deferred.push_back(msg);
                 continue;
             }
             self.switch_to(msg.target);
             n += 1;
+            if tracing::enabled!(target: "dom_probe", tracing::Level::INFO) {
+                let k = ((msg.source as u64) << 40) | ((msg.target as u64) << 8) | 6u64;
+                if self.msg_probe_seen.insert(k) {
+                    tracing::info!(target: "dom_probe", site = "msg.dlv", src = msg.source, target = msg.target, origin = %msg.origin);
+                }
+            }
             let data = self.wire_decode(&msg.data)?;
             let source = self.ctx_window_value(msg.source);
             let ev = self.new_object();
