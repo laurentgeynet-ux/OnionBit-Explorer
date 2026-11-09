@@ -1328,6 +1328,50 @@ fn media_subframe_video_offered_with_frame_ctx() {
     );
 }
 
+/// §B-123-bis — cadre **dynamique** : `fc.node` est la
+/// sentinelle `u32::MAX` (`install_dyn_frame_ctx` — le nœud
+/// réel n'existe qu'après resynchro). La surface du sous-
+/// document doit quand même recevoir le rect de l'`<iframe>`
+/// porteur, re-résolu par URL (`frame_context_plan`). Vol 763 :
+/// la `<video>` de l'embed YT offerte avec `rect` 0×0.
+#[test]
+fn media_dyn_frame_video_offered_with_carrier_rect() {
+    let mut s = Session::new(Arc::new(FailTransport), Arc::new(TestFont));
+    let tab = s.open_tab();
+    {
+        let e = s.tabs.get_mut(&tab).unwrap();
+        e.dom = Some(test_dom("<iframe src=\"http://f.test/embed\"></iframe>"));
+        e.url = Some(Url::parse("http://h.test/m").unwrap());
+        e.frames.push(SubFrame {
+            url: Url::parse("http://f.test/embed").unwrap(),
+            sandbox: None,
+            srcdoc: None,
+            dom: test_dom("<video src=\"blob:http://f.test/1\" controls></video>"),
+            title: None,
+            html: String::new(),
+        });
+        e.frame_ctxs.push(FrameCtx {
+            ctx: 3,
+            sub: 0,
+            url: Url::parse("http://f.test/embed").unwrap(),
+            node: explorer_dom::NodeId::from_parts(u32::MAX, u32::MAX),
+            opaque: false,
+            load_fired: true,
+            el_dyn: Some((0, 1)),
+        });
+    }
+    s.relayout(tab).unwrap();
+    s.refresh_media(tab);
+    let list = s.media_list(tab);
+    assert_eq!(list.len(), 1);
+    assert_eq!(list[0].frame_ctx, 3);
+    assert!(
+        list[0].rect.w > 0.0 && list[0].rect.h > 0.0,
+        "sentinelle re-résolue par URL — rect = boîte iframe : {:?}",
+        list[0].rect
+    );
+}
+
 /// a1 — `<source>` filtrés par `type` jouable : un `webm`
 /// en tête ne bloque plus le `mp4` que l'hôte sait décoder.
 /// Les capacités arrivent au claim (`mediaCodecs` hôte) —

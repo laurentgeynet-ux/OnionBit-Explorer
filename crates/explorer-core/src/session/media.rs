@@ -626,6 +626,46 @@ fn scan_media(
     (scanned, rects)
 }
 
+/// `(rect, meta)` de l'`<iframe>` porteur de `fc` — `fc.node`
+/// est une **sentinelle** (`u32::MAX`) pour les cadres
+/// dynamiques et peut mourir au re-parse pour les statiques :
+/// la résolution refait l'association de `frame_context_plan`
+/// — `srcdoc` par contenu, sinon `src` résolu == `fc.url`
+/// (premier élément en ordre document). `zero` si l'élément
+/// n'a pas de boîte posée (`display:none`, layout en retard).
+fn carrier_rect(
+    dom: &Dom,
+    base: &Url,
+    fc: &FrameCtx,
+    sf: &SubFrame,
+    rects: &MediaRects,
+    zero: MediaRect,
+) -> (MediaRect, MediaMeta) {
+    if let Some(&(r, m, _)) = rects.get(&fc.node) {
+        return (r, m);
+    }
+    for n in composite::iframe_nodes(dom) {
+        let srcdoc = dom.attribute_str(n, "srcdoc").ok().flatten();
+        let is_carrier = if let Some(sd) = srcdoc {
+            sf.srcdoc.as_deref() == Some(sd)
+        } else {
+            sf.srcdoc.is_none()
+                && dom
+                    .attribute_str(n, "src")
+                    .ok()
+                    .flatten()
+                    .and_then(|s| Url::resolve(base, s).ok())
+                    .is_some_and(|u| u == fc.url)
+        };
+        if is_carrier {
+            if let Some(&(r, m, _)) = rects.get(&n) {
+                return (r, m);
+            }
+        }
+    }
+    (zero, MediaMeta::default())
+}
+
 /// Parcours DOM d'un document (top-level ou `SubFrame`)
 /// à la recherche des éléments média offrables — le même
 /// code sert aux deux : seules changent la résolution de
@@ -865,9 +905,13 @@ impl Session {
                     w: 0.0,
                     h: 0.0,
                 };
-                let (rect, meta) = rects
-                    .get(&fc.node)
-                    .map_or((zero, MediaMeta::default()), |(r, m, _)| (*r, *m));
+                // `fc.node` est une **sentinelle** pour les
+                // cadres dynamiques (`install_dyn_frame_ctx`
+                // — le nœud réel n'existe qu'après resynchro)
+                // et peut mourir au re-parse pour les statiques :
+                // re-résolution de l'`<iframe>` porteur par la
+                // même association que `frame_context_plan`.
+                let (rect, meta) = carrier_rect(dom, base, fc, sf, &rects, zero);
                 scanned.extend(scan_media_nodes(
                     &sf.dom,
                     &sf.url,

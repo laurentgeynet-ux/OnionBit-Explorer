@@ -11110,3 +11110,14 @@ un crate PIPELINE.- [x] **JS-C422. Deadline honnête — canal session ↔ budge
   nouvel id surface — `#1`→`#2`→`#3`
   en 4 min ; le release sur surface
   remplacée → `410` honnête).
+  **§B-123-bis (vol 763 suite)** :
+  `rect` restait 0×0 — `fc.node`
+  sentinelle `u32::MAX` pour les
+  cadres dynamiques (jamais réécrit
+  après resynchro) et mortel au
+  re-parse pour les statiques.
+  `carrier_rect` re-résout l'iframe
+  porteur par `srcdoc`/URL (règle de
+  `frame_context_plan`) — verrou
+  `media_dyn_frame_video_offered_
+  with_carrier_rect`.
