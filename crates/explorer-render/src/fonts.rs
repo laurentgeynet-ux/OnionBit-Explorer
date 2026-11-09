@@ -358,7 +358,12 @@ struct WebFace {
     weight: u16,
     /// Italique/oblique déclaré.
     italic: bool,
-    /// Octets sfnt (déjà décodés de WOFF par l'appelant).
+    /// Index de face dans `data` (0 = fichier simple —
+    /// les `.ttc` fetchés sont éclatés en une entrée par
+    /// face à l'inscription, R-202).
+    face_index: u32,
+    /// Octets sfnt (déjà décodés de WOFF par l'appelant) —
+    /// partagés entre les faces d'une même collection.
     data: Arc<Vec<u8>>,
 }
 
@@ -409,9 +414,12 @@ impl WebFontSource {
         self.faces.len() >= self.cap
     }
 
-    /// Inscrit une face : validée par `ttf-parser`, bornée
-    /// par `cap`. `false` = refusée (fonte illisible ou
-    /// registre plein) — la page garde le repli local.
+    /// Inscrit une fonte : validée par `ttf-parser` (face 0),
+    /// bornée par `cap`. Une collection `.ttc` est éclatée en
+    /// une entrée par face (R-202 — leurs couvertures sont
+    /// sondées indépendamment). `false` = refusée (fonte
+    /// illisible ou registre plein) — la page garde le repli
+    /// local.
     #[allow(clippy::needless_pass_by_value)]
     pub fn register(&mut self, family: &str, weight: u16, italic: bool, data: Vec<u8>) -> bool {
         if self.faces.len() >= self.cap || norm(family).is_empty() {
@@ -438,12 +446,30 @@ impl WebFontSource {
         if !valid {
             return false;
         }
-        self.faces.push(WebFace {
-            family: norm(family),
-            weight,
-            italic,
-            data: Arc::new(data),
-        });
+        // R-202 — `.ttc` fetché en `@font-face` : la
+        // collection est éclatée en une entrée par face
+        // (même `Arc` — zéro copie), chacune portant son
+        // index ; `font_face`/`fallback_for` la servent.
+        // Faces illisibles au-delà de la 0 : `covers_bytes`
+        // dégrade en `false` (jamais servie), même
+        // tolérance que `DirFontSource`. `cap` reste la
+        // borne — une collection de N faces consomme N
+        // entrées ; l'éclatement s'arrête au cap (le
+        // préfixe reste utilisable).
+        let data = Arc::new(data);
+        let n = collection_len(&data).unwrap_or(1).min(MAX_TTC_FACES);
+        for face_index in 0..n {
+            if self.faces.len() >= self.cap {
+                break;
+            }
+            self.faces.push(WebFace {
+                family: norm(family),
+                weight,
+                italic,
+                face_index,
+                data: data.clone(),
+            });
+        }
         self.rev += 1;
         true
     }
@@ -466,10 +492,15 @@ impl FontSource for WebFontSource {
     fn font_data(&self, req: &FontRequest) -> Option<Vec<u8>> {
         for fam in &req.families {
             let n = norm(fam);
+            // Sémantique pré-R-69 conservée : seules les
+            // faces à l'index 0 sont servies par octets
+            // nus (un appelant qui parse à 0 sur une
+            // collection prendrait la mauvaise face —
+            // `font_face` pour l'index réel, R-202).
             if let Some(f) = self
                 .faces
                 .iter()
-                .filter(|f| f.family == n)
+                .filter(|f| f.family == n && f.face_index == 0)
                 .min_by_key(|f| Self::score(f, req))
             {
                 return Some((*f.data).clone());
@@ -478,8 +509,8 @@ impl FontSource for WebFontSource {
         self.inner.font_data(req)
     }
 
-    /// Faces web = fichiers simples (index 0 — WOFF décodé
-    /// amont) ; le reste délègue à la source interne.
+    /// Chaque face d'une collection fetchée est une entrée
+    /// propre (R-202) — l'index réel accompagne les octets.
     fn font_face(&self, req: &FontRequest) -> Option<(Arc<Vec<u8>>, u32)> {
         for fam in &req.families {
             let n = norm(fam);
@@ -489,7 +520,7 @@ impl FontSource for WebFontSource {
                 .filter(|f| f.family == n)
                 .min_by_key(|f| Self::score(f, req))
             {
-                return Some((f.data.clone(), 0));
+                return Some((f.data.clone(), f.face_index));
             }
         }
         self.inner.font_face(req)
@@ -498,13 +529,15 @@ impl FontSource for WebFontSource {
     /// Repli par glyphe (R-69) : une face web **de la
     /// famille demandée** qui couvre `c` gagne (une page
     /// peut charger son CJK en `@font-face`), sinon la
-    /// source interne (fontes système).
+    /// source interne (fontes système). R-202 : le sondage
+    /// porte l'index de chaque face — un `.ttc` web à
+    /// couverture segmentée trouve sa face non-0.
     fn fallback_for(&self, c: char, req: &FontRequest) -> Option<(Arc<Vec<u8>>, u32)> {
         for fam in &req.families {
             let n = norm(fam);
             for f in self.faces.iter().filter(|f| f.family == n) {
-                if covers_bytes(&f.data, 0, c) {
-                    return Some((f.data.clone(), 0));
+                if covers_bytes(&f.data, f.face_index, c) {
+                    return Some((f.data.clone(), f.face_index));
                 }
             }
         }

@@ -3632,7 +3632,7 @@ chez NAVIGATEUR — non recopiés ici.
   empilement de fragments sur une ligne trop étroite
   (wrap manqué). Verrous : fixture flex-colonne +
   verrou pixels (deux glyphes adjacents non superposés).
-- [ ] **R-202. Font fallback par glyphe** (R-M9c, première
+- [x] **R-202. Font fallback par glyphe** (R-M9c, première
   moitié — la moitié session `scroll-snap`/`dialog` reste
   NAV) : une seule fonte par run → tofu sur CJK et perte
   des icon fonts quand la glyphe n'existe pas dans la
@@ -3643,9 +3643,19 @@ chez NAVIGATEUR — non recopiés ici.
   (query `fontdb` par char avant shaping, runs segmentés
   par fonte résolue — ADR-0009 runs itemisés). Côté
   terrain : lichess (R-200), CJK, emoji, glyphes privés.
-  Verrous : run mixte latin+CJK segmenté deux fontes,
-  `.ttc` face non-0 choisie par couverture, tofu absent
-  quand une fonte de fallback la contient.
+  **Livré** : le trou résiduel était `WebFontSource` —
+  un `.ttc` fetché en `@font-face` était enregistré comme
+  fichier simple (index 0 en dur à `font_face` et
+  `fallback_for` ; `DirFontSource` éclatait déjà ses
+  collections à l'inscription). `register()` éclate
+  désormais la collection en une entrée par face (même
+  `Arc`, borné `MAX_TTC_FACES` et `cap`), `font_face`/
+  `fallback_for` servent l'index réel, `font_data` garde
+  la sémantique octets-nus = face 0 (compat pré-R-69).
+  Verrous `r202_ttc_web_face_index_par_couverture`
+  (`.ttc` latin+CJK → face 1 servie pour 中) et
+  `r202_run_mixte_segmente_vers_face_ttc` (`ab中cd` →
+  `fallback_spans` non vide, 4 glyphes latin primaires).
 - [ ] **R-203. `background` multi-couches complet** :
   résidu confirmé (audit 2026-10-25) — `background-origin`/
   `background-clip` par couche non consommés (la position

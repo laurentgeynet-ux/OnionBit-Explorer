@@ -19,7 +19,7 @@ use std::sync::Arc;
 
 use explorer_css::{Origin, StyleEngine, StyleEnv};
 use explorer_html::TreeBuilder;
-use explorer_layout::font::{FontRequest, FontSource};
+use explorer_layout::font::{FontCache, FontRequest, FontSource};
 use explorer_layout::{build_box_tree, layout_tree, BlockCtx};
 use explorer_render::{
     build_display_list, rasterize, rasterize_cached, rasterize_dirty_cached, DisplayList,
@@ -197,4 +197,81 @@ fn meme_requete_meme_face() {
     let b = gc.face(fonts(), &req).expect("face");
     assert!(Arc::ptr_eq(&a, &b), "même face partagée");
     assert_eq!(gc.faces_len(), 1);
+}
+
+// ── R-202 — `.ttc` web : sondage des faces par couverture ──
+
+/// Un `.ttc` fetché en `@font-face` est éclaté en une
+/// entrée par face : `fallback_for` sonde chaque face par
+/// couverture et sert l'index réel (avant : index 0 en dur
+/// — une collection web ne trouvait jamais sa face non-0).
+#[test]
+fn r202_ttc_web_face_index_par_couverture() {
+    let latin = explorer_test_support::fixture_ttf_custom("WebFam", 0x0020, 0x00FF);
+    let cjk = explorer_test_support::fixture_ttf_custom("WebFam", 0x4E00, 0x4FFF);
+    let ttc = explorer_test_support::fixture_ttc(&[latin, cjk]);
+    let mut web = WebFontSource::new(Arc::new(EmptyFont), 8);
+    assert!(web.register("WebFam", 400, false, ttc));
+    assert_eq!(web.len(), 2, "collection éclatée en 2 entrées");
+    let req = FontRequest {
+        families: vec!["WebFam".into()],
+        weight: 400,
+        italic: false,
+        caps: 0,
+        kern_off: false,
+        stretch: 100,
+    };
+    // 中 (U+4E2D) n'est couvert que par la face 1.
+    let (_, idx) = web.fallback_for('中', &req).expect("repli CJK");
+    assert_eq!(idx, 1, "la face CJK non-0 est servie");
+    // 'a' est couvert par la face 0.
+    let (_, idx) = web.fallback_for('a', &req).expect("repli latin");
+    assert_eq!(idx, 0);
+    // `font_data` garde la sémantique octets-nus = face 0.
+    assert!(web.font_data(&req).is_some());
+    // `font_face` résolution famille → meilleure face (la 0,
+    // score identique, première enregistrée).
+    let (_, idx) = web.font_face(&req).expect("font_face");
+    assert_eq!(idx, 0);
+}
+
+/// Run mixte latin+CJK sur la collection web : le caractère
+/// absent de la face 0 est segmenté vers la face 1
+/// (`fallback_spans` balise la plage — le raster peindra la
+/// bonne face).
+#[test]
+fn r202_run_mixte_segmente_vers_face_ttc() {
+    let latin = explorer_test_support::fixture_ttf_custom("WebFam2", 0x0020, 0x00FF);
+    let cjk = explorer_test_support::fixture_ttf_custom("WebFam2", 0x4E00, 0x4FFF);
+    let mut web = WebFontSource::new(Arc::new(EmptyFont), 8);
+    assert!(web.register(
+        "WebFam2",
+        400,
+        false,
+        explorer_test_support::fixture_ttc(&[latin, cjk])
+    ));
+    let req = FontRequest {
+        families: vec!["WebFam2".into()],
+        weight: 400,
+        italic: false,
+        caps: 0,
+        kern_off: false,
+        stretch: 100,
+    };
+    let mut fc = FontCache::new();
+    let run = fc
+        .shape(&web, &req, "ab中cd", 16.0, false, 0.0)
+        .expect("run shapé");
+    assert!(
+        !run.fallback_spans.is_empty(),
+        "中 segmenté vers la face 1 : {:?}",
+        run.fallback_spans
+    );
+    // Les glyphes latins restent sur la face primaire.
+    let n_fb: usize = run
+        .fallback_spans
+        .iter()
+        .map(|s| usize::try_from(s.end - s.start).unwrap())
+        .sum();
+    assert_eq!(run.glyphs.len() - n_fb, 4, "4 glyphes latin primaires");
 }
