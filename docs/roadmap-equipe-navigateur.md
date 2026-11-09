@@ -11082,7 +11082,31 @@ un crate PIPELINE.- [x] **JS-C422. Deadline honnête — canal session ↔ budge
   resolves_globally` (créé en ctx0,
   sondé/pull sous parasite courant :
   buffers, offsets, 16 octets tirés,
-  inconnue → `None` honnête). Reste :
-  vol — `mse:true` → claim
-  `rest_host_probe` → pull → verdict
-  dll.
+  inconnue → `None` honnête).
+  **Vol 763 (binaire `d94b8b45`, env
+  `EXPLORER_MEDIA_CODECS` avc1+mp4a) —
+  la chaîne complète jouée** : embed
+  `youtube.com/embed/0P_LBKqVbfs`
+  (Tembe) handshake ~48 s →
+  `mse.attach` ctx=3 → surface
+  `#2` offerte **`mse:true`**,
+  `mseBuffers=[audio/mp4 mp4a.40.2,
+  video/mp4 avc1.42C00B]`, offsets
+  `[0,0]` → `rest_host_probe`
+  claim `200` (3 codecs) →
+  `open_mse_multi` + pull
+  `GET …/segments` ×2 → dll ABI 5
+  décode → **verdict réel :
+  frames=57, dropped=18, vq
+  total=75 corrupt=0, 256×144,
+  pcm=1 917 040 octets, underrun=0,
+  streams Aac+H264** — et le fil de
+  commande joue (`[cmd] rate r=1`
+  reçu via SSE). `[state]` reports
+  postés à 4 Hz (pos = bord live
+  ~46,8 Mms — flux direct, pas VOD).
+  Note : le player YT ré-attache
+  périodiquement (nouveau blob →
+  nouvel id surface — `#1`→`#2`→`#3`
+  en 4 min ; le release sur surface
+  remplacée → `410` honnête).
