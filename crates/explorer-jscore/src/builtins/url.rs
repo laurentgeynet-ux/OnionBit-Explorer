@@ -529,7 +529,31 @@ pub(crate) fn url_ctor(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Va
                 .collect::<Vec<_>>()
                 .join(" <- ");
             let stack: String = stack.chars().take(600).collect();
-            tracing::info!(target: "dom_probe", site = "url.ctor.fail", arm = "input", input = %h, base = %base_s.as_deref().unwrap_or("<absent>").chars().take(80).collect::<String>(), stack = %stack);
+            // §B-119 : `document.currentScript` au moment du
+            // jeté — nomme l'élément en cours d'évaluation
+            // (`<script src>` ou inline `<none>`) pour
+            // trancher « currentScript périmé vs producteur
+            // amont de `""` » (pattern `getAssetPrefix`
+            // Next.js : `new URL(currentScript.src)`).
+            let cur = e.dom_ctx.as_ref().map_or_else(
+                || "<no-dom>".to_string(),
+                |(dom, _)| {
+                    let d = dom.borrow();
+                    e.hooks.current_script.map_or_else(
+                        || "<null>".to_string(),
+                        |n| {
+                            let s = d
+                                .attr(n, "src")
+                                .unwrap_or("<inline>")
+                                .chars()
+                                .take(120)
+                                .collect::<String>();
+                            format!("{}:{}", d.nodes[n as usize].tag, s)
+                        },
+                    )
+                },
+            );
+            tracing::info!(target: "dom_probe", site = "url.ctor.fail", arm = "input", input = %h, base = %base_s.as_deref().unwrap_or("<absent>").chars().take(80).collect::<String>(), cur = %cur, stack = %stack);
         }
         return Err(e.type_error(format!("Invalid URL: {h}")));
     };
