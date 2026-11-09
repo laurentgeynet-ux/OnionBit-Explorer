@@ -1985,22 +1985,32 @@ fn try_incr_payload(
 /// saturé à `[0, u32::MAX]` — un viewport invalide ne peut
 /// pas produire un env négatif ou absurdement grand), du
 /// schéma de couleurs réglé (étape 97 — `prefers-color-scheme`
-/// des media queries et défauts UA sombres, R-59) et du
+/// des media queries et défauts UA sombres, R-59), du
 /// « scripting flag » du contexte (R-93 — MQ `(scripting)` +
 /// `<noscript>` masqué UA : sans filage, le fallback rawtext
-/// peignait en clair sous un moteur installé — issue #22).
+/// peignait en clair sous un moteur installé — issue #22) et
+/// du rapport pixel réel `dpr` (`Session::scale` /
+/// `ApplyCtx.scale` — R-195 prérequis : MQ `resolution` et
+/// densité `srcset` lisaient `1.0` à vie en `HiDPI` ; un `dpr`
+/// invalide retombe sur `1.0`, jamais 0 ni négatif).
 #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
 // px CSS ≪ 2^32 en pratique — `as` sature déjà.
 pub(crate) fn viewport_env(
     viewport: (f32, f32),
     color_scheme: explorer_css::ColorScheme,
     scripting: bool,
+    dpr: f32,
 ) -> StyleEnv {
     StyleEnv {
         width_px: viewport.0.max(0.0).round() as u32,
         height_px: viewport.1.max(0.0).round() as u32,
         color_scheme,
         scripting,
+        dpr: if dpr.is_finite() && dpr > 0.0 {
+            dpr
+        } else {
+            1.0
+        },
         ..StyleEnv::default()
     }
 }
@@ -2015,6 +2025,7 @@ pub(crate) fn styles_payload(
     viewport: (f32, f32),
     color_scheme: explorer_css::ColorScheme,
     scripting: bool,
+    dpr: f32,
 ) -> StyleMap {
     let mut eng = StyleEngine::new();
     eng.add_css(MEDIA_UA_CSS, Origin::UserAgent);
@@ -2044,7 +2055,7 @@ pub(crate) fn styles_payload(
     // session (demande PIPE→NAV : `max-width:1007` doit être
     // vrai à 800px, pas lue sur le 1024×768 par défaut) et
     // le schéma de couleurs réglé (étape 97).
-    let env = viewport_env(viewport, color_scheme, scripting);
+    let env = viewport_env(viewport, color_scheme, scripting, dpr);
     let mut styles = eng.compute_tree(dom, dom.document(), &env);
     let ord_of = element_ordinals(dom);
     let raw: HashMap<usize, ComputedStyle> = styles
@@ -2087,7 +2098,14 @@ pub(crate) fn relayout_dom_payload(
     // bitmap frais (étape 129).
     composite::purge_frame_bitmaps(p);
     dlv_info!("apply: relayout");
-    let styles = styles_payload(p, dom, ctx.viewport, ctx.color_scheme, ctx.scripting);
+    let styles = styles_payload(
+        p,
+        dom,
+        ctx.viewport,
+        ctx.color_scheme,
+        ctx.scripting,
+        ctx.scale,
+    );
     tracing::info!(
         ms = u64::try_from(t0.elapsed().as_millis()).unwrap_or(u64::MAX),
         "apply: cascade"

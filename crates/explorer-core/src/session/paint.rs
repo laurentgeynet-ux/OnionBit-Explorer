@@ -304,6 +304,7 @@ impl Session {
             self.viewport,
             self.color_scheme,
             entry.js.is_some(),
+            self.scale,
         );
         entry.put_paint(p);
         styles

@@ -2296,7 +2296,12 @@ impl Session {
             // la pile statique).
             (Some(t), media) => {
                 let scripting = self.tabs.get(&tab).is_some_and(|e| e.js.is_some());
-                let env = super::apply::viewport_env(self.viewport, self.color_scheme, scripting);
+                let env = super::apply::viewport_env(
+                    self.viewport,
+                    self.color_scheme,
+                    scripting,
+                    self.scale,
+                );
                 let applies = media.as_deref().is_none_or(|m| media_attr_matches(&env, m));
                 if applies {
                     if let Some(entry) = self.tabs.get_mut(&tab) {
@@ -4081,7 +4086,8 @@ impl Session {
         // de liens générés répètent le même `href`, GitHub
         // ~7 doublons : un doublon brûle quota + fetch pour
         // un contenu identique en cascade).
-        let env = super::apply::viewport_env(self.viewport, self.color_scheme, scripting);
+        let env =
+            super::apply::viewport_env(self.viewport, self.color_scheme, scripting, self.scale);
         // CSP `upgrade-insecure-requests` (CAP-145) —
         // réécriture en amont des filtres : une cible
         // upgradée devient admissible mixed-content.

@@ -942,6 +942,10 @@ pub(crate) struct SubJob {
     /// contre le réglage session pendant la vague, hors
     /// verrou.
     pub(crate) color_scheme: explorer_css::ColorScheme,
+    /// Rapport pixel session recopié (R-195 prérequis) —
+    /// `env.dpr` des media queries (`resolution`) pendant
+    /// la vague ; avant ce fil l'env rapportait `1.0` à vie.
+    pub(crate) scale: f32,
     /// Bornes recopiées de la config session.
     pub(crate) max_inflight: usize,
     pub(crate) max_modules: usize,
@@ -1285,7 +1289,12 @@ impl SubJob {
     /// déclaré par une feuille importée est ainsi éligible.
     pub(crate) async fn fetch_imports(&mut self) {
         let mut ctx = ImportCtx {
-            env: super::apply::viewport_env(self.viewport, self.color_scheme, self.scripting),
+            env: super::apply::viewport_env(
+                self.viewport,
+                self.color_scheme,
+                self.scripting,
+                self.scale,
+            ),
             seen: HashSet::new(),
             left: self.max_imports,
             out: String::new(),
@@ -1392,7 +1401,12 @@ impl SubJob {
     pub(crate) async fn fetch_backgrounds(&mut self) {
         const BG_PROPS: &[&str] = &["background", "background-image"];
         const MASK_PROPS: &[&str] = &["mask-image", "-webkit-mask-image"];
-        let env = super::apply::viewport_env(self.viewport, self.color_scheme, self.scripting);
+        let env = super::apply::viewport_env(
+            self.viewport,
+            self.color_scheme,
+            self.scripting,
+            self.scale,
+        );
         let mut left = self.max_images.saturating_sub(self.img_urls.len());
         let mut seen = HashSet::new();
         let mut decl_urls = Vec::new();
@@ -1490,7 +1504,12 @@ impl SubJob {
         for sheet in self.css_slots.iter().flatten() {
             eng.add_css(sheet, Origin::Author);
         }
-        let env = super::apply::viewport_env(self.viewport, self.color_scheme, self.scripting);
+        let env = super::apply::viewport_env(
+            self.viewport,
+            self.color_scheme,
+            self.scripting,
+            self.scale,
+        );
         'faces: for face in eng.font_faces(&env) {
             if self.fonts.len() >= self.font_budget {
                 break;

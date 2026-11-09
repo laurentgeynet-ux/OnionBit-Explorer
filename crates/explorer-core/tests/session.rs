@@ -1281,6 +1281,40 @@ async fn color_scheme_dark_active_prefers_dark() {
     );
 }
 
+/// R-195 prérequis — `viewport_env` porte le `dpr` réel :
+/// `@media (min-resolution: 1.5dppx)` est inerte à scale 1.0
+/// et s'applique après `set_viewport(…, 2.0)` + `rerender`.
+/// Avant ce fil, l'env rapportait `1.0` à vie en HiDPI.
+#[tokio::test]
+async fn media_resolution_uses_session_scale() {
+    let (mut s, t) = test_session();
+    t.route(
+        "/",
+        200,
+        "<!doctype html><html><head><style>\
+         div { height: 300px; }\
+         @media (min-resolution: 1.5dppx) {\
+         #d { background: #00ff00; }\
+         }\
+         </style></head><body><div id=d></div></body></html>",
+    );
+    let id = s.open_tab();
+    s.navigate(id, "http://h.test/").await.unwrap();
+    let (fw, fh, px) = s.frame_pixels(id).unwrap();
+    assert_eq!(
+        count_color(fw as usize, fh as usize, px, [0, 255, 0]),
+        0,
+        "scale 1.0 : la règle min-resolution:1.5dppx reste inactive"
+    );
+    s.set_viewport(800.0, 600.0, 2.0);
+    s.rerender(id).unwrap();
+    let (fw, fh, px) = s.frame_pixels(id).unwrap();
+    assert!(
+        count_color(fw as usize, fh as usize, px, [0, 255, 0]) > 0,
+        "scale 2.0 : la règle min-resolution:1.5dppx s'applique"
+    );
+}
+
 /// Fenêtre raster (consommation R-62) : un document plus haut
 /// que le cap 16 384 px reste scrollable — la frame peint la
 /// tranche viewport-ancrée, pas seulement le haut du document

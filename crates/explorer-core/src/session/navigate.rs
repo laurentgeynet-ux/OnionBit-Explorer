@@ -1285,6 +1285,7 @@ impl Session {
             post_evals: Vec::new(),
             viewport: self.viewport,
             color_scheme: self.color_scheme,
+            scale: self.scale,
             max_inflight: self.max_inflight,
             max_modules: self.max_modules,
             font_budget: self.max_fonts,

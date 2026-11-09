@@ -78,6 +78,34 @@ fn shared_fonts_delegates_face_and_fallback() {
     assert_eq!(*bytes, explorer_test_support::fixture_ttf());
 }
 
+/// R-195 prérequis — `viewport_env` rapporte le rapport
+/// pixel réel de session (`Session::scale`) : la MQ
+/// `resolution`/`-webkit-device-pixel-ratio` et la densité
+/// `srcset` lisaient `1.0` à vie en `HiDPI`. Un `dpr` invalide
+/// (0, négatif, NaN, infini) retombe sur `1.0`.
+#[test]
+fn viewport_env_reporte_dpr_session() {
+    let env = crate::session::apply::viewport_env(
+        (800.0, 600.0),
+        explorer_css::ColorScheme::Light,
+        false,
+        2.0,
+    );
+    assert!((env.dpr - 2.0).abs() < f32::EPSILON);
+    for bad in [0.0, -1.0, f32::NAN, f32::INFINITY] {
+        let env = crate::session::apply::viewport_env(
+            (800.0, 600.0),
+            explorer_css::ColorScheme::Light,
+            false,
+            bad,
+        );
+        assert!(
+            (env.dpr - 1.0).abs() < f32::EPSILON,
+            "dpr {bad} invalide → 1.0"
+        );
+    }
+}
+
 /// Étape 56b — un snapshot gelé pendant la fenêtre
 /// `nav_apply` → `sub_commit` (DOM commis, produit
 /// jamais peint — `/frame` 204 persistant, hit-test

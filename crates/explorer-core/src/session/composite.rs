@@ -314,6 +314,7 @@ fn render_subframe(
         (w, h),
         ctx.color_scheme,
         child_ctx.scripting,
+        ctx.scale,
     );
     let data_imgs = collect_data_images(&f.dom, &styles, ctx.image_max_px);
     cp.images.replaced.extend(data_imgs.replaced);
