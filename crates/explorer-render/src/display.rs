@@ -420,6 +420,17 @@ pub struct EmitStats {
     pub backface_path: Option<Vec<u16>>,
     /// Premier chemin `visibility:hidden|collapse`.
     pub visibility_path: Option<Vec<u16>>,
+    /// `(tx, ty)` de chaque `PushTransform` émis — une
+    /// translation géante projette sa portée hors-canvas
+    /// en une lecture (§B-118 phase fix).
+    pub tf_offsets: Vec<(f32, f32)>,
+    /// Borne résolue `(x, y, w, h)` du premier item
+    /// hors-canvas.
+    pub off_canvas_first: Option<(f32, f32, f32, f32)>,
+    /// Transform composée `(tx, ty)` au premier item
+    /// hors-canvas : ≈ identité = placement layout fautif,
+    /// géante = `PushTransform` fautive.
+    pub off_canvas_tf: Option<(f32, f32)>,
 }
 
 /// Nom de variante pour la répartition [`EmitStats::by_kind`].
@@ -1458,13 +1469,37 @@ fn build_list(
         st.drop_cap = dropped_emits;
         // Post-pass : répartition par variante + bornes
         // résolues (transforms composées) — un item émis hors
-        // de la zone canvas est peint mais invisible.
+        // de la zone canvas est peint mais invisible. La pile
+        // `PushTransform` est rejouée en miroir pour lire la
+        // transform courante au premier item hors-zone (§B-118).
+        let mut tfs: Vec<tiny_skia::Transform> = Vec::new();
+        let mut cur = tiny_skia::Transform::default();
         for (it, b) in items.iter().zip(resolved_bounds(&items)) {
             *st.by_kind.entry(kind_name(it)).or_insert(0) += 1;
+            match it {
+                DisplayItem::PushTransform(m) => {
+                    tfs.push(*m);
+                    cur = tfs
+                        .iter()
+                        .fold(tiny_skia::Transform::default(), |acc, t| acc.pre_concat(*t));
+                    st.tf_offsets.push((m.tx, m.ty));
+                }
+                DisplayItem::PopTransform => {
+                    tfs.pop();
+                    cur = tfs
+                        .iter()
+                        .fold(tiny_skia::Transform::default(), |acc, t| acc.pre_concat(*t));
+                }
+                _ => {}
+            }
             if b.is_some_and(|r| {
                 !(r.x < viewport_w && r.y < doc_h && r.x + r.width > 0.0 && r.y + r.height > 0.0)
             }) {
                 st.off_canvas += 1;
+                if st.off_canvas_first.is_none() {
+                    st.off_canvas_first = b.map(|r| (r.x, r.y, r.width, r.height));
+                    st.off_canvas_tf = Some((cur.tx, cur.ty));
+                }
             }
         }
     }
