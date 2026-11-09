@@ -2304,6 +2304,12 @@ fn apply_presentational_hints(
         }
         _ => {}
     }
+    // R-171 — `dir` → `direction` sur tout élément (HTML
+    // Rendering §bidi, presentational hint) : `ltr`/`rtl`
+    // directs ; `auto` = premier caractère fort du texte
+    // descendant (scan borné — spec `dir=auto`) — valeur
+    // par défaut de `<bdi>`.
+    hint(props, "direction", hint_dir(dom, node, tag));
     legacy_presentational_hints(dom, node, tag, parent, env, props);
 }
 
@@ -2475,6 +2481,77 @@ fn span(a: Option<&str>) -> Option<String> {
         .ok()
         .filter(|n| *n >= 1)
         .map(|n| n.min(1000).to_string())
+}
+
+/// `dir` → `direction` (R-171, HTML Rendering §bidi) :
+/// `ltr`/`rtl` se mappent directement ; `auto` suit le
+/// premier caractère à directionnalité forte du texte
+/// descendant (spec `dir=auto` — **défaut de `<bdi>`**,
+/// attribut absent inclus). `None` sans `dir` ou valeur
+/// invalide → la propriété suit l'héritage.
+fn hint_dir(dom: &Dom, node: NodeId, tag: &str) -> Option<String> {
+    let value = match hint_attr(dom, node, "dir") {
+        Some(v) => v.trim().to_ascii_lowercase(),
+        None if tag == "bdi" => "auto".to_string(),
+        None => return None,
+    };
+    match value.as_str() {
+        v @ ("ltr" | "rtl") => Some(v.to_string()),
+        "auto" => dir_auto(dom, node).map(str::to_string),
+        _ => None,
+    }
+}
+
+/// Direction du premier caractère fort (bidi class `L` →
+/// `ltr`, `R`/`AL` → `rtl`) dans le texte descendant de
+/// `node` — préordre document borné (`MAX_DIR_SCAN` nœuds,
+/// contenu hostile). Les sous-arbres `bdi`/`bdo`/`script`/
+/// `style`/`textarea` et tout élément portant son propre
+/// `dir` sont sautés : ils portent leur directionnalité
+/// (spec `dir=auto`). `None` = aucun fort trouvé → héritage.
+fn dir_auto(dom: &Dom, node: NodeId) -> Option<&'static str> {
+    /// Budget de nœuds visités par résolution `dir=auto`.
+    const MAX_DIR_SCAN: u32 = 4_096;
+    let mut stack: Vec<NodeId> = Vec::new();
+    if let Ok(it) = dom.children_iter(node) {
+        stack.extend(it);
+        stack.reverse();
+    }
+    let mut visited = 0u32;
+    while let Some(n) = stack.pop() {
+        visited += 1;
+        if visited > MAX_DIR_SCAN {
+            break;
+        }
+        if let Ok(t) = dom.text(n) {
+            for c in t.chars() {
+                match unicode_bidi::bidi_class(c) {
+                    unicode_bidi::BidiClass::L => return Some("ltr"),
+                    unicode_bidi::BidiClass::R | unicode_bidi::BidiClass::AL => {
+                        return Some("rtl");
+                    }
+                    _ => {}
+                }
+            }
+            continue;
+        }
+        if let Ok(tag) = dom.tag_name(n) {
+            if matches!(tag, "bdi" | "bdo" | "script" | "style" | "textarea")
+                || hint_attr(dom, n, "dir").is_some()
+            {
+                continue;
+            }
+        }
+        if let Ok(it) = dom.children_iter(n) {
+            // `collect` + reverse : pop en préordre.
+            let mut kids: Vec<NodeId> = it.collect();
+            stack.reserve(kids.len());
+            while let Some(k) = kids.pop() {
+                stack.push(k);
+            }
+        }
+    }
+    None
 }
 
 /// `align` → text-align (spec : presentational hint) ;

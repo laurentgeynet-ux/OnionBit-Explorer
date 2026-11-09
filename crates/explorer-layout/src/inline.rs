@@ -17,10 +17,10 @@
 //! conteneur, puis coulée en ligne comme un « gros caractère »
 //! incassable.
 //!
-//! Limites documentées : runs RTL posés en ordre logique
-//! (réordonnancement visuel UAX #9 §L2 reporté à la display
-//! list ; les clusters gardent les offsets octets pour le
-//! hit-test futur).
+//! Limites documentées : `unicode-bidi` non résolu (R-176)
+//! — seul le réordonnancement visuel par niveaux UAX #9 §L2
+//! est livré (R-171) ; les clusters gardent les offsets
+//! octets pour le hit-test futur.
 
 use std::collections::HashMap;
 
@@ -133,6 +133,10 @@ pub struct Fragment {
     /// vide aussi sur les atomes : la propagation saute les
     /// remplacés (§16.3.1).
     pub deco: Vec<TextDeco>,
+    /// Niveau bidi UAX #9 du fragment (pair = LTR) — atomes
+    /// et marqueurs portent le niveau de base du paragraphe
+    /// (approximation neutre, R-171).
+    pub level: u8,
 }
 
 /// Une ligne de contenu en-ligne posée.
@@ -140,7 +144,8 @@ pub struct Fragment {
 pub struct LineBox {
     /// Rectangle de la ligne.
     pub rect: Rect,
-    /// Fragments dans l'ordre logique.
+    /// Fragments dans l'ordre **visuel** (réordonnancement
+    /// bidi UAX #9 §L2 appliqué à la fermeture — R-171).
     pub fragments: Vec<Fragment>,
     /// Baseline de la ligne (depuis `rect.y`).
     pub baseline: f32,
@@ -186,8 +191,21 @@ struct Piece {
     text: String,
     /// Direction bidi.
     dir: Direction,
+    /// Niveau bidi UAX #9 (pair = LTR) — sert au
+    /// réordonnancement visuel des fragments (R-171).
+    level: u8,
     /// Coupure obligatoire après cette pièce.
     hard_after: bool,
+}
+
+/// Niveau d'imbrication du paragraphe depuis `direction`
+/// (spec : `rtl` → 1, `ltr` → 0) — R-171. Insensible à la
+/// casse : la valeur est stockée telle que déclarée.
+fn para_level(st: &ComputedStyle) -> u8 {
+    u8::from(
+        st.get("direction")
+            .is_some_and(|d| d.trim().eq_ignore_ascii_case("rtl")),
+    )
 }
 
 /// Layout en-ligne du conteneur `bx` dans `[x, y, w]` : pose
@@ -209,6 +227,11 @@ pub(crate) fn layout_inline(
 ) -> f32 {
     let st = bx.style.clone();
     let fs = font_size_px(&st, parent_fs, ctx);
+    // R-171 — niveau d'imbrication du paragraphe : `direction`
+    // du conteneur (hint `dir` → `direction`, cascade) sert
+    // de base aux itemisations et de scel aux fragments non
+    // textuels ; la retraite visuelle se fait à `close`.
+    let para_lv = para_level(&st);
 
     // Atomes (inline-block, remplacés `intrinsic` — object,
     // img, svg, canvas) : dimensionnés comme blocs AVANT le
@@ -219,7 +242,7 @@ pub(crate) fn layout_inline(
     let mut atomics: HashMap<usize, Rect> = HashMap::new();
     size_atomics(bx, w, cb_h, ctx, fs, abs_cb, &mut atomics);
 
-    let items = collect_items(bx);
+    let items = collect_items(bx, para_lv);
     // Strut du conteneur (§10.8.1) : `line-height` de la
     // boîte — plancher de chaque ligne (`.chin` Acid2 :
     // `line-height:1em` tient la rangée à 12 px même si le
@@ -230,7 +253,9 @@ pub(crate) fn layout_inline(
     // image-remplacement (`text-indent:-9999px` + sprite en
     // `background-image`, portail Wikipedia `.sprite`).
     let indent = side_px(&st, "text-indent", w, fs, ctx, 0.0);
-    let mut lines = break_into_lines(&items, &atomics, x, y, w, ctx, fs, fl, strut_lh, indent);
+    let mut lines = break_into_lines(
+        &items, &atomics, x, y, w, ctx, fs, fl, strut_lh, indent, para_lv,
+    );
     align_lines(&st, &mut lines, x, w, fl, indent);
     apply_text_overflow(&st, &mut lines, x + w, ctx, fs);
     apply_line_clamp(&st, &mut lines, x + w, ctx, fs);
@@ -330,12 +355,17 @@ fn apply_line_clamp(
 /// fonte — retrait caractère par caractère, `pop` est sûr
 /// Unicode.
 fn ellipsize_line(line: &mut LineBox, right: f32, ctx: &BlockCtx, fs: f32) {
-    let Some((est, enode, eowner, ebase, edeco)) = line
-        .fragments
-        .iter()
-        .rev()
-        .find(|f| !f.atomic)
-        .map(|f| (f.style.clone(), f.node, f.owner, f.baseline, f.deco.clone()))
+    let Some((est, enode, eowner, ebase, edeco, elevel)) =
+        line.fragments.iter().rev().find(|f| !f.atomic).map(|f| {
+            (
+                f.style.clone(),
+                f.node,
+                f.owner,
+                f.baseline,
+                f.deco.clone(),
+                f.level,
+            )
+        })
     else {
         return;
     };
@@ -376,6 +406,7 @@ fn ellipsize_line(line: &mut LineBox, right: f32, ctx: &BlockCtx, fs: f32) {
         marg_b: 0.0,
         style: est,
         deco: edeco,
+        level: elevel,
     });
     line.rect.width = (cut + ell_w - line.rect.x).max(0.0);
 }
@@ -558,7 +589,8 @@ fn size_atomics_walk(
 }
 
 /// Items de flux : chaque enfant → pièces (texte) ou atomique.
-fn collect_items(bx: &LayoutBox) -> Vec<Item> {
+/// `para_lv` = niveau d'imbrication du paragraphe (R-171).
+fn collect_items(bx: &LayoutBox, para_lv: u8) -> Vec<Item> {
     let mut items = Vec::new();
     let mut aid = 0usize;
     // §16.3.1 / R-153 : une déco posée sur le CONTENEUR
@@ -568,17 +600,19 @@ fn collect_items(bx: &LayoutBox) -> Vec<Item> {
     // complètent à l'entrée de chaque élément inline.
     let mut decos: Vec<TextDeco> = text_deco(&bx.style).into_iter().collect();
     for (owner, child) in bx.children.iter().enumerate() {
-        collect_child(child, owner, &mut items, &mut aid, &mut decos);
+        collect_child(child, owner, &mut items, &mut aid, &mut decos, para_lv);
     }
     items
 }
 
+#[allow(clippy::too_many_arguments)]
 fn collect_child(
     b: &LayoutBox,
     owner: usize,
     items: &mut Vec<Item>,
     aid: &mut usize,
     decos: &mut Vec<TextDeco>,
+    para_lv: u8,
 ) {
     // Hors-flux : `absolute`/`fixed` est posé par
     // `resolve_absolutes` — son contenu n'entre jamais dans
@@ -595,7 +629,7 @@ fn collect_child(
     // `display: inline-block` — l'atomicité ne vaut que pour
     // les conteneurs.
     if let Some(t) = &b.text {
-        items.push(text_item(b, owner, t, decos));
+        items.push(text_item(b, owner, t, decos, para_lv));
         return;
     }
     if is_atomic(b) {
@@ -648,7 +682,7 @@ fn collect_child(
         });
     }
     for c in &b.children {
-        explorer_common::deep(|| collect_child(c, owner, items, aid, decos));
+        explorer_common::deep(|| collect_child(c, owner, items, aid, decos, para_lv));
     }
     if pushed.is_some() {
         decos.pop();
@@ -669,7 +703,10 @@ fn collect_child(
 /// Item texte : runs itemisés → pièces entre opportunités.
 /// `decos` = pile des décos déclarées par les ancêtres
 /// en-ligne (R-153) — copiée en snapshot sur l'item.
-fn text_item(b: &LayoutBox, owner: usize, t: &str, decos: &[TextDeco]) -> Item {
+/// `para_lv` = niveau d'imbrication du paragraphe : la
+/// `direction` du bloc conteneur sert de base UAX #9 à
+/// toutes les itemisations de la ligne (R-171).
+fn text_item(b: &LayoutBox, owner: usize, t: &str, decos: &[TextDeco], para_lv: u8) -> Item {
     // §16.6.1 white-space processing : `normal`/`nowrap` effondrent
     // toute suite de blancs en une espace ; `pre-line` effondre les
     // espaces/tabs mais garde `\n` (saut forcé) ; `pre`/`pre-wrap`
@@ -708,7 +745,12 @@ fn text_item(b: &LayoutBox, owner: usize, t: &str, decos: &[TextDeco]) -> Item {
         _ => src,
     };
     let mut pieces = Vec::new();
-    for run in text::itemize(src) {
+    let para = if para_lv == 0 {
+        unicode_bidi::Level::ltr()
+    } else {
+        unicode_bidi::Level::rtl()
+    };
+    for run in text::itemize(src, Some(para)) {
         let mut prev = 0usize;
         for br in &run.breaks {
             if br.offset > prev && br.offset <= run.text.len() {
@@ -721,6 +763,7 @@ fn text_item(b: &LayoutBox, owner: usize, t: &str, decos: &[TextDeco]) -> Item {
                     pieces.push(Piece {
                         text: strip_break_chars(p).to_string(),
                         dir: run.direction,
+                        level: run.level,
                         hard_after: br.mandatory && ends_hard_break(p),
                     });
                 }
@@ -732,6 +775,7 @@ fn text_item(b: &LayoutBox, owner: usize, t: &str, decos: &[TextDeco]) -> Item {
                 pieces.push(Piece {
                     text: strip_break_chars(p).to_string(),
                     dir: run.direction,
+                    level: run.level,
                     hard_after: ends_hard_break(p),
                 });
             }
@@ -840,9 +884,69 @@ impl LineAcc {
         self.frags.is_empty()
     }
 
+    /// Réordonnancement visuel bidi (UAX #9 §L2 — R-171) :
+    /// les fragments sont accumulés en ordre **logique** ;
+    /// chaque séquence de niveau ≥ seuil est retournée (du
+    /// niveau max vers le plus bas niveau impair), puis les
+    /// margin boxes sont re-tuilées dans l'ordre visuel —
+    /// à gauche pour un paragraphe LTR, ancrées au bord
+    /// droit de la bande pour RTL (`text-align` consomme le
+    /// slack restant ensuite, comme en LTR).
+    fn reorder_bidi(&mut self, base_rtl: bool, band_right: f32) {
+        if self.frags.is_empty() {
+            return;
+        }
+        let base = u8::from(base_rtl);
+        // Court-circuit : paragraphe LTR sans niveau impair —
+        // ordre logique = visuel, positions déjà tuilées. En
+        // RTL le retournement et l'ancre droite s'imposent
+        // même si tous les fragments sont niveau 1.
+        if !base_rtl && self.frags.iter().all(|f| f.level == base) {
+            return;
+        }
+        let levels: Vec<unicode_bidi::Level> = self
+            .frags
+            .iter()
+            .map(|f| unicode_bidi::Level::new(f.level).unwrap_or(unicode_bidi::LTR_LEVEL))
+            .collect();
+        // `map[i]` = indice logique du fragment posé au
+        // slot visuel `i` (UAX #9 §L2).
+        let map = unicode_bidi::BidiInfo::reorder_visual(&levels);
+        let mut frags = Vec::with_capacity(self.frags.len());
+        for &li in &map {
+            frags.push(self.frags[li].clone());
+        }
+        let total: f32 = frags
+            .iter()
+            .map(|f| f.marg_l + f.rect.width + f.marg_r)
+            .sum();
+        let mut cx = if base_rtl {
+            band_right - total
+        } else {
+            frags
+                .iter()
+                .map(|f| f.rect.x - f.marg_l)
+                .fold(f32::INFINITY, f32::min)
+        };
+        for f in &mut frags {
+            f.rect.x = cx + f.marg_l;
+            cx += f.marg_l + f.rect.width + f.marg_r;
+        }
+        self.frags = frags;
+    }
+
     /// Ferme la ligne à `y` : aligne les fragments sur la
-    /// baseline commune, calcule le rect.
-    fn close(&mut self, y: &mut f32, lines: &mut Vec<LineBox>, ctx: &BlockCtx) {
+    /// baseline commune, calcule le rect. `base_rtl`/
+    /// `band_right` alimentent le réordonnancement bidi —
+    /// le bord droit de la bande où la ligne a été coulée.
+    fn close(
+        &mut self,
+        y: &mut f32,
+        lines: &mut Vec<LineBox>,
+        ctx: &BlockCtx,
+        base_rtl: bool,
+        band_right: f32,
+    ) {
         // §16.6.1 : les espaces en FIN de ligne sont retirées
         // (elles ne rendent rien et ne comptent pas dans la
         // largeur — `text-align` mesure sans elles).
@@ -863,6 +967,7 @@ impl LineAcc {
         if self.is_empty() {
             return;
         }
+        self.reorder_bidi(base_rtl, band_right);
         // Le strut pose la baseline ET la hauteur plancher
         // de la ligne (§10.8.1) — un fragment bas s'y aligne
         // comme sur un caractère de la fonte du conteneur.
@@ -943,12 +1048,16 @@ fn break_into_lines(
     fl: &FloatCtx,
     strut_lh: f32,
     indent: f32,
+    para_lv: u8,
 ) -> Vec<LineBox> {
     /// Requêtes de bande bornées (contenu hostile : les
     /// flottants sont finis, chaque descente en franchit un).
     const MAX_BAND_STEPS: u32 = 128;
 
     let mut lines = Vec::new();
+    // R-171 — ancre RTL de la ligne : le contenu se re-tuile
+    // depuis le bord droit de la bande (`reorder_bidi`).
+    let base_rtl = para_lv == 1;
     // Baseline du strut = demi-leading + ascent (comme un
     // fragment texte de la fonte du conteneur) — avec
     // `line-height: 0` elle tombe sous l'em box et ne
@@ -991,7 +1100,7 @@ fn break_into_lines(
     // suivant (les flottants peuvent avoir commencé/fini).
     macro_rules! new_line {
         () => {{
-            acc.close(&mut cursor_y, &mut lines, ctx);
+            acc.close(&mut cursor_y, &mut lines, ctx, base_rtl, line_x + line_w);
             (line_x, line_w) = fl.band(cursor_y, x, w);
             cursor_x = line_x;
         }};
@@ -1093,6 +1202,7 @@ fn break_into_lines(
                 marg_t: mt,
                 marg_b: mb,
                 deco: Vec::new(),
+                level: para_lv,
             });
             // (`rect.y = y + base - h`), `mb` allonge la ligne.
             acc.max_lh = acc.max_lh.max(mt + r.height + mb);
@@ -1140,6 +1250,7 @@ fn break_into_lines(
                     marg_t: 0.0,
                     marg_b: 0.0,
                     deco: Vec::new(),
+                    level: para_lv,
                 });
                 cursor_x += m;
             }
@@ -1193,6 +1304,7 @@ fn break_into_lines(
                         marg_t: 0.0,
                         marg_b: 0.0,
                         deco: Vec::new(),
+                        level: para_lv,
                     });
                     acc.max_lh = acc.max_lh.max(lh);
                     acc.max_base = acc.max_base.max(fs * 0.8);
@@ -1280,6 +1392,7 @@ fn break_into_lines(
                     marg_t: 0.0,
                     marg_b: 0.0,
                     deco: item.deco.clone(),
+                    level: piece.level,
                 });
                 acc.max_lh = acc.max_lh.max(lh);
                 acc.max_base = acc.max_base.max(baseline);
@@ -1290,7 +1403,7 @@ fn break_into_lines(
             }
         }
     }
-    acc.close(&mut cursor_y, &mut lines, ctx);
+    acc.close(&mut cursor_y, &mut lines, ctx, base_rtl, line_x + line_w);
     lines
 }
 
@@ -1309,7 +1422,7 @@ fn align_lines(
     fl: &FloatCtx,
     indent: f32,
 ) {
-    let rtl = st.get("direction").is_some_and(|d| d.trim() == "rtl");
+    let rtl = para_level(st) == 1;
     let align = match st.get_or("text-align", "start") {
         "start" => {
             if rtl {

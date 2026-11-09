@@ -1154,6 +1154,93 @@ fn hint_align_vers_text_align() {
     assert_eq!(e.compute(&dom, x, &env()).get("text-align"), None);
 }
 
+/// R-171 — `dir` → `direction` sur tout élément (HTML
+/// Rendering §bidi, presentational hint de rang auteur 0).
+#[test]
+fn hint_dir_vers_direction() {
+    let f = fixture();
+    let e = StyleEngine::new();
+    let mut dom = f.dom;
+    let host = el(&mut dom, f.body, "div", &[("dir", "rtl")]);
+    assert_eq!(
+        e.compute(&dom, host, &env()).get("direction"),
+        Some("rtl"),
+        "dir=rtl → direction:rtl"
+    );
+    let upper = el(&mut dom, f.body, "div", &[("dir", "LTR")]);
+    assert_eq!(e.compute(&dom, upper, &env()).get("direction"), Some("ltr"));
+    // Valeur invalide → pas de hint : `direction` hérite
+    // du parent (ici `dir=rtl` → rtl).
+    let inv = el(&mut dom, host, "div", &[("dir", "nawak")]);
+    assert_eq!(
+        e.compute(&dom, inv, &env()).get("direction"),
+        Some("rtl"),
+        "dir invalide : héritage, pas de direction forcée"
+    );
+    // La CSS auteur prime le hint (rang 0).
+    let mut e2 = StyleEngine::new();
+    e2.add_css("div { direction: ltr }", Origin::Author);
+    let over = el(&mut dom, f.body, "div", &[("dir", "rtl")]);
+    assert_eq!(e2.compute(&dom, over, &env()).get("direction"), Some("ltr"));
+}
+
+/// R-171 — `dir=auto` : la directionnalité suit le premier
+/// caractère fort du texte descendant (spec dir=auto) ;
+/// les sous-arbres à `dir` propre sont sautés ; sans fort,
+/// héritage.
+#[test]
+fn hint_dir_auto_au_premier_fort() {
+    let f = fixture();
+    let e = StyleEngine::new();
+    let mut dom = f.dom;
+    // Fort hébreu → rtl ; fort latin → ltr.
+    let heb = el(&mut dom, f.body, "div", &[("dir", "auto")]);
+    let t_heb = dom.create_text("שלום").unwrap();
+    dom.append_child(heb, t_heb).unwrap();
+    assert_eq!(
+        e.compute(&dom, heb, &env()).get("direction"),
+        Some("rtl"),
+        "dir=auto sur hébreu → rtl"
+    );
+    let lat = el(&mut dom, f.body, "div", &[("dir", "auto")]);
+    let t_lat = dom.create_text("hello").unwrap();
+    dom.append_child(lat, t_lat).unwrap();
+    assert_eq!(e.compute(&dom, lat, &env()).get("direction"), Some("ltr"));
+    // Le sous-arbre à `dir` propre est sauté : le fort lu
+    // est le texte latin qui suit.
+    let skip = el(&mut dom, f.body, "div", &[("dir", "auto")]);
+    let inner = el(&mut dom, skip, "span", &[("dir", "rtl")]);
+    let t_in = dom.create_text("שלום").unwrap();
+    dom.append_child(inner, t_in).unwrap();
+    let t_out = dom.create_text("abc").unwrap();
+    dom.append_child(skip, t_out).unwrap();
+    assert_eq!(
+        e.compute(&dom, skip, &env()).get("direction"),
+        Some("ltr"),
+        "le span[dir] est sauté → fort latin"
+    );
+    // Aucun fort (espaces/chiffres) → pas de hint → héritage
+    // (sous le parent `dir=rtl`, `direction` suit rtl).
+    let host = el(&mut dom, f.body, "div", &[("dir", "rtl")]);
+    let none = el(&mut dom, host, "div", &[("dir", "auto")]);
+    let t_none = dom.create_text(" 123 ").unwrap();
+    dom.append_child(none, t_none).unwrap();
+    assert_eq!(
+        e.compute(&dom, none, &env()).get("direction"),
+        Some("rtl"),
+        "aucun fort → héritage du parent"
+    );
+    // `<bdi>` : `dir=auto` est le défaut même sans attribut.
+    let bdi = el(&mut dom, f.body, "bdi", &[]);
+    let t_bdi = dom.create_text("שלום").unwrap();
+    dom.append_child(bdi, t_bdi).unwrap();
+    assert_eq!(
+        e.compute(&dom, bdi, &env()).get("direction"),
+        Some("rtl"),
+        "bdi sans dir : auto par défaut"
+    );
+}
+
 #[test]
 fn hint_table_spacing_padding_border() {
     let f = fixture();

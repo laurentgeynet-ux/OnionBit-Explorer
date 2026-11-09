@@ -12,7 +12,7 @@
 
 use std::ops::Range;
 
-use unicode_bidi::BidiInfo;
+use unicode_bidi::{BidiInfo, Level};
 use unicode_linebreak::{linebreaks, BreakOpportunity};
 
 /// Direction d'un run de texte.
@@ -69,12 +69,15 @@ pub fn trim_css_ws(s: &str) -> &str {
 /// Itemise `text` en runs de direction homogène.
 ///
 /// - Segmentation par niveau bidi (UAX #9 via `unicode-bidi`,
-///   niveau de base déduit du premier caractère fort) ;
+///   `para_level` = niveau d'imbrication du paragraphe —
+///   `direction: rtl` → [`Level::rtl()`], `ltr` →
+///   [`Level::ltr()`] ; `None` = déduction au premier
+///   caractère fort, repli `dir=auto` non résolu — R-171) ;
 /// - opportunités UAX #14 recalées en offsets relatifs au run ;
 /// - texte vide → `Vec` vide ; les sauts de ligne produisent
 ///   leurs propres coupures obligatoires.
 #[must_use]
-pub fn itemize(text: &str) -> Vec<TextRun> {
+pub fn itemize(text: &str, para_level: Option<Level>) -> Vec<TextRun> {
     if text.is_empty() {
         return Vec::new();
     }
@@ -83,7 +86,7 @@ pub fn itemize(text: &str) -> Vec<TextRun> {
         .map(|(off, kind)| (off, kind == BreakOpportunity::Mandatory))
         .collect();
 
-    let bidi = BidiInfo::new(text, None);
+    let bidi = BidiInfo::new(text, para_level);
     let mut runs = Vec::new();
     for para in &bidi.paragraphs {
         // `levels` est indexé par offset octet — on découpe en

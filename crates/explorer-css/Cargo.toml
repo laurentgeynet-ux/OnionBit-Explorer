@@ -12,6 +12,7 @@ workspace = true
 [dependencies]
 explorer-common.workspace = true
 explorer-dom.workspace = true
+unicode-bidi.workspace = true
 
 [dev-dependencies]
 explorer-html.workspace = true

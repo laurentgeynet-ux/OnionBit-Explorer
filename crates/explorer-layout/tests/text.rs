@@ -93,7 +93,7 @@ fn mesure_et_clusters() {
 
 #[test]
 fn itemize_ltr_simple() {
-    let runs = text::itemize("hello world");
+    let runs = text::itemize("hello world", None);
     assert_eq!(runs.len(), 1);
     assert_eq!(runs[0].direction, Direction::Ltr);
     assert_eq!(runs[0].text, "hello world");
@@ -103,7 +103,7 @@ fn itemize_ltr_simple() {
 #[test]
 fn itemize_bidi_melange() {
     // « שלום » est hébreu (RTL fort) → run de niveau impair.
-    let runs = text::itemize("abc שלום def");
+    let runs = text::itemize("abc שלום def", None);
     assert!(runs.len() >= 3, "{runs:?}");
     assert_eq!(runs[0].direction, Direction::Ltr);
     let rtl = runs.iter().find(|r| r.direction == Direction::Rtl);
@@ -113,10 +113,26 @@ fn itemize_bidi_melange() {
 
 #[test]
 fn itemize_vide_et_neutres() {
-    assert_eq!(text::itemize(""), Vec::new());
-    let runs = text::itemize("123 !!!");
+    assert_eq!(text::itemize("", None), Vec::new());
+    let runs = text::itemize("123 !!!", None);
     assert_eq!(runs.len(), 1);
     assert_eq!(runs[0].direction, Direction::Ltr);
+}
+
+/// R-171 — `direction: rtl` force le niveau de base du
+/// paragraphe : le latin y passe niveau 2 (imbriqué), pas 0.
+#[test]
+fn itemize_base_rtl_promeut_le_latin() {
+    use unicode_bidi::Level;
+    let runs = text::itemize("abc שלום", Some(Level::rtl()));
+    assert!(runs.len() >= 2, "{runs:?}");
+    let latin = runs.iter().find(|r| r.text.contains("abc"));
+    let hebrew = runs.iter().find(|r| r.text.contains("שלום"));
+    assert_eq!(latin.map(|r| r.level), Some(2), "{runs:?}");
+    assert_eq!(hebrew.map(|r| r.level), Some(1), "{runs:?}");
+    // En base LTR explicite, mêmes niveaux que l'auto.
+    let ltr = text::itemize("abc שלום", Some(Level::ltr()));
+    assert_eq!(ltr[0].level, 0);
 }
 
 #[test]

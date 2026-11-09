@@ -876,6 +876,7 @@ dependencies = [
  "explorer-common",
  "explorer-dom",
  "explorer-html",
+ "unicode-bidi",
 ]
 
 [[package]]

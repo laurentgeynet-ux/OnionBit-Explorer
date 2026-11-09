@@ -3331,7 +3331,7 @@ items NAV (filage session/pointeur/réseau) sont déclarés au
 journal `interface-equipes.md`, pas ici. Ordre = ratio
 déblocage/coût décroissant.
 
-- [ ] **R-171. `dir`/`direction` → réordonnancement visuel
+- [x] **R-171. `dir`/`direction` → réordonnancement visuel
   bidi** : `dir` n'est jamais mappé vers `direction` (ni hint ni
   règle UA) et `BidiInfo::new(text, None)` déduit le niveau de
   base seul (`text.rs`) ; les runs segmentés par niveau sont
