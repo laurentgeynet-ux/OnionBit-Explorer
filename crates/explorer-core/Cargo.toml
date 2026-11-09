@@ -35,6 +35,9 @@ tracing.workspace = true
 # RSS processus du shed-load (Étape 209 / §B-114-b) — même
 # source `memory_stats()` que le watchdog daemon.
 memory-stats.workspace = true
+# Décodeurs streamés des encodages legacy (R-170) — le variant
+# `Encoding::Legacy` d'explorer-html embarque `&'static Encoding`.
+encoding_rs.workspace = true
 
 [dev-dependencies]
 image.workspace = true

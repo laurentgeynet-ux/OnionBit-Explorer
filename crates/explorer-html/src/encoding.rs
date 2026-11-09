@@ -20,6 +20,14 @@ pub enum Encoding {
     /// `windows-1252` — défaut WHATWG ; couvre les labels
     /// `latin1`/`iso-8859-1`/`ascii` (la spec les mappe tous ici).
     Windows1252,
+    /// Tout autre encodage WHATWG (R-170) — `Shift_JIS`, EUC-JP,
+    /// GBK/GB18030, Big5, EUC-KR, ISO-2022-JP, windows-125x,
+    /// KOI8-R, ISO-8859-*, `macintosh`, `x-user-defined`…
+    /// Le décodage est délégué aux tables `encoding_rs`
+    /// (déjà dépendance workspace via `explorer-net`) : avant,
+    /// ces labels tombaient sur `Windows1252` → mojibake
+    /// intégral sur le web patrimonial non-occidental.
+    Legacy(&'static encoding_rs::Encoding),
 }
 
 /// Taille de la fenêtre de sniffing `<meta>` (octets).
@@ -54,6 +62,7 @@ pub fn decode(bytes: &[u8], encoding: Encoding) -> String {
         Encoding::Utf16Le => decode_utf16(bytes, u16::from_le_bytes),
         Encoding::Utf16Be => decode_utf16(bytes, u16::from_be_bytes),
         Encoding::Windows1252 => decode_windows1252(bytes),
+        Encoding::Legacy(e) => e.decode_without_bom_handling(bytes).0.into_owned(),
     }
 }
 
@@ -152,12 +161,27 @@ fn read_charset_value(hay: &[u8], raw: &[u8]) -> Option<String> {
 /// Labels inconnus → `Windows1252` (défaut de fait de la spec).
 fn label_to_encoding(label: &str) -> Encoding {
     match label.to_ascii_lowercase().as_str() {
-        "utf-8" | "utf8" | "unicode-1-1-utf-8" => Encoding::Utf8,
-        "utf-16" | "utf-16le" | "utf-16l" => Encoding::Utf16Le,
-        "utf-16be" => Encoding::Utf16Be,
+        "utf-8" | "utf8" | "unicode-1-1-utf-8" => return Encoding::Utf8,
+        "utf-16" | "utf-16le" | "utf-16l" => return Encoding::Utf16Le,
+        "utf-16be" => return Encoding::Utf16Be,
+        _ => {}
+    }
+    // Table WHATWG complète (R-170) : les labels historiquement
+    // rabattus sur `Windows1252` — `shift_jis`, `euc-jp`, `gbk`,
+    // `big5`, `koi8-r`, `iso-8859-*`, `cp932`, `ms932`, `euc-kr`,
+    // `iso-2022-jp`… — obtiennent leur vrai décodeur. Les
+    // variantes utf-8/utf-16 ci-dessus restent prioritaires ;
+    // `WINDOWS_1252` est conservée sur notre décodeur maison
+    // (identique, testé — pas de casse de comportement).
+    match encoding_rs::Encoding::for_label(label.as_bytes()) {
+        Some(e) if e == encoding_rs::UTF_8 => Encoding::Utf8,
+        Some(e) if e == encoding_rs::UTF_16LE => Encoding::Utf16Le,
+        Some(e) if e == encoding_rs::UTF_16BE => Encoding::Utf16Be,
+        Some(e) if e == encoding_rs::WINDOWS_1252 => Encoding::Windows1252,
+        Some(e) => Encoding::Legacy(e),
         // windows-1252 couvre la famille latin-1/ascii (WHATWG) et
         // sert de repli pour tout label non reconnu.
-        _ => Encoding::Windows1252,
+        None => Encoding::Windows1252,
     }
 }
 

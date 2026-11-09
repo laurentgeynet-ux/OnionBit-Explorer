@@ -12,3 +12,12 @@ workspace = true
 [dependencies]
 explorer-common.workspace = true
 explorer-dom.workspace = true
+# Tables WHATWG complètes des encodages legacy (Shift_JIS, EUC-JP,
+# GBK, Big5, windows-125x, KOI8-R… — R-170). Déjà dépendance du
+# workspace (`explorer-net::Response::text`) — pur Rust.
+encoding_rs.workspace = true
+
+[dev-dependencies]
+# Encodage des attendus de test (round-trip, pas de table à la
+# main — R-170).
+encoding_rs.workspace = true

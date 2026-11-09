@@ -29,6 +29,12 @@ pub(crate) struct StreamDecoder {
     /// `Content-Type`) — entre BOM et prescan `<meta>`
     /// dans l'ordre WHATWG (étape 53e).
     pub(crate) hint: Option<Encoding>,
+    /// Décodeur persistant pour les encodages legacy (R-170) —
+    /// créé par `decide`. L'état de machine vit ici, pas dans
+    /// `buf` : ISO-2022-JP change de mode (ESC $ B) au fil du
+    /// flux et un décodeur jetable repartirait en ASCII à chaque
+    /// morceau → mojibake sur les vieux sites jp.
+    pub(crate) dec: Option<encoding_rs::Decoder>,
 }
 
 impl StreamDecoder {
@@ -39,6 +45,7 @@ impl StreamDecoder {
             buf: Vec::new(),
             enc: None,
             hint,
+            dec: None,
         }
     }
 
@@ -78,6 +85,10 @@ impl StreamDecoder {
             self.hint.unwrap_or_else(|| sniff_encoding(&self.buf))
         };
         self.buf.drain(..bom_len);
+        self.dec = match enc {
+            Encoding::Legacy(e) => Some(e.new_decoder()),
+            _ => None,
+        };
         self.enc = Some(enc);
     }
 
@@ -88,6 +99,14 @@ impl StreamDecoder {
             return String::new();
         };
         let buf = std::mem::take(&mut self.buf);
+        // Encodages legacy : décodeur **persistant** — l'état de
+        // machine (ISO-2022-JP) survit aux morceaux ; les octets
+        // d'une suite incomplète restent en queue (`read`).
+        if let Some(dec) = self.dec.as_mut() {
+            let (text, rest) = legacy_decode(dec, &buf, last);
+            self.buf = rest;
+            return text;
+        }
         let (text, rest) = decode_prefix(&buf, enc, last);
         self.buf = rest;
         text
@@ -153,6 +172,36 @@ pub(crate) fn decode_prefix(buf: &[u8], enc: Encoding, last: bool) -> (String, V
                 .collect();
             (String::from_utf16_lossy(&units), buf[n..].to_vec())
         }
+        // Repli non-streamé (appelants directs) : décodeur jetable.
+        Encoding::Legacy(e) => legacy_decode(&mut e.new_decoder(), buf, last),
+    }
+}
+
+/// Boucle `decode_to_string` (R-170) : `decode_to_string` écrit
+/// dans la capacité libre de `out` et rend `OutputFull` tant
+/// qu'elle n'en a plus — `max_utf8_buffer_length` la dimensionne
+/// au pire cas, `read` fait avancer `src`. À `InputEmpty` la
+/// queue `src` restante (suite multi-octets incomplète,
+/// `last = false`) est rendue en `rest` pour le morceau suivant ;
+/// `last = true` la vide en perte tolérante (U+FFFD).
+fn legacy_decode(dec: &mut encoding_rs::Decoder, buf: &[u8], last: bool) -> (String, Vec<u8>) {
+    let mut out = String::new();
+    let mut src = buf;
+    loop {
+        let room = dec
+            .max_utf8_buffer_length(src.len())
+            .unwrap_or_else(|| src.len().saturating_mul(4).max(16));
+        out.reserve(room.max(1));
+        let (res, read, _) = dec.decode_to_string(src, &mut out, last);
+        src = &src[read..];
+        match res {
+            encoding_rs::CoderResult::InputEmpty => return (out, src.to_vec()),
+            encoding_rs::CoderResult::OutputFull => {
+                if src.is_empty() {
+                    return (out, Vec::new());
+                }
+            }
+        }
     }
 }
 
@@ -176,18 +225,21 @@ pub(crate) fn sniff_bom(bytes: &[u8]) -> (Encoding, usize) {
 /// `Windows1252`). `None` = label absent/inconnu : la
 /// priorité retombe sur l'échelon suivant (BOM, UTF-8).
 pub(crate) fn label_encoding(label: &str) -> Option<Encoding> {
-    match label
-        .trim()
-        .trim_matches(['"', '\''])
-        .to_ascii_lowercase()
-        .as_str()
-    {
+    let l = label.trim().trim_matches(['"', '\'']).to_ascii_lowercase();
+    match l.as_str() {
         "utf-8" | "utf8" | "unicode-1-1-utf-8" => Some(Encoding::Utf8),
         "utf-16" | "utf-16le" | "utf-16l" => Some(Encoding::Utf16Le),
         "utf-16be" => Some(Encoding::Utf16Be),
         "windows-1252" | "iso-8859-1" | "latin1" | "latin-1" | "ascii" | "us-ascii"
         | "iso8859-1" | "iso_8859-1" | "cp1252" => Some(Encoding::Windows1252),
-        _ => None,
+        // Tout autre label WHATWG (R-170) : `shift_jis`, `euc-jp`,
+        // `gbk`, `big5`, `euc-kr`, `iso-2022-jp`, `windows-1251`,
+        // `koi8-r`, `iso-8859-*`, `macintosh`, `x-user-defined`…
+        // — avant : `None` → la page retombait en windows-1252
+        // → mojibake intégral sur le web patrimonial non-occidental.
+        // Label inconnu → `None` : la priorité retombe sur
+        // l'échelon suivant (BOM, UTF-8/`<meta>`).
+        _ => encoding_rs::Encoding::for_label(l.as_bytes()).map(Encoding::Legacy),
     }
 }
 
@@ -316,7 +368,11 @@ mod tests {
             Some(Encoding::Windows1252)
         );
         assert_eq!(label_encoding("utf-16BE"), Some(Encoding::Utf16Be));
-        assert_eq!(label_encoding("koi8-r"), None);
+        // R-170 : `koi8-r` est désormais un vrai encodage.
+        assert_eq!(
+            label_encoding("koi8-r"),
+            Some(Encoding::Legacy(encoding_rs::KOI8_R))
+        );
     }
 
     /// Ordre WHATWG §4.4 : `charset=` transport bat `@charset`.
@@ -363,6 +419,43 @@ mod tests {
         let mut d = StreamDecoder::new(Some(Encoding::Windows1252));
         let text = d.feed(&head) + &d.finish();
         assert!(text.contains('é'), "{text:?}");
+    }
+
+    /// R-170 — un lead byte `Shift_JIS` en queue de morceau attend
+    /// le suivant : le décodeur `encoding_rs` s'arrête avant la
+    /// suite incomplète (`read` < len) au lieu d'émettre U+FFFD.
+    #[test]
+    fn stream_decoder_holds_split_legacy_seq() {
+        let (sjis, _, _) = encoding_rs::SHIFT_JIS.encode("日");
+        assert_eq!(sjis.len(), 2);
+        let mut d = StreamDecoder::new(Some(Encoding::Legacy(encoding_rs::SHIFT_JIS)));
+        let mut head = b"<x>".to_vec();
+        head.extend(std::iter::repeat_n(0x20, SNIFF_WINDOW - head.len() - 1));
+        head.push(sjis[0]); // lead byte seul en queue de morceau
+        let out = d.feed(&head);
+        assert!(out.starts_with("<x>"), "{out:?}");
+        let text = out + &d.feed(&[sjis[1]]) + &d.finish();
+        assert!(text.contains('日'), "{text:?}");
+        assert!(!text.contains('\u{FFFD}'), "{text:?}");
+    }
+
+    /// R-170 — labels WHATWG routés vers `Encoding::Legacy` ;
+    /// inconnu → `None` (l'échelon suivant décide).
+    #[test]
+    fn label_encoding_legacy() {
+        assert_eq!(
+            label_encoding("shift_jis"),
+            Some(Encoding::Legacy(encoding_rs::SHIFT_JIS))
+        );
+        assert_eq!(
+            label_encoding(" \"koi8-r\" "),
+            Some(Encoding::Legacy(encoding_rs::KOI8_R))
+        );
+        assert_eq!(
+            label_encoding("x-user-defined"),
+            Some(Encoding::Legacy(encoding_rs::X_USER_DEFINED))
+        );
+        assert_eq!(label_encoding("x-bogus"), None);
     }
 
     #[test]

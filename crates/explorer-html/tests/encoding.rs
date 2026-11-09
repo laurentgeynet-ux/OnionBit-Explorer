@@ -85,3 +85,68 @@ fn utf16_longueur_impaire_tolerant() {
     let out = decode(&[b'a', 0, b'b'], Encoding::Utf16Le);
     assert_eq!(out, "a");
 }
+
+#[test]
+fn meta_labels_legacy() {
+    // R-170 — labels WHATWG routés vers leur vrai décodeur au
+    // lieu de retomber en windows-1252.
+    assert_eq!(
+        sniff_encoding(b"<meta charset=shift_jis>"),
+        Encoding::Legacy(encoding_rs::SHIFT_JIS)
+    );
+    assert_eq!(
+        sniff_encoding(b"<meta charset='windows-1251'>"),
+        Encoding::Legacy(encoding_rs::WINDOWS_1251)
+    );
+    assert_eq!(
+        sniff_encoding(br#"<meta http-equiv="content-type" content="text/html; charset=euc-kr">"#),
+        Encoding::Legacy(encoding_rs::EUC_KR)
+    );
+    // Alias WHATWG — `ms932`, `sjis`, `cskoi8r`…
+    assert_eq!(
+        sniff_encoding(b"<meta charset=ms932>"),
+        Encoding::Legacy(encoding_rs::SHIFT_JIS)
+    );
+    // Inconnu → toujours le repli windows-1252.
+    assert_eq!(
+        sniff_encoding(b"<meta charset='x-bidule-2'>"),
+        Encoding::Windows1252
+    );
+}
+
+#[test]
+fn legacy_decode_round_trip() {
+    // R-170 — attendus encodés par la table elle-même (pas de
+    // table d'octets écrite à la main).
+    let (sjis, _, _) = encoding_rs::SHIFT_JIS.encode("日本語テスト");
+    assert_eq!(
+        decode(&sjis, Encoding::Legacy(encoding_rs::SHIFT_JIS)),
+        "日本語テスト"
+    );
+    let (cyr, _, _) = encoding_rs::WINDOWS_1251.encode("Привет мир");
+    assert_eq!(
+        decode(&cyr, Encoding::Legacy(encoding_rs::WINDOWS_1251)),
+        "Привет мир"
+    );
+    let (big5, _, _) = encoding_rs::BIG5.encode("繁體中文");
+    assert_eq!(
+        decode(&big5, Encoding::Legacy(encoding_rs::BIG5)),
+        "繁體中文"
+    );
+    // Document complet sniffé : meta sjis + corps Shift_JIS.
+    let mut doc = b"<meta charset=sjis>".to_vec();
+    doc.extend_from_slice(&sjis);
+    let (text, enc) = decode_sniffed(&doc);
+    assert_eq!(enc, Encoding::Legacy(encoding_rs::SHIFT_JIS));
+    assert!(text.contains("日本語テスト"), "{text:?}");
+}
+
+#[test]
+fn legacy_malforme_tolerant() {
+    // Lead byte Shift_JIS orphelin en fin → U+FFFD, jamais panic.
+    // (0x82 suivi de 'b' formerait une paire valide — 0x62 est
+    // dans la plage trail ; un lead seul en queue est le vrai
+    // cas malformé.)
+    let out = decode(&[b'a', 0x82], Encoding::Legacy(encoding_rs::SHIFT_JIS));
+    assert_eq!(out, "a\u{FFFD}");
+}

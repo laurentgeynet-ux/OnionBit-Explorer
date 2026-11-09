@@ -846,6 +846,7 @@ version = "0.2.0"
 dependencies = [
  "async-trait",
  "criterion",
+ "encoding_rs",
  "explorer-common",
  "explorer-css",
  "explorer-dom",
@@ -930,6 +931,7 @@ dependencies = [
 name = "explorer-html"
 version = "0.2.0"
 dependencies = [
+ "encoding_rs",
  "explorer-common",
  "explorer-dom",
 ]
