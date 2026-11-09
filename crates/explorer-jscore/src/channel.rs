@@ -47,7 +47,10 @@ pub(crate) struct PortMsg {
     pub dest: Value,
     /// Donnée clonée (structured clone).
     pub data: crate::worker::WireValue,
-    /// Realm enregistreur — livraison dans son contexte.
+    /// Realm de naissance du port destinataire — livraison
+    /// dans son contexte (pas celui du posteur : un port
+    /// atteint via un global same-origin d'un autre realm
+    /// doit décoder avec les intrinsics de son handler).
     pub ctx: crate::context::CtxId,
 }
 
@@ -75,6 +78,12 @@ fn port_method_trampoline(e: &mut Engine, _this: Value, args: &[Value]) -> JsRes
 struct PortHost {
     /// L'autre port du canal (`Value` traquée pour le GC).
     peer: RefCell<Value>,
+    /// Realm de naissance du port — la livraison se fait sous
+    /// ce contexte même si `postMessage` est appelé depuis un
+    /// autre realm same-origin (§B-104, JS-C446 : décoder
+    /// sous le posteur produisait des valeurs aux intrinsics
+    /// étrangers au handler — `instanceof` faux).
+    home: crate::context::CtxId,
     /// `close()` appelé — poste et réception deviennent no-op
     /// (spec : `postMessage` sur port désentrelacé est
     /// silencieux ; les messages en file vers un port fermé
@@ -164,19 +173,27 @@ impl Host for PortHost {
                 }
                 e.sched_tick("post.port");
                 let dest = self.peer.borrow().clone();
+                // JS-C446 — realm du port DESTINATAIRE (sa
+                // naissance), pas du posteur : `port1` posé
+                // sur un global same-origin d'un autre realm
+                // recevait des valeurs décodées avec les
+                // intrinsics du posteur (classe §B-104).
+                let ctx = match dest {
+                    Value::Obj(pid) => e
+                        .host_of(pid)
+                        .and_then(|h| h.as_any().downcast_ref::<PortHost>().map(|p| p.home))
+                        .unwrap_or_else(|| e.current_context()),
+                    _ => e.current_context(),
+                };
                 if std::env::var("EXPLORER_PORT_TRACE").is_ok() {
                     eprintln!(
                         "[port-post] dest={:?} ctx={} queue={}",
                         dest,
-                        e.current_context(),
+                        ctx,
                         e.port_msgs.len() + 1
                     );
                 }
-                e.port_msgs.push_back(PortMsg {
-                    dest,
-                    data,
-                    ctx: e.current_context(),
-                });
+                e.port_msgs.push_back(PortMsg { dest, data, ctx });
                 Ok(Some(Value::Undefined))
             }
             "close" => {
@@ -239,13 +256,16 @@ impl Engine {
     /// Champ déclaré dans `interp/mod.rs` à côté de
     /// `pending_msgs`.
     fn new_port_pair(&mut self) -> (Value, Value) {
+        let home = self.current_context();
         let h1 = Rc::new(PortHost {
             peer: RefCell::new(Value::Undefined),
+            home,
             closed: Cell::new(false),
             listeners: RefCell::new(Vec::new()),
         });
         let h2 = Rc::new(PortHost {
             peer: RefCell::new(Value::Undefined),
+            home,
             closed: Cell::new(false),
             listeners: RefCell::new(Vec::new()),
         });

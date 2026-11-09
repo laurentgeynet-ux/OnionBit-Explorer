@@ -2733,6 +2733,16 @@ impl Engine {
                 continue;
             }
             self.switch_to(msg.target);
+            // §B-104 — cible vivante mais non garée : le
+            // `switch_to` no-op livrerait sous le contexte
+            // courant (décodage aux intrinsics d'un autre
+            // realm). Même garde que `port.drop_ctx` et la
+            // boucle microtasks — drop nommé, jamais de
+            // mauvais realm.
+            if self.cur_ctx != msg.target {
+                self.sched_tick("msg.drop_ctx");
+                continue;
+            }
             n += 1;
             if tracing::enabled!(target: "dom_probe", tracing::Level::INFO) {
                 let k = ((msg.source as u64) << 40) | ((msg.target as u64) << 8) | 6u64;

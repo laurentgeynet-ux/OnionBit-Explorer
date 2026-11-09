@@ -42,16 +42,15 @@ en branche courte sans invalider les étapes courtes.
 
 ## JT-A — Quick wins : fix prêt, recettes éprouvées, décision tranchée
 
-- [ ] **JT-1. `drain_pending_msgs`/`drain_port_msgs` sous
-  le realm routé** (`channel.rs`) — même classe que
-  §B-104 (JS-C430 a corrigé la livraison worker sous
-  dernier ctx) : postMessage/MessageChannel livrent sous
-  le dernier ctx actif au lieu du ctx destinataire. **Fix
-  déjà prêt** — le premier cas réel était attendu ; vol
-  732 a nommé le latent. Si aucun site ne l'exerce au
-  prochain vol, livrer sur verrou synthétique (deux ctx,
-  message posté depuis ctx0 vers port ctx1) plutôt que
-  laisser pourrir le fix.
+- [x] **JT-1. `drain_pending_msgs`/`drain_port_msgs` sous
+  le realm routé** (`channel.rs`) — **livré (JS-C446)**.
+  Constat au code : `drain_port_msgs` switchait déjà mais
+  `PortMsg.ctx` = realm du **posteur** — `PortHost.home`
+  (naissance) routé désormais ; `drain_pending_msgs`
+  switchait sans garde → `msg.drop_ctx` ajouté (parité
+  `port.drop_ctx`/microtasks). Verrou synthétique
+  `c446_msgs_realm` ×3 — post cross-realm rouge sans fix
+  (`false|20` → `true|20`).
 - [ ] **JT-2. `DocumentFragment` constructible** —
   `illegal constructor DocumentFragment` (gitlab) :
   `[Constructor]` WebIDL absent alors que le nœud existe

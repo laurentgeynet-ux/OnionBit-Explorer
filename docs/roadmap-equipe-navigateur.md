@@ -11256,3 +11256,22 @@ un crate PIPELINE.- [x] **JS-C422. Deadline honnête — canal session ↔ budge
   appends — vrai flux live =
   l'appends reprennent ; figé =
   rester muet.
+- [x] **JS-C446 (JT-1). §B-104 côté messages —
+  livraison sous le realm destinataire, pas du
+  posteur** — `PortMsg.ctx` enregistrait
+  `current_context()` à l'émission : un
+  `MessagePort` créé dans l'iframe et posté depuis
+  le parent same-origin
+  (`frames[0].ch.port1.postMessage`) livrait ses
+  données décodées avec les intrinsics du posteur
+  → `instanceof` faux dans le handler (classe
+  exacte JS-C430, latent nommé vol 732). Fix :
+  `PortHost.home` = realm de naissance routé ;
+  `drain_pending_msgs` gagne la garde post-switch
+  `msg.drop_ctx` (parité `port.drop_ctx` et boucle
+  microtasks — cible vivante non garée = drop
+  nommé, jamais de mauvais realm). Verrous
+  `c446_msgs_realm` ×3 : post cross-realm rouge
+  sans fix (`false|20` → `true|20`), same-realm
+  et fenêtre→enfant inchangés ; c78 20/20,
+  b4 16/16, worker 16/16 verts.
