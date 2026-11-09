@@ -11256,6 +11256,46 @@ un crate PIPELINE.- [x] **JS-C422. Deadline honnête — canal session ↔ budge
   appends — vrai flux live =
   l'appends reprennent ; figé =
   rester muet.
+  **Vols 777/778 — §B-54 ph4
+  validé terrain** (daemon
+  `f64041e1`, route Tembe) :
+  famine `drain_net_done` nommée
+  par sondes (`net.dfr`/`dfs`/
+  `dfc`/`dfx` + `probe_net_arr`
+  branches dyn) — `deferred=673`
+  figé 18 passes, `NetDone`
+  iframe YouTube jamais dispatché
+  malgré `dfs fetched 200` en
+  224 ms. Fix : plancher
+  `MIN_REST_DELIVERIES=8` hors
+  budget/passe + `rest`
+  sous-ordonné structurel-avant-
+  img. **Vol 777** : `net.dfc
+  install` YouTube+Maps ~42 s,
+  `deferred` décroissant (650→
+  412), handshake `initialDelivery`
+  + `ytembeds.base` 1 Mo évalué
+  + `/youtubei` — mais `declared_n
+  =0` (env absent) → verdicts `""`
+  honnêts, pas de `<video>`.
+  **Vol 778** (`EXPLORER_MEDIA_
+  CODECS` ×12) : `isTypeSupported
+  →probably`, `mse.attach`,
+  `addSourceBuffer` ×2 (mp4a+avc1),
+  `/videoplayback` soutenu,
+  `mse.appendBuffer` réel, surface
+  `frameCtx:2` publiée (rect
+  1024×150 §B-123-bis), churn
+  SABR `id1→2` conforme, claim
+  routé ctx enfant, `GET
+  /segments` rend un vrai init
+  DASH (`ftyp`/`moov`/`soun`).
+  Reliquat à mesurer : cadence
+  drain `rest` = 8/passe sous
+  pression — si le backlog
+  `rest` reste >500 en vol long,
+  monter le plancher ou pondérer
+  la tranche fetch.
 - [x] **JS-C446 (JT-1). §B-104 côté messages —
   livraison sous le realm destinataire, pas du
   posteur** — `PortMsg.ctx` enregistrait
