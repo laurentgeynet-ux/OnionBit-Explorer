@@ -2711,6 +2711,17 @@ impl Session {
         // double jamais un garé de son onglet (FIFO strict).
         let inflight = self.net_tasks.keys().filter(|(t, _)| *t == tab).count();
         if inflight >= self.max_script_net || self.pending_script_net.iter().any(|q| q.tab == tab) {
+            // §B-122(e) — sonde `net.pend` : un fetch garé au
+            // quota/FIFO n'émet jamais de `NetDone` tant qu'il
+            // ne spawn pas — silencieux sans cette trace
+            // (dedup par hôte, vol 753 : deux GET omega
+            // invisibles pendant que le 3e répondait).
+            if tracing::enabled!(target: "media_probe", tracing::Level::INFO) {
+                let h = p.req.url.host().to_string();
+                if self.note_net_probe("pend", &h) {
+                    tracing::info!(target: "media_probe", site = "net.pend", host = %h, inflight, ctx);
+                }
+            }
             if self.pending_script_net.len() >= MAX_PENDING_FETCHES {
                 tracing::trace!(tab, handle, "file requêtes script saturée");
                 self.note_net_drop("pend_full", url);
@@ -2739,6 +2750,15 @@ impl Session {
             .as_ref()
             .map(|c| c.unsafe_headers.clone())
             .unwrap_or_default();
+        // §B-122(e) — `net.go` : le fetch quitte la file/
+        // l'émission et devient une tâche vivante — borne le
+        // silencieux « jamais spawné » face à « jamais revenu ».
+        if tracing::enabled!(target: "media_probe", tracing::Level::INFO) {
+            let h = req_url.host().to_string();
+            if self.note_net_probe("go", &h) {
+                tracing::info!(target: "media_probe", site = "net.go", host = %h, handle);
+            }
+        }
         let j = tokio::spawn(async move {
             let out = fetch_maybe_data(&tr, &p.req).await;
             let _ = tx.send(NetDone {
@@ -3838,6 +3858,23 @@ impl Session {
                 continue;
             }
             self.net_tasks.remove(&(d.tab, d.handle));
+            // §B-122(e) — `net.arr` : chaque `NetDone` arrivé
+            // nomme hôte+issue — comble le trou entre
+            // `fetch.send`/`net.go` et `net.fail` (un succès
+            // livré était invisible entre deux tallys).
+            if tracing::enabled!(target: "media_probe", tracing::Level::INFO) {
+                let h = d.req_url.host().to_string();
+                let tag = match &d.out {
+                    Ok(r) => format!("{h}|ok:{}", r.status),
+                    Err(e) => format!("{h}|err:{}", net_err_kind(e)),
+                };
+                if self.note_net_probe("arr", &tag) {
+                    match &d.out {
+                        Ok(r) => tracing::info!(target: "media_probe", site = "net.arr", host = %h, ok = true, status = r.status, handle = d.handle),
+                        Err(e) => tracing::info!(target: "media_probe", site = "net.arr", host = %h, ok = false, kind = net_err_kind(e), handle = d.handle),
+                    }
+                }
+            }
             // `Set-Cookie` capturé : same-origin sauf
             // `credentials:omit` ; cross-origin sous `include`
             // seulement (étape 126 — le transport a déjà exigé
