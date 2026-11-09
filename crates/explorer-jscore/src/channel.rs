@@ -377,7 +377,16 @@ impl Engine {
                 self.sched_tick("port.drop_host");
                 continue;
             };
-            let data = self.wire_decode(&m.data)?;
+            let data = match self.wire_decode(&m.data) {
+                Ok(d) => d,
+                Err(e) => {
+                    if std::env::var("EXPLORER_PORT_TRACE").is_ok() {
+                        eprintln!("[port-throw-decode] dest={:?} err={:?}", m.dest, e);
+                    }
+                    self.sched_tick("port.throw_decode");
+                    return Err(e);
+                }
+            };
             let ev = self.new_object();
             crate::dom_host::event_proto(self, ev, "MessageEvent");
             let ty = self.str_val("message");
@@ -395,12 +404,28 @@ impl Engine {
             // ici l'IDL précède, déviation mineure).
             if let Some(cb) = self.get_prop(id, "onmessage") {
                 if self.is_callable(cb.clone()) {
-                    self.call_value(cb, m.dest.clone(), std::slice::from_ref(&evv))?;
+                    if let Err(e) =
+                        self.call_value(cb, m.dest.clone(), std::slice::from_ref(&evv))
+                    {
+                        if std::env::var("EXPLORER_PORT_TRACE").is_ok() {
+                            eprintln!("[port-throw-cb] dest={:?} err={:?}", m.dest, e);
+                        }
+                        self.sched_tick("port.throw_cb");
+                        return Err(e);
+                    }
                 }
             }
             for f in listeners {
                 if self.is_callable(f.clone()) {
-                    self.call_value(f, m.dest.clone(), std::slice::from_ref(&evv))?;
+                    if let Err(e) =
+                        self.call_value(f, m.dest.clone(), std::slice::from_ref(&evv))
+                    {
+                        if std::env::var("EXPLORER_PORT_TRACE").is_ok() {
+                            eprintln!("[port-throw-lis] dest={:?} err={:?}", m.dest, e);
+                        }
+                        self.sched_tick("port.throw_lis");
+                        return Err(e);
+                    }
                 }
             }
             n += 1;
