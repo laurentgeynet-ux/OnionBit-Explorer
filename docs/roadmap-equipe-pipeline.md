@@ -3090,11 +3090,12 @@ scroll interne `overflow:auto`) est loguée au journal.
   journalée : `frameset`→grille d'iframes, image maps
   `usemap`, `:hover`/`:focus` session, `overflow:auto`
   scrollbars, `a[name]` ancres.
-- [ ] **R-169. `counter-*`/`counter()` dans `content`** :
-  `counter-reset`/`counter-increment`/`counter(name)` —
-  sous-système dédié (portée par élément, incrément
-  implicite des `list-item` déjà porté par
-  `marker_ordinal`).
+- [x] **R-169. `counter-*`/`counter()` dans `content`** :
+  `compute_counter_envs` (pré-passe doc-order, reset→
+  increment→snapshot ; portée aplatis) via worker
+  `build_box_tree_env` ; `counter(name[,style])` +
+  `counters()` résolus — `decimal`/`alpha`/`roman`.
+  Verrou increment+reset.
 
 ## Palier R-B — Contenu étranger, animation, canvas
 

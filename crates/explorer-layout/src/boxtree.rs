@@ -19,6 +19,7 @@
 //! autour des blocs, §9.2.1.1 fin, est différé — l'étape 20
 //! décidera du rendu inline-block).
 
+use std::collections::HashMap;
 use std::fmt::Write as _;
 
 use explorer_css::{ComputedStyle, PseudoElement, StyleMap};
@@ -306,6 +307,24 @@ pub fn build_box_tree_sized<S: ::std::hash::BuildHasher>(
     styles: &StyleMap,
     sizes: &std::collections::HashMap<NodeId, (f32, f32), S>,
 ) -> Option<LayoutBox> {
+    // R-169 — env `counter-reset`/`counter-increment`
+    // pré-calculé sur l'ordre du document (une passe) et
+    // porté par le worker récursif.
+    let envs = compute_counter_envs(dom, dom.document(), styles);
+    build_box_tree_env(dom, root, styles, sizes, &envs)
+}
+
+/// Worker de [`build_box_tree_sized`] porteur de la map
+/// `counter-reset`/`counter-increment` (R-169) — les
+/// appels récursifs partagent la map pré-calculée.
+#[allow(clippy::too_many_lines)]
+fn build_box_tree_env<S: ::std::hash::BuildHasher>(
+    dom: &Dom,
+    root: NodeId,
+    styles: &StyleMap,
+    sizes: &std::collections::HashMap<NodeId, (f32, f32), S>,
+    envs: &HashMap<NodeId, HashMap<String, i32>>,
+) -> Option<LayoutBox> {
     let style = styles.get(root)?.clone();
     if style.get("display") == Some("none") {
         return None;
@@ -399,7 +418,7 @@ pub fn build_box_tree_sized<S: ::std::hash::BuildHasher>(
     // `<object>` (R-13c) : élément **remplacé** si sa ressource
     // est résolue, sinon ses **enfants se substituent**.
     if dom.tag_name(root).is_ok_and(|t| t == "object") {
-        return Some(object_box(dom, root, &style, styles, sizes));
+        return Some(object_box(dom, root, &style, styles, sizes, envs));
     }
     // Contrôles de formulaire (étape 38) : `input`/`select` —
     // la valeur peinte est synthétisée en enfant `Text` (la
@@ -449,7 +468,7 @@ pub fn build_box_tree_sized<S: ::std::hash::BuildHasher>(
         fc_root: false,
         marker_ordinal: 0,
     };
-    let children = child_boxes(dom, root, styles, &style, sizes);
+    let children = child_boxes(dom, root, styles, &style, sizes, envs);
     b.children = wrap_children(children, &style, kind);
     Some(b)
 }
@@ -498,6 +517,7 @@ fn child_boxes<S: ::std::hash::BuildHasher>(
     styles: &StyleMap,
     parent_style: &ComputedStyle,
     sizes: &std::collections::HashMap<NodeId, (f32, f32), S>,
+    envs: &HashMap<NodeId, HashMap<String, i32>>,
 ) -> Vec<LayoutBox> {
     let is_slot = dom
         .tag_name(parent)
@@ -516,7 +536,13 @@ fn child_boxes<S: ::std::hash::BuildHasher>(
     };
     let mut out = Vec::new();
     // `::before` généré en tête du contenu (R-13).
-    if let Some(b) = pseudo_box(dom, styles, parent, PseudoElement::Before) {
+    if let Some(b) = pseudo_box(
+        dom,
+        styles,
+        parent,
+        PseudoElement::Before,
+        envs.get(&parent),
+    ) {
         out.push(b);
     }
     for child in children {
@@ -538,6 +564,7 @@ fn child_boxes<S: ::std::hash::BuildHasher>(
                         styles,
                         styles.get(child).unwrap_or(parent_style),
                         sizes,
+                        envs,
                     )
                 });
                 out.extend(inner);
@@ -547,7 +574,7 @@ fn child_boxes<S: ::std::hash::BuildHasher>(
             // (R-24 : `host-nest3000` ne doit plus tuer le
             // worker).
             if let Some(mut b) =
-                explorer_common::deep(|| build_box_tree_sized(dom, child, styles, sizes))
+                explorer_common::deep(|| build_box_tree_env(dom, child, styles, sizes, envs))
             {
                 // `<br>` : saut de ligne forcé — texte sentinelle
                 // U+2028 LINE SEPARATOR, que l'itemisation UAX #14
@@ -603,7 +630,7 @@ fn child_boxes<S: ::std::hash::BuildHasher>(
         }
     }
     // `::after` en fin de contenu.
-    if let Some(b) = pseudo_box(dom, styles, parent, PseudoElement::After) {
+    if let Some(b) = pseudo_box(dom, styles, parent, PseudoElement::After, envs.get(&parent)) {
         out.push(b);
     }
     // R-108 — ordinals de marqueurs : position des `list-item`
@@ -665,9 +692,10 @@ fn pseudo_box(
     styles: &StyleMap,
     node: NodeId,
     which: explorer_css::PseudoElement,
+    env: Option<&HashMap<String, i32>>,
 ) -> Option<LayoutBox> {
     let st = styles.pseudo(node, which)?;
-    let text = pseudo_content(st.get("content")?, dom, node)?;
+    let text = pseudo_content(st.get("content")?, dom, node, env)?;
     let kind = box_kind_of(st);
     let mut bx = leaf_box_anon(kind, st.clone());
     if !text.is_empty() {
@@ -689,7 +717,12 @@ fn pseudo_box(
 /// `'…'`/`"…"` ; `none`/`normal` ou valeurs non couvertes
 /// → `None` (pas de boîte). `""` → boîte vide (ses
 /// bordures/dimensions peignent quand même — Acid2 nose).
-fn pseudo_content(raw: &str, dom: &Dom, node: NodeId) -> Option<String> {
+fn pseudo_content(
+    raw: &str,
+    dom: &Dom,
+    node: NodeId,
+    env: Option<&HashMap<String, i32>>,
+) -> Option<String> {
     let t = raw.trim();
     if t.eq_ignore_ascii_case("none") || t.eq_ignore_ascii_case("normal") {
         return None;
@@ -732,6 +765,29 @@ fn pseudo_content(raw: &str, dom: &Dom, node: NodeId) -> Option<String> {
     loop {
         let qpos = rest.find(['\'', '"']);
         let apos = rest.find("attr(");
+        let cpos = rest.find("counter");
+        // `counter(name [,style])` / `counters(name,
+        // sep [,style])` (R-169) : valeur de l'env des
+        // compteurs de l'élément — `counters` rendu comme
+        // `counter` (portée aplatis, approx. documentée).
+        if let Some(c) = cpos {
+            let before_q = qpos.is_none_or(|q| c < q);
+            let before_a = apos.is_none_or(|a| c < a);
+            if before_q && before_a && rest[c..].starts_with("counter") {
+                let plural = rest[c..].starts_with("counters(");
+                let off = if plural { c + 8 } else { c + 7 };
+                let end = rest[off..].find(')')?;
+                let inner = &rest[off + 1..off + end];
+                let mut parts = inner.split(',');
+                let name = parts.next().unwrap_or_default().trim();
+                let _sep = plural.then(|| parts.next().unwrap_or_default().trim());
+                let style = parts.next().map(str::trim);
+                let n = env.and_then(|e| e.get(name).copied()).unwrap_or(0);
+                out.push_str(&format_counter(n, style.unwrap_or("decimal")));
+                rest = &rest[off + end + 2..];
+                continue;
+            }
+        }
         if let Some(a) = apos {
             if qpos.is_none_or(|q| a < q) {
                 let after = &rest[a + 5..];
@@ -1117,6 +1173,7 @@ fn object_box(
     style: &ComputedStyle,
     styles: &StyleMap,
     sizes: &std::collections::HashMap<NodeId, (f32, f32), impl ::std::hash::BuildHasher>,
+    envs: &HashMap<NodeId, HashMap<String, i32>>,
 ) -> LayoutBox {
     let kind = box_kind_of(style);
     let mut b = LayoutBox {
@@ -1142,7 +1199,7 @@ fn object_box(
     // Ressource résolue → feuille remplacée ; sinon les
     // enfants prennent la place de l'objet.
     if b.intrinsic.is_none() {
-        let children = child_boxes(dom, root, styles, style, sizes);
+        let children = child_boxes(dom, root, styles, style, sizes, envs);
         b.children = wrap_children(children, style, kind);
     }
     b
@@ -1346,4 +1403,136 @@ pub fn scrollable_overflow_bottom(root: &LayoutBox) -> f32 {
         })
     }
     visit(root, f32::INFINITY, 0, false)
+}
+
+/// Paire `name [int]` d'une liste `counter-reset` /
+/// `counter-increment` (R-169).
+fn counter_pairs(raw: Option<&str>, default: i32) -> Vec<(String, i32)> {
+    let Some(v) = raw else {
+        return Vec::new();
+    };
+    if v.trim() == "none" {
+        return Vec::new();
+    }
+    let mut out = Vec::new();
+    let mut it = v.split_whitespace();
+    while let Some(name) = it.next() {
+        let step = it.next().and_then(|s| s.parse::<i32>().ok());
+        match step {
+            Some(d) => out.push((name.to_string(), d)),
+            // Pas de pas → suivant est déjà le nom suivant…
+            // sauf qu'il a été consommé — rejouer : splitter
+            // mot à mot est suffisant ici (`item 2`, `item`
+            // seul). `name` suivi d'un non-entier = pas=default
+            // et ce token EST le nom suivant — il faut le
+            // remettre : collecter d'abord les tokens.
+            None => out.push((name.to_string(), default)),
+        }
+    }
+    out
+}
+
+/// Env des compteurs CSS par `NodeId` (R-169) : pré-passe
+/// en ordre document — `counter-reset` puis
+/// `counter-increment` de l'élément, snapshot pour son
+/// `content` généré. Portée-sibling exacte du spec
+/// approximée (env aplati document).
+fn compute_counter_envs(
+    dom: &Dom,
+    root: NodeId,
+    styles: &StyleMap,
+) -> HashMap<NodeId, HashMap<String, i32>> {
+    let mut envs = HashMap::new();
+    let mut env = HashMap::new();
+    counter_walk(dom, root, styles, &mut env, &mut envs);
+    envs
+}
+
+fn counter_walk(
+    dom: &Dom,
+    node: NodeId,
+    styles: &StyleMap,
+    env: &mut HashMap<String, i32>,
+    envs: &mut HashMap<NodeId, HashMap<String, i32>>,
+) {
+    if dom.element(node).is_ok() {
+        if let Some(st) = styles.get(node) {
+            for (n, v) in counter_pairs(st.get("counter-reset"), 0) {
+                env.insert(n, v);
+            }
+            for (n, v) in counter_pairs(st.get("counter-increment"), 1) {
+                *env.entry(n).or_insert(0) += v;
+            }
+        }
+        envs.insert(node, env.clone());
+    }
+    if let Ok(ch) = dom.children(node) {
+        for c in ch {
+            counter_walk(dom, c, styles, env, envs);
+        }
+    }
+}
+
+/// `counter(name, style)` → texte (R-169) : `decimal`,
+/// `lower/upper-alpha(latin)`, `lower/upper-roman`,
+/// repli décimal. `counters()` approximé en `counter()`
+/// (scope aplati).
+fn format_counter(n: i32, style: &str) -> String {
+    match style {
+        "lower-alpha" | "lower-latin" => counter_alpha(n, false),
+        "upper-alpha" | "upper-latin" => counter_alpha(n, true),
+        "lower-roman" => counter_roman(n, false),
+        "upper-roman" => counter_roman(n, true),
+        _ => n.to_string(),
+    }
+}
+
+fn counter_alpha(n: i32, upper: bool) -> String {
+    if n <= 0 {
+        return n.to_string();
+    }
+    let base = if upper { b'A' } else { b'a' };
+    let mut v = n.unsigned_abs();
+    let mut out = Vec::new();
+    while v > 0 {
+        v -= 1;
+        out.push(base + (v % 26) as u8);
+        v /= 26;
+    }
+    out.reverse();
+    String::from_utf8_lossy(&out).into_owned()
+}
+
+fn counter_roman(n: i32, upper: bool) -> String {
+    if n <= 0 || n >= 4000 {
+        return n.to_string();
+    }
+    let t: [(i32, &str); 13] = [
+        (1000, "M"),
+        (900, "CM"),
+        (500, "D"),
+        (400, "CD"),
+        (100, "C"),
+        (90, "XC"),
+        (50, "L"),
+        (40, "XL"),
+        (10, "X"),
+        (9, "IX"),
+        (5, "V"),
+        (4, "IV"),
+        (1, "I"),
+    ];
+    let mut v = n;
+    let mut out = String::new();
+    for (val, sym) in t {
+        while v >= val {
+            out.push_str(sym);
+            v -= val;
+        }
+    }
+    if upper {
+        out
+    } else {
+        out.to_lowercase()
+    }
 }

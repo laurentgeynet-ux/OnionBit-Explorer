@@ -788,3 +788,33 @@ fn attr_dans_content_pseudo() {
         "attr(href) absent du texte généré : {found:?}"
     );
 }
+
+/// R-169 — `counter-reset`/`counter-increment`/`counter()` :
+/// la valeur de l'env des compteurs entre dans `content`
+/// (incrément par élément, reset à zéro).
+#[test]
+fn counter_increment_reset_dans_content() {
+    let (dom, bx) = laid_w(
+        "<!doctype html><div><h2>a</h2><h2>b</h2></div>",
+        "body { margin: 0 } div { counter-reset: ch 0 } \
+         h2 { counter-increment: ch } h2::before { content: counter(ch) \". \" } h2 { margin: 0 }",
+        800.0,
+    );
+    let texts = || -> Vec<String> {
+        let mut out = Vec::new();
+        let mut stack = vec![bx.clone()];
+        while let Some(b) = stack.pop() {
+            if let Some(t) = &b.text {
+                out.push(t.clone());
+            }
+            stack.extend(b.children.iter().cloned());
+        }
+        out
+    };
+    let all = texts().join("");
+    assert!(
+        all.contains("1. ") && all.contains("2. "),
+        "compteurs : {all:?}"
+    );
+    let _ = dom;
+}
