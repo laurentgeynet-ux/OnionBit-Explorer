@@ -147,14 +147,7 @@ surface minimale — jamais un stub qui ment.
   (`it.return()` sur break/throw, spec §13.7.5.14).
   Arrays/TA/strings gardent `iter_values`. Verrous
   `c456_forof_lazy` ×4.
-- [ ] **JT-13. `import()` `inline:` non routé** ×2
-  (vimeo 697) — JS-C414 a livré le repli du **referrer**
-  `inline:N` → page ; le résidu est le specifier
-  `import("inline:…")` **lui-même** non routé vers le
-  registre des modules inline (`module.rs` — le
-  parse/routage est jscore, pas NAV). Verrous :
-  `c414_*` existants conservés + cas specifier inline
-  résolu vers la source garée.
+- [x] **JT-13. `import()` `inline:` (vimeo 697)** — **livré (JS-C457)** : hit `module_urls`/`module_specs` avant `load_source` — réimport par URL opaque sans fetch. Verrou `c457_import_inline_url`.
 - [ ] **JT-14. `for..of` eager (vol 722)** — divergence
   nommée : reprendre le cas minimal du rapport de vol.
   Suspect de classe connue : l'héritage eager documenté

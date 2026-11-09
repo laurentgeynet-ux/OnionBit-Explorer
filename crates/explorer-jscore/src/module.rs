@@ -365,6 +365,21 @@ impl Engine {
     /// une `DynImportReq` part dans `drain_dyn_imports`.
     pub(crate) fn dynamic_import(&mut self, spec: &str, referrer: &str) -> JsResult<Value> {
         tracing::debug!(spec, referrer, "import() dynamique");
+        // JS-C457 — module déjà instancié sous cette URL :
+        // `import('inline:N')` (vimeo — réimport par l'URL
+        // opaque du `<script type=module>` évalué) ne part
+        // JAMAIS au fetch, `load_source` le ferait mourir
+        // en « schéma non supporté » sur `DynImportReq`.
+        // Identité = `module_urls` (canonique) puis
+        // `module_specs` (orthographe du specifier).
+        let resolved = self.resolve_bare(spec).unwrap_or_else(|| spec.to_string());
+        if let Some(&idx) = self
+            .module_urls
+            .get(&resolved)
+            .or_else(|| self.module_specs.get(spec))
+        {
+            return Ok(self.module_ns_object(idx));
+        }
         match self.load_source(spec, referrer) {
             Ok((url, src)) => {
                 let idx = self.instantiate(spec, &url, &src, 0)?;

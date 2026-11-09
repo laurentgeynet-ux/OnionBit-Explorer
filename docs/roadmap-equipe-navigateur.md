@@ -11380,3 +11380,8 @@ un crate PIPELINE.- [x] **JS-C422. Deadline honnête — canal session ↔ budge
   n'appelait jamais `it.return()`. `next()`-par-tour
   + `return()` sur break/throw (spec §13.7.5.14) ;
   arrays/TA/strings inchangés. `c456_forof_lazy` ×4.
+- [x] **JS-C457 (JT-13). `import('inline:N')` — hit
+  registre avant fetch** — vimeo : réimport par URL
+  opaque → `DynImportReq` « schéma non supporté ».
+  `module_urls`/`module_specs` consultés d'abord
+  (identité JS-C95). Verrou `c457_import_inline_url`.
