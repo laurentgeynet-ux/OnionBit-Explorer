@@ -3951,6 +3951,155 @@ fn drain_net_done_priorise_les_fetch() {
     );
 }
 
+/// §B-54 ph4 (explore.org vol 776) — anti-famine : sous
+/// pression continue de fetch/XHR, chaque passe épuisait le
+/// budget sur eux et re-deferrait tout le `rest` à l'infini
+/// (`deferred=673` constant — le `NetDone` du `<iframe>`
+/// youtube-video enterré derrière ~600 `<img>` n'atteignait
+/// jamais le dispatch). Deux garanties :
+/// 1. plancher `MIN_REST_DELIVERIES` items `rest` livrés par
+///    passe même budget épuisé (progression bornée) ;
+/// 2. `rest` structurel (link/script/module/import/frame)
+///    ordonné avant les images — la masse `<img>` ne noie
+///    plus les livraisons qui installent un document.
+#[test]
+fn drain_net_done_plancher_rest_anti_famine() {
+    use std::sync::Mutex;
+    use std::time::Instant;
+
+    struct StarveNet {
+        order: Arc<Mutex<Vec<String>>>,
+    }
+    impl explorer_js::JsEngine for StarveNet {
+        fn eval(&mut self, _src: &str) -> Result<String, explorer_js::JsError> {
+            Ok("undefined".to_string())
+        }
+        fn deliver_net_response(
+            &mut self,
+            resp: explorer_js::NetResponse,
+        ) -> Result<(), explorer_js::JsError> {
+            self.order
+                .lock()
+                .unwrap()
+                .push(format!("fetch:{}", resp.handle));
+            Ok(())
+        }
+        fn deliver_dyn_img(&mut self, _ctx: explorer_js::JsCtxId, seq: u64, _ok: bool) {
+            self.order.lock().unwrap().push(format!("img:{seq}"));
+        }
+        fn deliver_dyn_link(&mut self, _ctx: explorer_js::JsCtxId, seq: u64, _ok: bool) {
+            self.order.lock().unwrap().push(format!("link:{seq}"));
+        }
+        fn set_budget(&mut self, _ops: u64) {}
+    }
+
+    let mut s = Session::with_config(
+        Arc::new(FailTransport),
+        Arc::new(TestFont),
+        SessionConfig::default(),
+    );
+    let tab = s.open_tab();
+    let order = Arc::new(Mutex::new(Vec::new()));
+    {
+        let e = s.tabs.get_mut(&tab).expect("tab");
+        e.url = Some(Url::parse("https://x.test/").expect("url"));
+        e.js = Some(Box::new(StarveNet {
+            order: order.clone(),
+        }));
+    }
+    let page = Url::parse("https://x.test/").expect("page");
+    let mk = |handle: u64| NetDone {
+        tab,
+        handle,
+        cross: false,
+        mode: explorer_net::http::FetchMode::Cors,
+        credentials: explorer_net::http::FetchCredentials::Omit,
+        page_origin: "https://x.test".to_string(),
+        cors_unsafe: Vec::new(),
+        req_url: page.clone(),
+        partition: None,
+        out: Err(explorer_net::error::NetError::InvalidResponse(
+            "t".to_string(),
+        )),
+        script: None,
+        frame: None,
+        img: None,
+        link: None,
+        dyn_module: None,
+        import: None,
+    };
+    let n_imgs = super::net::MIN_REST_DELIVERIES + 3;
+    let mut batch: Vec<NetDone> = (0..3).map(mk).collect();
+    for seq in 10..(10 + n_imgs as u64) {
+        let mut d = mk(100 + seq);
+        d.img = Some(super::net_items::DynImgMeta {
+            ctx: explorer_js::JS_CTX_TOP,
+            seq,
+            src_key: format!("i{seq}"),
+            url: page.clone(),
+            page: page.clone(),
+        });
+        batch.push(d);
+    }
+    // Le `<link>` arrive en DERNIER — le sous-ordonnancement
+    // `rest` le fait passer avant toute la masse `<img>`.
+    let mut link = mk(200);
+    link.link = Some(super::net_items::DynLinkMeta {
+        ctx: explorer_js::JS_CTX_TOP,
+        seq: 99,
+        integrity: None,
+        media: None,
+        url: page.clone(),
+        page: page.clone(),
+    });
+    batch.push(link);
+    // Budget déjà épuisé : les fetch sont reportés, le
+    // plancher livre quand même `MIN_REST_DELIVERIES` items
+    // rest — `link` d'abord (structurel avant images).
+    s.drain_net_done(
+        batch,
+        Instant::now()
+            .checked_sub(std::time::Duration::from_secs(60))
+            .expect("instant passé"),
+    );
+    let got = order.lock().unwrap().clone();
+    assert_eq!(
+        got.len(),
+        super::net::MIN_REST_DELIVERIES,
+        "exactement le plancher rest servi hors budget"
+    );
+    assert_eq!(
+        got[0],
+        "link:99".to_string(),
+        "structurel livré avant les images malgré son arrivée en queue"
+    );
+    assert!(
+        got[1..].iter().all(|e| e.starts_with("img:")),
+        "le reste du plancher = images FIFO"
+    );
+    // Reportés : les 3 fetch (en tête, ordre conservé) puis
+    // les images excédentaires.
+    let n_deferred = 3 + n_imgs - (super::net::MIN_REST_DELIVERIES - 1);
+    assert_eq!(s.pending_net_done.len(), n_deferred);
+    assert!(s
+        .pending_net_done
+        .iter()
+        .take(3)
+        .all(|d| d.img.is_none() && d.link.is_none() && d.frame.is_none()));
+    assert!(s.pending_net_done.iter().skip(3).all(|d| d.img.is_some()));
+    // La passe suivante (budget frais) poursuit la vidange
+    // — `poll_net` relivre `pending_net_done` en tête : les
+    // fetch reportés passent d'abord, puis le reste du rest.
+    let n = s.poll_net();
+    assert_eq!(n, n_deferred);
+    assert!(s.pending_net_done.is_empty());
+    let got2 = order.lock().unwrap().clone();
+    assert!(
+        got2.iter().any(|e| e == "fetch:0"),
+        "fetch reporté relivré à la passe suivante"
+    );
+}
+
 /// §B-54 ph3 (explore.org vol 769) — un `NetDone` arrivé
 /// libère son slot `max_script_net` **à l'arrivée**
 /// (`net_tasks` vidé en tête de `poll_net`), pas à la

@@ -45,6 +45,13 @@ const MAX_HELD_FETCHES: usize = 512;
 /// borne (file saturée — exhaustion réelle), rejet sec
 /// `pend_full`, livré `status: 0` comme avant.
 pub(crate) const MAX_PENDING_FETCHES: usize = 1_024;
+/// §B-54 ph4 — plancher anti-famine `rest` par passe
+/// `drain_net_done` : les fetch/XHR priment (ph2), mais sous
+/// pression continue chaque passe épuisait le budget sur eux
+/// et les sous-ressources (frames/imgs/scripts/modules/
+/// imports) étaient re-deferrées indéfiniment. Les premiers
+/// items `rest` passent hors budget — borne par décompte.
+pub(crate) const MIN_REST_DELIVERIES: usize = 8;
 /// URLs suivies par le streak §B-60 : borne mémoire — une
 /// page balayant des milliers d'URL distinctes ne fait pas
 /// gonfler la map (les nouvelles URLs passent sans streak).
@@ -1274,6 +1281,15 @@ impl Session {
         // `<iframe>` : fetch puis realm enfant —
         // `commit_dyn_frame` à la réponse.
         for d in dyn_frames {
+            // §B-122(g) — `net.dfr` : chaque requête cadre
+            // dynamique arrivée nomme son src — borne le
+            // silencieux « jamais émise par le moteur » face
+            // aux rejets aval (`net.dfx`).
+            let epoch = self.tabs.get(&tab).map(|e| e.nav_epoch).unwrap_or(0);
+            let tag = format!("{}|{}|e{}", d.src.as_deref().unwrap_or(""), d.seq, epoch);
+            if self.note_net_probe("dfr", &tag) {
+                tracing::info!(target: "media_probe", site = "net.dfr", src = %d.src.as_deref().unwrap_or(""), seq = d.seq, epoch);
+            }
             self.spawn_dyn_frame(tab, page, base, &d);
         }
         // `<img>` : source choisie (`srcset`/`sizes`/dpr ou
@@ -1927,6 +1943,14 @@ impl Session {
         let Some((req_page, req_base, doc_policy, csp, _opaque)) =
             self.ctx_net_origin(tab, d.ctx, page, base)
         else {
+            // §B-122(g) — `net.dfx` : rejet nommé (origine
+            // ctx perdue) — avant, `deliver(false)` était
+            // invisible (vol 773 : iframe shadow YouTube).
+            let epoch = self.tabs.get(&tab).map(|e| e.nav_epoch).unwrap_or(0);
+            let tag = format!("ctx|{}|e{}", d.seq, epoch);
+            if self.note_net_probe("dfx", &tag) {
+                tracing::info!(target: "media_probe", site = "net.dfx", why = "ctx_origin", seq = d.seq, epoch);
+            }
             self.deliver_dyn_frame_el(tab, d.ctx, d.seq, false);
             return;
         };
@@ -2002,6 +2026,14 @@ impl Session {
                 )
             })
         else {
+            // §B-122(g) — `net.dfx` : rejet nommé — résolution,
+            // mixed-content ou `frame-src` CSP (suspect n°1 :
+            // la page peut borner ses cadres).
+            let epoch = self.tabs.get(&tab).map(|e| e.nav_epoch).unwrap_or(0);
+            let tag = format!("csp|{}|{}|e{}", src, d.seq, epoch);
+            if self.note_net_probe("dfx", &tag) {
+                tracing::info!(target: "media_probe", site = "net.dfx", why = "resolve_mixed_csp", src = %src, seq = d.seq, epoch);
+            }
             self.deliver_dyn_frame_el(tab, d.ctx, d.seq, false);
             return;
         };
@@ -2026,8 +2058,16 @@ impl Session {
         let tr = self.transport.clone();
         let tx = self.net_tx.clone();
         let seq = d.seq;
+        // §B-122(g) — `net.dfs` : témoin de vie de la tâche
+        // spawnée (vol 774-775 : `net.dfr` émis, `net.dfc`
+        // jamais — la tâche mourait sans laisser de trace
+        // entre le spawn et le `NetDone`).
+        let dfs_host = req_url.host().to_string();
         let j = tokio::spawn(async move {
+            tracing::info!(target: "media_probe", site = "net.dfs", phase = "start", seq, host = %dfs_host);
             let out = fetch_maybe_data(&tr, &req).await;
+            let st = out.as_ref().map(|r| r.status).unwrap_or(0);
+            tracing::info!(target: "media_probe", site = "net.dfs", phase = "fetched", seq, host = %dfs_host, status = st);
             let _ = tx.send(NetDone {
                 tab,
                 handle: seq,
@@ -2467,8 +2507,31 @@ impl Session {
             }
         }
         match got.pop() {
-            Some(sf) => self.install_dyn_frame_ctx(tab, meta, sf),
-            None => self.deliver_dyn_frame_el(tab, meta.ctx, meta.seq, false),
+            Some(sf) => {
+                // §B-122(g) — `net.dfc` : verdict ctx dyn
+                // nommé (install vs `deliver(false)` — le
+                // `error` silencieux était indistinct d'une
+                // absence de `NetDone`).
+                let epoch = self.tabs.get(&tab).map(|e| e.nav_epoch).unwrap_or(0);
+                let tag = format!("ok|{}|{}|e{}", meta.url.host(), meta.seq, epoch);
+                if self.note_net_probe("dfc", &tag) {
+                    tracing::info!(target: "media_probe", site = "net.dfc", verdict = "install", host = %meta.url.host(), seq = meta.seq, epoch);
+                }
+                self.install_dyn_frame_ctx(tab, meta, sf)
+            }
+            None => {
+                let epoch = self.tabs.get(&tab).map(|e| e.nav_epoch).unwrap_or(0);
+                let tag = format!("err|{}|{}|e{}", meta.url.host(), meta.seq, epoch);
+                if self.note_net_probe("dfc", &tag) {
+                    let why = match &out {
+                        Ok(r) if !(200..300).contains(&r.status) => "status",
+                        Ok(_) => "security",
+                        Err(_) => "transport",
+                    };
+                    tracing::info!(target: "media_probe", site = "net.dfc", verdict = "reject", why, host = %meta.url.host(), seq = meta.seq, epoch);
+                }
+                self.deliver_dyn_frame_el(tab, meta.ctx, meta.seq, false)
+            }
         }
     }
 
@@ -3990,63 +4053,97 @@ impl Session {
                 && d.link.is_none()
                 && d.import.is_none()
         });
-        let mut it = fetches.into_iter().chain(rest);
-        while let Some(mut d) = it.next() {
-            if !self.poll_net_budget.is_zero() && start.elapsed() > self.poll_net_budget {
-                let mut deferred = 1;
+        // §B-54 ph4 — sous-ordonnancement `rest` : les
+        // livraisons structurelles (frames, scripts, modules,
+        // imports, links) passent avant les images — la masse
+        // des `<img>` (~600 items/passe mesurée vol 776 sur
+        // explore.org) noyait sinon tout ce qui suit.
+        let (structural, light): (Vec<NetDone>, Vec<NetDone>) =
+            rest.into_iter().partition(|d| d.img.is_none());
+        let n_fetches = fetches.len();
+        let mut it = fetches
+            .into_iter()
+            .chain(structural)
+            .chain(light)
+            .enumerate();
+        let mut rest_served = 0usize;
+        let mut deferred = 0usize;
+        while let Some((i, mut d)) = it.next() {
+            // §B-54 ph4 — plancher anti-famine : sous pression
+            // continue (snapshot polling explore.org ~10 rafales/
+            // min), chaque passe épuisait son budget sur les
+            // fetch → les classes `rest` étaient re-deferrées à
+            // l'infini (`deferred=673` constant, vol 776 : le
+            // `NetDone` du `<iframe>` youtube-video n'est jamais
+            // arrivé au dispatch). Les `MIN_REST_DELIVERIES`
+            // premiers items `rest` passent hors budget — coût
+            // borné par décompte, progression garantie. On ne
+            // `break` plus : le reste de la file est dépilé en
+            // O(n) pour conserver l'ordre des reportés.
+            let in_rest = i >= n_fetches;
+            let rest_floor = in_rest && rest_served < MIN_REST_DELIVERIES;
+            if !rest_floor
+                && !self.poll_net_budget.is_zero()
+                && start.elapsed() > self.poll_net_budget
+            {
+                deferred += 1;
                 self.pending_net_done.push_back(d);
-                for rest in it {
-                    deferred += 1;
-                    self.pending_net_done.push_back(rest);
-                }
-                tracing::warn!(
-                    deferred,
-                    budget_ms = self.poll_net_budget.as_millis(),
-                    "poll_net : livraisons différées à la prochaine passe (B-54)"
-                );
-                break;
+                continue;
+            }
+            if in_rest {
+                rest_served += 1;
             }
             // `<script>` dynamique (CAP-169) — la tâche vit
             // dans `dyn_tasks` (son `handle` est le `seq`
             // moteur, espace distinct des handles fetch) :
             // sécurité sous-ressource + SRI, décodage puis
             // livraison `load`/`error` sur l'élément.
+            // §B-122(g) — `probe_net_arr` s'applique aussi aux
+            // branches dyn : un `NetDone` frame/img/script
+            // était sinon totalement invisible (vol 774 :
+            // le fetch youtube.com/embed sans témoin).
             if let Some(meta) = d.script.take() {
+                self.probe_net_arr(&d);
                 self.deliver_dyn_done(&d, &meta);
                 continue;
             }
             // `<script type="module">` dynamique (CAP-186) —
             // graphe rempli hors session, `eval_module_graph`
             // puis `load`/`error` sur l'élément.
-            if let Some(dm) = d.dyn_module {
+            if let Some(dm) = d.dyn_module.take() {
                 self.dyn_tasks.remove(&(d.tab, dm.seq));
+                self.probe_net_arr(&d);
                 self.deliver_dyn_module(d.tab, dm);
                 continue;
             }
             // `<iframe>` dynamique (CAP-171) — `handle` = `seq`
             // moteur, espace distinct des handles fetch.
-            if let Some(meta) = d.frame {
+            if let Some(meta) = d.frame.take() {
                 self.dyn_tasks.remove(&(d.tab, meta.seq));
+                self.probe_net_arr(&d);
                 self.commit_dyn_frame_resp(d.tab, &meta, &d.out);
                 continue;
             }
             // `<img>` dynamique (CAP-172) — même convention
             // `handle` = `seq` moteur.
-            if let Some(meta) = d.img {
+            if let Some(meta) = d.img.take() {
                 self.dyn_tasks.remove(&(d.tab, meta.seq));
+                self.probe_net_arr(&d);
                 self.commit_dyn_img(d.tab, meta, &d.out);
                 continue;
             }
             // `<link>` dynamique (CAP-173) — même convention.
-            if let Some(meta) = d.link {
+            if let Some(meta) = d.link.take() {
                 self.dyn_tasks.remove(&(d.tab, meta.seq));
+                self.probe_net_arr(&d);
                 self.commit_dyn_link(d.tab, &meta, &d.out);
                 continue;
             }
             // `import()` dynamique (JS-C100) — corps livré au
             // moteur (instancier+évaluer+résoudre la promesse).
-            if let Some(meta) = d.import {
+            if let Some(meta) = d.import.take() {
                 self.dyn_tasks.remove(&(d.tab, meta.seq));
+                self.probe_net_arr(&d);
                 self.commit_dyn_import(d.tab, &meta, &d.out);
                 continue;
             }
@@ -4121,6 +4218,14 @@ impl Session {
             if self.enqueue_net_response(d.tab, resp) && !touched.contains(&d.tab) {
                 touched.push(d.tab);
             }
+        }
+        if deferred > 0 {
+            tracing::warn!(
+                deferred,
+                rest_served,
+                budget_ms = self.poll_net_budget.as_millis(),
+                "poll_net : livraisons différées à la prochaine passe (B-54)"
+            );
         }
         for tab in touched {
             self.finish_net_turn(tab);
