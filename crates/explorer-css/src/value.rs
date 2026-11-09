@@ -687,6 +687,7 @@ pub fn expand_shorthand(name: &str, value: &str) -> Option<Vec<(String, String)>
         "background" => expand_background(value),
         "font" => expand_font(value),
         "list-style" => expand_list_style(value),
+        "outline" => Some(expand_outline(value)),
         _ => None,
     }
 }
@@ -1221,6 +1222,39 @@ fn expand_font(value: &str) -> Option<Vec<(String, String)>> {
 }
 
 /// `list-style` : chaque composante va à son longhand.
+/// `outline` shorthand → `outline-width`/`-style`/`-color`
+/// — tokens indépendants d'ordre (comme `border` : longueur
+/// → width, mot-clé de style → style, couleur → color) ;
+/// tokens excédentaires ignorés.
+fn expand_outline(value: &str) -> Vec<(String, String)> {
+    const STYLES: &[&str] = &[
+        "solid", "dotted", "dashed", "double", "groove", "ridge", "inset", "outset", "none",
+        "hidden",
+    ];
+    let mut out = Vec::new();
+    let mut pos = 0usize;
+    for tok in value.split_whitespace() {
+        let t = tok.to_ascii_lowercase();
+        if STYLES.contains(&t.as_str()) {
+            out.push(("outline-style".to_string(), t));
+        } else if parse_length(tok).is_some() {
+            out.push(("outline-width".to_string(), tok.to_string()));
+        } else {
+            // `rgb(255, 0, 0)` contient des espaces — la
+            // queue complète depuis ce token va au parser
+            // couleur (comme `parse_drop_shadow`).
+            let tail = value[pos..].trim();
+            if let Some(c) = parse_color(tail) {
+                let _ = c;
+                out.push(("outline-color".to_string(), tail.to_string()));
+            }
+            break;
+        }
+        pos += tok.len() + 1;
+    }
+    out
+}
+
 fn expand_list_style(value: &str) -> Option<Vec<(String, String)>> {
     let mut out = Vec::new();
     for part in value.split_whitespace() {

@@ -3097,6 +3097,22 @@ scroll interne `overflow:auto`) est loguée au journal.
   `counters()` résolus — `decimal`/`alpha`/`roman`.
   Verrou increment+reset.
 
+- [x] **R-170. Encodages legacy WHATWG via `encoding_rs`** —
+  la chaîne charset ne connaissait que UTF-8/UTF-16/1252 :
+  `shift_jis`/`euc-jp`/`gbk`/`big5`/`euc-kr`/`iso-2022-jp`/
+  `windows-125x`/`koi8-r`/`iso-8859-*`/`macintosh` retombaient
+  en 1252 → mojibake intégral (premier trou du palier R-L en
+  réalité — le corpus est latin-centré, les sites jp/cn/kr/ru
+  étaient illisibles de bout en bout). Livré : `Encoding::Legacy
+  (&'static encoding_rs::Encoding)` additif ; `label_to_encoding`
+  via `for_label` (alias WHATWG complets), variantes historiques
+  conservées ; session : `Decoder` persistant dans
+  `StreamDecoder` (état ISO-2022-JP entre morceaux), `label_encoding`
+  même repli, `legacy_decode` borné `max_utf8_buffer_length`.
+  Retouche bornée `explorer-core` journalisée (décodage =
+  surface NAV consommant la nouvelle variante PIPE). Verrous ×5
+  (round-trip tables, paire SJIS coupée, labels, malformés).
+
 ## Palier R-M — Rendu web moderne
 
 Trous restants pour les sites récents : `flex`/`grid`/`var()`
@@ -3149,6 +3165,10 @@ la dette, pas le layout.
   sous `rect` reçoit les ops puis le contenu se peint
   par-dessus (offscreen composité — même mécanique
   R-M5). Verrou ops + ordre + `none`.
+- [x] **R-M13. `outline` peint** : anneau
+  `Border` hors border box (`outline-offset`
+  + `-width`, shorthand expansé, `none`
+  inerte). Verrou rect étendu + none.
 - [x] **R-M12. `@supports` évalué** : fin
   du `unknown:true` toujours-vrai —
   `(prop:val)`/`not`/`and`/`or` parseés et

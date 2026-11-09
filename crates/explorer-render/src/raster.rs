@@ -1165,10 +1165,7 @@ fn apply_pixel_op(buf: &mut Pixmap, op: &FilterOp) {
                 lum + (b - lum) * s,
                 a,
             ),
-            // `DropShadow` : inatteignable — `apply_filter_ops`
-            // le route vers `apply_drop_shadow`. `Blur` est
-            // appliqué en amont par `box_blur` séparable.
-            FilterOp::DropShadow { .. } | FilterOp::Blur(_) => (r, g, b, a),
+            FilterOp::Blur(_) | FilterOp::DropShadow { .. } => (r, g, b, a),
             FilterOp::HueRotate(d) => {
                 let rad = d.to_radians();
                 let (c1, c2) = (rad.cos(), rad.sin());
@@ -1185,6 +1182,7 @@ fn apply_pixel_op(buf: &mut Pixmap, op: &FilterOp) {
                     a,
                 )
             }
+
         };
         c[0] = nr.clamp(0.0, 255.0) as u8;
         c[1] = ng.clamp(0.0, 255.0) as u8;

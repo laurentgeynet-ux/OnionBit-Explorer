@@ -2654,6 +2654,36 @@ fn paint_self(
             radii: corner_radii(&bx.style, &rect),
         });
     }
+    // `outline` (R-M13) : anneau autour de la bordure, sans
+    // emprise au layout — peint hors border box à
+    // `outline-offset` + `outline-width` de l'edge externe.
+    // Style `none` → rien ; épaisseur initiale `medium` = 3 px
+    // (même convention que border). Rayons suivis via
+    // `corner_radii` sur le rect étendu.
+    if !anonymous && !inline_flow {
+        let ow_style = border_style(bx.style.get("outline-style"));
+        if !matches!(ow_style, BorderStyle::None) {
+            let ow = prop_px(&bx.style, "outline-width", 3.0).max(0.0);
+            let off = prop_px(&bx.style, "outline-offset", 0.0);
+            if ow > 0.0 {
+                let grow = ow + off;
+                let orect = Rect {
+                    x: rect.x - grow,
+                    y: rect.y - grow,
+                    width: rect.width + 2.0 * grow,
+                    height: rect.height + 2.0 * grow,
+                };
+                let oc = border_color_of(&bx.style, "outline-color");
+                items.push(DisplayItem::Border {
+                    rect: orect,
+                    widths: [ow; 4],
+                    colors: [oc; 4],
+                    styles: [ow_style; 4],
+                    radii: corner_radii(&bx.style, &orect),
+                });
+            }
+        }
+    }
     // (Les fragments `bx.lines` sont émis par `paint_lines`,
     // appelée dans la zone clippée — voir `paint_box` / R-55.)
     // Contrôle coché (`checkbox`/`radio`, étape 38) : marque

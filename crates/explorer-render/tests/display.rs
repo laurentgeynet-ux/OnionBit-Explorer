@@ -2519,3 +2519,49 @@ fn drop_shadow_parsee_et_bracket() {
         None => panic!("pas de PushFilter"),
     }
 }
+
+/// R-M13 — `outline` : anneau `Border` émis hors border
+/// box, offset + width, sans emprise au layout ; `none`
+/// inerte ; shorthand `outline:` expansé.
+#[test]
+fn outline_emis_hors_border_box() {
+    let (_d, _b, items) = dl(
+        "<div>x</div>",
+        "div { width: 100px; height: 50px; outline: 2px solid rgb(255, 0, 0) }",
+    );
+    let b = items
+        .iter()
+        .find(|i| matches!(i, DisplayItem::Border { .. }));
+    match b {
+        Some(DisplayItem::Border {
+            rect,
+            widths,
+            colors,
+            styles,
+            ..
+        }) => {
+            assert_eq!(widths, &[2.0; 4], "outline-width uniforme : {widths:?}");
+            assert_eq!(rect.x, -2.0, "rect étendu de l'offset+width : {rect:?}");
+            assert_eq!(rect.width, 104.0, "largeur étendue : {rect:?}");
+            assert_eq!(colors[0].r, 255, "outline-color");
+            assert!(
+                styles
+                    .iter()
+                    .all(|s| *s != explorer_render::display::BorderStyle::None),
+                "styles peints : {styles:?}"
+            );
+        }
+        _ => panic!("pas de Border outline : {items:?}"),
+    }
+    // `none` → rien.
+    let (_d2, _b2, items2) = dl(
+        "<div>x</div>",
+        "div { width: 100px; height: 50px; outline-style: none }",
+    );
+    assert!(
+        !items2
+            .iter()
+            .any(|i| matches!(i, DisplayItem::Border { .. })),
+        "none → aucun item"
+    );
+}
