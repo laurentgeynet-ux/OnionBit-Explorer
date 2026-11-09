@@ -2115,6 +2115,42 @@ impl StyleEngine {
         //    flex moderne — la prop moderne déclarée prime
         //    (injection seulement si absente).
         legacy_flex_aliases(&mut props);
+        // 11. `subgrid` (R-196) : le grid item hérite le
+        //    `grid-template-*` **déclaré** de son parent grid
+        //    (MVP — approximations documentées : pas de
+        //    contribution des items du sous-grid au sizing
+        //    des pistes parent, pas de trim au span réel ;
+        //    la chaîne subgrid→subgrid fonctionne, le
+        //    template résolu cascade). Parent non-grid →
+        //    `none` (spec : subgrid sans parent grid = none).
+        for axis in ["grid-template-columns", "grid-template-rows"] {
+            if props
+                .get(axis)
+                .is_some_and(|v| v.trim().eq_ignore_ascii_case("subgrid"))
+            {
+                let parent_is_grid = parent.is_some_and(|p| {
+                    p.get("display")
+                        .is_some_and(|d| matches!(d, "grid" | "inline-grid"))
+                });
+                // Le parent a lui-même `subgrid` ? Sa valeur
+                // est déjà résolue amont (compute_tree est
+                // top-down) → la copie propage la liste
+                // héritée ; littéral `subgrid` résiduel →
+                // `none` (pas de grid ancêtre).
+                let inherited = if parent_is_grid {
+                    parent
+                        .and_then(|p| p.get(axis))
+                        .map(|v| v.trim().to_string())
+                        .filter(|v| !v.eq_ignore_ascii_case("subgrid"))
+                } else {
+                    None
+                };
+                props.insert(
+                    axis.to_string(),
+                    inherited.unwrap_or_else(|| "none".to_string()),
+                );
+            }
+        }
         ComputedStyle { props, vars }
     }
 

@@ -3228,3 +3228,45 @@ fn basefont_hints_racine_quirks_seulement() {
         "standards : basefont inerte"
     );
 }
+
+/// R-196 — `grid-template-*: subgrid` : l'item-grid hérite le
+/// template déclaré du parent grid ; parent non-grid → `none`.
+#[test]
+fn subgrid_herite_template_parent() {
+    let dom =
+        TreeBuilder::parse("<div id=p><div id=s><b>x</b></div><div id=n><b>y</b></div></div>");
+    let find = |id: &str| {
+        let mut st: Vec<explorer_dom::NodeId> =
+            dom.children(dom.document()).into_iter().flatten().collect();
+        while let Some(n) = st.pop() {
+            if dom.attribute_str(n, "id").ok().flatten() == Some(id) {
+                return Some(n);
+            }
+            st.extend(dom.children(n).into_iter().flatten());
+        }
+        None
+    };
+    let (p, s, n) = (find("p").unwrap(), find("s").unwrap(), find("n").unwrap());
+    let mut eng = StyleEngine::new();
+    eng.add_css(
+        "#p{display:grid;grid-template-columns:100px 1fr}\
+         #s{display:grid;grid-template-columns:subgrid}\
+         #n{grid-template-rows:subgrid}",
+        Origin::Author,
+    );
+    let map = eng.compute_tree(&dom, p, &env());
+    assert_eq!(
+        map.get(s).and_then(|c| c.get("grid-template-columns")),
+        Some("100px 1fr"),
+        "sous-grid hérite les pistes parent"
+    );
+    // `#n` n'est pas dans un contexte grid parent pour les
+    // lignes : le parent #p est grid → hérite aussi les rows
+    // du parent (absents → `none`… template parent sans rows
+    // explicites → None).
+    assert_eq!(
+        map.get(n).and_then(|c| c.get("grid-template-rows")),
+        Some("none"),
+        "pas de template parent pour rows → none"
+    );
+}

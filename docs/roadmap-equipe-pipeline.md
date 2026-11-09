@@ -3503,9 +3503,13 @@ déblocage/coût décroissant.
   imbriquées ; la cascade itère le bloc comme groupe
   ordinaire. `@starting-style` reporté (inerte sans
   transitions R-119). Verrous `scope_*` ×4 (`tests/parser.rs`).
-- [ ] **R-196. `subgrid`** : pistes imbriquées héritées —
-  documenté hors scope de la livraison grid MVP ; fréquence
-  terrain faible, extension algo circonscrite.
+- [x] **R-196. `subgrid`** : résolution à la cascade
+  (`explorer-css` `cascade.rs` — l'item-grid hérite le
+  `grid-template-*` déclaré de son parent grid ; chaîne
+  subgrid→subgrid propagée ; parent non-grid → `none`).
+  Approximations MVP documentées : pas de contribution des
+  items du sous-grid au sizing des pistes parent, pas de
+  trim au span réel. Verrou `subgrid_herite_template_parent`.
 - [ ] **R-198. Portée ancêtre dans les files différées +
   `clip-path` des descendants positionnés** : descendants
   `abs`/`fixed` peints hors du `PushClip` ancêtre (audit —
