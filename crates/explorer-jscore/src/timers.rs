@@ -362,6 +362,30 @@ fn timer_set_timeout(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Valu
     let ms = delay_ms(e, args.get(1).cloned())?;
     let cb_args = args.get(2..).unwrap_or(&[]).to_vec();
     e.sched_tick("post.timer");
+    // Sonde §B-122 — `EXPLORER_TIMER_SRC=1` nomme le producteur
+    // d'une tempête de timers : stack JS bornée (4 frames),
+    // dédupliquée par empreinte — un posteur en boucle se dénonce
+    // en une ligne au lieu de 1,3 M de `job-trace`.
+    if std::env::var_os("EXPLORER_TIMER_SRC").is_some() {
+        let stack: String = e
+            .stack_text("", "")
+            .lines()
+            .map(str::trim)
+            .filter(|l| l.starts_with("at "))
+            .take(4)
+            .collect::<Vec<_>>()
+            .join(" <- ");
+        let stack: String = stack.chars().take(400).collect();
+        static SEEN: std::sync::LazyLock<std::sync::Mutex<std::collections::HashSet<u64>>> =
+            std::sync::LazyLock::new(|| std::sync::Mutex::new(std::collections::HashSet::new()));
+        let mut h = 0xcbf29ce484222325u64;
+        for b in stack.as_bytes() {
+            h = (h ^ u64::from(*b)).wrapping_mul(0x100000001b3);
+        }
+        if SEEN.lock().map(|mut s| s.insert(h)).unwrap_or(false) {
+            eprintln!("[timer-src] ms={ms} {stack}");
+        }
+    }
     let id = e.timers.schedule(cb, ms, false, cb_args);
     Ok(Value::Num(id as f64))
 }
