@@ -8579,24 +8579,38 @@ impl Host for NodeHost {
                             "removeChild: node is not a child",
                         )));
                     }
-                    // §B-120 — premier retrait d'un enfant de
-                    // `body`/`html`/`#document` : la stack JS
-                    // nomme le vidage de page (React
-                    // `clearContainer`, `clearBody`…) — bornée
-                    // 8 frames aplaties, dédup `probe_seen`.
+                    // §B-120 — retraits d'enfants de
+                    // `body`/`html`/`#document` : la stack JS +
+                    // le verbatim de la fonction en tête de pile
+                    // nomment chaque vidage de page ($RV, React
+                    // `clearContainer`, `clearBody`…) — jusqu'à
+                    // 12 occurrences par parent (le premier
+                    // retrait seul cachait les vidages
+                    // suivants), stack bornée 8 frames aplaties.
                     if tracing::enabled!(target: "dom_probe", tracing::Level::INFO) {
                         let fire = {
                             let mut d = self.dom.borrow_mut();
                             let ptag = d.nodes[node as usize].tag.clone();
-                            if matches!(ptag.as_str(), "body" | "html" | "#document")
-                                && d.ce.probe_seen.insert(format!("dk:{ptag}"))
-                            {
-                                Some((ptag, d.nodes[child as usize].tag.clone()))
-                            } else {
-                                None
+                            let mut slot = None;
+                            if matches!(ptag.as_str(), "body" | "html" | "#document") {
+                                for i in 0..12u8 {
+                                    if d.ce.probe_seen.insert(format!("dk:{ptag}:{i}")) {
+                                        slot = Some(i);
+                                        break;
+                                    }
+                                }
                             }
+                            slot.map(|i| {
+                                let cid = d
+                                    .attr(child, "id")
+                                    .unwrap_or("")
+                                    .chars()
+                                    .take(48)
+                                    .collect::<String>();
+                                (ptag, d.nodes[child as usize].tag.clone(), i, cid)
+                            })
                         };
-                        if let Some((ptag, ctag)) = fire {
+                        if let Some((ptag, ctag, seq, cid)) = fire {
                             let stack: String = e
                                 .stack_text("", "")
                                 .lines()
@@ -8631,7 +8645,8 @@ impl Host for NodeHost {
                             let fn_src = e.stack_top_fn_src(400);
                             tracing::info!(target: "dom_probe",
                                 site = "dom.kill", parent = %ptag,
-                                child = %ctag, cur = %cur, stack = %stack,
+                                seq = seq, child = %ctag, cid = %cid,
+                                cur = %cur, stack = %stack,
                                 fn_src = %fn_src);
                         }
                     }
