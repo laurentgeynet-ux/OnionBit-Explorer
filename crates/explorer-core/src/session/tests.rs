@@ -853,6 +853,72 @@ fn doc_lifecycle_replays_after_detached_pump() {
     );
 }
 
+#[test]
+fn doc_lifecycle_buffered_step_precedes_live_dispatch() {
+    // §B-118 — un événement documentaire tamponné pendant un
+    // détachement doit sortir AVANT tout dispatch live
+    // ultérieur : `DOMContentLoaded` tamponné, le moteur
+    // réinstallé par la voie directe (`entry.js = eng`,
+    // net.rs — sans le drain de `commit_js_pump`), puis
+    // `load` dispatché en live. Avant le fix : `load` passait
+    // devant `DOMContentLoaded` (hydrate Next avant init →
+    // pluto noir).
+    let mut s = Session::new(Arc::new(FailTransport), Arc::new(TestFont));
+    s.set_js_factory(explorer_js::JscoreEngine::factory());
+    let tab = s.open_tab();
+    let html = "<!doctype html><html><body><div id=\"x\"></div></body></html>";
+    let eng = s.spawn_engine(tab, html, true, "");
+    {
+        let e = s.tabs.get_mut(&tab).unwrap();
+        let mut tb = TreeBuilder::new();
+        tb.push(html);
+        tb.finish();
+        e.dom = Some(tb.into_dom());
+        e.url = Some(Url::parse("http://h.test/lco").unwrap());
+        e.js = eng;
+    }
+    let _ = s.tabs.get_mut(&tab).and_then(|e| e.js.as_mut()).map(|eng| {
+        eng.eval(
+            "var __log='';\
+             document.addEventListener('DOMContentLoaded',function(){__log+='D';});\
+             window.addEventListener('load',function(){__log+='L';});",
+        )
+    });
+
+    // Détachement → `DOMContentLoaded` tamponne.
+    let (eng, _budget, epoch, sync_ok) = s.take_js_engine(tab).unwrap();
+    s.dispatch_doc_event(tab, "DOMContentLoaded");
+    assert_eq!(
+        s.tabs.get(&tab).unwrap().pending_doc_lifecycle.len(),
+        1,
+        "DCL tamponné pendant le détachement"
+    );
+
+    // Réinsertion par la voie directe (commit head — pas de
+    // drain de cycle de vie), puis dispatch live de `load`.
+    {
+        let e = s.tabs.get_mut(&tab).unwrap();
+        e.js = Some(eng);
+        e.js_detached = None;
+    }
+    let _ = epoch;
+    let _ = sync_ok;
+    s.dispatch_doc_event(tab, "load");
+
+    let out = s
+        .tabs
+        .get_mut(&tab)
+        .and_then(|e| e.js.as_mut())
+        .and_then(|eng| eng.eval("__log").ok())
+        .unwrap_or_default();
+    assert_eq!(
+        out.trim(),
+        "DL",
+        "le DCL tamponné sort avant le `load` live : {out}"
+    );
+    assert!(s.tabs.get(&tab).unwrap().pending_doc_lifecycle.is_empty());
+}
+
 /// Trou de liveness dyn-subresources : `<link rel=stylesheet>`
 /// inséré par JS ne devait son fetch qu'à `after_script`
 /// (gate `jobs>0` de la pompe) — une page qui marque le lien
@@ -3841,6 +3907,7 @@ fn drain_net_done_mutualise_le_tour_post_script() {
 /// (file réseau vs pipeline rendu — l'ordre intra-groupe
 /// reste FIFO).
 #[test]
+#[allow(clippy::too_many_lines)]
 fn drain_net_done_priorise_les_fetch() {
     use std::sync::Mutex;
     use std::time::Instant;
@@ -3963,6 +4030,7 @@ fn drain_net_done_priorise_les_fetch() {
 ///    ordonné avant les images — la masse `<img>` ne noie
 ///    plus les livraisons qui installent un document.
 #[test]
+#[allow(clippy::too_many_lines)]
 fn drain_net_done_plancher_rest_anti_famine() {
     use std::sync::Mutex;
     use std::time::Instant;

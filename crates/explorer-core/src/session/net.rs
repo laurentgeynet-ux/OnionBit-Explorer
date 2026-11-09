@@ -686,7 +686,7 @@ impl Session {
         // silencieux « jamais drainée » face aux goulots
         // d'aval (`net.pend`/`net.held`/`net.drop`/`net.go`).
         if tracing::enabled!(target: "media_probe", tracing::Level::INFO) {
-            let epoch = self.tabs.get(&tab).map(|e| e.nav_epoch).unwrap_or(0);
+            let epoch = self.tabs.get(&tab).map_or(0, |e| e.nav_epoch);
             for r in &reqs {
                 let (kind, handle, host) = match r {
                     NetRequest::Fetch { handle, url, .. } => {
@@ -1285,7 +1285,7 @@ impl Session {
             // dynamique arrivée nomme son src — borne le
             // silencieux « jamais émise par le moteur » face
             // aux rejets aval (`net.dfx`).
-            let epoch = self.tabs.get(&tab).map(|e| e.nav_epoch).unwrap_or(0);
+            let epoch = self.tabs.get(&tab).map_or(0, |e| e.nav_epoch);
             let tag = format!("{}|{}|e{}", d.src.as_deref().unwrap_or(""), d.seq, epoch);
             if self.note_net_probe("dfr", &tag) {
                 tracing::info!(target: "media_probe", site = "net.dfr", src = %d.src.as_deref().unwrap_or(""), seq = d.seq, epoch);
@@ -1946,7 +1946,7 @@ impl Session {
             // §B-122(g) — `net.dfx` : rejet nommé (origine
             // ctx perdue) — avant, `deliver(false)` était
             // invisible (vol 773 : iframe shadow YouTube).
-            let epoch = self.tabs.get(&tab).map(|e| e.nav_epoch).unwrap_or(0);
+            let epoch = self.tabs.get(&tab).map_or(0, |e| e.nav_epoch);
             let tag = format!("ctx|{}|e{}", d.seq, epoch);
             if self.note_net_probe("dfx", &tag) {
                 tracing::info!(target: "media_probe", site = "net.dfx", why = "ctx_origin", seq = d.seq, epoch);
@@ -2029,7 +2029,7 @@ impl Session {
             // §B-122(g) — `net.dfx` : rejet nommé — résolution,
             // mixed-content ou `frame-src` CSP (suspect n°1 :
             // la page peut borner ses cadres).
-            let epoch = self.tabs.get(&tab).map(|e| e.nav_epoch).unwrap_or(0);
+            let epoch = self.tabs.get(&tab).map_or(0, |e| e.nav_epoch);
             let tag = format!("csp|{}|{}|e{}", src, d.seq, epoch);
             if self.note_net_probe("dfx", &tag) {
                 tracing::info!(target: "media_probe", site = "net.dfx", why = "resolve_mixed_csp", src = %src, seq = d.seq, epoch);
@@ -2062,11 +2062,11 @@ impl Session {
         // spawnée (vol 774-775 : `net.dfr` émis, `net.dfc`
         // jamais — la tâche mourait sans laisser de trace
         // entre le spawn et le `NetDone`).
-        let dfs_host = req_url.host().to_string();
+        let dfs_host = req_url.host().clone();
         let j = tokio::spawn(async move {
             tracing::info!(target: "media_probe", site = "net.dfs", phase = "start", seq, host = %dfs_host);
             let out = fetch_maybe_data(&tr, &req).await;
-            let st = out.as_ref().map(|r| r.status).unwrap_or(0);
+            let st = out.as_ref().map_or(0, |r| r.status);
             tracing::info!(target: "media_probe", site = "net.dfs", phase = "fetched", seq, host = %dfs_host, status = st);
             let _ = tx.send(NetDone {
                 tab,
@@ -2506,32 +2506,29 @@ impl Session {
                 );
             }
         }
-        match got.pop() {
-            Some(sf) => {
-                // §B-122(g) — `net.dfc` : verdict ctx dyn
-                // nommé (install vs `deliver(false)` — le
-                // `error` silencieux était indistinct d'une
-                // absence de `NetDone`).
-                let epoch = self.tabs.get(&tab).map(|e| e.nav_epoch).unwrap_or(0);
-                let tag = format!("ok|{}|{}|e{}", meta.url.host(), meta.seq, epoch);
-                if self.note_net_probe("dfc", &tag) {
-                    tracing::info!(target: "media_probe", site = "net.dfc", verdict = "install", host = %meta.url.host(), seq = meta.seq, epoch);
-                }
-                self.install_dyn_frame_ctx(tab, meta, sf)
+        if let Some(sf) = got.pop() {
+            // §B-122(g) — `net.dfc` : verdict ctx dyn
+            // nommé (install vs `deliver(false)` — le
+            // `error` silencieux était indistinct d'une
+            // absence de `NetDone`).
+            let epoch = self.tabs.get(&tab).map_or(0, |e| e.nav_epoch);
+            let tag = format!("ok|{}|{}|e{}", meta.url.host(), meta.seq, epoch);
+            if self.note_net_probe("dfc", &tag) {
+                tracing::info!(target: "media_probe", site = "net.dfc", verdict = "install", host = %meta.url.host(), seq = meta.seq, epoch);
             }
-            None => {
-                let epoch = self.tabs.get(&tab).map(|e| e.nav_epoch).unwrap_or(0);
-                let tag = format!("err|{}|{}|e{}", meta.url.host(), meta.seq, epoch);
-                if self.note_net_probe("dfc", &tag) {
-                    let why = match &out {
-                        Ok(r) if !(200..300).contains(&r.status) => "status",
-                        Ok(_) => "security",
-                        Err(_) => "transport",
-                    };
-                    tracing::info!(target: "media_probe", site = "net.dfc", verdict = "reject", why, host = %meta.url.host(), seq = meta.seq, epoch);
-                }
-                self.deliver_dyn_frame_el(tab, meta.ctx, meta.seq, false)
+            self.install_dyn_frame_ctx(tab, meta, sf);
+        } else {
+            let epoch = self.tabs.get(&tab).map_or(0, |e| e.nav_epoch);
+            let tag = format!("err|{}|{}|e{}", meta.url.host(), meta.seq, epoch);
+            if self.note_net_probe("dfc", &tag) {
+                let why = match &out {
+                    Ok(r) if !(200..300).contains(&r.status) => "status",
+                    Ok(_) => "security",
+                    Err(_) => "transport",
+                };
+                tracing::info!(target: "media_probe", site = "net.dfc", verdict = "reject", why, host = %meta.url.host(), seq = meta.seq, epoch);
             }
+            self.deliver_dyn_frame_el(tab, meta.ctx, meta.seq, false);
         }
     }
 
@@ -2894,7 +2891,7 @@ impl Session {
             // `|e{epoch}` : un handle réutilisé par le moteur
             // suivant doit reloguer — sinon un `net.go` du
             // reload est invisible (même trou que `net.drq`).
-            let epoch = self.tabs.get(&tab).map(|e| e.nav_epoch).unwrap_or(0);
+            let epoch = self.tabs.get(&tab).map_or(0, |e| e.nav_epoch);
             let key = format!("{h}|{handle}|e{epoch}");
             if self.note_net_probe("go", &key) {
                 tracing::info!(target: "media_probe", site = "net.go", host = %h, handle, epoch);
@@ -3442,7 +3439,7 @@ impl Session {
         // `|e{epoch}` : un même (handle, statut) au cycle de
         // vie suivant doit reloguer — la dedup sans epoch
         // rendait le reload invisible (vol 770-771).
-        let epoch = self.tabs.get(&d.tab).map(|e| e.nav_epoch).unwrap_or(0);
+        let epoch = self.tabs.get(&d.tab).map_or(0, |e| e.nav_epoch);
         let tag = match &d.out {
             Ok(r) => format!("{h}|{}|ok:{}|e{}", d.handle, r.status, epoch),
             Err(e) => format!("{h}|{}|err:{}|e{}", d.handle, net_err_kind(e), epoch),
@@ -4026,6 +4023,9 @@ impl Session {
     /// `pending_net_done` (ordre conservé, relivrés en tête à
     /// la passe suivante) au lieu de tenir le verrou session
     /// sur une rafale de livraisons multi-secondes.
+    // §B-54 ph4 : la passe unique fetch→rest→dyn garde le
+    // flux linéaire — pas de découpe naturelle.
+    #[allow(clippy::too_many_lines)]
     pub(crate) fn drain_net_done(&mut self, done: Vec<NetDone>, start: std::time::Instant) {
         if let Ok(mut g) = crate::LAST_DRAIN.lock() {
             *g = "net_done";
@@ -4061,14 +4061,14 @@ impl Session {
         let (structural, light): (Vec<NetDone>, Vec<NetDone>) =
             rest.into_iter().partition(|d| d.img.is_none());
         let n_fetches = fetches.len();
-        let mut it = fetches
+        let it = fetches
             .into_iter()
             .chain(structural)
             .chain(light)
             .enumerate();
         let mut rest_served = 0usize;
         let mut deferred = 0usize;
-        while let Some((i, mut d)) = it.next() {
+        for (i, mut d) in it {
             // §B-54 ph4 — plancher anti-famine : sous pression
             // continue (snapshot polling explore.org ~10 rafales/
             // min), chaque passe épuisait son budget sur les
@@ -4166,21 +4166,21 @@ impl Session {
                     }
                 }
             }
-            let resp = match &d.out {
+            let net_resp = match &d.out {
                 // `no-cors` cross : livrée opaque par le moteur —
                 // `ACAO` n'est pas exigé (JS-C77 ; la lisibilité
                 // CORS ne s'applique qu'au mode `cors`).
-                Ok(resp)
+                Ok(rep)
                     if !d.cross
                         || d.mode == explorer_net::http::FetchMode::NoCors
-                        || cors_readable(&d.page_origin, resp) =>
+                        || cors_readable(&d.page_origin, rep) =>
                 {
                     NetResponse {
                         handle: d.handle,
-                        status: resp.status,
-                        status_text: resp.reason.clone(),
-                        headers: resp.headers.clone(),
-                        body: resp.body.clone(),
+                        status: rep.status,
+                        status_text: rep.reason.clone(),
+                        headers: rep.headers.clone(),
+                        body: rep.body.clone(),
                     }
                 }
                 _ => {
@@ -4202,7 +4202,7 @@ impl Session {
             // reste bornée (`MAX_STREAK_URLS`) : au-delà les
             // nouvelles URLs ne sont pas suivies.
             let key = (d.tab, d.req_url.to_string());
-            if resp.status == 0 {
+            if net_resp.status == 0 {
                 let n = self.fetch_fail_streak.get(&key).copied().unwrap_or(0);
                 if self.fetch_fail_streak.len() < MAX_STREAK_URLS
                     || self.fetch_fail_streak.contains_key(&key)
@@ -4215,7 +4215,7 @@ impl Session {
             // §B-54 — livraison sans tour : le `run_pending` +
             // resynchro + `after_script` est mutualisé en fin
             // de passe (un par onglet touché).
-            if self.enqueue_net_response(d.tab, resp) && !touched.contains(&d.tab) {
+            if self.enqueue_net_response(d.tab, net_resp) && !touched.contains(&d.tab) {
                 touched.push(d.tab);
             }
         }

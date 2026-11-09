@@ -1606,6 +1606,30 @@ impl Session {
                 }
                 return false;
             };
+            // §B-118 — ordre du cycle de vie : une étape doc
+            // tamponnée pendant un détachement doit sortir
+            // **avant** tout événement documentaire ultérieur,
+            // sinon `load` passe devant `DOMContentLoaded`
+            // (pluto : listener `load` tardif rejoué → hydrate
+            // Next avant `initialize` armé sur DCL → router
+            // undefined → hydratation morte). Le drain du
+            // flush global (l.526) arrive trop tard : on
+            // rejoue ici, juste avant le dispatch live.
+            if path.is_empty() && props.is_empty() && !entry.pending_doc_lifecycle.is_empty() {
+                for step in std::mem::take(&mut entry.pending_doc_lifecycle) {
+                    match step {
+                        types::DocLifecycle::ReadyState(ctx, s) => {
+                            eng.set_ready_state(ctx, &s);
+                        }
+                        types::DocLifecycle::Event(ctx, tty) => {
+                            if let Err(e) = eng.dispatch_event_ctx(ctx, &tty, &[]) {
+                                tracing::debug!(tab, ty = %tty, error = %e,
+                                    "replay lifecycle avant dispatch");
+                            }
+                        }
+                    }
+                }
+            }
             let p = match eng.dispatch_event_props(ty, path, props) {
                 Ok(p) => p,
                 Err(e) => {

@@ -12205,11 +12205,13 @@ fn ce_call(e: &mut Engine, el: Value, cb_name: &str, args: &[Value]) -> JsResult
                     .get_prop_value(el, "_template")
                     .ok()
                     .and_then(|t| e.get_prop_value(t, "outerHTML").ok())
-                    .map(|v| {
-                        let s = e.describe(v);
-                        s.chars().take(1600).collect::<String>()
-                    })
-                    .unwrap_or_else(|| "<none>".to_string());
+                    .map_or_else(
+                        || "<none>".to_string(),
+                        |v| {
+                            let s = e.describe(v);
+                            s.chars().take(1600).collect::<String>()
+                        },
+                    );
                 tracing::info!(target: "dom_probe", site = "ce.cc_threw",
                     tag = %tag, cb = %cb_name, "err={msg} src={src} tpl={tpl}");
             }
