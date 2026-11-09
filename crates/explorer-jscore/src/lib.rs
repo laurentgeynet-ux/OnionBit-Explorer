@@ -50,6 +50,7 @@
 mod ast;
 mod builtins;
 mod channel;
+mod cjs;
 mod cmp;
 mod collections;
 mod context;

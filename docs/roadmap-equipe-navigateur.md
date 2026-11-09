@@ -11292,3 +11292,28 @@ un crate PIPELINE.- [x] **JS-C422. Deadline honnête — canal session ↔ budge
   ctor-only `TypeError`, splice des enfants,
   chaîne proto, `getElementById` sur instance) ;
   dom 245/245, b14 52/52 verts.
+- [x] **JS-C448 (JT-3). §B-105 — globals `CommonJS`
+  en sandbox (repli sur échec)** — `module is not
+  defined` persistait sur les références nues alors
+  que les UMD gardés (`typeof exports === 'object'
+  && typeof module !== 'undefined'` — debounce/
+  chart.umd) survivent : installer les globals sur
+  le global les basculerait tous en branche CJS
+  (`window.X` jamais posé). Le sandbox est donc un
+  **repli** dans `exec_program_inner` :
+  `ReferenceError` `module`/`exports`/`require`
+  `is not defined` → re-exécution unique dans
+  `Env::local(global_env)` (= le wrapper fonction
+  de `Node` : `var` module-scope, globals par la
+  chaîne) semé de `module{exports,id,filename}`
+  (nom du script), `exports` alias, `require`
+  borné — registre `nom → module.exports` des
+  évals sandbox réussies (clé exacte puis dernier
+  segment, cap 64 FIFO, racines GC), `Error
+  Cannot find module` honnête sinon, **jamais**
+  de fetch/éval réseau. `cjs.sandbox` compté au
+  sched. Verrous `c448_umd_sandbox` ×6 (ref nue,
+  alias, garde UMD navigateur + `typeof`
+  inchangés, `require` résolu/inconnu, autre
+  `ReferenceError` intacte) ; lang 313/313,
+  lib 45/45, b105 2/2 verts.

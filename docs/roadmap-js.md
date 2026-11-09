@@ -60,20 +60,16 @@ en branche courte sans invalider les étapes courtes.
   `instanceof` gratuit via le mapping `Fragment →
   "DocumentFragment"`, chaîne `ShadowRoot` préservée.
   Verrous `c447_docfrag_ctor` ×5.
-- [ ] **JT-3. Globals CommonJS honnêtes en sandbox**
-  (résidu §B-105 — `builtins`, scope exec) —
-  `module`/`exports`/`require` : les wrappers UMD
-  survivent déjà (debounce/chart.umd) mais `module is
-  not defined` persiste sur leurs chemins CJS. Décision
-  tranchée : **globals CommonJS en sandbox** —
-  `module = {exports:{}}`, `exports = module.exports`,
-  `require` minimal borné (retourne `module.exports`
-  des deps connues, `Error` honnête sinon — **jamais**
-  de fetch/éval réseau). Scope : sandbox d'exécution,
-  pas le global de la page (le site ne doit pas voir
-  `module` comme feature-detect). Verrous : bundle UMD
-  prend la branche CJS sans throw, `require` inconnu
-  → erreur typée.
+- [x] **JT-3. Globals CommonJS honnêtes en sandbox**
+  (résidu §B-105) — **livré (JS-C448)** : repli sur
+  échec dans `exec_program_inner` — `ReferenceError`
+  `module`/`exports`/`require` → re-exec dans
+  `Env::local(global_env)` semé CJS (`module`+
+  `exports`+`require` borné, registre `nom → exports`
+  FIFO 64, `Cannot find module` honnête). Les gardes
+  `typeof` des bundles sains ne le voient jamais —
+  `typeof module` reste `"undefined"` en global.
+  Verrous `c448_umd_sandbox` ×6.
 
 ## JT-B — Gaps API miroir DOM (`dom_host.rs`) — batch sonde → fix
 

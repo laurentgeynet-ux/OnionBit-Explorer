@@ -670,6 +670,14 @@ pub struct Engine {
     /// Messages `MessageChannel` en file (JS-C81) — drainés à
     /// la même frontière de job que `pending_msgs`.
     pub(crate) port_msgs: std::collections::VecDeque<crate::channel::PortMsg>,
+    /// Registre `CommonJS` des évals sandbox (JS-C448) — clé =
+    /// nom du script (`eval_named`/`eval_script_el`, `<inline>`
+    /// sinon), valeur = `module.exports` produit. Borné
+    /// `cjs::REGISTRY_CAP`, racine GC posée à l'insert.
+    pub(crate) cjs_registry: Vec<(Rc<str>, Value)>,
+    /// Nom du script en cours d'éval — clé du registre
+    /// `cjs_registry` et `module.id`/`filename` du sandbox.
+    pub(crate) cjs_eval_name: Option<Rc<str>>,
     /// Cache des constructeurs d'interface par nom de classe
     /// (`HTMLInputElement`…) — JS-C82 : `el.constructor` typé +
     /// `.prototype` porteur des accesseurs IDL (surface
@@ -1173,6 +1181,8 @@ impl Engine {
             pending_msgs: std::collections::VecDeque::new(),
             msg_probe_seen: std::collections::HashSet::new(),
             port_msgs: std::collections::VecDeque::new(),
+            cjs_registry: Vec::new(),
+            cjs_eval_name: None,
             dom_ctors: std::collections::HashMap::new(),
             native_caller: Vec::new(),
             ctor_fresh: None,
@@ -3402,6 +3412,7 @@ impl Engine {
         let prog = parser::parse_in(src, false, self.nest_limit, None)?;
         self.note_parse(tp);
         self.emit_eval_checkpoint("", src.len());
+        self.cjs_eval_name = None;
         self.run_program(&prog)
     }
 
@@ -3418,6 +3429,7 @@ impl Engine {
         let prog = parser::parse_in(src, false, self.nest_limit, Some(std::rc::Rc::from(name)))?;
         self.note_parse(tp);
         self.emit_eval_checkpoint(name, src.len());
+        self.cjs_eval_name = Some(std::rc::Rc::from(name));
         self.run_program(&prog)
     }
 
@@ -3455,6 +3467,7 @@ impl Engine {
         if prog.is_ok() {
             self.emit_eval_checkpoint(name.unwrap_or(""), src.len());
         }
+        self.cjs_eval_name = name.map(std::rc::Rc::from);
         let r = match prog {
             Ok(p) => self.run_program(&p),
             Err(e) => Err(e),

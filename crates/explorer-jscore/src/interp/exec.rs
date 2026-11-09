@@ -82,7 +82,30 @@ impl Engine {
 
     pub(crate) fn exec_program_inner(&mut self, prog: &Program) -> JsResult<Value> {
         let env = self.global_env.clone();
-        self.exec_program_in(&env, Value::Obj(self.global), prog)
+        let this = Value::Obj(self.global);
+        let r = self.exec_program_in(&env, this.clone(), prog);
+        let Err(t) = r else {
+            return r;
+        };
+        if !self.is_cjs_ref_error(&t) {
+            return Err(t);
+        }
+        // §B-105 / JS-C448 — sandbox CommonJS : le script
+        // référence `module`/`exports`/`require` à nu.
+        // Re-exécution dans un env enfant semé des globals
+        // CJS — les scripts sains (gardes `typeof`) ne
+        // passent jamais ici : `typeof module` reste
+        // `"undefined"` pour eux (debounce/chart.umd
+        // intacts). Une seule tentative.
+        self.sched_tick("cjs.sandbox");
+        let (sandbox, module) = self.cjs_sandbox_env(&env);
+        let r2 = self.exec_program_in(&sandbox, this, prog);
+        if r2.is_ok() {
+            if let Some(exports) = self.get_prop(module, "exports") {
+                self.cjs_register_exports(exports);
+            }
+        }
+        r2
     }
 
     /// `eval(src)` **direct** (spec `PerformEval`, chemin local) :
