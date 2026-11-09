@@ -1030,7 +1030,7 @@ fn pseudo_content(
                 let style = parts.next().map(str::trim);
                 let n = env.and_then(|e| e.get(name).copied()).unwrap_or(0);
                 out.push_str(&format_counter(n, style.unwrap_or("decimal")));
-                rest = &rest[off + end + 2..];
+                rest = &rest[off + end + 1..];
                 continue;
             }
         }
@@ -1686,19 +1686,29 @@ fn counter_pairs(raw: Option<&str>, default: i32) -> Vec<(String, i32)> {
         return Vec::new();
     }
     let mut out = Vec::new();
-    let mut it = v.split_whitespace();
-    while let Some(name) = it.next() {
-        let step = it.next().and_then(|s| s.parse::<i32>().ok());
-        match step {
-            Some(d) => out.push((name.to_string(), d)),
-            // Pas de pas → suivant est déjà le nom suivant…
-            // sauf qu'il a été consommé — rejouer : splitter
-            // mot à mot est suffisant ici (`item 2`, `item`
-            // seul). `name` suivi d'un non-entier = pas=default
-            // et ce token EST le nom suivant — il faut le
-            // remettre : collecter d'abord les tokens.
-            None => out.push((name.to_string(), default)),
-        }
+    // Tokens collectés d'abord : le pas n'existe que si le
+    // token suivant PARSE en entier — sinon c'est le nom
+    // suivant (`a b 2` → `a`=0, `b`=2 ; l'ancienne version
+    // consommait `b` comme pas manqué et le perdait).
+    let toks: Vec<&str> = v.split_whitespace().collect();
+    let mut i = 0;
+    while i < toks.len() {
+        let name = toks[i];
+        let step = toks
+            .get(i + 1)
+            .and_then(|s| s.parse::<i32>().ok())
+            .unwrap_or(default);
+        out.push((name.to_string(), step));
+        // Pas présent → deux tokens consommés, sinon un.
+        i += if toks
+            .get(i + 1)
+            .and_then(|s| s.parse::<i32>().ok())
+            .is_some()
+        {
+            2
+        } else {
+            1
+        };
     }
     out
 }

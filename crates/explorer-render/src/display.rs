@@ -1174,7 +1174,7 @@ fn emit_canvas_bg(
     } else {
         ((viewport_w, viewport_h), (0.0, 0.0))
     };
-    emit_bg_layers(items, src, images, canvas, area, base);
+    emit_bg_layers(items, src, images, canvas, area, base, (0.0, 0.0));
     src.node
 }
 
@@ -1869,6 +1869,7 @@ fn emit_bg_layers(
     rect: Rect,
     area: (f32, f32),
     base: (f32, f32),
+    off: (f32, f32),
 ) {
     let style = &bx.style;
     let node = bx.node;
@@ -1996,7 +1997,10 @@ fn emit_bg_layers(
             if clip_text {
                 for fr in text_clip_rects(bx) {
                     {
-                        let f = fr;
+                        // `fr` est en coords layout —
+                        // `off` aligne le clip sur la
+                        // position peinte (rejeu décalé).
+                        let f = shifted(fr, off);
                         items.push(DisplayItem::PushClip(f));
                         items.push(DisplayItem::BackgroundImage {
                             rect: clip,
@@ -3016,7 +3020,7 @@ fn paint_self(
                     // couches image — `PushClip` par run).
                     for fr in text_clip_rects(bx) {
                         {
-                            let f = fr;
+                            let f = shifted(fr, off);
                             items.push(DisplayItem::PushClip(f));
                             items.push(DisplayItem::FillRect {
                                 rect,
@@ -3059,7 +3063,7 @@ fn paint_self(
                 (rect.x + bl, rect.y + bt),
             )
         };
-        emit_bg_layers(items, bx, images, rect, area, base);
+        emit_bg_layers(items, bx, images, rect, area, base, off);
     }
     // Bordures : 4 côtés, épaisseur > 0 et style non `none`.
     // Sémantique de `border_side_w` : la largeur ne compte que
@@ -4594,11 +4598,13 @@ fn paint_box<'a>(
             .any(|t| matches!(t, "paint" | "strict" | "content"))
     });
     if paint_contained {
-        items.push(DisplayItem::PushClip(bx.rect));
+        items.push(DisplayItem::PushClip(shifted(bx.rect, off)));
     }
     // R-187 — `clip-path` : la boîte (fond+contenu) ne se
     // peint que dans la géométrie — même pile `clips`.
-    let clip_item = clip_path_of(&bx.style, &bx.rect);
+    // `off` aligne le clip sur la position peinte
+    // (rejeu décalé), comme les autres clips.
+    let clip_item = clip_path_of(&bx.style, &shifted(bx.rect, off));
     if let Some(it) = &clip_item {
         items.push(it.clone());
     }

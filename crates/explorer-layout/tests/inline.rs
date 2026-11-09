@@ -820,6 +820,31 @@ fn counter_increment_reset_dans_content() {
     let _ = dom;
 }
 
+/// R-169 fix — `counter-reset: a b 2` : le token suivant
+/// n'est un pas que s'il PARSE en entier — sinon c'est le
+/// nom suivant. Régression post-revue : `b` était avalé
+/// comme pas manqué de `a` et un compteur « 2 » naissait.
+#[test]
+fn counter_reset_liste_sans_pas_n_avale_pas_le_nom() {
+    let (dom, bx) = laid_w(
+        "<!doctype html><div>x</div>",
+        "div { counter-reset: a b 2; margin: 0 } \
+         div::before { content: counter(a) \"/\" counter(b) }",
+        800.0,
+    );
+    let mut out = Vec::new();
+    let mut stack = vec![bx];
+    while let Some(b) = stack.pop() {
+        if let Some(t) = &b.text {
+            out.push(t.clone());
+        }
+        stack.extend(b.children.iter().cloned());
+    }
+    let all = out.join("");
+    assert!(all.contains("0/2"), "counter(a)=0 counter(b)=2 : {all:?}");
+    let _ = dom;
+}
+
 /// `line-clamp` / `-webkit-line-clamp` : ne garde que les
 /// n premières lignes + « … » sur la dernière — la hauteur
 /// de la boîte suit (mêmes lignes, mêmes fragments).
