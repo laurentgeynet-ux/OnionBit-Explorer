@@ -3416,43 +3416,65 @@ déblocage/coût décroissant.
   `backface-visibility`, `transform-box`/`transform-origin` 3D,
   `translate`/`rotate`/`scale` individuelles → aujourd'hui
   aplaties 2D.
+> **Ordonnancement (revue chef PIPELINE 2026-11-09)** : la
+> file est triée par valeur terrain / risque — les numéros
+> `R-N` restent historiques (référencés par commits et
+> CHANGELOG), **pas séquentiels**. Ordre de travail :
+> R-197 → R-189 → R-192 → R-193 → R-191 → R-195 →
+> R-194 → R-196 → R-198 → R-190.
+- [ ] **R-197. `font_face` : woff/woff2** : raster fontes =
+  truetype seul ; woff (sfnt compressé) absent →
+  `@font-face` woff2 des CDN non décodés (Google Fonts ne
+  sert que woff2 → quasi toutes les fontes du web réel
+  perdues). **TTC multi-faces déjà livré** (R-69 —
+  `font_face` porte l'index de face). Décompression woff
+  (zlib déjà lié) + `format()`. *Priorité 1 : meilleur
+  ratio valeur/effort de la file.*
 - [ ] **R-189. CSS nesting** : `&`, règles de style imbriquées,
   `@media`/`@supports` imbriqués dans un bloc de déclarations —
   tout est avalé par `recover_decl` → règles modernes perdues
   en silence (CSS 2023+, composants, thèmes). `parser.rs` doit
   émettre des règles imbriquées + résolution `&`/ordre dans
-  `cascade.rs`.
-- [ ] **R-190. `@container` évalué** : `CollectedContainer`
-  collecté, jamais consommé (`container_rules_matching`
-  annoncé absent — `cascade.rs`). Deuxième passe : tailles de
-  conteneur après layout → rematch des règles
-  (`container-type`/`container-name`).
+  `cascade.rs`. Livre la machinerie de scope utile à R-194.
+- [ ] **R-192. `display:-webkit-box` + `-webkit-line-clamp`
+  contexte** : vieux flexbox → bloc ; `line-clamp` est livré
+  MVP sans exiger la famille `-webkit-box`. Pattern legacy
+  très répandu (vieux Bootstrap, clamps historiques).
+- [ ] **R-193. `<basefont>`** : taille/couleur face de base —
+  hint documenté non implémenté ; rare mais trivial à cadrer.
 - [ ] **R-191. `display:contents` — résidus** : le cœur est
   **déjà livré** (R-103 — l'élément ne génère aucune boîte,
   enfants promus, pseudos générés). Résidu à vérifier :
   éléments à structure interne (`button`/`fieldset`/
   `legend`/`select`/internes table) où la spec impose un
   rendu particulier — notre flattening est uniforme.
-- [ ] **R-192. `display:-webkit-box` + `-webkit-line-clamp`
-  contexte** : vieux flexbox → bloc ; `line-clamp` est livré
-  MVP sans exiger la famille `-webkit-box`.
-- [ ] **R-193. `<basefont>`** : taille/couleur face de base —
-  hint documenté non implémenté ; rare mais trivial à cadrer.
-- [ ] **R-194. `@scope` + `@starting-style`** : at-rules
-  2024+ absentes. `light-dark()` **déjà livré** (R-105 —
-  branche claire/sombre résolue à la cascade).
 - [ ] **R-195. `<picture><source>` + `srcset` densité/taille**
   dans la sélection source : `dom_helpers` ne lit que `img`
   (type=/media/srcset ignorés). **Demande NAV journalisée**
   (`explorer-core`, interface-equipes.md 2026-11-09) — la
-  résolution de source vit dans le périmètre NAV.
+  résolution de source vit dans le périmètre NAV ; à
+  ordonnancer avec NAVIGATEUR dès que la couture est vivante.
+- [ ] **R-194. `@scope`** : at-rule 2024+ absente — dépend
+  de la machinerie `&`/scope de R-189. `@starting-style`
+  reporté : inerte tant que les transitions ne sont pas
+  portées.
 - [ ] **R-196. `subgrid`** : pistes imbriquées héritées —
-  documenté hors scope de la livraison grid MVP.
-- [ ] **R-197. `font_face` : woff/woff2** : raster fontes =
-  truetype seul ; woff (sfnt compressé) absent →
-  `@font-face` woff2 des CDN non décodés. **TTC multi-faces
-  déjà livré** (R-69 — `font_face` porte l'index de face).
-  Décompression woff (zlib déjà lié) + format().
+  documenté hors scope de la livraison grid MVP ; fréquence
+  terrain faible, extension algo circonscrite.
+- [ ] **R-198. Portée ancêtre dans les files différées +
+  `clip-path` des descendants positionnés** : descendants
+  `abs`/`fixed` peints hors du `PushClip` ancêtre (audit —
+  clip-path doit clipper tous les descendants et crée un
+  containing block). Enregistrer le bracket actif au defer
+  et le ré-émettre autour du drain — même infra de « portée
+  reportée » que la deuxième passe de R-190.
+- [ ] **R-190. `@container` évalué** : `CollectedContainer`
+  collecté, jamais consommé (`container_rules_matching`
+  annoncé absent — `cascade.rs`). Deuxième passe : tailles de
+  conteneur après layout → rematch des règles
+  (`container-type`/`container-name`). *Dernier : son vrai
+  coût est architectural (boucle style↔layout) — à faire
+  après R-198 qui paie l'infra de portée reportée.*
 
 ## Tâches continues
 
