@@ -3593,7 +3593,7 @@ chez NAVIGATEUR — non recopiés ici.
   span prouvée par occupation), `_ident_et_span`
   (ident nu `-start`/`-end`, `span` début et fin),
   `grid_area_jeton_invalide_preserve_les_longhands`.
-- [~] **R-199. §B-118 — effondrement display-list
+- [x] **R-199. §B-118 — effondrement display-list
   (pluto.tv)** : dom 4 156 nœuds → layout **4 385 boîtes**
   → `display_items` **148** → nav + écran noir, **zéro
   erreur console** (vol 719, prop. ; vol 722 : chrome nav
@@ -3615,12 +3615,19 @@ chez NAVIGATEUR — non recopiés ici.
   mesuré + chemin, `opacity:0`, page saine, transform
   hors-canvas). Audit des drains : aucun report perdu
   silencieux — files scopée/racine toutes drainées, seule
-  borne existante = §B-26 (déjà comptée). **Phase fix en
-  attente** : consommation NAV journalisée (swap vers la
-  variante stats sous probe dans `apply.rs` + log) — le
-  vol pluto suivant nomme la classe ; le responsable
-  nommé devient le verrou (`pluto_items_collapses_*`
-  ou fixture extraite).
+  borne existante = §B-26 (déjà comptée). **Classe nommée
+  + résolue côté NAV (JS-C466)** : la sonde a nommé le
+  fautif `.app-provider-viewport-reveal` (`opacity:0`
+  inline, 5 998 px/765 nœuds) — le drop `opacity0` était
+  **conforme** : le reveal JS ne flippait jamais parce
+  qu'un `load` de `<script>` dynamique **bullait** jusqu'à
+  `root` (`platform_event_flags` hors spec) et tuait
+  l'hydratation Next.js (`hydrate()` avant `initialize()`
+  → `TypeError _initialMatchesMiddlewarePromise`).
+  Verrou jscore `element_load_does_not_bubble_to_window`
+  (load élémentaire non-bullant, capture ancêtre
+  conservée, cycle de vie doc sur `root`, shim
+  `<body onload>`). Émission PIPE validée saine en vol.
 - [x] **R-200. Texte chevauché/corrompu en colonne
   lichess.org** : page redevable, texte illisible
   superposé dans la colonne latérale gauche — glyphes

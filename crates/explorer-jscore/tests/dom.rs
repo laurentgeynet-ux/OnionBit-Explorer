@@ -132,6 +132,41 @@ fn document_write_inside_load_listener_replaces() {
 }
 
 #[test]
+fn element_load_does_not_bubble_to_window() {
+    // §B-118 — le `load` d'un élément (`<img>`/`<script>`/`<iframe>`
+    // dyn) ne bulle pas (spec) : il ne doit pas invoquer les
+    // listeners `load` de `window`/`document` en phase non-capture.
+    // Mesuré pluto.tv : un chunk webpack `deliver_dyn_script`
+    // post-enregistrement invoquait `hydrate()` avant
+    // `initialize()` → `next.router` undefined → hydratation morte.
+    // La capture d'un ancêtre continue de voir l'événement.
+    let dom = Rc::new(RefCell::new(Dom::from_html(PAGE)));
+    let mut e = Engine::new();
+    e.install_dom(&dom);
+    let img = dom
+        .borrow()
+        .by_tag(dom.borrow().root, "input")
+        .into_iter()
+        .next()
+        .expect("input présent");
+    e.eval(
+        "var __n = 0;\
+         window.addEventListener('load', function() { __n += 1 });\
+         document.addEventListener('load', function() { __n += 10 });\
+         document.addEventListener('load', function() { __n += 100 }, true)",
+    )
+    .expect("listeners");
+    e.dom_event_on("load", img).expect("element load");
+    // Seule la capture du document a vu le `load` de l'élément.
+    let v = e.eval("String(__n)").expect("probe");
+    assert_eq!(e.describe(v), "100");
+    // Le `load` documentaire atteint window + document (at-target).
+    e.dom_event("load").expect("doc load");
+    let v = e.eval("String(__n)").expect("probe");
+    assert_eq!(e.describe(v), "211");
+}
+
+#[test]
 fn document_written_script_stays_inert() {
     // Un `<script>` écrit n'exécute pas dans le miroir —
     // l'ordonnancement revient à l'amont (étape 50), qui le

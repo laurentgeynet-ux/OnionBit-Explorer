@@ -1970,11 +1970,18 @@ fn first_control(d: &crate::dom::Dom, node: NodeId) -> Option<NodeId> {
 /// `focusin`/`focusout` et `focus` clavier) : la propagation
 /// de `propagate_event` lit `ev.bubbles`.
 pub(crate) fn platform_event_flags(ty: &str) -> (bool, bool, bool) {
-    // `focus`/`blur` seuls passent non-bullants (CAP-162,
-    // spec) — les autres types gardent leur historique
-    // (`load`/`error`/`DOMContentLoaded` restent bullants
-    // ici, borne documentée).
-    const NON_BUBBLING: &[&str] = &["focus", "blur"];
+    // `focus`/`blur` (CAP-162) et `load` (§B-118) passent non-
+    // bullants (spec) — `load` d'un élément (`<script>`/`<img>`/
+    // `<iframe>` dyn) ne doit jamais atteindre les listeners
+    // `load` de `window`/`document` : pluto.tv enregistrait
+    // `window.addEventListener('load', hydrate)` entre deux
+    // chunks webpack, le `load` bullé du script suivant
+    // invoquait `hydrate()` avant `initialize()` (armé sur le
+    // vrai cycle doc) → `next.router` undefined → hydratation
+    // morte → squelette figé `opacity:0`. Les listeners
+    // **capture** des ancêtres continuent de voir l'événement
+    // (spec : la capture descend indépendamment de `bubbles`).
+    const NON_BUBBLING: &[&str] = &["focus", "blur", "load"];
     const NON_CANCELABLE: &[&str] = &[
         "focus",
         "blur",
@@ -2024,6 +2031,21 @@ pub(crate) fn platform_event_flags(ty: &str) -> (bool, bool, bool) {
         !NON_CANCELABLE.contains(&ty),
         !NON_COMPOSED.contains(&ty),
     )
+}
+
+/// Cible d'un événement documentaire (§B-118) — le cycle de vie
+/// (`DOMContentLoaded`/`readystatechange`/`load`) est tiré par la
+/// spec sur le **document**/`window` (`root`) : avec `load` devenu
+/// non-bullant, une cible `<body>` couperait les listeners
+/// `window`/`document` du vrai `load`. Tout le reste (`scroll`,
+/// `keydown`, `click` délégué…) garde la cible `<body>`
+/// historique, qui bulle naturellement jusqu'à `root`.
+fn doc_event_target(d: &Dom, ty: &str) -> NodeId {
+    if matches!(ty, "DOMContentLoaded" | "readystatechange" | "load") {
+        d.root
+    } else {
+        d.body()
+    }
 }
 
 /// DOM `Event` host object (from `document.createEvent` +
@@ -4242,7 +4264,12 @@ impl Engine {
         if matches!(ty, "DOMContentLoaded" | "load") {
             dom.borrow_mut().doc_open = false;
         }
-        let target = dom.borrow().body();
+        // §B-118 — le cycle de vie (`DOMContentLoaded`/
+        // `readystatechange`/`load`) tire sur le **document**
+        // (spec : `load` vise le Window, non-bullant) ; un
+        // `load` qui bullerait depuis `<body>` ne distinguerait
+        // plus doc-cycle et `load` élémentaire.
+        let target = doc_event_target(&dom.borrow(), ty);
         self.dom_event_on_props(ty, target, &[])
     }
 
@@ -4256,7 +4283,7 @@ impl Engine {
         let Some((dom, _)) = self.dom_ctx.clone() else {
             return Ok(false);
         };
-        let target = dom.borrow().body();
+        let target = doc_event_target(&dom.borrow(), ty);
         self.dom_event_on_props(ty, target, props)
     }
 
@@ -4318,6 +4345,33 @@ impl Engine {
             _ => {}
         }
         self.propagate_event(&dom, &cache, &state)?;
+        // §B-118 — `<body onload>` (et `onload` scripté sur body)
+        // est un handler **Window** d'après la spec HTML : le
+        // `load` documentaire vise `root` et ne bulle plus — le
+        // handler de `<body>` est rejoué ici à cible identique.
+        if ty == "load" {
+            let body = dom.borrow().body();
+            if node == dom.borrow().root && body != node {
+                let ev_val = self.event_value(&dom, &cache, &state);
+                let this = node_value(self, &dom, &cache, body);
+                let key = format!("on{ty}");
+                let prop = if let Value::Obj(id) = &this {
+                    self.get_prop(*id, &key)
+                } else {
+                    None
+                };
+                let f = match prop {
+                    Some(f) if self.is_callable(f.clone()) => Some(f),
+                    _ => self.inline_handler(&dom, body, &key)?,
+                };
+                if let Some(f) = f {
+                    let v = self.call_value(f, this, std::slice::from_ref(&ev_val))?;
+                    if matches!(v, Value::Bool(false)) {
+                        state.prevented.set(true);
+                    }
+                }
+            }
+        }
         // Event dispatch is a job boundary — drain queued reactions.
         self.run_microtasks()?;
         Ok(state.prevented.get())
