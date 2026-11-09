@@ -81,6 +81,18 @@ pub enum DisplayItem {
         /// 0 = rectangle franc.
         radii: [f32; 4],
     },
+    /// Trait de `text-decoration` stylé (R-178) — `style` ∈
+    /// `explorer_layout::inline::DECO_*` ; `double`/`dotted`/
+    /// `dashed`/`wavy` se dessinent en patterns au raster,
+    /// pas en plein.
+    DecoRect {
+        /// Slot du trait (pleine épaisseur, marge comprise).
+        rect: Rect,
+        /// Couleur RGBA.
+        color: Color,
+        /// `DECO_*` — voir `explorer_layout::inline`.
+        style: u8,
+    },
     /// Ombre portée d'une boîte (`box-shadow`, R-M2) —
     /// peinte SOUS le fond/bordure de son élément (App. E).
     BoxShadow {
@@ -393,6 +405,9 @@ impl DisplayList {
                 DisplayItem::FillRect { rect, color, .. } => {
                     let _ = writeln!(out, "fill {rect:?} #{color:?}");
                 }
+                DisplayItem::DecoRect { rect, style, .. } => {
+                    let _ = writeln!(out, "deco s{style} {rect:?}");
+                }
                 DisplayItem::Border { rect, .. } => {
                     let _ = writeln!(out, "border {rect:?}");
                 }
@@ -531,6 +546,7 @@ pub(crate) fn resolved_bounds(items: &[DisplayItem]) -> Vec<Option<Rect>> {
 fn item_bounds(item: &DisplayItem) -> Option<Rect> {
     match item {
         DisplayItem::FillRect { rect, .. }
+        | DisplayItem::DecoRect { rect, .. }
         | DisplayItem::Border { rect, .. }
         | DisplayItem::Placeholder { rect, .. }
         | DisplayItem::Image { rect, .. }
@@ -657,6 +673,18 @@ fn item_eq(a: &DisplayItem, b: &DisplayItem) -> bool {
                 radii: ra2,
             },
         ) => r1 == r2 && c1 == c2 && ra1 == ra2,
+        (
+            D::DecoRect {
+                rect: r1,
+                color: c1,
+                style: s1,
+            },
+            D::DecoRect {
+                rect: r2,
+                color: c2,
+                style: s2,
+            },
+        ) => r1 == r2 && c1 == c2 && s1 == s2,
         (
             D::Border {
                 rect: r1,
@@ -2811,26 +2839,33 @@ fn paint_lines(bx: &LayoutBox, items: &mut Vec<DisplayItem>, off: (f32, f32)) {
                 // usuelles (approx. métriques fonte absente).
                 let th = (fs * 0.0625).max(1.0);
                 let base_y = frag.rect.y + frag.baseline + off.1;
-                let deco_rect = |dy: f32| Rect {
+                let deco_rect = |dy: f32, thick: f32| Rect {
                     x: frag.rect.x + off.0,
                     y: dy,
                     width: frag.rect.width,
-                    height: th,
+                    height: thick,
                 };
                 for d in &frag.deco {
                     let color = d.color.unwrap_or(ink);
+                    // R-178 : épaisseur/offset du déclarant
+                    // (`text-decoration-thickness` /
+                    // `text-underline-offset`) avant repli.
+                    let dth = if d.thick_px > 0.0 { d.thick_px } else { th };
                     if d.lines & explorer_layout::inline::DECO_UNDERLINE != 0 {
-                        items.push(DisplayItem::FillRect {
-                            rect: deco_rect(base_y + (fs * 0.1).max(1.0)),
+                        items.push(DisplayItem::DecoRect {
+                            rect: deco_rect(
+                                base_y + d.offset_px.unwrap_or((fs * 0.1).max(1.0)),
+                                dth,
+                            ),
                             color,
-                            radii: [0.0; 4],
+                            style: d.style,
                         });
                     }
                     if d.lines & explorer_layout::inline::DECO_OVERLINE != 0 {
-                        items.push(DisplayItem::FillRect {
-                            rect: deco_rect(base_y - fs * 0.85),
+                        items.push(DisplayItem::DecoRect {
+                            rect: deco_rect(base_y - fs * 0.85, dth),
                             color,
-                            radii: [0.0; 4],
+                            style: d.style,
                         });
                     }
                 }
@@ -2852,10 +2887,11 @@ fn paint_lines(bx: &LayoutBox, items: &mut Vec<DisplayItem>, off: (f32, f32)) {
                 });
                 for d in &frag.deco {
                     if d.lines & explorer_layout::inline::DECO_LINE_THROUGH != 0 {
-                        items.push(DisplayItem::FillRect {
-                            rect: deco_rect(base_y - fs * 0.3 - th / 2.0),
+                        let dth = if d.thick_px > 0.0 { d.thick_px } else { th };
+                        items.push(DisplayItem::DecoRect {
+                            rect: deco_rect(base_y - fs * 0.3 - dth / 2.0, dth),
                             color: d.color.unwrap_or(ink),
-                            radii: [0.0; 4],
+                            style: d.style,
                         });
                     }
                 }
@@ -3557,6 +3593,11 @@ fn translate_item(it: &DisplayItem, d: (f32, f32)) -> DisplayItem {
             rect: shifted(*rect, d),
             color: *color,
             radii: *radii,
+        },
+        D::DecoRect { rect, color, style } => D::DecoRect {
+            rect: shifted(*rect, d),
+            color: *color,
+            style: *style,
         },
         D::BoxShadow {
             rect,

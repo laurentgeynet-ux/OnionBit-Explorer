@@ -1008,6 +1008,75 @@ fn rects_overlap(a: explorer_layout::Rect, b: explorer_layout::Rect) -> bool {
 
 /// Peint un item de dessin (les clips sont gérés par
 /// `rasterize` directement).
+/// R-178 — trait `text-decoration` stylé : `solid` plein ;
+/// `double` = deux tiers fins (haut/bas du slot) ; `dotted`
+/// = pas 2·th ; `dashed` = 3·th on / 2·th off ; `wavy` =
+/// pseudo-vague en segments alternés (approximation honnête
+/// — pas de chemin courbe, mais visuellement ondulée).
+fn paint_deco_rect(
+    pixmap: &mut Pixmap,
+    rect: &explorer_layout::Rect,
+    color: Color,
+    style: u8,
+    dpi: Transform,
+    clip: Option<&Mask>,
+) {
+    use explorer_layout::inline as il;
+    let th = rect.height.max(1.0);
+    let right = rect.x + rect.width;
+    let mut draw = |x: f32, w: f32, y: f32, h: f32| {
+        fill_rect_item(
+            pixmap,
+            &explorer_layout::Rect {
+                x,
+                y,
+                width: w.max(0.0),
+                height: h.max(0.0),
+            },
+            color,
+            &[0.0; 4],
+            dpi,
+            clip,
+        );
+    };
+    match style {
+        il::DECO_DOUBLE => {
+            let t = (th / 3.0).max(1.0);
+            draw(rect.x, rect.width, rect.y, t);
+            draw(rect.x, rect.width, rect.y + th - t, t);
+        }
+        il::DECO_DOTTED => {
+            let step = (th * 2.0).max(2.0);
+            let mut x = rect.x;
+            while x < right {
+                draw(x, th.min(right - x), rect.y, th);
+                x += step;
+            }
+        }
+        il::DECO_DASHED => {
+            let (on, off) = ((th * 3.0).max(3.0), (th * 2.0).max(2.0));
+            let mut x = rect.x;
+            while x < right {
+                draw(x, on.min(right - x), rect.y, th);
+                x += on + off;
+            }
+        }
+        il::DECO_WAVY => {
+            let seg = (th * 1.5).max(2.0);
+            let half = (th * 0.5).max(1.0);
+            let mut x = rect.x;
+            let mut up = true;
+            while x < right {
+                let y = if up { rect.y } else { rect.y + th - half };
+                draw(x, seg.min(right - x), y, half);
+                x += seg;
+                up = !up;
+            }
+        }
+        _ => fill_rect_item(pixmap, rect, color, &[0.0; 4], dpi, clip),
+    }
+}
+
 /// R-167 — un `FillRect` : rayon > 0 → fill du chemin
 /// arrondi ; sinon rect pixel-snappé (`fill_guarded`).
 fn fill_rect_item(
@@ -1304,6 +1373,9 @@ fn paint_item(
     match item {
         DisplayItem::FillRect { rect, color, radii } => {
             fill_rect_item(pixmap, rect, *color, radii, dpi, clip);
+        }
+        DisplayItem::DecoRect { rect, color, style } => {
+            paint_deco_rect(pixmap, rect, *color, *style, dpi, clip);
         }
         DisplayItem::BoxShadow {
             rect,

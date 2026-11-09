@@ -39,6 +39,18 @@ pub const DECO_UNDERLINE: u8 = 0b001;
 pub const DECO_OVERLINE: u8 = 0b010;
 /// Ligne `text-decoration` barrant le texte (R-153).
 pub const DECO_LINE_THROUGH: u8 = 0b100;
+/// Style de trait `text-decoration-style` ([`TextDeco::style`],
+/// R-178) — `solid` par défaut.
+pub const DECO_SOLID: u8 = 0;
+/// `dotted` — points en pas 2·épaisseur.
+pub const DECO_DOTTED: u8 = 1;
+/// `dashed` — tirets 3·th on / 2·th off.
+pub const DECO_DASHED: u8 = 2;
+/// `double` — deux traits fins (tiers haut/bas du slot).
+pub const DECO_DOUBLE: u8 = 3;
+/// `wavy` — pseudo-vague (segments alternés au rendu,
+/// approximation honnête sans chemin courbe).
+pub const DECO_WAVY: u8 = 4;
 
 /// `text-decoration` **résolue** portée par un [`Fragment`]
 /// (R-153) : l'entrée appartient à l'élément **déclarant** —
@@ -54,14 +66,33 @@ pub struct TextDeco {
     /// `color` de l'élément déclarant ; `None` → l'encre
     /// du fragment au paint (repli currentcolor).
     pub color: Option<Color>,
+    /// Style de trait `text-decoration-style` (R-178) —
+    /// [`DECO_SOLID`] par défaut.
+    pub style: u8,
+    /// `text-decoration-thickness` résolue en px (`0` =
+    /// auto → repli ~1/16em au paint).
+    pub thick_px: f32,
+    /// `text-underline-offset` résolu en px (`None` = auto
+    /// → repli ~10% em au paint).
+    pub offset_px: Option<f32>,
 }
 
 /// `text-decoration` de `st` → entrée résolue, `None` si
 /// absente/`none`. Mots inconnus tolérés (`blink`, styles et
 /// couleurs du shorthand Level 4 — ignorés, jamais d'échec).
-fn text_deco(st: &ComputedStyle) -> Option<TextDeco> {
-    let v = st.get("text-decoration")?;
+fn text_deco(st: &ComputedStyle, fs: f32, ctx: &BlockCtx) -> Option<TextDeco> {
+    let v = st
+        .get("text-decoration")
+        .or_else(|| st.get("text-decoration-line"))?;
     let mut lines = 0u8;
+    let mut style = DECO_SOLID;
+    let style_of = |t: &str| match t {
+        "dotted" => DECO_DOTTED,
+        "dashed" => DECO_DASHED,
+        "double" => DECO_DOUBLE,
+        "wavy" => DECO_WAVY,
+        _ => DECO_SOLID,
+    };
     for t in v.split_ascii_whitespace() {
         if t.eq_ignore_ascii_case("underline") {
             lines |= DECO_UNDERLINE;
@@ -69,14 +100,37 @@ fn text_deco(st: &ComputedStyle) -> Option<TextDeco> {
             lines |= DECO_OVERLINE;
         } else if t.eq_ignore_ascii_case("line-through") {
             lines |= DECO_LINE_THROUGH;
+        } else {
+            let st2 = style_of(&t.to_ascii_lowercase());
+            if st2 != DECO_SOLID {
+                style = st2;
+            }
         }
+    }
+    // Longhands l'emportent sur le shorthand (cascade faite).
+    if let Some(s2) = st.get("text-decoration-style") {
+        style = style_of(&s2.trim().to_ascii_lowercase());
     }
     if lines == 0 {
         return None;
     }
+    // `text-decoration-thickness` / `text-underline-offset`
+    // (R-178) résolus contre la fonte du DÉCLARANT — `%` =
+    // pourcent de sa font-size ; `auto`/`from-font` → repli.
+    let own_fs = font_size_px(st, fs, ctx);
+    let thick_px = st
+        .get("text-decoration-thickness")
+        .and_then(|t| raw_length_px(t, own_fs, own_fs, ctx))
+        .unwrap_or(0.0);
+    let offset_px = st
+        .get("text-underline-offset")
+        .and_then(|t| raw_length_px(t, own_fs, own_fs, ctx));
     Some(TextDeco {
         lines,
         color: st.color("color"),
+        style,
+        thick_px,
+        offset_px,
     })
 }
 
@@ -242,7 +296,7 @@ pub(crate) fn layout_inline(
     let mut atomics: HashMap<usize, Rect> = HashMap::new();
     size_atomics(bx, w, cb_h, ctx, fs, abs_cb, &mut atomics);
 
-    let items = collect_items(bx, para_lv);
+    let items = collect_items(bx, para_lv, fs, ctx);
     // Strut du conteneur (§10.8.1) : `line-height` de la
     // boîte — plancher de chaque ligne (`.chin` Acid2 :
     // `line-height:1em` tient la rangée à 12 px même si le
@@ -644,7 +698,7 @@ fn size_atomics_walk(
 
 /// Items de flux : chaque enfant → pièces (texte) ou atomique.
 /// `para_lv` = niveau d'imbrication du paragraphe (R-171).
-fn collect_items(bx: &LayoutBox, para_lv: u8) -> Vec<Item> {
+fn collect_items(bx: &LayoutBox, para_lv: u8, fs: f32, ctx: &BlockCtx) -> Vec<Item> {
     let mut items = Vec::new();
     let mut aid = 0usize;
     // §16.3.1 / R-153 : une déco posée sur le CONTENEUR
@@ -652,9 +706,11 @@ fn collect_items(bx: &LayoutBox, para_lv: u8) -> Vec<Item> {
     // déclarants démarre avec la sienne (`<div style=
     // "text-decoration:underline">`). Les descendants la
     // complètent à l'entrée de chaque élément inline.
-    let mut decos: Vec<TextDeco> = text_deco(&bx.style).into_iter().collect();
+    let mut decos: Vec<TextDeco> = text_deco(&bx.style, fs, ctx).into_iter().collect();
     for (owner, child) in bx.children.iter().enumerate() {
-        collect_child(child, owner, &mut items, &mut aid, &mut decos, para_lv);
+        collect_child(
+            child, owner, &mut items, &mut aid, &mut decos, para_lv, fs, ctx,
+        );
     }
     items
 }
@@ -667,6 +723,8 @@ fn collect_child(
     aid: &mut usize,
     decos: &mut Vec<TextDeco>,
     para_lv: u8,
+    fs: f32,
+    ctx: &BlockCtx,
 ) {
     // Hors-flux : `absolute`/`fixed` est posé par
     // `resolve_absolutes` — son contenu n'entre jamais dans
@@ -719,7 +777,7 @@ fn collect_child(
     // cloné porte la déco du conteneur, déjà seedée par
     // `collect_items` — la repousser la doublerait.
     let pushed = (b.kind == BoxKind::Inline)
-        .then(|| text_deco(&b.style))
+        .then(|| text_deco(&b.style, fs, ctx))
         .flatten();
     if let Some(d) = pushed {
         decos.push(d);
@@ -736,7 +794,7 @@ fn collect_child(
         });
     }
     for c in &b.children {
-        explorer_common::deep(|| collect_child(c, owner, items, aid, decos, para_lv));
+        explorer_common::deep(|| collect_child(c, owner, items, aid, decos, para_lv, fs, ctx));
     }
     if pushed.is_some() {
         decos.pop();

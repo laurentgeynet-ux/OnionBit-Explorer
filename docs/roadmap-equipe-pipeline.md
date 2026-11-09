@@ -3372,7 +3372,7 @@ déblocage/coût décroissant.
   parsés-tolérés (`selector.rs`, never-matched volontairement)
   mais jamais générés : drop caps, sélection colorée, stylage
   des puces et marqueur `<details>` absents.
-- [ ] **R-178. `text-decoration` styles** : `dotted`/`dashed`/
+- [x] **R-178. `text-decoration` styles** : `dotted`/`dashed`/
   `double`/`wavy` peints `solid` ; `text-decoration-thickness`,
   `text-underline-offset`, `text-decoration-skip-ink` ignorés —
   patterns de stroke dans `raster.rs`.

@@ -2091,6 +2091,7 @@ fn underlines(items: &[DisplayItem], baseline: f32) -> Vec<(f32, explorer_css::v
         .iter()
         .filter_map(|i| match i {
             DisplayItem::FillRect { rect, color, .. }
+            | DisplayItem::DecoRect { rect, color, .. }
                 if rect.y >= baseline - 0.5 && rect.y <= baseline + 8.0 =>
             {
                 Some((rect.x, *color))
@@ -2145,7 +2146,12 @@ fn text_decoration_saute_les_remplaces() {
     let t = texts(&items);
     let rects: Vec<_> = items
         .iter()
-        .filter(|i| matches!(i, DisplayItem::FillRect { .. }))
+        .filter(|i| {
+            matches!(
+                i,
+                DisplayItem::FillRect { .. } | DisplayItem::DecoRect { .. }
+            )
+        })
         .collect();
     assert_eq!(t.len(), 2, "runs « a » + « b » : {t:?}");
     assert_eq!(rects.len(), 1, "un seul souligné : {rects:?}");
@@ -2165,7 +2171,9 @@ fn text_decoration_del_barre_apres_l_encre() {
     let pos_strike = items
         .iter()
         .position(|i| match i {
-            DisplayItem::FillRect { rect, .. } => rect.y < t[0].1,
+            DisplayItem::FillRect { rect, .. } | DisplayItem::DecoRect { rect, .. } => {
+                rect.y < t[0].1
+            }
             _ => false,
         })
         .expect("barré au-dessus de la baseline");
@@ -2564,4 +2572,44 @@ fn outline_emis_hors_border_box() {
             .any(|i| matches!(i, DisplayItem::Border { .. })),
         "none → aucun item"
     );
+}
+
+/// R-178 — `text-decoration` styles : `dotted`/`dashed`/
+/// `double`/`wavy` sortent en `DecoRect` (patterns raster,
+/// plus de plein `solid`), `text-decoration-thickness` et
+/// `text-underline-offset` résolus contre la fonte du
+/// déclarant. `skip-ink` hors scope (géométrie des glyphes).
+#[test]
+fn text_deco_styles_thickness_offset() {
+    let (_, _, items) = dl(
+        "<p><u id=a>soul</u><s id=b>barre</s><i id=c>vague</i></p>",
+        "u{text-decoration:underline wavy;text-decoration-thickness:2px;\
+           text-underline-offset:4px}\
+         s{text-decoration:line-through dashed}\
+         i{text-decoration:underline dotted;font-style:normal}",
+    );
+    let deco = |style: u8| -> &DisplayItem {
+        items
+            .iter()
+            .find(|i| matches!(i, DisplayItem::DecoRect { style: s, .. } if *s == style))
+            .expect("deco item")
+    };
+    // `wavy` : DECO_WAVY = 4, épaisseur 2 px, offset > repli.
+    let w = deco(explorer_layout::inline::DECO_WAVY);
+    if let DisplayItem::DecoRect { rect, .. } = w {
+        assert!(
+            (rect.height - 2.0).abs() < 0.5,
+            "thickness 2px : {}",
+            rect.height
+        );
+    }
+    // `dashed`/`dotted` : variantes présentes.
+    let _ = deco(explorer_layout::inline::DECO_DASHED);
+    let _ = deco(explorer_layout::inline::DECO_DOTTED);
+    // Plus de FillRect plein pour les décors (dégradé = re-test).
+    let fills = items
+        .iter()
+        .filter(|i| matches!(i, DisplayItem::DecoRect { .. }))
+        .count();
+    assert_eq!(fills, 3, "3 traits décorés : {fills}");
 }

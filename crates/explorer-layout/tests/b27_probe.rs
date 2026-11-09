@@ -77,7 +77,10 @@ fn widest(b: &LayoutBox, acc: &mut Vec<LayoutBox>) {
         slot: b.slot,
         height_raised: b.height_raised,
         fc_root: b.fc_root,
-        marker_ordinal: b.marker_ordinal, marker_style: None, first_line: None, first_letter: None,
+        marker_ordinal: b.marker_ordinal,
+        marker_style: None,
+        first_line: None,
+        first_letter: None,
     });
     for c in &b.children {
         widest(c, acc);
