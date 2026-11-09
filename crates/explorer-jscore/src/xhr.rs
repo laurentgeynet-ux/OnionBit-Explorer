@@ -301,6 +301,14 @@ impl Engine {
             // JS-C365 : réponse sans émetteur vivant (ctx mort,
             // handle inconnu) — la promesse `fetch` reste
             // pendante à jamais ; nommée `net.orphan`.
+            // Sonde §B-112 — rendu visible (vol 779 : drop
+            // silencieux suspecté sur le manifest dash.js).
+            tracing::info!(
+                target: "media_probe",
+                site = "net.orphan",
+                handle = resp.handle,
+                status = resp.status
+            );
             self.sched_tick("net.orphan");
             return Ok(());
         };
@@ -357,6 +365,16 @@ impl Engine {
             return Ok(());
         }
         let Some(pos) = self.xhr.live.iter().position(|(h, _, _)| *h == resp.handle) else {
+            // §B-112 — le ctx propriétaire a été trouvé mais le
+            // handle n'est ni une promesse `fetch` ni une entrée
+            // XHR `live` (aborté entre-temps ?) — rendu visible.
+            tracing::info!(
+                target: "media_probe",
+                site = "net.orphan",
+                handle = resp.handle,
+                status = resp.status,
+                kind = "live-miss"
+            );
             self.sched_tick("net.orphan");
             return Ok(());
         };
