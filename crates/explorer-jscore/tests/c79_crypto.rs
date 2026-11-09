@@ -192,18 +192,25 @@ fn digest_bad_data_throws_sync() {
     );
 }
 
-/// Sans transport installé, `subtle` existe mais `digest`
-/// rejette `NotSupportedError` — dégradation honnête, jamais
-/// de faux digest.
+/// Sans transport installé, `digest` calcule un vrai
+/// SHA-2 natif en repli (JS-C453 — §B-117/odysee : le
+/// rejet `NotSupportedError` abortait les bootstraps qui
+/// n'ont besoin que d'un digest honnête).
 #[test]
-fn digest_without_transport_rejects() {
+fn digest_without_transport_falls_back_to_native_sha2() {
     let mut e = Engine::new();
     eval(
         &mut e,
-        "var err=null; crypto.subtle.digest('SHA-256', new Uint8Array(1))\
-         .catch(ex=>{err=ex.name});",
+        "var h=null; crypto.subtle.digest('SHA-256', new Uint8Array(1))\
+         .then(b=>{h=[...new Uint8Array(b)]\
+         .map(x=>x.toString(16).padStart(2,'0')).join('')});",
     );
-    assert_eq!(describe(&mut e, "err"), "NotSupportedError");
+    e.run_microtasks().unwrap();
+    // KAT FIPS 180-4 : SHA-256(0x00).
+    assert_eq!(
+        describe(&mut e, "h"),
+        "6e340b9cffb37a989ca544e6bb780a2c78901d3fb33738768511a30617afa01d"
+    );
 }
 
 /// Échec plateforme (`Err` en réponse) → `OperationError`.

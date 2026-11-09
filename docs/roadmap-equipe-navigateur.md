@@ -11353,3 +11353,10 @@ un crate PIPELINE.- [x] **JS-C422. Deadline honnête — canal session ↔ budge
   `callee_label` + suffixe ` (call of `x`)` sur
   `message` ET `stack` (lu en premier, figé JS-C47).
   Verrous `c452_call_undef_named` ×4 ; lang 313/313.
+- [x] **JS-C453 (JT-9). `crypto.subtle.digest` : repli
+  SHA-2 natif sans backend** — §B-117/odysee « SubtleCrypto
+  not available » : `sha2.rs` pur Rust (FIPS 180-4,
+  `sha256`/`sha384`/`sha512`) calcule en local quand
+  `crypto_transport` est absent — `digest` n'a besoin
+  d'aucun backend. Transport injecté prioritaire. Test
+  `c79` rejet → KAT repli. Verrous `c453` ×3 + c79 15/15.

@@ -118,24 +118,13 @@ surface minimale — jamais un stub qui ment.
 
 ## JT-C — Surfaces builtins auto-contenues
 
-- [ ] **JT-9. `crypto.subtle` disponible sans backend
-  installé** (§B-117 corpus-root — `crypto.rs`) —
-  odysee : bootstrap tardif abort sur `SubtleCrypto not
-  available` (= le chemin `no crypto backend installed`
-  de `crypto.rs`). État : JS-C79 a tranché « couture
-  embedder » (jscore zéro-dep) et JS-C93 a livré
-  clés/sign via `ring` **côté embedder** — mais un
-  contexte câblé sans backend aborte au lieu de
-  dégrader. Minimal requis par le site : `digest`
-  (SHA-256) + `getRandomValues`. Deux voies à trancher
-  à la prise : (a) **fallback natif dans jscore** —
-  SHA-256 pur Rust ~150 lignes std-only dans
-  `crypto.rs`, la promesse « autonome zéro-dep »
-  survit ; (b) **dep pur Rust** (`sha2`, ≥7 jours,
-  workspace-deps) — justifiée par §B-117 dans le
-  commit, mais casse la promesse historique du crate.
-  Préférence : (a) sauf si la table d'algos demandée
-  grossit.
+- [x] **JT-9. `crypto.subtle` sans backend injecté**
+  (§B-117, odysee) — **livré (JS-C453)** : repli SHA-2
+  natif `sha2.rs` (FIPS 180-4, zéro-dep — la piste
+  préférée) quand `crypto_transport` est absent ;
+  `digest` calcule au lieu de rejeter. Verrous
+  `c453_subtle_digest_fallback` ×3 + c79 15/15
+  (test rejet basculé sur KAT repli).
 - [ ] **JT-10. `VTTCue`** — « chaîne suivante » nommée
   vol 722 : la classe est absente → `ReferenceError`
   sur les players qui pistonnent les sous-titres

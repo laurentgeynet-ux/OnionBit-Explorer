@@ -79,6 +79,7 @@ mod observers;
 mod parser;
 mod promise;
 mod regexp;
+mod sha2;
 mod storage;
 mod streams;
 mod svg_path;

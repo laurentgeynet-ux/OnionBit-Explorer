@@ -342,13 +342,19 @@ fn subtle_digest(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
         Some(algo) => {
             let transport = e.crypto_transport.clone();
             match transport {
+                // JS-C453 — repli SHA-2 natif (zéro-dep,
+                // §B-117/odysee : « SubtleCrypto not
+                // available » au bootstrap) : sans backend
+                // injecté, `digest` calcule en local les trois
+                // algos admis au lieu de rejeter.
                 None => {
-                    let err = dom_exc(
-                        e,
-                        "NotSupportedError",
-                        "subtle.digest: no crypto backend installed",
-                    );
-                    e.reject_promise(pid, err);
+                    let bytes = match algo {
+                        DigestAlgo::Sha256 => crate::sha2::sha256(&data).to_vec(),
+                        DigestAlgo::Sha384 => crate::sha2::sha384(&data),
+                        DigestAlgo::Sha512 => crate::sha2::sha512(&data),
+                    };
+                    let ab = crate::typed_array::new_array_buffer(e, bytes);
+                    e.resolve_promise(pid, ab);
                 }
                 Some(tr) => {
                     let h = tr.submit(CryptoRequest {
