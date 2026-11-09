@@ -81,6 +81,21 @@ de s'exécuter, aucun stamp/binding/card ne peut s'allumer.
 > aux indices `nodeInfos` → bindings `on-*`/`[[…]]` morts
 > = le cœur de P4.B. Repro : `<template>`+`on-*`+CE →
 > indices du walk vs nodeInfos.
+>
+> **Verdict vol 735c** (sonde `ce.cc_threw`) — le CE
+> fautif est **`ytd-app` `connectedCallback`** (le CE
+> racine). Rejeu post-mortem : `iDo` résout **21/21**
+> nodeInfos — dérive **temporelle** (contenu/index au
+> moment de l'upgrade) ou **sous-template** `dom-if`/
+> `dom-repeat` (templateInfo enfant, stamped via `:8929`).
+> Primitives template vérifiées saines en isolation :
+> `content`/`importNode`/flatten `appendChild(frag)`/
+> `innerHTML`→`content`/algo `iDo`+commentaires.
+> Prochaine instrumentation : nommer le nodeInfo fautif
+> (`parentIndex`+tag) au moment de l'upgrade — piste
+> la plus probable : `X.content` du sous-template
+> imbriqué vs fragment stampé (décalage d'un type de
+> nœud compté au parse, perdu au clone).
 
 ```mermaid
 flowchart TD
