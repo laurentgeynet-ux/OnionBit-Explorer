@@ -2755,7 +2755,8 @@ impl Session {
         // silencieux « jamais spawné » face à « jamais revenu ».
         if tracing::enabled!(target: "media_probe", tracing::Level::INFO) {
             let h = req_url.host().to_string();
-            if self.note_net_probe("go", &h) {
+            let key = format!("{h}|{handle}");
+            if self.note_net_probe("go", &key) {
                 tracing::info!(target: "media_probe", site = "net.go", host = %h, handle);
             }
         }
@@ -3865,8 +3866,8 @@ impl Session {
             if tracing::enabled!(target: "media_probe", tracing::Level::INFO) {
                 let h = d.req_url.host().to_string();
                 let tag = match &d.out {
-                    Ok(r) => format!("{h}|ok:{}", r.status),
-                    Err(e) => format!("{h}|err:{}", net_err_kind(e)),
+                    Ok(r) => format!("{h}|{}|ok:{}", d.handle, r.status),
+                    Err(e) => format!("{h}|{}|err:{}", d.handle, net_err_kind(e)),
                 };
                 if self.note_net_probe("arr", &tag) {
                     match &d.out {

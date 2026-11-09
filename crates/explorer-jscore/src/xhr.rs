@@ -2166,6 +2166,22 @@ fn url_path_seg(url: &str) -> &str {
     }
 }
 
+/// Chemin **complet** de l'URL (query/fragment masqués — les
+/// signatures de session n'y vivent que dans la query ; le
+/// chemin seul discrimine les endpoints d'un même hôte, ex.
+/// `/api/initial` vs `/api/get_cam_group_info.json`, §B-122e).
+fn url_path_full(url: &str) -> &str {
+    let rest = url
+        .split("://")
+        .nth(1)
+        .or_else(|| url.strip_prefix("//"))
+        .unwrap_or(url);
+    let Some(slash) = rest.find('/') else {
+        return "";
+    };
+    rest[slash..].split(['?', '#']).next().unwrap_or("")
+}
+
 /// Sonde §B-97 — `fetch`/`XHR`/`sendBeacon` vers un token
 /// dégénéré (`"undefined"`, `"null"`, `"NaN"`, `""` ou préfixe
 /// `undefined…`/`null…`) : la concat d'une valeur absente
@@ -2415,7 +2431,8 @@ pub(crate) fn fetch_fn(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Va
             site = "fetch.send",
             method = %req.method,
             host = url_host(&req.url),
-            path = url_path_seg(&req.url)
+            path = url_path_full(&req.url),
+            seg = url_path_seg(&req.url)
         );
         let h = t.send(&req);
         // `Response.url` = URL absolue résolue contre le document
