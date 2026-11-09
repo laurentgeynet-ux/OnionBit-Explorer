@@ -5410,7 +5410,7 @@ impl Host for DocumentHost {
     fn invoke(
         &self,
         e: &mut Engine,
-        _this: Value,
+        this_v: Value,
         name: &str,
         args: &[Value],
     ) -> JsResult<Option<Value>> {
@@ -6050,7 +6050,7 @@ impl Host for DocumentHost {
             // → page blanche (explore.org/arte.tv). Spec : la
             // racine d'un document est **lui-même** (avec ou
             // sans `composed`) → `this` donne l'identité `===`.
-            "getRootNode" => Ok(Some(_this)),
+            "getRootNode" => Ok(Some(this_v)),
             // Même classe — méthodes Node annoncées dans
             // `DOC_METHODS` sans implémentation (Undefined au
             // retour). Délégations spec sur la racine.
@@ -12780,6 +12780,47 @@ impl Host for FontFaceSetHost {
 /// `window.addEventListener(ty, f, capture?)` — enregistré sur le
 /// nœud racine (`window` ≙ sommet de l'arbre de propagation, même
 /// cible que les listeners `document.*`).
+/// §B-122 — borne anti-tempête : listeners max d'un type sur un
+/// nœud (vol 751 explore.org — web-vitals `rB` posait
+/// `addEventListener("load", ()=>rB(e), capture)` tant que
+/// `readyState!=="complete"` ; chaque `load` de sous-ressource
+/// traverse la capture racine et fait doublier l'armée (~19
+/// events → ~370k listeners → autant de `setTimeout` postés
+/// par dispatch). Une page saine n'a jamais >256 listeners
+/// d'un type sur une cible ; l'excès est refusé, nommé une
+/// fois par type.
+const MAX_LISTENERS_PER_TYPE: usize = 256;
+
+/// Push borné d'un listener DOM — partagé par `win_*` et
+/// `et_add_listener` : `false` si le plafond du type est
+/// atteint (la greffe est alors ignorée).
+fn push_dom_listener(
+    dom: &DomRef,
+    node: NodeId,
+    ty: &str,
+    on: &str,
+    f: Value,
+    capture: bool,
+) -> bool {
+    let mut d = dom.borrow_mut();
+    let ls = &mut d.nodes[node as usize].listeners;
+    if ls.iter().filter(|(t, _, _)| t == ty).count() >= MAX_LISTENERS_PER_TYPE {
+        if d.ce.probe_seen.insert(format!("lc:{ty}")) {
+            tracing::warn!(
+                target: "dom_probe",
+                site = "listen.cap",
+                ty = %ty,
+                on = %on,
+                cap = MAX_LISTENERS_PER_TYPE,
+                "listeners du type plafonnés — greffe refusée"
+            );
+        }
+        return false;
+    }
+    ls.push((ty.to_string(), f, capture));
+    true
+}
+
 fn win_add_event_listener(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
     let ty = e.to_js_string(arg(args, 0))?;
     let f = arg(args, 1);
@@ -12788,9 +12829,7 @@ fn win_add_event_listener(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult
         if let Some((dom, _)) = &e.dom_ctx {
             probe_el_listen(dom, &ty, "window");
             let root = dom.borrow().root;
-            dom.borrow_mut().nodes[root as usize]
-                .listeners
-                .push((ty, f, capture));
+            push_dom_listener(dom, root, &ty, "window", f, capture);
         }
     }
     Ok(Value::Undefined)
@@ -13844,9 +13883,7 @@ pub(crate) fn et_add_listener(e: &mut Engine, this: Value, args: &[Value]) -> Js
                 probe_node_desc(&d, node)
             };
             probe_el_listen(&dom, &ty, &on);
-            dom.borrow_mut().nodes[node as usize]
-                .listeners
-                .push((ty, cb, capture));
+            push_dom_listener(&dom, node, &ty, &on, cb, capture);
             return Ok(Value::Undefined);
         }
     }

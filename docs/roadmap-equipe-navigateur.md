@@ -10888,21 +10888,35 @@ un crate PIPELINE.- [x] **JS-C422. Deadline honnête — canal session ↔ budge
   `Undefined` et tuait chaque commit React dans
   l'œuf.
 - [ ] **§B-122 — post-hydratation : budget tas par défaut
-  trop juste + tempête `setTimeout`** (vol 750). Faits :
-  l'arbre hydraté d'explore.org exige ~405 Mo vivants >
-  384 MiB du budget défaut → `RangeError` en navigation
-  courante ; à 768 MiB la page hydrate complète. Reste
-  à trancher : (a) relever le défaut ou profiler la
-  rétention (arbre React + wrappers DOM + wakeables —
-  `prom.settled` 1484/1496 sain, `dlv.dynscript` 19/20)
-  ; (b) **tempête timers** : `fire.timer` ≈ 1,31 M en
-  ~90 s (~262k/cycle tally) — boucle `setTimeout(0)`
-  permanente, post=fire (chaque timer tiré une fois,
-  pas de ré-armement fantôme) ; suspect : heartbeat
-  analytics ou boucle retry dont la condition n'arrive
-  jamais vraie — nommer le producteur via `timer.src` ;
-  (c) **images absentes** : `req.img=1`/`err.img=1`
-  seulement — les vignettes lazy du carousel ne
-  déclenchent pas de fetch (IntersectionObserver/
-  `loading=lazy` à vérifier) ; frame montre les
-  placeholders gris correctement layoutés.
+  trop juste + tempête `setTimeout`** (vols 750-752).
+  Faits : l'arbre hydraté d'explore.org exige ~405 Mo
+  vivants > 384 MiB du budget défaut → `RangeError` en
+  navigation courante ; à 768 MiB la page hydrate
+  complète. **Tempête nommée et bornée** : `EXPLORER_
+  JOB_TRACE`+`TIMER_SRC` (JS-C439) — 99,98 % des
+  ~1,31 M fires = UN callback web-vitals `onTTFB`
+  (`()=>{let e=rg();e&&(...)}` dans `15t1vbzvplm8t.js`
+  — bundle Sentry). Chaîne : `rB` pose
+  `addEventListener("load",()=>rB(e),capture)` tant
+  que `readyState!=="complete"` ; chaque `load` de
+  sous-ressource (img/iframe/link dynamiques,
+  CAP-171/172/173) traverse la capture **root** →
+  `rB` → re-pose un listener → **doublement par
+  event** (~19 dispatches → ~370k listeners → autant
+  de `setTimeout` postés par dispatch). `rg()` exige
+  `responseStart>0` — notre entrée nav mettait `0` →
+  TTFB jamais résolu. Fix JS-C440 : (a) **cap de
+  listeners** 256 par (nœud,type) dans
+  `push_dom_listener` partagé `win_add_event_listener`
+  + `et_add_listener` — l'armée ne dépasse plus 256
+  (`listen.cap` warn nommé une fois/type) ; (b)
+  `responseStart`/`responseEnd`/`requestStart`/
+  `fetchStart` = `1.0` dans `perf_nav_entry` — `rg()`
+  résout TTFB (~1 ms, synthétique documenté) au lieu
+  de boucler. Verrous `b122_listeners_cap` 3/3
+  (cap 256/300, par type, capture+bulle partagées).
+  Reste : (c) budget tas par défaut à relever ou
+  profiler la rétention (~405 Mo) ; (d) images lazy
+  absentes (`req.img=1`/`err.img=1` — Intersection-
+  Observer/`loading=lazy` à vérifier, placeholders
+  gris layoutés correctement sur la frame).

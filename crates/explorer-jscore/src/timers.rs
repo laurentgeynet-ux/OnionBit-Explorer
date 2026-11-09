@@ -54,6 +54,11 @@ struct Timer {
 /// genius : `r is not defined` ×512 par retry setInterval).
 const TIMER_FAIL_CAP: u32 = 8;
 
+/// Empreintes FNV des stacks `setTimeout` déjà narrées —
+/// dédup de la sonde `EXPLORER_TIMER_SRC` (§B-122).
+static TIMER_SRC_SEEN: std::sync::LazyLock<std::sync::Mutex<std::collections::HashSet<u64>>> =
+    std::sync::LazyLock::new(|| std::sync::Mutex::new(std::collections::HashSet::new()));
+
 /// Pending timers for one engine (page).
 #[derive(Debug, Default)]
 pub(crate) struct TimerQueue {
@@ -376,13 +381,11 @@ fn timer_set_timeout(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Valu
             .collect::<Vec<_>>()
             .join(" <- ");
         let stack: String = stack.chars().take(400).collect();
-        static SEEN: std::sync::LazyLock<std::sync::Mutex<std::collections::HashSet<u64>>> =
-            std::sync::LazyLock::new(|| std::sync::Mutex::new(std::collections::HashSet::new()));
-        let mut h = 0xcbf29ce484222325u64;
+        let mut h = 0xcbf2_9ce4_8422_2325_u64;
         for b in stack.as_bytes() {
-            h = (h ^ u64::from(*b)).wrapping_mul(0x100000001b3);
+            h = (h ^ u64::from(*b)).wrapping_mul(0x0100_0000_01b3);
         }
-        if SEEN.lock().map(|mut s| s.insert(h)).unwrap_or(false) {
+        if TIMER_SRC_SEEN.lock().is_ok_and(|mut s| s.insert(h)) {
             eprintln!("[timer-src] ms={ms} {stack}");
         }
     }

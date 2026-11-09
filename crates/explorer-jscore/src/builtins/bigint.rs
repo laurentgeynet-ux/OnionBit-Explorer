@@ -545,10 +545,6 @@ fn perf_nav_entry(e: &mut Engine) -> Value {
         "secureConnectionStart",
         "domainLookupStart",
         "domainLookupEnd",
-        "fetchStart",
-        "requestStart",
-        "responseStart",
-        "responseEnd",
         "firstInterimResponseStart",
         "workerStart",
         "activationStart",
@@ -558,6 +554,18 @@ fn perf_nav_entry(e: &mut Engine) -> Value {
         "decodedBodySize",
     ] {
         e.set_own(o, k, Value::Num(0.0), true);
+    }
+    // §B-122 — quartet resource-timing positif : `0` sur
+    // `responseStart` rend l'entrée **invisible** au helper
+    // canonique de web-vitals (`rg()` exige
+    // `responseStart>0 && <performance.now()` — Sentry/Next
+    // analytics sondent TTFB en boucle sinon, tempête de
+    // timers §B-122 vol 751). `1.0` = « la réponse existe et
+    // a pris ~1 ms » — synthétique (le moteur n'a pas de
+    // timeline réseau — écart documenté comme les zéros
+    // ci-dessus) mais ordonné : fetch ≤ request ≤ response.
+    for k in ["fetchStart", "requestStart", "responseStart", "responseEnd"] {
+        e.set_own(o, k, Value::Num(1.0), true);
     }
     e.set_own(o, "redirectCount", Value::Num(0.0), true);
     e.set_own(o, "responseStatus", Value::Num(200.0), true);
