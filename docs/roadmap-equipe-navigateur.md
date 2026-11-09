@@ -11367,3 +11367,10 @@ un crate PIPELINE.- [x] **JS-C422. Deadline honnête — canal session ↔ budge
   `TextTrack` (`addCue`/`removeCue`/`cues`/`activeCues`
   snapshot — pas d'horloge) greffée à `textTracks`.
   Verrous `c454_vttcue` ×3 ; dom 245/245, mse5 5/5.
+- [x] **JS-C455 (JT-11). i18n bindings YouTube — surface
+  navigateur complète, bindings = internes site** —
+  `[[getSimpleString]]`/`[[countryCode]]` (vol 701) =
+  objets service `yt.i18n` produits côté site, pas une
+  API web (même classe que `categories` JT-5). `Intl`
+  riche + `navigator.language(s)` verrouillés. Résiduel
+  à sonder au prochain vol. `c455_i18n_surface` ×2.

@@ -131,16 +131,13 @@ surface minimale — jamais un stub qui ment.
   `TextTrack` (`addCue`/`removeCue`/`cues`/
   `activeCues` = snapshot, pas d'horloge) greffée
   à `textTracks`. Verrous `c454_vttcue` ×3.
-- [ ] **JT-11. i18n bindings YouTube
-  `[[getSimpleString]]`/`[[countryCode]]`** — résidu
-  nommé vol 701, post-§B-97 : slots internes du binding
-  i18n du player YT (syntaxe `[[…]]` = accès aux
-  internes Polymer/ytcfg). Surface minimale : chaînes
-  simples servies depuis `ytcfg`/la table de strings du
-  miroir, `countryCode` depuis la config de session
-  (jamais de géoloc inventée — valeur honnête ou
-  absente documentée). Fichier : `dom_host.rs` /
-  miroir bindings.
+- [x] **JT-11. i18n bindings YouTube
+  (`[[getSimpleString]]`/`[[countryCode]]`)** —
+  **mesuré (JS-C455)** : surface navigateur i18n
+  complète (`Intl` + `navigator.language(s)`) — les
+  clés nommées sont des objets service internes
+  `yt.i18n`, pas une API web. Résiduel sonde-
+  dépendant. Verrous `c455_i18n_surface` ×2.
 
 ## JT-D — Divergences langue (`interp`, `parser`, `module.rs`)
 
