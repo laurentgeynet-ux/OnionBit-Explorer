@@ -3536,7 +3536,7 @@ déblocage/coût décroissant.
   sous `overflow` d'ancêtre positionné (chaîne CB au-delà
   de `stacking_ctx`), `clip:rect()` legacy (pas de SC par
   spec — la même route resterait une approximation).
-- [ ] **R-190. `@container` évalué** : `CollectedContainer`
+- [x] **R-190. `@container` évalué** : `CollectedContainer`
   collecté, jamais consommé (`container_rules_matching`
   annoncé absent — `cascade.rs`). Deuxième passe : tailles de
   conteneur après layout → rematch des règles
@@ -3547,9 +3547,11 @@ déblocage/coût décroissant.
   (`CollectedRule.container`), `compute_*_with_ctx`,
   `measure_containers` (layout), évaluateur durci (plage
   MQ5, `not`, fail-closed), shorthand `container` +
-  `SUPPORTED_PROPS`. **Reste NAV** : boucle dans
-  `relayout_dom_payload` — demande posée
-  (`interface-equipes.md` 2026-11-09).
+  `SUPPORTED_PROPS`. **Boucle NAV livrée** :
+  `relayout_dom_payload` mesure → `compute_tree_with_ctx`
+  → re-collecte images → rebuild, une seule passe (bornes
+  journalisées : pas d'itération, transitions sur bascule
+  absentes, voies incrémentale/composite hors passe 2).
 
 ## Tâches continues
 

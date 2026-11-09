@@ -1899,7 +1899,10 @@ fn try_incr_payload(
         &p.img_decoded,
         &viewport_env(ctx.viewport, ctx.color_scheme, ctx.scripting, ctx.scale),
     );
-    let styles = styles_payload(
+    // `eng` inutilisé : la passe 2 `@container` est bornée
+    // à `relayout_dom_payload` (demande PIPE journalisée —
+    // la voie incrémentale garde les règles inertes).
+    let (styles, _eng) = styles_payload(
         p,
         new_dom,
         ctx.viewport,
@@ -2027,7 +2030,7 @@ pub(crate) fn styles_payload(
     color_scheme: explorer_css::ColorScheme,
     scripting: bool,
     dpr: f32,
-) -> StyleMap {
+) -> (StyleMap, StyleEngine) {
     let mut eng = StyleEngine::new();
     eng.add_css(MEDIA_UA_CSS, Origin::UserAgent);
     // Une passe de parse par feuille (étape 104) : l'ordre de
@@ -2079,12 +2082,13 @@ pub(crate) fn styles_payload(
         now,
     );
     p.prev_styles = raw;
-    styles
+    (styles, eng)
 }
 
 /// `relayout_dom` sur payload — style → boîtes → layout →
 /// display list → raster. `canvas_ops` = op-lists du miroir
 /// (capturées sous verrou — la payload n'a pas `entry.js`).
+#[allow(clippy::too_many_lines)] // passe 2 @container — séquentiel, pas de découpe naturelle.
 pub(crate) fn relayout_dom_payload(
     p: &mut PaintPayload,
     ctx: &ApplyCtx,
@@ -2099,7 +2103,7 @@ pub(crate) fn relayout_dom_payload(
     // bitmap frais (étape 129).
     composite::purge_frame_bitmaps(p);
     dlv_info!("apply: relayout");
-    let styles = styles_payload(
+    let (styles, eng) = styles_payload(
         p,
         dom,
         ctx.viewport,
@@ -2136,7 +2140,7 @@ pub(crate) fn relayout_dom_payload(
     }
     // R-133 : sources XML conservées pour le re-raster à
     // taille utilisée dans `paint_replaced` (§B-32/§B-36).
-    let (svgs, svg_sources) =
+    let (mut svgs, mut svg_sources) =
         explorer_render::svg::collect_svg_with_sources(dom, root_el, ctx.image_max_px);
     let Some(mut bx) = build_box_tree_sized(dom, root_el, &styles, &sizes) else {
         return Err(CoreError::NothingToPaint);
@@ -2152,6 +2156,66 @@ pub(crate) fn relayout_dom_payload(
         ms = u64::try_from(t0.elapsed().as_millis()).unwrap_or(u64::MAX),
         "apply: layout"
     );
+    // R-190 — passe 2 `@container` (demande PIPE journalisée,
+    // branchement NAV) : les règles taguées `container:` sont
+    // inertes en passe 1 ; le layout vient de poser les
+    // conteneurs — mesurer, re-calculer le style avec le ctx,
+    // puis rebuild + re-layout **une seule fois**. Pas
+    // d'itération (queries `min|max-width` stables ;
+    // oscillation height documentée au journal). Rebuild
+    // inconditionnel dès qu'un conteneur mesuré existe : les
+    // styles de `::before`/`::after` ne sont pas comparables
+    // depuis NAV (`StyleMap` n'expose pas leur itérateur) —
+    // une passe bornée plutôt qu'un changement de pseudo
+    // raté. Transitions sur bascule `@container` : absentes
+    // (le snapshot `prev_styles` reste celui de la passe 1 —
+    // borne documentée).
+    if !eng.container_queries.is_empty() {
+        let measures = explorer_layout::measure_containers(&bx);
+        if !measures.is_empty() {
+            let env = viewport_env(ctx.viewport, ctx.color_scheme, ctx.scripting, ctx.scale);
+            let mut styles2 =
+                eng.compute_tree_with_ctx(dom, dom.document(), &env, &|_| false, Some(&measures));
+            // Style brut : les overrides d'animation doivent
+            // être ré-appliqués (journal R-190 — sinon les
+            // nœuds retagués perdent l'effet courant).
+            let ord_of = element_ordinals(dom);
+            apply_anim_overrides(
+                &p.transitions,
+                &mut p.animations,
+                &eng,
+                &mut styles2,
+                &ord_of,
+                Instant::now(),
+            );
+            // Re-collecte identique : une règle qui bascule
+            // `background-image`/`content` charge son asset.
+            let data_imgs = collect_data_images(dom, &styles2, ctx.image_max_px);
+            p.images.replaced.extend(data_imgs.replaced);
+            p.images.backgrounds.extend(data_imgs.backgrounds);
+            p.images.masks_url.extend(data_imgs.masks_url);
+            insert_fetched_images(p, &styles2, ctx.image_max_px, ctx.image_max_bytes);
+            let mut sizes = image_sizes(dom, &p.images.replaced);
+            sizes.extend(explorer_render::svg::svg_sizes(dom, root_el));
+            for n in composite::iframe_nodes(dom) {
+                sizes
+                    .entry(n)
+                    .or_insert_with(|| composite::iframe_intrinsic(dom, n));
+            }
+            let (svgs2, svg_sources2) =
+                explorer_render::svg::collect_svg_with_sources(dom, root_el, ctx.image_max_px);
+            if let Some(mut bx2) = build_box_tree_sized(dom, root_el, &styles2, &sizes) {
+                layout_tree(&mut bx2, vw, &block);
+                tracing::info!(
+                    ms = u64::try_from(t0.elapsed().as_millis()).unwrap_or(u64::MAX),
+                    "apply: layout p2 @container"
+                );
+                svgs = svgs2;
+                svg_sources = svg_sources2;
+                bx = bx2;
+            }
+        }
+    }
     restitute_font_cache(p, &block);
     // Hauteur défilante ≠ hauteur de boîte : le contenu qui
     // déborde un ancêtre à hauteur spécifiée (`height:100%` de

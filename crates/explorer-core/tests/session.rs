@@ -1284,7 +1284,7 @@ async fn color_scheme_dark_active_prefers_dark() {
 /// R-195 prérequis — `viewport_env` porte le `dpr` réel :
 /// `@media (min-resolution: 1.5dppx)` est inerte à scale 1.0
 /// et s'applique après `set_viewport(…, 2.0)` + `rerender`.
-/// Avant ce fil, l'env rapportait `1.0` à vie en HiDPI.
+/// Avant ce fil, l'env rapportait `1.0` à vie en `HiDPI`.
 #[tokio::test]
 async fn media_resolution_uses_session_scale() {
     let (mut s, t) = test_session();
@@ -1312,6 +1312,46 @@ async fn media_resolution_uses_session_scale() {
     assert!(
         count_color(fw as usize, fh as usize, px, [0, 255, 0]) > 0,
         "scale 2.0 : la règle min-resolution:1.5dppx s'applique"
+    );
+}
+
+/// R-190 (NAV) — boucle passe 2 `@container` dans
+/// `relayout_dom_payload` : la règle taguée est inerte en
+/// passe 1 puis évaluée contre la border-box **mesurée**
+/// du conteneur (`measure_containers` →
+/// `compute_tree_with_ctx` → rebuild). Conteneur 500 px ≥
+/// 400 → verte ; 300 px → la règle reste inerte (rouge).
+#[tokio::test]
+async fn container_pass2_evalue_sur_mesure() {
+    let (mut s, t) = test_session();
+    let page = |w: u32| {
+        format!(
+            "<!doctype html><html><head><style>\
+             body{{margin:0}} #c{{container-type:inline-size;width:{w}px}}\
+             #b{{height:50px;background:#ff0000}}\
+             @container (min-width:400px){{#b{{background:#00ff00}}}}\
+             </style></head><body><div id=c><div id=b></div></div></body></html>"
+        )
+    };
+    t.route("/w", 200, page(500).leak());
+    t.route("/n", 200, page(300).leak());
+    let id = s.open_tab();
+    s.navigate(id, "http://h.test/w").await.unwrap();
+    let (fw, fh, px) = s.frame_pixels(id).unwrap();
+    assert!(
+        count_color(fw as usize, fh as usize, px, [0, 255, 0]) > 0,
+        "conteneur 500 ≥ 400 : la règle @container doit s'appliquer (passe 2)"
+    );
+    s.navigate(id, "http://h.test/n").await.unwrap();
+    let (fw, fh, px) = s.frame_pixels(id).unwrap();
+    assert_eq!(
+        count_color(fw as usize, fh as usize, px, [0, 255, 0]),
+        0,
+        "conteneur 300 < 400 : la règle @container reste inerte"
+    );
+    assert!(
+        count_color(fw as usize, fh as usize, px, [255, 0, 0]) > 0,
+        "le fond auteur hors @container reste peint"
     );
 }
 

@@ -308,7 +308,7 @@ fn render_subframe(
         scripting: ctx.scripting && f.sandbox.is_none_or(|s| s.scripts),
     };
     let root_el = f.dom.document_element()?;
-    let styles = styles_payload(
+    let (styles, _eng) = styles_payload(
         &mut cp,
         &f.dom,
         (w, h),
