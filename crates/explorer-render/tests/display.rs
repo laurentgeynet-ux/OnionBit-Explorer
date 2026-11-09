@@ -2420,3 +2420,45 @@ fn overflow_arrondi_emet_pushcliprounded() {
         "PushClip attendu sans radius"
     );
 }
+
+#[test]
+fn backdrop_filter_item_et_ops() {
+    // R-M9b — `backdrop-filter:blur(6px) grayscale(1)` →
+    // `BackdropFilter {rect, ops}` émis avant le fond de la
+    // boîte (les pixels peints sous `rect` reçoivent les
+    // ops au raster, le contenu se peint par-dessus) ;
+    // `none` → rien.
+    let (_d, _b, items) = dl(
+        "<div>x</div>",
+        "div { width: 40px; height: 20px; \
+         backdrop-filter: blur(6px) grayscale(1) }",
+    );
+    let pos = items
+        .iter()
+        .position(|i| matches!(i, DisplayItem::BackdropFilter { .. }));
+    assert!(pos.is_some(), "BackdropFilter absent : {items:?}");
+    let p = pos.unwrap();
+    match &items[p] {
+        DisplayItem::BackdropFilter { ops, .. } => {
+            assert_eq!(ops.len(), 2, "ops : {ops:?}");
+            assert_eq!(ops[0], explorer_render::display::FilterOp::Blur(6.0));
+            assert_eq!(ops[1], explorer_render::display::FilterOp::Grayscale(1.0));
+        }
+        _ => unreachable!(),
+    }
+    // Émis avant le fond (fond lui suit).
+    let bg = items.iter().position(|i| {
+        matches!(
+            i,
+            DisplayItem::FillRect { .. } | DisplayItem::BoxShadow { .. }
+        )
+    });
+    assert!(bg.is_none_or(|b| b > p), "ordre : filtre avant fond");
+    let (_d2, _b2, items2) = dl("<div>x</div>", "div { backdrop-filter: none }");
+    assert!(
+        !items2
+            .iter()
+            .any(|i| matches!(i, DisplayItem::BackdropFilter { .. })),
+        "none → aucun item"
+    );
+}

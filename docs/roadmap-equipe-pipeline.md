@@ -3145,8 +3145,11 @@ la dette, pas le layout.
   R-167) : `PushClipRounded {rect, radii}` émis quand
   `border-radius` > 0 — le `Mask` raster suit
   `rounded_rect_path`. Verrou + repli rect.
-- [ ] **R-M9b. Résidus restants** : `backdrop-filter`
-  (zone derrière l'élément → offscreen composité) ;
+- [x] **R-M9b. `backdrop-filter`** : la région peinte
+  sous `rect` reçoit les ops puis le contenu se peint
+  par-dessus (offscreen composité — même mécanique
+  R-M5). Verrou ops + ordre + `none`.
+- [ ] **R-M9c. Résidus restants** :
   `scroll-snap`/`scroll-behavior` (session) ;
   font fallback par glyphe (`.ttc`, tofu CJK) ;
   `line-clamp` ; `inert`/`dialog`/`popover`/

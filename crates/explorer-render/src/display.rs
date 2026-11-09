@@ -201,6 +201,16 @@ pub enum DisplayItem {
     /// Fin du groupe filtré — composite du tampon avec
     /// les ops appliquées.
     PopFilter,
+    /// `backdrop-filter` (R-M9b) : les pixels DÉJÀ peints
+    /// sous `rect` reçoivent les ops, le contenu de la
+    /// boîte se peint ensuite par-dessus.
+    BackdropFilter {
+        /// Zone filtrée (border box de l'élément).
+        rect: Rect,
+        /// Ops `<filter-function-list>` (mêmes que
+        /// `filter` — `drop-shadow`/`url` hors scope).
+        ops: Vec<FilterOp>,
+    },
     /// Marqueur d'une boîte `display: list-item`
     /// (`list-style-type` ≠ `none`, issue #9) — forme
     /// primitive rasterisée directement (pas de shaping :
@@ -415,6 +425,9 @@ impl DisplayList {
                 DisplayItem::PopTransform => out.push_str("pop-transform\n"),
                 DisplayItem::PushFilter(_) => out.push_str("push-filter\n"),
                 DisplayItem::PopFilter => out.push_str("pop-filter\n"),
+                DisplayItem::BackdropFilter { rect, .. } => {
+                    let _ = writeln!(out, "backdrop-filter {rect:?}");
+                }
             }
         }
         out
@@ -509,6 +522,7 @@ fn item_bounds(item: &DisplayItem) -> Option<Rect> {
         | DisplayItem::Image { rect, .. }
         | DisplayItem::MaskedFill { rect, .. }
         | DisplayItem::Marker { rect, .. }
+        | DisplayItem::BackdropFilter { rect, .. }
         | DisplayItem::BackgroundImage { rect, .. } => Some(*rect),
         // L'ombre déborde sa boîte (offset + spread +
         // blur) — borne propre pour le dirty-tracking.
@@ -744,6 +758,9 @@ fn item_eq(a: &DisplayItem, b: &DisplayItem) -> bool {
             },
         ) => r1 == r2 && a1 == a2,
         (D::PushFilter(o1), D::PushFilter(o2)) => o1 == o2,
+        (D::BackdropFilter { rect: r1, ops: o1 }, D::BackdropFilter { rect: r2, ops: o2 }) => {
+            r1 == r2 && o1 == o2
+        }
         (D::PushTransform(m1), D::PushTransform(m2)) => {
             (m1.sx, m1.ky, m1.kx, m1.sy, m1.tx, m1.ty) == (m2.sx, m2.ky, m2.kx, m2.sy, m2.tx, m2.ty)
         }
@@ -2428,6 +2445,26 @@ fn paint_self(
             .is_none_or(|v| v.trim() != "collapse")
         && bx.children.is_empty()
         && bx.lines.is_empty();
+    // R-M9b — `backdrop-filter` : la zone déjà peinte
+    // sous la boîte reçoit les ops AVANT que fond/contenu
+    // ne s'affichent par-dessus (raster : extract →
+    // ops → recompose la région).
+    if !anonymous && !inline_flow {
+        let bops = bx.style.get("backdrop-filter");
+        if let Some(v) = bops {
+            if !v.trim().eq_ignore_ascii_case("none") {
+                let mut st = bx.style.clone();
+                // `parse_filter` lit `filter` — même
+                // grammaire `<filter-function-list>` :
+                // injecter la valeur `backdrop-filter`.
+                st.set("filter", v);
+                let ops = parse_filter(&st);
+                if !ops.is_empty() {
+                    items.push(DisplayItem::BackdropFilter { rect, ops });
+                }
+            }
+        }
+    }
     // R-M2 — `box-shadow` : une ombre par couche, émise
     // AVANT le fond de la boîte (sous lui dans l'ordre de
     // peinture). `inset` non porté (bordure interne
@@ -3525,6 +3562,10 @@ fn translate_item(it: &DisplayItem, d: (f32, f32)) -> DisplayItem {
             D::PushTransform(m)
         }
         D::PopClip | D::PopTransform | D::PushFilter(_) | D::PopFilter => it.clone(),
+        D::BackdropFilter { rect, ops } => D::BackdropFilter {
+            rect: shifted(*rect, d),
+            ops: ops.clone(),
+        },
     }
 }
 

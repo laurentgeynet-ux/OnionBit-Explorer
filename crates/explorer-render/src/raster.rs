@@ -827,6 +827,11 @@ pub fn rasterize_dirty_cached(
 /// sémantique de pile) n'intersecte pas `window` est sauté ;
 /// les items d'état (`Push*/Pop*`) sont toujours rejoués —
 /// la pile doit refléter l'emplacement de chaque item.
+#[allow(
+    clippy::too_many_lines,
+    clippy::cast_possible_truncation,
+    clippy::cast_sign_loss
+)]
 fn replay_items(
     pixmap: &mut Pixmap,
     items: &[DisplayItem],
@@ -939,6 +944,36 @@ fn replay_items(
                         Transform::default(),
                         clips.last(),
                     );
+                }
+            }
+            // R-M9b — `backdrop-filter` : la région déjà
+            // peinte sous `rect` reçoit les ops, le contenu
+            // se peint ensuite par-dessus.
+            DisplayItem::BackdropFilter { rect: r, ops } => {
+                #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+                let (bw, bh) = (r.width.ceil() as u32, r.height.ceil() as u32);
+                if bw > 0 && bh > 0 {
+                    if let Some(mut buf) = Pixmap::new(bw, bh) {
+                        let src = filtered.last().map_or(pixmap.as_ref(), |(b, _)| b.as_ref());
+                        buf.draw_pixmap(
+                            0,
+                            0,
+                            src,
+                            &tiny_skia::PixmapPaint::default(),
+                            Transform::from_translate(-r.x, -r.y),
+                            None,
+                        );
+                        apply_filter_ops(&mut buf, ops);
+                        let dst = filtered.last_mut().map_or(&mut *pixmap, |(b, _)| b);
+                        dst.draw_pixmap(
+                            r.x.round() as i32,
+                            r.y.round() as i32,
+                            buf.as_ref(),
+                            &tiny_skia::PixmapPaint::default(),
+                            Transform::default(),
+                            clips.last(),
+                        );
+                    }
                 }
             }
             _ => {
@@ -1286,6 +1321,7 @@ fn paint_item(
         | DisplayItem::PushTransform(_)
         | DisplayItem::PushFilter(_)
         | DisplayItem::PopFilter
+        | DisplayItem::BackdropFilter { .. }
         | DisplayItem::PopTransform => {}
     }
 }
