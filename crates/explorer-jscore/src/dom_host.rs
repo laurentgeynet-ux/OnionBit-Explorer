@@ -2877,6 +2877,48 @@ impl Engine {
             "SVGAnimateMotionElement",
             "SVGAnimateTransformElement",
             "SVGSetElement",
+            // Famille `SVGAnimated*` (§B-122) — interfaces
+            // non-element, testées par `instanceof` dans les
+            // libs (Swiper `r instanceof SVGAnimatedString`
+            // sur `className` ; GSAP/d3 idem sur les
+            // longueurs). Absentes → `ReferenceError` jeté
+            // depuis les MutationObservers à chaque
+            // mutation DOM → insertions (iframes de
+            // lecteur) mortes. Jamais construites
+            // (`illegal_ctor`), jamais produites par notre
+            // DOM → `instanceof` rend `false`, ce qui est
+            // la branche attendue pour un `className`
+            // string. Aucun proto parent (WebIDL : objets
+            // autonomes, pas des éléments).
+            "SVGAnimatedAngle",
+            "SVGAnimatedBoolean",
+            "SVGAnimatedEnumeration",
+            "SVGAnimatedInteger",
+            "SVGAnimatedLength",
+            "SVGAnimatedLengthList",
+            "SVGAnimatedNumber",
+            "SVGAnimatedNumberList",
+            "SVGAnimatedPreserveAspectRatio",
+            "SVGAnimatedRect",
+            "SVGAnimatedString",
+            "SVGAnimatedTransformList",
+            // Objets-valeur SVG legacy encore référencés
+            // par `instanceof`/`typeof` dans les bundles
+            // réels (d3, vieux polyfills).
+            "SVGLength",
+            "SVGLengthList",
+            "SVGNumber",
+            "SVGNumberList",
+            "SVGAngle",
+            "SVGPreserveAspectRatio",
+            "SVGPoint",
+            "SVGPointList",
+            "SVGMatrix",
+            "SVGRect",
+            "SVGStringList",
+            "SVGTransform",
+            "SVGTransformList",
+            "SVGUnitTypes",
             "Document",
             // `HTMLDocument` — interface legacy de `document`
             // (cookie-monster/woopic : `x instanceof HTMLDocument`,

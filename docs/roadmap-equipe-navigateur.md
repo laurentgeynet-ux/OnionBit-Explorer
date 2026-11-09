@@ -10952,3 +10952,22 @@ un crate PIPELINE.- [x] **JS-C422. Deadline honnête — canal session ↔ budge
   Elephant Park — Emangusi, South Africa » + badge
   LIVE** — la cam vedette résolue ; le carrousel
   d'images (ex-résidu (d)) débloqué par la même donnée.
+  **Vol 757 — page détail cam** (`/livecams/currently-
+  live/tembe-elephant-park`) : rendu intégral (88
+  vignettes live, badge « 102 STREAMS », météo Emangusi,
+  partenaire AFRICAM, footer — PNG 29 Mo/1024×8060),
+  iframe Google Maps évaluée en contexte imbriqué
+  (700 Ko JS), `streams.json` cloudfront → playlists
+  `index.m3u8` MediaMTX nommées. Mur lecteur nommé
+  (f) : `youtube-video` restait vide (`ytKids:0`) —
+  sonde `new YT.Player` en live → **`ReferenceError:
+  SVGAnimatedString is not defined`** : Swiper
+  (`e[t] instanceof SVGAnimatedString` sur `className`)
+  jetait depuis les `MutationObservers` à chaque
+  insertion. Fix JS-C442 : les 26 interfaces
+  `SVGAnimated*` + objets-valeur SVG legacy installées
+  (`illegal_ctor_bound`, `instanceof`→`false`) ;
+  verrous `b122_svg_interfaces` 3/3. Reste : (c)
+  budget tas défaut (~405 Mo) ; (g) rejouer le vol
+  player — l'iframe YT peut maintenant s'insérer,
+  puis MSE/HLS en conditions réelles.

@@ -3871,8 +3871,12 @@ impl Session {
                 };
                 if self.note_net_probe("arr", &tag) {
                     match &d.out {
-                        Ok(r) => tracing::info!(target: "media_probe", site = "net.arr", host = %h, ok = true, status = r.status, handle = d.handle),
-                        Err(e) => tracing::info!(target: "media_probe", site = "net.arr", host = %h, ok = false, kind = net_err_kind(e), handle = d.handle),
+                        Ok(r) => {
+                            tracing::info!(target: "media_probe", site = "net.arr", host = %h, ok = true, status = r.status, handle = d.handle)
+                        }
+                        Err(e) => {
+                            tracing::info!(target: "media_probe", site = "net.arr", host = %h, ok = false, kind = net_err_kind(e), handle = d.handle)
+                        }
                     }
                 }
             }
