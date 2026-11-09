@@ -3121,9 +3121,11 @@ la dette, pas le layout.
   texte réel — blur ≈ 4 fantômes croisés ±blur/2 à
   alpha/3 (documenté, pas de gaussien). Verrou offset+
   couleur+`none`.
-- [ ] **R-M5. `filter`** : `blur`/`brightness`/`contrast`
-  à minima (post-traitement raster) ; `backdrop-filter`
-  à part.
+- [x] **R-M5. `filter`** : `FilterOp` + bracket
+  `PushFilter`/`PopFilter` sur toute la sous-arbre —
+  9 ops couleurs par pixel + `blur` en box blur
+  séparable, `drop-shadow()`/`url()` hors scope ;
+  `backdrop-filter` à part. Verrou ops + `none`.
 - [ ] **R-M6. `position:sticky`** : bloc conteneur relatif
   clampé au scroll — PIPE pose + session offset (journal).
 - [ ] **R-M7. `transform` complet + `transition`/

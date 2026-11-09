@@ -30,6 +30,31 @@ use explorer_layout::{
 };
 
 /// Une primitive de dessin, dans l'ordre de peinture.
+/// Opération `filter` CSS (R-M5) — `drop-shadow()`
+/// volontairement absent (ombre déjà portée par
+/// `box-shadow`/`text-shadow` ; `url()` SVG hors scope).
+#[derive(Debug, Clone, PartialEq)]
+pub enum FilterOp {
+    /// `blur(<longueur>)` — rayon px.
+    Blur(f32),
+    /// `brightness(<f|%>)` — facteur.
+    Brightness(f32),
+    /// `contrast(<f|%>)` — facteur.
+    Contrast(f32),
+    /// `grayscale(<f|%>)` — part 0..1.
+    Grayscale(f32),
+    /// `invert(<f|%>)` — part 0..1.
+    Invert(f32),
+    /// `opacity(<f|%>)` — facteur alpha.
+    Opacity(f32),
+    /// `saturate(<f|%>)` — facteur.
+    Saturate(f32),
+    /// `sepia(<f|%>)` — part 0..1.
+    Sepia(f32),
+    /// `hue-rotate(<angle>)` — degrés.
+    HueRotate(f32),
+}
+
 #[derive(Debug, Clone)]
 pub enum DisplayItem {
     /// Rectangle plein (fond, côté de bordure, placeholder).
@@ -160,6 +185,13 @@ pub enum DisplayItem {
     PushTransform(tiny_skia::Transform),
     /// Fin de portée du dernier `PushTransform`.
     PopTransform,
+    /// Début d'un groupe filtré (`filter`, R-M5) : les
+    /// items jusqu'à `PopFilter` se peignent hors-écran
+    /// puis reçoivent les ops avant composite.
+    PushFilter(Vec<FilterOp>),
+    /// Fin du groupe filtré — composite du tampon avec
+    /// les ops appliquées.
+    PopFilter,
     /// Marqueur d'une boîte `display: list-item`
     /// (`list-style-type` ≠ `none`, issue #9) — forme
     /// primitive rasterisée directement (pas de shaping :
@@ -369,6 +401,8 @@ impl DisplayList {
                     let _ = writeln!(out, "push-transform {m:?}");
                 }
                 DisplayItem::PopTransform => out.push_str("pop-transform\n"),
+                DisplayItem::PushFilter(_) => out.push_str("push-filter\n"),
+                DisplayItem::PopFilter => out.push_str("pop-filter\n"),
             }
         }
         out
@@ -517,7 +551,9 @@ fn item_bounds(item: &DisplayItem) -> Option<Rect> {
         DisplayItem::PushClip(_)
         | DisplayItem::PopClip
         | DisplayItem::PushTransform(_)
-        | DisplayItem::PopTransform => None,
+        | DisplayItem::PopTransform
+        | DisplayItem::PushFilter(_)
+        | DisplayItem::PopFilter => None,
     }
 }
 
@@ -684,6 +720,7 @@ fn item_eq(a: &DisplayItem, b: &DisplayItem) -> bool {
             },
         ) => o1 == o2 && t1 == t2 && f1 == f2 && c1 == c2 && s1 == s2,
         (D::PushClip(r1), D::PushClip(r2)) => r1 == r2,
+        (D::PushFilter(o1), D::PushFilter(o2)) => o1 == o2,
         (D::PushTransform(m1), D::PushTransform(m2)) => {
             (m1.sx, m1.ky, m1.kx, m1.sy, m1.tx, m1.ty) == (m2.sx, m2.ky, m2.kx, m2.sy, m2.tx, m2.ty)
         }
@@ -1685,6 +1722,61 @@ fn text_shadows(st: &explorer_css::ComputedStyle, default: Color) -> Vec<((f32, 
 /// §marker). Émise après le fond de la boîte et avant ses
 /// lignes → sous le texte. `inside` dessine au début du
 /// contenu (le texte n'est pas décalé — résidu).
+/// `filter` → ops (R-M5) : tokens `fn(arg)` de la
+/// valeur ; `none`/aucune op connue → vide (pas de
+/// bracket émis). `drop-shadow()`/`url()` sautés.
+#[allow(clippy::cast_possible_truncation)]
+fn parse_filter(st: &explorer_css::ComputedStyle) -> Vec<FilterOp> {
+    let Some(v) = st.get("filter") else {
+        return Vec::new();
+    };
+    if v.trim().eq_ignore_ascii_case("none") {
+        return Vec::new();
+    }
+    // `1.2` → 1.2 ; `120%` → 1.2 (facteurs) ; `50%`/`0.5`
+    // → 0.5 (parts 0..1) — mêmes tables pour les deux.
+    let num_or_pct = |a: &str| -> Option<f32> {
+        let t = a.trim();
+        t.strip_suffix('%')
+            .and_then(|p| p.parse::<f32>().ok())
+            .map(|v| v / 100.0)
+            .or_else(|| t.parse::<f32>().ok())
+    };
+    let mut out = Vec::new();
+    let mut rest = v;
+    while let Some(p) = rest.find('(') {
+        let name = rest[..p].trim().to_ascii_lowercase();
+        let inner = &rest[p + 1..];
+        let Some(q) = inner.find(')') else {
+            break;
+        };
+        let arg = inner[..q].trim();
+        let op = match name.as_str() {
+            "blur" => parse_length(arg)
+                .and_then(|l| l.unit.px_factor().map(|f| (l.value * f) as f32))
+                .map(|r| FilterOp::Blur(r.max(0.0))),
+            "brightness" => num_or_pct(arg).map(FilterOp::Brightness),
+            "contrast" => num_or_pct(arg).map(FilterOp::Contrast),
+            "grayscale" => num_or_pct(arg).map(FilterOp::Grayscale),
+            "invert" => num_or_pct(arg).map(FilterOp::Invert),
+            "opacity" => num_or_pct(arg).map(FilterOp::Opacity),
+            "saturate" => num_or_pct(arg).map(FilterOp::Saturate),
+            "sepia" => num_or_pct(arg).map(FilterOp::Sepia),
+            "hue-rotate" => arg
+                .strip_suffix("deg")
+                .and_then(|d| d.trim().parse::<f32>().ok())
+                .map(FilterOp::HueRotate),
+            // `drop-shadow()`/`url()` : hors scope R-M5.
+            _ => None,
+        };
+        if let Some(o) = op {
+            out.push(o);
+        }
+        rest = &inner[q + 1..];
+    }
+    out
+}
+
 /// R-168 — `list-style-image` : la bitmap est fetchée
 /// comme les `url()` CSS (clé `NodeId` → `backgrounds`)
 /// et peinte dans la gouttière à la place du marqueur —
@@ -2485,6 +2577,7 @@ fn is_inline_flow(bx: &LayoutBox) -> bool {
         && bx.display() != "inline-table"
 }
 
+#[allow(clippy::too_many_lines)]
 fn paint_lines(bx: &LayoutBox, items: &mut Vec<DisplayItem>, off: (f32, f32)) {
     // Deux passes (R-70) : TOUTES les décorations inline
     // d'abord, TOUS les textes ensuite — un fond émis entre
@@ -3404,7 +3497,7 @@ fn translate_item(it: &DisplayItem, d: (f32, f32)) -> DisplayItem {
             m.ty += d.1;
             D::PushTransform(m)
         }
-        D::PopClip | D::PopTransform => it.clone(),
+        D::PopClip | D::PopTransform | D::PushFilter(_) | D::PopFilter => it.clone(),
     }
 }
 
@@ -3772,9 +3865,36 @@ fn legacy_clip_rect(v: &str, r: Rect, px: &dyn Fn(&str, f32) -> Option<f32>) -> 
     })
 }
 
+fn paint_box<'a>(
+    bx: &'a LayoutBox,
+    items: &mut Vec<DisplayItem>,
+    off: (f32, f32),
+    cx: &mut PaintCx<'a>,
+    defer: &mut Vec<(Vec<u16>, &'a LayoutBox)>,
+    pos_defer: &mut Vec<(Vec<u16>, &'a LayoutBox)>,
+    fixed_defer: &mut Vec<(Vec<u16>, &'a LayoutBox)>,
+) {
+    // R-M5 — `filter` encadre TOUTE la sous-arbre de la
+    // boîte (contenu + descendants) : bracket hors-écran
+    // `PushFilter`…`PopFilter` ; la récursion des enfants
+    // bracket le leur à leur tour (imbrication correct).
+    // `drop-shadow()`/`url()` non portés.
+    let fops = parse_filter(&bx.style);
+    let filtered = !fops.is_empty();
+    if filtered {
+        items.push(DisplayItem::PushFilter(fops));
+    }
+    paint_box_impl(bx, items, off, cx, defer, pos_defer, fixed_defer);
+    if filtered {
+        items.push(DisplayItem::PopFilter);
+    }
+}
+
+/// Corps de [`paint_box`] — le wrapper pose le bracket
+/// `filter` (R-M5) autour de tout le sous-arbre.
 #[allow(clippy::too_many_lines)]
 #[allow(clippy::too_many_arguments)]
-fn paint_box<'a>(
+fn paint_box_impl<'a>(
     bx: &'a LayoutBox,
     items: &mut Vec<DisplayItem>,
     off: (f32, f32),

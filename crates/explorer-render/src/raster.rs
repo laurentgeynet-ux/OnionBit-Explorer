@@ -21,7 +21,7 @@ use explorer_css::value::Color;
 use explorer_layout::font::{FontRequest, FontSource, Glyph, ShapedRun};
 use tiny_skia::{FillRule, Mask, Paint, PathBuilder, Pixmap, Point, Rect, Stroke, Transform};
 
-use crate::display::{BorderStyle, DisplayItem, DisplayList, MarkerKind};
+use crate::display::{BorderStyle, DisplayItem, DisplayList, FilterOp, MarkerKind};
 use crate::glyph_cache::GlyphCache;
 use owned_ttf_parser::{AsFaceRef, OwnedFace};
 
@@ -837,6 +837,10 @@ fn replay_items(
     filter: Option<(&[Option<explorer_layout::Rect>], explorer_layout::Rect)>,
 ) {
     let mut clips: Vec<Mask> = Vec::new();
+    // R-M5 — `filter` : les items d'un groupe
+    // `PushFilter`…`PopFilter` se peignent dans un tampon
+    // offscreen puis reçoivent les ops et se compositent.
+    let mut filtered: Vec<(Pixmap, Vec<FilterOp>)> = Vec::new();
     // Pile des `transform` CSS : `cur` = dpi · produit des
     // matrices actives — recomposé à chaque push/pop (peu de
     // niveaux en pratique).
@@ -889,6 +893,25 @@ fn replay_items(
                 tfs.pop();
                 cur = tfs.iter().fold(dpi, |acc, t| acc.pre_concat(*t));
             }
+            DisplayItem::PushFilter(ops) => {
+                if let Some(buf) = Pixmap::new(pixmap.width(), pixmap.height()) {
+                    filtered.push((buf, ops.clone()));
+                }
+            }
+            DisplayItem::PopFilter => {
+                if let Some((mut buf, ops)) = filtered.pop() {
+                    apply_filter_ops(&mut buf, &ops);
+                    let dst = filtered.last_mut().map_or(&mut *pixmap, |(b, _)| b);
+                    dst.draw_pixmap(
+                        0,
+                        0,
+                        buf.as_ref(),
+                        &tiny_skia::PixmapPaint::default(),
+                        Transform::default(),
+                        clips.last(),
+                    );
+                }
+            }
             _ => {
                 // Fenêtre sale : item dont la bounds résolue
                 // est hors fenêtre → sauté (son encre ne peut
@@ -905,7 +928,8 @@ fn replay_items(
                             .is_none_or(|b| rects_overlap(b, win))
                     });
                 if draw {
-                    paint_item(pixmap, item, cur, fonts, gc, clips.last());
+                    let dst = filtered.last_mut().map_or(&mut *pixmap, |(b, _)| b);
+                    paint_item(dst, item, cur, fonts, gc, clips.last());
                 }
             }
         }
@@ -947,6 +971,139 @@ fn fill_rect_item(
         }
     } else if let Some(r) = Rect::from_xywh(rect.x, rect.y, rect.width, rect.height) {
         fill_guarded(pixmap, &r, &paint, dpi, clip);
+    }
+}
+
+/// R-M5 — ops `filter` sur un tampon RGBA premultiplié :
+/// chaque op dans l'ordre déclaré (spec) — par-pixel pour
+/// les couleurs, passe séparable pour `blur`. Les
+/// approximations premultipliées sont documentées.
+fn apply_filter_ops(buf: &mut Pixmap, ops: &[FilterOp]) {
+    for op in ops {
+        match op {
+            FilterOp::Blur(r) => box_blur(buf, (*r).max(0.5)),
+            _ => apply_pixel_op(buf, op),
+        }
+    }
+}
+
+/// Op de couleur sur chaque pixel du tampon —
+/// `mix(x,y,t)` linéaire ; les matrices agissent sur les
+/// canaux RGB premultipliés (approx. : le canal alpha
+/// n'entre pas dans le mélange, luminosité alpha-composée).
+#[allow(
+    clippy::cast_possible_truncation,
+    clippy::cast_sign_loss,
+    clippy::many_single_char_names
+)]
+fn apply_pixel_op(buf: &mut Pixmap, op: &FilterOp) {
+    let px = buf.data_mut();
+    for c in px.chunks_exact_mut(4) {
+        let (r, g, b, a) = (
+            f32::from(c[0]),
+            f32::from(c[1]),
+            f32::from(c[2]),
+            f32::from(c[3]),
+        );
+        let lum = 0.2126 * r + 0.7152 * g + 0.0722 * b;
+        let mix = |x: f32, y: f32, t: f32| x + (y - x) * t;
+        let (nr, ng, nb, na) = match op {
+            FilterOp::Brightness(f) => (r * f, g * f, b * f, a),
+            FilterOp::Contrast(f) => {
+                let k = |x: f32| (x - 127.5) * f + 127.5;
+                (k(r), k(g), k(b), a)
+            }
+            FilterOp::Grayscale(t) => (mix(r, lum, *t), mix(g, lum, *t), mix(b, lum, *t), a),
+            FilterOp::Invert(t) => (mix(r, a - r, *t), mix(g, a - g, *t), mix(b, a - b, *t), a),
+            FilterOp::Opacity(t) => (r * t, g * t, b * t, a * t),
+            FilterOp::Sepia(t) => {
+                let sr = 0.393 * r + 0.769 * g + 0.189 * b;
+                let sg = 0.349 * r + 0.686 * g + 0.168 * b;
+                let sb = 0.272 * r + 0.534 * g + 0.131 * b;
+                (mix(r, sr, *t), mix(g, sg, *t), mix(b, sb, *t), a)
+            }
+            FilterOp::Saturate(s) => (
+                lum + (r - lum) * s,
+                lum + (g - lum) * s,
+                lum + (b - lum) * s,
+                a,
+            ),
+            FilterOp::HueRotate(d) => {
+                let rad = d.to_radians();
+                let (c1, c2) = (rad.cos(), rad.sin());
+                (
+                    r * (0.213 + c1 * 0.787 - c2 * 0.213)
+                        + g * (0.715 - c1 * 0.715 - c2 * 0.715)
+                        + b * (0.072 - c1 * 0.072 + c2 * 0.928),
+                    r * (0.213 - c1 * 0.213 + c2 * 0.143)
+                        + g * (0.715 + c1 * 0.285 + c2 * 0.140)
+                        + b * (0.072 - c1 * 0.072 - c2 * 0.283),
+                    r * (0.213 - c1 * 0.213 - c2 * 0.787)
+                        + g * (0.715 - c1 * 0.715 + c2 * 0.715)
+                        + b * (0.072 + c1 * 0.928 + c2 * 0.072),
+                    a,
+                )
+            }
+            FilterOp::Blur(_) => (r, g, b, a),
+        };
+        c[0] = nr.clamp(0.0, 255.0) as u8;
+        c[1] = ng.clamp(0.0, 255.0) as u8;
+        c[2] = nb.clamp(0.0, 255.0) as u8;
+        c[3] = na.clamp(0.0, 255.0) as u8;
+    }
+}
+
+/// Box blur séparable (2 passes fenêtre) — approximation
+/// du gaussien de `blur()`, documentée (R-M5).
+#[allow(
+    clippy::cast_possible_truncation,
+    clippy::many_single_char_names,
+    clippy::cast_sign_loss
+)]
+fn box_blur(buf: &mut Pixmap, radius: f32) {
+    let (w, h) = (buf.width() as usize, buf.height() as usize);
+    let r = radius.max(0.0) as usize;
+    if w == 0 || h == 0 || r == 0 {
+        return;
+    }
+    let mut tmp = buf.data().to_vec();
+    let dst = buf.data_mut();
+    for y in 0..h {
+        for x in 0..w {
+            let mut acc = [0u32; 4];
+            let (x0, x1) = (x.saturating_sub(r), (x + r + 1).min(w));
+            for xs in x0..x1 {
+                let i = (y * w + xs) * 4;
+                acc[0] += u32::from(tmp[i]);
+                acc[1] += u32::from(tmp[i + 1]);
+                acc[2] += u32::from(tmp[i + 2]);
+                acc[3] += u32::from(tmp[i + 3]);
+            }
+            let n = (x1 - x0) as u32;
+            let o = (y * w + x) * 4;
+            for (ch, dstb) in dst[o..o + 4].iter_mut().enumerate() {
+                *dstb = (acc[ch] / n) as u8;
+            }
+        }
+    }
+    tmp.copy_from_slice(dst);
+    for y in 0..h {
+        for x in 0..w {
+            let mut acc = [0u32; 4];
+            let (y0, y1) = (y.saturating_sub(r), (y + r + 1).min(h));
+            for ys in y0..y1 {
+                let i = (ys * w + x) * 4;
+                acc[0] += u32::from(tmp[i]);
+                acc[1] += u32::from(tmp[i + 1]);
+                acc[2] += u32::from(tmp[i + 2]);
+                acc[3] += u32::from(tmp[i + 3]);
+            }
+            let n = (y1 - y0) as u32;
+            let o = (y * w + x) * 4;
+            for (ch, dstb) in dst[o..o + 4].iter_mut().enumerate() {
+                *dstb = (acc[ch] / n) as u8;
+            }
+        }
     }
 }
 
@@ -1097,6 +1254,8 @@ fn paint_item(
         DisplayItem::PushClip(_)
         | DisplayItem::PopClip
         | DisplayItem::PushTransform(_)
+        | DisplayItem::PushFilter(_)
+        | DisplayItem::PopFilter
         | DisplayItem::PopTransform => {}
     }
 }

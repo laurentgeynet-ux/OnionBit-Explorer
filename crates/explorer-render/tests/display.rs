@@ -2354,3 +2354,38 @@ fn text_shadow_fantomes_sous_texte() {
         "none → texte seul"
     );
 }
+
+#[test]
+fn filter_bracket_et_ops_parsed() {
+    // R-M5 — `filter:blur(4px) brightness(2)` →
+    // `PushFilter([Blur(4),Brightness(2)])`…`PopFilter`
+    // encadrant le sous-arbre ; `none` → rien.
+    let (_d, _b, items) = dl(
+        "<div>x</div>",
+        "div { filter: blur(4px) brightness(2) grayscale(50%) }",
+    );
+    let ops = items.iter().find_map(|i| match i {
+        DisplayItem::PushFilter(ops) => Some(ops),
+        _ => None,
+    });
+    match ops {
+        Some(ops) => {
+            assert_eq!(ops.len(), 3, "ops : {ops:?}");
+            assert_eq!(ops[0], explorer_render::display::FilterOp::Blur(4.0));
+            assert_eq!(ops[1], explorer_render::display::FilterOp::Brightness(2.0));
+            assert_eq!(ops[2], explorer_render::display::FilterOp::Grayscale(0.5));
+        }
+        None => panic!("pas de PushFilter : {items:?}"),
+    }
+    assert!(
+        items.iter().any(|i| matches!(i, DisplayItem::PopFilter)),
+        "PopFilter manquant"
+    );
+    let (_d2, _b2, items2) = dl("<div>x</div>", "div { filter: none }");
+    assert!(
+        !items2
+            .iter()
+            .any(|i| matches!(i, DisplayItem::PushFilter(_))),
+        "none → aucun bracket"
+    );
+}
