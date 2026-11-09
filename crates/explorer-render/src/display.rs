@@ -174,6 +174,10 @@ pub enum DisplayItem {
         /// `background-attachment: fixed`, la zone de
         /// positionnement est le viewport (R-13d).
         origin: (f32, f32),
+        /// `background-blend-mode` de la couche (R-184) —
+        /// 0 = `normal`, sinon tag `BLEND_MODES` ; appliqué
+        /// comme `paint.blend_mode` à la tuile.
+        blend: u8,
     },
     /// `background-color` passé par l'alpha d'un `mask-image`
     /// (R-52) : la couleur n'apparaît que là où le mask est
@@ -736,14 +740,16 @@ fn item_eq(a: &DisplayItem, b: &DisplayItem) -> bool {
                 img: i1,
                 repeat: p1,
                 origin: o1,
+                blend: b1,
             },
             D::BackgroundImage {
                 rect: r2,
                 img: i2,
                 repeat: p2,
                 origin: o2,
+                blend: b2,
             },
-        ) => r1 == r2 && p1 == p2 && o1 == o2 && std::sync::Arc::ptr_eq(i1, i2),
+        ) => r1 == r2 && p1 == p2 && o1 == o2 && b1 == b2 && std::sync::Arc::ptr_eq(i1, i2),
         (
             D::MaskedFill {
                 rect: r1,
@@ -1588,6 +1594,70 @@ fn bg_layers(v: &str) -> Vec<&str> {
     clippy::cast_possible_truncation,
     clippy::cast_sign_loss
 )]
+/// R-184 — rects des fragments de ligne dans le sous-arbre
+/// de `bx` (clip `background-clip:text` : les lignes vivent
+/// sur les porteurs inline anonymes, pas sur la boîte).
+/// Chaque run donne un rect de clip — approximation run-
+/// par-run du clip glyphe-par-glyphe.
+fn text_clip_rects(bx: &LayoutBox) -> Vec<Rect> {
+    fn walk(b: &LayoutBox, out: &mut Vec<Rect>) {
+        for line in &b.lines {
+            for f in &line.fragments {
+                out.push(f.rect);
+            }
+        }
+        for c in &b.children {
+            walk(c, out);
+        }
+    }
+    let mut out = Vec::new();
+    walk(bx, &mut out);
+    out
+}
+
+/// R-184 — `background-blend-mode` : tag compact porté
+/// par `DisplayItem::BackgroundImage::blend` — 0 = `normal`
+/// (repli valeur inconnue/absente), l'index+1 suit l'ordre
+/// [`BLEND_MODES`]. Le raster traduit le tag en
+/// `tiny_skia::BlendMode` — la display list reste sans
+/// dépendance sur l'énum complète.
+const BLEND_MODES: [&str; 15] = [
+    "multiply",
+    "screen",
+    "overlay",
+    "darken",
+    "lighten",
+    "color-dodge",
+    "color-burn",
+    "hard-light",
+    "soft-light",
+    "difference",
+    "exclusion",
+    "hue",
+    "saturation",
+    "color",
+    "luminosity",
+];
+
+/// Keyword `background-blend-mode` → tag `BLEND_MODES`
+/// (R-184). `normal`/inconnu → 0.
+fn blend_tag(keyword: Option<&str>) -> u8 {
+    match keyword {
+        None | Some("normal") => 0,
+        Some(k) => BLEND_MODES
+            .iter()
+            .position(|m| *m == k)
+            .map_or(0, |i| u8::try_from(i + 1).unwrap_or(0)),
+    }
+}
+
+#[allow(
+    clippy::too_many_lines,
+    clippy::cast_precision_loss,
+    clippy::cast_possible_truncation,
+    clippy::cast_sign_loss,
+    clippy::cast_possible_wrap
+)]
 fn emit_bg_layers(
     items: &mut Vec<DisplayItem>,
     bx: &LayoutBox,
@@ -1644,11 +1714,12 @@ fn emit_bg_layers(
     // sautées tant que la session ne fetch pas leurs urls.
     let first_url = layers.iter().position(|l| bg_has_url(l));
     for (i, layer) in layers.iter().enumerate().rev() {
+        let clip_text = layer_value("background-clip", i).as_deref() == Some("text");
         let clip = match layer_value("background-clip", i).as_deref() {
             Some("content-box") => content,
             Some("padding-box") => padding,
-            // `border-box` (défaut), `text` non porté,
-            // `border-area` — repli bordure.
+            // `text` (R-184 — clip par fragment ci-dessous),
+            // `border-box` (défaut), `border-area` — repli bordure.
             _ => rect,
         };
         let (l_area, l_base) = match layer_value("background-origin", i).as_deref() {
@@ -1713,12 +1784,35 @@ fn emit_bg_layers(
                 (img.width as f32, img.height as f32),
                 fs,
             );
-            items.push(DisplayItem::BackgroundImage {
-                rect: clip,
-                img,
-                repeat,
-                origin: (l_base.0 + px, l_base.1 + py),
-            });
+            let blend = blend_tag(layer_value("background-blend-mode", i).as_deref());
+            // R-184 — `background-clip:text` : la couche est
+            // émise une fois par fragment de ligne (clip
+            // propre à chaque run — `PushClip` existant,
+            // aucune primitive de masque au MVP).
+            if clip_text {
+                for fr in text_clip_rects(bx) {
+                    {
+                        let f = fr;
+                        items.push(DisplayItem::PushClip(f));
+                        items.push(DisplayItem::BackgroundImage {
+                            rect: clip,
+                            img: img.clone(),
+                            repeat,
+                            origin: (l_base.0 + px, l_base.1 + py),
+                            blend,
+                        });
+                        items.push(DisplayItem::PopClip);
+                    }
+                }
+            } else {
+                items.push(DisplayItem::BackgroundImage {
+                    rect: clip,
+                    img,
+                    repeat,
+                    origin: (l_base.0 + px, l_base.1 + py),
+                    blend,
+                });
+            }
         }
     }
 }
@@ -2639,6 +2733,27 @@ fn paint_self(
                         },
                         repeat: mask_repeat(&bx.style),
                     });
+                } else if bx
+                    .style
+                    .get("background-clip")
+                    .is_some_and(|v| v.split(',').any(|p| p.trim() == "text"))
+                {
+                    // R-184 — `background-clip:text` : fond
+                    // solide peint une fois par fragment de
+                    // ligne (même approximation que les
+                    // couches image — `PushClip` par run).
+                    for fr in text_clip_rects(bx) {
+                        {
+                            let f = fr;
+                            items.push(DisplayItem::PushClip(f));
+                            items.push(DisplayItem::FillRect {
+                                rect,
+                                color: c,
+                                radii: corner_radii(&bx.style, &rect),
+                            });
+                            items.push(DisplayItem::PopClip);
+                        }
+                    }
                 } else {
                     items.push(DisplayItem::FillRect {
                         rect,
@@ -3678,11 +3793,13 @@ fn translate_item(it: &DisplayItem, d: (f32, f32)) -> DisplayItem {
             img,
             repeat,
             origin,
+            blend,
         } => D::BackgroundImage {
             rect: shifted(*rect, d),
             img: img.clone(),
             repeat: *repeat,
             origin: (origin.0 + d.0, origin.1 + d.1),
+            blend: *blend,
         },
         D::MaskedFill {
             rect,

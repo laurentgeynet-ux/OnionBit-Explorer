@@ -1434,8 +1434,9 @@ fn paint_item(
             img,
             repeat,
             origin,
+            blend,
         } => {
-            paint_tiled(pixmap, rect, img, *repeat, *origin, dpi, clip);
+            paint_tiled(pixmap, rect, img, *repeat, *origin, dpi, clip, *blend);
         }
         DisplayItem::MaskedFill {
             rect,
@@ -1869,10 +1870,62 @@ fn paint_image_axis(
 /// compris **avant** l'origine (repeat ±∞). Axis-aligned →
 /// boucle directe ; le cas général tombe sur la boucle avec
 /// `cur` appliqué par point — approximation bornée documentée.
+/// R-184 — un canal de `background-blend-mode` (formules
+/// css-compositing-1 § blending). `s`/`d` ∈ [0,1]. Modes
+/// séparables portés ; `hue`/`saturation`/`color`/
+/// `luminosity` (non séparables — composés couleur
+/// entière) → repli `s` documenté.
+fn blend_channel(tag: u8, s: f32, d: f32) -> f32 {
+    let clamp01 = |v: f32| v.clamp(0.0, 1.0);
+    match tag {
+        1 => s * d,         // multiply
+        2 => s + d - s * d, // screen
+        3 => clamp01(if d <= 0.5 {
+            2.0 * s * d
+        } else {
+            1.0 - 2.0 * (1.0 - s) * (1.0 - d)
+        }), // overlay
+        4 => s.min(d),      // darken
+        5 => s.max(d),      // lighten
+        6 => clamp01(if s >= 1.0 {
+            1.0
+        } else if s <= 0.0 {
+            d
+        } else {
+            d / (1.0 - s)
+        }), // color-dodge
+        7 => clamp01(if s <= 0.0 { 0.0 } else { 1.0 - (1.0 - d) / s }), // color-burn
+        8 => clamp01(if s <= 0.5 {
+            2.0 * s * d
+        } else {
+            1.0 - 2.0 * (1.0 - s) * (1.0 - d)
+        }), // hard-light
+        9 => {
+            // soft-light
+            let g = if d <= 0.25 {
+                ((16.0 * d - 12.0) * d + 4.0) * d
+            } else {
+                d.sqrt()
+            };
+            clamp01(if s <= 0.5 {
+                d - (1.0 - 2.0 * s) * d * (1.0 - d)
+            } else {
+                d + (2.0 * s - 1.0) * (g - d)
+            })
+        }
+        10 => (d - s).abs(),                // difference
+        11 => clamp01(d + s - 2.0 * s * d), // exclusion
+        _ => s,                             // 12-15 non séparables : repli
+    }
+}
+
 #[allow(
     clippy::cast_possible_truncation,
     clippy::cast_sign_loss,
-    clippy::cast_possible_wrap
+    clippy::cast_possible_wrap,
+    clippy::too_many_arguments,
+    clippy::too_many_lines,
+    clippy::cast_precision_loss
 )]
 fn paint_tiled(
     pixmap: &mut Pixmap,
@@ -1882,6 +1935,7 @@ fn paint_tiled(
     origin: (f32, f32),
     cur: Transform,
     clip: Option<&Mask>,
+    blend: u8,
 ) {
     let (pw, ph) = (
         i32::try_from(pixmap.width()).unwrap_or(i32::MAX),
@@ -1945,7 +1999,16 @@ fn paint_tiled(
             );
             let inv = 255 - sa;
             let d = dst[i];
-            let blend = |sv: u32, dv: u8| ((sv * sa + u32::from(dv) * inv + 127) / 255) as u8;
+            // R-184 — `background-blend-mode` : la couleur
+            // mixée `Cb = blend(src, dst)` remplace `src`
+            // dans le source-over habituel.
+            let blend = |sv: u32, dv: u8| -> u8 {
+                if blend == 0 {
+                    return ((sv * sa + u32::from(dv) * inv + 127) / 255) as u8;
+                }
+                let cb = blend_channel(blend, sv as f32 / 255.0, f32::from(dv) / 255.0) * 255.0;
+                ((cb * sa as f32 + f32::from(dv) * inv as f32 + 127.5) / 255.0) as u8
+            };
             dst[i] = tiny_skia::PremultipliedColorU8::from_rgba(
                 blend(sr, d.red()),
                 blend(sg, d.green()),

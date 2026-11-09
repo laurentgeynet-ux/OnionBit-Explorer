@@ -1103,6 +1103,9 @@ struct BgParts {
     position: Vec<String>,
     size: Vec<String>,
     boxes: Vec<String>,
+    /// `background-blend-mode` (R-184) — keyword `<blend-mode>`
+    /// de la couche, `normal` par défaut.
+    blend: Option<String>,
     /// Les segments qui suivent immédiatement un `/` sont des
     /// valeurs `background-size` — jusqu'au premier token qui
     /// n'en est pas une (`center/cover no-repeat` :
@@ -1137,6 +1140,9 @@ impl BgParts {
         if matches!(part, "border-box" | "padding-box" | "content-box") && self.boxes.len() < 2 {
             self.boxes.push(part.to_string());
             return true;
+        }
+        if BG_BLEND_TOKENS.contains(&part) {
+            return self.blend.replace(part.to_string()).is_none();
         }
         if (matches!(part, "left" | "right" | "top" | "bottom" | "center")
             || parse_length(part).is_some()
@@ -1202,9 +1208,34 @@ impl BgParts {
                     .cloned()
                     .unwrap_or_else(|| "border-box".to_string()),
             ),
+            (
+                "background-blend-mode".to_string(),
+                self.blend.unwrap_or_else(|| "normal".to_string()),
+            ),
         ]
     }
 }
+
+/// Keywords `<blend-mode>` du shorthand `background` (R-184)
+/// — mêmes valeurs que `background-blend-mode` longhand.
+const BG_BLEND_TOKENS: [&str; 16] = [
+    "normal",
+    "multiply",
+    "screen",
+    "overlay",
+    "darken",
+    "lighten",
+    "color-dodge",
+    "color-burn",
+    "hard-light",
+    "soft-light",
+    "difference",
+    "exclusion",
+    "hue",
+    "saturation",
+    "color",
+    "luminosity",
+];
 
 /// Tokenisation du shorthand `background` : espaces hors
 /// parenthèses seulement — `linear-gradient(to right, red,

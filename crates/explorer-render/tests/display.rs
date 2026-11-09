@@ -2677,3 +2677,34 @@ fn writing_mode_emet_push_transform() {
         "transform de flux attendu dans {items:?}"
     );
 }
+
+/// R-184 — `background-blend-mode` : tag porté par
+/// `BackgroundImage::blend` (0 = normal, index+1 =
+/// `BLEND_MODES`) ; `background-clip:text` émet la couche
+/// une fois par fragment de ligne (`PushClip`).
+#[test]
+fn background_blend_et_clip_text() {
+    use explorer_render::DisplayItem;
+    let (_, _, items) = dl(
+        "<div style=\"width:100px;height:40px;\
+         background:linear-gradient(to right,red,blue) luminosity,\
+                   url(data:image/png;base64,) multiply;\
+         background-clip:text;border-radius:0\">\
+         <span>AB</span></div>",
+        "",
+    );
+    // Une couche au moins porte blend ≠ 0, et clip:text →
+    // plusieurs PushClip (un par fragment).
+    assert!(
+        items.iter().any(|it| matches!(
+            it,
+            DisplayItem::BackgroundImage { blend, .. } if *blend > 0
+        )),
+        "blend attendu dans {items:?}"
+    );
+    let clips = items
+        .iter()
+        .filter(|it| matches!(it, DisplayItem::PushClip(_)))
+        .count();
+    assert!(clips >= 1, "PushClip de clip:text attendu");
+}
