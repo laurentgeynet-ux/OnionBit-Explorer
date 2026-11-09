@@ -905,6 +905,16 @@ impl Engine {
                     }
                     let desc = self.describe_rejection(t);
                     self.unhandled_reports.push(format!("uncaught: {desc}"));
+                    // §B-118 — la même info partait seulement
+                    // vers le ring (drain session jamais
+                    // branché) : un throw avalé de microtask
+                    // tuait la boot-chain sans aucune trace en
+                    // vol (pluto `initialize` mort silencieux).
+                    tracing::info!(
+                        target: "media_probe",
+                        site = "prom.uncaught",
+                        desc = %desc
+                    );
                 }
             }
             // J11 — sortie gracieuse sur yield : jobs restants

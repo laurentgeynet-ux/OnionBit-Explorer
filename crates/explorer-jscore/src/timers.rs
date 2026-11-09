@@ -295,6 +295,14 @@ impl Engine {
                 let dead = streak >= TIMER_FAIL_CAP;
                 let desc = self.describe(v);
                 self.unhandled_reports.push(format!("uncaught: {desc}"));
+                // §B-118 — même classe que le rail microtask :
+                // throw avalé de timer traçé pour le vol
+                // (sinon invisible — drain session non branché).
+                tracing::info!(
+                    target: "media_probe",
+                    site = "prom.uncaught",
+                    desc = %desc
+                );
                 if dead && t.interval_ms.is_some() {
                     // Intervalle mort-né : ≥cap échecs → pas de
                     // réarmement (borne hostile — trace une fois).
