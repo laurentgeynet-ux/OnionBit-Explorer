@@ -11211,3 +11211,48 @@ un crate PIPELINE.- [x] **JS-C422. Deadline honnête — canal session ↔ budge
   continue ~2-3 min — reports
   d'avancement précoces =
   chantier suivant).
+  **Vol 766 — watchdog désarmé**
+  (même daemon, probe
+  `501e08a` perf/baseline —
+  reports d'avancement
+  précoces : tant que
+  `MediaClock` n'a pas tické,
+  `pos` = tête de la plage
+  `buffered_ranges` P-70,
+  `dur` = fin de plage si
+  `duration_ms` inconnu) :
+  premier `[state]`
+  `pos=46 790 000 dur=46 791 732`
+  (vs `0`/`0`) → **zéro
+  `mse.attach` pendant les
+  302 s du claim** (dernier
+  attach logué 16:44:37, avant
+  le claim ~16:52 — cycles
+  ~2 min auparavant), surface
+  `#6` unique claimée du début
+  à la fin, verdict
+  `frames=60 pcm=1 917 040
+  sessions=1 reclaims=0
+  underrun=0`, release `200`.
+  Le churn SABR est coupé à la
+  source — la boucle
+  `--reclaim` reste en secours.
+  ⚠ Nuance honnête : le player
+  n'a **pas repris les fetches**
+  `videoplayback` ni les
+  appends `mse.deliver` pendant
+  le claim (derniers ~16:49 —
+  avant le claim) : « dormant-
+  satisfait » plausible (pos≈
+  bord live → latency≈0 → plus
+  rien à chercher sur sa
+  cadence) mais « satisfait-
+  figé » non exclu (`dur` fin
+  de plage figée = lecture d'un
+  « VOD » dont la fin approche).
+  Discriminant à venir : vol
+  long + sonde `v.buffered`
+  (ctx iframe) ou comptage
+  appends — vrai flux live =
+  l'appends reprennent ; figé =
+  rester muet.
