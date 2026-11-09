@@ -222,7 +222,7 @@ fn transform_matrix(raw: &str, rect: &Rect) -> Option<Affine> {
                 args.get(1)
                     .map_or(0.0, |v| tf_len_px(v, rect.height).unwrap_or(0.0) as f32),
             ),
-            "translatez" | "scalez" => Affine::IDENTITY,
+            "translatez" | "scalez" | "perspective" => Affine::IDENTITY,
             "matrix3d" => {
                 // `matrix3d(m11..m44)` : la sous-matrice 2D est
                 // (m11 m12 m14, m21 m22 m24, m41 m42) — indices
@@ -260,8 +260,6 @@ fn transform_matrix(raw: &str, rect: &Rect) -> Option<Affine> {
                 e: 0.0,
                 f: 0.0,
             },
-            "rotatez" => Affine::rotate(tf_angle(args.first()?)?.to_degrees() as f32),
-            "perspective" => Affine::IDENTITY,
             "rotate3d" => {
                 // Rotation d'axe `(x,y,z)` : seule la
                 // composante z projette en 2D — axe autre
@@ -284,7 +282,7 @@ fn transform_matrix(raw: &str, rect: &Rect) -> Option<Affine> {
             }
             "scalex" => Affine::scale(num(0)? as f32, 1.0),
             "scaley" => Affine::scale(1.0, num(0)? as f32),
-            "rotate" => {
+            "rotate" | "rotatez" => {
                 // `tf_angle` rend des radians — `rotate` les
                 // reconvertit en degrés comme `from_rotate`.
                 Affine::rotate(tf_angle(args.first()?)?.to_degrees() as f32)
