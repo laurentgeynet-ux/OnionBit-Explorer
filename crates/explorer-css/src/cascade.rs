@@ -157,6 +157,49 @@ fn decl_supported(name: &str, value: &str) -> bool {
 /// supported` → les `not (…)` de feature-detection restent
 /// honnêtes (les auteurs écrivent `not` contre les trucs
 /// récents qui sont ici absents de fait).
+/// Propriétés « quirky length » (HTML Standard §quirks) :
+/// en quirks mode, SEULES celles-ci acceptent un entier nu
+/// comme `Npx` — liste fermée (un `grid-row:2` ne devient
+/// jamais `2px`, R-182 suite).
+const QUIRKY_LENGTH_PROPS: &[&str] = &[
+    "block-size",
+    "border-spacing",
+    "border-top-width",
+    "border-right-width",
+    "border-bottom-width",
+    "border-left-width",
+    "bottom",
+    "clip",
+    "column-gap",
+    "row-gap",
+    "font-size",
+    "height",
+    "inline-size",
+    "left",
+    "letter-spacing",
+    "margin-top",
+    "margin-right",
+    "margin-bottom",
+    "margin-left",
+    "max-block-size",
+    "max-height",
+    "max-inline-size",
+    "max-width",
+    "min-block-size",
+    "min-height",
+    "min-inline-size",
+    "min-width",
+    "padding-top",
+    "padding-right",
+    "padding-bottom",
+    "padding-left",
+    "right",
+    "text-indent",
+    "top",
+    "width",
+    "word-spacing",
+];
+
 const SUPPORTED_PROPS: &[&str] = &[
     "accent-color",
     "align-content",
@@ -355,6 +398,7 @@ const SUPPORTED_PROPS: &[&str] = &[
     "text-underline-offset",
     "top",
     "transform",
+    "transform-box",
     "transform-origin",
     "transform-style",
     "perspective",
@@ -1841,6 +1885,7 @@ impl StyleEngine {
                     if value_is_valid_for(&lname, &d.value) {
                         props.insert(lname, d.value.clone());
                     } else if matches!(dom.document_mode(), explorer_dom::DocumentMode::Quirks)
+                        && QUIRKY_LENGTH_PROPS.contains(&lname.as_str())
                         && d.value.trim().parse::<f32>().is_ok()
                     {
                         // R-182 — quirks « unitless length » :

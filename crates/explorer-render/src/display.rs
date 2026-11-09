@@ -4547,7 +4547,11 @@ fn legacy_clip_rect(v: &str, r: Rect, px: &dyn Fn(&str, f32) -> Option<f32>) -> 
 
 /// R-188 — `backface-visibility:hidden` + transform 3D
 /// dont le déterminant projeté est négatif (dos tourné) →
-/// la boîte ne se peint pas.
+/// la boîte ne se peint pas. Seule la transform **propre**
+/// compte : sans `preserve-3d` (non implémenté), les enfants
+/// s'aplatissent dans le plan du parent — leur « dos » ne
+/// dépend alors que de leur propre matrice (css-transforms-2
+/// — le cas hérité d'ancêtre n'existe qu'en preserve-3d).
 fn backface_hidden(bx: &LayoutBox) -> bool {
     bx.style
         .get("backface-visibility")

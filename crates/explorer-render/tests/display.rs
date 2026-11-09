@@ -2929,3 +2929,40 @@ fn props_transform_individuelles() {
         "translate:10px 5px → tx≈10 dans {items:?}"
     );
 }
+
+/// R-188 suite — `transform-box` : les `%` de la fonction
+/// et `transform-origin` se résolvent contre la boîte de
+/// référence choisie (`content-box` = moins bordure+padding,
+/// `border-box` = défaut).
+#[test]
+fn transform_box_content_box_change_la_reference() {
+    use explorer_render::DisplayItem;
+    let tx_of = |items: &[DisplayItem]| -> f32 {
+        items
+            .iter()
+            .find_map(|i| match i {
+                DisplayItem::PushTransform(m) => Some(m.tx),
+                _ => None,
+            })
+            .unwrap_or(f32::NAN)
+    };
+    // `translate(50%,0)` : % contre la boîte de référence —
+    // `content-box` = border-box moins les 20px de bordures
+    // → tx décalé de 10px, indépendamment du box-sizing.
+    let (_, _, bb) = dl(
+        "<div id=s>x</div>",
+        "#s{position:absolute;width:200px;height:200px;\
+         border:10px solid black;transform:translate(50%, 0)}",
+    );
+    let (_, _, cb) = dl(
+        "<div id=s>x</div>",
+        "#s{position:absolute;width:200px;height:200px;\
+         border:10px solid black;transform-box:content-box;\
+         transform:translate(50%, 0)}",
+    );
+    let (tx_bb, tx_cb) = (tx_of(&bb), tx_of(&cb));
+    assert!(
+        (tx_bb - tx_cb - 10.0).abs() < 1.5,
+        "border-box={tx_bb} content-box={tx_cb} — delta attendu 10"
+    );
+}

@@ -308,7 +308,9 @@ fn transform_matrix(raw: &str, rect: &Rect) -> Option<Affine> {
 }
 
 /// Résout `transform-origin` en point absolu de `rect` —
-/// deux valeurs px/`%` (défaut 50 % 50 %).
+/// deux valeurs px/`%` (défaut 50 % 50 %) ; une troisième
+/// valeur `z` est tolérée au parse et ignorée (aplatissement
+/// 2D — R-188, documenté).
 #[allow(clippy::cast_possible_truncation)]
 fn origin_px(st: &ComputedStyle, rect: &Rect) -> (f32, f32) {
     let raw = st.get_or("transform-origin", "50% 50%");
@@ -466,6 +468,43 @@ fn individual_transform(st: &ComputedStyle, rect: &Rect) -> Option<Affine> {
     any.then_some(m)
 }
 
+/// `transform-box` → boîte de référence des `%` et de
+/// `transform-origin` (css-transforms §transform-box,
+/// R-188 suite) : `border-box` (défaut) ; `padding-box` =
+/// moins les bordures ; `content-box` = moins bordures +
+/// padding. `fill-box`/`stroke-box`/`view-box` (boîte
+/// objet SVG) → repli `border-box` documenté — pas de
+/// boîte objet distincte pour nos éléments.
+#[allow(clippy::cast_possible_truncation)]
+fn transform_box_rect(st: &ComputedStyle, rect: &Rect) -> Rect {
+    let len = |p: &str, base: f32| -> f32 {
+        st.get(p).and_then(|v| tf_len_px(v, base)).unwrap_or(0.0) as f32
+    };
+    let bl = len("border-left-width", rect.width);
+    let br = len("border-right-width", rect.width);
+    let bt = len("border-top-width", rect.height);
+    let bb = len("border-bottom-width", rect.height);
+    let mut r = *rect;
+    let tb = st.get("transform-box").map(str::trim);
+    if matches!(tb, Some("padding-box" | "content-box")) {
+        r.x += bl;
+        r.y += bt;
+        r.width = (r.width - bl - br).max(0.0);
+        r.height = (r.height - bt - bb).max(0.0);
+        if tb == Some("content-box") {
+            let pl = len("padding-left", rect.width);
+            let pr = len("padding-right", rect.width);
+            let pt = len("padding-top", rect.height);
+            let pb = len("padding-bottom", rect.height);
+            r.x += pl;
+            r.y += pt;
+            r.width = (r.width - pl - pr).max(0.0);
+            r.height = (r.height - pt - pb).max(0.0);
+        }
+    }
+    r
+}
+
 /// `transform` d'une boîte → matrice complète (origine
 /// incluse, exprimée dans le repère du `rect` passé —
 /// document ou décalé scroll) — `None` si
@@ -485,18 +524,21 @@ pub fn box_transform(bx: &LayoutBox, rect: &Rect) -> Option<Affine> {
     if matches!(bx.kind, BoxKind::AnonymousBlock | BoxKind::Text) {
         return None;
     }
+    // Boîte de référence `transform-box` (R-188 suite) —
+    // `%` des fonctions et `transform-origin` s'y résolvent.
+    let trect = transform_box_rect(&bx.style, rect);
     // CSS Transforms 2 (R-188) : `translate`/`rotate`/
     // `scale` individuelles s'appliquent AVANT `transform`.
     let mut any = false;
     let mut m = Affine::IDENTITY;
-    if let Some(t) = individual_transform(&bx.style, rect) {
+    if let Some(t) = individual_transform(&bx.style, &trect) {
         m = t;
         any = true;
     }
     if let Some(t) = bx
         .style
         .get("transform")
-        .and_then(|raw| transform_matrix(raw, rect))
+        .and_then(|raw| transform_matrix(raw, &trect))
     {
         m = m.post_concat(t);
         any = true;
@@ -504,7 +546,7 @@ pub fn box_transform(bx: &LayoutBox, rect: &Rect) -> Option<Affine> {
     if !any {
         return None;
     }
-    let (ox, oy) = origin_px(&bx.style, rect);
+    let (ox, oy) = origin_px(&bx.style, &trect);
     // F(p) = o + M(p − o) : post-concaténation dans l'ordre
     // d'application — T(−o) d'abord, M, puis T(+o).
     Some(
