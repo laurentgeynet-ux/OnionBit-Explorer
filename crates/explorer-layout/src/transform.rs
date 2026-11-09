@@ -238,6 +238,30 @@ fn transform_matrix(raw: &str, rect: &Rect) -> Option<Affine> {
                 }
             }
             "scale3d" => Affine::scale(num(0)? as f32, num(1)? as f32),
+            // R-188 — 3D : `rotateZ`/`rotate3d` = rotation
+            // plan ; `rotateX`/`rotateY` = compression du
+            // côté orthogonal (projection affine — le warp
+            // perspective non-affine est différé documenté) ;
+            // `perspective(d)` = matrice de projection —
+            // approximation identité (affine) documentée.
+            "rotatex" => Affine {
+                a: 1.0,
+                b: 0.0,
+                c: 0.0,
+                d: tf_angle(args.first()?)?.to_degrees().to_radians().cos() as f32,
+                e: 0.0,
+                f: 0.0,
+            },
+            "rotatey" => Affine {
+                a: tf_angle(args.first()?)?.to_degrees().to_radians().cos() as f32,
+                b: 0.0,
+                c: 0.0,
+                d: 1.0,
+                e: 0.0,
+                f: 0.0,
+            },
+            "rotatez" => Affine::rotate(tf_angle(args.first()?)?.to_degrees() as f32),
+            "perspective" => Affine::IDENTITY,
             "rotate3d" => {
                 // Rotation d'axe `(x,y,z)` : seule la
                 // composante z projette en 2D — axe autre

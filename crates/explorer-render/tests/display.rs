@@ -2780,3 +2780,28 @@ fn clip_path_polygon_emet_clip() {
         "PushClipPath attendu dans {items:?}"
     );
 }
+
+/// R-188 — transforms 3D : `rotateX`/`rotateY`/`rotateZ`/
+/// `perspective` → projection affine ; `backface-visibility:
+/// hidden` + dos tourné (rotateY 180°) → non peint.
+#[test]
+fn rotate3d_projete_affine_et_backface() {
+    use explorer_render::DisplayItem;
+    // rotateX(30deg) → compression Y (d=cos30≈0.87).
+    let (_, _, items) = dl("<div style=\"transform:rotateX(30deg)\">A</div>", "");
+    assert!(
+        items.iter().any(|i| matches!(
+            i, DisplayItem::PushTransform(m) if (m.sy - 0.866).abs() < 0.02)),
+        "rotateX projeté attendu"
+    );
+    // backface-visibility:hidden + rotateY(180deg) → non peint.
+    let (_, _, items) = dl(
+        "<div style=\"transform:rotateY(180deg);\
+         backface-visibility:hidden\">B</div>",
+        "",
+    );
+    assert!(
+        !items.iter().any(|i| matches!(i, DisplayItem::Text { .. })),
+        "dos tourné → pas de texte peint"
+    );
+}

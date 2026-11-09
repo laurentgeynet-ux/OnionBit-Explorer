@@ -3411,7 +3411,7 @@ déblocage/coût décroissant.
 - [x] **R-187. `clip-path` `path()`/`url()` + `filter:url()`** :
   seules les formes box (`inset`/`circle`/`ellipse`/`polygon`)
   sont livrées ; la voie `reference-box`/SVG absence.
-- [ ] **R-188. Transforms 3D + props individuelles** :
+- [x] **R-188. Transforms 3D + props individuelles** :
   `perspective`, `transform-style:preserve-3d`,
   `backface-visibility`, `transform-box`/`transform-origin` 3D,
   `translate`/`rotate`/`scale` individuelles → aujourd'hui

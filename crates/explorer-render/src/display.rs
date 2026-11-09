@@ -4514,6 +4514,16 @@ fn legacy_clip_rect(v: &str, r: Rect, px: &dyn Fn(&str, f32) -> Option<f32>) -> 
     })
 }
 
+/// R-188 — `backface-visibility:hidden` + transform 3D
+/// dont le déterminant projeté est négatif (dos tourné) →
+/// la boîte ne se peint pas.
+fn backface_hidden(bx: &LayoutBox) -> bool {
+    bx.style
+        .get("backface-visibility")
+        .is_some_and(|v| v.trim() == "hidden")
+        && box_transform(bx, &bx.rect).is_some_and(|m| m.sx * m.sy - m.kx * m.ky < 0.0)
+}
+
 fn paint_box<'a>(
     bx: &'a LayoutBox,
     items: &mut Vec<DisplayItem>,
@@ -4555,6 +4565,9 @@ fn paint_box<'a>(
     }
     // R-187 — `clip-path` : la boîte (fond+contenu) ne se
     // peint que dans la géométrie — même pile `clips`.
+    if backface_hidden(bx) {
+        return;
+    }
     let clip_item = clip_path_of(&bx.style, &bx.rect);
     if let Some(it) = &clip_item {
         items.push(it.clone());
