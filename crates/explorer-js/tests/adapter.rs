@@ -536,6 +536,7 @@ fn media_claim_falls_back_to_url_when_path_diverges() {
         "blob:https://h.test/1",
         42,
         Some(vec!["avc1".into()]),
+        explorer_js::JS_CTX_TOP,
     );
     let _ = eng.eval("document.querySelector('video').play()");
     let cmds = eng.drain_media_commands();
@@ -567,11 +568,55 @@ fn media_claim_url_fallback_never_matches_wrong_element() {
         "blob:https://h.test/999",
         7,
         Some(vec!["avc1".into()]),
+        explorer_js::JS_CTX_TOP,
     );
     let _ = eng.eval("document.querySelector('video').play()");
     let cmds = eng.drain_media_commands();
     assert!(
         cmds.is_empty(),
         "aucun élément ne doit être claimé — {cmds:?}"
+    );
+}
+
+/// §B-123 — le claim d'une surface d'`<iframe>` se résout
+/// dans le miroir de SON contexte (`ctx_doms`), pas dans le
+/// top : le `play()` émis dans le realm enfant remonte en
+/// `MediaCommand` — preuve de bout en bout du routage.
+#[test]
+fn media_claim_routes_to_iframe_ctx() {
+    let mut eng = JscoreEngine::new();
+    eng.install_dom(
+        "<html><body><iframe></iframe></body></html>",
+        "http://h.test/p",
+        1,
+    );
+    let Some(ctx) = eng.context_new("http://f.test/embed", Some(0)) else {
+        panic!("contexte iframe attendu");
+    };
+    eng.install_dom_ctx(
+        ctx,
+        "<html><body><video src=\"blob:http://f.test/1\"></video></body></html>",
+        "http://f.test/embed",
+        std::collections::BTreeMap::new(),
+        "",
+    );
+    eng.set_media_claim(
+        &[
+            ("html".to_string(), 0),
+            ("body".to_string(), 0),
+            ("video".to_string(), 0),
+        ],
+        "blob:http://f.test/1",
+        42,
+        Some(vec!["avc1".into()]),
+        ctx,
+    );
+    let r = eng.eval_ctx(ctx, "document.querySelector('video').play()", None);
+    assert!(r.is_ok(), "play() dans le ctx enfant : {r:?}");
+    let cmds = eng.drain_media_commands();
+    assert!(
+        cmds.iter()
+            .any(|c| c.media == 42 && c.cmd == explorer_js::JsMediaCmd::Play),
+        "le play() du ctx enfant doit rejoindre la surface 42 — {cmds:?}"
     );
 }

@@ -460,6 +460,10 @@ pub struct MediaOfferInfo {
     /// `timestampOffset` de chaque `SourceBuffer` — même
     /// ordre que `mse_buffers` (P-54 `pts_offset_secs`).
     pub mse_offsets: Vec<f64>,
+    /// Realm propriétaire (`0` = document top-level,
+    /// §B-123) — une surface d'`<iframe>` est routée vers
+    /// le miroir de son contexte.
+    pub frame_ctx: u32,
 }
 
 /// Refus sur une surface média (étape 71b) — mappé `409`/

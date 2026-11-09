@@ -104,6 +104,12 @@ pub(crate) struct MediaSurface {
     /// sans UI — jamais composite natif, aucun slice à
     /// couper pour lui).
     pub(crate) box_path: Option<Box<[u16]>>,
+    /// Realm propriétaire — `JS_CTX_TOP` pour le document
+    /// top-level, ctx enfant pour une surface d'un
+    /// sous-document `<iframe>` (§B-123). `path` se résout
+    /// dans le miroir de ce contexte ; le claim/report
+    /// doivent y être routés.
+    pub(crate) frame_ctx: explorer_js::JsCtxId,
 }
 
 /// Contexte de peinture d'une boîte média (étape 185) —
@@ -184,6 +190,10 @@ struct GoneSurface {
     url: String,
     /// La surface était claimée par l'hôte.
     claimed: bool,
+    /// Realm propriétaire (`JS_CTX_TOP` = document
+    /// top-level) — le unclaim vise le miroir de ce
+    /// contexte.
+    frame_ctx: explorer_js::JsCtxId,
 }
 
 /// Élément média détecté sur le boxtree posé — image fixe
@@ -231,6 +241,13 @@ struct ScannedMedia {
     /// `timestampOffset` par rail — même ordre que
     /// `mse_buffers` (P-54 `pts_offset_secs`).
     mse_offsets: Vec<f64>,
+    /// Realm propriétaire — `JS_CTX_TOP` pour le document
+    /// top-level, ctx enfant pour une surface scannée dans
+    /// le `SubFrame` d'un `<iframe>` (§B-123 : la `<video>`
+    /// d'un player embarqué vit dans le document du cadre,
+    /// jamais dans le DOM parent). Le `path` s'interprète
+    /// dans le miroir de ce contexte.
+    frame_ctx: explorer_js::JsCtxId,
 }
 
 /// MIME média déduit du suffixe d'URL (contrat : `type` >
@@ -538,12 +555,17 @@ impl MediaCtx {
 /// élément média sans boîte (display:none explicite) reste
 /// offert à 0×0 : l'hôte n'attache que le pipeline. Pas de
 /// source → pas d'offre (honnêteté ADR-0023 conservée).
+/// Carte `NodeId → (rect, meta, box_path)` du boxtree posé
+/// — partagée entre le scan top-level et la résolution des
+/// rects d'`<iframe>` porteurs de surfaces enfants.
+type MediaRects = HashMap<NodeId, (MediaRect, MediaMeta, Box<[u16]>)>;
+
 fn scan_media(
     tree: &LayoutBox,
     dom: &Dom,
     base: &Url,
     declared: &std::collections::HashSet<String>,
-) -> Vec<ScannedMedia> {
+) -> (Vec<ScannedMedia>, MediaRects) {
     // Rects + contexte peint par nœud source — une passe
     // itérative sur l'arbre posé (un élément = au plus une
     // boîte ici). `MediaCtx` descend avec la récursion :
@@ -593,6 +615,39 @@ fn scan_media(
         w: 0.0,
         h: 0.0,
     };
+    let scanned = scan_media_nodes(
+        dom,
+        base,
+        declared,
+        explorer_js::JS_CTX_TOP,
+        &|n| rects.get(&n).map(|(r, m, p)| (*r, *m, Some(p.clone()))),
+        zero,
+    );
+    (scanned, rects)
+}
+
+/// Parcours DOM d'un document (top-level ou `SubFrame`)
+/// à la recherche des éléments média offrables — le même
+/// code sert aux deux : seules changent la résolution de
+/// boîte (`rect_of`) et le realm propriétaire (`frame_ctx`).
+/// Une surface de sous-document reçoit pour `rect`/`meta`
+/// celles de l'`<iframe>` porteur dans le layout parent
+/// (approximation documentée : le player occupe le cadre ;
+/// `box_path` reste `None` — pas de coupe top-slice dans
+/// un bitmap de sous-frame déjà composite en bloc).
+/// Résolution `NodeId → (rect, meta, box_path)` d'un document
+/// scanné — le layout top pour le document principal, la
+/// boîte de l'`<iframe>` porteur pour un sous-document.
+type RectOf<'a> = &'a dyn Fn(NodeId) -> Option<(MediaRect, MediaMeta, Option<Box<[u16]>>)>;
+
+fn scan_media_nodes(
+    dom: &Dom,
+    base: &Url,
+    declared: &std::collections::HashSet<String>,
+    frame_ctx: explorer_js::JsCtxId,
+    rect_of: RectOf<'_>,
+    zero: MediaRect,
+) -> Vec<ScannedMedia> {
     let mut out = Vec::new();
     for n in dom.descendants(dom.document()).into_iter().flatten() {
         let kind = match dom.tag_name(n) {
@@ -617,10 +672,7 @@ fn scan_media(
                     let (rect, meta, box_path) = if kind == MediaKind::Audio && !controls {
                         (zero, MediaMeta::default(), None)
                     } else {
-                        rects
-                            .get(&n)
-                            .map(|(r, m, p)| (*r, *m, Some(p.clone())))
-                            .unwrap_or((zero, MediaMeta::default(), None))
+                        rect_of(n).unwrap_or((zero, MediaMeta::default(), None))
                     };
                     out.push(ScannedMedia {
                         kind,
@@ -639,6 +691,7 @@ fn scan_media(
                         mse: false,
                         mse_buffers: Vec::new(),
                         mse_offsets: Vec::new(),
+                        frame_ctx,
                     });
                 }
             }
@@ -745,7 +798,7 @@ fn js_audio_spec_of(spec: MediaAudioSpec) -> explorer_js::JsAudioSpec {
 fn sync_claim_to_engine(m: &mut MediaSurface, js: &mut Option<Box<dyn JsEngine>>) {
     if m.claim_pending {
         if let Some(e) = js.as_mut() {
-            e.set_media_claim(&m.path, &m.url, m.id, m.claim.clone());
+            e.set_media_claim(&m.path, &m.url, m.id, m.claim.clone(), m.frame_ctx);
             m.claim_pending = false;
         }
     }
@@ -757,7 +810,7 @@ fn sync_claim_to_engine(m: &mut MediaSurface, js: &mut Option<Box<dyn JsEngine>>
 fn sync_report_to_engine(m: &mut MediaSurface, js: &mut Option<Box<dyn JsEngine>>) {
     if m.report_pending {
         if let (Some(e), Some(rep)) = (js.as_mut(), m.report.as_ref()) {
-            e.deliver_media_state(&m.path, m.id, js_report_of(rep));
+            e.deliver_media_state(&m.path, m.id, js_report_of(rep), m.frame_ctx);
             m.report_pending = false;
         }
     }
@@ -793,7 +846,37 @@ impl Session {
             else {
                 return;
             };
-            let mut scanned = scan_media(tree, dom, base, &self.declared_media_codecs);
+            let (mut scanned, rects) = scan_media(tree, dom, base, &self.declared_media_codecs);
+            // §B-123 — surfaces des sous-documents : la
+            // `<video>` d'un player `<iframe>` (embed YT,
+            // lecteur tiers) vit dans `SubFrame.dom` —
+            // le scan top-level ne la voit jamais. Rect =
+            // boîte de l'`<iframe>` porteur (`fc.node`,
+            // mort éventuel → 0×0) : le player occupe le
+            // cadre. `mse` est relu au marquage moteur —
+            // le registre `object_urls` est global.
+            for fc in &entry.frame_ctxs {
+                let Some(sf) = entry.frames.get(fc.sub) else {
+                    continue;
+                };
+                let zero = MediaRect {
+                    x: 0.0,
+                    y: 0.0,
+                    w: 0.0,
+                    h: 0.0,
+                };
+                let (rect, meta) = rects
+                    .get(&fc.node)
+                    .map_or((zero, MediaMeta::default()), |(r, m, _)| (*r, *m));
+                scanned.extend(scan_media_nodes(
+                    &sf.dom,
+                    &sf.url,
+                    &self.declared_media_codecs,
+                    fc.ctx,
+                    &|_| Some((rect, meta, None)),
+                    zero,
+                ));
+            }
             // Marquage MSE (MSE-2, ADR-0029) — le registre
             // vit dans le moteur : `blob:` + `is_media_source`
             // → l'offre route vers `GET …/segments`.
@@ -817,11 +900,9 @@ impl Session {
             let mut retained: Vec<Option<MediaSurface>> = Vec::new();
             retained.resize_with(scanned.len(), || None);
             for mut o in old {
-                if let Some(pos) = scanned
-                    .iter()
-                    .enumerate()
-                    .position(|(i, s)| !matched[i] && s.kind == o.kind && s.url == o.url)
-                {
+                if let Some(pos) = scanned.iter().enumerate().position(|(i, s)| {
+                    !matched[i] && s.kind == o.kind && s.url == o.url && s.frame_ctx == o.frame_ctx
+                }) {
                     matched[pos] = true;
                     let s = &scanned[pos];
                     if s.rect != o.rect {
@@ -860,6 +941,7 @@ impl Session {
                         path: o.path.clone(),
                         url: o.url.clone(),
                         claimed: o.claim.is_some(),
+                        frame_ctx: o.frame_ctx,
                     });
                 }
             }
@@ -890,6 +972,7 @@ impl Session {
                         mse_buffers: s.mse_buffers,
                         mse_offsets: s.mse_offsets,
                         meta: s.meta,
+                        frame_ctx: s.frame_ctx,
                     };
                     offered.push(MediaSurface {
                         id,
@@ -911,6 +994,7 @@ impl Session {
                         mse: surf.mse,
                         mse_offsets: surf.mse_offsets.clone(),
                         meta: surf.meta,
+                        frame_ctx: surf.frame_ctx,
                     });
                     media.push(surf);
                 }
@@ -933,7 +1017,7 @@ impl Session {
         for g in gone {
             if g.claimed {
                 if let Some(eng) = self.tabs.get_mut(&tab).and_then(|e| e.js.as_mut()) {
-                    eng.set_media_claim(&g.path, &g.url, g.id, None);
+                    eng.set_media_claim(&g.path, &g.url, g.id, None, g.frame_ctx);
                 }
             }
             let _ = self.events.send(CoreEvent::MediaGone { tab, media: g.id });
@@ -1027,6 +1111,7 @@ impl Session {
                         mse: m.mse,
                         mse_buffers: m.mse_buffers.clone(),
                         mse_offsets: m.mse_offsets.clone(),
+                        frame_ctx: m.frame_ctx,
                     })
                     .collect()
             })
@@ -1201,7 +1286,7 @@ impl Session {
         // no-op silencieux à vie (gel post-claim, étape 182).
         sync_claim_to_engine(m, &mut entry.js);
         if let Some(eng) = entry.js.as_mut() {
-            eng.deliver_media_state(&m.path, m.id, js_report_of(&report));
+            eng.deliver_media_state(&m.path, m.id, js_report_of(&report), m.frame_ctx);
             m.report_pending = false;
         } else {
             // Fenêtre pompe : le dernier rapport est retenu
@@ -1241,7 +1326,7 @@ impl Session {
         }
         sync_claim_to_engine(m, &mut entry.js);
         if let Some(eng) = entry.js.as_mut() {
-            eng.deliver_media_audio(&m.path, m.id, js_audio_spec_of(spec), chunk);
+            eng.deliver_media_audio(&m.path, m.id, js_audio_spec_of(spec), chunk, m.frame_ctx);
         }
         Ok(())
     }
@@ -1327,6 +1412,7 @@ pub fn media_offer_json(m: &MediaOfferInfo) -> serde_json::Value {
         "url": m.url, "mime": m.mime,
         "mse": m.mse, "mseBuffers": m.mse_buffers,
         "mseOffsets": m.mse_offsets,
+        "frameCtx": m.frame_ctx,
         "controls": m.controls, "autoplay": m.autoplay, "loop": m.looping,
         "preload": m.preload.as_str(),
         "claimed": m.claim.is_some(),

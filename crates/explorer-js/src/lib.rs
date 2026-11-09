@@ -1479,13 +1479,18 @@ pub trait JsEngine: Send {
     /// le path diverge du miroir (vol 176-ter : le JS peut
     /// réordonner le miroir plus vite que les applies ne
     /// resynchronisent le réel → path frais obsolète).
-    /// Défaut : rien (pas de surface média).
+    /// `ctx` = realm propriétaire de la surface — `JS_CTX_TOP`
+    /// pour le document top-level, ctx enfant pour une
+    /// surface d'un `<iframe>` (§B-123 : le nœud miroir vit
+    /// dans le `DomRef` de ce contexte). Défaut : rien (pas
+    /// de surface média).
     fn set_media_claim(
         &mut self,
         _path: &[(String, u32)],
         _url: &str,
         _media: u64,
         _codecs: Option<Vec<String>>,
+        _ctx: JsCtxId,
     ) {
     }
 
@@ -1507,12 +1512,15 @@ pub trait JsEngine: Send {
     /// Rapport sur élément non claimé/mort → ignoré.
     /// `media` = id de surface session — permet de retrouver
     /// le nœud déjà résolu au claim sans re-tenter un path
-    /// obsolète. Défaut : rien.
+    /// obsolète. `ctx` = realm propriétaire (§B-123 — le
+    /// repli `path` se résout dans le miroir de ce
+    /// contexte). Défaut : rien.
     fn deliver_media_state(
         &mut self,
         _path: &[(String, u32)],
         _media: u64,
         _report: JsMediaReport,
+        _ctx: JsCtxId,
     ) {
     }
 
@@ -1521,13 +1529,16 @@ pub trait JsEngine: Send {
     /// alimente le ring `pcm` par surface, lu par le graphe
     /// Web Audio (`MediaElementAudioSourceNode`, 204c).
     /// Chunks hors fenêtre moteur = perdus (flux — pas de
-    /// rejeu). Défaut : rien.
+    /// rejeu). `ctx` = realm de la surface (§B-123 — le
+    /// ring PCM est lu par le graphe Web Audio **de ce
+    /// contexte**). Défaut : rien.
     fn deliver_media_audio(
         &mut self,
         _path: &[(String, u32)],
         _media: u64,
         _spec: JsAudioSpec,
         _chunk: &[u8],
+        _ctx: JsCtxId,
     ) {
     }
 
@@ -1915,16 +1926,19 @@ enum Cmd {
         url: String,
         media: u64,
         codecs: Option<Vec<String>>,
+        ctx: JsCtxId,
     },
     DeliverMediaState {
         path: Vec<(String, u32)>,
         media: u64,
         report: JsMediaReport,
+        ctx: JsCtxId,
     },
     DeliverMediaAudio {
         media: u64,
         spec: JsAudioSpec,
         chunk: Vec<u8>,
+        ctx: JsCtxId,
     },
     NoteMediaCodecs {
         codecs: Vec<String>,
@@ -2972,6 +2986,7 @@ impl JscoreEngine {
                         let _ = serve_side(
                             eng,
                             jsd.as_ref(),
+                            ctx_doms,
                             net_q,
                             jar,
                             local_store,
@@ -3746,20 +3761,29 @@ impl JsEngine for JscoreEngine {
         url: &str,
         media: u64,
         codecs: Option<Vec<String>>,
+        ctx: JsCtxId,
     ) {
         let _ = self.tx.send(Cmd::SetMediaClaim {
             path: path.to_vec(),
             url: url.to_string(),
             media,
             codecs,
+            ctx,
         });
     }
 
-    fn deliver_media_state(&mut self, path: &[(String, u32)], media: u64, report: JsMediaReport) {
+    fn deliver_media_state(
+        &mut self,
+        path: &[(String, u32)],
+        media: u64,
+        report: JsMediaReport,
+        ctx: JsCtxId,
+    ) {
         let _ = self.tx.send(Cmd::DeliverMediaState {
             path: path.to_vec(),
             media,
             report,
+            ctx,
         });
     }
 
@@ -3769,6 +3793,7 @@ impl JsEngine for JscoreEngine {
         media: u64,
         spec: JsAudioSpec,
         chunk: &[u8],
+        ctx: JsCtxId,
     ) {
         // Pas de `path` dans le Cmd : le ring est clé par id
         // de surface — le lien nœud↔media se résout à la
@@ -3777,6 +3802,7 @@ impl JsEngine for JscoreEngine {
             media,
             spec,
             chunk: chunk.to_vec(),
+            ctx,
         });
     }
 
@@ -3981,10 +4007,11 @@ fn dispatch_event(
 /// miroir). `false` = canal de réponse fermé → le worker
 /// s'arrête ; tout autre `Cmd` est ignoré (invariant :
 /// l'appelant ne délègue que ces commandes).
-#[allow(clippy::too_many_lines)] // match de dispatch, chaque bras documenté in situ
+#[allow(clippy::too_many_lines, clippy::too_many_arguments)] // match de dispatch, chaque bras documenté in situ ; le canal mutualise l'état worker
 fn serve_side(
     eng: &mut explorer_jscore::Engine,
     jsd: Option<&explorer_jscore::DomRef>,
+    ctx_doms: &HashMap<JsCtxId, explorer_jscore::DomRef>,
     net_q: &std::rc::Rc<std::cell::RefCell<Vec<NetRequest>>>,
     jar: &std::rc::Rc<SnapshotJar>,
     local_store: &mut Option<explorer_jscore::Storage>,
@@ -4005,25 +4032,68 @@ fn serve_side(
             url,
             media,
             codecs,
+            ctx,
         } => {
-            deliver_media_claim(eng, jsd, media_nodes, &path, &url, media, codecs);
+            // §B-123 — surface d'un `<iframe>` : le nœud
+            // miroir vit dans le `DomRef` de SON contexte
+            // ET `Engine::set_media_claim` opère sur
+            // `dom_ctx` courant — les deux doivent être
+            // dans le realm de la surface.
+            let dref = if ctx == JS_CTX_TOP {
+                jsd
+            } else {
+                ctx_doms.get(&ctx)
+            };
+            let prev = eng.current_context();
+            if ctx != prev {
+                eng.context_switch(ctx);
+            }
+            deliver_media_claim(eng, dref, media_nodes, &path, &url, media, codecs);
+            if eng.current_context() != prev {
+                eng.context_switch(prev);
+            }
             true
         }
         Cmd::DeliverMediaState {
             path,
             media,
             report,
+            ctx,
         } => {
-            deliver_media_state(eng, jsd, media_nodes, &path, media, report);
+            let dref = if ctx == JS_CTX_TOP {
+                jsd
+            } else {
+                ctx_doms.get(&ctx)
+            };
+            let prev = eng.current_context();
+            if ctx != prev {
+                eng.context_switch(ctx);
+            }
+            deliver_media_state(eng, dref, media_nodes, &path, media, report);
+            if eng.current_context() != prev {
+                eng.context_switch(prev);
+            }
             true
         }
         Cmd::DeliverMediaAudio {
-            media, spec, chunk, ..
+            media,
+            spec,
+            chunk,
+            ctx,
         } => {
             // Ring par id de surface — le lien nœud↔media est
             // résolu à la lecture (`createMediaElementSource`,
             // 204c) via la table du claim, pas besoin du path.
+            // §B-123 : le ring vit dans le `MseState` du ctx
+            // de la surface (le graphe Web Audio y lit).
+            let prev = eng.current_context();
+            if ctx != prev {
+                eng.context_switch(ctx);
+            }
             eng.deliver_media_audio(media, spec.sample_rate, spec.channels, spec.format, &chunk);
+            if eng.current_context() != prev {
+                eng.context_switch(prev);
+            }
             true
         }
         Cmd::NoteMediaCodecs { codecs } => {
@@ -4031,18 +4101,24 @@ fn serve_side(
             true
         }
         Cmd::DrainMediaCommands { tx } => {
-            let out: Vec<JsMediaCommand> = jsd
-                .map(|d| {
-                    d.borrow_mut()
-                        .media_cmds
-                        .drain(..)
-                        .map(|(media, cmd)| JsMediaCommand {
-                            media,
-                            cmd: js_media_cmd(cmd),
-                        })
-                        .collect()
-                })
-                .unwrap_or_default();
+            // §B-123 — un `play()`/`pause()` sur la `<video>`
+            // d'un `<iframe>` est consigné dans le
+            // `media_cmds` de SON miroir : drainer chaque
+            // contexte, pas seulement le top.
+            let drain = |d: &explorer_jscore::DomRef| -> Vec<JsMediaCommand> {
+                d.borrow_mut()
+                    .media_cmds
+                    .drain(..)
+                    .map(|(media, cmd)| JsMediaCommand {
+                        media,
+                        cmd: js_media_cmd(cmd),
+                    })
+                    .collect()
+            };
+            let mut out: Vec<JsMediaCommand> = jsd.map(drain).unwrap_or_default();
+            for d in ctx_doms.values() {
+                out.extend(drain(d));
+            }
             tx.send(out).is_ok()
         }
         Cmd::DeliverNet { resp, tx } => {
@@ -4384,7 +4460,13 @@ fn deliver_media_claim(
 ) {
     let node = jsd.and_then(|d| {
         let d = d.borrow();
-        mirror_node(&d, path).or_else(|| mirror_node_by_url(&d, url))
+        let by_path = mirror_node(&d, path).filter(|&n| {
+            // Un path vide (`element_path` en défaut) résout
+            // la **racine** — claimer le document serait un
+            // claim fantôme ; seul un élément média vaut.
+            matches!(d.nodes[n as usize].tag.as_str(), "video" | "audio")
+        });
+        by_path.or_else(|| mirror_node_by_url(&d, url))
     });
     if let Some(n) = node {
         let is_claim = codecs.is_some();

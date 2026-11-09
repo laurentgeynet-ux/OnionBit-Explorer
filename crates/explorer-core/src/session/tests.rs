@@ -1261,6 +1261,73 @@ fn media_offered_scan_kinds_and_rects() {
     assert!(list.iter().all(|m| m.claim.is_none()));
 }
 
+/// §B-123 — la `<video>` d'un sous-document `<iframe>` est
+/// offerte : le scan descend dans `SubFrame.dom`, la
+/// surface porte `frame_ctx` ≠ top et le rect de l'iframe
+/// porteur (le player embarqué — youtube-video YT embed —
+/// n'existerait jamais sinon).
+#[test]
+fn media_subframe_video_offered_with_frame_ctx() {
+    let mut s = Session::new(Arc::new(FailTransport), Arc::new(TestFont));
+    let tab = s.open_tab();
+    let mut rx = s.subscribe();
+    let iframe_node;
+    {
+        let e = s.tabs.get_mut(&tab).unwrap();
+        e.dom = Some(test_dom("<iframe src=\"http://f.test/embed\"></iframe>"));
+        e.url = Some(Url::parse("http://h.test/m").unwrap());
+        iframe_node = {
+            let d = e.dom.as_ref().unwrap();
+            d.descendants(d.document())
+                .into_iter()
+                .flatten()
+                .find(|&n| d.tag_name(n) == Ok("iframe"))
+                .expect("un iframe dans le dom de test")
+        };
+        e.frames.push(SubFrame {
+            url: Url::parse("http://f.test/embed").unwrap(),
+            sandbox: None,
+            srcdoc: None,
+            dom: test_dom("<video src=\"blob:http://f.test/1\" controls></video>"),
+            title: None,
+            html: String::new(),
+        });
+        e.frame_ctxs.push(FrameCtx {
+            ctx: 3,
+            sub: 0,
+            url: Url::parse("http://f.test/embed").unwrap(),
+            node: iframe_node,
+            opaque: false,
+            load_fired: true,
+            el_dyn: None,
+        });
+    }
+    s.relayout(tab).unwrap();
+    s.refresh_media(tab);
+    let evs = media_events(&mut rx);
+    let offered = evs
+        .iter()
+        .filter_map(|e| match e {
+            CoreEvent::MediaOffered { media, url, .. } => Some((*media, url.clone())),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(
+        offered.len(),
+        1,
+        "la vidéo du sous-document est offerte : {evs:?}"
+    );
+    assert_eq!(offered[0].1, "blob:http://f.test/1");
+    let list = s.media_list(tab);
+    assert_eq!(list.len(), 1);
+    assert_eq!(list[0].frame_ctx, 3, "routée vers le ctx de l'iframe");
+    assert!(
+        list[0].rect.w > 0.0,
+        "rect = boîte de l'iframe porteur : {:?}",
+        list[0].rect
+    );
+}
+
 /// a1 — `<source>` filtrés par `type` jouable : un `webm`
 /// en tête ne bloque plus le `mp4` que l'hôte sait décoder.
 /// Les capacités arrivent au claim (`mediaCodecs` hôte) —
@@ -4048,6 +4115,7 @@ fn media_offer_json_carries_loop_and_mse_buffers() {
         mse: true,
         mse_buffers: vec!["video/mp4".into(), "audio/mp4".into()],
         mse_offsets: vec![0.0, 1.25],
+        frame_ctx: 0,
     };
     let j = media_offer_json(&offer);
     assert_eq!(j["loop"], true, "attribut loop propagé");

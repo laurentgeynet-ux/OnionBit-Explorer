@@ -10995,3 +10995,65 @@ un crate PIPELINE.- [x] **JS-C422. Deadline honnête — canal session ↔ budge
   embed (placeholder caméra encore affiché),
   puis MSE/HLS réel. Reste : (c) budget tas
   défaut (~405 Mo).
+- [x] **§B-123 — surfaces média des `<iframe>` :
+  le `<video>` embarqué est offert, le claim
+  routé dans son realm** (vols 760-761).
+  Faits : **vol 760** — sondes `msg.post/dlv/
+  defer/drop` : le defer de `listening` était
+  spec-correct (garé tant que l'embed charge) ;
+  le handshake widgetapi a complété en ~60 s
+  (`initialDelivery` reçu, méthodes Player
+  bindées) mais `getVideoData().errorCode =
+  "html5.missingapi"` — tous les probes
+  `isTypeSupported` rendaient `""` :
+  `declared_n=0`. Cause : le daemon volait
+  **sans `EXPLORER_MEDIA_CODECS`** — la table
+  hôte vide par défaut (honnêteté ADR-0023).
+  **Vol 761** (env `avc1.*;mp4a.*`) :
+  `avc1.4d401e` → `verdict="probably"`,
+  `errorCode=null`, `getPlayerState()=3`
+  (buffering), `/videoplayback` googlevideo
+  200 ×N, `mse.deliver sourceopen/
+  durationchange/progress/updateend` ×N +
+  **second `mse.attach`** (retry player — le
+  décode manque). Mur nommé : `GET …/media`
+  = `[]` — `scan_media` ne parcourait que le
+  DOM top-level ; la `<video>`+`MediaSource`
+  de l'embed vivent dans `SubFrame.dom`
+  (ctx=3) → jamais offerte → rien à claim
+  → `rest_host_probe` muet. Fix JS-C444 :
+  (a) `MediaSurface`/`ScannedMedia`/
+  `GoneSurface` + `frame_ctx` ; `scan_media`
+  extrait `scan_media_nodes(dom,…,rect_of)`
+  — `refresh_media` itère `frame_ctxs` :
+  surface rect = boîte de l'`<iframe>`
+  porteur (approximation documentée),
+  `path` dans le DOM enfant, matching
+  `kind+url+frame_ctx` ; `frameCtx` exposé
+  dans `media_offer_json`. (b) `JsEngine::
+  set_media_claim`/`deliver_media_state`/
+  `deliver_media_audio` + param `ctx` —
+  `serve_side` reçoit `ctx_doms` : le
+  `DomRef` du claim/report vient du ctx de
+  la surface (mort → `None` → warn, jamais
+  de repli sur top) ; **`context_switch`
+  autour des appels moteur** —
+  `Engine::set_media_claim` opère `dom_ctx`
+  courant (le bug profond trouvé : claim
+  iframe marquait le miroir top). (c)
+  `DrainMediaCommands` draine `jsd` + tous
+  `ctx_doms` — un `play()` de la `<video>`
+  embarquée remonte en `MediaCommand`.
+  (d) garde `deliver_media_claim` : nœud
+  résolu non `video`/`audio` (path vide →
+  racine !) → repli `by_url` — claim
+  fantôme sur le document impossible.
+  Verrous : `media_subframe_video_offered_
+  with_frame_ctx` (session), `media_claim_
+  routes_to_iframe_ctx` (adapter — claim →
+  `eval_ctx play()` → `MediaCommand` de
+  bout en bout). Reste : pull `?segments`
+  via `rest_host_probe` → verdict dll
+  (octets→décode→frames) ; le transport
+  `object_urls`/`mse_pull` était déjà
+  global (aucune modif côté file).
