@@ -794,6 +794,24 @@ fn has_el(st: &MseState, node: NodeId) -> bool {
         || st.attached_to.values().any(|&n| n == node)
 }
 
+/// `(ctx, wrapper)` propriétaire de l'object URL `url`
+/// (§B-123) — `object_urls` vit **par contexte** : la
+/// `MediaSource` d'un player `<iframe>` est enregistrée dans
+/// le `MseState` de SON realm, jamais dans `e.mse` quand
+/// l'appel court sous un autre ctx (`is_media_source`/
+/// `mse_pull`/`mse_buffers`/`mse_offsets` depuis la session,
+/// qui ne connaît pas le realm courant du worker). La table
+/// est clé globale de lookup ; les données (`MsData`,
+/// `SbData`) restent résolues par le heap global.
+fn object_url_ctx(e: &Engine, url: &str) -> Option<(CtxId, ObjId)> {
+    if let Some(&mid) = e.mse.object_urls.get(url) {
+        return Some((e.cur_ctx, mid));
+    }
+    e.parked
+        .iter()
+        .find_map(|(id, c)| c.mse.object_urls.get(url).map(|&mid| (*id, mid)))
+}
+
 /// Ctx dont l'`MseState` connaît `node` — pour les accessors
 /// élément (`readyState`/`paused`/`play`/`load`…) appelés
 /// sous un realm parasite.
@@ -2658,9 +2676,10 @@ pub(crate) fn revoke_object_url(e: &mut Engine, url: &str) -> bool {
 /// de la future couture d'offre `mse` côté `explorer-core`
 /// `url` → `ObjId` `MediaSource` enregistré (`createObjectURL`).
 /// Consulté par le scan média core (MSE-2) et par
-/// l'attache `src = blob:`.
+/// l'attache `src = blob:`. §B-123 : le registre est par
+/// contexte — le lookup couvre les realms garés.
 pub(crate) fn object_url_media(e: &Engine, url: &str) -> Option<ObjId> {
-    e.mse.object_urls.get(url).copied()
+    object_url_ctx(e, url).map(|(_, mid)| mid)
 }
 
 /// Attache tentative (MSE-2, ADR-0029) — appelée quand un
@@ -2765,7 +2784,7 @@ impl Engine {
     /// média core pour marquer l'offre `mse` (ADR-0029).
     #[must_use]
     pub fn is_media_source_url(&self, url: &str) -> bool {
-        self.mse.object_urls.contains_key(url)
+        object_url_ctx(self, url).is_some()
     }
 
     /// `readyState` de l'élément MSE-attaché **non claimé**
@@ -2897,7 +2916,7 @@ impl Engine {
         from: Option<u64>,
         peek: bool,
     ) -> Option<MsePullOut> {
-        let mid = self.mse.object_urls.get(url).copied()?;
+        let (_, mid) = object_url_ctx(self, url)?;
         let ms = ms_data(self, Value::Obj(mid))?;
         let sbv = ms.borrow().buffers.get(buffer).cloned()?;
         let sd = sb_data(self, sbv)?;
@@ -2968,7 +2987,7 @@ impl Engine {
     /// `open_mse_multi` : un descripteur par buffer — MSE-3
     /// transport déjà indexé `?buffer=N`). `[]` hors registre.
     pub fn mse_source_buffers(&mut self, url: &str) -> Vec<String> {
-        let Some(mid) = self.mse.object_urls.get(url).copied() else {
+        let Some((_, mid)) = object_url_ctx(self, url) else {
             return Vec::new();
         };
         let Some(ms) = ms_data(self, Value::Obj(mid)) else {
@@ -2987,7 +3006,7 @@ impl Engine {
     /// `0.0` par défaut (spec) ; l'offre `mseOffsets` alimente
     /// `MseDesc::pts_offset_secs` côté `open_mse_multi`.
     pub fn mse_buffer_offsets(&mut self, url: &str) -> Vec<f64> {
-        let Some(mid) = self.mse.object_urls.get(url).copied() else {
+        let Some((_, mid)) = object_url_ctx(self, url) else {
             return Vec::new();
         };
         let Some(ms) = ms_data(self, Value::Obj(mid)) else {
@@ -3010,7 +3029,7 @@ impl Engine {
     /// livré, chargement dead-locked. `None` si `url` n'est
     /// pas un object-URL MSE.
     pub(crate) fn mse_buffered_union(&mut self, url: &str) -> Option<Vec<(f64, f64)>> {
-        let mid = self.mse.object_urls.get(url).copied()?;
+        let (_, mid) = object_url_ctx(self, url)?;
         let ms = ms_data(self, Value::Obj(mid))?;
         let buffers = ms.borrow().buffers.clone();
         let mut ranges: Vec<(f64, f64)> = Vec::new();
@@ -3036,7 +3055,7 @@ impl Engine {
     /// attachement »). `None` hors registre ou durée jamais
     /// fixée (`NaN`).
     pub(crate) fn mse_source_duration(&self, url: &str) -> Option<f64> {
-        let mid = self.mse.object_urls.get(url).copied()?;
+        let (_, mid) = object_url_ctx(self, url)?;
         let ms = ms_data(self, Value::Obj(mid))?;
         let d = ms.borrow().duration;
         d.is_finite().then_some(d)
@@ -3047,7 +3066,7 @@ impl Engine {
     /// (VOD — les plages seekables = les plages présentes).
     /// `None` hors registre MSE.
     pub(crate) fn mse_seekable(&mut self, url: &str) -> Option<Vec<(f64, f64)>> {
-        let mid = self.mse.object_urls.get(url).copied()?;
+        let (_, mid) = object_url_ctx(self, url)?;
         let ms = ms_data(self, Value::Obj(mid))?;
         if let Some(r) = ms.borrow().live_range {
             return Some(vec![r]);
@@ -3768,5 +3787,61 @@ mod tests {
         // Sous le bug : 'so' seul (progress/lm avalés dans la
         // file parasite). Après fix : routés.
         assert_eq!(e.describe(out), "so,lm,p");
+    }
+
+    /// §B-123 — l'object URL d'une `MediaSource` vit dans le
+    /// `MseState` **du realm qui l'a créée** (player `<iframe>`
+    /// : ctx garé). Les ports session (`is_media_source_url`,
+    /// `mse_source_buffers`, `mse_pull_segments`, offsets,
+    /// durée, seekable) sont invoqués sous `cur_ctx` — le
+    /// document top — sans connaître le realm du blob. Sous le
+    /// bug vol 762 : `mse:false` sur la surface offerte alors
+    /// que l'attache et les appends tournaient en ctx2.
+    /// Le test retourne la symétrie (créé en ctx0, sondé sous
+    /// un parasite courant) — même invariant : le lookup ne
+    /// dépend pas du ctx appelant.
+    #[test]
+    fn object_url_registered_in_parked_ctx_resolves_globally() {
+        let (mut e, _dom) = engine_dom();
+        let url = e
+            .eval(
+                "var ms=new MediaSource();\
+                 var sb=ms.addSourceBuffer('video/mp4');\
+                 URL.createObjectURL(ms)",
+            )
+            .expect("create sous ctx0");
+        let url = e.describe(url);
+        assert!(url.starts_with("blob:"));
+        // Realm parasite courant — le ctx0 (propriétaire du
+        // blob) part en `parked`, comme le ctx de l'iframe en
+        // vol. Sans `object_url_ctx` : tout `None`.
+        let c1 = e.context_new("about:blank", None);
+        assert!(e.is_media_source_url(&url));
+        assert_eq!(e.mse_source_buffers(&url), vec!["video/mp4"]);
+        assert_eq!(e.mse_buffer_offsets(&url), vec![0.0]);
+        assert_eq!(e.mse_buffered_union(&url), Some(Vec::new()));
+        assert_eq!(e.mse_source_duration(&url), None);
+        // Append puis pull **sous le parasite** : le curseur
+        // vit dans `SbData` (heap global) — résolu sans
+        // retourner dans le ctx propriétaire.
+        e.context_switch(0);
+        e.eval(
+            "ms.sourceBuffers[0].appendBuffer(new Uint8Array([0,0,0,16,109,111,111,118,0,0,0,8,102,114,101,101]).buffer);0",
+        )
+        .expect("append sous ctx0");
+        e.eval("0").expect("drain updateend");
+        e.context_switch(c1);
+        let out = e.mse_pull_segments(&url, 0, 64, None, false);
+        let Some(Ok((bytes, cursor, _eos, _sections))) = out else {
+            panic!("pull sous parasite doit résoudre le blob garé : {out:?}");
+        };
+        assert_eq!(bytes.len(), 16);
+        assert_eq!(cursor, 16);
+        // Inconnue → `None` honnête (pas de faux positif).
+        assert!(!e.is_media_source_url("blob:https://x/999"));
+        assert!(e
+            .mse_pull_segments("blob:https://x/999", 0, 64, None, false)
+            .is_none());
+        e.context_switch(0);
     }
 }

@@ -11057,3 +11057,32 @@ un crate PIPELINE.- [x] **JS-C422. Deadline honnête — canal session ↔ budge
   (octets→décode→frames) ; le transport
   `object_urls`/`mse_pull` était déjà
   global (aucune modif côté file).
+  **Erratum corrigé au vol 762** : la
+  surface embed est bien offerte
+  (`frameCtx:2`, `blob:youtube.com/1`)
+  mais `mse:false` — `object_urls`
+  vit **par ctx** (`MseState` du realm
+  créateur), contrairement à la note
+  ci-dessus : seuls `ms_data`/`sb_data`
+  (heap global) étaient ctx-agnostiques.
+  Les ports session invoqués sous
+  `cur_ctx` top rataient le blob garé.
+  Suite JS-C445 : `object_url_ctx`
+  (scan `e.mse` puis `parked`) +
+  reroutage de `is_media_source_url`,
+  `mse_pull_segments`,
+  `mse_source_buffers`,
+  `mse_buffer_offsets`,
+  `mse_buffered_union`,
+  `mse_source_duration`, `mse_seekable`
+  et `object_url_media` (attache
+  `src=blob:` posée depuis un realm
+  étranger). Verrou
+  `object_url_registered_in_parked_ctx_
+  resolves_globally` (créé en ctx0,
+  sondé/pull sous parasite courant :
+  buffers, offsets, 16 octets tirés,
+  inconnue → `None` honnête). Reste :
+  vol — `mse:true` → claim
+  `rest_host_probe` → pull → verdict
+  dll.
