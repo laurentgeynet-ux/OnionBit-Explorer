@@ -343,12 +343,15 @@ impl Engine {
         while let Some(m) = self.port_msgs.pop_front() {
             self.switch_to(m.ctx);
             if self.cur_ctx != m.ctx {
+                self.sched_tick("port.drop_ctx");
                 continue;
             }
             let Value::Obj(id) = m.dest else {
+                self.sched_tick("port.drop_dest");
                 continue;
             };
             if !self.is_alive(id) {
+                self.sched_tick("port.drop_dead");
                 continue;
             }
             let Some(listeners) = self.host_of(id).and_then(|h| {
@@ -356,6 +359,7 @@ impl Engine {
                     .downcast_ref::<PortHost>()
                     .and_then(PortHost::msg_listeners)
             }) else {
+                self.sched_tick("port.drop_host");
                 continue;
             };
             let data = self.wire_decode(&m.data)?;

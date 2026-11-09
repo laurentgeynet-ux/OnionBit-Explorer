@@ -1006,6 +1006,12 @@ impl Engine {
                 if !self.microtasks.is_empty() {
                     self.sched_tick("left_drains");
                 }
+                // §B-121 — résidu ports : un `postMessage`
+                // survenu après le dernier drain attend une
+                // pompe qui peut ne jamais revenir (gel scheduler).
+                if !self.port_msgs.is_empty() {
+                    self.sched_tick("left_ports");
+                }
                 // JS-C154 — `unhandledrejection` en fin de
                 // checkpoint : les rejets non gérés du tour sont
                 // revus (un `.then` tardif les a retirés).
