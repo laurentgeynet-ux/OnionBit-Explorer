@@ -375,6 +375,82 @@ pub struct DisplayList {
     pub first_cycle_path: Option<Vec<u16>>,
 }
 
+/// Répartition boîte→item d'une passe de peinture (§B-118 /
+/// R-199 — mesure du collapse pluto.tv : 4 385 boîtes → 148
+/// items, écran noir silencieux). Produite par les variantes
+/// `*_stats` des builders — les builders ordinaires ne
+/// comptent rien (zéro coût). `*_path` = chemin d'index
+/// enfants du **premier** ancêtre fautif de sa catégorie :
+/// le coupable se nomme en une lecture.
+#[derive(Debug, Clone, Default)]
+pub struct EmitStats {
+    /// Boîtes visitées (entrées de `paint_box_impl`).
+    pub boxes: u32,
+    /// Items dans la liste finale.
+    pub items: usize,
+    /// Items par variante `DisplayItem` (nom → compte) —
+    /// ce qui a **survécu** à la passe (ex. `Text` à zéro
+    /// sur une page pleine = lignes jamais émises).
+    pub by_kind: std::collections::BTreeMap<&'static str, u32>,
+    /// Items dont la borne résolue (transforms composées)
+    /// sort entièrement de la zone `[0,w]×[0,h]` — émis
+    /// mais invisibles (translate géante, clip sortant).
+    pub off_canvas: u32,
+    /// Sous-arbres tués par `opacity <= 0` (retour précoce —
+    /// contenu SPA gâté par opacité jusqu'à hydratation).
+    pub drop_opacity0: u32,
+    /// Sous-arbres tués par `backface-visibility:hidden` retournée.
+    pub drop_backface: u32,
+    /// Boîtes dont l'émission propre est sautée par
+    /// `visibility:hidden|collapse` — **hérité** : un
+    /// ancêtre hidden fait skipper chaque descendant.
+    pub skip_visibility: u32,
+    /// Reports (inline/positionnés/fixed) effectivement
+    /// émis par un drain (`emit_scoped_at` ayant passé
+    /// les bornes §B-26).
+    pub deferred_emitted: u32,
+    /// Reports sautés par la borne §B-26 (== `dropped_emits`).
+    pub drop_cap: u32,
+    /// Plages copiées depuis `prev` (build incrémental —
+    /// un collapse sous ré-usage se lit ici).
+    pub spans_copied: u32,
+    /// Premier chemin tué par `opacity <= 0`.
+    pub opacity0_path: Option<Vec<u16>>,
+    /// Premier chemin tué par `backface-visibility`.
+    pub backface_path: Option<Vec<u16>>,
+    /// Premier chemin `visibility:hidden|collapse`.
+    pub visibility_path: Option<Vec<u16>>,
+}
+
+/// Nom de variante pour la répartition [`EmitStats::by_kind`].
+fn kind_name(it: &DisplayItem) -> &'static str {
+    match it {
+        DisplayItem::FillRect { .. } => "fill",
+        DisplayItem::DecoRect { .. } => "deco",
+        DisplayItem::BoxShadow { .. } => "shadow",
+        DisplayItem::Border { .. } => "border",
+        DisplayItem::Text { .. } => "text",
+        DisplayItem::Placeholder { .. } => "placeholder",
+        DisplayItem::Image { .. } => "image",
+        DisplayItem::Emphasis { .. } => "emphasis",
+        DisplayItem::BackgroundImage { .. } => "bg_image",
+        DisplayItem::MaskedFill { .. } => "masked",
+        DisplayItem::PushClip(_) => "push_clip",
+        DisplayItem::PushClipRounded { .. } => "push_clip_r",
+        DisplayItem::PopClip => "pop_clip",
+        DisplayItem::PushTransform(_) => "push_tf",
+        DisplayItem::PopTransform => "pop_tf",
+        DisplayItem::PushFilter(_) => "push_filter",
+        DisplayItem::PopFilter => "pop_filter",
+        DisplayItem::PushBlend(_) => "push_blend",
+        DisplayItem::PopBlend => "pop_blend",
+        DisplayItem::PushClipPath { .. } => "push_clippath",
+        DisplayItem::BackdropFilter { .. } => "backdrop",
+        DisplayItem::Marker { .. } => "marker",
+        DisplayItem::MarkerText { .. } => "marker_text",
+    }
+}
+
 /// Plage d'items émise par une boîte — indexe le re-usage
 /// de `build_display_list_incremental` (R-37).
 #[derive(Debug, Clone)]
@@ -1091,7 +1167,32 @@ pub fn build_display_list_scrolled(
     scroll: (f32, f32),
     images: &crate::PaintImages,
 ) -> DisplayList {
-    build_list(root, viewport_w, viewport_h, scroll, images, None, 0)
+    build_list(root, viewport_w, viewport_h, scroll, images, None, 0, None)
+}
+
+/// Variante de mesure (§B-118 / R-199) : renvoie la liste +
+/// la répartition boîte→item [`EmitStats`] — comptage opt-in,
+/// zéro coût sur les builders ordinaires.
+#[must_use]
+pub fn build_display_list_scrolled_stats(
+    root: &LayoutBox,
+    viewport_w: f32,
+    viewport_h: f32,
+    scroll: (f32, f32),
+    images: &crate::PaintImages,
+) -> (DisplayList, EmitStats) {
+    let mut st = EmitStats::default();
+    let list = build_list(
+        root,
+        viewport_w,
+        viewport_h,
+        scroll,
+        images,
+        None,
+        0,
+        Some(&mut st),
+    );
+    (list, st)
 }
 
 /// Variante incrémentale (R-37) : `prev` fournit les plages
@@ -1117,8 +1218,35 @@ pub fn build_display_list_incremental(
     tree_epoch: u64,
 ) -> DisplayList {
     build_list(
-        root, viewport_w, viewport_h, scroll, images, prev, tree_epoch,
+        root, viewport_w, viewport_h, scroll, images, prev, tree_epoch, None,
     )
+}
+
+/// Variante incrémentale de mesure (§B-118) — mêmes compteurs
+/// que [`build_display_list_scrolled_stats`], `spans_copied`
+/// isole les plages ré-utilisées depuis `prev`.
+#[must_use]
+pub fn build_display_list_incremental_stats(
+    root: &LayoutBox,
+    viewport_w: f32,
+    viewport_h: f32,
+    scroll: (f32, f32),
+    images: &crate::PaintImages,
+    prev: Option<&DisplayList>,
+    tree_epoch: u64,
+) -> (DisplayList, EmitStats) {
+    let mut st = EmitStats::default();
+    let list = build_list(
+        root,
+        viewport_w,
+        viewport_h,
+        scroll,
+        images,
+        prev,
+        tree_epoch,
+        Some(&mut st),
+    );
+    (list, st)
 }
 
 /// §14.2 : émet le fond du canvas (couleur puis image) et
@@ -1180,6 +1308,7 @@ fn emit_canvas_bg(
 
 /// Corps partagé des builders — `prev = None` : build plein.
 #[allow(clippy::too_many_lines)]
+#[allow(clippy::too_many_arguments)]
 fn build_list(
     root: &LayoutBox,
     viewport_w: f32,
@@ -1188,6 +1317,7 @@ fn build_list(
     images: &crate::PaintImages,
     prev: Option<&DisplayList>,
     tree_epoch: u64,
+    stats: Option<&mut EmitStats>,
 ) -> DisplayList {
     let mut items = Vec::new();
     let mut spans = SpanMap::default();
@@ -1211,6 +1341,7 @@ fn build_list(
         emits_total: 0,
         dropped: 0,
         first_cycle_path: None,
+        stats,
     };
     // §14.2 : le fond du canvas vient de la racine ; si elle
     // n'en a pas (couleur transparente et pas d'image), c'est
@@ -1322,6 +1453,21 @@ fn build_list(
         }
     }
     let (dropped_emits, first_cycle_path) = (cx.dropped, cx.first_cycle_path.take());
+    if let Some(st) = cx.stats {
+        st.items = items.len();
+        st.drop_cap = dropped_emits;
+        // Post-pass : répartition par variante + bornes
+        // résolues (transforms composées) — un item émis hors
+        // de la zone canvas est peint mais invisible.
+        for (it, b) in items.iter().zip(resolved_bounds(&items)) {
+            *st.by_kind.entry(kind_name(it)).or_insert(0) += 1;
+            if b.is_some_and(|r| {
+                !(r.x < viewport_w && r.y < doc_h && r.x + r.width > 0.0 && r.y + r.height > 0.0)
+            }) {
+                st.off_canvas += 1;
+            }
+        }
+    }
     DisplayList {
         items,
         width: viewport_w,
@@ -1380,6 +1526,9 @@ struct PaintCx<'a> {
     dropped: u32,
     /// Premier chemin cyclé (§B-26), pour diagnostic.
     first_cycle_path: Option<Vec<u16>>,
+    /// Collecteur de répartition §B-118 — `Some` uniquement
+    /// sur les variantes `*_stats` (comptage opt-in).
+    stats: Option<&'a mut EmitStats>,
 }
 
 /// Source de ré-usage incrémental.
@@ -1392,6 +1541,14 @@ struct IncCx<'a> {
 }
 
 impl PaintCx<'_> {
+    /// Applique `f` au collecteur de répartition s'il existe
+    /// (variantes `*_stats` — sinon no-op, zéro coût).
+    fn stat(&mut self, f: impl FnOnce(&mut EmitStats)) {
+        if let Some(s) = self.stats.as_mut() {
+            f(s);
+        }
+    }
+
     /// Enregistre la plage `[start, end)` émise pour `bx`
     /// sous le chemin courant — flags de ré-usage calculés.
     /// `escaped` = porteurs reportés au `defer` hérité
@@ -3679,6 +3836,7 @@ fn emit_scoped_at<'a>(
         }
         return;
     }
+    cx.stat(|s| s.deferred_emitted += 1);
     let saved = std::mem::replace(&mut cx.path, path);
     // R-134 : translation sticky — même discipline que
     // `emit_scoped` (file reportée, drain en contexte
@@ -3838,6 +3996,7 @@ fn copy_span(
     cx: &mut PaintCx,
 ) {
     let Some(inc) = cx.inc else { return };
+    cx.stat(|s| s.spans_copied += 1);
     let start = u32::try_from(items.len()).unwrap_or(u32::MAX);
     for it in &inc.items[(s.start as usize)..(s.end as usize)] {
         items.push(translate_item(it, d));
@@ -4586,6 +4745,11 @@ fn paint_box<'a>(
     // `return` plus tard laisserait des `PushClip`/
     // `PushFilter`/`PushBlend` orphelins sur la pile raster.
     if backface_hidden(bx) {
+        let p = cx.path.clone();
+        cx.stat(|s| {
+            s.drop_backface += 1;
+            s.backface_path.get_or_insert(p);
+        });
         return;
     }
     // R-M5 — `filter` encadre TOUTE la sous-arbre de la
@@ -4654,6 +4818,7 @@ fn paint_box_impl<'a>(
     pos_defer: &mut Vec<(Vec<u16>, &'a LayoutBox)>,
     fixed_defer: &mut Vec<(Vec<u16>, &'a LayoutBox)>,
 ) {
+    cx.stat(|s| s.boxes += 1);
     // `position: fixed` est ancrée au viewport : son sous-arbre
     // ignore le scroll.
     let off = if bx.position == Position::Fixed {
@@ -4678,6 +4843,11 @@ fn paint_box_impl<'a>(
         .get("opacity")
         .is_some_and(|v| v.trim().parse::<f32>().is_ok_and(|o| o <= 0.0))
     {
+        let p = cx.path.clone();
+        cx.stat(|s| {
+            s.drop_opacity0 += 1;
+            s.opacity0_path.get_or_insert(p);
+        });
         return;
     }
 
@@ -4707,6 +4877,13 @@ fn paint_box_impl<'a>(
     // sous-arbre visible s'il existe doit garder sa matrice
     // et son clip.
     let hidden = matches!(bx.style.get("visibility"), Some("hidden" | "collapse"));
+    if hidden {
+        let p = cx.path.clone();
+        cx.stat(|s| {
+            s.skip_visibility += 1;
+            s.visibility_path.get_or_insert(p);
+        });
+    }
     if !hidden {
         paint_self(bx, items, off, cx.vp, cx.images, cx.canvas_bg_src);
         paint_replaced(bx, items, off, cx.images);

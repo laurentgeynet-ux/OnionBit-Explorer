@@ -3588,7 +3588,7 @@ chez NAVIGATEUR — non recopiés ici.
   span prouvée par occupation), `_ident_et_span`
   (ident nu `-start`/`-end`, `span` début et fin),
   `grid_area_jeton_invalide_preserve_les_longhands`.
-- [ ] **R-199. §B-118 — effondrement display-list
+- [~] **R-199. §B-118 — effondrement display-list
   (pluto.tv)** : dom 4 156 nœuds → layout **4 385 boîtes**
   → `display_items` **148** → nav + écran noir, **zéro
   erreur console** (vol 719, prop. ; vol 722 : chrome nav
@@ -3596,17 +3596,26 @@ chez NAVIGATEUR — non recopiés ici.
   `classList`). Le contenu vit dans l'arbre de boîtes et
   n'atteint jamais la display list — signature paint-side,
   à distinguer de §B-108 (DOM vide) et du wedge vimeo
-  (0 boîte = layout-side, §B-115 clos). **Phase mesure** :
-  compteurs de transition boîte→item par type dans
-  `display.rs` (émis vs retenus par `DisplayItem` kind +
-  motif de drop : zero-size, clip sortant, transform
-  hors-viewport, `visibility`, overflow négatif) — la
-  classe fautive se nommera en une lecture. Suspects
-  ordonnés : `PushTransform` translate géant qui pousse
-  le contenu hors-viewport, `PushClip` région vide,
-  opacity/blend de groupe, z-order/stacking perdu.
-  **Phase fix** : le responsable nommé devient le verrou
-  (`pluto_items_collapses_*` ou fixture extraite).
+  (0 boîte = layout-side, §B-115 clos). **Phase mesure
+  livrée** : `EmitStats` + variantes additives
+  `build_display_list_scrolled_stats`/`_incremental_stats`
+  (opt-in, zéro coût sinon) — boîtes visitées, items par
+  variante (`by_kind`), bornes résolues hors canvas
+  (`off_canvas`), drops par motif (`drop_opacity0`/
+  `drop_backface`/`skip_visibility`/`deferred_emitted`/
+  `drop_cap`/`spans_copied`) et **chemins des premiers
+  ancêtres fautifs** (`*_path` — coupable nommé en une
+  lecture). Verrous `emit_stats_*` ×4 (signature pluto
+  reconstituée : `visibility:hidden` ancêtre → collapse
+  mesuré + chemin, `opacity:0`, page saine, transform
+  hors-canvas). Audit des drains : aucun report perdu
+  silencieux — files scopée/racine toutes drainées, seule
+  borne existante = §B-26 (déjà comptée). **Phase fix en
+  attente** : consommation NAV journalisée (swap vers la
+  variante stats sous probe dans `apply.rs` + log) — le
+  vol pluto suivant nomme la classe ; le responsable
+  nommé devient le verrou (`pluto_items_collapses_*`
+  ou fixture extraite).
 - [ ] **R-200. Texte chevauché/corrompu en colonne
   (lichess.org)** : vol 740 — page hydratée correctement
   (nav + lobby + toast « Reconnecting ») mais **colonne

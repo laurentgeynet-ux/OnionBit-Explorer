@@ -28,8 +28,9 @@ pub use canvas::{raster_ops, CanvasOp, CanvasTable};
 pub use dataurl::{collect_data_images, data_url_bytes, decode_data_url};
 pub use display::{
     build_display_list, build_display_list_full, build_display_list_imaged,
-    build_display_list_incremental, build_display_list_scrolled, BorderStyle, DisplayItem,
-    DisplayList, MarkerKind, SpanMap, SpanRec,
+    build_display_list_incremental, build_display_list_incremental_stats,
+    build_display_list_scrolled, build_display_list_scrolled_stats, BorderStyle, DisplayItem,
+    DisplayList, EmitStats, MarkerKind, SpanMap, SpanRec,
 };
 pub use fonts::{DirFontSource, WebFontSource};
 pub use glyph_cache::GlyphCache;

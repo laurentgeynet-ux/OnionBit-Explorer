@@ -1014,6 +1014,7 @@ journal « livré ».
   variantes utf-8/16/1252 inchangées, labels inconnus → 1252.
   | PIPE→NAV **retouche bornée livrée** |
 | 2026-11-09 | relié `display`/`state`/scroll — **Reliquat
+| 2026-11-09 | `explorer-render` — **R-199 phase mesure : `EmitStats` + variantes `*_stats` (API additive)** | Compteurs boîte→item opt-in : `build_display_list_scrolled_stats`/`build_display_list_incremental_stats` → `(DisplayList, EmitStats)` — zéro coût sur les builders ordinaires. Champs : `boxes`, `items`, `by_kind` (variante→compte), `off_canvas` (bornes résolues hors zone), `drop_opacity0`/`drop_backface`/`skip_visibility`/`deferred_emitted`/`drop_cap`/`spans_copied`, et chemins des premiers ancêtres fautifs `opacity0_path`/`backface_path`/`visibility_path`. **Consommation proposée NAV (mur §B-118 pluto.tv — 4 385 boîtes → 148 items)** : swap `build_display_list_incremental` → variante stats sous flag/probe dans `apply.rs` + `tracing::info` des champs — le vol pluto suivant nomme la classe fautive en une lecture (verrous `emit_stats_*` ×4 côté render). | PIPE (R-199) | API livrée — branchement probe NAV |
   NAV constaté à l'audit PIPE (post R-170)** | Trous trouvés
   côté PIPE dont le livrable vit dans le périmètre NAV —
   déclarés ici, non committés directement : états dynamiques

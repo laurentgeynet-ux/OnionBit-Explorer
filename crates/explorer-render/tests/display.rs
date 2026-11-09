@@ -3388,3 +3388,118 @@ fn clip_rect_ancetre_ne_clippe_pas_descendant_absolu() {
          mettre à jour le verrou : fill={fill} pop={pop}"
     );
 }
+
+// ── R-199 / §B-118 — répartition boîte→item (EmitStats) ──────
+
+fn dl_stats(html: &str, css: &str) -> explorer_render::EmitStats {
+    let dom = TreeBuilder::parse(html);
+    let mut eng = StyleEngine::new();
+    eng.add_css("body { margin: 0 }", Origin::Author);
+    eng.add_css(css, Origin::Author);
+    let styles = eng.compute_tree(&dom, dom.document(), &StyleEnv::default());
+    let root_el = dom
+        .children(dom.document())
+        .into_iter()
+        .flatten()
+        .find(|&c| dom.element(c).is_ok())
+        .expect("élément racine");
+    let mut bx = build_box_tree(&dom, root_el, &styles).expect("arbre");
+    layout_tree(&mut bx, VIEW, &ctx());
+    let (_list, st) = explorer_render::build_display_list_scrolled_stats(
+        &bx,
+        VIEW,
+        200.0,
+        (0.0, 0.0),
+        &explorer_render::PaintImages::default(),
+    );
+    st
+}
+
+/// Signature pluto.tv reconstituée : un ancêtre
+/// `visibility:hidden` (hérité → chaque descendant skippe
+/// son émission propre) — les boîtes vivent, les items
+/// s'effondrent. Le compteur doit nommer la cause ET
+/// l'ancêtre en une lecture.
+#[test]
+fn emit_stats_visibility_ancetre_collapse() {
+    let st = dl_stats(
+        "<div id=v><p>texte <a href=#>lien</a></p><div><span>suite</span></div></div>\
+         <p id=out>hors</p>",
+        "#v{visibility:hidden} p{margin:0}",
+    );
+    assert!(st.boxes >= 5, "boxes={}", st.boxes);
+    assert!(
+        st.skip_visibility >= 3,
+        "skip_visibility={}",
+        st.skip_visibility
+    );
+    assert_eq!(st.drop_opacity0, 0);
+    assert_eq!(
+        st.by_kind.get("text").copied().unwrap_or(0),
+        1,
+        "seul le <p> externe émet du texte : {:?}",
+        st.by_kind
+    );
+    assert!(st.visibility_path.is_some(), "l'ancêtre coupable est nommé");
+}
+
+/// `opacity:0` sur l'ancêtre : retour précoce — le sous-arbre
+/// n'émet rien du tout (ni propre ni descendants).
+#[test]
+fn emit_stats_opacity0_tue_sous_arbre() {
+    let st = dl_stats(
+        "<div id=o><p>texte</p><div>suite</div></div><p id=out>hors</p>",
+        "#o{opacity:0} p{margin:0}",
+    );
+    assert_eq!(st.drop_opacity0, 1, "drop_opacity0={}", st.drop_opacity0);
+    assert_eq!(st.skip_visibility, 0);
+    assert_eq!(
+        st.by_kind.get("text").copied().unwrap_or(0),
+        1,
+        "seul le <p> externe émet : {:?}",
+        st.by_kind
+    );
+    assert!(st.opacity0_path.is_some());
+}
+
+/// Page saine : les compteurs racontent une passe normale —
+/// texte émis, pas de drop, pas d'off-canvas.
+#[test]
+fn emit_stats_page_saine() {
+    let st = dl_stats(
+        "<div id=d><p>texte <a href=#>lien</a></p></div>",
+        "#d{background-color:#ff0000} p{margin:0}",
+    );
+    assert!(st.boxes >= 3);
+    assert!(st.items >= 2, "items={}", st.items);
+    assert!(
+        st.by_kind.get("text").copied().unwrap_or(0) >= 1,
+        "texte émis : {:?}",
+        st.by_kind
+    );
+    assert!(
+        st.by_kind.get("fill").copied().unwrap_or(0) >= 1,
+        "fond émis : {:?}",
+        st.by_kind
+    );
+    assert_eq!(st.drop_opacity0 + st.drop_backface + st.skip_visibility, 0);
+    assert_eq!(st.off_canvas, 0, "off_canvas={}", st.off_canvas);
+}
+
+/// Un élément translaté hors de la zone canvas : émis dans la
+/// liste mais borne résolue dehors — `off_canvas` le compte
+/// (classe « transform géant » des suspects).
+#[test]
+fn emit_stats_transform_hors_canvas_compte() {
+    let st = dl_stats(
+        "<div id=t>x</div><p>y</p>",
+        "#t{transform:translate(5000px,0);background-color:#ff0000;\
+           width:50px;height:50px} p{margin:0}",
+    );
+    assert!(
+        st.off_canvas >= 1,
+        "le fond translaté hors zone compté : {:?} / off={}",
+        st.by_kind,
+        st.off_canvas
+    );
+}
