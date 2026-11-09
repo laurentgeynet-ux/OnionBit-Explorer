@@ -10887,8 +10887,8 @@ un crate PIPELINE.- [x] **JS-C422. Deadline honnête — canal session ↔ budge
   refs — c'était un `getRootNode` hôte qui rendait
   `Undefined` et tuait chaque commit React dans
   l'œuf.
-- [ ] **§B-122 — post-hydratation : budget tas par défaut
-  trop juste + tempête `setTimeout`** (vols 750-752).
+- [x] **§B-122 — tempête `setTimeout` CASSÉE (vol 753),
+  budget tas restant à trancher** (vols 750-753).
   Faits : l'arbre hydraté d'explore.org exige ~405 Mo
   vivants > 384 MiB du budget défaut → `RangeError` en
   navigation courante ; à 768 MiB la page hydrate
@@ -10915,8 +10915,16 @@ un crate PIPELINE.- [x] **JS-C422. Deadline honnête — canal session ↔ budge
   résout TTFB (~1 ms, synthétique documenté) au lieu
   de boucler. Verrous `b122_listeners_cap` 3/3
   (cap 256/300, par type, capture+bulle partagées).
+  **Vol 753 — validation** : `fire.timer` 1,31 M →
+  **9**, `listen.cap ty=load` tiré 1× à 256 (armée
+  refusée), `readyState=complete`, `fiberChild=1`,
+  `main` repeuplé, eval instantané, nav 18,6 s vs
+  72+ s saturée ; frame : page React vivante, player
+  « Camera not found. » = état d'erreur React légitime
+  (API livecam non livrée — piste fetch séparée).
   Reste : (c) budget tas par défaut à relever ou
   profiler la rétention (~405 Mo) ; (d) images lazy
   absentes (`req.img=1`/`err.img=1` — Intersection-
   Observer/`loading=lazy` à vérifier, placeholders
-  gris layoutés correctement sur la frame).
+  gris layoutés correctement sur la frame) ; (e) API
+  cam non livrée → nommer le fetch fautif.
