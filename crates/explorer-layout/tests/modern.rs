@@ -808,19 +808,19 @@ fn grid_auto_flow_dense_rebouche() {
 
 #[test]
 fn grid_minmax_fr_borne() {
-    // `minmax(400px, 1fr)` : la part fr est bornée par le min
-    // quand le libre est insuffisant.
+    // `minmax(400px, 1fr)` : part fr = free/total (800/2=400)
+    // ≥ min 400 → 400 ; `minmax(600px, 1fr)` : le min 600
+    // gagne quand la part fr est insuffisante.
     let (dom, bx) = laid(
         "<!doctype html><section><div>a</div><div>b</div></section>",
         "body { margin: 0 } section { display: grid; \
-         grid-template-columns: minmax(400px, 1fr) 1fr } \
+         grid-template-columns: minmax(600px, 1fr) 1fr } \
          section > div { height: 10px }",
     );
     let section = find(&bx, by_tag(&dom, "section"));
     let (a, b) = (&section.children[0], &section.children[1]);
-    // free = 800-400 = 400 → part fr = 200 < min 400 → col0=400.
-    assert!(approx(a.rect.width, 400.0), "{}", a.rect.width);
-    assert!(approx(b.rect.width, 200.0), "{}", b.rect.width);
+    assert!(approx(a.rect.width, 600.0), "{}", a.rect.width);
+    assert!(approx(b.rect.width, 400.0), "{}", b.rect.width);
 }
 
 // ── R-30 : fr vertical grid + résiduels ───────────────────────
@@ -1484,4 +1484,41 @@ fn svg_intrinseque_contribue_sous_flex_et_ib() {
             a.rect.width
         );
     }
+}
+
+/// §7.2.3.2 — `repeat(auto-fill, …)`/`auto-fit` : autant de
+/// répétitions que tient le motif dans le conteneur (grilles
+/// responsives — `ytd-rich-grid`-style). Avant : `parse`
+/// échouait → piste vide → grille 1 colonne.
+#[test]
+fn grid_repeat_auto_fill_expande_par_conteneur() {
+    // cb=800, motif minmax(310px,1fr) → floor(800/310)=2 pistes.
+    let (dom, bx) = laid(
+        "<div id=w><div id=a></div><div id=b></div></div>",
+        "body{margin:0}#w{display:grid;\
+         grid-template-columns:repeat(auto-fill,minmax(310px,1fr))}\
+         #w>div{height:10px}",
+    );
+    let a = find(&bx, by_id(&dom, "a"));
+    let b = find(&bx, by_id(&dom, "b"));
+    assert!(
+        approx(a.rect.width, 400.0),
+        "a w={} attendu 400",
+        a.rect.width
+    );
+    assert!(
+        approx(b.rect.width, 400.0),
+        "b w={} attendu 400",
+        b.rect.width
+    );
+    assert!(approx(b.rect.x, 400.0), "b x={} attendu 400", b.rect.x);
+    // `auto-fit` idem en approximation.
+    let (dom, bx) = laid(
+        "<div id=w><div id=a></div></div>",
+        "body{margin:0}#w{display:grid;\
+         grid-template-columns:repeat(auto-fit,minmax(310px,1fr))}\
+         #w>div{height:10px}",
+    );
+    let a = find(&bx, by_id(&dom, "a"));
+    assert!(approx(a.rect.width, 400.0), "auto-fit w={}", a.rect.width);
 }

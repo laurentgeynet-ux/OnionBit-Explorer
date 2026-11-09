@@ -125,10 +125,36 @@ fn parse_tracks(raw: &str, fs: f32, ctx: &BlockCtx, cb: f32) -> (Vec<Track>, Lin
             continue;
         }
         if let Some(inner) = t.strip_prefix("repeat(").and_then(|s| s.strip_suffix(')')) {
-            // `repeat(n, a b c)` ou `repeat(auto-fill…)` —
-            // seul le compte numérique est supporté.
+            // `repeat(n, a b c)` ou `repeat(auto-fill|auto-fit, …)`.
             if let Some((n, list)) = inner.split_once(',') {
-                if let Ok(n) = n.trim().parse::<usize>() {
+                #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+                let count = n.trim().parse::<usize>().ok().or_else(|| {
+                    // §7.2.3.2 : `auto-fill`/`auto-fit` = autant
+                    // de répétitions que tient dans le conteneur —
+                    // la taille de base est la borne basse du motif
+                    // (`minmax(MIN,…)` → MIN, fixe → sa taille).
+                    // `auto-fit` ≈ `auto-fill` ici (les pistes vides
+                    // ne s'affaissent pas — approximation documentée).
+                    matches!(n.trim(), "auto-fill" | "auto-fit").then(|| {
+                        let (subs, _) = parse_tracks(list.trim(), fs, ctx, cb);
+                        let basis: f32 = subs
+                            .iter()
+                            .map(|t| match t {
+                                Track::MinMax(mn, _) => {
+                                    raw_length_px(mn, cb, fs, ctx).unwrap_or(0.0)
+                                }
+                                Track::Raw(r) => raw_length_px(r, cb, fs, ctx).unwrap_or(0.0),
+                                Track::Fr(_) | Track::Auto => 0.0,
+                            })
+                            .sum();
+                        if basis > 0.0 {
+                            ((cb / basis) as usize).max(1)
+                        } else {
+                            1
+                        }
+                    })
+                });
+                if let Some(n) = count {
                     let (subs, _) = parse_tracks(list.trim(), fs, ctx, cb);
                     for sub in &subs {
                         for _ in 0..n.min(512 / out.len().max(1)) {
@@ -440,7 +466,6 @@ fn col_widths(
             }
         }
     }
-    let free = (cb - w.iter().sum::<f32>() - gap * w.len().saturating_sub(1) as f32).max(0.0);
     let track_fr = |t: &Track| match t {
         Track::Fr(f) => *f,
         Track::MinMax(_, mx) => match &**mx {
@@ -451,6 +476,19 @@ fn col_widths(
     };
     let total_fr: f32 = tracks.iter().map(&track_fr).sum();
     if total_fr > 0.0 {
+        // §12.7 : le libre fr = cb moins les pistes **non
+        // flexibles** — les `min` des pistes fr n'y sont pas
+        // retranchés (la part fr EST la taille, clampée par
+        // le min). Avant : `cb - w.sum()` retranchait les lo
+        // → `minmax(310px,1fr)` en 800 restait à 310 au lieu
+        // de 400 (pistes `repeat(auto-fill,minmax(px,1fr))`
+        // jamais étirées — grilles responsives écrasées).
+        let non_fr: f32 = w
+            .iter()
+            .enumerate()
+            .map(|(i, v)| if track_fr(&tracks[i]) > 0.0 { 0.0 } else { *v })
+            .sum();
+        let free = (cb - non_fr - gap * w.len().saturating_sub(1) as f32).max(0.0);
         for (i, t) in tracks.iter().enumerate() {
             let f = track_fr(t);
             if f > 0.0 {
