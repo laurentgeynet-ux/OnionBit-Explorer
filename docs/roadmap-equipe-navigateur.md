@@ -10822,3 +10822,45 @@ un crate PIPELINE.- [x] **JS-C422. Deadline honnête — canal session ↔ budge
   deux sites Next.js passent le bootstrap mais restent des
   coquilles SSR — mur suivant (hydratation RSC sans commit
   DOM, 567 réactions puis silence) à numéroter.
+- [x] **JS-C435. §B-120 — `dom.kill` nomme le videur de page :
+  c'est React lui-même** (mur RSC du vol 735 — explore.org/
+  arte.tv : bootstrap sans exception mais coquille SSR vidée).
+  Trois itérations de la sonde (stack → `cur=`+verbatim
+  `fn_src` via `FnLit.src_text`/`span` → 12 slots/parent +
+  `cid`) sur `removeChild`/`remove` sous `body`/`html`/
+  `#document`. **Vol 740** : seq=0 = `$RV` (`S:0`→`B:0`,
+  swap de borne React 19 légitime, timer `cur=<null>`) ;
+  seq=1..11 = **`c6` = `clearContainer`** du chunk react-dom
+  (`0rykep33j217q.js:2:178418` — récursif document→html→
+  head→body, garde SCRIPT/STYLE/LINK par design), appelé
+  depuis `un` (marcheur d'effets `for(;null!==i8;)`) ← `sN`
+  (`commitRootImpl`, `do sO();while(0!==u2)`) : le vidage
+  se produit **dans le commit** d'un mount — flag reset du
+  HostRoot. Preuves live : `__reactContainer$…` +
+  `_reactListening…` sur `document`, `memoizedState=
+  {element, isDehydrated:true, cache}` → `hydrateRoot` qui
+  a fait **bail-out racine** puis client-render. Parse
+  innocent (NullEngine → 102 divs sur les vrais octets) ;
+  pile réseau livre les 75 552 octets complets. §B-120
+  clos : le DOM n'est pas perdu, React le vide
+  légitimement — la question migre à §B-121.
+- [ ] **§B-121 — `hydrateRoot` baille puis le client-render
+  commite un arbre vide** (explore.org/arte.tv, vols
+  739-741). Faits : racine `HostRoot tag:3, child:null`
+  committée ; `element=<StrictMode><Context.Provider>…` —
+  `$$typeof=react.transitional.element` valide,
+  `Symbol.for` sain ; flux `__next_f`→`enqueue` délivre
+  **17 819 octets intacts** (rows `1:"$Sreact.fragment"`,
+  `4:"/_next/…"`) puis `close` propre (JS-C436) ;
+  `prom.pending=0`, `stream_reads=1410`, rAF fonctionnel,
+  zéro exception/console.error/unhandledrejection. Le
+  silence est le mur : tout le front est sain, le modèle
+  flight résout « rien ». Pistes ordonnées : (a)
+  suspension racine sur ref flight non résolue (children
+  `type` objet `react.context` — refs client à résoudre
+  via la map de modules turbopack) ; (b) bail-out
+  hydratation sur marqueur racine (placement `<!--$-->`/
+  doctype — comparer vs DOM Chrome) ; (c) repro minimal
+  Next/RSC pour bissection hors production. Gates de tri
+  avant fix : instrumenter `Chunk._status`/wakeable ou
+  rejouer le payload en harnais.
