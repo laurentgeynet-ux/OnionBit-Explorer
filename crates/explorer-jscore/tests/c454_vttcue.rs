@@ -28,7 +28,7 @@ fn ev(e: &mut Engine, src: &str) -> String {
     }
 }
 
-/// `new VTTCue` remplit les props spec ; appel nu = TypeError.
+/// `new VTTCue` remplit les props spec ; appel nu = `TypeError`.
 #[test]
 fn c454_vttcue_ctor_and_props() {
     let mut e = engine();
@@ -65,7 +65,7 @@ fn c454_vttcue_getcueashtml_fragment() {
     );
 }
 
-/// `addTextTrack` → TextTrack greffée à `textTracks`,
+/// `addTextTrack` → `TextTrack` greffée à `textTracks`,
 /// `addCue`/`removeCue`/`cues`/`activeCues` vivants.
 #[test]
 fn c454_addtexttrack_and_cues() {

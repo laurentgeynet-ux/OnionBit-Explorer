@@ -6913,9 +6913,6 @@ fn text_track_list(e: &mut Engine) -> ObjId {
     o
 }
 
-/// `list.item(i)` — piste `__items[i]` ou `null` (spec).
-/// `__items` est peuplé par `media.addTextTrack` (JS-C454).
-
 /// `true` si `node` est `<dialog>` — gate des méthodes/props
 /// `HTMLDialogElement` (CAP-176).
 fn is_dialog(dom: &DomRef, node: NodeId) -> bool {
@@ -10429,7 +10426,7 @@ fn vttcue_ctor(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
 /// `cue.getCueAsHTML()` → `DocumentFragment` portant le
 /// texte de la cue (borné : pas de parsing des tags de cue
 /// `<v>`/`<b>`/`<i>` — le texte va tel quel en nœud texte,
-/// borne documentée de la surface VTTCue).
+/// borne documentée de la surface `VTTCue`).
 fn vttcue_as_html(e: &mut Engine, this: Value, _a: &[Value]) -> JsResult<Value> {
     let text = match this {
         Value::Obj(id) => e.get_prop_value(Value::Obj(id), "text")?,
@@ -10515,7 +10512,7 @@ fn text_track_cues_get(e: &mut Engine, this: Value, _a: &[Value]) -> JsResult<Va
 /// Objet `TextTrack` réel (JS-C454) — `kind`/`label`/
 /// `language`/`mode` + `__cues` + méthodes de la spec
 /// (`addCue`/`removeCue`, getters `cues`/`activeCues`,
-/// EventTarget) — créé par `addTextTrack` sur les
+/// `EventTarget`) — créé par `addTextTrack` sur les
 /// éléments média.
 fn text_track_obj(e: &mut Engine, kind: &str, label: &str, language: &str) -> ObjId {
     let o = e.new_object();
@@ -10571,27 +10568,25 @@ fn media_add_text_track(e: &mut Engine, this: Value, args: &[Value]) -> JsResult
         e.to_js_string(language)?
     };
     // Liste `__tt` — la même que le getter `textTracks`.
-    let list = match e.get_prop(this_id, "__tt") {
-        Some(v @ Value::Obj(_)) => v,
-        _ => {
-            let l = text_track_list(e);
-            let lv = Value::Obj(l);
-            e.set_own(this_id, "__tt", lv.clone(), false);
-            lv
-        }
+    let list = if let Some(v @ Value::Obj(_)) = e.get_prop(this_id, "__tt") {
+        v
+    } else {
+        let l = text_track_list(e);
+        let lv = Value::Obj(l);
+        e.set_own(this_id, "__tt", lv.clone(), false);
+        lv
     };
     let Value::Obj(list_id) = list else {
         return Err(e.type_error("addTextTrack: no list"));
     };
     let track = Value::Obj(text_track_obj(e, &kind, &label, &language));
     // `__items` sur la liste — `item(i)`/`length` le lisent.
-    let items = match e.get_prop(list_id, "__items") {
-        Some(v @ Value::Obj(_)) => v,
-        _ => {
-            let a = e.new_array(Vec::new());
-            e.set_own(list_id, "__items", a.clone(), false);
-            a
-        }
+    let items = if let Some(v @ Value::Obj(_)) = e.get_prop(list_id, "__items") {
+        v
+    } else {
+        let a = e.new_array(Vec::new());
+        e.set_own(list_id, "__items", a.clone(), false);
+        a
     };
     let Value::Obj(arr) = items else {
         return Err(e.type_error("addTextTrack: no items"));
