@@ -431,6 +431,13 @@ pub struct EmitStats {
     /// hors-canvas : ≈ identité = placement layout fautif,
     /// géante = `PushTransform` fautive.
     pub off_canvas_tf: Option<(f32, f32)>,
+    /// Glyphes émis au total (tous items `Text`).
+    pub glyphs: u32,
+    /// Glyphes marqués `invisible` (`.notdef` PUA —
+    /// avance conservée, rien peint) : ≈ `glyphs` =
+    /// la fonte n'a pas servi les caractères (webfont
+    /// absente/non décodée) → texte émis mais muet.
+    pub invisible_glyphs: u32,
 }
 
 /// Nom de variante pour la répartition [`EmitStats::by_kind`].
@@ -1489,6 +1496,10 @@ fn build_list(
                     cur = tfs
                         .iter()
                         .fold(tiny_skia::Transform::default(), |acc, t| acc.pre_concat(*t));
+                }
+                DisplayItem::Text { run, .. } => {
+                    st.glyphs += run.glyphs.len() as u32;
+                    st.invisible_glyphs += run.glyphs.iter().filter(|g| g.invisible).count() as u32;
                 }
                 _ => {}
             }
