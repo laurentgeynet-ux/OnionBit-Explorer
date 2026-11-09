@@ -399,6 +399,44 @@ fn inline_block_vertical_align_top() {
 }
 
 // ── grid ──────────────────────────────────────────────────────
+// ── R-204 : display:contents — enfants = items grid ───────────
+
+/// Les enfants d'un `display:contents` deviennent items grid
+/// du parent — placement ordre document (§2.7, comme le
+/// flatten flex de R-103).
+#[test]
+fn contents_flatten_grid_item() {
+    let (dom, bx) = laid(
+        "<!doctype html><section><div id=w style='display:contents'>\
+         <div>A</div><div>B</div></div><div>C</div></section>",
+        "body{margin:0}section{display:grid;grid-template-columns:1fr 1fr}\
+         section div{height:10px}",
+    );
+    let section = find(&bx, by_tag(&dom, "section"));
+    // #w n'a pas de boîte — A, B, C = 3 items grid directs
+    // (si #w en avait une, children = [w, C] = 2).
+    assert_eq!(section.children.len(), 3, "3 items grid");
+    assert!(
+        section.children.iter().all(|c| c.node != section.node),
+        "contents aplati — pas de boîte enveloppe"
+    );
+    let (a, b, c) = (
+        &section.children[0],
+        &section.children[1],
+        &section.children[2],
+    );
+    // Rangée 1 : A col 1, B col 2 ; rangée 2 : C col 1 —
+    // ordre document, les promus occupent leurs cellules.
+    assert!(approx(a.rect.x, 0.0), "{}", a.rect.x);
+    assert!(approx(b.rect.x, VIEW / 2.0), "{}", b.rect.x);
+    assert!(approx(c.rect.x, 0.0), "{}", c.rect.x);
+    assert!(
+        c.rect.y > a.rect.y,
+        "C rangée 2 : {} vs {}",
+        c.rect.y,
+        a.rect.y
+    );
+}
 
 #[test]
 fn grid_template_columns_fr() {

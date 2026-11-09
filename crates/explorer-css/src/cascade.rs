@@ -4001,6 +4001,11 @@ dialog:not([open]) { display: none }
 [inert] { pointer-events: none }
 audio:not([controls]) { display: none }
 @media (scripting) { noscript { display: none !important } }
+/* HTML Rendering — un `<slot>` ne génère aucune boîte :
+   son contenu de repli est promu (R-204 — la
+   distribution proper des nœuds assignés reste la borne
+   Shadow R-96/R-205). */
+slot { display: contents }
 li { display: list-item }
 ul, menu, dir { list-style-type: disc }
 ul ul, ol ul, menu ul, dir ul { list-style-type: circle }

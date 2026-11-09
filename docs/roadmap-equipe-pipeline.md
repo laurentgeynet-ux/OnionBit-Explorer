@@ -3681,13 +3681,22 @@ chez NAVIGATEUR — non recopiés ici.
   `r203_deux_couches_url_peintes_dans_l_ordre` (couche 0
   au-dessus) et `r203_clip_origin_par_couche` (border vs
   content box par couche).
-- [ ] **R-204. `display:contents` — résidus restants** :
+- [x] **R-204. `display:contents` — résidus restants** :
   R-191 a figé les internes table ; reste le flatten des
   enfants d'un `display:contents` **comme items flex/grid**
   du parent (aujourd'hui repli bloc) et les règles UA sur
-  `<slot>` (distribution — borne Shadow R-96). Verrous :
-  `contents_flatten_flex_item`, `contents_flatten_grid_
-  item` (items générés ordre document).
+  `<slot>` (distribution — borne Shadow R-96). **Livré** :
+  point d'audit obsolète — le flatten flex/grid existe via
+  la promotion boxtree (R-103, verrou flex
+  `display_contents_enfants_items_flex` ; verrou grid
+  prescrit posé : `contents_flatten_grid_item`, items
+  promus placés ordre document). Restant réel livré :
+  règle UA `slot { display: contents }` — le slot ne
+  génère aucune boîte et le flatten compose avec la
+  distribution R-96/97 (`child_boxes` retourne les
+  nœuds assignés, promus directs, ou le repli à défaut) —
+  borne documentée boxtree.rs:651 levée. Verrou
+  `slot_ua_contents_aplatit_fallback`.
 - [ ] **R-205. Shadow DOM — bornes R-96/R-97 levées** :
   `::part`/`exportparts` imbriqués (part list chaînée),
   `!important` inversé à la frontière (host règle vs

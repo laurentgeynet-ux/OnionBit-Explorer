@@ -684,3 +684,28 @@ fn measure_containers_mesure_les_container_type() {
         "container-type sur inline → inerte (spec)"
     );
 }
+
+/// R-204 — règle UA `slot { display: contents }` : un slot
+/// sans contexte shadow ne génère aucune boîte, son
+/// contenu de repli est promu (spec HTML rendering — la
+/// distribution proper est la borne Shadow R-96/R-205).
+#[test]
+fn slot_ua_contents_aplatit_fallback() {
+    let (dom, bx) = tree("<html><body><div><slot><b id=f>repli</b></slot></div></body></html>");
+    let slot = {
+        let mut q = vec![dom.document()];
+        let mut f = None;
+        while let Some(n) = q.pop() {
+            if dom.tag_name(n).is_ok_and(|t| t == "slot") {
+                f = Some(n);
+            }
+            if let Ok(ch) = dom.children(n) {
+                q.extend(ch.iter().rev());
+            }
+        }
+        f.expect("<slot>")
+    };
+    assert!(find(&bx, slot).is_none(), "slot → aucune boîte");
+    let fb = by_tag(&dom, "b");
+    assert!(find(&bx, fb).is_some(), "le contenu de repli est promu");
+}
