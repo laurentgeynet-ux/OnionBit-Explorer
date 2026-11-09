@@ -3149,6 +3149,12 @@ la dette, pas le layout.
   sous `rect` reçoit les ops puis le contenu se peint
   par-dessus (offscreen composité — même mécanique
   R-M5). Verrou ops + ordre + `none`.
+- [x] **R-M11. `drop-shadow()`** : la dernière
+  branche `filter` — `FilterOp::DropShadow`
+  (ombre de la forme alpha du contenu,
+  offset/teinte/blur, compositée sous le
+  groupe offscreen). `url()` hors scope.
+  Verrou args + défauts.
 - [x] **R-M10. `line-clamp`** : `-webkit-line-clamp`
   et `line-clamp` entiers lus au layout — seules les `n`
   premières lignes d'un bloc conteneur d'inline sont

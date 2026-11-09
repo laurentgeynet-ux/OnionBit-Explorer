@@ -30,9 +30,8 @@ use explorer_layout::{
 };
 
 /// Une primitive de dessin, dans l'ordre de peinture.
-/// Opération `filter` CSS (R-M5) — `drop-shadow()`
-/// volontairement absent (ombre déjà portée par
-/// `box-shadow`/`text-shadow` ; `url()` SVG hors scope).
+/// Opération `filter` CSS (R-M5/R-M11) — `url()` SVG
+/// volontairement hors scope.
 #[derive(Debug, Clone, PartialEq)]
 pub enum FilterOp {
     /// `blur(<longueur>)` — rayon px.
@@ -53,6 +52,21 @@ pub enum FilterOp {
     Sepia(f32),
     /// `hue-rotate(<angle>)` — degrés.
     HueRotate(f32),
+    /// `drop-shadow(<dx> <dy> [<blur>] [<color>])` (R-M11)
+    /// — ombre du **contenu** (forme alpha), pas d'une
+    /// boîte : au raster, le canal alpha de l'offscreen est
+    /// extrait, décalé, teinté `color`, flouté et composité
+    /// SOUS le groupe filtré.
+    DropShadow {
+        /// Décalage horizontal px.
+        dx: f32,
+        /// Décalage vertical px.
+        dy: f32,
+        /// Rayon de flou px (0 = net).
+        blur: f32,
+        /// Couleur de l'ombre.
+        color: Color,
+    },
 }
 
 #[derive(Debug, Clone)]
@@ -1787,7 +1801,25 @@ fn parse_filter(st: &explorer_css::ComputedStyle) -> Vec<FilterOp> {
     while let Some(p) = rest.find('(') {
         let name = rest[..p].trim().to_ascii_lowercase();
         let inner = &rest[p + 1..];
-        let Some(q) = inner.find(')') else {
+        //  de fermeture de LA fonction — scan paren-
+        // équilibré :  a des parens
+        // imbriquées, la première  appartient au color.
+        let mut depth = 0i32;
+        let Some(q) = inner.char_indices().find_map(|(i, c)| match c {
+            '(' => {
+                depth += 1;
+                None
+            }
+            ')' => {
+                if depth == 0 {
+                    Some(i)
+                } else {
+                    depth -= 1;
+                    None
+                }
+            }
+            _ => None,
+        }) else {
             break;
         };
         let arg = inner[..q].trim();
@@ -1806,7 +1838,8 @@ fn parse_filter(st: &explorer_css::ComputedStyle) -> Vec<FilterOp> {
                 .strip_suffix("deg")
                 .and_then(|d| d.trim().parse::<f32>().ok())
                 .map(FilterOp::HueRotate),
-            // `drop-shadow()`/`url()` : hors scope R-M5.
+            "drop-shadow" => parse_drop_shadow(arg),
+            // `url()` : hors scope.
             _ => None,
         };
         if let Some(o) = op {
@@ -1815,6 +1848,40 @@ fn parse_filter(st: &explorer_css::ComputedStyle) -> Vec<FilterOp> {
         rest = &inner[q + 1..];
     }
     out
+}
+
+/// `drop-shadow(<dx> <dy> [<blur>] [<color>])` — les
+/// longueurs en tête (2 ou 3), la couleur optionnelle à la
+/// fin (`parse_color` — accepte aussi les formes
+/// `rgb(`…`)`/`rgba(`…`)` multi-tokens : tout ce qui n'est
+/// pas une longueur à la fin est passé au parser couleur).
+/// Défauts spec : blur 0, couleur `currentcolor` →
+/// approximée à l'encre du déclarant (noir si absente).
+#[allow(clippy::cast_possible_truncation)]
+fn parse_drop_shadow(arg: &str) -> Option<FilterOp> {
+    let mut lens = Vec::new();
+    let mut color = None;
+    for tok in arg.split_whitespace() {
+        if let Some(l) = parse_length(tok).and_then(|l| l.unit.px_factor().map(|f| l.value * f)) {
+            lens.push(l as f32);
+        } else {
+            // Tout le reste (le ou les tokens couleur,
+            // éventuellement collés par l'espace dans
+            // `rgb(0, 0, 0)`) est recollé pour `parse_color`.
+            let tail = arg[arg.find(tok).unwrap_or(0)..].trim();
+            color = parse_color(tail);
+            break;
+        }
+    }
+    if lens.len() < 2 {
+        return None;
+    }
+    Some(FilterOp::DropShadow {
+        dx: lens[0],
+        dy: lens[1],
+        blur: lens.get(2).copied().unwrap_or(0.0).max(0.0),
+        color: color.unwrap_or(Color::BLACK),
+    })
 }
 
 /// R-168 — `list-style-image` : la bitmap est fetchée

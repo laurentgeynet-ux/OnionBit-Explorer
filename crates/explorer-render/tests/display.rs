@@ -2462,3 +2462,60 @@ fn backdrop_filter_item_et_ops() {
         "none → aucun item"
     );
 }
+
+/// R-M11 — `drop-shadow()` parse `dx dy [blur] [color]` :
+/// op portée par `PushFilter` comme les autres filtres ;
+/// défauts blur=0, couleur = encre (`Color::BLACK` en
+/// l'absence d'encre propre à l'ombre — approximation
+/// `currentcolor` documentée).
+#[test]
+fn drop_shadow_parsee_et_bracket() {
+    let (_d, _b, items) = dl(
+        "<div>x</div>",
+        "div { filter: drop-shadow(3px 4px 5px rgb(255, 0, 0)) }",
+    );
+    let ops = items.iter().find_map(|i| match i {
+        DisplayItem::PushFilter(ops) => Some(ops),
+        _ => None,
+    });
+    match ops {
+        Some(ops) => {
+            assert_eq!(ops.len(), 1, "ops : {ops:?}");
+            assert_eq!(
+                ops[0],
+                explorer_render::display::FilterOp::DropShadow {
+                    dx: 3.0,
+                    dy: 4.0,
+                    blur: 5.0,
+                    color: explorer_css::value::Color {
+                        r: 255,
+                        g: 0,
+                        b: 0,
+                        a: 255,
+                    },
+                }
+            );
+        }
+        None => panic!("pas de PushFilter : {items:?}"),
+    }
+    // Défauts : blur 0, couleur noire.
+    let (_d2, _b2, items2) = dl("<div>x</div>", "div { filter: drop-shadow(1px 2px) }");
+    let ops2 = items2.iter().find_map(|i| match i {
+        DisplayItem::PushFilter(ops) => Some(ops),
+        _ => None,
+    });
+    match ops2 {
+        Some(ops) => {
+            assert_eq!(
+                ops[0],
+                explorer_render::display::FilterOp::DropShadow {
+                    dx: 1.0,
+                    dy: 2.0,
+                    blur: 0.0,
+                    color: explorer_css::value::Color::BLACK,
+                }
+            );
+        }
+        None => panic!("pas de PushFilter"),
+    }
+}

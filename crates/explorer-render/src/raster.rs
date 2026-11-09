@@ -1046,7 +1046,77 @@ fn apply_filter_ops(buf: &mut Pixmap, ops: &[FilterOp]) {
     for op in ops {
         match op {
             FilterOp::Blur(r) => box_blur(buf, (*r).max(0.5)),
+            FilterOp::DropShadow {
+                dx,
+                dy,
+                blur,
+                color,
+            } => apply_drop_shadow(buf, *dx, *dy, *blur, *color),
             _ => apply_pixel_op(buf, op),
+        }
+    }
+}
+
+/// R-M11 — `drop-shadow()` : l'ombre est la **forme alpha**
+/// du groupe filtré — le canal alpha de `buf` est recopié
+/// décalé de `(dx,dy)`, teinté `color` (premultiplié à
+/// l'alpha source), flouté `blur` puis le tampon original
+/// est recomposé **par-dessus** (src-over) — l'ombre reste
+/// sous le contenu quoi qu'il arrive.
+#[allow(
+    clippy::cast_possible_truncation,
+    clippy::cast_sign_loss,
+    clippy::cast_lossless
+)]
+fn apply_drop_shadow(buf: &mut Pixmap, dx: f32, dy: f32, blur: f32, color: Color) {
+    let (w, h) = (buf.width(), buf.height());
+    let Some(mut shadow) = Pixmap::new(w, h) else {
+        return;
+    };
+    {
+        let (src_px, dst_px) = (buf.data(), shadow.data_mut());
+        let (iw, ih) = (w as i32, h as i32);
+        let (odx, ody) = (dx.round() as i32, dy.round() as i32);
+        for y in 0..ih {
+            let sy = y - ody;
+            if sy < 0 || sy >= ih {
+                continue;
+            }
+            for x in 0..iw {
+                let sx = x - odx;
+                if sx < 0 || sx >= iw {
+                    continue;
+                }
+                let sa = f32::from(src_px[((sy * iw + sx) * 4) as usize + 3]) / 255.0;
+                if sa <= 0.0 {
+                    continue;
+                }
+                let d = ((y * iw + x) * 4) as usize;
+                dst_px[d] = (f32::from(color.r) * sa).round() as u8;
+                dst_px[d + 1] = (f32::from(color.g) * sa).round() as u8;
+                dst_px[d + 2] = (f32::from(color.b) * sa).round() as u8;
+                dst_px[d + 3] = (f32::from(color.a) * sa).round() as u8;
+            }
+        }
+    }
+    if blur > 0.0 {
+        box_blur(&mut shadow, blur.max(0.5));
+    }
+    // src-over : buf peint par-dessus l'ombre.
+    let (under, over) = (shadow.take(), buf.data().to_vec());
+    buf.data_mut().copy_from_slice(&under);
+    // Composite manuel src-over (premultiplié — tiny-skia
+    // n'expose pas `draw_pixmap` sur deux Pixmap mutables
+    // empruntés ; la boucle est la version sûre).
+    {
+        let (d, s) = (buf.data_mut(), &over);
+        for i in (0..d.len()).step_by(4) {
+            let sa = f32::from(s[i + 3]) / 255.0;
+            let inv = 1.0 - sa;
+            d[i] = s[i].saturating_add((f32::from(d[i]) * inv).round() as u8);
+            d[i + 1] = s[i + 1].saturating_add((f32::from(d[i + 1]) * inv).round() as u8);
+            d[i + 2] = s[i + 2].saturating_add((f32::from(d[i + 2]) * inv).round() as u8);
+            d[i + 3] = s[i + 3].saturating_add((f32::from(d[i + 3]) * inv).round() as u8);
         }
     }
 }
@@ -1092,6 +1162,9 @@ fn apply_pixel_op(buf: &mut Pixmap, op: &FilterOp) {
                 lum + (b - lum) * s,
                 a,
             ),
+            // Inatteignable — `apply_filter_ops` route
+            // `DropShadow` vers `apply_drop_shadow`.
+            FilterOp::DropShadow { .. } => (r, g, b, a),
             FilterOp::HueRotate(d) => {
                 let rad = d.to_radians();
                 let (c1, c2) = (rad.cos(), rad.sin());
