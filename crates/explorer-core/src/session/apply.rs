@@ -2226,7 +2226,11 @@ pub(crate) fn repaint_payload(
     // il doit rester visible au-dessus du popup `<select>`.
     let cdom = dom_hint.or(p.dom.as_ref());
     if let Some((rect, color)) = caret::caret_rect(p, ctx, cdom) {
-        list.items.push(DisplayItem::FillRect { rect, color });
+        list.items.push(DisplayItem::FillRect {
+            rect,
+            color,
+            radii: [0.0; 4],
+        });
     }
     // Étape 180 (P4) — le framebuffer ne couvre plus que la
     // tranche viewport : tout document plus haut que
@@ -2390,7 +2394,11 @@ fn append_find_highlights(list: &mut DisplayList, f: &FindState) {
     for (i, occ) in f.rects.iter().enumerate() {
         let color = if i == f.current { cur } else { base };
         for &rect in occ {
-            list.items.push(DisplayItem::FillRect { rect, color });
+            list.items.push(DisplayItem::FillRect {
+            rect,
+            color,
+            radii: [0.0; 4],
+        });
         }
     }
 }

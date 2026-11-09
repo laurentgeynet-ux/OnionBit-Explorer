@@ -150,7 +150,25 @@ pub(crate) fn display_item_bounds(item: &DisplayItem) -> Option<Rect> {
         | DisplayItem::Image { rect, .. }
         | DisplayItem::MaskedFill { rect, .. }
         | DisplayItem::Marker { rect, .. }
+        | DisplayItem::BackdropFilter { rect, .. }
+        | DisplayItem::PushClipRounded { rect, .. }
         | DisplayItem::BackgroundImage { rect, .. } => Some(*rect),
+        // Mêmes bornes étendues qu'`item_bounds` PIPE.
+        DisplayItem::BoxShadow {
+            rect,
+            offset,
+            blur,
+            spread,
+            ..
+        } => {
+            let g = blur + spread.max(0.0);
+            Some(Rect {
+                x: rect.x + offset.0 - g,
+                y: rect.y + offset.1 - g,
+                width: rect.width + 2.0 * g,
+                height: rect.height + 2.0 * g,
+            })
+        }
         DisplayItem::Text { origin, run, .. } => Some(Rect {
             x: origin.0,
             y: origin.1 - run.metrics.ascent,
@@ -173,7 +191,9 @@ pub(crate) fn display_item_bounds(item: &DisplayItem) -> Option<Rect> {
         DisplayItem::PushClip(_)
         | DisplayItem::PopClip
         | DisplayItem::PushTransform(_)
-        | DisplayItem::PopTransform => None,
+        | DisplayItem::PopTransform
+        | DisplayItem::PushFilter(_)
+        | DisplayItem::PopFilter => None,
     }
 }
 

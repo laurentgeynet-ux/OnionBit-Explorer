@@ -131,12 +131,17 @@ pub(crate) fn append_select_popup(
         a: 255,
     };
     list.items
-        .push(DisplayItem::FillRect { rect, color: white });
+        .push(DisplayItem::FillRect {
+            rect,
+            color: white,
+            radii: [0.0; 4],
+        });
     list.items.push(DisplayItem::Border {
         rect,
         widths: [1.0; 4],
         colors: [edge; 4],
         styles: [BorderStyle::Solid; 4],
+        radii: [0.0; 4],
     });
     // Police chrome du popup : `sans-serif` ~¾ de ligne,
     // bornée — lisible sans dépendre du style de la page.
@@ -161,11 +166,13 @@ pub(crate) fn append_select_popup(
             list.items.push(DisplayItem::FillRect {
                 rect: row,
                 color: sel_bg,
+                radii: [0.0; 4],
             });
         } else if pop.hovered == Some(i) {
             list.items.push(DisplayItem::FillRect {
                 rect: row,
                 color: hov_bg,
+                radii: [0.0; 4],
             });
         }
         let Some(run) = data
