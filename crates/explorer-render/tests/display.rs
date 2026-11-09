@@ -3025,3 +3025,366 @@ fn transform_ancetre_englobe_positionne_z() {
         "texte z-positionné hors de la transform ancêtre : push={p} text={t} pop={q}"
     );
 }
+
+// ── R-198 : portée ancêtre dans les files différées ──────────
+//
+// Verrous écrits AVANT le fix — diagnostic figé en preuve.
+// Les positionnés z ≥ 0 et les `fixed` sont drainés par
+// `pos_defer`/`fixed_defer` au contexte d'empilement
+// englobant : ils ressortent hors des brackets des ancêtres
+// qui ne créent pas de contexte d'empilement dans
+// `stacking_ctx`. Spec : `clip-path` et `filter` créent un
+// stacking context ET un containing block pour les
+// descendants abs/fixed (css-masking-1, filter-effects) —
+// leurs descendants positionnés doivent peindre DANS le
+// bracket, pas à la racine.
+
+/// Index du `Pop*` fermant le bracket ouvert à `push` —
+/// profondeur comptée sur `is_push`/`is_pop` (brackets
+/// imbriqués du même type ignorés).
+fn matching_pop(
+    items: &[DisplayItem],
+    push: usize,
+    is_push: fn(&DisplayItem) -> bool,
+    is_pop: fn(&DisplayItem) -> bool,
+) -> Option<usize> {
+    let mut depth = 0i32;
+    for (i, it) in items.iter().enumerate().skip(push) {
+        if is_push(it) {
+            depth += 1;
+        } else if is_pop(it) {
+            depth -= 1;
+            if depth == 0 {
+                return Some(i);
+            }
+        }
+    }
+    None
+}
+
+fn clip_push(i: &DisplayItem) -> bool {
+    matches!(
+        i,
+        DisplayItem::PushClip(_)
+            | DisplayItem::PushClipRounded { .. }
+            | DisplayItem::PushClipPath { .. }
+    )
+}
+fn clip_pop(i: &DisplayItem) -> bool {
+    matches!(i, DisplayItem::PopClip)
+}
+fn filter_push(i: &DisplayItem) -> bool {
+    matches!(i, DisplayItem::PushFilter(_))
+}
+fn filter_pop(i: &DisplayItem) -> bool {
+    matches!(i, DisplayItem::PopFilter)
+}
+fn blend_push(i: &DisplayItem) -> bool {
+    matches!(i, DisplayItem::PushBlend(_))
+}
+fn blend_pop(i: &DisplayItem) -> bool {
+    matches!(i, DisplayItem::PopBlend)
+}
+
+/// Le `FillRect` 30×30 du descendant positionné des
+/// fixtures ci-dessous (ancêtres sans fond).
+fn fill_enfant(items: &[DisplayItem]) -> Option<usize> {
+    items.iter().position(|i| {
+        matches!(i, DisplayItem::FillRect { rect, .. }
+            if (rect.width - 30.0).abs() < 0.5 && (rect.height - 30.0).abs() < 0.5)
+    })
+}
+
+/// R-198 (verrou rouge) — `clip-path` ancêtre + descendant
+/// `position:absolute` : le clip géométrique borne TOUT le
+/// rendu de la boîte, descendants positionnés inclus
+/// (css-masking-1 : clip-path = containing block + stacking
+/// context). Aujourd'hui l'enfant part en `pos_defer` et se
+/// peint après le `PopClip`.
+#[test]
+fn clip_path_ancetre_clippe_descendant_absolu() {
+    let (_, _, items) = dl(
+        "<div id=c><div id=a></div></div>",
+        "#c{clip-path:polygon(0% 0%,100% 0%,50% 100%);width:100px;height:100px}\
+         #a{position:absolute;left:0;top:0;width:30px;height:30px;\
+            background-color:#ff0000}",
+    );
+    let push = items
+        .iter()
+        .position(|i| matches!(i, DisplayItem::PushClipPath { .. }))
+        .expect("PushClipPath ancêtre");
+    let pop = matching_pop(&items, push, clip_push, clip_pop).expect("PopClip");
+    let fill = fill_enfant(&items).expect("fond de l'enfant absolu");
+    assert!(
+        push < fill && fill < pop,
+        "enfant absolu hors du clip-path ancêtre : push={push} fill={fill} pop={pop}"
+    );
+}
+
+/// R-198 (verrou rouge) — même cas avec `z-index` explicite
+/// : l'enfant transite par `push_z` dans la file triée —
+/// autre chemin d'enfilement, même trou de portée.
+#[test]
+fn clip_path_ancetre_clippe_descendant_absolu_z() {
+    let (_, _, items) = dl(
+        "<div id=c><div id=a></div></div>",
+        "#c{clip-path:polygon(0% 0%,100% 0%,50% 100%);width:100px;height:100px}\
+         #a{position:absolute;left:0;top:0;width:30px;height:30px;\
+            z-index:1;background-color:#ff0000}",
+    );
+    let push = items
+        .iter()
+        .position(|i| matches!(i, DisplayItem::PushClipPath { .. }))
+        .expect("PushClipPath ancêtre");
+    let pop = matching_pop(&items, push, clip_push, clip_pop).expect("PopClip");
+    let fill = fill_enfant(&items).expect("fond de l'enfant absolu");
+    assert!(
+        push < fill && fill < pop,
+        "enfant z-positionné hors du clip-path ancêtre : \
+         push={push} fill={fill} pop={pop}"
+    );
+}
+
+/// R-198 (verrou rouge) — `filter` ancêtre + descendant
+/// absolu : filter-effects — `filter` non-none crée un
+/// stacking context et un containing block ; l'enfant doit
+/// subir le flou dans le groupe `PushFilter`…`PopFilter`,
+/// pas être peint net à la racine.
+#[test]
+fn filter_ancetre_encadre_descendant_absolu() {
+    let (_, _, items) = dl(
+        "<div id=c><div id=a></div></div>",
+        "#c{filter:blur(4px);width:100px;height:100px}\
+         #a{position:absolute;left:0;top:0;width:30px;height:30px;\
+            background-color:#ff0000}",
+    );
+    let push = items
+        .iter()
+        .position(|i| matches!(i, DisplayItem::PushFilter(_)))
+        .expect("PushFilter ancêtre");
+    let pop = matching_pop(&items, push, filter_push, filter_pop).expect("PopFilter");
+    let fill = fill_enfant(&items).expect("fond de l'enfant absolu");
+    assert!(
+        push < fill && fill < pop,
+        "enfant absolu hors du filter ancêtre : push={push} fill={fill} pop={pop}"
+    );
+}
+
+/// R-198 (cliquet vert) — `z-index:-1` : les positionnés à
+/// z négatif sont émis en phase négative par `emit_scoped`
+/// DANS l'émission du parent — déjà à l'intérieur du
+/// bracket. Verrouille le cas correct à ne pas casser en
+/// généralisant la route `stacking_ctx`.
+#[test]
+fn clip_path_ancetre_clippe_descendant_neg_z() {
+    let (_, _, items) = dl(
+        "<div id=c><div id=a></div></div>",
+        "#c{clip-path:polygon(0% 0%,100% 0%,50% 100%);width:100px;height:100px}\
+         #a{position:absolute;left:0;top:0;width:30px;height:30px;\
+            z-index:-1;background-color:#ff0000}",
+    );
+    let push = items
+        .iter()
+        .position(|i| matches!(i, DisplayItem::PushClipPath { .. }))
+        .expect("PushClipPath ancêtre");
+    let pop = matching_pop(&items, push, clip_push, clip_pop).expect("PopClip");
+    let fill = fill_enfant(&items).expect("fond de l'enfant z:-1");
+    assert!(
+        push < fill && fill < pop,
+        "enfant z:-1 hors du clip-path ancêtre : push={push} fill={fill} pop={pop}"
+    );
+}
+
+/// R-198 (cliquet vert) — `mix-blend-mode` figure déjà dans
+/// `stacking_ctx` : ses positionnés drainent dans `my_pos`,
+/// à l'intérieur du `PushBlend`. Prouve que l'infra de
+/// portée existe — le fix étend la même route aux ancêtres
+/// clip-path/filter.
+#[test]
+fn mix_blend_ancetre_encadre_descendant_absolu() {
+    let (_, _, items) = dl(
+        "<div id=c><div id=a></div></div>",
+        "#c{mix-blend-mode:multiply;width:100px;height:100px}\
+         #a{position:absolute;left:0;top:0;width:30px;height:30px;\
+            background-color:#ff0000}",
+    );
+    let push = items
+        .iter()
+        .position(|i| matches!(i, DisplayItem::PushBlend(_)))
+        .expect("PushBlend ancêtre");
+    let pop = matching_pop(&items, push, blend_push, blend_pop).expect("PopBlend");
+    let fill = fill_enfant(&items).expect("fond de l'enfant absolu");
+    assert!(
+        push < fill && fill < pop,
+        "enfant absolu hors du groupe blend : push={push} fill={fill} pop={pop}"
+    );
+}
+
+/// R-198 (cliquet vert) — `contain:paint` : déjà dans
+/// `stacking_ctx` ET émet son propre `PushClip` — le
+/// descendant absolu est clippé comme la spec le veut.
+/// Verrouille le comportement correct.
+#[test]
+fn contain_paint_clippe_descendant_absolu() {
+    let (_, _, items) = dl(
+        "<div id=c><div id=a></div></div>",
+        "#c{contain:paint;width:100px;height:100px}\
+         #a{position:absolute;left:0;top:0;width:30px;height:30px;\
+            background-color:#ff0000}",
+    );
+    let push = items
+        .iter()
+        .position(|i| matches!(i, DisplayItem::PushClip(_)))
+        .expect("PushClip contain");
+    let pop = matching_pop(&items, push, clip_push, clip_pop).expect("PopClip");
+    let fill = fill_enfant(&items).expect("fond de l'enfant absolu");
+    assert!(
+        push < fill && fill < pop,
+        "enfant absolu hors du clip contain:paint : \
+         push={push} fill={fill} pop={pop}"
+    );
+}
+
+/// R-198 (cliquet vert, garde-fou inverse) — un ancêtre
+/// `overflow:hidden` NON positionné n'est pas le bloc
+/// conteneur de l'absolu : la spec veut l'évasion (clip
+/// `overflow` ≠ clip de tout le rendu — il ne s'applique
+/// qu'aux descendants de sa chaîne de containing blocks).
+/// Le fix clip-path/filter ne doit PAS tout clipper.
+#[test]
+fn abs_echappe_clip_overflow_ancetre_statique() {
+    let (_, _, items) = dl(
+        "<div id=c><div id=a></div></div>",
+        "#c{overflow:hidden;width:50px;height:50px}\
+         #a{position:absolute;left:0;top:0;width:30px;height:30px;\
+            background-color:#ff0000}",
+    );
+    let push = items
+        .iter()
+        .position(|i| matches!(i, DisplayItem::PushClip(_)))
+        .expect("PushClip overflow");
+    let pop = matching_pop(&items, push, clip_push, clip_pop).expect("PopClip");
+    let fill = fill_enfant(&items).expect("fond de l'enfant absolu");
+    assert!(
+        fill > pop,
+        "enfant absolu rogné par le clip d'un ancêtre statique \
+         (spec : évasion correcte) : fill={fill} pop={pop}"
+    );
+}
+
+/// R-198 (cliquet d'écart — comportement actuel figé) —
+/// `position:fixed` sous ancêtre `clip-path` : la spec fait
+/// de clip-path le containing block du fixed → il devrait
+/// être clippé. Mais le rect `fixed` est résolu **vs
+/// viewport au layout** : la correction est côté
+/// `explorer-layout` (CB modélisé), pas display — hors du
+/// périmètre de ce fix. Flip attendu à l'étape CB-fixed.
+#[test]
+fn fixed_sous_clip_path_ancetre_echappe_aujourdhui() {
+    let (_, _, items) = dl(
+        "<div id=c><div id=a></div></div>",
+        "#c{clip-path:polygon(0% 0%,100% 0%,50% 100%);width:100px;height:100px}\
+         #a{position:fixed;left:0;top:0;width:30px;height:30px;\
+            background-color:#ff0000}",
+    );
+    let push = items
+        .iter()
+        .position(|i| matches!(i, DisplayItem::PushClipPath { .. }))
+        .expect("PushClipPath ancêtre");
+    let pop = matching_pop(&items, push, clip_push, clip_pop).expect("PopClip");
+    let fill = fill_enfant(&items).expect("fond du fixed");
+    assert!(
+        fill > pop,
+        "comportement courant changé (fixed sous clip-path) — \
+         mettre à jour le verrou : fill={fill} pop={pop}"
+    );
+}
+
+/// R-198 (cliquet d'écart) — `position:fixed` sous ancêtre
+/// `transform`é : spec — transform crée le CB du fixed →
+/// peint dans la matrice, ancré à l'ancêtre. Trou connu de
+/// l'audit (« fixed sous ancêtre transformé ») : le CB est
+/// résolu au layout — verrouillé à l'état actuel en
+/// attendant l'étape layout.
+#[test]
+fn fixed_sous_transform_ancetre_echappe_aujourdhui() {
+    let (_, _, items) = dl(
+        "<div id=c><div id=a></div></div>",
+        "#c{transform:translate(10px,5px);width:100px;height:100px}\
+         #a{position:fixed;left:0;top:0;width:30px;height:30px;\
+            background-color:#ff0000}",
+    );
+    let push = items
+        .iter()
+        .position(|i| matches!(i, DisplayItem::PushTransform(_)))
+        .expect("PushTransform ancêtre");
+    let pop = matching_pop(
+        &items,
+        push,
+        |i| matches!(i, DisplayItem::PushTransform(_)),
+        |i| matches!(i, DisplayItem::PopTransform),
+    )
+    .expect("PopTransform");
+    let fill = fill_enfant(&items).expect("fond du fixed");
+    assert!(
+        fill > pop,
+        "comportement courant changé (fixed sous transform) — \
+         mettre à jour le verrou : fill={fill} pop={pop}"
+    );
+}
+
+/// R-198 (cliquet d'écart) — `overflow:hidden` sur ancêtre
+/// POSITIONNÉ : le clip s'applique aux descendants de sa
+/// chaîne de containing blocks, et l'ancêtre positionné EST
+/// le CB de l'absolu → spec : clippé. L'évasion actuelle
+/// relève d'une route par containing block (au-delà de la
+/// seule extension `stacking_ctx`) — figé pour l'étape de
+/// généralisation.
+#[test]
+fn abs_sous_overflow_ancetre_positionne_echappe_aujourdhui() {
+    let (_, _, items) = dl(
+        "<div id=c><div id=a></div></div>",
+        "#c{position:relative;overflow:hidden;width:50px;height:50px}\
+         #a{position:absolute;left:0;top:0;width:30px;height:30px;\
+            background-color:#ff0000}",
+    );
+    let push = items
+        .iter()
+        .position(|i| matches!(i, DisplayItem::PushClip(_)))
+        .expect("PushClip overflow");
+    let pop = matching_pop(&items, push, clip_push, clip_pop).expect("PopClip");
+    let fill = fill_enfant(&items).expect("fond de l'enfant absolu");
+    assert!(
+        fill > pop,
+        "comportement courant changé (abs sous overflow positionné) — \
+         mettre à jour le verrou : fill={fill} pop={pop}"
+    );
+}
+
+/// R-198 (cliquet d'écart) — `clip:rect()` legacy : borne
+/// le rendu de TOUT l'élément (descendants inclus, CSS2
+/// §11.1.2) sans créer de stacking context — la spec veut
+/// l'enfant clippé, la route par contexte n'est qu'une
+/// approximation possible (z-order non modifié par spec).
+/// Figé à l'état actuel.
+#[test]
+fn clip_rect_ancetre_ne_clippe_pas_descendant_absolu() {
+    let (_, _, items) = dl(
+        "<div id=c><div id=a></div></div>",
+        "#c{position:absolute;width:100px;height:100px;\
+            clip:rect(0,50px,50px,0)}\
+         #a{position:absolute;left:0;top:0;width:30px;height:30px;\
+            background-color:#ff0000}",
+    );
+    let push = items
+        .iter()
+        .position(|i| matches!(i, DisplayItem::PushClip(_)))
+        .expect("PushClip clip:rect");
+    let pop = matching_pop(&items, push, clip_push, clip_pop).expect("PopClip");
+    let fill = fill_enfant(&items).expect("fond de l'enfant absolu");
+    assert!(
+        fill > pop,
+        "comportement courant changé (abs sous clip:rect) — \
+         mettre à jour le verrou : fill={fill} pop={pop}"
+    );
+}

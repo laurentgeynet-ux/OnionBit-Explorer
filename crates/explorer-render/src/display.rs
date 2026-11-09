@@ -4372,6 +4372,20 @@ fn stacking_ctx(bx: &LayoutBox) -> bool {
             .style
             .get("contain")
             .is_some_and(|v| v.split(' ').any(|t| matches!(t, "paint" | "strict" | "content")))
+        // R-198 — `clip-path` et `filter` non-`none` créent un
+        // stacking context ET un containing block pour les
+        // descendants abs/fixed (css-masking-1, filter-effects) :
+        // leurs positionnés z ≥ 0 doivent drainer dans `my_pos`
+        // — à l'intérieur du `PushClipPath`/`PushFilter` —
+        // comme les descendants d'un ancêtre transformé.
+        || bx
+            .style
+            .get("clip-path")
+            .is_some_and(|v| v.trim() != "none")
+        || bx
+            .style
+            .get("filter")
+            .is_some_and(|v| v.trim() != "none")
 }
 
 /// Enfile un enfant positionné dans la file de son contexte

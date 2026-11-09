@@ -3517,13 +3517,25 @@ déblocage/coût décroissant.
   Approximations MVP documentées : pas de contribution des
   items du sous-grid au sizing des pistes parent, pas de
   trim au span réel. Verrou `subgrid_herite_template_parent`.
-- [ ] **R-198. Portée ancêtre dans les files différées +
-  `clip-path` des descendants positionnés** : descendants
-  `abs`/`fixed` peints hors du `PushClip` ancêtre (audit —
-  clip-path doit clipper tous les descendants et crée un
-  containing block). Enregistrer le bracket actif au defer
-  et le ré-émettre autour du drain — même infra de « portée
-  reportée » que la deuxième passe de R-190.
+- [x] **R-198. `clip-path`/`filter` ancêtres — portée dans
+  les files différées** : les descendants `position:
+  absolute` z ≥ 0 d'un ancêtre `clip-path`/`filter` étaient
+  drainés en `pos_defer` racine — peints **après** le
+  `PopClip`/`PopFilter`. La spec fait des deux propriétés
+  des créateurs de stacking context ET containing block
+  (css-masking-1, filter-effects) → ajoutées à
+  `stacking_ctx` (`display.rs`) : leurs positionnés
+  drainent dans `my_pos`, à l'intérieur du bracket — même
+  infra que les ancêtres transformés, aucune capture de
+  scope ajoutée. Verrous ×11 (3 cibles rouges→verts,
+  cliquets verts `neg_z`/`mix_blend`/`contain:paint`/
+  évasion `overflow` statique, cliquets d'écart figés).
+  Écarts documentés restants : `fixed` sous ancêtre créant
+  un CB (clip-path/filter/transform — le rect `fixed` est
+  résolu vs viewport **au layout**, étape séparée), `abs`
+  sous `overflow` d'ancêtre positionné (chaîne CB au-delà
+  de `stacking_ctx`), `clip:rect()` legacy (pas de SC par
+  spec — la même route resterait une approximation).
 - [ ] **R-190. `@container` évalué** : `CollectedContainer`
   collecté, jamais consommé (`container_rules_matching`
   annoncé absent — `cascade.rs`). Deuxième passe : tailles de
