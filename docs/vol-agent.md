@@ -312,6 +312,20 @@ DASH illimité prend la rep max, ex. 4K `bbb_30fps.mpd`),
 `--framedrop` le skip-level décodeur (0 none → 4 all). Sur
 DLL ABI 4 ils sont ignorés (`[knobs] … ignoré` imprimé).
 
+**Pièges mesurés (vol 778)** — incidents d'exécution, pas
+des défauts de la chaîne média :
+
+- **`dlopen` est relatif au CWD** : lancé hors `terrain-bin`,
+  le probe panic `LoadLibraryExW failed` (il cherche
+  `onionmedia_ffi.dll` dans le répertoire courant). Règle :
+  `cd terrain-bin` avant lancement, ou `--dll <chemin absolu>`.
+- **Claim orphelin après crash** : un run qui panic **après**
+  `[claim] → 200` laisse la surface `claimed:true` → le run
+  suivant récolte `409 Taken` (first-wins, cf. états du
+  contrat). Reprise : `POST …/media/{mid}/release` manuel
+  puis relancer — `--reclaim` ne couvre que le churn 410,
+  pas un `409` initial.
+
 Ce qu'il fait, à chaque étape vérifiable par `GET …/media` :
 
 1. `GET …/media/{mid}` → lit `url`/`mime`/`mse`/`mseBuffers`/
