@@ -3735,6 +3735,105 @@ fn poll_net_budget_defere_les_livraisons_excedentaires() {
     assert!(s.pending_net_done.is_empty());
 }
 
+/// §B-54 (explore.org vols 765/767) — une rafale de
+/// livraisons fetch/XHR dans la même passe `drain_net_done`
+/// ne paie qu'UN tour post-script (`run_pending` +
+/// resynchro + `after_script`) par onglet touché : avant,
+/// chaque réponse payait le sien (~4 ms ×533 en tête de nav
+/// vidait `poll_net_budget` → le fetch de données SPA
+/// `/api/initial` arrivait ~38 s tard, tué par le timeout
+/// côté page). La file de jobs moteur étant globale, les
+/// handlers `.then` s'exécutent dans l'ordre d'arrivée au
+/// prochain `run_pending` — l'ordre observable est préservé.
+#[test]
+fn drain_net_done_mutualise_le_tour_post_script() {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::Mutex;
+    use std::time::Instant;
+
+    /// Moteur compteur — `run_pending`/`deliver_net_response`
+    /// instrumentés, le reste au défaut du trait.
+    struct CountNet {
+        runs: Arc<AtomicUsize>,
+        delivered: Arc<Mutex<Vec<u64>>>,
+    }
+    impl explorer_js::JsEngine for CountNet {
+        fn eval(&mut self, _src: &str) -> Result<String, explorer_js::JsError> {
+            Ok("undefined".to_string())
+        }
+        fn run_pending(&mut self) -> usize {
+            self.runs.fetch_add(1, Ordering::SeqCst);
+            0
+        }
+        fn deliver_net_response(
+            &mut self,
+            resp: explorer_js::NetResponse,
+        ) -> Result<(), explorer_js::JsError> {
+            self.delivered.lock().unwrap().push(resp.handle);
+            Ok(())
+        }
+        fn set_budget(&mut self, _ops: u64) {}
+    }
+
+    let mut s = Session::with_config(
+        Arc::new(FailTransport),
+        Arc::new(TestFont),
+        SessionConfig::default(),
+    );
+    let tab = s.open_tab();
+    let runs = Arc::new(AtomicUsize::new(0));
+    let delivered = Arc::new(Mutex::new(Vec::new()));
+    {
+        let e = s.tabs.get_mut(&tab).expect("tab");
+        e.url = Some(Url::parse("https://x.test/").expect("url"));
+        e.js = Some(Box::new(CountNet {
+            runs: runs.clone(),
+            delivered: delivered.clone(),
+        }));
+    }
+    let page = Url::parse("https://x.test/").expect("page");
+    let mk = |handle: u64| NetDone {
+        tab,
+        handle,
+        cross: false,
+        mode: explorer_net::http::FetchMode::Cors,
+        credentials: explorer_net::http::FetchCredentials::Omit,
+        page_origin: "https://x.test".to_string(),
+        cors_unsafe: Vec::new(),
+        req_url: page.clone(),
+        partition: None,
+        out: Ok(explorer_net::http::Response {
+            status: 200,
+            reason: "ok".to_string(),
+            headers: Vec::new(),
+            body: Vec::new(),
+            reused_connection: false,
+            resolved_url: None,
+        }),
+        script: None,
+        frame: None,
+        img: None,
+        link: None,
+        dyn_module: None,
+        import: None,
+    };
+    s.drain_net_done(vec![mk(0), mk(1), mk(2)], Instant::now());
+    assert_eq!(
+        *delivered.lock().unwrap(),
+        vec![0, 1, 2],
+        "livraisons dans l'ordre d'arrivée"
+    );
+    assert_eq!(
+        runs.load(Ordering::SeqCst),
+        1,
+        "un seul `run_pending` mutualisé pour toute la rafale"
+    );
+    // La passe suivante repaie son propre tour — la
+    // mutualisation est par passe, pas amortie au-delà.
+    s.drain_net_done(vec![mk(3)], Instant::now());
+    assert_eq!(runs.load(Ordering::SeqCst), 2);
+}
+
 /// J4/§B-12 (bookshop vol 95) — une fois `heap_dead` armé,
 /// chaque éval suivante échoue avec la même signature « heap
 /// memory limit exceeded » mais une pile JS différente par

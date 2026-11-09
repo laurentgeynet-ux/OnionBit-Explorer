@@ -3332,37 +3332,72 @@ impl Session {
     /// tour post-script : microtasks, resynchro DOM +
     /// relayout, drains (réseau chaîné, cookies, storage).
     pub(crate) fn deliver_net_response(&mut self, tab: TabId, resp: NetResponse) {
-        let mutated = {
+        if self.enqueue_net_response(tab, resp) {
+            self.finish_net_turn(tab);
+        }
+    }
+
+    /// Corps « léger » de [`Self::deliver_net_response`] : la
+    /// livraison moteur **sans** tour post-script —
+    /// `drain_net_done` (§B-54) enchaîne les livraisons en
+    /// rafale puis ne paie qu'un [`Self::finish_net_turn`]
+    /// par onglet en fin de passe : la file de jobs moteur
+    /// étant globale, les handlers `.then` s'exécutent dans
+    /// l'ordre d'arrivée au prochain `run_pending` — payer le
+    /// tour à CHAQUE réponse coûtait ~4 ms ×500+ en tête de
+    /// nav et vidait le `poll_net_budget` → les fetches de
+    /// données de la page (`/api/initial` explore.org)
+    /// mouraient de timeout SPA ~38 s plus tard.
+    fn enqueue_net_response(&mut self, tab: TabId, resp: NetResponse) -> bool {
+        let mut emit_err = None;
+        let delivered = {
             let Some(entry) = self.tabs.get_mut(&tab) else {
-                return;
+                return false;
             };
             // Moteur sorti pour exécution hors verrou (53f) —
             // la réponse est tamponnée et livrée à sa
             // réinsertion ; la jeter ici pendrait le `fetch`/
-            // XHR émetteur à jamais.
+            // XHR émetteur à jamais. Pas de tour à payer : le
+            // flush de `js_pending_net` à la réinsertion porte
+            // le sien.
             if entry.js_detached.is_some() {
                 entry.js_pending_net.push(resp);
-                return;
+                return false;
             }
             let Some(eng) = entry.js.as_mut() else {
-                return;
+                return false;
             };
-            let mut emit_err = None;
             if let Err(e) = eng.deliver_net_response(resp) {
                 tracing::debug!(tab, error = %e, "livraison réseau js");
                 emit_err = Some(e.to_string());
             }
             dlv_info!("net: resp");
-            let n = eng.run_pending();
-            dlv_info!("net: resp ret n={n}");
-            (Self::sync_for_apply(eng.as_mut()), emit_err)
+            true
         };
-        let (mutated, emit_err) = mutated;
         if let Some(m) = emit_err {
             // §B-12 vol 100 : les erreurs de livraison
             // passent par la porte partagée.
             self.emit_pipeline_error(tab, m);
         }
+        delivered
+    }
+
+    /// Tour post-script mutualisé : `run_pending` global (la
+    /// file moteur est commune — un drain emporte tous les
+    /// handlers enfilés depuis la rafale), resynchro miroir,
+    /// `after_script` — le triplet qu'on payait par livraison.
+    fn finish_net_turn(&mut self, tab: TabId) {
+        let mutated = {
+            let Some(entry) = self.tabs.get_mut(&tab) else {
+                return;
+            };
+            let Some(eng) = entry.js.as_mut() else {
+                return;
+            };
+            let n = eng.run_pending();
+            dlv_info!("net: resp ret n={n}");
+            Self::sync_for_apply(eng.as_mut())
+        };
         if let Some(s) = mutated {
             self.queue_apply_sync(tab, s);
         }
@@ -3839,6 +3874,12 @@ impl Session {
         if let Ok(mut g) = crate::LAST_DRAIN.lock() {
             *g = "net_done";
         }
+        // §B-54 — onglets ayant reçu au moins une livraison
+        // fetch/XHR : le tour post-script (`run_pending` +
+        // resynchro + `after_script`) est mutualisé en fin de
+        // passe (ordre d'arrivée préservé — la file de jobs
+        // moteur est globale).
+        let mut touched: Vec<TabId> = Vec::new();
         let mut it = done.into_iter();
         while let Some(mut d) = it.next() {
             if !self.poll_net_budget.is_zero() && start.elapsed() > self.poll_net_budget {
@@ -3850,7 +3891,7 @@ impl Session {
                     budget_ms = self.poll_net_budget.as_millis(),
                     "poll_net : livraisons différées à la prochaine passe (B-54)"
                 );
-                return;
+                break;
             }
             // `<script>` dynamique (CAP-169) — la tâche vit
             // dans `dyn_tasks` (son `handle` est le `seq`
@@ -3961,7 +4002,15 @@ impl Session {
             } else {
                 self.fetch_fail_streak.remove(&key);
             }
-            self.deliver_net_response(d.tab, resp);
+            // §B-54 — livraison sans tour : le `run_pending` +
+            // resynchro + `after_script` est mutualisé en fin
+            // de passe (un par onglet touché).
+            if self.enqueue_net_response(d.tab, resp) && !touched.contains(&d.tab) {
+                touched.push(d.tab);
+            }
+        }
+        for tab in touched {
+            self.finish_net_turn(tab);
         }
     }
 
