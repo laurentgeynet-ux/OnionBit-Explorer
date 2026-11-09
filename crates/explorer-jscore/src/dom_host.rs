@@ -8579,6 +8579,38 @@ impl Host for NodeHost {
                             "removeChild: node is not a child",
                         )));
                     }
+                    // §B-120 — premier retrait d'un enfant de
+                    // `body`/`html`/`#document` : la stack JS
+                    // nomme le vidage de page (React
+                    // `clearContainer`, `clearBody`…) — bornée
+                    // 8 frames aplaties, dédup `probe_seen`.
+                    if tracing::enabled!(target: "dom_probe", tracing::Level::INFO) {
+                        let fire = {
+                            let mut d = self.dom.borrow_mut();
+                            let ptag = d.nodes[node as usize].tag.clone();
+                            if matches!(ptag.as_str(), "body" | "html" | "#document")
+                                && d.ce.probe_seen.insert(format!("dk:{ptag}"))
+                            {
+                                Some((ptag, d.nodes[child as usize].tag.clone()))
+                            } else {
+                                None
+                            }
+                        };
+                        if let Some((ptag, ctag)) = fire {
+                            let stack: String = e
+                                .stack_text("", "")
+                                .lines()
+                                .map(str::trim)
+                                .filter(|l| l.starts_with("at "))
+                                .take(8)
+                                .collect::<Vec<_>>()
+                                .join(" <- ");
+                            let stack: String = stack.chars().take(600).collect();
+                            tracing::info!(target: "dom_probe",
+                                site = "dom.kill", parent = %ptag,
+                                child = %ctag, stack = %stack);
+                        }
+                    }
                     self.dom.borrow_mut().detach(child);
                     Ok(Some(arg(args, 0)))
                 } else {
