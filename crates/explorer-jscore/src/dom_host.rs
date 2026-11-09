@@ -2956,13 +2956,35 @@ impl Engine {
             // DocumentFragment` abortait le bootstrap) — le
             // vrai ctor remplace le bouchon ; proto, chaîne
             // `Node` et récolte ShadyDOM inchangés.
-            let f = if name == "DocumentFragment" {
-                self.native_fn(name, docfrag_ctor)
-            } else {
-                self.illegal_ctor_bound(name)
+            // JS-C461 — `Animation`/`KeyframeEffect` sont
+            // `[Constructor]` WebIDL (vol 733 §B-124 :
+            // `illegal constructor (KeyframeEffect)` à
+            // `late,app:5743` — YouTube/WAAPI). Même voie
+            // que DocumentFragment ; proto adopté par le
+            // lazy-path (`instanceof` sur les wrappers
+            // `el.animate()`/`getAnimations()`).
+            let f = match name {
+                "DocumentFragment" => self.native_fn(name, docfrag_ctor),
+                "Animation" => {
+                    self.native_fn(name, crate::misc_apis::animation_ctor)
+                }
+                "KeyframeEffect" => {
+                    self.native_fn(name, crate::misc_apis::keyframe_effect_ctor)
+                }
+                _ => self.illegal_ctor_bound(name),
             };
             if let Value::Obj(fid) = f {
                 let p = self.new_object();
+                // JS-C461 — les wrappers `el.animate()`/
+                // `new Animation()`/`new KeyframeEffect()`
+                // partagent le proto du ctor (identité
+                // `instanceof` — le lazy-path `anim_proto`/
+                // `kfe_proto` adopte celui-ci).
+                match name {
+                    "Animation" => self.misc.anim_proto = Some(p),
+                    "KeyframeEffect" => self.misc.kfe_proto = Some(p),
+                    _ => {}
+                }
                 // Chaîne d'héritage des protos DOM (J5) —
                 // `instanceof` transitif : `el instanceof
                 // Element` et `instanceof Node` à la fois
@@ -3849,9 +3871,28 @@ impl Engine {
             "CanvasRenderingContext2D",
             "WebGLRenderingContext",
         ] {
-            let f = self.illegal_ctor_bound(name);
+            // JS-C461 — `Animation`/`KeyframeEffect` ont un
+            // vrai ctor (le stub « illegal constructor »
+            // cassait `new KeyframeEffect` de YouTube).
+            let f = match name {
+                "Animation" => {
+                    self.native_fn(name, crate::misc_apis::animation_ctor)
+                }
+                "KeyframeEffect" => {
+                    self.native_fn(name, crate::misc_apis::keyframe_effect_ctor)
+                }
+                _ => self.illegal_ctor_bound(name),
+            };
             if let Value::Obj(fid) = f {
                 let p = self.new_object();
+                // Proto final servi par le ctor — c'est
+                // celui-ci que les wrappers adoptent
+                // (écrase l'adoption de la première boucle).
+                match name {
+                    "Animation" => self.misc.anim_proto = Some(p),
+                    "KeyframeEffect" => self.misc.kfe_proto = Some(p),
+                    _ => {}
+                }
                 self.set_own(fid, "prototype", Value::Obj(p), false);
             }
             self.set_own(g, name, f, false);
@@ -5262,6 +5303,13 @@ impl Host for DocumentHost {
             // (spec : reflète le referrer initial, jamais la
             // politique des requêtes ultérieures).
             "referrer" => Ok(Some(e.str_val(e.hooks.page_referrer.clone()))),
+            // `document.timeline` (JS-C461, WAAPI) —
+            // `DocumentTimeline` singleton du document,
+            // horloges honnêtes à 0 (pas de compositeur —
+            // même borne que `el.animate` CAP-187).
+            "timeline" => Ok(Some(Value::Obj(
+                crate::misc_apis::document_timeline_pub(e),
+            ))),
             // `document.currentScript` (CAP-168) — l'élément
             // `<script>` en cours d'évaluation, `null` sinon
             // (spec : posé uniquement pendant l'exécution).

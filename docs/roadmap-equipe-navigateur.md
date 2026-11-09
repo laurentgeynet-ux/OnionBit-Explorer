@@ -11462,3 +11462,24 @@ un crate PIPELINE.- [x] **JS-C422. Deadline honnête — canal session ↔ budge
   paresseux, `return` en vol pendant `finally`.
   Verrous `c460_gc_churn` ×7 ; frontière compound-expr
   (table racines d'expressions) documentée.
+- [x] **JS-C461. Surface WAAPI constructible —
+  `KeyframeEffect`/`Animation`/`document.timeline`**
+  (§B-124, vol 733 — `uncaught TypeError: illegal
+  constructor (KeyframeEffect)` à `late,app:5743:23`,
+  suspect n°1 de la cascade post-squelette accueil
+  YouTube) : les deux noms sortent du stub
+  `illegal_ctor_bound` — vrais ctors `[Constructor]`
+  WebIDL adossés à l'`AnimData` CAP-187. `new
+  KeyframeEffect(target, frames, opts)` stocke les 3
+  args (host `KfeHost`, `target`/`getKeyframes`/
+  `getComputedTiming`/`composite`/`pseudoElement`) ;
+  `new Animation(effect?, timeline?)` démarre `idle`
+  + `ready` pendante (spec — `el.animate` reste
+  `running`+`ready` résolu) ; `play()` résout `ready`
+  ; `effect`/`timeline` servis (KFE implicite +
+  singleton `document.timeline` — horloges honnêtes
+  à 0, pas de compositeur). Protos unifiés : les deux
+  boucles d'install adoptent le proto final du ctor
+  dans `misc.anim_proto`/`kfe_proto` → `instanceof`
+  croisé wrappers↔ctor. Verrous `c461_waapi` ×4 ;
+  canaris dom 245/245, media_events 15/15.

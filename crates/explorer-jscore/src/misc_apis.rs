@@ -67,7 +67,13 @@ pub(crate) struct MiscState {
     ni_proto: Option<ObjId>,
     /// `Animation.prototype` paresseux + registre des
     /// animations vivantes (CAP-187) — document-local.
-    anim_proto: Option<ObjId>,
+    /// `pub(crate)` : le proto du **ctor** est adopté à
+    /// l'install (JS-C461 — identité `instanceof`).
+    pub(crate) anim_proto: Option<ObjId>,
+    /// `KeyframeEffect.prototype` paresseux + singleton
+    /// `document.timeline` (JS-C461 — WAAPI constructible).
+    pub(crate) kfe_proto: Option<ObjId>,
+    doc_timeline: Option<ObjId>,
     anims: Vec<Rc<RefCell<AnimData>>>,
     /// `ViewTransition.prototype` paresseux (CAP-187).
     vt_proto: Option<ObjId>,
@@ -96,6 +102,8 @@ impl MiscState {
             self.tw_proto,
             self.ni_proto,
             self.anim_proto,
+            self.kfe_proto,
+            self.doc_timeline,
             self.vt_proto,
             self.xr_proto,
         ]
@@ -2211,6 +2219,11 @@ struct AnimData {
     /// Handlers `onfinish`/`oncancel`.
     onfinish: Value,
     oncancel: Value,
+    /// `effect`/`timeline` (JS-C461) — `new Animation(kfe,
+    /// tl)` les porte ; `el.animate` pose un KeyframeEffect
+    /// implicite + `document.timeline`.
+    effect: Value,
+    timeline: Value,
 }
 
 struct AnimHost {
@@ -2249,16 +2262,174 @@ fn anim_wrapper(e: &mut Engine, data: &Rc<RefCell<AnimData>>) -> Value {
     v
 }
 
+/// `KeyframeEffect.prototype` paresseux (JS-C461).
+fn kfe_proto(e: &mut Engine) -> ObjId {
+    if let Some(p) = e.misc.kfe_proto {
+        return p;
+    }
+    let p = e.new_object();
+    let tag = e.str_val("KeyframeEffect");
+    e.set_own(p, crate::interp::SYM_TO_STRING_TAG, tag, false);
+    e.misc.kfe_proto = Some(p);
+    p
+}
+
+/// `document.timeline` singleton (JS-C461) —
+/// `DocumentTimeline` honnête : `currentTime`/`originTime`
+/// = 0 (pas d'horloge compositeur dans le miroir).
+/// `pub(crate)` : le getter `document.timeline` (`dom_host`)
+/// sert le même singleton.
+pub(crate) fn document_timeline_pub(e: &mut Engine) -> ObjId {
+    document_timeline(e)
+}
+
+fn document_timeline(e: &mut Engine) -> ObjId {
+    if let Some(t) = e.misc.doc_timeline {
+        return t;
+    }
+    let t = e.new_object();
+    let tag = e.str_val("DocumentTimeline");
+    e.set_own(t, crate::interp::SYM_TO_STRING_TAG, tag, false);
+    e.set_own(t, "currentTime", Value::Num(0.0), false);
+    e.set_own(t, "originTime", Value::Num(0.0), false);
+    e.misc.doc_timeline = Some(t);
+    t
+}
+
+/// Host `KeyframeEffect` (JS-C461, mur vol 733 §B-124 —
+/// YouTube fait `new KeyframeEffect(el, frames, opts)`) :
+/// stocke cible/frames/options, lecture honnête, zéro
+/// interpolation (pas de compositeur — même borne que
+/// `el.animate` CAP-187).
+struct KfeHost {
+    target: Value,
+    keyframes: Value,
+    options: Value,
+}
+
+impl Host for KfeHost {
+    fn class_name(&self) -> &'static str {
+        "KeyframeEffect"
+    }
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
+    fn trace(&self, out: &mut Vec<ObjId>) {
+        crate::heap::push_value(out, &self.target);
+        crate::heap::push_value(out, &self.keyframes);
+        crate::heap::push_value(out, &self.options);
+    }
+    fn has_method(&self, name: &str) -> bool {
+        matches!(name, "getKeyframes" | "getComputedTiming")
+    }
+    fn get(&self, e: &mut Engine, _t: Value, key: &str) -> JsResult<Option<Value>> {
+        Ok(Some(match key {
+            "target" => self.target.clone(),
+            "pseudoElement" => Value::Null,
+            "composite" | "iterationComposite" => e.str_val("replace"),
+            _ => return Ok(None),
+        }))
+    }
+    fn invoke(
+        &self,
+        _e: &mut Engine,
+        _t: Value,
+        name: &str,
+        _args: &[Value],
+    ) -> JsResult<Option<Value>> {
+        match name {
+            "getKeyframes" => Ok(Some(self.keyframes.clone())),
+            "getComputedTiming" => Ok(Some(self.options.clone())),
+            _ => Ok(None),
+        }
+    }
+}
+
+/// `new KeyframeEffect(target, keyframes, options)`
+/// (JS-C461) — ctor spec : les 3 args stockés (le forme
+/// copie `new KeyframeEffect(kfe)` délègue aux accesseurs
+/// du source via `read_prop` — borné).
+pub(crate) fn keyframe_effect_ctor(
+    e: &mut Engine,
+    _t: Value,
+    args: &[Value],
+) -> JsResult<Value> {
+    let target = arg(args, 0);
+    let keyframes = arg(args, 1);
+    let options = arg(args, 2);
+    let v = e.new_host_object(Rc::new(KfeHost {
+        target,
+        keyframes,
+        options,
+    }));
+    if let Value::Obj(id) = v {
+        let p = kfe_proto(e);
+        if let Some(o) = e.heap.obj_mut(id) {
+            o.proto = Value::Obj(p);
+        }
+    }
+    Ok(v)
+}
+
+/// `new Animation(effect?, timeline?)` (JS-C461) — même
+/// `AnimData` que `el.animate` mais `playState='idle'`
+/// (spec : le ctor ne joue pas — `play()` démarre) et
+/// `ready` pendante jusqu'au premier `play`.
+pub(crate) fn animation_ctor(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
+    let effect = arg(args, 0);
+    let timeline = arg(args, 1);
+    let node = kfe_target_node(e, &effect);
+    let tl = if matches!(timeline, Value::Undefined) {
+        Value::Obj(document_timeline(e))
+    } else {
+        timeline
+    };
+    let finished = e.new_promise();
+    let ready = e.new_promise();
+    let data = Rc::new(RefCell::new(AnimData {
+        node: node.unwrap_or(0),
+        state: "idle",
+        rate: 1.0,
+        finished,
+        ready,
+        wrapper: None,
+        onfinish: Value::Undefined,
+        oncancel: Value::Undefined,
+        effect,
+        timeline: tl,
+    }));
+    e.misc.anims.push(data.clone());
+    Ok(anim_wrapper(e, &data))
+}
+
+/// `NodeId` de la cible d'un `KeyframeEffect` (0 si cible
+/// non-élément — la machine à états n'exige pas de nœud).
+fn kfe_target_node(e: &mut Engine, effect: &Value) -> Option<NodeId> {
+    let Value::Obj(id) = effect else {
+        return None;
+    };
+    let target = e
+        .host_of(*id)
+        .and_then(|h| h.as_any().downcast_ref::<KfeHost>().map(|k| k.target.clone()))?;
+    node_for(e, target)
+}
+
 /// `el.animate(keyframes, duration|options)` (CAP-187) —
 /// `Animation` machine à états : `playState='running'`,
 /// `ready` résolu, `finished` pendante (résolue par
 /// `finish()` ou annulée par `cancel()` — pas de timeline
 /// réelle, borné).
 pub(crate) fn animate(e: &mut Engine, t: Value, args: &[Value]) -> JsResult<Value> {
-    let Some(n) = node_for(e, t) else {
+    let Some(n) = node_for(e, t.clone()) else {
         return Err(e.type_error("animate: not an Element"));
     };
-    let _ = args; // keyframes/options — non lus (borné : pas de keyframe parsing)
+    // JS-C461 : `el.animate` crée un `KeyframeEffect`
+    // implicite (spec) — exposé via `animation.effect`.
+    let kfe = keyframe_effect_ctor(
+        e,
+        Value::Null,
+        &[t.clone(), arg(args, 0), arg(args, 1)],
+    )?;
     let finished = e.new_promise();
     let ready = e.new_promise();
     e.resolve_promise(ready, Value::Undefined);
@@ -2271,6 +2442,8 @@ pub(crate) fn animate(e: &mut Engine, t: Value, args: &[Value]) -> JsResult<Valu
         wrapper: None,
         onfinish: Value::Undefined,
         oncancel: Value::Undefined,
+        effect: kfe,
+        timeline: Value::Obj(document_timeline(e)),
     }));
     e.misc.anims.push(data.clone());
     Ok(anim_wrapper(e, &data))
@@ -2325,7 +2498,12 @@ impl Host for AnimHost {
             "playState" => return Ok(Some(e.str_val(d.state))),
             "playbackRate" => Value::Num(d.rate),
             "pending" => Value::Bool(false),
-            "currentTime" | "effect" | "timeline" => Value::Null,
+            "currentTime" => Value::Num(0.0),
+            // JS-C461 — `effect`/`timeline` servent les
+            // valeurs posées au ctor (`new Animation(kfe,tl)`)
+            // ou l'implicite `el.animate` (KFE + timeline).
+            "effect" => d.effect.clone(),
+            "timeline" => d.timeline.clone(),
             "finished" => Value::Obj(d.finished),
             "ready" => Value::Obj(d.ready),
             "onfinish" => d.onfinish.clone(),
@@ -2361,7 +2539,15 @@ impl Host for AnimHost {
     ) -> JsResult<Option<Value>> {
         match name {
             "play" => {
-                self.data.borrow_mut().state = "running";
+                let ready = {
+                    let mut d = self.data.borrow_mut();
+                    d.state = "running";
+                    d.ready
+                };
+                // JS-C461 — `new Animation()` démarre `idle`
+                // avec `ready` pendante : le premier `play`
+                // la résout (idempotent sur `el.animate`).
+                e.resolve_promise(ready, Value::Undefined);
                 Ok(Some(Value::Undefined))
             }
             "pause" => {
