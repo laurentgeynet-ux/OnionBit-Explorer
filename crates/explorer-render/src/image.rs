@@ -39,8 +39,22 @@ pub type ImageTable = HashMap<NodeId, Arc<DecodedImage>>;
 pub struct PaintImages {
     /// `<img>` décodés (`NodeId` → bitmap).
     pub replaced: ImageTable,
-    /// `background-image: url(...)` décodés (`NodeId` → bitmap).
+    /// `background-image: url(...)` décodés (`NodeId` → bitmap
+    /// de la **première** couche `url()` — contrat historique,
+    /// conservé : [`emit_bg_layers`][crate::build_display_list]
+    /// la sert quand la couche n'est pas indexée dans
+    /// `background_layers`).
     pub backgrounds: ImageTable,
+    /// Couches `url()` de `background-image` **par index de
+    /// couche** (R-203) : `NodeId` → `Vec<(index-couche,
+    /// bitmap)>`, index = position dans la liste séparée par
+    /// virgules (couche 0 = la plus haute). Remplie par
+    /// [`crate::dataurl::collect_data_images`] (couches
+    /// `data:`) et par la couture de fetch de l'appelant
+    /// ([`crate::dataurl::background_layer_urls`] énumère les
+    /// urls à résoudre) — complète `backgrounds`, ne la
+    /// remplace pas.
+    pub background_layers: HashMap<NodeId, Vec<(u8, Arc<DecodedImage>)>>,
     /// `<svg>` inline rasterisés (`NodeId` → bitmap) — R-9,
     /// produits par [`crate::svg::collect_svg`].
     pub svgs: ImageTable,
@@ -79,6 +93,7 @@ impl PaintImages {
         Self {
             replaced,
             backgrounds: ImageTable::new(),
+            background_layers: HashMap::new(),
             svgs: ImageTable::new(),
             svg_sources: HashMap::new(),
             masks: ImageTable::new(),
@@ -109,6 +124,7 @@ impl PaintImages {
     pub fn retain_alive(&mut self, dom: &explorer_dom::Dom) {
         self.replaced.retain(|k, _| dom.is_alive(*k));
         self.backgrounds.retain(|k, _| dom.is_alive(*k));
+        self.background_layers.retain(|k, _| dom.is_alive(*k));
         self.svgs.retain(|k, _| dom.is_alive(*k));
         self.svg_sources.retain(|k, _| dom.is_alive(*k));
         self.masks.retain(|k, _| dom.is_alive(*k));

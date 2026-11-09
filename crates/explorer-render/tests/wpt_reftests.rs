@@ -316,6 +316,7 @@ fn render(src: &str, file_dir: &Path, tag: &str) -> Option<Frame> {
     let images = PaintImages {
         replaced,
         backgrounds: collect_backgrounds(&dom, &styles, file_dir),
+        background_layers: std::collections::HashMap::new(),
         svgs: explorer_render::ImageTable::new(),
         masks: explorer_render::ImageTable::new(),
         masks_url: std::collections::HashMap::new(),

@@ -3503,3 +3503,104 @@ fn emit_stats_transform_hors_canvas_compte() {
         st.off_canvas
     );
 }
+
+// ── R-203 — background multi-couches : url() au-delà de la 1re ──
+
+const PX1: &str = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR42mP4%2F58BAAT%2FAf9jgNErAAAAAElFTkSuQmCC";
+
+/// Couche url 2+ : chaque couche est indexée dans
+/// `background_layers` et peinte — l'ordre spec (couche 0
+/// au-dessus) est respecté : la couche 1 émise en premier.
+#[test]
+fn r203_deux_couches_url_peintes_dans_l_ordre() {
+    let dom = TreeBuilder::parse("<div id=d></div>");
+    let mut eng = StyleEngine::new();
+    eng.add_css("body { margin: 0 }", Origin::Author);
+    eng.add_css(
+        "#d{width:100px;height:100px;\
+            background-image:url(PX),url(PX);\
+            background-repeat:no-repeat,no-repeat;\
+            background-position:0 0,50px 50px}"
+            .replace("PX", PX1)
+            .as_str(),
+        Origin::Author,
+    );
+    let styles = eng.compute_tree(&dom, dom.document(), &StyleEnv::default());
+    let images = explorer_render::collect_data_images(&dom, &styles, 10_000);
+    let root_el = dom
+        .children(dom.document())
+        .into_iter()
+        .flatten()
+        .find(|&c| dom.element(c).is_ok())
+        .expect("élément racine");
+    let mut bx = build_box_tree(&dom, root_el, &styles).expect("arbre");
+    layout_tree(&mut bx, VIEW, &ctx());
+    let n = images
+        .background_layers
+        .values()
+        .map(Vec::len)
+        .sum::<usize>();
+    assert_eq!(n, 2, "les 2 couches url indexées");
+    let items = explorer_render::build_display_list_full(&bx, VIEW, 200.0, 0.0, &images).items;
+    let bgs: Vec<_> = items
+        .iter()
+        .filter_map(|i| match i {
+            DisplayItem::BackgroundImage { origin, .. } => Some(*origin),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(bgs.len(), 2, "les 2 couches peintes : {bgs:?}");
+    // Couche 1 (basse, position 50/50) émise avant la couche
+    // 0 (haute, 0/0) — ordre spec : la première couche
+    // déclarée est au-dessus.
+    assert!(
+        (bgs[0].0 - 50.0).abs() < 1.0 && (bgs[1].0).abs() < 1.0,
+        "ordre des couches : {bgs:?}"
+    );
+}
+
+/// `background-clip`/`background-origin` **par couche** : la
+/// couche 1 (border-box) peint sur la border box, la couche
+/// 0 (content-box) sur la boîte de contenu — aires
+/// distinctes par couche.
+#[test]
+fn r203_clip_origin_par_couche() {
+    let dom = TreeBuilder::parse("<div id=d></div>");
+    let mut eng = StyleEngine::new();
+    eng.add_css("body { margin: 0 }", Origin::Author);
+    eng.add_css(
+        "#d{width:80px;height:80px;padding:10px;border:5px solid #000;\
+            background-image:url(PX),url(PX);\
+            background-clip:content-box,border-box;\
+            background-repeat:no-repeat,no-repeat}"
+            .replace("PX", PX1)
+            .as_str(),
+        Origin::Author,
+    );
+    let styles = eng.compute_tree(&dom, dom.document(), &StyleEnv::default());
+    let images = explorer_render::collect_data_images(&dom, &styles, 10_000);
+    let root_el = dom
+        .children(dom.document())
+        .into_iter()
+        .flatten()
+        .find(|&c| dom.element(c).is_ok())
+        .expect("élément racine");
+    let mut bx = build_box_tree(&dom, root_el, &styles).expect("arbre");
+    layout_tree(&mut bx, VIEW, &ctx());
+    let items = explorer_render::build_display_list_full(&bx, VIEW, 200.0, 0.0, &images).items;
+    let mut rects = items.iter().filter_map(|i| match i {
+        DisplayItem::BackgroundImage { rect, .. } => Some(*rect),
+        _ => None,
+    });
+    let bottom = rects.next().expect("couche 1 (basse)");
+    let top = rects.next().expect("couche 0 (haute)");
+    // Border box : 80 + 2*10 + 2*5 = 110 ; content : 80.
+    assert!(
+        (bottom.width - 110.0).abs() < 1.0,
+        "couche 1 = border box : {bottom:?}"
+    );
+    assert!(
+        (top.width - 80.0).abs() < 1.0,
+        "couche 0 = content box : {top:?}"
+    );
+}

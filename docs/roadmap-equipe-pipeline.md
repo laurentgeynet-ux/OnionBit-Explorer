@@ -3656,7 +3656,7 @@ chez NAVIGATEUR — non recopiés ici.
   (`.ttc` latin+CJK → face 1 servie pour 中) et
   `r202_run_mixte_segmente_vers_face_ttc` (`ab中cd` →
   `fallback_spans` non vide, 4 glyphes latin primaires).
-- [ ] **R-203. `background` multi-couches complet** :
+- [x] **R-203. `background` multi-couches complet** :
   résidu confirmé (audit 2026-10-25) — `background-origin`/
   `background-clip` par couche non consommés (la position
   et le clip suivent la couche, pas le shorthand global) ;
@@ -3666,9 +3666,21 @@ chez NAVIGATEUR — non recopiés ici.
   **consommation** multi-images dans `PaintImages.
   backgrounds` et `emit_bg_layers` est PIPE : clé
   `(NodeId, index-couche)` ou `Vec` par nœud, ordre
-  première-en-tête per spec. Verrous : deux couches
-  `url()` peintes dans l'ordre, `origin`/`clip` par
-  couche (border vs padding box visible).
+  première-en-tête per spec. **Livré** : champ additif
+  `PaintImages.background_layers : HashMap<NodeId,
+  Vec<(u8, Arc<DecodedImage>)>>` — `emit_bg_layers`
+  consulte la couche par index puis replie sur
+  `backgrounds[n]` pour la première url (compat — le
+  rejet « même bitmap réémise » qui sautait les couches
+  2+ est supprimé) ; `collect_data_images` indexe chaque
+  couche `url(data:…)` ; helper `background_layer_urls`
+  pour la couture de fetch NAV (journalisée). Point
+  d'audit corrigé : `origin`/`clip`/`repeat`/
+  `position`/`size`/`blend-mode` par couche étaient
+  déjà consommés (R-106/107/184). Verrous
+  `r203_deux_couches_url_peintes_dans_l_ordre` (couche 0
+  au-dessus) et `r203_clip_origin_par_couche` (border vs
+  content box par couche).
 - [ ] **R-204. `display:contents` — résidus restants** :
   R-191 a figé les internes table ; reste le flatten des
   enfants d'un `display:contents` **comme items flex/grid**

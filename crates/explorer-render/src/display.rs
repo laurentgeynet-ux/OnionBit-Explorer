@@ -1781,7 +1781,7 @@ fn prop_px(st: &explorer_css::ComputedStyle, prop: &str, fallback: f32) -> f32 {
 /// Wikipedia, R-71) est un `background-image` valide dont la
 /// couche image est en seconde position. Insensible à la
 /// casse, comme l'extracteur `url(…)` de la collecte.
-fn bg_has_url(v: &str) -> bool {
+pub(crate) fn bg_has_url(v: &str) -> bool {
     v.as_bytes()
         .windows(4)
         .any(|w| w.eq_ignore_ascii_case(b"url("))
@@ -1806,7 +1806,7 @@ fn bg_has_image(v: &str) -> bool {
 
 /// Couches d'une valeur `background-image` — éclatées sur les
 /// virgules hors parenthèses (`linear-gradient(…),url(…)`).
-fn bg_layers(v: &str) -> Vec<&str> {
+pub(crate) fn bg_layers(v: &str) -> Vec<&str> {
     let mut out = Vec::new();
     let mut depth = 0u32;
     let mut start = 0usize;
@@ -2097,11 +2097,24 @@ fn emit_bg_layers(
             _ => (true, true), // `repeat` = défaut.
         };
         let img = if bg_has_url(layer) {
-            if Some(i) == first_url {
-                node.and_then(|n| images.backgrounds.get(&n)).cloned()
-            } else {
-                None // url non fetchée — couche sautée.
-            }
+            let from_layers = node.and_then(|n| {
+                images
+                    .background_layers
+                    .get(&n)
+                    .and_then(|v| v.iter().find(|(idx, _)| usize::from(*idx) == i))
+                    .map(|(_, img)| img.clone())
+            });
+            from_layers.or_else(|| {
+                // Repli contrat historique : `backgrounds[n]`
+                // sert la première couche url (les fetchers qui
+                // ne remplissent pas `background_layers`
+                // conservent leur comportement, R-203).
+                if Some(i) == first_url {
+                    node.and_then(|n| images.backgrounds.get(&n)).cloned()
+                } else {
+                    None
+                }
+            })
         } else if bg_has_gradient(layer) {
             crate::gradient::decode_gradient(layer, l_area.0, l_area.1, fs).map(std::sync::Arc::new)
         } else {
@@ -4022,6 +4035,7 @@ fn is_media(bx: &LayoutBox, images: &crate::PaintImages) -> bool {
         images.replaced.contains_key(&n)
             || images.svgs.contains_key(&n)
             || images.backgrounds.contains_key(&n)
+            || images.background_layers.contains_key(&n)
             || images.canvases.contains_key(&n)
     }) || bx.style.get("background-attachment") == Some("fixed")
 }

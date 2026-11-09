@@ -49,6 +49,25 @@ pub fn decode_data_url(url: &str, max_px: u32) -> Option<DecodedImage> {
     decode_image(&data_url_bytes(url)?, max_px)
 }
 
+/// Les `url(...)` de `background-image` par **index de
+/// couche** (R-203) — la liste à résoudre pour la couture
+/// de fetch : chaque bitmap revient dans
+/// [`PaintImages::background_layers`] sous
+/// `(index-couche, image)`. `data:` incluses (elles sont
+/// aussi servies par [`collect_data_images`] — l'appelant
+/// peut les sauter). Couches au-delà de 255 tronquées.
+#[must_use]
+pub fn background_layer_urls(style: &explorer_css::ComputedStyle) -> Vec<(u8, String)> {
+    style.get("background-image").map_or_else(Vec::new, |v| {
+        crate::display::bg_layers(v)
+            .iter()
+            .enumerate()
+            .filter(|(i, l)| *i < 256 && crate::display::bg_has_url(l))
+            .filter_map(|(i, l)| url_arg(l).map(|u| (u8::try_from(i).unwrap_or(u8::MAX), u)))
+            .collect()
+    })
+}
+
 /// Collecte les images inline `data:` de la page :
 ///
 /// - `<img src="data:…">` / `<object data="data:…">` /
@@ -86,13 +105,31 @@ pub fn collect_data_images(dom: &Dom, styles: &StyleMap, max_px: u32) -> PaintIm
         }
     }
     for (node, style) in styles.iter() {
-        if let Some(url) = style
-            .get("background-image")
-            .and_then(url_arg)
-            .filter(|u| u.starts_with("data:"))
-        {
-            if let Some(img) = decode_data_url(&url, max_px) {
-                out.backgrounds.insert(node, Arc::new(img));
+        if let Some(v) = style.get("background-image") {
+            let layers = crate::display::bg_layers(v);
+            let first_url = layers.iter().position(|l| crate::display::bg_has_url(l));
+            // R-203 — chaque couche `url(data:…)` est indexée
+            // dans `background_layers` sous son index de
+            // couche ; la première garde aussi l'entrée
+            // `backgrounds` (contrat historique — les couches
+            // suivantes ne se repeignaient jamais).
+            for (i, layer) in layers.iter().enumerate() {
+                let Some(url) = url_arg(layer).filter(|u| u.starts_with("data:")) else {
+                    continue;
+                };
+                if let Some(img) = decode_data_url(&url, max_px) {
+                    let img = Arc::new(img);
+                    if Some(i) == first_url {
+                        out.backgrounds.insert(node, img.clone());
+                    }
+                    let Some(idx) = u8::try_from(i).ok() else {
+                        continue; // couches >255 : tronquées.
+                    };
+                    out.background_layers
+                        .entry(node)
+                        .or_default()
+                        .push((idx, img));
+                }
             }
         }
         // R-52 — motif « icône colorée » : `mask-image` +
