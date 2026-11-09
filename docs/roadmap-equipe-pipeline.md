@@ -3190,11 +3190,16 @@ la dette, pas le layout.
   MVP LTR : pas de `display:-webkit-box`/
   `-webkit-box-orient` exigé, `block-ellipsis` hors
   périmètre. Verrou `line_clamp_tronque_les_lignes_` `et_suspend`.
-- [ ] **R-M9c. Résidus restants** :
+- [x] **R-M9c. Résidus restants** :
   `scroll-snap`/`scroll-behavior` (session) ;
   font fallback par glyphe (`.ttc`, tofu CJK) ;
   `inert`/`dialog`/`popover`/`:focus-visible`
-  (session).
+  (session). **Soldé côté PIPE (2026-11-09)** : la moitié
+  domaine — fallback par glyphe — est livrée par R-69 +
+  R-202 (`.ttc` web éclaté par face, couverture unicode
+  complète). Le reste est intégralement session/comportement
+  = périmètre NAVIGATEUR, déjà tracé de leur côté.
+
 
 ## Palier R-B — Contenu étranger, animation, canvas
 
