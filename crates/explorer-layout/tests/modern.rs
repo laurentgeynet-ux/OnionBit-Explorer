@@ -1419,3 +1419,30 @@ fn caption_side_left_right_posee_en_vis_a_vis() {
         tbl.rect
     );
 }
+
+// ── R-200 : `grid-template-areas` — tokenisation par cellule ──
+
+/// css-grid-1 §7.3 : une suite de `.` = UNE cellule nulle, un
+/// ident = cellule nommée — frontières NON réservées aux
+/// espaces : `". .main. ."` = 5 cellules `[· · main · ·]`
+/// (signature lichess `#main-wrap` — `split_whitespace`
+/// lisait `.main.` comme une cellule nommée → `grid-area`
+/// jamais résolu → item hors piste, page écrasée ~10 px).
+#[test]
+fn grid_areas_cellules_adjacentes_sans_espace() {
+    let (dom, bx) = laid(
+        "<div id=w><main id=m></main></div>",
+        "body{margin:0}#w{display:grid;\
+         grid-template-areas:\". .main. .\";\
+         grid-template-columns:10px 1fr 500px 1fr 10px}\
+         #m{grid-area:main;height:50px}",
+    );
+    let m = find(&bx, by_tag(&dom, "main"));
+    // `main` en piste 3 (500 px) — fr = (800−520)/2 = 140.
+    assert!(
+        approx(m.rect.width, 500.0),
+        "w={} attendu 500",
+        m.rect.width
+    );
+    assert!(approx(m.rect.x, 150.0), "x={} attendu 150", m.rect.x);
+}

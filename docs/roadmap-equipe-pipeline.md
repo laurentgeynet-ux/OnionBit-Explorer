@@ -3621,23 +3621,18 @@ chez NAVIGATEUR — non recopiés ici.
   vol pluto suivant nomme la classe ; le responsable
   nommé devient le verrou (`pluto_items_collapses_*`
   ou fixture extraite).
-- [~] **R-200. Texte chevauché/corrompu en colonne
-  (lichess.org)** : vol 740 — page hydratée correctement
-  (nav + lobby + toast « Reconnecting ») mais **colonne
-  latérale gauche : glyphes superposés/tronqués** —
-  signature paint/inline (prop. §B-122 corpus-root,
-  numéro ré-attribué à la chaîne explore.org côté journal
-  — l'item reste ici). Fixture prescrite : **liste flex
-  + items hétérogènes** (icon font lichess + texte) —
-  repro hors site avant fix. Suspects ordonnés : métriques
-  de fonte de remplacement (fallback glyphe → R-202,
-  les icones lichess sont en fonte privée), avance/advance
-  des runs inline en présence d'`inline-block` étroit,
-  `letter-spacing`/`font-stretch` hérité mal résolu,
-  empilement de fragments sur une ligne trop étroite
-  (wrap manqué). Verrous : fixture flex-colonne +
-  verrou pixels (deux glyphes adjacents non superposés).
-- [x] **R-202. Font fallback par glyphe** (R-M9c, première
+- [x] **R-200. Texte chevauché/corrompu en colonne
+  lichess.org** : page redevable, texte illisible
+  superposé dans la colonne latérale gauche — glyphes
+  empilés/écriture dédoublée sur une zone ~5 car.
+  **Résolu par audit layout + fixture ** : la
+  signature était « conteneurs ~0 px » — 
+  (5 cellules) lu par  →  = 1
+  cellule nommée →  jamais résolu →
+   hors piste à ~10 px, enfants débordant.
+  Fix = tokenizer de cellules §7.3 ( — runs
+  de  = 1 nulle, adjacence sans espace comprise).
+  Verrou .
   moitié — la moitié session `scroll-snap`/`dialog` reste
   NAV) : une seule fonte par run → tofu sur CJK et perte
   des icon fonts quand la glyphe n'existe pas dans la

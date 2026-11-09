@@ -246,12 +246,53 @@ fn placement(
 /// `grid-template-areas` → carte nom → `(col, row, span_c,
 /// span_r)` (bounding box de la zone). Cellules `.` ou
 /// `none` = vides. Zones non rectangulaires : bbox documenté.
+/// Cellules d'une rangée `grid-template-areas` (css-grid-1
+/// §7.3) : une suite de `.` = **une** cellule nulle, un
+/// `<custom-ident>` = cellule nommée — les frontières ne
+/// sont PAS qu'espaces : `". .main. ."` = 5 cellules
+/// `[· · main · ·]` (signature lichess — `split_whitespace`
+/// lisait `.main.` comme UNE cellule nommée → `grid-area`
+/// ne résolvait jamais et l'item tombait hors piste).
+fn row_cells(row: &str) -> Vec<Option<String>> {
+    let mut cells = Vec::new();
+    let mut cur = String::new();
+    let mut in_dots = false;
+    for ch in row.chars() {
+        if ch == '.' {
+            if !cur.is_empty() {
+                cells.push(Some(std::mem::take(&mut cur)));
+            }
+            if !in_dots {
+                cells.push(None);
+            }
+            in_dots = true;
+        } else {
+            in_dots = false;
+            if ch.is_whitespace() {
+                if !cur.is_empty() {
+                    cells.push(Some(std::mem::take(&mut cur)));
+                }
+            } else {
+                cur.push(ch);
+            }
+        }
+    }
+    if !cur.is_empty() {
+        cells.push(Some(cur));
+    }
+    cells
+}
+
 fn parse_areas(raw: &str) -> std::collections::HashMap<String, (usize, usize, usize, usize)> {
     let mut areas: std::collections::HashMap<String, (usize, usize, usize, usize)> =
         std::collections::HashMap::new();
     for (ri, row_str) in raw.split('"').skip(1).step_by(2).enumerate() {
-        for (ci, cell) in row_str.split_whitespace().enumerate() {
-            if cell == "." || cell == "none" {
+        for (ci, cell) in row_cells(row_str).iter().enumerate() {
+            let Some(cell) = cell else {
+                continue;
+            };
+            let cell = cell.as_str();
+            if cell == "none" {
                 continue;
             }
             areas
