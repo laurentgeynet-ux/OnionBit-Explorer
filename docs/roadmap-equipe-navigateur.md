@@ -10967,7 +10967,19 @@ un crate PIPELINE.- [x] **JS-C422. Deadline honnête — canal session ↔ budge
   insertion. Fix JS-C442 : les 26 interfaces
   `SVGAnimated*` + objets-valeur SVG legacy installées
   (`illegal_ctor_bound`, `instanceof`→`false`) ;
-  verrous `b122_svg_interfaces` 3/3. Reste : (c)
-  budget tas défaut (~405 Mo) ; (g) rejouer le vol
-  player — l'iframe YT peut maintenant s'insérer,
+  verrous `b122_svg_interfaces` 3/3. **Vol 758** :
+  `new YT.Player` insère l'iframe embed réelle — mais
+  l'iframe **shadow** du `youtube-video` (vrai id
+  `0P_LBKqVbfs`, `contentWindow` nul) n'était jamais
+  fetchée : `attach_shadow_root` ne propageait pas
+  `attached` à la racine → arbre shadow « déconnecté »
+  → `note_attached_frame` rejetait. Fix JS-C443 :
+  propagation hôte→racine, descente de `set_attached`
+  en shadow + enfile des sous-ressources au
+  raccordement (spec « shadow-including ») ; `by_id`
+  re-scopé light (`root_of==document`) ; `iframe_
+  nodes` composite descend en shadow. Verrous
+  `b122_shadow_iframe` 3/3, `dom` 245/245. Reste :
+  (c) budget tas défaut (~405 Mo) ; (g) valider le
+  handshake `onReady`/`postMessage` YT vol 759+,
   puis MSE/HLS en conditions réelles.

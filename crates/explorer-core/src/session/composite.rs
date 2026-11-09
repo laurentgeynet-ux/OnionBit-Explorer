@@ -85,9 +85,21 @@ pub(crate) fn iframe_intrinsic(dom: &Dom, node: NodeId) -> (f32, f32) {
 /// ordre document).
 pub(crate) fn iframe_nodes(dom: &Dom) -> Vec<NodeId> {
     let mut out = Vec::new();
-    for n in dom.descendants(dom.document()).into_iter().flatten() {
-        if dom.tag_name(n).is_ok_and(|t| t == "iframe") {
-            out.push(n);
+    // §B-122(f) : les `<iframe>` vivent aussi en arbre
+    // shadow (youtube-video d'explore.org encapsule son
+    // lecteur — `descendants` seul ne les voyait jamais,
+    // le sous-document chargé restait in-painté). Chaque
+    // nœud visité ouvre sa racine shadow éventuelle ;
+    // chaque arbre n'est parcouru qu'une fois (linéaire).
+    let mut stack = vec![dom.document()];
+    while let Some(root) = stack.pop() {
+        for n in dom.descendants(root).into_iter().flatten() {
+            if dom.tag_name(n).is_ok_and(|t| t == "iframe") {
+                out.push(n);
+            }
+            if let Some(sr) = dom.shadow_root(n, false) {
+                stack.push(sr);
+            }
         }
     }
     out

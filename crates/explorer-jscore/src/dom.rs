@@ -2140,6 +2140,15 @@ impl Dom {
     pub fn attach_shadow_root(&mut self, host: NodeId, root: NodeId, open: bool) {
         self.shadow_roots.insert(host, (root, open));
         self.shadow_hosts.insert(root, host);
+        // §B-122(f) : la racine shadow d'un hôte connecté est
+        // **connectée** (spec — « shadow-including root »).
+        // Sans cette propagation tout l'arbre shadow garde
+        // `attached=false` : les `<iframe>` insérées en
+        // shadow (youtube-video d'explore.org) n'étaient
+        // jamais enfilées par `note_attached_frame` → pas
+        // de navigation, pas de realm, `contentWindow` nul.
+        let a = self.is_attached(host);
+        self.set_attached(root, a);
         self.mark_dirty_at(host);
         // Étape 137b : op de couture — l'attache voyage par
         // journal comme les autres mutations (re-parse seulement
@@ -2355,9 +2364,42 @@ impl Dom {
             } else if self.ce.upgraded.contains_key(&c) {
                 self.ce_reactions.push(CeReaction::Disconnected(c));
             }
+            // §B-122(f) : un sous-arbre qui devient connecté
+            // (hôte ré-inséré portant sa shadow, fragment
+            // attaché) doit enfiler ses sous-ressources comme
+            // `note_subtree` le fait à l'insertion — sinon
+            // l'iframe shadow d'un hôte attaché tardivement
+            // n'était jamais naviguée. Idempotent : chaque
+            // `note_*` dedupe (`dyn_frame_seen`, clé src,
+            // `dyn_started`) — un double passage depuis le
+            // chemin insert est sans effet.
+            if flag && self.nodes[c as usize].kind == NodeKind::Element {
+                if self.nodes[c as usize].tag == "script" && !self.dyn_started.contains(&c) {
+                    self.dyn_started.insert(c);
+                    self.pending_dyn.push(c);
+                }
+                if self.nodes[c as usize].tag == "iframe" {
+                    self.note_attached_frame(c);
+                }
+                if self.nodes[c as usize].tag == "img" {
+                    self.note_img(c);
+                }
+                if self.nodes[c as usize].tag == "link" {
+                    self.note_link(c);
+                }
+            }
             // `.rev()` : la pile LIFO restitue l'ordre document
             // (les `CeReaction` se drainent en ordre d'arbre).
             stack.extend(self.nodes[c as usize].children.iter().rev().copied());
+            // §B-122(f) : la connexion suit l'hôte — la
+            // racine shadow de `c` et son sous-arbre
+            // héritent du même drapeau (spec « shadow-
+            // including descendants » : connectés si l'hôte
+            // l'est). Sans ce bras, un hôte attaché après
+            // son shadow laissait l'arbre shadow détaché.
+            if let Some(&(sr, _)) = self.shadow_roots.get(&c) {
+                stack.push(sr);
+            }
         }
     }
 
@@ -3755,10 +3797,18 @@ impl Dom {
     /// plus trouvable (spec — la recherche couvre l'arbre du
     /// document, pas l'arène). Index `id → candidats` (AR-17) :
     /// chaque slot est re-validé (élément vivant, attr `id`
-    /// courant égal, attaché) — une entrée obsolète (attr
-    /// changé, slot réaffecté) n'y survit pas ; le `min` par
-    /// `NodeId` préserve l'ordre du scan historique (slots
-    /// croissants ≈ préordre de parse).
+    /// courant égal, attaché **dans l'arbre document**) — une
+    /// entrée obsolète (attr changé, slot réaffecté) n'y survit
+    /// pas ; le `min` par `NodeId` préserve l'ordre du scan
+    /// historique (slots croissants ≈ préordre de parse).
+    ///
+    /// §B-122(f) : `attached` vaut désormais « connecté » au
+    /// sens spec — un nœud shadow d'hôte connecté l'est, mais
+    /// `getElementById` reste scopé au **light tree** (spec :
+    /// la recherche ne descend pas en shadow). `root_of` d'un
+    /// nœud shadow remonte à la racine shadow (le lien hôte
+    /// vit dans `shadow_hosts`, pas `parent`) — on exige la
+    /// racine document.
     #[must_use]
     pub fn by_id(&self, id: &str) -> Option<NodeId> {
         self.id_index.get(id).and_then(|cands| {
@@ -3770,6 +3820,7 @@ impl Dom {
                             && !x.free
                             && Self::attr_val(x, "id") == Some(id)
                     }) && self.is_attached(n)
+                        && self.root_of(n) == self.root
                 })
                 .min()
                 .copied()

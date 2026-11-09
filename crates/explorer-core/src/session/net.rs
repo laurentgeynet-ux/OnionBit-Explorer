@@ -2717,7 +2717,7 @@ impl Session {
             // (dedup par hôte, vol 753 : deux GET omega
             // invisibles pendant que le 3e répondait).
             if tracing::enabled!(target: "media_probe", tracing::Level::INFO) {
-                let h = p.req.url.host().to_string();
+                let h = p.req.url.host().clone();
                 if self.note_net_probe("pend", &h) {
                     tracing::info!(target: "media_probe", site = "net.pend", host = %h, inflight, ctx);
                 }
@@ -2754,7 +2754,7 @@ impl Session {
         // l'émission et devient une tâche vivante — borne le
         // silencieux « jamais spawné » face à « jamais revenu ».
         if tracing::enabled!(target: "media_probe", tracing::Level::INFO) {
-            let h = req_url.host().to_string();
+            let h = req_url.host().clone();
             let key = format!("{h}|{handle}");
             if self.note_net_probe("go", &key) {
                 tracing::info!(target: "media_probe", site = "net.go", host = %h, handle);
@@ -3287,6 +3287,32 @@ impl Session {
             self.net_probe_seen.insert((kind, host.to_string()))
         } else {
             !self.net_probe_seen.contains(&(kind, host.to_string()))
+        }
+    }
+
+    /// §B-122(e) — `net.arr` : chaque `NetDone` arrivé nomme
+    /// hôte+issue — comble le trou entre `fetch.send`/
+    /// `net.go` et `net.fail` (un succès livré était
+    /// invisible entre deux tallys).
+    fn probe_net_arr(&mut self, d: &NetDone) {
+        if !tracing::enabled!(target: "media_probe", tracing::Level::INFO) {
+            return;
+        }
+        let h = d.req_url.host().clone();
+        let tag = match &d.out {
+            Ok(r) => format!("{h}|{}|ok:{}", d.handle, r.status),
+            Err(e) => format!("{h}|{}|err:{}", d.handle, net_err_kind(e)),
+        };
+        if !self.note_net_probe("arr", &tag) {
+            return;
+        }
+        match &d.out {
+            Ok(r) => {
+                tracing::info!(target: "media_probe", site = "net.arr", host = %h, ok = true, status = r.status, handle = d.handle);
+            }
+            Err(e) => {
+                tracing::info!(target: "media_probe", site = "net.arr", host = %h, ok = false, kind = net_err_kind(e), handle = d.handle);
+            }
         }
     }
 
@@ -3859,27 +3885,7 @@ impl Session {
                 continue;
             }
             self.net_tasks.remove(&(d.tab, d.handle));
-            // §B-122(e) — `net.arr` : chaque `NetDone` arrivé
-            // nomme hôte+issue — comble le trou entre
-            // `fetch.send`/`net.go` et `net.fail` (un succès
-            // livré était invisible entre deux tallys).
-            if tracing::enabled!(target: "media_probe", tracing::Level::INFO) {
-                let h = d.req_url.host().to_string();
-                let tag = match &d.out {
-                    Ok(r) => format!("{h}|{}|ok:{}", d.handle, r.status),
-                    Err(e) => format!("{h}|{}|err:{}", d.handle, net_err_kind(e)),
-                };
-                if self.note_net_probe("arr", &tag) {
-                    match &d.out {
-                        Ok(r) => {
-                            tracing::info!(target: "media_probe", site = "net.arr", host = %h, ok = true, status = r.status, handle = d.handle)
-                        }
-                        Err(e) => {
-                            tracing::info!(target: "media_probe", site = "net.arr", host = %h, ok = false, kind = net_err_kind(e), handle = d.handle)
-                        }
-                    }
-                }
-            }
+            self.probe_net_arr(&d);
             // `Set-Cookie` capturé : same-origin sauf
             // `credentials:omit` ; cross-origin sous `include`
             // seulement (étape 126 — le transport a déjà exigé
