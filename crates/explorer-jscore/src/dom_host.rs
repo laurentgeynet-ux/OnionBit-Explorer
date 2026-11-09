@@ -12209,7 +12209,7 @@ fn ce_call(e: &mut Engine, el: Value, cb_name: &str, args: &[Value]) -> JsResult
                         || "<none>".to_string(),
                         |v| {
                             let s = e.describe(v);
-                            s.chars().take(1600).collect::<String>()
+                            s.chars().take(20_000).collect::<String>()
                         },
                     );
                 tracing::info!(target: "dom_probe", site = "ce.cc_threw",
