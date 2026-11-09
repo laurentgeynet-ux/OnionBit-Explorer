@@ -887,3 +887,49 @@ fn line_clamp_tronque_les_lignes_et_suspend() {
     let lines2 = find(&bx2, by_tag(&dom2, "p")).children[0].lines.len();
     assert_eq!(lines2, 1, "line-clamp:1 → une ligne ({lines2})");
 }
+
+/// R-200 — repro lichess : colonne flex étroite, items
+/// hétérogènes (glyphe PUA type icon-font + texte). Verrou :
+/// deux fragments adjacents de la même ligne ne se
+/// superposent jamais (x + width strictement croissant ou
+/// lignes distinctes).
+#[test]
+fn r200_colonne_flex_etroite_pas_de_chevauchement() {
+    let (dom, bx) = laid(
+        "<!doctype html><aside><ul>\
+         <li><a href=#><i>\u{e000}</i> Games</a></li>\
+         <li><a href=#><i>\u{e001}</i> Puzzles</a></li>\
+         <li><a href=#><i>\u{e002}</i> Learn</a></li></ul></aside>",
+        "aside{display:flex;flex-direction:column;width:120px}\
+         ul{display:flex;flex-direction:column;margin:0;padding:0}\
+         li{display:block} a{display:block} i{font-style:normal}",
+    );
+    let aside = find(&bx, by_tag(&dom, "aside"));
+    // Collecte tous les fragments avec leur rect — vérifie
+    // l'absence de superposition dans chaque ligne.
+    fn frags(b: &LayoutBox, out: &mut Vec<(f32, f32, f32, String)>) {
+        for line in &b.lines {
+            for f in &line.fragments {
+                out.push((f.rect.x, f.rect.width, f.rect.y, f.text.clone()));
+            }
+        }
+        for c in &b.children {
+            frags(c, out);
+        }
+    }
+    let mut fs = Vec::new();
+    frags(aside, &mut fs);
+    eprintln!("fragments: {fs:?}");
+    // Regrouper par ligne (même y) — dans une ligne, les x
+    // doivent être croissants sans recouvrement.
+    for w in fs.windows(2) {
+        let (x0, w0, y0, t0) = &w[0];
+        let (x1, _w1, y1, t1) = &w[1];
+        if (y0 - y1).abs() < 0.5 && x1 < &(x0 + w0 - 0.5) {
+            panic!(
+                "fragments superposés même ligne : {t0:?} x={x0} w={w0} \
+                 vs {t1:?} x={x1} (y={y0})"
+            );
+        }
+    }
+}

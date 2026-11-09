@@ -3616,7 +3616,7 @@ chez NAVIGATEUR — non recopiés ici.
   vol pluto suivant nomme la classe ; le responsable
   nommé devient le verrou (`pluto_items_collapses_*`
   ou fixture extraite).
-- [ ] **R-200. Texte chevauché/corrompu en colonne
+- [~] **R-200. Texte chevauché/corrompu en colonne
   (lichess.org)** : vol 740 — page hydratée correctement
   (nav + lobby + toast « Reconnecting ») mais **colonne
   latérale gauche : glyphes superposés/tronqués** —
