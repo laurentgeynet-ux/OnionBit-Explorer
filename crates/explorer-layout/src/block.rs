@@ -1373,14 +1373,71 @@ fn layout_block_inner(
             } else {
                 h_spec
             };
-            flow_columns(
-                bx, content_x, cursor, content_w, adjoins, line_h, ctx, fs, pos_cb, kid_cb,
-            )
-            .unwrap_or_else(|| {
-                flow_children(
-                    bx, content_x, cursor, content_w, adjoins, line_h, ctx, fs, pos_cb, fl, kid_cb,
+            // R-183 — `writing-mode` orthogonal : les enfants
+            // coulent en coords transposées (x'=inline,
+            // y'=bloc) depuis l'origine O ; `flow_transform`
+            // au paint/hit les remet dans le repère parent.
+            // `FloatCtx` frais (pas de fuite en coords
+            // transposées), ctx aux `vw`/`vh` échangés,
+            // `cb_h` transposée (repli viewport quand la
+            // hauteur réelle est `auto` — sinon l'inline
+            // transposé n'est jamais borné).
+            let own_mode =
+                explorer_css::value::parse_writing_mode(st.get("writing-mode").unwrap_or(""));
+            if own_mode.is_vertical() == bx.flow_mode.is_vertical() {
+                flow_columns(
+                    bx, content_x, cursor, content_w, adjoins, line_h, ctx, fs, pos_cb, kid_cb,
                 )
-            })
+                .unwrap_or_else(|| {
+                    flow_children(
+                        bx, content_x, cursor, content_w, adjoins, line_h, ctx, fs, pos_cb, fl,
+                        kid_cb,
+                    )
+                })
+            } else {
+                let iw = h_spec.or(cb_h).unwrap_or(ctx.viewport_h);
+                let octx = BlockCtx {
+                    fonts: ctx.fonts,
+                    default_family: ctx.default_family,
+                    base_font_size: ctx.base_font_size,
+                    root_font_size: std::cell::Cell::new(ctx.root_font_size.get()),
+                    viewport_h: ctx.viewport_w,
+                    viewport_w: ctx.viewport_h,
+                    font_cache: std::cell::RefCell::new(font::FontCache::new()),
+                    quirks: std::cell::Cell::new(ctx.quirks.get()),
+                };
+                let mut ofl = FloatCtx::default();
+                let o_pos = Rect {
+                    x: 0.0,
+                    y: 0.0,
+                    width: iw,
+                    height: content_w,
+                };
+                let _used_o = flow_children(
+                    bx,
+                    0.0,
+                    0.0,
+                    iw,
+                    adjoins,
+                    line_h,
+                    &octx,
+                    fs,
+                    o_pos,
+                    &mut ofl,
+                    Some(content_w),
+                );
+                // Avance du curseur dans le repère PARENT :
+                // l'étendue bloc (P) des enfants = leur étendue
+                // inline transposée (fin x' max) — l'étendue
+                // bloc O (largeur réelle) ne sert pas ici.
+                let o_extent = bx
+                    .children
+                    .iter()
+                    .map(|c| c.rect.x + c.rect.width)
+                    .chain(bx.lines.iter().map(|l| l.rect.x + l.rect.width))
+                    .fold(0.0f32, f32::max);
+                cursor + o_extent
+            }
         }
     };
 
@@ -2288,6 +2345,7 @@ fn flow_children(
                 first_line: None,
                 first_letter: None,
                 quirks_mode: false,
+                flow_mode: bx.flow_mode,
             };
             let gap = if first && adjoining_top {
                 0.0

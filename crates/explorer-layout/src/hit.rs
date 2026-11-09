@@ -48,6 +48,32 @@ fn paint_bounds(bx: &LayoutBox) -> Rect {
 /// Bounding-box du rect `r` sous la matrice `t` (les quatre
 /// coins transformés — la rotation élargit, comme le
 /// raster).
+/// Content box approximée en coords parent pour
+/// [`flow_transform`](crate::transform::flow_transform) :
+/// border box moins bordure/padding lues en px bruts (les
+/// props stockées sont déjà dans le repère du parent —
+/// R-183). `em`/`%` non résolus ici (pas de `BlockCtx`) →
+/// traités 0, décalage borné documenté.
+fn flow_content_rect(bx: &LayoutBox) -> Rect {
+    let px = |name: &str| -> f32 {
+        bx.style
+            .get(name)
+            .and_then(|v| v.trim().strip_suffix("px"))
+            .and_then(|t| t.trim().parse::<f32>().ok())
+            .unwrap_or(0.0)
+    };
+    let l = px("border-left-width") + px("padding-left");
+    let t = px("border-top-width") + px("padding-top");
+    let r = px("border-right-width") + px("padding-right");
+    let b = px("border-bottom-width") + px("padding-bottom");
+    Rect {
+        x: bx.rect.x + l,
+        y: bx.rect.y + t,
+        width: (bx.rect.width - l - r).max(0.0),
+        height: (bx.rect.height - t - b).max(0.0),
+    }
+}
+
 fn map_rect(t: Affine, r: Rect) -> Rect {
     let (x2, y2) = (r.x + r.width, r.y + r.height);
     let pts = [
@@ -199,6 +225,12 @@ fn hit_test_m(bx: &LayoutBox, x: f32, y: f32, m: Affine) -> Option<NodeId> {
     // La transform propre de la boîte s'applique à elle-même
     // ET à ses descendants (même portée que `PushTransform`).
     let m = box_transform(bx, &bx.rect).map_or(m, |t| t.post_concat(m));
+    // R-183 — les enfants d'une boîte en `writing-mode`
+    // orthogonal vivent en coords transposées : même
+    // composition que le `PushTransform` de `display.rs`.
+    let own = explorer_css::value::parse_writing_mode(bx.style.get("writing-mode").unwrap_or(""));
+    let m = crate::transform::flow_transform(bx.flow_mode, own, &flow_content_rect(bx))
+        .map_or(m, |t| t.post_concat(m));
     let (px, py) = m.invert()?.apply(x, y);
     if !contains(paint_bounds(bx), px, py) {
         return None;

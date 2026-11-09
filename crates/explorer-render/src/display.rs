@@ -4303,6 +4303,22 @@ fn paint_box_impl<'a>(
                 emit_scoped(ci, child, items, off, cx, pd, fixed_defer);
             }
         }
+        // R-183 — `writing-mode` orthogonal : les enfants
+        // in-flow ont été posés en coords transposées — le
+        // `PushTransform` du repère de flux les remet dans le
+        // repère parent (miroir de `hit_test_m`/`paint_bounds`).
+        // Enfants positionnés/absolus : hors portée —
+        // limitation documentée (comme les `pos_defer` qui
+        // échappent aux transforms CSS).
+        let flow_t = {
+            let own =
+                explorer_css::value::parse_writing_mode(bx.style.get("writing-mode").unwrap_or(""));
+            explorer_layout::transform::flow_transform(bx.flow_mode, own, &content_rect(bx))
+                .map(|t| tiny_skia::Transform::from_row(t.a, t.b, t.c, t.d, t.e, t.f))
+        };
+        if let Some(t) = flow_t {
+            items.push(DisplayItem::PushTransform(t));
+        }
         // (a) blocs en flux ; récursion `deep` ∝ profondeur
         // (R-24). Les sticky sont positionnés depuis R-134 —
         // leur translation part dans la file (`sticky_deltas`).
@@ -4335,6 +4351,9 @@ fn paint_box_impl<'a>(
             let (p, c) = scoped_defer[i].clone();
             i += 1;
             emit_scoped_at(p, c, items, off, cx, pd, fixed_defer);
+        }
+        if flow_t.is_some() {
+            items.push(DisplayItem::PopTransform);
         }
         // Enfants positionnés `z-index` ≥ 0 : enfilés triés dans
         // la file du contexte — drainés à sa fermeture (ici si

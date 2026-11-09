@@ -132,6 +132,52 @@ impl fmt::Display for Unit {
     }
 }
 
+/// Mode d'écriture (css-writing-modes-3 §3.1 — R-183).
+/// `Sideways*` est ramené au mode vertical de base pour le
+/// mapping logique (la différence = orientation des glyphes,
+/// hors MVP).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum WritingMode {
+    /// Inline horizontal, bloc top→bottom (défaut).
+    #[default]
+    HorizontalTb,
+    /// Inline top→bottom, bloc right→left.
+    VerticalRl,
+    /// Inline top→bottom, bloc left→right.
+    VerticalLr,
+    /// `sideways-rl` — traité comme [`Self::VerticalRl`]
+    /// au MVP (glyphes toujours « couchés »).
+    SidewaysRl,
+    /// `sideways-lr` — traité comme [`Self::VerticalLr`].
+    SidewaysLr,
+}
+
+impl WritingMode {
+    /// Mode vertical (axe inline = vertical) ?
+    #[must_use]
+    pub fn is_vertical(&self) -> bool {
+        !matches!(self, Self::HorizontalTb)
+    }
+    /// Bloc en x **décroissant** (`vertical-rl`) ?
+    #[must_use]
+    pub fn block_reversed(&self) -> bool {
+        matches!(self, Self::VerticalRl | Self::SidewaysRl)
+    }
+}
+
+/// `writing-mode` CSS → enum (`horizontal-tb` en repli sur
+/// valeur inconnue — dégradation, jamais panic).
+#[must_use]
+pub fn parse_writing_mode(v: &str) -> WritingMode {
+    match v.trim().to_ascii_lowercase().as_str() {
+        "vertical-rl" => WritingMode::VerticalRl,
+        "vertical-lr" => WritingMode::VerticalLr,
+        "sideways-rl" => WritingMode::SidewaysRl,
+        "sideways-lr" => WritingMode::SidewaysLr,
+        _ => WritingMode::HorizontalTb,
+    }
+}
+
 /// Couleur RGBA 8 bits.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Color {
@@ -613,10 +659,9 @@ pub fn value_is_valid_for(name: &str, value: &str) -> bool {
 /// par propriété fera le tri).
 #[must_use]
 pub fn expand_shorthand(name: &str, value: &str) -> Option<Vec<(String, String)>> {
-    // Propriétés logiques (css-logical-1 — R-124) : mapping
-    // LTR / `horizontal-tb` — seul writing-mode porté. Les
-    // `*-inline`/`*-block` prennent 1-2 valeurs ; les
-    // `*-start`/`*-end`/`-size` sont des renommages.
+    // Propriétés logiques (css-logical-1 — R-124/R-183) :
+    // shorthands `*-inline`/`*-block` éclatés en longhands
+    // logiques ; la résolution physique attend la cascade.
     if let Some(expanded) = expand_logical(name, value) {
         return Some(expanded);
     }
@@ -1391,79 +1436,46 @@ const FONT_SIZE_KEYWORDS: &[&str] = &[
 ];
 
 /// `1..4` valeurs → `[top, right, bottom, left]` (spec).
-/// Propriétés logiques (css-logical-1 — R-124) : mapping
-/// **LTR / `horizontal-tb`** — le seul writing-mode porté.
-/// Retour : `Some(vec![(physique, valeur)…])` ou `None` si
-/// `name` n'est pas une propriété logique connue.
+/// Propriétés logiques (css-logical-1 — R-124/R-183) : les
+/// shorthands éclatent en longhands LOGIQUES ; la résolution
+/// vers le repère de flux (mode + direction) se fait à la
+/// cascade (`resolve_logical_props`). Retour :
+/// `Some(vec![(logique, valeur)…])` ou `None`.
 ///
 /// Couvert : `*-inline[-start|-end]` / `*-block[-start|-end]`
 /// de `margin`, `padding`, `inset`, `border-*` ; `inline-size`,
 /// `block-size` + `min-`/`max-` ; rayons `border-*-radius`.
 fn expand_logical(name: &str, value: &str) -> Option<Vec<(String, String)>> {
-    // Longhands `-start`/`-end`/`-size` = renommage direct.
-    let rename: &str = match name {
-        "margin-inline-start" => "margin-left",
-        "margin-inline-end" => "margin-right",
-        "margin-block-start" => "margin-top",
-        "margin-block-end" => "margin-bottom",
-        "padding-inline-start" => "padding-left",
-        "padding-inline-end" => "padding-right",
-        "padding-block-start" => "padding-top",
-        "padding-block-end" => "padding-bottom",
-        "inset-inline-start" => "left",
-        "inset-inline-end" => "right",
-        "inset-block-start" => "top",
-        "inset-block-end" => "bottom",
-        "inline-size" => "width",
-        "block-size" => "height",
-        "min-inline-size" => "min-width",
-        "max-inline-size" => "max-width",
-        "min-block-size" => "min-height",
-        "max-block-size" => "max-height",
-        "border-inline-start-width" => "border-left-width",
-        "border-inline-end-width" => "border-right-width",
-        "border-block-start-width" => "border-top-width",
-        "border-block-end-width" => "border-bottom-width",
-        "border-inline-start-style" => "border-left-style",
-        "border-inline-end-style" => "border-right-style",
-        "border-block-start-style" => "border-top-style",
-        "border-block-end-style" => "border-bottom-style",
-        "border-inline-start-color" => "border-left-color",
-        "border-inline-end-color" => "border-right-color",
-        "border-block-start-color" => "border-top-color",
-        "border-block-end-color" => "border-bottom-color",
-        "border-start-start-radius" => "border-top-left-radius",
-        "border-start-end-radius" => "border-top-right-radius",
-        "border-end-start-radius" => "border-bottom-left-radius",
-        "border-end-end-radius" => "border-bottom-right-radius",
-        _ => "",
-    };
-    if !rename.is_empty() {
-        return Some(vec![(rename.to_string(), value.to_string())]);
-    }
-    // Shorthands `*-inline`/`*-block` : 1-2 valeurs répétées.
+    // R-183 : les longhands `*-inline-start`/`end`/`size`…
+    // passent VERBATIM (None → insertion brute) — le mapping
+    // logique→repère de flux se fait à la cascade
+    // (`resolve_logical_props`), où le writing-mode de
+    // l'élément ET celui du parent sont connus.
+    // Shorthands `*-inline`/`*-block` : 1-2 valeurs répétées,
+    // émises sous leurs noms LOGIQUES.
     let (a, b): (&str, &str) = match name {
-        "margin-inline" => ("margin-left", "margin-right"),
-        "margin-block" => ("margin-top", "margin-bottom"),
-        "padding-inline" => ("padding-left", "padding-right"),
-        "padding-block" => ("padding-top", "padding-bottom"),
-        "inset-inline" => ("left", "right"),
-        "inset-block" => ("top", "bottom"),
-        "border-inline-width" => ("border-left-width", "border-right-width"),
-        "border-inline-style" => ("border-left-style", "border-right-style"),
-        "border-inline-color" => ("border-left-color", "border-right-color"),
-        "border-block-width" => ("border-top-width", "border-bottom-width"),
-        "border-block-style" => ("border-top-style", "border-bottom-style"),
-        "border-block-color" => ("border-top-color", "border-bottom-color"),
+        "margin-inline" => ("margin-inline-start", "margin-inline-end"),
+        "margin-block" => ("margin-block-start", "margin-block-end"),
+        "padding-inline" => ("padding-inline-start", "padding-inline-end"),
+        "padding-block" => ("padding-block-start", "padding-block-end"),
+        "inset-inline" => ("inset-inline-start", "inset-inline-end"),
+        "inset-block" => ("inset-block-start", "inset-block-end"),
+        "border-inline-width" => ("border-inline-start-width", "border-inline-end-width"),
+        "border-inline-style" => ("border-inline-start-style", "border-inline-end-style"),
+        "border-inline-color" => ("border-inline-start-color", "border-inline-end-color"),
+        "border-block-width" => ("border-block-start-width", "border-block-end-width"),
+        "border-block-style" => ("border-block-start-style", "border-block-end-style"),
+        "border-block-color" => ("border-block-start-color", "border-block-end-color"),
         _ => {
             // `border-inline`/`border-block` shorthand complet —
-            // délègue à `expand_border_parts` par côté physique.
+            // `expand_border_parts` accepte les noms logiques
+            // (le préfixe est recopié tel quel).
             return match name {
                 "border-inline" | "border-block" => {
                     let (p1, p2) = if name == "border-inline" {
-                        ("border-left", "border-right")
+                        ("border-inline-start", "border-inline-end")
                     } else {
-                        ("border-top", "border-bottom")
+                        ("border-block-start", "border-block-end")
                     };
                     let mut out = expand_border_parts(p1, value);
                     out.extend(expand_border_parts(p2, value));

@@ -3093,3 +3093,46 @@ fn supports_evalue_la_condition() {
         "not (bogus) → vrai, not (grid) → faux"
     );
 }
+
+/// R-183 — `writing-mode` : props logiques résolues dans le
+/// repère de flux (mode propre + direction + mode parent).
+#[test]
+fn writing_mode_resout_les_props_logiques() {
+    let mut dom = Dom::new();
+    let doc = dom.document();
+    let div = dom.create_element("div").unwrap();
+    dom.append_child(doc, div).unwrap();
+    let p = dom.create_element("p").unwrap();
+    dom.append_child(div, p).unwrap();
+    dom.set_attribute(p, "class", "c").unwrap();
+    let mut eng = StyleEngine::new();
+    eng.add_css(
+        "div { writing-mode: vertical-rl } .c { margin-inline-start: 10px; inline-size: 40px }",
+        Origin::Author,
+    );
+    let map = eng.compute_tree(&dom, doc, &env());
+    let cst = map.get(p).expect("style p");
+    // Enfant vrl dans parent vrl : inline-start → arête
+    // réelle `top` → nom stocké `left` (repère transposé).
+    assert_eq!(cst.get("margin-left"), Some("10px"), "is → margin-left");
+    // `inline-size` = axe inline = `width` du repère (mêmes axes).
+    assert_eq!(cst.get("width"), Some("40px"), "inline-size → width");
+    // `writing-mode` hérité par l'enfant.
+    assert_eq!(cst.get("writing-mode"), Some("vertical-rl"));
+
+    // Direction rtl en horizontal : inline-start → right.
+    let mut rtl_dom = Dom::new();
+    let rtl_root = rtl_dom.document();
+    let rtl_p = rtl_dom.create_element("p").unwrap();
+    rtl_dom.append_child(rtl_root, rtl_p).unwrap();
+    rtl_dom.set_attribute(rtl_p, "class", "c").unwrap();
+    rtl_dom.set_attribute(rtl_p, "dir", "rtl").unwrap();
+    let mut rtl_eng = StyleEngine::new();
+    rtl_eng.add_css(".c { margin-inline-start: 3px }", Origin::Author);
+    let rtl_map = rtl_eng.compute_tree(&rtl_dom, rtl_root, &env());
+    assert_eq!(
+        rtl_map.get(rtl_p).expect("style").get("margin-right"),
+        Some("3px"),
+        "rtl : is → margin-right"
+    );
+}

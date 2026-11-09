@@ -302,6 +302,50 @@ fn origin_px(st: &ComputedStyle, rect: &Rect) -> (f32, f32) {
     (rect.x + x, rect.y + y)
 }
 
+/// Transform du repère de flux propre → celui du parent
+/// (R-183, css-writing-modes) : les enfants d'une boîte
+/// dont le `writing-mode` croise le flux contenant sont
+/// posés en coordonnées transposées (`x'` = axe inline,
+/// `y'` = axe bloc) ; cette matrice les remet dans le
+/// repère parent. `content` = content box de la boîte **en
+/// coords parent**. `None` = identité (même repère).
+///
+/// `sideways-*` suit le vertical de base ; `text-orientation`
+/// ne change pas la géométrie des boîtes (glyphes seuls —
+/// hors MVP).
+#[must_use]
+#[allow(clippy::many_single_char_names)]
+pub fn flow_transform(
+    parent: explorer_css::value::WritingMode,
+    own: explorer_css::value::WritingMode,
+    content: &Rect,
+) -> Option<Affine> {
+    use explorer_css::value::WritingMode as W;
+    let (a, b, c, d, e, f) = match (parent, own) {
+        // O=vrl dans flux horizontal : inline→bas, bloc→gauche.
+        (W::HorizontalTb, W::VerticalRl | W::SidewaysRl) => {
+            (0., -1., 1., 0., content.x + content.width, content.y)
+        }
+        // O=vlr dans flux horizontal, OU O=horizontal dans
+        // flux vlr : même transposée directe.
+        (W::HorizontalTb, W::VerticalLr | W::SidewaysLr)
+        | (W::VerticalLr | W::SidewaysLr, W::HorizontalTb) => {
+            (0., 1., 1., 0., content.x, content.y)
+        }
+        // O=horizontal dans flux vrl : inverse de la transposée.
+        (W::VerticalRl | W::SidewaysRl, W::HorizontalTb) => {
+            (0., 1., -1., 0., content.x, content.y + content.height)
+        }
+        // Flux verticaux de sens opposés : miroir sur l'axe bloc.
+        (W::VerticalRl | W::SidewaysRl, W::VerticalLr | W::SidewaysLr)
+        | (W::VerticalLr | W::SidewaysLr, W::VerticalRl | W::SidewaysRl) => {
+            (1., 0., 0., -1., content.x, content.y + content.height)
+        }
+        _ => return None,
+    };
+    Some(Affine { a, b, c, d, e, f })
+}
+
 /// `transform` d'une boîte → matrice complète (origine
 /// incluse, exprimée dans le repère du `rect` passé —
 /// document ou décalé scroll) — `None` si

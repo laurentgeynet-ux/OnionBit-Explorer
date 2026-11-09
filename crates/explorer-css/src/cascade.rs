@@ -336,6 +336,7 @@ const SUPPORTED_PROPS: &[&str] = &[
     "text-emphasis",
     "text-indent",
     "text-justify",
+    "text-combine-upright",
     "text-orientation",
     "text-overflow",
     "text-shadow",
@@ -1853,6 +1854,13 @@ impl StyleEngine {
                 }
             }
         }
+        // 3b. Propriétés logiques → noms du repère de flux
+        // (R-183) : après l'héritage — `writing-mode` et
+        // `direction` de l'élément ET le mode du parent sont
+        // alors connus. Le physique déclaré l'emporte
+        // (l'ordre fin n'est pas préservable en `HashMap` —
+        // approximation documentée).
+        resolve_logical_props(&mut props, parent);
         // Propriétés custom `--*` : héritées par défaut (spec)
         // — R-57 : la table effective du parent est PARTAGÉE
         // (bump `Arc` O(1)) au lieu de recopier chaque entrée ;
@@ -3169,6 +3177,188 @@ fn parent_computed(
     Some(s)
 }
 
+/// R-183 — index d'un côté logique → arête **réelle** selon
+/// (mode propre, direction) ; puis arête réelle → nom lu
+/// dans le repère de flux du parent (transposé si vertical).
+/// `sideways-*` suit la table du vertical de base.
+fn logical_edge(mode: crate::value::WritingMode, rtl: bool, side: usize) -> &'static str {
+    // 0 = inline-start, 1 = inline-end (sens `direction`),
+    // 2 = block-start, 3 = block-end (sens `block_reversed`).
+    match side {
+        0 | 1 => {
+            let start = match (mode.is_vertical(), rtl) {
+                (false, false) => "left",
+                (false, true) => "right",
+                (true, false) => "top",
+                (true, true) => "bottom",
+            };
+            if side == 0 {
+                start
+            } else {
+                match start {
+                    "left" => "right",
+                    "right" => "left",
+                    "top" => "bottom",
+                    _ => "top",
+                }
+            }
+        }
+        2 => match (mode.is_vertical(), mode.block_reversed()) {
+            (false, _) => "top",
+            (true, false) => "left",
+            (true, true) => "right",
+        },
+        _ => match (mode.is_vertical(), mode.block_reversed()) {
+            (false, _) => "bottom",
+            (true, false) => "right",
+            (true, true) => "left",
+        },
+    }
+}
+
+/// Arête **réelle** → nom de côté dans le repère du flux
+/// parent (R-183) : en mode vertical, `x'` suit l'inline
+/// réel (top→`left`, bottom→`right`) et le bloc s'inverse
+/// selon `vertical-rl`/`vertical-lr`.
+fn stored_side(real: &str, pmode: crate::value::WritingMode) -> &'static str {
+    if !pmode.is_vertical() {
+        return match real {
+            "top" => "top",
+            "bottom" => "bottom",
+            "right" => "right",
+            _ => "left",
+        };
+    }
+    match real {
+        "bottom" => "right",
+        "left" => {
+            if pmode.block_reversed() {
+                "bottom"
+            } else {
+                "top"
+            }
+        }
+        "right" => {
+            if pmode.block_reversed() {
+                "top"
+            } else {
+                "bottom"
+            }
+        }
+        _ => "left",
+    }
+}
+
+/// `*-inline-start`/`*-block-end`/`-size`/`inset-*`/rayons
+/// logiques → nom du repère de flux (R-183). Composé :
+/// `logique → réel` (mode propre + `direction`), `réel →
+/// nom stocké` (mode du parent). Le physique déjà déclaré
+/// n'est pas écrasé (perdant arbitraire mais documenté).
+fn resolve_logical_props(props: &mut HashMap<String, String>, parent: Option<&ComputedStyle>) {
+    use crate::value::parse_writing_mode;
+    let own = props
+        .get("writing-mode")
+        .map_or(crate::value::WritingMode::default(), |v| {
+            parse_writing_mode(v)
+        });
+    let rtl = props.get("direction").is_some_and(|v| v.trim() == "rtl");
+    let pmode = parent
+        .and_then(|p| p.get("writing-mode"))
+        .map_or(crate::value::WritingMode::default(), parse_writing_mode);
+    let same_axes = own.is_vertical() == pmode.is_vertical();
+    for k in props.keys().cloned().collect::<Vec<_>>() {
+        let Some(stored) = logical_name(&k, own, rtl, pmode, same_axes) else {
+            continue;
+        };
+        if !props.contains_key(&stored) {
+            if let Some(v) = props.get(&k).cloned() {
+                props.insert(stored, v);
+            }
+        }
+    }
+}
+
+/// Nom logique → nom du repère de flux (R-183) — corps du
+/// mapping extrait de [`resolve_logical_props`]. `None` =
+/// nom non logique.
+fn logical_name(
+    k: &str,
+    own: crate::value::WritingMode,
+    rtl: bool,
+    pmode: crate::value::WritingMode,
+    same_axes: bool,
+) -> Option<String> {
+    let side_idx = |s: &str| -> Option<usize> {
+        match s {
+            "inline-start" => Some(0),
+            "inline-end" => Some(1),
+            "block-start" => Some(2),
+            "block-end" => Some(3),
+            _ => None,
+        }
+    };
+    if let Some(rest) = k
+        .strip_prefix("margin-")
+        .or_else(|| k.strip_prefix("padding-"))
+        .or_else(|| k.strip_prefix("inset-"))
+        .and_then(side_idx)
+    {
+        return Some(if k.starts_with("inset-") {
+            stored_side(logical_edge(own, rtl, rest), pmode).to_string()
+        } else {
+            format!(
+                "{}-{}",
+                k.split('-').next().unwrap_or_default(),
+                stored_side(logical_edge(own, rtl, rest), pmode)
+            )
+        });
+    }
+    if let Some(rest) = k.strip_prefix("border-") {
+        let mut it = rest.split('-');
+        if let (Some(a), Some(b), Some("radius")) = (it.next(), it.next(), it.next()) {
+            // `border-{s|e}{s|e}-radius` : coin logique —
+            // premier = bloc, second = inline (spec).
+            let ve = 2 + usize::from(a != "start");
+            let he = usize::from(b != "start");
+            let rv = logical_edge(own, rtl, ve);
+            let rh = logical_edge(own, rtl, he);
+            return Some(format!(
+                "border-{}-{}-radius",
+                stored_side(rh, pmode),
+                stored_side(rv, pmode)
+            ));
+        }
+        for (suf, idx) in [
+            ("inline-start", 0usize),
+            ("inline-end", 1),
+            ("block-start", 2),
+            ("block-end", 3),
+        ] {
+            if let Some(tail) = rest.strip_prefix(suf).and_then(|t| t.strip_prefix('-')) {
+                return Some(format!(
+                    "border-{}-{}",
+                    stored_side(logical_edge(own, rtl, idx), pmode),
+                    tail
+                ));
+            }
+        }
+        return None;
+    }
+    match k {
+        "inline-size" | "min-inline-size" | "max-inline-size" => Some(format!(
+            "{}{}",
+            k.strip_suffix("inline-size").unwrap_or_default(),
+            if same_axes { "width" } else { "height" }
+        )),
+        "block-size" | "min-block-size" | "max-block-size" => Some(format!(
+            "{}{}",
+            k.strip_suffix("block-size").unwrap_or_default(),
+            if same_axes { "height" } else { "width" }
+        )),
+        _ => None,
+    }
+}
+
 /// Propriétés héritées (spec CSS cascade / inherit list).
 const INHERITED_PROPS: &[&str] = &[
     "border-collapse",
@@ -3195,9 +3385,12 @@ const INHERITED_PROPS: &[&str] = &[
     "pointer-events",
     "quotes",
     "text-align",
+    "text-combine-upright",
     "text-indent",
+    "text-orientation",
     "text-transform",
     "visibility",
+    "writing-mode",
     "white-space",
     "widows",
     "word-spacing",

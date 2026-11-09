@@ -3392,7 +3392,7 @@ déblocage/coût décroissant.
   couvre que les attributs), `%`-height traversant les ancêtres
   `auto`, sélecteurs classe/id ASCII-insensibles, baseline quirks
   des images en cellule.
-- [ ] **R-183. `writing-mode` vertical** : `vertical-rl`/
+- [x] **R-183. `writing-mode` vertical** : `vertical-rl`/
   `vertical-lr`/`sideways-*` + `text-orientation`/`text-combine-upright`
   absents — `horizontal-tb` seul (`value.rs` le documente) ;
   toute la chaîne (inline/block/props logiques physiques/

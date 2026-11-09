@@ -2654,3 +2654,26 @@ fn column_rule_peint_un_trait_dans_le_gap() {
         "pas de trait par défaut"
     );
 }
+
+/// R-183 — `writing-mode: vertical-rl` : le sous-arbre
+/// transposé est remis dans le repère parent par un
+/// `PushTransform` de rotation — pas de double pivot.
+#[test]
+fn writing_mode_emet_push_transform() {
+    let (_, _, items) = dl(
+        "<div style=\"writing-mode:vertical-rl;width:200px;height:100px\">\
+         <div style=\"background:red\">A</div></div>",
+        "",
+    );
+    // Au moins un transform de repère de flux (rotation
+    // ±90° = coefficients croisés non nuls, diagonale nulle).
+    assert!(
+        items.iter().any(|it| matches!(
+            it,
+            DisplayItem::PushTransform(t)
+                if t.sx.abs() < 0.01 && t.sy.abs() < 0.01
+                    && t.kx.abs() > 0.9 && t.ky.abs() > 0.9
+        )),
+        "transform de flux attendu dans {items:?}"
+    );
+}

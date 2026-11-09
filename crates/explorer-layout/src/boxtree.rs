@@ -197,6 +197,12 @@ pub struct LayoutBox {
     /// racine par `build_box_tree_sized`, lu par
     /// `layout_tree` qui arme `BlockCtx::quirks`.
     pub quirks_mode: bool,
+    /// `writing-mode` du flux **contenant** (R-183) — le
+    /// repère où cette boîte a été posée (= mode propre du
+    /// parent élément, ICB pour la racine). Comparé au mode
+    /// propre : croisé → enfants en espace transposé +
+    /// [`crate::transform::flow_transform`] au paint/hit.
+    pub flow_mode: explorer_css::value::WritingMode,
 }
 
 /// Contexte de pose enregistré par `layout_block` (R-12) :
@@ -344,6 +350,10 @@ pub fn build_box_tree_sized<S: ::std::hash::BuildHasher>(
         // R-182 — le document mode voyage jusqu'au layout
         // (le DOM n'y est plus accessible).
         b.quirks_mode = dom.document_mode() != explorer_dom::DocumentMode::NoQuirks;
+        b.flow_mode =
+            explorer_css::value::parse_writing_mode(b.style.get("writing-mode").unwrap_or(""));
+        b.flow_mode =
+            explorer_css::value::parse_writing_mode(b.style.get("writing-mode").unwrap_or(""));
         lend_first_pseudos(b);
         inject_inside_markers(b);
     }
@@ -402,6 +412,7 @@ fn inject_inside_markers(bx: &mut LayoutBox) {
                     first_line: None,
                     first_letter: None,
                     quirks_mode: false,
+                    flow_mode: explorer_css::value::WritingMode::HorizontalTb,
                 },
             );
         }
@@ -595,6 +606,7 @@ fn build_box_tree_env<S: ::std::hash::BuildHasher>(
         first_line: None,
         first_letter: None,
         quirks_mode: false,
+        flow_mode: explorer_css::value::WritingMode::HorizontalTb,
     };
     let children = child_boxes(dom, root, styles, &style, sizes, envs);
     b.children = wrap_children(children, &style, kind);
@@ -639,6 +651,7 @@ fn box_kind_of(style: &ComputedStyle) -> BoxKind {
 /// Borne : la boîte `<slot>` suit son `display` calculé
 /// (inline par défaut — `display:contents` UA non porté,
 /// le découpage en-ligne/autour-de-bloc est celui de R-17).
+#[allow(clippy::too_many_lines)]
 fn child_boxes<S: ::std::hash::BuildHasher>(
     dom: &Dom,
     parent: NodeId,
@@ -663,6 +676,11 @@ fn child_boxes<S: ::std::hash::BuildHasher>(
         dom.children(owner).unwrap_or_default()
     };
     let mut out = Vec::new();
+    // R-183 : les enfants coulent dans le repère de flux du
+    // parent — leur `flow_mode` = le writing-mode propre de
+    // celui-ci (transposé seulement s'il croise le leur).
+    let flow =
+        explorer_css::value::parse_writing_mode(parent_style.get("writing-mode").unwrap_or(""));
     // `::before` généré en tête du contenu (R-13).
     if let Some(b) = pseudo_box(
         dom,
@@ -757,6 +775,7 @@ fn child_boxes<S: ::std::hash::BuildHasher>(
                     first_line: None,
                     first_letter: None,
                     quirks_mode: false,
+                    flow_mode: explorer_css::value::WritingMode::HorizontalTb,
                 });
             }
         }
@@ -778,6 +797,14 @@ fn child_boxes<S: ::std::hash::BuildHasher>(
     // fils (css-lists §2.4 — `ol[start]` fixe la base,
     // `reversed` décrémente, `li[value]` ancrape la série).
     assign_marker_ordinals(dom, parent, &mut out);
+    // R-183 — repère de flux du parent sur chaque fils.
+    for b in &mut out {
+        b.flow_mode = flow;
+    }
+    // R-183 — repère de flux du parent sur chaque fils.
+    for b in &mut out {
+        b.flow_mode = flow;
+    }
     out
 }
 
@@ -1074,6 +1101,7 @@ fn leaf_box_anon(kind: BoxKind, style: ComputedStyle) -> LayoutBox {
         first_line: None,
         first_letter: None,
         quirks_mode: false,
+        flow_mode: explorer_css::value::WritingMode::HorizontalTb,
     }
 }
 
@@ -1306,6 +1334,7 @@ fn flush_run(out: &mut Vec<LayoutBox>, run: &mut Vec<LayoutBox>, style: &Compute
             first_line: None,
             first_letter: None,
             quirks_mode: false,
+            flow_mode: explorer_css::value::WritingMode::HorizontalTb,
         });
     }
 }
@@ -1426,6 +1455,7 @@ fn object_box(
         first_line: None,
         first_letter: None,
         quirks_mode: false,
+        flow_mode: explorer_css::value::WritingMode::HorizontalTb,
     };
     // Ressource résolue → feuille remplacée ; sinon les
     // enfants prennent la place de l'objet.
@@ -1527,6 +1557,7 @@ fn leaf_box(
         first_line: None,
         first_letter: None,
         quirks_mode: false,
+        flow_mode: explorer_css::value::WritingMode::HorizontalTb,
     }
 }
 
@@ -1580,6 +1611,7 @@ fn control_box(
                     first_line: None,
                     first_letter: None,
                     quirks_mode: false,
+                    flow_mode: explorer_css::value::WritingMode::HorizontalTb,
                 }],
                 &style,
             )

@@ -3030,3 +3030,31 @@ fn quirks_profond() {
         "standards : unitless ignoré"
     );
 }
+
+/// R-183 — `writing-mode: vertical-rl` : les enfants d'une
+/// boîte orthogonale coulent en coords transposées (x'=
+/// inline, y'=bloc) — le repère parent est restauré au
+/// paint par `flow_transform`.
+#[test]
+fn writing_mode_vertical_pose_transposee() {
+    let (dom, bx) = laid(
+        "<div id=v style=\"writing-mode:vertical-rl;width:200px;height:100px\">\
+         <div id=a style=\"height:20px\">A</div>\
+         <div id=b style=\"height:30px\">B</div></div>",
+        "",
+    );
+    let a = find(&bx, by_id(&dom, "a"));
+    let b = find(&bx, by_id(&dom, "b"));
+    // En espace transposé : A et B s'empilent sur y'
+    // (bloc), leur largeur x' = l'inline avail = 100px
+    // (hauteur réelle du parent), pas la largeur 200px.
+    assert_eq!(a.rect.y, 0.0, "A en tête du flux transposé");
+    assert_eq!(b.rect.y, 20.0, "B empilé sous A en coords O");
+    assert_eq!(a.rect.width, 100.0, "inline avail = hauteur réelle");
+    assert_eq!(b.rect.width, 100.0);
+    // Sans writing-mode : pile verticale ordinaire (inchangé).
+    let (dom2, bx2) = laid("<div id=v><div id=a>A</div><div id=b>B</div></div>", "");
+    let a2 = find(&bx2, by_id(&dom2, "a"));
+    assert!(a2.rect.width > 100.0, "horizontal : pleine largeur");
+    assert_eq!(a2.rect.y, 0.0);
+}

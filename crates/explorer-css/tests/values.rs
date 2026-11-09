@@ -360,38 +360,40 @@ fn inset_expansion() {
 
 #[test]
 fn expand_proprietes_logiques_ltr() {
-    // R-124 — css-logical-1 : mapping LTR/horizontal-tb.
-    // Longhands `-start`/`-end`/`-size` (Tailwind ps-*/pe-*/ms-*).
+    // R-124/R-183 — les longhands passent verbatim (`None`),
+    // les shorthands éclatent en noms LOGIQUES : le mapping
+    // vers le repère de flux attend la cascade
+    // (`resolve_logical_props`, verrou `writing_mode_resout_
+    // les_props_logiques` dans cascade.rs).
     let g = |n, v| expand_shorthand(n, v).unwrap();
-    assert_eq!(
-        g("padding-inline-start", "8px"),
-        vec![("padding-left".into(), "8px".into())]
-    );
-    assert_eq!(
-        g("margin-inline-end", "4px"),
-        vec![("margin-right".into(), "4px".into())]
-    );
-    assert_eq!(
-        g("inset-inline-start", "0"),
-        vec![("left".into(), "0".into())]
-    );
-    assert_eq!(
-        g("block-size", "100px"),
-        vec![("height".into(), "100px".into())]
-    );
+    assert_eq!(expand_shorthand("padding-inline-start", "8px"), None);
+    assert_eq!(expand_shorthand("margin-inline-end", "4px"), None);
+    assert_eq!(expand_shorthand("inset-inline-start", "0"), None);
+    assert_eq!(expand_shorthand("block-size", "100px"), None);
     // Shorthands `-inline`/`-block` : 1 valeur répétée ou 2.
     assert_eq!(
         g("margin-inline", "10px 20px"),
         vec![
-            ("margin-left".into(), "10px".into()),
-            ("margin-right".into(), "20px".into())
+            ("margin-inline-start".into(), "10px".into()),
+            ("margin-inline-end".into(), "20px".into())
         ]
     );
     assert_eq!(
         g("padding-block", "6px"),
         vec![
-            ("padding-top".into(), "6px".into()),
-            ("padding-bottom".into(), "6px".into())
+            ("padding-block-start".into(), "6px".into()),
+            ("padding-block-end".into(), "6px".into())
+        ]
+    );
+    assert_eq!(
+        g("border-inline", "1px solid red"),
+        vec![
+            ("border-inline-start-width".into(), "1px".into()),
+            ("border-inline-start-style".into(), "solid".into()),
+            ("border-inline-start-color".into(), "red".into()),
+            ("border-inline-end-width".into(), "1px".into()),
+            ("border-inline-end-style".into(), "solid".into()),
+            ("border-inline-end-color".into(), "red".into())
         ]
     );
 }
