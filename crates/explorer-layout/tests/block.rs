@@ -3058,3 +3058,23 @@ fn writing_mode_vertical_pose_transposee() {
     assert!(a2.rect.width > 100.0, "horizontal : pleine largeur");
     assert_eq!(a2.rect.y, 0.0);
 }
+
+/// R-206 — `margin:auto` **vertical** sur item flex-column :
+/// les marges main-axis absorbent l'espace restant
+/// (centrage §9.5 — cas nommé au palier R-O).
+#[test]
+fn flex_column_margin_auto_centre_verticalement() {
+    let (dom, bx) = laid(
+        "<div style=\"display:flex;flex-direction:column;height:200px;width:100px\">\
+         <span style=\"height:50px;margin-top:auto;margin-bottom:auto\">x</span></div>",
+        "body{margin:0}",
+    );
+    let f = find(&bx, by_tag(&dom, "div"));
+    let a = find(&bx, by_tag(&dom, "span"));
+    // 200 − 50 = 150 réparti moitié/moitié → y_a − y_f = 75.
+    let dy = a.rect.y - f.rect.y;
+    assert!(
+        (dy - 75.0).abs() < 0.5,
+        "item centré verticalement : dy={dy} attendu 75"
+    );
+}

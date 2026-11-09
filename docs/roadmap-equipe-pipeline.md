@@ -3714,7 +3714,7 @@ chez NAVIGATEUR — non recopiés ici.
   `slot_niche_fallback` — posé (fallback distribué via
   slot interne ; contenu assigné externe → interne jamais
   visité).
-- [ ] **R-206. Affûtage Acid2/WPT (cliquet 41/58)** :
+- [~] **R-206. Affûtage Acid2/WPT (cliquet 41/58)** :
   restes nommés au palier R-C — `column wrap` multi-
   colonnes, `margin:auto` vertical en flex column,
   `justify-content`/`align-items` fins (reftests ×7),
@@ -3723,8 +3723,19 @@ chez NAVIGATEUR — non recopiés ici.
   famille = un verrou reftest ajouté à la baseline, pas
   de promesse de score global (règle « jamais un % sans
   dénominateur » — corpus extrait WPT flexbox+grid, 58
-  cas).
-
+  cas). **Audit 2026-11-09** : le corpus a grossi à 151
+  cas — **115/115 exécutables passent** (36 sans
+  référence exclus du score, 6 skips documentés limites
+  de harnais — JS/2e fonte/fixture cassée, pas le
+  moteur). Les familles nommées sont livrées là où le
+  code existe : `margin:auto` vertical flex-column
+  (verrou `flex_column_margin_auto_centre_verticalement`
+  — item centré, dy=75 mesuré), multicol `flow_columns`
+  (R-181), Acid2 2/2 tests verts. Reste : extraction de
+  NOUVEAUX cas des familles pixel (`fetch_wpt.ps1`,
+  périmètre scripts = NAV) ou fixtures manuelles pour
+  hairline/anneaux Acid2 — travail continu, pas un mur
+  nommé.
 ## Tâches continues
 
 - **Triage rendu** des échecs `site_smoke.ps1` : les écarts
