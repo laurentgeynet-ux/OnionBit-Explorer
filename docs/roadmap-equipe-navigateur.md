@@ -10693,6 +10693,33 @@ un crate PIPELINE.- [x] **JS-C422. Deadline honnête — canal session ↔ budge
   fix, `buf:true` avec), `b104_vrai_muxjs_segment_exploitable`
   (vrai worker mux.js + vrai TS vidéo/audio cache vol),
   `b104_transmux_wire` 2/2, worker 16/16, c78_contexts 20/20.
+- [x] **JS-C431. §B-117 — sonde `cors_preflight` nomme la
+  branche de rejet + verrous gvs réels** (mur googlevideo
+  `/videoplayback`, vol 731 — 1 `net.fail` sur le POST SABR,
+  vidéo longue). `note_net_fail` jetait la raison
+  `CorsBlocked` (6 branches : statut OPTIONS, ACAO preflight,
+  ACAM, ACAH, ACAO final, ACAC) — le log ne disait que
+  `kind`+`host`. Enrichi : `why` (détail borné 96 c) +
+  `uh=<unsafe_headers>` (noms d'en-têtes auteur non safelistés
+  portés par `NetDone.cors_unsafe` à chaque livraison —
+  constantes protocole, sûres) + `creds`, dédup
+  `(kind,host,raison)`. Donnée réelle (4 edges, URL signée du
+  vol) : **gvs 1.0 répond 403 à TOUT OPTIONS `/videoplayback`**
+  (ACAM+ACAH émis, jamais ACAO) tandis que le **POST direct →
+  200+ACAO+ACAC** — Chrome ne préflighte donc jamais ces
+  requêtes ; la sonde nommera au prochain vol si la nôtre
+  sur-déclenche `needs_preflight` (en-tête injecté en route)
+  ou si SABR pose un vrai en-tête non safelisté. Verrous
+  fixture : `cors_preflight_gvs_options_403_blocks` (403
+  bloque, POST jamais vu) + `cors_simple_post_gvs_acao_passes`
+  (POST direct sans contexte preflight livre 200). Réparation
+  contrat R-167 : constructeur `DisplayItem::FillRect` du
+  test `cull` reçoit `radii` ; fmt `apply`/`popup`
+  (bb53e937 n'était pas fmt-clean). Retouche bornée PIPE
+  journalée : `counter_walk` (R-169, boxtree — pré-passe
+  récursive ordre document) était la seule arête du merge
+  R-152 sans `deep()` → verrou R-24 en overflow
+  (`0xC00000FD` ×2) ; arête sous `deep()`, 2/2 verts 1,3 s.
   **Vol 730 : `ctx=0` aux livraisons, 0 `in.fail`, 21
   `mse.appendBuffer` (~1,7 Mo), `updateend`/`progress`,
   `duration=210`, `readyState=4`, `buffered=43,6 s`** — la

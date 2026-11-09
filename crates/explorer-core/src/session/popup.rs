@@ -130,12 +130,11 @@ pub(crate) fn append_select_popup(
         b: 32,
         a: 255,
     };
-    list.items
-        .push(DisplayItem::FillRect {
-            rect,
-            color: white,
-            radii: [0.0; 4],
-        });
+    list.items.push(DisplayItem::FillRect {
+        rect,
+        color: white,
+        radii: [0.0; 4],
+    });
     list.items.push(DisplayItem::Border {
         rect,
         widths: [1.0; 4],

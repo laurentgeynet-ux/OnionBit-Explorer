@@ -1468,7 +1468,7 @@ fn counter_walk(
     }
     if let Ok(ch) = dom.children(node) {
         for c in ch {
-            counter_walk(dom, c, styles, env, envs);
+            explorer_common::deep(|| counter_walk(dom, c, styles, env, envs));
         }
     }
 }

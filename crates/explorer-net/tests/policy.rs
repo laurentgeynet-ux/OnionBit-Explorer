@@ -1061,6 +1061,98 @@ async fn cors_no_context_passthrough() {
     assert_eq!(r.body, b"raw");
 }
 
+// ---- Vol 731 : l'échange réel `gvs 1.0` (googlevideo) ----
+//
+// Mesuré terrain sur `*.googlevideo.com/videoplayback` (4/4 edges
+// testés, URLs signées incluses) : `OPTIONS` → **403** systématique
+// (`ACAM`/`ACAH` émis pour le débogage mais jamais d'`ACAO`) alors
+// que `POST` direct → `200` + `ACAO` écho + `ACAC: true`. Conséquence
+// : aucun navigateur ne peut preflighter ces hôtes — YouTube SABR
+// reste CORS-simple ; un `OPTIONS` émis par nous est donc toujours
+// un sur-déclenchement à diagnostiquer (le `why` de `net.fail`
+// nomme alors le maillon).
+
+/// Rejoue la réponse `OPTIONS` capturée de `gvs 1.0` : statut
+/// 403 + `ACAM`/`ACAH`/`CORP`/`nosniff`, **sans `ACAO`**.
+fn gvs_options_403() -> Response {
+    resp(
+        403,
+        &[
+            ("access-control-allow-methods", "GET,HEAD,POST"),
+            (
+                "access-control-allow-headers",
+                "Accept-Language,Alt-Used,Cache-Control,Content-Type,Origin,Range,X-Playback-Session-Id",
+            ),
+            ("access-control-max-age", "86400"),
+            ("cross-origin-resource-policy", "cross-origin"),
+            ("x-content-type-options", "nosniff"),
+        ],
+        b"",
+    )
+}
+
+/// Rejoue la réponse `POST` capturée : `200` + `ACAO` écho +
+/// `ACAC: true` + `Timing-Allow-Origin`/`ACEH` UMP.
+fn gvs_post_200() -> Response {
+    resp(
+        200,
+        &[
+            ("content-type", "application/vnd.yt-ump"),
+            ("access-control-allow-origin", "https://www.youtube.com"),
+            ("access-control-allow-credentials", "true"),
+            ("timing-allow-origin", "https://www.youtube.com"),
+        ],
+        b"seg",
+    )
+}
+
+#[tokio::test]
+async fn cors_preflight_gvs_options_403_blocks() {
+    // Un en-tête auteur non safelisté (`x-goog-ump-*`) arme le
+    // preflight ; `gvs` répond 403 → `CorsBlocked` dont la
+    // raison nomme le statut — la vraie requête ne part jamais.
+    let inner = FakeTransport::new(vec![gvs_options_403()]);
+    let t = CorsTransport::wrap(inner.clone());
+    let err = t
+        .fetch(&cors_req(
+            "https://rr.example/videoplayback",
+            Method::Post,
+            "https://www.youtube.com",
+            &["x-goog-ump-part-number"],
+        ))
+        .await
+        .unwrap_err();
+    let NetError::CorsBlocked(why) = err else {
+        panic!("CorsBlocked attendu : {err}");
+    };
+    assert!(why.contains("403"), "la raison nomme le statut : {why}");
+    let seen = inner.seen();
+    assert_eq!(seen.len(), 1, "la requête réelle ne part pas");
+    assert_eq!(seen[0].method, Method::Options);
+}
+
+#[tokio::test]
+async fn cors_simple_post_gvs_acao_passes() {
+    // Le chemin que SABR emprunte vraiment : POST CORS-simple
+    // (aucun en-tête non safelisté) → **pas** d'`OPTIONS` ;
+    // `200` + `ACAO` écho + `ACAC` → livré.
+    let inner = FakeTransport::new(vec![gvs_post_200()]);
+    let t = CorsTransport::wrap(inner.clone());
+    let mut req = cors_req(
+        "https://rr.example/videoplayback",
+        Method::Post,
+        "https://www.youtube.com",
+        &[],
+    );
+    req.headers
+        .push(("content-type".to_string(), "text/plain".to_string()));
+    let r = t.fetch(&req).await.unwrap();
+    assert_eq!(r.body, b"seg");
+    let seen = inner.seen();
+    assert_eq!(seen.len(), 1, "aucun preflight émis");
+    assert_eq!(seen[0].method, Method::Post);
+}
+
 // ---- Étape 133 : `Origin` sur toute méthode non-safe ----
 
 /// Spec Fetch : `Origin` part sur tout non-GET/HEAD —

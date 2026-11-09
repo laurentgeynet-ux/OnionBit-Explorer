@@ -1075,7 +1075,10 @@ fn apply_drop_shadow(buf: &mut Pixmap, dx: f32, dy: f32, blur: f32, color: Color
     };
     {
         let (src_px, dst_px) = (buf.data(), shadow.data_mut());
-        let (iw, ih) = (w as i32, h as i32);
+        let (iw, ih) = (
+            i32::try_from(w).unwrap_or(i32::MAX),
+            i32::try_from(h).unwrap_or(i32::MAX),
+        );
         let (odx, ody) = (dx.round() as i32, dy.round() as i32);
         for y in 0..ih {
             let sy = y - ody;
@@ -1162,9 +1165,10 @@ fn apply_pixel_op(buf: &mut Pixmap, op: &FilterOp) {
                 lum + (b - lum) * s,
                 a,
             ),
-            // Inatteignable — `apply_filter_ops` route
-            // `DropShadow` vers `apply_drop_shadow`.
-            FilterOp::DropShadow { .. } => (r, g, b, a),
+            // `DropShadow` : inatteignable — `apply_filter_ops`
+            // le route vers `apply_drop_shadow`. `Blur` est
+            // appliqué en amont par `box_blur` séparable.
+            FilterOp::DropShadow { .. } | FilterOp::Blur(_) => (r, g, b, a),
             FilterOp::HueRotate(d) => {
                 let rad = d.to_radians();
                 let (c1, c2) = (rad.cos(), rad.sin());
@@ -1181,7 +1185,6 @@ fn apply_pixel_op(buf: &mut Pixmap, op: &FilterOp) {
                     a,
                 )
             }
-            FilterOp::Blur(_) => (r, g, b, a),
         };
         c[0] = nr.clamp(0.0, 255.0) as u8;
         c[1] = ng.clamp(0.0, 255.0) as u8;

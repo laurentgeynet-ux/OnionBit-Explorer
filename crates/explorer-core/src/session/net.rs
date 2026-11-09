@@ -1326,6 +1326,11 @@ impl Session {
                 mode: fetch_mode,
                 credentials: explorer_net::http::FetchCredentials::SameOrigin,
                 page_origin,
+                cors_unsafe: req
+                    .cors
+                    .as_ref()
+                    .map(|c| c.unsafe_headers.clone())
+                    .unwrap_or_default(),
                 req_url,
                 partition,
                 out,
@@ -1619,6 +1624,11 @@ impl Session {
                 mode: fetch_mode,
                 credentials,
                 page_origin,
+                cors_unsafe: req
+                    .cors
+                    .as_ref()
+                    .map(|c| c.unsafe_headers.clone())
+                    .unwrap_or_default(),
                 req_url,
                 partition,
                 out,
@@ -1686,6 +1696,7 @@ impl Session {
                 mode: explorer_net::http::FetchMode::NoCors,
                 credentials: explorer_net::http::FetchCredentials::SameOrigin,
                 page_origin: String::new(),
+                cors_unsafe: Vec::new(),
                 req_url,
                 partition: None,
                 out: Err(explorer_net::error::NetError::InvalidResponse(
@@ -1943,6 +1954,11 @@ impl Session {
                 mode: req.fetch_mode,
                 credentials: explorer_net::http::FetchCredentials::SameOrigin,
                 page_origin,
+                cors_unsafe: req
+                    .cors
+                    .as_ref()
+                    .map(|c| c.unsafe_headers.clone())
+                    .unwrap_or_default(),
                 req_url,
                 partition,
                 out,
@@ -2048,6 +2064,11 @@ impl Session {
                 mode: fetch_mode,
                 credentials,
                 page_origin,
+                cors_unsafe: req
+                    .cors
+                    .as_ref()
+                    .map(|c| c.unsafe_headers.clone())
+                    .unwrap_or_default(),
                 req_url,
                 partition,
                 out,
@@ -2208,6 +2229,11 @@ impl Session {
                 mode: fetch_mode,
                 credentials,
                 page_origin,
+                cors_unsafe: req
+                    .cors
+                    .as_ref()
+                    .map(|c| c.unsafe_headers.clone())
+                    .unwrap_or_default(),
                 req_url,
                 partition,
                 out,
@@ -2691,6 +2717,12 @@ impl Session {
         let tx = self.net_tx.clone();
         let req_url = p.req.url.clone();
         let (tab, handle) = (p.tab, p.handle);
+        let cors_unsafe = p
+            .req
+            .cors
+            .as_ref()
+            .map(|c| c.unsafe_headers.clone())
+            .unwrap_or_default();
         let j = tokio::spawn(async move {
             let out = fetch_maybe_data(&tr, &p.req).await;
             let _ = tx.send(NetDone {
@@ -2700,6 +2732,7 @@ impl Session {
                 mode: p.mode,
                 credentials: p.credentials,
                 page_origin: p.page_origin,
+                cors_unsafe,
                 req_url,
                 partition: p.partition,
                 out,
@@ -3174,7 +3207,15 @@ impl Session {
     /// Sonde `net.fail` (`media_probe`, JS-C366) — réponse
     /// arrivée mais livrée `status: 0` : nomme la cause
     /// transport (`NetError` → kind) ou `cors_resp` (corps
-    /// reçu mais `ACAO` absent/mismatch). Dedup `(kind, host)`.
+    /// reçu mais `ACAO` absent/mismatch). La **raison**
+    /// (`why`, vol 731 : un `cors_preflight` couvre six
+    /// violations distinctes — statut `OPTIONS`, ACAO
+    /// preflight, `ACAM`, `ACAH`, ACAO réponse finale,
+    /// `ACAC`) distingue le maillon fautif ; `uh` nomme les
+    /// en-têtes auteur non safelistés qui ont armé le
+    /// preflight. Dedup `(kind, host, why-tronquée)` —
+    /// deux causes distinctes d'un même hôte restent
+    /// visibles, chacune une fois.
     fn note_net_fail(&mut self, done: &net_items::NetDone) {
         if !tracing::enabled!(target: "media_probe", tracing::Level::INFO) {
             return;
@@ -3183,8 +3224,10 @@ impl Session {
         match &done.out {
             Err(e) => {
                 let kind = net_err_kind(e);
-                if self.note_net_probe(kind, &host) {
-                    tracing::info!(target: "media_probe", site = "net.fail", kind, host);
+                let why: String = e.to_string().chars().take(96).collect();
+                let key = format!("{host}|{why}");
+                if self.note_net_probe(kind, &key) {
+                    tracing::info!(target: "media_probe", site = "net.fail", kind, host, why = %why, uh = ?done.cors_unsafe, creds = ?done.credentials);
                 }
             }
             Ok(r) => {

@@ -2395,10 +2395,10 @@ fn append_find_highlights(list: &mut DisplayList, f: &FindState) {
         let color = if i == f.current { cur } else { base };
         for &rect in occ {
             list.items.push(DisplayItem::FillRect {
-            rect,
-            color,
-            radii: [0.0; 4],
-        });
+                rect,
+                color,
+                radii: [0.0; 4],
+            });
         }
     }
 }

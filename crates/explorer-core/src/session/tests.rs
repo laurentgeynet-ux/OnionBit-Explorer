@@ -330,6 +330,7 @@ fn cull_keeps_only_in_frame_items() {
             height: 10.0,
         },
         color: Color::BLACK,
+        radii: [0.0; 4],
     };
     let mut list = DisplayList {
         items: vec![
@@ -984,6 +985,7 @@ fn etape206_drain_anim_births_does_not_reenter_poll_net() {
             mode: explorer_net::http::FetchMode::Cors,
             credentials: explorer_net::http::FetchCredentials::Omit,
             page_origin: "http://h.test".to_string(),
+            cors_unsafe: Vec::new(),
             req_url: Url::parse("http://h.test/late.js").expect("url"),
             partition: None,
             out: Err(explorer_net::error::NetError::InvalidResponse(
@@ -3383,6 +3385,7 @@ fn poll_net_budget_defere_les_livraisons_excedentaires() {
         mode: explorer_net::http::FetchMode::Cors,
         credentials: explorer_net::http::FetchCredentials::Omit,
         page_origin: "https://x.test".to_string(),
+        cors_unsafe: Vec::new(),
         req_url: Url::parse("https://x.test/r").expect("url"),
         partition: None,
         out: Err(explorer_net::error::NetError::InvalidResponse(
@@ -3652,6 +3655,7 @@ async fn fetch_backoff_retient_les_retries_dune_url_en_echec() {
         mode: explorer_net::http::FetchMode::Cors,
         credentials: explorer_net::http::FetchCredentials::Omit,
         page_origin: "https://x.test".to_string(),
+        cors_unsafe: Vec::new(),
         req_url: api.clone(),
         partition: None,
         out: Err(explorer_net::error::NetError::InvalidResponse(
@@ -3783,6 +3787,7 @@ async fn fetch_quota_pompe_au_slot_libere() {
             mode: explorer_net::http::FetchMode::Cors,
             credentials: explorer_net::http::FetchCredentials::Omit,
             page_origin: "https://x.test".to_string(),
+            cors_unsafe: Vec::new(),
             req_url: page.clone(),
             partition: None,
             out: Err(explorer_net::error::NetError::InvalidResponse("t".into())),
@@ -3894,6 +3899,7 @@ fn fetch_backoff_succes_referme_le_streak() {
         mode: explorer_net::http::FetchMode::Cors,
         credentials: explorer_net::http::FetchCredentials::Omit,
         page_origin: "https://x.test".to_string(),
+        cors_unsafe: Vec::new(),
         req_url: api,
         partition: None,
         out: Ok(explorer_net::http::Response {

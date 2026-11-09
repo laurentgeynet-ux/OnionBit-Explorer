@@ -1615,6 +1615,13 @@ pub(crate) struct NetDone {
     pub(crate) credentials: explorer_net::http::FetchCredentials,
     /// Origine canonique de la page émettrice (check ACAO).
     pub(crate) page_origin: String,
+    /// Noms des en-têtes auteur **non safelistés** de la
+    /// requête (`CorsRequest::unsafe_headers` — vol 731 :
+    /// ce sont eux qui arment le preflight `OPTIONS`, que
+    /// gvs 1.0 refuse systématiquement). Noms seuls —
+    /// constantes de protocole, jamais les valeurs. Vide
+    /// hors `mode:cors`/sans contexte.
+    pub(crate) cors_unsafe: Vec<String>,
     /// URL de la requête — capture `Set-Cookie`.
     pub(crate) req_url: Url,
     /// Seau CHIPS de la requête (étape 127) — un `Set-Cookie:
