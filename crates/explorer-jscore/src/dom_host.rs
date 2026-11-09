@@ -12189,16 +12189,29 @@ fn ce_call(e: &mut Engine, el: Value, cb_name: &str, args: &[Value]) -> JsResult
         // frame source — sémantique inchangée.
         if let Err(thr) = e.call_value(cb, el.clone(), args) {
             if tracing::enabled!(target: "dom_probe", tracing::Level::INFO) {
-                let tag = node_for(e, el).map_or("?".to_string(), |n| {
-                    e.dom_ctx
-                        .as_ref()
-                        .map(|ctx| ctx.0.borrow().nodes[n as usize].tag.clone())
-                        .unwrap_or_else(|| "?".to_string())
+                let tag = node_for(e, el.clone()).map_or("?".to_string(), |n| {
+                    e.dom_ctx.as_ref().map_or_else(
+                        || "?".to_string(),
+                        |ctx| ctx.0.borrow().nodes[n as usize].tag.clone(),
+                    )
                 });
                 let msg = e.describe(thr.0.clone());
                 let src = e.stack_top_fn_src(160);
+                // Template du CE — le `_stampTemplate` fautif
+                // travaille dessus ; `outerHTML` en donne la
+                // structure exacte au moment du throw (les
+                // `on-*`/bindings/`<template>` imbriqués).
+                let tpl = e
+                    .get_prop_value(el, "_template")
+                    .ok()
+                    .and_then(|t| e.get_prop_value(t, "outerHTML").ok())
+                    .map(|v| {
+                        let s = e.describe(v);
+                        s.chars().take(1600).collect::<String>()
+                    })
+                    .unwrap_or_else(|| "<none>".to_string());
                 tracing::info!(target: "dom_probe", site = "ce.cc_threw",
-                    tag = %tag, cb = %cb_name, "err={msg} src={src}");
+                    tag = %tag, cb = %cb_name, "err={msg} src={src} tpl={tpl}");
             }
             return Err(thr);
         }
