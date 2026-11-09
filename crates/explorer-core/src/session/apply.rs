@@ -2266,15 +2266,54 @@ pub(crate) fn repaint_payload(
     // (même signature `box_sig`, même taille, Δ uniforme)
     // sont copiés depuis la liste précédente au lieu d'être
     // ré-émis ; `prev=None` ou largeur changée → plein.
-    let mut list = explorer_render::build_display_list_incremental(
-        bx,
-        vw,
-        vh,
-        (0.0, p.scroll_y),
-        &p.images,
-        p.list.as_ref(),
-        p.tree_epoch,
-    );
+    // §B-118 / R-199 — sonde `EXPLORER_EMIT_STATS=1` : variante
+    // stats (compteurs boîte→item + chemins des ancêtres
+    // fautifs) — la classe fautive se nomme en une lecture.
+    let stats_on = std::env::var_os("EXPLORER_EMIT_STATS").is_some();
+    let (mut list, emit_stats) = if stats_on {
+        let (l, st) = explorer_render::build_display_list_incremental_stats(
+            bx,
+            vw,
+            vh,
+            (0.0, p.scroll_y),
+            &p.images,
+            p.list.as_ref(),
+            p.tree_epoch,
+        );
+        (l, Some(st))
+    } else {
+        (
+            explorer_render::build_display_list_incremental(
+                bx,
+                vw,
+                vh,
+                (0.0, p.scroll_y),
+                &p.images,
+                p.list.as_ref(),
+                p.tree_epoch,
+            ),
+            None,
+        )
+    };
+    if let Some(st) = &emit_stats {
+        tracing::info!(
+            target: "paint_stats",
+            boxes = st.boxes,
+            items = st.items,
+            by_kind = ?st.by_kind,
+            off_canvas = st.off_canvas,
+            opacity0 = st.drop_opacity0,
+            backface = st.drop_backface,
+            visibility = st.skip_visibility,
+            deferred = st.deferred_emitted,
+            cap = st.drop_cap,
+            spans = st.spans_copied,
+            opacity0_path = ?st.opacity0_path,
+            backface_path = ?st.backface_path,
+            visibility_path = ?st.visibility_path,
+            "apply: emit_stats"
+        );
+    }
     tracing::info!(items = list.items.len(), "apply: display_list");
     if list.dropped_emits > 0 {
         // WARN une fois par chemin fautif (la borne absorbe à
