@@ -950,6 +950,55 @@ fn fill_rect_item(
     }
 }
 
+/// R-M2 — `box-shadow` externe : rect décalé + spread,
+/// flou approximé en bandes alpha concentriques (rampe
+/// lissée, pas de gaussien — documenté). Les rayons
+/// suivent `border-radius` (déjà dans `radii`).
+#[allow(
+    clippy::too_many_arguments,
+    clippy::cast_sign_loss,
+    clippy::cast_possible_truncation
+)]
+fn paint_box_shadow(
+    pixmap: &mut Pixmap,
+    rect: &explorer_layout::Rect,
+    offset: (f32, f32),
+    blur: f32,
+    spread: f32,
+    color: Color,
+    radii: &[f32; 4],
+    dpi: Transform,
+    clip: Option<&Mask>,
+) {
+    let steps: u16 = if blur > 0.0 { 8 } else { 1 };
+    for i in (0..steps).rev() {
+        let grow = spread + blur * f32::from(i) / f32::from(steps);
+        let mut paint = Paint {
+            anti_alias: true,
+            ..Paint::default()
+        };
+        let mut c = color;
+        c.a = (f32::from(c.a) * (1.0 - f32::from(i) / f32::from(steps)))
+            .round()
+            .clamp(0.0, 255.0) as u8;
+        paint.set_color(skia_color(c));
+        let (x0, y0) = (rect.x + offset.0 - grow, rect.y + offset.1 - grow);
+        let (x1, y1) = (
+            rect.x + offset.0 + rect.width + grow,
+            rect.y + offset.1 + rect.height + grow,
+        );
+        let rr: [f32; 4] = [
+            radii[0] + grow,
+            radii[1] + grow,
+            radii[2] + grow,
+            radii[3] + grow,
+        ];
+        if let Some(path) = rounded_rect_path(x0, y0, x1, y1, &rr) {
+            pixmap.fill_path(&path, &paint, FillRule::Winding, dpi, clip);
+        }
+    }
+}
+
 fn paint_item(
     pixmap: &mut Pixmap,
     item: &DisplayItem,
@@ -961,6 +1010,18 @@ fn paint_item(
     match item {
         DisplayItem::FillRect { rect, color, radii } => {
             fill_rect_item(pixmap, rect, *color, radii, dpi, clip);
+        }
+        DisplayItem::BoxShadow {
+            rect,
+            offset,
+            blur,
+            spread,
+            color,
+            radii,
+        } => {
+            paint_box_shadow(
+                pixmap, rect, *offset, *blur, *spread, *color, radii, dpi, clip,
+            );
         }
         DisplayItem::Border {
             rect,

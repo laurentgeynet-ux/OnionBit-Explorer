@@ -2284,3 +2284,38 @@ fn border_radius_shorthand_et_radii_sur_items() {
     });
     assert_eq!(r2, Some([32.0; 4]), "50% : {r2:?}");
 }
+
+#[test]
+fn box_shadow_parsed_sur_item() {
+    // R-M2 — `box-shadow` → `DisplayItem::BoxShadow` par
+    // couche : offset/blur/spread/color ; `inset` sauté
+    // (approx. documentée) ; `none` → rien.
+    let (_d, _b, items) = dl(
+        "<div>x</div>",
+        "div { width: 40px; height: 20px; \
+         box-shadow: 4px 4px 8px 2px rgba(255,0,0,.5), -2px -2px blue }",
+    );
+    let mut sh = items.iter().filter_map(|i| match i {
+        DisplayItem::BoxShadow {
+            offset,
+            blur,
+            spread,
+            color,
+            ..
+        } => Some((*offset, *blur, *spread, *color)),
+        _ => None,
+    });
+    let a = sh.next().expect("ombre 1");
+    assert_eq!(a.0, (4.0, 4.0));
+    assert!((a.1 - 8.0).abs() < 0.01 && (a.2 - 2.0).abs() < 0.01);
+    assert_eq!((a.3.r, a.3.g, a.3.b), (255, 0, 0));
+    let b = sh.next().expect("ombre 2");
+    assert_eq!(b.0, (-2.0, -2.0));
+    let (_d2, _b2, items2) = dl("<div>x</div>", "div { box-shadow: none }");
+    assert!(
+        !items2
+            .iter()
+            .any(|i| matches!(i, DisplayItem::BoxShadow { .. })),
+        "none → aucun item"
+    );
+}

@@ -3097,6 +3097,42 @@ scroll interne `overflow:auto`) est loguée au journal.
   `counters()` résolus — `decimal`/`alpha`/`roman`.
   Verrou increment+reset.
 
+## Palier R-M — Rendu web moderne
+
+Trous restants pour les sites récents : `flex`/`grid`/`var()`
+/`is()`/`mask` déjà là — le rendu (ombres, fit, effets) est
+la dette, pas le layout.
+
+- [x] **R-M1. Dégradés CSS** — **déjà livré à R-104** :
+  `gradient.rs` (`decode_linear`/`radial`/`conic` +
+  `repeating-*`) câblé dans `emit_bg_layers` par couche.
+  Résidu : commentaire d'en-tête périmé à corriger.
+- [x] **R-M2. `box-shadow`** : `DisplayItem::BoxShadow`
+  émis avant le fond (`offset`/`blur`/`spread`/`color`,
+  multi-couches paren-aware, `none` géré, `inset` sauté —
+  approx.) ; rayons `border-radius` suivis ; flou
+  approximé en 8 bandes alpha concentriques (documenté,
+  pas de gaussien). Verrou valeurs + `none`.
+- [ ] **R-M3. `object-fit`** : `cover`/`contain`/`fill`/
+  `none`/`scale-down` dans `paint_replaced` (crop/fit du
+  bitmap au rect — responsive media).
+- [ ] **R-M4. `text-shadow`** : réutilise le fill/shadow
+  de R-M2 sur les runs texte (`text-shadow: x y blur
+  color`).
+- [ ] **R-M5. `filter`** : `blur`/`brightness`/`contrast`
+  à minima (post-traitement raster) ; `backdrop-filter`
+  à part.
+- [ ] **R-M6. `position:sticky`** : bloc conteneur relatif
+  clampé au scroll — PIPE pose + session offset (journal).
+- [ ] **R-M7. `transform` complet + `transition`/
+  `animation`** : matrix 2D réel sur les boîtes +
+  interpolation CSS — couture session (journal NAV).
+- [ ] **R-M8. `clip-path` + clip `overflow` arrondi**
+  (reliquat R-167) + `aspect-ratio` + `line-clamp`.
+- [ ] **R-M9. Font fallback par glyphe** : `.ttc` +
+  fallback CJK (tofu du journal) ; `scroll-snap` ;
+  `has()`/`is()`/`where()` sélecteurs modernes.
+
 ## Palier R-B — Contenu étranger, animation, canvas
 
 - [x] **R-8. Foreign-content dans `explorer-html`** (ex-60a) :

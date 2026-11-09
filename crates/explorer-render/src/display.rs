@@ -42,6 +42,24 @@ pub enum DisplayItem {
         /// 0 = rectangle franc.
         radii: [f32; 4],
     },
+    /// Ombre portée d'une boîte (`box-shadow`, R-M2) —
+    /// peinte SOUS le fond/bordure de son élément (App. E).
+    BoxShadow {
+        /// Border box de l'élément (avant offset/spread).
+        rect: Rect,
+        /// Décalage `(dx, dy)` de l'ombre.
+        offset: (f32, f32),
+        /// Rayon de flou px (approx. en bandes alpha au
+        /// raster — pas de blur gaussien).
+        blur: f32,
+        /// Expansion px de la boîte d'ombre.
+        spread: f32,
+        /// Couleur de l'ombre.
+        color: Color,
+        /// Rayons des coins `[tl,tr,br,bl]` (suivent
+        /// `border-radius`, R-167).
+        radii: [f32; 4],
+    },
     /// Bordure d'une boîte — 4 côtés uniformisés en un item.
     Border {
         /// Border box extérieure.
@@ -334,6 +352,9 @@ impl DisplayList {
                 DisplayItem::MaskedFill { rect, mask, .. } => {
                     let _ = writeln!(out, "masked-fill {}x{} {rect:?}", mask.width, mask.height);
                 }
+                DisplayItem::BoxShadow { rect, .. } => {
+                    let _ = writeln!(out, "box-shadow {rect:?}");
+                }
                 DisplayItem::Marker { rect, kind, .. } => {
                     let _ = writeln!(out, "marker {kind:?} {rect:?}");
                 }
@@ -443,6 +464,23 @@ fn item_bounds(item: &DisplayItem) -> Option<Rect> {
         | DisplayItem::MaskedFill { rect, .. }
         | DisplayItem::Marker { rect, .. }
         | DisplayItem::BackgroundImage { rect, .. } => Some(*rect),
+        // L'ombre déborde sa boîte (offset + spread +
+        // blur) — borne propre pour le dirty-tracking.
+        DisplayItem::BoxShadow {
+            rect,
+            offset,
+            blur,
+            spread,
+            ..
+        } => {
+            let g = blur + spread.max(0.0);
+            Some(Rect {
+                x: rect.x + offset.0 - g,
+                y: rect.y + offset.1 - g,
+                width: rect.width + 2.0 * g,
+                height: rect.height + 2.0 * g,
+            })
+        }
         // Pas de fonte résolue ici — borne approchée :
         // ~0.6em/caractère de large, 1.2em de haut au-dessus de
         // la baseline.
@@ -518,6 +556,18 @@ fn apply_tf(r: Rect, t: tiny_skia::Transform) -> Rect {
 fn item_eq(a: &DisplayItem, b: &DisplayItem) -> bool {
     use DisplayItem as D;
     match (a, b) {
+        (
+            D::BoxShadow {
+                rect: r1,
+                color: c1,
+                ..
+            },
+            D::BoxShadow {
+                rect: r2,
+                color: c2,
+                ..
+            },
+        ) => r1 == r2 && c1 == c2,
         (
             D::FillRect {
                 rect: r1,
@@ -1269,6 +1319,69 @@ fn corner_radii(st: &explorer_css::ComputedStyle, rect: &Rect) -> [f32; 4] {
     ]
 }
 
+/// Une couche `box-shadow` : `inset? x y [blur [spread]]
+/// [color]` dans n'importe quel ordre (spec : 2 à 4
+/// longueurs consécutives + couleur optionnelle).
+#[allow(clippy::cast_possible_truncation, clippy::type_complexity)]
+fn parse_box_shadow_layer(raw: &str) -> Option<((f32, f32), f32, f32, Color, bool)> {
+    let mut lens = Vec::with_capacity(4);
+    let mut color = None;
+    let mut inset = false;
+    for tok in raw.split_whitespace() {
+        if tok.eq_ignore_ascii_case("inset") {
+            inset = true;
+        } else if let Some(l) = parse_length(tok) {
+            lens.push(l.unit.px_factor().map_or(0.0, |f| l.value * f) as f32);
+        } else if let Some(c) = parse_color(tok) {
+            color = Some(c);
+        }
+        // Fonctions couleur (`rgb(…)`, `var(…)`) déjà
+        // résolues en cascade quand supportées.
+    }
+    if lens.len() < 2 {
+        return None;
+    }
+    let blur = lens.get(2).copied().unwrap_or(0.0).max(0.0);
+    let spread = lens.get(3).copied().unwrap_or(0.0);
+    Some((
+        (lens[0], lens[1]),
+        blur,
+        spread,
+        color.unwrap_or(Color::BLACK),
+        inset,
+    ))
+}
+
+/// `box-shadow` → un `DisplayItem::BoxShadow` par couche
+/// (`none`/couches sans 2 longueurs = sautés ; `inset`
+/// documenté non peint — ombres externes seulement).
+fn emit_box_shadows(st: &explorer_css::ComputedStyle, rect: &Rect, items: &mut Vec<DisplayItem>) {
+    let Some(v) = st.get("box-shadow") else {
+        return;
+    };
+    if v.trim().eq_ignore_ascii_case("none") {
+        return;
+    }
+    let radii = corner_radii(st, rect);
+    for layer in bg_layers(v) {
+        let Some((offset, blur, spread, color, inset)) = parse_box_shadow_layer(layer.trim())
+        else {
+            continue;
+        };
+        if inset {
+            continue; // ombre interne non peinte (approx.).
+        }
+        items.push(DisplayItem::BoxShadow {
+            rect: *rect,
+            offset,
+            blur,
+            spread,
+            color,
+            radii,
+        });
+    }
+}
+
 #[allow(clippy::cast_possible_truncation)]
 fn prop_px(st: &explorer_css::ComputedStyle, prop: &str, fallback: f32) -> f32 {
     let raw = st.get_or(prop, "");
@@ -1499,6 +1612,58 @@ fn emit_bg_layers(
 /// §marker). Émise après le fond de la boîte et avant ses
 /// lignes → sous le texte. `inside` dessine au début du
 /// contenu (le texte n'est pas décalé — résidu).
+/// R-168 — `list-style-image` : la bitmap est fetchée
+/// comme les `url()` CSS (clé `NodeId` → `backgrounds`)
+/// et peinte dans la gouttière à la place du marqueur —
+/// absent/`none` → `false`, repli `list-style-type`
+/// (spec).
+#[allow(clippy::cast_possible_truncation, clippy::cast_precision_loss)]
+fn emit_image_marker(
+    bx: &LayoutBox,
+    items: &mut Vec<DisplayItem>,
+    off: (f32, f32),
+    images: &crate::PaintImages,
+) -> bool {
+    if !bx
+        .style
+        .get("list-style-image")
+        .is_some_and(|v| v.contains("url("))
+    {
+        return false;
+    }
+    let Some(img) = bx.node.and_then(|n| images.backgrounds.get(&n)) else {
+        return false;
+    };
+    let fs = font_size_of(&bx.style) as f32;
+    let iw = img.width as f32;
+    let ih = img.height as f32;
+    let baseline_y = bx
+        .lines
+        .first()
+        .map_or_else(|| bx.rect.y + fs, |l| l.rect.y + l.baseline);
+    let cy = baseline_y - fs * 0.3;
+    let content_x = content_rect(bx).x;
+    let inside = bx
+        .style
+        .get("list-style-position")
+        .is_some_and(|p| p.trim() == "inside");
+    let cx = if inside {
+        content_x + iw / 2.0
+    } else {
+        content_x - fs * 0.34 - iw / 2.0
+    };
+    items.push(DisplayItem::Image {
+        rect: Rect {
+            x: cx - iw / 2.0 + off.0,
+            y: cy - ih / 2.0 + off.1,
+            width: iw,
+            height: ih,
+        },
+        img: std::sync::Arc::clone(img),
+    });
+    true
+}
+
 fn emit_list_marker(
     bx: &LayoutBox,
     items: &mut Vec<DisplayItem>,
@@ -1508,45 +1673,8 @@ fn emit_list_marker(
     if bx.kind != BoxKind::ListItem {
         return;
     }
-    // R-168 — `list-style-image` : la bitmap est fetchée
-    // comme les `url()` CSS (clé `NodeId` → `backgrounds`)
-    // et peinte dans la gouttière à la place du marqueur —
-    // absent/`none` → repli `list-style-type` (spec).
-    if bx
-        .style
-        .get("list-style-image")
-        .is_some_and(|v| v.contains("url("))
-    {
-        if let Some(img) = bx.node.and_then(|n| images.backgrounds.get(&n)) {
-            let fs = font_size_of(&bx.style) as f32;
-            let iw = img.width as f32;
-            let ih = img.height as f32;
-            let baseline_y = bx
-                .lines
-                .first()
-                .map_or_else(|| bx.rect.y + fs, |l| l.rect.y + l.baseline);
-            let cy = baseline_y - fs * 0.3;
-            let content_x = content_rect(bx).x;
-            let inside = bx
-                .style
-                .get("list-style-position")
-                .is_some_and(|p| p.trim() == "inside");
-            let cx = if inside {
-                content_x + iw / 2.0
-            } else {
-                content_x - fs * 0.34 - iw / 2.0
-            };
-            items.push(DisplayItem::Image {
-                rect: Rect {
-                    x: cx - iw / 2.0 + off.0,
-                    y: cy - ih / 2.0 + off.1,
-                    width: iw,
-                    height: ih,
-                },
-                img: std::sync::Arc::clone(img),
-            });
-            return;
-        }
+    if emit_image_marker(bx, items, off, images) {
+        return;
     }
     let kind = match bx.style.get("list-style-type").map(str::trim) {
         // Initiale spec = `disc` (absence ou `initial`).
@@ -2112,6 +2240,13 @@ fn paint_self(
             .is_none_or(|v| v.trim() != "collapse")
         && bx.children.is_empty()
         && bx.lines.is_empty();
+    // R-M2 — `box-shadow` : une ombre par couche, émise
+    // AVANT le fond de la boîte (sous lui dans l'ordre de
+    // peinture). `inset` non porté (bordure interne
+    // d'ombre = approximation documentée, sautée).
+    if !anonymous && !inline_flow && !empty_hidden {
+        emit_box_shadows(&bx.style, &rect, items);
+    }
     if !anonymous && !inline_flow && !bg_propagated && !empty_hidden {
         if let Some(c) = bx.style.get("background-color").and_then(parse_color) {
             if c.a > 0 {
@@ -3077,6 +3212,7 @@ fn box_sig(bx: &LayoutBox) -> u64 {
 
 /// Item translaté de `d` — utilisé par les copies de plage
 /// incrémentales. `d = (0,0)` → clone simple.
+#[allow(clippy::too_many_lines)]
 fn translate_item(it: &DisplayItem, d: (f32, f32)) -> DisplayItem {
     use DisplayItem as D;
     if d == (0.0, 0.0) {
@@ -3085,6 +3221,21 @@ fn translate_item(it: &DisplayItem, d: (f32, f32)) -> DisplayItem {
     match it {
         D::FillRect { rect, color, radii } => D::FillRect {
             rect: shifted(*rect, d),
+            color: *color,
+            radii: *radii,
+        },
+        D::BoxShadow {
+            rect,
+            offset,
+            blur,
+            spread,
+            color,
+            radii,
+        } => D::BoxShadow {
+            rect: shifted(*rect, d),
+            offset: *offset,
+            blur: *blur,
+            spread: *spread,
             color: *color,
             radii: *radii,
         },
