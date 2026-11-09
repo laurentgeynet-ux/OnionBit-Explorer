@@ -11179,3 +11179,35 @@ un crate PIPELINE.- [x] **JS-C422. Deadline honnête — canal session ↔ budge
   soutenue » = boucle hôte
   re-claim + reports d'avancement
   précoces.
+  **Vol 765 — le mur franchi**
+  (daemon `e9d9a045`,
+  `rest_host_probe --reclaim`
+  repo media `67efa01`/master
+  `8127450`) : `GET /media/{id}`
+  → 410 détecté en vol →
+  successeur claimé `→ 200` →
+  `open_mse_multi` sur le
+  MediaSource neuf. Verdict :
+  `frames=113 dropped=34
+  pcm=3 834 072o sessions=2
+  reclaims=1 underrun=1` — le
+  PCM ≈ **2× le préfixe borné**
+  (1 917 040) : chaque session
+  a tiré sa propre fenêtre
+  init+data, la re-attach est
+  devenue un détail de
+  transport. Release final
+  `200`. Notes de vol : la base
+  `localhost` ne marche pas
+  (dll résout `::1`, daemon
+  bind IPv4 — `127.0.0.1`
+  requis) ; un `open` raté
+  poste `state:error` qui
+  éteint le retry du player
+  (re-nav nécessaire). Reste :
+  `pos=0` en rampe → le
+  watchdog ne se désarme
+  toujours pas (le churn
+  continue ~2-3 min — reports
+  d'avancement précoces =
+  chantier suivant).
