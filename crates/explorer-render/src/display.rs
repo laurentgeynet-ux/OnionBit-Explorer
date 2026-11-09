@@ -260,6 +260,15 @@ pub enum DisplayItem {
     PushBlend(u8),
     /// Fin du groupe fondu.
     PopBlend,
+    /// `clip-path:polygon(...)` (R-187) : les items jusqu'à
+    /// `PopClip` ne se peignent que dans le polygone — mask
+    /// `fill_path` au raster, même pile que `PushClip`.
+    /// `inset`/`circle`/`ellipse` → `PushClip`/`PushClipRounded`
+    /// (approximations rectangulaires documentées).
+    PushClipPath {
+        /// Sommets du polygone en coords document.
+        points: Vec<(f32, f32)>,
+    },
     /// `backdrop-filter` (R-M9b) : les pixels DÉJÀ peints
     /// sous `rect` reçoivent les ops, le contenu de la
     /// boîte se peint ensuite par-dessus.
@@ -490,6 +499,9 @@ impl DisplayList {
                 DisplayItem::PushBlend(b) => {
                     let _ = writeln!(out, "push-blend {b}");
                 }
+                DisplayItem::PushClipPath { points } => {
+                    let _ = writeln!(out, "push-clippath {}", points.len());
+                }
                 DisplayItem::Emphasis { origin, kind, .. } => {
                     let _ = writeln!(out, "emphasis k{kind} @{origin:?}");
                 }
@@ -647,6 +659,7 @@ fn item_bounds(item: &DisplayItem) -> Option<Rect> {
         DisplayItem::PushClip(_)
         | DisplayItem::PushClipRounded { .. }
         | DisplayItem::PopClip
+        | DisplayItem::PushClipPath { .. }
         | DisplayItem::PushTransform(_)
         | DisplayItem::PopTransform
         | DisplayItem::PushFilter(_)
@@ -845,6 +858,7 @@ fn item_eq(a: &DisplayItem, b: &DisplayItem) -> bool {
             },
         ) => o1 == o2 && t1 == t2 && f1 == f2 && c1 == c2 && s1 == s2,
         (D::PushClip(r1), D::PushClip(r2)) => r1 == r2,
+        (D::PushClipPath { points: p1 }, D::PushClipPath { points: p2 }) => p1 == p2,
         (
             D::PushClipRounded {
                 rect: r1,
@@ -1671,6 +1685,92 @@ fn bg_layers(v: &str) -> Vec<&str> {
     clippy::cast_possible_truncation,
     clippy::cast_sign_loss
 )]
+/// `clip-path` → clip géométrique (R-187) : `polygon` →
+/// `PushClipPath` réel ; `inset`/`circle`/`ellipse` →
+/// `PushClip`/`PushClipRounded` rectangulaire (approx.
+/// documentée). `%` relatifs à la border box.
+#[allow(clippy::many_single_char_names)]
+fn clip_path_of(st: &explorer_css::ComputedStyle, rect: &Rect) -> Option<DisplayItem> {
+    let v = st.get("clip-path")?.trim();
+    if v == "none" {
+        return None;
+    }
+    let px = |t: &str, base: f32| -> f32 {
+        let t = t.trim();
+        t.strip_suffix('%').map_or_else(
+            || {
+                t.strip_suffix("px")
+                    .and_then(|s| s.trim().parse::<f32>().ok())
+                    .unwrap_or(0.0)
+            },
+            |s| s.trim().parse::<f32>().unwrap_or(0.0) * base / 100.0,
+        )
+    };
+    if let Some(args) = v.strip_prefix("polygon(").and_then(|v| v.strip_suffix(')')) {
+        let points: Vec<(f32, f32)> = args
+            .split(',')
+            .filter_map(|pt| {
+                let mut it = pt.split_whitespace();
+                match (it.next(), it.next()) {
+                    (Some(x), Some(y)) => {
+                        Some((rect.x + px(x, rect.width), rect.y + px(y, rect.height)))
+                    }
+                    _ => None,
+                }
+            })
+            .collect();
+        if points.len() >= 3 {
+            return Some(DisplayItem::PushClipPath { points });
+        }
+        return None;
+    }
+    if let Some(args) = v.strip_prefix("inset(").and_then(|v| v.strip_suffix(')')) {
+        let nums: Vec<f32> = args
+            .split_whitespace()
+            .take_while(|p| *p != "round")
+            .map(|t| px(t, 100.0))
+            .collect();
+        if !nums.is_empty() {
+            let (t, r, b, l) = match nums.as_slice() {
+                [a] => (*a, *a, *a, *a),
+                [a, b] => (*a, *b, *a, *b),
+                [a, b, c] => (*a, *b, *c, *b),
+                _ => (nums[0], nums[1], nums[2], nums[3]),
+            };
+            return Some(DisplayItem::PushClip(Rect {
+                x: rect.x + l * rect.width / 100.0,
+                y: rect.y + t * rect.height / 100.0,
+                width: rect.width * (100.0 - l - r) / 100.0,
+                height: rect.height * (100.0 - t - b) / 100.0,
+            }));
+        }
+        return None;
+    }
+    for fn_name in ["circle", "ellipse"] {
+        if let Some(args) = v
+            .strip_prefix(fn_name)
+            .and_then(|v| v.strip_prefix('('))
+            .and_then(|v| v.strip_suffix(')'))
+        {
+            let parts: Vec<&str> = args.split_whitespace().collect();
+            let (rx, ry) = parts
+                .first()
+                .and_then(|p| p.strip_suffix('%'))
+                .and_then(|p| p.parse::<f32>().ok())
+                .map_or((50.0, 50.0), |a| (a, a));
+            // centre `at x y` non lu au MVP — centre boîte.
+            let (cx, cy) = (rect.x + rect.width / 2.0, rect.y + rect.height / 2.0);
+            return Some(DisplayItem::PushClip(Rect {
+                x: cx - rx * rect.width / 100.0,
+                y: cy - ry * rect.height / 100.0,
+                width: rx * rect.width / 50.0,
+                height: ry * rect.height / 50.0,
+            }));
+        }
+    }
+    None
+}
+
 /// R-184 — rects des fragments de ligne dans le sous-arbre
 /// de `bx` (clip `background-clip:text` : les lignes vivent
 /// sur les porteurs inline anonymes, pas sur la boîte).
@@ -4002,6 +4102,9 @@ fn translate_item(it: &DisplayItem, d: (f32, f32)) -> DisplayItem {
             m.ty += d.1;
             D::PushTransform(m)
         }
+        D::PushClipPath { points } => D::PushClipPath {
+            points: points.iter().map(|p| (p.0 + d.0, p.1 + d.1)).collect(),
+        },
         D::PopClip
         | D::PopTransform
         | D::PushFilter(_)
@@ -4450,7 +4553,16 @@ fn paint_box<'a>(
     if paint_contained {
         items.push(DisplayItem::PushClip(bx.rect));
     }
+    // R-187 — `clip-path` : la boîte (fond+contenu) ne se
+    // peint que dans la géométrie — même pile `clips`.
+    let clip_item = clip_path_of(&bx.style, &bx.rect);
+    if let Some(it) = &clip_item {
+        items.push(it.clone());
+    }
     paint_box_impl(bx, items, off, cx, defer, pos_defer, fixed_defer);
+    if clip_item.is_some() {
+        items.push(DisplayItem::PopClip);
+    }
     if paint_contained {
         items.push(DisplayItem::PopClip);
     }

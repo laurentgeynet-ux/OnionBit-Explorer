@@ -916,6 +916,32 @@ fn replay_items(
                     clips.push(mask);
                 }
             }
+            // R-187 — `clip-path:polygon` : mask rempli par
+            // `fill_path` sur le chemin du polygone — même
+            // pile `clips` que `PushClip`/`PushClipRounded`.
+            DisplayItem::PushClipPath { points } => {
+                if let Some(mut mask) = Mask::new(pixmap.width(), pixmap.height()) {
+                    let mut pb = tiny_skia::PathBuilder::new();
+                    let map = |x: f32, y: f32| -> (f32, f32) {
+                        let mut pt = tiny_skia::Point::from_xy(x, y);
+                        cur.map_point(&mut pt);
+                        (pt.x, pt.y)
+                    };
+                    if let Some((x, y)) = points.first() {
+                        let (x0, y0) = map(*x, *y);
+                        pb.move_to(x0, y0);
+                        for (x, y) in &points[1..] {
+                            let (tx, ty) = map(*x, *y);
+                            pb.line_to(tx, ty);
+                        }
+                        pb.close();
+                    }
+                    if let Some(path) = pb.finish() {
+                        mask.fill_path(&path, FillRule::Winding, true, Transform::default());
+                    }
+                    clips.push(mask);
+                }
+            }
             DisplayItem::PopClip => {
                 clips.pop();
             }
@@ -1498,6 +1524,7 @@ fn paint_item(
         ),
         DisplayItem::PushClip(_)
         | DisplayItem::PushClipRounded { .. }
+        | DisplayItem::PushClipPath { .. }
         | DisplayItem::PopClip
         | DisplayItem::PushTransform(_)
         | DisplayItem::PushFilter(_)

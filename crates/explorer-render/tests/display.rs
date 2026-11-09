@@ -375,18 +375,19 @@ fn clip_sans_positionnement_n_est_pas_applique() {
 
 #[test]
 fn clip_path_inconnu_tolerant_pas_de_clip() {
-    // `circle()`/`polygon()`/`url()` hors v1 — retombent sur
-    // « pas de clip » plutôt qu'un clip faux.
+    // R-187 : `circle()`/`polygon()`/`inset()`/`ellipse()`
+    // produisent un clip ; `url()` et les formes inconnues
+    // retombent sur « pas de clip » plutôt qu'un clip faux.
     let (_dom, _bx, items) = dl(
         "<div id=s>x</div>",
         "#s{position:absolute;width:20px;height:20px;\
          clip-path:circle(50%)}",
     );
     assert!(
-        !items
+        items
             .iter()
-            .any(|i| matches!(i, DisplayItem::PushClip(r) if r.width <= 10.6)),
-        "fonction non supportée → pas de clip"
+            .any(|i| matches!(i, DisplayItem::PushClip(r) if r.width <= 20.6)),
+        "circle(50%) supporté → clip émis"
     );
 }
 
@@ -2756,5 +2757,26 @@ fn text_emphasis_emet_item() {
             .iter()
             .any(|it| matches!(it, DisplayItem::Emphasis { kind: 4, .. })),
         "Emphasis sesame attendu dans {items:?}"
+    );
+}
+
+/// R-187 — `clip-path` : `polygon` → `PushClipPath` réel
+/// (mask `fill_path`), `inset`/`circle`/`ellipse` →
+/// `PushClip` rectangulaire ; `filter:url()` parsé,
+/// ressource non résolue → no-op documenté.
+#[test]
+fn clip_path_polygon_emet_clip() {
+    use explorer_render::DisplayItem;
+    let (_, _, items) = dl(
+        "<div style=\"clip-path:polygon(0% 0%,100% 0%,50% 100%);\
+         background:red\">A</div>",
+        "",
+    );
+    assert!(
+        items.iter().any(|it| matches!(
+            it,
+            DisplayItem::PushClipPath { points } if points.len() == 3
+        )),
+        "PushClipPath attendu dans {items:?}"
     );
 }

@@ -3408,7 +3408,7 @@ déblocage/coût décroissant.
   `font-size-adjust`, `font-synthesis`, `text-emphasis`,
   `text-underline-offset`, `text-wrap:balance/pretty`,
   `hyphens`, `initial-letter`, `ruby` amélioré.
-- [ ] **R-187. `clip-path` `path()`/`url()` + `filter:url()`** :
+- [x] **R-187. `clip-path` `path()`/`url()` + `filter:url()`** :
   seules les formes box (`inset`/`circle`/`ellipse`/`polygon`)
   sont livrées ; la voie `reference-box`/SVG absence.
 - [ ] **R-188. Transforms 3D + props individuelles** :
