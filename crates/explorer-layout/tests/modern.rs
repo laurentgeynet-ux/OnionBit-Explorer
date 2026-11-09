@@ -1449,32 +1449,38 @@ fn grid_areas_cellules_adjacentes_sans_espace() {
 
 // ── svg w=0 : diagnostic (vols pluto.tv/lichess — logos invisibles) ──
 
-/// `#[ignore]` — reproduit le mur : un `<svg>` à taille
-/// intrinsèque (91×28 portée par `sizes`) dans une chaîne
-/// `flex|inline-block > a > AnonymousBlock > Inline` mesure
-/// **0×0** alors que l'intrinsèque devrait contribuer 91
-/// (Sizing §5.1 — la contribution d'un remplacé est sa
-/// taille utilisée). La perte vit dans `content_px*` sur le
-/// porteur anonyme/en-ligne : ni `max_content_px` (flex
-/// base, shrink-to-fit) ni la pose directe ne la
-/// récupèrent. Retirer l'`#[ignore]` au fix.
+/// Hint UA `<svg viewBox>` sans attr = `min(300px, 100%)` —
+/// un `width` contenant un `%` en **fonction math** n'est
+/// pas un `%` nu : sa contribution intrinsèque est sa borne
+/// définie (300 sous `cb` définie, intrinsèque sinon), pas
+/// 0 — régression vols pluto/lichess : logos svg `w=0` sous
+/// porteur `AnonymousBlock`/`Inline` (Sizing §5.1).
 #[test]
-#[ignore = "diagnostic svg w=0 — contribution intrinsèque perdue dans AnonymousBlock/Inline"]
 fn svg_intrinseque_contribue_sous_flex_et_ib() {
-    let sz = |dom: &Dom| {
-        std::collections::HashMap::from([(by_tag(dom, "svg"), (91.0, 28.0))])
-    };
-    for (label, html, css) in [
-        ("flex>a>svg", "<nav><a><svg viewBox=\"0 0 91 28\"/></a></nav>",
-         "nav{display:flex}"),
-        ("ib>div>a>svg", "<div><a><svg viewBox=\"0 0 91 28\"/></a></div>",
-         "div{display:inline-block}a{display:block}"),
+    let sz = |dom: &Dom| std::collections::HashMap::from([(by_tag(dom, "svg"), (91.0, 28.0))]);
+    // Hint UA `<svg viewBox>` sans attr = `width:
+    // min(300px, 100%)` — cb définie (flex) → borne 300 ;
+    // cb indéfinie (mesure shrink-to-fit inline-block) →
+    // l'intrinsèque 91 reprend.
+    for (label, html, css, want) in [
+        (
+            "flex>a>svg",
+            "<nav><a><svg viewBox=\"0 0 91 28\"/></a></nav>",
+            "nav{display:flex}",
+            300.0,
+        ),
+        (
+            "ib>div>a>svg",
+            "<div><a><svg viewBox=\"0 0 91 28\"/></a></div>",
+            "div{display:inline-block}a{display:block}",
+            91.0,
+        ),
     ] {
         let (dom, bx) = laid_sized(html, css, &sz);
         let a = find(&bx, by_tag(&dom, "a"));
         assert!(
-            approx(a.rect.width, 91.0),
-            "{label} : <a> doit mesurer l'intrinsèque (91), w={}",
+            approx(a.rect.width, want),
+            "{label} : <a> attendu {want}, w={}",
             a.rect.width
         );
     }

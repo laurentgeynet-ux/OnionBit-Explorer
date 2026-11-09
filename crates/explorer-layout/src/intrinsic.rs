@@ -208,7 +208,18 @@ fn content_px_unclamped(
     // 480px dès l'arrivée du bitmap, débordant sa piste de
     // grille 236px). Un non-remplacé retombe sur son contenu
     // (`bx.intrinsic` absent → `None` → mesure des enfants).
-    let pct = st.get("width").is_some_and(|v| v.contains('%'));
+    // `%` **nu** seulement (`width:100%` → 0). Une fonction
+    // math contenant un `%` (`min(300px, 100%)` — le hint UA
+    // des `<svg viewBox>` sans attr) garde une borne définie :
+    // `bound()` l'évalue contre `cb` quand elle est définie,
+    // l'intrinsèque/ratio reprend sinon — la tuer à 0 écrasait
+    // tout ancêtre shrink-to-fit (logos svg w=0, vols pluto/
+    // lichess).
+    let pct = st.get("width").is_some_and(|v| {
+        v.trim()
+            .strip_suffix('%')
+            .is_some_and(|n| n.trim().parse::<f32>().is_ok())
+    });
     let base = if matches!(bx.kind, BoxKind::Text | BoxKind::AnonymousBlock) {
         // Texte et bloc anonyme clonent le style du parent —
         // leur `width` « hérité » n'est pas une taille de
