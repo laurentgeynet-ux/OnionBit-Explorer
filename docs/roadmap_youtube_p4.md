@@ -62,6 +62,14 @@ de s'exécuter, aucun stamp/binding/card ne peut s'allumer.
 > `KeyframeEffect` constructible** (JS-C46x), puis sonder
 > le span ~8 min du consommateur `/youtubei` sans mutation
 > aval.
+>
+> **Verdict vol 734** — JS-C461 **validé** : `illegal
+> constructor` disparu, `dlv.mutations` ×5. Gate suivant
+> **§B-125** : `uncaught TypeError: caller/arguments are
+> restricted function properties` ×8+ → étape JS-C46x
+> (`caller`/`arguments` = `null` sur fonctions non-strict,
+> spec) ; span ~8 min post-`/youtubei` reconduit
+> (instrumentation du consumer à prévoir).
 
 ```mermaid
 flowchart TD
