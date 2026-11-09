@@ -12182,7 +12182,26 @@ fn ce_upgrade_node(e: &mut Engine, dom: &DomRef, cache: &NodeCache, node: NodeId
 fn ce_call(e: &mut Engine, el: Value, cb_name: &str, args: &[Value]) -> JsResult<()> {
     let cb = e.get_prop_value(el.clone(), cb_name)?;
     if e.is_callable(cb.clone()) {
-        e.call_value(cb, el, args)?;
+        // §B-126 (vol 735) — nomme l'élément custom dont le
+        // callback jette (le `addEventListener of Undefined`
+        // de `_stampTemplate` Polymer n'identifiait pas le
+        // `ytd-*`/`yt-*` fautif). Sonde bornée : tag + cb +
+        // frame source — sémantique inchangée.
+        if let Err(thr) = e.call_value(cb, el.clone(), args) {
+            if tracing::enabled!(target: "dom_probe", tracing::Level::INFO) {
+                let tag = node_for(e, el).map_or("?".to_string(), |n| {
+                    e.dom_ctx
+                        .as_ref()
+                        .map(|ctx| ctx.0.borrow().nodes[n as usize].tag.clone())
+                        .unwrap_or_else(|| "?".to_string())
+                });
+                let msg = e.describe(thr.0.clone());
+                let src = e.stack_top_fn_src(160);
+                tracing::info!(target: "dom_probe", site = "ce.cc_threw",
+                    tag = %tag, cb = %cb_name, "err={msg} src={src}");
+            }
+            return Err(thr);
+        }
     }
     Ok(())
 }
