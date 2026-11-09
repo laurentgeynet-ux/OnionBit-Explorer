@@ -3697,16 +3697,23 @@ chez NAVIGATEUR — non recopiés ici.
   nœuds assignés, promus directs, ou le repli à défaut) —
   borne documentée boxtree.rs:651 levée. Verrou
   `slot_ua_contents_aplatit_fallback`.
-- [ ] **R-205. Shadow DOM — bornes R-96/R-97 levées** :
+- [x] **R-205. Shadow DOM — bornes R-96/R-97 levées** :
   `::part`/`exportparts` imbriqués (part list chaînée),
   `!important` inversé à la frontière (host règle vs
   shadow auteur — css-scoping §3.3 : l'important interne
   perd, l'important externe gagne), aplatissement de
   slots nichés (`<slot>` dans `<slot>`, fallback
   distribué). Cadre existant : miroir + scoping R-96 —
-  extensions additives. Verrous : `part_exportparts_
-  imbrique`, `important_frontiere_inversee`,
-  `slot_niche_fallback`.
+  extensions additives. **Audit : les trois features
+  étaient déjà livrées** — `::part` chaîné + `exportparts`
+  (R-110, verrou `part_chaine_et_exportparts`), inversion
+  `!important` frontière (R-111, verrou
+  `important_frontiere_shadow_inverse`), slots nichés
+  (R-96/97 + verrou `slot_niche_dans_slot_aplatit`).
+  Restant réel : le verrou prescrit
+  `slot_niche_fallback` — posé (fallback distribué via
+  slot interne ; contenu assigné externe → interne jamais
+  visité).
 - [ ] **R-206. Affûtage Acid2/WPT (cliquet 41/58)** :
   restes nommés au palier R-C — `column wrap` multi-
   colonnes, `margin:auto` vertical en flex column,

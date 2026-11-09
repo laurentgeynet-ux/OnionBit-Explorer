@@ -709,3 +709,52 @@ fn slot_ua_contents_aplatit_fallback() {
     let fb = by_tag(&dom, "b");
     assert!(find(&bx, fb).is_some(), "le contenu de repli est promu");
 }
+
+/// R-205 — `<slot>` dans `<slot>` : le repli du slot externe
+/// contient un slot interne qui **distribue** à son tour
+/// (css-scoping — slots nichés, fallback distribué).
+#[test]
+fn slot_niche_fallback() {
+    // Helper : le <em> de repli vit dans le fragment shadow —
+    // navigué via les enfants du slot interne.
+    fn fallback_em(dom: &Dom, host: NodeId) -> NodeId {
+        let root = dom.shadow_root(host, true).expect("racine");
+        let outer = dom.slots_in(root).into_iter().next().expect("slot a");
+        let inner = dom
+            .children(outer)
+            .unwrap()
+            .into_iter()
+            .find(|&c| dom.tag_name(c).is_ok_and(|t| t == "slot"))
+            .expect("slot b imbriqué");
+        dom.children(inner)
+            .unwrap()
+            .into_iter()
+            .next()
+            .expect("em de repli")
+    }
+    // Rien d'assigné à `a` → repli externe = slot `b` ;
+    // `i slot="b"` y est distribué, `em` (repli interne)
+    // couvert.
+    let (dom, bx) = tree(
+        "<html><body><x-h><template shadowrootmode=\"open\">\
+         <slot name=\"a\"><slot name=\"b\"><em>FB</em></slot></slot></template>\
+         <i slot=\"b\">I</i></x-h></body></html>",
+    );
+    let i = by_tag(&dom, "i");
+    let em = fallback_em(&dom, by_tag(&dom, "x-h"));
+    assert!(find(&bx, i).is_some(), "i distribué via slot niché");
+    assert!(find(&bx, em).is_none(), "repli interne couvert");
+    // Un contenu assigné à `a` remplace TOUT le repli —
+    // le slot interne n'est pas visité : `i` disparaît aussi.
+    let (dom, bx) = tree(
+        "<html><body><x-h><template shadowrootmode=\"open\">\
+         <slot name=\"a\"><slot name=\"b\"><em>FB</em></slot></slot></template>\
+         <i slot=\"b\">I</i><u slot=\"a\">U</u></x-h></body></html>",
+    );
+    let i = by_tag(&dom, "i");
+    let u = by_tag(&dom, "u");
+    let em = fallback_em(&dom, by_tag(&dom, "x-h"));
+    assert!(find(&bx, u).is_some(), "u distribué au slot externe");
+    assert!(find(&bx, i).is_none(), "slot interne non visité — i absent");
+    assert!(find(&bx, em).is_none(), "repli interne absent");
+}
