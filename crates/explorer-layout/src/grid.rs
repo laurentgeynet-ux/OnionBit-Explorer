@@ -557,46 +557,68 @@ pub(crate) fn flow_grid_children(
     for &i in &order_idx {
         let cst = &bx.children[i].style;
         // `grid-area` : nom d'area (`grid-template-areas`) ou
-        // forme numérique `r / c / r2 / c2` (bords 1-based).
-        let area_rect = cst.get("grid-area").and_then(|a| {
+        // positions `rs / cs / re / ce` — les formes courtes de
+        // 1 à 3 parties defaultent à `auto` (css-grid-1 §7.1 :
+        // row-start / col-start / row-end / col-end). Une part
+        // `span n` pose la span de son axe.
+        let area = cst.get("grid-area").and_then(|a| {
             let a = a.trim();
-            areas.get(a).copied().or_else(|| {
-                let n_r = row_tracks.len().max(1);
-                let parts: Vec<(Option<usize>, usize)> = a
-                    .split('/')
-                    .enumerate()
-                    .map(|(i, p)| placement(Some(p), &[], if i % 2 == 0 { n_r } else { ncols }))
-                    .collect();
-                if parts.len() == 4 {
-                    // r / c / r2 / c2 → (col, span_c, row, span_r)
-                    let (r0, _) = parts[0];
-                    let (c0, _) = parts[1];
-                    let (r1, s1) = parts[2];
-                    let (c1, s2) = parts[3];
-                    let row = r0?;
-                    let col = c0?;
-                    let span_c = if s2 > 1 {
-                        s2
-                    } else {
-                        c1.map_or(1, |e| e.saturating_sub(col).max(1))
-                    };
-                    let span_r = if s1 > 1 {
-                        s1
-                    } else {
-                        r1.map_or(1, |e| e.saturating_sub(row).max(1))
-                    };
-                    Some((col, row, span_c, span_r))
+            if let Some(&(col, row, sc, sr)) = areas.get(a) {
+                return Some((Some(col), sc, Some(row), sr));
+            }
+            // `<grid-line>` seul : `auto`, entier, `span n`,
+            // ident de ligne — tout autre jeton invalide la
+            // déclaration entière (les longhands survivent).
+            let line_ok = |p: &str| {
+                let p = p.trim();
+                p == "auto"
+                    || p.parse::<i32>().is_ok()
+                    || p.starts_with("span ")
+                    || p.chars()
+                        .next()
+                        .is_some_and(|c| c.is_alphabetic() || c == '-' || c == '_')
+            };
+            let raw: Vec<&str> = a.split('/').collect();
+            if raw.len() > 4 || !raw.iter().all(|p| line_ok(p)) {
+                return None;
+            }
+            let n_r = row_tracks.len().max(1);
+            let parts: Vec<(Option<usize>, usize)> = raw
+                .iter()
+                .enumerate()
+                .map(|(i, p)| {
+                    placement(
+                        Some(p),
+                        if i % 2 == 0 { &row_names } else { &col_names },
+                        if i % 2 == 0 { n_r } else { ncols },
+                    )
+                })
+                .collect();
+            // Span de l'axe : `span n` explicite d'un bord,
+            // sinon une fin définie depuis le début, sinon la
+            // span portée par le début (ident de zone), sinon 1.
+            let axis = |si: usize, ei: usize| -> (Option<usize>, usize) {
+                let (s0, ss) = parts.get(si).copied().unwrap_or((None, 1));
+                let (e0, es) = parts.get(ei).copied().unwrap_or((None, 1));
+                let span = if es > 1 {
+                    es
+                } else if let (Some(s), Some(e)) = (s0, e0) {
+                    e.saturating_sub(s).max(1)
                 } else {
-                    None
-                }
-            })
+                    ss
+                };
+                (s0, span.max(1))
+            };
+            let (row, span_r) = axis(0, 2);
+            let (col, span_c) = axis(1, 3);
+            Some((col, span_c, row, span_r))
         });
         let (mut start_c, mut span_c) = placement(cst.get("grid-column"), &col_names, ncols);
         let (mut start_r, mut span_r) = placement(cst.get("grid-row"), &row_names, rows_lim);
-        if let Some((c0, r0, sc, sr)) = area_rect {
-            start_c = Some(c0);
+        if let Some((c0, sc, r0, sr)) = area {
+            start_c = c0;
             span_c = sc;
-            start_r = Some(r0);
+            start_r = r0;
             span_r = sr;
         }
         while span_c > ncols && ncols < MAX_GRID_TRACKS {

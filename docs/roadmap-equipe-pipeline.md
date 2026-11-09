@@ -3567,20 +3567,27 @@ chez NAVIGATEUR — non recopiés ici.
 > valeur terrain / coût — R-201 → R-199 → R-200 →
 > R-202 → R-203 → R-204 → R-205 → R-206.
 
-- [ ] **R-201. `grid-area` formes courtes (2/3 valeurs) —
+- [x] **R-201. `grid-area` formes courtes (2/3 valeurs) —
   relai G-5** : la branche numérique `grid.rs:561-591`
   n'accepte que `parts.len() == 4` (`r / c / r2 / c2`) —
   `grid-area: 1 / 2` ou `1 / 2 / 3` → `None` → l'item
   tombe en placement auto et perd sa position déclarée
   (google.com SERP, mesuré vol 681, relayé officiellement
   à PIPE au journal 2026-11-09). Spec css-grid-1 §7.1 :
-  valeurs manquantes = `auto`/`span 1`. Étendre la branche
-  aux longueurs 1-3 en réutilisant `placement()` (déjà
-  conforme pour `grid-column`/`grid-row` : `a`, `a / b`,
-  `a / span n`, `span n`, noms `-start`/`-end`) — le cas
-  4 garde sa sémantique. Verrous : `grid_area_formes_
-  courtes` (2 parties ligne+colonne, 3 parties avec fin de
-  ligne, ident nu, `span` en position).
+  valeurs manquantes = `auto`/`span 1`. **Livré** : la
+  branche est résolue par axe — chaque part via
+  `placement()` avec les noms de lignes de son axe
+  (avant : `&[]` — les idents de ligne dans `grid-area`
+  gagnent la résolution au passage) ; span = `span n`
+  explicite d'un bord, sinon fin définie depuis le début,
+  sinon span du début (ident de zone), sinon 1. Le
+  shorthand détermine les deux axes inconditionnellement
+  (il réinitialise les quatre longhands) ; jeton invalide
+  → déclaration abandonnée, longhands préservés.
+  Verrous : `grid_area_formes_courtes` (2/3 parties,
+  span prouvée par occupation), `_ident_et_span`
+  (ident nu `-start`/`-end`, `span` début et fin),
+  `grid_area_jeton_invalide_preserve_les_longhands`.
 - [ ] **R-199. §B-118 — effondrement display-list
   (pluto.tv)** : dom 4 156 nœuds → layout **4 385 boîtes**
   → `display_items` **148** → nav + écran noir, **zéro

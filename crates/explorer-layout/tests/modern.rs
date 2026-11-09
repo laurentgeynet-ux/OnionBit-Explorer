@@ -565,6 +565,97 @@ fn grid_area_span_multi_cellules() {
     assert!(approx(h.rect.x, 0.0) && approx(h.rect.y, 0.0));
 }
 
+// ── R-201 : `grid-area` formes courtes ───────────────────────
+
+#[test]
+fn grid_area_formes_courtes() {
+    // `grid-area` à 1-3 parties : valeurs omises = `auto`
+    // (css-grid-1 §7.1) — avant, seule la forme `r/c/r2/c2`
+    // était résolue et les tuiles `grid-area: l / c` (SERP
+    // Google, vol 681) tombaient en auto-placement.
+    let (dom, bx) = laid(
+        "<!doctype html><section>\
+         <div id=\"a\">A</div><div id=\"b\">B</div><div id=\"d\">D</div></section>",
+        "body { margin: 0 } section { display: grid; \
+         grid-template-columns: 100px 100px 100px; \
+         grid-template-rows: 20px 20px 20px } \
+         #a { grid-area: 2 / 3; height: 10px } \
+         #b { grid-area: 1 / 1 / 3; height: 10px } \
+         #d { grid-area: 2 / 1; height: 10px }",
+    );
+    // `2 / 3` : ligne 2 / col 3, fins auto → 1 piste chacun.
+    let a = find(&bx, by_id(&dom, "a"));
+    assert!(
+        approx(a.rect.x, 200.0) && approx(a.rect.y, 20.0),
+        "a {:?}",
+        a.rect
+    );
+    assert!(approx(a.rect.width, 100.0), "a w={}", a.rect.width);
+    // `1 / 1 / 3` : col 1, rangées 1→3 → occupe (0,0) et (1,0).
+    let b = find(&bx, by_id(&dom, "b"));
+    assert!(
+        approx(b.rect.x, 0.0) && approx(b.rect.y, 0.0) && approx(b.rect.width, 100.0),
+        "b {:?}",
+        b.rect
+    );
+    // `2 / 1` veut (1,0) — occupé par la span de #b → rangée 3.
+    let d = find(&bx, by_id(&dom, "d"));
+    assert!(
+        approx(d.rect.x, 0.0) && approx(d.rect.y, 40.0),
+        "d {:?} — la span_r de #b n'est pas appliquée",
+        d.rect
+    );
+}
+
+#[test]
+fn grid_area_formes_courtes_ident_et_span() {
+    // Ident nu de ligne (`mid` → `mid-start`/`mid-end`) en
+    // part colonne, `span n` en part début et en part fin.
+    let (dom, bx) = laid(
+        "<!doctype html><section><div id=\"i\">I</div><div id=\"s\">S</div></section>",
+        "body { margin: 0 } section { display: grid; \
+         grid-template-columns: [a] 100px [mid-start] 200px [mid-end] 100px [z]; \
+         grid-template-rows: 10px 10px 10px } \
+         #i { grid-area: auto / mid; height: 5px } \
+         #s { grid-area: 2 / 1 / span 2 / span 2; height: 5px }",
+    );
+    // `auto / mid` : col = piste mid (200px à x=100), ligne auto.
+    let i = find(&bx, by_id(&dom, "i"));
+    assert!(
+        approx(i.rect.x, 100.0) && approx(i.rect.width, 200.0),
+        "i {:?}",
+        i.rect
+    );
+    // `2 / 1 / span 2 / span 2` : coin (1,0), 2×2 pistes —
+    // w = 100+200 (le `span 2` de la fin de colonne l'emporte
+    // sur la déduction depuis le début).
+    let s = find(&bx, by_id(&dom, "s"));
+    assert!(
+        approx(s.rect.x, 0.0) && approx(s.rect.y, 10.0),
+        "s {:?}",
+        s.rect
+    );
+    assert!(
+        approx(s.rect.width, 300.0),
+        "span 2 en fin de colonne : w={}",
+        s.rect.width
+    );
+}
+
+#[test]
+fn grid_area_jeton_invalide_preserve_les_longhands() {
+    // `grid-area` syntaxiquement invalide = déclaration
+    // abandonnée — `grid-column`/`grid-row` survivent.
+    let (dom, bx) = laid(
+        "<!doctype html><section><div id=\"g\">G</div></section>",
+        "body { margin: 0 } section { display: grid; \
+         grid-template-columns: 100px 100px } \
+         #g { grid-area: 1 2; grid-column: 2; height: 10px }",
+    );
+    let g = find(&bx, by_id(&dom, "g"));
+    assert!(approx(g.rect.x, 100.0), "g {:?}", g.rect);
+}
+
 #[test]
 fn grid_lignes_nommees() {
     // `[mid]` dans le template nomme la bordure —
