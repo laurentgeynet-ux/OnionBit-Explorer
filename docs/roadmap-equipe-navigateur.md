@@ -11512,9 +11512,18 @@ un crate PIPELINE.- [x] **JS-C422. Deadline honnête — canal session ↔ budge
   Verrou `dom_parser_xml_mpd` ×4 (MPD casse, self-
   close, attrs camelCase, ns, CDATA, mime inconnu) ;
   suite dom 246/246, clippy propre. **Re-flight
-  dash.js requis** — si le manifest se parse, le mur
-  suivant sera nommé par la même méthode (bus
-  d'événements `dashjs.MediaPlayer.events`).
+  effectué (vols 779/780, binaire JS-C462+)** : rail
+  XHR→MPD prouvé sain bout-en-bout — `xhr.open` →
+  `net.arr` 200 → livraison complétée (zéro
+  `net.orphan`, sonde JS-C464) → `onload` tiré →
+  `status`/`responseURL` pleine/`responseText`/
+  `responseXML→MPD` navigable (`Period=1`) — le tout
+  vérifié par XHR manuel sur l'URL réelle
+  `bbb_30fps.mpd`. Le stall résiduel observé est
+  interne au client de référence (bootstrap
+  `TOOLTIP` TypeError + handler silencieux), pas au
+  rail moteur ; le harnais `rest_host_probe` décode
+  le flux dash.js. **§B-112 refermé côté moteur.**
 - [x] **JS-C463. §B-125 — `caller`/`arguments` `null`
   sur fonctions sloppy (comportement observable
   V8)** (vol 734, accueil YouTube post-JS-C461 —
