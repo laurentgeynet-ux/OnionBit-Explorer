@@ -2561,6 +2561,76 @@ fn abs_geometry(
 }
 
 pub(crate) fn resolve_absolutes(bx: &mut LayoutBox, cb: Rect, ctx: &BlockCtx, fs: f32) {
+    resolve_absolutes_impl(bx, cb, None, ctx, fs);
+}
+
+/// `transform`/`filter`/`perspective`/`will-change` (≠ none)
+/// et les props individuelles `translate`/`rotate`/`scale` /
+/// `backdrop-filter`/`contain` établissent un bloc conteneur
+/// pour les descendants `position:fixed` (css-transforms
+/// §containing-block, R-173) — les boîtes Text/AnonymousBlock
+/// clonent le style parent sans jamais établir (R-22).
+fn establishes_fixed_cb(bx: &LayoutBox) -> bool {
+    if matches!(bx.kind, BoxKind::Text | BoxKind::AnonymousBlock) {
+        return false;
+    }
+    let non_none = |p: &str| {
+        bx.style
+            .get(p)
+            .is_some_and(|v| !v.trim().eq_ignore_ascii_case("none"))
+    };
+    non_none("transform")
+        || non_none("translate")
+        || non_none("rotate")
+        || non_none("scale")
+        || non_none("filter")
+        || non_none("backdrop-filter")
+        || non_none("perspective")
+        || bx.style.get("will-change").is_some_and(|v| {
+            v.split(&[',', ' '][..]).any(|t| {
+                matches!(
+                    t.to_ascii_lowercase().as_str(),
+                    "transform" | "filter" | "perspective" | "translate" | "rotate" | "scale"
+                )
+            })
+        })
+        || bx.style.get("contain").is_some_and(|v| {
+            v.split_ascii_whitespace().any(|t| {
+                matches!(
+                    t.to_ascii_lowercase().as_str(),
+                    "paint" | "layout" | "strict" | "content"
+                )
+            })
+        })
+}
+
+/// Padding box de `bx` (§10.1 : bloc conteneur des
+/// descendants positionnés — la bordure n'en fait pas
+/// partie ; `cb` ne sert qu'à résoudre les % de bordure).
+fn padding_box(bx: &LayoutBox, cb: Rect, fs: f32, ctx: &BlockCtx) -> Rect {
+    let bl = border_px(&bx.style, "border-left-width", cb.width, fs, ctx);
+    let bt = border_px(&bx.style, "border-top-width", cb.width, fs, ctx);
+    let br = border_px(&bx.style, "border-right-width", cb.width, fs, ctx);
+    let bb = border_px(&bx.style, "border-bottom-width", cb.width, fs, ctx);
+    Rect {
+        x: bx.rect.x + bl,
+        y: bx.rect.y + bt,
+        width: (bx.rect.width - bl - br).max(0.0),
+        height: (bx.rect.height - bt - bb).max(0.0),
+    }
+}
+
+/// `fixed_cb` = bloc conteneur des descendants `fixed` :
+/// padding box du plus proche ancêtre établissant
+/// (transform/filter/perspective/will-change — R-173) ou
+/// `None` = viewport (comportement §10.1 historique).
+fn resolve_absolutes_impl(
+    bx: &mut LayoutBox,
+    cb: Rect,
+    fixed_cb: Option<Rect>,
+    ctx: &BlockCtx,
+    fs: f32,
+) {
     // Fonte PROPRE de la boîte (R-17 : la cascade stocke la
     // valeur calculée — `font-size:1em` est déjà px absolu)
     // — les `em` des bordures/décalages se résolvent contre
@@ -2590,16 +2660,15 @@ pub(crate) fn resolve_absolutes(bx: &mut LayoutBox, cb: Rect, ctx: &BlockCtx, fs
     {
         cb
     } else {
-        let bl = border_px(&bx.style, "border-left-width", cb.width, own_fs, ctx);
-        let bt = border_px(&bx.style, "border-top-width", cb.width, own_fs, ctx);
-        let br = border_px(&bx.style, "border-right-width", cb.width, own_fs, ctx);
-        let bb = border_px(&bx.style, "border-bottom-width", cb.width, own_fs, ctx);
-        Rect {
-            x: bx.rect.x + bl,
-            y: bx.rect.y + bt,
-            width: (bx.rect.width - bl - br).max(0.0),
-            height: (bx.rect.height - bt - bb).max(0.0),
-        }
+        padding_box(bx, cb, own_fs, ctx)
+    };
+    // R-173 — CB des descendants `fixed` : padding box de
+    // `bx` s'il établit (transform/filter/perspective…), le
+    // CB hérité sinon (viewport au sommet).
+    let own_fixed_cb = if establishes_fixed_cb(bx) {
+        Some(padding_box(bx, cb, own_fs, ctx))
+    } else {
+        fixed_cb
     };
     let viewport = Rect {
         x: 0.0,
@@ -2633,7 +2702,7 @@ pub(crate) fn resolve_absolutes(bx: &mut LayoutBox, cb: Rect, ctx: &BlockCtx, fs
         }
         let cfs = font_size_px(&cst, fs, ctx);
         let target = if pos == Position::Fixed {
-            viewport
+            own_fixed_cb.unwrap_or(viewport)
         } else {
             own_cb
         };
@@ -2706,7 +2775,7 @@ pub(crate) fn resolve_absolutes(bx: &mut LayoutBox, cb: Rect, ctx: &BlockCtx, fs
     // leur contexte de fonte — `own_fs` = fonte de `bx`.
     for child in &mut bx.children {
         // Descente ∝ profondeur de l'arbre → pile garantie (R-24).
-        explorer_common::deep(|| resolve_absolutes(child, own_cb, ctx, own_fs));
+        explorer_common::deep(|| resolve_absolutes_impl(child, own_cb, own_fixed_cb, ctx, own_fs));
     }
 }
 

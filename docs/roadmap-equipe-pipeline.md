@@ -3343,7 +3343,7 @@ déblocage/coût décroissant.
   `Visible` (`block.rs`) → contenu clip-attendu déborde. Une
   ligne : variant `Clip` alié `Hidden` (pas de scroll interne
   de toute façon — journalisé).
-- [ ] **R-173. `position:fixed` sous ancêtre transformé** : le
+- [x] **R-173. `position:fixed` sous ancêtre transformé** : le
   CB des `fixed` est toujours le viewport (`resolve_absolutes`)
   — spec : `transform`/`filter`/`perspective`/`will-change`
   créent un containing block (modal/drawer dans un shell animé

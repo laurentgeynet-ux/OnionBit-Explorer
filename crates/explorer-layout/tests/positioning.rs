@@ -550,3 +550,52 @@ fn overflow_clip_variant_sans_bfc() {
     assert_eq!(x.overflow_x, Overflow::Clip);
     assert_eq!(x.overflow, Overflow::Auto);
 }
+
+/// R-173 — `transform`/`filter`/`perspective`/`will-change`
+/// (≠ none) établissent un bloc conteneur pour les
+/// descendants `position:fixed` (css-transforms
+/// §containing-block) : le CB passe du viewport à la
+/// padding box de l'ancêtre établissant.
+#[test]
+fn fixed_sous_ancetre_transforme_ancre_cb() {
+    // `right:0` → margin box droite = bord droit du CB :
+    // sous ancêtre transformé = padding box de #t (200 px),
+    // sans établisseur = viewport (400 px).
+    let (dom, bx) = laid(
+        "<div id=t><div id=f></div></div><div id=g></div>",
+        "#t{transform:translateX(5px);width:200px;height:100px}\
+         #f{position:fixed;top:0;right:0;width:10px;height:10px}\
+         #g{position:fixed;top:0;right:0;width:10px;height:10px}",
+    );
+    let t = find(&bx, by_id(&dom, "t"));
+    let f = find(&bx, by_id(&dom, "f"));
+    let edge = t.rect.x + t.rect.width;
+    assert!(
+        (f.rect.x + f.rect.width - edge).abs() < 1.0,
+        "fixed sous transformé : fin {} vs CB {}",
+        f.rect.x + f.rect.width,
+        edge
+    );
+    // Contrôle : pas d'ancêtre établissant → viewport (400).
+    let g = find(&bx, by_id(&dom, "g"));
+    assert!(
+        (g.rect.x + g.rect.width - 400.0).abs() < 1.0,
+        "fixed sans établisseur : fin {} vs viewport 400",
+        g.rect.x + g.rect.width
+    );
+    // `filter`/`will-change` établissent aussi (même règle).
+    let (dom2, bx2) = laid(
+        "<div id=t2><div id=f2></div></div>",
+        "#t2{will-change:transform;width:150px;height:50px}\
+         #f2{position:fixed;top:0;right:0;width:10px;height:10px}",
+    );
+    let t2 = find(&bx2, by_id(&dom2, "t2"));
+    let f2 = find(&bx2, by_id(&dom2, "f2"));
+    let edge2 = t2.rect.x + t2.rect.width;
+    assert!(
+        (f2.rect.x + f2.rect.width - edge2).abs() < 1.0,
+        "will-change établit aussi : fin {} vs CB {}",
+        f2.rect.x + f2.rect.width,
+        edge2
+    );
+}
