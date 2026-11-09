@@ -5475,7 +5475,7 @@ fn weakref_finreg() {
     assert_eq!(
         ev_str(
             "var fr = new FinalizationRegistry(function () {}); \
-                var t = {}; fr.register(t, 'h', 'tok'); fr.unregister('tok')"
+                var t = {}; var tok = {}; fr.register(t, 'h', tok); fr.unregister(tok)"
         ),
         "true"
     );
@@ -5509,7 +5509,7 @@ fn weakref_finreg() {
 #[test]
 fn finreg_unregister_token_checked_against_target() {
     assert_eq!(
-        ev_str("var fr=new FinalizationRegistry(function(){});var t={};fr.register(t,t,'k');'ok'"),
+        ev_str("var fr=new FinalizationRegistry(function(){});var t={};fr.register(t,t,{});'ok'"),
         "ok"
     );
     assert_eq!(

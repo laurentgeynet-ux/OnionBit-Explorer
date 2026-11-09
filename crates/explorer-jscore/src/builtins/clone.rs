@@ -415,6 +415,15 @@ pub(crate) fn finreg_register(e: &mut Engine, this: Value, args: &[Value]) -> Js
     };
     let held = arg(args, 1);
     let token = arg(args, 2);
+    // Spec §26.2.3.2 / V8 : `unregisterToken` présent et
+    // non-objet → `TypeError` (`CanBeHeldWeakly` — `undefined`
+    // = pas de jeton, objets/symboles légaux). Validé avant
+    // `SameValue` (odysee, JS-C451).
+    if !matches!(token, Value::Undefined | Value::Obj(_)) {
+        return Err(e.type_error(
+            "FinalizationRegistry unregisterToken must be an object or undefined",
+        ));
+    }
     // Spec : TypeError quand `SameValue(target, unregisterToken)`
     // — le jeton ne peut pas être la **cible** ; la valeur
     // tenue peut l'être (`fr.register(t, t, other)` est légal —

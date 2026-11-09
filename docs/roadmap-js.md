@@ -96,14 +96,13 @@ surface minimale — jamais un stub qui ment.
   playlist item null) — à sonder au prochain vol,
   jamais fixé à l'aveugle. Verrous `c450_qsa_surface`
   ×2.
-- [ ] **JT-6. `FinalizationRegistry.unregisterToken`
-  (odysee) — vérifier vs spec V8** : `register` valide
-  déjà `SameValue(target, unregisterToken)`
-  (`builtins/clone.rs`) — l'écart possible : la spec
-  exige que `unregisterToken` soit un **objet** sinon
-  `TypeError` à `register` ; V8 accepte `undefined`
-  (comme absent). Reproduire le cas exact du site avant
-  de toucher la validation.
+- [x] **JT-6. `FinalizationRegistry.unregisterToken`
+  (odysee) — vérifié vs spec V8** : **livré (JS-C451)** —
+  `CanBeHeldWeakly` validé : token présent non-objet →
+  `TypeError` (parité V8), `undefined` = pas de jeton,
+  `SameValue` intact. Deux tests `lang` basculés en
+  tokens objet (acceptation non-spec des chaînes
+  corrigée). Verrous `c451_finreg_token` ×2.
 - [ ] **JT-7. `call of Undefined` core-js (framatube)** —
   invocation sur `Undefined` : nommer la cible (méthode
   builtin ou entrée miroir manquante) — core-js feature-

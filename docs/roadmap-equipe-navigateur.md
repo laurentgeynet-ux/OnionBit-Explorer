@@ -11337,3 +11337,10 @@ un crate PIPELINE.- [x] **JS-C422. Deadline honnête — canal session ↔ budge
   archive.org) = lecture de config `item.categories`
   sur null — interne player, à sonder au prochain vol.
   Verrous `c450_qsa_surface` ×2.
+- [x] **JS-C451 (JT-6). `FinalizationRegistry.register`
+  — `unregisterToken` validé `CanBeHeldWeakly`** —
+  parité V8 : token présent non-objet → `TypeError`
+  « must be an object or undefined » (odysee) ;
+  `undefined` = pas de jeton, `SameValue(target,
+  token)` inchangé. Tests `lang` basculés en tokens
+  objet. Verrous `c451_finreg_token` ×2 ; lang 313/313.
