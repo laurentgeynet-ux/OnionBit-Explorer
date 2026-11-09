@@ -10979,7 +10979,19 @@ un crate PIPELINE.- [x] **JS-C422. Deadline honnête — canal session ↔ budge
   raccordement (spec « shadow-including ») ; `by_id`
   re-scopé light (`root_of==document`) ; `iframe_
   nodes` composite descend en shadow. Verrous
-  `b122_shadow_iframe` 3/3, `dom` 245/245. Reste :
-  (c) budget tas défaut (~405 Mo) ; (g) valider le
-  handshake `onReady`/`postMessage` YT vol 759+,
-  puis MSE/HLS en conditions réelles.
+  `b122_shadow_iframe` 3/3, `dom` 245/245.
+  **Vol 759 — le lecteur VIT** : iframe shadow
+  `embed/0P_LBKqVbfs` fetchée (`net.go` ctx=3),
+  realm `contentWindow` Window, **le JS
+  `/s/_/ytembeds/` du doc embed S'ÉVALUE**
+  (prom.settle ytembeds), `post.msg:12`
+  (protocole postMessage page↔embed actif),
+  `y.api` = instance `X` widgetapi complète
+  (`setSize`/`getIframe`/`sendMessage`/
+  `destroy`). Reste : binding des méthodes
+  (`getPlayerState`/`playVideo` s'installent à
+  la fin de l'infoexchange postMessage — flux
+  en cours/gap à nommer), paint du sous-doc
+  embed (placeholder caméra encore affiché),
+  puis MSE/HLS réel. Reste : (c) budget tas
+  défaut (~405 Mo).
