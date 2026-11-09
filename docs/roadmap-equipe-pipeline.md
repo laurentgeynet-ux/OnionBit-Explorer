@@ -3149,6 +3149,12 @@ la dette, pas le layout.
   sous `rect` reçoit les ops puis le contenu se peint
   par-dessus (offscreen composité — même mécanique
   R-M5). Verrou ops + ordre + `none`.
+- [x] **R-M12. `@supports` évalué** : fin
+  du `unknown:true` toujours-vrai —
+  `(prop:val)`/`not`/`and`/`or` parseés et
+  tranchés contre `SUPPORTED_PROPS` +
+  `expand_shorthand` + `--custom`.
+  Verrou vrai/faux/not ×2.
 - [x] **R-M11. `drop-shadow()`** : la dernière
   branche `filter` — `FilterOp::DropShadow`
   (ombre de la forme alpha du contenu,

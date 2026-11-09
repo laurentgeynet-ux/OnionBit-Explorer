@@ -95,9 +95,13 @@ fn query_matches(env: &StyleEnv, q: &MediaQuery) -> bool {
     if !ok {
         ok = match &q.media_type {
             None => true,
+            // `@supports` (encodé `media_type:"supports"`) :
+            // chaque condition = une déclaration à évaluer —
+            // `(prop:val)` supportée ? `not-<prop>` l'inverse.
+            Some(t) if t == "supports" => q.conditions.iter().all(|(n, v)| decl_supported(n, v)),
             Some(t) => t == "all" || t == &env.media_type,
         };
-        if ok {
+        if ok && q.media_type.as_deref() != Some("supports") {
             for (name, value) in &q.conditions {
                 if !condition_matches(env, name, value) {
                     ok = false;
@@ -112,6 +116,244 @@ fn query_matches(env: &StyleEnv, q: &MediaQuery) -> bool {
         ok
     }
 }
+
+/// `@supports (prop: value)` — la déclaration est-elle
+/// supportée ? Critères : le nom est une propriété connue
+/// du moteur (`SUPPORTED_PROPS`), un shorthand reconnu par
+/// `expand_shorthand` (retour `Some`), ou une propriété
+/// custom `--x` (toujours portées). `not-<prop>` inverse
+/// (même convention que les features MQ niées). C'est le
+/// test le plus honnête sans validateur par valeur : la
+/// valeur n'est pas type-checkée — `@supports(display:foo)`
+/// passe (approximation documentée : le nom seul tranche,
+/// comme les vieux `document.querySelectorAll` gates).
+fn decl_supported(name: &str, value: &str) -> bool {
+    let (prop, neg) = name
+        .strip_prefix("not-")
+        .map_or((name, false), |p| (p, true));
+    let supported = prop.starts_with("--")
+        || crate::value::expand_shorthand(prop, value).is_some()
+        || SUPPORTED_PROPS.contains(&prop);
+    if neg {
+        !supported
+    } else {
+        supported
+    }
+}
+
+/// Propriétés reconnues comme supportées dans `@supports` —
+/// noms consommés par le moteur (hors shorthands, couverts
+/// par `expand_shorthand`). Liste tenue à la main —
+/// approximation conservatrice : un nom absent = `not
+/// supported` → les `not (…)` de feature-detection restent
+/// honnêtes (les auteurs écrivent `not` contre les trucs
+/// récents qui sont ici absents de fait).
+const SUPPORTED_PROPS: &[&str] = &[
+    "accent-color",
+    "align-content",
+    "align-items",
+    "align-self",
+    "animation",
+    "appearance",
+    "aspect-ratio",
+    "backdrop-filter",
+    "background",
+    "background-attachment",
+    "background-blend-mode",
+    "background-clip",
+    "background-color",
+    "background-image",
+    "background-origin",
+    "background-position",
+    "background-repeat",
+    "background-size",
+    "block-ellipsis",
+    "border",
+    "border-bottom",
+    "border-bottom-color",
+    "border-bottom-left-radius",
+    "border-bottom-right-radius",
+    "border-bottom-style",
+    "border-bottom-width",
+    "border-collapse",
+    "border-color",
+    "border-image",
+    "border-left",
+    "border-left-color",
+    "border-left-style",
+    "border-left-width",
+    "border-radius",
+    "border-right",
+    "border-right-color",
+    "border-right-style",
+    "border-right-width",
+    "border-spacing",
+    "border-style",
+    "border-top",
+    "border-top-color",
+    "border-top-left-radius",
+    "border-top-right-radius",
+    "border-top-style",
+    "border-top-width",
+    "border-width",
+    "bottom",
+    "box-shadow",
+    "box-sizing",
+    "caption-side",
+    "caret-color",
+    "clear",
+    "clip",
+    "clip-path",
+    "color",
+    "column-count",
+    "column-gap",
+    "contain",
+    "content",
+    "counter-increment",
+    "counter-reset",
+    "cursor",
+    "direction",
+    "display",
+    "empty-cells",
+    "filter",
+    "flex",
+    "flex-basis",
+    "flex-direction",
+    "flex-flow",
+    "flex-grow",
+    "flex-shrink",
+    "flex-wrap",
+    "float",
+    "font",
+    "font-family",
+    "font-size",
+    "font-style",
+    "font-variant",
+    "font-weight",
+    "gap",
+    "grid",
+    "grid-area",
+    "grid-auto-columns",
+    "grid-auto-flow",
+    "grid-auto-rows",
+    "grid-column",
+    "grid-column-end",
+    "grid-column-start",
+    "grid-gap",
+    "grid-row",
+    "grid-row-end",
+    "grid-row-start",
+    "grid-template",
+    "grid-template-areas",
+    "grid-template-columns",
+    "grid-template-rows",
+    "height",
+    "hyphens",
+    "inset",
+    "isolation",
+    "justify-content",
+    "justify-items",
+    "justify-self",
+    "left",
+    "letter-spacing",
+    "line-clamp",
+    "-webkit-line-clamp",
+    "line-height",
+    "list-style",
+    "list-style-image",
+    "list-style-position",
+    "list-style-type",
+    "margin",
+    "margin-block",
+    "margin-block-end",
+    "margin-block-start",
+    "margin-bottom",
+    "margin-inline",
+    "margin-inline-end",
+    "margin-inline-start",
+    "margin-left",
+    "margin-right",
+    "margin-top",
+    "mask",
+    "mask-image",
+    "max-height",
+    "max-width",
+    "min-height",
+    "min-width",
+    "mix-blend-mode",
+    "object-fit",
+    "object-position",
+    "opacity",
+    "order",
+    "orphans",
+    "outline",
+    "outline-color",
+    "outline-offset",
+    "outline-style",
+    "outline-width",
+    "overflow",
+    "overflow-wrap",
+    "overflow-x",
+    "overflow-y",
+    "padding",
+    "padding-block",
+    "padding-block-end",
+    "padding-block-start",
+    "padding-bottom",
+    "padding-inline",
+    "padding-inline-end",
+    "padding-inline-start",
+    "padding-left",
+    "padding-right",
+    "padding-top",
+    "place-content",
+    "place-items",
+    "place-self",
+    "pointer-events",
+    "position",
+    "quotes",
+    "resize",
+    "right",
+    "row-gap",
+    "scroll-behavior",
+    "tab-size",
+    "text-align",
+    "text-align-last",
+    "text-decoration",
+    "text-decoration-color",
+    "text-decoration-line",
+    "text-decoration-style",
+    "text-decoration-thickness",
+    "text-emphasis",
+    "text-indent",
+    "text-justify",
+    "text-orientation",
+    "text-overflow",
+    "text-shadow",
+    "text-transform",
+    "text-underline-offset",
+    "top",
+    "transform",
+    "transform-origin",
+    "transition",
+    "transition-delay",
+    "transition-duration",
+    "transition-property",
+    "transition-timing-function",
+    "unicode-bidi",
+    "user-select",
+    "vertical-align",
+    "visibility",
+    "white-space",
+    "widows",
+    "width",
+    "will-change",
+    "word-break",
+    "word-spacing",
+    "word-wrap",
+    "writing-mode",
+    "z-index",
+];
 
 /// `(name: value)` d'une media query — px pour *-width/-height.
 /// `em`/`rem` y sont résolus contre la font-size INITIALE

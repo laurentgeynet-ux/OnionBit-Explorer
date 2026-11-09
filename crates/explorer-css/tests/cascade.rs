@@ -2882,3 +2882,32 @@ fn ua_big_small_nobr_mark_figure_fieldset() {
     assert_eq!(fss.get("border-top-style"), Some("groove"));
     assert_eq!(fss.get("border-top-width"), Some("2px"));
 }
+
+/// `@supports` évalué : `(prop:val)` → appliqué si la
+/// propriété est supportée, ignoré sinon ; `not (…)`
+/// s'inverse correctement ; `or`/`and` honorent.
+#[test]
+fn supports_evalue_la_condition() {
+    let f = fixture();
+    let mut e = StyleEngine::new();
+    e.add_css(
+        "div { color: red }          @supports (display: grid) { div { color: green } }          @supports (bogus-prop: x) { div { color: blue } }",
+        Origin::Author,
+    );
+    assert_eq!(
+        e.compute(&f.dom, f.div, &env()).get("color"),
+        Some("green"),
+        "supports vrai → règle appliquée"
+    );
+    // `not (bogus)` → vrai → s'applique ; `not (display:grid)` → faux → ignoré.
+    let mut e2 = StyleEngine::new();
+    e2.add_css(
+        "div { color: red }          @supports not (bogus-prop: x) { div { color: green } }          @supports not (display: grid) { div { color: blue } }",
+        Origin::Author,
+    );
+    assert_eq!(
+        e2.compute(&f.dom, f.div, &env()).get("color"),
+        Some("green"),
+        "not (bogus) → vrai, not (grid) → faux"
+    );
+}

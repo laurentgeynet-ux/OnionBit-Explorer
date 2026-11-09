@@ -419,16 +419,7 @@ impl<'t> Parser<'t> {
                             queries: if lname == "media" {
                                 parse_media_queries(&prelude)
                             } else {
-                                // supports non évalué ici : query
-                                // neutre « unknown » (toujours vrai
-                                // à l'évaluation par défaut — la
-                                // couche appelante tranchera).
-                                vec![MediaQuery {
-                                    negated: false,
-                                    media_type: None,
-                                    conditions: Vec::new(),
-                                    unknown: true,
-                                }]
+                                Self::parse_supports_queries(&prelude)
                             },
                             rules,
                         }
@@ -551,6 +542,80 @@ impl<'t> Parser<'t> {
     }
 
     /// `{` déjà consommé : lit les règles imbriquées jusqu'au `}`.
+    /// `@supports` → `MediaQuery` encodé `media_type:
+    /// Some("supports")` : le prelude « `or`-séparé »
+    /// devient N requêtes (any), chaque `and`-chaîne ses
+    /// conditions `(prop: value)` (all), `not` global →
+    /// `negated` ; `not (prop:val)` interne → `not-<prop>`
+    /// (même convention que les features niées des MQ).
+    /// Évaluation dans `query_matches` — une condition
+    /// supports = « la déclaration est supportée ».
+    fn parse_supports_queries(prelude: &str) -> Vec<MediaQuery> {
+        let mut queries = Vec::new();
+        let norm = prelude
+            .split_ascii_whitespace()
+            .collect::<Vec<_>>()
+            .join(" ")
+            .to_ascii_lowercase();
+        for or_part in norm.split(" or ") {
+            let or_part = or_part.trim();
+            if or_part.is_empty() {
+                continue;
+            }
+            let (negated, body) = or_part
+                .strip_prefix("not ")
+                .map_or((false, or_part), |b| (true, b.trim()));
+            let mut conditions = Vec::new();
+            for cond in body.split(" and ") {
+                let c = cond.trim();
+                // `(not (prop:val))` → `not-<prop>`.
+                let (inner, not) = c
+                    .strip_prefix("(not ")
+                    .and_then(|r| r.strip_suffix(')'))
+                    .map_or((c, false), |r| (r.trim(), true));
+                // Dépile les parens externes jusqu'au couple
+                // `prop:value` — `((display:grid))` = parens
+                // redondantes autorisées par la grammaire.
+                let mut inner = inner.trim();
+                while inner.starts_with('(') && inner.ends_with(')') {
+                    inner = inner[1..inner.len() - 1].trim();
+                }
+                let Some(colon) = inner.find(':') else {
+                    continue;
+                };
+                let prop = inner[..colon].trim();
+                let value = inner[colon + 1..].trim();
+                if prop.is_empty() || value.is_empty() {
+                    continue;
+                }
+                let key = if not {
+                    format!("not-{prop}")
+                } else {
+                    prop.to_string()
+                };
+                conditions.push((key, value.to_string()));
+            }
+            if !conditions.is_empty() || negated {
+                queries.push(MediaQuery {
+                    negated,
+                    media_type: Some("supports".to_string()),
+                    conditions,
+                    unknown: false,
+                });
+            }
+        }
+        if queries.is_empty() {
+            // Prelude inintelligible → tolérance neutre (vrai).
+            queries.push(MediaQuery {
+                negated: false,
+                media_type: None,
+                conditions: Vec::new(),
+                unknown: true,
+            });
+        }
+        queries
+    }
+
     fn nested_rules(&mut self) -> Vec<Rule> {
         let mut rules = Vec::new();
         loop {
