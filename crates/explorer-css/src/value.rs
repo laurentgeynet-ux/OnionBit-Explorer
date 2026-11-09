@@ -682,7 +682,8 @@ pub fn expand_shorthand(name: &str, value: &str) -> Option<Vec<(String, String)>
         "overflow" => expand_overflow(value),
         "flex-flow" => Some(expand_flex_flow(value)),
         "flex" => expand_flex(value),
-        "gap" => expand_gap(value),
+        "gap" | "grid-gap" => expand_gap(value),
+        "grid-template" | "grid" => expand_grid_template(value),
         "columns" => Some(expand_columns(value)),
         "background" => expand_background(value),
         "font" => expand_font(value),
@@ -756,6 +757,68 @@ fn expand_flex(value: &str) -> Option<Vec<(String, String)>> {
 }
 
 /// `gap` : `<row> [<col>]` → `row-gap`/`column-gap`.
+/// `grid-template`/`grid` : `none | [<rows> / <cols>] |
+/// <areas-ascii> [<rows>] / <cols>` — l'ASCII `"a a" 50px
+/// "b ." auto / 1fr 2fr` éclate areas/rows/cols ; `grid`
+/// traite ici la forme template (`none` + auto-flow hors
+/// scope — R-175).
+fn expand_grid_template(value: &str) -> Option<Vec<(String, String)>> {
+    let v = value.trim();
+    if v == "none" {
+        return Some(vec![
+            ("grid-template-columns".into(), "none".into()),
+            ("grid-template-rows".into(), "none".into()),
+            ("grid-template-areas".into(), "none".into()),
+        ]);
+    }
+    let (left, right) = v.split_once('/').unwrap_or((v, ""));
+    // Côté gauche : `"a a"` = lignes d'areas, les tailles
+    // intercalées = `grid-template-rows` ; sans guillemets,
+    // le gauche est `rows` quand le droit existe.
+    let mut areas = String::new();
+    let mut rows: Vec<String> = Vec::new();
+    let mut cur = String::new();
+    let mut in_q = false;
+    for c in left.chars() {
+        if c == '"' {
+            if in_q {
+                in_q = false;
+                areas.push('"');
+                areas.push_str(&cur);
+                areas.push('"');
+                cur.clear();
+            } else {
+                rows.extend(cur.split_whitespace().map(str::to_string));
+                cur.clear();
+                in_q = true;
+            }
+        } else {
+            cur.push(c);
+        }
+    }
+    rows.extend(cur.split_whitespace().map(str::to_string));
+    let mut out = Vec::new();
+    if !areas.is_empty() {
+        out.push(("grid-template-areas".into(), areas));
+        if !rows.is_empty() {
+            out.push(("grid-template-rows".into(), rows.join(" ")));
+        }
+        if !right.trim().is_empty() {
+            out.push(("grid-template-columns".into(), right.trim().into()));
+        }
+    } else if !right.trim().is_empty() {
+        // `<rows> / <cols>` sans areas.
+        if !left.trim().is_empty() {
+            out.push(("grid-template-rows".into(), left.trim().into()));
+        }
+        out.push(("grid-template-columns".into(), right.trim().into()));
+    } else {
+        // Forme bare sans `/` : invalide hors `none` (spec).
+        return None;
+    }
+    (!out.is_empty()).then_some(out)
+}
+
 fn expand_gap(value: &str) -> Option<Vec<(String, String)>> {
     let mut it = value.split_whitespace();
     let row = it.next()?;

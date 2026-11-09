@@ -599,3 +599,73 @@ fn fixed_sous_ancetre_transforme_ancre_cb() {
         edge2
     );
 }
+
+/// R-175 — pistes implicites (`grid-auto-*` cyclées) +
+/// alignment conteneur (`justify-content`/`align-content`)
+/// et shorthands (`grid-gap`, `grid-template` `rows/cols`,
+/// ASCII).
+#[test]
+fn grid_pistes_implicites_et_alignement_conteneur() {
+    // `auto-flow: column` + `grid-auto-columns: 30px` :
+    // les colonnes implicites valent 30 px (repli `auto`
+    // max-content avant).
+    let (dom, bx) = laid_w(
+        "<div id=g><div id=a></div><div id=b></div><div id=c></div></div>",
+        "#g{display:grid;grid-auto-flow:column;grid-auto-columns:30px;grid-template-rows:20px}\
+         #g>*{width:10px;height:10px}",
+        400.0,
+    );
+    let a = find(&bx, by_id(&dom, "a"));
+    let b = find(&bx, by_id(&dom, "b"));
+    let c = find(&bx, by_id(&dom, "c"));
+    assert!(
+        (b.rect.x - a.rect.x - 30.0).abs() < 1.0,
+        "implicite 30px : {} vs {}",
+        b.rect.x - a.rect.x,
+        30.0
+    );
+    assert!(
+        (c.rect.x - b.rect.x - 30.0).abs() < 1.0,
+        "implicite cyclée : {}",
+        c.rect.x - b.rect.x
+    );
+    // `justify-content:center` : 2×100px dans 400 → x0=100.
+    let (dom2, bx2) = laid_w(
+        "<div id=g2><div id=a2></div><div id=b2></div></div>",
+        "#g2{display:grid;grid-template-columns:100px 100px;justify-content:center}\
+         #g2>*{height:10px}",
+        400.0,
+    );
+    let a2 = find(&bx2, by_id(&dom2, "a2"));
+    assert!(
+        (a2.rect.x - 100.0).abs() < 1.5,
+        "justify-content:center : x={}",
+        a2.rect.x
+    );
+    // `grid-gap:20px` alias de `gap` + `grid-template` rows/cols.
+    let (dom3, bx3) = laid_w(
+        "<div id=g3><div id=a3></div><div id=b3></div></div>",
+        "#g3{display:grid;grid-template: 50px / 100px 100px;grid-gap:20px}\
+         #g3>*{height:10px}",
+        400.0,
+    );
+    let b3 = find(&bx3, by_id(&dom3, "b3"));
+    assert!(
+        (b3.rect.x - 120.0).abs() < 1.5,
+        "grid-template+grid-gap : x={}",
+        b3.rect.x
+    );
+    // ASCII : `grid-template: "z z" / 80px 80px` + `grid-area:z`.
+    let (dom4, bx4) = laid_w(
+        "<div id=g4><div id=z4></div></div>",
+        "#g4{display:grid;grid-template: \"z z\" 30px / 80px 80px}\
+         #z4{grid-area:z;height:10px}",
+        400.0,
+    );
+    let z4 = find(&bx4, by_id(&dom4, "z4"));
+    assert!(
+        (z4.rect.width - 160.0).abs() < 1.5,
+        "area ASCII span 2 : w={}",
+        z4.rect.width
+    );
+}

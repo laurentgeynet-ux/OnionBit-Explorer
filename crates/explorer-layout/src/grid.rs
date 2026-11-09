@@ -269,6 +269,39 @@ fn parse_areas(raw: &str) -> std::collections::HashMap<String, (usize, usize, us
     areas
 }
 
+/// Piste implicite `grid-auto-*` : la liste cycle par
+/// position (css-grid §7.6 — `a b` alterne) ; `auto` en
+/// l'absence. `idx` = rang implicite (0-based, hors grille
+/// explicite — notre placement ne grandit qu'après).
+fn auto_track(list: &[Track], idx: usize) -> Track {
+    if list.is_empty() {
+        Track::Auto
+    } else {
+        list[idx % list.len()].clone()
+    }
+}
+
+/// §11.4/11.5 — répartition conteneur `justify-content`/
+/// `align-content` : `(décalage initial, gap additionnel
+/// par piste)`. Préfixe `safe`/`unsafe` ignoré (dernier
+/// token lu). `stretch` ≈ `start` ici (pas d'étirement des
+/// pistes auto — approximation documentée).
+fn content_align(raw: &str, free: f32, ntracks: usize) -> (f32, f32) {
+    if free <= 0.0 || ntracks == 0 {
+        return (0.0, 0.0);
+    }
+    #[allow(clippy::cast_precision_loss)]
+    let n = ntracks as f32;
+    match raw.split_whitespace().last().unwrap_or("start") {
+        "end" | "flex-end" | "right" => (free, 0.0),
+        "center" => (free / 2.0, 0.0),
+        "space-between" if ntracks > 1 => (0.0, free / (n - 1.0)),
+        "space-around" => (free / n / 2.0, free / n),
+        "space-evenly" => (free / (n + 1.0), free / (n + 1.0)),
+        _ => (0.0, 0.0),
+    }
+}
+
 /// Largeur px des pistes colonnes : fixes résolues, `auto` =
 /// max des bases d'items placés, `fr` = part du libre.
 #[allow(clippy::cast_precision_loss)]
@@ -413,17 +446,39 @@ pub(crate) fn flow_grid_children(
     let gap_c = gap_px(&st, true, content_w, fs, ctx);
     let gap_r = gap_px(&st, false, h_def.unwrap_or(0.0), fs, ctx);
 
+    // R-175 — pistes implicites `grid-auto-rows`/
+    // `grid-auto-columns` : la liste cycle par position
+    // implicite (css-grid §7.6), `auto` en l'absence.
+    let (auto_cols, _) = st.get("grid-auto-columns").map_or_else(
+        || (Vec::new(), Vec::new()),
+        |v| parse_tracks(v, fs, ctx, content_w),
+    );
+    let (auto_rows, _) = st.get("grid-auto-rows").map_or_else(
+        || (Vec::new(), Vec::new()),
+        |v| parse_tracks(v, fs, ctx, content_w),
+    );
     let (mut col_tracks, col_names) = st.get("grid-template-columns").map_or_else(
         || (Vec::new(), Vec::new()),
         |v| parse_tracks(v, fs, ctx, content_w),
     );
     if col_tracks.is_empty() {
-        col_tracks.push(Track::Auto); // une colonne implicite
+        col_tracks.push(auto_track(&auto_cols, 0)); // colonne implicite
     }
+    let explicit_cols = col_tracks.len();
     let (row_tracks, row_names) = st.get("grid-template-rows").map_or_else(
         || (Vec::new(), Vec::new()),
         |v| parse_tracks(v, fs, ctx, content_w),
     );
+    // Piste de ligne `r` : explicite puis implicite cyclée.
+    let row_track = |r: usize| -> Option<&Track> {
+        row_tracks.get(r).or_else(|| {
+            if auto_rows.is_empty() {
+                None
+            } else {
+                auto_rows.get((r - row_tracks.len()) % auto_rows.len())
+            }
+        })
+    };
     // `grid-template-areas` : carte nom → rect (R-5).
     let areas = st
         .get("grid-template-areas")
@@ -471,7 +526,10 @@ pub(crate) fn flow_grid_children(
     let rows_lim = row_tracks.len().max(1); // borne du column flow
     let mut occupancy: Vec<Vec<bool>> = Vec::new();
     let grow_cols = |occ: &mut Vec<Vec<bool>>, ncols: &mut usize, col_tracks: &mut Vec<Track>| {
-        col_tracks.push(Track::Auto); // colonne implicite
+        col_tracks.push(auto_track(
+            &auto_cols,
+            col_tracks.len().saturating_sub(explicit_cols),
+        )); // colonne implicite cyclée
         *ncols += 1;
         for r in occ.iter_mut() {
             r.push(false);
@@ -664,11 +722,19 @@ pub(crate) fn flow_grid_children(
         })
         .collect();
     let widths = col_widths(&col_tracks, &items_base, gap_c, content_w, fs, ctx);
+    // R-175 — `justify-content` du conteneur : la grille de
+    // colonnes se répartit dans `content_w`.
+    let grid_w = widths.iter().sum::<f32>() + gap_c * widths.len().saturating_sub(1) as f32;
+    let (jx0, jgap) = content_align(
+        st.get("justify-content").unwrap_or("start"),
+        content_w - grid_w,
+        widths.len(),
+    );
     let mut x_off = Vec::with_capacity(widths.len());
-    let mut acc = content_x;
+    let mut acc = content_x + jx0;
     for w in &widths {
         x_off.push(acc);
-        acc += w + gap_c;
+        acc += w + gap_c + jgap;
     }
 
     // Passe 1 : pose à `y = margin-top` pour mesurer la
@@ -730,15 +796,13 @@ pub(crate) fn flow_grid_children(
         .max(row_tracks.len());
     let mut row_h = vec![0.0f32; nrows];
     for (ri, h) in row_h.iter_mut().enumerate() {
-        if let Some(Track::Raw(raw)) = row_tracks.get(ri) {
+        if let Some(Track::Raw(raw)) = row_track(ri) {
             *h = raw_length_px(raw, content_w, fs, ctx).unwrap_or(0.0);
         }
     }
     for (k, &(_, _, r, span_r)) in slots.iter().enumerate() {
         if span_r == 1 && row_h.get(r).copied().unwrap_or(0.0) < heights[k] {
-            let dominated = row_tracks
-                .get(r)
-                .is_some_and(|t| matches!(t, Track::Raw(_)));
+            let dominated = row_track(r).is_some_and(|t| matches!(t, Track::Raw(_)));
             if !dominated {
                 row_h[r] = row_h[r].max(heights[k]);
             }
@@ -755,14 +819,14 @@ pub(crate) fn flow_grid_children(
                 _ => 0.0,
             }
         };
-        let total_fr: f32 = (0..nrows).map(|r| fr_of(row_tracks.get(r))).sum();
+        let total_fr: f32 = (0..nrows).map(|r| fr_of(row_track(r))).sum();
         if total_fr > 0.0 {
             // §12.7 : l'espace libre exclut les pistes
             // flexibles entièrement — seules les non-`fr`
             // (fixe + auto) et les gaps l'amputent.
             let used: f32 = (0..nrows)
                 .map(|r| {
-                    if fr_of(row_tracks.get(r)) > 0.0 {
+                    if fr_of(row_track(r)) > 0.0 {
                         0.0
                     } else {
                         row_h[r]
@@ -772,9 +836,9 @@ pub(crate) fn flow_grid_children(
                 + gap_r * nrows.saturating_sub(1) as f32;
             let free = (hd - used).max(0.0);
             for (r, h) in row_h.iter_mut().enumerate() {
-                let f = fr_of(row_tracks.get(r));
+                let f = fr_of(row_track(r));
                 if f > 0.0 {
-                    let lo = match row_tracks.get(r) {
+                    let lo = match row_track(r) {
                         Some(Track::MinMax(mn, _)) => {
                             raw_length_px(mn, content_w, fs, ctx).unwrap_or(0.0)
                         }
@@ -785,11 +849,19 @@ pub(crate) fn flow_grid_children(
             }
         }
     }
+    // R-175 — `align-content` du conteneur : la grille de
+    // rangées se répartit dans `h_def` (indéfinie → start).
+    let grid_h = row_h.iter().sum::<f32>() + gap_r * row_h.len().saturating_sub(1) as f32;
+    let (ay0, agap) = content_align(
+        st.get("align-content").unwrap_or("start"),
+        h_def.map_or(0.0, |hd| hd - grid_h),
+        row_h.len(),
+    );
     let mut y_off = Vec::with_capacity(nrows);
-    let mut y = start_cursor;
+    let mut y = start_cursor + ay0;
     for h in &row_h {
         y_off.push(y);
-        y += h + gap_r;
+        y += h + gap_r + agap;
     }
 
     // Passe 2 : translation à la ligne + ajustements

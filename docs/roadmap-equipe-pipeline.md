@@ -3357,7 +3357,7 @@ déblocage/coût décroissant.
   `false` (`condition_matches`, `cascade.rs`) → les styles gâtés
   `@media (hover:hover) and (pointer:fine)` meurent. Ajout de
   cas + `StyleEnv` gagnant `dpr`/`viewport`-aspects.
-- [ ] **R-175. Grid : pistes implicites + alignment conteneur +
+- [x] **R-175. Grid : pistes implicites + alignment conteneur +
   shorthands** : `grid-auto-rows`/`grid-auto-columns` jamais lus
   (pistes implicites = `auto` — carrousels `auto-flow:column`),
   `justify-content`/`align-content`/`justify-self`/`align-self`
