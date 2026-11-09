@@ -735,8 +735,29 @@ pub fn expand_shorthand(name: &str, value: &str) -> Option<Vec<(String, String)>
         "font" => expand_font(value),
         "list-style" => expand_list_style(value),
         "outline" => Some(expand_outline(value)),
+        "container" => expand_container(value),
         _ => None,
     }
+}
+
+/// `container` shorthand → longhands (css-contain-3 — R-190) :
+/// `<'container-name'> [ / <'container-type'> ]` — les noms
+/// libres avant `/` ; `container-type` absent → `normal`
+/// (non émis — c'est l'initiale). Noms vides → `None`
+/// (déclaration passthrough, jamais consommée).
+fn expand_container(value: &str) -> Option<Vec<(String, String)>> {
+    let (names, ty) = match value.split_once('/') {
+        Some((n, t)) => (n.trim(), Some(t.trim())),
+        None => (value.trim(), None),
+    };
+    if names.is_empty() {
+        return None;
+    }
+    let mut out = vec![("container-name".to_string(), names.to_string())];
+    if let Some(t) = ty {
+        out.push(("container-type".to_string(), t.to_string()));
+    }
+    Some(out)
 }
 
 /// `flex-flow` : `[direction] [wrap]` ordre libre → longhands.

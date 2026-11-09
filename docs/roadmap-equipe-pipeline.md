@@ -3543,6 +3543,13 @@ déblocage/coût décroissant.
   (`container-type`/`container-name`). *Dernier : son vrai
   coût est architectural (boucle style↔layout) — à faire
   après R-198 qui paie l'infra de portée reportée.*
+  **Domaine livré (PIPE)** : règles inlinées taguées
+  (`CollectedRule.container`), `compute_*_with_ctx`,
+  `measure_containers` (layout), évaluateur durci (plage
+  MQ5, `not`, fail-closed), shorthand `container` +
+  `SUPPORTED_PROPS`. **Reste NAV** : boucle dans
+  `relayout_dom_payload` — demande posée
+  (`interface-equipes.md` 2026-11-09).
 
 ## Tâches continues
 

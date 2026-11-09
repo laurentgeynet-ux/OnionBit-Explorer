@@ -260,6 +260,9 @@ const SUPPORTED_PROPS: &[&str] = &[
     "column-count",
     "column-gap",
     "contain",
+    "container",
+    "container-name",
+    "container-type",
     "content",
     "counter-increment",
     "counter-reset",
@@ -617,6 +620,12 @@ struct CollectedRule {
     /// OR interne). Vide = inconditionnel. Évaluées à l'usage
     /// (le viewport peut changer entre deux calculs).
     media: Vec<Vec<MediaQuery>>,
+    /// R-190 — index dans `container_queries` du prédicat
+    /// `@container` englobant (`None` = règle ordinaire,
+    /// toujours éligible). La règle n'entre en jeu qu'en
+    /// seconde passe, quand sa query matche la border-box
+    /// mesurée du conteneur ancêtre du nœud.
+    container: Option<u32>,
 }
 
 /// Un bloc `@font-face` collecté — conservé hors cascade
@@ -630,21 +639,32 @@ pub(crate) struct CollectedFontFace {
     pub(crate) declarations: Vec<Declaration>,
 }
 
-/// Règle `@container` collectée (R-122 — css-contain-3) :
-/// query + règles à évaluer contre la taille d'un conteneur
-/// (mesurée après layout — la cascade ne la connaît pas).
+/// Prédicat `@container` collecté (R-122/R-190 —
+/// css-contain-3) : `name` + `query` bruts. Les règles du
+/// bloc sont inlinées dans la table ordinaire, taguées
+/// [`CollectedRule::container`] — la query est évaluée en
+/// seconde passe contre la border-box **mesurée** du
+/// conteneur ancêtre (inconnue à la cascade : elle
+/// n'existe qu'après layout).
 #[derive(Debug, Clone)]
 pub struct CollectedContainer {
     /// Nom de conteneur ciblé (`container-name`), si donné.
     pub name: Option<String>,
     /// Condition brute — `(min-width: 400px) and (…)` (parens).
     pub query: String,
-    /// Pile `@media` englobante.
-    pub media: Vec<Vec<MediaQuery>>,
-    /// Chemin `@layer` englobant.
-    pub layer: Vec<String>,
-    /// Règles imbriquées du bloc.
-    pub rules: Vec<Rule>,
+}
+
+/// Mesure d'un conteneur `@container` (R-190) — produite
+/// après layout par `explorer_layout::measure_containers` :
+/// border-box posée + noms `container-name` déclarés.
+#[derive(Debug, Clone)]
+pub struct ContainerMeasure {
+    /// Largeur border-box mesurée (px CSS).
+    pub w: f32,
+    /// Hauteur border-box mesurée (px CSS).
+    pub h: f32,
+    /// Noms `container-name` de la boîte (vide = anonyme).
+    pub names: Vec<String>,
 }
 
 /// Position d'un sélecteur dans la table des règles + son
@@ -1173,7 +1193,15 @@ impl StyleEngine {
         let mut e = Self::default();
         e.add_css(UA_CSS, Origin::UserAgent);
         let quirks_sheet = crate::parser::parse_stylesheet(QUIRKS_UA_CSS);
-        e.collect_rules_into(&quirks_sheet.rules, Origin::UserAgent, &[], &[], true, None);
+        e.collect_rules_into(
+            &quirks_sheet.rules,
+            Origin::UserAgent,
+            &[],
+            &[],
+            true,
+            None,
+            None,
+        );
         e.quirks_index = SelectorIndex::build(&e.quirks_rules);
         e
     }
@@ -1209,7 +1237,7 @@ impl StyleEngine {
     /// `media` = pile des listes englobantes (AND entre listes,
     /// OR entre les queries d'une même liste).
     fn collect_rules(&mut self, rules: &[Rule], origin: Origin, media: &[Vec<MediaQuery>]) {
-        self.collect_rules_into(rules, origin, media, &[], false, None);
+        self.collect_rules_into(rules, origin, media, &[], false, None, None);
         // L'index reflète toujours la table complète — une
         // feuille ajoutée entre deux calculs doit être vue.
         self.index = SelectorIndex::build(&self.rules);
@@ -1225,7 +1253,7 @@ impl StyleEngine {
         media: &[Vec<MediaQuery>],
         scope: NodeId,
     ) {
-        self.collect_rules_into(rules, origin, media, &[], false, Some(scope));
+        self.collect_rules_into(rules, origin, media, &[], false, Some(scope), None);
         self.index = SelectorIndex::build(&self.rules);
     }
 
@@ -1247,8 +1275,10 @@ impl StyleEngine {
     /// `quirks` est vrai (règles filtrées au document mode).
     /// `layer` = chemin de noms des couches `@layer`
     /// englobantes (R-91). `scope` = racine shadow
-    /// propriétaire (R-96, `None` = document).
+    /// propriétaire (R-96, `None` = document). `container` =
+    /// index du prédicat `@container` englobant (R-190).
     #[allow(clippy::too_many_arguments)]
+    #[allow(clippy::too_many_lines)]
     fn collect_rules_into(
         &mut self,
         rules: &[Rule],
@@ -1257,6 +1287,7 @@ impl StyleEngine {
         layer: &[String],
         quirks: bool,
         scope: Option<NodeId>,
+        container: Option<u32>,
     ) {
         for rule in rules {
             match rule {
@@ -1278,6 +1309,7 @@ impl StyleEngine {
                             scope,
                             layer: layer_ranks,
                             media: media.to_vec(),
+                            container,
                         });
                         self.next_order = self.next_order.saturating_add(1);
                     }
@@ -1288,7 +1320,9 @@ impl StyleEngine {
                         // liste de queries du niveau.
                         let mut nested = media.to_vec();
                         nested.push(queries.clone());
-                        self.collect_rules_into(rules, origin, &nested, layer, quirks, scope);
+                        self.collect_rules_into(
+                            rules, origin, &nested, layer, quirks, scope, container,
+                        );
                     } else if let AtKind::Layer { name, rules } = &at.kind {
                         // `@layer nom {…}` : les règles entrent
                         // dans la couche — l'ordre du layer est
@@ -1312,7 +1346,9 @@ impl StyleEngine {
                         for i in 1..=path.len() {
                             self.layer_slot(&path[..i]);
                         }
-                        self.collect_rules_into(rules, origin, media, &path, quirks, scope);
+                        self.collect_rules_into(
+                            rules, origin, media, &path, quirks, scope, container,
+                        );
                     } else if let AtKind::Statement { prelude } = &at.kind {
                         // `@layer a, b;` : déclare l'ordre sans
                         // règles (les corps s'y raccordent par
@@ -1344,22 +1380,33 @@ impl StyleEngine {
                             self.register_property(prelude, declarations);
                         }
                     } else if let AtKind::Container { name, query, rules } = &at.kind {
-                        // `@container` (R-122) : règles stockées
-                        // pour la 2ᵉ passe (taille du conteneur
-                        // inconnue à la cascade — l'appelant
-                        // ré-évalue via `container_rules_matching`
-                        // après layout). Collecte additive.
+                        // `@container` (R-190) : le prédicat
+                        // rejoint `container_queries` (évalué
+                        // en passe 2 sur la border-box mesurée
+                        // — inconnue à la cascade) ; les règles
+                        // internes sont inlinées avec le tag —
+                        // `order`/`media`/`layer`/`scope`
+                        // composés par la collecte ordinaire.
+                        let idx = u32::try_from(self.container_queries.len()).unwrap_or(u32::MAX);
                         self.container_queries.push(CollectedContainer {
                             name: name.clone(),
                             query: query.clone(),
-                            media: media.to_vec(),
-                            layer: layer.to_vec(),
-                            rules: rules.clone(),
                         });
+                        self.collect_rules_into(
+                            rules,
+                            origin,
+                            media,
+                            layer,
+                            quirks,
+                            scope,
+                            Some(idx),
+                        );
                     } else if let AtKind::Scope { rules } = &at.kind {
                         // `@scope` (R-194) : préludes déjà
                         // désucrés au parse — groupe ordinaire.
-                        self.collect_rules_into(rules, origin, media, layer, quirks, scope);
+                        self.collect_rules_into(
+                            rules, origin, media, layer, quirks, scope, container,
+                        );
                     } else if let AtKind::Keyframes { name, frames } = &at.kind {
                         // `@media` englobant appliqué ? La table
                         // des keyframes ne porte pas de media
@@ -1403,6 +1450,24 @@ impl StyleEngine {
         env: &StyleEnv,
         state: &dyn Fn(&str) -> bool,
     ) -> ComputedStyle {
+        self.compute_with_ctx(dom, node, env, state, None)
+    }
+
+    /// Variante contextuelle (R-190 — passe 2 `@container`) :
+    /// `containers` = mesures des boîtes `container-type` après
+    /// un premier layout (`explorer_layout::measure_containers`).
+    /// `None` = première passe — les règles taguées restent
+    /// inertes (comportement strictement identique à
+    /// [`StyleEngine::compute_with_state`]).
+    #[must_use]
+    pub fn compute_with_ctx(
+        &self,
+        dom: &Dom,
+        node: NodeId,
+        env: &StyleEnv,
+        state: &dyn Fn(&str) -> bool,
+        containers: Option<&HashMap<NodeId, ContainerMeasure>>,
+    ) -> ComputedStyle {
         let mut mcache = MatchCache::default();
         let root_fs = self.root_font_size(dom, env, state);
         let parent = parent_computed(
@@ -1414,6 +1479,7 @@ impl StyleEngine {
             &mut HashMap::new(),
             &mut mcache,
             root_fs,
+            containers,
         );
         self.compute_with_parent(
             dom,
@@ -1425,6 +1491,7 @@ impl StyleEngine {
             &mut mcache,
             &AncestorFilter::of_ancestors(dom, node),
             root_fs,
+            containers,
         )
     }
 
@@ -1451,6 +1518,10 @@ impl StyleEngine {
             &mut mcache,
             &AncestorFilter::of_ancestors(dom, doc_el),
             env.font_size_base,
+            // Pas de ctx ici : la base `rem` sert à l'évaluation
+            // même des règles taguées — un `@container` sur
+            // `:root` n'a de toute façon pas d'ancêtre mesuré.
+            None,
         )
         .get("font-size")
         .and_then(|v| v.trim().trim_end_matches("px").trim().parse::<f32>().ok())
@@ -1459,17 +1530,28 @@ impl StyleEngine {
     }
 
     /// Évalue une condition `@container` contre la taille
-    /// `(w, h)` d'un conteneur (R-122 — css-contain-3 §4) :
-    /// `(min-?width|max-?width|min-?height|max-?height: Npx)`,
-    /// clauses `and` jointes, `or` disjointes. Les unités
-    /// relatives (`em`, `%`…) ne résolvent pas → clause
-    /// ignorée (vraie — dégradation ouverte).
+    /// `(w, h)` d'un conteneur (R-122/R-190 — css-contain-3
+    /// §4) : `(min-?width|max-?width|min-?height|max-?height:
+    /// Npx)`, forme de plage MQ5 (`(width >= 400px)`,
+    /// `(400px <= width <= 800px)`), clauses `and` jointes,
+    /// `or` disjointes, `not` préfixe nié par branche.
+    /// Feature inconnue ou valeur non résoluble (unité
+    /// relative, `orientation`, `style()`) → clause FAUSSE
+    /// (fail-closed : une règle non évaluable ne s'applique
+    /// jamais — dégradation vers « pas de style », jamais
+    /// vers un style faux).
     /// Consommé en seconde passe par l'appelant (la taille
     /// du conteneur n'existe qu'après layout).
     #[must_use]
     pub fn matches_container_query(query: &str, w: f32, h: f32) -> bool {
         let eval_one = |q: &str| -> bool {
+            // `not` préfixe : nie la branche entière.
+            let (neg, q) = match q.trim_start().strip_prefix("not") {
+                Some(rest) => (true, rest.trim_start()),
+                None => (false, q),
+            };
             let mut all = true;
+            let mut seen = false;
             for clause in q.split('(').skip(1) {
                 let body = clause.split(')').next().unwrap_or("").trim();
                 if body.is_empty() {
@@ -1479,33 +1561,12 @@ impl StyleEngine {
                 // parenthèse dans la forme longue — split sur
                 // `and` à l'intérieur de la clause.
                 for feat in body.split(" and ") {
-                    let feat = feat.trim();
-                    let Some((name, val)) = feat.split_once(':') else {
-                        // Feature seule (`(orientation: …)` non
-                        // porté) → ignorée (clause ouverte).
-                        continue;
-                    };
-                    let (name, val) = (name.trim(), val.trim());
-                    let v = val
-                        .trim_end_matches("px")
-                        .parse::<f32>()
-                        .unwrap_or(f32::NAN);
-                    if v.is_nan() {
-                        continue;
-                    }
-                    let hit = match name {
-                        "min-width" => w >= v,
-                        "max-width" => w <= v,
-                        "width" => (w - v).abs() < f32::EPSILON,
-                        "min-height" => h >= v,
-                        "max-height" => h <= v,
-                        "height" => (h - v).abs() < f32::EPSILON,
-                        _ => true, // feature non portée → ouverte
-                    };
-                    all &= hit;
+                    seen = true;
+                    all &= container_feature(feat.trim(), w, h);
                 }
             }
-            all
+            // Aucune feature reconnue → fausse (fail-closed).
+            seen && all != neg
         };
         // `or` disjoint — chaque branche doit matcher seule.
         query.split(" or ").map(str::trim).any(eval_one)
@@ -1526,6 +1587,25 @@ impl StyleEngine {
         root: NodeId,
         env: &StyleEnv,
         state: &dyn Fn(&str) -> bool,
+    ) -> StyleMap {
+        self.compute_tree_with_ctx(dom, root, env, state, None)
+    }
+
+    /// Variante contextuelle (R-190 — passe 2 `@container`) :
+    /// `containers` = mesures des boîtes `container-type`
+    /// produites par `explorer_layout::measure_containers`
+    /// après un premier layout. `None` = première passe —
+    /// les règles `@container` taguées restent inertes
+    /// (sortie strictement identique à
+    /// [`StyleEngine::compute_tree_with_state`]).
+    #[must_use]
+    pub fn compute_tree_with_ctx(
+        &self,
+        dom: &Dom,
+        root: NodeId,
+        env: &StyleEnv,
+        state: &dyn Fn(&str) -> bool,
+        containers: Option<&HashMap<NodeId, ContainerMeasure>>,
     ) -> StyleMap {
         let mut map = HashMap::new();
         let mut pseudos = HashMap::new();
@@ -1550,6 +1630,7 @@ impl StyleEngine {
             &mut mcache,
             &anc,
             &mut root_fs,
+            containers,
         );
         StyleMap { map, pseudos }
     }
@@ -1594,6 +1675,23 @@ impl StyleEngine {
         parent: Option<&ComputedStyle>,
         state: &dyn Fn(&str) -> bool,
     ) -> StyleMap {
+        self.compute_scoped_with_ctx(dom, root, env, parent, state, None)
+    }
+
+    /// Variante contextuelle (R-190 — passe 2 `@container`)
+    /// de [`StyleEngine::compute_scoped_with_state`] — même
+    /// contrat, les règles taguées s'évaluent contre
+    /// `containers` (mesures post-layout).
+    #[must_use]
+    pub fn compute_scoped_with_ctx(
+        &self,
+        dom: &Dom,
+        root: NodeId,
+        env: &StyleEnv,
+        parent: Option<&ComputedStyle>,
+        state: &dyn Fn(&str) -> bool,
+        containers: Option<&HashMap<NodeId, ContainerMeasure>>,
+    ) -> StyleMap {
         let mut map = HashMap::new();
         let mut pseudos = HashMap::new();
         let mut mcache = MatchCache::default();
@@ -1612,6 +1710,7 @@ impl StyleEngine {
             &mut mcache,
             &anc,
             &mut root_fs,
+            containers,
         );
         StyleMap { map, pseudos }
     }
@@ -1630,9 +1729,11 @@ impl StyleEngine {
         mcache: &mut MatchCache,
         anc: &AncestorFilter,
         root_fs: &mut f32,
+        containers: Option<&HashMap<NodeId, ContainerMeasure>>,
     ) {
-        let style =
-            self.compute_with_parent(dom, node, env, parent, None, state, mcache, anc, *root_fs);
+        let style = self.compute_with_parent(
+            dom, node, env, parent, None, state, mcache, anc, *root_fs, containers,
+        );
         // L'élément racine vient d'être calculé : sa font-size
         // devient la base `rem` de tout le document (la marche
         // est parent-d'abord — ses descendants viennent après).
@@ -1667,6 +1768,7 @@ impl StyleEngine {
                         mcache,
                         anc,
                         *root_fs,
+                        containers,
                     );
                     let keep = if need_content {
                         s.get("content").is_some()
@@ -1736,6 +1838,7 @@ impl StyleEngine {
                                 &mut *mcache,
                                 &child_anc,
                                 root_fs,
+                                containers,
                             );
                         });
                     }
@@ -1766,6 +1869,7 @@ impl StyleEngine {
                         &mut *mcache,
                         &child_anc,
                         root_fs,
+                        containers,
                     );
                 });
             }
@@ -1793,6 +1897,7 @@ impl StyleEngine {
         mcache: &mut MatchCache,
         anc: &AncestorFilter,
         root_fs: f32,
+        containers: Option<&HashMap<NodeId, ContainerMeasure>>,
     ) -> ComputedStyle {
         let mut props: HashMap<String, String> = HashMap::new();
         if dom.element(node).is_err() {
@@ -1840,7 +1945,8 @@ impl StyleEngine {
                 }
             }
         }
-        let mut cand = self.collect_candidates(dom, node, env, pseudo, state, mcache, anc);
+        let mut cand =
+            self.collect_candidates(dom, node, env, pseudo, state, mcache, anc, containers);
         if pseudo.is_none() {
             // `style=` vit au contexte du nœud : interne si le
             // nœud est en shadow — le rang de frontière est
@@ -2321,6 +2427,7 @@ impl StyleEngine {
         state: &dyn Fn(&str) -> bool,
         mcache: &mut MatchCache,
         anc: &AncestorFilter,
+        containers: Option<&HashMap<NodeId, ContainerMeasure>>,
     ) -> Vec<(u8, u8, Vec<u32>, Specificity, u32, &'a Declaration)> {
         // Arbre d'appartenance du nœud (R-96) : `None` =
         // document. Arbitre le confinement des feuilles.
@@ -2350,6 +2457,19 @@ impl StyleEngine {
             // Chaque groupe `@media` englobant doit matcher.
             if !rule.media.is_empty() && !rule.media.iter().all(|qs| media_matches(env, qs)) {
                 return;
+            }
+            // R-190 — règle issue d'un `@container` : inerte
+            // hors seconde passe (`containers` absent) ou si
+            // sa query échoue sur le conteneur ancêtre mesuré.
+            if let Some(ci) = rule.container {
+                let ok = containers.is_some_and(|map| {
+                    self.container_queries
+                        .get(ci as usize)
+                        .is_some_and(|pred| container_pred_matches(dom, node, pred, map))
+                });
+                if !ok {
+                    return;
+                }
             }
             let Some(sel) = rule.selectors.get(e.selector as usize) else {
                 return;
@@ -2422,6 +2542,106 @@ impl StyleEngine {
             (*rank, *scope_rank, layer.clone(), *spec, *order)
         });
         rules_cand
+    }
+}
+
+/// R-190 — `pred` `@container` s'applique-t-il à `node` ?
+/// Le conteneur de la query = l'ancêtre DOM le plus proche
+/// mesuré (`containers`) et passant le filtre de nom ; sa
+/// border-box mesurée est évaluée par
+/// [`StyleEngine::matches_container_query`]. Aucun ancêtre
+/// éligible → la règle reste inerte (spec : sans conteneur,
+/// la query est fausse). Approximation MVP : l'éligibilité
+/// par feature n'est pas modélisée — un conteneur
+/// `inline-size` répond aussi aux queries height (spec :
+/// seules les queries d'axe inline y sont admises).
+fn container_pred_matches(
+    dom: &Dom,
+    node: NodeId,
+    pred: &CollectedContainer,
+    containers: &HashMap<NodeId, ContainerMeasure>,
+) -> bool {
+    let mut cur = node;
+    while let Ok(Some(p)) = dom.parent(cur) {
+        if let Some(m) = containers.get(&p) {
+            // Filtre de nom : la query nommée ne se pose qu'au
+            // premier conteneur ancêtre portant CE nom — les
+            // conteneurs intermédiaires d'un autre nom sont
+            // sautés (css-contain-3 §4 — nearest matching).
+            if pred
+                .name
+                .as_deref()
+                .is_none_or(|n| m.names.iter().any(|x| x == n))
+            {
+                return StyleEngine::matches_container_query(&pred.query, m.w, m.h);
+            }
+        }
+        cur = p;
+    }
+    false
+}
+
+/// Une feature `(…)` de query `@container` (R-190) :
+/// `(name: Npx)` ou la forme de plage MQ5
+/// `(width >= 400px)` / `(400px <= width <= 800px)` /
+/// `(400px < width)`. Inconnue ou valeur non résoluble →
+/// **fausse** (fail-closed, voir `matches_container_query`).
+fn container_feature(feat: &str, w: f32, h: f32) -> bool {
+    if let Some((name, val)) = feat.split_once(':') {
+        let Ok(v) = val.trim().trim_end_matches("px").trim().parse::<f32>() else {
+            return false;
+        };
+        return match name.trim() {
+            "min-width" => w >= v,
+            "max-width" => w <= v,
+            "width" => (w - v).abs() < f32::EPSILON,
+            "min-height" => h >= v,
+            "max-height" => h <= v,
+            "height" => (h - v).abs() < f32::EPSILON,
+            _ => false, // feature inconnue → fausse (spec)
+        };
+    }
+    container_range_feature(feat, w, h)
+}
+
+/// Forme de plage MQ5 : `feature op val`, `val op feature`
+/// ou `v1 op feature op v2` — `op` ∈ `< <= > >= =`.
+/// Inconnu → `false` (fail-closed).
+fn container_range_feature(feat: &str, w: f32, h: f32) -> bool {
+    let toks: Vec<&str> = feat.split_whitespace().collect();
+    let size_of = |name: &str| match name {
+        "width" => Some(w),
+        "height" => Some(h),
+        _ => None,
+    };
+    let px = |t: &str| t.trim().trim_end_matches("px").trim().parse::<f32>().ok();
+    // `a op b` : comparaison dans le sens écrit.
+    let cmp = |a: f32, op: &str, b: f32| -> Option<bool> {
+        Some(match op {
+            "<" => a < b,
+            "<=" => a <= b,
+            ">" => a > b,
+            ">=" => a >= b,
+            "=" | "==" => (a - b).abs() < f32::EPSILON,
+            _ => return None,
+        })
+    };
+    match toks.as_slice() {
+        // `width >= 400px`
+        [name, op, val] if size_of(name).is_some() => size_of(name)
+            .and_then(|s| px(val).and_then(|v| cmp(s, op, v)))
+            .unwrap_or(false),
+        // `400px <= width`
+        [val, op, name] if size_of(name).is_some() => size_of(name)
+            .and_then(|s| px(val).and_then(|v| cmp(v, op, s)))
+            .unwrap_or(false),
+        // `400px <= width <= 800px`
+        [v1, op1, name, op2, v2] if size_of(name).is_some() => size_of(name)
+            .and_then(|s| {
+                Some(px(v1).and_then(|a| cmp(a, op1, s))? && px(v2).and_then(|b| cmp(s, op2, b))?)
+            })
+            .unwrap_or(false),
+        _ => false,
     }
 }
 
@@ -3397,6 +3617,7 @@ fn parent_computed(
     memo: &mut HashMap<NodeId, ComputedStyle>,
     mcache: &mut MatchCache,
     root_fs: f32,
+    containers: Option<&HashMap<NodeId, ContainerMeasure>>,
 ) -> Option<ComputedStyle> {
     let parent = match dom.parent(node) {
         Ok(Some(p)) if dom.element(p).is_ok() => p,
@@ -3406,7 +3627,9 @@ fn parent_computed(
         return Some(s.clone());
     }
     let grand = explorer_common::deep(|| {
-        parent_computed(engine, dom, parent, env, state, memo, mcache, root_fs)
+        parent_computed(
+            engine, dom, parent, env, state, memo, mcache, root_fs, containers,
+        )
     });
     let s = engine.compute_with_parent(
         dom,
@@ -3418,6 +3641,7 @@ fn parent_computed(
         mcache,
         &AncestorFilter::of_ancestors(dom, parent),
         root_fs,
+        containers,
     );
     memo.insert(parent, s.clone());
     Some(s)

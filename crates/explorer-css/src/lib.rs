@@ -38,8 +38,8 @@ pub mod transition;
 pub mod value;
 
 pub use cascade::{
-    initial_value, is_inherited, media_matches, ColorScheme, ComputedStyle, Origin, StyleEngine,
-    StyleEnv, StyleMap,
+    initial_value, is_inherited, media_matches, CollectedContainer, ColorScheme, ComputedStyle,
+    ContainerMeasure, Origin, StyleEngine, StyleEnv, StyleMap,
 };
 pub use fontface::{FontFace, FontSrc};
 pub use parser::{

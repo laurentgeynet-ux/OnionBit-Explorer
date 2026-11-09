@@ -2750,6 +2750,155 @@ fn container_type_traverse_la_cascade() {
     assert_eq!(st.get("container-name"), Some("card"));
 }
 
+// ===== R-190 — `@container` : règles taguées + ctx de mesure =====
+
+/// Table de mesures `NodeId → ContainerMeasure` construite
+/// à la main — la même que `explorer_layout::measure_containers`
+/// produira après layout.
+fn ctx_of(
+    entries: &[(NodeId, f32, f32, &[&str])],
+) -> std::collections::HashMap<NodeId, explorer_css::ContainerMeasure> {
+    entries
+        .iter()
+        .map(|(n, w, h, names)| {
+            (
+                *n,
+                explorer_css::ContainerMeasure {
+                    w: *w,
+                    h: *h,
+                    names: names.iter().map(|s| (*s).to_string()).collect(),
+                },
+            )
+        })
+        .collect()
+}
+
+#[test]
+fn container_passe1_inerte_passe2_evalue_sur_mesure() {
+    // Passe 1 (ctx absent) : la règle `@container` reste
+    // inerte — comportement pré-R-190 préservé. Passe 2 :
+    // le MÊME sélecteur s'applique ou non selon la taille
+    // MESURÉE du conteneur (500 ≥ 400 oui, 300 non).
+    let f = fixture();
+    let mut e = StyleEngine::new();
+    e.add_css(
+        "@container (min-width: 400px) { .b { width: 123px } }",
+        Origin::Author,
+    );
+    assert_ne!(
+        e.compute(&f.dom, f.p, &env()).get("width"),
+        Some("123px"),
+        "passe 1 : règle `@container` doit rester inerte"
+    );
+    let wide = ctx_of(&[(f.div, 500.0, 200.0, &[])]);
+    assert_eq!(
+        e.compute_with_ctx(&f.dom, f.p, &env(), &|_| false, Some(&wide))
+            .get("width"),
+        Some("123px"),
+        "conteneur 500px ≥ 400 → règle active"
+    );
+    let narrow = ctx_of(&[(f.div, 300.0, 200.0, &[])]);
+    assert_ne!(
+        e.compute_with_ctx(&f.dom, f.p, &env(), &|_| false, Some(&narrow))
+            .get("width"),
+        Some("123px"),
+        "conteneur 300px < 400 → inerte"
+    );
+}
+
+#[test]
+fn container_nom_filtre_le_conteneur() {
+    // `@container nav (…)` ne se pose qu'au premier ancêtre
+    // conteneur portant CE nom — anonyme ou autre nom : inerte.
+    let f = fixture();
+    let mut e = StyleEngine::new();
+    e.add_css(
+        "@container nav (min-width: 400px) { .b { width: 123px } }",
+        Origin::Author,
+    );
+    for (names, expect) in [
+        (vec!["nav"], Some("123px")),
+        (vec!["other"], None),
+        (vec![], None),
+        (vec!["other", "nav"], Some("123px")),
+    ] {
+        let map = ctx_of(&[(f.div, 500.0, 200.0, &names)]);
+        assert_eq!(
+            e.compute_with_ctx(&f.dom, f.p, &env(), &|_| false, Some(&map))
+                .get("width"),
+            expect,
+            "names={names:?}"
+        );
+    }
+}
+
+#[test]
+fn container_sans_ancetre_mesure_inerte() {
+    // Le conteneur mesuré n'est PAS un ancêtre du nœud →
+    // inerte (spec : sans conteneur, la query est fausse).
+    let mut dom = Dom::new();
+    let doc = dom.document();
+    let c = dom.create_element("div").unwrap();
+    dom.append_child(doc, c).unwrap();
+    let p = dom.create_element("p").unwrap();
+    dom.set_attribute(p, "class", "b").unwrap();
+    dom.append_child(doc, p).unwrap();
+    let mut e = StyleEngine::new();
+    e.add_css(
+        "@container (min-width: 400px) { .b { width: 123px } }",
+        Origin::Author,
+    );
+    // `c` est conteneur mais frère de `p`, pas ancêtre.
+    let map = ctx_of(&[(c, 500.0, 200.0, &[])]);
+    assert_ne!(
+        e.compute_with_ctx(&dom, p, &env(), &|_| false, Some(&map))
+            .get("width"),
+        Some("123px"),
+        "conteneur non-ancêtre → inerte"
+    );
+}
+
+#[test]
+fn container_query_plage_not_et_fail_closed() {
+    let m = StyleEngine::matches_container_query;
+    // Forme de plage MQ5.
+    assert!(m("(width >= 400px)", 500.0, 100.0));
+    assert!(!m("(width >= 400px)", 300.0, 100.0));
+    assert!(m("(400px <= width <= 800px)", 500.0, 100.0));
+    assert!(!m("(400px <= width <= 800px)", 900.0, 100.0));
+    assert!(m("(width < 800px)", 500.0, 100.0));
+    // `not` nie la branche.
+    assert!(!m("not (min-width: 400px)", 500.0, 100.0));
+    assert!(m("not (min-width: 400px)", 300.0, 100.0));
+    // Fail-closed (R-190) : feature inconnue, valeur non
+    // résoluble ou query vide → FAUSSE — une règle non
+    // évaluable ne s'applique jamais.
+    assert!(!m("(orientation: portrait)", 500.0, 100.0));
+    assert!(!m("(min-width: 50%)", 500.0, 100.0));
+    assert!(!m("(foo: 1px)", 500.0, 100.0));
+    assert!(!m("", 500.0, 100.0));
+    assert!(!m("not-a-query", 500.0, 100.0));
+}
+
+#[test]
+fn container_shorthand_eclate_nom_et_type() {
+    // `container: <name> / <type>` éclate en longhands ;
+    // type absent → initiale (non émise).
+    let f = fixture();
+    let mut e = StyleEngine::new();
+    e.add_css("div{container: card / inline-size}", Origin::Author);
+    let st = e.compute(&f.dom, f.div, &env());
+    assert_eq!(st.get("container-name"), Some("card"));
+    assert_eq!(st.get("container-type"), Some("inline-size"));
+    let mut e = StyleEngine::new();
+    e.add_css("div{container: a b}", Origin::Author);
+    assert_eq!(
+        e.compute(&f.dom, f.div, &env()).get("container-name"),
+        Some("a b"),
+        "plusieurs noms sans type → container-name seul"
+    );
+}
+
 /// §B-75 sonde — feuille atomique réelle (stylexjs.com,
 /// Tailwind+stylex `@layer base`) : chaque règle qualifiée
 /// doit survivre au parse — un sélecteur non couvert

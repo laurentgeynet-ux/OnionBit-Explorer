@@ -1836,3 +1836,39 @@ fn counter_roman(n: i32, upper: bool) -> String {
         out.to_lowercase()
     }
 }
+
+/// Mesures des conteneurs `@container` (R-190 — css-contain-3,
+/// passe 2) : `NodeId` → border-box posée + noms
+/// `container-name`. Une boîte est conteneur si son
+/// `container-type` ∈ {`size`, `inline-size`} ET qu'elle
+/// génère une boîte de niveau non-inline (spec : la
+/// propriété est inerte sur `display:inline` ; les boîtes
+/// sans `node` — anonymes, `display:contents` aplati —
+/// ne peuvent pas être ciblées). Premier nœud gagnant en
+/// cas de fragmentation.
+#[must_use]
+pub fn measure_containers(
+    root: &LayoutBox,
+) -> std::collections::HashMap<NodeId, explorer_css::ContainerMeasure> {
+    let mut out = std::collections::HashMap::new();
+    let mut stack = vec![root];
+    while let Some(bx) = stack.pop() {
+        if let Some(n) = bx.node {
+            let ty = bx.style.get("container-type").unwrap_or("normal");
+            if matches!(ty.trim(), "size" | "inline-size") && !bx.kind.is_inline_level() {
+                let names = bx
+                    .style
+                    .get("container-name")
+                    .map(|v| v.split_whitespace().map(str::to_string).collect())
+                    .unwrap_or_default();
+                out.entry(n).or_insert(explorer_css::ContainerMeasure {
+                    w: bx.rect.width,
+                    h: bx.rect.height,
+                    names,
+                });
+            }
+        }
+        stack.extend(bx.children.iter());
+    }
+    out
+}

@@ -641,3 +641,46 @@ fn display_contents_ordinaire_toujours_aplati() {
     };
     assert!(find(&bx, c).is_none(), "div contents → aucune boîte");
 }
+
+/// R-190 — `measure_containers` : border-box posée + noms
+/// `container-name` des boîtes `container-type` non-`normal`.
+#[test]
+fn measure_containers_mesure_les_container_type() {
+    use explorer_layout::{layout_tree, measure_containers, BlockCtx};
+    let (dom, mut bx) = tree(
+        "<html><body>\
+         <div id=c style=\"container-type:inline-size;container-name:nav;\
+         width:200px;height:50px\"><p>x</p></div>\
+         <div id=n style=\"width:80px\">y</div>\
+         <span id=i style=\"container-type:inline-size\">z</span>\
+         </body></html>",
+    );
+    layout_tree(&mut bx, 400.0, &BlockCtx::default());
+    let by_id = |id: &str| -> NodeId {
+        let mut q = vec![dom.document()];
+        while let Some(n) = q.pop() {
+            if dom.attribute(n, "id").ok().flatten().as_deref() == Some(id) {
+                return n;
+            }
+            if let Ok(ch) = dom.children(n) {
+                q.extend(ch.iter().rev());
+            }
+        }
+        panic!("#{id} absent")
+    };
+    let map = measure_containers(&bx);
+    let c = map.get(&by_id("c")).expect("conteneur mesuré");
+    assert!(
+        (c.w - 200.0).abs() < 1.0 && (c.h - 50.0).abs() < 1.0,
+        "border-box posée attendue : {c:?}"
+    );
+    assert_eq!(c.names, vec!["nav".to_string()]);
+    assert!(
+        !map.contains_key(&by_id("n")),
+        "container-type normal → pas conteneur"
+    );
+    assert!(
+        !map.contains_key(&by_id("i")),
+        "container-type sur inline → inerte (spec)"
+    );
+}
