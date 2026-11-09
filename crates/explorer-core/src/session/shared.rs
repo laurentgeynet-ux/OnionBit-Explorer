@@ -558,7 +558,22 @@ pub async fn pump_timers_shared(sess: &tokio::sync::Mutex<Session>, tab: TabId) 
     let tb = Instant::now();
     let out = tokio::task::spawn_blocking(move || {
         dlv_info!("pump: run");
-        let jobs = eng.run_pending_bounded(max).unwrap_or(0);
+        // §B-104 — l'exception d'un handler (worker `onmessage`,
+        // timer, thenable) remontait jusqu'ici et mourait dans
+        // `unwrap_or(0)` : promesse pendante sans témoin. Nommée.
+        let jobs = match eng.run_pending_bounded(max) {
+            Ok(n) => n,
+            Err(e) => {
+                if !matches!(e, explorer_js::JsError::Timeout) {
+                    tracing::warn!(
+                        tab,
+                        error = %e,
+                        "pump: exception dans un handler JS (avant : avalée)"
+                    );
+                }
+                0
+            }
+        };
         dlv_info!("pump: js jobs={jobs}");
         let mutated = if sync_ok {
             let m = Session::sync_for_apply(&mut *eng);
@@ -636,7 +651,21 @@ pub async fn eval_shared(sess: &tokio::sync::Mutex<Session>, tab: TabId, src: St
         // d'hydratation, setTimeout(0)…) — on les draine pour
         // que la valeur rendue reflète l'état stabilisé.
         dlv_info!("pump: evalrun");
-        let jobs = eng.run_pending_bounded(max).unwrap_or(0);
+        // Même honnêteté que la pompe périodique : l'exception
+        // d'un handler drainé ici était avalée (`unwrap_or(0)`).
+        let jobs = match eng.run_pending_bounded(max) {
+            Ok(n) => n,
+            Err(e) => {
+                if !matches!(e, explorer_js::JsError::Timeout) {
+                    tracing::warn!(
+                        tab,
+                        error = %e,
+                        "pump: exception dans un handler JS après eval (avant : avalée)"
+                    );
+                }
+                0
+            }
+        };
         dlv_info!("pump: evalret jobs={jobs}");
         let mutated = if sync_ok {
             Session::sync_for_apply(&mut *eng)

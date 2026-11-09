@@ -129,10 +129,12 @@ fn transmuxer_bundle_emits_on_real_segment() {
     let ts = include_bytes!("data/foreman-h264.ts");
     let enc = b64(ts);
     let script = format!(
-        "var bin = atob({enc:?});\
-         var ab = new ArrayBuffer(bin.length);\
-         var u8 = new Uint8Array(ab);\
-         for (var i = 0; i < bin.length; i++) u8[i] = bin.charCodeAt(i);\
+        // `fromBase64` natif — l'injection par boucle
+        // `charCodeAt` (62 040 itérations interprétées)
+        // prenait > 60 s en debug et butait la deadline
+        // boot wall-clock ; mêmes octets, mêmes assertions.
+        "var u8 = Uint8Array.fromBase64({enc:?});\
+         var ab = u8.buffer;\
          var w = new Worker('tmx.js');\
          var msgs = [];\
          w.onmessage = function(ev) {{\

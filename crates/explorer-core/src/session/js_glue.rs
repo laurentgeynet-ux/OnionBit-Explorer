@@ -163,7 +163,19 @@ impl Session {
                     entry.js_stall_until = Some(Instant::now() + self.js_stall_cooldown);
                     0
                 }
-                Err(_) => 0,
+                Err(e) => {
+                    // §B-104 — une exception jetée dans un handler
+                    // (timer, `onmessage` worker, `onload` XHR,
+                    // thenable) remontait ici en `Err` et était
+                    // avalée en `0` : promesse pendante en silence.
+                    // Nommée — le mur réel doit rester visible.
+                    tracing::warn!(
+                        tab,
+                        error = %e,
+                        "pump: exception dans un handler JS (avant : avalée)"
+                    );
+                    0
+                }
             };
             dlv_info!("pump: js jobs={jobs}");
             let m = if sync_ok {

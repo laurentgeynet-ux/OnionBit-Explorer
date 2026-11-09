@@ -10668,3 +10668,37 @@ un crate PIPELINE.- [x] **JS-C422. Deadline honnête — canal session ↔ budge
   en bout vert, clippy propre. **Re-flight dash.js + bitmovin
   requis.**
 
+- [x] **JS-C430. §B-104 — livraison worker sous le realm
+  créateur** (mur bitmovin/HLS : `cannot read 'buffer' of
+  Null` au retour transmuxer — vols 725/727). Chaque realm a
+  ses intrinsics (`context_new` swappe `global`/`protos`) ;
+  `run_microtasks` itère tous les ctxs vivants puis
+  `pump_workers` livrait sous le **dernier itéré** — une
+  iframe ads (sodar/ima). `wire_decode`/`new_ta`
+  reconstruisaient `initSegment`/`data` avec le
+  `Uint8Array.prototype` de l'iframe → `getTypedArrayType`
+  (`instanceof` au realm principal) → `false` →
+  `ArrayHelper.append` → `null` → `t.data=null` → crash `Rz`.
+  `WorkerSlot.ctx` capture le créateur ; `pump_workers`
+  `switch_to(slot.ctx)` avant décodage+livraison (port =
+  realm propriétaire, spec). Télémétrie honnête : les
+  exceptions de pompe JS (`run_pending`, timers) remontées en
+  `warn` borné au lieu d'`unwrap_or(0)`/`Err→0` avalés —
+  bitmovin prouvait qu'un handler jeté = promesse pending
+  sans trace. Sondes durables `worker.*` : rail wire complet
+  `post/onmsg/out/in` + `in.shape` (kind + verdict
+  `instanceof` post-decode) + `in.fail` (erreur + forme).
+  Verrous : `b104_realm_worker_livre_sous_ctx_createur`
+  (rejoue `context_new`+drain → erreur exacte du vol sans
+  fix, `buf:true` avec), `b104_vrai_muxjs_segment_exploitable`
+  (vrai worker mux.js + vrai TS vidéo/audio cache vol),
+  `b104_transmux_wire` 2/2, worker 16/16, c78_contexts 20/20.
+  **Vol 730 : `ctx=0` aux livraisons, 0 `in.fail`, 21
+  `mse.appendBuffer` (~1,7 Mo), `updateend`/`progress`,
+  `duration=210`, `readyState=4`, `buffered=43,6 s`** — la
+  chaîne transmuxer→`v.Segment`→`SourceBuffer` traverse bout
+  en bout. Latent nommé : `drain_pending_msgs`/
+  `drain_port_msgs` partagent la même classe (postMessage/
+  MessageChannel sous dernier ctx) — même patron à appliquer
+  au premier cas réel.
+
