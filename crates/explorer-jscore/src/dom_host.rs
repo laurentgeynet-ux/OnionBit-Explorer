@@ -12255,6 +12255,25 @@ fn ce_call(e: &mut Engine, el: Value, cb_name: &str, args: &[Value]) -> JsResult
                 // travaille dessus ; `outerHTML` en donne la
                 // structure exacte au moment du throw (les
                 // `on-*`/bindings/`<template>` imbriqués).
+                // Branche du stamp : `importNode(X.content ||
+                // F.content)` — `X.content` (fragment rempli au
+                // parse imbriqué) vs `F.content` vivant. Le
+                // comptage des `childNodes` tranche laquelle
+                // des deux était vide au moment du throw.
+                let counts = e
+                    .get_prop_value(el.clone(), "_template")
+                    .ok()
+                    .map(|t| {
+                        let content = cct_prop_len(e, &t, &["content", "childNodes"]);
+                        let xcontent = cct_prop_len(
+                            e,
+                            &t,
+                            &["_templateInfo", "content", "childNodes"],
+                        );
+                        let ni = cct_prop_len(e, &t, &["_templateInfo", "nodeInfoList"]);
+                        format!("cn={content} xc={xcontent} ni={ni}")
+                    })
+                    .unwrap_or_else(|| "<no-template>".to_string());
                 let tpl = e
                     .get_prop_value(el, "_template")
                     .ok()
@@ -12267,12 +12286,29 @@ fn ce_call(e: &mut Engine, el: Value, cb_name: &str, args: &[Value]) -> JsResult
                         },
                     );
                 tracing::info!(target: "dom_probe", site = "ce.cc_threw",
-                    tag = %tag, cb = %cb_name, "err={msg} src={src} tpl={tpl}");
+                    tag = %tag, cb = %cb_name, "err={msg} src={src} counts={counts} tpl={tpl}");
             }
             return Err(thr);
         }
     }
     Ok(())
+}
+
+/// `obj.path… .length` décrit — `"?"` si un maillon manque
+/// (sonde `ce.cc_threw` §B-126 — comptages `content`/
+/// `X.content`/`nodeInfoList` au moment du throw).
+fn cct_prop_len(e: &mut Engine, obj: &Value, path: &[&str]) -> String {
+    let mut cur = obj.clone();
+    for key in path {
+        cur = match e.get_prop_value(cur, key) {
+            Ok(v) => v,
+            Err(_) => return "?".to_string(),
+        };
+    }
+    match e.get_prop_value(cur, "length") {
+        Ok(v) => e.describe(v),
+        Err(_) => "?".to_string(),
+    }
 }
 
 /// `connectedCallback`/`disconnectedCallback` (sans arguments).
