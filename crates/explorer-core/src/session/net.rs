@@ -3880,12 +3880,32 @@ impl Session {
         // passe (ordre d'arrivée préservé — la file de jobs
         // moteur est globale).
         let mut touched: Vec<TabId> = Vec::new();
-        let mut it = done.into_iter();
+        // §B-54 phase 2 — les fetch/XHR passent AVANT les
+        // sous-ressources dynamiques dans la rafale : un
+        // fetch de données SPA (`/api/initial` explore.org)
+        // mourait de timeout (~20 s) en attendant derrière
+        // 400+ `<img>`/`<link>` payant chacun leur tour
+        // post-script. Les navigateurs séparent la file
+        // réseau du pipeline rendu — les promesses de données
+        // priment sur les `load` de sous-ressources. L'ordre
+        // intra-groupe reste FIFO (partition stable).
+        let (fetches, rest): (Vec<NetDone>, Vec<NetDone>) = done.into_iter().partition(|d| {
+            d.script.is_none()
+                && d.dyn_module.is_none()
+                && d.frame.is_none()
+                && d.img.is_none()
+                && d.link.is_none()
+                && d.import.is_none()
+        });
+        let mut it = fetches.into_iter().chain(rest);
         while let Some(mut d) = it.next() {
             if !self.poll_net_budget.is_zero() && start.elapsed() > self.poll_net_budget {
-                let deferred = 1 + it.len();
+                let mut deferred = 1;
                 self.pending_net_done.push_back(d);
-                self.pending_net_done.extend(it);
+                for rest in it {
+                    deferred += 1;
+                    self.pending_net_done.push_back(rest);
+                }
                 tracing::warn!(
                     deferred,
                     budget_ms = self.poll_net_budget.as_millis(),

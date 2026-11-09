@@ -3834,6 +3834,123 @@ fn drain_net_done_mutualise_le_tour_post_script() {
     assert_eq!(runs.load(Ordering::SeqCst), 2);
 }
 
+/// §B-54 phase 2 (explore.org vol 768) — un fetch/XHR
+/// entré dans le `NetDone` APRÈS des sous-ressources
+/// dynamiques est livré AVANT elles : les promesses de
+/// données priment sur les `load` de `<img>`/`<link>`
+/// (file réseau vs pipeline rendu — l'ordre intra-groupe
+/// reste FIFO).
+#[test]
+fn drain_net_done_priorise_les_fetch() {
+    use std::sync::Mutex;
+    use std::time::Instant;
+
+    /// Journal d'ordre — `fetch:` vs `img:` enregistrés à
+    /// l'appel moteur.
+    struct OrderNet {
+        order: Arc<Mutex<Vec<String>>>,
+    }
+    impl explorer_js::JsEngine for OrderNet {
+        fn eval(&mut self, _src: &str) -> Result<String, explorer_js::JsError> {
+            Ok("undefined".to_string())
+        }
+        fn deliver_net_response(
+            &mut self,
+            resp: explorer_js::NetResponse,
+        ) -> Result<(), explorer_js::JsError> {
+            self.order
+                .lock()
+                .unwrap()
+                .push(format!("fetch:{}", resp.handle));
+            Ok(())
+        }
+        fn deliver_dyn_img(&mut self, _ctx: explorer_js::JsCtxId, seq: u64, _ok: bool) {
+            self.order.lock().unwrap().push(format!("img:{seq}"));
+        }
+        fn set_budget(&mut self, _ops: u64) {}
+    }
+
+    let mut s = Session::with_config(
+        Arc::new(FailTransport),
+        Arc::new(TestFont),
+        SessionConfig::default(),
+    );
+    let tab = s.open_tab();
+    let order = Arc::new(Mutex::new(Vec::new()));
+    {
+        let e = s.tabs.get_mut(&tab).expect("tab");
+        e.url = Some(Url::parse("https://x.test/").expect("url"));
+        e.js = Some(Box::new(OrderNet {
+            order: order.clone(),
+        }));
+    }
+    let page = Url::parse("https://x.test/").expect("page");
+    let img = NetDone {
+        tab,
+        handle: 100,
+        cross: false,
+        mode: explorer_net::http::FetchMode::Cors,
+        credentials: explorer_net::http::FetchCredentials::Omit,
+        page_origin: "https://x.test".to_string(),
+        cors_unsafe: Vec::new(),
+        req_url: page.clone(),
+        partition: None,
+        out: Ok(explorer_net::http::Response {
+            status: 200,
+            reason: "ok".to_string(),
+            headers: Vec::new(),
+            body: Vec::new(),
+            reused_connection: false,
+            resolved_url: None,
+        }),
+        script: None,
+        frame: None,
+        img: Some(super::net_items::DynImgMeta {
+            ctx: explorer_js::JS_CTX_TOP,
+            seq: 7,
+            src_key: "i".to_string(),
+            url: page.clone(),
+            page: page.clone(),
+        }),
+        link: None,
+        dyn_module: None,
+        import: None,
+    };
+    let fetch = NetDone {
+        tab,
+        handle: 1,
+        cross: false,
+        mode: explorer_net::http::FetchMode::Cors,
+        credentials: explorer_net::http::FetchCredentials::Omit,
+        page_origin: "https://x.test".to_string(),
+        cors_unsafe: Vec::new(),
+        req_url: page.clone(),
+        partition: None,
+        out: Ok(explorer_net::http::Response {
+            status: 200,
+            reason: "ok".to_string(),
+            headers: Vec::new(),
+            body: Vec::new(),
+            reused_connection: false,
+            resolved_url: None,
+        }),
+        script: None,
+        frame: None,
+        img: None,
+        link: None,
+        dyn_module: None,
+        import: None,
+    };
+    // L'img arrive EN PREMIER dans le vec — le fetch la
+    // déborde quand même (priorité données > sous-ressource).
+    s.drain_net_done(vec![img, fetch], Instant::now());
+    assert_eq!(
+        *order.lock().unwrap(),
+        vec!["fetch:1".to_string(), "img:7".to_string()],
+        "fetch livré avant l'img malgré son arrivée en seconde position"
+    );
+}
+
 /// J4/§B-12 (bookshop vol 95) — une fois `heap_dead` armé,
 /// chaque éval suivante échoue avec la même signature « heap
 /// memory limit exceeded » mais une pile JS différente par
