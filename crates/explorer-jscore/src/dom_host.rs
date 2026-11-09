@@ -6043,6 +6043,45 @@ impl Host for DocumentHost {
                 };
                 Ok(Some(Value::Bool(has)))
             }
+            // §B-121 — `document.getRootNode()` : annoncé par
+            // `DOC_METHODS` mais non implémenté → le trampoline
+            // rendait `Undefined`, lu `n.nodeType` par le
+            // commit React (`fu`) → TypeError → commit avorté
+            // → page blanche (explore.org/arte.tv). Spec : la
+            // racine d'un document est **lui-même** (avec ou
+            // sans `composed`) → `this` donne l'identité `===`.
+            "getRootNode" => Ok(Some(_this)),
+            // Même classe — méthodes Node annoncées dans
+            // `DOC_METHODS` sans implémentation (Undefined au
+            // retour). Délégations spec sur la racine.
+            "isSameNode" => {
+                let r = node_for_in(e, arg(args, 0), &self.dom)
+                    .is_some_and(|o| o == self.dom.borrow().root);
+                Ok(Some(Value::Bool(r)))
+            }
+            "isEqualNode" => {
+                let r = node_for_in(e, arg(args, 0), &self.dom)
+                    .is_some_and(|o| self.dom.borrow().is_equal_node(self.dom.borrow().root, o));
+                Ok(Some(Value::Bool(r)))
+            }
+            "compareDocumentPosition" => {
+                // `other` comparé à la racine : même nœud → 0 ;
+                // descendant de la racine → CONTAINED_BY(16)+FOLLOWING(4)=20 ;
+                // ancêtre → CONTAINS(8)+PRECEDING(2)=10 ;
+                // ailleurs → DISCONNECTED(1).
+                let root = self.dom.borrow().root;
+                let r = match node_for_in(e, arg(args, 0), &self.dom) {
+                    Some(o) if o == root => 0u32,
+                    Some(o) if self.dom.borrow().is_ancestor_or_self(root, o) => 20u32,
+                    Some(o) if self.dom.borrow().is_ancestor_or_self(o, root) => 10u32,
+                    _ => 1u32,
+                };
+                Ok(Some(Value::Num(f64::from(r))))
+            }
+            "normalize" => {
+                self.dom.borrow_mut().normalize(self.dom.borrow().root);
+                Ok(Some(Value::Undefined))
+            }
             _ => Ok(None),
         }
     }
