@@ -3954,6 +3954,26 @@ impl Engine {
         s
     }
 
+    /// Verbatim borné (`max` caractères) de la fonction en tête
+    /// de la pile d'appels — `span` tranche le littéral dans
+    /// `src_text` (§B-120 : nommer le corps appelant, mot pour
+    /// mot, dans les sondes de mutation DOM). `""` si la pile
+    /// est vide ou la fonction synthétique (sans `src_text`).
+    pub(crate) fn stack_top_fn_src(&self, max: usize) -> String {
+        self.call_stack
+            .last()
+            .and_then(|lit| {
+                lit.src_text.as_ref().map(|t| {
+                    let (lo, hi) = lit.span;
+                    t.chars()
+                        .skip(lo)
+                        .take(hi.saturating_sub(lo).min(max))
+                        .collect::<String>()
+                })
+            })
+            .unwrap_or_default()
+    }
+
     /// New `Error`-family object value (`{name, message}` on `proto`).
     pub(crate) fn error_value(&mut self, proto: ObjId, name: &str, msg: &str) -> Value {
         let id = self.heap.alloc_obj(Object::ordinary(Value::Obj(proto)));

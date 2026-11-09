@@ -8606,9 +8606,33 @@ impl Host for NodeHost {
                                 .collect::<Vec<_>>()
                                 .join(" <- ");
                             let stack: String = stack.chars().take(600).collect();
+                            // `currentScript` au kill — nomme
+                            // l'éval en cours (`<null>` si
+                            // microtask/handler asynchrone).
+                            let cur = e.hooks.current_script.map_or_else(
+                                || "<null>".to_string(),
+                                |n| {
+                                    let d = self.dom.borrow();
+                                    let s = d
+                                        .attr(n, "src")
+                                        .unwrap_or("<inline>")
+                                        .chars()
+                                        .take(120)
+                                        .collect::<String>();
+                                    format!("{}:{}", d.nodes[n as usize].tag, s)
+                                },
+                            );
+                            // §B-120 : le verbatim de la
+                            // fonction en tête de pile —
+                            // `span` tranche le littéral dans
+                            // `src_text` (borné 400 c) : le
+                            // corps qui appelle `removeChild`
+                            // est nommé mot pour mot.
+                            let fn_src = e.stack_top_fn_src(400);
                             tracing::info!(target: "dom_probe",
                                 site = "dom.kill", parent = %ptag,
-                                child = %ctag, stack = %stack);
+                                child = %ctag, cur = %cur, stack = %stack,
+                                fn_src = %fn_src);
                         }
                     }
                     self.dom.borrow_mut().detach(child);
