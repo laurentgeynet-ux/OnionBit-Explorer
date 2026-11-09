@@ -1498,8 +1498,15 @@ fn build_list(
                         .fold(tiny_skia::Transform::default(), |acc, t| acc.pre_concat(*t));
                 }
                 DisplayItem::Text { run, .. } => {
-                    st.glyphs += run.glyphs.len() as u32;
-                    st.invisible_glyphs += run.glyphs.iter().filter(|g| g.invisible).count() as u32;
+                    // Compteurs indicatifs : la saturation
+                    // u32::MAX est fine (jamais atteinte).
+                    st.glyphs = st
+                        .glyphs
+                        .saturating_add(u32::try_from(run.glyphs.len()).unwrap_or(u32::MAX));
+                    st.invisible_glyphs = st.invisible_glyphs.saturating_add(
+                        u32::try_from(run.glyphs.iter().filter(|g| g.invisible).count())
+                            .unwrap_or(u32::MAX),
+                    );
                 }
                 _ => {}
             }
