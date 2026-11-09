@@ -865,7 +865,11 @@ fn dom_nav_value(
                 e.str_val(v)
             }
         }
-        "ownerDocument" => e.get_prop(e.global, "document").unwrap_or(Value::Null),
+        // §B-121 — même panne que `getRootNode` : la prop
+        // `document` de `e.global` pouvait lire `Undefined`
+        // (env-record ≠ objet global). Le cache garantit
+        // l'identité `===` du document (posée à `install_dom`).
+        "ownerDocument" => node_value(e, dom, cache, dom.borrow().root),
         "tagName" | "nodeName" => {
             let (k, t) = {
                 let n = &dom.borrow().nodes[node as usize];
@@ -9069,13 +9073,16 @@ impl Host for NodeHost {
                         root = self.dom.borrow().root_of(h);
                     }
                 }
-                let doc_root = self.dom.borrow().root;
-                let v = if root == doc_root {
-                    e.get_prop(e.global, "document").unwrap_or(Value::Null)
-                } else {
-                    node_value(e, &self.dom, &self.cache, root)
-                };
-                Ok(Some(v))
+                // §B-121 — `document.getRootNode()` lisait la
+                // prop `document` sur `e.global` : `Undefined`
+                // sur les chemins où l'env-record et l'objet
+                // global divergent (React `fu` → `n.nodeType`
+                // TypeError → commit avorté → page blanche).
+                // `node_value(root)` répond la **même** identité
+                // (`cache[root]` contient le document depuis
+                // `install_dom`) — racine document ou fragment
+                // détaché, un seul chemin.
+                Ok(Some(node_value(e, &self.dom, &self.cache, root)))
             }
             "hasChildNodes" => {
                 let r = self
