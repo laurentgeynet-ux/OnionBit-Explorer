@@ -671,6 +671,40 @@ impl Session {
         reqs: Vec<explorer_js::NetRequest>,
         failed: &mut Vec<u64>,
     ) {
+        // §B-54 — `net.drq` : chaque `NetRequest` effectivement
+        // sortie du moteur (dedup `host|handle|epoch` —
+        // `nav_epoch` dans la clé car les handles repartent
+        // à zéro à chaque moteur : sans elle, le cycle
+        // reload est mangé par la dedup) — borne le
+        // silencieux « jamais drainée » face aux goulots
+        // d'aval (`net.pend`/`net.held`/`net.drop`/`net.go`).
+        if tracing::enabled!(target: "media_probe", tracing::Level::INFO) {
+            let epoch = self.tabs.get(&tab).map(|e| e.nav_epoch).unwrap_or(0);
+            for r in &reqs {
+                let (kind, handle, host) = match r {
+                    NetRequest::Fetch { handle, url, .. } => {
+                        let h = Url::parse(url)
+                            .ok()
+                            .map(|u| u.host().clone())
+                            .unwrap_or_default();
+                        ("fetch", *handle, h)
+                    }
+                    NetRequest::Abort { handle } => ("abort", *handle, String::new()),
+                    NetRequest::EventSource { handle, url, .. } => {
+                        let h = Url::parse(url)
+                            .ok()
+                            .map(|u| u.host().clone())
+                            .unwrap_or_default();
+                        ("es", *handle, h)
+                    }
+                    _ => continue,
+                };
+                let key = format!("{host}|{handle}|e{epoch}");
+                if self.note_net_probe(kind, &key) {
+                    tracing::info!(target: "media_probe", site = "net.drq", kind, host = %host, handle, epoch);
+                }
+            }
+        }
         for r in reqs {
             match r {
                 NetRequest::Fetch {
@@ -695,6 +729,19 @@ impl Session {
                         .copied()
                         .unwrap_or(0);
                     if streak >= FETCH_BACKOFF_START && self.fetch_held.len() < MAX_HELD_FETCHES {
+                        // §B-54 — `net.held` : la retenue
+                        // backoff est autrement invisible —
+                        // ni `net.go` ni `net.pend` n'y
+                        // correspondent (dedup par hôte).
+                        if tracing::enabled!(target: "media_probe", tracing::Level::INFO) {
+                            let h = Url::parse(&url)
+                                .ok()
+                                .map(|u| u.host().clone())
+                                .unwrap_or_default();
+                            if self.note_net_probe("held", &h) {
+                                tracing::info!(target: "media_probe", site = "net.held", host = %h, handle, streak);
+                            }
+                        }
                         self.fetch_held.push_back(net_items::HeldFetch {
                             at: std::time::Instant::now() + fetch_backoff_delay(streak),
                             tab,
@@ -731,19 +778,33 @@ impl Session {
                     }
                 }
                 NetRequest::Abort { handle } => {
-                    if let Some(j) = self.net_tasks.remove(&(tab, handle)) {
+                    let killed = if let Some(j) = self.net_tasks.remove(&(tab, handle)) {
                         j.abort();
-                    }
+                        true
+                    } else {
+                        false
+                    };
                     // Une retenue backoff annulée ne part
                     // jamais (§B-60) — `xhr.abort()` doit la
                     // trouver hors de `net_tasks`.
+                    let held_n = self.fetch_held.len();
                     self.fetch_held
                         .retain(|h| !(h.tab == tab && h.handle == handle));
+                    let held_purged = held_n - self.fetch_held.len();
                     // Même purge pour un fetch garé au quota
                     // (JS-C367) — annulé avant d'avoir pu
                     // partir, jamais émis.
+                    let pend_n = self.pending_script_net.len();
                     self.pending_script_net
                         .retain(|p| !(p.tab == tab && p.handle == handle));
+                    let pend_purged = pend_n - self.pending_script_net.len();
+                    // §B-54 — `net.abk` : un abort qui tue une
+                    // tâche vivante OU purge un garé/retenu
+                    // était totalement silencieux (vol 770 :
+                    // `api/initial` disparu sans trace).
+                    if killed || held_purged + pend_purged > 0 {
+                        tracing::info!(target: "media_probe", site = "net.abk", tab, handle, killed, held_purged, pend_purged);
+                    }
                 }
                 // Opération `crypto.subtle` (JS-C79) — pas une
                 // requête réseau : le calcul tourne en
@@ -2767,9 +2828,13 @@ impl Session {
         // silencieux « jamais spawné » face à « jamais revenu ».
         if tracing::enabled!(target: "media_probe", tracing::Level::INFO) {
             let h = req_url.host().clone();
-            let key = format!("{h}|{handle}");
+            // `|e{epoch}` : un handle réutilisé par le moteur
+            // suivant doit reloguer — sinon un `net.go` du
+            // reload est invisible (même trou que `net.drq`).
+            let epoch = self.tabs.get(&tab).map(|e| e.nav_epoch).unwrap_or(0);
+            let key = format!("{h}|{handle}|e{epoch}");
             if self.note_net_probe("go", &key) {
-                tracing::info!(target: "media_probe", site = "net.go", host = %h, handle);
+                tracing::info!(target: "media_probe", site = "net.go", host = %h, handle, epoch);
             }
         }
         let j = tokio::spawn(async move {
@@ -3311,19 +3376,23 @@ impl Session {
             return;
         }
         let h = d.req_url.host().clone();
+        // `|e{epoch}` : un même (handle, statut) au cycle de
+        // vie suivant doit reloguer — la dedup sans epoch
+        // rendait le reload invisible (vol 770-771).
+        let epoch = self.tabs.get(&d.tab).map(|e| e.nav_epoch).unwrap_or(0);
         let tag = match &d.out {
-            Ok(r) => format!("{h}|{}|ok:{}", d.handle, r.status),
-            Err(e) => format!("{h}|{}|err:{}", d.handle, net_err_kind(e)),
+            Ok(r) => format!("{h}|{}|ok:{}|e{}", d.handle, r.status, epoch),
+            Err(e) => format!("{h}|{}|err:{}|e{}", d.handle, net_err_kind(e), epoch),
         };
         if !self.note_net_probe("arr", &tag) {
             return;
         }
         match &d.out {
             Ok(r) => {
-                tracing::info!(target: "media_probe", site = "net.arr", host = %h, ok = true, status = r.status, handle = d.handle);
+                tracing::info!(target: "media_probe", site = "net.arr", host = %h, ok = true, status = r.status, handle = d.handle, epoch);
             }
             Err(e) => {
-                tracing::info!(target: "media_probe", site = "net.arr", host = %h, ok = false, kind = net_err_kind(e), handle = d.handle);
+                tracing::info!(target: "media_probe", site = "net.arr", host = %h, ok = false, kind = net_err_kind(e), handle = d.handle, epoch);
             }
         }
     }
