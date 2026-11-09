@@ -5,7 +5,7 @@
 //! JS-C455 (JT-11) — verrou de la surface i18n
 //! **énumérable** : `[[getSimpleString]]`/`[[countryCode]]`
 //! du vol 701 sont des clés d'objets **service internes
-//! YouTube** (produits par `yt.i18n` côté site — pas une
+//! `YouTube`** (produits par `yt.i18n` côté site — pas une
 //! API web, le moteur ne peut pas les fournir honnêtement).
 //! La surface navigateur i18n existe déjà ; ce test la
 //! fige, le résiduel se nomme par sonde au prochain vol.
@@ -16,7 +16,9 @@ use std::rc::Rc;
 
 fn engine() -> Engine {
     let mut e = Engine::new();
-    e.install_dom(&Rc::new(RefCell::new(Dom::from_html("<html><body></body></html>"))));
+    e.install_dom(&Rc::new(RefCell::new(Dom::from_html(
+        "<html><body></body></html>",
+    ))));
     e
 }
 

@@ -141,13 +141,12 @@ surface minimale — jamais un stub qui ment.
 
 ## JT-D — Divergences langue (`interp`, `parser`, `module.rs`)
 
-- [ ] **JT-12. Throws avalés dans les promesses** (vol
-  629, ouvert) — une exception dans un executor ou un
-  handler disparaît au lieu de rejeter : tracer
-  `promise.rs` chemin job→reject ; le symptôme site
-  est un `.catch` jamais appelé + état `pending`
-  éternel. Verrou : throw synchrone executor → rejet,
-  throw dans `then` → propagation au rejet suivant.
+- [x] **JT-12. `for..of` eager (vol 722)** —
+  **livré (JS-C456)** : boucle `next()`-par-tour
+  sur `Symbol.iterator` custom + `IteratorClose`
+  (`it.return()` sur break/throw, spec §13.7.5.14).
+  Arrays/TA/strings gardent `iter_values`. Verrous
+  `c456_forof_lazy` ×4.
 - [ ] **JT-13. `import()` `inline:` non routé** ×2
   (vimeo 697) — JS-C414 a livré le repli du **referrer**
   `inline:N` → page ; le résidu est le specifier

@@ -694,6 +694,79 @@ impl Engine {
             } => {
                 let labels = std::mem::take(&mut self.pending_labels);
                 let v = self.eval_expr(env, this.clone(), iter)?;
+                // JS-C456 — boucle **paresseuse** pour les
+                // itérateurs custom (`Symbol.iterator` callable)
+                // : `iter.next()` par tour, pas de Vec
+                // matérialisé — un `break`/`throw` ne consomme
+                // pas la suite et `IteratorClose` (spec
+                // §13.7.5.14) appelle `it.return()` (vol 722 —
+                // l'eager avalait les effets de bord dans le
+                // mauvais ordre). La voie `iter_values` reste
+                // pour les valeurs sans itérateur (arrays/TA/
+                // strings — observablement identiques).
+                if !*is_await {
+                    if let Some(it) = self.forof_iterator(v.clone())? {
+                        let using = matches!(target, ForTarget::Using { .. });
+                        let lex =
+                            matches!(target, ForTarget::Lexical { .. } | ForTarget::Using { .. });
+                        let mut out = Ok(Flow::Normal);
+                        loop {
+                            self.tick()?;
+                            let Value::Obj(iid) = it else { break };
+                            let Some(nf) = self.get_prop(iid, "next") else {
+                                break;
+                            };
+                            if !self.is_callable(nf.clone()) {
+                                break;
+                            }
+                            let r = self.call_value(nf, it.clone(), &[])?;
+                            let Value::Obj(rid) = r else { break };
+                            if self
+                                .get_prop(rid, "done")
+                                .is_some_and(|d| self.to_boolean(d))
+                            {
+                                break;
+                            }
+                            let item = self.get_prop(rid, "value").unwrap_or(Value::Undefined);
+                            if using {
+                                self.using_stack.push(Vec::new());
+                            }
+                            let ienv = if lex {
+                                Env::block(env.clone())
+                            } else {
+                                env.clone()
+                            };
+                            let mut rr = self
+                                .assign_target(&ienv, this.clone(), target, item)
+                                .and_then(|()| self.exec_stmt(&ienv, this.clone(), body));
+                            if using {
+                                rr = self.drain_using(rr);
+                            }
+                            match rr {
+                                Err(e) => {
+                                    self.iterator_close(&it)?;
+                                    out = Err(e);
+                                    break;
+                                }
+                                Ok(f) => {
+                                    if let Some(f) = Self::loop_flow(f, &labels) {
+                                        // `Break` = consommé par
+                                        // la boucle (Normal ici) —
+                                        // `IteratorClose` sur
+                                        // break aussi, pas sur
+                                        // `done`/`continue`.
+                                        if !matches!(f, Flow::Continue(_)) {
+                                            self.iterator_close(&it)?;
+                                        }
+                                        out = Ok(f);
+                                        break;
+                                    }
+                                }
+                            }
+                        }
+                        return out;
+                    }
+                }
                 let items = if *is_await {
                     self.iter_values_await(v)?
                 } else {
@@ -888,6 +961,35 @@ impl Engine {
     /// en propageant `f`. `labels` = labels de boucle captés via
     /// `pending_labels` (`continue lbl` ne les avale que si `lbl`
     /// y figure ; `break lbl` n'est jamais avalé par une boucle).
+    /// Itérateur `v[Symbol.iterator]()` callable —
+    /// `for..of` paresseux (JS-C456). `None` = pas
+    /// d'itérateur custom → voie `iter_values` (arrays/TA/
+    /// strings — observablement identique, plus rapide).
+    fn forof_iterator(&mut self, v: Value) -> JsResult<Option<Value>> {
+        let Value::Obj(id) = v else { return Ok(None) };
+        let Some(m) = self.get_prop(id, SYM_ITERATOR) else {
+            return Ok(None);
+        };
+        if !self.is_callable(m.clone()) {
+            return Ok(None);
+        }
+        Ok(Some(self.call_value(m, v, &[])?))
+    }
+
+    /// `IteratorClose` (spec §13.7.5.14) — appelle
+    /// `it.return()` si présent/callable ; erreurs de `next`
+    /// déjà propagées ailleurs.
+    fn iterator_close(&mut self, it: &Value) -> JsResult<()> {
+        if let Value::Obj(iid) = it {
+            if let Some(rf) = self.get_prop(*iid, "return") {
+                if self.is_callable(rf.clone()) {
+                    self.call_value(rf, it.clone(), &[])?;
+                }
+            }
+        }
+        Ok(())
+    }
+
     pub(crate) fn loop_flow(f: Flow, labels: &[Rc<str>]) -> Option<Flow> {
         match f {
             Flow::Normal | Flow::Continue(None) => None,

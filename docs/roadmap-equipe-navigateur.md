@@ -11374,3 +11374,9 @@ un crate PIPELINE.- [x] **JS-C422. Deadline honnête — canal session ↔ budge
   API web (même classe que `categories` JT-5). `Intl`
   riche + `navigator.language(s)` verrouillés. Résiduel
   à sonder au prochain vol. `c455_i18n_surface` ×2.
+- [x] **JS-C456 (JT-12). `for..of` paresseux +
+  `IteratorClose` sur itérateur custom** — vol 722 :
+  l'eager vidait `iter_values` avant la boucle et
+  n'appelait jamais `it.return()`. `next()`-par-tour
+  + `return()` sur break/throw (spec §13.7.5.14) ;
+  arrays/TA/strings inchangés. `c456_forof_lazy` ×4.
