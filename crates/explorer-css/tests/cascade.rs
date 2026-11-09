@@ -556,6 +556,32 @@ fn media_query_scripting() {
     );
 }
 
+/// R-176 — hints `unicode-bidi` : `<bdo>` = `bidi-override`,
+/// `<bdi>` = `isolate` (HTML Rendering §bidi).
+#[test]
+fn hint_unicode_bidi_bdo_bdi() {
+    let dom = TreeBuilder::parse("<bdo dir=rtl>x</bdo><bdi>y</bdi><p>z</p>");
+    let e = StyleEngine::new();
+    let styles = e.compute_tree(&dom, dom.document(), &env());
+    let find_tag = |t: &str| {
+        let mut q = vec![dom.document()];
+        while let Some(n) = q.pop() {
+            if dom.tag_name(n).is_ok_and(|x| x == t) {
+                return n;
+            }
+            if let Ok(ch) = dom.children(n) {
+                q.extend(ch.iter().rev());
+            }
+        }
+        panic!("<{t}> absent")
+    };
+    let (bdo, bdi, p) = (find_tag("bdo"), find_tag("bdi"), find_tag("p"));
+    let st = |n| styles.get(n).expect("style");
+    assert_eq!(st(bdo).get("unicode-bidi"), Some("bidi-override"));
+    assert_eq!(st(bdi).get("unicode-bidi"), Some("isolate"));
+    assert_eq!(st(p).get("unicode-bidi"), None);
+}
+
 /// R-174 — features MQ4/MQ5 : hover/pointer (bureau =
 /// fine+hover), resolution/dppx, aspect-ratio, update,
 /// color-gamut, forced-colors, display-mode, monochrome,

@@ -2388,6 +2388,18 @@ fn apply_presentational_hints(
     // descendant (scan borné — spec `dir=auto`) — valeur
     // par défaut de `<bdi>`.
     hint(props, "direction", hint_dir(dom, node, tag));
+    // R-176 — `unicode-bidi` UA (HTML Rendering §bidi) :
+    // `<bdo>` force la surcharge (`bidi-override`), `<bdi>`
+    // isole (`isolate`).
+    hint(
+        props,
+        "unicode-bidi",
+        match tag {
+            "bdo" => Some("bidi-override".to_string()),
+            "bdi" => Some("isolate".to_string()),
+            _ => None,
+        },
+    );
     legacy_presentational_hints(dom, node, tag, parent, env, props);
 }
 
@@ -3050,6 +3062,7 @@ const INHERITED_PROPS: &[&str] = &[
     "font-family",
     "font-size",
     "font-style",
+    "unicode-bidi",
     "font-variant",
     "font-weight",
     "letter-spacing",
@@ -3129,7 +3142,7 @@ pub fn initial_value(name: &str) -> Option<&'static str> {
         "background" | "background-color" => "transparent",
         "font-family" => "serif",
         "font-style" | "font-variant" | "font-weight" | "line-height" | "letter-spacing"
-        | "word-spacing" | "white-space" => "normal",
+        | "word-spacing" | "white-space" | "unicode-bidi" => "normal",
         "text-align" => "start",
         "visibility" | "overflow" | "overflow-x" | "overflow-y" => "visible",
         "vertical-align" => "baseline",

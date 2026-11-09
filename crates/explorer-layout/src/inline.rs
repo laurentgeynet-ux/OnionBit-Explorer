@@ -750,7 +750,32 @@ fn text_item(b: &LayoutBox, owner: usize, t: &str, decos: &[TextDeco], para_lv: 
     } else {
         unicode_bidi::Level::rtl()
     };
-    for run in text::itemize(src, Some(para)) {
+    // R-176 — `unicode-bidi` : `isolate`/`embed`/
+    // `isolate-override`/`bidi-override`/`plaintext` ouvrent
+    // un niveau propre (direction de l'élément — `dir` déjà
+    // résolu en `direction` par les hints) ; `plaintext`
+    // auto-détecte au premier fort (`None`). Les
+    // `*-override` aplatissent les niveaux internes — UAX #9
+    // §3.3.2 : l'override interdit tout réordonnancement
+    // interne (`<bdo dir=rtl>` s'affiche en miroir).
+    let ub = b.style.get("unicode-bidi").map(str::trim);
+    let overrides = matches!(ub, Some("bidi-override" | "isolate-override"));
+    let (para_arg, flat) = match ub {
+        Some("plaintext") => (None, 0),
+        Some("isolate" | "isolate-override" | "embed" | "bidi-override") => {
+            // Embeddings : prochain niveau de la parité
+            // directionnelle > `para` (rtl → impair, ltr → pair).
+            let n = if para_level(&b.style) == 1 {
+                (para.number() + 1) | 1
+            } else {
+                (para.number() + 2) & !1
+            };
+            (unicode_bidi::Level::new(n).ok(), n)
+        }
+        _ => (Some(para), 0),
+    };
+    for run in text::itemize(src, para_arg) {
+        let level = if overrides { flat } else { run.level };
         let mut prev = 0usize;
         for br in &run.breaks {
             if br.offset > prev && br.offset <= run.text.len() {
@@ -763,7 +788,7 @@ fn text_item(b: &LayoutBox, owner: usize, t: &str, decos: &[TextDeco], para_lv: 
                     pieces.push(Piece {
                         text: strip_break_chars(p).to_string(),
                         dir: run.direction,
-                        level: run.level,
+                        level,
                         hard_after: br.mandatory && ends_hard_break(p),
                     });
                 }
@@ -775,7 +800,7 @@ fn text_item(b: &LayoutBox, owner: usize, t: &str, decos: &[TextDeco], para_lv: 
                 pieces.push(Piece {
                     text: strip_break_chars(p).to_string(),
                     dir: run.direction,
-                    level: run.level,
+                    level,
                     hard_after: ends_hard_break(p),
                 });
             }

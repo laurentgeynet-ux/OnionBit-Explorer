@@ -264,3 +264,54 @@ fn rtl_wrap_garde_l_ordre_visuel_par_ligne() {
         );
     }
 }
+
+/// R-176 — `unicode-bidi` : `<bdo dir>` = `bidi-override`
+/// (contenu au niveau directionnel de l'élément — le miroir
+/// interne est l'affaire du shaping, voir limites R-171),
+/// `<bdi>` = `isolate` : son propre niveau directionnel
+/// (`dir=auto` → premier fort) au lieu du niveau du
+/// paragraphe hôte.
+#[test]
+fn bdo_et_bdi_niveaux_propres() {
+    // `<bdo dir=rtl>` : tout le run au niveau impair.
+    let (dom, bx) = laid(
+        "<!doctype html><p>x <bdo dir=\"rtl\">ab cd</bdo> y</p>",
+        "p{font-size:10px;width:400px}",
+    );
+    let p = find(&bx, by_tag(&dom, "p"));
+    let over_frag = p.children[0]
+        .lines
+        .iter()
+        .flat_map(|l| l.fragments.iter())
+        .find(|f| f.text.trim() == "cd")
+        .unwrap_or_else(|| {
+            panic!(
+                "fragments: {:?}",
+                p.children[0]
+                    .lines
+                    .iter()
+                    .flat_map(|l| l.fragments.iter().map(|f| (f.text.clone(), f.level)))
+                    .collect::<Vec<_>>()
+            )
+        });
+    assert_eq!(over_frag.level % 2, 1, "bdo dir=rtl → niveau impair");
+    // `<bdi>` latin dans paragraphe RTL : auto → ltr →
+    // niveau pair au-dessus du paragraphe (isolé du voisinage).
+    let (dom2, bx2) = laid(
+        "<!doctype html><div dir=\"rtl\">אב <bdi>abc</bdi> גד</div>",
+        "div{font-size:10px;width:400px}",
+    );
+    let d = find(&bx2, by_tag(&dom2, "div"));
+    let iso_frag = d.children[0]
+        .lines
+        .iter()
+        .flat_map(|l| l.fragments.iter())
+        .find(|f| f.text.contains("abc"))
+        .expect("fragment bdi");
+    assert_eq!(iso_frag.level % 2, 0, "bdi latin sous rtl → pair");
+    assert!(
+        iso_frag.level > 0,
+        "niveau propre > para : {}",
+        iso_frag.level
+    );
+}

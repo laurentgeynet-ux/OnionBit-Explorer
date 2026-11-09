@@ -3363,7 +3363,7 @@ déblocage/coût décroissant.
   `justify-content`/`align-content`/`justify-self`/`align-self`
   du conteneur ignorés, `grid`/`grid-template`/`grid-gap` (ASCII
   art + slash) jamais expansés. `grid.rs` + `value.rs`.
-- [ ] **R-176. `unicode-bidi` + niveau de base** : propriété
+- [x] **R-176. `unicode-bidi` + niveau de base** : propriété
   ignorée (`bidi-override`/`isolate`/`isolate-override`/
   `plaintext`/`normal`) ; niveau de base issu de `direction`
   héritée au lieu de l'auto-détection — pendant de R-171.
