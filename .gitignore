@@ -74,3 +74,17 @@ _probe*/
 _probe*.py
 _patch_scan.py
 _pmem.ps1
+
+# Filet de sécurité worktrees : un worktree créé par accident
+# DANS un worktree existant (chemin relatif) ne doit jamais
+# être balayé par status/add ni par les copies d'arbre —
+# imbrication = récursion infinie côté outils de copie.
+OnionBit-Explorer-*/
+OninionBit-Explorer-*/
+wt-*/
+
+# Artefacts de vol SANS underscore (fuite réelle observée :
+# volNNN/, volNNN-profile/, volNNN*.log à la racine — la
+# convention `_vol*` ne les couvrait pas).
+vol[0-9]*/
+vol[0-9]*.log

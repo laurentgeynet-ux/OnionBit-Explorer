@@ -306,6 +306,15 @@ Règles de la coexistence :
    au vert. En interne d'équipe, liberté totale (branches
    partagées, worktrees) — les règles ne gouvernent que ce
    qui atterrit sur `main`.
+   - **Worktree = chemin absolu, jamais imbriqué** :
+     `git worktree add C:\OnionBit-Explorer-<nom> <ref>` à la
+     racine du lecteur. Un chemin relatif lancé depuis un
+     worktree crée l'arbre *à l'intérieur* de celui-ci —
+     copies/indexeurs/outils récursent alors dans le projet
+     entier (station gelée, deux crashs mesurés le
+     2026-11-09). `.gitignore` couvre `OnionBit-Explorer-*/`
+     en filet de sécurité ; vérifier `git worktree list` si
+     un doute subsiste.
    - **Sortie de build — aucun chemin commité** :
      `.cargo/config.toml` n'épingle **aucun**
      `target-dir` (l'ancien épinglage d'un dossier

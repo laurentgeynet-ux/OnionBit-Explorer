@@ -16,7 +16,11 @@ l'API REST d'input, la télémétrie = `dom`/`layout`/`mem`/SSE.
 > 404, `doc_h` tronqué, scroll bloqué — trois faux constats
 > disparus sur HEAD propre). Si le worktree partagé porte du
 > WIP, builder depuis un worktree éphémère à HEAD :
-> `git worktree add <dir> HEAD`.
+> `git worktree add C:\<nom>-wt HEAD` — **chemin absolu à la
+> racine du lecteur, jamais relatif** : un chemin relatif
+> lancé depuis un worktree crée le nouvel arbre *dedans*
+> (imbrication du 2026-11-09 → copies/indexeurs récursant
+> dans le projet entier → station gelée, deux crashs).
 
 ## 0. Checklist de lancement — séquence canonique
 
