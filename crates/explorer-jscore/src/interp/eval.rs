@@ -566,6 +566,15 @@ impl Engine {
                     /// lookup, receiver stays `this`.
                     Super(Rc<str>),
                 }
+                // JS-C460 — drapeau « call-only » consommé au
+                // premier bras Call atteint : un appel imbriqué
+                // dans les args/callee ne le voit pas (les
+                // temporaires accumulés restent sous la borne du
+                // statement). Masquage appliqué au dispatch
+                // terminal seulement — les intermédiaires
+                // (base, clés, args) restent « jeunes » pendant
+                // leur évaluation.
+                let mask_slot = self.call_only_slot.take();
                 // `eval(…)` écrit tel quel → appel direct (spec
                 // `PerformEval`) : la callee résolue doit être *le*
                 // builtin `eval` global, pas un homonyme local.
@@ -617,7 +626,8 @@ impl Engine {
                                 None => Ok(Value::Undefined),
                             };
                         }
-                        let r = self.call_value(f.clone(), Value::Undefined, &args);
+                        let r =
+                            self.call_value_masked(mask_slot, f.clone(), Value::Undefined, &args);
                         match r {
                             Err(t) if matches!(f, Value::Undefined | Value::Null) => {
                                 Err(match &callee_lbl {
@@ -748,12 +758,12 @@ impl Engine {
                                 "`{name}` is not a function (on {recv_desc}) [got {fdesc}]"
                             )));
                         }
-                        self.call_value(f, recv, &args)
+                        self.call_value_masked(mask_slot, f, recv, &args)
                     }
                     Callee::Super(name) => {
                         let base = self.super_base(env)?;
                         let f = self.read_prop(base, this.clone(), &name)?;
-                        let r = self.call_value(f.clone(), this.clone(), &args);
+                        let r = self.call_value_masked(mask_slot, f.clone(), this.clone(), &args);
                         match r {
                             Err(t) if matches!(f, Value::Undefined | Value::Null) => {
                                 Err(self.tag_call_undef(t, &name))
@@ -764,6 +774,10 @@ impl Engine {
                 }
             }
             Expr::New(callee, arg_exprs) => {
+                // JS-C460 — même drapeau « call-only » que le
+                // bras Call : masquage au dispatch constructeur
+                // (`f`+args racinés pendant le chemin `new`).
+                let mask_slot = self.call_only_slot.take();
                 let f = self.eval_expr(env, this.clone(), callee)?;
                 let args = self.eval_args(env, this, arg_exprs)?;
                 // `new` sur non-ctor : le callee est nommé —
@@ -779,7 +793,7 @@ impl Engine {
                         self.type_error(format!("new {who}: constructor is not a function: {d}"))
                     );
                 }
-                self.construct(f, &args)
+                self.construct_masked(mask_slot, f, &args)
             }
             Expr::Seq(parts) => {
                 let mut last = Value::Undefined;

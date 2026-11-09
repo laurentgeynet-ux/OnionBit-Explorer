@@ -26,11 +26,25 @@ use explorer_jscore::Engine;
 /// Signature §B-110 : le churn `[x]`+`str` par op doit mourir
 /// en `RangeError` « deferred GC unreachable » avec les kinds
 /// `Array`/`Str` dominant le message — pas en kill aveugle.
+///
+/// JS-C460 : un `for` top-level n'épingle plus son churn — la
+/// borne d'âge est ré-stampée à chaque itération et les morts
+/// du tour précédent sont réclamés au safepoint (voir
+/// `c460_gc_churn` — le même script survit désormais). Le kill
+/// différé reste la frontière des temporaires **non racinés**
+/// d'un frame mid-expression : le churn est ici imbriqué dans
+/// une expression composée (`0 + f()`), dont la borne du
+/// statement protège l'opérande gauche — le sweep ne peut pas
+/// discriminer ses cellules de celles de la callee.
 #[test]
 fn array_str_churn_hits_deferred_gc_cap() {
     let mut e = Engine::new();
     e.set_mem_limit(64 * 1024 * 1024); // 64 Mio → cap dur 256 Mio
-    let r = e.eval("for (var i = 0; i < 4e6; i++) { var a = [i]; var s = String(i); } 1");
+    let r = e.eval(
+        "function f(){ for (var i = 0; i < 4e6; i++) { var a = [i]; var s = String(i); } return 0; }\
+         var x = 0 + f();\
+         x",
+    );
     let msg = format!("{r:?}");
     assert!(
         msg.contains("deferred GC unreachable"),

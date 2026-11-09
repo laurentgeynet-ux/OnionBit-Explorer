@@ -629,12 +629,33 @@ pub struct Engine {
     /// sans elle, un safepoint dans un corps appelé balayerait
     /// les bindings vivants des frames au-dessus.
     pub(crate) safepoint_envs: Vec<EnvRef>,
-    /// Borne d'âge safepoint (JS-C421) — min des `alloc_seq` des
-    /// statements actifs : les cellules allouées depuis sont des
-    /// temporaires potentiels de locaux Rust (`x + f()` — `x`
-    /// vit dans la frame de `BinOp` pendant que `f` safepointe).
-    /// `u64::MAX` hors éval — une passe de frontière balaie tout.
-    pub(crate) young_floor: u64,
+    /// Bornes d'âge safepoint **par frame** (JS-C421, affinée
+    /// JS-C460) — chaque `exec_stmt`/`call_value_impl` empile le
+    /// `alloc_seq` à partir duquel il peut tenir des temporaires
+    /// non racinés (`x + f()` — `x` vit dans la frame de `BinOp`
+    /// pendant que `f` safepointe) ; un frame en dispatch pur
+    /// (corps de boucle, bloc, `try`/`switch`, corps de callee)
+    /// masque la sienne à `u64::MAX` — tout ce qu'il tient est
+    /// raciné, l'enfant porte sa propre borne. Le safepoint lit
+    /// [`Engine::young_floor`] = min de la pile : les morts des
+    /// itérations/statements terminés redeviennent balayables —
+    /// le `for` n'épingle plus le churn de toute sa durée
+    /// (résidu §B-114/§B-110). Pile vide hors éval = `u64::MAX`,
+    /// une passe de frontière balaie tout.
+    pub(crate) young_stack: Vec<u64>,
+    /// JS-C460 — drapeau « call-only statement » : posé par un
+    /// statement dont le travail restant est une seule
+    /// expression `Call`/`New` top-level (`f()`, `x = f()`,
+    /// `return f()`, `if (f())`…) — pendant le dispatch de cet
+    /// appel le frame ne tient rien d'autre que ce que
+    /// `call_value_impl` racine (callee/this/args) → sa borne
+    /// d'âge est masquable. Consommé `.take()` par le **premier**
+    /// bras `Expr::Call`/`Expr::New` atteint — un appel imbriqué
+    /// dans une expression composée (`a + f()`) garde la
+    /// protection du statement (les temporaires du bras gauche
+    /// ne sont pas racinés — frontière table de racines
+    /// d'expressions, chantier suivant).
+    pub(crate) call_only_slot: Option<usize>,
     /// Le builtin `eval` — identité pour distinguer l'appel direct
     /// `eval(…)` (env appelant) de l'indirect (`(0,eval)`, `e=eval`
     /// → global), spec `PerformEval`.
@@ -1160,7 +1181,8 @@ impl Engine {
             using_stack: Vec::new(),
             safepoint_roots: Vec::new(),
             safepoint_envs: Vec::new(),
-            young_floor: u64::MAX,
+            young_stack: Vec::new(),
+            call_only_slot: None,
             eval_fn: Value::Undefined,
             re_ctor: Value::Undefined,
             re_static: None,
@@ -5126,14 +5148,16 @@ impl Engine {
         for e in &self.safepoint_envs {
             crate::heap::trace_env(e, &mut ids, &mut visited);
         }
-        // JS-C421 : épargne les cellules allouées depuis le plus
-        // ancien statement actif — temporaires d'expression des
-        // locaux Rust, invisibles aux racines.
+        // JS-C421 : épargne les cellules allouées depuis la
+        // borne d'âge courante — temporaires d'expression des
+        // locaux Rust, invisibles aux racines. JS-C460 : borne
+        // par frame (`young_floor()` = min de `young_stack`),
+        // les frames en dispatch pur sont masqués.
         // JS-C423 — part safepoint du temps GC : le delta de
         // `gc_ns` autour de la passe (mesure partagée —
         // `sp_us` ne peut pas dépasser `gc_us` sur l'éval).
         let g0 = self.gc_ns.get();
-        self.collect_extra(ids, self.young_floor);
+        self.collect_extra(ids, self.young_floor());
         self.sp_ns.set(
             self.sp_ns
                 .get()
@@ -5149,6 +5173,76 @@ impl Engine {
             self.gc_sp_shift = (self.gc_sp_shift + 1).min(Self::GC_SP_SHIFT_MAX);
         } else {
             self.gc_sp_shift = 0;
+        }
+    }
+
+    /// JS-C460 — borne d'âge courante pour le safepoint : min
+    /// des contributions de frames actifs (`u64::MAX` hors éval
+    /// ou quand tout frame actif est en dispatch pur — passe
+    /// pleine). O(profondeur), lu uniquement sous pression.
+    fn young_floor(&self) -> u64 {
+        self.young_stack.iter().copied().min().unwrap_or(u64::MAX)
+    }
+
+    /// JS-C460 — arme le masquage « call-only » pour l'éval de
+    /// `e` qui suit immédiatement : si `e` est un `Call`/`New`
+    /// top-level, le frame `yslot` ne tiendra rien d'autre que
+    /// ce que `call_value_impl` racine pendant le dispatch — sa
+    /// borne d'âge est masquable. Le drapeau est consommé par
+    /// `.take()` au premier bras `Expr::Call`/`Expr::New`
+    /// atteint : un appel imbriqué dans une expression composée
+    /// (`a + f()`) ne le voit jamais — les temporaires du bras
+    /// gauche restent protégés par la borne du statement.
+    pub(crate) fn arm_call_only(&mut self, yslot: usize, e: &Expr) {
+        self.call_only_slot = matches!(e, Expr::Call(..) | Expr::New(..)).then_some(yslot);
+    }
+
+    /// `call_value` avec borne d'âge englobante masquée pendant
+    /// le dispatch (JS-C460 — flag « call-only »). À cet instant
+    /// l'ensemble vivant du bras appelant est exactement
+    /// {callee, this, args} — déjà raciné par `call_value_impl`.
+    pub(crate) fn call_value_masked(
+        &mut self,
+        slot: Option<usize>,
+        f: Value,
+        this: Value,
+        args: &[Value],
+    ) -> JsResult<Value> {
+        match slot {
+            Some(i) if i < self.young_stack.len() => {
+                let saved = self.young_stack[i];
+                self.young_stack[i] = u64::MAX;
+                let r = self.call_value(f, this, args);
+                self.young_stack[i] = saved;
+                r
+            }
+            _ => self.call_value(f, this, args),
+        }
+    }
+
+    /// `construct` en position call-only (JS-C460) — `f` et les
+    /// args sont racinés pour toute la durée (le chemin
+    /// `construct_nt` peut invoquer des getters `prototype`
+    /// avant le dispatch du corps).
+    pub(crate) fn construct_masked(
+        &mut self,
+        slot: Option<usize>,
+        f: Value,
+        args: &[Value],
+    ) -> JsResult<Value> {
+        match slot {
+            Some(i) if i < self.young_stack.len() => {
+                let sr = self.safepoint_roots.len();
+                self.safepoint_roots.push(f.clone());
+                self.safepoint_roots.extend_from_slice(args);
+                let saved = self.young_stack[i];
+                self.young_stack[i] = u64::MAX;
+                let r = self.construct(f, args);
+                self.young_stack[i] = saved;
+                self.safepoint_roots.truncate(sr);
+                r
+            }
+            _ => self.construct(f, args),
         }
     }
 
@@ -8457,7 +8551,14 @@ impl Engine {
         self.safepoint_roots.push(this.clone());
         self.safepoint_roots.push(nt.clone());
         self.safepoint_roots.extend_from_slice(args);
+        // JS-C460 — contribution d'âge du frame d'appel : les
+        // temporaires du dispatch (délégation bound/proxy,
+        // boxing `this`, env local) naissent après cette entrée.
+        // `call_script_body` la masque pendant `exec_body` — le
+        // frame ne tient alors plus que des racines.
+        self.young_stack.push(self.heap.alloc_seq());
         let out = self.call_value_inner(f, this, args, nt);
+        self.young_stack.pop();
         self.safepoint_roots.truncate(sr_mark);
         out
     }
@@ -8836,11 +8937,21 @@ impl Engine {
         // segment tas avant tout débordement ; la borne
         // `call_depth_limit` garde le plafond logique.
         drop(frame);
+        // JS-C460 — pendant le corps, ce frame ne tient plus que
+        // des racines (f/this/args/nt poussés par
+        // `call_value_impl`, env `local` semée par le corps) :
+        // borne d'âge masquée — les morts des statements
+        // précédents de ce corps redeviennent balayables au
+        // safepoint (le churn d'une callee n'est plus épinglé
+        // par la durée de son appel).
+        let yslot = self.young_stack.len() - 1;
+        self.young_stack[yslot] = u64::MAX;
         let r = stacker::maybe_grow(
             crate::parser::STACK_RED_ZONE,
             crate::parser::STACK_GROW,
             || self.exec_body(&local, this, &body_rc),
         );
+        self.young_stack[yslot] = self.heap.alloc_seq();
         let _frame = crate::j17_scope(&crate::J17_FRAME_NS);
         self.call_depth -= 1;
         self.call_stack.pop();

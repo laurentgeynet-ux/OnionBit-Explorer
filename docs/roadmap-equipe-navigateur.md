@@ -11397,3 +11397,16 @@ un crate PIPELINE.- [x] **JS-C422. Deadline honnête — canal session ↔ budge
   via cache global → O(1) monomorphe, dictionnaire +
   `shape_epoch`. Mesures V-1 citées ; résidus `fn_body`/
   `close_table` hors course → frontière = V-4b→f.
+- [x] **JS-C460 (JT-F). Borne d'âge GC par frame —
+  safepoint plus fin** (résidus §B-114/§B-110 clos) :
+  `young_floor` → `young_stack` — contribution
+  d'âge par frame masquée (`MAX`) pendant tout
+  dispatch entièrement raciné (boucles re-stampées
+  par itération, blocs/`try`/`switch`, corps callee,
+  flag « call-only » `x = f()`) — les morts
+  inter-statements redeviennent balayables au
+  safepoint au lieu d'accumuler jusqu'à `dead_hard`.
+  Racines : ienv `for(let)`, itérateur `for..of`
+  paresseux, `return` en vol pendant `finally`.
+  Verrous `c460_gc_churn` ×7 ; frontière compound-expr
+  (table racines d'expressions) documentée.

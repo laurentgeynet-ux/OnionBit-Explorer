@@ -339,12 +339,14 @@ impl Engine {
         // JS-C421 : `this` + `env` restent vivants tant que cette
         // frame court — racines safepoint pour les corps en
         // dessous (la chaîne parente de la callee ne remonte pas
-        // à l'env appelant) ; `young_floor` borne l'âge balayable
-        // au plus ancien statement actif.
+        // à l'env appelant). JS-C460 : borne d'âge **par frame** —
+        // ce statement contribue son seq d'entrée ; les bras
+        // dispatcheurs (boucles, blocs, try…) la masquent pendant
+        // la sous-exécution et la re-stampent à la reprise, les
+        // morts des enfants terminés redeviennent balayables.
         self.safepoint_roots.push(this.clone());
         self.safepoint_envs.push(env.clone());
-        let saved_floor = self.young_floor;
-        self.young_floor = saved_floor.min(self.heap.alloc_seq());
+        self.young_stack.push(self.heap.alloc_seq());
         // JS-C41 : `if`/`try`/`for` s'exécutent en récursion
         // native — segment tas de secours avant débordement.
         let r = stacker::maybe_grow(
@@ -352,9 +354,9 @@ impl Engine {
             crate::parser::STACK_GROW,
             || self.exec_stmt_inner(env, this, s),
         );
+        self.young_stack.pop();
         self.safepoint_roots.pop();
         self.safepoint_envs.pop();
-        self.young_floor = saved_floor;
         r
     }
 
@@ -364,6 +366,12 @@ impl Engine {
         this: Value,
         s: &Stmt,
     ) -> JsResult<Flow> {
+        // JS-C460 — index de la borne d'âge de CE frame (empilée
+        // par `exec_stmt` juste avant) : les bras dispatcheurs la
+        // masquent pendant la sous-exécution de l'enfant
+        // (`u64::MAX` — tout ce que le frame tient est raciné) et
+        // la re-stampent à la reprise pour leurs propres temps.
+        let yslot = self.young_stack.len() - 1;
         match s {
             // `import …` — liaisons câblées à l'instanciation ;
             // l'exécution n'a rien à faire (idem `;`).
@@ -371,7 +379,12 @@ impl Engine {
             Stmt::Export(d) => match d {
                 // `export <decl>` — la déclaration s'exécute
                 // normalement (les noms sont déjà exportés).
-                ExportDecl::Decl(inner) => self.exec_stmt(env, this, inner),
+                ExportDecl::Decl(inner) => {
+                    self.young_stack[yslot] = u64::MAX;
+                    let r = self.exec_stmt(env, this, inner);
+                    self.young_stack[yslot] = self.heap.alloc_seq();
+                    r
+                }
                 // `export default <expr|function|class>` — lie le
                 // slot `default` (déclaré à l'instanciation) ; une
                 // fonction/classe nommée lie aussi son propre nom.
@@ -394,14 +407,22 @@ impl Engine {
                 _ => Ok(Flow::Normal),
             },
             Stmt::Expr(e) => {
-                self.completion = self.eval_expr(env, this, e)?;
+                // JS-C460 — un statement-expression qui EST un
+                // appel ne tient rien pendant le dispatch.
+                self.arm_call_only(yslot, e);
+                let v = self.eval_expr(env, this, e);
+                self.call_only_slot = None;
+                self.completion = v?;
                 Ok(Flow::Normal)
             }
             Stmt::Var(decls) => {
                 for d in decls {
                     match &d.init {
                         Some(init) => {
-                            let v = self.eval_expr(env, this.clone(), init)?;
+                            self.arm_call_only(yslot, init);
+                            let v = self.eval_expr(env, this.clone(), init);
+                            self.call_only_slot = None;
+                            let v = v?;
                             self.infer_name(&d.pat, v.clone());
                             self.bind_pat(env, this.clone(), &d.pat, v, BindMode::Var)?;
                         }
@@ -415,7 +436,10 @@ impl Engine {
                 for d in decls {
                     Self::declare_pat_lex(env, &d.pat, !constant);
                     if let Some(init) = &d.init {
-                        let v = self.eval_expr(env, this.clone(), init)?;
+                        self.arm_call_only(yslot, init);
+                        let v = self.eval_expr(env, this.clone(), init);
+                        self.call_only_slot = None;
+                        let v = v?;
                         self.infer_name(&d.pat, v.clone());
                         self.bind_pat(
                             env,
@@ -474,7 +498,12 @@ impl Engine {
             // les a déjà déclarés dans l'env fonction).
             Stmt::Block(stmts) => {
                 let benv = Env::block(env.clone());
-                self.exec_body(&benv, this, stmts)
+                // JS-C460 — dispatch pur : le frame du bloc ne
+                // tient rien pendant les sous-statements.
+                self.young_stack[yslot] = u64::MAX;
+                let r = self.exec_body(&benv, this, stmts);
+                self.young_stack[yslot] = self.heap.alloc_seq();
+                r
             }
             // `using x = e` (ES2026) — binding const + disposeur
             // enregistré sur la frame du corps courant.
@@ -496,14 +525,21 @@ impl Engine {
                 Ok(Flow::Normal)
             }
             Stmt::If { cond, then, else_ } => {
-                let c = self.eval_expr(env, this.clone(), cond)?;
-                if self.to_boolean(c) {
+                self.arm_call_only(yslot, cond);
+                let c = self.eval_expr(env, this.clone(), cond);
+                self.call_only_slot = None;
+                let c = c?;
+                // JS-C460 — dispatch pur des branches.
+                self.young_stack[yslot] = u64::MAX;
+                let r = if self.to_boolean(c) {
                     self.exec_stmt(env, this, then)
                 } else if let Some(e) = else_ {
                     self.exec_stmt(env, this, e)
                 } else {
                     Ok(Flow::Normal)
-                }
+                };
+                self.young_stack[yslot] = self.heap.alloc_seq();
+                r
             }
             // `with (o) b` — les noms se résolvent d'abord dans les
             // props de `o` (sauf `@@unscopables`), puis le scope
@@ -514,16 +550,27 @@ impl Engine {
                     return Err(self.type_error("cannot use `with` on `null` or `undefined`"));
                 };
                 let with_env = Env::with(env.clone(), oid);
-                self.exec_stmt(&with_env, this, body)
+                self.young_stack[yslot] = u64::MAX;
+                let r = self.exec_stmt(&with_env, this, body);
+                self.young_stack[yslot] = self.heap.alloc_seq();
+                r
             }
             Stmt::While { cond, body } => {
                 let labels = std::mem::take(&mut self.pending_labels);
                 loop {
+                    // JS-C460 — re-stamp à chaque tour : ce frame
+                    // ne tient plus que des racines (env/this) —
+                    // les morts des itérations passées redeviennent
+                    // balayables au safepoint du corps.
+                    self.young_stack[yslot] = self.heap.alloc_seq();
                     self.tick()?;
-                    let c = self.eval_expr(env, this.clone(), cond)?;
-                    if !self.to_boolean(c) {
+                    self.arm_call_only(yslot, cond);
+                    let c = self.eval_expr(env, this.clone(), cond);
+                    self.call_only_slot = None;
+                    if !self.to_boolean(c?) {
                         return Ok(Flow::Normal);
                     }
+                    self.young_stack[yslot] = u64::MAX;
                     let f = self.exec_stmt(env, this.clone(), body)?;
                     if let Some(f) = Self::loop_flow(f, &labels) {
                         return Ok(f);
@@ -533,13 +580,18 @@ impl Engine {
             Stmt::DoWhile { body, cond } => {
                 let labels = std::mem::take(&mut self.pending_labels);
                 loop {
+                    self.young_stack[yslot] = self.heap.alloc_seq();
                     self.tick()?;
+                    self.young_stack[yslot] = u64::MAX;
                     let f = self.exec_stmt(env, this.clone(), body)?;
+                    self.young_stack[yslot] = self.heap.alloc_seq();
                     if let Some(f) = Self::loop_flow(f, &labels) {
                         return Ok(f);
                     }
-                    let c = self.eval_expr(env, this.clone(), cond)?;
-                    if !self.to_boolean(c) {
+                    self.arm_call_only(yslot, cond);
+                    let c = self.eval_expr(env, this.clone(), cond);
+                    self.call_only_slot = None;
+                    if !self.to_boolean(c?) {
                         return Ok(Flow::Normal);
                     }
                 }
@@ -594,33 +646,84 @@ impl Engine {
                         }
                     }
                 }
+                // JS-C460 — l'env de tête (`ienv`) vit pendant
+                // toute la boucle, y compris pendant les évals
+                // test/update/copie où `safepoint_envs` ne la
+                // couvre pas (poussée par le `exec_stmt` du corps
+                // seulement) : racine indexée, re-seedée à chaque
+                // copie d'itération.
+                let sp_ienv = self.safepoint_envs.len();
+                self.safepoint_envs.push(ienv.clone());
+                let mut out: JsResult<Flow> = Ok(Flow::Normal);
                 loop {
-                    self.tick()?;
+                    // JS-C460 — re-stamp à chaque tour : ce frame
+                    // ne tient plus que des racines — les morts
+                    // des itérations passées redeviennent
+                    // balayables au safepoint du corps.
+                    self.young_stack[yslot] = self.heap.alloc_seq();
+                    if let Err(e) = self.tick() {
+                        out = Err(e);
+                        break;
+                    }
                     if let Some(t) = test {
-                        let c = self.eval_expr(&ienv, this.clone(), t)?;
-                        if !self.to_boolean(c) {
-                            return Ok(Flow::Normal);
+                        self.arm_call_only(yslot, t);
+                        let c = self.eval_expr(&ienv, this.clone(), t);
+                        self.call_only_slot = None;
+                        match c {
+                            Err(e) => {
+                                out = Err(e);
+                                break;
+                            }
+                            Ok(c) => {
+                                if !self.to_boolean(c) {
+                                    break;
+                                }
+                            }
                         }
                     }
-                    let f = self.exec_stmt(&ienv, this.clone(), body)?;
-                    if let Some(f) = Self::loop_flow(f, &labels) {
-                        return Ok(f);
+                    self.young_stack[yslot] = u64::MAX;
+                    match self.exec_stmt(&ienv, this.clone(), body) {
+                        Err(e) => {
+                            out = Err(e);
+                            break;
+                        }
+                        Ok(f) => {
+                            if let Some(f) = Self::loop_flow(f, &labels) {
+                                out = Ok(f);
+                                break;
+                            }
+                        }
                     }
+                    self.young_stack[yslot] = self.heap.alloc_seq();
                     if let Some(u) = update {
                         if names.is_empty() {
-                            self.eval_expr(&ienv, this.clone(), u)?;
+                            self.arm_call_only(yslot, u);
+                            let r = self.eval_expr(&ienv, this.clone(), u);
+                            self.call_only_slot = None;
+                            if let Err(e) = r {
+                                out = Err(e);
+                                break;
+                            }
                         } else {
                             // Copie post-corps : le tour suivant
                             // reçoit des cellules fraîches portant
                             // les valeurs courantes, puis `update`
-                            // les mute (spec).
+                            // les mute (spec). `next` racinée
+                            // avant l'éval.
                             let next = Env::block(env.clone());
                             for (n, m) in &names {
                                 let v = self.env_get(&ienv, n).unwrap_or(Value::Undefined);
                                 Self::env_declare_lex(&next, n, *m);
                                 Self::env_init_lex(&next, n, v);
                             }
-                            self.eval_expr(&next, this.clone(), u)?;
+                            self.safepoint_envs[sp_ienv] = next.clone();
+                            self.arm_call_only(yslot, u);
+                            let r = self.eval_expr(&next, this.clone(), u);
+                            self.call_only_slot = None;
+                            if let Err(e) = r {
+                                out = Err(e);
+                                break;
+                            }
                             ienv = next;
                         }
                     } else if !names.is_empty() {
@@ -632,9 +735,12 @@ impl Engine {
                             Self::env_declare_lex(&next, n, *m);
                             Self::env_init_lex(&next, n, v);
                         }
+                        self.safepoint_envs[sp_ienv] = next.clone();
                         ienv = next;
                     }
                 }
+                self.safepoint_envs.truncate(sp_ienv);
+                out
             }
             Stmt::ForIn {
                 target,
@@ -661,15 +767,24 @@ impl Engine {
                 self.safepoint_roots.push(Value::Obj(id));
                 let mut out = Ok(Flow::Normal);
                 for key in keys {
+                    // JS-C460 — re-stamp par itération + env
+                    // d'itération racinée (`assign_target` peut
+                    // invoquer un setter → safepoint pendant le
+                    // dispatch hors `exec_stmt`).
+                    self.young_stack[yslot] = self.heap.alloc_seq();
                     let kv = self.str_val(key);
                     let ienv = if per_iter {
                         Env::block(env.clone())
                     } else {
                         env.clone()
                     };
+                    self.safepoint_envs.push(ienv.clone());
+                    self.young_stack[yslot] = u64::MAX;
                     let st = self
                         .assign_target(&ienv, this.clone(), target, kv)
                         .and_then(|()| self.exec_stmt(&ienv, this.clone(), body));
+                    self.young_stack[yslot] = self.heap.alloc_seq();
+                    self.safepoint_envs.pop();
                     match st {
                         Err(e) => {
                             out = Err(e);
@@ -709,9 +824,18 @@ impl Engine {
                         let using = matches!(target, ForTarget::Using { .. });
                         let lex =
                             matches!(target, ForTarget::Lexical { .. } | ForTarget::Using { .. });
+                        // JS-C460 — l'itérateur vit à travers tous
+                        // les corps : racine pour la boucle (sous
+                        // borne d'âge fine il n'est plus « jeune »
+                        // après le premier tour).
+                        self.safepoint_roots.push(it.clone());
                         let mut out = Ok(Flow::Normal);
                         loop {
-                            self.tick()?;
+                            self.young_stack[yslot] = self.heap.alloc_seq();
+                            if let Err(e) = self.tick() {
+                                out = Err(e);
+                                break;
+                            }
                             let Value::Obj(iid) = it else { break };
                             let Some(nf) = self.get_prop(iid, "next") else {
                                 break;
@@ -719,7 +843,13 @@ impl Engine {
                             if !self.is_callable(nf.clone()) {
                                 break;
                             }
-                            let r = self.call_value(nf, it.clone(), &[])?;
+                            let r = match self.call_value(nf, it.clone(), &[]) {
+                                Err(e) => {
+                                    out = Err(e);
+                                    break;
+                                }
+                                Ok(r) => r,
+                            };
                             let Value::Obj(rid) = r else { break };
                             if self
                                 .get_prop(rid, "done")
@@ -736,15 +866,22 @@ impl Engine {
                             } else {
                                 env.clone()
                             };
+                            self.safepoint_envs.push(ienv.clone());
+                            self.young_stack[yslot] = u64::MAX;
                             let mut rr = self
                                 .assign_target(&ienv, this.clone(), target, item)
                                 .and_then(|()| self.exec_stmt(&ienv, this.clone(), body));
+                            self.young_stack[yslot] = self.heap.alloc_seq();
+                            self.safepoint_envs.pop();
                             if using {
                                 rr = self.drain_using(rr);
                             }
                             match rr {
                                 Err(e) => {
-                                    self.iterator_close(&it)?;
+                                    if let Err(e2) = self.iterator_close(&it) {
+                                        out = Err(e2);
+                                        break;
+                                    }
                                     out = Err(e);
                                     break;
                                 }
@@ -756,7 +893,10 @@ impl Engine {
                                         // break aussi, pas sur
                                         // `done`/`continue`.
                                         if !matches!(f, Flow::Continue(_)) {
-                                            self.iterator_close(&it)?;
+                                            if let Err(e) = self.iterator_close(&it) {
+                                                out = Err(e);
+                                                break;
+                                            }
                                         }
                                         out = Ok(f);
                                         break;
@@ -764,6 +904,7 @@ impl Engine {
                                 }
                             }
                         }
+                        self.safepoint_roots.pop();
                         return out;
                     }
                 }
@@ -785,6 +926,9 @@ impl Engine {
                 self.safepoint_roots.extend(items.iter().cloned());
                 let mut out = Ok(Flow::Normal);
                 for item in items {
+                    // JS-C460 — re-stamp + env d'itération racinée
+                    // (les `items` sont déjà racinés en bloc).
+                    self.young_stack[yslot] = self.heap.alloc_seq();
                     if using {
                         self.using_stack.push(Vec::new());
                     }
@@ -793,9 +937,13 @@ impl Engine {
                     } else {
                         env.clone()
                     };
+                    self.safepoint_envs.push(ienv.clone());
+                    self.young_stack[yslot] = u64::MAX;
                     let mut r = self
                         .assign_target(&ienv, this.clone(), target, item)
                         .and_then(|()| self.exec_stmt(&ienv, this.clone(), body));
+                    self.young_stack[yslot] = self.heap.alloc_seq();
+                    self.safepoint_envs.pop();
                     if using {
                         r = self.drain_using(r);
                     }
@@ -829,7 +977,9 @@ impl Engine {
                 ) {
                     self.pending_labels.push(name.clone());
                 }
+                self.young_stack[yslot] = u64::MAX;
                 let r = self.exec_stmt(env, this, body);
+                self.young_stack[yslot] = self.heap.alloc_seq();
                 // Défensif : nettoie le label si la boucle ne l'a
                 // pas consommé (corps non exécuté, erreur précoce).
                 if let Some(pos) = self.pending_labels.iter().rposition(|l| l == name) {
@@ -844,14 +994,21 @@ impl Engine {
             Stmt::Continue(l) => Ok(Flow::Continue(l.clone())),
             Stmt::Return(e) => {
                 let v = match e {
-                    Some(e) => self.eval_expr(env, this, e)?,
+                    Some(e) => {
+                        self.arm_call_only(yslot, e);
+                        let v = self.eval_expr(env, this, e);
+                        self.call_only_slot = None;
+                        v?
+                    }
                     None => Value::Undefined,
                 };
                 Ok(Flow::Return(v))
             }
             Stmt::Throw(e) => {
-                let v = self.eval_expr(env, this, e)?;
-                Err(Thrown(v))
+                self.arm_call_only(yslot, e);
+                let v = self.eval_expr(env, this, e);
+                self.call_only_slot = None;
+                Err(Thrown(v?))
             }
             Stmt::Try {
                 block,
@@ -861,7 +1018,10 @@ impl Engine {
                 // `try {}`/`finally {}` sont des blocs — env enfant
                 // pour leurs `let`/`const` (même règle que Block).
                 let benv = Env::block(env.clone());
+                // JS-C460 — dispatch pur des trois corps.
+                self.young_stack[yslot] = u64::MAX;
                 let mut r = self.exec_body(&benv, this.clone(), block);
+                self.young_stack[yslot] = self.heap.alloc_seq();
                 if let Err(Thrown(ref v)) = r {
                     if let Some((pat, cbody)) = catch {
                         let cenv = Env::block(env.clone());
@@ -879,7 +1039,9 @@ impl Engine {
                             // JS-C421 : le jeton vit dans `r`
                             // pendant le corps catch — racine.
                             self.safepoint_roots.push(v.clone());
+                            self.young_stack[yslot] = u64::MAX;
                             r = self.exec_body(&cenv, this.clone(), cbody);
+                            self.young_stack[yslot] = self.heap.alloc_seq();
                             self.safepoint_roots.pop();
                         }
                     }
@@ -887,14 +1049,19 @@ impl Engine {
                 if let Some(fbody) = finally {
                     // JS-C421 : `r` porte encore son jeton éventuel
                     // pendant le corps finally — racine temporaire.
-                    let held = if let Err(Thrown(v)) = &r {
-                        self.safepoint_roots.push(v.clone());
-                        true
-                    } else {
-                        false
+                    // JS-C460 : la valeur d'un `return` en vol est
+                    // un jeton au même titre (bornes fines).
+                    let held = match &r {
+                        Err(Thrown(v)) | Ok(Flow::Return(v)) => {
+                            self.safepoint_roots.push(v.clone());
+                            true
+                        }
+                        _ => false,
                     };
                     let fenv = Env::block(env.clone());
+                    self.young_stack[yslot] = u64::MAX;
                     let fr = self.exec_body(&fenv, this, fbody);
+                    self.young_stack[yslot] = self.heap.alloc_seq();
                     if held {
                         self.safepoint_roots.pop();
                     }
@@ -932,6 +1099,8 @@ impl Engine {
                 self.safepoint_roots.push(dv);
                 let mut out = Ok(Flow::Normal);
                 for c in &cases[start..] {
+                    // JS-C460 — dispatch pur d'un corps de case.
+                    self.young_stack[yslot] = u64::MAX;
                     match self.exec_body(&senv, this.clone(), &c.body) {
                         Err(e) => {
                             out = Err(e);

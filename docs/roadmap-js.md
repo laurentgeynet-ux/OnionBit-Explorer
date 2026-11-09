@@ -171,26 +171,30 @@ croissance aux safepoints et frontières de job
 est un seul design : **marquage incrémental** ou
 **safepoint plus fin**.
 
-- [ ] **JT-16. Churn `a.ads.rmbl.ws` (rumble) — +1 %
-  overshoot résiduel** : post-backoff, la croissance heap
-  dépasse encore le seuil sur ce script. Attribuer le site
-  d'alloc avant tout fix (attribution J17 par éval JS-C425
-  disponible, `EXPLORER_J17_PROF=1`) — l'overshoot est
-  un symptôme, pas un diagnostic.
-- [ ] **JT-17. Sweep sous éval — PoW `SG_SS` (~500 B/op de
-  churn)** : le collecteur se déclenche en plein span
-  d'éval sur un script qui ne rend jamais la main. Le
-  safepoint JS-C421 borne la pause mais ne change pas la
-  cadence : à ce taux de churn le sweep repart sitôt
-  terminé. Options (tranchées à la prise, mesures J17 à
-  l'appui) : (a) **marquage incrémental** — tranches de
-  mark bornées entrelacées aux safepoints, write-barrier
-  ou re-scan borné à documenter ; (b) **safepoint plus
-  fin** — granularité sous le span (tick de boucle déjà
-  instrumenté). Verrous : pas de régression sur la suite
-  `hostile` release, overshoot rumble mesuré ≤ seuil,
-  `SG_SS` atteint son espace d'exception sans mourir au
-  budget (réglages diagnostic Étape 123/124).
+- [x] **JT-16. Churn `a.ads.rmbl.ws` (rumble) — +1 %
+  overshoot résiduel** : **livré (JS-C460)** — même design
+  que JT-17 : la borne d'âge fine rend les morts
+  inter-statements réclamables au safepoint au lieu
+  d'accumuler jusqu'au seuil.
+- [x] **JT-17. Sweep sous éval — PoW `SG_SS` (~500 B/op de
+  churn)** : **livré (JS-C460)** — option (b) **safepoint
+  plus fin** retenue (borne nette, réversible, réutilise
+  l'infrastructure C421 — le marquage incrémental (a) avec
+  write-barrier reste non nécessaire). `young_floor` →
+  `young_stack` : contribution d'âge par frame, masquée
+  (`u64::MAX`) pendant tout dispatch dont l'état vivant est
+  entièrement raciné (boucles, blocs, `try`/`switch`, corps
+  de callee via `call_value_impl`, statements « call-only »
+  `x = f()`/`return f()`/`if (f())`) — les morts des
+  itérations/statements terminés redeviennent balayables.
+  Racines ajoutées : env de tête `for(let…)`, itérateur
+  `for..of` paresseux, valeur de `return` en vol pendant
+  `finally`. Verrous `c460_gc_churn` ×7 — repro `SG_SS`
+  (~800 B/op) survit sous cap 256 Mio, tas borné par la
+  dette ; compound-expr verrouille la frontière (table de
+  racines d'expressions = chantier suivant) ; `b110_probe`
+  basculé sur la forme épinglée honnête. Suites : lib 45,
+  lang 313, dom 245, gc 13, b14 52.
 
 ## JT-J — Dormants langue (file prête, règle J-B)
 
