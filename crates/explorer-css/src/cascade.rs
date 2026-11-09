@@ -64,6 +64,13 @@ pub struct StyleEnv {
     /// UA s'en sert pour masquer `<noscript>` — spec HTML :
     /// son contenu ne doit s'afficher que sans scripting.
     pub scripting: bool,
+    /// Rapport pixel écran (MQ `resolution`/`dppx` et les
+    /// `-webkit-*-device-pixel-ratio`, R-174) — le
+    /// `devicePixelRatio` du viewport ; 1.0 par défaut.
+    pub dpr: f32,
+    /// Réglage `prefers-reduced-motion` (MQ5, R-174) —
+    /// utilisateur/OS ; `false` par défaut.
+    pub reduced_motion: bool,
 }
 
 impl Default for StyleEnv {
@@ -75,6 +82,8 @@ impl Default for StyleEnv {
             font_size_base: 16.0,
             color_scheme: ColorScheme::default(),
             scripting: false,
+            dpr: 1.0,
+            reduced_motion: false,
         }
     }
 }
@@ -358,6 +367,7 @@ const SUPPORTED_PROPS: &[&str] = &[
 /// `(name: value)` d'une media query — px pour *-width/-height.
 /// `em`/`rem` y sont résolus contre la font-size INITIALE
 /// (spec MQ4 — jamais le `:root` calculé) : `env.font_size_base`.
+#[allow(clippy::too_many_lines)]
 fn condition_matches(env: &StyleEnv, name: &str, value: &str) -> bool {
     // Facteur nié `(not (f:v))` — encodé `not-<feature>` au
     // parsing (R-64). Un corps `not` non résoluble en une
@@ -391,6 +401,32 @@ fn condition_matches(env: &StyleEnv, name: &str, value: &str) -> bool {
         };
         num.trim().parse::<f64>().ok().map(|n| n * mul)
     };
+    // `Ndppx` = ratio direct, `Ndpi` = ÷96, `Ndpcm` = ×2,54/96 ;
+    // nombre nu = dppx (R-174).
+    let res = || -> Option<f64> {
+        let v = value.trim();
+        if let Some(s) = v.strip_suffix("dppx") {
+            s.trim().parse().ok()
+        } else if let Some(s) = v.strip_suffix("dpi") {
+            s.trim().parse::<f64>().ok().map(|n| n / 96.0)
+        } else if let Some(s) = v.strip_suffix("dpcm") {
+            s.trim().parse::<f64>().ok().map(|n| n * 2.54 / 96.0)
+        } else {
+            v.parse().ok()
+        }
+    };
+    // `W/H` ou nombre nu (R-174 — `aspect-ratio`).
+    let ratio = || -> Option<f64> {
+        let v = value.trim();
+        if let Some((w, h)) = v.split_once('/') {
+            let w = w.trim().parse::<f64>().ok()?;
+            let h = h.trim().parse::<f64>().ok()?;
+            (h != 0.0).then_some(w / h)
+        } else {
+            v.parse().ok()
+        }
+    };
+    let aspect = f64::from(env.width_px) / f64::from(env.height_px.max(1));
     match name {
         "min-width" => px().is_some_and(|v| f64::from(env.width_px) >= v),
         "max-width" => px().is_some_and(|v| f64::from(env.width_px) <= v),
@@ -433,6 +469,48 @@ fn condition_matches(env: &StyleEnv, name: &str, value: &str) -> bool {
             "none" => !env.scripting,
             _ => false,
         },
+        // ── R-174 : features MQ4/MQ5 manquantes — cap bureau
+        // plein écran : pointeur fin + hover, rafraîchissement
+        // rapide, gamut sRGB, 8 bits/couleur, mode navigateur.
+        "hover" | "any-hover" => matches!(value.trim(), "" | "hover"),
+        "pointer" | "any-pointer" => matches!(value.trim(), "" | "fine"),
+        "prefers-reduced-motion" => match value.trim() {
+            "" | "reduce" => env.reduced_motion,
+            "no-preference" => !env.reduced_motion,
+            _ => false,
+        },
+        "update" => matches!(value.trim(), "" | "fast"),
+        "color-gamut" => value.trim() == "srgb",
+        "forced-colors" => value.trim() == "none",
+        "display-mode" => value.trim() == "browser",
+        // 8 bits par composante couleur, 0 monochrome.
+        "color" => match value.trim() {
+            "" => true,
+            v => v.parse::<u32>().is_ok_and(|n| (1..=8).contains(&n)),
+        },
+        "min-color" => match value.trim() {
+            "" => true,
+            v => v.parse::<u32>().is_ok_and(|n| n <= 8),
+        },
+        "max-color" | "max-monochrome" => true,
+        "monochrome" | "min-monochrome" => match value.trim() {
+            "" => false,
+            v => v.parse::<u32>().is_ok_and(|n| n == 0),
+        },
+        // `resolution` + préfixés historiques — `dppx`
+        // canonique, `dpi`/`dpcm` convertis.
+        "resolution" | "-webkit-device-pixel-ratio" | "device-pixel-ratio" => {
+            res().is_some_and(|v| (f64::from(env.dpr) - v).abs() < 1e-6)
+        }
+        "min-resolution" | "-webkit-min-device-pixel-ratio" | "min-device-pixel-ratio" => {
+            res().is_some_and(|v| f64::from(env.dpr) >= v - 1e-6)
+        }
+        "max-resolution" | "-webkit-max-device-pixel-ratio" | "max-device-pixel-ratio" => {
+            res().is_some_and(|v| f64::from(env.dpr) <= v + 1e-6)
+        }
+        "aspect-ratio" => ratio().is_some_and(|v| (aspect - v).abs() < 0.01),
+        "min-aspect-ratio" => ratio().is_some_and(|v| aspect >= v - 1e-6),
+        "max-aspect-ratio" => ratio().is_some_and(|v| aspect <= v + 1e-6),
         // Feature inconnue → query fausse (spec : `not all`).
         _ => false,
     }

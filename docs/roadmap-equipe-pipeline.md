@@ -3349,7 +3349,7 @@ déblocage/coût décroissant.
   créent un containing block (modal/drawer dans un shell animé
   mal positionné). Reuse de la machinerie `absolute` avec CB =
   padding box de l'ancêtre transformé.
-- [ ] **R-174. Features MQ manquantes** : `(hover)`, `(pointer)`
+- [x] **R-174. Features MQ manquantes** : `(hover)`, `(pointer)`
   (et `any-`), `(resolution)`/`min/max-resolution` + `dppx`/
   `-webkit-min-device-pixel-ratio`, `(aspect-ratio)`, `(update)`,
   `(color-gamut)`, `(forced-colors)`, `(display-mode)`,

@@ -556,6 +556,75 @@ fn media_query_scripting() {
     );
 }
 
+/// R-174 — features MQ4/MQ5 : hover/pointer (bureau =
+/// fine+hover), resolution/dppx, aspect-ratio, update,
+/// color-gamut, forced-colors, display-mode, monochrome,
+/// color, prefers-reduced-motion — avant : tout faux → les
+/// règles gâtées `@media (hover:hover) and (pointer:fine)`
+/// mouraient.
+#[test]
+fn media_features_r174() {
+    let f = fixture();
+    for (q, want) in [
+        ("(hover: hover)", true),
+        ("(hover: none)", false),
+        ("(hover)", true),
+        ("(any-pointer: fine)", true),
+        ("(pointer: coarse)", false),
+        ("(pointer)", true),
+        ("(min-resolution: 2dppx)", false),
+        ("(max-resolution: 96dpi)", true),
+        ("(resolution: 1dppx)", true),
+        ("(-webkit-min-device-pixel-ratio: 1)", true),
+        ("(min-aspect-ratio: 1/1)", true),
+        ("(aspect-ratio: 4/3)", true),
+        ("(update: fast)", true),
+        ("(color-gamut: srgb)", true),
+        ("(color-gamut: p3)", false),
+        ("(forced-colors: none)", true),
+        ("(forced-colors: active)", false),
+        ("(display-mode: browser)", true),
+        ("(monochrome)", false),
+        ("(min-monochrome: 0)", true),
+        ("(color: 8)", true),
+        ("(color: 0)", false),
+        ("(min-color: 8)", true),
+        ("(prefers-reduced-motion: reduce)", false),
+        ("(prefers-reduced-motion: no-preference)", true),
+    ] {
+        let mut eng = StyleEngine::new();
+        eng.add_css(
+            &format!("@media {q} {{ div {{ color: red }} }}"),
+            Origin::Author,
+        );
+        let s = eng.compute(&f.dom, f.div, &env());
+        let got = s.get("color");
+        assert_eq!(
+            got.is_some(),
+            want,
+            "@media {q} attendu {want}, got {got:?}"
+        );
+    }
+    // `dpr`/`reduced_motion` pilotés par l'env.
+    let hi_dpi = StyleEnv { dpr: 2.0, ..env() };
+    let mut e2 = StyleEngine::new();
+    e2.add_css(
+        "@media (min-resolution: 2dppx) { div { color: red } }",
+        Origin::Author,
+    );
+    assert!(e2.compute(&f.dom, f.div, &hi_dpi).get("color").is_some());
+    let rm = StyleEnv {
+        reduced_motion: true,
+        ..env()
+    };
+    let mut e3 = StyleEngine::new();
+    e3.add_css(
+        "@media (prefers-reduced-motion: reduce) { div { color: red } }",
+        Origin::Author,
+    );
+    assert!(e3.compute(&f.dom, f.div, &rm).get("color").is_some());
+}
+
 #[test]
 fn noscript_masque_sous_scripting() {
     // R-93 — la feuille UA masque `<noscript>` quand
