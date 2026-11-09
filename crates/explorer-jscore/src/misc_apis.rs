@@ -2220,7 +2220,7 @@ struct AnimData {
     onfinish: Value,
     oncancel: Value,
     /// `effect`/`timeline` (JS-C461) — `new Animation(kfe,
-    /// tl)` les porte ; `el.animate` pose un KeyframeEffect
+    /// tl)` les porte ; `el.animate` pose un `KeyframeEffect`
     /// implicite + `document.timeline`.
     effect: Value,
     timeline: Value,
@@ -2297,7 +2297,7 @@ fn document_timeline(e: &mut Engine) -> ObjId {
 }
 
 /// Host `KeyframeEffect` (JS-C461, mur vol 733 §B-124 —
-/// YouTube fait `new KeyframeEffect(el, frames, opts)`) :
+/// `YouTube` fait `new KeyframeEffect(el, frames, opts)`) :
 /// stocke cible/frames/options, lecture honnête, zéro
 /// interpolation (pas de compositeur — même borne que
 /// `el.animate` CAP-187).
@@ -2349,11 +2349,7 @@ impl Host for KfeHost {
 /// (JS-C461) — ctor spec : les 3 args stockés (le forme
 /// copie `new KeyframeEffect(kfe)` délègue aux accesseurs
 /// du source via `read_prop` — borné).
-pub(crate) fn keyframe_effect_ctor(
-    e: &mut Engine,
-    _t: Value,
-    args: &[Value],
-) -> JsResult<Value> {
+pub(crate) fn keyframe_effect_ctor(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
     let target = arg(args, 0);
     let keyframes = arg(args, 1);
     let options = arg(args, 2);
@@ -2408,9 +2404,11 @@ fn kfe_target_node(e: &mut Engine, effect: &Value) -> Option<NodeId> {
     let Value::Obj(id) = effect else {
         return None;
     };
-    let target = e
-        .host_of(*id)
-        .and_then(|h| h.as_any().downcast_ref::<KfeHost>().map(|k| k.target.clone()))?;
+    let target = e.host_of(*id).and_then(|h| {
+        h.as_any()
+            .downcast_ref::<KfeHost>()
+            .map(|k| k.target.clone())
+    })?;
     node_for(e, target)
 }
 
@@ -2425,11 +2423,7 @@ pub(crate) fn animate(e: &mut Engine, t: Value, args: &[Value]) -> JsResult<Valu
     };
     // JS-C461 : `el.animate` crée un `KeyframeEffect`
     // implicite (spec) — exposé via `animation.effect`.
-    let kfe = keyframe_effect_ctor(
-        e,
-        Value::Null,
-        &[t.clone(), arg(args, 0), arg(args, 1)],
-    )?;
+    let kfe = keyframe_effect_ctor(e, Value::Null, &[t.clone(), arg(args, 0), arg(args, 1)])?;
     let finished = e.new_promise();
     let ready = e.new_promise();
     e.resolve_promise(ready, Value::Undefined);

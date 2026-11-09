@@ -11483,3 +11483,35 @@ un crate PIPELINE.- [x] **JS-C422. Deadline honnête — canal session ↔ budge
   dans `misc.anim_proto`/`kfe_proto` → `instanceof`
   croisé wrappers↔ctor. Verrous `c461_waapi` ×4 ;
   canaris dom 245/245, media_events 15/15.
+
+- [x] **JS-C462. §B-112 — `DOMParser` mode XML : casse
+  préservée (mur dash.js pré-attach nommé en vol)**
+  (vol 778, client de référence dashif.org) : le clic
+  `Load` dispatché ne produisait rien — instrumentation
+  in-page (`dashjs.MediaPlayer` + bus d'événements) :
+  `initialize()` ok, manifest fetché **2× en 200**
+  (re-tirage UTCTiming), puis silence entre
+  `MANIFEST_LOADING_STARTED` et l'attach MSE. Cause
+  racine : `parseFromString(…, "text/xml")` rendait un
+  document **vide** (déviation « pas de parseur XML »
+  documentée) → `documentElement` null → le parseur
+  MPD de dash.js marchait sur rien. `Dom::from_xml` :
+  tokenizer partagé `parse_fragment_mode` — casse des
+  balises/attributs préservée (`alloc` inclus), règles
+  HTML inertes (fermetures implicites par paires,
+  `<head>` implicite, tags de structure, void,
+  raw-text), `<![CDATA[…]]>` en texte brut.
+  `tagName`/`localName`/`namespaceURI` XML (xmlns le
+  plus proche, null à défaut) ; `by_tag`/`attr`/
+  `set_attr`/sélecteurs tolèrent la casse de la
+  requête (déviation douce vs casse stricte XML).
+  MIME routés spec : `text/html` → HTML ; `text/xml`,
+  `application/xml`, `application/xhtml+xml`,
+  `image/svg+xml` → XML ; inconnu → `TypeError`
+  (l'ancien « document vide » silencieux supprimé).
+  Verrou `dom_parser_xml_mpd` ×4 (MPD casse, self-
+  close, attrs camelCase, ns, CDATA, mime inconnu) ;
+  suite dom 246/246, clippy propre. **Re-flight
+  dash.js requis** — si le manifest se parse, le mur
+  suivant sera nommé par la même méthode (bus
+  d'événements `dashjs.MediaPlayer.events`).

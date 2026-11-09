@@ -871,14 +871,17 @@ fn dom_nav_value(
         // l'identité `===` du document (posée à `install_dom`).
         "ownerDocument" => node_value(e, dom, cache, dom.borrow().root),
         "tagName" | "nodeName" => {
-            let (k, t) = {
-                let n = &dom.borrow().nodes[node as usize];
-                (n.kind, n.tag.clone())
+            let (k, t, is_xml) = {
+                let d = dom.borrow();
+                let n = &d.nodes[node as usize];
+                (n.kind, n.tag.clone(), d.xml)
             };
-            // Majuscule = éléments HTML (spec) ; SVG garde le nom
-            // qualifié ; sentinels non-élément gardent leur forme.
+            // Majuscule = éléments HTML (spec) ; SVG et documents
+            // XML gardent le nom qualifié tel quel (§B-112 —
+            // `AdaptationSet`, jamais `ADAPTATIONSET`) ; sentinels
+            // non-élément gardent leur forme.
             e.str_val(if k == NodeKind::Element {
-                if tag_interface(&t).is_some_and(|n| n.starts_with("SVG")) {
+                if is_xml || tag_interface(&t).is_some_and(|n| n.starts_with("SVG")) {
                     t
                 } else {
                     t.to_uppercase()
@@ -896,15 +899,32 @@ fn dom_nav_value(
             }
         }
         "namespaceURI" => {
-            let n = &dom.borrow().nodes[node as usize];
+            let d = dom.borrow();
+            let n = &d.nodes[node as usize];
             if n.kind == NodeKind::Element {
-                e.str_val(
-                    if tag_interface(&n.tag).is_some_and(|i| i.starts_with("SVG")) {
-                        "http://www.w3.org/2000/svg"
-                    } else {
-                        "http://www.w3.org/1999/xhtml"
-                    },
-                )
+                if d.xml {
+                    // Document XML : l'espace de noms est celui
+                    // déclaré par `xmlns`/`xmlns:prefix` sur
+                    // l'élément ou ses ancêtres — à défaut, null
+                    // (pas de repli XHTML : un `<MPD>` n'est pas
+                    // du HTML — §B-112).
+                    let ns = std::iter::once(node)
+                        .chain(d.ancestors(node))
+                        .find_map(|a| d.attr(a, "xmlns"))
+                        .map(str::to_string);
+                    match ns {
+                        Some(ns) => e.str_val(&ns),
+                        None => Value::Null,
+                    }
+                } else {
+                    e.str_val(
+                        if tag_interface(&n.tag).is_some_and(|i| i.starts_with("SVG")) {
+                            "http://www.w3.org/2000/svg"
+                        } else {
+                            "http://www.w3.org/1999/xhtml"
+                        },
+                    )
+                }
             } else {
                 Value::Null
             }
@@ -2965,12 +2985,8 @@ impl Engine {
             // `el.animate()`/`getAnimations()`).
             let f = match name {
                 "DocumentFragment" => self.native_fn(name, docfrag_ctor),
-                "Animation" => {
-                    self.native_fn(name, crate::misc_apis::animation_ctor)
-                }
-                "KeyframeEffect" => {
-                    self.native_fn(name, crate::misc_apis::keyframe_effect_ctor)
-                }
+                "Animation" => self.native_fn(name, crate::misc_apis::animation_ctor),
+                "KeyframeEffect" => self.native_fn(name, crate::misc_apis::keyframe_effect_ctor),
                 _ => self.illegal_ctor_bound(name),
             };
             if let Value::Obj(fid) = f {
@@ -3875,12 +3891,8 @@ impl Engine {
             // vrai ctor (le stub « illegal constructor »
             // cassait `new KeyframeEffect` de YouTube).
             let f = match name {
-                "Animation" => {
-                    self.native_fn(name, crate::misc_apis::animation_ctor)
-                }
-                "KeyframeEffect" => {
-                    self.native_fn(name, crate::misc_apis::keyframe_effect_ctor)
-                }
+                "Animation" => self.native_fn(name, crate::misc_apis::animation_ctor),
+                "KeyframeEffect" => self.native_fn(name, crate::misc_apis::keyframe_effect_ctor),
                 _ => self.illegal_ctor_bound(name),
             };
             if let Value::Obj(fid) = f {
@@ -5307,9 +5319,7 @@ impl Host for DocumentHost {
             // `DocumentTimeline` singleton du document,
             // horloges honnêtes à 0 (pas de compositeur —
             // même borne que `el.animate` CAP-187).
-            "timeline" => Ok(Some(Value::Obj(
-                crate::misc_apis::document_timeline_pub(e),
-            ))),
+            "timeline" => Ok(Some(Value::Obj(crate::misc_apis::document_timeline_pub(e)))),
             // `document.currentScript` (CAP-168) — l'élément
             // `<script>` en cours d'évaluation, `null` sinon
             // (spec : posé uniquement pendant l'exécution).
@@ -13355,11 +13365,10 @@ fn node_ctor(e: &mut Engine, _t: Value, _a: &[Value]) -> JsResult<Value> {
 /// Constructeur-stub des interfaces DOM sans implémentation
 /// (`HTMLElement`, `IntersectionObserver`…) — « illegal
 /// constructor » comme `Node`, la détection `typeof`/`in` suffit.
-/// Host `DOMParser` (JS-C91) — `parseFromString` via le
-/// parseur HTML du miroir (`Dom::from_html` — tolérant tag
-/// soup). Seule la famille `text/html` est parseée ; les
-/// autres MIME rendent un document vide (déviation — pas de
-/// parseur XML).
+/// Host `DOMParser` (JS-C91) — `parseFromString` : `text/html`
+/// via `Dom::from_html` (tolérant tag soup) ; les quatre MIME
+/// XML via `Dom::from_xml` (§B-112 — casse préservée, requis
+/// par les manifests DASH `text/xml`).
 struct DomParserHost;
 
 impl Host for DomParserHost {
@@ -13385,16 +13394,26 @@ impl Host for DomParserHost {
         if name == "parseFromString" {
             let src = e.to_js_string(arg(args, 0))?;
             let mime = e.to_js_string(arg(args, 1))?;
-            // Spec : `text/html`/`application/xhtml+xml` →
-            // document HTML ; les autres MIME retournent un
-            // document d'erreur `<parsererror>` — ici un
-            // document vide (déviation honnête).
-            let body = if mime.contains("html") {
-                src
+            // Spec : `text/html` → document HTML ; les quatre
+            // MIME XML (`text/xml`, `application/xml`,
+            // `application/xhtml+xml`, `image/svg+xml`) →
+            // document XML casse-préservée (§B-112 — les
+            // manifests DASH des players sont `text/xml`).
+            // MIME inconnu → `TypeError` (spec) ; XML malformé
+            // → parse tolérant (déviation — pas de
+            // `<parsererror>` synthétisé).
+            let domref: DomRef = if mime == "text/html" {
+                Rc::new(RefCell::new(crate::dom::Dom::from_html(&src)))
+            } else if matches!(
+                mime.as_str(),
+                "text/xml" | "application/xml" | "application/xhtml+xml" | "image/svg+xml"
+            ) {
+                Rc::new(RefCell::new(crate::dom::Dom::from_xml(&src)))
             } else {
-                String::new()
+                return Err(e.type_error(format!(
+                    "DOMParser.parseFromString: unsupported mime \"{mime}\""
+                )));
             };
-            let domref: DomRef = Rc::new(RefCell::new(crate::dom::Dom::from_html(&body)));
             return Ok(Some(document_value(e, &domref)));
         }
         Ok(None)

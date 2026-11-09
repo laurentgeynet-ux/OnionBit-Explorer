@@ -5343,10 +5343,60 @@ fn dom_parser_constructs_and_parses() {
         ),
         "1/hi"
     );
-    // MIME non-HTML : document vide (déviation — pas de parseur XML).
+    // MIME inconnu → `TypeError` (spec) — avant : document
+    // vide rendu en silence (déviation remplacée, §B-112).
     assert_eq!(
-        ev("new DOMParser().parseFromString('<a/>','text/xml').body.childNodes.length"),
-        "0"
+        ev("try{new DOMParser().parseFromString('<a/>','text/plain')}catch(e){e.name}"),
+        "TypeError"
+    );
+}
+
+/// `parseFromString(…,'text/xml')` (§B-112) — les manifests
+/// DASH exigent la **casse préservée** (`MPD`/`Period`/
+/// `AdaptationSet`), `/>` et les attributs camelCase
+/// (`mediaPresentationDuration`). Le document vide historique
+/// stallait dash.js entre `MANIFEST_LOADING_STARTED` et
+/// `mse.attach` — mur mesuré sur le client de référence
+/// dashif.org (vol 778).
+#[test]
+fn dom_parser_xml_mpd() {
+    // Arbre casse-préservée, self-close, attrs camelCase.
+    assert_eq!(
+        ev(
+            "var d=new DOMParser().parseFromString(\
+            '<MPD mediaPresentationDuration=\"PT30S\"><Period><AdaptationSet mimeType=\"video/mp4\"><Representation bandwidth=\"100\"/></AdaptationSet></Period></MPD>',\
+            'text/xml');\
+            var r=d.documentElement;\
+            r.tagName+'/'+r.childNodes.length+'/'+r.getAttribute('mediaPresentationDuration')"
+        ),
+        "MPD/1/PT30S"
+    );
+    // `getElementsByTagName`/sélecteurs tolèrent la casse de
+    // la requête ; `localName`/`tagName` gardent la casse
+    // stockée (dash.js marche par `localName`/`childNodes`).
+    assert_eq!(
+        ev(
+            "var d=new DOMParser().parseFromString('<M><Period/><period/></M>','text/xml');\
+            d.getElementsByTagName('Period').length+'/'+d.documentElement.childNodes[0].localName+'/'+d.documentElement.childNodes[0].tagName"
+        ),
+        "2/Period/Period"
+    );
+    // `namespaceURI` : `xmlns` le plus proche, null à défaut.
+    assert_eq!(
+        ev(
+            "var d=new DOMParser().parseFromString('<MPD xmlns=\"urn:dash\"><Period/></MPD>','text/xml');\
+            var n=d2=new DOMParser().parseFromString('<M/>','text/xml');\
+            d.documentElement.namespaceURI+'|'+(n.documentElement.namespaceURI===null)"
+        ),
+        "urn:dash|true"
+    );
+    // `<![CDATA[…]]>` : texte brut, ni entités ni balises.
+    assert_eq!(
+        ev(
+            "var d=new DOMParser().parseFromString('<M><BaseURL><![CDATA[a&b<c>]]></BaseURL></M>','text/xml');\
+            d.documentElement.childNodes[0].textContent"
+        ),
+        "a&b<c>"
     );
 }
 

@@ -796,6 +796,15 @@ pub struct Dom {
     /// `write` sur document fermé rouvre implicitement en
     /// effaçant le contenu d'abord (spec `document open steps`).
     pub doc_open: bool,
+    /// Document parsé en **mode XML** (§B-112 — `DOMParser.
+    /// parseFromString(…, "text/xml")` pour les MPD DASH) : les
+    /// noms de balises et d'attributs conservent leur casse, les
+    /// requêtes (`by_tag`, `attr`, sélecteurs) comparent en
+    /// tolérant la casse du requête, les raccourcis du tree-
+    /// builder HTML (`<head>` implicite, void/raw-text,
+    /// fermetures par paires) sont inertes — tout élément reste
+    /// ouvert jusqu'à sa balise de fin ou `/>`.
+    pub xml: bool,
     /// Élément détenant le focus du document (CAP-162) —
     /// `el.focus()`/`el.blur()`/`autofocus` le maintiennent ;
     /// `document.activeElement` le lit (repli `body`). Un nœud
@@ -926,6 +935,7 @@ impl Dom {
             ce_reactions: Vec::new(),
             canvas_op_limit: DEFAULT_CANVAS_OP_LIMIT,
             doc_open: true,
+            xml: false,
             dyn_started: HashSet::new(),
             pending_dyn: Vec::new(),
             parse_dyn: HashSet::new(),
@@ -1775,6 +1785,20 @@ impl Dom {
         d
     }
 
+    /// `DOMParser.parseFromString(…, "text/xml")` (§B-112) —
+    /// miroir en mode XML : casse préservée, aucune synthèse
+    /// `html`/`head`/`body`, aucune règle de fermeture HTML.
+    /// Sert les manifests DASH/HLS (dash.js lit
+    /// `documentElement` + `childNodes`/`localName`/`getAttribute`
+    /// en casse stricte) — pas de scripts/dyn à collecter.
+    #[must_use]
+    pub fn from_xml(xml: &str) -> Self {
+        let mut d = Self::new();
+        d.xml = true;
+        d.parse_fragment_mode(d.root, xml, true);
+        d
+    }
+
     /// Marque « déjà chargés » tous les `<iframe>` du
     /// sous-arbre `node` (CAP-171) — contrairement aux
     /// scripts, la spec ne marque **pas** les cadres
@@ -2084,17 +2108,25 @@ impl Dom {
         // §B-59 — réutilise un slot libéré (payloads déjà
         // vidés, `parent` nul) : le churn `innerHTML` borne
         // l'arène au lieu de croître sans fin.
+        // En mode XML (`self.xml`) la casse du tag est
+        // préservée (§B-112 — `AdaptationSet` dans un MPD) ;
+        // en HTML elle est normalisée minuscules (spec).
+        let stored_tag = if self.xml {
+            tag.to_string()
+        } else {
+            tag.to_lowercase()
+        };
         if let Some(id) = self.free_nodes.pop() {
             let n = &mut self.nodes[id as usize];
             n.kind = kind;
-            n.tag = tag.to_lowercase();
+            n.tag = stored_tag;
             n.attached = false;
             n.free = false;
             return id;
         }
         self.nodes.push(Node {
             kind,
-            tag: tag.to_lowercase(),
+            tag: stored_tag,
             attrs: Vec::new(),
             children: Vec::new(),
             parent: None,
@@ -3574,6 +3606,10 @@ impl Dom {
             .get(node as usize)?
             .attrs
             .iter()
+            // ASCII-insensible en HTML (spec) comme en XML
+            // (déviation douce : la casse est préservée au
+            // stockage mais la requête du script ne paye pas
+            // la différence — §B-112).
             .find(|(k, _)| k.eq_ignore_ascii_case(name))
             .map(|(_, v)| v.as_str())
     }
@@ -3588,7 +3624,12 @@ impl Dom {
         if let Some((_, v)) = attrs.iter_mut().find(|(k, _)| k.eq_ignore_ascii_case(name)) {
             *v = value.to_string();
         } else {
-            attrs.push((name.to_lowercase(), value.to_string()));
+            let stored = if self.xml {
+                name.to_string()
+            } else {
+                name.to_lowercase()
+            };
+            attrs.push((stored, value.to_string()));
         }
         if name.eq_ignore_ascii_case("id") {
             self.index_id(node, old.clone());
@@ -3601,7 +3642,11 @@ impl Dom {
             removed: Vec::new(),
             prev_sibling: None,
             next_sibling: None,
-            attr_name: Some(name.to_lowercase()),
+            attr_name: Some(if self.xml {
+                name.to_string()
+            } else {
+                name.to_lowercase()
+            }),
             old_value: old.clone(),
         });
         self.ce_attr_reaction(node, name, old.clone(), Some(value.to_string()));
@@ -3848,8 +3893,33 @@ impl Dom {
     #[must_use]
     pub fn by_tag(&self, from: NodeId, tag: &str) -> Vec<NodeId> {
         let mut out = Vec::new();
-        self.collect_tag(from, &tag.to_lowercase(), &mut out);
+        // Mode XML (`self.xml`) : les balises ont conservé leur
+        // casse — la requête est comparée en tolérant la sienne
+        // (`getElementsByTagName("Period")` et `("period")` sur
+        // un MPD), déviation douce vs la casse stricte XML.
+        if self.xml {
+            self.collect_tag_xml(from, tag, &mut out);
+        } else {
+            self.collect_tag(from, &tag.to_lowercase(), &mut out);
+        }
         out
+    }
+
+    /// `collect_tag` casse-tolérante (mode XML — §B-112).
+    fn collect_tag_xml(&self, node: NodeId, tag: &str, out: &mut Vec<NodeId>) {
+        let mut stack: Vec<NodeId> = self.nodes[node as usize]
+            .children
+            .iter()
+            .rev()
+            .copied()
+            .collect();
+        while let Some(c) = stack.pop() {
+            let n = &self.nodes[c as usize];
+            if n.kind == NodeKind::Element && (tag == "*" || n.tag.eq_ignore_ascii_case(tag)) {
+                out.push(c);
+            }
+            stack.extend(n.children.iter().rev());
+        }
     }
 
     fn collect_tag(&self, node: NodeId, tag: &str, out: &mut Vec<NodeId>) {
@@ -4048,7 +4118,15 @@ impl Dom {
             return false;
         }
         if let Some(t) = &sel.tag {
-            if n.tag != *t {
+            // `sel.tag` est minuscule (parseur de sélecteur) ;
+            // en HTML les nœuds aussi. En XML le nœud a gardé
+            // sa casse → comparaison insensible (§B-112).
+            let tag_ok = if self.xml {
+                n.tag.eq_ignore_ascii_case(t)
+            } else {
+                n.tag == *t
+            };
+            if !tag_ok {
                 return false;
             }
         }
@@ -4401,6 +4479,14 @@ impl Dom {
     /// Tolerant by design: unknown entities pass through, unclosed
     /// tags simply stay open, `</x>` pops to the nearest open `x`.
     pub fn parse_fragment_into(&mut self, parent: NodeId, html: &str) {
+        self.parse_fragment_mode(parent, html, false);
+    }
+
+    /// Tokenizer commun HTML/XML — `xml=true` : casse des
+    /// balises et attributs préservée, règles HTML (fermetures
+    /// implicites, void, raw-text, tags de structure) inertes,
+    /// `<![CDATA[…]]>` rendu en texte brut (§B-112).
+    fn parse_fragment_mode(&mut self, parent: NodeId, html: &str, xml: bool) {
         let mut stack = vec![parent];
         // Compte des tags ouverts dans `stack` — les recherches
         // d'ancêtre (`head` ouvert, `html`/`body` implicites,
@@ -4457,6 +4543,24 @@ impl Dom {
                 i += 1;
                 continue;
             }
+            // `<![CDATA[…]]>` (mode XML uniquement) — texte
+            // brut, jamais décodé en entités ni découpé en
+            // balises : le contenu est opaque jusqu'à `]]>`.
+            if xml && cs[i + 1..].starts_with(&['!', '[', 'C', 'D', 'A', 'T', 'A', '[']) {
+                i += 9;
+                let start = i;
+                while i + 2 < cs.len() && !(cs[i] == ']' && cs[i + 1] == ']' && cs[i + 2] == '>') {
+                    i += 1;
+                }
+                let body: String = cs[start..i.min(cs.len())].iter().collect();
+                i = (i + 3).min(cs.len());
+                if !body.is_empty() {
+                    let t = self.create_text(&body);
+                    let top = *stack.last().unwrap_or(&parent);
+                    self.append(top, t);
+                }
+                continue;
+            }
             // Comments (`<!--…-->`) — émis en nœuds Comment
             // (nodeType 8) : Lit y pose ses marqueurs de parties
             // `?lit$N$` via innerHTML — doctype/PIs restent sautés.
@@ -4489,7 +4593,14 @@ impl Dom {
                 while i < cs.len() && (cs[i].is_alphanumeric() || cs[i] == '-') {
                     i += 1;
                 }
-                let name: String = cs[name_start..i].iter().collect::<String>().to_lowercase();
+                let name: String = {
+                    let s: String = cs[name_start..i].iter().collect();
+                    if xml {
+                        s
+                    } else {
+                        s.to_lowercase()
+                    }
+                };
                 while i < cs.len() && cs[i] != '>' {
                     i += 1;
                 }
@@ -4504,7 +4615,7 @@ impl Dom {
                 // stray ignoré fermait le vrai body prématurément,
                 // et tout le contenu suivant se nichait sous
                 // `html` — divergence keymap (JS-C290).
-                if matches!(name.as_str(), "body" | "html" | "frameset") {
+                if !xml && matches!(name.as_str(), "body" | "html" | "frameset") {
                     continue;
                 }
                 // Pas de correspondant ouvert → le rposition
@@ -4535,7 +4646,14 @@ impl Dom {
                 text.push('<'); // stray '<' — literal text
                 continue;
             }
-            let tag: String = cs[name_start..i].iter().collect::<String>().to_lowercase();
+            let tag: String = {
+                let s: String = cs[name_start..i].iter().collect();
+                if xml {
+                    s
+                } else {
+                    s.to_lowercase()
+                }
+            };
             // Attributes.
             let mut attrs: Vec<(String, String)> = Vec::new();
             let mut self_close = false;
@@ -4561,7 +4679,14 @@ impl Dom {
                         {
                             i += 1;
                         }
-                        let aname: String = cs[astart..i].iter().collect::<String>().to_lowercase();
+                        let aname: String = {
+                            let s: String = cs[astart..i].iter().collect();
+                            if xml {
+                                s
+                            } else {
+                                s.to_lowercase()
+                            }
+                        };
                         while i < cs.len() && cs[i].is_whitespace() {
                             i += 1;
                         }
@@ -4612,7 +4737,15 @@ impl Dom {
             // s'applique que si un ancêtre cible est présent —
             // sinon l'élément reste niché (tolérant, aucune
             // perte de contenu).
-            if let Some((_, targets)) = PAIRED_CLOSE.iter().find(|(t, _)| *t == tag) {
+            let paired_close = if xml {
+                None
+            } else {
+                PAIRED_CLOSE
+                    .iter()
+                    .find(|(t, _)| *t == tag)
+                    .map(|(_, targets)| targets)
+            };
+            if let Some(targets) = paired_close {
                 if targets
                     .iter()
                     .any(|t| open_tags.get(*t).copied().unwrap_or(0) > 0)
@@ -4636,7 +4769,9 @@ impl Dom {
             // `head` ouvert ? — compteur O(1), pas de scan :
             // sinon chaque `<div>` payait O(profondeur) sur la
             // pile (cause racine du O(n²) de `hostile_dom_depth`).
-            if !HEAD_TAGS.contains(&tag.as_str()) && open_tags.get("head").copied().unwrap_or(0) > 0
+            if !xml
+                && !HEAD_TAGS.contains(&tag.as_str())
+                && open_tags.get("head").copied().unwrap_or(0) > 0
             {
                 if let Some(hp) = stack
                     .iter()
@@ -4670,7 +4805,8 @@ impl Dom {
             // `<body>` orphelin → clé miroir sans nœud moteur →
             // `UnmappedKey`/`Fingerprint` → re-parse (`body#76`
             // non mappé, mur youtube.com — JS-C290).
-            if matches!(tag.as_str(), "html" | "head" | "body" | "frameset")
+            if !xml
+                && matches!(tag.as_str(), "html" | "head" | "body" | "frameset")
                 && (frag_ctx || open_tags.get("body").copied().unwrap_or(0) > 0)
             {
                 continue;
@@ -4680,8 +4816,8 @@ impl Dom {
             self.index_id(id, None);
             let top = *stack.last().unwrap_or(&parent);
             self.append(top, id);
-            if !self_close && !VOID_TAGS.contains(&tag.as_str()) {
-                if RAW_TEXT.contains(&tag.as_str()) {
+            if !self_close && (xml || !VOID_TAGS.contains(&tag.as_str())) {
+                if !xml && RAW_TEXT.contains(&tag.as_str()) {
                     // script/style/textarea: texte brut jusqu'à
                     // `</tag` — recherche **directement dans `cs`**,
                     // insensible à la casse. Ne jamais passer par
