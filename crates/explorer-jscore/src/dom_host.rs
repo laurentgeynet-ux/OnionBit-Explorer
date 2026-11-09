@@ -12271,7 +12271,29 @@ fn ce_call(e: &mut Engine, el: Value, cb_name: &str, args: &[Value]) -> JsResult
                             &["_templateInfo", "content", "childNodes"],
                         );
                         let ni = cct_prop_len(e, &t, &["_templateInfo", "nodeInfoList"]);
-                        format!("cn={content} xc={xcontent} ni={ni}")
+                        // `parentIndex` de chaque nodeInfo — à
+                        // comparer offline au fragment stampé
+                        // (lequel dépasse `childNodes.length` ?).
+                        let idxs = e
+                            .get_prop_value(t.clone(), "_templateInfo")
+                            .ok()
+                            .and_then(|ti| e.get_prop_value(ti, "nodeInfoList").ok())
+                            .map(|nl| {
+                                let n = cct_prop_len(e, &nl, &[])
+                                    .parse::<usize>()
+                                    .unwrap_or(0);
+                                (0..n)
+                                    .map(|i| {
+                                        e.get_prop_value(nl.clone(), &i.to_string())
+                                            .ok()
+                                            .map(|iv| cct_prop_get(e, &iv, &["parentIndex"]))
+                                            .unwrap_or_else(|| "?".to_string())
+                                    })
+                                    .collect::<Vec<_>>()
+                                    .join(",")
+                            })
+                            .unwrap_or_else(|| "?".to_string());
+                        format!("cn={content} xc={xcontent} ni={ni} idx={idxs}")
                     })
                     .unwrap_or_else(|| "<no-template>".to_string());
                 let tpl = e
@@ -12309,6 +12331,19 @@ fn cct_prop_len(e: &mut Engine, obj: &Value, path: &[&str]) -> String {
         Ok(v) => e.describe(v),
         Err(_) => "?".to_string(),
     }
+}
+
+/// `obj.path…` décrit — scalaire (`"?"` si maillon manquant,
+/// sonde `ce.cc_threw` §B-126 — `parentIndex` des nodeInfos).
+fn cct_prop_get(e: &mut Engine, obj: &Value, path: &[&str]) -> String {
+    let mut cur = obj.clone();
+    for key in path {
+        cur = match e.get_prop_value(cur, key) {
+            Ok(v) => v,
+            Err(_) => return "?".to_string(),
+        };
+    }
+    e.describe(cur)
 }
 
 /// `connectedCallback`/`disconnectedCallback` (sans arguments).
