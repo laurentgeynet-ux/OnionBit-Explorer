@@ -517,7 +517,19 @@ pub(crate) fn url_ctor(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Va
         // identique sous Chrome dans le même ordonnancement).
         let h: String = href.chars().take(80).collect();
         if tracing::enabled!(target: "dom_probe", tracing::Level::INFO) {
-            tracing::info!(target: "dom_probe", site = "url.ctor.fail", arm = "input", input = %h, base = %base_s.as_deref().unwrap_or("<absent>").chars().take(80).collect::<String>());
+            // §B-119 : la stack JS nomme le producteur de
+            // l'input fautif (frames bornées 8, aplaties sur
+            // une ligne — `src:line:col` par bundle).
+            let stack: String = e
+                .stack_text("", "")
+                .lines()
+                .map(str::trim)
+                .filter(|l| l.starts_with("at "))
+                .take(8)
+                .collect::<Vec<_>>()
+                .join(" <- ");
+            let stack: String = stack.chars().take(600).collect();
+            tracing::info!(target: "dom_probe", site = "url.ctor.fail", arm = "input", input = %h, base = %base_s.as_deref().unwrap_or("<absent>").chars().take(80).collect::<String>(), stack = %stack);
         }
         return Err(e.type_error(format!("Invalid URL: {h}")));
     };

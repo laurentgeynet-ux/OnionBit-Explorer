@@ -10791,3 +10791,13 @@ un crate PIPELINE.- [x] **JS-C422. Deadline honnête — canal session ↔ budge
   du 731 ne s'est pas reproduit cette session (variance
   SABR) ; la sonde `why`/`uh`/`creds` nommera la branche
   exacte à la prochaine occurrence.
+- [x] **JS-C433. §B-119 — `url.ctor.fail` nomme le producteur
+  par stack JS bornée** (mur `Invalid URL:` input vide, vols
+  721 explore.org + 733 arte/france.tv/zdf — 4 sites même
+  famille : le `""` est produit en amont, le ctor rejette
+  fidèlement comme Chrome). `stack_text` existant injecté
+  dans la sonde : 8 frames max `at f (bundle:l:c)` aplati,
+  600 c — le prochain vol nomme la fonction/bundle qui
+  appelle `new URL("")` (suspects : `currentScript.src`
+  inline turbopack, resource-timing vide…). Gate b116
+  24/24 vert.
