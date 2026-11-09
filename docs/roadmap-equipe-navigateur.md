@@ -10941,4 +10941,14 @@ un crate PIPELINE.- [x] **JS-C422. Deadline honnête — canal session ↔ budge
   rend le résultat de `source.cancel`, `settle_from`
   adopte les thenables ; verrous `b122_stream_cancel`
   4/4 (thenable+résolution, adoption retour, rejet
-  source, `reader.cancel` inchangé).
+  source, `reader.cancel` inchangé). **Vol 756 —
+  validation** : zéro `unhandledrejection`, la chaîne
+  complète coule — `get_cam_group_info`/`get_livecam_
+  info`/`get_cam_group_snapshots`/`cloudfront streams.
+  json`/`snapshots.cf.prod`/`graphql` commentaires ;
+  frame : onglets chaînes (FEATURED/AFRICA/BEARS…),
+  carousel peuplé de vraies vignettes (aurora, ours
+  polaires, grizzlys Katmai, migration), **« Tembe
+  Elephant Park — Emangusi, South Africa » + badge
+  LIVE** — la cam vedette résolue ; le carrousel
+  d'images (ex-résidu (d)) débloqué par la même donnée.
