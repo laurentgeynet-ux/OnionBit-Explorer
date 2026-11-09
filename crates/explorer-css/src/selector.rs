@@ -140,6 +140,18 @@ pub enum PseudoElement {
     Before,
     /// `::after` — contenu généré après les enfants.
     After,
+    /// `::first-line` — première ligne formatée du bloc.
+    FirstLine,
+    /// `::first-letter` — première lettre (drop caps).
+    FirstLetter,
+    /// `::marker` — marqueur de liste/`<details>`.
+    Marker,
+    /// `::selection` — texte sélectionné (style routé,
+    /// consommateur peinture en attente).
+    Selection,
+    /// `::backdrop` — toile d'arrière-plan `<dialog>`/
+    /// fullscreen (style routé, consommateur en attente).
+    Backdrop,
     /// Pseudo-élément réel du web **toléré au parse mais
     /// dormant** (`::placeholder`, `::backdrop`,
     /// `::-webkit-scrollbar*`…) — §B-75 : un nom inconnu
@@ -703,27 +715,29 @@ impl<'t> SelectorParser<'t> {
         }
     }
 
-    /// `::name` — pseudo-élément : seuls `before`/`after`
-    /// génèrent des boîtes (R-13) ; `::part(<nom>)` est le
-    /// franchissement shadow (R-96) ; les autres noms
-    /// (`first-line`, `selection`…) rendent le sélecteur
-    /// invalide → la règle est ignorée, dégradation sûre.
+    /// `::name` — pseudo-élément : `before`/`after` génèrent
+    /// des boîtes (R-13) ; `first-line`/`first-letter`/
+    /// `marker`/`selection`/`backdrop` portent un style pseudo
+    /// consommé par le layout/rendu (R-177) ; `::part(<nom>)`
+    /// est le franchissement shadow (R-96) ; les autres noms
+    /// restent tolérés-dormants (§B-75) et un inconnu rend le
+    /// sélecteur invalide → règle ignorée, dégradation sûre.
     fn pseudo_element(&mut self) -> Option<SimpleSelector> {
         match self.next() {
             Some(Token::Ident(name)) => match name.as_str() {
                 "before" => Some(SimpleSelector::PseudoElement(PseudoElement::Before)),
                 "after" => Some(SimpleSelector::PseudoElement(PseudoElement::After)),
+                "first-line" => Some(SimpleSelector::PseudoElement(PseudoElement::FirstLine)),
+                "first-letter" => Some(SimpleSelector::PseudoElement(PseudoElement::FirstLetter)),
+                "marker" => Some(SimpleSelector::PseudoElement(PseudoElement::Marker)),
+                "selection" => Some(SimpleSelector::PseudoElement(PseudoElement::Selection)),
+                "backdrop" => Some(SimpleSelector::PseudoElement(PseudoElement::Backdrop)),
                 // §B-75 — noms réels du web tolérés (aucune
                 // boîte générée) : sinon la liste entière
                 // est invalidée et la règle meurt (reset
                 // `*,:after,:before,::backdrop,…` des CSS
                 // atomiques). Un nom inconnu reste invalide.
-                "first-line"
-                | "first-letter"
-                | "selection"
-                | "marker"
-                | "placeholder"
-                | "backdrop"
+                "placeholder"
                 | "file-selector-button"
                 | "details-content"
                 | "cue"

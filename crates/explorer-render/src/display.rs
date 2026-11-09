@@ -2020,8 +2020,11 @@ fn emit_list_marker(
 /// Position : aligné à droite dans la gouttière (spec marker
 /// §3 — le marqueur finit avant le bord du contenu).
 fn emit_text_marker(bx: &LayoutBox, items: &mut Vec<DisplayItem>, off: (f32, f32), ty: &str) {
+    // R-177 — `::marker` : couleur/fonte du pseudo en
+    // priorité (css-pseudo §4.2), repli style de l'élément.
+    let mstyle = bx.marker_style.as_ref().unwrap_or(&bx.style);
     #[allow(clippy::cast_possible_truncation)]
-    let fs = font_size_of(&bx.style) as f32;
+    let fs = font_size_of(mstyle) as f32;
     if !fs.is_finite() || fs <= 0.0 {
         return;
     }
@@ -2061,15 +2064,14 @@ fn emit_text_marker(bx: &LayoutBox, items: &mut Vec<DisplayItem>, off: (f32, f32
     } else {
         content_x - (fs * 0.4).max(1.0) - est_w
     };
-    let color = bx
-        .style
+    let color = mstyle
         .get("color")
         .and_then(parse_color)
         .unwrap_or(Color::BLACK);
     items.push(DisplayItem::MarkerText {
         origin: (x + off.0, baseline_y + off.1),
         text,
-        font: font_request(&bx.style),
+        font: font_request(mstyle),
         color,
         size_px: fs,
     });

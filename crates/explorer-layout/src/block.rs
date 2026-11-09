@@ -2150,6 +2150,9 @@ fn flow_children(
                 height_raised: false,
                 fc_root: false,
                 marker_ordinal: 0,
+                marker_style: None,
+                first_line: None,
+                first_letter: None,
             };
             let gap = if first && adjoining_top {
                 0.0

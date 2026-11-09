@@ -182,6 +182,16 @@ pub struct LayoutBox {
     /// `ol[start]`, décrément `reversed`, ancrage `li[value]`.
     /// 0 pour les non-`list-item`.
     pub marker_ordinal: i32,
+    /// R-177 — style `::marker` de la cascade (listes/
+    /// `<details>`) — le rendu peint le glyphe avec lui en
+    /// priorité (font/color §7.1 du pseudo).
+    pub marker_style: Option<ComputedStyle>,
+    /// R-177 — style `::first-line` de la cascade — overlay
+    /// §7.1 sur les fragments de la première ligne.
+    pub first_line: Option<ComputedStyle>,
+    /// R-177 — style `::first-letter` de la cascade — overlay
+    /// sur le premier fragment texte (drop caps).
+    pub first_letter: Option<ComputedStyle>,
 }
 
 /// Contexte de pose enregistré par `layout_block` (R-12) :
@@ -316,7 +326,46 @@ pub fn build_box_tree_sized<S: ::std::hash::BuildHasher>(
     // pré-calculé sur l'ordre du document (une passe) et
     // porté par le worker récursif.
     let envs = compute_counter_envs(dom, dom.document(), styles);
-    build_box_tree_env(dom, root, styles, sizes, &envs)
+    let mut bx = build_box_tree_env(dom, root, styles, sizes, &envs);
+    // R-177 — la racine n'est pas couverte par `child_boxes` :
+    // ses pseudos `::marker`/`::first-line`/`::first-letter`
+    // se figent ici, puis les `first-*` des éléments se prêtent
+    // à leur premier bloc anonyme (où vit la première ligne
+    // formatée — `layout_inline` ne voit que lui).
+    if let Some(b) = &mut bx {
+        b.marker_style = styles.pseudo(root, PseudoElement::Marker).cloned();
+        b.first_line = styles.pseudo(root, PseudoElement::FirstLine).cloned();
+        b.first_letter = styles.pseudo(root, PseudoElement::FirstLetter).cloned();
+        lend_first_pseudos(b);
+    }
+    bx
+}
+
+/// R-177 — `::first-line`/`::first-letter` appartiennent à
+/// l'élément conteneur mais la première ligne formatée vit
+/// dans le **premier** bloc anonyme en-ligne enfant — leurs
+/// styles s'y prêtent (une passe post-construction, tous les
+/// chemins de création d'anons couverts ; approximation : un
+/// enfant antérieur porteur de lignes décalerait la cible —
+/// limite documentée R-177).
+fn lend_first_pseudos(bx: &mut LayoutBox) {
+    if bx.first_line.is_some() || bx.first_letter.is_some() {
+        if let Some(anon) = bx
+            .children
+            .iter_mut()
+            .find(|b| b.node.is_none() && matches!(b.kind, BoxKind::AnonymousBlock))
+        {
+            if anon.first_line.is_none() {
+                anon.first_line.clone_from(&bx.first_line);
+            }
+            if anon.first_letter.is_none() {
+                anon.first_letter.clone_from(&bx.first_letter);
+            }
+        }
+    }
+    for c in &mut bx.children {
+        explorer_common::deep(|| lend_first_pseudos(c));
+    }
 }
 
 /// Worker de [`build_box_tree_sized`] porteur de la map
@@ -472,6 +521,9 @@ fn build_box_tree_env<S: ::std::hash::BuildHasher>(
         height_raised: false,
         fc_root: false,
         marker_ordinal: 0,
+        marker_style: None,
+        first_line: None,
+        first_letter: None,
     };
     let children = child_boxes(dom, root, styles, &style, sizes, envs);
     b.children = wrap_children(children, &style, kind);
@@ -630,6 +682,9 @@ fn child_boxes<S: ::std::hash::BuildHasher>(
                     height_raised: false,
                     fc_root: false,
                     marker_ordinal: 0,
+                    marker_style: None,
+                    first_line: None,
+                    first_letter: None,
                 });
             }
         }
@@ -637,6 +692,15 @@ fn child_boxes<S: ::std::hash::BuildHasher>(
     // `::after` en fin de contenu.
     if let Some(b) = pseudo_box(dom, styles, parent, PseudoElement::After, envs.get(&parent)) {
         out.push(b);
+    }
+    // R-177 — pseudos appliqués : `::marker`/`::first-line`/
+    // `::first-letter` figent leur style sur la boîte élément.
+    for b in &mut out {
+        if let Some(n) = b.node {
+            b.marker_style = styles.pseudo(n, PseudoElement::Marker).cloned();
+            b.first_line = styles.pseudo(n, PseudoElement::FirstLine).cloned();
+            b.first_letter = styles.pseudo(n, PseudoElement::FirstLetter).cloned();
+        }
     }
     // R-108 — ordinals de marqueurs : position des `list-item`
     // fils (css-lists §2.4 — `ol[start]` fixe la base,
@@ -856,6 +920,9 @@ fn leaf_box_anon(kind: BoxKind, style: ComputedStyle) -> LayoutBox {
         height_raised: false,
         fc_root: false,
         marker_ordinal: 0,
+        marker_style: None,
+        first_line: None,
+        first_letter: None,
     }
 }
 
@@ -1084,6 +1151,9 @@ fn flush_run(out: &mut Vec<LayoutBox>, run: &mut Vec<LayoutBox>, style: &Compute
             height_raised: false,
             fc_root: false,
             marker_ordinal: 0,
+            marker_style: None,
+            first_line: None,
+            first_letter: None,
         });
     }
 }
@@ -1200,6 +1270,9 @@ fn object_box(
         height_raised: false,
         fc_root: false,
         marker_ordinal: 0,
+        marker_style: None,
+        first_line: None,
+        first_letter: None,
     };
     // Ressource résolue → feuille remplacée ; sinon les
     // enfants prennent la place de l'objet.
@@ -1297,6 +1370,9 @@ fn leaf_box(
         height_raised: false,
         fc_root: false,
         marker_ordinal: 0,
+        marker_style: None,
+        first_line: None,
+        first_letter: None,
     }
 }
 
@@ -1346,6 +1422,9 @@ fn control_box(
                     height_raised: false,
                     fc_root: false,
                     marker_ordinal: 0,
+                    marker_style: None,
+                    first_line: None,
+                    first_letter: None,
                 }],
                 &style,
             )

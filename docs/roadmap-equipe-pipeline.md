@@ -3367,7 +3367,7 @@ déblocage/coût décroissant.
   ignorée (`bidi-override`/`isolate`/`isolate-override`/
   `plaintext`/`normal`) ; niveau de base issu de `direction`
   héritée au lieu de l'auto-détection — pendant de R-171.
-- [ ] **R-177. Pseudos appliqués** : `::first-line`,
+- [x] **R-177. Pseudos appliqués** : `::first-line`,
   `::first-letter`, `::selection`, `::marker`, `::backdrop` —
   parsés-tolérés (`selector.rs`, never-matched volontairement)
   mais jamais générés : drop caps, sélection colorée, stylage

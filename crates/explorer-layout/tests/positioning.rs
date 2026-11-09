@@ -669,3 +669,56 @@ fn grid_pistes_implicites_et_alignement_conteneur() {
         z4.rect.width
     );
 }
+
+/// R-177 — pseudos appliqués : `::first-line`/`::first-letter`
+/// reçoivent l'overlay §7.1 typographique sur leurs fragments,
+/// `::marker` fige son style sur la boîte list-item (le rendu
+/// le lit en priorité) ; `::selection`/`::backdrop` routés —
+/// consommateurs peinture/top-layer en attente.
+#[test]
+fn pseudos_first_line_letter_marker() {
+    let (dom, bx) = laid(
+        "<p id=p>bonjour monde</p><ul><li id=i>item</li></ul>",
+        "p::first-line{color:red} \
+         p::first-letter{font-weight:bold;color:blue} \
+         li::marker{color:green}",
+    );
+    let p = find(&bx, by_id(&dom, "p"));
+    let first = p.children[0]
+        .lines
+        .first()
+        .and_then(|l| l.fragments.iter().find(|f| !f.atomic && !f.text.is_empty()))
+        .expect("fragment première ligne");
+    assert_eq!(
+        first.style.get("color"),
+        Some("blue"),
+        "::first-letter prioritaire sur le premier fragment"
+    );
+    // Le reste de la première ligne garde ::first-line.
+    let later = p.children[0]
+        .lines
+        .first()
+        .and_then(|l| {
+            l.fragments
+                .iter()
+                .filter(|f| !f.atomic && !f.text.is_empty())
+                .nth(1)
+        })
+        .expect("fragment suivant");
+    assert_eq!(
+        later.style.get("color"),
+        Some("red"),
+        "::first-line sur le fragment suivant"
+    );
+    assert_eq!(
+        later.style.get("font-weight"),
+        None,
+        "first-letter n'atteint pas le second fragment"
+    );
+    let li = find(&bx, by_id(&dom, "i"));
+    assert_eq!(
+        li.marker_style.as_ref().and_then(|s| s.get("color")),
+        Some("green"),
+        "::marker figé sur la boîte"
+    );
+}

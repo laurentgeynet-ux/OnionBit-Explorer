@@ -273,8 +273,62 @@ pub(crate) fn layout_inline(
     // sous les flottants a pu sauter de l'espace vertical.
     let h = lines.last().map_or(0.0, |l| l.rect.y + l.rect.height - y);
     bx.lines = lines;
+    // R-177 — `::first-line`/`::first-letter` : overlay §7.1
+    // (typographique) sur la première ligne / le premier
+    // fragment texte — props hors liste ignorées, les
+    // effets de mise en page (line-height, transform) restent
+    // documentés non rejoués.
+    if let Some(fl) = bx.first_line.clone() {
+        if let Some(line) = bx.lines.first_mut() {
+            for f in &mut line.fragments {
+                overlay_pseudo(&mut f.style, &fl);
+            }
+        }
+    }
+    if let Some(fl) = bx.first_letter.clone() {
+        if let Some(f) = bx.lines.first_mut().and_then(|l| {
+            l.fragments
+                .iter_mut()
+                .find(|f| !f.atomic && !f.text.is_empty())
+        }) {
+            overlay_pseudo(&mut f.style, &fl);
+        }
+    }
     bx.rect.height = h;
     h
+}
+
+/// Sous-ensemble typographique admis par `::first-line`/
+/// `::first-letter` (css-pseudo §7.1 + §4.1 — couleurs,
+/// fontes, espacements, décorations ; les props de boîte et
+/// de mise en page sont ignorées).
+const PSEUDO_OVERLAY_PROPS: &[&str] = &[
+    "color",
+    "background-color",
+    "font-family",
+    "font-size",
+    "font-style",
+    "font-variant",
+    "font-weight",
+    "letter-spacing",
+    "line-height",
+    "text-transform",
+    "text-decoration-line",
+    "text-decoration-color",
+    "text-decoration-style",
+    "text-shadow",
+    "word-spacing",
+];
+
+/// `ps` (style pseudo `::first-line`/`::first-letter`) par
+///-dessus `style` de fragment — les déclarations du pseudo
+/// gagnent, borné à [`PSEUDO_OVERLAY_PROPS`].
+fn overlay_pseudo(style: &mut ComputedStyle, ps: &ComputedStyle) {
+    for (k, v) in ps.iter() {
+        if PSEUDO_OVERLAY_PROPS.contains(&k) {
+            style.set(k, v);
+        }
+    }
 }
 
 /// §text-overflow (`clip` par défaut) : quand le contenu

@@ -610,6 +610,7 @@ struct SelEntry {
 /// clés internes sont des alternatives : ranger sous l'une
 /// manquerait les nœuds des autres).
 #[derive(Debug, Default)]
+#[allow(clippy::struct_excessive_bools)]
 struct SelectorIndex {
     /// `#id` exact → entrées (HTML = sensible à la casse).
     by_id: HashMap<String, Vec<SelEntry>>,
@@ -632,6 +633,16 @@ struct SelectorIndex {
     has_before: bool,
     /// Voir `has_before`.
     has_after: bool,
+    /// Voir `has_before` — `::first-line` (R-177).
+    has_first_line: bool,
+    /// Voir `has_before` — `::first-letter`.
+    has_first_letter: bool,
+    /// Voir `has_before` — `::marker`.
+    has_marker: bool,
+    /// Voir `has_before` — `::selection`.
+    has_selection: bool,
+    /// Voir `has_before` — `::backdrop`.
+    has_backdrop: bool,
 }
 
 impl SelectorIndex {
@@ -649,6 +660,11 @@ impl SelectorIndex {
                 match entry.pseudo {
                     Some(crate::PseudoElement::Before) => idx.has_before = true,
                     Some(crate::PseudoElement::After) => idx.has_after = true,
+                    Some(crate::PseudoElement::FirstLine) => idx.has_first_line = true,
+                    Some(crate::PseudoElement::FirstLetter) => idx.has_first_letter = true,
+                    Some(crate::PseudoElement::Marker) => idx.has_marker = true,
+                    Some(crate::PseudoElement::Selection) => idx.has_selection = true,
+                    Some(crate::PseudoElement::Backdrop) => idx.has_backdrop = true,
                     Some(crate::PseudoElement::Other) | None => {}
                 }
                 match rightmost_key(sel) {
@@ -937,6 +953,18 @@ pub struct PseudoStyles {
     pub before: Option<ComputedStyle>,
     /// `::after`.
     pub after: Option<ComputedStyle>,
+    /// `::first-line` (R-177) — style de la première ligne
+    /// formatée (sous-ensemble typographique §7.1).
+    pub first_line: Option<ComputedStyle>,
+    /// `::first-letter` — première lettre (drop caps).
+    pub first_letter: Option<ComputedStyle>,
+    /// `::marker` — marqueur de liste.
+    pub marker: Option<ComputedStyle>,
+    /// `::selection` — routé, consommateur peinture en attente.
+    pub selection: Option<ComputedStyle>,
+    /// `::backdrop` — routé, consommateur `<dialog>`/fullscreen
+    /// en attente.
+    pub backdrop: Option<ComputedStyle>,
 }
 
 /// Table des styles calculés d'un sous-arbre (mémoïsation
@@ -967,6 +995,11 @@ impl StyleMap {
         match which {
             crate::PseudoElement::Before => p.before.as_ref(),
             crate::PseudoElement::After => p.after.as_ref(),
+            crate::PseudoElement::FirstLine => p.first_line.as_ref(),
+            crate::PseudoElement::FirstLetter => p.first_letter.as_ref(),
+            crate::PseudoElement::Marker => p.marker.as_ref(),
+            crate::PseudoElement::Selection => p.selection.as_ref(),
+            crate::PseudoElement::Backdrop => p.backdrop.as_ref(),
             crate::PseudoElement::Other => None,
         }
     }
@@ -1491,6 +1524,7 @@ impl StyleEngine {
     }
 
     #[allow(clippy::too_many_arguments)]
+    #[allow(clippy::too_many_lines)]
     fn compute_subtree(
         &self,
         dom: &Dom,
@@ -1521,27 +1555,52 @@ impl StyleEngine {
         // pseudo correspondante (R-83) — `content` ne peut
         // alors jamais être produit.
         if dom.element(node).is_ok() {
-            let mut pseudo_style = |pe: crate::PseudoElement| -> Option<ComputedStyle> {
-                if !self.has_pseudo_rules(dom, pe) {
-                    return None;
-                }
-                let s = self.compute_with_parent(
-                    dom,
-                    node,
-                    env,
-                    Some(&style),
-                    Some(pe),
-                    state,
-                    mcache,
-                    anc,
-                    *root_fs,
-                );
-                (s.get("content").is_some()).then_some(s)
+            // `need_content` = porte `::before`/`::after`
+            // (R-13 — une règle sans `content` ne génère rien) ;
+            // les pseudos R-177 (`first-line`, `marker`…)
+            // gardent tout style produit.
+            let mut pseudo_style =
+                |pe: crate::PseudoElement, need_content: bool| -> Option<ComputedStyle> {
+                    if !self.has_pseudo_rules(dom, pe) {
+                        return None;
+                    }
+                    let s = self.compute_with_parent(
+                        dom,
+                        node,
+                        env,
+                        Some(&style),
+                        Some(pe),
+                        state,
+                        mcache,
+                        anc,
+                        *root_fs,
+                    );
+                    let keep = if need_content {
+                        s.get("content").is_some()
+                    } else {
+                        s.iter().next().is_some()
+                    };
+                    keep.then_some(s)
+                };
+            let before = pseudo_style(crate::PseudoElement::Before, true);
+            let after = pseudo_style(crate::PseudoElement::After, true);
+            let ps = PseudoStyles {
+                before,
+                after,
+                first_line: pseudo_style(crate::PseudoElement::FirstLine, false),
+                first_letter: pseudo_style(crate::PseudoElement::FirstLetter, false),
+                marker: pseudo_style(crate::PseudoElement::Marker, false),
+                selection: pseudo_style(crate::PseudoElement::Selection, false),
+                backdrop: pseudo_style(crate::PseudoElement::Backdrop, false),
             };
-            let before = pseudo_style(crate::PseudoElement::Before);
-            let after = pseudo_style(crate::PseudoElement::After);
-            let ps = PseudoStyles { before, after };
-            if ps.before.is_some() || ps.after.is_some() {
+            if ps.before.is_some()
+                || ps.after.is_some()
+                || ps.first_line.is_some()
+                || ps.first_letter.is_some()
+                || ps.marker.is_some()
+                || ps.selection.is_some()
+                || ps.backdrop.is_some()
+            {
                 pseudos.insert(node, ps);
             }
         }
@@ -1986,6 +2045,20 @@ impl StyleEngine {
         let (a, q) = match pe {
             crate::PseudoElement::Before => (self.index.has_before, self.quirks_index.has_before),
             crate::PseudoElement::After => (self.index.has_after, self.quirks_index.has_after),
+            crate::PseudoElement::FirstLine => {
+                (self.index.has_first_line, self.quirks_index.has_first_line)
+            }
+            crate::PseudoElement::FirstLetter => (
+                self.index.has_first_letter,
+                self.quirks_index.has_first_letter,
+            ),
+            crate::PseudoElement::Marker => (self.index.has_marker, self.quirks_index.has_marker),
+            crate::PseudoElement::Selection => {
+                (self.index.has_selection, self.quirks_index.has_selection)
+            }
+            crate::PseudoElement::Backdrop => {
+                (self.index.has_backdrop, self.quirks_index.has_backdrop)
+            }
             crate::PseudoElement::Other => (false, false),
         };
         a || (dom.document_mode() == explorer_dom::DocumentMode::Quirks && q)
