@@ -5336,6 +5336,15 @@ impl Host for DocumentHost {
             "nodeType" => Ok(Some(Value::Num(9.0))),
             // `document.nodeName`/`tagName` — `#document` / absent.
             "nodeName" => Ok(Some(e.str_val("#document"))),
+            // JS-C449 — props chaîne de `Document` (mw
+            // wikimedia lit `compatMode`/encodage en appels
+            // de méthodes — `x.toUpperCase` mourait sur
+            // `Undefined`) : HTML servi = quirks désarmé,
+            // type MIME et encodage honnêtes de notre
+            // pipeline.
+            "compatMode" => Ok(Some(e.str_val("CSS1Compat"))),
+            "contentType" => Ok(Some(e.str_val("text/html"))),
+            "characterSet" | "charset" | "inputEncoding" => Ok(Some(e.str_val("UTF-8"))),
             // `document.cookie` — raw `"k=v; …"` via the injected jar.
             "cookie" => Ok(Some(e.str_val(match &e.hooks.cookie_jar {
                 Some(jar) => jar.get(&e.hooks.page_url),
@@ -7952,6 +7961,29 @@ impl Host for NodeHost {
                     Some(v) => e.str_val(v),
                     None => e.str_val(""),
                 }));
+            }
+            // JS-C449 — `type` **calculé** spec (pas un
+            // reflet) sur les contrôles de formulaire :
+            // `textarea.type` = "textarea", `select.type` =
+            // "select-one"/"select-multiple" (mw/jQuery font
+            // `el.type.toUpperCase()` — mourait sur
+            // `Undefined`, les deux tags n'étant pas dans la
+            // table `TAGGED_ATTRS`).
+            "type"
+                if matches!(
+                    self.dom.borrow().nodes[node as usize].tag.as_str(),
+                    "textarea" | "select"
+                ) =>
+            {
+                let d = self.dom.borrow();
+                let v = if d.nodes[node as usize].tag == "select" && d.has_attr(node, "multiple") {
+                    "select-multiple"
+                } else if d.nodes[node as usize].tag == "select" {
+                    "select-one"
+                } else {
+                    "textarea"
+                };
+                return Ok(Some(e.str_val(v)));
             }
             // -- Validation de contraintes (étape 54) ------------------
             "willValidate" => {

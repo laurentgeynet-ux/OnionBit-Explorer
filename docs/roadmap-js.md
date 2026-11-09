@@ -79,12 +79,14 @@ porteur d'abord (une erreur `X of Undefined` se fixe sur
 l'objet qui aurait dû porter `X`, pas en avalant), puis
 surface minimale — jamais un stub qui ment.
 
-- [ ] **JT-4. `toUpperCase of Undefined` (mw wikimedia)** —
-  lecture de prop sur `Undefined` : nommer le site
-  d'accès par sonde avant fix — la prop attendue est
-  probablement une chaîne non installée sur le miroir
-  (médiawiki). Un getter qui rend `""` sur le mauvais
-  objet déplace l'erreur.
+- [x] **JT-4. `toUpperCase of Undefined` (mw wikimedia)** —
+  **livré (JS-C449)** : props chaîne `Document`
+  (`compatMode`/`contentType`/`characterSet`/`charset`/
+  `inputEncoding`) + `type` calculé spec sur
+  `textarea`/`select` (hors table `TAGGED_ATTRS` —
+  `el.type.toUpperCase()` mourait sur `Undefined`).
+  Reflet tag-restreint §B-103 intact. Verrous
+  `c449_doc_string_props` ×3.
 - [ ] **JT-5. `querySelectorAll` / `categories of Null`
   (jwplayer archive.org)** — deux symptômes : qsa absent
   ou non routé sur la cible visée ; `categories` lu sur

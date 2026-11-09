@@ -11317,3 +11317,14 @@ un crate PIPELINE.- [x] **JS-C422. Deadline honnête — canal session ↔ budge
   inchangés, `require` résolu/inconnu, autre
   `ReferenceError` intacte) ; lang 313/313,
   lib 45/45, b105 2/2 verts.
+- [x] **JS-C449 (JT-4). `x.toUpperCase` sur `Undefined`
+  (mw wikimedia)** — props chaîne `Document` servies :
+  `compatMode` `"CSS1Compat"`, `contentType`
+  `"text/html"`, `characterSet`/`charset`/`inputEncoding`
+  `"UTF-8"` ; `type` **calculé** spec (pas reflet) sur
+  `textarea` (`"textarea"`) et `select`
+  (`"select-one"`/`"select-multiple"` — absents de
+  `TAGGED_ATTRS`, `el.type.toUpperCase()` des helpers
+  jQuery/mw tombait sur `Undefined`). Reflet §B-103
+  intact ailleurs. Verrous `c449_doc_string_props` ×3 ;
+  dom 245/245, b14 52/52.
