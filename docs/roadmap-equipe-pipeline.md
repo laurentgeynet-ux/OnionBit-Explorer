@@ -3553,6 +3553,124 @@ déblocage/coût décroissant.
   journalisées : pas d'itération, transitions sur bascule
   absentes, voies incrémentale/composite hors passe 2).
 
+## Palier R-O — Trous terrain vols 719 → 768 (alimenté 2026-11-09)
+
+File issue du triage des derniers rapports de vol corpus
+(`C:\OnionBit-vol\SYNTHESE.md`, `youtube/SYNTHESE.md`) —
+chaque item est un mur mesuré terrain attribué PIPE, ou un
+résidu confirmé promu de la « File résiduelle ». Les murs
+jscore/session (§B-114 GC, §B-121 RSC clos vol 750,
+§B-112 pré-attach, SubtleCrypto, `DocumentFragment`) restent
+chez NAVIGATEUR — non recopiés ici.
+
+> **Ordonnancement (revue chef PIPELINE 2026-11-09)** :
+> valeur terrain / coût — R-201 → R-199 → R-200 →
+> R-202 → R-203 → R-204 → R-205 → R-206.
+
+- [ ] **R-201. `grid-area` formes courtes (2/3 valeurs) —
+  relai G-5** : la branche numérique `grid.rs:561-591`
+  n'accepte que `parts.len() == 4` (`r / c / r2 / c2`) —
+  `grid-area: 1 / 2` ou `1 / 2 / 3` → `None` → l'item
+  tombe en placement auto et perd sa position déclarée
+  (google.com SERP, mesuré vol 681, relayé officiellement
+  à PIPE au journal 2026-11-09). Spec css-grid-1 §7.1 :
+  valeurs manquantes = `auto`/`span 1`. Étendre la branche
+  aux longueurs 1-3 en réutilisant `placement()` (déjà
+  conforme pour `grid-column`/`grid-row` : `a`, `a / b`,
+  `a / span n`, `span n`, noms `-start`/`-end`) — le cas
+  4 garde sa sémantique. Verrous : `grid_area_formes_
+  courtes` (2 parties ligne+colonne, 3 parties avec fin de
+  ligne, ident nu, `span` en position).
+- [ ] **R-199. §B-118 — effondrement display-list
+  (pluto.tv)** : dom 4 156 nœuds → layout **4 385 boîtes**
+  → `display_items` **148** → nav + écran noir, **zéro
+  erreur console** (vol 719, prop. ; vol 722 : chrome nav
+  peint, zone contenu noire — distinct du rideau
+  `classList`). Le contenu vit dans l'arbre de boîtes et
+  n'atteint jamais la display list — signature paint-side,
+  à distinguer de §B-108 (DOM vide) et du wedge vimeo
+  (0 boîte = layout-side, §B-115 clos). **Phase mesure** :
+  compteurs de transition boîte→item par type dans
+  `display.rs` (émis vs retenus par `DisplayItem` kind +
+  motif de drop : zero-size, clip sortant, transform
+  hors-viewport, `visibility`, overflow négatif) — la
+  classe fautive se nommera en une lecture. Suspects
+  ordonnés : `PushTransform` translate géant qui pousse
+  le contenu hors-viewport, `PushClip` région vide,
+  opacity/blend de groupe, z-order/stacking perdu.
+  **Phase fix** : le responsable nommé devient le verrou
+  (`pluto_items_collapses_*` ou fixture extraite).
+- [ ] **R-200. Texte chevauché/corrompu en colonne
+  (lichess.org)** : vol 740 — page hydratée correctement
+  (nav + lobby + toast « Reconnecting ») mais **colonne
+  latérale gauche : glyphes superposés/tronqués** —
+  signature paint/inline (prop. §B-122 corpus-root,
+  numéro ré-attribué à la chaîne explore.org côté journal
+  — l'item reste ici). Fixture prescrite : **liste flex
+  + items hétérogènes** (icon font lichess + texte) —
+  repro hors site avant fix. Suspects ordonnés : métriques
+  de fonte de remplacement (fallback glyphe → R-202,
+  les icones lichess sont en fonte privée), avance/advance
+  des runs inline en présence d'`inline-block` étroit,
+  `letter-spacing`/`font-stretch` hérité mal résolu,
+  empilement de fragments sur une ligne trop étroite
+  (wrap manqué). Verrous : fixture flex-colonne +
+  verrou pixels (deux glyphes adjacents non superposés).
+- [ ] **R-202. Font fallback par glyphe** (R-M9c, première
+  moitié — la moitié session `scroll-snap`/`dialog` reste
+  NAV) : une seule fonte par run → tofu sur CJK et perte
+  des icon fonts quand la glyphe n'existe pas dans la
+  fonte résolue ; `.ttc` multi-faces : index de face porté
+  (R-69) mais la sélection de face par couverture unicode
+  n'est pas faite. Chaîne : `FontProvider`/`FontSource`
+  (port ADR-0009) — fallback ordonné par couverture
+  (query `fontdb` par char avant shaping, runs segmentés
+  par fonte résolue — ADR-0009 runs itemisés). Côté
+  terrain : lichess (R-200), CJK, emoji, glyphes privés.
+  Verrous : run mixte latin+CJK segmenté deux fontes,
+  `.ttc` face non-0 choisie par couverture, tofu absent
+  quand une fonte de fallback la contient.
+- [ ] **R-203. `background` multi-couches complet** :
+  résidu confirmé (audit 2026-10-25) — `background-origin`/
+  `background-clip` par couche non consommés (la position
+  et le clip suivent la couche, pas le shorthand global) ;
+  les couches `url()` au-delà de la première ne peignent
+  pas — le **fetch** par couche est journalisé NAV
+  (`backgrounds` clé `NodeId → image` unique), la
+  **consommation** multi-images dans `PaintImages.
+  backgrounds` et `emit_bg_layers` est PIPE : clé
+  `(NodeId, index-couche)` ou `Vec` par nœud, ordre
+  première-en-tête per spec. Verrous : deux couches
+  `url()` peintes dans l'ordre, `origin`/`clip` par
+  couche (border vs padding box visible).
+- [ ] **R-204. `display:contents` — résidus restants** :
+  R-191 a figé les internes table ; reste le flatten des
+  enfants d'un `display:contents` **comme items flex/grid**
+  du parent (aujourd'hui repli bloc) et les règles UA sur
+  `<slot>` (distribution — borne Shadow R-96). Verrous :
+  `contents_flatten_flex_item`, `contents_flatten_grid_
+  item` (items générés ordre document).
+- [ ] **R-205. Shadow DOM — bornes R-96/R-97 levées** :
+  `::part`/`exportparts` imbriqués (part list chaînée),
+  `!important` inversé à la frontière (host règle vs
+  shadow auteur — css-scoping §3.3 : l'important interne
+  perd, l'important externe gagne), aplatissement de
+  slots nichés (`<slot>` dans `<slot>`, fallback
+  distribué). Cadre existant : miroir + scoping R-96 —
+  extensions additives. Verrous : `part_exportparts_
+  imbrique`, `important_frontiere_inversee`,
+  `slot_niche_fallback`.
+- [ ] **R-206. Affûtage Acid2/WPT (cliquet 41/58)** :
+  restes nommés au palier R-C — `column wrap` multi-
+  colonnes, `margin:auto` vertical en flex column,
+  `justify-content`/`align-items` fins (reftests ×7),
+  marges/`fr` grid (×3), hairline fixed et anneaux des
+  yeux Acid2 (pixels). Travail par cas extrait — chaque
+  famille = un verrou reftest ajouté à la baseline, pas
+  de promesse de score global (règle « jamais un % sans
+  dénominateur » — corpus extrait WPT flexbox+grid, 58
+  cas).
+
 ## Tâches continues
 
 - **Triage rendu** des échecs `site_smoke.ps1` : les écarts
@@ -3580,56 +3698,36 @@ Règle : les API publiques des crates PIPELINE sont le contrat —
 extensions additives de préférence ; toute casse de signature
 existante = entrée dans `docs/interface-equipes.md` avant code.
 
-## File résiduelle (vérifiée 2026-10-25)
+## File résiduelle (vérifiée 2026-11-09)
 
-Toutes les étapes R-1 → R-97 sont livrées. La file se nourrit
-désormais des demandes journal et du triage terrain — état
-vérifié au code de chaque reliquat (audit consigné dans
-`interface-equipes.md`, même date) :
+Toutes les étapes R-1 → R-97 sont livrées (R-98 → R-198
+également, paliers R-L/R-M/R-B/R-C/R-N). La file se nourrit
+des demandes journal et du triage terrain — état vérifié au
+code de chaque reliquat :
 
-**Demandes ouvertes :**
+**Demandes ouvertes :** *(soldées depuis le 2026-10-25 :
+`:valid`/`:invalid` → R-100 ; `searchInput` Wikipedia →
+R-101 validé terrain `form:OK` ; `entities` exposé et
+`content_rect` promu → R-98 ; adoption NAV en cours sur les
+deux derniers — le seul reste est le flag `user-*` à poser
+côté session, livrable NAV.)*
 
-- **`:valid` / `:invalid` / `:user-invalid`** — seule extension
-  « proposée » non soldée. Parsés (`DynamicPseudo`) mais jamais
-  évalués : la session appelle `compute_tree` avec `state =
-  |_| false` et aucun modèle de validité §4.10.21.2 n'existe
-  (`required`, `type=email|url`, `pattern`, `min|max`,
-  `minlength|maxlength`, `step`). `:user-invalid` n'est pas
-  parsé. Livrable PIPE : évaluation de la contrainte de
-  validité d'un élément (`Dom` + règles spec) exposée pour le
-  callback `state` — le filage session est la couture NAV.
-- **`searchInput` Wikipedia — boîte vs surface peinte** :
-  dispatché 2026-10-22, pas de fix dédié. R-90 (rects des
-  inlines nichés + atomes `inline-flex`/`-grid`/`-table`) a
-  traité la famille du motif `.cdx-text-input` — **à
-  re-mesurer au prochain shot terrain avant de promouvoir**.
-- **Exposer `explorer_html::entities`** (`lookup_named` pub ou
-  `decode_str`) — demande résiduelle NAV (miroir jscore),
-  non bloquante ; `lookup_named` est encore `pub(crate)`,
-  jscore duplique `map_numeric`.
-- **Promouvoir `content_rect` public** (`explorer-render`) —
-  NAV le réplique en privé dans `session/composite.rs` pour
-  le composite d'iframes ; promotion additif trivial, adoption
-  NAV annoncée.
+**Résidus fonctionnels documentés — promus au palier R-O :**
 
-**Résidus fonctionnels documentés (à promouvoir en R-xx sur
-trigger site réel) :**
-
-- `display:contents` — repli `Block` ; flatten des enfants
-  comme items flex/grid et UA sur `<slot>` non portés.
-- `radial-`/`conic-gradient` — parsés, non peints.
-- `background-image` multi-`url()` : la collecte ne fetch
-  que le premier `url()` (`backgrounds` clé `NodeId →
-  image`) — les couches `url()` suivantes sont sautées au
-  paint depuis R-152 ; le fix complet (fetch par couche)
-  est logué au journal pour NAV. (La couche dégradé et la
-  première couche url peignent — R-73/R-152.)
-- `light-dark()` — non implémenté (R-59 hors scope v1).
-- Marqueurs textuels (`decimal`, alpha, roman) — non peints,
-  la display list ne shape pas ; `list-style-position:
-  inside` peint la puce sans décaler le texte.
-- Hit-test sans filtre `visibility:hidden` — éléments cachés
-  ciblables (inertes si `pointer-events:none`).
+- `display:contents` — flatten des enfants comme items
+  flex/grid et UA sur `<slot>` → **R-204** (internes table
+  déjà figées R-191).
+- `background` multi-couches : `origin`/`-clip` non
+  consommés + couches `url()` > 1 non peintes (fetch par
+  couche = journal NAV) → **R-203**.
 - Shadow DOM : `::part`/`exportparts` imbriqués, `!important`
-  inversé à la frontière, aplatissement de slots nichés —
-  bornes R-96/R-97.
+  inversé à la frontière, aplatissement de slots nichés →
+  **R-205**.
+- Affûtage Acid2/WPT (cliquet 41/58 — colonnes, marges
+  flex/grid, hairline) → **R-206**.
+
+*(Soldés depuis le 2026-10-25 : `radial-`/`conic-gradient` →
+R-104 ; `light-dark()` → R-105 ; marqueurs textuels +
+`<string>` → R-108, `ol[type]`/`ul[type]` UA → R-113,
+`list-style-position:inside` → R-180 ; hit-test filtre
+`visibility:hidden` → `hit.rs`.)*
