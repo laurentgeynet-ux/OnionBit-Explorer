@@ -1446,3 +1446,36 @@ fn grid_areas_cellules_adjacentes_sans_espace() {
     );
     assert!(approx(m.rect.x, 150.0), "x={} attendu 150", m.rect.x);
 }
+
+// ── svg w=0 : diagnostic (vols pluto.tv/lichess — logos invisibles) ──
+
+/// `#[ignore]` — reproduit le mur : un `<svg>` à taille
+/// intrinsèque (91×28 portée par `sizes`) dans une chaîne
+/// `flex|inline-block > a > AnonymousBlock > Inline` mesure
+/// **0×0** alors que l'intrinsèque devrait contribuer 91
+/// (Sizing §5.1 — la contribution d'un remplacé est sa
+/// taille utilisée). La perte vit dans `content_px*` sur le
+/// porteur anonyme/en-ligne : ni `max_content_px` (flex
+/// base, shrink-to-fit) ni la pose directe ne la
+/// récupèrent. Retirer l'`#[ignore]` au fix.
+#[test]
+#[ignore = "diagnostic svg w=0 — contribution intrinsèque perdue dans AnonymousBlock/Inline"]
+fn svg_intrinseque_contribue_sous_flex_et_ib() {
+    let sz = |dom: &Dom| {
+        std::collections::HashMap::from([(by_tag(dom, "svg"), (91.0, 28.0))])
+    };
+    for (label, html, css) in [
+        ("flex>a>svg", "<nav><a><svg viewBox=\"0 0 91 28\"/></a></nav>",
+         "nav{display:flex}"),
+        ("ib>div>a>svg", "<div><a><svg viewBox=\"0 0 91 28\"/></a></div>",
+         "div{display:inline-block}a{display:block}"),
+    ] {
+        let (dom, bx) = laid_sized(html, css, &sz);
+        let a = find(&bx, by_tag(&dom, "a"));
+        assert!(
+            approx(a.rect.width, 91.0),
+            "{label} : <a> doit mesurer l'intrinsèque (91), w={}",
+            a.rect.width
+        );
+    }
+}
