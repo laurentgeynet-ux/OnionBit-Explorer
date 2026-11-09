@@ -1688,32 +1688,36 @@ fn bg_layers(v: &str) -> Vec<&str> {
 /// `clip-path` → clip géométrique (R-187) : `polygon` →
 /// `PushClipPath` réel ; `inset`/`circle`/`ellipse` →
 /// `PushClip`/`PushClipRounded` rectangulaire (approx.
-/// documentée). `%` relatifs à la border box.
+/// documentée). `%` relatifs à la border box. Limites
+/// documentées : les descendants `absolutely`/`fixed`
+/// positionnés passent par `pos_defer`/`fixed_defer` et
+/// échappent au clip de l'ancêtre ; `path()`/`url()` et la
+/// `reference-box` explicite ne sont pas portés.
 #[allow(clippy::many_single_char_names)]
 fn clip_path_of(st: &explorer_css::ComputedStyle, rect: &Rect) -> Option<DisplayItem> {
     let v = st.get("clip-path")?.trim();
     if v == "none" {
         return None;
     }
-    let px = |t: &str, base: f32| -> f32 {
+    // `<length>`/`%` → px absolu (`%` contre `base`) ;
+    // autre/invalide → `None` (jamais de clip faux).
+    let len = |t: &str, base: f32| -> Option<f32> {
         let t = t.trim();
-        t.strip_suffix('%').map_or_else(
-            || {
-                t.strip_suffix("px")
-                    .and_then(|s| s.trim().parse::<f32>().ok())
-                    .unwrap_or(0.0)
-            },
-            |s| s.trim().parse::<f32>().unwrap_or(0.0) * base / 100.0,
-        )
+        if let Some(s) = t.strip_suffix('%') {
+            return s.trim().parse::<f32>().ok().map(|p| p * base / 100.0);
+        }
+        parse_length(t).and_then(|l| l.unit.px_factor().map(|f| (l.value * f) as f32))
     };
     if let Some(args) = v.strip_prefix("polygon(").and_then(|v| v.strip_suffix(')')) {
+        // `fill-rule` en tête (`evenodd`/`nonzero`) non lu
+        // — `Winding` au raster.
         let points: Vec<(f32, f32)> = args
             .split(',')
             .filter_map(|pt| {
                 let mut it = pt.split_whitespace();
                 match (it.next(), it.next()) {
                     (Some(x), Some(y)) => {
-                        Some((rect.x + px(x, rect.width), rect.y + px(y, rect.height)))
+                        Some((rect.x + len(x, rect.width)?, rect.y + len(y, rect.height)?))
                     }
                     _ => None,
                 }
@@ -1725,26 +1729,40 @@ fn clip_path_of(st: &explorer_css::ComputedStyle, rect: &Rect) -> Option<Display
         return None;
     }
     if let Some(args) = v.strip_prefix("inset(").and_then(|v| v.strip_suffix(')')) {
-        let nums: Vec<f32> = args
-            .split_whitespace()
-            .take_while(|p| *p != "round")
-            .map(|t| px(t, 100.0))
-            .collect();
-        if !nums.is_empty() {
-            let (t, r, b, l) = match nums.as_slice() {
-                [a] => (*a, *a, *a, *a),
-                [a, b] => (*a, *b, *a, *b),
-                [a, b, c] => (*a, *b, *c, *b),
-                _ => (nums[0], nums[1], nums[2], nums[3]),
-            };
-            return Some(DisplayItem::PushClip(Rect {
-                x: rect.x + l * rect.width / 100.0,
-                y: rect.y + t * rect.height / 100.0,
-                width: rect.width * (100.0 - l - r) / 100.0,
-                height: rect.height * (100.0 - t - b) / 100.0,
-            }));
-        }
-        return None;
+        let mut toks = args.split_whitespace();
+        let vals: Vec<&str> = toks.by_ref().take_while(|p| *p != "round").collect();
+        let (t, r, b, l) = match vals.as_slice() {
+            [a] => (*a, *a, *a, *a),
+            [a, b] => (*a, *b, *a, *b),
+            [a, b, c] => (*a, *b, *c, *b),
+            [a, b, c, d, ..] => (*a, *b, *c, *d),
+            _ => return None,
+        };
+        // `top`/`bottom` contre la hauteur, `left`/`right`
+        // contre la largeur — `px` et `%` exacts.
+        let (top, right, bottom, left) = (
+            len(t, rect.height)?,
+            len(r, rect.width)?,
+            len(b, rect.height)?,
+            len(l, rect.width)?,
+        );
+        let clip = Rect {
+            x: rect.x + left,
+            y: rect.y + top,
+            width: (rect.width - left - right).max(0.0),
+            height: (rect.height - top - bottom).max(0.0),
+        };
+        // `round <r>` : premier rayon appliqué aux 4 coins
+        // (coins différenciés/`/` elliptique hors MVP).
+        let radius = toks.next().and_then(|t| len(t, clip.width)).unwrap_or(0.0);
+        return if radius > 0.0 {
+            Some(DisplayItem::PushClipRounded {
+                rect: clip,
+                radii: [radius; 4],
+            })
+        } else {
+            Some(DisplayItem::PushClip(clip))
+        };
     }
     for fn_name in ["circle", "ellipse"] {
         if let Some(args) = v
@@ -1752,19 +1770,28 @@ fn clip_path_of(st: &explorer_css::ComputedStyle, rect: &Rect) -> Option<Display
             .and_then(|v| v.strip_prefix('('))
             .and_then(|v| v.strip_suffix(')'))
         {
-            let parts: Vec<&str> = args.split_whitespace().collect();
-            let (rx, ry) = parts
-                .first()
-                .and_then(|p| p.strip_suffix('%'))
-                .and_then(|p| p.parse::<f32>().ok())
-                .map_or((50.0, 50.0), |a| (a, a));
-            // centre `at x y` non lu au MVP — centre boîte.
+            // `circle(r)`/`ellipse(rx ry)` — `%` contre l'axe
+            // porté (approx. du `√(w²+h²)/√2` spec de
+            // `circle`), longueurs exactes, absent/invalide →
+            // demi-axe (≈ `closest-side`, biais « visible »).
+            // `at <position>` non lu — centre boîte.
+            let toks: Vec<&str> = args.split_whitespace().take_while(|t| *t != "at").collect();
+            let half = |t: Option<&str>, base: f32| -> f32 {
+                t.and_then(|t| len(t, base))
+                    .map_or(base / 2.0, |v| v.max(0.0))
+            };
+            let rx = half(toks.first().copied(), rect.width);
+            let ry = if fn_name == "ellipse" {
+                half(toks.get(1).copied(), rect.height)
+            } else {
+                half(toks.first().copied(), rect.height)
+            };
             let (cx, cy) = (rect.x + rect.width / 2.0, rect.y + rect.height / 2.0);
             return Some(DisplayItem::PushClip(Rect {
-                x: cx - rx * rect.width / 100.0,
-                y: cy - ry * rect.height / 100.0,
-                width: rx * rect.width / 50.0,
-                height: ry * rect.height / 50.0,
+                x: cx - rx,
+                y: cy - ry,
+                width: rx * 2.0,
+                height: ry * 2.0,
             }));
         }
     }
@@ -4533,6 +4560,12 @@ fn paint_box<'a>(
     pos_defer: &mut Vec<(Vec<u16>, &'a LayoutBox)>,
     fixed_defer: &mut Vec<(Vec<u16>, &'a LayoutBox)>,
 ) {
+    // R-188 — dos tourné : évalué AVANT tout push — un
+    // `return` plus tard laisserait des `PushClip`/
+    // `PushFilter`/`PushBlend` orphelins sur la pile raster.
+    if backface_hidden(bx) {
+        return;
+    }
     // R-M5 — `filter` encadre TOUTE la sous-arbre de la
     // boîte (contenu + descendants) : bracket hors-écran
     // `PushFilter`…`PopFilter` ; la récursion des enfants
@@ -4565,9 +4598,6 @@ fn paint_box<'a>(
     }
     // R-187 — `clip-path` : la boîte (fond+contenu) ne se
     // peint que dans la géométrie — même pile `clips`.
-    if backface_hidden(bx) {
-        return;
-    }
     let clip_item = clip_path_of(&bx.style, &bx.rect);
     if let Some(it) = &clip_item {
         items.push(it.clone());

@@ -368,6 +368,104 @@ pub fn flow_transform(
     Some(Affine { a, b, c, d, e, f })
 }
 
+/// `rotate` individuel (CSS Transforms 2, R-188) →
+/// matrice. Formes : `<angle>` (axe z implicite),
+/// `x|y|z <angle>`, `<x> <y> <z> <angle>`. Projection
+/// affine documentée (mêmes conventions que les fonctions
+/// `transform`) : axe z → rotation plan, x → `sy`=cosθ,
+/// y → `sx`=cosθ, axe arbitraire hors-plan → `None`.
+#[allow(clippy::cast_possible_truncation)]
+fn rotate_prop(v: &str) -> Option<Affine> {
+    let mut letter = "";
+    let mut axis = [0.0f64; 3];
+    let mut naxis = 0usize;
+    let mut angle = None;
+    for t in v.split_whitespace() {
+        if let Ok(n) = t.parse::<f64>() {
+            if naxis < 3 {
+                axis[naxis] = n;
+                naxis += 1;
+            }
+        } else if let Some(a) = tf_angle(t) {
+            angle = Some(a);
+        } else {
+            letter = t;
+        }
+    }
+    let ang = angle?;
+    let (x, y, z) = match (letter, naxis) {
+        ("", 0) | ("z", _) => (0.0, 0.0, 1.0),
+        ("x", _) => (1.0, 0.0, 0.0),
+        ("y", _) => (0.0, 1.0, 0.0),
+        ("", 3) => (axis[0], axis[1], axis[2]),
+        _ => return None,
+    };
+    if x.abs() < f64::EPSILON && y.abs() < f64::EPSILON && z.abs() > f64::EPSILON {
+        Some(Affine::rotate((z.signum() * ang.to_degrees()) as f32))
+    } else if x.abs() > f64::EPSILON && y.abs() < f64::EPSILON && z.abs() < f64::EPSILON {
+        Some(Affine {
+            a: 1.0,
+            b: 0.0,
+            c: 0.0,
+            d: ang.cos() as f32,
+            e: 0.0,
+            f: 0.0,
+        })
+    } else if x.abs() < f64::EPSILON && y.abs() > f64::EPSILON && z.abs() < f64::EPSILON {
+        Some(Affine {
+            a: ang.cos() as f32,
+            b: 0.0,
+            c: 0.0,
+            d: 1.0,
+            e: 0.0,
+            f: 0.0,
+        })
+    } else {
+        // Axe arbitraire hors-plan — pas de projection
+        // affine honnête → propriété ignorée.
+        None
+    }
+}
+
+/// `translate`/`rotate`/`scale` individuelles (CSS
+/// Transforms 2, R-188) → matrice partielle, composée dans
+/// l'ordre spec `translate → rotate → scale` **avant**
+/// `transform`. `none`/invalide → portion ignorée
+/// (tolérance, jamais de matrice fausse).
+#[allow(clippy::cast_possible_truncation)]
+fn individual_transform(st: &ComputedStyle, rect: &Rect) -> Option<Affine> {
+    let mut m = Affine::IDENTITY;
+    let mut any = false;
+    if let Some(v) = st.get("translate") {
+        let mut it = v.split_whitespace();
+        // Le z d'une 3e valeur est projeté à 0 (moteur
+        // planaire) ; `none` ne parse pas → ignoré.
+        if let Some(tx) = it.next().and_then(|t| tf_len_px(t, rect.width)) {
+            let ty = it
+                .next()
+                .and_then(|t| tf_len_px(t, rect.height))
+                .unwrap_or(0.0);
+            m = m.post_concat(Affine::translate(tx as f32, ty as f32));
+            any = true;
+        }
+    }
+    if let Some(v) = st.get("rotate") {
+        if let Some(r) = rotate_prop(v.trim()) {
+            m = m.post_concat(r);
+            any = true;
+        }
+    }
+    if let Some(v) = st.get("scale") {
+        let mut it = v.split_whitespace();
+        if let Some(sx) = it.next().and_then(|t| t.parse::<f64>().ok()) {
+            let sy = it.next().and_then(|t| t.parse::<f64>().ok()).unwrap_or(sx);
+            m = m.post_concat(Affine::scale(sx as f32, sy as f32));
+            any = true;
+        }
+    }
+    any.then_some(m)
+}
+
 /// `transform` d'une boîte → matrice complète (origine
 /// incluse, exprimée dans le repère du `rect` passé —
 /// document ou décalé scroll) — `None` si
@@ -387,8 +485,25 @@ pub fn box_transform(bx: &LayoutBox, rect: &Rect) -> Option<Affine> {
     if matches!(bx.kind, BoxKind::AnonymousBlock | BoxKind::Text) {
         return None;
     }
-    let raw = bx.style.get("transform")?;
-    let m = transform_matrix(raw, rect)?;
+    // CSS Transforms 2 (R-188) : `translate`/`rotate`/
+    // `scale` individuelles s'appliquent AVANT `transform`.
+    let mut any = false;
+    let mut m = Affine::IDENTITY;
+    if let Some(t) = individual_transform(&bx.style, rect) {
+        m = t;
+        any = true;
+    }
+    if let Some(t) = bx
+        .style
+        .get("transform")
+        .and_then(|raw| transform_matrix(raw, rect))
+    {
+        m = m.post_concat(t);
+        any = true;
+    }
+    if !any {
+        return None;
+    }
     let (ox, oy) = origin_px(&bx.style, rect);
     // F(p) = o + M(p − o) : post-concaténation dans l'ordre
     // d'application — T(−o) d'abord, M, puis T(+o).

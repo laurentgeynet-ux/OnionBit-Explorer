@@ -2805,3 +2805,127 @@ fn rotate3d_projete_affine_et_backface() {
         "dos tourné → pas de texte peint"
     );
 }
+
+/// R-187 fix — `inset` : les longueurs `px` sont absolues,
+/// pas des % (régression post-revue : `10px` lu `10%`).
+#[test]
+fn clip_path_inset_px_absolu() {
+    use explorer_render::DisplayItem;
+    let (_, _, items) = dl(
+        "<div id=s>x</div>",
+        "#s{position:absolute;width:200px;height:200px;\
+         clip-path:inset(10px)}",
+    );
+    assert!(
+        items.iter().any(|i| matches!(
+            i,
+            DisplayItem::PushClip(r) if (r.width - 180.0).abs() < 0.5
+        )),
+        "inset(10px) sur 200px → clip 180px dans {items:?}"
+    );
+}
+
+/// R-187 fix — `ellipse(rx ry)` lit les deux rayons ;
+/// `circle(<px>)` accepte les longueurs absolues.
+#[test]
+fn clip_path_ellipse_deux_rayons() {
+    use explorer_render::DisplayItem;
+    let (_, _, items) = dl(
+        "<div id=s>x</div>",
+        "#s{position:absolute;width:100px;height:100px;\
+         clip-path:ellipse(30% 60%)}",
+    );
+    assert!(
+        items.iter().any(|i| matches!(
+            i,
+            DisplayItem::PushClip(r) if (r.width - 60.0).abs() < 0.5
+                && (r.height - 120.0).abs() < 0.5
+        )),
+        "ellipse(30% 60%) → clip 60x120 dans {items:?}"
+    );
+    let (_, _, items) = dl(
+        "<div id=s>x</div>",
+        "#s{position:absolute;width:200px;height:200px;\
+         clip-path:circle(10px)}",
+    );
+    assert!(
+        items.iter().any(|i| matches!(
+            i,
+            DisplayItem::PushClip(r) if (r.width - 20.0).abs() < 0.5
+        )),
+        "circle(10px) → clip 20px dans {items:?}"
+    );
+}
+
+/// R-187 fix — `inset(... round <r>)` → `PushClipRounded`.
+#[test]
+fn clip_path_inset_round_arrondi() {
+    use explorer_render::DisplayItem;
+    let (_, _, items) = dl(
+        "<div id=s>x</div>",
+        "#s{position:absolute;width:100px;height:100px;\
+         clip-path:inset(10% round 5px)}",
+    );
+    assert!(
+        items.iter().any(|i| matches!(
+            i,
+            DisplayItem::PushClipRounded { radii, .. }
+                if (radii[0] - 5.0).abs() < 0.01
+        )),
+        "PushClipRounded attendu dans {items:?}"
+    );
+}
+
+/// R-188 fix — `backface_hidden` s'évalue AVANT tout push :
+/// `contain:paint` + dos tourné ne doit laisser aucun
+/// `PushClip` orphelin (pile raster déséquilibrée).
+#[test]
+fn backface_hidden_laisse_la_pile_equilibree() {
+    use explorer_render::DisplayItem;
+    let (_, _, items) = dl(
+        "<div style=\"contain:paint;transform:rotateY(180deg);\
+         backface-visibility:hidden\">A</div>",
+        "",
+    );
+    let pushes = items
+        .iter()
+        .filter(|i| {
+            matches!(
+                i,
+                DisplayItem::PushClip(_)
+                    | DisplayItem::PushClipRounded { .. }
+                    | DisplayItem::PushClipPath { .. }
+            )
+        })
+        .count();
+    let pops = items
+        .iter()
+        .filter(|i| matches!(i, DisplayItem::PopClip))
+        .count();
+    assert_eq!(pushes, pops, "clips déséquilibrés dans {items:?}");
+}
+
+/// R-188 — propriétés individuelles `translate`/`rotate`/
+/// `scale` (CSS Transforms 2) consommées par `box_transform`.
+#[test]
+fn props_transform_individuelles() {
+    use explorer_render::DisplayItem;
+    let (_, _, items) = dl("<div style=\"scale:2\">A</div>", "");
+    assert!(
+        items.iter().any(|i| matches!(
+            i, DisplayItem::PushTransform(m) if (m.sx - 2.0).abs() < 0.01)),
+        "scale:2 → sx=2 dans {items:?}"
+    );
+    let (_, _, items) = dl("<div style=\"rotate:x 90deg\">A</div>", "");
+    assert!(
+        items.iter().any(|i| matches!(
+            i, DisplayItem::PushTransform(m) if m.sy.abs() < 0.01)),
+        "rotate:x 90deg → sy≈0 dans {items:?}"
+    );
+    let (_, _, items) = dl("<div style=\"translate:10px 5px\">A</div>", "");
+    assert!(
+        items.iter().any(|i| matches!(
+            i, DisplayItem::PushTransform(m) if (m.tx - 10.0).abs() < 0.5)),
+        "translate:10px 5px → tx≈10 dans {items:?}"
+    );
+}
