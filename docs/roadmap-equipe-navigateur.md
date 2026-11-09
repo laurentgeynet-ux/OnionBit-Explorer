@@ -10815,5 +10815,10 @@ un crate PIPELINE.- [x] **JS-C422. Deadline honnête — canal session ↔ budge
   identiques, `heap_dead_flag` du chemin direct retiré (la
   porte `heap_dead_reported` couvre désormais les asyncs).
   Verrou `async_script_yields_to_parser_inserted_inline` +
-  `async_script_runs_before_defer` inchangé. Vol de verdict
-  sur explore.org/arte à suivre.
+  `async_script_runs_before_defer` inchangé. **Vol 735** :
+  0 `url.ctor.fail` / 0 `Invalid URL` / 76 évals `ok=true`
+  sur explore.org + arte.tv + france24 (0 régression
+  §B-105/§B-116 — f24 hydratée `h=2719`, 117 liens) ; les
+  deux sites Next.js passent le bootstrap mais restent des
+  coquilles SSR — mur suivant (hydratation RSC sans commit
+  DOM, 567 réactions puis silence) à numéroter.
