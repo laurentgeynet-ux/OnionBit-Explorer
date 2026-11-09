@@ -2311,8 +2311,16 @@ pub(crate) fn repaint_payload(
             opacity0_path = ?st.opacity0_path,
             backface_path = ?st.backface_path,
             visibility_path = ?st.visibility_path,
+            tf_offsets = ?st.tf_offsets,
+            off_first = ?st.off_canvas_first,
+            off_tf = ?st.off_canvas_tf,
+            glyphs = st.glyphs,
+            invisible = st.invisible_glyphs,
             "apply: emit_stats"
         );
+        // §B-118 — la liste complète au debug : rect/couleur/
+        // clip de chaque item (145 items ≈ autant de lignes).
+        tracing::info!(target: "paint_stats", "apply: display_dump\n{}", list.dump());
     }
     tracing::info!(items = list.items.len(), "apply: display_list");
     if list.dropped_emits > 0 {
