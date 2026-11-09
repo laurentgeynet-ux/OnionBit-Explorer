@@ -2613,3 +2613,44 @@ fn text_deco_styles_thickness_offset() {
         .count();
     assert_eq!(fills, 3, "3 traits décorés : {fills}");
 }
+
+/// R-181 — `column-rule` : un `DecoRect` vertical centré dans
+/// le gap, au-dessus du fond (§5). Shorthand + longhands.
+#[test]
+fn column_rule_peint_un_trait_dans_le_gap() {
+    let (_, _, items) = dl(
+        "<div id=c><p>a</p><p>b</p></div>",
+        "#c{column-count:2;column-gap:10px;width:210px;\
+           column-rule:2px dashed #ff0000;margin:0}",
+    );
+    let rules: Vec<_> = items
+        .iter()
+        .filter(|i| {
+            matches!(
+                i,
+                DisplayItem::DecoRect {
+                    style: explorer_layout::inline::DECO_DASHED,
+                    ..
+                }
+            )
+        })
+        .collect();
+    assert_eq!(rules.len(), 1, "un trait de colonne : {rules:?}");
+    if let DisplayItem::DecoRect { rect, color, .. } = rules[0] {
+        // Centré dans le gap : x ≈ 104 (col 100 + gap 10/2 - 1).
+        assert!((rect.x - 104.0).abs() < 6.0, "x du trait : {}", rect.x);
+        assert!((rect.width - 2.0).abs() < 0.5, "épaisseur : {}", rect.width);
+        assert_eq!((color.r, color.g, color.b), (255, 0, 0));
+    }
+    // Sans `column-rule-style` → rien.
+    let (_, _, items2) = dl(
+        "<div id=c><p>a</p><p>b</p></div>",
+        "#c{column-count:2;width:210px;margin:0}",
+    );
+    assert!(
+        !items2
+            .iter()
+            .any(|i| matches!(i, DisplayItem::DecoRect { .. })),
+        "pas de trait par défaut"
+    );
+}

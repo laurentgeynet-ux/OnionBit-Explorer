@@ -2935,3 +2935,37 @@ fn list_style_position_inside_indente_la_ligne() {
         "outside : pas de puce en ligne"
     );
 }
+
+/// R-181 — multicol : `column-span:all` re-pose le spanner
+/// pleine largeur entre deux segments équilibrés, et
+/// `break-before:column` force un saut de colonne.
+/// `column-fill:auto` séquentiel (cap = height connue) et
+/// `break-inside` déjà honoré (unités insécables).
+#[test]
+fn multicol_span_et_break() {
+    let (dom, bx) = laid(
+        "<div id=c><p>a</p><h2 id=s>T</h2><p>b</p></div>",
+        "#c{column-count:2;column-gap:10px;width:210px} \
+         h2{column-span:all;margin:0} p{margin:0}",
+    );
+    let s = find(&bx, by_id(&dom, "s"));
+    assert!(
+        (s.rect.width - 210.0).abs() < 1.0,
+        "spanner pleine largeur : {}",
+        s.rect.width
+    );
+    // `break-before:column` : la 2e unité saute en colonne 2.
+    let (dom2, bx2) = laid(
+        "<div id=c><p id=a>a</p><p id=b>b</p></div>",
+        "#c{column-count:2;column-gap:10px;width:210px} \
+         p{margin:0} #b{break-before:column}",
+    );
+    let a = find(&bx2, by_id(&dom2, "a"));
+    let b = find(&bx2, by_id(&dom2, "b"));
+    assert!(
+        b.rect.x > a.rect.x + 50.0,
+        "b en colonne 2 : a.x={} b.x={}",
+        a.rect.x,
+        b.rect.x
+    );
+}

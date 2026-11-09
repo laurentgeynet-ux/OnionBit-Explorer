@@ -1964,6 +1964,96 @@ fn emit_image_marker(
     true
 }
 
+/// R-181 — `column-rule` (css-multicol §5) : trait vertical
+/// centré dans chaque `column-gap`, peint au-dessus du fond
+/// du conteneur. La géométrie des colonnes est recomptée
+/// depuis le style (formule de `flow_columns` — `%`/`px` via
+/// `prop_px` ; `em`/`ch` approximés à la fonte — limite
+/// documentée). `column-rule-style` ∈ solid|dotted|dashed|
+/// double (groove/ridge/inset/outset → solid) ; `none`/
+/// `hidden` ou absent → rien. `column-rule-width` :
+/// thin|medium|thick = 1|3|5 px, sinon longueur.
+#[allow(clippy::cast_possible_truncation)]
+#[allow(clippy::cast_sign_loss)]
+#[allow(clippy::cast_precision_loss)]
+fn emit_column_rules(bx: &LayoutBox, items: &mut Vec<DisplayItem>, off: (f32, f32)) {
+    let st = &bx.style;
+    let Some(style_t) = st.get("column-rule-style") else {
+        return;
+    };
+    let style_t = style_t.trim();
+    if matches!(style_t, "none" | "hidden") {
+        return;
+    }
+    let deco_style = match style_t {
+        "dotted" => explorer_layout::inline::DECO_DOTTED,
+        "dashed" => explorer_layout::inline::DECO_DASHED,
+        "double" => explorer_layout::inline::DECO_DOUBLE,
+        _ => explorer_layout::inline::DECO_SOLID,
+    };
+    let rw = match st.get("column-rule-width").map(str::trim) {
+        Some("thin") => 1.0,
+        Some("thick") => 5.0,
+        Some("medium") | None => 3.0,
+        _ => prop_px(st, "column-rule-width", 3.0),
+    };
+    if rw <= 0.0 {
+        return;
+    }
+    let cr = content_rect(bx);
+    let fs = prop_px(st, "font-size", 16.0);
+    let count = st
+        .get("column-count")
+        .filter(|v| v.trim() != "auto")
+        .and_then(|v| v.trim().parse::<u32>().ok());
+    let col_w_spec = st
+        .get("column-width")
+        .filter(|v| v.trim() != "auto")
+        .map(|_| prop_px(st, "column-width", 0.0));
+    if count.is_none() && col_w_spec.is_none() {
+        return;
+    }
+    let gap = match st.get("column-gap").map(str::trim) {
+        None | Some("normal") => fs,
+        _ => prop_px(st, "column-gap", fs),
+    };
+    let n = match (count, col_w_spec) {
+        (Some(c), Some(w)) if w > 0.0 => {
+            c.min(((cr.width + gap) / (w + gap).max(1.0)).floor().max(1.0) as u32)
+        }
+        (Some(c), _) => c,
+        (None, Some(w)) if w > 0.0 => {
+            ((cr.width + gap) / (w + gap).max(1.0)).floor().max(1.0) as u32
+        }
+        _ => 1,
+    };
+    if n <= 1 {
+        return;
+    }
+    let col_w = (cr.width - gap * (n as f32 - 1.0)) / n as f32;
+    if col_w <= 0.0 {
+        return;
+    }
+    let color = st
+        .get("column-rule-color")
+        .and_then(parse_color)
+        .or_else(|| st.get("color").and_then(parse_color))
+        .unwrap_or(Color::BLACK);
+    for i in 1..n {
+        let cx = cr.x + i as f32 * (col_w + gap) - gap * 0.5 - rw * 0.5;
+        items.push(DisplayItem::DecoRect {
+            rect: Rect {
+                x: cx + off.0,
+                y: cr.y + off.1,
+                width: rw,
+                height: cr.height,
+            },
+            color,
+            style: deco_style,
+        });
+    }
+}
+
 fn emit_list_marker(
     bx: &LayoutBox,
     items: &mut Vec<DisplayItem>,
@@ -2114,7 +2204,6 @@ fn emit_text_marker(bx: &LayoutBox, items: &mut Vec<DisplayItem>, off: (f32, f32
         size_px: fs,
     });
 }
-
 
 /// La boîte déclare un fond : `background-color` non
 /// transparente ou `background-image` avec une couche
@@ -4143,6 +4232,9 @@ fn paint_box_impl<'a>(
         // `paint_self` émises avant (R-55).
         if !hidden {
             emit_list_marker(bx, items, off, cx.images);
+            // R-181 — `column-rule` : traits décoratifs entre
+            // colonnes au-dessus du fond (§5).
+            emit_column_rules(bx, items, off);
             paint_lines(bx, items, off);
         }
         // Ordre App. E au sein des non positionnés : (a)

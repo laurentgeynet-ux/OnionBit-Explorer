@@ -3383,7 +3383,7 @@ déblocage/coût décroissant.
 - [x] **R-180. `list-style-position:inside`** : puce peinte sans
   décalage du texte — la ligne doit s'indenter comme si la puce
   était le premier mot.
-- [ ] **R-181. Fragmentation multicol** : `column-rule`
+- [x] **R-181. Fragmentation multicol** : `column-rule`
   (décoratif), `column-span`, `column-fill`/`break-inside`/
   `break-before`/`break-after` ignorés (`columns.rs` range,
   `in-flow` absent du constructeur).

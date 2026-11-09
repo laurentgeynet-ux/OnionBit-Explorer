@@ -1641,11 +1641,14 @@ fn place_float(
 ///
 /// Déviations assumées (CSS Multi-column L1) : pas de
 /// fragmentation intra-boîte (un bloc de texte seul est une
-/// unité insécable), pas de `column-span`, `column-fill:auto`
-/// traité comme `balance`, marges collapsées mesurées en flux
-/// mono-colonne, flottants/positionnés translatés avec leur
-/// unité, padding/marges des maillons de chaîne ignorés au
-/// re-cadrage de leur `rect`.
+/// unité insécable — `break-inside` honoré de fait), marges
+/// collapsées mesurées en flux mono-colonne, flottants/
+/// positionnés translatés avec leur unité, padding/marges des
+/// maillons de chaîne ignorés au re-cadrage de leur `rect`.
+/// `column-span` re-pose le spanner pleine largeur (§6.1),
+/// `column-fill:auto` ne s'applique qu'avec une `height`
+/// connue, `column-rule` est un trait décoratif recompté au
+/// rendu (§5), `break-*` paginés absorbés en `column`.
 #[allow(clippy::too_many_arguments)]
 #[allow(clippy::cast_possible_truncation)]
 #[allow(clippy::cast_sign_loss)]
@@ -1728,8 +1731,17 @@ fn flow_columns(
         cb_h,
     );
 
+    // R-181 — `column-fill:auto` + `height` connue →
+    // remplissage séquentiel par colonne de `cap` de hauteur
+    // (§7.1) ; `balance` (défaut) ou hauteur auto → `None`.
+    let fill_cap = bx
+        .style
+        .get("column-fill")
+        .is_some_and(|v| v.trim() == "auto")
+        .then(|| side_px(&bx.style, "height", content_w, fs, ctx, 0.0))
+        .filter(|h| *h > 0.0);
     let h = columns_place(
-        bx, 0.0, 0.0, content_x, cursor, content_w, n, col_w, gap, ctx, fs, 0,
+        bx, 0.0, 0.0, content_x, cursor, content_w, n, col_w, gap, ctx, fs, 0, fill_cap,
     );
     if let Some(h) = h {
         return Some(cursor + h);
@@ -1766,6 +1778,7 @@ fn columns_place(
     ctx: &BlockCtx,
     fs: f32,
     depth: u32,
+    fill_cap: Option<f32>,
 ) -> Option<f32> {
     if depth > 16 {
         return None;
@@ -1820,6 +1833,7 @@ fn columns_place(
                     ctx,
                     wfs,
                     depth + 1,
+                    fill_cap,
                 )
             });
             if let Some(h) = inner {
@@ -1833,17 +1847,21 @@ fn columns_place(
             }
             inner
         }
-        _ => Some(partition_units(parent, n_cols, col_w, gap, dst_x, dst_y)),
+        _ => Some(partition_units(
+            parent, n_cols, col_w, gap, dst_x, dst_y, level_w, ctx, fs, fill_cap,
+        )),
     }
 }
 
-/// Répartit les enfants de `parent` (déjà posés en scratch) en
-/// `n_cols` colonnes équilibrées — une unité rejoint la colonne
-/// visée par son MILIEU vertical — puis translate chacune à sa
-/// place réelle. Renvoie la hauteur de la plus haute colonne.
+/// Répartit les enfants de `parent` (déjà posés en scratch)
+/// en segments séparés par `column-span: all` (R-181, §6.1) :
+/// chaque segment équilibré sur `n_cols` colonnes, chaque
+/// spanner re-posé pleine largeur entre deux (`layout_block`
+/// à `level_w` — sa mesure scratch à `col_w` est rejouée).
+/// Renvoie la hauteur totale consommée.
+#[allow(clippy::too_many_arguments)]
 #[allow(clippy::cast_possible_truncation)]
 #[allow(clippy::cast_sign_loss)]
-#[allow(clippy::cast_precision_loss)]
 fn partition_units(
     parent: &mut LayoutBox,
     n_cols: usize,
@@ -1851,24 +1869,113 @@ fn partition_units(
     gap: f32,
     dst_x: f32,
     dst_y: f32,
+    level_w: f32,
+    ctx: &BlockCtx,
+    fs: f32,
+    fill_cap: Option<f32>,
+) -> f32 {
+    let n = parent.children.len();
+    let mut cursor = dst_y;
+    let mut seg_start = 0usize;
+    for i in 0..=n {
+        let is_span = i < n
+            && parent.children[i]
+                .style
+                .get("column-span")
+                .is_some_and(|v| v.trim() == "all");
+        if i < n && !is_span {
+            continue;
+        }
+        if seg_start < i {
+            cursor += balance_segment(
+                &mut parent.children[seg_start..i],
+                n_cols,
+                col_w,
+                gap,
+                dst_x,
+                cursor,
+                fill_cap,
+            );
+        }
+        if is_span {
+            let spanner_cb = Rect {
+                x: dst_x,
+                y: cursor,
+                width: level_w,
+                height: 0.0,
+            };
+            cursor += layout_block(
+                &mut parent.children[i],
+                dst_x,
+                cursor,
+                level_w,
+                None,
+                ctx,
+                fs,
+                spanner_cb,
+                &mut FloatCtx::default(),
+            );
+        }
+        seg_start = i + 1;
+    }
+    cursor - dst_y
+}
+
+/// Équilibre une tranche d'unités (déjà posées en scratch)
+/// sur `n_cols` colonnes — une unité rejoint la colonne visée
+/// par son MILIEU vertical (ou `column-fill:auto` + cap : la
+/// colonne atteinte par son sommet, §7.1) — puis translate
+/// chacune à sa place réelle. `break-before|after: column`
+/// force un saut vers la colonne suivante (R-181 ; `page`/
+/// `always`/`left`/`right` absorbés — pas de média paginé).
+/// `break-inside:avoid` est honoré de fait : aucune unité
+/// n'est jamais coupée. Renvoie la hauteur consommée.
+#[allow(clippy::cast_possible_truncation)]
+#[allow(clippy::cast_sign_loss)]
+#[allow(clippy::cast_precision_loss)]
+fn balance_segment(
+    units: &mut [LayoutBox],
+    n_cols: usize,
+    col_w: f32,
+    gap: f32,
+    dst_x: f32,
+    dst_y: f32,
+    fill_cap: Option<f32>,
 ) -> f32 {
     let mut top = f32::INFINITY;
     let mut bot = f32::NEG_INFINITY;
-    for c in &parent.children {
+    for c in units.iter() {
         top = top.min(c.rect.y);
         bot = bot.max(c.rect.y + c.rect.height);
     }
-    let target = (bot - top).max(0.0) / n_cols as f32;
-    let x0 = parent.children.first().map_or(dst_x, |c| c.rect.x);
+    let target = fill_cap.unwrap_or((bot - top).max(0.0) / n_cols as f32);
+    let x0 = units.first().map_or(dst_x, |c| c.rect.x);
     let mut origins: Vec<Option<f32>> = vec![None; n_cols];
     let mut max_h = 0.0_f32;
-    for c in &mut parent.children {
-        let mid = c.rect.y + c.rect.height * 0.5;
-        let col = if target > 0.0 {
-            (((mid - top) / target) as usize).min(n_cols - 1)
+    let mut prev_col = usize::MAX;
+    let mut prev_break = false;
+    let col_break = |c: &LayoutBox, prop: &str| {
+        c.style
+            .get(prop)
+            .is_some_and(|v| matches!(v.trim(), "column" | "page" | "always" | "left" | "right"))
+    };
+    for c in units.iter_mut() {
+        let rel = if fill_cap.is_some() {
+            c.rect.y - top
+        } else {
+            c.rect.y + c.rect.height * 0.5 - top
+        };
+        let mut col = if target > 0.0 {
+            ((rel / target) as usize).min(n_cols - 1)
         } else {
             0
         };
+        if (col_break(c, "break-before") || prev_break) && prev_col != usize::MAX && col <= prev_col
+        {
+            col = (prev_col + 1).min(n_cols - 1);
+        }
+        prev_break = col_break(c, "break-after");
+        prev_col = col;
         let origin = *origins[col].get_or_insert(c.rect.y);
         // `u.x - x0` préserve l'indentation propre à l'unité ;
         // `dy` est constant par colonne (ordre et espacements

@@ -685,6 +685,7 @@ pub fn expand_shorthand(name: &str, value: &str) -> Option<Vec<(String, String)>
         "gap" | "grid-gap" => expand_gap(value),
         "grid-template" | "grid" => expand_grid_template(value),
         "columns" => Some(expand_columns(value)),
+        "column-rule" => Some(expand_column_rule(value)),
         "background" => expand_background(value),
         "font" => expand_font(value),
         "list-style" => expand_list_style(value),
@@ -827,6 +828,33 @@ fn expand_gap(value: &str) -> Option<Vec<(String, String)>> {
         ("row-gap".to_string(), row.to_string()),
         ("column-gap".to_string(), col.to_string()),
     ])
+}
+
+/// `column-rule` : `[<width>] [<style>] [<color>]` ordre
+/// libre (css-multicol §5) — mêmes rôles que `outline`,
+/// les mots-clés `thin`/`medium`/`thick` comptent comme
+/// largeur (valeurs de `border-width`).
+fn expand_column_rule(value: &str) -> Vec<(String, String)> {
+    const WIDTH_KW: &[&str] = &["thin", "medium", "thick"];
+    let mut out = Vec::new();
+    let mut pos = 0usize;
+    for tok in value.split_whitespace() {
+        let t = tok.to_ascii_lowercase();
+        if is_border_style(&t) {
+            out.push(("column-rule-style".to_string(), t));
+        } else if WIDTH_KW.contains(&t.as_str()) || parse_length(tok).is_some() {
+            out.push(("column-rule-width".to_string(), tok.to_string()));
+        } else {
+            let tail = value[pos..].trim();
+            if let Some(c) = parse_color(tail) {
+                let _ = c;
+                out.push(("column-rule-color".to_string(), tail.to_string()));
+            }
+            break;
+        }
+        pos += tok.len() + 1;
+    }
+    out
 }
 
 /// `columns` : `[<width>] [<count>]` ordre libre (CSS
