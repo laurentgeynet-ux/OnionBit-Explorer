@@ -72,6 +72,18 @@ pub struct FontRequest {
     pub weight: u16,
     /// Italique / oblique.
     pub italic: bool,
+    /// `font-variant` petites capitales (R-186) : 0 normal,
+    /// 1 `small-caps` (`smcp`), 2 `all-small-caps`
+    /// (`smcp`+`c2sc`), 3 `petite-caps` (`pcap`),
+    /// 4 `all-petite-caps` (`pcap`+`c2pc`) — features OT
+    /// réelles, polices sans support → no-op documenté.
+    pub caps: u8,
+    /// `font-kerning:none` (R-186) — feature `kern` coupée.
+    pub kern_off: bool,
+    /// `font-stretch` (R-186) — pourcentage `wdth` (100 =
+    /// normal, 0 = normal aussi — variable fontes seules
+    /// le consomment ; repli no-op documenté).
+    pub stretch: u16,
 }
 
 /// Métriques verticales de la fonte à une taille donnée (px).
@@ -443,11 +455,18 @@ impl FontCache {
         if let Some(hit) = self.shape.get(&key) {
             return hit.clone();
         }
+        // R-186 — features OT : `smcp`/`c2sc`/`pcap`/`c2pc`
+        // pour `font-variant` petites capitales, `kern`=0
+        // pour `font-kerning:none`. Polices sans support →
+        // no-op rustybuzz documenté.
+        let feats = ot_features(req);
         let run = self
             .face(src, req)
             .and_then(|(d, i)| {
                 let run = match self.buzz_face(&d, i) {
-                    Some(f) => shape_parsed(&f, (k, i), text, size_px, rtl, ls, &mut self.ink),
+                    Some(f) => {
+                        shape_parsed(&f, (k, i), text, size_px, rtl, ls, &feats, &mut self.ink)
+                    }
                     None => shape_face_ls(&d, i, text, size_px, rtl, ls),
                 };
                 run.map(|r| (d, i, r))
@@ -591,6 +610,7 @@ impl FontCache {
                         size_px,
                         rtl,
                         ls,
+                        &ot_features(req),
                         &mut self.ink,
                     )
                 })
@@ -675,6 +695,7 @@ pub fn request_of(style: &explorer_css::ComputedStyle, ctx: &crate::BlockCtx<'_>
 /// y peignait des glyphes sans sur du texte mesuré serif, et
 /// `bolder`/`lighter` y étaient pondérés autrement).
 #[must_use]
+#[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
 pub fn request_of_family(style: &explorer_css::ComputedStyle, default_family: &str) -> FontRequest {
     let families: Vec<String> = style.get("font-family").map_or_else(
         || vec![default_family.to_string()],
@@ -693,10 +714,45 @@ pub fn request_of_family(style: &explorer_css::ComputedStyle, default_family: &s
         })
         .unwrap_or(400);
     let italic = matches!(style.get("font-style"), Some("italic" | "oblique"));
+    // R-186 — typo longue traîne : `font-variant` (caps),
+    // `font-kerning:none`, `font-stretch` (%).
+    let caps = match style.get("font-variant").unwrap_or("").trim() {
+        "small-caps" => 1,
+        "all-small-caps" => 2,
+        "petite-caps" => 3,
+        "all-petite-caps" => 4,
+        _ => 0,
+    };
+    let kern_off = style
+        .get("font-kerning")
+        .is_some_and(|v| v.trim() == "none");
+    let stretch = style
+        .get("font-stretch")
+        .and_then(|v| {
+            let v = v.trim();
+            v.strip_suffix('%')
+                .and_then(|p| p.parse::<f32>().ok())
+                .map(|p| u16::try_from(p.round().clamp(0.0, 300.0) as i32).unwrap_or(100))
+                .or(match v {
+                    "ultra-condensed" => Some(50),
+                    "extra-condensed" => Some(63),
+                    "condensed" | "narrower" => Some(75),
+                    "semi-condensed" => Some(88),
+                    "semi-expanded" => Some(113),
+                    "expanded" | "wider" => Some(125),
+                    "extra-expanded" => Some(150),
+                    "ultra-expanded" => Some(200),
+                    _ => Some(100),
+                })
+        })
+        .unwrap_or(100);
     FontRequest {
         families,
         weight,
         italic,
+        caps,
+        kern_off,
+        stretch,
     }
 }
 
@@ -789,6 +845,7 @@ pub fn shape_face_ls(
         size_px,
         rtl,
         ls,
+        &[],
         &mut HashMap::new(),
     )
 }
@@ -799,6 +856,36 @@ pub fn shape_face_ls(
 /// GSUB/GPOS (~2,6 ms par appel mesuré sur page géante).
 /// Métriques et bbox passent par le `Deref` vers
 /// `ttf_parser::Face` du même objet.
+/// `FontRequest` → features OT `rustybuzz` (R-186) :
+/// `font-variant` petites capitales (`smcp`/`c2sc`/`pcap`/
+/// `c2pc`), `font-kerning:none` (`kern`=0). `Vec` vide
+/// = shaping nominal.
+fn ot_features(req: &FontRequest) -> Vec<rustybuzz::Feature> {
+    use rustybuzz::ttf_parser::Tag;
+    let mut feats: Vec<rustybuzz::Feature> = Vec::new();
+    let push = |f: &mut Vec<rustybuzz::Feature>, tag: &[u8; 4]| {
+        f.push(rustybuzz::Feature::new(Tag::from_bytes(tag), 1, ..));
+    };
+    match req.caps {
+        1 => push(&mut feats, b"smcp"),
+        2 => {
+            push(&mut feats, b"smcp");
+            push(&mut feats, b"c2sc");
+        }
+        3 => push(&mut feats, b"pcap"),
+        4 => {
+            push(&mut feats, b"pcap");
+            push(&mut feats, b"c2pc");
+        }
+        _ => {}
+    }
+    if req.kern_off {
+        feats.push(rustybuzz::Feature::new(Tag::from_bytes(b"kern"), 0, ..));
+    }
+    feats
+}
+
+#[allow(clippy::too_many_arguments)]
 fn shape_parsed(
     face: &rustybuzz::Face<'_>,
     font_key: (usize, u32),
@@ -806,6 +893,7 @@ fn shape_parsed(
     size_px: f32,
     rtl: bool,
     ls: f32,
+    feats: &[rustybuzz::Feature],
     ink: &mut HashMap<(usize, u32, u16), Option<ttf_parser::Rect>>,
 ) -> Option<ShapedRun> {
     let met = metrics_of(face, size_px)?;
@@ -820,7 +908,7 @@ fn shape_parsed(
     if rtl {
         buf.set_direction(rustybuzz::Direction::RightToLeft);
     }
-    let out = rustybuzz::shape(face, &[], buf);
+    let out = rustybuzz::shape(face, feats, buf);
 
     let positions = out.glyph_positions();
     // i32→f32 : les positions de glyphes restent bien en deçà
@@ -977,6 +1065,9 @@ mod tests {
                 families: vec!["Latin".into()],
                 weight: 400,
                 italic: false,
+                caps: 0,
+                kern_off: false,
+                stretch: 100,
             }
         }
     }
@@ -1144,6 +1235,9 @@ mod tests {
                 families: vec![format!("F{n}")],
                 weight: 400,
                 italic: false,
+                caps: 0,
+                kern_off: false,
+                stretch: 100,
             };
             let run = cache
                 .shape(&src, &req, "ABC", 10.0, false, 0.0)

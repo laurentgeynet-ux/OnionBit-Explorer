@@ -190,6 +190,9 @@ fn font_line_h(st: &explorer_css::ComputedStyle, fs: f32, fonts: &dyn FontSource
             })
             .unwrap_or(400),
         italic: matches!(st.get("font-style"), Some("italic" | "oblique")),
+        caps: 0,
+        kern_off: false,
+        stretch: 100,
     };
     let data = fonts.font_data(&req)?;
     Some(font::metrics(&data, fs)?.line_height())

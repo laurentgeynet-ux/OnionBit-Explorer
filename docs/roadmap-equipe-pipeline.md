@@ -3403,7 +3403,7 @@ déblocage/coût décroissant.
 - [x] **R-185. `mix-blend-mode`/`isolation` + `will-change`/
   `contain`** : fusion du groupe filtré avec le fond accumulé ;
   les contextes de pilement induits manquants.
-- [ ] **R-186. Typo longue traîne** : `font-stretch`,
+- [x] **R-186. Typo longue traîne** : `font-stretch`,
   `font-variant` (small-caps expansé jamais appliqué),
   `font-size-adjust`, `font-synthesis`, `text-emphasis`,
   `text-underline-offset`, `text-wrap:balance/pretty`,

@@ -1382,6 +1382,7 @@ fn paint_box_shadow(
     }
 }
 
+#[allow(clippy::too_many_lines)]
 fn paint_item(
     pixmap: &mut Pixmap,
     item: &DisplayItem,
@@ -1466,6 +1467,20 @@ fn paint_item(
             repeat,
         } => {
             paint_masked_fill(pixmap, rect, *color, mask, dst, *repeat, dpi, clip);
+        }
+        // R-186 — `text-emphasis` : marque par glyphe au-
+        // dessus (over) ou dessous du run.
+        DisplayItem::Emphasis {
+            origin,
+            run,
+            size_px,
+            kind,
+            color,
+            over,
+        } => {
+            paint_emphasis(
+                pixmap, *origin, run, *size_px, *kind, *color, *over, dpi, clip,
+            );
         }
         DisplayItem::Marker { rect, kind, color } => {
             paint_marker(pixmap, rect, *kind, *color, dpi, clip);
@@ -1941,6 +1956,80 @@ fn composite_blend(dst: &mut Pixmap, src: &Pixmap, tag: u8) {
             ) {
                 dst.pixels_mut()[i] = c;
             }
+        }
+    }
+}
+
+/// R-186 — `text-emphasis` : une marque par glyphe au
+/// milieu de son avance, au-dessus (over) ou dessous de
+/// la ligne. Kind : 0 dot, 1 circle, 2 double-circle,
+/// 3 triangle, 4 sesame ; bit3 = `open`.
+#[allow(
+    clippy::too_many_arguments,
+    clippy::cast_possible_truncation,
+    clippy::cast_sign_loss
+)]
+fn paint_emphasis(
+    pixmap: &mut Pixmap,
+    origin: (f32, f32),
+    run: &std::sync::Arc<ShapedRun>,
+    size_px: f32,
+    kind: u8,
+    color: Color,
+    over: bool,
+    cur: Transform,
+    clip: Option<&Mask>,
+) {
+    let mark = size_px * 0.5;
+    let y = if over {
+        origin.1 - size_px * 1.15
+    } else {
+        origin.1 + size_px * 0.35
+    };
+    let open = kind & 8 != 0;
+    let shape = kind & 7;
+    let c = tiny_skia::Color::from_rgba8(color.r, color.g, color.b, color.a);
+    let mut pen = origin.0;
+    for g in &run.glyphs {
+        let cx = pen + g.advance / 2.0;
+        pen += g.advance;
+        let m = mark * 0.5;
+        let mut pb = tiny_skia::PathBuilder::new();
+        match shape {
+            1 | 2 => {
+                pb.push_circle(cx, y, m / 2.0);
+                if shape == 2 {
+                    pb.push_circle(cx, y, m / 4.0);
+                }
+            }
+            3 => {
+                pb.move_to(cx, y - m / 2.0);
+                pb.line_to(cx + m / 2.0, y + m / 2.0);
+                pb.line_to(cx - m / 2.0, y + m / 2.0);
+                pb.close();
+            }
+            4 => {
+                pb.move_to(cx, y - m / 2.0);
+                pb.line_to(cx + m / 3.0, y);
+                pb.line_to(cx, y + m / 2.0);
+                pb.line_to(cx - m / 3.0, y);
+                pb.close();
+            }
+            _ => {
+                pb.push_circle(cx, y, m / 2.0);
+            }
+        }
+        let Some(path) = pb.finish() else { continue };
+        let mut paint = tiny_skia::Paint::default();
+        paint.set_color(c);
+        if open {
+            let stroke = tiny_skia::Stroke {
+                width: 1.0,
+                ..Default::default()
+            };
+            pixmap.stroke_path(&path, &paint, &stroke, cur, clip);
+        } else {
+            pixmap.fill_path(&path, &paint, tiny_skia::FillRule::Winding, cur, clip);
         }
     }
 }

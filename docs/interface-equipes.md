@@ -1031,3 +1031,4 @@ journal « livré ».
   startup-JS menus (surface JS-Cxx). | PIPE→NAV **demande
   déclarée** |
 - **R-185** — `DisplayItem::PushBlend(u8)`/`PopBlend` (mix-blend-mode/isolation) : bras `→ None` ajoutés dans `explorer-core::display_item_bounds` (même classe que `PushFilter`). Additif, tag u8 = `BLEND_MODES` (0 = normal/isolation).
+- **R-186** — `DisplayItem::Emphasis` (text-emphasis) : bras `→ None` ajouté dans `display_item_bounds` ; `FontRequest` a gagné `caps`/`kern_off`/`stretch` (u8/bool/u16) — littéraux NAV propagés (`caps:0, kern_off:false, stretch:100`).

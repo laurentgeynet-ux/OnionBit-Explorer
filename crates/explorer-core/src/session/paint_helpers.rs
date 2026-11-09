@@ -196,7 +196,8 @@ pub(crate) fn display_item_bounds(item: &DisplayItem) -> Option<Rect> {
         | DisplayItem::PushFilter(_)
         | DisplayItem::PopFilter
         | DisplayItem::PushBlend(_)
-        | DisplayItem::PopBlend => None,
+        | DisplayItem::PopBlend
+        | DisplayItem::Emphasis { .. } => None,
     }
 }
 

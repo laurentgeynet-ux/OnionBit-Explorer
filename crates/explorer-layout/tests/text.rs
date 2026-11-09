@@ -49,6 +49,9 @@ fn fixture_req() -> FontRequest {
         families: vec!["Fixture".into()],
         weight: 400,
         italic: false,
+    caps: 0,
+    kern_off: false,
+    stretch: 100,
     }
 }
 
@@ -177,12 +180,18 @@ fn port_fontsource() {
         families: vec!["Fixture".into()],
         weight: 400,
         italic: false,
+    caps: 0,
+    kern_off: false,
+    stretch: 100,
     });
     assert_eq!(ok.as_deref(), Some(ttf.as_slice()));
     let ko = src.font_data(&FontRequest {
         families: vec!["Inconnue".into()],
         weight: 400,
         italic: false,
+    caps: 0,
+    kern_off: false,
+    stretch: 100,
     });
     assert!(ko.is_none());
 }
@@ -205,6 +214,9 @@ fn cache_dedupe_font_data() {
         families: vec!["Inconnue".into()],
         weight: 400,
         italic: false,
+    caps: 0,
+    kern_off: false,
+    stretch: 100,
     };
     for _ in 0..5 {
         assert!(fc.data(&src, &miss).is_none());

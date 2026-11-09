@@ -149,6 +149,9 @@ pub(crate) fn append_select_popup(
         families: vec!["sans-serif".to_string()],
         weight: 400,
         italic: false,
+        caps: 0,
+        kern_off: false,
+        stretch: 100,
     };
     let data = fonts.font_data(&freq);
     let avail = (rect.width - 2.0 * PAD_X).max(0.0);

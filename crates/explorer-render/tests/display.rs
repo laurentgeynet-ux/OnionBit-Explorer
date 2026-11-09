@@ -2741,3 +2741,20 @@ fn mix_blend_isolation_contain() {
         "contain:paint → PushClip attendu"
     );
 }
+
+/// R-186 — typo longue traîne : `text-emphasis` émet un
+/// item `Emphasis` par run (marque par glyphe au raster) ;
+/// `font-variant`/`font-kerning`/`font-stretch`/`font-size-
+/// adjust`/`font-synthesis`/`text-spacing-trim`/
+/// `hanging-punctuation` parsés et hérités.
+#[test]
+fn text_emphasis_emet_item() {
+    use explorer_render::DisplayItem;
+    let (_, _, items) = dl("<p style=\"text-emphasis:filled sesame red\">AB</p>", "");
+    assert!(
+        items
+            .iter()
+            .any(|it| matches!(it, DisplayItem::Emphasis { kind: 4, .. })),
+        "Emphasis sesame attendu dans {items:?}"
+    );
+}

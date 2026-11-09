@@ -62,6 +62,9 @@ fn shared_fonts_delegates_face_and_fallback() {
         families: vec!["Fbk".to_string()],
         weight: 400,
         italic: false,
+        caps: 0,
+        kern_off: false,
+        stretch: 100,
     };
     // `font_face` délégué (les faces web = index 0 — la
     // preuve forte porte sur `fallback_for` ci-dessous).

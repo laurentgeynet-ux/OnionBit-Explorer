@@ -157,6 +157,26 @@ pub enum DisplayItem {
         /// Pixels décodés.
         img: std::sync::Arc<crate::image::DecodedImage>,
     },
+    /// `text-emphasis` (R-186) : un point/signet d'emphase
+    /// par glyphe du run, au-dessus (ou dessous selon
+    /// `text-emphasis-position`) — marque peinte par le
+    /// raster aux positions de plume de chaque glyphe.
+    Emphasis {
+        /// Origine du run (coords document).
+        origin: (f32, f32),
+        /// Run shapé (positions de plume des glyphes).
+        run: std::sync::Arc<ShapedRun>,
+        /// Taille de fonte (la marque fait ~0.5em).
+        size_px: f32,
+        /// Marque : 0 dot, 1 circle, 2 double-circle,
+        /// 3 triangle, 4 sesame ; +8 si `open`.
+        kind: u8,
+        /// Couleur de la marque (`text-emphasis-color`
+        /// ou `currentcolor`).
+        color: Color,
+        /// Position `over` (défaut horizontal) vs `under`.
+        over: bool,
+    },
     /// `background-image` décodée, tuilée dans `rect` selon
     /// `background-repeat` — origine padding box, aire border
     /// box. La tuile est mise à l'échelle selon
@@ -470,6 +490,9 @@ impl DisplayList {
                 DisplayItem::PushBlend(b) => {
                     let _ = writeln!(out, "push-blend {b}");
                 }
+                DisplayItem::Emphasis { origin, kind, .. } => {
+                    let _ = writeln!(out, "emphasis k{kind} @{origin:?}");
+                }
                 DisplayItem::PopBlend => out.push_str("pop-blend\n"),
                 DisplayItem::BackdropFilter { rect, .. } => {
                     let _ = writeln!(out, "backdrop-filter {rect:?}");
@@ -630,6 +653,18 @@ fn item_bounds(item: &DisplayItem) -> Option<Rect> {
         | DisplayItem::PopFilter
         | DisplayItem::PushBlend(_)
         | DisplayItem::PopBlend => None,
+        // Marques de texte — borne du run (avance × taille).
+        DisplayItem::Emphasis {
+            origin,
+            run,
+            size_px,
+            ..
+        } => Some(Rect {
+            x: origin.0,
+            y: origin.1 - size_px * 1.2,
+            width: run.advance,
+            height: size_px * 2.0,
+        }),
     }
 }
 
@@ -823,6 +858,31 @@ fn item_eq(a: &DisplayItem, b: &DisplayItem) -> bool {
         (D::PushFilter(o1), D::PushFilter(o2)) => o1 == o2,
         (D::PushBlend(b1), D::PushBlend(b2)) => b1 == b2,
         (D::PopBlend, D::PopBlend) => true,
+        (
+            D::Emphasis {
+                origin: o1,
+                run: r1,
+                size_px: s1,
+                kind: k1,
+                color: c1,
+                over: v1,
+            },
+            D::Emphasis {
+                origin: o2,
+                run: r2,
+                size_px: s2,
+                kind: k2,
+                color: c2,
+                over: v2,
+            },
+        ) => {
+            o1 == o2
+                && std::sync::Arc::ptr_eq(r1, r2)
+                && s1 == s2
+                && k1 == k2
+                && c1 == c2
+                && v1 == v2
+        }
         (D::BackdropFilter { rect: r1, ops: o1 }, D::BackdropFilter { rect: r2, ops: o2 }) => {
             r1 == r2 && o1 == o2
         }
@@ -1834,6 +1894,65 @@ fn emit_bg_layers(
     }
 }
 
+/// `text-emphasis` → (kind, couleur, over) ou `None`
+/// (R-186) : `dot|circle|double-circle|triangle|sesame`,
+/// `filled`/`open`, couleur optionnelle — `none` → `None`,
+/// position `under` → `over=false`.
+fn emphasis_kind(st: &explorer_css::ComputedStyle, ink: Color) -> Option<(u8, Color, bool)> {
+    let raw = st
+        .get("text-emphasis-style")
+        .or_else(|| st.get("text-emphasis"))?;
+    if raw.trim() == "none" {
+        return None;
+    }
+    let mut kind = 0u8;
+    let mut found = false;
+    let mut color = st
+        .get("text-emphasis-color")
+        .and_then(parse_color)
+        .unwrap_or(ink);
+    let over = st
+        .get("text-emphasis-position")
+        .is_none_or(|v| v.trim() != "under");
+    for tok in raw.split_whitespace() {
+        match tok {
+            "dot" => {
+                kind = 0;
+                found = true;
+            }
+            "circle" => {
+                kind = 1;
+                found = true;
+            }
+            "double-circle" => {
+                kind = 2;
+                found = true;
+            }
+            "triangle" => {
+                kind = 3;
+                found = true;
+            }
+            "sesame" => {
+                kind = 4;
+                found = true;
+            }
+            "open" => kind |= 8,
+            "filled" => {}
+            _ => {
+                if let Some(c) = parse_color(tok) {
+                    color = c;
+                }
+            }
+        }
+    }
+    // `<string>` custom (caractère unique) : non porté au
+    // MVP — repli `dot` documenté.
+    if !found {
+        return Some((0, color, over));
+    }
+    Some((kind, color, over))
+}
+
 /// R-M4 — émission des fantômes `text-shadow` pour un
 /// fragment : une run par couche sous le texte ; `blur`
 /// ≈ 4 fantômes croisés ±blur/2 à alpha/3 (documenté,
@@ -2329,10 +2448,19 @@ fn has_bg(st: &explorer_css::ComputedStyle) -> bool {
 
 /// `font-size` calculée de la boîte en px (16 par défaut).
 fn font_size_of(st: &explorer_css::ComputedStyle) -> f64 {
-    st.get("font-size")
+    let base = st
+        .get("font-size")
         .and_then(parse_length)
         .and_then(|l| l.unit.px_factor().map(|f| l.value * f))
-        .unwrap_or(16.0)
+        .unwrap_or(16.0);
+    // R-186 — `font-size-adjust` : la hauteur d'ex est
+    // ramenée au facteur demandé — rapport appliqué vs
+    // l'ex ≈ 0.5em de la fonte de repli (approximation
+    // documentée, faces réelles ≈ 0.45-0.55em).
+    st.get("font-size-adjust")
+        .and_then(|v| v.trim().parse::<f64>().ok())
+        .filter(|a| *a > 0.0)
+        .map_or(base, |a| base * (a / 0.5))
 }
 
 /// Rapport à l'em pour les unités font-relatives (`ex`/`ch`
@@ -3042,6 +3170,20 @@ fn paint_lines(bx: &LayoutBox, items: &mut Vec<DisplayItem>, off: (f32, f32)) {
                     color: ink,
                     size_px: fs,
                 });
+                // R-186 — `text-emphasis` : marque par
+                // glyphe ; style+position lus sur le
+                // fragment (shorthand non expansé —
+                // `text-emphasis` seul suffit).
+                if let Some((kind, ecolor, over)) = emphasis_kind(&frag.style, ink) {
+                    items.push(DisplayItem::Emphasis {
+                        origin: (frag.rect.x + off.0, base_y),
+                        run: run.clone(),
+                        size_px: fs,
+                        kind,
+                        color: ecolor,
+                        over,
+                    });
+                }
                 for d in &frag.deco {
                     if d.lines & explorer_layout::inline::DECO_LINE_THROUGH != 0 {
                         let dth = if d.thick_px > 0.0 { d.thick_px } else { th };
@@ -3866,6 +4008,21 @@ fn translate_item(it: &DisplayItem, d: (f32, f32)) -> DisplayItem {
         | D::PopFilter
         | D::PushBlend(_)
         | D::PopBlend => it.clone(),
+        D::Emphasis {
+            origin,
+            run,
+            size_px,
+            kind,
+            color,
+            over,
+        } => D::Emphasis {
+            origin: (origin.0 + d.0, origin.1 + d.1),
+            run: run.clone(),
+            size_px: *size_px,
+            kind: *kind,
+            color: *color,
+            over: *over,
+        },
         D::BackdropFilter { rect, ops } => D::BackdropFilter {
             rect: shifted(*rect, d),
             ops: ops.clone(),

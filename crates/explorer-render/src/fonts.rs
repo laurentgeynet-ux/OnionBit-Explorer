@@ -509,6 +509,9 @@ mod tests {
             families: families.iter().map(|s| (*s).to_string()).collect(),
             weight,
             italic,
+            caps: 0,
+            kern_off: false,
+            stretch: 100,
         }
     }
 
@@ -571,7 +574,7 @@ mod tests {
             ],
             generics: HashMap::new(),
             fallback: Some(0),
-        };
+};
         src.map_generics();
         let f = src
             .resolve(&req(&["serif"], 400, false))
