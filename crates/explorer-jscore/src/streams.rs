@@ -301,7 +301,47 @@ fn ctrl_enqueue(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> 
             return Err(e.type_error("enqueue on a closed stream"));
         }
     }
-    d.borrow_mut().queue.push_back(arg(args, 0));
+    let chunk = arg(args, 0);
+    // §B-121 — aperçu borné des chunks Uint8Array enqueued
+    // (le flux `__next_f`→`enqueue` de Next/RSC) : 24 premiers
+    // globalement, aperçu ASCII 160 c, ptr du stream pour
+    // corréler close/error. Non-Uint8Array → tag type seul.
+    if tracing::enabled!(target: "dom_probe", tracing::Level::INFO) {
+        static ENQ_N: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+        let bytes = crate::typed_array::bytes_of_value(e, chunk.clone());
+        let seq = ENQ_N.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        if seq < 24 {
+            let (tag, prev) = match &bytes {
+                Some(b) => {
+                    let prev: String = b
+                        .iter()
+                        .take(160)
+                        .map(|c| {
+                            if c.is_ascii_graphic() || *c == b' ' {
+                                *c as char
+                            } else {
+                                '.'
+                            }
+                        })
+                        .collect();
+                    ("u8".to_string(), prev)
+                }
+                None => (
+                    e.describe(chunk.clone())
+                        .chars()
+                        .take(60)
+                        .collect::<String>(),
+                    String::new(),
+                ),
+            };
+            let blen = bytes.map_or(0, |b| b.len());
+            tracing::info!(target: "dom_probe",
+                site = "stream.enqueue", seq = seq,
+                rs = ?std::rc::Rc::as_ptr(&d), tag = %tag,
+                len = blen, preview = %prev);
+        }
+    }
+    d.borrow_mut().queue.push_back(chunk);
     drain_pending(e, &d);
     Ok(Value::Undefined)
 }
@@ -317,6 +357,13 @@ fn ctrl_close(e: &mut Engine, this: Value, _a: &[Value]) -> JsResult<Value> {
             return Ok(Value::Undefined);
         }
     }
+    // §B-121 — fermeture du stream (`done` côté lecteur) :
+    // savoir si le flux flight se termine ou reste ouvert.
+    if tracing::enabled!(target: "dom_probe", tracing::Level::INFO) {
+        tracing::info!(target: "dom_probe",
+            site = "stream.close", rs = ?std::rc::Rc::as_ptr(&d),
+            queued = d.borrow().queue.len());
+    }
     d.borrow_mut().closed = true;
     drain_pending(e, &d);
     Ok(Value::Undefined)
@@ -331,6 +378,17 @@ fn ctrl_error(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
         let mut dd = d.borrow_mut();
         dd.errored = Some(arg(args, 0));
         dd.queue.clear();
+    }
+    // §B-121 — un flux en erreur purge sa queue : le modèle
+    // flight ne complèterait jamais.
+    if tracing::enabled!(target: "dom_probe", tracing::Level::INFO) {
+        let msg = e
+            .describe(arg(args, 0))
+            .chars()
+            .take(120)
+            .collect::<String>();
+        tracing::info!(target: "dom_probe",
+            site = "stream.error", rs = ?std::rc::Rc::as_ptr(&d), msg = %msg);
     }
     drain_pending(e, &d);
     Ok(Value::Undefined)
