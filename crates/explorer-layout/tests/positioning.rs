@@ -531,3 +531,22 @@ fn zindex_et_overflow_usages() {
     assert_eq!(z.overflow, Overflow::Hidden);
     assert_eq!(a.overflow, Overflow::Auto);
 }
+
+/// R-172 — `overflow:clip` : variant `Clip` (comportement
+/// `Hidden` — pas de scroll interne, journalisé) ; n'établit
+/// pas de scroll container → pas de BFC, et l'axe `visible`
+/// calcule `auto` quand l'autre est `clip` (css-overflow-3 §3).
+#[test]
+fn overflow_clip_variant_sans_bfc() {
+    let (dom, bx) = laid(
+        "<div id=c></div><div id=x></div>",
+        "#c{overflow:clip} #x{overflow-x:clip}",
+    );
+    let c = find(&bx, by_id(&dom, "c"));
+    assert_eq!(c.overflow, Overflow::Clip);
+    assert_eq!(c.overflow_x, Overflow::Clip);
+    // `overflow-x:clip` seul : l'axe y `visible` calcule `auto`.
+    let x = find(&bx, by_id(&dom, "x"));
+    assert_eq!(x.overflow_x, Overflow::Clip);
+    assert_eq!(x.overflow, Overflow::Auto);
+}

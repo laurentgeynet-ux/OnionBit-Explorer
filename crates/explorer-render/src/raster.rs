@@ -1182,7 +1182,6 @@ fn apply_pixel_op(buf: &mut Pixmap, op: &FilterOp) {
                     a,
                 )
             }
-
         };
         c[0] = nr.clamp(0.0, 255.0) as u8;
         c[1] = ng.clamp(0.0, 255.0) as u8;

@@ -3476,13 +3476,13 @@ fn box_sig(bx: &LayoutBox) -> u64 {
     });
     h.mix(match bx.overflow {
         Overflow::Visible => 0,
-        Overflow::Hidden => 1,
+        Overflow::Hidden | Overflow::Clip => 1,
         Overflow::Scroll => 2,
         Overflow::Auto => 3,
     });
     h.mix(match bx.overflow_x {
         Overflow::Visible => 0,
-        Overflow::Hidden => 1,
+        Overflow::Hidden | Overflow::Clip => 1,
         Overflow::Scroll => 2,
         Overflow::Auto => 3,
     });

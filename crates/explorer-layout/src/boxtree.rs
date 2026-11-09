@@ -92,6 +92,11 @@ pub enum Overflow {
     Visible,
     /// Clippé à la padding box.
     Hidden,
+    /// Clippé sans défilement possible — comportement
+    /// identique à [`Hidden`] ici (pas de scroll interne,
+    /// journalisé) ; n'est **pas** un scroll container →
+    /// pas de BFC (css-overflow-3 §3, R-172).
+    Clip,
     /// Clippé + défilement.
     Scroll,
     /// Défilement si déborde.
@@ -1390,7 +1395,7 @@ pub fn scrollable_overflow_bottom(root: &LayoutBox) -> f32 {
         }
         let to_viewport = depth == 0 || (depth == 1 && parent_visible);
         let child_clip = if bx.overflow == Overflow::Visible
-            || (to_viewport && bx.overflow != Overflow::Hidden)
+            || (to_viewport && !matches!(bx.overflow, Overflow::Hidden | Overflow::Clip))
         {
             clip_bottom
         } else {

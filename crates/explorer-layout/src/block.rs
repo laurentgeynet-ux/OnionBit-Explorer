@@ -1442,6 +1442,7 @@ fn apply_layout_metadata(bx: &mut LayoutBox, st: &ComputedStyle) {
     };
     let ov = |axis: &str| match st.get(axis) {
         Some("hidden") => Overflow::Hidden,
+        Some("clip") => Overflow::Clip,
         Some("auto") => Overflow::Auto,
         Some("scroll") => Overflow::Scroll,
         _ => Overflow::Visible,

@@ -3339,7 +3339,7 @@ déblocage/coût décroissant.
   arabe/hébreu cassés dans les segments mixtes. Hint `dir`→
   `direction` + repli `dir`→niveau de base + réordonnancement
   des fragments par niveau sur chaque ligne.
-- [ ] **R-172. `overflow:clip`** : mappe actuellement à
+- [x] **R-172. `overflow:clip`** : mappe actuellement à
   `Visible` (`block.rs`) → contenu clip-attendu déborde. Une
   ligne : variant `Clip` alié `Hidden` (pas de scroll interne
   de toute façon — journalisé).
