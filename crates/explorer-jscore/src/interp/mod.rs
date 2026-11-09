@@ -2079,17 +2079,22 @@ impl Engine {
     /// un prefetch spec — seul un nœud devenu absent du
     /// miroir saute.
     pub fn drain_dyn_imgs(&mut self) -> Vec<crate::dom_host::DynImgReq> {
-        let mut doms: Vec<(crate::context::CtxId, crate::dom_host::DomRef)> = Vec::new();
+        // Viewport par contexte (document-local, garé avec
+        // lui — CAP-161) : le `media=` des `<source>` de
+        // `<picture>` s'évalue contre le viewport du cadre
+        // émetteur, pas celui du contexte courant (R-195).
+        let mut doms: Vec<(crate::context::CtxId, crate::dom_host::DomRef, (u32, u32))> =
+            Vec::new();
         if let Some((d, _)) = &self.dom_ctx {
-            doms.push((self.cur_ctx, d.clone()));
+            doms.push((self.cur_ctx, d.clone(), self.hooks.viewport));
         }
         for (id, ctx) in &self.parked {
             if let Some((d, _)) = &ctx.dom_ctx {
-                doms.push((*id, d.clone()));
+                doms.push((*id, d.clone(), ctx.viewport));
             }
         }
         let mut out = Vec::new();
-        for (ctx, dom) in doms {
+        for (ctx, dom, vp) in doms {
             let nodes = std::mem::take(&mut dom.borrow_mut().pending_dyn_imgs);
             let d = dom.borrow();
             for n in nodes {
@@ -2131,14 +2136,26 @@ impl Engine {
                 let lazy = |a: &str, fallbacks: &[&str]| {
                     attr(a).or_else(|| fallbacks.iter().find_map(|f| attr(f)))
                 };
+                // R-195 — `<img>` enfant de `<picture>` : la
+                // `<source>` élue porte sa `srcset`/`sizes`
+                // dans la requête (une `sizes` absente =
+                // 100vw spec — jamais celle de l'`<img>`) ;
+                // la session re-dérive la même clé sur le
+                // DOM commis via `collect_images`. `src` de
+                // l'`<img>` reste le repli si la `srcset`
+                // élue ne produit aucun candidat.
+                let (srcset, sizes) = match Self::picture_elect(&d, n, self.hooks.media_env, vp) {
+                    Some((ss, sz)) => (Some(ss), sz),
+                    None => (lazy("srcset", &["data-srcset"]), attr("sizes")),
+                };
                 out.push(crate::dom_host::DynImgReq {
                     seq,
                     src: lazy(
                         "src",
                         &["data-src", "data-lazy-src", "data-original", "data-url"],
                     ),
-                    srcset: lazy("srcset", &["data-srcset"]),
-                    sizes: attr("sizes"),
+                    srcset,
+                    sizes,
                     crossorigin,
                     referrerpolicy: attr("referrerpolicy"),
                     ctx,
@@ -2147,6 +2164,87 @@ impl Engine {
         }
         self.sched_add("req.img", out.len() as u64);
         out
+    }
+
+    /// R-195 — `<source>` élue d'un `<img>` enfant direct de
+    /// `<picture>` dans le miroir (spec « update the image
+    /// data », miroir de `picture_pick` côté session) : les
+    /// frères `<source>` **précédant** l'`<img>` sont testés
+    /// dans l'ordre — `srcset` présent et non vide (`src`
+    /// est ignoré en contexte picture), `type` décodable
+    /// ([`picture_type_supported`]), `media` matché contre
+    /// `env`/`vp` ([`crate::mediaq::eval_media_query`]).
+    /// Renvoie `(srcset, sizes)` de l'élue — `sizes` est
+    /// l'attribut **propre** de la source (`None` = 100vw
+    /// spec, jamais celui de l'`<img>`). `None` = pas de
+    /// `<picture>` parent ou aucune source élue.
+    fn picture_elect(
+        d: &crate::dom::Dom,
+        img: crate::dom::NodeId,
+        env: crate::mediaq::MediaEnv,
+        vp: (u32, u32),
+    ) -> Option<(String, Option<String>)> {
+        let parent = d.nodes.get(d.nodes.get(img as usize)?.parent? as usize)?;
+        if parent.kind != crate::dom::NodeKind::Element || parent.tag != "picture" {
+            return None;
+        }
+        let attr_of = |c: crate::dom::NodeId, k: &str| {
+            d.nodes.get(c as usize).and_then(|n| {
+                n.attrs
+                    .iter()
+                    .find(|(name, _)| name.eq_ignore_ascii_case(k))
+                    .map(|(_, v)| v.clone())
+            })
+        };
+        for &c in &parent.children {
+            if c == img {
+                break; // les <source> suivant l'<img> ne comptent pas
+            }
+            let Some(s) = d.nodes.get(c as usize) else {
+                continue;
+            };
+            if s.kind != crate::dom::NodeKind::Element || s.tag != "source" {
+                continue;
+            }
+            let Some(ss) = attr_of(c, "srcset") else {
+                continue;
+            };
+            if ss.trim().is_empty() {
+                continue;
+            }
+            if attr_of(c, "type").is_some_and(|t| !Self::picture_type_supported(&t)) {
+                continue;
+            }
+            if attr_of(c, "media").is_some_and(|m| !crate::mediaq::eval_media_query(&m, env, vp)) {
+                continue;
+            }
+            return Some((ss, attr_of(c, "sizes")));
+        }
+        None
+    }
+
+    /// Formats `<source type>` décodables par l'embedder
+    /// (R-195) — miroir d'`image_type_supported` côté
+    /// session (`explorer-core`) : png/apng/jpeg/gif/webp/
+    /// bmp/ico + svg. Liste dupliquée à dessein —
+    /// `explorer-jscore` n'a aucune dépendance interne
+    /// (ADR-0007) ; toute divergence à maintenir dans les
+    /// deux listes. Paramètres `;…` tranchés, casse
+    /// insensible.
+    fn picture_type_supported(ty: &str) -> bool {
+        let base = ty.split(';').next().unwrap_or("").trim();
+        base.eq_ignore_ascii_case("image/png")
+            || base.eq_ignore_ascii_case("image/apng")
+            || base.eq_ignore_ascii_case("image/jpeg")
+            || base.eq_ignore_ascii_case("image/pjpeg")
+            || base.eq_ignore_ascii_case("image/gif")
+            || base.eq_ignore_ascii_case("image/webp")
+            || base.eq_ignore_ascii_case("image/bmp")
+            || base.eq_ignore_ascii_case("image/x-bmp")
+            || base.eq_ignore_ascii_case("image/x-ms-bmp")
+            || base.eq_ignore_ascii_case("image/x-icon")
+            || base.eq_ignore_ascii_case("image/vnd.microsoft.icon")
+            || base.eq_ignore_ascii_case("image/svg+xml")
     }
 
     /// Livraison d'un `<img>` dynamique (CAP-172) — corps

@@ -43,6 +43,12 @@ fn test_dom(body: &str) -> Dom {
     tb.into_dom()
 }
 
+/// `StyleEnv` minimal de collecte (`collect_images`) —
+/// viewport `w` px, densité `dpr`, env clair sans scripting.
+fn test_env(w: f32, dpr: f32) -> explorer_css::StyleEnv {
+    crate::session::apply::viewport_env((w, 600.0), explorer_css::ColorScheme::Light, false, dpr)
+}
+
 /// R-69 en session : `SharedFonts` délègue `font_face` +
 /// `fallback_for` sous verrou — sans elles, les défauts du
 /// trait re-servaient `font_data`@0 et `None` : le repli
@@ -3399,7 +3405,7 @@ fn collect_module_preloads_filters_as() {
 #[test]
 fn collect_images_falls_back_to_lazy_data_src() {
     let dom = test_dom("<img data-src=\"/a.png\"><img src=\"/b.png\" data-src=\"/c.png\"><img srcset=\"/d.png 1x\" data-src=\"/e.png\"><img>");
-    let srcs: Vec<String> = collect_images(&dom, 800.0, 1.0)
+    let srcs: Vec<String> = collect_images(&dom, &test_env(800.0, 1.0))
         .into_iter()
         .map(|(_, s)| s)
         .collect();
@@ -3420,7 +3426,7 @@ fn collect_images_parses_lazy_data_srcset() {
            <img data-srcset="/a.webp 1x" data-src="/b.webp">
            <img srcset="/s1.png 1x, /s2.png 2x" data-srcset="/never.webp 1x">"#,
     );
-    let srcs: Vec<String> = collect_images(&dom, 800.0, 1.0)
+    let srcs: Vec<String> = collect_images(&dom, &test_env(800.0, 1.0))
         .into_iter()
         .map(|(_, s)| s)
         .collect();
@@ -3430,11 +3436,182 @@ fn collect_images_parses_lazy_data_srcset() {
     // dpr=2 → le candidat `2x` l'emporte sur `data-src`.
     let dom =
         test_dom(r#"<img data-srcset="/w46.webp 1x, /w92.webp 2x" data-src="/fallback.png">"#);
-    let srcs: Vec<String> = collect_images(&dom, 800.0, 2.0)
+    let srcs: Vec<String> = collect_images(&dom, &test_env(800.0, 2.0))
         .into_iter()
         .map(|(_, s)| s)
         .collect();
     assert_eq!(srcs, vec!["/w92.webp"]);
+}
+
+// ===== R-195 — `<picture><source>` + `srcset` densité/taille =====
+
+/// La `<source>` élue prime sur les attributs de l'`<img>`
+/// (spec « update the image data ») — même la valeur `src`.
+#[test]
+fn picture_source_elue_prime_img() {
+    let dom =
+        test_dom(r#"<picture><source srcset="/wide.webp 1x"><img src="/fallback.png"></picture>"#);
+    let srcs: Vec<String> = collect_images(&dom, &test_env(800.0, 1.0))
+        .into_iter()
+        .map(|(_, s)| s)
+        .collect();
+    assert_eq!(srcs, vec!["/wide.webp"]);
+}
+
+/// `type` non décodable : la source `image/avif` est
+/// sautée, la suivante décodable élue ; sans élue l'`<img>`
+/// reprend ses propres attributs.
+#[test]
+fn picture_type_non_decodable_saute() {
+    let dom = test_dom(
+        r#"<picture>
+             <source srcset="/a.avif 1x" type="image/avif">
+             <source srcset="/b.webp 1x" type="image/webp">
+             <img src="/fb.png">
+           </picture>
+           <picture>
+             <source srcset="/c.jxl 1x" type="image/jxl">
+             <img src="/fb2.png">
+           </picture>"#,
+    );
+    let srcs: Vec<String> = collect_images(&dom, &test_env(800.0, 1.0))
+        .into_iter()
+        .map(|(_, s)| s)
+        .collect();
+    assert_eq!(srcs, vec!["/b.webp", "/fb2.png"]);
+}
+
+/// `media` non-matché : la source est sautée —
+/// `media_attr_matches` contre l'env session (viewport 800).
+#[test]
+fn picture_media_filtre_la_source() {
+    let dom = test_dom(
+        r#"<picture>
+             <source srcset="/small.webp 1x" media="(max-width: 600px)">
+             <source srcset="/big.webp 1x" media="(min-width: 601px)">
+             <img src="/fb.png">
+           </picture>"#,
+    );
+    let srcs: Vec<String> = collect_images(&dom, &test_env(800.0, 1.0))
+        .into_iter()
+        .map(|(_, s)| s)
+        .collect();
+    assert_eq!(srcs, vec!["/big.webp"]);
+    // Aucune source ne matche → repli `img.src`.
+    let dom = test_dom(
+        r#"<picture>
+             <source srcset="/small.webp 1x" media="(max-width: 600px)">
+             <img src="/fb.png">
+           </picture>"#,
+    );
+    let srcs: Vec<String> = collect_images(&dom, &test_env(800.0, 1.0))
+        .into_iter()
+        .map(|(_, s)| s)
+        .collect();
+    assert_eq!(srcs, vec!["/fb.png"]);
+}
+
+/// Ordre spec : le **premier** `<source>` éligible gagne ;
+/// les `<source>` placés après l'`<img>` ne comptent pas ;
+/// `src` d'un `<source>` n'est jamais lu en picture.
+#[test]
+fn picture_ordre_source_apres_img_et_src_ignores() {
+    let dom = test_dom(
+        r#"<picture>
+             <source srcset="/first.webp 1x">
+             <source srcset="/second.webp 1x">
+             <img src="/fb.png">
+             <source srcset="/after.webp 1x">
+           </picture>
+           <picture>
+             <source src="/src-only.png">
+             <img src="/fb2.png">
+           </picture>"#,
+    );
+    let srcs: Vec<String> = collect_images(&dom, &test_env(800.0, 1.0))
+        .into_iter()
+        .map(|(_, s)| s)
+        .collect();
+    assert_eq!(srcs, vec!["/first.webp", "/fb2.png"]);
+}
+
+/// `sizes` de la `<source>` élue pilote le choix `w`
+/// (spec : la taille source vient de l'élément élu, jamais
+/// de l'`<img>`) ; un `<source>` sans `sizes` = 100vw.
+#[test]
+fn picture_sizes_du_source_pilote_w() {
+    let dom = test_dom(
+        r#"<picture>
+             <source srcset="/s300.webp 300w, /s800.webp 800w" sizes="300px">
+             <img src="/fb.png" sizes="800px">
+           </picture>"#,
+    );
+    let srcs: Vec<String> = collect_images(&dom, &test_env(800.0, 1.0))
+        .into_iter()
+        .map(|(_, s)| s)
+        .collect();
+    // `sizes` du source (300px) → candidat 300w ; le
+    // `sizes=800px` de l'`<img>` n'est PAS consulté.
+    assert_eq!(srcs, vec!["/s300.webp"]);
+    // Sans `sizes` sur le source → 100vw = 800 → 800w.
+    let dom = test_dom(
+        r#"<picture>
+             <source srcset="/s300.webp 300w, /s800.webp 800w">
+             <img src="/fb.png">
+           </picture>"#,
+    );
+    let srcs: Vec<String> = collect_images(&dom, &test_env(800.0, 1.0))
+        .into_iter()
+        .map(|(_, s)| s)
+        .collect();
+    assert_eq!(srcs, vec!["/s800.webp"]);
+}
+
+/// `<img>` non enfant direct de `<picture>` → pas
+/// d'élection (spec) ; hors `<picture>` rien ne change.
+#[test]
+fn picture_img_non_direct_et_sans_picture() {
+    let dom = test_dom(
+        r#"<picture><div><img src="/nested.png"></div><source srcset="/s.webp 1x"></picture>
+           <div><img src="/plain.png"></div>"#,
+    );
+    let srcs: Vec<String> = collect_images(&dom, &test_env(800.0, 1.0))
+        .into_iter()
+        .map(|(_, s)| s)
+        .collect();
+    assert_eq!(srcs, vec!["/nested.png", "/plain.png"]);
+}
+
+/// Les termes conditionnels de `sizes` sont évalués comme
+/// media queries contre l'env (avant : sautés — le repli
+/// final gagnait toujours).
+#[test]
+fn sizes_termes_conditionnels_evalues() {
+    // (min-width:600px) vrai à 800 → 300px.
+    assert_eq!(
+        resolve_sizes(
+            Some("(min-width: 600px) 300px, 100vw"),
+            &test_env(800.0, 1.0)
+        ),
+        300.0
+    );
+    // Faux à 500 → repli final 100vw = 500.
+    assert_eq!(
+        resolve_sizes(
+            Some("(min-width: 600px) 300px, 100vw"),
+            &test_env(500.0, 1.0)
+        ),
+        500.0
+    );
+    // Condition composée `(a) and (b)` évaluée entière —
+    // min-width:900 faux à 800 → 33vw.
+    assert_eq!(
+        resolve_sizes(
+            Some("(min-width: 900px) and (orientation: landscape) 50vw, 33vw"),
+            &test_env(800.0, 1.0)
+        ),
+        800.0 * 0.33
+    );
 }
 
 /// Vol 13 franceinfo — un `Scroll` pendant la peinture

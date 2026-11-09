@@ -3489,12 +3489,19 @@ déblocage/coût décroissant.
   (`button`/`fieldset`/`select`/`img`…) : flattening déjà
   spec-conforme. Verrous `display_contents_interne_table_
   preservee`, `display_contents_ordinaire_toujours_aplati`.
-- [ ] **R-195. `<picture><source>` + `srcset` densité/taille**
+- [x] **R-195. `<picture><source>` + `srcset` densité/taille**
   dans la sélection source : `dom_helpers` ne lit que `img`
   (type=/media/srcset ignorés). **Demande NAV journalisée**
   (`explorer-core`, interface-equipes.md 2026-11-09) — la
   résolution de source vit dans le périmètre NAV ; à
   ordonnancer avec NAVIGATEUR dès que la couture est vivante.
+  **Livré côté NAV** (`explorer-core`/`explorer-jscore`) :
+  élection spec dans `picture_pick`/`collect_images`
+  (`type` whitelist décodable, `media` via
+  `media_attr_matches`, `sizes` du source), voie dyn
+  `drain_dyn_imgs`/`picture_elect`, `resolve_sizes` évalue
+  les conditions ; prérequis `viewport_env.dpr=scale` en
+  commit séparé.
 - [x] **R-194. `@scope`** : désucrage au parse (`explorer-css`
   `parser.rs`, `AtKind::Scope`) — `@scope (R) [to (B)] { S }`
   devient `R S` (`:scope`/`&` → `:is(R)`, déjà ancrés), borne

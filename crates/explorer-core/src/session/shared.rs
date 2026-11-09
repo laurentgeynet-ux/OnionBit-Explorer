@@ -269,8 +269,7 @@ async fn nav_commit_shared(
             &bodies,
             ctx.image_max_px,
             ctx.image_max_bytes,
-            ctx.viewport.0,
-            ctx.scale,
+            &apply::viewport_env(ctx.viewport, ctx.color_scheme, ctx.scripting, ctx.scale),
         );
         p.bg_aliases = bg_aliases;
         p.bg_bodies = bg_bodies;

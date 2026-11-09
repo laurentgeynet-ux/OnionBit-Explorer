@@ -9,6 +9,7 @@ use apply::PaintPayload;
 use std::collections::{HashMap, VecDeque};
 use std::sync::Arc;
 
+use explorer_css::StyleEnv;
 use explorer_dom::Dom;
 use explorer_js::{NetRequest, NetResponse};
 use explorer_net::error::NetResult;
@@ -121,13 +122,16 @@ fn img_dskip(reason: &'static str) {
 
 /// Source retenue d'un `DynImgReq` — `srcset` résolu par
 /// `sizes`/dpr prime sur `src` (spec), même pile que
-/// `collect_images`.
-fn dyn_img_src_key(d: &explorer_js::DynImgReq, img_w: f32, dpr: f32) -> Option<String> {
+/// `collect_images` (R-195 : `srcset`/`sizes` portées par
+/// la requête sont déjà celles de la `<source>` élue quand
+/// le miroir a résolu un `<picture>` parent — la clé reste
+/// identique à celle re-dérivée sur le DOM commis).
+fn dyn_img_src_key(d: &explorer_js::DynImgReq, env: &StyleEnv) -> Option<String> {
     d.srcset
         .as_deref()
         .and_then(|ss| {
-            let eff_w = resolve_sizes(d.sizes.as_deref(), img_w);
-            pick_srcset(ss, eff_w, dpr)
+            let eff_w = resolve_sizes(d.sizes.as_deref(), env);
+            pick_srcset(ss, eff_w, env.dpr)
         })
         .or_else(|| {
             d.src
@@ -2008,7 +2012,10 @@ impl Session {
         // Choix de la source — `srcset` prime sur `src`
         // (spec) ; la clé est la chaîne telle que
         // `collect_images` la relira au prochain apply.
-        let Some(src_key) = dyn_img_src_key(d, self.viewport.0, self.scale) else {
+        let scripting = self.tabs.get(&tab).is_some_and(|e| e.js.is_some());
+        let env =
+            super::apply::viewport_env(self.viewport, self.color_scheme, scripting, self.scale);
+        let Some(src_key) = dyn_img_src_key(d, &env) else {
             img_dskip("nosrc");
             self.deliver_dyn_img_el(tab, d.ctx, d.seq, false);
             return;
@@ -3998,6 +4005,7 @@ impl Session {
         dom: &Dom,
         page: &Url,
         base: &Url,
+        env: &StyleEnv,
         upg: &dyn Fn(Url) -> Url,
         allow: &dyn Fn(explorer_net::http::FetchDest, &Url) -> bool,
     ) -> Vec<Url> {
@@ -4007,7 +4015,7 @@ impl Session {
         let mut nonhttp = 0u64;
         let mut blocked = 0u64;
         let mut dup = 0u64;
-        let img_cands = collect_images(dom, self.viewport.0, self.scale);
+        let img_cands = collect_images(dom, env);
         let img_cand_n = img_cands.len();
         let imgs: Vec<Url> = img_cands
             .into_iter()
@@ -4145,7 +4153,7 @@ impl Session {
         } else {
             Vec::new()
         };
-        let imgs = self.plan_img_urls(dom, page, base, &upg, &allow);
+        let imgs = self.plan_img_urls(dom, page, base, &env, &upg, &allow);
         // `<iframe>` (étape 128 + CAP-142) — un sous-contexte
         // est un document complet : `src` = fetch http(s),
         // mixed-content filtré, dédup par URL résolue ;
@@ -4394,8 +4402,9 @@ impl Session {
             return;
         }
         let max_px = self.image_max_px;
-        let img_w = self.viewport.0;
-        let dpr = self.scale;
+        let scripting = self.tabs.get(&tab).is_some_and(|e| e.js.is_some());
+        let env =
+            super::apply::viewport_env(self.viewport, self.color_scheme, scripting, self.scale);
         let max_bytes = self.image_max_bytes;
         let Some(entry) = self.tabs.get_mut(&tab) else {
             return;
@@ -4419,8 +4428,7 @@ impl Session {
             bg_bytes,
             max_bytes,
             &mut entry.img_bodies,
-            img_w,
-            dpr,
+            &env,
         );
     }
 
@@ -4451,8 +4459,16 @@ impl Session {
         };
         // Phase lecture : items `<img>`/`poster`, table
         // ordinal→nœud (`prev_styles` est indexée ordinal), et
-        // racine pour la collecte svg.
-        let items = collect_images(dom, self.viewport.0, self.scale);
+        // racine pour la collecte svg. R-195 : l'élection
+        // `<picture>` re-matche sur l'env session — même clé
+        // qu'à la collecte initiale.
+        let env = super::apply::viewport_env(
+            self.viewport,
+            self.color_scheme,
+            entry.js.is_some(),
+            self.scale,
+        );
+        let items = collect_images(dom, &env);
         let ord_to_node: HashMap<usize, explorer_dom::NodeId> = element_ordinals(dom)
             .into_iter()
             .map(|(n, o)| (o, n))
@@ -4618,10 +4634,9 @@ fn insert_images_into(
     bg_bytes: usize,
     max_bytes: usize,
     bodies_store: &mut HashMap<String, Vec<u8>>,
-    img_w: f32,
-    dpr: f32,
+    env: &StyleEnv,
 ) {
-    let items = collect_images(dom, img_w, dpr);
+    let items = collect_images(dom, env);
     let mut decoded: HashMap<String, Option<Arc<DecodedImage>>> = HashMap::new();
     // Budget octets global sur les bitmaps retenus (§B-59) :
     // `image_max_px` borne chaque image mais pas leur somme —
@@ -4668,13 +4683,12 @@ pub(crate) fn reinsert_imgs_by_src(
     dom: &Dom,
     images: &mut PaintImages,
     decoded_cache: &HashMap<String, Arc<DecodedImage>>,
-    img_w: f32,
-    dpr: f32,
+    env: &StyleEnv,
 ) {
     if decoded_cache.is_empty() {
         return;
     }
-    for (node, src) in collect_images(dom, img_w, dpr) {
+    for (node, src) in collect_images(dom, env) {
         if let Some(img) = decoded_cache.get(&src) {
             images.replaced.insert(node, img.clone());
         }
@@ -4690,8 +4704,7 @@ pub(crate) fn insert_images_payload(
     bodies: &HashMap<String, Vec<u8>>,
     max_px: u32,
     max_bytes: usize,
-    img_w: f32,
-    dpr: f32,
+    env: &StyleEnv,
 ) {
     if bodies.is_empty() {
         return;
@@ -4722,8 +4735,7 @@ pub(crate) fn insert_images_payload(
         bg_bytes,
         max_bytes,
         img_bodies,
-        img_w,
-        dpr,
+        env,
     );
 }
 

@@ -13869,6 +13869,64 @@ async fn dyn_img_src_dedup_and_renav() {
     );
 }
 
+/// R-195 — `<img>` inséré par JS dans un `<picture>` : le
+/// miroir résout l'élection `<source>` au drain (l'`<img>`
+/// est enfilé sur `src=` détaché, l'élection voit l'arbre
+/// **final** — `srcset`/`type`/`media` des frères
+/// précédents). La `<source>` élue prime `img.src` ;
+/// `type` non décodable → repli `img.src` honnête.
+#[tokio::test(flavor = "multi_thread")]
+async fn dyn_img_picture_source_elue() {
+    let (mut s, t) = test_session();
+    t.route(
+        "/",
+        200,
+        "<!doctype html><html><body><picture id=p></picture><picture id=q></picture><script>\
+         var p=document.getElementById('p');\
+         var s1=document.createElement('source');\
+         s1.setAttribute('srcset','/wide.webp 1x');\
+         var m=document.createElement('img');\
+         m.src='/img-fallback.png';\
+         p.appendChild(s1);p.appendChild(m);\
+         var q=document.getElementById('q');\
+         var s2=document.createElement('source');\
+         s2.setAttribute('srcset','/x.avif 1x');s2.setAttribute('type','image/avif');\
+         var m2=document.createElement('img');\
+         m2.src='/img2.png';\
+         q.appendChild(s2);q.appendChild(m2);\
+         </script></body></html>",
+    );
+    t.route_bin("/wide.webp", 200, red_png());
+    t.route_bin("/img-fallback.png", 200, red_png());
+    t.route_bin("/x.avif", 200, red_png());
+    t.route_bin("/img2.png", 200, red_png());
+    s.set_js_factory(explorer_js::JscoreEngine::factory());
+    let a = s.open_tab();
+    s.navigate(a, "http://h.test/").await.unwrap();
+    s.pump_net().await;
+    s.pump_net().await;
+    let paths = t.paths();
+    // `<source>` élue : sa `srcset` est fetchée, `img.src`
+    // ne part pas (spec — la source élue fait foi).
+    assert!(
+        paths.contains(&"/wide.webp".to_string()),
+        "srcset de la source élue fetchée : {paths:?}"
+    );
+    assert!(
+        !paths.contains(&"/img-fallback.png".to_string()),
+        "img.src non fetché quand une source élit : {paths:?}"
+    );
+    // `type` indécodable → source sautée → `img.src` repli.
+    assert!(
+        paths.contains(&"/img2.png".to_string()),
+        "type avif sauté → img.src servi : {paths:?}"
+    );
+    assert!(
+        !paths.contains(&"/x.avif".to_string()),
+        "avif jamais fetché : {paths:?}"
+    );
+}
+
 // ===== CAP-173 — `<link rel=stylesheet>` inséré dynamiquement =====
 
 /// `createElement('link')` + `rel=stylesheet` + `href` +

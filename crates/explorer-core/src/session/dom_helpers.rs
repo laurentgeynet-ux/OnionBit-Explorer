@@ -6,13 +6,14 @@
 //! éditables, collectes de sous-ressources et d'ancres.
 use std::collections::HashMap;
 
+use explorer_css::StyleEnv;
 use explorer_dom::{Dom, DomError, NodeId};
 use explorer_layout::{LayoutBox, Rect};
 use explorer_net::http::FetchCredentials;
 use explorer_net::url::Url;
 use explorer_render::ImageTable;
 
-use super::{CoreError, SandboxFlags};
+use super::{media_attr_matches, CoreError, SandboxFlags};
 
 /// Hit-test profond : la boîte la plus imbriquée contenant
 /// `(x, y)` **viewport** gagne — renvoie son `NodeId` source
@@ -870,44 +871,136 @@ pub(crate) fn pick_srcset(srcset: &str, eff_w: f32, dpr: f32) -> Option<String> 
     }
 }
 
-/// `sizes` résolu en CSS px (CAP-157, borné) : la liste est
-/// parcourue et le **premier** terme sans condition média
-/// (sans parenthèse ouvrante) s'applique — `Npx` → `N`,
-/// `Nvw` → `N/100×viewport`, `Nem`/`Nrem` → `N×16` ; les
-/// termes conditionnels `(...) Npx` sont sautés (éval
-/// média hors portée — le terme final non conditionnel de
-/// la spec est ainsi trouvé). Défaut : `viewport` (100vw).
-pub(crate) fn resolve_sizes(sizes: Option<&str>, vp_w: f32) -> f32 {
+/// `sizes` résolu en CSS px : les termes sont parcourus
+/// dans l'ordre et le **premier dont la condition média
+/// matche `env`** s'applique (R-195 : les termes
+/// `(mq) val` étaient sautés — la condition est désormais
+/// évaluée comme media query via [`media_attr_matches`] ;
+/// le terme final non conditionnel de la spec reste le
+/// repli naturel). `Npx` → `N`, `Nvw` → `N/100×viewport`,
+/// `Nem`/`Nrem` → `N×16` ; valeur inconnue (`calc()`,
+/// `auto`, tronquée…) → terme suivant. Défaut :
+/// `viewport` (100vw).
+#[allow(clippy::cast_precision_loss)] // px CSS ≪ 2^24 — précision f32 suffisante.
+pub(crate) fn resolve_sizes(sizes: Option<&str>, env: &StyleEnv) -> f32 {
+    let vp_w = env.width_px as f32;
     let Some(sizes) = sizes else {
         return vp_w;
     };
     for term in sizes.split(',') {
         let t = term.trim();
-        if t.contains('(') {
+        if t.is_empty() {
             continue;
         }
-        if let Some(v) = t
+        // Le dernier token est la valeur — tout préfixe est
+        // une condition média (`(a)` ou `(a) and (b)`,
+        // évaluée entière contre l'env session).
+        let (cond, val) = t
+            .rsplit_once(char::is_whitespace)
+            .map_or(("", t), |(c, v)| (c.trim(), v.trim()));
+        if !cond.is_empty() && !media_attr_matches(env, cond) {
+            continue;
+        }
+        let parsed = val
             .strip_suffix("px")
             .and_then(|n| n.trim().parse::<f32>().ok())
-        {
-            return v;
-        }
-        if let Some(v) = t
-            .strip_suffix("vw")
-            .and_then(|n| n.trim().parse::<f32>().ok())
-        {
-            return vp_w * (v / 100.0);
-        }
-        let v: Option<f32> = t
-            .strip_suffix("rem")
-            .or_else(|| t.strip_suffix("em"))
-            .and_then(|n| n.trim().parse().ok())
-            .map(|n: f32| n * 16.0);
-        if let Some(v) = v {
+            .or_else(|| {
+                val.strip_suffix("vw")
+                    .and_then(|n| n.trim().parse::<f32>().ok())
+                    .map(|v| vp_w * (v / 100.0))
+            })
+            .or_else(|| {
+                val.strip_suffix("rem")
+                    .or_else(|| val.strip_suffix("em"))
+                    .and_then(|n| n.trim().parse::<f32>().ok())
+                    .map(|n| n * 16.0)
+            });
+        if let Some(v) = parsed {
             return v;
         }
     }
     vp_w
+}
+
+/// Type d'image déclaré décodable (`type=` d'un `<source>`
+/// de `<picture>` — R-195) : whitelist des formats que
+/// `decode_image` lit réellement (png/apng/jpeg/gif/webp/
+/// bmp/ico + svg rasterisé). `image/avif`/`jxl`/`heic`/
+/// `tiff` et tout type non `image/*` → `false` : le
+/// `<source>` est sauté et le suivant élu (spec « update
+/// the image data ») — un `avif` en tête ne bloque plus
+/// le webp/jpeg qui le suit. Paramètres `;…` tranchés,
+/// casse insensible.
+fn image_type_supported(ty: &str) -> bool {
+    let base = ty.split(';').next().unwrap_or("").trim();
+    base.eq_ignore_ascii_case("image/png")
+        || base.eq_ignore_ascii_case("image/apng")
+        || base.eq_ignore_ascii_case("image/jpeg")
+        || base.eq_ignore_ascii_case("image/pjpeg")
+        || base.eq_ignore_ascii_case("image/gif")
+        || base.eq_ignore_ascii_case("image/webp")
+        || base.eq_ignore_ascii_case("image/bmp")
+        || base.eq_ignore_ascii_case("image/x-bmp")
+        || base.eq_ignore_ascii_case("image/x-ms-bmp")
+        || base.eq_ignore_ascii_case("image/x-icon")
+        || base.eq_ignore_ascii_case("image/vnd.microsoft.icon")
+        || base.eq_ignore_ascii_case("image/svg+xml")
+}
+
+/// `<source>` élue d'un `<img>` enfant direct de
+/// `<picture>` (R-195, spec « update the image data ») :
+/// les frères `<source>` **précédant** l'`<img>` sont
+/// testés dans l'ordre — `srcset` présent et non vide
+/// (`src` est ignoré en contexte picture), `type`
+/// décodable ([`image_type_supported`]), `media` matché
+/// contre `env`. Le premier retenu gagne : sa `srcset`
+/// est résolue avec **son** `sizes` (spec : la taille
+/// source vient de l'élément élu, jamais de l'`<img>`).
+/// Un élu dont la `srcset` ne produit aucun candidat
+/// (`data:` borné, mélange `x`/`w`) est sauté — l'élection
+/// continue, conformément à la spec. `None` = pas de
+/// `<picture>` parent ou aucune source élue : l'appelant
+/// retombe sur `srcset`/`src` de l'`<img>`.
+fn picture_pick(dom: &Dom, img: NodeId, env: &StyleEnv) -> Option<String> {
+    let parent = dom.parent(img).ok()??;
+    if !dom.tag_name(parent).is_ok_and(|t| t == "picture") {
+        return None;
+    }
+    for c in dom.children_iter(parent).into_iter().flatten() {
+        if c == img {
+            break; // les <source> suivant l'<img> ne comptent pas
+        }
+        if !dom.tag_name(c).is_ok_and(|t| t == "source") {
+            continue;
+        }
+        let Ok(Some(ss)) = dom.attribute_str(c, "srcset") else {
+            continue;
+        };
+        if ss.trim().is_empty() {
+            continue;
+        }
+        if dom
+            .attribute_str(c, "type")
+            .ok()
+            .flatten()
+            .is_some_and(|t| !image_type_supported(t))
+        {
+            continue;
+        }
+        if dom
+            .attribute_str(c, "media")
+            .ok()
+            .flatten()
+            .is_some_and(|m| !media_attr_matches(env, m))
+        {
+            continue;
+        }
+        let eff_w = resolve_sizes(dom.attribute_str(c, "sizes").ok().flatten(), env);
+        if let Some(url) = pick_srcset(ss, eff_w, env.dpr) {
+            return Some(url);
+        }
+    }
+    None
 }
 
 /// `(NodeId, url)` des `<img>` et des affiches `<video
@@ -915,10 +1008,13 @@ pub(crate) fn resolve_sizes(sizes: Option<&str>, vp_w: f32) -> f32 {
 /// absent ou vide est sauté (étape 58 : l'affiche suit le
 /// canal image, se peint dans la boîte vidéo). CAP-157 :
 /// `<img srcset>` présent et résoluble **prime** sur `src`
-/// — `img_w`/`dpr` = largeur viewport CSS px et densité de
-/// pixels de la session (choix `w`/`x` de `pick_srcset`,
-/// `sizes` résolu par `resolve_sizes`).
-pub(crate) fn collect_images(dom: &Dom, img_w: f32, dpr: f32) -> Vec<(NodeId, String)> {
+/// — choix `w`/`x` de `pick_srcset` contre `env`
+/// (largeur viewport CSS px, densité `env.dpr`, `sizes`
+/// résolu par `resolve_sizes`). R-195 : un `<img>` enfant
+/// de `<picture>` voit d'abord ses `<source>` frères
+/// évaluées ([`picture_pick`]) — une élue prime tout le
+/// reste.
+pub(crate) fn collect_images(dom: &Dom, env: &StyleEnv) -> Vec<(NodeId, String)> {
     let probe = tracing::enabled!(target: "media_probe", tracing::Level::INFO);
     let mut seen = 0usize;
     let mut novar = 0usize;
@@ -944,39 +1040,41 @@ pub(crate) fn collect_images(dom: &Dom, img_w: f32, dpr: f32) -> Vec<(NodeId, St
                         .filter(|s| !s.is_empty())
                         .and_then(|ss| {
                             let eff_w =
-                                resolve_sizes(dom.attribute_str(n, "sizes").ok().flatten(), img_w);
-                            pick_srcset(ss, eff_w, dpr)
+                                resolve_sizes(dom.attribute_str(n, "sizes").ok().flatten(), env);
+                            pick_srcset(ss, eff_w, env.dpr)
                         })
                 };
-                let src = srcset_of("srcset")
-                    .or_else(|| {
-                        dom.attribute_str(n, "src")
-                            .ok()
-                            .flatten()
-                            .filter(|s| !s.is_empty())
-                            .map(str::to_owned)
-                    })
-                    // Lazy-load (vol 13 lemonde/bbc : ~200
-                    // `<img>` à `data-src`, ~0 % peints) : le
-                    // deferred `loading="lazy"` est déjà
-                    // fetché d'emblée — reste la variante
-                    // « src déplacé en data-* » dont le JS
-                    // bootstrap est souvent mort. Repli
-                    // produit : les attributs lazy usuels
-                    // servent de source, dans cet ordre —
-                    // mieux que jamais peint.
-                    .or_else(|| srcset_of("data-srcset"))
-                    .or_else(|| {
-                        const LAZY_SRCS: &[&str] =
-                            &["data-src", "data-lazy-src", "data-original", "data-url"];
-                        LAZY_SRCS.iter().find_map(|a| {
-                            dom.attribute_str(n, a)
+                let src = picture_pick(dom, n, env).or_else(|| {
+                    srcset_of("srcset")
+                        .or_else(|| {
+                            dom.attribute_str(n, "src")
                                 .ok()
                                 .flatten()
                                 .filter(|s| !s.is_empty())
                                 .map(str::to_owned)
                         })
-                    });
+                        // Lazy-load (vol 13 lemonde/bbc : ~200
+                        // `<img>` à `data-src`, ~0 % peints) : le
+                        // deferred `loading="lazy"` est déjà
+                        // fetché d'emblée — reste la variante
+                        // « src déplacé en data-* » dont le JS
+                        // bootstrap est souvent mort. Repli
+                        // produit : les attributs lazy usuels
+                        // servent de source, dans cet ordre —
+                        // mieux que jamais peint.
+                        .or_else(|| srcset_of("data-srcset"))
+                        .or_else(|| {
+                            const LAZY_SRCS: &[&str] =
+                                &["data-src", "data-lazy-src", "data-original", "data-url"];
+                            LAZY_SRCS.iter().find_map(|a| {
+                                dom.attribute_str(n, a)
+                                    .ok()
+                                    .flatten()
+                                    .filter(|s| !s.is_empty())
+                                    .map(str::to_owned)
+                            })
+                        })
+                });
                 if let Some(src) = src {
                     out.push((n, src.clone()));
                 } else if probe {
