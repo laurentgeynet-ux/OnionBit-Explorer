@@ -5199,6 +5199,43 @@ const FVN_TAGS: &[(&str, &str)] = &[
 ];
 
 impl StyleEngine {
+    /// R-249 — `text-wrap-mode` → `white-space` (css-text-4
+    /// §7.1 : `nowrap` → nowrap, autres → normal).
+    /// `text-wrap-style` (balance/pretty/stable) dormant.
+    fn resolve_text_wrap_mode(map: &mut HashMap<NodeId, ComputedStyle>) {
+        for st in map.values_mut() {
+            let mode = st.get("text-wrap-mode").map(str::to_string);
+            if let Some(m) = mode {
+                st.set(
+                    "white-space",
+                    if m.trim() == "nowrap" { "nowrap" } else { "normal" },
+                );
+            }
+        }
+    }
+
+    /// R-250 — `font-variant-east-asian` : mots-clés → tags
+    /// OT concaténés (css-fonts-4 §6.5).
+    fn resolve_font_east_asian(map: &mut HashMap<NodeId, ComputedStyle>) {
+        for st in map.values_mut() {
+            let Some(v) = st.get("font-variant-east-asian") else {
+                continue;
+            };
+            let mut settings: Vec<String> = st
+                .get("font-feature-settings")
+                .map(|s| s.split(',').map(str::to_owned).collect())
+                .unwrap_or_default();
+            for kw in v.split_whitespace() {
+                if let Some(tag) = FVE_TAGS.iter().find(|(k, _)| *k == kw).map(|(_, t)| t) {
+                    settings.push(format!("\"{tag}\" 1"));
+                }
+            }
+            if !settings.is_empty() {
+                st.set("font-feature-settings", &settings.join(", "));
+            }
+        }
+    }
+
     /// R-231 — `@custom-media` : chaque `MediaQuery` du lot
     /// dont l'unique condition est un `--nom` enregistré est
     /// remplacée par le parse du query alias (un niveau —
@@ -5250,23 +5287,7 @@ impl StyleEngine {
                 st.set("font-palette", &base);
             }
         }
-        // R-249 — `text-wrap`/`text-wrap-mode` : alias
-        // `white-space` (css-text-4 §7.1) — `nowrap`/
-        // `wrap`/`balance`/`pretty`/`stable` résolus
-        // vers le canal `white-space` consommé par
-        // l'inline (`nowrap` → nowrap, autres →
-        // normal). `text-wrap-style` (`balance`,
-        // `pretty`, `stable`, `auto`) stocké dormant —
-        // algorithme d'équilibrage de lignes futur.
-        for st in map.values_mut() {
-            let mode = st.get("text-wrap-mode").map(str::to_string);
-            if let Some(m) = mode {
-                st.set(
-                    "white-space",
-                    if m.trim() == "nowrap" { "nowrap" } else { "normal" },
-                );
-            }
-        }
+        Self::resolve_text_wrap_mode(map);
         // R-241 — `font-variant-numeric` : mots-clés → tags
         // OT équivalents (spec css-fonts-4 §6.3) — concaténés
         // aux `font-feature-settings` existants.
@@ -5287,27 +5308,7 @@ impl StyleEngine {
                 st.set("font-feature-settings", &settings.join(", "));
             }
         }
-        // R-250 — `font-variant-east-asian` : mêmes tags OT
-        // concaténés (css-fonts-4 §6.5).
-        for st in map.values_mut() {
-            let Some(v) = st.get("font-variant-east-asian") else {
-                continue;
-            };
-            let mut settings: Vec<String> = st
-                .get("font-feature-settings")
-                .map(|s| s.split(',').map(str::to_owned).collect())
-                .unwrap_or_default();
-            for kw in v.split_whitespace() {
-                if let Some(tag) = FVE_TAGS.iter().find(|(k, _)| *k == kw).map(|(_, t)| t) {
-                    settings.push(format!("\"{tag}\" 1"));
-                }
-            }
-            if !settings.is_empty() {
-                st.set("font-feature-settings", &settings.join(", "));
-            }
-        }
-        // `font-variant-emoji` : `emoji`/`text` — sélecteur de
-        // variation VS16/VS15 dormant (choix de fonte couleur).
+        Self::resolve_font_east_asian(map);
         if self.font_feature_values.is_empty() {
             return;
         }
