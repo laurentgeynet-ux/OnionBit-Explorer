@@ -1083,3 +1083,80 @@ fn anchor_inset_area_alias() {
     let m = find(&bx, by_id(&dom, "m"));
     assert_eq!(m.rect.y, 120.0, "inset-area:bottom = sous l'ancre");
 }
+
+/// `position-visibility` (css-anchor-1 §5) : `anchors-
+/// visible` masque la boîte tant que l'ancre est hors
+/// viewport ; `no-overflow` la masque si elle déborde
+/// encore après les fallbacks.
+#[test]
+fn anchor_position_visibility() {
+    let (dom, bx) = laid(
+        "<div id=a></div><div id=b></div><div id=m></div><div id=n></div>",
+        "body{height:800px}\
+         #a{position:absolute;left:10px;top:900px;width:40px;height:20px;anchor-name:--a}\
+         #b{position:absolute;left:10px;top:100px;width:40px;height:20px;anchor-name:--b}\
+         #m{position:absolute;position-anchor:--a;top:anchor(bottom);left:anchor(left);\
+            width:30px;height:10px;position-visibility:anchors-visible}\
+         #n{position:absolute;position-anchor:--b;top:anchor(bottom);left:anchor(left);\
+            width:30px;height:10px;position-visibility:anchors-visible}",
+    );
+    let m = find(&bx, by_id(&dom, "m"));
+    let n = find(&bx, by_id(&dom, "n"));
+    assert_eq!(
+        m.style.get("visibility"),
+        Some("hidden"),
+        "ancre hors viewport → masquée"
+    );
+    assert_ne!(
+        n.style.get("visibility"),
+        Some("hidden"),
+        "ancre visible → rendue"
+    );
+
+    // `no-overflow` : déborde → masquée ; flip qui fit → visible.
+    let (dom2, bx2) = laid(
+        "<div id=a></div><div id=m></div><div id=n></div>",
+        "body{height:800px}\
+         #a{position:absolute;left:10px;top:750px;width:40px;height:20px;anchor-name:--a}\
+         #m{position:absolute;position-anchor:--a;top:anchor(bottom);left:anchor(left);\
+            width:30px;height:80px;position-visibility:no-overflow}\
+         #n{position:absolute;position-anchor:--a;top:anchor(bottom);left:anchor(left);\
+            width:30px;height:80px;position-visibility:no-overflow;position-try:flip-block}",
+    );
+    let m2 = find(&bx2, by_id(&dom2, "m"));
+    let n2 = find(&bx2, by_id(&dom2, "n"));
+    assert_eq!(
+        m2.style.get("visibility"),
+        Some("hidden"),
+        "déborde sans fallback → masquée"
+    );
+    assert_ne!(
+        n2.style.get("visibility"),
+        Some("hidden"),
+        "fallback qui rentre → visible"
+    );
+}
+
+/// Insets logiques × `writing-mode` (css-logical-1) :
+/// `inset-inline-start` en `vertical-rl` alimente `top` ;
+/// `direction:rtl` en horizontal inverse l'axe inline.
+#[test]
+fn anchor_insets_logiques_writing_mode() {
+    let (dom, bx) = laid(
+        "<div id=a></div><div id=m></div><div id=n></div>",
+        "#a{position:absolute;left:40px;top:50px;width:20px;height:10px;anchor-name:--a}\
+         #m{position:absolute;position-anchor:--a;writing-mode:vertical-rl;\
+            inset-inline-start:anchor(top);inset-block-start:anchor(left);width:5px;height:5px}\
+         #n{position:absolute;position-anchor:--a;direction:rtl;\
+            inset-inline-start:anchor(left);width:5px;height:5px}",
+    );
+    let m = find(&bx, by_id(&dom, "m"));
+    // vertical-rl : inline-start → top (y = ancre top),
+    // block-start → right (bord droit sur ancre left).
+    assert_eq!(m.rect.y, 50.0, "vrl : inline-start → top");
+    assert_eq!(m.rect.x + m.rect.width, 40.0, "vrl : block-start → right");
+    let n = find(&bx, by_id(&dom, "n"));
+    // rtl : inline-start → right — le bord DROIT de la
+    // boîte se cale sur l'ancre left.
+    assert_eq!(n.rect.x + n.rect.width, 40.0, "rtl : inline-start → right");
+}

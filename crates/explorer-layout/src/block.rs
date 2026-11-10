@@ -725,9 +725,11 @@ fn fix_anchor_positioned(
             let cfs = font_size_px(st, fs, ctx);
             let mut dx = 0.0_f32;
             let mut dy = 0.0_f32;
-            // Physique prioritaire, logique en repli (LTR —
-            // même règle que `abs_geometry`) : `inset-inline-
-            // start`→left, `inset-block-start`→top…
+            // Physique prioritaire, logique en repli — le nom
+            // logique alimentant chaque côté suit `writing-
+            // mode`/`direction` (`logical_insets`, même règle
+            // que `abs_geometry`).
+            let (log_l, log_r, log_t, log_b) = logical_insets(st);
             let side_anchor =
                 |st: &ComputedStyle, phys: &str, log: &str, axis_x: bool| -> Option<f32> {
                     let raw = st
@@ -738,17 +740,17 @@ fn fix_anchor_positioned(
                 };
             // `left: anchor(bord)` → margin-box gauche sur le
             // point ; `right: anchor(bord)` → margin-box droit.
-            if let Some(p) = side_anchor(st, "left", "inset-inline-start", true) {
+            if let Some(p) = side_anchor(st, "left", log_l, true) {
                 dx = p + side_px(st, "margin-left", cb_w, cfs, ctx, 0.0) - bx.rect.x;
-            } else if let Some(p) = side_anchor(st, "right", "inset-inline-end", true) {
+            } else if let Some(p) = side_anchor(st, "right", log_r, true) {
                 dx = p
                     - side_px(st, "margin-right", cb_w, cfs, ctx, 0.0)
                     - bx.rect.width
                     - bx.rect.x;
             }
-            if let Some(p) = side_anchor(st, "top", "inset-block-start", false) {
+            if let Some(p) = side_anchor(st, "top", log_t, false) {
                 dy = p + side_px(st, "margin-top", cb_w, cfs, ctx, 0.0) - bx.rect.y;
-            } else if let Some(p) = side_anchor(st, "bottom", "inset-block-end", false) {
+            } else if let Some(p) = side_anchor(st, "bottom", log_b, false) {
                 dy = p
                     - side_px(st, "margin-bottom", cb_w, cfs, ctx, 0.0)
                     - bx.rect.height
@@ -968,9 +970,108 @@ fn fix_anchor_positioned(
                 }
             }
         }
+        // `position-visibility` (css-anchor-1 §5) — évaluée
+        // après tous les positionnements/fallbacks :
+        // `anchors-visible` = masquée tant que l'ancre
+        // n'intersecte pas le viewport (ancre absente →
+        // masquée) ; `no-overflow` = masquée si la boîte
+        // déborde encore ; `always` (défaut) = visible.
+        // Matérialisée en `visibility:hidden` sur le style —
+        // rail existant de la display list (§11.2),
+        // réactivable par un descendant `visible` (approxi-
+        // mation honnête : le flag spec est hors cascade).
+        let pos_vis = bx
+            .style
+            .get("position-visibility")
+            .map_or("", str::trim)
+            .to_string();
+        match pos_vis.as_str() {
+            "anchors-visible" => {
+                let vis = hint
+                    .as_deref()
+                    .and_then(|n| {
+                        anchors
+                            .iter()
+                            .rev()
+                            .find(|(nm, _)| nm.trim_start_matches("--") == n)
+                    })
+                    .is_some_and(|(_, ar)| {
+                        ar.x + ar.width > 0.0
+                            && ar.x < cb_w
+                            && ar.y + ar.height > 0.0
+                            && ar.y < vp_h
+                    });
+                if !vis {
+                    bx.style.set("visibility", "hidden");
+                }
+            }
+            "no-overflow" => {
+                let over = bx.rect.x < 0.0
+                    || bx.rect.x + bx.rect.width > cb_w
+                    || bx.rect.y < 0.0
+                    || bx.rect.y + bx.rect.height > vp_h;
+                if over {
+                    bx.style.set("visibility", "hidden");
+                }
+            }
+            _ => {}
+        }
     }
     for c in &mut bx.children {
         explorer_common::deep(|| fix_anchor_positioned(c, anchors, cb_w, vp_h, ctx, fs));
+    }
+}
+
+/// Mapping css-logical-1 des insets logiques → physiques
+/// selon `writing-mode` + `direction` : rend `(gauche,
+/// droite, haut, bas)` = les **noms de props logiques**
+/// qui alimentent chaque côté physique. Horizontal LTR :
+/// `inline-start`→left… ; RTL : inline inversé ; vertical :
+/// `inline-*` sur l'axe haut/bas (`rl` : `block-start`→right,
+/// `lr` : `block-start`→left), `direction:rtl` inverse aussi
+/// l'axe inline vertical (§6.4).
+fn logical_insets(st: &ComputedStyle) -> (&'static str, &'static str, &'static str, &'static str) {
+    use explorer_css::value::WritingMode as W;
+    let rtl = st
+        .get("direction")
+        .is_some_and(|d| d.trim().eq_ignore_ascii_case("rtl"));
+    match explorer_css::value::parse_writing_mode(st.get("writing-mode").unwrap_or("")) {
+        W::HorizontalTb if rtl => (
+            "inset-inline-end",
+            "inset-inline-start",
+            "inset-block-start",
+            "inset-block-end",
+        ),
+        W::HorizontalTb => (
+            "inset-inline-start",
+            "inset-inline-end",
+            "inset-block-start",
+            "inset-block-end",
+        ),
+        W::VerticalRl | W::SidewaysRl if rtl => (
+            "inset-block-end",
+            "inset-block-start",
+            "inset-inline-end",
+            "inset-inline-start",
+        ),
+        W::VerticalRl | W::SidewaysRl => (
+            "inset-block-end",
+            "inset-block-start",
+            "inset-inline-start",
+            "inset-inline-end",
+        ),
+        _ if rtl => (
+            "inset-block-start",
+            "inset-block-end",
+            "inset-inline-end",
+            "inset-inline-start",
+        ),
+        _ => (
+            "inset-block-start",
+            "inset-block-end",
+            "inset-inline-start",
+            "inset-inline-end",
+        ),
     }
 }
 
@@ -3309,32 +3410,34 @@ fn abs_geometry(
     cfs: f32,
     ctx: &BlockCtx,
 ) -> AbsGeo {
-    // Insets logiques (css-logical-1) : mapping LTR/
-    // horizontal-tb — `inset-inline-start`→left,
-    // `inset-block-start`→top… ; la valeur physique gagne
-    // quand les deux coexistent (la cascade garde l'ordre
-    // des déclarations — approximation : physique > logique).
+    // Insets logiques (css-logical-1) : le nom logique
+    // alimentant chaque côté physique suit `writing-mode`/
+    // `direction` ([`logical_insets`]) ; la valeur physique
+    // gagne quand les deux coexistent (la cascade garde
+    // l'ordre des déclarations — approximation : physique >
+    // logique).
     let or_log = |phys: Option<f32>, log: &str, basis: f32| {
         phys.or_else(|| css_px(cst, log, basis, cfs, ctx))
     };
+    let (log_l, log_r, log_t, log_b) = logical_insets(cst);
     let l = or_log(
         css_px(cst, "left", target.width, cfs, ctx),
-        "inset-inline-start",
+        log_l,
         target.width,
     );
     let r = or_log(
         css_px(cst, "right", target.width, cfs, ctx),
-        "inset-inline-end",
+        log_r,
         target.width,
     );
     let t = or_log(
         css_px(cst, "top", target.height, cfs, ctx),
-        "inset-block-start",
+        log_t,
         target.height,
     );
     let b = or_log(
         css_px(cst, "bottom", target.height, cfs, ctx),
-        "inset-block-end",
+        log_b,
         target.height,
     );
     let ml = side_px(cst, "margin-left", target.width, cfs, ctx, 0.0);

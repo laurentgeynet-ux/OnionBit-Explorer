@@ -3864,13 +3864,14 @@ de noms. Ordre fixe (priorité par site-impact mesuré) :
 4. **`anchor-*`/`position-try`** — MVP livré (R-254) — github
    ×96 : `anchor-name`/`position-anchor`/`anchor(<côté>|center|
    <%>[,repli])` résolus post-layout (`resolve_anchor_positioning`).
-   Résidus : `anchor()`/`anchor-size()` en insets logiques
-   (les insets logiques ne sont pas consommés du tout — gap
-   distinct). Livrés en suite : `position-area` 3×3 + alias
+   Livrés en suite : `position-area` 3×3 + alias
    `inset-area`, `@position-try` nommées, ordonnancement spec
    des fallbacks (première option qui « fit », tri
-   `position-try-order` + `most-*` en valeur du shorthand —
-   2026-11-10),
+   `position-try-order` + `most-*` en valeur du shorthand),
+   `position-visibility` (`anchors-visible`/`no-overflow` →
+   `visibility:hidden`), `anchor()`/insets logiques ×
+   `writing-mode`/`direction` (`logical_insets` partagé
+   `abs_geometry` — 2026-11-10),
    `anchor-center` (justify/align-self), `anchor-size()`,
    `anchor()` dans `calc()`, flips `position-try`+
    `position-try-order` sur débordement viewport.
