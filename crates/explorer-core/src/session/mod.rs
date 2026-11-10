@@ -1882,7 +1882,11 @@ impl Session {
                     node: e.node.index(),
                     tag,
                     id: attr("id"),
-                    cls: attr("class").split_whitespace().next().unwrap_or("").to_string(),
+                    cls: attr("class")
+                        .split_whitespace()
+                        .next()
+                        .unwrap_or("")
+                        .to_string(),
                     x: e.rect.x,
                     y: e.rect.y,
                     w: e.rect.width,

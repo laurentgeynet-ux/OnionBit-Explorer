@@ -13,6 +13,8 @@ import 'dart:io';
 import 'dart:typed_data';
 import 'dart:ui' as ui;
 
+import 'package:flutter_test/flutter_test.dart';
+
 import 'package:explorer_app/core/api/api_client.dart';
 import 'package:explorer_app/core/api/events_client.dart';
 import 'package:explorer_app/core/config/app_config.dart';
@@ -629,7 +631,8 @@ ProviderContainer makeContainer(
 /// terminer ses microtasks.
 Future<void> settle(ProviderContainer c) async {
   c.read(browserProvider);
-  await Future<void>.delayed(Duration.zero);
-  await Future<void>.delayed(Duration.zero);
-  await Future<void>.delayed(Duration.zero);
+  // `pumpEventQueue` draine jusqu'à file vide — déterministe
+  // contrairement à N×`Duration.zero` (le nombre de sauts de
+  // microtasks varie selon la charge du runner, flake CI vu).
+  await pumpEventQueue();
 }

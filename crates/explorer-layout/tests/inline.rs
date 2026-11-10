@@ -967,25 +967,30 @@ fn r207_clamp_font_size_materialisee_px_dans_style_fragment() {
     );
 }
 
-/// R-211v — `padding`/`border` horizontaux sur élément inline
-/// consomment la ligne (§9.4.2) : `<a>` inline avec
-/// `padding:0 8px` doit mesurer texte + 16px (nav dr
-/// « DR.DK/DRTV/DR LYD » concaténée, vol 772).
+/// R-211 — `padding`/`border` horizontaux sur élément inline non-
+/// remplacé consomment de l'espace sur la ligne (§9.4.2). Avant le
+/// fix, seuls `margin-left/right` déclenchaient les marqueurs
+/// d'extrémité → `a{padding:0 8px}` retombait à 0 → items de nav
+/// contigus (vol 772 dr.dk, vimeo, bitmovin).
 #[test]
 fn padding_horizontal_inline_consomme_la_ligne() {
-    let (_dom, bx) = laid(
-        "<!doctype html><p><a id=x>A</a></p>",
-        "a{padding:0 8px}",
+    let (dom, bx) = laid(
+        "<!doctype html><p><a>x1</a><a>x2</a></p>",
+        "p{font-size:10px;width:400px} a{padding:0 40px}",
     );
-    let mut q = vec![&bx];
-    while let Some(b) = q.pop() {
-        for f in &b.fragments {
-            if let Some(w) = f.width {
-                assert!(w > 16.0, "fragment inline sans padding : {w}");
-                return;
-            }
-        }
-        q.extend(b.children.iter());
-    }
-    panic!("fragment a introuvable");
+    let p = find(&bx, by_tag(&dom, "p"));
+    let anon = &p.children[0];
+    let frags = &anon.lines[0].fragments;
+    let x_of = |t: &str| {
+        frags
+            .iter()
+            .find(|f| f.text == t)
+            .map(|f| f.rect.x)
+            .expect(t)
+    };
+    // « x1 » = 10 px à 5 px/char : padding-left 40px consommé
+    // par le marqueur d'ouverture → le texte démarre à x=40.
+    assert_eq!(x_of("x1"), 40.0, "padding-left de <a> ignoré");
+    // x2 : 40 (pad) + 10 (x1) + 40 (pad) + 40 (pad) = 130.
+    assert_eq!(x_of("x2"), 130.0, "padding-right de <a> ignoré");
 }

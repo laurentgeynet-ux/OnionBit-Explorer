@@ -40,7 +40,7 @@ Future<({ProviderContainer c, FakePlayer p})> pumpSurface(
   c.read(browserProvider);
   await tester.runAsync(() async {
     for (var i = 0; i < 6; i++) {
-      await Future<void>.delayed(Duration.zero);
+      await pumpEventQueue();
     }
   });
 
@@ -56,7 +56,7 @@ Future<({ProviderContainer c, FakePlayer p})> pumpSurface(
   );
   await tester.runAsync(() async {
     for (var i = 0; i < 8; i++) {
-      await Future<void>.delayed(Duration.zero);
+      await pumpEventQueue();
     }
   });
   final ctrl = c.read(browserProvider.notifier);

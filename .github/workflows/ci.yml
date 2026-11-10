@@ -10,9 +10,10 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  rust:
+  # Gates rapides — formatage, lint, doc. Échoue vite.
+  lint:
     runs-on: windows-latest
-    timeout-minutes: 60
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
       - uses: Swatinem/rust-cache@v2
@@ -20,10 +21,29 @@ jobs:
         run: cargo fmt --all -- --check
       - name: clippy
         run: cargo clippy --workspace --all-targets -- -D warnings
-      - name: test
-        run: cargo test --workspace
       - name: doc
         run: cargo doc --workspace --no-deps
+
+  # Tests du domaine + produit, hors moteur JS (le plus lourd).
+  test-workspace:
+    runs-on: windows-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - uses: Swatinem/rust-cache@v2
+      - name: test (hors jscore)
+        run: cargo test --workspace --exclude explorer-jscore
+
+  # explorer-jscore à part — la suite hostile/test262 est lourde
+  # en debug par design (interpréteur non optimisé, voir AGENTS §3).
+  test-jscore:
+    runs-on: windows-latest
+    timeout-minutes: 150
+    steps:
+      - uses: actions/checkout@v4
+      - uses: Swatinem/rust-cache@v2
+      - name: test jscore
+        run: cargo test -p explorer-jscore
 
   flutter:
     runs-on: windows-latest

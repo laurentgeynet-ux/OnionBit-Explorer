@@ -332,23 +332,17 @@ fn emit_shot_reports(
             "doc_h_clamped": doc_h_clamped,
             "census": explorer_common::census::snapshot(),
         });
-        match serde_json::to_string_pretty(&payload)
-            .map(|j| std::fs::write(rep, j))
-        {
+        match serde_json::to_string_pretty(&payload).map(|j| std::fs::write(rep, j)) {
             Ok(Ok(())) => {}
             _ => eprintln!("--report : écriture {rep} impossible"),
         }
     }
     if let Some(gpath) = geometry {
         match session.geometry_report(tab) {
-            Some(g) => {
-                match serde_json::to_string_pretty(&g)
-                    .map(|j| std::fs::write(gpath, j))
-                {
-                    Ok(Ok(())) => {}
-                    _ => eprintln!("--geometry : écriture {gpath} impossible"),
-                }
-            }
+            Some(g) => match serde_json::to_string_pretty(&g).map(|j| std::fs::write(gpath, j)) {
+                Ok(Ok(())) => {}
+                _ => eprintln!("--geometry : écriture {gpath} impossible"),
+            },
             None => eprintln!("--geometry : pas d'arbre posé"),
         }
     }

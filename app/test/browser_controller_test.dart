@@ -66,7 +66,7 @@ void main() {
         'title': 'Page',
       }),
     );
-    await Future<void>.delayed(Duration.zero);
+    await pumpEventQueue();
     var tab = c.read(browserProvider).active!;
     expect(tab.url, 'http://h/page');
     expect(tab.title, 'Page');
@@ -74,18 +74,18 @@ void main() {
     events.ctrl.add(
       ServerEvent('title_changed', {'tab': 1, 'title': 'Nouveau'}),
     );
-    await Future<void>.delayed(Duration.zero);
+    await pumpEventQueue();
     tab = c.read(browserProvider).active!;
     expect(tab.title, 'Nouveau');
 
     events.ctrl.add(ServerEvent('frame_invalidated', {'tab': 1}));
-    await Future<void>.delayed(Duration.zero);
+    await pumpEventQueue();
     expect(c.read(browserProvider).frameTick, 1);
 
     events.ctrl.add(
       ServerEvent('pipeline_error', {'tab': 1, 'message': 'boom'}),
     );
-    await Future<void>.delayed(Duration.zero);
+    await pumpEventQueue();
     expect(c.read(browserProvider).lastError, 'boom');
   });
 
@@ -99,13 +99,13 @@ void main() {
     events.ctrl.add(
       ServerEvent('pipeline_error', {'tab': 1, 'message': 'HTTP 404'}),
     );
-    await Future<void>.delayed(Duration.zero);
+    await pumpEventQueue();
     expect(c.read(browserProvider).pageErrors['1'], 'HTTP 404');
 
     events.ctrl.add(
       ServerEvent('navigated', {'tab': 1, 'url': 'http://h/ok', 'title': 'OK'}),
     );
-    await Future<void>.delayed(Duration.zero);
+    await pumpEventQueue();
     expect(c.read(browserProvider).pageErrors.containsKey('1'), isFalse);
   });
 
@@ -126,7 +126,7 @@ void main() {
         'size': 42,
       }),
     );
-    await Future<void>.delayed(Duration.zero);
+    await pumpEventQueue();
     final offer = c.read(browserProvider).downloadOffer!;
     expect(offer.id, 7);
     expect(offer.filename, 'f.bin');
@@ -141,7 +141,7 @@ void main() {
     events.ctrl.add(
       ServerEvent('download_done', {'tab': 1, 'id': 7, 'path': '/dl/f.bin'}),
     );
-    await Future<void>.delayed(Duration.zero);
+    await pumpEventQueue();
     expect(c.read(browserProvider).lastError, contains('/dl/f.bin'));
 
     // Rejet d'une seconde offre → declineDownload.
@@ -154,7 +154,7 @@ void main() {
         'mime': 'application/octet-stream',
       }),
     );
-    await Future<void>.delayed(Duration.zero);
+    await pumpEventQueue();
     final offer2 = c.read(browserProvider).downloadOffer!;
     await c.read(browserProvider.notifier).declineDownload(offer2);
     expect(repo.declinedDownloads, ['1:8']);
@@ -210,7 +210,7 @@ void main() {
     events.ctrl.add(
       ServerEvent('pipeline_error', {'tab': 1, 'message': 'boom'}),
     );
-    await Future<void>.delayed(Duration.zero);
+    await pumpEventQueue();
     expect(c.read(browserProvider).lastError, 'boom');
 
     // Daemon parti puis revenu : le bootstrap réussi purge
@@ -250,17 +250,17 @@ void main() {
     // 1re invalidation → pull en vol (bloqué par la gate) ;
     // les suivantes se replient en un seul « à refaire ».
     events.ctrl.add(ServerEvent('frame_invalidated', {'tab': 1}));
-    await Future<void>.delayed(Duration.zero);
+    await pumpEventQueue();
     events.ctrl.add(ServerEvent('frame_invalidated', {'tab': 1}));
     events.ctrl.add(ServerEvent('frame_invalidated', {'tab': 1}));
-    await Future<void>.delayed(Duration.zero);
+    await pumpEventQueue();
     expect(repo.frameFetches, 1);
 
     // Libération : un seul second pull rejoue la dernière
     // frame — « dernière gagne », pas une file par event.
     repo.frameGate!.complete();
     for (var i = 0; i < 5; i++) {
-      await Future<void>.delayed(Duration.zero);
+      await pumpEventQueue();
     }
     expect(repo.frameFetches, 2);
   });
@@ -275,20 +275,20 @@ void main() {
     // Champ additif : un event ancien (sans scroll_y) ne casse
     // rien ; un event récent pose la valeur pour l'onglet.
     events.ctrl.add(ServerEvent('frame_invalidated', {'tab': 1}));
-    await Future<void>.delayed(Duration.zero);
+    await pumpEventQueue();
     expect(c.read(browserProvider).scrollY['1'], isNull);
 
     events.ctrl.add(
       ServerEvent('frame_invalidated', {'tab': 1, 'scroll_y': 240.5}),
     );
-    await Future<void>.delayed(Duration.zero);
+    await pumpEventQueue();
     expect(c.read(browserProvider).scrollY['1'], 240.5);
 
     // Autre onglet isolé — le scroll est par-onglet.
     events.ctrl.add(
       ServerEvent('frame_invalidated', {'tab': 9, 'scroll_y': 10}),
     );
-    await Future<void>.delayed(Duration.zero);
+    await pumpEventQueue();
     expect(c.read(browserProvider).scrollY['9'], 10);
     expect(c.read(browserProvider).scrollY['1'], 240.5);
   });
@@ -320,7 +320,7 @@ void main() {
     );
     // claim REST → fabrique async → listener : quelques ticks.
     for (var i = 0; i < 5; i++) {
-      await Future<void>.delayed(Duration.zero);
+      await pumpEventQueue();
     }
     final m = c.read(browserProvider).media['1']?[42];
     expect(m, isNotNull);
@@ -361,7 +361,7 @@ void main() {
       }),
     );
     for (var i = 0; i < 5; i++) {
-      await Future<void>.delayed(Duration.zero);
+      await pumpEventQueue();
     }
     final player = FakePlayer.instances.single;
     expect(player.audioTaps, 1, reason: 'tap activé au claim');
@@ -372,7 +372,7 @@ void main() {
       format: 4,
     ), Uint8List(9600));
     for (var i = 0; i < 5; i++) {
-      await Future<void>.delayed(Duration.zero);
+      await pumpEventQueue();
     }
     expect(repo.audioCalls, contains('audio:1:42:9600'));
   });
@@ -398,7 +398,7 @@ void main() {
       }),
     );
     for (var i = 0; i < 5; i++) {
-      await Future<void>.delayed(Duration.zero);
+      await pumpEventQueue();
     }
     final player = FakePlayer.instances.single;
     const spec = (sampleRate: 48000, channels: 2, format: 4);
@@ -412,7 +412,7 @@ void main() {
     repo.audioGate!.complete();
     repo.audioGate = null;
     for (var i = 0; i < 5; i++) {
-      await Future<void>.delayed(Duration.zero);
+      await pumpEventQueue();
     }
     expect(player.audioSink!(spec, Uint8List(64)), isTrue);
     expect(repo.audioCalls, hasLength(2));
@@ -439,7 +439,7 @@ void main() {
       }),
     );
     for (var i = 0; i < 5; i++) {
-      await Future<void>.delayed(Duration.zero);
+      await pumpEventQueue();
     }
     expect(FakePlayer.instances.single.audioTaps, 0);
     expect(repo.audioCalls, isEmpty);
@@ -463,7 +463,7 @@ void main() {
       }),
     );
     for (var i = 0; i < 5; i++) {
-      await Future<void>.delayed(Duration.zero);
+      await pumpEventQueue();
     }
     final p = FakePlayer.instances.single;
 
@@ -484,8 +484,8 @@ void main() {
         ServerEvent('media_command', {'tab': 1, 'media': 7, 'cmd': cmd}),
       );
     }
-    await Future<void>.delayed(Duration.zero);
-    await Future<void>.delayed(Duration.zero);
+    await pumpEventQueue();
+    await pumpEventQueue();
     expect(p.plays, 1);
     expect(p.pauses, 1);
     expect(p.seeked, const Duration(milliseconds: 2500));
@@ -503,12 +503,12 @@ void main() {
         'rect': {'x': 5.0, 'y': 999.0, 'w': 100.0, 'h': 60.0},
       }),
     );
-    await Future<void>.delayed(Duration.zero);
+    await pumpEventQueue();
     expect(c.read(browserProvider).media['1']?[7]?.rect.top, 999);
 
     // media_gone → dispose + retrait de l'état.
     events.ctrl.add(ServerEvent('media_gone', {'tab': 1, 'media': 7}));
-    await Future<void>.delayed(Duration.zero);
+    await pumpEventQueue();
     expect(c.read(browserProvider).media['1'], isNot(contains(7)));
     expect(p.disposes, 1);
 
@@ -520,7 +520,7 @@ void main() {
         'cmd': {'type': 'play'},
       }),
     );
-    await Future<void>.delayed(Duration.zero);
+    await pumpEventQueue();
     expect(p.plays, 1);
   });
 
@@ -546,7 +546,7 @@ void main() {
       }),
     );
     for (var i = 0; i < 5; i++) {
-      await Future<void>.delayed(Duration.zero);
+      await pumpEventQueue();
     }
     final p = FakePlayer.instances.single;
     // Rapport initial forcé (paused).
@@ -557,15 +557,15 @@ void main() {
       p.positionMs = i * 16;
       p.notify();
     }
-    await Future<void>.delayed(Duration.zero);
-    await Future<void>.delayed(Duration.zero);
+    await pumpEventQueue();
+    await pumpEventQueue();
     expect(repo.mediaCalls.where((s) => s.startsWith('state:')), hasLength(1));
 
     // Changement d'état dans la fenêtre → POST immédiat.
     p.state = 'playing';
     p.notify();
-    await Future<void>.delayed(Duration.zero);
-    await Future<void>.delayed(Duration.zero);
+    await pumpEventQueue();
+    await pumpEventQueue();
     expect(repo.mediaCalls, contains('state:1:5:playing'));
   });
 
@@ -587,16 +587,16 @@ void main() {
       }),
     );
     for (var i = 0; i < 5; i++) {
-      await Future<void>.delayed(Duration.zero);
+      await pumpEventQueue();
     }
     final p = FakePlayer.instances.single;
 
     events.ctrl.add(
       ServerEvent('frame_invalidated', {'tab': 1, 'scroll_y': 33}),
     );
-    await Future<void>.delayed(Duration.zero);
+    await pumpEventQueue();
     events.ctrl.add(ServerEvent('tab_closed', {'tab': 1}));
-    await Future<void>.delayed(Duration.zero);
+    await pumpEventQueue();
 
     expect(p.disposes, 1);
     expect(c.read(browserProvider).media.containsKey('1'), isFalse);
@@ -1119,7 +1119,7 @@ void main() {
       }),
     );
     for (var i = 0; i < 6; i++) {
-      await Future<void>.delayed(Duration.zero);
+      await pumpEventQueue();
     }
     final p = FakePlayer.instances.single;
     expect(p.muted, isTrue);
@@ -1147,7 +1147,7 @@ void main() {
       }),
     );
     for (var i = 0; i < 6; i++) {
-      await Future<void>.delayed(Duration.zero);
+      await pumpEventQueue();
     }
     final p = FakePlayer.instances.single;
     final ctrl = c.read(browserProvider.notifier);
@@ -1166,29 +1166,29 @@ void main() {
     // Volume absolu : posé, non persisté à chaque cran —
     // `mediaPersistAudio` est le geste de fin explicite.
     ctrl.mediaSetVolume('1', 7, 0.4);
-    await Future<void>.delayed(Duration.zero);
+    await pumpEventQueue();
     expect(p.volume, 0.4);
 
     // Mute → toggle + persistance (`.then` → 2 microtasks).
     ctrl.mediaToggleMute('1', 7);
-    await Future<void>.delayed(Duration.zero);
-    await Future<void>.delayed(Duration.zero);
+    await pumpEventQueue();
+    await pumpEventQueue();
     expect(p.muted, isTrue);
     expect(c.read(settingsProvider).mediaMuted, isTrue);
 
     // Volume > 0 sur surface mutée → dé-mute (convention).
     ctrl.mediaSetVolume('1', 7, 0.6);
-    await Future<void>.delayed(Duration.zero);
+    await pumpEventQueue();
     expect(p.volume, 0.6);
     expect(p.muted, isFalse);
     ctrl.mediaPersistAudio('1', 7);
-    await Future<void>.delayed(Duration.zero);
+    await pumpEventQueue();
     expect(c.read(settingsProvider).mediaVolume, 0.6);
 
     // `ended` → replay = seek 0 + play.
     ctrl.mediaReplay('1', 7);
-    await Future<void>.delayed(Duration.zero);
-    await Future<void>.delayed(Duration.zero);
+    await pumpEventQueue();
+    await pumpEventQueue();
     expect(p.seeked, Duration.zero);
     expect(p.plays, greaterThan(0));
   });
@@ -1214,7 +1214,7 @@ void main() {
       }),
     );
     for (var i = 0; i < 6; i++) {
-      await Future<void>.delayed(Duration.zero);
+      await pumpEventQueue();
     }
     final p = FakePlayer.instances.single;
     final ctrl = c.read(browserProvider.notifier);
@@ -1256,7 +1256,7 @@ void main() {
       }),
     );
     for (var i = 0; i < 6; i++) {
-      await Future<void>.delayed(Duration.zero);
+      await pumpEventQueue();
     }
     final ctrl = c.read(browserProvider.notifier);
 
@@ -1284,7 +1284,7 @@ void main() {
     expect(ctrl.isPipActive('1', 7), isTrue);
     events.ctrl.add(ServerEvent('media_gone', {'tab': 1, 'media': 7}));
     for (var i = 0; i < 4; i++) {
-      await Future<void>.delayed(Duration.zero);
+      await pumpEventQueue();
     }
     expect(ctrl.isPipActive('1', 7), isFalse);
   });
@@ -1313,7 +1313,7 @@ void main() {
       }),
     );
     for (var i = 0; i < 8; i++) {
-      await Future<void>.delayed(Duration.zero);
+      await pumpEventQueue();
     }
     final p = FakePlayer.instances.single;
     // Autoplay → la surface joue déjà : 🔊 visible même à 0×0.
@@ -1322,27 +1322,27 @@ void main() {
 
     // Clic 🔊 → mute global de l'onglet → 🔇.
     ctrl.mediaTabMute('1');
-    await Future<void>.delayed(Duration.zero);
+    await pumpEventQueue();
     expect(p.muted, isTrue);
     expect(c.read(browserProvider).mediaAudio['1'], isFalse);
 
     // Re-clic 🔇 → dé-mute → 🔊.
     ctrl.mediaTabMute('1');
-    await Future<void>.delayed(Duration.zero);
+    await pumpEventQueue();
     expect(p.muted, isFalse);
     expect(c.read(browserProvider).mediaAudio['1'], isTrue);
 
     // Pause → plus rien ne joue → indicateur retiré.
     await p.pause();
-    await Future<void>.delayed(Duration.zero);
+    await pumpEventQueue();
     expect(c.read(browserProvider).mediaAudio.containsKey('1'), isFalse);
 
     // media_gone sur surface en lecture → indicateur retiré.
     await p.play();
-    await Future<void>.delayed(Duration.zero);
+    await pumpEventQueue();
     expect(c.read(browserProvider).mediaAudio['1'], isTrue);
     events.ctrl.add(ServerEvent('media_gone', {'tab': 1, 'media': 7}));
-    await Future<void>.delayed(Duration.zero);
+    await pumpEventQueue();
     expect(c.read(browserProvider).mediaAudio.containsKey('1'), isFalse);
   });
 
@@ -1382,7 +1382,7 @@ void main() {
         }),
       );
       for (var i = 0; i < 8; i++) {
-        await Future<void>.delayed(Duration.zero);
+        await pumpEventQueue();
       }
       expect(c.read(browserProvider).media['1']![5]!.paint, isNull);
 

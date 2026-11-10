@@ -12404,10 +12404,10 @@ fn ce_call(e: &mut Engine, el: Value, cb_name: &str, args: &[Value]) -> JsResult
         // `call_value`, désarmé au retour) : nomme la lecture
         // que le `iDo` réel a rencontrée `Undefined`.
         let arm = cb_name == "connectedCallback"
-            && node_for(e, el.clone()).map_or(false, |n| {
-                e.dom_ctx.as_ref().map_or(false, |ctx| {
-                    ctx.0.borrow().nodes[n as usize].tag == "ytd-app"
-                })
+            && node_for(e, el.clone()).is_some_and(|n| {
+                e.dom_ctx
+                    .as_ref()
+                    .is_some_and(|ctx| ctx.0.borrow().nodes[n as usize].tag == "ytd-app")
             })
             && tracing::enabled!(target: "dom_probe", tracing::Level::INFO);
         if arm {

@@ -443,7 +443,7 @@ pub fn rsa_oaep_seal(
     plaintext: &[u8],
 ) -> Result<Vec<u8>, String> {
     use rsa::pkcs1::DecodeRsaPublicKey;
-    let pk = rsa::RsaPublicKey::from_pkcs1_der(key)
+    let pk = rsa::PublicKey::from_pkcs1_der(key)
         .map_err(|_| "encrypt: invalid public key (RSA-OAEP)".to_string())?;
     let mut rng = RingRng;
     match hash {
@@ -467,7 +467,7 @@ pub fn rsa_oaep_open(
     ciphertext: &[u8],
 ) -> Result<Vec<u8>, String> {
     use rsa::pkcs8::DecodePrivateKey;
-    let sk = rsa::RsaPrivateKey::from_pkcs8_der(key)
+    let sk = rsa::PrivateKey::from_pkcs8_der(key)
         .map_err(|_| "decrypt: invalid private key (RSA-OAEP pkcs8)".to_string())?;
     let mut rng = RingRng;
     match hash {
@@ -477,83 +477,78 @@ pub fn rsa_oaep_open(
     }
 }
 
-/// Le `label` `WebCrypto` est un `BufferSource` arbitraire ;
-/// le crate `rsa` le veut `&str` — conversion lossy bornée
-/// (les labels réels sont vides ou ASCII).
-fn rsa_oaep_pad<D>(label: &[u8]) -> rsa::Oaep
+/// Le `label` `WebCrypto` est un `BufferSource` arbitraire —
+/// `rsa` 0.10 le porte en octets (`Box<[u8]>`), copie bornée.
+fn rsa_oaep_pad<D>(label: &[u8]) -> rsa::Oaep<D>
 where
-    D: sha2::Digest + sha2::digest::DynDigest + Send + Sync + 'static,
+    D: sha2::Digest + sha2::digest::FixedOutputReset + Send + Sync + 'static,
 {
     if label.is_empty() {
-        rsa::Oaep::new::<D>()
+        rsa::Oaep::<D>::new()
     } else {
-        rsa::Oaep::new_with_label::<D, _>(String::from_utf8_lossy(label))
+        rsa::Oaep::<D>::new_with_label(label.to_vec())
     }
 }
 
 fn rsa_oaep_seal_at<D>(
-    pk: &rsa::RsaPublicKey,
+    pk: &rsa::PublicKey,
     rng: &mut RingRng,
     label: &[u8],
     plaintext: &[u8],
 ) -> Result<Vec<u8>, String>
 where
-    D: sha2::Digest + sha2::digest::DynDigest + Send + Sync + 'static,
+    D: sha2::Digest + sha2::digest::FixedOutputReset + Send + Sync + 'static,
 {
     pk.encrypt(rng, rsa_oaep_pad::<D>(label), plaintext)
         .map_err(|_| "encrypt: RSA-OAEP failed (clair trop long ou clé invalide)".to_string())
 }
 
 fn rsa_oaep_open_at<D>(
-    sk: &rsa::RsaPrivateKey,
+    sk: &rsa::PrivateKey,
     rng: &mut RingRng,
     label: &[u8],
     ciphertext: &[u8],
 ) -> Result<Vec<u8>, String>
 where
-    D: sha2::Digest + sha2::digest::DynDigest + Send + Sync + 'static,
+    D: sha2::Digest + sha2::digest::FixedOutputReset + Send + Sync + 'static,
 {
     sk.decrypt_blinded(rng, rsa_oaep_pad::<D>(label), ciphertext)
         .map_err(|_| "decrypt: RSA-OAEP open failed (padding invalide)".to_string())
 }
 
 /// `ring::rand::SystemRandom` adapté aux traits
-/// `rand_core` 0.6 — `rsa` exige un `CryptoRngCore`
+/// `rand_core` 0.10 — `rsa` exige un `TryCryptoRng`
 /// (aveuglement côté privée, remplissage OAEP côté
 /// publique) et `ring` n'expose pas ce trait.
 struct RingRng;
 
-impl rsa::rand_core::RngCore for RingRng {
-    fn next_u32(&mut self) -> u32 {
+impl rsa::rand_core::TryRng for RingRng {
+    type Error = core::convert::Infallible;
+
+    fn try_next_u32(&mut self) -> Result<u32, Self::Error> {
         let mut b = [0u8; 4];
-        self.fill_bytes(&mut b);
-        u32::from_le_bytes(b)
+        self.try_fill_bytes(&mut b)?;
+        Ok(u32::from_le_bytes(b))
     }
 
-    fn next_u64(&mut self) -> u64 {
+    fn try_next_u64(&mut self) -> Result<u64, Self::Error> {
         let mut b = [0u8; 8];
-        self.fill_bytes(&mut b);
-        u64::from_le_bytes(b)
+        self.try_fill_bytes(&mut b)?;
+        Ok(u64::from_le_bytes(b))
     }
 
-    fn fill_bytes(&mut self, dest: &mut [u8]) {
-        if self.try_fill_bytes(dest).is_err() {
-            // `ring` ne faillit jamais en pratique (syscall
-            // OS) — borne documentée : remplissage nul plutôt
-            // qu'un panic (AGENTS §4.3).
-            dest.fill(0);
-        }
-    }
-
-    fn try_fill_bytes(&mut self, dest: &mut [u8]) -> Result<(), rsa::rand_core::Error> {
+    fn try_fill_bytes(&mut self, dest: &mut [u8]) -> Result<(), Self::Error> {
         use ring::rand::SecureRandom;
-        ring::rand::SystemRandom::new()
-            .fill(dest)
-            .map_err(|_| rsa::rand_core::Error::new("ring rng fill failed"))
+        // `ring` ne faillit jamais en pratique (syscall
+        // OS) — borne documentée : remplissage nul plutôt
+        // qu'un panic (AGENTS §4.3) et `Error` est
+        // `Infallible`, l'échec n'est pas représentable.
+        let _ = ring::rand::SystemRandom::new().fill(dest);
+        Ok(())
     }
 }
 
-impl rsa::rand_core::CryptoRng for RingRng {}
+impl rsa::rand_core::TryCryptoRng for RingRng {}
 
 /// `ring::aead::UnboundKey` depuis les octets canoniques —
 /// 128/256 sélectionnés par taille de clé.
@@ -679,8 +674,8 @@ mod tests {
         use rsa::pkcs1::EncodeRsaPublicKey;
         use rsa::pkcs8::EncodePrivateKey;
         let mut rng = RingRng;
-        let sk = rsa::RsaPrivateKey::new(&mut rng, 2048).expect("keygen");
-        let pk = rsa::RsaPublicKey::from(&sk);
+        let sk = rsa::PrivateKey::new(&mut rng, 2048).expect("keygen");
+        let pk = rsa::PublicKey::from(&sk);
         let pub_der = pk.to_pkcs1_der().expect("pkcs1").as_bytes().to_vec();
         let priv_der = sk.to_pkcs8_der().expect("pkcs8").as_bytes().to_vec();
         let msg = b"license-token-42";

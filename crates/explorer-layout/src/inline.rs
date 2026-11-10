@@ -769,7 +769,16 @@ fn collect_child(
     // `AnonymousBlock` clonent le style du conteneur — leur
     // « marge » copiée n'est pas la leur : transparentes.
     let margins = b.kind == BoxKind::Inline
-        && (b.style.get("margin-left").is_some() || b.style.get("margin-right").is_some());
+        && [
+            "margin-left",
+            "margin-right",
+            "padding-left",
+            "padding-right",
+            "border-left-width",
+            "border-right-width",
+        ]
+        .iter()
+        .any(|p| b.style.get(p).is_some());
     // Élément en-ligne déclarant (§16.3.1 / R-153) : sa déco
     // enjambe le contenu descendant — empilée pour les items
     // produits par la descente, dépilée à la fermeture.
@@ -1376,11 +1385,22 @@ fn break_into_lines(
         // `align_lines` mesure la margin box ; le marqueur
         // n'ouvre jamais de ligne ni n'influe sa hauteur.
         if let Some(mark) = item.marker {
-            let (prop, open) = match mark {
-                Marker::Open => ("margin-left", true),
-                Marker::Close => ("margin-right", false),
-            };
-            let m = side_px(&item.style, prop, w, fs, ctx, 0.0);
+            let open = matches!(mark, Marker::Open);
+            // Bord consommé sur la ligne : marge + bordure +
+            // remplissage du côté concerné (§8.3/§9.4.2 — R-211 :
+            // `padding:0 8px` sur `<a>` inline retombait à 0 →
+            // items nav contigus, vol 772 dr.dk/vimeo/bitmovin).
+            let side = if open { "left" } else { "right" };
+            let m = side_px(&item.style, &format!("margin-{side}"), w, fs, ctx, 0.0)
+                + side_px(
+                    &item.style,
+                    &format!("border-{side}-width"),
+                    w,
+                    fs,
+                    ctx,
+                    0.0,
+                )
+                + side_px(&item.style, &format!("padding-{side}"), w, fs, ctx, 0.0);
             if m != 0.0 {
                 let (fx, marg_l, marg_r) = if open {
                     (cursor_x + m, m, 0.0)
