@@ -1035,3 +1035,42 @@ fn mask_shorthand_alimente_le_groupe() {
         "shorthand : hors alpha = canvas"
     );
 }
+
+/// `mask-origin:content-box` + `mask-clip:content-box` :
+/// la tuile se place dans la content box (padding ignoré)
+/// et la peinture du groupe y est bornée.
+#[test]
+fn mask_origin_clip_content_box() {
+    let dom: Dom = TreeBuilder::parse("<div class=x><div class=c></div></div>");
+    let mut eng = StyleEngine::new();
+    eng.add_css("body{margin:0}", Origin::Author);
+    // Boîte 30×30, padding 5 → content 20×20 à (5,5). Mask
+    // plein 20×20 opaque, origin+clip content-box : le mask
+    // ne couvre que x,y∈[5,25) — le carré rouge enfant
+    // (20×20 à (5,5)) survit entier, rien hors content.
+    eng.add_css(
+        ".x{display:block;width:30px;height:30px;padding:5px;box-sizing:border-box;\
+         mask-image:url('data:image/svg+xml;utf8,<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"20\" height=\"20\"><rect x=\"0\" y=\"0\" width=\"20\" height=\"20\" fill=\"black\"/></svg>');\
+         mask-origin:content-box;mask-clip:content-box}\
+         .c{display:block;width:20px;height:20px;background-color:#ff0000}",
+        Origin::Author,
+    );
+    let styles = eng.compute_tree(&dom, dom.document(), &StyleEnv::default());
+    let root_el = dom
+        .children(dom.document())
+        .into_iter()
+        .flatten()
+        .find(|&c| dom.element(c).is_ok())
+        .expect("élément racine");
+    let mut bx = build_box_tree(&dom, root_el, &styles).expect("arbre");
+    layout_tree(&mut bx, VIEW, &ctx());
+    let imgs = collect_data_images(&dom, &styles, 1 << 20);
+    let list = build_display_list_full(&bx, VIEW, 200.0, 0.0, &imgs);
+    let f = rasterize(&list, font_src(), 1.0).expect("frame allouée");
+    assert_eq!(px(&f, 10, 10)[0], 255, "content box masquée opaque = rouge");
+    assert_eq!(
+        px(&f, 2, 2),
+        [255, 255, 255, 255],
+        "zone padding = hors clip → canvas"
+    );
+}

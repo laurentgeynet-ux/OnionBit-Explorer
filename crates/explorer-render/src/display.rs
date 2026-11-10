@@ -3227,21 +3227,76 @@ fn mask_size(
 /// `mask-size`/`mask-position` résolus. Partagé par
 /// `MaskedFill` (feuille « icône ») et `PushMask` (groupe
 /// R-252) — un seul site de résolution.
+/// Aire rectangulaire d'une boîte de référence mask
+/// (`border-box`/`padding-box`/`content-box`) — R-252
+/// `mask-origin`/`mask-clip`. `fill-box`/`stroke-box`/
+/// `view-box` (référence SVG) et `no-clip`/`margin-box`
+/// approchés : `fill|stroke|view|no-clip` → border box,
+/// `margin-box` → border box élargie des marges.
+fn mask_area(bx: &LayoutBox, kind: &str) -> Rect {
+    let st = &bx.style;
+    match kind {
+        "padding-box" => {
+            let l = border_side_w(st, "left");
+            let t = border_side_w(st, "top");
+            let r = border_side_w(st, "right");
+            let b = border_side_w(st, "bottom");
+            Rect {
+                x: bx.rect.x + l,
+                y: bx.rect.y + t,
+                width: (bx.rect.width - l - r).max(0.0),
+                height: (bx.rect.height - t - b).max(0.0),
+            }
+        }
+        "content-box" => content_rect(bx),
+        "margin-box" => {
+            let ml = prop_px(st, "margin-left", 0.0);
+            let mt = prop_px(st, "margin-top", 0.0);
+            let mr = prop_px(st, "margin-right", 0.0);
+            let mb = prop_px(st, "margin-bottom", 0.0);
+            Rect {
+                x: bx.rect.x - ml,
+                y: bx.rect.y - mt,
+                width: bx.rect.width + ml + mr,
+                height: bx.rect.height + mt + mb,
+            }
+        }
+        _ => bx.rect,
+    }
+}
+
 #[allow(clippy::cast_possible_truncation, clippy::cast_precision_loss)]
-fn resolve_mask(
-    bx: &LayoutBox,
-    rect: &Rect,
-    images: &crate::PaintImages,
-) -> Option<(
-    std::sync::Arc<crate::image::DecodedImage>,
-    Rect,
-    (bool, bool),
-)> {
+fn resolve_mask(bx: &LayoutBox, rect: &Rect, images: &crate::PaintImages) -> Option<MaskLayer> {
     let mask = bx
         .node
         .and_then(|n| images.masks.get(&n))
         .or_else(|| crate::dataurl::mask_url(&bx.style).and_then(|u| images.masks_url.get(&u)))?;
-    let area = (rect.width, rect.height);
+    // R-252 — `mask-origin` borne la zone de positionnement de
+    // la tuile (initial `border-box` — mais `padding-box` dans
+    // le shorthand ? non : initial = `border-box`, §4.3) ;
+    // `mask-clip` borne l'aire de peinture du groupe.
+    // `rect` = border box décalée passée par l'appelant : les
+    // aires sont reconstruites depuis `bx.rect` + le même
+    // décalage (`rect - bx.rect`).
+    let (ox, oy) = (rect.x - bx.rect.x, rect.y - bx.rect.y);
+    let shift = |mut a: Rect| {
+        a.x += ox;
+        a.y += oy;
+        a
+    };
+    let clip_kind = bx
+        .style
+        .get("mask-clip")
+        .or_else(|| bx.style.get("-webkit-mask-clip"))
+        .map_or("border-box", str::trim);
+    let origin_kind = bx
+        .style
+        .get("mask-origin")
+        .or_else(|| bx.style.get("-webkit-mask-origin"))
+        .map_or("border-box", str::trim);
+    let origin = shift(mask_area(bx, origin_kind));
+    let clip = shift(mask_area(bx, clip_kind));
+    let area = (origin.width, origin.height);
     let fs = font_size_of(&bx.style);
     let (mw, mh) = mask_size(&bx.style, area, (mask.width as f32, mask.height as f32), fs);
     let (px, py) = bg_position(
@@ -3252,16 +3307,31 @@ fn resolve_mask(
         (mw, mh),
         fs,
     );
-    Some((
-        mask.clone(),
-        Rect {
-            x: rect.x + px,
-            y: rect.y + py,
+    Some(MaskLayer {
+        mask: mask.clone(),
+        dst: Rect {
+            x: origin.x + px,
+            y: origin.y + py,
             width: mw,
             height: mh,
         },
-        mask_repeat(&bx.style),
-    ))
+        clip,
+        repeat: mask_repeat(&bx.style),
+    })
+}
+
+/// Résolution d'une couche `mask-*` (R-252) : bitmap dont
+/// l'alpha masque, tuile `dst` (origin+size+position) et
+/// aire de peinture `clip` — coordonnées document.
+struct MaskLayer {
+    /// Bitmap — seul l'alpha est lu.
+    mask: std::sync::Arc<crate::image::DecodedImage>,
+    /// Tuile résolue (`mask-origin`+`mask-size`+`mask-position`).
+    dst: Rect,
+    /// Aire de peinture (`mask-clip`) — hors d'elle, alpha 0.
+    clip: Rect,
+    /// `mask-repeat` `(x, y)`.
+    repeat: (bool, bool),
 }
 
 /// `mask-repeat` → `(x, y)` : `repeat` par défaut (tuilage),
@@ -3453,15 +3523,13 @@ fn paint_self(
                 // — fond plein ici, un `MaskedFill`
                 // re-masquerait (alpha² sur les bords doux).
                 let group_masked = !bx.children.is_empty() || !bx.lines.is_empty();
-                if let Some((mask, dst, repeat)) =
-                    resolve_mask(bx, &rect, images).filter(|_| !group_masked)
-                {
+                if let Some(l) = resolve_mask(bx, &rect, images).filter(|_| !group_masked) {
                     items.push(DisplayItem::MaskedFill {
                         rect,
                         color: c,
-                        mask,
-                        dst,
-                        repeat,
+                        mask: l.mask,
+                        dst: l.dst,
+                        repeat: l.repeat,
                     });
                 } else if bx
                     .style
@@ -5145,12 +5213,12 @@ fn paint_box<'a>(
     } else {
         resolve_mask(bx, &shifted(bx.rect, off), cx.images)
     };
-    if let Some((mask, dst, repeat)) = &group_mask {
+    if let Some(l) = &group_mask {
         items.push(DisplayItem::PushMask {
-            rect: shifted(bx.rect, off),
-            mask: mask.clone(),
-            dst: *dst,
-            repeat: *repeat,
+            rect: l.clip,
+            mask: l.mask.clone(),
+            dst: l.dst,
+            repeat: l.repeat,
         });
     }
     // R-M5 — `filter` encadre TOUTE la sous-arbre de la
