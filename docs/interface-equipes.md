@@ -1247,3 +1247,10 @@ correcte (`UA_CSS` : `del`/`strike` line-through, `ins` underline,
 `menu` listé disc + display). Action NAV : enregistrer les 3
 interfaces dans le host DOM jscore.
 
+
+## NAV — cran 19 : le cycle patché kevlar nommé (fA/E_/I_o/ifV/dR1)
+
+- **Driver** : kevlar patche `Element.prototype.{appendChild,insertBefore,removeChild,replaceChild}` (+`j3.Wrapper`) — chaque insert dans parent `isConnected` relance `fA(O)` → `lifecycleIsConnected=true` + `u.connectedCallback` sur `pc`. **Patch posé et fonctionnel** (`patched:true`, `upl:13/lic:13` flaggés — `fA` a couru).
+- **Hydratation `F`-renderers** : `I_o(MEo=ssrEl)` → `ifV` → `O=k(F,{beforeReady})` (pc `zc` créé — `F.polymerController=O` mesuré sur masthead) → `dR1(u,P,F,X)` (slots `_.QI(H).appendChild` + `F5Z` + callbackProps). `MEo`/`xrN[tag]`/`CAf`/`TLo`/`o3f`/`lOX` = registry+fabrique.
+- **Maillon fautif nommé** : `fA` → `u.connectedCallback` → **`undefined` sur `zc`** → saut silencieux → `inst` jamais connecté → `stampbuttons_`/`stampinterstitial_`/`stampskip_navigation_`/`_renderSelf`/`renderJobsMap_` (propres à `zc[77]`) jamais engagés → masthead/page-manager vides, skeleton non retiré, `masthead-finish` jamais posé. `pc.ready()` cascade `_ensureAttributes`→`_flushProperties` = mixins `PropertyEffects`/`hostAttributes` (`kBo`/`behaviors`) jamais appliqués à cette famille (les `d`-renderers les ont — `F.polymerController=Pgm` est le bon chemin, `G`/`v.inst` l'autre — masthead a pris le chemin `Pgm` sans `inst`/`controllerProxy`/`forwardMethods`/`connectedCallback`).
+- Prochaine mesure : `dR1`/`F5Z`/`beforeReady` — qui invoque `inst`/`pc.connected` pour `F`-family (soit via `G`-ctor `v.inst` — absent car `I_o` n'a pas couru `G`, soit via un call site `pc.connectedCallback`/`inst.connected`/`attach` non tiré).
