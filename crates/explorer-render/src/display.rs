@@ -225,6 +225,30 @@ pub enum DisplayItem {
         /// (tuilage ±∞ comme `background-repeat`).
         repeat: (bool, bool),
     },
+    /// `border-image-*` résolu (R-248) — image découpée en 9
+    /// régions : coins copiés, bords étirés/tilés, centre
+    /// étiré ou omis selon `fill`.
+    BorderImage {
+        /// Boîte de destination (border box + `outset`).
+        rect: Rect,
+        /// Bitmap source.
+        img: std::sync::Arc<crate::image::DecodedImage>,
+        /// Tranches de découpe `(top, right, bottom, left)`
+        /// en pixels source (`border-image-slice` résolu).
+        src_edges: [f32; 4],
+        /// Épaisseurs de bordure `(top, right, bottom, left)`
+        /// en pixels document (`border-image-width` résolu —
+        /// `auto` → border-*-width calculé).
+        dst_edges: [f32; 4],
+        /// `fill` : la tranche centrale est peinte aussi.
+        fill_center: bool,
+        /// `border-image-repeat` `(x, y)` — 0 `stretch`,
+        /// 1 `repeat` (tilé, approximation stretch si les
+        /// deux bords ne tombent pas entiers), 2 `round`
+        /// (tilé + ajustement à un nombre entier de tuiles),
+        /// 3 `space` (tilé + espacement — approx `round`).
+        repeat: (u8, u8),
+    },
     /// Entrée de zone de clipping (`overflow` ≠ `visible`).
     PushClip(Rect),
     /// Entrée de zone de clipping arrondie (R-M9) :
@@ -462,6 +486,7 @@ fn kind_name(it: &DisplayItem) -> &'static str {
         DisplayItem::Emphasis { .. } => "emphasis",
         DisplayItem::BackgroundImage { .. } => "bg_image",
         DisplayItem::MaskedFill { .. } => "masked",
+        DisplayItem::BorderImage { .. } => "border-image",
         DisplayItem::PushClip(_) => "push_clip",
         DisplayItem::PushClipRounded { .. } => "push_clip_r",
         DisplayItem::PopClip => "pop_clip",
@@ -579,6 +604,9 @@ impl DisplayList {
                 }
                 DisplayItem::MaskedFill { rect, mask, .. } => {
                     let _ = writeln!(out, "masked-fill {}x{} {rect:?}", mask.width, mask.height);
+                }
+                DisplayItem::BorderImage { rect, img, .. } => {
+                    let _ = writeln!(out, "border-image {}x{} {rect:?}", img.width, img.height);
                 }
                 DisplayItem::BoxShadow { rect, .. } => {
                     let _ = writeln!(out, "box-shadow {rect:?}");
@@ -709,6 +737,7 @@ fn item_bounds(item: &DisplayItem) -> Option<Rect> {
         | DisplayItem::Placeholder { rect, .. }
         | DisplayItem::Image { rect, .. }
         | DisplayItem::MaskedFill { rect, .. }
+        | DisplayItem::BorderImage { rect, .. }
         | DisplayItem::Marker { rect, .. }
         | DisplayItem::BackdropFilter { rect, .. }
         | DisplayItem::BackgroundImage { rect, .. } => Some(*rect),
@@ -935,6 +964,31 @@ fn item_eq(a: &DisplayItem, b: &DisplayItem) -> bool {
                 repeat: p2,
             },
         ) => r1 == r2 && c1 == c2 && d1 == d2 && p1 == p2 && std::sync::Arc::ptr_eq(m1, m2),
+        (
+            D::BorderImage {
+                rect: r1,
+                img: i1,
+                src_edges: s1,
+                dst_edges: d1,
+                fill_center: f1,
+                repeat: p1,
+            },
+            D::BorderImage {
+                rect: r2,
+                img: i2,
+                src_edges: s2,
+                dst_edges: d2,
+                fill_center: f2,
+                repeat: p2,
+            },
+        ) => {
+            r1 == r2
+                && s1 == s2
+                && d1 == d2
+                && f1 == f2
+                && p1 == p2
+                && std::sync::Arc::ptr_eq(i1, i2)
+        }
         (
             D::Marker {
                 rect: r1,
@@ -3134,6 +3188,63 @@ fn mask_size(
 /// `space`/`round` approchés en `repeat` (nearest — l'écart
 /// de rendu est sub-pixel sur les motifs icon, où la tuile
 /// couvre la zone). Deux valeurs = x puis y.
+/// `border-image-slice` : insets `(t, r, b, l)` en pixels
+/// source — `%` rapportés à la dimension de l'image
+/// (t/b → hauteur, r/l → largeur), nombre nu = px.
+/// `fill` est lu à l'émission (pas un inset).
+fn border_img_slice(st: &explorer_css::ComputedStyle) -> [f32; 4] {
+    // `border-image-slice` : insets `(t, r, b, l)` —
+    // nombre nu = pixels source, `%` = pourcentage de la
+    // dimension image (t/b → hauteur, r/l → largeur).
+    // Convention interne : `≥0` = px, `<0` = -%×100
+    // (le raster décode contre iw/ih). `fill` lu ailleurs.
+    let v = st.get("border-image-slice").unwrap_or_default();
+    let mut out = [0.0f32; 4];
+    let vals: Vec<&str> = v.split_whitespace().filter(|p| *p != "fill").collect();
+    for (i, o) in out.iter_mut().enumerate() {
+        let t = vals.get(i).or_else(|| vals.first()).copied().unwrap_or("100%");
+        *o = if let Some(n) = t.strip_suffix('%') {
+            -n.parse::<f32>().unwrap_or(0.0)
+        } else {
+            t.parse::<f32>().unwrap_or(0.0)
+        };
+    }
+    out
+}
+
+/// `border-image-width` : épaisseurs `(t, r, b, l)` px —
+/// `auto`/absent → les `border-*-width` calculés.
+fn border_img_widths(st: &explorer_css::ComputedStyle, fallback: [f32; 4]) -> [f32; 4] {
+    let v = st.get("border-image-width");
+    let mut out = fallback;
+    if let Some(v) = v {
+        let parts: Vec<&str> = v.split_whitespace().collect();
+        for (i, o) in out.iter_mut().enumerate() {
+            if let Some(t) = parts.get(i).or_else(|| parts.first()) {
+                if let Some(px) = t.strip_suffix("px").and_then(|n| n.parse::<f32>().ok()) {
+                    *o = px;
+                } else if let Ok(n) = t.parse::<f32>() {
+                    *o = n; // multiplicateur de border-width — simplification.
+                }
+            }
+        }
+    }
+    out
+}
+
+/// `border-image-repeat` — 0 stretch, 1 repeat, 2 round, 3 space.
+fn border_img_repeat(st: &explorer_css::ComputedStyle) -> (u8, u8) {
+    let v = st.get("border-image-repeat").unwrap_or("stretch");
+    let mut it = v.split_whitespace();
+    let m = |t: &str| match t {
+        "repeat" => 1u8,
+        "round" => 2u8,
+        "space" => 3u8,
+        _ => 0u8,
+    };
+    (m(it.next().unwrap_or("stretch")), m(it.next().unwrap_or("stretch")))
+}
+
 fn mask_repeat(st: &explorer_css::ComputedStyle) -> (bool, bool) {
     let raw = st
         .get("mask-repeat")
@@ -3372,6 +3483,30 @@ fn paint_self(
             ],
             radii: corner_radii(&bx.style, &rect),
         });
+    }
+    // R-248 — `border-image` : source url résolue par
+    // `borders_url` (data-url collectés, fetchés par
+    // `register_border_url`) → découpe 9 régions émise après
+    // la bordure classique (le style `border-image-*`
+    // **remplace** le visuel des côtés — l'item `Border` ci-
+    // dessus reste pour les coins/rayons et les bords non
+    // couverts par l'image).
+    if !anonymous && !inline_flow && !empty_hidden {
+        if let Some(img) = crate::dataurl::border_img_url(&bx.style)
+            .and_then(|u| images.borders_url.get(&u))
+        {
+            items.push(DisplayItem::BorderImage {
+                rect,
+                img: img.clone(),
+                src_edges: border_img_slice(&bx.style),
+                dst_edges: border_img_widths(&bx.style, widths),
+                fill_center: bx
+                    .style
+                    .get("border-image-slice")
+                    .is_some_and(|v| v.split_whitespace().any(|p| p == "fill")),
+                repeat: border_img_repeat(&bx.style),
+            });
+        }
     }
     // `outline` (R-M13) : anneau autour de la bordure, sans
     // emprise au layout — peint hors border box à
@@ -4408,6 +4543,21 @@ fn translate_item(it: &DisplayItem, d: (f32, f32)) -> DisplayItem {
             color: *color,
             mask: mask.clone(),
             dst: shifted(*dst, d),
+            repeat: *repeat,
+        },
+        D::BorderImage {
+            rect,
+            img,
+            src_edges,
+            dst_edges,
+            fill_center,
+            repeat,
+        } => D::BorderImage {
+            rect: shifted(*rect, d),
+            img: img.clone(),
+            src_edges: *src_edges,
+            dst_edges: *dst_edges,
+            fill_center: *fill_center,
             repeat: *repeat,
         },
         D::Marker { rect, kind, color } => D::Marker {

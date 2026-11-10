@@ -155,6 +155,17 @@ pub fn collect_data_images(dom: &Dom, styles: &StyleMap, max_px: u32) -> PaintIm
                 }
             }
         }
+        // `border-image-source` — même canal `url(data:…)` que
+        // les masks (R-248).
+        if let Some(url) = style
+            .get("border-image-source")
+            .and_then(url_arg)
+            .filter(|u| u.starts_with("data:"))
+        {
+            if let Some(img) = decode_data_url(&url, max_px) {
+                out.borders_url.insert(url, Arc::new(img));
+            }
+        }
         // Masks portés par les `::before`/`::after` de `node` —
         // les styles pseudo sont clés sur l'élément origine
         // dans `StyleMap` ; la boîte pseudo n'a pas de
@@ -180,6 +191,12 @@ pub fn collect_data_images(dom: &Dom, styles: &StyleMap, max_px: u32) -> PaintIm
 /// clé de [`crate::PaintImages::masks_url`], utilisée pour les
 /// porteurs sans `NodeId` (pseudos) et les masks fetchés
 /// enregistrés par l'appelant.
+/// `border-image-source` — url brute du style calculé
+/// (R-248, clé de `PaintImages::borders_url`).
+pub(crate) fn border_img_url(style: &explorer_css::ComputedStyle) -> Option<String> {
+    style.get("border-image-source").and_then(url_arg)
+}
+
 pub(crate) fn mask_url(style: &explorer_css::ComputedStyle) -> Option<String> {
     for prop in ["mask-image", "-webkit-mask-image"] {
         if let Some(url) = style.get(prop).and_then(url_arg) {

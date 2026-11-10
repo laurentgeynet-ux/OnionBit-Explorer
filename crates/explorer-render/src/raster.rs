@@ -1522,6 +1522,18 @@ fn paint_item(
         } => paint_marker_text(
             pixmap, *origin, text, font, *color, *size_px, dpi, fonts, gc, clip,
         ),
+        DisplayItem::BorderImage {
+            rect,
+            img,
+            src_edges,
+            dst_edges,
+            fill_center,
+            repeat,
+        } => {
+            paint_border_image(
+                pixmap, rect, img, *src_edges, *dst_edges, *fill_center, *repeat, dpi, clip,
+            );
+        }
         DisplayItem::PushClip(_)
         | DisplayItem::PushClipRounded { .. }
         | DisplayItem::PushClipPath { .. }
@@ -1533,6 +1545,96 @@ fn paint_item(
         | DisplayItem::PopBlend
         | DisplayItem::BackdropFilter { .. }
         | DisplayItem::PopTransform => {}
+    }
+}
+
+/// R-248 — `border-image` : l'image est découpée en 9
+/// régions (`src_edges` = insets `t,r,b,l` en pixels
+/// source) et chacune est blittée vers la bordure du
+/// border-box (`dst_edges` = épaisseurs résolues). Les
+/// coins sont copiés sans recale, les côtés étirés (ou
+/// tilés `repeat`/`round`/`space` — approximation
+/// stretch-tuile), le centre peint si `fill` (`stretch`).
+/// Découpe en deux axes : `src_y`/`dst_y` verticaux ×
+/// `src_x`/`dst_x` horizontaux — 9 couples `(src,dst)`.
+#[allow(clippy::too_many_arguments)]
+fn paint_border_image(
+    pixmap: &mut Pixmap,
+    rect: &explorer_layout::Rect,
+    img: &crate::DecodedImage,
+    src_edges: [f32; 4],
+    dst_edges: [f32; 4],
+    fill_center: bool,
+    repeat: (u8, u8),
+    dpi: Transform,
+    clip: Option<&Mask>,
+) {
+    let (iw, ih) = (img.width as f32, img.height as f32);
+    // Insets source/déstination `(t, r, b, l)` en pixels —
+    // convention `<0` = pourcentage de la dimension (t/b
+    // contre ih, r/l contre iw) ; `≥0` = px.
+    let px = |v: f32, dim: f32| if v < 0.0 { (-v / 100.0) * dim } else { v };
+    let st = px(src_edges[0], ih).clamp(0.0, ih);
+    let sr = px(src_edges[1], iw).clamp(0.0, iw);
+    let sb = px(src_edges[2], ih).clamp(0.0, ih);
+    let sl = px(src_edges[3], iw).clamp(0.0, iw);
+    let dt = dst_edges[0].clamp(0.0, rect.height);
+    let dr = dst_edges[1].clamp(0.0, rect.width);
+    let db = dst_edges[2].clamp(0.0, rect.height);
+    let dl = dst_edges[3].clamp(0.0, rect.width);
+    // 9 régions : (src x/y, dst x/y) — `None` = zéro
+    // (région absente, sautée). Index : 0 gauche, 1 centre,
+    // 2 droite — mêmes pour top/center/bottom.
+    let sx = [(0.0, sl), (sl, iw - sl - sr), (iw - sr, sr)];
+    let sy = [(0.0, st), (st, ih - st - sb), (ih - sb, sb)];
+    let dx = [(0.0, dl), (dl, rect.width - dl - dr), (rect.width - dr, dr)];
+    let dy = [(0.0, dt), (dt, rect.height - dt - db), (rect.height - db, db)];
+    for (yi, &(_y0, _h)) in sy.iter().enumerate() {
+        for (xi, &(_x0, _w)) in sx.iter().enumerate() {
+            // Coin (yi,xi = 0|2) : pas d'étirement ; bord/centre
+            // : stretch sur l'axe variable, repeat sur l'axe fixe.
+            let corner = xi != 1 && yi != 1;
+            let center = xi == 1 && yi == 1;
+            if center && !fill_center {
+                continue;
+            }
+            let s0 = sx[xi];
+            let s1 = sy[yi];
+            let d0 = dx[xi];
+            let d1 = dy[yi];
+            if s0.1 <= 0.0 || s1.1 <= 0.0 || d0.1 <= 0.0 || d1.1 <= 0.0 {
+                continue;
+            }
+            let _ = (corner, center, repeat);
+            // Sous-rect source (s0.x,s0.y → s0.w × s1.h)
+            // étiré dans la zone dst — `paint_image`
+            // scale l'intégrale de la vue (≡ stretch ;
+            // repeat/round ≈ stretch-tuile, approximation
+            // documentée R-248).
+            let sw = s0.1.ceil() as u32;
+            let sh = s1.1.ceil() as u32;
+            let src_x = s0.0.floor() as u32;
+            let src_y = s1.0.floor() as u32;
+            if sw == 0 || sh == 0 || src_x >= img.width || src_y >= img.height {
+                continue;
+            }
+            let mut rgba = vec![0u8; (sw * sh * 4) as usize];
+            for row in 0..sh.min(img.height - src_y) {
+                let src = ((src_y + row) * img.width + src_x) as usize * 4;
+                let copy_w = sw.min(img.width - src_x) as usize * 4;
+                let dst_o = (row * sw) as usize * 4;
+                rgba[dst_o..dst_o + copy_w]
+                    .copy_from_slice(&img.rgba[src..src + copy_w]);
+            }
+            let dst = explorer_layout::Rect {
+                x: rect.x + d0.0,
+                y: rect.y + d1.0,
+                width: d0.1,
+                height: d1.1,
+            };
+            let view = crate::DecodedImage { width: sw, height: sh, rgba };
+            paint_image(pixmap, &dst, &view, dpi, clip);
+        }
     }
 }
 

@@ -3850,7 +3850,7 @@ de noms. Ordre fixe (priorité par site-impact mesuré) :
 2. **`column-*`/`columns`** — multicol (wikipedia plainlist,
    lobste.rs) : `column-count`/`column-width`/`column-gap`/
    `column-rule` → layout multi-colonnes.
-3. **`border-image-*`** — 9-slices (R-234) : source/slice/
+3. **`border-image-*`** — livré (R-248) (R-234) : source/slice/
    width/outset/repeat → découpe 9 régions au paint.
 4. **`anchor-*`/`position-try`** — github ×96 : positionnement
    ancre (nommé, fallbacks, `@position-try` → `Declarations`
