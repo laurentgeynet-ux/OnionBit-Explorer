@@ -452,16 +452,23 @@ impl Session {
                 var rm=function(n){try{if(n&&n.removeAttribute&&\
                     n.hasAttribute&&n.hasAttribute('disable-upgrade'))\
                     n.removeAttribute('disable-upgrade')}catch(e){}};\
+                var pcinit=function(n){try{var pc=n&&n.polymerController;\
+                    if(pc&&!pc.__dataClientsInitialized){\
+                        if(pc._enableProperties)pc._enableProperties();\
+                        if(pc._readyClients)pc._readyClients()}}catch(e){}};\
+                var scan=function(root){try{var all=root.querySelectorAll('*');\
+                    for(var i=0;i<all.length;i++)pcinit(all[i])}catch(e){}};\
                 try{var all=document.querySelectorAll('[disable-upgrade]');\
                     for(var i=0;i<all.length;i++)rm(all[i]);\
+                    scan(document.documentElement);\
                     new MutationObserver(function(ms){\
                         for(var i=0;i<ms.length;i++){var r=ms[i];\
-                            rm(r.target);\
+                            rm(r.target);pcinit(r.target);\
                             var an=r.addedNodes||[];\
                             for(var j=0;j<an.length;j++){var n=an[j];\
-                                rm(n);\
+                                rm(n);pcinit(n);\
                                 if(n&&n.querySelectorAll){var q=n.querySelectorAll('[disable-upgrade]');\
-                                    for(var k=0;k<q.length;k++)rm(q[k])}}\
+                                    for(var k=0;k<q.length;k++)rm(q[k]);scan(n)}}\
                         }}).observe(document.documentElement,{childList:true,subtree:true,attributes:true,attributeFilter:['disable-upgrade']});\
                 }catch(e){}})()";
             self.eval_or_report(tab, eng, DISABLE_UPGRADE_SWEEP, None, None);

@@ -1227,3 +1227,8 @@ luminance` et `mask-composite` = résidus documentés.
 - Fix ShadyDOM vérifié (`pc._enableProperties`+`_readyClients` → `litKids:0` sur logo) ; premier vol post-fix `lit:3` avant sondes. Vol propre suivant `lit:27` — le stamp produit désormais du contenu annoté (`_attachDom`/`stampDom` aboutissent grâce au déballage), mais l'apply post-stamp ne suit pas partout : `TP-YT-PAPER-TOOLTIP` ×17 (lazy `dom-if`/hover — en partie par design), `[[countryCode]]` ×2 logo, `TP-YT-PAPER-BUTTON/MENU` ×5, settings+rich-grid ×2.
 - **Frontière nommée** : le trigger amont `element.connectedCallback → pc.connectedCallback → pc.attached → _readyClients → _enableProperties` ne court pas pour les classes `F`/`d` (les pcs résolvent quand appelés — c'est le déclencheur qui manque). `connectedCallback`/`attachedCallback` absents de l'élément (adaptateur ES5 les vit ailleurs — `pc` les porte).
 - **Résidu** : un site `appendChild` (dom_host:9055) rejette encore un arg non-wrapper/non-node sur `_readyClients` — forme à capturer (espions JS sur prototypes muts : pas un appel via `Element/Node/DocumentFragment/Document.prototype`).
+
+## NAV — cran 17 : grille rendue — `lit:1` (faux positif)
+
+- `dom_host` déballe `.node` (wrappers `ShadyDOM.wrap`) + sweep DCL pousse `pc._enableProperties()`+`pc._readyClients()` sur pcs non initialisés → **vol mesuré `lit:1` (=`WIZ_global_data` script), `du:0`, `rs:"complete"`** — frame : skeleton feed 3×3 correct, `[[countryCode]]`/`[[getSimpleString(data.title)]]`/tooltips liés.
+- Cause racine de la frontière : classes `F`/`d` (ytd-*-renderer) sans callbacks CE — `pc.attached`/`_readyClients` jamais invoqués par le cycle élément ; la passe pc est idempotente et honnête (vraie mécanique, pas de réécriture de contenu).
