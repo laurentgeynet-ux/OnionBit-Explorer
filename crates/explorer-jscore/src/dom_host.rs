@@ -2548,7 +2548,7 @@ pub(crate) fn whole_text_of(dom: &DomRef, node: NodeId) -> String {
     let mut cur = Some(node);
     while let Some(c) = cur {
         let n = &d.nodes[c as usize];
-        if !matches!(n.kind, NodeKind::Text | NodeKind::Comment) {
+        if !matches!(n.kind, NodeKind::Text) {
             break;
         }
         if c != node {
@@ -2563,7 +2563,7 @@ pub(crate) fn whole_text_of(dom: &DomRef, node: NodeId) -> String {
     cur = d.sibling(node, true);
     while let Some(c) = cur {
         let n = &d.nodes[c as usize];
-        if !matches!(n.kind, NodeKind::Text | NodeKind::Comment) {
+        if !matches!(n.kind, NodeKind::Text) {
             break;
         }
         out.push_str(&n.text);
@@ -8621,15 +8621,25 @@ impl Host for NodeHost {
             // `Range.getBoxQuads`/`Text.getBoxQuads` — pas de
             // géométrie fine de quads dans le miroir : tableau
             // vide honnête (même borne `getClientRects`).
+            // `getBoxQuads` — méthode lisible (garde `Text`/
+            // `Comment`) ; l'invoke rend un tableau vide
+            // honnête (pas de géométrie de quads — même borne
+            // `getClientRects`).
             "getBoxQuads" => {
                 let is_text = matches!(
                     self.dom.borrow().nodes[node as usize].kind,
                     NodeKind::Text | NodeKind::Comment
                 );
-                if !is_text {
+                if !is_text || matches!(this, Value::Obj(id) if e.host_method_shadowed(id, key))
+                {
                     return Ok(None);
                 }
-                return Ok(Some(e.new_array(Vec::new())));
+                let nv = e.str_val(key);
+                return Ok(Some(e.bound_native(
+                    "node.method",
+                    host_method_trampoline,
+                    vec![nv, this],
+                )));
             }
             // `el.attributes` — `NamedNodeMap` vivante (JS-C76) :
             // itérable + `length` + indexés — les helpers
@@ -10646,6 +10656,18 @@ impl Host for NodeHost {
                 }
                 drop(d);
                 Ok(Some(node_value(e, &self.dom, &self.cache, t2)))
+            }
+            "getBoxQuads" => {
+                // Garde `Text`/`Comment` — tableau vide
+                // honnête (pas de géométrie de quads).
+                let is_text = matches!(
+                    self.dom.borrow().nodes[node as usize].kind,
+                    NodeKind::Text | NodeKind::Comment
+                );
+                if !is_text {
+                    return Ok(None);
+                }
+                Ok(Some(e.new_array(Vec::new())))
             }
             "insertAdjacentText" => {
                 let pos = e.to_js_string(arg(args, 0))?;

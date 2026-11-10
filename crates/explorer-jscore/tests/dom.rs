@@ -7626,7 +7626,7 @@ fn text_members_lot4() {
             "<html><body><div id=d>ab</div></body></html>",
             "var t=document.getElementById('d').firstChild;\
              var q=t.splitText(1);\
-             t.data+'|'+q.data+'|'+t.wholeText+'|'+t.nextSibling===q+'|'+document.getElementById('d').childNodes.length",
+             t.data+'|'+q.data+'|'+t.wholeText+'|'+(t.nextSibling===q)+'|'+document.getElementById('d').childNodes.length",
         ),
         "a|b|ab|true|2"
     );
