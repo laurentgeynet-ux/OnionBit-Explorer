@@ -1018,6 +1018,50 @@ async fn animationstart_fires_for_new_keyframe_animation() {
     assert_eq!(out.trim(), "ghz@DIV", "animationstart livré : {out}");
 }
 
+/// JS-C475 — `getAnimations()` remonte les animations **CSS**
+/// : la session pose `data-explorer-anim` sur le miroir à
+/// chaque pompe (`drain_anim_marks`) ; la lecture
+/// matérialise l'`Animation` avec `animationName`.
+#[tokio::test]
+async fn css_animation_marked_getanimations_sees_it() {
+    let mut s = Session::new(Arc::new(FailTransport), Arc::new(TestFont));
+    s.set_js_factory(explorer_js::JscoreEngine::factory());
+    let tab = s.open_tab();
+    let html = "<!doctype html><html><head><style>\
+                @keyframes ghz { from { opacity:.9 } to { opacity:1 } }\
+                #x { animation-name: ghz; animation-duration: 5s }\
+                </style></head><body><div id=\"x\"></div></body></html>";
+    let eng = s.spawn_engine(tab, html, true, "");
+    {
+        let e = s.tabs.get_mut(&tab).unwrap();
+        let mut tb = TreeBuilder::new();
+        tb.push(html);
+        tb.finish();
+        e.dom = Some(tb.into_dom());
+        e.url = Some(Url::parse("http://h.test/as").unwrap());
+        e.js = eng;
+    }
+    s.relayout(tab).unwrap();
+    s.pump_timers(tab);
+    let out = s
+        .tabs
+        .get_mut(&tab)
+        .and_then(|e| e.js.as_mut())
+        .and_then(|eng| {
+            eng.eval(
+                "var a=document.getAnimations();\
+                 a.length+'@'+a[0].animationName+'@'+a[0].playState",
+            )
+            .ok()
+        })
+        .unwrap_or_default();
+    assert_eq!(
+        out.trim(),
+        "1@ghz@running",
+        "getAnimations remonte l'anim CSS : {out}"
+    );
+}
+
 /// §B-54 (flixbus vol 100) — `drain_anim_births` dispatchait
 /// chaque naissance `animationstart` sans borne temps :
 /// dispatch+miroir ~15 s chacun sous verrou → boucle ×N =

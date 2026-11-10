@@ -1209,6 +1209,10 @@ impl Session {
             // `animationstart` pendants n'ont plus de cible
             // ni de listeners sur le document neuf.
             entry.pending_anim_births.clear();
+            // Marques `data-explorer-anim` : le miroir du
+            // document mort meurt avec son moteur — le diff
+            // repart d'un miroir nu (JS-C475).
+            entry.anim_marks.clear();
             entry.frame_ctxs.clear();
             entry.images = PaintImages::default();
             entry.bg_aliases.clear();

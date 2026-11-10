@@ -186,6 +186,7 @@ impl Tab {
         self.js_pending_attrs.clear();
         self.pending_doc_lifecycle.clear();
         self.pending_anim_births.clear();
+        self.anim_marks.clear();
         self.sync_floor = None;
         self.last_req = snap.last_req;
         self.frames = snap.frames;

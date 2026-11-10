@@ -621,6 +621,12 @@ pub(crate) struct Tab {
     /// présent (sinon conservées — la découverte lazy des
     /// registries CE dépend de chaque événement).
     pending_anim_births: std::collections::VecDeque<(explorer_dom::NodeId, String)>,
+    /// Marques `data-explorer-anim` actuellement posées sur
+    /// le miroir (JS-C475 — `getAnimations()` remonte les
+    /// animations CSS déclaratives) : chemin élément →
+    /// `nom` ou `nom|paused`. Vidée à la navigation comme
+    /// `animations` — le diff repart d'un miroir nu.
+    anim_marks: std::collections::HashMap<Vec<(String, u32)>, String>,
     /// Événements `EventSource` tamponnés pendant le
     /// détachement (JS-C92) — `(ctx, handle, ev)`, même
     /// règle que `js_pending_crypto`.
@@ -1657,6 +1663,7 @@ impl Session {
                 js_pending_crypto: Vec::new(),
                 pending_doc_lifecycle: Vec::new(),
                 pending_anim_births: std::collections::VecDeque::new(),
+                anim_marks: std::collections::HashMap::new(),
                 js_pending_es: Vec::new(),
                 js_pending_ws: Vec::new(),
                 js_pending_attrs: Vec::new(),

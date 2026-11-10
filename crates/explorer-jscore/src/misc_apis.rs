@@ -2224,6 +2224,11 @@ struct AnimData {
     /// implicite + `document.timeline`.
     effect: Value,
     timeline: Value,
+    /// `animationName` (JS-C475) — `Some` pour une animation
+    /// **CSS déclarative** remontée par la session via la
+    /// marque `data-explorer-anim` du miroir ; `None` pour
+    /// les `Animation` nées du script (`el.animate`, ctor).
+    css_name: Option<String>,
 }
 
 struct AnimHost {
@@ -2393,6 +2398,7 @@ pub(crate) fn animation_ctor(e: &mut Engine, _t: Value, args: &[Value]) -> JsRes
         oncancel: Value::Undefined,
         effect,
         timeline: tl,
+        css_name: None,
     }));
     e.misc.anims.push(data.clone());
     Ok(anim_wrapper(e, &data))
@@ -2438,17 +2444,102 @@ pub(crate) fn animate(e: &mut Engine, t: Value, args: &[Value]) -> JsResult<Valu
         oncancel: Value::Undefined,
         effect: kfe,
         timeline: Value::Obj(document_timeline(e)),
+        css_name: None,
     }));
     e.misc.anims.push(data.clone());
     Ok(anim_wrapper(e, &data))
 }
 
+/// Marque posée par la session sur le miroir pour chaque
+/// animation **CSS** active (JS-C475) — `data-explorer-anim`
+/// = `nom` ou `nom|paused`. `get_animations` les matérialise
+/// en `Animation` honnêtes : identité `(nœud, nom)` stable
+/// entre deux appels, mortes retirées du registre.
+const CSS_ANIM_ATTR: &str = "data-explorer-anim";
+
+/// Matérialise les animations CSS marquées du miroir en
+/// `AnimData` — crée les entrées manquantes, retire les
+/// mortes, met à jour `paused` en place. Retourne les
+/// `NodeId` des éléments marqués (pour le filtre de scope).
+fn sync_css_anims(e: &mut Engine) -> Vec<(crate::dom::NodeId, String, bool)> {
+    let Some((dom, _)) = e.dom_ctx.clone() else {
+        return Vec::new();
+    };
+    let mut marks: Vec<(crate::dom::NodeId, String, bool)> = Vec::new();
+    {
+        let d = dom.borrow();
+        for (id, n) in d.nodes.iter().enumerate() {
+            if n.kind != crate::dom::NodeKind::Element {
+                continue;
+            }
+            let Some((_, v)) = n
+                .attrs
+                .iter()
+                .find(|(k, _)| k.eq_ignore_ascii_case(CSS_ANIM_ATTR))
+            else {
+                continue;
+            };
+            // `nom` ou `nom|paused` — `|` ne peut pas figurer
+            // dans un ident CSS (grammaire des noms @keyframes).
+            let (name, paused) = match v.rsplit_once('|') {
+                Some((name, "paused")) => (name, true),
+                _ => (v.as_str(), false),
+            };
+            marks.push((id as crate::dom::NodeId, name.to_string(), paused));
+        }
+    }
+    // Mortes : une entrée CSS dont la marque a disparu du
+    // miroir quitte le registre (spec : `getAnimations` ne
+    // rend que les animations « relevant »).
+    e.misc.anims.retain(|a| {
+        let d = a.borrow();
+        d.css_name
+            .as_ref()
+            .is_none_or(|cn| marks.iter().any(|(n, name, _)| *n == d.node && name == cn))
+    });
+    for (node, name, paused) in &marks {
+        let state = if *paused { "paused" } else { "running" };
+        if let Some(a) = e.misc.anims.iter().find(|a| {
+            let d = a.borrow();
+            d.node == *node && d.css_name.as_deref() == Some(name.as_str())
+        }) {
+            let cur = a.borrow().state;
+            if cur != "finished" {
+                a.borrow_mut().state = state;
+            }
+            continue;
+        }
+        let finished = e.new_promise();
+        let ready = e.new_promise();
+        e.resolve_promise(ready, Value::Undefined);
+        let data = Rc::new(RefCell::new(AnimData {
+            node: *node,
+            state,
+            rate: 1.0,
+            finished,
+            ready,
+            wrapper: None,
+            onfinish: Value::Undefined,
+            oncancel: Value::Undefined,
+            effect: Value::Null,
+            timeline: Value::Obj(document_timeline(e)),
+            css_name: Some(name.clone()),
+        }));
+        e.misc.anims.push(data);
+    }
+    marks
+}
+
 /// `el.getAnimations()`/`document.getAnimations()`
-/// (CAP-187) — wrappers des animations vivantes (le
+/// (CAP-187 + JS-C475) — wrappers des animations vivantes :
+/// celles nées du script (`el.animate`, `new Animation`)
+/// **et** les animations `@keyframes` CSS déclaratives
+/// remontées par la session via `data-explorer-anim` (le
 /// filtre élément borne aux animations de ce nœud ;
 /// document → toutes — borné : pas de sous-arbre).
 pub(crate) fn get_animations(e: &mut Engine, this: Value, _a: &[Value]) -> JsResult<Value> {
     let scope = node_for(e, this);
+    sync_css_anims(e);
     let datas: Vec<Rc<RefCell<AnimData>>> = e
         .misc
         .anims
@@ -2498,6 +2589,13 @@ impl Host for AnimHost {
             // ou l'implicite `el.animate` (KFE + timeline).
             "effect" => d.effect.clone(),
             "timeline" => d.timeline.clone(),
+            // `CSSAnimation.animationName` (JS-C475) —
+            // `undefined` sur les `Animation` nées du script
+            // (WAAPI : pas de nom déclaratif).
+            "animationName" => d
+                .css_name
+                .as_ref()
+                .map_or(Value::Undefined, |n| e.str_val(n.clone())),
             "finished" => Value::Obj(d.finished),
             "ready" => Value::Obj(d.ready),
             "onfinish" => d.onfinish.clone(),
