@@ -9,23 +9,24 @@
 use explorer_css::{Origin, StyleEngine, StyleEnv};
 use explorer_html::TreeBuilder;
 
+fn find(bx: &explorer_layout::LayoutBox, dom: &explorer_dom::Dom, class: &str) -> Option<(f32, f32)> {
+    if bx.node.and_then(|n| dom.attribute_str(n, "class").ok().flatten()).is_some_and(|c| c == class) {
+        return Some((bx.intrinsic.map_or(-1.0, |i| i.0), bx.intrinsic.map_or(-1.0, |i| i.1)));
+    }
+    for c in &bx.children {
+        if let Some(r) = find(c, dom, class) {
+            return Some(r);
+        }
+    }
+    None
+}
+
 fn rect_of(html: &str, css: &str, class: &str) -> (f32, f32) {
     let dom = TreeBuilder::parse(html);
     let mut eng = StyleEngine::new();
     eng.add_css(css, Origin::Author);
     let styles = eng.compute_tree(&dom, dom.document(), &StyleEnv::default());
     let bx = explorer_layout::build_box_tree(&dom, dom.document(), &styles).expect("arbre");
-    fn find(bx: &explorer_layout::LayoutBox, dom: &explorer_dom::Dom, class: &str) -> Option<(f32, f32)> {
-        if bx.node.and_then(|n| dom.attribute_str(n, "class").ok().flatten()).is_some_and(|c| c == class) {
-            return Some((bx.intrinsic.map(|i| i.0).unwrap_or(-1.0), bx.intrinsic.map(|i| i.1).unwrap_or(-1.0)));
-        }
-        for c in &bx.children {
-            if let Some(r) = find(c, dom, class) {
-                return Some(r);
-            }
-        }
-        None
-    }
     find(&bx, &dom, class).unwrap_or((-1.0, -1.0))
 }
 
