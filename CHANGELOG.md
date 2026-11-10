@@ -6,6 +6,7 @@ Le format suit [Keep a Changelog](https://keepachangelog.com/fr/1.1.0/)
 et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
+- **`alignment-baseline`/`baseline-shift` consommés** (`explorer-layout`) : replient sur la table `vertical-align` (`ideographic`→text-bottom, `hanging`→top, `central`/`mathematical`/`middle`→middle ; `baseline-shift` = `sub`/`super`/longueur) — `vertical-align` déclaré prime. Verrou : `alignment_baseline_repli`.
 - **css.values / jauge affectsv — 3 fixes mesurés** (contrat NAV→PIPE) :
   - **CSS-wide sur shorthands** (`explorer-css`) : `inherit`/`initial`/`unset`/`revert(-layer)` sur un shorthand expanse désormais chaque longhand au mot-clé (liste sondée via valeur canonique) — avant, `outline:inherit`/`flex-flow:inherit`/`column-rule:inherit` étaient droppés par les grammaires strictes (routed-miss). Verrous : `css_wide_sur_shorthands`, `outline_inherit_route_longhands`.
   - **`align-items`/`align-self` keywords** (`explorer-layout`) : `end`/`self-end`, `safe`/`unsafe` préfixés, `anchor-center`≈center consommés dans `align_offset` — `align-items:self-end|end|safe center|baseline` basculent `ok` dans `check affectsv`. `align-self:*` sur l'item = artefact fixture (stretch = line_cross).

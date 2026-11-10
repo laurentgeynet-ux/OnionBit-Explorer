@@ -1144,7 +1144,28 @@ impl LineAcc {
             // (approximation — la spec centre sur x-height/2
             // au-dessus de la baseline). Texte et autres clés
             // : baseline.
-            let va = f.style.get("vertical-align").unwrap_or("baseline");
+            // `alignment-baseline` (css-inline-3 — réexport SVG)
+            // quand `vertical-align` est absent : repli sur les
+            // clés communes. `alphabetic`→baseline, `ideographic`
+            // →text-bottom, `hanging`→top, `central`/`mathematical`
+            // →middle. `baseline-shift` = alias de `vertical-align`
+            // (`sub`/`super`/longueur) — même traitement.
+            let va_owned;
+            let va = if let Some(v) = f.style.get("vertical-align") {
+                v
+            } else if let Some(bs) = f.style.get("baseline-shift") {
+                bs
+            } else if let Some(ab) = f.style.get("alignment-baseline") {
+                va_owned = match ab.trim() {
+                    "ideographic" => "text-bottom",
+                    "hanging" => "top",
+                    "central" | "mathematical" | "middle" => "middle",
+                    _ => "baseline",
+                };
+                va_owned
+            } else {
+                "baseline"
+            };
             // R-161 — décalages de baseline sur tout fragment
             // : / en fractions de font-size
             // (métriques fonte hors périmètre), longueur en
