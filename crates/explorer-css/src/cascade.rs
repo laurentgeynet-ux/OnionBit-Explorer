@@ -1900,7 +1900,7 @@ impl StyleEngine {
         containers: Option<&HashMap<NodeId, ContainerMeasure>>,
     ) -> ComputedStyle {
         let mut mcache = MatchCache::default();
-        mcache.namespaces = self.namespaces.clone();
+        mcache.namespaces.clone_from(&self.namespaces);
         let root_fs = self.root_font_size(dom, env, state);
         let parent = parent_computed(
             self,
@@ -1940,7 +1940,7 @@ impl StyleEngine {
         // `compute_with_parent`. Appel direct : passer par
         // `compute_with_state` re-bouclerait ici sans fin.
         let mut mcache = MatchCache::default();
-        mcache.namespaces = self.namespaces.clone();
+        mcache.namespaces.clone_from(&self.namespaces);
         self.compute_with_parent(
             dom,
             doc_el,
@@ -2043,7 +2043,7 @@ impl StyleEngine {
         let mut map = HashMap::new();
         let mut pseudos = HashMap::new();
         let mut mcache = MatchCache::default();
-        mcache.namespaces = self.namespaces.clone();
+        mcache.namespaces.clone_from(&self.namespaces);
         // Ancêtres de `root` : un sous-arbre peut être stylé
         // hors racine document — leurs clés restent visibles
         // pour les combinators ancêtres (même contrat que
@@ -2135,7 +2135,7 @@ impl StyleEngine {
         let mut map = HashMap::new();
         let mut pseudos = HashMap::new();
         let mut mcache = MatchCache::default();
-        mcache.namespaces = self.namespaces.clone();
+        mcache.namespaces.clone_from(&self.namespaces);
         // Les ancêtres au-dessus du sous-arbre restent
         // visibles au matching (contrat du restyle scopé).
         let anc = AncestorFilter::of_ancestors(dom, root);
