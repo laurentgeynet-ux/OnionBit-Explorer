@@ -495,6 +495,74 @@ fn anchor_point(
     })
 }
 
+/// `anchor-size(<dim>)` → dimension de l'ancre (R-254 suite) :
+/// `width`/`height`/`block`/`inline`/`self-*` — `auto` = même
+/// axe que la propriété porteuse ; nom d'ancre en préfixe
+/// (`anchor-size(--a width)`), repli `, <len>` ; `%` de repli
+/// sur la base `cb_w`. `axis_x` = la propriété porteuse est
+/// horizontale (`width`/`min-width`/`max-width`).
+fn anchor_size_px(
+    raw: &str,
+    axis_x: bool,
+    hint: Option<&str>,
+    anchors: &[(String, Rect)],
+    cb_w: f32,
+    fs: f32,
+    ctx: &BlockCtx,
+) -> Option<f32> {
+    use std::fmt::Write as _;
+    // Substitution `anchor-size(…)` par sa valeur — comme
+    // `anchor_len`, la fonction peut siéger dans `calc()`.
+    let mut out = String::with_capacity(raw.len());
+    let mut rest = raw.trim();
+    while let Some(i) = rest.find("anchor-size(") {
+        out.push_str(&rest[..i]);
+        let sub = &rest[i..];
+        let close = sub.find(')')?;
+        let inner = sub[12..close].trim();
+        // `[<nom>]? <dim> [, <repli>]?` — dim : width/height/
+        // block/inline/self-block/self-inline (LTR : block→h,
+        // inline→w).
+        let mut toks = inner.splitn(2, |c: char| c.is_whitespace() || c == ',');
+        let first = toks.next().unwrap_or("");
+        let rest2 = toks.next().unwrap_or("").trim();
+        let (name, dim_part) = if first.starts_with("--") {
+            (Some(first), rest2)
+        } else {
+            (hint, inner)
+        };
+        let mut it = dim_part.splitn(2, ',');
+        let dim = it.next().unwrap_or("").trim();
+        let fallback = it.next().map(str::trim);
+        let px = name.and_then(|nm| {
+            anchors
+                .iter()
+                .rev()
+                .find(|(n, _)| n.trim_start_matches("--") == nm.trim_start_matches("--"))
+                .map(|(_, ar)| {
+                    // `auto`/absent = axe de la propriété
+                    // porteuse (`axis_x`) ; `self-*` suit la
+                    // même convention LTR (block→h, inline→w).
+                    let w_axis = match dim {
+                        "height" | "block" | "self-block" => false,
+                        "width" | "inline" | "self-inline" => true,
+                        _ => axis_x,
+                    };
+                    if w_axis {
+                        ar.width
+                    } else {
+                        ar.height
+                    }
+                })
+        });
+        let v = px.or_else(|| fallback.and_then(|f| raw_length_px(f, cb_w, fs, ctx)))?;
+        let _ = write!(out, "{v}px");
+        rest = &sub[close + 1..];
+    }
+    out.push_str(rest);
+    raw_length_px(&out, cb_w, fs, ctx)
+}
+
 /// `anchor()` en position d'inset ou **dans `calc()`**
 /// (R-254 suite) : chaque occurrence `anchor(…)` est
 /// substituée par sa longueur document résolue (ou son
@@ -510,6 +578,7 @@ fn anchor_len(
     fs: f32,
     ctx: &BlockCtx,
 ) -> Option<f32> {
+    use std::fmt::Write as _;
     let raw = raw.trim();
     if raw.starts_with("anchor(") {
         return anchor_point(raw, axis_x, hint, anchors, cb_w, fs, ctx);
@@ -522,7 +591,6 @@ fn anchor_len(
         let sub = &rest[i..];
         let close = sub.find(')')?;
         let pt = anchor_point(&sub[..=close], axis_x, hint, anchors, cb_w, fs, ctx)?;
-        use std::fmt::Write as _;
         let _ = write!(out, "{pt}px");
         rest = &sub[close + 1..];
     }
@@ -536,6 +604,7 @@ fn anchor_len(
 /// (largeur document — approximation documentée : la vraie
 /// base est la largeur du bloc conteneur, non retrouvable
 /// post-hoc sans la porter).
+#[allow(clippy::too_many_lines)]
 fn fix_anchor_positioned(
     bx: &mut LayoutBox,
     anchors: &[(String, Rect)],
@@ -561,6 +630,24 @@ fn fix_anchor_positioned(
             .map(str::trim)
             .filter(|v| !v.is_empty() && *v != "none" && *v != "normal");
         let has = |p: &str| st.get(p).is_some_and(|v| v.contains("anchor("));
+        // `anchor-size()` dans `width`/`height` : redimension
+        // post-hoc de la border box — approximation documentée
+        // (le contenu n'est pas re-flown ; le motif réel est
+        // « bulle/flèche de la taille de l'ancre »).
+        let cfs = font_size_px(st, fs, ctx);
+        for (prop, axis_x) in [("width", true), ("height", false)] {
+            if let Some(v) = st.get(prop).filter(|v| v.contains("anchor-size(")) {
+                if let Some(px) =
+                    anchor_size_px(v, axis_x, hint.as_deref(), anchors, cb_w, cfs, ctx)
+                {
+                    if axis_x {
+                        bx.rect.width = px.max(0.0);
+                    } else {
+                        bx.rect.height = px.max(0.0);
+                    }
+                }
+            }
+        }
         if let Some(av) = area {
             if let Some(name) = hint.as_deref() {
                 if let Some((_, ar)) = anchors

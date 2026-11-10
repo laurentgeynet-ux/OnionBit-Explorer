@@ -807,3 +807,22 @@ fn anchor_dans_calc() {
     assert_eq!(m.rect.x, 68.0, "anchor(right)+8 dans calc");
     assert_eq!(m.rect.y, 50.0, "anchor(top) nu");
 }
+
+/// `anchor-size()` dans `width`/`height` (R-254 suite) :
+/// dimension de l'ancre reportée sur la boîte (post-hoc,
+/// contenu non re-flown — approximation documentée).
+#[test]
+fn anchor_size_dimensionne() {
+    let (dom, bx) = laid(
+        "<div id=a></div><div id=m></div>",
+        "#a{position:absolute;left:0;top:0;width:60px;height:14px;anchor-name:--a}\
+         #m{position:absolute;position-anchor:--a;left:anchor(left);top:anchor(bottom);\
+            width:anchor-size(width);height:anchor-size(height)}",
+    );
+    let m = find(&bx, by_id(&dom, "m"));
+    assert_eq!(
+        (m.rect.width, m.rect.height),
+        (60.0, 14.0),
+        "taille = ancre"
+    );
+}

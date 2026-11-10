@@ -6,6 +6,7 @@ Le format suit [Keep a Changelog](https://keepachangelog.com/fr/1.1.0/)
 et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
+- **R-254 (suite) — `anchor-size(<dim>)`** (`explorer-layout` + validation `explorer-css`) : `width`/`height` (et usage dans `calc()`) résolvent la dimension de l'ancre (`width`/`height`/`block`/`inline`/`self-*`, nom optionnel `--x`, repli `, <len>`, `auto` = axe porteur) — redimension post-hoc du border box, contenu non re-flown (approximation documentée). Verrou : `anchor_size_dimensionne`.
 - **R-254 (suite) — `anchor()` dans `calc()`** (`explorer-layout`) : substitution des occurrences `anchor(…)` avant `raw_length_px` — `calc(anchor(left) + 8px)` résolu. Verrou : `anchor_dans_calc`.
 - **R-252 (suite) — `mask-mode:luminance` sur le groupe et `MaskedFill`** (`explorer-render`) : `PushMask`/`GroupKind::Mask`/`group_mask_coverage` et `MaskedFill`/`paint_masked_fill` gagnent `luminance` — couverture = luma sRGB (0.2126/0.7152/0.0722) × alpha au lieu de l'alpha seul, feuilles et groupes alignés. Verrou : `mask_luminance_groupe`.
 - **R-254 (suite) — `position-area` MVP** (`explorer-layout`) : grille 3×3 autour de l'ancre `position-anchor` — rang `top|bottom|center`, colonne `left|right|center`, alias logiques/`x-*`/`y-*` mappés LTR, axe absent = start-à-start, `span-*` hors portée. Verrou : `anchor_position_area`.

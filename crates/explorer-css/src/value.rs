@@ -930,6 +930,7 @@ pub fn value_is_valid_for(name: &str, value: &str) -> bool {
                 v,
                 "auto" | "none" | "min-content" | "max-content" | "fit-content"
             ) || len_or_pct(v)
+                || v.trim_start().starts_with("anchor-size(")
         }
         // R-254 — `anchor()`/`anchor-size()` dans les insets
         // (css-anchor-position-1) : fonction à résolution
