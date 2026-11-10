@@ -838,6 +838,9 @@ const SUPPORTED_PROPS: &[&str] = &[
     "path-length",
     "position-anchor",
     "position-area",
+    // `inset-area` = nom d'origine de `position-area`
+    // (css-anchor-1, renommé — Chrome a shippe l'ancien).
+    "inset-area",
     "position-try",
     "position-try-fallbacks",
     "position-try-order",
@@ -4923,6 +4926,9 @@ const INHERITED_PROPS: &[&str] = &[
     "orphans",
     "pointer-events",
     "quotes",
+    // css-ruby-1 §3.1 : `ruby-position` est héritée — une
+    // valeur posée sur `<ruby>`/`rtc` atteint le `rt`.
+    "ruby-position",
     "tab-size",
     "text-align",
     "text-combine-upright",
@@ -5143,14 +5149,16 @@ small, sub, sup { font-size: smaller }
 nobr { white-space: nowrap }
 sub { vertical-align: sub }
 sup { vertical-align: super }
-/* css-ruby-1 : l'annotation `rt` est plus petite et sur-
-   ligne (approximation bornée — la spec la pose AU-DESSUS
-   de la base ; `super` dans la boîte de ligne est le meilleur
-   rendu sans chirurgie inline). `rp` (parenthèses pleine
-   largeur pour navigateurs sans ruby) est masqué — le rt
-   est affiché ici. `rtc`/`rb` = conteneurs (inline via
-   `display:ruby*` côté boxtree). */
-rt { font-size: 50%; vertical-align: super }
+/* css-ruby-1 : vrais niveaux `display:ruby*` (le boxtree les
+   approxime inline ; la pose de l'annotation au-dessus de la
+   base est faite côté inline.rs — `ruby-position:over|under`).
+   `rt` à demi fonte ; `rp` (parenthèses pleine largeur pour
+   navigateurs sans ruby) est masqué — le rt est affiché. */
+ruby { display: ruby }
+rbc { display: ruby-base-container }
+rb { display: ruby-base }
+rtc { display: ruby-text-container }
+rt { display: ruby-text; font-size: 50% }
 rp { display: none }
 abbr[title], acronym[title] { text-decoration: underline }
 mark { background-color: yellow; color: black }

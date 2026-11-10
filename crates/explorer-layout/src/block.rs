@@ -627,8 +627,12 @@ fn fix_anchor_positioned(
         // mappés LTR (approximation documentée), `span-*` →
         // repli sur le côté de base. Axe absent = bord start
         // de l'ancre.
+        // `inset-area` = nom d'origine de `position-area`
+        // (spec renommée, Chrome a shippe l'ancien) — repli
+        // quand la forme canonique est absente.
         let area = st
             .get("position-area")
+            .or_else(|| st.get("inset-area"))
             .map(str::trim)
             .filter(|v| !v.is_empty() && *v != "none" && *v != "normal");
         let has = |p: &str| st.get(p).is_some_and(|v| v.contains("anchor("));
@@ -778,13 +782,18 @@ fn fix_anchor_positioned(
                 }
             }
         }
-        // `position-try`/`position-try-fallbacks` (R-254
-        // suite) : fallbacks flip — la boîte résolue qui
-        // déborde le viewport sur un axe flippé est mirée
-        // autour du centre de l'ancre. MVP borné :
+        // `position-try`/`position-try-fallbacks` : les
+        // options sont évaluées dans l'ordre trié par
+        // `position-try-order` (css-anchor-1 §3.5) — la
+        // première dont la boîte translatée rentre dans le
+        // viewport est retenue ; si toutes débordent encore,
+        // la dernière essayée est appliquée (spec).
         // `flip-block`/`flip-y`, `flip-inline`/`flip-x`,
-        // `flip-start` = axe en débordement ; options
-        // `@position-try` nommées et `most-*` = résidus.
+        // `flip-start` = miroir autour du centre de l'ancre
+        // sur l'axe en débordement ; `--nom` = règle
+        // `@position-try` sérialisée (`position-area` +
+        // insets px — autres props ignorées, MVP borné
+        // viewport).
         if let Some(name) = hint.as_deref() {
             if let Some(raw_try) = bx
                 .style
@@ -800,132 +809,161 @@ fn fix_anchor_positioned(
                     let over_r = bx.rect.x + bx.rect.width > cb_w;
                     let over_t = bx.rect.y < 0.0;
                     let over_b = bx.rect.y + bx.rect.height > vp_h;
-                    // `position-try-order` (R-254 suite) :
-                    // `most-width`/`most-inline-size` = flip
-                    // horizontal seul, `most-height`/
-                    // `most-block-size` = vertical seul ;
-                    // `normal`/absent = les deux (résidus :
-                    // tri complet des fallbacks ordonnés).
-                    let order = bx
-                        .style
-                        .get("position-try-order")
-                        .map_or("normal", |v| v.trim());
-                    let (mut fx, mut fy) = (0.0_f32, 0.0_f32);
-                    for t in raw_try.split_ascii_whitespace() {
-                        match t {
-                            "flip-block" | "flip-y"
-                                if (over_t || over_b)
-                                    && matches!(
-                                        order,
-                                        "normal" | "most-height" | "most-block-size" | "most-size"
-                                    ) =>
-                            {
-                                fy = 2.0 * (ar.y + ar.height / 2.0)
-                                    - 2.0 * bx.rect.y
-                                    - bx.rect.height;
-                            }
-                            "flip-inline" | "flip-x"
-                                if (over_l || over_r)
-                                    && matches!(
-                                        order,
-                                        "normal" | "most-width" | "most-inline-size" | "most-size"
-                                    ) =>
-                            {
-                                fx =
-                                    2.0 * (ar.x + ar.width / 2.0) - 2.0 * bx.rect.x - bx.rect.width;
-                            }
-                            "flip-start" => {
-                                if (over_t || over_b)
-                                    && matches!(
-                                        order,
-                                        "normal" | "most-height" | "most-block-size" | "most-size"
-                                    )
+                    if over_l || over_r || over_t || over_b {
+                        // `position-try` = shorthand
+                        // `<'position-try-order'>? ||
+                        // <'position-try-fallbacks'>` : les
+                        // mots-clés `most-*`/`normal` fixent
+                        // l'ordre, le reste est la liste
+                        // (la prop longhand prime si déclarée).
+                        let has_order_prop = bx.style.get("position-try-order").is_some();
+                        let mut order = bx
+                            .style
+                            .get("position-try-order")
+                            .map_or("normal", |v| v.trim())
+                            .to_string();
+                        let mut toks = Vec::new();
+                        for t in raw_try.split_ascii_whitespace() {
+                            match t {
+                                "normal" | "most-width" | "most-inline-size" | "most-height"
+                                | "most-block-size" | "most-size"
+                                    if !has_order_prop =>
                                 {
+                                    order = t.to_string();
+                                }
+                                _ => toks.push(t),
+                            }
+                        }
+                        // Δ de chaque option (flip → miroir
+                        // autour du centre d'ancre ; `--nom` →
+                        // `position-area`/insets px du try
+                        // sérialisé — autres props ignorées).
+                        let cand = |t: &str| -> (f32, f32) {
+                            let (mut fx, mut fy) = (0.0_f32, 0.0_f32);
+                            match t {
+                                "flip-block" | "flip-y" if over_t || over_b => {
                                     fy = 2.0 * (ar.y + ar.height / 2.0)
                                         - 2.0 * bx.rect.y
                                         - bx.rect.height;
                                 }
-                                if (over_l || over_r)
-                                    && matches!(
-                                        order,
-                                        "normal" | "most-width" | "most-inline-size" | "most-size"
-                                    )
-                                {
+                                "flip-inline" | "flip-x" if over_l || over_r => {
                                     fx = 2.0 * (ar.x + ar.width / 2.0)
                                         - 2.0 * bx.rect.x
                                         - bx.rect.width;
                                 }
-                            }
-                            name if name.starts_with("--") => {
-                                // `@position-try --nom { … }`
-                                // (css-anchor-1) : débordement
-                                // → la règle sérialisée par la
-                                // cascade fournit
-                                // `position-area` + insets px
-                                // (MVP — autres props ignorées).
-                                if !(over_l || over_r || over_t || over_b) {
-                                    continue;
-                                }
-                                let Some(body) =
-                                    bx.style.get(&format!("position-try-{}", name.trim()))
-                                else {
-                                    continue;
-                                };
-                                for kv in body.split(';').filter_map(|p| p.split_once(':')) {
-                                    let (k, v) = (kv.0.trim(), kv.1.trim());
-                                    match k {
-                                        "position-area" => {
-                                            for t2 in v.split_ascii_whitespace() {
-                                                match t2 {
-                                                    "bottom" | "y-end" | "block-end" => {
-                                                        fy = ar.y + ar.height - bx.rect.y;
-                                                    }
-                                                    "top" | "y-start" | "block-start" => {
-                                                        fy = ar.y - bx.rect.height - bx.rect.y;
-                                                    }
-                                                    "right" | "x-end" | "inline-end" => {
-                                                        fx = ar.x + ar.width - bx.rect.x;
-                                                    }
-                                                    "left" | "x-start" | "inline-start" => {
-                                                        fx = ar.x - bx.rect.width - bx.rect.x;
-                                                    }
-                                                    _ => {}
-                                                }
-                                            }
-                                        }
-                                        "top" | "bottom" => {
-                                            if let Some(px) = v
-                                                .strip_suffix("px")
-                                                .and_then(|n| n.parse::<f32>().ok())
-                                            {
-                                                fy = if k == "top" {
-                                                    ar.y + ar.height + px - bx.rect.y
-                                                } else {
-                                                    ar.y - px - bx.rect.height - bx.rect.y
-                                                };
-                                            }
-                                        }
-                                        "left" | "right" => {
-                                            if let Some(px) = v
-                                                .strip_suffix("px")
-                                                .and_then(|n| n.parse::<f32>().ok())
-                                            {
-                                                fx = if k == "left" {
-                                                    ar.x + ar.width + px - bx.rect.x
-                                                } else {
-                                                    ar.x - px - bx.rect.width - bx.rect.x
-                                                };
-                                            }
-                                        }
-                                        _ => {}
+                                "flip-start" => {
+                                    if over_t || over_b {
+                                        fy = 2.0 * (ar.y + ar.height / 2.0)
+                                            - 2.0 * bx.rect.y
+                                            - bx.rect.height;
+                                    }
+                                    if over_l || over_r {
+                                        fx = 2.0 * (ar.x + ar.width / 2.0)
+                                            - 2.0 * bx.rect.x
+                                            - bx.rect.width;
                                     }
                                 }
+                                n if n.starts_with("--") => {
+                                    if let Some(body) =
+                                        bx.style.get(&format!("position-try-{}", n.trim()))
+                                    {
+                                        for kv in body.split(';').filter_map(|p| p.split_once(':'))
+                                        {
+                                            let (k, v) = (kv.0.trim(), kv.1.trim());
+                                            match k {
+                                                "position-area" => {
+                                                    for t2 in v.split_ascii_whitespace() {
+                                                        match t2 {
+                                                            "bottom" | "y-end" | "block-end" => {
+                                                                fy = ar.y + ar.height - bx.rect.y;
+                                                            }
+                                                            "top" | "y-start" | "block-start" => {
+                                                                fy = ar.y
+                                                                    - bx.rect.height
+                                                                    - bx.rect.y;
+                                                            }
+                                                            "right" | "x-end" | "inline-end" => {
+                                                                fx = ar.x + ar.width - bx.rect.x;
+                                                            }
+                                                            "left" | "x-start" | "inline-start" => {
+                                                                fx = ar.x
+                                                                    - bx.rect.width
+                                                                    - bx.rect.x;
+                                                            }
+                                                            _ => {}
+                                                        }
+                                                    }
+                                                }
+                                                "top" | "bottom" => {
+                                                    if let Some(px) = v
+                                                        .strip_suffix("px")
+                                                        .and_then(|n| n.parse::<f32>().ok())
+                                                    {
+                                                        fy = if k == "top" {
+                                                            ar.y + ar.height + px - bx.rect.y
+                                                        } else {
+                                                            ar.y - px - bx.rect.height - bx.rect.y
+                                                        };
+                                                    }
+                                                }
+                                                "left" | "right" => {
+                                                    if let Some(px) = v
+                                                        .strip_suffix("px")
+                                                        .and_then(|n| n.parse::<f32>().ok())
+                                                    {
+                                                        fx = if k == "left" {
+                                                            ar.x + ar.width + px - bx.rect.x
+                                                        } else {
+                                                            ar.x - px - bx.rect.width - bx.rect.x
+                                                        };
+                                                    }
+                                                }
+                                                _ => {}
+                                            }
+                                        }
+                                    }
+                                }
+                                _ => {}
+                            }
+                            (fx, fy)
+                        };
+                        // `position-try-order` trie les options
+                        // (spec §3.5 : priorité à l'axe donnant
+                        // le plus de place — approximation :
+                        // options Δx d'abord pour `most-width`,
+                        // Δy d'abord pour `most-height`, ordre
+                        // relatif stable ; toutes restent
+                        // éligibles). La première dont la boîte
+                        // translatée rentre gagne ; si toutes
+                        // débordent, la dernière est appliquée.
+                        let mut cands: Vec<(f32, f32)> = toks
+                            .iter()
+                            .map(|t| cand(t))
+                            .filter(|d| d.0 != 0.0 || d.1 != 0.0)
+                            .collect();
+                        match order.as_str() {
+                            "most-width" | "most-inline-size" => {
+                                cands.sort_by_key(|d| u8::from(d.0 == 0.0));
+                            }
+                            "most-height" | "most-block-size" => {
+                                cands.sort_by_key(|d| u8::from(d.1 == 0.0));
                             }
                             _ => {}
                         }
-                    }
-                    if fx != 0.0 || fy != 0.0 {
-                        crate::flex::translate_subtree(bx, fx, fy);
+                        let mut chosen = None;
+                        for &(fx, fy) in &cands {
+                            chosen = Some((fx, fy));
+                            let fits = bx.rect.x + fx >= 0.0
+                                && bx.rect.x + fx + bx.rect.width <= cb_w
+                                && bx.rect.y + fy >= 0.0
+                                && bx.rect.y + fy + bx.rect.height <= vp_h;
+                            if fits {
+                                break;
+                            }
+                        }
+                        if let Some((fx, fy)) = chosen {
+                            crate::flex::translate_subtree(bx, fx, fy);
+                        }
                     }
                 }
             }
@@ -1045,12 +1083,8 @@ pub(crate) fn raw_length_px(
         // viewport — axes inline→w, block→h (approx).
         Unit::Vw | Unit::Cqw | Unit::Cqi => len.value as f32 * ctx.viewport_w / 100.0,
         Unit::Vh | Unit::Cqh | Unit::Cqb => len.value as f32 * ctx.viewport_h / 100.0,
-        Unit::Vmin | Unit::Cqmin => {
-            len.value as f32 * ctx.viewport_w.min(ctx.viewport_h) / 100.0
-        }
-        Unit::Vmax | Unit::Cqmax => {
-            len.value as f32 * ctx.viewport_w.max(ctx.viewport_h) / 100.0
-        }
+        Unit::Vmin | Unit::Cqmin => len.value as f32 * ctx.viewport_w.min(ctx.viewport_h) / 100.0,
+        Unit::Vmax | Unit::Cqmax => len.value as f32 * ctx.viewport_w.max(ctx.viewport_h) / 100.0,
         u => (len.value * u.px_factor()?) as f32,
     })
 }
@@ -1145,12 +1179,8 @@ fn eval_calc(expr: &str, pct_basis: f32, em_basis: f32, ctx: &BlockCtx) -> Optio
                 Unit::Em => l.value * f64::from(em),
                 Unit::Rem => l.value * f64::from(ctx.rem_basis()),
                 Unit::Ex | Unit::Ch => l.value * f64::from(em) * 0.5,
-                Unit::Vw | Unit::Cqw | Unit::Cqi => {
-                    l.value * f64::from(ctx.viewport_w) / 100.0
-                }
-                Unit::Vh | Unit::Cqh | Unit::Cqb => {
-                    l.value * f64::from(ctx.viewport_h) / 100.0
-                }
+                Unit::Vw | Unit::Cqw | Unit::Cqi => l.value * f64::from(ctx.viewport_w) / 100.0,
+                Unit::Vh | Unit::Cqh | Unit::Cqb => l.value * f64::from(ctx.viewport_h) / 100.0,
                 Unit::Vmin | Unit::Cqmin => {
                     l.value * f64::from(ctx.viewport_w.min(ctx.viewport_h)) / 100.0
                 }

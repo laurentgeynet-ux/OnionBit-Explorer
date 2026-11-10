@@ -1141,3 +1141,121 @@ fn tab_size_avance_aux_taquets() {
         "hors pre : pas de frag tab"
     );
 }
+
+/// css-ruby-1 : l'annotation `rt` (`display:ruby-text`)
+/// sort du flux vertical — posée dans la bande au-dessus
+/// de la base (`ruby-position:over`), la ligne grandit ;
+/// `under` la pose en dessous.
+#[test]
+fn ruby_rt_au_dessus_de_la_base() {
+    let (_d, bx) = laid(
+        "<!doctype html><p>x<ruby>B<rt>a</rt></ruby>y</p>",
+        "p{font-size:20px;width:400px;margin:0}",
+    );
+    let p = first_box_with_lines(&bx);
+    let line = &p.lines[0];
+    let rt = line
+        .fragments
+        .iter()
+        .find(|f| f.style.get("display") == Some("ruby-text"))
+        .expect("frag rt");
+    let base = line
+        .fragments
+        .iter()
+        .filter(|f| f.style.get("display") != Some("ruby-text"))
+        .map(|f| f.rect.y)
+        .fold(f32::INFINITY, f32::min);
+    assert!(
+        rt.rect.y + rt.rect.height <= base + 0.01,
+        "rt au-dessus de la base (rt {:?} vs base {base})",
+        rt.rect
+    );
+    // La ligne a grandi de la hauteur de l'annotation.
+    assert!(
+        line.rect.height > 20.0 + rt.rect.height - 0.01,
+        "ligne agrandie de l'annotation ({})",
+        line.rect.height
+    );
+
+    // `ruby-position:under` : annotation sous la base, la
+    // base ne bouge pas.
+    let (_d2, bx2) = laid(
+        "<!doctype html><p>x<ruby style=ruby-position:under>B<rt>a</rt></ruby>y</p>",
+        "p{font-size:20px;width:400px;margin:0}",
+    );
+    let line2 = &first_box_with_lines(&bx2).lines[0];
+    let rt2 = line2
+        .fragments
+        .iter()
+        .find(|f| f.style.get("display") == Some("ruby-text"))
+        .expect("frag rt under");
+    let base_bot = line2
+        .fragments
+        .iter()
+        .filter(|f| f.style.get("display") != Some("ruby-text"))
+        .map(|f| f.rect.y + f.rect.height)
+        .fold(0.0_f32, f32::max);
+    assert!(
+        rt2.rect.y >= base_bot - 0.01,
+        "rt sous la base (rt {:?} vs bas {base_bot})",
+        rt2.rect
+    );
+}
+
+/// css-ruby-1 suite : l'annotation est **centrée** sur le
+/// segment de base qui la précède (ruby-align:center
+/// défaut) ; `inter-character` la cale après la base sur la
+/// même ligne de base.
+#[test]
+fn ruby_rt_centre_et_inter_character() {
+    // Base "BB" (20 px) + annotation "a" (5 px) : centre à
+    // x_seg(10) + 10 - 2.5 = 17.5.
+    let (_d, bx) = laid(
+        "<!doctype html><p><ruby>BB<rt>a</rt></ruby></p>",
+        "p{font-size:20px;width:400px;margin:0}",
+    );
+    let line = &first_box_with_lines(&bx).lines[0];
+    let rt = line
+        .fragments
+        .iter()
+        .find(|f| f.style.get("display") == Some("ruby-text"))
+        .expect("frag rt");
+    let bb = line
+        .fragments
+        .iter()
+        .find(|f| f.style.get("display") == Some("ruby"))
+        .expect("frag base");
+    let want = bb.rect.x + (bb.rect.width - rt.rect.width) / 2.0;
+    assert!(
+        (rt.rect.x - want).abs() < 0.01,
+        "rt centré sur la base : x={} attendu {want}",
+        rt.rect.x
+    );
+
+    // `inter-character` : après la base, baseline alignée.
+    let (_d2, bx2) = laid(
+        "<!doctype html><p><ruby style=ruby-position:inter-character>BB<rt>a</rt></ruby></p>",
+        "p{font-size:20px;width:400px;margin:0}",
+    );
+    let line2 = &first_box_with_lines(&bx2).lines[0];
+    let rt2 = line2
+        .fragments
+        .iter()
+        .find(|f| f.style.get("display") == Some("ruby-text"))
+        .expect("frag rt ic");
+    let bb2 = line2
+        .fragments
+        .iter()
+        .find(|f| f.style.get("display") == Some("ruby"))
+        .expect("frag base ic");
+    assert!(
+        (rt2.rect.x - (bb2.rect.x + bb2.rect.width)).abs() < 0.01,
+        "inter-character : rt après la base ({} vs {})",
+        rt2.rect.x,
+        bb2.rect.x + bb2.rect.width
+    );
+    assert!(
+        (rt2.rect.y + rt2.baseline - (bb2.rect.y + bb2.baseline)).abs() < 0.5,
+        "inter-character : baselines alignées"
+    );
+}

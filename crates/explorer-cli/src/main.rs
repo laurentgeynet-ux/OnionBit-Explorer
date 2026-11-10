@@ -1261,7 +1261,12 @@ fn check_names(kind: &str) -> ExitCode {
         // stocke les inconnus) ; `affects` : la géométrie
         // change-t-elle (jauge non-saturante).
         "routed" => {
-            routed_dom = explorer_html::TreeBuilder::parse("<body><p class=x>ok</p></body>");
+            // Parent à `display:inline` : `display:inherit` sur
+            // `.x` hérite `inline` ≠ `block` UA — sans ça la
+            // sonde est aveugle (valeur héritée = initiale).
+            routed_dom = explorer_html::TreeBuilder::parse(
+                "<body style=display:inline><p class=x>ok</p></body>",
+            );
             Box::new(move |name| explorer_css::prop_routed(&routed_dom, name))
         }
         "affects" => Box::new(prop_affects),

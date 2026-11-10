@@ -573,6 +573,18 @@ fn is_atomic(b: &LayoutBox) -> bool {
         ) || b.intrinsic.is_some())
 }
 
+/// Fragment d'annotation ruby (css-ruby-1) : le style du
+/// fragment est celui de l'élément inline porteur — `rt`
+/// direct ou `rtc`. Limite MVP : un `rt` dont le texte est
+/// enveloppé dans un `display:inline` intermédiaire n'est
+/// pas reconnu (le style du fragment est celui du span).
+fn is_ruby_text_frag(f: &Fragment) -> bool {
+    matches!(
+        f.style.get("display").map(str::trim),
+        Some("ruby-text" | "ruby-text-container")
+    )
+}
+
 /// Sous-rect d'une tranche d'octets `start..end` de
 /// `frag.text` (R-35 — surlignage find au glyphe près).
 ///
@@ -1242,7 +1254,7 @@ impl LineAcc {
             .iter()
             .map(|f| f.rect.x + f.rect.width)
             .fold(0.0_f32, f32::max);
-        let h = self.max_lh.max(self.strut_lh).max(base);
+        let mut h = self.max_lh.max(self.strut_lh).max(base);
         for f in &mut self.frags {
             // `vertical-align` des atomes (inline-block,
             // remplacés) : `top`/`bottom` ancrent la **margin
@@ -1295,6 +1307,8 @@ impl LineAcc {
                 _ => *y + (base - f.baseline) + dy,
             };
         }
+        let mut base = base;
+        self.lift_ruby(&mut h, &mut base);
         lines.push(LineBox {
             rect: Rect {
                 x: min_x,
@@ -1309,6 +1323,152 @@ impl LineAcc {
         self.max_base = 0.0;
         *y += h;
     }
+
+    /// css-ruby-1 : l'annotation (`display:ruby-text*`) sort
+    /// du flux vertical de la base — posée dans une bande
+    /// au-dessus (`ruby-position:over`, défaut) ou en dessous
+    /// (`under`), la ligne grandit d'autant. Chaque run
+    /// d'annotation est apparié au segment de base `ruby*`
+    /// qui le précède et **centré** dessus (`ruby-align:
+    /// center`, défaut) ; `inter-character` cale le run
+    /// après sa base, lignes de base alignées (usage texte
+    /// vertical — dégradation documentée en horizontal).
+    /// Résidus : overhang borné par voisins, `ruby-align`
+    /// non lu (toujours center), `rtc` multi-annotations,
+    /// positions mixtes sur une même ligne → repli `over`.
+    fn lift_ruby(&mut self, h: &mut f32, base: &mut f32) {
+        if !self.frags.iter().any(is_ruby_text_frag) {
+            return;
+        }
+        let pos = self
+            .frags
+            .iter()
+            .find(|f| is_ruby_text_frag(f))
+            .and_then(|f| f.style.get("ruby-position"))
+            .unwrap_or("over")
+            .trim()
+            .to_string();
+        let rt_h = self
+            .frags
+            .iter()
+            .filter(|f| is_ruby_text_frag(f))
+            .map(|f| f.rect.height)
+            .fold(0.0_f32, f32::max);
+        let base_top = self
+            .frags
+            .iter()
+            .filter(|f| !is_ruby_text_frag(f))
+            .map(|f| f.rect.y)
+            .fold(f32::INFINITY, f32::min);
+        let base_bot = self
+            .frags
+            .iter()
+            .filter(|f| !is_ruby_text_frag(f))
+            .map(|f| f.rect.y + f.rect.height)
+            .fold(0.0_f32, f32::max);
+        if rt_h <= 0.0 || !base_top.is_finite() {
+            return;
+        }
+        // Runs d'annotation consécutifs (ordre des fragments)
+        // → indice de début/fin + segment de base apparié
+        // (contigu `ruby*` non-rt en arrière ; repli = toute
+        // la base de la ligne).
+        let runs = rt_runs(&self.frags);
+        for (lo, hi) in &runs {
+            let (seg_l, seg_r) = ruby_base_span(&self.frags, *lo);
+            let run_l = self.frags[*lo].rect.x;
+            let run_r = self.frags[*hi].rect.x + self.frags[*hi].rect.width;
+            // Centrage (defaut ruby-align) : `inter-character`
+            // cale le run APRES la base, sur sa ligne de base.
+            let dx = if pos.as_str() == "inter-character" {
+                seg_r - run_l
+            } else {
+                seg_l.midpoint(seg_r) - run_l.midpoint(run_r)
+            };
+            let base_ref = if *lo > 0 {
+                let b = &self.frags[lo - 1];
+                (b.rect.y, b.baseline)
+            } else {
+                (0.0, 0.0)
+            };
+            for f in &mut self.frags[*lo..=*hi] {
+                f.rect.x += dx;
+                f.rect.y = match pos.as_str() {
+                    "under" => base_bot,
+                    "inter-character" => {
+                        if *lo > 0 {
+                            base_ref.0 + (base_ref.1 - f.baseline)
+                        } else {
+                            f.rect.y
+                        }
+                    }
+                    _ => base_top + rt_h - f.rect.height,
+                };
+            }
+        }
+        if pos.as_str() == "inter-character" {
+            return;
+        }
+        // Bande d'annotation : la base descend (`over`) ou la
+        // ligne grandit vers le bas (`under`).
+        let over = pos.as_str() != "under";
+        for f in &mut self.frags {
+            if !is_ruby_text_frag(f) && over {
+                f.rect.y += rt_h;
+            }
+        }
+        *h += rt_h;
+        if over {
+            *base += rt_h;
+        }
+    }
+}
+
+/// Runs consécutifs de fragments `ruby-text*` — indices
+/// `(début, fin)` inclusifs dans `frags`.
+fn rt_runs(frags: &[Fragment]) -> Vec<(usize, usize)> {
+    let mut out = Vec::new();
+    for (i, f) in frags.iter().enumerate() {
+        if is_ruby_text_frag(f) {
+            match out.last_mut() {
+                Some((_, hi)) if i == *hi + 1 => *hi = i,
+                _ => out.push((i, i)),
+            }
+        }
+    }
+    out
+}
+
+/// Étendue horizontale `(gauche, droite)` du segment de
+/// base `ruby*` contigu précédant l'indice `rt_lo` — repli
+/// sur toute la base non-rt de la ligne.
+fn ruby_base_span(frags: &[Fragment], rt_lo: usize) -> (f32, f32) {
+    let (mut l, mut r) = (f32::INFINITY, 0.0_f32);
+    let mut i = rt_lo;
+    while i > 0 {
+        i -= 1;
+        let f = &frags[i];
+        if !f
+            .style
+            .get("display")
+            .map_or("", |d| d.trim())
+            .starts_with("ruby")
+            || is_ruby_text_frag(f)
+        {
+            break;
+        }
+        l = l.min(f.rect.x);
+        r = r.max(f.rect.x + f.rect.width);
+    }
+    if !l.is_finite() {
+        for f in frags {
+            if !is_ruby_text_frag(f) {
+                l = l.min(f.rect.x);
+                r = r.max(f.rect.x + f.rect.width);
+            }
+        }
+    }
+    (if l.is_finite() { l } else { 0.0 }, r)
 }
 
 /// Greedy : pièces → lignes posées dans la bande libre de
@@ -1865,7 +2025,17 @@ fn align_lines(
         } else {
             ebx
         };
-        let recale = (edge - mleft).max(0.0);
+        // `text-indent` négatif : le recalage tire vers la
+        // GAUCHE (le bord indenté sort de la bande — technique
+        // image-remplacement des sprites). Sans indent négatif
+        // sur cette ligne, jamais de tirage gauche (flottant
+        // commençant au milieu de la ligne).
+        let indented = (i == 0 && !hanging) || (i != 0 && hanging);
+        let recale = if indented && indent < 0.0 {
+            edge - mleft
+        } else {
+            (edge - mleft).max(0.0)
+        };
         #[allow(clippy::cast_precision_loss)]
         let (dx, space) = match align {
             "right" => ((ebx + ebw) - mright, 0.0),

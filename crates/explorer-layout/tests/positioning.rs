@@ -852,19 +852,53 @@ fn anchor_position_try_flip() {
     assert_eq!(m.rect.y, 670.0, "flip-block : mirée au-dessus");
 }
 
-/// `position-try-order` (R-254 suite) : `most-width` ne
-/// flip que l'axe horizontal — un débordement vertical ne
-/// provoque plus de miroir.
+/// `position-try-order` : le tri ne retire **aucune** option
+/// (css-anchor-1 §3.5 — il ordonne la priorité, ne filtre
+/// pas l'axe) — `flip-block` seul s'applique même avec
+/// `most-width`. Le tri devient visible quand aucune option
+/// ne « fit » : la **dernière essayée** est appliquée —
+/// `most-width` pousse les Δx en tête → le Δy reste dernier.
 #[test]
 fn anchor_position_try_order() {
     let (dom, bx) = laid(
-        "<div id=a></div><div id=m></div>",
-        "#a{position:absolute;left:10px;top:750px;width:40px;height:20px;anchor-name:--a}\
-         #m{position:absolute;position-anchor:--a;top:anchor(bottom);left:anchor(left);\
-            width:30px;height:80px;position-try:flip-block;position-try-order:most-width}",
+        "<div id=a></div><div id=m></div><div id=n></div>",
+        // body{height} fixe la hauteur document (proxy viewport).
+        "body{height:800px}\
+         #a{position:absolute;left:350px;top:750px;width:40px;height:20px;anchor-name:--a}\
+         #m{position:absolute;position-anchor:--a;top:anchor(bottom);left:anchor(right);\
+            width:30px;height:80px;position-try:flip-block;position-try-order:most-width}\
+         #n{position:absolute;position-anchor:--a;top:anchor(bottom);left:anchor(right);\
+            width:30px;height:80px;position-try:flip-block flip-inline;position-try-order:most-width}",
     );
     let m = find(&bx, by_id(&dom, "m"));
-    assert_eq!(m.rect.y, 770.0, "most-width : flip-block ignoré");
+    // Option unique : appliquée quel que soit l'ordre.
+    assert_eq!(m.rect.y, 670.0, "option seule = appliquée");
+    let n = find(&bx, by_id(&dom, "n"));
+    // Débordement x+y, aucune candidate ne « fit » entièrement :
+    // `most-width` trie flip-inline (Δx) en tête → flip-block
+    // reste dernier → c'est lui qui est appliqué (spec).
+    assert_eq!(
+        n.rect.y, 670.0,
+        "most-width : Δx d'abord, Δy dernier appliqué"
+    );
+    assert_eq!(n.rect.x, 390.0, "x non flippé (rejeté)");
+}
+
+/// `position-try` shorthand : les mots-clés `most-*` dans la
+/// valeur portent l'ordre (css-anchor-1 — même sémantique
+/// que `position-try-order`).
+#[test]
+fn anchor_position_try_most_dans_le_shorthand() {
+    let (dom, bx) = laid(
+        "<div id=a></div><div id=n></div>",
+        "body{height:800px}\
+         #a{position:absolute;left:350px;top:750px;width:40px;height:20px;anchor-name:--a}\
+         #n{position:absolute;position-anchor:--a;top:anchor(bottom);left:anchor(right);\
+            width:30px;height:80px;position-try:most-width flip-block flip-inline}",
+    );
+    let n = find(&bx, by_id(&dom, "n"));
+    assert_eq!(n.rect.y, 670.0, "most-width du shorthand trie aussi");
+    assert_eq!(n.rect.x, 390.0);
 }
 
 /// `justify-self`/`align-self:anchor-center` (R-254 suite) :
@@ -1006,4 +1040,46 @@ fn container_units_fallback_viewport() {
     let a = find(&bx, by_id(&dom, "a"));
     assert_eq!(a.rect.width, 400.0, "cqw = % viewport");
     assert_eq!(a.rect.height, 60.0, "cqh = % viewport");
+}
+
+/// `position-try` ordonné (css-anchor-1 §3.5) : la première
+/// option dont la boîte rentre dans le viewport gagne —
+/// `--stay` n'est jamais évaluée quand `flip-block` résout
+/// le débordement ; seule, elle est appliquée même si elle
+/// déborde encore (dernière essayée, spec).
+#[test]
+fn anchor_position_try_ordre_declare() {
+    let (dom, bx) = laid(
+        "<div id=a></div><div id=m></div><div id=n></div>",
+        // `body{height}` fixe la hauteur document (proxy
+        // viewport de la passe — tout est abs-pos, sinon la
+        // racine ne fait que ~16 px et rien ne « fit »).
+        "body{height:800px}\
+         #a{position:absolute;left:10px;top:750px;width:40px;height:20px;anchor-name:--a}\
+         #m{position:absolute;position-anchor:--a;top:anchor(bottom);left:anchor(left);\
+            width:30px;height:80px;position-try:flip-block --stay}\
+         #n{position:absolute;position-anchor:--a;top:anchor(bottom);left:anchor(left);\
+            width:30px;height:80px;position-try:--stay}\
+         @position-try --stay{top:50px}",
+    );
+    let m = find(&bx, by_id(&dom, "m"));
+    let n = find(&bx, by_id(&dom, "n"));
+    // flip-block rentre → 670 (miroir) ; --stay jamais lu.
+    assert_eq!(m.rect.y, 670.0, "première option qui fit gagne");
+    // --stay seul : `top:50px` du try → y = 770+50 = 820 —
+    // appliqué bien que débordant (dernière option, spec).
+    assert_eq!(n.rect.y, 820.0, "--stay seul = son inset");
+}
+
+/// `inset-area` = nom d'origine de `position-area` (repli
+/// quand la forme canonique est absente).
+#[test]
+fn anchor_inset_area_alias() {
+    let (dom, bx) = laid(
+        "<div id=a></div><div id=m></div>",
+        "#a{position:absolute;left:10px;top:100px;width:40px;height:20px;anchor-name:--a}\
+         #m{position:absolute;position-anchor:--a;inset-area:bottom;width:30px;height:10px}",
+    );
+    let m = find(&bx, by_id(&dom, "m"));
+    assert_eq!(m.rect.y, 120.0, "inset-area:bottom = sous l'ancre");
 }
