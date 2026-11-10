@@ -678,11 +678,68 @@ fn prop_affects(name: &str) -> bool {
 /// `p { name:value }` change-t-elle le box tree vs `p {}` ?
 /// Alimente `bcd.css.values` (conformité par feature, pas par
 /// nom — `display:ruby` vs `display:grid`).
+/// Fixture par famille (R-247 — le `<p>` nu rendait 91 % des
+/// valeurs inertes par construction) : chaque prop est
+/// déclarée sur l'élément `.x` dans le contexte où sa valeur
+/// *peut* produire de la géométrie. `.x` = l'élément porteur
+/// de la déclaration (conteneur ou item selon la famille).
+fn fixture_for(name: &str) -> &'static str {
+    let n = name.trim_start_matches('-').trim_start_matches("webkit-");
+    match () {
+        // Props de conteneur flex/grid — `.x` = le conteneur.
+        _ if matches!(
+            n,
+            "align-content" | "align-items" | "justify-content"
+                | "place-content" | "place-items" | "gap" | "row-gap" | "column-gap"
+                | "flex-direction" | "flex-wrap" | "flex-flow" | "grid-template-columns"
+                | "grid-template-rows" | "grid-auto-flow" | "grid-auto-columns"
+                | "grid-auto-rows" | "justify-items" | "container-type" | "container-name"
+        ) =>
+        {
+            // Multi-lignes + hauteur fixe : `align-content` a
+            // de l'espace libre à distribuer (conteneur auto
+            // → effet nul par construction).
+            "<body><div class=x style=\"display:flex;flex-wrap:wrap;height:200px\"><p style=\"width:100%\">a</p><p>b</p></div></body>"
+        }
+        // Props d'item dans un conteneur flex — `.x` = l'item.
+        _ if matches!(
+            n,
+            "align-self" | "order" | "flex-grow" | "flex-shrink" | "flex-basis"
+                | "justify-self" | "grid-column" | "grid-row" | "grid-column-start"
+                | "grid-column-end" | "grid-row-start" | "grid-row-end" | "grid-area"
+        ) =>
+        {
+            "<body><div style=\"display:flex\"><p class=x>a</p><p>b</p></div></body>"
+        }
+        // Formulaires — `accent-color`, `caret-color`, `appearance`,
+        // `cursor`, `field-sizing`… n'ont d'effet que sur contrôle.
+        _ if matches!(
+            n,
+            "accent-color" | "caret-color" | "appearance" | "field-sizing"
+                | "user-select" | "pointer-events"
+        ) =>
+        {
+            "<body><div><input class=x type=checkbox checked></div></body>"
+        }
+        // Listes — `list-style-*`, `counter-*`.
+        _ if n.starts_with("list-style") || n.starts_with("counter") => {
+            "<body><ol><li class=x>a</li><li>b</li></ol></body>"
+        }
+        // Multi-colonnes — `column-count`/`column-width`/…
+        _ if n.starts_with("column-") || n == "columns" => {
+            "<body><div class=x><p>a</p><p>b</p></div></body>"
+        }
+        // Défaut — `<p>` dans `<div>` (texte, box, décorations).
+        _ => "<body><div><p class=x>ok</p></div></body>",
+    }
+}
+
 fn prop_affects_decl(decl: &str) -> bool {
     let Some((name, value)) = decl.split_once(':') else {
         return false;
     };
-    let dom = explorer_html::TreeBuilder::parse("<body><div><p class=x>ok</p></div></body>");
+    let name = name.trim();
+    let dom = explorer_html::TreeBuilder::parse(fixture_for(name));
     let root = {
         let mut r = None;
         walk_any(dom.document(), &dom, &mut r);
@@ -695,12 +752,19 @@ fn prop_affects_decl(decl: &str) -> bool {
         match explorer_layout::build_box_tree(&dom, root, &sm) {
             Some(mut bx) => {
                 explorer_layout::layout_tree(&mut bx, 800.0, &explorer_layout::BlockCtx::default());
-                bx.dump(&dom)
+                // Box tree + display list : la géométrie seule
+                // rate les effets paint (`accent-color`,
+                // `caret-color`, `text-shadow`…). Limite
+                // connue : la couleur du run texte n'est pas
+                // dans `dl.dump` — `color:*`/`caret-*` purs
+                // sur texte restent invisibles à la jauge.
+                let dl = explorer_render::build_display_list(&bx, 800.0, 600.0, 0.0);
+                format!("{}\n{}", bx.dump(&dom), dl.dump())
             }
             None => String::new(),
         }
     };
-    sig(&format!("p {{ {}: {} }}", name.trim(), value.trim())) != sig("p {}")
+    sig(&format!(".x {{ {}: {} }}", name, value.trim())) != sig(".x {}")
 }
 
 fn walk_any(n: explorer_dom::NodeId, dom: &explorer_dom::Dom, out: &mut Option<explorer_dom::NodeId>) {
