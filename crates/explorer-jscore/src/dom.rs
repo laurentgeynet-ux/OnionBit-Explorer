@@ -244,6 +244,18 @@ pub struct Node {
     /// l'arène (§B-59) ; jamais sérialisé ni observé côté JS.
     /// Le miroir est un harnais : `serde` n'y lit pas ce champ.
     pub(crate) free: bool,
+    /// **Génération du slot** — incrémentée à chaque
+    /// réutilisation par [`Self::alloc`] (pop `free_nodes`).
+    /// `NodeId` est un `u32` nu réutilisé : sans époque, un
+    /// wrapper JS sur un id détaché (`removeChild` /
+    /// `stripWhiteSpace` pendant un stamp) traversait le
+    /// **nouveau** nœud alloué sur le même slot — alias
+    /// silencieux (§B-126, classe ADR-0008 côté
+    /// explorer-dom). Les porteurs JS (`NodeHost`) capturent
+    /// l'époque à leur création et la comparent à chaque
+    /// résolution : un handle obsolète dégrade en
+    /// `undefined`/`null`, jamais le nœud recyclé.
+    pub(crate) epoch: u32,
 }
 
 /// Opération `CanvasRenderingContext2D` enregistrée sur le
@@ -2122,6 +2134,10 @@ impl Dom {
             n.tag = stored_tag;
             n.attached = false;
             n.free = false;
+            // Nouvel occupant = nouvelle génération : les
+            // handles JS créés pour l'occupant précédent
+            // deviennent obsolètes (§B-126).
+            n.epoch = n.epoch.wrapping_add(1);
             return id;
         }
         self.nodes.push(Node {
@@ -2135,6 +2151,7 @@ impl Dom {
             inline_handlers: Vec::new(),
             attached: false,
             free: false,
+            epoch: 1,
         });
         (self.nodes.len() - 1) as NodeId
     }

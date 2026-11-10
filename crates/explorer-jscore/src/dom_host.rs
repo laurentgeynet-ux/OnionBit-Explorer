@@ -591,16 +591,36 @@ struct NodeHost {
     dom: DomRef,
     cache: NodeCache,
     node: NodeId,
+    /// **Époque du slot** capturée à la création du wrapper —
+    /// `NodeId` (`u32` nu) est réutilisé par `alloc`/`free_nodes` :
+    /// sans elle, un handle sur un id détaché traverse le
+    /// **nouvel occupant** du slot — alias silencieux (§B-126,
+    /// même classe qu'ADR-0008 côté explorer-dom).
+    epoch: u32,
 }
 
 impl NodeHost {
+    /// Le handle est-il encore vivant — le slot porte-t-il le
+    /// nœud pour lequel ce wrapper a été créé ? Un id recyclé
+    /// (époque différente) dégrade `undefined`/`null`/refus au
+    /// lieu de frapper le nœud étranger (§B-126).
+    fn live(&self) -> bool {
+        let d = self.dom.borrow();
+        d.node_valid(self.node) && d.nodes[self.node as usize].epoch == self.epoch
+    }
+
     /// (dom, nœud) pour les accesseurs de prototype IDL
     /// (JS-C82 — `dom_acc_get`/`dom_acc_set` lisent la valeur
     /// **brute** sans repasser par `Host::get`, faute de quoi
     /// un `defineProperty` accesseur propre sur l'élément —
     /// le tracker React `inputValueTracking` — rebouclerait).
-    pub(crate) fn dom_node(&self) -> (DomRef, NodeId) {
-        (self.dom.clone(), self.node)
+    /// `None` si le handle est obsolète (slot recyclé §B-126).
+    pub(crate) fn dom_node(&self) -> Option<(DomRef, NodeId)> {
+        if self.live() {
+            Some((self.dom.clone(), self.node))
+        } else {
+            None
+        }
     }
 }
 
@@ -709,7 +729,7 @@ fn dom_acc_get(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
     let Some((dom, node)) = e.host_of(id).and_then(|h| {
         h.as_any()
             .downcast_ref::<NodeHost>()
-            .map(NodeHost::dom_node)
+            .and_then(NodeHost::dom_node)
     }) else {
         return Ok(Value::Undefined);
     };
@@ -733,7 +753,7 @@ fn dom_acc_set(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
     let Some((dom, node)) = e.host_of(id).and_then(|h| {
         h.as_any()
             .downcast_ref::<NodeHost>()
-            .map(NodeHost::dom_node)
+            .and_then(NodeHost::dom_node)
     }) else {
         return Ok(Value::Undefined);
     };
@@ -1169,7 +1189,13 @@ fn dom_nav_set(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
         }
         "innerHTML" => {
             let s = e.to_js_string(v)?;
-            let host = NodeHost { dom, cache, node };
+            let epoch = dom.borrow().nodes.get(node as usize).map_or(0, |n| n.epoch);
+            let host = NodeHost {
+                dom,
+                cache,
+                node,
+                epoch,
+            };
             host.set_inner_html(node, &s);
         }
         _ => {}
@@ -2057,12 +2083,34 @@ struct EventHost {
 }
 
 pub(crate) fn node_value(e: &mut Engine, dom: &DomRef, cache: &NodeCache, node: NodeId) -> Value {
-    if let Some(&id) = cache.borrow().get(&node) {
+    let epoch = dom.borrow().nodes.get(node as usize).map_or(0, |n| n.epoch);
+    // Liaison hors scrutinee : un temporaire `Ref` de
+    // `cache.borrow()` dans le `if let` vivrait jusqu'à la fin
+    // du bloc → `borrow_mut` dedans paniquerait (latent).
+    let cached = cache.borrow().get(&node).copied();
+    if let Some(id) = cached {
         // Garde GC : un `ObjId` balayé ne doit jamais être
         // rendu (zombie → « of Undefined » / « (on ?) ») — on
         // recrée le wrapper et on nettoie la entrée morte.
-        if e.heap.obj(id).is_some() {
-            return Value::Obj(id);
+        // Garde époque (§B-126) : le wrapper en cache a pu être
+        // créé pour l'occupant **précédent** du slot recyclé —
+        // le rendre aliasserait silencieusement le nouveau nœud.
+        if let Some(o) = e.heap.obj(id) {
+            // `NodeHost` → époque requise (le slot a pu être
+            // recyclé). Autres kinds (`DocumentHost` racine,
+            // hosts spécialisés) → pas de `NodeId` vérifiable,
+            // le wrapper identitaire est conservé (`x ===
+            // document`, §B-126 régression cap191).
+            let same = matches!(
+                &o.kind,
+                ObjKind::Host(h)
+                    if h.as_any()
+                        .downcast_ref::<NodeHost>()
+                        .is_none_or(|n| n.epoch == epoch)
+            );
+            if same {
+                return Value::Obj(id);
+            }
         }
         cache.borrow_mut().remove(&node);
     }
@@ -2070,6 +2118,7 @@ pub(crate) fn node_value(e: &mut Engine, dom: &DomRef, cache: &NodeCache, node: 
         dom: dom.clone(),
         cache: cache.clone(),
         node,
+        epoch,
     }));
     if let Value::Obj(id) = v {
         // `sr instanceof ShadowRoot` (JS-C159) — la racine
@@ -7550,9 +7599,10 @@ fn media_call_claimed(
 impl Host for NodeHost {
     fn class_name(&self) -> &'static str {
         let d = self.dom.borrow();
-        // Id obsolète (arène resynchronisée sous handle JS vivant)
-        // → repli générique, jamais panic.
-        if !d.node_valid(self.node) {
+        // Id obsolète (arène resynchronisée ou slot recyclé
+        // sous handle JS vivant, §B-126) → repli générique,
+        // jamais panic ni lecture du nouvel occupant.
+        if !d.node_valid(self.node) || d.nodes[self.node as usize].epoch != self.epoch {
             return "HTMLElement";
         }
         match d.nodes[self.node as usize].tag.as_str() {
@@ -7577,7 +7627,7 @@ impl Host for NodeHost {
     }
 
     fn has_method(&self, name: &str) -> bool {
-        if !self.dom.borrow().node_valid(self.node) {
+        if !self.live() {
             return NODE_METHODS.contains(&name);
         }
         NODE_METHODS.contains(&name)
@@ -7617,9 +7667,11 @@ impl Host for NodeHost {
     fn get(&self, e: &mut Engine, this: Value, key: &str) -> JsResult<Option<Value>> {
         let node = self.node;
         // Id obsolète (arène resynchronisée — spectrum
-        // `groupChildren`, `nodes[614]` sur 507) → prop absente,
-        // dégradation `undefined` plutôt que panic.
-        if !self.dom.borrow().node_valid(node) {
+        // `groupChildren`, `nodes[614]` sur 507 — ou slot
+        // recyclé, époque divergée, §B-126) → prop absente,
+        // dégradation `undefined` plutôt que lecture du
+        // nouvel occupant.
+        if !self.live() {
             return Ok(None);
         }
         // Accesseur propre `defineProperty` (JS-C82) : il shadowe
@@ -8511,9 +8563,10 @@ impl Host for NodeHost {
 
     fn set(&self, e: &mut Engine, this: Value, key: &str, v: Value) -> JsResult<bool> {
         let node = self.node;
-        // Id obsolète → écriture refusée (set expando ailleurs),
-        // jamais panic sur l'arène.
-        if !self.dom.borrow().node_valid(node) {
+        // Id obsolète (ou slot recyclé §B-126) → écriture
+        // refusée (set expando ailleurs), jamais mutation du
+        // nouvel occupant.
+        if !self.live() {
             return Ok(false);
         }
         // Accesseur propre `defineProperty` (JS-C82) : refuser
@@ -8741,6 +8794,12 @@ impl Host for NodeHost {
         args: &[Value],
     ) -> JsResult<Option<Value>> {
         let node = self.node;
+        // Slot recyclé sous handle JS vivant (§B-126) — sans
+        // ce garde, `by_tag`/`child_nodes`/`append` lisaient et
+        // mutaient le nouvel occupant.
+        if !self.live() {
+            return Ok(None);
+        }
         match name {
             "getElementsByTagName" => {
                 let tag = e.to_js_string(arg(args, 0))?;
@@ -10022,7 +10081,9 @@ pub(crate) fn node_for(e: &mut Engine, v: Value) -> Option<NodeId> {
         // tenait la référence — spectrum `groupChildren` :
         // `nodes[614]` sur arène 507) → pas un nœud : TypeError
         // amont plutôt que panic dans `append`/`detach`.
-        if !n.dom.borrow().node_valid(n.node) {
+        if !n.dom.borrow().node_valid(n.node)
+            || n.dom.borrow().nodes[n.node as usize].epoch != n.epoch
+        {
             return None;
         }
         return Some(n.node);
@@ -10057,7 +10118,10 @@ pub(crate) fn node_for_in(e: &mut Engine, v: Value, dom: &DomRef) -> Option<Node
         _ => return None,
     };
     if let Some(n) = h.as_any().downcast_ref::<NodeHost>() {
-        if !Rc::ptr_eq(&n.dom, dom) || !dom.borrow().node_valid(n.node) {
+        if !Rc::ptr_eq(&n.dom, dom)
+            || !dom.borrow().node_valid(n.node)
+            || dom.borrow().nodes[n.node as usize].epoch != n.epoch
+        {
             return None;
         }
         return Some(n.node);
@@ -10085,7 +10149,10 @@ fn foreign_node_in(e: &mut Engine, v: Value, dom: &DomRef) -> Option<(NodeId, Do
         _ => return None,
     };
     if let Some(n) = h.as_any().downcast_ref::<NodeHost>() {
-        if Rc::ptr_eq(&n.dom, dom) || !n.dom.borrow().node_valid(n.node) {
+        if Rc::ptr_eq(&n.dom, dom)
+            || !n.dom.borrow().node_valid(n.node)
+            || n.dom.borrow().nodes[n.node as usize].epoch != n.epoch
+        {
             return None;
         }
         return Some((n.node, n.dom.clone()));
@@ -10193,10 +10260,12 @@ fn adopt_into(e: &mut Engine, v: Value, dst: &DomRef, dst_cache: &NodeCache) -> 
     };
     n.dom.borrow_mut().detach(n.node);
     if let Some(o) = e.heap.obj_mut(id) {
+        let epoch = dst.borrow().nodes[new_id as usize].epoch;
         o.kind = ObjKind::Host(Rc::new(NodeHost {
             dom: dst.clone(),
             cache: dst_cache.clone(),
             node: new_id,
+            epoch,
         }));
     }
     dst_cache.borrow_mut().insert(new_id, id);
@@ -12471,12 +12540,32 @@ fn cct_stamp_diag(e: &mut Engine, el: &Value) -> String {
         };
         res.push(format!("{i}:{name}"));
     }
+    // §B-126 — le `X` RÉEL de l'appel : `_bindTemplate` pose
+    // `this.__templateInfo = Object.create(F._templateInfo)` —
+    // il survit sur l'élément. `X.content` (fragment Polymer
+    // pré-annotation ?) et `X.nodeInfoList` (hérité ou propre ?)
+    // tranchent la divergence paire (F, P) : clone fidèle mais
+    // arbre ≠ annotations → iDo undefined sur les `events`.
+    let x = e
+        .get_prop_value(el.clone(), "__templateInfo")
+        .unwrap_or(Value::Undefined);
+    let xc2 = cct_prop_len(e, &x, &["content", "childNodes"]);
+    let nl2 = cct_prop_len(e, &x, &["nodeInfoList"]);
+    let nlst = cct_prop_len(e, &x, &["nodeList"]);
+    let xown_c = !matches!(
+        e.get_prop_value(x.clone(), "content")
+            .unwrap_or(Value::Undefined),
+        Value::Undefined | Value::Null
+    );
     format!(
-        "fk={} res={} fU={} fUev={}",
+        "fk={} res={} fU={} fUev={} x={{c:{} nl:{} nlst:{}}}",
         top.join(","),
         res.join("|"),
         first_undef,
-        first_undef_ev
+        first_undef_ev,
+        if xown_c { xc2 } else { "abs".to_string() },
+        nl2,
+        nlst
     )
 }
 
@@ -14534,7 +14623,7 @@ pub(crate) fn dom_node_of(e: &Engine, v: Value) -> Option<(DomRef, NodeId)> {
     e.host_of(id).and_then(|h| {
         h.as_any()
             .downcast_ref::<NodeHost>()
-            .map(NodeHost::dom_node)
+            .and_then(NodeHost::dom_node)
     })
 }
 
