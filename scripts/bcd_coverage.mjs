@@ -315,17 +315,54 @@ for (const sec of sections) {
         return one && one.version_added !== false && !one.version_removed;
       }).length;
     };
+    // Sémantique des noms de membres BCD (étape 219 —
+    // correction d'artefacts de mesure) :
+    //  - `X.m_static`     → membre statique `X.m`
+    //  - `X.e_event`      → handler `one` (proto ou instance)
+    //  - `X.X`            → le constructeur existe
+    //  - membre ordinaire → `X.m` ou `X.prototype.m` ou
+    //    `new X().m` (attributs d'instance — `signal`,
+    //    `aborted`… ne vivent pas sur le prototype : les
+    //    sondés littéralement comptaient miss à tort).
+    // `FACTORY` : classes à ctor « Illegal » dont l'objet
+    // se fabrique ailleurs (AbortSignal via AbortController).
+    const FACTORY = {
+      AbortSignal: 'new AbortController().signal',
+      AbortController: 'new AbortController()',
+      // Singleton spec — les attributs d'instance
+      // (`timeOrigin`, `timing`, `navigation`) vivent sur
+      // `performance`, le ctor reste « Illegal ».
+      Performance: 'performance',
+      Navigator: 'navigator',
+      Location: 'location',
+      History: 'history',
+    };
     for (const [a, nodeA] of Object.entries(bcd.api ?? {})) {
       if (a === '__compat' || a.startsWith('_')) continue;
       if (rel(nodeA.__compat) > 0) tests.push({ name: a, cand: [[a]] });
       for (const [b, nodeB] of Object.entries(nodeA)) {
         if (b === '__compat' || !nodeB?.__compat || rel(nodeB.__compat) === 0) continue;
-        const cand = b === a ? [[a]] : [[a, b], [a, 'prototype', b]];
+        let cand;
+        if (b === a) {
+          cand = [[a]];
+        } else if (b.endsWith('_static')) {
+          cand = [[a, b.slice(0, -7)]];
+        } else if (b.endsWith('_event')) {
+          const h = 'on' + b.slice(0, -6);
+          cand = [[a, 'prototype', h], ['new:', a, h]];
+        } else {
+          cand = [[a, b], [a, 'prototype', b], ['new:', a, b]];
+        }
         tests.push({ name: `${a}.${b}`, cand });
       }
     }
     const src = [
-      'function chk(p){var o=globalThis,i=0;',
+      'var F=' + JSON.stringify(FACTORY) + ';',
+      'function inst(a){if(F[a])try{return eval(F[a])}catch(e){return null}',
+      'try{return new globalThis[a]()}catch(e){return null}}',
+      'function chk(p){',
+      'if(p[0]==="new:"){var o=inst(p[1]);return o!=null&&p[2] in o}',
+      'var o=globalThis,i=0;',
       'if(p.length===1)return typeof o[p[0]]!=="undefined";',
       'while(i<p.length-1){if(o==null)return false;o=o[p[i]];i++}',
       'try{return o!=null && p[i] in o}catch(e){return false}}',
@@ -367,14 +404,18 @@ for (const sec of sections) {
         pairs.push({ name: `${p}:${v}`, engines: n });
       }
     }
-    const okSet = new Set(
-      execFileSync(cli, ['check', 'affectsv'], {
-        input: pairs.map(e => e.name).join('\n'),
-        encoding: 'utf8', timeout: 600_000, maxBuffer: 64 * 1024 * 1024,
-      }).split(/\r?\n/).filter(Boolean)
-        .filter(l => l.endsWith('\tok')).map(l => l.split('\t')[0]));
-    report('css.values', pairs, okSet,
-      'déclaration exacte → effet géométrique (jauge non-saturante)');
+    const lines = execFileSync(cli, ['check', 'affectsv'], {
+      input: pairs.map(e => e.name).join('\n'),
+      encoding: 'utf8', timeout: 600_000, maxBuffer: 64 * 1024 * 1024,
+    }).split(/\r?\n/).filter(Boolean);
+    const okSet = new Set(lines.filter(l => l.endsWith('\tok')).map(l => l.split('\t')[0]));
+    // `na` = valeur initiale spec ou CSS-wide — neutre par
+    // construction (aucun oracle géométrique possible) →
+    // hors dénominateur, annoncée dans la note (ADR-0010).
+    const naSet = new Set(lines.filter(l => l.endsWith('\tna')).map(l => l.split('\t')[0]));
+    const measured = pairs.filter(e => !naSet.has(e.name));
+    report('css.values', measured, okSet,
+      `déclaration exacte → effet géométrique (jauge non-saturante) ; ${naSet.size} neutres (initiale spec / CSS-wide) hors dénominateur`);
   } else if (sec === 'html') {
     // bcd.html.elements.<tag> — oracle de comportement par
     // élément (`check html`, étape 219) : « le tag parse »

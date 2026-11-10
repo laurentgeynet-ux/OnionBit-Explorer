@@ -4070,6 +4070,55 @@ impl Engine {
             }
             self.set_own(g, name, f, false);
         }
+        // `Performance` (étape 219 / `api` BCD) — les méthodes
+        // vivent sur `Performance.prototype` (spec : le
+        // singleton `performance` en hérite — `instanceof`
+        // valide, les feature-detects lisent le proto). Les
+        // impls natives sont celles du global `performance`
+        // (builtins) ; les attributs d'instance (`timeOrigin`,
+        // `timing`, `navigation`) restent propres au
+        // singleton.
+        if let Some(Value::Obj(pid)) =
+            self.get_prop(self.global, "Performance")
+                .and_then(|c| match c {
+                    Value::Obj(cid) => self.get_prop(cid, "prototype"),
+                    _ => None,
+                })
+        {
+            for (k, f2) in [
+                (
+                    "now",
+                    crate::builtins::performance_now as crate::heap::NativeFn,
+                ),
+                ("mark", crate::builtins::performance_mark),
+                ("measure", crate::builtins::performance_measure),
+                ("clearMarks", crate::builtins::performance_clear_marks),
+                ("clearMeasures", crate::builtins::performance_clear_measures),
+                ("getEntries", crate::builtins::performance_get_entries),
+                (
+                    "getEntriesByName",
+                    crate::builtins::performance_get_entries_by_name,
+                ),
+                (
+                    "getEntriesByType",
+                    crate::builtins::performance_get_entries_by_type,
+                ),
+                (
+                    "setResourceTimingBufferSize",
+                    crate::builtins::performance_noop,
+                ),
+                ("clearResourceTimings", crate::builtins::performance_noop),
+            ] {
+                self.add_method(pid, k, f2);
+            }
+            // Chaîne spec : `performance` hérite
+            // `Performance.prototype`.
+            if let Some(Value::Obj(gid)) = self.get_prop(self.global, "performance") {
+                if let Some(o) = self.heap.obj_mut(gid) {
+                    o.proto = Value::Obj(pid);
+                }
+            }
+        }
         // `XPathResult` — stub + constantes `*_TYPE` lues en
         // argument de `document.evaluate(…, type, …)` (CAP-188).
         let xr_f = self.illegal_ctor_bound("XPathResult");

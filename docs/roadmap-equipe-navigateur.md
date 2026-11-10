@@ -7465,6 +7465,20 @@ incrément.
   et `menu`→`HTMLMenuElement`,
   `time.dateTime` reflète `datetime`.
   Verrou `tag_interfaces_mod_menu_time`.
+  **Suite** : (a) `affectsv` tri-état —
+  initiales spec + CSS-wide = `na`
+  hors dénominateur (90 exclues,
+  `INITIAL_EXTRA` oracle local) ;
+  (b) probe `api` honnête — `_static`/
+  `_event` décodés, membres d'instance
+  via `new A()` + `FACTORY` singletons
+  → 802→1040 ; (c) `Performance.prototype`
+  chaîné sur le singleton ; (d) fixtures
+  débordant/scrollable (`overflow-*`,
+  `scroll-snap-*`) ; (e) `rp` = repli
+  ruby → `Hidden`. `css.values`
+  395/2608, `api` 1040/8099,
+  `html.elem` 119/119.
 
 - [ ] **Écarts terrain — vol humain
   22/10 (release `39ab821`, FFI)** :

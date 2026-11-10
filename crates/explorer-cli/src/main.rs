@@ -749,6 +749,38 @@ fn fixture_for(name: &str) -> &'static str {
         () if n.starts_with("column-") || n == "columns" => {
             "<body><div class=x><p>a</p><p>b</p></div></body>"
         }
+        // Conteneur **débordant** (étape 219) — `overflow-*`
+        // et `overscroll-*` n'ont d'oracle que si le contenu
+        // excède la boîte : `hidden`/`clip` coupent vs
+        // `scroll`/`auto` posent la gouttière vs `visible`.
+        () if matches!(
+            n,
+            "overflow" | "overflow-x" | "overflow-y" | "overflow-block"
+                | "overflow-inline" | "overscroll-behavior" | "overscroll-behavior-x"
+                | "overscroll-behavior-y" | "overscroll-behavior-block"
+                | "overscroll-behavior-inline"
+        ) =>
+        {
+            "<body><div class=x style=\"width:100px;height:80px\"><p style=\"height:200px\">a</p></div></body>"
+        }
+        // Conteneur **déjà scrollable** — `scroll-snap-*`/
+        // `scroll-margin`/`scroll-padding` (étape 219) : la
+        // valeur n'a d'effet possible que sur un scroller.
+        () if matches!(
+            n,
+            "scroll-snap-type" | "scroll-snap-align" | "scroll-snap-stop" | "scroll-margin"
+                | "scroll-margin-top" | "scroll-margin-right" | "scroll-margin-bottom"
+                | "scroll-margin-left" | "scroll-margin-block" | "scroll-margin-inline"
+                | "scroll-margin-block-start" | "scroll-margin-block-end"
+                | "scroll-margin-inline-start" | "scroll-margin-inline-end" | "scroll-padding"
+                | "scroll-padding-top" | "scroll-padding-right" | "scroll-padding-bottom"
+                | "scroll-padding-left" | "scroll-padding-block" | "scroll-padding-inline"
+                | "scroll-padding-block-start" | "scroll-padding-block-end"
+                | "scroll-padding-inline-start" | "scroll-padding-inline-end"
+        ) =>
+        {
+            "<body><div class=x style=\"width:100px;height:80px;overflow:scroll\"><p style=\"height:200px\">a</p></div></body>"
+        }
         // Boîte à dimensions fixes — `position`, `inset`,
         // `transform`, `overflow`, `scroll-snap`, `contain`,
         // `clip-*`, `background-*`, `mask-*` : un box 100×80
@@ -759,9 +791,7 @@ fn fixture_for(name: &str) -> &'static str {
             "position" | "top" | "right" | "bottom" | "left" | "inset"
                 | "z-index" | "transform" | "transform-origin" | "transform-style"
                 | "transform-box" | "perspective" | "backface-visibility"
-                | "overflow" | "overflow-x" | "overflow-y" | "overflow-block"
-                | "overflow-inline" | "scroll-snap-type" | "scroll-snap-align"
-                | "scroll-margin" | "scroll-padding" | "contain" | "contain-intrinsic-size"
+                | "contain" | "contain-intrinsic-size"
                 | "contain-intrinsic-width" | "contain-intrinsic-height" | "content-visibility"
                 | "clip" | "clip-path" | "visibility" | "opacity" | "filter"
                 | "mix-blend-mode" | "isolation" | "box-shadow" | "box-sizing"
@@ -827,6 +857,88 @@ fn prop_affects_decl(decl: &str) -> bool {
         }
     };
     sig(&format!(".x {{ {}: {} }}", name, value.trim())) != sig(".x {}")
+}
+
+/// `affectsv` tri-état (étape 219) : `None` = **neutre par
+/// construction** — la valeur est l'initiale spec de la prop
+/// ou un mot-clé CSS-wide ; sa déclaration a pour effet spec
+/// « identique à l'absence de déclaration » → aucun oracle
+/// géométrique n'existe. Hors dénominateur (`na`), documenté
+/// en note du rapport — sinon le score punissait les valeurs
+/// sans effet possible.
+///
+/// `initial_value` (css) ne couvre qu'une partie du
+/// catalogue — `INITIAL_EXTRA` complète par les initiales
+/// spec des familles les plus visibles du lot BCD (oracle
+/// vérifiable à la spec ; tout ce qui n'est pas initial
+/// reste un miss honnête).
+const INITIAL_EXTRA: &[(&str, &str)] = &[
+    ("accent-color", "auto"),
+    ("align-content", "normal"),
+    ("align-items", "normal"),
+    ("align-self", "auto"),
+    ("alignment-baseline", "baseline"),
+    ("anchor-name", "none"),
+    ("anchor-scope", "none"),
+    ("appearance", "none"),
+    ("aspect-ratio", "auto"),
+    ("backface-visibility", "visible"),
+    ("baseline-shift", "baseline"),
+    ("caret-color", "auto"),
+    ("clear", "none"),
+    ("column-fill", "balance"),
+    ("contain", "none"),
+    ("content", "normal"),
+    ("content-visibility", "visible"),
+    ("direction", "ltr"),
+    ("field-sizing", "fixed"),
+    ("flex-wrap", "nowrap"),
+    ("float", "none"),
+    ("hyphens", "manual"),
+    ("image-rendering", "auto"),
+    ("isolation", "auto"),
+    ("justify-content", "normal"),
+    ("justify-items", "legacy"),
+    ("justify-self", "auto"),
+    ("letter-spacing", "normal"),
+    ("line-break", "auto"),
+    ("list-style-position", "outside"),
+    ("mix-blend-mode", "normal"),
+    ("object-fit", "fill"),
+    ("order", "0"),
+    ("overflow-wrap", "normal"),
+    ("overscroll-behavior", "auto"),
+    ("pointer-events", "auto"),
+    ("resize", "none"),
+    ("scroll-behavior", "auto"),
+    ("table-layout", "auto"),
+    ("text-align", "start"),
+    ("text-orientation", "mixed"),
+    ("text-wrap", "wrap"),
+    ("transform", "none"),
+    ("transform-style", "flat"),
+    ("unicode-bidi", "normal"),
+    ("user-select", "auto"),
+    ("vertical-align", "baseline"),
+    ("white-space", "normal"),
+    ("word-break", "normal"),
+    ("word-spacing", "normal"),
+    ("writing-mode", "horizontal-tb"),
+];
+
+fn affects_decl_verdict(decl: &str) -> Option<bool> {
+    let (name, value) = decl.split_once(':')?;
+    let (name, value) = (name.trim(), value.trim());
+    let v = value.to_ascii_lowercase();
+    if matches!(
+        v.as_str(),
+        "inherit" | "initial" | "unset" | "revert" | "revert-layer"
+    ) || explorer_css::initial_value(name).is_some_and(|iv| iv == value)
+        || INITIAL_EXTRA.iter().any(|&(n, iv)| n == name && iv == v)
+    {
+        return None;
+    }
+    Some(prop_affects_decl(decl))
 }
 
 /// `check html` — oracle de comportement par élément
@@ -906,6 +1018,15 @@ fn html_spec(tag: &str) -> HtmlSpec {
             Some("<body><audio></audio></body>"), Hidden),
         "base" => hs("HTMLBaseElement", "true", None, Hidden),
         "blockquote" | "q" => hs("HTMLQuoteElement", "true", None, Renders),
+        // Parenthèse de repli pour les UAs sans ruby — ne
+        // génère jamais de boîte propre dans un contexte
+        // ruby (le texte `<rt>` est posé par le moteur).
+        "rp" => hs(
+            "HTMLElement",
+            "true",
+            Some("<body><ruby>base<rp>(</rp><rt>x</rt><rp>)</rp></ruby></body>"),
+            Hidden,
+        ),
         "body" => hs("HTMLBodyElement", "true",
             Some("<body><p>ok</p></body>"), Renders),
         "br" => hs("HTMLBRElement", "true",
@@ -1144,6 +1265,9 @@ fn check_names(kind: &str) -> ExitCode {
             Box::new(move |name| explorer_css::prop_routed(&routed_dom, name))
         }
         "affects" => Box::new(prop_affects),
+        // `affectsv` est tri-état (`na` = valeur initiale spec
+        // ou CSS-wide — neutre par construction, hors
+        // dénominateur) : boucle dédiée plus bas.
         "affectsv" => Box::new(prop_affects_decl),
         // Étape 219 — `html` : oracle de comportement par
         // élément (`bcd.html.elements`) — binding JS
@@ -1168,7 +1292,13 @@ fn check_names(kind: &str) -> ExitCode {
         if name.is_empty() {
             continue;
         }
-        println!("{name}\t{}", if test(name) { "ok" } else { "miss" });
+        if kind == "affectsv" {
+            let verdict =
+                affects_decl_verdict(name).map_or("na", |ok| if ok { "ok" } else { "miss" });
+            println!("{name}\t{verdict}");
+        } else {
+            println!("{name}\t{}", if test(name) { "ok" } else { "miss" });
+        }
     }
     ExitCode::SUCCESS
 }
