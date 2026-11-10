@@ -1184,3 +1184,34 @@ fn text_orientation_sideways_brackete() {
         .count();
     assert_eq!(bracketed, 1, "seul le run sideways est pivote");
 }
+
+/// `text-orientation:upright` : chaque glyphe est un `Text`
+/// séparé empilé verticalement (avance = font-size) —
+/// `mixed` inchangé (résidu).
+#[test]
+fn text_orientation_upright_per_glyph() {
+    let dom: Dom = TreeBuilder::parse("<div class=v>ab</div>");
+    let mut eng = StyleEngine::new();
+    eng.add_css("body{margin:0}", Origin::Author);
+    eng.add_css(
+        ".v{display:block;writing-mode:vertical-rl;text-orientation:upright}",
+        Origin::Author,
+    );
+    let styles = eng.compute_tree(&dom, dom.document(), &StyleEnv::default());
+    let root_el = dom
+        .children(dom.document())
+        .into_iter()
+        .flatten()
+        .find(|&c| dom.element(c).is_ok())
+        .expect("élément racine");
+    let mut bx = build_box_tree(&dom, root_el, &styles).expect("arbre");
+    layout_tree(&mut bx, VIEW, &ctx());
+    let imgs = collect_data_images(&dom, &styles, 1 << 20);
+    let list = build_display_list_full(&bx, VIEW, 200.0, 0.0, &imgs);
+    let texts = list
+        .items
+        .iter()
+        .filter(|i| matches!(i, explorer_render::DisplayItem::Text { .. }))
+        .count();
+    assert_eq!(texts, 2, "« ab » = 2 glyphes empilés : {texts}");
+}
