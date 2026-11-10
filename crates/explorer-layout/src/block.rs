@@ -2872,9 +2872,15 @@ fn resolve_absolutes_impl(
     // aux blocs) — son champ resterait `Static` (R-31). Les
     // boîtes anonymes/texte clonent le style du parent mais
     // ne sont JAMAIS des blocs conteneurs (R-22).
-    let own_cb = if (bx.position == Position::Static
-        && bx.style.get("position").is_none_or(|p| p == "static"))
-        || matches!(bx.kind, BoxKind::Text | BoxKind::AnonymousBlock)
+    // R-222 — le CB des descendants **absolus** est aussi
+    // établi par `transform`/`filter`/`perspective`/`contain`
+    // (css-transforms §12 — les menus `vector-*` wikipedia
+    // sont absolus dans un ancêtre transformé : sans ça ils
+    // s'ancraient au CB englobant → dx +1032 px mesuré).
+    let own_cb = if matches!(bx.kind, BoxKind::Text | BoxKind::AnonymousBlock)
+        || ((bx.position == Position::Static
+            && bx.style.get("position").is_none_or(|p| p == "static"))
+            && !establishes_fixed_cb(bx))
     {
         cb
     } else {
