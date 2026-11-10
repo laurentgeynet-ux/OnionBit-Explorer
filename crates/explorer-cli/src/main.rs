@@ -180,38 +180,47 @@ const XHR_GRACE_MS: u64 = 1_000;
 /// optionnel, puis paires de flags `--report <json>` /
 /// `--geometry <json>` (étapes 215/216). Retourne
 /// `(size, report, geometry)` — `Err` = usage.
-fn shot_tail<'a>(
-    rest: &'a [String],
-) -> Result<(Option<&'a str>, Option<&'a str>, Option<&'a str>), ()> {
+/// Flags optionnels de `shot` (étapes 215/216).
+#[derive(Default)]
+struct ShotTail<'a> {
+    size: Option<&'a str>,
+    report: Option<&'a str>,
+    geometry: Option<&'a str>,
+}
+
+fn shot_tail(rest: &[String]) -> Result<ShotTail<'_>, ()> {
+    let mut out = ShotTail::default();
     let mut idx = 0;
-    let mut size = None;
     if let Some(first) = rest.first() {
         if !first.starts_with("--") {
-            size = Some(first.as_str());
+            out.size = Some(first.as_str());
             idx = 1;
         }
     }
-    let mut report = None;
-    let mut geometry = None;
     while idx < rest.len() {
         match rest[idx].as_str() {
             "--report" => {
-                report = Some(rest.get(idx + 1).ok_or(())?.as_str());
+                out.report = Some(rest.get(idx + 1).ok_or(())?.as_str());
                 idx += 2;
             }
             "--geometry" => {
-                geometry = Some(rest.get(idx + 1).ok_or(())?.as_str());
+                out.geometry = Some(rest.get(idx + 1).ok_or(())?.as_str());
                 idx += 2;
             }
             _ => return Err(()),
         }
     }
-    Ok((size, report, geometry))
+    Ok(out)
 }
 
 #[tokio::main(flavor = "current_thread")]
 async fn shot(url: &str, out: &str, rest: &[String]) -> ExitCode {
-    let Ok((size, report, geometry)) = shot_tail(rest) else {
+    let Ok(ShotTail {
+        size,
+        report,
+        geometry,
+    }) = shot_tail(rest)
+    else {
         eprintln!("usage : explorer-cli shot <url> <sortie.png> [LxH] [--report out.json] [--geometry out.json]");
         return ExitCode::FAILURE;
     };
@@ -277,10 +286,38 @@ async fn shot(url: &str, out: &str, rest: &[String]) -> ExitCode {
         session.journal_fallbacks(),
         session.journal_classified()
     );
-    // `--report` (étape 215 — contrat consommé par
-    // `site_harvest`) : census moteur verbatim + `doc_h`
-    // mesurée. Émis même si la frame échoue — un shot sans
-    // PNG reste un signal pour le Pareto.
+    emit_shot_reports(&mut session, tab, url, report, geometry);
+    if let Some(png) = session.frame_png(tab) {
+        match std::fs::write(out, &png) {
+            Ok(()) => {
+                println!("{out} — {} octets", png.len());
+                ExitCode::SUCCESS
+            }
+            Err(e) => {
+                eprintln!("écriture {out} : {e}");
+                ExitCode::FAILURE
+            }
+        }
+    } else {
+        eprintln!("pas de frame produite");
+        ExitCode::FAILURE
+    }
+}
+
+/// Émission `--report`/`--geometry` post-navigation (étapes
+/// 215/216). `--report` (contrat consommé par `site_harvest`) :
+/// census moteur verbatim + `doc_h` mesurée — émis même si la
+/// frame échoue, un shot sans PNG reste un signal pour le
+/// Pareto. `--geometry` (R-208 consommé) : boîtes `NodeId→rect`
+/// jointes `(tag,id,cls)`, même forme que `ref_capture`
+/// `.ref.json` — consommée par `geo_diff.mjs`.
+fn emit_shot_reports(
+    session: &mut explorer_core::Session,
+    tab: explorer_core::TabId,
+    url: &str,
+    report: Option<&str>,
+    geometry: Option<&str>,
+) {
     if let Some(rep) = report {
         let mut doc_h = serde_json::Value::Null;
         let mut doc_h_clamped = serde_json::Value::Null;
@@ -302,9 +339,6 @@ async fn shot(url: &str, out: &str, rest: &[String]) -> ExitCode {
             _ => eprintln!("--report : écriture {rep} impossible"),
         }
     }
-    // `--geometry` (étape 216 — R-208 consommé) : boîtes
-    // `NodeId→rect` jointes `(tag,id,cls)`, même forme que
-    // `ref_capture` `.ref.json` — consommée par geo_diff.mjs.
     if let Some(gpath) = geometry {
         match session.geometry_report(tab) {
             Some(g) => {
@@ -317,21 +351,6 @@ async fn shot(url: &str, out: &str, rest: &[String]) -> ExitCode {
             }
             None => eprintln!("--geometry : pas d'arbre posé"),
         }
-    }
-    if let Some(png) = session.frame_png(tab) {
-        match std::fs::write(out, &png) {
-            Ok(()) => {
-                println!("{out} — {} octets", png.len());
-                ExitCode::SUCCESS
-            }
-            Err(e) => {
-                eprintln!("écriture {out} : {e}");
-                ExitCode::FAILURE
-            }
-        }
-    } else {
-        eprintln!("pas de frame produite");
-        ExitCode::FAILURE
     }
 }
 
