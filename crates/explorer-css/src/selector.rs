@@ -244,6 +244,13 @@ pub enum PseudoClass {
     Is(Vec<ComplexSelector>),
     /// `:where(<liste>)` — comme `is` mais spécificité nulle.
     Where(Vec<ComplexSelector>),
+    /// `:lang(<code>[, <code>]*)` — la langue héritée de
+    /// l'élément (attribut `lang` le plus proche —
+    /// selectors-4 §7.4) matche un code, préfixe tiret
+    /// inclus (`en` ≈ `en-US`) ; `*` = toute langue.
+    /// R-212 — ×des dizaines dans la feuille Wikipedia
+    /// (`h1:lang(xx)`, `ol:lang(..) li`), LOT-selectors.
+    Lang(Vec<String>),
     /// `:has(<liste>)` — sélecteur relationnel (selectors-4
     /// §19, R-119 — ×105 dans la feuille Tailwind) : l'élément
     /// matche si un de ses **descendants** matche un sélecteur
@@ -715,6 +722,28 @@ impl<'t> SelectorParser<'t> {
                     };
                     Some(SimpleSelector::Pseudo(simple))
                 }
+                // `:lang(c, ...)` — liste de codes
+                // idents/strings/`*` séparés par virgules
+                // (selectors-4 : `range`-list non portée).
+                "lang" => {
+                    let mut codes = Vec::new();
+                    loop {
+                        self.skip_ws();
+                        match self.next() {
+                            Some(Token::Ident(v) | Token::Str(v)) => {
+                                codes.push(v.clone());
+                            }
+                            Some(Token::Delim('*')) => codes.push("*".to_string()),
+                            Some(Token::Comma) => {}
+                            Some(Token::CloseParen) => break,
+                            _ => return None,
+                        }
+                    }
+                    if codes.is_empty() {
+                        return None;
+                    }
+                    Some(SimpleSelector::Pseudo(PseudoClass::Lang(codes)))
+                }
                 _ => None,
             },
             _ => None,
@@ -780,6 +809,16 @@ impl<'t> SelectorParser<'t> {
                 | "view-transition-old"
                 | "view-transition-new"
                 | "view-transition-image-pair" => {
+                    Some(SimpleSelector::PseudoElement(PseudoElement::Other))
+                }
+                // R-212 — même famille §B-75, préfixés vendor
+                // hors whitelist (`::-moz-focus-inner`,
+                // `::-ms-`, `::-o-`) : dormant plutôt que
+                // liste entière invalidée — mesuré wikipedia.
+                _ if name.starts_with("-moz-")
+                    || name.starts_with("-ms-")
+                    || name.starts_with("-o-") =>
+                {
                     Some(SimpleSelector::PseudoElement(PseudoElement::Other))
                 }
                 _ => None,
@@ -1642,6 +1681,32 @@ fn pseudo_matches(
                 cur = parent_element(dom, n);
             }
             false
+        }
+        // `:lang(c)` — attribut `lang` le plus proche en
+        // remontant (élément puis ancêtres — la langue est
+        // héritée au sens documentaire). `en` ≈ `en-US`
+        // (préfixe tiret, ASCII-insensible) ; `*` = toute
+        // langue non vide. `xml:lang` non lu (le web réel
+        // n'en fait pas usage — borne documentée).
+        PseudoClass::Lang(codes) => {
+            let mut lang = None;
+            let mut cur = Some(node);
+            while let Some(n) = cur {
+                if let Ok(Some(l)) = dom.attribute(n, "lang") {
+                    lang = Some(l);
+                    break;
+                }
+                cur = parent_element(dom, n);
+            }
+            lang.is_some_and(|l| {
+                codes.iter().any(|c| {
+                    c == "*"
+                        || l.eq_ignore_ascii_case(c)
+                        || (l.len() > c.len()
+                            && l[..c.len()].eq_ignore_ascii_case(c)
+                            && l.as_bytes()[c.len()] == b'-')
+                })
+            })
         }
         PseudoClass::Dynamic(d) => dynamic_matches(dom, node, *d, state),
     }

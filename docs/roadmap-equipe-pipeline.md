@@ -3807,6 +3807,7 @@ chez NAVIGATEUR — non recopiés ici.
   `collapsed_top_margin`/`escaped_bottom_run`. Marge propre
   de body et collapse frères inchangés. Verrous : 3 tests
   `quirks_body_margin` + fixture `colonnes` recalée.
+- [x] **R-212. LOT-selectors : `:lang()` + tolérance `::-moz-*`/`-ms`/`-o`** : premier lot nommé par le Pareto réel (`css.selector.bad` = `:lang` Wikipedia + vendor pseudos). `PseudoClass::Lang` (parse + héritage documentaire + préfixe tiret + `*`) ; vendor préfixés → `Other` dormant au lieu d'invalider la liste. Verrous : 4 tests dédiés.
 ## Tâches continues
 
 - **Triage rendu** des échecs `site_smoke.ps1` : les écarts
