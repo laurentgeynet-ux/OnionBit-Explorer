@@ -386,7 +386,7 @@ immédiat (grep du dump DOM ou `eval`).
 
 ---
 
-### Étape P4.F — Consommation NAV de `background_layer_urls` (R-203)
+### Étape P4.F — Consommation NAV de `background_layer_urls` (R-203) — **livrée (Étape 214)**
 
 - **Bloqueur** : R-203 a livré côté render
   `PaintImages.background_layers` (map additive par nœud,

@@ -191,6 +191,13 @@ fn collect_imgs<'a>(seen: &mut ImgSet, t: impl Iterator<Item = &'a std::sync::Ar
 fn collect_page_imgs(seen: &mut ImgSet, images: &PaintImages, list: Option<&DisplayList>) {
     collect_imgs(seen, images.replaced.values());
     collect_imgs(seen, images.backgrounds.values());
+    collect_imgs(
+        seen,
+        images
+            .background_layers
+            .values()
+            .flat_map(|v| v.iter().map(|(_, i)| i)),
+    );
     collect_imgs(seen, images.svgs.values());
     collect_imgs(seen, images.masks.values());
     collect_imgs(seen, images.masks_url.values());

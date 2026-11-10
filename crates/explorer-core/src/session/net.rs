@@ -4747,9 +4747,14 @@ impl Session {
         let mut bg_work = Vec::new();
         let mut mask_work = Vec::new();
         for (ord, st) in &entry.prev_styles {
-            if let Some(raw) = st.get("background-image").and_then(css_url_arg) {
+            // R-203 — toutes les couches `url()` (index
+            // préservé), pas seulement la première :
+            // `background_layers` est restaurée en même
+            // temps que `backgrounds`.
+            let layers = explorer_render::background_layer_urls(st);
+            if !layers.is_empty() {
                 if let Some(node) = ord_to_node.get(ord) {
-                    bg_work.push((*node, raw));
+                    bg_work.push((*node, layers));
                 }
             }
             for prop in ["mask-image", "-webkit-mask-image"] {
@@ -4804,20 +4809,47 @@ impl Session {
         }
         // (b) fonds `url(...)` — alias → corps → bitmap, le
         // cache `bg_decoded` est re-alimenté sous la clé résolue.
-        for (node, raw) in bg_work {
-            let Some((bytes, key)) = body_of(&raw, &entry.bg_aliases, &entry.img_bodies) else {
-                continue;
-            };
-            let Some(img) = decode_image(&bytes, max_px).map(Arc::new) else {
-                continue;
-            };
-            if running.saturating_add(img.rgba.len()) > max_bytes {
-                continue;
-            }
-            running += img.rgba.len();
-            entry.images.backgrounds.insert(node, img.clone());
-            if let Some(k) = key {
-                entry.bg_decoded.insert(k, Some(img));
+        // R-203 : chaque couche retrouve son bitmap dans
+        // `background_layers` (la première garde aussi
+        // l'entrée `backgrounds`, contrat historique) ; une
+        // clé déjà décodée est ré-utilisée plutôt que
+        // re-décodée (même `Arc` — la dédup ptr du budget
+        // §B-59 et de `collect_page_imgs` tient).
+        for (node, layers) in bg_work {
+            let first_idx = layers.first().map(|(i, _)| *i);
+            for (idx, raw) in layers {
+                let Some((bytes, key)) = body_of(&raw, &entry.bg_aliases, &entry.img_bodies) else {
+                    continue;
+                };
+                let cached = key
+                    .as_ref()
+                    .and_then(|k| entry.bg_decoded.get(k))
+                    .cloned()
+                    .flatten();
+                let img = if let Some(i) = cached {
+                    i
+                } else {
+                    let Some(img) = decode_image(&bytes, max_px).map(Arc::new) else {
+                        continue;
+                    };
+                    if running.saturating_add(img.rgba.len()) > max_bytes {
+                        continue;
+                    }
+                    running += img.rgba.len();
+                    if let Some(k) = key {
+                        entry.bg_decoded.insert(k, Some(img.clone()));
+                    }
+                    img
+                };
+                if Some(idx) == first_idx {
+                    entry.images.backgrounds.insert(node, img.clone());
+                }
+                entry
+                    .images
+                    .background_layers
+                    .entry(node)
+                    .or_default()
+                    .push((idx, img));
             }
         }
         // (c) masques — table cléée par le texte `url(...)` brut

@@ -1892,6 +1892,7 @@ fn try_incr_payload(
     composite::purge_frame_bitmaps(p);
     p.images.replaced.clear();
     p.images.backgrounds.clear();
+    p.images.background_layers.clear();
     p.images.masks_url.clear();
     net::reinsert_imgs_by_src(
         new_dom,
@@ -1913,6 +1914,15 @@ fn try_incr_payload(
     let data_imgs = collect_data_images(new_dom, &styles, ctx.image_max_px);
     p.images.replaced.extend(data_imgs.replaced);
     p.images.backgrounds.extend(data_imgs.backgrounds);
+    // R-203 — couches `data:` indexées comme les http (même
+    // contrat `emit_bg_layers` : couche puis repli).
+    for (n, v) in data_imgs.background_layers {
+        let e = p.images.background_layers.entry(n).or_default();
+        for (idx, img) in v {
+            e.retain(|(i, _)| *i != idx);
+            e.push((idx, img));
+        }
+    }
     // `masks_url` n'est pas indexée `NodeId` : les masques
     // `data:` sont ré-étendus à chaque apply comme les
     // fetchés sont ré-enregistrés via `mask_aliases` — sans
@@ -2121,6 +2131,15 @@ pub(crate) fn relayout_dom_payload(
     let data_imgs = collect_data_images(dom, &styles, ctx.image_max_px);
     p.images.replaced.extend(data_imgs.replaced);
     p.images.backgrounds.extend(data_imgs.backgrounds);
+    // R-203 — couches `data:` indexées comme les http (même
+    // contrat `emit_bg_layers` : couche puis repli).
+    for (n, v) in data_imgs.background_layers {
+        let e = p.images.background_layers.entry(n).or_default();
+        for (idx, img) in v {
+            e.retain(|(i, _)| *i != idx);
+            e.push((idx, img));
+        }
+    }
     // Même merge `masks_url` que la voie incrémentale (voir
     // plus haut) : masques `data:` sinon invisibles en
     // session depuis R-52.
@@ -2193,6 +2212,15 @@ pub(crate) fn relayout_dom_payload(
             let data_imgs = collect_data_images(dom, &styles2, ctx.image_max_px);
             p.images.replaced.extend(data_imgs.replaced);
             p.images.backgrounds.extend(data_imgs.backgrounds);
+            // R-203 — couches `data:` indexées comme les http
+            // (même contrat `emit_bg_layers` : couche puis repli).
+            for (n, v) in data_imgs.background_layers {
+                let e = p.images.background_layers.entry(n).or_default();
+                for (idx, img) in v {
+                    e.retain(|(i, _)| *i != idx);
+                    e.push((idx, img));
+                }
+            }
             p.images.masks_url.extend(data_imgs.masks_url);
             insert_fetched_images(p, &styles2, ctx.image_max_px, ctx.image_max_bytes);
             let mut sizes = image_sizes(dom, &p.images.replaced);
@@ -3159,12 +3187,15 @@ pub(crate) type ApplyQueue = VecDeque<PendingApply>;
 /// Fonds `url(http…)` et masques `mask-image` fetchés
 /// pendant la vague (étapes 98 et 121 — demande PIPE R-86) :
 /// les corps posés sur `p` par `stage_backgrounds`/l'apply
-/// détachée sont insérés dans `images.backgrounds` et
-/// `images.masks_url`. Pour les fonds, le `NodeId`
-/// propriétaire est retrouvé par la valeur
-/// `background-image` calculée, via `bg_aliases` (texte
-/// `url(...)` brut → URL résolue ; la feuille d'origine ne
-/// survit pas à la cascade). Pour les masques, la clé est le
+/// détachée sont insérés dans `images.backgrounds`,
+/// `images.background_layers` (R-203 — chaque couche
+/// `url()` sous son index) et `images.masks_url`. Pour les
+/// fonds, le `NodeId` propriétaire est retrouvé par les
+/// `url()` de la valeur `background-image` calculée — via
+/// `bg_aliases` (texte `url(...)` brut → URL résolue ; la
+/// feuille d'origine ne survit pas à la cascade) et
+/// `background_layer_urls` (énumération par index de
+/// couche). Pour les masques, la clé est le
 /// texte brut lui-même — `PaintImages::register_mask` indexe
 /// `masks_url` comme le fait `mask_url(style)` côté render,
 /// ce qui couvre les pseudo-boîtes dépourvues de `NodeId`.
@@ -3202,6 +3233,7 @@ fn prune_paint_images(p: &mut PaintPayload, max_bytes: usize) {
         idx: usize,
         replaced: Vec<explorer_dom::NodeId>,
         backgrounds: Vec<explorer_dom::NodeId>,
+        bg_layers: Vec<explorer_dom::NodeId>,
         svgs: Vec<explorer_dom::NodeId>,
         masks: Vec<explorer_dom::NodeId>,
         mask_urls: Vec<String>,
@@ -3228,6 +3260,14 @@ fn prune_paint_images(p: &mut PaintPayload, max_bytes: usize) {
         e.bytes = img.rgba.len();
         e.idx = e.idx.min(n.index() as usize);
         e.backgrounds.push(*n);
+    }
+    for (n, layers) in &p.images.background_layers {
+        for (_, img) in layers {
+            let e = slot(&mut by_ptr, img);
+            e.bytes = img.rgba.len();
+            e.idx = e.idx.min(n.index() as usize);
+            e.bg_layers.push(*n);
+        }
     }
     for (n, img) in &p.images.svgs {
         let e = slot(&mut by_ptr, img);
@@ -3288,6 +3328,17 @@ fn prune_paint_images(p: &mut PaintPayload, max_bytes: usize) {
         for n in e.backgrounds {
             p.images.backgrounds.remove(&n);
         }
+        for n in e.bg_layers {
+            // Éviction fine par bitmap : le nœud peut porter
+            // d'autres couches encore budgétées — on ne
+            // retire que l'entrée du bitmap évincé.
+            if let Some(v) = p.images.background_layers.get_mut(&n) {
+                v.retain(|(_, i)| Arc::as_ptr(i) as usize != ptr);
+                if v.is_empty() {
+                    p.images.background_layers.remove(&n);
+                }
+            }
+        }
         for n in e.svgs {
             p.images.svgs.remove(&n);
         }
@@ -3345,14 +3396,30 @@ fn insert_fetched_images(p: &mut PaintPayload, styles: &StyleMap, max_px: u32, m
         }
     }
     for (node, st) in styles.iter() {
-        let Some(raw) = st.get("background-image").and_then(css_url_arg) else {
-            continue;
-        };
-        let Some(resolved) = p.bg_aliases.get(raw.as_str()) else {
-            continue;
-        };
-        if let Some(Some(img)) = p.bg_decoded.get(resolved.as_str()) {
-            p.images.backgrounds.insert(node, img.clone());
+        // R-203 — chaque couche `url()` est indexée dans
+        // `background_layers` sous son index de couche
+        // (`emit_bg_layers` la consulte avant le repli
+        // `backgrounds`) ; la première couche url garde
+        // aussi l'entrée `backgrounds` — contrat
+        // historique inchangé pour les consommateurs
+        // existants (`emit_image_marker`, fetchers
+        // mono-couche). `retain` par index : la passe 2
+        // `@container` ré-insère sous les mêmes `NodeId`
+        // sans dupliquer.
+        let layers = explorer_render::background_layer_urls(st);
+        let first_idx = layers.first().map(|(i, _)| *i);
+        for (idx, raw) in layers {
+            let Some(resolved) = p.bg_aliases.get(raw.as_str()) else {
+                continue;
+            };
+            if let Some(Some(img)) = p.bg_decoded.get(resolved.as_str()) {
+                if Some(idx) == first_idx {
+                    p.images.backgrounds.insert(node, img.clone());
+                }
+                let v = p.images.background_layers.entry(node).or_default();
+                v.retain(|(i, _)| *i != idx);
+                v.push((idx, img.clone()));
+            }
         }
     }
     // Masques : la table `masks_url` est cléée par le texte

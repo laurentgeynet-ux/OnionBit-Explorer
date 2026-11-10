@@ -2985,6 +2985,58 @@ fn red_png() -> Vec<u8> {
     buf
 }
 
+/// PNG `w`×`h` uni opaque/alpha `px`, encodé à la volée.
+fn solid_png(w: u32, h: u32, px: [u8; 4]) -> Vec<u8> {
+    use image::{codecs::png::PngEncoder, ExtendedColorType, ImageEncoder};
+    let mut buf = Vec::new();
+    PngEncoder::new(&mut buf)
+        .write_image(&px.repeat((w * h) as usize), w, h, ExtendedColorType::Rgba8)
+        .expect("encode png");
+    buf
+}
+
+/// P4.F (consommation NAV de R-203) — `background-image`
+/// multi-couches : les `url()` au-delà de la première
+/// étaient fetchées mais jamais routées — seule la première
+/// atteignait `images.backgrounds`. Désormais chaque couche
+/// entre dans `background_layers` sous son index ; la
+/// première garde `backgrounds` (contrat historique).
+/// Couche 0 = dessus : 2×2 rouge posée sur 4×4 bleue
+/// (`no-repeat`) → coin rouge, reste bleu.
+#[tokio::test]
+async fn background_multi_layer_fetches_and_paints_all_layers() {
+    let (mut s, t) = test_session();
+    t.route(
+        "/m",
+        200,
+        "<html><body><style>\
+         body{margin:0}#v{width:4px;height:4px;\
+         background-image:url(/top.png),url(/bottom.png);\
+         background-repeat:no-repeat}</style>\
+         <div id=\"v\"></div></body></html>",
+    );
+    t.route_bin("/top.png", 200, solid_png(2, 2, [255, 0, 0, 255]));
+    t.route_bin("/bottom.png", 200, solid_png(4, 4, [0, 0, 255, 255]));
+    let id = s.open_tab();
+    s.navigate(id, "http://h.test/m").await.unwrap();
+    assert!(
+        t.paths().iter().any(|p| p == "/bottom.png"),
+        "la couche 1 doit être fetchée — {:?}",
+        t.paths()
+    );
+    let (w, _h, px) = s.frame_pixels(id).unwrap();
+    assert_eq!(
+        px_at(px, w, 1, 1),
+        [255, 0, 0, 255],
+        "couche 0 (rouge) peinte au-dessus"
+    );
+    assert_eq!(
+        px_at(px, w, 3, 3),
+        [0, 0, 255, 255],
+        "couche 1 (bleue) visible hors empreinte de la couche 0"
+    );
+}
+
 #[tokio::test]
 async fn img_renders_decoded_bitmap() {
     let (mut s, t) = test_session();
