@@ -44,7 +44,7 @@
 //   dénominateur.
 
 import { execFileSync } from 'node:child_process';
-import { existsSync, writeFileSync, rmSync } from 'node:fs';
+import { existsSync, writeFileSync, rmSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
@@ -109,8 +109,10 @@ function checkBatch(kind, names) {
     .filter(l => l.endsWith('\tok')).map(l => l.split('\t')[0]));
 }
 
+const scores = {};
 function report(label, entries, okSet, note) {
   const ok = entries.filter(e => okSet.has(e.name)).length;
+  scores[label] = ok;
   const pct = (100 * ok / entries.length).toFixed(1);
   console.log(`${label.padEnd(10)} : ${ok}/${entries.length} (${pct} %)${note ? '  — ' + note : ''}`);
   const missing = entries.filter(e => !okSet.has(e.name))
@@ -120,7 +122,7 @@ function report(label, entries, okSet, note) {
   }
 }
 
-const sections = only ? [only] : ['props', 'routed', 'sel', 'at', 'js', 'api'];
+const sections = only ? [only] : ['props', 'routed', 'sel', 'at', 'js', 'api', 'values'];
 
 for (const sec of sections) {
   if (sec === 'props') {
@@ -340,5 +342,55 @@ for (const sec of sections) {
     }
     report('api', tests.map(t => ({ name: t.name, engines: 3 })), okSet,
       'surface navigateur installée (install_dom) — présence seule');
+  } else if (sec === 'values') {
+    // bcd.css.properties.<p>.<v> — la déclaration `p:v` change-
+    // t-elle le box tree (`check affectsv`) ? Conformité par
+    // feature : `display:ruby` ≠ `display:grid`.
+    const pairs = [];
+    for (const [p, node] of Object.entries(bcd.css.properties)) {
+      for (const [v, vn] of Object.entries(node)) {
+        if (v === '__compat' || !vn?.__compat) continue;
+        const c = vn.__compat;
+        const n = browsers.filter(br => {
+          const s = c.support?.[br];
+          const one = Array.isArray(s) ? s[0] : s;
+          return one && one.version_added !== false && !one.version_removed;
+        }).length;
+        if (c.status?.deprecated || c.status?.standard_track === false || n === 0) continue;
+        pairs.push({ name: `${p}:${v}`, engines: n });
+      }
+    }
+    const okSet = new Set(
+      execFileSync(cli, ['check', 'affectsv'], {
+        input: pairs.map(e => e.name).join('\n'),
+        encoding: 'utf8', timeout: 600_000, maxBuffer: 64 * 1024 * 1024,
+      }).split(/\r?\n/).filter(Boolean)
+        .filter(l => l.endsWith('\tok')).map(l => l.split('\t')[0]));
+    report('css.values', pairs, okSet,
+      'déclaration exacte → effet géométrique (jauge non-saturante)');
   }
+}
+
+// ── Cliquet baseline (ADR-0010) ─────────────────────────────
+// `--save <f.json>` écrit les scores de cette passe ;
+// `--gate <f.json>` échoue (exit 1) si un score descend sous
+// la baseline — les scores flottent au gré du build, le
+// cliquet les verrouille.
+const saveIdx = args.indexOf('--save');
+const gateIdx = args.indexOf('--gate');
+if (saveIdx >= 0) {
+  writeFileSync(args[saveIdx + 1], JSON.stringify({ scores }, null, 2) + '\n');
+  console.log(`baseline écrite → ${args[saveIdx + 1]}`);
+}
+if (gateIdx >= 0) {
+  const base = JSON.parse(readFileSync(args[gateIdx + 1], 'utf8')).scores;
+  let regressions = 0;
+  for (const [k, v] of Object.entries(scores)) {
+    if (base[k] != null && v < base[k]) {
+      console.log(`RÉGRESSION ${k} : ${v} < ${base[k]}`);
+      regressions++;
+    }
+  }
+  if (regressions > 0) process.exit(1);
+  console.log(`cliquet vert — aucune régression vs baseline`);
 }

@@ -674,6 +674,46 @@ fn prop_affects(name: &str) -> bool {
     false
 }
 
+/// `affectsv` : entrée `name:value` — la déclaration **exacte**
+/// `p { name:value }` change-t-elle le box tree vs `p {}` ?
+/// Alimente `bcd.css.values` (conformité par feature, pas par
+/// nom — `display:ruby` vs `display:grid`).
+fn prop_affects_decl(decl: &str) -> bool {
+    let Some((name, value)) = decl.split_once(':') else {
+        return false;
+    };
+    let dom = explorer_html::TreeBuilder::parse("<body><div><p class=x>ok</p></div></body>");
+    let root = {
+        let mut r = None;
+        walk_any(dom.document(), &dom, &mut r);
+        r.unwrap_or(dom.document())
+    };
+    let sig = |css: &str| -> String {
+        let mut eng = explorer_css::StyleEngine::new();
+        eng.add_css(css, explorer_css::Origin::Author);
+        let sm = eng.compute_tree(&dom, root, &explorer_css::StyleEnv::default());
+        match explorer_layout::build_box_tree(&dom, root, &sm) {
+            Some(mut bx) => {
+                explorer_layout::layout_tree(&mut bx, 800.0, &explorer_layout::BlockCtx::default());
+                bx.dump(&dom)
+            }
+            None => String::new(),
+        }
+    };
+    sig(&format!("p {{ {}: {} }}", name.trim(), value.trim())) != sig("p {}")
+}
+
+fn walk_any(n: explorer_dom::NodeId, dom: &explorer_dom::Dom, out: &mut Option<explorer_dom::NodeId>) {
+    if dom.element(n).is_ok() && out.is_none() {
+        *out = Some(n);
+    }
+    if let Ok(ch) = dom.children(n) {
+        for c in ch {
+            walk_any(c, dom, out);
+        }
+    }
+}
+
 fn check_names(kind: &str) -> ExitCode {
     use std::io::BufRead;
     let routed_dom;
@@ -692,8 +732,9 @@ fn check_names(kind: &str) -> ExitCode {
             Box::new(move |name| explorer_css::prop_routed(&routed_dom, name))
         }
         "affects" => Box::new(prop_affects),
+        "affectsv" => Box::new(prop_affects_decl),
         _ => {
-            eprintln!("check : kind inconnu {kind:?} — attendu prop|sel|at|routed|affects");
+            eprintln!("check : kind inconnu {kind:?} — attendu prop|sel|at|routed|affects|affectsv");
             return ExitCode::FAILURE;
         }
     };
