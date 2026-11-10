@@ -4303,6 +4303,35 @@ fn heap_dead_errors_reported_once_per_document() {
     assert_eq!(heap_errors, 1, "tas mort = 1 occurrence par document");
 }
 
+/// Verrou du routage `report_unhandled_rejection`
+/// (drain session branché sur `drain_unhandled_rejections`) :
+/// un throw avalé jscore arrive préfixé `uncaught:` et passe
+/// tel quel ; une description de rejet nue reçoit le préfixe
+/// `unhandledrejection — `. Les deux partent en
+/// `PipelineError` (ring `/console` + warn log de vol).
+#[test]
+fn report_unhandled_rejection_prefixe_et_route() {
+    let mut s = Session::with_config(
+        Arc::new(FailTransport),
+        Arc::new(TestFont),
+        SessionConfig::default(),
+    );
+    let mut rx = s.subscribe();
+    let tab = s.open_tab();
+    s.report_unhandled_rejection(tab, "uncaught: TypeError: boom");
+    s.report_unhandled_rejection(tab, "RangeError: hors bornes");
+    let mut msgs = Vec::new();
+    while let Ok(ev) = rx.try_recv() {
+        if let CoreEvent::PipelineError { message, .. } = ev {
+            msgs.push(message);
+        }
+    }
+    assert!(msgs.iter().any(|m| m == "uncaught: TypeError: boom"));
+    assert!(msgs
+        .iter()
+        .any(|m| m == "unhandledrejection — RangeError: hors bornes"));
+}
+
 /// §B-12 vol 100 (bookshop ×5) — les scripts `async` sont
 /// évalués par la vague détachée (`eval_async_arrival`,
 /// moteur hors verrou) : chaque éval post-mortem émettait

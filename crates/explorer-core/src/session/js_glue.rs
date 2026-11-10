@@ -1198,24 +1198,26 @@ impl Session {
         (local, self.cookies.header_for(url, false))
     }
 
-    /// Rejet de promesse non rattrapé → `PipelineError`
-    /// (vol : mort silencieuse type pinterest —
-    /// `__PWS_ROOT__` vide sans aucune trace).
+    /// Rejet de promesse non rattrapé (ou throw avalé
+    /// microtask/timer, JS-C458) → `PipelineError` +
+    /// `tracing::warn` (vol : mort silencieuse type
+    /// pinterest — `__PWS_ROOT__` vide sans aucune trace ;
+    /// le warn rend le rejet lisible dans le log de vol
+    /// sans abonné `/console`).
     ///
-    /// **Couture en attente** : le trait `JsEngine`
-    /// n'expose pas encore de drain pour les rejets (les
-    /// `onunhandledrejection` émis côté jscore restent
-    /// internes au moteur — chantier FIX-1). Ce routeur est
-    /// prêt : le jour où `drain_unhandled_rejections`
-    /// (ou équivalent) arrive, il suffit de l'appeler aux
-    /// points de synchro et de repasser chaque message ici —
-    /// le `PipelineError` part déjà vers le ring `/console`.
-    // Aucun drain ne l'appelle encore (couture jscore
-    // attendue) — l'avertissement est donc intentionnel.
-    #[allow(dead_code)]
+    /// Appelé par `drain_script_net` sur chaque message de
+    /// `drain_unhandled_rejections`. Les rapports jscore
+    /// préfixés `uncaught:` (throws en callback) passent
+    /// tels quels — le préfixe `unhandledrejection — ` ne
+    /// s'applique qu'aux descriptions de rejets nues.
     pub(crate) fn report_unhandled_rejection(&mut self, tab: TabId, message: &str) {
         tracing::warn!(tab, error = %message, "promesse rejetée non rattrapée");
-        self.emit_pipeline_error(tab, format!("unhandledrejection — {message}"));
+        let msg = if message.starts_with("uncaught:") {
+            message.to_string()
+        } else {
+            format!("unhandledrejection — {message}")
+        };
+        self.emit_pipeline_error(tab, msg);
     }
 
     /// `true` si l'erreur trahit un worker moteur saturé ou

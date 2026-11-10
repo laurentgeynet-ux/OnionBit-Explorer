@@ -1234,7 +1234,7 @@ impl Session {
             .and_then(|e| e.js.as_mut())
             .map_or_else(Vec::new, |eng| eng.drain_unhandled_rejections())
         {
-            self.emit_pipeline_error(tab, msg);
+            self.report_unhandled_rejection(tab, &msg);
         }
     }
 
