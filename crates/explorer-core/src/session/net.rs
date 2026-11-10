@@ -420,16 +420,51 @@ impl Session {
         // direct : `entry.js` n'est rangé qu'après ce bras
         // (`set_doc_ready_state` dropperait silencieusement). La
         // garde `doc_dcl_epoch` rend le re-tir du tail idempotent.
-        {
+        let fire_dcl = {
             let Some(entry) = self.tabs.get_mut(&tab) else {
                 return;
             };
-            if entry.doc_dcl_epoch != entry.nav_epoch {
+            let fire = entry.doc_dcl_epoch != entry.nav_epoch;
+            if fire {
                 entry.doc_dcl_epoch = entry.nav_epoch;
                 eng.set_ready_state(explorer_js::JS_CTX_TOP, "interactive");
                 let _ = eng.dispatch_event_ctx(explorer_js::JS_CTX_TOP, "readystatechange", &[]);
                 let _ = eng.dispatch_event_ctx(explorer_js::JS_CTX_TOP, "DOMContentLoaded", &[]);
             }
+            fire
+        };
+        if fire_dcl {
+            // JS-C471 — sweep `disable-upgrade` : le driver kevlar
+            // qui retire l'attribut (SSR → éléments marqués
+            // « upgrade différé ») n'a pas été identifié ; sans
+            // lui `__isUpgradeDisabled` court-circuite
+            // `connectedCallback` → `_initDataProperties`/
+            // `_enableProperties` gelés → marqueurs `[[ ]]`
+            // littéraux (~51 → 5 au repos). La mécanique est
+            // entièrement fonctionnelle : `removeAttribute` →
+            // `attributeChangedCallback` efface
+            // `__isUpgradeDisabled` → cycle complet → marqueur
+            // consommé (prouvé en vol). Ce sweep couvre le trou
+            // — initial + `MutationObserver` pour les fragments
+            // stampés ensuite (lazy-hydration kevlar), jusqu'à ce
+            // que le déclencheur réel soit nommé.
+            const DISABLE_UPGRADE_SWEEP: &str = "(function(){\
+                var rm=function(n){try{if(n&&n.removeAttribute&&\
+                    n.hasAttribute&&n.hasAttribute('disable-upgrade'))\
+                    n.removeAttribute('disable-upgrade')}catch(e){}};\
+                try{var all=document.querySelectorAll('[disable-upgrade]');\
+                    for(var i=0;i<all.length;i++)rm(all[i]);\
+                    new MutationObserver(function(ms){\
+                        for(var i=0;i<ms.length;i++){var r=ms[i];\
+                            rm(r.target);\
+                            var an=r.addedNodes||[];\
+                            for(var j=0;j<an.length;j++){var n=an[j];\
+                                rm(n);\
+                                if(n&&n.querySelectorAll){var q=n.querySelectorAll('[disable-upgrade]');\
+                                    for(var k=0;k<q.length;k++)rm(q[k])}}\
+                        }}).observe(document.documentElement,{childList:true,subtree:true,attributes:true,attributeFilter:['disable-upgrade']});\
+                }catch(e){}})()";
+            self.eval_or_report(tab, eng, DISABLE_UPGRADE_SWEEP, None, None);
         }
         // §B-111 — paire `net:` (morgue C406) : la ligne
         // d'entrée sans son `ret` nomme le drain fautif.
