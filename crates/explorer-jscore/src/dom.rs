@@ -2750,6 +2750,13 @@ impl Dom {
         if !self.node_valid(parent) || !self.node_valid(child) {
             return;
         }
+        // Spec « appropriate place for inserting a node » —
+        // `<template>` : `childNodes` reste toujours vide et
+        // l'insertion est redirigée vers `content` (§B-126 —
+        // kevlar peuple `dom-module` par `appendChild` ;
+        // couvre aussi l'append d'un fragment : le redirect
+        // précède `splice_fragment`).
+        let parent = self.content_target(parent);
         if self.nodes[child as usize].kind == NodeKind::Fragment {
             self.splice_fragment(parent, child, None);
             return;
@@ -2988,6 +2995,11 @@ impl Dom {
         if !self.node_valid(parent) || !self.node_valid(child) {
             return;
         }
+        // §B-126 — même redirection « appropriate place »
+        // qu'`append` : `insertBefore` sur un `<template>`
+        // écrit dans `content` (`template.childNodes` reste
+        // vide — spec `template contents`).
+        let parent = self.content_target(parent);
         if self.nodes[child as usize].kind == NodeKind::Fragment {
             self.splice_fragment(parent, child, ref_node);
             return;
