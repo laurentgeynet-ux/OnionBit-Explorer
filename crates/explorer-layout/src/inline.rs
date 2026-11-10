@@ -757,9 +757,22 @@ fn collect_items(bx: &LayoutBox, para_lv: u8, fs: f32, ctx: &BlockCtx) -> Vec<It
     // "text-decoration:underline">`). Les descendants la
     // complètent à l'entrée de chaque élément inline.
     let mut decos: Vec<TextDeco> = text_deco(&bx.style, fs, ctx).into_iter().collect();
+    // css-ruby-1 : séquence des conteneurs `rtc` — chaque
+    // `<rtc>` ouvre un niveau d'annotation distinct (bandes
+    // empilées, §3.2). `0` = `rt` nu hors `rtc`.
+    let mut rtc_seq = 0u32;
     for (owner, child) in bx.children.iter().enumerate() {
         collect_child(
-            child, owner, &mut items, &mut aid, &mut decos, para_lv, fs, ctx,
+            child,
+            owner,
+            &mut items,
+            &mut aid,
+            &mut decos,
+            para_lv,
+            fs,
+            ctx,
+            &mut rtc_seq,
+            0,
         );
     }
     items
@@ -775,6 +788,8 @@ fn collect_child(
     para_lv: u8,
     fs: f32,
     ctx: &BlockCtx,
+    rtc_seq: &mut u32,
+    ruby_tier: u32,
 ) {
     // Hors-flux : `absolute`/`fixed` est posé par
     // `resolve_absolutes` — son contenu n'entre jamais dans
@@ -791,7 +806,7 @@ fn collect_child(
     // `display: inline-block` — l'atomicité ne vaut que pour
     // les conteneurs.
     if let Some(t) = &b.text {
-        items.push(text_item(b, owner, t, decos, para_lv));
+        items.push(text_item(b, owner, t, decos, para_lv, ruby_tier));
         return;
     }
     if is_atomic(b) {
@@ -852,8 +867,27 @@ fn collect_child(
             deco: Vec::new(),
         });
     }
+    // Niveau d'annotation ruby (css-ruby-1 §3.2) : un
+    // conteneur `<ruby>` relance la numérotation des `rtc` ;
+    // chaque `ruby-text-container` descendu tague ses
+    // annotations du niveau suivant (bandes empilées au
+    // coulage — `lift_ruby`).
+    let mut tier = ruby_tier;
+    match b.style.get("display").map_or("", |d| d.trim()) {
+        "ruby" => {
+            *rtc_seq = 0;
+            tier = 0;
+        }
+        "ruby-text-container" => {
+            *rtc_seq += 1;
+            tier = *rtc_seq;
+        }
+        _ => {}
+    }
     for c in &b.children {
-        explorer_common::deep(|| collect_child(c, owner, items, aid, decos, para_lv, fs, ctx));
+        explorer_common::deep(|| {
+            collect_child(c, owner, items, aid, decos, para_lv, fs, ctx, rtc_seq, tier);
+        });
     }
     if pushed.is_some() {
         decos.pop();
@@ -877,7 +911,14 @@ fn collect_child(
 /// `para_lv` = niveau d'imbrication du paragraphe : la
 /// `direction` du bloc conteneur sert de base UAX #9 à
 /// toutes les itemisations de la ligne (R-171).
-fn text_item(b: &LayoutBox, owner: usize, t: &str, decos: &[TextDeco], para_lv: u8) -> Item {
+fn text_item(
+    b: &LayoutBox,
+    owner: usize,
+    t: &str,
+    decos: &[TextDeco],
+    para_lv: u8,
+    ruby_tier: u32,
+) -> Item {
     // §16.6.1 white-space processing : `normal`/`nowrap` effondrent
     // toute suite de blancs en une espace ; `pre-line` effondre les
     // espaces/tabs mais garde `\n` (saut forcé) ; `pre`/`pre-wrap`
@@ -985,10 +1026,17 @@ fn text_item(b: &LayoutBox, owner: usize, t: &str, decos: &[TextDeco], para_lv: 
     if pieces.iter().any(|p| p.text.contains('\t')) {
         pieces = split_tabs(pieces);
     }
+    let mut style = b.style.clone();
+    if ruby_tier > 0 {
+        // Marqueur interne (jamais déclaré en cascade) :
+        // niveau `rtc` lu par `lift_ruby` pour empiler les
+        // bandes d'annotation (css-ruby-1 §3.2).
+        style.set("x-ruby-tier", &ruby_tier.to_string());
+    }
     Item {
         owner,
         node: b.node,
-        style: b.style.clone(),
+        style,
         pieces,
         aid: None,
         marker: None,
@@ -1353,12 +1401,19 @@ impl LineAcc {
             .unwrap_or("over")
             .trim()
             .to_string();
-        let rt_h = self
-            .frags
-            .iter()
-            .filter(|f| is_ruby_text_frag(f))
-            .map(|f| f.rect.height)
-            .fold(0.0_f32, f32::max);
+        // Hauteur de bande par niveau d'annotation (css-ruby-1
+        // §3.2) : tier 0 = `rt` nu hors `rtc`, chaque `rtc`
+        // = un niveau empilé — le plus proche de la base en
+        // premier (over : le plus haut niveau est le plus
+        // éloigné de la base ; under : miroir).
+        let mut tier_h: std::collections::BTreeMap<u32, f32> = std::collections::BTreeMap::new();
+        for f in self.frags.iter().filter(|f| is_ruby_text_frag(f)) {
+            let t = ruby_tier(f);
+            let h = tier_h.entry(t).or_default();
+            *h = h.max(f.rect.height);
+        }
+        let total_h: f32 = tier_h.values().sum();
+        let rt_h = total_h;
         let base_top = self
             .frags
             .iter()
@@ -1395,9 +1450,39 @@ impl LineAcc {
         // → indice de début/fin + segment de base apparié
         // (contigu `ruby*` non-rt en arrière ; repli = toute
         // la base de la ligne).
+        // Bande verticale de chaque niveau — `over` : les
+        // niveaux s'empilent au-dessus de `base_top` (le plus
+        // grand tier le plus haut) ; `under` : miroir sous
+        // `base_bot` (le plus petit tier le plus proche).
+        let band_top = |t: u32, over: bool| -> f32 {
+            if over {
+                base_top
+                    + tier_h
+                        .iter()
+                        .filter(|(j, _)| **j > t)
+                        .map(|(_, h)| *h)
+                        .sum::<f32>()
+            } else {
+                base_bot
+                    + tier_h
+                        .iter()
+                        .filter(|(j, _)| **j < t)
+                        .map(|(_, h)| *h)
+                        .sum::<f32>()
+            }
+        };
         let runs = rt_runs(&self.frags);
         for (lo, hi) in &runs {
-            self.place_rt_run(*lo, *hi, &pos, rt_h, base_top, base_bot, (cont_l, cont_r));
+            let t = ruby_tier(&self.frags[*lo]);
+            self.place_rt_run(
+                *lo,
+                *hi,
+                &pos,
+                tier_h[&t],
+                band_top(t, true),
+                band_top(t, false),
+                (cont_l, cont_r),
+            );
         }
         if pos.as_str() == "inter-character" {
             return;
@@ -1419,8 +1504,9 @@ impl LineAcc {
     /// Pose un run d'annotation `frags[lo..=hi]` : `dx`
     /// horizontal selon `ruby-align` (`start`/centré/
     /// `space-between` étiré aux bords du segment) et bande
-    /// verticale selon `pos` — overhang borné à l'étendue
-    /// `(cont_l, cont_r)` du conteneur (hors
+    /// verticale selon `pos` — `band_h`/`top_over`/`top_under`
+    /// sont déjà relatifs au niveau `rtc` du run ; overhang
+    /// borné à l'étendue `cont` du conteneur (hors
     /// `inter-character`, sorti par construction ; run plus
     /// large que le conteneur → calé sur son bord de départ).
     #[allow(clippy::too_many_arguments, clippy::cast_precision_loss)]
@@ -1429,9 +1515,9 @@ impl LineAcc {
         lo: usize,
         hi: usize,
         pos: &str,
-        rt_h: f32,
-        base_top: f32,
-        base_bot: f32,
+        band_h: f32,
+        top_over: f32,
+        top_under: f32,
         cont: (f32, f32),
     ) {
         let (seg_l, seg_r) = ruby_base_span(&self.frags, lo);
@@ -1488,7 +1574,7 @@ impl LineAcc {
         for (k, f) in self.frags[lo..=hi].iter_mut().enumerate() {
             f.rect.x += dx + span_gap * k as f32;
             f.rect.y = match pos {
-                "under" => base_bot,
+                "under" => top_under,
                 "inter-character" => {
                     if lo > 0 {
                         base_ref.0 + (base_ref.1 - f.baseline)
@@ -1496,20 +1582,32 @@ impl LineAcc {
                         f.rect.y
                     }
                 }
-                _ => base_top + rt_h - f.rect.height,
+                _ => top_over + band_h - f.rect.height,
             };
         }
     }
 }
 
+/// Niveau `rtc` d'un fragment (`0` = `rt` nu hors `rtc`).
+fn ruby_tier(f: &Fragment) -> u32 {
+    f.style
+        .get("x-ruby-tier")
+        .and_then(|v| v.trim().parse::<u32>().ok())
+        .unwrap_or(0)
+}
+
 /// Runs consécutifs de fragments `ruby-text*` — indices
-/// `(début, fin)` inclusifs dans `frags`.
+/// `(début, fin)` inclusifs dans `frags`. Un changement de
+/// niveau `rtc` coupe le run : chaque `rtc` a sa propre
+/// bande (css-ruby-1 §3.2).
 fn rt_runs(frags: &[Fragment]) -> Vec<(usize, usize)> {
-    let mut out = Vec::new();
+    let mut out: Vec<(usize, usize)> = Vec::new();
     for (i, f) in frags.iter().enumerate() {
         if is_ruby_text_frag(f) {
             match out.last_mut() {
-                Some((_, hi)) if i == *hi + 1 => *hi = i,
+                Some((_, hi)) if i == *hi + 1 && ruby_tier(f) == ruby_tier(&frags[*hi]) => {
+                    *hi = i;
+                }
                 _ => out.push((i, i)),
             }
         }

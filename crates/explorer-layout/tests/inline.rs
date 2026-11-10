@@ -1314,3 +1314,58 @@ fn ruby_align_start_et_overhang_borne() {
         bb2.rect.x
     );
 }
+
+/// css-ruby-1 §3.2 — `rtc` multi-annotations : chaque
+/// conteneur d'annotation ouvre un niveau empilé (le
+/// premier `rtc` le plus proche de la base), la ligne
+/// grandit de la somme des bandes.
+#[test]
+fn ruby_rtc_niveaux_empiles() {
+    let (_d, bx) = laid(
+        "<!doctype html><p><ruby>B<rtc><rt>a1</rt></rtc><rtc><rt>a2</rt></rtc></ruby></p>",
+        "p{font-size:20px;width:400px;margin:0}",
+    );
+    let line = &first_box_with_lines(&bx).lines[0];
+    let tier = |t: &str| {
+        line.fragments
+            .iter()
+            .find(|f| f.text == t)
+            .expect("frag")
+            .rect
+            .y
+    };
+    let (y_a1, y_a2) = (tier("a1"), tier("a2"));
+    let y_base = tier("B");
+    // a1 (premier rtc) sous a2 (second rtc), tous deux
+    // au-dessus de la base ; bandes distinctes empilées.
+    assert!(y_a2 < y_a1, "tier2 au-dessus de tier1 ({y_a2} vs {y_a1})");
+    assert!(y_a1 < y_base, "annotations au-dessus de la base");
+    // La ligne couvre les deux bandes + la base.
+    assert!(
+        line.rect.height > 20.0 + 2.0 * 5.0,
+        "deux bandes d'annotation dans la ligne ({})",
+        line.rect.height
+    );
+
+    // `rt` nu + `rtc` mélangés : le nu reste le plus proche.
+    let (_d2, bx2) = laid(
+        "<!doctype html><p><ruby>B<rt>n</rt><rtc><rt>a</rt></rtc></ruby></p>",
+        "p{font-size:20px;width:400px;margin:0}",
+    );
+    let line2 = &first_box_with_lines(&bx2).lines[0];
+    let tier2 = |t: &str| {
+        line2
+            .fragments
+            .iter()
+            .find(|f| f.text == t)
+            .expect("frag")
+            .rect
+            .y
+    };
+    assert!(
+        tier2("a") < tier2("n"),
+        "rtc au-dessus du rt nu ({} vs {})",
+        tier2("a"),
+        tier2("n")
+    );
+}

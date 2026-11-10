@@ -3912,8 +3912,10 @@ de noms. Ordre fixe (priorité par site-impact mesuré) :
   `ruby*` précédent et **centré** (`ruby-align:center`
   défaut), `ruby-position:over|under|inter-character`
   (héritée), `ruby-align` (start/center/space-between/
-  space-around), overhang borné au conteneur, feuille UA
-  aux niveaux `ruby*` spec. Résidu : `rtc` multi-annotations.
+  space-around), `rtc` multi-annotations empilées (niveau
+  par conteneur), overhang borné au conteneur, feuille UA
+  aux niveaux `ruby*` spec. Résidu : positions mixtes sur
+  une même ligne.
 - Prochaine : display-list delta (plan paint — `text-decoration`,
   `font-*`, `background-*`, `border-*`, `box-shadow`…).
 - Census en vol : `value.dropped.<prop>.<valeur>` (R-238) nomme
