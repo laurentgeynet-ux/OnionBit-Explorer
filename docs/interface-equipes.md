@@ -1148,3 +1148,18 @@ cycle `interactive`→`DCL`→`complete`→`load` **perdu** (`rs.set` : seul
 **Levier** : le cycle de vie doc top ne doit pas dépendre du sort du
 commit paint — rejouer `pending_doc_lifecycle` ou appeler le bloc
 cycle sur les bras non-`(Ok,true)` de `shared.rs`.
+
+## PIPE → NAV — `@import` imbriqué : lobste.rs reste à 99,98 % (mesuré post-Etape 218)
+
+- **Funnel réel** : `css.import.ok` ×1, `css.import.skip.media`
+  ×3, `css.at.unapplied.import` ×8 — le `light-normal` (2 Ko,
+  couleurs) est fetché, la feuille de **layout** reste un
+  `@import` **imbriqué** non expansé → la page rend empilée
+  (flex/grid des stories absents).
+- **Demande** : `expand_import` doit re-expander le contenu
+  fetché récursivement (les `@import` à l'intérieur de la
+  feuille importée), pas seulement la couche top-level.
+  Vérifier aussi l'évaluation `skip.media` : `(not
+  (prefers-color-scheme: dark)) and (prefers-contrast: more)`
+  — si notre env évalue dark/no-preference différemment, le
+  light bundle peut être sauté à tort.
