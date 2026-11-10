@@ -997,3 +997,13 @@ fn anchor_position_try_named() {
         "@position-try → sous ancre"
     );
 }
+
+/// `cq*` (css-contain-3) : sans `container-type` ancêtre le
+/// repli spec = small viewport — `50cqw` = moitié viewport.
+#[test]
+fn container_units_fallback_viewport() {
+    let (dom, bx) = laid("<div id=a></div>", "#a{width:50cqw;height:10cqh}");
+    let a = find(&bx, by_id(&dom, "a"));
+    assert_eq!(a.rect.width, 400.0, "cqw = % viewport");
+    assert_eq!(a.rect.height, 60.0, "cqh = % viewport");
+}

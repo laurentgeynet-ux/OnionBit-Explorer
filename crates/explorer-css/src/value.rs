@@ -56,6 +56,21 @@ pub enum Unit {
     Vmin,
     /// Max des deux dimensions du viewport.
     Vmax,
+    /// `cq*` (css-contain-3 §4.2) : % de la dimension du
+    /// conteneur query le plus proche — résolu `Vw`/`Vh`
+    /// quand aucun `container-type` ancêtre n'est tracé
+    /// (fallback spec = small viewport, approx. documentée).
+    Cqw,
+    /// `cqh` — hauteur du conteneur.
+    Cqh,
+    /// `cqi`/`cqb` — axes inline/block.
+    Cqi,
+    /// `cqb`.
+    Cqb,
+    /// `cqmin`/`cqmax` — min/max des deux.
+    Cqmin,
+    /// `cqmax`.
+    Cqmax,
 }
 
 impl Unit {
@@ -78,7 +93,13 @@ impl Unit {
             | Self::Vw
             | Self::Vh
             | Self::Vmin
-            | Self::Vmax => return None,
+            | Self::Vmax
+            | Self::Cqw
+            | Self::Cqh
+            | Self::Cqi
+            | Self::Cqb
+            | Self::Cqmin
+            | Self::Cqmax => return None,
         })
     }
 
@@ -105,6 +126,12 @@ impl Unit {
             "vh" | "dvh" | "svh" | "lvh" => Self::Vh,
             "vmin" | "dvmin" | "svmin" | "lvmin" => Self::Vmin,
             "vmax" | "dvmax" | "svmax" | "lvmax" => Self::Vmax,
+            "cqw" => Self::Cqw,
+            "cqh" => Self::Cqh,
+            "cqi" => Self::Cqi,
+            "cqb" => Self::Cqb,
+            "cqmin" => Self::Cqmin,
+            "cqmax" => Self::Cqmax,
             _ => return None,
         })
     }
@@ -128,6 +155,12 @@ impl fmt::Display for Unit {
             Self::Vh => "vh",
             Self::Vmin => "vmin",
             Self::Vmax => "vmax",
+            Self::Cqw => "cqw",
+            Self::Cqh => "cqh",
+            Self::Cqi => "cqi",
+            Self::Cqb => "cqb",
+            Self::Cqmin => "cqmin",
+            Self::Cqmax => "cqmax",
         })
     }
 }

@@ -1044,6 +1044,13 @@ pub(crate) fn raw_length_px(
         Unit::Vh => len.value as f32 * ctx.viewport_h / 100.0,
         Unit::Vmin => len.value as f32 * ctx.viewport_w.min(ctx.viewport_h) / 100.0,
         Unit::Vmax => len.value as f32 * ctx.viewport_w.max(ctx.viewport_h) / 100.0,
+        // `cq*` (css-contain-3) : sans suivi de
+        // `container-type` ancêtre le repli spec est la
+        // small viewport — axes inline→w, block→h (approx).
+        Unit::Cqw | Unit::Cqi => len.value as f32 * ctx.viewport_w / 100.0,
+        Unit::Cqh | Unit::Cqb => len.value as f32 * ctx.viewport_h / 100.0,
+        Unit::Cqmin => len.value as f32 * ctx.viewport_w.min(ctx.viewport_h) / 100.0,
+        Unit::Cqmax => len.value as f32 * ctx.viewport_w.max(ctx.viewport_h) / 100.0,
         u => (len.value * u.px_factor()?) as f32,
     })
 }
@@ -1142,6 +1149,10 @@ fn eval_calc(expr: &str, pct_basis: f32, em_basis: f32, ctx: &BlockCtx) -> Optio
                 Unit::Vh => l.value * f64::from(ctx.viewport_h) / 100.0,
                 Unit::Vmin => l.value * f64::from(ctx.viewport_w.min(ctx.viewport_h)) / 100.0,
                 Unit::Vmax => l.value * f64::from(ctx.viewport_w.max(ctx.viewport_h)) / 100.0,
+                Unit::Cqw | Unit::Cqi => l.value * f64::from(ctx.viewport_w) / 100.0,
+                Unit::Cqh | Unit::Cqb => l.value * f64::from(ctx.viewport_h) / 100.0,
+                Unit::Cqmin => l.value * f64::from(ctx.viewport_w.min(ctx.viewport_h)) / 100.0,
+                Unit::Cqmax => l.value * f64::from(ctx.viewport_w.max(ctx.viewport_h)) / 100.0,
                 u => l.value * u.px_factor()?,
             };
             return Some(Term { px, dim: true });
