@@ -984,7 +984,49 @@ pub fn value_is_valid_for(name: &str, value: &str) -> bool {
 /// aussi (la déclaration brute est conservée : la validation
 /// par propriété fera le tri).
 #[must_use]
+#[allow(clippy::too_many_lines)]
 pub fn expand_shorthand(name: &str, value: &str) -> Option<Vec<(String, String)>> {
+    // Mot-clé CSS-wide sur un shorthand (css-cascade-5
+    // §defaulting) : **chaque longhand** reçoit le mot-clé —
+    // les grammaires strictes des expansions le droppaient
+    // (`outline:inherit`, `flex-flow:inherit`, `column-rule:
+    // inherit`, `display:inherit` via la jauge affectsv).
+    // La liste des longhands est sondée via une valeur
+    // canonique de l'expansion concernée — `None` = repli
+    // sur l'ancien chemin (déclaration verbatim).
+    let kw = value.trim();
+    if matches!(
+        kw.to_ascii_lowercase().as_str(),
+        "inherit" | "initial" | "unset" | "revert" | "revert-layer"
+    ) {
+        let probe = match name {
+            "margin" | "padding" | "inset" | "gap" | "grid-gap" | "columns" | "border-radius" => {
+                "0"
+            }
+            "border" | "border-top" | "border-right" | "border-bottom" | "border-left"
+            | "column-rule" | "outline" => "1px solid black",
+            "border-width" | "border-style" | "border-color" => "thin",
+            "overflow" => "visible",
+            "flex-flow" => "row nowrap",
+            "flex" => "1",
+            "background" | "mask" | "-webkit-mask" | "grid-template" | "grid" | "container"
+            | "text-wrap" => "none",
+            "font" => "medium serif",
+            "list-style" => "disc",
+            "place-items" | "place-content" | "place-self" => "center",
+            _ => "",
+        };
+        if !probe.is_empty() && !probe.eq_ignore_ascii_case(kw) {
+            if let Some(expanded) = expand_shorthand(name, probe) {
+                return Some(
+                    expanded
+                        .into_iter()
+                        .map(|(n, _)| (n, kw.to_string()))
+                        .collect(),
+                );
+            }
+        }
+    }
     // Propriétés logiques (css-logical-1 — R-124/R-183) :
     // shorthands `*-inline`/`*-block` éclatés en longhands
     // logiques ; la résolution physique attend la cascade.

@@ -3422,3 +3422,20 @@ fn subgrid_herite_template_parent() {
         "pas de template parent pour rows → none"
     );
 }
+
+/// `p { outline: inherit }` sur un parent indéclaré :
+/// l'expansion CSS-wide remplit les 3 longhands — le style
+/// diffère de `p {}` (jauge `routed`).
+#[test]
+fn outline_inherit_route_longhands() {
+    let f = fixture();
+    let mut e1 = StyleEngine::new();
+    e1.add_css("p {}", Origin::Author);
+    let mut e2 = StyleEngine::new();
+    e2.add_css("p { outline: inherit }", Origin::Author);
+    let m1 = e1.compute_tree(&f.dom, f.dom.document(), &env());
+    let m2 = e2.compute_tree(&f.dom, f.dom.document(), &env());
+    let (s1, s2) = (m1.get(f.p).expect("s1"), m2.get(f.p).expect("s2"));
+    assert_ne!(s1, s2, "outline:inherit doit router des longhands");
+    assert!(s2.get("outline-style").is_some());
+}

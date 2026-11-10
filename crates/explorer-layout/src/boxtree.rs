@@ -692,6 +692,14 @@ fn box_kind_of(style: &ComputedStyle) -> BoxKind {
         "inline" | "inline-block" | "inline-table" | "inline-flex" | "inline-grid" => {
             BoxKind::Inline
         }
+        // `display:ruby` (css-ruby-1) : niveau inline — la
+        // famille `ruby*` est approchée `inline` (annotation
+        // `rt` posée en ligne dans le flux, pas au-dessus de
+        // la base — résidu documenté, meilleur que le repli
+        // `block` qui cassait la phrase).
+        "ruby" | "ruby-base" | "ruby-text" | "ruby-text-container" | "ruby-base-container" => {
+            BoxKind::Inline
+        }
         "list-item" => BoxKind::ListItem,
         // block, table* et tout l'inconnu → bloc (repli).
         _ => BoxKind::Block,
@@ -1180,7 +1188,7 @@ fn leaf_box_anon(kind: BoxKind, style: ComputedStyle) -> LayoutBox {
         first_letter: None,
         quirks_mode: false,
         is_body: false,
-                    counter: None,
+        counter: None,
         flow_mode: explorer_css::value::WritingMode::HorizontalTb,
     }
 }
@@ -1415,7 +1423,7 @@ fn flush_run(out: &mut Vec<LayoutBox>, run: &mut Vec<LayoutBox>, style: &Compute
             first_letter: None,
             quirks_mode: false,
             is_body: false,
-                    counter: None,
+            counter: None,
             flow_mode: explorer_css::value::WritingMode::HorizontalTb,
         });
     }
@@ -1538,7 +1546,7 @@ fn object_box(
         first_letter: None,
         quirks_mode: false,
         is_body: false,
-                    counter: None,
+        counter: None,
         flow_mode: explorer_css::value::WritingMode::HorizontalTb,
     };
     // Ressource résolue → feuille remplacée ; sinon les
@@ -1572,7 +1580,11 @@ fn is_contained_skip(style: &explorer_css::ComputedStyle) -> bool {
 /// `{width,height}`/`{block,inline}-size` (axis-mapped ici
 /// en horizontal-tb — `block-size`→h, `inline-size`→w).
 fn contain_intrinsic(style: &explorer_css::ComputedStyle) -> (Option<f32>, Option<f32>) {
-    let px = |v: &str| v.trim().strip_suffix("px").and_then(|n| n.parse::<f32>().ok());
+    let px = |v: &str| {
+        v.trim()
+            .strip_suffix("px")
+            .and_then(|n| n.parse::<f32>().ok())
+    };
     let mut w = style.get("contain-intrinsic-width").and_then(px);
     let mut h = style.get("contain-intrinsic-height").and_then(px);
     if w.is_none() {
@@ -1659,16 +1671,15 @@ fn img_box<S: ::std::hash::BuildHasher>(
         // dimensions — `alt` est un texte de secours, pas
         // la géométrie). `input[type=image]` garde le
         // repli `alt` : là, c'est le libellé du bouton.
-        None if dom.tag_name(node).is_ok_and(|t| t == "img")
-            && {
-                let sized = |p: &str| {
-                    style.get(p).is_some_and(|v| {
-                        let v = v.trim();
-                        v != "auto" && !v.ends_with('%')
-                    })
-                };
-                sized("width") || sized("height")
-            } =>
+        None if dom.tag_name(node).is_ok_and(|t| t == "img") && {
+            let sized = |p: &str| {
+                style.get(p).is_some_and(|v| {
+                    let v = v.trim();
+                    v != "auto" && !v.ends_with('%')
+                })
+            };
+            sized("width") || sized("height")
+        } =>
         {
             (box_kind_of(&style), None)
         }
@@ -1712,7 +1723,7 @@ fn leaf_box(
         first_letter: None,
         quirks_mode: false,
         is_body: false,
-                    counter: None,
+        counter: None,
         flow_mode: explorer_css::value::WritingMode::HorizontalTb,
     }
 }
