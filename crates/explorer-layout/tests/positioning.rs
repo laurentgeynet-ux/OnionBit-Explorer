@@ -913,3 +913,18 @@ fn anchor_inset_logique() {
     assert_eq!(m.rect.x, 60.0, "inline-start = left → bord droit");
     assert_eq!(m.rect.y, 50.0, "block-start = top");
 }
+
+/// `justify-self`/`align-self` dans la cellule grid :
+/// `<self-position>` complet — `safe`/`unsafe`/`self-end`
+///`anchor-center` consommés (file affectsv).
+#[test]
+fn grid_self_position() {
+    let (dom, bx) = laid(
+        "<div id=g><div id=a></div></div>",
+        "#g{display:grid;grid-template-columns:100px;grid-template-rows:50px}\
+         #a{justify-self:self-end;align-self:safe center;width:30px;height:10px}",
+    );
+    let a = find(&bx, by_id(&dom, "a"));
+    assert_eq!(a.rect.x, 70.0, "self-end → bout de cellule");
+    assert_eq!(a.rect.y, 20.0, "safe center → centre cellule");
+}
