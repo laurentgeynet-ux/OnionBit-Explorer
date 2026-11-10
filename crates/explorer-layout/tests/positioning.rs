@@ -826,3 +826,28 @@ fn anchor_size_dimensionne() {
         "taille = ancre"
     );
 }
+
+/// `position-try:flip-block` (R-254 suite) : la bulle
+/// ancrée sous l'ancre qui déborde le bas du viewport est
+/// mirée au-dessus de l'ancre.
+#[test]
+fn anchor_position_try_flip() {
+    let (dom, bx) = laid(
+        "<div id=a></div><div id=m></div><div id=n></div>",
+        // Viewport 600×800. Ancre à y=750 → la bulle
+        // `anchor(bottom)` (h=30 → y 770..800 pile ? on force
+        // le débordement : hauteur 80 → 750+20+80=850 > 800).
+        "#a{position:absolute;left:10px;top:750px;width:40px;height:20px;anchor-name:--a}\
+         #m{position:absolute;position-anchor:--a;top:anchor(bottom);left:anchor(left);\
+            width:30px;height:80px;position-try:flip-block}\
+         #n{position:absolute;position-anchor:--a;top:anchor(bottom);left:anchor(left);\
+            width:30px;height:80px}",
+    );
+    let m = find(&bx, by_id(&dom, "m"));
+    let n = find(&bx, by_id(&dom, "n"));
+    // Sans try : sous l'ancre → 770.
+    assert_eq!(n.rect.y, 770.0, "contrôle : ancré sous l'ancre");
+    // Avec flip-block : miroir → centre ancre 760, bulle 80
+    // → y = 2*760 - 770 - 80 = 670.
+    assert_eq!(m.rect.y, 670.0, "flip-block : mirée au-dessus");
+}

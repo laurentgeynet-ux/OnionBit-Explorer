@@ -403,7 +403,8 @@ pub(crate) fn resolve_anchor_positioning(root: &mut LayoutBox, ctx: &BlockCtx, f
     // replis `anchor(…, <len>)` doivent encore résoudre.
     let mut anchors: Vec<(String, Rect)> = Vec::new();
     collect_anchor_names(root, &mut anchors);
-    fix_anchor_positioned(root, &anchors, root.rect.width.max(1.0), ctx, fs);
+    let (vw, vh) = (root.rect.width.max(1.0), root.rect.height.max(1.0));
+    fix_anchor_positioned(root, &anchors, vw, vh, ctx, fs);
 }
 
 /// Collecte `anchor-name` → rect (parcours préfixe = ordre
@@ -609,6 +610,7 @@ fn fix_anchor_positioned(
     bx: &mut LayoutBox,
     anchors: &[(String, Rect)],
     cb_w: f32,
+    vp_h: f32,
     ctx: &BlockCtx,
     fs: f32,
 ) {
@@ -729,9 +731,64 @@ fn fix_anchor_positioned(
                 crate::flex::translate_subtree(bx, dx, dy);
             }
         }
+        // `position-try`/`position-try-fallbacks` (R-254
+        // suite) : fallbacks flip — la boîte résolue qui
+        // déborde le viewport sur un axe flippé est mirée
+        // autour du centre de l'ancre. MVP borné :
+        // `flip-block`/`flip-y`, `flip-inline`/`flip-x`,
+        // `flip-start` = axe en débordement ; options
+        // `@position-try` nommées et `most-*` = résidus.
+        if let Some(name) = hint.as_deref() {
+            if let Some(raw_try) = bx
+                .style
+                .get("position-try")
+                .or_else(|| bx.style.get("position-try-fallbacks"))
+            {
+                if let Some((_, ar)) = anchors
+                    .iter()
+                    .rev()
+                    .find(|(n, _)| n.trim_start_matches("--") == name)
+                {
+                    let over_l = bx.rect.x < 0.0;
+                    let over_r = bx.rect.x + bx.rect.width > cb_w;
+                    let over_t = bx.rect.y < 0.0;
+                    let over_b = bx.rect.y + bx.rect.height > vp_h;
+                    let (mut fx, mut fy) = (0.0_f32, 0.0_f32);
+                    for t in raw_try.split_ascii_whitespace() {
+                        match t {
+                            "flip-block" | "flip-y" if over_t || over_b => {
+                                fy = 2.0 * (ar.y + ar.height / 2.0)
+                                    - 2.0 * bx.rect.y
+                                    - bx.rect.height;
+                            }
+                            "flip-inline" | "flip-x" if over_l || over_r => {
+                                fx =
+                                    2.0 * (ar.x + ar.width / 2.0) - 2.0 * bx.rect.x - bx.rect.width;
+                            }
+                            "flip-start" => {
+                                if over_t || over_b {
+                                    fy = 2.0 * (ar.y + ar.height / 2.0)
+                                        - 2.0 * bx.rect.y
+                                        - bx.rect.height;
+                                }
+                                if over_l || over_r {
+                                    fx = 2.0 * (ar.x + ar.width / 2.0)
+                                        - 2.0 * bx.rect.x
+                                        - bx.rect.width;
+                                }
+                            }
+                            _ => {}
+                        }
+                    }
+                    if fx != 0.0 || fy != 0.0 {
+                        crate::flex::translate_subtree(bx, fx, fy);
+                    }
+                }
+            }
+        }
     }
     for c in &mut bx.children {
-        explorer_common::deep(|| fix_anchor_positioned(c, anchors, cb_w, ctx, fs));
+        explorer_common::deep(|| fix_anchor_positioned(c, anchors, cb_w, vp_h, ctx, fs));
     }
 }
 
