@@ -7662,7 +7662,9 @@ fn c22_misc_apis() {
         ev_str("let g=function(){'use strict'};try{g.arguments}catch(x){'TE'}"),
         "TE"
     );
-    assert_eq!(ev_str("let h=function(){};typeof h.caller"), "undefined");
+    // Sloppy non strict : `caller` = `null` spec (pas
+    // `undefined`) — `typeof null` = "object" (JS-C463).
+    assert_eq!(ev_str("let h=function(){};typeof h.caller"), "object");
     assert_eq!(
         ev_str("function* gg(){};try{gg.caller}catch(x){'TE'}"),
         "TE"
