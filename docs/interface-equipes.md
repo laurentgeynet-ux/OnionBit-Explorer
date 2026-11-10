@@ -1066,3 +1066,24 @@ journal « livré ».
 - **R-185** — `DisplayItem::PushBlend(u8)`/`PopBlend` (mix-blend-mode/isolation) : bras `→ None` ajoutés dans `explorer-core::display_item_bounds` (même classe que `PushFilter`). Additif, tag u8 = `BLEND_MODES` (0 = normal/isolation).
 - **R-186** — `DisplayItem::Emphasis` (text-emphasis) : bras `→ None` ajouté dans `display_item_bounds` ; `FontRequest` a gagné `caps`/`kern_off`/`stretch` (u8/bool/u16) — littéraux NAV propagés (`caps:0, kern_off:false, stretch:100`).
 - **R-187** — `DisplayItem::PushClipPath { points }` (clip-path polygon) : bras `→ None` ajouté dans `display_item_bounds`. Même pile `clips` que `PushClip`.
+
+## PIPE → NAV — `geo_diff` : appariement ambigu sur classes répétées (mesuré)
+
+- **Constat** : `geo_diff` apparie les boîtes par `(tag, id, cls[0])`
+  — wikipedia a **22 instances `vector-menu-content`** (menus
+  déroulants à x=36/53/944/1120/1142) ; la paire est
+  non-déterministe → faux `dx>500` (eng 53 vs ref 1142 : ce sont
+  deux éléments différents, pas une dérive). Même famille
+  d'artefact que `#text` `eng_only`.
+- **Mesuré** : `dx>500` wikipedia = 127 entrées — la quasi-
+  totalité sont ces fausses paires ; le signal réel sous-jacent
+  = un shift ~+24 px sur le groupe x≈944 (menus droite) et un
+  comptage 22 vs 16 (boîtes `visibility:hidden`/`opacity:0` que
+  gBCR émet et pas `geometry_dump` — décision à trancher :
+  émettre les boîtes masquées avec un drapeau `hidden`, ou les
+  ignorer côté ref).
+- **Demande** : désambiguïser les classes répétées dans
+  `geo_diff` — appariement par (tag, cls, position la plus
+  proche) ou index dans le parent ; à défaut, exclure les
+  classes comptées >1 de l'appariement strict et les rapporter
+  séparément.
