@@ -96,6 +96,16 @@ de s'exécuter, aucun stamp/binding/card ne peut s'allumer.
 > la plus probable : `X.content` du sous-template
 > imbriqué vs fragment stampé (décalage d'un type de
 > nœud compté au parse, perdu au clone).
+>
+> **Verdict vols 735d-h** — sonde instrumentée : `cn=25
+> xc=? ni=21 idx∈[0,23]` — indices tous dans les bornes ;
+> **`el.childNodes` = enfants SSR** (ytd-masthead+A×12+div)
+> → le throw survient **avant insertion** du fragment.
+> Toutes primitives propres (iDo 29/29 sur le template
+> réel) → **divergence temporelle** (nodeInfoList figé sur
+> un contenu autre) ou **sous-template** dom-if stamped
+> via `q0f`/`jSY`. Prochaine sonde : `events`/`id`/
+> `localName` par nodeInfo → nommer l'entrée fautive.
 
 ```mermaid
 flowchart TD
