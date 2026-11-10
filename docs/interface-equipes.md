@@ -1171,3 +1171,30 @@ Candidats non exclus : `Polymer.dom.flush` (testé — no-op sur `lit`), `Render
 - **Cran 10** : la séquence d'activation est entièrement fonctionnelle côté moteur — `el.removeAttribute('disable-upgrade')` seul → `attributeChangedCallback` kevlar efface `__isUpgradeDisabled` → `connectedCallback`/`_initDataProperties`/`_enqueueClient`/`_enableProperties` → `[[ ]]` consommé (mesuré : `de:true, lit:""` sur éléments traités).
 - **Mur résiduel nommé** : la boucle `querySelectorAll('[disable-upgrade]') → removeAttribute` de kevlar — le sweep d'hydratation (`YtHydration`/`hydrate`/`attach`/`enableUpgrade`-adjacent). Exclus : `Polymer.dom.flush`, `RenderStatus.flush`, `onPolymerReady` (tick `apr` seulement), `yt-*` events (tous tirés), MO (non armé vu). Le terme `disable-upgrade`/`__isUpgradeDisabled` est **absent des `pluto_*.js` sauvegardés** — vit dans la couche custom-elements/webcomponents du bundle (base.js non capturé).
 - Levier : soit nommer le trigger manquant (observer filtré sur `disable-upgrade`, idle-time, `yt-visibility-update`, `DEFERRED_DETACH`-adjacent), soit driver le retrait côté `dom_host` quand `readyState` atteint `interactive`/`complete` (honnête : la page s'attend au sweep kevlar — le livrer nous-même couvre le trou tant que le déclencheur réel n'est pas identifié).
+
+## R-252 — `DisplayItem` : mask de groupe (PIPE → NAV, extension additive)
+
+`DisplayItem` gagne `PushMask{rect, dst, repeat, mask}` / `PopMask` —
+bracket hors-écran appliquant l'alpha d'un `mask-image` à tout le
+sous-arbre de la boîte (css-masking-1), posé à la racine de
+`paint_box` quand l'élément peint plus que son `background-color`
+(le cas « icône pure » garde `MaskedFill`, sans buffer). Ordre des
+brackets : `PushMask` **outermost** (spec : filter → clip → mask).
+
+Impact NAV : extension additive — les `match` exhaustifs sur
+`DisplayItem` gagnent un bras (`paint_helpers::display_item_bounds`
+→ `None`, item d'état ; `cull_display_list` conserve comme
+`PushFilter`). `masks`/`masks_url` inchangés. Résolus à l'émission :
+`mask-size`/`mask-position`/`mask-repeat` dans `dst`/`repeat` ;
+`mask-clip`/`mask-origin` non-initiaux, multi-couches, `mask-mode:
+luminance` et `mask-composite` = résidus documentés.
+
+## NAV — bissection kevlar, crans 11-14 (état honnête post-scrub)
+
+- **État mesuré** (vol du-sweep seul) : `rs:"complete"`, `du:0`, `lit:7` — dont 1 faux positif `SCRIPT` (`WIZ_global_data`) ; les 6 réels : `[[countryCode]]` ×2 (logo), `[[menuStrings.BACK/SEARCH_ALT_LABEL]]` (tooltips cachés), `[[getSimpleString(data.title)]]` ×2 (sidebar + titre du fil — **visible**, heading rendu).
+- **Rendu** : coquille YouTube fonctionnelle (consentement, recherche, "Se connecter") ; `[[countryCode]]` et `[[getSimpleString(data.title)]]` **rendus visibles** — ce ne sont PAS des différés légitimes (`logoDu:false`, `data`/`countryCode:"FR"` peuplés, `__dataEnabled:true`).
+- **Cran 11** : `guideIsVisibleButNotPersistent:false` — le setter n'a pas pris (`givAfter:false`), mais le logo n'est plus sous `disable-upgrade` de toute façon → paresse intentionnelle écartée pour ces 6.
+- **Cran 12** : `ytd-topbar-logo-renderer` = classe kevlar `F` (sous-classe du wrapper `H` — ES5 : pas de `connectedCallback`/`ready`/`instanceTemplate` exposés, `bindCb` + `__dataHost` + `__dataEnabled` + `__dataPending:{}` vide). `V0q` a posé ses params (`data` peuplé) — le binding texte `[[countryCode]]` interne n'a **jamais été enregistré**.
+- **Cran 13** — bundle `kevlar_base.js` lu : `_stampTemplate`/`_bindTemplate`/`nodeInfoList`/`dynamicFns`/`_evaluateBinding`/`iDo` (locator par index) — l'apply `isCompound` (`[[X]]`+fallback) tourne **au stamp**. Le binding des annotations **texte sur DOM SSR existant** (sans re-stamp) n'est atteignable ni via globales sondées (`yt.scheduler`/`ypc`/`Polymer.Settings`/`default_kevlar_base`), ni dans `kevlar_base.js`/`webcomponents-sd.js`/inline-766 Ko (données JSON). Driver = module-interne kevlar, chunk probablement non capturé.
+- **Cran 14** — ShadyDOM : `ShadyDOM.inUse:true`, `__shady_*` posés sur `Node.prototype` — polyfill sain ; `__shady_getRootNode is not a function` (vu en énumérant `pc`) = getter kevlar sur objet non-nœud, bénin.
+- **Levier suivant** : `EXPLORER_NET_RECORD` sur un vol complet → capturer **tous** les chunks jsbin → grep `annotate`/`_evaluateBinding`/`bind`/`iDo` — le driver SSR-bind vit dans l'un d'eux. Fallback contenu (`[[path]]`→`__data`) écarté : réécriture de contenu, pas la mécanique réelle.
