@@ -852,6 +852,11 @@ fn escaped_bottom_run(bx: &LayoutBox, cb_w: f32, parent_fs: f32, ctx: &BlockCtx)
     run.add(margins(st, cb_w, fs, ctx).bottom);
     // `height_raised` (min-height au-dessus du contenu) coupe
     // la chaîne du dernier fils : sa marge basse est avalée.
+    // R-210 — miroir bas de la quirk « body margin » : la
+    // marge du dernier fils ne s'échappe pas sous `body`.
+    if bx.is_body && ctx.quirks.get() {
+        return run;
+    }
     if bottom_adjoining(bx, cb_w, fs, ctx) && !bx.height_raised {
         if let Some(c) = bx.children.iter().rev().find(|c| {
             !matches!(c.kind, BoxKind::Text | BoxKind::AnonymousBlock)
@@ -911,6 +916,15 @@ fn collapsed_top_margin(
     let mut run = MarginRun::default();
     run.add(margins(st, cb_w, fs, ctx).top);
     if !top_adjoining(bx, cb_w, fs, ctx) {
+        return run;
+    }
+    // R-210 — quirks « body margin » (HTML Standard
+    // §quirks-rendering, mesuré Chrome : `<body><h1>` sans
+    // doctype → h1 au bord de contenu de body, marge avalée
+    // — ni protrusion au-dessus ni re-dépôt à l'intérieur,
+    // le 1er fils adjoining reste à gap 0). En quirks, la
+    // chaîne des descendants ne traverse jamais `body`.
+    if bx.is_body && ctx.quirks.get() {
         return run;
     }
     for c in &bx.children {
@@ -2345,6 +2359,7 @@ fn flow_children(
                 first_line: None,
                 first_letter: None,
                 quirks_mode: false,
+                is_body: false,
                 flow_mode: bx.flow_mode,
             };
             let gap = if first && adjoining_top {

@@ -1665,15 +1665,18 @@ fn colonnes_distribuent_les_items() {
     let ul = find(&bx, by_tag(&dom, "ul"));
     assert_eq!(ul.children.len(), 6);
     // col_w = (300 - 20)/3 ≈ 93.33 ; 6×20 px, cible 40 → 2/col.
-    // La marge UA `ul{margin-top:1em}` décale tout à y=16,
-    // le `padding-left:40px` UA décale les colonnes à x=40+.
+    // Sans doctype → quirks : la marge UA `ul{margin-top:1em}`
+    // collapse jusqu'au bord de `body` et s'y avalée (R-210 —
+    // quirk « body margin » mesurée Chrome) → les items
+    // partent à y=0. Le `padding-left:40px` UA décale les
+    // colonnes à x=40+.
     let (a, c, e) = (&ul.children[0], &ul.children[2], &ul.children[4]);
     assert!(approx(a.rect.x, 40.0), "col0 x={}", a.rect.x);
     assert!(approx(c.rect.x, 143.333), "col1 x={}", c.rect.x);
     assert!(approx(e.rect.x, 246.667), "col2 x={}", e.rect.x);
     // Chaque colonne repart du haut du conteneur.
     for (i, u) in ul.children.iter().enumerate() {
-        let want = [16.0, 36.0][i % 2];
+        let want = [0.0, 20.0][i % 2];
         assert!(approx(u.rect.y, want), "li{i} y={}", u.rect.y);
     }
     // Le conteneur couvre les trois colonnes.

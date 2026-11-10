@@ -197,6 +197,13 @@ pub struct LayoutBox {
     /// racine par `build_box_tree_sized`, lu par
     /// `layout_tree` qui arme `BlockCtx::quirks`.
     pub quirks_mode: bool,
+    /// Élément `<body>` — posé au build (le DOM n'est pas
+    /// accessible en layout). Sert à la quirk « marges
+    /// absorbées au bord de body » (R-210, HTML §quirks —
+    /// mesuré Chrome : la chaîne de marges collapsant au
+    /// bord de `body` est avalée en quirks — ni protrusion
+    /// au-dessus ni re-dépôt à l'intérieur).
+    pub is_body: bool,
     /// `writing-mode` du flux **contenant** (R-183) — le
     /// repère où cette boîte a été posée (= mode propre du
     /// parent élément, ICB pour la racine). Comparé au mode
@@ -412,6 +419,7 @@ fn inject_inside_markers(bx: &mut LayoutBox) {
                     first_line: None,
                     first_letter: None,
                     quirks_mode: false,
+                    is_body: false,
                     flow_mode: explorer_css::value::WritingMode::HorizontalTb,
                 },
             );
@@ -583,6 +591,7 @@ fn build_box_tree_env<S: ::std::hash::BuildHasher>(
         ));
     }
     let kind = box_kind_of(&style);
+    let is_body = dom.tag_name(root).is_ok_and(|t| t == "body");
     let mut b = LayoutBox {
         kind,
         node: Some(root),
@@ -606,6 +615,7 @@ fn build_box_tree_env<S: ::std::hash::BuildHasher>(
         first_line: None,
         first_letter: None,
         quirks_mode: false,
+        is_body,
         flow_mode: explorer_css::value::WritingMode::HorizontalTb,
     };
     let children = child_boxes(dom, root, styles, &style, sizes, envs);
@@ -794,6 +804,7 @@ fn child_boxes<S: ::std::hash::BuildHasher>(
                     first_line: None,
                     first_letter: None,
                     quirks_mode: false,
+                    is_body: false,
                     flow_mode: explorer_css::value::WritingMode::HorizontalTb,
                 });
             }
@@ -1120,6 +1131,7 @@ fn leaf_box_anon(kind: BoxKind, style: ComputedStyle) -> LayoutBox {
         first_line: None,
         first_letter: None,
         quirks_mode: false,
+        is_body: false,
         flow_mode: explorer_css::value::WritingMode::HorizontalTb,
     }
 }
@@ -1353,6 +1365,7 @@ fn flush_run(out: &mut Vec<LayoutBox>, run: &mut Vec<LayoutBox>, style: &Compute
             first_line: None,
             first_letter: None,
             quirks_mode: false,
+            is_body: false,
             flow_mode: explorer_css::value::WritingMode::HorizontalTb,
         });
     }
@@ -1474,6 +1487,7 @@ fn object_box(
         first_line: None,
         first_letter: None,
         quirks_mode: false,
+        is_body: false,
         flow_mode: explorer_css::value::WritingMode::HorizontalTb,
     };
     // Ressource résolue → feuille remplacée ; sinon les
@@ -1576,6 +1590,7 @@ fn leaf_box(
         first_line: None,
         first_letter: None,
         quirks_mode: false,
+        is_body: false,
         flow_mode: explorer_css::value::WritingMode::HorizontalTb,
     }
 }
@@ -1630,6 +1645,7 @@ fn control_box(
                     first_line: None,
                     first_letter: None,
                     quirks_mode: false,
+                    is_body: false,
                     flow_mode: explorer_css::value::WritingMode::HorizontalTb,
                 }],
                 &style,

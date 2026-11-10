@@ -3799,6 +3799,14 @@ chez NAVIGATEUR — non recopiés ici.
 
 - [x] **R-211v. `padding`/`border` horizontaux sur élément inline consomment la ligne** (terrain vol 772 dr.dk/vimeo/bitmovin) : les marqueurs d'extrémité `Open`/`Close` n'étaient posés que pour `margin-left|right` → `padding`/`border-width` horizontaux d'un inline non-remplacé ignorés → `ul li a{padding:0 8px}` retombait à 0 → items nav contigus (`DR.DKDRTVDR LYD`, spans bitmovin concaténés). Fix `inline.rs` : trigger étendu aux six propriétés, bord = `margin + border-width + padding` par côté. Verrou `padding_horizontal_inline_consomme_la_ligne`. Reste : le fond peint de l'élément ne s'étend pas encore sur la zone padding (cosmétique, documenté).
 
+- [x] **R-210. Quirk « marges absorbées au bord de `body` »**
+  (lot géométrique — dy +13,4 px nommé par `geo_diff` sur
+  info.cern.ch, quirks sans doctype) : mesuré Chrome, la
+  chaîne de marges collapsant au bord de `body` est avalée —
+  `LayoutBox.is_body` (posé au build) + garde dans
+  `collapsed_top_margin`/`escaped_bottom_run`. Marge propre
+  de body et collapse frères inchangés. Verrous : 3 tests
+  `quirks_body_margin` + fixture `colonnes` recalée.
 ## Tâches continues
 
 - **Triage rendu** des échecs `site_smoke.ps1` : les écarts
