@@ -689,17 +689,30 @@ fn box_kind_of(style: &ComputedStyle) -> BoxKind {
         // `rt` posée en ligne dans le flux, pas au-dessus de
         // la base — résidu documenté, meilleur que le repli
         // `block` qui cassait la phrase).
-        "inline" | "inline-block" | "inline-table" | "inline-flex" | "inline-grid" | "ruby"
-        | "ruby-base" | "ruby-text" | "ruby-text-container" | "ruby-base-container"
+        "inline"
+        | "inline-block"
+        | "inline-table"
+        | "inline-flex"
+        | "inline-grid"
+        | "ruby"
+        | "ruby-base"
+        | "ruby-text"
+        | "ruby-text-container"
+        | "ruby-base-container"
             if matches!(style.get("position"), Some("absolute" | "fixed")) =>
         {
             BoxKind::Block
         }
-        "inline" | "inline-block" | "inline-table" | "inline-flex" | "inline-grid" | "ruby"
-        | "ruby-base" | "ruby-text" | "ruby-text-container" | "ruby-base-container" =>
-        {
-            BoxKind::Inline
-        }
+        "inline"
+        | "inline-block"
+        | "inline-table"
+        | "inline-flex"
+        | "inline-grid"
+        | "ruby"
+        | "ruby-base"
+        | "ruby-text"
+        | "ruby-text-container"
+        | "ruby-base-container" => BoxKind::Inline,
         "list-item" => BoxKind::ListItem,
         // block, table* et tout l'inconnu → bloc (repli).
         _ => BoxKind::Block,
@@ -1908,6 +1921,11 @@ fn counter_walk(
     if dom.element(node).is_ok() {
         if let Some(st) = styles.get(node) {
             for (n, v) in counter_pairs(st.get("counter-reset"), 0) {
+                env.insert(n, v);
+            }
+            // `counter-set` (css-lists-3) : set absolu, pas
+            // l'incrément de `counter-increment`.
+            for (n, v) in counter_pairs(st.get("counter-set"), 1) {
                 env.insert(n, v);
             }
             for (n, v) in counter_pairs(st.get("counter-increment"), 1) {

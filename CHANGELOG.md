@@ -6,6 +6,7 @@ Le format suit [Keep a Changelog](https://keepachangelog.com/fr/1.1.0/)
 et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
+- **`counter-set` consommé** (`explorer-layout`) : valeur absolue dans l'env compteurs (`env.insert`, distinct de `counter-increment` +=). Verrou : `counter_set_absolu`.
 - **`rt`/`rp` feuille UA ruby** (`explorer-css`) : `rt` = `font-size:50%` + `vertical-align:super` (annotation sur-ligne, meilleur rendu sans chirurgie inline — la pose au-dessus de la base reste le résidu css-ruby-1 rendant `display:ruby` mesurable), `rp` (parenthèses de secours) = `display:none`. Verrou : `ua_ruby_rt_rp`.
 - **`alignment-baseline`/`baseline-shift` consommés** (`explorer-layout`) : replient sur la table `vertical-align` (`ideographic`→text-bottom, `hanging`→top, `central`/`mathematical`/`middle`→middle ; `baseline-shift` = `sub`/`super`/longueur) — `vertical-align` déclaré prime. Verrou : `alignment_baseline_repli`.
 - **css.values / jauge affectsv — 3 fixes mesurés** (contrat NAV→PIPE) :
