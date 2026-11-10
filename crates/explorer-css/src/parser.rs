@@ -515,8 +515,7 @@ impl<'t> Parser<'t> {
                         scope_wrap_rules(&mut rules, &root, bound.as_deref());
                         AtKind::Scope { rules }
                     }
-                    "font-face" | "page" | "viewport" | "counter-style" | "property"
-                    | "font-palette-values" => {
+                    "font-face" | "page" | "viewport" | "counter-style" | "property" => {
                         AtKind::Declarations {
                             prelude,
                             declarations: self.declaration_block(),
@@ -1711,6 +1710,11 @@ fn find_matching_paren(s: &str) -> usize {
 /// (`scripts/bcd_coverage.mjs`).
 #[must_use]
 pub fn at_rule_supported(name: &str) -> bool {
+    // Statements gérés nominativement : `charset`/`import`
+    // (feuille), `namespace` (R-237 — registre préfixe→URI),
+    // `custom-media` (R-231 — alias de media query). Un
+    // statement `@x …;` inconnu est indistinguable d'un
+    // reconnu au parse — la liste blanche est le critère.
     const KNOWN_STATEMENTS: &[&str] = &["charset", "import", "namespace", "custom-media"];
     if KNOWN_STATEMENTS.contains(&name.to_ascii_lowercase().as_str()) {
         return true;
