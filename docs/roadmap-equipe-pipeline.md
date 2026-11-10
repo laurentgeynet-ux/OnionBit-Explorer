@@ -3820,32 +3820,7 @@ chez NAVIGATEUR — non recopiés ici.
 - [x] **R-229. `@font-feature-values` parse+registre+résolution** : corps de sous-at-rules (parse dédié), registre par famille, `font-variant-alternates`→`font-feature-settings` équivalent (ssNN/cvNN/nalt/swsh/salt). `at.unknown/unapplied` MDN éliminés. Verrous : 3 tests.
 - [x] **R-230. `decl.malformed.delim` diagnostic** : tokens `*`/`!`/`=` = hacks CSS historiques (star-hack, IE `!`) — rejetés par spec comme Chrome — pas de perte de rendu. Reste : `value.dropped.font-size` ×108 github (à nommer : forme de la valeur rejetée) + `number(0.0)` ×18 github.
 - [ ] **R-231. `@import` (mur NAV)** : `at.unapplied.import` ×18 — feuilles manquantes → lobste.rs 99,98 % ; journalisé PIPE→NAV (résolution récursive à la collecte).
-
-**Manques mesurés BCD (`scripts/bcd_coverage.mjs`, 2026-11-10
-— `css.prop` 235/581 = 40,4 %, `css.sel` 123/123, `css.at`
-13/20)** — lots ordonnés par impact (3/3 moteurs) :
-
-- [ ] **R-232. `all` + `unset` global** : reset cascade —
-  structurel (chaque longhand déclare son repli).
-- [ ] **R-233. `animation-*` longhands** (×8 : `-name`,
-  `-duration`, `-timing-function`, `-delay`,
-  `-iteration-count`, `-direction`, `-fill-mode`,
-  `-play-state`) : le shorthand est porté, les longhands
-  posés séparément sont droppés → animations perdues.
-- [ ] **R-234. `border-image-*` longhands** (×6 : `-source`,
-  `-slice`, `-width`, `-outset`, `-repeat`, le shorthand).
-- [ ] **R-235. `-webkit-text-fill-color` /
-  `-webkit-text-stroke*`** (×4, 3/3 moteurs — dégradés de
-  texte des landing pages).
-- [ ] **R-236. Longhands logiques manquantes** : `border-
-  {block,inline}-{start,end}-{color,style,width}` + `border-
-  {start,end}-{start,end}-radius` (css-logical — les
-  shorthands R-124/183 sont posés, les longhands non).
-- [ ] **R-237. At-rules manquantes** : `@namespace`,
-  `@starting-style`, `@position-try`, `@font-palette-values`,
-  `@view-transition`, `@function` — tri par site réel
-  (`@namespace` = SVG/XLink, `@starting-style` = animations
-  d'entrée, fréquent).
+- [x] **R-231. `@custom-media` alias de media query** : registre `Statement` + substitution `@media (--nom)` à la collecte (négation composée). `at.unapplied.custom-media` éliminé. Verrou : 2 env.
 ## Tâches continues
 
 - **Triage rendu** des échecs `site_smoke.ps1` : les écarts

@@ -1148,6 +1148,10 @@ pub struct StyleEngine {
     /// famille → nom → tag+indices (résolution
     /// `font-variant-alternates`).
     pub font_feature_values: HashMap<String, HashMap<String, FontFeatureValues>>,
+    /// `@custom-media <--nom> (query)` enregistrés (R-231) —
+    /// alias de media query : `@media (--nom)` → substitution
+    /// du query enregistré à la collecte.
+    pub custom_media: HashMap<String, String>,
     rules: Vec<CollectedRule>,
     /// Règles UA **quirks-only** (HTML Rendering, « In quirks
     /// mode ») — parsées avec la feuille UA, ne candidatent
@@ -1590,10 +1594,14 @@ impl StyleEngine {
                 }
                 Rule::At(at) => {
                     if let AtKind::Media { queries, rules } = &at.kind {
+                        // R-231 — `@custom-media` : un groupe
+                        // `(--nom)` enregistré se substitue à
+                        // son query (un niveau de récursion).
+                        let queries = self.expand_custom_media(queries);
                         // `@media` imbriqué = AND : on empile la
                         // liste de queries du niveau.
                         let mut nested = media.to_vec();
-                        nested.push(queries.clone());
+                        nested.push(queries);
                         self.collect_rules_into(
                             rules, origin, &nested, layer, quirks, scope, container,
                         );
@@ -1627,7 +1635,18 @@ impl StyleEngine {
                         // `@layer a, b;` : déclare l'ordre sans
                         // règles (les corps s'y raccordent par
                         // nom — premier arrivé fixe le rang).
-                        if at.name == "layer" {
+                        if at.name == "custom-media" {
+                            // R-231 — `@custom-media --nom (q)` :
+                            // l'alias vit dans `custom_media` —
+                            // `@media (--nom)` substitué à la
+                            // collecte ci-dessous.
+                            if let Some((name, q)) = prelude.split_once(char::is_whitespace) {
+                                self.custom_media.insert(
+                                    name.trim().to_string(),
+                                    q.trim().to_string(),
+                                );
+                            }
+                        } else if at.name == "layer" {
                             let mut path = layer.to_vec();
                             for part in prelude.split(',') {
                                 for seg in part.split('.') {
@@ -4535,6 +4554,32 @@ table {
 /// virgule de tête sépare les deux branches ; un argument
 /// manquant conserve le texte source (dégradation).
 impl StyleEngine {
+    /// R-231 — `@custom-media` : chaque `MediaQuery` du lot
+    /// dont l'unique condition est un `--nom` enregistré est
+    /// remplacée par le parse du query alias (un niveau —
+    /// l'alias peut à son tour contenir un alias, mais la
+    /// chaîne est bornée à une substitution).
+    fn expand_custom_media(&self, queries: &[MediaQuery]) -> Vec<MediaQuery> {
+        let mut out = Vec::new();
+        for q in queries {
+            let custom = q.conditions.len() == 1
+                && q.conditions[0].1.is_empty()
+                && q.conditions[0].0.starts_with("--")
+                && self.custom_media.contains_key(&q.conditions[0].0);
+            if custom {
+                let alias = self.custom_media[&q.conditions[0].0].clone();
+                let mut expanded = crate::parser::parse_media_queries(&alias);
+                for e in &mut expanded {
+                    e.negated = e.negated != q.negated;
+                }
+                out.extend(expanded);
+            } else {
+                out.push(q.clone());
+            }
+        }
+        out
+    }
+
     /// R-229 — `font-variant-alternates` : résout les noms
     /// enregistrés `@font-feature-values` en réglages
     /// `font-feature-settings` équivalents (concatenés) —

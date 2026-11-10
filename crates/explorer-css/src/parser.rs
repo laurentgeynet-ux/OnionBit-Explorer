@@ -1433,7 +1433,7 @@ fn parse_import(prelude: &str) -> ImportRule {
 }
 
 /// Parse une liste de media queries séparées par `,`.
-fn parse_media_queries(prelude: &str) -> Vec<MediaQuery> {
+pub(crate) fn parse_media_queries(prelude: &str) -> Vec<MediaQuery> {
     let queries: Vec<MediaQuery> = prelude
         .split(',')
         .map(|q| parse_one_media(q.trim()))
