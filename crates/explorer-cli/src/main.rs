@@ -52,6 +52,7 @@ fn main() -> ExitCode {
         [_, cmd, url] if cmd == "mem" => mem_report(url),
         [_, cmd, url, dir] if cmd == "save" => save_fixture(url, dir),
         [_, cmd, file] if cmd == "eval" => eval_js(file),
+        [_, cmd] if cmd == "props" => props_check(),
         [_, cmd, url, out] if cmd == "download" => download(url, out),
         [_, cmd] if cmd == "mcp" => mcp_main("9377"),
         [_, cmd, port] if cmd == "mcp" => mcp_main(port),
@@ -68,6 +69,9 @@ fn main() -> ExitCode {
             eprintln!("        explorer-cli mem <url>");
             eprintln!("        explorer-cli save <url> <dossier>");
             eprintln!("        explorer-cli eval <fichier.js>");
+            eprintln!(
+                "        explorer-cli props            (noms de props sur stdin → `nom\\tok|miss`)"
+            );
             eprintln!("        explorer-cli download <url> <sortie>");
             eprintln!("        explorer-cli diff <a.png> <b.png>");
             eprintln!("        explorer-cli mcp [port]  (serveur MCP stdio → daemon)");
@@ -581,6 +585,26 @@ fn eval_js(path: &str) -> ExitCode {
     } else {
         ExitCode::SUCCESS
     }
+}
+
+/// `props` : lit des noms de propriétés CSS sur stdin (un par
+/// ligne) et émet `nom\tok` ou `nom\tmiss` selon
+/// [`explorer_css::prop_supported`] — critère `@supports`
+/// (nom seul). Brique de `scripts/bcd_coverage.mjs` : le
+/// script alimente les ~650 clés BCD et compte la couverture.
+fn props_check() -> ExitCode {
+    use std::io::BufRead;
+    let stdin = std::io::stdin();
+    for line in stdin.lock().lines() {
+        let Ok(name) = line else { break };
+        let name = name.trim();
+        if name.is_empty() {
+            continue;
+        }
+        let ok = explorer_css::prop_supported(name);
+        println!("{name}\t{}", if ok { "ok" } else { "miss" });
+    }
+    ExitCode::SUCCESS
 }
 
 /// `mem <url>` : attribution mémoire par réservoir après

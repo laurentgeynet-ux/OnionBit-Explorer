@@ -544,6 +544,20 @@ const SUPPORTED_PROPS: &[&str] = &[
     "z-index",
 ];
 
+/// Propriété `name` reconnue par le moteur — même critère que
+/// `decl_supported` (nom seul : `SUPPORTED_PROPS` ou shorthand
+/// expansible par [`crate::value::expand_shorthand`], la valeur
+/// n'est pas type-checkée ; `--custom` exclus — elles sont
+/// toujours portées mais ne disent rien du moteur).
+///
+/// Exposée pour le rapport de couverture
+/// `scripts/bcd_coverage.mjs` (croisement `@mdn/browser-compat-
+/// data` — « où en est le navigateur » mesuré en x/y).
+#[must_use]
+pub fn prop_supported(name: &str) -> bool {
+    SUPPORTED_PROPS.contains(&name) || crate::value::expand_shorthand(name, "0").is_some()
+}
+
 /// `(name: value)` d'une media query — px pour *-width/-height.
 /// `em`/`rem` y sont résolus contre la font-size INITIALE
 /// (spec MQ4 — jamais le `:root` calculé) : `env.font_size_base`.
@@ -1117,7 +1131,11 @@ impl CounterStyle {
                 }
             }
         };
-        let suffix = if self.suffix.is_empty() { "." } else { &self.suffix };
+        let suffix = if self.suffix.is_empty() {
+            "."
+        } else {
+            &self.suffix
+        };
         format!("{}{}{}", self.prefix, body, suffix)
     }
 }
@@ -1656,11 +1674,17 @@ impl StyleEngine {
                                         cs.symbols = d
                                             .value
                                             .split_whitespace()
-                                            .map(|t| t.trim_matches('"').trim_matches('\'').to_string())
+                                            .map(|t| {
+                                                t.trim_matches('"').trim_matches('\'').to_string()
+                                            })
                                             .collect();
                                     }
-                                    "prefix" => cs.prefix = d.value.trim().trim_matches('"').to_string(),
-                                    "suffix" => cs.suffix = d.value.trim().trim_matches('"').to_string(),
+                                    "prefix" => {
+                                        cs.prefix = d.value.trim().trim_matches('"').to_string();
+                                    }
+                                    "suffix" => {
+                                        cs.suffix = d.value.trim().trim_matches('"').to_string();
+                                    }
                                     "fallback" => cs.fallback = d.value.trim().to_string(),
                                     _ => {}
                                 }
@@ -1694,15 +1718,10 @@ impl StyleEngine {
                                 "annotation" => {
                                     idxs.iter().map(|i| ("nalt".to_string(), *i)).collect()
                                 }
-                                "swash" => {
-                                    idxs.iter().map(|i| ("swsh".to_string(), *i)).collect()
-                                }
+                                "swash" => idxs.iter().map(|i| ("swsh".to_string(), *i)).collect(),
                                 _ => idxs.iter().map(|i| ("salt".to_string(), *i)).collect(),
                             };
-                            set.insert(
-                                name.to_ascii_lowercase(),
-                                FontFeatureValues { settings },
-                            );
+                            set.insert(name.to_ascii_lowercase(), FontFeatureValues { settings });
                         }
                     } else if let AtKind::Container { name, query, rules } = &at.kind {
                         // `@container` (R-190) : le prédicat
@@ -4112,12 +4131,9 @@ fn resolve_logical_props(
         // UA). À rang égal, le physique l'emporte —
         // comportement historique documenté (l'ordre fin
         // intra-élément n'est pas préservable en `HashMap`).
-        let win = ranks.get(&k).is_some_and(|r| {
-            *r > ranks
-                .get(&stored)
-                .copied()
-                .unwrap_or(0)
-        });
+        let win = ranks
+            .get(&k)
+            .is_some_and(|r| *r > ranks.get(&stored).copied().unwrap_or(0));
         if !props.contains_key(&stored) || win {
             if let Some(v) = props.get(&k).cloned() {
                 props.insert(stored, v);
@@ -4538,7 +4554,11 @@ impl StyleEngine {
             let fam = st
                 .get("font-family")
                 .and_then(|f| f.split(',').next())
-                .map(|f| f.trim().trim_matches(|c: char| c == '"' || c as u32 == 0x27).to_ascii_lowercase())
+                .map(|f| {
+                    f.trim()
+                        .trim_matches(|c: char| c == '"' || c as u32 == 0x27)
+                        .to_ascii_lowercase()
+                })
                 .unwrap_or_default();
             let set = self
                 .font_feature_values
@@ -4557,7 +4577,10 @@ impl StyleEngine {
                 let Some(end) = end else { break };
                 let inside = &rest[open + 1..end - 1];
                 for nm in inside.split(',') {
-                    let nm = nm.trim().trim_matches(|c: char| c == '"' || c as u32 == 0x27).to_ascii_lowercase();
+                    let nm = nm
+                        .trim()
+                        .trim_matches(|c: char| c == '"' || c as u32 == 0x27)
+                        .to_ascii_lowercase();
                     if let Some(fv) = set.get(&nm) {
                         for (tag, v) in &fv.settings {
                             out.push(format!("\"{tag}\" {v}"));
