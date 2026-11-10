@@ -1112,3 +1112,39 @@ journal « livré ».
   accepte une feuille additionnelle, `compute_tree` la
   rejoue ; une API `recompute(delta_css)` peut être ajoutée
   si le coût d'un recompute complet gêne (journal à rebondir).
+
+---
+
+## Mur aval youtube nommé (NAV) — `readyState` figé `loading` → hydratation kevlar morte
+
+Vol mesuré (daemon, sondes `lit.insert`/`lit.caller`/`rs.set`, binaire HEAD) :
+
+- `document.readyState === "loading"` en fin de vol ; `rs.set` montre
+  `interactive`/`complete` écrits sur `ctx=1` (frame —
+  `fire_frame_ctx_cycle`) mais **jamais sur `ctx=0`** : le bloc cycle
+  de vie du document top (`sub_commit_tail`,
+  `explorer-core/src/session/net.rs:529`/`563` →
+  `set_doc_ready_state(JS_CTX_TOP, …)`) n'a pas couru, ou est allé dans
+  `pending_doc_lifecycle` sans replay.
+- Conséquence nommée : le polyfill custom-elements kevlar laisse
+  `__isUpgradeDisabled` sur les éléments SSR (`disable-upgrade`) —
+  `connectedCallback` court-circuité → les marqueurs d'hydratation
+  `[[X]]` (annotation + valeur de repli dans le même nœud texte, ex.
+  `[[menuStrings.BACK_ALT_LABEL]] … Retour`) restent littéraux → ~51
+  `[[ ]]` visibles (`menuStrings`/`countryCode`/`tooltip` sont bien
+  dans `__data` — la machine à données est saine).
+- Exclus par mesure : `V0q`/`stampDomArray_`/`flushRenderStamper…`
+  fonctionnent (`#buttons` kids sans littéral) ; `MutationObserver`,
+  `IntersectionObserver`, `raf`, timers sains ; réseau `youtubei` 200
+  livré ; `items:0`/`vids:0` = nudge de consentement attendu.
+- `[[ ]]` n'entrent dans le DOM vivant que via `template.innerHTML`
+  (`lit.caller` : `function(H,w){w=_.Wz(_.u8(w));H.innerHTML=w}` sur
+  `<template>`) — chemins `appendChild`/`insertBefore`/`norm_children`/
+  `insertAdjacent*` propres.
+- Levier NAV : faire courir le cycle `interactive`→`readystatechange`→
+  `DOMContentLoaded`→`complete`→`load` du document top pour ce chemin
+  de commit (ou le rejouer depuis `pending_doc_lifecycle`), puis
+  re-mesurer `rs`/`[[ ]]`/`__isUpgradeDisabled`.
+- Sondes laissées (coût ~0, gardées `tracing::enabled!`) :
+  `lit.insert`/`lit.caller` (`dom.rs`, `dom_host.rs`), `rs.set`
+  (`interp/mod.rs`).

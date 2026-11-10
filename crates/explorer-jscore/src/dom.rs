@@ -2317,6 +2317,21 @@ impl Dom {
         if node as usize >= self.nodes.len() {
             return;
         }
+        // §lit — repère : écriture d'une annotation `[[X]]` dans
+        // un nœud texte vivant (binding kevlar écrivant le
+        // littéral en valeur, au lieu de résoudre `[[X]]`).
+        if text.contains("[[")
+            && self.is_attached(node)
+            && tracing::enabled!(target: "dom_probe", tracing::Level::INFO)
+        {
+            let p = self.parent(node);
+            tracing::info!(
+                target: "dom_probe",
+                site = "lit.set_text",
+                parent = %p.map_or("?".into(), |i| self.nodes[i as usize].tag.clone()),
+                txt = %text.chars().take(40).collect::<String>()
+            );
+        }
         let old = std::mem::replace(&mut self.nodes[node as usize].text, text.to_string());
         // Le nœud texte se reboîte via son élément parent.
         self.mark_dirty_at(self.parent(node).unwrap_or(node));
@@ -2808,6 +2823,30 @@ impl Dom {
         let a = self.nodes[parent as usize].attached;
         self.set_attached(child, a);
         self.nodes[parent as usize].children.push(child);
+        // §lit — repère « annotation `[[X]]` insérée hors
+        // `template.content` » (stamp sans binding — cf.
+        // `insert_before`/`splice_fragment`).
+        if self.nodes[child as usize].kind == NodeKind::Text
+            && self.nodes[child as usize].text.contains("[[")
+            && tracing::enabled!(target: "dom_probe", tracing::Level::INFO)
+        {
+            let mut n = parent;
+            let mut in_tpl = false;
+            while let Some(p) = self.nodes[n as usize].parent {
+                if self.nodes[p as usize].tag == "template" {
+                    in_tpl = true;
+                    break;
+                }
+                n = p;
+            }
+            tracing::info!(
+                target: "dom_probe",
+                site = "lit.insert",
+                parent = %self.nodes[parent as usize].tag,
+                in_tpl,
+                txt = %self.nodes[child as usize].text.chars().take(40).collect::<String>()
+            );
+        }
         self.mark_dirty_at(parent);
         let prev = {
             let kids = &self.nodes[parent as usize].children;
@@ -2913,6 +2952,24 @@ impl Dom {
             self.detach(k);
             self.nodes[k as usize].parent = Some(node);
             self.set_attached(k, a);
+        }
+        // §lit — même repère qu'`append` : `[[X]]` posé hors
+        // `template.content` via « replace all »
+        // (`textContent=`/`innerHTML=`/`replaceChildren`).
+        if tracing::enabled!(target: "dom_probe", tracing::Level::INFO) {
+            for &k in &kept {
+                if self.nodes[k as usize].kind == NodeKind::Text
+                    && self.nodes[k as usize].text.contains("[[")
+                {
+                    tracing::info!(
+                        target: "dom_probe",
+                        site = "lit.insert",
+                        parent = %self.nodes[node as usize].tag,
+                        rc = true,
+                        txt = %self.nodes[k as usize].text.chars().take(40).collect::<String>()
+                    );
+                }
+            }
         }
         self.nodes[node as usize].children.clone_from(&kept);
         self.mark_dirty_at(node);
@@ -3083,6 +3140,31 @@ impl Dom {
         self.nodes[child as usize].parent = Some(parent);
         let a = self.nodes[parent as usize].attached;
         self.set_attached(child, a);
+        // §lit — repère : un nœud texte `[[X]]` (annotation
+        // Polymer/kevlar) inséré hors `template.content` = stamp
+        // sans enregistrement de binding (annotations littérales
+        // YouTube). Coût ~0 : seul le chemin Text est testé.
+        if self.nodes[child as usize].kind == NodeKind::Text
+            && self.nodes[child as usize].text.contains("[[")
+            && tracing::enabled!(target: "dom_probe", tracing::Level::INFO)
+        {
+            let mut n = parent;
+            let mut in_tpl = false;
+            while let Some(p) = self.nodes[n as usize].parent {
+                if self.nodes[p as usize].tag == "template" {
+                    in_tpl = true;
+                    break;
+                }
+                n = p;
+            }
+            tracing::info!(
+                target: "dom_probe",
+                site = "lit.insert",
+                parent = %self.nodes[parent as usize].tag,
+                in_tpl,
+                txt = %self.nodes[child as usize].text.chars().take(40).collect::<String>()
+            );
+        }
         self.mark_dirty_at(parent);
         let (prev, next) = {
             let kids = &self.nodes[parent as usize].children;
@@ -3145,6 +3227,34 @@ impl Dom {
         for &k in &kids {
             self.nodes[k as usize].parent = Some(parent);
             self.set_attached(k, a);
+        }
+        // §lit — même repère que `insert_before` : annotations
+        // `[[X]]` posées hors `template.content` (chemin fragment
+        // = clone/stamp — le couloir suspect des littéraux).
+        if tracing::enabled!(target: "dom_probe", tracing::Level::INFO) {
+            for &k in &kids {
+                if self.nodes[k as usize].kind == NodeKind::Text
+                    && self.nodes[k as usize].text.contains("[[")
+                {
+                    let mut n = parent;
+                    let mut in_tpl = false;
+                    while let Some(p) = self.nodes[n as usize].parent {
+                        if self.nodes[p as usize].tag == "template" {
+                            in_tpl = true;
+                            break;
+                        }
+                        n = p;
+                    }
+                    tracing::info!(
+                        target: "dom_probe",
+                        site = "lit.insert",
+                        parent = %self.nodes[parent as usize].tag,
+                        frag = true,
+                        in_tpl,
+                        txt = %self.nodes[k as usize].text.chars().take(40).collect::<String>()
+                    );
+                }
+            }
         }
         self.nodes[parent as usize]
             .children

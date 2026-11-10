@@ -1189,6 +1189,15 @@ fn dom_nav_set(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
         }
         "innerHTML" => {
             let s = e.to_js_string(v)?;
+            // §lit — voie accesseur générique `innerHTML=` :
+            // annotation `[[X]]` brute écrite + appelant JS.
+            if s.contains("[[") && tracing::enabled!(target: "dom_probe", tracing::Level::INFO) {
+                let fn_src = e.stack_top_fn_src(200);
+                let ptag = dom.borrow().nodes[node as usize].tag.clone();
+                tracing::info!(target: "dom_probe",
+                    site = "lit.caller", op = "innerHTML=/acc",
+                    parent = %ptag, fn_src = %fn_src);
+            }
             let epoch = dom.borrow().nodes.get(node as usize).map_or(0, |n| n.epoch);
             let host = NodeHost {
                 dom,
@@ -1732,6 +1741,21 @@ impl NodeHost {
             if let Some(n) = node_for_in(e, a.clone(), &self.dom)
                 .or_else(|| adopt_into(e, a.clone(), &self.dom, &self.cache))
             {
+                // §lit — un nœud texte `[[X]]` existant passé à
+                // `append`/`prepend`/`before`/`after`/`replaceWith`
+                // (branche non-string de norm_children — la
+                // chaîne est sondée plus bas).
+                let lit = {
+                    let d = self.dom.borrow();
+                    d.nodes[n as usize].kind == crate::dom::NodeKind::Text
+                        && d.nodes[n as usize].text.contains("[[")
+                };
+                if lit && tracing::enabled!(target: "dom_probe", tracing::Level::INFO) {
+                    let fn_src = e.stack_top_fn_src(200);
+                    tracing::info!(target: "dom_probe",
+                        site = "lit.caller", op = "norm_children/node",
+                        fn_src = %fn_src);
+                }
                 out.push(n);
             } else if node_for(e, a.clone()).is_some() {
                 // Nœud d'une autre arène non adoptable (id invalide)
@@ -1739,6 +1763,17 @@ impl NodeHost {
                 return Err(e.type_error("node is from a different document"));
             } else {
                 let s = e.to_js_string(a.clone())?;
+                // §lit — repère : une chaîne `[[X]]` (annotation
+                // kevlar non résolue) passée en enfant — nomme la
+                // fonction JS qui fournit le littéral brut.
+                if s.contains("[[") && tracing::enabled!(target: "dom_probe", tracing::Level::INFO)
+                {
+                    let fn_src = e.stack_top_fn_src(200);
+                    tracing::info!(target: "dom_probe",
+                        site = "lit.caller", op = "norm_children",
+                        txt = %s.chars().take(48).collect::<String>(),
+                        fn_src = %fn_src);
+                }
                 out.push(self.dom.borrow_mut().create_text(&s));
             }
         }
@@ -1803,6 +1838,13 @@ impl NodeHost {
         pos: &str,
         s: &str,
     ) -> JsResult<()> {
+        if s.contains("[[") && tracing::enabled!(target: "dom_probe", tracing::Level::INFO) {
+            let fn_src = e.stack_top_fn_src(200);
+            let ptag = self.dom.borrow().nodes[node as usize].tag.clone();
+            tracing::info!(target: "dom_probe",
+                site = "lit.caller", op = "insertAdjacentText",
+                parent = %ptag, fn_src = %fn_src);
+        }
         let t = self.dom.borrow_mut().create_text(s);
         self.insert_at_position(e, node, pos, t)
     }
@@ -1839,6 +1881,20 @@ impl NodeHost {
         // Position ASCII case-insensitive (spec — voir
         // `insert_adjacent`).
         let pos = pos.to_ascii_lowercase();
+        // §lit — `insertAdjacentText/Element` d'un texte `[[X]]` —
+        // nomme la fonction JS (rail commun aux 4 positions).
+        {
+            let d = self.dom.borrow();
+            if d.nodes[child as usize].kind == crate::dom::NodeKind::Text
+                && d.nodes[child as usize].text.contains("[[")
+                && tracing::enabled!(target: "dom_probe", tracing::Level::INFO)
+            {
+                let fn_src = e.stack_top_fn_src(200);
+                tracing::info!(target: "dom_probe",
+                    site = "lit.caller", op = "insertAdjacent",
+                    pos = %pos, fn_src = %fn_src);
+            }
+        }
         match pos.as_str() {
             "beforebegin" => {
                 if let Some(p) = dom_parent(&self.dom, node) {
@@ -8662,11 +8718,33 @@ impl Host for NodeHost {
         match key {
             "innerHTML" => {
                 let html = e.to_js_string(v)?;
+                // §lit — repère : `innerHTML=` écrit des
+                // annotations `[[X]]` brutes — nomme la fonction
+                // JS qui fournit le HTML non résolu.
+                if html.contains("[[")
+                    && tracing::enabled!(target: "dom_probe", tracing::Level::INFO)
+                {
+                    let fn_src = e.stack_top_fn_src(200);
+                    let ptag = self.dom.borrow().nodes[node as usize].tag.clone();
+                    tracing::info!(target: "dom_probe",
+                        site = "lit.caller", op = "innerHTML=",
+                        parent = %ptag, fn_src = %fn_src);
+                }
                 self.set_inner_html(node, &html);
                 Ok(true)
             }
             "textContent" | "innerText" => {
                 let s = e.to_js_string(v)?;
+                // §lit — `textContent=`/`innerText=` écrit une
+                // annotation `[[X]]` brute (binding non résolu).
+                if s.contains("[[") && tracing::enabled!(target: "dom_probe", tracing::Level::INFO)
+                {
+                    let fn_src = e.stack_top_fn_src(200);
+                    let ptag = self.dom.borrow().nodes[node as usize].tag.clone();
+                    tracing::info!(target: "dom_probe",
+                        site = "lit.caller", op = "textContent=",
+                        parent = %ptag, fn_src = %fn_src);
+                }
                 let mut d = self.dom.borrow_mut();
                 let t = d.create_text(&s);
                 d.replace_children(node, &[t]);
@@ -8954,6 +9032,22 @@ impl Host for NodeHost {
                         // walks DFS postérieures boucleraient.
                         if self.dom.borrow().is_ancestor_or_self(node, child) {
                             return Err(e.type_error("HierarchyRequestError: ancestor"));
+                        }
+                        // §lit — qui insère un texte `[[X]]`
+                        // (annotation kevlar non résolue) ?
+                        // Le verbatim de la fonction appelante
+                        // nomme la passe (V0q, binding, stamp…).
+                        let lit = {
+                            let d = self.dom.borrow();
+                            d.nodes[child as usize].kind == crate::dom::NodeKind::Text
+                                && d.nodes[child as usize].text.contains("[[")
+                        };
+                        if lit && tracing::enabled!(target: "dom_probe", tracing::Level::INFO) {
+                            let fn_src = e.stack_top_fn_src(200);
+                            let ptag = self.dom.borrow().nodes[node as usize].tag.clone();
+                            tracing::info!(target: "dom_probe",
+                                site = "lit.caller", op = "appendChild",
+                                parent = %ptag, fn_src = %fn_src);
                         }
                         self.dom.borrow_mut().append(node, child);
                         Ok(Some(arg(args, 0)))
@@ -9406,6 +9500,20 @@ impl Host for NodeHost {
                             "insertBefore: reference not a child",
                         )));
                     }
+                    // §lit — même repère qu'`appendChild` :
+                    // nomme la fonction JS insérant un texte `[[X]]`.
+                    let lit = {
+                        let d = self.dom.borrow();
+                        d.nodes[c as usize].kind == crate::dom::NodeKind::Text
+                            && d.nodes[c as usize].text.contains("[[")
+                    };
+                    if lit && tracing::enabled!(target: "dom_probe", tracing::Level::INFO) {
+                        let fn_src = e.stack_top_fn_src(200);
+                        let ptag = self.dom.borrow().nodes[node as usize].tag.clone();
+                        tracing::info!(target: "dom_probe",
+                            site = "lit.caller", op = "insertBefore",
+                            parent = %ptag, fn_src = %fn_src);
+                    }
                     self.dom.borrow_mut().insert_before(node, c, ref_n);
                     Ok(Some(arg(args, 0)))
                 } else {
@@ -9439,6 +9547,35 @@ impl Host for NodeHost {
             }
             "cloneNode" => {
                 let deep = e.to_boolean(arg(args, 0));
+                // §lit — qui clone un sous-arbre porteur
+                // d'annotations `[[X]]` (stamp kevlar/Polymer de
+                // `template.content`) ? Le verbatim de l'appelant
+                // nomme la passe de stamp.
+                if deep && tracing::enabled!(target: "dom_probe", tracing::Level::INFO) {
+                    let has_lit = {
+                        let d = self.dom.borrow();
+                        let mut stack = vec![node];
+                        let mut found = false;
+                        while let Some(n) = stack.pop() {
+                            let nd = &d.nodes[n as usize];
+                            if nd.kind == crate::dom::NodeKind::Text && nd.text.contains("[[") {
+                                found = true;
+                                break;
+                            }
+                            for &k in &nd.children {
+                                stack.push(k);
+                            }
+                        }
+                        found
+                    };
+                    if has_lit {
+                        let fn_src = e.stack_top_fn_src(200);
+                        let stag = self.dom.borrow().nodes[node as usize].tag.clone();
+                        tracing::info!(target: "dom_probe",
+                            site = "lit.caller", op = "cloneNode",
+                            src = %stag, fn_src = %fn_src);
+                    }
+                }
                 let c = self.dom.borrow_mut().clone_node(node, deep);
                 // Clone CE : le clone (et ses descendants deep)
                 // matchant une définition s'upgrade — ctor
@@ -9715,6 +9852,17 @@ impl Host for NodeHost {
             "insertAdjacentHTML" => {
                 let pos = e.to_js_string(arg(args, 0))?;
                 let html = e.to_js_string(arg(args, 1))?;
+                // §lit — même repère qu'`innerHTML=` : HTML portant
+                // des annotations `[[X]]` brutes + appelant JS.
+                if html.contains("[[")
+                    && tracing::enabled!(target: "dom_probe", tracing::Level::INFO)
+                {
+                    let fn_src = e.stack_top_fn_src(200);
+                    let ptag = self.dom.borrow().nodes[node as usize].tag.clone();
+                    tracing::info!(target: "dom_probe",
+                        site = "lit.caller", op = "insertAdjacentHTML",
+                        parent = %ptag, pos = %pos, fn_src = %fn_src);
+                }
                 self.insert_adjacent(e, node, &pos, &html)?;
                 Ok(Some(Value::Undefined))
             }
@@ -17619,7 +17767,7 @@ fn tt_passthrough(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> 
 
 /// `trustedTypes.isHTML/isScript/isScriptURL(v)` — vrai pour
 /// `Str` : nos `createX` rendent des strings passthrough —
-/// équivalent TrustedType de ce moteur. `undefined`/`Null`/
+/// équivalent `TrustedType` de ce moteur. `undefined`/`Null`/
 /// Obj non-TT → `false` (kevlar re-wrappe via `createX`).
 fn tt_is_str(_e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
     Ok(Value::Bool(matches!(arg(args, 0), Value::Str(_))))

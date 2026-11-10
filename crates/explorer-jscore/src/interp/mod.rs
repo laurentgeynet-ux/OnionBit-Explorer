@@ -1696,6 +1696,13 @@ impl Engine {
         } else if let Some(p) = self.parked.get_mut(&ctx) {
             p.ready_state = v;
         }
+        // §lit — trace chaque étape du cycle (appels rares :
+        // ~6 par document) — « readyState figé loading » du vol
+        // youtube (`[[ ]]` non hydratés) nomme le bras fautif.
+        if tracing::enabled!(target: "dom_probe", tracing::Level::INFO) {
+            tracing::info!(target: "dom_probe",
+                site = "rs.set", ctx, cur = self.cur_ctx, state = %v);
+        }
         // `defer_msgs` : `"loading"` arme la retenue des
         // `postMessage` entrants (le document n'a pas fini son
         // parse — ses scripts/listeners courent encore) ;
