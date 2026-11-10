@@ -26,6 +26,7 @@ use std::collections::HashMap;
 use explorer_dom::NodeId;
 
 use crate::boxtree::{LayoutBox, Rect};
+use crate::transform::Affine;
 
 /// Une entrée `NodeId → rect` du dump.
 #[derive(Debug, Clone, Copy)]
@@ -66,14 +67,33 @@ pub fn geometry_dump(root: &LayoutBox) -> GeometryDump {
             order.push(node);
         }
     };
-    let mut stack = vec![root];
-    while let Some(b) = stack.pop() {
+    // R-223 — coordonnées post-transform : chaque boîte
+    // émet son rect composé par la chaîne des `Affine` de
+    // ses ancêtres + la sienne (`gBCR` inclut les
+    // transforms — les menus `vector-*` wikipedia vivaient
+    // dans un ancêtre translaté : dx +1032 px sans ça).
+    let mut stack = vec![(root, Affine::IDENTITY)];
+    while let Some((b, acc)) = stack.pop() {
+        let t_own = crate::transform::box_transform(b, &b.rect);
+        let emit_acc = t_own.map_or(acc, |t| acc.post_concat(t));
+        let xform = |r: Rect| {
+            if emit_acc == Affine::IDENTITY {
+                r
+            } else {
+                rect_of_points(&[
+                    emit_acc.apply(r.x, r.y),
+                    emit_acc.apply(r.x + r.width, r.y),
+                    emit_acc.apply(r.x, r.y + r.height),
+                    emit_acc.apply(r.x + r.width, r.y + r.height),
+                ])
+            }
+        };
         if let Some(n) = b.node {
             // R-213 — une boîte en-ligne porte le rect de sa
             // LIGNE allouée ; `gBCR` rend la border box de
             // contenu (~`font-size`, mesuré Chrome : `<a>`
             // sous `line-height:30` → h=17, pas 30).
-            add(n, inline_content_rect(b));
+            add(n, xform(inline_content_rect(b)));
         }
         for line in &b.lines {
             for frag in &line.fragments {
@@ -85,11 +105,11 @@ pub fn geometry_dump(root: &LayoutBox) -> GeometryDump {
                     } else {
                         inline_content_rect_st(frag.rect, &frag.style)
                     };
-                    add(n, r);
+                    add(n, xform(r));
                 }
             }
         }
-        stack.extend(b.children.iter().rev());
+        stack.extend(b.children.iter().rev().map(|c| (c, emit_acc)));
     }
     GeometryDump {
         width: root.rect.width,
@@ -139,6 +159,25 @@ fn inline_content_rect_st(rect: Rect, style: &explorer_css::ComputedStyle) -> Re
         y: rect.y + (rect.height - fs) / 2.0,
         width: rect.width,
         height: fs,
+    }
+}
+
+/// Bounding box des points transformés (`gBCR` = bbox du
+/// quadrilatère transformé, R-223).
+fn rect_of_points(pts: &[(f32, f32)]) -> Rect {
+    let (mut x0, mut y0, mut x1, mut y1) =
+        (f32::INFINITY, f32::INFINITY, f32::NEG_INFINITY, f32::NEG_INFINITY);
+    for &(x, y) in pts {
+        x0 = x0.min(x);
+        y0 = y0.min(y);
+        x1 = x1.max(x);
+        y1 = y1.max(y);
+    }
+    Rect {
+        x: x0,
+        y: y0,
+        width: (x1 - x0).max(0.0),
+        height: (y1 - y0).max(0.0),
     }
 }
 
