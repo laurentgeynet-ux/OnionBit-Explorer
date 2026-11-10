@@ -6,6 +6,7 @@ Le format suit [Keep a Changelog](https://keepachangelog.com/fr/1.1.0/)
 et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
+- **Insets logiques pour `position:absolute` + `anchor()` logique** (`explorer-layout`) : `inset-inline-start`/`end` et `inset-block-start`/`end` mappés LTR sur `left`/`right`/`top`/`bottom` dans `abs_geometry` et dans la passe ancre — physique prioritaire ; `writing-mode` vertical/RTL = résidu. Verrous : `insets_logiques_absolus`, `anchor_inset_logique`.
 - **R-252 (suite) — `MaskedFill` multi-couches** (`explorer-render`) : une feuille (`background-color` seul) avec >1 couche `mask-image` bascule en bracket `PushMask`+`MaskedFill`+`PopMask` — l'union des couches s'applique au remplissage sans offscreen superflu.
 - **R-254 (suite) — `justify-self`/`align-self:anchor-center`** (`explorer-layout`) : centre de la boîte ancrée calé sur le centre de l'ancre par axe, compose avec insets/`position-area`. Verrou : `anchor_self_center`.
 - **R-254 (suite) — `position-try-order`** (`explorer-layout`) : `most-width`/`most-inline-size` restreignent au flip horizontal, `most-height`/`most-block-size` au vertical ; `normal`/`most-size` = les deux. Verrou : `anchor_position_try_order`.
