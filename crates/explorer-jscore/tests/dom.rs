@@ -7540,3 +7540,43 @@ fn html_insertion_methods_lot3b() {
         "true/true/true/true/function"
     );
 }
+
+// ===== Pareto `api` lot 4 — reflets `aria*Elements`/`aria*Element`
+// (ARIAMixin §6) : attribut idref(s) → élément(s) résolu(s)
+// `by_id` ; setter = ids sérialisés (approximation — les
+// références explicites de la spec ne sont pas conservées).
+
+/// `ariaLabelledByElements`/`ariaControlsElements` rendent un
+/// tableau ordonné d'éléments (ids morts filtrés) ;
+/// `ariaActiveDescendantElement`/`ariaErrorMessageElement` un
+/// élément ou `null` ; setter écrit les `id`.
+#[test]
+fn aria_elements_reflections() {
+    assert_eq!(
+        ev_in(
+            "<html><body><div id=t aria-labelledby='a b ghost'></div>\
+             <span id=a></span><span id=b></span></body></html>",
+            "var t=document.getElementById('t');\
+             var r=t.ariaLabelledByElements;\
+             r.length+'/'+r[0].id+'/'+r[1].id+'|'+\
+             (t.ariaActiveDescendantElement===null)+'|'+\
+             ('ariaOwnsElements' in t)+'/'+typeof t.ariaControlsElements",
+        ),
+        "2/a/b|true|true/object"
+    );
+    // Multi : `aria-controls` résolu dans l'ordre + setter.
+    assert_eq!(
+        ev_in(
+            "<html><body><div id=t aria-controls='x'></div>\
+             <b id=x></b><b id=y></b><div id=d></div></body></html>",
+            "var t=document.getElementById('t');\
+             t.ariaDescribedByElements=[document.getElementById('x'),document.getElementById('y')];\
+             t.ariaActiveDescendantElement=document.getElementById('y');\
+             document.getElementById('d').ariaErrorMessageElement=null;\
+             t.getAttribute('aria-controls')+'|'+t.getAttribute('aria-describedby')+'|'+\
+             t.getAttribute('aria-activedescendant')+'|'+\
+             document.getElementById('d').hasAttribute('aria-errormessage')",
+        ),
+        "x|x y|y|false"
+    );
+}

@@ -6891,6 +6891,35 @@ fn aria_attr_name(key: &str) -> Option<String> {
     }
 }
 
+/// Reflets `aria*Elements`/`aria*Element` (ARIAMixin §6,
+/// Pareto `api` lot 4) — `(prop JS, attribut, multi)`.
+/// `multi` = `FrozenArray<Element>` (le moteur rend un
+/// tableau snapshot — la fraîcheur n'est pas sondable en
+/// pratique, borne documentée) ; `false` = `Element?`.
+/// Le setter écrit les `id` des éléments passés dans
+/// l'attribut (approximation idrefs — la spec conserve
+/// les références explicites ; un élément sans `id`
+/// disparaît de la valeur écrite, déviation bornée).
+const ARIA_ELEMENTS_PROPS: &[(&str, &str, bool)] = &[
+    ("ariaActiveDescendantElement", "aria-activedescendant", false),
+    ("ariaControlsElements", "aria-controls", true),
+    ("ariaDescribedByElements", "aria-describedby", true),
+    ("ariaDetailsElements", "aria-details", true),
+    ("ariaErrorMessageElement", "aria-errormessage", false),
+    ("ariaFlowToElements", "aria-flowto", true),
+    ("ariaLabelledByElements", "aria-labelledby", true),
+    ("ariaOwnsElements", "aria-owns", true),
+];
+
+/// Prop JS → `(attribut, multi)` pour les reflets
+/// `aria*Elements`/`aria*Element` — `None` sinon.
+fn aria_elements_binding(key: &str) -> Option<(&'static str, bool)> {
+    ARIA_ELEMENTS_PROPS
+        .iter()
+        .find(|(k, _, _)| *k == key)
+        .map(|(_, a, m)| (*a, *m))
+}
+
 /// Noms `on*` reconnus comme handlers IDL (`GlobalEventHandlers`,
 /// pointer/touch/animation/transition). La table borne le sniff :
 /// `on` + nom inconnu reste `undefined` (spec), un nom connu
@@ -9107,6 +9136,33 @@ impl Host for NodeHost {
             let has = self.dom.borrow().has_attr(node, attr);
             return Ok(Some(Value::Bool(has)));
         }
+        // Reflets `aria*Elements`/`aria*Element` (ARIAMixin
+        // §6 — lot 4) : attribut idref(s) → éléments
+        // résolus `by_id` (ordre de la liste, ids morts
+        // filtrés — spec). Multi → tableau snapshot ;
+        // single → élément ou `null`.
+        if let Some((attr, multi)) = aria_elements_binding(key) {
+            let ids: Vec<String> = self
+                .dom
+                .borrow()
+                .attr(node, attr)
+                .map(|s| s.split_whitespace().map(str::to_string).collect())
+                .unwrap_or_default();
+            if multi {
+                let vals: Vec<Value> = ids
+                    .iter()
+                    .filter_map(|i| self.dom.borrow().by_id(i))
+                    .map(|n| node_value(e, &self.dom, &self.cache, n))
+                    .collect();
+                return Ok(Some(e.new_array(vals)));
+            }
+            return Ok(Some(
+                ids.first()
+                    .and_then(|i| self.dom.borrow().by_id(i))
+                    .map(|n| node_value(e, &self.dom, &self.cache, n))
+                    .unwrap_or(Value::Null),
+            ));
+        }
         // Réflexions `ARIAMixin` (Pareto `api` lot 3) —
         // `DOMString?` : attribut absent → `null` (spec).
         if let Some(attr) = aria_attr_name(key) {
@@ -9430,6 +9486,50 @@ impl Host for NodeHost {
                 if let Some(attr) = mapped {
                     let s = e.to_js_string(v)?;
                     self.dom.borrow_mut().set_attr(node, attr, &s);
+                    return Ok(true);
+                }
+                // Reflets `aria*Elements`/`aria*Element`
+                // (ARIAMixin §6) : écrire = sérialiser les
+                // `id` des éléments passés en attribut
+                // (approximation idrefs — les références
+                // explicites de la spec ne sont pas
+                // conservées ; élément sans `id` ignoré).
+                if let Some((attr, multi)) = aria_elements_binding(key) {
+                    if matches!(v, Value::Null) {
+                        self.dom.borrow_mut().remove_attr(node, attr);
+                        return Ok(true);
+                    }
+                    let mut ids: Vec<String> = Vec::new();
+                    let collect = |n: NodeId, ids: &mut Vec<String>| {
+                        if let Some(id) = self.dom.borrow().attr(n, "id") {
+                            let id = id.to_string();
+                            if !id.is_empty() {
+                                ids.push(id);
+                            }
+                        }
+                    };
+                    if multi {
+                        let elems = match v {
+                            Value::Obj(oid) => match e.heap.obj(oid).map(|o| &o.kind) {
+                                Some(ObjKind::Array(elems)) => elems.clone(),
+                                _ => Vec::new(),
+                            },
+                            _ => Vec::new(),
+                        };
+                        for ev in elems {
+                            if let Some(n) = node_for_in(e, ev, &self.dom) {
+                                collect(n, &mut ids);
+                            }
+                        }
+                    } else if let Some(n) = node_for_in(e, v, &self.dom) {
+                        collect(n, &mut ids);
+                    }
+                    let mut d = self.dom.borrow_mut();
+                    if ids.is_empty() {
+                        d.remove_attr(node, attr);
+                    } else {
+                        d.set_attr(node, attr, &ids.join(" "));
+                    }
                     return Ok(true);
                 }
                 // Réflexions `ARIAMixin` : `el.ariaLabel = "x"`
