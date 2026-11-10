@@ -3864,10 +3864,15 @@ de noms. Ordre fixe (priorité par site-impact mesuré) :
    `position-try*`, `anchor()` en `calc`/insets logiques.
 5. **`text-wrap`/`text-wrap-mode`/`text-wrap-style`** — livré (R-249) — `balance`
    (titres) : mesure de ligne + répartiteur.
-6. **`unicode-bidi`/`text-orientation`** — bidi explicite +
-   orientations verticales (text.rs déjà en place).
-7. **`gap`/`place-*`/`container-*`/`inset-area`** — props
-   conteneur (blind spot `affects`) : layout flex/grid dédié.
+6. **`unicode-bidi`/`text-orientation`** — vérifié 2026-11-10 :
+   `unicode-bidi` livré (R-176 — isolate/embed/override/
+   plaintext + UAX#9 §L2), `writing-mode` transposé (R-183).
+   Résidu : `text-orientation` au niveau glyphe (sideways/
+   upright dans les runs — hors MVP documenté transform.rs).
+7. **`gap`/`place-*`/`container-*`/`inset-area`** — vérifié
+   2026-11-10 : `gap` consommé flex+grid (`gap_px`), `place-*`
+   expansé (R-125), `@container` mesuré (R-190). Résidu :
+   `position-area`/`inset-area` (filet R-254).
 8. **`contain-intrinsic-*`/`content-visibility`** — livré (R-251) — tailles
    virtuelles hors-écran → layout.
 9. **At-rules** : `@starting-style` (transitions d'entrée),
