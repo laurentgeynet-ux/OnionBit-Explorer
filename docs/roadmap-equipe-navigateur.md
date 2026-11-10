@@ -7405,6 +7405,18 @@ incrément.
   (écart margin-collapse — premier lot
   géométrique nommé par mesure).
 
+- [x] **Étape 217. `ddmin.mjs` —
+  minimiseur différentiel** (sprint 3,
+  dernière brique du plan PIPE) : bissection
+  DOM/CSS vers repro minimal — blocs
+  top-level puis déclarations CSS dans les
+  `<style>` survivants, serveur HTTP local +
+  `shot --report` par candidat, prédicat
+  `--grep` sur le census. Scripts exclus
+  par défaut ; piège résolu : `spawnSync`
+  gèle l'event loop → spawn async.
+  Vérifié : 322 → 97 octets en 8 évals.
+
 - [ ] **Écarts terrain — vol humain
   22/10 (release `39ab821`, FFI)** :
   second run humain — trois constats
