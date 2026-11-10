@@ -775,3 +775,21 @@ fn anchor_positioning_repli_nom_inconnu() {
         m.style.get("top")
     );
 }
+
+/// `position-area` (R-254 suite) : grille 3×3 autour de
+/// l'ancre — `bottom` = sous l'ancre, `right` = à droite.
+#[test]
+fn anchor_position_area() {
+    let (dom, bx) = laid(
+        "<div id=a></div><div id=m></div><div id=n></div>",
+        "#a{position:absolute;left:100px;top:100px;width:40px;height:20px;anchor-name:--a}\
+         #m{position:absolute;position-anchor:--a;position-area:bottom;width:10px;height:8px}\
+         #n{position:absolute;position-anchor:--a;position-area:top right;width:10px;height:8px}",
+    );
+    let m = find(&bx, by_id(&dom, "m"));
+    let n = find(&bx, by_id(&dom, "n"));
+    // bottom : top = bas de l'ancre ; x aligné start (140).
+    assert_eq!((m.rect.x, m.rect.y), (100.0, 120.0), "area bottom");
+    // top right : au-dessus, bord gauche sur bord droit ancre.
+    assert_eq!((n.rect.x, n.rect.y), (140.0, 92.0), "area top right");
+}

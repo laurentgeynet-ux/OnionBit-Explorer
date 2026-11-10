@@ -515,8 +515,65 @@ fn fix_anchor_positioned(
             .map(str::trim)
             .filter(|v| !v.is_empty() && *v != "auto" && *v != "implicit")
             .map(|v| v.trim_start_matches("--").to_string());
+        // `position-area` (R-254 suite) : grille 3×3 autour de
+        // l'ancre — rang `top|bottom|center`, colonne
+        // `left|right|center` ; tokens logiques/`x-*`/`y-*`
+        // mappés LTR (approximation documentée), `span-*` →
+        // repli sur le côté de base. Axe absent = bord start
+        // de l'ancre.
+        let area = st
+            .get("position-area")
+            .map(str::trim)
+            .filter(|v| !v.is_empty() && *v != "none" && *v != "normal");
         let has = |p: &str| st.get(p).is_some_and(|v| v.contains("anchor("));
-        if has("left") || has("right") || has("top") || has("bottom") {
+        if let Some(av) = area {
+            if let Some(name) = hint.as_deref() {
+                if let Some((_, ar)) = anchors
+                    .iter()
+                    .rev()
+                    .find(|(n, _)| n.trim_start_matches("--") == name)
+                {
+                    let mut dx = 0.0;
+                    let mut dy = 0.0;
+                    let (w, h) = (bx.rect.width, bx.rect.height);
+                    for t in av.split_ascii_whitespace() {
+                        match t {
+                            "bottom" | "y-end" | "block-end" => {
+                                dy = ar.y + ar.height - bx.rect.y;
+                            }
+                            "top" | "y-start" | "block-start" => {
+                                dy = ar.y - h - bx.rect.y;
+                            }
+                            "right" | "x-end" | "inline-end" => {
+                                dx = ar.x + ar.width - bx.rect.x;
+                            }
+                            "left" | "x-start" | "inline-start" => {
+                                dx = ar.x - w - bx.rect.x;
+                            }
+                            "center" => {
+                                // `center` nu = les deux axes ;
+                                // `center` en paire vaut pour
+                                // l'axe non nommé — approximation :
+                                // appliqué aux deux.
+                                dx = ar.x + (ar.width - w) / 2.0 - bx.rect.x;
+                                dy = ar.y + (ar.height - h) / 2.0 - bx.rect.y;
+                            }
+                            _ => {}
+                        }
+                    }
+                    // Axe non couvert : aligner start-à-start.
+                    if dx == 0.0 {
+                        dx = ar.x - bx.rect.x;
+                    }
+                    if dy == 0.0 {
+                        dy = ar.y - bx.rect.y;
+                    }
+                    if dx != 0.0 || dy != 0.0 {
+                        crate::flex::translate_subtree(bx, dx, dy);
+                    }
+                }
+            }
+        } else if has("left") || has("right") || has("top") || has("bottom") {
             let cfs = font_size_px(st, fs, ctx);
             let mut dx = 0.0_f32;
             let mut dy = 0.0_f32;
