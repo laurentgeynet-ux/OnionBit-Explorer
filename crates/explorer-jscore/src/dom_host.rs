@@ -12293,7 +12293,25 @@ fn ce_call(e: &mut Engine, el: Value, cb_name: &str, args: &[Value]) -> JsResult
                                     .join(",")
                             })
                             .unwrap_or_else(|| "?".to_string());
-                        format!("cn={content} xc={xcontent} ni={ni} idx={idxs}")
+                        // Enfants réellement déposés sous le
+                        // CE (le fragment stampé inséré — ShadyDOM
+                        // les matérialise en light DOM) : si <
+                        // `cn`, le stamp a perdu des nœuds →
+                        // `iDo` hors bornes sur les derniers.
+                        let n_ch = cct_prop_len(e, &el, &["childNodes"]);
+                        let kids = (0..n_ch.parse::<usize>().unwrap_or(0).min(30))
+                            .map(|i| {
+                                e.get_prop_value(el.clone(), "childNodes")
+                                    .ok()
+                                    .and_then(|l| e.get_prop_value(l, &i.to_string()).ok())
+                                    .map(|k| cct_prop_get(e, &k, &["nodeName"]))
+                                    .unwrap_or_else(|| "?".to_string())
+                            })
+                            .collect::<Vec<_>>()
+                            .join(",");
+                        format!(
+                            "cn={content} xc={xcontent} ni={ni} idx={idxs} ch={n_ch} kids={kids}"
+                        )
                     })
                     .unwrap_or_else(|| "<no-template>".to_string());
                 let tpl = e
