@@ -1461,7 +1461,15 @@ fn parse_one_media(q: &str) -> MediaQuery {
             // lobste.rs `dark-normal`).
             let depth_end = find_matching_paren(rest);
             let inner = &inner[..depth_end.min(inner.len())];
-            let inner_trim = inner.trim_end_matches(')').trim();
+            // R-225 — exactement UNE paire externe :
+            // `trim_end_matches(')')` mangeait la `)` d'un
+            // `calc(…)` interne (`min-width:calc(640px -
+            // 1px)` → valeur tronquée → parse `None` → la
+            // condition ne matchait jamais).
+            let inner_trim = inner.trim();
+            let inner_trim = inner_trim
+                .strip_suffix(')')
+                .map_or(inner_trim, |s| s.trim_end());
             let negated = inner_trim
                 .get(..3)
                 .is_some_and(|w| w.eq_ignore_ascii_case("not"))

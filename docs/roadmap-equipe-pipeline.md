@@ -3817,6 +3817,7 @@ chez NAVIGATEUR — non recopiés ici.
 - [x] **R-220. `or` top-level media query (MQ4)** : `(a) or (b)` tombait `unknown` → règles appliquées à tort (MDN). `or_groups` par groupe AND ; `type_ok && (g0 ∨ gN…)`. Verrous : 2 tests dédiés.
 - [x] **R-221. `@counter-style <nom>`** : `css.at.unapplied` ×9 wikipedia — registre `StyleEngine`→`StyleMap`→`LayoutBox.counter`, `label` pour numeric/alphabetic/cyclic/fixed/symbolic. Verrou : test e2e (labels cycliques).
 - [x] **R-224. `width:100%` dans flex item shrink-wrap** : `%` nu → `None` en mesure intrinsèque (contenu), maths à % gardent `cb`. `vector-collapsible` wikipedia 1088→~297 ; verrou `r224_flex_pct`.
+- [x] **R-225. `calc()` en feature MQ** : `(min-width:calc(640px - 1px))` wikipedia — bloc masquage logo jamais appliqué (+118 header-start) ; double bug : extraction `)` de groupe qui mangeait celle de `calc()`. Évaluateur `mq_calc_len` borné. Verrou : test aux deux bords.
 ## Tâches continues
 
 - **Triage rendu** des échecs `site_smoke.ps1` : les écarts

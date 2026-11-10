@@ -47,3 +47,18 @@ fn or_semantique_ou() {
     let qs = queries_of("(min-width:5000px) or (max-width:200px)");
     assert!(!media_matches(&env, &qs), "or devrait être faux");
 }
+
+// R-225 — calc() dans les features MQ (wikipedia :
+// `min-width:calc(640px - 1px)` masque `.mw-logo-icon`).
+#[test]
+fn calc_dans_feature_mq() {
+    let qs = queries_of("screen and (min-width:calc(640px - 1px))");
+    let env = StyleEnv { width_px: 1366, height_px: 900, ..StyleEnv::default() };
+    assert!(media_matches(&env, &qs), "calc(640px-1px)=639 < 1366 doit matcher");
+    let env = StyleEnv { width_px: 500, height_px: 900, ..StyleEnv::default() };
+    assert!(!media_matches(&env, &qs), "500 < 639 ne doit pas matcher");
+    let qs = queries_of("(max-width:calc(2 * 300px + (40px / 2)))");
+    let env = StyleEnv { width_px: 600, height_px: 900, ..StyleEnv::default() };
+    assert!(media_matches(&env, &qs), "620 = 2*300+20 doit matcher");
+}
+

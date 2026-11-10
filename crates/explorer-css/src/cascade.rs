@@ -98,6 +98,114 @@ pub fn media_matches(env: &StyleEnv, queries: &[MediaQuery]) -> bool {
     queries.iter().any(|q| query_matches(env, q))
 }
 
+/// `calc()` dans une valeur de feature MQ (R-225) —
+/// `calc(640px - 1px)` → 639. Grammaire bornée : `+−` au
+/// sommet, `*/` prioritaires, parenthèses, feuilles
+/// `<nombre><unité>` (px/em/rem/vw/vh/vmin/vmax comme
+/// `px()` ci-dessus ; `%` → fraction de la base pertinente
+/// non portée → `None`, approximation documentée — les
+/// features de taille en % sont rares).
+fn mq_calc_len(v: &str, env: &StyleEnv) -> Option<f64> {
+    let inner = v
+        .trim()
+        .strip_prefix("calc(")
+        .and_then(|s| s.strip_suffix(')'))?;
+    // Tokens : parenthèses, ops, atomes (`640px`, `1.5`,
+    // `-` n'est jamais signe — calc exige des espaces autour
+    // des `+`/`-` (spéc) ; un `-` collé invalide l'atome.
+    let mut toks: Vec<String> = Vec::new();
+    let mut cur = String::new();
+    for c in inner.trim().chars() {
+        match c {
+            ' ' | '\t' => {
+                if !cur.is_empty() {
+                    toks.push(std::mem::take(&mut cur));
+                }
+            }
+            '(' | ')' | '+' | '-' | '*' | '/' => {
+                if !cur.is_empty() {
+                    toks.push(std::mem::take(&mut cur));
+                }
+                toks.push(c.to_string());
+            }
+            _ => cur.push(c),
+        }
+    }
+    if !cur.is_empty() {
+        toks.push(cur);
+    }
+    if toks.is_empty() {
+        return None;
+    }
+    let mut i = 0;
+    let v = mq_calc_expr(&toks, &mut i, env)?;
+    (i == toks.len()).then_some(v)
+}
+
+/// Feuille `calc` MQ : `<nombre><unité>` → px (mêmes
+/// unités que `px()` : em/rem → `font_size_base`,
+/// vw/vh/vmin/vmax → viewport).
+fn mq_calc_leaf(t: &str, env: &StyleEnv) -> Option<f64> {
+    let (num, mul) = if let Some(s) = t.strip_suffix("rem") {
+        (s, f64::from(env.font_size_base))
+    } else if let Some(s) = t.strip_suffix("em") {
+        (s, f64::from(env.font_size_base))
+    } else if let Some(s) = t.strip_suffix("vmin") {
+        (s, f64::from(env.width_px.min(env.height_px)) / 100.0)
+    } else if let Some(s) = t.strip_suffix("vmax") {
+        (s, f64::from(env.width_px.max(env.height_px)) / 100.0)
+    } else if let Some(s) = t.strip_suffix("vw") {
+        (s, f64::from(env.width_px) / 100.0)
+    } else if let Some(s) = t.strip_suffix("vh") {
+        (s, f64::from(env.height_px) / 100.0)
+    } else if let Some(s) = t.strip_suffix("px") {
+        (s, 1.0)
+    } else {
+        (t, 1.0)
+    };
+    num.trim().parse::<f64>().ok().map(|n| n * mul)
+}
+
+fn mq_calc_factor(t: &[String], i: &mut usize, env: &StyleEnv) -> Option<f64> {
+    match t.get(*i)?.as_str() {
+        "(" => {
+            *i += 1;
+            let v = mq_calc_expr(t, i, env)?;
+            if t.get(*i)? != ")" {
+                return None;
+            }
+            *i += 1;
+            Some(v)
+        }
+        t => {
+            *i += 1;
+            mq_calc_leaf(t, env)
+        }
+    }
+}
+
+fn mq_calc_term(t: &[String], i: &mut usize, env: &StyleEnv) -> Option<f64> {
+    let mut v = mq_calc_factor(t, i, env)?;
+    while t.get(*i).is_some_and(|s| s == "*" || s == "/") {
+        let op = t[*i].clone();
+        *i += 1;
+        let rhs = mq_calc_factor(t, i, env)?;
+        v = if op == "*" { v * rhs } else { v / rhs };
+    }
+    Some(v)
+}
+
+fn mq_calc_expr(t: &[String], i: &mut usize, env: &StyleEnv) -> Option<f64> {
+    let mut v = mq_calc_term(t, i, env)?;
+    while t.get(*i).is_some_and(|s| s == "+" || s == "-") {
+        let op = t[*i].clone();
+        *i += 1;
+        let rhs = mq_calc_term(t, i, env)?;
+        v = if op == "+" { v + rhs } else { v - rhs };
+    }
+    Some(v)
+}
+
 fn query_matches(env: &StyleEnv, q: &MediaQuery) -> bool {
     // Forme non reconnue → vrai (tolérance documentée au parser).
     let mut ok = q.unknown;
@@ -448,6 +556,15 @@ fn condition_matches(env: &StyleEnv, name: &str, value: &str) -> bool {
     }
     let px = || -> Option<f64> {
         let v = value.trim();
+        // R-225 — `calc()` dans les features de taille :
+        // `@media (min-width:calc(640px - 1px))` wikipedia —
+        // sans lui le bloc entier (`.mw-logo-icon{
+        // display:none}` + `container{max-width:120px}`)
+        // ne s'appliquait jamais → icône +118 px et menus
+        // abs décalés en cascade.
+        if v.starts_with("calc(") {
+            return mq_calc_len(v, env);
+        }
         // Ordre : `rem` avant `em`, `vmin`/`vmax` avant
         // `vw`/`vh` (suffixes partagés). R-42 : les unités
         // viewport sont légales dans les features de taille
