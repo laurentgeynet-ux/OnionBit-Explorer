@@ -44,8 +44,10 @@ fn accent_color_reconnu() {
 
 #[test]
 fn batch_dormant_props_reconnues() {
+    // R-249 : `text-wrap` est sorti du batch dormant — devenu
+    // shorthand consommé (→ `text-wrap-mode`/`text-wrap-style` →
+    // `white-space`), couvert par `text_wrap.rs`.
     for css in [
-        "input { text-wrap: balance }",
         "input { overflow-anchor: none }",
         "input { overscroll-behavior: contain }",
         "input { print-color-adjust: exact }",
@@ -54,7 +56,7 @@ fn batch_dormant_props_reconnues() {
         "input { contain-intrinsic-size: 100px }",
     ] {
         let st = style_of(css);
-        let has = ["text-wrap","overflow-anchor","overscroll-behavior",
+        let has = ["overflow-anchor","overscroll-behavior",
                    "print-color-adjust","forced-color-adjust","field-sizing",
                    "contain-intrinsic-size"]
             .iter().any(|p| st.get(p).is_some());
