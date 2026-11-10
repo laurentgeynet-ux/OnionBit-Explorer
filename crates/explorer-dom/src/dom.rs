@@ -776,10 +776,27 @@ impl Dom {
     /// `reference` n'est pas un enfant de `parent`.
     pub fn insert_before(
         &mut self,
-        parent: NodeId,
+        mut parent: NodeId,
         child: NodeId,
         reference: Option<NodeId>,
     ) -> Result<()> {
+        // Spec HTML « template contents » : une insertion dans
+        // un élément `<template>` vise son fragment `content` —
+        // `template.childNodes` reste toujours vide (§B-126 :
+        // sans la redirection, un `appendChild` JS atterrissait
+        // en enfants light, invisibles de `.content` et des
+        // walks — le fragment stampé manquait les nœuds).
+        // Le fragment est matérialisé paresseusement : un
+        // `<template>` créé par `createElement` n'en a pas.
+        if matches!(self.data(parent)?, NodeData::Element(_))
+            && self.tag_name(parent)?.eq_ignore_ascii_case("template")
+        {
+            if self.template_contents(parent)?.is_none() {
+                let frag = self.create_fragment()?;
+                self.set_template_contents(parent, frag)?;
+            }
+            parent = self.template_contents(parent)?.unwrap_or(parent);
+        }
         match self.data(parent)? {
             NodeData::Document | NodeData::Element(_) => {}
             _ => {

@@ -838,3 +838,32 @@ fn by_id_ordre_apres_deplacement() {
     dom.insert_before(doc, apres, Some(avant)).expect("move");
     assert_eq!(dom.by_id("dup"), Some(apres));
 }
+
+/// §B-126 — `appendChild`/`insertBefore` sur `<template>`
+/// redirige vers `template_contents` (« appropriate place »,
+/// spec HTML) : `childNodes` du template reste vide, le
+/// fragment reçoit l'enfant, un fragment est matérialisé
+/// paresseusement pour un template créé hors parseur.
+#[test]
+fn append_dans_template_redirige_vers_content() {
+    let mut dom = Dom::new();
+    let doc = dom.document();
+    let tpl = el(&mut dom, "template");
+    dom.append_child(doc, tpl).expect("tpl");
+    // Template sans fragment (créé hors parseur) : matérialisé.
+    assert!(dom.template_contents(tpl).expect("tc").is_none());
+    let d = el(&mut dom, "div");
+    dom.append_child(tpl, d).expect("append dans tpl");
+    let frag = dom
+        .template_contents(tpl)
+        .expect("tc")
+        .expect("fragment matérialisé");
+    // `template.childNodes` vide (spec) ; le fragment le porte.
+    assert_eq!(dom.children(tpl).expect("kids tpl"), vec![]);
+    assert_eq!(dom.children(frag).expect("kids frag"), vec![d]);
+    assert_eq!(dom.parent(d).expect("parent"), Some(frag));
+    // `insertBefore` dans le content avec référence interne.
+    let e2 = el(&mut dom, "span");
+    dom.insert_before(tpl, e2, Some(d)).expect("insert avant d");
+    assert_eq!(dom.children(frag).expect("kids frag"), vec![e2, d]);
+}
