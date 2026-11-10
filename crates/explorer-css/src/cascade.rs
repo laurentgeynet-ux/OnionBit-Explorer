@@ -1017,7 +1017,10 @@ impl ComputedStyle {
     /// si absente ou non-longueur (`auto`, `medium`…).
     #[must_use]
     pub fn length(&self, name: &str) -> Option<Length> {
-        self.get(name).and_then(parse_length)
+        let raw = self.get(name)?;
+        let out = parse_length(raw);
+        census_unresolved(name, raw, out.is_none());
+        out
     }
 
     /// Valeur typée `Color` — `currentcolor` est résolu via la
@@ -1031,13 +1034,23 @@ impl ComputedStyle {
                 .and_then(parse_color)
                 .or(Some(Color::BLACK));
         }
-        parse_color(raw)
+        let out = parse_color(raw);
+        if out.is_none() {
+            // R-209 — une couleur qui ne s'analyse pas est
+            // toujours un manque réel (pas de mot-clé légal
+            // non couleur dans ce slot).
+            explorer_common::census::bump(&format!("css.value.unresolved.{name}"));
+        }
+        out
     }
 
     /// Valeur typée `f64` (`z-index`, `opacity`…).
     #[must_use]
     pub fn number(&self, name: &str) -> Option<f64> {
-        self.get(name)?.trim().parse().ok()
+        let raw = self.get(name)?;
+        let out = raw.trim().parse().ok();
+        census_unresolved(name, raw, out.is_none());
+        out
     }
 
     /// Pose `name = value` — réservé aux surcharges
@@ -3921,6 +3934,29 @@ const INHERITED_PROPS: &[&str] = &[
     "widows",
     "word-spacing",
 ];
+
+/// R-209 — une valeur **déclarée** qui échoue à la lecture
+/// typée (`length`/`number`) est comptée `css.value.unresolved`
+/// — le blind spot restant après la validation syntaxique
+/// (`width: 200` part plus tôt ; ici : `calc` mal formé,
+/// décimale virgule `0,5em`, fonction inconnue…).
+///
+/// Filtre anti-bruit : seules les valeurs à chiffres/unités/
+/// parenthèses comptent — les ident-keyword (`auto`,
+/// `normal`, `none`) échouent aussi à `parse_length` mais
+/// sont des valeurs **légales** que le consommateur gère à
+/// côté ; les ignorer évite un Pareto de faux positifs.
+fn census_unresolved(name: &str, raw: &str, failed: bool) {
+    if !failed {
+        return;
+    }
+    let numeric = raw
+        .chars()
+        .any(|c| c.is_ascii_digit() || c == '(' || c == '%');
+    if numeric {
+        explorer_common::census::bump(&format!("css.value.unresolved.{name}"));
+    }
+}
 
 /// R-207 — clé census d'une déclaration auteur : nom
 /// minuscule, custom properties collapsées en `--custom`

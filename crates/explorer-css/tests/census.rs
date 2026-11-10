@@ -114,6 +114,42 @@ fn valeur_invalide_dropped_et_mq_unknown() {
 }
 
 #[test]
+fn valeur_illisible_au_point_dusage() {
+    let _g = arm();
+    let mut dom = Dom::new();
+    let doc = dom.document();
+    let div = dom.create_element("div").unwrap();
+    dom.set_attribute(
+        div,
+        "style",
+        "letter-spacing: 0,5em; opacity: abc; z-index: auto",
+    )
+    .unwrap();
+    dom.append_child(doc, div).unwrap();
+    let eng = StyleEngine::new();
+    let style = eng.compute(&dom, div, &StyleEnv::default());
+    // Lecture typée au point d'usage — le funnel couvre tous
+    // les consommateurs layout/render.
+    let _ = style.length("letter-spacing");
+    let _ = style.number("opacity");
+    let _ = style.number("z-index");
+    let s = census::snapshot();
+    // `0,5em` (décimale virgule) et `abc` échouent à la lecture ;
+    // `auto` est un mot-clé légal — filtré, jamais compté.
+    assert!(
+        s.get("css.value.unresolved.letter-spacing")
+            .copied()
+            .unwrap_or(0)
+            >= 1,
+        "clés: {s:?}"
+    );
+    assert!(s
+        .keys()
+        .all(|k| !k.starts_with("css.value.unresolved.z-index")));
+    disarm();
+}
+
+#[test]
 fn style_inline_compte_aussi() {
     let _g = arm();
     let e = StyleEngine::new();

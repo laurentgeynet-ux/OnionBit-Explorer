@@ -3782,6 +3782,12 @@ chez NAVIGATEUR — non recopiés ici.
   la jointure `(tag,id,cls)` ↔ `ref.json` relèvent de NAV —
   le domaine rend la donnée, pas le transport. Verrous :
   2 tests `geometry` ; bonus clippy/rustdoc du crate soldés.
+- [x] **R-209. Census valeurs illisibles au point d’usage** :
+  le blind spot restant — `ComputedStyle::length`/`color`/`number`
+  comptent `css.value.unresolved.<name>` sur valeur déclarée
+  non lisible, filtre anti-bruit ident-keyword (`auto`&co
+  exclus). Funnel unique, zéro touche aux call sites layout.
+  Verrou : 6 tests census verts.
 ## Tâches continues
 
 - **Triage rendu** des échecs `site_smoke.ps1` : les écarts
