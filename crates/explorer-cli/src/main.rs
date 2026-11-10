@@ -51,7 +51,8 @@ fn main() -> ExitCode {
         [_, cmd, url] if cmd == "dom" => dom_live(url),
         [_, cmd, url] if cmd == "mem" => mem_report(url),
         [_, cmd, url, dir] if cmd == "save" => save_fixture(url, dir),
-        [_, cmd, file] if cmd == "eval" => eval_js(file),
+        [_, cmd, file] if cmd == "eval" => eval_js(file, false),
+        [_, cmd, file] if cmd == "api" => eval_js(file, true),
         [_, cmd] if cmd == "props" => check_names("prop"),
         [_, cmd, kind] if cmd == "check" => check_names(kind),
         [_, cmd, url, out] if cmd == "download" => download(url, out),
@@ -70,6 +71,7 @@ fn main() -> ExitCode {
             eprintln!("        explorer-cli mem <url>");
             eprintln!("        explorer-cli save <url> <dossier>");
             eprintln!("        explorer-cli eval <fichier.js>");
+            eprintln!("        explorer-cli api <fichier.js>   (eval + surface navigateur installée)");
             eprintln!(
                 "        explorer-cli props            (noms de props sur stdin → `nom\\tok|miss`)"
             );
@@ -558,7 +560,12 @@ async fn save_fixture(url: &str, dir: &str) -> ExitCode {
 /// stderr. Brique du différentiel `scripts/js_diff.mjs`
 /// (confrontation à Node/V8 sur corpus). Bornes optionnelles :
 /// `EXPLORER_JS_OPS` (ops) — le défaut suit le moteur.
-fn eval_js(path: &str) -> ExitCode {
+/// `api <fichier.js>` : identique à `eval` mais avec la surface
+/// navigateur installée (`install_dom` — `document`,
+/// `navigator`, `fetch`, `MutationObserver`, etc.). Sondage de
+/// couverture `bcd.api.*` : les globals session sont testés en
+/// contexte réel, pas dans le moteur nu.
+fn eval_js(path: &str, with_dom: bool) -> ExitCode {
     let src = match std::fs::read_to_string(path) {
         Ok(s) => s,
         Err(e) => {
@@ -567,6 +574,12 @@ fn eval_js(path: &str) -> ExitCode {
         }
     };
     let mut e = explorer_jscore::Engine::new();
+    if with_dom {
+        let dom = std::rc::Rc::new(std::cell::RefCell::new(
+            explorer_jscore::Dom::from_html("<!doctype html><body></body>"),
+        ));
+        e.install_dom(&dom);
+    }
     if let Some(ops) = std::env::var("EXPLORER_JS_OPS")
         .ok()
         .and_then(|v| v.parse::<u64>().ok())

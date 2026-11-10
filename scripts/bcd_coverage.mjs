@@ -12,6 +12,8 @@
 //   selectors  bcd.css.selectors    → `explorer-cli check sel`
 //   at-rules   bcd.css['at-rules']  → `explorer-cli check at`
 //   builtins   bcd.javascript.builtins (prof. 2) → `eval` jscore
+//   api        bcd.api (interfaces + membres) → `api` jscore
+//              (moteur avec surface navigateur installée)
 //
 // Chaque ligne rapporte `x/y (z %)` avec son dénominateur —
 // règle ADR-0010 : standard-track livrées par ≥1 des 3 moteurs,
@@ -118,7 +120,7 @@ function report(label, entries, okSet, note) {
   }
 }
 
-const sections = only ? [only] : ['props', 'routed', 'sel', 'at', 'js'];
+const sections = only ? [only] : ['props', 'routed', 'sel', 'at', 'js', 'api'];
 
 for (const sec of sections) {
   if (sec === 'props') {
@@ -291,5 +293,52 @@ for (const sec of sections) {
     }
     report('js.builtins', tests.map(t => ({ name: t.name, engines: 3 })), okSet,
       `moteur nu — sous-features sondées comportementalement, exclues: ${excludedNames.join(', ')}`);
+  } else if (sec === 'api') {
+    // bcd.api.<Interface> → globalThis.Interface ; membres
+    // `Interface.m` → `Interface.m` (statique) ou
+    // `Interface.prototype.m`. Globals minuscules directs.
+    const tests = [];
+    const rel = c => {
+      if (!c || c.status?.deprecated || c.status?.standard_track === false) return 0;
+      return browsers.filter(br => {
+        const s = c.support?.[br];
+        const one = Array.isArray(s) ? s[0] : s;
+        return one && one.version_added !== false && !one.version_removed;
+      }).length;
+    };
+    for (const [a, nodeA] of Object.entries(bcd.api ?? {})) {
+      if (a === '__compat' || a.startsWith('_')) continue;
+      if (rel(nodeA.__compat) > 0) tests.push({ name: a, cand: [[a]] });
+      for (const [b, nodeB] of Object.entries(nodeA)) {
+        if (b === '__compat' || !nodeB?.__compat || rel(nodeB.__compat) === 0) continue;
+        const cand = b === a ? [[a]] : [[a, b], [a, 'prototype', b]];
+        tests.push({ name: `${a}.${b}`, cand });
+      }
+    }
+    const src = [
+      'function chk(p){var o=globalThis,i=0;',
+      'if(p.length===1)return typeof o[p[0]]!=="undefined";',
+      'while(i<p.length-1){if(o==null)return false;o=o[p[i]];i++}',
+      'try{return o!=null && p[i] in o}catch(e){return false}}',
+      'var T=' + JSON.stringify(tests.map(t => t.cand)) + ';',
+      'var N=' + JSON.stringify(tests.map(t => t.name)) + ';',
+      'for(var i=0;i<N.length;i++){var c=T[i],hit=false;',
+      'for(var j=0;j<c.length;j++){if(chk(c[j])){hit=true;break}}',
+      'console.log(N[i]+"\\t"+(hit?"ok":"miss"))}',
+    ].join('\n');
+    const tmp = join(tmpdir(), `bcdapi-${process.pid}.js`);
+    writeFileSync(tmp, src);
+    let okSet;
+    try {
+      const out = execFileSync(cli, ['api', tmp], {
+        encoding: 'utf8', timeout: 120_000, maxBuffer: 64 * 1024 * 1024,
+      });
+      okSet = new Set(out.split(/\r?\n/).filter(Boolean)
+        .filter(l => l.endsWith('\tok')).map(l => l.split('\t')[0]));
+    } finally {
+      rmSync(tmp, { force: true });
+    }
+    report('api', tests.map(t => ({ name: t.name, engines: 3 })), okSet,
+      'surface navigateur installée (install_dom) — présence seule');
   }
 }
