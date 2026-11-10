@@ -27,7 +27,7 @@ fn walk_x(
 }
 
 fn style_of(css: &str) -> explorer_css::ComputedStyle {
-    let dom = TreeBuilder::parse("<body><p class=x>ok</p></body>");
+    let dom = TreeBuilder::parse("<body><input class=x></body>");
     let mut eng = StyleEngine::new();
     eng.add_css(css, Origin::Author);
     let sm = eng.compute_tree(&dom, dom.document(), &StyleEnv::default());
@@ -45,13 +45,13 @@ fn accent_color_reconnu() {
 #[test]
 fn batch_dormant_props_reconnues() {
     for css in [
-        "p { text-wrap: balance }",
-        "p { overflow-anchor: none }",
-        "p { overscroll-behavior: contain }",
-        "p { print-color-adjust: exact }",
-        "p { forced-color-adjust: none }",
-        "p { field-sizing: content }",
-        "p { contain-intrinsic-size: 100px }",
+        "input { text-wrap: balance }",
+        "input { overflow-anchor: none }",
+        "input { overscroll-behavior: contain }",
+        "input { print-color-adjust: exact }",
+        "input { forced-color-adjust: none }",
+        "input { field-sizing: content }",
+        "input { contain-intrinsic-size: 100px }",
     ] {
         let st = style_of(css);
         let has = ["text-wrap","overflow-anchor","overscroll-behavior",
