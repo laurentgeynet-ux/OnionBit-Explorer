@@ -1639,6 +1639,23 @@ impl Session {
                     }
                 }
             }
+            // JS-C471 — `complete`/`load` au premier point de
+            // synchro après `interactive`/`DOMContentLoaded` : sur
+            // un site au JS jamais idle (youtube), `sub_commit_head`
+            // ne rend pas la main et le tail qui porte la moitié
+            // basse ne court pas — `readyState` resterait
+            // « interactive » à vie et les listeners `load`
+            // pendraient (hydratation kevlar incomplète — `[[ ]]`
+            // résiduels). La garde `doc_load_epoch` rend l'appel
+            // idempotent : un commit normal est déjà passé par
+            // `fire_doc_complete` — no-op. `eng` direct : même voie
+            // que le rejeu ci-dessus.
+            if entry.doc_dcl_epoch == entry.nav_epoch && entry.doc_load_epoch != entry.nav_epoch {
+                entry.doc_load_epoch = entry.nav_epoch;
+                eng.set_ready_state(explorer_js::JS_CTX_TOP, "complete");
+                let _ = eng.dispatch_event_ctx(explorer_js::JS_CTX_TOP, "readystatechange", &[]);
+                let _ = eng.dispatch_event_ctx(explorer_js::JS_CTX_TOP, "load", &[]);
+            }
             let p = match eng.dispatch_event_props(ty, path, props) {
                 Ok(p) => p,
                 Err(e) => {
