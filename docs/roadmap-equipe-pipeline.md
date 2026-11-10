@@ -3826,6 +3826,9 @@ chez NAVIGATEUR — non recopiés ici.
 - [x] **R-242. `accent-color`/batch dormant** : accent consommé au paint contrôle coché + 10 props dormants reconnus. Verrous : 2 tests.
 - [x] **R-243. `SUPPORTED_PROPS` comblé — BCD prop 652/652 = 100 %** : 380 noms manquants ajoutés (dormants stockés, logiques/animations/border-image consommés via routage existant). Mesuré `check prop`.
 - [x] **R-244. `starting-style`/`position-try`/`view-transition`/`function` + restauration `font-palette-values`** — css.at **20/20 = 100 %** mesuré.
+- [x] **R-245. `check routed` + `prop_routed`** : plumbing livré — limite nommée (cascade stocke les inconnus → saturation). Prochain : `prop_affects` (delta layout) ou gate `decl_supported` à l’insert.
+- [x] **R-246. `check affects` + `prop_affects`** : delta box tree — vrai négatif dormants (`mask-*`/`anchor-*`/`xyz-bogus` miss), vrai positif consommables (`margin`/`all`/`block-size`/`display`). Aveugle aux props conteneur.
+- [x] **R-247. `font-feature-settings` → rustybuzz** : `FontRequest.feature_settings` parsé → `ot_features` — tnum/onum/nalt réels. `affects` aveugle au paint (prochaine jauge display-list).
 ## Tâches continues
 
 - **Triage rendu** des échecs `site_smoke.ps1` : les écarts

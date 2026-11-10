@@ -152,6 +152,7 @@ pub(crate) fn append_select_popup(
         caps: 0,
         kern_off: false,
         stretch: 100,
+        feature_settings: Vec::new(),
     };
     let data = fonts.font_data(&freq);
     let avail = (rect.width - 2.0 * PAD_X).max(0.0);

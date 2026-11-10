@@ -600,14 +600,87 @@ fn eval_js(path: &str) -> ExitCode {
 /// `prop_supported` / `selector_supported` /
 /// `at_rule_supported`. Brique de `scripts/bcd_coverage.mjs` :
 /// le script alimente les clés BCD et compte la couverture.
+/// R-246 — la prop change-t-elle la **geometrie/kind** de
+/// `.x` ? `x{name:v}` vs `x{}` — vrai pour `margin`/`all`/
+/// `block-size`, faux pour les noms stockés indifféremment
+/// (`xyz-bogus`, `mask-*` dormants). Valeurs de sonde par
+/// famille (longueur/couleur/mot-clé layout/keyword).
+fn prop_affects(name: &str) -> bool {
+    let dom = explorer_html::TreeBuilder::parse("<body><div><p class=x>ok</p></div></body>");
+    let root = {
+        let mut r = None;
+        walk_for(dom.document(), &dom, &mut r);
+        r.unwrap_or(dom.document())
+    };
+    fn walk_for(n: explorer_dom::NodeId, dom: &explorer_dom::Dom, out: &mut Option<explorer_dom::NodeId>) {
+        if dom.element(n).is_ok() && out.is_none() {
+            *out = Some(n);
+        }
+        if let Ok(ch) = dom.children(n) {
+            for c in ch {
+                walk_for(c, dom, out);
+            }
+        }
+    }
+    let sig = |css: &str| -> String {
+        let mut eng = explorer_css::StyleEngine::new();
+        eng.add_css(css, explorer_css::Origin::Author);
+        let sm = eng.compute_tree(&dom, root, &explorer_css::StyleEnv::default());
+        match explorer_layout::build_box_tree(&dom, root, &sm) {
+            Some(mut bx) => {
+                explorer_layout::layout_tree(
+                    &mut bx,
+                    800.0,
+                    &explorer_layout::BlockCtx::default(),
+                );
+                bx.dump(&dom)
+            }
+            None => String::new(),
+        }
+    };
+    let base = sig("p {}");
+    for v in [
+        "10px", "red", "block", "flex", "none", "nowrap", "column", "bold", "italic",
+        "absolute", "inherit", "unset", "initial",
+        // R-246 — axes d'écriture : `writing-mode`/`direction`/
+        // `text-orientation`/`unicode-bidi`/`dir`/`bdo`.
+        "vertical-rl", "vertical-lr", "sideways-rl", "rtl", "ltr", "mixed",
+    ] {
+        if sig(&format!("p {{ {name}: {v} }}")) != base {
+            return true;
+        }
+    }
+    // Contexte flex — les props flex-*/grid-*/gap n'ont
+    // d'effet que dans un conteneur dédié.
+    let base_f = sig("div { display: flex } p {}");
+    for v in ["row-reverse", "wrap", "10px", "flex-start", "column", "stretch"] {
+        if sig(&format!("div {{ display: flex }} p {{ {name}: {v} }}")) != base_f {
+            return true;
+        }
+    }
+    false
+}
+
 fn check_names(kind: &str) -> ExitCode {
     use std::io::BufRead;
-    let test: fn(&str) -> bool = match kind {
-        "prop" => explorer_css::prop_supported,
-        "sel" => explorer_css::selector_supported,
-        "at" => explorer_css::at_rule_supported,
+    let routed_dom;
+    let test: Box<dyn Fn(&str) -> bool> = match kind {
+        "prop" => Box::new(explorer_css::prop_supported),
+        "sel" => Box::new(explorer_css::selector_supported),
+        "at" => Box::new(explorer_css::at_rule_supported),
+        // R-245/246 — `routed` : la déclaration atteint-elle
+        // `ComputedStyle` (saturante tant que la cascade
+        // stocke les inconnus) ; `affects` : la géométrie
+        // change-t-elle (jauge non-saturante).
+        "routed" => {
+            routed_dom = explorer_html::TreeBuilder::parse(
+                "<body><p class=x>ok</p></body>",
+            );
+            Box::new(move |name| explorer_css::prop_routed(&routed_dom, name))
+        }
+        "affects" => Box::new(prop_affects),
         _ => {
-            eprintln!("check : kind inconnu {kind:?} — attendu prop|sel|at");
+            eprintln!("check : kind inconnu {kind:?} — attendu prop|sel|at|routed|affects");
             return ExitCode::FAILURE;
         }
     };

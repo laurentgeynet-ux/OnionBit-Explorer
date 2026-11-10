@@ -84,6 +84,9 @@ pub struct FontRequest {
     /// normal, 0 = normal aussi — variable fontes seules
     /// le consomment ; repli no-op documenté).
     pub stretch: u16,
+    /// `font-feature-settings` résolus (R-229/241) —
+    /// `(tag 4 car., valeur)` ex : `tnum`/`onum`/`lnum`/`frac`.
+    pub feature_settings: Vec<(String, u32)>,
 }
 
 /// Métriques verticales de la fonte à une taille donnée (px).
@@ -751,6 +754,26 @@ pub fn request_of_family(style: &explorer_css::ComputedStyle, default_family: &s
                 })
         })
         .unwrap_or(100);
+    // R-247 — `font-feature-settings` : `"tag" valeur` par
+    // paire (R-229/241 y ont mis les tags alternates/numeric
+    // — `nalt`/`tnum`/…). Tolérance : paire mal formée
+    // ignorée, jamais d'échec global.
+    let feature_settings = style
+        .get("font-feature-settings")
+        .map(|v| {
+            v.split(',')
+                .filter_map(|part| {
+                    let mut it = part.trim().split_whitespace();
+                    let tag = it.next()?.trim_matches('"');
+                    if tag.len() != 4 {
+                        return None;
+                    }
+                    let val = it.next().and_then(|x| x.parse::<u32>().ok()).unwrap_or(1);
+                    Some((tag.to_string(), val))
+                })
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
     FontRequest {
         families,
         weight,
@@ -758,6 +781,7 @@ pub fn request_of_family(style: &explorer_css::ComputedStyle, default_family: &s
         caps,
         kern_off,
         stretch,
+        feature_settings,
     }
 }
 
@@ -889,6 +913,18 @@ fn ot_features(req: &FontRequest) -> Vec<rustybuzz::Feature> {
     }
     if req.kern_off {
         feats.push(rustybuzz::Feature::new(Tag::from_bytes(b"kern"), 0, ..));
+    }
+    // R-247 — `font-feature-settings` : tags utilisateur
+    // appliqués après les features déduites (ils priment —
+    // css-fonts-4 §7.1 : le shorthand écrase les autres).
+    for (tag, val) in &req.feature_settings {
+        if tag.len() == 4 {
+            feats.push(rustybuzz::Feature::new(
+                Tag::from_bytes(tag.as_bytes().try_into().unwrap_or(b"    ")),
+                *val,
+                ..,
+            ));
+        }
     }
     feats
 }
@@ -1076,6 +1112,7 @@ mod tests {
                 caps: 0,
                 kern_off: false,
                 stretch: 100,
+                feature_settings: Vec::new(),
             }
         }
     }
@@ -1246,6 +1283,7 @@ mod tests {
                 caps: 0,
                 kern_off: false,
                 stretch: 100,
+                feature_settings: Vec::new(),
             };
             let run = cache
                 .shape(&src, &req, "ABC", 10.0, false, 0.0)

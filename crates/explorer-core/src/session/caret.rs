@@ -193,6 +193,7 @@ fn font_line_h(st: &explorer_css::ComputedStyle, fs: f32, fonts: &dyn FontSource
         caps: 0,
         kern_off: false,
         stretch: 100,
+        feature_settings: Vec::new(),
     };
     let data = fonts.font_data(&req)?;
     Some(font::metrics(&data, fs)?.line_height())
