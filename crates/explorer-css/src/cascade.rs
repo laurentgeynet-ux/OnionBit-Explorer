@@ -425,6 +425,7 @@ const SUPPORTED_PROPS: &[&str] = &[
     "font-style",
     "font-variant",
     "font-variant-alternates",
+    "font-variant-numeric",
     "font-feature-settings",
     "font-palette",
     "font-stretch",
@@ -4425,6 +4426,7 @@ const INHERITED_PROPS: &[&str] = &[
     "unicode-bidi",
     "font-variant",
     "font-variant-alternates",
+    "font-variant-numeric",
     "font-feature-settings",
     "font-palette",
     "font-stretch",
@@ -4721,6 +4723,19 @@ table {
 /// (un `light-dark` peut nicher dans une autre valeur), la
 /// virgule de tête sépare les deux branches ; un argument
 /// manquant conserve le texte source (dégradation).
+/// R-241 — `font-variant-numeric` : mots-clés → tags OT
+/// (css-fonts-4 §6.3).
+const FVN_TAGS: &[(&str, &str)] = &[
+    ("lining-nums", "lnum"),
+    ("oldstyle-nums", "onum"),
+    ("proportional-nums", "pnum"),
+    ("tabular-nums", "tnum"),
+    ("diagonal-fractions", "frac"),
+    ("stacked-fractions", "afrc"),
+    ("ordinal", "ordn"),
+    ("slashed-zero", "zero"),
+];
+
 impl StyleEngine {
     /// R-231 — `@custom-media` : chaque `MediaQuery` du lot
     /// dont l'unique condition est un `--nom` enregistré est
@@ -4771,6 +4786,26 @@ impl StyleEngine {
                     fp.base_palette.clone()
                 };
                 st.set("font-palette", &base);
+            }
+        }
+        // R-241 — `font-variant-numeric` : mots-clés → tags
+        // OT équivalents (spec css-fonts-4 §6.3) — concaténés
+        // aux `font-feature-settings` existants.
+        for st in map.values_mut() {
+            let Some(v) = st.get("font-variant-numeric") else {
+                continue;
+            };
+            let mut settings: Vec<String> = st
+                .get("font-feature-settings")
+                .map(|s| s.split(',').map(str::to_owned).collect())
+                .unwrap_or_default();
+            for kw in v.split_whitespace() {
+                if let Some(tag) = FVN_TAGS.iter().find(|(k, _)| *k == kw).map(|(_, t)| t) {
+                    settings.push(format!("\"{tag}\" 1"));
+                }
+            }
+            if !settings.is_empty() {
+                st.set("font-feature-settings", &settings.join(", "));
             }
         }
         if self.font_feature_values.is_empty() {
