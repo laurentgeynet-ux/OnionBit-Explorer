@@ -187,6 +187,22 @@ fn content_px_unclamped(
     let bound = |p: &str| -> Option<f32> {
         let v = st.get(p)?;
         if v.contains('%') {
+            // R-224 — un `%` NU sur `width` (`width:100%`)
+            // est indéfini en mesure intrinsèque, même avec
+            // base : sinon un bloc `width:100%` dans un
+            // flex item shrink-wrap s'étire au conteneur
+            // (`vector-collapsible` wikipedia 1088 vs 297 —
+            // ses menus abs `right:0` dérivaient dx +1032
+            // px). Le §9.9.3 vaut pour `min|max-width` et
+            // les maths à % (`min(300px,100%)`) — pas pour
+            // un `width:%` nu dont le parent se mesure.
+            let bare = v
+                .trim()
+                .strip_suffix('%')
+                .is_some_and(|n| n.trim().parse::<f32>().is_ok());
+            if bare {
+                return None;
+            }
             let c = cb?;
             return css_px(st, p, c, fs, ctx).map(|v| box_size_to_content(st, v, chassis));
         }

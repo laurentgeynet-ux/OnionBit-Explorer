@@ -3816,6 +3816,7 @@ chez NAVIGATEUR — non recopiés ici.
 - [x] **R-219. `light-dark()`/`var()` couleurs dans les shorthands** : `background:light-dark(...)` droppé sur example.com — `color_like` accepte les fonctions à résolution retardée (bg + border). Fond page restauré.
 - [x] **R-220. `or` top-level media query (MQ4)** : `(a) or (b)` tombait `unknown` → règles appliquées à tort (MDN). `or_groups` par groupe AND ; `type_ok && (g0 ∨ gN…)`. Verrous : 2 tests dédiés.
 - [x] **R-221. `@counter-style <nom>`** : `css.at.unapplied` ×9 wikipedia — registre `StyleEngine`→`StyleMap`→`LayoutBox.counter`, `label` pour numeric/alphabetic/cyclic/fixed/symbolic. Verrou : test e2e (labels cycliques).
+- [x] **R-224. `width:100%` dans flex item shrink-wrap** : `%` nu → `None` en mesure intrinsèque (contenu), maths à % gardent `cb`. `vector-collapsible` wikipedia 1088→~297 ; verrou `r224_flex_pct`.
 ## Tâches continues
 
 - **Triage rendu** des échecs `site_smoke.ps1` : les écarts

@@ -83,6 +83,7 @@ fn widest(b: &LayoutBox, acc: &mut Vec<LayoutBox>) {
         first_letter: None,
         quirks_mode: false,
         is_body: false,
+        counter: None,
         flow_mode: explorer_css::value::WritingMode::HorizontalTb,
     });
     for c in &b.children {
