@@ -938,6 +938,18 @@ fn affects_decl_verdict(decl: &str) -> Option<bool> {
     {
         return None;
     }
+    // Familles **temporelles** : `animation-*`/`transition-*`
+    // ne produisent de valeur calculée qu'avec une horloge +
+    // `@keyframes` — aucun oracle géométrique statique
+    // n'existe par construction (même classe que les
+    // initiales spec : hors dénominateur). La conformité se
+    // mesure sur les verrous session (R-255/256/257), pas ici.
+    if name.starts_with("animation-")
+        || name.starts_with("transition-")
+        || matches!(name, "animation" | "transition")
+    {
+        return None;
+    }
     Some(prop_affects_decl(decl))
 }
 
@@ -1599,5 +1611,30 @@ async fn fetch(src: &str) -> ExitCode {
             eprintln!("erreur : {e}");
             ExitCode::FAILURE
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    /// `affectsv` : les familles temporelles (`animation-*`/
+    /// `transition-*`) sont `na` — neutres par construction,
+    /// aucun oracle géométrique statique n'existe (verrous
+    /// session R-255/256/257 portent la conformité réelle).
+    #[test]
+    fn affectsv_familles_temporelles_neutres() {
+        for d in [
+            "animation-fill-mode:forwards",
+            "animation-play-state:paused",
+            "animation-timing-function:steps(4,end)",
+            "animation-composition:add",
+            "animation:spin 1s infinite",
+            "transition-property:opacity",
+            "transition-timing-function:steps(2)",
+            "transition:all .3s",
+        ] {
+            assert!(super::affects_decl_verdict(d).is_none(), "{d} doit être na");
+        }
+        // Garde-fou : une prop géométrique reste mesurée.
+        assert!(super::affects_decl_verdict("display:grid").is_some());
     }
 }
