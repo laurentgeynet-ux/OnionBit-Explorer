@@ -898,3 +898,18 @@ fn insets_logiques_absolus() {
     assert_eq!(n.rect.x, 70.0, "physique > logique");
     assert_eq!(n.rect.y, 60.0, "logique seul = résolu");
 }
+
+/// `anchor()` en inset **logique** (R-254 suite) :
+/// `inset-inline-start:anchor(left)` se comporte comme
+/// `left:anchor(left)` en LTR.
+#[test]
+fn anchor_inset_logique() {
+    let (dom, bx) = laid(
+        "<div id=a></div><div id=m></div>",
+        "#a{position:absolute;left:40px;top:50px;width:20px;height:10px;anchor-name:--a}\
+         #m{position:absolute;position-anchor:--a;inset-inline-start:anchor(right);inset-block-start:anchor(top);width:5px;height:5px}",
+    );
+    let m = find(&bx, by_id(&dom, "m"));
+    assert_eq!(m.rect.x, 60.0, "inline-start = left → bord droit");
+    assert_eq!(m.rect.y, 50.0, "block-start = top");
+}

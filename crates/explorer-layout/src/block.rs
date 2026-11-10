@@ -697,35 +697,46 @@ fn fix_anchor_positioned(
                     }
                 }
             }
-        } else if has("left") || has("right") || has("top") || has("bottom") {
+        } else if has("left")
+            || has("right")
+            || has("top")
+            || has("bottom")
+            || has("inset-inline-start")
+            || has("inset-inline-end")
+            || has("inset-block-start")
+            || has("inset-block-end")
+        {
             let cfs = font_size_px(st, fs, ctx);
             let mut dx = 0.0_f32;
             let mut dy = 0.0_f32;
+            // Physique prioritaire, logique en repli (LTR —
+            // même règle que `abs_geometry`) : `inset-inline-
+            // start`→left, `inset-block-start`→top…
+            let side_anchor =
+                |st: &ComputedStyle, phys: &str, log: &str, axis_x: bool| -> Option<f32> {
+                    let raw = st
+                        .get(phys)
+                        .or_else(|| st.get(log))
+                        .filter(|v| v.contains("anchor("))?;
+                    anchor_len(raw, axis_x, hint.as_deref(), anchors, cb_w, cfs, ctx)
+                };
             // `left: anchor(bord)` → margin-box gauche sur le
             // point ; `right: anchor(bord)` → margin-box droit.
-            if let Some(v) = st.get("left").filter(|v| v.contains("anchor(")) {
-                if let Some(p) = anchor_len(v, true, hint.as_deref(), anchors, cb_w, cfs, ctx) {
-                    dx = p + side_px(st, "margin-left", cb_w, cfs, ctx, 0.0) - bx.rect.x;
-                }
-            } else if let Some(v) = st.get("right").filter(|v| v.contains("anchor(")) {
-                if let Some(p) = anchor_len(v, true, hint.as_deref(), anchors, cb_w, cfs, ctx) {
-                    dx = p
-                        - side_px(st, "margin-right", cb_w, cfs, ctx, 0.0)
-                        - bx.rect.width
-                        - bx.rect.x;
-                }
+            if let Some(p) = side_anchor(st, "left", "inset-inline-start", true) {
+                dx = p + side_px(st, "margin-left", cb_w, cfs, ctx, 0.0) - bx.rect.x;
+            } else if let Some(p) = side_anchor(st, "right", "inset-inline-end", true) {
+                dx = p
+                    - side_px(st, "margin-right", cb_w, cfs, ctx, 0.0)
+                    - bx.rect.width
+                    - bx.rect.x;
             }
-            if let Some(v) = st.get("top").filter(|v| v.contains("anchor(")) {
-                if let Some(p) = anchor_len(v, false, hint.as_deref(), anchors, cb_w, cfs, ctx) {
-                    dy = p + side_px(st, "margin-top", cb_w, cfs, ctx, 0.0) - bx.rect.y;
-                }
-            } else if let Some(v) = st.get("bottom").filter(|v| v.contains("anchor(")) {
-                if let Some(p) = anchor_len(v, false, hint.as_deref(), anchors, cb_w, cfs, ctx) {
-                    dy = p
-                        - side_px(st, "margin-bottom", cb_w, cfs, ctx, 0.0)
-                        - bx.rect.height
-                        - bx.rect.y;
-                }
+            if let Some(p) = side_anchor(st, "top", "inset-block-start", false) {
+                dy = p + side_px(st, "margin-top", cb_w, cfs, ctx, 0.0) - bx.rect.y;
+            } else if let Some(p) = side_anchor(st, "bottom", "inset-block-end", false) {
+                dy = p
+                    - side_px(st, "margin-bottom", cb_w, cfs, ctx, 0.0)
+                    - bx.rect.height
+                    - bx.rect.y;
             }
             if dx != 0.0 || dy != 0.0 {
                 crate::flex::translate_subtree(bx, dx, dy);
