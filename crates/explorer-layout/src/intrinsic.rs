@@ -406,6 +406,38 @@ fn inline_level(c: &LayoutBox) -> bool {
 /// §16.6.1) ; min = le mot le plus long.
 fn text_px(st: &ComputedStyle, text: &str, fs: f32, ctx: &BlockCtx, max: bool) -> f32 {
     let measure = measure_fn(st, fs, ctx);
+    // `pre`/`pre-wrap` : §16.6.1 hors jeu — lignes littérales
+    // et tabulations aux taquets `tab-size` (§8.1, avance au
+    // prochain multiple depuis le début de la ligne).
+    let pre = matches!(
+        st.get("white-space"),
+        Some(v) if matches!(v.trim(), "pre" | "pre-wrap")
+    );
+    if pre {
+        let tab_w = crate::inline::tab_size_px(st, measure(" "), fs, ctx);
+        let line_w = |line: &str| -> f32 {
+            let mut pos = 0.0_f32;
+            for (i, seg) in line.split('\t').enumerate() {
+                if i > 0 && tab_w > f32::EPSILON {
+                    pos += tab_w - pos.rem_euclid(tab_w);
+                }
+                pos += measure(seg);
+            }
+            pos
+        };
+        if max {
+            return text.split('\n').map(line_w).fold(0.0, f32::max);
+        }
+        // `pre-wrap` coupe aux espaces et après tabulation
+        // (UAX #14 BA) — min = mot le plus long ou un taquet.
+        return text
+            .split('\n')
+            .flat_map(|l| l.split([' ', '\t']))
+            .filter(|w| !w.is_empty())
+            .map(&measure)
+            .fold(0.0, f32::max)
+            .max(if text.contains('\t') { tab_w } else { 0.0 });
+    }
     if max {
         return measure(&crate::inline::collapse_ws(text));
     }

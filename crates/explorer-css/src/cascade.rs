@@ -4923,6 +4923,7 @@ const INHERITED_PROPS: &[&str] = &[
     "orphans",
     "pointer-events",
     "quotes",
+    "tab-size",
     "text-align",
     "text-combine-upright",
     "text-emphasis",
@@ -5045,6 +5046,7 @@ pub fn initial_value(name: &str) -> Option<&'static str> {
         "font-style" | "font-variant" | "font-weight" | "line-height" | "letter-spacing"
         | "word-spacing" | "white-space" | "unicode-bidi" => "normal",
         "text-align" => "start",
+        "tab-size" => "8",
         "visibility" | "overflow" | "overflow-x" | "overflow-y" => "visible",
         "vertical-align" => "baseline",
         "list-style" | "list-style-type" => "disc",

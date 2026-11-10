@@ -1058,3 +1058,86 @@ fn text_indent_keywords() {
     let p2 = first_box_with_lines(&bx2);
     assert_eq!(p2.lines[1].rect.x, 20.0, "each-line : L2 indentée");
 }
+
+/// §8.1 `tab-size` : les `\t` préservés (`pre`/`pre-wrap`)
+// avancent au prochain taquet — multiple de `tab-size` ×
+// avance d'espace — depuis le bord de départ du bloc.
+#[test]
+fn tab_size_avance_aux_taquets() {
+    // Fixture 5px/car à font-size:10px → espace 5px,
+    // tab-size:4 → taquets tous les 20px.
+    let (_dom, bx) = laid(
+        "<!doctype html><p>a\tb</p>",
+        "p{font-size:10px;width:400px;white-space:pre;tab-size:4;margin:0}",
+    );
+    let p = first_box_with_lines(&bx);
+    let frags = &p.lines[0].fragments;
+    let b = frags
+        .iter()
+        .find(|f| f.text == "b")
+        .unwrap_or_else(|| panic!("frags={frags:?}"));
+    // « a » occupe [0,5] → taquet suivant = 20.
+    assert_eq!(
+        b.rect.x,
+        20.0,
+        "b doit partir au taquet 20 ({:?})",
+        frags
+            .iter()
+            .map(|f| (&f.text, f.rect.x, f.rect.width))
+            .collect::<Vec<_>>()
+    );
+    // Le fragment tabulation porte l'avance, aucun glyphe.
+    let tab = frags.iter().find(|f| f.text == "\t").expect("frag tab");
+    assert_eq!(tab.rect.width, 15.0, "avance tab 5→20");
+    assert!(tab.shaped.is_none(), "pas de shaping sur une tab");
+
+    // Taquet déjà atteint → avance au taquet SUIVANT.
+    let (_d2, bx2) = laid(
+        "<!doctype html><p>aaaa\tb</p>",
+        "p{font-size:10px;width:400px;white-space:pre;tab-size:4;margin:0}",
+    );
+    let p2 = first_box_with_lines(&bx2);
+    let b2 = p2.lines[0]
+        .fragments
+        .iter()
+        .find(|f| f.text == "b")
+        .expect("b");
+    assert_eq!(b2.rect.x, 40.0, "sur un taquet → suivant ({})", b2.rect.x);
+
+    // `\t` en tête de ligne : taquet depuis le bord du bloc.
+    let (_d3, bx3) = laid(
+        "<!doctype html><p>\ta</p>",
+        "p{font-size:10px;width:400px;white-space:pre;tab-size:4;margin:0}",
+    );
+    let p3 = first_box_with_lines(&bx3);
+    let a3 = p3.lines[0]
+        .fragments
+        .iter()
+        .find(|f| f.text == "a")
+        .expect("a");
+    assert_eq!(a3.rect.x, 20.0, "tab en tête → taquet 20 ({})", a3.rect.x);
+
+    // tab-size en <length> : taquets absolus de 30px.
+    let (_d4, bx4) = laid(
+        "<!doctype html><p>a\tb</p>",
+        "p{font-size:10px;width:400px;white-space:pre;tab-size:30px;margin:0}",
+    );
+    let p4 = first_box_with_lines(&bx4);
+    let b4 = p4.lines[0]
+        .fragments
+        .iter()
+        .find(|f| f.text == "b")
+        .expect("b");
+    assert_eq!(b4.rect.x, 30.0, "length → taquet 30 ({})", b4.rect.x);
+
+    // Sans `pre`, les tabs s'effondrent en espace ordinaire.
+    let (_d5, bx5) = laid(
+        "<!doctype html><p>a\tb</p>",
+        "p{font-size:10px;width:400px;margin:0}",
+    );
+    let p5 = first_box_with_lines(&bx5);
+    assert!(
+        !p5.lines[0].fragments.iter().any(|f| f.text == "\t"),
+        "hors pre : pas de frag tab"
+    );
+}

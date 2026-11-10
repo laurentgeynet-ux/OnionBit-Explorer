@@ -3883,6 +3883,13 @@ de noms. Ordre fixe (priorité par site-impact mesuré) :
 9. **At-rules** : `@starting-style` (transitions d'entrée),
    `@position-try` (résolu), `@function`/`@view-transition`
    (dormants — consommateurs futurs).
+10. **`tab-size`** — livré : prop héritée consommée, `\t`
+    préservés (`pre`/`pre-wrap`) avancés aux taquets
+    (multiple depuis le bord de départ du bloc, RTL ancré
+    droite), mesure intrinsèque alignée. Résidus nommés :
+    tabs dans les contextes inline hors `pre*`
+    (effondrement §16.6.1, conforme), `tab-size` sur
+    `white-space:collapse` des futurs `break-spaces`.
 
 ### Axe 3 — jauges non-saturantes
 - `check affects` (layout delta) — livré.

@@ -250,6 +250,10 @@ struct Piece {
     level: u8,
     /// Coupure obligatoire après cette pièce.
     hard_after: bool,
+    /// `true` = pièce tabulation (texte = `"\t"`) — son
+    /// avance n'est pas shapée mais résolue au coulage
+    /// d'après les taquets `tab-size` (§8.1).
+    tab: bool,
 }
 
 /// Niveau d'imbrication du paragraphe depuis `direction`
@@ -945,6 +949,7 @@ fn text_item(b: &LayoutBox, owner: usize, t: &str, decos: &[TextDeco], para_lv: 
                         dir: run.direction,
                         level,
                         hard_after: br.mandatory && ends_hard_break(p),
+                        tab: false,
                     });
                 }
                 prev = br.offset;
@@ -957,9 +962,16 @@ fn text_item(b: &LayoutBox, owner: usize, t: &str, decos: &[TextDeco], para_lv: 
                     dir: run.direction,
                     level,
                     hard_after: ends_hard_break(p),
+                    tab: false,
                 });
             }
         }
+    }
+    // §8.1 — `tab-size` : en `pre`/`pre-wrap` les `\t` ont
+    // survécu à l'effondrement des blancs ; UAX #14 ne les
+    // isole pas forcément dans leurs propres pièces.
+    if pieces.iter().any(|p| p.text.contains('\t')) {
+        pieces = split_tabs(pieces);
     }
     Item {
         owner,
@@ -969,6 +981,66 @@ fn text_item(b: &LayoutBox, owner: usize, t: &str, decos: &[TextDeco], para_lv: 
         aid: None,
         marker: None,
         deco: decos.to_vec(),
+    }
+}
+
+/// §8.1 — chaque tabulation devient une pièce dédiée
+/// (`tab`) : sans ça elle partirait au shaping → glyphe
+/// `.notdef` visible. `hard_after` reste sur la dernière
+/// sous-pièce de la pièce d'origine.
+fn split_tabs(pieces: Vec<Piece>) -> Vec<Piece> {
+    let mut split = Vec::with_capacity(pieces.len() + 4);
+    for p in pieces {
+        let mut rest = p.text.as_str();
+        while let Some(i) = rest.find('\t') {
+            if i > 0 {
+                split.push(Piece {
+                    text: rest[..i].to_string(),
+                    dir: p.dir,
+                    level: p.level,
+                    hard_after: false,
+                    tab: false,
+                });
+            }
+            split.push(Piece {
+                text: "\t".to_string(),
+                dir: p.dir,
+                level: p.level,
+                hard_after: false,
+                tab: true,
+            });
+            rest = &rest[i + 1..];
+        }
+        if !rest.is_empty() {
+            split.push(Piece {
+                text: rest.to_string(),
+                dir: p.dir,
+                level: p.level,
+                hard_after: p.hard_after,
+                tab: false,
+            });
+        } else if p.hard_after {
+            if let Some(last) = split.last_mut() {
+                last.hard_after = true;
+            }
+        }
+    }
+    split
+}
+
+/// §8.1 — `tab-size` : `<number>` = multiple de l'avance
+/// d'une espace, `<length>` absolue ; initiale `8`. Les
+/// valeurs négatives sont hors grammaire — défense : bornées
+/// à ≥ 0 (un taquet nul rend des avances nulles).
+pub(crate) fn tab_size_px(st: &ComputedStyle, space_w: f32, fs: f32, ctx: &BlockCtx) -> f32 {
+    match st.get("tab-size").map(str::trim) {
+        Some(v) => v
+            .parse::<f32>()
+            .ok()
+            .map(|n| n.max(0.0) * space_w)
+            .or_else(|| raw_length_px(v, fs, fs, ctx).map(|l| l.max(0.0)))
+            .unwrap_or(8.0 * space_w),
+        None => 8.0 * space_w,
     }
 }
 
@@ -1498,6 +1570,78 @@ fn break_into_lines(
             Some(v) if matches!(v.trim(), "pre" | "pre-wrap")
         );
         for piece in &item.pieces {
+            // §8.1 — taquet de tabulation (`pre`/`pre-wrap`) :
+            // l'avance mène au prochain multiple de `tab-size`
+            // compté depuis le bord de départ du conteneur de
+            // bloc (gauche en LTR, droite en RTL). Fragment
+            // non-atomique sans glyphe : rien à peindre, et
+            // `close` le retire s'il pend en fin de ligne
+            // (blanc pendant, §16.6.1).
+            if piece.tab {
+                let tab_w = tab_size_px(&item.style, measure(" "), fs, ctx);
+                let pos = if base_rtl {
+                    x + w - cursor_x
+                } else {
+                    cursor_x - x
+                };
+                // `rem_euclid` ∈ [0, tab_w) ; déjà sur un
+                // taquet (r ≈ 0) → taquet SUIVANT (avance
+                // pleine — une tabulation avance toujours).
+                let adv = if tab_w <= f32::EPSILON {
+                    0.0
+                } else {
+                    let r = pos.rem_euclid(tab_w);
+                    if r < 0.01 {
+                        tab_w
+                    } else {
+                        tab_w - r
+                    }
+                };
+                let no_wrap = matches!(
+                    item.style.get("white-space"),
+                    Some(v) if matches!(v.trim(), "nowrap" | "pre")
+                );
+                if !no_wrap
+                    && cursor_x > line_x
+                    && cursor_x - line_x + adv > line_w + 0.01
+                    && !acc.is_empty()
+                {
+                    new_line!();
+                }
+                if acc.is_empty() {
+                    descend_band!(adv);
+                }
+                acc.frags.push(Fragment {
+                    node: item.node,
+                    owner: item.owner,
+                    text: piece.text.clone(),
+                    atomic: false,
+                    aid: None,
+                    style: frag_style.clone(),
+                    rect: Rect {
+                        x: cursor_x,
+                        y: cursor_y,
+                        width: adv,
+                        height: lh,
+                    },
+                    baseline: fs * 0.8,
+                    shaped: None,
+                    trail_w: 0.0,
+                    marg_l: 0.0,
+                    marg_r: 0.0,
+                    marg_t: 0.0,
+                    marg_b: 0.0,
+                    deco: item.deco.clone(),
+                    level: piece.level,
+                });
+                acc.max_lh = acc.max_lh.max(lh);
+                acc.max_base = acc.max_base.max(fs * 0.8);
+                cursor_x += adv;
+                if piece.hard_after {
+                    new_line!();
+                }
+                continue;
+            }
             // §16.6.1 : les espaces en TÊTE de ligne sont
             // supprimées — y compris en tête d'une pièce
             // non-blanche (le collapse fusionne `"  mot"`).
