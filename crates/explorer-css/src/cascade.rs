@@ -1018,27 +1018,29 @@ pub fn prop_routed(dom: &explorer_dom::Dom, name: &str) -> bool {
         eng.add_css(&format!("p {{ {name}: inherit }}"), Origin::Author);
         eng.compute_tree(dom, dom.document(), &StyleEnv::default())
     };
-    fn st_of<'a>(
-        dom: &explorer_dom::Dom,
-        n: explorer_dom::NodeId,
-        sm: &'a StyleMap,
-        out: &mut Option<&'a ComputedStyle>,
-    ) {
-        if dom.attribute_str(n, "class").ok().flatten().is_some_and(|c| c == "x") {
-            *out = sm.get(n);
-        }
-        if let Ok(ch) = dom.children(n) {
-            for c in ch {
-                st_of(dom, c, sm, out);
-            }
-        }
-    }
     let (mut b, mut w) = (None, None);
-    st_of(dom, dom.document(), &baseline, &mut b);
-    st_of(dom, dom.document(), &with, &mut w);
+    st_of_x(dom, dom.document(), &baseline, &mut b);
+    st_of_x(dom, dom.document(), &with, &mut w);
     match (b, w) {
         (Some(b), Some(w)) => b != w,
         _ => false,
+    }
+}
+
+/// R-245 — descend jusqu'au `class=x` et lit son style.
+fn st_of_x<'a>(
+    dom: &explorer_dom::Dom,
+    n: explorer_dom::NodeId,
+    sm: &'a StyleMap,
+    out: &mut Option<&'a ComputedStyle>,
+) {
+    if dom.attribute_str(n, "class").ok().flatten().is_some_and(|c| c == "x") {
+        *out = sm.get(n);
+    }
+    if let Ok(ch) = dom.children(n) {
+        for c in ch {
+            st_of_x(dom, c, sm, out);
+        }
     }
 }
 
