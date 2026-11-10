@@ -2261,6 +2261,20 @@ pub(crate) fn node_value(e: &mut Engine, dom: &DomRef, cache: &NodeCache, node: 
         epoch,
     }));
     if let Value::Obj(id) = v {
+        // Sonde §cran-34 — tout wrap d'un tag CE nommé
+        // (node+epoch+ctx) : l'absence du wrap de `u` dans ce
+        // rail prouve le chemin hors-cache (`NodeHost{}` direct
+        // ou ctx distinct).
+        let tag = dom.borrow().nodes[node as usize].tag.clone();
+        if tag.contains('-') && tracing::enabled!(target: "dom_probe", tracing::Level::INFO) {
+            if let Ok(mut d) = dom.try_borrow_mut() {
+                if d.ce.probe_seen.insert(format!("wb:{node}:{id}")) {
+                    tracing::info!(target: "dom_probe", site = "dom.wrap",
+                        "node={node} tag={tag} epoch={epoch} ctx={:?}",
+                        Rc::as_ptr(cache) as usize);
+                }
+            }
+        }
         // `sr instanceof ShadowRoot` (JS-C159) — la racine
         // hérite `ShadowRoot.prototype` (proto lu sur le
         // ctor global, posé à `install_dom`).
@@ -8630,8 +8644,7 @@ impl Host for NodeHost {
                     self.dom.borrow().nodes[node as usize].kind,
                     NodeKind::Text | NodeKind::Comment
                 );
-                if !is_text || matches!(this, Value::Obj(id) if e.host_method_shadowed(id, key))
-                {
+                if !is_text || matches!(this, Value::Obj(id) if e.host_method_shadowed(id, key)) {
                     return Ok(None);
                 }
                 let nv = e.str_val(key);
@@ -12865,11 +12878,7 @@ impl Host for StyleMapHost {
                     for (k, v) in map {
                         let kv = e.str_val(k);
                         let vv = e.str_val(v);
-                        let _ = e.call_value(
-                            cb.clone(),
-                            this_arg.clone(),
-                            &[vv, kv, _t.clone()],
-                        );
+                        let _ = e.call_value(cb.clone(), this_arg.clone(), &[vv, kv, _t.clone()]);
                     }
                     Ok(Some(Value::Undefined))
                 } else {
@@ -12895,8 +12904,17 @@ impl Host for StyleMapHost {
     fn has_method(&self, name: &str) -> bool {
         matches!(
             name,
-            "get" | "getAll" | "has" | "set" | "append" | "delete" | "clear" | "forEach"
-                | "entries" | "keys" | "values"
+            "get"
+                | "getAll"
+                | "has"
+                | "set"
+                | "append"
+                | "delete"
+                | "clear"
+                | "forEach"
+                | "entries"
+                | "keys"
+                | "values"
         )
     }
 }
