@@ -1661,6 +1661,9 @@ pub struct StyleEngine {
     /// alias de media query : `@media (--nom)` → substitution
     /// du query enregistré à la collecte.
     pub custom_media: HashMap<String, String>,
+    /// `@position-try --nom { … }` enregistrés (css-anchor-1) —
+    /// appliqués par la passe de flip quand la boîte déborde.
+    pub position_tries: HashMap<String, Vec<Declaration>>,
     /// `@namespace` enregistrés (R-237) — préfixe → URI,
     /// transportés au `MatchCache` à chaque `compute_*` pour
     /// résoudre les sélecteurs `ns|tag`.
@@ -2242,6 +2245,12 @@ impl StyleEngine {
                             }
                             self.counter_styles
                                 .insert(prelude.trim().to_ascii_lowercase(), cs);
+                        } else if at.name.eq_ignore_ascii_case("position-try") {
+                            // `@position-try --nom { décls }` —
+                            // registre nommé : `position-try:
+                            // --nom` référence la règle.
+                            self.position_tries
+                                .insert(prelude.trim().to_string(), declarations.clone());
                         } else if at.name.eq_ignore_ascii_case("font-palette-values") {
                             // R-239 — `@font-palette-values --nom
                             // { font-family; base-palette;
@@ -3266,6 +3275,26 @@ impl StyleEngine {
                     axis.to_string(),
                     inherited.unwrap_or_else(|| "none".to_string()),
                 );
+            }
+        }
+        // 12. `@position-try --nom` (css-anchor-1) : la règle
+        //     nommée référencée par `position-try`/
+        //     `position-try-fallbacks` est sérialisée dans une
+        //     clé porteuse `position-try--nom` — le layout ne
+        //     connaît pas la feuille, seules ses déclarations
+        //     servent en débordement (pas de style anticipé).
+        for prop in ["position-try", "position-try-fallbacks"] {
+            if let Some(names) = props.get(prop).map(|v| v.clone()) {
+                for name in names.split_whitespace().filter(|t| t.starts_with("--")) {
+                    if let Some(decls) = self.position_tries.get(name) {
+                        let body: String = decls
+                            .iter()
+                            .map(|d| format!("{}:{}", d.name, d.value.trim()))
+                            .collect::<Vec<_>>()
+                            .join(";");
+                        props.insert(format!("position-try-{}", name.trim()), body);
+                    }
+                }
             }
         }
         ComputedStyle { props, vars }
