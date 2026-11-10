@@ -946,7 +946,22 @@ impl<'t> Parser<'t> {
     fn recover_decl(&mut self) {
         // R-207 — déclaration hors grammaire (nom non-ident ou
         // `:` manquant) : récupération spec, signalée au census.
+        // R-218 : détail par token fautif — le Pareto nomme
+        // la forme (`.name.<ident>` si c'est un nom, sinon le
+        // kind de token) au lieu d'un compteur muet.
         explorer_common::census::bump("css.decl.malformed");
+        let detail = match self.peek() {
+            Some(Token::Ident(n)) => format!("css.decl.malformed.name.{n}"),
+            Some(t) => {
+                let kind = format!("{t:?}");
+                format!(
+                    "css.decl.malformed.{}",
+                    kind.split('(').next().unwrap_or("token")
+                )
+            }
+            None => "css.decl.malformed.eof".to_string(),
+        };
+        explorer_common::census::bump(&detail);
         let mut depth = 0i32;
         while let Some(t) = self.peek() {
             match t {
