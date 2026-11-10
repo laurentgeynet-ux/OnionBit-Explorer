@@ -373,6 +373,187 @@ pub fn layout_tree(root: &mut LayoutBox, viewport_w: f32, ctx: &BlockCtx) {
         .max(FloatCtx::bottom_of(&floats.right).unwrap_or(0.0));
     root.rect.height = root.rect.height.max(deep);
     resolve_absolutes(root, viewport, ctx, ctx.base_font_size);
+    resolve_anchor_positioning(root, ctx, ctx.base_font_size);
+}
+
+/// R-254 — css-anchor-position-1 (MVP) : `anchor-name` pose
+/// une ancre nommée, `anchor(<côté>|center|<%>)` dans un
+/// inset (`top`/`right`/`bottom`/`left`) de boîte
+/// `absolute`/`fixed` y accroche le bord correspondant ;
+/// `position-anchor` nomme l'ancre par défaut (celle des
+/// `anchor()` sans nom).
+///
+/// Post-passe APRÈS `resolve_absolutes` : tous les rects sont
+/// en coords document (ancres absolues comprises). Une inset
+/// contenant `anchor(...)` n'était pas une longueur → la
+/// boîte est restée à sa position statique ; on la translate
+/// au bord d'ancre demandé (+ marge propre). `anchor()` sans
+/// nom utilise `position-anchor` ; nom absent de la carte →
+/// la longueur de fallback `anchor(…, <len>)` est utilisée,
+/// sinon la boîte reste en place (dégradation, jamais panic).
+///
+/// Résidus documentés : `position-area`, `anchor-center`,
+/// `anchor-size()`, `position-try*`/`@position-try`,
+/// `anchor()` dans `calc()`/insets logiques, auto-anchor
+/// `popover`/`implicit`. Multi-ancres `<dashed-ident>#` sur
+/// `anchor-name` couvertes ; doublon de nom = dernier en
+/// ordre d'arbre (spec).
+pub(crate) fn resolve_anchor_positioning(root: &mut LayoutBox, ctx: &BlockCtx, fs: f32) {
+    // Aucun `anchor-name` ne dispense de la passe : les
+    // replis `anchor(…, <len>)` doivent encore résoudre.
+    let mut anchors: Vec<(String, Rect)> = Vec::new();
+    collect_anchor_names(root, &mut anchors);
+    fix_anchor_positioned(root, &anchors, root.rect.width.max(1.0), ctx, fs);
+}
+
+/// Collecte `anchor-name` → rect (parcours préfixe = ordre
+/// de document : le dernier porteur d'un nom écrase, §4.2).
+fn collect_anchor_names(bx: &LayoutBox, out: &mut Vec<(String, Rect)>) {
+    if let Some(v) = bx.style.get("anchor-name") {
+        for name in v.split(',').map(str::trim) {
+            if !name.is_empty() && name != "none" {
+                // Un nom déjà posé est remplacé — swap_remove
+                // garderait l'ancien en tête ; on ré-insère en
+                // fin pour conserver « dernier gagnant ».
+                if let Some(i) = out.iter().position(|(n, _)| n == name) {
+                    out.remove(i);
+                }
+                out.push((name.to_string(), bx.rect));
+            }
+        }
+    }
+    for c in &bx.children {
+        explorer_common::deep(|| collect_anchor_names(c, out));
+    }
+}
+
+/// Point d'accroche résolu d'une valeur `anchor(…)` sur l'axe
+/// `x` (`left`/`right`) ou `y` (`top`/`bottom`), en coords
+/// document. `name_hint` = `position-anchor` quand `anchor()`
+/// n'en nomme pas. `None` = token irreconnaissable ou axe
+/// incompatible (dégradation — la boîte garde sa place).
+fn anchor_point(
+    raw: &str,
+    axis_x: bool,
+    name_hint: Option<&str>,
+    anchors: &[(String, Rect)],
+    cb_w: f32,
+    fs: f32,
+    ctx: &BlockCtx,
+) -> Option<f32> {
+    let open = raw.find("anchor(")?;
+    let inner = raw.get(open + 7..)?.strip_suffix(')')?.trim();
+    // `anchor([<nom>]? <côté> [, <repli>]?)` — le nom est un
+    // `<dashed-ident>` (`--x`) ; le reste est le côté.
+    let mut toks = inner.splitn(2, |c: char| c.is_whitespace() || c == ',');
+    let first = toks.next().unwrap_or("");
+    let rest = toks.next().unwrap_or("").trim();
+    let (name, side_part) = if first.starts_with("--") {
+        (Some(first), rest)
+    } else {
+        (name_hint, inner)
+    };
+    // Le repli éventuel suit la virgule top-level.
+    let (side, fallback) = {
+        let mut it = side_part.splitn(2, ',');
+        (it.next().unwrap_or("").trim(), it.next().map(str::trim))
+    };
+    let name = name?.trim_start_matches("--").to_string();
+    // Ancre absente de la carte → longueur de repli
+    // `anchor(…, <len>)` si présente, sinon `None` (la boîte
+    // garde sa position statique — `position-try` hors MVP).
+    let Some((_, ar)) = anchors
+        .iter()
+        .rev()
+        .find(|(n, _)| n.trim_start_matches("--") == name)
+    else {
+        return raw_length_px(fallback.unwrap_or(""), cb_w, fs, ctx);
+    };
+    Some(match side {
+        "left" | "start" | "self-start" if axis_x => ar.x,
+        "right" | "end" | "self-end" if axis_x => ar.x + ar.width,
+        "top" | "start" | "self-start" if !axis_x => ar.y,
+        "bottom" | "end" | "self-end" if !axis_x => ar.y + ar.height,
+        "center" => {
+            if axis_x {
+                ar.x + ar.width / 2.0
+            } else {
+                ar.y + ar.height / 2.0
+            }
+        }
+        p if p.ends_with('%') => {
+            let t = p.trim_end_matches('%').parse::<f32>().ok()? / 100.0;
+            if axis_x {
+                ar.x + ar.width * t
+            } else {
+                ar.y + ar.height * t
+            }
+        }
+        // Repli `anchor(…, <len>)` côté inset (peu usité —
+        // les fallbacks propres vivent dans `position-try`).
+        _ => return raw_length_px(fallback.unwrap_or(""), cb_w, fs, ctx),
+    })
+}
+
+/// Seconde moitié de la passe : translate chaque boîte
+/// positionnée dont un inset porte `anchor(…)` au bord
+/// d'ancre voulu. `cb_w` = base des `%`/margins de repli
+/// (largeur document — approximation documentée : la vraie
+/// base est la largeur du bloc conteneur, non retrouvable
+/// post-hoc sans la porter).
+fn fix_anchor_positioned(
+    bx: &mut LayoutBox,
+    anchors: &[(String, Rect)],
+    cb_w: f32,
+    ctx: &BlockCtx,
+    fs: f32,
+) {
+    if bx.out_of_flow() {
+        let st = &bx.style;
+        let hint = st
+            .get("position-anchor")
+            .map(str::trim)
+            .filter(|v| !v.is_empty() && *v != "auto" && *v != "implicit")
+            .map(|v| v.trim_start_matches("--").to_string());
+        let has = |p: &str| st.get(p).is_some_and(|v| v.contains("anchor("));
+        if has("left") || has("right") || has("top") || has("bottom") {
+            let cfs = font_size_px(st, fs, ctx);
+            let mut dx = 0.0_f32;
+            let mut dy = 0.0_f32;
+            // `left: anchor(bord)` → margin-box gauche sur le
+            // point ; `right: anchor(bord)` → margin-box droit.
+            if let Some(v) = st.get("left").filter(|v| v.contains("anchor(")) {
+                if let Some(p) = anchor_point(v, true, hint.as_deref(), anchors, cb_w, cfs, ctx) {
+                    dx = p + side_px(st, "margin-left", cb_w, cfs, ctx, 0.0) - bx.rect.x;
+                }
+            } else if let Some(v) = st.get("right").filter(|v| v.contains("anchor(")) {
+                if let Some(p) = anchor_point(v, true, hint.as_deref(), anchors, cb_w, cfs, ctx) {
+                    dx = p
+                        - side_px(st, "margin-right", cb_w, cfs, ctx, 0.0)
+                        - bx.rect.width
+                        - bx.rect.x;
+                }
+            }
+            if let Some(v) = st.get("top").filter(|v| v.contains("anchor(")) {
+                if let Some(p) = anchor_point(v, false, hint.as_deref(), anchors, cb_w, cfs, ctx) {
+                    dy = p + side_px(st, "margin-top", cb_w, cfs, ctx, 0.0) - bx.rect.y;
+                }
+            } else if let Some(v) = st.get("bottom").filter(|v| v.contains("anchor(")) {
+                if let Some(p) = anchor_point(v, false, hint.as_deref(), anchors, cb_w, cfs, ctx) {
+                    dy = p
+                        - side_px(st, "margin-bottom", cb_w, cfs, ctx, 0.0)
+                        - bx.rect.height
+                        - bx.rect.y;
+                }
+            }
+            if dx != 0.0 || dy != 0.0 {
+                crate::flex::translate_subtree(bx, dx, dy);
+            }
+        }
+    }
+    for c in &mut bx.children {
+        explorer_common::deep(|| fix_anchor_positioned(c, anchors, cb_w, ctx, fs));
+    }
 }
 
 /// Résout `font-size` en px : `em`/`rem` relatifs au parent

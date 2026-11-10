@@ -3850,14 +3850,18 @@ de noms. Ordre fixe (priorité par site-impact mesuré) :
    fond — `MaskedFill` gardé pour les feuilles) + shorthand
    `mask`/`-webkit-mask` expansé. Résidus : luminance/
    composite/clip-origin non initiaux, multi-couches.
-2. **`column-*`/`columns`** — multicol (wikipedia plainlist,
-   lobste.rs) : `column-count`/`column-width`/`column-gap`/
-   `column-rule` → layout multi-colonnes.
+2. **`column-*`/`columns`** — déjà livré (R-181 + R-253
+   vérification au code 2026-11-10) : `flow_columns`,
+   `column-span`, `break-*`, `column-fill`, `columns`/
+   `column-rule` expansés, `column-rule` peint. Résidu :
+   fragmentation intra-boîte (déviation assumée).
 3. **`border-image-*`** — livré (R-248) (R-234) : source/slice/
    width/outset/repeat → découpe 9 régions au paint.
-4. **`anchor-*`/`position-try`** — github ×96 : positionnement
-   ancre (nommé, fallbacks, `@position-try` → `Declarations`
-   livré ; consommateur = resolver anchor → offsets).
+4. **`anchor-*`/`position-try`** — MVP livré (R-254) — github
+   ×96 : `anchor-name`/`position-anchor`/`anchor(<côté>|center|
+   <%>[,repli])` résolus post-layout (`resolve_anchor_positioning`).
+   Résidus : `position-area`, `anchor-center`, `anchor-size()`,
+   `position-try*`, `anchor()` en `calc`/insets logiques.
 5. **`text-wrap`/`text-wrap-mode`/`text-wrap-style`** — livré (R-249) — `balance`
    (titres) : mesure de ligne + répartiteur.
 6. **`unicode-bidi`/`text-orientation`** — bidi explicite +

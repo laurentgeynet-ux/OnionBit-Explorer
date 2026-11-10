@@ -722,3 +722,56 @@ fn pseudos_first_line_letter_marker() {
         "::marker figé sur la boîte"
     );
 }
+
+// ---------- R-254 : anchor positioning ----------
+
+/// `anchor-name` + `anchor(<bord>)` dans un inset : la boîte
+/// absolue s'accroche au bord de l'ancre nommée (css-anchor-1
+/// MVP — `top: anchor(bottom)` = menu sous l'ancre).
+#[test]
+fn anchor_positioning_base() {
+    let (dom, bx) = laid(
+        "<div id=a></div><div id=m></div>",
+        "#a{position:absolute;left:40px;top:50px;width:20px;height:10px;anchor-name:--menu}\
+         #m{position:absolute;left:anchor(--menu left);top:anchor(--menu bottom);width:30px;height:8px;background:red}",
+    );
+    let a = find(&bx, by_id(&dom, "a"));
+    let m = find(&bx, by_id(&dom, "m"));
+    assert_eq!(a.rect.x, 40.0);
+    // left: anchor(left) → bord gauche de l'ancre.
+    assert_eq!(m.rect.x, 40.0, "menu accroché au bord gauche de l'ancre");
+    // top: anchor(bottom) → sous l'ancre (50+10).
+    assert_eq!(m.rect.y, 60.0, "menu sous l'ancre");
+}
+
+/// `position-anchor` = ancre par défaut des `anchor()` sans
+/// nom ; `center` = milieu d'axe.
+#[test]
+fn anchor_positioning_nom_par_defaut_et_center() {
+    let (dom, bx) = laid(
+        "<div id=a></div><div id=m></div>",
+        "#a{position:absolute;left:0;top:100px;width:40px;height:20px;anchor-name:--a}\
+         #m{position:absolute;position-anchor:--a;left:anchor(right);top:anchor(center);width:10px;height:4px}",
+    );
+    let m = find(&bx, by_id(&dom, "m"));
+    assert_eq!(m.rect.x, 40.0, "bord droit de l'ancre");
+    assert_eq!(m.rect.y, 110.0, "centre vertical de l'ancre (100+10)");
+}
+
+/// Nom inconnu → repli `anchor(…, <len>)` ; sans repli la
+/// boîte garde sa position statique (dégradation, pas de trou).
+#[test]
+fn anchor_positioning_repli_nom_inconnu() {
+    let (dom, bx) = laid(
+        "<div id=m></div>",
+        "#m{position:absolute;left:anchor(--ghost left, 33px);top:anchor(--ghost top, 44px);width:10px;height:10px}",
+    );
+    let m = find(&bx, by_id(&dom, "m"));
+    assert_eq!(
+        (m.rect.x, m.rect.y),
+        (33.0, 44.0),
+        "repli horizontal/vertical — left={:?} top={:?}",
+        m.style.get("left"),
+        m.style.get("top")
+    );
+}

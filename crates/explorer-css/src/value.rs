@@ -931,8 +931,16 @@ pub fn value_is_valid_for(name: &str, value: &str) -> bool {
                 "auto" | "none" | "min-content" | "max-content" | "fit-content"
             ) || len_or_pct(v)
         }
+        // R-254 — `anchor()`/`anchor-size()` dans les insets
+        // (css-anchor-position-1) : fonction à résolution
+        // retardée (layout) — acceptée ici comme `var(`.
         "margin-top" | "margin-right" | "margin-bottom" | "margin-left" | "top" | "right"
-        | "bottom" | "left" => v == "auto" || len_or_pct(v),
+        | "bottom" | "left" => {
+            v == "auto"
+                || len_or_pct(v)
+                || v.trim_start().starts_with("anchor(")
+                || v.trim_start().starts_with("anchor-size(")
+        }
         "padding-top" | "padding-right" | "padding-bottom" | "padding-left" => len_or_pct(v),
         "border-top-width" | "border-right-width" | "border-bottom-width" | "border-left-width" => {
             matches!(v, "thin" | "medium" | "thick") || len_or_pct(v)
