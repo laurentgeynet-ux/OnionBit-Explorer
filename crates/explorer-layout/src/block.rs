@@ -2360,6 +2360,7 @@ fn flow_children(
                 first_letter: None,
                 quirks_mode: false,
                 is_body: false,
+                counter: None,
                 flow_mode: bx.flow_mode,
             };
             let gap = if first && adjoining_top {

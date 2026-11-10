@@ -39,7 +39,7 @@ pub mod value;
 
 pub use cascade::{
     initial_value, is_inherited, media_matches, CollectedContainer, ColorScheme, ComputedStyle,
-    ContainerMeasure, Origin, StyleEngine, StyleEnv, StyleMap,
+    ContainerMeasure, CounterStyle, Origin, StyleEngine, StyleEnv, StyleMap,
 };
 pub use fontface::{FontFace, FontSrc};
 pub use parser::{

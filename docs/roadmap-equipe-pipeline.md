@@ -3815,6 +3815,7 @@ chez NAVIGATEUR — non recopiés ici.
 - [x] **R-217. `:has` relatif** : combinateurs de tête `>`/`+`/`~` (`Vec<(Combinator, sel)>`) + whitelist `-webkit-search-decoration`/`-webkit-textfield`/`-webkit-input-placeholder`. Verrous : 3 tests, suites vertes.
 - [x] **R-219. `light-dark()`/`var()` couleurs dans les shorthands** : `background:light-dark(...)` droppé sur example.com — `color_like` accepte les fonctions à résolution retardée (bg + border). Fond page restauré.
 - [x] **R-220. `or` top-level media query (MQ4)** : `(a) or (b)` tombait `unknown` → règles appliquées à tort (MDN). `or_groups` par groupe AND ; `type_ok && (g0 ∨ gN…)`. Verrous : 2 tests dédiés.
+- [x] **R-221. `@counter-style <nom>`** : `css.at.unapplied` ×9 wikipedia — registre `StyleEngine`→`StyleMap`→`LayoutBox.counter`, `label` pour numeric/alphabetic/cyclic/fixed/symbolic. Verrou : test e2e (labels cycliques).
 ## Tâches continues
 
 - **Triage rendu** des échecs `site_smoke.ps1` : les écarts

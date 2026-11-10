@@ -909,8 +909,90 @@ pub(crate) struct RegisteredProp {
     pub initial: Option<String>,
 }
 
+/// `@counter-style <nom>` — style de compteur nommé
+/// (css-counter-styles-3). R-221 — champs minimaux :
+/// `system`/`symbols`/`prefix`/`suffix`/`fallback` ;
+/// `pad`/`range`/`negative`/`extends` non portés (borne
+/// documentée — `fallback` vaut).
+#[derive(Debug, Clone, Default)]
+pub struct CounterStyle {
+    /// `system` tel que déclaré (`symbolic`, `numeric`,
+    /// `alphabetic`, `cyclic`, `fixed`…). Vide = `symbolic`.
+    pub system: String,
+    /// `symbols` — la liste de glyphes (chaînés).
+    pub symbols: Vec<String>,
+    /// `prefix` — texte avant le label (vide par défaut).
+    pub prefix: String,
+    /// `suffix` — texte après le label (spec : ". ").
+    pub suffix: String,
+    /// `fallback` — style de repli quand `n` sort du
+    /// système (défaut `decimal`).
+    pub fallback: String,
+}
+
+impl CounterStyle {
+    /// Label du marqueur pour l'ordinal `n` (1-based) —
+    /// `prefix + corps + suffix`. Systèmes non portés
+    /// (`additive`, `extends`, `fixed` hors portée) →
+    /// repli `decimal` via le corps numérique.
+    #[must_use]
+    pub fn label(&self, n: i32) -> String {
+        // `n` est un ordinal : négatif → 1 pour le cycle
+        // (arithmétique usize, aucun cast flottant).
+        let ni = usize::try_from(n.max(1)).unwrap_or(1);
+        let sym = |i: usize| self.symbols.get(i).cloned().unwrap_or_default();
+        let body = match self.system.as_str() {
+            "numeric" => {
+                if self.symbols.len() >= 10 {
+                    n.to_string()
+                        .chars()
+                        .filter_map(|c| c.to_digit(10).map(|d| sym(d as usize)))
+                        .collect::<String>()
+                } else {
+                    n.to_string()
+                }
+            }
+            "alphabetic" => {
+                if self.symbols.is_empty() {
+                    n.to_string()
+                } else {
+                    let base = self.symbols.len();
+                    let mut v = ni;
+                    let mut s = Vec::new();
+                    while v > 0 {
+                        v -= 1;
+                        s.push(sym(v % base));
+                        v /= base;
+                    }
+                    s.into_iter().rev().collect()
+                }
+            }
+            "fixed" => {
+                if ni <= self.symbols.len() {
+                    sym(ni - 1)
+                } else {
+                    n.to_string()
+                }
+            }
+            _ => {
+                // `symbolic`/`cyclic` (défaut) : cycle sur
+                // les symboles — sinon repli numérique pur.
+                if self.symbols.is_empty() {
+                    n.to_string()
+                } else {
+                    sym((ni - 1) % self.symbols.len())
+                }
+            }
+        };
+        let suffix = if self.suffix.is_empty() { "." } else { &self.suffix };
+        format!("{}{}{}", self.prefix, body, suffix)
+    }
+}
+
 #[derive(Default)]
 pub struct StyleEngine {
+    /// `@counter-style` enregistrés (R-221).
+    pub counter_styles: HashMap<String, CounterStyle>,
     rules: Vec<CollectedRule>,
     /// Règles UA **quirks-only** (HTML Rendering, « In quirks
     /// mode ») — parsées avec la feuille UA, ne candidatent
@@ -1098,6 +1180,10 @@ pub struct StyleMap {
     /// `compute_tree` (R-13). Vide pour les noeuds sans
     /// pseudo généré.
     pseudos: HashMap<NodeId, PseudoStyles>,
+    /// `@counter-style` enregistrés — transportés au
+    /// consommateur (`build_box_tree` lit `list-style-type`
+    /// nommé). R-221.
+    pub counter_styles: HashMap<String, CounterStyle>,
 }
 
 impl StyleMap {
@@ -1415,10 +1501,36 @@ impl StyleEngine {
                             });
                         } else if at.name.eq_ignore_ascii_case("property") {
                             self.register_property(prelude, declarations);
+                        } else if at.name.eq_ignore_ascii_case("counter-style") {
+                            // R-221 — `@counter-style <nom>`
+                            // enregistré : `list-style-type:
+                            // <nom>` résout ensuite dans le
+                            // layout (StyleMap.counter_styles).
+                            let mut cs = CounterStyle {
+                                suffix: ".".to_string(),
+                                ..CounterStyle::default()
+                            };
+                            for d in declarations {
+                                match d.name.as_str() {
+                                    "system" => cs.system = d.value.trim().to_string(),
+                                    "symbols" => {
+                                        cs.symbols = d
+                                            .value
+                                            .split_whitespace()
+                                            .map(|t| t.trim_matches('"').trim_matches('\'').to_string())
+                                            .collect();
+                                    }
+                                    "prefix" => cs.prefix = d.value.trim().trim_matches('"').to_string(),
+                                    "suffix" => cs.suffix = d.value.trim().trim_matches('"').to_string(),
+                                    "fallback" => cs.fallback = d.value.trim().to_string(),
+                                    _ => {}
+                                }
+                            }
+                            self.counter_styles
+                                .insert(prelude.trim().to_ascii_lowercase(), cs);
                         } else {
                             // R-207 — bloc de déclarations parsé
                             // mais inerte (`@page`, `@viewport`,
-                            // `@counter-style`,
                             // `@font-feature-values`…).
                             explorer_common::census::bump(&format!("css.at.unapplied.{}", at.name));
                         }
@@ -1681,7 +1793,7 @@ impl StyleEngine {
             &mut root_fs,
             containers,
         );
-        StyleMap { map, pseudos }
+        StyleMap { map, pseudos, counter_styles: self.counter_styles.clone() }
     }
 
     /// Re-style le sous-arbre de `root` semé sur le style
@@ -1761,7 +1873,7 @@ impl StyleEngine {
             &mut root_fs,
             containers,
         );
-        StyleMap { map, pseudos }
+        StyleMap { map, pseudos, counter_styles: self.counter_styles.clone() }
     }
 
     #[allow(clippy::too_many_arguments)]

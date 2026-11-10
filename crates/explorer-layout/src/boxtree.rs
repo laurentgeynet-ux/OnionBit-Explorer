@@ -187,6 +187,10 @@ pub struct LayoutBox {
     /// `<details>`) — le rendu peint le glyphe avec lui en
     /// priorité (font/color §7.1 du pseudo).
     pub marker_style: Option<ComputedStyle>,
+    /// `@counter-style <nom>` résolu pour
+    /// `list-style-type: <nom>` (R-221) — `None` pour les
+    /// types natifs (`decimal`, `disc`…).
+    pub counter: Option<explorer_css::CounterStyle>,
     /// R-177 — style `::first-line` de la cascade — overlay
     /// §7.1 sur les fragments de la première ligne.
     pub first_line: Option<ComputedStyle>,
@@ -352,6 +356,12 @@ pub fn build_box_tree_sized<S: ::std::hash::BuildHasher>(
     // formatée — `layout_inline` ne voit que lui).
     if let Some(b) = &mut bx {
         b.marker_style = styles.pseudo(root, PseudoElement::Marker).cloned();
+        // R-221 — `list-style-type: <nom>` nommé : le
+        // `@counter-style` correspondant voyage avec la
+        // boîte pour la génération de marqueur.
+        if let Some(ty) = b.style.get("list-style-type") {
+            b.counter = styles.counter_styles.get(ty.trim()).cloned();
+        }
         b.first_line = styles.pseudo(root, PseudoElement::FirstLine).cloned();
         b.first_letter = styles.pseudo(root, PseudoElement::FirstLetter).cloned();
         // R-182 — le document mode voyage jusqu'au layout
@@ -391,7 +401,17 @@ fn inject_inside_markers(bx: &mut LayoutBox) {
                     .strip_prefix('"')
                     .and_then(|v| v.strip_suffix('"'))
                     .or_else(|| ty.strip_prefix('\'').and_then(|v| v.strip_suffix('\'')))
-                    .map_or_else(|| marker_label(ty, bx.marker_ordinal), str::to_string),
+                    .map_or_else(
+                        || {
+                            // R-221 — `@counter-style` nommé
+                            // prioritaire sur les natifs.
+                            bx.counter.as_ref().map_or_else(
+                                || marker_label(ty, bx.marker_ordinal),
+                                |cs| cs.label(bx.marker_ordinal),
+                            )
+                        },
+                        str::to_string,
+                    ),
             };
             let mstyle = bx.marker_style.clone().unwrap_or_else(|| bx.style.clone());
             bx.children.insert(
@@ -420,6 +440,7 @@ fn inject_inside_markers(bx: &mut LayoutBox) {
                     first_letter: None,
                     quirks_mode: false,
                     is_body: false,
+                    counter: None,
                     flow_mode: explorer_css::value::WritingMode::HorizontalTb,
                 },
             );
@@ -616,6 +637,13 @@ fn build_box_tree_env<S: ::std::hash::BuildHasher>(
         first_letter: None,
         quirks_mode: false,
         is_body,
+        // R-221 — `list-style-type: <nom>` nommé : le
+        // `@counter-style` correspondant voyage avec la
+        // boîte pour la génération de marqueur.
+        counter: style
+            .get("list-style-type")
+            .and_then(|ty| styles.counter_styles.get(ty.trim()))
+            .cloned(),
         flow_mode: explorer_css::value::WritingMode::HorizontalTb,
     };
     let children = child_boxes(dom, root, styles, &style, sizes, envs);
@@ -805,6 +833,7 @@ fn child_boxes<S: ::std::hash::BuildHasher>(
                     first_letter: None,
                     quirks_mode: false,
                     is_body: false,
+                    counter: None,
                     flow_mode: explorer_css::value::WritingMode::HorizontalTb,
                 });
             }
@@ -1132,6 +1161,7 @@ fn leaf_box_anon(kind: BoxKind, style: ComputedStyle) -> LayoutBox {
         first_letter: None,
         quirks_mode: false,
         is_body: false,
+                    counter: None,
         flow_mode: explorer_css::value::WritingMode::HorizontalTb,
     }
 }
@@ -1366,6 +1396,7 @@ fn flush_run(out: &mut Vec<LayoutBox>, run: &mut Vec<LayoutBox>, style: &Compute
             first_letter: None,
             quirks_mode: false,
             is_body: false,
+                    counter: None,
             flow_mode: explorer_css::value::WritingMode::HorizontalTb,
         });
     }
@@ -1488,6 +1519,7 @@ fn object_box(
         first_letter: None,
         quirks_mode: false,
         is_body: false,
+                    counter: None,
         flow_mode: explorer_css::value::WritingMode::HorizontalTb,
     };
     // Ressource résolue → feuille remplacée ; sinon les
@@ -1591,6 +1623,7 @@ fn leaf_box(
         first_letter: None,
         quirks_mode: false,
         is_body: false,
+                    counter: None,
         flow_mode: explorer_css::value::WritingMode::HorizontalTb,
     }
 }
@@ -1646,6 +1679,7 @@ fn control_box(
                     first_letter: None,
                     quirks_mode: false,
                     is_body: false,
+                    counter: None,
                     flow_mode: explorer_css::value::WritingMode::HorizontalTb,
                 }],
                 &style,
