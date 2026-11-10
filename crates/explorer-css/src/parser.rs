@@ -1358,9 +1358,23 @@ fn parse_media_queries(prelude: &str) -> Vec<MediaQuery> {
         .collect();
     // R-207 — une query `unknown` est tolérée à `true` : elle
     // peut masquer une techno de media query non couverte
-    // (formes range, features récentes) → signalée.
-    if queries.iter().any(|q| q.unknown) {
+    // (formes range, features récentes) → signalée. R-216 :
+    // clé détaillée par contenu — le Pareto nomme la feature
+    // (ex. `@media (400px<=width)` → `mq.unknown.range`…).
+    for (q, raw) in queries.iter().zip(prelude.split(',')) {
+        if !q.unknown {
+            continue;
+        }
         explorer_common::census::bump("css.mq.unknown");
+        let frag = raw.trim();
+        let key = if frag.contains("<=") || frag.contains(">=")
+            || frag.matches(|c| c == '<' || c == '>').count() > 1
+        {
+            "css.mq.unknown.range".to_string()
+        } else {
+            format!("css.mq.unknown.{}", frag.chars().take(48).collect::<String>())
+        };
+        explorer_common::census::bump(&key);
     }
     queries
 }
