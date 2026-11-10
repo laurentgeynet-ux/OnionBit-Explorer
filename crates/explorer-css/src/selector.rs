@@ -337,6 +337,11 @@ pub enum DynamicPseudo {
     /// méga-menu github/tool-tips `popover="manual"` peints
     /// dépliés en permanence).
     PopoverOpen,
+    /// Pseudo-classe vendeur/`autofill` dormante (R-240 —
+    /// même convention §B-75 que les pseudo-éléments) : le
+    /// sélecteur reste valide mais ne matche jamais —
+    /// `input:-webkit-autofill` n'invalide plus la liste.
+    Other,
 }
 
 impl DynamicPseudo {
@@ -366,6 +371,7 @@ impl DynamicPseudo {
             Self::UserInvalid => "user-invalid",
             Self::Defined => "defined",
             Self::PopoverOpen => "popover-open",
+            Self::Other => "other",
         }
     }
 
@@ -394,6 +400,17 @@ impl DynamicPseudo {
             "user-invalid" => Self::UserInvalid,
             "defined" => Self::Defined,
             "popover-open" => Self::PopoverOpen,
+            "autofill" => Self::Other,
+            // R-240 — `:-vendor-*` dormant : la règle reste
+            // applicable aux autres sélecteurs de la liste
+            // (github : `selector.bad` ×14).
+            _ if name.starts_with("-webkit-")
+                || name.starts_with("-moz-")
+                || name.starts_with("-ms-")
+                || name.starts_with("-o-") =>
+            {
+                Self::Other
+            }
             _ => return None,
         })
     }
@@ -921,7 +938,9 @@ impl<'t> SelectorParser<'t> {
                 // liste entière invalidée — mesuré wikipedia.
                 _ if name.starts_with("-moz-")
                     || name.starts_with("-ms-")
-                    || name.starts_with("-o-") =>
+                    || name.starts_with("-o-")
+                    || name.starts_with("-webkit-")
+                    || name == "autofill" =>
                 {
                     Some(SimpleSelector::PseudoElement(PseudoElement::Other))
                 }
