@@ -336,6 +336,36 @@ for (const sec of sections) {
       Navigator: 'navigator',
       Location: 'location',
       History: 'history',
+      // Instances obtenues par les fabriques DOM (étape 219
+      // — vérifiées non-null en moteur) : membres d'instance
+      // (`length`, `data`, `value`…) mesurés sur l'objet
+      // réel, pas le prototype.
+      Document: 'document',
+      Window: 'window',
+      Element: 'document.body',
+      HTMLElement: 'document.body',
+      EventTarget: 'document.body',
+      DOMTokenList: 'document.body.classList',
+      NamedNodeMap: 'document.body.attributes',
+      HTMLCollection: 'document.body.children',
+      NodeList: 'document.body.childNodes',
+      DocumentFragment: 'document.createDocumentFragment()',
+      Selection: 'window.getSelection()',
+      Geolocation: 'navigator.geolocation',
+      ServiceWorkerContainer: 'navigator.serviceWorker',
+      Permissions: 'navigator.permissions',
+      CookieStore: 'window.cookieStore',
+      FontFaceSet: 'document.fonts',
+      TreeWalker: 'document.createTreeWalker(document.body)',
+      NodeIterator: 'document.createNodeIterator(document.body)',
+      Range: 'document.createRange()',
+      XPathResult: "document.evaluate('//body',document)",
+      CSSStyleDeclaration: 'document.body.style',
+      PerformanceEntry: "performance.getEntriesByName('x')[0]||performance.mark('x')&&performance.getEntriesByName('x')[0]",
+      MutationObserver: 'new MutationObserver(function(){})',
+      IntersectionObserver: 'new IntersectionObserver(function(){})',
+      ResizeObserver: 'new ResizeObserver(function(){})',
+      PerformanceObserver: 'new PerformanceObserver(function(){})',
     };
     for (const [a, nodeA] of Object.entries(bcd.api ?? {})) {
       if (a === '__compat' || a.startsWith('_')) continue;
