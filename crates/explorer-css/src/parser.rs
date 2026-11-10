@@ -1710,7 +1710,7 @@ fn find_matching_paren(s: &str) -> usize {
 /// (`scripts/bcd_coverage.mjs`).
 #[must_use]
 pub fn at_rule_supported(name: &str) -> bool {
-    const KNOWN_STATEMENTS: &[&str] = &["charset", "import"];
+    const KNOWN_STATEMENTS: &[&str] = &["charset", "import", "namespace", "custom-media"];
     if KNOWN_STATEMENTS.contains(&name.to_ascii_lowercase().as_str()) {
         return true;
     }
