@@ -592,8 +592,8 @@ fn build_box_tree_env<S: ::std::hash::BuildHasher>(
                 root,
                 style.clone(),
                 Some((
-                    w.unwrap_or_else(|| sizes.get(&root).map(|s| s.0).unwrap_or(0.0)),
-                    h.unwrap_or_else(|| sizes.get(&root).map(|s| s.1).unwrap_or(0.0)),
+                    w.unwrap_or_else(|| sizes.get(&root).map_or(0.0, |s| s.0)),
+                    h.unwrap_or_else(|| sizes.get(&root).map_or(0.0, |s| s.1)),
                 )),
             ));
         }
