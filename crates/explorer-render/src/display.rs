@@ -224,6 +224,8 @@ pub enum DisplayItem {
         /// `mask-repeat` résolu `(x, y)` — défaut `repeat`
         /// (tuilage ±∞ comme `background-repeat`).
         repeat: (bool, bool),
+        /// `mask-mode:luminance` — couverture = luma×alpha.
+        luminance: bool,
     },
     /// `border-image-*` résolu (R-248) — image découpée en 9
     /// régions : coins copiés, bords étirés/tilés, centre
@@ -995,6 +997,7 @@ fn item_eq(a: &DisplayItem, b: &DisplayItem) -> bool {
                 mask: m1,
                 dst: d1,
                 repeat: p1,
+                luminance: u1,
             },
             D::MaskedFill {
                 rect: r2,
@@ -1002,8 +1005,16 @@ fn item_eq(a: &DisplayItem, b: &DisplayItem) -> bool {
                 mask: m2,
                 dst: d2,
                 repeat: p2,
+                luminance: u2,
             },
-        ) => r1 == r2 && c1 == c2 && d1 == d2 && p1 == p2 && std::sync::Arc::ptr_eq(m1, m2),
+        ) => {
+            r1 == r2
+                && c1 == c2
+                && d1 == d2
+                && p1 == p2
+                && u1 == u2
+                && std::sync::Arc::ptr_eq(m1, m2)
+        }
         (
             D::BorderImage {
                 rect: r1,
@@ -3543,6 +3554,7 @@ fn paint_self(
                         mask: l.mask,
                         dst: l.dst,
                         repeat: l.repeat,
+                        luminance: l.luminance,
                     });
                 } else if bx
                     .style
@@ -4689,12 +4701,14 @@ fn translate_item(it: &DisplayItem, d: (f32, f32)) -> DisplayItem {
             mask,
             dst,
             repeat,
+            luminance,
         } => D::MaskedFill {
             rect: shifted(*rect, d),
             color: *color,
             mask: mask.clone(),
             dst: shifted(*dst, d),
             repeat: *repeat,
+            luminance: *luminance,
         },
         D::BorderImage {
             rect,

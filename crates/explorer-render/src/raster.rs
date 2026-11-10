@@ -1572,8 +1572,11 @@ fn paint_item(
             mask,
             dst,
             repeat,
+            luminance,
         } => {
-            paint_masked_fill(pixmap, rect, *color, mask, dst, *repeat, dpi, clip);
+            paint_masked_fill(
+                pixmap, rect, *color, mask, dst, *repeat, *luminance, dpi, clip,
+            );
         }
         // R-186 — `text-emphasis` : marque par glyphe au-
         // dessus (over) ou dessous du run.
@@ -1856,6 +1859,7 @@ fn paint_masked_fill(
     img: &crate::DecodedImage,
     dst: &explorer_layout::Rect,
     repeat: (bool, bool),
+    luminance: bool,
     cur: Transform,
     clip: Option<&Mask>,
 ) {
@@ -1950,7 +1954,18 @@ fn paint_masked_fill(
                 continue;
             };
             let sx = (tx as usize * img_w / tile_w).min(img_w - 1);
-            data[py as usize * w + px as usize] = img.rgba[(sy * img_w + sx) * 4 + 3];
+            let i4 = (sy * img_w + sx) * 4;
+            data[py as usize * w + px as usize] = if luminance {
+                let (rc, gc, bc, ac) = (
+                    u32::from(img.rgba[i4]),
+                    u32::from(img.rgba[i4 + 1]),
+                    u32::from(img.rgba[i4 + 2]),
+                    u32::from(img.rgba[i4 + 3]),
+                );
+                ((rc * 2126 + gc * 7152 + bc * 722 + 5000) / 10000 * ac / 255) as u8
+            } else {
+                img.rgba[i4 + 3]
+            };
         }
     }
     // Compose avec le clip actif (`overflow`) — min des
