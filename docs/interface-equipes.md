@@ -1149,17 +1149,18 @@ cycle `interactive`→`DCL`→`complete`→`load` **perdu** (`rs.set` : seul
 commit paint — rejouer `pending_doc_lifecycle` ou appeler le bloc
 cycle sur les bras non-`(Ok,true)` de `shared.rs`.
 
-## PIPE → NAV — `@import` imbriqué : lobste.rs reste à 99,98 % (mesuré post-Etape 218)
+## Mur aval youtube — bissection crans 5-7 (NAV, JS-C471)
 
-- **Funnel réel** : `css.import.ok` ×1, `css.import.skip.media`
-  ×3, `css.at.unapplied.import` ×8 — le `light-normal` (2 Ko,
-  couleurs) est fetché, la feuille de **layout** reste un
-  `@import` **imbriqué** non expansé → la page rend empilée
-  (flex/grid des stories absents).
-- **Demande** : `expand_import` doit re-expander le contenu
-  fetché récursivement (les `@import` à l'intérieur de la
-  feuille importée), pas seulement la couche top-level.
-  Vérifier aussi l'évaluation `skip.media` : `(not
-  (prefers-color-scheme: dark)) and (prefers-contrast: more)`
-  — si notre env évalue dark/no-preference différemment, le
-  light bundle peut être sauté à tort.
+- **Cran 5** : `__dataClientsInitialized:false` sur `ytd-app`/`ytd-masthead`/`ytd-button-renderer` — `attached`/`dataReady`/`clientsReady` tous true mais l'init clients des enfants ne termine pas (Polymer `attached()`→`_readyClients` court-circuité, probablement par `__isUpgradeDisabled` dans le `connectedCallback` wrapper).
+- **Cran 6** : `__dataHost` résolu sur les enfants `disable-upgrade` (vers `ytd-button-renderer`) — enregistrés comme data-clients mais `__dataReady`/`__dataEnabled` jamais — la moitié `attach→_readyClients` du host s'arrête pour eux.
+- **Cran 7** : `onYtPageDataFetched` tourne (`pc.data` = page/endpoint/response/url/expirationTime) — la donnée atteint le contrôleur ; le maillon fautif est en aval : `dataUpdatePromise`/`bindCb`/la passe d'activation `disable-upgrade` qu'il devrait enchaîner.
+- **Prouvé** : la mécanique complète marche — clear flag + `removeAttribute` + `customElements.upgrade` → stamp → `__dataEnabled` → `[[ ]]` consommé.
+- Levier NAV : nommer ce qui doit enchaîner l'activation après `onYtPageDataFetched` — `dataUpdatePromise`, `bindCb`, `hydrate`/`attach` kevlar, observer `disable-upgrade`, ou le déclencheur `yt-visibility-update`/idle.
+
+## Mur aval youtube — cran 8 (NAV, JS-C471) : `connectedCallback` kevlar court-circuité par `__isUpgradeDisabled`
+
+Source minifiée mesurée en vol : `connectedCallback` = `this.__isUpgradeDisabled||(w.prototype.connectedCallback.call(this),this.isAttached=!0,this.attached())` — le flag **isole tout le cycle** (`isAttached`, `attached()`, `_readyClients`, `_enableProperties`, `__dataReady`/`__dataEnabled`). `isAttached:true` mesuré sur les hosts = Polymer a posé le marker avant court-circuit — `attached()` s'est arrêté **après** `isAttached` mais **avant** `_readyClients` → `__dataClientsInitialized:false`, `__dataPendingClients` inexistant.
+
+Signaux présents : `ytd-app-attached`, `yt-rendererstamper-finished`, `yt-page-data-fetched`/`updated`, `attached` — tous tirés (×5+). Donc le driver-enable n'est ni l'événement ni la mécanique (prouvée : clear flag → `__dataEnabled` → `[[ ]]` résolu) mais la **passe qui retire `disable-upgrade`/`__isUpgradeDisabled`** — reste à nommer dans le polyfill CE kevlar (hors `pluto_*.js` sauvegardés : terme absent du bundle capturé — vit dans la couche custom-elements/webcomponents).
+
+Candidats non exclus : `Polymer.dom.flush` (testé — no-op sur `lit`), `RenderStatus.flush` (testé — idem), MutationObserver (non armé vu), `yt-visibility-update`/scroll (lazy — `scrollIntoView` stampe de nouveaux `disable-upgrade` au lieu de consommer), sweep `querySelectorAll` dans le handler `ytd-app-attached`/`yt-rendererstamper-finished` (à vérifier — leur corps n'a pas produit le retrait).
