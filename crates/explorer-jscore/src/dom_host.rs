@@ -1160,16 +1160,16 @@ fn dom_nav_set(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
     let Value::Obj(id) = this else {
         return Ok(Value::Undefined);
     };
+    // §B-126 — `dom_node()` pose la vérification d'époque : un
+    // wrapper sur un slot recyclé ne doit pas écrire dans le
+    // nouvel occupant (le `n.node` brut la laissait passer).
     let Some((dom, cache, node)) = e.host_of(id).and_then(|h| {
         h.as_any()
             .downcast_ref::<NodeHost>()
-            .map(|n| (n.dom.clone(), n.cache.clone(), n.node))
+            .and_then(|n| n.dom_node().map(|(d, node)| (d, n.cache.clone(), node)))
     }) else {
         return Ok(Value::Undefined);
     };
-    if !dom.borrow().node_valid(node) {
-        return Ok(Value::Undefined);
-    }
     match prop.as_str() {
         "textContent" | "innerText" => {
             let s = e.to_js_string(v)?;
@@ -1256,14 +1256,42 @@ fn dom_nav_get(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
     let Value::Obj(id) = this else {
         return Ok(Value::Undefined);
     };
-    let Some((dom, node, cache)) = e.host_of(id).and_then(|h| {
+    // §B-126 — la vérification d'époque est requise ici aussi :
+    // un wrapper sur un slot recyclé ne doit pas lire le nouvel
+    // occupant (le `n.node` brut aliasait silencieusement — la
+    // voie accesseur contournait la garde `get`, voie réelle
+    // du walk `iDo` `firstChild`/`nextSibling`).
+    let Some((dom, cache, node, live_ok, epoch_me)) = e.host_of(id).and_then(|h| {
         h.as_any()
             .downcast_ref::<NodeHost>()
-            .map(|n| (n.dom.clone(), n.node, n.cache.clone()))
+            .map(|n| (n.dom.clone(), n.cache.clone(), n.node, n.live(), n.epoch))
     }) else {
         return Ok(Value::Undefined);
     };
-    if !dom.borrow().node_valid(node) {
+    if !live_ok {
+        // Sonde §B-126 — stale lu par l'accesseur proto
+        // (invisible à la sonde `get`) : nomme le walk
+        // `firstChild`/`nextSibling` frappant un handle mort.
+        if tracing::enabled!(target: "dom_probe", tracing::Level::INFO) {
+            let (valid, epoch_now, tag) = {
+                let d = dom.borrow();
+                (
+                    d.node_valid(node),
+                    d.nodes.get(node as usize).map(|n| n.epoch),
+                    d.nodes
+                        .get(node as usize)
+                        .map(|n| n.tag.clone())
+                        .unwrap_or_default(),
+                )
+            };
+            if let Ok(mut d) = dom.try_borrow_mut() {
+                if d.ce.probe_seen.insert(format!("sn:{prop}:{node}")) {
+                    let src = e.stack_top_fn_src(160);
+                    tracing::info!(target: "dom_probe", site = "dom.stale",
+                        "rail=nav key={prop} node={node} tag={tag} valid={valid} epoch_me={epoch_me} epoch_now={epoch_now:?} top={src}");
+                }
+            }
+        }
         return Ok(Value::Undefined);
     }
     match dom_nav_value(e, &dom, &cache, node, &prop) {
@@ -5900,6 +5928,22 @@ impl Host for DocumentHost {
                     };
                     return Err(e.type_error(format!("importNode: nœud requis (reçu={t})")));
                 };
+                // §B-126 — structure du clone **à l'appel réel**
+                // (le rejeu post-mortem en refait un autre,
+                // faussement sain) : enfants top-level du
+                // fragment cloné, avant `ce_upgrade_subtree`.
+                if tracing::enabled!(target: "dom_probe", tracing::Level::INFO) {
+                    let tags: Vec<String> = {
+                        let d = self.dom.borrow();
+                        d.child_nodes(c)
+                            .iter()
+                            .take(40)
+                            .map(|&k| d.nodes[k as usize].tag.clone())
+                            .collect()
+                    };
+                    tracing::info!(target: "dom_probe", site = "ce.clone",
+                        "n={} tags={}", tags.len(), tags.join(","));
+                }
                 ce_upgrade_subtree(e, &self.dom, &self.cache, c)?;
                 Ok(Some(node_value(e, &self.dom, &self.cache, c)))
             }
@@ -7672,6 +7716,31 @@ impl Host for NodeHost {
         // dégradation `undefined` plutôt que lecture du
         // nouvel occupant.
         if !self.live() {
+            // §B-126 — un handle mort frappé par le live path :
+            // nomme la prop lue + le sommet de pile JS (le walk
+            // `iDo` `firstChild`/`nextSibling` du stamp
+            // `ytd-app` traverse ici si le zombi est DOM-side).
+            if tracing::enabled!(target: "dom_probe", tracing::Level::INFO) {
+                let (valid, epoch_now, tag) = {
+                    let d = self.dom.borrow();
+                    (
+                        d.node_valid(node),
+                        d.nodes.get(node as usize).map(|n| n.epoch),
+                        d.nodes
+                            .get(node as usize)
+                            .map(|n| n.tag.clone())
+                            .unwrap_or_default(),
+                    )
+                };
+                if let Ok(mut d) = self.dom.try_borrow_mut() {
+                    if d.ce.probe_seen.insert(format!("st:{key}:{node}")) {
+                        let src = e.stack_top_fn_src(160);
+                        tracing::info!(target: "dom_probe", site = "dom.stale",
+                            "key={key} node={node} tag={tag} valid={valid} epoch_me={} epoch_now={epoch_now:?} top={src}",
+                            self.epoch);
+                    }
+                }
+            }
             return Ok(None);
         }
         // Accesseur propre `defineProperty` (JS-C82) : il shadowe
