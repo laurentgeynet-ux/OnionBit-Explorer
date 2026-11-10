@@ -2860,6 +2860,13 @@ impl Dom {
         if !self.node_valid(node) {
             return;
         }
+        // §B-126 — même redirection « appropriate place »
+        // qu'`append`/`insert_before` : `replaceChildren`,
+        // `textContent=`/`innerText=` et `innerHTML=` sur un
+        // `<template>` visent `content` (les enfants light
+        // restent vides — le « replace all » vidait sinon le
+        // mauvais sac et laissait `content` inchangé).
+        let node = self.content_target(node);
         // Sonde §B-59 : `EXPLORER_DOM_KILL` — un « replace all »
         // sous la racine/`html`/`body`, ou retirant une rafale
         // d'enfants, s'identifie (effacement de page hostile).

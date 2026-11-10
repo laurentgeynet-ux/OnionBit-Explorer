@@ -87,6 +87,54 @@ fn c467_template_programmatic_fill_then_stamp() {
     );
 }
 
+/// Même règle « appropriate place » sur les mutateurs de
+/// remplacement et d'insertion en tête (résidu du live
+/// path) : `replaceChildren`/`textContent=` écrivent dans
+/// `content` — pas en light children — et `prepend` mesure
+/// son repère sur `content` (sans lui : append déguisé une
+/// fois `content` matérialisé).
+#[test]
+fn c467_template_replace_prepend_target_content() {
+    let mut e = engine();
+    // `replaceChildren` sur content matérialisé : l'ancien
+    // enfant de `content` disparaît, `childNodes` reste vide.
+    assert_eq!(
+        ev(
+            &mut e,
+            "var t=document.createElement('template');\
+             t.appendChild(document.createElement('b'));\
+             var d=document.createElement('i');d.id='r';\
+             t.replaceChildren(d);\
+             t.childNodes.length+'|'+t.content.childNodes.length+'|'+t.content.firstChild.tagName"
+        ),
+        "0|1|I"
+    );
+    // `textContent=` — « string replace all » vise `content`.
+    assert_eq!(
+        ev(
+            &mut e,
+            "var t=document.createElement('template');\
+             t.appendChild(document.createElement('b'));\
+             t.textContent='x';\
+             t.childNodes.length+'|'+t.content.childNodes.length+'|'+t.content.textContent"
+        ),
+        "0|1|x"
+    );
+    // `prepend` sur `content` déjà matérialisé — le repère
+    // est le 1er enfant du fragment (sinon : append).
+    assert_eq!(
+        ev(
+            &mut e,
+            "var t=document.createElement('template');\
+             t.appendChild(document.createElement('b'));\
+             t.appendChild(document.createElement('u'));\
+             t.prepend(document.createElement('i'));\
+             t.content.firstChild.tagName+'|'+t.content.childNodes.length+'|'+t.content.lastChild.tagName"
+        ),
+        "I|3|U"
+    );
+}
+
 /// Fragment appendé dans un `<template>` : aplatissement
 /// dans `content` (pas en light children).
 #[test]

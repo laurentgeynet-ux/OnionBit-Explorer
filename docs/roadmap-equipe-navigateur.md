@@ -7422,7 +7422,7 @@ incrément.
     « Cliquez ici si… pas été
     redirigé » + `exception js :
     Error: b`**~~ → **résolu, chaîne
-    - **[`x`] JS-C467 — §B-126 : redirection « appropriate place » `<template>` (jscore)** — `append`/`insert_before` redirigés vers `content` (jumeau PIPE `3219b5c0`, live path) ; check `pre-insert` du repère sur `content` ; verrou `c467_template_insert` ×3, 247/247 `dom`. Suspect mécanique n°1 du mur `ytd-app` (vol 735d-h) — re-vol à suivre.
+    - **[`x`] JS-C467 — §B-126 : redirection « appropriate place » `<template>` (jscore)** — `append`/`insert_before` redirigés vers `content` (jumeau PIPE `3219b5c0`, live path) ; check `pre-insert` du repère sur `content` ; suite : `replace_children` (`replaceChildren`/`textContent=`/`innerText=`) + repère `prepend` même règle ; verrou `c467_template_insert` ×4, 247/247 `dom`. Suspect mécanique n°1 du mur `ytd-app` (vol 735d-h) — re-vol à suivre.
     JS-C46→C52 + Étapes 91-92** :
     quantifieurs lazy (JS-C48), entités
     miroir (JS-C46), pile d'appel

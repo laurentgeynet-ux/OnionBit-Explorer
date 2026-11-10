@@ -9254,12 +9254,11 @@ impl Host for NodeHost {
                     // `content` (les `childNodes` de l'élément
                     // restent vides) — l'appartenance se mesure
                     // sur le fragment, pas l'élément.
-                    let ref_parent =
-                        if self.dom.borrow().nodes[node as usize].tag == "template" {
-                            self.dom.borrow_mut().content_target(node)
-                        } else {
-                            node
-                        };
+                    let ref_parent = if self.dom.borrow().nodes[node as usize].tag == "template" {
+                        self.dom.borrow_mut().content_target(node)
+                    } else {
+                        node
+                    };
                     // Spec `pre-insert` : le repère, s'il est
                     // donné, doit être enfant de `node` —
                     // `NotFoundError` sinon (parité navigateur).
@@ -9512,6 +9511,17 @@ impl Host for NodeHost {
                         return Err(e.type_error("HierarchyRequestError: ancestor"));
                     }
                 }
+                // §B-126 — `<template>` : le repère « premier
+                // enfant » vit dans `content` (les `childNodes`
+                // de l'élément restent vides) — mesuré sur le
+                // fragment, comme le check `insertBefore`
+                // (sinon `prepend` retombait en append une
+                // fois `content` matérialisé).
+                let ref_parent = if self.dom.borrow().nodes[node as usize].tag == "template" {
+                    self.dom.borrow_mut().content_target(node)
+                } else {
+                    node
+                };
                 // Ancre glissante (comme `after`) : chaque inséré
                 // se place après le précédent — l'ordre des args
                 // est préservé, et un `first` déplacé par
@@ -9519,7 +9529,7 @@ impl Host for NodeHost {
                 let mut anchor = None;
                 for k in kids {
                     let ref_n = match anchor {
-                        None => self.dom.borrow().child_nodes(node).first().copied(),
+                        None => self.dom.borrow().child_nodes(ref_parent).first().copied(),
                         Some(a) => self.dom.borrow().sibling(a, true),
                     };
                     self.dom.borrow_mut().insert_before(node, k, ref_n);
@@ -12270,67 +12280,60 @@ fn ce_call(e: &mut Engine, el: Value, cb_name: &str, args: &[Value]) -> JsResult
                 // parse imbriqué) vs `F.content` vivant. Le
                 // comptage des `childNodes` tranche laquelle
                 // des deux était vide au moment du throw.
-                let counts = e
-                    .get_prop_value(el.clone(), "_template")
-                    .ok()
-                    .map_or_else(
-                        || "<no-template>".to_string(),
-                        |t| {
-                            let content = cct_prop_len(e, &t, &["content", "childNodes"]);
-                            let xcontent =
-                                cct_prop_len(e, &t, &["_templateInfo", "content", "childNodes"]);
-                            let ni = cct_prop_len(e, &t, &["_templateInfo", "nodeInfoList"]);
-                            // `parentIndex` de chaque nodeInfo — à
-                            // comparer offline au fragment stampé
-                            // (lequel dépasse `childNodes.length` ?).
-                            let idxs = e
-                                .get_prop_value(t.clone(), "_templateInfo")
-                                .ok()
-                                .and_then(|ti| e.get_prop_value(ti, "nodeInfoList").ok())
-                                .map_or_else(
-                                    || "?".to_string(),
-                                    |nl| {
-                                        let n = cct_prop_len(e, &nl, &[])
-                                            .parse::<usize>()
-                                            .unwrap_or(0);
-                                        (0..n)
-                                            .map(|i| {
-                                                e.get_prop_value(nl.clone(), &i.to_string())
-                                                    .ok()
-                                                    .map_or_else(
-                                                        || "?".to_string(),
-                                                        |iv| {
-                                                            cct_prop_get(e, &iv, &["parentIndex"])
-                                                        },
-                                                    )
-                                            })
-                                            .collect::<Vec<_>>()
-                                            .join(",")
-                                    },
-                                );
-                            // Enfants réellement déposés sous le
-                            // CE (le fragment stampé inséré — ShadyDOM
-                            // les matérialise en light DOM) : si <
-                            // `cn`, le stamp a perdu des nœuds →
-                            // `iDo` hors bornes sur les derniers.
-                            let n_ch = cct_prop_len(e, &el, &["childNodes"]);
-                            let kids = (0..n_ch.parse::<usize>().unwrap_or(0).min(30))
-                                .map(|i| {
-                                    e.get_prop_value(el.clone(), "childNodes")
-                                        .ok()
-                                        .and_then(|l| e.get_prop_value(l, &i.to_string()).ok())
-                                        .map_or_else(
-                                            || "?".to_string(),
-                                            |k| cct_prop_get(e, &k, &["nodeName"]),
-                                        )
-                                })
-                                .collect::<Vec<_>>()
-                                .join(",");
-                            format!(
-                                "cn={content} xc={xcontent} ni={ni} idx={idxs} ch={n_ch} kids={kids}"
-                            )
-                        },
-                    );
+                let counts = e.get_prop_value(el.clone(), "_template").ok().map_or_else(
+                    || "<no-template>".to_string(),
+                    |t| {
+                        let content = cct_prop_len(e, &t, &["content", "childNodes"]);
+                        let xcontent =
+                            cct_prop_len(e, &t, &["_templateInfo", "content", "childNodes"]);
+                        let ni = cct_prop_len(e, &t, &["_templateInfo", "nodeInfoList"]);
+                        // `parentIndex` de chaque nodeInfo — à
+                        // comparer offline au fragment stampé
+                        // (lequel dépasse `childNodes.length` ?).
+                        let idxs = e
+                            .get_prop_value(t.clone(), "_templateInfo")
+                            .ok()
+                            .and_then(|ti| e.get_prop_value(ti, "nodeInfoList").ok())
+                            .map_or_else(
+                                || "?".to_string(),
+                                |nl| {
+                                    let n = cct_prop_len(e, &nl, &[]).parse::<usize>().unwrap_or(0);
+                                    (0..n)
+                                        .map(|i| {
+                                            e.get_prop_value(nl.clone(), &i.to_string())
+                                                .ok()
+                                                .map_or_else(
+                                                    || "?".to_string(),
+                                                    |iv| cct_prop_get(e, &iv, &["parentIndex"]),
+                                                )
+                                        })
+                                        .collect::<Vec<_>>()
+                                        .join(",")
+                                },
+                            );
+                        // Enfants réellement déposés sous le
+                        // CE (le fragment stampé inséré — ShadyDOM
+                        // les matérialise en light DOM) : si <
+                        // `cn`, le stamp a perdu des nœuds →
+                        // `iDo` hors bornes sur les derniers.
+                        let n_ch = cct_prop_len(e, &el, &["childNodes"]);
+                        let kids = (0..n_ch.parse::<usize>().unwrap_or(0).min(30))
+                            .map(|i| {
+                                e.get_prop_value(el.clone(), "childNodes")
+                                    .ok()
+                                    .and_then(|l| e.get_prop_value(l, &i.to_string()).ok())
+                                    .map_or_else(
+                                        || "?".to_string(),
+                                        |k| cct_prop_get(e, &k, &["nodeName"]),
+                                    )
+                            })
+                            .collect::<Vec<_>>()
+                            .join(",");
+                        format!(
+                            "cn={content} xc={xcontent} ni={ni} idx={idxs} ch={n_ch} kids={kids}"
+                        )
+                    },
+                );
                 let tpl = e
                     .get_prop_value(el, "_template")
                     .ok()
