@@ -12583,10 +12583,45 @@ fn cct_stamp_diag(e: &mut Engine, el: &Value) -> String {
     let mut res = Vec::with_capacity(n.min(64));
     let mut first_undef: i64 = -1;
     let mut first_undef_ev: i64 = -1;
+    let mut deep = Vec::with_capacity(n.min(64));
     for i in 0..n.min(64) {
         let ni = e
             .get_prop_value(nl.clone(), &i.to_string())
             .unwrap_or(Value::Undefined);
+        // `deep=` — capacité du parent résolu vs `parentIndex` :
+        // `pi/kids/chain` — `kids` = `childNodes.length` (la
+        // liste), `chain` = la marche `firstChild→nextSibling`
+        // (ce que `iDo` suit réellement) — une chaîne plus
+        // courte que la liste nomme des liens `next`/`prev`
+        // cassés sur le clone réel.
+        let pi_obj = e
+            .get_prop_value(ni.clone(), "parentInfo")
+            .unwrap_or(Value::Undefined);
+        let (pi_num, p_kids, p_chain) = {
+            let par = if matches!(pi_obj, Value::Undefined | Value::Null) {
+                f.clone()
+            } else {
+                cct_ido(e, &f, &pi_obj, 64)
+            };
+            let kids = cct_prop_len(e, &par, &["childNodes"])
+                .parse::<usize>()
+                .unwrap_or(0);
+            let mut chain = 0usize;
+            let mut cur = e
+                .get_prop_value(par.clone(), "firstChild")
+                .unwrap_or(Value::Null);
+            while !matches!(cur, Value::Null | Value::Undefined) && chain < 64 {
+                chain += 1;
+                cur = e.get_prop_value(cur, "nextSibling").unwrap_or(Value::Null);
+            }
+            let pnum = e
+                .get_prop_value(ni.clone(), "parentIndex")
+                .ok()
+                .and_then(|v| e.to_number(v).ok())
+                .unwrap_or(-1.0) as i64;
+            (pnum, kids, chain)
+        };
+        deep.push(format!("{i}:{pi_num}/{p_kids}/{p_chain}"));
         let c = cct_ido(e, &f, &ni, 64);
         let undef = matches!(c, Value::Undefined | Value::Null);
         if undef {
@@ -12627,14 +12662,15 @@ fn cct_stamp_diag(e: &mut Engine, el: &Value) -> String {
         Value::Undefined | Value::Null
     );
     format!(
-        "fk={} res={} fU={} fUev={} x={{c:{} nl:{} nlst:{}}}",
+        "fk={} res={} fU={} fUev={} x={{c:{} nl:{} nlst:{}}} deep={}",
         top.join(","),
         res.join("|"),
         first_undef,
         first_undef_ev,
         if xown_c { xc2 } else { "abs".to_string() },
         nl2,
-        nlst
+        nlst,
+        deep.join("|")
     )
 }
 

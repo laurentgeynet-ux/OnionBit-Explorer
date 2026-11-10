@@ -7242,6 +7242,17 @@ impl Engine {
                 Err(self.type_error(format!("cannot read `{key}` of {base:?}")))
             }
             Value::Obj(id) => {
+                // §B-126 — zombie JS-heap : prop lue sur un
+                // `ObjId` balayé (le `w`/`parentInfo` de iDo —
+                // `Value::Obj(mort)` n'est pas `=== undefined`
+                // mais lit `Undefined` — invisible aux shims).
+                if self.heap.obj(id).is_none()
+                    && tracing::enabled!(target: "dom_probe", tracing::Level::INFO)
+                {
+                    let src = self.stack_top_fn_src(160);
+                    tracing::info!(target: "dom_probe", site = "gc.zombie",
+                        "key={key} id={id} top={src}");
+                }
                 let h = self.host_of(id);
                 if let Some(h) = &h {
                     crate::host_mark(h.class_name(), key);
@@ -9130,7 +9141,10 @@ impl Engine {
             // trancher §B-125 (strict juste vs lecture
             // bénigne) sans changer la sémantique.
             let tc = self.native_fn("restricted.caller", crate::builtins::restricted_caller);
-            let ta = self.native_fn("restricted.arguments", crate::builtins::restricted_arguments);
+            let ta = self.native_fn(
+                "restricted.arguments",
+                crate::builtins::restricted_arguments,
+            );
             if let Some(o) = self.heap.obj_mut(id) {
                 o.set_accessor("caller", tc.clone(), tc, false);
                 o.set_accessor("arguments", ta.clone(), ta, false);

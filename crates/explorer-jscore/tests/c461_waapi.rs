@@ -5,8 +5,8 @@
 //! JS-C461 — surface WAAPI constructible (vol 733 §B-124 —
 //! `uncaught TypeError: illegal constructor (KeyframeEffect)`
 //! à `late,app:5743:23` coupait la cascade d'hydratation
-//! YouTube accueil) : `new KeyframeEffect(el, frames, opts)`
-//! et `new Animation(effect?, timeline?)` WebIDL
+//! `YouTube` accueil) : `new KeyframeEffect(el, frames, opts)`
+//! et `new Animation(effect?, timeline?)` `WebIDL`
 //! `[Constructor]`, `effect`/`timeline` servis, machine à
 //! états `idle → running`, `el.animate` pose un KFE
 //! implicite + `document.timeline`, identité `instanceof`
@@ -79,7 +79,7 @@ fn c461_animation_ctor_machine_etat() {
     );
 }
 
-/// `el.animate` pose un `effect` KeyframeEffect et une
+/// `el.animate` pose un `effect` `KeyframeEffect` et une
 /// `timeline` non nulles — identité `instanceof` croisée
 /// entre wrapper implicite et ctor.
 #[test]

@@ -4,7 +4,7 @@
 
 //! JS-C463 (§B-125, vol 734) — `caller`/`arguments` sur
 //! `Function.prototype` : V8 rend `null` pour les fonctions
-//! sloppy (YouTube lit `fn.caller`/`fn.arguments` dans sa
+//! sloppy (`YouTube` lit `fn.caller`/`fn.arguments` dans sa
 //! cascade — le `TypeError` inconditionnel remontait
 //! `uncaught:` ×8+ et arrêtait la chaîne), les fonctions
 //! strictes/génératrices/async gardent leur poison propre
@@ -44,7 +44,10 @@ fn c463_sloppy_fn_caller_arguments_null() {
     );
     // En lecture héritée aussi : arrow sloppy → proto.
     assert_eq!(
-        ev(&mut e, "var g=()=>1; (g.caller===null)+'|'+(g.arguments===null)"),
+        ev(
+            &mut e,
+            "var g=()=>1; (g.caller===null)+'|'+(g.arguments===null)"
+        ),
         "true|true"
     );
 }
@@ -69,7 +72,7 @@ fn c463_strict_fn_caller_still_throws() {
     );
 }
 
-/// Lecture répétée stable (la chaîne YouTube itère) + un
+/// Lecture répétée stable (la chaîne `YouTube` itère) + un
 /// call-site via variable/property path.
 #[test]
 fn c463_repeated_access_and_bound() {
