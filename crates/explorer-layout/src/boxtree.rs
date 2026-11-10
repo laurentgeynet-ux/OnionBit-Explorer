@@ -579,6 +579,25 @@ fn build_box_tree_env<S: ::std::hash::BuildHasher>(
             Some(sizes.get(&root).copied().unwrap_or(fallback)),
         ));
     }
+    // R-251 — `content-visibility`/`contain: size` +
+    // `contain-intrinsic-*` : la boîte devient **remplacée
+    // taille déclarée** — les enfants ne sont pas boxifiés
+    // (skip — l'effet rendu est une taille intrinsèque
+    // forcée, `contain` strict `size` seul suffit aussi).
+    if is_contained_skip(&style) {
+        let (w, h) = contain_intrinsic(&style);
+        if w.is_some() || h.is_some() {
+            return Some(leaf_box(
+                box_kind_of(&style),
+                root,
+                style.clone(),
+                Some((
+                    w.unwrap_or_else(|| sizes.get(&root).map(|s| s.0).unwrap_or(0.0)),
+                    h.unwrap_or_else(|| sizes.get(&root).map(|s| s.1).unwrap_or(0.0)),
+                )),
+            ));
+        }
+    }
     // `<object>` (R-13c) : élément **remplacé** si sa ressource
     // est résolue, sinon ses **enfants se substituent**.
     if dom.tag_name(root).is_ok_and(|t| t == "object") {
@@ -1529,6 +1548,51 @@ fn object_box(
         b.children = wrap_children(children, style, kind);
     }
     b
+}
+
+/// R-251 — la boîte doit-elle sauter son contenu pour une
+/// taille intrinsèque déclarée ? `contain: size|strict` OU
+/// `content-visibility: auto|hidden` (css-contain-2 §4).
+fn is_contained_skip(style: &explorer_css::ComputedStyle) -> bool {
+    let contained = style.get("contain").is_some_and(|v| {
+        v.split_ascii_whitespace()
+            .any(|t| matches!(t, "size" | "strict"))
+    });
+    let cv = style.get("content-visibility").is_some_and(|v| {
+        let t = v.trim();
+        t == "auto" || t == "hidden"
+    });
+    contained || cv
+}
+
+/// `contain-intrinsic-size`/`contain-intrinsic-{width,height}`
+/// — `(w, h)` en px (une valeur `auto` ou absente → `None`,
+/// repli sur la taille intrinsèque naturelle).
+/// `contain-intrinsic-size: <w> <h>` et les longhands
+/// `{width,height}`/`{block,inline}-size` (axis-mapped ici
+/// en horizontal-tb — `block-size`→h, `inline-size`→w).
+fn contain_intrinsic(style: &explorer_css::ComputedStyle) -> (Option<f32>, Option<f32>) {
+    let px = |v: &str| v.trim().strip_suffix("px").and_then(|n| n.parse::<f32>().ok());
+    let mut w = style.get("contain-intrinsic-width").and_then(px);
+    let mut h = style.get("contain-intrinsic-height").and_then(px);
+    if w.is_none() {
+        w = style.get("contain-intrinsic-inline-size").and_then(px);
+    }
+    if h.is_none() {
+        h = style.get("contain-intrinsic-block-size").and_then(px);
+    }
+    if w.is_none() || h.is_none() {
+        if let Some(v) = style.get("contain-intrinsic-size") {
+            let mut it = v.split_whitespace().filter(|p| *p != "auto");
+            if w.is_none() {
+                w = it.next().and_then(px);
+            }
+            if h.is_none() {
+                h = it.next().and_then(px).or(w);
+            }
+        }
+    }
+    (w, h)
 }
 
 fn svg_intrinsic(dom: &Dom, node: NodeId) -> (f32, f32) {

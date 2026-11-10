@@ -3861,7 +3861,7 @@ de noms. Ordre fixe (priorité par site-impact mesuré) :
    orientations verticales (text.rs déjà en place).
 7. **`gap`/`place-*`/`container-*`/`inset-area`** — props
    conteneur (blind spot `affects`) : layout flex/grid dédié.
-8. **`contain-intrinsic-*`/`content-visibility`** — tailles
+8. **`contain-intrinsic-*`/`content-visibility`** — livré (R-251) — tailles
    virtuelles hors-écran → layout.
 9. **At-rules** : `@starting-style` (transitions d'entrée),
    `@position-try` (résolu), `@function`/`@view-transition`
