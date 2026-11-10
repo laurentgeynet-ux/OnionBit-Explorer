@@ -251,13 +251,12 @@ pub enum PseudoClass {
     /// R-212 — ×des dizaines dans la feuille Wikipedia
     /// (`h1:lang(xx)`, `ol:lang(..) li`), LOT-selectors.
     Lang(Vec<String>),
-    /// `:has(<liste>)` — sélecteur relationnel (selectors-4
-    /// §19, R-119 — ×105 dans la feuille Tailwind) : l'élément
-    /// matche si un de ses **descendants** matche un sélecteur
-    /// de la liste. Borne v1 : portée descendante seule — les
-    /// combinateurs de tête (`>`, `+`, `~`) ne sont pas portés
-    /// (la règle est alors droppée, dégradation sûre).
-    Has(Vec<ComplexSelector>),
+    /// `:has(<liste relative>)` — sélecteur relationnel
+    /// (selectors-4 §19, R-119 + R-217) : chaque item porte
+    /// son combinateur de tête — `Descendant` (implicite),
+    /// `Child` (`>`), `NextSibling` (`+`) ou
+    /// `SubsequentSibling` (`~`) — contre le sujet.
+    Has(Vec<(Combinator, ComplexSelector)>),
     /// `:host` / `:host(<composé>)` — l'élément hôte de la
     /// racine shadow du scope de la règle (R-96). Ne matche
     /// qu'au franchissement de frontière (composé d'un
@@ -474,6 +473,45 @@ impl<'t> SelectorParser<'t> {
                 break;
             }
             out.push(self.complex()?);
+            self.skip_ws();
+            match self.peek() {
+                Some(Token::Comma) => {
+                    self.pos += 1;
+                }
+                None | Some(Token::CloseParen) => break,
+                _ => return None,
+            }
+        }
+        Some(out)
+    }
+
+    /// Liste de sélecteurs **relatifs** (`:has(...)`,
+    /// selectors-4 §19) — chaque item peut ouvrir par un
+    /// combinateur de tête `>`/`+`/`~` (l'espace/rien =
+    /// descendant implicite). R-217.
+    fn rel_list(&mut self) -> Option<Vec<(Combinator, ComplexSelector)>> {
+        let mut out = Vec::new();
+        loop {
+            self.skip_ws();
+            if self.peek().is_none() || matches!(self.peek(), Some(Token::CloseParen)) {
+                break;
+            }
+            let head = match self.peek() {
+                Some(Token::Delim('>')) => {
+                    self.pos += 1;
+                    Combinator::Child
+                }
+                Some(Token::Delim('+')) => {
+                    self.pos += 1;
+                    Combinator::NextSibling
+                }
+                Some(Token::Delim('~')) => {
+                    self.pos += 1;
+                    Combinator::SubsequentSibling
+                }
+                _ => Combinator::Descendant,
+            };
+            out.push((head, self.complex()?));
             self.skip_ws();
             match self.peek() {
                 Some(Token::Comma) => {
@@ -709,6 +747,14 @@ impl<'t> SelectorParser<'t> {
                     Some(SimpleSelector::Pseudo(simple))
                 }
                 "not" | "is" | "where" | "has" => {
+                    if name.as_str() == "has" {
+                        let inner = self.rel_list()?;
+                        match self.next() {
+                            Some(Token::CloseParen) => {}
+                            _ => return None,
+                        }
+                        return Some(SimpleSelector::Pseudo(PseudoClass::Has(inner)));
+                    }
                     let inner = self.list()?;
                     match self.next() {
                         Some(Token::CloseParen) => {}
@@ -717,7 +763,6 @@ impl<'t> SelectorParser<'t> {
                     let simple = match name.as_str() {
                         "not" => PseudoClass::Not(inner),
                         "is" => PseudoClass::Is(inner),
-                        "has" => PseudoClass::Has(inner),
                         _ => PseudoClass::Where(inner),
                     };
                     Some(SimpleSelector::Pseudo(simple))
@@ -795,6 +840,9 @@ impl<'t> SelectorParser<'t> {
                 | "-webkit-outer-spin-button"
                 | "-webkit-search-cancel-button"
                 | "-webkit-search-results-button"
+                | "-webkit-search-decoration"
+                | "-webkit-textfield-decoration-container"
+                | "-webkit-input-placeholder"
                 | "-webkit-calendar-picker-indicator"
                 | "-webkit-color-swatch"
                 | "-webkit-color-swatch-wrapper"
@@ -1604,6 +1652,79 @@ fn attr_matches(actual: &str, op: AttrOp, expected: &str, ci: bool) -> bool {
     }
 }
 
+/// Évaluation de `:has(<liste relative>)` (R-217) : têtes
+/// `>` fils direct, `+` frère suivant direct, `~` frères
+/// suivants, descendant implicite sinon (BFS bornée).
+fn has_matches(
+    dom: &Dom,
+    node: NodeId,
+    list: &[(Combinator, ComplexSelector)],
+    state: &dyn Fn(&str) -> bool,
+    cache: &mut MatchCache,
+    anc: AncestorFilter,
+    scope: Option<NodeId>,
+) -> bool {
+
+            for (head, sel) in list {
+                let mut hit = |c| dom.element(c).is_ok()
+                    && matches_any_with_state_in(
+                        dom,
+                        c,
+                        std::slice::from_ref(sel),
+                        state,
+                        cache,
+                        anc,
+                        scope,
+                    );
+                match head {
+                    Combinator::Descendant => {
+                        let mut stack: Vec<NodeId> = Vec::new();
+                        if let Ok(ch) = dom.children(node) {
+                            stack.extend(ch.iter().rev());
+                        }
+                        while let Some(c) = stack.pop() {
+                            if hit(c) {
+                                return true;
+                            }
+                            if let Ok(ch) = dom.children(c) {
+                                stack.extend(ch.iter().rev());
+                            }
+                        }
+                    }
+                    Combinator::Child => {
+                        if let Ok(ch) = dom.children(node) {
+                            if ch.iter().any(|&c| hit(c)) {
+                                return true;
+                            }
+                        }
+                    }
+                    Combinator::NextSibling | Combinator::SubsequentSibling => {
+                        if let Some(sibs) = following_siblings(dom, node) {
+                            let mut it = sibs.into_iter().filter(|&c| dom.element(c).is_ok());
+                            let found = match head {
+                                Combinator::NextSibling => it.next().is_some_and(hit),
+                                _ => it.any(hit),
+                            };
+                            if found {
+                                return true;
+                            }
+                        }
+                    }
+                }
+            }
+            false
+}
+
+/// Frères **suivants** de `node` (éléments et non-éléments,
+/// dans l'ordre) — les têtes `+`/`~` de `:has` filtrent sur
+/// `dom.element` ensuite.
+fn following_siblings(dom: &Dom, node: NodeId) -> Option<Vec<NodeId>> {
+    let par = dom.parent(node).ok()??;
+    let ch = dom.children(par).ok()?;
+    let idx = ch.iter().position(|&c| c == node)?;
+    Some(ch[idx + 1..].to_vec())
+}
+
 /// Pseudo-classe contre un nœud. `scope` = racine shadow de
 /// la règle évaluée (R-96) — `:host*` n'y répond que sur
 /// l'hôte de cette racine.
@@ -1641,23 +1762,9 @@ fn pseudo_matches(
         // sélecteur de la liste (portée descendante, R-119).
         // BFS borné-pile (pas de récursion) ; `anc`/`scope`
         // conservés pour la marche en amont des inner.
-        PseudoClass::Has(list) => {
-            let mut stack: Vec<NodeId> = Vec::new();
-            if let Ok(ch) = dom.children(node) {
-                stack.extend(ch.iter().rev());
-            }
-            while let Some(c) = stack.pop() {
-                if dom.element(c).is_ok()
-                    && matches_any_with_state_in(dom, c, list, state, cache, anc, scope)
-                {
-                    return true;
-                }
-                if let Ok(ch) = dom.children(c) {
-                    stack.extend(ch.iter().rev());
-                }
-            }
-            false
-        }
+        // R-217 — têtes de combinateur relatives, voir
+        // [`has_matches`].
+        PseudoClass::Has(list) => has_matches(dom, node, list, state, cache, anc, scope),
         // `:host` / `:host(c)` — vrai seulement sur l'hôte de
         // la racine du scope (atteint via le franchissement
         // de combinateur, ou en sujet sur l'hôte).

@@ -1368,7 +1368,7 @@ fn parse_media_queries(prelude: &str) -> Vec<MediaQuery> {
         explorer_common::census::bump("css.mq.unknown");
         let frag = raw.trim();
         let key = if frag.contains("<=") || frag.contains(">=")
-            || frag.matches(|c| c == '<' || c == '>').count() > 1
+            || frag.matches(['<', '>']).count() > 1
         {
             "css.mq.unknown.range".to_string()
         } else {

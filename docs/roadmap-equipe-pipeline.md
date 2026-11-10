@@ -3812,6 +3812,7 @@ chez NAVIGATEUR — non recopiés ici.
 - [x] **R-214. `line-height` naturelle = `asc − desc`** : dy +0,4 px/ligne (info.cern.ch) — le `lineGap` hhea doublait la métrique vs Chrome ; retiré (borne fonte à gap réel documentée).
 - [x] **R-215. Priorité cascade logique/physique** : `padding-inline-start` auteur écrasé par `padding-left` UA (`dw +24` wikipedia). Rang d'origine mémorisé par nom ; écrasement logique→physique si rang strictement supérieur.
 - [x] **R-216. Census `mq.unknown` par contenu** : `css.mq.unknown.<fragment>` / `.range` — le Pareto nommera les features fautives à la prochaine récolte.
+- [x] **R-217. `:has` relatif** : combinateurs de tête `>`/`+`/`~` (`Vec<(Combinator, sel)>`) + whitelist `-webkit-search-decoration`/`-webkit-textfield`/`-webkit-input-placeholder`. Verrous : 3 tests, suites vertes.
 ## Tâches continues
 
 - **Triage rendu** des échecs `site_smoke.ps1` : les écarts

@@ -69,3 +69,57 @@ fn vendor_pseudo_ne_tue_plus_la_liste() {
     // Un nom vraiment inconnu reste invalide (spec).
     assert!(parse_selector_list("a::totalement-inconnu").is_none());
 }
+
+// ── R-217 — `:has(<relatif>)` : combinateurs de tête ──────
+
+#[test]
+fn has_fils_direct() {
+    let dom = dom_of(
+        "<html><body><div id=a><span><b>x</b></span></div><div id=b><b>y</b></div>",
+    );
+    let divs = {
+        let mut out = Vec::new();
+        let mut q = vec![dom.document()];
+        while let Some(n) = q.pop() {
+            if dom.tag_name(n).is_ok_and(|t| t == "div") {
+                out.push(n);
+            }
+            if let Ok(c) = dom.children(n) {
+                q.extend(c.iter().rev());
+            }
+        }
+        out
+    };
+    let sels = parse_selector_list("div:has(> b)").unwrap();
+    assert!(!matches_any(&dom, divs[0], &sels), "b n'est pas fils direct de a");
+    assert!(matches_any(&dom, divs[1], &sels), "b est fils direct de la 2e div");
+}
+
+#[test]
+fn has_frere_suivant() {
+    let dom = dom_of("<html><body><ul><li>a</li><li>b</li></ul>");
+    let lis = {
+        let mut out = Vec::new();
+        let mut q = vec![dom.document()];
+        while let Some(n) = q.pop() {
+            if dom.tag_name(n).is_ok_and(|t| t == "li") { out.push(n); }
+            if let Ok(c) = dom.children(n) { q.extend(c.iter().rev()); }
+        }
+        out
+    };
+    // li:has(+ li) — le premier a un frère suivant, le second non.
+    let sels = parse_selector_list("li:has(+ li)").unwrap();
+    assert!(matches_any(&dom, lis[0], &sels));
+    assert!(!matches_any(&dom, lis[1], &sels));
+    // li:has(~ li) idem toute distance.
+    let sels = parse_selector_list("li:has(~ li)").unwrap();
+    assert!(matches_any(&dom, lis[0], &sels));
+}
+
+#[test]
+fn has_liste_relative_mixte() {
+    let sels = parse_selector_list("a:has(> img), a:has(span)");
+    assert!(sels.is_some(), "liste relative mixte doit parser");
+    // La forme implicite reste fonctionnelle.
+    assert!(parse_selector_list("div:has(span.x)").is_some());
+}
