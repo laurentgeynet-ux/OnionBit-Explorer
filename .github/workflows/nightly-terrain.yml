@@ -52,14 +52,14 @@ jobs:
           $body | gh issue comment $env:RADAR_ISSUE --body-file -
       - name: artefacts PNG
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: site-smoke-${{ github.run_number }}
           path: target/site_smoke/*.png
           retention-days: 30
       - name: artefacts geo_diff
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: geo-smoke-${{ github.run_number }}
           path: target/geo_smoke/*.json
