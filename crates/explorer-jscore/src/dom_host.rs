@@ -10358,7 +10358,22 @@ pub(crate) fn node_for_in(e: &mut Engine, v: Value, dom: &DomRef) -> Option<Node
         }
         return Some(dh.dom.borrow().root);
     }
-    None
+    shady_unwrap_in(e, v.clone(), dom)
+}
+
+/// Wrapper ShadyDOM (`webcomponents-sd`, youtube) :
+/// `ShadyDOM.wrap(nœud)` rend un objet `{node, …}` qui n'est
+/// pas `instanceof Node` — kevlar le repasse tel quel à
+/// `appendChild`/`insertBefore`/`removeChild`/`contains`
+/// (polymer `dom.flush`/`_attachDom`) et la garde « not a
+/// node » tuait la passe d'hydratation (`[[X]]` non liés).
+/// On déballe `.node` quand il désigne un nœud valide.
+fn shady_unwrap_in(e: &mut Engine, v: Value, dom: &DomRef) -> Option<NodeId> {
+    let inner = e.get_prop_value(v, "node").ok()?;
+    if !matches!(inner, Value::Obj(_)) {
+        return None;
+    }
+    node_for_in(e, inner, dom)
 }
 
 /// `(node, dom)` d'un `NodeHost` d'un **autre** miroir que
@@ -10394,7 +10409,16 @@ fn foreign_node_in(e: &mut Engine, v: Value, dom: &DomRef) -> Option<(NodeId, Do
         let root = dh.dom.borrow().root;
         return Some((root, dh.dom.clone()));
     }
-    None
+    // Wrapper ShadyDOM (cf. `shady_unwrap_in`) — le nœud
+    // déballé peut vivre dans le miroir cible ou ailleurs.
+    let inner = e.get_prop_value(v.clone(), "node").ok()?;
+    if !matches!(inner, Value::Obj(_)) {
+        return None;
+    }
+    if let Some(pair) = foreign_node_in(e, inner.clone(), dom) {
+        return Some(pair);
+    }
+    node_for_in(e, inner, dom).map(|n| (n, dom.clone()))
 }
 
 /// Reconnaît un objet **Attr-shaped** (`{nodeType:2, name,

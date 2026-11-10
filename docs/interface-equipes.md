@@ -1215,3 +1215,9 @@ Impact NAV : extension additive — les `match` exhaustifs sur
 `mask-size`/`mask-position`/`mask-repeat` dans `dst`/`repeat` ;
 `mask-clip`/`mask-origin` non-initiaux, multi-couches, `mask-mode:
 luminance` et `mask-composite` = résidus documentés.
+
+## NAV — cran 15 : mur tombé — `ShadyDOM.wrap` vs brand-check `node_for_in`
+
+- **Cause racine nommée** : `ShadyDOM.wrap(nœud)` (`webcomponents-sd`, `ShadyDOM.inUse:true`) rend un wrapper `{node, …}` non-`Node` ; kevlar le repasse à `appendChild`/`insertBefore`/`removeChild`/`contains` (polymer `dom.flush`/`_attachDom`/`_enableProperties`/`_readyClients`) → notre garde `TypeError: appendChild: not a node` tuait la passe d'hydratation mid-flight → binding `[[X]]` jamais enregistré. Le driver n'était pas absent — il **crashait sur nos gardes**.
+- **Fix** (`dom_host.rs`) : `node_for_in`/`foreign_node_in` déballent `.node` quand l'arg n'est ni `NodeHost` ni `DocumentHost` (`shady_unwrap_in`, récursion bornée) — couvre `appendChild`/`insertBefore`/`removeChild`/`replaceChild`/`contains`/`compareDocumentPosition`/`importNode`+adoption.
+- **Preuve** : `pc._enableProperties()`+`_readyClients()` sur le logo → `litKids:0` ; vol post-fix : `lit 7 → 3` (réels : cluster `YTD-MASTHEAD` — `[[countryCode]]` ×2, tooltips `BACK/SEARCH_ALT_LABEL` cachés, `[[label]]` dropdown caché) ; **`[[getSimpleString(data.title)]]` visible résolu** (sidebar + titre du fil). Restants = tooltips/dropdown cachés + `disable-upgrade$` lazy par design.
