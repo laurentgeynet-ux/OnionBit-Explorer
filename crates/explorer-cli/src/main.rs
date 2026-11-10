@@ -712,11 +712,17 @@ fn fixture_for(name: &str) -> &'static str {
             // → effet nul par construction).
             "<body><div class=x style=\"display:flex;flex-wrap:wrap;height:200px\"><p style=\"width:100%\">a</p><p>b</p></div></body>"
         }
+        // `justify-self` est **ignoré** dans un conteneur
+        // flex (css-align §8.3) — conteneur grid requis pour
+        // mesurer le vrai support.
+        () if n == "justify-self" => {
+            "<body><div style=\"display:grid;width:400px\"><p class=x>a</p><p>b</p></div></body>"
+        }
         // Props d'item dans un conteneur flex — `.x` = l'item.
         () if matches!(
             n,
             "align-self" | "order" | "flex-grow" | "flex-shrink" | "flex-basis"
-                | "justify-self" | "grid-column" | "grid-row" | "grid-column-start"
+                | "grid-column" | "grid-row" | "grid-column-start"
                 | "grid-column-end" | "grid-row-start" | "grid-row-end" | "grid-area"
         ) =>
         {
