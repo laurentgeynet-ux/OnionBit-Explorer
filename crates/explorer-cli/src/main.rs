@@ -46,8 +46,7 @@ fn main() -> ExitCode {
         [_, cmd, arg] if cmd == "fetch" => fetch(arg),
         [_, cmd, arg] if cmd == "layout" => layout(arg, None),
         [_, cmd, arg, size] if cmd == "layout" => layout(arg, Some(size)),
-        [_, cmd, url, out] if cmd == "shot" => shot(url, out, None),
-        [_, cmd, url, out, size] if cmd == "shot" => shot(url, out, Some(size)),
+        [_, cmd, url, out, rest @ ..] if cmd == "shot" => shot(url, out, rest),
         [_, cmd, url] if cmd == "jprobe" => jprobe(url),
         [_, cmd, url] if cmd == "dom" => dom_live(url),
         [_, cmd, url] if cmd == "mem" => mem_report(url),
@@ -60,7 +59,9 @@ fn main() -> ExitCode {
             eprintln!("usage : explorer-cli dump <fichier|url>");
             eprintln!("        explorer-cli fetch <url>");
             eprintln!("        explorer-cli layout <fichier|url>");
-            eprintln!("        explorer-cli shot <url> <sortie.png> [LxH]");
+            eprintln!(
+                "        explorer-cli shot <url> <sortie.png> [LxH] [--report out.json] [--geometry out.json]"
+            );
             eprintln!("        explorer-cli jprobe <url>");
             eprintln!("        explorer-cli dom <url>");
             eprintln!("        explorer-cli mem <url>");
@@ -175,11 +176,60 @@ fn parse_viewport(v: &str) -> Option<(f32, f32)> {
 /// (étape 51 — bornée, puis rendu quoi qu'il arrive).
 const XHR_GRACE_MS: u64 = 1_000;
 
+/// Queue d'arguments de `shot` : `[LxH]` positionnel
+/// optionnel, puis paires de flags `--report <json>` /
+/// `--geometry <json>` (étapes 215/216). Retourne
+/// `(size, report, geometry)` — `Err` = usage.
+fn shot_tail<'a>(
+    rest: &'a [String],
+) -> Result<(Option<&'a str>, Option<&'a str>, Option<&'a str>), ()> {
+    let mut idx = 0;
+    let mut size = None;
+    if let Some(first) = rest.first() {
+        if !first.starts_with("--") {
+            size = Some(first.as_str());
+            idx = 1;
+        }
+    }
+    let mut report = None;
+    let mut geometry = None;
+    while idx < rest.len() {
+        match rest[idx].as_str() {
+            "--report" => {
+                report = Some(rest.get(idx + 1).ok_or(())?.as_str());
+                idx += 2;
+            }
+            "--geometry" => {
+                geometry = Some(rest.get(idx + 1).ok_or(())?.as_str());
+                idx += 2;
+            }
+            _ => return Err(()),
+        }
+    }
+    Ok((size, report, geometry))
+}
+
 #[tokio::main(flavor = "current_thread")]
-async fn shot(url: &str, out: &str, size: Option<&str>) -> ExitCode {
+async fn shot(url: &str, out: &str, rest: &[String]) -> ExitCode {
+    let Ok((size, report, geometry)) = shot_tail(rest) else {
+        eprintln!("usage : explorer-cli shot <url> <sortie.png> [LxH] [--report out.json] [--geometry out.json]");
+        return ExitCode::FAILURE;
+    };
+    if geometry.is_some() {
+        eprintln!("--geometry : surface à venir (étape 216)");
+        return ExitCode::FAILURE;
+    }
     let fonts = explorer_render::DirFontSource::new(&default_fonts_dir());
     let mut session = session_from_env(fonts);
     session.set_js_factory(explorer_js::JscoreEngine::factory());
+    // `--report` (étape 215) : armer le census moteur (R-207)
+    // avant la navigation — `reset` au cas où un processus
+    // hôte aurait déjà compté (binaire one-shot = table vide
+    // par construction, la garde coûte rien).
+    if report.is_some() {
+        explorer_common::census::reset();
+        explorer_common::census::set_armed(true);
+    }
     if let Some(s) = size {
         // `LxH` optionnel — triage terrain à la taille de
         // la fenêtre app (défaut session : 1024×768).
@@ -227,6 +277,31 @@ async fn shot(url: &str, out: &str, size: Option<&str>) -> ExitCode {
         session.journal_fallbacks(),
         session.journal_classified()
     );
+    // `--report` (étape 215 — contrat consommé par
+    // `site_harvest`) : census moteur verbatim + `doc_h`
+    // mesurée. Émis même si la frame échoue — un shot sans
+    // PNG reste un signal pour le Pareto.
+    if let Some(rep) = report {
+        let mut doc_h = serde_json::Value::Null;
+        let mut doc_h_clamped = serde_json::Value::Null;
+        if let Some(info) = session.tab_info(tab) {
+            doc_h = serde_json::json!(info.doc_h);
+            doc_h_clamped = serde_json::json!(info.doc_h_clamped);
+        }
+        let payload = serde_json::json!({
+            "url": url,
+            "final_url": session.tab_url(tab).unwrap_or_default(),
+            "doc_h": doc_h,
+            "doc_h_clamped": doc_h_clamped,
+            "census": explorer_common::census::snapshot(),
+        });
+        match serde_json::to_string_pretty(&payload)
+            .map(|j| std::fs::write(rep, j))
+        {
+            Ok(Ok(())) => {}
+            _ => eprintln!("--report : écriture {rep} impossible"),
+        }
+    }
     if let Some(png) = session.frame_png(tab) {
         match std::fs::write(out, &png) {
             Ok(()) => {

@@ -7371,6 +7371,22 @@ incrément.
   example.com 99,99 % = vrai signal
   (fond `#f0f0f2` non peint par le moteur).
 
+- [x] **Étape 215. `explorer-cli shot
+  --report`** (consommateur NAV de R-207,
+  le maillon bloquant du Pareto) : flag
+  `--report out.json` sur `shot` — census
+  `explorer_common` armé avant navigation
+  (`reset`+`set_armed`), rapport émis
+  post-grâce `{url, final_url, doc_h,
+  doc_h_clamped, census}` verbatim vers
+  `site_harvest` (contrat journal ligne 71).
+  Queue de flags générique `[LxH]` +
+  paires (`--geometry` acceptée à la
+  grammaire, garde honnête tant que la
+  surface n'est pas câblée). Vérifié :
+  clés `css.prop.*`/`css.value.dropped.*`/
+  `html.err.*` remplies, `doc_h` réel.
+
 - [ ] **Écarts terrain — vol humain
   22/10 (release `39ab821`, FFI)** :
   second run humain — trois constats

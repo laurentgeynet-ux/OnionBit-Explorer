@@ -10,6 +10,7 @@ description = "Binaire de dev/debug : fetch, dump DOM, wireframe layout, shot PN
 workspace = true
 
 [dependencies]
+explorer-common.workspace = true
 explorer-core.workspace = true
 explorer-dom.workspace = true
 explorer-html.workspace = true
