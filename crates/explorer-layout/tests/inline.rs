@@ -1019,6 +1019,19 @@ fn padding_horizontal_inline_consomme_la_ligne() {
     assert_eq!(x_of("x2"), 130.0, "padding-right de <a> ignoré");
 }
 
+fn first_box_with_lines(bx: &LayoutBox) -> &LayoutBox {
+    if !bx.lines.is_empty() {
+        return bx;
+    }
+    bx.children
+        .iter()
+        .find_map(|c| {
+            let c = first_box_with_lines(c);
+            (!c.lines.is_empty()).then_some(c)
+        })
+        .expect("boîte p")
+}
+
 /// `text-indent` `hanging`/`each-line` (css-text-4) :
 /// `hanging` = indent sauf la première ligne ; `each-line`
 /// = toutes les lignes.
@@ -1027,24 +1040,12 @@ fn text_indent_keywords() {
     let long = "aaaa bbbb cccc dddd eeee ffff gggg hhhh iiii jjjj";
     let html = format!("<p>{long}</p>");
     // `hanging` : la 2e ligne est décalée de 20px.
-    fn lines_of(bx: &LayoutBox) -> &LayoutBox {
-        if !bx.lines.is_empty() {
-            return bx;
-        }
-        bx.children
-            .iter()
-            .find_map(|c| {
-                let c = lines_of(c);
-                (!c.lines.is_empty()).then_some(c)
-            })
-            .expect("boîte p")
-    }
     let (_dom, bx) = laid_w(
         &html,
         "p{width:100px;text-indent:20px hanging;margin:0}",
         800.0,
     );
-    let p = lines_of(&bx);
+    let p = first_box_with_lines(&bx);
     let (first, rest) = (p.lines.first().unwrap().rect.x, p.lines[1].rect.x);
     assert_eq!(first, 0.0, "hanging : L1 sans indent");
     assert_eq!(rest, 20.0, "hanging : L2+ indentées ({rest})");
@@ -1054,6 +1055,6 @@ fn text_indent_keywords() {
         "p{width:100px;text-indent:20px each-line;margin:0}",
         800.0,
     );
-    let p2 = lines_of(&bx2);
+    let p2 = first_box_with_lines(&bx2);
     assert_eq!(p2.lines[1].rect.x, 20.0, "each-line : L2 indentée");
 }

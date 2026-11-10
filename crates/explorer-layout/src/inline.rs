@@ -341,13 +341,7 @@ pub(crate) fn layout_inline(
         // première/suivantes est porté à la cassure et à
         // l'alignement.
         if each_line { indent } else { 0.0 },
-        if hanging {
-            indent
-        } else if each_line {
-            indent
-        } else {
-            0.0
-        },
+        if hanging || each_line { indent } else { 0.0 },
         para_lv,
     );
     align_lines(&st, &mut lines, x, w, fl, indent, hanging);
