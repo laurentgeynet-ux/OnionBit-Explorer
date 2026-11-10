@@ -7915,7 +7915,7 @@ async fn redirect_commits_final_url_and_fragment() {
             event_tail_budget: std::time::Duration::from_secs(15),
             rss_shed_mb: 0,
             shed_retry_after_s: 5,
-        smooth_scroll_ms: 0,
+            smooth_scroll_ms: 0,
         },
     );
 
