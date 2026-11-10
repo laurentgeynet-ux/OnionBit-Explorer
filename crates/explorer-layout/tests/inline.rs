@@ -1259,3 +1259,58 @@ fn ruby_rt_centre_et_inter_character() {
         "inter-character : baselines alignées"
     );
 }
+
+/// `ruby-align:start` colle l'annotation au début de la
+/// base ; l'overhang est borné à l'étendue `ruby*` de la
+/// ligne (conteneur — pas de fuite sur les voisins).
+#[test]
+fn ruby_align_start_et_overhang_borne() {
+    // `start` : rt collé au bord gauche de "BB".
+    let (_d, bx) = laid(
+        "<!doctype html><p><ruby style=ruby-align:start>BB<rt>a</rt></ruby></p>",
+        "p{font-size:20px;width:400px;margin:0}",
+    );
+    let line = &first_box_with_lines(&bx).lines[0];
+    let rt = line
+        .fragments
+        .iter()
+        .find(|f| f.style.get("display") == Some("ruby-text"))
+        .expect("frag rt");
+    let bb = line
+        .fragments
+        .iter()
+        .find(|f| f.style.get("display") == Some("ruby"))
+        .expect("frag base");
+    assert!(
+        (rt.rect.x - bb.rect.x).abs() < 0.01,
+        "start : rt au début de la base ({} vs {})",
+        rt.rect.x,
+        bb.rect.x
+    );
+
+    // Overhang borné : annotation large (4 glyphes) centrée
+    // sur base étroite "B" — le run ne dépasse pas
+    // l'étendue ruby* de la ligne.
+    let (_d2, bx2) = laid(
+        "<!doctype html><p><ruby>B<rt>WWWW</rt></ruby></p>",
+        "p{font-size:20px;width:400px;margin:0}",
+    );
+    let line2 = &first_box_with_lines(&bx2).lines[0];
+    let rt2 = line2
+        .fragments
+        .iter()
+        .find(|f| f.style.get("display") == Some("ruby-text"))
+        .expect("frag rt large");
+    let bb2 = line2
+        .fragments
+        .iter()
+        .find(|f| f.style.get("display") == Some("ruby"))
+        .expect("frag base étroite");
+    // Centré pur sortirait à gauche de la base : borné ≥ seg.
+    assert!(
+        rt2.rect.x >= bb2.rect.x - 0.01,
+        "overhang borné au conteneur (rt {} vs base {})",
+        rt2.rect.x,
+        bb2.rect.x
+    );
+}

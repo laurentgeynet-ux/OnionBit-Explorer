@@ -1333,9 +1333,14 @@ impl LineAcc {
     /// center`, défaut) ; `inter-character` cale le run
     /// après sa base, lignes de base alignées (usage texte
     /// vertical — dégradation documentée en horizontal).
-    /// Résidus : overhang borné par voisins, `ruby-align`
-    /// non lu (toujours center), `rtc` multi-annotations,
+    /// `ruby-align` est lu sur le run (repli : segment) —
+    /// `start`/`center`/`space-around`≈centré/`space-between`
+    /// = étiré aux bords du segment ; l'overhang est borné
+    /// à l'étendue `ruby*` non-rt de la ligne (conteneur —
+    /// approximation : la boîte `ruby` elle-même n'est pas
+    /// retrouvée). Résidus : `rtc` multi-annotations,
     /// positions mixtes sur une même ligne → repli `over`.
+    #[allow(clippy::cast_precision_loss)]
     fn lift_ruby(&mut self, h: &mut f32, base: &mut f32) {
         if !self.frags.iter().any(is_ruby_text_frag) {
             return;
@@ -1369,42 +1374,30 @@ impl LineAcc {
         if rt_h <= 0.0 || !base_top.is_finite() {
             return;
         }
+        // Étendue du conteneur ruby de la ligne — borne de
+        // l'overhang (l'annotation ne doit pas dépasser le
+        // conteneur qui la porte, approximation : la boîte
+        // `ruby` n'est pas retrouvée, on borne à l'étendue
+        // `ruby*` non-rt de la ligne).
+        let (cont_l, cont_r) = self
+            .frags
+            .iter()
+            .filter(|f| {
+                !is_ruby_text_frag(f)
+                    && f.style
+                        .get("display")
+                        .is_some_and(|d| d.trim().starts_with("ruby"))
+            })
+            .fold((f32::INFINITY, 0.0_f32), |(l, r), f| {
+                (l.min(f.rect.x), r.max(f.rect.x + f.rect.width))
+            });
         // Runs d'annotation consécutifs (ordre des fragments)
         // → indice de début/fin + segment de base apparié
         // (contigu `ruby*` non-rt en arrière ; repli = toute
         // la base de la ligne).
         let runs = rt_runs(&self.frags);
         for (lo, hi) in &runs {
-            let (seg_l, seg_r) = ruby_base_span(&self.frags, *lo);
-            let run_l = self.frags[*lo].rect.x;
-            let run_r = self.frags[*hi].rect.x + self.frags[*hi].rect.width;
-            // Centrage (defaut ruby-align) : `inter-character`
-            // cale le run APRES la base, sur sa ligne de base.
-            let dx = if pos.as_str() == "inter-character" {
-                seg_r - run_l
-            } else {
-                seg_l.midpoint(seg_r) - run_l.midpoint(run_r)
-            };
-            let base_ref = if *lo > 0 {
-                let b = &self.frags[lo - 1];
-                (b.rect.y, b.baseline)
-            } else {
-                (0.0, 0.0)
-            };
-            for f in &mut self.frags[*lo..=*hi] {
-                f.rect.x += dx;
-                f.rect.y = match pos.as_str() {
-                    "under" => base_bot,
-                    "inter-character" => {
-                        if *lo > 0 {
-                            base_ref.0 + (base_ref.1 - f.baseline)
-                        } else {
-                            f.rect.y
-                        }
-                    }
-                    _ => base_top + rt_h - f.rect.height,
-                };
-            }
+            self.place_rt_run(*lo, *hi, &pos, rt_h, base_top, base_bot, (cont_l, cont_r));
         }
         if pos.as_str() == "inter-character" {
             return;
@@ -1420,6 +1413,91 @@ impl LineAcc {
         *h += rt_h;
         if over {
             *base += rt_h;
+        }
+    }
+
+    /// Pose un run d'annotation `frags[lo..=hi]` : `dx`
+    /// horizontal selon `ruby-align` (`start`/centré/
+    /// `space-between` étiré aux bords du segment) et bande
+    /// verticale selon `pos` — overhang borné à l'étendue
+    /// `(cont_l, cont_r)` du conteneur (hors
+    /// `inter-character`, sorti par construction ; run plus
+    /// large que le conteneur → calé sur son bord de départ).
+    #[allow(clippy::too_many_arguments, clippy::cast_precision_loss)]
+    fn place_rt_run(
+        &mut self,
+        lo: usize,
+        hi: usize,
+        pos: &str,
+        rt_h: f32,
+        base_top: f32,
+        base_bot: f32,
+        cont: (f32, f32),
+    ) {
+        let (seg_l, seg_r) = ruby_base_span(&self.frags, lo);
+        let run_l = self.frags[lo].rect.x;
+        let run_r = self.frags[hi].rect.x + self.frags[hi].rect.width;
+        // `ruby-align` (lu sur le run, repli sur le segment) :
+        // `start`/`space-between` = collé au début (`space-
+        // between` étire en plus), `center`/`space-around`
+        // (defaut spec) = centré ; `inter-character` = après
+        // la base, sur sa ligne de base.
+        let align = self.frags[lo]
+            .style
+            .get("ruby-align")
+            .or_else(|| {
+                (lo > 0)
+                    .then(|| self.frags[lo - 1].style.get("ruby-align"))
+                    .flatten()
+            })
+            .map_or("center", str::trim);
+        let mut dx = if pos == "inter-character" {
+            seg_r - run_l
+        } else {
+            match align {
+                "start" | "space-between" => seg_l - run_l,
+                _ => seg_l.midpoint(seg_r) - run_l.midpoint(run_r),
+            }
+        };
+        let base_ref = if lo > 0 {
+            let b = &self.frags[lo - 1];
+            (b.rect.y, b.baseline)
+        } else {
+            (0.0, 0.0)
+        };
+        // `space-between` : l'espace entre fragments absorbe
+        // le reliquat jusqu'aux bords du segment (§4.4 — un
+        // seul fragment = collé au départ).
+        let span_gap = if align == "space-between" && hi > lo {
+            ((seg_r - seg_l) - (run_r - run_l)) / (hi - lo) as f32
+        } else {
+            0.0
+        };
+        if pos != "inter-character" {
+            let (cl, cr) = if cont.0.is_finite() {
+                cont
+            } else {
+                (seg_l, seg_r)
+            };
+            dx = if run_r - run_l > cr - cl {
+                cl - run_l
+            } else {
+                dx.clamp(cl - run_l, cr - run_r)
+            };
+        }
+        for (k, f) in self.frags[lo..=hi].iter_mut().enumerate() {
+            f.rect.x += dx + span_gap * k as f32;
+            f.rect.y = match pos {
+                "under" => base_bot,
+                "inter-character" => {
+                    if lo > 0 {
+                        base_ref.0 + (base_ref.1 - f.baseline)
+                    } else {
+                        f.rect.y
+                    }
+                }
+                _ => base_top + rt_h - f.rect.height,
+            };
         }
     }
 }
