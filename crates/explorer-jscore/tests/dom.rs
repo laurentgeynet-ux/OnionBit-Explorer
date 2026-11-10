@@ -7603,3 +7603,100 @@ fn move_before_preserves_identity() {
         "true/function"
     );
 }
+
+// ===== Pareto `api` lot 4 — `Text.*` + `Animation` lisibles.
+
+/// `wholeText` concatène les frères texte contigus ;
+/// `splitText` divise le nœud et retourne la queue insérée ;
+/// `getBoxQuads` = tableau vide (pas de géométrie fine).
+#[test]
+fn text_members_lot4() {
+    assert_eq!(
+        ev_in(
+            "<html><body><div id=d>ab<!--c--><span>x</span>tail</div></body></html>",
+            "var t=document.getElementById('d').firstChild;\
+             t.wholeText+'|'+('splitText' in t)+'|'+('getBoxQuads' in t)+'|'+t.getBoxQuads().length",
+        ),
+        "ab|true|true|0"
+    );
+    // `splitText(1)` : `a|b` — le nouveau nœud suit, contigus
+    // → `wholeText` du premier = `ab`.
+    assert_eq!(
+        ev_in(
+            "<html><body><div id=d>ab</div></body></html>",
+            "var t=document.getElementById('d').firstChild;\
+             var q=t.splitText(1);\
+             t.data+'|'+q.data+'|'+t.wholeText+'|'+t.nextSibling===q+'|'+document.getElementById('d').childNodes.length",
+        ),
+        "a|b|ab|true|2"
+    );
+    // Erreur hors-bornes → exception (spec `IndexSizeError`).
+    assert_eq!(
+        ev_in(
+            "<html><body><div id=d>ab</div></body></html>",
+            "try{document.getElementById('d').firstChild.splitText(9);'no'}catch(e){e.name}",
+        ),
+        "TypeError"
+    );
+}
+
+/// `Animation` — méthodes lisibles (`in`/`typeof`), `id`
+/// mutable, `replaceState`/`startTime`/`overallProgress`
+/// servis, `onremove` posable.
+#[test]
+fn animation_readable_lot4() {
+    assert_eq!(
+        ev("var a=document.body.animate([{opacity:0}],{duration:9});\
+            ('play' in a)+'|'+('cancel' in a)+'|'+('commitStyles' in a)+'|'+typeof a.pause+'|'+\
+            ('id' in a)+'|'+a.replaceState+'|'+a.startTime+'|'+a.overallProgress+'|'+('onremove' in a)"),
+        "true|true|true|function|true|active|null|null|true"
+    );
+    // `id`/`onremove` mutables ; l'invocation dispatchée.
+    assert_eq!(
+        ev("var a=document.body.animate([{opacity:0}],{duration:9});\
+            a.id='x';var f=0;a.onremove=function(){f=1};\
+            a.pause();a.playState+'|'+a.id+'|'+f"),
+        "paused|x|0"
+    );
+}
+
+// ===== Pareto `api` lot 4 — Typed OM (`attributeStyleMap`
+// mutable, `computedStyleMap` read-only, css-typed-om-1) :
+// vue map-like de la même liste inline que `el.style`.
+
+/// `get`/`has`/`size` lisent les déclarations ; `set`/`append`
+////`delete`/`clear` écrivent l'attribut ; le read-only jette.
+#[test]
+fn style_typed_om_maps() {
+    assert_eq!(
+        ev_in(
+            "<html><body><div id=t style='color:red;margin-top:4px'></div></body></html>",
+            "var m=document.getElementById('t').attributeStyleMap;\
+             m.size+'|'+m.get('color')+'|'+m.has('margin-top')+'|'+\
+             (typeof m.getAll)+'|'+(typeof m.set)",
+        ),
+        "2|red|true|function|function"
+    );
+    // set/append/delete → rail `style` attr ; forEach ordonné.
+    assert_eq!(
+        ev_in(
+            "<html><body><div id=t style='a:1'></div></body></html>",
+            "var m=document.getElementById('t').attributeStyleMap;\
+             m.set('b','2');m.append('a','3');m.delete('zz');\
+             var seen=[];m.forEach(function(v,k){seen.push(k+'='+v)});\
+             m.clear?document.getElementById('t').style.cssText+':'+seen.join(',')\
+                  :seen.join(',')",
+        ),
+        "a: 1; b: 2; a: 3:a=1,b=2,a=3"
+    );
+    // `computedStyleMap` : même table, `set` jette TypeError.
+    assert_eq!(
+        ev_in(
+            "<html><body><div id=t style='x:9'></div></body></html>",
+            "var c=document.getElementById('t').computedStyleMap();\
+             var ok;try{c.set('y','1');ok='no'}catch(e){ok=e.name||'TypeError'}\
+             c.get('x')+'|'+ok+'|'+('attributeStyleMap' in document.getElementById('t'))",
+        ),
+        "9|TypeError|true"
+    );
+}

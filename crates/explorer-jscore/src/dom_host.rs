@@ -6927,7 +6927,7 @@ fn aria_attr_name(key: &str) -> Option<String> {
     }
 }
 
-/// Reflets `aria*Elements`/`aria*Element` (ARIAMixin §6,
+/// Reflets `aria*Elements`/`aria*Element` (`ARIAMixin` §6,
 /// Pareto `api` lot 4) — `(prop JS, attribut, multi)`.
 /// `multi` = `FrozenArray<Element>` (le moteur rend un
 /// tableau snapshot — la fraîcheur n'est pas sondable en
@@ -8196,6 +8196,9 @@ impl Host for NodeHost {
             // si l'élément est un popover — feature-detect
             // honnête).
             || name == "requestFullscreen"
+            // `computedStyleMap()` — Typed OM read-only
+            // (tout élément, spec css-typed-om-1).
+            || name == "computedStyleMap"
             || (self.dom.borrow().has_attr(self.node, "popover")
                 && matches!(name, "showPopover" | "hidePopover" | "togglePopover"))
             // §B-82 — `"canPlayType" in v` (hasown des sniffs).
@@ -8480,6 +8483,15 @@ impl Host for NodeHost {
         match key {
             "style" => {
                 return Ok(Some(e.new_host_object(Rc::new(StyleHost {
+                    dom: self.dom.clone(),
+                    node,
+                    computed: false,
+                }))));
+            }
+            // `attributeStyleMap` — vue Typed OM de la même
+            // liste inline (Pareto api, css-typed-om-1).
+            "attributeStyleMap" => {
+                return Ok(Some(e.new_host_object(Rc::new(StyleMapHost {
                     dom: self.dom.clone(),
                     node,
                     computed: false,
@@ -9242,8 +9254,7 @@ impl Host for NodeHost {
             return Ok(Some(
                 ids.first()
                     .and_then(|i| self.dom.borrow().by_id(i))
-                    .map(|n| node_value(e, &self.dom, &self.cache, n))
-                    .unwrap_or(Value::Null),
+                    .map_or(Value::Null, |n| node_value(e, &self.dom, &self.cache, n)),
             ));
         }
         // Réflexions `ARIAMixin` (Pareto `api` lot 3) —
@@ -10614,10 +10625,7 @@ impl Host for NodeHost {
             // spec : le nœud garde `[0, off)`, un nouveau nœud
             // texte `[off, len)` est inséré après et retourné.
             "splitText" => {
-                let is_text = matches!(
-                    self.dom.borrow().nodes[node as usize].kind,
-                    NodeKind::Text
-                );
+                let is_text = matches!(self.dom.borrow().nodes[node as usize].kind, NodeKind::Text);
                 if !is_text {
                     return Ok(None);
                 }
@@ -11040,6 +11048,17 @@ impl Host for NodeHost {
             // Élément détaché → promesse rejetée `TypeError`
             // (spec). Borné : état logique honnête — la peinture
             // n'a pas d'overlay plein-écran à changer.
+            // `el.computedStyleMap()` — vue read-only des
+            // valeurs calculées (css-typed-om-1) : même liste
+            // que `getComputedStyle` (inline + repli
+            // géométrie borné), `set`/`delete` → TypeError.
+            "computedStyleMap" => {
+                return Ok(Some(e.new_host_object(Rc::new(StyleMapHost {
+                    dom: self.dom.clone(),
+                    node,
+                    computed: true,
+                }))));
+            }
             "requestFullscreen" => {
                 let pid = e.new_promise();
                 let attached = {
@@ -12659,8 +12678,206 @@ impl Host for StyleHost {
 }
 
 // ------------------------------------------------------------------
-// classList
+// attributeStyleMap / computedStyleMap — Typed OM
+// (`StylePropertyMap` / `StylePropertyMapReadOnly`, css-typed-om-1).
+// Vue map-like de la MÊME `style_map` que `el.style` — valeurs
+// servies en chaîne (les `CSSUnitValue`/`CSSKeywordValue` typés
+// sont une déviation bornée : la plupart des sites lisent
+// `.get('x')` et n'inspectent pas `.unit`).
 // ------------------------------------------------------------------
+
+/// `el.attributeStyleMap` (mutable) / `el.computedStyleMap()`
+/// (read-only spec — `set`/`append`/`delete`/`clear` →
+/// `TypeError` css-typed-om-1).
+struct StyleMapHost {
+    dom: DomRef,
+    node: NodeId,
+    /// `true` = `computedStyleMap()` — lecture seule.
+    computed: bool,
+}
+
+/// Réécrit l'attribut `style` depuis une `style_map`
+/// (même sérialisation que `removeProperty` — `css: v`).
+fn style_map_write(d: &mut Dom, node: NodeId, map: &[(String, String)]) {
+    if map.is_empty() {
+        d.remove_attr(node, "style");
+    } else {
+        let css = map
+            .iter()
+            .map(|(k, v)| format!("{k}: {v}"))
+            .collect::<Vec<_>>()
+            .join("; ");
+        d.set_attr(node, "style", &css);
+    }
+}
+
+impl Host for StyleMapHost {
+    fn class_name(&self) -> &'static str {
+        if self.computed {
+            "StylePropertyMapReadOnly"
+        } else {
+            "StylePropertyMap"
+        }
+    }
+
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
+
+    fn get(&self, _e: &mut Engine, _t: Value, key: &str) -> JsResult<Option<Value>> {
+        if key == "size" {
+            let n = {
+                let d = self.dom.borrow();
+                style_map(&d, self.node).len()
+            };
+            return Ok(Some(Value::Num(n as f64)));
+        }
+        Ok(None)
+    }
+
+    fn set(&self, _e: &mut Engine, _t: Value, _key: &str, _v: Value) -> JsResult<bool> {
+        // `StylePropertyMap` n'est pas indexable par
+        // prop arbitraire (spec) — refus.
+        Ok(false)
+    }
+
+    fn invoke(
+        &self,
+        e: &mut Engine,
+        _t: Value,
+        name: &str,
+        args: &[Value],
+    ) -> JsResult<Option<Value>> {
+        let readonly = self.computed;
+        match name {
+            "get" => {
+                let k = prop_key(&e.to_js_string(arg(args, 0))?);
+                let v = {
+                    let d = self.dom.borrow();
+                    style_map(&d, self.node)
+                        .into_iter()
+                        .find(|(kk, _)| kk == &k)
+                        .map(|(_, v)| v)
+                };
+                Ok(Some(match v {
+                    Some(v) => e.str_val(v),
+                    None => Value::Undefined,
+                }))
+            }
+            "getAll" => {
+                let k = prop_key(&e.to_js_string(arg(args, 0))?);
+                let vals: Vec<Value> = {
+                    let d = self.dom.borrow();
+                    style_map(&d, self.node)
+                        .into_iter()
+                        .filter(|(kk, _)| kk == &k)
+                        .map(|(_, v)| v)
+                        .collect::<Vec<_>>()
+                }
+                .into_iter()
+                .map(|v| e.str_val(v))
+                .collect();
+                Ok(Some(e.new_array(vals)))
+            }
+            "has" => {
+                let k = prop_key(&e.to_js_string(arg(args, 0))?);
+                let has = {
+                    let d = self.dom.borrow();
+                    style_map(&d, self.node).iter().any(|(kk, _)| kk == &k)
+                };
+                Ok(Some(Value::Bool(has)))
+            }
+            "set" | "append" => {
+                if readonly {
+                    return Err(e.type_error("TypeError: read only"));
+                }
+                let k = prop_key(&e.to_js_string(arg(args, 0))?);
+                let vals: Vec<String> = (1..args.len())
+                    .map(|i| e.to_js_string(arg(args, i)))
+                    .collect::<Result<_, _>>()?;
+                let mut d = self.dom.borrow_mut();
+                let mut map = style_map(&d, self.node);
+                // `set` = remplace toutes les entrées du nom ;
+                // `append` = ajoute une entrée par valeur
+                // (spec : doublons possibles — `getAll` les
+                // voit, `el.style` les ignore en cascade).
+                if name == "set" {
+                    map.retain(|(kk, _)| kk != &k);
+                }
+                for v in vals {
+                    map.push((k.clone(), v));
+                }
+                style_map_write(&mut d, self.node, &map);
+                Ok(Some(Value::Undefined))
+            }
+            "delete" => {
+                if readonly {
+                    return Err(e.type_error("TypeError: read only"));
+                }
+                let k = prop_key(&e.to_js_string(arg(args, 0))?);
+                let mut d = self.dom.borrow_mut();
+                let mut map = style_map(&d, self.node);
+                map.retain(|(kk, _)| kk != &k);
+                style_map_write(&mut d, self.node, &map);
+                Ok(Some(Value::Undefined))
+            }
+            "clear" => {
+                if readonly {
+                    return Err(e.type_error("TypeError: read only"));
+                }
+                self.dom.borrow_mut().remove_attr(self.node, "style");
+                Ok(Some(Value::Undefined))
+            }
+            // `entries`/`keys`/`values` — snapshots de
+            // tableaux (l'iterable Symbol reste une borne,
+            // cf. autres surfaces). `forEach(cb, this?)` =
+            // `(valeur, nom, map)` spec.
+            "entries" | "keys" | "values" | "forEach" => {
+                let map = {
+                    let d = self.dom.borrow();
+                    style_map(&d, self.node)
+                };
+                if name == "forEach" {
+                    let cb = arg(args, 0);
+                    let this_arg = arg(args, 1);
+                    for (k, v) in map {
+                        let kv = e.str_val(k);
+                        let vv = e.str_val(v);
+                        let _ = e.call_value(
+                            cb.clone(),
+                            this_arg.clone(),
+                            &[vv, kv, _t.clone()],
+                        );
+                    }
+                    Ok(Some(Value::Undefined))
+                } else {
+                    let vals: Vec<Value> = match name {
+                        "keys" => map.iter().map(|(k, _)| e.str_val(k)).collect(),
+                        "values" => map.iter().map(|(_, v)| e.str_val(v)).collect(),
+                        _ => map
+                            .iter()
+                            .map(|(k, v)| {
+                                let kk = e.str_val(k);
+                                let vv = e.str_val(v);
+                                e.new_array(vec![kk, vv])
+                            })
+                            .collect(),
+                    };
+                    Ok(Some(e.new_array(vals)))
+                }
+            }
+            _ => Ok(None),
+        }
+    }
+
+    fn has_method(&self, name: &str) -> bool {
+        matches!(
+            name,
+            "get" | "getAll" | "has" | "set" | "append" | "delete" | "clear" | "forEach"
+                | "entries" | "keys" | "values"
+        )
+    }
+}
 
 /// Types de liens supportés pour `relList.supports` (spec
 /// linkTypes courants — la liste exacte évolue avec le moteur ;
@@ -13356,7 +13573,7 @@ fn ce_upgrade_node(e: &mut Engine, dom: &DomRef, cache: &NodeCache, node: NodeId
         if let Ok(mut d) = dom.try_borrow_mut() {
             if d.ce.probe_seen.insert(format!("+{name}")) {
                 tracing::info!(target: "dom_probe", site = "ce.upgrade", tag = %name, node = %node,
-                    epoch = %d.nodes.get(node as usize).map(|n| n.epoch).unwrap_or(0));
+                    epoch = %d.nodes.get(node as usize).map_or(0, |n| n.epoch));
             }
         }
     }

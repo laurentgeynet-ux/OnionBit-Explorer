@@ -2216,9 +2216,13 @@ struct AnimData {
     /// Wrapper `Animation` déjà rendu — `getAnimations`
     /// rend le même objet (identité spec).
     wrapper: Option<ObjId>,
-    /// Handlers `onfinish`/`oncancel`.
+    /// Handlers `onfinish`/`oncancel`/`onremove`.
     onfinish: Value,
     oncancel: Value,
+    /// `onremove` (WAAPI `remove` event) — valeur du handler.
+    onremove: Value,
+    /// `id` spec (chaîne, mutable).
+    id: String,
     /// `effect`/`timeline` (JS-C461) — `new Animation(kfe,
     /// tl)` les porte ; `el.animate` pose un `KeyframeEffect`
     /// implicite + `document.timeline`.
@@ -2396,6 +2400,8 @@ pub(crate) fn animation_ctor(e: &mut Engine, _t: Value, args: &[Value]) -> JsRes
         wrapper: None,
         onfinish: Value::Undefined,
         oncancel: Value::Undefined,
+        onremove: Value::Undefined,
+        id: String::new(),
         effect,
         timeline: tl,
         css_name: None,
@@ -2442,6 +2448,8 @@ pub(crate) fn animate(e: &mut Engine, t: Value, args: &[Value]) -> JsResult<Valu
         wrapper: None,
         onfinish: Value::Undefined,
         oncancel: Value::Undefined,
+        onremove: Value::Undefined,
+        id: String::new(),
         effect: kfe,
         timeline: Value::Obj(document_timeline(e)),
         css_name: None,
@@ -2521,6 +2529,8 @@ fn sync_css_anims(e: &mut Engine) -> Vec<(crate::dom::NodeId, String, bool)> {
             wrapper: None,
             onfinish: Value::Undefined,
             oncancel: Value::Undefined,
+            onremove: Value::Undefined,
+            id: String::new(),
             effect: Value::Null,
             timeline: Value::Obj(document_timeline(e)),
             css_name: Some(name.clone()),
@@ -2577,9 +2587,30 @@ impl Host for AnimHost {
         )
     }
 
-    fn get(&self, e: &mut Engine, _t: Value, key: &str) -> JsResult<Option<Value>> {
+    fn get(&self, e: &mut Engine, t: Value, key: &str) -> JsResult<Option<Value>> {
+        // Méthodes lisibles (Pareto `api` lot 4) — même
+        // discipline que les nœuds : `typeof anim.play` et
+        // `'play' in anim` exigent une fonction en lecture ;
+        // le trampoline redispatche `Host::invoke`.
+        if self.has_method(key) {
+            let nv = e.str_val(key);
+            return Ok(Some(e.bound_native(
+                "anim.method",
+                anim_method_trampoline,
+                vec![nv, t],
+            )));
+        }
         let d = self.data.borrow();
         Ok(Some(match key {
+            "id" => e.str_val(d.id.clone()),
+            // `startTime`/`overallProgress` — `null` spec sans
+            // horloge de timeline dans le miroir (borne).
+            "startTime" | "overallProgress" => Value::Null,
+            // `replaceState` — `"active"` honnête : la machine
+            // n'a pas de compositeur (pas d'état `removed`
+            // sans timeline — même borne CAP-187).
+            "replaceState" => return Ok(Some(e.str_val("active"))),
+            "onremove" => d.onremove.clone(),
             "playState" => return Ok(Some(e.str_val(d.state))),
             "playbackRate" => Value::Num(d.rate),
             "pending" => Value::Bool(false),
@@ -2612,6 +2643,14 @@ impl Host for AnimHost {
             }
             "oncancel" => {
                 self.data.borrow_mut().oncancel = v;
+                Ok(true)
+            }
+            "onremove" => {
+                self.data.borrow_mut().onremove = v;
+                Ok(true)
+            }
+            "id" => {
+                self.data.borrow_mut().id = e.to_js_string(v)?;
                 Ok(true)
             }
             "playbackRate" => {
@@ -3396,4 +3435,22 @@ impl Host for XrHost {
             _ => Ok(None),
         }
     }
+}
+
+/// Trampoline « méthode `Animation` lisible » (Pareto `api`
+/// lot 4) — redispatche `Host::invoke` sur le receveur lié,
+/// même motif que `host_method_trampoline` des nœuds.
+fn anim_method_trampoline(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
+    let Some((Value::Str(m), rest)) = args.split_first() else {
+        return Ok(Value::Undefined);
+    };
+    let name = m.to_string();
+    let Some(Value::Obj(id)) = rest.first().cloned() else {
+        return Ok(Value::Undefined);
+    };
+    let Some(h) = e.host_of(id) else {
+        return Ok(Value::Undefined);
+    };
+    Ok(h.invoke(e, Value::Obj(id), &name, &rest[1..])?
+        .unwrap_or(Value::Undefined))
 }
