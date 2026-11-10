@@ -3411,10 +3411,13 @@ fn paint_self(
     if bx.control_checked {
         let side = (rect.width.min(rect.height) * 0.55).max(0.0);
         if side > 0.0 {
+            // `accent-color` prime sur `color` pour la marque
+            // de contrôle (css-ui-4 §accent-color).
             let ink = bx
                 .style
-                .get("color")
+                .get("accent-color")
                 .and_then(parse_color)
+                .or_else(|| bx.style.get("color").and_then(parse_color))
                 .unwrap_or(Color::BLACK);
             items.push(DisplayItem::FillRect {
                 rect: Rect {

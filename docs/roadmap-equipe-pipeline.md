@@ -3823,6 +3823,7 @@ chez NAVIGATEUR — non recopiés ici.
 - [x] **R-231. `@custom-media` alias de media query** : registre `Statement` + substitution `@media (--nom)` à la collecte (négation composée). `at.unapplied.custom-media` éliminé. Verrou : 2 env.
 - [x] **R-238. `value.dropped.<prop>.<valeur>` détaillé** : le compteur nomme le début de la valeur — font-size github à nommer r5.
 - [x] **R-241. `font-variant-numeric` → `font-feature-settings`** : 8 mots-clés → tags OT concaténés aux settings existants. Verrous : 2 tests.
+- [x] **R-242. `accent-color`/batch dormant** : accent consommé au paint contrôle coché + 10 props dormants reconnus. Verrous : 2 tests.
 ## Tâches continues
 
 - **Triage rendu** des échecs `site_smoke.ps1` : les écarts
