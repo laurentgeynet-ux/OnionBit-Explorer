@@ -834,6 +834,7 @@ dependencies = [
 name = "explorer-cli"
 version = "0.2.0"
 dependencies = [
+ "explorer-common",
  "explorer-core",
  "explorer-css",
  "explorer-dom",
