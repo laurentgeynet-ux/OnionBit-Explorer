@@ -1046,7 +1046,9 @@ fn rightmost_key(sel: &ComplexSelector) -> BucketKey {
                 attr.get_or_insert(name);
             }
             SimpleSelector::Type(t) => {
-                tag.get_or_insert(t);
+                // `ns|tag` indexé sous `tag` nu — le filtrage
+                // ns reste côté `simple_matches` (R-237).
+                tag.get_or_insert(t.rsplit('|').next().unwrap_or(t.as_str()));
             }
             SimpleSelector::Universal
             | SimpleSelector::Pseudo(_)
@@ -1190,6 +1192,10 @@ pub struct StyleEngine {
     /// alias de media query : `@media (--nom)` → substitution
     /// du query enregistré à la collecte.
     pub custom_media: HashMap<String, String>,
+    /// `@namespace` enregistrés (R-237) — préfixe → URI,
+    /// transportés au `MatchCache` à chaque `compute_*` pour
+    /// résoudre les sélecteurs `ns|tag`.
+    pub namespaces: HashMap<String, String>,
     rules: Vec<CollectedRule>,
     /// Règles UA **quirks-only** (HTML Rendering, « In quirks
     /// mode ») — parsées avec la feuille UA, ne candidatent
@@ -1673,7 +1679,25 @@ impl StyleEngine {
                         // `@layer a, b;` : déclare l'ordre sans
                         // règles (les corps s'y raccordent par
                         // nom — premier arrivé fixe le rang).
-                        if at.name == "custom-media" {
+                        if at.name == "namespace" {
+                            // R-237 — `@namespace [préfixe]
+                            // "uri"` : l'absence de préfixe
+                            // déclare le défaut (clé vide).
+                            let toks: Vec<&str> = prelude
+                                .split_whitespace()
+                                .map(|t| t.trim_matches('"').trim_matches('\''))
+                                .filter(|t| !t.is_empty())
+                                .collect();
+                            match toks.as_slice() {
+                                [uri] => {
+                                    self.namespaces.insert(String::new(), (*uri).to_string());
+                                }
+                                [pfx, uri] => {
+                                    self.namespaces.insert((*pfx).to_string(), (*uri).to_string());
+                                }
+                                _ => {}
+                            }
+                        } else if at.name == "custom-media" {
                             // R-231 — `@custom-media --nom (q)` :
                             // l'alias vit dans `custom_media` —
                             // `@media (--nom)` substitué à la
@@ -1876,6 +1900,7 @@ impl StyleEngine {
         containers: Option<&HashMap<NodeId, ContainerMeasure>>,
     ) -> ComputedStyle {
         let mut mcache = MatchCache::default();
+        mcache.namespaces = self.namespaces.clone();
         let root_fs = self.root_font_size(dom, env, state);
         let parent = parent_computed(
             self,
@@ -1915,6 +1940,7 @@ impl StyleEngine {
         // `compute_with_parent`. Appel direct : passer par
         // `compute_with_state` re-bouclerait ici sans fin.
         let mut mcache = MatchCache::default();
+        mcache.namespaces = self.namespaces.clone();
         self.compute_with_parent(
             dom,
             doc_el,
@@ -2017,6 +2043,7 @@ impl StyleEngine {
         let mut map = HashMap::new();
         let mut pseudos = HashMap::new();
         let mut mcache = MatchCache::default();
+        mcache.namespaces = self.namespaces.clone();
         // Ancêtres de `root` : un sous-arbre peut être stylé
         // hors racine document — leurs clés restent visibles
         // pour les combinators ancêtres (même contrat que
@@ -2108,6 +2135,7 @@ impl StyleEngine {
         let mut map = HashMap::new();
         let mut pseudos = HashMap::new();
         let mut mcache = MatchCache::default();
+        mcache.namespaces = self.namespaces.clone();
         // Les ancêtres au-dessus du sous-arbre restent
         // visibles au matching (contrat du restyle scopé).
         let anc = AncestorFilter::of_ancestors(dom, root);
