@@ -1129,3 +1129,20 @@ journal « livré ».
 - **Côté PIPE** : l'at-rule est déjà parsée en `Statement`;
   si la feuille résolue arrive concaténée, tout le reste
   (cascade, médias, couches) fonctionne — rien à changer.
+
+---
+
+## Mur aval youtube — cycle de vie top-doc perdu (NAV, JS-C471)
+
+`document.readyState === "loading"` mesuré → `[[X]]` SSR non hydratés
+(polyfill CE kevlar : `__isUpgradeDisabled` tant que `loading`).
+
+**Bras fautif nommé** : `sub_commit_tail` (cycle de vie doc top —
+`net.rs:529`/`563`) n'est appelé que sur commit paint réussi —
+`shared.rs:296` `(Ok(()), live==true)`. Bras `Err`/epoch supplantée =
+cycle `interactive`→`DCL`→`complete`→`load` **perdu** (`rs.set` : seul
+`ctx=1` frame reçoit le cycle ; aucun `rs.buf`/`rs.skip` → jamais invoqué).
+
+**Levier** : le cycle de vie doc top ne doit pas dépendre du sort du
+commit paint — rejouer `pending_doc_lifecycle` ou appeler le bloc
+cycle sur les bras non-`(Ok,true)` de `shared.rs`.
