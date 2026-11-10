@@ -994,54 +994,6 @@ pub fn prop_supported(name: &str) -> bool {
     SUPPORTED_PROPS.contains(&name) || crate::value::expand_shorthand(name, "0").is_some()
 }
 
-/// R-245 — **routée** : la déclaration `x{name:inherit}`
-/// atteint-elle le `ComputedStyle` (nom posé, ou shorthand
-/// expansé en longhands) ? Le critère `prop_supported`
-/// sature une fois la table comblée — cette sonde mesure
-/// si la déclaration *survit* à la cascade au lieu de
-/// répondre seulement « nom reconnu ».
-/// L'appelant fournit le DOM (`<p class=x>` attendu) —
-/// explorer-css ne peut pas construire de DOM (pas de dep
-/// vers explorer-html). Critère honnête : `x{name:inherit}`
-/// doit produire un `ComputedStyle` **différent** de `x{}`
-/// — un nom stocké indifféremment (`xyz-bogus`) ne compte
-/// pas. `all`/shorthands routent via leurs longhands.
-#[must_use]
-pub fn prop_routed(dom: &explorer_dom::Dom, name: &str) -> bool {
-    let baseline = {
-        let mut eng = StyleEngine::new();
-        eng.add_css("p {}", Origin::Author);
-        eng.compute_tree(dom, dom.document(), &StyleEnv::default())
-    };
-    let with = {
-        let mut eng = StyleEngine::new();
-        eng.add_css(&format!("p {{ {name}: inherit }}"), Origin::Author);
-        eng.compute_tree(dom, dom.document(), &StyleEnv::default())
-    };
-    fn st_of<'a>(
-        dom: &explorer_dom::Dom,
-        n: explorer_dom::NodeId,
-        sm: &'a StyleMap,
-        out: &mut Option<&'a ComputedStyle>,
-    ) {
-        if dom.attribute_str(n, "class").ok().flatten().is_some_and(|c| c == "x") {
-            *out = sm.get(n);
-        }
-        if let Ok(ch) = dom.children(n) {
-            for c in ch {
-                st_of(dom, c, sm, out);
-            }
-        }
-    }
-    let (mut b, mut w) = (None, None);
-    st_of(dom, dom.document(), &baseline, &mut b);
-    st_of(dom, dom.document(), &with, &mut w);
-    match (b, w) {
-        (Some(b), Some(w)) => b != w,
-        _ => false,
-    }
-}
-
 /// `(name: value)` d'une media query — px pour *-width/-height.
 /// `em`/`rem` y sont résolus contre la font-size INITIALE
 /// (spec MQ4 — jamais le `:root` calculé) : `env.font_size_base`.
