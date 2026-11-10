@@ -1348,3 +1348,12 @@ raster via `tile_sample`). Impact NAV : les bras lisant
 - Contrat **additif** : `vendor_alias(name)` privé — préfixe `-webkit-*`/`-moz-*`/`-ms-*`/`-o-*` → nom canonique, appliqué sur `lname` en entrée de cascade et dans `prop_supported`/`decl_supported`. Aucune signature cassée ; l'alias produit la MÊME propriété (cascade normale — la dernière déclarée gagne, comportement Chrome).
 - Non mappés volontairement : `-ms-filter` (syntaxe IE incompatible), `-ms-overflow-style`/`font-smoothing`/`overflow-scrolling` (non-standard-track — restent honnêtement non supportés).
 - Verrou : `vendor_prefix_alias_canonique` (consommation + priorité cascade + `prop_supported`). Misses corpus : 58 → 9 honnêtes.
+
+## NAV — crans 27-30 (vols 9521-9524) : `polymerController` jamais écrit via `set`/`defineProperty` sur hôte ; le pm est **omis du stamping `ytd-app`**
+
+- **Piège corrigé** : les vols 9520-9522 tournaient un **binaire périmé** (`scripts/spawn_daemon.ps1` résout `cargo metadata` → `target/x86_64-pc-windows-msvc/release/` — le `.cargo/config` déprécié écrit ailleurs + exe verrouillé par les daemons résiduels). Passer `-Exe` explicite + tuer les daemons avant rebuild.
+- `pc.def` (cran 27, `define_one_prop`) : `polymerController` est défini en **accesseur** sur objets `<plain>` (descripteurs kevlar `app:6169`+ — nominal `wig`/`drX`) ; `pc.set` (interp) : écrit sur `HTMLElement` depuis `base_module_set` (`app:616`/`293` — init early shim) — jamais vu `F.polymerController=O` du `kevlar_base:3779` aboutir sur l'élément vivant.
+- Vol 9524 (binaire frais, sondes cran 29) : **`dom.stale`/`op=set` = 0** — aucun handle périmé cette fois (le phénomène 9520 était réel mais non déterministe — probablement course). `el.birth` : 3 `ytd-page-manager` (1847/1927/2007) ; upgrade OK sur node=2007 epoch=1.
+- **Faits finals mesurés** : `ytd-masthead` pc=`d` + 5 enfants stampés ; `ytd-app` 15 enfants — mais `ytd-page-manager` absent du DOM vivant alors que le template `ytd-app` le liste à `res` index 15 ; `getElementById` null, `skel` présent, `grid`=0. **Le stamping/flatten `res→kids` de `ytd-app` omet l'élément slot-default `ytd-page-manager`** (ou il est retiré post-upgrade sans `dom.kill` — il est sous `ytd-app`, hors fenêtre de la sonde body).
+- Erreur annexe : `TypeError: cannot read addEventListener of Undefined` à `app:731` pendant un upgrade `class extends h` (avant la fenêtre pm).
+- **Levier** : sonder le flatten/stamp (nommer l'index sauté : non-sloté vs retiré après coup) — ou élargir `dom.kill` à tout parent custom-element (`ytd-*`).
