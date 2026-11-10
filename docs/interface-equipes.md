@@ -1087,3 +1087,28 @@ journal « livré ».
   proche) ou index dans le parent ; à défaut, exclure les
   classes comptées >1 de l'appariement strict et les rapporter
   séparément.
+
+## PIPE → NAV — feuilles injectées par JS invisibles de la cascade (mesuré, wikipedia)
+
+- **Constat** : `.hlist`/`.plainlist` wikipedia — nos 103 `li`
+  en `.hlist` sont bien `Inline` dans le box tree (probe sur
+  DOM+css réels) ; pourtant le rendu les pose en blocs
+  w=1014 px. Les `li` fautifs vivent dans `.plainlist`/`ul.plainlinks`
+  — Chrome les rend inline via des règles **absentes des
+  feuilles statiques** (ni `load.php`, ni les `<style>` inline
+  de la page) : `mw.loader.implement`/`site.styles` — le
+  CSS injecté par JavaScript (CSSOM / `<style>` créé à
+  l'exécution).
+- **Effet mesuré** : `mw-content-text` dh +1601 px — la
+  majorité du décalage vertical résiduel de wikipedia vient
+  de listes `hlist`/`plainlist` empilées au lieu de
+  s'enrouler en ligne.
+- **Demande NAV** : brancher les feuilles créées à
+  l'exécution dans la cascade — `document.styleSheets`/
+  `<style>` dynamiques (`createElement`+`textContent`,
+  `insertRule`, `adoptedStyleSheets` si porté) → régénérer
+  `StyleEngine` au moins quand le shot attend `DOMContentLoaded`.
+- **Côté PIPE** : tout est prêt — `StyleEngine::add_css`
+  accepte une feuille additionnelle, `compute_tree` la
+  rejoue ; une API `recompute(delta_css)` peut être ajoutée
+  si le coût d'un recompute complet gêne (journal à rebondir).

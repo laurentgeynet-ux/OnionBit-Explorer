@@ -3815,7 +3815,7 @@ chez NAVIGATEUR — non recopiés ici.
 - [x] **R-224. `width:%` nu indéfini en mesure intrinsèque** : shrink-to-fit/flex ne résout plus le `%` nu contre `cb` (menus vector `dx>500` : 251→127) ; les maths à % gardent `cb`.
 - [x] **R-225. `calc()` dans les features MQ** : `mq_calc_len` (`+−*/`, parenthèses, `px`/`em`/`rem`/`vw`/`vh`/`vmin`/`vmax`) + extraction de groupe `(…)` qui ne mange plus la `)` du `calc` interne — `(min-width:calc(640px-1px))` wikipedia.
 - [x] **R-226. `img` à taille CSS explicite reste remplacée sans `sizes`** : `img_box` tombait sur `Text(alt)` → dimensions perdues (img flex → 0) ; garde le kind si `tag==img` + taille non-auto non-% ; `input[type=image]` garde le repli `alt`.
-- [ ] **R-227. `a.mw-logo` 261 vs 140 — stretch dans `vector-header-start`** (EN COURS) : `.mw-header{display:grid;grid-template:.../15.5rem minmax(0,1fr);grid-template-areas}` — `a` display:flex s'étire au conteneur au lieu de shrink-wrap ; flex-in-flex + grid reproduisent correctement en isolation — reste une règle réelle spécifique.
+- [ ] **R-227. `a.mw-logo` 261 vs 140 — stretch dans `vector-header-start`** ; **R-228. dy+1601 = listes `hlist`/`plainlist` empilées** — diagnostic : `li` Inline corrects en cascade+boxtree ; les blocs viennent des feuilles **injectées par JS** (mw.loader/site.styles) absentes de notre cascade — journalisé PIPE→NAV (EN COURS) : `.mw-header{display:grid;grid-template:.../15.5rem minmax(0,1fr);grid-template-areas}` — `a` display:flex s'étire au conteneur au lieu de shrink-wrap ; flex-in-flex + grid reproduisent correctement en isolation — reste une règle réelle spécifique.
 
 ## Tâches continues
 
