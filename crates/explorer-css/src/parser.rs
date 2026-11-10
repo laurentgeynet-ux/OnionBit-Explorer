@@ -515,7 +515,8 @@ impl<'t> Parser<'t> {
                         scope_wrap_rules(&mut rules, &root, bound.as_deref());
                         AtKind::Scope { rules }
                     }
-                    "font-face" | "page" | "viewport" | "counter-style" | "property" => {
+                    "font-face" | "page" | "viewport" | "counter-style" | "property"
+                    | "font-palette-values" => {
                         AtKind::Declarations {
                             prelude,
                             declarations: self.declaration_block(),

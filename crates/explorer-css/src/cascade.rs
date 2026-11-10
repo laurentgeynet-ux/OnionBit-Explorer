@@ -426,6 +426,7 @@ const SUPPORTED_PROPS: &[&str] = &[
     "font-variant",
     "font-variant-alternates",
     "font-feature-settings",
+    "font-palette",
     "font-stretch",
     "font-size-adjust",
     "font-synthesis",
@@ -1082,6 +1083,19 @@ pub(crate) struct RegisteredProp {
     pub initial: Option<String>,
 }
 
+/// R-239 — une palette nommée `@font-palette-values` :
+/// `font-family`, `base-palette`, `override-colors`
+/// (index→couleur) — consommée par `font-palette: --nom`.
+#[derive(Debug, Clone, Default)]
+pub struct FontPalette {
+    /// Famille de police à laquelle la palette s'applique.
+    pub font_family: String,
+    /// `base-palette` (numéro ou mot-clé).
+    pub base_palette: String,
+    /// `override-colors` : index → valeur couleur.
+    pub override_colors: Vec<(u32, String)>,
+}
+
 /// R-229 — une valeur nommée de `@font-feature-values` :
 /// tag OpenType 4cc + indices — résolution
 /// `font-variant-alternates` (annotation→`nalt`,
@@ -1188,6 +1202,9 @@ pub struct StyleEngine {
     /// famille → nom → tag+indices (résolution
     /// `font-variant-alternates`).
     pub font_feature_values: HashMap<String, HashMap<String, FontFeatureValues>>,
+    /// `@font-palette-values` enregistrés (R-239) —
+    /// `--nom` → palette (consommée par `font-palette`).
+    pub font_palettes: HashMap<String, FontPalette>,
     /// `@custom-media <--nom> (query)` enregistrés (R-231) —
     /// alias de media query : `@media (--nom)` → substitution
     /// du query enregistré à la collecte.
@@ -1389,6 +1406,8 @@ pub struct StyleMap {
     pub counter_styles: HashMap<String, CounterStyle>,
     /// `@font-feature-values` enregistrés (R-229).
     pub font_feature_values: HashMap<String, HashMap<String, FontFeatureValues>>,
+    /// `@font-palette-values` enregistrés (R-239).
+    pub font_palettes: HashMap<String, FontPalette>,
 }
 
 impl StyleMap {
@@ -1772,6 +1791,37 @@ impl StyleEngine {
                             }
                             self.counter_styles
                                 .insert(prelude.trim().to_ascii_lowercase(), cs);
+                        } else if at.name.eq_ignore_ascii_case("font-palette-values") {
+                            // R-239 — `@font-palette-values --nom
+                            // { font-family; base-palette;
+                            // override-colors }` — registre par nom.
+                            let mut fp = FontPalette::default();
+                            for d in declarations {
+                                match d.name.as_str() {
+                                    "font-family" => {
+                                        fp.font_family =
+                                            d.value.trim().trim_matches('"').to_string();
+                                    }
+                                    "base-palette" => {
+                                        fp.base_palette = d.value.trim().to_string();
+                                    }
+                                    "override-colors" => {
+                                        for pair in d.value.split(',') {
+                                            let mut it =
+                                                pair.trim().splitn(2, char::is_whitespace);
+                                            if let (Some(i), Some(c)) = (it.next(), it.next()) {
+                                                if let Ok(idx) = i.parse::<u32>() {
+                                                    fp.override_colors
+                                                        .push((idx, c.trim().to_string()));
+                                                }
+                                            }
+                                        }
+                                    }
+                                    _ => {}
+                                }
+                            }
+                            self.font_palettes
+                                .insert(prelude.trim().to_ascii_lowercase(), fp);
                         } else {
                             // R-207 — bloc de déclarations parsé
                             // mais inerte (`@page`, `@viewport`,
@@ -2072,6 +2122,7 @@ impl StyleEngine {
             pseudos,
             counter_styles: self.counter_styles.clone(),
             font_feature_values: self.font_feature_values.clone(),
+            font_palettes: self.font_palettes.clone(),
         }
     }
 
@@ -2159,6 +2210,7 @@ impl StyleEngine {
             pseudos,
             counter_styles: self.counter_styles.clone(),
             font_feature_values: self.font_feature_values.clone(),
+            font_palettes: self.font_palettes.clone(),
         }
     }
 
@@ -4374,6 +4426,7 @@ const INHERITED_PROPS: &[&str] = &[
     "font-variant",
     "font-variant-alternates",
     "font-feature-settings",
+    "font-palette",
     "font-stretch",
     "font-size-adjust",
     "font-synthesis",
@@ -4701,6 +4754,25 @@ impl StyleEngine {
     /// la clé de famille vient de `font-family` calculé.
     /// `normal`/absent ne touche à rien.
     fn resolve_font_alternates(&self, map: &mut HashMap<NodeId, ComputedStyle>) {
+        // R-239 — `font-palette: --nom` : le registre livre
+        // la palette → `base-palette` normalisée en valeur
+        // (`light`/`dark`/index — `normal` si absent).
+        if !self.font_palettes.is_empty() {
+            for st in map.values_mut() {
+                let Some(name) = st.get("font-palette") else {
+                    continue;
+                };
+                let Some(fp) = self.font_palettes.get(name.trim()) else {
+                    continue;
+                };
+                let base = if fp.base_palette.is_empty() {
+                    "normal".to_string()
+                } else {
+                    fp.base_palette.clone()
+                };
+                st.set("font-palette", &base);
+            }
+        }
         if self.font_feature_values.is_empty() {
             return;
         }
