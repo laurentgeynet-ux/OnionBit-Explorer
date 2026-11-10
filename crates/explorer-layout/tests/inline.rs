@@ -820,6 +820,30 @@ fn counter_increment_reset_dans_content() {
     let _ = dom;
 }
 
+/// `counter-set` (css-lists-3) : valeur absolue, pas
+/// l'incrément — « ch » saute de 1 à 10 sur le 2e h2.
+#[test]
+fn counter_set_absolu() {
+    let (dom, bx) = laid_w(
+        "<!doctype html><div><h2>a</h2><h2 class=skip>b</h2></div>",
+        "body { margin: 0 } div { counter-reset: ch 0 } \
+         h2 { counter-increment: ch } h2.skip { counter-set: ch 10 } \
+         h2::before { content: counter(ch) \". \" } h2 { margin: 0 }",
+        800.0,
+    );
+    let mut out = Vec::new();
+    let mut stack = vec![bx.clone()];
+    while let Some(b) = stack.pop() {
+        if let Some(t) = &b.text {
+            out.push(t.clone());
+        }
+        stack.extend(b.children.iter().cloned());
+    }
+    let all = out.join("");
+    assert!(all.contains("1. "), "1er h2 → 1 : {all:?}");
+    assert!(all.contains("11. "), "skip → set 10 + increment : {all:?}");
+    let _ = dom;
+}
 /// R-169 fix — `counter-reset: a b 2` : le token suivant
 /// n'est un pas que s'il PARSE en entier — sinon c'est le
 /// nom suivant. Régression post-revue : `b` était avalé
