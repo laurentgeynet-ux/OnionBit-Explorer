@@ -336,6 +336,31 @@ pub(crate) fn define_one_prop(
     key: &str,
     desc_id: ObjId,
 ) -> JsResult<()> {
+    // Sonde kevlar §cran-27 : `polymerController` peut être
+    // posé par `Object.defineProperty` (acc `get/set` ou
+    // valeur) sans passer `set_prop_value` — la sonde `pc.set`
+    // de l'interp ne le voit pas ; celle-ci le nomme (classe
+    // hôte + forme du descripteur + pile JS bornée).
+    if key == "polymerController" && tracing::enabled!(target: "dom_probe", tracing::Level::INFO) {
+        let cls = e.host_of(id).map(|h| h.class_name()).unwrap_or("<plain>");
+        let dv = e
+            .get_prop(desc_id, "value")
+            .map(|v| e.describe(v))
+            .unwrap_or_else(|| "<acc/none>".into());
+        let stack: String = e
+            .stack_text("", "")
+            .lines()
+            .map(str::trim)
+            .filter(|l| l.starts_with("at "))
+            .take(8)
+            .collect::<Vec<_>>()
+            .join(" <- ");
+        let stack: String = stack.chars().take(600).collect();
+        tracing::info!(target: "dom_probe",
+            site = "pc.def", host = %cls,
+            v = %dv.chars().take(120).collect::<String>(),
+            stack = %stack);
+    }
     let r = define_one_prop_impl(e, id, key, desc_id);
     if let Err(t) = &r {
         crate::defprop_note(defprop_err_desc(e, id, key, t));
