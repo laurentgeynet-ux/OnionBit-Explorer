@@ -602,12 +602,23 @@ fn eval_js(path: &str) -> ExitCode {
 /// le script alimente les clés BCD et compte la couverture.
 fn check_names(kind: &str) -> ExitCode {
     use std::io::BufRead;
-    let test: fn(&str) -> bool = match kind {
-        "prop" => explorer_css::prop_supported,
-        "sel" => explorer_css::selector_supported,
-        "at" => explorer_css::at_rule_supported,
+    // R-245 — `routed` : la déclaration `x{name:inherit}`
+    // atteint-elle `ComputedStyle` (nom ou longhands
+    // expansés) ? Métrique post-saturation de `prop_supported`
+    // (la table comblée = « nom reconnu » trivial).
+    let routed_dom;
+    let test: Box<dyn Fn(&str) -> bool> = match kind {
+        "prop" => Box::new(explorer_css::prop_supported),
+        "sel" => Box::new(explorer_css::selector_supported),
+        "at" => Box::new(explorer_css::at_rule_supported),
+        "routed" => {
+            routed_dom = explorer_html::TreeBuilder::parse(
+                "<body><p class=x>ok</p></body>",
+            );
+            Box::new(move |name| explorer_css::prop_routed(&routed_dom, name))
+        }
         _ => {
-            eprintln!("check : kind inconnu {kind:?} — attendu prop|sel|at");
+            eprintln!("check : kind inconnu {kind:?} — attendu prop|sel|at|routed");
             return ExitCode::FAILURE;
         }
     };
