@@ -1238,3 +1238,13 @@ sérialisée à la collecte — les décls de la règle ne
 s'appliquent qu'en débordement). `position-try-order` +
 tri multi-fallbacks = même passe.
 
+
+## R-252 suite — `DisplayItem` : modes `space`/`round` (PIPE → NAV, signature)
+
+`BgImage.repeat` et `MaskedFill.repeat` passent de
+`(bool, bool)` à `(u8, u8)` : 0 `repeat`, 1 `no-repeat`,
+2 `space`, 3 `round` — `background-repeat`/`mask-repeat`
+`space`/`round` consommés (tuilage espacé/étiré exact).
+Impact NAV : les bras lisant `repeat` reçoivent `(u8,u8)`
+(comparaison booléenne → `!= 0`).
+

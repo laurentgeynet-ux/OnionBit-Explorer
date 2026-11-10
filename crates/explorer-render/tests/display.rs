@@ -1294,7 +1294,7 @@ fn multicouche_url_seule_la_premiere_peint_limage_stockee() {
             _ => None,
         })
         .expect("item fond");
-    assert_eq!(repeat, (false, false), "couche no-repeat conservée");
+    assert_eq!(repeat, (1, 1), "couche no-repeat conservée");
 }
 
 #[test]
@@ -1915,7 +1915,7 @@ fn background_multicouche_paint_les_deux_couches() {
     let url_item = items
         .iter()
         .find(|i| match i {
-            DisplayItem::BackgroundImage { repeat, .. } => *repeat == (false, false),
+            DisplayItem::BackgroundImage { repeat, .. } => *repeat == (1, 1),
             _ => false,
         })
         .expect("couche url no-repeat");

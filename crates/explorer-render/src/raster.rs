@@ -1835,7 +1835,7 @@ fn paint_masked_fill(
     color: Color,
     img: &crate::DecodedImage,
     dst: &explorer_layout::Rect,
-    repeat: (bool, bool),
+    repeat: (u8, u8),
     luminance: bool,
     cur: Transform,
     clip: Option<&Mask>,
@@ -1912,22 +1912,14 @@ fn paint_masked_fill(
         // rel négatifs — pixels avant l'origine de la tuile) ;
         // sans repeat, hors tuile = couverture nulle (mask
         // absent → pixel masqué, pas peint).
-        let ry = py - dy0;
-        let ty = if repeat.1 {
-            ry.rem_euclid(dh)
-        } else if (0..dh).contains(&ry) {
-            ry
-        } else {
+        let Some(ty) = tile_sample((py - dy0) as f32, dh as f32, (y1 - dy0) as f32, repeat.1)
+        else {
             continue;
         };
         let sy = (ty as usize * img_h / tile_h).min(img_h - 1);
         for px in x0..x1 {
-            let rx = px - dx0;
-            let tx = if repeat.0 {
-                rx.rem_euclid(dw)
-            } else if (0..dw).contains(&rx) {
-                rx
-            } else {
+            let Some(tx) = tile_sample((px - dx0) as f32, dw as f32, (x1 - dx0) as f32, repeat.0)
+            else {
                 continue;
             };
             let sx = (tx as usize * img_w / tile_w).min(img_w - 1);
@@ -2050,22 +2042,14 @@ fn coverage_tile(
     let w = pw as usize;
     let data = m.data_mut();
     for py in y0..y1 {
-        let ry = py - dy0;
-        let ty = if repeat.1 {
-            ry.rem_euclid(dh)
-        } else if (0..dh).contains(&ry) {
-            ry
-        } else {
+        let Some(ty) = tile_sample((py - dy0) as f32, dh as f32, (y1 - dy0) as f32, repeat.1)
+        else {
             continue;
         };
         let sy = (ty as usize * ih / tile_h).min(ih - 1);
         for px in x0..x1 {
-            let rx = px - dx0;
-            let tx = if repeat.0 {
-                rx.rem_euclid(dw)
-            } else if (0..dw).contains(&rx) {
-                rx
-            } else {
+            let Some(tx) = tile_sample((px - dx0) as f32, dw as f32, (x1 - dx0) as f32, repeat.0)
+            else {
                 continue;
             };
             let sx = (tx as usize * iw / tile_w).min(iw - 1);
@@ -2451,11 +2435,43 @@ fn blend_channel(tag: u8, s: f32, d: f32) -> f32 {
     clippy::too_many_lines,
     clippy::cast_precision_loss
 )]
+/// Index source `rel` dans une tuile de `tile` px sur une
+/// zone de `zone` px — `space` = N tuiles pleines + gap
+/// uniforme (non-peint dans les gaps → `None`), `round` =
+/// N tuiles étirées à `zone/N` (échantillonnage à l'échelle).
+/// Mode 0 `repeat`, 1 `no-repeat`.
+fn tile_sample(rel: f32, tile: f32, zone: f32, mode: u8) -> Option<f32> {
+    match mode {
+        1 => (0.0..tile).contains(&rel).then_some(rel),
+        2 | 3 => {
+            if tile <= 0.0 || zone <= 0.0 {
+                return None;
+            }
+            let n = ((zone / tile).floor() as i32).max(1) as f32;
+            let pitch = zone / n;
+            let local = rel.rem_euclid(pitch);
+            if mode == 2 {
+                (local < tile).then_some(local)
+            } else {
+                Some(local * tile / pitch)
+            }
+        }
+        _ => Some(rel.rem_euclid(tile)),
+    }
+}
+
+#[allow(
+    clippy::too_many_arguments,
+    clippy::cast_precision_loss,
+    clippy::cast_possible_truncation,
+    clippy::cast_sign_loss,
+    clippy::cast_possible_wrap
+)]
 fn paint_tiled(
     pixmap: &mut Pixmap,
     rect: &explorer_layout::Rect,
     img: &crate::DecodedImage,
-    repeat: (bool, bool),
+    repeat: (u8, u8),
     origin: (f32, f32),
     cur: Transform,
     clip: Option<&Mask>,
@@ -2492,23 +2508,17 @@ fn paint_tiled(
     let dst = pixmap.pixels_mut();
     for dy in dy0..dy1 {
         let rel_y = dy - oy;
-        let sy = if repeat.1 {
-            rel_y.rem_euclid(ih)
-        } else {
-            if rel_y < 0 || rel_y >= ih {
-                continue;
-            }
-            rel_y
+        let Some(sy) =
+            tile_sample(rel_y as f32, ih as f32, (dy1 - dy0) as f32, repeat.1).map(|v| v as i32)
+        else {
+            continue;
         };
         for dx in dx0..dx1 {
             let rel_x = dx - ox;
-            let sx = if repeat.0 {
-                rel_x.rem_euclid(iw)
-            } else {
-                if rel_x < 0 || rel_x >= iw {
-                    continue;
-                }
-                rel_x
+            let Some(sx) = tile_sample(rel_x as f32, iw as f32, (dx1 - dx0) as f32, repeat.0)
+                .map(|v| v as i32)
+            else {
+                continue;
             };
             let i = dy as usize * pw as usize + dx as usize;
             if clip_data.is_some_and(|m| m[i] == 0) {

@@ -6,6 +6,7 @@ Le format suit [Keep a Changelog](https://keepachangelog.com/fr/1.1.0/)
 et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
+- **`background-repeat`/`mask-repeat` `space`/`round`** (`explorer-render`) : `DisplayItem::{BackgroundImage,MaskedFill}.repeat` passe de `(bool,bool)` à un mode `(u8,u8)` (0 repeat, 1 no-repeat, 2 space, 3 round — extension signée au journal) ; `tile_sample` distribue le gap (`space`) ou étire la tuile (`round`) au raster. `repeat-x`/`y` = `(0,1)`/`(1,0)`.
 - **`cq*` units** (`explorer-css` + `explorer-layout`) : `cqw`/`cqh`/`cqi`/`cqb`/`cqmin`/`cqmax` parsées et résolues — repli spec = small viewport sans conteneur ancêtre tracé (css-contain-3 §4.2, approximation documentée : `cqi`→w, `cqb`→h). Verrou : `container_units_fallback_viewport`.
 - **`text-indent` `hanging`/`each-line`** (`explorer-layout`) : les mots-clés css-text-4 sont lus — `hanging` = indent des lignes 2..n seulement, `each-line` = indent sur toutes (la longueur est extraite des tokens non mots-clés). Verrou : `text_indent_keywords`.
 - **`text-orientation:mixed` par glyphe** (`explorer-render`) : glyphe CJK (Han/Hiragana/Katakana/Hangul/pleine-largeur, via `cluster` → caractère source) debout ; glyphe non-CJK pivoté ±90° autour de sa plume — css-writing-modes §5.2, défaut spec. Verrou : `text_orientation_mixed_per_glyph`.
