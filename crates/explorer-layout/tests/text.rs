@@ -71,7 +71,9 @@ fn metrics_a_la_taille() {
     let m = font::metrics(&ttf, 10.0).expect("métriques");
     assert!((m.ascent - 8.0).abs() < f32::EPSILON);
     assert!((m.descent + 2.0).abs() < f32::EPSILON);
-    assert!((m.line_height() - 12.0).abs() < 0.01);
+    // R-214 — `line_height` = `asc − desc` (10), le
+    // `lineGap` n'entre plus (parité Chrome mesurée).
+    assert!((m.line_height() - 10.0).abs() < 0.01);
 }
 
 #[test]

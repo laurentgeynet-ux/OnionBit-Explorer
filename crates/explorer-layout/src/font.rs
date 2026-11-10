@@ -100,10 +100,15 @@ pub struct FontMetrics {
 }
 
 impl FontMetrics {
-    /// Hauteur de ligne naturelle (`ascent - descent + gap`).
+    /// Hauteur de ligne naturelle — `ascent − descent`
+    /// hhea (R-214, parité Chrome mesurée : Arial 16 → 17,9
+    /// ≈ 18 ; le `lineGap` ajoutait +0,4 px/line vs la réf).
+    /// Borne honnête : une fonte à `lineGap` significatif
+    /// réel (CJK épais) peut sous-mesurer — à recaler si un
+    /// corpus le montre.
     #[must_use]
     pub fn line_height(self) -> f32 {
-        self.ascent - self.descent + self.line_gap
+        self.ascent - self.descent
     }
 }
 
@@ -783,6 +788,9 @@ fn metrics_of(face: &ttf_parser::Face<'_>, size_px: f32) -> Option<FontMetrics> 
         return None;
     }
     let scale = size_px / upem;
+    // R-214 — `windows_metrics()` = OS/2 usWin avec repli
+    // hhea (parité Chrome sous Windows : Arial 16 → ~18 vs
+    // hhea+lineGap 18,4).
     Some(FontMetrics {
         ascent: f32::from(face.ascender()) * scale,
         descent: f32::from(face.descender()) * scale,
