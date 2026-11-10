@@ -3829,6 +3829,65 @@ chez NAVIGATEUR — non recopiés ici.
 - [x] **R-245. `check routed` + `prop_routed`** : plumbing livré — limite nommée (cascade stocke les inconnus → saturation). Prochain : `prop_affects` (delta layout) ou gate `decl_supported` à l’insert.
 - [x] **R-246. `check affects` + `prop_affects`** : delta box tree — vrai négatif dormants (`mask-*`/`anchor-*`/`xyz-bogus` miss), vrai positif consommables (`margin`/`all`/`block-size`/`display`). Aveugle aux props conteneur.
 - [x] **R-247. `font-feature-settings` → rustybuzz** : `FontRequest.feature_settings` parsé → `ot_features` — tnum/onum/nalt réels. `affects` aveugle au paint (prochaine jauge display-list).
+
+## Plan d'action long-terme — « tous les sites rendus correctement »
+
+Objectif : rendre tout site réel visuellement correct. La file ne
+s'épuise que si on mesure par le rendu, pas par la reconnaissance
+de noms. Ordre fixe (priorité par site-impact mesuré) :
+
+### Axe 1 — corpus vivant (file auto-alimentée)
+- Récoltes `site_harvest` périodiques (Tranco N+), ref Chrome,
+  diff pixel + `geometry_diff` + census `css.*`/`html.err.*`.
+- Chaque signal nommé par une fixture Chrome-vérifiée AVANT fix.
+- `bcd_coverage` = mesure d'entrée ; `affects`/`routed` = mesure
+  de consommation ; `value.dropped`/`unresolved` = file en vol.
+
+### Axe 2 — consommation des dormants (`affects`-miss, par usage réel)
+1. **`mask-*`** — wikipedia ×363 (icônes Vector masquées →
+   visibles à tort) : `mask-image`/`mask-size`/`mask-position`/
+   `mask-repeat` → pipeline rendu (surface + alpha).
+2. **`column-*`/`columns`** — multicol (wikipedia plainlist,
+   lobste.rs) : `column-count`/`column-width`/`column-gap`/
+   `column-rule` → layout multi-colonnes.
+3. **`border-image-*`** — 9-slices (R-234) : source/slice/
+   width/outset/repeat → découpe 9 régions au paint.
+4. **`anchor-*`/`position-try`** — github ×96 : positionnement
+   ancre (nommé, fallbacks, `@position-try` → `Declarations`
+   livré ; consommateur = resolver anchor → offsets).
+5. **`text-wrap`/`text-wrap-mode`/`text-wrap-style`** — `balance`
+   (titres) : mesure de ligne + répartiteur.
+6. **`unicode-bidi`/`text-orientation`** — bidi explicite +
+   orientations verticales (text.rs déjà en place).
+7. **`gap`/`place-*`/`container-*`/`inset-area`** — props
+   conteneur (blind spot `affects`) : layout flex/grid dédié.
+8. **`contain-intrinsic-*`/`content-visibility`** — tailles
+   virtuelles hors-écran → layout.
+9. **At-rules** : `@starting-style` (transitions d'entrée),
+   `@position-try` (résolu), `@function`/`@view-transition`
+   (dormants — consommateurs futurs).
+
+### Axe 3 — jauges non-saturantes
+- `check affects` (layout delta) — livré.
+- `check routed` (consommé par ComputedStyle — extension
+  user : shorthands expansés + `all` + longhand-prefixes).
+- Prochaine : display-list delta (plan paint — `text-decoration`,
+  `font-*`, `background-*`, `border-*`, `box-shadow`…).
+- Census en vol : `value.dropped.<prop>.<valeur>` (R-238) nomme
+  les valeurs réelles par site — file `font-size`×108 github.
+
+### Axe 4 — murs NAV (journalisés, hors périmètre PIPE)
+- `@import` imbriqué non re-expansé (lobste.rs layout).
+- Cycle de vie doc (`readyState`, `sub_commit_tail`).
+- CSSOM / styles injectés JS (`mw.loader`, `site.styles`).
+- Comparateur géométrique : faux appariements classes répétées.
+- `js.builtins` (82 %) — file JS-C468/469/471 NAV.
+
+### Discipline (par lot)
+fixture Chrome-vérifiée → implémentation → tests → clippy
+`-D warnings` → commit dédié + CHANGELOG + case cochée → merge
+→ re-mesure corpus/census. Sync `nav/youtube-fix` fréquent.
+
 ## Tâches continues
 
 - **Triage rendu** des échecs `site_smoke.ps1` : les écarts
