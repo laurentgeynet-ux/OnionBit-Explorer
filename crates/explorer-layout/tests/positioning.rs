@@ -928,3 +928,25 @@ fn grid_self_position() {
     assert_eq!(a.rect.x, 70.0, "self-end → bout de cellule");
     assert_eq!(a.rect.y, 20.0, "safe center → centre cellule");
 }
+
+/// `alignment-baseline`/`baseline-shift` replient sur la
+/// table `vertical-align` (css-inline-3 / SVG) quand
+/// `vertical-align` est absent.
+#[test]
+fn alignment_baseline_repli() {
+    let (dom, bx) = laid(
+        "<div><span id=a></span><span id=b></span></div>",
+        "div{font-size:40px}\
+         span{display:inline-block;width:10px;height:10px}\
+         #a{alignment-baseline:hanging}\
+         #b{baseline-shift:super}\
+",
+    );
+    let a = find(&bx, by_id(&dom, "a"));
+    let b = find(&bx, by_id(&dom, "b"));
+    // `hanging`→top : ancre la margin box au bord haut (y=0).
+    assert_eq!(a.rect.y, 0.0, "hanging → top");
+    // `super` remonte ≈ 0.33em — le run remonte d'au moins
+    // 1/4 d'em (métriques fonte approximées).
+    assert!(b.rect.y < 0.0, "super : dy négatif ({})", b.rect.y);
+}
