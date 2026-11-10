@@ -62,3 +62,16 @@ fn calc_dans_feature_mq() {
     assert!(media_matches(&env, &qs), "620 = 2*300+20 doit matcher");
 }
 
+
+#[test]
+fn calc_max_width_faux_desktop() {
+    // (max-width:calc(640px - 1px)) à 1366 → FAUX —
+    // sinon `.mw-logo-icon{display:block}`+`container{
+    // max-width:none}` s'appliqueraient à tort (logo
+    // wikipedia 261 vs 140).
+    let qs = queries_of("(max-width:calc(640px - 1px))");
+    let env = StyleEnv { width_px: 1366, height_px: 900, ..StyleEnv::default() };
+    assert!(!media_matches(&env, &qs), "1366 > 639 → doit être faux");
+    let env = StyleEnv { width_px: 500, height_px: 900, ..StyleEnv::default() };
+    assert!(media_matches(&env, &qs));
+}

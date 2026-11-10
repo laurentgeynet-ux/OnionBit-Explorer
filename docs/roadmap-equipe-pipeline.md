@@ -3819,6 +3819,7 @@ chez NAVIGATEUR — non recopiés ici.
 - [x] **R-224. `width:100%` dans flex item shrink-wrap** : `%` nu → `None` en mesure intrinsèque (contenu), maths à % gardent `cb`. `vector-collapsible` wikipedia 1088→~297 ; verrou `r224_flex_pct`.
 - [x] **R-225. `calc()` en feature MQ** : `(min-width:calc(640px - 1px))` wikipedia — bloc masquage logo jamais appliqué (+118 header-start) ; double bug : extraction `)` de groupe qui mangeait celle de `calc()`. Évaluateur `mq_calc_len` borné. Verrou : test aux deux bords.
 - [ ] **R-226. Remplacé `img` en flex → w=0** (EN COURS) : `style="width:140px"` donne 0 en item flex direct ET dans le contenu d'un item — `style`/`width` non résolu ou item traité atomique. Verrou `r226_img_flex` (ignore). Bissections faites : span texte+width → OK, img div plain → OK, img flex → 0.
+- [ ] **R-227. `a.mw-logo` stretch dans grid `mw-header`** (EN COURS — diagnostic figé) : wikipedia `.mw-header{display:grid;grid-template:.../15.5rem minmax(0,1fr);grid-template-areas}` — `a` (display:flex, block-level) s'étire au conteneur 261 vs Chrome 140 — soit le track `15.5rem`/`minmax`/auto-size diverge, soit le fallback grid/flex rate. grid-area/columns couverts dans grid.rs ; fixture à écrire `display:grid;15.5rem minmax(0,1fr)`.
 ## Tâches continues
 
 - **Triage rendu** des échecs `site_smoke.ps1` : les écarts
