@@ -1274,3 +1274,16 @@ interfaces dans le host DOM jscore.
 - `ypc.data` = `{page,endpoint,response,url,expirationTime}` (`onYtPageDataFetched` livré, `dataUpdatePromise` settled) — **`pc.data.topbarData:null`** → `computeTopbarData`/`updateMastheadData`/`onPageDataUpdated` jamais complétées → `mf.data:undef` → `stamp*`/`_renderSelf`/`renderJobsMap_` n'ont rien → masthead/page-manager vides.
 - `pc.onPageDataUpdated(pc.data)` → **`TypeError: getCurrentPage is not a function (on zc)`** — `zc`/`_.ke`/`PolymerFakeBaseClassWithoutHtml` manque aussi `getCurrentPage` — même trou que la suite `_`-interne (`_ensureAttributes`/`_flushProperties`/`_initDataProperties`/`_enableProperties`/`_attachDom`/`instanceTemplate`/`_stampTemplate`/`set`/`get`/`notifyPath`/`linkPaths`/`_takeAttributes`/`setPropertiesFromInitialAttributeValues`/`_propertiesChanged`/`_initializeProperties`/`_readyClients`/`_createNotifyingProperty`/`_addPropertyEffect`/`push`/`splice`/`_setPendingProperty`/`beforeReady`/`behaviors`/`properties` tous `undefined`).
 - `zc` a `__templateInfo`/`__dataReady`/`__dataClientsReady`/`isAttached`/`stamp*`/`_renderSelf`/`renderJobsMap_`/`ready`/`__shady_*`/`updateReduxProperties`/`bindCb` — les mixins `MutableData`/`PropertyEffects`/`TemplateInfo`/`PropertyAccessors`/`YtRouter`/`yt`-page (`getCurrentPage`) manquent — `ZuN`/`kBo`/`behaviors`/`Object.assign`/`_.OP`/`FnY`/`wig`/`XiZ`/`drX`/`getExtraMethodsToForward` ne les ont pas appliqués à `zc`/`_.ke`/`PolymerFakeBaseClassWithoutHtml` — soit la liste `u.behaviors`/`jna`/`X.behaviors`/`H.prototype.behaviors` pour `F`-renderers est vide/incomplète, soit `_.ke`/`PFB` n'est pas la bonne base (`brX=DfM(huT(C9(XXO)))` portait `_takeAttributes`/`_attachDom`/`_readyClients`/`connectedCallback` — `zc` n'hérite pas `brX` → `c2q`/`TLo` a câblé `_.ke`/`PFB` au lieu de `brX`).
+
+## PIPE — `@position-try` nommées : chemin de câblage retenu
+
+Parser déjà : `AtKind::Declarations{prelude:"--nom"}`.
+À faire : `StyleEngine.position_tries: HashMap<String,
+Vec<Declaration>>` → `StyleMap` (même transport que
+`counter_styles`) → `resolve_anchor_positioning` reçoit le
+registre (signature additive ou via `LayoutBox.style`
+porteur d'une clé synthétique `position-try--<nom>`
+sérialisée à la collecte — les décls de la règle ne
+s'appliquent qu'en débordement). `position-try-order` +
+tri multi-fallbacks = même passe.
+
