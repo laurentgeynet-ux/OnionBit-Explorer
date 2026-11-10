@@ -175,12 +175,20 @@ pub(crate) fn math_sum_precise(e: &mut Engine, _t: Value, args: &[Value]) -> JsR
 /// ; §B-125 vol 734 : `uncaught TypeError` ×8+ persistant
 /// post-JS-C463 — strict flaggé juste ou lecture bénigne ?
 /// La sonde nomme la fonction source de l'accès pour trancher.
-pub(crate) fn restricted_caller(e: &mut Engine, _t: Value, _a: &[Value]) -> JsResult<Value> {
+pub(crate) fn restricted_caller(
+    e: &mut Engine,
+    _t: Value,
+    _a: &[Value],
+) -> JsResult<Value> {
     restricted_probe(e, "caller")
 }
 
 /// Voir `restricted_caller` — variante `arguments`.
-pub(crate) fn restricted_arguments(e: &mut Engine, _t: Value, _a: &[Value]) -> JsResult<Value> {
+pub(crate) fn restricted_arguments(
+    e: &mut Engine,
+    _t: Value,
+    _a: &[Value],
+) -> JsResult<Value> {
     restricted_probe(e, "arguments")
 }
 
