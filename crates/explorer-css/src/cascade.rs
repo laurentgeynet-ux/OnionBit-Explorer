@@ -364,6 +364,26 @@ const SUPPORTED_PROPS: &[&str] = &[
     "border-top-style",
     "border-top-width",
     "border-width",
+    "border-block-start",
+    "border-block-end",
+    "border-inline-start",
+    "border-inline-end",
+    "border-block-start-color",
+    "border-block-start-style",
+    "border-block-start-width",
+    "border-block-end-color",
+    "border-block-end-style",
+    "border-block-end-width",
+    "border-inline-start-color",
+    "border-inline-start-style",
+    "border-inline-start-width",
+    "border-inline-end-color",
+    "border-inline-end-style",
+    "border-inline-end-width",
+    "border-start-start-radius",
+    "border-start-end-radius",
+    "border-end-start-radius",
+    "border-end-end-radius",
     "bottom",
     "box-shadow",
     "box-sizing",
@@ -427,6 +447,12 @@ const SUPPORTED_PROPS: &[&str] = &[
     "height",
     "hyphens",
     "inset",
+    "inset-block",
+    "inset-block-end",
+    "inset-block-start",
+    "inset-inline",
+    "inset-inline-end",
+    "inset-inline-start",
     "isolation",
     "justify-content",
     "justify-items",
@@ -4215,8 +4241,8 @@ fn logical_name(
             let rh = logical_edge(own, rtl, he);
             return Some(format!(
                 "border-{}-{}-radius",
-                stored_side(rh, pmode),
-                stored_side(rv, pmode)
+                stored_side(rv, pmode),
+                stored_side(rh, pmode)
             ));
         }
         for (suf, idx) in [
@@ -4225,6 +4251,14 @@ fn logical_name(
             ("block-start", 2),
             ("block-end", 3),
         ] {
+            if rest == suf {
+                // Nu `border-{i,b}-{s,e}` → shorthand
+                // `border-{side}` (expansion aval).
+                return Some(format!(
+                    "border-{}",
+                    stored_side(logical_edge(own, rtl, idx), pmode)
+                ));
+            }
             if let Some(tail) = rest.strip_prefix(suf).and_then(|t| t.strip_prefix('-')) {
                 return Some(format!(
                     "border-{}-{}",
