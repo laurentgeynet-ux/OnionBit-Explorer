@@ -297,9 +297,10 @@ pub enum DisplayItem {
     /// couche 0 seule est appliquée.
     PushMask {
         /// Aire de peinture du mask (border box, coords
-        /// document — `mask-clip` initial).
+        /// document — `mask-clip` résolu).
         rect: Rect,
-        /// Bitmap du mask — seul l'alpha est lu.
+        /// Bitmap du mask — alpha lu ; en `luminance`, la
+        /// luminance sRGB×alpha fait foi (css-masking-1 §5.3).
         mask: std::sync::Arc<crate::image::DecodedImage>,
         /// Zone d'**une tuile** du mask (coords document) :
         /// `mask-size` + `mask-position` résolus — même
@@ -307,6 +308,10 @@ pub enum DisplayItem {
         dst: Rect,
         /// `mask-repeat` résolu `(x, y)` — défaut `repeat`.
         repeat: (bool, bool),
+        /// `mask-mode:luminance` (R-252 suite) — couverture =
+        /// luminance relative du pixel source × son alpha ;
+        /// `alpha`/`match-source` (bitmap) = canal alpha seul.
+        luminance: bool,
     },
     /// Fin du groupe masqué — composite du tampon modulé
     /// par l'alpha du mask.
@@ -3317,14 +3322,20 @@ fn resolve_mask(bx: &LayoutBox, rect: &Rect, images: &crate::PaintImages) -> Opt
         },
         clip,
         repeat: mask_repeat(&bx.style),
+        luminance: bx
+            .style
+            .get("mask-mode")
+            .or_else(|| bx.style.get("-webkit-mask-mode"))
+            .is_some_and(|v| v.trim() == "luminance"),
     })
 }
 
 /// Résolution d'une couche `mask-*` (R-252) : bitmap dont
-/// l'alpha masque, tuile `dst` (origin+size+position) et
-/// aire de peinture `clip` — coordonnées document.
+/// l'alpha (ou la luminance) masque, tuile `dst`
+/// (origin+size+position) et aire de peinture `clip` —
+/// coordonnées document.
 struct MaskLayer {
-    /// Bitmap — seul l'alpha est lu.
+    /// Bitmap — seul l'alpha est lu (luminance : luma×alpha).
     mask: std::sync::Arc<crate::image::DecodedImage>,
     /// Tuile résolue (`mask-origin`+`mask-size`+`mask-position`).
     dst: Rect,
@@ -3332,6 +3343,8 @@ struct MaskLayer {
     clip: Rect,
     /// `mask-repeat` `(x, y)`.
     repeat: (bool, bool),
+    /// `mask-mode:luminance` résolu.
+    luminance: bool,
 }
 
 /// `mask-repeat` → `(x, y)` : `repeat` par défaut (tuilage),
@@ -4735,11 +4748,13 @@ fn translate_item(it: &DisplayItem, d: (f32, f32)) -> DisplayItem {
             mask,
             dst,
             repeat,
+            luminance,
         } => D::PushMask {
             rect: shifted(*rect, d),
             mask: mask.clone(),
             dst: shifted(*dst, d),
             repeat: *repeat,
+            luminance: *luminance,
         },
         D::PopClip
         | D::PopTransform
@@ -5219,6 +5234,7 @@ fn paint_box<'a>(
             mask: l.mask.clone(),
             dst: l.dst,
             repeat: l.repeat,
+            luminance: l.luminance,
         });
     }
     // R-M5 — `filter` encadre TOUTE la sous-arbre de la

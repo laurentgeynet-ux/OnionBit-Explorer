@@ -833,12 +833,14 @@ enum GroupKind {
     Mask {
         /// Aire de peinture (border box, coords document).
         rect: explorer_layout::Rect,
-        /// Bitmap — seul l'alpha est lu.
+        /// Bitmap — alpha, ou luma×alpha en mode luminance.
         mask: std::sync::Arc<crate::DecodedImage>,
         /// Tuile résolue (coords document).
         dst: explorer_layout::Rect,
         /// `mask-repeat` `(x, y)`.
         repeat: (bool, bool),
+        /// `mask-mode:luminance` — couverture = luma×alpha.
+        luminance: bool,
     },
 }
 
@@ -999,6 +1001,7 @@ fn replay_items(
                 mask,
                 dst,
                 repeat,
+                luminance,
             } => {
                 if let Some(buf) = Pixmap::new(pixmap.width(), pixmap.height()) {
                     filtered.push((
@@ -1008,6 +1011,7 @@ fn replay_items(
                             mask: mask.clone(),
                             dst: *dst,
                             repeat: *repeat,
+                            luminance: *luminance,
                         },
                     ));
                 }
@@ -1043,6 +1047,7 @@ fn replay_items(
                             mask,
                             dst: tile,
                             repeat,
+                            luminance,
                         } => {
                             let cov = group_mask_coverage(
                                 pixmap.width(),
@@ -1051,6 +1056,7 @@ fn replay_items(
                                 &mask,
                                 &tile,
                                 repeat,
+                                luminance,
                                 cur,
                                 clips.last(),
                             );
@@ -1983,6 +1989,7 @@ fn group_mask_coverage(
     img: &crate::DecodedImage,
     tile: &explorer_layout::Rect,
     repeat: (bool, bool),
+    luminance: bool,
     cur: Transform,
     clip: Option<&Mask>,
 ) -> Option<Mask> {
@@ -2045,7 +2052,19 @@ fn group_mask_coverage(
                 continue;
             };
             let sx = (tx as usize * iw / tile_w).min(iw - 1);
-            data[py as usize * w + px as usize] = img.rgba[(sy * iw + sx) * 4 + 3];
+            let i4 = (sy * iw + sx) * 4;
+            data[py as usize * w + px as usize] = if luminance {
+                // sRGB luma × alpha (css-masking-1 §5.3).
+                let (rc, gc, bc, ac) = (
+                    u32::from(img.rgba[i4]),
+                    u32::from(img.rgba[i4 + 1]),
+                    u32::from(img.rgba[i4 + 2]),
+                    u32::from(img.rgba[i4 + 3]),
+                );
+                ((rc * 2126 + gc * 7152 + bc * 722 + 5000) / 10000 * ac / 255) as u8
+            } else {
+                img.rgba[i4 + 3]
+            };
         }
     }
     if let Some(c) = clip {

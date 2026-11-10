@@ -1074,3 +1074,42 @@ fn mask_origin_clip_content_box() {
         "zone padding = hors clip → canvas"
     );
 }
+
+/// `mask-mode:luminance` (R-252 suite) : la couverture du
+/// groupe suit la luminance ×alpha, pas l'alpha seul —
+/// moitié gauche rouge (lum≈0,21) → assombrie, droite blanche.
+#[test]
+fn mask_luminance_groupe() {
+    let dom: Dom = TreeBuilder::parse("<div class=x><div class=c></div></div>");
+    let mut eng = StyleEngine::new();
+    eng.add_css("body{margin:0}", Origin::Author);
+    // Mask 20×20 : moitié gauche noire opaque (lum 0),
+    // droite blanche opaque (lum 1). En luminance, gauche =
+    // invisible, droite = opaque — inverse du canal alpha.
+    eng.add_css(
+        ".x{display:block;width:20px;height:20px;\
+         mask-mode:luminance;\
+         mask-image:url('data:image/svg+xml;utf8,<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"20\" height=\"20\"><rect x=\"0\" y=\"0\" width=\"10\" height=\"20\" fill=\"white\"/></svg>');\
+         mask-position:10px 0}\
+         .c{display:block;width:20px;height:20px;background-color:#ff0000}",
+        Origin::Author,
+    );
+    let styles = eng.compute_tree(&dom, dom.document(), &StyleEnv::default());
+    let root_el = dom
+        .children(dom.document())
+        .into_iter()
+        .flatten()
+        .find(|&c| dom.element(c).is_ok())
+        .expect("élément racine");
+    let mut bx = build_box_tree(&dom, root_el, &styles).expect("arbre");
+    layout_tree(&mut bx, VIEW, &ctx());
+    let imgs = collect_data_images(&dom, &styles, 1 << 20);
+    let list = build_display_list_full(&bx, VIEW, 200.0, 0.0, &imgs);
+    let f = rasterize(&list, font_src(), 1.0).expect("frame allouée");
+    assert_eq!(
+        px(&f, 5, 10),
+        [255, 255, 255, 255],
+        "luminance : moitié noire du mask = invisible"
+    );
+    assert_eq!(px(&f, 15, 10)[0], 255, "luminance : blanc = opaque");
+}
