@@ -3946,6 +3946,16 @@ fn paint_lines(bx: &LayoutBox, items: &mut Vec<DisplayItem>, off: (f32, f32)) {
             bx.style.get("text-orientation").map_or("", |v| v.trim()),
             "sideways" | "sideways-rl"
         );
+    // `text-orientation:upright` (css-writing-modes §5.2) :
+    // glyphes debout empilés verticalement — avance =
+    // `font-size` ; `mixed` = résidu (pas de classification
+    // par script au niveau glyphe — `upright` explicite seul
+    // est consommé).
+    let upright = own_v
+        && bx
+            .style
+            .get("text-orientation")
+            .is_some_and(|v| v.trim() == "upright");
     // Deux passes (R-70) : TOUTES les décorations inline
     // d'abord, TOUS les textes ensuite — un fond émis entre
     // deux textes couvrirait l'encre du premier (le fond du
@@ -4069,13 +4079,38 @@ fn paint_lines(bx: &LayoutBox, items: &mut Vec<DisplayItem>, off: (f32, f32)) {
                     };
                     items.push(DisplayItem::PushTransform(t));
                 }
-                items.push(DisplayItem::Text {
-                    origin: (frag.rect.x + off.0, base_y),
-                    run: run.clone(),
-                    font: font_request(&frag.style),
-                    color: ink,
-                    size_px: fs,
-                });
+                if upright {
+                    // Un `Text` par glyphe, x centré sur la
+                    // cellule verticale, y = avance cumulée
+                    // depuis le haut du fragment + ascent.
+                    let mut y = frag.rect.y + run.metrics.ascent;
+                    for g in &run.glyphs {
+                        let solo = std::sync::Arc::new(ShapedRun {
+                            glyphs: vec![*g],
+                            advance: g.advance,
+                            metrics: run.metrics,
+                            fallback_spans: Vec::new(),
+                            ink: None,
+                        });
+                        let x = frag.rect.x + (frag.rect.width - g.advance).max(0.0) / 2.0;
+                        items.push(DisplayItem::Text {
+                            origin: (x, y),
+                            run: solo,
+                            font: font_request(&frag.style),
+                            color: ink,
+                            size_px: fs,
+                        });
+                        y += fs;
+                    }
+                } else {
+                    items.push(DisplayItem::Text {
+                        origin: (frag.rect.x + off.0, base_y),
+                        run: run.clone(),
+                        font: font_request(&frag.style),
+                        color: ink,
+                        size_px: fs,
+                    });
+                }
                 if sideways_lr || sideways_rl {
                     items.push(DisplayItem::PopTransform);
                 }
