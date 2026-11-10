@@ -5621,12 +5621,15 @@ fn cap179_fullscreen_popover() {
         "true|false"
     );
     // Popover : show/hide/toggle + `InvalidStateError` rules.
+    // `typeof q.showPopover` = 'function' même hors `popover`
+    // (méthode `HTMLElement` — visible partout, Pareto `api`
+    // lot 3 ; l'ancien `undefined` était l'absence historique).
     assert_eq!(
         evf(&mut e,
             "var tg='';p.addEventListener('toggle',function(){tg+='T'});p.addEventListener('beforetoggle',function(){tg+='b'});\
             p.showPopover();p.showPopover===undefined;\
             [tg, typeof q.showPopover].join('|')"),
-        "bT|undefined"
+        "bT|function"
     );
     assert_eq!(
         evf(
@@ -7327,5 +7330,162 @@ var li2 = list.children[0];\
 Node.prototype.removeChild.call(list, li2);\
 list.children.length"),
         "1"
+    );
+}
+
+// ===== Pareto `api` lot 3 (étape 219 suite) — réflexions
+// `ARIAMixin`, `Element` triviaux, `CustomEvent.detail`,
+// substitutions console, `HTMLElement` restants.
+
+/// `ariaXxx` reflète `aria-xxx` en `DOMString?` : absent →
+/// `null`, `null` écrit → retrait d'attribut, table bornée à
+/// la liste spec (`ariaFoo` arbitraire non réfléchi).
+#[test]
+fn aria_reflections() {
+    assert_eq!(
+        ev("var b=document.getElementById('main');\
+            ('ariaLabel' in b)+'/'+b.ariaLabel+'/'+('ariaFoobar' in b)"),
+        "true/null/false"
+    );
+    assert_eq!(
+        ev("var b=document.getElementById('main');\
+            b.ariaLabel='titre';\
+            b.getAttribute('aria-label')+'/'+b.ariaLabel;\
+            "),
+        "titre/titre"
+    );
+    // `= null` → `removeAttribute` (spec `DOMString?`).
+    assert_eq!(
+        ev("var b=document.getElementById('main');\
+            b.setAttribute('aria-hidden','true');\
+            var a=b.ariaHidden;\
+            b.ariaHidden=null;\
+            a+'/'+b.ariaHidden+'/'+b.hasAttribute('aria-hidden')"),
+        "true/null/false"
+    );
+}
+
+/// `Element` triviaux : `role`/`prefix`/`clientTop`/`part`,
+/// `getElementsByTagNameNS`, capture de pointeur.
+#[test]
+fn element_misc_lot3() {
+    assert_eq!(
+        ev("var b=document.getElementById('main');\
+            b.setAttribute('role','note');\
+            b.role+'/'+b.prefix+'/'+b.clientTop+'/'+('part' in b)"),
+        "note/null/0/true"
+    );
+    // `part` = DOMTokenList vivante sur l'attribut `part`.
+    assert_eq!(
+        ev("var b=document.getElementById('main');\
+            b.part.add('thumb');\
+            b.getAttribute('part')+'/'+b.part.contains('thumb')"),
+        "thumb/true"
+    );
+    // `getElementsByTagNameNS` — `*`/`ns xhtml`/`ns raté`.
+    assert_eq!(
+        ev("var d=document;\
+            d.getElementsByTagNameNS('*','li').length+'/'+\
+            d.getElementsByTagNameNS('http://www.w3.org/1999/xhtml','li').length+'/'+\
+            d.getElementsByTagNameNS('http://www.w3.org/2000/svg','li').length"),
+        "2/2/0"
+    );
+    // Capture : set → has(id) ; release(id) ne relâche que
+    // le capturé.
+    assert_eq!(
+        ev("var b=document.getElementById('main');\
+            b.setPointerCapture(7);\
+            var a=b.hasPointerCapture(7),c=b.hasPointerCapture(9);\
+            b.releasePointerCapture(9);\
+            var still=b.hasPointerCapture(7);\
+            b.releasePointerCapture(7);\
+            a+'/'+c+'/'+still+'/'+b.hasPointerCapture(7)"),
+        "true/false/true/false"
+    );
+}
+
+/// Handlers `on*` ajoutés — présents en props (`null`), pas
+/// en `undefined` (le nom inconnu reste `undefined`).
+#[test]
+fn event_handler_props_lot3() {
+    assert_eq!(
+        ev("var b=document.getElementById('main');\
+            ('onfocusin' in b)+'/'+b.onfocusin+'/'+('onpaste' in b)+'/'+\
+            ('oncommand' in b)+'/'+('onfullscreenchange' in b)+'/'+b.onarbitrarybogus"),
+        "true/null/true/true/true/undefined"
+    );
+}
+
+/// `CustomEvent` : `detail` propre `null` par défaut (clé
+/// présente), init `detail` copié tel quel.
+#[test]
+fn custom_event_detail() {
+    assert_eq!(
+        ev("var c=new CustomEvent('x');('detail' in c)+'/'+c.detail"),
+        "true/null"
+    );
+    assert_eq!(
+        ev("var c=new CustomEvent('x',{detail:{a:41}});c.detail.a+1"),
+        "42"
+    );
+}
+
+/// `console.log` — substitutions `%s`/`%d`/`%f`/`%o`/`%j`/`%%`,
+/// `%c` consommé silencieusement.
+#[test]
+fn console_substitution_strings() {
+    let lines = Rc::new(RefCell::new(Vec::new()));
+    let cap = lines.clone();
+    let mut e = engine_with("<html><body></body></html>");
+    e.set_console_hook(Rc::new(move |l| cap.borrow_mut().push(l)));
+    e.eval(
+        "console.log('n=%d s=%s f=%f', 41.7, 'hi', 1.5);\
+            console.log('o=%o j=%j pct=100%%', {k:1}, [1]);\
+            console.log('%cred %s', 'color:red', 'plain');",
+    )
+    .expect("eval");
+    let l = lines.borrow();
+    assert_eq!(l[0], "n=41 s=hi f=1.5");
+    assert_eq!(l[1], "o=[object Object] j=[1] pct=100%");
+    assert_eq!(l[2], "red plain");
+}
+
+/// `HTMLElement` restants : `isContentEditable` résolu par
+/// remontée d'ancêtres ; `outerText` lit `textContent`,
+/// écrit = remplacement par nœud texte ; méthodes popover
+/// lisibles.
+#[test]
+fn htmlelement_lot3() {
+    // Hérité du `contenteditable` de l'ancêtre ; `"false"`
+    // du plus proche déclarant prime.
+    assert_eq!(
+        ev_in(
+            "<html><body><div id=p contenteditable><span id=c>x</span></div>\
+             <div id=q contenteditable=false><span id=r>x</span></div></body></html>",
+            "document.getElementById('c').isContentEditable+'/'+\
+             document.getElementById('r').isContentEditable+'/'+\
+             ('virtualKeyboardPolicy' in document.getElementById('c'))+'/'+\
+             ('writingSuggestions' in document.getElementById('c'))+'/'+\
+             ('headingOffset' in document.getElementById('c'))",
+        ),
+        "true/false/true/true/true"
+    );
+    // `outerText=` remplace l'élément par un texte (spec) —
+    // le fils `#c` disparaît de l'arbre, son texte subsiste.
+    assert_eq!(
+        ev_in(
+            "<html><body><div id=p><span id=c>old</span></div></body></html>",
+            "var c=document.getElementById('c');\
+             c.outerText='new';\
+             document.getElementById('p').innerHTML+'/'+\
+             (document.getElementById('c')==null)",
+        ),
+        "new/true"
+    );
+    // Popover : lisible (`in`/`typeof`) + bascule existante.
+    assert_eq!(
+        ev("var b=document.getElementById('main');\
+            ('togglePopover' in b)+'/'+typeof b.showPopover+'/'+('hidePopover' in b)"),
+        "true/function/true"
     );
 }

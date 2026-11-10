@@ -955,34 +955,24 @@ fn dom_nav_value(
             }
         }
         "namespaceURI" => {
+            // Document XML : `xmlns` héritée, sinon null —
+            // pas de repli XHTML (§B-112) ; HTML : svg/xhtml
+            // via `node_namespace` (source unique, partagée
+            // avec `getElementsByTagNameNS`).
             let d = dom.borrow();
-            let n = &d.nodes[node as usize];
-            if n.kind == NodeKind::Element {
-                if d.xml {
-                    // Document XML : l'espace de noms est celui
-                    // déclaré par `xmlns`/`xmlns:prefix` sur
-                    // l'élément ou ses ancêtres — à défaut, null
-                    // (pas de repli XHTML : un `<MPD>` n'est pas
-                    // du HTML — §B-112).
-                    let ns = std::iter::once(node)
-                        .chain(d.ancestors(node))
-                        .find_map(|a| d.attr(a, "xmlns"))
-                        .map(str::to_string);
-                    match ns {
-                        Some(ns) => e.str_val(&ns),
-                        None => Value::Null,
-                    }
-                } else {
-                    e.str_val(
-                        if tag_interface(&n.tag).is_some_and(|i| i.starts_with("SVG")) {
-                            "http://www.w3.org/2000/svg"
-                        } else {
-                            "http://www.w3.org/1999/xhtml"
-                        },
-                    )
-                }
-            } else {
-                Value::Null
+            match node_namespace(&d, node) {
+                Some(ns) => e.str_val(&ns),
+                None => Value::Null,
+            }
+        }
+        "prefix" => {
+            // `Node.prefix` — qualifié seulement si le tag est
+            // préfixé (`ns:tag`, XML/createElementNS) ; `null`
+            // partout ailleurs (éléments HTML ordinaires).
+            let n = &dom.borrow().nodes[node as usize];
+            match n.tag.split_once(':') {
+                Some((p, _)) => e.str_val(p.to_string()),
+                None => Value::Null,
             }
         }
         "innerHTML" => {
@@ -1106,6 +1096,13 @@ const ELEMENT_PROTO_METHODS: &[&str] = &[
     "focus",
     "blur",
     "click",
+    "getElementsByTagNameNS",
+    "setPointerCapture",
+    "releasePointerCapture",
+    "hasPointerCapture",
+    "showPopover",
+    "hidePopover",
+    "togglePopover",
 ];
 
 /// Méthodes spec `Document` posées **propres** sur
@@ -1138,6 +1135,7 @@ const DOC_PROTO_METHODS: &[&str] = &[
     "contains",
     "getElementById",
     "getElementsByTagName",
+    "getElementsByTagNameNS",
     "getElementsByClassName",
     "getElementsByName",
     "querySelector",
@@ -2485,6 +2483,62 @@ fn collection_named_item(e: &mut Engine, t: Value, args: &[Value]) -> JsResult<V
 /// nommé (`collection.foo` ≙ élément de `id`/`name` `foo`,
 /// propre aux collections de formulaires). Snapshot à l'accès —
 /// la vivacité vient de la relecture à chaque get.
+/// `namespaceURI` d'un nœud miroir — même approximation que
+/// le getter `dom_value` : XML = `xmlns` déclarée sur
+/// l'élément ou ses ancêtres (sinon `None`), HTML = svg
+/// via `tag_interface`, sinon xhtml. Les préfixes `ns:tag`
+/// ne résolvent pas `xmlns:ns` (approximation documentée —
+/// le miroir ne porte pas de table d'espaces).
+fn node_namespace(d: &Dom, node: NodeId) -> Option<String> {
+    let n = &d.nodes[node as usize];
+    if n.kind != NodeKind::Element {
+        return None;
+    }
+    if d.xml {
+        std::iter::once(node)
+            .chain(d.ancestors(node))
+            .find_map(|a| d.attr(a, "xmlns"))
+            .map(str::to_string)
+    } else {
+        Some(
+            if tag_interface(&n.tag).is_some_and(|i| i.starts_with("SVG")) {
+                "http://www.w3.org/2000/svg"
+            } else {
+                "http://www.w3.org/1999/xhtml"
+            }
+            .to_string(),
+        )
+    }
+}
+
+/// `getElementsByTagNameNS(ns, local)` — DFS des descendants
+/// de `from` : nom local = tag après `:` (nom qualifié) ;
+/// `*` joker sur les deux dimensions ; namespace évalué via
+/// [`node_namespace`] (même approximation que `namespaceURI`).
+fn by_tag_ns(dom: &DomRef, from: NodeId, ns: &str, local: &str) -> Vec<NodeId> {
+    let d = dom.borrow();
+    let mut out = Vec::new();
+    let mut stack: Vec<NodeId> = d.nodes[from as usize]
+        .children
+        .iter()
+        .rev()
+        .copied()
+        .collect();
+    while let Some(c) = stack.pop() {
+        let n = &d.nodes[c as usize];
+        if n.kind == NodeKind::Element {
+            let local_name = n.tag.rsplit_once(':').map_or(n.tag.as_str(), |(_, l)| l);
+            let local_ok = local == "*" || local_name.eq_ignore_ascii_case(local);
+            let node_ns = || node_namespace(&d, c);
+            if local_ok && (ns == "*" || ns.is_empty() || node_ns().as_deref() == Some(ns)) {
+                out.push(c);
+            }
+        }
+        stack.extend(n.children.iter().rev().copied());
+    }
+    out
+}
+
 fn dom_collection(
     e: &mut Engine,
     dom: &DomRef,
@@ -3790,6 +3844,8 @@ impl Engine {
                 "MouseEvent" | "PointerEvent" | "WheelEvent" | "DragEvent"
             ) {
                 mouse_event_ctor as crate::heap::NativeFn
+            } else if name == "CustomEvent" {
+                custom_event_ctor as crate::heap::NativeFn
             } else {
                 event_ctor as crate::heap::NativeFn
             };
@@ -5923,6 +5979,22 @@ impl Host for DocumentHost {
                     "HTMLCollection",
                 )))
             }
+            "getElementsByTagNameNS" => {
+                let ns = match arg(args, 0) {
+                    Value::Null | Value::Undefined => "*".to_string(),
+                    v => e.to_js_string(v)?,
+                };
+                let local = e.to_js_string(arg(args, 1))?;
+                let ids = by_tag_ns(&self.dom, self.dom.borrow().root, &ns, &local);
+                Ok(Some(dom_collection(
+                    e,
+                    &self.dom,
+                    &self.cache,
+                    &ids,
+                    false,
+                    "HTMLCollection",
+                )))
+            }
             "getElementsByClassName" => {
                 let cls = e.to_js_string(arg(args, 0))?;
                 let ids = {
@@ -6556,6 +6628,17 @@ const GLOBAL_ATTRS: &[&str] = &[
     "autocapitalize",
     "autocorrect",
     "popover",
+    // Pareto `api` lot 3 (étape 219 suite) — `role` vit sur
+    // `Element` (ARIAMixin) ; `virtualkeyboardpolicy`/
+    // `writingsuggestions`/`headingoffset`/`headingreset`
+    // sont globaux `HTMLElement` — reflets chaîne comme
+    // `tabIndex` (déviation numérique documentée pour les
+    // deux `heading*`).
+    "role",
+    "virtualkeyboardpolicy",
+    "writingsuggestions",
+    "headingoffset",
+    "headingreset",
 ];
 
 /// Attributs réfléchis **scopés par tag** — spec IDL
@@ -6665,6 +6748,10 @@ fn prop_attr_name(key: &str) -> &str {
         "tabIndex" => "tabindex",
         "playsInline" => "playsinline",
         "referrerPolicy" => "referrerpolicy",
+        "virtualKeyboardPolicy" => "virtualkeyboardpolicy",
+        "writingSuggestions" => "writingsuggestions",
+        "headingOffset" => "headingoffset",
+        "headingReset" => "headingreset",
         k => k,
     }
 }
@@ -6709,6 +6796,78 @@ fn bool_attr_for(tag: &str, key: &str) -> Option<&'static str> {
         .iter()
         .find(|(a, tags)| *a == key && tags.contains(&tag))
         .map(|(a, _)| *a)
+}
+
+/// Réflexions `aria*` de `ARIAMixin` (Pareto `api` lot 3,
+/// étape 219 suite — tête des misses `Element.*`) : prop IDL
+/// `ariaXxx` ≙ attribut de contenu `aria-xxx` (minuscules, un
+/// seul tiret — `ariaLabel` ↔ `aria-label`). Table **bornée**
+/// à la liste spec : `ariaFoo` arbitraire reste `undefined`
+/// (un reflet n'existe que si la spec le déclare). IDL
+/// `DOMString?` nullable : attribut absent → `null`, jamais
+/// `""` (contrairement aux reflets globaux historiques).
+/// Exclus : `aria*Elements` (`FrozenArray<Element>` — vraie
+/// feature, P5) et `ariaBraille*` non standard (déjà listés
+/// ici : ils sont standard-track BCD, on les garde).
+const ARIA_PROPS: &[&str] = &[
+    "ariaActiveDescendant",
+    "ariaAtomic",
+    "ariaAutoComplete",
+    "ariaBrailleLabel",
+    "ariaBrailleRoleDescription",
+    "ariaBusy",
+    "ariaChecked",
+    "ariaColCount",
+    "ariaColIndex",
+    "ariaColIndexText",
+    "ariaColSpan",
+    "ariaCurrent",
+    "ariaDescription",
+    "ariaDisabled",
+    "ariaErrorMessage",
+    "ariaExpanded",
+    "ariaFlowTo",
+    "ariaHasPopup",
+    "ariaHidden",
+    "ariaInvalid",
+    "ariaKeyShortcuts",
+    "ariaLabel",
+    "ariaLevel",
+    "ariaLive",
+    "ariaModal",
+    "ariaMultiLine",
+    "ariaMultiSelectable",
+    "ariaNotify",
+    "ariaOrientation",
+    "ariaPlaceholder",
+    "ariaPosInSet",
+    "ariaPressed",
+    "ariaReadOnly",
+    "ariaRelevant",
+    "ariaRequired",
+    "ariaRoleDescription",
+    "ariaRowCount",
+    "ariaRowIndex",
+    "ariaRowIndexText",
+    "ariaRowSpan",
+    "ariaSelected",
+    "ariaSetSize",
+    "ariaSort",
+    "ariaValueMax",
+    "ariaValueMin",
+    "ariaValueNow",
+    "ariaValueText",
+];
+
+/// `ariaXxx` → `Some("aria-xxx")` si la prop est une réflexion
+/// `ARIAMixin` déclarée ([`ARIA_PROPS`]) — `None` sinon.
+fn aria_attr_name(key: &str) -> Option<String> {
+    if ARIA_PROPS.contains(&key) {
+        let rest = &key[4..];
+        Some(format!("aria-{}", rest.to_ascii_lowercase()))
+    } else {
+        None
+    }
 }
 
 /// Noms `on*` reconnus comme handlers IDL (`GlobalEventHandlers`,
@@ -6834,6 +6993,22 @@ const EVENT_HANDLER_PROPS: &[&str] = &[
     "onstorage",
     "onunhandledrejection",
     "onunload",
+    // Pareto `api` lot 3 — handlers d'events BCD `*_event`
+    // encore absents de la table : focus/composition/
+    // clipboard/fullscreen/scrollsnap/commands/XR.
+    "onfocusin",
+    "onfocusout",
+    "oncompositionstart",
+    "oncompositionupdate",
+    "oncompositionend",
+    "onpaste",
+    "onfullscreenchange",
+    "onfullscreenerror",
+    "onscrollsnapchange",
+    "onscrollsnapchanging",
+    "oncontentvisibilityautostatechange",
+    "onbeforexrselect",
+    "oncommand",
 ];
 
 /// `on` + nom connu ?
@@ -6875,6 +7050,7 @@ const DOC_METHODS: &[&str] = &[
     "contains",
     "getElementById",
     "getElementsByTagName",
+    "getElementsByTagNameNS",
     "getElementsByClassName",
     "getElementsByName",
     "querySelector",
@@ -6930,6 +7106,7 @@ const NODE_METHODS: &[&str] = &[
     "remove",
     "replaceWith",
     "getElementsByTagName",
+    "getElementsByTagNameNS",
     "getElementsByClassName",
     "querySelector",
     "querySelectorAll",
@@ -6973,7 +7150,37 @@ const NODE_METHODS: &[&str] = &[
     "focus",
     "blur",
     "click",
+    // Pointer Events capture (Pareto `api` lot 3) —
+    // bookkeeping honnête sur slot interne `PC_ATTR` : le
+    // dispatch pointer réel est hors moteur, mais la
+    // sémantique capture/release/existe est vérifiable.
+    "setPointerCapture",
+    "releasePointerCapture",
+    "hasPointerCapture",
 ];
+
+/// Méthodes `HTMLElement` scopées au tag non-SVG (Pareto `api`
+/// lot 3) — `showPopover`/`hidePopover`/`togglePopover` : IDL
+/// `HTMLElement`, absentes de `SVGElement`/`MathMLElement`.
+/// État `:popover-open` porté par le slot interne
+/// `POPOVER_OPEN_ATTR` (pas de couche top-layer dans le
+/// miroir — borne documentée).
+const HTML_EL_METHODS: &[&str] = &["showPopover", "hidePopover", "togglePopover"];
+
+/// Slot interne pointer-capture (motif `SEL_START_ATTR`) —
+/// `data-explorer-pc` = pointerId capturé sur l'élément.
+const PC_ATTR: &str = "data-explorer-pc";
+
+/// `true` si le nœud est un élément **HTML** (hors SVG/
+/// `MathML`) — le mixin `HTMLElement` (popover methods,
+/// `isContentEditable`…) ne s'y applique que là.
+fn is_html_element(dom: &DomRef, node: NodeId) -> bool {
+    let d = dom.borrow();
+    let n = &d.nodes[node as usize];
+    n.kind == NodeKind::Element
+        && !tag_interface(&n.tag).is_some_and(|i| i.starts_with("SVG"))
+        && !n.tag.contains(':')
+}
 
 /// Méthodes `HTMLMediaElement` lisibles (§B-82) — les players
 /// MSE feature-détectent `typeof v.canPlayType` avant tout
@@ -8184,6 +8391,24 @@ impl Host for NodeHost {
                     _ => Value::Undefined,
                 }));
             }
+            // `el.part` (Pareto `api` lot 3) — `DOMTokenList`
+            // reflétant `part` (CSS Shadow Parts) ; même rail
+            // `ClassListHost` que `classList`/`relList`.
+            "part" => {
+                let is_el = matches!(
+                    self.dom.borrow().nodes[node as usize].kind,
+                    NodeKind::Element
+                );
+                return Ok(Some(if is_el {
+                    e.new_iterable_host(Rc::new(ClassListHost {
+                        dom: self.dom.clone(),
+                        node,
+                        attr: "part",
+                    }))
+                } else {
+                    Value::Undefined
+                }));
+            }
             // Navigation/traversal brute (JS-C340) — déléguée à
             // `dom_nav_value`, source unique partagée avec les
             // accesseurs de prototype `dom_nav_get` : même valeur
@@ -8209,6 +8434,7 @@ impl Host for NodeHost {
             | "nodeName"
             | "localName"
             | "namespaceURI"
+            | "prefix"
             | "innerHTML"
             | "textContent"
             | "innerText"
@@ -8560,6 +8786,13 @@ impl Host for NodeHost {
                 };
                 return Ok(Some(Value::Num(px)));
             }
+            // `clientLeft`/`clientTop` = largeur de bordure —
+            // le miroir ne porte pas de boîte de bordure
+            // détaillée (borne documentée) : `0` honnête, même
+            // discipline que `scrollTop` non-racine.
+            "clientLeft" | "clientTop" => {
+                return Ok(Some(Value::Num(0.0)));
+            }
             "clientWidth" | "clientHeight" | "scrollWidth" | "scrollHeight" | "offsetWidth"
             | "offsetHeight" => {
                 let (vw, vh) = e.hooks.viewport;
@@ -8686,6 +8919,26 @@ impl Host for NodeHost {
                     .to_string();
                 return Ok(Some(e.str_val(v)));
             }
+            // `HTMLElement.isContentEditable` — état résolu :
+            // `true` si le plus proche ancêtre (soi compris)
+            // déclarant `contenteditable` n'est pas `"false"`.
+            "isContentEditable" => {
+                let v = {
+                    let d = self.dom.borrow();
+                    let val = std::iter::once(node)
+                        .chain(d.ancestors(node))
+                        .find_map(|a| d.attr(a, "contenteditable"))
+                        .unwrap_or("false");
+                    !matches!(val, "false")
+                };
+                return Ok(Some(Value::Bool(v)));
+            }
+            // `HTMLElement.outerText` — lecture ≙ `textContent`
+            // (spec : même rendu que `innerText` à la lecture).
+            "outerText" => {
+                let s = self.dom.borrow().text_content(node);
+                return Ok(Some(e.str_val(s)));
+            }
             // Référence lisible (même motif que `matches`) —
             // les scripts mesurent aussi via
             // `Element.prototype.getBoundingClientRect.call(el)`
@@ -8719,6 +8972,19 @@ impl Host for NodeHost {
         // JS-C341 : un `el.play = f` auteur prime le natif.
         if is_media(&self.dom, node)
             && MEDIA_METHODS.contains(&key)
+            && !matches!(this, Value::Obj(id) if e.host_method_shadowed(id, key))
+        {
+            let nv = e.str_val(key);
+            return Ok(Some(e.bound_native(
+                "node.method",
+                host_method_trampoline,
+                vec![nv, this],
+            )));
+        }
+        // Méthodes `HTMLElement` lisibles (Pareto `api` lot 3)
+        // — popover : IDL `HTMLElement`, absentes sur SVG/MathML.
+        if is_html_element(&self.dom, node)
+            && HTML_EL_METHODS.contains(&key)
             && !matches!(this, Value::Obj(id) if e.host_method_shadowed(id, key))
         {
             let nv = e.str_val(key);
@@ -8791,6 +9057,15 @@ impl Host for NodeHost {
         if let Some(attr) = scoped_bool {
             let has = self.dom.borrow().has_attr(node, attr);
             return Ok(Some(Value::Bool(has)));
+        }
+        // Réflexions `ARIAMixin` (Pareto `api` lot 3) —
+        // `DOMString?` : attribut absent → `null` (spec).
+        if let Some(attr) = aria_attr_name(key) {
+            let v = self.dom.borrow().attr(node, &attr).map(str::to_string);
+            return Ok(Some(match v {
+                Some(s) => e.str_val(s),
+                None => Value::Null,
+            }));
         }
         // Named getter du `<form>` (HTML §4.10.3) : `form.username`
         // ≙ contrôle listé de `id`/`name` — multi-match (radio)
@@ -8870,6 +9145,20 @@ impl Host for NodeHost {
                 let mut d = self.dom.borrow_mut();
                 let t = d.create_text(&s);
                 d.replace_children(node, &[t]);
+                Ok(true)
+            }
+            // `HTMLElement.outerText` (Pareto `api` lot 3) —
+            // écriture = remplacement de l'élément par un nœud
+            // texte (spec `outerText=`), même rail que
+            // `replaceWith` ; sans parent → no-op spec.
+            "outerText" => {
+                let s = e.to_js_string(v)?;
+                let mut d = self.dom.borrow_mut();
+                if let Some(p) = d.parent(node) {
+                    let t = d.create_text(&s);
+                    d.insert_before(p, t, Some(node));
+                    d.detach(node);
+                }
                 Ok(true)
             }
             // `CharacterData` — écriture directe du payload
@@ -9059,6 +9348,18 @@ impl Host for NodeHost {
                     self.dom.borrow_mut().set_attr(node, attr, &s);
                     return Ok(true);
                 }
+                // Réflexions `ARIAMixin` : `el.ariaLabel = "x"`
+                // → `setAttribute('aria-label', 'x')` ; `null`
+                // → `removeAttribute` (spec `DOMString?`).
+                if let Some(attr) = aria_attr_name(key) {
+                    if matches!(v, Value::Null) {
+                        self.dom.borrow_mut().remove_attr(node, &attr);
+                    } else {
+                        let s = e.to_js_string(v)?;
+                        self.dom.borrow_mut().set_attr(node, &attr, &s);
+                    }
+                    return Ok(true);
+                }
                 Ok(false)
             }
         }
@@ -9082,6 +9383,24 @@ impl Host for NodeHost {
             "getElementsByTagName" => {
                 let tag = e.to_js_string(arg(args, 0))?;
                 let ids = self.dom.borrow().by_tag(node, &tag);
+                Ok(Some(dom_collection(
+                    e,
+                    &self.dom,
+                    &self.cache,
+                    &ids,
+                    false,
+                    "HTMLCollection",
+                )))
+            }
+            // `getElementsByTagNameNS(ns, local)` (Pareto `api`
+            // lot 3) — rail partagé [`by_tag_ns`].
+            "getElementsByTagNameNS" => {
+                let ns = match arg(args, 0) {
+                    Value::Null | Value::Undefined => "*".to_string(),
+                    v => e.to_js_string(v)?,
+                };
+                let local = e.to_js_string(arg(args, 1))?;
+                let ids = by_tag_ns(&self.dom, node, &ns, &local);
                 Ok(Some(dom_collection(
                     e,
                     &self.dom,
@@ -9990,6 +10309,29 @@ impl Host for NodeHost {
             }
             // Same slots as `insertAdjacentHTML` but the payload is a
             // text node — never parsed (spec).
+            // Pointer Events capture (Pareto `api` lot 3) —
+            // bookkeeping honnête : `setPointerCapture(id)`
+            // pose le pointerId, `hasPointerCapture` le vérifie,
+            // `releasePointerCapture` ne relâche que le capturé
+            // (spec : mismatched id → no-op).
+            "setPointerCapture" => {
+                let id = e.to_js_string(arg(args, 0))?;
+                self.dom.borrow_mut().set_attr(node, PC_ATTR, &id);
+                Ok(Some(Value::Undefined))
+            }
+            "releasePointerCapture" => {
+                let id = e.to_js_string(arg(args, 0))?;
+                let mut d = self.dom.borrow_mut();
+                if d.attr(node, PC_ATTR) == Some(id.as_str()) {
+                    d.remove_attr(node, PC_ATTR);
+                }
+                Ok(Some(Value::Undefined))
+            }
+            "hasPointerCapture" => {
+                let id = e.to_js_string(arg(args, 0))?;
+                let has = self.dom.borrow().attr(node, PC_ATTR) == Some(id.as_str());
+                Ok(Some(Value::Bool(has)))
+            }
             "insertAdjacentText" => {
                 let pos = e.to_js_string(arg(args, 0))?;
                 let s = e.to_js_string(arg(args, 1))?;
@@ -14489,6 +14831,17 @@ fn event_ctor(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
     Ok(Value::Undefined)
 }
 
+/// `CustomEvent` (Pareto `api` lot 3) — `event_ctor` + défaut
+/// spec `detail = null` : sans init la clé doit quand même
+/// exister (`'detail' in new CustomEvent('x')` → `true`).
+fn custom_event_ctor(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
+    event_ctor(e, this.clone(), args)?;
+    if matches!(this, Value::Obj(id) if e.find_own(id, "detail").is_none()) {
+        e.set_prop_value(this, "detail", Value::Null)?;
+    }
+    Ok(Value::Undefined)
+}
+
 /// `MouseEvent`/`PointerEvent`/`WheelEvent`/`DragEvent` :
 /// `event_ctor` + défauts `MouseEventInit` — `button`/`buttons`
 /// = 0 et toutes les coordonnées = 0, modifieurs = `false`.
@@ -15807,6 +16160,52 @@ fn creds_psa(e: &mut Engine, _t: Value, _a: &[Value]) -> JsResult<Value> {
 // ------------------------------------------------------------------
 
 fn fmt_args(e: &mut Engine, args: &[Value]) -> JsResult<String> {
+    // Chaîne de substitution console (spec `Formatter`) :
+    // `console.log("a=%s n=%d", a, n)` — `%s` string, `%d`/`%i`
+    // int, `%f` float, `%o`/`%O` objet décrit, `%j` JSON,
+    // `%c` style consommé-silencieusement (pas de rendu CSS
+    // console — borne documentée), `%%` littéral.
+    if let Some(Value::Str(fmt)) = args.first() {
+        if fmt.contains('%') {
+            let mut out = String::with_capacity(fmt.len());
+            let mut it = args[1..].iter();
+            let mut chars = fmt.chars().peekable();
+            while let Some(c) = chars.next() {
+                if c != '%' {
+                    out.push(c);
+                    continue;
+                }
+                match chars.next() {
+                    Some('%') | None => out.push('%'),
+                    Some('c') => {
+                        it.next();
+                    }
+                    Some(spec @ ('s' | 'd' | 'i' | 'f' | 'o' | 'O' | 'j')) => {
+                        let v = it.next().cloned().unwrap_or(Value::Undefined);
+                        match spec {
+                            's' => out.push_str(&e.to_js_string(v)?),
+                            'd' | 'i' => out.push_str(&format!("{}", e.to_number(v)? as i64)),
+                            'f' => out.push_str(&format!("{}", e.to_number(v)?)),
+                            'j' => match crate::json::stringify(e, v) {
+                                Ok(j) => out.push_str(&e.to_js_string(j)?),
+                                Err(_) => out.push_str("undefined"),
+                            },
+                            _ => out.push_str(&e.describe(v)),
+                        }
+                    }
+                    Some(other) => {
+                        out.push('%');
+                        out.push(other);
+                    }
+                }
+            }
+            for a in it {
+                out.push(' ');
+                out.push_str(&e.to_js_string(a.clone())?);
+            }
+            return Ok(out);
+        }
+    }
     let mut parts = Vec::with_capacity(args.len());
     for a in args {
         parts.push(e.to_js_string(a.clone())?);
