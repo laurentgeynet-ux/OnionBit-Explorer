@@ -6,6 +6,7 @@ Le format suit [Keep a Changelog](https://keepachangelog.com/fr/1.1.0/)
 et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
+- **`text-indent` `hanging`/`each-line`** (`explorer-layout`) : les mots-clés css-text-4 sont lus — `hanging` = indent des lignes 2..n seulement, `each-line` = indent sur toutes (la longueur est extraite des tokens non mots-clés). Verrou : `text_indent_keywords`.
 - **`text-orientation:mixed` par glyphe** (`explorer-render`) : glyphe CJK (Han/Hiragana/Katakana/Hangul/pleine-largeur, via `cluster` → caractère source) debout ; glyphe non-CJK pivoté ±90° autour de sa plume — css-writing-modes §5.2, défaut spec. Verrou : `text_orientation_mixed_per_glyph`.
 - **`text-orientation:upright` niveau glyphe** (`explorer-render`) : chaque glyphe du run devient un `Text` séparé — x centré sur sa cellule, y = avance cumulée `font-size` + ascent (css-writing-modes §5.2). `mixed` = résidu (pas de classification par script au niveau glyphe). Verrou : `text_orientation_upright_per_glyph`.
 - **`@position-try --nom { … }`** (`explorer-css` + `explorer-layout`) : la règle nommée (registre `StyleEngine.position_tries` → sérialisée en clé `position-try--<nom>` du style porteur) s'applique quand la boîte déborde — `position-area` + insets px du try MVP (autres props ignorées, ordonnancement complet = résidu). Verrou : `anchor_position_try_named`.
