@@ -7489,3 +7489,54 @@ fn htmlelement_lot3() {
         "true/function/true"
     );
 }
+
+// ===== Pareto `api` lot 3b — méthodes d'insertion `*HTML`
+// (HTML insertion methods) : rails `insertAdjacentHTML`/
+// `innerHTML`, `*Unsafe` même rail (pas de sanitiser).
+
+/// `beforeHTML`/`afterHTML`/`prependHTML`/`appendHTML` insèrent
+/// le fragment parsé à la bonne position ; `setHTML` ≙
+/// `innerHTML=` ; `replaceWithHTML` substitue l'élément.
+#[test]
+fn html_insertion_methods_lot3b() {
+    assert_eq!(
+        ev_in(
+            "<html><body><div id=h><span id=c>x</span></div></body></html>",
+            "var h=document.getElementById('h');\
+             h.beforeHTML('<b id=B1>i</b>');\
+             h.afterHTML('<b id=A1>f</b>');\
+             h.prependHTML('<i id=P>i</i>');\
+             h.appendHTML('<u id=U>u</u>');\
+             document.body.innerHTML",
+        ),
+        "<b id=\"B1\">i</b><div id=\"h\"><i id=\"P\">i</i><span id=\"c\">x</span><u id=\"U\">u</u></div><b id=\"A1\">f</b>"
+    );
+    // `setHTML` remplace le contenu (rail `set_inner_html`).
+    assert_eq!(
+        ev_in(
+            "<html><body><div id=h><span>x</span></div></body></html>",
+            "document.getElementById('h').setHTML('<em>s</em>');\
+             document.getElementById('h').innerHTML",
+        ),
+        "<em>s</em>"
+    );
+    // `replaceWithHTML` — l'élément sort du document.
+    assert_eq!(
+        ev_in(
+            "<html><body><div id=p><div id=h>x</div></div></body></html>",
+            "document.getElementById('h').replaceWithHTML('<q id=R>rq</q>');\
+             document.getElementById('p').innerHTML+'|'+\
+             (document.getElementById('h')==null)+'|'+\
+             document.getElementById('R').tagName",
+        ),
+        "<q id=\"R\">rq</q>|true|Q"
+    );
+    // Lisibilité + variantes `*Unsafe` (même rail).
+    assert_eq!(
+        ev("var d=document.createElement('div');\
+            ('beforeHTML' in d)+'/'+('setHTML' in d)+'/'+\
+            ('replaceWithHTMLUnsafe' in d)+'/'+('appendHTMLUnsafe' in d)+'/'+\
+            typeof d.beforeHTML"),
+        "true/true/true/true/function"
+    );
+}
