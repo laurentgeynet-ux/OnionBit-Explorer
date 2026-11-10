@@ -1020,6 +1020,9 @@ impl Session {
     ) -> Result<Option<SubJob>, CoreError> {
         {
             let entry = self.tabs.get(&tab).ok_or(CoreError::UnknownTab(tab))?;
+            tracing::info!(target:"dom_probe", tab,
+                epoch = tail.epoch, cur = entry.nav_epoch,
+                site = "nav.apply", "nav_apply entrée");
             if entry.nav_epoch != tail.epoch {
                 self.unspec(tab);
                 return Ok(None);

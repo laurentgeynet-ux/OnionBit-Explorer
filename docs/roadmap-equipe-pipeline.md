@@ -3822,7 +3822,6 @@ chez NAVIGATEUR — non recopiés ici.
 - [ ] **R-231. `@import` (mur NAV)** : `at.unapplied.import` ×18 — feuilles manquantes → lobste.rs 99,98 % ; journalisé PIPE→NAV (résolution récursive à la collecte).
 - [x] **R-231. `@custom-media` alias de media query** : registre `Statement` + substitution `@media (--nom)` à la collecte (négation composée). `at.unapplied.custom-media` éliminé. Verrou : 2 env.
 - [x] **R-238. `value.dropped.<prop>.<valeur>` détaillé** : le compteur nomme le début de la valeur — font-size github à nommer r5.
-- [x] **R-240. `:-webkit-*`/`autofill`/vendor tolérés** : `DynamicPseudo::Other` dormant — `selector.bad` github ×14 éliminé, règles entières restaurées.
 ## Tâches continues
 
 - **Triage rendu** des échecs `site_smoke.ps1` : les écarts

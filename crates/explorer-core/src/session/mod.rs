@@ -487,6 +487,14 @@ pub(crate) struct Tab {
     /// automatiquement une navigation abandonnée au profit
     /// d'une plus récente (double-clic, script redirect).
     nav_epoch: u64,
+    /// Epoch pour lequel `interactive`/`DOMContentLoaded` a déjà
+    /// été tiré (JS-C471) — anti double-feu quand le cycle est
+    /// livré tôt (post-`nav_apply`, sub_commit_head en cours)
+    /// puis re-délivré par `sub_commit_tail`/un bras avorté.
+    doc_dcl_epoch: u64,
+    /// Même garde pour `complete`/`load` — le tail ou un bras
+    /// avorté livre sans re-tirer (JS-C471).
+    doc_load_epoch: u64,
     /// Intentions de navigation en attente (étape 53d) —
     /// input (`Req`) et script (`collect_script_navs` y
     /// déverse `location`/`history`/`form.submit()`) :
@@ -1625,6 +1633,8 @@ impl Session {
                 transitions: Vec::new(),
                 animations: Vec::new(),
                 nav_epoch: 0,
+                doc_dcl_epoch: 0,
+                doc_load_epoch: 0,
                 frame_epoch: 0,
                 pending_nav: std::collections::VecDeque::new(),
                 pending_nav_reqs: std::collections::VecDeque::new(),

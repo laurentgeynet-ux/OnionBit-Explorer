@@ -224,6 +224,9 @@ impl Session {
     ) -> Result<Option<SubCommitTail>, CoreError> {
         {
             let entry = self.tabs.get(&tab).ok_or(CoreError::UnknownTab(tab))?;
+            tracing::info!(target:"dom_probe", tab,
+                epoch = job.epoch, cur = entry.nav_epoch,
+                site = "commit.head", "sub_commit_head entrée");
             if entry.nav_epoch != job.epoch {
                 self.unspec(tab);
                 return Ok(None);
@@ -405,6 +408,29 @@ impl Session {
                 evals += 1;
             }
         }
+        // JS-C471 — `interactive`/`readystatechange`/`DOMContentLoaded`
+        // ici, après les scripts parse+async+modules+post (ordre
+        // spec : DCL attend les scripts différés, pas le reste) —
+        // **avant** `run_pending` et les drains : un site dont le
+        // JS ne s'idle jamais (youtube — la tête dépassait 50 s
+        // sans retour) ne doit pas garder `readyState` à
+        // `loading` à vie : le polyfill d'upgrade custom-elements
+        // gèle alors l'hydratation (`__isUpgradeDisabled`
+        // persistant → marqueurs `[[X]]` non consommés). `eng`
+        // direct : `entry.js` n'est rangé qu'après ce bras
+        // (`set_doc_ready_state` dropperait silencieusement). La
+        // garde `doc_dcl_epoch` rend le re-tir du tail idempotent.
+        {
+            let Some(entry) = self.tabs.get_mut(&tab) else {
+                return;
+            };
+            if entry.doc_dcl_epoch != entry.nav_epoch {
+                entry.doc_dcl_epoch = entry.nav_epoch;
+                eng.set_ready_state(explorer_js::JS_CTX_TOP, "interactive");
+                let _ = eng.dispatch_event_ctx(explorer_js::JS_CTX_TOP, "readystatechange", &[]);
+                let _ = eng.dispatch_event_ctx(explorer_js::JS_CTX_TOP, "DOMContentLoaded", &[]);
+            }
+        }
         // §B-111 — paire `net:` (morgue C406) : la ligne
         // d'entrée sans son `ret` nomme le drain fautif.
         dlv_info!("net: scripts");
@@ -478,10 +504,56 @@ impl Session {
     /// reste celui installé — ses listeners méritent le cycle.
     /// Aucun `Navigated`/`push` ici : `sub_commit_tail` garde le
     /// historiabilité quand le commit aboutit.
+    /// Cycle de vie du document top quand `sub_commit_tail` n'a
+    /// pas couru (commit paint rejeté — epoch supplantée,
+    /// `shared.rs` bras `(Ok, false)` ; erreur de rendu avant
+    /// `Navigated`). `readyState` resterait sinon à `"loading"`
+    /// pour toujours : les pages dont le polyfill d'upgrade
+    /// attend `DOMContentLoaded`/état `interactive` gèlent leur
+    /// hydratation (youtube : marqueurs `[[X]]` non consommés,
+    /// `__isUpgradeDisabled` persistant — JS-C471). Le document
+    /// reste celui installé — ses listeners méritent le cycle.
+    /// Aucun `Navigated`/`push` ici : `sub_commit_tail` garde le
+    /// historiabilité quand le commit aboutit.
     pub(crate) fn fire_top_doc_lifecycle(&mut self, tab: TabId) {
+        self.fire_doc_interactive(tab);
+        self.fire_doc_complete(tab);
+    }
+
+    /// Moitié haute du cycle (JS-C471) : `interactive` +
+    /// `readystatechange` + `DOMContentLoaded` — tirée dès que le
+    /// document est installé et le moteur armé (`nav_apply`),
+    /// **sans** attendre `sub_commit_head` : sur un site dont le
+    /// JS ne s'idle jamais (youtube — pompe/dyn-scripts en
+    /// continu), la tête ne rend pas la main et le tail ne court
+    /// pas, ce qui figeait `readyState`/`DOMContentLoaded` à vie.
+    /// Gardée par `doc_dcl_epoch` — un second appel pour la même
+    /// epoch (tail, bras avorté) est un no-op.
+    pub(crate) fn fire_doc_interactive(&mut self, tab: TabId) {
+        let Some(entry) = self.tabs.get_mut(&tab) else {
+            return;
+        };
+        if entry.doc_dcl_epoch == entry.nav_epoch {
+            return;
+        }
+        entry.doc_dcl_epoch = entry.nav_epoch;
         self.set_doc_ready_state(tab, explorer_js::JS_CTX_TOP, "interactive");
         self.dispatch_doc_event(tab, "readystatechange");
         self.dispatch_doc_event(tab, "DOMContentLoaded");
+    }
+
+    /// Moitié basse du cycle (JS-C471) : `load` des sous-contextes,
+    /// `complete` + `readystatechange` + `load` — après les
+    /// sous-ressources (tail) ou sur un bras avorté où le document
+    /// demeure. Gardée par `doc_load_epoch`.
+    pub(crate) fn fire_doc_complete(&mut self, tab: TabId) {
+        let Some(entry) = self.tabs.get_mut(&tab) else {
+            return;
+        };
+        if entry.doc_load_epoch == entry.nav_epoch {
+            return;
+        }
+        entry.doc_load_epoch = entry.nav_epoch;
         self.frame_ctx_load_events(tab);
         self.set_doc_ready_state(tab, explorer_js::JS_CTX_TOP, "complete");
         self.dispatch_doc_event(tab, "readystatechange");
@@ -562,9 +634,9 @@ impl Session {
         // `readystatechange` juste avant `DOMContentLoaded`
         // (ordre spec — les scripts de la page ont déjà couru,
         // les sous-ressources peuvent encore charger).
-        self.set_doc_ready_state(tab, explorer_js::JS_CTX_TOP, "interactive");
-        self.dispatch_doc_event(tab, "readystatechange");
-        self.dispatch_doc_event(tab, "DOMContentLoaded");
+        // JS-C471 : via `fire_doc_interactive` (garde epoch) —
+        // le tir précoce de `nav_apply` rend cet appel no-op.
+        self.fire_doc_interactive(tab);
         // `Navigated` seulement si le document final est bien
         // celui demandé : une redirection script a déjà émis
         // pour sa cible. Le titre annoncé = `entry.title` —
@@ -588,19 +660,13 @@ impl Session {
             let frag = frag.to_string();
             self.scroll_to_fragment(tab, &frag);
         }
-        // Étape 134 : `load` des sous-contextes d'abord (spec :
-        // le `load` de la page attend ses `<iframe>`), puis
-        // `load`/`onload` sur chaque élément porteur.
-        self.frame_ctx_load_events(tab);
         // CAP-170 : `readyState` « complete » +
         // `readystatechange` **avant** `load` (spec — dans un
         // listener `load`, `document.readyState ===
-        // "complete"`).
-        self.set_doc_ready_state(tab, explorer_js::JS_CTX_TOP, "complete");
-        self.dispatch_doc_event(tab, "readystatechange");
-        // `load` : tout est commis (sous-ressources, peinture,
-        // historique) — dernier événement du cycle de vie.
-        self.dispatch_doc_event(tab, "load");
+        // "complete"`). JS-C471 : via `fire_doc_complete`
+        // (garde epoch) — idempotent si un bras avorté a déjà
+        // livré.
+        self.fire_doc_complete(tab);
         // §B-4(c) T2-bis : le WARN `evals_sans_mutation` a
         // tiré pendant le commit — ré-échantillonne le
         // diagnostic **après** le cycle de vie : un
