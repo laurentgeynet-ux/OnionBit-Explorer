@@ -658,6 +658,37 @@ fn dom_acc_props(class: &str) -> &'static [&'static str] {
         "HTMLAnchorElement" => &["href", "target", "rel"],
         "HTMLIFrameElement" => &["src", "srcdoc", "sandbox", "loading"],
         "HTMLScriptElement" | "HTMLLinkElement" => &["src", "href", "type", "rel"],
+        // Attributs globaux de `HTMLElement` (étape 219 /
+        // `api` BCD) — réflexions d'attributs globaux ;
+        // `accessKeyLabel` ≈ `accesskey` (label calculé =
+        // approximation documentée), `isContentEditable`/
+        // `outerText`/`attributeStyleMap`/`editContext`/
+        // `containerTiming` = vraies features, non
+        // réfléchies — misses honnêtes.
+        "HTMLElement" => &[
+            "id",
+            "className",
+            "title",
+            "lang",
+            "dir",
+            "slot",
+            "hidden",
+            "inert",
+            "autofocus",
+            "accessKey",
+            "accessKeyLabel",
+            "tabIndex",
+            "contentEditable",
+            "draggable",
+            "spellcheck",
+            "translate",
+            "nonce",
+            "inputMode",
+            "enterKeyHint",
+            "autocapitalize",
+            "autocorrect",
+            "popover",
+        ],
         // `time.dateTime` = réflexion de l'attribut
         // `datetime` (html.elem BCD — le seul membre IDL
         // spécifique de `HTMLTimeElement`).
@@ -678,6 +709,7 @@ fn dom_bool_attr(prop: &str) -> Option<&'static str> {
         "required" => "required",
         "hidden" => "hidden",
         "autofocus" => "autofocus",
+        "inert" => "inert",
         _ => return None,
     })
 }
@@ -6497,7 +6529,34 @@ impl Host for DocumentHost {
 /// Attributs réfléchis comme props sur TOUT élément — spec
 /// globale (`HTMLElement` : `id`/`class`/`title`/`lang`/`dir` ;
 /// `slot` est global par le mixin `Slottable`).
-const GLOBAL_ATTRS: &[&str] = &["id", "class", "title", "lang", "dir", "slot"];
+const GLOBAL_ATTRS: &[&str] = &[
+    "id",
+    "class",
+    "title",
+    "lang",
+    "dir",
+    "slot",
+    // Attributs globaux réfléchis (étape 219 / `api` BCD —
+    // `HTMLElement.*` 2e du Pareto terrain) : `hidden`/
+    // `inert`/`autofocus` sont booléens (`dom_bool_attr`),
+    // le reste = chaînes/enums brutes (`contenteditable`,
+    // `draggable`… — enum à valeurs documenté).
+    "hidden",
+    "inert",
+    "autofocus",
+    "accesskey",
+    "tabindex",
+    "contenteditable",
+    "draggable",
+    "spellcheck",
+    "translate",
+    "nonce",
+    "inputmode",
+    "enterkeyhint",
+    "autocapitalize",
+    "autocorrect",
+    "popover",
+];
 
 /// Attributs réfléchis **scopés par tag** — spec IDL
 /// `reflect` par classe (§B-103, JS-C384). La table plate
@@ -6599,6 +6658,12 @@ fn prop_attr_name(key: &str) -> &str {
         "encoding" => "enctype",
         "crossOrigin" => "crossorigin",
         "dateTime" => "datetime",
+        "accessKey" => "accesskey",
+        "accessKeyLabel" => "accesskey",
+        "contentEditable" => "contenteditable",
+        "enterKeyHint" => "enterkeyhint",
+        "inputMode" => "inputmode",
+        "tabIndex" => "tabindex",
         "playsInline" => "playsinline",
         "referrerPolicy" => "referrerpolicy",
         k => k,
