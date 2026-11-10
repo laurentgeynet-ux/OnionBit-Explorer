@@ -31,7 +31,7 @@ fn walk_x(dom: &Dom, n: explorer_dom::NodeId, sm: &explorer_css::StyleMap, out: 
 fn all_unset_reset_tout() {
     let st = style_of("p { color: red; margin: 10px; all: unset }");
     // color hérité → unset hérite du parent (pas red)
-    assert!(st.get("color") != Some("red"));
+    assert_ne!(st.get("color"), Some("red"));
     // margin non-hérité → initial
     assert!(st.get("margin-top").is_none() || st.get("margin-top") == Some("0"));
 }
