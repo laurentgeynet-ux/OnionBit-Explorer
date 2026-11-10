@@ -1237,3 +1237,13 @@ luminance` et `mask-composite` = résidus documentés.
 
 - Skeleton `BODY>DIV#home-page-skeleton` (sibling `ytd-app`) ; `ytd-browse`/masthead/page-manager **vidés** (`innerHTML:0`, detach SSR couru, remplacement jamais stampé) ; `masthead-finish:false`, `ytd-browse:0`, `items:0` (feedNudgeRenderer anonyme — squelette honnête jusqu'au mount nudge).
 - **`ytd-masthead`/page-manager = classe `zc`** — `pc.ready()` → `TypeError _ensureAttributes` → patch stub → `_flushProperties` → cascade : la famille `zc` n'a **aucun** mixin Polymer-lite (`PropertyEffects`/`_ensureAttributes`/`_flushProperties`/`instanceTemplate`/`_attachDom` absents de la chaîne `zc→zc→DocumentFragment→Object`) — `kBo`/`_registered`/`behaviors` jamais appliqués à cette famille (les `d`-renderers les ont tous). Prochaine mesure : pourquoi `zc` n'a pas couru `kBo`/`_registered` (`__hasRegisterFinished`/`_initializeProperties`/`Polymer(...)`-branche).
+
+## PIPE → NAV — `html.elem` : 4 misses = interfaces IDL JS (pas PIPE)
+
+`bcd.html.elements` : `del`/`ins` (`HTMLModElement`), `menu`
+(`HTMLMenuElement`), `time` (`HTMLTimeElement`) échouent à
+`html_check` sur le **binding JS** — la géométrie UA est déjà
+correcte (`UA_CSS` : `del`/`strike` line-through, `ins` underline,
+`menu` listé disc + display). Action NAV : enregistrer les 3
+interfaces dans le host DOM jscore.
+
