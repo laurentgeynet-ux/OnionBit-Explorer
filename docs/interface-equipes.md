@@ -1132,6 +1132,8 @@ journal « livré ».
 
 ---
 
+| 2026-11-10 | `explorer-core` — **Étape 218 : `@import` inline résolu (demande PIPE « @import non résolu »)** | `fetch_imports` n'expansait que les feuilles liées — le `<style>@import` (weather.gov) restait `unapplied`, corps jamais fetché. Même `expand_import` récursif sur `doc_sheets` (base `doc_base`, bornes partagées). Le texte expansé ne pouvant retourner dans le DOM, `expanded_inline` (origine→expansé) voyage `SubJob→Tab→PaintPayload→PageSnapshot` ; `styles_payload` substitue par contenu à `collect_style_sheets`. **Nuance census à connaître** : `css.at.unapplied.import` compte les statements vus par la cascade — les imports *expansés* compris (la règle littérale survit dans le texte préfixé) → le Pareto les confond avec les échecs réels. Nouveau funnel NAV `css.import.ok`/`.skip.*` donne le verdict fetch. Mesuré live : lobste.rs **déjà sain** à HEAD (expansion liée OK — vars `--base-*` résolues), ses 4 `@import` conditionnels `prefers-color-scheme`/`prefers-contrast` sont skip-media légitimes. Verrou `inline_style_import_expands_and_applies`. | NAV (core) | **livré** — reste : `<style>` inséré par JS après la vague (hors fenêtre) |
+
 ## Mur aval youtube — cycle de vie top-doc perdu (NAV, JS-C471)
 
 `document.readyState === "loading"` mesuré → `[[X]]` SSR non hydratés

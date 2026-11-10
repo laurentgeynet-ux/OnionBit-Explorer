@@ -7417,6 +7417,23 @@ incrément.
   gèle l'event loop → spawn async.
   Vérifié : 322 → 97 octets en 8 évals.
 
+- [x] **Étape 218. `@import` en feuille
+  inline (`<style>`) + funnel `css.import.*`** :
+  `fetch_imports` n'expansait que les
+  feuilles liées — le `<style>@import`
+  (weather.gov, demande journal) restait
+  `unapplied`, corps jamais fetché. Même
+  `expand_import` sur `doc_sheets` (base
+  `doc_base`) ; `expanded_inline` (origine→
+  expansé) voyage `SubJob→Tab→PaintPayload→
+  PageSnapshot`, substitué par contenu à
+  `collect_style_sheets` (robuste aux
+  `<style>` JS insérés entre vague et
+  commit). Census `css.import.ok`/`.skip.*`
+  — `at.unapplied.import` confondait
+  expansés et échecs réels. Verrou
+  `inline_style_import_expands_and_applies`.
+
 - [ ] **Écarts terrain — vol humain
   22/10 (release `39ab821`, FFI)** :
   second run humain — trois constats

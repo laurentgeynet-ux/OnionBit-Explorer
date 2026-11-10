@@ -1218,6 +1218,7 @@ impl Session {
             entry.style_dirty.clear();
             entry.linked_sheets.clear();
             entry.adopted_sheets.clear();
+            entry.inline_css_expanded.clear();
             entry.defined_names.clear();
             entry.frames.clear();
             entry.prev_styles = HashMap::new();
@@ -1275,6 +1276,7 @@ impl Session {
             import_specs,
             mod_preloads,
             doc_sheets,
+            expanded_inline: HashMap::new(),
             eng,
             scripting,
             css_slots: Vec::new(),

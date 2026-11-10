@@ -2995,6 +2995,41 @@ fn solid_png(w: u32, h: u32, px: [u8; 4]) -> Vec<u8> {
     buf
 }
 
+/// Étape 218 — `@import` en feuille inline (`<style>`) :
+/// même expansion récursive que les feuilles liées — gap
+/// nommé par le Pareto r4 (weather.gov) : la règle restait
+/// `unapplied`, le corps de la feuille importée jamais
+/// fetché. Verrou : la feuille importée part en fetch et
+/// ses règles s'appliquent (fond rouge peint).
+#[tokio::test]
+async fn inline_style_import_expands_and_applies() {
+    let (mut s, t) = test_session();
+    t.route(
+        "/m",
+        200,
+        "<html><body><style>@import url(/th.css)</style>\
+         <div id=\"x\"></div></body></html>",
+    );
+    t.route(
+        "/th.css",
+        200,
+        "body{margin:0}#x{background-color:#ff0000;width:2px;height:2px}",
+    );
+    let id = s.open_tab();
+    s.navigate(id, "http://h.test/m").await.unwrap();
+    assert!(
+        t.paths().iter().any(|p| p == "/th.css"),
+        "la feuille inline @import doit être fetchée — {:?}",
+        t.paths()
+    );
+    let (w, _h, px) = s.frame_pixels(id).unwrap();
+    assert_eq!(
+        px_at(px, w, 1, 1),
+        [255, 0, 0, 255],
+        "règle de la feuille importée inline appliquée"
+    );
+}
+
 /// P4.F (consommation NAV de R-203) — `background-image`
 /// multi-couches : les `url()` au-delà de la première
 /// étaient fetchées mais jamais routées — seule la première

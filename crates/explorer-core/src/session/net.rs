@@ -243,6 +243,7 @@ impl Session {
             bg_aliases,
             bg_bodies,
             mask_aliases,
+            expanded_inline,
             mut eng,
             fonts,
             arrival_classic,
@@ -258,6 +259,9 @@ impl Session {
         // parsée isolément à la cascade.
         if let Some(entry) = self.tabs.get_mut(&tab) {
             entry.linked_sheets = css_slots.into_iter().flatten().collect();
+            // `<style>` inline expansés `@import` (étape 218)
+            // — substitution par contenu à `styles_payload`.
+            entry.inline_css_expanded = expanded_inline;
             // Sous-contextes `<iframe>` de la vague (étape
             // 128) — ordre d'arrivée ; `frames` est réassigné
             // à chaque commit → les contextes du document

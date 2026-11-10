@@ -375,6 +375,10 @@ pub(crate) struct Tab {
     /// `drain_script_net`, cascadé en feuilles auteur document
     /// après `linked_sheets` (ordre spec).
     adopted_sheets: Vec<String>,
+    /// `<style>` inline dont les `@import` ont été expansés
+    /// (étape 218) : texte d'origine → texte expansé —
+    /// substitué par contenu dans `styles_payload`.
+    inline_css_expanded: HashMap<String, String>,
     /// Noms des custom elements définis — gel bfcache du
     /// champ `Tab.defined_names` (registre `customElements`
     /// du miroir, re-poussé dans `Dom::set_defined_names`
@@ -725,6 +729,9 @@ pub(crate) struct PageSnapshot {
     /// pompe (`drain_script_net`), cascadé en feuilles auteur
     /// document après `linked_sheets` (ordre spec).
     adopted_sheets: Vec<String>,
+    /// `<style>` inline expansés `@import` (étape 218) —
+    /// gel/restauration comme `linked_sheets`.
+    inline_css_expanded: HashMap<String, String>,
     /// Noms des custom elements définis (`customElements.
     /// define`) — snapshot miroir rafraîchi au même drain ;
     /// poussé dans `Dom::set_defined_names` pour `:defined`
@@ -1598,6 +1605,7 @@ impl Session {
                 images: PaintImages::default(),
                 linked_sheets: Vec::new(),
                 adopted_sheets: Vec::new(),
+                inline_css_expanded: HashMap::new(),
                 defined_names: Vec::new(),
                 frames: Vec::new(),
                 frame_ctxs: Vec::new(),
