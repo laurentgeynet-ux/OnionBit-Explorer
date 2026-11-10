@@ -187,8 +187,9 @@ pub enum DisplayItem {
         rect: Rect,
         /// Pixels décodés.
         img: std::sync::Arc<crate::image::DecodedImage>,
-        /// Répétition `(x, y)` de `background-repeat`.
-        repeat: (bool, bool),
+        /// Mode `background-repeat` `(x, y)` — 0 `repeat`,
+        /// 1 `no-repeat`, 2 `space`, 3 `round`.
+        repeat: (u8, u8),
         /// Coin haut-gauche de la tuile (0,0) en coords document
         /// — inclut `background-position` résolu ; pour
         /// `background-attachment: fixed`, la zone de
@@ -221,9 +222,9 @@ pub enum DisplayItem {
         /// y est mis à l'échelle en nearest puis tuilé selon
         /// `repeat`.
         dst: Rect,
-        /// `mask-repeat` résolu `(x, y)` — défaut `repeat`
-        /// (tuilage ±∞ comme `background-repeat`).
-        repeat: (bool, bool),
+        /// Mode `mask-repeat` `(x, y)` — 0 `repeat`,
+        /// 1 `no-repeat`, 2 `space`, 3 `round`.
+        repeat: (u8, u8),
         /// `mask-mode:luminance` — couverture = luma×alpha.
         luminance: bool,
     },
@@ -2292,11 +2293,27 @@ fn emit_bg_layers(
             // `padding-box` = défaut — identique à l'aire reçue.
             _ => (area, base),
         };
-        let repeat = match layer_value("background-repeat", i).as_deref() {
-            Some("no-repeat") => (false, false),
-            Some("repeat-x") => (true, false),
-            Some("repeat-y") => (false, true),
-            _ => (true, true), // `repeat` = défaut.
+        // `space`/`round` (css-backgrounds-3 §3.5) : modes
+        // propres (gap distribué / tuile étirée) — pas
+        // l'approximation `repeat` des tuiles booléennes.
+        let mode = |t: &str| match t {
+            "no-repeat" => 1u8,
+            "space" => 2,
+            "round" => 3,
+            _ => 0,
+        };
+        let repeat = {
+            let v = layer_value("background-repeat", i).unwrap_or("repeat".to_string());
+            match v.trim() {
+                "repeat-x" => (0u8, 1u8),
+                "repeat-y" => (1u8, 0u8),
+                _ => {
+                    let mut it = v.split_whitespace();
+                    let a = it.next().map_or(0, mode);
+                    let b = it.next().map_or(a, mode);
+                    (a, b)
+                }
+            }
         };
         let img = if bg_has_url(layer) {
             let from_layers = node.and_then(|n| {
@@ -3356,16 +3373,22 @@ fn resolve_mask(bx: &LayoutBox, rect: &Rect, images: &crate::PaintImages) -> Vec
 
 /// `mask-repeat` d'une couche → `(x, y)` — même table que
 /// [`mask_repeat`] sur un fragment déjà isolé.
-fn mask_repeat_raw(raw: &str) -> (bool, bool) {
+fn mask_repeat_raw(raw: &str) -> (u8, u8) {
     let toks: Vec<&str> = raw.split_whitespace().collect();
-    let on = |t: &str| !matches!(t, "no-repeat");
+    // Modes css-masking-1 §7.2 : 0 repeat, 1 no-repeat,
+    // 2 space, 3 round.
+    let mode = |t: &str| match t {
+        "no-repeat" => 1u8,
+        "space" => 2,
+        "round" => 3,
+        _ => 0,
+    };
     match toks.as_slice() {
-        [] => (true, true),
-        ["no-repeat"] => (false, false),
-        ["repeat-x"] => (true, false),
-        ["repeat-y"] => (false, true),
-        [a] => (on(a), on(a)),
-        [a, b, ..] => (on(a), on(b)),
+        [] => (0, 0),
+        ["repeat-x"] => (0, 1),
+        ["repeat-y"] => (1, 0),
+        [a] => (mode(a), mode(a)),
+        [a, b, ..] => (mode(a), mode(b)),
     }
 }
 
@@ -3468,7 +3491,7 @@ pub struct MaskTile {
     /// Zone d'une tuile du mask (coords document).
     pub dst: Rect,
     /// `mask-repeat` `(x, y)`.
-    pub repeat: (bool, bool),
+    pub repeat: (u8, u8),
     /// `mask-mode:luminance` de la couche.
     pub luminance: bool,
     /// `mask-composite` de la couche : 0 `add` (initial —
@@ -3488,8 +3511,8 @@ struct MaskLayer {
     dst: Rect,
     /// Aire de peinture (`mask-clip`) — hors d'elle, alpha 0.
     clip: Rect,
-    /// `mask-repeat` `(x, y)`.
-    repeat: (bool, bool),
+    /// `mask-repeat` `(x, y)` — mode u8 (0/1/2/3).
+    repeat: (u8, u8),
     /// `mask-mode:luminance` résolu.
     luminance: bool,
     /// `mask-composite` de la couche (0 add…3 exclude).
@@ -3564,19 +3587,25 @@ fn border_img_repeat(st: &explorer_css::ComputedStyle) -> (u8, u8) {
     )
 }
 
-fn mask_repeat(st: &explorer_css::ComputedStyle) -> (bool, bool) {
+fn mask_repeat(st: &explorer_css::ComputedStyle) -> (u8, u8) {
     let raw = st
         .get("mask-repeat")
         .or_else(|| st.get("-webkit-mask-repeat"));
     let toks: Vec<&str> = raw.unwrap_or("").split_whitespace().collect();
-    let on = |t: &str| !matches!(t, "no-repeat");
+    // Modes css-masking-1 §7.2 : 0 repeat, 1 no-repeat,
+    // 2 space, 3 round.
+    let mode = |t: &str| match t {
+        "no-repeat" => 1u8,
+        "space" => 2,
+        "round" => 3,
+        _ => 0,
+    };
     match toks.as_slice() {
-        [] => (true, true),
-        ["no-repeat"] => (false, false),
-        ["repeat-x"] => (true, false),
-        ["repeat-y"] => (false, true),
-        [a] => (on(a), on(a)),
-        [a, b, ..] => (on(a), on(b)),
+        [] => (0, 0),
+        ["repeat-x"] => (0, 1),
+        ["repeat-y"] => (1, 0),
+        [a] => (mode(a), mode(a)),
+        [a, b, ..] => (mode(a), mode(b)),
     }
 }
 
@@ -4110,11 +4139,14 @@ fn paint_lines(bx: &LayoutBox, items: &mut Vec<DisplayItem>, off: (f32, f32)) {
                         let rot = orientation == 2 && !cjk;
                         if rot {
                             let ox = frag.rect.x + off.0;
-                            items.push(DisplayItem::PushTransform(
-                                tiny_skia::Transform::from_row(
-                                    0.0, 1.0, -1.0, 0.0, ox + y, y - ox,
-                                ),
-                            ));
+                            items.push(DisplayItem::PushTransform(tiny_skia::Transform::from_row(
+                                0.0,
+                                1.0,
+                                -1.0,
+                                0.0,
+                                ox + y,
+                                y - ox,
+                            )));
                         }
                         let solo = std::sync::Arc::new(ShapedRun {
                             glyphs: vec![*g],

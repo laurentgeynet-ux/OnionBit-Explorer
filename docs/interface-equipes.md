@@ -1294,3 +1294,13 @@ tri multi-fallbacks = même passe.
 - `ytd-browse`/`ytd-mini-guide`/`tp-yt-paper-tooltip` = `nopc` — pc jamais créé (chemin d'attache différent/lazy).
 - Effet domino nommé : `ytd-app.onPageDataUpdated` → `pageManager.getCurrentPage()` → `TypeError (on zc)` → `topbarData`/`data` jamais calculée → `updateMastheadData`/`bindCb` jamais livrée → `stamp*`/`_renderSelf`/`renderJobsMap_` du masthead idle → contenu vide → `home-page-skeleton`/`masthead-finish` jamais.
 - Levier : `xrN["ytd-page-manager"].ctor`/`TLo`/`CAf`/`hSd`/`a_1`/`ucV` — le `ctor`/`brX`/`Ae`-mixin assigné à `page-manager` devait être `Ae`/`YC`/`_.LA` ; `zc`/`_.ke`/`PFB` a été livré — branche d'enregistrement `u.ctor`/`ctor`/`z4R`/`behaviors`/`k` fautive pour ce tag (ou `_.ke`/`PFB` devait recevoir la suite `Ae` via `ZuN`/`kBo`/`behaviors`/`Object.assign`/`_.L=`/`_.OP`/`mix`/`jna` — passe non courue).
+
+## R-252 suite — `DisplayItem` : modes `space`/`round` (PIPE → NAV, signature)
+
+`BgImage.repeat` et `MaskedFill.repeat` passent de
+`(bool, bool)` à `(u8, u8)` : 0 `repeat`, 1 `no-repeat`,
+2 `space`, 3 `round` — `background-repeat`/`mask-repeat`
+`space`/`round` consommés (gap distribué / tuile étirée au
+raster via `tile_sample`). Impact NAV : les bras lisant
+`repeat` reçoivent `(u8,u8)` (comparaison → `!= 0`).
+
