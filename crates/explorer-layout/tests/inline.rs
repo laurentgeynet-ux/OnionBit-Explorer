@@ -844,3 +844,177 @@ fn counter_set_absolu() {
     assert!(all.contains("11. "), "skip → set 10 + increment : {all:?}");
     let _ = dom;
 }
+/// R-169 fix — `counter-reset: a b 2` : le token suivant
+/// n'est un pas que s'il PARSE en entier — sinon c'est le
+/// nom suivant. Régression post-revue : `b` était avalé
+/// comme pas manqué de `a` et un compteur « 2 » naissait.
+#[test]
+fn counter_reset_liste_sans_pas_n_avale_pas_le_nom() {
+    let (dom, bx) = laid_w(
+        "<!doctype html><div>x</div>",
+        "div { counter-reset: a b 2; margin: 0 } \
+         div::before { content: counter(a) \"/\" counter(b) }",
+        800.0,
+    );
+    let mut out = Vec::new();
+    let mut stack = vec![bx];
+    while let Some(b) = stack.pop() {
+        if let Some(t) = &b.text {
+            out.push(t.clone());
+        }
+        stack.extend(b.children.iter().cloned());
+    }
+    let all = out.join("");
+    assert!(all.contains("0/2"), "counter(a)=0 counter(b)=2 : {all:?}");
+    let _ = dom;
+}
+
+/// `line-clamp` / `-webkit-line-clamp` : ne garde que les
+/// n premières lignes + « … » sur la dernière — la hauteur
+/// de la boîte suit (mêmes lignes, mêmes fragments).
+#[test]
+fn line_clamp_tronque_les_lignes_et_suspend() {
+    let long = "mot ".repeat(60);
+    // Contrôle : sans clamp, le texte fait > 3 lignes.
+    let (dom0, bx0) = laid_w(
+        &format!("<!doctype html><p>{long}</p>"),
+        "body { margin: 0 } p { width: 100px; font-size: 10px }",
+        800.0,
+    );
+    let (dom1, bx1) = laid_w(
+        &format!("<!doctype html><p>{long}</p>"),
+        "body { margin: 0 } p { width: 100px; font-size: 10px; -webkit-line-clamp: 2 }",
+        800.0,
+    );
+    let lines0 = find(&bx0, by_tag(&dom0, "p")).children[0].lines.len();
+    let lines1 = find(&bx1, by_tag(&dom1, "p")).children[0].lines.len();
+    assert!(lines0 > 3, "contrôle : >3 lignes ({lines0})");
+    assert_eq!(lines1, 2, "clamped : 2 lignes ({lines1})");
+    let last = find(&bx1, by_tag(&dom1, "p")).children[0].lines[1]
+        .fragments
+        .last()
+        .expect("fragment ellipsis");
+    assert_eq!(last.text, "…", "dernier fragment = suspension");
+    // La hauteur de la boîte suit les lignes restantes.
+    let h_full = find(&bx0, by_tag(&dom0, "p")).rect.height;
+    let h_clamped = find(&bx1, by_tag(&dom1, "p")).rect.height;
+    assert!(
+        h_clamped < h_full,
+        "hauteur réduite : {h_clamped} vs {h_full}"
+    );
+    // `line-clamp` (nom moderne) a le même effet.
+    let (dom2, bx2) = laid_w(
+        &format!("<!doctype html><p>{long}</p>"),
+        "body { margin: 0 } p { width: 100px; font-size: 10px; line-clamp: 1 }",
+        800.0,
+    );
+    let lines2 = find(&bx2, by_tag(&dom2, "p")).children[0].lines.len();
+    assert_eq!(lines2, 1, "line-clamp:1 → une ligne ({lines2})");
+}
+
+/// R-200 — repro lichess : colonne flex étroite, items
+/// hétérogènes (glyphe PUA type icon-font + texte). Verrou :
+/// deux fragments adjacents de la même ligne ne se
+/// superposent jamais (x + width strictement croissant ou
+/// lignes distinctes).
+#[test]
+fn r200_colonne_flex_etroite_pas_de_chevauchement() {
+    // Collecte tous les fragments avec leur rect — vérifie
+    // l'absence de superposition dans chaque ligne.
+    fn frags(b: &LayoutBox, out: &mut Vec<(f32, f32, f32, String)>) {
+        for line in &b.lines {
+            for f in &line.fragments {
+                out.push((f.rect.x, f.rect.width, f.rect.y, f.text.clone()));
+            }
+        }
+        for c in &b.children {
+            frags(c, out);
+        }
+    }
+    let (dom, bx) = laid(
+        "<!doctype html><aside><ul>\
+         <li><a href=#><i>\u{e000}</i> Games</a></li>\
+         <li><a href=#><i>\u{e001}</i> Puzzles</a></li>\
+         <li><a href=#><i>\u{e002}</i> Learn</a></li></ul></aside>",
+        "aside{display:flex;flex-direction:column;width:120px}\
+         ul{display:flex;flex-direction:column;margin:0;padding:0}\
+         li{display:block} a{display:block} i{font-style:normal}",
+    );
+    let aside = find(&bx, by_tag(&dom, "aside"));
+    let mut fs = Vec::new();
+    frags(aside, &mut fs);
+    // Regrouper par ligne (même y) — dans une ligne, les x
+    // doivent être croissants sans recouvrement.
+    for w in fs.windows(2) {
+        let (x0, w0, y0, t0) = &w[0];
+        let (x1, _w1, y1, t1) = &w[1];
+        assert!(
+            !((y0 - y1).abs() < 0.5 && x1 < &(x0 + w0 - 0.5)),
+            "fragments superposés même ligne : {t0:?} x={x0} w={w0} \
+             vs {t1:?} x={x1} (y={y0})"
+        );
+    }
+}
+
+/// R-207 — `font-size:clamp()` (et `calc()`/`min()`/`max()`)
+/// est matérialisée en px absolu dans le style porté par le
+/// fragment : les consommateurs aval (paint `prop_px` /
+/// `font_size_of`) ne résolvent pas les fonctions maths —
+/// sans la matérialisation, les glyphes étaient rastrés à
+/// 16 px sous des avances shapées à la taille réelle
+/// (plyr.io : titre éclaté lettre par lettre).
+#[test]
+fn r207_clamp_font_size_materialisee_px_dans_style_fragment() {
+    fn frag_style(b: &LayoutBox) -> Option<String> {
+        if let Some(f) = b.lines.iter().flat_map(|l| &l.fragments).next() {
+            return Some(f.style.get_or("font-size", "").to_string());
+        }
+        b.children.iter().find_map(frag_style)
+    }
+    // `clamp(10px, 50vw, 40px)` à VIEW=400 → 50vw=200 borné
+    // à 40 px. Idem `calc(30px + 4px)` = 34 px.
+    let (dom, bx) = laid(
+        "<!doctype html><p id=a>un</p><p id=b>deux</p>",
+        "#a{font-size:clamp(10px,50vw,40px)}#b{font-size:calc(30px + 4px)}",
+    );
+    let a = find(&bx, by_id(&dom, "a"));
+    assert_eq!(
+        frag_style(a).as_deref(),
+        Some("40px"),
+        "font-size:clamp matérialisée en px dans le style du fragment"
+    );
+    let b = find(&bx, by_id(&dom, "b"));
+    assert_eq!(
+        frag_style(b).as_deref(),
+        Some("34px"),
+        "font-size:calc matérialisée en px dans le style du fragment"
+    );
+}
+
+/// R-211 — `padding`/`border` horizontaux sur élément inline non-
+/// remplacé consomment de l'espace sur la ligne (§9.4.2). Avant le
+/// fix, seuls `margin-left/right` déclenchaient les marqueurs
+/// d'extrémité → `a{padding:0 8px}` retombait à 0 → items de nav
+/// contigus (vol 772 dr.dk, vimeo, bitmovin).
+#[test]
+fn padding_horizontal_inline_consomme_la_ligne() {
+    let (dom, bx) = laid(
+        "<!doctype html><p><a>x1</a><a>x2</a></p>",
+        "p{font-size:10px;width:400px} a{padding:0 40px}",
+    );
+    let p = find(&bx, by_tag(&dom, "p"));
+    let anon = &p.children[0];
+    let frags = &anon.lines[0].fragments;
+    let x_of = |t: &str| {
+        frags
+            .iter()
+            .find(|f| f.text == t)
+            .map(|f| f.rect.x)
+            .expect(t)
+    };
+    // « x1 » = 10 px à 5 px/char : padding-left 40px consommé
+    // par le marqueur d'ouverture → le texte démarre à x=40.
+    assert_eq!(x_of("x1"), 40.0, "padding-left de <a> ignoré");
+    // x2 : 40 (pad) + 10 (x1) + 40 (pad) + 40 (pad) = 130.
+    assert_eq!(x_of("x2"), 130.0, "padding-right de <a> ignoré");
+}
