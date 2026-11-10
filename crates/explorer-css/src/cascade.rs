@@ -3284,7 +3284,7 @@ impl StyleEngine {
         //     connaît pas la feuille, seules ses déclarations
         //     servent en débordement (pas de style anticipé).
         for prop in ["position-try", "position-try-fallbacks"] {
-            if let Some(names) = props.get(prop).map(|v| v.clone()) {
+            if let Some(names) = props.get(prop).cloned() {
                 for name in names.split_whitespace().filter(|t| t.starts_with("--")) {
                     if let Some(decls) = self.position_tries.get(name) {
                         let body: String = decls
