@@ -763,7 +763,7 @@ pub fn request_of_family(style: &explorer_css::ComputedStyle, default_family: &s
         .map(|v| {
             v.split(',')
                 .filter_map(|part| {
-                    let mut it = part.trim().split_whitespace();
+                    let mut it = part.split_whitespace();
                     let tag = it.next()?.trim_matches('"');
                     if tag.len() != 4 {
                         return None;
