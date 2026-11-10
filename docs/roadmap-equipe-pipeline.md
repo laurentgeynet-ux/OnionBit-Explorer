@@ -3570,7 +3570,7 @@ chez NAVIGATEUR — non recopiés ici.
 
 > **Ordonnancement (revue chef PIPELINE 2026-11-09)** :
 > valeur terrain / coût — R-201 → R-199 → R-200 →
-> R-202 → R-203 → R-204 → R-205 → R-206 → R-207.
+> R-202 → R-203 → R-204 → R-205 → R-206 → R-207 → R-208 → R-209 → R-210 → R-211.
 
 - [x] **R-201. `grid-area` formes courtes (2/3 valeurs) —
   relai G-5** : la branche numérique `grid.rs:561-591`
@@ -3788,7 +3788,16 @@ chez NAVIGATEUR — non recopiés ici.
   non lisible, filtre anti-bruit ident-keyword (`auto`&co
   exclus). Funnel unique, zéro touche aux call sites layout.
   Verrou : 6 tests census verts.
-- [x] **R-207. `font-size` à fonction maths matérialisée en px dans le style (terrain vol 771 plyr.io)** : `clamp()`/`calc()`/`min()`/`max()`/`var()` passaient la cascade en brut (résolution exigeant viewport/rem) ; la display list relisait la valeur par `parse_length` seul → repli 16 px → glyphes rastrés à 16 px sous des avances shapées à la taille réelle (« lettres éclatées » plyr.io, famille Tailwind). Fix : `break_into_lines` écrit la font-size résolue en px dans le style du fragment ; `resolve_absolutes_impl` idem dans le style de la boîte (contrat R-17 étendu). Verrou `r207_clamp_font_size_materialisee_px_dans_style_fragment`.
+- [x] **R-207v. `font-size` à fonction maths matérialisée en px dans le style (terrain vol 771 plyr.io)** : `clamp()`/`calc()`/`min()`/`max()`/`var()` passaient la cascade en brut (résolution exigeant viewport/rem) ; la display list relisait la valeur par `parse_length` seul → repli 16 px → glyphes rastrés à 16 px sous des avances shapées à la taille réelle (« lettres éclatées » plyr.io, famille Tailwind). Fix : `break_into_lines` écrit la font-size résolue en px dans le style du fragment ; `resolve_absolutes_impl` idem dans le style de la boîte (contrat R-17 étendu). Verrou `r207_clamp_font_size_materialisee_px_dans_style_fragment`.
+
+
+- [x] **R-208v. Shorthands : valeurs `calc()`/`var()`/`min()`/`max()` avec espaces internes** (terrain vol 771 plyr.io, famille Tailwind v4) : l'expansion des shorthands multi-valeurs (`margin`, `padding`, `inset`, `border-radius`, `border-width`, `place-*`, `border`, `overflow`, `flex`, `gap`) éclatait sur whitespace naïf → `calc(var(--spacing) * n)` découpé → `four_sides`/expansion échouait → déclaration droppée → zéro padding/marge. Fix : `split_ws_top` (profondeur de parenthèses) dans `explorer-css/value.rs`. Verrou `r208_shorthand_fonctions_avec_espaces_internes`.
+
+- [x] **R-209v. `@font-face unicode-range` parsé + fetch priorisé sur la couverture ASCII** (terrain vol 771 plyr.io — Inter variable de Google Fonts, 126 faces éclatées par écriture, latin en dernier ; budget 16 → seules des faces sans couverture latine s'enregistraient → fallback glyphe → serif/italique partout). `FontFace.unicode_ranges` ajouté (champ additif, `parse_unicode_range` avec joker `?`), `font_faces()` ordonne les faces couvrant l'ASCII en premier. Verrou `r209_font_faces_unicode_range_latin_prioritaire`. Reste : le fetch reste séquentiel à budget fixe — un site non-latin voudrait la même priorité sur son écriture (heuristique documentée).
+
+- [x] **R-210v. `calc` : `0` nu polymorphe nombre/dimension** (terrain vol 772 ORF — bisect de la feuille mosaik) : `parse_length("0")` classait le zéro nu en `<length>` → `N ± 0` mixte rejeté par le contrôle nombre/dimension → `calc(… * (100 - var(--mosaik-grid-ad,0)) * 1dvw)` et les `clamp()` conteneurs retournaient `None` → `--mosaik-space-2xs-md` non résolue → `--lane-item-width` non résolue → `grid-template-columns`/`grid-auto-columns` retombaient à `auto` → items `li` en colonnes min-content de ~1px de haut (contenu absolu) → titres concaténés. Fix `explorer-layout/block.rs` : `Term.zero` polymorphe, nombres nus parsés avant `parse_length`, `±` accorde le zéro au type de l'autre opérande, `calc(0)` conservé. Verrou `calc_bare_zero_is_polymorphic`.
+
+- [x] **R-211v. `padding`/`border` horizontaux sur élément inline consomment la ligne** (terrain vol 772 dr.dk/vimeo/bitmovin) : les marqueurs d'extrémité `Open`/`Close` n'étaient posés que pour `margin-left|right` → `padding`/`border-width` horizontaux d'un inline non-remplacé ignorés → `ul li a{padding:0 8px}` retombait à 0 → items nav contigus (`DR.DKDRTVDR LYD`, spans bitmovin concaténés). Fix `inline.rs` : trigger étendu aux six propriétés, bord = `margin + border-width + padding` par côté. Verrou `padding_horizontal_inline_consomme_la_ligne`. Reste : le fond peint de l'élément ne s'étend pas encore sur la zone padding (cosmétique, documenté).
 
 ## Tâches continues
 
