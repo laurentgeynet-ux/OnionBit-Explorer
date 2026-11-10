@@ -3799,27 +3799,6 @@ chez NAVIGATEUR — non recopiés ici.
 
 - [x] **R-211v. `padding`/`border` horizontaux sur élément inline consomment la ligne** (terrain vol 772 dr.dk/vimeo/bitmovin) : les marqueurs d'extrémité `Open`/`Close` n'étaient posés que pour `margin-left|right` → `padding`/`border-width` horizontaux d'un inline non-remplacé ignorés → `ul li a{padding:0 8px}` retombait à 0 → items nav contigus (`DR.DKDRTVDR LYD`, spans bitmovin concaténés). Fix `inline.rs` : trigger étendu aux six propriétés, bord = `margin + border-width + padding` par côté. Verrou `padding_horizontal_inline_consomme_la_ligne`. Reste : le fond peint de l'élément ne s'étend pas encore sur la zone padding (cosmétique, documenté).
 
-- [x] **R-210. Quirk « marges absorbées au bord de `body` »**
-  (lot géométrique — dy +13,4 px nommé par `geo_diff` sur
-  info.cern.ch, quirks sans doctype) : mesuré Chrome, la
-  chaîne de marges collapsant au bord de `body` est avalée —
-  `LayoutBox.is_body` (posé au build) + garde dans
-  `collapsed_top_margin`/`escaped_bottom_run`. Marge propre
-  de body et collapse frères inchangés. Verrous : 3 tests
-  `quirks_body_margin` + fixture `colonnes` recalée.
-- [x] **R-212. LOT-selectors : `:lang()` + tolérance `::-moz-*`/`-ms`/`-o`** : premier lot nommé par le Pareto réel (`css.selector.bad` = `:lang` Wikipedia + vendor pseudos). `PseudoClass::Lang` (parse + héritage documentaire + préfixe tiret + `*`) ; vendor préfixés → `Other` dormant au lieu d'invalider la liste. Verrous : 4 tests dédiés.
-- [x] **R-213. `geometry_dump` : rect contenu pour les inline** : nos fragments rapportaient la ligne allouée (lh) où `gBCR` rend la border-box contenu (~fs) — dh inline systématique +9 px sur le corpus. Rect `Inline`/`Text`/fragment non-atomique resserré à `font-size` recentrée. Verrou : suites layout vertes.
-- [x] **R-214. `line-height` naturelle = `asc − desc`** : dy +0,4 px/ligne (info.cern.ch) — le `lineGap` hhea doublait la métrique vs Chrome ; retiré (borne fonte à gap réel documentée).
-- [x] **R-215. Priorité cascade logique/physique** : `padding-inline-start` auteur écrasé par `padding-left` UA (`dw +24` wikipedia). Rang d'origine mémorisé par nom ; écrasement logique→physique si rang strictement supérieur.
-- [x] **R-216. Census `mq.unknown` par contenu** : `css.mq.unknown.<fragment>` / `.range` — le Pareto nommera les features fautives à la prochaine récolte.
-- [x] **R-217. `:has` relatif** : combinateurs de tête `>`/`+`/`~` (`Vec<(Combinator, sel)>`) + whitelist `-webkit-search-decoration`/`-webkit-textfield`/`-webkit-input-placeholder`. Verrous : 3 tests, suites vertes.
-- [x] **R-219. `light-dark()`/`var()` couleurs dans les shorthands** : `background:light-dark(...)` droppé sur example.com — `color_like` accepte les fonctions à résolution retardée (bg + border). Fond page restauré.
-- [x] **R-220. `or` top-level media query (MQ4)** : `(a) or (b)` tombait `unknown` → règles appliquées à tort (MDN). `or_groups` par groupe AND ; `type_ok && (g0 ∨ gN…)`. Verrous : 2 tests dédiés.
-- [x] **R-221. `@counter-style <nom>`** : `css.at.unapplied` ×9 wikipedia — registre `StyleEngine`→`StyleMap`→`LayoutBox.counter`, `label` pour numeric/alphabetic/cyclic/fixed/symbolic. Verrou : test e2e (labels cycliques).
-- [x] **R-224. `width:100%` dans flex item shrink-wrap** : `%` nu → `None` en mesure intrinsèque (contenu), maths à % gardent `cb`. `vector-collapsible` wikipedia 1088→~297 ; verrou `r224_flex_pct`.
-- [x] **R-225. `calc()` en feature MQ** : `(min-width:calc(640px - 1px))` wikipedia — bloc masquage logo jamais appliqué (+118 header-start) ; double bug : extraction `)` de groupe qui mangeait celle de `calc()`. Évaluateur `mq_calc_len` borné. Verrou : test aux deux bords.
-- [ ] **R-226. Remplacé `img` en flex → w=0** (EN COURS) : `style="width:140px"` donne 0 en item flex direct ET dans le contenu d'un item — `style`/`width` non résolu ou item traité atomique. Verrou `r226_img_flex` (ignore). Bissections faites : span texte+width → OK, img div plain → OK, img flex → 0.
-- [ ] **R-227. `a.mw-logo` stretch dans grid `mw-header`** (EN COURS — diagnostic figé) : wikipedia `.mw-header{display:grid;grid-template:.../15.5rem minmax(0,1fr);grid-template-areas}` — `a` (display:flex, block-level) s'étire au conteneur 261 vs Chrome 140 — soit le track `15.5rem`/`minmax`/auto-size diverge, soit le fallback grid/flex rate. grid-area/columns couverts dans grid.rs ; fixture à écrire `display:grid;15.5rem minmax(0,1fr)`.
 ## Tâches continues
 
 - **Triage rendu** des échecs `site_smoke.ps1` : les écarts
