@@ -6,6 +6,7 @@ Le format suit [Keep a Changelog](https://keepachangelog.com/fr/1.1.0/)
 et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
+- **R-232 — `all: kw` reset global** (`explorer-css`, BCD) : `initial`/`inherit`/`unset`/`revert[-layer]` expansé vers toutes les longhands connues, chacune rejoint son repli aval (hérité→parent sinon initiale). Verrous : 2 tests.
 - **R-238 — `css.value.dropped.<prop>.<valeur>` détaillé** (`explorer-css`, diagnostic) : le compteur nomme le début de la valeur fautive (`--` préfixe stripé, 30 car., non-alnum→`_`) — la prochaine récolte nommera les ×108 `font-size` de github.
 - **R-237 — `@namespace` + sélecteurs `ns|tag`** (`explorer-css`, BCD at) : registre préfixe→URI (`Statement`), `Type("ns|tag")` parse (`ns|tag`/`|tag`/`*|tag`), match `dom.namespace` par URI (svg/mathml/xhtml), index candidat sous le tag nu (le préfixe filtre à `simple_matches`). Verrous : 3 tests (svg vs html, `*|a`).
 - **R-235 — `-webkit-text-fill-color` + `-webkit-text-stroke*`** (`explorer-css`, BCD ×4) : fill remplace `color` sauf `transparent` (post-cascade), stroke reconnus. Verrous : 3 tests.

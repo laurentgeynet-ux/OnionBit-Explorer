@@ -2445,6 +2445,22 @@ impl StyleEngine {
             } else {
                 d.name.to_ascii_lowercase()
             };
+            // R-232 — `all: kw` : reset de TOUTES les longhands
+            // connues au mot-clé (`initial`/`inherit`/`unset`/
+            // `revert[-layer]` — chacune rejoint son repli
+            // aval : hérité→parent, sinon initiale).
+            if lname == "all"
+                && matches!(
+                    d.value.trim().to_ascii_lowercase().as_str(),
+                    "initial" | "inherit" | "unset" | "revert" | "revert-layer"
+                )
+            {
+                for p in SUPPORTED_PROPS {
+                    ranks.insert((*p).to_string(), *rank);
+                    props.insert((*p).to_string(), d.value.clone());
+                }
+                continue;
+            }
             // Shorthand → longhands (spec : `margin: x` fixe les
             // quatre côtés, chacun à la spécificité de la règle).
             match expand_shorthand(&lname, &d.value) {
