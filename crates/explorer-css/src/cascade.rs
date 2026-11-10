@@ -5234,6 +5234,23 @@ impl StyleEngine {
                 st.set("font-palette", &base);
             }
         }
+        // R-249 — `text-wrap`/`text-wrap-mode` : alias
+        // `white-space` (css-text-4 §7.1) — `nowrap`/
+        // `wrap`/`balance`/`pretty`/`stable` résolus
+        // vers le canal `white-space` consommé par
+        // l'inline (`nowrap` → nowrap, autres →
+        // normal). `text-wrap-style` (`balance`,
+        // `pretty`, `stable`, `auto`) stocké dormant —
+        // algorithme d'équilibrage de lignes futur.
+        for st in map.values_mut() {
+            let mode = st.get("text-wrap-mode").map(str::to_string);
+            if let Some(m) = mode {
+                st.set(
+                    "white-space",
+                    if m.trim() == "nowrap" { "nowrap" } else { "normal" },
+                );
+            }
+        }
         // R-241 — `font-variant-numeric` : mots-clés → tags
         // OT équivalents (spec css-fonts-4 §6.3) — concaténés
         // aux `font-feature-settings` existants.

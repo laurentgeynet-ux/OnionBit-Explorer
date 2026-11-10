@@ -981,6 +981,26 @@ pub fn expand_shorthand(name: &str, value: &str) -> Option<Vec<(String, String)>
     if let Some(expanded) = expand_logical(name, value) {
         return Some(expanded);
     }
+    // `text-wrap` (css-text-4 — R-249) : `<mode> <style>?`
+    // → `text-wrap-mode` + `text-wrap-style`. `nowrap` n'est
+    // qu'un mode ; `balance`/`pretty`/`stable`/`auto` ne sont
+    // qu'un style — chaque absent retombe sur son initial.
+    if name == "text-wrap" {
+        let parts: Vec<&str> = split_ws_top(value);
+        let mut mode = None;
+        let mut style = None;
+        for p in parts {
+            match p {
+                "wrap" | "nowrap" => mode = Some(p),
+                "balance" | "pretty" | "stable" | "auto" => style = Some(p),
+                _ => return None,
+            }
+        }
+        return Some(vec![
+            ("text-wrap-mode".to_string(), mode.unwrap_or("wrap").to_string()),
+            ("text-wrap-style".to_string(), style.unwrap_or("auto").to_string()),
+        ]);
+    }
     // Shorthands `place-*` (css-align-3 — R-125) : 1 valeur
     // répétée ou 2 (`<align> <justify>`).
     if let Some((a, b)) = match name {
