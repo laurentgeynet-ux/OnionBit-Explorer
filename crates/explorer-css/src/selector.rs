@@ -440,6 +440,23 @@ pub fn parse_selector_list(prelude: &str) -> Option<Vec<ComplexSelector>> {
     p.list().filter(|l| !l.is_empty())
 }
 
+/// Sélecteur `name` reconnu par le moteur — sondage syntaxique
+/// via [`parse_selector_list`] (le nom BCD `hover`/`::before`/
+/// `:has` est essayé tel quel puis avec `:`/`::` selon le
+/// préfixe manquant). Critère *parsé*, pas *matché* : un
+/// pseudo dormant (`PseudoElement::Other`) compte reconnu —
+/// même biais que [`crate::prop_supported`] pour la couverture
+/// BCD (`scripts/bcd_coverage.mjs`).
+#[must_use]
+pub fn selector_supported(name: &str) -> bool {
+    if parse_selector_list(name).is_some() {
+        return true;
+    }
+    let t = name.trim_start_matches(':');
+    parse_selector_list(&format!(":{t}")).is_some()
+        || parse_selector_list(&format!("::{t}")).is_some()
+}
+
 struct SelectorParser<'t> {
     tokens: &'t [Token],
     pos: usize,
@@ -1664,55 +1681,56 @@ fn has_matches(
     anc: AncestorFilter,
     scope: Option<NodeId>,
 ) -> bool {
-
-            for (head, sel) in list {
-                let mut hit = |c| dom.element(c).is_ok()
-                    && matches_any_with_state_in(
-                        dom,
-                        c,
-                        std::slice::from_ref(sel),
-                        state,
-                        cache,
-                        anc,
-                        scope,
-                    );
-                match head {
-                    Combinator::Descendant => {
-                        let mut stack: Vec<NodeId> = Vec::new();
-                        if let Ok(ch) = dom.children(node) {
-                            stack.extend(ch.iter().rev());
-                        }
-                        while let Some(c) = stack.pop() {
-                            if hit(c) {
-                                return true;
-                            }
-                            if let Ok(ch) = dom.children(c) {
-                                stack.extend(ch.iter().rev());
-                            }
-                        }
+    for (head, sel) in list {
+        let mut hit = |c| {
+            dom.element(c).is_ok()
+                && matches_any_with_state_in(
+                    dom,
+                    c,
+                    std::slice::from_ref(sel),
+                    state,
+                    cache,
+                    anc,
+                    scope,
+                )
+        };
+        match head {
+            Combinator::Descendant => {
+                let mut stack: Vec<NodeId> = Vec::new();
+                if let Ok(ch) = dom.children(node) {
+                    stack.extend(ch.iter().rev());
+                }
+                while let Some(c) = stack.pop() {
+                    if hit(c) {
+                        return true;
                     }
-                    Combinator::Child => {
-                        if let Ok(ch) = dom.children(node) {
-                            if ch.iter().any(|&c| hit(c)) {
-                                return true;
-                            }
-                        }
-                    }
-                    Combinator::NextSibling | Combinator::SubsequentSibling => {
-                        if let Some(sibs) = following_siblings(dom, node) {
-                            let mut it = sibs.into_iter().filter(|&c| dom.element(c).is_ok());
-                            let found = match head {
-                                Combinator::NextSibling => it.next().is_some_and(hit),
-                                _ => it.any(hit),
-                            };
-                            if found {
-                                return true;
-                            }
-                        }
+                    if let Ok(ch) = dom.children(c) {
+                        stack.extend(ch.iter().rev());
                     }
                 }
             }
-            false
+            Combinator::Child => {
+                if let Ok(ch) = dom.children(node) {
+                    if ch.iter().any(|&c| hit(c)) {
+                        return true;
+                    }
+                }
+            }
+            Combinator::NextSibling | Combinator::SubsequentSibling => {
+                if let Some(sibs) = following_siblings(dom, node) {
+                    let mut it = sibs.into_iter().filter(|&c| dom.element(c).is_ok());
+                    let found = match head {
+                        Combinator::NextSibling => it.next().is_some_and(hit),
+                        _ => it.any(hit),
+                    };
+                    if found {
+                        return true;
+                    }
+                }
+            }
+        }
+    }
+    false
 }
 
 /// Frères **suivants** de `node` (éléments et non-éléments,

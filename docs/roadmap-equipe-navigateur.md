@@ -7832,6 +7832,30 @@ github.com — bundle > plafonds (JS-C41 livré le cadre).
   *Déclencheur : insertion dynamique constatée sur sites
   réels.*
 
+**Manques mesurés BCD (`scripts/bcd_coverage.mjs`,
+2026-11-10 — `js.builtins` 533/649 = 82,1 %, moteur nu)** —
+lots ordonnés par impact (3/3 moteurs d'abord) ; la mesure
+est reproductible, les scores servent de cliquet
+documentaire (ADR-0010) :
+
+- [ ] **JS-C468. Accesseurs d'instance TypedArrays/DataView**
+  (`ArrayBuffer.byteLength`, `DataView.buffer/byteLength/
+  byteOffset`, `ArrayBuffer.transferToFixedLength`) — les
+  bundles JS modernes et les chemins binaires (MSE, wasm)
+  les lisent en boot. *Déclencheur : déjà mesuré.*
+- [ ] **JS-C469. Objets itérateurs avancés** (`Generator`,
+  `AsyncGenerator` + `.next/.return/.throw`, `AsyncIterator`,
+  `AsyncFunction`, `AsyncGeneratorFunction`,
+  `AsyncDisposableStack`) — surface async itérative ES2018+.
+  *Déclencheur : site réel async-iter (streams, for-await).*
+- [ ] **JS-C471. Détails Error modernes** (`AggregateError.
+  errors`, `Error.cause`, `*.serializable_object`) —
+  `cause` circule dans les boot-chains (diagnostic des
+  « morts silencieuses »). *Déclencheur : déjà mesuré.*
+- [ ] **JS-C472. `Date.toTemporalInstant`, `Atomics` hors
+  buffers partagés** — ponts vers `Temporal` (JS-C31) et
+  workers. *Déclencheur : site réel.*
+
 ### J-C — Mesure, perf, robustesse
 
 - [x] **JS-C36. Acid3 subset JS mesuré** (harnais informatif) :

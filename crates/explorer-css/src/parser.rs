@@ -1449,13 +1449,15 @@ fn parse_media_queries(prelude: &str) -> Vec<MediaQuery> {
         }
         explorer_common::census::bump("css.mq.unknown");
         let frag = raw.trim();
-        let key = if frag.contains("<=") || frag.contains(">=")
-            || frag.matches(['<', '>']).count() > 1
-        {
-            "css.mq.unknown.range".to_string()
-        } else {
-            format!("css.mq.unknown.{}", frag.chars().take(48).collect::<String>())
-        };
+        let key =
+            if frag.contains("<=") || frag.contains(">=") || frag.matches(['<', '>']).count() > 1 {
+                "css.mq.unknown.range".to_string()
+            } else {
+                format!(
+                    "css.mq.unknown.{}",
+                    frag.chars().take(48).collect::<String>()
+                )
+            };
         explorer_common::census::bump(&key);
     }
     queries
@@ -1580,7 +1582,11 @@ fn parse_one_media(q: &str) -> MediaQuery {
         }
     }
     mq.conditions = groups.first().cloned().unwrap_or_default();
-    mq.or_groups = if groups.len() > 1 { groups[1..].to_vec() } else { Vec::new() };
+    mq.or_groups = if groups.len() > 1 {
+        groups[1..].to_vec()
+    } else {
+        Vec::new()
+    };
     mq
 }
 
@@ -1689,4 +1695,29 @@ fn find_matching_paren(s: &str) -> usize {
         }
     }
     s.len()
+}
+
+/// At-rule `name` reconnue par le moteur — sondage par parse
+/// d'un bloc `@name … {}` : tout nom qui produit un
+/// [`AtKind`] structuré (≠ [`AtKind::UnknownBlock`]) est
+/// reconnu ; les at-rules à statement gérées nominativement
+/// (`charset`, `import`) complètent la liste.
+///
+/// Critère *reconnu au parse*, pas *appliqué* — `unapplied`
+/// du census (R-207) mesure la seconde colonne ; le
+/// dénominateur de couverture BCD se veut « le moteur sait
+/// quoi faire de `@x` », pas « il l'applique »
+/// (`scripts/bcd_coverage.mjs`).
+#[must_use]
+pub fn at_rule_supported(name: &str) -> bool {
+    const KNOWN_STATEMENTS: &[&str] = &["charset", "import"];
+    if KNOWN_STATEMENTS.contains(&name.to_ascii_lowercase().as_str()) {
+        return true;
+    }
+    let probe = format!("@{name} x {{}}");
+    let sheet = parse_stylesheet(&probe);
+    matches!(
+        sheet.rules.first(),
+        Some(Rule::At(at)) if !matches!(at.kind, AtKind::UnknownBlock { .. })
+    )
 }

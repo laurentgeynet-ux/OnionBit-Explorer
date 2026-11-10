@@ -52,7 +52,8 @@ fn main() -> ExitCode {
         [_, cmd, url] if cmd == "mem" => mem_report(url),
         [_, cmd, url, dir] if cmd == "save" => save_fixture(url, dir),
         [_, cmd, file] if cmd == "eval" => eval_js(file),
-        [_, cmd] if cmd == "props" => props_check(),
+        [_, cmd] if cmd == "props" => check_names("prop"),
+        [_, cmd, kind] if cmd == "check" => check_names(kind),
         [_, cmd, url, out] if cmd == "download" => download(url, out),
         [_, cmd] if cmd == "mcp" => mcp_main("9377"),
         [_, cmd, port] if cmd == "mcp" => mcp_main(port),
@@ -72,6 +73,7 @@ fn main() -> ExitCode {
             eprintln!(
                 "        explorer-cli props            (noms de props sur stdin → `nom\\tok|miss`)"
             );
+            eprintln!("        explorer-cli check prop|sel|at");
             eprintln!("        explorer-cli download <url> <sortie>");
             eprintln!("        explorer-cli diff <a.png> <b.png>");
             eprintln!("        explorer-cli mcp [port]  (serveur MCP stdio → daemon)");
@@ -592,8 +594,23 @@ fn eval_js(path: &str) -> ExitCode {
 /// [`explorer_css::prop_supported`] — critère `@supports`
 /// (nom seul). Brique de `scripts/bcd_coverage.mjs` : le
 /// script alimente les ~650 clés BCD et compte la couverture.
-fn props_check() -> ExitCode {
+/// `check <prop|sel|at>` (`props` = `check prop`) : lit des
+/// noms sur stdin (un par ligne) et émet `nom\tok` ou
+/// `nom\tmiss` selon le critère de reconnaissance du moteur —
+/// `prop_supported` / `selector_supported` /
+/// `at_rule_supported`. Brique de `scripts/bcd_coverage.mjs` :
+/// le script alimente les clés BCD et compte la couverture.
+fn check_names(kind: &str) -> ExitCode {
     use std::io::BufRead;
+    let test: fn(&str) -> bool = match kind {
+        "prop" => explorer_css::prop_supported,
+        "sel" => explorer_css::selector_supported,
+        "at" => explorer_css::at_rule_supported,
+        _ => {
+            eprintln!("check : kind inconnu {kind:?} — attendu prop|sel|at");
+            return ExitCode::FAILURE;
+        }
+    };
     let stdin = std::io::stdin();
     for line in stdin.lock().lines() {
         let Ok(name) = line else { break };
@@ -601,8 +618,7 @@ fn props_check() -> ExitCode {
         if name.is_empty() {
             continue;
         }
-        let ok = explorer_css::prop_supported(name);
-        println!("{name}\t{}", if ok { "ok" } else { "miss" });
+        println!("{name}\t{}", if test(name) { "ok" } else { "miss" });
     }
     ExitCode::SUCCESS
 }

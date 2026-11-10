@@ -43,13 +43,13 @@ pub use cascade::{
 };
 pub use fontface::{FontFace, FontSrc};
 pub use parser::{
-    parse_declarations, parse_stylesheet, AtKind, AtRule, Declaration, ImportRule, MediaQuery,
-    QualifiedRule, Rule, Stylesheet,
+    at_rule_supported, parse_declarations, parse_stylesheet, AtKind, AtRule, Declaration,
+    ImportRule, MediaQuery, QualifiedRule, Rule, Stylesheet,
 };
 pub use selector::{
-    matches, matches_any, matches_any_with_state, matches_with_state, parse_selector_list, AttrOp,
-    Combinator, ComplexSelector, CompoundSelector, DynamicPseudo, PseudoClass, PseudoElement,
-    SimpleSelector, Specificity,
+    matches, matches_any, matches_any_with_state, matches_with_state, parse_selector_list,
+    selector_supported, AttrOp, Combinator, ComplexSelector, CompoundSelector, DynamicPseudo,
+    PseudoClass, PseudoElement, SimpleSelector, Specificity,
 };
 pub use token::Token;
 pub use tokenizer::tokenize;
