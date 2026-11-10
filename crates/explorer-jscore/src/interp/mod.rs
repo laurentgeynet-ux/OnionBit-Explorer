@@ -7328,6 +7328,29 @@ impl Engine {
             Value::Obj(id) => {
                 if let Some(h) = self.host_of(id) {
                     crate::host_mark(h.class_name(), key);
+                    // Sonde kevlar §cran-24 : qui écrit
+                    // `polymerController` sur un élément — la
+                    // pile nomme le site qui livre un pc
+                    // racine-Shady (`zc`) au lieu du `d`.
+                    if key == "polymerController"
+                        && tracing::enabled!(target: "dom_probe", tracing::Level::INFO)
+                    {
+                        let cls = h.class_name();
+                        let vdesc = self.describe(v.clone());
+                        let stack: String = self
+                            .stack_text("", "")
+                            .lines()
+                            .map(str::trim)
+                            .filter(|l| l.starts_with("at "))
+                            .take(8)
+                            .collect::<Vec<_>>()
+                            .join(" <- ");
+                        let stack: String = stack.chars().take(600).collect();
+                        tracing::info!(target: "dom_probe",
+                            site = "pc.set", host = %cls,
+                            v = %vdesc.chars().take(120).collect::<String>(),
+                            stack = %stack);
+                    }
                     if h.set(self, base.clone(), key, v.clone())? {
                         // Réactions CE synchrones (JS-C68) — un
                         // setter host a pu muter le miroir

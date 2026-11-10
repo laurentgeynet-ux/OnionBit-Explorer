@@ -6658,8 +6658,7 @@ fn prop_attr_name(key: &str) -> &str {
         "encoding" => "enctype",
         "crossOrigin" => "crossorigin",
         "dateTime" => "datetime",
-        "accessKey" => "accesskey",
-        "accessKeyLabel" => "accesskey",
+        "accessKey" | "accessKeyLabel" => "accesskey",
         "contentEditable" => "contenteditable",
         "enterKeyHint" => "enterkeyhint",
         "inputMode" => "inputmode",
@@ -14737,6 +14736,34 @@ fn element_attach_shadow(e: &mut Engine, this: Value, args: &[Value]) -> JsResul
         _ => true,
     };
     let existing = dom.borrow().shadow_root(node, true);
+    // Sonde kevlar §cran-24 : `attachShadow` produit la
+    // racine Shady (`zc`) qui se retrouve posée en
+    // `polymerController` — tag hôte + init + pile JS.
+    if existing.is_none() && tracing::enabled!(target: "dom_probe", tracing::Level::INFO) {
+        let (tag, frag) = {
+            let d = dom.borrow();
+            let tag = d.nodes[node as usize].tag.clone();
+            let frag = match args.first() {
+                Some(Value::Obj(id)) => e
+                    .get_prop(*id, "shadyUpgradeFragment")
+                    .is_some_and(|f| !matches!(f, Value::Undefined | Value::Null)),
+                _ => false,
+            };
+            (tag, frag)
+        };
+        let stack: String = e
+            .stack_text("", "")
+            .lines()
+            .map(str::trim)
+            .filter(|l| l.starts_with("at "))
+            .take(8)
+            .collect::<Vec<_>>()
+            .join(" <- ");
+        let stack: String = stack.chars().take(600).collect();
+        tracing::info!(target: "dom_probe",
+            site = "dom.shady", tag = %tag, open = %open, frag = %frag,
+            stack = %stack);
+    }
     let root = if let Some(r) = existing {
         r
     } else {
