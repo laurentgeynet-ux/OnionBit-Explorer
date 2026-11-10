@@ -851,3 +851,18 @@ fn anchor_position_try_flip() {
     // → y = 2*760 - 770 - 80 = 670.
     assert_eq!(m.rect.y, 670.0, "flip-block : mirée au-dessus");
 }
+
+/// `position-try-order` (R-254 suite) : `most-width` ne
+/// flip que l'axe horizontal — un débordement vertical ne
+/// provoque plus de miroir.
+#[test]
+fn anchor_position_try_order() {
+    let (dom, bx) = laid(
+        "<div id=a></div><div id=m></div>",
+        "#a{position:absolute;left:10px;top:750px;width:40px;height:20px;anchor-name:--a}\
+         #m{position:absolute;position-anchor:--a;top:anchor(bottom);left:anchor(left);\
+            width:30px;height:80px;position-try:flip-block;position-try-order:most-width}",
+    );
+    let m = find(&bx, by_id(&dom, "m"));
+    assert_eq!(m.rect.y, 770.0, "most-width : flip-block ignoré");
+}

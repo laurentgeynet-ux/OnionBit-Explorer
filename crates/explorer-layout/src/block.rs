@@ -753,25 +753,57 @@ fn fix_anchor_positioned(
                     let over_r = bx.rect.x + bx.rect.width > cb_w;
                     let over_t = bx.rect.y < 0.0;
                     let over_b = bx.rect.y + bx.rect.height > vp_h;
+                    // `position-try-order` (R-254 suite) :
+                    // `most-width`/`most-inline-size` = flip
+                    // horizontal seul, `most-height`/
+                    // `most-block-size` = vertical seul ;
+                    // `normal`/absent = les deux (résidus :
+                    // tri complet des fallbacks ordonnés).
+                    let order = bx
+                        .style
+                        .get("position-try-order")
+                        .map_or("normal", |v| v.trim());
                     let (mut fx, mut fy) = (0.0_f32, 0.0_f32);
                     for t in raw_try.split_ascii_whitespace() {
                         match t {
-                            "flip-block" | "flip-y" if over_t || over_b => {
+                            "flip-block" | "flip-y"
+                                if (over_t || over_b)
+                                    && matches!(
+                                        order,
+                                        "normal" | "most-height" | "most-block-size" | "most-size"
+                                    ) =>
+                            {
                                 fy = 2.0 * (ar.y + ar.height / 2.0)
                                     - 2.0 * bx.rect.y
                                     - bx.rect.height;
                             }
-                            "flip-inline" | "flip-x" if over_l || over_r => {
+                            "flip-inline" | "flip-x"
+                                if (over_l || over_r)
+                                    && matches!(
+                                        order,
+                                        "normal" | "most-width" | "most-inline-size" | "most-size"
+                                    ) =>
+                            {
                                 fx =
                                     2.0 * (ar.x + ar.width / 2.0) - 2.0 * bx.rect.x - bx.rect.width;
                             }
                             "flip-start" => {
-                                if over_t || over_b {
+                                if (over_t || over_b)
+                                    && matches!(
+                                        order,
+                                        "normal" | "most-height" | "most-block-size" | "most-size"
+                                    )
+                                {
                                     fy = 2.0 * (ar.y + ar.height / 2.0)
                                         - 2.0 * bx.rect.y
                                         - bx.rect.height;
                                 }
-                                if over_l || over_r {
+                                if (over_l || over_r)
+                                    && matches!(
+                                        order,
+                                        "normal" | "most-width" | "most-inline-size" | "most-size"
+                                    )
+                                {
                                     fx = 2.0 * (ar.x + ar.width / 2.0)
                                         - 2.0 * bx.rect.x
                                         - bx.rect.width;
