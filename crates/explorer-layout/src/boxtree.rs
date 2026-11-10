@@ -684,20 +684,20 @@ fn box_kind_of(style: &ComputedStyle) -> BoxKind {
     // `list-item` n'est pas dans la table de blockification
     // (sa puce survit au positionnement).
     match style.get_or("display", "inline") {
-        "inline" | "inline-block" | "inline-table" | "inline-flex" | "inline-grid"
-            if matches!(style.get("position"), Some("absolute" | "fixed")) =>
-        {
-            BoxKind::Block
-        }
-        "inline" | "inline-block" | "inline-table" | "inline-flex" | "inline-grid" => {
-            BoxKind::Inline
-        }
         // `display:ruby` (css-ruby-1) : niveau inline — la
         // famille `ruby*` est approchée `inline` (annotation
         // `rt` posée en ligne dans le flux, pas au-dessus de
         // la base — résidu documenté, meilleur que le repli
         // `block` qui cassait la phrase).
-        "ruby" | "ruby-base" | "ruby-text" | "ruby-text-container" | "ruby-base-container" => {
+        "inline" | "inline-block" | "inline-table" | "inline-flex" | "inline-grid" | "ruby"
+        | "ruby-base" | "ruby-text" | "ruby-text-container" | "ruby-base-container"
+            if matches!(style.get("position"), Some("absolute" | "fixed")) =>
+        {
+            BoxKind::Block
+        }
+        "inline" | "inline-block" | "inline-table" | "inline-flex" | "inline-grid" | "ruby"
+        | "ruby-base" | "ruby-text" | "ruby-text-container" | "ruby-base-container" =>
+        {
             BoxKind::Inline
         }
         "list-item" => BoxKind::ListItem,

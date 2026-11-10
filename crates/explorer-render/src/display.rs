@@ -3926,6 +3926,26 @@ fn is_inline_flow(bx: &LayoutBox) -> bool {
 
 #[allow(clippy::too_many_lines)]
 fn paint_lines(bx: &LayoutBox, items: &mut Vec<DisplayItem>, off: (f32, f32)) {
+    // `text-orientation` (css-writing-modes §5.2) : en flux
+    // vertical, `sideways`/`sideways-rl`/`sideways-lr`
+    // pivote le run entier de ±90° autour de la baseline
+    // (rl → +90° horaire, lr → −90°). `upright`/`mixed` =
+    // résidus — avance verticale par glyphe hors MVP.
+    // NB : `flow_mode` = flux CONTENANT — la boîte verticale
+    // elle-même est horizontale pour son parent ; c'est son
+    // `writing-mode` propre qui transposé ses lignes.
+    let own_v = explorer_css::value::parse_writing_mode(bx.style.get("writing-mode").unwrap_or(""))
+        .is_vertical();
+    let sideways_lr = own_v
+        && matches!(
+            bx.style.get("text-orientation").map_or("", |v| v.trim()),
+            "sideways" | "sideways-lr"
+        );
+    let sideways_rl = own_v
+        && matches!(
+            bx.style.get("text-orientation").map_or("", |v| v.trim()),
+            "sideways" | "sideways-rl"
+        );
     // Deux passes (R-70) : TOUTES les décorations inline
     // d'abord, TOUS les textes ensuite — un fond émis entre
     // deux textes couvrirait l'encre du premier (le fond du
@@ -4038,6 +4058,17 @@ fn paint_lines(bx: &LayoutBox, items: &mut Vec<DisplayItem>, off: (f32, f32)) {
                     ink,
                     items,
                 );
+                if sideways_lr || sideways_rl {
+                    // Rotation autour de (x, baseline) : lr
+                    // −90° (x→−y), rl +90° (x→+y).
+                    let (ox, oy) = (frag.rect.x + off.0, base_y);
+                    let t = if sideways_lr {
+                        tiny_skia::Transform::from_row(0.0, -1.0, 1.0, 0.0, ox - oy, ox + oy)
+                    } else {
+                        tiny_skia::Transform::from_row(0.0, 1.0, -1.0, 0.0, ox + oy, oy - ox)
+                    };
+                    items.push(DisplayItem::PushTransform(t));
+                }
                 items.push(DisplayItem::Text {
                     origin: (frag.rect.x + off.0, base_y),
                     run: run.clone(),
@@ -4045,6 +4076,9 @@ fn paint_lines(bx: &LayoutBox, items: &mut Vec<DisplayItem>, off: (f32, f32)) {
                     color: ink,
                     size_px: fs,
                 });
+                if sideways_lr || sideways_rl {
+                    items.push(DisplayItem::PopTransform);
+                }
                 // R-186 — `text-emphasis` : marque par
                 // glyphe ; style+position lus sur le
                 // fragment (shorthand non expansé —
