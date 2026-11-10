@@ -301,19 +301,13 @@ pub enum DisplayItem {
         /// Aire de peinture du mask (border box, coords
         /// document — `mask-clip` résolu).
         rect: Rect,
-        /// Bitmap du mask — alpha lu ; en `luminance`, la
-        /// luminance sRGB×alpha fait foi (css-masking-1 §5.3).
-        mask: std::sync::Arc<crate::image::DecodedImage>,
-        /// Zone d'**une tuile** du mask (coords document) :
-        /// `mask-size` + `mask-position` résolus — même
-        /// sémantique que `MaskedFill::dst`.
-        dst: Rect,
-        /// `mask-repeat` résolu `(x, y)` — défaut `repeat`.
-        repeat: (bool, bool),
-        /// `mask-mode:luminance` (R-252 suite) — couverture =
-        /// luminance relative du pixel source × son alpha ;
-        /// `alpha`/`match-source` (bitmap) = canal alpha seul.
-        luminance: bool,
+        /// Couches `mask-image` résolues (R-252 suite —
+        /// multi-couches) : chaque entrée = `(bitmap, tuile,
+        /// repeat, luminance)` ; la couverture du groupe est
+        /// l'**union** (`mask-composite:add`, initial) des
+        /// alphas — `intersect`/`subtract`/`exclude` =
+        /// résidus documentés.
+        layers: Vec<MaskTile>,
     },
     /// Fin du groupe masqué — composite du tampon modulé
     /// par l'alpha du mask.
@@ -676,8 +670,8 @@ impl DisplayList {
                     let _ = writeln!(out, "emphasis k{kind} @{origin:?}");
                 }
                 DisplayItem::PopBlend => out.push_str("pop-blend\n"),
-                DisplayItem::PushMask { rect, mask, .. } => {
-                    let _ = writeln!(out, "push-mask {}x{} {rect:?}", mask.width, mask.height);
+                DisplayItem::PushMask { rect, layers, .. } => {
+                    let _ = writeln!(out, "push-mask x{} {rect:?}", layers.len());
                 }
                 DisplayItem::PopMask => out.push_str("pop-mask\n"),
                 DisplayItem::BackdropFilter { rect, .. } => {
@@ -3282,18 +3276,16 @@ fn mask_area(bx: &LayoutBox, kind: &str) -> Rect {
 }
 
 #[allow(clippy::cast_possible_truncation, clippy::cast_precision_loss)]
-fn resolve_mask(bx: &LayoutBox, rect: &Rect, images: &crate::PaintImages) -> Option<MaskLayer> {
-    let mask = bx
-        .node
-        .and_then(|n| images.masks.get(&n))
-        .or_else(|| crate::dataurl::mask_url(&bx.style).and_then(|u| images.masks_url.get(&u)))?;
-    // R-252 — `mask-origin` borne la zone de positionnement de
-    // la tuile (initial `border-box` — mais `padding-box` dans
-    // le shorthand ? non : initial = `border-box`, §4.3) ;
-    // `mask-clip` borne l'aire de peinture du groupe.
-    // `rect` = border box décalée passée par l'appelant : les
-    // aires sont reconstruites depuis `bx.rect` + le même
-    // décalage (`rect - bx.rect`).
+fn resolve_mask(bx: &LayoutBox, rect: &Rect, images: &crate::PaintImages) -> Vec<MaskLayer> {
+    // Couches `mask-image` : texte → bitmap ; la couche 0 garde
+    // le lookup `NodeId` historique, les suivantes passent par
+    // `masks_url` (multi-couches R-252, union `add`).
+    let urls: Vec<String> = bx
+        .style
+        .get("mask-image")
+        .or_else(|| bx.style.get("-webkit-mask-image"))
+        .map(|v| top_commas(v).filter_map(crate::dataurl::url_arg).collect())
+        .unwrap_or_default();
     let (ox, oy) = (rect.x - bx.rect.x, rect.y - bx.rect.y);
     let shift = |mut a: Rect| {
         a.x += ox;
@@ -3314,31 +3306,165 @@ fn resolve_mask(bx: &LayoutBox, rect: &Rect, images: &crate::PaintImages) -> Opt
     let clip = shift(mask_area(bx, clip_kind));
     let area = (origin.width, origin.height);
     let fs = font_size_of(&bx.style);
-    let (mw, mh) = mask_size(&bx.style, area, (mask.width as f32, mask.height as f32), fs);
-    let (px, py) = bg_position(
-        bx.style
-            .get("mask-position")
-            .or_else(|| bx.style.get("-webkit-mask-position")),
-        area,
-        (mw, mh),
-        fs,
-    );
-    Some(MaskLayer {
-        mask: mask.clone(),
-        dst: Rect {
-            x: origin.x + px,
-            y: origin.y + py,
-            width: mw,
-            height: mh,
-        },
-        clip,
-        repeat: mask_repeat(&bx.style),
-        luminance: bx
-            .style
-            .get("mask-mode")
-            .or_else(|| bx.style.get("-webkit-mask-mode"))
-            .is_some_and(|v| v.trim() == "luminance"),
-    })
+    let mut out = Vec::new();
+    for (i, url) in urls.iter().enumerate() {
+        let mask = if i == 0 {
+            bx.node
+                .and_then(|n| images.masks.get(&n))
+                .or_else(|| images.masks_url.get(url))
+        } else {
+            images.masks_url.get(url)
+        };
+        let Some(mask) = mask else { continue };
+        // Longhands à couches : i-ème valeur (ou dernière —
+        // répétition spec) ; la couche 0 reprend le helper
+        // historique pour les valeurs simples.
+        let size_raw = if i == 0 {
+            None
+        } else {
+            mask_layer_prop(&bx.style, "mask-size", i)
+        };
+        let (mw, mh) = if let Some(r) = size_raw {
+            mask_size_raw(r, area, (mask.width as f32, mask.height as f32), fs)
+        } else {
+            mask_size(&bx.style, area, (mask.width as f32, mask.height as f32), fs)
+        };
+        let pos_raw = mask_layer_prop(&bx.style, "mask-position", i);
+        let (px, py) = bg_position(pos_raw, area, (mw, mh), fs);
+        out.push(MaskLayer {
+            mask: mask.clone(),
+            dst: Rect {
+                x: origin.x + px,
+                y: origin.y + py,
+                width: mw,
+                height: mh,
+            },
+            clip,
+            repeat: mask_layer_prop(&bx.style, "mask-repeat", i)
+                .map_or_else(|| mask_repeat(&bx.style), mask_repeat_raw),
+            luminance: mask_layer_prop(&bx.style, "mask-mode", i).is_some_and(|v| v == "luminance"),
+        });
+    }
+    out
+}
+
+/// `mask-repeat` d'une couche → `(x, y)` — même table que
+/// [`mask_repeat`] sur un fragment déjà isolé.
+fn mask_repeat_raw(raw: &str) -> (bool, bool) {
+    let toks: Vec<&str> = raw.split_whitespace().collect();
+    let on = |t: &str| !matches!(t, "no-repeat");
+    match toks.as_slice() {
+        [] => (true, true),
+        ["no-repeat"] => (false, false),
+        ["repeat-x"] => (true, false),
+        ["repeat-y"] => (false, true),
+        [a] => (on(a), on(a)),
+        [a, b, ..] => (on(a), on(b)),
+    }
+}
+
+/// `mask-size` d'une couche → dimensions de la tuile — même
+/// grammaire que [`mask_size`] sur un fragment déjà isolé.
+#[allow(clippy::cast_possible_truncation)]
+fn mask_size_raw(raw: &str, area: (f32, f32), img: (f32, f32), fs: f64) -> (f32, f32) {
+    // Réutilise `mask_size` via un style temporaire impossible
+    // — version fragment : mêmes branches sur tokens simples.
+    let toks: Vec<&str> = raw.split_whitespace().collect();
+    let ratio = if img.1 > 0.0 { img.0 / img.1 } else { 1.0 };
+    let len = |t: &str, span: f32| -> Option<f32> {
+        t.strip_suffix('%')
+            .and_then(|p| p.parse::<f32>().ok())
+            .map(|p| span * p / 100.0)
+            .or_else(|| {
+                parse_length(t).map(|l| {
+                    (match l.unit.px_factor() {
+                        Some(f) => l.value * f,
+                        None => l.value * fs * em_factor(l.unit),
+                    }) as f32
+                })
+            })
+    };
+    match toks.as_slice() {
+        [] | ["auto"] | ["auto", "auto"] => area,
+        ["cover" | "contain"] => {
+            if img.0 <= 0.0 || img.1 <= 0.0 {
+                return area;
+            }
+            let s = if toks[0] == "cover" {
+                (area.0 / img.0).max(area.1 / img.1)
+            } else {
+                (area.0 / img.0).min(area.1 / img.1)
+            };
+            (img.0 * s, img.1 * s)
+        }
+        [a] => len(a, area.0).map_or(area, |w| (w, if ratio > 0.0 { w / ratio } else { w })),
+        [a, b, ..] => {
+            let w = if *a == "auto" {
+                len(b, area.1).map_or(img.0, |h| h * ratio)
+            } else {
+                len(a, area.0).unwrap_or(img.0)
+            };
+            let h = if *b == "auto" {
+                len(a, area.0).map_or(img.1, |w| if ratio > 0.0 { w / ratio } else { w })
+            } else {
+                len(b, area.1).unwrap_or(img.1)
+            };
+            (w, h)
+        }
+    }
+}
+
+/// i-ème valeur d'une longhand `mask-*` à couches — liste
+/// virgule top-level ; hors-portée → `None` (le site retombe
+/// sur la dernière — répétition spec — via `or_else` amont).
+fn mask_layer_prop<'a>(
+    st: &'a explorer_css::ComputedStyle,
+    name: &str,
+    i: usize,
+) -> Option<&'a str> {
+    let raw = st
+        .get(name)
+        .or_else(|| st.get(&format!("-webkit-{name}")))?;
+    let parts: Vec<&str> = top_commas(raw).collect();
+    parts
+        .get(i)
+        .or_else(|| parts.last())
+        .map(|s| s.trim())
+        .filter(|s| !s.is_empty())
+}
+
+/// Virgules top-level (parenthèses ignorées).
+fn top_commas(raw: &str) -> impl Iterator<Item = &str> {
+    let mut depth = 0u32;
+    let mut start = 0usize;
+    let mut out = Vec::new();
+    for (i, ch) in raw.char_indices() {
+        match ch {
+            '(' => depth += 1,
+            ')' => depth = depth.saturating_sub(1),
+            ',' if depth == 0 => {
+                out.push(&raw[start..i]);
+                start = i + 1;
+            }
+            _ => {}
+        }
+    }
+    out.push(&raw[start..]);
+    out.into_iter()
+}
+
+/// Une tuile de mask (R-252 multi-couches) : bitmap,
+/// `dst`/`repeat` résolus, `luminance`.
+#[derive(Debug, Clone)]
+pub struct MaskTile {
+    /// Bitmap — seul l'alpha (ou la luma) est lu.
+    pub mask: std::sync::Arc<crate::image::DecodedImage>,
+    /// Zone d'une tuile du mask (coords document).
+    pub dst: Rect,
+    /// `mask-repeat` `(x, y)`.
+    pub repeat: (bool, bool),
+    /// `mask-mode:luminance` de la couche.
+    pub luminance: bool,
 }
 
 /// Résolution d'une couche `mask-*` (R-252) : bitmap dont
@@ -3547,7 +3673,16 @@ fn paint_self(
                 // — fond plein ici, un `MaskedFill`
                 // re-masquerait (alpha² sur les bords doux).
                 let group_masked = !bx.children.is_empty() || !bx.lines.is_empty();
-                if let Some(l) = resolve_mask(bx, &rect, images).filter(|_| !group_masked) {
+                if let Some(l) = (!group_masked)
+                    .then(|| resolve_mask(bx, &rect, images))
+                    .and_then(|mut ls| {
+                        if ls.is_empty() {
+                            None
+                        } else {
+                            Some(ls.remove(0))
+                        }
+                    })
+                {
                     items.push(DisplayItem::MaskedFill {
                         rect,
                         color: c,
@@ -4757,18 +4892,17 @@ fn translate_item(it: &DisplayItem, d: (f32, f32)) -> DisplayItem {
         D::PushClipPath { points } => D::PushClipPath {
             points: points.iter().map(|p| (p.0 + d.0, p.1 + d.1)).collect(),
         },
-        D::PushMask {
-            rect,
-            mask,
-            dst,
-            repeat,
-            luminance,
-        } => D::PushMask {
+        D::PushMask { rect, layers } => D::PushMask {
             rect: shifted(*rect, d),
-            mask: mask.clone(),
-            dst: shifted(*dst, d),
-            repeat: *repeat,
-            luminance: *luminance,
+            layers: layers
+                .iter()
+                .map(|l| MaskTile {
+                    mask: l.mask.clone(),
+                    dst: shifted(l.dst, d),
+                    repeat: l.repeat,
+                    luminance: l.luminance,
+                })
+                .collect(),
         },
         D::PopClip
         | D::PopTransform
@@ -5238,17 +5372,22 @@ fn paint_box<'a>(
     // descendants reportés hors racine (`pos_defer` au
     // contexte ancêtre, `fixed_defer`) échappent au groupe.
     let group_mask = if bx.children.is_empty() && bx.lines.is_empty() {
-        None
+        Vec::new()
     } else {
         resolve_mask(bx, &shifted(bx.rect, off), cx.images)
     };
-    if let Some(l) = &group_mask {
+    if let Some((first, layers)) = group_mask.split_first() {
         items.push(DisplayItem::PushMask {
-            rect: l.clip,
-            mask: l.mask.clone(),
-            dst: l.dst,
-            repeat: l.repeat,
-            luminance: l.luminance,
+            rect: first.clip,
+            layers: layers
+                .iter()
+                .map(|l| MaskTile {
+                    mask: l.mask.clone(),
+                    dst: l.dst,
+                    repeat: l.repeat,
+                    luminance: l.luminance,
+                })
+                .collect(),
         });
     }
     // R-M5 — `filter` encadre TOUTE la sous-arbre de la
@@ -5302,7 +5441,7 @@ fn paint_box<'a>(
     if filtered {
         items.push(DisplayItem::PopFilter);
     }
-    if group_mask.is_some() {
+    if !group_mask.is_empty() {
         items.push(DisplayItem::PopMask);
     }
 }

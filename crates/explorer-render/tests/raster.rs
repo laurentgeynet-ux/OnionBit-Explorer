@@ -1113,3 +1113,35 @@ fn mask_luminance_groupe() {
     );
     assert_eq!(px(&f, 15, 10)[0], 255, "luminance : blanc = opaque");
 }
+
+/// Multi-couches `mask-image` (R-252 suite) : couverture =
+/// union `add` — deux demi-masks complémentaires recomposent
+/// la boîte entière.
+#[test]
+fn mask_multi_couches_union() {
+    let dom: Dom = TreeBuilder::parse("<div class=x><div class=c></div></div>");
+    let mut eng = StyleEngine::new();
+    eng.add_css("body{margin:0}", Origin::Author);
+    // Couche 0 = moitié gauche, couche 1 = moitié droite
+    // (même bitmap, décalée) → union = boîte opaque entière.
+    eng.add_css(
+        ".x{display:block;width:20px;height:20px;\
+         mask-image:url('data:image/svg+xml;utf8,<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"20\" height=\"20\"><rect x=\"0\" y=\"0\" width=\"10\" height=\"20\" fill=\"black\"/></svg>'),url('data:image/svg+xml;utf8,<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"20\" height=\"20\"><rect x=\"10\" y=\"0\" width=\"10\" height=\"20\" fill=\"black\"/></svg>')}\
+         .c{display:block;width:20px;height:20px;background-color:#ff0000}",
+        Origin::Author,
+    );
+    let styles = eng.compute_tree(&dom, dom.document(), &StyleEnv::default());
+    let root_el = dom
+        .children(dom.document())
+        .into_iter()
+        .flatten()
+        .find(|&c| dom.element(c).is_ok())
+        .expect("élément racine");
+    let mut bx = build_box_tree(&dom, root_el, &styles).expect("arbre");
+    layout_tree(&mut bx, VIEW, &ctx());
+    let imgs = collect_data_images(&dom, &styles, 1 << 20);
+    let list = build_display_list_full(&bx, VIEW, 200.0, 0.0, &imgs);
+    let f = rasterize(&list, font_src(), 1.0).expect("frame allouée");
+    assert_eq!(px(&f, 5, 10)[0], 255, "couche 0 : gauche opaque");
+    assert_eq!(px(&f, 15, 10)[0], 255, "couche 1 : droite opaque — union");
+}

@@ -831,16 +831,10 @@ enum GroupKind {
     /// `mask-image` de groupe — composite modulé par
     /// l'alpha du bitmap tuilé dans `dst` (R-252).
     Mask {
-        /// Aire de peinture (border box, coords document).
+        /// Aire de peinture (mask-clip, coords document).
         rect: explorer_layout::Rect,
-        /// Bitmap — alpha, ou luma×alpha en mode luminance.
-        mask: std::sync::Arc<crate::DecodedImage>,
-        /// Tuile résolue (coords document).
-        dst: explorer_layout::Rect,
-        /// `mask-repeat` `(x, y)`.
-        repeat: (bool, bool),
-        /// `mask-mode:luminance` — couverture = luma×alpha.
-        luminance: bool,
+        /// Tuiles des couches — union `add` des couvertures.
+        layers: Vec<crate::display::MaskTile>,
     },
 }
 
@@ -996,22 +990,13 @@ fn replay_items(
             // composite au pop modulé par l'alpha du bitmap
             // (tuile `dst`/`repeat` résolus à l'émission,
             // aire `rect` = border box).
-            DisplayItem::PushMask {
-                rect,
-                mask,
-                dst,
-                repeat,
-                luminance,
-            } => {
+            DisplayItem::PushMask { rect, layers } => {
                 if let Some(buf) = Pixmap::new(pixmap.width(), pixmap.height()) {
                     filtered.push((
                         buf,
                         GroupKind::Mask {
                             rect: *rect,
-                            mask: mask.clone(),
-                            dst: *dst,
-                            repeat: *repeat,
-                            luminance: *luminance,
+                            layers: layers.clone(),
                         },
                     ));
                 }
@@ -1042,21 +1027,12 @@ fn replay_items(
                             let dst = filtered.last_mut().map_or(&mut *pixmap, |(b, _)| b);
                             composite_blend(dst, &buf, tag);
                         }
-                        GroupKind::Mask {
-                            rect,
-                            mask,
-                            dst: tile,
-                            repeat,
-                            luminance,
-                        } => {
+                        GroupKind::Mask { rect, layers } => {
                             let cov = group_mask_coverage(
                                 pixmap.width(),
                                 pixmap.height(),
                                 &rect,
-                                &mask,
-                                &tile,
-                                repeat,
-                                luminance,
+                                &layers,
                                 cur,
                                 clips.last(),
                             );
@@ -1852,6 +1828,7 @@ fn paint_marker(
     clippy::cast_sign_loss,
     clippy::too_many_arguments
 )]
+#[allow(clippy::too_many_lines)]
 fn paint_masked_fill(
     pixmap: &mut Pixmap,
     rect: &explorer_layout::Rect,
@@ -2001,32 +1978,57 @@ fn group_mask_coverage(
     pw: u32,
     ph: u32,
     rect: &explorer_layout::Rect,
-    img: &crate::DecodedImage,
-    tile: &explorer_layout::Rect,
-    repeat: (bool, bool),
-    luminance: bool,
+    layers: &[crate::display::MaskTile],
     cur: Transform,
     clip: Option<&Mask>,
 ) -> Option<Mask> {
+    // Union `add` des couvertures des couches — chaque tuile
+    // est échantillonnée à part puis l'alpha retenu est le
+    // max (union). `intersect`/`subtract`/`exclude` = résidus.
     let mut m = Mask::new(pw, ph)?;
+    for tile in layers {
+        coverage_tile(&mut m, rect, tile, cur);
+    }
+    if let Some(c) = clip {
+        for (d, e) in m.data_mut().iter_mut().zip(c.data().iter()) {
+            *d = (*d).min(*e);
+        }
+    }
+    Some(m)
+}
+
+/// Accumule la couverture d'une tuile dans `m` (union max) —
+/// corps de boucle extrait de la version mono-couche.
+#[allow(
+    clippy::cast_possible_truncation,
+    clippy::cast_precision_loss,
+    clippy::cast_sign_loss
+)]
+fn coverage_tile(
+    m: &mut Mask,
+    rect: &explorer_layout::Rect,
+    layer: &crate::display::MaskTile,
+    cur: Transform,
+) {
+    let (img, tile, repeat, luminance) = (&layer.mask, &layer.dst, layer.repeat, layer.luminance);
+    let (pw, ph) = (m.width(), m.height());
     let (iw, ih) = (img.width as usize, img.height as usize);
     if iw == 0 || ih == 0 {
-        return Some(m); // bitmap vide → couverture nulle.
+        return;
     }
-    // Aire de peinture + tuile en coords device (bbox sous
-    // transform — approximation documentée pour les
-    // non-axis-aligned).
-    let phys =
-        Rect::from_xywh(rect.x, rect.y, rect.width, rect.height).and_then(|r| r.transform(cur));
-    let Some(phys) = phys else { return Some(m) };
+    let Some(phys) =
+        Rect::from_xywh(rect.x, rect.y, rect.width, rect.height).and_then(|r| r.transform(cur))
+    else {
+        return;
+    };
     let dom = Rect::from_ltrb(0.0, 0.0, pw as f32, ph as f32);
     let Some(zone) = dom.and_then(|d| phys.intersect(&d)) else {
-        return Some(m);
+        return;
     };
     let Some(dst_phys) =
         Rect::from_xywh(tile.x, tile.y, tile.width, tile.height).and_then(|r| r.transform(cur))
     else {
-        return Some(m);
+        return;
     };
     let (dx0, dy0) = (
         dst_phys.left().round() as i32,
@@ -2037,7 +2039,7 @@ fn group_mask_coverage(
         dst_phys.height().round() as i32,
     );
     if dw <= 0 || dh <= 0 {
-        return Some(m);
+        return;
     }
     let (tile_w, tile_h) = (dw as usize, dh as usize);
     let (x0, y0) = (zone.left().max(0.0) as i32, zone.top().max(0.0) as i32);
@@ -2068,8 +2070,7 @@ fn group_mask_coverage(
             };
             let sx = (tx as usize * iw / tile_w).min(iw - 1);
             let i4 = (sy * iw + sx) * 4;
-            data[py as usize * w + px as usize] = if luminance {
-                // sRGB luma × alpha (css-masking-1 §5.3).
+            let cov = if luminance {
                 let (rc, gc, bc, ac) = (
                     u32::from(img.rgba[i4]),
                     u32::from(img.rgba[i4 + 1]),
@@ -2080,14 +2081,10 @@ fn group_mask_coverage(
             } else {
                 img.rgba[i4 + 3]
             };
+            let d = &mut data[py as usize * w + px as usize];
+            *d = (*d).max(cov);
         }
     }
-    if let Some(c) = clip {
-        for (d, e) in m.data_mut().iter_mut().zip(c.data().iter()) {
-            *d = (*d).min(*e);
-        }
-    }
-    Some(m)
 }
 
 /// Bitmap `img` blittée dans `rect` sous la transform `cur`.
