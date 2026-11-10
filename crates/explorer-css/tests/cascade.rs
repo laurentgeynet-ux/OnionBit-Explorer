@@ -1963,8 +1963,11 @@ fn scoped_herite_custom_properties_et_selecteurs_contextuels() {
         Some("red"),
         "sélecteur ancêtre hors scope"
     );
+    // R-219 — `background: var(--theme)` s'expanse désormais
+    // correctement en `background-color` (avant : verbatim,
+    // `var(` n'était pas reconnu comme couleur).
     assert_eq!(
-        leaf_style.get("background"),
+        leaf_style.get("background-color"),
         Some("dark"),
         "--* héritée via le parent semé"
     );

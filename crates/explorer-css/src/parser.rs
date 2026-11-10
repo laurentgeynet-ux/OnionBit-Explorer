@@ -162,8 +162,13 @@ pub struct MediaQuery {
     pub negated: bool,
     /// Type de média (`screen`, `print`, `all`…) — `None` = implicite.
     pub media_type: Option<String>,
-    /// Conditions `(name: value)` jointes par `and`.
+    /// Conditions `(name: value)` jointes par `and` —
+    /// premier groupe.
     pub conditions: Vec<(String, String)>,
+    /// Groupes AND supplémentaires joints par `or` (MQ4 —
+    /// `(a) or (b) or (c)`). La query matche si
+    /// `conditions` ou un des groupes matche entièrement.
+    pub or_groups: Vec<Vec<(String, String)>>,
     /// Forme non reconnue → évaluée vraie (tolérance documentée).
     pub unknown: bool,
 }
@@ -630,6 +635,7 @@ impl<'t> Parser<'t> {
                     negated,
                     media_type: Some("supports".to_string()),
                     conditions,
+                    or_groups: Vec::new(),
                     unknown: false,
                 });
             }
@@ -644,6 +650,7 @@ impl<'t> Parser<'t> {
                 negated: false,
                 media_type: None,
                 conditions: Vec::new(),
+                or_groups: Vec::new(),
                 unknown: true,
             });
         }
@@ -1400,8 +1407,13 @@ fn parse_one_media(q: &str) -> MediaQuery {
         negated: false,
         media_type: None,
         conditions: Vec::new(),
+        or_groups: Vec::new(),
         unknown: false,
     };
+    // R-220 — `or` top-level (MQ4 boolean) : chaque `or`
+    // ouvre un nouveau groupe AND. `cur` = groupe courant ;
+    // `conditions` et `or_groups` sont remplis à la sortie.
+    let mut groups: Vec<Vec<(String, String)>> = vec![Vec::new()];
     let mut rest = q.trim();
     if rest.is_empty() {
         mq.unknown = true;
@@ -1428,6 +1440,14 @@ fn parse_one_media(q: &str) -> MediaQuery {
             && rest.get(3..4).is_some_and(|c| c == " " || c == "(")
         {
             rest = rest[3..].trim_start();
+        } else if rest.get(..2).is_some_and(|w| w.eq_ignore_ascii_case("or"))
+            && rest.get(2..3).is_some_and(|c| c == " " || c == "(")
+        {
+            // R-220 — `(a) or (b)` : groupe AND suivant
+            // (approximation documentée : le `media_type`
+            // s'applique à tous les groupes).
+            rest = rest[2..].trim_start();
+            groups.push(Vec::new());
         } else {
             mq.unknown = !rest.is_empty();
             break;
@@ -1456,16 +1476,25 @@ fn parse_one_media(q: &str) -> MediaQuery {
                     .map_or(n_inner, |s| s.trim_end_matches(')'))
                     .trim();
                 match parse_media_condition(n_trim).as_slice() {
-                    [(n, v)] => mq.conditions.push((format!("not-{n}"), v.clone())),
+                    [(n, v)] => groups
+                        .last_mut()
+                        .unwrap_or(&mut mq.conditions)
+                        .push((format!("not-{n}"), v.clone())),
                     // Corps multi-conditions (double borne
                     // range, `and` interne) : non exprimable
                     // en conditions jointes par AND — nom
                     // inconnu → « feature absente » → nié vrai
                     // (tolérance documentée, cas rare).
-                    _ => mq.conditions.push((format!("not-{n_trim}"), String::new())),
+                    _ => groups
+                        .last_mut()
+                        .unwrap_or(&mut mq.conditions)
+                        .push((format!("not-{n_trim}"), String::new())),
                 }
             } else {
-                mq.conditions.extend(parse_media_condition(inner_trim));
+                groups
+                    .last_mut()
+                    .unwrap_or(&mut mq.conditions)
+                    .extend(parse_media_condition(inner_trim));
             }
             rest = rest[depth_end + 1..].trim_start();
         } else {
@@ -1482,6 +1511,8 @@ fn parse_one_media(q: &str) -> MediaQuery {
             rest = rest[word_end..].trim_start();
         }
     }
+    mq.conditions = groups.first().cloned().unwrap_or_default();
+    mq.or_groups = if groups.len() > 1 { groups[1..].to_vec() } else { Vec::new() };
     mq
 }
 

@@ -3814,6 +3814,7 @@ chez NAVIGATEUR — non recopiés ici.
 - [x] **R-216. Census `mq.unknown` par contenu** : `css.mq.unknown.<fragment>` / `.range` — le Pareto nommera les features fautives à la prochaine récolte.
 - [x] **R-217. `:has` relatif** : combinateurs de tête `>`/`+`/`~` (`Vec<(Combinator, sel)>`) + whitelist `-webkit-search-decoration`/`-webkit-textfield`/`-webkit-input-placeholder`. Verrous : 3 tests, suites vertes.
 - [x] **R-219. `light-dark()`/`var()` couleurs dans les shorthands** : `background:light-dark(...)` droppé sur example.com — `color_like` accepte les fonctions à résolution retardée (bg + border). Fond page restauré.
+- [x] **R-220. `or` top-level media query (MQ4)** : `(a) or (b)` tombait `unknown` → règles appliquées à tort (MDN). `or_groups` par groupe AND ; `type_ok && (g0 ∨ gN…)`. Verrous : 2 tests dédiés.
 ## Tâches continues
 
 - **Triage rendu** des échecs `site_smoke.ps1` : les écarts

@@ -111,12 +111,12 @@ fn query_matches(env: &StyleEnv, q: &MediaQuery) -> bool {
             Some(t) => t == "all" || t == &env.media_type,
         };
         if ok && q.media_type.as_deref() != Some("supports") {
-            for (name, value) in &q.conditions {
-                if !condition_matches(env, name, value) {
-                    ok = false;
-                    break;
-                }
-            }
+            let g = |conds: &[(String, String)]| {
+                conds.iter().all(|(n, v)| condition_matches(env, n, v))
+            };
+            // `or` top-level (MQ4, R-220) : un seul groupe
+            // suffit — le `media_type` s'applique à tous.
+            ok = g(&q.conditions) || q.or_groups.iter().any(|grp| g(grp));
         }
     }
     if q.negated {
