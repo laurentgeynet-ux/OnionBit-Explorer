@@ -3957,18 +3957,15 @@ fn paint_lines(bx: &LayoutBox, items: &mut Vec<DisplayItem>, off: (f32, f32)) {
     // pleine-largeur — le reste reste couché (≈ `sideways`,
     // approximation documentée : sans fonte verticale les
     // accents CJK ne sont pas repositionnés).
-    let orientation = if !own_v {
-        0u8
-    } else {
-        match bx
-            .style
-            .get("text-orientation")
-            .map_or("mixed", |v| v.trim())
-        {
-            "upright" => 1,
-            "mixed" => 2,
-            _ => 0,
-        }
+    let orientation = match bx
+        .style
+        .get("text-orientation")
+        .map_or("mixed", |v| v.trim())
+    {
+        _ if !own_v => 0u8,
+        "upright" => 1,
+        "mixed" => 2,
+        _ => 0,
     };
     // Deux passes (R-70) : TOUTES les décorations inline
     // d'abord, TOUS les textes ensuite — un fond émis entre
@@ -4113,14 +4110,11 @@ fn paint_lines(bx: &LayoutBox, items: &mut Vec<DisplayItem>, off: (f32, f32)) {
                         let rot = orientation == 2 && !cjk;
                         if rot {
                             let ox = frag.rect.x + off.0;
-                            items.push(DisplayItem::PushTransform(tiny_skia::Transform::from_row(
-                                0.0,
-                                1.0,
-                                -1.0,
-                                0.0,
-                                ox + y,
-                                y - ox,
-                            )));
+                            items.push(DisplayItem::PushTransform(
+                                tiny_skia::Transform::from_row(
+                                    0.0, 1.0, -1.0, 0.0, ox + y, y - ox,
+                                ),
+                            ));
                         }
                         let solo = std::sync::Arc::new(ShapedRun {
                             glyphs: vec![*g],

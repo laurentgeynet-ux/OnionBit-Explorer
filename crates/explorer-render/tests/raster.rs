@@ -1182,7 +1182,9 @@ fn text_orientation_sideways_brackete() {
                 && matches!(w[2], explorer_render::DisplayItem::PopTransform)
         })
         .count();
-    assert_eq!(bracketed, 1, "seul le run sideways est pivote");
+    // `.v` sideways = 1 triplet run-entier ; `.h` mixed
+    // (défaut spec) = 1 triplet par glyphe latin (« cd » → 2).
+    assert_eq!(bracketed, 3, "sideways run + mixed par glyphe ({bracketed})");
 }
 
 /// `text-orientation:upright` : chaque glyphe est un `Text`
