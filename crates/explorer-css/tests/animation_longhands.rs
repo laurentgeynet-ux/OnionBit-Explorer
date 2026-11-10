@@ -17,7 +17,12 @@ fn walk_cls(
     sm: &explorer_css::StyleMap,
     out: &mut Option<explorer_css::ComputedStyle>,
 ) {
-    if dom.attribute_str(n, "class").ok().flatten().is_some_and(|c| c == cls) {
+    if dom
+        .attribute_str(n, "class")
+        .ok()
+        .flatten()
+        .is_some_and(|c| c == cls)
+    {
         *out = sm.get(n).cloned();
     }
     if let Ok(ch) = dom.children(n) {
@@ -55,4 +60,25 @@ fn longhands_poses_separement_lus() {
 fn longhand_name_seul_reconnu() {
     let st = style_of("x", "p { animation-name: fade }");
     assert_eq!(st.get("animation-name"), Some("fade"));
+}
+
+/// R-255 — `animation-play-state` : longhand par index +
+/// mot-clé shorthand, consommé par la session (gel de phase).
+#[test]
+fn play_state_longhand_et_shorthand() {
+    use explorer_css::animation::PlayState;
+    let st = style_of(
+        "x",
+        "p { animation: a 1s, b 2s; animation-play-state: running, paused }",
+    );
+    let decls = explorer_css::animation::animation_decls(&st);
+    assert_eq!(decls.len(), 2);
+    assert_eq!(decls[0].play_state, PlayState::Running);
+    assert_eq!(decls[1].play_state, PlayState::Paused);
+    // Mot-clé dans le shorthand.
+    let st = style_of("x", "p { animation: a 1s paused }");
+    assert_eq!(
+        explorer_css::animation::animation_decls(&st)[0].play_state,
+        PlayState::Paused
+    );
 }

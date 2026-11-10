@@ -24,9 +24,9 @@
 //!   nombres, longueurs même-unité/px, couleurs) — timeline
 //!   partagée, cadenceur côté session.
 //!
-//! Écarts documentés : `steps()` non couvert (comme les
-//! transitions), les keyframes multi-sélecteurs (`0%, 50%`)
-//! sont dupliquées à chaque offset, une propriété absente
+//! Écarts documentés : les keyframes multi-sélecteurs
+//! (`0%, 50%`) sont dupliquées à chaque offset, une
+//! propriété absente
 //! d'une frame tombe sur la valeur *calculée* de l'élément
 //! (`base` — spec §keyframes implicit 0%/100%).
 
@@ -112,6 +112,17 @@ pub enum Direction {
     AlternateReverse,
 }
 
+/// `animation-play-state` (R-255).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum PlayState {
+    /// Lecture normale.
+    #[default]
+    Running,
+    /// Gelée à sa progression courante — la session fixe
+    /// l'horloge à l'instant de la pause.
+    Paused,
+}
+
 /// `animation-fill-mode`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum Fill {
@@ -146,6 +157,9 @@ pub struct AnimationDecl {
     pub direction: Direction,
     /// `animation-fill-mode`.
     pub fill: Fill,
+    /// `animation-play-state` — `Paused` gèle la phase à
+    /// l'instant de la pause (consommé par la session).
+    pub play_state: PlayState,
 }
 
 impl AnimationDecl {
@@ -213,6 +227,7 @@ impl Default for AnimationDecl {
             iterations: 1.0,
             direction: Direction::Normal,
             fill: Fill::None,
+            play_state: PlayState::Running,
         }
     }
 }
@@ -243,6 +258,7 @@ pub fn animation_decls(style: &ComputedStyle) -> Vec<AnimationDecl> {
         count: longhand("animation-iteration-count"),
         dir: longhand("animation-direction"),
         fill: longhand("animation-fill-mode"),
+        play: longhand("animation-play-state"),
     };
     let n = lh
         .all_lens()
@@ -274,6 +290,9 @@ pub fn animation_decls(style: &ComputedStyle) -> Vec<AnimationDecl> {
         if let Some(v) = at(&lh.fill, i) {
             d.fill = parse_fill(v);
         }
+        if let Some(v) = at(&lh.play, i) {
+            d.play_state = parse_play_state(v);
+        }
         out.push(d);
     }
     out
@@ -294,10 +313,11 @@ struct Longhands {
     count: Vec<String>,
     dir: Vec<String>,
     fill: Vec<String>,
+    play: Vec<String>,
 }
 
 impl Longhands {
-    fn all_lens(&self) -> [usize; 7] {
+    fn all_lens(&self) -> [usize; 8] {
         [
             self.name.len(),
             self.dur.len(),
@@ -306,6 +326,7 @@ impl Longhands {
             self.count.len(),
             self.dir.len(),
             self.fill.len(),
+            self.play.len(),
         ]
     }
 }
@@ -336,6 +357,8 @@ fn parse_animation_item(item: &str) -> AnimationDecl {
                 "reverse" => d.direction = Direction::Reverse,
                 "alternate" => d.direction = Direction::Alternate,
                 "alternate-reverse" => d.direction = Direction::AlternateReverse,
+                "paused" => d.play_state = PlayState::Paused,
+                "running" => d.play_state = PlayState::Running,
                 "none" | "forwards" | "backwards" | "both" => {
                     if !named && tok.eq_ignore_ascii_case("none") {
                         // `none` peut être name ou fill — il est
@@ -385,6 +408,13 @@ fn parse_fill(v: &str) -> Fill {
         "backwards" => Fill::Backwards,
         "both" => Fill::Both,
         _ => Fill::None,
+    }
+}
+
+fn parse_play_state(v: &str) -> PlayState {
+    match v.trim().to_ascii_lowercase().as_str() {
+        "paused" => PlayState::Paused,
+        _ => PlayState::Running,
     }
 }
 

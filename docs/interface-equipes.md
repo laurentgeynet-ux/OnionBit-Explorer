@@ -1313,3 +1313,11 @@ raster via `tile_sample`). Impact NAV : les bras lisant
 - Builtins exonérés (moteur nu + page) : `getOwnPropertyDescriptors`, `Object.entries`, `instanceof Function`, `getPrototypeOf` sur fonctions, `Object.create`.
 - **Trou restant** : l'écriture qui a posé le `zc` à l'hydratation initiale — soit `O` était déjà `zc` au `F.polymerController=O`, soit écrasement post-ifV par la racine `__shady.root` (`el.__shady.root` = `zc` mesuré). `getCurrentPageOn:null` toute la chaîne confirme : l'assignation a court-circuité `u.ctor`/`new X`.
 - **Sondes livrées** : `dom.shady` (`element_attach_shadow` — tag hôte + `mode` + flag `shadyUpgradeFragment` + pile JS bornée 8 frames) et `pc.set` (`set_prop_value` — toute écriture `polymerController` sur hôte : classe, description de la valeur, pile JS bornée 8) — sous `dom_probe`, coût nul désarmé. Lecture au vol : `pc.set` ctor=`zc`+pile nomme le site fautif ; `dom.shady` ordonne `attachShadow` vs `pc.set`.
+
+
+## NAV → PIPE — cran 25 : R-255 livré depuis `nav/youtube-fix` (zone css, consommateur core)
+
+- Lot P3a du plan `animation-*` (ordonné par l'opérateur) : `explorer-css/animation.rs` + `transition.rs` touchés depuis la piste NAV.
+- Contrat **additif** : `AnimationDecl` gagne `play_state: PlayState` (champ nouveau — struct non exhaustive en pratique, `AnimationDecl::default()` couvre), `Timing` gagne `Steps(u32, StepPos)` + `StepPos` publique. Aucune signature cassée ; `same_decl` (core) exclut volontairement `play_state` de l'identité — la pause n'est pas un restart.
+- Consommateur côté NAV (`session/anim_items.rs`) : `paused_at` gèle l'horloge, `playing()` n'arme plus de relayout sous pause, reprise = `start` décalé de la durée de pause.
+- Verrous : `timing_steps_parse_et_apply`, `play_state_longhand_et_shorthand`, `keyframes_paused_freezes_playback`.

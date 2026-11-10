@@ -4,9 +4,9 @@
 
 //! Transitions CSS (étape 45) — sous-ensemble animable :
 //! `transition` (shorthand) et les quatre longhands,
-//! `linear`/`ease*`/`cubic-bezier()`, interpolation des
-//! nombres, longueurs (même unité ou absolues → px) et
-//! couleurs RGBA. Déviations MVP : `steps()` et les listes
+//! `linear`/`ease*`/`cubic-bezier()`/`steps()`, interpolation
+//! des nombres, longueurs (même unité ou absolues → px) et
+//! couleurs RGBA. Déviations MVP : les listes
 //! multi-valeurs (`transform`, `box-shadow`, `filter`) ne
 //! sont pas interpolées — ces propriétés commutent en fin
 //! de transition (comportement « discret » de la spec).
@@ -34,7 +34,8 @@ pub struct TransitionDecl {
     pub timing: Timing,
 }
 
-/// `transition-timing-function` : mots-clés + `cubic-bezier`.
+/// `transition-timing-function` : mots-clés + `cubic-bezier`
+/// + `steps()` (R-255).
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum Timing {
     /// `linear`.
@@ -49,6 +50,23 @@ pub enum Timing {
     EaseInOut,
     /// `cubic-bezier(x1, y1, x2, y2)` — x bornés à `[0,1]`.
     CubicBezier(f64, f64, f64, f64),
+    /// `steps(n, <step-position>)` — n paliers, saut selon
+    /// [`StepPos`] (défaut spec `jump-end`).
+    Steps(u32, StepPos),
+}
+
+/// Position des sauts d'une `steps()` (css-easing §3.4).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum StepPos {
+    /// `jump-start` / `start` — premier saut à l'entrée 0.
+    JumpStart,
+    /// `jump-end` / `end` — dernier saut à l'entrée 1.
+    #[default]
+    JumpEnd,
+    /// `jump-none` — pas de saut aux bornes (n−1 sauts).
+    JumpNone,
+    /// `jump-both` — saut aux deux bornes (n+1 paliers).
+    JumpBoth,
 }
 
 impl Timing {
@@ -59,6 +77,7 @@ impl Timing {
     pub fn apply(self, p: f64) -> f64 {
         let (x1, y1, x2, y2) = match self {
             Self::Linear => return p.clamp(0.0, 1.0),
+            Self::Steps(n, pos) => return steps_apply(n, pos, p),
             Self::Ease => (0.25, 0.1, 0.25, 1.0),
             Self::EaseIn => (0.42, 0.0, 1.0, 1.0),
             Self::EaseOut => (0.0, 0.0, 0.58, 1.0),
@@ -120,6 +139,43 @@ fn cubic_bezier_y(x1: f64, y1: f64, x2: f64, y2: f64, x: f64) -> f64 {
     sample(t, y1, y2)
 }
 
+/// Valeur eased d'une `steps(n, pos)` à l'entrée `p`
+/// (css-easing §3.4) : les bornes 0/1 rendent toujours 0/1,
+/// entre les deux la sortie est quantifiée en paliers —
+/// `jump-end` saute en fin de palier (défaut), `jump-start`
+/// en début, `jump-none` lisse les deux bords (n−1 sauts),
+/// `jump-both` ajoute un palier de chaque côté (n+1).
+/// `n = 0` est rejeté au parsing ; les cas dégénérés
+/// (`jump-none` sur `n = 1`, sans saut possible) restent
+/// sur 0 — dégradation tolérante documentée.
+fn steps_apply(n: u32, pos: StepPos, p: f64) -> f64 {
+    let p = p.clamp(0.0, 1.0);
+    if p >= 1.0 {
+        return 1.0;
+    }
+    if p <= 0.0 {
+        return match pos {
+            // Premier saut déjà franchi à l'entrée 0.
+            StepPos::JumpStart => 1.0 / f64::from(n.max(1)),
+            StepPos::JumpBoth => 1.0 / f64::from(n + 1),
+            _ => 0.0,
+        };
+    }
+    let n = f64::from(n.max(1));
+    match pos {
+        StepPos::JumpEnd => ((p * n).floor() / n).clamp(0.0, 1.0),
+        StepPos::JumpStart => (((p * n).floor() + 1.0) / n).clamp(0.0, 1.0),
+        StepPos::JumpNone => {
+            let d = (n - 1.0).max(1.0);
+            ((p * d).floor() / d).clamp(0.0, 1.0)
+        }
+        StepPos::JumpBoth => {
+            let d = n + 1.0;
+            (((p * d).floor() + 1.0) / d).clamp(0.0, 1.0)
+        }
+    }
+}
+
 /// Parse une durée `<time>` : `2s`, `150ms`, `0` → secondes.
 #[must_use]
 pub fn parse_duration(text: &str) -> Option<f64> {
@@ -137,8 +193,9 @@ pub fn parse_duration(text: &str) -> Option<f64> {
     v.is_finite().then_some(v * mult)
 }
 
-/// Parse `transition-timing-function` — `steps()` non couvert
-/// → `None` (la déclaration tombe en `ease`, valeur initiale).
+/// Parse `transition-timing-function` — mots-clés,
+/// `cubic-bezier()`, `steps(n[, pos])` et les alias legacy
+/// `step-start`/`step-end` (`steps(1, …)` — R-255).
 #[must_use]
 pub fn parse_timing(text: &str) -> Option<Timing> {
     let t = text.trim().to_ascii_lowercase();
@@ -148,6 +205,23 @@ pub fn parse_timing(text: &str) -> Option<Timing> {
         "ease-in" => Timing::EaseIn,
         "ease-out" => Timing::EaseOut,
         "ease-in-out" => Timing::EaseInOut,
+        "step-start" => Timing::Steps(1, StepPos::JumpStart),
+        "step-end" => Timing::Steps(1, StepPos::JumpEnd),
+        _ if t.starts_with("steps(") => {
+            let inner = t.strip_prefix("steps(").and_then(|s| s.strip_suffix(')'))?;
+            let mut parts = inner.split(',');
+            let n: u32 = parts.next()?.trim().parse().ok().filter(|n| *n > 0)?;
+            let pos = match parts.next().map(str::trim) {
+                None | Some("end" | "jump-end") => StepPos::JumpEnd,
+                Some("start" | "jump-start") => StepPos::JumpStart,
+                Some("jump-none") => StepPos::JumpNone,
+                Some("jump-both") => StepPos::JumpBoth,
+                _ => return None,
+            };
+            // Un 3ᵉ argument → déclaration invalide (spec).
+            parts.next().is_none().then_some(())?;
+            Timing::Steps(n, pos)
+        }
         _ => {
             let inner = t
                 .strip_prefix("cubic-bezier(")
@@ -329,8 +403,45 @@ mod tests {
         );
         // x hors `[0,1]` → invalide (spec).
         assert_eq!(parse_timing("cubic-bezier(2, 0, 0, 1)"), None);
-        assert_eq!(parse_timing("steps(3)"), None);
         assert_eq!(parse_timing("bounce"), None);
+    }
+
+    #[test]
+    fn timing_steps_parse_et_apply() {
+        // `steps(n)` = jump-end par défaut ; alias legacy.
+        assert_eq!(
+            parse_timing("steps(3)"),
+            Some(Timing::Steps(3, StepPos::JumpEnd))
+        );
+        assert_eq!(
+            parse_timing("steps(4, jump-start)"),
+            Some(Timing::Steps(4, StepPos::JumpStart))
+        );
+        assert_eq!(
+            parse_timing("step-end"),
+            Some(Timing::Steps(1, StepPos::JumpEnd))
+        );
+        // n = 0, position inconnue, argument surnuméraire → invalide.
+        assert_eq!(parse_timing("steps(0)"), None);
+        assert_eq!(parse_timing("steps(2, middle)"), None);
+        assert_eq!(parse_timing("steps(2, end, extra)"), None);
+        // jump-end : paliers quantifiés, bornes 0/1 intactes.
+        let st = Timing::Steps(4, StepPos::JumpEnd);
+        assert_eq!(st.apply(0.0), 0.0);
+        assert_eq!(st.apply(0.5), 0.5);
+        assert_eq!(st.apply(0.6), 0.5);
+        assert_eq!(st.apply(1.0), 1.0);
+        // jump-start : premier saut franchi à l'entrée 0.
+        let st = Timing::Steps(4, StepPos::JumpStart);
+        assert_eq!(st.apply(0.0), 0.25);
+        assert_eq!(st.apply(0.5), 0.75);
+        assert_eq!(st.apply(1.0), 1.0);
+        // jump-both : palier en plus à chaque bord — le
+        // saut est franchi pile sur la borne (p = 0.5 → 1).
+        let st = Timing::Steps(1, StepPos::JumpBoth);
+        assert_eq!(st.apply(0.0), 0.5);
+        assert_eq!(st.apply(0.49), 0.5);
+        assert_eq!(st.apply(0.5), 1.0);
     }
 
     #[test]

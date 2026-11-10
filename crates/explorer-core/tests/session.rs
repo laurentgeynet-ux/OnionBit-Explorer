@@ -7478,6 +7478,34 @@ async fn keyframes_absent_means_no_animation_ticks() {
     );
 }
 
+/// R-255 — `animation-play-state: paused` est consommé :
+/// la lecture est gelée — `tick_animations` n'arme aucun
+/// relayout et deux frames à 150 ms d'écart sont identiques.
+#[tokio::test]
+async fn keyframes_paused_freezes_playback() {
+    let (mut sess, tr) = test_session();
+    tr.route(
+        "/p",
+        200,
+        "<html><head><style>\
+         @keyframes k { from { background-color: #ff0000 }\
+         to { background-color: #0000ff } }\
+         #b { width:2px; height:2px; animation: k 500ms linear;\
+         animation-play-state: paused }\
+         </style></head><body><div id=\"b\"></div></body></html>",
+    );
+    let tab = sess.open_tab();
+    sess.navigate(tab, "http://h.test/p").await.unwrap();
+    let start = sess.frame_png(tab).unwrap();
+    tokio::time::sleep(std::time::Duration::from_millis(150)).await;
+    assert!(
+        !sess.tick_animations(tab).unwrap(),
+        "une animation paused ne doit pas armer de relayout (R-255)"
+    );
+    let later = sess.frame_png(tab).unwrap();
+    assert_eq!(start, later, "lecture gelée — frame identique (R-255)");
+}
+
 /// Moteur de test : `run_pending` signale son entrée puis
 /// bloque sur un canal — sert à prouver que la pompe partagée
 /// laisse le verrou session libre pendant l'exécution JS

@@ -3829,6 +3829,7 @@ chez NAVIGATEUR — non recopiés ici.
 - [x] **R-245. `check routed` + `prop_routed`** : plumbing livré — limite nommée (cascade stocke les inconnus → saturation). Prochain : `prop_affects` (delta layout) ou gate `decl_supported` à l’insert.
 - [x] **R-246. `check affects` + `prop_affects`** : delta box tree — vrai négatif dormants (`mask-*`/`anchor-*`/`xyz-bogus` miss), vrai positif consommables (`margin`/`all`/`block-size`/`display`). Aveugle aux props conteneur.
 - [x] **R-247. `font-feature-settings` → rustybuzz** : `FontRequest.feature_settings` parsé → `ot_features` — tnum/onum/nalt réels. `affects` aveugle au paint (prochaine jauge display-list).
+- [x] **R-255. `animation-play-state` consommé + `steps()` dans les easing** (livré depuis `nav/youtube-fix`, journalisé — zone css en lecture-journal NAV→PIPE) : `PlayState` sur `AnimationDecl` (longhand par index + shorthand), pause = gel d'horloge session/reprise sans redémarrage ; `Timing::Steps(n, StepPos)` — `steps()`/`step-start`/`step-end` pour transitions **et** animations. Verrous : 2 tests css + 1 test session.
 
 ## Plan d'action long-terme — « tous les sites rendus correctement »
 
