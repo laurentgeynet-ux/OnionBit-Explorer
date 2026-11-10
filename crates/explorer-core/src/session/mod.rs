@@ -489,7 +489,7 @@ pub(crate) struct Tab {
     nav_epoch: u64,
     /// Epoch pour lequel `interactive`/`DOMContentLoaded` a déjà
     /// été tiré (JS-C471) — anti double-feu quand le cycle est
-    /// livré tôt (post-`nav_apply`, sub_commit_head en cours)
+    /// livré tôt (post-`nav_apply`, `sub_commit_head` en cours)
     /// puis re-délivré par `sub_commit_tail`/un bras avorté.
     doc_dcl_epoch: u64,
     /// Même garde pour `complete`/`load` — le tail ou un bras
