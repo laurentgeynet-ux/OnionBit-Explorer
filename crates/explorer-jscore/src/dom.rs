@@ -2108,15 +2108,6 @@ impl Dom {
         // miroir… tout passe par `alloc`), premier-par-tag —
         // discrimine « jamais né » vs « né mais jamais
         // upgradé » pour les `ytd-*` de l'accueil `YouTube`.
-        if kind == NodeKind::Element
-            && tag.contains('-')
-            && tracing::enabled!(target: "dom_probe", tracing::Level::INFO)
-        {
-            let t = tag.to_lowercase();
-            if self.ce.probe_seen.insert(t.clone()) {
-                tracing::info!(target: "dom_probe", site = "el.birth", tag = %t);
-            }
-        }
         // §B-59 — réutilise un slot libéré (payloads déjà
         // vidés, `parent` nul) : le churn `innerHTML` borne
         // l'arène au lieu de croître sans fin.
@@ -2128,7 +2119,7 @@ impl Dom {
         } else {
             tag.to_lowercase()
         };
-        if let Some(id) = self.free_nodes.pop() {
+        let id = if let Some(id) = self.free_nodes.pop() {
             let n = &mut self.nodes[id as usize];
             n.kind = kind;
             n.tag = stored_tag;
@@ -2138,22 +2129,38 @@ impl Dom {
             // handles JS créés pour l'occupant précédent
             // deviennent obsolètes (§B-126).
             n.epoch = n.epoch.wrapping_add(1);
-            return id;
+            id
+        } else {
+            self.nodes.push(Node {
+                kind,
+                tag: stored_tag,
+                attrs: Vec::new(),
+                children: Vec::new(),
+                parent: None,
+                text: String::new(),
+                listeners: Vec::new(),
+                inline_handlers: Vec::new(),
+                attached: false,
+                free: false,
+                epoch: 1,
+            });
+            (self.nodes.len() - 1) as NodeId
+        };
+        // Sonde §cran-29 — `node`+`epoch` au birth : corrèle le
+        // handle né (createElement/stamp) avec le `dom.stale`
+        // qui le frappe plus tard — nomme la couture
+        // naissance↔décoration qui perd la génération.
+        if kind == NodeKind::Element
+            && tag.contains('-')
+            && tracing::enabled!(target: "dom_probe", tracing::Level::INFO)
+        {
+            let t = tag.to_lowercase();
+            if self.ce.probe_seen.insert(format!("{t}:{id}")) {
+                tracing::info!(target: "dom_probe", site = "el.birth", tag = %t,
+                    node = %id, epoch = %self.nodes[id as usize].epoch);
+            }
         }
-        self.nodes.push(Node {
-            kind,
-            tag: stored_tag,
-            attrs: Vec::new(),
-            children: Vec::new(),
-            parent: None,
-            text: String::new(),
-            listeners: Vec::new(),
-            inline_handlers: Vec::new(),
-            attached: false,
-            free: false,
-            epoch: 1,
-        });
-        (self.nodes.len() - 1) as NodeId
+        id
     }
 
     /// Detached element (`document.createElement`).

@@ -1098,6 +1098,17 @@ const ELEMENT_PROTO_METHODS: &[&str] = &[
     "getHTML",
     "setHTMLUnsafe",
     "parseHTMLUnsafe",
+    "setHTML",
+    "beforeHTML",
+    "beforeHTMLUnsafe",
+    "afterHTML",
+    "afterHTMLUnsafe",
+    "prependHTML",
+    "prependHTMLUnsafe",
+    "appendHTML",
+    "appendHTMLUnsafe",
+    "replaceWithHTML",
+    "replaceWithHTMLUnsafe",
     "checkVisibility",
     "getClientRects",
     "animate",
@@ -7142,6 +7153,22 @@ const NODE_METHODS: &[&str] = &[
     "getHTML",
     "setHTMLUnsafe",
     "parseHTMLUnsafe",
+    // Méthodes d'insertion `*HTML` (Pareto `api` lot 3b,
+    // HTML insertion methods) — rails existants
+    // `insert_adjacent`/`set_inner_html` ; variantes
+    // `*Unsafe` partagent le même rail (pas de sanitiser
+    // dans le moteur — borne documentée).
+    "setHTML",
+    "beforeHTML",
+    "beforeHTMLUnsafe",
+    "afterHTML",
+    "afterHTMLUnsafe",
+    "prependHTML",
+    "prependHTMLUnsafe",
+    "appendHTML",
+    "appendHTMLUnsafe",
+    "replaceWithHTML",
+    "replaceWithHTMLUnsafe",
     "checkVisibility",
     "replaceChildren",
     "closest",
@@ -9120,6 +9147,30 @@ impl Host for NodeHost {
         // refusée (set expando ailleurs), jamais mutation du
         // nouvel occupant.
         if !self.live() {
+            // §cran-29 — le write refusé est nommé aussi :
+            // `F.polymerController=O` sur handle mort passe ici
+            // (refus silencieux `Ok(false)` = pc fantôme).
+            if tracing::enabled!(target: "dom_probe", tracing::Level::INFO) {
+                let (valid, epoch_now, tag) = {
+                    let d = self.dom.borrow();
+                    (
+                        d.node_valid(node),
+                        d.nodes.get(node as usize).map(|n| n.epoch),
+                        d.nodes
+                            .get(node as usize)
+                            .map(|n| n.tag.clone())
+                            .unwrap_or_default(),
+                    )
+                };
+                if let Ok(mut d) = self.dom.try_borrow_mut() {
+                    if d.ce.probe_seen.insert(format!("sw:{key}:{node}")) {
+                        let src = e.stack_top_fn_src(160);
+                        tracing::info!(target: "dom_probe", site = "dom.stale",
+                            "op=set key={key} node={node} tag={tag} valid={valid} epoch_me={} epoch_now={epoch_now:?} top={src}",
+                            self.epoch);
+                    }
+                }
+            }
             // §cran-28 — sonde : sous `EXPLORER_STALE_THROW`
             // le write silencieux devient un TypeError nommé —
             // `ifV`/`I_o` jettent et la pile nomme le site
@@ -10401,9 +10452,48 @@ impl Host for NodeHost {
                 let s = self.dom.borrow().outer_html(node);
                 Ok(Some(e.str_val(s)))
             }
-            "setHTMLUnsafe" => {
+            "setHTML" | "setHTMLUnsafe" => {
                 let html = e.to_js_string(arg(args, 0))?;
                 self.set_inner_html(node, &html);
+                Ok(Some(Value::Undefined))
+            }
+            // Méthodes `*HTML` d'insertion positionnelle (Pareto
+            // `api` lot 3b — spec HTML insertion methods) :
+            // before/after/prepend/append ≙ positions
+            // `insertAdjacentHTML` ; `replaceWithHTML` remplace
+            // l'élément par les nœuds parsés (rail `outerHTML=`).
+            // `*Unsafe` = même rail (pas de sanitiser — borne).
+            "beforeHTML"
+            | "beforeHTMLUnsafe"
+            | "afterHTML"
+            | "afterHTMLUnsafe"
+            | "prependHTML"
+            | "prependHTMLUnsafe"
+            | "appendHTML"
+            | "appendHTMLUnsafe"
+            | "replaceWithHTML"
+            | "replaceWithHTMLUnsafe" => {
+                let html = e.to_js_string(arg(args, 0))?;
+                if name.starts_with("replaceWith") {
+                    let mut d = self.dom.borrow_mut();
+                    if let Some(p) = d.parent(node) {
+                        let scratch = d.create_element("div");
+                        d.parse_fragment_into(scratch, &html);
+                        let kids = d.child_nodes(scratch);
+                        for k in kids {
+                            d.insert_before(p, k, Some(node));
+                        }
+                        d.detach(node);
+                    }
+                } else {
+                    let pos = match name {
+                        n if n.starts_with("before") => "beforebegin",
+                        n if n.starts_with("after") => "afterend",
+                        n if n.starts_with("prepend") => "afterbegin",
+                        _ => "beforeend",
+                    };
+                    self.insert_adjacent(e, node, pos, &html)?;
+                }
                 Ok(Some(Value::Undefined))
             }
             // `el.parseHTMLUnsafe(html)` — spec : parse en
@@ -13042,7 +13132,8 @@ fn ce_upgrade_node(e: &mut Engine, dom: &DomRef, cache: &NodeCache, node: NodeId
     if tracing::enabled!(target: "dom_probe", tracing::Level::INFO) {
         if let Ok(mut d) = dom.try_borrow_mut() {
             if d.ce.probe_seen.insert(format!("+{name}")) {
-                tracing::info!(target: "dom_probe", site = "ce.upgrade", tag = %name);
+                tracing::info!(target: "dom_probe", site = "ce.upgrade", tag = %name, node = %node,
+                    epoch = %d.nodes.get(node as usize).map(|n| n.epoch).unwrap_or(0));
             }
         }
     }
