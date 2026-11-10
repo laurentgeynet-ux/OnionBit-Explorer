@@ -950,3 +950,27 @@ fn alignment_baseline_repli() {
     // 1/4 d'em (métriques fonte approximées).
     assert!(b.rect.y < 0.0, "super : dy négatif ({})", b.rect.y);
 }
+
+/// `position-area` `span-*` : mappés sur le côté de base
+/// (la taille spannée exige un re-flow — approximation
+/// documentée, la position change).
+#[test]
+fn anchor_position_area_spans() {
+    let (dom, bx) = laid(
+        "<div><div id=anc></div><div id=t></div></div>",
+        "#anc{position:absolute;left:100px;top:50px;width:40px;height:40px;anchor-name:--a}\
+         #t{position:absolute;position-anchor:--a;position-area:span-bottom span-right;width:10px;height:10px}",
+    );
+    let anc = find(&bx, by_id(&dom, "anc"));
+    let t = find(&bx, by_id(&dom, "t"));
+    assert_eq!(
+        t.rect.y,
+        anc.rect.y + anc.rect.height,
+        "span-bottom → sous ancre"
+    );
+    assert_eq!(
+        t.rect.x,
+        anc.rect.x + anc.rect.width,
+        "span-right → à droite"
+    );
+}
