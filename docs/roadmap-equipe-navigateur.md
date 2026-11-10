@@ -7345,6 +7345,32 @@ incrément.
   cli et en daemon (doc_h + mem + layout
   captés), diff pixel raccordé.
 
+- [x] **Étape 213. `ref_capture.mjs` —
+  oracle de référence Chrome batch, zéro
+  dépendance** (sprint 2/3 du plan PIPE —
+  « Chrome comme arbitre, en masse ») :
+  pilote Chrome/Chromium/Edge réel via le
+  protocole DevTools brut — WebSocket natif
+  Node ≥22 + `Target`/`Page`/`Runtime`/`Emulation`,
+  **aucun paquet npm**. Par URL :
+  `<nom>.ref.png` (viewport identique au
+  shot moteur → `explorer-cli diff` direct)
+  et `<nom>.ref.json` = géométrie de
+  référence (`scrollWidth`/`scrollHeight` +
+  `getBoundingClientRect()` par élément,
+  borné 4000 boîtes — socle du **diff
+  géométrique** sprint 3 qui localisera
+  l'élément divergent, pas le pixel).
+  Nommage strictement identique à
+  `site_harvest` (`/` terminal absorbé),
+  purge des events entre navigations,
+  timeout + settle par site, profil jetable.
+  Consommé par `site_harvest -WithRef`/
+  `-Diff -RefDir`. Vérifié : Chrome trouvé
+  seul, 2/2 refs produites, diff mesuré —
+  example.com 99,99 % = vrai signal
+  (fond `#f0f0f2` non peint par le moteur).
+
 - [ ] **Écarts terrain — vol humain
   22/10 (release `39ab821`, FFI)** :
   second run humain — trois constats
