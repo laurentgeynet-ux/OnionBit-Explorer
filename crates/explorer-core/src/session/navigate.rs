@@ -485,9 +485,52 @@ impl Session {
             let entry = self.tabs.get_mut(&tab).ok_or(CoreError::UnknownTab(tab))?;
             let max = (entry.doc_h - self.viewport.1).max(0.0);
             let next = y.clamp(0.0, max);
-            if (next - entry.scroll_y).abs() < f32::EPSILON {
+            // Position courante réelle : interpolée quand une
+            // lecture smooth est en vol (spec : une nouvelle
+            // cible repart de la position affichée).
+            let sm = self.smooth_scroll_ms;
+            let cur = entry.smooth_scroll.map_or(entry.scroll_y, |(f, t, s)| {
+                let p = if sm == 0 {
+                    1.0
+                } else {
+                    (s.elapsed().as_secs_f64() * 1000.0 / sm as f64) as f32
+                };
+                f + (t - f) * p
+            });
+            if (next - cur).abs() < f32::EPSILON {
+                entry.smooth_scroll = None;
                 return Ok(false);
             }
+            // R-259 — `scroll-behavior:smooth` sur la boîte
+            // de l'élément racine (scrolling box du viewport,
+            // spec cssom-view) : la lecture est armée, le
+            // tick `advance_animations` interpole et repeint.
+            let smooth = self.smooth_scroll_ms > 0
+                && entry
+                    .dom
+                    .as_ref()
+                    .zip(entry.tree.as_ref())
+                    .is_some_and(|(dom, tree)| {
+                        let Some(el) = dom.document_element() else {
+                            return false;
+                        };
+                        let mut stack = vec![tree];
+                        while let Some(b) = stack.pop() {
+                            if b.node == Some(el) {
+                                return b
+                                    .style
+                                    .get("scroll-behavior")
+                                    .is_some_and(|v| v.trim() == "smooth");
+                            }
+                            stack.extend(b.children.iter());
+                        }
+                        false
+                    });
+            if smooth {
+                entry.smooth_scroll = Some((cur, next, std::time::Instant::now()));
+                return Ok(true);
+            }
+            entry.smooth_scroll = None;
             entry.set_scroll(next);
         }
         self.repaint(tab)?;
@@ -1213,6 +1256,9 @@ impl Session {
             // document mort meurt avec son moteur — le diff
             // repart d'un miroir nu (JS-C475).
             entry.anim_marks.clear();
+            // Lecture `scroll-behavior:smooth` en vol — la
+            // cible appartient au document mort (R-259).
+            entry.smooth_scroll = None;
             entry.frame_ctxs.clear();
             entry.images = PaintImages::default();
             entry.bg_aliases.clear();

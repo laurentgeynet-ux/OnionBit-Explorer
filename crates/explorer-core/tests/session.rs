@@ -313,6 +313,7 @@ fn test_session_policy(
         event_tail_budget: std::time::Duration::from_secs(15),
         rss_shed_mb: 0,
         shed_retry_after_s: 5,
+        smooth_scroll_ms: 0,
     })
 }
 
@@ -801,6 +802,7 @@ async fn download_url_bound_fails_mid_stream() {
         event_tail_budget: std::time::Duration::from_secs(15),
         rss_shed_mb: 0,
         shed_retry_after_s: 5,
+        smooth_scroll_ms: 0,
     });
     let dir = std::env::temp_dir().join("explorer-dl-174-bound");
     let _ = std::fs::remove_dir_all(&dir);
@@ -7455,6 +7457,52 @@ async fn shared_pump_advances_scriptless_animations() {
     );
 }
 
+/// R-259 — `scroll-behavior:smooth` : `scroll_to_y` arme
+/// une lecture interpolée (la position ne saute pas), le
+/// tick `advance_animations` l'avance jusqu'à la cible.
+/// `scroll-behavior` absent → saut instantané (garde).
+#[tokio::test]
+async fn smooth_scroll_interpolates_instead_of_jumping() {
+    // `smooth_scroll_ms` très long (60 s) : la lecture est
+    // armée mais la progression reste ≈ 0 — déterministe,
+    // le saut instantané donnerait la cible complète.
+    let (mut sess, tr) = test_session_with(SessionConfig {
+        smooth_scroll_ms: 60_000,
+        ..SessionConfig::default()
+    });
+    let page = "<!doctype html><html><head><style>\
+        html { scroll-behavior: smooth }\
+        .sp{height:2000px}</style></head>\
+        <body><div class=\"sp\">haut</div><p id=\"t\">cible</p></body></html>";
+    let instant = "<!doctype html><html><body><div style=\"height:2000px\">haut</div><p id=\"t\">cible</p></body></html>";
+    tr.route("/s", 200, page);
+    tr.route("/i", 200, instant);
+    let tab = sess.open_tab();
+    sess.navigate(tab, "http://h.test/s").await.unwrap();
+    // Fragment same-document : sous `smooth`, la lecture est
+    // armée — la position n'est PAS encore arrivée.
+    sess.navigate(tab, "http://h.test/s#t").await.unwrap();
+    let mid = scroll_pos(&mut sess, tab).await;
+    assert!(mid < 500.0, "smooth : interpolée, pas saut ({mid})");
+    // `scroll-behavior` absent → saut instantané (garde).
+    let tab2 = sess.open_tab();
+    sess.navigate(tab2, "http://h.test/i").await.unwrap();
+    sess.navigate(tab2, "http://h.test/i#t").await.unwrap();
+    let pos = scroll_pos(&mut sess, tab2).await;
+    assert!(pos > 1000.0, "auto = saut instantané (pos={pos})");
+}
+
+async fn scroll_pos(s: &mut Session, tab: explorer_core::TabId) -> f32 {
+    match s
+        .handle_input(tab, InputEvent::Scroll { dy: 0.0 })
+        .await
+        .unwrap()
+    {
+        InputOutcome::Scrolled { scroll_y } => scroll_y,
+        o => panic!("inattendu : {o:?}"),
+    }
+}
+
 /// Étape 55e — garde : un élément sans `animation` (ou
 /// `animation-name: none`) ne déclenche aucun tick de
 /// relayout — `tick_animations` reste inerte.
@@ -7867,6 +7915,7 @@ async fn redirect_commits_final_url_and_fragment() {
             event_tail_budget: std::time::Duration::from_secs(15),
             rss_shed_mb: 0,
             shed_retry_after_s: 5,
+        smooth_scroll_ms: 0,
         },
     );
 
