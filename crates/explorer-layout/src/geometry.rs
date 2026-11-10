@@ -69,12 +69,23 @@ pub fn geometry_dump(root: &LayoutBox) -> GeometryDump {
     let mut stack = vec![root];
     while let Some(b) = stack.pop() {
         if let Some(n) = b.node {
-            add(n, b.rect);
+            // R-213 — une boîte en-ligne porte le rect de sa
+            // LIGNE allouée ; `gBCR` rend la border box de
+            // contenu (~`font-size`, mesuré Chrome : `<a>`
+            // sous `line-height:30` → h=17, pas 30).
+            add(n, inline_content_rect(b));
         }
         for line in &b.lines {
             for frag in &line.fragments {
                 if let Some(n) = frag.node {
-                    add(n, frag.rect);
+                    let r = if frag.atomic {
+                        // Inline-block/remplacé : le rect EST
+                        // la border box — pas de resserrement.
+                        frag.rect
+                    } else {
+                        inline_content_rect_st(frag.rect, &frag.style)
+                    };
+                    add(n, r);
                 }
             }
         }
@@ -94,6 +105,40 @@ pub fn geometry_dump(root: &LayoutBox) -> GeometryDump {
                 }
             })
             .collect(),
+    }
+}
+
+/// Rect « contenu » d'une boîte `Inline`/`Text` : la ligne
+/// allouée (line-height) resserrée à ~`font-size` et
+/// recentrée verticalement — approximation honnête de la
+/// border box `gBCR` (±1 px mesuré : a=17 pour fs=16).
+/// Si la font-size n'est pas résolue en px ou dépasse la
+/// hauteur, le rect brut est conservé (jamais agrandi).
+fn inline_content_rect(b: &LayoutBox) -> Rect {
+    if matches!(b.kind, crate::boxtree::BoxKind::Inline | crate::boxtree::BoxKind::Text) {
+        inline_content_rect_st(b.rect, &b.style)
+    } else {
+        b.rect
+    }
+}
+
+/// Idem [`inline_content_rect`] sur un rect + style (cas
+/// fragment de ligne non-atomique).
+fn inline_content_rect_st(rect: Rect, style: &explorer_css::ComputedStyle) -> Rect {
+    let Some(fs) = style
+        .get("font-size")
+        .and_then(|v| v.trim_end_matches("px").trim().parse::<f32>().ok())
+    else {
+        return rect;
+    };
+    if fs >= rect.height || fs <= 0.0 {
+        return rect;
+    }
+    Rect {
+        x: rect.x,
+        y: rect.y + (rect.height - fs) / 2.0,
+        width: rect.width,
+        height: fs,
     }
 }
 

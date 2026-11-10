@@ -3808,6 +3808,7 @@ chez NAVIGATEUR — non recopiés ici.
   de body et collapse frères inchangés. Verrous : 3 tests
   `quirks_body_margin` + fixture `colonnes` recalée.
 - [x] **R-212. LOT-selectors : `:lang()` + tolérance `::-moz-*`/`-ms`/`-o`** : premier lot nommé par le Pareto réel (`css.selector.bad` = `:lang` Wikipedia + vendor pseudos). `PseudoClass::Lang` (parse + héritage documentaire + préfixe tiret + `*`) ; vendor préfixés → `Other` dormant au lieu d'invalider la liste. Verrous : 4 tests dédiés.
+- [x] **R-213. `geometry_dump` : rect contenu pour les inline** : nos fragments rapportaient la ligne allouée (lh) où `gBCR` rend la border-box contenu (~fs) — dh inline systématique +9 px sur le corpus. Rect `Inline`/`Text`/fragment non-atomique resserré à `font-size` recentrée. Verrou : suites layout vertes.
 ## Tâches continues
 
 - **Triage rendu** des échecs `site_smoke.ps1` : les écarts
