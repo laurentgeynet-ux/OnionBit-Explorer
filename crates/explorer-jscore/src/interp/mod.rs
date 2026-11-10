@@ -3002,6 +3002,27 @@ impl Engine {
             // un borrow traversant l'éval rend domgc non licite,
             // on le saute pour cette passe.
             if let Ok(mut c) = cache.try_borrow_mut() {
+                // Sonde §cran-33 : wrapper balayé au mark-sweep
+                // AVANT collect_garbage → son nœud n'est plus
+                // seedé et part en `free_nodes`/`dead_blocked`
+                // au même safepoint — nomme les cache-entry
+                // de tags CE qui tombent ici.
+                if tracing::enabled!(target: "dom_probe", tracing::Level::INFO) {
+                    let dead: Vec<(crate::dom::NodeId, String)> = c
+                        .iter()
+                        .filter(|(_, oid)| self.heap.obj(**oid).is_none())
+                        .filter_map(|(&n, _)| {
+                            let d = dom.borrow();
+                            let t = d.nodes.get(n as usize).map(|x| x.tag.clone())?;
+                            t.contains('-').then(|| (n, t))
+                        })
+                        .collect();
+                    for (n, t) in dead {
+                        tracing::info!(target: "dom_probe", site = "gc.cache",
+                            "node={n} tag={t} epoch={:?}",
+                            dom.borrow().nodes.get(n as usize).map(|x| x.epoch));
+                    }
+                }
                 c.retain(|_, &mut oid| self.heap.obj(oid).is_some());
                 let mut seeds: std::collections::HashSet<crate::dom::NodeId> =
                     c.keys().copied().collect();
