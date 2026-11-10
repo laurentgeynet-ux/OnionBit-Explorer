@@ -369,7 +369,9 @@ pub fn interpolate(from: &str, to: &str, t: f64) -> Option<String> {
 
 /// `f64` → chaîne courte (4 décimales max, zéros traînants
 /// retirés) — le re-parse côté cascade reste exact.
-fn fmt_num(v: f64) -> String {
+/// `pub(crate)` : partagé avec `animation::accumulate`
+/// (R-257 — même format que l'interpolation).
+pub(crate) fn fmt_num(v: f64) -> String {
     let s = format!("{v:.4}");
     let s = s.trim_end_matches('0').trim_end_matches('.');
     if s == "-0" {

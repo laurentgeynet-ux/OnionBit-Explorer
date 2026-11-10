@@ -112,6 +112,22 @@ pub enum Direction {
     AlternateReverse,
 }
 
+/// `animation-composition` (css-animations-2 §3.8, R-257).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum Composite {
+    /// La valeur animée remplace la valeur sous-jacente.
+    #[default]
+    Replace,
+    /// `add` — concaténation de liste (`transform`,
+    /// `filter`, `box-shadow`…) ; repli `accumulate` hors
+    /// liste, `replace` si non combinable.
+    Add,
+    /// `accumulate` — addition numérique (longueurs,
+    /// nombres, couleurs par canal) ; `replace` si non
+    /// combinable (spec).
+    Accumulate,
+}
+
 /// `animation-play-state` (R-255).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum PlayState {
@@ -160,6 +176,9 @@ pub struct AnimationDecl {
     /// `animation-play-state` — `Paused` gèle la phase à
     /// l'instant de la pause (consommé par la session).
     pub play_state: PlayState,
+    /// `animation-composition` — comment la valeur animée
+    /// se combine à la valeur sous-jacente (R-257).
+    pub composite: Composite,
 }
 
 impl AnimationDecl {
@@ -228,6 +247,7 @@ impl Default for AnimationDecl {
             direction: Direction::Normal,
             fill: Fill::None,
             play_state: PlayState::Running,
+            composite: Composite::Replace,
         }
     }
 }
@@ -259,6 +279,7 @@ pub fn animation_decls(style: &ComputedStyle) -> Vec<AnimationDecl> {
         dir: longhand("animation-direction"),
         fill: longhand("animation-fill-mode"),
         play: longhand("animation-play-state"),
+        comp: longhand("animation-composition"),
     };
     let n = lh
         .all_lens()
@@ -293,6 +314,9 @@ pub fn animation_decls(style: &ComputedStyle) -> Vec<AnimationDecl> {
         if let Some(v) = at(&lh.play, i) {
             d.play_state = parse_play_state(v);
         }
+        if let Some(v) = at(&lh.comp, i) {
+            d.composite = parse_composite(v);
+        }
         out.push(d);
     }
     out
@@ -314,10 +338,11 @@ struct Longhands {
     dir: Vec<String>,
     fill: Vec<String>,
     play: Vec<String>,
+    comp: Vec<String>,
 }
 
 impl Longhands {
-    fn all_lens(&self) -> [usize; 8] {
+    fn all_lens(&self) -> [usize; 9] {
         [
             self.name.len(),
             self.dur.len(),
@@ -327,6 +352,7 @@ impl Longhands {
             self.dir.len(),
             self.fill.len(),
             self.play.len(),
+            self.comp.len(),
         ]
     }
 }
@@ -416,6 +442,77 @@ fn parse_play_state(v: &str) -> PlayState {
         "paused" => PlayState::Paused,
         _ => PlayState::Running,
     }
+}
+
+fn parse_composite(v: &str) -> Composite {
+    match v.trim().to_ascii_lowercase().as_str() {
+        "add" => Composite::Add,
+        "accumulate" => Composite::Accumulate,
+        _ => Composite::Replace,
+    }
+}
+
+/// Propriétés animables par concaténation de liste — le
+/// `add` spec (css-animations-2) ne s'applique qu'aux
+/// valeurs à répétition ; hors liste il retombe sur
+/// `accumulate`, puis `replace` si non combinable.
+const ADDITIVE_LIST_PROPS: &[&str] =
+    &["transform", "filter", "backdrop-filter", "box-shadow", "mask-image"];
+
+/// Valeur produite selon `animation-composition` (R-257) :
+/// `base` = valeur sous-jacente calculée, `anim` = sortie
+/// keyframe. `Add` concatène les listes, `Accumulate`
+/// additionne numériquement (longueurs même-unité/absolues,
+/// nombres, couleurs par canal RGBA), repli `anim` seul
+/// quand la paire n'est pas combinable (spec).
+#[must_use]
+pub fn composite_value(prop: &str, base: &str, anim: &str, comp: Composite) -> String {
+    match comp {
+        Composite::Replace => anim.to_string(),
+        Composite::Add if ADDITIVE_LIST_PROPS.contains(&prop) => {
+            format!("{} {}", base.trim(), anim.trim()).trim().to_string()
+        }
+        Composite::Add | Composite::Accumulate => {
+            accumulate_values(base, anim).unwrap_or_else(|| anim.to_string())
+        }
+    }
+}
+
+/// `base + anim` numérique : longueur (même unité, ou
+/// absolues converties en px), nombre nu, couleur par canal
+/// (RGBA, alpha sommé plafonné à 255). `None` = paire non
+/// combinable → l'appelant retombe sur `anim` (spec).
+fn accumulate_values(base: &str, anim: &str) -> Option<String> {
+    use crate::transition::fmt_num;
+    if let (Ok(a), Ok(b)) = (base.trim().parse::<f64>(), anim.trim().parse::<f64>()) {
+        return Some(fmt_num(a + b));
+    }
+    if let (Some(a), Some(b)) = (
+        crate::value::parse_length(base),
+        crate::value::parse_length(anim),
+    ) {
+        if a.unit == b.unit {
+            return Some(format!("{}{}", fmt_num(a.value + b.value), a.unit));
+        }
+        if let (Some(fa), Some(fb)) = (a.unit.px_factor(), b.unit.px_factor()) {
+            return Some(format!("{}px", fmt_num(a.value * fa + b.value * fb)));
+        }
+        return None;
+    }
+    if let (Some(a), Some(b)) = (
+        crate::value::parse_color(base),
+        crate::value::parse_color(anim),
+    ) {
+        let c = |x: u8, y: u8| u8::try_from(u32::from(x) + u32::from(y)).unwrap_or(u8::MAX);
+        return Some(format!(
+            "rgba({}, {}, {}, {})",
+            c(a.r, b.r),
+            c(a.g, b.g),
+            c(a.b, b.b),
+            fmt_num(f64::from(u16::from(a.a) + u16::from(b.a)).min(255.0) / 255.0)
+        ));
+    }
+    None
 }
 
 /// Propriétés interpolées à la `phase` ∈ \[0,1\] sur la table

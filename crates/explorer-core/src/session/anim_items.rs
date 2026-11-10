@@ -316,8 +316,12 @@ pub(crate) fn sync_animations(
                             }
                         }
                     }
-                    a.decl = decl.clone();
                 }
+                // `composite` est hors identité comme
+                // `play_state` (R-257) : changer de mode ne
+                // redémarre pas la lecture — la déclaration
+                // est rafraîchie en place.
+                a.decl = decl.clone();
                 a
             } else {
                 births.push((node, decl.name.clone()));
@@ -373,7 +377,14 @@ pub(crate) fn apply_anim_overrides(
             continue;
         };
         for (k, v) in keyframe_style(frames, phase, a.decl.timing, cs) {
-            cs.set(&k, &v);
+            // `animation-composition` (R-257) : `add`/
+            // `accumulate` combinent la valeur animée à la
+            // valeur courante de `cs` (base ou composition
+            // d'une animation d'index inférieur — spec :
+            // composition par ordre de la liste).
+            let cur = cs.get(&k).unwrap_or_default();
+            let out = explorer_css::animation::composite_value(&k, cur, &v, a.decl.composite);
+            cs.set(&k, &out);
         }
         a.applied = true;
     }

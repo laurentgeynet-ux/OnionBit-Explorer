@@ -82,3 +82,52 @@ fn play_state_longhand_et_shorthand() {
         PlayState::Paused
     );
 }
+
+/// R-257 — `animation-composition` : longhand par index,
+/// combinaison `add` (listes) / `accumulate` (numérique)
+/// contre la valeur sous-jacente.
+#[test]
+fn composition_longhand_et_combinaison() {
+    use explorer_css::animation::{composite_value, Composite};
+    let st = style_of(
+        "x",
+        "p { animation: a 1s, b 2s; animation-composition: add, accumulate }",
+    );
+    let decls = explorer_css::animation::animation_decls(&st);
+    assert_eq!(decls[0].composite, Composite::Add);
+    assert_eq!(decls[1].composite, Composite::Accumulate);
+    // `replace` : valeur animée seule.
+    assert_eq!(
+        composite_value("left", "10px", "30px", Composite::Replace),
+        "30px"
+    );
+    // `add` sur liste : concaténation.
+    assert_eq!(
+        composite_value("transform", "scale(2)", "rotate(4deg)", Composite::Add),
+        "scale(2) rotate(4deg)"
+    );
+    // `add` hors liste → repli accumulate.
+    assert_eq!(
+        composite_value("left", "10px", "30px", Composite::Add),
+        "40px"
+    );
+    // `accumulate` : somme même unité, px mixtes, nombres,
+    // couleurs par canal.
+    assert_eq!(
+        composite_value("left", "10px", "30px", Composite::Accumulate),
+        "40px"
+    );
+    assert_eq!(
+        composite_value("left", "96px", "1in", Composite::Accumulate),
+        "192px"
+    );
+    assert_eq!(
+        composite_value("opacity", "0.2", "0.3", Composite::Accumulate),
+        "0.5"
+    );
+    // Non combinable → valeur animée (spec repli).
+    assert_eq!(
+        composite_value("display", "block", "flex", Composite::Accumulate),
+        "flex"
+    );
+}

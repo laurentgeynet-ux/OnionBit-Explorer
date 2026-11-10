@@ -3829,6 +3829,7 @@ chez NAVIGATEUR — non recopiés ici.
 - [x] **R-245. `check routed` + `prop_routed`** : plumbing livré — limite nommée (cascade stocke les inconnus → saturation). Prochain : `prop_affects` (delta layout) ou gate `decl_supported` à l’insert.
 - [x] **R-246. `check affects` + `prop_affects`** : delta box tree — vrai négatif dormants (`mask-*`/`anchor-*`/`xyz-bogus` miss), vrai positif consommables (`margin`/`all`/`block-size`/`display`). Aveugle aux props conteneur.
 - [x] **R-247. `font-feature-settings` → rustybuzz** : `FontRequest.feature_settings` parsé → `ot_features` — tnum/onum/nalt réels. `affects` aveugle au paint (prochaine jauge display-list).
+- [x] **R-257. `animation-composition` consommé** (même piste, journalisé) : `Composite::{Replace,Add,Accumulate}` sur `AnimationDecl` + `composite_value` — `add` concatène les listes, `accumulate` additionne numériquement, appliqué contre `cs` en chaîne par index dans `apply_anim_overrides`. Verrou : `composition_longhand_et_combinaison`.
 - [x] **R-256. `animation-timing-function` par keyframe** : l'easing du segment vient de la frame quittée (`keyframe_style` lit la decl de `d1`, repli item) ; la prop exclue du style animé. Verrou : `keyframe_timing_function_par_frame`.
 - [x] **R-255. `animation-play-state` consommé + `steps()` dans les easing** (livré depuis `nav/youtube-fix`, journalisé — zone css en lecture-journal NAV→PIPE) : `PlayState` sur `AnimationDecl` (longhand par index + shorthand), pause = gel d'horloge session/reprise sans redémarrage ; `Timing::Steps(n, StepPos)` — `steps()`/`step-start`/`step-end` pour transitions **et** animations. Verrous : 2 tests css + 1 test session.
 
@@ -3862,10 +3863,13 @@ de noms. Ordre fixe (priorité par site-impact mesuré) :
 4. **`anchor-*`/`position-try`** — MVP livré (R-254) — github
    ×96 : `anchor-name`/`position-anchor`/`anchor(<côté>|center|
    <%>[,repli])` résolus post-layout (`resolve_anchor_positioning`).
-   Résidus : `@position-try` nommées + `most-*` en valeur de
-   `position-try` ; `anchor()`/`anchor-size()` en insets
-   logiques (les insets logiques ne sont pas consommés du tout
-   — gap distinct). Livrés en suite : `position-area` 3×3,
+   Résidus : `anchor()`/`anchor-size()` en insets logiques
+   (les insets logiques ne sont pas consommés du tout — gap
+   distinct). Livrés en suite : `position-area` 3×3 + alias
+   `inset-area`, `@position-try` nommées, ordonnancement spec
+   des fallbacks (première option qui « fit », tri
+   `position-try-order` + `most-*` en valeur du shorthand —
+   2026-11-10),
    `anchor-center` (justify/align-self), `anchor-size()`,
    `anchor()` dans `calc()`, flips `position-try`+
    `position-try-order` sur débordement viewport.
@@ -3896,7 +3900,16 @@ de noms. Ordre fixe (priorité par site-impact mesuré) :
 ### Axe 3 — jauges non-saturantes
 - `check affects` (layout delta) — livré.
 - `check routed` (consommé par ComputedStyle — extension
-  user : shorthands expansés + `all` + longhand-prefixes).
+  user : shorthands expansés + `all` + longhand-prefixes) —
+  **581/581 (100 %)** : le dernier miss `display` était un
+  artefact de sonde (valeur héritée = initiale UA), fixture
+  corrigée 2026-11-10.
+- **Ruby réel (css-ruby-1, 2026-11-10)** : `rt` posé dans la
+  bande au-dessus de la base (`lift_ruby`), apparié au segment
+  `ruby*` précédent et **centré** (`ruby-align:center`
+  défaut), `ruby-position:over|under|inter-character`
+  (héritée), feuille UA aux niveaux `ruby*` spec. Résidus :
+  overhang borné, `ruby-align` autres valeurs, `rtc`.
 - Prochaine : display-list delta (plan paint — `text-decoration`,
   `font-*`, `background-*`, `border-*`, `box-shadow`…).
 - Census en vol : `value.dropped.<prop>.<valeur>` (R-238) nomme
