@@ -3855,7 +3855,7 @@ de noms. Ordre fixe (priorité par site-impact mesuré) :
 4. **`anchor-*`/`position-try`** — github ×96 : positionnement
    ancre (nommé, fallbacks, `@position-try` → `Declarations`
    livré ; consommateur = resolver anchor → offsets).
-5. **`text-wrap`/`text-wrap-mode`/`text-wrap-style`** — `balance`
+5. **`text-wrap`/`text-wrap-mode`/`text-wrap-style`** — livré (R-249) — `balance`
    (titres) : mesure de ligne + répartiteur.
 6. **`unicode-bidi`/`text-orientation`** — bidi explicite +
    orientations verticales (text.rs déjà en place).

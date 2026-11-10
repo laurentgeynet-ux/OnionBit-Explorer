@@ -5169,6 +5169,22 @@ table {
 /// (un `light-dark` peut nicher dans une autre valeur), la
 /// virgule de tête sépare les deux branches ; un argument
 /// manquant conserve le texte source (dégradation).
+/// R-250 — `font-variant-east-asian` : mots-clés → tags OT
+/// (css-fonts-4 §6.5).
+const FVE_TAGS: &[(&str, &str)] = &[
+    ("full-width", "fwid"),
+    ("proportional-width", "pwid"),
+    ("jis78", "jp78"),
+    ("jis83", "jp83"),
+    ("jis90", "jp90"),
+    ("jis04", "jp04"),
+    ("simplified", "smpl"),
+    ("traditional", "trad"),
+    ("hojo", "hojo"),
+    ("nlc-kanji", "nlck"),
+    ("ruby", "ruby"),
+];
+
 /// R-241 — `font-variant-numeric` : mots-clés → tags OT
 /// (css-fonts-4 §6.3).
 const FVN_TAGS: &[(&str, &str)] = &[
@@ -5271,6 +5287,27 @@ impl StyleEngine {
                 st.set("font-feature-settings", &settings.join(", "));
             }
         }
+        // R-250 — `font-variant-east-asian` : mêmes tags OT
+        // concaténés (css-fonts-4 §6.5).
+        for st in map.values_mut() {
+            let Some(v) = st.get("font-variant-east-asian") else {
+                continue;
+            };
+            let mut settings: Vec<String> = st
+                .get("font-feature-settings")
+                .map(|s| s.split(',').map(str::to_owned).collect())
+                .unwrap_or_default();
+            for kw in v.split_whitespace() {
+                if let Some(tag) = FVE_TAGS.iter().find(|(k, _)| *k == kw).map(|(_, t)| t) {
+                    settings.push(format!("\"{tag}\" 1"));
+                }
+            }
+            if !settings.is_empty() {
+                st.set("font-feature-settings", &settings.join(", "));
+            }
+        }
+        // `font-variant-emoji` : `emoji`/`text` — sélecteur de
+        // variation VS16/VS15 dormant (choix de fonte couleur).
         if self.font_feature_values.is_empty() {
             return;
         }
