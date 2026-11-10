@@ -2956,6 +2956,17 @@ impl Dom {
             return None;
         }
         if let Some(&f) = self.template_contents.get(&n) {
+            // Fragment déjà matérialisé (parse, `content_target`
+            // ou accès antérieur) : toute **remise** au script
+            // empoisonne — les mutations ultérieures des enfants
+            // détachés sont invisibles au journal (ADR-0025), et
+            // le flag est idempotent jusqu'au drain (aucun coût
+            // supplémentaire vs poison unique). Le poison posé
+            // lors d'une création précoce a pu être balayé par
+            // un `clear_journal` de baseline.
+            if self.is_attached(n) {
+                self.poison_journal();
+            }
             return Some(f);
         }
         let frag = self.create_fragment();
