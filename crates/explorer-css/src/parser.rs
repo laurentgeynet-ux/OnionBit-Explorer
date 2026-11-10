@@ -87,6 +87,16 @@ pub enum AtKind {
         /// Déclarations du bloc.
         declarations: Vec<Declaration>,
     },
+    /// R-229 — `@font-feature-values <fam>` : valeurs
+    /// nommées `(kind, nom, indices)` consommées par
+    /// `font-variant-alternates` (css-fonts-4 §6).
+    FontFeatureValues {
+        /// Famille de police déclarée.
+        family: String,
+        /// `(kind, nom, indices)` ex : `("stylistic",
+        /// "salt-style", [1, 3])`.
+        features: Vec<(String, String, Vec<u32>)>,
+    },
     /// `@keyframes <nom> { <selecteurs> { decls } }` — sous-règles
     /// à prélude brut (pourcentages/from/to).
     Keyframes {
@@ -511,6 +521,13 @@ impl<'t> Parser<'t> {
                             declarations: self.declaration_block(),
                         }
                     }
+                    // R-229 — `@font-feature-values <fam> {
+                    // @<kind> { <nom>: <idx>+ } }` : corps de
+                    // sous-at-rules, pas de déclarations.
+                    "font-feature-values" => AtKind::FontFeatureValues {
+                        family: prelude.trim().to_string(),
+                        features: self.font_feature_block(),
+                    },
                     "keyframes" | "-webkit-keyframes" | "-moz-keyframes" => {
                         let frames = self.keyframes_block();
                         AtKind::Keyframes {
@@ -708,6 +725,49 @@ impl<'t> Parser<'t> {
             }
         }
         decls
+    }
+
+    /// Corps `@font-feature-values` : suite de
+    /// `@<kind> { <nom>: <idx>+ ; … }` (css-fonts-4 §6).
+    /// Tolérant : un bloc fautif saute à `;`/`}`.
+    fn font_feature_block(&mut self) -> Vec<(String, String, Vec<u32>)> {
+        let mut out = Vec::new();
+        loop {
+            self.skip_ws();
+            match self.peek() {
+                None | Some(Token::CloseBrace) => {
+                    if self.peek().is_some() {
+                        self.pos += 1;
+                    }
+                    break;
+                }
+                Some(Token::AtKeyword(kind)) => {
+                    let kind = kind.clone();
+                    self.pos += 1;
+                    self.skip_ws();
+                    // `@kind { ... }` — le `{` doit être
+                    // consommé avant `declaration_block`
+                    // (sinon il part en récupération).
+                    if matches!(self.peek(), Some(Token::OpenBrace)) {
+                        self.pos += 1;
+                    }
+                    for d in self.declaration_block() {
+                        let idxs: Vec<u32> = d
+                            .value
+                            .split_whitespace()
+                            .filter_map(|t| t.trim_end_matches(';').parse::<u32>().ok())
+                            .collect();
+                        if !idxs.is_empty() {
+                            out.push((kind.clone(), d.name, idxs));
+                        }
+                    }
+                }
+                Some(_) => {
+                    self.recover_decl();
+                }
+            }
+        }
+        out
     }
 
     /// Une déclaration `name : value !important` — erreurs

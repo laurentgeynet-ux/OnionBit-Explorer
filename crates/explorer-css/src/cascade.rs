@@ -392,6 +392,8 @@ const SUPPORTED_PROPS: &[&str] = &[
     "font-size",
     "font-style",
     "font-variant",
+    "font-variant-alternates",
+    "font-feature-settings",
     "font-stretch",
     "font-size-adjust",
     "font-synthesis",
@@ -1026,6 +1028,20 @@ pub(crate) struct RegisteredProp {
     pub initial: Option<String>,
 }
 
+/// R-229 — une valeur nommée de `@font-feature-values` :
+/// tag OpenType 4cc + indices — résolution
+/// `font-variant-alternates` (annotation→`nalt`,
+/// character-variant→`cvNN`, styleset→`ssNN`,
+/// stylistic→`salt`, swash→`swsh`).
+#[derive(Debug, Clone)]
+pub struct FontFeatureValues {
+    /// Réglages résolus `(tag, valeur)` — un indice de
+    /// `styleset`/`character-variant` code le tag lui-même
+    /// (`ssNN`/`cvNN`) alors qu'`annotation`/`stylistic`/
+    /// `swash` l'emportent comme valeur (`"nalt" 1`).
+    pub settings: Vec<(String, u32)>,
+}
+
 /// `@counter-style <nom>` — style de compteur nommé
 /// (css-counter-styles-3). R-221 — champs minimaux :
 /// `system`/`symbols`/`prefix`/`suffix`/`fallback` ;
@@ -1110,6 +1126,10 @@ impl CounterStyle {
 pub struct StyleEngine {
     /// `@counter-style` enregistrés (R-221).
     pub counter_styles: HashMap<String, CounterStyle>,
+    /// `@font-feature-values` enregistrés (R-229) —
+    /// famille → nom → tag+indices (résolution
+    /// `font-variant-alternates`).
+    pub font_feature_values: HashMap<String, HashMap<String, FontFeatureValues>>,
     rules: Vec<CollectedRule>,
     /// Règles UA **quirks-only** (HTML Rendering, « In quirks
     /// mode ») — parsées avec la feuille UA, ne candidatent
@@ -1301,6 +1321,8 @@ pub struct StyleMap {
     /// consommateur (`build_box_tree` lit `list-style-type`
     /// nommé). R-221.
     pub counter_styles: HashMap<String, CounterStyle>,
+    /// `@font-feature-values` enregistrés (R-229).
+    pub font_feature_values: HashMap<String, HashMap<String, FontFeatureValues>>,
 }
 
 impl StyleMap {
@@ -1651,6 +1673,37 @@ impl StyleEngine {
                             // `@font-feature-values`…).
                             explorer_common::census::bump(&format!("css.at.unapplied.{}", at.name));
                         }
+                    } else if let AtKind::FontFeatureValues { family, features } = &at.kind {
+                        // R-229 — registre : la famille
+                        // sert de clé à la résolution
+                        // `font-variant-alternates`.
+                        let fam = family.trim().trim_matches('"').to_ascii_lowercase();
+                        let set = self.font_feature_values.entry(fam).or_default();
+                        for (kind, name, idxs) in features {
+                            // css-fonts-4 §6.2 — `ssNN`/`cvNN` :
+                            // le tag code l'indice (valeur 1) ;
+                            // `nalt`/`swsh`/`salt` : l'indice est
+                            // la valeur.
+                            let settings: Vec<(String, u32)> = match kind.as_str() {
+                                "styleset" => {
+                                    idxs.iter().map(|i| (format!("ss{i:02}"), 1)).collect()
+                                }
+                                "character-variant" => {
+                                    idxs.iter().map(|i| (format!("cv{i:02}"), 1)).collect()
+                                }
+                                "annotation" => {
+                                    idxs.iter().map(|i| ("nalt".to_string(), *i)).collect()
+                                }
+                                "swash" => {
+                                    idxs.iter().map(|i| ("swsh".to_string(), *i)).collect()
+                                }
+                                _ => idxs.iter().map(|i| ("salt".to_string(), *i)).collect(),
+                            };
+                            set.insert(
+                                name.to_ascii_lowercase(),
+                                FontFeatureValues { settings },
+                            );
+                        }
                     } else if let AtKind::Container { name, query, rules } = &at.kind {
                         // `@container` (R-190) : le prédicat
                         // rejoint `container_queries` (évalué
@@ -1910,7 +1963,13 @@ impl StyleEngine {
             &mut root_fs,
             containers,
         );
-        StyleMap { map, pseudos, counter_styles: self.counter_styles.clone() }
+        self.resolve_font_alternates(&mut map);
+        StyleMap {
+            map,
+            pseudos,
+            counter_styles: self.counter_styles.clone(),
+            font_feature_values: self.font_feature_values.clone(),
+        }
     }
 
     /// Re-style le sous-arbre de `root` semé sur le style
@@ -1990,7 +2049,13 @@ impl StyleEngine {
             &mut root_fs,
             containers,
         );
-        StyleMap { map, pseudos, counter_styles: self.counter_styles.clone() }
+        self.resolve_font_alternates(&mut map);
+        StyleMap {
+            map,
+            pseudos,
+            counter_styles: self.counter_styles.clone(),
+            font_feature_values: self.font_feature_values.clone(),
+        }
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -4157,6 +4222,8 @@ const INHERITED_PROPS: &[&str] = &[
     "font-style",
     "unicode-bidi",
     "font-variant",
+    "font-variant-alternates",
+    "font-feature-settings",
     "font-stretch",
     "font-size-adjust",
     "font-synthesis",
@@ -4451,6 +4518,62 @@ table {
 /// (un `light-dark` peut nicher dans une autre valeur), la
 /// virgule de tête sépare les deux branches ; un argument
 /// manquant conserve le texte source (dégradation).
+impl StyleEngine {
+    /// R-229 — `font-variant-alternates` : résout les noms
+    /// enregistrés `@font-feature-values` en réglages
+    /// `font-feature-settings` équivalents (concatenés) —
+    /// la clé de famille vient de `font-family` calculé.
+    /// `normal`/absent ne touche à rien.
+    fn resolve_font_alternates(&self, map: &mut HashMap<NodeId, ComputedStyle>) {
+        if self.font_feature_values.is_empty() {
+            return;
+        }
+        for st in map.values_mut() {
+            let Some(alt) = st.get("font-variant-alternates") else {
+                continue;
+            };
+            if alt.trim() == "normal" {
+                continue;
+            }
+            let fam = st
+                .get("font-family")
+                .and_then(|f| f.split(',').next())
+                .map(|f| f.trim().trim_matches(|c: char| c == '"' || c as u32 == 0x27).to_ascii_lowercase())
+                .unwrap_or_default();
+            let set = self
+                .font_feature_values
+                .get(&fam)
+                .or_else(|| self.font_feature_values.values().next());
+            let Some(set) = set else {
+                continue;
+            };
+            // `annotation(alt) styleset(a, b) swash(s)` —
+            // chaque fonction → noms → réglages OT.
+            let mut out = Vec::new();
+            let mut rest = alt.trim();
+            while let Some(open) = rest.find('(') {
+                let name_part = &rest[..open];
+                let end = rest[open..].find(')').map(|e| open + e + 1);
+                let Some(end) = end else { break };
+                let inside = &rest[open + 1..end - 1];
+                for nm in inside.split(',') {
+                    let nm = nm.trim().trim_matches(|c: char| c == '"' || c as u32 == 0x27).to_ascii_lowercase();
+                    if let Some(fv) = set.get(&nm) {
+                        for (tag, v) in &fv.settings {
+                            out.push(format!("\"{tag}\" {v}"));
+                        }
+                    }
+                }
+                let _ = name_part;
+                rest = rest[end..].trim();
+            }
+            if !out.is_empty() {
+                st.set("font-feature-settings", &out.join(", "));
+            }
+        }
+    }
+}
+
 fn resolve_light_dark(v: &str, dark: bool) -> String {
     // JS-C400 — arête ∝ imbrication `light-dark(` dans la
     // valeur (contrôlée par la feuille — §B-111) : segment tas.

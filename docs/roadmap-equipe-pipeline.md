@@ -3817,6 +3817,7 @@ chez NAVIGATEUR — non recopiés ici.
 - [x] **R-226. `img` à taille CSS explicite reste remplacée sans `sizes`** : `img_box` tombait sur `Text(alt)` → dimensions perdues (img flex → 0) ; garde le kind si `tag==img` + taille non-auto non-% ; `input[type=image]` garde le repli `alt`.
 - [x] **R-227 (diagnostic). `a.mw-logo` — pipeline sain** : box tree du vrai DOM+css → `a`/span w=140 = Chrome ; l'écart w9 (261) vit **uniquement dans le DOM live** — `html.client-js` (JS exécuté) + classes clientprefs gated → les règles conditionnelles divergent de la capture statique. À reprober avec le DOM du shot ; dépend du lot CSS-injecté-JS (journal NAV) ; **R-228. dy+1601 = listes `hlist`/`plainlist` empilées** — diagnostic : `li` Inline corrects en cascade+boxtree ; les blocs viennent des feuilles **injectées par JS** (mw.loader/site.styles) absentes de notre cascade — journalisé PIPE→NAV (EN COURS) : `.mw-header{display:grid;grid-template:.../15.5rem minmax(0,1fr);grid-template-areas}` — `a` display:flex s'étire au conteneur au lieu de shrink-wrap ; flex-in-flex + grid reproduisent correctement en isolation — reste une règle réelle spécifique.
 
+- [x] **R-229. `@font-feature-values` parse+registre+résolution** : corps de sous-at-rules (parse dédié), registre par famille, `font-variant-alternates`→`font-feature-settings` équivalent (ssNN/cvNN/nalt/swsh/salt). `at.unknown/unapplied` MDN éliminés. Verrous : 3 tests.
 ## Tâches continues
 
 - **Triage rendu** des échecs `site_smoke.ps1` : les écarts
