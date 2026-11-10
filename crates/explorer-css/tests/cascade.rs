@@ -1619,6 +1619,34 @@ fn animation_shorthand_et_phase() {
     assert_eq!(left, Some("50px"), "props={props:?}");
 }
 
+/// R-256 — `animation-timing-function` posée dans la frame
+/// quittée pilote le segment (spec §3.4), et ne s'écrit pas
+/// dans le style animé.
+#[test]
+fn keyframe_timing_function_par_frame() {
+    use explorer_css::animation::{animation_decls, keyframe_style};
+    let (_dom, node, eng, styles) = styled(
+        "@keyframes k { 0% { left: 0px; animation-timing-function: steps(1) }\
+         100% { left: 100px } }\
+         #d { animation: k 1s linear }",
+    );
+    let st = styles.get(node).expect("style");
+    let d = &animation_decls(st)[0];
+    let frames = eng.keyframes("k").unwrap();
+    let props = keyframe_style(frames, 0.5, d.timing, st);
+    let left = props
+        .iter()
+        .find(|(n, _)| n == "left")
+        .map(|(_, v)| v.as_str());
+    // steps(1, jump-end) sur le segment → t = 0 → left = 0px
+    // (le `linear` de l'item donnerait 50px).
+    assert_eq!(left, Some("0px"), "props={props:?}");
+    assert!(
+        props.iter().all(|(n, _)| n != "animation-timing-function"),
+        "le timing ne s'écrit pas dans le style : {props:?}"
+    );
+}
+
 #[test]
 fn animation_fill_backwards_pendant_le_delai() {
     use explorer_css::animation::animation_decls;
@@ -3440,8 +3468,8 @@ fn outline_inherit_route_longhands() {
     assert!(s2.get("outline-style").is_some());
 }
 
-/// Feuille UA ruby (css-ruby-1 bornée) : `rt` = 50 % +
-/// `super`, `rp` masqué.
+/// Feuille UA ruby (css-ruby-1) : `rt` = `display:ruby-text`
+/// à 50 %, `rp` masqué, conteneurs aux niveaux spec.
 #[test]
 fn ua_ruby_rt_rp() {
     let dom = TreeBuilder::parse("<ruby><rb></rb><rt>zi</rt><rp>(</rp></ruby>");
@@ -3450,8 +3478,8 @@ fn ua_ruby_rt_rp() {
     let annot_el = find_tag(&dom, dom.document(), "rt").expect("rt");
     let paren_el = find_tag(&dom, dom.document(), "rp").expect("rp");
     let rt = m.get(annot_el).expect("style rt");
+    assert_eq!(rt.get("display"), Some("ruby-text"), "rt niveau annotation");
     assert_eq!(rt.get("font-size"), Some("8px"), "rt 50 % de 16px");
-    assert_eq!(rt.get("vertical-align"), Some("super"), "rt sur-ligne");
     assert_eq!(
         m.get(paren_el).and_then(|s| s.get("display")),
         Some("none"),

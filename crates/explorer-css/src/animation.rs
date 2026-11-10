@@ -419,9 +419,9 @@ fn parse_play_state(v: &str) -> PlayState {
 }
 
 /// Propriétés interpolées à la `phase` ∈ \[0,1\] sur la table
-/// de frames (offsets triés) — `timing` appliqué dans chaque
-/// segment (spec : `animation-timing-function` de la frame
-/// entrante — MVP : la déclaration unique de l'item).
+/// de frames (offsets triés) — `timing` est l'easing de
+/// l'item ; une `animation-timing-function` posée dans la
+/// frame quittée le remplace pour ce segment (spec, R-256).
 /// Une propriété absente d'une borne part de `base` (frames
 /// 0 %/100 % implicites du spec) ; la paire non interpolable
 /// commute discrètement à mi-segment (comportement « discrete
@@ -450,18 +450,28 @@ pub fn keyframe_style(
         .unwrap_or(frames.len() - 1);
     let (o1, d1) = &frames[lo];
     let (o2, d2) = &frames[hi];
+    // Easing du segment : `animation-timing-function` posé
+    // dans la frame quittée prime sur celui de l'item
+    // (css-animations §3.4 — R-256).
+    let seg_timing = d1
+        .iter()
+        .find(|d| d.name == "animation-timing-function")
+        .and_then(|d| parse_timing(&d.value))
+        .unwrap_or(timing);
     // t segmentaire : 0 avant, 1 après, interpolé entre.
     let t = if o2 > o1 {
-        timing.apply(((p - o1) / (o2 - o1)).clamp(0.0, 1.0))
+        seg_timing.apply(((p - o1) / (o2 - o1)).clamp(0.0, 1.0))
     } else if p >= *o2 {
         1.0
     } else {
         0.0
     };
-    // Union des propriétés déclarées aux deux bornes.
+    // Union des propriétés déclarées aux deux bornes —
+    // `animation-timing-function` pilote l'easing, elle ne
+    // s'écrit pas dans le style calculé (R-256).
     let mut props: Vec<String> = Vec::new();
     for d in d1.iter().chain(d2.iter()) {
-        if !props.contains(&d.name) {
+        if d.name != "animation-timing-function" && !props.contains(&d.name) {
             props.push(d.name.clone());
         }
     }

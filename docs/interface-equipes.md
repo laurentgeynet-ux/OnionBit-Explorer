@@ -1321,3 +1321,4 @@ raster via `tile_sample`). Impact NAV : les bras lisant
 - Contrat **additif** : `AnimationDecl` gagne `play_state: PlayState` (champ nouveau — struct non exhaustive en pratique, `AnimationDecl::default()` couvre), `Timing` gagne `Steps(u32, StepPos)` + `StepPos` publique. Aucune signature cassée ; `same_decl` (core) exclut volontairement `play_state` de l'identité — la pause n'est pas un restart.
 - Consommateur côté NAV (`session/anim_items.rs`) : `paused_at` gèle l'horloge, `playing()` n'arme plus de relayout sous pause, reprise = `start` décalé de la durée de pause.
 - Verrous : `timing_steps_parse_et_apply`, `play_state_longhand_et_shorthand`, `keyframes_paused_freezes_playback`.
+- **R-256 (même piste)** : `keyframe_style` honore l'easing posé dans la frame quittée (`animation-timing-function` en decl de `d1` prime sur l'item) — additif, pas de signature cassée.
