@@ -14,18 +14,25 @@
 //   builtins   bcd.javascript.builtins (prof. 2) → `eval` jscore
 //   api        bcd.api (interfaces + membres) → `api` jscore
 //              (moteur avec surface navigateur installée)
+//   values     bcd.css.properties.<p>.<v> → `check affectsv`
+//              (fixture par famille — la déclaration exacte
+//              doit changer le box tree)
+//   html       bcd.html.elements → `check html`
+//              (oracle par élément : interface JS + membres
+//              IDL + effet géométrique UA — « le tag parse »
+//              ne suffit pas, étape 219)
 //
 // Chaque ligne rapporte `x/y (z %)` avec son dénominateur —
 // règle ADR-0010 : standard-track livrées par ≥1 des 3 moteurs,
 // obsolètes/non-standard exclues (jamais un % sans dénominateur).
 //
 // Usage : node scripts/bcd_coverage.mjs [--cli <binaire>]
-//           [--missing N] [--only props|sel|at|js]
+//           [--missing N] [--only props|routed|sel|at|js|api|values|html]
 //   --cli      explorer-cli (défaut : $EXPLORER_CLI puis
 //              target/debug/explorer-cli — cargo build -p explorer-cli)
 //   --missing  nb de manques listés par section (défaut 12,
 //              0 = aucun)
-//   --only     une seule surface (props|routed|sel|at|js)
+//   --only     une seule surface (props|routed|sel|at|js|api|values|html)
 //
 // Critères (biais documentés) :
 // - props/sel/at : nom *reconnu* (prop_supported /
@@ -122,7 +129,7 @@ function report(label, entries, okSet, note) {
   }
 }
 
-const sections = only ? [only] : ['props', 'routed', 'sel', 'at', 'js', 'api', 'values'];
+const sections = only ? [only] : ['props', 'routed', 'sel', 'at', 'js', 'api', 'values', 'html'];
 
 for (const sec of sections) {
   if (sec === 'props') {
@@ -368,6 +375,19 @@ for (const sec of sections) {
         .filter(l => l.endsWith('\tok')).map(l => l.split('\t')[0]));
     report('css.values', pairs, okSet,
       'déclaration exacte → effet géométrique (jauge non-saturante)');
+  } else if (sec === 'html') {
+    // bcd.html.elements.<tag> — oracle de comportement par
+    // élément (`check html`, étape 219) : « le tag parse »
+    // est trivial, la jauge exige l'interface JS spec
+    // (`createElement(tag) instanceof HTML<Name>Element`),
+    // les membres IDL clés (`showModal`, `content`,
+    // `value`…) ET l'effet géométrique UA (boîte produite,
+    // list-item, display:none des inertes, `details` replié,
+    // `slot` → display:contents). Les ~80 conteneurs
+    // génériques sondent `HTMLElement` + boîte rendue.
+    const entries = relevantEntries(bcd.html.elements ?? {});
+    report('html.elem', entries, checkBatch('html', entries.map(e => e.name)),
+      `sur ${Object.keys(bcd.html.elements ?? {}).length} clés BCD — interface + IDL + géométrie UA`);
   }
 }
 

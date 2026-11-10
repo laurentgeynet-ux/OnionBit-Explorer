@@ -7434,6 +7434,36 @@ incrément.
   expansés et échecs réels. Verrou
   `inline_style_import_expands_and_applies`.
 
+- [x] **Étape 219. `check html` — oracle de
+  comportement par élément
+  (`bcd.html.elements`)** (`explorer-cli` +
+  `scripts/bcd_coverage.mjs`) : « le tag
+  parse » est trivial — toute balise
+  produit un élément. Table
+  `tag → assertion` artisanale combinant
+  trois jauges : **interface JS**
+  (`createElement(tag) instanceof
+  HTML<Name>Element`, oracle spec
+  indépendant de `tag_interface`),
+  **membres IDL clés** (`showModal`,
+  `template.content`, `input.value`…) et
+  **géométrie UA** (box tree : boîte
+  produite, `list-item`, `display:none`
+  des inertes — `script`/`style`/`title`/
+  `source`/`template`, `details` replié
+  sans `open`, `slot` → `display:contents`,
+  `option` peint par son `select`). Les
+  conteneurs génériques (`div`,
+  `section`…) tombent sur le défaut
+  `HTMLElement` + boîte rendue — au
+  dénominateur, triviaux. Mesure :
+  **115/119 (96,6 %)** sur les clés
+  standard-track ; manques honnêtes :
+  `del`/`ins`→`HTMLModElement`,
+  `menu`→`HTMLMenuElement` (interfaces
+  non câblées), `time.dateTime`
+  (binding absent).
+
 - [ ] **Écarts terrain — vol humain
   22/10 (release `39ab821`, FFI)** :
   second run humain — trois constats

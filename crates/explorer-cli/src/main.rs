@@ -71,11 +71,13 @@ fn main() -> ExitCode {
             eprintln!("        explorer-cli mem <url>");
             eprintln!("        explorer-cli save <url> <dossier>");
             eprintln!("        explorer-cli eval <fichier.js>");
-            eprintln!("        explorer-cli api <fichier.js>   (eval + surface navigateur installée)");
+            eprintln!(
+                "        explorer-cli api <fichier.js>   (eval + surface navigateur installée)"
+            );
             eprintln!(
                 "        explorer-cli props            (noms de props sur stdin → `nom\\tok|miss`)"
             );
-            eprintln!("        explorer-cli check prop|sel|at");
+            eprintln!("        explorer-cli check prop|sel|at|routed|affects|affectsv|html");
             eprintln!("        explorer-cli download <url> <sortie>");
             eprintln!("        explorer-cli diff <a.png> <b.png>");
             eprintln!("        explorer-cli mcp [port]  (serveur MCP stdio → daemon)");
@@ -575,9 +577,9 @@ fn eval_js(path: &str, with_dom: bool) -> ExitCode {
     };
     let mut e = explorer_jscore::Engine::new();
     if with_dom {
-        let dom = std::rc::Rc::new(std::cell::RefCell::new(
-            explorer_jscore::Dom::from_html("<!doctype html><body></body>"),
-        ));
+        let dom = std::rc::Rc::new(std::cell::RefCell::new(explorer_jscore::Dom::from_html(
+            "<!doctype html><body></body>",
+        )));
         e.install_dom(&dom);
     }
     if let Some(ops) = std::env::var("EXPLORER_JS_OPS")
@@ -622,30 +624,16 @@ fn prop_affects(name: &str) -> bool {
     let dom = explorer_html::TreeBuilder::parse("<body><div><p class=x>ok</p></div></body>");
     let root = {
         let mut r = None;
-        walk_for(dom.document(), &dom, &mut r);
+        walk_any(dom.document(), &dom, &mut r);
         r.unwrap_or(dom.document())
     };
-    fn walk_for(n: explorer_dom::NodeId, dom: &explorer_dom::Dom, out: &mut Option<explorer_dom::NodeId>) {
-        if dom.element(n).is_ok() && out.is_none() {
-            *out = Some(n);
-        }
-        if let Ok(ch) = dom.children(n) {
-            for c in ch {
-                walk_for(c, dom, out);
-            }
-        }
-    }
     let sig = |css: &str| -> String {
         let mut eng = explorer_css::StyleEngine::new();
         eng.add_css(css, explorer_css::Origin::Author);
         let sm = eng.compute_tree(&dom, root, &explorer_css::StyleEnv::default());
         match explorer_layout::build_box_tree(&dom, root, &sm) {
             Some(mut bx) => {
-                explorer_layout::layout_tree(
-                    &mut bx,
-                    800.0,
-                    &explorer_layout::BlockCtx::default(),
-                );
+                explorer_layout::layout_tree(&mut bx, 800.0, &explorer_layout::BlockCtx::default());
                 bx.dump(&dom)
             }
             None => String::new(),
@@ -653,11 +641,27 @@ fn prop_affects(name: &str) -> bool {
     };
     let base = sig("p {}");
     for v in [
-        "10px", "red", "block", "flex", "none", "nowrap", "column", "bold", "italic",
-        "absolute", "inherit", "unset", "initial",
+        "10px",
+        "red",
+        "block",
+        "flex",
+        "none",
+        "nowrap",
+        "column",
+        "bold",
+        "italic",
+        "absolute",
+        "inherit",
+        "unset",
+        "initial",
         // R-246 — axes d'écriture : `writing-mode`/`direction`/
         // `text-orientation`/`unicode-bidi`/`dir`/`bdo`.
-        "vertical-rl", "vertical-lr", "sideways-rl", "rtl", "ltr", "mixed",
+        "vertical-rl",
+        "vertical-lr",
+        "sideways-rl",
+        "rtl",
+        "ltr",
+        "mixed",
     ] {
         if sig(&format!("p {{ {name}: {v} }}")) != base {
             return true;
@@ -666,7 +670,14 @@ fn prop_affects(name: &str) -> bool {
     // Contexte flex — les props flex-*/grid-*/gap n'ont
     // d'effet que dans un conteneur dédié.
     let base_f = sig("div { display: flex } p {}");
-    for v in ["row-reverse", "wrap", "10px", "flex-start", "column", "stretch"] {
+    for v in [
+        "row-reverse",
+        "wrap",
+        "10px",
+        "flex-start",
+        "column",
+        "stretch",
+    ] {
         if sig(&format!("div {{ display: flex }} p {{ {name}: {v} }}")) != base_f {
             return true;
         }
@@ -687,7 +698,7 @@ fn fixture_for(name: &str) -> &'static str {
     let n = name.trim_start_matches('-').trim_start_matches("webkit-");
     match () {
         // Props de conteneur flex/grid — `.x` = le conteneur.
-        _ if matches!(
+        () if matches!(
             n,
             "align-content" | "align-items" | "justify-content"
                 | "place-content" | "place-items" | "gap" | "row-gap" | "column-gap"
@@ -702,7 +713,7 @@ fn fixture_for(name: &str) -> &'static str {
             "<body><div class=x style=\"display:flex;flex-wrap:wrap;height:200px\"><p style=\"width:100%\">a</p><p>b</p></div></body>"
         }
         // Props d'item dans un conteneur flex — `.x` = l'item.
-        _ if matches!(
+        () if matches!(
             n,
             "align-self" | "order" | "flex-grow" | "flex-shrink" | "flex-basis"
                 | "justify-self" | "grid-column" | "grid-row" | "grid-column-start"
@@ -713,7 +724,7 @@ fn fixture_for(name: &str) -> &'static str {
         }
         // Formulaires — `accent-color`, `caret-color`, `appearance`,
         // `cursor`, `field-sizing`… n'ont d'effet que sur contrôle.
-        _ if matches!(
+        () if matches!(
             n,
             "accent-color" | "caret-color" | "appearance" | "field-sizing"
                 | "user-select" | "pointer-events"
@@ -722,11 +733,11 @@ fn fixture_for(name: &str) -> &'static str {
             "<body><div><input class=x type=checkbox checked></div></body>"
         }
         // Listes — `list-style-*`, `counter-*`.
-        _ if n.starts_with("list-style") || n.starts_with("counter") => {
+        () if n.starts_with("list-style") || n.starts_with("counter") => {
             "<body><ol><li class=x>a</li><li>b</li></ol></body>"
         }
         // Multi-colonnes — `column-count`/`column-width`/…
-        _ if n.starts_with("column-") || n == "columns" => {
+        () if n.starts_with("column-") || n == "columns" => {
             "<body><div class=x><p>a</p><p>b</p></div></body>"
         }
         // Boîte à dimensions fixes — `position`, `inset`,
@@ -734,7 +745,7 @@ fn fixture_for(name: &str) -> &'static str {
         // `clip-*`, `background-*`, `mask-*` : un box 100×80
         // suffit (les effets position/sizing/visibilité sont
         // mesurables).
-        _ if matches!(
+        () if matches!(
             n,
             "position" | "top" | "right" | "bottom" | "left" | "inset"
                 | "z-index" | "transform" | "transform-origin" | "transform-style"
@@ -756,7 +767,7 @@ fn fixture_for(name: &str) -> &'static str {
         // `word-*`, `line-*`, `font-*`, `text-wrap`,
         // `hyphens`, `text-transform`, `letter/word-spacing` :
         // la ligne wrappe ou se mesure différemment.
-        _ if n.starts_with("text-")
+        () if n.starts_with("text-")
             || n.starts_with("font-")
             || n.starts_with("letter-")
             || n.starts_with("line-")
@@ -772,7 +783,7 @@ fn fixture_for(name: &str) -> &'static str {
             "<body><div><p class=x style=\"width:80px\">un deux trois quatre cinq</p></div></body>"
         }
         // Défaut — `<p>` dans `<div>` (texte, box, décorations).
-        _ => "<body><div><p class=x>ok</p></div></body>",
+        () => "<body><div><p class=x>ok</p></div></body>",
     }
 }
 
@@ -809,7 +820,295 @@ fn prop_affects_decl(decl: &str) -> bool {
     sig(&format!(".x {{ {}: {} }}", name, value.trim())) != sig(".x {}")
 }
 
-fn walk_any(n: explorer_dom::NodeId, dom: &explorer_dom::Dom, out: &mut Option<explorer_dom::NodeId>) {
+/// `check html` — oracle de comportement par élément
+/// (`bcd.html.elements`, étape 219). « Le tag parse » est
+/// trivial (toute balise produit un élément) : la jauge
+/// combine trois mesures par tag —
+///   1. **interface JS** : `document.createElement(tag)`
+///      est `instanceof` de l'interface spec (`HTMLDialog-
+///      Element`, `HTMLTemplateElement`…, défaut
+///      `HTMLElement`) ;
+///   2. **membres IDL clés** : `showModal`, `content`,
+///      `value`… présents sur l'élément ;
+///   3. **géométrie UA** : le box tree (feuille `UA_CSS`
+///      incluse par `StyleEngine::new`) montre l'effet
+///      attendu — boîte produite, `list-item`, `display:none`
+///      des éléments inertes, contenu replié (`details` sans
+///      `open`) ou promu (`slot` → `display:contents`).
+///
+/// Table `tag → assertion` artisanale : BCD fournit le
+/// dénominateur, chaque ligne mesure un vrai comportement.
+#[derive(Clone, Copy)]
+enum HtmlWant {
+    /// Une boîte nommée `<tag>` existe dans le dump.
+    Renders,
+    /// L'élément produit une boîte `list-item`.
+    ListItem,
+    /// Aucune boîte `<tag>` — `display:none` UA (script,
+    /// style, title, meta, link, source, template…).
+    Hidden,
+    /// Boîte `<tag>` présente mais le texte fils replié
+    /// (`details` sans `open`).
+    Collapsed(&'static str),
+    /// Pas de boîte `<tag>` mais le texte enfant promu dans
+    /// le flux (`slot` → `display:contents` UA).
+    Contents(&'static str),
+}
+
+/// Assertion d'un élément : interface JS attendue,
+/// expression IDL supplémentaire (sur `el`, conjointe),
+/// fixture HTML et attente géométrique.
+struct HtmlSpec {
+    ctor: &'static str,
+    extra: &'static str,
+    fixture: Option<&'static str>,
+    want: HtmlWant,
+}
+
+const fn hs(
+    ctor: &'static str,
+    extra: &'static str,
+    fixture: Option<&'static str>,
+    want: HtmlWant,
+) -> HtmlSpec {
+    HtmlSpec {
+        ctor,
+        extra,
+        fixture,
+        want,
+    }
+}
+
+/// Table `tag → assertion` — les interfaces viennent de la
+/// spec HTML (oracle indépendant de `tag_interface`), les
+/// membres IDL des propriétés qui distinguent un élément
+/// réel d'un conteneur générique. Les éléments non listés
+/// tombent sur le défaut « `HTMLElement` + boîte rendue »
+/// (conteneurs sans sémantique propre : `div`, `section`,
+/// `article`… — inclus au dénominateur, triviaux).
+#[allow(clippy::too_many_lines)]
+fn html_spec(tag: &str) -> HtmlSpec {
+    use HtmlWant::{Collapsed, Contents, Hidden, ListItem, Renders};
+    match tag {
+        "a" => hs("HTMLAnchorElement", "'href' in el", None, Renders),
+        "area" => hs("HTMLAreaElement", "true",
+            Some("<body><map name=m><area href=x></map></body>"), Hidden),
+        "audio" => hs("HTMLAudioElement", "true",
+            Some("<body><audio></audio></body>"), Hidden),
+        "base" => hs("HTMLBaseElement", "true", None, Hidden),
+        "blockquote" | "q" => hs("HTMLQuoteElement", "true", None, Renders),
+        "body" => hs("HTMLBodyElement", "true",
+            Some("<body><p>ok</p></body>"), Renders),
+        "br" => hs("HTMLBRElement", "true",
+            Some("<body><p>a<br>b</p></body>"), Renders),
+        "button" => hs("HTMLButtonElement", "'disabled' in el && 'value' in el",
+            None, Renders),
+        "canvas" => hs("HTMLCanvasElement", "true", None, Renders),
+        "caption" => hs("HTMLTableCaptionElement", "true",
+            Some("<body><table><caption>ok</caption><tr><td>c</td></tr></table></body>"),
+            Renders),
+        "col" | "colgroup" => hs("HTMLTableColElement", "true",
+            Some("<body><table><colgroup><col></colgroup><tr><td>c</td></tr></table></body>"),
+            Renders),
+        "data" => hs("HTMLDataElement", "'value' in el", None, Renders),
+        "datalist" => hs("HTMLDataListElement", "true", None, Hidden),
+        "del" | "ins" => hs("HTMLModElement", "true", None, Renders),
+        // Replié sans `open` — UA `details:not([open]) >
+        // :not(summary) { display: none }`.
+        "details" => hs("HTMLDetailsElement", "true",
+            Some("<body><details><summary>voir</summary><p>HIDEME</p></details></body>"),
+            Collapsed("HIDEME")),
+        "dialog" => hs("HTMLDialogElement",
+            "typeof el.showModal === 'function' && typeof el.close === 'function'",
+            Some("<body><dialog><p>HIDEME</p></dialog></body>"), Hidden),
+        "dir" => hs("HTMLDirectoryElement", "true", None, Renders),
+        "embed" => hs("HTMLEmbedElement", "true", None, Renders),
+        "fencedframe" => hs("HTMLFencedFrameElement", "true", None, Renders),
+        "fieldset" => hs("HTMLFieldSetElement", "true", None, Renders),
+        "font" => hs("HTMLFontElement", "true", None, Renders),
+        "form" => hs("HTMLFormElement", "'method' in el", None, Renders),
+        "h1" | "h2" | "h3" | "h4" | "h5" | "h6" =>
+            hs("HTMLHeadingElement", "true", None, Renders),
+        "head" => hs("HTMLHeadElement", "true",
+            Some("<body><p>ok</p></body>"), Hidden),
+        "hr" => hs("HTMLHRElement", "true", None, Renders),
+        "html" => hs("HTMLHtmlElement", "true",
+            Some("<body><p>ok</p></body>"), Renders),
+        "iframe" => hs("HTMLIFrameElement", "'src' in el", None, Renders),
+        "img" => hs("HTMLImageElement", "'src' in el && 'alt' in el",
+            Some("<body><img alt=x></body>"), Renders),
+        "input" => hs("HTMLInputElement", "'value' in el && 'checked' in el",
+            Some("<body><input type=checkbox></body>"), Renders),
+        "label" => hs("HTMLLabelElement", "true", None, Renders),
+        "legend" => hs("HTMLLegendElement", "true",
+            Some("<body><fieldset><legend>ok</legend></fieldset></body>"), Renders),
+        "li" => hs("HTMLLIElement", "true",
+            Some("<body><ul><li>ok</li></ul></body>"), ListItem),
+        "link" => hs("HTMLLinkElement", "true", None, Hidden),
+        "map" => hs("HTMLMapElement", "true", None, Renders),
+        "marquee" => hs("HTMLMarqueeElement", "true", None, Renders),
+        "menu" => hs("HTMLMenuElement", "true",
+            Some("<body><menu><li>ok</li></menu></body>"), Renders),
+        "meta" => hs("HTMLMetaElement", "true", None, Hidden),
+        "meter" => hs("HTMLMeterElement", "true", None, Renders),
+        "object" => hs("HTMLObjectElement", "true", None, Renders),
+        "ol" => hs("HTMLOListElement", "true",
+            Some("<body><ol><li>ok</li></ol></body>"), Renders),
+        // `option`/`optgroup` ne génèrent pas de boîte
+        // propre — le `<select>` peint le libellé de
+        // l'option courante dans son contrôle.
+        "optgroup" => hs("HTMLOptGroupElement", "true",
+            Some("<body><select><optgroup><option>OPTME</option></optgroup></select></body>"),
+            Contents("OPTME")),
+        "option" => hs("HTMLOptionElement", "'value' in el",
+            Some("<body><select><option>OPTME</option></select></body>"), Contents("OPTME")),
+        "output" => hs("HTMLOutputElement", "true", None, Renders),
+        "p" => hs("HTMLParagraphElement", "true", None, Renders),
+        "param" => hs("HTMLParamElement", "true", None, Hidden),
+        "picture" => hs("HTMLPictureElement", "true",
+            Some("<body><picture><img alt=x></picture></body>"), Renders),
+        "pre" => hs("HTMLPreElement", "true", None, Renders),
+        "progress" => hs("HTMLProgressElement", "'value' in el", None, Renders),
+        "script" => hs("HTMLScriptElement", "true", None, Hidden),
+        "select" => hs("HTMLSelectElement", "'value' in el",
+            Some("<body><select><option>o</option></select></body>"), Renders),
+        // `display:contents` UA — pas de boîte propre, le
+        // repli est promu dans le flux.
+        "slot" => hs("HTMLSlotElement", "true", None, Contents("ok")),
+        "source" => hs("HTMLSourceElement", "true", None, Hidden),
+        "span" => hs("HTMLSpanElement", "true", None, Renders),
+        "style" => hs("HTMLStyleElement", "true", None, Hidden),
+        "table" => hs("HTMLTableElement", "true",
+            Some("<body><table><tr><td>ok</td></tr></table></body>"), Renders),
+        "tbody" => hs("HTMLTableSectionElement", "true",
+            Some("<body><table><tbody><tr><td>ok</td></tr></tbody></table></body>"),
+            Renders),
+        "thead" => hs("HTMLTableSectionElement", "true",
+            Some("<body><table><thead><tr><th>h</th></tr></thead><tr><td>ok</td></tr></table></body>"),
+            Renders),
+        "tfoot" => hs("HTMLTableSectionElement", "true",
+            Some("<body><table><tfoot><tr><td>f</td></tr></tfoot><tr><td>ok</td></tr></table></body>"),
+            Renders),
+        "td" => hs("HTMLTableCellElement", "true",
+            Some("<body><table><tr><td>ok</td></tr></table></body>"), Renders),
+        "th" => hs("HTMLTableCellElement", "true",
+            Some("<body><table><tr><th>ok</th></tr></table></body>"), Renders),
+        // `.content` = DocumentFragment distinct ; les
+        // enfants du template n'appartiennent pas au DOM
+        // rendu (`display:none` UA de toute façon).
+        "template" => hs("HTMLTemplateElement",
+            "el.content instanceof DocumentFragment",
+            Some("<body><template><p>HIDEME</p></template></body>"), Hidden),
+        "textarea" => hs("HTMLTextAreaElement", "'value' in el", None, Renders),
+        "time" => hs("HTMLTimeElement", "'dateTime' in el", None, Renders),
+        "title" => hs("HTMLTitleElement", "true", None, Hidden),
+        "tr" => hs("HTMLTableRowElement", "true",
+            Some("<body><table><tr><td>ok</td></tr></table></body>"), Renders),
+        "track" => hs("HTMLTrackElement", "true", None, Hidden),
+        "ul" => hs("HTMLUListElement", "true",
+            Some("<body><ul><li>ok</li></ul></body>"), Renders),
+        "video" => hs("HTMLVideoElement", "true", None, Renders),
+        "wbr" => hs("HTMLElement", "true",
+            Some("<body><p>a<wbr>b</p></body>"), Renders),
+        // Conteneur générique — seule jauge honnête :
+        // interface `HTMLElement` + boîte produite.
+        _ => hs("HTMLElement", "true", None, Renders),
+    }
+}
+
+/// Dump du box tree d'une fixture (feuille UA comprise) —
+/// sondage géométrique partagé avec `prop_affects_decl`.
+fn html_box_dump(fixture: &str) -> String {
+    let dom = explorer_html::TreeBuilder::parse(fixture);
+    let root = {
+        let mut r = None;
+        walk_any(dom.document(), &dom, &mut r);
+        r.unwrap_or(dom.document())
+    };
+    let eng = explorer_css::StyleEngine::new();
+    let sm = eng.compute_tree(&dom, root, &explorer_css::StyleEnv::default());
+    match explorer_layout::build_box_tree(&dom, root, &sm) {
+        Some(mut bx) => {
+            explorer_layout::layout_tree(&mut bx, 800.0, &explorer_layout::BlockCtx::default());
+            bx.dump(&dom)
+        }
+        None => String::new(),
+    }
+}
+
+fn html_want_ok(dump: &str, tag: &str, want: HtmlWant) -> bool {
+    let pat = format!("<{tag}");
+    match want {
+        HtmlWant::Renders => dump.contains(&pat),
+        HtmlWant::Hidden => !dump.contains(&pat),
+        HtmlWant::ListItem => dump
+            .lines()
+            .any(|l| l.contains("list-item") && l.contains(&pat)),
+        HtmlWant::Collapsed(text) => dump.contains(&pat) && !dump.contains(text),
+        HtmlWant::Contents(text) => !dump.contains(&pat) && dump.contains(text),
+    }
+}
+
+/// Canal JS de `check html` — un moteur avec la surface
+/// navigateur (`install_dom`), une expression de sonde par
+/// tag passant par `console.log` (canal capturé, pas de
+/// parsing de `Value`).
+struct HtmlJsProbe {
+    eng: explorer_jscore::Engine,
+    out: std::rc::Rc<std::cell::RefCell<Vec<String>>>,
+}
+
+impl HtmlJsProbe {
+    fn new() -> Self {
+        let mut eng = explorer_jscore::Engine::new();
+        let dom = std::rc::Rc::new(std::cell::RefCell::new(explorer_jscore::Dom::from_html(
+            "<!doctype html><body></body>",
+        )));
+        eng.install_dom(&dom);
+        let out = std::rc::Rc::new(std::cell::RefCell::new(Vec::new()));
+        let o = out.clone();
+        eng.set_console_hook(std::rc::Rc::new(move |l| o.borrow_mut().push(l)));
+        Self { eng, out }
+    }
+
+    /// `createElement(tag) instanceof ctor && extra` — un
+    /// ctor absent du global (`HTMLFencedFrameElement`…)
+    /// jette `ReferenceError` = miss honnête.
+    fn ok(&mut self, tag: &str, spec: &HtmlSpec) -> bool {
+        self.out.borrow_mut().clear();
+        let src = format!(
+            "console.log(function(){{var el=document.createElement({tag:?});\
+             return el instanceof {} && ({})}}()?'ok':'miss')",
+            spec.ctor, spec.extra
+        );
+        if self.eng.eval_named(&src, "check-html").is_err() {
+            return false;
+        }
+        self.out.borrow().last().is_some_and(|l| l.trim() == "ok")
+    }
+}
+
+fn html_check(tag: &str, cell: &std::cell::RefCell<Option<HtmlJsProbe>>) -> bool {
+    let tag = tag.trim().to_ascii_lowercase();
+    let spec = html_spec(&tag);
+    let js_ok = {
+        let mut g = cell.borrow_mut();
+        g.get_or_insert_with(HtmlJsProbe::new).ok(&tag, &spec)
+    };
+    if !js_ok {
+        return false;
+    }
+    let fixture = spec
+        .fixture
+        .map_or_else(|| format!("<body><{tag}>ok</{tag}></body>"), str::to_string);
+    html_want_ok(&html_box_dump(&fixture), &tag, spec.want)
+}
+
+fn walk_any(
+    n: explorer_dom::NodeId,
+    dom: &explorer_dom::Dom,
+    out: &mut Option<explorer_dom::NodeId>,
+) {
     if dom.element(n).is_ok() && out.is_none() {
         *out = Some(n);
     }
@@ -832,15 +1131,24 @@ fn check_names(kind: &str) -> ExitCode {
         // stocke les inconnus) ; `affects` : la géométrie
         // change-t-elle (jauge non-saturante).
         "routed" => {
-            routed_dom = explorer_html::TreeBuilder::parse(
-                "<body><p class=x>ok</p></body>",
-            );
+            routed_dom = explorer_html::TreeBuilder::parse("<body><p class=x>ok</p></body>");
             Box::new(move |name| explorer_css::prop_routed(&routed_dom, name))
         }
         "affects" => Box::new(prop_affects),
         "affectsv" => Box::new(prop_affects_decl),
+        // Étape 219 — `html` : oracle de comportement par
+        // élément (`bcd.html.elements`) — binding JS
+        // (interface + membres IDL) ET géométrie UA (box
+        // tree) ; un moteur jscore partagé, créé à la
+        // première ligne sondée.
+        "html" => {
+            let cell = std::cell::RefCell::new(None);
+            Box::new(move |tag| html_check(tag, &cell))
+        }
         _ => {
-            eprintln!("check : kind inconnu {kind:?} — attendu prop|sel|at|routed|affects|affectsv");
+            eprintln!(
+                "check : kind inconnu {kind:?} — attendu prop|sel|at|routed|affects|affectsv|html"
+            );
             return ExitCode::FAILURE;
         }
     };

@@ -6,6 +6,7 @@
     "css.at": 20,
     "js.builtins": 648,
     "api": 801,
-    "css.values": 365
+    "css.values": 365,
+    "html.elem": 115
   }
 }

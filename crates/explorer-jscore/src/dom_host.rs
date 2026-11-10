@@ -10361,7 +10361,7 @@ pub(crate) fn node_for_in(e: &mut Engine, v: Value, dom: &DomRef) -> Option<Node
     shady_unwrap_in(e, v.clone(), dom)
 }
 
-/// Wrapper ShadyDOM (`webcomponents-sd`, youtube) :
+/// Wrapper `ShadyDOM` (`webcomponents-sd`, youtube) :
 /// `ShadyDOM.wrap(nœud)` rend un objet `{node, …}` qui n'est
 /// pas `instanceof Node` — kevlar le repasse tel quel à
 /// `appendChild`/`insertBefore`/`removeChild`/`contains`
