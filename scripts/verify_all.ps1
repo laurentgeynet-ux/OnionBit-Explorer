@@ -19,6 +19,20 @@ Step 'cargo clippy --workspace --all-targets' { cargo clippy --workspace --all-t
 Step 'cargo test --workspace'                { cargo test --workspace }
 Step 'cargo doc --workspace --no-deps'       { cargo doc --workspace --no-deps }
 
+# Cliquet BCD (ADR-0010) — les scores ne doivent jamais
+# descendre sous scripts/bcd_baseline.json. Sauté si la
+# dépendance @mdn/browser-compat-data n'est pas installée
+# (`npm i` dans scripts/).
+if (Test-Path 'scripts/node_modules/@mdn/browser-compat-data/package.json') {
+    Step 'cargo build explorer-cli' { cargo build -p explorer-cli }
+    Step 'cliquet BCD (--gate)' {
+        $cli = Get-ChildItem "$env:CARGO_TARGET_DIR\explorer-cli.exe" -Recurse -ErrorAction SilentlyContinue |
+            Select-Object -First 1 -ExpandProperty FullName
+        if (-not $cli) { $cli = "target\debug\explorer-cli.exe" }
+        node scripts/bcd_coverage.mjs --cli $cli --gate scripts/bcd_baseline.json
+    }
+}
+
 if (Test-Path 'app/pubspec.yaml') {
     Push-Location app
     try {

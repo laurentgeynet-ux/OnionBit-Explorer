@@ -729,6 +729,48 @@ fn fixture_for(name: &str) -> &'static str {
         _ if n.starts_with("column-") || n == "columns" => {
             "<body><div class=x><p>a</p><p>b</p></div></body>"
         }
+        // Boîte à dimensions fixes — `position`, `inset`,
+        // `transform`, `overflow`, `scroll-snap`, `contain`,
+        // `clip-*`, `background-*`, `mask-*` : un box 100×80
+        // suffit (les effets position/sizing/visibilité sont
+        // mesurables).
+        _ if matches!(
+            n,
+            "position" | "top" | "right" | "bottom" | "left" | "inset"
+                | "z-index" | "transform" | "transform-origin" | "transform-style"
+                | "transform-box" | "perspective" | "backface-visibility"
+                | "overflow" | "overflow-x" | "overflow-y" | "overflow-block"
+                | "overflow-inline" | "scroll-snap-type" | "scroll-snap-align"
+                | "scroll-margin" | "scroll-padding" | "contain" | "contain-intrinsic-size"
+                | "contain-intrinsic-width" | "contain-intrinsic-height" | "content-visibility"
+                | "clip" | "clip-path" | "visibility" | "opacity" | "filter"
+                | "mix-blend-mode" | "isolation" | "box-shadow" | "box-sizing"
+                | "background-clip" | "background-origin" | "background-size"
+                | "background-position" | "background-repeat" | "background-attachment"
+                | "background-blend-mode" | "object-fit" | "object-position"
+        ) =>
+        {
+            "<body><div class=x style=\"width:100px;height:80px;background:blue\"><p>a</p></div></body>"
+        }
+        // Texte multi-mots — `text-*`, `white-space`,
+        // `word-*`, `line-*`, `font-*`, `text-wrap`,
+        // `hyphens`, `text-transform`, `letter/word-spacing` :
+        // la ligne wrappe ou se mesure différemment.
+        _ if n.starts_with("text-")
+            || n.starts_with("font-")
+            || n.starts_with("letter-")
+            || n.starts_with("line-")
+            || n.starts_with("word-")
+            || n.starts_with("white-")
+            || n.starts_with("tab-")
+            || matches!(
+                n,
+                "direction" | "unicode-bidi" | "writing-mode" | "text-orientation"
+                    | "hyphens" | "text-transform" | "font" | "quotes" | "text-indent"
+            ) =>
+        {
+            "<body><div><p class=x style=\"width:80px\">un deux trois quatre cinq</p></div></body>"
+        }
         // Défaut — `<p>` dans `<div>` (texte, box, décorations).
         _ => "<body><div><p class=x>ok</p></div></body>",
     }
