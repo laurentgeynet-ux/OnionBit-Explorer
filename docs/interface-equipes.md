@@ -1287,3 +1287,10 @@ sérialisée à la collecte — les décls de la règle ne
 s'appliquent qu'en débordement). `position-try-order` +
 tri multi-fallbacks = même passe.
 
+
+## NAV — cran 23 : mismatch exact — `ytd-page-manager` = `zc` au lieu de `Ae`
+
+- Mesure live (vol 9518) : `ytd-app`.pc = **`d`** (suite complète : `store`/`set`/`onPageDataFetched`/`dataUpdatePromise`/`updateMastheadData`/`computeTopbarData`/`bindCb`/`updateRenderGuideFromBinding`/`updateGuide*`) — correcte. `ytd-masthead`/renderers/`yt-icon-button` = `zc` (`dom`-fragment — `stamp*`/`_renderSelf`/`renderJobsMap_` — correct pour eux). **`ytd-page-manager` = `zc`** — mais sa famille attendue = `Ae`/`YC`/`_.LA` (`getCurrentPage`/`currentPage`/`pagePool`/`setActivePage`/`startLoadingShorts`/`isOnWatch`/`getCurrentData`/`store`/`getState`/`dispatch`/`useSignals`/`updateReduxProperties`/`beforeRegister`/`attached`/`detached`/`recomputeReduxSelector`/`behaviors`/`properties`) — **un seul tag mal mappé**.
+- `ytd-browse`/`ytd-mini-guide`/`tp-yt-paper-tooltip` = `nopc` — pc jamais créé (chemin d'attache différent/lazy).
+- Effet domino nommé : `ytd-app.onPageDataUpdated` → `pageManager.getCurrentPage()` → `TypeError (on zc)` → `topbarData`/`data` jamais calculée → `updateMastheadData`/`bindCb` jamais livrée → `stamp*`/`_renderSelf`/`renderJobsMap_` du masthead idle → contenu vide → `home-page-skeleton`/`masthead-finish` jamais.
+- Levier : `xrN["ytd-page-manager"].ctor`/`TLo`/`CAf`/`hSd`/`a_1`/`ucV` — le `ctor`/`brX`/`Ae`-mixin assigné à `page-manager` devait être `Ae`/`YC`/`_.LA` ; `zc`/`_.ke`/`PFB` a été livré — branche d'enregistrement `u.ctor`/`ctor`/`z4R`/`behaviors`/`k` fautive pour ce tag (ou `_.ke`/`PFB` devait recevoir la suite `Ae` via `ZuN`/`kBo`/`behaviors`/`Object.assign`/`_.L=`/`_.OP`/`mix`/`jna` — passe non courue).
