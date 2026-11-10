@@ -1568,6 +1568,167 @@ fn promise_all_fulfill(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Va
     Ok(Value::Undefined)
 }
 
+// -- `allKeyed` / `allSettledKeyed` (proposal ES2026) ----------------------
+// Même mécanique `remaining`/`results` que `all`/`allSettled`,
+// mais la source et le résultat sont des **objets** `{k: v}` —
+// `bound = [state, clé str]` au lieu de l'index.
+
+/// `Promise.allKeyed(obj)` — `all` sur un objet : chaque clé =
+/// une promesse → résout `{k: valeur}`. Rejette au premier
+/// échec (comme `all`).
+fn promise_all_keyed(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
+    let Value::Obj(src) = arg(args, 0) else {
+        return Err(e.type_error("Promise.allKeyed expects an object"));
+    };
+    let keys = e.own_keys(src);
+    let id = e.new_promise();
+    let results = e.new_object();
+    if keys.is_empty() {
+        e.resolve_promise(id, Value::Obj(results));
+        return Ok(Value::Obj(id));
+    }
+    let state = e.new_object();
+    e.set_own(state, "remaining", Value::Num(keys.len() as f64), false);
+    e.set_own(state, "results", Value::Obj(results), false);
+    e.set_own(state, "target", Value::Obj(id), false);
+    for k in keys {
+        let v = e.get_prop(src, &k).unwrap_or(Value::Undefined);
+        let pv = if e.is_promise(v.clone()) {
+            v
+        } else {
+            let pid = e.new_promise();
+            e.resolve_promise(pid, v);
+            Value::Obj(pid)
+        };
+        let key_v = e.str_val(k);
+        let on_f = e.bound_native(
+            "allKeyed",
+            promise_all_keyed_fulfill,
+            vec![Value::Obj(state), key_v],
+        );
+        let on_r = {
+            let Some(o) = e.heap.obj(id) else { continue };
+            let ObjKind::Promise(p) = &o.kind else {
+                continue;
+            };
+            p.reject_fn.clone()
+        };
+        promise_then(e, pv, &[on_f, on_r])?;
+    }
+    Ok(Value::Obj(id))
+}
+
+/// `allKeyed` fulfill — `bound = [state, key]`, écrit
+/// `results[key] = v` et résout quand `remaining` atteint 0.
+fn promise_all_keyed_fulfill(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
+    let Some(Value::Obj(state)) = args.first().cloned() else {
+        return Err(e.type_error("allKeyed: missing state"));
+    };
+    let k = e.to_js_string(args.get(1).cloned().unwrap_or(Value::Undefined))?;
+    let v = args.get(2).cloned().unwrap_or(Value::Undefined);
+    let (results, target) = (
+        e.get_prop(state, "results").unwrap_or(Value::Undefined),
+        e.get_prop(state, "target").unwrap_or(Value::Undefined),
+    );
+    if let (Value::Obj(rid), Value::Obj(tid)) = (&results, &target) {
+        e.set_own(*rid, &k, v, true);
+        let rem = e
+            .get_prop(state, "remaining")
+            .map_or(1.0, |v| e.to_number(v).unwrap_or(1.0))
+            - 1.0;
+        e.set_own(state, "remaining", Value::Num(rem), false);
+        if rem <= 0.0 {
+            e.resolve_promise(*tid, results);
+        }
+    }
+    Ok(Value::Undefined)
+}
+
+/// `Promise.allSettledKeyed(obj)` — `allSettled` sur objet :
+/// résout `{k: {status, value|reason}}`, jamais de rejet.
+fn promise_all_settled_keyed(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
+    let Value::Obj(src) = arg(args, 0) else {
+        return Err(e.type_error("Promise.allSettledKeyed expects an object"));
+    };
+    let keys = e.own_keys(src);
+    let id = e.new_promise();
+    let results = e.new_object();
+    if keys.is_empty() {
+        e.resolve_promise(id, Value::Obj(results));
+        return Ok(Value::Obj(id));
+    }
+    let state = e.new_object();
+    e.set_own(state, "remaining", Value::Num(keys.len() as f64), false);
+    e.set_own(state, "results", Value::Obj(results), false);
+    e.set_own(state, "target", Value::Obj(id), false);
+    for k in keys {
+        let v = e.get_prop(src, &k).unwrap_or(Value::Undefined);
+        let pv = if e.is_promise(v.clone()) {
+            v
+        } else {
+            let pid = e.new_promise();
+            e.resolve_promise(pid, v);
+            Value::Obj(pid)
+        };
+        let k_v = e.str_val(k);
+        let on_f = e.bound_native(
+            "allSettledKeyed",
+            promise_all_settled_keyed_ok,
+            vec![Value::Obj(state), k_v.clone()],
+        );
+        let on_r = e.bound_native(
+            "allSettledKeyed",
+            promise_all_settled_keyed_err,
+            vec![Value::Obj(state), k_v],
+        );
+        promise_then(e, pv, &[on_f, on_r])?;
+    }
+    Ok(Value::Obj(id))
+}
+
+/// Slot `allSettledKeyed` — `bound = [state, key]` ; `slot_key`
+/// choisit `value` vs `reason`.
+fn all_settled_keyed_slot(e: &mut Engine, args: &[Value], slot_key: &'static str) -> JsResult<()> {
+    let Some(Value::Obj(state)) = args.first().cloned() else {
+        return Err(e.type_error("allSettledKeyed: missing state"));
+    };
+    let k = e.to_js_string(args.get(1).cloned().unwrap_or(Value::Undefined))?;
+    let v = args.get(2).cloned().unwrap_or(Value::Undefined);
+    let slot = e.new_object();
+    let status = e.str_val(if slot_key == "value" {
+        "fulfilled"
+    } else {
+        "rejected"
+    });
+    e.set_own(slot, "status", status, true);
+    e.set_own(slot, slot_key, v, true);
+    let (results, target) = (
+        e.get_prop(state, "results").unwrap_or(Value::Undefined),
+        e.get_prop(state, "target").unwrap_or(Value::Undefined),
+    );
+    if let (Value::Obj(rid), Value::Obj(tid)) = (&results, &target) {
+        e.set_own(*rid, &k, Value::Obj(slot), true);
+        let rem = e
+            .get_prop(state, "remaining")
+            .map_or(1.0, |v| e.to_number(v).unwrap_or(1.0))
+            - 1.0;
+        e.set_own(state, "remaining", Value::Num(rem), false);
+        if rem <= 0.0 {
+            e.resolve_promise(*tid, results);
+        }
+    }
+    Ok(())
+}
+
+fn promise_all_settled_keyed_ok(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
+    all_settled_keyed_slot(e, args, "value")?;
+    Ok(Value::Undefined)
+}
+fn promise_all_settled_keyed_err(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
+    all_settled_keyed_slot(e, args, "reason")?;
+    Ok(Value::Undefined)
+}
+
 /// `Promise.race(iter)` — first settle wins.
 fn promise_race(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
     let vals = iter_values(e, arg(args, 0))?;
@@ -1866,8 +2027,10 @@ pub(crate) fn install(e: &mut Engine) {
         e.add_method(cid, "resolve", promise_static_resolve);
         e.add_method(cid, "reject", promise_static_reject);
         e.add_method(cid, "all", promise_all);
+        e.add_method(cid, "allKeyed", promise_all_keyed);
         e.add_method(cid, "race", promise_race);
         e.add_method(cid, "allSettled", promise_all_settled);
+        e.add_method(cid, "allSettledKeyed", promise_all_settled_keyed);
         e.add_method(cid, "any", promise_any);
         e.add_method(cid, "withResolvers", promise_with_resolvers);
         e.add_method(cid, "try", promise_try);

@@ -181,6 +181,8 @@ pub(crate) fn install(e: &mut Engine) {
             e.set_own(iid, "prototype", Value::Obj(e.protos.iterator), false);
             e.add_method(iid, "from", iterator_from);
             e.add_method(iid, "concat", iterator_concat);
+            e.add_method(iid, "zip", crate::collections::iterator_zip);
+            e.add_method(iid, "zipKeyed", crate::collections::iterator_zip_keyed);
         }
         e.set_own(e.protos.iterator, "constructor", iter.clone(), false);
         e.set_own(g, "Iterator", iter, false);
@@ -732,6 +734,8 @@ pub(crate) fn install(e: &mut Engine) {
     }
     let op = e.protos.object;
     e.add_method(op, "toString", object_to_string);
+    // Spec : `toLocaleString` délègue à `toString` par défaut.
+    e.add_method(op, "toLocaleString", object_to_string);
     e.add_method(op, "hasOwnProperty", has_own_property);
     e.add_method(op, "valueOf", object_value_of);
     e.add_method(op, "isPrototypeOf", object_is_prototype_of);
@@ -772,10 +776,7 @@ pub(crate) fn install(e: &mut Engine) {
     // (`AddRestrictedFunctionProperties`, interp `fn_obj`) qui
     // masque celui-ci — le `TypeError` spec est préservé.
     {
-        let na = e.native_fn(
-            "restricted_null",
-            crate::builtins::restricted_null_prop,
-        );
+        let na = e.native_fn("restricted_null", crate::builtins::restricted_null_prop);
         if let Some(o) = e.heap.obj_mut(fp) {
             o.set_accessor("caller", na.clone(), na.clone(), false);
             o.set_accessor("arguments", na.clone(), na, false);
@@ -979,6 +980,61 @@ pub(crate) fn install(e: &mut Engine) {
     e.add_method(rp, crate::interp::SYM_REPLACE, re_sym_replace);
     e.add_method(rp, crate::interp::SYM_SEARCH, re_sym_search);
     e.add_method(rp, crate::interp::SYM_SPLIT, re_sym_split);
+    // Accesseurs spec du proto (`'flags' in RegExp.prototype`) —
+    // les instances ne portent plus que `lastIndex` propre.
+    for (n, f, gname) in [
+        (
+            "source",
+            re_source_get as crate::heap::NativeFn,
+            "get source",
+        ),
+        ("flags", re_flags_get as crate::heap::NativeFn, "get flags"),
+        (
+            "global",
+            re_global_get as crate::heap::NativeFn,
+            "get global",
+        ),
+        (
+            "ignoreCase",
+            re_ignore_case_get as crate::heap::NativeFn,
+            "get ignoreCase",
+        ),
+        (
+            "multiline",
+            re_multiline_get as crate::heap::NativeFn,
+            "get multiline",
+        ),
+        (
+            "dotAll",
+            re_dot_all_get as crate::heap::NativeFn,
+            "get dotAll",
+        ),
+        (
+            "sticky",
+            re_sticky_get as crate::heap::NativeFn,
+            "get sticky",
+        ),
+        (
+            "unicode",
+            re_unicode_get as crate::heap::NativeFn,
+            "get unicode",
+        ),
+        (
+            "unicodeSets",
+            re_unicode_sets_get as crate::heap::NativeFn,
+            "get unicodeSets",
+        ),
+        (
+            "hasIndices",
+            re_has_indices_get as crate::heap::NativeFn,
+            "get hasIndices",
+        ),
+    ] {
+        let gf = e.native_fn(gname, f);
+        if let Some(o) = e.heap.obj_mut(rp) {
+            o.set_accessor(n, gf, Value::Undefined, false);
+        }
+    }
     let regexp = ctor(e, "RegExp", regexp_ctor, rp);
     if let Value::Obj(rid) = regexp {
         e.add_method(rid, "escape", regexp_escape);
@@ -1038,6 +1094,7 @@ pub(crate) fn install(e: &mut Engine) {
     // 1900+n (utilisés par du code pré-2000 encore vivant).
     e.add_method(dp, "getYear", date_get_year);
     e.add_method(dp, "setYear", date_set_year);
+    e.add_method(dp, "toTemporalInstant", date_to_temporal_instant);
     e.add_method(dp, "toISOString", date_to_iso);
     e.add_method(dp, "toUTCString", date_to_utc_string);
     e.add_method(dp, "toGMTString", date_to_utc_string);
@@ -1087,6 +1144,9 @@ pub(crate) fn install(e: &mut Engine) {
     e.add_method(math, "sinh", math_sinh);
     e.add_method(math, "cosh", math_cosh);
     e.add_method(math, "tanh", math_tanh);
+    e.add_method(math, "asinh", math_asinh);
+    e.add_method(math, "acosh", math_acosh);
+    e.add_method(math, "atanh", math_atanh);
     e.add_method(math, "hypot", math_hypot);
     e.add_method(math, "imul", math_imul);
     e.add_method(math, "clz32", math_clz32);

@@ -8,6 +8,7 @@
 // Quatre surfaces, un verdict chacune :
 //
 //   props      bcd.css.properties   → `explorer-cli check prop`
+//   routed     bcd.css.properties   → `explorer-cli check routed`
 //   selectors  bcd.css.selectors    → `explorer-cli check sel`
 //   at-rules   bcd.css['at-rules']  → `explorer-cli check at`
 //   builtins   bcd.javascript.builtins (prof. 2) → `eval` jscore
@@ -22,13 +23,18 @@
 //              target/debug/explorer-cli — cargo build -p explorer-cli)
 //   --missing  nb de manques listés par section (défaut 12,
 //              0 = aucun)
-//   --only     une seule surface
+//   --only     une seule surface (props|routed|sel|at|js)
 //
 // Critères (biais documentés) :
 // - props/sel/at : nom *reconnu* (prop_supported /
 //   selector_supported / at_rule_supported — même biais que
 //   `@supports` : la valeur n'est pas type-checkée, un pseudo
 //   dormant compte) → plafond de conformité, pas plancher.
+//   `check prop` sature dès que `SUPPORTED_PROPS` couvre le
+//   catalogue — le critère devient muet (vécu R-243 : 652/652).
+// - routed : déclaration `{name: inherit}` **appliquée** dans
+//   le ComputedStyle — distingue « nommé » de « consommé » ;
+//   c'est le score discriminant une fois `prop` saturé.
 // - builtins : `globalThis.A.b` ou `A.prototype.b` défini dans
 //   le moteur NU (`explorer-cli eval`) — surface langage
 //   seule : les bindings navigateur (fetch, DOM…) vivent en
@@ -112,13 +118,17 @@ function report(label, entries, okSet, note) {
   }
 }
 
-const sections = only ? [only] : ['props', 'sel', 'at', 'js'];
+const sections = only ? [only] : ['props', 'routed', 'sel', 'at', 'js'];
 
 for (const sec of sections) {
   if (sec === 'props') {
     const entries = relevantEntries(bcd.css.properties);
     report('css.prop', entries, checkBatch('prop', entries.map(e => e.name)),
       `sur ${Object.keys(bcd.css.properties).length} clés BCD`);
+  } else if (sec === 'routed') {
+    const entries = relevantEntries(bcd.css.properties);
+    report('css.routed', entries, checkBatch('routed', entries.map(e => e.name)),
+      'déclaration appliquée — score discriminant post-saturation `prop`');
   } else if (sec === 'sel') {
     const entries = relevantEntries(bcd.css.selectors ?? {});
     report('css.sel', entries, checkBatch('sel', entries.map(e => e.name)),
@@ -152,20 +162,119 @@ for (const sec of sections) {
         tests.push({ name: `${a}.${b}`, cand });
       }
     }
+    // Intégration hôte non observable en moteur nu (cf. F/B plus
+    // bas) — retirée du dénominateur, annoncée dans la note.
+    const EXCLUDED = new Set(['Promise.incumbent_settings_object_tracking']);
+    const excludedNames = tests.filter(t => EXCLUDED.has(t.name)).map(t => t.name);
+    const kept = tests.filter(t => !EXCLUDED.has(t.name));
+    tests.length = 0;
+    tests.push(...kept);
     // Un script unique : `chk` descend le chemin, `ok`/`miss`
-    // par test — langage ES5 volontaire (cible = jscore).
+    // par test. Deux corrections de mesure (biais documentés) :
+    //
+    // - `B` : bases *abstraites* jamais exposées en global par
+    //   la spec (`%TypedArray%`, `%GeneratorPrototype%`,
+    //   `GeneratorFunction`, `AsyncFunction`, `%AsyncIteratorPrototype%`…)
+    //   — `typeof TypedArray === "undefined"` même sous V8.
+    //   La sonde les atteint par leur chemin spec, sinon elles
+    //   compteraient miss pour toujours sans rien mesurer.
+    // - `F` : sous-features BCD qui ne sont PAS des propriétés
+    //   (`Error.cause`, `serializable_object`,
+    //   `key_equality_for_zeros`, `unicode_code_point_escapes`…)
+    //   — testées *comportementalement* : la fonctionnalité
+    //   doit exister et marcher, pas seulement être nommée.
+    //
+    // `EXCLUDED` : sous-features d'intégration hôte (HTML spec)
+    // non testables dans le moteur nu — hors dénominateur,
+    // listées dans la note du rapport.
+    const BEHAVIOR = {
+      'AggregateError.errors':
+        'new AggregateError([1,2],"m").errors.length===2',
+      'AggregateError.serializable_object':
+        'structuredClone(new AggregateError([1],"m")) instanceof AggregateError',
+      'Atomics.Atomic_operations_on_non_shared_buffers':
+        '(function(){var t=new Int32Array(new ArrayBuffer(8));Atomics.store(t,1,7);return Atomics.add(t,1,3)===7&&Atomics.load(t,1)===10})()',
+      'Date.toTemporalInstant':
+        'new Date(0).toTemporalInstant().epochMilliseconds===0',
+      'Error.cause': 'new Error("x",{cause:7}).cause===7',
+      'Error.serializable_object':
+        'structuredClone(new Error("m")) instanceof Error',
+      'EvalError.serializable_object':
+        'structuredClone(new EvalError("m")) instanceof EvalError',
+      'Intl.Segments':
+        'new Intl.Segmenter("en",{granularity:"word"}).segment("a b").containing(0).index===0',
+      'JSON.json_superset':
+        'JSON.parse("\\"\\\\u2028\\"").charCodeAt(0)===0x2028',
+      'Map.key_equality_for_zeros':
+        'new Map().set(-0,1).get(0)===1',
+      'parseInt.leading_zero_strings_as_decimal':
+        'parseInt("08")===8',
+      'RangeError.serializable_object':
+        'structuredClone(new RangeError("m")) instanceof RangeError',
+      'ReferenceError.serializable_object':
+        'structuredClone(new ReferenceError("m")) instanceof ReferenceError',
+      'RegExp.lastIndex':
+        '(function(){var r=/a/g;r.lastIndex=3;return r.lastIndex===3})()',
+      'Set.key_equality_for_zeros':
+        '(function(){var s=new Set();s.add(-0);return s.has(0)})()',
+      'String.unicode_code_point_escapes': "'\\u{1F600}'.length===2",
+      // `typeof globalThis.undefined` no puede distinguir nada —
+      // la presencia se verifica como binding global real.
+      'undefined': 'typeof undefined==="undefined"',
+      'SuppressedError.error':
+        'new SuppressedError(1,2,"m").error===1',
+      'SuppressedError.suppressed':
+        'new SuppressedError(1,2,"m").suppressed===2',
+      'SyntaxError.serializable_object':
+        'structuredClone(new SyntaxError("m")) instanceof SyntaxError',
+      'TypeError.serializable_object':
+        'structuredClone(new TypeError("m")) instanceof TypeError',
+      'TypedArray.constructor_without_parameters':
+        'new Uint8Array().length===0',
+      'TypedArray.index_properties_not_consulting_prototype':
+        '(function(){var P=Object.getPrototypeOf(Uint8Array.prototype);P[0]=9;var ok=new Uint8Array(1)[0]!==9;delete P[0];return ok})()',
+      'TypedArray.iterable_in_constructor':
+        'new Uint8Array((function*(){yield 4;yield 5})())[1]===5',
+      'TypedArray.named_properties':
+        '(function(){var t=new Uint8Array(2);t.foo=7;return t.foo===7})()',
+      'URIError.serializable_object':
+        'structuredClone(new URIError("m")) instanceof URIError',
+      'WeakMap.symbol_as_keys':
+        '(function(){var s=Symbol();return new WeakMap().set(s,7).get(s)===7})()',
+      'WeakSet.symbol_as_keys':
+        '(function(){var s=Symbol();return new WeakSet().add(s).has(s)})()',
+    };
     const src = [
+      // Bases intrinsèques non-globales (spec-only paths).
+      'var B={',
+      // %TypedArray% no es un objeto real: BCD `TypedArray.x` =
+      // "los ctors tipados tienen x" → se sondea sobre Uint8Array
+      // (proto encadenado a %TypedArray%.prototype, `in` la ve).
+      'TypedArray:Uint8Array,',
+      'Generator:(function*(){}).prototype,',
+      'GeneratorFunction:(function*(){}).constructor,',
+      'AsyncGenerator:(async function*(){}).prototype,',
+      'AsyncGeneratorFunction:(async function*(){}).constructor,',
+      'AsyncFunction:(async function(){}).constructor,',
+      'AsyncIterator:Object.getPrototypeOf(Object.getPrototypeOf((async function*(){}).prototype))',
+      '};',
       // Présence testée par `in` — lire `A.prototype.byteLength`
       // invoquerait le getter (TypeError sur récepteur
       // incompatible, réel aussi sous V8).
-      'function chk(p){var o=globalThis,i=0;',
-      'if(p.length===1)return typeof o[p[0]]!=="undefined";',
+      'function chk(p){var o=B[p[0]]||globalThis[p[0]],i=1;',
+      'if(p.length===1)return typeof o!=="undefined";',
       'while(i<p.length-1){if(o==null)return false;o=o[p[i]];i++}',
       'return o!=null && p[i] in o}',
       'var T=' + JSON.stringify(tests.map(t => t.cand)) + ';',
       'var N=' + JSON.stringify(tests.map(t => t.name)) + ';',
-      'for(var i=0;i<N.length;i++){var c=T[i],hit=false;',
-      'for(var j=0;j<c.length;j++){if(chk(c[j])){hit=true;break}}',
+      'var F={',
+      ...Object.entries(BEHAVIOR)
+        .filter(([k]) => tests.some(t => t.name === k))
+        .map(([k, v]) => `${JSON.stringify(k)}:function(){try{return ${v}}catch(e){return false}},`),
+      '};',
+      'for(var i=0;i<N.length;i++){var hit=false;',
+      'if(F[N[i]]){hit=F[N[i]]()===true}else{var c=T[i];',
+      'for(var j=0;j<c.length;j++){if(chk(c[j])){hit=true;break}}}',
       'console.log(N[i]+"\\t"+(hit?"ok":"miss"))}',
     ].join('\n');
     const tmp = join(tmpdir(), `bcdcov-${process.pid}.js`);
@@ -181,6 +290,6 @@ for (const sec of sections) {
       rmSync(tmp, { force: true });
     }
     report('js.builtins', tests.map(t => ({ name: t.name, engines: 3 })), okSet,
-      'moteur nu — bindings session (fetch, DOM) hors dénominateur');
+      `moteur nu — sous-features sondées comportementalement, exclues: ${excludedNames.join(', ')}`);
   }
 }

@@ -972,6 +972,9 @@ pub struct FinRegEntry {
 pub enum TempData {
     /// `Temporal.Instant` — nanosecondes depuis l'époque UTC.
     Instant { ns: i128 },
+    /// `Temporal.ZonedDateTime` — fuseau unique UTC : l'instant
+    /// suffit (offset +00:00 implicite, `timeZoneId` = "UTC").
+    Zoned { ns: i128 },
     /// `Temporal.PlainDate` (calendrier iso8601).
     PDate { y: i64, m: u8, d: u8 },
     /// `Temporal.PlainTime` — `ms`/`us`/`ns` = milli/micro/nano

@@ -7855,23 +7855,69 @@ lots ordonnés par impact (3/3 moteurs d'abord) ; la mesure
 est reproductible, les scores servent de cliquet
 documentaire (ADR-0010) :
 
-- [ ] **JS-C468. Accesseurs d'instance TypedArrays/DataView**
+- [x] **JS-C468. Accesseurs d'instance TypedArrays/DataView**
   (`ArrayBuffer.byteLength`, `DataView.buffer/byteLength/
   byteOffset`, `ArrayBuffer.transferToFixedLength`) — les
   bundles JS modernes et les chemins binaires (MSE, wasm)
   les lisent en boot. *Déclencheur : déjà mesuré.*
-- [ ] **JS-C469. Objets itérateurs avancés** (`Generator`,
+  **Livré (2026-11-10)** — étendu à la surface complète :
+  accesseurs spec sur `ArrayBuffer.prototype.byteLength`,
+  `SharedArrayBuffer.prototype.{byteLength,maxByteLength}` +
+  `slice`, `DataView.prototype.{buffer,byteLength,byteOffset}`,
+  `%TypedArray%.prototype.{buffer,byteLength,byteOffset,length}`
+  (les props restent aussi virtuelles propres côté instance,
+  même valeur) + `transferToFixedLength` ; méthodes TA ES2023
+  `findLast`/`findLastIndex`/`with`/`toReversed`/`toSorted`/
+  `toLocaleString`.
+- [x] **JS-C469. Objets itérateurs avancés** (`Generator`,
   `AsyncGenerator` + `.next/.return/.throw`, `AsyncIterator`,
   `AsyncFunction`, `AsyncGeneratorFunction`,
   `AsyncDisposableStack`) — surface async itérative ES2018+.
   *Déclencheur : site réel async-iter (streams, for-await).*
-- [ ] **JS-C471. Détails Error modernes** (`AggregateError.
+  **Soldé par la mesure (2026-11-10)** — ces constructeurs
+  sont des intrinsèques abstraites jamais exposées en global
+  (spec : `typeof Generator === "undefined"` même sous V8) ;
+  la sonde les atteint désormais par leurs chemins spec et
+  tout passe. Élargi aux helpers ES2026 réellement manquants :
+  `Iterator.prototype.{includes,join,chunks,windows}` +
+  `Iterator.{zip,zipKeyed}` statiques (snapshot eager, même
+  déviation que les autres helpers).
+- [x] **JS-C471. Détails Error modernes** (`AggregateError.
   errors`, `Error.cause`, `*.serializable_object`) —
   `cause` circule dans les boot-chains (diagnostic des
   « morts silencieuses »). *Déclencheur : déjà mesuré.*
-- [ ] **JS-C472. `Date.toTemporalInstant`, `Atomics` hors
+  **Soldé par la mesure (2026-11-10)** — toutes présentes
+  et fonctionnelles : les sous-features non-propriétés sont
+  sondées comportementalement (`structuredClone(new X) instanceof X`,
+  `new Error('x',{cause:7}).cause===7`, `SuppressedError`
+  champs propres) — 8/8 ok.
+- [x] **JS-C472. `Date.toTemporalInstant`, `Atomics` hors
   buffers partagés** — ponts vers `Temporal` (JS-C31) et
   workers. *Déclencheur : site réel.*
+  **Livré (2026-11-10)** — `Date.prototype.toTemporalInstant`
+  (epoch ms → `Temporal.Instant`) ; `Atomics` sur buffers
+  non-partagés fonctionnait déjà (sonde corrigée : `add`
+  retourne la valeur *antérieure*) ; `Temporal.ZonedDateTime`
+  ajouté en fuseau unique UTC (`from`/ctor BigInt/`compare`/
+  `toInstant`/`toPlainDate(Time)`/`toPlainTime`/`with`/
+  `add`/`subtract`/`since`/`until`/`withTimeZone`,
+  `toString` = `…+00:00[UTC]`, `RangeError` honnête hors UTC).
+- [x] **JS-C473. Complément de surface BCD (100 %)** —
+  `RegExp.prototype` getters spec (`source`,`flags`,`global`,
+  `ignoreCase`,`multiline`,`dotAll`,`sticky`,`unicode`,
+  `unicodeSets`,`hasIndices` — les flags quittent les props
+  propres d'instance pour devenir de vrais accesseurs ;
+  flag `v`/unicodeSets tracké, `/uv/` rejeté) ;
+  `Math.{acosh,asinh,atanh}` ; `Object.prototype.toLocaleString`
+  ; `Promise.{allKeyed,allSettledKeyed}` (proposal ES2026,
+  résolution `{k: v}` / `{k: {status,…}}`) ;
+  `Intl.DurationFormat` (en-US long/short/narrow/digital,
+  `format`/`formatToParts`/`resolvedOptions`, entrée
+  `Temporal.Duration`/objet/ISO). **Mesure finale :
+  `js.builtins` 648/648 = 100 %** (moteur nu ; seule entrée
+  hors dénominateur : `Promise.incumbent_settings_object_tracking`,
+  intégration hôte HTML non observable en moteur nu —
+  documentée dans la note du rapport).
 
 ### J-C — Mesure, perf, robustesse
 

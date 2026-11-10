@@ -4247,7 +4247,6 @@ impl Engine {
             Ok(r) => r,
             Err(msg) => return Err(self.syntax_error(msg)),
         };
-        let flag_str = re.flag_string();
         let id = self.heap.alloc_obj(Object {
             proto: Value::Obj(self.protos.regexp),
             props: Vec::new(),
@@ -4257,21 +4256,9 @@ impl Engine {
             elem_integrity: 0,
             args_map: None,
         });
-        let src = self.str_val(pattern.to_string());
-        let fl = self.str_val(flag_str);
-        self.set_own(id, "source", src, false);
-        self.set_own(id, "flags", fl, false);
-        let re = match self.heap.obj(id).map(|o| &o.kind) {
-            Some(ObjKind::RegExp(r)) => r.clone(),
-            _ => return Err(self.type_error("internal regexp error")),
-        };
-        self.set_own(id, "global", Value::Bool(re.global), false);
-        self.set_own(id, "ignoreCase", Value::Bool(re.ignore_case), false);
-        self.set_own(id, "multiline", Value::Bool(re.multiline), false);
-        self.set_own(id, "dotAll", Value::Bool(re.dot_all), false);
-        self.set_own(id, "sticky", Value::Bool(re.sticky), false);
-        self.set_own(id, "unicode", Value::Bool(re.unicode), false);
-        self.set_own(id, "hasIndices", Value::Bool(re.has_indices), false);
+        // `source`/`flags`/flags booléens sont des accesseurs sur
+        // `RegExp.prototype` (spec) — seul `lastIndex` reste une
+        // data prop propre non énumérable et réinscriptible.
         self.set_own_attrs(
             id,
             "lastIndex",
