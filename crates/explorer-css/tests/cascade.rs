@@ -3439,3 +3439,22 @@ fn outline_inherit_route_longhands() {
     assert_ne!(s1, s2, "outline:inherit doit router des longhands");
     assert!(s2.get("outline-style").is_some());
 }
+
+/// Feuille UA ruby (css-ruby-1 bornée) : `rt` = 50 % +
+/// `super`, `rp` masqué.
+#[test]
+fn ua_ruby_rt_rp() {
+    let dom = TreeBuilder::parse("<ruby><rb></rb><rt>zi</rt><rp>(</rp></ruby>");
+    let eng = StyleEngine::new();
+    let m = eng.compute_tree(&dom, dom.document(), &StyleEnv::default());
+    let annot_el = find_tag(&dom, dom.document(), "rt").expect("rt");
+    let paren_el = find_tag(&dom, dom.document(), "rp").expect("rp");
+    let rt = m.get(annot_el).expect("style rt");
+    assert_eq!(rt.get("font-size"), Some("8px"), "rt 50 % de 16px");
+    assert_eq!(rt.get("vertical-align"), Some("super"), "rt sur-ligne");
+    assert_eq!(
+        m.get(paren_el).and_then(|s| s.get("display")),
+        Some("none"),
+        "rp masque"
+    );
+}

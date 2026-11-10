@@ -1034,7 +1034,12 @@ fn st_of_x<'a>(
     sm: &'a StyleMap,
     out: &mut Option<&'a ComputedStyle>,
 ) {
-    if dom.attribute_str(n, "class").ok().flatten().is_some_and(|c| c == "x") {
+    if dom
+        .attribute_str(n, "class")
+        .ok()
+        .flatten()
+        .is_some_and(|c| c == "x")
+    {
         *out = sm.get(n);
     }
     if let Ok(ch) = dom.children(n) {
@@ -2159,7 +2164,8 @@ impl StyleEngine {
                                     self.namespaces.insert(String::new(), (*uri).to_string());
                                 }
                                 [pfx, uri] => {
-                                    self.namespaces.insert((*pfx).to_string(), (*uri).to_string());
+                                    self.namespaces
+                                        .insert((*pfx).to_string(), (*uri).to_string());
                                 }
                                 _ => {}
                             }
@@ -2169,10 +2175,8 @@ impl StyleEngine {
                             // `@media (--nom)` substitué à la
                             // collecte ci-dessous.
                             if let Some((name, q)) = prelude.split_once(char::is_whitespace) {
-                                self.custom_media.insert(
-                                    name.trim().to_string(),
-                                    q.trim().to_string(),
-                                );
+                                self.custom_media
+                                    .insert(name.trim().to_string(), q.trim().to_string());
                             }
                         } else if at.name == "layer" {
                             let mut path = layer.to_vec();
@@ -2254,8 +2258,7 @@ impl StyleEngine {
                                     }
                                     "override-colors" => {
                                         for pair in d.value.split(',') {
-                                            let mut it =
-                                                pair.trim().splitn(2, char::is_whitespace);
+                                            let mut it = pair.trim().splitn(2, char::is_whitespace);
                                             if let (Some(i), Some(c)) = (it.next(), it.next()) {
                                                 if let Ok(idx) = i.parse::<u32>() {
                                                     fp.override_colors
@@ -2999,7 +3002,9 @@ impl StyleEngine {
                             .chars()
                             .take(30)
                             .map(|c| {
-                                if c.is_ascii_alphanumeric() || matches!(c, '-' | '.' | '(' | ')' | '%') {
+                                if c.is_ascii_alphanumeric()
+                                    || matches!(c, '-' | '.' | '(' | ')' | '%')
+                                {
                                     c
                                 } else {
                                     '_'
@@ -5107,6 +5112,15 @@ small, sub, sup { font-size: smaller }
 nobr { white-space: nowrap }
 sub { vertical-align: sub }
 sup { vertical-align: super }
+/* css-ruby-1 : l'annotation `rt` est plus petite et sur-
+   ligne (approximation bornée — la spec la pose AU-DESSUS
+   de la base ; `super` dans la boîte de ligne est le meilleur
+   rendu sans chirurgie inline). `rp` (parenthèses pleine
+   largeur pour navigateurs sans ruby) est masqué — le rt
+   est affiché ici. `rtc`/`rb` = conteneurs (inline via
+   `display:ruby*` côté boxtree). */
+rt { font-size: 50%; vertical-align: super }
+rp { display: none }
 abbr[title], acronym[title] { text-decoration: underline }
 mark { background-color: yellow; color: black }
 figure { margin-top: 1em; margin-bottom: 1em; margin-left: 40px; margin-right: 40px }
@@ -5208,7 +5222,11 @@ impl StyleEngine {
             if let Some(m) = mode {
                 st.set(
                     "white-space",
-                    if m.trim() == "nowrap" { "nowrap" } else { "normal" },
+                    if m.trim() == "nowrap" {
+                        "nowrap"
+                    } else {
+                        "normal"
+                    },
                 );
             }
         }
