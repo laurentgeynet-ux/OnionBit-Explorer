@@ -192,6 +192,20 @@ fn parse_tracks(raw: &str, fs: f32, ctx: &BlockCtx, cb: f32) -> (Vec<Track>, Lin
 /// résout `<ident>-start` côté début / `<ident>-end` côté
 /// fin (`grid-column: content` couvre ainsi la piste
 /// `[content-start]…[content-end]` — squelette MDN).
+/// `safe`/`unsafe` préfixés d'un `<self-position>` → mode
+/// nu (même offset — l'effet overflow n'a pas de moteur).
+fn self_pos_clean(m: &str) -> &str {
+    let m = m.trim();
+    if let Some(r) = m
+        .strip_prefix("safe ")
+        .or_else(|| m.strip_prefix("unsafe "))
+    {
+        r
+    } else {
+        m
+    }
+}
+
 fn placement(
     raw: Option<&str>,
     names: &[(String, usize)],
@@ -1017,14 +1031,19 @@ pub(crate) fn flow_grid_children(
         // passe 1, la translation vise donc la boîte externe.
         let outer_w = ml + bx.children[i].rect.width + mr;
         let outer_h = mt + bx.children[i].rect.height + mb;
-        let dx = match jmode.as_str() {
-            "center" => (cell_w - outer_w).max(0.0) / 2.0,
-            "end" | "flex-end" => (cell_w - outer_w).max(0.0),
+        // `<self-position>` complet (css-align-3) comme flex :
+        // `safe`/`unsafe` préfixés reconnus (même offset),
+        // `self-end`/`end`/`flex-end` → fin de cellule ;
+        // `start`/`self-*`/`baseline`/`normal`/`stretch` →
+        // start (défaut) — `anchor-center` ≈ center.
+        let dx = match self_pos_clean(&jmode) {
+            "center" | "anchor-center" => (cell_w - outer_w).max(0.0) / 2.0,
+            "end" | "self-end" | "flex-end" => (cell_w - outer_w).max(0.0),
             _ => 0.0,
         };
-        let dy = match amode.as_str() {
-            "center" => (cell_h - outer_h).max(0.0) / 2.0,
-            "end" | "flex-end" => (cell_h - outer_h).max(0.0),
+        let dy = match self_pos_clean(&amode) {
+            "center" | "anchor-center" => (cell_h - outer_h).max(0.0) / 2.0,
+            "end" | "self-end" | "flex-end" => (cell_h - outer_h).max(0.0),
             _ => 0.0,
         };
         translate_subtree(&mut bx.children[i], dx, y_off[r] + dy);
