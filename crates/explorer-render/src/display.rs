@@ -3343,6 +3343,12 @@ fn resolve_mask(bx: &LayoutBox, rect: &Rect, images: &crate::PaintImages) -> Vec
             repeat: mask_layer_prop(&bx.style, "mask-repeat", i)
                 .map_or_else(|| mask_repeat(&bx.style), mask_repeat_raw),
             luminance: mask_layer_prop(&bx.style, "mask-mode", i).is_some_and(|v| v == "luminance"),
+            composite: mask_layer_prop(&bx.style, "mask-composite", i).map_or(0, |v| match v {
+                "intersect" => 1,
+                "subtract" => 2,
+                "exclude" => 3,
+                _ => 0,
+            }),
         });
     }
     out
@@ -3465,6 +3471,10 @@ pub struct MaskTile {
     pub repeat: (bool, bool),
     /// `mask-mode:luminance` de la couche.
     pub luminance: bool,
+    /// `mask-composite` de la couche : 0 `add` (initial —
+    /// union max), 1 `intersect` (min), 2 `subtract`
+    /// (`d×(1−cov)`), 3 `exclude` (xor).
+    pub composite: u8,
 }
 
 /// Résolution d'une couche `mask-*` (R-252) : bitmap dont
@@ -3482,6 +3492,8 @@ struct MaskLayer {
     repeat: (bool, bool),
     /// `mask-mode:luminance` résolu.
     luminance: bool,
+    /// `mask-composite` de la couche (0 add…3 exclude).
+    composite: u8,
 }
 
 /// `mask-repeat` → `(x, y)` : `repeat` par défaut (tuilage),
@@ -4901,6 +4913,7 @@ fn translate_item(it: &DisplayItem, d: (f32, f32)) -> DisplayItem {
                     dst: shifted(l.dst, d),
                     repeat: l.repeat,
                     luminance: l.luminance,
+                    composite: l.composite,
                 })
                 .collect(),
         },
@@ -5386,6 +5399,7 @@ fn paint_box<'a>(
                     dst: l.dst,
                     repeat: l.repeat,
                     luminance: l.luminance,
+                    composite: l.composite,
                 })
                 .collect(),
         });

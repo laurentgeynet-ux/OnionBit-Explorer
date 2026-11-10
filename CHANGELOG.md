@@ -6,6 +6,7 @@ Le format suit [Keep a Changelog](https://keepachangelog.com/fr/1.1.0/)
 et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
+- **R-252 (suite) — `mask-composite` par couche** (`explorer-render`) : `intersect` (min), `subtract` (`d×(1−cov)`), `exclude` (xor) en plus de l'union `add` — op i-ème dans `MaskTile.composite`, composée dans `coverage_tile`.
 - **R-252 (suite) — `mask-image` multi-couches** (`explorer-render`) : `resolve_mask` produit `Vec<MaskLayer>` — couches url `,` séparées, longhands à couches `mask-position`/`mask-size`/`mask-repeat`/`mask-mode` (i-ème valeur ou répétition de la dernière, alias `-webkit-*`) ; `PushMask` porte `Vec<MaskTile>`, couverture du groupe = union max (`mask-composite:add` initial — `intersect`/`subtract`/`exclude` résidus ; `MaskedFill` = couche 0). Verrou : `mask_multi_couches_union`.
 - **R-254 (suite) — `anchor-size(<dim>)`** (`explorer-layout` + validation `explorer-css`) : `width`/`height` (et usage dans `calc()`) résolvent la dimension de l'ancre (`width`/`height`/`block`/`inline`/`self-*`, nom optionnel `--x`, repli `, <len>`, `auto` = axe porteur) — redimension post-hoc du border box, contenu non re-flown (approximation documentée). Verrou : `anchor_size_dimensionne`.
 - **R-254 (suite) — `anchor()` dans `calc()`** (`explorer-layout`) : substitution des occurrences `anchor(…)` avant `raw_length_px` — `calc(anchor(left) + 8px)` résolu. Verrou : `anchor_dans_calc`.
