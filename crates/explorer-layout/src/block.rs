@@ -662,17 +662,29 @@ fn fix_anchor_positioned(
                     let (w, h) = (bx.rect.width, bx.rect.height);
                     for t in av.split_ascii_whitespace() {
                         match t {
-                            "bottom" | "y-end" | "block-end" => {
+                            "bottom" | "y-end" | "block-end" | "span-bottom" | "span-y-end"
+                            | "span-block-end" => {
                                 dy = ar.y + ar.height - bx.rect.y;
                             }
-                            "top" | "y-start" | "block-start" => {
+                            "top" | "y-start" | "block-start" | "span-top" | "span-y-start"
+                            | "span-block-start" => {
                                 dy = ar.y - h - bx.rect.y;
                             }
-                            "right" | "x-end" | "inline-end" => {
+                            "right" | "x-end" | "inline-end" | "span-right" | "span-x-end"
+                            | "span-inline-end" => {
                                 dx = ar.x + ar.width - bx.rect.x;
                             }
-                            "left" | "x-start" | "inline-start" => {
+                            "left" | "x-start" | "inline-start" | "span-left" | "span-x-start"
+                            | "span-inline-start" => {
                                 dx = ar.x - w - bx.rect.x;
+                            }
+                            // `span-all` = les 3 pistes des deux
+                            // axes → centré (la taille spannée
+                            // exigerait un re-flow — approchée
+                            // center, documentée).
+                            "span-all" | "all" => {
+                                dx = ar.x + (ar.width - w) / 2.0 - bx.rect.x;
+                                dy = ar.y + (ar.height - h) / 2.0 - bx.rect.y;
                             }
                             "center" => {
                                 // `center` nu = les deux axes ;
