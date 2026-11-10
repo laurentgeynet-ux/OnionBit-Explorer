@@ -1531,7 +1531,15 @@ fn paint_item(
             repeat,
         } => {
             paint_border_image(
-                pixmap, rect, img, *src_edges, *dst_edges, *fill_center, *repeat, dpi, clip,
+                pixmap,
+                rect,
+                img,
+                *src_edges,
+                *dst_edges,
+                *fill_center,
+                *repeat,
+                dpi,
+                clip,
             );
         }
         DisplayItem::PushClip(_)
@@ -1569,6 +1577,9 @@ fn paint_border_image(
     dpi: Transform,
     clip: Option<&Mask>,
 ) {
+    // Casts f32↔u32 sûrs : dimensions image < 2^23 (précision
+    // f32 suffisante) et bords clampés ≥0 amont (signe garanti).
+    #[allow(clippy::cast_precision_loss)]
     let (iw, ih) = (img.width as f32, img.height as f32);
     // Insets source/déstination `(t, r, b, l)` en pixels —
     // convention `<0` = pourcentage de la dimension (t/b
@@ -1588,7 +1599,11 @@ fn paint_border_image(
     let sx = [(0.0, sl), (sl, iw - sl - sr), (iw - sr, sr)];
     let sy = [(0.0, st), (st, ih - st - sb), (ih - sb, sb)];
     let dx = [(0.0, dl), (dl, rect.width - dl - dr), (rect.width - dr, dr)];
-    let dy = [(0.0, dt), (dt, rect.height - dt - db), (rect.height - db, db)];
+    let dy = [
+        (0.0, dt),
+        (dt, rect.height - dt - db),
+        (rect.height - db, db),
+    ];
     for (yi, &(_y0, _h)) in sy.iter().enumerate() {
         for (xi, &(_x0, _w)) in sx.iter().enumerate() {
             // Coin (yi,xi = 0|2) : pas d'étirement ; bord/centre
@@ -1611,9 +1626,15 @@ fn paint_border_image(
             // scale l'intégrale de la vue (≡ stretch ;
             // repeat/round ≈ stretch-tuile, approximation
             // documentée R-248).
+            // `s0.1`/`s1.1` > 0 vérifié ; `ceil` < iw/ih donc
+            // le cast ne peut ni tronquer ni perdre le signe.
+            #[allow(clippy::cast_sign_loss, clippy::cast_possible_truncation)]
             let sw = s0.1.ceil() as u32;
+            #[allow(clippy::cast_sign_loss, clippy::cast_possible_truncation)]
             let sh = s1.1.ceil() as u32;
+            #[allow(clippy::cast_sign_loss, clippy::cast_possible_truncation)]
             let src_x = s0.0.floor() as u32;
+            #[allow(clippy::cast_sign_loss, clippy::cast_possible_truncation)]
             let src_y = s1.0.floor() as u32;
             if sw == 0 || sh == 0 || src_x >= img.width || src_y >= img.height {
                 continue;
@@ -1623,8 +1644,7 @@ fn paint_border_image(
                 let src = ((src_y + row) * img.width + src_x) as usize * 4;
                 let copy_w = sw.min(img.width - src_x) as usize * 4;
                 let dst_o = (row * sw) as usize * 4;
-                rgba[dst_o..dst_o + copy_w]
-                    .copy_from_slice(&img.rgba[src..src + copy_w]);
+                rgba[dst_o..dst_o + copy_w].copy_from_slice(&img.rgba[src..src + copy_w]);
             }
             let dst = explorer_layout::Rect {
                 x: rect.x + d0.0,
@@ -1632,7 +1652,11 @@ fn paint_border_image(
                 width: d0.1,
                 height: d1.1,
             };
-            let view = crate::DecodedImage { width: sw, height: sh, rgba };
+            let view = crate::DecodedImage {
+                width: sw,
+                height: sh,
+                rgba,
+            };
             paint_image(pixmap, &dst, &view, dpi, clip);
         }
     }

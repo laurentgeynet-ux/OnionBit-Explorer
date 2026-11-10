@@ -11,8 +11,8 @@ use explorer_css::{Origin, StyleEngine, StyleEnv};
 use explorer_html::TreeBuilder;
 
 // PNG 1x1 transparent — data-url la plus petite.
+#[allow(dead_code)]
 const PNG: &str = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==";
-
 
 #[test]
 fn border_image_collecte_et_emet() {
