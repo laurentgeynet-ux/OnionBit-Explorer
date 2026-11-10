@@ -989,6 +989,11 @@ pub fn value_is_valid_for(name: &str, value: &str) -> bool {
                     | "large"
                     | "x-large"
                     | "xx-large"
+                    // css-fonts-4 : `xxx-large` + `math` (taille
+                    // de l'élément math courant) — la table
+                    // s'arrêtait à `xx-large` (R-258).
+                    | "xxx-large"
+                    | "math"
                     | "smaller"
                     | "larger"
             ) || len_or_pct(v)

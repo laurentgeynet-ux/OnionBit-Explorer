@@ -3767,6 +3767,8 @@ fn resolve_font_size(raw: &str, parent_fs: f32, env: &StyleEnv, rem_base: f32) -
         "xxx-large" => return Some(base * 2.0736),
         "smaller" => return Some(parent_fs / 1.2),
         "larger" => return Some(parent_fs * 1.2),
+        // css-fonts-4 : `math` = taille calculée du parent.
+        "math" => return Some(parent_fs),
         _ => {}
     }
     if let Some(pct) = v.strip_suffix('%') {

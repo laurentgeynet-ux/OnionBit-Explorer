@@ -577,3 +577,14 @@ fn css_wide_sur_shorthands() {
         );
     }
 }
+
+/// R-258 — `font-size` : mots-clés css-fonts-4 `xxx-large` +
+/// `math` acceptés à la validation (table stoppée à `xx-large`
+/// → `value.dropped.font-size` terrain).
+#[test]
+fn font_size_mots_cles_css4() {
+    use explorer_css::value::value_is_valid_for;
+    for v in ["xxx-large", "math", "smaller", "larger", "12px", "150%"] {
+        assert!(value_is_valid_for("font-size", v), "{v} refusé");
+    }
+}
