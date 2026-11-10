@@ -1232,3 +1232,8 @@ luminance` et `mask-composite` = résidus documentés.
 
 - `dom_host` déballe `.node` (wrappers `ShadyDOM.wrap`) + sweep DCL pousse `pc._enableProperties()`+`pc._readyClients()` sur pcs non initialisés → **vol mesuré `lit:1` (=`WIZ_global_data` script), `du:0`, `rs:"complete"`** — frame : skeleton feed 3×3 correct, `[[countryCode]]`/`[[getSimpleString(data.title)]]`/tooltips liés.
 - Cause racine de la frontière : classes `F`/`d` (ytd-*-renderer) sans callbacks CE — `pc.attached`/`_readyClients` jamais invoqués par le cycle élément ; la passe pc est idempotente et honnête (vraie mécanique, pas de réécriture de contenu).
+
+## NAV — cran 18 : classe `zc` sans mixins — mur skeleton/masthead nommé
+
+- Skeleton `BODY>DIV#home-page-skeleton` (sibling `ytd-app`) ; `ytd-browse`/masthead/page-manager **vidés** (`innerHTML:0`, detach SSR couru, remplacement jamais stampé) ; `masthead-finish:false`, `ytd-browse:0`, `items:0` (feedNudgeRenderer anonyme — squelette honnête jusqu'au mount nudge).
+- **`ytd-masthead`/page-manager = classe `zc`** — `pc.ready()` → `TypeError _ensureAttributes` → patch stub → `_flushProperties` → cascade : la famille `zc` n'a **aucun** mixin Polymer-lite (`PropertyEffects`/`_ensureAttributes`/`_flushProperties`/`instanceTemplate`/`_attachDom` absents de la chaîne `zc→zc→DocumentFragment→Object`) — `kBo`/`_registered`/`behaviors` jamais appliqués à cette famille (les `d`-renderers les ont tous). Prochaine mesure : pourquoi `zc` n'a pas couru `kBo`/`_registered` (`__hasRegisterFinished`/`_initializeProperties`/`Polymer(...)`-branche).
