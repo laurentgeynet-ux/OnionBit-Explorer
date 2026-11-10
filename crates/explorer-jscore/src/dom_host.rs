@@ -12335,7 +12335,7 @@ fn ce_call(e: &mut Engine, el: Value, cb_name: &str, args: &[Value]) -> JsResult
                     },
                 );
                 let tpl = e
-                    .get_prop_value(el, "_template")
+                    .get_prop_value(el.clone(), "_template")
                     .ok()
                     .and_then(|t| e.get_prop_value(t, "outerHTML").ok())
                     .map_or_else(
@@ -12345,13 +12345,139 @@ fn ce_call(e: &mut Engine, el: Value, cb_name: &str, args: &[Value]) -> JsResult
                             s.chars().take(20_000).collect::<String>()
                         },
                     );
+                // §B-126 — rejoue la chaîne `_stampTemplate`
+                // kevlar **au moment du throw** : `importNode`
+                // + résolution `iDo` par nodeInfo — nomme
+                // l'index fautif (`UNDEF`) au lieu du verdict
+                // global « F undefined » (le replay a
+                // post-mortem donnait 21/21 : la divergence
+                // est temporelle, il faut l'état exact).
+                let diag = cct_stamp_diag(e, &el);
                 tracing::info!(target: "dom_probe", site = "ce.cc_threw",
-                    tag = %tag, cb = %cb_name, "err={msg} src={src} counts={counts} tpl={tpl}");
+                    tag = %tag, cb = %cb_name, "err={msg} src={src} counts={counts} diag={diag} tpl={tpl}");
             }
             return Err(thr);
         }
     }
     Ok(())
+}
+
+/// §B-126 — `iDo` de kevlar porté en host : résout le nœud
+/// stampé de `ni` — `parent.firstChild`/`nextSibling` jusqu'à
+/// `parentIndex` ; parentInfo falsy ou résolution falsy → la
+/// racine stampée (sémantique exacte du `else return H`).
+fn cct_ido(e: &mut Engine, root: &Value, ni: &Value, depth: u8) -> Value {
+    if depth == 0 {
+        return root.clone();
+    }
+    let parent = match e.get_prop_value(ni.clone(), "parentInfo") {
+        Ok(pi) if !matches!(pi, Value::Undefined | Value::Null) => cct_ido(e, root, &pi, depth - 1),
+        _ => Value::Undefined,
+    };
+    if matches!(parent, Value::Undefined | Value::Null) {
+        return root.clone();
+    }
+    let target = e
+        .get_prop_value(ni.clone(), "parentIndex")
+        .ok()
+        .and_then(|v| e.to_number(v).ok())
+        .unwrap_or(-1.0) as i64;
+    let mut cur = e
+        .get_prop_value(parent, "firstChild")
+        .unwrap_or(Value::Null);
+    let mut i = 0i64;
+    while !matches!(cur, Value::Null | Value::Undefined) {
+        if i == target {
+            return cur;
+        }
+        i += 1;
+        cur = e.get_prop_value(cur, "nextSibling").unwrap_or(Value::Null);
+    }
+    Value::Undefined
+}
+
+/// §B-126 — rejoue `_stampTemplate` au moment du throw :
+/// `F = ownerDocument.importNode(ti.content || t.content, true)`
+/// puis `iDo` sur chaque `nodeInfo` — rend les résolutions
+/// par index (`UNDEF` = trou), les enfants top-level du clone
+/// et le 1er index fautif (global + porteur d'`events`, le
+/// type qui jette à `_addEventListenerToNode`).
+fn cct_stamp_diag(e: &mut Engine, el: &Value) -> String {
+    let Ok(t) = e.get_prop_value(el.clone(), "_template") else {
+        return "<no-template>".to_string();
+    };
+    let ti = e
+        .get_prop_value(t.clone(), "_templateInfo")
+        .unwrap_or(Value::Undefined);
+    let nl = e
+        .get_prop_value(ti.clone(), "nodeInfoList")
+        .unwrap_or(Value::Undefined);
+    let doc = e
+        .get_prop_value(el.clone(), "ownerDocument")
+        .unwrap_or(Value::Undefined);
+    let imp = e
+        .get_prop_value(doc.clone(), "importNode")
+        .unwrap_or(Value::Undefined);
+    // `X.content || F.content` — même disjonction que kevlar.
+    let mut src = e
+        .get_prop_value(ti.clone(), "content")
+        .unwrap_or(Value::Undefined);
+    if matches!(src, Value::Undefined | Value::Null) {
+        src = e.get_prop_value(t, "content").unwrap_or(Value::Undefined);
+    }
+    let f = e
+        .call_value(imp, doc, &[src, Value::Bool(true)])
+        .unwrap_or(Value::Undefined);
+    if matches!(f, Value::Undefined | Value::Null) {
+        return "<importNode-fail>".to_string();
+    }
+    // Enfants top-level du clone (miroir du `kids=` SSR).
+    let mut top = Vec::new();
+    let mut cur = e
+        .get_prop_value(f.clone(), "firstChild")
+        .unwrap_or(Value::Null);
+    while !matches!(cur, Value::Null | Value::Undefined) && top.len() < 40 {
+        let name = cct_prop_get(e, &cur, &["nodeName"]);
+        top.push(name);
+        cur = e.get_prop_value(cur, "nextSibling").unwrap_or(Value::Null);
+    }
+    let n = cct_prop_len(e, &nl, &[]).parse::<usize>().unwrap_or(0);
+    let mut res = Vec::with_capacity(n.min(64));
+    let mut first_undef: i64 = -1;
+    let mut first_undef_ev: i64 = -1;
+    for i in 0..n.min(64) {
+        let ni = e
+            .get_prop_value(nl.clone(), &i.to_string())
+            .unwrap_or(Value::Undefined);
+        let c = cct_ido(e, &f, &ni, 64);
+        let undef = matches!(c, Value::Undefined | Value::Null);
+        if undef {
+            if first_undef < 0 {
+                first_undef = i as i64;
+            }
+            if first_undef_ev < 0
+                && cct_prop_len(e, &ni, &["events"])
+                    .parse::<usize>()
+                    .unwrap_or(0)
+                    > 0
+            {
+                first_undef_ev = i as i64;
+            }
+        }
+        let name = if undef {
+            "UNDEF".to_string()
+        } else {
+            cct_prop_get(e, &c, &["nodeName"])
+        };
+        res.push(format!("{i}:{name}"));
+    }
+    format!(
+        "fk={} res={} fU={} fUev={}",
+        top.join(","),
+        res.join("|"),
+        first_undef,
+        first_undef_ev
+    )
 }
 
 /// `obj.path… .length` décrit — `"?"` si un maillon manque
