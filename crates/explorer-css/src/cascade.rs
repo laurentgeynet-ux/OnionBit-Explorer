@@ -2473,8 +2473,25 @@ impl StyleEngine {
                     } else {
                         // R-207 — déclaration ignorée sur la
                         // validation par propriété (`width:
-                        // 200`…) : signalée par nom.
+                        // 200`…) : signalée par nom ; le détail
+                        // porte le début de la valeur pour que
+                        // le Pareto nomme la forme fautive
+                        // (github : `font-size` ×108).
                         explorer_common::census::bump(&format!("css.value.dropped.{lname}"));
+                        let v = d.value.trim();
+                        let v = v.strip_prefix("var(--").unwrap_or(v);
+                        let key: String = v
+                            .chars()
+                            .take(30)
+                            .map(|c| {
+                                if c.is_ascii_alphanumeric() || matches!(c, '-' | '.' | '(' | ')' | '%') {
+                                    c
+                                } else {
+                                    '_'
+                                }
+                            })
+                            .collect();
+                        explorer_common::census::bump(&format!("css.value.dropped.{lname}.{key}"));
                     }
                 }
             }

@@ -3821,6 +3821,7 @@ chez NAVIGATEUR — non recopiés ici.
 - [x] **R-230. `decl.malformed.delim` diagnostic** : tokens `*`/`!`/`=` = hacks CSS historiques (star-hack, IE `!`) — rejetés par spec comme Chrome — pas de perte de rendu. Reste : `value.dropped.font-size` ×108 github (à nommer : forme de la valeur rejetée) + `number(0.0)` ×18 github.
 - [ ] **R-231. `@import` (mur NAV)** : `at.unapplied.import` ×18 — feuilles manquantes → lobste.rs 99,98 % ; journalisé PIPE→NAV (résolution récursive à la collecte).
 - [x] **R-231. `@custom-media` alias de media query** : registre `Statement` + substitution `@media (--nom)` à la collecte (négation composée). `at.unapplied.custom-media` éliminé. Verrou : 2 env.
+- [x] **R-238. `value.dropped.<prop>.<valeur>` détaillé** : le compteur nomme le début de la valeur — font-size github à nommer r5.
 ## Tâches continues
 
 - **Triage rendu** des échecs `site_smoke.ps1` : les écarts
