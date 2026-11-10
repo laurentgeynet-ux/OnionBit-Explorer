@@ -961,6 +961,7 @@ pub fn value_is_valid_for(name: &str, value: &str) -> bool {
         // invalides : arrivés ici sans expansion, c'est qu'elle
         // a échoué — on revalide pour confirmer le drop.
         "background" => expand_background(v).is_some(),
+        "mask" | "-webkit-mask" => expand_mask(v).is_some(),
         "font" => expand_font(v).is_some(),
         _ => true,
     }
@@ -997,8 +998,14 @@ pub fn expand_shorthand(name: &str, value: &str) -> Option<Vec<(String, String)>
             }
         }
         return Some(vec![
-            ("text-wrap-mode".to_string(), mode.unwrap_or("wrap").to_string()),
-            ("text-wrap-style".to_string(), style.unwrap_or("auto").to_string()),
+            (
+                "text-wrap-mode".to_string(),
+                mode.unwrap_or("wrap").to_string(),
+            ),
+            (
+                "text-wrap-style".to_string(),
+                style.unwrap_or("auto").to_string(),
+            ),
         ]);
     }
     // Shorthands `place-*` (css-align-3 — R-125) : 1 valeur
@@ -1068,6 +1075,7 @@ pub fn expand_shorthand(name: &str, value: &str) -> Option<Vec<(String, String)>
         "columns" => Some(expand_columns(value)),
         "column-rule" => Some(expand_column_rule(value)),
         "background" => expand_background(value),
+        "mask" | "-webkit-mask" => expand_mask(value),
         "font" => expand_font(value),
         "list-style" => expand_list_style(value),
         "outline" => Some(expand_outline(value)),
@@ -1615,6 +1623,170 @@ impl BgParts {
             ),
         ]
     }
+}
+
+/// Shorthand `mask` / `-webkit-mask` (css-masking-1 — R-252) :
+/// `<mask-layer>#` — même grammaire de couche que
+/// `background` (`image position/size repeat box×2`), plus
+/// `mask-composite` et `mask-mode`. Émis vers les noms
+/// **standards** (`mask-*`) pour les deux orthographes — les
+/// consommateurs lisent déjà l'alias `-webkit-mask-*` en
+/// repli ; normaliser ici évite de dupliquer la liste.
+fn expand_mask(value: &str) -> Option<Vec<(String, String)>> {
+    let layers: Vec<Vec<(String, String)>> = split_top_commas(value)
+        .into_iter()
+        .map(parse_mask_layer)
+        .collect::<Option<_>>()?;
+    let (last, _) = layers.split_last()?;
+    let mut out = Vec::with_capacity(last.len());
+    for (i, (name, _)) in last.iter().enumerate() {
+        let joined = layers
+            .iter()
+            .map(|l| l[i].1.clone())
+            .collect::<Vec<_>>()
+            .join(", ");
+        out.push((name.clone(), joined));
+    }
+    Some(out)
+}
+
+/// Parse **une** couche du shorthand `mask` — une valeur par
+/// composante, doublon ou token inconnu → `None` (déclaration
+/// entière droppée, même discipline que `background`).
+#[allow(clippy::too_many_lines)]
+fn parse_mask_layer(layer: &str) -> Option<Vec<(String, String)>> {
+    #[derive(Default)]
+    struct MaskParts {
+        image: Option<String>,
+        position: Vec<String>,
+        size: Vec<String>,
+        repeat: Vec<String>,
+        boxes: Vec<String>,
+        composite: Option<String>,
+        mode: Option<String>,
+        clip_keyword: Option<String>,
+        in_size: bool,
+        recognized: bool,
+    }
+    let mut acc = MaskParts::default();
+    for raw in bg_tokens(layer) {
+        let segs = split_top_slash(raw);
+        if segs.len() > 3 {
+            return None;
+        }
+        for (i, &part) in segs.iter().enumerate() {
+            if i > 0 {
+                acc.in_size = true;
+            }
+            if part.is_empty() {
+                continue;
+            }
+            // Segment post-`/` : `mask-size` tant que le token
+            // est une taille — sinon re-classement normal.
+            if acc.in_size && acc.size.len() < 2 && bg_size_token(part) {
+                acc.size.push(part.to_string());
+                acc.recognized = true;
+                continue;
+            }
+            acc.in_size = false;
+            acc.recognized = true;
+            let ok = if bg_image_token(part) {
+                acc.image.replace(part.to_string()).is_none()
+            } else if matches!(
+                part,
+                "repeat" | "repeat-x" | "repeat-y" | "no-repeat" | "space" | "round"
+            ) && acc.repeat.len() < 2
+            {
+                acc.repeat.push(part.to_string());
+                true
+            } else if matches!(part, "add" | "subtract" | "intersect" | "exclude") {
+                acc.composite.replace(part.to_string()).is_none()
+            } else if matches!(part, "alpha" | "luminance" | "match-source") {
+                acc.mode.replace(part.to_string()).is_none()
+            } else if part == "no-clip" {
+                acc.clip_keyword.replace(part.to_string()).is_none()
+            } else if matches!(
+                part,
+                "border-box"
+                    | "padding-box"
+                    | "content-box"
+                    | "margin-box"
+                    | "fill-box"
+                    | "stroke-box"
+                    | "view-box"
+            ) && acc.boxes.len() < 2
+            {
+                acc.boxes.push(part.to_string());
+                true
+            } else if (matches!(part, "left" | "right" | "top" | "bottom" | "center")
+                || parse_length(part).is_some()
+                || part.ends_with('%'))
+                && acc.position.len() < 4
+            {
+                acc.position.push(part.to_string());
+                true
+            } else {
+                false
+            };
+            if !ok {
+                return None;
+            }
+        }
+    }
+    if !acc.recognized {
+        return None;
+    }
+    Some(vec![
+        (
+            "mask-image".to_string(),
+            acc.image.unwrap_or_else(|| "none".to_string()),
+        ),
+        (
+            "mask-position".to_string(),
+            if acc.position.is_empty() {
+                "0% 0%".to_string()
+            } else {
+                acc.position.join(" ")
+            },
+        ),
+        (
+            "mask-size".to_string(),
+            if acc.size.is_empty() {
+                "auto".to_string()
+            } else {
+                acc.size.join(" ")
+            },
+        ),
+        (
+            "mask-repeat".to_string(),
+            if acc.repeat.is_empty() {
+                "repeat".to_string()
+            } else {
+                acc.repeat.join(" ")
+            },
+        ),
+        (
+            "mask-origin".to_string(),
+            acc.boxes
+                .first()
+                .cloned()
+                .unwrap_or_else(|| "border-box".to_string()),
+        ),
+        (
+            "mask-clip".to_string(),
+            acc.clip_keyword
+                .or_else(|| acc.boxes.last().cloned())
+                .unwrap_or_else(|| "border-box".to_string()),
+        ),
+        (
+            "mask-composite".to_string(),
+            acc.composite.unwrap_or_else(|| "add".to_string()),
+        ),
+        (
+            "mask-mode".to_string(),
+            acc.mode.unwrap_or_else(|| "match-source".to_string()),
+        ),
+    ])
 }
 
 /// Keywords `<blend-mode>` du shorthand `background` (R-184)

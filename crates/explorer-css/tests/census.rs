@@ -55,7 +55,7 @@ fn at_rules_sans_consommateur_signalees() {
     let _g = arm();
     let mut e = StyleEngine::new();
     e.add_css(
-        "@tailwind utilities; @page { margin: 0 } @starting-style { a { opacity: 0 } } a { color: red }",
+        "@tailwind utilities; @page { margin: 0 } @swizzle { a { opacity: 0 } } a { color: red }",
         Origin::Author,
     );
     let s = census::snapshot();
@@ -64,13 +64,8 @@ fn at_rules_sans_consommateur_signalees() {
     // Bloc de déclarations parsé mais inerte.
     assert!(s.get("css.at.unapplied.page").copied().unwrap_or(0) >= 1);
     // Bloc non structuré : parser + cascade le voient tous deux.
-    assert!(s.get("css.at.unknown.starting-style").copied().unwrap_or(0) >= 1);
-    assert!(
-        s.get("css.at.unapplied.starting-style")
-            .copied()
-            .unwrap_or(0)
-            >= 1
-    );
+    assert!(s.get("css.at.unknown.swizzle").copied().unwrap_or(0) >= 1);
+    assert!(s.get("css.at.unapplied.swizzle").copied().unwrap_or(0) >= 1);
     disarm();
 }
 

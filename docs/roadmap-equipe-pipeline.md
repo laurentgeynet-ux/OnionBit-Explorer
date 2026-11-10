@@ -3844,9 +3844,12 @@ de noms. Ordre fixe (priorité par site-impact mesuré) :
   de consommation ; `value.dropped`/`unresolved` = file en vol.
 
 ### Axe 2 — consommation des dormants (`affects`-miss, par usage réel)
-1. **`mask-*`** — wikipedia ×363 (icônes Vector masquées →
-   visibles à tort) : `mask-image`/`mask-size`/`mask-position`/
-   `mask-repeat` → pipeline rendu (surface + alpha).
+1. **`mask-*`** — livré (R-252) — wikipedia ×363 (icônes
+   Vector masquées → visibles à tort) : mask de groupe
+   `PushMask`/`PopMask` (tout le sous-arbre, pas seulement le
+   fond — `MaskedFill` gardé pour les feuilles) + shorthand
+   `mask`/`-webkit-mask` expansé. Résidus : luminance/
+   composite/clip-origin non initiaux, multi-couches.
 2. **`column-*`/`columns`** — multicol (wikipedia plainlist,
    lobste.rs) : `column-count`/`column-width`/`column-gap`/
    `column-rule` → layout multi-colonnes.

@@ -284,6 +284,33 @@ pub enum DisplayItem {
     PushBlend(u8),
     /// Fin du groupe fondu.
     PopBlend,
+    /// `mask-image` de groupe (R-252, css-masking-1) : les
+    /// items jusqu'à `PopMask` se peignent hors-écran puis
+    /// se compositent modulés par l'**alpha** du mask —
+    /// l'élément masqué cache TOUT son rendu (fond,
+    /// bordures, texte, descendants), pas seulement le
+    /// `background-color` du motif `MaskedFill`. Posé
+    /// **outermost** des brackets de la boîte (spec :
+    /// filter → clip → mask). Résidus documentés :
+    /// `mask-mode:luminance`, `mask-composite`, `mask-clip`/
+    /// `mask-origin` non initiaux, multi-couches — la
+    /// couche 0 seule est appliquée.
+    PushMask {
+        /// Aire de peinture du mask (border box, coords
+        /// document — `mask-clip` initial).
+        rect: Rect,
+        /// Bitmap du mask — seul l'alpha est lu.
+        mask: std::sync::Arc<crate::image::DecodedImage>,
+        /// Zone d'**une tuile** du mask (coords document) :
+        /// `mask-size` + `mask-position` résolus — même
+        /// sémantique que `MaskedFill::dst`.
+        dst: Rect,
+        /// `mask-repeat` résolu `(x, y)` — défaut `repeat`.
+        repeat: (bool, bool),
+    },
+    /// Fin du groupe masqué — composite du tampon modulé
+    /// par l'alpha du mask.
+    PopMask,
     /// `clip-path:polygon(...)` (R-187) : les items jusqu'à
     /// `PopClip` ne se peignent que dans le polygone — mask
     /// `fill_path` au raster, même pile que `PushClip`.
@@ -496,6 +523,8 @@ fn kind_name(it: &DisplayItem) -> &'static str {
         DisplayItem::PopFilter => "pop_filter",
         DisplayItem::PushBlend(_) => "push_blend",
         DisplayItem::PopBlend => "pop_blend",
+        DisplayItem::PushMask { .. } => "push_mask",
+        DisplayItem::PopMask => "pop_mask",
         DisplayItem::PushClipPath { .. } => "push_clippath",
         DisplayItem::BackdropFilter { .. } => "backdrop",
         DisplayItem::Marker { .. } => "marker",
@@ -640,6 +669,10 @@ impl DisplayList {
                     let _ = writeln!(out, "emphasis k{kind} @{origin:?}");
                 }
                 DisplayItem::PopBlend => out.push_str("pop-blend\n"),
+                DisplayItem::PushMask { rect, mask, .. } => {
+                    let _ = writeln!(out, "push-mask {}x{} {rect:?}", mask.width, mask.height);
+                }
+                DisplayItem::PopMask => out.push_str("pop-mask\n"),
                 DisplayItem::BackdropFilter { rect, .. } => {
                     let _ = writeln!(out, "backdrop-filter {rect:?}");
                 }
@@ -800,7 +833,9 @@ fn item_bounds(item: &DisplayItem) -> Option<Rect> {
         | DisplayItem::PushFilter(_)
         | DisplayItem::PopFilter
         | DisplayItem::PushBlend(_)
-        | DisplayItem::PopBlend => None,
+        | DisplayItem::PopBlend
+        | DisplayItem::PushMask { .. }
+        | DisplayItem::PopMask => None,
         // Marques de texte — borne du run (avance × taille).
         DisplayItem::Emphasis {
             origin,
@@ -3184,6 +3219,51 @@ fn mask_size(
     }
 }
 
+/// `mask-image` résolu pour `bx` → `(bitmap, tuile, repeat)`
+/// en coords document. Lookup R-52 : `NodeId` d'abord, repli
+/// par texte `url(...)` (`masks_url`) pour les boîtes pseudo
+/// sans `NodeId` et les masks fetchés par l'appelant. `rect` =
+/// border box **décalée** (`mask-clip` initial) ; `dst` porte
+/// `mask-size`/`mask-position` résolus. Partagé par
+/// `MaskedFill` (feuille « icône ») et `PushMask` (groupe
+/// R-252) — un seul site de résolution.
+#[allow(clippy::cast_possible_truncation, clippy::cast_precision_loss)]
+fn resolve_mask(
+    bx: &LayoutBox,
+    rect: &Rect,
+    images: &crate::PaintImages,
+) -> Option<(
+    std::sync::Arc<crate::image::DecodedImage>,
+    Rect,
+    (bool, bool),
+)> {
+    let mask = bx
+        .node
+        .and_then(|n| images.masks.get(&n))
+        .or_else(|| crate::dataurl::mask_url(&bx.style).and_then(|u| images.masks_url.get(&u)))?;
+    let area = (rect.width, rect.height);
+    let fs = font_size_of(&bx.style);
+    let (mw, mh) = mask_size(&bx.style, area, (mask.width as f32, mask.height as f32), fs);
+    let (px, py) = bg_position(
+        bx.style
+            .get("mask-position")
+            .or_else(|| bx.style.get("-webkit-mask-position")),
+        area,
+        (mw, mh),
+        fs,
+    );
+    Some((
+        mask.clone(),
+        Rect {
+            x: rect.x + px,
+            y: rect.y + py,
+            width: mw,
+            height: mh,
+        },
+        mask_repeat(&bx.style),
+    ))
+}
+
 /// `mask-repeat` → `(x, y)` : `repeat` par défaut (tuilage),
 /// `space`/`round` approchés en `repeat` (nearest — l'écart
 /// de rendu est sub-pixel sur les motifs icon, où la tuile
@@ -3202,7 +3282,11 @@ fn border_img_slice(st: &explorer_css::ComputedStyle) -> [f32; 4] {
     let mut out = [0.0f32; 4];
     let vals: Vec<&str> = v.split_whitespace().filter(|p| *p != "fill").collect();
     for (i, o) in out.iter_mut().enumerate() {
-        let t = vals.get(i).or_else(|| vals.first()).copied().unwrap_or("100%");
+        let t = vals
+            .get(i)
+            .or_else(|| vals.first())
+            .copied()
+            .unwrap_or("100%");
         *o = if let Some(n) = t.strip_suffix('%') {
             -n.parse::<f32>().unwrap_or(0.0)
         } else {
@@ -3242,7 +3326,10 @@ fn border_img_repeat(st: &explorer_css::ComputedStyle) -> (u8, u8) {
         "space" => 3u8,
         _ => 0u8,
     };
-    (m(it.next().unwrap_or("stretch")), m(it.next().unwrap_or("stretch")))
+    (
+        m(it.next().unwrap_or("stretch")),
+        m(it.next().unwrap_or("stretch")),
+    )
 }
 
 fn mask_repeat(st: &explorer_css::ComputedStyle) -> (bool, bool) {
@@ -3361,37 +3448,20 @@ fn paint_self(
                 // texte `url(...)` du style (motif `.x:before`
                 // des icônes MDN), et les masks fetchés sont
                 // enregistrés par l'appelant sur la même clé.
-                let mask = bx.node.and_then(|n| images.masks.get(&n)).or_else(|| {
-                    crate::dataurl::mask_url(&bx.style).and_then(|u| images.masks_url.get(&u))
-                });
-                if let Some(mask) = mask {
-                    // `mask-size`/`mask-position`/`mask-repeat`
-                    // résolus en zone d'une tuile (`dst`) —
-                    // aire = border box (mask-origin/clip
-                    // initiaux, § mask-clip).
-                    let area = (rect.width, rect.height);
-                    let fs = font_size_of(&bx.style);
-                    let (mw, mh) =
-                        mask_size(&bx.style, area, (mask.width as f32, mask.height as f32), fs);
-                    let (px, py) = bg_position(
-                        bx.style
-                            .get("mask-position")
-                            .or_else(|| bx.style.get("-webkit-mask-position")),
-                        area,
-                        (mw, mh),
-                        fs,
-                    );
+                // R-252 — boîte à contenu (enfants/lignes) :
+                // le `PushMask` ancêtre masque déjà le groupe
+                // — fond plein ici, un `MaskedFill`
+                // re-masquerait (alpha² sur les bords doux).
+                let group_masked = !bx.children.is_empty() || !bx.lines.is_empty();
+                if let Some((mask, dst, repeat)) =
+                    resolve_mask(bx, &rect, images).filter(|_| !group_masked)
+                {
                     items.push(DisplayItem::MaskedFill {
                         rect,
                         color: c,
-                        mask: mask.clone(),
-                        dst: Rect {
-                            x: rect.x + px,
-                            y: rect.y + py,
-                            width: mw,
-                            height: mh,
-                        },
-                        repeat: mask_repeat(&bx.style),
+                        mask,
+                        dst,
+                        repeat,
                     });
                 } else if bx
                     .style
@@ -3492,8 +3562,8 @@ fn paint_self(
     // dessus reste pour les coins/rayons et les bords non
     // couverts par l'image).
     if !anonymous && !inline_flow && !empty_hidden {
-        if let Some(img) = crate::dataurl::border_img_url(&bx.style)
-            .and_then(|u| images.borders_url.get(&u))
+        if let Some(img) =
+            crate::dataurl::border_img_url(&bx.style).and_then(|u| images.borders_url.get(&u))
         {
             items.push(DisplayItem::BorderImage {
                 rect,
@@ -4592,12 +4662,24 @@ fn translate_item(it: &DisplayItem, d: (f32, f32)) -> DisplayItem {
         D::PushClipPath { points } => D::PushClipPath {
             points: points.iter().map(|p| (p.0 + d.0, p.1 + d.1)).collect(),
         },
+        D::PushMask {
+            rect,
+            mask,
+            dst,
+            repeat,
+        } => D::PushMask {
+            rect: shifted(*rect, d),
+            mask: mask.clone(),
+            dst: shifted(*dst, d),
+            repeat: *repeat,
+        },
         D::PopClip
         | D::PopTransform
         | D::PushFilter(_)
         | D::PopFilter
         | D::PushBlend(_)
-        | D::PopBlend => it.clone(),
+        | D::PopBlend
+        | D::PopMask => it.clone(),
         D::Emphasis {
             origin,
             run,
@@ -5049,6 +5131,28 @@ fn paint_box<'a>(
         });
         return;
     }
+    // R-252 — `mask-image` de groupe (css-masking-1) : quand
+    // la boîte peint plus que son `background-color` (enfants
+    // ou lignes), l'alpha du mask s'applique à TOUT le
+    // sous-arbre — bracket **outermost** (ordre spec :
+    // filter → clip → mask). Les feuilles « icône pure »
+    // gardent `MaskedFill` (pas de buffer offscreen). Limites
+    // documentées — communes aux autres brackets : les
+    // descendants reportés hors racine (`pos_defer` au
+    // contexte ancêtre, `fixed_defer`) échappent au groupe.
+    let group_mask = if bx.children.is_empty() && bx.lines.is_empty() {
+        None
+    } else {
+        resolve_mask(bx, &shifted(bx.rect, off), cx.images)
+    };
+    if let Some((mask, dst, repeat)) = &group_mask {
+        items.push(DisplayItem::PushMask {
+            rect: shifted(bx.rect, off),
+            mask: mask.clone(),
+            dst: *dst,
+            repeat: *repeat,
+        });
+    }
     // R-M5 — `filter` encadre TOUTE la sous-arbre de la
     // boîte (contenu + descendants) : bracket hors-écran
     // `PushFilter`…`PopFilter` ; la récursion des enfants
@@ -5099,6 +5203,9 @@ fn paint_box<'a>(
     }
     if filtered {
         items.push(DisplayItem::PopFilter);
+    }
+    if group_mask.is_some() {
+        items.push(DisplayItem::PopMask);
     }
 }
 

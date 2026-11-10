@@ -1198,3 +1198,20 @@ luminance` et `mask-composite` = résidus documentés.
 - **Cran 13** — bundle `kevlar_base.js` lu : `_stampTemplate`/`_bindTemplate`/`nodeInfoList`/`dynamicFns`/`_evaluateBinding`/`iDo` (locator par index) — l'apply `isCompound` (`[[X]]`+fallback) tourne **au stamp**. Le binding des annotations **texte sur DOM SSR existant** (sans re-stamp) n'est atteignable ni via globales sondées (`yt.scheduler`/`ypc`/`Polymer.Settings`/`default_kevlar_base`), ni dans `kevlar_base.js`/`webcomponents-sd.js`/inline-766 Ko (données JSON). Driver = module-interne kevlar, chunk probablement non capturé.
 - **Cran 14** — ShadyDOM : `ShadyDOM.inUse:true`, `__shady_*` posés sur `Node.prototype` — polyfill sain ; `__shady_getRootNode is not a function` (vu en énumérant `pc`) = getter kevlar sur objet non-nœud, bénin.
 - **Levier suivant** : `EXPLORER_NET_RECORD` sur un vol complet → capturer **tous** les chunks jsbin → grep `annotate`/`_evaluateBinding`/`bind`/`iDo` — le driver SSR-bind vit dans l'un d'eux. Fallback contenu (`[[path]]`→`__data`) écarté : réécriture de contenu, pas la mécanique réelle.
+
+## R-252 — `DisplayItem` : mask de groupe (PIPE → NAV, extension additive)
+
+`DisplayItem` gagne `PushMask{rect, dst, repeat, mask}` / `PopMask` —
+bracket hors-écran appliquant l'alpha d'un `mask-image` à tout le
+sous-arbre de la boîte (css-masking-1), posé à la racine de
+`paint_box` quand l'élément peint plus que son `background-color`
+(le cas « icône pure » garde `MaskedFill`, sans buffer). Ordre des
+brackets : `PushMask` **outermost** (spec : filter → clip → mask).
+
+Impact NAV : extension additive — les `match` exhaustifs sur
+`DisplayItem` gagnent un bras (`paint_helpers::display_item_bounds`
+→ `None`, item d'état ; `cull_display_list` conserve comme
+`PushFilter`). `masks`/`masks_url` inchangés. Résolus à l'émission :
+`mask-size`/`mask-position`/`mask-repeat` dans `dst`/`repeat` ;
+`mask-clip`/`mask-origin` non-initiaux, multi-couches, `mask-mode:
+luminance` et `mask-composite` = résidus documentés.

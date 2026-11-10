@@ -819,6 +819,29 @@ pub fn rasterize_dirty_cached(
     Some(prev)
 }
 
+/// Nature d'un groupe hors-écran sur la pile `filtered` de
+/// [`replay_items`] — le kind fait foi au pop (R-252) :
+/// `PopFilter`/`PopBlend`/`PopMask` sont interchangeables,
+/// l'appariement est garanti par l'émission.
+enum GroupKind {
+    /// `filter` — ops appliquées avant composite (R-M5).
+    Ops(Vec<FilterOp>),
+    /// `mix-blend-mode`/`isolation` — fondu au pop (R-185).
+    Blend(u8),
+    /// `mask-image` de groupe — composite modulé par
+    /// l'alpha du bitmap tuilé dans `dst` (R-252).
+    Mask {
+        /// Aire de peinture (border box, coords document).
+        rect: explorer_layout::Rect,
+        /// Bitmap — seul l'alpha est lu.
+        mask: std::sync::Arc<crate::DecodedImage>,
+        /// Tuile résolue (coords document).
+        dst: explorer_layout::Rect,
+        /// `mask-repeat` `(x, y)`.
+        repeat: (bool, bool),
+    },
+}
+
 /// Rejoue les items dans `pixmap` — boucle de peinture
 /// partagée par [`rasterize`] et [`rasterize_dirty`].
 ///
@@ -842,10 +865,11 @@ fn replay_items(
     filter: Option<(&[Option<explorer_layout::Rect>], explorer_layout::Rect)>,
 ) {
     let mut clips: Vec<Mask> = Vec::new();
-    // R-M5 — `filter` : les items d'un groupe
-    // `PushFilter`…`PopFilter` se peignent dans un tampon
-    // offscreen puis reçoivent les ops et se compositent.
-    let mut filtered: Vec<(Pixmap, Vec<FilterOp>, u8)> = Vec::new();
+    // R-M5 — groupes hors-écran : `PushFilter`/`PushBlend`/
+    // `PushMask` poussent un tampon ; les items suivants s'y
+    // peignent (`filtered.last_mut()` = cible courante) et le
+    // `Pop*` correspondant le composite selon `GroupKind`.
+    let mut filtered: Vec<(Pixmap, GroupKind)> = Vec::new();
     // Pile des `transform` CSS : `cur` = dpi · produit des
     // matrices actives — recomposé à chaque push/pop (peu de
     // niveaux en pratique).
@@ -955,7 +979,7 @@ fn replay_items(
             }
             DisplayItem::PushFilter(ops) => {
                 if let Some(buf) = Pixmap::new(pixmap.width(), pixmap.height()) {
-                    filtered.push((buf, ops.clone(), 0));
+                    filtered.push((buf, GroupKind::Ops(ops.clone())));
                 }
             }
             // R-185 — `mix-blend-mode`/`isolation` : groupe
@@ -963,31 +987,84 @@ fn replay_items(
             // 0 = `isolation` isolant).
             DisplayItem::PushBlend(tag) => {
                 if let Some(buf) = Pixmap::new(pixmap.width(), pixmap.height()) {
-                    filtered.push((buf, Vec::new(), *tag));
+                    filtered.push((buf, GroupKind::Blend(*tag)));
                 }
             }
-            DisplayItem::PopFilter => {
-                if let Some((mut buf, ops, _)) = filtered.pop() {
-                    apply_filter_ops(&mut buf, &ops);
-                    let dst = filtered.last_mut().map_or(&mut *pixmap, |(b, _, _)| b);
-                    dst.draw_pixmap(
-                        0,
-                        0,
-                        buf.as_ref(),
-                        &tiny_skia::PixmapPaint::default(),
-                        Transform::default(),
-                        clips.last(),
-                    );
+            // R-252 — `mask-image` de groupe : le tampon se
+            // composite au pop modulé par l'alpha du bitmap
+            // (tuile `dst`/`repeat` résolus à l'émission,
+            // aire `rect` = border box).
+            DisplayItem::PushMask {
+                rect,
+                mask,
+                dst,
+                repeat,
+            } => {
+                if let Some(buf) = Pixmap::new(pixmap.width(), pixmap.height()) {
+                    filtered.push((
+                        buf,
+                        GroupKind::Mask {
+                            rect: *rect,
+                            mask: mask.clone(),
+                            dst: *dst,
+                            repeat: *repeat,
+                        },
+                    ));
                 }
             }
-            // R-185 — `PopBlend` : le tampon du groupe se
-            // composite sur le fond accumulé — `blend_channel`
-            // par canal quand le tag > 0, source-over sinon
-            // (isolation = buffer opaque, même coût de copie).
-            DisplayItem::PopBlend => {
-                if let Some((buf, _, tag)) = filtered.pop() {
-                    let dst = filtered.last_mut().map_or(&mut *pixmap, |(b, _, _)| b);
-                    composite_blend(dst, &buf, tag);
+            // Pop générique : le kind porté par le groupe fait
+            // foi — `PopFilter`/`PopBlend`/`PopMask` sont
+            // interchangeables à la raster (l'émission garantit
+            // l'appariement ; un interleave fautif dégrade en
+            // composite du kind réel, jamais un panic).
+            DisplayItem::PopFilter | DisplayItem::PopBlend | DisplayItem::PopMask => {
+                if let Some((mut buf, kind)) = filtered.pop() {
+                    match kind {
+                        GroupKind::Ops(ops) => {
+                            apply_filter_ops(&mut buf, &ops);
+                            let dst = filtered.last_mut().map_or(&mut *pixmap, |(b, _)| b);
+                            dst.draw_pixmap(
+                                0,
+                                0,
+                                buf.as_ref(),
+                                &tiny_skia::PixmapPaint::default(),
+                                Transform::default(),
+                                clips.last(),
+                            );
+                        }
+                        // `blend_channel` par canal quand le
+                        // tag > 0, source-over sinon.
+                        GroupKind::Blend(tag) => {
+                            let dst = filtered.last_mut().map_or(&mut *pixmap, |(b, _)| b);
+                            composite_blend(dst, &buf, tag);
+                        }
+                        GroupKind::Mask {
+                            rect,
+                            mask,
+                            dst: tile,
+                            repeat,
+                        } => {
+                            let cov = group_mask_coverage(
+                                pixmap.width(),
+                                pixmap.height(),
+                                &rect,
+                                &mask,
+                                &tile,
+                                repeat,
+                                cur,
+                                clips.last(),
+                            );
+                            let dst = filtered.last_mut().map_or(&mut *pixmap, |(b, _)| b);
+                            dst.draw_pixmap(
+                                0,
+                                0,
+                                buf.as_ref(),
+                                &tiny_skia::PixmapPaint::default(),
+                                Transform::default(),
+                                cov.as_ref(),
+                            );
+                        }
+                    }
                 }
             }
             // R-M9b — `backdrop-filter` : la région déjà
@@ -998,9 +1075,7 @@ fn replay_items(
                 let (bw, bh) = (r.width.ceil() as u32, r.height.ceil() as u32);
                 if bw > 0 && bh > 0 {
                     if let Some(mut buf) = Pixmap::new(bw, bh) {
-                        let src = filtered
-                            .last()
-                            .map_or(pixmap.as_ref(), |(b, _, _)| b.as_ref());
+                        let src = filtered.last().map_or(pixmap.as_ref(), |(b, _)| b.as_ref());
                         buf.draw_pixmap(
                             0,
                             0,
@@ -1010,7 +1085,7 @@ fn replay_items(
                             None,
                         );
                         apply_filter_ops(&mut buf, ops);
-                        let dst = filtered.last_mut().map_or(&mut *pixmap, |(b, _, _)| b);
+                        let dst = filtered.last_mut().map_or(&mut *pixmap, |(b, _)| b);
                         dst.draw_pixmap(
                             r.x.round() as i32,
                             r.y.round() as i32,
@@ -1038,7 +1113,7 @@ fn replay_items(
                             .is_none_or(|b| rects_overlap(b, win))
                     });
                 if draw {
-                    let dst = filtered.last_mut().map_or(&mut *pixmap, |(b, _, _)| b);
+                    let dst = filtered.last_mut().map_or(&mut *pixmap, |(b, _)| b);
                     paint_item(dst, item, cur, fonts, gc, clips.last());
                 }
             }
@@ -1551,6 +1626,8 @@ fn paint_item(
         | DisplayItem::PopFilter
         | DisplayItem::PushBlend(_)
         | DisplayItem::PopBlend
+        | DisplayItem::PushMask { .. }
+        | DisplayItem::PopMask
         | DisplayItem::BackdropFilter { .. }
         | DisplayItem::PopTransform => {}
     }
@@ -1883,6 +1960,100 @@ fn paint_masked_fill(
     };
     paint.set_color(skia_color(color));
     pixmap.fill_rect(phys, &paint, Transform::default(), Some(&m));
+}
+
+/// Couverture d'un groupe `PushMask` (R-252) : mask
+/// canvas-size dont l'alpha = celui du bitmap tuilé dans
+/// `tile` (zone `rect` = border box transformée — mask
+/// painting area initiale ; hors zone = 0 → groupe
+/// invisible, conforme spec : mask hors zone = élément
+/// masqué entièrement), composé en `min` avec le clip
+/// actif. Même échantillonnage nearest que
+/// [`paint_masked_fill`]. `None` = allocation impossible.
+#[allow(
+    clippy::cast_possible_truncation,
+    clippy::cast_precision_loss,
+    clippy::cast_sign_loss,
+    clippy::too_many_arguments
+)]
+fn group_mask_coverage(
+    pw: u32,
+    ph: u32,
+    rect: &explorer_layout::Rect,
+    img: &crate::DecodedImage,
+    tile: &explorer_layout::Rect,
+    repeat: (bool, bool),
+    cur: Transform,
+    clip: Option<&Mask>,
+) -> Option<Mask> {
+    let mut m = Mask::new(pw, ph)?;
+    let (iw, ih) = (img.width as usize, img.height as usize);
+    if iw == 0 || ih == 0 {
+        return Some(m); // bitmap vide → couverture nulle.
+    }
+    // Aire de peinture + tuile en coords device (bbox sous
+    // transform — approximation documentée pour les
+    // non-axis-aligned).
+    let phys =
+        Rect::from_xywh(rect.x, rect.y, rect.width, rect.height).and_then(|r| r.transform(cur));
+    let Some(phys) = phys else { return Some(m) };
+    let dom = Rect::from_ltrb(0.0, 0.0, pw as f32, ph as f32);
+    let Some(zone) = dom.and_then(|d| phys.intersect(&d)) else {
+        return Some(m);
+    };
+    let Some(dst_phys) =
+        Rect::from_xywh(tile.x, tile.y, tile.width, tile.height).and_then(|r| r.transform(cur))
+    else {
+        return Some(m);
+    };
+    let (dx0, dy0) = (
+        dst_phys.left().round() as i32,
+        dst_phys.top().round() as i32,
+    );
+    let (dw, dh) = (
+        dst_phys.width().round() as i32,
+        dst_phys.height().round() as i32,
+    );
+    if dw <= 0 || dh <= 0 {
+        return Some(m);
+    }
+    let (tile_w, tile_h) = (dw as usize, dh as usize);
+    let (x0, y0) = (zone.left().max(0.0) as i32, zone.top().max(0.0) as i32);
+    let (x1, y1) = (
+        zone.right().ceil().min(pw as f32) as i32,
+        zone.bottom().ceil().min(ph as f32) as i32,
+    );
+    let w = pw as usize;
+    let data = m.data_mut();
+    for py in y0..y1 {
+        let ry = py - dy0;
+        let ty = if repeat.1 {
+            ry.rem_euclid(dh)
+        } else if (0..dh).contains(&ry) {
+            ry
+        } else {
+            continue;
+        };
+        let sy = (ty as usize * ih / tile_h).min(ih - 1);
+        for px in x0..x1 {
+            let rx = px - dx0;
+            let tx = if repeat.0 {
+                rx.rem_euclid(dw)
+            } else if (0..dw).contains(&rx) {
+                rx
+            } else {
+                continue;
+            };
+            let sx = (tx as usize * iw / tile_w).min(iw - 1);
+            data[py as usize * w + px as usize] = img.rgba[(sy * iw + sx) * 4 + 3];
+        }
+    }
+    if let Some(c) = clip {
+        for (d, e) in m.data_mut().iter_mut().zip(c.data().iter()) {
+            *d = (*d).min(*e);
+        }
+    }
+    Some(m)
 }
 
 /// Bitmap `img` blittée dans `rect` sous la transform `cur`.

@@ -71,6 +71,7 @@ fn shared_fonts_delegates_face_and_fallback() {
         caps: 0,
         kern_off: false,
         stretch: 100,
+        feature_settings: Vec::new(),
     };
     // `font_face` délégué (les faces web = index 0 — la
     // preuve forte porte sur `fallback_for` ci-dessous).

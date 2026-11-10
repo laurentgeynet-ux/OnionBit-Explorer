@@ -153,6 +153,7 @@ pub(crate) fn display_item_bounds(item: &DisplayItem) -> Option<Rect> {
         | DisplayItem::Marker { rect, .. }
         | DisplayItem::BackdropFilter { rect, .. }
         | DisplayItem::PushClipRounded { rect, .. }
+        | DisplayItem::BorderImage { rect, .. }
         | DisplayItem::BackgroundImage { rect, .. } => Some(*rect),
         // Mêmes bornes étendues qu'`item_bounds` PIPE.
         DisplayItem::BoxShadow {
@@ -197,6 +198,8 @@ pub(crate) fn display_item_bounds(item: &DisplayItem) -> Option<Rect> {
         | DisplayItem::PopFilter
         | DisplayItem::PushBlend(_)
         | DisplayItem::PopBlend
+        | DisplayItem::PushMask { .. }
+        | DisplayItem::PopMask
         | DisplayItem::Emphasis { .. }
         | DisplayItem::PushClipPath { .. } => None,
     }

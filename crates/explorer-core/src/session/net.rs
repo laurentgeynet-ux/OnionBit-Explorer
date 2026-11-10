@@ -332,7 +332,7 @@ impl Session {
     /// post), `run_pending`, resynchro du miroir et compteur
     /// T2 `evals_sans_mutation`. Extrait pour la borne
     /// clippy — pas de changement de sémantique.
-    #[allow(clippy::too_many_arguments)]
+    #[allow(clippy::too_many_arguments, clippy::too_many_lines)]
     fn run_commit_scripts(
         &mut self,
         tab: TabId,

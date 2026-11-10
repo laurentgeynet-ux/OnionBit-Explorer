@@ -919,3 +919,119 @@ fn slice_peint_seul_au_dessus_de_la_coupe() {
     // #b déborderait son conteneur.
     assert_eq!(px(&sl, 30, 70), [0, 0, 0, 0], "clip rejoué");
 }
+
+// ── R-252 : mask de groupe (css-masking-1) ─────────────────
+
+/// L'alpha du `mask-image` s'applique à TOUT le sous-arbre :
+/// un enfant plein (pas de `background-color` propre sur le
+/// parent) ne passe que par l'alpha du mask — motif wikipedia
+/// « élément masqué dont le contenu restait visible à tort ».
+#[test]
+fn mask_de_groupe_masque_le_contenu() {
+    let dom: Dom = TreeBuilder::parse("<div class=x><div class=c></div></div>");
+    let mut eng = StyleEngine::new();
+    eng.add_css("body{margin:0}", Origin::Author);
+    // Mask 20×20 moitié gauche opaque sur le parent ; l'enfant
+    // peint un carré rouge 20×20 — seule la moitié gauche doit
+    // survivre au composite masqué.
+    eng.add_css(
+        ".x{display:block;width:20px;height:20px;\
+         mask-image:url('data:image/svg+xml;utf8,<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"20\" height=\"20\"><rect x=\"0\" y=\"0\" width=\"10\" height=\"20\" fill=\"black\"/></svg>')}\
+         .c{display:block;width:20px;height:20px;background-color:#ff0000}",
+        Origin::Author,
+    );
+    let styles = eng.compute_tree(&dom, dom.document(), &StyleEnv::default());
+    let root_el = dom
+        .children(dom.document())
+        .into_iter()
+        .flatten()
+        .find(|&c| dom.element(c).is_ok())
+        .expect("élément racine");
+    let mut bx = build_box_tree(&dom, root_el, &styles).expect("arbre");
+    layout_tree(&mut bx, VIEW, &ctx());
+    let imgs = collect_data_images(&dom, &styles, 1 << 20);
+    let list = build_display_list_full(&bx, VIEW, 200.0, 0.0, &imgs);
+    assert!(
+        list.items
+            .iter()
+            .any(|i| matches!(i, explorer_render::DisplayItem::PushMask { .. })),
+        "PushMask attendu, got {}",
+        list.dump()
+    );
+    let f = rasterize(&list, font_src(), 1.0).expect("frame allouée");
+    assert_eq!(px(&f, 5, 10)[0], 255, "contenu sous alpha opaque = rouge");
+    assert_eq!(
+        px(&f, 15, 10),
+        [255, 255, 255, 255],
+        "contenu hors alpha du mask = canvas (masqué)"
+    );
+}
+
+/// Boîte feuille « icône » (sans enfant ni ligne) : le chemin
+/// `MaskedFill` reste celui utilisé — pas de groupe offscreen
+/// pour le motif dominant (perf).
+#[test]
+fn mask_feuille_reste_maskedfill() {
+    let dom: Dom = TreeBuilder::parse("<span class=icon></span>");
+    let mut eng = StyleEngine::new();
+    eng.add_css("body{margin:0}", Origin::Author);
+    eng.add_css(
+        ".icon{display:inline-block;width:20px;height:20px;\
+         mask-image:url('data:image/svg+xml;utf8,<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"20\" height=\"20\"><rect x=\"0\" y=\"0\" width=\"10\" height=\"20\" fill=\"black\"/></svg>');\
+         background-color:#ff0000}",
+        Origin::Author,
+    );
+    let styles = eng.compute_tree(&dom, dom.document(), &StyleEnv::default());
+    let root_el = dom
+        .children(dom.document())
+        .into_iter()
+        .flatten()
+        .find(|&c| dom.element(c).is_ok())
+        .expect("élément racine");
+    let mut bx = build_box_tree(&dom, root_el, &styles).expect("arbre");
+    layout_tree(&mut bx, VIEW, &ctx());
+    let imgs = collect_data_images(&dom, &styles, 1 << 20);
+    let list = build_display_list_full(&bx, VIEW, 200.0, 0.0, &imgs);
+    assert!(
+        !list
+            .items
+            .iter()
+            .any(|i| matches!(i, explorer_render::DisplayItem::PushMask { .. })),
+        "pas de groupe sur feuille, got {}",
+        list.dump()
+    );
+}
+
+/// Shorthand `mask` : `url()` + `position/size` + `repeat` —
+/// éclaté en longhands à la cascade, consommé comme les
+/// déclarations longhand (même rendu que le longhand).
+#[test]
+fn mask_shorthand_alimente_le_groupe() {
+    let dom: Dom = TreeBuilder::parse("<div class=x><div class=c></div></div>");
+    let mut eng = StyleEngine::new();
+    eng.add_css("body{margin:0}", Origin::Author);
+    eng.add_css(
+        ".x{display:block;width:20px;height:20px;\
+         mask:url('data:image/svg+xml;utf8,<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"20\" height=\"20\"><rect x=\"0\" y=\"0\" width=\"10\" height=\"20\" fill=\"black\"/></svg>') no-repeat}\
+         .c{display:block;width:20px;height:20px;background-color:#ff0000}",
+        Origin::Author,
+    );
+    let styles = eng.compute_tree(&dom, dom.document(), &StyleEnv::default());
+    let root_el = dom
+        .children(dom.document())
+        .into_iter()
+        .flatten()
+        .find(|&c| dom.element(c).is_ok())
+        .expect("élément racine");
+    let mut bx = build_box_tree(&dom, root_el, &styles).expect("arbre");
+    layout_tree(&mut bx, VIEW, &ctx());
+    let imgs = collect_data_images(&dom, &styles, 1 << 20);
+    let list = build_display_list_full(&bx, VIEW, 200.0, 0.0, &imgs);
+    let f = rasterize(&list, font_src(), 1.0).expect("frame allouée");
+    assert_eq!(px(&f, 5, 10)[0], 255, "shorthand : alpha opaque = rouge");
+    assert_eq!(
+        px(&f, 15, 10),
+        [255, 255, 255, 255],
+        "shorthand : hors alpha = canvas"
+    );
+}

@@ -510,3 +510,46 @@ fn color_mix_et_oklch_relatif() {
             .unwrap();
     assert!(plyr.a > 100 && plyr.a < 160, "plyr bg : {plyr:?}");
 }
+
+/// R-252 — shorthand `mask` (css-masking-1) : couche complète
+/// `image position/size repeat composite mode box×2` éclatée
+/// en longhands standards ; `-webkit-mask` alias.
+#[test]
+fn mask_shorthand_expande() {
+    let e = expand_shorthand(
+        "mask",
+        "url(icon.svg) center / cover no-repeat padding-box content-box subtract luminance",
+    )
+    .unwrap();
+    let get = |n: &str| e.iter().find(|(k, _)| k == n).map(|(_, v)| v.as_str());
+    assert_eq!(get("mask-image"), Some("url(icon.svg)"));
+    assert_eq!(get("mask-position"), Some("center"));
+    assert_eq!(get("mask-size"), Some("cover"));
+    assert_eq!(get("mask-repeat"), Some("no-repeat"));
+    // Deux boxes : origin puis clip.
+    assert_eq!(get("mask-origin"), Some("padding-box"));
+    assert_eq!(get("mask-clip"), Some("content-box"));
+    assert_eq!(get("mask-composite"), Some("subtract"));
+    assert_eq!(get("mask-mode"), Some("luminance"));
+}
+
+/// `-webkit-mask` minimal : image seule → longhands
+/// standards aux initiales ailleurs (le shorthand
+/// réinitialise tout, comme `background`).
+#[test]
+fn webkit_mask_image_seule() {
+    let e = expand_shorthand("-webkit-mask", "url(i.svg)").unwrap();
+    let get = |n: &str| e.iter().find(|(k, _)| k == n).map(|(_, v)| v.as_str());
+    assert_eq!(get("mask-image"), Some("url(i.svg)"));
+    assert_eq!(get("mask-repeat"), Some("repeat"));
+    assert_eq!(get("mask-mode"), Some("match-source"));
+}
+
+/// Multi-couches : longhands joints par `, ` dans l'ordre.
+#[test]
+fn mask_multi_couches() {
+    let e = expand_shorthand("mask", "url(a), url(b) 50%").unwrap();
+    let get = |n: &str| e.iter().find(|(k, _)| k == n).map(|(_, v)| v.as_str());
+    assert_eq!(get("mask-image"), Some("url(a), url(b)"));
+    assert_eq!(get("mask-position"), Some("0% 0%, 50%"));
+}
