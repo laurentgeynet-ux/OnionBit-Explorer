@@ -1262,6 +1262,20 @@ fn expand_columns(value: &str) -> Vec<(String, String)> {
 /// internes : un `split_whitespace` naïf cassait
 /// `padding:calc(0.25rem * 4)` en trois morceaux invalides et
 /// la déclaration entière sautait (Tailwind v4, R-208).
+/// Token couleur **déclaré** — `parse_color` strict +
+/// `currentcolor` + `light-dark(`/`var(` : ces fonctions ne
+/// se résolvent qu'à la valeur calculée (cascade R-105/
+/// substitution) — le shorthand doit les laisser passer
+/// comme position couleur, sans quoi `background:
+/// light-dark(#eee,#222)` est droppé en entier (mesuré
+/// example.com — fond `#f0f0f2` perdu, R-219).
+fn color_like(part: &str) -> bool {
+    parse_color(part).is_some()
+        || part == "currentcolor"
+        || part.starts_with("light-dark(")
+        || part.starts_with("var(")
+}
+
 fn split_ws_top(value: &str) -> Vec<&str> {
     let mut parts = Vec::new();
     let mut depth = 0i32;
@@ -1320,7 +1334,7 @@ fn expand_border_parts(name: &str, value: &str) -> Vec<(String, String)> {
     for part in split_ws_top(value) {
         if is_border_style(part) {
             style = Some(part);
-        } else if parse_color(part).is_some() || part == "currentcolor" {
+        } else if color_like(part) {
             color = Some(part);
         } else {
             width = Some(part); // width ou inconnu — validation en aval
@@ -1492,7 +1506,7 @@ impl BgParts {
         }
         self.in_size = false;
         self.recognized = true;
-        if parse_color(part).is_some() {
+        if color_like(part) {
             return self.color.replace(part.to_string()).is_none();
         }
         if bg_image_token(part) {
