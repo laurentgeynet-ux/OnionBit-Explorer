@@ -553,3 +553,27 @@ fn mask_multi_couches() {
     assert_eq!(get("mask-image"), Some("url(a), url(b)"));
     assert_eq!(get("mask-position"), Some("0% 0%, 50%"));
 }
+
+/// Mot-clé CSS-wide sur un shorthand (css-cascade-5
+/// §defaulting) : chaque longhand de l'expansion reçoit le
+/// mot-clé — les grammaires strictes le droppaient
+/// (jauge `affectsv` : `outline:inherit` & co).
+#[test]
+fn css_wide_sur_shorthands() {
+    for (sh, n) in [
+        ("outline", 3),
+        ("column-rule", 3),
+        ("flex-flow", 2),
+        ("margin", 4),
+        ("place-self", 2),
+        ("gap", 2),
+        ("border-top", 3),
+    ] {
+        let e = expand_shorthand(sh, "inherit").unwrap_or_else(|| panic!("{sh} expansion"));
+        assert_eq!(e.len(), n, "{sh} : {n} longhands attendus");
+        assert!(
+            e.iter().all(|(_, v)| v == "inherit"),
+            "{sh} : chaque longhand = inherit ({e:?})"
+        );
+    }
+}

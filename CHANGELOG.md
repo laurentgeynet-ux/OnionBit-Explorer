@@ -6,6 +6,10 @@ Le format suit [Keep a Changelog](https://keepachangelog.com/fr/1.1.0/)
 et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
+- **css.values / jauge affectsv — 3 fixes mesurés** (contrat NAV→PIPE) :
+  - **CSS-wide sur shorthands** (`explorer-css`) : `inherit`/`initial`/`unset`/`revert(-layer)` sur un shorthand expanse désormais chaque longhand au mot-clé (liste sondée via valeur canonique) — avant, `outline:inherit`/`flex-flow:inherit`/`column-rule:inherit` étaient droppés par les grammaires strictes (routed-miss). Verrous : `css_wide_sur_shorthands`, `outline_inherit_route_longhands`.
+  - **`align-items`/`align-self` keywords** (`explorer-layout`) : `end`/`self-end`, `safe`/`unsafe` préfixés, `anchor-center`≈center consommés dans `align_offset` — `align-items:self-end|end|safe center|baseline` basculent `ok` dans `check affectsv`. `align-self:*` sur l'item = artefact fixture (stretch = line_cross).
+  - **`display:ruby*`** (`explorer-layout`) : famille ruby → `BoxKind::Inline` (niveau inline css-ruby-1 — annotation posée en ligne, repli sur `block` supprimé). `display:ruby` reste `miss` à la jauge : la fixture `.x` porte `style="display:flex"` en attribut qui gagne — **déclaré artefact mesure**.
 - **Insets logiques pour `position:absolute` + `anchor()` logique** (`explorer-layout`) : `inset-inline-start`/`end` et `inset-block-start`/`end` mappés LTR sur `left`/`right`/`top`/`bottom` dans `abs_geometry` et dans la passe ancre — physique prioritaire ; `writing-mode` vertical/RTL = résidu. Verrous : `insets_logiques_absolus`, `anchor_inset_logique`.
 - **R-252 (suite) — `MaskedFill` multi-couches** (`explorer-render`) : une feuille (`background-color` seul) avec >1 couche `mask-image` bascule en bracket `PushMask`+`MaskedFill`+`PopMask` — l'union des couches s'applique au remplissage sans offscreen superflu.
 - **R-254 (suite) — `justify-self`/`align-self:anchor-center`** (`explorer-layout`) : centre de la boîte ancrée calé sur le centre de l'ancre par axe, compose avec insets/`position-area`. Verrou : `anchor_self_center`.

@@ -289,15 +289,28 @@ fn justify_offsets(j: &str, free: f32, count: usize) -> (f32, f32) {
     }
 }
 
-/// `align-items`/`align-self` → décalage cross de l'item
-/// (`stretch`/`baseline` ≈ `flex-start` — MVP).
+/// `align-items`/`align-self` → décalage cross de l'item.
+/// `<self-position>` complet (css-align-3 §5.3) :
+/// `start`/`end`/`self-*`/`flex-*` mappés sur l'axe physique
+/// (LTR + `flex-direction` — `start` = main-start du conteneur,
+/// `flex-start` = bord de ligne cross-start), `safe`/`unsafe`
+/// préfixés reconnus (`safe` n'a d'effet qu'avec overflow —
+/// approximation documentée), `first/last baseline` ≈
+/// `flex-start` (MVP — alignement bas de ligne absent),
+/// `anchor-center` ≈ `center` hors ancrage.
 fn align_offset(mode: &str, line_cross: f32, item_cross: f32) -> f32 {
-    match mode {
+    // `safe`/`unsafe` modifie le repli overflow — même offset.
+    let m = mode
+        .trim()
+        .strip_prefix("safe ")
+        .or_else(|| mode.trim().strip_prefix("unsafe "))
+        .unwrap_or(mode.trim());
+    match m {
         // Pas de clamp : un item plus grand que la ligne
         // déborde symétriquement / par main-start (même règle
         // que `justify_offsets`).
-        "center" => (line_cross - item_cross) / 2.0,
-        "flex-end" => line_cross - item_cross,
+        "center" | "anchor-center" => (line_cross - item_cross) / 2.0,
+        "flex-end" | "end" | "self-end" => line_cross - item_cross,
         _ => 0.0,
     }
 }
