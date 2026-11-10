@@ -793,3 +793,17 @@ fn anchor_position_area() {
     // top right : au-dessus, bord gauche sur bord droit ancre.
     assert_eq!((n.rect.x, n.rect.y), (140.0, 92.0), "area top right");
 }
+
+/// `anchor()` dans `calc()` (R-254 suite) : substitution
+/// avant évaluation — `calc(anchor(left) + 8px)`.
+#[test]
+fn anchor_dans_calc() {
+    let (dom, bx) = laid(
+        "<div id=a></div><div id=m></div>",
+        "#a{position:absolute;left:40px;top:50px;width:20px;height:10px;anchor-name:--a}\
+         #m{position:absolute;position-anchor:--a;left:calc(anchor(right) + 8px);top:anchor(top);width:5px;height:5px}",
+    );
+    let m = find(&bx, by_id(&dom, "m"));
+    assert_eq!(m.rect.x, 68.0, "anchor(right)+8 dans calc");
+    assert_eq!(m.rect.y, 50.0, "anchor(top) nu");
+}

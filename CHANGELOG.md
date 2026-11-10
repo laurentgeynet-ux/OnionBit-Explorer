@@ -6,6 +6,7 @@ Le format suit [Keep a Changelog](https://keepachangelog.com/fr/1.1.0/)
 et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
+- **R-254 (suite) — `anchor()` dans `calc()`** (`explorer-layout`) : substitution des occurrences `anchor(…)` avant `raw_length_px` — `calc(anchor(left) + 8px)` résolu. Verrou : `anchor_dans_calc`.
 - **R-252 (suite) — `mask-mode:luminance` sur le groupe** (`explorer-render`) : `PushMask`/`GroupKind::Mask`/`group_mask_coverage` gagnent `luminance` — couverture = luma sRGB (0.2126/0.7152/0.0722) × alpha au lieu de l'alpha seul. `MaskedFill` reste alpha-seul (résidu documenté). Verrou : `mask_luminance_groupe`.
 - **R-254 (suite) — `position-area` MVP** (`explorer-layout`) : grille 3×3 autour de l'ancre `position-anchor` — rang `top|bottom|center`, colonne `left|right|center`, alias logiques/`x-*`/`y-*` mappés LTR, axe absent = start-à-start, `span-*` hors portée. Verrou : `anchor_position_area`.
 - **R-252 (suite) — `mask-clip`/`mask-origin` honorés** (`explorer-render`) : `resolve_mask` produit `MaskLayer {mask, dst, clip, repeat}` — la tuile se positionne dans la boîte `mask-origin` et l'aire de peinture du groupe suit `mask-clip` (`border/padding/content-box` ; `margin-box`, `no-clip` et les références SVG approchés). Verrou : `mask_origin_clip_content_box` (padding hors clip = canvas).

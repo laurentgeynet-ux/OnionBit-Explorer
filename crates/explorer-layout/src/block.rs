@@ -495,6 +495,41 @@ fn anchor_point(
     })
 }
 
+/// `anchor()` en position d'inset ou **dans `calc()`**
+/// (R-254 suite) : chaque occurrence `anchor(…)` est
+/// substituée par sa longueur document résolue (ou son
+/// repli), puis la valeur est évaluée comme longueur
+/// ordinaire. `None` = un `anchor()` irrésoluble — le côté
+/// reste inchangé.
+fn anchor_len(
+    raw: &str,
+    axis_x: bool,
+    hint: Option<&str>,
+    anchors: &[(String, Rect)],
+    cb_w: f32,
+    fs: f32,
+    ctx: &BlockCtx,
+) -> Option<f32> {
+    let raw = raw.trim();
+    if raw.starts_with("anchor(") {
+        return anchor_point(raw, axis_x, hint, anchors, cb_w, fs, ctx);
+    }
+    // `calc(… anchor(…) …)` : substitution des occurrences.
+    let mut out = String::with_capacity(raw.len());
+    let mut rest = raw;
+    while let Some(i) = rest.find("anchor(") {
+        out.push_str(&rest[..i]);
+        let sub = &rest[i..];
+        let close = sub.find(')')?;
+        let pt = anchor_point(&sub[..=close], axis_x, hint, anchors, cb_w, fs, ctx)?;
+        use std::fmt::Write as _;
+        let _ = write!(out, "{pt}px");
+        rest = &sub[close + 1..];
+    }
+    out.push_str(rest);
+    raw_length_px(&out, cb_w, fs, ctx)
+}
+
 /// Seconde moitié de la passe : translate chaque boîte
 /// positionnée dont un inset porte `anchor(…)` au bord
 /// d'ancre voulu. `cb_w` = base des `%`/margins de repli
@@ -580,11 +615,11 @@ fn fix_anchor_positioned(
             // `left: anchor(bord)` → margin-box gauche sur le
             // point ; `right: anchor(bord)` → margin-box droit.
             if let Some(v) = st.get("left").filter(|v| v.contains("anchor(")) {
-                if let Some(p) = anchor_point(v, true, hint.as_deref(), anchors, cb_w, cfs, ctx) {
+                if let Some(p) = anchor_len(v, true, hint.as_deref(), anchors, cb_w, cfs, ctx) {
                     dx = p + side_px(st, "margin-left", cb_w, cfs, ctx, 0.0) - bx.rect.x;
                 }
             } else if let Some(v) = st.get("right").filter(|v| v.contains("anchor(")) {
-                if let Some(p) = anchor_point(v, true, hint.as_deref(), anchors, cb_w, cfs, ctx) {
+                if let Some(p) = anchor_len(v, true, hint.as_deref(), anchors, cb_w, cfs, ctx) {
                     dx = p
                         - side_px(st, "margin-right", cb_w, cfs, ctx, 0.0)
                         - bx.rect.width
@@ -592,11 +627,11 @@ fn fix_anchor_positioned(
                 }
             }
             if let Some(v) = st.get("top").filter(|v| v.contains("anchor(")) {
-                if let Some(p) = anchor_point(v, false, hint.as_deref(), anchors, cb_w, cfs, ctx) {
+                if let Some(p) = anchor_len(v, false, hint.as_deref(), anchors, cb_w, cfs, ctx) {
                     dy = p + side_px(st, "margin-top", cb_w, cfs, ctx, 0.0) - bx.rect.y;
                 }
             } else if let Some(v) = st.get("bottom").filter(|v| v.contains("anchor(")) {
-                if let Some(p) = anchor_point(v, false, hint.as_deref(), anchors, cb_w, cfs, ctx) {
+                if let Some(p) = anchor_len(v, false, hint.as_deref(), anchors, cb_w, cfs, ctx) {
                     dy = p
                         - side_px(st, "margin-bottom", cb_w, cfs, ctx, 0.0)
                         - bx.rect.height
