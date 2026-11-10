@@ -38,7 +38,7 @@ fn by_id<'a>(b: &'a LayoutBox, id: &str, dom: &Dom) -> Option<&'a LayoutBox> {
 }
 
 #[test]
-#[ignore = "R-226 — bug mesuré non corrigé : img remplacée en flex → w=0"]
+
 fn img_flex_item_garde_sa_largeur_explicite() {
     let (dom, bx) = laid(
         "<!doctype html><body><a id=a><img id=i1 src=\"/i.png\" \

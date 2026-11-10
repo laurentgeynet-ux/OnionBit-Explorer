@@ -1583,6 +1583,31 @@ fn img_box<S: ::std::hash::BuildHasher>(
         .unwrap_or_default();
     let (kind, text) = match sizes.get(&node) {
         Some(_) => (box_kind_of(&style), None),
+        // R-226 — image indisponible : si `width`/`height`
+        // sont explicites (attribut ou style), la boîte
+        // reste remplacée au gabarit demandé — Chrome peint
+        // le placeholder cassé à ces dimensions, pas un
+        // texte `alt` aplati à 0 (mesuré : img flex item
+        // `width:140px` → 0).
+        // R-226 — `<img>` sans dimensions chargées : une
+        // taille CSS explicite garde la boîte remplacée
+        // (Chrome peint le placeholder cassé à ces
+        // dimensions — `alt` est un texte de secours, pas
+        // la géométrie). `input[type=image]` garde le
+        // repli `alt` : là, c'est le libellé du bouton.
+        None if dom.tag_name(node).is_ok_and(|t| t == "img")
+            && {
+                let sized = |p: &str| {
+                    style.get(p).is_some_and(|v| {
+                        let v = v.trim();
+                        v != "auto" && !v.ends_with('%')
+                    })
+                };
+                sized("width") || sized("height")
+            } =>
+        {
+            (box_kind_of(&style), None)
+        }
         None => (BoxKind::Text, (!alt.is_empty()).then(|| alt.to_owned())),
     };
     let mut bx = leaf_box(kind, node, style, sizes.get(&node).copied());
