@@ -393,6 +393,10 @@ const SUPPORTED_PROPS: &[&str] = &[
     "clip",
     "clip-path",
     "color",
+    "-webkit-text-fill-color",
+    "-webkit-text-stroke",
+    "-webkit-text-stroke-color",
+    "-webkit-text-stroke-width",
     "column-count",
     "column-gap",
     "contain",
@@ -2472,6 +2476,14 @@ impl StyleEngine {
         // (l'ordre fin n'est pas préservable en `HashMap` —
         // approximation documentée).
         resolve_logical_props(&mut props, parent, &ranks);
+        // R-235 — `-webkit-text-fill-color` remplace `color`
+        // pour le remplissage du texte (spec compat : le fill
+        // l'emporte quand présent, sauf `transparent`).
+        if let Some(v) = props.get("-webkit-text-fill-color").cloned() {
+            if v.trim() != "transparent" {
+                props.insert("color".to_string(), v);
+            }
+        }
         // Propriétés custom `--*` : héritées par défaut (spec)
         // — R-57 : la table effective du parent est PARTAGÉE
         // (bump `Arc` O(1)) au lieu de recopier chaque entrée ;

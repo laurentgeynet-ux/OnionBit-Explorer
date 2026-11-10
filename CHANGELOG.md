@@ -6,6 +6,7 @@ Le format suit [Keep a Changelog](https://keepachangelog.com/fr/1.1.0/)
 et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
+- **R-235 — `-webkit-text-fill-color` + `-webkit-text-stroke*`** (`explorer-css`, BCD ×4) : fill remplace `color` sauf `transparent` (post-cascade), stroke reconnus. Verrous : 3 tests.
 - **R-236 — longhands `border-*`/`inset-*` logiques** (`explorer-css`, BCD) : table + routage `border-{block,inline}-{start,end}[-{color,style,width}]` + `border-{s,e}{s,e}-radius` + `inset-{block,inline}[-{start,end}]` — vrai bug trouvé : le coin logique émettait `border-{h}-{v}-radius` (nom fantôme, jamais routé) au lieu de `border-{v}-{h}-radius`. Verrous : 5 tests LTR/RTL.
 - **R-233 — `animation-*` longhands reconnus** (`explorer-css`, BCD R-232→237) : `animation-name`/`duration`/`timing-function`/`delay`/`iteration-count`/`direction`/`fill-mode`/`play-state` ajoutés à la table — les longhands posés hors shorthand rejoignent `animation_decls` (déjà lus par index). Verrous : 2 tests.
 - **R-231 — `@custom-media <--nom> (q)` : alias de media query** (`explorer-css`, `at.unapplied.custom-media` ×42 github) : enregistrement `Statement` nom→query, substitution à la collecte `@media (--nom)` → query alias (un niveau de récursion), négation composée. Verrou : `custom_media.rs` (1366→visible, 500→`none`).
