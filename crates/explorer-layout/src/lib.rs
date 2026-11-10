@@ -21,6 +21,7 @@ pub mod block;
 mod boxtree;
 mod flex;
 pub mod font;
+pub mod geometry;
 mod grid;
 mod hit;
 pub mod inline;
@@ -36,6 +37,7 @@ pub use boxtree::{
     scrollable_overflow_bottom, BoxKind, BoxSlot, Float, LayoutBox, Overflow, Position, Rect,
 };
 pub use font::{FontCache, FontMetrics, FontRequest, FontSource, Glyph, ShapedRun};
+pub use geometry::{geometry_dump, GeomEntry, GeometryDump};
 pub use hit::{hit_test, hit_test_scrolled, hit_test_scrolled_vp, sticky_offset};
 pub use inline::{fragment_sub_rect, Fragment, LineBox};
 pub use relayout::{relayout_subtree, Relayout};

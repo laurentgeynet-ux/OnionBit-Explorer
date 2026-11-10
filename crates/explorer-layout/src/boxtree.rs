@@ -93,7 +93,7 @@ pub enum Overflow {
     /// Clippé à la padding box.
     Hidden,
     /// Clippé sans défilement possible — comportement
-    /// identique à [`Hidden`] ici (pas de scroll interne,
+    /// identique à `Hidden` ici (pas de scroll interne,
     /// journalisé) ; n'est **pas** un scroll container →
     /// pas de BFC (css-overflow-3 §3, R-172).
     Clip,

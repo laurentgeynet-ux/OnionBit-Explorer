@@ -1476,7 +1476,7 @@ fn svg_intrinseque_contribue_sous_flex_et_ib() {
             91.0,
         ),
     ] {
-        let (dom, bx) = laid_sized(html, css, &sz);
+        let (dom, bx) = laid_sized(html, css, sz);
         let a = find(&bx, by_tag(&dom, "a"));
         assert!(
             approx(a.rect.width, want),

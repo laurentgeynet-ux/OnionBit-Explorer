@@ -3771,6 +3771,17 @@ chez NAVIGATEUR — non recopiés ici.
   suivant), anomalies géométriques boxtree (attend le dump
   normalisé du sprint 3). Verrous : 3 tests common + 5 css +
   2 html — suites des trois crates vertes.
+- [x] **R-208. Dump géométrique normalisé `NodeId→rect`** :
+  la pièce PIPE du diff boîte-à-boîte vs Chrome (sprint 3,
+  demande journal « `--report` + dump normalisé »).
+  `explorer_layout::geometry_dump(&LayoutBox) ->
+  GeometryDump { width, height, entries }` : union des
+  fragments par nœud (= `getBoundingClientRect`), boîtes
+  anonymes ignorées, fragments de ligne couverts, ordre de
+  première apparition déterministe. La sérialisation JSON et
+  la jointure `(tag,id,cls)` ↔ `ref.json` relèvent de NAV —
+  le domaine rend la donnée, pas le transport. Verrous :
+  2 tests `geometry` ; bonus clippy/rustdoc du crate soldés.
 ## Tâches continues
 
 - **Triage rendu** des échecs `site_smoke.ps1` : les écarts
