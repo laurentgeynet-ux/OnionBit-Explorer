@@ -826,3 +826,90 @@ fn anchor_size_dimensionne() {
         "taille = ancre"
     );
 }
+
+/// `position-try:flip-block` (R-254 suite) : la bulle
+/// ancrée sous l'ancre qui déborde le bas du viewport est
+/// mirée au-dessus de l'ancre.
+#[test]
+fn anchor_position_try_flip() {
+    let (dom, bx) = laid(
+        "<div id=a></div><div id=m></div><div id=n></div>",
+        // Viewport 600×800. Ancre à y=750 → la bulle
+        // `anchor(bottom)` (h=30 → y 770..800 pile ? on force
+        // le débordement : hauteur 80 → 750+20+80=850 > 800).
+        "#a{position:absolute;left:10px;top:750px;width:40px;height:20px;anchor-name:--a}\
+         #m{position:absolute;position-anchor:--a;top:anchor(bottom);left:anchor(left);\
+            width:30px;height:80px;position-try:flip-block}\
+         #n{position:absolute;position-anchor:--a;top:anchor(bottom);left:anchor(left);\
+            width:30px;height:80px}",
+    );
+    let m = find(&bx, by_id(&dom, "m"));
+    let n = find(&bx, by_id(&dom, "n"));
+    // Sans try : sous l'ancre → 770.
+    assert_eq!(n.rect.y, 770.0, "contrôle : ancré sous l'ancre");
+    // Avec flip-block : miroir → centre ancre 760, bulle 80
+    // → y = 2*760 - 770 - 80 = 670.
+    assert_eq!(m.rect.y, 670.0, "flip-block : mirée au-dessus");
+}
+
+/// `position-try-order` (R-254 suite) : `most-width` ne
+/// flip que l'axe horizontal — un débordement vertical ne
+/// provoque plus de miroir.
+#[test]
+fn anchor_position_try_order() {
+    let (dom, bx) = laid(
+        "<div id=a></div><div id=m></div>",
+        "#a{position:absolute;left:10px;top:750px;width:40px;height:20px;anchor-name:--a}\
+         #m{position:absolute;position-anchor:--a;top:anchor(bottom);left:anchor(left);\
+            width:30px;height:80px;position-try:flip-block;position-try-order:most-width}",
+    );
+    let m = find(&bx, by_id(&dom, "m"));
+    assert_eq!(m.rect.y, 770.0, "most-width : flip-block ignoré");
+}
+
+/// `justify-self`/`align-self:anchor-center` (R-254 suite) :
+/// la bulle est centrée sur l'ancre selon chaque axe nommé.
+#[test]
+fn anchor_self_center() {
+    let (dom, bx) = laid(
+        "<div id=a></div><div id=m></div>",
+        "#a{position:absolute;left:100px;top:100px;width:60px;height:20px;anchor-name:--a}\
+         #m{position:absolute;position-anchor:--a;width:20px;height:10px;\
+            justify-self:anchor-center;align-self:anchor-center}",
+    );
+    let m = find(&bx, by_id(&dom, "m"));
+    assert_eq!(m.rect.x, 120.0, "centré h : 100+30−10");
+    assert_eq!(m.rect.y, 105.0, "centré v : 100+10−5");
+}
+
+/// Insets logiques (css-logical-1) : `inset-inline-start`/
+/// `inset-block-start` mappés LTR sur `left`/`top` —
+/// la valeur physique gagne.
+#[test]
+fn insets_logiques_absolus() {
+    let (dom, bx) = laid(
+        "<div id=m></div><div id=n></div>",
+        "#m{position:absolute;inset-inline-start:50px;inset-block-start:60px;width:10px;height:10px}\
+         #n{position:absolute;inset-inline-start:50px;left:70px;inset-block-start:60px;width:10px;height:10px}",
+    );
+    let m = find(&bx, by_id(&dom, "m"));
+    let n = find(&bx, by_id(&dom, "n"));
+    assert_eq!((m.rect.x, m.rect.y), (50.0, 60.0), "logiques → physiques");
+    assert_eq!(n.rect.x, 70.0, "physique > logique");
+    assert_eq!(n.rect.y, 60.0, "logique seul = résolu");
+}
+
+/// `anchor()` en inset **logique** (R-254 suite) :
+/// `inset-inline-start:anchor(left)` se comporte comme
+/// `left:anchor(left)` en LTR.
+#[test]
+fn anchor_inset_logique() {
+    let (dom, bx) = laid(
+        "<div id=a></div><div id=m></div>",
+        "#a{position:absolute;left:40px;top:50px;width:20px;height:10px;anchor-name:--a}\
+         #m{position:absolute;position-anchor:--a;inset-inline-start:anchor(right);inset-block-start:anchor(top);width:5px;height:5px}",
+    );
+    let m = find(&bx, by_id(&dom, "m"));
+    assert_eq!(m.rect.x, 60.0, "inline-start = left → bord droit");
+    assert_eq!(m.rect.y, 50.0, "block-start = top");
+}

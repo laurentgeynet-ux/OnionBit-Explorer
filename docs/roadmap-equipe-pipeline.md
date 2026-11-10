@@ -3860,8 +3860,13 @@ de noms. Ordre fixe (priorité par site-impact mesuré) :
 4. **`anchor-*`/`position-try`** — MVP livré (R-254) — github
    ×96 : `anchor-name`/`position-anchor`/`anchor(<côté>|center|
    <%>[,repli])` résolus post-layout (`resolve_anchor_positioning`).
-   Résidus : `position-area`, `anchor-center`, `anchor-size()`,
-   `position-try*`, `anchor()` en `calc`/insets logiques.
+   Résidus : `@position-try` nommées + `most-*` en valeur de
+   `position-try` ; `anchor()`/`anchor-size()` en insets
+   logiques (les insets logiques ne sont pas consommés du tout
+   — gap distinct). Livrés en suite : `position-area` 3×3,
+   `anchor-center` (justify/align-self), `anchor-size()`,
+   `anchor()` dans `calc()`, flips `position-try`+
+   `position-try-order` sur débordement viewport.
 5. **`text-wrap`/`text-wrap-mode`/`text-wrap-style`** — livré (R-249) — `balance`
    (titres) : mesure de ligne + répartiteur.
 6. **`unicode-bidi`/`text-orientation`** — vérifié 2026-11-10 :

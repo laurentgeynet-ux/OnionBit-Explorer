@@ -2082,7 +2082,12 @@ fn coverage_tile(
                 img.rgba[i4 + 3]
             };
             let d = &mut data[py as usize * w + px as usize];
-            *d = (*d).max(cov);
+            *d = match layer.composite {
+                1 => (*d).min(cov),                 // intersect
+                2 => (*d) * (255 - cov) / 255,      // subtract
+                3 => (*d).max(cov) - (*d).min(cov), // exclude
+                _ => (*d).max(cov),                 // add (union)
+            };
         }
     }
 }

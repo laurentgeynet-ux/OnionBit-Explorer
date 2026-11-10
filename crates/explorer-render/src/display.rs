@@ -3343,6 +3343,12 @@ fn resolve_mask(bx: &LayoutBox, rect: &Rect, images: &crate::PaintImages) -> Vec
             repeat: mask_layer_prop(&bx.style, "mask-repeat", i)
                 .map_or_else(|| mask_repeat(&bx.style), mask_repeat_raw),
             luminance: mask_layer_prop(&bx.style, "mask-mode", i).is_some_and(|v| v == "luminance"),
+            composite: mask_layer_prop(&bx.style, "mask-composite", i).map_or(0, |v| match v {
+                "intersect" => 1,
+                "subtract" => 2,
+                "exclude" => 3,
+                _ => 0,
+            }),
         });
     }
     out
@@ -3465,6 +3471,10 @@ pub struct MaskTile {
     pub repeat: (bool, bool),
     /// `mask-mode:luminance` de la couche.
     pub luminance: bool,
+    /// `mask-composite` de la couche : 0 `add` (initial —
+    /// union max), 1 `intersect` (min), 2 `subtract`
+    /// (`d×(1−cov)`), 3 `exclude` (xor).
+    pub composite: u8,
 }
 
 /// Résolution d'une couche `mask-*` (R-252) : bitmap dont
@@ -3482,6 +3492,8 @@ struct MaskLayer {
     repeat: (bool, bool),
     /// `mask-mode:luminance` résolu.
     luminance: bool,
+    /// `mask-composite` de la couche (0 add…3 exclude).
+    composite: u8,
 }
 
 /// `mask-repeat` → `(x, y)` : `repeat` par défaut (tuilage),
@@ -3673,16 +3685,36 @@ fn paint_self(
                 // — fond plein ici, un `MaskedFill`
                 // re-masquerait (alpha² sur les bords doux).
                 let group_masked = !bx.children.is_empty() || !bx.lines.is_empty();
-                if let Some(l) = (!group_masked)
-                    .then(|| resolve_mask(bx, &rect, images))
-                    .and_then(|mut ls| {
-                        if ls.is_empty() {
-                            None
-                        } else {
-                            Some(ls.remove(0))
-                        }
-                    })
-                {
+                let mut mask_layers = if group_masked {
+                    Vec::new()
+                } else {
+                    resolve_mask(bx, &rect, images)
+                };
+                // Feuille **multi-couches** : `MaskedFill` ne
+                // porte qu'une couche — bracket groupe autour
+                // du remplissage, la couverture du groupe fait
+                // l'union des couches (R-252 suite).
+                let pushed_group = mask_layers.len() > 1;
+                if pushed_group {
+                    items.push(DisplayItem::PushMask {
+                        rect,
+                        layers: mask_layers
+                            .iter()
+                            .map(|l| MaskTile {
+                                mask: l.mask.clone(),
+                                dst: l.dst,
+                                repeat: l.repeat,
+                                luminance: l.luminance,
+                                composite: l.composite,
+                            })
+                            .collect(),
+                    });
+                }
+                if let Some(l) = if mask_layers.is_empty() {
+                    None
+                } else {
+                    Some(mask_layers.remove(0))
+                } {
                     items.push(DisplayItem::MaskedFill {
                         rect,
                         color: c,
@@ -3691,6 +3723,9 @@ fn paint_self(
                         repeat: l.repeat,
                         luminance: l.luminance,
                     });
+                    if pushed_group {
+                        items.push(DisplayItem::PopMask);
+                    }
                 } else if bx
                     .style
                     .get("background-clip")
@@ -4901,6 +4936,7 @@ fn translate_item(it: &DisplayItem, d: (f32, f32)) -> DisplayItem {
                     dst: shifted(l.dst, d),
                     repeat: l.repeat,
                     luminance: l.luminance,
+                    composite: l.composite,
                 })
                 .collect(),
         },
@@ -5386,6 +5422,7 @@ fn paint_box<'a>(
                     dst: l.dst,
                     repeat: l.repeat,
                     luminance: l.luminance,
+                    composite: l.composite,
                 })
                 .collect(),
         });

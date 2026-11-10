@@ -403,7 +403,8 @@ pub(crate) fn resolve_anchor_positioning(root: &mut LayoutBox, ctx: &BlockCtx, f
     // replis `anchor(…, <len>)` doivent encore résoudre.
     let mut anchors: Vec<(String, Rect)> = Vec::new();
     collect_anchor_names(root, &mut anchors);
-    fix_anchor_positioned(root, &anchors, root.rect.width.max(1.0), ctx, fs);
+    let (vw, vh) = (root.rect.width.max(1.0), root.rect.height.max(1.0));
+    fix_anchor_positioned(root, &anchors, vw, vh, ctx, fs);
 }
 
 /// Collecte `anchor-name` → rect (parcours préfixe = ordre
@@ -609,6 +610,7 @@ fn fix_anchor_positioned(
     bx: &mut LayoutBox,
     anchors: &[(String, Rect)],
     cb_w: f32,
+    vp_h: f32,
     ctx: &BlockCtx,
     fs: f32,
 ) {
@@ -695,43 +697,165 @@ fn fix_anchor_positioned(
                     }
                 }
             }
-        } else if has("left") || has("right") || has("top") || has("bottom") {
+        } else if has("left")
+            || has("right")
+            || has("top")
+            || has("bottom")
+            || has("inset-inline-start")
+            || has("inset-inline-end")
+            || has("inset-block-start")
+            || has("inset-block-end")
+        {
             let cfs = font_size_px(st, fs, ctx);
             let mut dx = 0.0_f32;
             let mut dy = 0.0_f32;
+            // Physique prioritaire, logique en repli (LTR —
+            // même règle que `abs_geometry`) : `inset-inline-
+            // start`→left, `inset-block-start`→top…
+            let side_anchor =
+                |st: &ComputedStyle, phys: &str, log: &str, axis_x: bool| -> Option<f32> {
+                    let raw = st
+                        .get(phys)
+                        .or_else(|| st.get(log))
+                        .filter(|v| v.contains("anchor("))?;
+                    anchor_len(raw, axis_x, hint.as_deref(), anchors, cb_w, cfs, ctx)
+                };
             // `left: anchor(bord)` → margin-box gauche sur le
             // point ; `right: anchor(bord)` → margin-box droit.
-            if let Some(v) = st.get("left").filter(|v| v.contains("anchor(")) {
-                if let Some(p) = anchor_len(v, true, hint.as_deref(), anchors, cb_w, cfs, ctx) {
-                    dx = p + side_px(st, "margin-left", cb_w, cfs, ctx, 0.0) - bx.rect.x;
-                }
-            } else if let Some(v) = st.get("right").filter(|v| v.contains("anchor(")) {
-                if let Some(p) = anchor_len(v, true, hint.as_deref(), anchors, cb_w, cfs, ctx) {
-                    dx = p
-                        - side_px(st, "margin-right", cb_w, cfs, ctx, 0.0)
-                        - bx.rect.width
-                        - bx.rect.x;
-                }
+            if let Some(p) = side_anchor(st, "left", "inset-inline-start", true) {
+                dx = p + side_px(st, "margin-left", cb_w, cfs, ctx, 0.0) - bx.rect.x;
+            } else if let Some(p) = side_anchor(st, "right", "inset-inline-end", true) {
+                dx = p
+                    - side_px(st, "margin-right", cb_w, cfs, ctx, 0.0)
+                    - bx.rect.width
+                    - bx.rect.x;
             }
-            if let Some(v) = st.get("top").filter(|v| v.contains("anchor(")) {
-                if let Some(p) = anchor_len(v, false, hint.as_deref(), anchors, cb_w, cfs, ctx) {
-                    dy = p + side_px(st, "margin-top", cb_w, cfs, ctx, 0.0) - bx.rect.y;
-                }
-            } else if let Some(v) = st.get("bottom").filter(|v| v.contains("anchor(")) {
-                if let Some(p) = anchor_len(v, false, hint.as_deref(), anchors, cb_w, cfs, ctx) {
-                    dy = p
-                        - side_px(st, "margin-bottom", cb_w, cfs, ctx, 0.0)
-                        - bx.rect.height
-                        - bx.rect.y;
-                }
+            if let Some(p) = side_anchor(st, "top", "inset-block-start", false) {
+                dy = p + side_px(st, "margin-top", cb_w, cfs, ctx, 0.0) - bx.rect.y;
+            } else if let Some(p) = side_anchor(st, "bottom", "inset-block-end", false) {
+                dy = p
+                    - side_px(st, "margin-bottom", cb_w, cfs, ctx, 0.0)
+                    - bx.rect.height
+                    - bx.rect.y;
             }
             if dx != 0.0 || dy != 0.0 {
                 crate::flex::translate_subtree(bx, dx, dy);
             }
         }
+        // `justify-self`/`align-self:anchor-center` (R-254
+        // suite) : centre de la boîte calé sur le centre de
+        // l'ancre sur l'axe nommé — compose avec l'ancrage
+        // d'insets ou `position-area` déjà appliqué.
+        if let Some(name) = hint.as_deref() {
+            if let Some((_, ar)) = anchors
+                .iter()
+                .rev()
+                .find(|(n, _)| n.trim_start_matches("--") == name)
+            {
+                let j = bx.style.get("justify-self").map_or("", |v| v.trim());
+                let a = bx.style.get("align-self").map_or("", |v| v.trim());
+                let (mut cx, mut cy) = (0.0_f32, 0.0_f32);
+                if j == "anchor-center" {
+                    cx = ar.x + ar.width / 2.0 - (bx.rect.x + bx.rect.width / 2.0);
+                }
+                if a == "anchor-center" {
+                    cy = ar.y + ar.height / 2.0 - (bx.rect.y + bx.rect.height / 2.0);
+                }
+                if cx != 0.0 || cy != 0.0 {
+                    crate::flex::translate_subtree(bx, cx, cy);
+                }
+            }
+        }
+        // `position-try`/`position-try-fallbacks` (R-254
+        // suite) : fallbacks flip — la boîte résolue qui
+        // déborde le viewport sur un axe flippé est mirée
+        // autour du centre de l'ancre. MVP borné :
+        // `flip-block`/`flip-y`, `flip-inline`/`flip-x`,
+        // `flip-start` = axe en débordement ; options
+        // `@position-try` nommées et `most-*` = résidus.
+        if let Some(name) = hint.as_deref() {
+            if let Some(raw_try) = bx
+                .style
+                .get("position-try")
+                .or_else(|| bx.style.get("position-try-fallbacks"))
+            {
+                if let Some((_, ar)) = anchors
+                    .iter()
+                    .rev()
+                    .find(|(n, _)| n.trim_start_matches("--") == name)
+                {
+                    let over_l = bx.rect.x < 0.0;
+                    let over_r = bx.rect.x + bx.rect.width > cb_w;
+                    let over_t = bx.rect.y < 0.0;
+                    let over_b = bx.rect.y + bx.rect.height > vp_h;
+                    // `position-try-order` (R-254 suite) :
+                    // `most-width`/`most-inline-size` = flip
+                    // horizontal seul, `most-height`/
+                    // `most-block-size` = vertical seul ;
+                    // `normal`/absent = les deux (résidus :
+                    // tri complet des fallbacks ordonnés).
+                    let order = bx
+                        .style
+                        .get("position-try-order")
+                        .map_or("normal", |v| v.trim());
+                    let (mut fx, mut fy) = (0.0_f32, 0.0_f32);
+                    for t in raw_try.split_ascii_whitespace() {
+                        match t {
+                            "flip-block" | "flip-y"
+                                if (over_t || over_b)
+                                    && matches!(
+                                        order,
+                                        "normal" | "most-height" | "most-block-size" | "most-size"
+                                    ) =>
+                            {
+                                fy = 2.0 * (ar.y + ar.height / 2.0)
+                                    - 2.0 * bx.rect.y
+                                    - bx.rect.height;
+                            }
+                            "flip-inline" | "flip-x"
+                                if (over_l || over_r)
+                                    && matches!(
+                                        order,
+                                        "normal" | "most-width" | "most-inline-size" | "most-size"
+                                    ) =>
+                            {
+                                fx =
+                                    2.0 * (ar.x + ar.width / 2.0) - 2.0 * bx.rect.x - bx.rect.width;
+                            }
+                            "flip-start" => {
+                                if (over_t || over_b)
+                                    && matches!(
+                                        order,
+                                        "normal" | "most-height" | "most-block-size" | "most-size"
+                                    )
+                                {
+                                    fy = 2.0 * (ar.y + ar.height / 2.0)
+                                        - 2.0 * bx.rect.y
+                                        - bx.rect.height;
+                                }
+                                if (over_l || over_r)
+                                    && matches!(
+                                        order,
+                                        "normal" | "most-width" | "most-inline-size" | "most-size"
+                                    )
+                                {
+                                    fx = 2.0 * (ar.x + ar.width / 2.0)
+                                        - 2.0 * bx.rect.x
+                                        - bx.rect.width;
+                                }
+                            }
+                            _ => {}
+                        }
+                    }
+                    if fx != 0.0 || fy != 0.0 {
+                        crate::flex::translate_subtree(bx, fx, fy);
+                    }
+                }
+            }
+        }
     }
     for c in &mut bx.children {
-        explorer_common::deep(|| fix_anchor_positioned(c, anchors, cb_w, ctx, fs));
+        explorer_common::deep(|| fix_anchor_positioned(c, anchors, cb_w, vp_h, ctx, fs));
     }
 }
 
@@ -3063,10 +3187,34 @@ fn abs_geometry(
     cfs: f32,
     ctx: &BlockCtx,
 ) -> AbsGeo {
-    let l = css_px(cst, "left", target.width, cfs, ctx);
-    let r = css_px(cst, "right", target.width, cfs, ctx);
-    let t = css_px(cst, "top", target.height, cfs, ctx);
-    let b = css_px(cst, "bottom", target.height, cfs, ctx);
+    // Insets logiques (css-logical-1) : mapping LTR/
+    // horizontal-tb — `inset-inline-start`→left,
+    // `inset-block-start`→top… ; la valeur physique gagne
+    // quand les deux coexistent (la cascade garde l'ordre
+    // des déclarations — approximation : physique > logique).
+    let or_log = |phys: Option<f32>, log: &str, basis: f32| {
+        phys.or_else(|| css_px(cst, log, basis, cfs, ctx))
+    };
+    let l = or_log(
+        css_px(cst, "left", target.width, cfs, ctx),
+        "inset-inline-start",
+        target.width,
+    );
+    let r = or_log(
+        css_px(cst, "right", target.width, cfs, ctx),
+        "inset-inline-end",
+        target.width,
+    );
+    let t = or_log(
+        css_px(cst, "top", target.height, cfs, ctx),
+        "inset-block-start",
+        target.height,
+    );
+    let b = or_log(
+        css_px(cst, "bottom", target.height, cfs, ctx),
+        "inset-block-end",
+        target.height,
+    );
     let ml = side_px(cst, "margin-left", target.width, cfs, ctx, 0.0);
     let mr = side_px(cst, "margin-right", target.width, cfs, ctx, 0.0);
     let mt = side_px(cst, "margin-top", target.width, cfs, ctx, 0.0);
