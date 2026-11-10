@@ -3176,10 +3176,34 @@ fn abs_geometry(
     cfs: f32,
     ctx: &BlockCtx,
 ) -> AbsGeo {
-    let l = css_px(cst, "left", target.width, cfs, ctx);
-    let r = css_px(cst, "right", target.width, cfs, ctx);
-    let t = css_px(cst, "top", target.height, cfs, ctx);
-    let b = css_px(cst, "bottom", target.height, cfs, ctx);
+    // Insets logiques (css-logical-1) : mapping LTR/
+    // horizontal-tb — `inset-inline-start`→left,
+    // `inset-block-start`→top… ; la valeur physique gagne
+    // quand les deux coexistent (la cascade garde l'ordre
+    // des déclarations — approximation : physique > logique).
+    let or_log = |phys: Option<f32>, log: &str, basis: f32| {
+        phys.or_else(|| css_px(cst, log, basis, cfs, ctx))
+    };
+    let l = or_log(
+        css_px(cst, "left", target.width, cfs, ctx),
+        "inset-inline-start",
+        target.width,
+    );
+    let r = or_log(
+        css_px(cst, "right", target.width, cfs, ctx),
+        "inset-inline-end",
+        target.width,
+    );
+    let t = or_log(
+        css_px(cst, "top", target.height, cfs, ctx),
+        "inset-block-start",
+        target.height,
+    );
+    let b = or_log(
+        css_px(cst, "bottom", target.height, cfs, ctx),
+        "inset-block-end",
+        target.height,
+    );
     let ml = side_px(cst, "margin-left", target.width, cfs, ctx, 0.0);
     let mr = side_px(cst, "margin-right", target.width, cfs, ctx, 0.0);
     let mt = side_px(cst, "margin-top", target.width, cfs, ctx, 0.0);

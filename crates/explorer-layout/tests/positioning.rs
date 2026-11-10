@@ -881,3 +881,20 @@ fn anchor_self_center() {
     assert_eq!(m.rect.x, 120.0, "centré h : 100+30−10");
     assert_eq!(m.rect.y, 105.0, "centré v : 100+10−5");
 }
+
+/// Insets logiques (css-logical-1) : `inset-inline-start`/
+/// `inset-block-start` mappés LTR sur `left`/`top` —
+/// la valeur physique gagne.
+#[test]
+fn insets_logiques_absolus() {
+    let (dom, bx) = laid(
+        "<div id=m></div><div id=n></div>",
+        "#m{position:absolute;inset-inline-start:50px;inset-block-start:60px;width:10px;height:10px}\
+         #n{position:absolute;inset-inline-start:50px;left:70px;inset-block-start:60px;width:10px;height:10px}",
+    );
+    let m = find(&bx, by_id(&dom, "m"));
+    let n = find(&bx, by_id(&dom, "n"));
+    assert_eq!((m.rect.x, m.rect.y), (50.0, 60.0), "logiques → physiques");
+    assert_eq!(n.rect.x, 70.0, "physique > logique");
+    assert_eq!(n.rect.y, 60.0, "logique seul = résolu");
+}
