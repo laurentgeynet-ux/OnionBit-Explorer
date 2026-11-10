@@ -7314,6 +7314,37 @@ incrément.
   `ac-3` miroir app). `flutter
   analyze` 0 issue.
 
+- [x] **Étape 212. `site_harvest.ps1` —
+  récolte de corpus automatisée** (sprint 2
+  du plan « recensement des features » PIPE —
+  inverser le flux : corpus → compteurs →
+  Pareto, au lieu de site → œil humain) :
+  par URL, **shot → PNG + report.json +
+  timing + doc_h** sans humain, sortie
+  `target/harvest/<run>/` = `<nom>.png`,
+  `<nom>.json`, `index.json` agrégé et
+  **`report.html`** (dashboard statique
+  autonome : table site × statut × temps ×
+  doc_h × diff triable par clic + Pareto des
+  compteurs `report.census` agrégés — forme
+  générique, prête pour le sprint 1 PIPE).
+  Corpus : `-ListFile` (format
+  `sites-legacy.txt`), `-TrancoCsv` +
+  `-TrancoTop` (CSV « rang,domaine » →
+  `https://domaine/`), défaut = shortlist
+  smoke. **Deux modes** : `cli` (one-shot
+  `explorer-cli shot` — `--report` auto-
+  détecté sur l'usage du binaire, repli sans
+  le flag) et `daemon` (spawn port libre +
+  HTTP poolé — `/navigate` rapporte `doc_h`
+  réel dès aujourd'hui, `/frame`, `/layout`,
+  `/mem` par onglet). Timeout dur par site
+  (kill, jamais de récolte figée), profil
+  release par défaut, dédup d'URLs en
+  conservant l'ordre. Vérifié : 2/2 OK en
+  cli et en daemon (doc_h + mem + layout
+  captés), diff pixel raccordé.
+
 - [ ] **Écarts terrain — vol humain
   22/10 (release `39ab821`, FFI)** :
   second run humain — trois constats
