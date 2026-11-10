@@ -7387,6 +7387,24 @@ incrément.
   clés `css.prop.*`/`css.value.dropped.*`/
   `html.err.*` remplies, `doc_h` réel.
 
+- [x] **Étape 216. Surface géométrique
+  (consommation NAV de R-208, sprint 3)** :
+  `Session::geometry_report` joint le dump
+  `NodeId→rect` aux `(tag,id,cls)` du DOM →
+  `GeometryReport` serde même forme que
+  `ref_capture` ; `GET /api/tabs/{id}/
+  geometry` + `shot --geometry` exposent la
+  surface ; `site_harvest` la collecte
+  (flag auto-détecté, endpoint daemon) ;
+  `geo_diff.mjs` = comparateur boîte-à-boîte
+  (clé `tag|id|cls` + occurrence ordinale,
+  tolérance, score % divergents + Pareto par
+  tag + manques par côté) → `.geodiff.json`
+  + colonnes dashboard. Vérifié :
+  info.cern.ch — dy constant ≈ +13,4 px
+  (écart margin-collapse — premier lot
+  géométrique nommé par mesure).
+
 - [ ] **Écarts terrain — vol humain
   22/10 (release `39ab821`, FFI)** :
   second run humain — trois constats

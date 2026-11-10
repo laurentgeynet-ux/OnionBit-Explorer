@@ -216,8 +216,8 @@ async fn shot(url: &str, out: &str, rest: &[String]) -> ExitCode {
         return ExitCode::FAILURE;
     };
     if geometry.is_some() {
-        eprintln!("--geometry : surface à venir (étape 216)");
-        return ExitCode::FAILURE;
+        // Étape 216 — émis post-navigation (l'arbre n'existe
+        // qu'après le commit), voir bloc plus bas.
     }
     let fonts = explorer_render::DirFontSource::new(&default_fonts_dir());
     let mut session = session_from_env(fonts);
@@ -300,6 +300,22 @@ async fn shot(url: &str, out: &str, rest: &[String]) -> ExitCode {
         {
             Ok(Ok(())) => {}
             _ => eprintln!("--report : écriture {rep} impossible"),
+        }
+    }
+    // `--geometry` (étape 216 — R-208 consommé) : boîtes
+    // `NodeId→rect` jointes `(tag,id,cls)`, même forme que
+    // `ref_capture` `.ref.json` — consommée par geo_diff.mjs.
+    if let Some(gpath) = geometry {
+        match session.geometry_report(tab) {
+            Some(g) => {
+                match serde_json::to_string_pretty(&g)
+                    .map(|j| std::fs::write(gpath, j))
+                {
+                    Ok(Ok(())) => {}
+                    _ => eprintln!("--geometry : écriture {gpath} impossible"),
+                }
+            }
+            None => eprintln!("--geometry : pas d'arbre posé"),
         }
     }
     if let Some(png) = session.frame_png(tab) {

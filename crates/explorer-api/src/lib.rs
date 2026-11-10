@@ -233,6 +233,7 @@ pub fn router_with_egress(
         .route("/api/tabs/{id}/frame", get(frame))
         .route("/api/tabs/{id}/dom", get(dom_dump))
         .route("/api/tabs/{id}/layout", get(layout_dump))
+        .route("/api/tabs/{id}/geometry", get(geometry))
         .route("/api/tabs/{id}/mem", get(mem_report))
         .route("/api/tabs/{id}/navigate", post(navigate))
         .route("/api/tabs/{id}/reload", post(reload))
@@ -886,6 +887,19 @@ async fn layout_dump(State(st): State<ApiState>, Path(id): Path<TabId>) -> Respo
     match session.layout_dump(id) {
         Some(d) => (StatusCode::OK, d).into_response(),
         None => (StatusCode::NOT_FOUND, "pas de layout").into_response(),
+    }
+}
+
+/// `GET /api/tabs/{id}/geometry` → `GeometryReport` JSON
+/// (étape 216 — R-208 consommé) : boîtes `NodeId→rect` jointes
+/// `(tag,id,cls)`, même forme que les `boxes[]` de
+/// `ref_capture` pour le diff géométrique boîte-à-boîte.
+/// `404` onglet inconnu ou arbre détaché.
+async fn geometry(State(st): State<ApiState>, Path(id): Path<TabId>) -> Response {
+    let session = st.session.lock().await;
+    match session.geometry_report(id) {
+        Some(g) => Json(g).into_response(),
+        None => (StatusCode::NOT_FOUND, "pas de géométrie").into_response(),
     }
 }
 

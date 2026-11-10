@@ -1853,6 +1853,50 @@ impl Session {
         let (tree, dom) = (entry.tree.as_ref()?, entry.dom.as_ref()?);
         Some(tree.dump(dom))
     }
+
+    /// Rapport géométrique résolu DOM (étape 216) — consomme
+    /// `geometry_dump` (R-208, `NodeId → rect` union des
+    /// fragments) et joint chaque entrée aux attributs
+    /// `(tag, id, class)` du nœud : la forme produite épouse
+    /// les `boxes[]` de `ref_capture` (`getBoundingClientRect`
+    /// Chrome) pour le diff boîte-à-boîte du sprint 3.
+    /// `None` dans les mêmes cas que [`Self::layout_dump`].
+    #[must_use]
+    pub fn geometry_report(&self, tab: TabId) -> Option<GeometryReport> {
+        let entry = self.tabs.get(&tab)?;
+        let (tree, dom) = (entry.tree.as_ref()?, entry.dom.as_ref()?);
+        let dump = explorer_layout::geometry_dump(tree);
+        let boxes = dump
+            .entries
+            .iter()
+            .map(|e| {
+                let tag = dom.tag_name(e.node).unwrap_or("#text").to_string();
+                let attr = |name: &str| {
+                    dom.attribute_str(e.node, name)
+                        .ok()
+                        .flatten()
+                        .unwrap_or("")
+                        .to_string()
+                };
+                GeomBox {
+                    node: e.node.index(),
+                    tag,
+                    id: attr("id"),
+                    cls: attr("class").split_whitespace().next().unwrap_or("").to_string(),
+                    x: e.rect.x,
+                    y: e.rect.y,
+                    w: e.rect.width,
+                    h: e.rect.height,
+                    fragments: e.fragments,
+                }
+            })
+            .collect();
+        Some(GeometryReport {
+            width: dump.width,
+            height: dump.height,
+            boxes,
+        })
+    }
 }
 
 /// Pile de transports politiques de la session.

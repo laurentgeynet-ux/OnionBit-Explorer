@@ -712,6 +712,48 @@ pub struct TabInfo {
     pub doc_h_clamped: bool,
 }
 
+/// Boîte géométrique résolue DOM (étape 216, consomme R-208)
+/// — une entrée `NodeId → rect` du `geometry_dump` jointe aux
+/// attributs `(tag, id, class)` du nœud, pour le diff
+/// boîte-à-boîte contre `ref_capture` (`getBoundingClientRect`
+/// côté Chrome). `Serialize` : même forme REST et fichier.
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct GeomBox {
+    /// Index d'arène du nœud producteur (diagnostic — la
+    /// jointure se fait sur `tag`/`id`/`cls`, pas cet id :
+    /// les `NodeId` sont réattribués au re-parse).
+    pub node: u32,
+    /// Nom de balise minuscule (`"#text"` hors éléments).
+    pub tag: String,
+    /// Attribut `id` (vide si absent).
+    pub id: String,
+    /// Premier token de l'attribut `class` (vide si absent —
+    /// même règle tronquée que `ref_capture`).
+    pub cls: String,
+    /// Union des fragments (border-box, px CSS document).
+    pub x: f32,
+    /// Ordonnée (px CSS document).
+    pub y: f32,
+    /// Largeur (px CSS).
+    pub w: f32,
+    /// Hauteur (px CSS).
+    pub h: f32,
+    /// Fragments fusionnés dans le rect (> 1 = élément split).
+    pub fragments: u32,
+}
+
+/// Rapport géométrique complet d'une frame posée (étape 216).
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct GeometryReport {
+    /// Largeur du document posé (px CSS).
+    pub width: f32,
+    /// Hauteur du document posé — même vérité que `doc_h`.
+    pub height: f32,
+    /// Boîtes résolues en ordre de première apparition
+    /// (pré-ordre — déterministe pour le diff).
+    pub boxes: Vec<GeomBox>,
+}
+
 /// Signet utilisateur.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Bookmark {

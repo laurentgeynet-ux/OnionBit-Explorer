@@ -178,6 +178,10 @@ if ($reportOk) {
 } else {
     Write-Output 'census : --report absent — PNG + timing seuls'
 }
+# `--geometry` (étape 216 — R-208 consommé) : dump
+# `NodeId→rect` joint (tag,id,cls), même détection.
+$geomOk = $usage -match '--geometry'
+if ($geomOk) { Write-Output 'géométrie : --geometry détecté' }
 
 # Viewport radar — même convention que site_smoke (étape 129).
 $env:EXPLORER_VIEWPORT = $Viewport
@@ -292,12 +296,15 @@ foreach ($site in $sites) {
         ok = $false; png = "$name.png"; png_bytes = 0
         elapsed_ms = 0; doc_h = $null; doc_h_clamped = $null
         diff_pct = $null; report = $null; mem = $null; error = $null
+        geom = $null; geo_pct = $null; geo_divergent = $null; geo_top = $null
     }
     $sw = [System.Diagnostics.Stopwatch]::StartNew()
     if ($Mode -eq 'cli') {
         $rep = Join-Path $OutDir "$name.census.json"
+        $geo = Join-Path $OutDir "$name.geom.json"
         $argList = @('shot', $site, $png, $Viewport)
         if ($reportOk) { $argList += @('--report', $rep) }
+        if ($geomOk) { $argList += @('--geometry', $geo) }
         # Timeout dur : un TLS suspendu ne doit pas figer la
         # récolte — kill propre, marqué `timeout`.
         $p = Start-Process -FilePath $cli -ArgumentList $argList `
@@ -334,6 +341,7 @@ foreach ($site in $sites) {
                 if ($rec.report.doc_h) { $rec.doc_h = $rec.report.doc_h }
             } catch { }
         }
+        if (Test-Path $geo) { $rec.geom = "$name.geom.json" }
     } else {
         # Mode daemon : onglet -> viewport -> navigate -> frame
         # -> layout -> mem -> close. doc_h réel exposé par
@@ -368,6 +376,15 @@ foreach ($site in $sites) {
                         (Join-Path $OutDir "$name.layout.txt"),
                         [byte[]]$lay.Bytes)
                 }
+                # Géométrie normalisée (étape 216 — R-208) :
+                # `NodeId→rect` joint (tag,id,cls), même forme
+                # que les `boxes[]` de ref_capture.
+                $geoj = Send-Api Get "$FuncBase/tabs/$id/geometry" $null 30
+                if ($geoj) {
+                    $geoj | ConvertTo-Json -Depth 8 | Set-Content `
+                        (Join-Path $OutDir "$name.geom.json") -Encoding utf8
+                    $rec.geom = "$name.geom.json"
+                }
                 $mem = Send-Api Get "$FuncBase/tabs/$id/mem" $null 30
                 if ($mem) {
                     $rec.mem = [ordered]@{
@@ -393,6 +410,30 @@ foreach ($site in $sites) {
                 $rec.diff_pct = [double]$Matches[1]
             } elseif ($dout -match 'identiques') {
                 $rec.diff_pct = 0.0
+            }
+        }
+        # Oracle géométrique (étape 216, sprint 3) : diff
+        # boîte-à-boîte vs `.ref.json` — localise l'élément
+        # divergent (tag × fréquence → lot de techno).
+        $geomFile = Join-Path $OutDir "$name.geom.json"
+        $refj = Join-Path $refOut "$name.ref.json"
+        if ((Test-Path $geomFile) -and (Test-Path $refj)) {
+            $gd = Join-Path $OutDir "$name.geodiff.json"
+            $gout = & node (Join-Path $root 'scripts\geo_diff.mjs') `
+                $geomFile $refj --out $gd 2>&1 | Out-String
+            if ($gout -match 'geo : ([\d.—]+)%') {
+                if ($Matches[1] -ne '—') {
+                    $rec.geo_pct = [double]$Matches[1]
+                }
+            }
+            if (Test-Path $gd) {
+                try {
+                    $g = Get-Content $gd -Raw | ConvertFrom-Json
+                    $rec.geo_divergent = $g.divergent_n
+                    $rec.geo_top = ($g.pareto |
+                        Select-Object -First 3 |
+                        ForEach-Object { "$($_.tag)×$($_.n)" }) -join ' '
+                } catch { }
             }
         }
     }
@@ -451,6 +492,8 @@ Chrome (oracle)</p>
 <th data-k="png_bytes" class="num">png</th>
 <th data-k="doc_h" class="num">doc_h</th>
 <th data-k="diff_pct" class="num">diff %</th>
+<th data-k="geo_pct" class="num">geo %</th>
+<th data-k="geo_top">geo top</th>
 <th data-k="topmiss">top manques</th><th data-k="error">erreur</th>
 </tr></thead><tbody></tbody></table>
 <h2>Pareto des manques (agrégat census)</h2>
@@ -489,7 +532,7 @@ function resort(){const rows=[...D.sites].sort((a,b)=>{
  let x=a[sk],y=b[sk];if(x==null)x='';if(y==null)y='';
  return(x<y?-1:x>y?1:0)*sd});
  draw(document.getElementById('t'),rows,
- ['site','ok','elapsed_ms','png_bytes','doc_h','diff_pct','topmiss','error']);
+ ['site','ok','elapsed_ms','png_bytes','doc_h','diff_pct','geo_pct','geo_top','topmiss','error']);
  const pb=document.getElementById('p');
  const pt=pb.tBodies[0];pt.innerHTML='';
  for(const r of pareto){const tr=pt.insertRow();
