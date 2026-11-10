@@ -739,7 +739,14 @@ impl Session {
         );
         let mut sub = match self.nav_apply(tab, *tail, *done) {
             Ok(Some(s)) => s,
-            Ok(None) => return Ok(None),
+            Ok(None) => {
+                // Epoch supplantée — le document installé reste
+                // sans cycle de vie sinon (`readyState` figé
+                // `loading` : polyfill d'upgrade kevlar gelé,
+                // `[[ ]]` youtube non hydratés — JS-C471).
+                self.fire_top_doc_lifecycle(tab);
+                return Ok(None);
+            }
             Err(e) => {
                 self.paint_error_page(tab, &err_req, push, &e);
                 return Err(e);

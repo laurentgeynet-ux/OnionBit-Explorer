@@ -1529,9 +1529,16 @@ impl Session {
         } else if entry.js_detached.is_some()
             && entry.pending_doc_lifecycle.len() < MAX_PENDING_LIFECYCLE
         {
+            tracing::info!(target: "dom_probe", tab, ctx, state,
+                site = "rs.buf", "ready_state tamponné (moteur détaché)");
             entry
                 .pending_doc_lifecycle
                 .push(types::DocLifecycle::ReadyState(ctx, state.to_string()));
+        } else {
+            tracing::info!(target: "dom_probe", tab, ctx, state,
+                js = entry.js.is_some(), det = entry.js_detached.is_some(),
+                pend = entry.pending_doc_lifecycle.len(),
+                site = "rs.skip", "ready_state non livré");
         }
     }
 

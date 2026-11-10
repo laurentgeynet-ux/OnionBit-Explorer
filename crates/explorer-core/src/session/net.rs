@@ -171,11 +171,22 @@ impl Session {
         job: SubJob,
     ) -> Result<Option<String>, CoreError> {
         let Some(mut tail) = self.sub_commit_head(tab, job).await? else {
+            // Epoch supplantée : le document installé garde son
+            // cycle de vie — `readyState` figé `loading` sinon
+            // (JS-C471 — polyfill d'upgrade kevlar gelé,
+            // `[[ ]]` youtube non hydratés).
+            self.fire_top_doc_lifecycle(tab);
             return Ok(None);
         };
         self.insert_images(tab, &tail.url, &tail.img_bodies);
         self.stage_backgrounds(tab, &mut tail);
-        self.relayout(tab)?;
+        if let Err(e) = self.relayout(tab) {
+            // Le rendu a échoué — la page d'erreur est peinte par
+            // l'appelant ; le document installé touche quand même
+            // son cycle (ses listeners restent armés).
+            self.fire_top_doc_lifecycle(tab);
+            return Err(e);
+        }
         Ok(self.sub_commit_tail(tab, tail))
     }
 
@@ -452,6 +463,27 @@ impl Session {
     /// Queue du commit — après le rendu (inline ou détaché) :
     /// historique, `Navigated`, persistance des cookies et
     /// scroll de fragment. Renvoie le titre extrait au parse.
+    /// Cycle de vie du document top quand `sub_commit_tail` n'a
+    /// pas couru (commit paint rejeté — epoch supplantée,
+    /// `shared.rs` bras `(Ok, false)` ; erreur de rendu avant
+    /// `Navigated`). `readyState` resterait sinon à `"loading"`
+    /// pour toujours : les pages dont le polyfill d'upgrade
+    /// attend `DOMContentLoaded`/état `interactive` gèlent leur
+    /// hydratation (youtube : marqueurs `[[X]]` non consommés,
+    /// `__isUpgradeDisabled` persistant — JS-C471). Le document
+    /// reste celui installé — ses listeners méritent le cycle.
+    /// Aucun `Navigated`/`push` ici : `sub_commit_tail` garde le
+    /// historiabilité quand le commit aboutit.
+    pub(crate) fn fire_top_doc_lifecycle(&mut self, tab: TabId) {
+        self.set_doc_ready_state(tab, explorer_js::JS_CTX_TOP, "interactive");
+        self.dispatch_doc_event(tab, "readystatechange");
+        self.dispatch_doc_event(tab, "DOMContentLoaded");
+        self.frame_ctx_load_events(tab);
+        self.set_doc_ready_state(tab, explorer_js::JS_CTX_TOP, "complete");
+        self.dispatch_doc_event(tab, "readystatechange");
+        self.dispatch_doc_event(tab, "load");
+    }
+
     pub(crate) fn sub_commit_tail(&mut self, tab: TabId, tail: SubCommitTail) -> Option<String> {
         let SubCommitTail {
             url,
