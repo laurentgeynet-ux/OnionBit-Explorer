@@ -36,6 +36,60 @@ pub struct FontFace {
     /// `font-display` brut — comportement « block » appliqué
     /// (fetch synchrone avant layout — documenté ADR-0016).
     pub display: String,
+    /// `unicode-range` éclaté en paires `(début, fin)`
+    /// inclusives — vide = descripteur absent, la face couvre
+    /// tout (§4.3 css-fonts). Joker `?` expansé en plage
+    /// (`U+4??` → `U+400-4FF`).
+    pub unicode_ranges: Vec<(u32, u32)>,
+}
+
+/// `unicode-range: U+XXXX[-YYYY], U+Z?` → plages inclusives.
+/// `U+4??` = `U+400-4FF` (le joker remplit les digits bas).
+/// Entrée invalide/hors borne → plage sautée (dégradation
+/// douce — une face sans plage valide reste universelle).
+fn parse_unicode_range(raw: &str) -> Vec<(u32, u32)> {
+    let mut out = Vec::new();
+    for seg in raw.split(',') {
+        let t = seg.trim().strip_prefix("U+").unwrap_or(seg.trim());
+        let (a, b) = match t.split_once('-') {
+            Some((a, b)) => (a.trim(), b.trim()),
+            None => (t, t),
+        };
+        if a.is_empty() || b.is_empty() {
+            continue;
+        }
+        // Joker `?` : chaque `?` = digit hexa libre bas.
+        let lo_s = a.replace('?', "0");
+        let hi_s = b.replace('?', "F");
+        let (Ok(lo), Ok(hi)) = (
+            u32::from_str_radix(&lo_s, 16),
+            u32::from_str_radix(&hi_s, 16),
+        ) else {
+            continue;
+        };
+        if lo <= hi {
+            out.push((lo, hi.min(0x10_FFFF)));
+        }
+    }
+    out
+}
+
+/// La plage `unicode-range` de la face couvre-t-elle un
+/// point de code ? Absence de descripteur → `true` (face
+/// universelle). Utilisé pour prioriser le fetch : les
+/// éclatements `unicode-range` (Google Fonts sert des
+/// dizaines de faces par sous-ensemble d'écriture) font que
+/// les faces latines arrivent en fin de feuille — sans
+/// priorité, le budget de fetch s'épuise sur des faces qui
+/// ne couvrent pas le texte de la page (vol 771 plyr.io :
+/// le latin tombait en fallback glyphe → tout en serif).
+#[must_use]
+pub fn face_covers(face: &FontFace, cp: u32) -> bool {
+    face.unicode_ranges.is_empty()
+        || face
+            .unicode_ranges
+            .iter()
+            .any(|&(lo, hi)| cp >= lo && cp <= hi)
 }
 
 /// Parse une valeur `src:` : segments séparés par virgules —
@@ -103,19 +157,32 @@ fn to_face(decls: &[Declaration]) -> Option<FontFace> {
         weight,
         italic,
         display: get("font-display").unwrap_or_else(|| "auto".to_string()),
+        unicode_ranges: get("unicode-range")
+            .map(|v| parse_unicode_range(&v))
+            .unwrap_or_default(),
     })
 }
 
 impl StyleEngine {
     /// `@font-face` visibles sous `env` (media englobantes
-    /// filtrées), dans l'ordre des feuilles.
+    /// filtrées). Ordre des feuilles, **sauf** que les faces
+    /// dont `unicode-range` exclut l'ASCII sont reléguées en
+    /// fin : sous budget de fetch borné, les feuilles qui
+    /// éclatent par sous-ensemble d'écriture (Google Fonts :
+    /// ~126 faces pour Inter, latin en dernier) feraient
+    /// sinon enregistrer des faces sans couverture pour le
+    /// texte réel — le shaping tombait en fallback par
+    /// glyphe (vol 771 plyr.io : texte en serif de repli).
     #[must_use]
     pub fn font_faces(&self, env: &StyleEnv) -> Vec<FontFace> {
-        self.font_faces
+        let mut faces: Vec<FontFace> = self
+            .font_faces
             .iter()
             .filter(|f| f.media.iter().all(|qs| media_matches(env, qs)))
             .filter_map(|f| to_face(&f.declarations))
-            .collect()
+            .collect();
+        faces.sort_by_key(|f| u8::from(!face_covers(f, 0x41)));
+        faces
     }
 }
 

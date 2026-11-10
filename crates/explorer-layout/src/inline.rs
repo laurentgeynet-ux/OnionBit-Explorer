@@ -1253,6 +1253,19 @@ fn break_into_lines(
 
     for item in items {
         let fs = font_size_px(&item.style, parent_fs, ctx);
+        // R-207 — la valeur calculée est matérialisée en px
+        // dans le style porté par le fragment : les
+        // consommateurs aval (paint `prop_px`/`font_size_of`,
+        // `em` des bordures et décorations) ne savent pas
+        // résoudre `calc()`/`clamp()`/`min()`/`max()` — sans
+        // ça ils retombaient sur 16 px et rastraient les
+        // glyphes à une taille différente des avances shapées
+        // (plyr.io : titre éclaté lettre par lettre).
+        let frag_style = {
+            let mut s = item.style.clone();
+            s.set("font-size", &format!("{fs}px"));
+            s
+        };
         let lh = line_height_of(&item.style, fs, ctx);
         let font_req = font::request_of(&item.style, ctx);
         let measure = measure_fn(&item.style, fs, ctx);
@@ -1332,7 +1345,7 @@ fn break_into_lines(
                 text: String::new(),
                 atomic: true,
                 aid: item.aid,
-                style: item.style.clone(),
+                style: frag_style.clone(),
                 rect: Rect {
                     x: px + ml,
                     y: cursor_y + mt,
@@ -1380,7 +1393,7 @@ fn break_into_lines(
                     text: String::new(),
                     atomic: false,
                     aid: None,
-                    style: item.style.clone(),
+                    style: frag_style.clone(),
                     rect: Rect {
                         x: fx,
                         y: cursor_y,
@@ -1434,7 +1447,7 @@ fn break_into_lines(
                         text: String::new(),
                         atomic: true,
                         aid: None,
-                        style: item.style.clone(),
+                        style: frag_style.clone(),
                         rect: Rect {
                             x: cursor_x,
                             y: cursor_y,
@@ -1522,7 +1535,7 @@ fn break_into_lines(
                     text: (*seg).to_string(),
                     atomic: false,
                     aid: None,
-                    style: item.style.clone(),
+                    style: frag_style.clone(),
                     rect: Rect {
                         x: cursor_x,
                         y: cursor_y,

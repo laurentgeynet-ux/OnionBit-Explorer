@@ -300,6 +300,18 @@ pub fn parse_color(text: &str) -> Option<Color> {
             return parser(inner);
         }
     }
+    // R-214 — `color-mix(in <espace>, A [p%], B [p%])` (css-color-5)
+    // + syntaxe relative `oklch(from <couleur> l c h / a)` — les
+    // mélanges passent par sRGB (espaces autres qu'`srgb` admis par
+    // approximation documentée). Terrain : `bg-brand-50/50` de
+    // plyr.io (Tailwind v4) — `color-mix(in srgb, oklch(from
+    // var(--brand) l c h) 50%, transparent)`.
+    if let Some(inner) = lower
+        .strip_prefix("color-mix(")
+        .and_then(|s| s.strip_suffix(')'))
+    {
+        return parse_color_mix(inner);
+    }
     named_color(&lower)
 }
 
@@ -382,6 +394,12 @@ fn parse_oklab(inner: &str) -> Option<Color> {
 }
 
 fn parse_oklch(inner: &str) -> Option<Color> {
+    // R-214 — syntaxe relative css-color-5 : `oklch(from
+    // <couleur> <l> <c> <h> / <a>)` — les canaux `l`/`c`/`h`/
+    // `alpha` nomment ceux de la source, seuls ou en `calc()`.
+    if let Some(rest) = inner.trim().strip_prefix("from ") {
+        return oklch_relative(rest);
+    }
     let (light, chroma, hue, alpha) = color_3args(inner)?;
     let (cr, hh) = (num_or_pct(&chroma, 0.4), hue.parse::<f32>().ok()?);
     let (x_v, y_v, z_v) = oklab_xyz(
@@ -390,6 +408,304 @@ fn parse_oklch(inner: &str) -> Option<Color> {
         cr * hh.to_radians().sin(),
     );
     Some(xyz_srgb_color(x_v, y_v, z_v, alpha))
+}
+
+/// sRGB `[0,255]` → OKLCH `(l, c, h, a)` — inverse des
+/// matrices `oklab_xyz`/`xyz_srgb_color` (Ottosson). Sert aux
+/// couleurs relatives (`oklch(from …)`) et à `color-mix` en
+/// espaces non-sRGB.
+fn srgb_to_oklch(c: Color) -> (f32, f32, f32, f32) {
+    let lin = |v: u8| {
+        let s = f32::from(v) / 255.0;
+        if s <= 0.040_45 {
+            s / 12.92
+        } else {
+            ((s + 0.055) / 1.055).powf(2.4)
+        }
+    };
+    let (r, g, b) = (lin(c.r), lin(c.g), lin(c.b));
+    let (x_v, y_v, z_v) = (
+        r.mul_add(0.412_391, g.mul_add(0.357_584, b * 0.180_481)),
+        r.mul_add(0.212_639, g.mul_add(0.715_169, b * 0.072_192)),
+        r.mul_add(0.019_331, g.mul_add(0.119_195, b * 0.950_532)),
+    );
+    let (l_, m_, s_) = (
+        (x_v.mul_add(0.818_933, y_v.mul_add(0.361_867, z_v * -0.128_86))).cbrt(),
+        (x_v.mul_add(0.032_985, y_v.mul_add(0.929_312, z_v * 0.036_146))).cbrt(),
+        (x_v.mul_add(0.048_2, y_v.mul_add(0.264_366, z_v * 0.633_852))).cbrt(),
+    );
+    let (ol, oa, ob) = (
+        0.210_454 * l_ + 0.793_618 * m_ - 0.004_072 * s_,
+        1.978 * l_ - 2.428_592 * m_ + 0.450_594 * s_,
+        0.025_904 * l_ + 0.782_772 * m_ - 0.808_676 * s_,
+    );
+    (
+        ol,
+        oa.hypot(ob),
+        ob.atan2(oa).to_degrees().rem_euclid(360.0),
+        f32::from(c.a) / 255.0,
+    )
+}
+
+/// Canal relatif (`l`/`c`/`h`/`alpha`) : mot-clé = valeur de la
+/// source ; nombre/% = direct ; `calc()` = expression sur ces
+/// variables (`calc(l * 0.5)`, `calc(h + 30)`…). `get` retourne
+/// la valeur source du canal nommé ; `scale` la borne des `%`.
+fn rel_channel(expr: &str, names: &[&str], src: &[f32], scale: f32) -> Option<f32> {
+    let e = expr.trim();
+    let get = |k: &str| names.iter().position(|n| *n == k).map(|i| src[i]);
+    // Mot-clé seul → canal source ; `none` → 0 (canal absent).
+    if e.eq_ignore_ascii_case("none") {
+        return Some(0.0);
+    }
+    if let Some(v) = get(e) {
+        return Some(v);
+    }
+    // `calc(…)` : évalue en substituant les canaux nommés —
+    // mini-évaluateur `+ - * /` à priorité `*`/`/` (parenthèses
+    // un niveau : le contenu est récursé).
+    if let Some(inner) = e.strip_prefix("calc(").and_then(|s| s.strip_suffix(')')) {
+        return eval_rel_calc(inner.trim(), &get, scale);
+    }
+    // Nombre ou pourcentage nu.
+    let v = e.strip_suffix('%').map_or_else(
+        || e.parse::<f32>().ok(),
+        |n| n.trim().parse::<f32>().ok().map(|x| x / 100.0 * scale),
+    )?;
+    Some(v)
+}
+
+/// Évalue un `calc()` restreint : `±` profondeur 0, puis `*/`
+/// — les opérandes sont nombres, `%` ou canaux (`l`, `c`, `h`,
+/// `alpha`). NaN/échec → `None` (dégradation, jamais panic).
+fn eval_rel_calc(e: &str, get: &dyn Fn(&str) -> Option<f32>, scale: f32) -> Option<f32> {
+    let atom = |t: &str| -> Option<f32> {
+        let t = t.trim();
+        if let Some(v) = get(t) {
+            return Some(v);
+        }
+        if let Some(inner) = t.strip_prefix('(').and_then(|s| s.strip_suffix(')')) {
+            return eval_rel_calc(inner.trim(), get, scale);
+        }
+        t.strip_suffix('%').map_or_else(
+            || t.parse::<f32>().ok(),
+            |n| n.trim().parse::<f32>().ok().map(|x| x / 100.0 * scale),
+        )
+    };
+    // Split ± profondeur 0 (signe en tête toléré).
+    let mut terms: Vec<(bool, String)> = Vec::new();
+    let (mut depth, mut cur, mut neg) = (0i32, String::new(), false);
+    let mut first = true;
+    for ch in e.chars() {
+        match ch {
+            '(' => depth += 1,
+            ')' => depth -= 1,
+            '+' | '-' if depth == 0 => {
+                if first {
+                    neg = ch == '-';
+                    first = false;
+                } else {
+                    terms.push((neg, cur.trim().into()));
+                    (cur, neg) = (String::new(), ch == '-');
+                }
+                continue;
+            }
+            _ => {}
+        }
+        cur.push(ch);
+    }
+    terms.push((neg, cur));
+    let mul = |t: &str| -> Option<f32> {
+        // `*` et `/` dans le terme.
+        let it = t.split_inclusive(['*', '/']);
+        let mut acc: Option<f32> = None;
+        for seg in it {
+            let (num, op) = match seg.chars().last() {
+                Some('*') => (&seg[..seg.len() - 1], '*'),
+                Some('/') => (&seg[..seg.len() - 1], '/'),
+                _ => (seg, ' '),
+            };
+            let v = atom(num)?;
+            acc = Some(match (acc, op) {
+                (None, _) => v,
+                (Some(a), '/') => a / v,
+                (Some(a), _) => a * v,
+            });
+        }
+        acc
+    };
+    let mut sum = 0.0;
+    for (neg, t) in &terms {
+        let v = mul(t)?;
+        sum += if *neg { -v } else { v };
+    }
+    Some(sum)
+}
+
+/// `oklch(from <couleur> <l> <c> <h> / <a>)` — la source est le
+/// premier token (hex, nom, `rgb()`… ou fonction imbriquée).
+fn oklch_relative(rest: &str) -> Option<Color> {
+    // Délimite la couleur source : fonction imbriquée → à la
+    // parenthèse fermante de profondeur 0 ; sinon au 1er espace.
+    let src_end = if rest
+        .trim_start()
+        .starts_with(|c: char| c.is_ascii_alphabetic())
+        && rest.trim_start().contains('(')
+    {
+        let mut depth = 0i32;
+        let start = rest.trim_start();
+        let mut end = start.len();
+        for (i, ch) in start.char_indices() {
+            match ch {
+                '(' => depth += 1,
+                ')' => {
+                    depth -= 1;
+                    if depth == 0 {
+                        end = i + 1;
+                        break;
+                    }
+                }
+                _ => {}
+            }
+        }
+        rest.trim_start().len() - rest.len() + end
+    } else {
+        rest.find(char::is_whitespace)?
+    };
+    let src = parse_color(&rest[..src_end])?;
+    let (l0, c0, h0, a0) = srgb_to_oklch(src);
+    let rest = &rest[src_end..];
+    // Canaux séparés espaces à profondeur 0 (`calc(l * 0.5)`
+    // contient des espaces internes) + `/ alpha` éventuel.
+    let (body, alpha) = match rest.split_once('/') {
+        Some((b, a)) => (b, a.trim()),
+        None => (rest, ""),
+    };
+    let mut toks: Vec<&str> = Vec::new();
+    let (mut depth, mut start) = (0i32, 0usize);
+    for (i, ch) in body.char_indices() {
+        match ch {
+            '(' => depth += 1,
+            ')' => depth -= 1,
+            ' ' if depth == 0 => {
+                let t = body[start..i].trim();
+                if !t.is_empty() {
+                    toks.push(t);
+                }
+                start = i + 1;
+            }
+            _ => {}
+        }
+    }
+    let t = body[start..].trim();
+    if !t.is_empty() {
+        toks.push(t);
+    }
+    if toks.len() != 3 {
+        return None;
+    }
+    let (light, chroma, hue) = (toks[0], toks[1], toks[2]);
+    let names = ["l", "c", "h", "alpha"];
+    let srcv = [l0, c0, h0, a0];
+    let l = rel_channel(light, &names, &srcv, 1.0)?;
+    let cr = rel_channel(chroma, &names, &srcv, 0.4)?;
+    let hh = rel_channel(hue, &names, &srcv, 360.0)?;
+    let al = if alpha.is_empty() {
+        a0
+    } else {
+        rel_channel(alpha, &names, &srcv, 1.0)?
+    };
+    let (x_v, y_v, z_v) = oklab_xyz(l, cr * hh.to_radians().cos(), cr * hh.to_radians().sin());
+    Some(xyz_srgb_color(x_v, y_v, z_v, al))
+}
+
+/// `color-mix(in <espace>, <couleur> [p%], <couleur> [p%])` —
+/// mélange linéaire en sRGB (autres espaces admis : conversion
+/// d'abord, interpolation sRGB ensuite — approximation
+/// documentée ; `oklch` interpole en `OKLab` serait plus fidèle).
+fn parse_color_mix(inner: &str) -> Option<Color> {
+    // Split top-level `,` (profondeur 0) : [in srgb, A, B].
+    let mut depth = 0i32;
+    let mut parts: Vec<&str> = Vec::new();
+    let mut start = 0;
+    for (i, ch) in inner.char_indices() {
+        match ch {
+            '(' => depth += 1,
+            ')' => depth -= 1,
+            ',' if depth == 0 => {
+                parts.push(&inner[start..i]);
+                start = i + 1;
+            }
+            _ => {}
+        }
+    }
+    parts.push(&inner[start..]);
+    if parts.len() != 3 {
+        return None;
+    }
+    // `in <espace>` — admis mais non différencié (approx sRGB).
+    let first = parts[0].trim();
+    if !first.starts_with("in ") {
+        return None;
+    }
+    let side = |s: &str| -> Option<(Color, f32)> {
+        let s = s.trim();
+        // Couleur + pourcentage éventuel en fin (`X 50%`).
+        let mut depth = 0i32;
+        let mut split = s.len();
+        for (i, ch) in s.char_indices().rev() {
+            match ch {
+                ')' => depth += 1,
+                '(' => depth -= 1,
+                ' ' if depth == 0 => {
+                    if s[i + 1..].trim_end().ends_with('%') {
+                        split = i;
+                    }
+                    break;
+                }
+                _ => {}
+            }
+        }
+        let (col, pct) = if split < s.len() {
+            (
+                &s[..split],
+                s[split..]
+                    .trim()
+                    .trim_end_matches('%')
+                    .parse::<f32>()
+                    .ok()?
+                    / 100.0,
+            )
+        } else {
+            (s, -1.0)
+        };
+        Some((parse_color(col)?, pct))
+    };
+    let (a, mut pa) = side(parts[1])?;
+    let (b, mut pb) = side(parts[2])?;
+    // Défauts css-color-5 : un seul % → l'autre complète à 100 ;
+    // aucun → 50/50. Somme >100 normalisée.
+    if pa < 0.0 && pb < 0.0 {
+        (pa, pb) = (0.5, 0.5);
+    } else if pa < 0.0 {
+        pa = (1.0 - pb).max(0.0);
+    } else if pb < 0.0 {
+        pb = (1.0 - pa).max(0.0);
+    }
+    let tot = pa + pb;
+    if tot <= 0.0 {
+        return None;
+    }
+    let (pa, pb) = (pa / tot, pb / tot);
+    let mix = |x: u8, y: u8| -> u8 {
+        unit_to_u8((f32::from(x) / 255.0).mul_add(pa, f32::from(y) / 255.0 * pb))
+    };
+    Some(Color {
+        r: mix(a.r, b.r),
+        g: mix(a.g, b.g),
+        b: mix(a.b, b.b),
+        a: unit_to_u8((f32::from(a.a) / 255.0).mul_add(pa, f32::from(b.a) / 255.0 * pb)),
+    })
 }
 
 fn parse_lab(inner: &str) -> Option<Color> {
@@ -673,7 +989,7 @@ pub fn expand_shorthand(name: &str, value: &str) -> Option<Vec<(String, String)>
         "place-self" => Some(("align-self", "justify-self")),
         _ => None,
     } {
-        let parts: Vec<&str> = value.split_whitespace().collect();
+        let parts: Vec<&str> = split_ws_top(value);
         let (v1, v2) = match parts.as_slice() {
             [v] => (*v, *v),
             [v1, v2] => (*v1, *v2),
@@ -690,7 +1006,7 @@ pub fn expand_shorthand(name: &str, value: &str) -> Option<Vec<(String, String)>
     // pris (dégradation documentée).
     if name == "border-radius" {
         let hpart = value.split('/').next().unwrap_or_default();
-        let parts: Vec<&str> = hpart.split_whitespace().collect();
+        let parts: Vec<&str> = split_ws_top(hpart);
         let [tl, tr, br, bl] = four_sides(&parts)?;
         return Some(vec![
             ("border-top-left-radius".to_string(), tl),
@@ -708,7 +1024,7 @@ pub fn expand_shorthand(name: &str, value: &str) -> Option<Vec<(String, String)>
             // `position:absolute; inset:0` du Guardian
             // restaient sans offsets → boîtes `0x0`,
             // articles inouvrables au hit-test.
-            let parts: Vec<&str> = value.split_whitespace().collect();
+            let parts: Vec<&str> = split_ws_top(value);
             let [top, right, bottom, left] = four_sides(&parts)?;
             Some(vec![
                 ("top".to_string(), top),
@@ -763,7 +1079,7 @@ fn expand_container(value: &str) -> Option<Vec<(String, String)>> {
 /// `flex-flow` : `[direction] [wrap]` ordre libre → longhands.
 fn expand_flex_flow(value: &str) -> Vec<(String, String)> {
     let mut out = Vec::new();
-    for part in value.split_whitespace() {
+    for part in split_ws_top(value) {
         match part {
             "row" | "row-reverse" | "column" | "column-reverse" => {
                 out.push(("flex-direction".to_string(), part.to_string()));
@@ -904,7 +1220,7 @@ fn expand_column_rule(value: &str) -> Vec<(String, String)> {
     const WIDTH_KW: &[&str] = &["thin", "medium", "thick"];
     let mut out = Vec::new();
     let mut pos = 0usize;
-    for tok in value.split_whitespace() {
+    for tok in split_ws_top(value) {
         let t = tok.to_ascii_lowercase();
         if is_border_style(&t) {
             out.push(("column-rule-style".to_string(), t));
@@ -928,7 +1244,7 @@ fn expand_column_rule(value: &str) -> Vec<(String, String)> {
 fn expand_columns(value: &str) -> Vec<(String, String)> {
     let mut width = "auto";
     let mut count = "auto";
-    for part in value.split_whitespace() {
+    for part in split_ws_top(value) {
         match part {
             "auto" => {}
             p if p.parse::<u32>().is_ok() => count = p,
@@ -941,9 +1257,39 @@ fn expand_columns(value: &str) -> Vec<(String, String)> {
     ]
 }
 
+/// Éclate sur les espaces de profondeur 0 — les fonctions
+/// (`calc(…)`, `var(…)`, `min(…)`…) gardent leurs espaces
+/// internes : un `split_whitespace` naïf cassait
+/// `padding:calc(0.25rem * 4)` en trois morceaux invalides et
+/// la déclaration entière sautait (Tailwind v4, R-208).
+fn split_ws_top(value: &str) -> Vec<&str> {
+    let mut parts = Vec::new();
+    let mut depth = 0i32;
+    let mut start = None;
+    for (i, c) in value.char_indices() {
+        match c {
+            '(' | '[' => depth += 1,
+            ')' | ']' => depth -= 1,
+            _ => {}
+        }
+        if !c.is_whitespace() && start.is_none() {
+            start = Some(i);
+        }
+        if c.is_whitespace() && depth <= 0 {
+            if let Some(s) = start.take() {
+                parts.push(&value[s..i]);
+            }
+        }
+    }
+    if let Some(s) = start {
+        parts.push(&value[s..]);
+    }
+    parts
+}
+
 /// `margin`/`padding` : 1..4 valeurs → quatre longhands.
 fn expand_box(name: &str, value: &str) -> Option<Vec<(String, String)>> {
-    let parts: Vec<&str> = value.split_whitespace().collect();
+    let parts: Vec<&str> = split_ws_top(value);
     let [top, right, bottom, left] = four_sides(&parts)?;
     Some(vec![
         (format!("{name}-top"), top),
@@ -955,7 +1301,7 @@ fn expand_box(name: &str, value: &str) -> Option<Vec<(String, String)>> {
 
 /// `border-width/style/color` : 1..4 valeurs → `border-<side>-<kind>`.
 fn expand_border_uniform(kind: &str, value: &str) -> Option<Vec<(String, String)>> {
-    let parts: Vec<&str> = value.split_whitespace().collect();
+    let parts: Vec<&str> = split_ws_top(value);
     let [top, right, bottom, left] = four_sides(&parts)?;
     Some(vec![
         (format!("border-top-{kind}"), top),
@@ -971,7 +1317,7 @@ fn expand_border_parts(name: &str, value: &str) -> Vec<(String, String)> {
     let mut width = None;
     let mut style = None;
     let mut color = None;
-    for part in value.split_whitespace() {
+    for part in split_ws_top(value) {
         if is_border_style(part) {
             style = Some(part);
         } else if parse_color(part).is_some() || part == "currentcolor" {
@@ -1008,7 +1354,7 @@ fn expand_border_parts(name: &str, value: &str) -> Vec<(String, String)> {
 
 /// `overflow` : 1 ou 2 valeurs → `overflow-x`/`-y`.
 fn expand_overflow(value: &str) -> Option<Vec<(String, String)>> {
-    match value.split_whitespace().collect::<Vec<_>>().as_slice() {
+    match split_ws_top(value).as_slice() {
         [v] => Some(vec![
             ("overflow-x".into(), (*v).to_string()),
             ("overflow-y".into(), (*v).to_string()),
@@ -1360,7 +1706,7 @@ fn bg_size_token(part: &str) -> bool {
 
 /// `font: [style]? [variant]? [weight]? size[/line-height] family`.
 fn expand_font(value: &str) -> Option<Vec<(String, String)>> {
-    let parts: Vec<&str> = value.split_whitespace().collect();
+    let parts: Vec<&str> = split_ws_top(value);
     // Le premier token à chiffre / mot-clé de taille / `size/lh`
     // marque font-size — tout ce qui suit est la famille.
     let size_pos = parts.iter().position(|p| {
@@ -1421,7 +1767,7 @@ fn expand_outline(value: &str) -> Vec<(String, String)> {
     ];
     let mut out = Vec::new();
     let mut pos = 0usize;
-    for tok in value.split_whitespace() {
+    for tok in split_ws_top(value) {
         let t = tok.to_ascii_lowercase();
         if STYLES.contains(&t.as_str()) {
             out.push(("outline-style".to_string(), t));
@@ -1445,7 +1791,7 @@ fn expand_outline(value: &str) -> Vec<(String, String)> {
 
 fn expand_list_style(value: &str) -> Option<Vec<(String, String)>> {
     let mut out = Vec::new();
-    for part in value.split_whitespace() {
+    for part in split_ws_top(value) {
         match part {
             "inside" | "outside" => {
                 out.push(("list-style-position".to_string(), part.to_string()));
@@ -1537,7 +1883,7 @@ fn expand_logical(name: &str, value: &str) -> Option<Vec<(String, String)>> {
             };
         }
     };
-    let parts: Vec<&str> = value.split_whitespace().collect();
+    let parts: Vec<&str> = split_ws_top(value);
     let (v1, v2) = match parts.as_slice() {
         [v] => (*v, *v),
         [v1, v2] => (*v1, *v2),

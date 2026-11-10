@@ -440,6 +440,15 @@ pub struct EmitStats {
     pub invisible_glyphs: u32,
 }
 
+/// Porteur reporté conservé sous une plage ré-utilisable
+/// (R-212) : chemin relatif depuis la boîte propriétaire +
+/// clips `overflow` `(rect, radii)` applicables au drain.
+type EscapedDefer = (Box<[u16]>, Box<[(Rect, [f32; 4])]>);
+
+/// Clips `overflow` applicables à un porteur reporté, indexés
+/// par son chemin — `(rect, radii)` par ancêtre clippé (R-212).
+type DeferClips = std::collections::HashMap<Box<[u16]>, Box<[(Rect, [f32; 4])]>>;
+
 /// Nom de variante pour la répartition [`EmitStats::by_kind`].
 fn kind_name(it: &DisplayItem) -> &'static str {
     match it {
@@ -514,7 +523,10 @@ pub struct SpanRec {
     /// les re-pousse dans le `defer` courant pour que le
     /// drain englobant les ré-émette (via leurs propres
     /// spans) — sinon le contenu en ligne disparaîtrait.
-    pub escaped: Box<[Box<[u16]>]>,
+    /// Porteurs reportés capturés sous cette plage — chemin
+    /// relatif + clips `overflow` applicables (R-212 : le
+    /// report se re-clipe au drain).
+    pub escaped: Box<[EscapedDefer]>,
 }
 
 /// Boîte `position: fixed` — sa plage n'est **pas**
@@ -1360,6 +1372,9 @@ fn build_list(
         dropped: 0,
         first_cycle_path: None,
         stats,
+        clip_stack: Vec::new(),
+        pos_floor: 0,
+        defer_clips: DeferClips::new(),
     };
     // §14.2 : le fond du canvas vient de la racine ; si elle
     // n'en a pas (couleur transparente et pas d'image), c'est
@@ -1403,9 +1418,9 @@ fn build_list(
     {
         // Span racine — `escaped` = les porteurs poussés aux
         // files racine (chemins absolus = relatifs à la racine).
-        let mut esc = escaped_paths(&defer, 0, &cx.path).into_vec();
-        esc.extend(escaped_paths(&pos_defer, 0, &cx.path).into_vec());
-        esc.extend(escaped_paths(&fixed_defer, 0, &cx.path).into_vec());
+        let mut esc = escaped_paths(&defer, 0, &cx.path, &cx).into_vec();
+        esc.extend(escaped_paths(&pos_defer, 0, &cx.path, &cx).into_vec());
+        esc.extend(escaped_paths(&fixed_defer, 0, &cx.path, &cx).into_vec());
         let end = u32::try_from(items.len()).unwrap_or(u32::MAX);
         let sig = box_sig(root);
         cx.record_span(
@@ -1582,6 +1597,26 @@ struct PaintCx<'a> {
     /// Collecteur de répartition §B-118 — `Some` uniquement
     /// sur les variantes `*_stats` (comptage opt-in).
     stats: Option<&'a mut EmitStats>,
+    /// Pile des clips `overflow` actifs — poussée au
+    /// `PushClip` de `paint_box_impl`, retirée au `PopClip`
+    /// (R-212) : les porteurs reportés (positionnés, inlines,
+    /// fixed) en capturent un instantané à l'enfilement —
+    /// le drain lointain les ré-émet autour de la boîte, sinon
+    /// un `overflow:hidden` ancêtre perd ses descendants
+    /// différés (nav de mesure vimeo visible, `h-0` outrepassé).
+    clip_stack: Vec<(Rect, [f32; 4])>,
+    /// Longueur de `clip_stack` à l'entrée du plus proche
+    /// ancêtre positionné (son propre clip compris) — borne
+    /// supérieure des clips applicables à un `absolute`
+    /// différé : seuls les clips de son bloc conteneur et de
+    /// ses ancêtres le rognent, les clippers entre le CB et
+    /// lui ne s'appliquent pas (§11.1.1).
+    pos_floor: usize,
+    /// Clips `overflow` applicables par chemin reporté —
+    /// instantané pris à l'enfilement, consommé au drain
+    /// (`emit_scoped_at`). Le chemin est la clé unique du
+    /// report ; les entrées non drainées meurent avec la passe.
+    defer_clips: DeferClips,
 }
 
 /// Source de ré-usage incrémental.
@@ -1613,7 +1648,7 @@ impl PaintCx<'_> {
         end: u32,
         off: (f32, f32),
         sig: u64,
-        escaped: Box<[Box<[u16]>]>,
+        escaped: Box<[EscapedDefer]>,
     ) {
         let mut flags = 0u8;
         if bx.position == Position::Fixed {
@@ -1651,10 +1686,25 @@ impl PaintCx<'_> {
 /// Extrait les chemins des porteurs poussés dans `defer`
 /// depuis l'indice `base`, relativisés à `path` (le chemin
 /// de la boîte en cours d'enregistrement).
-fn escaped_paths(defer: &[(Vec<u16>, &LayoutBox)], base: usize, path: &[u16]) -> Box<[Box<[u16]>]> {
+fn escaped_paths(
+    defer: &[(Vec<u16>, &LayoutBox)],
+    base: usize,
+    path: &[u16],
+    cx: &PaintCx,
+) -> Box<[EscapedDefer]> {
     defer[base..]
         .iter()
-        .filter_map(|(p, _)| p.strip_prefix(path).map(Box::from))
+        .filter_map(|(p, _)| {
+            p.strip_prefix(path).map(|rel| {
+                (
+                    Box::from(rel),
+                    cx.defer_clips
+                        .get(p.as_slice())
+                        .cloned()
+                        .unwrap_or_default(),
+                )
+            })
+        })
         .collect()
 }
 
@@ -3743,9 +3793,9 @@ fn emit_child<'a>(
         });
         let end = u32::try_from(items.len()).unwrap_or(u32::MAX);
         let sig = box_sig(bx);
-        let mut esc = escaped_paths(defer, base, &cx.path).into_vec();
-        esc.extend(escaped_paths(pos_defer, pbase, &cx.path).into_vec());
-        esc.extend(escaped_paths(fixed_defer, fbase, &cx.path).into_vec());
+        let mut esc = escaped_paths(defer, base, &cx.path, cx).into_vec();
+        esc.extend(escaped_paths(pos_defer, pbase, &cx.path, cx).into_vec());
+        esc.extend(escaped_paths(fixed_defer, fbase, &cx.path, cx).into_vec());
         cx.record_span(
             bx,
             start,
@@ -3797,8 +3847,8 @@ fn emit_scoped<'a>(
         // la copie — sinon un ré-usage perd leurs items
         // (under-paint incrémental). Les inlines restent
         // internes à `paint_scoped` : couverts par la plage.
-        let mut esc = escaped_paths(pos_defer, pbase, &cx.path).into_vec();
-        esc.extend(escaped_paths(fixed_defer, fbase, &cx.path).into_vec());
+        let mut esc = escaped_paths(pos_defer, pbase, &cx.path, cx).into_vec();
+        esc.extend(escaped_paths(fixed_defer, fbase, &cx.path, cx).into_vec());
         cx.record_span(
             bx,
             start,
@@ -3823,18 +3873,23 @@ fn emit_scoped<'a>(
 /// pieds s'émet scoped plutôt que de disparaître).
 fn repush_escaped<'a>(
     bx: &'a LayoutBox,
-    escaped: &[Box<[u16]>],
+    escaped: &[EscapedDefer],
     cx: &mut PaintCx<'a>,
     pos_defer: &mut Vec<(Vec<u16>, &'a LayoutBox)>,
     fixed_defer: &mut Vec<(Vec<u16>, &'a LayoutBox)>,
     mut else_q: Option<&mut Vec<(Vec<u16>, &'a LayoutBox)>>,
 ) {
-    for rel in escaped {
+    for (rel, clips) in escaped {
         let Some(target) = resolve_rel(bx, rel) else {
             continue;
         };
         let mut p = cx.path.clone();
         p.extend(rel.iter().copied());
+        // R-212 — l'instantané de clips pris lors de la
+        // première émission est restauré : le span copié ne
+        // retraverse pas les clippers internes.
+        cx.defer_clips
+            .insert(p.clone().into_boxed_slice(), clips.clone());
         if target.position == Position::Fixed {
             push_z(fixed_defer, 0, p, target);
         } else if !matches!(target.position, Position::Static | Position::Sticky)
@@ -3903,6 +3958,24 @@ fn emit_scoped_at<'a>(
         return;
     }
     cx.stat(|s| s.deferred_emitted += 1);
+    // R-212 — instantané des clips `overflow` applicables
+    // (§11.1.1 : in-flow = tous ; absolute = bornés à son CB ;
+    // fixed = aucun, jamais enregistrés) — ré-émis autour de la
+    // peinture : sinon le report fuit le clipper ancêtre (nav de
+    // mesure vimeo `h-0 overflow:hidden` affichée, vol 772).
+    let clips = cx
+        .defer_clips
+        .get(path.as_slice())
+        .cloned()
+        .unwrap_or_default();
+    for &(r, radii) in &*clips {
+        if radii.iter().any(|v| *v > 0.0) {
+            items.push(DisplayItem::PushClipRounded { rect: r, radii });
+        } else {
+            items.push(DisplayItem::PushClip(r));
+        }
+    }
+    cx.clip_stack.extend_from_slice(&clips);
     let saved = std::mem::replace(&mut cx.path, path);
     // R-134 : translation sticky — même discipline que
     // `emit_scoped` (file reportée, drain en contexte
@@ -3928,8 +4001,8 @@ fn emit_scoped_at<'a>(
         // §B-26 : porteurs poussés pendant la fenêtre —
         // même bookkeeping que `emit_scoped` (sans `defer`,
         // portée interne à `paint_scoped`).
-        let mut esc = escaped_paths(pos_defer, pbase, &cx.path).into_vec();
-        esc.extend(escaped_paths(fixed_defer, fbase, &cx.path).into_vec());
+        let mut esc = escaped_paths(pos_defer, pbase, &cx.path, cx).into_vec();
+        esc.extend(escaped_paths(fixed_defer, fbase, &cx.path, cx).into_vec());
         cx.record_span(
             bx,
             start,
@@ -3941,6 +4014,10 @@ fn emit_scoped_at<'a>(
     }
     if delta.is_some() {
         items.push(DisplayItem::PopTransform);
+    }
+    cx.clip_stack.truncate(cx.clip_stack.len() - clips.len());
+    for _ in 0..clips.len() {
+        items.push(DisplayItem::PopClip);
     }
     cx.path = saved;
 }
@@ -4971,7 +5048,11 @@ fn paint_box_impl<'a>(
             // géométrie arrondie au raster (plus d'excès
             // angulaire de contenu hors des coins).
             let clip_rect = shifted(bx.rect, off);
+            // R-212 — le clip entre dans la pile : les porteurs
+            // reportés (positionnés, inlines) le re-captureront
+            // à l'enfilement pour être rognés au drain.
             let radii = corner_radii(&bx.style, &clip_rect);
+            cx.clip_stack.push((clip_rect, radii));
             if radii.iter().any(|r| *r > 0.0) {
                 items.push(DisplayItem::PushClipRounded {
                     rect: clip_rect,
@@ -4980,6 +5061,14 @@ fn paint_box_impl<'a>(
             } else {
                 items.push(DisplayItem::PushClip(clip_rect));
             }
+        }
+        // R-212 — borne des clips applicables aux `absolute`
+        // descendants : leur bloc conteneur est cette boîte
+        // (positionnée) ; les clips empilés jusqu'à elle
+        // (le sien compris) les rognent, pas ceux entre eux.
+        let saved_pos_floor = cx.pos_floor;
+        if bx.position != Position::Static {
+            cx.pos_floor = cx.clip_stack.len();
         }
         // Les `fixed` descendants remontent à la file RACINE
         // (`fixed_defer`, drainée hors de tout clip) : leur bloc
@@ -5103,6 +5192,10 @@ fn paint_box_impl<'a>(
                 // peut avoir lieu chez un ancêtre englobant.
                 let mut p = cx.path.clone();
                 p.push(u16::try_from(ci).unwrap_or(u16::MAX));
+                // R-212 — porteur en flux : tous les clips
+                // ancêtres s'appliquent (§11.1.1).
+                cx.defer_clips
+                    .insert(p.clone().into_boxed_slice(), cx.clip_stack.clone().into());
                 d.push((p, child));
             }
         }
@@ -5129,6 +5222,15 @@ fn paint_box_impl<'a>(
             if child.position == Position::Fixed {
                 push_z(fixed_defer, 0, p, child);
             } else {
+                // R-212 — clips applicables : tout pour un
+                // in-flow positionné ; pour un `absolute`,
+                // borné à son bloc conteneur (§11.1.1).
+                let clips = if child.position == Position::Absolute {
+                    cx.clip_stack[..cx.pos_floor].to_vec().into()
+                } else {
+                    cx.clip_stack.clone().into()
+                };
+                cx.defer_clips.insert(p.clone().into_boxed_slice(), clips);
                 push_z(pd, 0, p, child);
             }
         }
@@ -5147,7 +5249,9 @@ fn paint_box_impl<'a>(
         }
         if clipped {
             items.push(DisplayItem::PopClip);
+            cx.clip_stack.pop();
         }
+        cx.pos_floor = saved_pos_floor;
     }
     if geo_clip.is_some() {
         items.push(DisplayItem::PopClip);

@@ -280,6 +280,14 @@ fn content_px_unclamped(
             let items: Vec<f32> = bx
                 .children
                 .iter()
+                .filter(|c| {
+                    // Hors flux (`absolute`/`fixed`) : aucune
+                    // contribution — voir la boucle bloc plus bas
+                    // (§4.1 / B-49 ; vimeo : `a.inline-flex >
+                    // div.absolute.w-full` gonflait le `li`
+                    // item à ~la ligne → nav écrasée, vol 772).
+                    !c.out_of_flow()
+                })
                 .map(|c| {
                     let cfs = font_size_px(&c.style, fs, ctx);
                     explorer_common::deep(|| content_px_opt(c, cfs, ctx, max, false, cb))

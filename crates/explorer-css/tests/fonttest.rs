@@ -39,3 +39,39 @@ fn font_shorthand_keeps_slash_line_height() {
     let s = e.compute(&dom, div, &StyleEnv::default());
     assert_eq!(s.get("line-height"), Some("1.25"));
 }
+
+/// R-209 — `font_faces` relègue les faces dont `unicode-range`
+/// exclut l'ASCII en fin de liste : sous budget de fetch borné,
+/// les feuilles éclatées par sous-ensemble d'écriture (Google
+/// Fonts : latin en dernier) faisaient enregistrer des faces
+/// sans couverture latine — le texte tombait en fallback par
+/// glyphe (vol 771 plyr.io, tout en serif/italique de repli).
+#[test]
+fn r209_font_faces_unicode_range_latin_prioritaire() {
+    let mut e = StyleEngine::new();
+    // Ordre « Google » : sous-ensembles non-latins d'abord,
+    // latin en dernier.
+    e.add_css(
+        "@font-face{font-family:Inter;font-weight:400;font-style:italic;\
+         src:url(i-it-cyr.ttf);unicode-range:U+0400-045F}\
+         @font-face{font-family:Inter;font-weight:700;font-style:normal;\
+         src:url(i-n-gr.ttf);unicode-range:U+0370-03FF}\
+         @font-face{font-family:Inter;font-weight:400;font-style:normal;\
+         src:url(i-n-lat.ttf);unicode-range:U+0000-00FF}\
+         @font-face{font-family:Inter;font-weight:700;font-style:normal;\
+         src:url(i-n-lat7.ttf);unicode-range:U+0000-00FF}\
+         @font-face{font-family:Solo;src:url(s.ttf)}",
+        Origin::Author,
+    );
+    let faces = e.font_faces(&StyleEnv::default());
+    assert_eq!(faces.len(), 5);
+    // Unicode-range éclatée + joker.
+    assert_ne!(faces[0].unicode_ranges.len(), 0);
+    // Les faces couvrant 'A' (latin + universelle) passent
+    // devant, ordre relatif conservé.
+    assert_eq!(faces[0].unicode_ranges, vec![(0x0000, 0x00FF)]);
+    assert_eq!(faces[1].unicode_ranges, vec![(0x0000, 0x00FF)]);
+    assert!(faces[2].unicode_ranges.is_empty(), "Solo universelle");
+    assert_eq!(faces[3].unicode_ranges, vec![(0x0400, 0x045F)]);
+    assert_eq!(faces[4].unicode_ranges, vec![(0x0370, 0x03FF)]);
+}

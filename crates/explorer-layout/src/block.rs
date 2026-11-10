@@ -2832,6 +2832,12 @@ fn resolve_absolutes_impl(
     // — les `em` des bordures/décalages se résolvent contre
     // elle, pas contre la base 16 du premier appel.
     let own_fs = font_size_px(&bx.style, fs, ctx);
+    // R-207 — matérialise la `font-size` résolue en px dans
+    // le style de la boîte (contrat R-17) : les consommateurs
+    // aval sans contexte viewport (`font_size_of`/`prop_px`
+    // de la display list — marqueurs, colonnes, `em` de
+    // bordures) retombaient à 16 px sur `calc()`/`clamp()`.
+    bx.style.set("font-size", &format!("{own_fs}px"));
     // Bloc conteneur des enfants absolus de cette boîte :
     // **padding box** de l'ancêtre positionné (§10.1) — la
     // bordure n'en fait pas partie (Acid2 `.picture` a une

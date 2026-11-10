@@ -3570,7 +3570,7 @@ chez NAVIGATEUR — non recopiés ici.
 
 > **Ordonnancement (revue chef PIPELINE 2026-11-09)** :
 > valeur terrain / coût — R-201 → R-199 → R-200 →
-> R-202 → R-203 → R-204 → R-205 → R-206.
+> R-202 → R-203 → R-204 → R-205 → R-206 → R-207.
 
 - [x] **R-201. `grid-area` formes courtes (2/3 valeurs) —
   relai G-5** : la branche numérique `grid.rs:561-591`
@@ -3788,6 +3788,8 @@ chez NAVIGATEUR — non recopiés ici.
   non lisible, filtre anti-bruit ident-keyword (`auto`&co
   exclus). Funnel unique, zéro touche aux call sites layout.
   Verrou : 6 tests census verts.
+- [x] **R-207. `font-size` à fonction maths matérialisée en px dans le style (terrain vol 771 plyr.io)** : `clamp()`/`calc()`/`min()`/`max()`/`var()` passaient la cascade en brut (résolution exigeant viewport/rem) ; la display list relisait la valeur par `parse_length` seul → repli 16 px → glyphes rastrés à 16 px sous des avances shapées à la taille réelle (« lettres éclatées » plyr.io, famille Tailwind). Fix : `break_into_lines` écrit la font-size résolue en px dans le style du fragment ; `resolve_absolutes_impl` idem dans le style de la boîte (contrat R-17 étendu). Verrou `r207_clamp_font_size_materialisee_px_dans_style_fragment`.
+
 ## Tâches continues
 
 - **Triage rendu** des échecs `site_smoke.ps1` : les écarts
@@ -3849,3 +3851,14 @@ R-104 ; `light-dark()` → R-105 ; marqueurs textuels +
 `<string>` → R-108, `ol[type]`/`ul[type]` UA → R-113,
 `list-style-position:inside` → R-180 ; hit-test filtre
 `visibility:hidden` → `hit.rs`.)*
+
+## Série visuel-30 (vols 770/771/772 — branche pipeline/visuel-30)
+
+- [x] **R-207v. `font-size` clamp()/calc() matérialisée en px** dans les fragments/boîtes de style (plyr titre).
+- [x] **R-208v. Shorthands** — split whitespace à profondeur 0 (`calc(var(--x)*n)`, `min/max` intacts ; margin/padding/inset/radius/border/place/flex/gap).
+- [x] **R-209v. `@font-face unicode-range`** parsé (`U+`/`?` joker) — faces couvrant latin/ASCII fetchées en priorité sous le budget (plyr Inter).
+- [x] **R-210v. `calc` — `0` nu polymorphe nombre/dimension** (`explorer-layout/block.rs`) : `calc((100 - 0) * 1px)` résolu → chaîne mosaik ORF restaurée (doc 215k→15k px, lanes+cartes).
+- [x] **R-211v. `padding`/`border` horizontaux sur élément inline** consomment la ligne (mécanisme des marqueurs inline réutilisé — nav dr « DR.DK/DRTV/DR LYD » espacée).
+- [x] **R-212v. Reports `pos_defer` sous le clip `overflow` ancêtre** (`explorer-render/display.rs`) : `clip_stack`+`pos_floor`+`defer_clips` — instantané `(rect, radii)` par chemin, ré-émission `PushClip`/`PushClipRounded` au drain (§11.1.1 : in-flow = tous ; `absolute` = borné CB ; `fixed` = aucun).
+- [x] **R-213v. Descendants hors-flux exclus de la mesure intrinsèque flex** (`explorer-layout/intrinsic.rs`) : `a.inline-flex > div.absolute{width:100%}` gonflait le `li` à ~la ligne — nav vimeo « Contact sales » réparée.
+- [x] **R-214v. `color-mix()` + `oklch(from …)` relatifs (css-color-5)** (`explorer-css/value.rs`) : mix sRGB + canaux relatifs (mot-clé/`%`/`calc` restreint) + sRGB→OKLCH inverse — fond `bg-brand-50/50` plyr.

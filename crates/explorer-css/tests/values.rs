@@ -445,3 +445,68 @@ fn unites_viewport_dynamiques_dvh() {
         assert_eq!(l.unit, expected, "{u}");
     }
 }
+
+/// R-208 — les shorthands multi-valeurs acceptent les fonctions
+/// avec espaces internes (`calc()`/`var()`/`min()`/`max()`) : le
+/// split whitespace se fait à profondeur de parenthèses 0.
+/// Avant : `padding:calc(0.25rem * 4)` était éclaté en morceaux
+/// invalides et la déclaration entière sautait (Tailwind v4).
+#[test]
+fn r208_shorthand_fonctions_avec_espaces_internes() {
+    let e = expand_shorthand("padding", "calc(0.25rem * 4)").unwrap();
+    assert_eq!(e.len(), 4);
+    assert_eq!(
+        e[0],
+        ("padding-top".to_string(), "calc(0.25rem * 4)".to_string())
+    );
+    assert_eq!(
+        e[3],
+        ("padding-left".to_string(), "calc(0.25rem * 4)".to_string())
+    );
+    // Deux valeurs dont une fonction.
+    let e = expand_shorthand("margin", "calc(1px + 2px) auto").unwrap();
+    assert_eq!(e.len(), 4);
+    assert_eq!(e[0].1, "calc(1px + 2px)");
+    assert_eq!(e[1].1, "auto");
+    assert_eq!(e[2].1, "calc(1px + 2px)");
+    // inset + var non résolu au verbatim.
+    let e = expand_shorthand("inset", "calc(var(--gap) * 2) 0").unwrap();
+    assert_eq!(
+        e[0],
+        ("top".to_string(), "calc(var(--gap) * 2)".to_string())
+    );
+    assert_eq!(e[1], ("right".to_string(), "0".to_string()));
+}
+
+/// R-214 — `color-mix(in srgb, …)` et syntaxe relative
+/// `oklch(from <couleur> …)` (css-color-5) : le fond
+/// `bg-brand-50/50` de plyr.io est `color-mix(in srgb,
+/// oklch(from var(--brand) l c h) 50%, transparent)` — les
+/// deux formes doivent se résoudre (vol 771).
+#[test]
+fn color_mix_et_oklch_relatif() {
+    // color-mix : blanc 50% + transparent(noir,a=0) → rgba≈(128,a≈0.5).
+    let c = parse_color("color-mix(in srgb, #ffffff 50%, transparent)").unwrap();
+    assert!(
+        (120..=135).contains(&c.r) && c.a > 100 && c.a < 160,
+        "mix 50/50 : {c:?}"
+    );
+    // Sans % → 50/50.
+    let c = parse_color("color-mix(in srgb, #000, #fff)").unwrap();
+    assert!((110..=145).contains(&c.r), "mix défaut : {c:?}");
+    // Relatif : `oklch(from <src> l c h)` = source elle-même.
+    let src = parse_color("oklch(0.7 0.15 250)").unwrap();
+    let rel = parse_color("oklch(from oklch(0.7 0.15 250) l c h)").unwrap();
+    assert!(
+        src.r.abs_diff(rel.r) <= 4 && src.g.abs_diff(rel.g) <= 4 && src.b.abs_diff(rel.b) <= 4,
+        "relatif ≈ source : {src:?} vs {rel:?}"
+    );
+    // Canal modifié par calc : `calc(l * 0.5)` assombrit.
+    let dark = parse_color("oklch(from #ffffff calc(l * 0.5) c h)").unwrap();
+    assert!(dark.r < 150, "l*0.5 assombrit : {dark:?}");
+    // Chaîne plyr complète : mix(oklch(from …) 50%, transparent).
+    let plyr =
+        parse_color("color-mix(in srgb, oklch(from oklch(0.9 0.05 250) l c h) 50%, transparent)")
+            .unwrap();
+    assert!(plyr.a > 100 && plyr.a < 160, "plyr bg : {plyr:?}");
+}

@@ -3604,3 +3604,41 @@ fn r203_clip_origin_par_couche() {
         "couche 0 = content box : {top:?}"
     );
 }
+
+/// R-212 — un enfant positionné différé (`pos_defer`) reste sous
+/// le clip `overflow` de ses ancêtres (§11.1.1). Avant le fix, le
+/// drain au contexte d'empilement peignait le positionné APRÈS le
+/// `PopClip` du clipper → il fuyait (nav de mesure vimeo
+/// `h-0 overflow:hidden` affichée, vol 772).
+#[test]
+fn enfant_positionne_reste_sous_clip_overflow() {
+    let (_dom, _bx, items) = dl(
+        "<!doctype html><div id=o><div id=r></div></div>",
+        "#o{overflow:hidden;height:0;width:100px}#r{position:relative;height:20px;background:#e33}",
+    );
+    // Position du FillRect rouge de l'enfant.
+    let at = items
+        .iter()
+        .position(
+            |i| matches!(i, DisplayItem::FillRect { color, .. } if color.r > 200 && color.g < 80),
+        )
+        .expect("fond enfant");
+    // Profondeur de clips ouverts à cet instant : ≥ 1 (le clip
+    // du parent overflow:hidden doit encadrer le report).
+    let mut depth = 0i32;
+    let mut max_open = 0i32;
+    for i in &items[..at] {
+        match i {
+            DisplayItem::PushClip(_)
+            | DisplayItem::PushClipRounded { .. }
+            | DisplayItem::PushClipPath { .. } => depth += 1,
+            DisplayItem::PopClip => depth -= 1,
+            _ => {}
+        }
+        max_open = max_open.max(depth);
+    }
+    assert!(
+        depth >= 1,
+        "positionné peint hors du clip ancêtre (depth={depth})"
+    );
+}

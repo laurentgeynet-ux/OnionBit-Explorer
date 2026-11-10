@@ -931,3 +931,61 @@ fn r200_colonne_flex_etroite_pas_de_chevauchement() {
         );
     }
 }
+
+/// R-207 — `font-size:clamp()` (et `calc()`/`min()`/`max()`)
+/// est matérialisée en px absolu dans le style porté par le
+/// fragment : les consommateurs aval (paint `prop_px` /
+/// `font_size_of`) ne résolvent pas les fonctions maths —
+/// sans la matérialisation, les glyphes étaient rastrés à
+/// 16 px sous des avances shapées à la taille réelle
+/// (plyr.io : titre éclaté lettre par lettre).
+#[test]
+fn r207_clamp_font_size_materialisee_px_dans_style_fragment() {
+    fn frag_style(b: &LayoutBox) -> Option<String> {
+        if let Some(f) = b.lines.iter().flat_map(|l| &l.fragments).next() {
+            return Some(f.style.get_or("font-size", "").to_string());
+        }
+        b.children.iter().find_map(frag_style)
+    }
+    // `clamp(10px, 50vw, 40px)` à VIEW=400 → 50vw=200 borné
+    // à 40 px. Idem `calc(30px + 4px)` = 34 px.
+    let (dom, bx) = laid(
+        "<!doctype html><p id=a>un</p><p id=b>deux</p>",
+        "#a{font-size:clamp(10px,50vw,40px)}#b{font-size:calc(30px + 4px)}",
+    );
+    let a = find(&bx, by_id(&dom, "a"));
+    assert_eq!(
+        frag_style(a).as_deref(),
+        Some("40px"),
+        "font-size:clamp matérialisée en px dans le style du fragment"
+    );
+    let b = find(&bx, by_id(&dom, "b"));
+    assert_eq!(
+        frag_style(b).as_deref(),
+        Some("34px"),
+        "font-size:calc matérialisée en px dans le style du fragment"
+    );
+}
+
+/// R-211v — `padding`/`border` horizontaux sur élément inline
+/// consomment la ligne (§9.4.2) : `<a>` inline avec
+/// `padding:0 8px` doit mesurer texte + 16px (nav dr
+/// « DR.DK/DRTV/DR LYD » concaténée, vol 772).
+#[test]
+fn padding_horizontal_inline_consomme_la_ligne() {
+    let (_dom, bx) = laid(
+        "<!doctype html><p><a id=x>A</a></p>",
+        "a{padding:0 8px}",
+    );
+    let mut q = vec![&bx];
+    while let Some(b) = q.pop() {
+        for f in &b.fragments {
+            if let Some(w) = f.width {
+                assert!(w > 16.0, "fragment inline sans padding : {w}");
+                return;
+            }
+        }
+        q.extend(b.children.iter());
+    }
+    panic!("fragment a introuvable");
+}

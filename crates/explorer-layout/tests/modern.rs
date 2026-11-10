@@ -1522,3 +1522,27 @@ fn grid_repeat_auto_fill_expande_par_conteneur() {
     let a = find(&bx, by_id(&dom, "a"));
     assert!(approx(a.rect.width, 400.0), "auto-fit w={}", a.rect.width);
 }
+
+/// R-213 — un descendant `absolute`/`fixed` ne contribue PAS
+/// à la taille intrinsèque d'un conteneur flex. La branche flex
+/// de la mesure intrinsèque les comptait : le `width:100%` du
+/// descendant résolu contre la ligne gonflait l'item à ~la
+/// largeur du conteneur (nav vimeo, vol 772).
+#[test]
+fn flex_descendant_absolu_wfull_ne_gonfle_pas_l_item() {
+    let (_dom, bx) = laid(
+        "<!doctype html><ul><li class=a><a><span>Contact sales</span><div class=hover></div></a></li><li class=b><a><span>Join</span></a></li></ul>",
+        "ul{display:flex;flex-direction:row;justify-content:flex-end;\
+         width:352px;padding:0}li{list-style:none}\
+         a{display:inline-flex;position:relative;overflow:hidden}\
+         .hover{position:absolute;top:0;left:0;width:100%;height:100%}",
+    );
+    // ul > li : chaque item ≈ son contenu (~<150px), pas ~352.
+    let ul = &bx.children[0].children[0];
+    let li_a = &ul.children[0];
+    assert!(
+        li_a.rect.width < 200.0,
+        "li gonflé par le descendant absolu w-full : {}",
+        li_a.rect.width
+    );
+}
