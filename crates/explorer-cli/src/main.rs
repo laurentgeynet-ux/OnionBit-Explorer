@@ -720,7 +720,10 @@ fn fixture_for(name: &str) -> &'static str {
                 | "grid-column-end" | "grid-row-start" | "grid-row-end" | "grid-area"
         ) =>
         {
-            "<body><div style=\"display:flex\"><p class=x>a</p><p>b</p></div></body>"
+            // 2 items de hauteurs variables : sans ça
+            // `align-self` = stretch (line_cross) → offset 0
+            // quel que soit le mot-clé (artefact mesuré).
+            "<body><div style=\"display:flex;height:200px\"><p class=x>a</p><p style=\"height:150px\">b</p></div></body>"
         }
         // Formulaires — `accent-color`, `caret-color`, `appearance`,
         // `cursor`, `field-sizing`… n'ont d'effet que sur contrôle.
