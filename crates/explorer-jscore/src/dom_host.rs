@@ -599,6 +599,16 @@ struct NodeHost {
     epoch: u32,
 }
 
+/// Sonde §cran-28 — `EXPLORER_STALE_THROW` : les accès sur
+/// handle périmé (slot recyclé §B-126) jettent un
+/// `TypeError` nommé `StaleHandle` au lieu de la dégradation
+/// silencieuse (`undefined`/refus) — nomme le site JS exact
+/// de la rupture (`ifV` kevlar) au lieu du symptôme aval.
+fn stale_throw() -> bool {
+    static FLAG: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *FLAG.get_or_init(|| std::env::var_os("EXPLORER_STALE_THROW").is_some())
+}
+
 impl NodeHost {
     /// Le handle est-il encore vivant — le slot porte-t-il le
     /// nœud pour lequel ce wrapper a été créé ? Un id recyclé
@@ -8135,6 +8145,18 @@ impl Host for NodeHost {
                     }
                 }
             }
+            // §cran-28 — sonde : sous `EXPLORER_STALE_THROW`
+            // la lecture périmée devient un TypeError nommé —
+            // transforme les early-outs silencieux (`ifV` lit
+            // `loggingStatus`/`polymerController` → undefined)
+            // en pile exploitable au point de rupture.
+            if stale_throw() {
+                return Err(e.type_error(format!(
+                    "StaleHandle: get `{key}` on recycled node {node} (epoch_me={}, epoch_now={:?})",
+                    self.epoch,
+                    self.dom.borrow().nodes.get(node as usize).map(|n| n.epoch)
+                )));
+            }
             return Ok(None);
         }
         // Accesseur propre `defineProperty` (JS-C82) : il shadowe
@@ -9098,6 +9120,17 @@ impl Host for NodeHost {
         // refusée (set expando ailleurs), jamais mutation du
         // nouvel occupant.
         if !self.live() {
+            // §cran-28 — sonde : sous `EXPLORER_STALE_THROW`
+            // le write silencieux devient un TypeError nommé —
+            // `ifV`/`I_o` jettent et la pile nomme le site
+            // exact du write sur handle périmé.
+            if stale_throw() {
+                return Err(e.type_error(format!(
+                    "StaleHandle: set `{key}` on recycled node {node} (epoch_me={}, epoch_now={:?})",
+                    self.epoch,
+                    self.dom.borrow().nodes.get(node as usize).map(|n| n.epoch)
+                )));
+            }
             return Ok(false);
         }
         // Accesseur propre `defineProperty` (JS-C82) : refuser
