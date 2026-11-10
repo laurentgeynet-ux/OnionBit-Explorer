@@ -297,6 +297,26 @@ fn html_element_interfaces_detectable() {
 }
 
 #[test]
+fn tag_interfaces_mod_menu_time() {
+    // Étape 219 / `html.elem` BCD — `del`/`ins` →
+    // `HTMLModElement`, `menu` → `HTMLMenuElement` (câblage
+    // `tag_interface`) ; `time.dateTime` reflète l'attribut
+    // `datetime`.
+    assert_eq!(
+        ev("['del','ins','menu','time'].map(function(t){\
+            return document.createElement(t) instanceof \
+            globalThis[{del:'HTMLModElement',ins:'HTMLModElement',\
+            menu:'HTMLMenuElement',time:'HTMLTimeElement'}[t]]}).join(',')"),
+        "true,true,true,true"
+    );
+    assert_eq!(
+        ev("var t=document.createElement('time');t.dateTime='2026-11';\
+            t.getAttribute('datetime')+':'+t.dateTime"),
+        "2026-11:2026-11"
+    );
+}
+
+#[test]
 fn navigator_is_fixed_and_poor() {
     assert_eq!(ev("navigator.userAgent"), "Explorer/0.1 (explorer-jscore)");
     // Deliberately absent: plugins et APIs matérielles ;

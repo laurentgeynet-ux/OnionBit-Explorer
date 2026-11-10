@@ -658,6 +658,10 @@ fn dom_acc_props(class: &str) -> &'static [&'static str] {
         "HTMLAnchorElement" => &["href", "target", "rel"],
         "HTMLIFrameElement" => &["src", "srcdoc", "sandbox", "loading"],
         "HTMLScriptElement" | "HTMLLinkElement" => &["src", "href", "type", "rel"],
+        // `time.dateTime` = réflexion de l'attribut
+        // `datetime` (html.elem BCD — le seul membre IDL
+        // spécifique de `HTMLTimeElement`).
+        "HTMLTimeElement" => &["dateTime"],
         _ => &["id", "className", "title"],
     }
 }
@@ -2274,6 +2278,7 @@ fn tag_interface(tag: &str) -> Option<&'static str> {
         "canvas" => "HTMLCanvasElement",
         "data" => "HTMLDataElement",
         "datalist" => "HTMLDataListElement",
+        "del" | "ins" => "HTMLModElement",
         "details" => "HTMLDetailsElement",
         "dialog" => "HTMLDialogElement",
         "div" => "HTMLDivElement",
@@ -2293,6 +2298,7 @@ fn tag_interface(tag: &str) -> Option<&'static str> {
         "li" => "HTMLLIElement",
         "link" => "HTMLLinkElement",
         "map" => "HTMLMapElement",
+        "menu" => "HTMLMenuElement",
         "meta" => "HTMLMetaElement",
         "meter" => "HTMLMeterElement",
         "object" => "HTMLObjectElement",
@@ -6512,6 +6518,8 @@ const TAGGED_ATTRS: &[(&str, &[&str])] = &[
         "referrerpolicy",
         &["a", "area", "iframe", "img", "link", "script"],
     ),
+    // `time.dateTime` ↔ `datetime` (html.elem BCD).
+    ("datetime", &["time"]),
 ];
 
 /// Attributs booléens réfléchis — même discipline de scoping
@@ -6541,6 +6549,7 @@ fn prop_attr_name(key: &str) -> &str {
         "htmlFor" => "for",
         "encoding" => "enctype",
         "crossOrigin" => "crossorigin",
+        "dateTime" => "datetime",
         "playsInline" => "playsinline",
         "referrerPolicy" => "referrerpolicy",
         k => k,

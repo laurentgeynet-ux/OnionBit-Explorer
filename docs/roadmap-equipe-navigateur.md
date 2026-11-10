@@ -7457,12 +7457,14 @@ incrément.
   `section`…) tombent sur le défaut
   `HTMLElement` + boîte rendue — au
   dénominateur, triviaux. Mesure :
-  **115/119 (96,6 %)** sur les clés
-  standard-track ; manques honnêtes :
-  `del`/`ins`→`HTMLModElement`,
-  `menu`→`HTMLMenuElement` (interfaces
-  non câblées), `time.dateTime`
-  (binding absent).
+  **115/119 (96,6 %) puis 119/119
+  (100 %)** — les 4 manques du premier
+  jet étaient des trous de binding
+  jscore, soldés : `tag_interface`
+  câble `del`/`ins`→`HTMLModElement`
+  et `menu`→`HTMLMenuElement`,
+  `time.dateTime` reflète `datetime`.
+  Verrou `tag_interfaces_mod_menu_time`.
 
 - [ ] **Écarts terrain — vol humain
   22/10 (release `39ab821`, FFI)** :
