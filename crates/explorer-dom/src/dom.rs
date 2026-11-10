@@ -790,6 +790,7 @@ impl Dom {
         // `<template>` créé par `createElement` n'en a pas.
         if matches!(self.data(parent)?, NodeData::Element(_))
             && self.tag_name(parent)?.eq_ignore_ascii_case("template")
+            && self.namespace(parent).ok() == Some(crate::node::Namespace::Html)
         {
             if self.template_contents(parent)?.is_none() {
                 let frag = self.create_fragment()?;
