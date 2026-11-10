@@ -1177,6 +1177,7 @@ const DOC_PROTO_METHODS: &[&str] = &[
     "append",
     "prepend",
     "insertBefore",
+    "moveBefore",
     "removeChild",
     "replaceChild",
     "replaceChildren",
@@ -2536,6 +2537,41 @@ fn node_namespace(d: &Dom, node: NodeId) -> Option<String> {
 /// de `from` : nom local = tag après `:` (nom qualifié) ;
 /// `*` joker sur les deux dimensions ; namespace évalué via
 /// [`node_namespace`] (même approximation que `namespaceURI`).
+/// `CharacterData.wholeText` — concaténation de `node` et de
+/// ses frères contigus de type `Text`/`Comment` (spec).
+/// `pub(crate)` : réutilisé par `misc_apis` (Range/
+/// surroundContents).
+pub(crate) fn whole_text_of(dom: &DomRef, node: NodeId) -> String {
+    let d = dom.borrow();
+    let mut out = String::new();
+    let mut rev: Vec<String> = Vec::new();
+    let mut cur = Some(node);
+    while let Some(c) = cur {
+        let n = &d.nodes[c as usize];
+        if !matches!(n.kind, NodeKind::Text | NodeKind::Comment) {
+            break;
+        }
+        if c != node {
+            rev.push(n.text.clone());
+        }
+        cur = d.sibling(c, false);
+    }
+    for t in rev.into_iter().rev() {
+        out.push_str(&t);
+    }
+    out.push_str(&d.nodes[node as usize].text);
+    cur = d.sibling(node, true);
+    while let Some(c) = cur {
+        let n = &d.nodes[c as usize];
+        if !matches!(n.kind, NodeKind::Text | NodeKind::Comment) {
+            break;
+        }
+        out.push_str(&n.text);
+        cur = d.sibling(c, true);
+    }
+    out
+}
+
 fn by_tag_ns(dom: &DomRef, from: NodeId, ns: &str, local: &str) -> Vec<NodeId> {
     let d = dom.borrow();
     let mut out = Vec::new();
@@ -6901,7 +6937,11 @@ fn aria_attr_name(key: &str) -> Option<String> {
 /// les références explicites ; un élément sans `id`
 /// disparaît de la valeur écrite, déviation bornée).
 const ARIA_ELEMENTS_PROPS: &[(&str, &str, bool)] = &[
-    ("ariaActiveDescendantElement", "aria-activedescendant", false),
+    (
+        "ariaActiveDescendantElement",
+        "aria-activedescendant",
+        false,
+    ),
     ("ariaControlsElements", "aria-controls", true),
     ("ariaDescribedByElements", "aria-describedby", true),
     ("ariaDetailsElements", "aria-details", true),
@@ -7123,6 +7163,7 @@ const DOC_METHODS: &[&str] = &[
     "append",
     "prepend",
     "insertBefore",
+    "moveBefore",
     "removeChild",
     "replaceChild",
     "replaceChildren",
@@ -7139,6 +7180,7 @@ const NODE_METHODS: &[&str] = &[
     "dispatchEvent",
     "appendChild",
     "insertBefore",
+    "moveBefore",
     "removeChild",
     "replaceChild",
     "cloneNode",
@@ -8536,6 +8578,47 @@ impl Host for NodeHost {
                 }
                 return Ok(None);
             }
+            // `CharacterData.wholeText` — concaténation des nœuds
+            // texte contigus (soi compris), spec `CharacterData`.
+            "wholeText" => {
+                let is_cd = matches!(
+                    self.dom.borrow().nodes[node as usize].kind,
+                    NodeKind::Text | NodeKind::Comment
+                );
+                if !is_cd {
+                    return Ok(None);
+                }
+                let s = whole_text_of(&self.dom, node);
+                return Ok(Some(e.str_val(s)));
+            }
+            // `Text.splitText` lisible (Pareto `api` lot 4) —
+            // `typeof`/`in` exigent une fonction (trampoline
+            // invoke, même motif `matches`). Garde `Text` seul.
+            "splitText" => {
+                let is_text = matches!(self.dom.borrow().nodes[node as usize].kind, NodeKind::Text);
+                if !is_text || matches!(this, Value::Obj(id) if e.host_method_shadowed(id, key)) {
+                    return Ok(None);
+                }
+                let nv = e.str_val(key);
+                return Ok(Some(e.bound_native(
+                    "node.method",
+                    host_method_trampoline,
+                    vec![nv, this],
+                )));
+            }
+            // `Range.getBoxQuads`/`Text.getBoxQuads` — pas de
+            // géométrie fine de quads dans le miroir : tableau
+            // vide honnête (même borne `getClientRects`).
+            "getBoxQuads" => {
+                let is_text = matches!(
+                    self.dom.borrow().nodes[node as usize].kind,
+                    NodeKind::Text | NodeKind::Comment
+                );
+                if !is_text {
+                    return Ok(None);
+                }
+                return Ok(Some(e.new_array(Vec::new())));
+            }
             // `el.attributes` — `NamedNodeMap` vivante (JS-C76) :
             // itérable + `length` + indexés — les helpers
             // `makeIterator` des bundles closure l'exigent
@@ -9707,7 +9790,13 @@ impl Host for NodeHost {
                             let mut d = self.dom.borrow_mut();
                             let ptag = d.nodes[node as usize].tag.clone();
                             let mut slot = None;
-                            if matches!(ptag.as_str(), "body" | "html" | "#document") {
+                            // §cran-31 — étendu aux parents
+                            // custom-element : un retrait sous
+                            // `ytd-app`/`ytd-browse` (pm omis du
+                            // stamping ?) sortait du cadre body.
+                            if matches!(ptag.as_str(), "body" | "html" | "#document")
+                                || ptag.contains('-')
+                            {
                                 for i in 0..12u8 {
                                     if d.ce.probe_seen.insert(format!("dk:{ptag}:{i}")) {
                                         slot = Some(i);
@@ -10098,7 +10187,12 @@ impl Host for NodeHost {
                 Ok(Some(Value::Bool(self.check_validity_of(e, node)?)))
             }
             // -- JS-7g structural ops ------------------------------------
-            "insertBefore" => {
+            // `moveBefore(node, child)` (dom-parts spec) —
+            // déplacement **sans** clone ni re-exécution :
+            // `insert_before` de l'arène est déjà un move
+            // (detach+insert, identité conservée) — même
+            // chemin, même repère `ref_node` (Pareto api).
+            "insertBefore" | "moveBefore" => {
                 let new_n = node_for_in(e, arg(args, 0), &self.dom)
                     .or_else(|| adopt_into(e, arg(args, 0), &self.dom, &self.cache));
                 let ref_n = node_for_in(e, arg(args, 1), &self.dom);
@@ -10515,6 +10609,35 @@ impl Host for NodeHost {
                 let id = e.to_js_string(arg(args, 0))?;
                 let has = self.dom.borrow().attr(node, PC_ATTR) == Some(id.as_str());
                 Ok(Some(Value::Bool(has)))
+            }
+            // `Text.splitText(offset)` (Pareto `api` lot 4) —
+            // spec : le nœud garde `[0, off)`, un nouveau nœud
+            // texte `[off, len)` est inséré après et retourné.
+            "splitText" => {
+                let is_text = matches!(
+                    self.dom.borrow().nodes[node as usize].kind,
+                    NodeKind::Text
+                );
+                if !is_text {
+                    return Ok(None);
+                }
+                let off = e.to_number(arg(args, 0))?.max(0.0) as usize;
+                let mut d = self.dom.borrow_mut();
+                let text = d.nodes[node as usize].text.clone();
+                let chars: Vec<char> = text.chars().collect();
+                if off > chars.len() {
+                    return Err(e.type_error("IndexSizeError: splitText offset"));
+                }
+                let tail: String = chars[off..].iter().collect();
+                let head: String = chars[..off].iter().collect();
+                d.set_text(node, &head);
+                let t2 = d.create_text(&tail);
+                if let Some(p) = d.parent(node) {
+                    let next = d.sibling(node, true);
+                    d.insert_before(p, t2, next);
+                }
+                drop(d);
+                Ok(Some(node_value(e, &self.dom, &self.cache, t2)))
             }
             "insertAdjacentText" => {
                 let pos = e.to_js_string(arg(args, 0))?;

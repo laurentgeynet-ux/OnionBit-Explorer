@@ -7580,3 +7580,26 @@ fn aria_elements_reflections() {
         "x|x y|y|false"
     );
 }
+
+/// `parent.moveBefore(node, ref)` — déplacement sans clone
+/// (dom-parts spec) : identité et état conservés, même rail
+/// `insert_before` que `insertBefore`.
+#[test]
+fn move_before_preserves_identity() {
+    assert_eq!(
+        ev_in(
+            "<html><body><div id=a><b id=x>1</b></div><div id=b><i id=y>2</i></div></body></html>",
+            "var x=document.getElementById('x'),b=document.getElementById('b');\
+             var before=x;\
+             b.moveBefore(x,null);\
+             b.moveBefore(document.getElementById('y'),x);\
+             (x===before)+'|'+b.children[0].id+'|'+b.children[1].id+'|'+x.parentNode.id",
+        ),
+        "true|y|x|b"
+    );
+    // Lisibilité `in`.
+    assert_eq!(
+        ev("var d=document.createElement('div');('moveBefore' in d)+'/'+typeof d.moveBefore"),
+        "true/function"
+    );
+}
