@@ -1,0 +1,19 @@
+# This file is part of Explorer.
+# Copyright (C) 2026 Laurent Geynet
+# SPDX-License-Identifier: MIT OR Apache-2.0
+
+# Config cargo-nextest — `cargo nextest run` (timings par test,
+# retentatives, timeouts). Le gate de CI reste `cargo test`
+# (verify_all.ps1) ; nextest sert au diagnostic itératif et à la
+# surveillance perf (AGENTS.md §3).
+
+[profile.default]
+# Un test qui dépasse 60 s est suspect (interpréteur jscore en
+# debug ~10-20× plus lent) — on le tue plutôt que d'attendre.
+slow-timeout = { period = "60s", terminate-after = 2 }
+# Une seule tentative : les suites sont censées être
+# déterministes ; un flaky est un bug à nommer, pas à retenter.
+retries = 0
+# Sortie compacte ; les échecs gardent stdout/stderr complets.
+status-level = "skip"
+failure-output = "immediate-final"

@@ -51,6 +51,7 @@ fn main() -> ExitCode {
         [_, cmd, url] if cmd == "dom" => dom_live(url),
         [_, cmd, url] if cmd == "mem" => mem_report(url),
         [_, cmd, url, dir] if cmd == "save" => save_fixture(url, dir),
+        [_, cmd, file] if cmd == "eval" => eval_js(file),
         [_, cmd, url, out] if cmd == "download" => download(url, out),
         [_, cmd] if cmd == "mcp" => mcp_main("9377"),
         [_, cmd, port] if cmd == "mcp" => mcp_main(port),
@@ -66,6 +67,7 @@ fn main() -> ExitCode {
             eprintln!("        explorer-cli dom <url>");
             eprintln!("        explorer-cli mem <url>");
             eprintln!("        explorer-cli save <url> <dossier>");
+            eprintln!("        explorer-cli eval <fichier.js>");
             eprintln!("        explorer-cli download <url> <sortie>");
             eprintln!("        explorer-cli diff <a.png> <b.png>");
             eprintln!("        explorer-cli mcp [port]  (serveur MCP stdio → daemon)");
@@ -78,10 +80,34 @@ fn main() -> ExitCode {
 /// redirections bornées) — partagée par `read_source` et
 /// `shot`.
 fn client_stack() -> Arc<dyn HttpTransport> {
+    // Rejeu d'un vol enregistré (explorer-net `replay`) —
+    // priorité absolue : aucun socket ouvert, la session rejoue
+    // les réponses du dossier dans l'ordre d'enregistrement.
+    if let Ok(dir) = std::env::var("EXPLORER_NET_REPLAY") {
+        if !dir.is_empty() {
+            eprintln!("[EXPLORER_NET_REPLAY={dir} — rejeu offline]");
+            return Arc::new(explorer_net::replay::DirTransport::new(
+                std::path::Path::new(&dir),
+            ));
+        }
+    }
     let tls = Arc::new(TlsConnector::web_roots());
     let h1: Arc<dyn HttpTransport> = Arc::new(AutoClient::new(tls, HttpConfig::default()));
     let decoded: Arc<dyn HttpTransport> = Arc::new(DecodingTransport::wrap(h1, 16 * 1024 * 1024));
-    Arc::new(RedirectTransport::wrap(decoded, 8))
+    let stack: Arc<dyn HttpTransport> = Arc::new(RedirectTransport::wrap(decoded, 8));
+    // Enregistrement de vol : chaque réponse décodée est écrite
+    // dans le dossier (`<clé>-<seq>.resp`) — rejouable ensuite
+    // via `EXPLORER_NET_REPLAY`.
+    match std::env::var("EXPLORER_NET_RECORD") {
+        Ok(dir) if !dir.is_empty() => {
+            eprintln!("[EXPLORER_NET_RECORD={dir} — capture des réponses]");
+            Arc::new(explorer_net::replay::RecordingTransport::wrap(
+                stack,
+                std::path::Path::new(&dir),
+            ))
+        }
+        _ => stack,
+    }
 }
 
 /// `download <url> <sortie>` — enregistre `url` sous le
@@ -519,6 +545,42 @@ async fn save_fixture(url: &str, dir: &str) -> ExitCode {
     }
     println!("save : {} artefacts dans {dir}", wrote.len());
     ExitCode::SUCCESS
+}
+
+/// `eval <fichier.js>` : exécute un script sous `explorer-jscore`
+/// — `console.*` vers stdout, throws et rejets drainés vers
+/// stderr. Brique du différentiel `scripts/js_diff.mjs`
+/// (confrontation à Node/V8 sur corpus). Bornes optionnelles :
+/// `EXPLORER_JS_OPS` (ops) — le défaut suit le moteur.
+fn eval_js(path: &str) -> ExitCode {
+    let src = match std::fs::read_to_string(path) {
+        Ok(s) => s,
+        Err(e) => {
+            eprintln!("eval : lecture impossible ({path}) : {e}");
+            return ExitCode::FAILURE;
+        }
+    };
+    let mut e = explorer_jscore::Engine::new();
+    if let Some(ops) = std::env::var("EXPLORER_JS_OPS")
+        .ok()
+        .and_then(|v| v.parse::<u64>().ok())
+    {
+        e.set_op_limit(if ops == 0 { u64::MAX } else { ops });
+    }
+    e.set_console_hook(std::rc::Rc::new(|l| println!("{l}")));
+    let r = e.eval_named(&src, path);
+    let _ = e.run_microtasks();
+    if let Err(err) = &r {
+        eprintln!("uncaught: {err}");
+    }
+    for m in e.drain_unhandled_rejections() {
+        eprintln!("{m}");
+    }
+    if r.is_err() {
+        ExitCode::FAILURE
+    } else {
+        ExitCode::SUCCESS
+    }
 }
 
 /// `mem <url>` : attribution mémoire par réservoir après

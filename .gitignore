@@ -88,3 +88,4 @@ wt-*/
 # convention `_vol*` ne les couvrait pas).
 vol[0-9]*/
 vol[0-9]*.log
+node_modules/

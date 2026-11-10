@@ -27,6 +27,7 @@ pub mod lang;
 pub mod media_proxy;
 pub mod policy;
 pub mod proxy;
+pub mod replay;
 pub mod resolver;
 pub mod sse;
 pub mod tls;
