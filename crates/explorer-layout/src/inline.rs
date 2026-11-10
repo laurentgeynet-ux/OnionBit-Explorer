@@ -306,11 +306,51 @@ pub(crate) fn layout_inline(
     // formatée — négatif = sortie d'écran, la technique
     // image-remplacement (`text-indent:-9999px` + sprite en
     // `background-image`, portail Wikipedia `.sprite`).
-    let indent = side_px(&st, "text-indent", w, fs, ctx, 0.0);
+    // Mots-clés `each-line`/`hanging` (css-text-4) :
+    // `each-line` = indent sur TOUTES les lignes (pas la
+    // première seule), `hanging` = l'indent s'applique aux
+    // lignes SAUF la première — combinés = tout sauf la
+    // première est décalée de l'indent. `side_px` échouerait
+    // sur `"20px hanging"` — la longueur est extraite des
+    // tokens non mots-clés.
+    let ti_raw = st.get("text-indent").map_or("", |v| v);
+    let each_line = ti_raw.contains("each-line");
+    let hanging = ti_raw.contains("hanging");
+    let indent = if each_line || hanging {
+        let len = ti_raw
+            .split_whitespace()
+            .filter(|t| !matches!(*t, "each-line" | "hanging"))
+            .collect::<Vec<_>>()
+            .join(" ");
+        raw_length_px(&len, w, fs, ctx).unwrap_or(0.0)
+    } else {
+        side_px(&st, "text-indent", w, fs, ctx, 0.0)
+    };
     let mut lines = break_into_lines(
-        &items, &atomics, x, y, w, ctx, fs, fl, strut_lh, indent, para_lv,
+        &items,
+        &atomics,
+        x,
+        y,
+        w,
+        ctx,
+        fs,
+        fl,
+        strut_lh,
+        // `each-line` → indent toutes lignes ; `hanging` →
+        // indent sauf la première (css-text-4) — le delta
+        // première/suivantes est porté à la cassure et à
+        // l'alignement.
+        if each_line { indent } else { 0.0 },
+        if hanging {
+            indent
+        } else if each_line {
+            indent
+        } else {
+            0.0
+        },
+        para_lv,
     );
-    align_lines(&st, &mut lines, x, w, fl, indent);
+    align_lines(&st, &mut lines, x, w, fl, indent, hanging);
     apply_text_overflow(&st, &mut lines, x + w, ctx, fs);
     apply_line_clamp(&st, &mut lines, x + w, ctx, fs);
     apply_line_clamp(&st, &mut lines, x + w, ctx, fs);
@@ -1222,7 +1262,8 @@ fn break_into_lines(
     parent_fs: f32,
     fl: &FloatCtx,
     strut_lh: f32,
-    indent: f32,
+    indent_first: f32,
+    indent_rest: f32,
     para_lv: u8,
 ) -> Vec<LineBox> {
     /// Requêtes de bande bornées (contenu hostile : les
@@ -1244,7 +1285,7 @@ fn break_into_lines(
     // seulement (`new_line!` repart de `line_x` brut) ; les
     // tests de fit soustraient déjà `cursor_x - line_x`, la
     // largeur de bande reste la référence.
-    let mut cursor_x = line_x + indent;
+    let mut cursor_x = line_x + indent_first;
     let mut cursor_y = y;
 
     // Descend la ligne tant que la bande est vide ou trop
@@ -1277,7 +1318,7 @@ fn break_into_lines(
         () => {{
             acc.close(&mut cursor_y, &mut lines, ctx, base_rtl, line_x + line_w);
             (line_x, line_w) = fl.band(cursor_y, x, w);
-            cursor_x = line_x;
+            cursor_x = line_x + indent_rest;
         }};
     }
 
@@ -1620,6 +1661,7 @@ fn align_lines(
     w: f32,
     fl: &FloatCtx,
     indent: f32,
+    hanging: bool,
 ) {
     let rtl = para_level(st) == 1;
     let align = match st.get_or("text-align", "start") {
@@ -1672,7 +1714,19 @@ fn align_lines(
         // (`ebx + indent`) — `text-indent` négatif n'est pas
         // annulé par le recalage (image-remplacement des
         // sprites, `.sprite{text-indent:-9999px}` Wikipedia).
-        let edge = if i == 0 { ebx + indent } else { ebx };
+        // `hanging` : l'indent s'applique aux lignes SAUF la
+        // première — edge décalé sur i>0 seulement.
+        let edge = if i == 0 {
+            if hanging {
+                ebx
+            } else {
+                ebx + indent
+            }
+        } else if hanging {
+            ebx + indent
+        } else {
+            ebx
+        };
         let recale = (edge - mleft).max(0.0);
         #[allow(clippy::cast_precision_loss)]
         let (dx, space) = match align {
