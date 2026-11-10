@@ -1145,3 +1145,42 @@ fn mask_multi_couches_union() {
     assert_eq!(px(&f, 5, 10)[0], 255, "couche 0 : gauche opaque");
     assert_eq!(px(&f, 15, 10)[0], 255, "couche 1 : droite opaque — union");
 }
+
+/// `text-orientation:sideways` en flux vertical : le run
+/// est bracketé d'une rotation ±90° (PushTransform/Pop)
+/// autour de la baseline — `upright`/`mixed` inchangés.
+#[test]
+fn text_orientation_sideways_brackete() {
+    let dom: Dom = TreeBuilder::parse("<div class=v>ab</div><div class=h>cd</div>");
+    let mut eng = StyleEngine::new();
+    eng.add_css("body{margin:0}", Origin::Author);
+    eng.add_css(
+        ".v{display:block;writing-mode:vertical-rl;text-orientation:sideways}\
+         .h{display:block;writing-mode:vertical-rl;text-orientation:mixed}",
+        Origin::Author,
+    );
+    let styles = eng.compute_tree(&dom, dom.document(), &StyleEnv::default());
+    let root_el = dom
+        .children(dom.document())
+        .into_iter()
+        .flatten()
+        .find(|&c| dom.element(c).is_ok())
+        .expect("élément racine");
+    let mut bx = build_box_tree(&dom, root_el, &styles).expect("arbre");
+    layout_tree(&mut bx, VIEW, &ctx());
+    let imgs = collect_data_images(&dom, &styles, 1 << 20);
+    let list = build_display_list_full(&bx, VIEW, 200.0, 0.0, &imgs);
+    // Motif sideways : PushTransform suivi directement d'un
+    // Text puis PopTransform (le flow_transform R-183, lui,
+    // encadre toute la sous-arbre — on isole le triplet).
+    let items = &list.items;
+    let bracketed = items
+        .windows(3)
+        .filter(|w| {
+            matches!(w[0], explorer_render::DisplayItem::PushTransform(_))
+                && matches!(w[1], explorer_render::DisplayItem::Text { .. })
+                && matches!(w[2], explorer_render::DisplayItem::PopTransform)
+        })
+        .count();
+    assert_eq!(bracketed, 1, "seul le run sideways est pivote");
+}
