@@ -4252,6 +4252,15 @@ impl Engine {
         // enregistrent une `default` policy obtiennent l'API).
         let tt = self.new_object();
         self.add_method(tt, "createPolicy", tt_create_policy);
+        // `isHTML`/`isScript`/`isScriptURL` — contrats de la
+        // factory (spec `TrustedTypePolicyFactory`) : vrai pour
+        // `Str` (nos `createX` passthrough rendent des strings
+        // — équivalent TT de ce moteur), faux sinon. Les deux
+        // patterns kevlar passent : `isHTML(v)?v:createHTML(v)`
+        // et le check `already-trusted`.
+        self.add_method(tt, "isHTML", tt_is_str);
+        self.add_method(tt, "isScript", tt_is_str);
+        self.add_method(tt, "isScriptURL", tt_is_str);
         self.set_own(g, "trustedTypes", Value::Obj(tt), false);
         // `speechSynthesis` — global `window` spec (jar vide :
         // `getVoices()` → `[]`, speak/cancel no-op — aucune
@@ -17606,6 +17615,14 @@ fn tt_create_policy(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value
 fn tt_passthrough(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
     let s = e.to_js_string(arg(args, 0))?;
     Ok(e.str_val(s))
+}
+
+/// `trustedTypes.isHTML/isScript/isScriptURL(v)` — vrai pour
+/// `Str` : nos `createX` rendent des strings passthrough —
+/// équivalent TrustedType de ce moteur. `undefined`/`Null`/
+/// Obj non-TT → `false` (kevlar re-wrappe via `createX`).
+fn tt_is_str(_e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
+    Ok(Value::Bool(matches!(arg(args, 0), Value::Str(_))))
 }
 
 /// `new PerformanceObserver(cb)` / `new ReportingObserver(cb)`
