@@ -2024,7 +2024,14 @@ impl StyleEngine {
                 (*rank, *scope_rank, layer.clone(), *spec, *order)
             });
         }
-        for (_, _, _, _, _, d) in &cand {
+        // R-215 — rang d'origine par nom inséré : la
+        // résolution logique→physique doit pouvoir écraser
+        // un physique de moindre priorité (UA `padding-left`
+        // vs auteur `padding-inline-start` — bug mesuré
+        // `dw +24` wikipedia). Absent de `ranks` = hint/
+        // héritage = rang 0 (toujours le plus faible).
+        let mut ranks: HashMap<String, u8> = HashMap::new();
+        for (rank, _, _, _, _, d) in &cand {
             // Les noms de propriétés ordinaires sont
             // ASCII-insensibles → minuscules canoniques ; les
             // propriétés custom `--*` sont SENSIBLES À LA CASSE
@@ -2045,6 +2052,7 @@ impl StyleEngine {
             match expand_shorthand(&lname, &d.value) {
                 Some(expanded) => {
                     for (long_name, v) in expanded {
+                        ranks.insert(long_name.clone(), *rank);
                         props.insert(long_name, v);
                     }
                 }
@@ -2053,6 +2061,7 @@ impl StyleEngine {
                     // fait le tri (`width: 200` sans unité,
                     // raccourci invalide → déclaration ignorée).
                     if value_is_valid_for(&lname, &d.value) {
+                        ranks.insert(lname.clone(), *rank);
                         props.insert(lname, d.value.clone());
                     } else if matches!(dom.document_mode(), explorer_dom::DocumentMode::Quirks)
                         && QUIRKY_LENGTH_PROPS.contains(&lname.as_str())
@@ -2096,7 +2105,7 @@ impl StyleEngine {
         // alors connus. Le physique déclaré l'emporte
         // (l'ordre fin n'est pas préservable en `HashMap` —
         // approximation documentée).
-        resolve_logical_props(&mut props, parent);
+        resolve_logical_props(&mut props, parent, &ranks);
         // Propriétés custom `--*` : héritées par défaut (spec)
         // — R-57 : la table effective du parent est PARTAGÉE
         // (bump `Arc` O(1)) au lieu de recopier chaque entrée ;
@@ -3783,7 +3792,11 @@ fn stored_side(real: &str, pmode: crate::value::WritingMode) -> &'static str {
 /// `logique → réel` (mode propre + `direction`), `réel →
 /// nom stocké` (mode du parent). Le physique déjà déclaré
 /// n'est pas écrasé (perdant arbitraire mais documenté).
-fn resolve_logical_props(props: &mut HashMap<String, String>, parent: Option<&ComputedStyle>) {
+fn resolve_logical_props(
+    props: &mut HashMap<String, String>,
+    parent: Option<&ComputedStyle>,
+    ranks: &HashMap<String, u8>,
+) {
     use crate::value::parse_writing_mode;
     let own = props
         .get("writing-mode")
@@ -3799,7 +3812,19 @@ fn resolve_logical_props(props: &mut HashMap<String, String>, parent: Option<&Co
         let Some(stored) = logical_name(&k, own, rtl, pmode, same_axes) else {
             continue;
         };
-        if !props.contains_key(&stored) {
+        // Le logique écrase le physique présent seulement
+        // si son rang d'origine dépasse (auteur > UA —
+        // `padding-inline-start` auteur bat `padding-left`
+        // UA). À rang égal, le physique l'emporte —
+        // comportement historique documenté (l'ordre fin
+        // intra-élément n'est pas préservable en `HashMap`).
+        let win = ranks.get(&k).is_some_and(|r| {
+            *r > ranks
+                .get(&stored)
+                .copied()
+                .unwrap_or(0)
+        });
+        if !props.contains_key(&stored) || win {
             if let Some(v) = props.get(&k).cloned() {
                 props.insert(stored, v);
             }

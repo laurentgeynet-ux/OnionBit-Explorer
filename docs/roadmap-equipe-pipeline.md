@@ -3810,6 +3810,7 @@ chez NAVIGATEUR — non recopiés ici.
 - [x] **R-212. LOT-selectors : `:lang()` + tolérance `::-moz-*`/`-ms`/`-o`** : premier lot nommé par le Pareto réel (`css.selector.bad` = `:lang` Wikipedia + vendor pseudos). `PseudoClass::Lang` (parse + héritage documentaire + préfixe tiret + `*`) ; vendor préfixés → `Other` dormant au lieu d'invalider la liste. Verrous : 4 tests dédiés.
 - [x] **R-213. `geometry_dump` : rect contenu pour les inline** : nos fragments rapportaient la ligne allouée (lh) où `gBCR` rend la border-box contenu (~fs) — dh inline systématique +9 px sur le corpus. Rect `Inline`/`Text`/fragment non-atomique resserré à `font-size` recentrée. Verrou : suites layout vertes.
 - [x] **R-214. `line-height` naturelle = `asc − desc`** : dy +0,4 px/ligne (info.cern.ch) — le `lineGap` hhea doublait la métrique vs Chrome ; retiré (borne fonte à gap réel documentée).
+- [x] **R-215. Priorité cascade logique/physique** : `padding-inline-start` auteur écrasé par `padding-left` UA (`dw +24` wikipedia). Rang d'origine mémorisé par nom ; écrasement logique→physique si rang strictement supérieur.
 ## Tâches continues
 
 - **Triage rendu** des échecs `site_smoke.ps1` : les écarts
