@@ -1182,7 +1182,9 @@ fn text_orientation_sideways_brackete() {
                 && matches!(w[2], explorer_render::DisplayItem::PopTransform)
         })
         .count();
-    assert_eq!(bracketed, 1, "seul le run sideways est pivote");
+    // `.v` sideways = 1 triplet run-entier ; `.h` mixed
+    // (défaut spec) = 1 triplet par glyphe latin (« cd » → 2).
+    assert_eq!(bracketed, 3, "sideways run + mixed par glyphe ({bracketed})");
 }
 
 /// `text-orientation:upright` : chaque glyphe est un `Text`
@@ -1214,4 +1216,48 @@ fn text_orientation_upright_per_glyph() {
         .filter(|i| matches!(i, explorer_render::DisplayItem::Text { .. }))
         .count();
     assert_eq!(texts, 2, "« ab » = 2 glyphes empilés : {texts}");
+}
+
+/// `text-orientation:mixed` : glyphe CJK debout (pas de
+/// transform), glyphe Latin pivoté — par glyphe.
+#[test]
+fn text_orientation_mixed_per_glyph() {
+    let dom: Dom = TreeBuilder::parse("<div class=v>a\u{65e5}</div>");
+    let mut eng = StyleEngine::new();
+    eng.add_css("body{margin:0}", Origin::Author);
+    eng.add_css(
+        ".v{display:block;writing-mode:vertical-rl;text-orientation:mixed}",
+        Origin::Author,
+    );
+    let styles = eng.compute_tree(&dom, dom.document(), &StyleEnv::default());
+    let root_el = dom
+        .children(dom.document())
+        .into_iter()
+        .flatten()
+        .find(|&c| dom.element(c).is_ok())
+        .expect("élément racine");
+    let mut bx = build_box_tree(&dom, root_el, &styles).expect("arbre");
+    layout_tree(&mut bx, VIEW, &ctx());
+    let imgs = collect_data_images(&dom, &styles, 1 << 20);
+    let list = build_display_list_full(&bx, VIEW, 200.0, 0.0, &imgs);
+    // Le triplet Push→Text→Pop = le glyphe Latin couché ;
+    // l'autre Text (CJK) est nu.
+    let items = &list.items;
+    let rotated = items
+        .windows(3)
+        .filter(|w| {
+            matches!(w[0], explorer_render::DisplayItem::PushTransform(_))
+                && matches!(w[1], explorer_render::DisplayItem::Text { .. })
+                && matches!(w[2], explorer_render::DisplayItem::PopTransform)
+        })
+        .count();
+    let texts = items
+        .iter()
+        .filter(|i| matches!(i, explorer_render::DisplayItem::Text { .. }))
+        .count();
+    assert_eq!(
+        (texts, rotated),
+        (2, 1),
+        "1 CJK debout + 1 latin pivoté : {texts} texts/{rotated} rotés"
+    );
 }
