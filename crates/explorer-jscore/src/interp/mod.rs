@@ -1966,7 +1966,18 @@ impl Engine {
                 d.attr(node, "src")
                     .map_or_else(|| format!("dyn:{seq}"), str::to_string)
             };
-            let _ = self.eval_named(text, &label);
+            // §B-118 — `dyn.err` : l'exception d'éval d'un chunk
+            // ne tue pas `load` (spec) mais elle partait sans
+            // aucune trace — webpack l'enterre dans `{error}` de
+            // l'entrypoint, `whenEntrypoint` rejette, et le
+            // `catch` de l'app avale la vraie cause (pluto.tv :
+            // `createRouter` jamais atteint derrière un
+            // `getProperError` silencieux).
+            if let Err(th) = self.eval_named(text, &label) {
+                let msg = th.to_string();
+                let msg: String = msg.chars().take(240).collect();
+                tracing::info!(target: "dom_probe", site = "dyn.err", src = %label, error = %msg);
+            }
             self.hooks.current_script = prev;
             self.sched_tick("dlv.dynscript");
             "load"

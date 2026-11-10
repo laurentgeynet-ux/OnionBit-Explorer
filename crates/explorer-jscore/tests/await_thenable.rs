@@ -273,3 +273,63 @@ fn c286_for_init_suspend_declarator() {
     let out = e.eval("out").map(|v| e.describe(v)).unwrap();
     assert_eq!(out, "F!F!F!");
 }
+
+/// §B-118 — `await` dans une séquence virgule : chaque
+/// opérande s'évalue **à son tour**. Le hissage du second
+/// `await` évaluait son argument (`n.p`) avant `n = f()` —
+/// `n` undefined → `TypeError` (pluto.tv : `ef` hydratation,
+/// `n = createRouter` sauté → `next.router` jamais posé).
+#[test]
+fn b118_comma_seq_await_operands_in_order() {
+    let mut e = Engine::new();
+    e.eval(
+        "var out='?';\
+         (async function(){\
+           var n,z;\
+           (await Promise.resolve(0)), n={p:5}, z=await n.p;\
+           out=n.p+'/'+z;\
+         })();",
+    )
+    .expect("setup");
+    e.run_microtasks().expect("microtasks");
+    let out = e.eval("out").map(|v| e.describe(v)).unwrap();
+    assert_eq!(out, "5/5");
+}
+
+/// Forme exacte pluto : `cond && await p(), n = f(), z = await n.p`
+/// — la garde `&&` tire, l'affectation intermédiaire doit vivre.
+#[test]
+fn b118_comma_seq_await_after_and_guard() {
+    let mut e = Engine::new();
+    e.eval(
+        "var out='?';\
+         (async function(){\
+           var n,z;\
+           (Promise.resolve(1)&&await Promise.resolve(1)), n={p:7}, z=await n.p;\
+           out=n.p+'/'+z;\
+         })();",
+    )
+    .expect("setup");
+    e.run_microtasks().expect("microtasks");
+    let out = e.eval("out").map(|v| e.describe(v)).unwrap();
+    assert_eq!(out, "7/7");
+}
+
+/// Garde `&&` non tirée + suspend aval : `n = f()` s'évalue
+/// quand même avant le `await` suivant.
+#[test]
+fn b118_comma_seq_await_guard_not_taken() {
+    let mut e = Engine::new();
+    e.eval(
+        "var out='?';\
+         (async function(){\
+           var n,z;\
+           (0&&await Promise.resolve(1)), n={p:8}, z=await n.p;\
+           out=n.p+'/'+z;\
+         })();",
+    )
+    .expect("setup");
+    e.run_microtasks().expect("microtasks");
+    let out = e.eval("out").map(|v| e.describe(v)).unwrap();
+    assert_eq!(out, "8/8");
+}

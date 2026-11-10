@@ -285,7 +285,38 @@ fn lift_inner(e: &mut Expr, pre: &mut Vec<Stmt>, cx: &mut LowerCx) {
             }
         }
         Expr::Class(cl) => lift_classlit(std::rc::Rc::make_mut(cl), pre, cx),
-        Expr::Seq(items) | Expr::SuperCall(items) => {
+        Expr::Seq(items) => {
+            if items.iter().any(has_suspend) {
+                // §B-118 — une virgule évalue **à son tour** :
+                // chaque opérande est éclaté en statement ordonné
+                // (`lift` de l'opérande posé juste avant lui).
+                // Le hissage global évaluait l'argument d'un
+                // `await` avant les affectations intermédiaires —
+                // `(await a, n = f(), z = await n.p)` lisait `n.p`
+                // avec `n` encore undefined (pluto.tv : `ef`
+                // hydratation — `n = createRouter` sauté →
+                // `next.router` jamais posé).
+                let n = cx.fresh();
+                pre.push(Stmt::Var(vec![VarDecl {
+                    pat: Pat::Ident(n.clone()),
+                    init: None,
+                }]));
+                for it in items.iter_mut() {
+                    lift(it, pre, cx);
+                    pre.push(Stmt::Expr(Expr::Assign(
+                        Box::new(Expr::Ident(n.clone())),
+                        AssignOp::Set,
+                        Box::new(std::mem::replace(it, Expr::Null)),
+                    )));
+                }
+                *e = Expr::Ident(n);
+            } else {
+                for it in items {
+                    lift(it, pre, cx);
+                }
+            }
+        }
+        Expr::SuperCall(items) => {
             for it in items {
                 lift(it, pre, cx);
             }
