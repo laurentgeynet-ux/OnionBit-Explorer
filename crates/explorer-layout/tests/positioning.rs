@@ -974,3 +974,26 @@ fn anchor_position_area_spans() {
         "span-right → à droite"
     );
 }
+
+/// `@position-try --nom { … }` : la règle nommée s'applique
+/// quand la boîte déborde (fallback `position-area` +
+/// insets px — MVP css-anchor-1).
+#[test]
+fn anchor_position_try_named() {
+    let (dom, bx) = laid(
+        "<div><div id=anc></div><div id=t></div></div>",
+        "#anc{position:absolute;left:100px;top:4px;width:40px;height:20px;anchor-name:--a}\
+         #t{position:absolute;position-anchor:--a;position-area:top;\
+            position-try:--move;width:10px;height:10px}\
+         @position-try --move{position-area:bottom}",
+    );
+    let anc = find(&bx, by_id(&dom, "anc"));
+    let t = find(&bx, by_id(&dom, "t"));
+    // `top` = y = 4-10 = -6 → déborde → `--move` pose sous
+    // l'ancre (y = 4+20 = 24).
+    assert_eq!(
+        t.rect.y,
+        anc.rect.y + anc.rect.height,
+        "@position-try → sous ancre"
+    );
+}

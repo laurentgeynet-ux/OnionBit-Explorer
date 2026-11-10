@@ -856,6 +856,71 @@ fn fix_anchor_positioned(
                                         - bx.rect.width;
                                 }
                             }
+                            name if name.starts_with("--") => {
+                                // `@position-try --nom { … }`
+                                // (css-anchor-1) : débordement
+                                // → la règle sérialisée par la
+                                // cascade fournit
+                                // `position-area` + insets px
+                                // (MVP — autres props ignorées).
+                                if !(over_l || over_r || over_t || over_b) {
+                                    continue;
+                                }
+                                let Some(body) =
+                                    bx.style.get(&format!("position-try-{}", name.trim()))
+                                else {
+                                    continue;
+                                };
+                                for kv in body.split(';').filter_map(|p| p.split_once(':')) {
+                                    let (k, v) = (kv.0.trim(), kv.1.trim());
+                                    match k {
+                                        "position-area" => {
+                                            for t2 in v.split_ascii_whitespace() {
+                                                match t2 {
+                                                    "bottom" | "y-end" | "block-end" => {
+                                                        fy = ar.y + ar.height - bx.rect.y;
+                                                    }
+                                                    "top" | "y-start" | "block-start" => {
+                                                        fy = ar.y - bx.rect.height - bx.rect.y;
+                                                    }
+                                                    "right" | "x-end" | "inline-end" => {
+                                                        fx = ar.x + ar.width - bx.rect.x;
+                                                    }
+                                                    "left" | "x-start" | "inline-start" => {
+                                                        fx = ar.x - bx.rect.width - bx.rect.x;
+                                                    }
+                                                    _ => {}
+                                                }
+                                            }
+                                        }
+                                        "top" | "bottom" => {
+                                            if let Some(px) = v
+                                                .strip_suffix("px")
+                                                .and_then(|n| n.parse::<f32>().ok())
+                                            {
+                                                fy = if k == "top" {
+                                                    ar.y + ar.height + px - bx.rect.y
+                                                } else {
+                                                    ar.y - px - bx.rect.height - bx.rect.y
+                                                };
+                                            }
+                                        }
+                                        "left" | "right" => {
+                                            if let Some(px) = v
+                                                .strip_suffix("px")
+                                                .and_then(|n| n.parse::<f32>().ok())
+                                            {
+                                                fx = if k == "left" {
+                                                    ar.x + ar.width + px - bx.rect.x
+                                                } else {
+                                                    ar.x - px - bx.rect.width - bx.rect.x
+                                                };
+                                            }
+                                        }
+                                        _ => {}
+                                    }
+                                }
+                            }
                             _ => {}
                         }
                     }
