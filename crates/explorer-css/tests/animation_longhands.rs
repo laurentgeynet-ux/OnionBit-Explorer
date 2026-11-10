@@ -10,29 +10,30 @@ use explorer_css::{Origin, StyleEngine, StyleEnv};
 use explorer_dom::Dom;
 use explorer_html::TreeBuilder;
 
+fn walk_cls(
+    dom: &Dom,
+    n: explorer_dom::NodeId,
+    cls: &str,
+    sm: &explorer_css::StyleMap,
+    out: &mut Option<explorer_css::ComputedStyle>,
+) {
+    if dom.attribute_str(n, "class").ok().flatten().is_some_and(|c| c == cls) {
+        *out = sm.get(n).cloned();
+    }
+    if let Ok(ch) = dom.children(n) {
+        for c in ch {
+            walk_cls(dom, c, cls, sm, out);
+        }
+    }
+}
+
 fn style_of(cls: &str, css: &str) -> explorer_css::ComputedStyle {
     let dom = TreeBuilder::parse("<body><p class=x>ok</p></body>");
     let mut eng = StyleEngine::new();
     eng.add_css(css, Origin::Author);
     let sm = eng.compute_tree(&dom, dom.document(), &StyleEnv::default());
-    fn walk(
-        dom: &Dom,
-        n: explorer_dom::NodeId,
-        cls: &str,
-        sm: &explorer_css::StyleMap,
-        out: &mut Option<explorer_css::ComputedStyle>,
-    ) {
-        if dom.attribute_str(n, "class").ok().flatten().is_some_and(|c| c == cls) {
-            *out = sm.get(n).cloned();
-        }
-        if let Ok(ch) = dom.children(n) {
-            for c in ch {
-                walk(dom, c, cls, sm, out);
-            }
-        }
-    }
     let mut out = None;
-    walk(&dom, dom.document(), cls, &sm, &mut out);
+    walk_cls(&dom, dom.document(), cls, &sm, &mut out);
     out.expect("élément")
 }
 
