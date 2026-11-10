@@ -6,6 +6,7 @@ Le format suit [Keep a Changelog](https://keepachangelog.com/fr/1.1.0/)
 et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
+- **`@position-try --nom { … }`** (`explorer-css` + `explorer-layout`) : la règle nommée (registre `StyleEngine.position_tries` → sérialisée en clé `position-try--<nom>` du style porteur) s'applique quand la boîte déborde — `position-area` + insets px du try MVP (autres props ignorées, ordonnancement complet = résidu). Verrou : `anchor_position_try_named`.
 - **`position-area` `span-*`** (`explorer-layout`) : `span-top/bottom/left/right` (+`x-`/`y-`/`block-`/`inline-` préfixés) mappés sur le côté de base de la grille 3×3, `span-all`/`all` → centre des deux axes — la taille spannée exige un re-flow, approximée par la position (documentée). Verrou : `anchor_position_area_spans`.
 - **`counter-set` consommé** (`explorer-layout`) : valeur absolue dans l'env compteurs (`env.insert`, distinct de `counter-increment` +=). Verrou : `counter_set_absolu`.
 - **`rt`/`rp` feuille UA ruby** (`explorer-css`) : `rt` = `font-size:50%` + `vertical-align:super` (annotation sur-ligne, meilleur rendu sans chirurgie inline — la pose au-dessus de la base reste le résidu css-ruby-1 rendant `display:ruby` mesurable), `rp` (parenthèses de secours) = `display:none`. Verrou : `ua_ruby_rt_rp`.
