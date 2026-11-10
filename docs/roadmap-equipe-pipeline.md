@@ -3825,6 +3825,7 @@ chez NAVIGATEUR — non recopiés ici.
 - [x] **R-241. `font-variant-numeric` → `font-feature-settings`** : 8 mots-clés → tags OT concaténés aux settings existants. Verrous : 2 tests.
 - [x] **R-242. `accent-color`/batch dormant** : accent consommé au paint contrôle coché + 10 props dormants reconnus. Verrous : 2 tests.
 - [x] **R-243. `SUPPORTED_PROPS` comblé — BCD prop 652/652 = 100 %** : 380 noms manquants ajoutés (dormants stockés, logiques/animations/border-image consommés via routage existant). Mesuré `check prop`.
+- [x] **R-244. `starting-style`/`position-try`/`view-transition`/`function` + restauration `font-palette-values`** — css.at **20/20 = 100 %** mesuré.
 ## Tâches continues
 
 - **Triage rendu** des échecs `site_smoke.ps1` : les écarts

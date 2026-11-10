@@ -125,6 +125,15 @@ pub enum AtKind {
         /// Règles désucrées (préludes déjà préfixés).
         rules: Vec<Rule>,
     },
+    /// `@starting-style { rules }` — styles initiaux de
+    /// transition/transitions d'entrée (css-transitions-2).
+    /// R-244 : parsé mais dormant — les règles NE SONT PAS
+    /// appliquées (elles ne valent qu'à la première pose,
+    /// consommateur futur).
+    StartingStyle {
+        /// Règles imbriquées.
+        rules: Vec<Rule>,
+    },
     /// Sans bloc : `@name prelude ;` (`@import`, `@charset`,
     /// `@namespace`, `@supports` sans cas nominal ici, etc.) —
     /// le prélude est conservé brut.
@@ -515,11 +524,28 @@ impl<'t> Parser<'t> {
                         scope_wrap_rules(&mut rules, &root, bound.as_deref());
                         AtKind::Scope { rules }
                     }
-                    "font-face" | "page" | "viewport" | "counter-style" | "property" => {
+                    "font-face" | "page" | "viewport" | "counter-style" | "property"
+                    | "font-palette-values" | "position-try" | "view-transition"
+                    | "function" => {
                         AtKind::Declarations {
                             prelude,
                             declarations: self.declaration_block(),
                         }
+                    }
+                    // R-244 — `@starting-style` : container
+                    // de règles dormant (consommateur futur —
+                    // animations d'entrée).
+                    "starting-style" => {
+                        let rules = if self.nest_depth >= MAX_NESTING {
+                            self.skip_block();
+                            Vec::new()
+                        } else {
+                            self.nest_depth += 1;
+                            let r = self.nested_rules();
+                            self.nest_depth -= 1;
+                            r
+                        };
+                        AtKind::StartingStyle { rules }
                     }
                     // R-229 — `@font-feature-values <fam> {
                     // @<kind> { <nom>: <idx>+ } }` : corps de
