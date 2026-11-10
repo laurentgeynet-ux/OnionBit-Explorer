@@ -24,10 +24,18 @@ jobs:
         run: |
           pwsh -File scripts/site_smoke.ps1 |
             Tee-Object -FilePath target/site_smoke/report.txt
+      - name: geo_smoke (diff géométrique moteur vs Chrome)
+        if: always()
+        shell: pwsh
+        run: |
+          pwsh -File scripts/geo_smoke.ps1 |
+            Tee-Object -FilePath target/geo_smoke/report.txt
       - name: résumé du run
         if: always()
         shell: pwsh
-        run: Get-Content target/site_smoke/report.txt >> $env:GITHUB_STEP_SUMMARY
+        run: |
+          Get-Content target/site_smoke/report.txt >> $env:GITHUB_STEP_SUMMARY
+          Get-Content target/geo_smoke/report.txt >> $env:GITHUB_STEP_SUMMARY
       - name: rapport sur l'issue radar #2
         if: always()
         shell: pwsh
@@ -48,4 +56,11 @@ jobs:
         with:
           name: site-smoke-${{ github.run_number }}
           path: target/site_smoke/*.png
+          retention-days: 30
+      - name: artefacts geo_diff
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: geo-smoke-${{ github.run_number }}
+          path: target/geo_smoke/*.json
           retention-days: 30
