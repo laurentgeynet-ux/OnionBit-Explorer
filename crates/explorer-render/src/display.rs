@@ -3685,16 +3685,36 @@ fn paint_self(
                 // — fond plein ici, un `MaskedFill`
                 // re-masquerait (alpha² sur les bords doux).
                 let group_masked = !bx.children.is_empty() || !bx.lines.is_empty();
-                if let Some(l) = (!group_masked)
-                    .then(|| resolve_mask(bx, &rect, images))
-                    .and_then(|mut ls| {
-                        if ls.is_empty() {
-                            None
-                        } else {
-                            Some(ls.remove(0))
-                        }
-                    })
-                {
+                let mut mask_layers = if group_masked {
+                    Vec::new()
+                } else {
+                    resolve_mask(bx, &rect, images)
+                };
+                // Feuille **multi-couches** : `MaskedFill` ne
+                // porte qu'une couche — bracket groupe autour
+                // du remplissage, la couverture du groupe fait
+                // l'union des couches (R-252 suite).
+                let pushed_group = mask_layers.len() > 1;
+                if pushed_group {
+                    items.push(DisplayItem::PushMask {
+                        rect,
+                        layers: mask_layers
+                            .iter()
+                            .map(|l| MaskTile {
+                                mask: l.mask.clone(),
+                                dst: l.dst,
+                                repeat: l.repeat,
+                                luminance: l.luminance,
+                                composite: l.composite,
+                            })
+                            .collect(),
+                    });
+                }
+                if let Some(l) = if mask_layers.is_empty() {
+                    None
+                } else {
+                    Some(mask_layers.remove(0))
+                } {
                     items.push(DisplayItem::MaskedFill {
                         rect,
                         color: c,
@@ -3703,6 +3723,9 @@ fn paint_self(
                         repeat: l.repeat,
                         luminance: l.luminance,
                     });
+                    if pushed_group {
+                        items.push(DisplayItem::PopMask);
+                    }
                 } else if bx
                     .style
                     .get("background-clip")
