@@ -1225,3 +1225,16 @@ correcte (`UA_CSS` : `del`/`strike` line-through, `ins` underline,
 `menu` listé disc + display). Action NAV : enregistrer les 3
 interfaces dans le host DOM jscore.
 
+
+## PIPE — `@position-try` nommées : chemin de câblage retenu
+
+Parser déjà : `AtKind::Declarations{prelude:"--nom"}`.
+À faire : `StyleEngine.position_tries: HashMap<String,
+Vec<Declaration>>` → `StyleMap` (même transport que
+`counter_styles`) → `resolve_anchor_positioning` reçoit le
+registre (signature additive ou via `LayoutBox.style`
+porteur d'une clé synthétique `position-try--<nom>`
+sérialisée à la collecte — les décls de la règle ne
+s'appliquent qu'en débordement). `position-try-order` +
+tri multi-fallbacks = même passe.
+
