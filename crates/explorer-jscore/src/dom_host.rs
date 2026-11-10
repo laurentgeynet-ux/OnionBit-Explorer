@@ -12399,7 +12399,25 @@ fn ce_call(e: &mut Engine, el: Value, cb_name: &str, args: &[Value]) -> JsResult
         // de `_stampTemplate` Polymer n'identifiait pas le
         // `ytd-*`/`yt-*` fautif). Sonde bornée : tag + cb +
         // frame source — sémantique inchangée.
-        if let Err(thr) = e.call_value(cb, el.clone(), args) {
+        // §B-126 — trace des lectures `Undefined` bornée à
+        // `connectedCallback`/`ytd-app` (armé autour de
+        // `call_value`, désarmé au retour) : nomme la lecture
+        // que le `iDo` réel a rencontrée `Undefined`.
+        let arm = cb_name == "connectedCallback"
+            && node_for(e, el.clone()).map_or(false, |n| {
+                e.dom_ctx.as_ref().map_or(false, |ctx| {
+                    ctx.0.borrow().nodes[n as usize].tag == "ytd-app"
+                })
+            })
+            && tracing::enabled!(target: "dom_probe", tracing::Level::INFO);
+        if arm {
+            e.trace_undef_props = true;
+        }
+        let call_r = e.call_value(cb, el.clone(), args);
+        if arm {
+            e.trace_undef_props = false;
+        }
+        if let Err(thr) = call_r {
             if tracing::enabled!(target: "dom_probe", tracing::Level::INFO) {
                 let tag = node_for(e, el.clone()).map_or("?".to_string(), |n| {
                     e.dom_ctx.as_ref().map_or_else(

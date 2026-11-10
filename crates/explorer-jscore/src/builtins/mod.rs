@@ -772,10 +772,7 @@ pub(crate) fn install(e: &mut Engine) {
     // (`AddRestrictedFunctionProperties`, interp `fn_obj`) qui
     // masque celui-ci — le `TypeError` spec est préservé.
     {
-        let na = e.native_fn(
-            "restricted_null",
-            crate::builtins::restricted_null_prop,
-        );
+        let na = e.native_fn("restricted_null", crate::builtins::restricted_null_prop);
         if let Some(o) = e.heap.obj_mut(fp) {
             o.set_accessor("caller", na.clone(), na.clone(), false);
             o.set_accessor("arguments", na.clone(), na, false);

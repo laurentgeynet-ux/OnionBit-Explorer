@@ -629,6 +629,15 @@ pub struct Engine {
     /// sans elle, un safepoint dans un corps appelé balayerait
     /// les bindings vivants des frames au-dessus.
     pub(crate) safepoint_envs: Vec<EnvRef>,
+    /// §B-126 — trace bornée des lectures de prop rendant
+    /// `Undefined` : armée dans `ce_call` pour
+    /// `connectedCallback` (`ytd-app`) — nomme la lecture qui
+    /// produit le `Undefined` à l'intérieur de `iDo` réel
+    /// (`w.parentIndex`/`w.parentInfo`/`H.nextSibling`…).
+    pub(crate) trace_undef_props: bool,
+    /// Compteur borné des `prop.undef` déjà émis (cap de
+    /// volume par vol — le stamp en produit des centaines).
+    pub(crate) trace_undef_n: u32,
     /// Bornes d'âge safepoint **par frame** (JS-C421, affinée
     /// JS-C460) — chaque `exec_stmt`/`call_value_impl` empile le
     /// `alloc_seq` à partir duquel il peut tenir des temporaires
@@ -1181,6 +1190,8 @@ impl Engine {
             using_stack: Vec::new(),
             safepoint_roots: Vec::new(),
             safepoint_envs: Vec::new(),
+            trace_undef_props: false,
+            trace_undef_n: 0,
             young_stack: Vec::new(),
             call_only_slot: None,
             eval_fn: Value::Undefined,
@@ -7221,6 +7232,43 @@ impl Engine {
 
     /// `base[key]` on any value — wraps primitives via their prototype.
     pub(crate) fn get_prop_value(&mut self, base: Value, key: &str) -> JsResult<Value> {
+        let r = self.get_prop_value_inner(base, key);
+        // §B-126 — borné au stamp `ytd-app` (armé par `ce_call`)
+        // : nomme la lecture `Undefined` que le `iDo` réel a
+        // rencontrée (`nextSibling`/`parentIndex`/`events`…).
+        if self.trace_undef_props
+            && self.trace_undef_n < 200
+            && matches!(&r, Ok(v) if matches!(v, Value::Undefined))
+            && matches!(
+                key,
+                "firstChild"
+                    | "lastChild"
+                    | "nextSibling"
+                    | "previousSibling"
+                    | "parentIndex"
+                    | "parentInfo"
+                    | "parent"
+                    | "events"
+                    | "nodeInfoList"
+                    | "nodeList"
+                    | "subInfoList"
+                    | "infoIndex"
+                    | "childNodes"
+                    | "addEventListener"
+                    | "importNode"
+                    | "content"
+            )
+            && tracing::enabled!(target: "dom_probe", tracing::Level::INFO)
+        {
+            self.trace_undef_n += 1;
+            let src = self.stack_top_fn_src(140);
+            tracing::info!(target: "dom_probe", site = "prop.undef",
+                "key={key} top={src}");
+        }
+        r
+    }
+
+    fn get_prop_value_inner(&mut self, base: Value, key: &str) -> JsResult<Value> {
         // V-7 : temps cumulé de résolution (inclusif — un getter
         // JS re-entrant cumule dans le span englobant).
         let _t = crate::j17_scope(&crate::J17_PROP_NS);
