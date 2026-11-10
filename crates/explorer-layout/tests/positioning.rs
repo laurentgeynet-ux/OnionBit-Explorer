@@ -866,3 +866,18 @@ fn anchor_position_try_order() {
     let m = find(&bx, by_id(&dom, "m"));
     assert_eq!(m.rect.y, 770.0, "most-width : flip-block ignoré");
 }
+
+/// `justify-self`/`align-self:anchor-center` (R-254 suite) :
+/// la bulle est centrée sur l'ancre selon chaque axe nommé.
+#[test]
+fn anchor_self_center() {
+    let (dom, bx) = laid(
+        "<div id=a></div><div id=m></div>",
+        "#a{position:absolute;left:100px;top:100px;width:60px;height:20px;anchor-name:--a}\
+         #m{position:absolute;position-anchor:--a;width:20px;height:10px;\
+            justify-self:anchor-center;align-self:anchor-center}",
+    );
+    let m = find(&bx, by_id(&dom, "m"));
+    assert_eq!(m.rect.x, 120.0, "centré h : 100+30−10");
+    assert_eq!(m.rect.y, 105.0, "centré v : 100+10−5");
+}

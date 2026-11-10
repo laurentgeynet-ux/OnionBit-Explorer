@@ -731,6 +731,30 @@ fn fix_anchor_positioned(
                 crate::flex::translate_subtree(bx, dx, dy);
             }
         }
+        // `justify-self`/`align-self:anchor-center` (R-254
+        // suite) : centre de la boîte calé sur le centre de
+        // l'ancre sur l'axe nommé — compose avec l'ancrage
+        // d'insets ou `position-area` déjà appliqué.
+        if let Some(name) = hint.as_deref() {
+            if let Some((_, ar)) = anchors
+                .iter()
+                .rev()
+                .find(|(n, _)| n.trim_start_matches("--") == name)
+            {
+                let j = bx.style.get("justify-self").map_or("", |v| v.trim());
+                let a = bx.style.get("align-self").map_or("", |v| v.trim());
+                let (mut cx, mut cy) = (0.0_f32, 0.0_f32);
+                if j == "anchor-center" {
+                    cx = ar.x + ar.width / 2.0 - (bx.rect.x + bx.rect.width / 2.0);
+                }
+                if a == "anchor-center" {
+                    cy = ar.y + ar.height / 2.0 - (bx.rect.y + bx.rect.height / 2.0);
+                }
+                if cx != 0.0 || cy != 0.0 {
+                    crate::flex::translate_subtree(bx, cx, cy);
+                }
+            }
+        }
         // `position-try`/`position-try-fallbacks` (R-254
         // suite) : fallbacks flip — la boîte résolue qui
         // déborde le viewport sur un axe flippé est mirée

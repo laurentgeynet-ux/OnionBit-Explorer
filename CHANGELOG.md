@@ -7,6 +7,7 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 - **R-252 (suite) — `MaskedFill` multi-couches** (`explorer-render`) : une feuille (`background-color` seul) avec >1 couche `mask-image` bascule en bracket `PushMask`+`MaskedFill`+`PopMask` — l'union des couches s'applique au remplissage sans offscreen superflu.
+- **R-254 (suite) — `justify-self`/`align-self:anchor-center`** (`explorer-layout`) : centre de la boîte ancrée calé sur le centre de l'ancre par axe, compose avec insets/`position-area`. Verrou : `anchor_self_center`.
 - **R-254 (suite) — `position-try-order`** (`explorer-layout`) : `most-width`/`most-inline-size` restreignent au flip horizontal, `most-height`/`most-block-size` au vertical ; `normal`/`most-size` = les deux. Verrou : `anchor_position_try_order`.
 - **R-254 (suite) — `position-try`/`position-try-fallbacks` flips** (`explorer-layout`) : `flip-block`/`flip-y`, `flip-inline`/`flip-x`, `flip-start` — boîte ancrée débordant le viewport sur un axe mirée autour du centre de l'ancre (MVP borné viewport ; `most-*`, `@position-try` nommées, `position-try-order` = résidus). Verrou : `anchor_position_try_flip`.
 - **R-252 (suite) — `mask-composite` par couche** (`explorer-render`) : `intersect` (min), `subtract` (`d×(1−cov)`), `exclude` (xor) en plus de l'union `add` — op i-ème dans `MaskTile.composite`, composée dans `coverage_tile`.
