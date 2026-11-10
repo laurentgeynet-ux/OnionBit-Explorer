@@ -1118,7 +1118,14 @@ impl Dom {
         // aliasserait.
         let mut blocked = std::mem::take(&mut self.dead_blocked);
         blocked.retain(|&id| {
-            let reusable = !jids.contains(&id) && !self.nodes[id as usize].attached;
+            // §cran-32 — le drain ignorait `keep` : un slot
+            // bloqué puis **wrappé** entre deux passes était
+            // recyclé malgré son wrapper vivant (`u` inerte
+            // d'`I_o` recyclé en `#comment` pendant `ifV` —
+            // les writes `polymerController`+forwarding
+            // refusés silencieusement, pm jamais stampé).
+            let reusable =
+                !jids.contains(&id) && !self.nodes[id as usize].attached && !keep.contains(&id);
             if reusable {
                 self.free_nodes.push(id);
             }
@@ -1150,6 +1157,18 @@ impl Dom {
             // en attente ne cite cet id — sinon l'op rejouerait
             // sur le futur occupant du slot.
             node.free = true;
+            // Sonde §cran-32 — nomme les éléments CE libérés :
+            // `u` inerte d'`I_o` est passé ici (ou par le drain
+            // `dead_blocked`) avant son recyclage en
+            // `#comment`.
+            if node.kind == NodeKind::Element
+                && node.tag.contains('-')
+                && tracing::enabled!(target: "dom_probe", tracing::Level::INFO)
+                && self.ce.probe_seen.insert(format!("gf:{id}"))
+            {
+                tracing::info!(target: "dom_probe", site = "gc.free",
+                    "node={id} tag={} epoch={}", node.tag, node.epoch);
+            }
             if jids.contains(&id) {
                 self.dead_blocked.push(id);
             } else {
