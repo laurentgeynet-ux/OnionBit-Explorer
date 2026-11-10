@@ -3745,6 +3745,32 @@ chez NAVIGATEUR — non recopiés ici.
   périmètre scripts = NAV) ou fixtures manuelles pour
   hairline/anneaux Acid2 — travail continu, pas un mur
   nommé.
+- [x] **R-207. Recensement des manques moteur (census
+  terrain)** : sprint 1 du plan « par lot de technologie » —
+  la mesure qui transforme chaque dégradation silencieuse du
+  pipeline en signal de triage (Pareto `site_harvest` au lieu
+  du vol manuel site par site). `explorer_common::census` :
+  table globale `{clé: count}` désarmée par défaut
+  (`EXPLORER_CENSUS`/`set_armed`, convention J17 — désarmé =
+  un load atomique ; clés bornées 64 char × 4 096 distinctes
+  → `__overflow`). Compteurs CSS aux funnels : déclarations
+  auteur `css.prop.*` (UA exclue, `--*` → `--custom`) dans
+  `collect_rules_into` + style inline ; `css.value.dropped.*`
+  à la validation par propriété ; `css.decl.malformed` à
+  `recover_decl` ; `css.selector.bad.<prélude>` au drop de
+  règle ; `css.at.unknown.*`/`css.at.unapplied.*` aux at-rules
+  sans consommateur ; `css.mq.unknown`/`css.supports.unknown`/
+  `css.token.orphan`. HTML : `TreeStats` (u64 inconditionnels)
+  sur `TreeBuilder` + `stats()` + versement `html.*` à
+  `finish()` — le funnel `generic_end_tag` couvre la famille
+  dominante des end tags ignorés. Consommateur nommé
+  (§10-5b) : `explorer-cli shot --report` → `site_harvest`
+  (contrat NAV du 2026-11-10 — forme `report.census` libre,
+  nos clés y entrent verbatim). Hors borne : recensement des
+  valeurs au point d'usage layout (sites dispersés, sprint
+  suivant), anomalies géométriques boxtree (attend le dump
+  normalisé du sprint 3). Verrous : 3 tests common + 5 css +
+  2 html — suites des trois crates vertes.
 ## Tâches continues
 
 - **Triage rendu** des échecs `site_smoke.ps1` : les écarts
@@ -3767,6 +3793,7 @@ chez NAVIGATEUR — non recopiés ici.
 | hit-test / path `(tag,index)` | `explorer-core` dispatch events | ✅ |
 | `DisplayItem` + dirty rects | transport FFI (NAV-55) | ✅ — livré R-7 (`changed_rects`), raffiné R-37/R-61/R-76 |
 | op-list canvas → `DisplayItem::Image` | `explorer-jscore` canvas (JS-C28) | ✅ — livré R-11, consommé (`CanvasTable`) |
+| `explorer_common::census` + `TreeBuilder::stats`/`TreeStats` (R-207) | `explorer-cli shot --report`, `site_harvest` | ✅ — livré, câblage `--report` côté NAV |
 
 Règle : les API publiques des crates PIPELINE sont le contrat —
 extensions additives de préférence ; toute casse de signature

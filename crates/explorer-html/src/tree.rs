@@ -38,6 +38,36 @@ pub enum QuirksMode {
     Quirks,
 }
 
+/// Compteurs de tolérance du tree-builder (R-207) — mesure
+/// le « degré de tag-soup » d'un document pour le census
+/// terrain ([`explorer_common::census`]). Incrémentés en
+/// permanence (`u64` plats — coût nul, pas de clé à hacher),
+/// lisibles via [`TreeBuilder::stats`] et versés au census
+/// global à [`TreeBuilder::finish`].
+///
+/// `ignored_tokens` ne couvre que les sites « parse error »
+/// instrumentés (les plus fréquents) — sous-estimation
+/// assumée : les 30+ points d'abandon du builder sont
+/// documentés « parse error spec » au fil du code.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct TreeStats {
+    /// Tokens passés par [`TreeBuilder::process`].
+    pub tokens_processed: u64,
+    /// Reconstructions de la liste des éléments de formatage
+    /// actifs (AFE) — balisage mal niché (`<b><i></b></i>`).
+    pub afe_reconstructs: u64,
+    /// Éléments redirigés par foster parenting (contenu
+    /// introduit hors contexte table).
+    pub foster_inserts: u64,
+    /// Textes redirigés par foster parenting.
+    pub foster_texts: u64,
+    /// Tokens ignorés aux sites « parse error spec »
+    /// instrumentés (end tag sans correspondant, end tag
+    /// inconnu en noscript/template, start tag en
+    /// `AfterFrameset`…).
+    pub ignored_tokens: u64,
+}
+
 /// Modes d'insertion de la spec (sous-ensemble couvrant le web
 /// documentaire et les tables).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -357,6 +387,8 @@ pub struct TreeBuilder {
     /// l'appelant qui exécute du JS le lève via
     /// [`TreeBuilder::set_scripting`].
     scripting: bool,
+    /// Compteurs de tolérance (R-207) — voir [`TreeStats`].
+    stats: TreeStats,
 }
 
 impl TreeBuilder {
@@ -385,6 +417,7 @@ impl TreeBuilder {
             skip_leading_lf: false,
             template_modes: Vec::new(),
             scripting: false,
+            stats: TreeStats::default(),
         }
     }
 
@@ -415,6 +448,13 @@ impl TreeBuilder {
     #[must_use]
     pub fn quirks_mode(&self) -> QuirksMode {
         self.quirks
+    }
+
+    /// Compteurs de tolérance accumulés (R-207) — instantané,
+    /// valable à toute frontière de token.
+    #[must_use]
+    pub fn stats(&self) -> TreeStats {
+        self.stats
     }
 
     /// Raccourci complet : `push` + `finish` — pour tests et
@@ -479,6 +519,21 @@ impl TreeBuilder {
         t.finish();
         self.drive(&mut t);
         self.tokenizer = t;
+        // R-207 — versement des compteurs de tolérance au
+        // census global (armé = run de récolte ; désarmé,
+        // `bump_n` est un no-op quasi gratuit). Le mode
+        // quirks compte le *document*, pas un événement.
+        let s = self.stats;
+        explorer_common::census::bump_n("html.tokens", s.tokens_processed);
+        explorer_common::census::bump_n("html.err.afe_reconstruct", s.afe_reconstructs);
+        explorer_common::census::bump_n("html.err.foster_insert", s.foster_inserts);
+        explorer_common::census::bump_n("html.err.foster_text", s.foster_texts);
+        explorer_common::census::bump_n("html.err.ignored_token", s.ignored_tokens);
+        explorer_common::census::bump(match self.quirks {
+            QuirksMode::NoQuirks => "html.quirks.no-quirks",
+            QuirksMode::LimitedQuirks => "html.quirks.limited-quirks",
+            QuirksMode::Quirks => "html.quirks.quirks",
+        });
     }
 
     /// Consomme le tokenizer en traitant chaque token à mesure —
@@ -503,6 +558,7 @@ impl TreeBuilder {
     /// Traite un token émis par `tokenizer` (le tree-builder pilote
     /// les états de contenu du tokenizer — `set_content_state`).
     pub fn process(&mut self, tokenizer: &mut Tokenizer, token: Token) {
+        self.stats.tokens_processed += 1;
         if self.skip_leading_lf {
             self.skip_leading_lf = false;
             if let Token::Character(s) = &token {
@@ -683,6 +739,7 @@ impl TreeBuilder {
     /// la table, ou en fin de l'élément qui la précède dans la
     /// pile, sinon dans le document.
     fn foster_insert(&mut self, node: NodeId) {
+        self.stats.foster_inserts += 1;
         let tmpl_pos = self
             .recent_template()
             .and_then(|t| self.stack.iter().rposition(|&x| x == t));
@@ -749,6 +806,7 @@ impl TreeBuilder {
     /// Texte en foster parenting : `content` du dernier template
     /// si plus récent que la table, sinon repérage avant la table.
     fn foster_text(&mut self, data: &str) {
+        self.stats.foster_texts += 1;
         let tmpl_pos = self
             .recent_template()
             .and_then(|t| self.stack.iter().rposition(|&x| x == t));
@@ -1152,6 +1210,7 @@ impl TreeBuilder {
             }
         }
         // Aucun correspondant : token ignoré (parse error spec).
+        self.stats.ignored_tokens += 1;
     }
 
     /// Miroir `selectedcontent` (select personnalisable, corpus
@@ -1328,6 +1387,7 @@ impl TreeBuilder {
     /// après le dernier marqueur qui n'est plus dans la pile est
     /// ré-insérée (clone d'attributs) — spec « reconstruct ».
     fn reconstruct_afe(&mut self) {
+        self.stats.afe_reconstructs += 1;
         // Collecte des entrées à recréer (de bas en haut de pile).
         let mut reopen = Vec::new();
         for e in &self.afe {
@@ -1778,12 +1838,14 @@ impl TreeBuilder {
                 // `head`/`noscript` ouvrants → ignorés (parse error).
                 if let Token::StartTag { ref name, .. } = token {
                     if matches!(name.as_str(), "head" | "noscript") {
+                        self.stats.ignored_tokens += 1;
                         return;
                     }
                 }
                 // End tags inconnus → parse error ignoré, noscript
                 // reste ouvert.
                 if matches!(token, Token::EndTag { .. }) {
+                    self.stats.ignored_tokens += 1;
                     return;
                 }
                 // Le reste (texte, starts, EOF) : fin implicite de
@@ -1936,6 +1998,9 @@ impl TreeBuilder {
                     self.mode = Mode::InFrameset;
                 }
                 // sinon : token ignoré (parse error spec).
+                else {
+                    self.stats.ignored_tokens += 1;
+                }
             }
             "form" => {
                 if self.form.is_none() {
@@ -2279,9 +2344,14 @@ impl TreeBuilder {
                 return;
             }
             if self.is_special(id) {
+                // « spécial » barre la route → token ignoré.
+                self.stats.ignored_tokens += 1;
                 return;
             }
         }
+        // Aucun correspondant dans la pile → token ignoré
+        // (parse error spec — `</bogus>` le plus courant).
+        self.stats.ignored_tokens += 1;
     }
 
     /// `true` si `id` est en scope (aucun terminateur `scope`
@@ -2576,6 +2646,8 @@ impl TreeBuilder {
             Token::EndTag { name } => {
                 if name == "template" {
                     self.step_in_head(tokenizer, Token::EndTag { name });
+                } else {
+                    self.stats.ignored_tokens += 1;
                 }
                 // Autres end tags : ignorés (parse error spec).
             }

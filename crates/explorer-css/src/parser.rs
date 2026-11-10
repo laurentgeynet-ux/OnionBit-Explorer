@@ -385,6 +385,7 @@ impl<'t> Parser<'t> {
                         // invalide) : on l'avale pour garantir
                         // la terminaison (contenu hostile).
                         self.pos += 1;
+                        explorer_common::census::bump("css.token.orphan");
                     }
                 }
             }
@@ -515,6 +516,10 @@ impl<'t> Parser<'t> {
                     _ => {
                         // Inconnu : on avale le bloc équilibré.
                         self.skip_block();
+                        // R-207 — le bloc n'est même pas
+                        // structuré (`@starting-style`,
+                        // `@position-try`, at-rules futures…).
+                        explorer_common::census::bump(&format!("css.at.unknown.{lname}"));
                         AtKind::UnknownBlock { prelude }
                     }
                 };
@@ -631,6 +636,10 @@ impl<'t> Parser<'t> {
         }
         if queries.is_empty() {
             // Prelude inintelligible → tolérance neutre (vrai).
+            // R-207 — même signal que les media queries : un
+            // `@supports` incompris peut masquer une condition
+            // moderne (`selector()`, `font-tech()`…).
+            explorer_common::census::bump("css.supports.unknown");
             queries.push(MediaQuery {
                 negated: false,
                 media_type: None,
@@ -661,6 +670,7 @@ impl<'t> Parser<'t> {
                     if self.pos == before {
                         // Anti-boucle : token isolé non traité.
                         self.pos += 1;
+                        explorer_common::census::bump("css.token.orphan");
                     }
                 }
             }
@@ -934,6 +944,9 @@ impl<'t> Parser<'t> {
 
     /// Saute jusqu'à `;` ou `}` (sans consommer le `}`).
     fn recover_decl(&mut self) {
+        // R-207 — déclaration hors grammaire (nom non-ident ou
+        // `:` manquant) : récupération spec, signalée au census.
+        explorer_common::census::bump("css.decl.malformed");
         let mut depth = 0i32;
         while let Some(t) = self.peek() {
             match t {
@@ -1339,10 +1352,17 @@ fn parse_import(prelude: &str) -> ImportRule {
 
 /// Parse une liste de media queries séparées par `,`.
 fn parse_media_queries(prelude: &str) -> Vec<MediaQuery> {
-    prelude
+    let queries: Vec<MediaQuery> = prelude
         .split(',')
         .map(|q| parse_one_media(q.trim()))
-        .collect()
+        .collect();
+    // R-207 — une query `unknown` est tolérée à `true` : elle
+    // peut masquer une techno de media query non couverte
+    // (formes range, features récentes) → signalée.
+    if queries.iter().any(|q| q.unknown) {
+        explorer_common::census::bump("css.mq.unknown");
+    }
+    queries
 }
 
 /// Une query : `[not|only] [type] [and (cond)]*` ou `(cond)…`.

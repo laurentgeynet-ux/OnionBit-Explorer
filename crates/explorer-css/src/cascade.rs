@@ -642,7 +642,7 @@ pub(crate) struct CollectedFontFace {
 /// Prédicat `@container` collecté (R-122/R-190 —
 /// css-contain-3) : `name` + `query` bruts. Les règles du
 /// bloc sont inlinées dans la table ordinaire, taguées
-/// [`CollectedRule::container`] — la query est évaluée en
+/// `CollectedRule::container` — la query est évaluée en
 /// seconde passe contre la border-box **mesurée** du
 /// conteneur ancêtre (inconnue à la cascade : elle
 /// n'existe qu'après layout).
@@ -1312,6 +1312,24 @@ impl StyleEngine {
                             container,
                         });
                         self.next_order = self.next_order.saturating_add(1);
+                        // R-207 — census des propriétés
+                        // déclarées par l'auteur (la feuille
+                        // UA intégrée est connue : elle
+                        // ferait du bruit dans le Pareto).
+                        if origin == Origin::Author {
+                            for d in &q.declarations {
+                                census_prop(&d.name);
+                            }
+                        }
+                    } else {
+                        // R-207 — prélude non analysable : la
+                        // règle entière est droppée — le prélude
+                        // (tronqué par le census) nomme la
+                        // construction fautive (`:has(…)`…).
+                        explorer_common::census::bump(&format!(
+                            "css.selector.bad.{}",
+                            q.prelude.trim()
+                        ));
                     }
                 }
                 Rule::At(at) => {
@@ -1365,6 +1383,12 @@ impl StyleEngine {
                                 }
                                 path.truncate(layer.len());
                             }
+                        } else {
+                            // R-207 — statement sans
+                            // consommateur (`@namespace`,
+                            // `@tailwind …;`, `@charset`
+                            // hors-tête…).
+                            explorer_common::census::bump(&format!("css.at.unapplied.{}", at.name));
                         }
                     } else if let AtKind::Declarations {
                         prelude,
@@ -1378,6 +1402,12 @@ impl StyleEngine {
                             });
                         } else if at.name.eq_ignore_ascii_case("property") {
                             self.register_property(prelude, declarations);
+                        } else {
+                            // R-207 — bloc de déclarations parsé
+                            // mais inerte (`@page`, `@viewport`,
+                            // `@counter-style`,
+                            // `@font-feature-values`…).
+                            explorer_common::census::bump(&format!("css.at.unapplied.{}", at.name));
                         }
                     } else if let AtKind::Container { name, query, rules } = &at.kind {
                         // `@container` (R-190) : le prédicat
@@ -1417,6 +1447,12 @@ impl StyleEngine {
                             name.clone(),
                             frames,
                         );
+                    } else {
+                        // R-207 — at-rule structurée mais sans
+                        // consommateur (`AtKind::UnknownBlock`
+                        // et variantes futures) — le manque
+                        // techno nommé.
+                        explorer_common::census::bump(&format!("css.at.unapplied.{}", at.name));
                     }
                 }
             }
@@ -1948,6 +1984,11 @@ impl StyleEngine {
         let mut cand =
             self.collect_candidates(dom, node, env, pseudo, state, mcache, anc, containers);
         if pseudo.is_none() {
+            // R-207 — le style inline est aussi de la déclaration
+            // auteur : même census que les règles.
+            for d in &inline_decls {
+                census_prop(&d.name);
+            }
             // `style=` vit au contexte du nœud : interne si le
             // nœud est en shadow — le rang de frontière est
             // le même que `scope == sa racine` (§6, R-111).
@@ -2009,6 +2050,11 @@ impl StyleEngine {
                         // §quirks — les props numériques déjà
                         // valides ne passent jamais ici).
                         props.insert(lname, format!("{}px", d.value.trim()));
+                    } else {
+                        // R-207 — déclaration ignorée sur la
+                        // validation par propriété (`width:
+                        // 200`…) : signalée par nom.
+                        explorer_common::census::bump(&format!("css.value.dropped.{lname}"));
                     }
                 }
             }
@@ -3875,6 +3921,26 @@ const INHERITED_PROPS: &[&str] = &[
     "widows",
     "word-spacing",
 ];
+
+/// R-207 — clé census d'une déclaration auteur : nom
+/// minuscule, custom properties collapsées en `--custom`
+/// (cardinalité bornée — un site à 10⁴ variables uniques ne
+/// doit pas gonfler la table). Le tri « supporté ou non »
+/// est fait par le rapporteur qui croise `css.prop.*` avec
+/// la liste des propriétés consommées — le compteur mesure
+/// l'**usage**, pas un jugement.
+fn census_prop(name: &str) {
+    let n = name.trim();
+    if n.is_empty() {
+        return;
+    }
+    let key = if n.starts_with("--") {
+        String::from("css.prop.--custom")
+    } else {
+        format!("css.prop.{}", n.to_ascii_lowercase())
+    };
+    explorer_common::census::bump(&key);
+}
 
 /// `name` est-elle héritée (propriétés custom incluses) ?
 #[must_use]

@@ -30,4 +30,4 @@ mod tree;
 
 pub use token::{Token, TokenAttribute};
 pub use tokenizer::{ContentKind, Tokenizer};
-pub use tree::{QuirksMode, TreeBuilder};
+pub use tree::{QuirksMode, TreeBuilder, TreeStats};

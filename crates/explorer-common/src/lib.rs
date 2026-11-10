@@ -8,6 +8,8 @@
 
 #![forbid(unsafe_code)]
 
+pub mod census;
+
 /// Marge de pile exigée avant une descente récursive (R-24).
 /// Les frames des traversées domaine (boxtree, layout,
 /// display list, hit-test, cascade) coûtent ~1–3 Kio —
