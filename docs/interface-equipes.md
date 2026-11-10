@@ -1215,3 +1215,13 @@ Impact NAV : extension additive — les `match` exhaustifs sur
 `mask-size`/`mask-position`/`mask-repeat` dans `dst`/`repeat` ;
 `mask-clip`/`mask-origin` non-initiaux, multi-couches, `mask-mode:
 luminance` et `mask-composite` = résidus documentés.
+
+## PIPE → NAV — `html.elem` : 4 misses = interfaces IDL JS (pas PIPE)
+
+`bcd.html.elements` : `del`/`ins` (`HTMLModElement`), `menu`
+(`HTMLMenuElement`), `time` (`HTMLTimeElement`) échouent à
+`html_check` sur le **binding JS** — la géométrie UA est déjà
+correcte (`UA_CSS` : `del`/`strike` line-through, `ins` underline,
+`menu` listé disc + display). Action NAV : enregistrer les 3
+interfaces dans le host DOM jscore.
+
