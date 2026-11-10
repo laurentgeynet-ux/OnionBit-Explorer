@@ -3486,3 +3486,78 @@ fn ua_ruby_rt_rp() {
         "rp masque"
     );
 }
+
+// ===== Census P2 — alias vendor-prefix → canonique =====
+
+/// `-webkit-*`/`-moz-*`/`-ms-*`/`-o-*` aliasés vers les noms
+/// canoniques : déclaration consommée (routée dans le
+/// `ComputedStyle`), prop moderne déclarée prime sur l'alias.
+#[test]
+fn vendor_prefix_alias_canonique() {
+    let dom = TreeBuilder::parse("<div id=c><span id=k>x</span></div>");
+    let (c_node, k_node) = (
+        {
+            let mut stack: Vec<explorer_dom::NodeId> =
+                dom.children(dom.document()).into_iter().flatten().collect();
+            let mut out = None;
+            while let Some(n) = stack.pop() {
+                if dom.attribute_str(n, "id").ok().flatten() == Some("c") {
+                    out = Some(n);
+                    break;
+                }
+                stack.extend(dom.children(n).into_iter().flatten());
+            }
+            out.expect("div")
+        },
+        {
+            let mut stack: Vec<explorer_dom::NodeId> =
+                dom.children(dom.document()).into_iter().flatten().collect();
+            let mut out = None;
+            while let Some(n) = stack.pop() {
+                if dom.attribute_str(n, "id").ok().flatten() == Some("k") {
+                    out = Some(n);
+                    break;
+                }
+                stack.extend(dom.children(n).into_iter().flatten());
+            }
+            out.expect("span")
+        },
+    );
+    let mut eng = StyleEngine::new();
+    eng.add_css(
+        "#c{-webkit-transition:color 1s ease;-webkit-transform:rotate(5deg);\
+         -webkit-box-shadow:0 0 4px red;-webkit-user-select:none;\
+         -webkit-mask-image:url(m.png);-moz-appearance:none}\
+         #k{-ms-flex-positive:2;-o-transform:scale(2)}",
+        Origin::Author,
+    );
+    let map = eng.compute_tree(&dom, c_node, &env());
+    let c = map.get(c_node).expect("computed c");
+    assert_eq!(c.get("transition"), Some("color 1s ease"));
+    assert_eq!(c.get("transform"), Some("rotate(5deg)"));
+    assert_eq!(c.get("box-shadow"), Some("0 0 4px red"));
+    assert_eq!(c.get("user-select"), Some("none"));
+    assert_eq!(c.get("mask-image"), Some("url(m.png)"));
+    assert_eq!(c.get("appearance"), Some("none"));
+    let k = map.get(k_node).expect("computed k");
+    assert_eq!(k.get("flex-grow"), Some("2"));
+    assert_eq!(k.get("transform"), Some("scale(2)"));
+    // Alias = MÊME propriété : cascade normale, la dernière
+    // déclarée gagne (comportement Chrome — pas de priorité
+    // spéciale pour le nom moderne).
+    let mut eng2 = StyleEngine::new();
+    eng2.add_css(
+        "#c{transform:rotate(9deg);-webkit-transform:rotate(5deg)}",
+        Origin::Author,
+    );
+    let map2 = eng2.compute_tree(&dom, c_node, &env());
+    assert_eq!(
+        map2.get(c_node).expect("c2").get("transform"),
+        Some("rotate(5deg)")
+    );
+    // `prop_supported` accepte les formes préfixées via l'alias.
+    assert!(explorer_css::prop_supported("-webkit-transition"));
+    assert!(explorer_css::prop_supported("-moz-user-select"));
+    // `-ms-filter` délibérément non mappé (syntaxe IE incompatible).
+    assert!(!explorer_css::prop_supported("-ms-filter"));
+}

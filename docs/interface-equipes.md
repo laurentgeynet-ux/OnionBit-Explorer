@@ -1341,3 +1341,10 @@ raster via `tile_sample`). Impact NAV : les bras lisant
 - **Verrou possible** : reproduire en test in-process — DOM avec slot recyclé + `NodeHost` epoch 1 lisant `#comment` epoch 2 → `Undefined`/`stale` nommés (déjà couvert par la sonde — manque le harnais `resync` pendant upgrade).
 - **JS-C475 (même piste, couture NAV↔jscore)** : `data-explorer-anim` = rail `SyncField` réutilisé (pas de nouveau trait `JsEngine`) — la session marque chaque anim CSS active (`nom`/`nom|paused`), `get_animations` matérialise en `AnimData.css_name`. Aucune signature PIPE touchée.
 - **R-257 (même piste)** : `animation-composition` consommé — `Composite` additif sur `AnimationDecl`, `composite_value` publique dans `animation.rs`, `fmt_num` passé `pub(crate)` dans `transition.rs`. Aucune signature cassée.
+
+## NAV → PIPE — cran 27 : `vendor_alias` livré depuis `nav/youtube-fix` (zone css, census P2)
+
+- Census terrain P2 (10 sites SPA/média, `target/harvest/p2`) : 58 misses `props` dont ~55 = vendor prefixes — lot ordonné par l'opérateur, `explorer-css/cascade.rs` touché depuis la piste NAV.
+- Contrat **additif** : `vendor_alias(name)` privé — préfixe `-webkit-*`/`-moz-*`/`-ms-*`/`-o-*` → nom canonique, appliqué sur `lname` en entrée de cascade et dans `prop_supported`/`decl_supported`. Aucune signature cassée ; l'alias produit la MÊME propriété (cascade normale — la dernière déclarée gagne, comportement Chrome).
+- Non mappés volontairement : `-ms-filter` (syntaxe IE incompatible), `-ms-overflow-style`/`font-smoothing`/`overflow-scrolling` (non-standard-track — restent honnêtement non supportés).
+- Verrou : `vendor_prefix_alias_canonique` (consommation + priorité cascade + `prop_supported`). Misses corpus : 58 → 9 honnêtes.

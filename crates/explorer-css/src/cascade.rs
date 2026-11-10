@@ -248,6 +248,7 @@ fn decl_supported(name: &str, value: &str) -> bool {
     let (prop, neg) = name
         .strip_prefix("not-")
         .map_or((name, false), |p| (p, true));
+    let prop = vendor_alias(prop);
     let supported = prop.starts_with("--")
         || crate::value::expand_shorthand(prop, value).is_some()
         || SUPPORTED_PROPS.contains(&prop);
@@ -255,6 +256,125 @@ fn decl_supported(name: &str, value: &str) -> bool {
         !supported
     } else {
         supported
+    }
+}
+
+/// Alias vendor-prefix → nom canonique (census terrain P2 :
+/// les misses réelles des sites SPA/média sont à ~55 % des
+/// props `-webkit-*`/`-moz-*`/`-ms-*`/`-o-*`). Le nom
+/// canonique est rendu quand la spec le standardise — les
+/// props restées préfixées-de-fait (`-webkit-line-clamp`,
+/// `-webkit-box-*` legacy, `-webkit-tap-highlight-color`)
+/// gardent leur nom dans `SUPPORTED_PROPS` et ne passent
+/// pas ici. `-ms-filter` est délibérément **non** mappé
+/// (syntaxe IE pré-CSS3 incompatible).
+#[allow(clippy::too_many_lines, clippy::match_same_arms)]
+fn vendor_alias(name: &str) -> &str {
+    match name {
+        "-webkit-animation" | "-moz-animation" | "-o-animation" => "animation",
+        "-webkit-animation-delay" | "-moz-animation-delay" | "-o-animation-delay" => {
+            "animation-delay"
+        }
+        "-webkit-animation-direction" | "-moz-animation-direction" | "-o-animation-direction" => {
+            "animation-direction"
+        }
+        "-webkit-animation-duration" | "-moz-animation-duration" | "-o-animation-duration" => {
+            "animation-duration"
+        }
+        "-webkit-animation-fill-mode" | "-moz-animation-fill-mode" | "-o-animation-fill-mode" => {
+            "animation-fill-mode"
+        }
+        "-webkit-animation-iteration-count"
+        | "-moz-animation-iteration-count"
+        | "-o-animation-iteration-count" => "animation-iteration-count",
+        "-webkit-animation-name" | "-moz-animation-name" | "-o-animation-name" => "animation-name",
+        "-webkit-animation-play-state"
+        | "-moz-animation-play-state"
+        | "-o-animation-play-state" => "animation-play-state",
+        "-webkit-animation-timing-function"
+        | "-moz-animation-timing-function"
+        | "-o-animation-timing-function" => "animation-timing-function",
+        "-webkit-appearance" | "-moz-appearance" => "appearance",
+        "-webkit-backface-visibility" | "-moz-backface-visibility" => "backface-visibility",
+        "-webkit-background-clip" | "-moz-background-clip" => "background-clip",
+        "-webkit-background-origin" | "-moz-background-origin" => "background-origin",
+        "-webkit-background-size" | "-moz-background-size" => "background-size",
+        "-webkit-backdrop-filter" => "backdrop-filter",
+        "-webkit-border-image" | "-moz-border-image" | "-o-border-image" => "border-image",
+        "-webkit-box-decoration-break" => "box-decoration-break",
+        "-webkit-box-shadow" | "-moz-box-shadow" => "box-shadow",
+        "-webkit-box-sizing" | "-moz-box-sizing" => "box-sizing",
+        "-webkit-clip-path" => "clip-path",
+        "-webkit-column-count" | "-moz-column-count" => "column-count",
+        "-webkit-column-gap" | "-moz-column-gap" => "column-gap",
+        "-webkit-column-rule" | "-moz-column-rule" => "column-rule",
+        "-webkit-columns" | "-moz-columns" => "columns",
+        "-webkit-filter" => "filter",
+        "-webkit-flex" | "-ms-flex" => "flex",
+        "-webkit-flex-align" | "-ms-flex-align" => "align-items",
+        "-webkit-flex-direction" | "-ms-flex-direction" => "flex-direction",
+        "-webkit-flex-pack" | "-ms-flex-pack" => "justify-content",
+        "-webkit-flex-wrap" | "-ms-flex-wrap" => "flex-wrap",
+        "-webkit-font-feature-settings" | "-moz-font-feature-settings" => "font-feature-settings",
+        "-webkit-font-kerning" => "font-kerning",
+        "-webkit-font-smoothing" | "-moz-osx-font-smoothing" => "font-smoothing",
+        "-webkit-hyphens" | "-moz-hyphens" | "-ms-hyphens" => "hyphens",
+        "-webkit-justify-content" => "justify-content",
+        "-webkit-mask" => "mask",
+        "-webkit-mask-clip" => "mask-clip",
+        "-webkit-mask-composite" => "mask-composite",
+        "-webkit-mask-image" => "mask-image",
+        "-webkit-mask-origin" => "mask-origin",
+        "-webkit-mask-position" => "mask-position",
+        "-webkit-mask-repeat" => "mask-repeat",
+        "-webkit-mask-size" => "mask-size",
+        "-webkit-overflow-scrolling" => "overflow-scrolling",
+        "-webkit-perspective" | "-moz-perspective" => "perspective",
+        "-webkit-perspective-origin" | "-moz-perspective-origin" => "perspective-origin",
+        "-webkit-text-decoration" | "-moz-text-decoration" => "text-decoration",
+        "-webkit-text-size-adjust" | "-moz-text-size-adjust" | "-ms-text-size-adjust" => {
+            "text-size-adjust"
+        }
+        "-webkit-text-stroke" | "-webkit-text-stroke-width" => "-webkit-text-stroke-width",
+        "-webkit-text-stroke-color" => "-webkit-text-stroke-color",
+        "-webkit-text-fill-color" => "-webkit-text-fill-color",
+        "-webkit-touch-callout" => "-webkit-touch-callout",
+        "-webkit-tap-highlight-color" => "-webkit-tap-highlight-color",
+        "-webkit-transform" | "-moz-transform" | "-ms-transform" | "-o-transform" => "transform",
+        "-webkit-transform-origin"
+        | "-moz-transform-origin"
+        | "-ms-transform-origin"
+        | "-o-transform-origin" => "transform-origin",
+        "-webkit-transform-style" | "-moz-transform-style" => "transform-style",
+        "-webkit-transition" | "-moz-transition" | "-o-transition" => "transition",
+        "-webkit-transition-delay" | "-moz-transition-delay" | "-o-transition-delay" => {
+            "transition-delay"
+        }
+        "-webkit-transition-duration" | "-moz-transition-duration" | "-o-transition-duration" => {
+            "transition-duration"
+        }
+        "-webkit-transition-property" | "-moz-transition-property" | "-o-transition-property" => {
+            "transition-property"
+        }
+        "-webkit-transition-timing-function"
+        | "-moz-transition-timing-function"
+        | "-o-transition-timing-function" => "transition-timing-function",
+        "-webkit-user-select" | "-moz-user-select" | "-ms-user-select" => "user-select",
+        "-webkit-user-drag" => "-webkit-user-drag",
+        "-webkit-word-break" | "-ms-word-break" => "word-break",
+        "-moz-float-edge" => "-moz-float-edge",
+        "-moz-force-broken-image-icon" => "-moz-force-broken-image-icon",
+        "-moz-orient" => "-moz-orient",
+        "-moz-user-input" => "-moz-user-input",
+        "-ms-flex-negative" => "flex-shrink",
+        "-ms-flex-positive" => "flex-grow",
+        "-ms-flex-preferred-size" => "flex-basis",
+        "-ms-touch-action" => "touch-action",
+        "-ms-overflow-style" => "-ms-overflow-style",
+        "-o-user-select" => "user-select",
+        "-o-text-overflow" => "text-overflow",
+        "-o-background-size" => "background-size",
+        _ => name,
     }
 }
 
@@ -994,6 +1114,7 @@ const SUPPORTED_PROPS: &[&str] = &[
 /// data` — « où en est le navigateur » mesuré en x/y).
 #[must_use]
 pub fn prop_supported(name: &str) -> bool {
+    let name = vendor_alias(name);
     SUPPORTED_PROPS.contains(&name) || crate::value::expand_shorthand(name, "0").is_some()
 }
 
@@ -2957,7 +3078,7 @@ impl StyleEngine {
             let lname = if d.name.starts_with("--") {
                 d.name.clone()
             } else {
-                d.name.to_ascii_lowercase()
+                vendor_alias(&d.name.to_ascii_lowercase()).to_string()
             };
             // R-232 — `all: kw` : reset de TOUTES les longhands
             // connues au mot-clé (`initial`/`inherit`/`unset`/
