@@ -3799,6 +3799,24 @@ chez NAVIGATEUR — non recopiés ici.
 
 - [x] **R-211v. `padding`/`border` horizontaux sur élément inline consomment la ligne** (terrain vol 772 dr.dk/vimeo/bitmovin) : les marqueurs d'extrémité `Open`/`Close` n'étaient posés que pour `margin-left|right` → `padding`/`border-width` horizontaux d'un inline non-remplacé ignorés → `ul li a{padding:0 8px}` retombait à 0 → items nav contigus (`DR.DKDRTVDR LYD`, spans bitmovin concaténés). Fix `inline.rs` : trigger étendu aux six propriétés, bord = `margin + border-width + padding` par côté. Verrou `padding_horizontal_inline_consomme_la_ligne`. Reste : le fond peint de l'élément ne s'étend pas encore sur la zone padding (cosmétique, documenté).
 
+- [x] **R-210. Quirk « marges absorbées au bord de `body` »** : chaîne de marges collapsant au bord de `body` avalée quand `body` touche le bord (info.cern.ch, dy +13,4 px) — `LayoutBox.is_body` + garde dans `collapsed_top_margin`/`escaped_bottom_run`.
+- [x] **R-212. LOT-selectors : `:lang()` + tolérance `::-moz-*`/`-ms`/`-o`** : `PseudoClass::Lang` (parse + héritage + préfixe tiret + `*`) ; vendor préfixés → `Other` dormant au lieu d'invalider la liste. `selector.bad` ~15 → 0 sur le corpus.
+- [x] **R-213. `geometry_dump` : rect contenu pour les inline** : fragments rapportaient la ligne allouée (lh) où `gBCR` rend la border-box contenu (~fs) — dh inline +9 px systématique. Rect `Inline`/`Text` resserré.
+- [x] **R-214. `line-height` naturelle = `asc − desc`** : `lineGap` hhea doublait la métrique vs Chrome ; retiré (dy +0,4 px/ligne).
+- [x] **R-215. Priorité logique/physique** : `resolve_logical_props` cédait au physique déjà déclaré par l'UA (rang mémorisé par nom inséré) — `padding-inline-start` auteur vs `padding-left` UA (`li` wikipedia x 48→32).
+- [x] **R-216. Census `mq.unknown`/`mq.unknown.range` détaillés** : le compteur nomme la feature fautive (récolte r2 : `or` top-level identifié → R-220).
+- [x] **R-217. `:has()` relatif `>`/`+`/`~`** : `Vec<(Option<Combinator>, ComplexSelector)>` — `a:has(> .x)` selectors-4.
+- [x] **R-218. `decl.malformed` nommé par token/propriété** : `*.name.<x>` pour cibler le prochain lot.
+- [x] **R-219. `light-dark()`/`var()` dans les shorthands couleur** : `color_like` reconnaît les fonctions résolues post-cascade — fond example.com restauré (99,99 %).
+- [x] **R-220. `or` top-level MQ4** : `MediaQuery.or_groups` — chaque `or` ouvre un groupe AND, la query matche si un groupe matche (`mq.unknown` MDN éliminé).
+- [x] **R-221. `@counter-style` nommé appliqué aux marqueurs** : `CounterStyle` + registre `StyleEngine` → `StyleMap` → `LayoutBox.counter` → `inject_inside_markers` (marqueurs wikipedia).
+- [x] **R-222. `transform`/`filter`/`contain`/`perspective` établit le CB des absolus** (css-transforms §12) : `own_cb` dans `resolve_absolutes_impl` — base du lot positionnement.
+- [x] **R-223. `geometry_dump` : coordonnées post-transform** : `Affine` cumulée par ancêtre, rect → bbox des 4 coins — `gBCR` aligné (mesuré `a2` y 60→120).
+- [x] **R-224. `width:%` nu indéfini en mesure intrinsèque** : shrink-to-fit/flex ne résout plus le `%` nu contre `cb` (menus vector `dx>500` : 251→127) ; les maths à % gardent `cb`.
+- [x] **R-225. `calc()` dans les features MQ** : `mq_calc_len` (`+−*/`, parenthèses, `px`/`em`/`rem`/`vw`/`vh`/`vmin`/`vmax`) + extraction de groupe `(…)` qui ne mange plus la `)` du `calc` interne — `(min-width:calc(640px-1px))` wikipedia.
+- [x] **R-226. `img` à taille CSS explicite reste remplacée sans `sizes`** : `img_box` tombait sur `Text(alt)` → dimensions perdues (img flex → 0) ; garde le kind si `tag==img` + taille non-auto non-% ; `input[type=image]` garde le repli `alt`.
+- [ ] **R-227. `a.mw-logo` 261 vs 140 — stretch dans grid `mw-header`** (EN COURS) : `.mw-header{display:grid;grid-template:.../15.5rem minmax(0,1fr);grid-template-areas}` — `a` display:flex s'étire au conteneur au lieu de shrink-wrap ; flex-in-flex + grid reproduisent correctement en isolation — reste une règle réelle spécifique.
+
 ## Tâches continues
 
 - **Triage rendu** des échecs `site_smoke.ps1` : les écarts
