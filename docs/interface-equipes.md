@@ -1616,3 +1616,14 @@ Lot PIPE livré depuis la piste YoutubeFix (R-260, crates `explorer-css`/`explor
 - `pm.getCurrentPage()` s'exécute (jette sur `.slice` interne — donnée absente) → les wrappers forwardés **vivent** post-swap (capture `F` ou chaîne résiduelle) → le swap n'ampute pas l'API élément.
 - `ytd-browse` n'apparaît dans **aucun** `proto.swap` (22 swaps : masthead, page-manager, logo, icon-button, interaction, player…) → son pc n'a pas été promu — attach par un autre rail (ou jamais connecté).
 - Reste à trancher : pourquoi l'insertion n'a pas suivi `yt-navigate-finish` — le rail `attachPage`/`setActivePage`/`pagePool` du contextSwitcher. Aucune erreur `b/38014653` dans le log → soit le check `typeof d.loadPage` a passé, soit le rail n'est pas atteint.
+
+
+## NAV — cran 60 (vol 9773) : coupure réelle = data-binding `{{data}}` jamais propagé vers `ytd-page-manager`
+
+- `attachPage` = `try{_.Kg(hostElement).appendChild(H)}catch → _.EX` (muet). `setActivePage` appelle `F.attachPage(H)` après `currentPage=H`. `performDataUpdate` = le rail complet (`d=Ma(pagePool,X)` → `u=setActivePage(d)` si `!renderLoadingStateJobId` → `d.loadPage(H.response)` sur l'élément **`ytd-browse`**).
+- `ytd-browse` est bien dans `pc.pagePool.pageNameToElement` (`"browse"→ytd-browse`, `parentNode:null`, hors document).
+- **`pm.data` = undefined** (élément ET contrôleur) alors que `app.data` = objet complet (`__data` 36 clés). `pm.__data` absent. → `updatePageData`/`performDataUpdate` n'ont jamais tourné sur ce pm ; le `yt-page-data-updated` observé vient d'un autre rail.
+- Donc : le binding `data="{{data}}"` du template ytd-app → ytd-page-manager **n'a jamais propagé** — soit les annotations `{{}}` du template stampé ne créent pas les effets de propriété chez nous, soit `notifyPath`/`_setPendingProperty` ne les déclenche pas. `appKids=27` + stamping OK → les nœuds existent ; ce sont les *bindings* qui manquent.
+- `pc.currentPage`/`pm.currentPage` = null ; `renderLoadingStateJobId="0"` ; `b.isAttached` falsy.
+- Faux suspects éliminés : `__shady_native_*` accesseurs bien installés sur `Node.prototype` (`typeof`="undefined" = getter natif appelé sur le proto, attendu) ; le throw `childNodes` wc_sd:61 = transitoire pré-`yc` snapshot (`pm.__shady.firstChild` maintenant object → `x()` true).
+- **Cran 61** : vérifier si le stamping (`q0f`/`_stampTemplate`/importNode) crée les binding-annotations (`propertyEffects`/`nodeInfo.bindings`) — la couche qui transforme `{{data}}` en `notifyPath` — c'est probablement notre vrai gap Polymer.
