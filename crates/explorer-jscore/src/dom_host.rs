@@ -11985,7 +11985,26 @@ fn docfrag_ctor(e: &mut Engine, this: Value, _a: &[Value]) -> JsResult<Value> {
         return Err(e.type_error("DocumentFragment: no document"));
     };
     let n = dom.borrow_mut().create_fragment();
-    Ok(node_value(e, &dom, &cache, n))
+    let v = node_value(e, &dom, &cache, n);
+    // JS-C481 — `class X extends DocumentFragment` et la voie
+    // « fake-inheritance » kevlar (`DocumentFragment.apply(this)`
+    // dans un ctor qui rend l'objet) : le nœud retourné prime
+    // sur `this` — il doit porter le proto `newTarget`
+    // (`this`'s proto), sinon les membres de la classe dérivée
+    // sont invisibles sur l'instance (contrôleur PolySi
+    // `zc` creux : `h`/`ga`/`Xb` null, méthodes mixées
+    // injoignables → `updateReduxProperties` TypeError →
+    // `onYtNavigateFinish` mort → `ytd-browse` jamais créé).
+    // `new DocumentFragment()` direct : `this`'s proto est déjà
+    // `DocumentFragment.prototype` — no-op.
+    if let (Value::Obj(wid), Value::Obj(tid)) = (v.clone(), this.clone()) {
+        if let Some(tp) = e.heap.obj(tid).map(|o| o.proto.clone()) {
+            if let Some(w) = e.heap.obj_mut(wid) {
+                w.proto = tp;
+            }
+        }
+    }
+    Ok(v)
 }
 
 /// JS-C427 — `new DOMRect(ReadOnly)(x, y, w, h)` — `bound[0]` =

@@ -783,6 +783,38 @@ fn define_duplicate_throws_domexception_not_supported() {
 }
 
 #[test]
+fn docfrag_derived_class_keeps_derived_proto() {
+    // kevlar JS-C481 : `class X extends DocumentFragment` (le
+    // contrôleur PolySi `c2q`) — le nœud fragment rendu par le
+    // ctor natif doit porter `X.prototype` (newTarget), sinon
+    // les membres mixés de `X` sont invisibles sur l'instance
+    // (wrapper `zc` creux : `h`/`ga`/`Xb` null, méthodes
+    // `updateReduxProperties` injoignables).
+    assert_eq!(
+        ev("class X extends DocumentFragment {};\
+            X.prototype.marker = 'mix';\
+            var x = new X();\
+            [x instanceof X, x instanceof DocumentFragment, x.nodeType, x.marker].join('|')"),
+        "true|true|11|mix"
+    );
+    // Même sémantique via la voie « fake-inheritance » kevlar :
+    // `d = function(){ return Base.apply(this) || this }` —
+    // `DocumentFragment.apply(this)` sur un `this` frais de
+    // `new d` doit lier le nœud au proto de `d`.
+    assert_eq!(
+        ev(
+            "function Base() { return DocumentFragment.apply(this) || this; }\
+            function D() { return Base.apply(this, arguments) || this; }\
+            Object.setPrototypeOf(D, Base);\
+            D.prototype.marker = 'mix';\
+            var u = new D();\
+            [u instanceof D, u.nodeType, u.marker].join('|')"
+        ),
+        "true|11|mix"
+    );
+}
+
+#[test]
 fn template_content_is_fragment() {
     // github.com `z8-*.js` : `tpl.content.appendChild(row)` —
     // `.content` matérialise le fragment de contenu et y
