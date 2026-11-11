@@ -675,7 +675,38 @@ impl Engine {
                             // classe fautive dans du code minifié.
                             let recv_desc = match &recv {
                                 Value::Obj(rid) => match self.heap.obj(*rid).map(|o| &o.kind) {
-                                    Some(ObjKind::Host(h)) => h.class_name().to_string(),
+                                    Some(ObjKind::Host(h)) => {
+                                        let base = h.class_name().to_string();
+                                        let mut hints = Vec::new();
+                                        for k in ["is", "localName", "id"] {
+                                            if let Some(s) = self
+                                                .get_prop(*rid, k)
+                                                .as_ref()
+                                                .and_then(Self::heap_string_of)
+                                                .filter(|v| !v.is_empty())
+                                            {
+                                                hints.push(format!("{k}:{s}"));
+                                            }
+                                        }
+                                        if let Some(host) = self.get_prop(*rid, "hostElement") {
+                                            for k in ["localName", "id"] {
+                                                if let Some(s) = self
+                                                    .get_prop_value(host.clone(), k)
+                                                    .ok()
+                                                    .as_ref()
+                                                    .and_then(Self::heap_string_of)
+                                                    .filter(|v| !v.is_empty())
+                                                {
+                                                    hints.push(format!("host.{k}:{s}"));
+                                                }
+                                            }
+                                        }
+                                        if hints.is_empty() {
+                                            base
+                                        } else {
+                                            format!("{}«{}»", base, hints.join(","))
+                                        }
+                                    }
                                     // Un callable receveur : le nom du
                                     // FnLit identifie la fonction dont
                                     // l'accesseur manque (`kW.vG`).
