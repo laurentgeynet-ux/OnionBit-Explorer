@@ -1772,3 +1772,10 @@ Lot PIPE livré depuis la piste YoutubeFix (R-260, crates `explorer-css`/`explor
 - **Mesure a ~38M lookups** : `env_ns` 3.85 s -> 3.78 s (**-2 %, bruit** ; ~107 ns/get des deux cotes). `env_lvl`=65.4M, `env_gets`=35.2M — travail identique.
 - **Conclusion** : le surcout par get est deja serre ; la couche lookup est epusee au niveau micro. Le levier restant = resolution compile-time (profondeur+slot) ou inline caches — chantier multi-jours, a arbitrer explicitement. Code conserve (equivalent, un borrow en moins = moins de surface de panique RefCell).
 - Sante : `ytd-browse` attache, RSS ~1.3-1.5 Go stable sous J17.
+
+### cran 75 (vol 9773, daemon 12260, J17) : pile de rejet capturee au settle — `unhandledrejection: undefined` = rail attestation poToken
+
+- **Sonde** : `pending_unhandled` porte desormais `(promise, reason, Option<Rc<str>>)` — la pile JS est capturee au `settle` (armee seulement sous `dom_probe`, 8 frames) car au drain la call_stack est repartie. Log `promise.reject` gagne `stk=`.
+- **`unhandledrejection: undefined` nomme** : `kevlar_base:27271` = rail **attestation/poToken** (`pw4` chemin « potato », `A2J` retry backoff, `attestation_challenge_fetch`, `integrityToken`, poToken via `H.poo(X)` — fetcher d'attestation WebView/GMS). L'appel au backend d'integrite echoue dans notre moteur -> `F.reject()` sans raison -> rafales ×27/×31 (le backoff `A2J` `currBackoffCount_<10`). **Echec attendu hors Google** — pas de backend d'attestation ; rendu non bloque.
+- **`AbortError: animation canceled`** : `web-animations-next-lite` + `kevlar_base:5497-5507` — annulation d'animation a la suppression/retrait d'element ; nominal.
+- Reste possible (non bloquant) : faire reussir le fetch XHR `Kus` (POST protobuf + Api-Key) si le rejet vient d'une 4xx mal geree — verification ulterieure via `media_probe net.*` sur l'endpoint attestation.

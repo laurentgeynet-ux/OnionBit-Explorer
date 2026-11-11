@@ -548,7 +548,11 @@ pub struct Engine {
     /// Promesses rejetées sans `then` (JS-C154) — candidates
     /// `unhandledrejection`, revues en fin de checkpoint
     /// (un `.then` tardif pose `handled` et les retire).
-    pub(crate) pending_unhandled: Vec<(Value, Value)>,
+    /// `(promesse, raison, pile optionnelle)` — la pile est
+    /// capturée au `settle` quand la sonde `dom_probe` est
+    /// armée (cran 75 : nommer le site des rejets
+    /// `unhandledrejection: undefined`).
+    pub(crate) pending_unhandled: Vec<(Value, Value, Option<std::rc::Rc<str>>)>,
     /// Descriptions des rejets non gérés — drainées par la
     /// session (`report_unhandled_rejection` → ring console).
     pub(crate) unhandled_reports: Vec<String>,
@@ -3282,7 +3286,7 @@ impl Engine {
         }
         // `unhandledrejection` en attente (JS-C154) — promesse
         // + raison racines jusqu'au tir du checkpoint.
-        for (p, r) in &self.pending_unhandled {
+        for (p, r, _) in &self.pending_unhandled {
             crate::heap::push_value(&mut ids, p);
             crate::heap::push_value(&mut ids, r);
         }

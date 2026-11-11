@@ -377,8 +377,23 @@ impl Engine {
         // silencieux). Le host session draine
         // `unhandled_reports` pour le ring console.
         if unhandled {
+            // Pile du site de rejet capturée au `settle` —
+            // au drain, la pile d'appel est déjà repartie
+            // (cran 75 : nommer les `unhandledrejection:
+            // undefined`). Bornée à 8 frames, armée seulement
+            // sous sonde `dom_probe`.
+            let stk = if tracing::enabled!(target: "dom_probe", tracing::Level::INFO) {
+                let s = self
+                    .stack_text("", "")
+                    .replace('\n', "<<")
+                    .trim_start_matches('<')
+                    .to_string();
+                Some(std::rc::Rc::from(s.as_str()))
+            } else {
+                None
+            };
             self.pending_unhandled
-                .push((Value::Obj(id), result.clone()));
+                .push((Value::Obj(id), result.clone(), stk));
         }
         if std::env::var("EXPLORER_PROM_TRACE").is_ok() && !reactions.is_empty() {
             eprintln!("[settle] reactions={}", reactions.len());
@@ -1133,7 +1148,7 @@ impl Engine {
         let mut same_desc = 0u32;
         let mut reported = 0u32;
         let mut capped = false;
-        for (pv, reason) in pending {
+        for (pv, reason, stk) in pending {
             // `.then` tardif → « rejectionhandled » silencieux :
             // la promesse ne remonte plus.
             let still = match self.heap.obj(if let Value::Obj(id) = pv {
@@ -1181,7 +1196,7 @@ impl Engine {
                 if tracing::enabled!(target: "dom_probe", tracing::Level::INFO) {
                     if let Ok(mut d) = dom.try_borrow_mut() {
                         if d.ce.probe_seen.insert(format!("pr:{desc}")) {
-                            tracing::info!(target: "dom_probe", site = "promise.reject", reason = %desc);
+                            tracing::info!(target: "dom_probe", site = "promise.reject", reason = %desc, stk = %stk.as_deref().unwrap_or(""));
                         }
                     }
                 }
