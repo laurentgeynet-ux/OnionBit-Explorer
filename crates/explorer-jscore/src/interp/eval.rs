@@ -690,6 +690,15 @@ impl Engine {
                                     )) => {
                                         format!("native {name}")
                                     }
+                                    Some(ObjKind::Proxy { target, .. }) => {
+                                        // Le nom « (on zc) » venait du
+                                        // constructeur de la cible —
+                                        // nommer le proxy lui-même puis
+                                        // décrire la cible (kevlar :
+                                        // `Pgm(controller)`).
+                                        let d = self.describe(target.clone());
+                                        format!("Proxy→{d}")
+                                    }
                                     Some(_) if self.is_callable(recv.clone()) => self
                                         .get_prop(*rid, "name")
                                         .as_ref()
