@@ -11999,8 +11999,26 @@ fn docfrag_ctor(e: &mut Engine, this: Value, _a: &[Value]) -> JsResult<Value> {
     // `DocumentFragment.prototype` — no-op.
     if let (Value::Obj(wid), Value::Obj(tid)) = (v.clone(), this.clone()) {
         if let Some(tp) = e.heap.obj(tid).map(|o| o.proto.clone()) {
+            let changed = e.heap.obj(wid).is_some_and(|w| w.proto != tp);
             if let Some(w) = e.heap.obj_mut(wid) {
                 w.proto = tp;
+            }
+            if changed {
+                // Sonde cran 43 : le chemin dérivé est-il
+                // emprunté en vol ? (falsification cran 42 —
+                // si jamais logué, le `zc` creux ne vient pas
+                // d'un `new`-sur-DocumentFragment dérivé).
+                let stack: String = e
+                    .stack_text("", "")
+                    .lines()
+                    .map(str::trim)
+                    .filter(|l| l.starts_with("at "))
+                    .take(6)
+                    .collect::<Vec<_>>()
+                    .join(" <- ");
+                tracing::info!(target: "dom_probe",
+                    site = "docfrag.derive", node = %n,
+                    stack = %stack.chars().take(500).collect::<String>());
             }
         }
     }
