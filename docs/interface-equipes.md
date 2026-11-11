@@ -1383,3 +1383,11 @@ Lot PIPE livré depuis la piste YoutubeFix (R-260, crates `explorer-css`/`explor
 **Candidats `na` honnêtes** (équivalent-à-initial, pas initiale littérale — table type `INITIAL_EXTRA` ou nouvelle table `EQUIV_EXTRA` ?) : `justify-self:normal|stretch|auto`, `align-items|align-self|align-content|justify-items|place-*:stretch`, `alignment-baseline|dominant-baseline|vertical-align:alphabetic`, `vertical-align:first|last` (baseline tableau ≈ baseline), `dominant-baseline:auto`, `perspective:none`, `display:block` (sur `<p>`), `font-variant-*:normal`, `flex-basis:auto`, `flex-direction:row`, `flex-flow:row|nowrap`, `flex-wrap:nowrap`, `appearance:auto`.
 
 **Bug signalé (zone css, commit NAV `98657228`)** : `vendor_alias` mappe `-webkit-text-stroke` (shorthand) → `-webkit-text-stroke-width` — la couleur du shorthand est perdue ; le test `stroke_props_reconnus` (`tests/webkit_text_fill.rs`) rougit (pré-existant, non lié au lot). Corriger : laisser `-webkit-text-stroke` en identité ou expanser `(width, color)`.
+
+## NAV — cran 36 (vol 9529, fix cran 35) : zombies refusés → pm stampé proprement
+
+- `dom.zombie` nomme l'accès : **`HTMLTemplateElement.decorate` + `document.importNode`** (`_stampTemplate` kevlar) atteignait les slots morts 1931/1933/1935/1872 — des `content.children` référençant des ids libérés par `gc.domgc`.
+- Fix cran 35 (`node_value` refuse `node.free`) : **4 zombies refusés, 0 `dom.stale` en aval** — aucun write `polymerController`/forwarding perdu.
+- `ytd-page-manager` node 2031 : `el.birth` → `dom.wrap` → `ce.upgrade` → **présent dans le DOM vivant** (`<ytd-page-manager id="page-manager" class="style-scope ytd-app">`).
+- Reste : `appKids=0` à +2 min — re-swap tardif ou autre ctx ; l'hydratation continue (`ytd-browse` défini, `ce.define` vu). Le trou « wrap d'un nœud mort » est **fermé** ; l'amont (pourquoi `content.children` référençait des ids libérés — `template_contents` seedé mais ses enfants non clos) est le chantier suivant.
+- Chaîne de fixes : `99245c83` (dead_blocked+seeds) + `b14b06d4` (gc.cache) + `3e9de8c9` (dom.wrap) + `79af70ff` (node_value refuse free + dom.zombie).
