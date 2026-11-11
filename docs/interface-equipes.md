@@ -1802,3 +1802,9 @@ Lot PIPE livré depuis la piste YoutubeFix (R-260, crates `explorer-css`/`explor
 - **Reinterpretation** : les placeholders bruts vus sur la page recherche/post-SPA etaient des instants d'hydratation en cours (elements stampes avant le flush `__dataClientsReady`), pas un rail casse. `country-code` null = evaluation correcte (data.countryCode indefini).
 - **Instrumentation retiree** : compteurs `run_fx`/`eval_bind` par `lit.name` ne pouvaient pas tirer (fonctions minifiees anonymes, `lit.name=null`) — code revert avant commit.
 - **Nav SPA elargie** : home -> /results?search_query -> clic a#thumbnail -> /watch?v=jNQXAC9IVRw, `hasNavigated=true` a chaque rail. Resultats recherche = vrais renderers stampes (3+).
+
+### cran 77b — attribution : le rail `[[x]]` a ete repare par JS-C487 (`8c927827`, session parallele), pas un etat transitoire
+
+- Mon vol 8780 compilait l'arbre de travail incluant le fix non commis `textContent=` sur CharacterData -> `.data` (record `characterData`). C'est LE mecanisme qui vidait les placeholders : `Node.textContent=` sur un Text greffait un enfant au lieu d'ecrire `.data` -> le `[[x]]` restait litteral ET la mutation `childList` tuait `Polymer.Async.microTask` (MutationObserver sur texte detache) -> bindings jamais re-evalues.
+- Correction du cran 77 : les `[[x]]` n'etaient PAS des etats transitoires — ils etaient structuresllement casses jusqu'a JS-C487. `country-code=null` reste une evaluation correcte.
+- Piege ops note : un build release compile l'arbre non commis — un commit parallele peut atterrir pendant un build ; verifier `git log` avant d'attribuer un verdict de vol.
