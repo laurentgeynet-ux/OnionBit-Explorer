@@ -273,26 +273,28 @@ pub(crate) fn object_set_proto(e: &mut Engine, _t: Value, args: &[Value]) -> JsR
                 Value::Obj(pid) => Some(pid),
                 _ => None,
             })
-            .map(|pid| {
-                let is = e
-                    .get_prop_value(Value::Obj(pid), "is")
-                    .ok()
-                    .and_then(|v| e.to_js_string(v).ok())
-                    .filter(|s| !s.is_empty());
-                let ctor = e
-                    .get_prop_value(Value::Obj(pid), "constructor")
-                    .ok()
-                    .and_then(|c| e.get_prop_value(c, "name").ok())
-                    .and_then(|n| e.to_js_string(n).ok())
-                    .filter(|s| !s.is_empty());
-                match (is, ctor) {
-                    (Some(i), Some(c)) => format!("{i}/{c}"),
-                    (Some(i), None) => i,
-                    (None, Some(c)) => c,
-                    (None, None) => "?".to_string(),
-                }
-            })
-            .unwrap_or_else(|| "null".to_string());
+            .map_or_else(
+                || "null".to_string(),
+                |pid| {
+                    let is = e
+                        .get_prop_value(Value::Obj(pid), "is")
+                        .ok()
+                        .and_then(|v| e.to_js_string(v).ok())
+                        .filter(|s| !s.is_empty());
+                    let ctor = e
+                        .get_prop_value(Value::Obj(pid), "constructor")
+                        .ok()
+                        .and_then(|c| e.get_prop_value(c, "name").ok())
+                        .and_then(|n| e.to_js_string(n).ok())
+                        .filter(|s| !s.is_empty());
+                    match (is, ctor) {
+                        (Some(i), Some(c)) => format!("{i}/{c}"),
+                        (Some(i), None) => i,
+                        (None, Some(c)) => c,
+                        (None, None) => "?".to_string(),
+                    }
+                },
+            );
         // Cran 58 — `nodeType` own (11 = vrai fragment) et
         // `hpc` : `b` est-il le `polymerController` de son
         // hôte ? (contrôleur swappé → méthodes de classe
@@ -324,9 +326,9 @@ pub(crate) fn object_set_proto(e: &mut Engine, _t: Value, args: &[Value]) -> JsR
                     "ot:"
                 };
                 if l.len() > 60 {
-                    format!("{}{}", tag, &l[l.len().saturating_sub(14)..])
+                    format!("{tag}{}", &l[l.len().saturating_sub(14)..])
                 } else {
-                    format!("{}{}", tag, l)
+                    format!("{tag}{l}")
                 }
             })
             .collect::<Vec<_>>()

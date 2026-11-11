@@ -6913,8 +6913,7 @@ impl Engine {
             // `roteq` = `root===self` déjà vrai à la souscription.
             let dcr = self
                 .get_prop(id, "didCallReady")
-                .map(|v| self.to_boolean(v))
-                .unwrap_or(false);
+                .is_some_and(|v| self.to_boolean(v));
             let tpl = self.find_prop(id, "_template").is_some();
             let roteq = matches!(self.get_prop(id, "root"), Some(Value::Obj(r)) if r == id);
             // `ipec` = `isPolySiElementConnected` — posé par
@@ -6923,8 +6922,7 @@ impl Engine {
             // a atteint `_.L` » vs « court-circuitée en amont ».
             let ipec = self
                 .get_prop(id, "isPolySiElementConnected")
-                .map(|v| self.to_boolean(v))
-                .unwrap_or(false);
+                .is_some_and(|v| self.to_boolean(v));
             tracing::info!(
                 target: "dom_probe",
                 site = "sub.arm",
@@ -7063,6 +7061,47 @@ impl Engine {
             }
             id = tid;
             self.deleg_hop(&mut depth)?;
+        }
+        // Cran 62 — `_.L.created` lit `this.polySiParams` avec
+        // succès au sommet de la pile du swap alors que ni
+        // l'élément pm ni son pc n'en portent : chaque
+        // résolution non-undefined nomme le receveur réel
+        // (`is` élément ou `hostElement` du contrôleur) + la
+        // pile → identifie l'objet Ae-family qui invoque
+        // l'attachShadow promouvant le pc.
+        if key == "polySiParams"
+            && tracing::enabled!(target: "dom_probe", tracing::Level::INFO)
+            && self
+                .find_prop(id, key)
+                .and_then(|p| p.data_value())
+                .is_some()
+        {
+            let host = self
+                .get_prop(id, "hostElement")
+                .and_then(|h| self.get_prop_value(h, "localName").ok())
+                .as_ref()
+                .and_then(Self::heap_string_of)
+                .unwrap_or_default();
+            let is_ = self
+                .get_prop(id, "is")
+                .as_ref()
+                .and_then(Self::heap_string_of)
+                .unwrap_or_default();
+            let frames: Vec<String> = self
+                .call_stack
+                .iter()
+                .rev()
+                .take(6)
+                .map(Self::fn_label_of)
+                .collect();
+            tracing::info!(
+                target: "dom_probe",
+                site = "psp.hit",
+                host = %host,
+                is = %is_,
+                obj = ?id,
+                stk = %frames.join("<")
+            );
         }
         match self.find_prop(id, key) {
             Some(Prop::Data { value, .. }) => {
