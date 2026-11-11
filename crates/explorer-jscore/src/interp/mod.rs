@@ -3014,7 +3014,7 @@ impl Engine {
                         .filter_map(|(&n, _)| {
                             let d = dom.borrow();
                             let t = d.nodes.get(n as usize).map(|x| x.tag.clone())?;
-                            t.contains('-').then(|| (n, t))
+                            t.contains('-').then_some((n, t))
                         })
                         .collect();
                     for (n, t) in dead {
@@ -7358,6 +7358,26 @@ impl Engine {
                     {
                         let cls = h.class_name();
                         let vdesc = self.describe(v.clone());
+                        // §cran-38 — `node=`/`tag=` du wrapper
+                        // hôte : corréler le write à
+                        // `el.birth`/`ce.upgrade` (cran 37 :
+                        // l'expando atterrit sur le bon élément
+                        // mais porte `O=zc` — le nœud visé nomme
+                        // si c'est l'élément vivant ou l'inerte
+                        // `u` d'`I_o`).
+                        let (node, tag) = crate::dom_host::dom_node_of(self, base.clone())
+                            .map_or_else(
+                                || ("-".to_string(), "-".to_string()),
+                                |(d, n)| {
+                                    let t = d
+                                        .borrow()
+                                        .nodes
+                                        .get(n as usize)
+                                        .map(|x| x.tag.clone())
+                                        .unwrap_or_default();
+                                    (n.to_string(), t)
+                                },
+                            );
                         let stack: String = self
                             .stack_text("", "")
                             .lines()
@@ -7368,7 +7388,7 @@ impl Engine {
                             .join(" <- ");
                         let stack: String = stack.chars().take(600).collect();
                         tracing::info!(target: "dom_probe",
-                            site = "pc.set", host = %cls,
+                            site = "pc.set", host = %cls, node = %node, tag = %tag,
                             v = %vdesc.chars().take(120).collect::<String>(),
                             stack = %stack);
                     }

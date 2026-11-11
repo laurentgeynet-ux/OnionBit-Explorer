@@ -11121,13 +11121,11 @@ impl Host for NodeHost {
             // valeurs calculées (css-typed-om-1) : même liste
             // que `getComputedStyle` (inline + repli
             // géométrie borné), `set`/`delete` → TypeError.
-            "computedStyleMap" => {
-                return Ok(Some(e.new_host_object(Rc::new(StyleMapHost {
-                    dom: self.dom.clone(),
-                    node,
-                    computed: true,
-                }))));
-            }
+            "computedStyleMap" => Ok(Some(e.new_host_object(Rc::new(StyleMapHost {
+                dom: self.dom.clone(),
+                node,
+                computed: true,
+            })))),
             "requestFullscreen" => {
                 let pid = e.new_promise();
                 let attached = {
@@ -12813,7 +12811,7 @@ impl Host for StyleMapHost {
     fn invoke(
         &self,
         e: &mut Engine,
-        _t: Value,
+        this: Value,
         name: &str,
         args: &[Value],
     ) -> JsResult<Option<Value>> {
@@ -12912,7 +12910,7 @@ impl Host for StyleMapHost {
                     for (k, v) in map {
                         let kv = e.str_val(k);
                         let vv = e.str_val(v);
-                        let _ = e.call_value(cb.clone(), this_arg.clone(), &[vv, kv, _t.clone()]);
+                        let _ = e.call_value(cb.clone(), this_arg.clone(), &[vv, kv, this.clone()]);
                     }
                     Ok(Some(Value::Undefined))
                 } else {

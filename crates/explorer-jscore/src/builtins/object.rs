@@ -342,11 +342,10 @@ pub(crate) fn define_one_prop(
     // de l'interp ne le voit pas ; celle-ci le nomme (classe
     // hôte + forme du descripteur + pile JS bornée).
     if key == "polymerController" && tracing::enabled!(target: "dom_probe", tracing::Level::INFO) {
-        let cls = e.host_of(id).map(|h| h.class_name()).unwrap_or("<plain>");
+        let cls = e.host_of(id).map_or("<plain>", |h| h.class_name());
         let dv = e
             .get_prop(desc_id, "value")
-            .map(|v| e.describe(v))
-            .unwrap_or_else(|| "<acc/none>".into());
+            .map_or_else(|| "<acc/none>".into(), |v| e.describe(v));
         let stack: String = e
             .stack_text("", "")
             .lines()

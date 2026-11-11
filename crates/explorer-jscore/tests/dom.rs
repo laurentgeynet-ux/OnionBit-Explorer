@@ -7665,7 +7665,7 @@ fn animation_readable_lot4() {
 // vue map-like de la même liste inline que `el.style`.
 
 /// `get`/`has`/`size` lisent les déclarations ; `set`/`append`
-////`delete`/`clear` écrivent l'attribut ; le read-only jette.
+/// `delete`/`clear` écrivent l'attribut ; le read-only jette.
 #[test]
 fn style_typed_om_maps() {
     assert_eq!(
