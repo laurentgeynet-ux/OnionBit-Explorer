@@ -1717,3 +1717,10 @@ Lot PIPE livré depuis la piste YoutubeFix (R-260, crates `explorer-css`/`explor
 - **Home** : toujours 1 `richSectionRenderer` -> `feedNudgeRenderer` "Votre historique YouTube est desactive" — **comportement serveur nominal** pour une session sans historique (meme consentie, non connectee) : un Chrome vierge sign-out EEA recoit le meme nudge. Le feed exige historique active (endpoint `feedback` du bouton -> consent.youtube.com) ou un compte — hors perimetre moteur.
 - **Sante du vol** : `proto.swap`=0, `ev.threw`=0, `assignParentResizable`=0, `err=`=0 sur toute la session watch+home.
 - Piege opérationnel noté : double `spawn_daemon` sur meme port -> le second echoue au bind MAIS "en ligne" s'imprime quand meme (health check sur le daemon preexistant) et son stderr ecrase le log du vivant — pidfile non mis a jour. Toujours lire `daemon-<port>.pid` et verifier `Win32_Process explorer-daemon.exe` avant un vol.
+
+### cran 69 (vol 9773, daemon 12700) : navigation SPA interne validee — `hasNavigated` mesure true
+
+- Clic reel `a#logo` (masthead) depuis `/watch` -> `location.href` devient `https://www.youtube.com/` **sans reload** : `yt-navigate -> handleNavigate -> N8Q -> publishPageData -> onYtPageDataFetched` declenche par la delegation de clic, `ytd-browse` re-stampe dans le page-manager.
+- `hasNavigated` = **true** — le rail `initHistoryManager`/`onYtNavigate` s'est arme lors de la navigation interne (home->watch deja SPA : `can_back=true`), confirmant que `false` au chargement initial etait nominal.
+- Sante : `proto.swap`=0, `ev.threw`=0, `err=`=0, `heap memory`=0 sur l'ensemble watch + clic SPA + re-stamp ; RSS daemon stable ~830 Mio (joblimit 5 Go).
+- `items=0` persistant = nudge serveur (session sans historique), idem vols precedents.
