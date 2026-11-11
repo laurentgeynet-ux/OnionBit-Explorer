@@ -1724,3 +1724,11 @@ Lot PIPE livré depuis la piste YoutubeFix (R-260, crates `explorer-css`/`explor
 - `hasNavigated` = **true** — le rail `initHistoryManager`/`onYtNavigate` s'est arme lors de la navigation interne (home->watch deja SPA : `can_back=true`), confirmant que `false` au chargement initial etait nominal.
 - Sante : `proto.swap`=0, `ev.threw`=0, `err=`=0, `heap memory`=0 sur l'ensemble watch + clic SPA + re-stamp ; RSS daemon stable ~830 Mio (joblimit 5 Go).
 - `items=0` persistant = nudge serveur (session sans historique), idem vols precedents.
+
+### cran 70 (vol 9773, daemon 2452, EXPLORER_J17_PROF=1, cap 768) : churn d'allocations attribue — trafic reel, pas fuite unique
+
+- Snapshot J17 (~40 s d'hydratation) : `call=4 275 286` appels dont `call_nat=2 066 626` (**48% d'appels natifs** — DOM/getters du cascade iron-resize + delegation), `env_new=2 208 660` cellules Env, `env_lvl=51.8M` niveaux de scope traverses, `prop_scan=72M` comparaisons lineaires de cles, `arridx_try=20.6M`.
+- `fn_mat=7 148` seulement → les `Fun:500k` du vol precedent n'etaient PAS de la materialisation de parse : ce sont des **closures runtime vivantes** — `Function.prototype.bind` (`_.HU(this,fn)` a chaque addEventListener), closures arrow par element par listener, wrappers `.call`/forward — retenues par les listes de listeners et les files Polymer. Pas de site de fuite unique : c'est l'echelle Polymer×DOM (cascade `_notifyDescendant`/`fire("iron-resize")` debloquee par le fix instanceof).
+- Goulots nommes par ordre : (1) `prop_scan=72M` — scan lineaire des props (`prop_ns=10.6 s` = le temps dominant du batch) — l'index paresseux ne s'arme qu'au-dela de PROPS_IDX_MIN ; abaisser le seuil ou indexer des le premier miss repete est le cran perf le plus prometteur. (2) `env_lvl=51.8M` — profondeur de fermeture des bundles closure/google3 (env_ns=2.7 s). (3) `call_nat` ~48% — le cout dispatch natif (host get/invoke) domine la moitie des appels.
+- Cap 768 non atteint ce vol (plus lent sous J17, hydratation amortie) — le pic 805 Mio du vol anterieur coincindait avec le storm iron-resize **pre-fix** (erreurs toutes les ~3 ms allouant piles+objets d'erreur) ; post-fix la consommation s'est stabilisee (RSS ~830 Mio).
+- Pas de fuite identifiee → pas de patch memoire ce cran ; le journal garde la decomposition pour le futur chantier perf (`prop_scan` premier candidat).
