@@ -704,7 +704,7 @@ fn fixture_for(name: &str) -> &'static str {
                 | "place-content" | "place-items" | "gap" | "row-gap" | "column-gap"
                 | "flex-direction" | "flex-wrap" | "flex-flow" | "grid-template-columns"
                 | "grid-template-rows" | "grid-auto-flow" | "grid-auto-columns"
-                | "grid-auto-rows" | "justify-items" | "container-type" | "container-name"
+                | "grid-auto-rows" | "container-type" | "container-name"
         ) =>
         {
             // Multi-lignes + hauteur fixe : `align-content` a
@@ -717,6 +717,37 @@ fn fixture_for(name: &str) -> &'static str {
         // mesurer le vrai support.
         () if n == "justify-self" => {
             "<body><div style=\"display:grid;width:400px\"><p class=x>a</p><p>b</p></div></body>"
+        }
+        // `justify-items`/`place-items` — ignorés en flex
+        // (css-align §8.3) ; conteneur grid requis.
+        () if n == "justify-items" => {
+            "<body><div class=x style=\"display:grid;width:400px\"><p>a</p><p>b</p></div></body>"
+        }
+        // `place-self` — item grid (les deux axes self).
+        () if n == "place-self" => {
+            "<body><div style=\"display:grid;width:400px;height:200px\"><p class=x>a</p></div></body>"
+        }
+        // `flex` shorthand — item dans conteneur flex
+        // (`flex:1` grandit l'item → delta de largeur).
+        () if n == "flex" => {
+            "<body><div style=\"display:flex;width:400px\"><p class=x>a</p><p>b</p></div></body>"
+        }
+        // `ruby-*` — contexte `<ruby>` requis (rb/rt
+        // n'existent que sous ruby).
+        () if n.starts_with("ruby") => {
+            "<body><ruby class=x>base<rt class=x>x</rt></ruby>"
+        }
+        // Props de transformée — n'ont d'effet que sur une
+        // boîte **transformée** (`transform-origin` déplace
+        // le pivot, `backface`/`perspective`/`transform-box`
+        // `transform-style` le référentiel).
+        () if matches!(
+            n,
+            "transform-origin" | "transform-box" | "perspective"
+                | "backface-visibility" | "transform-style"
+        ) =>
+        {
+            "<body><div class=x style=\"width:100px;height:80px;background:blue;transform:rotate(30deg)\"><p>a</p></div></body>"
         }
         // Props d'item dans un conteneur flex — `.x` = l'item.
         () if matches!(
@@ -789,8 +820,7 @@ fn fixture_for(name: &str) -> &'static str {
         () if matches!(
             n,
             "position" | "top" | "right" | "bottom" | "left" | "inset"
-                | "z-index" | "transform" | "transform-origin" | "transform-style"
-                | "transform-box" | "perspective" | "backface-visibility"
+                | "z-index" | "transform"
                 | "contain" | "contain-intrinsic-size"
                 | "contain-intrinsic-width" | "contain-intrinsic-height" | "content-visibility"
                 | "clip" | "clip-path" | "visibility" | "opacity" | "filter"
@@ -885,6 +915,13 @@ const INITIAL_EXTRA: &[(&str, &str)] = &[
     ("backface-visibility", "visible"),
     ("baseline-shift", "baseline"),
     ("caret-color", "auto"),
+    ("dominant-baseline", "alphabetic"),
+    ("align-self", "normal"),
+    ("align-self", "stretch"),
+    ("justify-self", "normal"),
+    ("justify-self", "stretch"),
+    ("justify-items", "normal"),
+    ("justify-items", "legacy"),
     ("clear", "none"),
     ("column-fill", "balance"),
     ("contain", "none"),
