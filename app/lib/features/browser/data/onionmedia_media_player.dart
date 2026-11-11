@@ -103,6 +103,7 @@ class OnionMediaPlayer implements MediaPlayer {
   int _lastSeq = -1;
   bool _disposed = false;
   bool _pulling = false;
+  bool _needsPull = false;
 
   /// File des pas-à-pas (Étape 203) — `frame_step` est
   /// **bloquant** côté DLL (poll jusqu'à trame présentée,
@@ -1168,9 +1169,23 @@ class OnionMediaPlayer implements MediaPlayer {
   /// `explorer_ffi`).
   static ffi.DynamicLibrary _load() {
     final p = Platform.environment['ONIONMEDIA_FFI_LIB'];
-    return p != null && p.isNotEmpty
-        ? ffi.DynamicLibrary.open(p)
-        : ffi.DynamicLibrary.open('onionmedia_ffi.dll');
+    if (p != null && p.isNotEmpty) {
+      return ffi.DynamicLibrary.open(p);
+    }
+    final candidates = <String>[
+      'onionmedia_ffi.dll',
+      r'terrain-bin\onionmedia_ffi.dll',
+      r'..\terrain-bin\onionmedia_ffi.dll',
+      r'C:\cargo-target\media-wt-perf\target\x86_64-pc-windows-msvc\release\onionmedia_ffi.dll',
+    ];
+    for (final c in candidates) {
+      try {
+        return ffi.DynamicLibrary.open(c);
+      } on Object {
+        // Essai du candidat suivant
+      }
+    }
+    return ffi.DynamicLibrary.open('onionmedia_ffi.dll');
   }
 
   static void _setHwAccel(ffi.DynamicLibrary lib, ffi.Pointer h, bool on) {
@@ -1597,50 +1612,64 @@ class OnionMediaPlayer implements MediaPlayer {
 
   /// Tire la trame courante : acquire zéro-copie (ABI ≥ 3)
   /// si la DLL l'expose, sinon chemin copie. Réentrance
-  /// écartée (`_pulling`) — un tick/événement peut chevaucher
-  /// le `await` du décodage précédent.
+  /// régulée avec garde anti-backpressure (`_needsPull`) :
+  /// un tick ou événement arrivant pendant le `await _decode`
+  /// redéclenche immédiatement un pull de la trame fraîche
+  /// dès que l'upload GPU en cours se termine (évite le saut
+  /// de trames et l'accumulation mémoire).
   Future<void> _pull() async {
-    if (_disposed || _pulling) return;
+    if (_disposed) return;
+    if (_pulling) {
+      _needsPull = true;
+      return;
+    }
     _pulling = true;
     try {
-      final acquire = _acquire;
-      final release = _frameRelease;
-      if (acquire != null && release != null) {
-        final fv = calloc<_OnionMediaFrame>(1);
-        try {
-          if (acquire(_h, fv) != 1) return;
-          try {
-            if (fv.ref.seq == _lastSeq ||
-                fv.ref.width == 0 ||
-                fv.ref.height == 0) {
-              return;
-            }
-            _lastSeq = fv.ref.seq;
-            // `data` valide jusqu'au release : le `await`
-            // est sûr — `decodeImageFromPixels` copie les
-            // octets dans l'ImmutableBuffer avant de rendre.
-            final img = await _decode(
-              fv.ref.data.asTypedList(fv.ref.len),
-              fv.ref.width,
-              fv.ref.height,
-            );
-            if (img != null) {
-              _frame?.dispose();
-              _frame = img;
-              _notify();
-            }
-          } finally {
-            release(fv.ref.token);
-          }
-        } finally {
-          calloc.free(fv);
-        }
-        return;
-      }
-      await _pullCopy();
+      do {
+        _needsPull = false;
+        await _pullOnce();
+      } while (_needsPull && !_disposed);
     } finally {
       _pulling = false;
     }
+  }
+
+  Future<void> _pullOnce() async {
+    final acquire = _acquire;
+    final release = _frameRelease;
+    if (acquire != null && release != null) {
+      final fv = calloc<_OnionMediaFrame>(1);
+      try {
+        if (acquire(_h, fv) != 1) return;
+        try {
+          if (fv.ref.seq == _lastSeq ||
+              fv.ref.width == 0 ||
+              fv.ref.height == 0) {
+            return;
+          }
+          _lastSeq = fv.ref.seq;
+          // `data` valide jusqu'au release : le `await`
+          // est sûr — `decodeImageFromPixels` copie les
+          // octets dans l'ImmutableBuffer avant de rendre.
+          final img = await _decode(
+            fv.ref.data.asTypedList(fv.ref.len),
+            fv.ref.width,
+            fv.ref.height,
+          );
+          if (img != null) {
+            _frame?.dispose();
+            _frame = img;
+            _notify();
+          }
+        } finally {
+          release(fv.ref.token);
+        }
+      } finally {
+        calloc.free(fv);
+      }
+      return;
+    }
+    await _pullCopy();
   }
 
   /// Repli copie (DLL < ABI 3) : `pull_ex` atomique si
