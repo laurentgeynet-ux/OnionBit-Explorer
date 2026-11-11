@@ -1095,6 +1095,27 @@ impl Dom {
     /// audit AR-16). Les `seeds` sont closes sur les
     /// descendants : un wrapper vivant sur un nœud détaché
     /// retient tout son sous-arbre.
+    /// §cran-37 — nomme les tables qui citent encore un slot
+    /// libéré (`dom.zombie`) : `(template_contents, shadow,
+    /// journal)` — le canal par lequel le JS a lu l'id mort.
+    pub(crate) fn zombie_carriers(&self, node: NodeId) -> (bool, bool, bool) {
+        let in_tmpl = self
+            .template_contents
+            .iter()
+            .any(|(t, f)| *t == node || *f == node);
+        let in_shadow = self.shadow_roots.values().any(|(r, _)| *r == node)
+            || self.shadow_hosts.contains_key(&node)
+            || self.shadow_hosts.values().any(|h| *h == node);
+        let in_journal = self.journal.iter().any(|op| match op {
+            JournalOp::Insert { parent, added, .. } => *parent == node || added.contains(&node),
+            JournalOp::Remove { key }
+            | JournalOp::SetAttr { key, .. }
+            | JournalOp::SetText { key } => *key == node,
+            JournalOp::AttachShadow { host, root, .. } => *host == node || *root == node,
+        });
+        (in_tmpl, in_shadow, in_journal)
+    }
+
     pub(crate) fn collect_garbage(&mut self, seeds: &std::collections::HashSet<NodeId>) -> usize {
         let mut keep = self.extra_kept_nodes();
         keep.extend(seeds.iter().copied());

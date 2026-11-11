@@ -2236,8 +2236,24 @@ pub(crate) fn node_value(e: &mut Engine, dom: &DomRef, cache: &NodeCache, node: 
     {
         if tracing::enabled!(target: "dom_probe", tracing::Level::INFO) {
             let fn_src = e.stack_top_fn_src(200);
+            // §cran-37 — nomme le porteur de l'id mort : les
+            // tables qui le citent encore (`template_contents`,
+            // `journal`, `shadow_*`) sont le canal par lequel le
+            // JS l'a lu.
+            let (in_tmpl, in_shadow, in_journal, p, ptag) = {
+                let d = dom.borrow();
+                let p = d.nodes[node as usize].parent;
+                let (t, s, j) = d.zombie_carriers(node);
+                (
+                    t,
+                    s,
+                    j,
+                    p,
+                    p.map_or_else(|| "-".into(), |q| d.nodes[q as usize].tag.clone()),
+                )
+            };
             tracing::info!(target: "dom_probe", site = "dom.zombie",
-                "node={node} fn_src={fn_src}");
+                "node={node} parent={ptag}@{p:?} tmpl={in_tmpl} shadow={in_shadow} journal={in_journal} fn_src={fn_src}");
         }
         return Value::Undefined;
     }
