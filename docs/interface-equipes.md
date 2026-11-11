@@ -1585,3 +1585,12 @@ Lot PIPE livré depuis la piste YoutubeFix (R-260, crates `explorer-css`/`explor
 - Masthead élément : `urp`/`select` forwardés (fonctions) ; pm : rien. Le forwarding `FnY` (`ifV` : `O=u.ctor(F,{beforeReady})` + `getInitialMethods`/`getExtraMethodsToForward`/`wig`) a livré ~rien pour pm — à creuser si le rail forwarding est notre divergence.
 - **Insertion** : `ytd-browse` créé+upgradé+stampé (template complet) mais jamais inséré — racine du page-manager = 3 ancres `#comment` (`dom-if`/`iron-pages` placeholders non déclenchés). `yt-navigate-finish`/`yt-page-data-fetched` dispatchés → le rail `z2X`/insertBefore du routeur n'a pas tiré. Cran 57 : sonder `insertBefore`/`appendChild` sur les ancres pm + état `if` des dom-if.
 - `pm.__CE_shadowRoot.childNodes` fonctionne (3 enfants, tableau `.item` ok) — le throw `cannot set 'item' of Undefined` observé une fois était transitoire (pompe).
+
+
+## NAV — cran 57 (vol 9773) : `ytd-browse` orphelin = `loadPage` non forwardé/appelable — le contrôleur `oOJ` perd `_.L.*` au swap ; insertion = rail **impératif**, pas dom-if
+
+- La racine pm (3 commentaires css) est **correcte** : le template `TUO` de ytd-page-manager = 3 marqueurs css + `_.RQ()` base styles — PolySi n'utilise pas de contenu template pour les pages. `templateInfo.nodeInfoList=0` nominal.
+- `oOJ` = classe contrôleur du page-manager (`pagePool`, `contextSwitcher`, `actionMap`, `loadPage`…) — vit sur `oOJ.prototype`/`d.prototype`, perdu quand `shadyUpgradeFragment(this)` swap le contrôleur (`u.root=u`, `root===self`).
+- Rail d'insertion mesuré au symbole (`kevlar:9081800`) : `d.loadPage(H.response)` sur l'élément page — `typeof d.loadPage==="function"` requis sinon `_.fx(new _.R6("b/38014653",…))` → abandon. `d.loadPage` vient du forwarding `FnY`/`wig` (`ifV`) qui délègue à `this.polymerController[v]` → **le contrôleur doit garder ses méthodes post-swap** — donc en Chrome `oOJ.prototype` survit au swap (ou le forwarding copie la fonction own avant le swap).
+- `_template` = `null` sur pc/masthead (`tpl=false`) — normal PolySi (template minimal). `template.innerHTML` moteur OK.
+- **Cran 58** : déterminer si `wig`/`FnY` copie la référence de fonction (own sur `F.prototype` — survivrait) ou un déléguant (lit `pc[v]` à l'appel — casse) ; et pourquoi pm n'a même pas `urp`/`select` forwardés alors que masthead en a 2.
