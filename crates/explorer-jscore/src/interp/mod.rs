@@ -6961,6 +6961,38 @@ impl Engine {
                 stk = %frames.join("<")
             );
         }
+        // Cran 63 — `__dataClientsReady` repassé falsy =
+        // `_initializeProperties` rejoué sur le contrôleur →
+        // rouvre la gate `_readyClients` → second `_attachDom`
+        // → swap du pc. La pile nomme le ré-initialiseur.
+        if key == "__dataClientsReady"
+            && tracing::enabled!(target: "dom_probe", tracing::Level::INFO)
+        {
+            let host = self
+                .get_prop(id, "hostElement")
+                .and_then(|h| self.get_prop_value(h, "localName").ok())
+                .as_ref()
+                .and_then(Self::heap_string_of)
+                .unwrap_or_default();
+            if !host.is_empty() {
+                let falsy = !self.to_boolean(v.clone());
+                let frames: Vec<String> = self
+                    .call_stack
+                    .iter()
+                    .rev()
+                    .take(6)
+                    .map(Self::fn_label_of)
+                    .collect();
+                tracing::info!(
+                    target: "dom_probe",
+                    site = "dcr.set",
+                    host = %host,
+                    falsy,
+                    obj = ?id,
+                    stk = %frames.join("<")
+                );
+            }
+        }
         // Cran 53b — `root` réassigné : `this.root=this` (init),
         // `=_stampTemplate` (stamp), `=_attachDom` (final). Trace
         // la provenance pour savoir si `_stampTemplate` a tourné.
@@ -7069,39 +7101,72 @@ impl Engine {
         // (`is` élément ou `hostElement` du contrôleur) + la
         // pile → identifie l'objet Ae-family qui invoque
         // l'attachShadow promouvant le pc.
-        if key == "polySiParams"
-            && tracing::enabled!(target: "dom_probe", tracing::Level::INFO)
+        // Cran 63 — mêmes clés pour `_readyClients`/`_attachDom`/
+        // `_flushClients` : nommer le rail qui re-déclenche le
+        // second `_readyClients` sur le pc (`__dataClientsReady`
+        // déjà posé → `_flushClients` gate fermée → le re-
+        // déclencheur est ailleurs : microtask `_.hQ`, CE re-
+        // dispatch, ou `_enableOrFlushClients` → `d.ready`).
+        if matches!(
+            key,
+            "polySiParams" | "_readyClients" | "_attachDom" | "_flushClients"
+        ) && tracing::enabled!(target: "dom_probe", tracing::Level::INFO)
             && self
                 .find_prop(id, key)
                 .and_then(|p| p.data_value())
                 .is_some()
         {
-            let host = self
-                .get_prop(id, "hostElement")
-                .and_then(|h| self.get_prop_value(h, "localName").ok())
-                .as_ref()
-                .and_then(Self::heap_string_of)
-                .unwrap_or_default();
-            let is_ = self
-                .get_prop(id, "is")
-                .as_ref()
-                .and_then(Self::heap_string_of)
-                .unwrap_or_default();
-            let frames: Vec<String> = self
-                .call_stack
-                .iter()
-                .rev()
-                .take(6)
-                .map(Self::fn_label_of)
-                .collect();
-            tracing::info!(
-                target: "dom_probe",
-                site = "psp.hit",
-                host = %host,
-                is = %is_,
-                obj = ?id,
-                stk = %frames.join("<")
-            );
+            // Dédup par (clé, receveur) sur `polySiParams` seul
+            // — les clés lifecycle restent exhaustives : le
+            // rail fautif est justement le SECOND appel
+            // (cran 63 : `_flushClients` dédupliqué avait rendu
+            // le second `this._readyClients()` orphelin de sa
+            // cause).
+            let fresh = if key != "polySiParams" {
+                true
+            } else if let Some((dom, _)) = &self.dom_ctx {
+                dom.try_borrow_mut()
+                    .is_ok_and(|mut d| d.ce.probe_seen.insert(format!("life:{key}:{id:?}")))
+            } else {
+                true
+            };
+            if fresh {
+                // `dcr` = la gate de `_flushClients` au moment
+                // du read — `true` → `__enableOrFlushClients`
+                // (pas de `_readyClients`), `false`/`undef` →
+                // branche `_readyClients` ouverte.
+                let dcr = self
+                    .get_prop(id, "__dataClientsReady")
+                    .is_some_and(|v| self.to_boolean(v));
+                let host = self
+                    .get_prop(id, "hostElement")
+                    .and_then(|h| self.get_prop_value(h, "localName").ok())
+                    .as_ref()
+                    .and_then(Self::heap_string_of)
+                    .unwrap_or_default();
+                let is_ = self
+                    .get_prop(id, "is")
+                    .as_ref()
+                    .and_then(Self::heap_string_of)
+                    .unwrap_or_default();
+                let frames: Vec<String> = self
+                    .call_stack
+                    .iter()
+                    .rev()
+                    .take(6)
+                    .map(Self::fn_label_of)
+                    .collect();
+                tracing::info!(
+                    target: "dom_probe",
+                    site = "psp.hit",
+                    key = %key,
+                    host = %host,
+                    is = %is_,
+                    obj = ?id,
+                    dcr,
+                    stk = %frames.join("<")
+                );
+            }
         }
         match self.find_prop(id, key) {
             Some(Prop::Data { value, .. }) => {
