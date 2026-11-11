@@ -5157,3 +5157,30 @@ fn cors_unsafe_headers_excludes_forbidden() {
     );
     assert_eq!(c2.unsafe_headers, vec!["x-goog-request-info".to_string()]);
 }
+
+/// Étape 220-suite — le snapshot `document.cookie` de
+/// `spawn_engine` doit refléter le jar session : les
+/// graines consent semées en `nav_begin` (ou persistées
+/// de profil) sont visibles côté JS dès la première
+/// lecture — le bump `ytd-consent-bump*` lit `SOCS` via
+/// `document.cookie`, pas le jar réseau (vol 806 : bump
+/// ouvert une fois malgré la graine émise — `header_for`
+/// la rendait au `Cookie:` mais pas à `document.cookie`).
+#[test]
+fn document_cookie_reflete_le_jar_session() {
+    let mut s = Session::new(Arc::new(FailTransport), Arc::new(TestFont));
+    s.set_js_factory(explorer_js::JscoreEngine::factory());
+    let tab = s.open_tab();
+    let url = Url::parse("https://www.youtube.com/").unwrap();
+    assert!(s
+        .cookies
+        .set_from_header_ctx(&url, "SEEDX=abc123; Path=/; SameSite=Lax; Max-Age=3600", None));
+    s.tabs.get_mut(&tab).unwrap().url = Some(url);
+    let html = "<!doctype html><html><body></body></html>";
+    let mut eng = s.spawn_engine(tab, html, true, "").unwrap();
+    let out = eng.eval("document.cookie").unwrap_or_default();
+    assert!(
+        out.contains("SEEDX=abc123"),
+        "document.cookie doit refléter le jar session — reçu : {out}"
+    );
+}

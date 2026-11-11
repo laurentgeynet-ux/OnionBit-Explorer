@@ -1423,6 +1423,7 @@ impl Engine {
         swap(&mut self.current_module, &mut ctx.current_module);
         swap(&mut self.import_map, &mut ctx.import_map);
         swap(&mut self.hooks.page_url, &mut ctx.page_url);
+        swap(&mut self.hooks.cookie_jar, &mut ctx.cookie_jar);
         swap(&mut self.hooks.screen_obj, &mut ctx.screen_obj);
         swap(&mut self.hooks.navigate, &mut ctx.navigate);
         swap(&mut self.hooks.history_go, &mut ctx.history_go);

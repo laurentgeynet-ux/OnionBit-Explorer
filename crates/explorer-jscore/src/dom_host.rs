@@ -282,7 +282,8 @@ pub(crate) struct BrowserHooks {
     pub popover_open: std::collections::BTreeSet<NodeId>,
     /// Séquence d'émission des scripts dynamiques.
     pub dyn_script_seq: u64,
-    /// Cookie jar for `document.cookie`.
+    /// Cookie jar for `document.cookie` — document-local
+    /// (garé/restauré au `switch_to` avec `page_url`, JS-C486).
     pub cookie_jar: Option<Rc<dyn CookieJar>>,
     /// `location.assign/replace/href=`/`reload` → navigate to arg.
     pub navigate: Option<NavHook>,

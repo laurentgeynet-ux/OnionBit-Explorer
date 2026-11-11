@@ -21,7 +21,9 @@
 use std::collections::VecDeque;
 use std::rc::Rc;
 
-use crate::dom_host::{DomRef, FormSubmit, HistHook, NavHook, NodeCache, OpenHook, PushStateHook};
+use crate::dom_host::{
+    CookieJar, DomRef, FormSubmit, HistHook, NavHook, NodeCache, OpenHook, PushStateHook,
+};
 use crate::heap::{EnvRef, Host, JsResult};
 use crate::interp::ReStatic;
 use crate::value::{ObjId, Value};
@@ -174,8 +176,15 @@ pub(crate) struct BrowsingContext {
     pub current_module: String,
     pub import_map: Vec<(String, String)>,
     // `BrowserHooks` document-local (le reste des hooks —
-    // `console`/`alert`/`cookie_jar`… — est engine-global).
+    // `console`/`alert`… — est engine-global).
     pub page_url: String,
+    /// Jar `document.cookie` du contexte (JS-C486) —
+    /// document-local, garé/restauré au `switch_to` comme
+    /// `page_url` : chaque cadre reçoit un jar scopé à son
+    /// origine (`install_dom_ctx`), l'écrire dans un hook
+    /// engine-global masquait le jar du top-level à tout
+    /// `document.cookie` ultérieur.
+    pub cookie_jar: Option<Rc<dyn CookieJar>>,
     pub screen_obj: Option<ObjId>,
     pub navigate: Option<NavHook>,
     pub history_go: Option<HistHook>,
@@ -454,6 +463,7 @@ impl BrowsingContext {
             current_module: String::new(),
             import_map: Vec::new(),
             page_url: String::new(),
+            cookie_jar: None,
             screen_obj: None,
             navigate: None,
             history_go: None,
