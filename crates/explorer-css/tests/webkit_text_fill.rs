@@ -50,6 +50,10 @@ fn transparent_garde_color() {
 
 #[test]
 fn stroke_props_reconnus() {
+    // Shorthand `<width> <color>` expansé en longhands
+    // (spec — avant, l'alias vendor rabattait tout sur
+    // `-webkit-text-stroke-width` et la couleur était perdue).
     let st = style_of("p { -webkit-text-stroke: 1px black }");
-    assert_eq!(st.get("-webkit-text-stroke"), Some("1px black"));
+    assert_eq!(st.get("-webkit-text-stroke-width"), Some("1px"));
+    assert_eq!(st.get("-webkit-text-stroke-color"), Some("black"));
 }

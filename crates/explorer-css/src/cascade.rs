@@ -335,7 +335,7 @@ fn vendor_alias(name: &str) -> &str {
         "-webkit-text-size-adjust" | "-moz-text-size-adjust" | "-ms-text-size-adjust" => {
             "text-size-adjust"
         }
-        "-webkit-text-stroke" | "-webkit-text-stroke-width" => "-webkit-text-stroke-width",
+        "-webkit-text-stroke-width" => "-webkit-text-stroke-width",
         "-webkit-text-stroke-color" => "-webkit-text-stroke-color",
         "-webkit-text-fill-color" => "-webkit-text-fill-color",
         "-webkit-touch-callout" => "-webkit-touch-callout",

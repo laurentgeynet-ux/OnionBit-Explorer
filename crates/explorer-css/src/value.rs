@@ -1176,6 +1176,11 @@ pub fn expand_shorthand(name: &str, value: &str) -> Option<Vec<(String, String)>
         "font" => expand_font(value),
         "list-style" => expand_list_style(value),
         "outline" => Some(expand_outline(value)),
+        // `-webkit-text-stroke` = shorthand `<width> <color>`
+        // (ordre libre comme `outline`) — l'ancien alias le
+        // pliait sur `-webkit-text-stroke-width` et la couleur
+        // partait dans la largeur.
+        "-webkit-text-stroke" => Some(expand_webkit_text_stroke(value)),
         "container" => expand_container(value),
         _ => None,
     }
@@ -1356,6 +1361,27 @@ fn expand_column_rule(value: &str) -> Vec<(String, String)> {
             if let Some(c) = parse_color(tail) {
                 let _ = c;
                 out.push(("column-rule-color".to_string(), tail.to_string()));
+            }
+            break;
+        }
+        pos += tok.len() + 1;
+    }
+    out
+}
+
+/// `-webkit-text-stroke` : `[<width>] [<color>]` — le token
+/// longueur est la largeur, le reste de la valeur est la
+/// couleur (tail, `calc`/fonctions de couleur comprises).
+fn expand_webkit_text_stroke(value: &str) -> Vec<(String, String)> {
+    let mut out = Vec::new();
+    let mut pos = 0usize;
+    for tok in split_ws_top(value) {
+        if parse_length(tok).is_some() {
+            out.push(("-webkit-text-stroke-width".to_string(), tok.to_string()));
+        } else {
+            let tail = value[pos..].trim();
+            if parse_color(tail).is_some() {
+                out.push(("-webkit-text-stroke-color".to_string(), tail.to_string()));
             }
             break;
         }
