@@ -278,7 +278,7 @@ pub static J17_PROP_IDX_BUILD: std::sync::atomic::AtomicU64 = std::sync::atomic:
 /// de fermeture moyenne × `env_get` = coût résolution variable.
 pub static J17_ENV_LVL: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 /// Appels `env_get_seen` — `env_lvl / env_gets` = profondeur de
-/// chaîne moyenne par résolution (cran 73).
+/// chaîne moyenne par résolution (cran 73b).
 pub static J17_ENV_GETS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 /// `array_index(key)` tenté — multiplicité par `find_own`
 /// (× niveau, ×2 par niveau Array) — cible V-3b (hoist).

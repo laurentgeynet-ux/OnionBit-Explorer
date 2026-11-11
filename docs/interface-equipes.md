@@ -1758,7 +1758,7 @@ Lot PIPE livré depuis la piste YoutubeFix (R-260, crates `explorer-css`/`explor
 - **Effet attendu au prochain vol** : le check cookie du bump `ytd-consent-bump` voit `SOCS` via `document.cookie` → plus de dialog « Enregistrement de votre choix… Une erreur s'est produite » (vol 806) ; les écritures page (PREF, VISITOR_…) atteignent enfin la session.
 - Numérotation : JS-C485 pris par le cran 72 (`PROPS_IDX_MIN`) — ce cran = **JS-C486**.
 
-### cran 73 (vol 9773, daemon 15212, J17_PROF) : `env_lvl/env_gets` = 1.88 — chaine peu profonde, cache resolution non rentable
+### cran 73b (vol 9773, daemon 15212, J17_PROF) : `env_lvl/env_gets` = 1.88 — chaine peu profonde, cache resolution non rentable
 
 - **Compteur ajoute** : `J17_ENV_GETS` (tick a l'entree d'`env_get_seen`) — mesure la profondeur moyenne de chaine, absent du snapshot.
 - **Mesure a prop_lookup=39.5M** : `env_lvl=67.5M / env_gets=35.8M` = **1.88 niveau/get** ; `env_ns=3.85 s` (~107 ns/get). La marche est courte — le total venait du VOLUME de gets, pas de la profondeur des fermetures.
