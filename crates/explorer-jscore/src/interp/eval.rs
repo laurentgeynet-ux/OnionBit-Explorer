@@ -786,10 +786,27 @@ impl Engine {
                                             {
                                                 hints.push(format!("id:{s}"));
                                             }
-                                            if hints.is_empty() {
-                                                desc
-                                            } else {
+                                            if !hints.is_empty() {
                                                 format!("{}«{}»", desc, hints.join(","))
+                                            } else if desc.chars().count() <= 4 {
+                                                // Nom minifié muet (classe
+                                                // `zc`, proxy `Pgm`…) :
+                                                // échantillon des propres
+                                                // clés pour nommer
+                                                // l'objet (kevlar JS-C480).
+                                                let keys = self.own_keys(*rid);
+                                                let shown: Vec<&str> = keys
+                                                    .iter()
+                                                    .take(8)
+                                                    .map(String::as_str)
+                                                    .collect();
+                                                if shown.is_empty() {
+                                                    desc
+                                                } else {
+                                                    format!("{desc}{{{}}}", shown.join(","))
+                                                }
+                                            } else {
+                                                desc
                                             }
                                         }
                                     }
