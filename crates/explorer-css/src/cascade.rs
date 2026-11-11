@@ -5374,6 +5374,36 @@ const FVN_TAGS: &[(&str, &str)] = &[
     ("slashed-zero", "zero"),
 ];
 
+/// `font-variant-ligatures` : mots-clés → `(tag OT, valeur)`
+/// (css-fonts-4 §6.4) — `none` coupe toutes les ligatures.
+const FVL_TAGS: &[(&str, &[(&str, u32)])] = &[
+    ("common-ligatures", &[("liga", 1), ("clig", 1)]),
+    ("no-common-ligatures", &[("liga", 0), ("clig", 0)]),
+    ("discretionary-ligatures", &[("dlig", 1)]),
+    ("no-discretionary-ligatures", &[("dlig", 0)]),
+    ("historical-ligatures", &[("hlig", 1)]),
+    ("no-historical-ligatures", &[("hlig", 0)]),
+    ("contextual", &[("calt", 1)]),
+    ("no-contextual", &[("calt", 0)]),
+    (
+        "none",
+        &[("liga", 0), ("clig", 0), ("dlig", 0), ("hlig", 0)],
+    ),
+];
+
+/// `font-variant` shorthand : répartition des mots-clés par
+/// longhand (css-fonts-4 §6.7). Les fonctions `stylistic()`
+/// /`styleset()`… vont à `font-variant-alternates` brut.
+const FV_CAPS: &[&str] = &[
+    "small-caps",
+    "all-small-caps",
+    "petite-caps",
+    "all-petite-caps",
+    "unicase",
+    "titling-caps",
+];
+const FV_EMOJI: &[&str] = &["emoji", "text", "unicode"];
+
 impl StyleEngine {
     /// R-249 — `text-wrap-mode` → `white-space` (css-text-4
     /// §7.1 : `nowrap` → nowrap, autres → normal).
@@ -5390,6 +5420,105 @@ impl StyleEngine {
                         "normal"
                     },
                 );
+            }
+        }
+    }
+
+    /// `font-variant` shorthand : chaque mot-clé est routé
+    /// vers son longhand (css-fonts-4 §6.7) — les résolveurs
+    /// `numeric`/`east-asian`/`ligatures`/`caps`/`position`
+    /// consomment alors le résultat. `normal`/`none` et les
+    /// formes fonctionnelles des alternates gardent leur
+    /// valeur brute sur `font-variant` (lues par font.rs
+    /// pour les caps, dégradées sinon). Un longhand déjà
+    /// présent n'est pas écrasé (la cascade a tranché).
+    fn expand_font_variant(map: &mut HashMap<NodeId, ComputedStyle>) {
+        for st in map.values_mut() {
+            let Some(v) = st.get("font-variant") else {
+                continue;
+            };
+            let v = v.trim().to_string();
+            if matches!(v.as_str(), "normal" | "inherit" | "initial" | "unset") {
+                continue;
+            }
+            let mut numeric = Vec::new();
+            let mut asian = Vec::new();
+            let mut ligs = Vec::new();
+            let mut alts = Vec::new();
+            for kw in v.split_whitespace() {
+                if FV_CAPS.contains(&kw) {
+                    if st.get("font-variant-caps").is_none() {
+                        st.set("font-variant-caps", kw);
+                    }
+                } else if matches!(kw, "sub" | "super") {
+                    if st.get("font-variant-position").is_none() {
+                        st.set("font-variant-position", kw);
+                    }
+                } else if FV_EMOJI.contains(&kw) {
+                    if st.get("font-variant-emoji").is_none() {
+                        st.set("font-variant-emoji", kw);
+                    }
+                } else if FVN_TAGS.iter().any(|(k, _)| *k == kw) {
+                    numeric.push(kw);
+                } else if FVE_TAGS.iter().any(|(k, _)| *k == kw) {
+                    asian.push(kw);
+                } else if FVL_TAGS.iter().any(|(k, _)| *k == kw) {
+                    ligs.push(kw);
+                } else if kw == "none" {
+                    // `font-variant: none` = ligatures coupées
+                    // (css-fonts-4 §6.7 : none ≡
+                    // `font-variant-ligatures: none` + caps
+                    // normal…).
+                    ligs.push("none");
+                } else if kw != "normal" {
+                    // `historical-forms`, fonctions
+                    // `styleset(`… — vers alternates brut.
+                    alts.push(kw);
+                }
+            }
+            let merge = |st: &mut ComputedStyle, prop: &str, kws: Vec<&str>| {
+                if kws.is_empty() {
+                    return;
+                }
+                let joined = match st.get(prop) {
+                    Some(prev) if !prev.trim().is_empty() && prev.trim() != "normal" => {
+                        format!("{} {}", prev.trim(), kws.join(" "))
+                    }
+                    _ => kws.join(" "),
+                };
+                st.set(prop, &joined);
+            };
+            merge(st, "font-variant-numeric", numeric);
+            merge(st, "font-variant-east-asian", asian);
+            merge(st, "font-variant-ligatures", ligs);
+            if !alts.is_empty() && st.get("font-variant-alternates").is_none() {
+                st.set("font-variant-alternates", &alts.join(" "));
+            }
+        }
+    }
+
+    /// `font-variant-ligatures` : mots-clés → réglages OT
+    /// concaténés (css-fonts-4 §6.4) — les valeurs `0`
+    /// coupent la feature, le parsing
+    /// `font-feature-settings` les porte déjà.
+    fn resolve_font_ligatures(map: &mut HashMap<NodeId, ComputedStyle>) {
+        for st in map.values_mut() {
+            let Some(v) = st.get("font-variant-ligatures") else {
+                continue;
+            };
+            let mut settings: Vec<String> = st
+                .get("font-feature-settings")
+                .map(|s| s.split(',').map(str::to_owned).collect())
+                .unwrap_or_default();
+            for kw in v.split_whitespace() {
+                if let Some((_, pairs)) = FVL_TAGS.iter().find(|(k, _)| *k == kw) {
+                    for (tag, val) in *pairs {
+                        settings.push(format!("\"{tag}\" {val}"));
+                    }
+                }
+            }
+            if !settings.is_empty() {
+                st.set("font-feature-settings", &settings.join(", "));
             }
         }
     }
@@ -5468,6 +5597,7 @@ impl StyleEngine {
             }
         }
         Self::resolve_text_wrap_mode(map);
+        Self::expand_font_variant(map);
         // R-241 — `font-variant-numeric` : mots-clés → tags
         // OT équivalents (spec css-fonts-4 §6.3) — concaténés
         // aux `font-feature-settings` existants.
@@ -5488,6 +5618,7 @@ impl StyleEngine {
                 st.set("font-feature-settings", &settings.join(", "));
             }
         }
+        Self::resolve_font_ligatures(map);
         Self::resolve_font_east_asian(map);
         if self.font_feature_values.is_empty() {
             return;

@@ -39,14 +39,32 @@ pub(crate) fn intrinsic_size_px(
     fs: f32,
     ctx: &BlockCtx,
 ) -> Option<f32> {
+    // Marges de l'axe concerné : `stretch`/`fit-content`
+    // remplissent le bloc conteneur **moins** les marges
+    // (css-sizing-4 §4.1 — la margin box comble l'espace).
+    let (m1, m2) = if matches!(
+        prop,
+        "height" | "min-height" | "max-height" | "block-size" | "min-block-size" | "max-block-size"
+    ) {
+        ("margin-top", "margin-bottom")
+    } else {
+        ("margin-left", "margin-right")
+    };
+    let avail =
+        (basis - side_px(st, m1, basis, fs, ctx, 0.0) - side_px(st, m2, basis, fs, ctx, 0.0))
+            .max(0.0);
     match st.get(prop)?.trim() {
         "max-content" => Some(max_content_px(bx, fs, ctx)),
         "min-content" => Some(min_content_px(bx, fs, ctx)),
+        // `stretch` et alias vendor (`-webkit-fill-available`
+        // ≈ `stretch`, `-moz-available` ≈ `fit-content` au
+        // sens « disponible » — approximations documentées,
+        // css-sizing-4 §4) : la margin box comble le bloc
+        // conteneur — différent d'`auto` dès que la boîte
+        // est shrink-to-fit (absolu, flottant, item non
+        // étiré, `flex-basis`).
+        "stretch" | "fill-available" | "-webkit-fill-available" | "-moz-available" => Some(avail),
         "fit-content" => {
-            let avail = (basis
-                - side_px(st, "margin-left", basis, fs, ctx, 0.0)
-                - side_px(st, "margin-right", basis, fs, ctx, 0.0))
-            .max(0.0);
             Some(max_content_px(bx, fs, ctx).min(min_content_px(bx, fs, ctx).max(avail)))
         }
         _ => None,

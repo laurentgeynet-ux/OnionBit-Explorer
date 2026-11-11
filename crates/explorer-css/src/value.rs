@@ -961,7 +961,15 @@ pub fn value_is_valid_for(name: &str, value: &str) -> bool {
         "width" | "height" | "min-width" | "min-height" | "max-width" | "max-height" => {
             matches!(
                 v,
-                "auto" | "none" | "min-content" | "max-content" | "fit-content"
+                "auto"
+                    | "none"
+                    | "min-content"
+                    | "max-content"
+                    | "fit-content"
+                    | "stretch"
+                    | "fill-available"
+                    | "-webkit-fill-available"
+                    | "-moz-available"
             ) || len_or_pct(v)
                 || v.trim_start().starts_with("anchor-size(")
         }

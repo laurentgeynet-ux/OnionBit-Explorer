@@ -911,6 +911,7 @@ fn collect_child(
 /// `para_lv` = niveau d'imbrication du paragraphe : la
 /// `direction` du bloc conteneur sert de base UAX #9 à
 /// toutes les itemisations de la ligne (R-171).
+#[allow(clippy::too_many_lines)]
 fn text_item(
     b: &LayoutBox,
     owner: usize,
@@ -952,6 +953,34 @@ fn text_item(
         }
         Some("capitalize") => {
             transformed = capitalize_words(src);
+            &transformed
+        }
+        // `font-variant-caps` (css-fonts-4 §6.6) — capitales
+        // **synthétisées** par uppercase : les features OT
+        // `smcp`/`c2sc`/`pcap`/`c2pc` sont aussi demandées au
+        // shaping (`FontRequest.caps`) ; sur une fonte qui
+        // les porte, l'uppercase ci-dessous rend la version
+        // pleine taille (approximation documentée — mieux
+        // qu'un no-op silencieux). `titling-caps` → `tit`.
+        _ if b
+            .style
+            .get("font-variant-caps")
+            .or_else(|| b.style.get("font-variant"))
+            .is_some_and(|v| {
+                v.split_whitespace().any(|kw| {
+                    matches!(
+                        kw,
+                        "small-caps"
+                            | "all-small-caps"
+                            | "petite-caps"
+                            | "all-petite-caps"
+                            | "unicase"
+                            | "titling-caps"
+                    )
+                })
+            }) =>
+        {
+            transformed = src.to_uppercase();
             &transformed
         }
         _ => src,
@@ -1323,9 +1352,31 @@ impl LineAcc {
                 bs
             } else if let Some(ab) = f.style.get("alignment-baseline") {
                 va_owned = match ab.trim() {
-                    "ideographic" => "text-bottom",
-                    "hanging" => "top",
+                    "ideographic" | "text-after-edge" | "text-bottom" => "text-bottom",
+                    "hanging" | "text-before-edge" | "text-top" => "top",
                     "central" | "mathematical" | "middle" => "middle",
+                    _ => "baseline",
+                };
+                va_owned
+            } else if let Some(db) = f.style.get("dominant-baseline") {
+                // `dominant-baseline` (SVG, css-inline-3) —
+                // même table de repli qu'`alignment-baseline`
+                // quand rien d'autre n'aligne le fragment.
+                va_owned = match db.trim() {
+                    "ideographic" | "text-after-edge" | "text-bottom" => "text-bottom",
+                    "hanging" | "text-before-edge" | "text-top" => "top",
+                    "central" | "mathematical" | "middle" => "middle",
+                    _ => "baseline",
+                };
+                va_owned
+            } else if let Some(fp) = f.style.get("font-variant-position") {
+                // css-fonts-4 §6.8 : `sub`/`super` déplacent
+                // la baseline (approximation des décalages
+                // `subs`/`sups` — les métriques de la fonte
+                // ne sont pas lues ici).
+                va_owned = match fp.trim() {
+                    "sub" => "sub",
+                    "super" => "super",
                     _ => "baseline",
                 };
                 va_owned
@@ -1349,9 +1400,17 @@ impl LineAcc {
                 _ => raw_length_px(va, self.strut_lh, fs_px, ctx).map_or(0.0, |l| -l),
             };
             f.rect.y = match va {
-                "top" | "text-top" => *y + f.marg_t,
-                "bottom" | "text-bottom" => *y + h - (f.rect.height + f.marg_b),
-                "middle" => *y + (h - f.rect.height - f.marg_t - f.marg_b) / 2.0 + f.marg_t,
+                // Synonymes SVG (css-inline-3 — `alphabetic`/
+                // `ideographic`/`hanging`/`central`/
+                // `mathematical`/*-edge tolérés aussi sur
+                // `vertical-align` — repli gracieux).
+                "top" | "text-top" | "hanging" | "text-before-edge" => *y + f.marg_t,
+                "bottom" | "text-bottom" | "ideographic" | "text-after-edge" => {
+                    *y + h - (f.rect.height + f.marg_b)
+                }
+                "middle" | "center" | "central" | "mathematical" => {
+                    *y + (h - f.rect.height - f.marg_t - f.marg_b) / 2.0 + f.marg_t
+                }
                 _ => *y + (base - f.baseline) + dy,
             };
         }

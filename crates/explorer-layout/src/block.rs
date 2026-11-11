@@ -3531,6 +3531,15 @@ fn establishes_fixed_cb(bx: &LayoutBox) -> bool {
         || non_none("filter")
         || non_none("backdrop-filter")
         || non_none("perspective")
+        // `transform-style: preserve-3d` = propriété de
+        // regroupement (css-transforms-2 §grouping) : CB +
+        // stacking context même quand le rendu aplatit
+        // (notre moteur planaire — la scène 3D est un
+        // résidu documenté).
+        || bx
+            .style
+            .get("transform-style")
+            .is_some_and(|v| v.trim().eq_ignore_ascii_case("preserve-3d"))
         || bx.style.get("will-change").is_some_and(|v| {
             v.split(&[',', ' '][..]).any(|t| {
                 matches!(

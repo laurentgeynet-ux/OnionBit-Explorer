@@ -12,8 +12,11 @@
 //! `grid-auto-flow` (`row`/`column`/`dense`), `gap`,
 //! `grid-column`/`grid-row` (`a`, `a / b`, `a / span n`,
 //! `span n`, noms), placement automatique row-major avec
-//! balayage avant, `order`, `justify-items`/`align-items`
-//! (décalage dans la cellule, `stretch` = défaut).
+//! balayage avant, `order`, `justify-items`/`align-items`/
+//! `justify-self`/`align-self` (décalage dans la cellule,
+//! `stretch` = défaut ; ≠ stretch → `width:auto` se comporte
+//! en `fit-content`, §10.1), stretch des pistes `auto` sous
+//! `justify|align-content: normal` (§12.8).
 //!
 //! Écarts connus : `fr` sur l'axe vertical ≈ `auto`
 //! (hauteur de conteneur inconnue au flow), `auto` colonne =
@@ -836,7 +839,35 @@ pub(crate) fn flow_grid_children(
             (c, span, base)
         })
         .collect();
-    let widths = col_widths(&col_tracks, &items_base, gap_c, content_w, fs, ctx);
+    let mut widths = col_widths(&col_tracks, &items_base, gap_c, content_w, fs, ctx);
+    // §12.8 « Stretch auto Tracks » — `justify-content`
+    // `normal`/`stretch` (la valeur initiale) étire les
+    // pistes à max `auto` au-delà de leur growth limit pour
+    // combler l'espace libre : une colonne `auto` seule
+    // remplit le conteneur (c'est là que `justify-self`
+    // non-`stretch` trouve son aire).
+    let jc_clean = self_pos_clean(st.get("justify-content").map_or("normal", str::trim));
+    if matches!(jc_clean, "normal" | "stretch") {
+        let free =
+            content_w - widths.iter().sum::<f32>() - gap_c * widths.len().saturating_sub(1) as f32;
+        if free > 0.0 {
+            let autos: Vec<usize> = col_tracks
+                .iter()
+                .enumerate()
+                .filter_map(|(i, t)| match t {
+                    Track::Auto => Some(i),
+                    Track::MinMax(_, mx) if matches!(&**mx, Track::Auto) => Some(i),
+                    _ => None,
+                })
+                .collect();
+            if !autos.is_empty() {
+                let share = free / autos.len() as f32;
+                for i in autos {
+                    widths[i] += share;
+                }
+            }
+        }
+    }
     // R-175 — `justify-content` du conteneur : la grille de
     // colonnes se répartit dans `content_w`.
     let grid_w = widths.iter().sum::<f32>() + gap_c * widths.len().saturating_sub(1) as f32;
@@ -876,6 +907,26 @@ pub(crate) fn flow_grid_children(
             }
         })
         .collect();
+    // `justify-items`/`justify-self` de la grille : lus ici
+    // (passe 1) car un mode ≠ `stretch` change la LARGEUR de
+    // l'item — `auto` se comporte en `fit-content` (css-grid
+    // §10.1) — donc la hauteur mesurée qui dimensionne les
+    // pistes `auto`.
+    let ji = st.get_or("justify-items", "stretch").to_string();
+    let ai = st.get_or("align-items", "stretch").to_string();
+    // Mode inline effectif de l'item : `justify-self`,
+    // repli `justify-items` — `auto`/`normal`/`legacy`
+    // retombent sur le mode du conteneur (`normal` =
+    // `stretch` pour un item de grille, css-align §6.1).
+    let eff_jmode = |cs: &explorer_css::ComputedStyle, ji: &str| -> String {
+        let raw = cs.get("justify-self").map_or(ji, |v| v.trim());
+        let m = self_pos_clean(raw);
+        if matches!(m, "auto" | "normal" | "legacy") {
+            self_pos_clean(ji.trim()).to_string()
+        } else {
+            m.to_string()
+        }
+    };
     let mut heights: Vec<f32> = Vec::with_capacity(slots.len());
     for (k, &i) in order_idx.iter().enumerate() {
         let (c, span, _, _) = slots[k];
@@ -883,18 +934,46 @@ pub(crate) fn flow_grid_children(
             .iter()
             .sum::<f32>()
             + gap_c * (span.saturating_sub(1)) as f32;
-        let (mt, mb, _, _) = item_margins[k];
-        layout_item(
-            &mut bx.children[i],
-            x_off[c],
-            mt,
-            cell_w.max(0.0),
-            cell_w.max(0.0),
-            ctx,
-            fs,
-            pos_cb,
-            None,
-        );
+        let (mt, mb, ml, mr) = item_margins[k];
+        // `justify-self: <self-position>` hors `stretch` :
+        // la largeur auto devient `fit-content` bornée par la
+        // cellule moins les marges (§10.1). La déclaration
+        // est neutralisée puis restaurée — l'item n'est
+        // posé qu'une fois, à sa taille définitive.
+        let shrink = !matches!(eff_jmode(&bx.children[i].style, &ji).as_str(), "stretch")
+            && matches!(
+                bx.children[i].style.get("width").map(str::trim),
+                None | Some("auto")
+            )
+            && bx.children[i].intrinsic.is_none();
+        if shrink {
+            let saved = bx.children[i].style.clone();
+            bx.children[i].style.set("width", "fit-content");
+            layout_item(
+                &mut bx.children[i],
+                x_off[c],
+                mt,
+                (cell_w - ml - mr).max(0.0),
+                cell_w.max(0.0),
+                ctx,
+                fs,
+                pos_cb,
+                None,
+            );
+            bx.children[i].style = saved;
+        } else {
+            layout_item(
+                &mut bx.children[i],
+                x_off[c],
+                mt,
+                cell_w.max(0.0),
+                cell_w.max(0.0),
+                ctx,
+                fs,
+                pos_cb,
+                None,
+            );
+        }
         // Piste `auto` dimensionnée sur la margin box.
         heights.push(mt + bx.children[i].rect.height + mb);
     }
@@ -964,6 +1043,31 @@ pub(crate) fn flow_grid_children(
             }
         }
     }
+    // §12.8 symétrique — `align-content` `normal`/`stretch`
+    // étire les pistes de rangée à max `auto` dans le libre
+    // (conteneur à hauteur définie seulement).
+    let ac_clean = self_pos_clean(st.get("align-content").map_or("normal", str::trim));
+    if matches!(ac_clean, "normal" | "stretch") {
+        if let Some(hd) = h_def {
+            let free =
+                hd - row_h.iter().sum::<f32>() - gap_r * row_h.len().saturating_sub(1) as f32;
+            if free > 0.0 {
+                let autos: Vec<usize> = (0..nrows)
+                    .filter(|&r| match row_track(r) {
+                        Some(Track::Auto) | None => true,
+                        Some(Track::MinMax(_, mx)) if matches!(&**mx, Track::Auto) => true,
+                        _ => false,
+                    })
+                    .collect();
+                if !autos.is_empty() {
+                    let share = free / autos.len() as f32;
+                    for r in autos {
+                        row_h[r] += share;
+                    }
+                }
+            }
+        }
+    }
     // R-175 — `align-content` du conteneur : la grille de
     // rangées se répartit dans `h_def` (indéfinie → start).
     let grid_h = row_h.iter().sum::<f32>() + gap_r * row_h.len().saturating_sub(1) as f32;
@@ -981,8 +1085,6 @@ pub(crate) fn flow_grid_children(
 
     // Passe 2 : translation à la ligne + ajustements
     // justify-items/align-items dans la cellule.
-    let ji = st.get_or("justify-items", "stretch").to_string();
-    let ai = st.get_or("align-items", "stretch").to_string();
     for (k, &i) in order_idx.iter().enumerate() {
         let (c, span_cols, r, span_rows) = slots[k];
         let cell_w = widths[c.min(widths.len())..(c + span_cols).min(widths.len())]
@@ -996,14 +1098,12 @@ pub(crate) fn flow_grid_children(
         let (jmode, amode, h_pct, h_auto) = {
             let cs = &bx.children[i].style;
             (
-                cs.get("justify-self").map_or(ji.as_str(), |v| v),
-                cs.get("align-self").map_or(ai.as_str(), |v| v),
+                eff_jmode(cs, &ji),
+                cs.get("align-self").map_or(ai.as_str(), |v| v).to_string(),
                 cs.get("height").is_some_and(|v| v.contains('%')),
                 matches!(cs.get("height"), None | Some("auto")),
             )
         };
-        let jmode = jmode.to_string();
-        let amode = amode.to_string();
         let (mt, mb, ml, mr) = item_margins[k];
         // L'aire de grille est le bloc conteneur de l'item :
         // `height:%` se résout contre la hauteur de la cellule
@@ -1038,7 +1138,7 @@ pub(crate) fn flow_grid_children(
         // start (défaut) — `anchor-center` ≈ center.
         let dx = match self_pos_clean(&jmode) {
             "center" | "anchor-center" => (cell_w - outer_w).max(0.0) / 2.0,
-            "end" | "self-end" | "flex-end" => (cell_w - outer_w).max(0.0),
+            "end" | "self-end" | "flex-end" | "right" => (cell_w - outer_w).max(0.0),
             _ => 0.0,
         };
         let dy = match self_pos_clean(&amode) {

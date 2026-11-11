@@ -72,11 +72,13 @@ pub struct FontRequest {
     pub weight: u16,
     /// Italique / oblique.
     pub italic: bool,
-    /// `font-variant` petites capitales (R-186) : 0 normal,
-    /// 1 `small-caps` (`smcp`), 2 `all-small-caps`
-    /// (`smcp`+`c2sc`), 3 `petite-caps` (`pcap`),
-    /// 4 `all-petite-caps` (`pcap`+`c2pc`) — features OT
-    /// réelles, polices sans support → no-op documenté.
+    /// `font-variant-caps`/`font-variant` petites capitales
+    /// (R-186) : 0 normal, 1 `small-caps` (`smcp`),
+    /// 2 `all-small-caps`/`unicase` (`smcp`+`c2sc`),
+    /// 3 `petite-caps` (`pcap`), 4 `all-petite-caps`
+    /// (`pcap`+`c2pc`), 5 `titling-caps` (`titl`) —
+    /// features OT réelles, polices sans support → repli
+    /// uppercase synthétique au niveau texte (inline.rs).
     pub caps: u8,
     /// `font-kerning:none` (R-186) — feature `kern` coupée.
     pub kern_off: bool,
@@ -724,13 +726,24 @@ pub fn request_of_family(style: &explorer_css::ComputedStyle, default_family: &s
     let italic = matches!(style.get("font-style"), Some("italic" | "oblique"));
     // R-186 — typo longue traîne : `font-variant` (caps),
     // `font-kerning:none`, `font-stretch` (%).
-    let caps = match style.get("font-variant").unwrap_or("").trim() {
-        "small-caps" => 1,
-        "all-small-caps" => 2,
-        "petite-caps" => 3,
-        "all-petite-caps" => 4,
-        _ => 0,
-    };
+    // `font-variant-caps` prime ; le shorthand `font-variant`
+    // est scanné par jetons (il peut cumuler
+    // `small-caps`+numeric+…, css-fonts-4 §6.7).
+    let caps_src = style
+        .get("font-variant-caps")
+        .or_else(|| style.get("font-variant"))
+        .map_or("", |v| v.trim());
+    let caps = caps_src
+        .split_whitespace()
+        .find_map(|kw| match kw {
+            "small-caps" => Some(1),
+            "all-small-caps" | "unicase" => Some(2),
+            "petite-caps" => Some(3),
+            "all-petite-caps" => Some(4),
+            "titling-caps" => Some(5),
+            _ => None,
+        })
+        .unwrap_or(0);
     let kern_off = style
         .get("font-kerning")
         .is_some_and(|v| v.trim() == "none");
@@ -909,6 +922,7 @@ fn ot_features(req: &FontRequest) -> Vec<rustybuzz::Feature> {
             push(&mut feats, b"pcap");
             push(&mut feats, b"c2pc");
         }
+        5 => push(&mut feats, b"titl"),
         _ => {}
     }
     if req.kern_off {

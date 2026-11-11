@@ -963,6 +963,64 @@ fn grid_self_position() {
     assert_eq!(a.rect.y, 20.0, "safe center → centre cellule");
 }
 
+/// §12.8 « Stretch auto Tracks » : une colonne `auto` seule
+/// absorbe tout l'espace libre sous `justify-content`
+/// normal/stretch (défaut) — la cellule fait la largeur du
+/// conteneur, l'item s'y aligne.
+#[test]
+fn grid_colonne_auto_stretch() {
+    let (dom, bx) = laid(
+        "<div id=g><div id=a></div></div>",
+        "#g{display:grid;width:400px}#a{justify-self:end;width:30px;height:10px}",
+    );
+    let g = find(&bx, by_id(&dom, "g"));
+    assert_eq!(g.rect.width, 400.0);
+    let a = find(&bx, by_id(&dom, "a"));
+    // Piste auto étirée à 400 → item aligné en fin de cellule.
+    assert_eq!(a.rect.x + a.rect.width, 400.0, "end → bord droit");
+}
+
+/// `justify-self` ≠ `stretch` → l'item `width:auto` se
+/// comporte en `fit-content` (css-grid §10.1) : sa boîte
+/// retombe sur le contenu au lieu de remplir la cellule.
+#[test]
+fn grid_justify_self_shrink_wrap() {
+    let (dom, bx) = laid(
+        "<div id=g><div id=a>x</div><div id=b></div></div>",
+        "#g{display:grid;width:400px;grid-template-columns:400px}\
+         #a{justify-self:center}#b{justify-self:start;width:30px;height:10px}",
+    );
+    let a = find(&bx, by_id(&dom, "a"));
+    let b = find(&bx, by_id(&dom, "b"));
+    // `a` shrink-wrappe (fit-content ≈ quelques px de texte)
+    // — `center` la décale ; `b` à largeur explicite garde
+    // ses 30 px alignés en début de cellule.
+    assert!(a.rect.width < 100.0, "pas de remplissage 400px");
+    let expected = (400.0 - a.rect.width) / 2.0;
+    assert!(
+        (a.rect.x - expected).abs() < 0.5,
+        "centré dans la cellule : x={} attendu≈{expected}",
+        a.rect.x
+    );
+    assert_eq!(b.rect.x, 0.0, "start → début de cellule");
+    assert_eq!(b.rect.width, 30.0);
+}
+
+/// `font-variant-position:sub|super` déplace la baseline du
+/// run (css-fonts-4 §6.8) quand `vertical-align` est absent.
+#[test]
+fn font_variant_position_decale_baseline() {
+    let base = |css: &str| -> f32 {
+        let (d, b) = laid("<p>l<a id=x>i</a>m</p>", css);
+        find(&b, by_id(&d, "x")).rect.y
+    };
+    let y_ref = base("");
+    let y_sub = base("#x{font-variant-position:sub}");
+    let y_above = base("#x{font-variant-position:super}");
+    assert!(y_sub > y_ref, "sub descend : {y_sub} > {y_ref}");
+    assert!(y_above < y_ref, "super monte : {y_above} < {y_ref}");
+}
+
 /// `alignment-baseline`/`baseline-shift` replient sur la
 /// table `vertical-align` (css-inline-3 / SVG) quand
 /// `vertical-align` est absent.

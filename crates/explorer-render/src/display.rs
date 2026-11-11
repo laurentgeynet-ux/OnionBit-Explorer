@@ -5326,6 +5326,13 @@ fn stacking_ctx(bx: &LayoutBox) -> bool {
             .style
             .get("filter")
             .is_some_and(|v| v.trim() != "none")
+        // `transform-style: preserve-3d` — propriété de
+        // regroupement (css-transforms-2) : stacking context
+        // même aplati (moteur planaire, scène 3D = résidu).
+        || bx
+            .style
+            .get("transform-style")
+            .is_some_and(|v| v.trim() == "preserve-3d")
 }
 
 /// Enfile un enfant positionné dans la file de son contexte
