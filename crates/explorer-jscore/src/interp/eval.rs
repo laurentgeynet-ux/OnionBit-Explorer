@@ -744,6 +744,46 @@ impl Engine {
                                             .and_then(Self::heap_string_of)
                                             .filter(|n| !n.is_empty())
                                             .unwrap_or_else(|| "Object".to_string());
+                                        // JS-C481/cran 44 : où siège le
+                                        // membre manquant — own (copie
+                                        // partielle) vs proto (chaîne
+                                        // fabriquée) vs absent du tout.
+                                        let src = {
+                                            let keys0 = self.own_keys(*rid);
+                                            if keys0.iter().any(|k| k.as_str() == name.as_ref())
+                                            {
+                                                "own"
+                                            } else {
+                                                let mut cur = self
+                                                    .heap
+                                                    .obj(*rid)
+                                                    .map(|o| o.proto.clone());
+                                                let mut hit = false;
+                                                for _ in 0..8 {
+                                                    match cur {
+                                                        Some(Value::Obj(pid)) => {
+                                                            if self
+                                                                .own_keys(pid)
+                                                                .iter()
+                                                                .any(|k| {
+                                                                    k.as_str()
+                                                                        == name.as_ref()
+                                                                })
+                                                            {
+                                                                hit = true;
+                                                                break;
+                                                            }
+                                                            cur = self
+                                                                .heap
+                                                                .obj(pid)
+                                                                .map(|o| o.proto.clone());
+                                                        }
+                                                        _ => break,
+                                                    }
+                                                }
+                                                if hit { "proto" } else { "absent" }
+                                            }
+                                        };
                                         // « on Object » ne nomme rien —
                                         // enrichir par `@@toStringTag`
                                         // puis les propres clés (objets
@@ -827,7 +867,11 @@ impl Engine {
                                                 hints.push(format!("id:{s}"));
                                             }
                                             if !hints.is_empty() {
-                                                format!("{}«{}»", desc, hints.join(","))
+                                                format!(
+                                                    "{}«{}»«{name}@{src}»",
+                                                    desc,
+                                                    hints.join(",")
+                                                )
                                             } else if desc.chars().count() <= 4 {
                                                 // Nom minifié muet (classe
                                                 // `zc`, proxy `Pgm`…) :
@@ -840,13 +884,14 @@ impl Engine {
                                                     .take(8)
                                                     .map(String::as_str)
                                                     .collect();
-                                                if shown.is_empty() {
-                                                    desc
+                                                let base = if shown.is_empty() {
+                                                    desc.clone()
                                                 } else {
                                                     format!("{desc}{{{}}}", shown.join(","))
-                                                }
+                                                };
+                                                format!("{base}«{name}@{src}»")
                                             } else {
-                                                desc
+                                                format!("{desc}«{name}@{src}»")
                                             }
                                         }
                                     }
