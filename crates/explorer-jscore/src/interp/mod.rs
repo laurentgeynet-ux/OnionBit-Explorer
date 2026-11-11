@@ -7107,9 +7107,24 @@ impl Engine {
         // déjà posé → `_flushClients` gate fermée → le re-
         // déclencheur est ailleurs : microtask `_.hQ`, CE re-
         // dispatch, ou `_enableOrFlushClients` → `d.ready`).
+        // Cran 64 — rail de mise à jour de page + lifecycle :
+        // `performDataUpdate`/`updatePageData`/`attachPage`/
+        // `setActivePage`/`enqueueClient`/`connectedCallback` —
+        // si le second `_readyClients` vient d'un `call(pc)`
+        // depuis un job `kAu` ou un dispatch natif, le read du
+        // callee sur l'objet appelant nomme la fonction source.
         if matches!(
             key,
-            "polySiParams" | "_readyClients" | "_attachDom" | "_flushClients"
+            "polySiParams"
+                | "_readyClients"
+                | "_attachDom"
+                | "_flushClients"
+                | "performDataUpdate"
+                | "updatePageData"
+                | "attachPage"
+                | "setActivePage"
+                | "enqueueClient"
+                | "connectedCallback"
         ) && tracing::enabled!(target: "dom_probe", tracing::Level::INFO)
             && self
                 .find_prop(id, key)
