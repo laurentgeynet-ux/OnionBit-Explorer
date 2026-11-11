@@ -1740,3 +1740,11 @@ Lot PIPE livré depuis la piste YoutubeFix (R-260, crates `explorer-css`/`explor
 - **Fix (Etape 220)** : `seed_headers(policy, now, host)` — `SOCS` emis uniquement sur `youtube.com`/`youtube-nocookie.com`/`google.<tld>` : `CAISNQ…` (proto « tout refuser », valeur uAssets) sous `RejectAll`, `CAES…` (« tout accepter ») sous `AcceptAll`. La decision de politique est portee, pas l'accord — `Honest` reste vierge. Verrou `socs_scope_google_uniquement`.
 - **Posture multi-session** : le cran est ecrit en parallele des crans 68-70 (profil `.eval/prof9773`, daemon 2452) — meme conclusion atteinte des deux cotes : injection manuelle `SOCS`/`CONSENT` au profil (cran 68) vs graine codee scopée hote (ici).
 - Verdict feed : `items=0` = nudge serveur « historique desactive » (crans 67b/68) — orthogonal au bump ; la graine leve la boucle de reload, pas le nudge.
+
+### cran 72 (vol 9773, daemon 6640, EXPLORER_J17_PROF=1) : `PROPS_IDX_MIN` 24 -> 12 — prop_scan −20 % a volume egal
+
+- **Experience** : le scan lineaire de cles dominait le profil J17 (`prop_scan=72M`, `prop_ns`=temps dominant). Les objets de 12-23 props (dicts d'options kevlar, petits protos Polymer) sont relus en boucle sans jamais armer l'index ; seuil abaisse a 12 (JS-C485).
+- **Mesure a ~27M lookups** (baseline extrapolee a meme volume) : `prop_scan` ~88M -> **71.1M (−20 %)**, `prop_idx_hit` ~6.1M -> **8.16M (+64 %)**, `prop_idx_build` 2 494 -> **1 900** (l'index des objets moyens se construit a la premiere relecture, amorti sur tout le reste du vol). `prop_ns` brut non comparable (ce vol a fait ~29 % de travail en plus — `call` 5.5M vs 4.3M).
+- **Sante** : `ytd-browse` attache, `pm.children=2`, `proto.swap`=0, RSS ~1 740 Mo sous J17 — aucune regression fonctionnelle.
+- **Gates** : clippy/doc/fmt verts sur `explorer-jscore` ; echecs **pre-existants** hors scope : `explorer-cli::fixture_for` `too_many_lines` (fichier non modifie, HEAD casse par le travail PIPELINE parallele) et `interp::tests::gc_debt_arms_sweep_below_soft_limit` (echoue aussi a seuil 24 — independent du changement).
+- **Suivant candidat perf** : `env_lvl=62.6M` traverses de scope (env_ns) — desormais le premier poste apres la baisse du scan.
