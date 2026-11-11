@@ -746,7 +746,51 @@ impl Engine {
                                                 }
                                             }
                                         } else {
-                                            desc
+                                            // Nom de classe minifié
+                                            // (`zc`…) : enrichir par les
+                                            // indices d'identité DOM/
+                                            // Polymer — `is`, `localName`,
+                                            // `hostElement.localName`,
+                                            // `id` — pour nommer le vrai
+                                            // receveur parmi les
+                                            // homonymes (kevlar JS-C479).
+                                            let mut hints = Vec::new();
+                                            for k in ["is", "localName"] {
+                                                if let Some(s) = self
+                                                    .get_prop(*rid, k)
+                                                    .as_ref()
+                                                    .and_then(Self::heap_string_of)
+                                                    .filter(|v| !v.is_empty())
+                                                {
+                                                    hints.push(format!("{k}:{s}"));
+                                                }
+                                            }
+                                            if let Some(host) = self.get_prop(*rid, "hostElement") {
+                                                for k in ["localName", "id"] {
+                                                    if let Some(s) = self
+                                                        .get_prop_value(host.clone(), k)
+                                                        .ok()
+                                                        .as_ref()
+                                                        .and_then(Self::heap_string_of)
+                                                        .filter(|v| !v.is_empty())
+                                                    {
+                                                        hints.push(format!("host.{k}:{s}"));
+                                                    }
+                                                }
+                                            }
+                                            if let Some(s) = self
+                                                .get_prop(*rid, "id")
+                                                .as_ref()
+                                                .and_then(Self::heap_string_of)
+                                                .filter(|v| !v.is_empty())
+                                            {
+                                                hints.push(format!("id:{s}"));
+                                            }
+                                            if hints.is_empty() {
+                                                desc
+                                            } else {
+                                                format!("{}«{}»", desc, hints.join(","))
+                                            }
                                         }
                                     }
                                     None => "?".to_string(),
