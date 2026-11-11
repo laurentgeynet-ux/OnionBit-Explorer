@@ -2435,6 +2435,83 @@ fn event_dispatche_surface_honnete() {
     );
 }
 
+/// JS-C484 — `instanceof` pendant le dispatch : l'`EventHost`
+/// présenté aux listeners porte le proto JS de l'event
+/// dispatché (`new CustomEvent` → `CustomEvent.prototype`,
+/// sinon `%Event.prototype%` du realm). Mesuré `YouTube` :
+/// `_.re(H)` teste `H instanceof Event` — faux sinon →
+/// wrapper `ohH` sans `rootTarget` → `TypeError:
+/// assignParentResizable of Undefined` dans iron-resize →
+/// `connectedCallback` tué (`ce.cc_threw` tp-yt-*).
+#[test]
+fn dispatched_event_keeps_instanceof() {
+    // `new CustomEvent` dispatché : le listener voit
+    // `e instanceof CustomEvent` *et* `e instanceof Event`,
+    // et les props servies par le host (`type`/`detail`)
+    // restent intactes (le host prime sur la chaîne proto).
+    assert_eq!(
+        ev2(
+            PAGE,
+            "var r='';var el=document.getElementById('main');\
+             el.addEventListener('ce',function(e){\
+             r=(e instanceof CustomEvent)+'|'+(e instanceof Event)+'|'+\
+             e.type+'|'+e.detail.n+'|'+(e instanceof MouseEvent)});\
+             el.dispatchEvent(new CustomEvent('ce',{detail:{n:3}}))",
+            "r"
+        ),
+        "true|true|ce|3|false"
+    );
+    // `new Event` → `e instanceof Event` dans le listener.
+    assert_eq!(
+        ev2(
+            PAGE,
+            "var r='';var el=document.getElementById('main');\
+             el.addEventListener('x',function(e){r=(e instanceof Event)+'|'+e.type});\
+             el.dispatchEvent(new Event('x'))",
+            "r"
+        ),
+        "true|x"
+    );
+    // `createEvent` + `initEvent` (EventHost dispatché en
+    // arg) : proto hôte générique → repli `%Event.prototype%`.
+    assert_eq!(
+        ev2(
+            PAGE,
+            "var r='';var el=document.getElementById('main');\
+             el.addEventListener('y',function(e){r=(e instanceof Event)+'|'+e.type});\
+             var ev=document.createEvent('HTMLEvents');ev.initEvent('y',false,false);\
+             el.dispatchEvent(ev)",
+            "r"
+        ),
+        "true|y"
+    );
+    // Literal `{type}` dispatché : repli `%Event.prototype%`.
+    assert_eq!(
+        ev2(
+            PAGE,
+            "var r='';var el=document.getElementById('main');\
+             el.addEventListener('z',function(e){r=(e instanceof Event)+'|'+e.type});\
+             el.dispatchEvent({type:'z'})",
+            "r"
+        ),
+        "true|z"
+    );
+    // Re-dispatch de l'event reçu : le proto survit au second
+    // passage (receveur #2 voit encore `instanceof`).
+    assert_eq!(
+        ev2(
+            PAGE,
+            "var r='';var a=document.getElementById('main');\
+             var b=document.getElementById('list');\
+             b.addEventListener('w',function(e){r=(e instanceof CustomEvent)+'|'+e.detail.k});\
+             a.addEventListener('w',function(e){b.dispatchEvent(e)});\
+             a.dispatchEvent(new CustomEvent('w',{detail:{k:5}}))",
+            "r"
+        ),
+        "true|5"
+    );
+}
+
 #[test]
 fn custom_elements_registry() {
     // `customElements` — registre minimal (JS-C56, github.com).

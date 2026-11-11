@@ -2064,6 +2064,14 @@ pub(crate) struct EventState {
     /// `initCustomEvent` pose `detail` après construction
     /// (DOM L2 — le payload arrive post-`createEvent`).
     props: RefCell<Vec<(String, Value)>>,
+    /// Proto JS de l'event passé à `dispatchEvent`
+    /// (`CustomEvent.prototype` pour `new CustomEvent`…) —
+    /// recopié sur l'`EventHost` présenté aux listeners pour
+    /// que `e instanceof Event` tienne pendant le dispatch
+    /// (mesuré `YouTube` : `_.re(H)` teste `H instanceof Event`,
+    /// faux sinon → wrapper `ohH` sans `rootTarget` →
+    /// `undefined.assignParentResizable` dans iron-resize).
+    js_proto: RefCell<Option<Value>>,
 }
 
 /// Flags d'initialisation d'un event (spec `EventInit` +
@@ -2106,6 +2114,7 @@ pub(crate) fn make_event_state(
         path: RefCell::new(Vec::new()),
         created: std::time::Instant::now(),
         props: RefCell::new(props),
+        js_proto: RefCell::new(None),
     })
 }
 
@@ -4629,11 +4638,32 @@ impl Engine {
         cache: &NodeCache,
         state: &Rc<EventState>,
     ) -> Value {
-        self.new_host_object(Rc::new(EventHost {
+        let v = self.new_host_object(Rc::new(EventHost {
             dom: dom.clone(),
             cache: cache.clone(),
             state: state.clone(),
-        }))
+        }));
+        // `instanceof` pendant le dispatch : l'`EventHost`
+        // présenté aux listeners porte le proto de l'event
+        // d'origine (`CustomEvent.prototype`…), ou à défaut
+        // `Event.prototype` du realm — sinon `e instanceof
+        // Event` est faux dans les callbacks (YouTube `_.re`
+        // retombait sur un wrapper `ohH` sans `rootTarget` →
+        // `undefined.assignParentResizable`, `hasNavigated`
+        // bloqué).
+        if let Value::Obj(id) = v {
+            let proto = state
+                .js_proto
+                .borrow()
+                .clone()
+                .or_else(|| event_realm_proto(self));
+            if let Some(p) = proto {
+                if let Some(o) = self.heap.obj_mut(id) {
+                    o.proto = p;
+                }
+            }
+        }
+        v
     }
 
     /// Platform-originated event entry point (JS-5): dispatches a
@@ -5335,7 +5365,15 @@ impl Engine {
                             }
                         }
                     }
-                    return Err(th);
+                    // Spec : l'exception d'un listener est
+                    // **rapportée** (window.onerror / `error`)
+                    // mais ne stoppe ni les listeners frères ni
+                    // la propagation — `dispatchEvent` ne la
+                    // propage jamais à l'appelant. Mesuré YouTube :
+                    // un listener `yt-navigate-finish` qui jetait
+                    // tuait `onYtNavigateFinish` de ytd-app →
+                    // `hasNavigated` figé à false.
+                    let _ = crate::misc_apis::report_exception(self, th.0);
                 }
             }
         }
@@ -5361,7 +5399,16 @@ impl Engine {
             };
             let f = match prop {
                 Some(f) if self.is_callable(f.clone()) => Some(f),
-                _ => self.inline_handler(dom, node, &key)?,
+                _ => match self.inline_handler(dom, node, &key) {
+                    Ok(f) => f,
+                    Err(th) => {
+                        // Handler d'attribut incompilable :
+                        // rapporté, le dispatch continue (spec —
+                        // jamais propagé à `dispatchEvent`).
+                        let _ = crate::misc_apis::report_exception(self, th.0);
+                        None
+                    }
+                },
             };
             if let Some(f) = f {
                 // Spec : un handler `on*` qui retourne `false`
@@ -5383,7 +5430,9 @@ impl Engine {
                                 }
                             }
                         }
-                        return Err(th);
+                        // Même règle que les listeners :
+                        // rapporté, dispatch poursuivi.
+                        let _ = crate::misc_apis::report_exception(self, th.0);
                     }
                 }
             }
@@ -12160,6 +12209,16 @@ pub(crate) fn misc_event_state(
     event_state_of(e, node, dom, cache, v)
 }
 
+/// `%Event.prototype%` du realm — résolu via le global
+/// (`dispatchEvent` d'un literal/`EventHost` nu recoit le proto
+/// pour que `instanceof` tienne côté listeners).
+fn event_realm_proto(e: &mut Engine) -> Option<Value> {
+    let Value::Obj(f) = e.get_prop(e.global, "Event")? else {
+        return None;
+    };
+    e.get_prop(f, "prototype")
+}
+
 fn event_state_of(
     e: &mut Engine,
     node: NodeId,
@@ -12170,10 +12229,24 @@ fn event_state_of(
     let Value::Obj(id) = v else {
         return Ok(None);
     };
+    // Le proto de l'arg est conservé quand il est spécialisé
+    // (`new CustomEvent` → `CustomEvent.prototype`) — les
+    // listeners verront `e instanceof CustomEvent` vrai comme
+    // dans un vrai moteur.
+    let arg_proto = e.heap.obj(id).map(|o| o.proto.clone());
+    let obj_proto = e.protos.object;
+    let keep_proto = |st: &Rc<EventState>| {
+        if let Some(p) = &arg_proto {
+            if !matches!(p, Value::Obj(p) if *p == obj_proto) {
+                st.js_proto.replace(Some(p.clone()));
+            }
+        }
+    };
     if let Some(ObjKind::Host(h)) = e.heap.obj(id).map(|o| &o.kind) {
         if let Some(ev) = h.as_any().downcast_ref::<EventHost>() {
             let state = ev.state.clone();
             state.target.set(node);
+            keep_proto(&state);
             return Ok(Some(state));
         }
     }
@@ -12267,7 +12340,7 @@ fn event_state_of(
     .into_iter()
     .filter_map(|k| e.get_prop(id, k).map(|v| (k.to_string(), v)))
     .collect();
-    Ok(Some(make_event_state(
+    let st = make_event_state(
         &ty,
         node,
         EventFlags {
@@ -12277,7 +12350,9 @@ fn event_state_of(
             trusted: false,
         },
         props,
-    )))
+    );
+    keep_proto(&st);
+    Ok(Some(st))
 }
 
 // ------------------------------------------------------------------
@@ -12296,6 +12371,9 @@ impl Host for EventHost {
     fn trace(&self, out: &mut Vec<ObjId>) {
         trace_node_cache(&self.cache, out);
         for (_, v) in self.state.props.borrow().iter() {
+            crate::heap::push_value(out, v);
+        }
+        if let Some(v) = self.state.js_proto.borrow().as_ref() {
             crate::heap::push_value(out, v);
         }
     }
