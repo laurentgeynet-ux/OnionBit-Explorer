@@ -390,6 +390,11 @@ pub struct Engine {
     /// saturant un cœur meurt en ms, pas au timeout canal 30 s —
     /// allrecipes : API muette 3-6 min, 6 pompes × 30 s).
     eval_deadline: Option<Instant>,
+    /// Profondeur du rail « report exception » (listener qui
+    /// jette → `error` sur window → son listener qui jette →
+    /// …). Borné : au-delà le rapport est élidé, le dispatch
+    /// continue quand même (spec).
+    pub(crate) report_depth: std::cell::Cell<u8>,
     /// Budget wall-clock d'un batch, ms — `EXPLORER_JS_EVAL_
     /// TIMEOUT_MS` lu une fois (défaut : voir `DEFAULT_EVAL_MS`).
     pub(crate) eval_timeout_ms: u64,
@@ -1103,6 +1108,7 @@ impl Engine {
             ops_left: DEFAULT_OP_LIMIT,
             op_limit: DEFAULT_OP_LIMIT,
             eval_deadline: None,
+            report_depth: std::cell::Cell::new(0),
             eval_timeout_boot_ms: std::env::var("EXPLORER_JS_EVAL_BOOT_TIMEOUT_MS")
                 .ok()
                 .and_then(|s| s.parse().ok())

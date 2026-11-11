@@ -877,7 +877,26 @@ impl Host for SelectionHost {
 /// racine empêche le rapport — sinon `console` embedder log
 /// `Uncaught: <v>` (sortie réelle d'un uncaught).
 fn report_error(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
-    let v = arg(args, 0);
+    report_exception(e, arg(args, 0))?;
+    Ok(Value::Undefined)
+}
+
+/// « Report the exception » réutilisable (JS listener qui
+/// jette pendant `dispatchEvent` — spec : rapporté, jamais
+/// propagé à l'appelant, dispatch poursuivi).
+pub(crate) fn report_exception(e: &mut Engine, v: Value) -> JsResult<()> {
+    // Borne anti-récursion : un listener `error` qui jette
+    // redéclencherait ce rail à l'infini.
+    if e.report_depth.get() >= 4 {
+        return Ok(());
+    }
+    e.report_depth.set(e.report_depth.get() + 1);
+    let r = report_exception_inner(e, v);
+    e.report_depth.set(e.report_depth.get() - 1);
+    r
+}
+
+fn report_exception_inner(e: &mut Engine, v: Value) -> JsResult<()> {
     let message = e.to_js_string(v.clone()).unwrap_or_default();
     // 1. `window.onerror` legacy — 5 arguments (spec HTML) ;
     //    retour truthy = erreur « gérée », pas de rapport.
@@ -892,7 +911,7 @@ fn report_error(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
                 &[m, src, Value::Num(0.0), Value::Num(0.0), v.clone()],
             )?;
             if e.to_boolean(ret) {
-                return Ok(Value::Undefined);
+                return Ok(());
             }
         }
     }
@@ -923,7 +942,7 @@ fn report_error(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
             f(format!("Uncaught: {message}"));
         }
     }
-    Ok(Value::Undefined)
+    Ok(())
 }
 
 // ------------------------------------------------------------------
