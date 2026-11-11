@@ -304,6 +304,7 @@ pub(crate) fn object_set_proto(e: &mut Engine, _t: Value, args: &[Value]) -> JsR
         tracing::info!(target: "dom_probe",
             site = "proto.swap", host = %host,
             frag = is_frag, roteq, urpc, urpo, pname = %pname,
+            ext = e.heap.obj(id).is_some_and(|o| o.extensible),
             stack = %stack.chars().take(400).collect::<String>());
     }
     if let Some(o) = e.heap.obj_mut(id) {
