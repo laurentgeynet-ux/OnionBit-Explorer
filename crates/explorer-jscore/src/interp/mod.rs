@@ -5331,6 +5331,7 @@ impl Engine {
     ) -> Option<Value> {
         // V-7 : temps cumulé de la marche de chaîne de portées.
         let _t = crate::j17_scope(&crate::J17_ENV_NS);
+        crate::j17_tick(&crate::J17_ENV_GETS);
         let mut cur = Some(env.clone());
         while let Some(e) = cur {
             enum Next {

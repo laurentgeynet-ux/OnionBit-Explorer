@@ -1757,3 +1757,11 @@ Lot PIPE livré depuis la piste YoutubeFix (R-260, crates `explorer-css`/`explor
 - **Verrou** : `c78_cookie_jar_isolated_between_contexts` — top seedé `SOCS`, enfant `childpref`, aller-retours + écritures des deux côtés, aucune fuite ; 21/21 `c78_contexts`, 262/262 `dom`, c259/c446/c79 verts, clippy `-D warnings` propre.
 - **Effet attendu au prochain vol** : le check cookie du bump `ytd-consent-bump` voit `SOCS` via `document.cookie` → plus de dialog « Enregistrement de votre choix… Une erreur s'est produite » (vol 806) ; les écritures page (PREF, VISITOR_…) atteignent enfin la session.
 - Numérotation : JS-C485 pris par le cran 72 (`PROPS_IDX_MIN`) — ce cran = **JS-C486**.
+
+### cran 73 (vol 9773, daemon 15212, J17_PROF) : `env_lvl/env_gets` = 1.88 — chaine peu profonde, cache resolution non rentable
+
+- **Compteur ajoute** : `J17_ENV_GETS` (tick a l'entree d'`env_get_seen`) — mesure la profondeur moyenne de chaine, absent du snapshot.
+- **Mesure a prop_lookup=39.5M** : `env_lvl=67.5M / env_gets=35.8M` = **1.88 niveau/get** ; `env_ns=3.85 s` (~107 ns/get). La marche est courte — le total venait du VOLUME de gets, pas de la profondeur des fermetures.
+- **Validation retro cran 72** : `prop_scan/lookup` 3.24 -> **1.11** (-66 % normalise), `prop_ns/lookup` 466 -> **125 ns** (~3.7x) — le seuil 12 a paye plus que le -20 % estime a mi-vol.
+- **Conclusion** : un cache `(env,name)->holder` ne raserait que ~0.9 niveau/get — ROI faible. Le surcout `env_ns` vient des ~2 `RefCell::borrow` + scans `BindingMap` par niveau, deja optimises (cles internees, `ptr_eq`). La suite structurelle = resolution compile-time (profondeur+slot a la materialisation) — chantier lourd, a arbitrer contre les autres crans.
+- Sante vol : `ytd-browse` attache, RSS ~2.4 Go sous J17 (le profilage enfle le pied) — aucune regression.
