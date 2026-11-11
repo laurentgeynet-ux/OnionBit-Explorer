@@ -2091,6 +2091,29 @@ fn mutation_observer_character_data() {
 }
 
 #[test]
+fn mutation_observer_character_data_via_text_content() {
+    // JS-C487 — `textContent=` sur un nœud `CharacterData`
+    // (Text/Comment) écrit `.data` et émet `characterData`
+    // (spec `Node.textContent`), pas un `replace_children` —
+    // rail `Polymer.Async.microTask` (MutationObserver sur un
+    // texte détaché).
+    assert_eq!(
+        ev2(
+            PAGE,
+            "var log='';\
+             var tn=document.createTextNode('abc');\
+             var mo=new MutationObserver(function(rs){\
+               log=rs[0].type+'|'+rs[0].oldValue+'|'+tn.data+'|'+tn.children.length;\
+             });\
+             mo.observe(tn,{characterData:true,characterDataOldValue:true});\
+             tn.textContent='xyz';",
+            "log"
+        ),
+        "characterData|abc|xyz|0"
+    );
+}
+
+#[test]
 fn mutation_observer_callback_can_mutate_again() {
     assert_eq!(
         ev2(

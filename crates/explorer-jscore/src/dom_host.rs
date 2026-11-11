@@ -1231,8 +1231,21 @@ fn dom_nav_set(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
         "textContent" | "innerText" => {
             let s = e.to_js_string(v)?;
             let mut d = dom.borrow_mut();
-            let t = d.create_text(&s);
-            d.replace_children(node, &[t]);
+            // JS-C487 — spec `Node.textContent` : sur un nœud
+            // `CharacterData` (Text/Comment) l'écriture vise
+            // `.data` (record `characterData`) — `replace_children`
+            // greffait un enfant sous le texte et émettait
+            // `childList`, tuant `Polymer.Async.microTask`
+            // (MutationObserver sur un texte détaché).
+            if matches!(
+                d.nodes[node as usize].kind,
+                NodeKind::Text | NodeKind::Comment
+            ) {
+                d.set_text(node, &s);
+            } else {
+                let t = d.create_text(&s);
+                d.replace_children(node, &[t]);
+            }
         }
         "nodeValue" | "data" => {
             let is_text = matches!(
@@ -9484,8 +9497,18 @@ impl Host for NodeHost {
                         parent = %ptag, fn_src = %fn_src);
                 }
                 let mut d = self.dom.borrow_mut();
-                let t = d.create_text(&s);
-                d.replace_children(node, &[t]);
+                // JS-C487 — même branche `CharacterData` que
+                // l'accesseur `Node.prototype` : `data`, pas un
+                // « replace all » (record `characterData`).
+                if matches!(
+                    d.nodes[node as usize].kind,
+                    NodeKind::Text | NodeKind::Comment
+                ) {
+                    d.set_text(node, &s);
+                } else {
+                    let t = d.create_text(&s);
+                    d.replace_children(node, &[t]);
+                }
                 Ok(true)
             }
             // `HTMLElement.outerText` (Pareto `api` lot 3) —
