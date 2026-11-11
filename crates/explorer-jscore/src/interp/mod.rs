@@ -9122,6 +9122,70 @@ impl Engine {
         // un appel refusé ne laisse pas de résidu dans
         // `error.stack`/`Uncaught`.
         self.call_stack.push(lit.clone());
+        // Cran 66 — sonde d'invocation : les reads `psp.hit`
+        // nomment le callee résolu mais l'émetteur du second
+        // `_readyClients` reste sur des trampolines `.call`/
+        // natives (`<anon>:1:`). Ici le frame est empilé —
+        // quand un lifecycle chaud (`_readyClients`, `_attachDom`,
+        // `_flushClients`, `_enableProperties`, `ready`) tourne
+        // sur un contrôleur (receveur avec `hostElement`), on
+        // nomme le receveur + les appelants JS réels. Filtré
+        // par `enabled!` : zéro coût quand la sonde dort.
+        let life_probe = tracing::enabled!(target: "dom_probe", tracing::Level::INFO)
+            && (matches!(
+                lit.name.as_deref(),
+                Some(
+                    "_readyClients"
+                        | "_attachDom"
+                        | "_flushClients"
+                        | "_enableProperties"
+                        | "ready"
+                        | "connectedCallback"
+                )
+            ) || (lit.name.is_none() && matches!(lit.pos.0, 8950..=8960 | 15670..=15690)));
+        if life_probe {
+            let rid = match &this {
+                Value::Obj(r) => *r,
+                _ => self.global,
+            };
+            let host = self
+                .get_prop(rid, "hostElement")
+                .and_then(|h| self.get_prop_value(h, "localName").ok())
+                .as_ref()
+                .and_then(Self::heap_string_of)
+                .unwrap_or_default();
+            if !host.is_empty() {
+                let frames: Vec<String> = self
+                    .call_stack
+                    .iter()
+                    .rev()
+                    .take(8)
+                    .map(Self::fn_label_of)
+                    .collect();
+                // Les trampolines du second `_readyClients` sont
+                // des `FnLit` sans `src` (`:1:`) — eval/`Function`/
+                // shims moteur : `src_text` porte le corps compilé
+                // et nomme le rail réel.
+                let anon_src: String = self
+                    .call_stack
+                    .iter()
+                    .rev()
+                    .filter(|l| l.src.is_none())
+                    .filter_map(|l| l.src_text.as_deref())
+                    .map(|t| t.chars().take(120).collect::<String>())
+                    .next()
+                    .unwrap_or_default();
+                tracing::info!(
+                    target: "dom_probe",
+                    site = "life.call",
+                    name = %lit.name.as_deref().unwrap_or("?"),
+                    host = %host,
+                    obj = ?rid,
+                    anon = %anon_src,
+                    stk = %frames.join("<")
+                );
+            }
+        }
         // Arrow functions ignore the caller's receiver —
         // `this` was captured at creation time. En sloppy,
         // `this` null/undefined est coercé vers l'objet

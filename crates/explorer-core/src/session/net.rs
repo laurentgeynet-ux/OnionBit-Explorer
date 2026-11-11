@@ -448,27 +448,32 @@ impl Session {
             // — initial + `MutationObserver` pour les fragments
             // stampés ensuite (lazy-hydration kevlar), jusqu'à ce
             // que le déclencheur réel soit nommé.
+            // JS-C480 : `pcinit` (scan `pc._enableProperties()`/
+            // `pc._readyClients()` directs) **supprimé** — gate
+            // `!pc.__dataClientsInitialized` toujours vraie (flag
+            // inexistant) → `pc._readyClients()` hors `_flushClients`
+            // à chaque mutation → `_attachDom(root===this)` →
+            // `attachShadow({shadyUpgradeFragment:pc})` → `Bc`
+            // promeut le contrôleur sans garde → méthodes mortes
+            // ~1 s post-hydratation (ytd-browse orphelin). `rm`
+            // seul déclenche déjà `attributeChangedCallback` →
+            // `__isUpgradeDisabled=false` → `connectedCallback` →
+            // `_enableProperties` → `ready` → `_flushClients` —
+            // le chemin Polymer nominal avec ses gates.
             const DISABLE_UPGRADE_SWEEP: &str = "(function(){\
                 var rm=function(n){try{if(n&&n.removeAttribute&&\
                     n.hasAttribute&&n.hasAttribute('disable-upgrade'))\
                     n.removeAttribute('disable-upgrade')}catch(e){}};\
-                var pcinit=function(n){try{var pc=n&&n.polymerController;\
-                    if(pc&&!pc.__dataClientsInitialized){\
-                        if(pc._enableProperties)pc._enableProperties();\
-                        if(pc._readyClients)pc._readyClients()}}catch(e){}};\
-                var scan=function(root){try{var all=root.querySelectorAll('*');\
-                    for(var i=0;i<all.length;i++)pcinit(all[i])}catch(e){}};\
                 try{var all=document.querySelectorAll('[disable-upgrade]');\
                     for(var i=0;i<all.length;i++)rm(all[i]);\
-                    scan(document.documentElement);\
                     new MutationObserver(function(ms){\
                         for(var i=0;i<ms.length;i++){var r=ms[i];\
-                            rm(r.target);pcinit(r.target);\
+                            rm(r.target);\
                             var an=r.addedNodes||[];\
                             for(var j=0;j<an.length;j++){var n=an[j];\
-                                rm(n);pcinit(n);\
+                                rm(n);\
                                 if(n&&n.querySelectorAll){var q=n.querySelectorAll('[disable-upgrade]');\
-                                    for(var k=0;k<q.length;k++)rm(q[k]);scan(n)}}\
+                                    for(var k=0;k<q.length;k++)rm(q[k])}}\
                         }}).observe(document.documentElement,{childList:true,subtree:true,attributes:true,attributeFilter:['disable-upgrade']});\
                 }catch(e){}})()";
             self.eval_or_report(tab, eng, DISABLE_UPGRADE_SWEEP, None, None);
