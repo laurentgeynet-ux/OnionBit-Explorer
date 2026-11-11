@@ -708,6 +708,17 @@ pub struct Engine {
     /// Nom du script en cours d'éval — clé du registre
     /// `cjs_registry` et `module.id`/`filename` du sandbox.
     pub(crate) cjs_eval_name: Option<Rc<str>>,
+    /// JS-C490 — annotations du resolveur statique :
+    /// `ptr(Expr::Ident) → profondeur d'env` (niveaux à sauter
+    /// avant le `BindingMap::get`). Clés = adresses des nœuds
+    /// AST — stables tant que le `FnLit` gardien est vivant.
+    pub(crate) resolved_map: std::collections::HashMap<usize, u16>,
+    /// `FnLit` déjà résolus (`Rc::as_ptr`) — dédup par corps.
+    pub(crate) resolved_lits: std::collections::HashSet<usize>,
+    /// Gardiens : maintient les `Rc<FnLit>` résolus en vie pour
+    /// que les adresses AST indexées dans `resolved_map` restent
+    /// uniques (un lit libéré → adresses réutilisables).
+    pub(crate) resolved_guard: Vec<Rc<crate::ast::FnLit>>,
     /// Cache des constructeurs d'interface par nom de classe
     /// (`HTMLInputElement`…) — JS-C82 : `el.constructor` typé +
     /// `.prototype` porteur des accesseurs IDL (surface
@@ -1215,6 +1226,9 @@ impl Engine {
             port_msgs: std::collections::VecDeque::new(),
             cjs_registry: Vec::new(),
             cjs_eval_name: None,
+            resolved_map: std::collections::HashMap::new(),
+            resolved_lits: std::collections::HashSet::new(),
+            resolved_guard: Vec::new(),
             dom_ctors: std::collections::HashMap::new(),
             native_caller: Vec::new(),
             ctor_fresh: None,
@@ -5289,6 +5303,62 @@ impl Engine {
     /// d'import de module renvoient vers l'env exporteur (live
     /// binding) ; `visited` borne les chaînes cycliques
     /// (`export {a} from 'b'` ↔ `export {b} from 'a'`).
+    /// JS-C490 — résout les identifiants du corps d'un lit
+    /// nouvellement matérialisé (dédup par `Rc::as_ptr`). La
+    /// table est bornée : pleine → purge complète (les entrées
+    /// obsolètes partent avec leurs gardiens).
+    fn ensure_lit_resolved(
+        &mut self,
+        lit: &Rc<crate::ast::FnLit>,
+        body: &Rc<Vec<crate::ast::Stmt>>,
+    ) {
+        const RESOLVED_LITS_CAP: usize = 512;
+        let key = Rc::as_ptr(lit) as usize;
+        if self.resolved_lits.contains(&key) {
+            return;
+        }
+        if self.resolved_lits.len() >= RESOLVED_LITS_CAP {
+            self.resolved_map.clear();
+            self.resolved_lits.clear();
+            self.resolved_guard.clear();
+        }
+        self.resolved_lits.insert(key);
+        self.resolved_guard.push(lit.clone());
+        let m = resolve::resolve_lit(lit, body);
+        self.resolved_map.extend(m);
+    }
+
+    /// JS-C490 — lecture d'identifiant via l'annotation du
+    /// resolveur : saute `d` niveaux sans sonder leurs maps,
+    /// puis `env_get` complet depuis la cible (la marche remonte
+    /// au-delà si elle rate). `None` si non annoté ou cible
+    /// manquante → l'appelant reprend la marche complète.
+    pub(crate) fn env_get_resolved(
+        &mut self,
+        env: &EnvRef,
+        name: &str,
+        e: &crate::ast::Expr,
+    ) -> Option<Value> {
+        let &d = self
+            .resolved_map
+            .get(&(std::ptr::from_ref::<crate::ast::Expr>(e) as usize))?;
+        let mut cur = env.clone();
+        for _ in 0..d {
+            let p = cur.borrow().parent.clone();
+            match p {
+                Some(p) => cur = p,
+                None => break,
+            }
+        }
+        if let v @ Some(_) = self.env_get(&cur, name) {
+            crate::j17_tick(&crate::J17_RES_HIT);
+            v
+        } else {
+            crate::j17_tick(&crate::J17_RES_MISS);
+            None
+        }
+    }
+
     pub(crate) fn env_get(&mut self, env: &EnvRef, name: &str) -> Option<Value> {
         self.env_get_seen(env, name, &mut HashSet::new())
     }
@@ -9314,6 +9384,9 @@ impl Engine {
             *g = "hoist";
         }
         let lowered_body = lowered_fn.as_ref().map(|(_, b)| b.clone());
+        // JS-C490 — annotations de profondeur sur le corps qui
+        // tournera (le corps baissé des gen/async).
+        self.ensure_lit_resolved(lit, lowered_body.as_ref().unwrap_or(&body_rc));
         self.hoist(
             lowered_body.as_deref().map_or(&body_rc[..], |b| &b[..]),
             &local,
@@ -9753,6 +9826,7 @@ mod eval;
 mod exec;
 pub(crate) mod lazy;
 mod ops;
+mod resolve;
 
 pub(crate) use ops::*;
 
@@ -10057,5 +10131,37 @@ mod tests {
             e.heap.live_count(),
             e.gc_threshold
         );
+    }
+}
+
+#[cfg(test)]
+mod c490_tests {
+    use super::*;
+
+    /// JS-C490 — les identifiants de scope propre sont servis par
+    /// l'annotation du resolveur (hit), jamais par une valeur
+    /// fausse : les lectures doivent retourner les bonnes liaisons
+    /// à travers blocs, boucles, try/catch et captures.
+    #[test]
+    fn c490_resolution_sert_les_bonnes_liaisons() {
+        let mut e = Engine::new();
+        crate::j17_enable();
+        let r = e
+            .eval(
+                "var out=[];\
+                 function f(a){ var b=a+1; { let c=a+b; out.push(c) } return b }\
+                 out.push(f(2));\
+                 function g(){ for(let i=0;i<3;i++){ let d=i*2; out.push(d) } }\
+                 g();\
+                 function h(){ try { let t=9; throw t } catch(e){ out.push(e+1) } }\
+                 h();\
+                 function outer(){ var x=7; return function(){ return x+1 } }\
+                 out.push(outer()());\
+                 out.join(',')",
+            )
+            .unwrap();
+        assert_eq!(format!("{r:?}"), "Str(\"5,3,0,2,4,10,8\")");
+        let hits = crate::J17_RES_HIT.load(std::sync::atomic::Ordering::Relaxed);
+        assert!(hits > 0, "le fast-path doit servir des lectures — hits={hits}");
     }
 }

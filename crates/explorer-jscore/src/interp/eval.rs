@@ -219,7 +219,8 @@ impl Engine {
             Expr::Null => Ok(Value::Null),
             Expr::This => Ok(this),
             Expr::Ident(name) => self
-                .env_get(env, name)
+                .env_get_resolved(env, name, e)
+                .or_else(|| self.env_get(env, name))
                 .ok_or_else(|| self.ref_error(format!("{name} is not defined"))),
             Expr::Array(elems) => {
                 let mut v = Vec::with_capacity(elems.len());
@@ -1117,7 +1118,8 @@ impl Engine {
     pub(crate) fn read_lvalue(&mut self, env: &EnvRef, this: Value, e: &Expr) -> JsResult<Value> {
         match e {
             Expr::Ident(name) => self
-                .env_get(env, name)
+                .env_get_resolved(env, name, e)
+                .or_else(|| self.env_get(env, name))
                 .ok_or_else(|| self.ref_error(format!("{name} is not defined"))),
             Expr::Member(base, name) => {
                 let b = self.eval_expr(env, this, base)?;
