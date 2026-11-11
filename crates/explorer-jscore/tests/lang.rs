@@ -3010,6 +3010,14 @@ fn proxy_traps() {
     );
     // Sans trap → transparent vers la cible.
     assert_eq!(ev_str("var t = {a: 5}; var p = new Proxy(t, {}); p.a"), "5");
+    // `in` à travers un **proxy en milieu de chaîne** : sans
+    // trap `has`, la délégation à la cible doit continuer
+    // (spec `[[HasProperty]]` — mesuré YouTube : `F in w` sur
+    // un inst dont un ancêtre est proxyfié rendait `false`).
+    assert_eq!(
+        ev_str("var w = {m: 1}; var F = function() {}; F.prototype = new Proxy(w, {}); var o = Reflect.construct(function(){}, [], F); 'm' in o"),
+        "true"
+    );
     // apply/construct sur proxy de fonction.
     assert_eq!(
         ev_str("var f = function(x) { return x + 1; }; var p = new Proxy(f, {apply: function(t, th, args) { return t.apply(th, args) + 100; }}); p(1)"),

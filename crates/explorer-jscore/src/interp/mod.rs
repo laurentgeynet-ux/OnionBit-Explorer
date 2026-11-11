@@ -7689,7 +7689,42 @@ impl Engine {
                 return Ok(true);
             }
         }
-        Ok(self.find_prop(id, key).is_some())
+        // Marche chaîne-de-proto **consciente des proxies** : un
+        // `Ordinary` dont un ancêtre est un `Proxy` doit déléguer
+        // à la cible (spec `[[HasProperty]]` — la chaîne passe
+        // par `proxy.[[GetPrototypeOf]]` puis `has` sur le
+        // proxy). `find_prop` ne lisait que les `proto` bruts :
+        // `"m" in o` rendait `false` quand un proto de la chaîne
+        // était un proxy (mesuré en vol YouTube — `ZuN`/`jYd`
+        // kevlar s'appuie sur `F in w` à travers des protos
+        // proxyfiés).
+        let ai = array_index(key);
+        let mut cur = Some(id);
+        let mut pdepth = 0;
+        while let Some(cid) = cur {
+            crate::j17_tick(&crate::J17_PROTO_LVL);
+            if self
+                .heap
+                .obj(cid)
+                .is_some_and(|o| matches!(o.kind, ObjKind::Proxy { .. }))
+            {
+                // Re-entre dans `has_prop` : le bras proxy gère le
+                // trap `has` ou la délégation à la cible.
+                return self.has_prop(cid, key);
+            }
+            if self.find_own_ai(cid, key, ai).is_some() {
+                return Ok(true);
+            }
+            cur = match self.heap.obj(cid).map(|o| o.proto.clone()) {
+                Some(Value::Obj(p)) => Some(p),
+                _ => None,
+            };
+            pdepth += 1;
+            if pdepth > MAX_PROTO_DEPTH {
+                return Ok(false);
+            }
+        }
+        Ok(false)
     }
 
     pub(crate) fn delete_prop(&mut self, id: ObjId, key: &str) -> bool {
