@@ -2223,6 +2223,24 @@ struct EventHost {
 }
 
 pub(crate) fn node_value(e: &mut Engine, dom: &DomRef, cache: &NodeCache, node: NodeId) -> Value {
+    // §cran-35 — un slot libéré par `collect_garbage` mais pas
+    // encore réattribué garde `epoch`/`tag` : le wrapper
+    // créé dessus est un zombie qui aliassera le **prochain**
+    // occupant (vol 9528 : `u` inerte d'`I_o` = nœud mort
+    // 9 ms → writes `ifV` refusés sur `#comment` recyclé).
+    if dom
+        .borrow()
+        .nodes
+        .get(node as usize)
+        .is_some_and(|n| n.free)
+    {
+        if tracing::enabled!(target: "dom_probe", tracing::Level::INFO) {
+            let fn_src = e.stack_top_fn_src(200);
+            tracing::info!(target: "dom_probe", site = "dom.zombie",
+                "node={node} fn_src={fn_src}");
+        }
+        return Value::Undefined;
+    }
     let epoch = dom.borrow().nodes.get(node as usize).map_or(0, |n| n.epoch);
     // Liaison hors scrutinee : un temporaire `Ref` de
     // `cache.borrow()` dans le `if let` vivrait jusqu'à la fin
