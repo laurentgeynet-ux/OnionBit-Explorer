@@ -375,6 +375,18 @@ for (const sec of sections) {
         let cand;
         if (b === a) {
           cand = [[a]];
+        } else if (b === 'worker_support') {
+          // Marqueur BCD « l'API existe en contexte worker » —
+          // pas une propriété réelle (`X.worker_support` n'a
+          // jamais existé) : sonde le ctor `Worker` (littéral
+          // `in` comptait miss à tort — même biais que les
+          // attributs d'instance).
+          cand = [['behavior', 'typeof Worker==="function"']];
+        } else if (b === 'builtin_element_support') {
+          cand = [['behavior', 'typeof customElements!=="undefined"']];
+        } else if (b === 'supportsText') {
+          // `CSSImportRule.supportsText` = attribut d'instance.
+          cand = [['new:', 'CSSImportRule', 'supportsText']];
         } else if (b.endsWith('_static')) {
           cand = [[a, b.slice(0, -7)]];
         } else if (b.endsWith('_event')) {
@@ -391,6 +403,7 @@ for (const sec of sections) {
       'function inst(a){if(F[a])try{return eval(F[a])}catch(e){return null}',
       'try{return new globalThis[a]()}catch(e){return null}}',
       'function chk(p){',
+      'if(p[0]==="behavior"){try{return !!eval(p[1])}catch(e){return false}}',
       'if(p[0]==="new:"){var o=inst(p[1]);return o!=null&&p[2] in o}',
       'var o=globalThis,i=0;',
       'if(p.length===1)return typeof o[p[0]]!=="undefined";',
