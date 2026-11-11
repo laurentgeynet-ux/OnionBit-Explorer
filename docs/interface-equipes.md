@@ -1605,3 +1605,14 @@ Lot PIPE livré depuis la piste YoutubeFix (R-260, crates `explorer-css`/`explor
 - En Chrome : `ready` tourne (CE `connectedCallback` de l'élément forwardé au contrôleur) → `root`=fragment → le swap frappe le fragment, `d.prototype` survit sur le contrôleur → `loadPage` forwardé → insertion.
 - **Divergence racine resserrée** : pourquoi `polySiParams`/`behaviors` sont vides au moment où `ifV` énumère les méthodes à forwarder pour pm (masthead en a 2 — `urp`/`select` — mais pas `connectedCallback` non plus). Suspect : `Ae.call`/`P` (ctor posant `polySiInfo`/`polySiParams`) jamais atteint dans la chaîne `new X` de `TLo` — le ctor `d` généré par `c2q` n'appelle pas la couche `Ae` chez nous.
 - Instrumentation ajoutée : flags `nt` (nodeType own) + `hpc` (b===hostElement.polymerController) au `proto.swap`.
+
+
+## NAV — cran 59 (vol 9773) : deux familles de contrôleurs ; le forwarding pm **fonctionne** ; `ytd-browse` jamais swappé
+
+- Deux chemins de contrôleur PolySi dans kevlar :
+  - `GSo`→`P extends Ae` (`Ae` @3432086 pose `polySiInfo`/`polySiParams`/`polySiContext`) — `_.L`=`Ae.prototype` porte `connectedCallback`/`ready`/`attached`/`registered` (`_.L.ready` fait stamping `q0f` + `attachShadow({shadyUpgradeFragment:H.root})` puis `this.root=F.shadowRoot`).
+  - `TLo`→`new X` (`X=c2q(H.prototype,brX,…)`, `u.root=u`, `u.hostElement=d`) — le `polymerController` des éléments, **sans** polySi* — `pc.polySiInfo/Params/Context` absents est **nominal** (pas notre bug).
+- `pm` a **54 méthodes forwardées** own (`attachPage`, `setActivePage`, `lazyPrepareCriticalPages`, `preparePage`, `updatePageData`…) — `FnY`/`wig` ont tourné correctement. `loadPage` n'y figure pas : le rail `d.loadPage(H.response)` @9082168 cible l'élément **`ytd-browse`** (`d.is==="ytd-browse"`), pas le page-manager.
+- `pm.getCurrentPage()` s'exécute (jette sur `.slice` interne — donnée absente) → les wrappers forwardés **vivent** post-swap (capture `F` ou chaîne résiduelle) → le swap n'ampute pas l'API élément.
+- `ytd-browse` n'apparaît dans **aucun** `proto.swap` (22 swaps : masthead, page-manager, logo, icon-button, interaction, player…) → son pc n'a pas été promu — attach par un autre rail (ou jamais connecté).
+- Reste à trancher : pourquoi l'insertion n'a pas suivi `yt-navigate-finish` — le rail `attachPage`/`setActivePage`/`pagePool` du contextSwitcher. Aucune erreur `b/38014653` dans le log → soit le check `typeof d.loadPage` a passé, soit le rail n'est pas atteint.
