@@ -7113,6 +7113,13 @@ impl Engine {
         // si le second `_readyClients` vient d'un `call(pc)`
         // depuis un job `kAu` ou un dispatch natif, le read du
         // callee sur l'objet appelant nomme la fonction source.
+        // Cran 65 — chaîne de propagation de la vague : `ready`/
+        // `_enableProperties`/`_flushProperties`/`_propertiesChanged`/
+        // `__enableOrFlushClients`/`_enqueueClient` — reconstruire le
+        // chemin exact `ready → _flushProperties → _propertiesChanged →
+        // _flushClients → _readyClients` (ou un appel direct) pour le
+        // second flush ; si aucune clé amont ne tire sur le receveur,
+        // le callee est une valeur capturée (closure/job natif).
         if matches!(
             key,
             "polySiParams"
@@ -7125,6 +7132,12 @@ impl Engine {
                 | "setActivePage"
                 | "enqueueClient"
                 | "connectedCallback"
+                | "ready"
+                | "_enableProperties"
+                | "_flushProperties"
+                | "_propertiesChanged"
+                | "__enableOrFlushClients"
+                | "_enqueueClient"
         ) && tracing::enabled!(target: "dom_probe", tracing::Level::INFO)
             && self
                 .find_prop(id, key)
