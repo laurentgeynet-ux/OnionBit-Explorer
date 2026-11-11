@@ -6889,6 +6889,108 @@ impl Engine {
     /// `o` tagué → `{label}w {k} ty={type}` (`g.cfgw` =
     /// `ytcfg.set(k,v)`/`data_.k=v` — clés de config posées).
     fn probe_store(&mut self, id: ObjId, key: &str, v: Value) {
+        // JS-C483/cran 51 — `activeStoreSubscription` posé =
+        // `YC.attached` vient de souscrire au store redux avec
+        // `this` = le receveur swappé : les 5 frames du sommet
+        // nomment le rail d'invocation (`ELO`/bag `X.attached`/
+        // `_.L.attached`) qui a appelé le hook sur un objet
+        // sans `attached` dans sa chaîne.
+        if key == "activeStoreSubscription"
+            && tracing::enabled!(target: "dom_probe", tracing::Level::INFO)
+        {
+            let frames: Vec<String> = self
+                .call_stack
+                .iter()
+                .rev()
+                .take(5)
+                .map(Self::fn_label_of)
+                .collect();
+            let psp = self.find_prop(id, "polySiParams").is_some();
+            let atto = self.find_prop(id, "attached").is_some();
+            // Cran 52 — pourquoi `this.root===this` au `_attachDom` ?
+            // `dcr` = `ready()` a-t-il tourné (ELO), `tpl` = `_template`
+            // présent (le stamping aurait dû réassigner `root`),
+            // `roteq` = `root===self` déjà vrai à la souscription.
+            let dcr = self
+                .get_prop(id, "didCallReady")
+                .map(|v| self.to_boolean(v))
+                .unwrap_or(false);
+            let tpl = self.find_prop(id, "_template").is_some();
+            let roteq = matches!(self.get_prop(id, "root"), Some(Value::Obj(r)) if r == id);
+            // `ipec` = `isPolySiElementConnected` — posé par
+            // `_.L.connectedCallback` (Ae) juste avant `ELO` :
+            // distingue « chaîne `w.prototype.connectedCallback`
+            // a atteint `_.L` » vs « court-circuitée en amont ».
+            let ipec = self
+                .get_prop(id, "isPolySiElementConnected")
+                .map(|v| self.to_boolean(v))
+                .unwrap_or(false);
+            tracing::info!(
+                target: "dom_probe",
+                site = "sub.arm",
+                psp,
+                atto,
+                dcr,
+                ipec,
+                tpl,
+                roteq,
+                stk = %frames.join("<")
+            );
+        }
+        // Cran 53 — `__hasRegisterFinished` posé sur le proto de
+        // classe = `_registered` a tourné : si le corps jette
+        // après le flag, `W(d.prototype)` (mix méthodes +
+        // `_template`) est sauté → classe nue définitivement.
+        if key == "__hasRegisterFinished"
+            && tracing::enabled!(target: "dom_probe", tracing::Level::INFO)
+        {
+            let is_ = self
+                .get_prop(id, "is")
+                .as_ref()
+                .and_then(Self::heap_string_of)
+                .unwrap_or_default();
+            let frames: Vec<String> = self
+                .call_stack
+                .iter()
+                .rev()
+                .take(3)
+                .map(Self::fn_label_of)
+                .collect();
+            tracing::info!(
+                target: "dom_probe",
+                site = "reg.fin",
+                is = %is_,
+                stk = %frames.join("<")
+            );
+        }
+        // Cran 53b — `root` réassigné : `this.root=this` (init),
+        // `=_stampTemplate` (stamp), `=_attachDom` (final). Trace
+        // la provenance pour savoir si `_stampTemplate` a tourné.
+        if key == "root" && tracing::enabled!(target: "dom_probe", tracing::Level::INFO) {
+            let host = self
+                .get_prop(id, "hostElement")
+                .and_then(|h| self.get_prop_value(h, "localName").ok())
+                .as_ref()
+                .and_then(Self::heap_string_of)
+                .unwrap_or_default();
+            if !host.is_empty() {
+                let selfref = matches!(v, Value::Obj(r) if r == id);
+                let frames: Vec<String> = self
+                    .call_stack
+                    .iter()
+                    .rev()
+                    .take(3)
+                    .map(Self::fn_label_of)
+                    .collect();
+                tracing::info!(
+                    target: "dom_probe",
+                    site = "root.set",
+                    host = %host,
+                    selfref,
+                    stk = %frames.join("<")
+                );
+            }
+        }
         // Filtres cheap d'abord (global + clé surveillée, ou
         // conteneur tagué) — puis tout le travail armé est gaté
         // par le niveau du target (même fix V-2i que

@@ -250,6 +250,17 @@ pub(crate) fn object_set_proto(e: &mut Engine, _t: Value, args: &[Value]) -> JsR
             .and_then(|h| e.get_prop_value(h, "localName").ok())
             .and_then(|l| e.to_js_string(l).ok())
             .unwrap_or_else(|| "?".to_string());
+        // Cran 53c — distinguer fragment stampé (`templateInfo`/
+        // `nodeInfoList`/`$` own) du contrôleur (`root`/`attached`
+        // /`urp` dans la chaîne AVANT le swap — mesure la perte
+        // réelle de la chaîne de classe).
+        let is_frag = crate::builtins::extras::has_own(e, id, "templateInfo")
+            || crate::builtins::extras::has_own(e, id, "nodeInfoList")
+            || crate::builtins::extras::has_own(e, id, "$");
+        let roteq =
+            matches!(e.get_prop_value(Value::Obj(id), "root"), Ok(Value::Obj(r)) if r == id);
+        let urpc = e.find_prop(id, "updateReduxProperties").is_some();
+        let urpo = crate::builtins::extras::has_own(e, id, "updateReduxProperties");
         let stack: String = e
             .stack_text("", "")
             .lines()
@@ -260,6 +271,7 @@ pub(crate) fn object_set_proto(e: &mut Engine, _t: Value, args: &[Value]) -> JsR
             .join(" <- ");
         tracing::info!(target: "dom_probe",
             site = "proto.swap", host = %host,
+            frag = is_frag, roteq, urpc, urpo,
             stack = %stack.chars().take(400).collect::<String>());
     }
     if let Some(o) = e.heap.obj_mut(id) {
