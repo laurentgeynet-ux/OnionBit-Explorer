@@ -4,7 +4,6 @@
 
 import 'dart:async';
 
-import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 
 import '../../../core/design/design_tokens.dart';
@@ -183,7 +182,6 @@ class _MediaSurfaceViewState extends State<MediaSurfaceView> {
     final snap = _snap ?? p?.snapshot;
     final ready = p?.ready == true;
     final playing = snap?.state == 'playing';
-    final isPip = widget.ctrl.isPipActive(widget.tabId, o.id);
     // Audio : la barre est toute la surface — pas de vidéo à
     // découvrir, jamais masquée.
     final barShown = o.controls &&
@@ -216,57 +214,13 @@ class _MediaSurfaceViewState extends State<MediaSurfaceView> {
           // visible (pas de trou noir).
           if (o.isVideo)
             Positioned.fill(
-              child: Listener(
-                onPointerSignal: (signal) {
-                  if (signal is PointerScrollEvent && !playing && o.isVideo) {
-                    final dir = signal.scrollDelta.dy < 0 ? 1 : -1;
-                    widget.ctrl.mediaStepFrame(widget.tabId, o.id, dir);
-                  }
-                },
-                child: GestureDetector(
-                  // La vue du lecteur peut être une texture sans
-                  // hit-test propre — le tap appartient à toute
-                  // la surface `controls`, pas au widget interne.
-                  behavior: HitTestBehavior.opaque,
-                  onTapUp: o.controls ? _onVideoTap : null,
-                  child: isPip
-                      ? Container(
-                          color: Colors.black87,
-                          child: Center(
-                            child: Column(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                Icon(
-                                  Icons.picture_in_picture_alt,
-                                  size: 38,
-                                  color: Colors.white.withValues(alpha: 0.7),
-                                ),
-                                const SizedBox(height: 8),
-                                const Text(
-                                  'Lecture en Picture-in-Picture',
-                                  style: TextStyle(
-                                    color: Colors.white,
-                                    fontSize: 13,
-                                    fontWeight: FontWeight.w500,
-                                  ),
-                                ),
-                                const SizedBox(height: 8),
-                                TextButton.icon(
-                                  style: TextButton.styleFrom(
-                                    foregroundColor: Colors.white,
-                                  ),
-                                  icon: const Icon(Icons.close, size: 16),
-                                  label: const Text('Ramener ici'),
-                                  onPressed: () => widget.ctrl.mediaClosePip(),
-                                ),
-                              ],
-                            ),
-                          ),
-                        )
-                      : ready
-                          ? p!.view
-                          : const SizedBox.shrink(),
-                ),
+              child: GestureDetector(
+                // La vue du lecteur peut être une texture sans
+                // hit-test propre — le tap appartient à toute
+                // la surface `controls`, pas au widget interne.
+                behavior: HitTestBehavior.opaque,
+                onTapUp: o.controls ? _onVideoTap : null,
+                child: ready ? p!.view : const SizedBox.shrink(),
               ),
             ),
           // Init / buffering — indicateur discret centré.
@@ -439,13 +393,6 @@ class _MediaSurfaceViewState extends State<MediaSurfaceView> {
                         widget.onActive(o.id);
                         widget.ctrl.mediaToggleMute(widget.tabId, o.id);
                       },
-                      isPip: isPip,
-                      onTogglePip: o.isVideo
-                          ? () => widget.ctrl.mediaTogglePip(widget.tabId, o.id)
-                          : null,
-                      onStepFrame: o.isVideo
-                          ? (dir) => widget.ctrl.mediaStepFrame(widget.tabId, o.id, dir)
-                          : null,
                     ),
                   ),
                 ),
@@ -602,9 +549,6 @@ class MediaControlsBar extends StatelessWidget {
     required this.onVolume,
     required this.onVolumeEnd,
     required this.onToggleMute,
-    this.onTogglePip,
-    this.isPip = false,
-    this.onStepFrame,
   });
 
   final MediaPlayer? player;
@@ -627,15 +571,6 @@ class MediaControlsBar extends StatelessWidget {
   /// crans de drag.
   final VoidCallback onVolumeEnd;
   final VoidCallback onToggleMute;
-
-  /// Bascule Picture-in-Picture (`null` si non supporté ou audio).
-  final VoidCallback? onTogglePip;
-
-  /// Si le média est actuellement en mode Picture-in-Picture.
-  final bool isPip;
-
-  /// Pas-à-pas image par image (`dir` = -1 ou +1).
-  final ValueChanged<int>? onStepFrame;
 
   /// `mm:ss` ou `h:mm:ss` — zéro padding sur l'heure.
   static String fmtTime(int ms) {
@@ -681,28 +616,6 @@ class MediaControlsBar extends StatelessWidget {
                   : l10n.mediaPlay,
           onPressed: player == null ? null : onToggle,
         ),
-        if (!audio && !live && onStepFrame != null) ...[
-          IconButton(
-            visualDensity: compact,
-            iconSize: 18,
-            style: IconButton.styleFrom(
-              foregroundColor: onSurface.withValues(alpha: 0.85),
-            ),
-            icon: const Icon(Icons.arrow_left),
-            tooltip: 'Image précédente (virgule / molette bas)',
-            onPressed: player == null ? null : () => onStepFrame!(-1),
-          ),
-          IconButton(
-            visualDensity: compact,
-            iconSize: 18,
-            style: IconButton.styleFrom(
-              foregroundColor: onSurface.withValues(alpha: 0.85),
-            ),
-            icon: const Icon(Icons.arrow_right),
-            tooltip: 'Image suivante (point / molette haut)',
-            onPressed: player == null ? null : () => onStepFrame!(1),
-          ),
-        ],
         if (!live)
           Text(
             fmtTime(
@@ -853,25 +766,6 @@ class MediaControlsBar extends StatelessWidget {
             ),
           ),
         ),
-        if (!audio && onTogglePip != null)
-          IconButton(
-            visualDensity: compact,
-            iconSize: 20,
-            style: IconButton.styleFrom(
-              foregroundColor: isPip
-                  ? t.color('accent', 'base', fallback: Colors.blueAccent)
-                  : onSurface,
-            ),
-            icon: Icon(
-              isPip
-                  ? Icons.picture_in_picture
-                  : Icons.picture_in_picture_alt,
-            ),
-            tooltip: isPip
-                ? 'Quitter Picture-in-Picture'
-                : 'Picture-in-Picture',
-            onPressed: onTogglePip,
-          ),
       ],
     );
 

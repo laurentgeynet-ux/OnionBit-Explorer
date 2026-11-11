@@ -139,9 +139,12 @@ if (-not $SkipFunctional -and $ok -gt 0) {
         Write-Error 'cargo build -p explorer-daemon a échoué'
         exit 1
     }
-    $daemon = Join-Path $meta.target_directory 'debug\explorer-daemon.exe'
-    if (-not (Test-Path $daemon)) {
-        Write-Error "explorer-daemon introuvable : $daemon"
+    $daemon = @(
+        $(if ($triple) { Join-Path $meta.target_directory "$triple\debug\explorer-daemon.exe" }),
+        (Join-Path $meta.target_directory 'debug\explorer-daemon.exe')
+    ) | Where-Object { $_ -and (Test-Path $_) } | Select-Object -First 1
+    if (-not $daemon) {
+        Write-Error "explorer-daemon introuvable sous $($meta.target_directory)"
         exit 1
     }
     # Port libre plutôt que port fixe + kill : la rustine

@@ -14111,6 +14111,21 @@ impl Engine {
                     let d = dom.borrow();
                     (d.ce.upgraded.contains_key(&n), d.ce.failed.contains(&n))
                 };
+                // Sonde cran 46 — ordre des callbacks vie vs
+                // kill/re-append (masthead détaché JS-C481) :
+                // si `attached` re-tire sur nœud mort, un
+                // `Connected` a suivi le `dom.kill` ou le
+                // `pc.set` post-kill a relancé la séquence.
+                if tracing::enabled!(target: "dom_probe", tracing::Level::INFO) {
+                    let d = dom.borrow();
+                    if let Some(nd) = d.nodes.get(n as usize) {
+                        if nd.tag == "ytd-masthead" || nd.tag == "ytd-page-manager" {
+                            tracing::info!(target: "dom_probe",
+                                site = "ce.life", ev = "conn", tag = %nd.tag,
+                                node = %n, upg = upgraded, failed = failed);
+                        }
+                    }
+                }
                 if failed {
                     return Ok(());
                 }
@@ -14128,6 +14143,16 @@ impl Engine {
                     let d = dom.borrow();
                     d.ce.upgraded.contains_key(&n) && !d.ce.failed.contains(&n)
                 };
+                if tracing::enabled!(target: "dom_probe", tracing::Level::INFO) {
+                    let d = dom.borrow();
+                    if let Some(nd) = d.nodes.get(n as usize) {
+                        if nd.tag == "ytd-masthead" || nd.tag == "ytd-page-manager" {
+                            tracing::info!(target: "dom_probe",
+                                site = "ce.life", ev = "disc", tag = %nd.tag,
+                                node = %n, upg = live);
+                        }
+                    }
+                }
                 if !live {
                     return Ok(());
                 }

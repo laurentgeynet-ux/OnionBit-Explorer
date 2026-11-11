@@ -750,26 +750,18 @@ impl Engine {
                                         // fabriquée) vs absent du tout.
                                         let src = {
                                             let keys0 = self.own_keys(*rid);
-                                            if keys0.iter().any(|k| k.as_str() == name.as_ref())
-                                            {
+                                            if keys0.iter().any(|k| k.as_str() == name.as_ref()) {
                                                 "own"
                                             } else {
-                                                let mut cur = self
-                                                    .heap
-                                                    .obj(*rid)
-                                                    .map(|o| o.proto.clone());
+                                                let mut cur =
+                                                    self.heap.obj(*rid).map(|o| o.proto.clone());
                                                 let mut hit = false;
                                                 for _ in 0..8 {
                                                     match cur {
                                                         Some(Value::Obj(pid)) => {
-                                                            if self
-                                                                .own_keys(pid)
-                                                                .iter()
-                                                                .any(|k| {
-                                                                    k.as_str()
-                                                                        == name.as_ref()
-                                                                })
-                                                            {
+                                                            if self.own_keys(pid).iter().any(|k| {
+                                                                k.as_str() == name.as_ref()
+                                                            }) {
                                                                 hit = true;
                                                                 break;
                                                             }
@@ -781,7 +773,11 @@ impl Engine {
                                                         _ => break,
                                                     }
                                                 }
-                                                if hit { "proto" } else { "absent" }
+                                                if hit {
+                                                    "proto"
+                                                } else {
+                                                    "absent"
+                                                }
                                             }
                                         };
                                         // « on Object » ne nomme rien —

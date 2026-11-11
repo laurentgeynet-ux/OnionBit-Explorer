@@ -235,6 +235,33 @@ pub(crate) fn object_set_proto(e: &mut Engine, _t: Value, args: &[Value]) -> JsR
         }
         cur = e.heap.obj(cid).map_or(Value::Null, |o| o.proto.clone());
     }
+    // Sonde cran 47 : `b.__proto__ = ShadowRoot.prototype`
+    // (wc_sd `shadyUpgradeFragment`) re-prototype l'objet. Si le
+    // receveur porte déjà des champs de contrôleur PolySi
+    // (`hostElement`/`__dataEnabled`), c'est le `this` de
+    // `new X` qui passe en fragment d'upgrade — signature du
+    // `zc` creux (`urp@absent`).
+    if crate::builtins::extras::has_own(e, id, "hostElement")
+        || crate::builtins::extras::has_own(e, id, "__dataEnabled")
+    {
+        let host = e
+            .get_prop_value(Value::Obj(id), "hostElement")
+            .ok()
+            .and_then(|h| e.get_prop_value(h, "localName").ok())
+            .and_then(|l| e.to_js_string(l).ok())
+            .unwrap_or_else(|| "?".to_string());
+        let stack: String = e
+            .stack_text("", "")
+            .lines()
+            .map(str::trim)
+            .filter(|l| l.starts_with("at "))
+            .take(6)
+            .collect::<Vec<_>>()
+            .join(" <- ");
+        tracing::info!(target: "dom_probe",
+            site = "proto.swap", host = %host,
+            stack = %stack.chars().take(400).collect::<String>());
+    }
     if let Some(o) = e.heap.obj_mut(id) {
         o.proto = proto;
     }
