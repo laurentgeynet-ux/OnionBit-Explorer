@@ -1765,3 +1765,10 @@ Lot PIPE livré depuis la piste YoutubeFix (R-260, crates `explorer-css`/`explor
 - **Validation retro cran 72** : `prop_scan/lookup` 3.24 -> **1.11** (-66 % normalise), `prop_ns/lookup` 466 -> **125 ns** (~3.7x) — le seuil 12 a paye plus que le -20 % estime a mi-vol.
 - **Conclusion** : un cache `(env,name)->holder` ne raserait que ~0.9 niveau/get — ROI faible. Le surcout `env_ns` vient des ~2 `RefCell::borrow` + scans `BindingMap` par niveau, deja optimises (cles internees, `ptr_eq`). La suite structurelle = resolution compile-time (profondeur+slot a la materialisation) — chantier lourd, a arbitrer contre les autres crans.
 - Sante vol : `ytd-browse` attache, RSS ~2.4 Go sous J17 (le profilage enfle le pied) — aucune regression.
+
+### cran 74 (vol 9773, daemon 4836, J17_PROF) : fusion du double `borrow` par niveau — gain nul mesure, borne atteinte
+
+- **Change** : `env_get_seen` faisait 2 `RefCell::borrow` par niveau (check `With` puis lookup) — fusionne en un seul, semantique `Global` inchangee (find_prop + getter sous l'emprunt, comme avant).
+- **Mesure a ~38M lookups** : `env_ns` 3.85 s -> 3.78 s (**-2 %, bruit** ; ~107 ns/get des deux cotes). `env_lvl`=65.4M, `env_gets`=35.2M — travail identique.
+- **Conclusion** : le surcout par get est deja serre ; la couche lookup est epusee au niveau micro. Le levier restant = resolution compile-time (profondeur+slot) ou inline caches — chantier multi-jours, a arbitrer explicitement. Code conserve (equivalent, un borrow en moins = moins de surface de panique RefCell).
+- Sante : `ytd-browse` attache, RSS ~1.3-1.5 Go stable sous J17.

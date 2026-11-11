@@ -5343,12 +5343,60 @@ impl Engine {
             }
             crate::j17_tick(&crate::J17_ENV_LVL);
             // `with (o)` — la résolution passe par les props de
-            // l'objet (hors `@@unscopables`) puis remonte.
-            let with_oid = {
+            // l'objet (hors `@@unscopables`) puis remonte. Le
+            // `borrow` est mutualisé avec la lookup ci-dessous :
+            // un seul `RefCell::borrow` par niveau (cran 74 —
+            // env_lvl ~67M sur YouTube, ~107 ns/get).
+            // Un seul `borrow` pour `with`-check + lookup (cran 74)
+            // — le cas `Global` garde sa sémantique (find_prop +
+            // getter invoqué sous l'emprunt, comme avant).
+            let (with_oid, next) = {
                 let b = e.borrow();
                 match &b.kind {
-                    EnvKind::With(oid) => Some(*oid),
-                    _ => None,
+                    EnvKind::With(oid) => (Some(*oid), None),
+                    EnvKind::Local(m) | EnvKind::Block(m) => (
+                        None,
+                        Some(match m.get(name) {
+                            Some(EnvCell::Bind(v)) => return Some(v.value.clone()),
+                            Some(EnvCell::Alias(t, n)) => Next::Alias(t.clone(), n.clone()),
+                            Some(EnvCell::LazyArgs(la)) => Next::Lazy(la.clone()),
+                            None => Next::Up(b.parent.clone()),
+                        }),
+                    ),
+                    EnvKind::Global(m) => match m.get(name) {
+                        Some(EnvCell::Bind(v)) => return Some(v.value.clone()),
+                        Some(EnvCell::Alias(t, n)) => {
+                            (None, Some(Next::Alias(t.clone(), n.clone())))
+                        }
+                        Some(EnvCell::LazyArgs(la)) => (None, Some(Next::Lazy(la.clone()))),
+                        None => {
+                            // Declarative record first, then `window`
+                            // props — data ET accessors (JS-C78 :
+                            // `parent`/`top`/`frames`/`length`/`closed`
+                            // sont des getters posés sur le global —
+                            // un identifiant libre doit les invoquer).
+                            let g = self.global;
+                            match self.find_prop(g, name) {
+                                Some(Prop::Data { value, .. }) => return Some(value),
+                                Some(Prop::Acc {
+                                    get: Value::Obj(gf),
+                                    ..
+                                }) => {
+                                    if let Ok(v) =
+                                        self.call_value(Value::Obj(gf), Value::Obj(g), &[])
+                                    {
+                                        return Some(v);
+                                    }
+                                    // Getter qui jette → prop non
+                                    // liée (la chaîne remonte —
+                                    // `ReferenceError` honnête plutôt
+                                    // qu'un `undefined` silencieux).
+                                }
+                                _ => {}
+                            }
+                            (None, Some(Next::Up(b.parent.clone())))
+                        }
+                    },
                 }
             };
             if let Some(oid) = with_oid {
@@ -5380,51 +5428,10 @@ impl Engine {
                 }
                 continue;
             }
-            let next = {
-                let b = e.borrow();
-                match &b.kind {
-                    EnvKind::Local(m) | EnvKind::Block(m) => match m.get(name) {
-                        Some(EnvCell::Bind(v)) => return Some(v.value.clone()),
-                        Some(EnvCell::Alias(t, n)) => Next::Alias(t.clone(), n.clone()),
-                        Some(EnvCell::LazyArgs(la)) => Next::Lazy(la.clone()),
-                        None => Next::Up(b.parent.clone()),
-                    },
-                    EnvKind::Global(m) => match m.get(name) {
-                        Some(EnvCell::Bind(v)) => return Some(v.value.clone()),
-                        Some(EnvCell::Alias(t, n)) => Next::Alias(t.clone(), n.clone()),
-                        Some(EnvCell::LazyArgs(la)) => Next::Lazy(la.clone()),
-                        None => {
-                            // Declarative record first, then `window`
-                            // props — data ET accessors (JS-C78 :
-                            // `parent`/`top`/`frames`/`length`/`closed`
-                            // sont des getters posés sur le global —
-                            // un identifiant libre doit les invoquer).
-                            let g = self.global;
-                            match self.find_prop(g, name) {
-                                Some(Prop::Data { value, .. }) => return Some(value),
-                                Some(Prop::Acc {
-                                    get: Value::Obj(gf),
-                                    ..
-                                }) => {
-                                    if let Ok(v) =
-                                        self.call_value(Value::Obj(gf), Value::Obj(g), &[])
-                                    {
-                                        return Some(v);
-                                    }
-                                    // Getter qui jette → prop non
-                                    // liée (la chaîne remonte —
-                                    // `ReferenceError` honnête plutôt
-                                    // qu'un `undefined` silencieux).
-                                }
-                                _ => {}
-                            }
-                            Next::Up(b.parent.clone())
-                        }
-                    },
-                    // Déjà géré au-dessus — repli défensif.
-                    EnvKind::With(_) => Next::Up(b.parent.clone()),
-                }
-            };
+            // `With` a déjà `continue` — `next` est toujours
+            // `Some` ici ; le repli `None` reste une dégradation
+            // sûre (nom non lié), jamais un panic.
+            let next = next?;
             match next {
                 Next::Up(p) => cur = p,
                 Next::Alias(t, n) => {
