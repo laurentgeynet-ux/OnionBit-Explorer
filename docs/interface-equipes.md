@@ -1812,3 +1812,10 @@ Lot PIPE livré depuis la piste YoutubeFix (R-260, crates `explorer-css`/`explor
 ### cran 77c (vol 809, daemon 9777, JS_MEM_MIB=2048, profil froid) : verification JS-C487 — boutons consent stampes, storm timers nomme
 
 - **Verification vol 809** : DOM dump -> `cb-header` + `eom-button-row` + boutons `<button aria-label="Refuser…">` "Tout refuser"/"Tout accepter" **stampes nativement** (aucun flush manuel). Effet de bord mesure : la resurrection du rail microTask rend l'app reellement vivante -> `fire.timer=52 471` + `post.raf=16 485` en ~9 min (storm de timers/raf kevlar — probablement un retry sur un autre gap, A INSTRUMENTER) -> pompe quasi-saturee, evals "pompe en vol" ~80 % du temps (passent par gaps). N'est PAS un mur stamping : les naissances d'elements convergent (fin a 22:55:38), le DOM se stabilise. Avec la borne par defaut (512 Mio) le heap sature en plein burst d'hydratation — config vol etablie = 3072 Mio.
+
+### cran 78 (vol 9773, daemon 8780, build post-JS-C487) : watch complete — titre rendu, rail binding sain
+
+- **Navigation directe /watch** : `document.title` = « Me at the zoo - YouTube », `<video>` presente, `ytd-watch-flexy.data` = reponse complete (contents, currentVideoEndpoint, engagementPanels...), secondary-results + comments stamps.
+- **Titre rendu** : « Me at the zoo » trouve dans un `YT-FORMATTED-STRING` de la watch page — le h1 vide vu plus tot etait un autre `h1` (searchbox/topbar) ; `ytInitialData` porte `videoPrimaryInfoRenderer` et le texte parvient au DOM.
+- **Zero `[[x]]` residuel** sur tout le document — le fix JS-C487 (`textContent=` -> `.data` sur CharacterData) a debouche le rail d'annotation complet : bindings texte ET attributs evalues, `Polymer.Async.microTask` vivant.
+- Bilan : apres JS-C487 la page watch est fonctionnellement complete ; SPA home/search/watch navigable ; rejets classes (attestation poToken, AbortError nominal).
