@@ -1795,3 +1795,10 @@ Lot PIPE livré depuis la piste YoutubeFix (R-260, crates `explorer-css`/`explor
 - **Fix** : branche `Text|Comment -> set_text` dans les deux sites (`dom_nav_set` accesseur `Node.prototype`, invoke `ElementHost`). Verrou : `mutation_observer_character_data_via_text_content` (263/263 suite dom, clippy propre).
 - **Bonus mesure** : le save consent bout-en-bout fonctionne deja quand on l'invoque avec le vrai `command.saveConsentAction` (`socsCookie`+`savePreferenceUrl`) : `POST /upgrade_visitor_cookie?eom=1` -> 200, `POST consent.youtube.com/save` -> **204**, `location.reload` -> bump disparu au re-chargement (consent serveur persiste). `_.G8`/`_.Oy`/`_.DlV`/`_.IKh` tous presents et fonctionnels — les craintes `sCN`/`yKq` etaient des alias d'un **autre build** (base stale, pas le live `default_kevlar_base`).
 - Impact probable au-dela du bump : tout stamping debounce kevlar (grille riche, sections, menus) deboque — a re-mesurer en vol.
+
+### cran 77 (vols 9773, daemons 12260 + 8780) : `[[x]]` Polymer et titres renderers VERIFIES fonctionnels — le mur etait un etat transitoire
+
+- **Mesure en page** : tooltip masthead = « Retour » (binding `[[menuStrings.BACK_ALT_LABEL]]` resolu) ; `ytd-video-renderer` a#video-title = « Me at the zoo » (`[[getSimpleString(data.text)]]` resolu, `__dataClientsReady=true`). Un seul nœud `[[` residuel sur home = source `<script>` WIZ_global_data (faux positif).
+- **Reinterpretation** : les placeholders bruts vus sur la page recherche/post-SPA etaient des instants d'hydratation en cours (elements stampes avant le flush `__dataClientsReady`), pas un rail casse. `country-code` null = evaluation correcte (data.countryCode indefini).
+- **Instrumentation retiree** : compteurs `run_fx`/`eval_bind` par `lit.name` ne pouvaient pas tirer (fonctions minifiees anonymes, `lit.name=null`) — code revert avant commit.
+- **Nav SPA elargie** : home -> /results?search_query -> clic a#thumbnail -> /watch?v=jNQXAC9IVRw, `hasNavigated=true` a chaque rail. Resultats recherche = vrais renderers stampes (3+).
