@@ -862,6 +862,23 @@ impl Engine {
                                             {
                                                 hints.push(format!("id:{s}"));
                                             }
+                                            // Le receveur est-il un
+                                            // proxy `jYd`/`Pgm` ? — son
+                                            // get-trap lit la méthode
+                                            // depuis le proto de classe
+                                            // en fallback (cran 54).
+                                            if self
+                                                .heap
+                                                .obj(*rid)
+                                                .is_some_and(|o| {
+                                                    matches!(
+                                                        o.kind,
+                                                        ObjKind::Proxy { .. }
+                                                    )
+                                                })
+                                            {
+                                                hints.push("pxy".to_string());
+                                            }
                                             // JS-C483 — le receveur
                                             // zc porte-t-il la machinerie
                                             // PolySi (own, survivant au

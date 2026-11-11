@@ -261,6 +261,38 @@ pub(crate) fn object_set_proto(e: &mut Engine, _t: Value, args: &[Value]) -> JsR
             matches!(e.get_prop_value(Value::Obj(id), "root"), Ok(Value::Obj(r)) if r == id);
         let urpc = e.find_prop(id, "updateReduxProperties").is_some();
         let urpo = crate::builtins::extras::has_own(e, id, "updateReduxProperties");
+        // Cran 54 — nommer le proto **remplacé** : en Chrome un
+        // fragment stampé hérite `DocumentFragment.prototype` ;
+        // si le nôtre porte `d.prototype` (proto de classe
+        // Polymer, repérable par `is`/`ctor`), la déviation est
+        // l'héritage du fragment, pas le swap.
+        let pname = e
+            .heap
+            .obj(id)
+            .and_then(|o| match o.proto {
+                Value::Obj(pid) => Some(pid),
+                _ => None,
+            })
+            .map(|pid| {
+                let is = e
+                    .get_prop_value(Value::Obj(pid), "is")
+                    .ok()
+                    .and_then(|v| e.to_js_string(v).ok())
+                    .filter(|s| !s.is_empty());
+                let ctor = e
+                    .get_prop_value(Value::Obj(pid), "constructor")
+                    .ok()
+                    .and_then(|c| e.get_prop_value(c, "name").ok())
+                    .and_then(|n| e.to_js_string(n).ok())
+                    .filter(|s| !s.is_empty());
+                match (is, ctor) {
+                    (Some(i), Some(c)) => format!("{i}/{c}"),
+                    (Some(i), None) => i,
+                    (None, Some(c)) => c,
+                    (None, None) => "?".to_string(),
+                }
+            })
+            .unwrap_or_else(|| "null".to_string());
         let stack: String = e
             .stack_text("", "")
             .lines()
@@ -271,7 +303,7 @@ pub(crate) fn object_set_proto(e: &mut Engine, _t: Value, args: &[Value]) -> JsR
             .join(" <- ");
         tracing::info!(target: "dom_probe",
             site = "proto.swap", host = %host,
-            frag = is_frag, roteq, urpc, urpo,
+            frag = is_frag, roteq, urpc, urpo, pname = %pname,
             stack = %stack.chars().take(400).collect::<String>());
     }
     if let Some(o) = e.heap.obj_mut(id) {

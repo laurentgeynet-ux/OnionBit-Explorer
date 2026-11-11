@@ -1558,3 +1558,12 @@ Lot PIPE livré depuis la piste YoutubeFix (R-260, crates `explorer-css`/`explor
 - `DocumentFragment.call({})` jette `TypeError:illegal constructor` — conforme Chrome.
 - **État de fait** : la souscription `YC.attached` court avec `this` = le fragment-contrôleur (proto `d.prototype` → `urp` présent) ; le swap `b.__proto__=zc.prototype` lui ôte la chaîne (design polyfill) ; au dispatch `H.updateReduxProperties` → `@absent`. En Chrome le même swap s'applique à un objet de même forme → **l'écart doit être que `urp` est own sur l'objet chez Chrome** (copie own par un rail non encore nommé — `PAX`/`ZuN`/`k1Z` own-copy) **ou** `this` au `YC.attached` est un proxy `jYd` dont le get-trap rend `d.prototype.urp`. `urpo=false` mesuré chez nous.
 - **Note produit** : `ytd-browse` naît (`el.birth` node=2520) mais n'est pas inséré dans l'arbre (`nobrowse` récursif) — `appKids=27`. Le rejet redux ampute la boucle de dispatch (subscribers post-masthead ratés) mais n'empêche pas la création.
+
+
+## NAV — cran 54 (vol 9773) : le proto remplacé est `d.prototype` — l'objet swappé est le **contrôleur `new d`**, jamais un vrai `DocumentFragment`
+
+- Sonde `pname` (proto remplacé, via `is`/`constructor.name`) : les 22 swaps portent `pname=<tag>/d` — `d.prototype` pour **chaque** élément PolySi. Aucun objet à proto `DocumentFragment.prototype` n'est jamais swappé.
+- Receveur du rejet : pas de flag `pxy` → `this` dans `YC.attached` n'est **pas** un proxy `jYd`/`Pgm` → option « fallback proxy vers le proto de classe » **éliminée**.
+- Tableau désormais complet : `shadyUpgradeFragment(this)` re-prototype le contrôleur `new d` (`root===self`, `hostElement`/champs template own) `d.prototype`→`zc.prototype`. `urp` n'existe que sur `d.prototype` (mix `W`/`k1Z` à `_registered`) → perdu. En Chrome, même mécanisme → `urp` doit donc être **own** sur l'instance là-bas : le seul rail de copie own identifié est `PAX`→`ZuN`(`behavior.constructor.apply(inst)`), ou un rail `k1Z`-sur-inst.
+- **Cran 55 ouvert** : vérifier si `PAX`/`ZuN` copie les méthodes own en Chrome (constructeur de behavior qui assigne `this.urp = fn`) et pourquoi ce rail ne produit pas `urpo=true` chez nous — ou instrumenter le get de `updateReduxProperties` au moment de `YC.attached` pour voir quel objet le fournit.
+- Garde-fous vol maintenus : spawn watchdog + joblimit 4 Go + memwatch 5 Go, daemon 7032 RSS stable.
