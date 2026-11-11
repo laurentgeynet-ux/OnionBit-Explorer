@@ -1819,3 +1819,10 @@ Lot PIPE livré depuis la piste YoutubeFix (R-260, crates `explorer-css`/`explor
 - **Titre rendu** : « Me at the zoo » trouve dans un `YT-FORMATTED-STRING` de la watch page — le h1 vide vu plus tot etait un autre `h1` (searchbox/topbar) ; `ytInitialData` porte `videoPrimaryInfoRenderer` et le texte parvient au DOM.
 - **Zero `[[x]]` residuel** sur tout le document — le fix JS-C487 (`textContent=` -> `.data` sur CharacterData) a debouche le rail d'annotation complet : bindings texte ET attributs evalues, `Polymer.Async.microTask` vivant.
 - Bilan : apres JS-C487 la page watch est fonctionnellement complete ; SPA home/search/watch navigable ; rejets classes (attestation poToken, AbortError nominal).
+
+### cran 79 (vol 9773, daemon 8780) : pipeline media verifie jusqu'au 403 serveur — lecture bloquee par poToken, classifiee
+
+- **Shell lecteur OK** : `video` dans `html5-video-player`, `ytInitialPlayerResponse.streamingData` = 14 `adaptiveFormats`, `MediaSource` fonction + `createObjectURL` presente.
+- **Chaine** : player instancie -> URLs `videoplayback` obtenues -> fetch tentes -> **403** (cran 76 : pas de poToken sans backend attestation). `src`/`sources` vides en consequence.
+- Verdict : lecture video = blocage politique serveur Google, pas mur moteur. Rail `MediaSource`/player fonctionnel a hauteur de ce que le serveur autorise.
+- **Etat final de la campagne** : hydration Polymer, bindings `[[x]]`, SPA home/search/watch, recherche, titres — fonctionnels ; restants = perf structurelle (compile-time resolution) + politique serveur (poToken, nudge historique).
