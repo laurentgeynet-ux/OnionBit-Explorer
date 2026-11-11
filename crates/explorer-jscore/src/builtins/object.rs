@@ -305,6 +305,7 @@ pub(crate) fn object_set_proto(e: &mut Engine, _t: Value, args: &[Value]) -> JsR
             site = "proto.swap", host = %host,
             frag = is_frag, roteq, urpc, urpo, pname = %pname,
             ext = e.heap.obj(id).is_some_and(|o| o.extensible),
+            nt = ?e.get_prop_value(Value::Obj(id), "nodeType"),
             stack = %stack.chars().take(400).collect::<String>());
     }
     if let Some(o) = e.heap.obj_mut(id) {
