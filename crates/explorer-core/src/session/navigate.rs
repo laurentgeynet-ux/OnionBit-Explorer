@@ -490,6 +490,8 @@ impl Session {
             // cible repart de la position affichée).
             let sm = self.smooth_scroll_ms;
             let cur = entry.smooth_scroll.map_or(entry.scroll_y, |(f, t, s)| {
+                #[allow(clippy::cast_precision_loss, clippy::cast_possible_truncation)]
+                // durées ms ≪ 2^24.
                 let p = if sm == 0 {
                     1.0
                 } else {
@@ -985,8 +987,11 @@ impl Session {
         if !matches!(req.url.scheme(), "http" | "https") {
             return;
         }
-        let headers =
-            explorer_net::consent::seed_headers(self.consent_policy, std::time::SystemTime::now());
+        let headers = explorer_net::consent::seed_headers(
+            self.consent_policy,
+            std::time::SystemTime::now(),
+            &req.url.host(),
+        );
         if headers.is_empty() {
             return;
         }

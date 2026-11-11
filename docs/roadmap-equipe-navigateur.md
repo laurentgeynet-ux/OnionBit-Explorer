@@ -11778,3 +11778,24 @@ un crate PIPELINE.- [x] **JS-C422. Deadline honnête — canal session ↔ budge
   `TypeError` toujours servi). Verrou
   `c463_fn_caller_arguments` ×3 (sloppy/arrow→null,
   strict→TypeError, boucle d'accès) ; dom 246/246.
+
+- [x] **Étape 220. Graine `SOCS` scopée
+  Google — décision de consentement pour
+  `ytd-consent-bump*`** (`explorer-net`
+  `consent.rs` + `explorer-core`
+  `navigate.rs`, vol 805) : sans cookie de
+  décision Google, le lightbox
+  `ytd-consent-bump-v2` bouclait les
+  re-navigations (3 chargements/vol).
+  `seed_headers(policy, now, host)` émet
+  `SOCS` uniquement sur
+  `youtube.com`/`youtube-nocookie.com`/
+  `google.<tld>` — `CAISNQ…` (refus,
+  valeur uAssets) sous `RejectAll`,
+  `CAES…` (accord) sous `AcceptAll` ;
+  `CONSENT` omis (non relu). La décision
+  est portée, pas l'accord. Verrou
+  `socs_scope_google_uniquement`.
+  Diagnostic soldé : `hasNavigated=false`
+  post-boot nominal (adoption initiale
+  sans `yt-navigate-start`).

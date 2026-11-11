@@ -50,7 +50,10 @@ impl Session {
         if ms == 0 {
             return 1.0;
         }
-        (start.elapsed().as_secs_f64() * 1000.0 / ms as f64) as f32
+        #[allow(clippy::cast_precision_loss, clippy::cast_possible_truncation)]
+        // durées ms ≪ 2^24.
+        let p = (start.elapsed().as_secs_f64() * 1000.0 / ms as f64) as f32;
+        p
     }
 
     /// Tick `scroll-behavior:smooth` (R-259) : interpole la
