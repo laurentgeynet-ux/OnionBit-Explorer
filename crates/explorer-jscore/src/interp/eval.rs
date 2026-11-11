@@ -862,6 +862,36 @@ impl Engine {
                                             {
                                                 hints.push(format!("id:{s}"));
                                             }
+                                            // JS-C483 — le receveur
+                                            // zc porte-t-il la machinerie
+                                            // PolySi (own, survivant au
+                                            // re-proto) ? `psp`/`psi`/
+                                            // `urpo` (urp own ?).
+                                            for (k, tag) in [
+                                                ("polySiParams", "psp"),
+                                                ("polySiInfo", "psi"),
+                                                ("polySiContext", "psc"),
+                                                ("updateReduxProperties", "urpo"),
+                                                ("attached", "atto"),
+                                            ] {
+                                                if self.find_prop(*rid, k).is_some() {
+                                                    hints.push(tag.to_string());
+                                                }
+                                            }
+                                            // Rail d'invocation : les 3
+                                            // frames JS au sommet nomment
+                                            // qui appelle le hook sur le
+                                            // receveur swappé (cran 50).
+                                            let frames: Vec<String> = self
+                                                .call_stack
+                                                .iter()
+                                                .rev()
+                                                .take(3)
+                                                .map(Self::fn_label_of)
+                                                .collect();
+                                            if !frames.is_empty() {
+                                                hints.push(format!("stk:{}", frames.join("<")));
+                                            }
                                             if !hints.is_empty() {
                                                 format!(
                                                     "{}«{}»«{name}@{src}»",
