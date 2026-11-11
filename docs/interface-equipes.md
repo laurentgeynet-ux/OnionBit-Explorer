@@ -1779,3 +1779,10 @@ Lot PIPE livré depuis la piste YoutubeFix (R-260, crates `explorer-css`/`explor
 - **`unhandledrejection: undefined` nomme** : `kevlar_base:27271` = rail **attestation/poToken** (`pw4` chemin « potato », `A2J` retry backoff, `attestation_challenge_fetch`, `integrityToken`, poToken via `H.poo(X)` — fetcher d'attestation WebView/GMS). L'appel au backend d'integrite echoue dans notre moteur -> `F.reject()` sans raison -> rafales ×27/×31 (le backoff `A2J` `currBackoffCount_<10`). **Echec attendu hors Google** — pas de backend d'attestation ; rendu non bloque.
 - **`AbortError: animation canceled`** : `web-animations-next-lite` + `kevlar_base:5497-5507` — annulation d'animation a la suppression/retrait d'element ; nominal.
 - Reste possible (non bloquant) : faire reussir le fetch XHR `Kus` (POST protobuf + Api-Key) si le rejet vient d'une 4xx mal geree — verification ulterieure via `media_probe net.*` sur l'endpoint attestation.
+
+### cran 76 (vol 9773, daemon 12260) : chaine attestation refermee — XHR sain, poToken absent = 403 videoplayback attendus
+
+- **XHR/fetch bout-en-bout sain** : POST `/youtubei` -> `net.arr status=200` (~7.9 s aller-retour). La mecanique n'est pas en cause.
+- **Rail attestation** : jamais d'XHR ouvert — le chemin `pw4` utilise le fetcher injecte `H.poo` (« potato ») qui rejette `undefined` ; `Kus` (XHR POST protobuf + Api-Key) n'est pas atteint.
+- **Consequence observee** : `rr5---*.googlevideo.com/videoplayback` -> **403** x3 — sans poToken Google refuse les flux ; coherent avec la politique serveur anti-bot (Chrome sign-out voit des 403 similaires). Pas un mur moteur — implementer IntegrityToken API est hors perimetre.
+- Etat des rejets : `unhandledrejection: undefined` (attestation) et `AbortError` (annulation animation) = classes expliquees, non bloquantes, journal fermees.
