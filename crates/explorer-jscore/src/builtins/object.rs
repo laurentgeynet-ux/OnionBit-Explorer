@@ -312,7 +312,23 @@ pub(crate) fn object_set_proto(e: &mut Engine, _t: Value, args: &[Value]) -> JsR
             .lines()
             .map(str::trim)
             .filter(|l| l.starts_with("at "))
-            .take(6)
+            .take(12)
+            .map(|l| {
+                // Les URLs kevlar (~200 chars) noient le
+                // `:line:col` final — tag du script + queue.
+                let tag = if l.contains("kevlar") {
+                    "kb:"
+                } else if l.contains("webcomponents") {
+                    "wc:"
+                } else {
+                    "ot:"
+                };
+                if l.len() > 60 {
+                    format!("{}{}", tag, &l[l.len().saturating_sub(14)..])
+                } else {
+                    format!("{}{}", tag, l)
+                }
+            })
             .collect::<Vec<_>>()
             .join(" <- ");
         tracing::info!(target: "dom_probe",

@@ -1627,3 +1627,12 @@ Lot PIPE livré depuis la piste YoutubeFix (R-260, crates `explorer-css`/`explor
 - `pc.currentPage`/`pm.currentPage` = null ; `renderLoadingStateJobId="0"` ; `b.isAttached` falsy.
 - Faux suspects éliminés : `__shady_native_*` accesseurs bien installés sur `Node.prototype` (`typeof`="undefined" = getter natif appelé sur le proto, attendu) ; le throw `childNodes` wc_sd:61 = transitoire pré-`yc` snapshot (`pm.__shady.firstChild` maintenant object → `x()` true).
 - **Cran 61** : vérifier si le stamping (`q0f`/`_stampTemplate`/importNode) crée les binding-annotations (`propertyEffects`/`nodeInfo.bindings`) — la couche qui transforme `{{data}}` en `notifyPath` — c'est probablement notre vrai gap Polymer.
+
+
+## NAV — cran 61 (vol 9773) : pile du swap nommée — `_.L.created` (Ae.prototype) déclenche le swap du pc
+
+- `stack:` étendue (12 frames, tags kb:/wc: + queue `:line:col`) : `wc:96←wc:124←kb:15709(_.L.created)←kb:8995←kb:15711`. Le swap du pc est invoqué **depuis `_.L.created`** d'un objet Ae-family (lit `polySiParams` avec succès — absent sur notre pm/pc, own+chaîne).
+- Faits figés : `pm` et `pc` n'ont `polySi*` nulle part ; `pc.loadPage/updatePageData/attachPage/setActivePage` tous undefined (proto=zc). Le wrapper `FnY` forwardé : `W=(F!=null?F:X[w]); W?.call(X,…)` — `X[w]` mort → **no-op silencieux** (mesuré : `pm.updatePageData(app.data)` → undefined, aucun effet).
+- `data` sur `ytd-app` n'est lié par `{{}}` qu'au masthead (`topbarData`) — le pm reçoit ses données via `onYtPageDataFetched` → `_.Hu().resolve(_.Ru).updatePageData(this.data)` — `app.dataUpdatePromise`=null → probablement `_.Ru` non résolu ou updatePageData → forward no-op.
+- `ytd-browse` présent dans `pc.pagePool.pageNameToElement` (jamais attaché).
+- Hypothèse courante resserrée : le swap nominal frappe le **fragment stampé** en Chrome (`shadyUpgradeFragment:H.root` depuis `_.L.ready` ou `_attachDom(frag)`) — chez nous `root===self` au moment du second attach (`!F.shadowRoot` guard : `v(F).Xb` invisible → second `attachShadow` passe et promeut le pc). Le premier attach (frag, :8958) n'a PAS logué de swap — à vérifier : `_attachDom` a-t-il réellement appelé `attachShadow` ou a-t-il été court-circuité (`d.shadowRoot`/`!d`) ?
