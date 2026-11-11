@@ -1594,3 +1594,14 @@ Lot PIPE livré depuis la piste YoutubeFix (R-260, crates `explorer-css`/`explor
 - Rail d'insertion mesuré au symbole (`kevlar:9081800`) : `d.loadPage(H.response)` sur l'élément page — `typeof d.loadPage==="function"` requis sinon `_.fx(new _.R6("b/38014653",…))` → abandon. `d.loadPage` vient du forwarding `FnY`/`wig` (`ifV`) qui délègue à `this.polymerController[v]` → **le contrôleur doit garder ses méthodes post-swap** — donc en Chrome `oOJ.prototype` survit au swap (ou le forwarding copie la fonction own avant le swap).
 - `_template` = `null` sur pc/masthead (`tpl=false`) — normal PolySi (template minimal). `template.innerHTML` moteur OK.
 - **Cran 58** : déterminer si `wig`/`FnY` copie la référence de fonction (own sur `F.prototype` — survivrait) ou un déléguant (lit `pc[v]` à l'appel — casse) ; et pourquoi pm n'a même pas `urp`/`select` forwardés alors que masthead en a 2.
+
+
+## NAV — cran 58 (vol 9773, hpc) : chaîne causale complète — `ready()` jamais invoqué → swap du contrôleur, pas du fragment
+
+- `FnY` copie la référence de fonction en own sur l'élément (`H[w]=function(){…X[w]…}`), `wig` = accesseurs déléguants ; `Pgm` ne crée un Proxy que sous flag logging (`mA`), get-trap sans fallback proto. Pas de rail de survie.
+- **Mesure `hpc` (nouveau flag)** : 22 swaps, **un par élément**, tous `hpc=true` + `roteq=true` → l'objet passé à `shadyUpgradeFragment` est le `polymerController` lui-même (`u.root=u`), jamais un fragment stampé.
+- Site kevlar (`kevlar:…`): `F=_.QI(F); if(!F.shadowRoot||X)F.attachShadow({mode:"open",shadyUpgradeFragment:H.root})` — `H.root` = `u` tant que `_stampTemplate` n'a pas réassigné `u.root`.
+- `u.root` n'est réassigné que par `ready()`/`_stampTemplate`, atteints via `ELO(this)` ← `_.L.connectedCallback` ← le forward `connectedCallback` posé par `FnY` sur l'élément. `didCallReady=false` + `ipec=false` + pm sans aucun forward → **le contrôleur n'est jamais « connecté »** → `root` reste `u` → `attachShadow` promeut le contrôleur → `oOJ.prototype` (`loadPage`/`attached`/`pagePool`) perdu → `ytd-browse` orphelin.
+- En Chrome : `ready` tourne (CE `connectedCallback` de l'élément forwardé au contrôleur) → `root`=fragment → le swap frappe le fragment, `d.prototype` survit sur le contrôleur → `loadPage` forwardé → insertion.
+- **Divergence racine resserrée** : pourquoi `polySiParams`/`behaviors` sont vides au moment où `ifV` énumère les méthodes à forwarder pour pm (masthead en a 2 — `urp`/`select` — mais pas `connectedCallback` non plus). Suspect : `Ae.call`/`P` (ctor posant `polySiInfo`/`polySiParams`) jamais atteint dans la chaîne `new X` de `TLo` — le ctor `d` généré par `c2q` n'appelle pas la couche `Ae` chez nous.
+- Instrumentation ajoutée : flags `nt` (nodeType own) + `hpc` (b===hostElement.polymerController) au `proto.swap`.

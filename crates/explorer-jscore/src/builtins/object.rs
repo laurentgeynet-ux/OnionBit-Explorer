@@ -293,6 +293,20 @@ pub(crate) fn object_set_proto(e: &mut Engine, _t: Value, args: &[Value]) -> JsR
                 }
             })
             .unwrap_or_else(|| "null".to_string());
+        // Cran 58 — `nodeType` own (11 = vrai fragment) et
+        // `hpc` : `b` est-il le `polymerController` de son
+        // hôte ? (contrôleur swappé → méthodes de classe
+        // perdues → `loadPage` meurt).
+        let nt = e
+            .get_prop_value(Value::Obj(id), "nodeType")
+            .ok()
+            .and_then(|v| e.to_js_string(v).ok())
+            .unwrap_or_else(|| "?".to_string());
+        let hpc = e
+            .get_prop_value(Value::Obj(id), "hostElement")
+            .ok()
+            .and_then(|h| e.get_prop_value(h, "polymerController").ok())
+            .is_some_and(|pc| e.strict_eq(&pc, &Value::Obj(id)));
         let stack: String = e
             .stack_text("", "")
             .lines()
@@ -305,7 +319,7 @@ pub(crate) fn object_set_proto(e: &mut Engine, _t: Value, args: &[Value]) -> JsR
             site = "proto.swap", host = %host,
             frag = is_frag, roteq, urpc, urpo, pname = %pname,
             ext = e.heap.obj(id).is_some_and(|o| o.extensible),
-            nt = ?e.get_prop_value(Value::Obj(id), "nodeType"),
+            nt = %nt, hpc,
             stack = %stack.chars().take(400).collect::<String>());
     }
     if let Some(o) = e.heap.obj_mut(id) {
