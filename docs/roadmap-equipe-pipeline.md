@@ -4082,9 +4082,14 @@ le census `site_harvest` arbitre les ex æquo.
   paire area = UNE candidate. Le chemin `position-area`
   propre passe par la même table (mot-clé seul → autre axe
   `span-all` ≈ centré, plus proche spec que l'aligné-start).
-- [ ] `break-*` multicol — `break-before`/`break-after`/
-  `break-inside:avoid` entre/dans colonnes (le moteur pose
-  déjà `column-count`/`column-rule`).
+- [x] **R-268** — `break-*` multicol complété : alias
+  legacy `page-break-before`/`page-break-after` lus comme
+  shorthands de `break-*` (css-break-3 §4.1 — `break-*`
+  prime) ; `avoid`/`avoid-column` garde les unités
+  ensemble (best-effort, la coupure forcée l'emporte) ;
+  valeurs `recto`/`verso`/`all`/`region` absorbées dans
+  l'ensemble de forçage. `break-inside:avoid` +
+  `page-break-inside` honorés de fait (unités insécables).
 - [ ] `alignment-baseline` — baseline inline : `alphabetic`/
   `central`/`hanging`/`ideographic`/`mathematical`/`middle`.
 - [ ] `vertical-align:top` — voir Sprint 1 si non soldé.

@@ -2825,9 +2825,16 @@ fn partition_units(
 /// colonne atteinte par son sommet, §7.1) — puis translate
 /// chacune à sa place réelle. `break-before|after: column`
 /// force un saut vers la colonne suivante (R-181 ; `page`/
-/// `always`/`left`/`right` absorbés — pas de média paginé).
-/// `break-inside:avoid` est honoré de fait : aucune unité
-/// n'est jamais coupée. Renvoie la hauteur consommée.
+/// `always`/`left`/`right`/`recto`/`verso`/`all`/`region`
+/// absorbés — pas de média paginé). R-268 : alias legacy
+/// `page-break-*` lus comme shorthands de `break-*`
+/// (css-break-3 §4.1 — `break-*` prime si déclaré) ;
+/// `avoid`/`avoid-column` sur `break-*` = garder l'unité
+/// avec sa voisine (best-effort — une coupure forcée de
+/// l'autre côté l'emporte, spec §3). `break-inside:avoid`
+/// (+ `page-break-inside`, `avoid-*`) est honoré de fait :
+/// aucune unité n'est jamais coupée. Renvoie la hauteur
+/// consommée.
 #[allow(clippy::cast_possible_truncation)]
 #[allow(clippy::cast_sign_loss)]
 #[allow(clippy::cast_precision_loss)]
@@ -2852,11 +2859,31 @@ fn balance_segment(
     let mut max_h = 0.0_f32;
     let mut prev_col = usize::MAX;
     let mut prev_break = false;
-    let col_break = |c: &LayoutBox, prop: &str| {
+    let mut prev_keep = false;
+    // `break-*` prime sur l'alias `page-break-*` (§4.1).
+    let bv = |c: &LayoutBox, canon: &str, legacy: &str| -> Option<String> {
         c.style
-            .get(prop)
-            .is_some_and(|v| matches!(v.trim(), "column" | "page" | "always" | "left" | "right"))
+            .get(canon)
+            .or_else(|| c.style.get(legacy))
+            .map(|v| v.trim().to_ascii_lowercase())
     };
+    let force = |v: Option<&str>| {
+        matches!(
+            v,
+            Some(
+                "column"
+                    | "page"
+                    | "always"
+                    | "left"
+                    | "right"
+                    | "recto"
+                    | "verso"
+                    | "all"
+                    | "region"
+            )
+        )
+    };
+    let keep = |v: Option<&str>| matches!(v, Some("avoid" | "avoid-column"));
     for c in units.iter_mut() {
         let rel = if fill_cap.is_some() {
             c.rect.y - top
@@ -2868,11 +2895,24 @@ fn balance_segment(
         } else {
             0
         };
-        if (col_break(c, "break-before") || prev_break) && prev_col != usize::MAX && col <= prev_col
-        {
+        let before = bv(c, "break-before", "page-break-before");
+        let forced = force(before.as_deref()) || prev_break;
+        if forced && prev_col != usize::MAX && col <= prev_col {
             col = (prev_col + 1).min(n_cols - 1);
         }
-        prev_break = col_break(c, "break-after");
+        // `avoid` : sans coupure forcée, l'unité reste dans la
+        // colonne de sa voisine quand l'équilibre voulait
+        // les séparer.
+        if !forced
+            && col > prev_col
+            && prev_col != usize::MAX
+            && (prev_keep || keep(before.as_deref()))
+        {
+            col = prev_col;
+        }
+        let after = bv(c, "break-after", "page-break-after");
+        prev_break = force(after.as_deref());
+        prev_keep = keep(after.as_deref());
         prev_col = col;
         let origin = *origins[col].get_or_insert(c.rect.y);
         // `u.x - x0` préserve l'indentation propre à l'unité ;

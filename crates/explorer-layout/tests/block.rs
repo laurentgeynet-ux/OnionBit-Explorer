@@ -3064,6 +3064,96 @@ fn multicol_span_et_break() {
     );
 }
 
+/// R-268 — alias legacy `page-break-*` (css-break-3 §4.1 :
+/// shorthands de `break-*`, `always` = saut de colonne en
+/// multicol — `break-*` prime si les deux sont déclarés).
+#[test]
+fn multicol_page_break_alias() {
+    // `page-break-before:always` → saut de colonne.
+    let (dom, bx) = laid(
+        "<div id=c><p id=a>a</p><p id=b>b</p></div>",
+        "#c{column-count:2;column-gap:10px;width:210px} \
+         p{margin:0} #b{page-break-before:always}",
+    );
+    let a = find(&bx, by_id(&dom, "a"));
+    let b = find(&bx, by_id(&dom, "b"));
+    assert!(
+        b.rect.x > a.rect.x + 50.0,
+        "page-break-before:always → b colonne 2 : {}",
+        b.rect.x
+    );
+    // `page-break-after:always` sur la 1re pousse la 2e.
+    let (dom2, bx2) = laid(
+        "<div id=c><p id=a>a</p><p id=b>b</p></div>",
+        "#c{column-count:2;column-gap:10px;width:210px} \
+         p{margin:0} #a{page-break-after:always}",
+    );
+    let a2 = find(&bx2, by_id(&dom2, "a"));
+    let b2 = find(&bx2, by_id(&dom2, "b"));
+    assert!(
+        b2.rect.x > a2.rect.x + 50.0,
+        "page-break-after:always → b colonne 2 : {}",
+        b2.rect.x
+    );
+    // `break-*` prime : `break-before:auto` bat
+    // `page-break-before:always` — pas de saut forcé.
+    let (dom3, bx3) = laid(
+        "<div id=c><p id=a>a</p><p id=b>b</p></div>",
+        "#c{column-count:2;column-gap:10px;width:210px} \
+         p{margin:0} #b{page-break-before:always;break-before:auto}",
+    );
+    let a3 = find(&bx3, by_id(&dom3, "a"));
+    let b3 = find(&bx3, by_id(&dom3, "b"));
+    // Équilibre naturel 2 unités / 2 colonnes → b en col 2
+    // quand même : le test discriminant est le CAS `avoid`
+    // ci-dessous — ici on vérifie juste que `auto` ne
+    // force rien de plus que le placement naturel.
+    assert!(b3.rect.x >= a3.rect.x, "break-before:auto inerte");
+}
+
+/// R-268 — `break-*:avoid`/`avoid-column` garde les unités
+/// ensemble : sans lui `b` partirait en colonne 2 (équilibre
+/// au milieu) — il reste avec `a`. Une coupure forcée
+/// (`break-before:column` sur l'unité suivante) l'emporte.
+#[test]
+fn multicol_break_avoid() {
+    let (dom, bx) = laid(
+        "<div id=c><p id=a>a</p><p id=b>b</p><p id=c2>c</p></div>",
+        "#c{column-count:2;column-gap:10px;width:210px} \
+         p{margin:0} #a{break-after:avoid}",
+    );
+    let a = find(&bx, by_id(&dom, "a"));
+    let b = find(&bx, by_id(&dom, "b"));
+    let c2 = find(&bx, by_id(&dom, "c2"));
+    assert_eq!(
+        a.rect.x, b.rect.x,
+        "break-after:avoid → b garde la colonne de a"
+    );
+    assert!(c2.rect.x > a.rect.x + 50.0, "c en colonne 2");
+    // `break-before:avoid-column` sur l'unité elle-même.
+    let (dom2, bx2) = laid(
+        "<div id=c><p id=a>a</p><p id=b>b</p></div>",
+        "#c{column-count:2;column-gap:10px;width:210px} \
+         p{margin:0} #b{break-before:avoid-column}",
+    );
+    let a2 = find(&bx2, by_id(&dom2, "a"));
+    let b2 = find(&bx2, by_id(&dom2, "b"));
+    assert_eq!(a2.rect.x, b2.rect.x, "avoid-column → b garde a");
+    // La coupure forcée l'emporte sur l'`avoid` (spec §3).
+    let (dom3, bx3) = laid(
+        "<div id=c><p id=a>a</p><p id=b>b</p></div>",
+        "#c{column-count:2;column-gap:10px;width:210px} \
+         p{margin:0} #a{break-after:avoid} #b{break-before:column}",
+    );
+    let a3 = find(&bx3, by_id(&dom3, "a"));
+    let b3 = find(&bx3, by_id(&dom3, "b"));
+    assert!(
+        b3.rect.x > a3.rect.x + 50.0,
+        "break-before:column > break-after:avoid : {}",
+        b3.rect.x
+    );
+}
+
 /// R-182 — quirks profond : `N` nu = Npx dans les valeurs,
 /// `color:abc` sans `#`, `%`-height traversant les ancêtres
 /// `auto`, sélecteurs classe/id ASCII-insensibles.
