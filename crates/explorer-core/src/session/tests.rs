@@ -371,6 +371,7 @@ fn cull_keeps_only_in_frame_items() {
         },
         color: Color::BLACK,
         radii: [0.0; 4],
+        corners: [1.0; 4],
     };
     let mut list = DisplayList {
         items: vec![
@@ -5172,9 +5173,11 @@ fn document_cookie_reflete_le_jar_session() {
     s.set_js_factory(explorer_js::JscoreEngine::factory());
     let tab = s.open_tab();
     let url = Url::parse("https://www.youtube.com/").unwrap();
-    assert!(s
-        .cookies
-        .set_from_header_ctx(&url, "SEEDX=abc123; Path=/; SameSite=Lax; Max-Age=3600", None));
+    assert!(s.cookies.set_from_header_ctx(
+        &url,
+        "SEEDX=abc123; Path=/; SameSite=Lax; Max-Age=3600",
+        None
+    ));
     s.tabs.get_mut(&tab).unwrap().url = Some(url);
     let html = "<!doctype html><html><body></body></html>";
     let mut eng = s.spawn_engine(tab, html, true, "").unwrap();

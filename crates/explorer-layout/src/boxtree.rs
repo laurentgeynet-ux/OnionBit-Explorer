@@ -849,10 +849,18 @@ fn child_boxes<S: ::std::hash::BuildHasher>(
             // éléments en-ligne (`<b>x</b> <b>y</b>`). C'est
             // `wrap_anonymous` qui les tronque en bord de run.
             if !text.is_empty() {
+                let mut tstyle = parent_style.clone();
+                // R-275 — `hyphens:auto` : la langue se résout
+                // au plus proche `lang`/`xml:lang` ancêtre
+                // (même règle que `:lang`, selector.rs) —
+                // pseudo-prop `x-lang` pour l'itemisation.
+                if let Some(l) = inherited_lang(dom, child) {
+                    tstyle.set("x-lang", &l);
+                }
                 out.push(LayoutBox {
                     kind: BoxKind::Text,
                     node: Some(child),
-                    style: parent_style.clone(),
+                    style: tstyle,
                     text: Some(text.to_string()),
                     children: Vec::new(),
                     lines: Vec::new(),
@@ -2003,6 +2011,26 @@ fn counter_roman(n: i32, upper: bool) -> String {
     } else {
         out.to_lowercase()
     }
+}
+
+/// R-275 — `lang`/`xml:lang` héritée : attribut le plus
+/// proche en remontant depuis `node` (même règle que
+/// `:lang`, selector.rs — `hyphens:auto` la lit en
+/// `x-lang`).
+fn inherited_lang(dom: &Dom, node: NodeId) -> Option<String> {
+    let mut cur = Some(node);
+    while let Some(n) = cur {
+        for attr in ["lang", "xml:lang"] {
+            if let Ok(Some(l)) = dom.attribute(n, attr) {
+                let l = l.trim();
+                if !l.is_empty() {
+                    return Some(l.to_string());
+                }
+            }
+        }
+        cur = dom.parent(n).ok().flatten();
+    }
+    None
 }
 
 /// Mesures des conteneurs `@container` (R-190 — css-contain-3,

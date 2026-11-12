@@ -4174,9 +4174,31 @@ le census `site_harvest` arbitre les ex æquo.
   `scrollable` (pas de moteur de scroll-state). Verrou :
   `container_type_size_contient_la_taille` (size → h~0,
   inline-size → h contenu, normal témoin, height:80px gagne).
-- [ ] `table-layout:fixed` — algo table fixe (largeurs par
-  première ligne).
-- [ ] `hyphens` réel — dictionnaire de césure.
+- [x] `table-layout:fixed` — **déjà honnête** (§17.5.2.1 :
+  largeurs par `<col>` + premier rang, distribution auto) —
+  le `miss` restant est un artefact d'oracle, journalisé.
+- [x] **R-275 — `hyphens` réel** (~10) — `text::hyphen_points`
+  : splitter syllabique borné latin (`v-cv`, `vc-cv`,
+  clusters inséparables `ch`/`ph`/liquides → avant le groupe,
+  doublées → entre les deux, `y` contextuel, `e` muet final
+  FR ; `lang` via pseudo-prop `x-lang` posée à la
+  boxification depuis `lang`/`xml:lang` hérité). `Piece.
+  hyph_before` : `split_hyphens` redécoupe aux `&shy;`
+  (U+00AD — `manual`/`auto`, consommé ; `none` → caractère
+  supprimé du run) + points `auto` ; `carry_hyph` propage le
+  drapeau quand l'itemiseur UAX #14 a déjà coupé au shy
+  (fin/tête de pièce). `hyphenate-limit-chars` `[<int>{1,3}]`
+  = (total, avant, après), défaut borné (5,2,2) — ne
+  contraint que l'automatique. Coupure en coulage : le
+  fragment `hyphenate-character` (défaut `-`, `<string>`
+  supporté) est shapé puis posé en fin de ligne ; `word_tail`
+  (sommes de queue par run) permet de couper au **dernier
+  point valable** sans backtracking quand le tiret au point
+  suivant déborderait ; `hyphenate-limit-lines` borne les
+  lignes consécutives césurées. Verrou :
+  `hyphens_auto_coupe_avec_tiret_et_shy` (auto → tiret,
+  `none` → insécable, `&shy;` `manual` → coupure, caractère
+  `~` custom).
 
 ### Queue P2 — valeurs unitaires exotiques (~300)
 

@@ -94,10 +94,12 @@ fn encode(resp: &Response) -> Vec<u8> {
 }
 
 /// Désérialise le format [`encode`] : `status\n` + `reason\n`
-/// + en-têtes `k\tv` + ligne vide + corps. La `reason` peut
-/// être **vide** (HTTP/2 n'a pas de phrase) — le premier
-/// `\n\n` n'est donc PAS une borne tête/corps fiable : on
-/// lit ligne par ligne depuis le début.
+/// + en-têtes `k\tv` + ligne vide + corps.
+///
+/// La `reason` peut être **vide** (HTTP/2 n'a pas de
+/// phrase) — le premier `\n\n` n'est donc PAS une borne
+/// tête/corps fiable : on lit ligne par ligne depuis le
+/// début.
 fn decode(bytes: &[u8]) -> Option<Response> {
     fn line<'a>(bytes: &'a [u8], pos: &mut usize) -> Option<&'a [u8]> {
         let rel = bytes[*pos..].iter().position(|&b| b == b'\n')?;

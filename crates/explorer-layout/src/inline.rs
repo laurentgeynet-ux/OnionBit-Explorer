@@ -260,6 +260,11 @@ struct Piece {
     /// avance n'est pas shapée mais résolue au coulage
     /// d'après les taquets `tab-size` (§8.1).
     tab: bool,
+    /// R-275 — la pièce suit une **opportunité de césure**
+    /// (`&shy;` explicite ou point `hyphens:auto`) : si la
+    /// ligne coupe ici, le fragment précédent gagne le
+    /// `hyphenate-character` en fin de ligne.
+    hyph_before: bool,
 }
 
 /// Niveau d'imbrication du paragraphe depuis `direction`
@@ -1051,6 +1056,7 @@ fn text_item(
                         level,
                         hard_after: br.mandatory && ends_hard_break(p),
                         tab: false,
+                        hyph_before: false,
                     });
                 }
                 prev = br.offset;
@@ -1064,6 +1070,7 @@ fn text_item(
                     level,
                     hard_after: ends_hard_break(p),
                     tab: false,
+                    hyph_before: false,
                 });
             }
         }
@@ -1082,6 +1089,24 @@ fn text_item(
     // APRES elle — voir le point de décision plus bas).
     if ws_collapse == WsCollapse::BreakSpaces {
         pieces = pieces.into_iter().flat_map(explode_break_spaces).collect();
+    }
+    // R-275 — `hyphens` : re-découpe aux opportunités de
+    // césure (`&shy;` pour `manual`/`auto`, points auto du
+    // splitter `lang`). `none` et l'absence de `&shy;`
+    // passent par le chemin rapide.
+    let hyphens = b
+        .style
+        .get("hyphens")
+        .unwrap_or("manual")
+        .trim()
+        .to_string();
+    if hyphens != "manual" || pieces.iter().any(|p| p.text.contains('\u{AD}')) {
+        pieces = split_hyphens(
+            pieces,
+            &hyphens,
+            b.style.get("x-lang").unwrap_or(""),
+            &b.style,
+        );
     }
     let mut style = b.style.clone();
     if ruby_tier > 0 {
@@ -1117,6 +1142,7 @@ fn split_tabs(pieces: Vec<Piece>) -> Vec<Piece> {
                     level: p.level,
                     hard_after: false,
                     tab: false,
+                    hyph_before: false,
                 });
             }
             split.push(Piece {
@@ -1125,6 +1151,7 @@ fn split_tabs(pieces: Vec<Piece>) -> Vec<Piece> {
                 level: p.level,
                 hard_after: false,
                 tab: true,
+                hyph_before: false,
             });
             rest = &rest[i + 1..];
         }
@@ -1135,6 +1162,7 @@ fn split_tabs(pieces: Vec<Piece>) -> Vec<Piece> {
                 level: p.level,
                 hard_after: p.hard_after,
                 tab: false,
+                hyph_before: false,
             });
         } else if p.hard_after {
             if let Some(last) = split.last_mut() {
@@ -1164,6 +1192,7 @@ fn explode_break_spaces(p: Piece) -> Vec<Piece> {
                 level: p.level,
                 hard_after: false,
                 tab: false,
+                hyph_before: false,
             });
         }
         cur.push(c);
@@ -1174,6 +1203,7 @@ fn explode_break_spaces(p: Piece) -> Vec<Piece> {
                 level: p.level,
                 hard_after: false,
                 tab: false,
+                hyph_before: false,
             });
         }
     }
@@ -1184,6 +1214,7 @@ fn explode_break_spaces(p: Piece) -> Vec<Piece> {
             level: p.level,
             hard_after: p.hard_after,
             tab: false,
+            hyph_before: false,
         });
     } else if p.hard_after {
         if let Some(last) = out.last_mut() {
@@ -1191,6 +1222,177 @@ fn explode_break_spaces(p: Piece) -> Vec<Piece> {
         }
     }
     out
+}
+
+/// Candidats de coupure d'une pièce — paires (fin du segment
+/// précédent, début du suivant) : `&shy;` → la coupure
+/// consomme le caractère (i, i+2 octets) ; point `auto` →
+/// (off, off), par run alphabétique via
+/// [`text::hyphen_points`], borné `lim` = (total, avant,
+/// après).
+fn hyph_candidates(
+    text: &str,
+    auto: bool,
+    none: bool,
+    lim: (usize, usize, usize),
+    lang: &str,
+) -> Vec<(usize, usize)> {
+    let mut bounds: Vec<(usize, usize)> = Vec::new();
+    if !none {
+        bounds.extend(text.match_indices('\u{AD}').map(|(i, _)| (i, i + 2)));
+    }
+    if auto {
+        let chars: Vec<(usize, char)> = text.char_indices().collect();
+        let mut rs = 0usize;
+        while rs < chars.len() {
+            // Run alphabétique maximal.
+            if !chars[rs].1.is_alphabetic() {
+                rs += 1;
+                continue;
+            }
+            let mut re = rs;
+            while re < chars.len() && chars[re].1.is_alphabetic() {
+                re += 1;
+            }
+            let (b0, b1) = (chars[rs].0, chars.get(re).map_or(text.len(), |&(o, _)| o));
+            let nch = re - rs;
+            if nch >= lim.0 {
+                for off in text::hyphen_points(&text[b0..b1], lang) {
+                    // Position char dans le run pour les
+                    // bornes avant/après.
+                    let ci = text[b0..b0 + off].chars().count();
+                    if ci >= lim.1 && nch - ci >= lim.2 {
+                        bounds.push((b0 + off, b0 + off));
+                    }
+                }
+            }
+            rs = re;
+        }
+    }
+    bounds
+}
+
+/// R-275 — `hyphens` (css-text-3 §6.1) : re-découpe des
+/// pièces aux opportunités de césure. `&shy;` (U+00AD) est
+/// un caractère de format — **retiré du texte dans tous les
+/// modes** : `none` sans ouvrir de coupure, `manual`/`auto`
+/// en ouvrant une opportunité `hyph_before` (le fragment
+/// précédent gagne le `hyphenate-character` si la ligne
+/// coupe ici). `auto` ajoute les points de
+/// [`text::hyphen_points`] par run alphabétique (`lang` =
+/// pseudo-prop `x-lang` posée à la boxification), filtrés
+/// par `hyphenate-limit-chars` `[auto|<int>{1,3}]` =
+/// (total, avant, après) — défaut UA borné (5, 2, 2) ;
+/// les limites ne contraindent que l'automatique, jamais
+/// le `&shy;` explicite (intention de l'auteur).
+fn split_hyphens(pieces: Vec<Piece>, mode: &str, lang: &str, st: &ComputedStyle) -> Vec<Piece> {
+    let mut lim = (5usize, 2usize, 2usize);
+    if let Some(v) = st.get("hyphenate-limit-chars") {
+        let v = v.trim();
+        if v != "auto" {
+            let ns: Vec<usize> = v
+                .split_whitespace()
+                .filter_map(|t| t.parse().ok())
+                .collect();
+            if let Some(&t) = ns.first() {
+                lim.0 = t;
+            }
+            if let Some(&b) = ns.get(1) {
+                lim.1 = b;
+            }
+            lim.2 = ns.get(2).copied().unwrap_or(lim.1);
+        }
+    }
+    let auto = mode == "auto";
+    let none = mode == "none";
+    let mut out = Vec::with_capacity(pieces.len());
+    // Une pièce finissant pile sur un `&shy;` (l'itemiseur
+    // UAX #14 coupe souvent juste après le caractère) rend
+    // la pièce SUIVANTE continuation du même mot — sinon le
+    // tiret n'apparaîtrait jamais à la coupure prise là.
+    let mut carry_hyph = false;
+    for mut p in pieces {
+        let has_shy = p.text.contains('\u{AD}');
+        if p.tab || (!has_shy && !auto) {
+            if carry_hyph && !p.tab && !p.text.trim_matches(text::is_css_ws).is_empty() {
+                p.hyph_before = true;
+            }
+            carry_hyph = false;
+            out.push(p);
+            continue;
+        }
+        let mut bounds = hyph_candidates(&p.text, auto, none, lim, lang);
+        if bounds.is_empty() {
+            // `&shy;` présent sans coupure admise (`none`) —
+            // le caractère disparaît du texte shapé.
+            if has_shy {
+                out.push(Piece {
+                    text: p.text.replace('\u{AD}', ""),
+                    dir: p.dir,
+                    level: p.level,
+                    hard_after: p.hard_after,
+                    tab: false,
+                    hyph_before: p.hyph_before || carry_hyph,
+                });
+            } else {
+                out.push(p);
+            }
+            carry_hyph = false;
+            continue;
+        }
+        bounds.sort_unstable();
+        bounds.dedup();
+        let ends_on_shy = p.text.ends_with('\u{AD}');
+        let mut prev = 0usize;
+        let mut pushed = carry_hyph || p.hyph_before;
+        for &(end, start) in &bounds {
+            if end > prev {
+                let seg = p.text[prev..end].replace('\u{AD}', "");
+                out.push(Piece {
+                    text: seg,
+                    dir: p.dir,
+                    level: p.level,
+                    hard_after: false,
+                    tab: false,
+                    hyph_before: pushed,
+                });
+            }
+            // Tout candidat consommé — y compris un shy en
+            // TÊTE de pièce (`end == 0`, rien émis) — est une
+            // coupure avant ce qui suit.
+            pushed = true;
+            prev = prev.max(start);
+        }
+        if prev < p.text.len() {
+            let seg = p.text[prev..].replace('\u{AD}', "");
+            out.push(Piece {
+                text: seg,
+                dir: p.dir,
+                level: p.level,
+                hard_after: p.hard_after,
+                tab: false,
+                hyph_before: pushed,
+            });
+        } else if p.hard_after {
+            if let Some(last) = out.last_mut() {
+                last.hard_after = true;
+            }
+        }
+        carry_hyph = ends_on_shy;
+    }
+    out
+}
+
+/// `hyphenate-character` (css-text-4 §6.3) : `<string>` ou
+/// `auto` → `"-"` (U+002D — la forme U+2010 dépend de la
+/// fonte, borne documentée).
+fn hyphenate_character(st: &ComputedStyle) -> String {
+    st.get("hyphenate-character")
+        .map(str::trim)
+        .filter(|v| *v != "auto")
+        .map(|v| v.trim_matches('"').trim_matches('\'').to_string())
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(|| "-".to_string())
 }
 
 /// §8.1 — `tab-size` : `<number>` = multiple de l'avance
@@ -2149,7 +2351,82 @@ fn break_into_lines(
             ws_collapse,
             WsCollapse::Preserve | WsCollapse::PreserveSpaces | WsCollapse::BreakSpaces
         );
-        for piece in &item.pieces {
+        // R-275 — `hyphens` : une pièce `hyph_before` qui ne
+        // tient pas → la ligne coupe avec le
+        // `hyphenate-character` à son bord (glyphe shapé une
+        // fois — il doit LUI-MÊME tenir, sinon le point est
+        // invalide et la pièce poursuit, mot insécable).
+        // `hyphenate-limit-lines` borne les lignes consécutives
+        // césurées (défaut `no-limit`).
+        let hyph_char = hyphenate_character(&item.style);
+        let hyph_shaped = ctx.fonts.and_then(|src| {
+            ctx.font_cache.borrow_mut().shape(
+                src,
+                &font_req,
+                &hyph_char,
+                fs,
+                false,
+                crate::block::letter_spacing_px(&item.style, fs, ctx),
+            )
+        });
+        let hyph_limit: usize = item
+            .style
+            .get("hyphenate-limit-lines")
+            .and_then(|v| v.trim().parse().ok())
+            .unwrap_or(usize::MAX);
+        let mut hyph_streak = 0usize;
+        let hyph_w = measure(&hyph_char);
+        // R-275 — `word_tail[i]` : largeur du RESTE du mot à partir
+        // de la pièce i (somme des pièces chaînées par
+        // `hyph_before`). Sert à couper au DERNIER point de
+        // césure valable sans backtracking : quand la pièce
+        // tient mais que le mot déborde et que le point
+        // suivant ne peut plus recevoir le tiret, on coupe ici.
+        let mut word_tail = vec![0.0f32; item.pieces.len()];
+        if item.pieces.iter().any(|p| p.hyph_before) {
+            let mut run_w = 0.0f32;
+            for i in (0..item.pieces.len()).rev() {
+                if i + 1 < item.pieces.len() && !item.pieces[i + 1].hyph_before {
+                    run_w = 0.0;
+                }
+                run_w += measure(item.pieces[i].text.as_str());
+                word_tail[i] = run_w;
+            }
+        }
+        // Pousser le glyphe de césure en fin de ligne puis
+        // casser — factorise les deux sites de coupure (pièce
+        // qui déborde, dernier point valable).
+        macro_rules! hyph_break {
+            ($level:expr) => {{
+                let hyph_base = hyph_shaped.as_ref().map_or(fs * 0.8, |s| s.metrics.ascent);
+                acc.frags.push(Fragment {
+                    node: item.node,
+                    owner: item.owner,
+                    text: hyph_char.clone(),
+                    atomic: false,
+                    aid: None,
+                    style: frag_style.clone(),
+                    rect: Rect {
+                        x: cursor_x,
+                        y: cursor_y,
+                        width: hyph_w,
+                        height: lh,
+                    },
+                    baseline: hyph_base,
+                    shaped: hyph_shaped.clone(),
+                    trail_w: 0.0,
+                    marg_l: 0.0,
+                    marg_r: 0.0,
+                    marg_t: 0.0,
+                    marg_b: 0.0,
+                    deco: item.deco.clone(),
+                    level: $level,
+                });
+                hyph_streak += 1;
+                new_line!();
+            }};
+        }
+        for (pi, piece) in item.pieces.iter().enumerate() {
             // §8.1 — taquet de tabulation (`pre`/`pre-wrap`) :
             // l'avance mène au prochain multiple de `tab-size`
             // compté depuis le bord de départ du conteneur de
@@ -2299,7 +2576,44 @@ fn break_into_lines(
                 && cursor_x - line_x + pw > line_w + 0.01
                 && !acc.is_empty()
             {
-                new_line!();
+                // R-275 — `hyph_before` : la coupure n'est
+                // valable qu'avec le tiret à sa place — s'il
+                // déborde lui-même (ou la limite de lignes
+                // consécutives est atteinte), la pièce reste
+                // sur la ligne (mot insécable — borne).
+                if piece.hyph_before {
+                    if hyph_streak < hyph_limit && cursor_x + hyph_w <= line_x + line_w + 0.01 {
+                        hyph_break!(piece.level);
+                    } else {
+                        hyph_streak = 0;
+                    }
+                    // Point non valable : PAS de coupure — la
+                    // pièce poursuit sur la ligne (rejoint sa
+                    // première moitié, déborde comme un mot
+                    // insécable).
+                } else {
+                    hyph_streak = 0;
+                    new_line!();
+                }
+            } else if piece.hyph_before
+                && !no_wrap
+                && !hangs
+                && !acc.is_empty()
+                && item.pieces.get(pi + 1).is_some_and(|next| next.hyph_before)
+                && cursor_x - line_x + word_tail[pi] > line_w + 0.01
+                && cursor_x - line_x + pw + hyph_w > line_w + 0.01
+                && hyph_streak < hyph_limit
+                && cursor_x + hyph_w <= line_x + line_w + 0.01
+            {
+                // Dernier point de césure VALABLE : la pièce
+                // tient mais le mot déborde et le point
+                // suivant (bordure droite de cette pièce) ne
+                // peut plus recevoir le tiret — couper ICI,
+                // sinon la pièce posée rend le point
+                // précédent inaccessible (css-text-3 §5.3 —
+                // le moteur choisit la coupure qui maximise
+                // le remplissage).
+                hyph_break!(piece.level);
             }
             if acc.is_empty() {
                 descend_band!(pw);

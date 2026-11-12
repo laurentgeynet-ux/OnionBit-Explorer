@@ -1469,3 +1469,61 @@ fn longhand_collapse_surclasse_le_shorthand_pre() {
     let p = find(&bx, by_tag(&dom, "p"));
     assert_eq!(line_text(&p.children[0].lines[0]), "a b");
 }
+
+#[test]
+fn hyphens_auto_coupe_avec_tiret_et_shy() {
+    // R-275 — `hyphens:auto` : un mot plus long que la
+    // bande se césure aux points syllabiques (`x-lang`
+    // absent → règles latines génériques), le fragment
+    // `hyphenate-character` (défaut `-`) ferme la ligne.
+    let html = "<!doctype html><div style=\"width:80px\"><p>internationalization</p></div>";
+    let (dom, bx) = laid(html, "p{font-size:10px;margin:0;hyphens:auto}");
+    let p = find(&bx, by_tag(&dom, "p"));
+    let texts: Vec<String> = p.children[0].lines.iter().map(line_text).collect();
+    assert!(texts.len() >= 2, "mot césuré : {texts:?}");
+    assert!(
+        texts.iter().any(|t| t.ends_with('-')),
+        "tiret en fin de ligne césurée : {texts:?}"
+    );
+    // `hyphens:none` : même fixture → aucun tiret, le mot
+    // déborde sans se couper.
+    let (_, bx) = laid(html, "p{font-size:10px;margin:0;hyphens:none}");
+    let texts: Vec<String> = find(&bx, by_tag(&dom, "p")).children[0]
+        .lines
+        .iter()
+        .map(line_text)
+        .collect();
+    assert!(
+        !texts.iter().any(|t| t.ends_with('-')),
+        "none → pas de tiret : {texts:?}"
+    );
+    // `&shy;` explicite : `manual` (la défaut) l'honore —
+    // coupure avec tiret au shy. Le mot entier tient dans
+    // 80px (13 car. ≈ 65px, shy muet) — la bande rétrécit
+    // à 60px pour que l'opportunité soit prise.
+    let html2 = "<!doctype html><div style=\"width:60px\"><p>inter\u{AD}national</p></div>";
+    let (_, bx) = laid(html2, "p{font-size:10px;margin:0}");
+    let texts: Vec<String> = find(&bx, by_tag(&dom, "p")).children[0]
+        .lines
+        .iter()
+        .map(line_text)
+        .collect();
+    assert!(
+        texts.iter().any(|t| t.ends_with('-')),
+        "&shy; → césure : {texts:?}"
+    );
+    // `hyphenate-character` déclaré remplace le tiret.
+    let (_, bx) = laid(
+        html,
+        "p{font-size:10px;margin:0;hyphens:auto;hyphenate-character:\"~\"}",
+    );
+    let texts: Vec<String> = find(&bx, by_tag(&dom, "p")).children[0]
+        .lines
+        .iter()
+        .map(line_text)
+        .collect();
+    assert!(
+        texts.iter().any(|t| t.ends_with('~')),
+        "hyphenate-character custom : {texts:?}"
+    );
+}
