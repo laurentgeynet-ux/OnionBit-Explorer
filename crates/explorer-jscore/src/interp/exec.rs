@@ -155,7 +155,7 @@ impl Engine {
         r
     }
 
-    /// N1.5 — le bytecode VM BotGuard est livré par `eval()`
+    /// N1.5 — le bytecode `VM BotGuard` est livré par `eval()`
     /// (src="<eval>", invisible aux sondes par-src). Si la source
     /// mentionne `trayride`, on la marque du src de l'interpréteur
     /// → `bg.call`/`bg.listen`/frames la voient.

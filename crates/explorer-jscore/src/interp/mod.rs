@@ -102,7 +102,7 @@ static BG_TRAYRIDE: std::sync::atomic::AtomicU32 =
     std::sync::atomic::AtomicU32::new(u32::MAX);
 static BG_ENTRY: std::sync::atomic::AtomicU32 =
     std::sync::atomic::AtomicU32::new(u32::MAX);
-/// N1.5 — dernier native invoqué depuis une frame VM BotGuard :
+/// N1.5 — dernier native invoqué depuis une frame `VM BotGuard` :
 /// relu au `bg.a` suivant (session d'après) — le dernier op
 /// hôte avant l'arrêt est exactement l'op attendu par la VM.
 static BG_LAST_HOST: std::sync::Mutex<String> = std::sync::Mutex::new(String::new());
