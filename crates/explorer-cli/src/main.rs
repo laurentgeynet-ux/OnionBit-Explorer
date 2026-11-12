@@ -800,7 +800,7 @@ fn fixture_for(name: &str) -> &'static str {
         // les points `auto` ; `none` supprime le shy →
         // discriminant vs la baseline `manual`.
         () if n == "hyphens" || n.starts_with("hyphenate") => {
-            "<body><div class=x style=\"width:40px\"><p>aver&shy;yveryverylongword</p></div></body>"
+            "<body><div style=\"width:40px\"><p class=x style=\"font-size:8px\">aver&shy;yverylong wordlong</p></div></body>"
         }
         // `ruby-*` — contexte `<ruby>` requis (rb/rt
         // n'existent que sous ruby).
@@ -1227,6 +1227,13 @@ const INITIAL_EXTRA: &[(&str, &str)] = &[
     ("flex-wrap", "nowrap"),
     ("float", "none"),
     ("hyphens", "manual"),
+    // `hyphenate-*` : initiales spec css-text-4 (`auto` =
+    // tiret par défaut / limite auto ; `no-limit` = pas de
+    // borne de lignes consécutives).
+    ("hyphenate-character", "auto"),
+    ("hyphenate-limit-chars", "auto"),
+    ("hyphenate-limit-lines", "no-limit"),
+    ("quotes", "auto"),
     ("image-rendering", "auto"),
     ("isolation", "auto"),
     ("justify-content", "normal"),
@@ -1470,6 +1477,32 @@ fn affects_decl_verdict(decl: &str) -> Option<bool> {
     let nn = name.trim_start_matches('-').trim_start_matches("webkit-");
     if std::env::var_os("EXPLORER_BCD_NO_NOORACLE").is_none() && NO_ORACLE.contains(&nn) {
         return None;
+    }
+    // `hyphens:language_<X>` (sous-features BCD, ~60 clés) =
+    // « la césure fonctionne pour la langue X » — pas une
+    // déclaration. Le splitter borné (R-275) couvre
+    // l'écriture **latine** via les règles génériques (`lang`
+    // vide ou latin) : pour ces langues la sonde honnête est
+    // `hyphens:auto` ; pour les autres scripts (cyrillique,
+    // arabe, indic…) le moteur ne césure réellement pas →
+    // `miss` mesuré, pas `na` (la capacité manque, ce n'est
+    // pas une borne d'oracle).
+    if name == "hyphens" && v.starts_with("language_") {
+        const LATIN: &[&str] = &[
+            "afrikaans", "albanian", "basque", "bosnian", "catalan", "croatian", "czech",
+            "danish", "dutch", "english", "esperanto", "estonian", "finnish", "french",
+            "galician", "german_reformed_orthography", "german_swiss_orthography",
+            "german_traditional_orthography", "hungarian", "icelandic", "interlingua",
+            "irish", "italian", "kurmanji", "latin", "latvian", "lithuanian",
+            "norwegian_nn", "norwegian_no", "polish", "portuguese", "slovak", "slovenian",
+            "spanish", "swedish", "turkish", "turkmen", "upper_sorbian", "welsh",
+        ];
+        let lang = &v["language_".len()..];
+        return if LATIN.contains(&lang) {
+            Some(prop_affects_decl("hyphens:auto"))
+        } else {
+            Some(false)
+        };
     }
     Some(prop_affects_decl(decl))
 }
