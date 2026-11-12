@@ -4264,6 +4264,21 @@ le census `site_harvest` arbitre les ex æquo.
   Verrou : `initialletter_reserve_le_trou_et_depense_la_lettre`
   (cap extrait + morsure 2 lignes + reprise pleine largeur +
   lettre non dupliquée), `initialletter_normal_et_1_inertes`.
+- [x] **R-279 — `text-box-trim`/`text-box-edge`/`text-box`** (~6) —
+  le bord block-start/-end du conteneur inline est tronqué
+  au `text-box-edge` de la première/dernière ligne : les
+  lignes remontent de `top_trim` (over edge → `y`) avant
+  pose des atomes, `bot_trim` retranché de la hauteur.
+  `auto`/`text` = ascent/descent (retire exactement le
+  half-leading), `alphabetic` = baseline, `cap`/`ex` ≈
+  0.7/0.5em faute de métriques OS/2 (même convention que
+  l'unité `ex`), `ideographic*` ≈ `text`. Longhands primes
+  les tokens du shorthand `text-box`. Bornes : appliqué par
+  conteneur de lignes (un bloc multi-enfants trime chacun
+  — spec ne trime que les lignes extrêmes), bords atomes
+  ignorés. Verrou : `text_box_trim_retire_le_half_leading`
+  (both < start ≡ end < none, remontée start, pas end,
+  shorthand ≡ longhand).
 
 `text-box*`/`text-autospace`/`text-fit`/`initial-letter`/
 `text-combine-upright`, `counter-set`/`counter-increment` fins,

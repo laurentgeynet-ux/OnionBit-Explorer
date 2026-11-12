@@ -1618,3 +1618,65 @@ fn initialletter_normal_et_1_inertes() {
         );
     }
 }
+
+// ---------- R-279 — `text-box-trim` (css-inline-3 §10) ----------
+
+#[test]
+fn text_box_trim_retire_le_half_leading() {
+    // line-height:20px / font-size:10px → ~5px de
+    // half-leading par bord. `trim-both` retire ~10px de
+    // hauteur et la première ligne remonte au bord haut.
+    let html = "<!doctype html><p>alpha beta</p>";
+    let css = |extra: &str| format!("p {{ font-size: 10px; line-height: 20px; {extra} }}");
+    let (d0, b0) = laid(html, &css(""));
+    let (d1, b1) = laid(html, &css("text-box-trim: trim-both"));
+    let p0 = &find(&b0, by_tag(&d0, "p")).children[0];
+    let p1 = &find(&b1, by_tag(&d1, "p")).children[0];
+    assert_eq!(p0.lines.len(), p1.lines.len());
+    // La hauteur baisse d'environ 2 half-leadings.
+    let h0 = p0.rect.height;
+    let h1 = p1.rect.height;
+    assert!(h1 < h0, "trim doit réduire : h0={h0} h1={h1}");
+    // Le texte remonte : l'over edge de la 1re ligne rejoint
+    // le haut (y ≈ 0 → baseline monte de ~half-leading).
+    let f0 = p0.lines[0]
+        .fragments
+        .iter()
+        .find(|f| !f.text.is_empty())
+        .expect("frag");
+    let f1 = p1.lines[0]
+        .fragments
+        .iter()
+        .find(|f| !f.text.is_empty())
+        .expect("frag");
+    assert!(
+        f1.rect.y < f0.rect.y,
+        "remontée : f0.y={} f1.y={}",
+        f0.rect.y,
+        f1.rect.y
+    );
+    // `trim-start` seul : hauteur réduite d'un bord.
+    let (d2, b2) = laid(html, &css("text-box-trim: trim-start"));
+    let p2 = &find(&b2, by_tag(&d2, "p")).children[0];
+    let h2 = p2.rect.height;
+    assert!(h2 < h0 && h2 > h1, "trim-start : {h1} < {h2} < {h0}");
+    // `trim-end` seul : hauteur réduite du bord bas, sans
+    // remonter la première ligne.
+    let (d5, b5) = laid(html, &css("text-box-trim: trim-end"));
+    let p5 = &find(&b5, by_tag(&d5, "p")).children[0];
+    let f5 = p5.lines[0]
+        .fragments
+        .iter()
+        .find(|f| !f.text.is_empty())
+        .expect("frag");
+    assert_eq!(p5.rect.height, h2, "trim-end ≡ trim-start en hauteur");
+    assert_eq!(f5.rect.y, f0.rect.y, "trim-end ne remonte pas");
+    // `none` et absent : inchangé.
+    let (d3, b3) = laid(html, &css("text-box-trim: none"));
+    let p3 = &find(&b3, by_tag(&d3, "p")).children[0];
+    assert_eq!(p3.rect.height, h0);
+    // Shorthand `text-box: trim-both` ≡ longhand.
+    let (d4, b4) = laid(html, &css("text-box: trim-both"));
+    let p4 = &find(&b4, by_tag(&d4, "p")).children[0];
+    assert_eq!(p4.rect.height, h1);
+}

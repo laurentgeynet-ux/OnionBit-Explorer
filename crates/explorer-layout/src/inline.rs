@@ -385,6 +385,12 @@ pub(crate) fn layout_inline(
     apply_text_overflow(&st, &mut lines, x + w, ctx, fs);
     apply_line_clamp(&st, &mut lines, x + w, ctx, fs);
     apply_line_clamp(&st, &mut lines, x + w, ctx, fs);
+    // R-279 — `text-box-trim` : les lignes remontent de
+    // `top_trim` (le bord block-start du contenu rejoint le
+    // `text-box-edge` de la première ligne) AVANT que les
+    // atomes/enfants soient posés sur leurs fragments ;
+    // `bot_trim` est retranché de la hauteur rendue.
+    let bot_trim = apply_text_box_trim(&st, &mut lines, y, fs, ctx);
     // Atomes d'abord : leur sous-arbre a été posé en (0,0)
     // par `size_atomics` — translation au rect du fragment
     // (R-23 : sans elle, les enfants d'un atome — valeur d'un
@@ -396,7 +402,9 @@ pub(crate) fn layout_inline(
     assign_child_rects(bx, &lines);
     // Span réelle `y → bas de la dernière ligne` : la descente
     // sous les flottants a pu sauter de l'espace vertical.
-    let h = lines.last().map_or(0.0, |l| l.rect.y + l.rect.height - y);
+    let h = lines
+        .last()
+        .map_or(0.0, |l| l.rect.y + l.rect.height - y - bot_trim);
     bx.lines = lines;
     // R-177 — `::first-line`/`::first-letter` : overlay §7.1
     // (typographique) sur la première ligne / le premier
@@ -630,6 +638,152 @@ fn emit_drop_cap(l0: &mut LineBox, cap: DropCap, para_lv: u8) {
 /// coupé. MVP LTR : seul le débordement à droite est traité
 /// (`ellipsis` RTL / `'<string>'` hors périmètre). Vol 21/22
 /// : « Topics » discourse tronqué net, sans suspension.
+/// R-279 — `text-box-trim` (css-inline-3 §10.1) : le bord
+/// block-start et/ou block-end du conteneur est tronqué au
+/// `text-box-edge` de la première/dernière ligne formatée —
+/// le cas usuel retire le half-leading (`trim-both` + bord
+/// `text`/`auto`). Les lignes sont remontées de `top_trim`
+/// (première ligne : son *over edge* rejoint `y`) ; rend
+/// `bot_trim` à retrancher de la hauteur du bloc.
+/// `text-box` shorthand = mots-clés trim ‖ edge (les
+/// longhands déclarés priment les tokens du shorthand —
+/// borne : sans ordre de cascade, la longhand est lue
+/// d'abord). `cap`/`ex` sans métriques OS/2 ≈ 0.7/0.5em
+/// (même repli que l'unité `ex`) ; `ideographic*` ≈ `text`.
+/// Non héritée : lue sur le style de la boîte (la boîte
+/// anonyme clone le style du parent — `wrap_anonymous`).
+/// R-279 — distance baseline → bord `text-box-edge`
+/// (`text`/`auto` = ascent/descent ; `alphabetic` =
+/// baseline ; `cap`/`ex` = repli em faute de métriques
+/// OS/2 — même convention que l'unité `ex`).
+fn edge_dist(kw: &str, m: font::FontMetrics, fsf: f32, over: bool) -> f32 {
+    match kw {
+        "cap" if over => 0.7 * fsf,
+        "ex" if over => 0.5 * fsf,
+        "alphabetic" => 0.0,
+        _ => {
+            if over {
+                m.ascent
+            } else {
+                -m.descent
+            }
+        }
+    }
+}
+
+/// R-279 — *over*/*under edges* (coords absolues) d'une
+/// ligne selon les mots-clés `text-box-edge` ; `None` si la
+/// ligne n'a aucun fragment texte.
+fn text_box_edges(
+    l: &LineBox,
+    over_kw: &str,
+    under_kw: &str,
+    fs: f32,
+    ctx: &BlockCtx,
+) -> Option<(f32, f32)> {
+    let mut over = f32::MAX;
+    let mut under = f32::MIN;
+    let mut any = false;
+    for f in &l.fragments {
+        if f.atomic || f.text.is_empty() {
+            continue;
+        }
+        let fsf = font_size_px(&f.style, fs, ctx);
+        let m = f.shaped.as_ref().map_or_else(
+            || font::FontMetrics {
+                ascent: 0.8 * fsf,
+                descent: -0.2 * fsf,
+                line_gap: 0.0,
+                units_per_em: 0,
+            },
+            |s| s.metrics,
+        );
+        let base = f.rect.y + f.baseline;
+        over = over.min(base - edge_dist(over_kw, m, fsf, true));
+        under = under.max(base + edge_dist(under_kw, m, fsf, false));
+        any = true;
+    }
+    any.then_some((over, under))
+}
+
+fn apply_text_box_trim(
+    st: &ComputedStyle,
+    lines: &mut [LineBox],
+    y: f32,
+    fs: f32,
+    ctx: &BlockCtx,
+) -> f32 {
+    const TRIM: &[&str] = &[
+        "none",
+        "start",
+        "end",
+        "both",
+        "trim-start",
+        "trim-end",
+        "trim-both",
+    ];
+    const EDGE: &[&str] = &[
+        "auto",
+        "text",
+        "cap",
+        "ex",
+        "alphabetic",
+        "ideographic",
+        "ideographic-ink",
+    ];
+    let sh: Vec<&str> = st
+        .get("text-box")
+        .map_or_else(Vec::new, |v| v.split_whitespace().collect());
+    let trim = st
+        .get("text-box-trim")
+        .or_else(|| sh.iter().find(|t| TRIM.contains(t)).copied());
+    let Some(trim) = trim else { return 0.0 };
+    if trim == "none" {
+        return 0.0;
+    }
+    let mut edge: Vec<&str> = st
+        .get("text-box-edge")
+        .map_or_else(Vec::new, |v| v.split_whitespace().collect());
+    if edge.is_empty() {
+        edge = sh.iter().filter(|t| EDGE.contains(t)).copied().collect();
+    }
+    if edge.contains(&"auto") || edge.is_empty() {
+        edge = vec!["text"];
+    }
+    let over_kw = edge.first().copied().unwrap_or("text");
+    let under_kw = edge.get(1).copied().unwrap_or(over_kw);
+    let do_start = matches!(trim, "start" | "trim-start" | "both" | "trim-both");
+    let do_end = matches!(trim, "end" | "trim-end" | "both" | "trim-both");
+    let top = if do_start {
+        lines
+            .first()
+            .and_then(|l| text_box_edges(l, over_kw, under_kw, fs, ctx))
+            .map_or(0.0, |(over, _)| (over - y).max(0.0))
+    } else {
+        0.0
+    };
+    if top > 0.0 {
+        for l in lines.iter_mut() {
+            l.rect.y -= top;
+            for f in &mut l.fragments {
+                f.rect.y -= top;
+            }
+        }
+    }
+    if do_end {
+        lines
+            .last()
+            .and_then(|l| text_box_edges(l, over_kw, under_kw, fs, ctx))
+            .map_or(0.0, |(_, under)| {
+                lines
+                    .last()
+                    .map_or(0.0, |l| (l.rect.y + l.rect.height - under).max(0.0))
+            })
+    } else {
+        0.0
+    }
+}
+
 fn apply_text_overflow(
     st: &ComputedStyle,
     lines: &mut [LineBox],

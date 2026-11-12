@@ -2489,3 +2489,18 @@ cause** ; résidu = promesses des handlers d'erreur `Atn`
 - BCD ne sonde que normal : denominateur 2218 -> 2217,
   numerateur stable a 1051 (47,4 %). Cliquet vert.
 
+
+### 2026-11-13 — PIPE → NAV : R-279 `text-box-trim`/`text-box-edge`
+
+- `text-box-trim` consommé (`explorer-layout`) : les lignes
+  remontent de `top_trim` (over edge de la 1re ligne → haut
+  du contenu) et `bot_trim` retranché de la hauteur —
+  `trim-both` + `auto`/`text` retire le half-leading des
+  deux bords. `alphabetic` = baseline ; `cap`/`ex` ≈
+  0.7/0.5em (pas de métriques OS/2 dans la pile fonte —
+  repli documenté). Shorthand `text-box` lu (longhands
+  priment). Bornes : trim par conteneur de lignes, atomes
+  ignorés.
+- Re-tour `affectsv` souhaité : `text-box-trim.none` (na
+  initiale), `start`/`end`/`both`/`trim-*`, `text-box-edge`
+  (`auto`/`text`/`alphabetic`/`cap`), `text-box` shorthand.
