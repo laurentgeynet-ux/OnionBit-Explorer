@@ -93,39 +93,52 @@ fn encode(resp: &Response) -> Vec<u8> {
     out
 }
 
-/// Désérialise le format [`encode`]. Corps = tout après la
-/// première ligne vide.
+/// Désérialise le format [`encode`] : `status\n` + `reason\n`
+/// + en-têtes `k\tv` + ligne vide + corps. La `reason` peut
+/// être **vide** (HTTP/2 n'a pas de phrase) — le premier
+/// `\n\n` n'est donc PAS une borne tête/corps fiable : on
+/// lit ligne par ligne depuis le début.
 fn decode(bytes: &[u8]) -> Option<Response> {
-    let mut head_end = None;
-    for (i, w) in bytes.windows(2).enumerate() {
-        if w == b"\n\n" {
-            head_end = Some(i);
+    fn line<'a>(bytes: &'a [u8], pos: &mut usize) -> Option<&'a [u8]> {
+        let rel = bytes[*pos..].iter().position(|&b| b == b'\n')?;
+        let l = &bytes[*pos..*pos + rel];
+        *pos += rel + 1;
+        Some(l)
+    }
+    let mut pos = 0usize;
+    let status: u16 = std::str::from_utf8(line(bytes, &mut pos)?)
+        .ok()?
+        .parse()
+        .ok()?;
+    let reason = std::str::from_utf8(line(bytes, &mut pos)?)
+        .ok()?
+        .to_string();
+    let mut resolved = None;
+    let mut headers = Vec::new();
+    loop {
+        let l = line(bytes, &mut pos)?;
+        if l.is_empty() {
             break;
         }
+        let Some((n, v)) = l
+            .iter()
+            .position(|&b| b == b'\t')
+            .map(|i| (&l[..i], &l[i + 1..]))
+        else {
+            continue;
+        };
+        let (n, v) = (std::str::from_utf8(n).ok()?, std::str::from_utf8(v).ok()?);
+        if n == RESOLVED_KEY {
+            resolved = crate::url::Url::parse(v).ok();
+        } else {
+            headers.push((n.to_string(), v.to_string()));
+        }
     }
-    let head_end = head_end?;
-    let head = std::str::from_utf8(&bytes[..head_end]).ok()?;
-    let mut lines = head.lines();
-    let status: u16 = lines.next()?.parse().ok()?;
-    let reason = lines.next()?.to_string();
-    let mut resolved = None;
-    let headers = lines
-        .filter_map(|l| l.split_once('\t'))
-        .filter(|(n, v)| {
-            if *n == RESOLVED_KEY {
-                resolved = crate::url::Url::parse(v).ok();
-                false
-            } else {
-                true
-            }
-        })
-        .map(|(n, v)| (n.to_string(), v.to_string()))
-        .collect();
     Some(Response {
         status,
         reason,
         headers,
-        body: bytes[head_end + 2..].to_vec(),
+        body: bytes[pos..].to_vec(),
         reused_connection: false,
         resolved_url: resolved,
     })
@@ -381,6 +394,21 @@ mod tests {
             back.resolved_url.as_ref().map(Url::as_str).as_deref(),
             Some("https://a.b/final")
         );
+    }
+
+    /// Réponse HTTP/2 : `reason` vide — le fichier commence
+    /// `200\n\n` et l'ancien décodeur confondait cette ligne
+    /// vide avec la borne tête/corps (`fixture illisible`).
+    #[test]
+    fn decode_reason_vide_http2() {
+        let fixture = b"200\n\ncontent-type\ttext/html\n\n<html/>";
+        let r = decode(fixture).expect("decode h2");
+        assert_eq!(r.status, 200);
+        assert_eq!(r.reason, "");
+        assert_eq!(r.body, b"<html/>".as_slice());
+        // Aller-retour : `reason: ""` encode le même motif.
+        let back = decode(&encode(&r)).expect("round-trip");
+        assert_eq!(back.body, r.body);
     }
 
     #[tokio::test]
