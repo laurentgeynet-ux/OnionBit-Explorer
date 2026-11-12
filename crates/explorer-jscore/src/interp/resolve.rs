@@ -422,6 +422,10 @@ impl Resolver {
     fn walk_fn(&mut self, lit: &FnLit, body: &[Stmt]) {
         let poisoned = body_poisons(body);
         self.push(fn_scope_names(lit, body), poisoned);
+        // `= défaut` de paramètres : évalués dans l'env `Local`.
+        for p in &lit.params {
+            self.walk_pat(&p.pat);
+        }
         self.walk_stmts(body);
         self.pop();
     }

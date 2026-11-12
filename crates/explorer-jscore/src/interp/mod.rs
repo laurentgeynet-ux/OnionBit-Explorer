@@ -724,8 +724,19 @@ pub struct Engine {
     /// profondeur `d` est déterministe. La **clé épingle son
     /// env** (le `EnvRef` gardé vivant empêche la réutilisation
     /// de son adresse par un autre env → pas de collision).
-    /// Borné — purge complète.
-    pub(crate) resolved_envs: std::collections::HashMap<usize, (EnvRef, EnvRef)>,
+    /// Borné — purge complète. Clé **tuple** `(ptr, profondeur)` :
+    /// une clé composite aplatie `ptr+d<<20` peut collisionner
+    /// entre envs proches → ancêtre faux → liaison erronée
+    /// silencieuse (régression constatée vol 9773 `/results`).
+    pub(crate) resolved_envs: std::collections::HashMap<(usize, u16), (EnvRef, EnvRef)>,
+    /// JS-C490c — kill-switch A/B : `EXPLORER_NO_RESOLVE=1`
+    /// désarme la résolution statique (A/B en vol sans rebuild).
+    pub(crate) resolve_off: bool,
+    /// JS-C490d — `EXPLORER_RESOLVE_VERIFY=1` : chaque hit du
+    /// fast-path est revérifié par la marche complète ; les
+    /// divergences sont loguées bornées (`res.bad`). Mode
+    /// diagnostic — ~2× le coût de résolution.
+    pub(crate) resolve_verify: bool,
     /// Cache des constructeurs d'interface par nom de classe
     /// (`HTMLInputElement`…) — JS-C82 : `el.constructor` typé +
     /// `.prototype` porteur des accesseurs IDL (surface
@@ -1237,6 +1248,8 @@ impl Engine {
             resolved_lits: std::collections::HashSet::new(),
             resolved_guard: Vec::new(),
             resolved_envs: std::collections::HashMap::new(),
+            resolve_off: std::env::var("EXPLORER_NO_RESOLVE").is_ok_and(|v| v == "1"),
+            resolve_verify: std::env::var("EXPLORER_RESOLVE_VERIFY").is_ok_and(|v| v == "1"),
             dom_ctors: std::collections::HashMap::new(),
             native_caller: Vec::new(),
             ctor_fresh: None,
@@ -5321,6 +5334,9 @@ impl Engine {
         body: &Rc<Vec<crate::ast::Stmt>>,
     ) {
         const RESOLVED_LITS_CAP: usize = 512;
+        if self.resolve_off {
+            return;
+        }
         let key = Rc::as_ptr(lit) as usize;
         if self.resolved_lits.contains(&key) {
             return;
@@ -5352,10 +5368,10 @@ impl Engine {
             .resolved_map
             .get(&(std::ptr::from_ref::<crate::ast::Expr>(e) as usize))?;
         // L'ancêtre est déterministe par (env, d) — `Env.parent`
-        // immuable post-création. La clé composite mêle la
-        // profondeur au pointeur (un même env sert plusieurs
-        // profondeurs).
-        let ekey = (Rc::as_ptr(env) as usize).wrapping_add((d as usize) << 20);
+        // immuable post-création. Clé tuple exacte — jamais
+        // d'aplatissement (une collision `ptr+d<<20` entre envs
+        // proches rendait un ancêtre faux → liaison erronée).
+        let ekey = (Rc::as_ptr(env) as usize, d);
         let cur = if let Some((_, anc)) = self.resolved_envs.get(&ekey) {
             anc.clone()
         } else {
@@ -5378,6 +5394,22 @@ impl Engine {
         };
         if let v @ Some(_) = self.env_get(&cur, name) {
             crate::j17_tick(&crate::J17_RES_HIT);
+            if self.resolve_verify {
+                let check = self.env_get(env, name);
+                // `strict_eq`, pas `PartialEq` — `NaN != NaN`
+                // signalait 181 faux positifs/vol.
+                let same = match (&check, &v) {
+                    (Some(c), Some(f)) => self.strict_eq(c, f),
+                    _ => check == v,
+                };
+                if !same {
+                    crate::j17_tick(&crate::J17_RES_MISS);
+                    tracing::warn!(
+                        target: "resolve",
+                        "res.bad name={name} d={d} fast={v:?} walk={check:?}"
+                    );
+                }
+            }
             v
         } else {
             crate::j17_tick(&crate::J17_RES_MISS);
