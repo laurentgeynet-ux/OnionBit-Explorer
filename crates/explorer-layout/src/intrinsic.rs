@@ -256,22 +256,32 @@ fn content_px_unclamped(
         }
         css_px(st, p, 0.0, fs, ctx)
     };
-    // §4.1 : un `width:%` en mesure intrinsèque est indéfini
-    // (le bloc contenant dépend de cette mesure) — un
-    // remplacé n'impose alors **pas** son intrinsèque : sa
-    // contribution est nulle, sans quoi un `img{width:100%}`
-    // gonflerait tout ancêtre shrink-to-fit à la taille du
-    // bitmap (terrain : carte BBC `min-width:fit-content` à
-    // 480px dès l'arrivée du bitmap, débordant sa piste de
-    // grille 236px). Un non-remplacé retombe sur son contenu
-    // (`bx.intrinsic` absent → `None` → mesure des enfants).
-    // `%` **nu** seulement (`width:100%` → 0). Une fonction
-    // math contenant un `%` (`min(300px, 100%)` — le hint UA
-    // des `<svg viewBox>` sans attr) garde une borne définie :
+    // §4.1 cyclique : un `width:%` en mesure intrinsèque est
+    // indéfini (le bloc contenant dépend de cette mesure).
+    // R-284 — la réponse dépend de la mesure :
+    // * **min-content** → contribution **0** : sinon un
+    //   `img{width:100%}` imposerait son bitmap entier aux
+    //   ancêtres shrink-to-fit (R-51, terrain : carte BBC
+    //   `min-width:fit-content` à 480px — `fit-content` =
+    //   `min(max, max(min, avail))` ne pouvait plus clamp
+    //   à la piste 236, le plancher `min` valant déjà 480).
+    // * **max-content** → `%` traité `auto` → **intrinsèque**
+    //   (§5.1 : remplacé `auto` = taille intrinsèque) — sinon
+    //   tout remplacé `width:100%` en item flex shrink-to-fit
+    //   mesurait 0 (geo_diff N0.3 : `svg{w/h:100%}` des
+    //   icônes masthead YouTube → 0×0, `yt-icon-shape`/
+    //   `#logo`/`#content` à h=0). `height` résolue garde la
+    //   dérivation de ratio (B-38 : `height:28px` + bitmap
+    //   5839×745 contribue ~220, pas 5839).
+    // Un non-remplacé retombe sur son contenu (`bx.intrinsic`
+    // absent → `None` → mesure des enfants). `%` **nu**
+    // seulement (`width:100%`) — une fonction math contenant
+    // un `%` (`min(300px, 100%)` — le hint UA des `<svg
+    // viewBox>` sans attr) garde une borne définie :
     // `bound()` l'évalue contre `cb` quand elle est définie,
-    // l'intrinsèque/ratio reprend sinon — la tuer à 0 écrasait
-    // tout ancêtre shrink-to-fit (logos svg w=0, vols pluto/
-    // lichess).
+    // l'intrinsèque/ratio reprend sinon — la tuer à 0
+    // écrasait tout ancêtre shrink-to-fit (logos svg w=0,
+    // vols pluto/lichess).
     let pct = st.get("width").is_some_and(|v| {
         v.trim()
             .strip_suffix('%')
@@ -291,7 +301,12 @@ fn content_px_unclamped(
         bx.intrinsic
             .map(|(iw, ih)| bound_v("height").map_or(iw, |h| h * iw / ih))
     } else if pct && bx.intrinsic.is_some() {
-        Some(0.0)
+        if max {
+            bx.intrinsic
+                .map(|(iw, ih)| bound_v("height").map_or(iw, |h| h * iw / ih))
+        } else {
+            Some(0.0)
+        }
     } else {
         bound("width")
             .or_else(|| {

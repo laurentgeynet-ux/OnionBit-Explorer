@@ -4371,6 +4371,20 @@ le census `site_harvest` arbitre les ex æquo.
   `<use>` externe (fetch), fonts `@font-face` pour `<text>`
   (usvg n'a pas la table de fontes session).
 
+- [x] **R-284 — `width:%` remplacé : max-content =
+  intrinsèque** (fix `geo_diff` N0.3 — terrain, pas census) —
+  le R-51 traitait le `%` nu comme 0 dans les deux mesures
+  intrinsèques ; correct pour min-content (cyclique §4.1,
+  carte BBC sauve) mais un remplacé `width:100%` en item
+  flex shrink-to-fit mesurait 0×0 — cause dominante des
+  boîtes `h=0` masthead YouTube (`svg{w/h:100%}` des
+  `yt-icon` → `yt-icon-shape`/`#logo`/`#content` aplatis,
+  ~65 % de divergences). §5.1 : max-content traite `%`
+  comme `auto` → intrinsèque ; `height` résolue garde la
+  dérivation de ratio (B-38). Locks : verrou dédié +
+  R-51/R-224/R-226 verts. Re-mesure `geo_diff` demandée
+  à NAV (journal).
+
 `text-fit`/`text-combine-upright`/`interpolate-size` (chantier
 animation↔layout), `text-decoration-skip-ink` (géométrie
 glyphes), `display` exotiques résiduels, `grid-*`/`flex-*`
@@ -4381,10 +4395,14 @@ sous-features, `font-stretch`/`font-width` (fontes variables),
 
 ### P3 — hors périmètre / bornes (décision requise)
 
-- **SVG (~80)** : `fill`, `stroke*`, `marker-*`, `lighting-*`,
-  `flood-*`, `stop-*`, `d`, `rx`/`ry`, `vector-effect` —
-  chantier `<svg>` inline entier ; à lancer ou déclarer hors
-  périmètre assumé.
+- **SVG (~80 → soldé structurellement)** : `fill`, `stroke*`,
+  `marker-*`, `lighting-*`, `flood-*`, `stop-*`, `d`, `rx`/
+  `ry`, `vector-effect` — chantier `<svg>` inline **livré**
+  par R-283 : la sérialisation style-aware projette toutes
+  ces valeurs dans l'îlot `usvg` (classées `NO_ORACLE` par
+  NAV — effet interne au bitmap, conformité par locks PIPE).
+  Restes bornés : `foreignObject`, `<use>` externe, fontes
+  `@font-face` pour `<text>` (fontdb session).
 - **Borne oracle** (mesure, pas moteur) : `filter:url(#ref)`,
   `clip-path:url`, `background-attachment:multiple_backgrounds`
   (sous-feature BCD), `position-try:--custom` (`@position-try`

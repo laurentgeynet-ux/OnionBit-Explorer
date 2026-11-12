@@ -1113,6 +1113,26 @@ fn img_auto_contribue_intrinseque() {
     );
 }
 
+/// R-284 — l'autre moitié du §4.1 : en **max-content** le
+/// `%` se traite `auto` → l'intrinsèque contribue (R-51 ne
+/// couvre que min-content = 0). Terrain : masthead `YouTube`,
+/// `svg{display:block;width:100%;height:100%}` en item flex
+/// shrink-to-fit mesurait 0×0 → `yt-icon-shape`/`#logo`/
+/// `#content` à h=0 (`geo_diff` N0.3).
+#[test]
+fn svg_pct_contribue_intrinseque_en_max_content() {
+    let (dom, bx) = laid(
+        "<yt-icon><span><svg viewBox=\"0 0 24 24\" style=\"display:block;width:100%;height:100%\"><path d=\"M0 0h24v24H0z\"/></svg></span></yt-icon>",
+        "yt-icon{display:inline-flex;width:24px;height:24px}span{display:block}",
+    );
+    let svg = find(&bx, by_tag(&dom, "svg"));
+    assert!(
+        svg.rect.width > 20.0 && svg.rect.height > 20.0,
+        "svg `w/h:100%` en item flex : 24x24 attendu, {:?}",
+        svg.rect
+    );
+}
+
 /// Vol 18 quora : en `flex-direction:column`, l'axe cross
 /// est horizontal — hors `stretch`, un item `align-items`
 /// non-étiré est **fit-content** (shrink-to-fit §9.5), puis

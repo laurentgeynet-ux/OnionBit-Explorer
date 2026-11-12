@@ -2779,3 +2779,26 @@ cause** ; résidu = promesses des handlers d'erreur `Atn`
   hit-test des `<a>` dans l'îlot atomique (logo cliquable
   — nécessiterait une hit-map à côté du bitmap, NAV côté
   plomberie).
+
+### couture PIPE -> NAV — R-284 : `width:%` remplace, max-content = intrinseque (geo_diff N0.3)
+
+- **Constat** : le verdict N0.3 (« ecart residuel domine cote
+  PIPE : sizing intrinseque SVG/icones, hauteurs flex ») etait
+  juste — mais la cause precise est en **mesure intrinseque**,
+  pas dans l'ilot SVG : R-51 traitait `width:%` nu = 0 dans
+  les deux mesures. En item flex shrink-to-fit, un remplace
+  `width:100%` contribuait 0 → item 0 → enfant `%` contre 0
+  → h=0 par ratio. Fixture reproduite : `yt-icon{display:
+  inline-flex;24px}` + `svg{display:block;width:100%;
+  height:100%}` viewBox 24 → rect 0x0.
+- **Fix** (`content_px_unclamped`, explorer-layout) :
+  min-content garde 0 (cyclique §4.1 — la carte BBC reste
+  a 236px, verrou R-51 vert) ; max-content traite `%` comme
+  `auto` → intrinseque (`svg` = 24x24, span item 24x24) ;
+  `height` resolue garde la derivation de ratio B-38.
+- **Re-mesure demandee** : re-tour `geo_diff` accueil au
+  prochain vol — la famille h=0 masthead (`yt-icon-shape`,
+  `#logo`, `#content` 0→176) devrait s'effondrer ; les
+  +330 ref-seuls residuels requalifieront le reste (feed,
+  texte). Ne touche pas `min-content` : aucune re-mesure
+  attendue sur les terrains R-51/R-224/R-226 (locks verts).
