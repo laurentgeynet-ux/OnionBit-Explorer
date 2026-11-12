@@ -339,6 +339,20 @@ impl Engine {
             let (_, pid, url, ty) = self.xhr.fetches.remove(pos);
             if resp.status == 0 {
                 self.sched_tick("fetch.rej");
+                // N1.5 — nomme la requête qui alimente le
+                // stall : un chunk lazy `.js` rejeté gèle le
+                // rail DI (`_.Xl`/deferred) en cascade — un
+                // média `googlevideo` est bénin. host+path
+                // seuls (query signée = secret de session,
+                // même discipline que `fetch.send`).
+                if std::env::var_os("EXPLORER_CTX_PROBE").is_some() {
+                    tracing::info!(
+                        target: "dom_probe",
+                        site = "fetch.rej",
+                        host = url_host(&url),
+                        path = url_path_full(&url)
+                    );
+                }
                 let msg = self.str_val("fetch: network error");
                 self.reject_promise(pid, msg);
             } else if ty == "opaque" {
