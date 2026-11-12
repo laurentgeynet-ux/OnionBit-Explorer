@@ -807,6 +807,24 @@ fn fixture_for(name: &str) -> &'static str {
         () if n == "word-break" => {
             "<body><div class=x style=\"width:40px\"><p>averyveryveryverylongword のテキストです</p></div></body>"
         }
+        // `text-autospace` (R-282) — n'a d'effet qu'à une
+        // frontière CJK ↔ non-CJK adjacente.
+        () if n == "text-autospace" => {
+            "<body><div style=\"width:200px\"><p class=x>中文abc 中文def</p></div></body>"
+        }
+        // `text-justify`/`text-wrap-style` (R-282) — plusieurs
+        // lignes de longueurs inégales : `justify` redistribue
+        // l'espace, `balance`/`pretty` rééquilibrent la fin.
+        () if n == "text-justify" || n == "text-wrap-style" => {
+            "<body><div><p class=x style=\"width:200px\">un deux trois quatre cinq six sept huit neuf dix</p></div></body>"
+        }
+        // `text-decoration-skip*` (R-282) — la coupure de la
+        // deco ne se voit que sur un blanc **interne** à la
+        // ligne (les blancs de bord tombent à la cassure) :
+        // inline souligné avec espaces intérieurs, ligne large.
+        () if n.starts_with("text-decoration-skip") => {
+            "<body><p>zéro <u class=x> un deux trois quatre </u> cinq six</p></body>"
+        }
         // `hyphens`/`hyphenate-*` (R-275) : la césure n'a
         // d'oracle que s'il y a une **opportunité** — le mot
         // porte un `&shy;` (manuel) ET assez de lettres pour
@@ -1149,6 +1167,10 @@ fn context_css(name: &str) -> &'static str {
         } else {
             "offset-path:ray(90deg);offset-distance:20px"
         }
+    } else if n == "text-justify" {
+        // `text-justify` ne règle que la méthode de la
+        // justification — inerte sans `text-align:justify`.
+        "text-align:justify"
     } else if n == "text-box-edge" {
         // L'edge ne produit d'effet que sous un trim actif
         // (css-inline-3 §10) — `trim-both` en ctx rend chaque
@@ -1288,6 +1310,27 @@ const INITIAL_EXTRA: &[(&str, &str)] = &[
     // `text-box-edge` sans trim actif = inerte (son ctx pose
     // `trim-both`, donc seule l'initiale `auto` reste `na`).
     ("text-box-edge", "auto"),
+    // R-282 — `text-justify` : `auto` est l'initiale spec ;
+    // `inter-word`/`inter-character`/`distribute` utilisent
+    // tous la distribution inter-mots (borne PIPE : pas de
+    // glu intra-mot) → déclaration ≡ baseline justifiée.
+    ("text-justify", "auto"),
+    ("text-justify", "inter-word"),
+    ("text-justify", "inter-character"),
+    ("text-justify", "distribute"),
+    // `text-wrap-style` : `auto` initiale ; `stable` = garder
+    // les césures stables au ré-écoulement — pas d'oracle
+    // statique.
+    ("text-wrap-style", "auto"),
+    ("text-wrap-style", "stable"),
+    // `text-decoration-skip-spaces` : l'implémentation ne
+    // saute aucun blanc par défaut → `none` ≡ absent.
+    ("text-decoration-skip-spaces", "none"),
+    // `text-autospace` : opt-in — `auto`/`normal`/`no-autospace`
+    // ≡ absent par construction.
+    ("text-autospace", "auto"),
+    ("text-autospace", "normal"),
+    ("text-autospace", "no-autospace"),
     // `text` ≡ `auto` (css-inline-3 : `auto` se résout en
     // bords texte — identique par construction).
     ("text-box-edge", "text"),

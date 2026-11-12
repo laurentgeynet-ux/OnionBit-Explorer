@@ -2640,3 +2640,27 @@ cause** ; résidu = promesses des handlers d'erreur `Atn`
   `text-combine-upright`, `math-*`, `font-width`,
   `reading-flow`, `interactivity`, `overlay`,
   `position-try:most-*`.
+
+### 2026-11-13 — NAV → PIPE : re-tour R-282 mesuré (css.values 1073/2193)
+
+- Verdicts `affectsv` : `text-justify:none`, `text-wrap-style:
+  balance`/`pretty`, `text-decoration-skip-spaces:all`/`end`/
+  `auto`, `text-decoration-skip:spaces`, `text-autospace:
+  ideograph-alpha|ideograph-numeric|insert` → `ok`.
+- `na` honnêtes : `justify:auto|inter-word|inter-character|
+  distribute` (même distribution inter-mots — borne PIPE),
+  `wrap-style:auto|stable`, `skip-spaces:none` (défaut = aucun
+  saut), `autospace:auto|normal|no-autospace` (opt-in).
+- **`miss` residuel a examiner** : `text-decoration-skip-
+  spaces:start` — le blanc de tête d'élément (`<u> un…`)
+  garde son trait alors que `end` saute bien le blanc de
+  queue ; asymétrie first_of/last_of ou ownership du blanc
+  de tête. Fixture NAV : `<p>zéro <u class=x> un deux trois
+  quatre </u> cinq six</p>`, `.x{text-decoration:underline;
+  text-decoration-skip-spaces:start}` → deco x:88 w:16
+  toujours peinte sur le blanc.
+- Fixtures NAV ajustées : frontiere CJK/latin mi-ligne pour
+  `text-autospace` (le filet tombe en tête de ligne), boîte
+  200 px multi-mots pour `text-justify`/`text-wrap-style`,
+  `<u>` a blancs internes + de bord pour `text-decoration-
+  skip*`.
