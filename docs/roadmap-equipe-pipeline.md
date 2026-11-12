@@ -4006,3 +4006,89 @@ R-104 ; `light-dark()` → R-105 ; marqueurs textuels +
 - [x] **R-212v. Reports `pos_defer` sous le clip `overflow` ancêtre** (`explorer-render/display.rs`) : `clip_stack`+`pos_floor`+`defer_clips` — instantané `(rect, radii)` par chemin, ré-émission `PushClip`/`PushClipRounded` au drain (§11.1.1 : in-flow = tous ; `absolute` = borné CB ; `fixed` = aucun).
 - [x] **R-213v. Descendants hors-flux exclus de la mesure intrinsèque flex** (`explorer-layout/intrinsic.rs`) : `a.inline-flex > div.absolute{width:100%}` gonflait le `li` à ~la ligne — nav vimeo « Contact sales » réparée.
 - [x] **R-214v. `color-mix()` + `oklch(from …)` relatifs (css-color-5)** (`explorer-css/value.rs`) : mix sRGB + canaux relatifs (mot-clé/`%`/`calc` restreint) + sRGB→OKLCH inverse — fond `bg-brand-50/50` plyr.
+
+## Plan `css.values` — file des trous moteur (NAV→PIPE, 2026-11-12)
+
+La jauge `check affectsv` (NAV) est épuisée : **834/2273 (36,7 %)**,
+~1440 misses dont chacun est un trou moteur documenté — plus un
+artefact de mesure. File ordonnée **impact produit × taille** ;
+le census `site_harvest` arbitre les ex æquo.
+
+### Sprint 1 — petits fixes, gros flips (~30)
+
+- [ ] `background-position-x`/`background-position-y` — longhands
+  non routés (expansion `background-position` existe ; ajouter
+  les deux noms + `layer_value`). Sites réels : sprites.
+- [ ] `overflow-wrap` (`anywhere`/`break-word`) +
+  `word-break:break-all`/`line-break` — coupure intra-mot du
+  line-breaker (`layout/inline`). YouTube en abuse.
+- [ ] `empty-cells:hide` — cellule vide → fond/bordure non
+  peints (`layout`/`display`).
+- [ ] `white-space` variantes — `pre-line`/`pre-wrap`/
+  `break-spaces` + `white-space-collapse` (règles de collapse
+  à compléter dans le tokenizer de lignes).
+- [ ] `currentColor` — résolution vers `color` calculé au
+  paint (`background-color`, `border-*` restants).
+- [ ] `vertical-align:top`/`text-top`/`text-bottom` —
+  alignement cellules (`top` manque) + baseline texte inline.
+
+### Sprint 2 — familles à fort décompte (~115)
+
+- [ ] `position-try`/`position-try-fallbacks` — valeurs
+  `<position-area>` dans les listes de fallbacks (~95 : `span-*`,
+  `self-*`, `x-start`, `block-end`… + `@position-try` règles).
+  `cand()` (`layout/block.rs:~840`) ne gère que `flip-*`/`--nom`
+  — mapper chaque mot-clé area vers le `position-area` calculé.
+- [ ] `break-*` multicol — `break-before`/`break-after`/
+  `break-inside:avoid` entre/dans colonnes (le moteur pose
+  déjà `column-count`/`column-rule`).
+- [ ] `alignment-baseline` — baseline inline : `alphabetic`/
+  `central`/`hanging`/`ideographic`/`mathematical`/`middle`.
+- [ ] `vertical-align:top` — voir Sprint 1 si non soldé.
+
+### Sprint 3 — peinture (~95)
+
+- [ ] `corner-shape`/`corner-*-shape` (~50) — css-borders-4 :
+  `notch`/`scoop`/`bevel`/`squircle` — DecoRect/corners raster.
+- [ ] `rule`/`row-rule`/`rule-*`/`row-rule-*` (~45) — règles
+  entre lignes/colonnes (css-multicol récent) — items de
+  peinture entre fragments.
+
+### Sprint 4 — chantiers lourds (~75)
+
+- [ ] `offset-*` motion-path (~52) — `offset-path`/
+  `offset-position`/`offset-anchor`/`offset-rotate` + shorthand :
+  géométrie de chemin (line/circle/ray/url) + placement.
+- [ ] `shape-outside` (13) — float shape circle/ellipse/
+  polygon/inset + `margin`/`shape-image-threshold` : line boxes
+  contournant la forme.
+- [ ] `container-type`/`container-name`/`container` (~10) —
+  container queries size/style : cascade contextuelle.
+- [ ] `table-layout:fixed` — algo table fixe (largeurs par
+  première ligne).
+- [ ] `hyphens` réel — dictionnaire de césure.
+
+### Queue P2 — valeurs unitaires exotiques (~300)
+
+`text-box*`/`text-autospace`/`text-fit`/`initial-letter`/
+`text-combine-upright`, `counter-set`/`counter-increment` fins,
+`display` exotiques (`flow-root`, `table-*`), `grid-*`/`flex-*`
+sous-features, `font-stretch`/`font-width` (fontes variables),
+`font-variant-*` OT fins, `field-sizing`, `interactivity`,
+`overlay`, `reading-flow`, `scroll-snap-*` résiduel,
+`position-try-order:most-*` fins, `quotes` (contenu généré
+`<q>`), `ruby-*` fins, `interpolate-size`, `math-*`.
+
+### P3 — hors périmètre / bornes (décision requise)
+
+- **SVG (~80)** : `fill`, `stroke*`, `marker-*`, `lighting-*`,
+  `flood-*`, `stop-*`, `d`, `rx`/`ry`, `vector-effect` —
+  chantier `<svg>` inline entier ; à lancer ou déclarer hors
+  périmètre assumé.
+- **Borne oracle** (mesure, pas moteur) : `filter:url(#ref)`,
+  `clip-path:url`, `background-attachment:multiple_backgrounds`
+  (sous-feature BCD), `position-try:--custom` (`@position-try`
+  hors ctx).
+
+**Plafond théorique** : Sprints 1-4 + P2 ≈ **~1400-1500/2273
+(~65 %)** ; le reste = SVG + sous-features non sondables.

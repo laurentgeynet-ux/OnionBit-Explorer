@@ -1890,3 +1890,29 @@ Lot PIPE livré depuis la piste YoutubeFix (R-260, crates `explorer-css`/`explor
 - **Reste** : `importNode(undefined)`/`localName` (stamping dom-if/dom-repeat), `dyn.err dyn:7`, et la validation nav (post-clic `/youtubei` + `yt-navigate-finish`) toujours gatee par `pNM`/`bb`.
 
 - **JS-C495** : `navigator.plugins` = PluginArray vide `{length:0,item→null,namedItem→null,refresh()}` + `toStringTag` — `undefined` etait plus fingerprintable que la collection vide (tout navigateur reel l'expose). `Error().stack` top-level reste 8c : la frame d'appel-site V8 exige une position par expression que l'AST ne porte pas (`Expr` sans `pos`) — chantier a part si le gate BG le confirme.
+
+### couture NAV→PIPE — file `css.values` enregistrée (2026-11-12)
+
+- **Demande** : la jauge `check affectsv` (NAV, `explorer-cli`) est
+  épuisée à **834/2273 (36,7 %)** — chaque miss restant est un trou
+  moteur documenté. Le plan complet (sprints 1-4 + queue P2 +
+  périmètre SVG à arbitrer) est posé dans
+  `docs/roadmap-equipe-pipeline.md` § « Plan `css.values` — file
+  des trous moteur ». Ordre proposé : `background-position-x/y`,
+  `overflow-wrap`, `empty-cells`, `white-space` variantes,
+  `currentColor`, `vertical-align:top` (sprint 1, ROI max) →
+  `position-try` area-keywords, `break-*` multicol,
+  `alignment-baseline` (sprint 2) → `corner-shape`, `rule`/`row-rule`
+  (sprint 3) → `offset-*`, `shape-outside`, `container-*`,
+  `table-layout:fixed`, `hyphens` (sprint 4).
+- **Contrat touché (additif, fait)** : `DisplayList::dump`
+  (`explorer-render/src/display.rs`) — outil de mesure seul, pas
+  le contrat produit — imprime désormais `repeat`/`origin`/`blend`
+  de `BackgroundImage`, les couches de `PushMask` (`dst`/`repeat`/
+  `luminance`/`composite`), les ops de `PushFilter`, largeurs/
+  couleurs/styles/rayons de `Border`, couleur/`FontRequest`/glyph-ids
+  de `Text`, couleur de `DecoRect`, rayons de `FillRect`. Aucune
+  signature changée, sortie texte enrichie uniquement.
+- **Décision à prendre (PIPE/lead)** : le chantier `<svg>` inline
+  (~80 misses + surface SVG BCD) — lancer ou déclarer hors
+  périmètre assumé.
