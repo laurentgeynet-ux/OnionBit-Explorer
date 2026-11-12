@@ -4016,9 +4016,10 @@ le census `site_harvest` arbitre les ex æquo.
 
 ### Sprint 1 — petits fixes, gros flips (~30)
 
-- [ ] `background-position-x`/`background-position-y` — longhands
-  non routés (expansion `background-position` existe ; ajouter
-  les deux noms + `layer_value`). Sites réels : sprites.
+- [x] `background-position-x`/`background-position-y` — **R-261** :
+  `bg_axis_position` (grammaire mono-axe : `center`, `bord`,
+  `bord offset`, `<len>`/`<%>`) compose chaque axe sur le
+  shorthand au paint (`layer_value` par couche). 3 verrous.
 - [ ] `overflow-wrap` (`anywhere`/`break-word`) +
   `word-break:break-all`/`line-break` — coupure intra-mot du
   line-breaker (`layout/inline`). YouTube en abuse.

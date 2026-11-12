@@ -2425,12 +2425,35 @@ fn emit_bg_layers(
             // offsets absolus (`0 -667px` sprites) actifs —
             // conforme §14.2.1. La dimension retenue est la
             // tuile **mise à l'échelle** (spec §images-3).
-            let (px, py) = bg_position(
+            let (mut px, mut py) = bg_position(
                 layer_value("background-position", i).as_deref(),
                 l_area,
                 (img.width as f32, img.height as f32),
                 fs,
             );
+            // R-261 — longhands `background-position-x`/`-y`
+            // (css-backgrounds-4 §3.5) : chaque axe déclaré
+            // écrase l'axe correspondant du shorthand (la
+            // cascade les stocke verbatim, ce sont des
+            // longhands indépendants — `background`/
+            // `background-position` continuent de passer par
+            // le nom combiné).
+            if let Some(x) = bg_axis_position(
+                layer_value("background-position-x", i).as_deref(),
+                l_area.0,
+                img.width as f32,
+                fs,
+            ) {
+                px = x;
+            }
+            if let Some(y) = bg_axis_position(
+                layer_value("background-position-y", i).as_deref(),
+                l_area.1,
+                img.height as f32,
+                fs,
+            ) {
+                py = y;
+            }
             let blend = blend_tag(layer_value("background-blend-mode", i).as_deref());
             // R-184 — `background-clip:text` : la couche est
             // émise une fois par fragment de ligne (clip
@@ -3106,29 +3129,6 @@ fn bg_position(raw: Option<&str>, area: (f32, f32), img: (f32, f32), fs: f64) ->
     if toks.is_empty() {
         return (0.0, 0.0);
     }
-    // Une dimension : longueur/`%` = offset depuis le coin,
-    // mot-clé → fraction de (zone − image).
-    let token = |t: &str, span: f32, dim: f32| -> f32 {
-        match t {
-            "left" | "top" => 0.0,
-            "center" => (span - dim) / 2.0,
-            "right" | "bottom" => span - dim,
-            _ => t
-                .strip_suffix('%')
-                .and_then(|p| p.parse::<f32>().ok())
-                .map_or_else(
-                    || {
-                        parse_length(t)
-                            .map(|l| match l.unit.px_factor() {
-                                Some(f) => l.value * f,
-                                None => l.value * fs * em_factor(l.unit),
-                            })
-                            .map_or(0.0, |v| v as f32)
-                    },
-                    |p| (span - dim) * p / 100.0,
-                ),
-        }
-    };
     let (x_tok, y_tok) = match toks.as_slice() {
         [a] => {
             // Seul un mot-clé vertical indique y.
@@ -3141,7 +3141,83 @@ fn bg_position(raw: Option<&str>, area: (f32, f32), img: (f32, f32), fs: f64) ->
         [a, b, ..] => (*a, *b),
         _ => ("left", "top"),
     };
-    (token(x_tok, area.0, img.0), token(y_tok, area.1, img.1))
+    (
+        bg_pos_token(x_tok, area.0, img.0, fs),
+        bg_pos_token(y_tok, area.1, img.1, fs),
+    )
+}
+
+/// Une dimension de `background-position` : longueur/`%` =
+/// offset depuis le coin, mot-clé → fraction de
+/// (zone − image).
+#[allow(clippy::cast_possible_truncation)]
+fn bg_pos_token(t: &str, span: f32, dim: f32, fs: f64) -> f32 {
+    match t {
+        "left" | "top" => 0.0,
+        "center" => (span - dim) / 2.0,
+        "right" | "bottom" => span - dim,
+        _ => t
+            .strip_suffix('%')
+            .and_then(|p| p.parse::<f32>().ok())
+            .map_or_else(
+                || {
+                    parse_length(t)
+                        .map(|l| match l.unit.px_factor() {
+                            Some(f) => l.value * f,
+                            None => l.value * fs * em_factor(l.unit),
+                        })
+                        .map_or(0.0, |v| v as f32)
+                },
+                |p| (span - dim) * p / 100.0,
+            ),
+    }
+}
+
+/// Longhand mono-axe `background-position-x`/`-y`
+/// (css-backgrounds-4 §3.5, R-261) → décalage (px) de la
+/// tuile sur cet axe : `center`, `bord` (seul ou avec offset
+/// — `left 10px`, `right 10px`), `<len>`/`<%>` nu mesuré
+/// depuis le bord de début. `x-start`/`y-start` = bord de
+/// début, `x-end`/`y-end` = bord de fin (approximation
+/// LTR/TB — le repère d'écriture n'est pas porté ici).
+/// `None` = absent ou hors grammaire → l'appelant garde
+/// l'axe du shorthand combiné.
+#[allow(clippy::cast_possible_truncation)]
+fn bg_axis_position(raw: Option<&str>, span: f32, dim: f32, fs: f64) -> Option<f32> {
+    let toks: Vec<&str> = raw?.split_whitespace().collect();
+    // `<len>`/`<%>` → px : le `%` mesure (zone − image) comme
+    // `bg_position` ; les longueurs font-relatives sur `fs`.
+    let len_px = |t: &str| -> Option<f32> {
+        if let Some(p) = t.strip_suffix('%') {
+            return p.parse::<f32>().ok().map(|n| (span - dim) * n / 100.0);
+        }
+        parse_length(t)
+            .map(|l| match l.unit.px_factor() {
+                Some(f) => l.value * f,
+                None => l.value * fs * em_factor(l.unit),
+            })
+            .map(|v| v as f32)
+    };
+    match toks.as_slice() {
+        [a] => match *a {
+            "left" | "top" | "x-start" | "y-start" => Some(0.0),
+            "center" => Some((span - dim) / 2.0),
+            "right" | "bottom" | "x-end" | "y-end" => Some(span - dim),
+            t => len_px(t),
+        },
+        // Forme `bord offset` : l'offset se mesure depuis le
+        // bord nommé (`right 10px` = bord droit − 10 px).
+        [a, b] => {
+            let off = len_px(b)?;
+            match *a {
+                "left" | "top" | "x-start" | "y-start" => Some(off),
+                "right" | "bottom" | "x-end" | "y-end" => Some(span - dim - off),
+                "center" => Some((span - dim) / 2.0),
+                t => len_px(t),
+            }
+        }
+        _ => None,
+    }
 }
 
 /// Plafond de la tuile `background-size` mise à l'échelle

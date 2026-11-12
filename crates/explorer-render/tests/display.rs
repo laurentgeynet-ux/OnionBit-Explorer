@@ -1241,6 +1241,68 @@ fn background_position_decale_lorigine() {
 }
 
 #[test]
+fn background_position_x_y_routes_les_deux_axes() {
+    // R-261 : les longhands mono-axe (css-backgrounds-4) se
+    // combinent avec le shorthand — chaque axe déclaré
+    // écrase l'axe correspondant.
+    let list = bg_div(
+        "background:url(x) no-repeat;background-position:10px 10px;\
+         background-position-x:right;background-position-y:5px",
+    );
+    let origin = list
+        .items
+        .iter()
+        .find_map(|i| match i {
+            DisplayItem::BackgroundImage { origin, .. } => Some(*origin),
+            _ => None,
+        })
+        .expect("bg item");
+    // `right` = aire − image : 40 − 4 ; `5px` garde y.
+    assert_eq!(
+        origin,
+        (36.0, 5.0),
+        "x depuis -x:right, y depuis -y : {origin:?}"
+    );
+}
+
+#[test]
+fn background_position_x_forme_bord_offset() {
+    // `background-position-x: right 5px` = bord droit − 5 px.
+    let list = bg_div("background:url(x) no-repeat;background-position-x:right 5px");
+    let origin = list
+        .items
+        .iter()
+        .find_map(|i| match i {
+            DisplayItem::BackgroundImage { origin, .. } => Some(*origin),
+            _ => None,
+        })
+        .expect("bg item");
+    assert_eq!(origin.0, 31.0, "right 5px → 36−5 : {origin:?}");
+}
+
+#[test]
+fn background_position_y_seule_garde_x_du_shorthand() {
+    let list = bg_div(
+        "background:url(x) no-repeat;background-position:7px 1px;\
+         background-position-y:bottom",
+    );
+    let origin = list
+        .items
+        .iter()
+        .find_map(|i| match i {
+            DisplayItem::BackgroundImage { origin, .. } => Some(*origin),
+            _ => None,
+        })
+        .expect("bg item");
+    // `bottom` = 20 − 2 = 18 ; x inchangé.
+    assert_eq!(
+        origin,
+        (7.0, 18.0),
+        "y depuis -y:bottom, x conservé : {origin:?}"
+    );
+}
+
+#[test]
 fn background_image_multicouche_peint_la_couche_url() {
     // R-71 : `linear-gradient(…),url(…)` (sprites Wikipedia
     // `.sprite`) — la couche `url()` doit peindre même quand
