@@ -2555,3 +2555,11 @@ cause** ; résidu = promesses des handlers d'erreur `Atn`
   Verrou `word_break_keep_all_supprime_les_coupures_cjk`.
 - Re-tour `affectsv` souhaité : `word-break.keep-all`
   (fixture CJK), `text-decoration-inset`, `underline-position`.
+
+### 2026-11-13 — NAV -> PIPE : re-tour affectsv post-R-281 (10e)
+
+- word-break:keep-all -> ok (fixture latin+CJK ; le latin seul
+  ne discriminait pas). auto-phrase = miss honnete (segmentation
+  phrasale Chrome, hors scope). normal = na initiale.
+- **Score : 1065/2202 (48,4 %)** — +1 net. Cliquet vert.
+

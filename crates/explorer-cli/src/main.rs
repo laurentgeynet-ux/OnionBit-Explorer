@@ -795,11 +795,17 @@ fn fixture_for(name: &str) -> &'static str {
         // étroit + mot long/tabulation).
         () if matches!(
             n,
-            "overflow-wrap" | "word-break" | "line-break" | "tab-size"
+            "overflow-wrap" | "line-break" | "tab-size"
                 | "overflow" | "overflow-x" | "overflow-y" | "text-wrap"
         ) =>
         {
             "<body><div class=x style=\"width:40px\"><p>averyveryveryverylongword\tb</p></div></body>"
+        }
+        // `word-break` (R-281) : `keep-all` n'a d'effet que
+        // sur des lettres CJK — le run latin sert `break-all`,
+        // le run  sert `keep-all`/`normal`.
+        () if n == "word-break" => {
+            "<body><div class=x style=\"width:40px\"><p>averyveryveryverylongword のテキストです</p></div></body>"
         }
         // `hyphens`/`hyphenate-*` (R-275) : la césure n'a
         // d'oracle que s'il y a une **opportunité** — le mot
