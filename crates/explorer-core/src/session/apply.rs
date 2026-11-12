@@ -1950,7 +1950,7 @@ fn try_incr_payload(
     // display list re-rasterise à la taille utilisée quand
     // la boîte dépasse le naturel (§B-32/§B-36).
     let (svgs, svg_sources) =
-        explorer_render::svg::collect_svg_with_sources(new_dom, root_el, ctx.image_max_px);
+        explorer_render::svg::collect_svg_styled(new_dom, root_el, &styles, ctx.image_max_px);
     let block = layout_ctx(ctx, p);
     // Reliquat R-88 : `relayout_subtree` ne pose pas
     // `root_font_size`, contrairement à `layout_tree` —
@@ -2171,7 +2171,7 @@ pub(crate) fn relayout_dom_payload(
     // R-133 : sources XML conservées pour le re-raster à
     // taille utilisée dans `paint_replaced` (§B-32/§B-36).
     let (mut svgs, mut svg_sources) =
-        explorer_render::svg::collect_svg_with_sources(dom, root_el, ctx.image_max_px);
+        explorer_render::svg::collect_svg_styled(dom, root_el, &styles, ctx.image_max_px);
     let Some(mut bx) = build_box_tree_sized(dom, root_el, &styles, &sizes) else {
         return Err(CoreError::NothingToPaint);
     };
@@ -2241,8 +2241,12 @@ pub(crate) fn relayout_dom_payload(
                     .entry(n)
                     .or_insert_with(|| composite::iframe_intrinsic(dom, n));
             }
-            let (svgs2, svg_sources2) =
-                explorer_render::svg::collect_svg_with_sources(dom, root_el, ctx.image_max_px);
+            let (svgs2, svg_sources2) = explorer_render::svg::collect_svg_styled(
+                dom,
+                root_el,
+                &styles2,
+                ctx.image_max_px,
+            );
             if let Some(mut bx2) = build_box_tree_sized(dom, root_el, &styles2, &sizes) {
                 layout_tree(&mut bx2, vw, &block);
                 tracing::info!(

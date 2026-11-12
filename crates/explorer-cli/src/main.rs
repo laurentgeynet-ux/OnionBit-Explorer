@@ -1532,6 +1532,43 @@ const NO_ORACLE: &[&str] = &[
     // queries `@container` — aucun effet géométrique propre
     // (le prédicat s'évalue dans la règle, pas la déclaration).
     "container-name",
+    // Peinture/géométrie **à portée SVG** (svg2 §geometry /
+    // svg11 §painting) : l'effet vit dans l'îlot rasterisé
+    // `<svg>` (atome remplacé — son bitmap n'entre pas dans
+    // le dump display-list) ; déclarée sur un élément HTML
+    // elle est inerte par spec. Même classe que
+    // `dominant-baseline` : conformité prouvée par les
+    // verrous PIPE (R-283 `collect_svg_styled`), aucun
+    // oracle statique ici.
+    "fill",
+    "fill-opacity",
+    "fill-rule",
+    "stroke",
+    "stroke-width",
+    "stroke-opacity",
+    "stroke-dasharray",
+    "stroke-dashoffset",
+    "stroke-linecap",
+    "stroke-linejoin",
+    "stroke-miterlimit",
+    "paint-order",
+    "d",
+    "cx",
+    "cy",
+    "r",
+    "rx",
+    "ry",
+    "x",
+    "y",
+    "stop-color",
+    "stop-opacity",
+    "flood-color",
+    "flood-opacity",
+    "lighting-color",
+    "marker",
+    "marker-start",
+    "marker-mid",
+    "marker-end",
 ];
 
 fn affects_decl_verdict(decl: &str) -> Option<bool> {

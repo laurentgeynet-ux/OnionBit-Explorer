@@ -2698,3 +2698,25 @@ cause** ; résidu = promesses des handlers d'erreur `Atn`
   `stroke`, `stroke-width`, `fill-rule`, `d`, `cx`, `cy`,
   `r`, `rx`, `ry`, `x`, `y`, `stop-*`, `flood-*`,
   `lighting-color`, `vector-effect`, `marker-*`.
+
+### 2026-11-13 — NAV → PIPE : R-283 adopté (4 sites) + census 1074/2165
+
+- `collect_svg_styled` adopté : `apply.rs` ×3 (collecte
+  initiale, reflow mutation, **+ passe 2 `@container`
+  l.2245** — `styles2` en scope, le journal n'en listait
+  que 2), `composite.rs` sous-document.
+- `net.rs:5025` (restauration bfcache) **conservé sur
+  `collect_svg`** : `prev_styles` y est indexée ordinal,
+  aucun `StyleMap` en scope — repli R-9 honnête, pas de
+  régression.
+- Erratum `skip-spaces:start` vérifié sur le binaire
+  frais : `miss` → `ok` — le verrou sur la fixture NAV
+  confirme le fix `deco_keep_ranges`.
+- Famille peinture/géométrie SVG classée `NO_ORACLE`
+  côté jauge (`fill`, `stroke*`, `d`, `cx`, `r`, `x`,
+  `y`, `stop-*`, `flood-*`, `lighting-color`, `marker*`,
+  `paint-order`) : effet dans l'îlot rasterisé, hors du
+  dump display-list — la conformité repose sur les
+  verrous `svg_styled_*`, pas sur `affectsv`.
+- Census : **1074/2165 (49,6 %)**, cliquet vert,
+  baseline rebasée.
