@@ -2127,10 +2127,11 @@ Lot PIPE livré depuis la piste YoutubeFix (R-260, crates `explorer-css`/`explor
   `shape-outside:none|margin-box` (≡ flottant nu),
   `shape-image-threshold` (NO_ORACLE — sources image
   dormantes, même borne que `mask-*`).
-- **`miss` honnêtes à journaliser** :
-  `offset-anchor:bottom left` (l'axe `bottom`/`right` n'est
-  pas résolu par `offset_pos` — les mots-clés de fin de
-  bord passent inaperçus), `shape-outside:url()/image()`
+- **`offset-anchor` après le fix annexe R-273** : la sonde
+  exige `offset-position` fixe (`normal` suit l'ancre —
+  `T − A` invariant, neutre par construction) : `bottom left`
+  /`right bottom`/`left top` tous `ok`. Reste `miss` honnête :
+  `shape-outside:url()/image()`
   (analyse alpha absente), sous-features `offset-path`
   (`ray()`/`coord-box`/`path()` dormants — bornes PIPE
   documentées). Le delta attendu ~52 → réel +15 : la

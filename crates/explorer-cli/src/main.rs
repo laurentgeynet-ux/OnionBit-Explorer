@@ -1089,6 +1089,11 @@ fn context_css(name: &str) -> &'static str {
         // honnête de la spec : `offset:<path>` = distance 0).
         if matches!(n, "offset" | "offset-path") {
             "offset-distance:20px"
+        } else if n == "offset-anchor" {
+            // L'ancre n'a d'effet que si la position du
+            // chemin est **fixe** — `offset-position:normal`
+            // (défaut) suit l'ancre et `T − A` est invariant.
+            "offset-path:ray(90deg);offset-distance:20px;offset-position:10px 10px"
         } else {
             "offset-path:ray(90deg);offset-distance:20px"
         }
