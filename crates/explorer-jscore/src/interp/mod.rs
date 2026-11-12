@@ -7917,7 +7917,15 @@ impl Engine {
                         Value::Str(_) | Value::Num(_) | Value::Bool(_) => {
                             self.to_js_string(v.clone()).unwrap_or_default()
                         }
-                        Value::Obj(o) => format!("<obj:{o}>"),
+                        Value::Obj(o) => {
+                            let nm = self
+                                .read_prop(v.clone(), v.clone(), "name")
+                                .ok()
+                                .filter(|n| matches!(n, Value::Str(_)))
+                                .and_then(|n| self.to_js_string(n).ok())
+                                .unwrap_or_default();
+                            format!("<obj:{o}:{nm}>")
+                        }
                         _ => format!("{v:?}"),
                     };
                     let (src, d, depth) = self.stack_nearest_fn_src(120);
