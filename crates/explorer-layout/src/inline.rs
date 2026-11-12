@@ -2114,10 +2114,22 @@ fn break_into_lines(
             // le reste continue sur les lignes suivantes. Sans
             // cette borne un mot long (URL, `break-words`
             // Tailwind) débordait sa boîte au lieu de couper.
+            // R-262 : `word-break:break-word` (alias déprécié
+            // d'`overflow-wrap:break-word`, css-text-3 §6.1),
+            // `word-wrap` (nom legacy d'`overflow-wrap`) et
+            // `line-break:anywhere` (§6.2 — opportunité souple
+            // autour de chaque caractère typographique) ouvrent
+            // la même coupure intra-mot.
             let break_any = matches!(
                 item.style.get("overflow-wrap"),
                 Some("break-word" | "anywhere")
-            ) || matches!(item.style.get("word-break"), Some("break-all"));
+            ) || matches!(
+                item.style.get("word-wrap"),
+                Some("break-word" | "anywhere")
+            ) || matches!(
+                item.style.get("word-break"),
+                Some("break-all" | "break-word")
+            ) || matches!(item.style.get("line-break"), Some("anywhere"));
             let segs = if break_any && !no_wrap && pw > line_w + 0.01 {
                 split_to_fit(text, line_w - (cursor_x - line_x), line_w, &measure)
             } else {

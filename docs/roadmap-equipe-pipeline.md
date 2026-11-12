@@ -4020,9 +4020,13 @@ le census `site_harvest` arbitre les ex æquo.
   `bg_axis_position` (grammaire mono-axe : `center`, `bord`,
   `bord offset`, `<len>`/`<%>`) compose chaque axe sur le
   shorthand au paint (`layer_value` par couche). 3 verrous.
-- [ ] `overflow-wrap` (`anywhere`/`break-word`) +
-  `word-break:break-all`/`line-break` — coupure intra-mot du
-  line-breaker (`layout/inline`). YouTube en abuse.
+- [x] `overflow-wrap` (`anywhere`/`break-word`) +
+  `word-break:break-all`/`line-break` — **R-262** : `break_any`
+  couvre `word-break:break-word` (alias déprécié), `word-wrap`
+  (nom legacy d'`overflow-wrap`), `line-break:anywhere` (§6.2).
+  `line-break:loose|strict|normal` = règles CJK sans effet
+  latin (UAX #14 sans curseur de sévérité → `na` honnête,
+  journal NAV). 3 verrous.
 - [ ] `empty-cells:hide` — cellule vide → fond/bordure non
   peints (`layout`/`display`).
 - [ ] `white-space` variantes — `pre-line`/`pre-wrap`/

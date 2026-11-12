@@ -2258,6 +2258,50 @@ fn overflow_wrap_break_word_coupe() {
     assert!(total >= 2, "mot long non coupé — {total} ligne(s)");
 }
 
+/// R-262 — fabrique partagée des tests de coupure intra-mot :
+/// `decl` = la déclaration testée, un mot de ~30 caractères
+/// dans une boîte de 60 px doit produire ≥ 2 lignes.
+fn long_word_lines(decl: &str) -> usize {
+    let dom = TreeBuilder::parse("<div id=d>treslongmotquidebordepartout</div>");
+    let mut e = StyleEngine::new();
+    e.add_css(
+        &format!("body{{margin:0}} #d{{width:60px;font-size:10px;{decl}}}"),
+        Origin::Author,
+    );
+    let styles = e.compute_tree(&dom, dom.document(), &StyleEnv::default());
+    let root_el = dom
+        .children(dom.document())
+        .into_iter()
+        .flatten()
+        .find(|&c| dom.element(c).is_ok())
+        .unwrap();
+    let mut bx = build_box_tree(&dom, root_el, &styles).unwrap();
+    layout_tree(&mut bx, VIEW, &BlockCtx::default());
+    let d = find(&bx, by_id(&dom, "d"));
+    d.lines.len() + d.children.iter().map(|c| c.lines.len()).sum::<usize>()
+}
+
+#[test]
+fn word_break_break_word_alias_coupe() {
+    // `word-break:break-word` (forme dépréciée, css-text-3
+    // §6.1) se comporte en `overflow-wrap:break-word`.
+    assert!(long_word_lines("word-break:break-word") >= 2);
+}
+
+#[test]
+fn word_wrap_alias_overflow_wrap_coupe() {
+    // `word-wrap` = nom legacy d'`overflow-wrap` — même effet.
+    assert!(long_word_lines("word-wrap:break-word") >= 2);
+}
+
+#[test]
+fn line_break_anywhere_coupe() {
+    // `line-break:anywhere` (css-text-3 §6.2) : opportunité
+    // souple autour de chaque caractère typographique — le
+    // mot latin long se coupe aussi.
+    assert!(long_word_lines("line-break:anywhere") >= 2);
+}
+
 #[test]
 fn height_pct_chain_html_body_map() {
     // B-28 (uMap/Leaflet vol50) : `html`/`body`/`#map` à
