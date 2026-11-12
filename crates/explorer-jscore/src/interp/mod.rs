@@ -102,6 +102,12 @@ static BG_TRAYRIDE: std::sync::atomic::AtomicU32 =
     std::sync::atomic::AtomicU32::new(u32::MAX);
 static BG_ENTRY: std::sync::atomic::AtomicU32 =
     std::sync::atomic::AtomicU32::new(u32::MAX);
+/// N1.5 — `ObjId` du handler de requêtes `sPQ` (yield du
+/// programme `Q`, stocké `this.sPQ`) — `bg.spq` logue les
+/// appels page→VM : la page a-t-elle invoqué, la VM a-t-elle
+/// répondu.
+static BG_SPQ: std::sync::atomic::AtomicU32 =
+    std::sync::atomic::AtomicU32::new(u32::MAX);
 /// N1.5 — dernier native invoqué depuis une frame `VM BotGuard` :
 /// relu au `bg.a` suivant (session d'après) — le dernier op
 /// hôte avant l'arrêt est exactement l'op attendu par la VM.
@@ -4305,6 +4311,11 @@ impl Engine {
             if let Value::Obj(id) = v {
                 BG_ENTRY.store(*id, Relaxed);
                 eprintln!("[ctxp] bg.entry key={key} id={id}");
+            }
+        } else if key == "sPQ" {
+            if let Value::Obj(id) = v {
+                BG_SPQ.store(*id, Relaxed);
+                eprintln!("[ctxp] bg.spq.obj id={id}");
             }
         }
     }
@@ -9458,6 +9469,15 @@ impl Engine {
                         .unwrap_or_default();
                     tracing::info!(target: "dom_probe", site = "bg.a",
                         n = n, id = cid, from = %from, last = %last, tail = %ring);
+                }
+            } else if cid == BG_SPQ.load(std::sync::atomic::Ordering::Relaxed) {
+                static BG_SPQ_N: std::sync::atomic::AtomicU32 =
+                    std::sync::atomic::AtomicU32::new(0);
+                let n = BG_SPQ_N.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                if n < 64 {
+                    let (from, _, _) = self.stack_nearest_fn_src(120);
+                    tracing::info!(target: "dom_probe", site = "bg.spq",
+                        n = n, id = cid, argc = args_ref.len(), from = %from);
                 }
             }
         }
