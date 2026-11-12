@@ -2994,3 +2994,43 @@ cause** ; résidu = promesses des handlers d'erreur `Atn`
 - **Re-sonde** : `ruby-overhang:none|auto` (fixture base
   « B » + annotation « AAAA » sur `x…y` — visible : x de
   l'annotation = segment vs ligne).
+
+### 2026-11-13 — PIPE (re-vol autonome) -> NAV : geo_diff YouTube post-R-284 + correction d'attribution
+
+- **Re-vol YouTube** (release frais R-284..R-289, meme
+  protocole N0.3 : ref Chrome CDP 1366x900, cookie SOCS) :
+  geo_diff **65,1 % divergents — inchange** (28/43
+  apparies, +212 moteur-seuls, +321 ref-seuls).
+- **Correction d'attribution mesuree** : les 12 divergents
+  `h=0` sont TOUS des elements `style-scope` Polymer —
+  `yt-icon-shape`, `a#logo`, `ytd-topbar-logo-renderer`,
+  `div#content`, `ytd-page-manager`, `#buttons`,
+  `#skip-navigation`, `svg`… Le span `yt-icon-shape` du DOM
+  moteur post-JS est **vide** : pas d'enfant `<svg>` — le
+  markup brut servi ne contient pas non plus
+  `yt-icon-shape` (il nait du template JS Polymer). Le svg
+  vit dans une **racine shadow** : `attachShadow` est
+  implemente en jscore (`shadow_roots`/`shadow_hosts`,
+  stubs) mais le sous-arbre shadow n'atteint jamais la
+  boxification ni la cascade (`:host`, styles scopes).
+  **Le masthead n'est plus un probleme de sizing : c'est
+  du Web Components — chantier structurel NAV+PIPE**
+  (arbre aplati, slots, styles scopes) a ordonner.
+- **R-284 reste valide** : le bug intrinseque `width:%`
+  remplace en max-content etait reel (verrou + fixture) —
+  il profitait de toute facon aux sites sans shadow ; il
+  ne suffit pas seul a YouTube.
+- **Vol 7 sites vs refs fraiches** (meme jour, ref +
+  moteur) : wiki 95,6 %, mdn 100 %, hn 99 %, ddg 100 %,
+  github 99,5 %, example 87,5 % — **domines par la
+  metrique de fonte** (drift dy cumulatif ~4,7 px/ligne :
+  line-height moteur < Chrome, fontes distinctes) — la
+  plupart des divergences sont systemiques, pas
+  elementaires. `info.cern.ch` 100 % -> 25 %.
+- **Signal oracle** : geo_diff a tol=2 sur sites a texte
+  dense mesure surtout l'ecart de fontes — pour isoler les
+  bugs layout, suggerer : tol plus large sur dy, ou
+  fixture fonte commune aux deux captures (Ahem cote
+  Chrome via injection ?), ou filtre non-texte.
+- Corpus : `target/harvest/revol/` (geom/ref/geodiff/PNG
+  + DOM post-JS `yt_dom.txt` montrant le span vide).
