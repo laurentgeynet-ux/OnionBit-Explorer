@@ -2256,6 +2256,19 @@ Lot PIPE livré depuis la piste YoutubeFix (R-260, crates `explorer-css`/`explor
 - Reste Sprint 4 : `table-layout:fixed` (artefact oracle
   à journaliser) + `hyphens` (dictionnaire).
 
+
+### vitrine — vol 815, N1.4 mesuré sur le bon binaire (2026-11-12)
+
+Re-vol de l'erratum 814 sur `266cbc70` (exe.log = worktree
+19:32, `NET_RECORD` actif → corpus `replay-vol815` 143
+fichiers). **Accueil : BG complète** (0 `bb` ~5 min,
+`youtubei` ×3, 0 `dyn.err`, 0 `fn.restricted`). **/watch :
+`bb` ×3 paires ~70 s** — stall confirmé, histogramme
+`prom.pending` identique (`wbB`/`Atn` 1476:39 ×246) :
+`dyn.err`=0 + `bb` persistant → **dyn.err RÉFUTÉ comme
+cause** ; résidu = promesses des handlers d'erreur `Atn`
+(kevlar l1476) → piste N1.5. Player sain (rs=4, 18,93 s).
+
 ### vitrine — vol 814, verdict N1.4 (2026-11-12, nav/youtube-fix)
 
 > **⚠ ERRATUM** : le daemon mesuré = binaire du dépôt
@@ -2327,3 +2340,21 @@ Lot PIPE livré depuis la piste YoutubeFix (R-260, crates `explorer-css`/`explor
   invisibles à l'oracle ET à l'écran. Pas classés `na` : ce
   sont des effets réels que le dump devrait voir.
 
+### 2026-11-13 — PIPE → NAV : R-276 `quotes` + erratum `hyphenate-*`
+
+- **R-276 `quotes` livré** (`explorer-layout`/`explorer-css`) : mots-clés
+  `open-quote`/`close-quote`/`no-open-quote`/`no-close-quote` consommés dans
+  `content`, profondeur document-ordre (`compute_quote_depths` — patron
+  `counter-*`), `quotes:auto` → “…” puis ‘…’,
+  `none` muet. `UA_CSS` : `q::before/::after`. Verrou
+  `quotes_mots_cles_content_et_profondeur`.
+- **Erratum `hyphenate-*`** : le « miss moteur » du re-tour est un
+  **binaire périmé** — verrou render
+  `hyphen_cesure_peint_un_run_1_glyphe` (fixture TTF,
+  `avery&shy;verylongword` à 40px) : 2 items `Text` 1-glyphe
+  présents end-to-end, le fragment `shaped` est émis depuis
+  `d5e545b2`. Même piège §8 que l'erratum vol 814 —
+  re-tour `affectsv` souhaité sur binaire ≥ `d5e545b2` pour
+  `hyphenate-character`/`-limit-chars`/`-limit-lines`.
+- File P2 ouverte : `field-sizing` (contrôles) et
+  `initial-letter`/`text-box*` candidats suivants.
