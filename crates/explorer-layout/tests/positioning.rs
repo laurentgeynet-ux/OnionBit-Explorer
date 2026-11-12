@@ -788,8 +788,10 @@ fn anchor_position_area() {
     );
     let m = find(&bx, by_id(&dom, "m"));
     let n = find(&bx, by_id(&dom, "n"));
-    // bottom : top = bas de l'ancre ; x aligné start (140).
-    assert_eq!((m.rect.x, m.rect.y), (100.0, 120.0), "area bottom");
+    // bottom : top = bas de l'ancre ; mot-clé seul →
+    // l'autre axe = `span-all` ≈ centré (R-267, spec :
+    // 100 + (40-10)/2 = 115).
+    assert_eq!((m.rect.x, m.rect.y), (115.0, 120.0), "area bottom");
     // top right : au-dessus, bord gauche sur bord droit ancre.
     assert_eq!((n.rect.x, n.rect.y), (140.0, 92.0), "area top right");
 }
@@ -1098,6 +1100,103 @@ fn container_units_fallback_viewport() {
     let a = find(&bx, by_id(&dom, "a"));
     assert_eq!(a.rect.width, 400.0, "cqw = % viewport");
     assert_eq!(a.rect.height, 60.0, "cqh = % viewport");
+}
+
+/// R-267 — `<position-area>` dans `position-try` : les
+/// mots-clés de la grille 3×3 (css-anchor-1 §3.4) sont
+/// des candidates qui déplacent la boîte vers la tuile
+/// nommée — ici la paire `top left` (rangée haut,
+/// colonne gauche).
+#[test]
+fn anchor_position_try_area_pair() {
+    let (dom, bx) = laid(
+        "<div id=a></div><div id=m></div><div id=n></div>",
+        "body{height:800px}\
+         #a{position:absolute;left:350px;top:400px;width:40px;height:20px;anchor-name:--a}\
+         #m{position:absolute;position-anchor:--a;left:anchor(right);top:anchor(top);\
+            width:30px;height:20px;position-try:top left}\
+         #n{position:absolute;position-anchor:--a;left:anchor(right);top:anchor(top);\
+            width:30px;height:20px}",
+    );
+    let m = find(&bx, by_id(&dom, "m"));
+    let n = find(&bx, by_id(&dom, "n"));
+    assert_eq!(
+        (n.rect.x, n.rect.y),
+        (390.0, 400.0),
+        "contrôle : déborde à droite"
+    );
+    // Tuile haut-gauche : y = 400-20 = 380, x = 350-30 = 320.
+    assert_eq!(
+        (m.rect.x, m.rect.y),
+        (320.0, 380.0),
+        "top left → tuile haut-gauche"
+    );
+}
+
+/// R-267 — options séparées par virgule (`<try-fallback>#`)
+/// et mot-clé explicite seul : `top` = rangée haut +
+/// colonne `span-all` ≈ centrée ; `right` = Δ nulle
+/// (déjà à droite) → filtrée, boîte inchangée.
+#[test]
+fn anchor_position_try_area_virgules() {
+    let (dom, bx) = laid(
+        "<div id=a></div><div id=m></div><div id=n></div><div id=o></div>",
+        "body{height:800px}\
+         #a{position:absolute;left:350px;top:400px;width:40px;height:20px;anchor-name:--a}\
+         #m{position:absolute;position-anchor:--a;left:anchor(right);top:anchor(top);\
+            width:30px;height:20px;position-try:top, left}\
+         #n{position:absolute;position-anchor:--a;left:anchor(right);top:anchor(top);\
+            width:30px;height:20px;position-try:left, top}\
+         #o{position:absolute;position-anchor:--a;left:anchor(right);top:anchor(top);\
+            width:30px;height:20px;position-try:right}",
+    );
+    let m = find(&bx, by_id(&dom, "m"));
+    let n = find(&bx, by_id(&dom, "n"));
+    let o = find(&bx, by_id(&dom, "o"));
+    // `top` essayée en premier : y = 380, x ≈ 350+5 = 355.
+    assert_eq!(
+        (m.rect.x, m.rect.y),
+        (355.0, 380.0),
+        "top seul → centrée dessus"
+    );
+    // `left` essayée en premier : x = 320, y inchangé.
+    assert_eq!((n.rect.x, n.rect.y), (320.0, 400.0), "left seul → à gauche");
+    // `right` = tuile déjà occupée → Δ(0,0) filtrée.
+    assert_eq!(
+        (o.rect.x, o.rect.y),
+        (390.0, 400.0),
+        "right = candidate nulle"
+    );
+}
+
+/// R-267 — mots-clés ambigus et `self-*` : `start` seul
+/// (ambigu) se répète → tuile start×start (haut-gauche
+/// LTR) ; `self-block-end` = rangée end explicite →
+/// colonne `span-all` ≈ centrée ; `span-left` retombe
+/// sur le côté de base (approximation documentée).
+#[test]
+fn anchor_position_try_area_ambigus() {
+    let (dom, bx) = laid(
+        "<div id=a></div><div id=m></div><div id=n></div><div id=o></div>",
+        "body{height:800px}\
+         #a{position:absolute;left:350px;top:400px;width:40px;height:20px;anchor-name:--a}\
+         #m{position:absolute;position-anchor:--a;left:anchor(right);top:anchor(top);\
+            width:30px;height:20px;position-try:start}\
+         #n{position:absolute;position-anchor:--a;left:anchor(right);top:anchor(top);\
+            width:30px;height:20px;position-try:self-block-end}\
+         #o{position:absolute;position-anchor:--a;left:anchor(right);top:anchor(top);\
+            width:30px;height:20px;position-try:span-left}",
+    );
+    let m = find(&bx, by_id(&dom, "m"));
+    let n = find(&bx, by_id(&dom, "n"));
+    let o = find(&bx, by_id(&dom, "o"));
+    assert_eq!((m.rect.x, m.rect.y), (320.0, 380.0), "start → haut-gauche");
+    assert_eq!(
+        (n.rect.x, n.rect.y),
+        (355.0, 420.0),
+        "self-block-end → dessous centré"
+    );
+    assert_eq!((o.rect.x, o.rect.y), (320.0, 400.0), "span-left → gauche");
 }
 
 /// `position-try` ordonné (css-anchor-1 §3.5) : la première

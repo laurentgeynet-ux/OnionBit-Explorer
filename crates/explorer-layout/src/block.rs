@@ -599,6 +599,121 @@ fn anchor_len(
     raw_length_px(&out, cb_w, fs, ctx)
 }
 
+/// Un mot-clé `<position-area>` (css-anchor-1 §3.1, R-267) →
+/// `(axe, côté)` : axe `0` = colonne (inline, LTR→x),
+/// `1` = rangée (bloc, horizontal-tb→y), `2` = **ambigu**
+/// (`start`/`end`/`self-*` nus — résolus par position dans
+/// la paire : 1ᵉʳ→bloc, 2ᵉ→inline ; seul → répété) ;
+/// côté `0` = start, `1` = center, `2` = end.
+/// `span-*` retombe sur le côté de base (approximation — le
+/// span complet exigerait un re-flow, déjà documenté au
+/// chemin `position-area`), `span-all`/`all`/`center` → 1.
+/// `self-*` = writing-mode propre de la boîte — mappé LTR
+/// comme le reste du chantier (approximation documentée).
+fn area_token(t: &str) -> Option<(u8, u8)> {
+    Some(match t {
+        "left"
+        | "x-start"
+        | "inline-start"
+        | "x-self-start"
+        | "self-inline-start"
+        | "span-left"
+        | "span-x-start"
+        | "span-inline-start"
+        | "span-x-self-start"
+        | "span-self-inline-start" => (0, 0),
+        "right"
+        | "x-end"
+        | "inline-end"
+        | "x-self-end"
+        | "self-inline-end"
+        | "span-right"
+        | "span-x-end"
+        | "span-inline-end"
+        | "span-x-self-end"
+        | "span-self-inline-end" => (0, 2),
+        "top"
+        | "y-start"
+        | "block-start"
+        | "y-self-start"
+        | "self-block-start"
+        | "span-top"
+        | "span-y-start"
+        | "span-block-start"
+        | "span-y-self-start"
+        | "span-self-block-start" => (1, 0),
+        "bottom"
+        | "y-end"
+        | "block-end"
+        | "y-self-end"
+        | "self-block-end"
+        | "span-bottom"
+        | "span-y-end"
+        | "span-block-end"
+        | "span-y-self-end"
+        | "span-self-block-end" => (1, 2),
+        "start" | "self-start" | "span-start" | "span-self-start" => (2, 0),
+        "end" | "self-end" | "span-end" | "span-self-end" => (2, 2),
+        "center" | "span-all" | "all" => (2, 1),
+        _ => return None,
+    })
+}
+
+/// `<position-area>` → Δ `(dx, dy)` à appliquer à `rect`
+/// pour rejoindre la tuile de la grille 3×3 autour de
+/// `ar` (css-anchor-1 §3.1). Un seul mot-clé explicite →
+/// l'autre axe ≈ `span-all` centré (pas de re-flow,
+/// approximation documentée) ; un ambigu seul → répété
+/// sur les deux axes (spec). Axe jamais couvert :
+/// aligné start-à-start (convention du chantier).
+fn area_delta(toks: &[&str], ar: &Rect, rect: &Rect) -> (f32, f32) {
+    let (w, h) = (rect.width, rect.height);
+    let (mut xs, mut ys) = (None::<u8>, None::<u8>);
+    let mut ambig = false;
+    for t in toks {
+        let Some((axis, side)) = area_token(t) else {
+            continue;
+        };
+        match axis {
+            0 => xs = Some(side),
+            1 => ys = Some(side),
+            _ => {
+                ambig = true;
+                if ys.is_none() {
+                    ys = Some(side);
+                } else if xs.is_none() {
+                    xs = Some(side);
+                }
+            }
+        }
+    }
+    if toks.len() == 1 {
+        match (xs, ys, ambig) {
+            // Ambigu seul (`start`, `self-end`, `center`…) :
+            // répété sur les deux axes (spec §3.1.2).
+            (None, Some(s), true) => xs = Some(s),
+            // Explicite seul (`top`, `left`…) : l'autre axe
+            // = `span-all` ≈ centré en translate-only.
+            (Some(_), None, _) => ys = Some(1),
+            (None, Some(_), false) => xs = Some(1),
+            _ => {}
+        }
+    }
+    let dx = match xs {
+        Some(0) => ar.x - w - rect.x,
+        Some(1) => ar.x + (ar.width - w) / 2.0 - rect.x,
+        Some(2) => ar.x + ar.width - rect.x,
+        _ => ar.x - rect.x,
+    };
+    let dy = match ys {
+        Some(0) => ar.y - h - rect.y,
+        Some(1) => ar.y + (ar.height - h) / 2.0 - rect.y,
+        Some(2) => ar.y + ar.height - rect.y,
+        _ => ar.y - rect.y,
+    };
+    (dx, dy)
+}
+
 /// Seconde moitié de la passe : translate chaque boîte
 /// positionnée dont un inset porte `anchor(…)` au bord
 /// d'ancre voulu. `cb_w` = base des `%`/margins de repli
@@ -661,53 +776,13 @@ fn fix_anchor_positioned(
                     .rev()
                     .find(|(n, _)| n.trim_start_matches("--") == name)
                 {
-                    let mut dx = 0.0;
-                    let mut dy = 0.0;
-                    let (w, h) = (bx.rect.width, bx.rect.height);
-                    for t in av.split_ascii_whitespace() {
-                        match t {
-                            "bottom" | "y-end" | "block-end" | "span-bottom" | "span-y-end"
-                            | "span-block-end" => {
-                                dy = ar.y + ar.height - bx.rect.y;
-                            }
-                            "top" | "y-start" | "block-start" | "span-top" | "span-y-start"
-                            | "span-block-start" => {
-                                dy = ar.y - h - bx.rect.y;
-                            }
-                            "right" | "x-end" | "inline-end" | "span-right" | "span-x-end"
-                            | "span-inline-end" => {
-                                dx = ar.x + ar.width - bx.rect.x;
-                            }
-                            "left" | "x-start" | "inline-start" | "span-left" | "span-x-start"
-                            | "span-inline-start" => {
-                                dx = ar.x - w - bx.rect.x;
-                            }
-                            // `span-all` = les 3 pistes des deux
-                            // axes → centré (la taille spannée
-                            // exigerait un re-flow — approchée
-                            // center, documentée).
-                            "span-all" | "all" => {
-                                dx = ar.x + (ar.width - w) / 2.0 - bx.rect.x;
-                                dy = ar.y + (ar.height - h) / 2.0 - bx.rect.y;
-                            }
-                            "center" => {
-                                // `center` nu = les deux axes ;
-                                // `center` en paire vaut pour
-                                // l'axe non nommé — approximation :
-                                // appliqué aux deux.
-                                dx = ar.x + (ar.width - w) / 2.0 - bx.rect.x;
-                                dy = ar.y + (ar.height - h) / 2.0 - bx.rect.y;
-                            }
-                            _ => {}
-                        }
-                    }
-                    // Axe non couvert : aligner start-à-start.
-                    if dx == 0.0 {
-                        dx = ar.x - bx.rect.x;
-                    }
-                    if dy == 0.0 {
-                        dy = ar.y - bx.rect.y;
-                    }
+                    // R-267 — table `area_token`/`area_delta`
+                    // partagée avec `position-try` : mêmes
+                    // mots-clés (`x-*`/`y-*`/`block-*`/`self-*`
+                    // + ambigus), mêmes approximations.
+                    let toks: Vec<&str> = av.split_ascii_whitespace().collect();
+                    let rect = bx.rect;
+                    let (dx, dy) = area_delta(&toks, ar, &rect);
                     if dx != 0.0 || dy != 0.0 {
                         crate::flex::translate_subtree(bx, dx, dy);
                     }
@@ -824,36 +899,65 @@ fn fix_anchor_positioned(
                             .get("position-try-order")
                             .map_or("normal", |v| v.trim())
                             .to_string();
-                        let mut toks = Vec::new();
-                        for t in raw_try.split_ascii_whitespace() {
-                            match t {
-                                "normal" | "most-width" | "most-inline-size" | "most-height"
-                                | "most-block-size" | "most-size"
-                                    if !has_order_prop =>
-                                {
-                                    order = t.to_string();
+                        // R-267 — découpe en candidates :
+                        // la virgule sépare les options
+                        // (css-anchor-1 §3.4, `<try-fallback>#`).
+                        // Dans une option, `flip-*`/`--nom`
+                        // vaut une candidate seul ; les
+                        // mots-clés `<position-area>` (1..=2
+                        // = une tuile) forment UNE candidate
+                        // groupée passée à `area_delta`.
+                        let mut groups: Vec<Vec<&str>> = Vec::new();
+                        for opt in raw_try.split(',') {
+                            let mut area: Vec<&str> = Vec::new();
+                            for t in opt.split_ascii_whitespace() {
+                                match t {
+                                    "normal" | "most-width" | "most-inline-size"
+                                    | "most-height" | "most-block-size" | "most-size"
+                                        if !has_order_prop =>
+                                    {
+                                        order = t.to_string();
+                                    }
+                                    "flip-block" | "flip-y" | "flip-inline" | "flip-x"
+                                    | "flip-start" => {
+                                        if !area.is_empty() {
+                                            groups.push(std::mem::take(&mut area));
+                                        }
+                                        groups.push(vec![t]);
+                                    }
+                                    _ if t.starts_with("--") => {
+                                        if !area.is_empty() {
+                                            groups.push(std::mem::take(&mut area));
+                                        }
+                                        groups.push(vec![t]);
+                                    }
+                                    _ if area_token(t).is_some() => area.push(t),
+                                    _ => {}
                                 }
-                                _ => toks.push(t),
+                            }
+                            if !area.is_empty() {
+                                groups.push(area);
                             }
                         }
                         // Δ de chaque option (flip → miroir
                         // autour du centre d'ancre ; `--nom` →
                         // `position-area`/insets px du try
-                        // sérialisé — autres props ignorées).
-                        let cand = |t: &str| -> (f32, f32) {
+                        // sérialisé — autres props ignorées ;
+                        // groupe area → tuile via `area_delta`).
+                        let cand = |g: &[&str]| -> (f32, f32) {
                             let (mut fx, mut fy) = (0.0_f32, 0.0_f32);
-                            match t {
-                                "flip-block" | "flip-y" if over_t || over_b => {
+                            match g {
+                                ["flip-block" | "flip-y"] if over_t || over_b => {
                                     fy = 2.0 * (ar.y + ar.height / 2.0)
                                         - 2.0 * bx.rect.y
                                         - bx.rect.height;
                                 }
-                                "flip-inline" | "flip-x" if over_l || over_r => {
+                                ["flip-inline" | "flip-x"] if over_l || over_r => {
                                     fx = 2.0 * (ar.x + ar.width / 2.0)
                                         - 2.0 * bx.rect.x
                                         - bx.rect.width;
                                 }
-                                "flip-start" => {
+                                ["flip-start"] => {
                                     if over_t || over_b {
                                         fy = 2.0 * (ar.y + ar.height / 2.0)
                                             - 2.0 * bx.rect.y
@@ -865,7 +969,7 @@ fn fix_anchor_positioned(
                                             - bx.rect.width;
                                     }
                                 }
-                                n if n.starts_with("--") => {
+                                [n] if n.starts_with("--") => {
                                     if let Some(body) =
                                         bx.style.get(&format!("position-try-{}", n.trim()))
                                     {
@@ -874,27 +978,11 @@ fn fix_anchor_positioned(
                                             let (k, v) = (kv.0.trim(), kv.1.trim());
                                             match k {
                                                 "position-area" => {
-                                                    for t2 in v.split_ascii_whitespace() {
-                                                        match t2 {
-                                                            "bottom" | "y-end" | "block-end" => {
-                                                                fy = ar.y + ar.height - bx.rect.y;
-                                                            }
-                                                            "top" | "y-start" | "block-start" => {
-                                                                fy = ar.y
-                                                                    - bx.rect.height
-                                                                    - bx.rect.y;
-                                                            }
-                                                            "right" | "x-end" | "inline-end" => {
-                                                                fx = ar.x + ar.width - bx.rect.x;
-                                                            }
-                                                            "left" | "x-start" | "inline-start" => {
-                                                                fx = ar.x
-                                                                    - bx.rect.width
-                                                                    - bx.rect.x;
-                                                            }
-                                                            _ => {}
-                                                        }
-                                                    }
+                                                    let toks: Vec<&str> =
+                                                        v.split_ascii_whitespace().collect();
+                                                    let (dx, dy) = area_delta(&toks, ar, &bx.rect);
+                                                    fx = dx;
+                                                    fy = dy;
                                                 }
                                                 "top" | "bottom" => {
                                                     if let Some(px) = v
@@ -925,7 +1013,12 @@ fn fix_anchor_positioned(
                                         }
                                     }
                                 }
-                                _ => {}
+                                // Groupe `<position-area>` — R-267.
+                                _ => {
+                                    let (dx, dy) = area_delta(g, ar, &bx.rect);
+                                    fx = dx;
+                                    fy = dy;
+                                }
                             }
                             (fx, fy)
                         };
@@ -938,9 +1031,9 @@ fn fix_anchor_positioned(
                         // éligibles). La première dont la boîte
                         // translatée rentre gagne ; si toutes
                         // débordent, la dernière est appliquée.
-                        let mut cands: Vec<(f32, f32)> = toks
+                        let mut cands: Vec<(f32, f32)> = groups
                             .iter()
-                            .map(|t| cand(t))
+                            .map(|g| cand(g))
                             .filter(|d| d.0 != 0.0 || d.1 != 0.0)
                             .collect();
                         match order.as_str() {

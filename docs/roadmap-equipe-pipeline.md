@@ -4070,11 +4070,18 @@ le census `site_harvest` arbitre les ex æquo.
 
 ### Sprint 2 — familles à fort décompte (~115)
 
-- [ ] `position-try`/`position-try-fallbacks` — valeurs
-  `<position-area>` dans les listes de fallbacks (~95 : `span-*`,
-  `self-*`, `x-start`, `block-end`… + `@position-try` règles).
-  `cand()` (`layout/block.rs:~840`) ne gère que `flip-*`/`--nom`
-  — mapper chaque mot-clé area vers le `position-area` calculé.
+- [x] **R-267** — `position-try`/`position-try-fallbacks` :
+  valeurs `<position-area>` dans les listes de fallbacks
+  (~95). Table `area_token`/`area_delta` partagée (`layout/
+  block.rs`) : tout le vocabulaire §3.1 — `top`/`left`,
+  `x-*`/`y-*`, `block-*`/`inline-*`, `self-*`, `x-self-*`/
+  `self-block-*`, `span-*` (→ côté de base, approximation
+  translate-only documentée), ambigus `start`/`end`/`self-*`
+  nus (1ᵉʳ→bloc, 2ᵉ→inline ; seul → répété), `center`/
+  `span-all` ; options séparées par virgule (spec) — une
+  paire area = UNE candidate. Le chemin `position-area`
+  propre passe par la même table (mot-clé seul → autre axe
+  `span-all` ≈ centré, plus proche spec que l'aligné-start).
 - [ ] `break-*` multicol — `break-before`/`break-after`/
   `break-inside:avoid` entre/dans colonnes (le moteur pose
   déjà `column-count`/`column-rule`).
