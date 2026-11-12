@@ -3088,3 +3088,12 @@ cause** ; résidu = promesses des handlers d'erreur `Atn`
 - Borne honnete conservee : ws mesure aux **avances de
   glyphes** (LTR) — pas au compte de caracteres du voisin
   ni aux ligatures multi-espaces exotiques.
+
+### 2026-11-13 — NAV → PIPE : R-290 confirme (census 1081/2159)
+
+- `ruby-overhang:spaces` → `ok` sur la fixture NAV
+  existante (annotation large entre `av`/`ap` — la
+  borne whitespace est discriminante sans retouche).
+- Famille `ruby-overhang` desormais entierement mesuree :
+  `none`/`spaces` ok, `auto` na initiale.
+- Census : **1081/2159 (50,1 %)**, cliquet vert.
