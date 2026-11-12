@@ -2144,7 +2144,14 @@ impl Dom {
             }
             if self.nodes[n as usize].tag == "script" && !self.dyn_started.contains(&n) {
                 self.dyn_started.insert(n);
-                self.pending_dyn.push(n);
+                // `type=` inerte (data-block `application/json`,
+                // `text/plain`…) : vu, jamais exécuté — même
+                // filtre `script_parse_exec` que le balayage
+                // `from_html` (l2090). Un bloc cloné depuis un
+                // template CE ne part plus en `dyn.err`.
+                if self.script_parse_exec(n) {
+                    self.pending_dyn.push(n);
+                }
             }
             // `innerHTML` n'inerte pas les cadres (spec) —
             // `note_attached_frame` filtre l'absence de
@@ -2513,7 +2520,9 @@ impl Dom {
             if flag && self.nodes[c as usize].kind == NodeKind::Element {
                 if self.nodes[c as usize].tag == "script" && !self.dyn_started.contains(&c) {
                     self.dyn_started.insert(c);
-                    self.pending_dyn.push(c);
+                    if self.script_parse_exec(c) {
+                        self.pending_dyn.push(c);
+                    }
                 }
                 if self.nodes[c as usize].tag == "iframe" {
                     self.note_attached_frame(c);

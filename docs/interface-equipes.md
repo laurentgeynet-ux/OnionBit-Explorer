@@ -2093,6 +2093,35 @@ Lot PIPE livré depuis la piste YoutubeFix (R-260, crates `explorer-css`/`explor
   (territoire JS-C496) est désormais plus probable que la
   cause BG directe. Le plan garde les deux hypothèses ; la
   source capturée tranchera.
+- **N1.3 — verdict (archéologie `vol_ctxp` + corpus
+  `replay-vol813`)** : `Error("bb")` = watchdog 60 s
+  (`pw(v.pNM, lUI=6E4, ()=>Promise.reject(Error("bb")))` —
+  kevlar l6987, config `BsO` l6990). La session BG construit
+  `v8Q`/`pNM` (l6968) qui ne se résout **ni par `h7H`**
+  (succès, l6979) **ni par `R7c`** (abort `Za`, l6975) →
+  le programme `_.$6` cale sur un **`await` pendu**, pas un
+  throw fatal : le polling `t`/`trayride` reste dense
+  jusqu'au bout du run et `fn.restricted` ×1 n'y coupe rien
+  (exécution continue 130 k lignes après). L'event loop est
+  sain (`sched.tally` drainé, réseau inflight→0). Awaits
+  dominants (prom.pending tardif) : **`_.mr(<token>)` —
+  chargeur paresseux kevlar** (`z.load`→`LgV`→`setLoaded`,
+  file sérialisée ; le module `Tx5i5b` n'apparaît **0 fois**
+  dans le log → bloqué en amont du réseau — un chunk
+  antérieur chargé mais jamais `setLoaded`) + complétions
+  événementielles (`script.onload/error`, `caches.match`,
+  deferreds internes BG l6931). **Bug moteur fixé** :
+  `note_attached_scripts` enfilait les `<script type=…>`
+  **inertes** (data-blocks `application/json` clonés depuis
+  les templates CE — 2 sites, `dom.rs` l2145/l2514, sans le
+  filtre `script_parse_exec` que `from_html` applique) →
+  source probable des `dyn.err` `syntax error at 1:12`
+  (`dyn:7`/`dyn:8`, tirés en plein `ce.clone`/`_attachDom`).
+  Sonde `dyn.err` étendue : `kind` (src/inline) + `ty`
+  (attribut `type`) sous `EXPLORER_DYN_PROBE` — le prochain
+  vol tranchera chunk fetché (vrai gel de file `mr`) vs
+  data-block inerte (faux-positif). Verrou :
+  `inserted_data_script_stays_inert`.
 
 ### couture PIPE → NAV — R-272 `offset-*` motion-path (2026-11-13)
 

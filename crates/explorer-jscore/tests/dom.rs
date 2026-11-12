@@ -167,6 +167,36 @@ fn element_load_does_not_bubble_to_window() {
 }
 
 #[test]
+fn inserted_data_script_stays_inert() {
+    // N1.3 — un `<script type="application/json">` (data-block,
+    // inerte spec) inséré dynamiquement ne doit pas partir en
+    // `pending_dyn` : avant le fix, `note_attached_scripts`
+    // enfilait tout `script` attaché — les data-blocks clonés
+    // depuis un template CE finissaient en `dyn.err` syntaxique
+    // (vol_ctxp : `dyn:7`/`dyn:8` `expected ;` à 1:12).
+    let dom = Rc::new(RefCell::new(Dom::from_html(PAGE)));
+    let mut e = Engine::new();
+    e.install_dom(&dom);
+    e.eval(
+        "var s = document.createElement('script');\
+         s.type = 'application/json';\
+         s.text = '{\"a\": 1}';\
+         document.body.appendChild(s);\
+         var s2 = document.createElement('script');\
+         s2.textContent = 'var __ran2 = 1';\
+         document.body.appendChild(s2)",
+    )
+    .expect("insert");
+    let reqs = e.drain_dyn_scripts();
+    assert_eq!(reqs.len(), 1, "seul le script exécutable part");
+    assert_eq!(reqs[0].src, None);
+    assert_eq!(
+        reqs[0].text.as_deref().map(str::trim),
+        Some("var __ran2 = 1")
+    );
+}
+
+#[test]
 fn document_written_script_stays_inert() {
     // Un `<script>` écrit n'exécute pas dans le miroir —
     // l'ordonnancement revient à l'amont (étape 50), qui le

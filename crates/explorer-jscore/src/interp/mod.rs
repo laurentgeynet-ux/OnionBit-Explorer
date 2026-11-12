@@ -2093,7 +2093,21 @@ impl Engine {
                         .collect::<String>()
                         .replace('\n', "\u{240a}")
                         .replace('\r', "\u{240d}");
-                    tracing::info!(target: "dom_probe", site = "dyn.err", src = %label, error = %msg, len = text.len(), head = %head);
+                    // N1.3 — `kind`/`ty` distinguent un chunk
+                    // `src` fetché (file `mr`/`LgV`) d'un bloc
+                    // de données inline cloné (template CE) :
+                    // le premier gèle la file du chargeur, le
+                    // second est juste un faux-positif inerte.
+                    let (has_src, ty_attr) = {
+                        let d = dom.borrow();
+                        (
+                            d.attr(node, "src").is_some_and(|s| !s.trim().is_empty()),
+                            d.attr(node, "type").map(str::to_string),
+                        )
+                    };
+                    let kind = if has_src { "src" } else { "inline" };
+                    let ty_attr = ty_attr.unwrap_or_default();
+                    tracing::info!(target: "dom_probe", site = "dyn.err", src = %label, error = %msg, kind = kind, ty = %ty_attr, len = text.len(), head = %head);
                 } else {
                     tracing::info!(target: "dom_probe", site = "dyn.err", src = %label, error = %msg);
                 }
