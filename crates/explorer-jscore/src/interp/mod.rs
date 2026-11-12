@@ -108,6 +108,34 @@ static BG_ENTRY: std::sync::atomic::AtomicU32 =
 /// répondu.
 static BG_SPQ: std::sync::atomic::AtomicU32 =
     std::sync::atomic::AtomicU32::new(u32::MAX);
+/// N1.5 — chaîne readiness `BotGuard` : `ObjId` des callables et
+/// objets-clés capturés à l'écriture (`wpc` thunk `NdQ`, méthodes
+/// `wPd`/`jOM`/`hDo`/`a4`, interface `{f,c,m,mws}` — indexée sur
+/// l'écriture de `mws`, dernier membre du littéral).
+/// `bg.io` nomme le maillon invoqué entre `eO` et `sPQ`.
+static BG_IO: std::sync::Mutex<Vec<(u32, &'static str)>> =
+    std::sync::Mutex::new(Vec::new());
+static BG_IO_ARMED: std::sync::atomic::AtomicBool =
+    std::sync::atomic::AtomicBool::new(false);
+/// N1.5 — enregistre un callable de la chaîne readiness dans
+/// `BG_IO` (borné à 48 — `wpc` est aussi un champ `this.wpc`
+/// des instances `vvI`, plusieurs écritures attendues).
+fn bg_io_register(id: u32, lbl: &'static str) {
+    if let Ok(mut g) = BG_IO.lock() {
+        if g.len() < 48 {
+            g.push((id, lbl));
+        }
+    }
+    BG_IO_ARMED.store(true, std::sync::atomic::Ordering::Relaxed);
+}
+/// N1.5 — label `BG_IO` d'un callee `ObjId`, s'il est capturé.
+fn bg_io_label(id: u32) -> Option<&'static str> {
+    BG_IO.lock()
+        .ok()?
+        .iter()
+        .find(|(i, _)| *i == id)
+        .map(|(_, l)| *l)
+}
 /// N1.5 — dernier native invoqué depuis une frame `VM BotGuard` :
 /// relu au `bg.a` suivant (session d'après) — le dernier op
 /// hôte avant l'arrêt est exactement l'op attendu par la VM.
@@ -4316,6 +4344,34 @@ impl Engine {
             if let Value::Obj(id) = v {
                 BG_SPQ.store(*id, Relaxed);
                 eprintln!("[ctxp] bg.spq.obj id={id}");
+            }
+        } else if matches!(key, "wpc" | "wPd" | "jOM" | "hDo" | "a4") {
+            if let Value::Obj(id) = v {
+                let lbl: &'static str = match key {
+                    "wpc" => "wpc",
+                    "wPd" => "wPd",
+                    "jOM" => "jOM",
+                    "hDo" => "hDo",
+                    _ => "a4",
+                };
+                bg_io_register(*id, lbl);
+                eprintln!("[ctxp] bg.io.reg key={key} id={id} obj={obj}");
+            }
+        } else if key == "mws" {
+            if let Value::Obj(id) = v {
+                bg_io_register(*id, "io.mws");
+            }
+            if let Some(o) = self.heap.obj(obj) {
+                for (k, lbl) in [("f", "io.f"), ("c", "io.c"), ("m", "io.m")] {
+                    if let Some(Value::Obj(id)) = o.get_own(k) {
+                        bg_io_register(id, lbl);
+                    }
+                }
+            }
+            eprintln!("[ctxp] bg.io.reg mws obj={obj}");
+        } else if key == "eO" {
+            if let Value::Obj(id) = v {
+                eprintln!("[ctxp] bg.eo id={id} obj={obj}");
             }
         }
     }
@@ -9478,6 +9534,22 @@ impl Engine {
                     let (from, _, _) = self.stack_nearest_fn_src(120);
                     tracing::info!(target: "dom_probe", site = "bg.spq",
                         n = n, id = cid, argc = args_ref.len(), from = %from);
+                }
+            } else if BG_IO_ARMED.load(std::sync::atomic::Ordering::Relaxed) {
+                // N1.5 — `bg.io` : invocation d'un callable de la
+                // chaîne readiness (`wpc`/`wPd`/`jOM`/`hDo`/`a4`/
+                // `io.*`) — nomme le maillon atteint entre `eO`
+                // et le stepper `sPQ`.
+                if let Some(lbl) = bg_io_label(cid) {
+                    static BG_IO_N: std::sync::atomic::AtomicU32 =
+                        std::sync::atomic::AtomicU32::new(0);
+                    let n = BG_IO_N.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                    if n < 96 {
+                        let (from, _, _) = self.stack_nearest_fn_src(120);
+                        tracing::info!(target: "dom_probe", site = "bg.io",
+                            n = n, lbl = lbl, id = cid, argc = args_ref.len(),
+                            from = %from);
+                    }
                 }
             }
         }
