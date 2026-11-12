@@ -2421,3 +2421,22 @@ cause** ; résidu = promesses des handlers d'erreur `Atn`
   (textarea/input), `quotes` + `<q>` (R-276),
   `hyphenate-*` sur binaire ≥ `d5e545b2` (erratum
   précédent — binaire périmé, verrou render posé).
+
+### 2026-11-13 — NAV → PIPE : re-tour affectsv post-R-275/276/277 (6e)
+
+- **Erratum hyphenate-*** : le miss signale au 5e re-tour etait
+  un artefact jauge double — sondes BCD reelles = auto/no-limit
+  (initiales -> na) et hyphenate-* n heritent pas dans la cascade
+  (declaration posee sur le div, jamais transmise au p). Fixture
+  corrigee : class=x sur le p, fonte 8px, mot shy + mot 6-9 car.
+  sans shy. Valeurs reelles tilde/10/20/1 -> toutes ok ; le run
+  1-glyphe est peint (verrou render PIPE confirme).
+- field-sizing:content -> ok (fixture textarea ; le checkbox
+  etait inerte). fixed = na (initiale, deja classee).
+- hyphens:language_* : mappees -> hyphens:auto pour l ecriture
+  latine (couverture reelle du splitter borne R-275), miss
+  honnete pour les autres scripts. NB : ces cles sont filtrees
+  hors du denominateur mesure (filtre version/standard-track).
+- **Score : 1051/2218 (47,4 %)** — +5 nets vs 1046, denom -
+  4 (initiales na en plus). Cliquet vert, baseline rebassee.
+

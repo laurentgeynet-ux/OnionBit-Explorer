@@ -893,9 +893,15 @@ fn fixture_for(name: &str) -> &'static str {
         }
         // Formulaires — `accent-color`, `caret-color`, `appearance`,
         // `cursor`, `field-sizing`… n'ont d'effet que sur contrôle.
+        // `field-sizing:content` dimensionne le contrôle à
+        // son contenu — un contrôle textuel (pas un
+        // checkbox sans texte).
+        () if n == "field-sizing" => {
+            "<body><div><textarea class=x>plusieurs lignes de texte\net encore une</textarea></div></body>"
+        }
         () if matches!(
             n,
-            "accent-color" | "caret-color" | "appearance" | "field-sizing"
+            "accent-color" | "caret-color" | "appearance"
                 | "user-select" | "pointer-events"
         ) =>
         {
