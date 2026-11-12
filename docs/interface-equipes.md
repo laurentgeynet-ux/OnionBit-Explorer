@@ -2110,6 +2110,33 @@ Lot PIPE livré depuis la piste YoutubeFix (R-260, crates `explorer-css`/`explor
   (fixtures probables : `offset-path:circle()/ray()` +
   distance `%`/px sur élément `position:absolute`).
 
+### couture NAV → PIPE — re-tour post-R-272/273 : **1041/2231 (46,7 %)** (2026-11-13)
+
+- **+15 flips nets** (baseline rebasée 1026 → 1041) :
+  `offset-path` (`ray`/`circle`/`ellipse`/`inset`/`polygon`),
+  `offset-distance` px/%, `offset-rotate`, `offset-position`,
+  `offset-anchor`, shorthand `offset` + **`shape-outside`
+  circle/ellipse/inset/polygon et `shape-margin` (R-273
+  mesuré dans la même passe)**.
+- **Jauge NAV ajoutée** : fixture `offset-*` (enfant
+  `position:absolute` dans parent `relative` 200×200 — cb),
+  fixture `shape-*` (flottant 80×80 + texte de
+  contournement). `na` : `offset:none`, `offset-path:none`,
+  `offset-rotate:auto|normal`, `offset-anchor:auto|normal|
+  50% 50%`, `offset-position:normal|auto`,
+  `shape-outside:none|margin-box` (≡ flottant nu),
+  `shape-image-threshold` (NO_ORACLE — sources image
+  dormantes, même borne que `mask-*`).
+- **`miss` honnêtes à journaliser** :
+  `offset-anchor:bottom left` (l'axe `bottom`/`right` n'est
+  pas résolu par `offset_pos` — les mots-clés de fin de
+  bord passent inaperçus), `shape-outside:url()/image()`
+  (analyse alpha absente), sous-features `offset-path`
+  (`ray()`/`coord-box`/`path()` dormants — bornes PIPE
+  documentées). Le delta attendu ~52 → réel +15 : la
+  majorité des clés `offset-*` BCD sont des sous-features
+  de formes dormantes, pas des valeurs flippables.
+
 ### note NAV — vol 813 enregistré + mesures N0.2/N0.3 sur rejeu (2026-11-13)
 
 - **N0.1 bouclé** : corpus `replay-vol813` (300 fichiers/67 Mo,

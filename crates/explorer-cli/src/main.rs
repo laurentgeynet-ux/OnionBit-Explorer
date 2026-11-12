@@ -904,6 +904,21 @@ fn fixture_for(name: &str) -> &'static str {
         () if n == "rule" || n.starts_with("rule-") || n.starts_with("row-rule") => {
             "<body><div class=x><p>a<br>a<br>a<br>a</p><h2 style=\"column-span:all;margin:0\">s</h2><p>b<br>b<br>b<br>b</p></div></body>"
         }
+        // `offset-*` (css-motion-1 — R-272) : le chemin se
+        // trace dans le **bloc conteneur** — `.x` = enfant
+        // `position:absolute` d'un parent `relative` dimensionné
+        // (200×200), sinon aucun cb mesurable.
+        () if n == "offset" || n.starts_with("offset-") => {
+            "<body><div style=\"position:relative;width:200px;height:200px\"><div class=x style=\"position:absolute;width:10px;height:10px\"></div></div></body>"
+        }
+        // `shape-outside`/`shape-margin`/`shape-image-
+        // threshold` (css-shapes-1 — R-273) : la forme n'a
+        // d'effet que sur un **flottant** entouré de texte
+        // (les line boxes contournent la forme). `.x` = le
+        // flottant dimensionné ; le `<p>` apporte les lignes.
+        () if n == "shape-outside" || n == "shape-margin" || n == "shape-image-threshold" => {
+            "<body><div><div class=x style=\"float:left;width:80px;height:80px\"></div><p>un deux trois quatre cinq six sept huit neuf dix onze douze treize quatorze quinze seize</p></div></body>"
+        }
         // Conteneur **débordant** (étape 219) — `overflow-*`
         // et `overscroll-*` n'ont d'oracle que si le contenu
         // excède la boîte : `hidden`/`clip` coupent vs
@@ -1063,6 +1078,24 @@ fn context_css(name: &str) -> &'static str {
         // longhands `rule-*` discriminants (couleur/largeur/
         // style/inset/break) — le shorthand `rule` l'écrase.
         "columns:2;column-gap:20px;column-rule:2px solid black;height:100px"
+    } else if n == "offset" || n.starts_with("offset-") {
+        // css-motion-1 : le transform n'existe que si le
+        // chemin est tracé ET la distance non nulle — les
+        // longhands seuls (`offset-distance`, `-rotate`…) sont
+        // inertes sans `offset-path` en ctx ; `offset-path`
+        // seul est inerte à distance 0 (point de départ =
+        // ancre). Le shorthand `offset` réinitialise la
+        // distance → inerte s'il n'en porte pas (borne
+        // honnête de la spec : `offset:<path>` = distance 0).
+        if matches!(n, "offset" | "offset-path") {
+            "offset-distance:20px"
+        } else {
+            "offset-path:ray(90deg);offset-distance:20px"
+        }
+    } else if n == "shape-margin" || n == "shape-image-threshold" {
+        // `shape-margin` dilate la forme, `shape-image-
+        // threshold` n'a d'effet que contre une forme posée.
+        "shape-outside:circle(40%)"
     } else if n.starts_with("column-") || n == "columns" {
         "columns:2;column-rule:2px solid black;height:200px"
     } else {
@@ -1256,6 +1289,23 @@ const INITIAL_EXTRA: &[(&str, &str)] = &[
     // oracle ne les distingue ici).
     ("rule-break", "intersection"),
     ("rule-break", "spanning-item"),
+    // css-motion-1 : initiales spec + équivalents moteur
+    // (`normal`/`auto` = repli ancre/position, `50% 50%` =
+    // le centre implicite de la boîte 10×10 de la fixture).
+    ("offset", "none"),
+    ("offset-path", "none"),
+    ("offset-rotate", "auto"),
+    ("offset-rotate", "normal"),
+    ("offset-anchor", "auto"),
+    ("offset-anchor", "normal"),
+    ("offset-anchor", "50% 50%"),
+    ("offset-position", "normal"),
+    ("offset-position", "auto"),
+    // css-shapes-1 : `none` est l'initiale ; `margin-box` seul
+    // = la boîte de marge du flottant — exactement le
+    // contournement par défaut, neutre par construction.
+    ("shape-outside", "none"),
+    ("shape-outside", "margin-box"),
 ];
 
 /// Propriétés **non observables** par l'oracle géométrique
@@ -1323,6 +1373,10 @@ const NO_ORACLE: &[&str] = &[
     "mask-border-width",
     "mask-border-outset",
     "mask-type",
+    // `shape-image-threshold` : seuil alpha des formes image
+    // (`url()`/`gradient`) — sources non analysées au harnais
+    // (même borne que `mask-*`), aucun oracle statique.
+    "shape-image-threshold",
 ];
 
 fn affects_decl_verdict(decl: &str) -> Option<bool> {
