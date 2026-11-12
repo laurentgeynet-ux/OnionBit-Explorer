@@ -2093,3 +2093,52 @@ Lot PIPE livré depuis la piste YoutubeFix (R-260, crates `explorer-css`/`explor
   (territoire JS-C496) est désormais plus probable que la
   cause BG directe. Le plan garde les deux hypothèses ; la
   source capturée tranchera.
+
+### couture PIPE → NAV — R-272 `offset-*` motion-path (2026-11-13)
+
+- **`offset-path`/`offset-distance`/`offset-position`/
+  `offset-anchor`/`offset-rotate` + shorthand `offset`** :
+  transform de motion (point + tangente à distance `d`)
+  composée en `PushTransform` au paint. Chemins supportés :
+  `ray`/`circle`/`ellipse`/`inset`/`rect`/`xywh`/`polygon`.
+  Le bloc conteneur est pris = `content_rect` du parent
+  d'arbre (vrai cb abs = padding box de l'ancêtre
+  positionné — approximation journalisée). Dormants :
+  `path('…')`/`url()`/`coord-box` nus.
+- **Demande NAV** : quatrième re-tour `check affectsv`
+  post-S4 — les ~52 `offset-*` devraient basculer
+  (fixtures probables : `offset-path:circle()/ray()` +
+  distance `%`/px sur élément `position:absolute`).
+
+### note NAV — vol 813 enregistré + mesures N0.2/N0.3 sur rejeu (2026-11-13)
+
+- **N0.1 bouclé** : corpus `replay-vol813` (300 fichiers/67 Mo,
+  commit corpus `67ccaf4`) rejoué offline déterministe — deux
+  `explorer-cli shot` consécutifs produisent des PNG **bit-identiques**
+  (3 923 098 octets). Fix rejeu h2 embarqué : `reason` vide →
+  décodage par lignes (`e8291838` + test `decode_reason_vide_http2`).
+  `EXPLORER_NET_RECORD`/`NET_REPLAY` désormais câblés dans le daemon
+  (`a079c497`), pas seulement le CLI.
+- **N0.2 — baseline J17 sur rejeu accueil** (archivée
+  `youtube/j17-vol813-baseline.txt`) : `prop_scan=7 526 464`,
+  `prop_lookup=3 613 547`, `env_gets=2 784 806`, `call=750 858`,
+  `call_nat=334 115`, `env_ns=305,7 ms`, `prop_ns=548,6 ms`.
+  `prop_scan` reste le goulot compté #1 (N4.1) mais 10× sous la
+  mesure « 72 M » de la carte des murs — re-mesurer sa source.
+- **N0.3 — shot de contrôle + oracle Chrome** : `ref_capture.mjs`
+  a gagné `--cookie nom=valeur@domaine` (CDP `Network.setCookie`
+  pré-nav) — `SOCS=CAI` saute le mur consentement EU. **Constat
+  produit majeur : Chrome réel en profil froid/consentement rejeté
+  affiche lui aussi un feed vide** (« Faites des recherches pour
+  commencer ») — le `items:0`/`shownItems:1` du moteur est le
+  comportement conforme, pas un mur NAV. La cible vitrine
+  « feed peuplé » exige un profil amorcé (historique/session).
+- **geo_diff accueil (rejeu vs Chrome, tol 2 px)** : 65,1 %
+  divergents sur 43 appariés, +212 moteur-seuls / +330 réf-seuls.
+  Divergences dominées par des **boîtes à h=0** dans le masthead
+  (`span.yt-icon-shape`, `a#logo`, `#content` h=0→176) — le
+  document matché est le bon (searchbox à +52 px près, même
+  structure). Verdict N0.3 : **écart résiduel dominé côté PIPE**
+  (sizing intrinsèque SVG/icônes, hauteurs flex) — la file M1
+  (BG/fingerprints) garde son ordre mais M3/paint ne gate pas
+  le squelette ; la parité feed attendra le profil amorcé.

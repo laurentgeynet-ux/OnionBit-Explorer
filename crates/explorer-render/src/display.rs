@@ -1542,6 +1542,7 @@ fn build_list(
         canvas_bg_src: None,
         emit_per_path: std::collections::HashMap::new(),
         sticky_deltas: std::collections::HashMap::new(),
+        offset_tf: std::collections::HashMap::new(),
         emits_total: 0,
         dropped: 0,
         first_cycle_path: None,
@@ -1759,6 +1760,13 @@ struct PaintCx<'a> {
     /// phase positionnée, plus en flux, doit garder sa
     /// translation d'épingle quel que soit le drain final).
     sticky_deltas: std::collections::HashMap<usize, (f32, f32)>,
+    /// R-272 — transform `offset-*` des enfants à chemin
+    /// (`offset-path`), indexée par pointeur : le bloc
+    /// conteneur n'est connu qu'au niveau du parent — le
+    /// calcul y est fait à l'émission de l'enfant, consommé
+    /// dans `paint_box` au site `box_transform` (même patron
+    /// que `sticky_deltas`).
+    offset_tf: std::collections::HashMap<usize, explorer_layout::transform::Affine>,
     /// Total d'émissions reportées de la passe (§B-26) —
     /// plafond dur [`MAX_EMITS_TOTAL`] couvrant les cycles à
     /// chemins divergents que le cap par chemin ne voit pas.
@@ -5973,7 +5981,22 @@ fn paint_box_impl<'a>(
 
     // `transform` : matrice poussée avant tout item du
     // sous-arbre, retiré après (imbrication additive).
-    let tf = box_transform(bx, &shifted(bx.rect, off));
+    // R-272 — `offset-path` : transform pré-calculée par le
+    // parent (bloc conteneur inconnu ici) — composée AVANT le
+    // `transform` propre (motion path d'abord, spec §5).
+    let off_t = cx.offset_tf.remove(&(std::ptr::from_ref(bx) as usize));
+    let tf = match (box_transform(bx, &shifted(bx.rect, off)), off_t) {
+        (Some(css), Some(off)) => Some(
+            // `transform` propre d'abord, motion ensuite :
+            // css.post_concat(off) = off ∘ css.
+            tiny_skia::Transform::from_row(off.a, off.b, off.c, off.d, off.e, off.f)
+                .post_concat(css),
+        ),
+        (None, Some(off)) => Some(tiny_skia::Transform::from_row(
+            off.a, off.b, off.c, off.d, off.e, off.f,
+        )),
+        (t, None) => t,
+    };
     if let Some(m) = tf {
         items.push(DisplayItem::PushTransform(m));
     }
@@ -6109,6 +6132,22 @@ fn paint_box_impl<'a>(
                 if d != (0.0, 0.0) {
                     cx.sticky_deltas
                         .insert(std::ptr::from_ref(child) as usize, d);
+                }
+            }
+            // R-272 — `offset-path` : le chemin se trace dans
+            // le bloc conteneur (padding box du parent, §5.2)
+            // — calculé ici, consommé au `box_transform` de
+            // l'enfant quel que soit le drain (reporté ou non).
+            if child.style.get("offset-path").is_some_and(|v| {
+                let v = v.trim();
+                !v.is_empty() && v != "none"
+            }) {
+                let cb = shifted(content_rect(bx), off);
+                let rect = shifted(child.rect, off);
+                if let Some(t) =
+                    explorer_layout::transform::offset_transform(&child.style, &rect, &cb)
+                {
+                    cx.offset_tf.insert(std::ptr::from_ref(child) as usize, t);
                 }
             }
         }

@@ -3965,3 +3965,66 @@ fn rule_shorthand_alimente_column_rule_spanner_et_inset() {
         _ => panic!("traits attendus : {r:?} / {r5:?}"),
     }
 }
+
+/// R-272 — `offset-*` (css-motion-1) : `offset-path` pose
+/// un `PushTransform` de motion — la boîte est portée le
+/// long du chemin tracé dans le bloc conteneur. Le parent
+/// calcule la matrice (stash par pointeur, consommé au
+/// `box_transform` de l'enfant).
+#[test]
+fn offset_path_ray_ellipse_et_shorthand() {
+    let tf = |items: &[DisplayItem]| -> Option<tiny_skia::Transform> {
+        items.iter().find_map(|i| match i {
+            DisplayItem::PushTransform(t) => Some(*t),
+            _ => None,
+        })
+    };
+    // ray(90deg → +x) à distance 50px : la boîte part de
+    // son ancre (5,5) et atterrit en (55,5) — translation
+    // = (50, 0) + tangente 0° (pas de rotation).
+    let (_, _, items) = dl(
+        "<div id=p><div id=c></div></div>",
+        "#p{position:relative;width:200px;height:200px}\
+         #c{position:absolute;width:10px;height:10px;\
+           offset-path:ray(90deg);offset-distance:50px}",
+    );
+    let t = tf(&items).expect("ray + distance → PushTransform");
+    assert!((t.tx - 50.0).abs() < 0.5, "tx={}", t.tx);
+    assert!(t.ty.abs() < 0.5, "ty={}", t.ty);
+    // distance 0 → translation nulle au-delà de l'ancre.
+    let (_, _, items0) = dl(
+        "<div id=p><div id=c></div></div>",
+        "#p{position:relative;width:200px;height:200px}\
+         #c{position:absolute;width:10px;height:10px;\
+           offset-path:ray(90deg);offset-distance:0px}",
+    );
+    assert!(
+        tf(&items0).is_none_or(|t| t.tx.abs() < 0.01 && t.ty.abs() < 0.01),
+        "distance 0 = pas de mouvement"
+    );
+    // circle(50px at center) + distance 0 + rotate 0deg
+    // (rotation gélée → translation pure) : l'ancre
+    // atterrit au point gauche du cercle (50,100) →
+    // translation (45, 95) depuis l'ancre (5,5).
+    let (_, _, items2) = dl(
+        "<div id=p><div id=c></div></div>",
+        "#p{position:relative;width:200px;height:200px}\
+         #c{position:absolute;width:10px;height:10px;\
+           offset:circle(50px at center) 0px 0deg}",
+    );
+    let t2 = tf(&items2).expect("shorthand offset → transform");
+    assert!((t2.tx - 45.0).abs() < 0.5, "tx={}", t2.tx);
+    assert!((t2.ty - 95.0).abs() < 0.5, "ty={}", t2.ty);
+    // `offset-rotate:reverse` → tangente+180° : au point
+    // gauche la tangente est −90° → rotation ~90° (off-
+    // diagonal ≈ ±1, serait 0 sans rotation).
+    let (_, _, items3) = dl(
+        "<div id=p><div id=c></div></div>",
+        "#p{position:relative;width:200px;height:200px}\
+         #c{position:absolute;width:10px;height:10px;\
+           offset-path:circle(50px at center);offset-distance:0px;\
+           offset-rotate:reverse}",
+    );
+    let t3 = tf(&items3).expect("reverse → transform");
+    assert!(t3.kx.abs() > 0.5, "rotation ~90° attendue : {t3:?}");
+}

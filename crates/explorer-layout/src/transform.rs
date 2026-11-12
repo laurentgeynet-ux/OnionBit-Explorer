@@ -555,3 +555,317 @@ pub fn box_transform(bx: &LayoutBox, rect: &Rect) -> Option<Affine> {
             .post_concat(Affine::translate(ox, oy)),
     )
 }
+
+// ---- R-272 — css-motion-1 `offset-*` --------------------
+
+/// Une paire `<position>` (`x y`, mots-clés ou longueurs/`%`)
+/// résolue en coords absolues de `r` — `%` sur les deux axes.
+#[allow(clippy::cast_possible_truncation)]
+fn pos_in_rect(tok1: &str, tok2: &str, r: &Rect) -> (f32, f32) {
+    let axis = |t: &str, lo: f32, len: f32, start: &str, end: &str| -> f32 {
+        let t = t.trim();
+        if t == start {
+            return lo;
+        }
+        if t == end {
+            return lo + len;
+        }
+        if t == "center" {
+            return lo + len / 2.0;
+        }
+        tf_len_px(t, len).map_or(lo, |v| lo + v as f32)
+    };
+    (
+        axis(tok1, r.x, r.width, "left", "right"),
+        axis(tok2, r.y, r.height, "top", "bottom"),
+    )
+}
+
+/// `offset-anchor`/`offset-position` → point : `auto`/`normal`
+/// → `fallback` ; sinon 1-2 tokens (x [y], `center` seul
+/// → centre). `r` = boîte de référence (`%`/mots-clés).
+#[allow(clippy::cast_possible_truncation)]
+fn offset_pos(raw: &str, r: &Rect, fallback: (f32, f32)) -> (f32, f32) {
+    let raw = raw.trim();
+    if raw.is_empty() || matches!(raw, "auto" | "normal" | "none") {
+        return fallback;
+    }
+    let mut it = raw.split_whitespace();
+    let Some(x) = it.next() else {
+        return fallback;
+    };
+    let y = it.next().unwrap_or("center");
+    if matches!(x, "top" | "bottom") {
+        return pos_in_rect("center", x, r);
+    }
+    pos_in_rect(x, y, r)
+}
+
+/// Angle de trajectoire + distance → point et tangente d'un
+/// chemin paramétré. `perim` = longueur totale (0 = rayon
+/// infini — `%` non résolvable → traité en px).
+enum OffPath {
+    /// `ray(θ)` — origine propre, direction θ (0deg = haut).
+    Ray { dir: (f32, f32) },
+    /// `circle(r)`/`ellipse(rx ry)` — centre + param t.
+    Ellipse { c: (f32, f32), rx: f32, ry: f32 },
+    /// `inset`/`rect`/`xywh` — rectangle dans le cb.
+    Rect { x: f32, y: f32, w: f32, h: f32 },
+    /// `polygon(p1, p2, …)` — sommets dans le cb.
+    Poly { pts: Vec<(f32, f32)> },
+}
+
+/// `point at (x, y, tangent_deg)` à distance `d` le long du
+/// chemin — départ : gauche pour ellipse (spec), coin haut-
+/// gauche pour rect, premier sommet pour polygon (sens
+/// horaire, coords écran y-down = angle croissant).
+#[allow(clippy::many_single_char_names, clippy::cast_possible_truncation)]
+fn path_point(p: &OffPath, d: f32) -> (f32, f32, f32) {
+    use std::f32::consts::{PI, TAU};
+    match p {
+        OffPath::Ray { dir } => (dir.0 * d, dir.1 * d, dir.1.atan2(dir.0).to_degrees()),
+        OffPath::Ellipse { c, rx, ry } => {
+            // Périmètre Ramanujan II ; départ au point
+            // gauche (t=π), sens horaire (t croissant en
+            // coords écran y-down).
+            let (a, b) = (rx.max(f32::EPSILON), ry.max(f32::EPSILON));
+            let h = ((a - b) / (a + b)).powi(2);
+            let perim = PI * (a + b) * (1.0 + 3.0 * h / (10.0 + (4.0 - 3.0 * h).sqrt()));
+            let t = PI + TAU * (d / perim.max(f32::EPSILON));
+            // Tangente = dérivée paramétrique (x′, y′).
+            let tan = (b * t.cos()).atan2(-a * t.sin()).to_degrees();
+            (c.0 + a * t.cos(), c.1 + b * t.sin(), tan)
+        }
+        OffPath::Rect { x, y, w, h } => {
+            let segs = [(*w, 0.0), (0.0, *h), (-*w, 0.0), (0.0, -*h)];
+            let mut at = (*x, *y);
+            let mut d = d.rem_euclid((2.0 * (w + h)).max(f32::EPSILON));
+            for (dx, dy) in segs {
+                let len = (dx * dx + dy * dy).sqrt();
+                if d <= len.max(f32::EPSILON) {
+                    let f = if len > 0.0 { d / len } else { 0.0 };
+                    return (at.0 + f * dx, at.1 + f * dy, dy.atan2(dx).to_degrees());
+                }
+                d -= len;
+                at = (at.0 + dx, at.1 + dy);
+            }
+            (*x, *y, 0.0)
+        }
+        OffPath::Poly { pts } => {
+            let perim = path_perim(p);
+            if pts.len() < 2 {
+                return (pts.first().map_or(0.0, |p| p.0), 0.0, 0.0);
+            }
+            let mut d = d.rem_euclid(perim.max(f32::EPSILON));
+            for i in 0..pts.len() {
+                let (a, b) = (pts[i], pts[(i + 1) % pts.len()]);
+                let (dx, dy) = (b.0 - a.0, b.1 - a.1);
+                let len = (dx * dx + dy * dy).sqrt();
+                if d <= len.max(f32::EPSILON) {
+                    let f = if len > 0.0 { d / len } else { 0.0 };
+                    return (a.0 + f * dx, a.1 + f * dy, dy.atan2(dx).to_degrees());
+                }
+                d -= len;
+            }
+            (pts[0].0, pts[0].1, 0.0)
+        }
+    }
+}
+
+/// css-motion-1 (R-272) : `offset-path` positionne la boîte
+/// le long d'un chemin tracé dans son bloc conteneur (`cb` —
+/// coords du même repère que `rect`). Transform résultant :
+/// `F(p) = T + R·(p − A)` — l'ancre `A` (offset-anchor,
+/// défaut = `transform-origin`/centre) atterrit sur le point
+/// `T` du chemin à `offset-distance`, la boîte tournée de
+/// `offset-rotate` (`auto` = tangente, `reverse` = +180°).
+///
+/// Chemins supportés : `ray(θ)`, `circle(r [at p])`,
+/// `ellipse(rx ry [at p])`, `inset`/`rect`/`xywh`,
+/// `polygon(...)`. Dormants : `path('…')`, `url()`, les
+/// `coord-box` nus, `offset-position` sur les formes à `at`.
+/// `offset` est expansé en longhands par la cascade.
+#[must_use]
+#[allow(
+    clippy::too_many_lines,
+    clippy::cast_precision_loss,
+    clippy::cast_possible_truncation,
+    clippy::many_single_char_names
+)]
+pub fn offset_transform(st: &ComputedStyle, rect: &Rect, cb: &Rect) -> Option<Affine> {
+    let raw_path = st.get("offset-path")?;
+    let raw_path = raw_path.trim();
+    if raw_path.is_empty() || raw_path == "none" {
+        return None;
+    }
+    // Ancre de la boîte : `offset-anchor` (défaut
+    // `transform-origin`, sinon centre — spec §5.3).
+    let anchor = offset_pos(
+        st.get("offset-anchor").unwrap_or(""),
+        rect,
+        origin_px(st, rect),
+    );
+    // Position d'ancrage du chemin : `offset-position`,
+    // défaut `normal` = position propre de l'ancre.
+    let origin = offset_pos(st.get("offset-position").unwrap_or(""), cb, anchor);
+    // Corps du chemin.
+    let path = parse_off_path(raw_path, cb, origin)?;
+    // Distance : `<length>` ou `%` du périmètre (ray → px).
+    let raw_d = st.get("offset-distance").unwrap_or("0");
+    let d = if raw_d.trim().ends_with('%') {
+        let pct = raw_d
+            .trim_end_matches('%')
+            .trim()
+            .parse::<f32>()
+            .unwrap_or(0.0);
+        match &path {
+            OffPath::Ray { .. } => pct,
+            _ => pct / 100.0 * path_perim(&path),
+        }
+    } else {
+        tf_len_px(raw_d, cb.width).map_or(0.0, |v| v as f32)
+    };
+    let (px, py, tangent) = path_point(&path, d);
+    // `ray` part de l'origine résolue ; les formes donnent
+    // déjà des points absolus du cb (`at`/offsets inclus).
+    let target = if matches!(path, OffPath::Ray { .. }) {
+        (origin.0 + px, origin.1 + py)
+    } else {
+        (px, py)
+    };
+    // `offset-rotate` : `auto` = tangente ; `reverse` =
+    // tangente+180° ; `auto <a>` = tangente+a ; `<a>` seul.
+    let raw_rot = st.get("offset-rotate").unwrap_or("auto");
+    let mut it = raw_rot.split_whitespace();
+    let rot = match (it.next(), it.next()) {
+        (Some("reverse"), _) => tangent + 180.0,
+        (Some("auto"), extra) => {
+            tangent
+                + extra
+                    .and_then(tf_angle)
+                    .map_or(0.0, |v| v.to_degrees() as f32)
+        }
+        (Some(a), _) => tf_angle(a).map_or(0.0, |v| v.to_degrees() as f32),
+        _ => 0.0,
+    };
+    // F(p) = T + R(p − A).
+    let (s, c) = rot.to_radians().sin_cos();
+    Some(
+        Affine::translate(-anchor.0, -anchor.1)
+            .post_concat(Affine {
+                a: c,
+                b: s,
+                c: -s,
+                d: c,
+                e: 0.0,
+                f: 0.0,
+            })
+            .post_concat(Affine::translate(target.0, target.1)),
+    )
+}
+
+/// Périmètre du chemin — `%` de `offset-distance` s'y
+/// résout (ray = 0, non résolvable par construction).
+#[allow(clippy::cast_possible_truncation)]
+fn path_perim(p: &OffPath) -> f32 {
+    use std::f32::consts::PI;
+    match p {
+        OffPath::Ray { .. } => 0.0,
+        OffPath::Ellipse { rx, ry, .. } => {
+            let (a, b) = (rx.max(f32::EPSILON), ry.max(f32::EPSILON));
+            let h = ((a - b) / (a + b)).powi(2);
+            PI * (a + b) * (1.0 + 3.0 * h / (10.0 + (4.0 - 3.0 * h).sqrt()))
+        }
+        OffPath::Rect { w, h, .. } => 2.0 * (w + h).max(0.0),
+        OffPath::Poly { pts } => pts
+            .iter()
+            .zip(pts.iter().cycle().skip(1))
+            .take(pts.len())
+            .map(|(a, b)| ((b.0 - a.0).powi(2) + (b.1 - a.1).powi(2)).sqrt())
+            .sum(),
+    }
+}
+
+/// Parse le corps de `offset-path` en [`OffPath`] — origine
+/// `o` résolue en amont (`offset-position`, défaut = ancre
+/// de la boîte). `None` = dormant (`path()`, `url()`,
+/// `coord-box`) ou invalide.
+#[allow(clippy::cast_possible_truncation, clippy::many_single_char_names)]
+fn parse_off_path(raw: &str, cb: &Rect, o: (f32, f32)) -> Option<OffPath> {
+    let (name, args) = raw.split_once('(')?;
+    let args = args.trim_end_matches(')').trim();
+    match name.trim() {
+        "ray" => {
+            let deg = args
+                .split_whitespace()
+                .find_map(tf_angle)
+                .map_or(0.0, |v| v.to_degrees() as f32);
+            // Convention CSS : 0deg = vers le haut.
+            let r = deg.to_radians();
+            Some(OffPath::Ray {
+                dir: (r.sin(), -r.cos()),
+            })
+        }
+        "circle" | "ellipse" => {
+            let (dims, at) = args.split_once(" at ").map_or((args, ""), |(d, a)| (d, a));
+            let mut it = dims.split_whitespace();
+            let (rx, ry) = if name.trim() == "circle" {
+                let r = tf_len_px(it.next().unwrap_or("50%"), cb.width)? as f32;
+                (r, r)
+            } else {
+                let rx = tf_len_px(it.next()?, cb.width)? as f32;
+                let ry = tf_len_px(it.next()?, cb.height)? as f32;
+                (rx, ry)
+            };
+            let c = if at.is_empty() {
+                o
+            } else {
+                let mut ait = at.split_whitespace();
+                pos_in_rect(
+                    ait.next().unwrap_or("center"),
+                    ait.next().unwrap_or("center"),
+                    cb,
+                )
+            };
+            Some(OffPath::Ellipse { c, rx, ry })
+        }
+        "inset" | "rect" | "xywh" => {
+            let v: Vec<f32> = args
+                .split_whitespace()
+                .filter_map(|t| tf_len_px(t, cb.width).map(|v| v as f32))
+                .collect();
+            let (x, y, w, h) = if name.trim() == "xywh" {
+                (*v.first()?, *v.get(1)?, *v.get(2)?, *v.get(3)?)
+            } else {
+                // inset/rect : t r b l (clockwise).
+                let g = |i: usize| v.get(i).or_else(|| v.last()).copied().unwrap_or(0.0);
+                let (t, r, b, l) = (g(0), g(1), g(2), g(3));
+                (
+                    l,
+                    t,
+                    (cb.width - l - r).max(0.0),
+                    (cb.height - t - b).max(0.0),
+                )
+            };
+            Some(OffPath::Rect {
+                x: cb.x + x,
+                y: cb.y + y,
+                w,
+                h,
+            })
+        }
+        "polygon" => {
+            let pts: Vec<(f32, f32)> = args
+                .split(',')
+                .filter_map(|p| {
+                    let mut it = p.split_whitespace();
+                    let x = tf_len_px(it.next()?, cb.width)? as f32;
+                    let y = tf_len_px(it.next()?, cb.height)? as f32;
+                    Some((cb.x + x, cb.y + y))
+                })
+                .collect();
+            (pts.len() >= 2).then_some(OffPath::Poly { pts })
+        }
+        _ => None,
+    }
+}

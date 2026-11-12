@@ -4129,9 +4129,14 @@ le census `site_harvest` arbitre les ex æquo.
 
 ### Sprint 4 — chantiers lourds (~75)
 
-- [ ] `offset-*` motion-path (~52) — `offset-path`/
-  `offset-position`/`offset-anchor`/`offset-rotate` + shorthand :
-  géométrie de chemin (line/circle/ray/url) + placement.
+- [x] **R-272 — `offset-*` motion-path** (~52) — `offset-path`
+  (`ray`/`circle`/`ellipse`/`inset`/`rect`/`xywh`/`polygon`),
+  `offset-distance` (px/%·périmètre), `offset-position`,
+  `offset-anchor`, `offset-rotate` (`auto`/`reverse`/angle),
+  shorthand `offset` expansé. Transform = PushTransform
+  composée au paint (stash par pointeur — le bloc conteneur
+  n'est connu que du parent, patron `sticky_deltas`). Dormants
+  bornés : `path('…')`, `url()`, `coord-box` nus.
 - [ ] `shape-outside` (13) — float shape circle/ellipse/
   polygon/inset + `margin`/`shape-image-threshold` : line boxes
   contournant la forme.

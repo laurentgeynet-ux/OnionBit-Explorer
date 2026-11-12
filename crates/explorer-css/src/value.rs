@@ -1131,6 +1131,45 @@ pub fn expand_shorthand(name: &str, value: &str) -> Option<Vec<(String, String)>
             ("text-wrap-mode".to_string(), mode.to_string()),
         ]);
     }
+    // `offset` (css-motion-1 §4 — R-272) : `[ <'offset-
+    // position'>? [ <'offset-path'> <'offset-distance'>?
+    // <'offset-rotate'>? ]? / <'offset-anchor'>? ]` — le
+    // chemin est le token fonction/`none`/`<coord-box>` ; ce
+    // qui le précède est la position, ce qui suit distance
+    // puis rotation, ce qui suit `/` l'ancre.
+    if name == "offset" {
+        let (left, anchor) = value.split_once('/').map_or((value, ""), |(l, a)| (l, a));
+        let toks: Vec<&str> = split_ws_top(left);
+        let is_path = |t: &str| {
+            t.contains('(')
+                || matches!(
+                    t.trim(),
+                    "none"
+                        | "content-box"
+                        | "padding-box"
+                        | "border-box"
+                        | "fill-box"
+                        | "stroke-box"
+                        | "view-box"
+                )
+        };
+        let pi = toks.iter().position(|t| is_path(t))?;
+        let mut out: Vec<(String, String)> = Vec::new();
+        if pi > 0 {
+            out.push(("offset-position".to_string(), toks[..pi].join(" ")));
+        }
+        out.push(("offset-path".to_string(), toks[pi].to_string()));
+        if let Some(d) = toks.get(pi + 1) {
+            out.push(("offset-distance".to_string(), (*d).to_string()));
+        }
+        if let Some(r) = toks.get(pi + 2) {
+            out.push(("offset-rotate".to_string(), (*r).to_string()));
+        }
+        if !anchor.trim().is_empty() {
+            out.push(("offset-anchor".to_string(), anchor.trim().to_string()));
+        }
+        return Some(out);
+    }
     // Shorthands `place-*` (css-align-3 — R-125) : 1 valeur
     // répétée ou 2 (`<align> <justify>`).
     if let Some((a, b)) = match name {
