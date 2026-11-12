@@ -5087,6 +5087,7 @@ const INHERITED_PROPS: &[&str] = &[
     "ruby-position",
     "tab-size",
     "text-align",
+    "text-decoration-skip-ink",
     "text-combine-upright",
     "text-emphasis",
     "text-emphasis-color",

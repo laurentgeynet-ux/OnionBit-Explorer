@@ -107,6 +107,15 @@ pub struct TextDeco {
     /// Level 3 `text-decoration-skip: … spaces …` pose
     /// [`DECO_SKIP_ALL`]. `none`/absent → 0.
     pub skip_sp: u8,
+    /// `text-decoration-skip-ink` (css-text-decor-4 §5.6 —
+    /// R-286) : **0** = `none` (jamais), **1** = `auto`
+    /// (initiale — underline/overline seulement), **2** =
+    /// `all` (line-through inclus). Au paint, le trait se
+    /// découpe là où une encre de glyphe croise la bande
+    /// (`ink_glyphs` du run — borne : rect englobant, pas
+    /// le contour exact ; un glyphe dont l'encre touche la
+    /// bande saute toute sa largeur).
+    pub skip_ink: u8,
 }
 
 /// `text-decoration` de `st` → entrée résolue, `None` si
@@ -199,6 +208,7 @@ fn text_deco(st: &ComputedStyle, fs: f32, ctx: &BlockCtx) -> Option<TextDeco> {
         inset_r: last_in.0,
         inset_r_pct: last_in.1,
         skip_sp: skip_spaces_mask(st),
+        skip_ink: skip_ink_mode(st),
     })
 }
 
@@ -235,6 +245,36 @@ fn skip_spaces_mask(st: &ComputedStyle) -> u8 {
         m |= DECO_SKIP_ALL;
     }
     m
+}
+
+/// R-286 — `text-decoration-skip-ink` `auto|none|all` :
+/// `auto` = l'initiale (saut aux traits sous/sur-ligne) ;
+/// le shorthand Level 3 `text-decoration-skip` accepte le
+/// token `ink` → `auto`, `none` → tout à `none` — borne
+/// partagée avec `skip-spaces` : la sémantique reset-all
+/// du shorthand n'est pas rejouée (`skip:edges` seul laisse
+/// l'initiale `auto`, comme `spaces` le laissait à 0).
+fn skip_ink_mode(st: &ComputedStyle) -> u8 {
+    if let Some(v) = st.get("text-decoration-skip-ink") {
+        return match v.trim().to_ascii_lowercase().as_str() {
+            "none" => 0,
+            "all" => 2,
+            _ => 1,
+        };
+    }
+    if let Some(v) = st.get("text-decoration-skip") {
+        let toks: Vec<String> = v
+            .split_ascii_whitespace()
+            .map(str::to_ascii_lowercase)
+            .collect();
+        if toks.iter().any(|t| t == "none") {
+            return 0;
+        }
+        if toks.iter().any(|t| t == "ink") {
+            return 1;
+        }
+    }
+    1
 }
 
 /// Fragment posé dans une ligne : tranche de texte shapé, ou

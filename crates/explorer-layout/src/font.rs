@@ -195,6 +195,14 @@ pub struct ShapedRun {
     /// n'a de contour (run d'espaces). Sert aux bounds de
     /// peinture du raster — R-37.
     pub ink: Option<crate::Rect>,
+    /// Bbox d'encre **par glyphe** (R-286 — même repère que
+    /// [`Self::ink`] : plume du premier glyphe = origine x,
+    /// baseline = 0, y négatif au-dessus) — `ink_glyphs[i]`
+    /// = encre de `glyphs[i]` ; rect à `width == 0` pour un
+    /// glyphe sans contour. Vide quand aucune fonte n'a
+    /// servi les contours ; sert à `text-decoration-
+    /// skip-ink` (le trait saute les croisements d'encre).
+    pub ink_glyphs: Vec<crate::Rect>,
 }
 
 /// Cache de la pipeline fonte, borné à une passe de layout
@@ -601,6 +609,7 @@ impl FontCache {
         let mut glyphs = Vec::new();
         let mut advance = 0.0;
         let mut ink: Option<crate::Rect> = None;
+        let mut ink_glyphs: Vec<crate::Rect> = Vec::new();
         let mut spans: Vec<FallbackSpan> = Vec::new();
         for si in order {
             let (start, end, choice) = &segs[si];
@@ -645,6 +654,12 @@ impl FontCache {
                 g.cluster = g
                     .cluster
                     .saturating_add(u32::try_from(*start).unwrap_or(u32::MAX));
+                let mut gink = crate::Rect {
+                    x: 0.0,
+                    y: 0.0,
+                    width: 0.0,
+                    height: 0.0,
+                };
                 if let Some(f) = tf {
                     if let Some(b) = ink_bbox(&mut self.ink, seg_key, f, g.id) {
                         let r = crate::Rect {
@@ -653,6 +668,7 @@ impl FontCache {
                             width: f32::from(b.x_max - b.x_min) * scale,
                             height: f32::from(b.y_max - b.y_min) * scale,
                         };
+                        gink = r;
                         ink = Some(match ink {
                             Some(i) => crate::inline::union_rect(i, r),
                             None => r,
@@ -661,6 +677,7 @@ impl FontCache {
                 }
                 pen += g.advance;
                 glyphs.push(g);
+                ink_glyphs.push(gink);
             }
             if let Choice::Fallback(d, i) = choice {
                 spans.push(FallbackSpan {
@@ -678,6 +695,7 @@ impl FontCache {
             metrics,
             fallback_spans: spans,
             ink,
+            ink_glyphs,
         }
     }
 }
@@ -1003,7 +1021,14 @@ fn shape_parsed(
     // glyphe peut sortir de la boîte de métriques.
     let mut pen = 0.0_f32;
     let mut cumul: Option<crate::Rect> = None;
+    let mut ink_glyphs = Vec::with_capacity(glyphs.len());
     for g in &glyphs {
+        let mut gink = crate::Rect {
+            x: 0.0,
+            y: 0.0,
+            width: 0.0,
+            height: 0.0,
+        };
         if let Some(b) = ink_bbox(ink, font_key, face, g.id) {
             let r = crate::Rect {
                 x: pen + g.offset_x + f32::from(b.x_min) * scale,
@@ -1011,11 +1036,13 @@ fn shape_parsed(
                 width: f32::from(b.x_max - b.x_min) * scale,
                 height: f32::from(b.y_max - b.y_min) * scale,
             };
+            gink = r;
             cumul = Some(match cumul {
                 Some(i) => crate::inline::union_rect(i, r),
                 None => r,
             });
         }
+        ink_glyphs.push(gink);
         pen += g.advance;
     }
     Some(ShapedRun {
@@ -1024,6 +1051,7 @@ fn shape_parsed(
         metrics: met,
         fallback_spans: Vec::new(),
         ink: cumul,
+        ink_glyphs,
     })
 }
 

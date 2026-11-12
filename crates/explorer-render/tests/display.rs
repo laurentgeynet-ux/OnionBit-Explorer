@@ -4408,3 +4408,46 @@ fn svg_styled_raster_prouve_fill_css_et_currentcolor() {
         "stylesheet fill → vert : {px2:?}"
     );
 }
+
+#[test]
+fn text_decoration_skip_ink_coupe_le_trait_sous_l_encre() {
+    // Fixture : encre glyphe y in [-7,+0.5] rel baseline a
+    // fs=10 (bbox 50/-50/450/700 sur 1000 upm, avance 5px).
+    // `text-underline-offset:0` pose la bande [0,1] dans
+    // l'encre de chaque glyphe -> segments ; `none` -> plein.
+    let deco_count = |css: &str| -> usize {
+        let (_d, _b, items) = dl("<a>ab</a>", css);
+        items
+            .iter()
+            .filter(|i| matches!(i, DisplayItem::DecoRect { .. }))
+            .count()
+    };
+    let base = "a{text-decoration:underline;font-size:10px;text-underline-offset:0}";
+    let sans = deco_count("a{text-decoration:underline;font-size:10px;text-underline-offset:0;text-decoration-skip-ink:none}");
+    let auto = deco_count(base);
+    assert_eq!(sans, 1, "skip-ink:none -> trait plein");
+    assert!(
+        auto > sans,
+        "skip-ink:auto -> segments sous l'encre : {auto} vs {sans}"
+    );
+    // Offset par defaut : la bande [+1,+2] est SOUS l'encre
+    // (fond +0.5) -> auto ne coupe pas.
+    let loin = deco_count("a{text-decoration:underline;font-size:10px}");
+    assert_eq!(loin, 1, "bande sous l'encre -> pas de saut");
+    // `all` etend le saut au line-through (bande a -0.3em,
+    // dans l'encre) ; auto le laisse plein.
+    let thru_auto = deco_count("a{text-decoration:line-through;font-size:10px}");
+    let thru_all =
+        deco_count("a{text-decoration:line-through;font-size:10px;text-decoration-skip-ink:all}");
+    assert_eq!(thru_auto, 1, "through + auto -> plein");
+    assert!(thru_all > thru_auto, "through + all -> segments");
+    // Shorthand Level 3 : `text-decoration-skip:ink` = auto.
+    let short = deco_count(
+        "a{text-decoration:underline;font-size:10px;text-underline-offset:0;text-decoration-skip:ink}",
+    );
+    assert!(short > 1, "skip:ink -> segments");
+    let short_none = deco_count(
+        "a{text-decoration:underline;font-size:10px;text-underline-offset:0;text-decoration-skip:none}",
+    );
+    assert_eq!(short_none, 1, "skip:none -> trait plein");
+}

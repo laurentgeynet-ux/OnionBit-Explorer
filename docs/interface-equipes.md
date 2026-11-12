@@ -2819,3 +2819,24 @@ cause** ; résidu = promesses des handlers d'erreur `Atn`
   `interactivity:inert` (flip si l'oracle est hit/geometrie) ;
   `interactivity:auto` = `na` (initiale). `overlay` reste
   borne : pas de couche top-level dans le modele boites.
+
+### couture PIPE -> NAV — R-286 : `text-decoration-skip-ink` (initiale auto)
+
+- **Contenu** : `auto` coupe le trait underline/overline a
+  l'encre des glyphes (jambages), `all` etend au
+  line-through, `none` desactive ; shorthand
+  `text-decoration-skip:ink|none` reconnu. Encre par
+  glyphe = bbox `glyph_bounding_box` projetee au paint
+  (`ShapedRun.ink_glyphs` — collectee au shaping, cache
+  deja present, aucun nouveau parse de face).
+- **Impact visuel global** : `auto` est l'initiale — tout
+  souligne change (troupe aux jambages, parite Chrome) ;
+  sur les fontes sans table de contours ou encre absente,
+  repli = trait plein (honnete). Borne : bbox englobante
+  au lieu du contour exact — un glyphe effleurant la bande
+  saute toute sa largeur.
+- **Re-mesure** : sonde `affectsv` pour
+  `text-decoration-skip-ink` (`auto` vs `none` = delta
+  geometrique visible a `text-underline-offset` petit) —
+  `all` = 3e valeur mesurable. `text-decoration-skip:ink`
+  shorthand inclus.

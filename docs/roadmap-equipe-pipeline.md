@@ -4394,9 +4394,17 @@ le census `site_harvest` arbitre les ex æquo.
   calculée conforme. Volet pointer seul ; focus/find-in-
   page = NAV. `overlay` reste borné (pas de top-layer).
 
+- [x] **R-286 — `text-decoration-skip-ink`** (~3, valeur
+  initiale `auto` → tous les soulignés) — `ink_glyphs`
+  bbox d'encre par glyphe au shaping ; `TextDeco.skip_ink`
+  (`none`/`auto`/`all`) ; `deco_keep_ranges` coupe le
+  trait aux croisements d'encre. Borne : bbox englobante,
+  pas le contour (Chrome est plus fin). Fix annexe :
+  early-return `mask==0` court-circuitait les cuts sans
+  `skip-spaces`. +`INHERITED_PROPS`.
+
 `text-fit`/`text-combine-upright`/`interpolate-size` (chantier
-animation↔layout), `text-decoration-skip-ink` (géométrie
-glyphes), `display` exotiques résiduels, `grid-*`/`flex-*`
+animation↔layout), `display` exotiques résiduels, `grid-*`/`flex-*`
 sous-features, `font-stretch`/`font-width` (fontes variables),
 `font-variant-*` OT fins, `overlay`,
 `reading-flow`, `scroll-snap-*` résiduel,

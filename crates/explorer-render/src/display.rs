@@ -4258,12 +4258,18 @@ fn paint_self(
 /// end des fragments intérieurs sont effacés à l'appelant,
 /// donc un fragment tout-blanc n'arrive ici en bord
 /// qu'avec son bit → vidé).
-fn deco_keep_ranges(text: &str, run: &ShapedRun, width: f32, mask: u8) -> Vec<(f32, f32)> {
+fn deco_keep_ranges(
+    text: &str,
+    run: &ShapedRun,
+    width: f32,
+    mask: u8,
+    ink_band: Option<(f32, f32)>,
+) -> Vec<(f32, f32)> {
     use explorer_layout::inline::{DECO_SKIP_ALL, DECO_SKIP_END, DECO_SKIP_START};
     if width <= 0.0 {
         return Vec::new();
     }
-    if mask == 0 {
+    if mask == 0 && ink_band.is_none() {
         return vec![(0.0, width)];
     }
     // Fragment tout-blanc : vidé dès qu'un saut est demandé.
@@ -4312,6 +4318,17 @@ fn deco_keep_ranges(text: &str, run: &ShapedRun, width: f32, mask: u8) -> Vec<(f
                     break;
                 }
                 cuts.push((s.0, s.1));
+            }
+        }
+    }
+    // R-286 — `text-decoration-skip-ink` : coupe le trait
+    // là où une encre de glyphe traverse la bande.
+    // `ink_band` = (haut, bas) du trait dans le repère des
+    // `ink_glyphs` (baseline = 0, y positif vers le bas).
+    if let Some((top, bot)) = ink_band {
+        for r in &run.ink_glyphs {
+            if r.width > 0.0 && r.y < bot && r.y + r.height > top {
+                cuts.push((r.x, r.x + r.width));
             }
         }
     }
@@ -4475,42 +4492,49 @@ fn paint_lines(bx: &LayoutBox, items: &mut Vec<DisplayItem>, off: (f32, f32)) {
                 // R-280 — `text-decoration-inset` : rentrée
                 // du trait aux bords start/end (`%` de la
                 // largeur du fragment — base connue ici).
-                let deco_rect =
-                    |d: &explorer_layout::inline::TextDeco, dy: f32, thick: f32| -> Vec<Rect> {
-                        let w = frag.rect.width;
-                        let il = if d.inset_l_pct {
-                            d.inset_l * w / 100.0
-                        } else {
-                            d.inset_l
-                        };
-                        let ir = if d.inset_r_pct {
-                            d.inset_r * w / 100.0
-                        } else {
-                            d.inset_r
-                        };
-                        // R-282 — `text-decoration-skip-spaces`
-                        // : le trait se découpe en segments
-                        // hors blancs (`deco_keep_ranges`),
-                        // dans les bornes `il..w-ir`. Les
-                        // bords start/end ne sautent qu'aux
-                        // bords RÉELS de l'élément décoré.
-                        let mut sk = d.skip_sp;
-                        if first_of.get(&frag.owner) != Some(&(li, fi)) {
-                            sk &= !explorer_layout::inline::DECO_SKIP_START;
-                        }
-                        if last_of.get(&frag.owner) != Some(&(li, fi)) {
-                            sk &= !explorer_layout::inline::DECO_SKIP_END;
-                        }
-                        deco_keep_ranges(&frag.text, run, (w - il - ir).max(0.0), sk)
-                            .into_iter()
-                            .map(|(a, b)| Rect {
-                                x: frag.rect.x + off.0 + il + a,
-                                y: dy,
-                                width: (b - a).max(0.0),
-                                height: thick,
-                            })
-                            .collect()
+                let deco_rect = |d: &explorer_layout::inline::TextDeco,
+                                 dy: f32,
+                                 thick: f32,
+                                 ink_ok: bool|
+                 -> Vec<Rect> {
+                    let w = frag.rect.width;
+                    let il = if d.inset_l_pct {
+                        d.inset_l * w / 100.0
+                    } else {
+                        d.inset_l
                     };
+                    let ir = if d.inset_r_pct {
+                        d.inset_r * w / 100.0
+                    } else {
+                        d.inset_r
+                    };
+                    // R-282 — `text-decoration-skip-spaces`
+                    // : le trait se découpe en segments
+                    // hors blancs (`deco_keep_ranges`),
+                    // dans les bornes `il..w-ir`. Les
+                    // bords start/end ne sautent qu'aux
+                    // bords RÉELS de l'élément décoré.
+                    let mut sk = d.skip_sp;
+                    if first_of.get(&frag.owner) != Some(&(li, fi)) {
+                        sk &= !explorer_layout::inline::DECO_SKIP_START;
+                    }
+                    if last_of.get(&frag.owner) != Some(&(li, fi)) {
+                        sk &= !explorer_layout::inline::DECO_SKIP_END;
+                    }
+                    // R-286 — `skip-ink` : bande du trait
+                    // en repère baseline (les `ink_glyphs`
+                    // du run vivent baseline = 0).
+                    let band = ink_ok.then_some((dy - base_y, dy - base_y + thick));
+                    deco_keep_ranges(&frag.text, run, (w - il - ir).max(0.0), sk, band)
+                        .into_iter()
+                        .map(|(a, b)| Rect {
+                            x: frag.rect.x + off.0 + il + a,
+                            y: dy,
+                            width: (b - a).max(0.0),
+                            height: thick,
+                        })
+                        .collect()
+                };
                 for d in &frag.deco {
                     let color = d.color.unwrap_or(ink);
                     // R-178 : épaisseur/offset du déclarant
@@ -4530,7 +4554,7 @@ fn paint_lines(bx: &LayoutBox, items: &mut Vec<DisplayItem>, off: (f32, f32)) {
                                     (fs * 0.1).max(1.0)
                                 }
                             });
-                        for rect in deco_rect(d, dy, dth) {
+                        for rect in deco_rect(d, dy, dth, d.skip_ink >= 1) {
                             items.push(DisplayItem::DecoRect {
                                 rect,
                                 color,
@@ -4539,7 +4563,7 @@ fn paint_lines(bx: &LayoutBox, items: &mut Vec<DisplayItem>, off: (f32, f32)) {
                         }
                     }
                     if d.lines & explorer_layout::inline::DECO_OVERLINE != 0 {
-                        for rect in deco_rect(d, base_y - fs * 0.85, dth) {
+                        for rect in deco_rect(d, base_y - fs * 0.85, dth, d.skip_ink >= 1) {
                             items.push(DisplayItem::DecoRect {
                                 rect,
                                 color,
@@ -4603,6 +4627,7 @@ fn paint_lines(bx: &LayoutBox, items: &mut Vec<DisplayItem>, off: (f32, f32)) {
                             metrics: run.metrics,
                             fallback_spans: Vec::new(),
                             ink: None,
+                            ink_glyphs: Vec::new(),
                         });
                         let x = frag.rect.x + (frag.rect.width - g.advance).max(0.0) / 2.0;
                         items.push(DisplayItem::Text {
@@ -4646,7 +4671,9 @@ fn paint_lines(bx: &LayoutBox, items: &mut Vec<DisplayItem>, off: (f32, f32)) {
                 for d in &frag.deco {
                     if d.lines & explorer_layout::inline::DECO_LINE_THROUGH != 0 {
                         let dth = if d.thick_px > 0.0 { d.thick_px } else { th };
-                        for rect in deco_rect(d, base_y - fs * 0.3 - dth / 2.0, dth) {
+                        for rect in
+                            deco_rect(d, base_y - fs * 0.3 - dth / 2.0, dth, d.skip_ink >= 2)
+                        {
                             items.push(DisplayItem::DecoRect {
                                 rect,
                                 color: d.color.unwrap_or(ink),
