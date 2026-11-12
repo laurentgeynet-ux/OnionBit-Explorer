@@ -2480,3 +2480,12 @@ cause** ; résidu = promesses des handlers d'erreur `Atn`
   (na attendu — initiale), `<integer>`/`<number>`,
   `initial-letter-align`/`initial-letter-wrap` (dormants —
   bornes non routées).
+
+### 2026-11-13 — NAV -> PIPE : re-tour affectsv post-R-278 (7e)
+
+- initial-letter : la sonde cible desormais .x::first-letter
+  (non herite, inerte ailleurs) + fixture texte 3+ lignes.
+  initial-letter:3 et 3 2 -> ok ; normal -> na (initiale).
+- BCD ne sonde que normal : denominateur 2218 -> 2217,
+  numerateur stable a 1051 (47,4 %). Cliquet vert.
+

@@ -782,6 +782,13 @@ fn fixture_for(name: &str) -> &'static str {
         () if n == "quotes" => {
             "<body><p class=x><q>a<q>b</q></q></p></body>"
         }
+        // `initial-letter` — ne s'applique qu'au pseudo
+        // `::first-letter` (la sonde cible `.x::first-letter`,
+        // voir `prop_affects_decl`) et exige ≥3 lignes pour
+        // que la morsure de la lettrine soit observable.
+        () if n == "initial-letter" => {
+            "<body><p class=x style=\"width:120px;font-size:8px\">alpha beta gamma delta epsilon zeta eta theta iota kappa lambda mu nu xi omicron pi rho</p></body>"
+        }
         // Coupure de ligne — `overflow-wrap`/`word-break`/
         // `line-break`/`hyphens`/`tab-size` n'ont d'effet
         // qu'avec un mot plus long que la ligne (conteneur
@@ -1179,9 +1186,18 @@ fn prop_affects_decl(decl: &str) -> bool {
         }
     };
     let cctx = context_css(name);
+    // `initial-letter` n'existe que sur `::first-letter`
+    // (css-inline-3 §4 — non hérité, inerte ailleurs) : la
+    // déclaration sondée porte sur le pseudo, le ctx reste
+    // sur `.x`.
+    let sel = if name == "initial-letter" {
+        ".x::first-letter"
+    } else {
+        ".x"
+    };
     let (a, b) = (
-        sig(&format!(".x {{ {cctx}; {}: {} }}", name, value.trim())),
-        sig(&format!(".x {{ {cctx} }}")),
+        sig(&format!("{sel} {{ {cctx}; {}: {} }}", name, value.trim())),
+        sig(&format!("{sel} {{ {cctx} }}")),
     );
     if std::env::var_os("EXPLORER_BCD_DEBUG_SIG").is_some() {
         eprintln!("=== {name}:{value}\n--- with\n{a}\n--- base\n{b}");
@@ -1233,6 +1249,7 @@ const INITIAL_EXTRA: &[(&str, &str)] = &[
     ("flex-wrap", "nowrap"),
     ("float", "none"),
     ("hyphens", "manual"),
+    ("initial-letter", "normal"),
     // `hyphenate-*` : initiales spec css-text-4 (`auto` =
     // tiret par défaut / limite auto ; `no-limit` = pas de
     // borne de lignes consécutives).
