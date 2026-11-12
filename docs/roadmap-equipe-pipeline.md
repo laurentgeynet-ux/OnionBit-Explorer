@@ -4403,12 +4403,19 @@ le census `site_harvest` arbitre les ex æquo.
   early-return `mask==0` court-circuitait les cuts sans
   `skip-spaces`. +`INHERITED_PROPS`.
 
+- [x] **R-287 — `position-try-order:most-*` fins** (~5) —
+  tri par étendue réelle bord-d'ancre→bord-CB dans la
+  direction du dépôt (avant : présence d'un Δx/Δy seul) ;
+  `most-size` = produit des étendues (avant : ignoré).
+  Borne : inline/block ≈ width/height (horizontal-tb).
+  Verrou discriminant `anchor_try_most_mesure_la_place_reelle`.
+
 `text-fit`/`text-combine-upright`/`interpolate-size` (chantier
 animation↔layout), `display` exotiques résiduels, `grid-*`/`flex-*`
 sous-features, `font-stretch`/`font-width` (fontes variables),
 `font-variant-*` OT fins, `overlay`,
 `reading-flow`, `scroll-snap-*` résiduel,
-`position-try-order:most-*` fins, `ruby-*` fins, `math-*`.
+`ruby-*` fins (`overhang:auto`), `math-*`.
 
 ### P3 — hors périmètre / bornes (décision requise)
 

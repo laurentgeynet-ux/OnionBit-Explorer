@@ -2895,3 +2895,17 @@ cause** ; résidu = promesses des handlers d'erreur `Atn`
   → `na` (hit-test, NO_ORACLE) ; `skip-ink:none` →
   `ok`, `auto`/`all` → `na` (initiale / ≡ auto) ;
   `text-decoration-skip:auto` → `na`, `:none` → `ok`.
+
+### couture PIPE -> NAV — R-287 : `position-try-order:most-*` tri par place reelle
+
+- **Changement** : le tri des candidats `position-try` sous
+  `most-width`/`most-height`/`most-size` et les variantes
+  logiques ne regarde plus la presence d'un delta x/y —
+  il ordonne par l'etendue reelle entre le bord d'ancre et
+  le bord du bloc conteneur dans la direction du depot
+  (spec css-anchor-1 §3.5). `most-size` desormais consomme
+  (avant : valeur inconnue → ordre declare).
+- **Sondage `affectsv`** : `position-try-order` accepte
+  desormais les 5 mots-cles avec effet distinct mesurable
+  quand plusieurs options debordent (`most-*` change
+  l'option appliquee en dernier recours).

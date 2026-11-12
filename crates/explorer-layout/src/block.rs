@@ -1322,27 +1322,68 @@ fn fix_anchor_positioned(
                             (fx, fy)
                         };
                         // `position-try-order` trie les options
-                        // (spec §3.5 : priorité à l'axe donnant
-                        // le plus de place — approximation :
-                        // options Δx d'abord pour `most-width`,
-                        // Δy d'abord pour `most-height`, ordre
-                        // relatif stable ; toutes restent
-                        // éligibles). La première dont la boîte
-                        // translatée rentre gagne ; si toutes
+                        // (spec §3.5 : `most-*` préfère l'option
+                        // laissant le plus de place sur l'axe
+                        // demandé). « La place » = l'étendue
+                        // entre le bord de l'ancre et le bord
+                        // du bloc conteneur dans la direction
+                        // où le candidat dépose la boîte (CB
+                        // modifié par l'option) : gauche →
+                        // `ar.x`, droite → `cb_w − ar.right`,
+                        // dessus → `ar.y`, dessous →
+                        // `vp_h − ar.bottom` ; quand le candidat
+                        // reste dans l'axe de l'ancre, le côté
+                        // de la position **non flippée** garde
+                        // la mesure. Sort stable décroissant ;
+                        // `most-inline/block-size` ≈ width/height
+                        // (horizontal-tb — un mode vertical
+                        // échangerait les axes, borne assumée).
+                        // La première dont la boîte translatée
+                        // rentre entièrement gagne ; si toutes
                         // débordent, la dernière est appliquée.
                         let mut cands: Vec<(f32, f32)> = groups
                             .iter()
                             .map(|g| cand(g))
                             .filter(|d| d.0 != 0.0 || d.1 != 0.0)
                             .collect();
-                        match order.as_str() {
-                            "most-width" | "most-inline-size" => {
-                                cands.sort_by_key(|d| u8::from(d.0 == 0.0));
-                            }
-                            "most-height" | "most-block-size" => {
-                                cands.sort_by_key(|d| u8::from(d.1 == 0.0));
-                            }
-                            _ => {}
+                        if order.as_str() != "normal" {
+                            let space = |d: &(f32, f32)| {
+                                let (tx, ty) = (bx.rect.x + d.0, bx.rect.y + d.1);
+                                // Côté horizontal du dépôt.
+                                let xs = if tx + bx.rect.width <= ar.x {
+                                    ar.x
+                                } else if tx >= ar.x + ar.width {
+                                    cb_w - (ar.x + ar.width)
+                                } else if bx.rect.x + bx.rect.width <= ar.x {
+                                    ar.x
+                                } else {
+                                    cb_w - (ar.x + ar.width)
+                                };
+                                // Côté vertical du dépôt.
+                                let ys = if ty + bx.rect.height <= ar.y {
+                                    ar.y
+                                } else if ty >= ar.y + ar.height {
+                                    vp_h - (ar.y + ar.height)
+                                } else if bx.rect.y + bx.rect.height <= ar.y {
+                                    ar.y
+                                } else {
+                                    vp_h - (ar.y + ar.height)
+                                };
+                                (xs.max(0.0), ys.max(0.0))
+                            };
+                            cands.sort_by(|a, b| {
+                                let (ax, ay) = space(a);
+                                let (bx2, by2) = space(b);
+                                let key = match order.as_str() {
+                                    "most-width" | "most-inline-size" => bx2.partial_cmp(&ax),
+                                    "most-height" | "most-block-size" => by2.partial_cmp(&ay),
+                                    // `most-size` = produit des
+                                    // deux étendues.
+                                    "most-size" => (bx2 * by2).partial_cmp(&(ax * ay)),
+                                    _ => Some(std::cmp::Ordering::Equal),
+                                };
+                                key.unwrap_or(std::cmp::Ordering::Equal)
+                            });
                         }
                         let mut chosen = None;
                         for &(fx, fy) in &cands {

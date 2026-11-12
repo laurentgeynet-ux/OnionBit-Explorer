@@ -903,6 +903,35 @@ fn anchor_position_try_most_dans_le_shorthand() {
     assert_eq!(n.rect.x, 390.0);
 }
 
+/// `position-try-order:most-width` mesure la place **réelle**
+/// (R-287) — l'étendue entre le bord de l'ancre et le bord
+/// du bloc conteneur dans la direction du dépôt — pas juste
+/// « le candidat a un Δx ». Ancre près du bord gauche :
+/// `flip-inline` (à gauche de l'ancre) n'a que `ar.x` de
+/// place ; `flip-block` garde `cb_w − ar.right` — trié
+/// **dernier** par `most-width` bien que dénué de Δx, donc
+/// appliqué quand aucune option ne rentre.
+#[test]
+fn anchor_try_most_mesure_la_place_reelle() {
+    let (dom, bx) = laid(
+        "<div id=a></div><div id=n></div>",
+        "body{height:400px}\
+         #a{position:absolute;left:60px;top:350px;width:40px;height:20px;anchor-name:--a}\
+         #n{position:absolute;position-anchor:--a;top:anchor(bottom);left:anchor(right);\
+            width:320px;height:40px;position-try:flip-block flip-inline;\
+            position-try-order:most-width}",
+    );
+    let n = find(&bx, by_id(&dom, "n"));
+    // flip-inline : miroir autour de x=80 → x=−260 (espace
+    // 60) ; flip-block : miroir y → 310 (espace x = 300,
+    // toujours à droite). Les deux débordent encore → la
+    // dernière triée (`flip-inline`, moins de place) est
+    // appliquée — l'ancien tri « Δx d'abord » l'aurait mise
+    // en tête et appliqué `flip-block` à la place.
+    assert_eq!(n.rect.x, -260.0, "most-width : flip-inline dernier");
+    assert_eq!(n.rect.y, 370.0, "y non flippé");
+}
+
 /// `justify-self`/`align-self:anchor-center` (R-254 suite) :
 /// la bulle est centrée sur l'ancre selon chaque axe nommé.
 #[test]
