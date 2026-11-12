@@ -2280,6 +2280,54 @@ sonde : nommer la clé `k` des `resolve(VhV(k))` pendants
 `LgV` côté insertion — quel `await` précède la première
 demande de chunk.
 
+### vitrine — N1.5 : rail DI **réfuté** (clés nommées = inertes par design) + `bb` décodé dans `eG`/`_.aq` (rejeu `64e161fc`/`075ecef2`)
+
+Sonde `di.key` étendue (`64e161fc` — `.name` de la valeur) sur
+rejeu `replay-vol815` `/watch` : les `deferredKey` pendants sont
+nommés — **`CHUNK_REGISTRY_TOKEN` ×246**,
+`SEMANTIC_LAYOUT_RESOLVER_TOKEN` ×222,
+`SEMANTIC_COLOR_RESOLVER_TOKEN` ×90,
+`SEMANTIC_TYPOGRAPHY_RESOLVER_TOKEN` ×76. Lecture du bundle :
+
+- `_.QN=new _.gG("CHUNK_REGISTRY_TOKEN")` n'est fourni que sous
+  `_.R("web_enable_chunk_prediction")` → flag **absent du ytcfg
+  capturé** → provider jamais enregistré **dans tout navigateur**
+  (pend identique sous Chrome — inerte).
+- Les `SEMANTIC_*` ont le motif `N||_.ve(token, fallback)` — un
+  `.then` pendu sur token non fourni est le **chemin normal**.
+- `addProvider`→`G06` fonctionne : provider `$lq` enregistré
+  (`27615:365`).
+
+**Verdict rail DI : mort par design — écarté comme cause `bb`.**
+
+**`bb` décodé** (bundle `b32ee58`, PAS le même fichier que les
+proms kevlar) : session `eG` —
+`q0(this.wId.promise, f.d7b, ()=>Promise.reject(Error("bb")))`
+(coroutine, `K++;jumpTo(10)` = retry). `wId` ne se résout que par
+`yP6` (complétion programme) ou se rejette par `cPh` (« Za »).
+Programme `_.aq` → `sPQ` créé via `_.lI[globalName].a` = la VM
+bytecode BotGuard (fichier `www.google.com/js/th/…`, 64 Ko,
+évalué OK dans le log) ; callback de fin `V` →
+`C.resolve({bWm,nXe,auT,nXm})` **jamais invoqué**.
+
+Rails éliminés dans le même rejeu : `crypto.subtle` **jamais
+appelé** (`req.crypto`=0, compteur `075ecef2`) — la VM stall
+avant la signature ; timers/réactions/ports/messages drainent
+intégralement ; un seul `net.drq` à hôte vide (`/api/stats/qoe`,
+miss corpus bénin) ; `err.dynscript`×1 = 8ᵉ `<script>` inséré en
+rejeu seulement (miss corpus — divergence marqueur, pas la cause
+live).
+
+**Spawn de session = piloté par le cycle de vie** (chaîne
+`ready`/`connectedCallback` d'éléments `yt-*-view-model`, pas un
+timer) → variance du 1ᵉr `bb` entre rejeux (di1 : ~75 s ; run
+crypto : 0 à 6 min — batterie fingerprint `fn.restricted` jamais
+déclenchée). Le stall est **interne au bytecode** : l'opération
+hôte attendue entre spawn et `V` reste à nommer — prochaine
+sonde : étiqueter la valeur yieldée des coroutines suspendues
+(`JSC$10237_yield`) ou tracer les callbacks `w`/`h`/`l.done` du
+pont `_.aq`.
+
 ### vitrine — N1.5 itération : le stall **reproduit en rejeu** (offline) + rail DI décodé
 
 Daemon `266cbc70` + `EXPLORER_NET_REPLAY=replay-vol815`,
