@@ -690,6 +690,7 @@ impl Session {
             self.sync_media_pending(tab);
             self.drain_media_commands(tab);
         }
+        sync_phase(tab, "commit.tail", t);
         // B-41 (flixbus) : une rafale `UnmappedKey` →
         // re-parse → éval produisait des jobs à chaque
         // pompe — la pompe repartait sans fin (pump_

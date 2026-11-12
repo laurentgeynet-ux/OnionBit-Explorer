@@ -603,7 +603,9 @@ pub async fn pump_timers_shared(sess: &tokio::sync::Mutex<Session>, tab: TabId) 
     let jobs = s.commit_js_pump(tab, epoch, out.ok(), sync_ok);
     // 55e : les animations cadencées par ce battement.
     dlv_info!("pump: anim");
+    let ta = Instant::now();
     let _ = s.advance_animations(tab);
+    sync_phase(tab, "commit.anim", ta);
     sync_phase(tab, "pump.commit_lock", tc);
     drop(s);
     // 55h : la mutation rapportée par le miroir a été
