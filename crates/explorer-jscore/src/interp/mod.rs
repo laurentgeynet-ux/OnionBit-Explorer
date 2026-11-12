@@ -106,6 +106,12 @@ static BG_ENTRY: std::sync::atomic::AtomicU32 =
 /// relu au `bg.a` suivant (session d'après) — le dernier op
 /// hôte avant l'arrêt est exactement l'op attendu par la VM.
 static BG_LAST_HOST: std::sync::Mutex<String> = std::sync::Mutex::new(String::new());
+/// N1.5 — anneau des 24 derniers natives VM : le reliquat au
+/// `bg.a` suivant = la queue d'ops avant l'arrêt (les purs
+/// natives de donnée — `charCodeAt`/`fromCharCode`/`push`… —
+/// dominent sinon le log borné).
+static BG_LAST_RING: std::sync::Mutex<std::collections::VecDeque<String>> =
+    std::sync::Mutex::new(std::collections::VecDeque::new());
 
 /// Hidden env bindings installed in class member scopes — the names
 /// use private-use code points so no source identifier can collide
@@ -9444,8 +9450,14 @@ impl Engine {
                         .lock()
                         .map(|g| g.clone())
                         .unwrap_or_default();
+                    let ring = BG_LAST_RING
+                        .lock()
+                        .map(|r| {
+                            r.iter().cloned().collect::<Vec<_>>().join("→")
+                        })
+                        .unwrap_or_default();
                     tracing::info!(target: "dom_probe", site = "bg.a",
-                        n = n, id = cid, from = %from, last = %last);
+                        n = n, id = cid, from = %from, last = %last, tail = %ring);
                 }
             }
         }
@@ -9577,8 +9589,25 @@ impl Engine {
             if let Ok(mut g) = BG_LAST_HOST.lock() {
                 *g = name.to_string();
             }
+            if let Ok(mut ring) = BG_LAST_RING.lock() {
+                ring.push_back(name.to_string());
+                if ring.len() > 24 {
+                    ring.pop_front();
+                }
+            }
             let n = BG_HOST_N.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-            if n < 512 {
+            // Bruit interne VM (déobfuscation/strings) filtré du
+            // log — l'anneau lui garde tout.
+            if n < 512
+                && !matches!(
+                    name,
+                    "fromCharCode" | "charCodeAt" | "push" | "toString" | "call"
+                        | "valueOf" | "substring" | "split" | "pop" | "join" | "splice"
+                        | "concat" | "bind" | "freeze" | "setPrototypeOf"
+                        | "hasOwnProperty" | "defineProperty" | "Array" | "random"
+                        | "create" | "indexOf" | "slice" | "atob" | "apply"
+                )
+            {
                 let (from, _, _) = self.stack_nearest_fn_src(80);
                 tracing::info!(target: "dom_probe", site = "bg.host",
                     n = n, name = name, argc = args.len(), from = %from);
