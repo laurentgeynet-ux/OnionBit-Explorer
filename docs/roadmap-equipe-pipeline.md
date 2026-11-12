@@ -4413,7 +4413,15 @@ le census `site_harvest` arbitre les ex æquo.
   Borne : inline/block ≈ width/height (horizontal-tb).
   Verrou discriminant `anchor_try_most_mesure_la_place_reelle`.
 
-`text-fit`/`text-combine-upright`/`interpolate-size` (chantier
+- [x] **R-288 — `text-combine-upright`** (~2, tate-chu-yoko)
+  — séries combinées peintes debout en un `Text` horizontal
+  compressé dans 1em sous `text-orientation:upright`/`mixed` :
+  `digits <n>` tronçons de chiffres, `all` série non-blanche,
+  `-webkit-text-combine:horizontal` ≡ all. Bornes : sous-run
+  sans `fallback_spans`, baseline = créneau (pas de centrage
+  optique), pas de regroupement inter-styles.
+
+`text-fit`/`interpolate-size` (chantier
 animation↔layout), `display` exotiques résiduels, `grid-*`/`flex-*`
 sous-features, `font-stretch`/`font-width` (fontes variables),
 `font-variant-*` OT fins, `overlay`,

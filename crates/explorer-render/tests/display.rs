@@ -4451,3 +4451,58 @@ fn text_decoration_skip_ink_coupe_le_trait_sous_l_encre() {
     );
     assert_eq!(short_none, 1, "skip:none -> trait plein");
 }
+
+/// R-288 — `text-combine-upright` : les chiffres sont peints
+/// debout en **un** `Text` horizontal (tate-chu-yoko) dans
+/// un flux vertical `text-orientation:upright`.
+#[test]
+fn text_combine_upright_dresse_les_chiffres() {
+    use explorer_render::DisplayItem;
+    let multi = |html: &str, css: &str| -> Vec<usize> {
+        let (_d, _b, items) = dl(html, css);
+        items
+            .iter()
+            .filter_map(|i| match i {
+                DisplayItem::Text { run, .. } if run.glyphs.len() > 1 => Some(run.glyphs.len()),
+                _ => None,
+            })
+            .collect()
+    };
+    let html = "<div style=\"writing-mode:vertical-rl;text-orientation:upright;\
+                width:40px;height:200px;font-size:10px\">\
+                <span id=t>12</span></div>";
+    // Sans combine : chaque glyphe empilé seul → aucun Text
+    // multi-glyphes.
+    assert!(
+        multi(html, "span{text-combine-upright:none}").is_empty(),
+        "none → glyphes empilés seuls"
+    );
+    // `digits 2` : « 12 » = un Text de 2 glyphes.
+    assert_eq!(
+        multi(html, "span{text-combine-upright:digits 2}"),
+        vec![2],
+        "digits 2 → série combinée"
+    );
+    // `all` : tout non-blanc debout.
+    assert_eq!(
+        multi(html, "span{text-combine-upright:all}"),
+        vec![2],
+        "all → série combinée"
+    );
+    // `digits 2` sur « 123 » : tronçon [12] + « 3 » seul →
+    // un seul Text multi-glyphes.
+    let html3 = "<div style=\"writing-mode:vertical-rl;text-orientation:upright;\
+                 width:40px;height:200px;font-size:10px\">\
+                 <span>123</span></div>";
+    assert_eq!(
+        multi(html3, "span{text-combine-upright:digits 2}"),
+        vec![2],
+        "digits 2 → tronçons de 2"
+    );
+    // Alias `-webkit-text-combine:horizontal` ≡ all.
+    assert_eq!(
+        multi(html, "span{-webkit-text-combine:horizontal}"),
+        vec![2],
+        "alias webkit"
+    );
+}

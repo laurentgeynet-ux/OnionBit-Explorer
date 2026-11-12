@@ -4372,6 +4372,63 @@ fn is_inline_flow(bx: &LayoutBox) -> bool {
         && bx.display() != "inline-table"
 }
 
+/// `text-combine-upright` (css-writing-modes §4.3 — R-288) :
+/// mode lu sur le style du fragment — 0 `none`, 1 `all`,
+/// 2..=9 = `digits <n>` (séries de n chiffres max). L'alias
+/// `-webkit-text-combine` (`none`/`horizontal`) est lu en
+/// repli. La propriété n'est pas héritée par spec.
+fn combine_mode(style: &explorer_css::ComputedStyle) -> u8 {
+    let v = style
+        .get("text-combine-upright")
+        .or_else(|| style.get("-webkit-text-combine"))
+        .map_or("", |v| v.trim());
+    if v == "all" || v == "horizontal" {
+        return 1;
+    }
+    if let Some(rest) = v.strip_prefix("digits") {
+        // `digits` nu = 2 par spec.
+        let n = rest.trim().parse::<u8>().unwrap_or(2).clamp(2, 9);
+        return n;
+    }
+    0
+}
+
+/// Groupe `text-combine-upright` débutant au glyphe `gi`
+/// (R-288) : série contiguë de glyphes qualifiants — chiffre
+/// ASCII pour `digits <n>` (tronçons de `n` max), non-blanc
+/// pour `all`. Retourne la fin exclusive si ≥ 2 glyphes.
+fn combine_group(run: &ShapedRun, text: &str, gi: usize, mode: u8) -> Option<usize> {
+    let qual = |g: &explorer_layout::font::Glyph| {
+        text.get(g.cluster as usize..)
+            .and_then(|s| s.chars().next())
+            .is_some_and(|ch| {
+                if mode == 1 {
+                    !is_css_ws(ch)
+                } else {
+                    ch.is_ascii_digit()
+                }
+            })
+    };
+    if !qual(&run.glyphs[gi]) {
+        return None;
+    }
+    let mut end = gi + 1;
+    if mode == 1 {
+        // `all` = série contiguë entière (compressée à 1em).
+        while end < run.glyphs.len() && qual(&run.glyphs[end]) {
+            end += 1;
+        }
+    } else {
+        // `digits <n>` : tronçons de n chiffres max — un
+        // reste de 1 glyphe n'est jamais combiné seul.
+        let max = usize::from(mode);
+        while end < run.glyphs.len() && end - gi < max && qual(&run.glyphs[end]) {
+            end += 1;
+        }
+    }
+    (end - gi >= 2).then_some(end)
+}
+
 #[allow(clippy::too_many_lines)]
 fn paint_lines(bx: &LayoutBox, items: &mut Vec<DisplayItem>, off: (f32, f32)) {
     // `text-orientation` (css-writing-modes §5.2) : en flux
@@ -4609,8 +4666,63 @@ fn paint_lines(bx: &LayoutBox, items: &mut Vec<DisplayItem>, off: (f32, f32)) {
                     // depuis le haut du fragment + ascent.
                     // `mixed` : glyphe CJK debout ; glyphe non
                     // CJK → pivote ±90° autour de sa plume.
+                    // R-288 — `text-combine-upright` : une
+                    // série combinée (digits N / all) est
+                    // peinte DEBOUT — un `Text` horizontal
+                    // compressé dans 1em (tate-chu-yoko),
+                    // occupant un seul créneau vertical.
+                    let combine = combine_mode(&frag.style);
                     let mut y = frag.rect.y + run.metrics.ascent;
-                    for g in &run.glyphs {
+                    let mut gi = 0usize;
+                    while gi < run.glyphs.len() {
+                        if combine != 0 {
+                            if let Some(end) = combine_group(run, &frag.text, gi, combine) {
+                                let sub = &run.glyphs[gi..end];
+                                let gw: f32 = sub.iter().map(|g| g.advance).sum();
+                                // Compressé à 1em quand la
+                                // série dépasse (spec :
+                                // tate-chu-yoko tient dans
+                                // le corps).
+                                let sc = if gw > fs && gw > 0.0 { fs / gw } else { 1.0 };
+                                let cx = frag.rect.x + frag.rect.width / 2.0;
+                                if sc < 1.0 {
+                                    items.push(DisplayItem::PushTransform(
+                                        tiny_skia::Transform::from_row(
+                                            sc,
+                                            0.0,
+                                            0.0,
+                                            1.0,
+                                            cx * (1.0 - sc),
+                                            0.0,
+                                        ),
+                                    ));
+                                }
+                                let solo = std::sync::Arc::new(ShapedRun {
+                                    glyphs: sub.to_vec(),
+                                    advance: gw,
+                                    metrics: run.metrics,
+                                    fallback_spans: Vec::new(),
+                                    ink: None,
+                                    ink_glyphs: Vec::new(),
+                                });
+                                let x = frag.rect.x + (frag.rect.width - gw * sc).max(0.0) / 2.0;
+                                items.push(DisplayItem::Text {
+                                    origin: (x, y),
+                                    run: solo,
+                                    font: font_request(&frag.style),
+                                    color: ink,
+                                    size_px: fs,
+                                });
+                                if sc < 1.0 {
+                                    items.push(DisplayItem::PopTransform);
+                                }
+                                y += fs;
+                                gi = end;
+                                continue;
+                            }
+                        }
+                        let g = &run.glyphs[gi];
+                        gi += 1;
                         let cjk = frag
                             .text
                             .get(g.cluster as usize..)

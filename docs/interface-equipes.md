@@ -2935,3 +2935,25 @@ cause** ; résidu = promesses des handlers d'erreur `Atn`
 - **Reste honnete** : un `<a>` monoglyphe a encre couvrant
   la bande gardera son trait (le garde-fou s'applique par
   fragment) — rare, borne documentee.
+
+### couture PIPE -> NAV — R-288 : `text-combine-upright` (tate-chu-yoko)
+
+- **Contenu** : `text-combine-upright` consomme — en flux
+  vertical (`writing-mode:*` + `text-orientation:upright`/
+  `mixed`), les series combinees sont peintes debout en un
+  `Text` horizontal compresse dans 1em : `digits <n>` =
+  troncons de n chiffres ASCII (reste de 1 non combine),
+  `all` = serie non-blanche entiere, `none` = empile
+  (defaut). `-webkit-text-combine:horizontal` ≡ `all`
+  (autres valeurs webkit inertes).
+- **Sondage `affectsv`** : fixture verticale
+  (`writing-mode:vertical-rl;text-orientation:upright` +
+  `text-combine-upright:digits 2|all|none`) — visible :
+  nombre de `Text` items (combine = 1 run multi-glyphes
+  par serie) et geometrie compressee quand la serie
+  depasse 1em (`PushTransform` x-scale). Non heritee par
+  spec.
+- **Bornes honnetes** : pas de centrage optique vertical
+  (baseline = creneau ascent), sous-run sans
+  `fallback_spans` dedie (chiffres = fonte dominante), ni
+  regroupement de segments de styles distincts.
