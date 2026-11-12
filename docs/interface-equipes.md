@@ -2257,6 +2257,26 @@ Lot PIPE livré depuis la piste YoutubeFix (R-260, crates `explorer-css`/`explor
   à journaliser) + `hyphens` (dictionnaire).
 
 
+
+### vitrine — N1.5 : attribution du stall `wbB`/`Atn` (vol 815, archéologie corpus)
+
+Lecture du site dominant `kevlar:1476:39` dans
+`replay-vol813` : c'est `_.Xl(c,H)` — le **locator DI**
+kevlar : `W.resolve(_.lo(c))` sinon
+`W.resolve(new VhV(c)).then(H)` (`VhV` = clé deferred,
+`BJj` = conteneur à `JSC_deferred: Map`). Les ×246
+pendants = **résolutions de services paresseux attendant un
+provider jamais enregistré** — la même famille que `_.mr`
+(chunks lazy) : un seul rail d'enregistrement
+(`setLoaded`/`onLoad` des `<script>` dynamiques ou la
+résolution du Map deferred) ne se déclenche pas. Réseau
+innocent (`dlv.dynscript` ×7 livrés sur /watch), `dyn.err`
+réfuté (0 + `bb` persistant), `fn.restricted` non fatal.
+**Prochaine sonde N1.5** : marquer les promesses créées dans
+`resolve(VhV)`/le `.then` provider et mesurer si le
+provider est enregistré plus tard (rail lent) ou jamais
+(rail mort — `onLoad` non dispatché sur un chunk livré ?).
+
 ### vitrine — vol 815, N1.4 mesuré sur le bon binaire (2026-11-12)
 
 Re-vol de l'erratum 814 sur `266cbc70` (exe.log = worktree
