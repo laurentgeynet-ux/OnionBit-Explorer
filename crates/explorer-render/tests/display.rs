@@ -4360,3 +4360,51 @@ fn svg_styled_racine_ne_double_pas_les_effets_boite() {
         "enfant conservé : {src}"
     );
 }
+
+#[test]
+fn svg_styled_raster_prouve_fill_css_et_currentcolor() {
+    // End-to-end : le bitmap produit doit porter les couleurs
+    // projetées — le XML correct ne suffit pas si usvg
+    // ignore l'attribut.
+    let dom = TreeBuilder::parse(
+        "<span><svg width=\"8\" height=\"8\"><rect width=\"8\" height=\"8\" fill=\"currentColor\"/></svg></span>",
+    );
+    let mut eng = StyleEngine::new();
+    eng.add_css("span{color:rgb(255,0,0)}", Origin::Author);
+    let styles = eng.compute_tree(&dom, dom.document(), &StyleEnv::default());
+    let root_el = dom
+        .children(dom.document())
+        .into_iter()
+        .flatten()
+        .find(|&c| dom.element(c).is_ok())
+        .expect("racine");
+    let (svgs, _) = explorer_render::svg::collect_svg_styled(&dom, root_el, &styles, 1_000_000);
+    let img = svgs.values().next().expect("bitmap");
+    // Premier pixel : rouge (currentColor résolu via `color`
+    // projeté) — sans projection il serait noir.
+    let px = &img.rgba[0..4];
+    assert!(
+        px[0] > 200 && px[1] < 60 && px[2] < 60,
+        "currentColor → rouge : {px:?}"
+    );
+    // Stylesheet `fill` : rect bleu-attribut → vert calculé.
+    let dom2 = TreeBuilder::parse(
+        "<svg width=\"8\" height=\"8\"><rect width=\"8\" height=\"8\" fill=\"blue\"/></svg>",
+    );
+    let mut eng2 = StyleEngine::new();
+    eng2.add_css("svg rect{fill:rgb(0,128,0)}", Origin::Author);
+    let styles2 = eng2.compute_tree(&dom2, dom2.document(), &StyleEnv::default());
+    let root2 = dom2
+        .children(dom2.document())
+        .into_iter()
+        .flatten()
+        .find(|&c| dom2.element(c).is_ok())
+        .expect("racine2");
+    let (svgs2, _) = explorer_render::svg::collect_svg_styled(&dom2, root2, &styles2, 1_000_000);
+    let img2 = svgs2.values().next().expect("bitmap2");
+    let px2 = &img2.rgba[0..4];
+    assert!(
+        px2[1] > 100 && px2[0] < 60 && px2[2] < 60,
+        "stylesheet fill → vert : {px2:?}"
+    );
+}
