@@ -12421,6 +12421,25 @@ impl Host for EventHost {
                 Some(n) => node_value(e, &self.dom, &self.cache, n),
                 None => Value::Null,
             },
+            // Legacy Blink/WebKit : `ev.path` = tableau du chemin
+            // de composition (ère ShadyDOM/Polymer, antérieure à
+            // `composedPath()`). Chrome l'expose encore — le code
+            // kevlar lit `e.path` directement. Même sémantique :
+            // le chemin pendant le dispatch, `[]` hors dispatch.
+            "path" => {
+                if self.state.current.get().is_none() {
+                    e.new_array(Vec::new())
+                } else {
+                    let vals: Vec<Value> = self
+                        .state
+                        .path
+                        .borrow()
+                        .iter()
+                        .map(|&n| node_value(e, &self.dom, &self.cache, n))
+                        .collect();
+                    e.new_array(vals)
+                }
+            }
             "bubbles" => Value::Bool(self.state.bubbles.get()),
             "cancelable" => Value::Bool(self.state.cancelable.get()),
             "composed" => Value::Bool(self.state.composed.get()),
@@ -15535,6 +15554,12 @@ fn event_ctor(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
             e.set_prop_value(this.clone(), k, v)?;
         }
     }
+    // `ev.path` (legacy Blink/WebKit, ère ShadyDOM/Polymer) —
+    // l'`Event` scripté est un literal ordinaire (pas
+    // `EventHost`) : `[]` hors dispatch (le chemin réel n'est
+    // exposé que sur l'`EventHost` livré aux listeners).
+    let arr = e.new_array(Vec::new());
+    e.set_prop_value(this.clone(), "path", arr)?;
     // `CustomEvent`/`ErrorEvent`/`PromiseRejectionEvent`/
     // `KeyboardEvent` portent des payloads d'init — copiés
     // tels quels.

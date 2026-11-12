@@ -2416,6 +2416,23 @@ fn event_dispatche_surface_honnete() {
         ),
         "1"
     );
+    // JS-C491 — `ev.path` (legacy Blink/WebKit, ère ShadyDOM/
+    // Polymer — le code kevlar lit `e.path` directement) : le
+    // tableau du chemin de composition pendant le dispatch,
+    // `[]` hors dispatch — alias de `composedPath()`.
+    assert_eq!(
+        ev2(
+            PAGE,
+            "var r='';var el=document.getElementById('main');\
+             el.addEventListener('x',function(e){\
+             r=(Array.isArray(e.path)?'arr':'?')+'|'+e.path.length+'|'+e.path[0].id+'|'+\
+             (e.path[e.path.length-1]===document?'doc':'?')});\
+             el.dispatchEvent(new Event('x',{bubbles:true}));\
+             r=r+'|'+(new Event('x').path.length)",
+            "r"
+        ),
+        "arr|4|main|doc|0"
+    );
     // `preventDefault` est no-op sans `cancelable` (spec) ;
     // `dispatchEvent` rend `!defaultPrevented`.
     assert_eq!(
