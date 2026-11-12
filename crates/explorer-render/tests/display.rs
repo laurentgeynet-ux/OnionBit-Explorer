@@ -3883,3 +3883,85 @@ fn corner_shape_shorthand_longhands_et_logiques_sur_items() {
     });
     assert_eq!(c4, Some([1.0; 4]), "invalide → round : {c4:?}");
 }
+
+#[test]
+fn rule_shorthand_alimente_column_rule_spanner_et_inset() {
+    // R-271 — css-gaps-1 : `rule` pose les deux axes → les
+    // `column-rule-*` expansés peignent le trait de colonne ;
+    // le `column-span:all` coupe le trait (défaut §5.1) ;
+    // `rule-break:none` traverse ; `rule-inset` raccourcit.
+    let deco = |items: &[DisplayItem]| {
+        items
+            .iter()
+            .filter(|i| {
+                matches!(
+                    i,
+                    DisplayItem::DecoRect {
+                        style: explorer_layout::inline::DECO_SOLID,
+                        ..
+                    } | DisplayItem::DecoRect {
+                        style: explorer_layout::inline::DECO_DASHED,
+                        ..
+                    }
+                )
+            })
+            .count()
+    };
+    // 1. `rule:2px solid black` → trait de colonne émis.
+    let (_, _, items) = dl(
+        "<div id=c><p>a</p><p>b</p></div>",
+        "#c{column-count:2;column-gap:10px;width:210px;\
+           rule:2px solid black;margin:0}",
+    );
+    assert_eq!(deco(&items), 1, "rule alimente le trait de colonne");
+    // 2. Spanner au milieu → le trait est coupé en segments.
+    let html = "<div id=c><p>a<br>a<br>a<br>a<br>a<br>a</p>\
+                <h2>s</h2><p>b<br>b<br>b<br>b<br>b<br>b</p></div>";
+    let (_, _, items2) = dl(
+        html,
+        "#c{column-count:2;column-gap:10px;width:210px;\
+           column-rule:2px solid black;margin:0}h2{column-span:all;margin:0}",
+    );
+    assert!(
+        deco(&items2) >= 2,
+        "spanner coupe le trait : {}",
+        deco(&items2)
+    );
+    // 3. `rule-break:none` → un seul trait pleine hauteur.
+    let (_, _, items3) = dl(
+        html,
+        "#c{column-count:2;column-gap:10px;width:210px;\
+           column-rule:2px solid black;rule-break:none;margin:0}\
+           h2{column-span:all;margin:0}",
+    );
+    assert_eq!(deco(&items3), 1, "rule-break:none traverse le spanner");
+    // 4. `rule-inset` raccourcit les deux extrémités.
+    let (_, _, items4) = dl(
+        "<div id=c><p>a</p><p>b</p></div>",
+        "#c{column-count:2;column-gap:10px;width:210px;height:100px;\
+           column-rule:2px solid black;rule-inset:10px;margin:0}",
+    );
+    let r = items4.iter().find_map(|i| match i {
+        DisplayItem::DecoRect { rect, .. } => Some(*rect),
+        _ => None,
+    });
+    let (_, _, items5) = dl(
+        "<div id=c><p>a</p><p>b</p></div>",
+        "#c{column-count:2;column-gap:10px;width:210px;height:100px;\
+           column-rule:2px solid black;margin:0}",
+    );
+    let r5 = items5.iter().find_map(|i| match i {
+        DisplayItem::DecoRect { rect, .. } => Some(*rect),
+        _ => None,
+    });
+    match (r, r5) {
+        (Some(a), Some(b)) => {
+            assert!(
+                (a.height - (b.height - 20.0)).abs() < 0.5,
+                "inset 10px × 2 extrémités : {a:?} vs {b:?}"
+            );
+            assert!((a.y - (b.y + 10.0)).abs() < 0.5, "début décalé : {a:?}");
+        }
+        _ => panic!("traits attendus : {r:?} / {r5:?}"),
+    }
+}

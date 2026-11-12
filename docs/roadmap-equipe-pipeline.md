@@ -4114,9 +4114,18 @@ le census `site_harvest` arbitre les ex æquo.
   cordes (AA). Verrous : `corner_shape_shorthand_longhands_
   et_logiques_sur_items`, `corner_shape_change_la_geometrie_
   peinte`.
-- [ ] `rule`/`row-rule`/`rule-*`/`row-rule-*` (~45) — règles
-  entre lignes/colonnes (css-multicol récent) — items de
-  peinture entre fragments.
+- [x] **R-271** — `rule`/`row-rule`/`rule-*`/`row-rule-*` (~45) —
+  css-gaps-1 : `rule` pose les deux axes → `column-rule-*`
+  expansés peignent en multicol ; `rule-break` (coupe aux
+  spanners `column-span:all`, défaut §5.1 multicol-1 ;
+  `none` traverse) ; `rule-inset*` raccourcit les traits.
+  `rule-{width,style,color,break,outset,overlap,
+  visibility-items,inset-*}` → longhands row+column.
+  Bornes : pas de traits de ligne peints (multicol sans
+  lignes — flex/grid gap rules = chantier à part) ;
+  `rule-overlap`/`visibility-items`/`inset-cap*`/
+  `junction*`/`row-rule-*` stockés dormants. Verrou :
+  `rule_shorthand_alimente_column_rule_spanner_et_inset`.
 
 ### Sprint 4 — chantiers lourds (~75)
 

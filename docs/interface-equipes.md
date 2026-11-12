@@ -2028,7 +2028,18 @@ Lot PIPE livré depuis la piste YoutubeFix (R-260, crates `explorer-css`/`explor
   (pas de rayon propre — `corner-shape` seul = carré, comme
   les navigateurs) ; concave (`scoop`/`notch`) approximé en
   cordes — un oracle à sub-pixel fin pourrait diverger.
-- **Sprint 3 en cours** : reste `rule`/`row-rule` (~45).
+- **Sprint 3 bouclé — R-271 `rule`/`row-rule`/`rule-*`** :
+  `rule` pose les deux axes → `column-rule-*` peints en
+  multicol ; `rule-break` (défaut : coupe aux `column-span:
+  all` — §5.1 multicol-1 ; `none` traverse) ; `rule-inset*`
+  raccourcit. Bornes `affectsv` à journaliser si miss :
+  pas de traits de ligne peints (multicol sans lignes —
+  flex/grid gap decorations = chantier dédié), et
+  `rule-overlap`/`visibility-items`/`inset-cap*`/`junction*`/
+  `row-rule-*`/`rule-outset` stockés dormants.
+- **Demande NAV** : troisième re-tour `check affectsv`
+  post-S3 — les ~50 `corner-*` + ~45 `rule*` devraient
+  basculer.
 
 ### vitrine — livraisons M0/M1 amont (2026-11-12, nav/youtube-fix)
 

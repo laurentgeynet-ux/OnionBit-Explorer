@@ -2930,19 +2930,81 @@ fn emit_column_rules(bx: &LayoutBox, items: &mut Vec<DisplayItem>, off: (f32, f3
         .color("column-rule-color")
         .or_else(|| st.color("color"))
         .unwrap_or(Color::BLACK);
+    // R-271 — `rule-break`/`rule-inset` (css-gaps-1 §4.2/4.4)
+    // via `gap_rule_segments` ; `column-rule-inset-*` est le
+    // longhand axe colonnes (expansion `rule-inset*`).
+    let segs = gap_rule_segments(bx, cr.y, cr.y + cr.height);
+    if segs.is_empty() {
+        return;
+    }
     for i in 1..n {
         let cx = cr.x + i as f32 * (col_w + gap) - gap * 0.5 - rw * 0.5;
-        items.push(DisplayItem::DecoRect {
-            rect: Rect {
-                x: cx + off.0,
-                y: cr.y + off.1,
-                width: rw,
-                height: cr.height,
-            },
-            color,
-            style: deco_style,
-        });
+        for (a, b) in &segs {
+            items.push(DisplayItem::DecoRect {
+                rect: Rect {
+                    x: cx + off.0,
+                    y: a + off.1,
+                    width: rw,
+                    height: b - a,
+                },
+                color,
+                style: deco_style,
+            });
+        }
     }
+}
+
+/// R-271 — segments verticaux d'une règle de gap
+/// (css-gaps-1 §4.2/4.4) : `column-rule-break`/`rule-break`
+/// ∈ `none` peint à travers les spanners ; `spanning-item`/
+/// `intersection` (et l'absence — css-multicol-1 §5.1 : les
+/// règles ne traversent pas un `column-span:all`) coupent à
+/// chaque spanner (rects des enfants `column-span:all` de
+/// `bx`, posés pleine largeur). `column-rule-inset-start`/
+/// `-end` raccourcissent les extrémités du trait.
+fn gap_rule_segments(bx: &LayoutBox, y0: f32, y1: f32) -> Vec<(f32, f32)> {
+    let st = &bx.style;
+    let break_t = st
+        .get("column-rule-break")
+        .or_else(|| st.get("rule-break"))
+        .map_or("spanning-item", str::trim);
+    let break_spans = !matches!(break_t, "none");
+    let y0 = y0 + prop_px(st, "column-rule-inset-start", 0.0);
+    let y1 = y1 - prop_px(st, "column-rule-inset-end", 0.0);
+    if y1 <= y0 {
+        return Vec::new();
+    }
+    let mut segs = vec![(y0, y1)];
+    if break_spans {
+        let mut spans: Vec<(f32, f32)> = bx
+            .children
+            .iter()
+            .filter(|c| {
+                c.style
+                    .get("column-span")
+                    .is_some_and(|v| v.trim() == "all")
+            })
+            .map(|c| (c.rect.y, c.rect.y + c.rect.height))
+            .collect();
+        spans.sort_by(|a, b| a.0.total_cmp(&b.0));
+        for (sy0, sy1) in spans {
+            let mut next = Vec::with_capacity(segs.len() + 1);
+            for (a, b) in segs {
+                if sy1 <= a || sy0 >= b {
+                    next.push((a, b));
+                } else {
+                    if sy0 > a {
+                        next.push((a, sy0));
+                    }
+                    if sy1 < b {
+                        next.push((sy1, b));
+                    }
+                }
+            }
+            segs = next;
+        }
+    }
+    segs
 }
 
 fn emit_list_marker(

@@ -1192,6 +1192,78 @@ pub fn expand_shorthand(name: &str, value: &str) -> Option<Vec<(String, String)>
             (pair.1.to_string(), v2.to_string()),
         ]);
     }
+    // `rule`/`row-rule` (css-gaps-1 §4.3 — R-271) :
+    // `[<width>] [<style>] [<color>]` — `rule` pose les deux
+    // axes (row+column), `row-rule` l'axe bloc. Le nom
+    // déclaré reste stocké (census + repli `rule-*`).
+    if name == "rule" {
+        let mut out = vec![(name.to_string(), value.to_string())];
+        out.extend(expand_rule_parts(value, "row-rule"));
+        out.extend(expand_rule_parts(value, "column-rule"));
+        return Some(out);
+    }
+    if name == "row-rule" {
+        let mut out = vec![(name.to_string(), value.to_string())];
+        out.extend(expand_rule_parts(value, "row-rule"));
+        return Some(out);
+    }
+    // Longhands génériques `rule-*` : dupliqués sur les deux
+    // axes (`row-rule-*` + `column-rule-*`) — `rule-inset`
+    // = shorthand 1..2 de `-start`/`-end` (§4.4).
+    if name == "rule-inset" {
+        let parts: Vec<&str> = split_ws_top(value);
+        let (v1, v2) = match parts.as_slice() {
+            [v] => (*v, *v),
+            [a, b] => (*a, *b),
+            _ => return None,
+        };
+        let mut out = vec![(name.to_string(), value.to_string())];
+        for prefix in ["row-rule-inset", "column-rule-inset"] {
+            out.push((format!("{prefix}-start"), v1.to_string()));
+            out.push((format!("{prefix}-end"), v2.to_string()));
+        }
+        return Some(out);
+    }
+    if let Some(suf) = name.strip_prefix("rule-").filter(|s| {
+        matches!(
+            *s,
+            "width"
+                | "style"
+                | "color"
+                | "break"
+                | "outset"
+                | "overlap"
+                | "visibility-items"
+                | "inset-start"
+                | "inset-end"
+                | "inset-cap"
+                | "inset-junction"
+        )
+    }) {
+        return Some(vec![
+            (name.to_string(), value.to_string()),
+            (format!("row-rule-{suf}"), value.to_string()),
+            (format!("column-rule-{suf}"), value.to_string()),
+        ]);
+    }
+    // `row-rule-inset*` : shorthand 1..2 → `-start`/`-end`
+    // de son axe (même traitement sur `column-rule-inset*`
+    // si un jour routé — borne documentée).
+    if let Some(suf) = name.strip_prefix("row-rule-inset") {
+        if suf.is_empty() {
+            let parts: Vec<&str> = split_ws_top(value);
+            let (v1, v2) = match parts.as_slice() {
+                [v] => (*v, *v),
+                [a, b] => (*a, *b),
+                _ => return None,
+            };
+            return Some(vec![
+                (name.to_string(), value.to_string()),
+                ("row-rule-inset-start".to_string(), v1.to_string()),
+                ("row-rule-inset-end".to_string(), v2.to_string()),
+            ]);
+        }
+    }
     // `border-radius` (R-167) : 1..4 rayons → coins tl/tr/
     // br/bl ; la forme elliptique `h/v` n'est pas encore
     // supportée — seul le rayon horizontal avant `/` est
@@ -1415,20 +1487,26 @@ fn expand_gap(value: &str) -> Option<Vec<(String, String)>> {
 /// les mots-clés `thin`/`medium`/`thick` comptent comme
 /// largeur (valeurs de `border-width`).
 fn expand_column_rule(value: &str) -> Vec<(String, String)> {
+    expand_rule_parts(value, "column-rule")
+}
+
+/// Corps partagé des shorthands `column-rule`/`row-rule`/
+/// `rule` (css-gaps-1 §4.3 — R-271) : `[<width>] [<style>]
+/// [<color>]` ordre libre, émis sous le préfixe donné.
+fn expand_rule_parts(value: &str, prefix: &str) -> Vec<(String, String)> {
     const WIDTH_KW: &[&str] = &["thin", "medium", "thick"];
     let mut out = Vec::new();
     let mut pos = 0usize;
     for tok in split_ws_top(value) {
         let t = tok.to_ascii_lowercase();
         if is_border_style(&t) {
-            out.push(("column-rule-style".to_string(), t));
+            out.push((format!("{prefix}-style"), t));
         } else if WIDTH_KW.contains(&t.as_str()) || parse_length(tok).is_some() {
-            out.push(("column-rule-width".to_string(), tok.to_string()));
+            out.push((format!("{prefix}-width"), tok.to_string()));
         } else {
             let tail = value[pos..].trim();
-            if let Some(c) = parse_color(tail) {
-                let _ = c;
-                out.push(("column-rule-color".to_string(), tail.to_string()));
+            if parse_color(tail).is_some() {
+                out.push((format!("{prefix}-color"), tail.to_string()));
             }
             break;
         }
