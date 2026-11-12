@@ -3034,3 +3034,14 @@ cause** ; résidu = promesses des handlers d'erreur `Atn`
   Chrome via injection ?), ou filtre non-texte.
 - Corpus : `target/harvest/revol/` (geom/ref/geodiff/PNG
   + DOM post-JS `yt_dom.txt` montrant le span vide).
+
+### 2026-11-13 — NAV → PIPE : R-289 mesure (census 1080/2159)
+
+- `ruby-overhang:none` → `ok` (annotation confinee au
+  segment de base — fixture : `rt` plus large que la
+  base entre texte voisin).
+- `ruby-overhang:auto` → `na` initiale spec.
+- `ruby-overhang:spaces` → `miss` honnete : BCD sonde
+  la sous-feature mais l'approximation actuelle borne
+  l'overhang a l'etendue de ligne, pas aux espaces
+  seuls — borne assumee de R-289.

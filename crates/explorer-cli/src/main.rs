@@ -835,6 +835,12 @@ fn fixture_for(name: &str) -> &'static str {
         }
         // `ruby-*` — contexte `<ruby>` requis (rb/rt
         // n'existent que sous ruby).
+        // `ruby-overhang` — annotation **plus large** que la
+        // base requise : sans débordement possible `none` et
+        // `auto` coïncident (neutre de contexte).
+        () if n == "ruby-overhang" => {
+            "<body><p>av <ruby>b<rt class=x>xxxxxxxxxxxx</rt></ruby> ap</p></body>"
+        }
         () if n.starts_with("ruby") => {
             "<body><ruby class=x>base<rt class=x>x</rt></ruby>"
         }
@@ -1374,6 +1380,9 @@ const INITIAL_EXTRA: &[(&str, &str)] = &[
     // R-287 — `position-try-order` : `normal` = l'ordre
     // déclaré des fallbacks, initiale spec.
     ("position-try-order", "normal"),
+    // R-289 — `ruby-overhang:auto` = initiale spec
+    // (débordement autorisé — le défaut de l'impl).
+    ("ruby-overhang", "auto"),
     ("resize", "none"),
     ("scroll-behavior", "auto"),
     ("table-layout", "auto"),
