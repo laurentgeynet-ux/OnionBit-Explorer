@@ -4330,6 +4330,33 @@ le census `site_harvest` arbitre les ex æquo.
   `text_wrap_style_balance_egalise_les_lignes`,
   `text_wrap_style_pretty_evite_l_orphelin`,
   `text_decoration_skip_spaces_decoupe_le_trait`.
+- [x] **R-283 — `<svg>` inline style-aware** (~25, déblocage
+  icônes) — la chaîne R-9 sérialise le sous-arbre DOM en
+  XML puis rasterise via `usvg` ; elle ignorait les styles
+  **calculés** : un stylesheet `svg path{fill:red}` restait
+  sans effet, `fill="currentColor"` (icônes design systems —
+  YouTube inclus) tombait noir faute de `color` dans l'îlot,
+  et les propriétés géométriques SVG2 (`d`, `cx`, `r`…) en
+  CSS n'atteignaient jamais le rendu. Nouvelle API
+  `collect_svg_styled(dom, root, styles, max_px)` : la
+  sérialisation projette le `ComputedStyle` de chaque
+  élément en attributs XML — la valeur calculée prime
+  l'attribut de présentation de même nom (rang UA,
+  spec-correct), `none` sur `clip-path`/`mask`/`filter`/
+  `transform` supprime l'attribut, `transform` CSS est
+  re-syntaxée (px/deg → nombres), `d:path(…)` désenrobée.
+  Whitelist peinture + géométrie + fontes (`<text>`) +
+  `display`/`visibility` censurants ; les `url(#…)` émises
+  rejoignent le scan `inject_external_refs` (cibles CSS-
+  déclarées désormais injectées). `color` hérité du HTML
+  projeté partout → `currentColor` se résout dans usvg.
+  API **additive** (R-9 conservée intacte) — adoption par
+  les 3 sites NAV via journal ↔ NAV. Verrous :
+  `svg_styled_fill_css_prime_l_attribut`,
+  `svg_styled_currentcolor_recoit_le_color_herite`,
+  `svg_styled_display_none_et_geom_css`,
+  `svg_styled_d_path_desenrobe`,
+  `svg_styled_clip_path_css_relie_les_refs`.
 
 `text-fit`/`text-combine-upright`/`interpolate-size` (chantier
 animation↔layout), `text-decoration-skip-ink` (géométrie

@@ -2664,3 +2664,37 @@ cause** ; résidu = promesses des handlers d'erreur `Atn`
   200 px multi-mots pour `text-justify`/`text-wrap-style`,
   `<u>` a blancs internes + de bord pour `text-decoration-
   skip*`.
+
+### 2026-11-13 — PIPE → NAV : R-283 collect_svg_styled (adoption) + erratum skip-spaces:start
+
+- **Nouvelle API additive** : `explorer_render::svg::
+  collect_svg_styled(dom, root, &styles, max_px)` — même
+  retour que `collect_svg_with_sources` + `StyleMap`. La
+  sérialisation XML projette le style calculé de chaque
+  élément SVG en attributs (valeur calculée > attribut de
+  présentation, rang UA). Effets : `fill`/`stroke`/opacités
+  en stylesheet actifs, `currentColor` résolu via `color`
+  projeté (icônes design systems — YouTube), géométrie
+  SVG2 `d`/`cx`/`r`/`x`/`y`/`width`/`height` en CSS,
+  `display:none` / `visibility` censurants, `clip-path`/
+  `mask`/`filter` CSS (+ les `url(#)` de la source émise
+  scannées par `inject_external_refs`), `transform`
+  re-syntaxée, `d:path(…)` désenrobée.
+- **Adoption demandée** (3 sites, diff trivial — `styles`
+  déjà en scope partout) : `apply.rs:1952` et
+  `apply.rs:2174` → remplacer
+  `collect_svg_with_sources(dom, root_el, ctx.image_max_px)`
+  par `collect_svg_styled(dom, root_el, &styles,
+  ctx.image_max_px)` ; `composite.rs:333` → idem pour
+  `collect_svg` (même retour, `.0` des deux).
+- **Erratum R-282 corrigé** : `text-decoration-skip-spaces:
+  start` laissait le trait sur le blanc de tête d'élément —
+  `deco_keep_ranges` exigeait le bit `all` pour vider un
+  fragment tout-blanc ; désormais `mask != 0` suffit (les
+  fragments intérieurs ont leurs bits start/end effacés —
+  seul un vrai bord d'owner conserve un bit). Verrou :
+  `text_decoration_skip_spaces_start_vide_le_blanc_de_tete`.
+- Re-tour `affectsv` souhaité après adoption : `fill`,
+  `stroke`, `stroke-width`, `fill-rule`, `d`, `cx`, `cy`,
+  `r`, `rx`, `ry`, `x`, `y`, `stop-*`, `flood-*`,
+  `lighting-color`, `vector-effect`, `marker-*`.

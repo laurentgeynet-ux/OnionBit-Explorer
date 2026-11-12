@@ -4254,9 +4254,10 @@ fn paint_self(
 /// pour RTL). `mask` = `DECO_SKIP_START`/`END`/`ALL` :
 /// `all` coupe chaque blanc ; `start`/`end` la série de
 /// blancs touchant ce bord du fragment (borne : bord de
-/// fragment ≈ bord de l'élément décoré ; un fragment
-/// tout-blanc sous `start`/`end` est traité comme espace
-/// intérieur → conservé).
+/// fragment ≈ bord de l'élément décoré — les bits start/
+/// end des fragments intérieurs sont effacés à l'appelant,
+/// donc un fragment tout-blanc n'arrive ici en bord
+/// qu'avec son bit → vidé).
 fn deco_keep_ranges(text: &str, run: &ShapedRun, width: f32, mask: u8) -> Vec<(f32, f32)> {
     use explorer_layout::inline::{DECO_SKIP_ALL, DECO_SKIP_END, DECO_SKIP_START};
     if width <= 0.0 {
@@ -4265,10 +4266,15 @@ fn deco_keep_ranges(text: &str, run: &ShapedRun, width: f32, mask: u8) -> Vec<(f
     if mask == 0 {
         return vec![(0.0, width)];
     }
-    // Fragment tout-blanc : `all` le vide ; sans `all` c'est
-    // une espace intérieure → le trait reste entier.
+    // Fragment tout-blanc : vidé dès qu'un saut est demandé.
+    // `all` vide partout ; sous `start`/`end` seuls les
+    // fragments de bord d'owner gardent leur bit (les
+    // intérieurs ont `sk == 0` — première ligne) → un blanc
+    // de tête/queue d'élément est sauté, un blanc intérieur
+    // gardé (erratum re-tour : `start` laissait le trait
+    // sur le fragment tout-blanc de tête).
     if text.chars().all(is_css_ws) {
-        return if mask & DECO_SKIP_ALL != 0 {
+        return if mask != 0 {
             Vec::new()
         } else {
             vec![(0.0, width)]

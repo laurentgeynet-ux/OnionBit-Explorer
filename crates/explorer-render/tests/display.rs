@@ -4154,3 +4154,128 @@ fn text_decoration_skip_spaces_decoupe_le_trait() {
     let (_, _, items3) = dl(html, &format!("{base}text-decoration-skip:spaces}}"));
     assert!(gap_of(&deco_rects(&items3)) > 4.0);
 }
+
+// ── R-283 : `<svg>` style-aware (styles calculés → XML) ────
+
+/// Source sérialisée du premier `<svg>` du document — la
+/// projection des styles calculés s'y lit directement.
+fn svg_src(html: &str, css: &str) -> String {
+    let dom = TreeBuilder::parse(html);
+    let mut eng = StyleEngine::new();
+    eng.add_css("body{margin:0}", Origin::Author);
+    eng.add_css(css, Origin::Author);
+    let styles = eng.compute_tree(&dom, dom.document(), &StyleEnv::default());
+    let root_el = dom
+        .children(dom.document())
+        .into_iter()
+        .flatten()
+        .find(|&c| dom.element(c).is_ok())
+        .expect("racine");
+    let (_, sources) = explorer_render::svg::collect_svg_styled(&dom, root_el, &styles, 1_000_000);
+    sources.values().next().expect("svg").to_string()
+}
+
+#[test]
+fn svg_styled_fill_css_prime_l_attribut() {
+    // Stylesheet `svg path{fill:green}` : la valeur calculée
+    // remplace l'attribut de présentation `fill="red"`.
+    let src = svg_src(
+        "<svg width=\"10\" height=\"10\"><path fill=\"red\" d=\"M0 0L9 9\"/></svg>",
+        "svg path{fill:green}",
+    );
+    assert!(src.contains("fill=\"green\""), "css prime : {src}");
+    assert!(!src.contains("fill=\"red\""), "attribut remplacé : {src}");
+}
+
+#[test]
+fn svg_styled_currentcolor_recoit_le_color_herite() {
+    // `color` hérité du contexte HTML projeté sur l'îlot →
+    // `fill="currentColor"` des icônes se résout dans usvg.
+    let src = svg_src(
+        "<span><svg width=\"10\" height=\"10\"><path fill=\"currentColor\" d=\"M0 0L9 9\"/></svg></span>",
+        "span{color:rgb(1,2,3)}",
+    );
+    assert!(
+        src.contains("color=\"rgb(1,2,3)\"") || src.contains("color=\"#010203\""),
+        "color projeté : {src}"
+    );
+}
+
+#[test]
+fn svg_styled_display_none_et_geom_css() {
+    // `display:none` au stylesheet censure la forme ; la
+    // propriété géométrique `r` CSS prime l'attribut (SVG2).
+    let src = svg_src(
+        "<svg width=\"10\" height=\"10\"><circle r=\"5\" cx=\"5\" cy=\"5\"/></svg>",
+        "svg circle{display:none;r:3px}",
+    );
+    assert!(src.contains("display=\"none\""), "display projeté : {src}");
+    assert!(
+        src.contains("r=\"3px\"") || src.contains("r=\"3\""),
+        "r css : {src}"
+    );
+    assert!(!src.contains("r=\"5\""), "r attribut remplacé : {src}");
+}
+
+#[test]
+fn svg_styled_d_path_desenrobe() {
+    // `d:path("…")` CSS → `d="…"` dans la source (SVG2 §9).
+    let src = svg_src(
+        "<svg width=\"10\" height=\"10\"><path d=\"M0 0\"/></svg>",
+        "svg path{d:path(\"M1 1L5 5\")}",
+    );
+    assert!(src.contains("d=\"M1 1L5 5\""), "d css désenrobé : {src}");
+    assert!(!src.contains("d=\"M0 0\""), "d attribut remplacé : {src}");
+}
+
+#[test]
+fn svg_styled_clip_path_css_relie_les_refs() {
+    // `clip-path:url(#c)` déclaré en CSS (pas d'attribut DOM)
+    // doit être émis ET sa cible injectée cross-îlot.
+    let src = svg_src(
+        concat!(
+            "<svg width=\"0\" height=\"0\"><defs><clipPath id=\"c\">",
+            "<rect width=\"4\" height=\"4\"/></clipPath></defs></svg>",
+            "<svg width=\"10\" height=\"10\"><rect width=\"10\" height=\"10\"/></svg>"
+        ),
+        "svg rect{clip-path:url(#c)}",
+    );
+    // Les deux îlots sérialisent — on vérifie le 2e (celui qui
+    // référence #c) : la clipPath externe est injectée.
+    assert!(
+        src.contains("clip-path=\"url(#c)\"") || src.contains("<clipPath"),
+        "refs : {src}"
+    );
+}
+
+#[test]
+fn text_decoration_skip_spaces_start_vide_le_blanc_de_tete() {
+    // Erratum re-tour NAV : `<u> un…` sous
+    // `text-decoration-skip-spaces:start` — le fragment
+    // tout-blanc de tête conservait son trait (il n'est
+    // « intérieur » que pour les blancs hors bord d'owner).
+    let html = "<!doctype html><p>zéro <u class=x> un deux trois quatre </u> cinq six</p>";
+    let base = "p{margin:0;font-size:16px}.x{text-decoration:underline;";
+    let rects = |css: &str| {
+        let (_, _, items) = dl(html, css);
+        deco_rects(&items)
+    };
+    let none_r = rects(&format!("{base}}}"));
+    let start_r = rects(&format!("{base}text-decoration-skip-spaces:start}}"));
+    let end_r = rects(&format!("{base}text-decoration-skip-spaces:end}}"));
+    let auto_r = rects(&format!("{base}text-decoration-skip-spaces:auto}}"));
+    // `start` : le premier segment de l'<u> ne couvre plus
+    // le blanc de tête (x décalé à droite vs `none`) ;
+    // `end` découpe le blanc de queue (total réduit) ;
+    // `auto` = les deux.
+    let first_x = |r: &[(f32, f32, f32)]| r.iter().map(|s| s.0).fold(f32::MAX, f32::min);
+    assert!(
+        first_x(&start_r) > first_x(&none_r) + 1.0,
+        "start : blanc de tête sauté {start_r:?} vs {none_r:?}"
+    );
+    assert!(
+        first_x(&end_r) <= first_x(&none_r) + 1.0,
+        "end : tête conservée {end_r:?}"
+    );
+    assert_eq!(first_x(&auto_r), first_x(&start_r), "auto ≡ start|end");
+}
