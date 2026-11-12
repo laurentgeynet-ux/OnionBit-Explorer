@@ -2840,3 +2840,26 @@ cause** ; résidu = promesses des handlers d'erreur `Atn`
   geometrique visible a `text-underline-offset` petit) —
   `all` = 3e valeur mesurable. `text-decoration-skip:ink`
   shorthand inclus.
+
+### 2026-11-12 — N1.5 : la VM attend sa première requête `sPQ`
+
+- Tag `<eval:google.com/js/th>` : la VM devient visible aux
+  sondes par-src (`bg.call` ×128 saturé, `bg.a` = `Q` invoqué
+  par `_.aq` à chaque spawn, cadence `bb` ~70 s).
+- La VM fait ~470 appels natifs en 13 ms à l'init
+  (deobfuscation + Trusted Types `createPolicy`/`createScript`/
+  `eval`), puis **silence total** — aucun `setTimeout`,
+  `Promise`, listener, crypto attendu ensuite (`bg.host` filtré).
+- Le programme est une co-routine : `Q` rend `sPQ`
+  (`[a9,cAW,oN7,vYy]` = handler de requêtes) — la suite n'arrive
+  que si kevlar rappelle `sPQ` (page `invoke`/`snapshot`).
+- `auT` (feed événementiel) n'existe qu'**après `V`** —
+  `zJ9` fait `hix.then(r => r.auT?.(ev))`, `hix` se résout via
+  `V` : l'interaction ne peut pas déverrouiller un premier run
+  parqué. Injection synthétique (60 événements dispatchés) :
+  la VM ne s'est pas réveillée — attendu.
+- Ce run : `bb`=0 — la page n'a pas invoqué → le programme
+  attend sa première requête, cohérent. Les `bb` des runs
+  précédents = `invoke` émis → `sPQ` a tourné → `V` toujours
+  absent → la halte est dans le chemin de réponse, pas dans
+  l'attente d'événements.
