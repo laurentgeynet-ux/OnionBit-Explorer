@@ -3593,6 +3593,20 @@ impl Engine {
         let prev = self.hooks.current_script;
         self.hooks.current_script = el;
         self.reset_eval_split();
+        if std::env::var_os("EXPLORER_CTX_PROBE").is_some() {
+            let wid = match self.get_prop(self.global, "window") {
+                Some(Value::Obj(o)) => format!("{o:?}"),
+                _ => "-".to_string(),
+            };
+            eprintln!(
+                "[ctxp] kind=script_el ctx={} global={:?} window={} name={:?} bytes={}",
+                self.cur_ctx,
+                self.global,
+                wid,
+                name.unwrap_or(""),
+                src.len()
+            );
+        }
         let tp = Instant::now();
         let prog = parser::parse_in(src, false, self.nest_limit, name.map(std::rc::Rc::from));
         self.note_parse(tp);
@@ -4196,6 +4210,15 @@ impl Engine {
 
     /// Attach a non-enumerable property.
     pub(crate) fn set_own(&mut self, obj: ObjId, key: &str, v: Value, enumerable: bool) {
+        static CTXP: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+        if *CTXP.get_or_init(|| std::env::var_os("EXPLORER_CTX_PROBE").is_some())
+            && (key == "trayride" || key == "t" || key == "ntpevasrs")
+        {
+            eprintln!(
+                "[ctxp] set_own key={} obj={:?} ctx={} global={:?}",
+                key, obj, self.cur_ctx, self.global
+            );
+        }
         if let Some(o) = self.heap.obj_mut(obj) {
             o.set_own(key, v, enumerable);
         }
@@ -4217,6 +4240,15 @@ impl Engine {
         v: Value,
         attrs: crate::heap::PropAttrs,
     ) {
+        static CTXP: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+        if *CTXP.get_or_init(|| std::env::var_os("EXPLORER_CTX_PROBE").is_some())
+            && (key == "trayride" || key == "t" || key == "ntpevasrs")
+        {
+            eprintln!(
+                "[ctxp] set_own_attrs key={} obj={:?} ctx={} global={:?}",
+                key, obj, self.cur_ctx, self.global
+            );
+        }
         if let Some(o) = self.heap.obj_mut(obj) {
             o.define_data(key, v, attrs);
         }
@@ -6922,6 +6954,15 @@ impl Engine {
 
     /// First `Prop` found on `id`'s prototype chain.
     pub(crate) fn find_prop(&mut self, id: ObjId, key: &str) -> Option<Prop> {
+        static CTXP: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+        if *CTXP.get_or_init(|| std::env::var_os("EXPLORER_CTX_PROBE").is_some())
+            && (key == "trayride" || key == "t")
+        {
+            eprintln!(
+                "[ctxp] lookup key={} base_id={:?} ctx={} global={:?}",
+                key, id, self.cur_ctx, self.global
+            );
+        }
         let ai = array_index(key); // V-3b — hoisted hors de la marche
         let mut cur = Some(id);
         let mut depth = 0;
@@ -7404,6 +7445,15 @@ impl Engine {
         // bornée — `own` suit le dernier non-proxy (cible réelle
         // du `set_prop` final : écrire sur le wrapper proxy serait
         // une fuite, J2 : délégation `Proxy(proxy)×N` sans borne).
+        static CTXP: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+        if *CTXP.get_or_init(|| std::env::var_os("EXPLORER_CTX_PROBE").is_some())
+            && (key == "trayride" || key == "t")
+        {
+            eprintln!(
+                "[ctxp] write_prop key={} base_id={:?} ctx={} global={:?}",
+                key, id, self.cur_ctx, self.global
+            );
+        }
         let ai = array_index(key); // V-3b — hoisted hors de la marche
         let mut own = id;
         let mut cur = Some(id);

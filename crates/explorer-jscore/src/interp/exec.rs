@@ -55,6 +55,19 @@ impl Engine {
     pub(crate) fn eval_source(&mut self, src: &str) -> JsResult<Value> {
         // `eval` direct : le texte hérite du strict appelant —
         // early errors (`01`, `delete x`) et effets runtime.
+        if std::env::var_os("EXPLORER_CTX_PROBE").is_some() {
+            let wid = match self.get_prop(self.global, "window") {
+                Some(Value::Obj(o)) => format!("{o:?}"),
+                _ => "-".to_string(),
+            };
+            eprintln!(
+                "[ctxp] kind=eval ctx={} global={:?} window={} bytes={}",
+                self.cur_ctx,
+                self.global,
+                wid,
+                src.len()
+            );
+        }
         if let Some(h) = &self.eval_hook {
             h(src);
         }
