@@ -835,6 +835,7 @@ impl Host for XhrHost {
                         ctx: e.cur_ctx,
                     }
                 };
+                probe_youtubei(&req, "xhr.hdrs");
                 let handle = transport.send(&req);
                 self.data.borrow_mut().handle = Some(handle);
                 e.xhr.live.push((handle, wrapper, self.data.clone()));
@@ -2242,6 +2243,54 @@ pub(crate) fn probe_url_bisect(e: &Engine, site: &str, method: &str, url: &str) 
     tracing::info!(target: "media_probe", site, method = %method, url = %url, stack = %stack);
 }
 
+/// Sonde N1.5 — dump headers + extrait du corps des requêtes
+/// `/youtubei` sortantes : vérifie que `serviceIntegrityDimensions
+/// .poToken` (résultat `BotGuard` post-`V`) est attaché au fil.
+/// Extrait ±60/160 caractères autour de `poToken`/
+/// `serviceIntegrity`, découpage sûr aux frontières UTF-8.
+pub(crate) fn probe_youtubei(req: &XhrRequest, site: &str) {
+    if !req.url.contains("/youtubei")
+        || !tracing::enabled!(target: "media_probe", tracing::Level::INFO)
+    {
+        return;
+    }
+    let hdrs = req
+        .headers
+        .iter()
+        .map(|(k, v)| format!("{k}={v}"))
+        .collect::<Vec<_>>()
+        .join("|");
+    let (blen, tok) = match &req.body {
+        Some(b) => {
+            let s = String::from_utf8_lossy(b);
+            let exc = s
+                .find("poToken")
+                .or_else(|| s.find("serviceIntegrity"))
+                .map(|i| {
+                    let lo = i.saturating_sub(60);
+                    let hi = (i + 160).min(s.len());
+                    let seg: String = s
+                        .char_indices()
+                        .filter(|(j, _)| *j >= lo && *j < hi)
+                        .map(|(_, c)| c)
+                        .collect();
+                    format!("…{seg}…")
+                })
+                .unwrap_or_default();
+            (b.len(), exc)
+        }
+        None => (0, String::new()),
+    };
+    tracing::info!(
+        target: "media_probe",
+        site,
+        path = url_path_full(&req.url),
+        hdrs = %hdrs,
+        body_len = blen,
+        tok = %tok
+    );
+}
+
 /// `fetch(url | Request, opts?)` — `input` `Request` fournit
 /// url/method/headers/body par défaut, `opts` surcharge (spec
 /// `fetch` = `new Request(input, init)` puis transport).
@@ -2466,6 +2515,7 @@ pub(crate) fn fetch_fn(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Va
             path = url_path_full(&req.url),
             seg = url_path_seg(&req.url)
         );
+        probe_youtubei(&req, "fetch.hdrs");
         let h = t.send(&req);
         // `Response.url` = URL absolue résolue contre le document
         // émetteur (JS-C282) — les players s'en servent comme base
