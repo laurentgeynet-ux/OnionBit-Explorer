@@ -173,11 +173,22 @@ impl Engine {
     /// Un fichier `_evaldump_NNN.js` par source, cwd du daemon.
     fn dump_eval_source(src: &str) {
         static N: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
-        if std::env::var_os("EXPLORER_EVAL_DUMP").is_none() {
+        static DIR: std::sync::OnceLock<Option<String>> = std::sync::OnceLock::new();
+        let Some(dir) = DIR
+            .get_or_init(|| std::env::var("EXPLORER_EVAL_DUMP").ok())
+            .as_ref()
+        else {
             return;
-        }
+        };
         let n = N.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-        let path = format!("_evaldump_{n:03}.js");
+        // Valeur = répertoire de sortie (cwd du daemon WMI =
+        // System32\wbem, non inscriptible — `dir` vide/`1` tombe
+        // sur le cwd historique).
+        let path = if dir.is_empty() || dir == "1" {
+            format!("_evaldump_{n:03}.js")
+        } else {
+            format!("{dir}/_evaldump_{n:03}.js")
+        };
         let _ = std::fs::write(&path, src);
         eprintln!("[eval-dump] {path} bytes={}", src.len());
     }
