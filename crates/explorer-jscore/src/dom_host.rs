@@ -16409,6 +16409,17 @@ pub(crate) fn et_add_listener(e: &mut Engine, this: Value, args: &[Value]) -> Js
     let Value::Obj(sid) = this else {
         return Ok(Value::Undefined);
     };
+    // N1.5 — même sonde `bg.listen` sur la voie `__et` (cible
+    // non-DOM : wrapper JS `window`/shim — la VM BG peut y
+    // attacher hors de la file `node.listeners`).
+    if tracing::enabled!(target: "dom_probe", tracing::Level::INFO)
+        && std::env::var_os("EXPLORER_CTX_PROBE").is_some()
+        && e.frame_src_contains("google.com/js/th")
+    {
+        let (src, _, _) = e.stack_nearest_fn_src(120);
+        tracing::info!(target: "dom_probe", site = "bg.listen",
+            ty = %ty, on = %format!("__et:{sid}"), src = %src);
+    }
     if e.get_prop(sid, "__et").is_none() {
         let mid = e.new_object();
         e.set_own(sid, "__et", Value::Obj(mid), true);

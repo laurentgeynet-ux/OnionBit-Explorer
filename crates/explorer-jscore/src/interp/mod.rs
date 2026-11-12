@@ -9427,6 +9427,31 @@ impl Engine {
                 Err(self.type_error("bound function dispatch failed"))
             }
             Fun::Script { lit, env, lex_this } => {
+                // N1.5 — sonde `bg.call` : une fonction du fichier
+                // interpréteur BotGuard (`google.com/js/th`) est
+                // invoquée. Bornée (128) — nomme le callee et la
+                // cible la plus proche côté appelant. Tranche
+                // « VM jamais lancée » vs « VM lancée puis halt ».
+                static BG_CALL_N: std::sync::atomic::AtomicU32 =
+                    std::sync::atomic::AtomicU32::new(0);
+                static CTXP: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+                if *CTXP.get_or_init(|| std::env::var_os("EXPLORER_CTX_PROBE").is_some())
+                    && tracing::enabled!(target: "dom_probe", tracing::Level::INFO)
+                    && lit
+                        .src
+                        .as_deref()
+                        .is_some_and(|s| s.contains("google.com/js/th"))
+                {
+                    let n = BG_CALL_N.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                    if n < 128 {
+                        let (from, _, _) = self.stack_nearest_fn_src(120);
+                        tracing::info!(target: "dom_probe", site = "bg.call",
+                            n = n,
+                            callee = %lit.name.as_deref().unwrap_or("<anon>"),
+                            pos = ?lit.pos,
+                            from = %from);
+                    }
+                }
                 // §B-59 : nomme la fonction avant son préambule —
                 // `last_phase=call` figé + `last_fun` nommé =
                 // mort dans le liage/hoist/`arguments` de celle-ci.
