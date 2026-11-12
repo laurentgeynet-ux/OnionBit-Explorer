@@ -790,16 +790,28 @@ fn fixture_for(name: &str) -> &'static str {
         // (couleur, style, largeur, côté logique, rayon,
         // `none` = suppression) produit un delta de dump.
         () if n.starts_with("border") => {
-            // Pas de `style=` sur `.x` : l'inline écraserait
-            // toute déclaration auteur testée — le contexte
-            // passe par un `<style>` embarqué (même origine,
-            // l'ordre fait gagner `.x {name:value}`).
-            "<body><style>.x{border:2px solid black;width:100px;height:80px;background:blue}</style><div class=x><p>a</p></div></body>"
+            // Le contexte (bordure existante) passe par
+            // `context_css` — pas de `style=` inline (il
+            // écraserait la déclaration testée).
+            "<body><div class=x><p>a</p></div></body>"
         }
         // Contours — même classe : `outline*` observable si
         // une outline existe (`display.rs` peint l'item).
         () if n.starts_with("outline") => {
-            "<body><style>.x{outline:2px solid black;width:100px;height:80px}</style><div class=x><p>a</p></div></body>"
+            "<body><div class=x><p>a</p></div></body>"
+        }
+        // `clear` — n'a d'effet qu'avec un flottant amont :
+        // `.x` se cale sous le `<div float:left>` (le
+        // flottant porte `style=` — prop différente, pas de
+        // conflit de spécificité).
+        () if n == "clear" => {
+            "<body><div style=\"float:left;width:50px;height:50px\">a</div><p class=x>x</p><p>tail</p></body>"
+        }
+        // `float` — le flottant `.x` doit avoir du contenu
+        // qui le contourne pour que `left`/`right`/
+        // `inline-*` se mesurent.
+        () if n == "float" => {
+            "<body><div><p class=x>a</p><p>un deux trois quatre cinq six sept huit neuf dix</p></div></body>"
         }
         // Formulaires — `accent-color`, `caret-color`, `appearance`,
         // `cursor`, `field-sizing`… n'ont d'effet que sur contrôle.
@@ -820,7 +832,7 @@ fn fixture_for(name: &str) -> &'static str {
         // `column-fill`, `column-span` produisent un delta
         // (sans colonnes posées la famille est inerte).
         () if n.starts_with("column-") || n.starts_with("break-") || n == "columns" => {
-            "<body><style>.x{columns:2;column-rule:2px solid black;height:200px}</style><div class=x><p>a</p><p>b</p><p>c</p><p>d</p></div></body>"
+            "<body><div class=x><p>a</p><p>b</p><p>c</p><p>d</p></div></body>"
         }
         // Conteneur **débordant** (étape 219) — `overflow-*`
         // et `overscroll-*` n'ont d'oracle que si le contenu
@@ -914,6 +926,28 @@ impl explorer_layout::font::FontSource for BcdAhem {
     }
 }
 
+/// Déclarations de **contexte** injectées dans la signature
+/// `.x` (`affectsv`) : la prop testée n'a d'effet observable
+/// que sur une boîte préparée — `border-color` sans style ne
+/// peint rien, `column-rule-*` sans colonnes non plus. La
+/// signature compare `.x { ctx }` à `.x { ctx; name:value }`
+/// — même règle, l'ordre fait gagner la déclaration testée.
+/// À distinguer du `<style>` embarqué (jamais collecté par
+/// `compute_tree` dans ce chemin) et de `style=` inline
+/// (rang inline > auteur — écraserait la déclaration).
+fn context_css(name: &str) -> &'static str {
+    let n = name.trim_start_matches('-').trim_start_matches("webkit-");
+    if n.starts_with("border") {
+        "border:2px solid black;width:100px;height:80px;background:blue"
+    } else if n.starts_with("outline") {
+        "outline:2px solid black;width:100px;height:80px"
+    } else if n.starts_with("column-") || n.starts_with("break-") || n == "columns" {
+        "columns:2;column-rule:2px solid black;height:200px"
+    } else {
+        ""
+    }
+}
+
 fn prop_affects_decl(decl: &str) -> bool {
     static SRC: BcdAhem = BcdAhem;
     let Some((name, value)) = decl.split_once(':') else {
@@ -949,9 +983,10 @@ fn prop_affects_decl(decl: &str) -> bool {
             None => String::new(),
         }
     };
+    let cctx = context_css(name);
     let (a, b) = (
-        sig(&format!(".x {{ {}: {} }}", name, value.trim())),
-        sig(".x {}"),
+        sig(&format!(".x {{ {cctx}; {}: {} }}", name, value.trim())),
+        sig(&format!(".x {{ {cctx} }}")),
     );
     if std::env::var_os("EXPLORER_BCD_DEBUG_SIG").is_some() {
         eprintln!("=== {name}:{value}\n--- with\n{a}\n--- base\n{b}");
@@ -1031,6 +1066,29 @@ const INITIAL_EXTRA: &[(&str, &str)] = &[
     ("word-break", "normal"),
     ("word-spacing", "normal"),
     ("writing-mode", "horizontal-tb"),
+    // Cran « oracle » : équivalents-initiale confirmés par
+    // mesure (`stretch` ≡ `normal` sur les alignements —
+    // css-align : `normal` se comporte en `stretch`) et
+    // contexte de pagination inexistant (valeurs `page`/
+    // `left`/`right`/`paged_context` des `break-*` = no-op
+    // hors média paginé → équivalent initiale ici).
+    ("appearance", "auto"),
+    ("align-content", "stretch"),
+    ("align-items", "stretch"),
+    ("backdrop-filter", "none"),
+    ("break-after", "auto"),
+    ("break-after", "page"),
+    ("break-after", "left"),
+    ("break-after", "right"),
+    ("break-after", "paged_context"),
+    ("break-before", "auto"),
+    ("break-before", "page"),
+    ("break-before", "left"),
+    ("break-before", "right"),
+    ("break-before", "paged_context"),
+    ("break-inside", "auto"),
+    ("break-inside", "avoid-page"),
+    ("break-inside", "paged_context"),
 ];
 
 /// Propriétés **non observables** par l'oracle géométrique
@@ -1069,6 +1127,8 @@ const NO_ORACLE: &[&str] = &[
     "widows",
     "page",
     "speak-as",
+    "backface-visibility",
+    "anchor-scope",
 ];
 
 fn affects_decl_verdict(decl: &str) -> Option<bool> {
