@@ -4427,6 +4427,13 @@ le census `site_harvest` arbitre les ex æquo.
   ligne (avant : borne conteneur `ruby*` fixe).
   Approximation : borne ligne entière vs texte non-ruby
   adjacent. `overhang_bounds` extrait de `lift_ruby`.
+- [x] **R-290 — `ruby-overhang:spaces`** (~2, miss NAV
+  aabb4b6d) — borne réelle au whitespace adjacent :
+  `ws_advance` mesure les glyphes ws extrêmes des
+  fragments voisins (repli proportionnel sans fonte) ;
+  voisin droit = premier non-`rt` (base ruby = non-ws).
+  Clippé à l'étendue de la ligne. Verrou ordonné
+  `none` < `spaces` < `auto`.
 
 `text-fit`/`interpolate-size` (chantier
 animation↔layout), `display` exotiques résiduels, `grid-*`/`flex-*`

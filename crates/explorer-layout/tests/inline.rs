@@ -1848,3 +1848,48 @@ fn ruby_overhang_none_borne_au_segment() {
         "auto → débordement sur le voisinage (x={x_auto} vs seg {seg_l2})"
     );
 }
+
+/// `ruby-overhang:spaces` (§3.3 — R-290) : l'annotation ne
+/// déborde que sur le whitespace adjacent — ici une
+/// espace de part et d'autre (`a … y`). L'annotation
+/// « AAAAAAAA » (20 px) centrée déborderait de 10 px ;
+/// `spaces` la borne à l'espace (5 px) — entre `none`
+/// (plaqué base) et `auto` (étendue ligne).
+#[test]
+fn ruby_overhang_spaces_borne_aux_espaces() {
+    let rt_x = |css: &str| -> (f32, f32) {
+        let (_d, bx) = laid(
+            "<!doctype html><p>a <ruby>B<rt>AAAAAAAA</rt></ruby> y</p>",
+            css,
+        );
+        let line = &first_box_with_lines(&bx).lines[0];
+        let rt = line
+            .fragments
+            .iter()
+            .find(|f| f.style.get("display") == Some("ruby-text"))
+            .expect("frag rt");
+        let base = line
+            .fragments
+            .iter()
+            .find(|f| f.style.get("display") == Some("ruby"))
+            .expect("frag base");
+        (rt.rect.x, base.rect.x)
+    };
+    let css =
+        |oh: &str| format!("p{{font-size:10px;width:400px;margin:0}}rt{{ruby-overhang:{oh}}}");
+    let (x_none, seg_l) = rt_x(&css("none"));
+    let (x_spaces, seg_l2) = rt_x(&css("spaces"));
+    let (x_auto, _) = rt_x(&css("auto"));
+    assert!(
+        (x_none - seg_l).abs() < 0.01 && (seg_l2 - seg_l).abs() < 0.01,
+        "none → plaque base (x={x_none} vs {seg_l})"
+    );
+    assert!(
+        x_spaces < seg_l - 0.5,
+        "spaces → déborde sur l'espace (x={x_spaces} vs base {seg_l})"
+    );
+    assert!(
+        x_spaces > x_auto + 0.01,
+        "spaces → borné avant les lettres (x={x_spaces} vs auto {x_auto})"
+    );
+}

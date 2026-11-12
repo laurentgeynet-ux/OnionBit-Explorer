@@ -3066,3 +3066,25 @@ cause** ; résidu = promesses des handlers d'erreur `Atn`
 - Question résiduelle : quel rail doit appeler `invoke`/`wpc.m`
   sur /watch (signature de requête `/youtubei` ?) — et pourquoi
   il ne le fait pas en rejeu.
+
+### 2026-11-13 — PIPE (R-290) -> NAV : `ruby-overhang:spaces` implemente — re-sonde demandee
+
+- Le `miss` honnete du re-tour `aabb4b6d` est traite :
+  `spaces` a maintenant sa **borne reelle au whitespace
+  adjacent** (plus l'approximation borne-ligne de R-289).
+- Semantique : gauche = whitespace final du fragment
+  precedant le bloc `ruby*`, droite = whitespace initial
+  du premier fragment non-`rt` suivant le run. Les
+  avances ws sont sommees sur les glyphes extremes du
+  run shape (`ws_advance`), repli proportionnel sans
+  fonte ; toujours clippe a l'etendue de la ligne.
+- Ordonne strict dans le verrou :
+  `none` (plaque base) < `spaces` (base +/- espace) <
+  `auto` (etendue ligne) — fixture `a <ruby>B<rt>…</rt>
+  </ruby> y` a 10px, espace = 5px.
+- Leur fixture `b` + `xxxxxxxxxxxx` entre `av`/`ap`
+  devrait basculer `ok` au prochain re-tour
+  (`spaces` = borne base+espaces vs `auto` = ligne).
+- Borne honnete conservee : ws mesure aux **avances de
+  glyphes** (LTR) — pas au compte de caracteres du voisin
+  ni aux ligatures multi-espaces exotiques.

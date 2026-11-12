@@ -2478,7 +2478,7 @@ impl LineAcc {
                 tier_h[&t],
                 band_top(t, true),
                 band_top(t, false),
-                self.overhang_bounds(*lo, (line_l, line_r), (cont_l, cont_r)),
+                self.overhang_bounds(*lo, *hi, (line_l, line_r), (cont_l, cont_r)),
             );
         }
         if pos.as_str() == "inter-character" {
@@ -2506,7 +2506,13 @@ impl LineAcc {
     /// ruby adjacent), repli conteneur `ruby*`. Lu sur le
     /// run, repli sur le fragment précédent — même
     /// convention que `ruby-align`.
-    fn overhang_bounds(&self, lo: usize, line: (f32, f32), cont: (f32, f32)) -> (f32, f32) {
+    fn overhang_bounds(
+        &self,
+        lo: usize,
+        hi: usize,
+        line: (f32, f32),
+        cont: (f32, f32),
+    ) -> (f32, f32) {
         let oh = self.frags[lo]
             .style
             .get("ruby-overhang")
@@ -2516,13 +2522,44 @@ impl LineAcc {
                     .flatten()
             })
             .map_or("auto", str::trim);
-        if oh == "none" {
-            ruby_base_span(&self.frags, lo)
-        } else if line.0.is_finite() {
-            line
-        } else {
-            cont
+        match oh {
+            "none" => ruby_base_span(&self.frags, lo),
+            "spaces" => self.spaces_bounds(lo, hi, line),
+            _ if line.0.is_finite() => line,
+            _ => cont,
         }
+    }
+
+    /// Bornes `ruby-overhang:spaces` (css-ruby-1 §3.3 —
+    /// R-290) : l'annotation ne peut déborder de son segment
+    /// de base que sur le **whitespace adjacent** — gauche =
+    /// whitespace final du fragment précédant le bloc ruby,
+    /// droite = whitespace initial du fragment non-rt
+    /// suivant le run. Repli `line` si le segment est
+    /// introuvable.
+    fn spaces_bounds(&self, lo: usize, hi: usize, line: (f32, f32)) -> (f32, f32) {
+        let (bl, br) = ruby_base_span(&self.frags, lo);
+        let is_ruby = |f: &Fragment| {
+            f.style
+                .get("display")
+                .map_or("", str::trim)
+                .starts_with("ruby")
+        };
+        // Voisin gauche = premier fragment non-ruby avant le
+        // bloc (rt + bases + conteneur sont tous `ruby*`).
+        // Voisin droit = premier fragment non-rt après le
+        // run — une base `ruby` suivante est du contenu
+        // adjacent (non-ws → débordement nul, correct).
+        let li = (0..lo).rev().find(|&i| !is_ruby(&self.frags[i]));
+        let ri = (hi + 1..self.frags.len()).find(|&i| !is_ruby_text_frag(&self.frags[i]));
+        let lw = li.map_or(0.0, |i| ws_advance(&self.frags[i], true));
+        let rw = ri.map_or(0.0, |i| ws_advance(&self.frags[i], false));
+        let (mut l, mut r) = (bl - lw, br + rw);
+        if line.0.is_finite() {
+            l = l.max(line.0);
+            r = r.min(line.1);
+        }
+        (l, r)
     }
 
     /// Pose un run d'annotation `frags[lo..=hi]` : `dx`
@@ -2642,6 +2679,38 @@ fn rt_runs(frags: &[Fragment]) -> Vec<(usize, usize)> {
 /// Étendue horizontale `(gauche, droite)` du segment de
 /// base `ruby*` contigu précédant l'indice `rt_lo` — repli
 /// sur toute la base non-rt de la ligne.
+/// Avance du whitespace de **fin** (`trailing`) ou de
+/// **tête** du fragment — somme des avances des glyphes
+/// extrêmes quand le run est shapé (glyphes en ordre
+/// visuel : approximation LTR honnête pour RTL), sinon
+/// part proportionnelle de la largeur du fragment.
+#[allow(clippy::cast_precision_loss)]
+fn ws_advance(f: &Fragment, trailing: bool) -> f32 {
+    let n = if trailing {
+        f.text
+            .chars()
+            .rev()
+            .take_while(|&c| text::is_css_ws(c))
+            .count()
+    } else {
+        f.text.chars().take_while(|&c| text::is_css_ws(c)).count()
+    };
+    if n == 0 {
+        return 0.0;
+    }
+    if let Some(run) = &f.shaped {
+        let it: Box<dyn Iterator<Item = &crate::font::Glyph> + '_> = if trailing {
+            Box::new(run.glyphs.iter().rev())
+        } else {
+            Box::new(run.glyphs.iter())
+        };
+        it.take(n).map(|g| g.advance.abs()).sum()
+    } else {
+        let total = f.text.chars().count().max(1) as f32;
+        f.rect.width * (n as f32 / total)
+    }
+}
+
 fn ruby_base_span(frags: &[Fragment], rt_lo: usize) -> (f32, f32) {
     let (mut l, mut r) = (f32::INFINITY, 0.0_f32);
     let mut i = rt_lo;
