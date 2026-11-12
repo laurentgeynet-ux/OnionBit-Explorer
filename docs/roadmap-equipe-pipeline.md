@@ -4385,11 +4385,20 @@ le census `site_harvest` arbitre les ex æquo.
   R-51/R-224/R-226 verts. Re-mesure `geo_diff` demandée
   à NAV (journal).
 
+- [x] **R-285 — `interactivity:inert`** (~2) — consommée au
+  hit-test : flag cumulatif dans `hit_test_m` /
+  `hit_test_delta_m_vp` — un ancêtre `inert` exclut tout
+  le sous-arbre, **sans** ré-arm (absolu par spec, à la
+  différence de `pointer-events` qui s'hérite et se
+  réactive). Non héritée : propagée en descente — valeur
+  calculée conforme. Volet pointer seul ; focus/find-in-
+  page = NAV. `overlay` reste borné (pas de top-layer).
+
 `text-fit`/`text-combine-upright`/`interpolate-size` (chantier
 animation↔layout), `text-decoration-skip-ink` (géométrie
 glyphes), `display` exotiques résiduels, `grid-*`/`flex-*`
 sous-features, `font-stretch`/`font-width` (fontes variables),
-`font-variant-*` OT fins, `interactivity`, `overlay`,
+`font-variant-*` OT fins, `overlay`,
 `reading-flow`, `scroll-snap-*` résiduel,
 `position-try-order:most-*` fins, `ruby-*` fins, `math-*`.
 

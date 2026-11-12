@@ -658,6 +658,49 @@ fn hit_test_pointer_events_enfant_reactive() {
     );
 }
 
+/// R-285 — `interactivity:inert` (css-ui-5) : le sous-arbre
+/// entier est exclu du hit-test, **absolument** — ni
+/// `interactivity:auto` ni `pointer-events:auto` sur un
+/// descendant ne réarment (à la différence de
+/// `pointer-events`, qui s'hérite mais se réactive).
+#[test]
+fn hit_test_interactivity_inert_exclut_le_sous_arbre() {
+    let (dom, bx) = laid(
+        "<div id=o style=\"position:absolute;inset:0;width:100px;height:100px;interactivity:inert\">\
+         <a id=a href=# style=\"interactivity:auto;pointer-events:auto;display:block;width:20px;height:20px\">x</a>\
+         </div><p id=u style=\"width:50px;height:50px\">y</p>",
+        "body{margin:0} p{position:absolute;top:0;left:0;margin:0}",
+    );
+    // (5,5) : sous le <a> « ré-armé » ET sous le <p> —
+    // l'inertie du parent prime absolument : le <p> gagne.
+    let p = by_tag(&dom, "p");
+    let hit = explorer_layout::hit_test(&bx, 5.0, 5.0);
+    let mut cur = hit;
+    let elem = loop {
+        let Some(n) = cur else { break None };
+        if dom.tag_name(n).is_ok() {
+            break Some(n);
+        }
+        cur = dom.parent(n).ok().flatten();
+    };
+    assert_eq!(
+        elem,
+        Some(p),
+        "interactivity:inert — aucun descendant ne se réarme : hit={hit:?}"
+    );
+    // Hors <a> mais dans le parent inerte : pareil.
+    let hit2 = explorer_layout::hit_test(&bx, 40.0, 40.0);
+    let mut cur2 = hit2;
+    let elem2 = loop {
+        let Some(n) = cur2 else { break None };
+        if dom.tag_name(n).is_ok() {
+            break Some(n);
+        }
+        cur2 = dom.parent(n).ok().flatten();
+    };
+    assert_eq!(elem2, Some(p));
+}
+
 /// §B-17 — `[inert]` exclut tout le sous-arbre du hit-test
 /// (HTML §6.4.2 : « as if the pointer-events property were
 /// set to none », porté par la règle UA) : le drawer santemag

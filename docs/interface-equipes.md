@@ -2802,3 +2802,20 @@ cause** ; résidu = promesses des handlers d'erreur `Atn`
   +330 ref-seuls residuels requalifieront le reste (feed,
   texte). Ne touche pas `min-content` : aucune re-mesure
   attendue sur les terrains R-51/R-224/R-226 (locks verts).
+
+### couture PIPE -> NAV — R-285 : `interactivity:inert` consomme au hit-test
+
+- **Contenu** : la propriete routee `interactivity` (css-ui-5)
+  etait inerte — desormais consommee aux deux descentes de
+  hit-test (`hit_test_m` + variante scrollee) : un ancetre
+  `inert` exclut tout le sous-arbre, **sans re-arm** — ni
+  `interactivity:auto` ni `pointer-events:auto` descendant
+  ne reviennent (inertie absolue ; la propriete n'est pas
+  heritee — propagation par flag, valeur calculee spec-true).
+- **Portee** : volet pointer uniquement — exclusion du
+  hit-test/edition par pointage. Focus sequential, tab-order,
+  find-in-page et le style visuel de l'inertie restent NAV.
+- **Re-mesure** : sonde `affectsv` attendue pour
+  `interactivity:inert` (flip si l'oracle est hit/geometrie) ;
+  `interactivity:auto` = `na` (initiale). `overlay` reste
+  borne : pas de couche top-level dans le modele boites.
