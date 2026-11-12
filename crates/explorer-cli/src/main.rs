@@ -783,6 +783,24 @@ fn fixture_for(name: &str) -> &'static str {
         () if n == "anchor-name" => {
             "<body><div class=x style=\"position:absolute;top:10px;left:10px;width:20px;height:20px\"></div><p style=\"position:absolute;position-anchor:--a\">b</p></body>"
         }
+        // Bordures — `border*[-color|-style|-width]` n'ont
+        // d'effet que sur une boîte **déjà bordée** (une
+        // couleur sans `border-style` ne peint rien). La
+        // baseline porte `2px solid black` : chaque variante
+        // (couleur, style, largeur, côté logique, rayon,
+        // `none` = suppression) produit un delta de dump.
+        () if n.starts_with("border") => {
+            // Pas de `style=` sur `.x` : l'inline écraserait
+            // toute déclaration auteur testée — le contexte
+            // passe par un `<style>` embarqué (même origine,
+            // l'ordre fait gagner `.x {name:value}`).
+            "<body><style>.x{border:2px solid black;width:100px;height:80px;background:blue}</style><div class=x><p>a</p></div></body>"
+        }
+        // Contours — même classe : `outline*` observable si
+        // une outline existe (`display.rs` peint l'item).
+        () if n.starts_with("outline") => {
+            "<body><style>.x{outline:2px solid black;width:100px;height:80px}</style><div class=x><p>a</p></div></body>"
+        }
         // Formulaires — `accent-color`, `caret-color`, `appearance`,
         // `cursor`, `field-sizing`… n'ont d'effet que sur contrôle.
         () if matches!(
@@ -797,9 +815,12 @@ fn fixture_for(name: &str) -> &'static str {
         () if n.starts_with("list-style") || n.starts_with("counter") => {
             "<body><ol><li class=x>a</li><li>b</li></ol></body>"
         }
-        // Multi-colonnes — `column-count`/`column-width`/…
-        () if n.starts_with("column-") || n == "columns" => {
-            "<body><div class=x><p>a</p><p>b</p></div></body>"
+        // Multi-colonnes — le conteneur porte `columns:2` +
+        // une `column-rule` : `column-rule-*`, `break-*`,
+        // `column-fill`, `column-span` produisent un delta
+        // (sans colonnes posées la famille est inerte).
+        () if n.starts_with("column-") || n.starts_with("break-") || n == "columns" => {
+            "<body><style>.x{columns:2;column-rule:2px solid black;height:200px}</style><div class=x><p>a</p><p>b</p><p>c</p><p>d</p></div></body>"
         }
         // Conteneur **débordant** (étape 219) — `overflow-*`
         // et `overscroll-*` n'ont d'oracle que si le contenu
@@ -877,11 +898,32 @@ fn fixture_for(name: &str) -> &'static str {
     }
 }
 
+/// Fonte du harnais `affectsv` : Ahem (WPT) embarquée par
+/// `include_bytes!`, servie à **toute** requête — sans
+/// `FontSource` les fragments restent `shaped: None` et
+/// aucun item `Text` n'est émis (`color`, `font-*`,
+/// `text-decoration` invisibles à la jauge). Les octets
+/// identiques à toute requête n'importent pas : l'oracle
+/// mesure le `FontRequest` et la couleur de l'item, pas les
+/// contours.
+struct BcdAhem;
+impl explorer_layout::font::FontSource for BcdAhem {
+    fn font_data(&self, _req: &explorer_layout::font::FontRequest) -> Option<Vec<u8>> {
+        static AHEM: &[u8] = include_bytes!("../../explorer-render/tests/data/wpt/ahem.ttf");
+        Some(AHEM.to_vec())
+    }
+}
+
 fn prop_affects_decl(decl: &str) -> bool {
+    static SRC: BcdAhem = BcdAhem;
     let Some((name, value)) = decl.split_once(':') else {
         return false;
     };
     let name = name.trim();
+    let ctx = explorer_layout::BlockCtx {
+        fonts: Some(&SRC),
+        ..explorer_layout::BlockCtx::default()
+    };
     let dom = explorer_html::TreeBuilder::parse(fixture_for(name));
     let root = {
         let mut r = None;
@@ -894,7 +936,7 @@ fn prop_affects_decl(decl: &str) -> bool {
         let sm = eng.compute_tree(&dom, root, &explorer_css::StyleEnv::default());
         match explorer_layout::build_box_tree(&dom, root, &sm) {
             Some(mut bx) => {
-                explorer_layout::layout_tree(&mut bx, 800.0, &explorer_layout::BlockCtx::default());
+                explorer_layout::layout_tree(&mut bx, 800.0, &ctx);
                 // Box tree + display list : la géométrie seule
                 // rate les effets paint (`accent-color`,
                 // `caret-color`, `text-shadow`…). Limite
@@ -907,7 +949,14 @@ fn prop_affects_decl(decl: &str) -> bool {
             None => String::new(),
         }
     };
-    sig(&format!(".x {{ {}: {} }}", name, value.trim())) != sig(".x {}")
+    let (a, b) = (
+        sig(&format!(".x {{ {}: {} }}", name, value.trim())),
+        sig(".x {}"),
+    );
+    if std::env::var_os("EXPLORER_BCD_DEBUG_SIG").is_some() {
+        eprintln!("=== {name}:{value}\n--- with\n{a}\n--- base\n{b}");
+    }
+    a != b
 }
 
 /// `affectsv` tri-état (étape 219) : `None` = **neutre par
@@ -984,6 +1033,44 @@ const INITIAL_EXTRA: &[(&str, &str)] = &[
     ("writing-mode", "horizontal-tb"),
 ];
 
+/// Propriétés **non observables** par l'oracle géométrique
+/// statique (`affectsv`) — l'effet vit hors du box tree et
+/// du dump display-list (curseur, caret, hit-test, scroll
+/// dynamique, widget UA, pagination). `na` honnête, pas un
+/// « miss » : aucun dump ne peut discriminer la valeur.
+const NO_ORACLE: &[&str] = &[
+    "cursor",
+    "caret-color",
+    "accent-color",
+    "appearance",
+    "pointer-events",
+    "resize",
+    "touch-action",
+    "user-select",
+    "touch-callout",
+    "tap-highlight-color",
+    "scroll-behavior",
+    "overscroll-behavior",
+    "overscroll-behavior-x",
+    "overscroll-behavior-y",
+    "overscroll-behavior-block",
+    "overscroll-behavior-inline",
+    "overflow-anchor",
+    "image-rendering",
+    "shape-rendering",
+    "text-rendering",
+    "color-rendering",
+    "vector-effect",
+    "will-change",
+    "forced-color-adjust",
+    "print-color-adjust",
+    "color-adjust",
+    "orphans",
+    "widows",
+    "page",
+    "speak-as",
+];
+
 fn affects_decl_verdict(decl: &str) -> Option<bool> {
     let (name, value) = decl.split_once(':')?;
     let (name, value) = (name.trim(), value.trim());
@@ -1006,6 +1093,23 @@ fn affects_decl_verdict(decl: &str) -> Option<bool> {
         || name.starts_with("transition-")
         || matches!(name, "animation" | "transition")
     {
+        return None;
+    }
+    // Familles **sans oracle statique** : l'effet de la prop
+    // vit hors du dump — curseur (rendu OS), caret/couleur
+    // de caret, hit-testing (`pointer-events`), comportement
+    // de scroll (`scroll-behavior`, `overscroll-behavior`,
+    // snap), interaction (`resize`, `touch-action`,
+    // `user-select`, `-webkit-touch-callout`), widget UA
+    // (`appearance`, `accent-color`), hints raster
+    // (`image/shape/text/color-rendering`, `will-change`),
+    // modes forcés/impression (`forced-color-adjust`,
+    // `*-print-color-adjust`), ancrage dynamique
+    // (`overflow-anchor`), pagination (`orphans`/`widows`/
+    // `page*`, `speak`). Un miss serait un artefact de
+    // jauge, pas un trou moteur — hors dénominateur.
+    let nn = name.trim_start_matches('-').trim_start_matches("webkit-");
+    if std::env::var_os("EXPLORER_BCD_NO_NOORACLE").is_none() && NO_ORACLE.contains(&nn) {
         return None;
     }
     Some(prop_affects_decl(decl))

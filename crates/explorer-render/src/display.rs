@@ -601,27 +601,57 @@ pub const F_STICKY_KID: u8 = 4;
 impl DisplayList {
     /// Dump texte indenté — debug/golden sans raster.
     #[must_use]
+    #[allow(clippy::too_many_lines)]
     pub fn dump(&self) -> String {
         let mut out = String::new();
         for item in &self.items {
             use std::fmt::Write as _;
             match item {
-                DisplayItem::FillRect { rect, color, .. } => {
-                    let _ = writeln!(out, "fill {rect:?} #{color:?}");
+                DisplayItem::FillRect {
+                    rect, color, radii, ..
+                } => {
+                    let _ = writeln!(out, "fill {rect:?} #{color:?} r{radii:?}");
                 }
-                DisplayItem::DecoRect { rect, style, .. } => {
-                    let _ = writeln!(out, "deco s{style} {rect:?}");
+                DisplayItem::DecoRect {
+                    rect, style, color, ..
+                } => {
+                    let _ = writeln!(out, "deco s{style} #{color:?} {rect:?}");
                 }
-                DisplayItem::Border { rect, .. } => {
-                    let _ = writeln!(out, "border {rect:?}");
-                }
-                DisplayItem::Text { origin, run, .. } => {
+                DisplayItem::Border {
+                    rect,
+                    widths,
+                    colors,
+                    styles,
+                    radii,
+                    ..
+                } => {
                     let _ = writeln!(
                         out,
-                        "text @{:.1},{:.1} ({} glyphs)",
+                        "border {rect:?} w{widths:?} c{colors:?} s{styles:?} r{radii:?}"
+                    );
+                }
+                DisplayItem::Text {
+                    origin,
+                    run,
+                    color,
+                    font,
+                    ..
+                } => {
+                    let gid_sum: u32 = run.glyphs.iter().map(|g| u32::from(g.id)).sum();
+                    let _ = writeln!(
+                        out,
+                        "text @{:.1},{:.1} ({} glyphs g{gid_sum} adv{:.2}) #{color:?} f[{},{},i{},c{},s{},k{},ft{:?}]",
                         origin.0,
                         origin.1,
-                        run.glyphs.len()
+                        run.glyphs.len(),
+                        run.advance,
+                        font.families.join("|"),
+                        font.weight,
+                        u8::from(font.italic),
+                        font.caps,
+                        font.stretch,
+                        u8::from(font.kern_off),
+                        font.feature_settings,
                     );
                 }
                 DisplayItem::Placeholder { rect, label } => {
