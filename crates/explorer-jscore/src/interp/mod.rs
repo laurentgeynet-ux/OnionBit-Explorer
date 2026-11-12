@@ -10225,4 +10225,37 @@ mod c490_tests {
             "le fast-path doit servir des lectures — hits={hits}"
         );
     }
+
+    /// JS-C490e — régression du vol 811 (B1) : une portée
+    /// `for (let/const … in/of)` oubliée sur la pile décalait la
+    /// profondeur de tous les identifiants suivants de la fonction
+    /// englobante → `_` résolu sur le global au lieu du paramètre
+    /// de l'IIFE (`TypeError: cannot set 'we' of Undefined`).
+    #[test]
+    fn c490_forin_forof_ne_fuient_pas_leur_portee() {
+        let mut e = Engine::new();
+        crate::j17_enable();
+        let r = e
+            .eval(
+                "var _ = { mark: 'GLOBAL' };\
+                 (function(_) {\
+                   var f = function(a, b) { for (let d in a) b(a[d], d) };\
+                   var g = function(a) { for (const x of a) x };\
+                   return _.mark\
+                 })({ mark: 'param' })",
+            )
+            .unwrap();
+        assert_eq!(format!("{r:?}"), "Str(\"param\")");
+        // `for` lexical classique couvert par le même garde-fou.
+        let r2 = e
+            .eval(
+                "var v = 'G';\
+                 (function(v) {\
+                   var h = function() { for (let i = 0; i < 1; i++) i };\
+                   return v\
+                 })('P')",
+            )
+            .unwrap();
+        assert_eq!(format!("{r2:?}"), "Str(\"P\")");
+    }
 }

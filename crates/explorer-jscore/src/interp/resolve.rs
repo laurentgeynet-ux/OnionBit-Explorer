@@ -421,13 +421,18 @@ impl Resolver {
     /// `poisoned` si le corps contient `eval`/`delete`.
     fn walk_fn(&mut self, lit: &FnLit, body: &[Stmt]) {
         let poisoned = body_poisons(body);
+        // Filet défensif : une portée poussée et oubliée dans un
+        // bras de statement ne doit jamais décaler les profondeurs
+        // des fonctions sœurs (régression `for-in`/`for-of` B1 du
+        // vol 811).
+        let base = self.scopes.len();
         self.push(fn_scope_names(lit, body), poisoned);
         // `= défaut` de paramètres : évalués dans l'env `Local`.
         for p in &lit.params {
             self.walk_pat(&p.pat);
         }
         self.walk_stmts(body);
-        self.pop();
+        self.scopes.truncate(base);
     }
 
     /// Corps d'un `FnLit` quel qu'en soit la forme — `Deferred`
@@ -573,15 +578,23 @@ impl Resolver {
                 if let Some(v) = var_init {
                     self.walk_expr(v);
                 }
+                let pushed = matches!(target, ForTarget::Lexical { .. } | ForTarget::Using { .. });
                 self.walk_for_target(target);
                 self.walk_stmt(body);
+                if pushed {
+                    self.pop();
+                }
             }
             Stmt::ForOf {
                 target, iter, body, ..
             } => {
                 self.walk_expr(iter);
+                let pushed = matches!(target, ForTarget::Lexical { .. } | ForTarget::Using { .. });
                 self.walk_for_target(target);
                 self.walk_stmt(body);
+                if pushed {
+                    self.pop();
+                }
             }
             // `with` — l'env objet est dans la chaîne : aucune
             // annotation dans le sous-arbre.
