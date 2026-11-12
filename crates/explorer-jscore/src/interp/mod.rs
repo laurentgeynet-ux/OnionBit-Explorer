@@ -719,6 +719,13 @@ pub struct Engine {
     /// que les adresses AST indexées dans `resolved_map` restent
     /// uniques (un lit libéré → adresses réutilisables).
     pub(crate) resolved_guard: Vec<Rc<crate::ast::FnLit>>,
+    /// JS-C490b — cache `(ptr(env), profondeur) → env ancêtre` :
+    /// `Env.parent` est immuable post-création → l'ancêtre à
+    /// profondeur `d` est déterministe. La **clé épingle son
+    /// env** (le `EnvRef` gardé vivant empêche la réutilisation
+    /// de son adresse par un autre env → pas de collision).
+    /// Borné — purge complète.
+    pub(crate) resolved_envs: std::collections::HashMap<usize, (EnvRef, EnvRef)>,
     /// Cache des constructeurs d'interface par nom de classe
     /// (`HTMLInputElement`…) — JS-C82 : `el.constructor` typé +
     /// `.prototype` porteur des accesseurs IDL (surface
@@ -1229,6 +1236,7 @@ impl Engine {
             resolved_map: std::collections::HashMap::new(),
             resolved_lits: std::collections::HashSet::new(),
             resolved_guard: Vec::new(),
+            resolved_envs: std::collections::HashMap::new(),
             dom_ctors: std::collections::HashMap::new(),
             native_caller: Vec::new(),
             ctor_fresh: None,
@@ -5339,17 +5347,35 @@ impl Engine {
         name: &str,
         e: &crate::ast::Expr,
     ) -> Option<Value> {
+        const RESOLVED_ENVS_CAP: usize = 8192;
         let &d = self
             .resolved_map
             .get(&(std::ptr::from_ref::<crate::ast::Expr>(e) as usize))?;
-        let mut cur = env.clone();
-        for _ in 0..d {
-            let p = cur.borrow().parent.clone();
-            match p {
-                Some(p) => cur = p,
-                None => break,
+        // L'ancêtre est déterministe par (env, d) — `Env.parent`
+        // immuable post-création. La clé composite mêle la
+        // profondeur au pointeur (un même env sert plusieurs
+        // profondeurs).
+        let ekey = (Rc::as_ptr(env) as usize).wrapping_add((d as usize) << 20);
+        let cur = if let Some((_, anc)) = self.resolved_envs.get(&ekey) {
+            anc.clone()
+        } else {
+            let mut cur = env.clone();
+            for _ in 0..d {
+                let p = cur.borrow().parent.clone();
+                match p {
+                    Some(p) => cur = p,
+                    None => break,
+                }
             }
-        }
+            if self.resolved_envs.len() >= RESOLVED_ENVS_CAP {
+                self.resolved_envs.clear();
+            }
+            // Le `EnvRef` épinglé dans la clé empêche la
+            // réutilisation de l'adresse de `env` par un autre
+            // env — aucune collision de pointeur possible.
+            self.resolved_envs.insert(ekey, (env.clone(), cur.clone()));
+            cur
+        };
         if let v @ Some(_) = self.env_get(&cur, name) {
             crate::j17_tick(&crate::J17_RES_HIT);
             v
@@ -10162,6 +10188,9 @@ mod c490_tests {
             .unwrap();
         assert_eq!(format!("{r:?}"), "Str(\"5,3,0,2,4,10,8\")");
         let hits = crate::J17_RES_HIT.load(std::sync::atomic::Ordering::Relaxed);
-        assert!(hits > 0, "le fast-path doit servir des lectures — hits={hits}");
+        assert!(
+            hits > 0,
+            "le fast-path doit servir des lectures — hits={hits}"
+        );
     }
 }
