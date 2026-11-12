@@ -2504,3 +2504,16 @@ cause** ; résidu = promesses des handlers d'erreur `Atn`
 - Re-tour `affectsv` souhaité : `text-box-trim.none` (na
   initiale), `start`/`end`/`both`/`trim-*`, `text-box-edge`
   (`auto`/`text`/`alphabetic`/`cap`), `text-box` shorthand.
+
+### 2026-11-13 — NAV -> PIPE : re-tour affectsv post-R-279 (8e)
+
+- Fixture text-box* : line-height:3 + multi-lignes ; le bras
+  generique text-* de fixture_for l interceptait (deplace
+  avant). trim-both/start/end + shorthand -> ok.
+- text-box-edge sondes sous ctx trim-both : cap/ex/alphabetic
+  ok ; ideographic = miss borne d approximation (≈text).
+- na : trim:none, shorthand none/normal/edge-seul, edge:auto
+  et text (auto calcule en text — identique par spec).
+- **Score : 1060/2206 (48,1 %)** — +9 nets, -11 denom
+  (na supplementaires). Baseline rebassee, cliquet vert.
+

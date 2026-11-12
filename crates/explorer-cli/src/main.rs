@@ -1013,6 +1013,13 @@ fn fixture_for(name: &str) -> &'static str {
         {
             "<body><div class=x style=\"width:100px;height:80px;background:blue\"><p>a</p></div></body>"
         }
+        // `text-box*` (R-279) — le trim retire le demi-
+        // leading des bords : il faut un `line-height` qui
+        // en crée un + plusieurs lignes pour discriminer
+        // `trim-start`/`trim-end` de `trim-both`.
+        () if n == "text-box" || n.starts_with("text-box-") => {
+            "<body><p class=x style=\"width:60px;line-height:3\">alpha beta gamma delta epsilon zeta</p></body>"
+        }
         // Texte multi-mots — `text-*`, `white-space`,
         // `word-*`, `line-*`, `font-*`, `text-wrap`,
         // `hyphens`, `text-transform`, `letter/word-spacing` :
@@ -1135,6 +1142,11 @@ fn context_css(name: &str) -> &'static str {
         } else {
             "offset-path:ray(90deg);offset-distance:20px"
         }
+    } else if n == "text-box-edge" {
+        // L'edge ne produit d'effet que sous un trim actif
+        // (css-inline-3 §10) — `trim-both` en ctx rend chaque
+        // valeur discriminable.
+        "text-box-trim:trim-both"
     } else if n.starts_with("hyphenate") {
         // `hyphenate-character`/`hyphenate-limit-*` n'ont
         // d'effet que sous césure automatique.
@@ -1250,6 +1262,24 @@ const INITIAL_EXTRA: &[(&str, &str)] = &[
     ("float", "none"),
     ("hyphens", "manual"),
     ("initial-letter", "normal"),
+    ("text-box-trim", "none"),
+    // `text-box` shorthand — un bord `<text-box-edge>` seul
+    // (sans token `trim-*`) = trim `none` → inerte ; `none`/
+    // `normal` = initiales spec.
+    ("text-box", "none"),
+    ("text-box", "normal"),
+    ("text-box", "cap"),
+    ("text-box", "text"),
+    ("text-box", "ex"),
+    ("text-box", "alphabetic"),
+    ("text-box", "ideographic"),
+    ("text-box", "ideographic-ink"),
+    // `text-box-edge` sans trim actif = inerte (son ctx pose
+    // `trim-both`, donc seule l'initiale `auto` reste `na`).
+    ("text-box-edge", "auto"),
+    // `text` ≡ `auto` (css-inline-3 : `auto` se résout en
+    // bords texte — identique par construction).
+    ("text-box-edge", "text"),
     // `hyphenate-*` : initiales spec css-text-4 (`auto` =
     // tiret par défaut / limite auto ; `no-limit` = pas de
     // borne de lignes consécutives).
