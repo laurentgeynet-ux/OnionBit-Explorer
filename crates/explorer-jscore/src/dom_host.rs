@@ -16390,6 +16390,18 @@ pub(crate) fn et_add_listener(e: &mut Engine, this: Value, args: &[Value]) -> Js
                 probe_node_desc(&d, node)
             };
             probe_el_listen(&dom, &ty, &on);
+            // N1.5 — `bg.listen` : les abonnements posés depuis
+            // l'interpréteur BotGuard (`www.google.com/js/th/…`)
+            // nomment les événements que la VM attend ; un type
+            // jamais dispatché = l'op qui gèle `S.J`/`V`.
+            if tracing::enabled!(target: "dom_probe", tracing::Level::INFO)
+                && std::env::var_os("EXPLORER_CTX_PROBE").is_some()
+                && e.frame_src_contains("google.com/js/th")
+            {
+                let (src, _, _) = e.stack_nearest_fn_src(120);
+                tracing::info!(target: "dom_probe", site = "bg.listen",
+                    ty = %ty, on = %on, src = %src);
+            }
             push_dom_listener(&dom, node, &ty, &on, cb, capture);
             return Ok(Value::Undefined);
         }

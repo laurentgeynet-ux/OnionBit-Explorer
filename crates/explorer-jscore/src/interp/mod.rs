@@ -4441,6 +4441,15 @@ impl Engine {
     /// Retourne `(extrait préfixé, frames sautés, hauteur pile)` —
     /// diagnostic « pile vide ou top synthétique » pour le cas
     /// `src=` resté vide au vol 814.
+    /// `true` si un frame de la pile courante a `lit.src` (URL du
+    /// script évalué) contenant `needle` — filtre d'origine pour
+    /// les sondes (ex. `google.com/js/th` = interpréteur BG).
+    pub(crate) fn frame_src_contains(&self, needle: &str) -> bool {
+        self.call_stack
+            .iter()
+            .any(|lit| lit.src.as_deref().is_some_and(|s| s.contains(needle)))
+    }
+
     pub(crate) fn stack_nearest_fn_src(&self, max: usize) -> (String, usize, usize) {
         for (i, lit) in self.call_stack.iter().enumerate().rev() {
             let Some(t) = lit.src_text.as_ref() else {
