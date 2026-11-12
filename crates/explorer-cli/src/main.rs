@@ -774,12 +774,21 @@ fn fixture_for(name: &str) -> &'static str {
         // `position-visibility`, `anchor-scope`). Sans ancre
         // référencée toute la famille est inerte par
         // construction.
+        // `position-try*` — fallbacks évalués **uniquement
+        // en débordement** (css-anchor-1 §3.5) : l'ancre est
+        // plaquée en haut à gauche et l'item trop grand
+        // (`position-area:top` → déborde en y, 900 px → en x)
+        // pour que `flip-block`/`flip-inline`/`flip-start`
+        // s'activent. Sans débordement toute la famille est
+        // inerte.
         () if matches!(
             n,
-            "position-area" | "position-try" | "position-try-order"
-                | "position-try-fallbacks" | "position-visibility" | "anchor-scope"
+            "position-try" | "position-try-fallbacks" | "position-try-order"
         ) =>
         {
+            "<body><div id=a style=\"anchor-name:--a;position:absolute;top:5px;left:5px;width:20px;height:20px\"></div><p class=x style=\"position:absolute;position-anchor:--a;position-area:top;width:900px;height:100px\">b</p></body>"
+        }
+        () if matches!(n, "position-area" | "position-visibility" | "anchor-scope") => {
             "<body><div id=a style=\"anchor-name:--a;position:absolute;top:10px;left:10px;width:20px;height:20px\"></div><p class=x style=\"position:absolute;position-anchor:--a\">b</p></body>"
         }
         // `anchor-name` — `.x` = l'**ancre** elle-même ; un
@@ -946,6 +955,11 @@ impl explorer_layout::font::FontSource for BcdAhem {
 /// (rang inline > auteur — écraserait la déclaration).
 fn context_css(name: &str) -> &'static str {
     let n = name.trim_start_matches('-').trim_start_matches("webkit-");
+    if n == "position-try-order" {
+        // L'ordre n'a d'effet qu'avec plusieurs candidats —
+        // `most-width` choisit alors l'option la plus large.
+        return "position-try-fallbacks:flip-block flip-inline";
+    }
     if n.starts_with("border") {
         // Logique (`border-block-*`/`border-inline-*`) : le
         // mapping physique arrive APRÈS la cascade — un ctx
