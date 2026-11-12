@@ -87,6 +87,11 @@ const STACK_TRACE_LIMIT: usize = 10;
 /// `items_after_statements` interdit un `static` dans le corps.
 static DYN_PROBE: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
 
+/// Sonde DI N1.5 — nomme les clés `deferredKey`/`provide`
+/// lues par le rail kevlar (`resolve(VhV)`/`addProvider`)
+/// sous `EXPLORER_CTX_PROBE`.
+static DI_PROBE: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+
 /// Hidden env bindings installed in class member scopes — the names
 /// use private-use code points so no source identifier can collide
 /// (`super.x` / `super()` resolve through these).
@@ -7897,6 +7902,28 @@ impl Engine {
                     }
                 }
                 let v = self.read_prop(base.clone(), base, key)?;
+                // N1.5 — sonde DI kevlar : nomme la clé des
+                // deferreds `resolve(new VhV(k))` (`deferredKey`
+                // lu par `IK$`) + les providers enregistrés
+                // (`provide` lu par `addProvider`/`G06`) —
+                // providers attendus vs enregistrés tranchent
+                // « rail mort » (clé jamais fournie) vs « rail
+                // lent ». Sous `EXPLORER_CTX_PROBE`.
+                if (key == "deferredKey" || key == "provide")
+                    && tracing::enabled!(target: "dom_probe", tracing::Level::INFO)
+                    && *DI_PROBE.get_or_init(|| std::env::var_os("EXPLORER_CTX_PROBE").is_some())
+                {
+                    let kv = match &v {
+                        Value::Str(_) | Value::Num(_) | Value::Bool(_) => {
+                            self.to_js_string(v.clone()).unwrap_or_default()
+                        }
+                        Value::Obj(o) => format!("<obj:{o}>"),
+                        _ => format!("{v:?}"),
+                    };
+                    let (src, d, depth) = self.stack_nearest_fn_src(120);
+                    tracing::info!(target: "dom_probe", site = "di.key",
+                        "k={key} v={kv} d={d} depth={depth} src={src}");
+                }
                 // Feature-detect : les méthodes host sont
                 // invoke-only — quand ni `get` ni la chaîne
                 // proto ne produisent de valeur, exposer le
