@@ -2787,9 +2787,13 @@ impl Engine {
         self.set_own(g, "document", doc.clone(), false);
 
         // Fixed, low-fingerprint navigator — by design.
+        // `userAgent` aligné sur l'en-tête HTTP `User-Agent`
+        // (h1.rs) : les deux doivent rester identiques comme
+        // dans tout navigateur réel — un écart UA-header/JS est
+        // un signal anti-bot immédiat (et un bug de cohérence).
         let nav = self.new_object();
         for (k, v) in [
-            ("userAgent", "Explorer/0.1 (explorer-jscore)"),
+            ("userAgent", crate::dom_host::EXPLORER_USER_AGENT),
             ("appName", "Netscape"),
             ("platform", "Win32"),
             ("language", "en-US"),
@@ -16749,6 +16753,18 @@ fn nav_java_enabled(_e: &mut Engine, _t: Value, _a: &[Value]) -> JsResult<Value>
     Ok(Value::Bool(false))
 }
 
+/// `navigator.userAgent` = la chaîne `User-Agent` exacte envoyée
+/// par `explorer-net` (`h1.rs`) — les navigateurs réels gardent
+/// header et prop JS identiques ; un écart est un signal anti-bot
+/// trivial. Dupliquée ici : `explorer-jscore` reste autonome
+/// (aucune dépendance interne — garder les deux en phase à la
+/// main, le token `Explorer` reste honnêtement présent).
+pub(crate) const EXPLORER_USER_AGENT: &str = concat!(
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) ",
+    "AppleWebKit/537.36 (KHTML, like Gecko) ",
+    "Explorer/0.2 Safari/537.36"
+);
+
 /// `navigator.userAgentData` — réponse desktop spec-honnête
 /// (`brands` vide, `mobile:false`, `platform` figé — low-
 /// fingerprint) ; partagée `Navigator`/`WorkerNavigator`
@@ -16822,7 +16838,7 @@ fn navigator_uad(e: &mut Engine) -> Value {
 pub(crate) fn install_worker_navigator(e: &mut Engine) {
     let nav = e.new_object();
     for (k, v) in [
-        ("userAgent", "Explorer/0.1 (explorer-jscore)"),
+        ("userAgent", EXPLORER_USER_AGENT),
         ("appName", "Netscape"),
         ("platform", "Win32"),
         ("language", "en-US"),

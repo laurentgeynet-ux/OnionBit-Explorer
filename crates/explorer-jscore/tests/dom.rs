@@ -318,7 +318,13 @@ fn tag_interfaces_mod_menu_time() {
 
 #[test]
 fn navigator_is_fixed_and_poor() {
-    assert_eq!(ev("navigator.userAgent"), "Explorer/0.1 (explorer-jscore)");
+    // `userAgent` identique à l'en-tête HTTP `User-Agent`
+    // (h1.rs) — token `Explorer` honnête conservé, forme
+    // navigateur standard (JS-C493).
+    assert_eq!(
+        ev("navigator.userAgent"),
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Explorer/0.2 Safari/537.36"
+    );
     // Deliberately absent: plugins et APIs matérielles ;
     // `geolocation` existe depuis B-14 (stub honnête
     // `POSITION_UNAVAILABLE`, jamais de succès fabriqué).
