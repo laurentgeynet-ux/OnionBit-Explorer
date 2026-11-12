@@ -4314,7 +4314,49 @@ fn svg_styled_marker_shorthand_eclate_et_clip_rule() {
         "<svg width=\"10\" height=\"10\"><marker id=\"m\"/><path d=\"M0 0L9 9\"/></svg>",
         "svg path{marker:url(#m);clip-rule:evenodd}",
     );
-    assert!(src.contains("marker-start=\"url(#m)\""), "marker-start : {src}");
+    assert!(
+        src.contains("marker-start=\"url(#m)\""),
+        "marker-start : {src}"
+    );
     assert!(src.contains("marker-end=\"url(#m)\""), "marker-end : {src}");
     assert!(src.contains("clip-rule=\"evenodd\""), "clip-rule : {src}");
+}
+
+#[test]
+fn svg_styled_transform_css_resyntaxee() {
+    // Fonctions CSS-only → syntaxe d'attribut SVG :
+    // translateX → translate(x 0), scaleY → scale(1 y),
+    // rotate(deg) → nombre, matrix(e,f en px) → nombres.
+    let src = svg_src(
+        "<svg width=\"10\" height=\"10\"><path d=\"M0 0L9 9\"/></svg>",
+        "svg path{transform:translateX(3px) scaleY(2) rotate(45deg)}",
+    );
+    assert!(src.contains("translate(3 0)"), "translateX : {src}");
+    assert!(src.contains("scale(1 2)"), "scaleY : {src}");
+    assert!(src.contains("rotate(45)"), "rotate : {src}");
+    // 3D pure → ignorée, repli strip conservé en secours.
+    let src2 = svg_src(
+        "<svg width=\"10\" height=\"10\"><path d=\"M0 0L9 9\"/></svg>",
+        "svg path{transform:matrix(1,0,0,1,4px,5px)}",
+    );
+    assert!(src2.contains("matrix(1 0 0 1 4 5)"), "matrix px : {src2}");
+}
+
+#[test]
+fn svg_styled_racine_ne_double_pas_les_effets_boite() {
+    // `transform`/`opacity`/`clip-path` CSS sur la racine
+    // `<svg>` sont appliqués par la pipeline boîte HTML —
+    // les ré-émettre dans l'îlot les jouerait deux fois.
+    let src = svg_src(
+        "<svg class=\"s\" width=\"10\" height=\"10\"><path transform=\"scale(2)\" d=\"M0 0L9 9\"/></svg>",
+        "svg.s{transform:rotate(10deg);opacity:.5;clip-path:url(#c)}",
+    );
+    assert!(!src.contains("rotate"), "transform racine non émis : {src}");
+    assert!(!src.contains("opacity"), "opacity racine non émis : {src}");
+    assert!(!src.contains("clip-path"), "clip racine non émis : {src}");
+    // …mais l'enfant garde sa transform d'attribut.
+    assert!(
+        src.contains("transform=\"scale(2)\""),
+        "enfant conservé : {src}"
+    );
 }

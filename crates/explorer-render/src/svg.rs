@@ -268,6 +268,10 @@ const SVG_STYLE_PROPS: &[&str] = &[
     "text-anchor",
     "dominant-baseline",
     "alignment-baseline",
+    "baseline-shift",
+    "direction",
+    "unicode-bidi",
+    "transform-origin",
 ];
 
 /// Propriétés géométriques SVG2 projetées sur les **enfants**
@@ -300,6 +304,26 @@ fn project_style(
         return projected;
     };
     for &p in SVG_STYLE_PROPS {
+        // Effets de boîte sur la racine : `transform`/
+        // `opacity`/`clip-path`/`mask`/`filter`/`display`/
+        // `visibility`/`overflow` sont déjà appliqués par la
+        // pipeline HTML (transform de boîte, clip, alpha) —
+        // les émettre dans l'îlot les appliquerait deux fois.
+        if is_root_svg
+            && matches!(
+                p,
+                "display"
+                    | "visibility"
+                    | "clip-path"
+                    | "mask"
+                    | "filter"
+                    | "overflow"
+                    | "opacity"
+                    | "transform-origin"
+            )
+        {
+            continue;
+        }
         if let Some(v) = st.get(p) {
             let v = v.trim();
             match p {
@@ -336,12 +360,14 @@ fn project_style(
             }
         }
     }
-    if let Some(v) = st.get("transform") {
-        let v = v.trim();
-        projected.push((
-            "transform",
-            (v != "none" && v != "initial").then(|| svg_transform(v)),
-        ));
+    if !is_root_svg {
+        if let Some(v) = st.get("transform") {
+            let v = v.trim();
+            projected.push((
+                "transform",
+                (v != "none" && v != "initial").then(|| svg_transform(v)),
+            ));
+        }
     }
     if !is_root_svg {
         for &p in SVG_GEOM_PROPS {
@@ -444,11 +470,125 @@ fn strip_style_decls(v: &str, projected: &[(&str, Option<String>)]) -> String {
         .join(";")
 }
 
-/// CSS `transform` → syntaxe d'attribut SVG : `px`/`deg` nus
-/// (le parseur d'attribut `usvg` attend des nombres ; `deg`
-/// est l'unité implicite), `none` déjà filtré en amont.
+/// CSS `transform` → syntaxe d'attribut SVG. Les fonctions
+/// communes passent après strip des unités (`px`, `deg` —
+/// nombre implicite en SVG) ; les fonctions **CSS-only** sont
+/// traduites (`translateX` → `translate(x 0)`, `scaleX` →
+/// `scale(x 1)`, `skew` 2-arg → `skewX`+`skewY`, `translate3d`
+/// → plan xy) ; les 3D sans équivalent (`rotateX/Y/3d`,
+/// `perspective`, `matrix3d`, `translateZ`) sont ignorées —
+/// borne : une transform purement 3D est perdue plutôt que
+/// mal approximée.
 fn svg_transform(v: &str) -> String {
-    v.replace("px", "").replace("deg", "")
+    let mut out = String::new();
+    let mut rest = v.trim();
+    while let Some(open) = rest.find('(') {
+        let name = rest[..open].trim();
+        let Some(close) = rest[open..].find(')').map(|o| open + o) else {
+            break;
+        };
+        let args: Vec<String> = rest[open + 1..close]
+            .split(',')
+            .flat_map(|a| a.split_ascii_whitespace())
+            .filter(|s| !s.is_empty())
+            .map(str::to_string)
+            .collect();
+        rest = &rest[close + 1..];
+        let num = |k: usize, d: &str| {
+            args.get(k)
+                .map_or_else(|| d.to_string(), |s| strip_units(s))
+        };
+        let deg = |k: usize| -> String {
+            let arg = args.get(k).map_or("0", |s| s.as_str());
+            let split = arg
+                .find(|c: char| c.is_ascii_alphabetic())
+                .unwrap_or(arg.len());
+            let (num_part, unit) = arg.split_at(split);
+            let val: f32 = num_part.parse().unwrap_or(0.0);
+            let deg_val = match unit {
+                "rad" => val.to_degrees(),
+                "turn" => val * 360.0,
+                "grad" => val * 0.9,
+                _ => val, // deg ou nu
+            };
+            fmt_num(deg_val)
+        };
+        match name {
+            "translate" | "translate3d" => {
+                let _ = write!(out, "translate({} {}) ", num(0, "0"), num(1, "0"));
+            }
+            "translateX" => {
+                let _ = write!(out, "translate({} 0) ", num(0, "0"));
+            }
+            "translateY" => {
+                let _ = write!(out, "translate(0 {}) ", num(0, "0"));
+            }
+            "scale" => {
+                let _ = write!(out, "scale({} {}) ", num(0, "1"), num(1, &num(0, "1")));
+            }
+            "scaleX" => {
+                let _ = write!(out, "scale({} 1) ", num(0, "1"));
+            }
+            "scaleY" => {
+                let _ = write!(out, "scale(1 {}) ", num(0, "1"));
+            }
+            "scale3d" | "scaleZ" => {
+                // z sans plan → approximation xy documentée.
+                let _ = write!(out, "scale({} {}) ", num(0, "1"), num(1, "1"));
+            }
+            "rotate" | "rotateZ" => {
+                let _ = write!(out, "rotate({}) ", deg(0));
+            }
+            "skewX" => {
+                let _ = write!(out, "skewX({}) ", deg(0));
+            }
+            "skewY" => {
+                let _ = write!(out, "skewY({}) ", deg(0));
+            }
+            "skew" => {
+                let _ = write!(out, "skewX({}) ", deg(0));
+                if args.len() > 1 {
+                    let _ = write!(out, "skewY({}) ", deg(1));
+                }
+            }
+            "matrix" => {
+                let _ = write!(
+                    out,
+                    "matrix({} {} {} {} {} {}) ",
+                    num(0, "1"),
+                    num(1, "0"),
+                    num(2, "0"),
+                    num(3, "1"),
+                    num(4, "0"),
+                    num(5, "0")
+                );
+            }
+            // 3D sans équivalent 2D — ignoré (borne documentée).
+            _ => {}
+        }
+    }
+    let t = out.trim();
+    if t.is_empty() {
+        // Fonction non reconnue seule → repli strip (le
+        // parseur usvg ignorera ce qu'il ne comprend pas).
+        return v.replace("px", "").replace("deg", "");
+    }
+    t.to_string()
+}
+
+/// `12px`/`45deg`/`2.5` → nombre nu SVG.
+fn strip_units(s: &str) -> String {
+    s.trim_end_matches(|c: char| c.is_ascii_alphabetic())
+        .to_string()
+}
+
+/// Forme compacte : `2.00` → `2`.
+fn fmt_num(f: f32) -> String {
+    if f.fract() == 0.0 && f.abs() < 1e7 {
+        format!("{f:.0}")
+    } else {
+        format!("{f:.4}")
+    }
 }
 
 /// `d: path("M …")` (valeur CSS) → donnée `d` brute —

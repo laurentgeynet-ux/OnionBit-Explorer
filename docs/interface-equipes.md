@@ -2758,3 +2758,24 @@ cause** ; résidu = promesses des handlers d'erreur `Atn`
   repli R-9 documenté (prev_styles ordinal — pas de StyleMap).
   Famille SVG classée NO_ORACLE au census (effet dans l'îlot
   rasterisé, hors display-list — verrous PIPE = oracle).
+
+### 2026-11-13 — PIPE : R-283 suite 2 — transform CSS + racine non doublée
+
+- `svg_transform` réécrit : fonctions CSS-only traduites en
+  syntaxe d'attribut (`translateX`, `scaleX/Y`, `skew`,
+  `matrix` px, angles `rad`/`turn`/`grad` → deg) ; 3D pures
+  ignorées — borne.
+- **Bug évité** : les effets calculés sur la racine `<svg>`
+  (`transform`/`opacity`/`clip-path`/`filter`/…) étaient
+  émis dans l'îlot ET appliqués par la pipeline boîte HTML
+  au paint → double application. Désormais filtrés sur la
+  racine ; les enfants gardent les leurs.
+- Whitelist : `baseline-shift`, `direction`, `unicode-bidi`,
+  `transform-origin` (attr SVG2 — honoré ou ignoré par usvg,
+  jamais pire qu'avant).
+- Bornes SVG restantes consignées : `foreignObject` (refus
+  usvg), `<use href>` externe (fetch), `@font-face` pour
+  `<text>` (fontdb système usvg, pas la table session),
+  hit-test des `<a>` dans l'îlot atomique (logo cliquable
+  — nécessiterait une hit-map à côté du bitmap, NAV côté
+  plomberie).
