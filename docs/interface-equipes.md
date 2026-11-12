@@ -2720,3 +2720,21 @@ cause** ; résidu = promesses des handlers d'erreur `Atn`
   verrous `svg_styled_*`, pas sur `affectsv`.
 - Census : **1074/2165 (49,6 %)**, cliquet vert,
   baseline rebasée.
+
+### 2026-11-12 — N1.5 : la VM BotGuard tourne, son halt est interne
+
+- `_.aq` exige `window[globalName].a` — l'interpréteur enregistre
+  `trayride = {mtI_: usine, m:41, ad, a:K5}` ; `K5` = entrée VM.
+- Le code VM est livré par `eval()` → `lit.src=None`/<eval>,
+  invisible aux sondes par-src. Tag `<eval:google.com/js/th>`
+  ajouté (`eval_source`, `eval_source_in`, `Function`) — les
+  fonctions VM deviennent traçables.
+- `bg.a`/`bg.call`/`bg.listen` (identité ObjId + tag src) :
+  `_.aq` invoque bien `Q` à chaque session (×2-4, cadence ~70 s
+  calée sur `bb`), la VM exécute ≥128 appels internes (machine
+  à états, dispatch `r!=30`), **mais n'enregistre aucun
+  listener DOM** — l'hypothèse « attente d'événement » est
+  réfutée. `V` (callback de complétion) ne tire jamais.
+- Reste : nommer l'op hôte que la VM attend avant de boucler —
+  prochaine sonde `bg.host` (natives appelées depuis des frames
+  VM) ou trace du dernier op avant l'arrêt.
