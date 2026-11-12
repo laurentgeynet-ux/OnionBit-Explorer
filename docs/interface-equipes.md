@@ -1916,3 +1916,19 @@ Lot PIPE livré depuis la piste YoutubeFix (R-260, crates `explorer-css`/`explor
 - **Décision à prendre (PIPE/lead)** : le chantier `<svg>` inline
   (~80 misses + surface SVG BCD) — lancer ou déclarer hors
   périmètre assumé.
+
+### couture interne NAV — plan équipe enregistré (2026-11-12)
+
+- **Plan NAVIGATEUR posé** dans `docs/roadmap-equipe-navigateur.md`
+  § « Plan NAVIGATEUR — vitrine YouTube + surface navigateur » :
+  Sprint N1 vitrine (`pNM`/`bb` BotGuard — fingerprints `stack`=8c
+  top-level, `stackTraceLimit`=50, `t.m`=41 ; JS-C496 en vol ;
+  `dyn.err dyn:7` ; shot `EXPLORER_NET_RECORD`+rejeu), Sprint N2
+  `api` Pareto (`Range`/`Selection` profonds, IDL réel Element/
+  Document/Window, hors-périmètre sensors à déclarer), Sprint N3
+  perf jscore (`prop_scan` 72 M, inline-cache `(env,nom)→cellule`),
+  Sprint N4 terrain (`site_harvest` ordonne PIPE + N2, `geo_diff`,
+  replays versionnés).
+- **Complémentarité** : la file PIPE `css.values` (même commit)
+  couvre le domaine pur ; N2 couvre la surface navigateur ; les
+  deux convergent vers le shot vitrine (N1).

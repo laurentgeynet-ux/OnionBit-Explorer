@@ -11799,3 +11799,84 @@ un crate PIPELINE.- [x] **JS-C422. Deadline honnête — canal session ↔ budge
   Diagnostic soldé : `hasNavigated=false`
   post-boot nominal (adoption initiale
   sans `yt-navigate-start`).
+
+## Plan NAVIGATEUR — vitrine YouTube + surface navigateur (2026-11-12)
+
+Plan parallèle à la file `css.values` PIPE (§ roadmap équipe
+pipeline). Objectif produit déclaré : **le screenshot YouTube
+vitrine GitHub** — feed monté, masthead rendu, miniatures. Les
+deux axes : lever les murs résiduels kevlar/BG **et** faire
+croître la surface navigateur mesurée (`api` 1510/8099, 18,6 %).
+
+### Sprint N1 — la vitrine (mur résiduel = BotGuard)
+
+- [ ] **`pNM`/`bb`** : le programme BG (`trayride.a` → `mr`)
+  tourne mais **n'appelle jamais `g`** → `pNM` pend 60 s → `bb`
+  → session `v8Q` morte → `/youtubei` gatées →
+  `yt-navigate-finish` absent. Fingerprints confirmés à éliminer
+  un par un : `Error().stack` = 8c top-level (V8 ≈ 200+ — exige
+  une position par `Expr`, chantier `Expr::pos` ou position
+  d'appel-site bornée), `Error.stackTraceLimit` = 50 (V8 = 10),
+  `plugins` (✅ JS-C495), `t.m` = 41. Méthode : spy `g` armé +
+  éliminer les diffs un par un jusqu'à l'appel.
+- [ ] **JS-C496 (WIP)** — `cloneNode`/`importNode` : clone
+  détaché épinglé pendant `ce_upgrade_subtree` (fix `pin_node`
+  posé, tests écrits) — vérifier la levée du mur
+  `importNode(undefined)`/`localName` en vol.
+- [ ] **`dyn.err dyn:7 syntax error 1:12`** — script dynamique
+  mal tokenisé (repro à isoler du vol).
+- [ ] **Shot vitrine** : `EXPLORER_NET_RECORD` vol complet →
+  rejeu `DirTransport` → `explorer-cli shot` sur daemon frais →
+  PNG reproductible pour le README.
+
+### Sprint N2 — `api` par Pareto (18,6 % → cible ~30 %)
+
+- [ ] **`Element`/`Document`/`Window` membres IDL réels** —
+  tête du miss-list = `AbstractRange`, `Range` profonds
+  (`startContainer`, `endOffset`, `collapsed`…), `Selection`.
+- [ ] **`Range`/`Selection` profonds** — chantier DOM/JS :
+  `getSelection`, `createRange`, points DOM, `toString`.
+- [ ] **IDL à fort retour** : `MutationObserver` variantes
+  restantes, `ResizeObserver`/`IntersectionObserver` membres,
+  `CSSStyleDeclaration` accesseurs BCD, `fetch`/`Response`
+  membres résiduels, `aria*Elements` (P5 différés), `editContext`,
+  `requestFullscreen`, `containerTiming`.
+- [ ] **Hors périmètre à déclarer** : sensors
+  (`Accelerometer`, `AbsoluteOrientationSensor`…),
+  WebAuthn/WebTransport/BT — sous-ensemble explicite du
+  dénominateur ou file assumée.
+
+### Sprint N3 — perf `jscore` (le goulot nommé)
+
+- [ ] **`prop_scan` (72 M)** : index props armé à 12 entrées
+  (JS-C485) — si le J17 montre encore `prop_ns` dominant :
+  armement au premier miss répété (compteur de scans par objet)
+  ou index proto-partagé pour les objets à props mixtes.
+- [ ] **Inline-cache `(env, nom) → cellule`** : le plancher du
+  fast-path C490b = 2 sondes de table (~40-60 ns) ; le vrai saut
+  = cache de porteur par site (staleness : liaisons de bloc
+  réécrites entre évals — purge à gérer).
+- [ ] **Mesure produit** : chaque cran perf → `shot`/vol de
+  contrôle (moins de timeouts pompe → plus de stamping).
+
+### Sprint N4 — terrain (`site_harvest` = le signal qui ordonne)
+
+- [ ] **Census corpus réel** : `css.value.dropped.*`/`html.err.*`
+  par fréquence — ordonne la file PIPE (sprint 1 candidats déjà
+  posés) et les priorités api N2.
+- [ ] **`geo_diff`/captures YouTube** : différentiel rendu vs
+  Chrome sur les mêmes fixtures — nomme les écarts visibles du
+  screenshot avant les % abstraits.
+- [ ] **Replays versionnés** : fixtures `DirTransport` des vols
+  YouTube dans `fuzz`/`.eval` promus en corpus de régression
+  (le shot vitrine doit être rejouable hors-ligne).
+
+### Verrous et discipline
+
+- Chaque cran JS-Cxxx = commit dédié + `CHANGELOG` + verrou test.
+- Suites de garde : `lang` 313, `dom` 263 + fumées ciblées
+  (`lazy_gen`, `await_thenable`, `c49x`).
+- `baseline bcd` re-sauvée après chaque lot mesure ;
+  `--gate scripts/bcd_baseline.json` en régression.
+- Journal : crans numérotés dans `interface-equipes.md` —
+  toute mesure en vol y est tracée (daemon, profil, métriques).
