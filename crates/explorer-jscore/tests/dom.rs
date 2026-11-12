@@ -325,10 +325,16 @@ fn navigator_is_fixed_and_poor() {
         ev("navigator.userAgent"),
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Explorer/0.2 Safari/537.36"
     );
-    // Deliberately absent: plugins et APIs matérielles ;
+    // `plugins` = PluginArray vide honnête (JS-C495 — les
+    // navigateurs réels exposent toujours la collection, même
+    // vide : `undefined` est plus fingerprintable que la forme
+    // spec) ; APIs matérielles restent absentes ;
     // `geolocation` existe depuis B-14 (stub honnête
     // `POSITION_UNAVAILABLE`, jamais de succès fabriqué).
-    assert_eq!(ev("navigator.plugins === undefined"), "true");
+    assert_eq!(ev("navigator.plugins.length"), "0");
+    assert_eq!(ev("navigator.plugins.item(0)"), "null");
+    assert_eq!(ev("navigator.plugins.namedItem('x')"), "null");
+    assert_eq!(ev("navigator.plugins.toString()"), "[object PluginArray]");
     assert_eq!(ev("typeof navigator.geolocation"), "object");
 }
 

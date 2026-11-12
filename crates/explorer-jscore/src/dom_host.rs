@@ -2825,6 +2825,20 @@ impl Engine {
         let _ =
             crate::builtins::object_freeze(self, Value::Undefined, std::slice::from_ref(&langs));
         self.set_own(nav, "languages", langs, true);
+        // `navigator.plugins` — PluginArray minimal (collection
+        // vide : aucun plugin NPAPI — honnête, proche headless ;
+        // `undefined`/`null` cassent les feature-detects
+        // `navigator.plugins.length`/`plugins[i]` des scripts
+        // réels et flag un moteur non-navigateur pour les
+        // fingerprints anti-bot).
+        let plugins = self.new_object();
+        self.set_own(plugins, "length", Value::Num(0.0), true);
+        self.add_method(plugins, "item", nav_plugin_null);
+        self.add_method(plugins, "namedItem", nav_plugin_null);
+        self.add_method(plugins, "refresh", nav_plugin_refresh);
+        let tag = self.str_val("PluginArray");
+        self.set_own(plugins, crate::interp::SYM_TO_STRING_TAG, tag, false);
+        self.set_own(nav, "plugins", Value::Obj(plugins), true);
         // `navigator.sendBeacon(url, data?)` — POST fire-and-forget
         // via le transport XHR (staple de télémétrie des pages
         // réelles ; `false` sans connecteur, comme la spec).
@@ -16751,6 +16765,17 @@ fn nav_send_beacon(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value>
 /// feature-detects de fingerprinting, maif vol 122).
 fn nav_java_enabled(_e: &mut Engine, _t: Value, _a: &[Value]) -> JsResult<Value> {
     Ok(Value::Bool(false))
+}
+
+/// `PluginArray.item(i)`/`namedItem(name)` — `null` hors borne
+/// (tableau vide : aucun plugin — honnête, headless-like).
+fn nav_plugin_null(_e: &mut Engine, _t: Value, _a: &[Value]) -> JsResult<Value> {
+    Ok(Value::Null)
+}
+
+/// `PluginArray.refresh()` — no-op (collection vide).
+fn nav_plugin_refresh(_e: &mut Engine, _t: Value, _a: &[Value]) -> JsResult<Value> {
+    Ok(Value::Undefined)
 }
 
 /// `navigator.userAgent` = la chaîne `User-Agent` exacte envoyée
