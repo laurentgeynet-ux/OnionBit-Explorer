@@ -733,6 +733,11 @@ fn fixture_for(name: &str) -> &'static str {
         () if n == "flex" => {
             "<body><div style=\"display:flex;width:400px\"><p class=x>a</p><p>b</p></div></body>"
         }
+        // `list-style*` — contexte `<li>` requis (marqueur
+        // émis que sur un item de liste, §marker).
+        () if n.starts_with("list-style") || n == "list-style-type" => {
+            "<body><ul><li class=x>a</li><li>b</li></ul></body>"
+        }
         // `ruby-*` — contexte `<ruby>` requis (rb/rt
         // n'existent que sous ruby).
         () if n.starts_with("ruby") => {
@@ -969,7 +974,7 @@ fn context_css(name: &str) -> &'static str {
         // `PaintImages` vide au harnais). La bordure distingue
         // `content-box`/`padding-box`/`border-box` (sans elle
         // les trois aires coïncident → `clip`/`origin` inertes).
-        "background-image:linear-gradient(red,blue);border:10px solid black;width:100px;height:80px"
+        "background-image:linear-gradient(red,blue);border:10px solid black;padding:10px;width:100px;height:80px"
     } else if n.starts_with("outline") {
         "outline:2px solid black;width:100px;height:80px"
     } else if n.starts_with("column-") || n.starts_with("break-") || n == "columns" {
