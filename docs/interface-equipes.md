@@ -3208,3 +3208,33 @@ shadow n'atteint ni cascade ni boxification ») etait
   ~1 unité/3,3 s là où Chrome tourne à ~60 Hz → `V`
   inatteignable dans la fenêtre `bb` (60 s) — **stall de
   vitesse, pas de mécanisme**.
+
+### 2026-11-12 — N1.5 RÉSOLU : la VM complète — `V` tire — la signature suit
+
+- **`bg.v` a tiré** (23:32:23, `argc=4`) — la VM appelle le
+  callback de complétion : `hix` résout `{bWm,nXe,auT,nXm}`.
+- **Le « stall » était une phase de sampling par design** :
+  opcode `pY` → `v.setTimeout(cb, K.timeout≈3 s)` → ~64 beats
+  de ~15 ms (~4-5 min) avant complétion. Pas une famine
+  moteur : les délais demandés sont majoritairement ≥1 s
+  (mesure hook `/eval` sur `window.setTimeout` : 3 posts <10 ms
+  vs 123 ≥100 ms).
+- **Toute la chaîne s'est déverrouillée** après `V` :
+  `D8$` case 2 → `y7.snapshot` → `bWm` → `C9A` → `fBF` →
+  `pj` → `zZN.resolve` → `wPd`/`kFI` → `isReady` →
+  `a4`×13 / `hDo`×2 / `io.m`/`io.mws` invoqués.
+- **Requêtes attestées observées** : `POST /youtubei` XHR à
+  +3 s post-`V` ; `fetch.send /youtubei/v1/guide` +
+  `/v1/feedback` ensuite.
+- `bg.spq` = 0 cohérent : `L.sPQ` (stepper `mtI_`) n'est
+  invoqué que par `invoke`/`Kmw` — le flux principal passe
+  par `pj` (`i4F`/`AP$`/`mTM` — le wrapper de `fBF`), pas
+  par `aq.sPQ`.
+- `bb` ×3 = watchdogs `eG` (60 s) qui expirent pendant la
+  phase sampling → respawn — **bénin vis-à-vis de la
+  complétion** : les programmes continuent en arrière-plan.
+- Verdict : BotGuard **fonctionne** dans le moteur — le coût
+  est la durée intrinsèque du programme (~5 min à cadence
+  ~3 s/pas, conçue ainsi) + le pacing bridé par
+  `commit.anim`=3,2 s. La différence Chrome est la vitesse,
+  pas un op manquant.
