@@ -3183,3 +3183,28 @@ shadow n'atteint ni cascade ni boxification ») etait
   a investiguer au prochain tour si priorise.
 - **Census** : dernier re-tour NAV post-R-290 = **1081/2159
   (50,1 %)** — `spaces` ok confirme, famille bouclee.
+
+### 2026-11-12 — N1.5 : la VM n'est pas figée — elle est *lente*
+
+- `bg.io` (chaîne readiness) : `wpc()` ×2 → `{f,c,m,mws}`
+  créés ×2 → `io.f`/`wPd`/`f` invoqués → `eO` assigné →
+  `kFI` atteint `wPd` → **pend sur `zZN.promise`**.
+- `wPd` = `zZN.promise` ; `zZN` ne résout qu'en `D8$` case 6
+  — or `D8$` case 2 attend `y7.snapshot` (hix-gaté) → `V`.
+  **Le bootstrap session exige `V` issu du run `Q()` lui-même.**
+- `bg.v` = **0** : `V` (callback arg1 de `Q`, résout `hix`
+  avec `{bWm,nXe,auT,nXm}`) **jamais invoqué**.
+- `bg.wcb` ×34+ : le logger `w` (arg4) reçoit des beats
+  `a0≈15 ms, e=true (y="h")` toutes les **~3,3 s** — la VM
+  exécute des unités de ~15 ms à cadence fixe : **vivante,
+  en boucle de collecte, jamais complétée**.
+- Corrélation cadence : `commit.anim` = **3,2 s/commit**
+  (`relayout_animated` sur le DOM /watch) — le battement
+  hôte (pump_timers) est bridé à cette cadence + sieste
+  plancher `elapsed` (JS-C293). Les livraisons/timers du
+  moteur n'avancent qu'à ce rythme.
+- Si le pacing VM est accroché aux livrées de commit
+  (observers/timers drainés à la pompe), il progresse
+  ~1 unité/3,3 s là où Chrome tourne à ~60 Hz → `V`
+  inatteignable dans la fenêtre `bb` (60 s) — **stall de
+  vitesse, pas de mécanisme**.
