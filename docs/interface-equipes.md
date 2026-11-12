@@ -2258,6 +2258,36 @@ Lot PIPE livré depuis la piste YoutubeFix (R-260, crates `explorer-css`/`explor
 
 
 
+
+### vitrine — N1.5 itération : le stall **reproduit en rejeu** (offline) + rail DI décodé
+
+Daemon `266cbc70` + `EXPLORER_NET_REPLAY=replay-vol815`,
+navigation directe `/watch` : `bb` ×2 en ~100 s —
+**le stall est déterministe offline**, itération sans vol
+débloquée (port 9480, log `daemon-9480.stderr.log`).
+
+Histogramme rejeu (amplifié — misses corpus attendues) :
+`_.Xl` DI ×767, coroutines `_.p` ×666, scheduler fetch
+`rXH` ×564, `cache.put` ×262, transitions
+`transitionTasksMap` ×165, deferreds rAF `kdF` ×106.
+`prom.created` 11 084 vs `settled` 7 444 (~3,6 k jamais).
+
+**Rail décodé dans le bundle** : `resolve(new VhV(k))` →
+`IK$` crée un deferred `{promise,resolver,rejector}` dans
+`JSC_deferred` ; `addProvider` → `G06` appelle
+`D.resolver(L.resolve(N))`. Un provider s'enregistre dans
+le code des chunks lazy → **un chunk qui échoue ou n'est
+jamais demandé gèle tous les `_.Xl` en aval** (cascade :
+coroutines, transitions, fetch-queue). Live : fetch.rej ×7
+(DNS googlevideo média — pas des chunks JS ; les 7
+dynscripts livrés) ; la cause racine live reste à nommer.
+
+**Prochaine sonde** : instrumenter côté moteur la création
+des deferreds DI — loguer la clé `k` de `VhV` au pend +
+tout `addProvider` (providers enregistrés vs attendus) ;
+et nommer le module/provider racine jamais résolu — un
+rejeu instrumenté tranche « rail lent » vs « rail mort ».
+
 ### vitrine — N1.5 : attribution du stall `wbB`/`Atn` (vol 815, archéologie corpus)
 
 Lecture du site dominant `kevlar:1476:39` dans
