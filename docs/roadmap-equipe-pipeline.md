@@ -4350,13 +4350,26 @@ le census `site_harvest` arbitre les ex æquo.
   rejoignent le scan `inject_external_refs` (cibles CSS-
   déclarées désormais injectées). `color` hérité du HTML
   projeté partout → `currentColor` se résout dans usvg.
-  API **additive** (R-9 conservée intacte) — adoption par
-  les 3 sites NAV via journal ↔ NAV. Verrous :
+  API **additive** (R-9 conservée intacte) — adoptée par
+  NAV aux 4 sites (`apply.rs` ×3, `composite.rs`) dès
+  `7e0c8a73` ; `net.rs` bfcache garde `collect_svg` (pas de
+  StyleMap en scope — repli honnête). Suite : whitelist
+  `marker*` (shorthand éclaté), `clip-rule`, `mask-type`,
+  `color-interpolation*`, `*-rendering`, `overflow`
+  censurant → `hidden` ; `strip_style_decls` retire du
+  `style` DOM les props projetées (sinon `style=` bat
+  l'attribut dans la cascade usvg). Verrous :
   `svg_styled_fill_css_prime_l_attribut`,
   `svg_styled_currentcolor_recoit_le_color_herite`,
   `svg_styled_display_none_et_geom_css`,
   `svg_styled_d_path_desenrobe`,
-  `svg_styled_clip_path_css_relie_les_refs`.
+  `svg_styled_clip_path_css_relie_les_refs`,
+  `svg_styled_style_attr_ne_prime_pas_le_calcule`,
+  `svg_styled_marker_shorthand_eclate_et_clip_rule`.
+  Restants SVG : `<style>` dans l'îlot (usvg le parse),
+  `foreignObject` (refus usvg — HTML imbriqué hors scope),
+  `<use>` externe (fetch), fonts `@font-face` pour `<text>`
+  (usvg n'a pas la table de fontes session).
 
 `text-fit`/`text-combine-upright`/`interpolate-size` (chantier
 animation↔layout), `text-decoration-skip-ink` (géométrie

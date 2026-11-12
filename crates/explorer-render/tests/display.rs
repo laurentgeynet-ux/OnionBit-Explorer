@@ -4279,3 +4279,42 @@ fn text_decoration_skip_spaces_start_vide_le_blanc_de_tete() {
     );
     assert_eq!(first_x(&auto_r), first_x(&start_r), "auto ≡ start|end");
 }
+
+#[test]
+fn svg_styled_style_attr_ne_prime_pas_le_calcule() {
+    // `style="fill:blue;stroke:red"` DOM + stylesheet
+    // `path{fill:green !important}` : la valeur calculée
+    // (green) doit gagner — sinon usvg applique sa cascade
+    // `style` > présentation et blue l'emporterait.
+    let src = svg_src(
+        "<svg width=\"10\" height=\"10\"><path style=\"fill:blue;mix-blend-mode:multiply\" d=\"M0 0L9 9\"/></svg>",
+        "svg path{fill:green !important}",
+    );
+    assert!(src.contains("fill=\"green\""), "projeté gagne : {src}");
+    assert!(!src.contains("fill:blue"), "décl style retirée : {src}");
+    assert!(
+        src.contains("mix-blend-mode:multiply"),
+        "décl non projetée conservée : {src}"
+    );
+    // Cas usuel (sans !important) : la déclaration inline
+    // blue est la valeur calculée → projetée telle quelle.
+    let src2 = svg_src(
+        "<svg width=\"10\" height=\"10\"><path style=\"fill:blue;stroke:red\" d=\"M0 0L9 9\"/></svg>",
+        "svg path{fill:green}",
+    );
+    assert!(src2.contains("fill=\"blue\""), "inline calculé : {src2}");
+    assert!(src2.contains("stroke=\"red\""), "stroke projeté : {src2}");
+}
+
+#[test]
+fn svg_styled_marker_shorthand_eclate_et_clip_rule() {
+    // `marker:url(#m)` shorthand → 3 longhands ; `clip-rule`
+    // en stylesheet passe aussi.
+    let src = svg_src(
+        "<svg width=\"10\" height=\"10\"><marker id=\"m\"/><path d=\"M0 0L9 9\"/></svg>",
+        "svg path{marker:url(#m);clip-rule:evenodd}",
+    );
+    assert!(src.contains("marker-start=\"url(#m)\""), "marker-start : {src}");
+    assert!(src.contains("marker-end=\"url(#m)\""), "marker-end : {src}");
+    assert!(src.contains("clip-rule=\"evenodd\""), "clip-rule : {src}");
+}

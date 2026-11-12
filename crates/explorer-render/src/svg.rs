@@ -246,8 +246,20 @@ const SVG_STYLE_PROPS: &[&str] = &[
     "flood-opacity",
     "lighting-color",
     "clip-path",
+    "clip-rule",
     "mask",
+    "mask-type",
     "filter",
+    "marker",
+    "marker-start",
+    "marker-mid",
+    "marker-end",
+    "color-interpolation",
+    "color-interpolation-filters",
+    "shape-rendering",
+    "text-rendering",
+    "image-rendering",
+    "overflow",
     "font-family",
     "font-size",
     "font-weight",
@@ -274,6 +286,78 @@ const SVG_GEOM_PROPS: &[&str] = &[
 /// gagne), `transform` est re-syntaxée, `d:path(…)` est
 /// désenrobée. Échappement XML des textes et attributs ;
 /// commentaires ignorés (non significatifs pour le rendu).
+/// Projection style → attributs XML pour un élément
+/// (R-283) : `nom → valeur` (`None` = supprimer l'attribut
+/// DOM — CSS `none` sur `clip-path`/`mask`/`filter`/
+/// `transform`). Les filtres `display`/`visibility`/
+/// `overflow` n'émettent que leurs valeurs censurantes.
+fn project_style(
+    st: Option<&explorer_css::ComputedStyle>,
+    is_root_svg: bool,
+) -> Vec<(&'static str, Option<String>)> {
+    let mut projected: Vec<(&'static str, Option<String>)> = Vec::new();
+    let Some(st) = st else {
+        return projected;
+    };
+    for &p in SVG_STYLE_PROPS {
+        if let Some(v) = st.get(p) {
+            let v = v.trim();
+            match p {
+                "display" => {
+                    if v == "none" {
+                        projected.push((p, Some(v.to_string())));
+                    }
+                }
+                "visibility" => {
+                    if matches!(v, "hidden" | "collapse") {
+                        projected.push((p, Some(v.to_string())));
+                    }
+                }
+                "clip-path" | "mask" | "filter" => {
+                    // `none` = retirer l'effet → supprimer
+                    // l'attribut DOM s'il existe.
+                    projected.push((p, (v != "none").then(|| v.to_string())));
+                }
+                "marker" => {
+                    // Shorthand — pas d'attribut `marker` :
+                    // les trois longhands reçoivent la valeur.
+                    for m in ["marker-start", "marker-mid", "marker-end"] {
+                        projected.push((m, Some(v.to_string())));
+                    }
+                }
+                "overflow" => {
+                    // SVG2 §14.3.3 : sur svg/symbol/image/
+                    // marker/pattern `scroll`/`auto` ≡ `hidden`.
+                    if !matches!(v, "visible" | "initial" | "unset" | "inherit") {
+                        projected.push(("overflow", Some("hidden".to_string())));
+                    }
+                }
+                _ => projected.push((p, Some(v.to_string()))),
+            }
+        }
+    }
+    if let Some(v) = st.get("transform") {
+        let v = v.trim();
+        projected.push((
+            "transform",
+            (v != "none" && v != "initial").then(|| svg_transform(v)),
+        ));
+    }
+    if !is_root_svg {
+        for &p in SVG_GEOM_PROPS {
+            if let Some(v) = st.get(p) {
+                projected.push((p, Some(v.trim().to_string())));
+            }
+        }
+        if let Some(v) = st.get("d") {
+            if let Some(d) = css_path(v.trim()) {
+                projected.push(("d", Some(d)));
+            }
+        }
+    }
+    projected
+}
+
 fn serialize_into(dom: &Dom, node: NodeId, styles: Option<&StyleMap>, out: &mut String) {
     match dom.data(node) {
         Ok(NodeData::Element(e)) => {
@@ -284,60 +368,28 @@ fn serialize_into(dom: &Dom, node: NodeId, styles: Option<&StyleMap>, out: &mut 
             let mut has_xmlns = false;
             // Attributs projetés : nom → valeur de remplacement
             // (`None` = supprimer l'attribut DOM — CSS `none`).
-            let mut projected: Vec<(&str, Option<String>)> = Vec::new();
-            if let Some(st) = st {
-                for &p in SVG_STYLE_PROPS {
-                    if let Some(v) = st.get(p) {
-                        let v = v.trim();
-                        match p {
-                            "display" => {
-                                if v == "none" {
-                                    projected.push((p, Some(v.to_string())));
-                                }
-                            }
-                            "visibility" => {
-                                if matches!(v, "hidden" | "collapse") {
-                                    projected.push((p, Some(v.to_string())));
-                                }
-                            }
-                            "clip-path" | "mask" | "filter" => {
-                                // `none` = retirer l'effet →
-                                // supprimer l'attribut DOM s'il
-                                // existe, rien émettre sinon.
-                                projected.push((p, (v != "none").then(|| v.to_string())));
-                            }
-                            _ => projected.push((p, Some(v.to_string()))),
-                        }
-                    }
-                }
-                if let Some(v) = st.get("transform") {
-                    let v = v.trim();
-                    projected.push((
-                        "transform",
-                        (v != "none" && v != "initial").then(|| svg_transform(v)),
-                    ));
-                }
-                if !is_root_svg {
-                    for &p in SVG_GEOM_PROPS {
-                        if let Some(v) = st.get(p) {
-                            projected.push((p, Some(v.trim().to_string())));
-                        }
-                    }
-                    if let Some(v) = st.get("d") {
-                        if let Some(d) = css_path(v.trim()) {
-                            projected.push(("d", Some(d)));
-                        }
-                    }
-                }
-            }
+            let mut projected = project_style(st, is_root_svg);
             for a in &e.attributes {
                 // La valeur calculée remplace l'attribut de
                 // présentation de même nom (rang UA) — ou le
                 // supprime (`transform:none`, `clip-path:none`…).
                 let name = a.name.as_str();
-                let val = match projected.iter().position(|(n, _)| *n == name) {
-                    Some(i) => projected.remove(i).1,
-                    None => Some(a.value.clone()),
+                // Cas `style` : dans la cascade usvg, l'attribut
+                // `style` bat les attributs de présentation — un
+                // `style="fill:blue"` DOM écraserait le `fill`
+                // calculé projeté (les exports SVG en sont
+                // pleins). On retire donc de la déclaration
+                // sérialisée toutes les propriétés projetées —
+                // leur valeur calculée (qui englobe déjà la
+                // déclaration inline) vit dans l'attribut émis.
+                let val = if name == "style" {
+                    let kept = strip_style_decls(&a.value, &projected);
+                    (!kept.is_empty()).then_some(kept)
+                } else {
+                    match projected.iter().position(|(n, _)| *n == name) {
+                        Some(i) => projected.remove(i).1,
+                        None => Some(a.value.clone()),
+                    }
                 };
                 if let Some(v) = val {
                     let _ = write!(out, " {name}=\"");
@@ -371,6 +423,25 @@ fn serialize_into(dom: &Dom, node: NodeId, styles: Option<&StyleMap>, out: &mut 
         Ok(NodeData::Text(t)) => escape_xml(dom.text_at(*t), out, false),
         _ => {}
     }
+}
+
+/// Retire d'une valeur d'attribut `style` les déclarations
+/// dont la propriété est projetée en attribut — le reste est
+/// conservé tel quel (propriétés non couvertes par la
+/// projection restent visibles pour `usvg`).
+fn strip_style_decls(v: &str, projected: &[(&str, Option<String>)]) -> String {
+    v.split(';')
+        .filter(|decl| {
+            let name = decl
+                .split(':')
+                .next()
+                .unwrap_or("")
+                .trim()
+                .to_ascii_lowercase();
+            name.is_empty() || !projected.iter().any(|(p, _)| *p == name)
+        })
+        .collect::<Vec<_>>()
+        .join(";")
 }
 
 /// CSS `transform` → syntaxe d'attribut SVG : `px`/`deg` nus

@@ -2738,3 +2738,23 @@ cause** ; résidu = promesses des handlers d'erreur `Atn`
 - Reste : nommer l'op hôte que la VM attend avant de boucler —
   prochaine sonde `bg.host` (natives appelées depuis des frames
   VM) ou trace du dernier op avant l'arrêt.
+
+### 2026-11-13 — PIPE : R-283 suite — précédence `style=` + whitelist étendue
+
+- **Correctif de précédence** (post-adoption) : `strip_style_decls`
+  retire du `style` DOM sérialisé toute propriété projetée —
+  sinon `style="fill:blue"` battait le `fill` calculé dans la
+  cascade usvg (exports SVG pleins de `style=`). Les décls non
+  projetées y restent (propriétés hors whitelist visibles pour
+  usvg — ex. `mix-blend-mode`).
+- Whitelist : `marker`/`marker-start`/`marker-mid`/`marker-end`
+  (`marker` shorthand éclaté — les refs `url(#)` des marqueurs
+  CSS passent désormais par `inject_external_refs`), `clip-rule`,
+  `mask-type`, `color-interpolation(-filters)`,
+  `shape-rendering`, `text-rendering`, `image-rendering`,
+  `overflow` censurant (≠visible → `hidden`, SVG2 §14.3.3).
+- Noté : adoption NAV aux 4 sites (`7e0c8a73` — merci pour la
+  passe @container que j'avais ratée), `net.rs` bfcache en
+  repli R-9 documenté (prev_styles ordinal — pas de StyleMap).
+  Famille SVG classée NO_ORACLE au census (effet dans l'îlot
+  rasterisé, hors display-list — verrous PIPE = oracle).
