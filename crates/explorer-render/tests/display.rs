@@ -2290,6 +2290,27 @@ fn empty_cells_hide_ne_peint_ni_fond_ni_bordure() {
 }
 
 #[test]
+fn empty_cells_hide_compte_les_cellules_a_blancs_seuls_comme_vides() {
+    // R-263 — §17.6.1.1 : une cellule réduite à des blancs
+    // collapsibles (espaces, tabulations, sauts de ligne)
+    // est « vide » — elle ne peint ni fond ni bordure.
+    // `\u{A0}`/un élément enfant restent du contenu.
+    let (_dom, _bx, items) = dl(
+        "<table><tr><td id=esp> </td><td id=tab>\t \n </td>\
+         <td id=nbsp>&nbsp;</td><td id=span><span></span></td></tr></table>",
+        "table { empty-cells: hide; border-spacing: 4px } \
+         td { border: 2px solid black; width: 40px }",
+    );
+    // `esp` et `tab` sont vides (blancs seuls) → sautées ;
+    // `nbsp` et `span` = contenu → peintes.
+    let borders = items
+        .iter()
+        .filter(|i| matches!(i, DisplayItem::Border { .. }))
+        .count();
+    assert_eq!(borders, 2, "seules nbsp+span peignent : {borders}");
+}
+
+#[test]
 fn styles_3d_mappees_aux_variantes_reelles() {
     // R-166 — `inset`/`outset`/`groove`/`ridge`/`double`
     // ne sont plus rabattus sur `Double` : la display list

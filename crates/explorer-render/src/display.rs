@@ -25,6 +25,7 @@
 use explorer_css::value::Color;
 use explorer_css::value::{parse_color, parse_length, Unit};
 use explorer_layout::font::ShapedRun;
+use explorer_layout::text::trim_css_ws;
 use explorer_layout::{
     scrollable_overflow_bottom, BoxKind, Float, LayoutBox, Overflow, Position, Rect,
 };
@@ -3738,6 +3739,28 @@ fn mask_repeat(st: &explorer_css::ComputedStyle) -> (u8, u8) {
     }
 }
 
+/// `true` si le fragment ne rend aucun glyphe : texte réduit
+/// à des blancs CSS collapsibles (un atome `inline-block`/
+/// remplacé EST du contenu — `\u{A0}` aussi, cf. `trim_css_ws`).
+fn frag_is_ws_only(f: &explorer_layout::inline::Fragment) -> bool {
+    !f.atomic && trim_css_ws(&f.text).is_empty()
+}
+
+/// `true` si la boîte est du blanc collapsible : texte tout
+/// blanc, ou bloc anonyme dont toute la descendance est
+/// blanche — sert au critère « cellule vide » de
+/// `empty-cells:hide` (§17.6.1.1, R-263).
+fn box_is_ws_only(b: &LayoutBox) -> bool {
+    match b.kind {
+        BoxKind::Text => b.text.as_deref().is_none_or(|t| trim_css_ws(t).is_empty()),
+        BoxKind::AnonymousBlock => {
+            b.children.iter().all(box_is_ws_only)
+                && b.lines.iter().all(|l| l.fragments.iter().all(frag_is_ws_only))
+        }
+        _ => false,
+    }
+}
+
 /// Fond + bordures + texte propre d'une boîte (avant les
 /// enfants — le fond passe TOUJOURS sous son contenu).
 /// `off` = décalage vertical de scroll (`0` dans les
@@ -3784,6 +3807,11 @@ fn paint_self(
     // modèle `separate`, une cellule sans contenu (ni
     // enfants ni lignes — `&nbsp;` compte comme contenu)
     // ne peint ni fond ni bordure.
+    // R-263 : une cellule réduite à des blancs collapsibles
+    // (`<td> </td>` — espace, tab, saut) est « vide » au
+    // sens de la spec : les boîtes texte/blocs anonymes qui
+    // ne portent que du blanc CSS ne comptent pas comme
+    // contenu (`\u{A0}` si — il rend de l'encre).
     let empty_hidden = bx
         .style
         .get("display")
@@ -3796,8 +3824,11 @@ fn paint_self(
             .style
             .get("border-collapse")
             .is_none_or(|v| v.trim() != "collapse")
-        && bx.children.is_empty()
-        && bx.lines.is_empty();
+        && bx.children.iter().all(box_is_ws_only)
+        && bx
+            .lines
+            .iter()
+            .all(|l| l.fragments.iter().all(frag_is_ws_only));
     // R-M9b — `backdrop-filter` : la zone déjà peinte
     // sous la boîte reçoit les ops AVANT que fond/contenu
     // ne s'affichent par-dessus (raster : extract →

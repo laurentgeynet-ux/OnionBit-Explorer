@@ -1932,3 +1932,28 @@ Lot PIPE livré depuis la piste YoutubeFix (R-260, crates `explorer-css`/`explor
 - **Complémentarité** : la file PIPE `css.values` (même commit)
   couvre le domaine pur ; N2 couvre la surface navigateur ; les
   deux convergent vers le shot vitrine (N1).
+
+### couture PIPE → NAV — artefacts de fixture `check affectsv` (2026-11-13)
+
+- **Constat sprint css.values S1** : plusieurs misses `affectsv`
+  résiduels ne sont plus des trous moteur mais des fixtures dont
+  l'effet n'est pas observable — le moteur peint déjà le bon
+  résultat, la valeur sondée est indiscernable du défaut.
+- **`empty-cells:hide`** (R-263) : la cellule vide de la fixture
+  n'a ni `border` ni `background` propre → rien à cacher, `show`
+  et `hide` peignent à l'identique. Pour que la valeur flipe, la
+  `<td>` vide doit porter un décor (`td{border:1px solid}` ou
+  `background`). Côté moteur, le critère est désormais complet
+  (blancs seuls = vide, `\u{A0}` = contenu).
+- **`line-break:loose|normal|strict`** (R-262) : règles de
+  rupture CJK (UAX #14 n'expose pas de niveau de sévérité et le
+  latin n'a pas de coupure à assouplir) — sur fixture latine le
+  rendu est identique par construction → `na` honnête sauf si la
+  fixture porte du CJK.
+- **`vertical-align:top`** sur cellule unique (R-266, en cours
+  d'analyse) : baseline cellule ≈ baseline sœur quand les fontes
+  coïncident → `top` indiscernable de `baseline`. Une sœur de
+  hauteur/ligne différente rend la valeur observable.
+- **Demande NAV** : re-tourner `check affectsv` sur un profil
+  post-R-261…R-266 pour rebaser le score ; journaliser les `na`
+  de fixture séparément des trous moteur réels.

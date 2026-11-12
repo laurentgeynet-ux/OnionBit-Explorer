@@ -4027,8 +4027,11 @@ le census `site_harvest` arbitre les ex æquo.
   `line-break:loose|strict|normal` = règles CJK sans effet
   latin (UAX #14 sans curseur de sévérité → `na` honnête,
   journal NAV). 3 verrous.
-- [ ] `empty-cells:hide` — cellule vide → fond/bordure non
-  peints (`layout`/`display`).
+- [x] `empty-cells:hide` — cellule vide → fond/bordure non
+  peints (`layout`/`display`). **R-263** : critère R-164
+  étendu aux blancs seuls (`box_is_ws_only`, `trim_css_ws`
+  — `\u{A0}` = contenu). Reste : fixture jauge — `<td></td>`
+  sans fond/bordure n'a rien à cacher → `na`, journal NAV.
 - [ ] `white-space` variantes — `pre-line`/`pre-wrap`/
   `break-spaces` + `white-space-collapse` (règles de collapse
   à compléter dans le tokenizer de lignes).
