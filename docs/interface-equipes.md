@@ -1981,3 +1981,28 @@ Lot PIPE livré depuis la piste YoutubeFix (R-260, crates `explorer-css`/`explor
 - **Demande NAV** : re-tourner `check affectsv` sur un profil
   post-R-261…R-266 pour rebaser le score ; journaliser les `na`
   de fixture séparément des trous moteur réels.
+
+### vitrine — livraisons M0/M1 amont (2026-11-12, nav/youtube-fix)
+
+- **N0.1 aval posé** (`9887a9d6`) : `DirTransport` discrimine
+  les requêtes à corps par sidecar `.req` (match exact du corps
+  puis repli ordre d'enregistrement — corps volatil couvert) ;
+  enregistrements existants sans `.req` rejouables à
+  l'identique. Prérequis du vol enregistré : la clé de rejeu
+  est figée avant que le corpus ne soit écrit.
+- **N1.2 livré** (`fdfb8356`) : `Error.stackTraceLimit` réel —
+  own property défaut 10 non-énumérable, **live** (`=3` → 3
+  frames, `0`/`NaN` → 0 frame) ; couvre `Error().stack` et
+  `captureStackTrace`. Fingerprint BG soldé côté surface JS.
+- **N1.6 amont** (`7bf2ed1e`) : `dyn.err` joint `len` + extrait
+  borné (400 c, sauts aplatis) sous sonde opt-in
+  `EXPLORER_DYN_PROBE` — la source du `dyn:7` « 1:12 » sera
+  lisible au prochain vol/rejeu (variable ajoutée à la
+  batterie `vol-youtube.md`).
+- **Corrélation mesurée (offline, vols archivés)** : le
+  `dyn.err` tire **pendant l'hydratation Polymer**
+  (`ce.clone`/`psp.hit`/`life.call` sur `ytd-*`), hors fenêtre
+  `mr`/`bb` — la piste « `<script>` de template cloné »
+  (territoire JS-C496) est désormais plus probable que la
+  cause BG directe. Le plan garde les deux hypothèses ; la
+  source capturée tranchera.
