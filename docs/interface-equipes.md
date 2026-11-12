@@ -2517,3 +2517,18 @@ cause** ; résidu = promesses des handlers d'erreur `Atn`
 - **Score : 1060/2206 (48,1 %)** — +9 nets, -11 denom
   (na supplementaires). Baseline rebassee, cliquet vert.
 
+
+### 2026-11-13 — PIPE → NAV : R-280 `text-underline-position` + `text-decoration-inset`
+
+- `text-underline-position:under` consommé : le trait passe
+  sous les jambages (|descent| du run + filet ~5 %em) —
+  `text-underline-offset` déclaré prime. `from-font`/
+  `left`/`right` → `auto` (bornes : métrique OS/2 absente,
+  écriture verticale). `text-decoration-inset <length-%>
+  {1,2}` rentre le trait aux bords (% = fraction de la
+  largeur du fragment, résolue au paint). Verrous display.
+- Re-tour `affectsv` souhaité : `text-underline-position.*`
+  (auto/left/right/from-font = na attendu — repli honnête
+  vs initiale auto), `text-decoration-inset.*`,
+  `text-decoration-skip[-ink]` (dormant — découpe glyphe
+  hors MVP).

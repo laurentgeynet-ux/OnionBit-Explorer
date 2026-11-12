@@ -4043,3 +4043,84 @@ fn hyphen_cesure_peint_un_run_1_glyphe() {
         .count();
     assert_eq!(solo, 2, "deux tirets césurés attendus : {items:?}");
 }
+
+// ---------- R-280 — `text-underline-position` + `text-decoration-inset` ----------
+
+/// Toutes les `DecoRect` de la display list.
+fn deco_rects(items: &[DisplayItem]) -> Vec<(f32, f32, f32)> {
+    items
+        .iter()
+        .filter_map(|i| match i {
+            DisplayItem::DecoRect { rect, .. } => Some((rect.x, rect.y, rect.width)),
+            _ => None,
+        })
+        .collect()
+}
+
+#[test]
+fn text_underline_position_under_descend_le_trait() {
+    // `under` : le trait passe SOUS les jambages (|descent|
+    // sous la baseline + filet) — plus profond que le repli
+    // `auto` ~10 %em. `text-underline-offset` déclaré prime
+    // sur les deux.
+    let html = "<p><u>ggg ppp</u></p>";
+    let (_, _, auto_items) = dl(
+        html,
+        "p{margin:0;font-size:16px} u{text-decoration:underline}",
+    );
+    let (_, _, under_items) = dl(
+        html,
+        "p{margin:0;font-size:16px}          u{text-decoration:underline;text-underline-position:under}",
+    );
+    let ya = deco_rects(&auto_items)
+        .first()
+        .map(|r| r.1)
+        .expect("deco auto");
+    let yu = deco_rects(&under_items)
+        .first()
+        .map(|r| r.1)
+        .expect("deco under");
+    assert!(yu > ya, "under plus profond : auto={ya} under={yu}");
+    // `from-font`/`left`/`right` : repli auto (bornes).
+    let (_, _, ff_items) = dl(
+        html,
+        "p{margin:0;font-size:16px}          u{text-decoration:underline;text-underline-position:from-font}",
+    );
+    let yf = deco_rects(&ff_items).first().map(|r| r.1).expect("deco");
+    assert_eq!(yf, ya, "from-font = auto (borne métrique)");
+}
+
+#[test]
+fn text_decoration_inset_rentre_le_trait() {
+    // `<length>{1,2}` : 1 valeur = les deux bords ; 2 =
+    // start/end. Le trait rétrécit en largeur ET démarre
+    // après la rentrée start.
+    let html = "<p><u>abcde</u></p>";
+    let (_, _, items) = dl(
+        html,
+        "p{margin:0;font-size:16px} u{text-decoration:underline}",
+    );
+    let (_, _, inset_items) = dl(
+        html,
+        "p{margin:0;font-size:16px}          u{text-decoration:underline;text-decoration-inset:4px 8px}",
+    );
+    let (_, _, uni_items) = dl(
+        html,
+        "p{margin:0;font-size:16px}          u{text-decoration:underline;text-decoration-inset:5px}",
+    );
+    let (x0, _, w0) = deco_rects(&items).first().copied().expect("deco");
+    let (xi, _, wi) = deco_rects(&inset_items).first().copied().expect("deco");
+    let (xu, _, wu) = deco_rects(&uni_items).first().copied().expect("deco");
+    assert!((xi - x0 - 4.0).abs() < 0.5, "start +4 : {x0} → {xi}");
+    assert!((w0 - wi - 12.0).abs() < 0.5, "w −12 : {w0} → {wi}");
+    assert!((xu - x0 - 5.0).abs() < 0.5, "1 valeur = 2 bords : {xu}");
+    assert!((w0 - wu - 10.0).abs() < 0.5, "w −10 : {w0} → {wu}");
+    // `%` de la largeur du fragment.
+    let (_, _, pct_items) = dl(
+        html,
+        "p{margin:0;font-size:16px}          u{text-decoration:underline;text-decoration-inset:25%}",
+    );
+    let (xp, _, wp) = deco_rects(&pct_items).first().copied().expect("deco");
+    assert!((xp - x0 - w0 * 0.25).abs() < 0.5, "25% start : {xp}");
+    assert!((w0 - wp - w0 * 0.5).abs() < 0.5, "w −50% : {wp}");
+}

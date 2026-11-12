@@ -4367,12 +4367,29 @@ fn paint_lines(bx: &LayoutBox, items: &mut Vec<DisplayItem>, off: (f32, f32)) {
                 // usuelles (approx. métriques fonte absente).
                 let th = (fs * 0.0625).max(1.0);
                 let base_y = frag.rect.y + frag.baseline + off.1;
-                let deco_rect = |dy: f32, thick: f32| Rect {
-                    x: frag.rect.x + off.0,
-                    y: dy,
-                    width: frag.rect.width,
-                    height: thick,
-                };
+                // R-280 — `text-decoration-inset` : rentrée
+                // du trait aux bords start/end (`%` de la
+                // largeur du fragment — base connue ici).
+                let deco_rect =
+                    |d: &explorer_layout::inline::TextDeco, dy: f32, thick: f32| -> Rect {
+                        let w = frag.rect.width;
+                        let il = if d.inset_l_pct {
+                            d.inset_l * w / 100.0
+                        } else {
+                            d.inset_l
+                        };
+                        let ir = if d.inset_r_pct {
+                            d.inset_r * w / 100.0
+                        } else {
+                            d.inset_r
+                        };
+                        Rect {
+                            x: frag.rect.x + off.0 + il,
+                            y: dy,
+                            width: (w - il - ir).max(0.0),
+                            height: thick,
+                        }
+                    };
                 for d in &frag.deco {
                     let color = d.color.unwrap_or(ink);
                     // R-178 : épaisseur/offset du déclarant
@@ -4380,18 +4397,27 @@ fn paint_lines(bx: &LayoutBox, items: &mut Vec<DisplayItem>, off: (f32, f32)) {
                     // `text-underline-offset`) avant repli.
                     let dth = if d.thick_px > 0.0 { d.thick_px } else { th };
                     if d.lines & explorer_layout::inline::DECO_UNDERLINE != 0 {
+                        // R-280 — `text-underline-position:under` :
+                        // sous les jambages (|descent| + petit
+                        // filet) quand l'offset est auto —
+                        // `text-underline-offset` déclaré prime.
+                        let dy = base_y
+                            + d.offset_px.unwrap_or_else(|| {
+                                if d.under_pos == 1 {
+                                    -run.metrics.descent + (fs * 0.05).max(1.0)
+                                } else {
+                                    (fs * 0.1).max(1.0)
+                                }
+                            });
                         items.push(DisplayItem::DecoRect {
-                            rect: deco_rect(
-                                base_y + d.offset_px.unwrap_or((fs * 0.1).max(1.0)),
-                                dth,
-                            ),
+                            rect: deco_rect(d, dy, dth),
                             color,
                             style: d.style,
                         });
                     }
                     if d.lines & explorer_layout::inline::DECO_OVERLINE != 0 {
                         items.push(DisplayItem::DecoRect {
-                            rect: deco_rect(base_y - fs * 0.85, dth),
+                            rect: deco_rect(d, base_y - fs * 0.85, dth),
                             color,
                             style: d.style,
                         });
@@ -4496,7 +4522,7 @@ fn paint_lines(bx: &LayoutBox, items: &mut Vec<DisplayItem>, off: (f32, f32)) {
                     if d.lines & explorer_layout::inline::DECO_LINE_THROUGH != 0 {
                         let dth = if d.thick_px > 0.0 { d.thick_px } else { th };
                         items.push(DisplayItem::DecoRect {
-                            rect: deco_rect(base_y - fs * 0.3 - dth / 2.0, dth),
+                            rect: deco_rect(d, base_y - fs * 0.3 - dth / 2.0, dth),
                             color: d.color.unwrap_or(ink),
                             style: d.style,
                         });

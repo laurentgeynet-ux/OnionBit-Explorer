@@ -4279,6 +4279,18 @@ le census `site_harvest` arbitre les ex æquo.
   ignorés. Verrou : `text_box_trim_retire_le_half_leading`
   (both < start ≡ end < none, remontée start, pas end,
   shorthand ≡ longhand).
+- [x] **R-280 — `text-underline-position` + `text-decoration-inset`** (~4) —
+  `under` place le trait sous les jambages (|descent| +
+  filet, offset déclaré prime) ; `from-font`/`left`/`right`
+  retombent sur `auto` (pas de métrique `underlinePosition`
+  dans la pile fonte, bords verticaux — bornes).
+  `text-decoration-inset <length-%>{1,2}` rentre le trait
+  aux bords start/end (1 valeur = 2 bords, `%` = fraction
+  de la largeur du fragment résolue au paint). `TextDeco`
+  porte `under_pos` + insets résolus à l'itemisation.
+  Verrous : `text_underline_position_under_descend_le_trait`
+  (under > auto, from-font ≡ auto), `text_decoration_inset_rentre_le_trait`
+  (1/2 valeurs + `%` sur underline).
 
 `text-box*`/`text-autospace`/`text-fit`/`initial-letter`/
 `text-combine-upright`, `counter-set`/`counter-increment` fins,

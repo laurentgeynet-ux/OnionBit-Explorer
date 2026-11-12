@@ -76,6 +76,24 @@ pub struct TextDeco {
     /// `text-underline-offset` résolu en px (`None` = auto
     /// → repli ~10% em au paint).
     pub offset_px: Option<f32>,
+    /// `text-underline-position` (css-text-decor-4 — R-280) :
+    /// 0 = `auto`/`from-font`/`left`/`right` (repli — pas de
+    /// métrique `underlinePosition` dans la pile de fontes,
+    /// bords verticaux hors scope horizontal), 1 = `under`
+    /// (sous les jambages — CJK).
+    pub under_pos: u8,
+    /// `text-decoration-inset` (css-text-decor-4 — R-280) :
+    /// rentrée du trait aux bords start/end — valeur brute
+    /// (px, ou **pourcent** si le drapeau `_pct` est posé —
+    /// alors fraction ×100 de la largeur du fragment, base
+    /// inconnue à l'itemisation). `auto`/absent → 0.
+    pub inset_l: f32,
+    /// Voir [`TextDeco::inset_l`].
+    pub inset_l_pct: bool,
+    /// Voir [`TextDeco::inset_l`].
+    pub inset_r: f32,
+    /// Voir [`TextDeco::inset_l`].
+    pub inset_r_pct: bool,
 }
 
 /// `text-decoration` de `st` → entrée résolue, `None` si
@@ -126,6 +144,30 @@ fn text_deco(st: &ComputedStyle, fs: f32, ctx: &BlockCtx) -> Option<TextDeco> {
     let offset_px = st
         .get("text-underline-offset")
         .and_then(|t| raw_length_px(t, own_fs, own_fs, ctx));
+    // R-280 — `text-underline-position` : `under` place le
+    // trait sous les jambages ; `from-font`/`left`/`right`
+    // retombent sur `auto` (métrique `underlinePosition` et
+    // écriture verticale hors périmètre — bornes).
+    let under_pos = u8::from(
+        st.get("text-underline-position")
+            .is_some_and(|v| v.trim().eq_ignore_ascii_case("under")),
+    );
+    // R-280 — `text-decoration-inset` `<length-%>{1,2}|auto` :
+    // une valeur = les deux bords ; `%` retardé au paint
+    // (base = largeur du fragment, inconnue ici).
+    let inset_of = |t: &str| -> (f32, bool) {
+        if let Some(pct) = t.strip_suffix('%') {
+            (pct.parse().unwrap_or(0.0), true)
+        } else {
+            (raw_length_px(t, own_fs, own_fs, ctx).unwrap_or(0.0), false)
+        }
+    };
+    let mut toks = st.get("text-decoration-inset").map_or_else(Vec::new, |v| {
+        v.split_ascii_whitespace().collect::<Vec<&str>>()
+    });
+    toks.retain(|t| *t != "auto");
+    let first_in = toks.first().map_or((0.0, false), |t| inset_of(t));
+    let last_in = toks.get(1).map_or(first_in, |t| inset_of(t));
     Some(TextDeco {
         lines,
         // `text-decoration-color` (css-text-decor-3 §2.4 —
@@ -138,6 +180,11 @@ fn text_deco(st: &ComputedStyle, fs: f32, ctx: &BlockCtx) -> Option<TextDeco> {
         style,
         thick_px,
         offset_px,
+        under_pos,
+        inset_l: first_in.0,
+        inset_l_pct: first_in.1,
+        inset_r: last_in.0,
+        inset_r_pct: last_in.1,
     })
 }
 
