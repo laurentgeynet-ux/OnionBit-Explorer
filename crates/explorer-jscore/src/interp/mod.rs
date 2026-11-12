@@ -9584,9 +9584,21 @@ impl Engine {
                         .get(1)
                         .map(|v| self.describe(v.clone()))
                         .unwrap_or_default();
+                    let a2 = args_ref
+                        .get(2)
+                        .map(|v| self.describe(v.clone()))
+                        .unwrap_or_default();
+                    let a3 = args_ref
+                        .get(3)
+                        .map(|v| self.describe(v.clone()))
+                        .unwrap_or_default();
+                    let (from, _, _) = self.stack_nearest_fn_src(120);
                     tracing::info!(target: "dom_probe", site = "bg.wcb",
-                        n = n, a0 = %a0.chars().take(60).collect::<String>(),
-                        a1 = %a1.chars().take(40).collect::<String>());
+                        n = n, a0 = %a0.chars().take(40).collect::<String>(),
+                        a1 = %a1.chars().take(24).collect::<String>(),
+                        a2 = %a2.chars().take(24).collect::<String>(),
+                        a3 = %a3.chars().take(24).collect::<String>(),
+                        from = %from);
                 }
             } else if BG_IO_ARMED.load(std::sync::atomic::Ordering::Relaxed) {
                 // N1.5 — `bg.io` : invocation d'un callable de la
