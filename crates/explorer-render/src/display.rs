@@ -660,8 +660,18 @@ impl DisplayList {
                 DisplayItem::Image { rect, img } => {
                     let _ = writeln!(out, "image {}x{} {rect:?}", img.width, img.height);
                 }
-                DisplayItem::BackgroundImage { rect, img, .. } => {
-                    let _ = writeln!(out, "bg-image {}x{} {rect:?}", img.width, img.height);
+                DisplayItem::BackgroundImage {
+                    rect,
+                    img,
+                    repeat,
+                    origin,
+                    blend,
+                } => {
+                    let _ = writeln!(
+                        out,
+                        "bg-image {}x{} {rect:?} r{repeat:?} o{origin:?} b{blend}",
+                        img.width, img.height
+                    );
                 }
                 DisplayItem::MaskedFill { rect, mask, .. } => {
                     let _ = writeln!(out, "masked-fill {}x{} {rect:?}", mask.width, mask.height);
@@ -702,7 +712,18 @@ impl DisplayList {
                 }
                 DisplayItem::PopBlend => out.push_str("pop-blend\n"),
                 DisplayItem::PushMask { rect, layers, .. } => {
-                    let _ = writeln!(out, "push-mask x{} {rect:?}", layers.len());
+                    let _ = write!(out, "push-mask x{} {rect:?}", layers.len());
+                    for l in layers {
+                        let _ = write!(
+                            out,
+                            " [d{dst:?} r{repeat:?} l{lumi} c{comp}]",
+                            dst = l.dst,
+                            repeat = l.repeat,
+                            lumi = l.luminance,
+                            comp = l.composite
+                        );
+                    }
+                    out.push('\n');
                 }
                 DisplayItem::PopMask => out.push_str("pop-mask\n"),
                 DisplayItem::BackdropFilter { rect, .. } => {

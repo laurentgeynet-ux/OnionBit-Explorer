@@ -866,11 +866,17 @@ fn fixture_for(name: &str) -> &'static str {
         {
             "<body><div class=x style=\"width:100px;height:80px;overflow:scroll\"><p style=\"height:200px\">a</p></div></body>"
         }
+        // `background*`/`mask*` — pas de `background` inline
+        // (il écraserait la déclaration testée) : l'image de
+        // contexte est posée par `context_css` (gradient
+        // peint sans ressource externe).
+        () if n.starts_with("background") || n.starts_with("mask") => {
+            "<body><div class=x><p>a</p></div></body>"
+        }
         // Boîte à dimensions fixes — `position`, `inset`,
         // `transform`, `overflow`, `scroll-snap`, `contain`,
-        // `clip-*`, `background-*`, `mask-*` : un box 100×80
-        // suffit (les effets position/sizing/visibilité sont
-        // mesurables).
+        // `clip-*` : un box 100×80 suffit (les effets
+        // position/sizing/visibilité sont mesurables).
         () if matches!(
             n,
             "position" | "top" | "right" | "bottom" | "left" | "inset"
@@ -879,9 +885,7 @@ fn fixture_for(name: &str) -> &'static str {
                 | "contain-intrinsic-width" | "contain-intrinsic-height" | "content-visibility"
                 | "clip" | "clip-path" | "visibility" | "opacity" | "filter"
                 | "mix-blend-mode" | "isolation" | "box-shadow" | "box-sizing"
-                | "background-clip" | "background-origin" | "background-size"
-                | "background-position" | "background-repeat" | "background-attachment"
-                | "background-blend-mode" | "object-fit" | "object-position"
+                | "object-fit" | "object-position"
         ) =>
         {
             "<body><div class=x style=\"width:100px;height:80px;background:blue\"><p>a</p></div></body>"
@@ -954,6 +958,18 @@ fn context_css(name: &str) -> &'static str {
         } else {
             "border:2px solid black;width:100px;height:80px;background:blue"
         }
+    } else if n.starts_with("mask") {
+        // Les longhands `mask-*` n'ont d'effet que sur une
+        // source `mask-image` (même astuce gradient).
+        "mask-image:linear-gradient(red,blue);width:100px;height:80px"
+    } else if n.starts_with("background") {
+        // `position`/`repeat`/`size`/`attachment`/`blend` n'ont
+        // d'effet que sur une image de fond — gradient
+        // `linear-gradient` (peint sans ressource externe,
+        // `PaintImages` vide au harnais). La bordure distingue
+        // `content-box`/`padding-box`/`border-box` (sans elle
+        // les trois aires coïncident → `clip`/`origin` inertes).
+        "background-image:linear-gradient(red,blue);border:10px solid black;width:100px;height:80px"
     } else if n.starts_with("outline") {
         "outline:2px solid black;width:100px;height:80px"
     } else if n.starts_with("column-") || n.starts_with("break-") || n == "columns" {
@@ -1144,6 +1160,30 @@ const NO_ORACLE: &[&str] = &[
     "speak-as",
     "backface-visibility",
     "anchor-scope",
+    // `mask-*` : la couche mask n'est résolue que depuis une
+    // bitmap `url()` fetchée (`resolve_mask` — `PaintImages`
+    // vide au harnais, les gradients ne passent pas par ce
+    // chemin) — aucune valeur observable sans ressource
+    // externe.
+    "mask",
+    "mask-image",
+    "mask-mode",
+    "mask-repeat",
+    "mask-position",
+    "mask-position-x",
+    "mask-position-y",
+    "mask-size",
+    "mask-clip",
+    "mask-origin",
+    "mask-composite",
+    "mask-border",
+    "mask-border-mode",
+    "mask-border-repeat",
+    "mask-border-slice",
+    "mask-border-source",
+    "mask-border-width",
+    "mask-border-outset",
+    "mask-type",
 ];
 
 fn affects_decl_verdict(decl: &str) -> Option<bool> {
