@@ -785,6 +785,25 @@ pub(crate) fn layout_table(
             row_h = row_h.max(used);
             used_list.push(used);
         }
+        // §17.5.3 — la `height` **spécifiée de la rangée**
+        // (`tr` réel, `path` présent) borne inférieurement
+        // `row_h` : `<tr style="height:5px">` garde ses 5 px
+        // même à cellules vides (spacer HN — avant : rang
+        // effondré à la hauteur de contenu ~0). Un rang
+        // spécifié est fixe pour la distribution d'excédent,
+        // comme une cellule à `height` ; les `%` restent
+        // `auto` (cb de hauteur indéfinie à ce stade).
+        if let Some(p) = &row.path {
+            if let Some(rb) = at_path(bx, p) {
+                let h = rb.style.get("height").map_or("", str::trim);
+                if !h.is_empty() && h != "auto" && !h.contains('%') {
+                    row_fixed[k] = true;
+                    if let Some(px) = css_px(&rb.style, "height", 0.0, fs, ctx) {
+                        row_h = row_h.max(px);
+                    }
+                }
+            }
+        }
         cell_used.push(used_list);
         row_tops.push((cursor_y, row_h));
         cursor_y += row_h + gap[k + 1];

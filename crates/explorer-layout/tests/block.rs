@@ -2991,6 +2991,35 @@ fn table_collapse_colonnes_et_baseline() {
     );
 }
 
+/// R-291 — §17.5.3 : la `height` **spécifiée de la rangée**
+/// (`tr` réel) borne inférieurement sa hauteur — un spacer
+/// `<tr style="height:5px">` à cellule vide conserve ses
+/// 5 px au lieu de s'effondrer au contenu (~0). La rangée
+/// suivante est repoussée d'autant — cause mesurée du
+/// drift `dy` cumulatif ~4,7 px/story sur Hacker News.
+#[test]
+fn table_tr_height_specifiee_borne_le_rang() {
+    let (dom, bx) = laid(
+        "<table><tr><td id=a>x</td></tr>\
+         <tr id=sp style=\"height:5px\"><td></td></tr>\
+         <tr><td id=b>y</td></tr></table>",
+        "table{border-collapse:collapse} td{padding:0;font-size:10px}",
+    );
+    let sp = find(&bx, by_id(&dom, "sp"));
+    assert!(
+        sp.rect.height >= 5.0 - 0.01,
+        "rang à height spécifiée : {} ≥ 5",
+        sp.rect.height
+    );
+    let a = find(&bx, by_id(&dom, "a"));
+    let b = find(&bx, by_id(&dom, "b"));
+    let gap = b.rect.y - (a.rect.y + a.rect.height);
+    assert!(
+        gap >= 5.0 - 0.01,
+        "la rangée suivante est repoussée du spacer : gap {gap}"
+    );
+}
+
 /// R-266 — §17.5.3.1 : sur une cellule, toute valeur hors
 /// `baseline`/`top`/`middle`/`bottom` retombe sur `baseline`
 /// (l'ancien `_ => 0` alignait `text-top`/`text-bottom`/

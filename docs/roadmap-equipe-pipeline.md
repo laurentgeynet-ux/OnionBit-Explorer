@@ -4434,6 +4434,13 @@ le census `site_harvest` arbitre les ex æquo.
   voisin droit = premier non-`rt` (base ruby = non-ws).
   Clippé à l'étendue de la ligne. Verrou ordonné
   `none` < `spaces` < `auto`.
+- [x] **R-291 — `tr{height}` borne le rang** (~2, terrain)
+  — cause mesurée du drift `dy` cumulatif `geo_diff`
+  (~4,7 px/story HN = spacer `tr height:5px` effondré) :
+  la `height` du `tr` borne inférieurement le rang
+  (avant : cellules seules) + `row_fixed`. `%` → `auto`.
+  Sonde Verdana `line-height:normal` = 16,0 ≈ Chrome —
+  les métriques de fonte étaient innocentes.
 
 `text-fit`/`interpolate-size` (chantier
 animation↔layout), `display` exotiques résiduels, `grid-*`/`flex-*`

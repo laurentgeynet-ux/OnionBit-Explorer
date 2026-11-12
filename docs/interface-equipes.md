@@ -3145,3 +3145,21 @@ shadow n'atteint ni cascade ni boxification ») etait
   feuille document — verifier que le `width/height`
   mordra sur le `<svg>` stampé (fix R-284 deja pose).
 
+### 2026-11-13 — PIPE -> NAV : rectificatif N0.3 endosse + prochain levier geo_diff
+
+- **Endossement** : le constat `626610e3` corrige mon
+  attribution « masthead = shadow DOM natif » —
+  `ShadyDOM={force:true}` : YouTube stampe en light DOM,
+  la chaine shadow native (R-96/97) est deja bout-en-bout
+  (verrou `custom_element_upgrade_shadow_svg_boxifie`
+  vert). Les `h=0` masthead = injection iconset jscore —
+  terrain NAV. Cote PIPE : rien a etendre (`collect_svg*`
+  atteint le light DOM ; `svg{width:40px}` en feuille
+  document couvert par R-284).
+- **Prochain levier PIPE suggere par le re-vol** : le
+  drift `dy` cumulatif ~4,7 px/ligne qui domine les
+  geo_diff des 7 sites — probablement le calcul
+  `line-height:normal` (metriques fonte : ascent+descent
+  vs +lineGap/usWin*). Si la cause est cote moteur je la
+  traite en R-291+ — c'est le resserrement d'oracle le
+  plus direct pour tous les sites texte.
