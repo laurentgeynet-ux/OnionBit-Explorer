@@ -3045,3 +3045,24 @@ cause** ; résidu = promesses des handlers d'erreur `Atn`
   la sous-feature mais l'approximation actuelle borne
   l'overhang a l'etendue de ligne, pas aux espaces
   seuls — borne assumee de R-289.
+
+### 2026-11-12 — N1.5 : `sPQ` = stepper VM, jamais invoqué
+
+- `EXPLORER_EVAL_DUMP=<dir>` : dump du bytecode VM
+  (`_evaldump_001.js`, 66 117 o) — le daemon WMI écrit hors de
+  son cwd `System32\wbem`.
+- `mtI_` retourne `[(new u3(...), step), halt]` — la virgule
+  garde la fonction : **`sPQ` = le stepper** (`$g(1,false,17,
+  L,W)` — un pas du programme avec entrée `W`).
+- `bg.spq.obj` ×3 écrits, **`bg.spq` = 0** : le stepper n'est
+  jamais rappelé. Seul chemin : `Kmw → L.sPQ([a9,cAW,oN7,vYy])`
+  (via `d8U.invoke`/`wpc.m`/`mws`). Page jamais invoquée →
+  programme figé à son yield d'entrée → `V` inatteignable →
+  `jOM`/`snapshot`/`auT` (tous hix-gatés) pendent → `bb`.
+- La VM a son propre système Event/EventTarget interne
+  (`Q.prototype.preventDefault`…), `l3`="integCheckBypass" ;
+  ses listeners natifs n'atteignent pas le DOM (bg.listen=0
+  cohérent).
+- Question résiduelle : quel rail doit appeler `invoke`/`wpc.m`
+  sur /watch (signature de requête `/youtubei` ?) — et pourquoi
+  il ne le fait pas en rejeu.
