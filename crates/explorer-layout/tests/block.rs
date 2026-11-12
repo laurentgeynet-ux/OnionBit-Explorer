@@ -3262,3 +3262,96 @@ fn flex_column_margin_auto_centre_verticalement() {
         "item centré verticalement : dy={dy} attendu 75"
     );
 }
+
+// ── R-273 : `shape-outside` — les lignes contournent la
+// forme (css-shapes-1 §3) : un cercle dans la margin box ne
+// mord que là où sa courbe passe — la ligne du haut déborde
+// moins que celle du milieu.
+
+#[test]
+fn shape_outside_cercle_mord_selon_la_hauteur() {
+    // Flottant gauche 40×40 ; `circle(20px at center)` →
+    // centre (20,20), r=20 : étendue droite = 20 en haut
+    // (tangente), 40 au milieu. Sans forme : 40 partout.
+    let html = concat!(
+        "<!doctype html><div style=\"width:200px\">",
+        "<div class=\"fl\"><div style=\"width:40px;height:40px\"></div></div>",
+        "<p>aaaa aaaa aaaa aaaa aaaa aaaa aaaa aaaa aaaa aaaa aaaa aaaa</p>",
+        "</div>"
+    );
+    let (_, bx) = laid(
+        html,
+        "body{margin:0}p{margin:0}.fl{float:left;shape-outside:circle(20px at center)}",
+    );
+    let (dom, _) = laid(html, "");
+    let p = find(&bx, by_tag(&dom, "p"));
+    let anon = &p.children[0];
+    assert!(anon.lines.len() >= 3, "lines={}", anon.lines.len());
+    // Témoin sans forme : la marge-rect mord pareil partout.
+    let (_, bx2) = laid(html, "body{margin:0}p{margin:0}.fl{float:left}");
+    let p2 = find(&bx2, by_tag(&dom, "p"));
+    let rect_x = p2.children[0].lines[0].rect.x;
+    // Forme : la morsure varie selon la hauteur (courbe) ET
+    // quelque part elle est strictement plus faible que le
+    // rectangle témoin.
+    let xs: Vec<f32> = anon.lines.iter().map(|l| l.rect.x).collect();
+    let (lo, hi) = xs
+        .iter()
+        .fold((f32::INFINITY, f32::NEG_INFINITY), |(a, b), v| {
+            (a.min(*v), b.max(*v))
+        });
+    assert!(hi - lo > 1.0, "morsure variable attendue : {xs:?}");
+    assert!(
+        lo < rect_x - 1.0,
+        "la forme mord moins que le rect : lo={lo} rect={rect_x} ({xs:?})"
+    );
+}
+
+#[test]
+fn shape_outside_inset_bornee_et_shape_margin() {
+    // `inset(10px)` sur un flottant 40×40 : la forme couvre
+    // [10,30)² → les lignes dans cette bande démarrent à
+    // ~30 (10+20), celles en dessous à 0.
+    let html = concat!(
+        "<!doctype html><div style=\"width:200px\">",
+        "<div class=\"fl\"><div style=\"width:40px;height:40px\"></div></div>",
+        "<p>aaaa aaaa aaaa aaaa aaaa aaaa aaaa aaaa aaaa aaaa aaaa aaaa</p>",
+        "</div>"
+    );
+    let (dom, _) = laid(html, "");
+    let (_, bx) = laid(
+        html,
+        "body{margin:0}p{margin:0}.fl{float:left;shape-outside:inset(10px)}",
+    );
+    let xs: Vec<f32> = find(&bx, by_tag(&dom, "p")).children[0]
+        .lines
+        .iter()
+        .map(|l| l.rect.x)
+        .collect();
+    let (lo, hi) = xs
+        .iter()
+        .fold((f32::INFINITY, f32::NEG_INFINITY), |(a, b), v| {
+            (a.min(*v), b.max(*v))
+        });
+    assert!(lo < 5.0, "lignes sous la forme libres : {xs:?}");
+    assert!(
+        hi > 20.0 && hi < 40.0,
+        "morsure bornée à l'inset (30) : {xs:?}"
+    );
+    // `shape-margin:10px` dilate la forme au-delà de la
+    // marge-rect : certaines lignes reculent plus que 40.
+    let (_, bx) = laid(
+        html,
+        "body{margin:0}p{margin:0}.fl{float:left;\
+         shape-outside:inset(0);shape-margin:10px}",
+    );
+    let xs: Vec<f32> = find(&bx, by_tag(&dom, "p")).children[0]
+        .lines
+        .iter()
+        .map(|l| l.rect.x)
+        .collect();
+    assert!(
+        xs.iter().any(|x| *x > 45.0),
+        "shape-margin repousse au-delà de la marge : {xs:?}"
+    );
+}

@@ -2169,3 +2169,25 @@ Lot PIPE livré depuis la piste YoutubeFix (R-260, crates `explorer-css`/`explor
   (sizing intrinsèque SVG/icônes, hauteurs flex) — la file M1
   (BG/fingerprints) garde son ordre mais M3/paint ne gate pas
   le squelette ; la parité feed attendra le profil amorcé.
+
+### couture PIPE — R-273 `shape-outside` (css.values S4)
+
+- **Modèle** : `FloatCtx.left/right` : `Vec<Rect>` →
+  `Vec<FloatRect{rect, shape}>` — la marge-rect pilote
+  placement §9.5 / clear / containment ; la forme ne mord
+  que les lignes (`band`/`band_over` → `bite_left/right`
+  sur l’intervalle vertical). Pas de changement d’API publique
+  (types `pub(crate)`).
+- **Formes** : `circle`/`ellipse` (`at`, rayon % = √(w²+h²)/√2),
+  `inset`/`rect`/`xywh`, `polygon` ; `shape-margin` dilate
+  (sauf polygon). Référence : `margin-box` défaut §3,
+  `border-box` explicite, `padding`/`content` → bordure (borne).
+- **Bornes** : `url()`/`image()`/`gradient()` → None (pas
+  d’analyse alpha — `shape-image-threshold` dormant ;
+  chantier dédié si la jauge le justifie).
+- **Fix annexe** : `offset-anchor:bottom left` (ordre
+  vertical d’abord) tronquait le 2ᵉ token — routé.
+- **Census** : re-mesure NAV 1041/2231 (46,7 %) déjà
+  intégrée ; `shape-outside` circle/ellipse/inset/polygon/
+  shape-margin mesurés `ok`, `url()`/`image()` restent
+  `miss` attendus.

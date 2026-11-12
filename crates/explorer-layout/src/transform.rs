@@ -596,7 +596,9 @@ fn offset_pos(raw: &str, r: &Rect, fallback: (f32, f32)) -> (f32, f32) {
     };
     let y = it.next().unwrap_or("center");
     if matches!(x, "top" | "bottom") {
-        return pos_in_rect("center", x, r);
+        // Ordre inversé (`bottom left`) : le token vertical
+        // en tête, l'autre pilote l'axe x (spec `<position>`).
+        return pos_in_rect(y, x, r);
     }
     pos_in_rect(x, y, r)
 }

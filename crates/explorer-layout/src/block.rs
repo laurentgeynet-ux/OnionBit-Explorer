@@ -163,10 +163,153 @@ impl MarginRun {
 /// pas l'extérieur, et réciproquement).
 #[derive(Default)]
 pub(crate) struct FloatCtx {
-    /// Flottants gauche (marge-rects).
-    pub left: Vec<Rect>,
-    /// Flottants droit (marge-rects).
-    pub right: Vec<Rect>,
+    /// Flottants gauche (marge-rects + forme `shape-outside`).
+    pub left: Vec<FloatRect>,
+    /// Flottants droit (marge-rects + forme `shape-outside`).
+    pub right: Vec<FloatRect>,
+}
+
+/// Un flottant posé : sa **marge-box** (référence pour
+/// `clear`, le placement §9.5 et `bottom_of` — la forme
+/// n'influe que sur la morsure des lignes, pas sur ces
+/// algorithmes) et sa forme `shape-outside` éventuelle,
+/// déjà résolue en coords absolues (css-shapes-1 — R-273).
+pub(crate) struct FloatRect {
+    /// Marge-rect du flottant.
+    pub rect: Rect,
+    /// Forme extérieure éventuelle (`None` = marge-rect).
+    pub shape: Option<OutsideShape>,
+}
+
+impl FloatRect {
+    /// Bord le plus à droite qui mord `[y0, y1]` — marge-
+    /// rect sans forme, étendue max de la forme sinon.
+    fn bite_right(&self, y0: f32, y1: f32) -> f32 {
+        match &self.shape {
+            None => self.rect.x + self.rect.width,
+            Some(s) => s.max_x_over(y0, y1),
+        }
+    }
+
+    /// Bord le plus à gauche qui mord `[y0, y1]` — symétrique.
+    fn bite_left(&self, y0: f32, y1: f32) -> f32 {
+        match &self.shape {
+            None => self.rect.x,
+            Some(s) => s.min_x_over(y0, y1),
+        }
+    }
+
+    /// Étendue verticale de la **morsure** : la forme si
+    /// présente (un cercle court ne contraint pas la ligne
+    /// sous/sur lui), sinon la marge-rect.
+    fn y_extent(&self) -> (f32, f32) {
+        match &self.shape {
+            None => (self.rect.y, self.rect.y + self.rect.height),
+            Some(s) => s.y_extent(),
+        }
+    }
+}
+
+/// `shape-outside` résolu en coords absolues — formes de
+/// base de css-shapes-1 §3 : `inset`/`rect`/`xywh` bornés à
+/// leur rectangle, `polygon` en sommets.
+#[derive(Debug)]
+pub(crate) enum OutsideShape {
+    /// `circle`/`ellipse` — centre + demi-axes (rx=ry pour
+    /// `circle`).
+    Ellipse { c: (f32, f32), rx: f32, ry: f32 },
+    /// `inset`/`rect`/`xywh` — rectangle absolu.
+    Inset { x: f32, y: f32, w: f32, h: f32 },
+    /// `polygon(pts…)` — sommets absolus.
+    Poly { pts: Vec<(f32, f32)> },
+}
+
+impl OutsideShape {
+    /// Étendue verticale de la forme — le rect de marge
+    /// borne le *débogage* ; c'est la forme qui mord.
+    fn y_extent(&self) -> (f32, f32) {
+        match self {
+            Self::Ellipse { c, ry, .. } => (c.1 - ry, c.1 + ry),
+            Self::Inset { y, h, .. } => (*y, y + h),
+            Self::Poly { pts } => {
+                let (lo, hi) = pts
+                    .iter()
+                    .map(|p| p.1)
+                    .fold((f32::INFINITY, f32::NEG_INFINITY), |(a, b), y| {
+                        (a.min(y), b.max(y))
+                    });
+                (lo, hi)
+            }
+        }
+    }
+
+    /// Étendue x maximale de la forme sur `[y0, y1]`.
+    fn max_x_over(&self, y0: f32, y1: f32) -> f32 {
+        match self {
+            Self::Ellipse { c, rx, ry } => {
+                // Candidats : bornes + sommet de la courbe
+                // (cy dans l'intervalle → demi-axe plein).
+                let mut m = f32::NEG_INFINITY;
+                for y in [y0, y1, c.1.clamp(y0, y1)] {
+                    let t = ((y - c.1) / ry.max(f32::EPSILON)).clamp(-1.0, 1.0);
+                    m = m.max(c.0 + rx * (1.0 - t * t).sqrt());
+                }
+                m
+            }
+            Self::Inset { x, w, .. } => x + w,
+            Self::Poly { pts } => pts
+                .iter()
+                .filter(|p| p.1 >= y0 && p.1 <= y1)
+                .map(|p| p.0)
+                .chain(
+                    // Sommets des arêtes qui coupent
+                    // l'intervalle : l'étendue peut être
+                    // atteinte en traversée.
+                    Self::poly_crossings(pts, y0, y1).iter().copied(),
+                )
+                .fold(f32::NEG_INFINITY, f32::max),
+        }
+    }
+
+    /// Étendue x minimale de la forme sur `[y0, y1]`.
+    fn min_x_over(&self, y0: f32, y1: f32) -> f32 {
+        match self {
+            Self::Ellipse { c, rx, ry } => {
+                let mut m = f32::INFINITY;
+                for y in [y0, y1, c.1.clamp(y0, y1)] {
+                    let t = ((y - c.1) / ry.max(f32::EPSILON)).clamp(-1.0, 1.0);
+                    m = m.min(c.0 - rx * (1.0 - t * t).sqrt());
+                }
+                m
+            }
+            Self::Inset { x, .. } => *x,
+            Self::Poly { pts } => pts
+                .iter()
+                .filter(|p| p.1 >= y0 && p.1 <= y1)
+                .map(|p| p.0)
+                .chain(Self::poly_crossings(pts, y0, y1).iter().copied())
+                .fold(f32::INFINITY, f32::min),
+        }
+    }
+
+    /// Abscisses où le polygone coupe `[y0, y1]` —
+    /// intersections des arêtes avec les bornes.
+    fn poly_crossings(pts: &[(f32, f32)], y0: f32, y1: f32) -> Vec<f32> {
+        let mut xs = Vec::new();
+        for i in 0..pts.len() {
+            let (a, b) = (pts[i], pts[(i + 1) % pts.len()]);
+            let (dy, dx) = (b.1 - a.1, b.0 - a.0);
+            for y in [y0, y1] {
+                if (a.1 - y) * (b.1 - y) < 0.0 && dy.abs() > f32::EPSILON {
+                    xs.push(a.0 + dx * (y - a.1) / dy);
+                }
+            }
+            // L'étendue sur l'intervalle peut aussi venir d'un
+            // sommet **à l'intérieur** — déjà couvert par
+            // `pts` dans l'appelant.
+        }
+        xs
+    }
 }
 
 impl FloatCtx {
@@ -176,13 +319,15 @@ impl FloatCtx {
         let mut xl = cx;
         let mut xr = cx + cw;
         for f in &self.left {
-            if f.y <= top && f.y + f.height > top {
-                xl = xl.max(f.x + f.width);
+            let (fy0, fy1) = f.y_extent();
+            if fy0 <= top && fy1 > top {
+                xl = xl.max(f.bite_right(top, top));
             }
         }
         for f in &self.right {
-            if f.y <= top && f.y + f.height > top {
-                xr = xr.min(f.x);
+            let (fy0, fy1) = f.y_extent();
+            if fy0 <= top && fy1 > top {
+                xr = xr.min(f.bite_left(top, top));
             }
         }
         // Sans morsure effective (bords inchangés), `cw` est
@@ -198,8 +343,10 @@ impl FloatCtx {
 
     /// Bas le plus profond des flottants `side` (`None` si
     /// aucun) — pour `clear` et la containment BFC.
-    pub(crate) fn bottom_of(list: &[Rect]) -> Option<f32> {
-        list.iter().map(|f| f.y + f.height).reduce(f32::max)
+    pub(crate) fn bottom_of(list: &[FloatRect]) -> Option<f32> {
+        list.iter()
+            .map(|f| f.rect.y + f.rect.height)
+            .reduce(f32::max)
     }
 
     /// Haut le plus élevé des flottants déjà posés (§9.5.1
@@ -211,7 +358,7 @@ impl FloatCtx {
         self.left
             .iter()
             .chain(self.right.iter())
-            .map(|f| f.y)
+            .map(|f| f.rect.y)
             .reduce(f32::max)
     }
 
@@ -236,8 +383,8 @@ impl FloatCtx {
         self.left
             .iter()
             .chain(self.right.iter())
-            .filter(|f| f.y <= top && f.y + f.height > top)
-            .map(|f| f.y + f.height)
+            .filter(|f| f.rect.y <= top && f.rect.y + f.rect.height > top)
+            .map(|f| f.rect.y + f.rect.height)
             .reduce(f32::min)
     }
 
@@ -255,13 +402,15 @@ impl FloatCtx {
         let mut xl = cx;
         let mut xr = cx + cw;
         for f in &self.left {
-            if f.y < bottom && f.y + f.height > top {
-                xl = xl.max(f.x + f.width);
+            let (fy0, fy1) = f.y_extent();
+            if fy0 < bottom && fy1 > top {
+                xl = xl.max(f.bite_right(top, bottom));
             }
         }
         for f in &self.right {
-            if f.y < bottom && f.y + f.height > top {
-                xr = xr.min(f.x);
+            let (fy0, fy1) = f.y_extent();
+            if fy0 < bottom && fy1 > top {
+                xr = xr.min(f.bite_left(top, bottom));
             }
         }
         if xl <= cx && xr >= cx + cw {
@@ -278,10 +427,159 @@ impl FloatCtx {
         self.left
             .iter()
             .chain(self.right.iter())
-            .filter(|f| f.y < bottom && f.y + f.height > y)
-            .map(|f| f.y + f.height)
+            .filter(|f| f.rect.y < bottom && f.rect.y + f.rect.height > y)
+            .map(|f| f.rect.y + f.rect.height)
             .filter(|b| *b > y)
             .reduce(f32::min)
+    }
+}
+
+/// R-273 — `shape-outside` (css-shapes-1 §3) : forme de
+/// référence résolue en coords absolues contre la boîte de
+/// référence (`margin-box` défaut → `margin` ; `border-box`/
+/// `padding-box`/`content-box` approchés à la border box —
+/// la margin box englobe, borne documentée). `shape-margin`
+/// dilate la forme (rayons/demi-axes/insets — ignorée sur
+/// `polygon`, borne documentée). `none`/`url()`/`linear-
+/// gradient()`/`image()` → `None` (pas d'analyse alpha).
+#[allow(
+    clippy::cast_possible_truncation,
+    clippy::too_many_lines,
+    clippy::many_single_char_names
+)]
+fn parse_shape_outside(
+    st: &ComputedStyle,
+    margin: &Rect,
+    border: &Rect,
+    ctx: &BlockCtx,
+    fs: f32,
+) -> Option<OutsideShape> {
+    let raw = st.get("shape-outside")?.trim();
+    if raw.is_empty() || raw == "none" {
+        return None;
+    }
+    // `<shape-box>` + `<basic-shape>` combinables (`circle()
+    // border-box`) : la boîte choisit la référence — défaut
+    // **margin-box** (§3) ; `padding-box`/`content-box` sont
+    // approchés à la bordure (métriques indisponibles ici,
+    // borne documentée).
+    let reference = if raw
+        .split_whitespace()
+        .any(|t| t == "border-box" || t == "padding-box" || t == "content-box")
+    {
+        border
+    } else {
+        margin
+    };
+    let sm = css_px(st, "shape-margin", margin.width, fs, ctx).unwrap_or(0.0);
+    let (name, args) = raw.split_once('(')?;
+    let args = args.trim_end_matches(')').trim();
+    let px = |t: &str, basis: f32| {
+        let t = t.trim();
+        if let Some(p) = t.strip_suffix('%') {
+            return p.trim().parse::<f32>().ok().map(|v| v * basis / 100.0);
+        }
+        explorer_css::value::parse_length(t)
+            .and_then(|l| l.unit.px_factor().map(|f| (l.value * f) as f32))
+    };
+    let pos_at = |at: &str| -> (f32, f32) {
+        let mut it = at.split_whitespace();
+        let xa = it.next().unwrap_or("center");
+        let ya = it.next().unwrap_or("center");
+        let ax = |t: &str, lo: f32, len: f32| match t {
+            "left" | "top" => lo,
+            "right" | "bottom" => lo + len,
+            "center" => lo + len / 2.0,
+            _ => px(t, len).map_or(lo + len / 2.0, |v| lo + v),
+        };
+        (
+            ax(xa, reference.x, reference.width),
+            ax(ya, reference.y, reference.height),
+        )
+    };
+    match name.trim() {
+        "circle" | "ellipse" => {
+            let (dims, at) = args.split_once(" at ").map_or((args, ""), |(d, a)| (d, a));
+            let mut it = dims.split_whitespace();
+            let (rx, ry) = if name.trim() == "circle" {
+                // % du rayon : sqrt(w²+h²)/√2 (§3.1).
+                let basis = reference.width.hypot(reference.height) / std::f32::consts::SQRT_2;
+                let r = px(it.next()?, basis)? + sm;
+                (r, r)
+            } else {
+                (
+                    px(it.next()?, reference.width)? + sm,
+                    px(it.next()?, reference.height)? + sm,
+                )
+            };
+            let c = if at.is_empty() {
+                (
+                    reference.x + reference.width / 2.0,
+                    reference.y + reference.height / 2.0,
+                )
+            } else {
+                pos_at(at)
+            };
+            Some(OutsideShape::Ellipse { c, rx, ry })
+        }
+        "inset" | "rect" | "xywh" => {
+            // `rect`/`xywh` tolèrent la virgule (héritage
+            // `clip: rect()`) ; `inset` peut finir en
+            // `round <radii>` — ignoré (borne, documentée).
+            let body = args
+                .split_once(" round")
+                .map_or(args, |(b, _)| b)
+                .replace(',', " ");
+            let v: Vec<f32> = body
+                .split_whitespace()
+                .filter_map(|t| px(t, reference.width))
+                .collect();
+            let g = |i: usize| v.get(i).or_else(|| v.last()).copied().unwrap_or(0.0);
+            let (x, y, w, h) = match name.trim() {
+                "xywh" => (g(0), g(1), g(2), g(3)),
+                "rect" => {
+                    // rect(top right bottom left) — distances
+                    // depuis le coin haut-gauche de la référence.
+                    let (t, r, b, l) = (g(0), g(1), g(2), g(3));
+                    (l, t, (r - l).max(0.0), (b - t).max(0.0))
+                }
+                // inset(top right bottom left) — distances
+                // depuis chaque bord.
+                _ => {
+                    let (t, r, b, l) = (g(0), g(1), g(2), g(3));
+                    (
+                        l,
+                        t,
+                        (reference.width - l - r).max(0.0),
+                        (reference.height - t - b).max(0.0),
+                    )
+                }
+            };
+            // `shape-margin` dilate le rectangle résultat.
+            Some(OutsideShape::Inset {
+                x: reference.x + x - sm,
+                y: reference.y + y - sm,
+                w: w + 2.0 * sm,
+                h: h + 2.0 * sm,
+            })
+        }
+        "polygon" => {
+            // Saute le `fill-rule` éventuel en tête.
+            let body = args
+                .split(',')
+                .map(str::trim)
+                .filter(|p| !p.starts_with("nonzero") && !p.starts_with("evenodd"));
+            let pts: Vec<(f32, f32)> = body
+                .filter_map(|p| {
+                    let mut it = p.split_whitespace();
+                    let x = px(it.next()?, reference.width)?;
+                    let y = px(it.next()?, reference.height)?;
+                    Some((reference.x + x, reference.y + y))
+                })
+                .collect();
+            (pts.len() >= 3).then_some(OutsideShape::Poly { pts })
+        }
+        _ => None,
     }
 }
 
@@ -2463,7 +2761,8 @@ fn place_float(
         // « déjà aussi loin que possible » — un voisin de
         // même côté annule l'exception et force la descente).
         {
-            let overlapped = |o: &Rect| {
+            let overlapped = |o: &FloatRect| {
+                let o = &o.rect;
                 placed.y < o.y + o.height - 0.01
                     && placed.y + placed.height > o.y + 0.01
                     && placed.x < o.x + o.width - 0.01
@@ -2474,7 +2773,7 @@ fn place_float(
             let mut drop = foes
                 .iter()
                 .filter(|o| overlapped(o))
-                .map(|o| o.y + o.height)
+                .map(|o| o.rect.y + o.rect.height)
                 .fold(f32::NEG_INFINITY, f32::max);
             let overflows = if right_side {
                 placed.x < content_x - 0.01
@@ -2489,6 +2788,7 @@ fn place_float(
                 drop = drop.max(
                     kin.iter()
                         .filter(|o| {
+                            let o = &o.rect;
                             o.y + o.height > placed.y + 0.01
                                 && o.y < placed.y + placed.height - 0.01
                                 && if right_side {
@@ -2497,7 +2797,7 @@ fn place_float(
                                     o.x + o.width <= placed.x + 0.01
                                 }
                         })
-                        .map(|o| o.y + o.height)
+                        .map(|o| o.rect.y + o.rect.height)
                         .fold(f32::NEG_INFINITY, f32::max),
                 );
             }
@@ -2518,10 +2818,22 @@ fn place_float(
             _ => break,
         }
     }
+    // R-273 — `shape-outside` : la forme est résolue contre
+    // la margin box (défaut `<shape-box>`), déjà absolue.
+    let fr = float_record(&parent.children[i], placed, ctx, fs);
     if right_side {
-        fl.right.push(placed);
+        fl.right.push(fr);
     } else {
-        fl.left.push(placed);
+        fl.left.push(fr);
+    }
+}
+
+/// R-273 — `shape-outside` : enrôle le flottant posé avec la
+/// forme d'exclusion résolue sur son style (`None` = rectangle).
+fn float_record(cb: &LayoutBox, placed: Rect, ctx: &BlockCtx, fs: f32) -> FloatRect {
+    FloatRect {
+        rect: placed,
+        shape: parse_shape_outside(&cb.style, &placed, &cb.rect, ctx, fs),
     }
 }
 

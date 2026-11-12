@@ -4137,9 +4137,26 @@ le census `site_harvest` arbitre les ex æquo.
   composée au paint (stash par pointeur — le bloc conteneur
   n'est connu que du parent, patron `sticky_deltas`). Dormants
   bornés : `path('…')`, `url()`, `coord-box` nus.
-- [ ] `shape-outside` (13) — float shape circle/ellipse/
-  polygon/inset + `margin`/`shape-image-threshold` : line boxes
-  contournant la forme.
+- [x] **R-273 — `shape-outside`** (13) — `FloatCtx` : `Vec<Rect>`
+  → `Vec<FloatRect{rect, shape}>` ; la marge-rect pilote
+  toujours placement/clear/containment, la **forme** ne mord
+  que les lignes (`band`/`band_over` via `bite_left`/`bite_right`
+  sur l'intervalle de la ligne, étendue verticale propre).
+  Formes résolues en absolu au push : `circle`/`ellipse`
+  (` at ` supporté, rayon % = √(w²+h²)/√2), `inset`/`rect`/
+  `xywh`, `polygon` (sommets + croisements d'arêtes sur
+  l'intervalle). `shape-margin` dilate (rayons/demi-axes/
+  insets ; ignoré sur `polygon`). `<shape-box>` : `margin-box`
+  défaut (§3), `border-box` explicite, `padding`/`content`
+  approchés à la bordure. Bornes honnêtes : `url()`/`image()`/
+  `gradient()` → `None` (pas d'analyse alpha —
+  `shape-image-threshold` dormant) ; `round <radii>` d'`
+  inset` ignoré. Fix annexe : `offset-anchor`/`offset-position`
+  ordre inversé `bottom left` (token vertical en tête → le
+  second pilote l'axe x). Verrous :
+  `shape_outside_cercle_mord_selon_la_hauteur` (morsure non
+  constante < rect témoin), `shape_outside_inset_bornee_et_
+  shape_margin` (bande bornée + dilatation au-delà de la marge).
 - [ ] `container-type`/`container-name`/`container` (~10) —
   container queries size/style : cascade contextuelle.
 - [ ] `table-layout:fixed` — algo table fixe (largeurs par
