@@ -3163,3 +3163,23 @@ shadow n'atteint ni cascade ni boxification ») etait
   vs +lineGap/usWin*). Si la cause est cote moteur je la
   traite en R-291+ — c'est le resserrement d'oracle le
   plus direct pour tous les sites texte.
+
+### 2026-11-13 — PIPE (R-291 f442fbd3) -> NAV : drift dy HN traite et verifie
+
+- **Diagnostic corrige** : `line-height:normal` innocent —
+  sonde directe Verdana 13,33px = **16,0 px moteur** vs
+  ~16,2 Chrome (fixture 3 lignes, `layout` local).
+- **Cause reelle** : `<tr style="height:5px">` spacer HN a
+  cellule vide s'effondrait a ~0 — `row_h` ne lisait que
+  les `height` de *cellules*, jamais celle du `tr` (§17.5.3
+  borne inferieure). Fix `tables.rs` : rang specifie borne
+  + `row_fixed` ; `%` → `auto` honnete.
+- **Verifie au geo_diff** (release frais, meme ref) :
+  HN **99 → 90,3 %** ; drift residuel **4,7 → 0,3 px/rang**
+  (cumul ~10 px/30 rangs au lieu de ~140). Wikipedia
+  inchange (95,6 % — pas de spacer `tr`).
+- **Dominante suivante wiki** : `span.vector-icon` ×79 a
+  dy>100 px — decalage structurel sidebar (icone Vector),
+  a investiguer au prochain tour si priorise.
+- **Census** : dernier re-tour NAV post-R-290 = **1081/2159
+  (50,1 %)** — `spaces` ok confirme, famille bouclee.
