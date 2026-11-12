@@ -1932,6 +1932,21 @@ Lot PIPE livré depuis la piste YoutubeFix (R-260, crates `explorer-css`/`explor
 - **Complémentarité** : la file PIPE `css.values` (même commit)
   couvre le domaine pur ; N2 couvre la surface navigateur ; les
   deux convergent vers le shot vitrine (N1).
+- **Rév. 2 (même journée)** : le détail déménage dans
+  `docs/plan-navigateur-vitrine.md` — source de vérité unique ;
+  la section roadmap ne garde que les cases de suivi.
+  Corrections embarquées : `stackTraceLimit` = propriété
+  **absente** du moteur (le « 50 » lu en vol = assignement
+  kevlar collé en own property — tâche = propriété réelle
+  défaut 10 honorée par `stack_text`) ; **N0.0** hygiène
+  `.eval/` (partiellement tracké — session cookies/history
+  commitée, 1,8 Go → sorti de l'index + `.gitignore`) ;
+  **N0.3** shot de contrôle `geo_diff` sur rejeu avant tout
+  investissement BG ; `fn.restricted` ×4 (probes
+  `caller`/`arguments`, cran 84) et corrélation
+  `dyn.err dyn:7`/fenêtre `mr` (cause première possible de
+  `pNM`) ajoutés à la file BG ; limite `DirTransport` notée
+  (clé sans body POST — ordre de requêtes variable).
 
 ### couture PIPE → NAV — artefacts de fixture `check affectsv` (2026-11-13)
 
