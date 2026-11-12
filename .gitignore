@@ -33,6 +33,13 @@ fuzz/artifacts/
 test-run/
 .playwright-mcp/
 
+# `.eval/` — mesures et vols locaux (profils, caches réseau,
+# logs, JSON de triage). Convention vol §8 : corpus sous
+# C:\OnionBit-vol\, rejeux promus → fuzz/. Tracké par erreur
+# (session cookies/history commités) → sorti de l'index,
+# ne jamais re-tracker (plan vitrine N0.0).
+.eval/
+
 # Déchets de session vol/débogage à la racine (convention `_`)
 # — journaux de daemons lancés à la main, sondes, chunks décodés.
 _vol*
