@@ -1435,6 +1435,25 @@ impl LineAcc {
         self.frags = frags;
     }
 
+    /// §16.6.1 : retire les fragments-blancs de fin de ligne
+    /// (invisibles, hors mesure `text-align`) et défalque
+    /// l'espace finale intra-fragment (`"mot "` fusionné) —
+    /// appelé par `close` hors mode `break-spaces` (R-264 :
+    /// les blancs préservés y sont du contenu mesuré).
+    fn drop_trailing_ws(&mut self) {
+        while self
+            .frags
+            .last()
+            .is_some_and(|f| !f.atomic && text::trim_css_ws(&f.text).is_empty())
+        {
+            self.frags.pop();
+        }
+        if let Some(f) = self.frags.last_mut() {
+            f.rect.width -= f.trail_w;
+            f.trail_w = 0.0;
+        }
+    }
+
     /// Ferme la ligne à `y` : aligne les fragments sur la
     /// baseline commune, calcule le rect. `base_rtl`/
     /// `band_right` alimentent le réordonnancement bidi —
@@ -1458,20 +1477,7 @@ impl LineAcc {
             .last()
             .is_some_and(|f| ws_mode(&f.style).0 == WsCollapse::BreakSpaces && !f.atomic);
         if !keep_trail {
-            while self
-                .frags
-                .last()
-                .is_some_and(|f| !f.atomic && text::trim_css_ws(&f.text).is_empty())
-            {
-                self.frags.pop();
-            }
-            // L'espace finale intra-fragment (pièce fusionnée
-            // `"mot "`) est exclue aussi : la ligne se mesure
-            // sur le contenu visible.
-            if let Some(f) = self.frags.last_mut() {
-                f.rect.width -= f.trail_w;
-                f.trail_w = 0.0;
-            }
+            self.drop_trailing_ws();
         }
         if self.is_empty() {
             return;
