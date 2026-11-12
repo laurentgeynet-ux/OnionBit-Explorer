@@ -41,7 +41,7 @@ score BCD global (outil de pilotage, pas un but).
 |---|---|---|
 | Hydratation `ytd-*` | ✅ soldé | 1038 `ce.define`, watch complète (cran 78/83) |
 | Consentement | ✅ soldé | `SOCS` scopé + cookie jar local (É220, JS-C486) |
-| Stamping templates | 🟠 WIP | JS-C496 `pin_node` posé — `importNode`/`localName` à revalider en vol |
+| Stamping templates | ✅ soldé | JS-C496 — clone détaché récolté par le GC pendant `ce_upgrade_subtree` → `pin_node` ; `importNode`/`localName` → 0 en vol (cran 87) |
 | **BotGuard `pNM`** | 🔴 ouvert | `trayride.a`→`mr` tourne, `g` jamais appelé → `pNM` pend → `bb` → `v8Q` morte → `/youtubei` gatées |
 | `dyn.err dyn:7` | 🔴 ouvert | script dynamique, syntax 1:12 — **à corréler avec la fenêtre `mr`** : si émis par BG, c'est la cause première de `pNM`, pas un mur parallèle |
 | `fn.restricted` ×4 | 🔴 ouvert | `caller`/`arguments` sur fonctions strictes — probes BG probables (cran 84), fingerprint candidat |

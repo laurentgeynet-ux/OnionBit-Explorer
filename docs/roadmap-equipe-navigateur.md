@@ -11829,8 +11829,11 @@ croître la surface navigateur mesurée (`api` 1510/8099, 18,6 %).
   du stall `mr`, boucle d'élimination (`t.m`=41,
   `fn.restricted` ×4, `dyn.err dyn:7` à corréler avec la
   fenêtre `mr` — cause première possible).
-- [ ] **JS-C496 (WIP → N1.5)** — `importNode`/`localName`
-  erreurs → 0 en vol ; stamping `dom-if`/`dom-repeat` effectif.
+- [x] **JS-C496 (→ N1.5 validé)** — `importNode`/`localName` :
+  cause nommée = clone détaché récolté par le GC pendant
+  `ce_upgrade_subtree` (racine non-CE jamais wrappée) ;
+  `pin_node` posé, erreurs → 0 en vol, stamping
+  `dom-if`/`dom-repeat` effectif (cran 87).
 - [ ] **Shot vitrine (N2.2)** : `shot` sur rejeu M0 → PNG
   feed+masthead selon critères §0 du plan.
 

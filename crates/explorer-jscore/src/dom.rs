@@ -715,6 +715,14 @@ pub struct Dom {
     /// Slots morts encore cités par des ops de journal en
     /// attente — passent en `free_nodes` une fois drainés.
     dead_blocked: Vec<NodeId>,
+    /// Nœuds épinglés contre `collect_garbage` — sous-arbres
+    /// détachés **encore sans wrapper JS** exposés à un
+    /// safepoint GC (constructeurs CE pendant
+    /// `importNode`/`cloneNode` profond : le clone était
+    /// récolté avant `node_value` → `importNode` rendait
+    /// `undefined` → `__noInsertionPoint` sur Undefined —
+    /// mur stamp Polymer `YouTube`, JS-C496).
+    pinned: HashSet<NodeId>,
     /// Ops drainées mais **non rejouées** — empoisonnement ou
     /// classement « re-parse » côté adaptateur (ADR-0025 :
     /// mesure du périmètre du pilote — un taux élevé signale
@@ -934,6 +942,7 @@ impl Dom {
             journal: Vec::new(),
             free_nodes: Vec::new(),
             dead_blocked: Vec::new(),
+            pinned: HashSet::new(),
             journal_poisoned: false,
             journal_dropped: 0,
             canvases: HashMap::new(),
@@ -1047,6 +1056,10 @@ impl Dom {
         keep.extend(self.pending_dyn_imgs.iter().copied());
         keep.extend(self.dyn_link_seen.keys().copied());
         keep.extend(self.pending_dyn_links.iter().copied());
+        // Racines épinglées : la fermeture descendante retient
+        // tout leur sous-arbre (clone frais en cours
+        // d'upgrade CE — JS-C496).
+        keep.extend(self.pinned.iter().copied());
         // ADR-0033 — tampons ordinaux **figés au parse** : le
         // design veut « un script/link retiré reste
         // identifiable » → les nœuds cités sont retenus,
@@ -1114,6 +1127,19 @@ impl Dom {
             JournalOp::AttachShadow { host, root, .. } => *host == node || *root == node,
         });
         (in_tmpl, in_shadow, in_journal)
+    }
+
+    /// Épingle `n` contre [`Self::collect_garbage`] — la
+    /// fermeture descendante retient tout son sous-arbre. Pour
+    /// les clones frais exposés au JS avant leur premier
+    /// wrapper (upgrade CE synchrone — JS-C496).
+    pub(crate) fn pin_node(&mut self, n: NodeId) {
+        self.pinned.insert(n);
+    }
+
+    /// Retire l'épingle posée par [`Self::pin_node`].
+    pub(crate) fn unpin_node(&mut self, n: NodeId) {
+        self.pinned.remove(&n);
     }
 
     pub(crate) fn collect_garbage(&mut self, seeds: &std::collections::HashSet<NodeId>) -> usize {
@@ -6217,6 +6243,33 @@ mod tests {
         assert!(!d.parse_dyn.contains(&n), "parse_dyn purgé");
         assert_eq!(d.focused.get(), None, "focused purgé");
         assert_eq!(d.dirty_node.get(), None, "dirty_node purgé");
+    }
+
+    /// JS-C496 — `pin_node` : un clone détaché et sans wrapper
+    /// exposé au GC (ctors CE de `ce_upgrade_subtree`, avant
+    /// `node_value`) doit survivre — la fermeture descendante
+    /// retient tout le sous-arbre. Sans ça `importNode`
+    /// rendait `undefined` (mur stamp Polymer `YouTube`).
+    #[test]
+    fn collect_retient_clone_epingle() {
+        let mut d = Dom::from_html("<html><body><div><p>t</p><x-g></x-g></div></body></html>");
+        let src = d.by_tag(d.root, "div")[0];
+        let c = d.clone_node(src, true);
+        d.pin_node(c);
+        d.collect_garbage(&HashSet::new());
+        assert!(
+            !d.nodes[c as usize].free,
+            "la racine clonée épinglée survit à la passe"
+        );
+        let kids = d.nodes[c as usize].children.clone();
+        assert_eq!(kids.len(), 2);
+        for &k in &kids {
+            assert!(!d.nodes[k as usize].free, "descendant retenu par fermeture");
+        }
+        // Épingle levée → le sous-arbre redevient récoltable.
+        d.unpin_node(c);
+        d.collect_garbage(&HashSet::new());
+        assert!(d.nodes[c as usize].free, "dé-épinglé → libéré");
     }
 
     /// Un nœud **attaché** reste vivant et son `parent`

@@ -3943,6 +3943,37 @@ fn c294_el_constructor_suit_le_proto() {
     );
 }
 
+#[test]
+fn c496_clone_survives_gc_during_ce_upgrade() {
+    // JS-C496 — `cloneNode(true)`/`importNode(·,true)` sur une
+    // racine **non-CE** : `ce_upgrade_subtree` joue les ctors CE
+    // des descendants **avant** `node_value` — le clone détaché
+    // et sans wrapper était récolté par le safepoint GC →
+    // retour `undefined` → `__noInsertionPoint` posé sur
+    // Undefined (mur stamp Polymer `dom-if`/`dom-repeat`,
+    // YouTube). La racine est épinglée le temps de la passe.
+    let mut e =
+        engine_with("<html><body><div id=\"h\"><p>t</p><x-g a=\"1\"></x-g></div></body></html>");
+    e.eval(
+        "class XG extends HTMLElement{constructor(){super();\
+         for(var i=0;i<60000;i++){var o=[i,'q'+i,i*2];this.n=i}}}\
+         customElements.define('x-g',XG);",
+    )
+    .unwrap();
+    // `gc_debt(4 Mio)` = 1 Mio — le churn du ctor arme `gc_due`
+    // → safepoint GC en plein `ce_upgrade_subtree`.
+    e.set_mem_limit(4 * 1024 * 1024);
+    let v = e
+        .eval(
+            "var c=document.getElementById('h').cloneNode(true);\
+             var d=document.importNode(document.getElementById('h'),true);\
+             [typeof c,c?c.nodeType+':'+c.childNodes.length:'-',\
+              typeof d,d?d.nodeType+':'+d.childNodes.length:'-'].join('|')",
+        )
+        .unwrap();
+    assert_eq!(e.describe(v), "object|1:2|object|1:2");
+}
+
 /// Eval via `describe` — multi-appels sur le même moteur.
 fn describe_ev(e: &mut Engine, src: &str) -> String {
     match e.eval(src) {

@@ -14189,6 +14189,27 @@ fn ce_upgrade_subtree(
     cache: &NodeCache,
     root: NodeId,
 ) -> JsResult<()> {
+    // §cran-87 — le clone frais (`importNode`/`cloneNode`)
+    // est **détaché et encore sans wrapper JS** : les ctors
+    // CE ci-dessous ouvrent des safepoints GC qui récoltaient
+    // le sous-arbre avant `node_value` → `importNode` rendait
+    // `undefined` → `F.__noInsertionPoint=` plantait sur
+    // Undefined (mur stamp Polymer YouTube, JS-C496). La
+    // racine est épinglée le temps de la passe — la
+    // fermeture descendante de `collect_garbage` retient
+    // tous les descendants.
+    dom.borrow_mut().pin_node(root);
+    let r = ce_upgrade_subtree_pinned(e, dom, cache, root);
+    dom.borrow_mut().unpin_node(root);
+    r
+}
+
+fn ce_upgrade_subtree_pinned(
+    e: &mut Engine,
+    dom: &DomRef,
+    cache: &NodeCache,
+    root: NodeId,
+) -> JsResult<()> {
     ce_upgrade_node(e, dom, cache, root)?;
     let kids = dom.borrow().by_tag(root, "*");
     for n in kids {
