@@ -2057,7 +2057,23 @@ impl Engine {
             if let Err(th) = self.eval_named(text, &label) {
                 let msg = th.to_string();
                 let msg: String = msg.chars().take(240).collect();
-                tracing::info!(target: "dom_probe", site = "dyn.err", src = %label, error = %msg);
+                // N1.6 — le label `dyn:N` ne nomme rien : sous
+                // sonde opt-in `EXPLORER_DYN_PROBE`, extrait
+                // borné (400 c, sauts aplatis) + longueur du
+                // corps fautif — sinon la source d'un <script>
+                // injecté sans `src` est perdue.
+                static DYNP: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+                if *DYNP.get_or_init(|| std::env::var_os("EXPLORER_DYN_PROBE").is_some()) {
+                    let head: String = text
+                        .chars()
+                        .take(400)
+                        .collect::<String>()
+                        .replace('\n', "\u{240a}")
+                        .replace('\r', "\u{240d}");
+                    tracing::info!(target: "dom_probe", site = "dyn.err", src = %label, error = %msg, len = text.len(), head = %head);
+                } else {
+                    tracing::info!(target: "dom_probe", site = "dyn.err", src = %label, error = %msg);
+                }
             }
             self.hooks.current_script = prev;
             self.sched_tick("dlv.dynscript");
