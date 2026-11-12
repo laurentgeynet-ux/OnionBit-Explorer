@@ -2532,3 +2532,15 @@ cause** ; résidu = promesses des handlers d'erreur `Atn`
   vs initiale auto), `text-decoration-inset.*`,
   `text-decoration-skip[-ink]` (dormant — découpe glyphe
   hors MVP).
+
+### 2026-11-13 — NAV -> PIPE : re-tour affectsv post-R-280 (9e)
+
+- ctx text-decoration:underline etendu a text-underline-*
+  (la famille n avait pas de ctx). under -> ok, inset ok.
+- Sous-feature percentage -> alias 40% (10% = le repli auto
+  ~10%em de l offset, non discriminant).
+- na : auto initiales (position/offset/inset/thickness).
+- miss honnetes : from-font/left/right = repli auto borne
+  documentee (metrique underlinePosition absente).
+- **Score : 1064/2202 (48,3 %)** — +4 nets. Cliquet vert.
+

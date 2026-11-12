@@ -1105,9 +1105,10 @@ fn context_css(name: &str) -> &'static str {
         // `content-box`/`padding-box`/`border-box` (sans elle
         // les trois aires coïncident → `clip`/`origin` inertes).
         "background-image:linear-gradient(red,blue);border:10px solid black;padding:10px;width:100px;height:80px"
-    } else if n.starts_with("text-decoration-") {
-        // `text-decoration-color`/`-line`/`-style`/`-thickness`
-        // n'ont d'effet qu'avec un trait posé.
+    } else if n.starts_with("text-decoration-") || n.starts_with("text-underline-") {
+        // `text-decoration-color`/`-line`/`-style`/`-thickness`,
+        // `text-underline-position`/`-offset` n'ont d'effet
+        // qu'avec un trait posé.
         "text-decoration:underline"
     } else if n.starts_with("outline") {
         "outline:2px solid black;width:100px;height:80px"
@@ -1262,6 +1263,10 @@ const INITIAL_EXTRA: &[(&str, &str)] = &[
     ("float", "none"),
     ("hyphens", "manual"),
     ("initial-letter", "normal"),
+    ("text-underline-position", "auto"),
+    ("text-decoration-inset", "auto"),
+    ("text-underline-offset", "auto"),
+    ("text-decoration-thickness", "auto"),
     ("text-box-trim", "none"),
     // `text-box` shorthand — un bord `<text-box-edge>` seul
     // (sans token `trim-*`) = trim `none` → inerte ; `none`/
@@ -1540,6 +1545,16 @@ fn affects_decl_verdict(decl: &str) -> Option<bool> {
     // arabe, indic…) le moteur ne césure réellement pas →
     // `miss` mesuré, pas `na` (la capacité manque, ce n'est
     // pas une borne d'oracle).
+    // Sous-features BCD `percentage` = « les valeurs `<percent>`
+    // sont supportées » — pas une déclaration en soi : sonder
+    // avec `10%` mesure la capacité réelle (honnie).
+    // Sous-features BCD `percentage` = « les valeurs `<percent>`
+    // sont supportées » — pas une déclaration en soi : sonder
+    // avec `40%` mesure la capacité réelle (10% retomberait
+    // pile sur le repli `auto` ~10%em de l'offset).
+    if v == "percentage" {
+        return Some(prop_affects_decl(&format!("{name}:40%")));
+    }
     if name == "hyphens" && v.starts_with("language_") {
         const LATIN: &[&str] = &[
             "afrikaans", "albanian", "basque", "bosnian", "catalan", "croatian", "czech",
