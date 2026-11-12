@@ -2199,6 +2199,15 @@ fn expand_logical(name: &str, value: &str) -> Option<Vec<(String, String)>> {
             // `expand_border_parts` accepte les noms logiques
             // (le préfixe est recopié tel quel).
             return match name {
+                // `border-<logique>` nu (`border-block-end:solid`)
+                // : expansion en longhands LOGIQUES — le mapping
+                // physique se fait en cascade
+                // (`resolve_logical_props`), comme les autres
+                // noms logiques.
+                "border-inline-start"
+                | "border-inline-end"
+                | "border-block-start"
+                | "border-block-end" => Some(expand_border_parts(name, value)),
                 "border-inline" | "border-block" => {
                     let (p1, p2) = if name == "border-inline" {
                         ("border-inline-start", "border-inline-end")

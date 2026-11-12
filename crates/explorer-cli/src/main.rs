@@ -938,7 +938,22 @@ impl explorer_layout::font::FontSource for BcdAhem {
 fn context_css(name: &str) -> &'static str {
     let n = name.trim_start_matches('-').trim_start_matches("webkit-");
     if n.starts_with("border") {
-        "border:2px solid black;width:100px;height:80px;background:blue"
+        // Logique (`border-block-*`/`border-inline-*`) : le
+        // mapping physique arrive APRÈS la cascade — un ctx
+        // uniforme poserait la même prop physique au même
+        // rang et gagnerait à égalité. `-color`/`-width`
+        // exigent juste un `border-style` existant (autre
+        // nom de prop — pas de conflit) ; `-style` et le
+        // shorthand nu créent la bordure seuls → pas de ctx.
+        if n.contains("-block") || n.contains("-inline") {
+            if n.ends_with("-style") || (!n.ends_with("-color") && !n.ends_with("-width")) {
+                ""
+            } else {
+                "border-style:solid"
+            }
+        } else {
+            "border:2px solid black;width:100px;height:80px;background:blue"
+        }
     } else if n.starts_with("outline") {
         "outline:2px solid black;width:100px;height:80px"
     } else if n.starts_with("column-") || n.starts_with("break-") || n == "columns" {
