@@ -741,10 +741,18 @@ fn fixture_for(name: &str) -> &'static str {
         // Props de **table** — `.x` = la table (caption
         // présente pour `caption-side`, cellule vide pour
         // `empty-cells`, bordures pour `border-collapse`).
-        () if matches!(n, "empty-cells" | "caption-side" | "border-collapse" | "table-layout")
+        () if matches!(n, "empty-cells" | "caption-side" | "border-collapse")
         =>
         {
             "<body><table class=x><caption>c</caption><tr><td style=\"border:1px solid black\"> </td><td style=\"border:1px solid black;width:100px;height:40px\">a</td></tr></table></body>"
+        }
+        // `table-layout` (R-275, artefact oracle) : `fixed`
+        // n'est discriminant que si l'**auto** élargirait la
+        // colonne au contenu — une cellule à texte large
+        // sans `width` (auto = contenu, fixed = largeurs du
+        // premier rang uniquement §17.5.2.1).
+        () if n == "table-layout" => {
+            "<body><table class=x><tr><td>a</td><td>bbbbbbbbbbbbbbbbbbbbbbbbbbbb</td></tr></table></body>"
         }
         // `break-*`/`page-break-*` — s'appliquent à
         // l'**unité enfant** du conteneur multicol, pas au
@@ -780,11 +788,19 @@ fn fixture_for(name: &str) -> &'static str {
         // étroit + mot long/tabulation).
         () if matches!(
             n,
-            "overflow-wrap" | "word-break" | "line-break" | "hyphens" | "tab-size"
+            "overflow-wrap" | "word-break" | "line-break" | "tab-size"
                 | "overflow" | "overflow-x" | "overflow-y" | "text-wrap"
         ) =>
         {
             "<body><div class=x style=\"width:40px\"><p>averyveryveryverylongword\tb</p></div></body>"
+        }
+        // `hyphens`/`hyphenate-*` (R-275) : la césure n'a
+        // d'oracle que s'il y a une **opportunité** — le mot
+        // porte un `&shy;` (manuel) ET assez de lettres pour
+        // les points `auto` ; `none` supprime le shy →
+        // discriminant vs la baseline `manual`.
+        () if n == "hyphens" || n.starts_with("hyphenate") => {
+            "<body><div class=x style=\"width:40px\"><p>aver&shy;yveryverylongword</p></div></body>"
         }
         // `ruby-*` — contexte `<ruby>` requis (rb/rt
         // n'existent que sous ruby).
@@ -1106,6 +1122,10 @@ fn context_css(name: &str) -> &'static str {
         } else {
             "offset-path:ray(90deg);offset-distance:20px"
         }
+    } else if n.starts_with("hyphenate") {
+        // `hyphenate-character`/`hyphenate-limit-*` n'ont
+        // d'effet que sous césure automatique.
+        "hyphens:auto"
     } else if n == "shape-margin" || n == "shape-image-threshold" {
         // `shape-margin` dilate la forme, `shape-image-
         // threshold` n'a d'effet que contre une forme posée.

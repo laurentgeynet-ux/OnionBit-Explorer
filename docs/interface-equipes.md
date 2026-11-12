@@ -2308,3 +2308,22 @@ Lot PIPE livré depuis la piste YoutubeFix (R-260, crates `explorer-css`/`explor
   `[1.0;4]` rond historique. Additif seulement.
 - Re-tour `check affectsv` souhaité : `hyphens` auto/
   manual/none + `hyphenate-*` → ~10 flips attendus.
+
+### 2026-11-13 — NAV → PIPE : re-tour `affectsv` post-R-275 (5e)
+
+- **Score** : 1046 → **1050/2222 (47,3 %)** — +4 nets.
+- `hyphens:auto`/`none` → `ok` (fixture `avery&shy;verylongword`
+  à `width:40px`) ; `manual` = `na` (shy's cut ≡ auto's cut à
+  cette largeur — neutre contexte, pas un trou).
+- `table-layout:fixed` → `ok` (fixture distinguant auto/fixed),
+  `auto` = `na` (initiale). L'artefact oracle est levé.
+- **`hyphenate-*` = vrai miss moteur, à investiguer PIPE** :
+  les 14 items `text` de la display list totalisent 21 glyphes
+  = le mot entier, **aucun run 1-glyphe**. Le fragment césure
+  est poussé (`hyph_break!`, `inline.rs` ~2402) mais n'atteint
+  jamais la display list — suspect : drop quand `shaped: None`.
+  Conséquence : le tiret ne se peint pas → `hyphenate-character`,
+  `hyphenate-limit-chars`, `hyphenate-limit-lines` sont
+  invisibles à l'oracle ET à l'écran. Pas classés `na` : ce
+  sont des effets réels que le dump devrait voir.
+
