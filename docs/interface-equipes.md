@@ -3097,3 +3097,51 @@ cause** ; résidu = promesses des handlers d'erreur `Atn`
 - Famille `ruby-overhang` desormais entierement mesuree :
   `none`/`spaces` ok, `auto` na initiale.
 - Census : **1081/2159 (50,1 %)**, cliquet vert.
+
+### 2026-11-13 — NAV : rectificatif chantier « shadow DOM » YouTube — Shady force, le trou est JS
+
+Re-analyse du re-vol (`target/harvest/revol/yt_dom.txt` +
+`yt_raw.html`) — le diagnostic precedent (« le sous-arbre
+shadow n'atteint ni cascade ni boxification ») etait
+**partiellement errone** :
+
+- **`window.ShadyDOM={force:true,preferPerformance:true,noPatch:true}`**
+  en tete de `yt_raw.html` : YouTube *force* le polyfill
+  Shady DOM. Le contenu est stampé en **light DOM** — d'ou
+  les classes `style-scope` et le `span.yt-icon-shape`
+  directement enfant light de `yt-icon`.
+- **0 `shadowrootmode` dans tout le dump commis** : aucune
+  racine shadow n'a jamais ete attachee en session —
+  `attachShadow` natif n'est jamais invoque (Shady le
+  neutralise, `noPatch:true`).
+- Verrou ajoute cote NAV
+  (`custom_element_upgrade_shadow_svg_boxifie`,
+  `explorer-core/tests/session.rs`) : upgrade
+  `customElements` + `attachShadow` + `<svg>` en ombre
+  → serialise + boxifie, bout-en-bout **vert**. La
+  chaine shadow native (R-96/97 : flat tree, slots,
+  styles scopes) est donc operationnelle et n'est **pas**
+  le bloqueur masthead.
+- Le trou reel est en amont, cote jscore : le stamping
+  Polymer produit bien la structure (`span.yt-icon-shape`
+  present) mais **l'injection d'icone ne tourne pas**
+  (`icon="yt-icons:arrow-back"` → registre
+  `yt-icons`/`iron-iconset-svg` → `<svg>` injecte dans
+  `.yt-icon-shape`). Suspects : `innerHTML` sur element,
+  `dom-module`/iconset registry, `MutationObserver`,
+  ou erreur JS en amont du stamping d'icone.
+- Corollaire mesure : une fois les `<svg>` injectes en
+  light DOM, `collect_svg_styled`/`svg_sizes` les
+  atteindront par le parcours `children` ordinaire —
+  **aucune extension shadow des collectes SVG n'est
+  requise pour YouTube** (le parcours shadow reste un
+  manque connu des traversées `collect_*`/`svg_sizes`/
+  `collect_images`, non bloquant aujourd'hui puisqu'il
+  n'y a pas d'ombre reelle sur ce site ; a garder en
+  file pour les sites a shadow natif).
+- En revanche la **geometrie** du span stampé reste a
+  traiter : `.yt-icon-shape` est `h=0` meme peuple ? Le
+  css `ytd-masthead svg{width:40px;height:40px}` est en
+  feuille document — verifier que le `width/height`
+  mordra sur le `<svg>` stampé (fix R-284 deja pose).
+

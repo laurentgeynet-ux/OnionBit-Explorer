@@ -14637,6 +14637,42 @@ async fn journal_attach_shadow_rejoue_en_place() {
     );
 }
 
+/// Motif Polymer `YouTube` (revol masthead `h=0`) : un
+/// custom element **déjà présent** au parse est upgradé par
+/// `customElements.define`, son `connectedCallback` pose
+/// `attachShadow` + un `<svg>` dans l'ombre — la chaîne doit
+/// livrer la racine au flat tree (le `<svg>` shadow apparaît
+/// dans le dump et produit une boîte dimensionnée).
+#[tokio::test]
+async fn custom_element_upgrade_shadow_svg_boxifie() {
+    let (mut s, t) = test_session();
+    t.route(
+        "/m",
+        200,
+        "<html><body><x-ic id=\"h\"></x-ic>\
+         <script>class C extends HTMLElement{\
+         connectedCallback(){var r=this.attachShadow({mode:'open'});\
+         r.innerHTML='<svg viewBox=\"0 0 24 24\" width=\"24\" height=\"24\"></svg>'}}\
+         customElements.define('x-ic',C)</script>\
+         </body></html>",
+    );
+    s.set_js_factory(explorer_js::JscoreEngine::factory());
+    let a = s.open_tab();
+    s.navigate(a, "http://h.test/m").await.unwrap();
+    std::thread::sleep(std::time::Duration::from_millis(60));
+    s.pump_timers(a);
+    let dump = s.dom_dump(a).unwrap_or_default();
+    assert!(
+        dump.contains("<svg"),
+        "svg de l'ombre absent du dump : {dump}"
+    );
+    let layout = s.layout_dump(a).unwrap_or_default();
+    assert!(
+        layout.contains("svg"),
+        "svg de l'ombre non boxifié : {layout}"
+    );
+}
+
 /// Terrain stallman — `<a href="…jpg"><img>` : le clic
 /// résolvait bien le lien mais la nav vers le `.jpg`
 /// classait `NavOutcome::Download` → offre de
