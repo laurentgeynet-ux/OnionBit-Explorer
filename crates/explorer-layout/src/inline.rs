@@ -1525,9 +1525,16 @@ impl LineAcc {
             } else if let Some(bs) = f.style.get("baseline-shift") {
                 bs
             } else if let Some(ab) = f.style.get("alignment-baseline") {
+                // R-269 — `top`/`bottom` = bords de ligne ;
+                // `above`/`over`/`below`/`under` = termes
+                // writing-modes verticaux (css-inline-3,
+                // §10.3 — approchés bord haut/bas en
+                // horizontal-tb). `first`/`last`/`auto` →
+                // baseline (unique en ligne simple).
                 va_owned = match ab.trim() {
-                    "ideographic" | "text-after-edge" | "text-bottom" => "text-bottom",
-                    "hanging" | "text-before-edge" | "text-top" => "top",
+                    "ideographic" | "text-after-edge" | "text-bottom" | "bottom" | "below"
+                    | "under" => "text-bottom",
+                    "hanging" | "text-before-edge" | "text-top" | "top" | "above" | "over" => "top",
                     "central" | "mathematical" | "middle" => "middle",
                     _ => "baseline",
                 };

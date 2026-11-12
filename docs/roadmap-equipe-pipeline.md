@@ -4090,9 +4090,14 @@ le census `site_harvest` arbitre les ex æquo.
   valeurs `recto`/`verso`/`all`/`region` absorbées dans
   l'ensemble de forçage. `break-inside:avoid` +
   `page-break-inside` honorés de fait (unités insécables).
-- [ ] `alignment-baseline` — baseline inline : `alphabetic`/
-  `central`/`hanging`/`ideographic`/`mathematical`/`middle`.
-- [ ] `vertical-align:top` — voir Sprint 1 si non soldé.
+- [x] **R-269** — `alignment-baseline` complété (repli R-161
+  déjà en place) : `top`/`bottom` = bords de ligne,
+  `above`/`over`/`below`/`under` (termes writing-modes
+  verticaux, §10.3) approchés bord haut/bas en horizontal-tb.
+  `first`/`last`/`auto` = baseline honnête (ligne à baseline
+  unique — `na` jauge).
+- [x] `vertical-align:top` — soldé en Sprint 1 (R-266 :
+  quatuor cellule + top/text-top/text-bottom inline).
 
 ### Sprint 3 — peinture (~95)
 

@@ -1045,6 +1045,40 @@ fn alignment_baseline_repli() {
     assert!(b.rect.y < 0.0, "super : dy négatif ({})", b.rect.y);
 }
 
+/// R-269 — `alignment-baseline` : `top`/`bottom` (bords de
+/// ligne) et `above`/`below`/`over`/`under` (termes WM
+/// verticaux, approchés bord haut/bas) étaient absorbés en
+/// `baseline`. `first`/`auto` restent baseline honnête
+/// (ligne à baseline unique).
+#[test]
+fn alignment_baseline_bords() {
+    let (dom, bx) = laid(
+        // Le run texte garde le strut actif (ligne ≈48px) —
+        // toute-atomes le neutraliserait (quirks §images).
+        "<div>x<span id=a></span><span id=b></span><span id=c></span><span id=d></span></div>",
+        "div{font-size:40px}\
+         span{display:inline-block;width:10px;height:10px}\
+         #a{alignment-baseline:bottom}\
+         #b{alignment-baseline:above}\
+         #c{alignment-baseline:under}\
+         #d{alignment-baseline:first}",
+    );
+    let a = find(&bx, by_id(&dom, "a"));
+    let b = find(&bx, by_id(&dom, "b"));
+    let c = find(&bx, by_id(&dom, "c"));
+    let d = find(&bx, by_id(&dom, "d"));
+    // `bottom`/`under` : margin box au bord BAS de la ligne
+    // (h ≥ fonte 40px ×1.2 ≈ 48 — y > 0 net).
+    assert!(a.rect.y > 20.0, "bottom → bas de ligne ({})", a.rect.y);
+    assert_eq!(a.rect.y, c.rect.y, "under ≈ bottom");
+    // `above` : bord haut → y=0.
+    assert_eq!(b.rect.y, 0.0, "above → haut de ligne");
+    // `first` = baseline → y intermédiaire (descend de
+    // `top`, monte de `bottom`).
+    assert!(d.rect.y > b.rect.y, "first = baseline > top");
+    assert!(d.rect.y < a.rect.y, "first = baseline < bottom");
+}
+
 /// `position-area` `span-*` : mappés sur le côté de base
 /// (la taille spannée exige un re-flow — approximation
 /// documentée, la position change).
