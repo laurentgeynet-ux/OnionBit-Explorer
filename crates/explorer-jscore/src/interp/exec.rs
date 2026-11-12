@@ -77,7 +77,7 @@ impl Engine {
             src,
             self.strict,
             self.nest_limit,
-            Some(std::rc::Rc::from("<eval>")),
+            Some(std::rc::Rc::from(Self::eval_src_tag(src))),
         )
         .map_err(|err| {
             Thrown(self.error_value(self.protos.syntax_error, "SyntaxError", &err.to_string()))
@@ -143,7 +143,7 @@ impl Engine {
             src,
             self.strict,
             self.nest_limit,
-            Some(std::rc::Rc::from("<eval>")),
+            Some(std::rc::Rc::from(Self::eval_src_tag(src))),
         )
         .map_err(|err| {
             Thrown(self.error_value(self.protos.syntax_error, "SyntaxError", &err.to_string()))
@@ -153,6 +153,18 @@ impl Engine {
         let r = self.exec_program_in(env, this, &prog);
         self.strict = outer_strict;
         r
+    }
+
+    /// N1.5 — le bytecode VM BotGuard est livré par `eval()`
+    /// (src="<eval>", invisible aux sondes par-src). Si la source
+    /// mentionne `trayride`, on la marque du src de l'interpréteur
+    /// → `bg.call`/`bg.listen`/frames la voient.
+    fn eval_src_tag(src: &str) -> &'static str {
+        if src.contains("trayride") {
+            "<eval:google.com/js/th>"
+        } else {
+            "<eval>"
+        }
     }
 
     /// Dump des sources évaluées sous `EXPLORER_EVAL_DUMP`

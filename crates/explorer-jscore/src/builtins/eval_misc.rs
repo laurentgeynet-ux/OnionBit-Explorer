@@ -68,12 +68,15 @@ fn function_ctor_kind(e: &mut Engine, _t: Value, args: &[Value], kw: &str) -> Js
         h(&src);
     }
     e.note_eval_src(&src)?;
-    let prog = crate::parser::parse_in(
-        &src,
-        false,
-        e.nest_limit,
-        Some(std::rc::Rc::from("<Function>")),
-    )
+    // N1.5 — même marquage que `eval_source` : le bytecode VM
+    // BotGuard livré par `new Function(...)` porterait sinon le
+    // src muet "<Function>", invisible aux sondes par-src.
+    let src_tag: &'static str = if src.contains("trayride") {
+        "<eval:google.com/js/th>"
+    } else {
+        "<Function>"
+    };
+    let prog = crate::parser::parse_in(&src, false, e.nest_limit, Some(std::rc::Rc::from(src_tag)))
     .map_err(|err| {
         crate::heap::Thrown(e.error_value(
             e.protos.syntax_error,
