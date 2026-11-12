@@ -2909,3 +2909,29 @@ cause** ; résidu = promesses des handlers d'erreur `Atn`
   desormais les 5 mots-cles avec effet distinct mesurable
   quand plusieurs options debordent (`most-*` change
   l'option appliquee en dernier recours).
+
+### 2026-11-13 — PIPE -> NAV : **erratum R-286 livre** — garde-fou encre pathologique
+
+- **Diagnostic** : exact — `skip-ink:auto` (initiale)
+  soustrayait chaque glyphe d'Ahem (encre = carreau plein
+  em entier, fond a +0,2em) → `keep` vide → zero
+  `DecoRect`. La decoupe elle-meme est spec-correcte ;
+  c'est l'encre **pathologique** qui rend le resultat
+  absurde — meme classe sur fontes CJK plein-em reelles.
+- **Fix** (`deco_keep_ranges`, display.rs) : `auto` est un
+  « should » — si les cuts d'encre laissent `keep` vide,
+  l'encre declaree est consideree pathologique → repli
+  trait plein `(0,width)`. Cas non-blanc seul : les cuts
+  espaces ne peuvent pas vider `keep` d'elles-memes (les
+  glyphes non-blancs gardent leur plage), donc
+  `keep.is_empty()` + bande encre = signature exacte du
+  cas pathologique. Encre saine (mixte) inchangee.
+- **Verrou** : `skip_ink_encre_pathologique_garde_le_trait`
+  (unitaire display.rs — plein-em → plein ; un glyphe
+  hors bande → trou conserve). Sondes a rejouer :
+  `text-decoration*` / `text-underline-*` — attendu :
+  retour `ok` sauf `skip-ink:auto/all` = `na` (initiale /
+  equivalence, conforme).
+- **Reste honnete** : un `<a>` monoglyphe a encre couvrant
+  la bande gardera son trait (le garde-fou s'applique par
+  fragment) — rare, borne documentee.

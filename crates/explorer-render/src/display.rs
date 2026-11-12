@@ -4350,6 +4350,17 @@ fn deco_keep_ranges(
     if cur < width - 0.01 {
         keep.push((cur, width));
     }
+    // Erratum re-tour NAV (régression mesurée) : avec une
+    // fonte dont l'encre couvre toute la bande du trait —
+    // Ahem (carreau plein sur tout l'em), fontes plein-em —
+    // le skip-ink soustrait `DecoRect` entier : le souligné
+    // **disparaît** au lieu de trouer aux jambages (7 sondes
+    // `text-decoration*` basculées `ok→miss`). `auto` est un
+    // « should » : quand l'encre déclarée annihilerait tout,
+    // elle est pathologique → trait plein conservé.
+    if keep.is_empty() && ink_band.is_some() {
+        return vec![(0.0, width)];
+    }
     keep
 }
 
@@ -6542,5 +6553,48 @@ mod tests {
             "merge_rects trop lent : {:?}",
             t0.elapsed()
         );
+    }
+
+    /// Erratum R-286 (régression re-tour NAV) : avec une
+    /// fonte dont l'encre déclarée couvre toute la bande du
+    /// trait — Ahem, fontes plein-em — le skip-ink ne doit
+    /// **pas** annihiler le `DecoRect` entier : `auto` est
+    /// un « should », encre pathologique → trait plein.
+    #[test]
+    fn skip_ink_encre_pathologique_garde_le_trait() {
+        use super::deco_keep_ranges;
+        use explorer_layout::font::{FontMetrics, Glyph, ShapedRun};
+        let mk = || Glyph {
+            id: 1,
+            advance: 10.0,
+            offset_x: 0.0,
+            offset_y: 0.0,
+            cluster: 0,
+            invisible: false,
+        };
+        // Encre plein-em : chaque glyphe couvre la bande.
+        let run = ShapedRun {
+            glyphs: vec![mk(), mk()],
+            advance: 20.0,
+            metrics: FontMetrics {
+                ascent: 8.0,
+                descent: -2.0,
+                line_gap: 0.0,
+                units_per_em: 1000,
+            },
+            fallback_spans: Vec::new(),
+            ink: None,
+            ink_glyphs: vec![r(0.0, -8.0, 10.0, 10.0), r(10.0, -8.0, 10.0, 10.0)],
+        };
+        // Bande [1,2] sous la baseline — traversée par les
+        // deux encre — sans garde-fou : `keep` vide.
+        let keep = deco_keep_ranges("ab", &run, 20.0, 0, Some((1.0, 2.0)));
+        assert_eq!(keep, vec![(0.0, 20.0)], "encre plein-em → trait plein");
+        // Encre partielle (un glyphe n'atteint pas la
+        // bande) : le skip-ink normal continue de trouer.
+        let mut run2 = run.clone();
+        run2.ink_glyphs[1] = r(10.0, -8.0, 10.0, 5.0);
+        let keep2 = deco_keep_ranges("ab", &run2, 20.0, 0, Some((1.0, 2.0)));
+        assert_eq!(keep2, vec![(10.0, 20.0)], "encre saine → trou conservé");
     }
 }

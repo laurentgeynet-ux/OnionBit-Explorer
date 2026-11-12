@@ -4402,6 +4402,9 @@ le census `site_harvest` arbitre les ex æquo.
   pas le contour (Chrome est plus fin). Fix annexe :
   early-return `mask==0` court-circuitait les cuts sans
   `skip-spaces`. +`INHERITED_PROPS`.
+  **Erratum** : encre plein-em (Ahem harnais, fontes
+  plein-em réelles) annihilait le trait entier → garde-fou
+  « le trait ne disparaît jamais à cause du skip-ink ».
 
 - [x] **R-287 — `position-try-order:most-*` fins** (~5) —
   tri par étendue réelle bord-d'ancre→bord-CB dans la
