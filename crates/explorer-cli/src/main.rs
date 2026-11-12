@@ -876,11 +876,16 @@ fn fixture_for(name: &str) -> &'static str {
         // pour que `flip-block`/`flip-inline`/`flip-start`
         // s'activent. Sans débordement toute la famille est
         // inerte.
-        () if matches!(
-            n,
-            "position-try" | "position-try-fallbacks" | "position-try-order"
-        ) =>
-        {
+        // `position-try-order` — l'ordre ne se voit que si
+        // AUCUN candidat ne rentre (la dernière essayée est
+        // appliquée, css-anchor-1 §3.5) : ancre en haut à
+        // droite — `bottom` déborde en x, `left` déborde en
+        // y ; `most-width` trie `left` en tête → le repli
+        // final diffère de l'ordre `normal`.
+        () if n == "position-try-order" => {
+            "<body><div id=a style=\"anchor-name:--a;position:absolute;top:5px;left:750px;width:20px;height:20px\"></div><p class=x style=\"position:absolute;position-anchor:--a;position-area:top;width:200px;height:100px\">b</p></body>"
+        }
+        () if matches!(n, "position-try" | "position-try-fallbacks") => {
             "<body><div id=a style=\"anchor-name:--a;position:absolute;top:5px;left:5px;width:20px;height:20px\"></div><p class=x style=\"position:absolute;position-anchor:--a;position-area:top;width:900px;height:100px\">b</p></body>"
         }
         () if matches!(n, "position-area" | "position-visibility" | "anchor-scope") => {
@@ -1096,9 +1101,10 @@ impl explorer_layout::font::FontSource for BcdAhem {
 fn context_css(name: &str) -> &'static str {
     let n = name.trim_start_matches('-').trim_start_matches("webkit-");
     if n == "position-try-order" {
-        // L'ordre n'a d'effet qu'avec plusieurs candidats —
-        // `most-width` choisit alors l'option la plus large.
-        return "position-try-fallbacks:flip-block flip-inline";
+        // `bottom` en tête : l'ordre `normal` finit sur
+        // `left` (aucun ne rentre) ; `most-width`/`most-size`
+        // trient différemment → repli final différent.
+        return "position-try-fallbacks:bottom,left";
     }
     if n.starts_with("border") {
         // Logique (`border-block-*`/`border-inline-*`) : le
@@ -1365,6 +1371,9 @@ const INITIAL_EXTRA: &[(&str, &str)] = &[
     ("pointer-events", "auto"),
     ("position-try", "none"),
     ("position-try-fallbacks", "none"),
+    // R-287 — `position-try-order` : `normal` = l'ordre
+    // déclaré des fallbacks, initiale spec.
+    ("position-try-order", "normal"),
     ("resize", "none"),
     ("scroll-behavior", "auto"),
     ("table-layout", "auto"),

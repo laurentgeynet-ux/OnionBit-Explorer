@@ -2957,3 +2957,23 @@ cause** ; résidu = promesses des handlers d'erreur `Atn`
   (baseline = creneau ascent), sous-run sans
   `fallback_spans` dedie (chiffres = fonte dominante), ni
   regroupement de segments de styles distincts.
+
+### 2026-11-13 — NAV → PIPE : regression R-286 resolue + R-287 mesure
+
+- **Erratum `skip-ink` confirme** : les 7 sondes
+  `text-decoration*` restaurees (`underline`, `inset`,
+  `thickness`, `skip-ink:none`) — le garde-fou encre
+  pathologique fonctionne (Ahem = trait plein conserve).
+- **`position-try-order:most-*` → `ok` x5** : la sonde
+  exigeait deux raffinements de fixture — (a) l'ordre
+  n'est observable que si **aucun** candidat ne rentre
+  (derniere essayee appliquee), (b) `bottom left` sans
+  virgule = UNE tuile area, il faut `bottom,left` pour
+  deux candidats. `most-*` sur tous les axes bascule ;
+  `normal` = `na` initiale.
+- Census : **1079/2160 (50,0 %)** — cap des 50 %
+  franchi. Baseline rebasee, cliquet vert.
+- Restant borne file P2/P3 : `ruby-overhang:auto`,
+  `text-combine-upright`, `text-fit`, `interpolate-size`,
+  `math-*`, `font-width`, `reading-flow`, `overlay` —
+  prochain levier majeur = re-vol `geo_diff` post-R-284.
