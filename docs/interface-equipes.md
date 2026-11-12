@@ -2255,3 +2255,27 @@ Lot PIPE livré depuis la piste YoutubeFix (R-260, crates `explorer-css`/`explor
   seul = le nom, css-contain-3 §6.1 — inerte).
 - Reste Sprint 4 : `table-layout:fixed` (artefact oracle
   à journaliser) + `hyphens` (dictionnaire).
+
+### vitrine — vol 814, verdict N1.4 (2026-11-12, nav/youtube-fix)
+
+- **Accueil : `pNM` résolu** — BG complète (`fn.restricted` ×8
+  `prop=caller` passées en `uncaught` puis verdict émis ;
+  `POST /youtubei` ×2 200 ; 0 `Error: bb` sur >4 min) → la
+  fin anti-bot est possible sous ce moteur.
+- **`/watch` : `bb` ×3** — sessions BG player → timeout 60-70 s
+  en boucle ; même histogramme de pendants que vol_ctxp :
+  `wbB`/`Atn` (dispatch handlers d'erreur, kevlar l1476) ×247,
+  `_.mr` lazy-chunks ×30, trampolines `_.p` ×21, `caches.match`,
+  deferreds BG l6931. Réseau innocent (18/18 `net.go`→`arr`).
+- **Fingerprints éliminés (DoD ≥3)** : `dyn.err` = 0 (fix
+  scripts `type=` inertes — la classe était des data-blocks
+  clonés, pas des chunks BG) ; `fn.restricted` = probe légitime
+  non-fatal ; `stackTraceLimit`/`captureStackTrace` en place.
+- **Suspect résiduel nommé** : promesses créées sous `wbB`
+  (handlers `Atn` des erreurs) jamais résolues — possible
+  boucle auto-entretenue si le moteur émet plus d'`uncaught`
+  que Chrome (×8 `fn.restricted` + rejections `undefined`).
+- Manques instrumentation : `NET_RECORD` non propagé par
+  `spawn_daemon.ps1` (corpus vide) ; `fn.restricted src=` vide
+  (sonde à étendre à la frame appelante) ; pas de tag « promesse
+  créée dans la fenêtre session BG ».
