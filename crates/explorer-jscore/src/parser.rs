@@ -1973,6 +1973,9 @@ impl Parser {
     /// `Expr::Chain` steps — everything after it is skipped when the
     /// `?.` base is nullish (`a?.b.c` never evaluates `.c`).
     fn lhs_expr(&mut self, no_in: bool) -> Result<Expr> {
+        // Position du `new` — site d'appel porté par `Expr::New`
+        // (N1.1) ; lue avant `eat_kw` qui avance le curseur.
+        let new_pos = self.pos_here();
         let mut e = if self.eat_kw(Kw::New) {
             if self.eat_p(P::Dot) {
                 // `new.target` — meta-property : la seule paire
@@ -1989,7 +1992,7 @@ impl Parser {
                 } else {
                     Vec::new()
                 };
-                Expr::New(Box::new(callee), args)
+                Expr::New(Box::new(callee), args, new_pos)
             }
         } else {
             self.primary(no_in)?
@@ -2046,10 +2049,13 @@ impl Parser {
                     None => e = Expr::Index(Box::new(e), Box::new(k)),
                 }
             } else if self.check_p(P::LParen) {
+                // Position du `(` — site d'appel porté par
+                // `Expr::Call` (N1.1), lue avant `args()`.
+                let call_pos = self.pos_here();
                 let args = self.args(no_in)?;
                 match &mut steps {
                     Some(s) => s.push(ChainStep::Call(args)),
-                    None => e = Expr::Call(Box::new(e), args),
+                    None => e = Expr::Call(Box::new(e), args, call_pos),
                 }
             } else if let Tok::Tpl(_) = self.peek() {
                 // `` tag`…` `` — tagged template (MemberExpression,
@@ -2089,6 +2095,7 @@ impl Parser {
     }
 
     fn new_callee_inner(&mut self, no_in: bool) -> Result<Expr> {
+        let new_pos = self.pos_here();
         let mut e = if self.eat_kw(Kw::New) {
             let callee = self.new_callee(no_in)?;
             let args = if self.check_p(P::LParen) {
@@ -2096,7 +2103,7 @@ impl Parser {
             } else {
                 Vec::new()
             };
-            Expr::New(Box::new(callee), args)
+            Expr::New(Box::new(callee), args, new_pos)
         } else {
             self.primary(no_in)?
         };

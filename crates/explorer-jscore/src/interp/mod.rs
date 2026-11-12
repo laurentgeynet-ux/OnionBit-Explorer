@@ -80,6 +80,13 @@ const DEFAULT_GC_THRESHOLD: usize = 131_072;
 /// — la propriété est **live** (assignable par la page).
 const STACK_TRACE_LIMIT: usize = 10;
 
+/// N1.6 — sonde `dyn.err` opt-in : `EXPLORER_DYN_PROBE` pose un
+/// extrait borné du corps fautif dans le log `dom_probe` (les
+/// scripts injectés sans `src` n'ont ni URL ni cache réseau —
+/// leur source est sinon perdue). Loquet module-level :
+/// `items_after_statements` interdit un `static` dans le corps.
+static DYN_PROBE: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+
 /// Hidden env bindings installed in class member scopes — the names
 /// use private-use code points so no source identifier can collide
 /// (`super.x` / `super()` resolve through these).
@@ -297,6 +304,21 @@ pub struct Engine {
     /// rendue dans `error.stack` et `Error::Uncaught`. Les
     /// natives n'y figurent pas (déviation documentée).
     call_stack: Vec<Rc<crate::ast::FnLit>>,
+    /// Sites d'invocation parallèles à `call_stack` (N1.1) —
+    /// `call_sites[i]` = position `(ligne, colonne)` du `Call`/
+    /// `New` qui a invoqué la frame `i`, `(0,0)` quand l'appel
+    /// vient d'un chemin non-AST (microtask, callback natif).
+    /// Rendue comme position d'exécution de la frame **parente**
+    /// (forme V8 : chaque frame nomme le point où elle tourne).
+    call_sites: Vec<(usize, usize)>,
+    /// Site du `Call`/`New` en cours de dispatch (N1.1) — posé
+    /// par les bras `Expr::Call`/`Expr::New` après l'éval des
+    /// args, consommé au push de frame (callee script) ou lu par
+    /// `stack_text` comme point d'exécution courant (callee
+    /// natif — `new Error()` y laisse sa position). Peut rester
+    /// sur un site consommé par un natif : approximation
+    /// documentée, toujours une position réelle du bundle.
+    pending_call_pos: (usize, usize),
     /// Hook d'observabilité des sources `eval`/`Function`/
     /// timer-string (JS-C50) — le code obfusqué des pages réelles
     /// vit dans ces sources, pas dans le `<script>` parent ; le
@@ -1153,6 +1175,8 @@ impl Engine {
             call_depth: 0,
             call_depth_limit: DEFAULT_CALL_DEPTH,
             call_stack: Vec::new(),
+            call_sites: Vec::new(),
+            pending_call_pos: (0, 0),
             eval_hook: None,
             expr_depth: 0,
             expr_dump_n: 4,
@@ -2062,8 +2086,7 @@ impl Engine {
                 // borné (400 c, sauts aplatis) + longueur du
                 // corps fautif — sinon la source d'un <script>
                 // injecté sans `src` est perdue.
-                static DYNP: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
-                if *DYNP.get_or_init(|| std::env::var_os("EXPLORER_DYN_PROBE").is_some()) {
+                if *DYN_PROBE.get_or_init(|| std::env::var_os("EXPLORER_DYN_PROBE").is_some()) {
                     let head: String = text
                         .chars()
                         .take(400)
@@ -4289,19 +4312,63 @@ impl Engine {
         } else {
             format!("{name}: {msg}")
         };
-        for lit in self.call_stack.iter().rev().take(self.stack_trace_limit()) {
-            let n = lit.name.as_deref().unwrap_or("<anonymous>");
+        let n = self.call_stack.len();
+        // Forme V8 (N1.1) : chaque frame nomme le point où elle
+        // **exécute** — la frame du haut le site courant (posé
+        // par le `Call`/`New` de l'erreur), une frame plus basse
+        // le site qui a invoqué la frame au-dessus d'elle. Repli
+        // sur la position de définition (`lit.pos`) quand le site
+        // est inconnu `(0,0)` — chemins non-AST, vieux corpus.
+        let frame_pos = |i: usize| -> (usize, usize) {
+            if i + 1 == n {
+                let p = self.pending_call_pos;
+                if p.0 > 0 {
+                    return p;
+                }
+            } else {
+                let p = self.call_sites.get(i + 1).copied().unwrap_or((0, 0));
+                if p.0 > 0 {
+                    return p;
+                }
+            }
+            self.call_stack[i].pos
+        };
+        let render = |s: &mut String, nm: &str, src: Option<&Rc<str>>, pos: (usize, usize)| {
             s.push_str("\n    at ");
-            s.push_str(n);
-            if lit.pos.0 > 0 {
+            s.push_str(nm);
+            if pos.0 > 0 {
                 // `src` (nom de module / `<eval>`) préfixe la
                 // position — `at f (bundle.js:l:c)` attribue
                 // chaque frame à son bundle (JS-C56).
-                match &lit.src {
-                    Some(src) => s.push_str(&format!(" ({}:{}:{})", src, lit.pos.0, lit.pos.1)),
-                    None => s.push_str(&format!(" ({}:{})", lit.pos.0, lit.pos.1)),
+                match src {
+                    Some(src) => s.push_str(&format!(" ({}:{}:{})", src, pos.0, pos.1)),
+                    None => s.push_str(&format!(" ({}:{})", pos.0, pos.1)),
                 }
             }
+        };
+        for i in (0..n).rev().take(self.stack_trace_limit()) {
+            let lit = &self.call_stack[i];
+            render(
+                &mut s,
+                lit.name.as_deref().unwrap_or("<anonymous>"),
+                lit.src.as_ref(),
+                frame_pos(i),
+            );
+        }
+        // Frame script synthétique : le contexte qui a invoqué la
+        // frame du bas (top-level `f()` → `at <anonymous>:l:c`),
+        // ou — pile vide — le `new Error()` top-level lui-même.
+        // Nécessaire à la forme V8 : une erreur top-level produit
+        // une frame, pas un stack à zéro ligne.
+        if n > 0 {
+            if let Some(&p) = self.call_sites.first() {
+                if p.0 > 0 && self.stack_trace_limit() > n {
+                    render(&mut s, "<anonymous>", self.call_stack[0].src.as_ref(), p);
+                }
+            }
+        } else if self.pending_call_pos.0 > 0 && self.stack_trace_limit() > 0 {
+            let p = self.pending_call_pos;
+            render(&mut s, "<anonymous>", None, p);
         }
         s
     }
@@ -9392,6 +9459,11 @@ impl Engine {
         // un appel refusé ne laisse pas de résidu dans
         // `error.stack`/`Uncaught`.
         self.call_stack.push(lit.clone());
+        // N1.1 — site d'invocation parallèle : consommé ici,
+        // `(0,0)` si l'appel n'a pas traversé un bras `Call`/
+        // `New` (microtask drain, callback natif…).
+        self.call_sites
+            .push(std::mem::take(&mut self.pending_call_pos));
         // Cran 66 — sonde d'invocation : les reads `psp.hit`
         // nomment le callee résolu mais l'émetteur du second
         // `_readyClients` reste sur des trampolines `.call`/
@@ -9490,6 +9562,7 @@ impl Engine {
             Err(t) => {
                 self.call_depth -= 1;
                 self.call_stack.pop();
+                self.call_sites.pop();
                 self.strict = outer_strict;
                 return Err(t);
             }
@@ -9540,6 +9613,7 @@ impl Engine {
             if let Err(t) = self.bind_pat(&local, this.clone(), &p.pat, v, BindMode::Var) {
                 self.call_depth -= 1;
                 self.call_stack.pop();
+                self.call_sites.pop();
                 return Err(t);
             }
         }
@@ -9605,6 +9679,7 @@ impl Engine {
             }
             self.call_depth -= 1;
             self.call_stack.pop();
+            self.call_sites.pop();
             self.strict = outer_strict;
             return Ok(it);
         }
@@ -9631,6 +9706,7 @@ impl Engine {
             }
             self.call_depth -= 1;
             self.call_stack.pop();
+            self.call_sites.pop();
             self.strict = outer_strict;
             return Ok(Value::Obj(prom));
         }
@@ -9657,6 +9733,7 @@ impl Engine {
         let _frame = crate::j17_scope(&crate::J17_FRAME_NS);
         self.call_depth -= 1;
         self.call_stack.pop();
+        self.call_sites.pop();
         self.strict = outer_strict;
 
         match r {

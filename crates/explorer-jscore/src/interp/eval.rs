@@ -159,7 +159,7 @@ impl Engine {
                 // dépilée — un callee Member/Index garde le
                 // bras `Expr::Call` complet (référence
                 // receveur/`this`).
-                Expr::Call(f, args) if matches!(&**f, Expr::Call(..)) => {
+                Expr::Call(f, args, _) if matches!(&**f, Expr::Call(..)) => {
                     spine.push(Spine::Call(args));
                     f
                 }
@@ -557,7 +557,7 @@ impl Engine {
                 let k = self.prop_key(k)?;
                 self.get_prop_value(b, &k)
             }
-            Expr::Call(callee, arg_exprs) => {
+            Expr::Call(callee, arg_exprs, call_pos) => {
                 enum Callee {
                     /// `expr(…)` — f pre-evaluated, global receiver.
                     Bare(Value),
@@ -609,6 +609,13 @@ impl Engine {
                     _ => Callee::Bare(self.eval_expr(env, this.clone(), callee)?),
                 };
                 let args = self.eval_args(env, this.clone(), arg_exprs)?;
+                // N1.1 — site d'appel de CE `Call` : posé après
+                // l'évaluation des args (un appel imbriqué dans
+                // les args a déjà consommé sa propre position ;
+                // le dernier écrivain avant le dispatch est le
+                // bon). Consommé au push de frame (appel JS) ou
+                // écrasé au prochain bras Call/New (callee natif).
+                self.pending_call_pos = *call_pos;
                 match callee {
                     // Receiver `undefined` — le callee sloppy le
                     // coercera vers l'objet global, le strict le
@@ -956,13 +963,16 @@ impl Engine {
                     }
                 }
             }
-            Expr::New(callee, arg_exprs) => {
+            Expr::New(callee, arg_exprs, call_pos) => {
                 // JS-C460 — même drapeau « call-only » que le
                 // bras Call : masquage au dispatch constructeur
                 // (`f`+args racinés pendant le chemin `new`).
                 let mask_slot = self.call_only_slot.take();
                 let f = self.eval_expr(env, this.clone(), callee)?;
                 let args = self.eval_args(env, this, arg_exprs)?;
+                // N1.1 — site du `new` posé après l'éval des args
+                // (même convention que le bras `Expr::Call`).
+                self.pending_call_pos = *call_pos;
                 // `new` sur non-ctor : le callee est nommé —
                 // les sondes de sites réels identifient l'API
                 // hôte manquante du premier coup.

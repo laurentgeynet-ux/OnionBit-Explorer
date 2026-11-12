@@ -211,7 +211,7 @@ fn expr_poisons(e: &Expr) -> bool {
         }
         Expr::Cond(a, b, c) => expr_poisons(a) || expr_poisons(b) || expr_poisons(c),
         Expr::Member(o, _) => expr_poisons(o),
-        Expr::Call(f, args) | Expr::New(f, args) => {
+        Expr::Call(f, args, _) | Expr::New(f, args, _) => {
             expr_poisons(f) || args.iter().any(expr_poisons)
         }
         Expr::SuperCall(args) => args.iter().any(expr_poisons),
@@ -731,7 +731,7 @@ impl Resolver {
                 self.walk_expr(c);
             }
             Expr::Member(o, _) => self.walk_expr(o),
-            Expr::Call(f, args) | Expr::New(f, args) => {
+            Expr::Call(f, args, _) | Expr::New(f, args, _) => {
                 self.walk_expr(f);
                 for a in args {
                     self.walk_expr(a);

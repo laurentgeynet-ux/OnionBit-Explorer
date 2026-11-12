@@ -666,6 +666,31 @@ fn stack_native_ne_laissent_pas_de_frame_orpheline() {
 }
 
 #[test]
+fn stack_format_v8_like() {
+    // N1.1 — positions d'**appel-site** (forme V8 : chaque
+    // frame nomme le point où elle exécute), plus une frame
+    // script `<anonymous>` pour l'appelant top-level — une
+    // erreur top-level produit une frame, pas un stack vide.
+    let s = ev_str(
+        "function g() {\n  return new Error('x').stack }\n\
+         function f() { return g() }\nf()",
+    );
+    // `g` exécute le `new Error` — ligne 2, pas sa définition 1.
+    assert!(s.contains("at g (2:"), "g au site du new : {s}");
+    // `f` exécute l'appel `g()` — ligne 3.
+    assert!(s.contains("at f (3:"), "f au site de g() : {s}");
+    // Le script top-level invoque `f()` — ligne 4.
+    assert!(s.contains("at <anonymous> (4:"), "frame script : {s}");
+    // Top-level direct : une frame script seule porte le site
+    // du `new` (V8 : `at <anonymous>:l:c`).
+    let t = ev_str("new Error('t').stack");
+    assert!(
+        t.contains("Error: t\n    at <anonymous> (1:"),
+        "top-level : {t}"
+    );
+}
+
+#[test]
 fn syntax_error() {
     let mut e = Engine::new();
     assert!(matches!(
@@ -5652,17 +5677,26 @@ fn c14_json_reviver() {
 #[test]
 fn c14_error_stack() {
     // Own prop non-énumérable, format première ligne V8-style
-    // (JS-C47 : les frames d'appel suivent — pile vide au niveau
-    // top, donc seule l'en-tête ici ; couvert frames dans les
-    // tests `stack_*`).
-    assert_eq!(ev_str("new Error('x').stack"), "Error: x");
-    assert_eq!(ev_str("new TypeError('m').stack"), "TypeError: m");
+    // (JS-C47 : les frames d'appel suivent — N1.1 : la frame
+    // script `<anonymous>` porte le site du `new`, couvert
+    // frames en détail dans les tests `stack_*`).
+    assert_eq!(
+        ev_str("new Error('x').stack"),
+        "Error: x\n    at <anonymous> (1:1)"
+    );
+    assert_eq!(
+        ev_str("new TypeError('m').stack"),
+        "TypeError: m\n    at <anonymous> (1:1)"
+    );
     assert_eq!(ev_str("Object.keys(new Error('x')).join()"), "");
     assert_eq!(
         ev_str("Object.getOwnPropertyNames(new Error('x')).sort().join(',')"),
         "message,name,stack"
     );
-    assert_eq!(ev_str("new Error().stack"), "Error");
+    assert_eq!(
+        ev_str("new Error().stack"),
+        "Error\n    at <anonymous> (1:1)"
+    );
 }
 
 #[test]
@@ -5797,7 +5831,7 @@ fn c15_species_concat_spreadable() {
 fn c15_capture_stack_trace() {
     assert_eq!(
         ev_str("var e={name:'MyErr',message:'boom'}; Error.captureStackTrace(e); e.stack"),
-        "MyErr: boom"
+        "MyErr: boom\n    at <anonymous> (1:61)"
     );
     // Own prop non-énumérable.
     assert_eq!(
