@@ -744,7 +744,7 @@ fn fixture_for(name: &str) -> &'static str {
         () if matches!(n, "empty-cells" | "caption-side" | "border-collapse" | "table-layout")
         =>
         {
-            "<body><table class=x><caption>c</caption><tr><td></td><td style=\"width:100px;height:40px\">a</td></tr></table></body>"
+            "<body><table class=x><caption>c</caption><tr><td style=\"border:1px solid black\"> </td><td style=\"border:1px solid black;width:100px;height:40px\">a</td></tr></table></body>"
         }
         // `vertical-align`/`alignment-baseline`/`baseline-shift`
         // — `.x` = cellule table (la ligne de base des
@@ -1022,6 +1022,10 @@ fn context_css(name: &str) -> &'static str {
         // `content-box`/`padding-box`/`border-box` (sans elle
         // les trois aires coïncident → `clip`/`origin` inertes).
         "background-image:linear-gradient(red,blue);border:10px solid black;padding:10px;width:100px;height:80px"
+    } else if n.starts_with("text-decoration-") {
+        // `text-decoration-color`/`-line`/`-style`/`-thickness`
+        // n'ont d'effet qu'avec un trait posé.
+        "text-decoration:underline"
     } else if n.starts_with("outline") {
         "outline:2px solid black;width:100px;height:80px"
     } else if n.starts_with("column-") || n.starts_with("break-") || n == "columns" {
@@ -1116,6 +1120,7 @@ const INITIAL_EXTRA: &[(&str, &str)] = &[
     ("content", "normal"),
     ("content-visibility", "visible"),
     ("direction", "ltr"),
+    ("empty-cells", "show"),
     ("field-sizing", "fixed"),
     ("flex-wrap", "nowrap"),
     ("float", "none"),
@@ -1189,6 +1194,23 @@ const INITIAL_EXTRA: &[(&str, &str)] = &[
     ("background-repeat", "repeat"),
     ("background-size", "auto"),
     ("background-size", "cover"),
+    // `background-position-x`/`-y` : neutres sur un dégradé
+    // calibré à la zone (même borne que `cover`/`center` —
+    // l'image a la dimension de la zone, l'offset est nul
+    // quelle que soit la valeur).
+    ("background-position-x", "left"),
+    ("background-position-x", "center"),
+    ("background-position-x", "right"),
+    ("background-position-y", "top"),
+    ("background-position-y", "center"),
+    ("background-position-y", "bottom"),
+    // Cellule : `text-top`/`text-bottom`/`sub`/`super`/
+    // `<length>` retombent spec sur `baseline` (R-266
+    // §17.5.3.1) = le défaut de la fixture cellule → neutre.
+    ("vertical-align", "text-top"),
+    ("vertical-align", "text-bottom"),
+    ("vertical-align", "sub"),
+    ("vertical-align", "super"),
 ];
 
 /// Propriétés **non observables** par l'oracle géométrique
