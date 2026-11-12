@@ -1680,3 +1680,34 @@ fn text_box_trim_retire_le_half_leading() {
     let p4 = &find(&b4, by_tag(&d4, "p")).children[0];
     assert_eq!(p4.rect.height, h1);
 }
+
+// ---------- R-281 — `word-break:keep-all` (css-text-3 §5.2) ----------
+
+#[test]
+fn word_break_keep_all_supprime_les_coupures_cjk() {
+    // Texte CJK dans un conteneur étroit : `normal` casse
+    // n'importe où (UAX #14) ; `keep-all` ne coupe qu'aux
+    // espaces — les pièces CJK restent entières.
+    let html = "<!doctype html><p>中文文字 abc</p>";
+    let css = |wb: &str| format!("p {{ font-size: 10px; line-height: 10px; word-break: {wb} }}");
+    let (d0, b0) = laid_w(html, &css("normal"), 12.0);
+    let (d1, b1) = laid_w(html, &css("keep-all"), 12.0);
+    let p0 = &find(&b0, by_tag(&d0, "p")).children[0];
+    let p1 = &find(&b1, by_tag(&d1, "p")).children[0];
+    // normal : le run CJK (4×10px > 30px de bande) casse
+    // intra-mot → plusieurs lignes de 1-2 glyphes.
+    let l0 = p0.lines.len();
+    let l1 = p1.lines.len();
+    assert!(l0 >= 3, "normal casse le CJK : {l0} lignes");
+    assert!(l1 <= 3, "keep-all : {l1} lignes");
+    // keep-all : le mot CJK tient (ou déborde) sur UNE ligne
+    // → moins de lignes.
+    assert!(l1 < l0, "keep-all réduit les coupures : {l1} < {l0}");
+    // Le run CJK survit entier sur une ligne (déborde la
+    // bande — dégradation §5.3 — plutôt que coupé).
+    let l1_text: Vec<String> = p1.lines.iter().map(line_text).collect();
+    assert!(
+        l1_text.iter().any(|t| t.contains("中文文字")),
+        "mot CJK entier sur une ligne : {l1_text:?}"
+    );
+}

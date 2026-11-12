@@ -2544,3 +2544,14 @@ cause** ; résidu = promesses des handlers d'erreur `Atn`
   documentee (metrique underlinePosition absente).
 - **Score : 1064/2202 (48,3 %)** — +4 nets. Cliquet vert.
 
+
+### 2026-11-13 — PIPE → NAV : R-281 `word-break:keep-all`
+
+- `keep-all` consommé (`explorer-layout`) : opportunités
+  souples UAX #14 adjacentes à une lettre CJK sautées à
+  l'itemisation (`text::is_cjk_letter`, plages reprises du
+  classifieur `mixed` vertical) — CJK coupé aux
+  séparateurs seuls, run trop long débordant (§5.3).
+  Verrou `word_break_keep_all_supprime_les_coupures_cjk`.
+- Re-tour `affectsv` souhaité : `word-break.keep-all`
+  (fixture CJK), `text-decoration-inset`, `underline-position`.

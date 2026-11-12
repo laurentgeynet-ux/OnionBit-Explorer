@@ -55,6 +55,17 @@ pub struct TextRun {
 /// encre propres (`&nbsp;` tient une ligne à lui seul).
 /// `char::is_whitespace`/`str::trim` avalent `\u{A0}` —
 /// interdits pour toute décision de visibilité.
+/// R-281 — lettre CJK pour `word-break:keep-all` (Han +
+/// extensions, Hiragana, Katakana, Hangul, compat, pleine
+/// largeur — mêmes plages que la classification `mixed` du
+/// rendu vertical).
+#[must_use]
+pub fn is_cjk_letter(c: char) -> bool {
+    matches!(c as u32,
+        0x3000..=0x30FF | 0x3400..=0x4DBF | 0x4E00..=0x9FFF
+        | 0xAC00..=0xD7AF | 0xF900..=0xFAFF | 0xFF00..=0xFFEF)
+}
+
 #[must_use]
 pub fn is_css_ws(c: char) -> bool {
     matches!(c, ' ' | '\t' | '\n' | '\r' | '\u{B}' | '\u{C}')

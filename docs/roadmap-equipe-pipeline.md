@@ -4291,6 +4291,17 @@ le census `site_harvest` arbitre les ex æquo.
   Verrous : `text_underline_position_under_descend_le_trait`
   (under > auto, from-font ≡ auto), `text_decoration_inset_rentre_le_trait`
   (1/2 valeurs + `%` sur underline).
+- [x] **R-281 — `word-break:keep-all`** (~3) — les
+  opportunités souples UAX #14 adjacentes à une lettre CJK
+  (`text::is_cjk_letter` — plages du classifieur `mixed`
+  vertical) sont sautées à l'itemisation : le CJK ne se
+  coupe qu'aux séparateurs durs/espaces, comme le latin
+  sous `normal`. Un run CJK trop long déborde sa bande au
+  lieu de couper (§5.3). `normal`/`break-all`/`break-word`
+  inchangés. Verrou :
+  `word_break_keep_all_supprime_les_coupures_cjk`
+  (normal ≥ 3 lignes, keep-all ≤ 3 + mot entier sur une
+  ligne).
 
 `text-box*`/`text-autospace`/`text-fit`/`initial-letter`/
 `text-combine-upright`, `counter-set`/`counter-increment` fins,

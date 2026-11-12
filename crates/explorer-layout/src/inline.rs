@@ -1428,10 +1428,23 @@ fn text_item(
         }
         _ => (Some(para), 0),
     };
+    // R-281 — `word-break:keep-all` (css-text-3 §5.2) : les
+    // opportunités souples adjacentes à une lettre CJK sont
+    // supprimées — le texte CJK ne se coupe qu'aux
+    // séparateurs durs (comme le latin sous `normal`).
+    let keep_all = matches!(b.style.get("word-break").map(str::trim), Some("keep-all"));
     for run in text::itemize(src, para_arg) {
         let level = if overrides { flat } else { run.level };
         let mut prev = 0usize;
         for br in &run.breaks {
+            if keep_all && !br.mandatory {
+                let before = run.text.get(..br.offset).and_then(|p| p.chars().last());
+                let after = run.text.get(br.offset..).and_then(|p| p.chars().next());
+                if before.is_some_and(text::is_cjk_letter) || after.is_some_and(text::is_cjk_letter)
+                {
+                    continue;
+                }
+            }
             if br.offset > prev && br.offset <= run.text.len() {
                 if let Some(p) = run.text.get(prev..br.offset) {
                     // UAX #14 marque la FIN du texte comme
