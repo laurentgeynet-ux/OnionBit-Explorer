@@ -1058,6 +1058,7 @@ pub fn expand_shorthand(name: &str, value: &str) -> Option<Vec<(String, String)>
             "background" | "mask" | "-webkit-mask" | "grid-template" | "grid" | "container"
             | "text-wrap" => "none",
             "font" => "medium serif",
+            "-webkit-text-stroke" => "1px black",
             "list-style" => "disc",
             "place-items" | "place-content" | "place-self" => "center",
             _ => "",

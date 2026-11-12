@@ -1,5 +1,12 @@
 {
   "scores": {
-    "api": 1509
+    "css.prop": 581,
+    "css.routed": 581,
+    "css.sel": 123,
+    "css.at": 20,
+    "js.builtins": 648,
+    "api": 1509,
+    "css.values": 474,
+    "html.elem": 119
   }
 }
