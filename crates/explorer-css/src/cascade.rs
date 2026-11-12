@@ -5001,6 +5001,25 @@ fn logical_name(
         }
         return None;
     }
+    if let Some(rest) = k
+        .strip_prefix("corner-")
+        .and_then(|t| t.strip_suffix("-shape"))
+    {
+        // `corner-{s|e}{s|e}-shape` : coin logique — premier
+        // = bloc, second = inline (css-borders-4 §3.8.1,
+        // même convention que `border-{s|e}{s|e}-radius`).
+        let toks: Vec<&str> = rest.split('-').collect();
+        if let [a @ ("start" | "end"), b @ ("start" | "end")] = toks.as_slice() {
+            let ve = 2 + usize::from(*a != "start");
+            let he = usize::from(*b != "start");
+            return Some(format!(
+                "corner-{}-{}-shape",
+                stored_side(logical_edge(own, rtl, ve), pmode),
+                stored_side(logical_edge(own, rtl, he), pmode)
+            ));
+        }
+        return None;
+    }
     match k {
         "inline-size" | "min-inline-size" | "max-inline-size" => Some(format!(
             "{}{}",

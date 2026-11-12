@@ -1150,6 +1150,48 @@ pub fn expand_shorthand(name: &str, value: &str) -> Option<Vec<(String, String)>
             (b.to_string(), v2.to_string()),
         ]);
     }
+    // `corner-shape` (css-borders-4 §3.8.2 — R-270) : 1..4
+    // formes → coins tl/tr/br/bl ; `corner-{side}-shape`
+    // (§3.8.1) : 1..2 formes → les 2 coins du côté ; les
+    // logiques `corner-{block,inline}-*-shape` émettent les
+    // longhands logiques `corner-{s|e}{s|e}-shape` (résolus
+    // physiques en cascade comme `border-*-radius`).
+    if name == "corner-shape" {
+        let parts: Vec<&str> = split_ws_top(value);
+        let [tl, tr, br, bl] = four_sides(&parts)?;
+        return Some(vec![
+            // Le nom est gardé (comme `white-space`) : le
+            // census `affectsv` lit la forme déclarée.
+            ("corner-shape".to_string(), value.to_string()),
+            ("corner-top-left-shape".to_string(), tl),
+            ("corner-top-right-shape".to_string(), tr),
+            ("corner-bottom-right-shape".to_string(), br),
+            ("corner-bottom-left-shape".to_string(), bl),
+        ]);
+    }
+    if let Some(pair) = match name {
+        "corner-top-shape" => Some(("corner-top-left-shape", "corner-top-right-shape")),
+        "corner-right-shape" => Some(("corner-top-right-shape", "corner-bottom-right-shape")),
+        "corner-bottom-shape" => Some(("corner-bottom-right-shape", "corner-bottom-left-shape")),
+        "corner-left-shape" => Some(("corner-bottom-left-shape", "corner-top-left-shape")),
+        "corner-block-start-shape" => Some(("corner-start-start-shape", "corner-start-end-shape")),
+        "corner-block-end-shape" => Some(("corner-end-start-shape", "corner-end-end-shape")),
+        "corner-inline-start-shape" => Some(("corner-start-start-shape", "corner-end-start-shape")),
+        "corner-inline-end-shape" => Some(("corner-start-end-shape", "corner-end-end-shape")),
+        _ => None,
+    } {
+        let parts: Vec<&str> = split_ws_top(value);
+        let (v1, v2) = match parts.as_slice() {
+            [v] => (*v, *v),
+            [a, b] => (*a, *b),
+            _ => return None,
+        };
+        return Some(vec![
+            (name.to_string(), value.to_string()),
+            (pair.0.to_string(), v1.to_string()),
+            (pair.1.to_string(), v2.to_string()),
+        ]);
+    }
     // `border-radius` (R-167) : 1..4 rayons → coins tl/tr/
     // br/bl ; la forme elliptique `h/v` n'est pas encore
     // supportée — seul le rayon horizontal avant `/` est

@@ -2007,6 +2007,29 @@ Lot PIPE livré depuis la piste YoutubeFix (R-260, crates `explorer-css`/`explor
   les ~95 `position-try` + ~16 `break-*` + ~10
   `alignment-baseline` devraient basculer en masse.
 
+### couture PIPE → NAV — R-270 `corner-shape` posé (2026-11-13)
+
+- **`corner-*-shape` consommé** : les 17 noms étaient routés
+  mais lus nulle part (~50 misses visés). `corner-shape` +
+  `corner-{side}-shape` s'expansent en longhands physiques ;
+  les logiques `corner-{block,inline}-*`/`{s|e}{s|e}-shape`
+  passent par `resolve_logical_props` comme `border-*-radius`.
+- **Contrat touché** : `DisplayItem::FillRect` et
+  `DisplayItem::Border` gagnent `corners: [f32; 4]` (exposant
+  superellipse `K` par coin — `round`=1 = comportement
+  historique). **Extension additive de champ** : le dump
+  `fill`/`border` imprime désormais `c{…}` en fin de ligne —
+  si une fixture NAV parse ces lignes, tolérance requise.
+- **`affectsv`** : les sondes par coin devraient toutes
+  basculer (`superellipse(k)` compris). Bornes honnêtes à
+  journaliser si miss : `BoxShadow`/`PushClipRounded`/
+  `clip-path:round`/`border-image` restent ronds ;
+  `corner-shape` n'a d'effet qu'avec `border-radius` > 0
+  (pas de rayon propre — `corner-shape` seul = carré, comme
+  les navigateurs) ; concave (`scoop`/`notch`) approximé en
+  cordes — un oracle à sub-pixel fin pourrait diverger.
+- **Sprint 3 en cours** : reste `rule`/`row-rule` (~45).
+
 ### vitrine — livraisons M0/M1 amont (2026-11-12, nav/youtube-fix)
 
 - **N0.1 aval posé** (`9887a9d6`) : `DirTransport` discrimine

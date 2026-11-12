@@ -81,6 +81,11 @@ pub enum DisplayItem {
         /// Rayons des 4 coins \[tl,tr,br,bl] px (R-167) —
         /// 0 = rectangle franc.
         radii: [f32; 4],
+        /// Formes des 4 coins \[tl,tr,br,bl] : exposant `K`
+        /// de la superellipse (css-borders-4 §3.7 — R-270 ;
+        /// `round`=1, `squircle`=2, `square`=+∞, `bevel`=0,
+        /// `scoop`=-1, `notch`=-∞). 1 = coin rond classique.
+        corners: [f32; 4],
     },
     /// Trait de `text-decoration` stylé (R-178) — `style` ∈
     /// `explorer_layout::inline::DECO_*` ; `double`/`dotted`/
@@ -124,6 +129,10 @@ pub enum DisplayItem {
         styles: [BorderStyle; 4],
         /// Rayons des 4 coins \[tl,tr,br,bl] px (R-167).
         radii: [f32; 4],
+        /// Formes des 4 coins \[tl,tr,br,bl] : exposant `K`
+        /// superellipse (R-270, même convention que
+        /// `FillRect::corners` — 1 = rond).
+        corners: [f32; 4],
     },
     /// Run de glyphes shapés, posé depuis l'origine
     /// baseline (`x`, `y` = ligne de base).
@@ -609,9 +618,13 @@ impl DisplayList {
             use std::fmt::Write as _;
             match item {
                 DisplayItem::FillRect {
-                    rect, color, radii, ..
+                    rect,
+                    color,
+                    radii,
+                    corners,
+                    ..
                 } => {
-                    let _ = writeln!(out, "fill {rect:?} #{color:?} r{radii:?}");
+                    let _ = writeln!(out, "fill {rect:?} #{color:?} r{radii:?} c{corners:?}");
                 }
                 DisplayItem::DecoRect {
                     rect, style, color, ..
@@ -624,11 +637,12 @@ impl DisplayList {
                     colors,
                     styles,
                     radii,
+                    corners,
                     ..
                 } => {
                     let _ = writeln!(
                         out,
-                        "border {rect:?} w{widths:?} c{colors:?} s{styles:?} r{radii:?}"
+                        "border {rect:?} w{widths:?} c{colors:?} s{styles:?} r{radii:?} c{corners:?}"
                     );
                 }
                 DisplayItem::Text {
@@ -959,13 +973,15 @@ fn item_eq(a: &DisplayItem, b: &DisplayItem) -> bool {
                 rect: r1,
                 color: c1,
                 radii: ra1,
+                corners: k1,
             },
             D::FillRect {
                 rect: r2,
                 color: c2,
                 radii: ra2,
+                corners: k2,
             },
-        ) => r1 == r2 && c1 == c2 && ra1 == ra2,
+        ) => r1 == r2 && c1 == c2 && ra1 == ra2 && k1 == k2,
         (
             D::DecoRect {
                 rect: r1,
@@ -985,6 +1001,7 @@ fn item_eq(a: &DisplayItem, b: &DisplayItem) -> bool {
                 colors: c1,
                 styles: s1,
                 radii: ra1,
+                corners: k1,
             },
             D::Border {
                 rect: r2,
@@ -992,8 +1009,9 @@ fn item_eq(a: &DisplayItem, b: &DisplayItem) -> bool {
                 colors: c2,
                 styles: s2,
                 radii: ra2,
+                corners: k2,
             },
-        ) => r1 == r2 && w1 == w2 && c1 == c2 && s1 == s2 && ra1 == ra2,
+        ) => r1 == r2 && w1 == w2 && c1 == c2 && s1 == s2 && ra1 == ra2 && k1 == k2,
         (
             D::Text {
                 origin: o1,
@@ -1465,6 +1483,7 @@ fn emit_canvas_bg(
                 rect: canvas,
                 color: c,
                 radii: [0.0; 4],
+                corners: [1.0; 4],
             });
         }
     }
@@ -1948,6 +1967,46 @@ fn corner_radii(st: &explorer_css::ComputedStyle, rect: &Rect) -> [f32; 4] {
         radius_px(st.get("border-bottom-right-radius"), basis).min(cap),
         radius_px(st.get("border-bottom-left-radius"), basis).min(cap),
     ]
+}
+
+/// `corner-*-shape` (css-borders-4 §3.7 — R-270) →
+/// exposants `K` de la superellipse par coin \[tl,tr,br,bl]
+/// : `round`=1 (e=2), `squircle`=2 (e=4), `square`=+∞,
+/// `bevel`=0 (e=1), `scoop`=-1 (e=0.5, concave),
+/// `notch`=-∞ ; `superellipse(k)`/`±infinity` = k/±∞.
+/// `round` absent → 1.0 partout (comportement historique).
+/// `PushClipRounded`/`BoxShadow`/`outline` restent ronds —
+/// borne documentée : la forme ne suit pas encore ces
+/// surfaces.
+fn corner_ks(st: &explorer_css::ComputedStyle) -> [f32; 4] {
+    fn k_of(v: &str) -> Option<f32> {
+        Some(match v.trim() {
+            "round" => 1.0,
+            "squircle" => 2.0,
+            "square" => f32::INFINITY,
+            "bevel" => 0.0,
+            "scoop" => -1.0,
+            "notch" => f32::NEG_INFINITY,
+            other => {
+                let inner = other
+                    .strip_prefix("superellipse(")
+                    .and_then(|s| s.strip_suffix(')'))?
+                    .trim();
+                match inner {
+                    "infinity" => f32::INFINITY,
+                    "-infinity" => f32::NEG_INFINITY,
+                    _ => inner.parse::<f32>().ok()?,
+                }
+            }
+        })
+    }
+    [
+        st.get("corner-top-left-shape"),
+        st.get("corner-top-right-shape"),
+        st.get("corner-bottom-right-shape"),
+        st.get("corner-bottom-left-shape"),
+    ]
+    .map(|v| v.and_then(k_of).unwrap_or(1.0))
 }
 
 /// Une couche `box-shadow` : `inset? x y [blur [spread]]
@@ -3941,6 +4000,7 @@ fn paint_self(
                                 rect,
                                 color: c,
                                 radii: corner_radii(&bx.style, &rect),
+                                corners: corner_ks(&bx.style),
                             });
                             items.push(DisplayItem::PopClip);
                         }
@@ -3950,6 +4010,7 @@ fn paint_self(
                         rect,
                         color: c,
                         radii: corner_radii(&bx.style, &rect),
+                        corners: corner_ks(&bx.style),
                     });
                 }
             }
@@ -4013,6 +4074,7 @@ fn paint_self(
                 border_style(bx.style.get("border-left-style")),
             ],
             radii: corner_radii(&bx.style, &rect),
+            corners: corner_ks(&bx.style),
         });
     }
     // R-248 — `border-image` : source url résolue par
@@ -4065,6 +4127,7 @@ fn paint_self(
                     colors: [oc; 4],
                     styles: [ow_style; 4],
                     radii: corner_radii(&bx.style, &orect),
+                    corners: corner_ks(&bx.style),
                 });
             }
         }
@@ -4093,6 +4156,7 @@ fn paint_self(
                 },
                 color: ink,
                 radii: [0.0; 4],
+                corners: [1.0; 4],
             });
         }
     }
@@ -4418,6 +4482,7 @@ fn paint_inline_deco(
                 rect: outer,
                 color: c,
                 radii: [0.0; 4],
+                corners: [1.0; 4],
             });
         }
     }
@@ -4446,6 +4511,7 @@ fn paint_inline_deco(
                 border_style(st.get("border-left-style")),
             ],
             radii: corner_radii(st, &outer),
+            corners: corner_ks(st),
         });
     }
 }
@@ -5092,10 +5158,16 @@ fn translate_item(it: &DisplayItem, d: (f32, f32)) -> DisplayItem {
         return it.clone();
     }
     match it {
-        D::FillRect { rect, color, radii } => D::FillRect {
+        D::FillRect {
+            rect,
+            color,
+            radii,
+            corners,
+        } => D::FillRect {
             rect: shifted(*rect, d),
             color: *color,
             radii: *radii,
+            corners: *corners,
         },
         D::DecoRect { rect, color, style } => D::DecoRect {
             rect: shifted(*rect, d),
@@ -5123,12 +5195,14 @@ fn translate_item(it: &DisplayItem, d: (f32, f32)) -> DisplayItem {
             colors,
             styles,
             radii,
+            corners,
         } => D::Border {
             rect: shifted(*rect, d),
             widths: *widths,
             colors: *colors,
             styles: *styles,
             radii: *radii,
+            corners: *corners,
         },
         D::Text {
             origin,

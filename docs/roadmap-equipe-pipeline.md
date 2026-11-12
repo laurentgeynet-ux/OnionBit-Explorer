@@ -4101,8 +4101,19 @@ le census `site_harvest` arbitre les ex æquo.
 
 ### Sprint 3 — peinture (~95)
 
-- [ ] `corner-shape`/`corner-*-shape` (~50) — css-borders-4 :
-  `notch`/`scoop`/`bevel`/`squircle` — DecoRect/corners raster.
+- [x] **R-270** — `corner-shape`/`corner-*-shape` (~50) — css-borders-4
+  §3.7/3.8 : superellipse par coin (`DisplayItem::corners` =
+  exposant `K`, `round`=1 … `notch`=-∞) ; `FillRect`/`Border`
+  + raster `corner_arc` (cubique ronde, corde `bevel`,
+  échantillonnage 9 cordes, `square`/`notch` francs).
+  Shorthand 1..4 + `corner-{side}-shape` 1..2 + logiques
+  `corner-{block,inline}-*`/`{s|e}{s|e}-shape` (→ physiques
+  en cascade comme `border-*-radius`). Bornes : `BoxShadow`,
+  `PushClipRounded`, `clip-path:round` restent ronds ;
+  contour interne bordure = même exposant ; concave ≈ 9
+  cordes (AA). Verrous : `corner_shape_shorthand_longhands_
+  et_logiques_sur_items`, `corner_shape_change_la_geometrie_
+  peinte`.
 - [ ] `rule`/`row-rule`/`rule-*`/`row-rule-*` (~45) — règles
   entre lignes/colonnes (css-multicol récent) — items de
   peinture entre fragments.

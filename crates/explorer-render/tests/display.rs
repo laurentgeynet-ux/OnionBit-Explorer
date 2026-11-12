@@ -3807,3 +3807,79 @@ fn text_decoration_color_declaree_peint_le_trait() {
     });
     assert!(deco, "trait rouge sous l'encre bleue attendu");
 }
+
+#[test]
+fn corner_shape_shorthand_longhands_et_logiques_sur_items() {
+    // R-270 — css-borders-4 §3.7/3.8 : `corner-shape` =
+    // shorthand 1..4 → K par coin sur FillRect ET Border ;
+    // `corner-{side}-shape` = 2 coins ; `corner-{s|e}{s|e}
+    // -shape` logique → physique (LTR/horizontal) ;
+    // `superellipse(k)`/`±infinity` passent l'exposant.
+    // `round` absent → 1.0 (historique rond).
+    let (_d, _b, items) = dl(
+        "<div>x</div>",
+        "div { border: 2px solid black; background: #ccc; \
+         border-radius: 20px; corner-shape: bevel scoop; \
+         width: 80px; height: 60px }",
+    );
+    let border = items.iter().find_map(|i| match i {
+        DisplayItem::Border { corners, .. } => Some(*corners),
+        _ => None,
+    });
+    assert_eq!(
+        border,
+        Some([0.0, -1.0, 0.0, -1.0]),
+        "corners border : {border:?}"
+    );
+    let fill = items.iter().find_map(|i| match i {
+        DisplayItem::FillRect { corners, .. } => Some(*corners),
+        _ => None,
+    });
+    assert_eq!(
+        fill,
+        Some([0.0, -1.0, 0.0, -1.0]),
+        "corners fond : {fill:?}"
+    );
+    // Longhands coin : `superellipse(-3)` + `squircle` ; les
+    // autres restent `round` (1.0).
+    let (_d2, _b2, items2) = dl(
+        "<div>x</div>",
+        "div { border-radius: 20px; \
+         corner-top-left-shape: superellipse(-3); \
+         corner-top-right-shape: squircle; background: #ccc; \
+         width: 20px; height: 20px }",
+    );
+    let c2 = items2.iter().find_map(|i| match i {
+        DisplayItem::FillRect { corners, .. } => Some(*corners),
+        _ => None,
+    });
+    assert_eq!(c2, Some([-3.0, 2.0, 1.0, 1.0]), "longhands : {c2:?}");
+    // `corner-top-shape` (2 formes : tl puis tr) + logique
+    // `corner-end-end-shape` → bottom-right (LTR).
+    let (_d3, _b3, items3) = dl(
+        "<div>x</div>",
+        "div { border-radius: 8px; corner-top-shape: bevel square; \
+         corner-end-end-shape: notch; background: #ccc; \
+         width: 20px; height: 20px }",
+    );
+    let c3 = items3.iter().find_map(|i| match i {
+        DisplayItem::FillRect { corners, .. } => Some(*corners),
+        _ => None,
+    });
+    assert_eq!(
+        c3,
+        Some([0.0, f32::INFINITY, f32::NEG_INFINITY, 1.0]),
+        "side + logique : {c3:?}"
+    );
+    // Valeur invalide → `round` (dégradation tolérante).
+    let (_d4, _b4, items4) = dl(
+        "<div>x</div>",
+        "div { border-radius: 8px; corner-shape: bogus; \
+         background: #ccc; width: 20px; height: 20px }",
+    );
+    let c4 = items4.iter().find_map(|i| match i {
+        DisplayItem::FillRect { corners, .. } => Some(*corners),
+        _ => None,
+    });
+    assert_eq!(c4, Some([1.0; 4]), "invalide → round : {c4:?}");
+}

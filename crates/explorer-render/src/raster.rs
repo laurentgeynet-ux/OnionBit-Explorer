@@ -923,6 +923,7 @@ fn replay_items(
                                 clamped.right(),
                                 clamped.bottom(),
                                 radii,
+                                &ROUND_CORNERS,
                             ) {
                                 mask.fill_path(
                                     &path,
@@ -1138,6 +1139,7 @@ fn paint_deco_rect(
             },
             color,
             &[0.0; 4],
+            &ROUND_CORNERS,
             dpi,
             clip,
         );
@@ -1176,9 +1178,14 @@ fn paint_deco_rect(
                 up = !up;
             }
         }
-        _ => fill_rect_item(pixmap, rect, color, &[0.0; 4], dpi, clip),
+        _ => fill_rect_item(pixmap, rect, color, &[0.0; 4], &ROUND_CORNERS, dpi, clip),
     }
 }
+
+/// Coins `corner-shape` ronds (`DisplayItem::corners` =
+/// `[1.0; 4]`) — surfaces bornées : clip overflow,
+/// `clip-path:round`, `box-shadow` (R-270).
+const ROUND_CORNERS: [f32; 4] = [1.0; 4];
 
 /// R-167 — un `FillRect` : rayon > 0 → fill du chemin
 /// arrondi ; sinon rect pixel-snappé (`fill_guarded`).
@@ -1187,6 +1194,7 @@ fn fill_rect_item(
     rect: &explorer_layout::Rect,
     color: Color,
     radii: &[f32; 4],
+    corners: &[f32; 4],
     dpi: Transform,
     clip: Option<&Mask>,
 ) {
@@ -1202,6 +1210,7 @@ fn fill_rect_item(
             rect.x + rect.width,
             rect.y + rect.height,
             radii,
+            corners,
         ) {
             pixmap.fill_path(&path, &paint, FillRule::Winding, dpi, clip);
         }
@@ -1459,7 +1468,7 @@ fn paint_box_shadow(
             radii[2] + grow,
             radii[3] + grow,
         ];
-        if let Some(path) = rounded_rect_path(x0, y0, x1, y1, &rr) {
+        if let Some(path) = rounded_rect_path(x0, y0, x1, y1, &rr, &ROUND_CORNERS) {
             pixmap.fill_path(&path, &paint, FillRule::Winding, dpi, clip);
         }
     }
@@ -1475,8 +1484,13 @@ fn paint_item(
     clip: Option<&Mask>,
 ) {
     match item {
-        DisplayItem::FillRect { rect, color, radii } => {
-            fill_rect_item(pixmap, rect, *color, radii, dpi, clip);
+        DisplayItem::FillRect {
+            rect,
+            color,
+            radii,
+            corners,
+        } => {
+            fill_rect_item(pixmap, rect, *color, radii, corners, dpi, clip);
         }
         DisplayItem::DecoRect { rect, color, style } => {
             paint_deco_rect(pixmap, rect, *color, *style, dpi, clip);
@@ -1499,8 +1513,11 @@ fn paint_item(
             colors,
             styles,
             radii,
+            corners,
         } => {
-            paint_border(pixmap, rect, widths, colors, *styles, radii, dpi, clip);
+            paint_border(
+                pixmap, rect, widths, colors, *styles, radii, corners, dpi, clip,
+            );
         }
         DisplayItem::Text {
             origin,
@@ -2558,33 +2575,121 @@ fn paint_tiled(
 /// (cubiques Bézier κ≈0.5523 par coin, rayons 0 = coin
 /// droit ; approximation circulaire — l'elliptique `h/v`
 /// n'est pas encore supporté).
+/// Un coin de `rounded_rect_path` (R-270) : de l'entrée
+/// `S = C + r·u` à la sortie `E = C + r·v` (`u`,`v` =
+/// directions depuis le centre `C`, dans l'ordre du
+/// parcours). `o` = coin externe (pour `square`) et `k`
+/// l'exposant superellipse du coin : 1 = cubique ronde,
+/// ≥8 ≈ `square` (sommet), ≤-16 ≈ `notch` (coupure droite
+/// en `C`), sinon arc superellipse échantillonné — `e=2^k`,
+/// `p=2^{1-k}` : `bevel`(0) trace la corde, `squircle`(2)
+/// l'aplatie, `scoop`(-1) la creuse (concave). Le
+/// tracé paramétrique `cos^p`/`sin^p` suit exactement la
+/// superellipse pour tout `k` réel.
+#[allow(clippy::many_single_char_names, clippy::cast_precision_loss)]
+fn corner_arc(
+    pb: &mut PathBuilder,
+    o: (f32, f32),
+    c: (f32, f32),
+    u: (f32, f32),
+    v: (f32, f32),
+    r: f32,
+    k: f32,
+) {
+    if r <= 0.0 {
+        return;
+    }
+    if k >= 8.0 {
+        // `square` (ou exposant très grand) : sommet franc.
+        pb.line_to(o.0, o.1);
+        return;
+    }
+    if k <= -16.0 {
+        // `notch` : deux segments par le centre intérieur.
+        pb.line_to(c.0, c.1);
+        pb.line_to(c.0 + r * v.0, c.1 + r * v.1);
+        return;
+    }
+    if (k - 1.0).abs() < 1e-6 {
+        // `round` : cubique Bézier historique (constante
+        // classique du quart de cercle).
+        const CK: f32 = 0.552_284_8;
+        let s = (c.0 + r * u.0, c.1 + r * u.1);
+        let e = (c.0 + r * v.0, c.1 + r * v.1);
+        pb.cubic_to(
+            s.0 + CK * (o.0 - s.0),
+            s.1 + CK * (o.1 - s.1),
+            e.0 + CK * (o.0 - e.0),
+            e.1 + CK * (o.1 - e.1),
+            e.0,
+            e.1,
+        );
+        return;
+    }
+    // Arc superellipse générique — 9 cordes + extrémité
+    // exacte (`cos(π/2)` en f32 < 0 → `powf` NaN sinon).
+    let p = 2.0_f32.powf(1.0 - k);
+    for i in 1..10 {
+        let t = i as f32 * std::f32::consts::FRAC_PI_2 / 10.0;
+        let cu = t.cos().max(0.0).powf(p) * r;
+        let sv = t.sin().max(0.0).powf(p) * r;
+        pb.line_to(c.0 + cu * u.0 + sv * v.0, c.1 + cu * u.1 + sv * v.1);
+    }
+    pb.line_to(c.0 + r * v.0, c.1 + r * v.1);
+}
+
 fn rounded_rect_path(
     x0: f32,
     y0: f32,
     x1: f32,
     y1: f32,
     radii: &[f32; 4],
+    corners: &[f32; 4],
 ) -> Option<tiny_skia::Path> {
-    const K: f32 = 0.552_284_8;
     let [rtl, rtr, rbr, rbl] = *radii;
+    let [ktl, ktr, kbr, kbl] = *corners;
     let mut pb = PathBuilder::new();
     pb.move_to(x0 + rtl, y0);
     pb.line_to(x1 - rtr, y0);
-    if rtr > 0.0 {
-        pb.cubic_to(x1 - rtr + K * rtr, y0, x1, y0 + rtr - K * rtr, x1, y0 + rtr);
-    }
+    corner_arc(
+        &mut pb,
+        (x1, y0),
+        (x1 - rtr, y0 + rtr),
+        (0.0, -1.0),
+        (1.0, 0.0),
+        rtr,
+        ktr,
+    );
     pb.line_to(x1, y1 - rbr);
-    if rbr > 0.0 {
-        pb.cubic_to(x1, y1 - rbr + K * rbr, x1 - rbr + K * rbr, y1, x1 - rbr, y1);
-    }
+    corner_arc(
+        &mut pb,
+        (x1, y1),
+        (x1 - rbr, y1 - rbr),
+        (1.0, 0.0),
+        (0.0, 1.0),
+        rbr,
+        kbr,
+    );
     pb.line_to(x0 + rbl, y1);
-    if rbl > 0.0 {
-        pb.cubic_to(x0 + rbl - K * rbl, y1, x0, y1 - rbl + K * rbl, x0, y1 - rbl);
-    }
+    corner_arc(
+        &mut pb,
+        (x0, y1),
+        (x0 + rbl, y1 - rbl),
+        (-1.0, 0.0),
+        (0.0, 1.0),
+        rbl,
+        kbl,
+    );
     pb.line_to(x0, y0 + rtl);
-    if rtl > 0.0 {
-        pb.cubic_to(x0, y0 + rtl - K * rtl, x0 + rtl - K * rtl, y0, x0 + rtl, y0);
-    }
+    corner_arc(
+        &mut pb,
+        (x0, y0),
+        (x0 + rtl, y0 + rtl),
+        (-1.0, 0.0),
+        (0.0, -1.0),
+        rtl,
+        ktl,
+    );
     pb.close();
     pb.finish()
 }
@@ -2665,6 +2770,7 @@ fn paint_border(
     colors: &[Color; 4],
     styles: [BorderStyle; 4],
     radii: &[f32; 4],
+    corners: &[f32; 4],
     dpi: Transform,
     clip: Option<&Mask>,
 ) {
@@ -2692,10 +2798,13 @@ fn paint_border(
             (radii[3] - widths[2].max(widths[3])).max(0.0),
         ];
         let mut pb = PathBuilder::new();
-        if let Some(outer) = rounded_rect_path(ox0, oy0, ox1, oy1, radii) {
+        if let Some(outer) = rounded_rect_path(ox0, oy0, ox1, oy1, radii, corners) {
             pb.push_path(&outer);
         }
-        if let Some(inner) = rounded_rect_path(ix0, iy0, ix1, iy1, &inner_r) {
+        // R-270 — le contour interne garde l'exposant du
+        // coin (css-borders-4 : la forme se propage à la
+        // padding box, seul le rayon se réduit).
+        if let Some(inner) = rounded_rect_path(ix0, iy0, ix1, iy1, &inner_r, corners) {
             pb.push_path(&inner);
         }
         if let Some(ring) = pb.finish() {

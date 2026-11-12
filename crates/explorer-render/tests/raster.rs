@@ -1184,7 +1184,10 @@ fn text_orientation_sideways_brackete() {
         .count();
     // `.v` sideways = 1 triplet run-entier ; `.h` mixed
     // (défaut spec) = 1 triplet par glyphe latin (« cd » → 2).
-    assert_eq!(bracketed, 3, "sideways run + mixed par glyphe ({bracketed})");
+    assert_eq!(
+        bracketed, 3,
+        "sideways run + mixed par glyphe ({bracketed})"
+    );
 }
 
 /// `text-orientation:upright` : chaque glyphe est un `Text`
@@ -1260,4 +1263,42 @@ fn text_orientation_mixed_per_glyph() {
         (2, 1),
         "1 CJK debout + 1 latin pivoté : {texts} texts/{rotated} rotés"
     );
+}
+
+#[test]
+fn corner_shape_change_la_geometrie_peinte() {
+    // R-270 — `corner-shape` plie le chemin du coin (r=15
+    // sur boîte 40×40). Le remplissage garde l'intérieur de
+    // la superellipse centrée en (15,15) : sondes chacune
+    // discriminante vs `round` (arc à d≈4.4 en diagonale) —
+    // `bevel` retire la corde (6,6 vide), `square` garde le
+    // coin (1,1 plein), `squircle` aplatit (4,4 plein),
+    // `scoop` creuse en concave (10,10 vide), `notch` coupe
+    // jusqu'au centre (14,14 vide).
+    // Canal vert : 0 = plein rouge, 255 = blanc (fond frame).
+    let probe = |shape: &str, x: u32, y: u32| {
+        let f = frame(
+            "<div></div>",
+            &format!(
+                "div {{ width:40px; height:40px; background:#f00; \
+                 border-radius:15px; corner-shape:{shape} }}"
+            ),
+        );
+        px(&f, x, y)[1]
+    };
+    // Chaque forme peint bien quelque chose (20,20 = hors
+    // de tout carré de coin → plein quel que soit `e`).
+    for s in ["round", "bevel", "square", "squircle", "notch", "scoop"] {
+        assert!(probe(s, 20, 20) < 60, "{s} : 20,20 plein attendu");
+    }
+    // Témoins `round` (historique).
+    assert!(probe("round", 3, 3) > 200, "round 3,3 vide attendu");
+    assert!(probe("round", 6, 6) < 60, "round 6,6 plein attendu");
+    // Convexes.
+    assert!(probe("bevel", 6, 6) > 200, "bevel retire la corde");
+    assert!(probe("square", 1, 1) < 60, "square = coin franc");
+    assert!(probe("squircle", 4, 4) < 60, "squircle aplatit vs round");
+    // Concaves.
+    assert!(probe("notch", 14, 14) > 200, "notch coupe au centre");
+    assert!(probe("scoop", 10, 10) > 200, "scoop creuse vs round");
 }
