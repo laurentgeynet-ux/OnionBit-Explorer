@@ -127,7 +127,13 @@ fn text_deco(st: &ComputedStyle, fs: f32, ctx: &BlockCtx) -> Option<TextDeco> {
         .and_then(|t| raw_length_px(t, own_fs, own_fs, ctx));
     Some(TextDeco {
         lines,
-        color: st.color("color"),
+        // `text-decoration-color` (css-text-decor-3 §2.4 —
+        // R-265) : déclarée → son effet (currentcolor → le
+        // `color` du déclarant) ; absente → couleur du
+        // déclarant (= initiale currentcolor — inchangé).
+        color: st
+            .color("text-decoration-color")
+            .or_else(|| st.color("color")),
         style,
         thick_px,
         offset_px,

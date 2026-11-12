@@ -3725,3 +3725,85 @@ fn enfant_positionne_reste_sous_clip_overflow() {
         "positionné peint hors du clip ancêtre (depth={depth})"
     );
 }
+
+// ---------- R-265 — `currentcolor` résolu au paint ----------
+
+#[test]
+fn currentcolor_background_suit_la_couleur_calculee() {
+    // `background-color:currentcolor` = `color` de l'élément
+    // — l'ancien `parse_color` brut retournait `None` → pas
+    // de fond du tout.
+    let (_d, _b, items) = dl(
+        "<div id=x>&nbsp;</div>",
+        "div{color:#008000;background-color:currentColor;width:20px;height:20px}",
+    );
+    let fill = items
+        .iter()
+        .filter_map(|i| match i {
+            DisplayItem::FillRect { color, .. } => Some(*color),
+            _ => None,
+        })
+        .find(|c| c.g > 100 && c.r < 80);
+    assert!(fill.is_some(), "fond currentcolor vert attendu");
+}
+
+#[test]
+fn currentcolor_border_item_colors_suivent_color() {
+    let (_d, _b, items) = dl(
+        "<div id=x>&nbsp;</div>",
+        "div{color:#0000CC;border:2px solid currentColor;width:20px;height:20px}",
+    );
+    let b = items
+        .iter()
+        .find_map(|i| match i {
+            DisplayItem::Border { colors, .. } => Some(*colors),
+            _ => None,
+        })
+        .expect("bordure peinte");
+    assert!(
+        b.iter().all(|c| c.b > 150 && c.r < 60),
+        "bordure currentcolor bleue attendue : {b:?}"
+    );
+}
+
+#[test]
+fn box_shadow_sans_couleur_prend_currentcolor() {
+    // Défaut spec de la couleur d'ombre = `currentcolor`.
+    let (_d, _b, items) = dl(
+        "<div id=x>&nbsp;</div>",
+        "div{color:#00AA00;box-shadow:2px 2px 4px;width:20px;height:20px}",
+    );
+    let sh = items
+        .iter()
+        .find_map(|i| match i {
+            DisplayItem::BoxShadow { color, .. } => Some(*color),
+            _ => None,
+        })
+        .expect("ombre");
+    assert!(sh.g > 100 && sh.r < 60, "ombre verte : {sh:?}");
+}
+
+#[test]
+fn text_decoration_color_declaree_peint_le_trait() {
+    // `text-decoration-color` déclarée → le trait prend SA
+    // couleur, pas celle du texte.
+    let (_d, _b, items) = dl(
+        "<p><span class=x>souligne</span></p>",
+        "span{color:#0000CC;text-decoration:underline;\
+         text-decoration-color:#CC0000;font-size:20px}",
+    );
+    let t = items
+        .iter()
+        .find_map(|i| match i {
+            DisplayItem::Text { origin, .. } => Some(origin.1),
+            _ => None,
+        })
+        .expect("run");
+    let deco = items.iter().any(|i| match i {
+        DisplayItem::DecoRect { rect, color, .. } | DisplayItem::FillRect { rect, color, .. } => {
+            rect.y > t && color.r > 150 && color.b < 80
+        }
+        _ => false,
+    });
+    assert!(deco, "trait rouge sous l'encre bleue attendu");
+}

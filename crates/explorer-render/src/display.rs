@@ -1458,7 +1458,8 @@ fn emit_canvas_bg(
         )
     };
     let src = canvas_bx?;
-    if let Some(c) = src.style.get("background-color").and_then(parse_color) {
+    // R-265 — `currentcolor` résolu via `st.color`.
+    if let Some(c) = src.style.color("background-color") {
         if c.a > 0 {
             items.push(DisplayItem::FillRect {
                 rect: canvas,
@@ -1953,7 +1954,10 @@ fn corner_radii(st: &explorer_css::ComputedStyle, rect: &Rect) -> [f32; 4] {
 /// [color]` dans n'importe quel ordre (spec : 2 à 4
 /// longueurs consécutives + couleur optionnelle).
 #[allow(clippy::cast_possible_truncation, clippy::type_complexity)]
-fn parse_box_shadow_layer(raw: &str) -> Option<((f32, f32), f32, f32, Color, bool)> {
+fn parse_box_shadow_layer(
+    st: &explorer_css::ComputedStyle,
+    raw: &str,
+) -> Option<((f32, f32), f32, f32, Color, bool)> {
     let mut lens = Vec::with_capacity(4);
     let mut color = None;
     let mut inset = false;
@@ -1962,7 +1966,7 @@ fn parse_box_shadow_layer(raw: &str) -> Option<((f32, f32), f32, f32, Color, boo
             inset = true;
         } else if let Some(l) = parse_length(tok) {
             lens.push(l.unit.px_factor().map_or(0.0, |f| l.value * f) as f32);
-        } else if let Some(c) = parse_color(tok) {
+        } else if let Some(c) = token_color(st, tok) {
             color = Some(c);
         }
         // Fonctions couleur (`rgb(…)`, `var(…)`) déjà
@@ -1977,7 +1981,9 @@ fn parse_box_shadow_layer(raw: &str) -> Option<((f32, f32), f32, f32, Color, boo
         (lens[0], lens[1]),
         blur,
         spread,
-        color.unwrap_or(Color::BLACK),
+        // Défaut spec = `currentcolor` (R-265) — la `color`
+        // calculée de la boîte, plus du noir fixe.
+        color.or_else(|| st.color("color")).unwrap_or(Color::BLACK),
         inset,
     ))
 }
@@ -1994,7 +2000,7 @@ fn emit_box_shadows(st: &explorer_css::ComputedStyle, rect: &Rect, items: &mut V
     }
     let radii = corner_radii(st, rect);
     for layer in bg_layers(v) {
-        let Some((offset, blur, spread, color, inset)) = parse_box_shadow_layer(layer.trim())
+        let Some((offset, blur, spread, color, inset)) = parse_box_shadow_layer(st, layer.trim())
         else {
             continue;
         };
@@ -2504,10 +2510,7 @@ fn emphasis_kind(st: &explorer_css::ComputedStyle, ink: Color) -> Option<(u8, Co
     }
     let mut kind = 0u8;
     let mut found = false;
-    let mut color = st
-        .get("text-emphasis-color")
-        .and_then(parse_color)
-        .unwrap_or(ink);
+    let mut color = st.color("text-emphasis-color").unwrap_or(ink);
     let over = st
         .get("text-emphasis-position")
         .is_none_or(|v| v.trim() != "under");
@@ -2536,7 +2539,7 @@ fn emphasis_kind(st: &explorer_css::ComputedStyle, ink: Color) -> Option<(u8, Co
             "open" => kind |= 8,
             "filled" => {}
             _ => {
-                if let Some(c) = parse_color(tok) {
+                if let Some(c) = token_color(st, tok) {
                     color = c;
                 }
             }
@@ -2607,7 +2610,7 @@ fn text_shadows(st: &explorer_css::ComputedStyle, default: Color) -> Vec<((f32, 
             for tok in layer.split_whitespace() {
                 if let Some(l) = parse_length(tok) {
                     lens.push(l.unit.px_factor().map_or(0.0, |f| l.value * f) as f32);
-                } else if let Some(c) = parse_color(tok) {
+                } else if let Some(c) = token_color(st, tok) {
                     color = Some(c);
                 }
             }
@@ -2693,7 +2696,7 @@ fn parse_filter(st: &explorer_css::ComputedStyle) -> Vec<FilterOp> {
                 .strip_suffix("deg")
                 .and_then(|d| d.trim().parse::<f32>().ok())
                 .map(FilterOp::HueRotate),
-            "drop-shadow" => parse_drop_shadow(arg),
+            "drop-shadow" => parse_drop_shadow(st, arg),
             // `url()` : hors scope.
             _ => None,
         };
@@ -2713,7 +2716,7 @@ fn parse_filter(st: &explorer_css::ComputedStyle) -> Vec<FilterOp> {
 /// Défauts spec : blur 0, couleur `currentcolor` →
 /// approximée à l'encre du déclarant (noir si absente).
 #[allow(clippy::cast_possible_truncation)]
-fn parse_drop_shadow(arg: &str) -> Option<FilterOp> {
+fn parse_drop_shadow(st: &explorer_css::ComputedStyle, arg: &str) -> Option<FilterOp> {
     let mut lens = Vec::new();
     let mut color = None;
     for tok in arg.split_whitespace() {
@@ -2722,9 +2725,10 @@ fn parse_drop_shadow(arg: &str) -> Option<FilterOp> {
         } else {
             // Tout le reste (le ou les tokens couleur,
             // éventuellement collés par l'espace dans
-            // `rgb(0, 0, 0)`) est recollé pour `parse_color`.
+            // `rgb(0, 0, 0)`) est recollé pour le parser
+            // couleur (`currentcolor` inclus — R-265).
             let tail = arg[arg.find(tok).unwrap_or(0)..].trim();
-            color = parse_color(tail);
+            color = token_color(st, tail);
             break;
         }
     }
@@ -2735,7 +2739,9 @@ fn parse_drop_shadow(arg: &str) -> Option<FilterOp> {
         dx: lens[0],
         dy: lens[1],
         blur: lens.get(2).copied().unwrap_or(0.0).max(0.0),
-        color: color.unwrap_or(Color::BLACK),
+        // Défaut spec = `currentcolor` — la `color` calculée
+        // du déclarant (R-265), plus du noir fixe.
+        color: color.or_else(|| st.color("color")).unwrap_or(Color::BLACK),
     })
 }
 
@@ -2862,9 +2868,8 @@ fn emit_column_rules(bx: &LayoutBox, items: &mut Vec<DisplayItem>, off: (f32, f3
         return;
     }
     let color = st
-        .get("column-rule-color")
-        .and_then(parse_color)
-        .or_else(|| st.get("color").and_then(parse_color))
+        .color("column-rule-color")
+        .or_else(|| st.color("color"))
         .unwrap_or(Color::BLACK);
     for i in 1..n {
         let cx = cr.x + i as f32 * (col_w + gap) - gap * 0.5 - rw * 0.5;
@@ -2948,11 +2953,7 @@ fn emit_list_marker(
     } else {
         content_x - gap - d / 2.0
     };
-    let color = bx
-        .style
-        .get("color")
-        .and_then(parse_color)
-        .unwrap_or(Color::BLACK);
+    let color = bx.style.color("color").unwrap_or(Color::BLACK);
     items.push(DisplayItem::Marker {
         rect: Rect {
             x: cx - d / 2.0 + off.0,
@@ -3019,10 +3020,7 @@ fn emit_text_marker(bx: &LayoutBox, items: &mut Vec<DisplayItem>, off: (f32, f32
     } else {
         content_x - (fs * 0.4).max(1.0) - est_w
     };
-    let color = mstyle
-        .get("color")
-        .and_then(parse_color)
-        .unwrap_or(Color::BLACK);
+    let color = mstyle.color("color").unwrap_or(Color::BLACK);
     items.push(DisplayItem::MarkerText {
         origin: (x + off.0, baseline_y + off.1),
         text,
@@ -3037,9 +3035,7 @@ fn emit_text_marker(bx: &LayoutBox, items: &mut Vec<DisplayItem>, off: (f32, f32
 /// `url()`/dégradé (§14.2 — sélection de la source du fond de
 /// canvas).
 fn has_bg(st: &explorer_css::ComputedStyle) -> bool {
-    st.get("background-color")
-        .and_then(parse_color)
-        .is_some_and(|c| c.a > 0)
+    st.color("background-color").is_some_and(|c| c.a > 0)
         || st.get("background-image").is_some_and(bg_has_image)
 }
 
@@ -3077,10 +3073,21 @@ fn em_factor(u: explorer_css::value::Unit) -> f64 {
 /// `color` de la boîte, pas sur du noir (R-22 — les pastilles
 /// `a.tag` de lobste.rs peignaient un cadre noir).
 fn border_color_of(st: &explorer_css::ComputedStyle, side: &str) -> Color {
-    st.get(side)
-        .and_then(parse_color)
-        .or_else(|| st.get("color").and_then(parse_color))
+    st.color(side)
+        .or_else(|| st.color("color"))
         .unwrap_or(Color::BLACK)
+}
+
+/// R-265 — couleur d'un **token** de valeur composée
+/// (`box-shadow`, `text-shadow`, `text-emphasis`,
+/// `drop-shadow()`) : `currentcolor` résolu sur le `color`
+/// calculé de l'élément (css-color-3 §4.2) — un `parse_color`
+/// brut retournait `None` et laissait le repli noir.
+fn token_color(st: &explorer_css::ComputedStyle, tok: &str) -> Option<Color> {
+    if tok.trim().eq_ignore_ascii_case("currentcolor") {
+        return st.color("color").or(Some(Color::BLACK));
+    }
+    parse_color(tok)
 }
 
 /// Content box de la boîte = border box − bordures − padding
@@ -3755,7 +3762,9 @@ fn box_is_ws_only(b: &LayoutBox) -> bool {
         BoxKind::Text => b.text.as_deref().is_none_or(|t| trim_css_ws(t).is_empty()),
         BoxKind::AnonymousBlock => {
             b.children.iter().all(box_is_ws_only)
-                && b.lines.iter().all(|l| l.fragments.iter().all(frag_is_ws_only))
+                && b.lines
+                    .iter()
+                    .all(|l| l.fragments.iter().all(frag_is_ws_only))
         }
         _ => false,
     }
@@ -3857,7 +3866,7 @@ fn paint_self(
         emit_box_shadows(&bx.style, &rect, items);
     }
     if !anonymous && !inline_flow && !bg_propagated && !empty_hidden {
-        if let Some(c) = bx.style.get("background-color").and_then(parse_color) {
+        if let Some(c) = bx.style.color("background-color") {
             if c.a > 0 {
                 // R-52 — `mask-image` présent : la couleur ne
                 // passe que par l'alpha du mask (icônes des
@@ -4072,9 +4081,8 @@ fn paint_self(
             // de contrôle (css-ui-4 §accent-color).
             let ink = bx
                 .style
-                .get("accent-color")
-                .and_then(parse_color)
-                .or_else(|| bx.style.get("color").and_then(parse_color))
+                .color("accent-color")
+                .or_else(|| bx.style.color("color"))
                 .unwrap_or(Color::BLACK);
             items.push(DisplayItem::FillRect {
                 rect: Rect {
@@ -4215,11 +4223,7 @@ fn paint_lines(bx: &LayoutBox, items: &mut Vec<DisplayItem>, off: (f32, f32)) {
                 continue;
             }
             if let Some(run) = &frag.shaped {
-                let ink = frag
-                    .style
-                    .get("color")
-                    .and_then(parse_color)
-                    .unwrap_or(Color::BLACK);
+                let ink = frag.style.color("color").unwrap_or(Color::BLACK);
                 let fs = prop_px(&frag.style, "font-size", 16.0);
                 // §16.3.1 / R-153 : `text-decoration` résolue
                 // à l'itemisation (`frag.deco`, couleur du
@@ -4408,7 +4412,7 @@ fn paint_inline_deco(
         },
         off,
     );
-    if let Some(c) = st.get("background-color").and_then(parse_color) {
+    if let Some(c) = st.color("background-color") {
         if c.a > 0 {
             items.push(DisplayItem::FillRect {
                 rect: outer,

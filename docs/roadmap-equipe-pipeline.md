@@ -4046,8 +4046,17 @@ le census `site_harvest` arbitre les ex æquo.
   `word-wrap`, `overflow-wrap`, `line-break`, `hyphens` —
   `intrinsic` mesure les modes verbatim. 6 verrous inline +
   5 cascade.
-- [ ] `currentColor` — résolution vers `color` calculé au
-  paint (`background-color`, `border-*` restants).
+- [x] `currentColor` — **R-265** : tous les slots couleur du
+  paint passent par `st.color()` (résolution `currentcolor`
+  → `color` calculé, census R-209) : `background-color`
+  (canvas/paint_self/inline `has_bg`), `border-*-color` +
+  `outline-color` (`border_color_of`), `column-rule-color`,
+  `accent-color`, `color` des markers/encre de texte.
+  `token_color()` pour les tokens composés : `box-shadow`
+  (+ défaut spec → `currentcolor`, plus du noir fixe),
+  `text-shadow`, `text-emphasis`, `drop-shadow()`.
+  `text-decoration-color` consommé dans `text_deco`. 5
+  verrous paint.
 - [ ] `vertical-align:top`/`text-top`/`text-bottom` —
   alignement cellules (`top` manque) + baseline texte inline.
 
