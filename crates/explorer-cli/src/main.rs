@@ -738,6 +738,39 @@ fn fixture_for(name: &str) -> &'static str {
         () if n.starts_with("list-style") || n == "list-style-type" => {
             "<body><ul><li class=x>a</li><li>b</li></ul></body>"
         }
+        // Props de **table** — `.x` = la table (caption
+        // présente pour `caption-side`, cellule vide pour
+        // `empty-cells`, bordures pour `border-collapse`).
+        () if matches!(n, "empty-cells" | "caption-side" | "border-collapse" | "table-layout")
+        =>
+        {
+            "<body><table class=x><caption>c</caption><tr><td></td><td style=\"width:100px;height:40px\">a</td></tr></table></body>"
+        }
+        // `vertical-align`/`alignment-baseline`/`baseline-shift`
+        // — `.x` = cellule table (la ligne de base des
+        // cellules est observable : la cellule soeur est
+        // plus haute → `top`/`bottom`/`middle` déplacent le
+        // contenu).
+        () if matches!(n, "vertical-align" | "alignment-baseline" | "baseline-shift") => {
+            "<body><table><tr><td class=x>a</td><td style=\"height:60px\">b</td></tr></table></body>"
+        }
+        // `quotes` — n'a d'effet que sur le contenu généré
+        // `<q>` (paires de guillemets par langue).
+        () if n == "quotes" => {
+            "<body><p class=x><q>a<q>b</q></q></p></body>"
+        }
+        // Coupure de ligne — `overflow-wrap`/`word-break`/
+        // `line-break`/`hyphens`/`tab-size` n'ont d'effet
+        // qu'avec un mot plus long que la ligne (conteneur
+        // étroit + mot long/tabulation).
+        () if matches!(
+            n,
+            "overflow-wrap" | "word-break" | "line-break" | "hyphens" | "tab-size"
+                | "overflow" | "overflow-x" | "overflow-y" | "text-wrap"
+        ) =>
+        {
+            "<body><div class=x style=\"width:40px\"><p>averyveryveryverylongword\tb</p></div></body>"
+        }
         // `ruby-*` — contexte `<ruby>` requis (rb/rt
         // n'existent que sous ruby).
         () if n.starts_with("ruby") => {
