@@ -4028,3 +4028,18 @@ fn offset_path_ray_ellipse_et_shorthand() {
     let t3 = tf(&items3).expect("reverse → transform");
     assert!(t3.kx.abs() > 0.5, "rotation ~90° attendue : {t3:?}");
 }
+
+#[test]
+fn hyphen_cesure_peint_un_run_1_glyphe() {
+    // R-275 — le fragment `hyphenate-character` posé en fin
+    // de ligne césurée doit atteindre la display list : le
+    // doute venait d'un dump NAV sans run 1-glyphe (binaire
+    // périmé — mesuré ici end-to-end sur la fixture TTF).
+    let html = "<!doctype html><div style=\"width:40px\"><p>avery\u{AD}verylongword</p></div>";
+    let (_d, _b, items) = dl(html, "p{font-size:10px;margin:0;hyphens:auto}");
+    let solo = items
+        .iter()
+        .filter(|it| matches!(it, DisplayItem::Text { run, .. } if run.glyphs.len() == 1))
+        .count();
+    assert_eq!(solo, 2, "deux tirets césurés attendus : {items:?}");
+}

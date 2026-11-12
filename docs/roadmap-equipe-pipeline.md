@@ -4202,6 +4202,32 @@ le census `site_harvest` arbitre les ex æquo.
 
 ### Queue P2 — valeurs unitaires exotiques (~300)
 
+- [x] **R-276 — `quotes` + mots-clés de `content`** —
+  `pseudo_content` consomme `open-quote`/`close-quote`/
+  `no-open-quote`/`no-close-quote` (css-content-3 §6.1) :
+  profondeur document-ordre pré-calculée
+  (`compute_quote_depths`, même patron que les envs
+  `counter-*` — `(avant ::before, avant ::after)` par
+  élément, deltas `quote_delta` hors chaînes). `quote_pair`
+  résout la paire : `auto` → `“…”` puis `‘…’`, liste
+  explicite `[<string> <string>]+` (dernière paire répétée
+  au-delà, profondeur négative bornée à 0), `none` → muet
+  mais la profondeur bouge. `find_quote_kw` pose des
+  frontières d'identifiant (`x-open-quote` ignoré).
+  `UA_CSS` : `q::before { content: open-quote }` /
+  `q::after { content: close-quote }`. Verrou :
+  `quotes_mots_cles_content_et_profondeur` (auto imbriqué,
+  paires explicites + saturation, `no-open-quote` saute un
+  niveau, `quotes:none` muet). Borne : `quotes:auto` ne
+  lit pas `lang` (paires latines fixes — CLDR par langue
+  hors MVP).
+- [x] **Erratum jauge `hyphenate-*`** — le « miss moteur »
+  signalé par NAV (tiret poussé dans `acc.frags` mais
+  absent de la display list) est un **binaire périmé** :
+  verrou `hyphen_cesure_peint_un_run_1_glyphe` (render,
+  fixture TTF) — 2 runs 1-glyphe présents end-to-end.
+  Re-tour `affectsv` sur binaire ≥ `d5e545b2` attendu.
+
 `text-box*`/`text-autospace`/`text-fit`/`initial-letter`/
 `text-combine-upright`, `counter-set`/`counter-increment` fins,
 `display` exotiques (`flow-root`, `table-*`), `grid-*`/`flex-*`

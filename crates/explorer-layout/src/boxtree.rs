@@ -348,7 +348,10 @@ pub fn build_box_tree_sized<S: ::std::hash::BuildHasher>(
     // pré-calculé sur l'ordre du document (une passe) et
     // porté par le worker récursif.
     let envs = compute_counter_envs(dom, dom.document(), styles);
-    let mut bx = build_box_tree_env(dom, root, styles, sizes, &envs);
+    // R-276 — profondeur `quotes` document-ordre (même
+    // patron que `envs` : pré-passe, portée par le worker).
+    let qdepth = compute_quote_depths(dom, dom.document(), styles);
+    let mut bx = build_box_tree_env(dom, root, styles, sizes, &envs, &qdepth);
     // R-177 — la racine n'est pas couverte par `child_boxes` :
     // ses pseudos `::marker`/`::first-line`/`::first-letter`
     // se figent ici, puis les `first-*` des éléments se prêtent
@@ -488,6 +491,7 @@ fn build_box_tree_env<S: ::std::hash::BuildHasher>(
     styles: &StyleMap,
     sizes: &std::collections::HashMap<NodeId, (f32, f32), S>,
     envs: &HashMap<NodeId, HashMap<String, i32>>,
+    qdepth: &HashMap<NodeId, (i32, i32)>,
 ) -> Option<LayoutBox> {
     let style = styles.get(root)?.clone();
     if style.get("display") == Some("none") {
@@ -601,7 +605,7 @@ fn build_box_tree_env<S: ::std::hash::BuildHasher>(
     // `<object>` (R-13c) : élément **remplacé** si sa ressource
     // est résolue, sinon ses **enfants se substituent**.
     if dom.tag_name(root).is_ok_and(|t| t == "object") {
-        return Some(object_box(dom, root, &style, styles, sizes, envs));
+        return Some(object_box(dom, root, &style, styles, sizes, envs, qdepth));
     }
     // Contrôles de formulaire (étape 38) : `input`/`select` —
     // la valeur peinte est synthétisée en enfant `Text` (la
@@ -665,7 +669,7 @@ fn build_box_tree_env<S: ::std::hash::BuildHasher>(
             .cloned(),
         flow_mode: explorer_css::value::WritingMode::HorizontalTb,
     };
-    let children = child_boxes(dom, root, styles, &style, sizes, envs);
+    let children = child_boxes(dom, root, styles, &style, sizes, envs, qdepth);
     b.children = wrap_children(children, &style, kind);
     Some(b)
 }
@@ -737,6 +741,7 @@ fn child_boxes<S: ::std::hash::BuildHasher>(
     parent_style: &ComputedStyle,
     sizes: &std::collections::HashMap<NodeId, (f32, f32), S>,
     envs: &HashMap<NodeId, HashMap<String, i32>>,
+    qdepth: &HashMap<NodeId, (i32, i32)>,
 ) -> Vec<LayoutBox> {
     let is_slot = dom
         .tag_name(parent)
@@ -766,6 +771,7 @@ fn child_boxes<S: ::std::hash::BuildHasher>(
         parent,
         PseudoElement::Before,
         envs.get(&parent),
+        qdepth.get(&parent).map_or(0, |d| d.0),
     ) {
         out.push(b);
     }
@@ -808,6 +814,7 @@ fn child_boxes<S: ::std::hash::BuildHasher>(
                         styles.get(child).unwrap_or(parent_style),
                         sizes,
                         envs,
+                        qdepth,
                     )
                 });
                 out.extend(inner);
@@ -816,9 +823,9 @@ fn child_boxes<S: ::std::hash::BuildHasher>(
             // Récursion ∝ profondeur DOM — pile garantie
             // (R-24 : `host-nest3000` ne doit plus tuer le
             // worker).
-            if let Some(mut b) =
-                explorer_common::deep(|| build_box_tree_env(dom, child, styles, sizes, envs))
-            {
+            if let Some(mut b) = explorer_common::deep(|| {
+                build_box_tree_env(dom, child, styles, sizes, envs, qdepth)
+            }) {
                 // `<br>` : saut de ligne forcé — texte sentinelle
                 // U+2028 LINE SEPARATOR, que l'itemisation UAX #14
                 // coupe durement (`ends_hard_break`). Choisi plutôt
@@ -888,7 +895,14 @@ fn child_boxes<S: ::std::hash::BuildHasher>(
         }
     }
     // `::after` en fin de contenu.
-    if let Some(b) = pseudo_box(dom, styles, parent, PseudoElement::After, envs.get(&parent)) {
+    if let Some(b) = pseudo_box(
+        dom,
+        styles,
+        parent,
+        PseudoElement::After,
+        envs.get(&parent),
+        qdepth.get(&parent).map_or(0, |d| d.1),
+    ) {
         out.push(b);
     }
     // R-177 — pseudos appliqués : `::marker`/`::first-line`/
@@ -1046,9 +1060,10 @@ fn pseudo_box(
     node: NodeId,
     which: explorer_css::PseudoElement,
     env: Option<&HashMap<String, i32>>,
+    depth: i32,
 ) -> Option<LayoutBox> {
     let st = styles.pseudo(node, which)?;
-    let text = pseudo_content(st.get("content")?, dom, node, env)?;
+    let text = pseudo_content(st.get("content")?, dom, node, env, depth, st)?;
     let kind = box_kind_of(st);
     let mut bx = leaf_box_anon(kind, st.clone());
     if !text.is_empty() {
@@ -1070,11 +1085,14 @@ fn pseudo_box(
 /// `'…'`/`"…"` ; `none`/`normal` ou valeurs non couvertes
 /// → `None` (pas de boîte). `""` → boîte vide (ses
 /// bordures/dimensions peignent quand même — Acid2 nose).
+#[allow(clippy::too_many_lines)]
 fn pseudo_content(
     raw: &str,
     dom: &Dom,
     node: NodeId,
     env: Option<&HashMap<String, i32>>,
+    depth: i32,
+    st: &ComputedStyle,
 ) -> Option<String> {
     let t = raw.trim();
     if t.eq_ignore_ascii_case("none") || t.eq_ignore_ascii_case("normal") {
@@ -1115,10 +1133,37 @@ fn pseudo_content(
     // le flux (attr entre deux chaînes concatène entre
     // elles). `attr(name type, fallback)` : le premier
     // token seul est lu (type/fallback non supportés).
+    let mut depth = depth;
     loop {
         let qpos = rest.find(['\'', '"']);
         let apos = rest.find("attr(");
         let cpos = rest.find("counter");
+        // Mots-clés guillemets (css-content-3 §6.1, R-276) :
+        // `open-quote` émet puis +1, `close-quote` −1 puis
+        // émet, `no-*-quote` déplace sans émettre. La paire
+        // vient de `quotes` sur le style du pseudo (hérité).
+        if let Some((k, kw)) = find_quote_kw(rest) {
+            let earliest = qpos.is_none_or(|q| k < q)
+                && apos.is_none_or(|a| k < a)
+                && cpos.is_none_or(|c| k < c);
+            if earliest {
+                let quotes = st.get("quotes");
+                match kw {
+                    "open-quote" => {
+                        out.push_str(&quote_pair(quotes, depth).0);
+                        depth += 1;
+                    }
+                    "no-open-quote" => depth += 1,
+                    "close-quote" => {
+                        depth -= 1;
+                        out.push_str(&quote_pair(quotes, depth).1);
+                    }
+                    _ => depth -= 1,
+                }
+                rest = &rest[k + kw.len()..];
+                continue;
+            }
+        }
         // `counter(name [,style])` / `counters(name,
         // sep [,style])` (R-169) : valeur de l'env des
         // compteurs de l'élément — `counters` rendu comme
@@ -1179,6 +1224,171 @@ fn pseudo_content(
         None
     } else {
         Some(out)
+    }
+}
+
+/// Premier mot-clé guillemets de `content` (`open-quote`,
+/// `close-quote`, `no-open-quote`, `no-close-quote`) avec
+/// frontières d'identifiant — `x-open-quote` ni
+/// `open-quotex` ne comptent.
+fn find_quote_kw(rest: &str) -> Option<(usize, &'static str)> {
+    const KW: [&str; 4] = [
+        "no-open-quote",
+        "no-close-quote",
+        "open-quote",
+        "close-quote",
+    ];
+    let mut best: Option<(usize, &'static str)> = None;
+    for kw in KW {
+        let mut at = 0usize;
+        while let Some(p) = rest[at..].find(kw) {
+            let p = at + p;
+            let before_ok = p == 0 || !is_ident(rest.as_bytes()[p - 1]);
+            let after_ok = rest
+                .as_bytes()
+                .get(p + kw.len())
+                .is_none_or(|&b| !is_ident(b));
+            if before_ok && after_ok {
+                if best.is_none_or(|(bp, _)| p < bp) {
+                    best = Some((p, kw));
+                }
+                break;
+            }
+            at = p + 1;
+        }
+    }
+    best
+}
+
+/// Caractère d'identifiant CSS (les mots-clés guillemets
+/// exigent des frontières nettes — cf. [`find_quote_kw`]).
+fn is_ident(b: u8) -> bool {
+    b.is_ascii_alphanumeric() || b == b'-' || b == b'_'
+}
+
+/// Paire (ouvrant, fermant) de `quotes` à la profondeur `d`
+/// (css-content-3 §6.1) : `auto` → paires latines usuelles
+/// (`“…”` puis `‘…’`) ; `none` → chaînes vides mais la
+/// profondeur avance ; liste explicite → la dernière paire
+/// se répète au-delà (la profondeur négative borne à 0).
+#[allow(
+    clippy::cast_sign_loss,
+    clippy::cast_possible_truncation,
+    clippy::cast_possible_wrap
+)]
+fn quote_pair(quotes: Option<&str>, depth: i32) -> (String, String) {
+    let pairs: Vec<(String, String)> = match quotes.map(str::trim) {
+        Some("none") => return (String::new(), String::new()),
+        Some(v) if v != "auto" => {
+            let mut strs = Vec::new();
+            let mut rest = v;
+            while let Some(p) = rest.find(['\'', '"']) {
+                let q = rest.as_bytes()[p] as char;
+                let Some(e) = rest[p + 1..].find(q) else {
+                    break;
+                };
+                strs.push(rest[p + 1..p + 1 + e].to_string());
+                rest = &rest[p + 1 + e + 1..];
+            }
+            strs.chunks(2)
+                .filter(|c| c.len() == 2)
+                .map(|c| (c[0].clone(), c[1].clone()))
+                .collect()
+        }
+        _ => vec![
+            ("\u{201c}".into(), "\u{201d}".into()),
+            ("\u{2018}".into(), "\u{2019}".into()),
+        ],
+    };
+    if pairs.is_empty() {
+        return (String::new(), String::new());
+    }
+    let i = depth.clamp(0, (pairs.len() - 1) as i32) as usize;
+    pairs[i].clone()
+}
+
+/// Delta de profondeur du `content` d'un pseudo — même
+/// sémantique que la boucle de [`pseudo_content`], sans
+/// l'émission (les chaînes littérales sont sautées).
+fn quote_delta(raw: &str) -> i32 {
+    let mut d = 0i32;
+    let bytes = raw.as_bytes();
+    let mut i = 0usize;
+    while i < bytes.len() {
+        let b = bytes[i];
+        if b == b'"' || b == b'\'' {
+            i += 1;
+            while i < bytes.len() && bytes[i] != b {
+                i += 1;
+            }
+            i += 1;
+            continue;
+        }
+        if i == 0 || !is_ident(bytes[i - 1]) {
+            for kw in [
+                "no-open-quote",
+                "no-close-quote",
+                "open-quote",
+                "close-quote",
+            ] {
+                if raw[i..].starts_with(kw)
+                    && raw
+                        .as_bytes()
+                        .get(i + kw.len())
+                        .is_none_or(|&c| !is_ident(c))
+                {
+                    d += if kw.contains("open") { 1 } else { -1 };
+                    i += kw.len() - 1;
+                    break;
+                }
+            }
+        }
+        i += 1;
+    }
+    d
+}
+
+/// Profondeur `quotes` par `NodeId` (R-276) : pré-passe en
+/// ordre du document — `(avant ::before, avant ::after)` par
+/// élément. La profondeur monte/descend avec les mots-clés
+/// rencontrés (css-content-3 §6.1 : `open-quote` et
+/// `no-open-quote` = +1 après/à l'émission, `close-quote` et
+/// `no-close-quote` = −1 avant).
+fn compute_quote_depths(dom: &Dom, root: NodeId, styles: &StyleMap) -> HashMap<NodeId, (i32, i32)> {
+    let mut depths = HashMap::new();
+    let mut depth = 0i32;
+    quote_walk(dom, root, styles, &mut depth, &mut depths);
+    depths
+}
+
+/// Bras récursif de [`compute_quote_depths`] — pile garantie
+/// (R-24, même patron que [`counter_walk`]).
+fn quote_walk(
+    dom: &Dom,
+    node: NodeId,
+    styles: &StyleMap,
+    depth: &mut i32,
+    depths: &mut HashMap<NodeId, (i32, i32)>,
+) {
+    if dom.element(node).is_ok() {
+        let before = *depth;
+        *depth += styles
+            .pseudo(node, PseudoElement::Before)
+            .and_then(|st| st.get("content"))
+            .map_or(0, quote_delta);
+        for c in dom.children(node).unwrap_or_default() {
+            explorer_common::deep(|| quote_walk(dom, c, styles, depth, depths));
+        }
+        let after = *depth;
+        *depth += styles
+            .pseudo(node, PseudoElement::After)
+            .and_then(|st| st.get("content"))
+            .map_or(0, quote_delta);
+        depths.insert(node, (before, after));
+    } else if let Ok(ch) = dom.children(node) {
+        for c in ch {
+            explorer_common::deep(|| quote_walk(dom, c, styles, depth, depths));
+        }
     }
 }
 
@@ -1541,6 +1751,7 @@ fn object_box(
     styles: &StyleMap,
     sizes: &std::collections::HashMap<NodeId, (f32, f32), impl ::std::hash::BuildHasher>,
     envs: &HashMap<NodeId, HashMap<String, i32>>,
+    qdepth: &HashMap<NodeId, (i32, i32)>,
 ) -> LayoutBox {
     let kind = box_kind_of(style);
     let mut b = LayoutBox {
@@ -1573,7 +1784,7 @@ fn object_box(
     // Ressource résolue → feuille remplacée ; sinon les
     // enfants prennent la place de l'objet.
     if b.intrinsic.is_none() {
-        let children = child_boxes(dom, root, styles, style, sizes, envs);
+        let children = child_boxes(dom, root, styles, style, sizes, envs, qdepth);
         b.children = wrap_children(children, style, kind);
     }
     b

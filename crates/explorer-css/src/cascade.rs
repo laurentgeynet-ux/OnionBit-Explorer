@@ -5295,6 +5295,12 @@ b, strong { font-weight: bold }
 i, em, cite, dfn, var, address { font-style: italic }
 u, ins { text-decoration: underline }
 s, del, strike { text-decoration: line-through }
+/* HTML Rendering : `<q>` génère ses guillemets via
+   `content` + les mots-clés `open-quote`/`close-quote`
+   (css-content-3 §6.1, R-276 — la paire vient de `quotes`,
+   `auto` = latines usuelles). */
+q::before { content: open-quote }
+q::after { content: close-quote }
 big { font-size: larger }
 small, sub, sup { font-size: smaller }
 nobr { white-space: nowrap }

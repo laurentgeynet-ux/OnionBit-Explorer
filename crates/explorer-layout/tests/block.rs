@@ -3390,3 +3390,67 @@ fn container_type_size_contient_la_taille() {
         "height explicit > contain : h={h_fixed}"
     );
 }
+
+/// Collecte le texte (boîtes `Text`) dans l'ordre de l'arbre.
+fn texts(b: &LayoutBox, out: &mut String) {
+    if let Some(t) = &b.text {
+        out.push_str(t);
+    }
+    for c in &b.children {
+        texts(c, out);
+    }
+}
+
+#[test]
+fn quotes_mots_cles_content_et_profondeur() {
+    // R-276 — css-content-3 §6.1 : `open-quote`/`close-quote`
+    // dans `content` émettent la paire de `quotes` à la
+    // profondeur courante (document-ordre) ; `auto` =
+    // `“…”` puis `‘…’`. La feuille UA pose les pseudos de
+    // `<q>` ; la cascade auteur peut les surcharger.
+    let (_dom, bx) = laid(
+        "<html><body><p>un <q>deux <q>trois</q></q> quatre</p></body></html>",
+        "p { quotes: auto } q { font-size: 10px }",
+    );
+    let mut t = String::new();
+    texts(&bx, &mut t);
+    assert_eq!(
+        t, "un \u{201c}deux \u{2018}trois\u{2019}\u{201d} quatre",
+        "paires auto + profondeur imbriquée : {t:?}"
+    );
+
+    // Paires explicites : la 2e se répète au-delà
+    // (css-content-3 — profondeur bornée à la liste).
+    let (_d2, bx2) = laid(
+        "<html><body><p>x<q>a<q>b<q>c</q></q></q>y</p></body></html>",
+        "p { quotes: '\u{2039}' '\u{203a}' '\u{00ab}' '\u{00bb}' }",
+    );
+    let mut t2 = String::new();
+    texts(&bx2, &mut t2);
+    assert_eq!(
+        t2, "x\u{2039}a\u{00ab}b\u{00ab}c\u{00bb}\u{00bb}\u{203a}y",
+        "paires explicites + saturation de profondeur : {t2:?}"
+    );
+
+    // `no-open-quote` décale la profondeur sans émettre.
+    let (_d3, bx3) = laid(
+        "<html><body><p><span id=s></span><q>q</q></p></body></html>",
+        "#s::before { content: no-open-quote } q::before { content: open-quote }",
+    );
+    let mut t3 = String::new();
+    texts(&bx3, &mut t3);
+    assert_eq!(
+        t3, "\u{2018}q\u{2019}",
+        "no-open-quote saute un niveau : {t3:?}"
+    );
+
+    // `quotes:none` → les mots-clés n'émettent rien mais la
+    // profondeur bouge toujours.
+    let (_d4, bx4) = laid(
+        "<html><body><p><q>a</q><q>b</q></p></body></html>",
+        "p { quotes: none }",
+    );
+    let mut t4 = String::new();
+    texts(&bx4, &mut t4);
+    assert_eq!(t4, "ab", "quotes:none muet : {t4:?}");
+}
