@@ -729,6 +729,17 @@ pub struct Engine {
     /// entre envs proches → ancêtre faux → liaison erronée
     /// silencieuse (régression constatée vol 9773 `/results`).
     pub(crate) resolved_envs: std::collections::HashMap<(usize, u16), (EnvRef, EnvRef)>,
+    /// JS-C492 — corps baissé (générateur/async) **partagé par
+    /// `lit`** : `lower_suspend_fn` alloue un `Rc<Vec<Stmt>>`
+    /// neuf à chaque appel ; sans cache, le `resolved_map`
+    /// rempli au 1er appel indexait des `ptr(Expr)` d'un corps
+    /// baissé éphémère — libéré avec son `GExec`, ses adresses
+    /// réutilisées par un corps baissé ultérieur → profondeur
+    /// fantôme → mauvaise porte lue (corruption async,
+    /// `Error: bb`/`yt-navigate-finish`). Un seul corps baissé
+    /// par `lit` → adresses stables + chaque appel résout.
+    /// La valeur épingle `lit` → `ptr(lit)` (clé) non réutilisé.
+    pub(crate) lowered_suspend_cache: std::collections::HashMap<usize, Rc<LoweredSuspend>>,
     /// JS-C490c — kill-switch A/B : `EXPLORER_NO_RESOLVE=1`
     /// désarme la résolution statique (A/B en vol sans rebuild).
     pub(crate) resolve_off: bool,
@@ -844,6 +855,19 @@ pub struct Engine {
     /// immédiatement — la page cesse de réessayer, le daemon
     /// survit à ~seuil au lieu d'aborter au double.
     pub(crate) rss_kill_latched: bool,
+}
+
+/// JS-C492 — corps baissé d'un générateur/async **partagé par
+/// `lit`** : `_lit` épingle le `FnLit` (son adresse = clé du
+/// cache ne peut pas être réutilisée) et `body` épingle les
+/// adresses `Expr` indexées par `resolved_map`.
+pub(crate) struct LoweredSuspend {
+    /// Gardien — maintient `lit` vivant (clé `Rc::as_ptr` stable).
+    _lit: Rc<crate::ast::FnLit>,
+    /// Paramètres baissés (défauts suspend déplacés dans le corps).
+    pub(crate) params: Vec<crate::ast::Param>,
+    /// Corps baissé partagé — `Rc` cloné dans chaque `GExec`.
+    pub(crate) body: Rc<Vec<crate::ast::Stmt>>,
 }
 
 /// Dernier match `RegExp` — `RegExp.$1…$9`/`input`/`lastMatch`/…
@@ -1248,6 +1272,7 @@ impl Engine {
             resolved_lits: std::collections::HashSet::new(),
             resolved_guard: Vec::new(),
             resolved_envs: std::collections::HashMap::new(),
+            lowered_suspend_cache: std::collections::HashMap::new(),
             resolve_off: std::env::var("EXPLORER_NO_RESOLVE").is_ok_and(|v| v == "1"),
             resolve_verify: std::env::var("EXPLORER_RESOLVE_VERIFY").is_ok_and(|v| v == "1"),
             dom_ctors: std::collections::HashMap::new(),
@@ -5345,6 +5370,11 @@ impl Engine {
             self.resolved_map.clear();
             self.resolved_lits.clear();
             self.resolved_guard.clear();
+            // JS-C492 — purge atomique avec `resolved_map` :
+            // les corps baissés épinglés doivent libérer en même
+            // temps que les `ptr(Expr)` qu'ils indexaient, sinon
+            // réutilisation d'adresses → profondeurs fantômes.
+            self.lowered_suspend_cache.clear();
         }
         self.resolved_lits.insert(key);
         self.resolved_guard.push(lit.clone());
@@ -9376,8 +9406,24 @@ impl Engine {
         // le corps (la liaison s'exécute hors `GExec`, un
         // `await` pendante y jetterait). `lit` reste la
         // référence (`fn.length`, `args_map`).
-        let lowered_fn = (lit.is_gen || lit.is_async)
-            .then(|| crate::interp::lazy::lower_suspend_fn(lit, &body_rc));
+        // JS-C492 — corps baissé partagé par `lit` : un seul
+        // `lower_suspend_fn` par littéral (cache) → adresses
+        // `Expr` stables pour `resolved_map` (avant : réalloué
+        // à chaque appel → `ptr` pendants après mort du `GExec`).
+        let lowered_fn: Option<Rc<LoweredSuspend>> = (lit.is_gen || lit.is_async).then(|| {
+            let key = Rc::as_ptr(lit) as usize;
+            self.lowered_suspend_cache
+                .entry(key)
+                .or_insert_with(|| {
+                    let (params, body) = crate::interp::lazy::lower_suspend_fn(lit, &body_rc);
+                    Rc::new(LoweredSuspend {
+                        _lit: lit.clone(),
+                        params,
+                        body,
+                    })
+                })
+                .clone()
+        });
         // §B-59 : sous-phase « bind » — `last_phase` figé à
         // « bind » = mort dans le liage de paramètres
         // (`bind_pat` × N params, `...rest`, défauts).
@@ -9387,7 +9433,7 @@ impl Engine {
         // Param binding: patterns + `= default` + `...rest`.
         for (i, p) in lowered_fn
             .as_ref()
-            .map_or(&lit.params, |(params, _)| params)
+            .map_or(&lit.params, |lf| &lf.params)
             .iter()
             .enumerate()
         {
@@ -9441,7 +9487,7 @@ impl Engine {
         if let Ok(mut g) = crate::LAST_PHASE.lock() {
             *g = "hoist";
         }
-        let lowered_body = lowered_fn.as_ref().map(|(_, b)| b.clone());
+        let lowered_body = lowered_fn.as_ref().map(|lf| lf.body.clone());
         // JS-C490 — annotations de profondeur sur le corps qui
         // tournera (le corps baissé des gen/async).
         self.ensure_lit_resolved(lit, lowered_body.as_ref().unwrap_or(&body_rc));
