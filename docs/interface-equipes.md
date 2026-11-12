@@ -2408,3 +2408,16 @@ cause** ; résidu = promesses des handlers d'erreur `Atn`
   `hyphenate-character`/`-limit-chars`/`-limit-lines`.
 - File P2 ouverte : `field-sizing` (contrôles) et
   `initial-letter`/`text-box*` candidats suivants.
+
+### 2026-11-13 — PIPE → NAV : R-277 `field-sizing`
+
+- `field-sizing:content` consommé (`explorer-css`, hints
+  de présentation) : sous `content`, les hints
+  `cols`/`rows`/`size` (+ défauts UA) ne s'émettent plus
+  → `width:auto` → `inline-block` mesure au texte.
+  `fixed` inchangé, `width` auteur prime. Verrou
+  `field_sizing_content_mesure_au_contenu`.
+- Re-tour `affectsv` attendu : `field-sizing.content`
+  (textarea/input), `quotes` + `<q>` (R-276),
+  `hyphenate-*` sur binaire ≥ `d5e545b2` (erratum
+  précédent — binaire périmé, verrou render posé).

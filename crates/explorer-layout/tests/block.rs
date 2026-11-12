@@ -3454,3 +3454,57 @@ fn quotes_mots_cles_content_et_profondeur() {
     texts(&bx4, &mut t4);
     assert_eq!(t4, "ab", "quotes:none muet : {t4:?}");
 }
+
+#[test]
+fn field_sizing_content_mesure_au_contenu() {
+    // R-277 — css-forms : `field-sizing:content` mesure le
+    // contrôle à son contenu au lieu de la taille fixe
+    // (`size`/`cols`/`rows` + défauts 10em/4em). `width`
+    // auteur prime toujours (le hint n'a que le rang UA).
+    let w = |html: &str, css: &str, tag: &str| {
+        let (dom, bx) = laid(html, css);
+        find(&bx, by_tag(&dom, tag)).rect.width
+    };
+    let fixed = w(
+        "<html><body><input value=abcde></body></html>",
+        "input{font-size:16px}",
+        "input",
+    );
+    assert!(fixed >= 160.0, "défaut ≥ 10em à 16px : {fixed}");
+    let content = w(
+        "<html><body><input value=abcde></body></html>",
+        "input{font-size:16px;field-sizing:content}",
+        "input",
+    );
+    assert!(
+        content < fixed && content > 0.0,
+        "content ≠ 10em (mesure au texte) : {content}"
+    );
+    // `field-sizing:fixed` explicite = défaut.
+    let expl = w(
+        "<html><body><input value=abcde></body></html>",
+        "input{font-size:16px;field-sizing:fixed}",
+        "input",
+    );
+    assert_eq!(expl, fixed, "fixed explicite : {expl}");
+    // `width` auteur prime `field-sizing:content`.
+    let authored = w(
+        "<html><body><input value=abcde></body></html>",
+        "input{font-size:16px;field-sizing:content;width:200px}",
+        "input",
+    );
+    assert!(
+        (authored - 200.0).abs() <= 4.0,
+        "width auteur prime (+bordures) : {authored}"
+    );
+    // `cols`/`rows` ignorés sous `field-sizing:content`.
+    let (dom, bx) = laid(
+        "<html><body><textarea cols=40 rows=8>hi</textarea></body></html>",
+        "textarea{font-size:16px;field-sizing:content}",
+    );
+    let ta = find(&bx, by_tag(&dom, "textarea")).rect;
+    assert!(
+        ta.width < 40.0 * 16.0 && ta.height < 8.0 * 19.2,
+        "cols/rows ignorés : {ta:?}"
+    );
+}

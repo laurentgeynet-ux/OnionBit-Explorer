@@ -4221,6 +4221,21 @@ le census `site_harvest` arbitre les ex æquo.
   niveau, `quotes:none` muet). Borne : `quotes:auto` ne
   lit pas `lang` (paires latines fixes — CLDR par langue
   hors MVP).
+- [x] **R-277 — `field-sizing`** (~2) — `content` mesure le
+  contrôle à son contenu au lieu des tailles fixes
+  `cols`/`rows`/`size` (+ défauts UA 10em/4em). La propriété
+  n'étant pas héritée (spec), la valeur est lisible dans
+  `props` à l'heure des *presentational hints* : les hints
+  de dimensions ne s'émettent simplement pas sous
+  `field-sizing:content` → `width`/`height` retombent sur
+  `auto` → `display:inline-block` UA mesure au texte
+  (shrink-to-fit). `width`/`height` auteur prime toujours
+  (rang des hints), `field-sizing:fixed` = défaut inchangé.
+  Verrou : `field_sizing_content_mesure_au_contenu` (content
+  < 10em, fixed ≡ défaut, auteur prime, `cols`/`rows`
+  ignorés). Bornes : `<select>`/boutons non concernés par
+  des hints fixes (rien à retirer) ; `min-/max-*` de
+  contenu non spéciaux.
 - [x] **Erratum jauge `hyphenate-*`** — le « miss moteur »
   signalé par NAV (tiret poussé dans `acc.frags` mais
   absent de la display list) est un **binaire périmé** :

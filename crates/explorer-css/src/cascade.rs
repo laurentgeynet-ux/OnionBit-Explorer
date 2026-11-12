@@ -3936,6 +3936,17 @@ fn apply_presentational_hints(
     let Ok(tag) = dom.tag_name(node) else {
         return;
     };
+    // `field-sizing:content` (css-forms / R-277) : le
+    // contrôle se mesure au **contenu** — les dimensions
+    // fixes issues de `cols`/`rows`/`size` (et leurs
+    // défauts UA) ne s'appliquent plus. La propriété n'est
+    // PAS héritée : seule la déclaration propre compte,
+    // déjà résolue dans `props` quand les hints passent.
+    // `width`/`height` auteur priment de toute façon
+    // (rang des hints) — ici on supprime le hint lui-même.
+    let field_content = props
+        .get("field-sizing")
+        .is_some_and(|v| v.trim() == "content");
     match tag {
         "table" | "td" | "th" | "tr" | "col" | "colgroup" | "img" | "iframe" | "object"
         | "embed" | "canvas" | "video" => {
@@ -3974,7 +3985,10 @@ fn apply_presentational_hints(
             // exclus (approximation documentée).
             hint(props, "height", dim(hint_attr(dom, node, "size")));
         }
-        "textarea" => {
+        // `field-sizing:content` → pas de taille fixe sur
+        // textarea/input (mesure au contenu) : la garde
+        // laisse le tag tomber sur `_`.
+        "textarea" if !field_content => {
             // `cols`/`rows` → taille en caractères (HTML
             // Rendering) : `cols` → `width` en `ch`,
             // `rows` → `height` ≈ rows × hauteur de ligne.
@@ -3995,7 +4009,7 @@ fn apply_presentational_hints(
                 lines(hint_attr(dom, node, "rows")).or_else(|| Some("4em".to_string())),
             );
         }
-        "input" => {
+        "input" if !field_content => {
             // `size` → `width` en `ch` — ignoré sur les
             // états à contrôle propre (checkbox/radio/
             // submit : leur `width` UA est une vraie règle,
