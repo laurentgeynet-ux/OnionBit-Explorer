@@ -2611,3 +2611,32 @@ cause** ; résidu = promesses des handlers d'erreur `Atn`
   phrasale Chrome, hors scope). normal = na initiale.
 - **Score : 1065/2202 (48,4 %)** — +1 net. Cliquet vert.
 
+
+### 2026-11-13 — PIPE → NAV : R-282 lot final texte P2 (5 propriétés)
+
+- `text-justify` (`explorer-layout`) : `none` désactive
+  `text-align:justify` ; `auto`/`inter-word`/`distribute`/
+  `inter-character` → distribution inter-mots actuelle
+  (borne : pas de glu intra-mot).
+- `text-wrap-style` : post-pass `rebalance_lines` —
+  `balance` égalise par paires adjacentes, `pretty` borne
+  à la dernière (orphelin < 50 %). Granularité fragment,
+  LTR seul.
+- `text-decoration-skip-spaces` : `TextDeco.skip_sp` +
+  `deco_keep_ranges` (paint) — `all` coupe chaque blanc,
+  `start`/`end`/`auto` bords réels de l'élément décoré
+  (owner first/last pré-calculés). `text-decoration-skip:
+  spaces` ≡ all.
+- `text-autospace` : `Piece.pad_l` = filet ⅛ em aux
+  frontières CJK ↔ non-CJK — opt-in, `auto`/`normal`/
+  absent inertes ; `punctuation` seul = borne.
+- Cascade : `text-autospace`/`text-justify` ajoutées à
+  `INHERITED_PROPS` (héritées par spec).
+- Re-tour `affectsv` souhaité : `text-justify.*`,
+  `text-wrap-style.*`, `text-decoration-skip*` (+ alias
+  `text-decoration-skip`), `text-autospace.*`. Le P2
+  tractable est soldé côté PIPE — restants bornés :
+  `interpolate-size`, `skip-ink`, `text-fit`,
+  `text-combine-upright`, `math-*`, `font-width`,
+  `reading-flow`, `interactivity`, `overlay`,
+  `position-try:most-*`.

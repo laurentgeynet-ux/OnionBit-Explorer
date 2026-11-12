@@ -4302,15 +4302,42 @@ le census `site_harvest` arbitre les ex æquo.
   `word_break_keep_all_supprime_les_coupures_cjk`
   (normal ≥ 3 lignes, keep-all ≤ 3 + mot entier sur une
   ligne).
+- [x] **R-282 — lot final texte : `text-justify` +
+  `text-wrap-style` + `text-decoration-skip-spaces` +
+  `text-autospace`** (~12) — `text-justify:none`
+  désactive la justification même sous
+  `text-align:justify` (`auto`/`inter-word`/`distribute`/
+  `inter-character` → distribution inter-mots actuelle —
+  borne : pas de glu intra-mot, re-shaping hors scope).
+  `text-wrap-style` post-pass `rebalance_lines` avant
+  alignement : `balance` pousse les pièces de fin vers la
+  ligne suivante tant que l'écart de la paire se réduit,
+  `pretty` borne à la dernière paire (orphelin < 50 %) —
+  granularité fragment, LTR, pas de croissance verticale,
+  espace récupérée ≈⅓ em/glyph sans shaping. `TextDeco
+  .skip_sp` + `deco_keep_ranges` (render) découpent le
+  trait aux glyphes blancs : `all` = tous, `start`/`end`/
+  `auto` = bords réels de l'élément décoré (bornes
+  owner-first/last pré-calculées), shorthand Level 3
+  `text-decoration-skip:spaces` ≡ all. `text-autospace` :
+  `Piece.pad_l` = filet ⅛ em aux frontières CJK ↔
+  non-CJK (itemisation, compté dans le fit — opt-in,
+  `auto`/`normal`/absent inertes ; `punctuation` seul =
+  borne). Cascade : `text-autospace`/`text-justify`
+  ajoutées à `INHERITED_PROPS` (spec-correct).
+  Verrous : `text_autospace_insere_un_filet_inter_script`,
+  `text_justify_none_desactive_la_justification`,
+  `text_wrap_style_balance_egalise_les_lignes`,
+  `text_wrap_style_pretty_evite_l_orphelin`,
+  `text_decoration_skip_spaces_decoupe_le_trait`.
 
-`text-box*`/`text-autospace`/`text-fit`/`initial-letter`/
-`text-combine-upright`, `counter-set`/`counter-increment` fins,
-`display` exotiques (`flow-root`, `table-*`), `grid-*`/`flex-*`
+`text-fit`/`text-combine-upright`/`interpolate-size` (chantier
+animation↔layout), `text-decoration-skip-ink` (géométrie
+glyphes), `display` exotiques résiduels, `grid-*`/`flex-*`
 sous-features, `font-stretch`/`font-width` (fontes variables),
-`font-variant-*` OT fins, `field-sizing`, `interactivity`,
-`overlay`, `reading-flow`, `scroll-snap-*` résiduel,
-`position-try-order:most-*` fins, `quotes` (contenu généré
-`<q>`), `ruby-*` fins, `interpolate-size`, `math-*`.
+`font-variant-*` OT fins, `interactivity`, `overlay`,
+`reading-flow`, `scroll-snap-*` résiduel,
+`position-try-order:most-*` fins, `ruby-*` fins, `math-*`.
 
 ### P3 — hors périmètre / bornes (décision requise)
 

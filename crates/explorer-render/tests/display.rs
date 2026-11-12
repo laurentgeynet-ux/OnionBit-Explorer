@@ -4124,3 +4124,33 @@ fn text_decoration_inset_rentre_le_trait() {
     assert!((xp - x0 - w0 * 0.25).abs() < 0.5, "25% start : {xp}");
     assert!((w0 - wp - w0 * 0.5).abs() < 0.5, "w −50% : {wp}");
 }
+
+// ---------- R-282 — `text-decoration-skip-spaces` (css-text-decor-4 §5.5) ----------
+
+#[test]
+fn text_decoration_skip_spaces_decoupe_le_trait() {
+    // `all` découpe le trait aux blancs : "a b" → 2 segments
+    // ("a" et "b") ; sans la propriété → 1 rect continu.
+    let html = "<!doctype html><p><u>a b</u></p>";
+    let base = "p{margin:0;font-size:16px}u{text-decoration:underline;";
+    let (_, _, items0) = dl(html, &format!("{base}}}"));
+    let (_, _, items1) = dl(html, &format!("{base}text-decoration-skip-spaces:all}}"));
+    let r0 = deco_rects(&items0);
+    let r1 = deco_rects(&items1);
+    // L'espace est soudée à la pièce "a " → le trait de base
+    // est contigu (fin du 1er rect = début du 2d) ; `all`
+    // ouvre un trou large de l'espace entre les segments.
+    let gap_of = |r: &[(f32, f32, f32)]| r[1].0 - (r[0].0 + r[0].2);
+    assert!(gap_of(&r0).abs() < 0.5, "sans skip : contigu {r0:?}");
+    assert!(gap_of(&r1) > 4.0, "all : trou au blanc {r1:?}");
+    // `none`/`auto` (bords d'élément seuls — espace intérieur
+    // conservé) → comportement d'origine.
+    for v in ["none", "auto"] {
+        let (_, _, it) = dl(html, &format!("{base}text-decoration-skip-spaces:{v}}}"));
+        let r = deco_rects(&it);
+        assert!(gap_of(&r).abs() < 0.5, "{v} : contigu {r:?}");
+    }
+    // Shorthand Level 3 `text-decoration-skip: spaces` ≡ all.
+    let (_, _, items3) = dl(html, &format!("{base}text-decoration-skip:spaces}}"));
+    assert!(gap_of(&deco_rects(&items3)) > 4.0);
+}

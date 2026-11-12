@@ -5094,6 +5094,10 @@ const INHERITED_PROPS: &[&str] = &[
     "text-emphasis-style",
     "text-spacing-trim",
     "hanging-punctuation",
+    // css-text-4 §9/§7.3 (R-282) : `text-autospace` et
+    // `text-justify` sont héritées.
+    "text-autospace",
+    "text-justify",
     "text-indent",
     "text-orientation",
     "text-transform",

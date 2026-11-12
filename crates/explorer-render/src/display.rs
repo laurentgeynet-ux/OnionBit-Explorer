@@ -25,7 +25,7 @@
 use explorer_css::value::Color;
 use explorer_css::value::{parse_color, parse_length, Unit};
 use explorer_layout::font::ShapedRun;
-use explorer_layout::text::trim_css_ws;
+use explorer_layout::text::{is_css_ws, trim_css_ws};
 use explorer_layout::{
     scrollable_overflow_bottom, BoxKind, Float, LayoutBox, Overflow, Position, Rect,
 };
@@ -4247,6 +4247,89 @@ fn paint_self(
 /// `true` = boîte `display:inline` pure (ni atomique ni
 /// remplacée) : son `rect` n'est que l'union de fragments —
 /// sa décoration s'émet par pièce de ligne, pas sur la boîte.
+/// R-282 — `text-decoration-skip-spaces` (css-text-decor-4
+/// §5.5) : intervalles locaux au fragment où le trait reste
+/// peint, blancs exclus — positions de plume des glyphes
+/// espaces du [`ShapedRun`] (ordre logique, avance signée
+/// pour RTL). `mask` = `DECO_SKIP_START`/`END`/`ALL` :
+/// `all` coupe chaque blanc ; `start`/`end` la série de
+/// blancs touchant ce bord du fragment (borne : bord de
+/// fragment ≈ bord de l'élément décoré ; un fragment
+/// tout-blanc sous `start`/`end` est traité comme espace
+/// intérieur → conservé).
+fn deco_keep_ranges(text: &str, run: &ShapedRun, width: f32, mask: u8) -> Vec<(f32, f32)> {
+    use explorer_layout::inline::{DECO_SKIP_ALL, DECO_SKIP_END, DECO_SKIP_START};
+    if width <= 0.0 {
+        return Vec::new();
+    }
+    if mask == 0 {
+        return vec![(0.0, width)];
+    }
+    // Fragment tout-blanc : `all` le vide ; sans `all` c'est
+    // une espace intérieure → le trait reste entier.
+    if text.chars().all(is_css_ws) {
+        return if mask & DECO_SKIP_ALL != 0 {
+            Vec::new()
+        } else {
+            vec![(0.0, width)]
+        };
+    }
+    // Étendue de plume de chaque glyphe, + marque blanc.
+    let mut pen = 0.0_f32;
+    let mut spans: Vec<(f32, f32, bool)> = Vec::with_capacity(run.glyphs.len());
+    for g in &run.glyphs {
+        let a0 = pen;
+        pen += g.advance;
+        let is_ws = text
+            .get(g.cluster as usize..)
+            .and_then(|s| s.chars().next())
+            .is_some_and(is_css_ws);
+        spans.push((a0.min(pen), a0.max(pen), is_ws));
+    }
+    // Plages à couper : `all` = tous les blancs ; sinon les
+    // séries contiguës en tête (`start`) / queue (`end`).
+    let mut cuts: Vec<(f32, f32)> = Vec::new();
+    if mask & DECO_SKIP_ALL != 0 {
+        cuts.extend(spans.iter().filter(|s| s.2).map(|s| (s.0, s.1)));
+    } else {
+        if mask & DECO_SKIP_START != 0 {
+            for s in &spans {
+                if !s.2 {
+                    break;
+                }
+                cuts.push((s.0, s.1));
+            }
+        }
+        if mask & DECO_SKIP_END != 0 {
+            for s in spans.iter().rev() {
+                if !s.2 {
+                    break;
+                }
+                cuts.push((s.0, s.1));
+            }
+        }
+    }
+    if cuts.is_empty() {
+        return vec![(0.0, width)];
+    }
+    cuts.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal));
+    // Soustraction : intervalles conservés dans [0, width].
+    let mut keep = Vec::new();
+    let mut cur = 0.0_f32;
+    for (a, b) in cuts {
+        let a = a.clamp(0.0, width);
+        let b = b.clamp(0.0, width);
+        if a > cur + 0.01 {
+            keep.push((cur, a.min(width)));
+        }
+        cur = cur.max(b);
+    }
+    if cur < width - 0.01 {
+        keep.push((cur, width));
+    }
+    keep
+}
+
 fn is_inline_flow(bx: &LayoutBox) -> bool {
     bx.kind == BoxKind::Inline
         && bx.intrinsic.is_none()
@@ -4303,7 +4386,23 @@ fn paint_lines(bx: &LayoutBox, items: &mut Vec<DisplayItem>, off: (f32, f32)) {
     // deux textes couvrirait l'encre du premier (le fond du
     // bouton-langue Wikipedia mangeait la queue de
     // « language »).
-    for line in &bx.lines {
+    // R-282 — `text-decoration-skip-spaces` start/end : les
+    // vrais bords de l'élément décoré ≈ premier/dernier
+    // fragment de son `owner` (enfant direct de `bx`) dans
+    // l'ordre document — l'espace intérieur n'est sauté que
+    // sous `all` (borne : bord d'élément imbriqué ≈ bord de
+    // l'owner de tête, et ordre visuel pour RTL).
+    let mut first_of: std::collections::HashMap<usize, (usize, usize)> =
+        std::collections::HashMap::new();
+    let mut last_of: std::collections::HashMap<usize, (usize, usize)> =
+        std::collections::HashMap::new();
+    for (li, line) in bx.lines.iter().enumerate() {
+        for (fi, f) in line.fragments.iter().enumerate() {
+            first_of.entry(f.owner).or_insert((li, fi));
+            last_of.insert(f.owner, (li, fi));
+        }
+    }
+    for (li, line) in bx.lines.iter().enumerate() {
         // Décos — une pièce par élément et par ligne (approx.
         // `box-decoration-break: slice`, R-70) : l'union des
         // fragments de l'élément SUR LA LIGNE, padding aux
@@ -4352,7 +4451,7 @@ fn paint_lines(bx: &LayoutBox, items: &mut Vec<DisplayItem>, off: (f32, f32)) {
         if let Some((u, first)) = run {
             paint_inline_deco(&line.fragments[first].style, u, items, off);
         }
-        for frag in &line.fragments {
+        for (fi, frag) in line.fragments.iter().enumerate() {
             if frag.atomic {
                 continue;
             }
@@ -4371,7 +4470,7 @@ fn paint_lines(bx: &LayoutBox, items: &mut Vec<DisplayItem>, off: (f32, f32)) {
                 // du trait aux bords start/end (`%` de la
                 // largeur du fragment — base connue ici).
                 let deco_rect =
-                    |d: &explorer_layout::inline::TextDeco, dy: f32, thick: f32| -> Rect {
+                    |d: &explorer_layout::inline::TextDeco, dy: f32, thick: f32| -> Vec<Rect> {
                         let w = frag.rect.width;
                         let il = if d.inset_l_pct {
                             d.inset_l * w / 100.0
@@ -4383,12 +4482,28 @@ fn paint_lines(bx: &LayoutBox, items: &mut Vec<DisplayItem>, off: (f32, f32)) {
                         } else {
                             d.inset_r
                         };
-                        Rect {
-                            x: frag.rect.x + off.0 + il,
-                            y: dy,
-                            width: (w - il - ir).max(0.0),
-                            height: thick,
+                        // R-282 — `text-decoration-skip-spaces`
+                        // : le trait se découpe en segments
+                        // hors blancs (`deco_keep_ranges`),
+                        // dans les bornes `il..w-ir`. Les
+                        // bords start/end ne sautent qu'aux
+                        // bords RÉELS de l'élément décoré.
+                        let mut sk = d.skip_sp;
+                        if first_of.get(&frag.owner) != Some(&(li, fi)) {
+                            sk &= !explorer_layout::inline::DECO_SKIP_START;
                         }
+                        if last_of.get(&frag.owner) != Some(&(li, fi)) {
+                            sk &= !explorer_layout::inline::DECO_SKIP_END;
+                        }
+                        deco_keep_ranges(&frag.text, run, (w - il - ir).max(0.0), sk)
+                            .into_iter()
+                            .map(|(a, b)| Rect {
+                                x: frag.rect.x + off.0 + il + a,
+                                y: dy,
+                                width: (b - a).max(0.0),
+                                height: thick,
+                            })
+                            .collect()
                     };
                 for d in &frag.deco {
                     let color = d.color.unwrap_or(ink);
@@ -4409,18 +4524,22 @@ fn paint_lines(bx: &LayoutBox, items: &mut Vec<DisplayItem>, off: (f32, f32)) {
                                     (fs * 0.1).max(1.0)
                                 }
                             });
-                        items.push(DisplayItem::DecoRect {
-                            rect: deco_rect(d, dy, dth),
-                            color,
-                            style: d.style,
-                        });
+                        for rect in deco_rect(d, dy, dth) {
+                            items.push(DisplayItem::DecoRect {
+                                rect,
+                                color,
+                                style: d.style,
+                            });
+                        }
                     }
                     if d.lines & explorer_layout::inline::DECO_OVERLINE != 0 {
-                        items.push(DisplayItem::DecoRect {
-                            rect: deco_rect(d, base_y - fs * 0.85, dth),
-                            color,
-                            style: d.style,
-                        });
+                        for rect in deco_rect(d, base_y - fs * 0.85, dth) {
+                            items.push(DisplayItem::DecoRect {
+                                rect,
+                                color,
+                                style: d.style,
+                            });
+                        }
                     }
                 }
                 emit_text_shadows(
@@ -4521,11 +4640,13 @@ fn paint_lines(bx: &LayoutBox, items: &mut Vec<DisplayItem>, off: (f32, f32)) {
                 for d in &frag.deco {
                     if d.lines & explorer_layout::inline::DECO_LINE_THROUGH != 0 {
                         let dth = if d.thick_px > 0.0 { d.thick_px } else { th };
-                        items.push(DisplayItem::DecoRect {
-                            rect: deco_rect(d, base_y - fs * 0.3 - dth / 2.0, dth),
-                            color: d.color.unwrap_or(ink),
-                            style: d.style,
-                        });
+                        for rect in deco_rect(d, base_y - fs * 0.3 - dth / 2.0, dth) {
+                            items.push(DisplayItem::DecoRect {
+                                rect,
+                                color: d.color.unwrap_or(ink),
+                                style: d.style,
+                            });
+                        }
                     }
                 }
             }

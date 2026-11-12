@@ -52,6 +52,12 @@ pub const DECO_DOUBLE: u8 = 3;
 /// `wavy` — pseudo-vague (segments alternés au rendu,
 /// approximation honnête sans chemin courbe).
 pub const DECO_WAVY: u8 = 4;
+/// Voir [`TextDeco::skip_sp`] — blancs en début d'élément.
+pub const DECO_SKIP_START: u8 = 1;
+/// Voir [`TextDeco::skip_sp`] — blancs en fin d'élément.
+pub const DECO_SKIP_END: u8 = 2;
+/// Voir [`TextDeco::skip_sp`] — tous les blancs.
+pub const DECO_SKIP_ALL: u8 = 4;
 
 /// `text-decoration` **résolue** portée par un [`Fragment`]
 /// (R-153) : l'entrée appartient à l'élément **déclarant** —
@@ -94,6 +100,13 @@ pub struct TextDeco {
     pub inset_r: f32,
     /// Voir [`TextDeco::inset_l`].
     pub inset_r_pct: bool,
+    /// `text-decoration-skip-spaces` (css-text-decor-4 §5.5 —
+    /// R-282) : masque [`DECO_SKIP_START`] / [`DECO_SKIP_END`]
+    /// / [`DECO_SKIP_ALL`] — `auto` → `start|end` (la spec la
+    /// résout aux bords de l'élément décoré). Le shorthand
+    /// Level 3 `text-decoration-skip: … spaces …` pose
+    /// [`DECO_SKIP_ALL`]. `none`/absent → 0.
+    pub skip_sp: u8,
 }
 
 /// `text-decoration` de `st` → entrée résolue, `None` si
@@ -185,7 +198,43 @@ fn text_deco(st: &ComputedStyle, fs: f32, ctx: &BlockCtx) -> Option<TextDeco> {
         inset_l_pct: first_in.1,
         inset_r: last_in.0,
         inset_r_pct: last_in.1,
+        skip_sp: skip_spaces_mask(st),
     })
+}
+
+/// R-282 — `text-decoration-skip-spaces`
+/// `auto|none|all|[start||end]` → masque
+/// [`DECO_SKIP_START`/`END`/`ALL`] : `auto` → les deux bords ;
+/// le shorthand Level 3 `text-decoration-skip` accepte le
+/// token `spaces` → `all`.
+fn skip_spaces_mask(st: &ComputedStyle) -> u8 {
+    let mut m = 0u8;
+    if let Some(v) = st
+        .get("text-decoration-skip-spaces")
+        .map(|v| v.trim().to_ascii_lowercase())
+    {
+        if v == "all" {
+            m |= DECO_SKIP_ALL;
+        } else {
+            for t in v.split_ascii_whitespace() {
+                match t {
+                    "auto" | "start" => m |= DECO_SKIP_START,
+                    "end" => m |= DECO_SKIP_END,
+                    _ => {}
+                }
+            }
+            if v.split_ascii_whitespace().any(|t| t == "auto") {
+                m |= DECO_SKIP_END;
+            }
+        }
+    }
+    if st.get("text-decoration-skip").is_some_and(|v| {
+        v.split_ascii_whitespace()
+            .any(|t| t.eq_ignore_ascii_case("spaces"))
+    }) {
+        m |= DECO_SKIP_ALL;
+    }
+    m
 }
 
 /// Fragment posé dans une ligne : tranche de texte shapé, ou
@@ -313,6 +362,10 @@ struct Piece {
     /// ligne coupe ici, le fragment précédent gagne le
     /// `hyphenate-character` en fin de ligne.
     hyph_before: bool,
+    /// R-282 — `text-autospace` : espace inter-script
+    /// inséré AVANT la pièce (frontière CJK ↔ non-CJK) —
+    /// ignoré en tête de ligne.
+    pad_l: f32,
 }
 
 /// Niveau d'imbrication du paragraphe depuis `direction`
@@ -428,6 +481,9 @@ pub(crate) fn layout_inline(
         if hanging || each_line { indent } else { 0.0 },
         para_lv,
     );
+    // R-282 — `text-wrap-style` : re-choix des coupures AVANT
+    // l'alignement (qui recalera les positions).
+    rebalance_lines(&st, &mut lines, x, w, fl_eff);
     align_lines(&st, &mut lines, x, w, fl_eff, indent, hanging);
     apply_text_overflow(&st, &mut lines, x + w, ctx, fs);
     apply_line_clamp(&st, &mut lines, x + w, ctx, fs);
@@ -1206,7 +1262,8 @@ fn collect_child(
     // `display: inline-block` — l'atomicité ne vaut que pour
     // les conteneurs.
     if let Some(t) = &b.text {
-        items.push(text_item(b, owner, t, decos, para_lv, ruby_tier));
+        let autosp = autospace_gap(&b.style, font_size_px(&b.style, fs, ctx));
+        items.push(text_item(b, owner, t, decos, para_lv, ruby_tier, autosp));
         return;
     }
     if is_atomic(b) {
@@ -1305,12 +1362,27 @@ fn collect_child(
     }
 }
 
+/// R-282 — `text-autospace` → taille du filet inter-script
+/// (⅛ em) ; `None` = inerte (`no-autospace`/`normal`/`auto`/
+/// absent — la valeur initiale spec `auto` laisse l'espacement
+/// à l'UA, ici opt-in explicite ; `punctuation` seul borne :
+/// compression de la ponctuation CJK non implémentée).
+fn autospace_gap(st: &ComputedStyle, fs: f32) -> Option<f32> {
+    match st.get("text-autospace").map(str::trim) {
+        None | Some("no-autospace" | "none" | "auto" | "normal") => None,
+        Some(v) if v.contains("punctuation") && !v.contains("ideograph") => None,
+        Some(_) => Some(fs * 0.125),
+    }
+}
+
 /// Item texte : runs itemisés → pièces entre opportunités.
 /// `decos` = pile des décos déclarées par les ancêtres
 /// en-ligne (R-153) — copiée en snapshot sur l'item.
 /// `para_lv` = niveau d'imbrication du paragraphe : la
 /// `direction` du bloc conteneur sert de base UAX #9 à
 /// toutes les itemisations de la ligne (R-171).
+/// `autosp` = filet `text-autospace` déjà résolu (px) —
+/// pré-calculé par l'appelant qui détient `fs`/`ctx`.
 #[allow(clippy::too_many_lines)]
 fn text_item(
     b: &LayoutBox,
@@ -1319,6 +1391,7 @@ fn text_item(
     decos: &[TextDeco],
     para_lv: u8,
     ruby_tier: u32,
+    autosp: Option<f32>,
 ) -> Item {
     // §16.6.1 white-space processing : `normal`/`nowrap` effondrent
     // toute suite de blancs en une espace ; `pre-line` effondre les
@@ -1459,6 +1532,7 @@ fn text_item(
                         hard_after: br.mandatory && ends_hard_break(p),
                         tab: false,
                         hyph_before: false,
+                        pad_l: 0.0,
                     });
                 }
                 prev = br.offset;
@@ -1473,6 +1547,7 @@ fn text_item(
                     hard_after: ends_hard_break(p),
                     tab: false,
                     hyph_before: false,
+                    pad_l: 0.0,
                 });
             }
         }
@@ -1502,6 +1577,23 @@ fn text_item(
         .unwrap_or("manual")
         .trim()
         .to_string();
+    // R-282 — `text-autospace` (css-text-4 §9) : espace
+    // inter-script à la frontière CJK ↔ non-CJK — ~1/8 em
+    // (taille laissée à l'UA par la spec). `no-autospace`/
+    // absent → inerte (borne : la valeur initiale spec est
+    // `normal` — appliquée ici sur opt-in explicite).
+    if let Some(gap) = autosp {
+        for i in 1..pieces.len() {
+            let [prev, cur] = &mut pieces[i - 1..=i] else {
+                continue;
+            };
+            if let (Some(pc), Some(cc)) = (prev.text.chars().last(), cur.text.chars().next()) {
+                if text::is_cjk_letter(pc) != text::is_cjk_letter(cc) {
+                    cur.pad_l = gap;
+                }
+            }
+        }
+    }
     if hyphens != "manual" || pieces.iter().any(|p| p.text.contains('\u{AD}')) {
         pieces = split_hyphens(
             pieces,
@@ -1545,6 +1637,7 @@ fn split_tabs(pieces: Vec<Piece>) -> Vec<Piece> {
                     hard_after: false,
                     tab: false,
                     hyph_before: false,
+                    pad_l: 0.0,
                 });
             }
             split.push(Piece {
@@ -1554,6 +1647,7 @@ fn split_tabs(pieces: Vec<Piece>) -> Vec<Piece> {
                 hard_after: false,
                 tab: true,
                 hyph_before: false,
+                pad_l: 0.0,
             });
             rest = &rest[i + 1..];
         }
@@ -1565,6 +1659,7 @@ fn split_tabs(pieces: Vec<Piece>) -> Vec<Piece> {
                 hard_after: p.hard_after,
                 tab: false,
                 hyph_before: false,
+                pad_l: 0.0,
             });
         } else if p.hard_after {
             if let Some(last) = split.last_mut() {
@@ -1595,6 +1690,7 @@ fn explode_break_spaces(p: Piece) -> Vec<Piece> {
                 hard_after: false,
                 tab: false,
                 hyph_before: false,
+                pad_l: 0.0,
             });
         }
         cur.push(c);
@@ -1606,6 +1702,7 @@ fn explode_break_spaces(p: Piece) -> Vec<Piece> {
                 hard_after: false,
                 tab: false,
                 hyph_before: false,
+                pad_l: 0.0,
             });
         }
     }
@@ -1617,6 +1714,7 @@ fn explode_break_spaces(p: Piece) -> Vec<Piece> {
             hard_after: p.hard_after,
             tab: false,
             hyph_before: false,
+            pad_l: 0.0,
         });
     } else if p.hard_after {
         if let Some(last) = out.last_mut() {
@@ -1735,6 +1833,7 @@ fn split_hyphens(pieces: Vec<Piece>, mode: &str, lang: &str, st: &ComputedStyle)
                     hard_after: p.hard_after,
                     tab: false,
                     hyph_before: p.hyph_before || carry_hyph,
+                    pad_l: p.pad_l,
                 });
             } else {
                 out.push(p);
@@ -1757,6 +1856,7 @@ fn split_hyphens(pieces: Vec<Piece>, mode: &str, lang: &str, st: &ComputedStyle)
                     hard_after: false,
                     tab: false,
                     hyph_before: pushed,
+                    pad_l: if prev == 0 { p.pad_l } else { 0.0 },
                 });
             }
             // Tout candidat consommé — y compris un shy en
@@ -1774,6 +1874,7 @@ fn split_hyphens(pieces: Vec<Piece>, mode: &str, lang: &str, st: &ComputedStyle)
                 hard_after: p.hard_after,
                 tab: false,
                 hyph_before: pushed,
+                pad_l: 0.0,
             });
         } else if p.hard_after {
             if let Some(last) = out.last_mut() {
@@ -2969,6 +3070,14 @@ fn break_into_lines(
                     .frags
                     .last()
                     .is_some_and(|f| !f.atomic && text::trim_css_ws(&f.text).is_empty());
+            // R-282 — `text-autospace` : le filet inter-script
+            // s'insère avant la pièce — jamais en tête de
+            // ligne (`acc.is_empty()`), et compté dans le
+            // test d'ajustement : si la pièce coupe, le curseur
+            // repart à `line_x` et le filet tombe avec elle.
+            if piece.pad_l > 0.0 && !acc.is_empty() {
+                cursor_x += piece.pad_l;
+            }
             // Même tolérance `+ 0.01` que `descend_band!` :
             // dépassement sub-ulp agrégé → la pièce tient,
             // sinon `new_line!`.
@@ -3111,6 +3220,145 @@ fn break_into_lines(
 /// ligne (§9.5 : une line box est raccourcie par TOUT
 /// flottant qu'elle touche, pas seulement à son haut).
 /// `start`/`end` suivent `direction` (rtl → start = right).
+/// R-282 — `text-wrap-style` (css-text-4 §7.3) : post-pass de
+/// choix de coupures sur les lignes coulées, avant alignement.
+/// `balance` égalise les largeurs en poussant les pièces de fin
+/// de ligne vers la ligne suivante tant que l'écart de la paire
+/// se réduit ; `pretty` évite une dernière ligne trop courte
+/// (même mécanique, bornée à la dernière paire — orphelin).
+///
+/// Bornes honnêtes : granularité = **fragment** (pas de
+/// recoupe intra-pièce — un très long dernier mot reste),
+/// paragraphes LTR uniquement (ordre visuel == logique),
+/// un fragment plus haut que la ligne cible n'est pas poussé
+/// (pas de croissance verticale a posteriori), et l'espace
+/// récupérée entre pièce déplacée et suite est approximée sans
+/// shaping à ~⅓ em par caractère blanc pendant.
+fn rebalance_lines(st: &ComputedStyle, lines: &mut [LineBox], x: f32, w: f32, fl: &FloatCtx) {
+    let mode = st.get("text-wrap-style").map(str::trim);
+    let (pretty, balance) = (mode == Some("pretty"), mode == Some("balance"));
+    if (!pretty && !balance) || lines.len() < 2 || para_level(st) == 1 {
+        return;
+    }
+    if balance {
+        for i in 0..lines.len() - 1 {
+            let mut steps = 0u32;
+            while try_shift_down(lines, i, x, w, fl) && steps < 64 {
+                steps += 1;
+            }
+        }
+    } else {
+        // `pretty` : pousser vers la dernière ligne tant qu'elle
+        // reste nettement plus courte que l'avant-dernière.
+        let last = lines.len() - 1;
+        let mut steps = 0u32;
+        while steps < 64 {
+            let ul = line_used(&lines[last]);
+            let up = line_used(&lines[last - 1]);
+            if ul >= up * 0.5 || !try_shift_down(lines, last - 1, x, w, fl) {
+                break;
+            }
+            steps += 1;
+        }
+    }
+}
+
+/// Étendue horizontale utilisée d'une ligne (margin boxes,
+/// même mesure qu'`align_lines`).
+fn line_used(line: &LineBox) -> f32 {
+    let (mut l, mut r) = (f32::INFINITY, 0.0f32);
+    for f in &line.fragments {
+        l = l.min(f.rect.x - f.marg_l);
+        r = r.max(f.rect.x + f.rect.width + f.marg_r);
+    }
+    if l.is_finite() {
+        r - l
+    } else {
+        0.0
+    }
+}
+
+/// Pousse le dernier fragment posable de la ligne `i` en tête
+/// de `i+1` si l'équilibre de la paire s'améliore et que la
+/// bande cible l'accueille. `false` = rien à pousser ou pas
+/// d'amélioration.
+#[allow(clippy::cast_precision_loss)]
+fn try_shift_down(lines: &mut [LineBox], i: usize, x: f32, w: f32, fl: &FloatCtx) -> bool {
+    let (before, after) = lines.split_at_mut(i + 1);
+    let (src, dst) = (&mut before[i], &mut after[0]);
+    let Some(f) = src.fragments.last() else {
+        return false;
+    };
+    // Fragment posable : du contenu réel (texte ou atome) —
+    // un marqueur de marge zéro-largeur en queue n'est pas
+    // déplaçable (sa marge resterait orpheline en tête).
+    if f.text.is_empty() && !f.atomic {
+        return false;
+    }
+    if src.fragments.len() < 2 {
+        return false;
+    }
+    // Pas de croissance verticale : un fragment plus haut que
+    // la ligne cible ferait déborder son encre.
+    if f.rect.height > dst.rect.height + 0.5 {
+        return false;
+    }
+    // L'espace d'avant-coupure : `close` a retranché
+    // `trail_w` de la largeur — l'avance shapée la contient
+    // encore ; sans fonte, ≈⅓ em par blanc pendant.
+    let pend_ws = f
+        .text
+        .chars()
+        .rev()
+        .take_while(|c| text::is_css_ws(*c))
+        .count();
+    let gap = if pend_ws == 0 {
+        0.0
+    } else {
+        f.shaped.as_ref().map_or_else(
+            || {
+                let fs = f
+                    .style
+                    .get("font-size")
+                    .and_then(|v| v.trim_end_matches("px").parse::<f32>().ok())
+                    .unwrap_or(16.0);
+                fs * 0.33 * pend_ws as f32
+            },
+            |s| (s.advance - f.rect.width).max(0.0),
+        )
+    };
+    let used_s = line_used(src);
+    let used_d = line_used(dst);
+    let mv = f.rect.width + gap;
+    // L'équilibre de la paire doit s'améliorer strictement.
+    if ((used_s - mv) - (used_d + mv)).abs() >= (used_s - used_d).abs() {
+        return false;
+    }
+    // La pièce poussée doit tenir dans la bande de la ligne
+    // cible (même intersect flottants qu'`align_lines`).
+    let (_, ebw) = fl.band_over(dst.rect.y, dst.rect.height, x, w);
+    if used_d + mv > ebw + 0.01 {
+        return false;
+    }
+    let Some(mut f) = src.fragments.pop() else {
+        return false;
+    };
+    f.rect.x = dst
+        .fragments
+        .iter()
+        .map(|g| g.rect.x - g.marg_l)
+        .fold(f32::INFINITY, f32::min)
+        + f.marg_l;
+    f.rect.y = dst.rect.y + (dst.baseline - f.baseline);
+    for g in &mut dst.fragments {
+        g.rect.x += mv;
+    }
+    dst.rect.width += mv;
+    dst.fragments.insert(0, f);
+    src.rect.width = line_used(src);
+    true
+}
+
 fn align_lines(
     st: &ComputedStyle,
     lines: &mut [LineBox],
@@ -3195,11 +3443,21 @@ fn align_lines(
         } else {
             (edge - mleft).max(0.0)
         };
+        // R-282 — `text-justify` (css-text-3 §7.3) : `none`
+        // désactive la justification même sous
+        // `text-align:justify` (alignement retombe sur le
+        // bord start). `auto`/`inter-word`/`distribute`/
+        // `inter-character` → distribution inter-mots : la
+        // granularité de coupe du moteur est déjà le
+        // fragment-mot (borne honnête : `inter-character`
+        // n'insère pas de glu intra-mot — re-shaping à la
+        // justification hors scope).
+        let no_justify = matches!(st.get("text-justify").map(str::trim), Some("none"));
         #[allow(clippy::cast_precision_loss)]
         let (dx, space) = match align {
             "right" => ((ebx + ebw) - mright, 0.0),
             "center" => (recale + slack / 2.0, 0.0),
-            "justify" if !last && line.fragments.len() > 1 => {
+            "justify" if !last && !no_justify && line.fragments.len() > 1 => {
                 (recale, slack / (line.fragments.len() - 1) as f32)
             }
             _ => (recale, 0.0),

@@ -1711,3 +1711,96 @@ fn word_break_keep_all_supprime_les_coupures_cjk() {
         "mot CJK entier sur une ligne : {l1_text:?}"
     );
 }
+
+// ---------- R-282 — `text-autospace` (css-text-4 §9) ----------
+
+#[test]
+fn text_autospace_insere_un_filet_inter_script() {
+    // Frontière CJK ↔ latin : `ideographic-alpha` insère un
+    // filet ~⅛ em avant la pièce latine ; absent/`no-autospace`
+    // → rien.
+    let html = "<!doctype html><p>中文abc</p>";
+    let css = |v: &str| format!("p {{ font-size: 10px; line-height: 10px; text-autospace: {v} }}");
+    let gap_of = |b: &explorer_layout::LayoutBox, d: &explorer_dom::Dom| {
+        let p = &find(b, by_tag(d, "p")).children[0];
+        let l = &p.lines[0];
+        // Le run CJK est éclaté par glyphe (UAX #14) — le
+        // voisin immédiat d'"abc" est le dernier frag CJK.
+        let abi = l
+            .fragments
+            .iter()
+            .position(|f| f.text.contains("abc"))
+            .expect("frag latin");
+        let prev = &l.fragments[abi - 1];
+        l.fragments[abi].rect.x - (prev.rect.x + prev.rect.width)
+    };
+    let (d0, b0) = laid(html, &css("no-autospace"));
+    let (d1, b1) = laid(html, &css("ideographic-alpha"));
+    let (d2, b2) = laid(html, &css("auto"));
+    assert_eq!(gap_of(&b0, &d0), 0.0, "no-autospace : pas de filet");
+    let g = gap_of(&b1, &d1);
+    assert!((g - 10.0 * 0.125).abs() < 0.5, "filet ≈⅛ em : {g}");
+    assert_eq!(gap_of(&b2, &d2), 0.0, "auto : opt-in non activé");
+}
+
+// ---------- R-282 — `text-justify` (css-text-3 §7.3) ----------
+
+#[test]
+fn text_justify_none_desactive_la_justification() {
+    // `text-align:justify` répartit le slack entre fragments ;
+    // `text-justify:none` le neutralise (ligne rasa-start).
+    let html = "<!doctype html><p>aa bb cc dd</p>";
+    let css =
+        |tj: &str| format!("p {{ font-size: 10px; line-height: 10px; text-align: justify; {tj} }}");
+    // Écarts inter-fragments de la première ligne.
+    let spread = |b: &explorer_layout::LayoutBox, d: &explorer_dom::Dom| {
+        let p = &find(b, by_tag(d, "p")).children[0];
+        let l = &p.lines[0];
+        l.fragments
+            .windows(2)
+            .map(|w| w[1].rect.x - (w[0].rect.x + w[0].rect.width))
+            .fold(0.0_f32, f32::max)
+    };
+    let (d0, b0) = laid_w(html, &css(""), 50.0);
+    let (d1, b1) = laid_w(html, &css("text-justify: none"), 50.0);
+    assert!(
+        spread(&b0, &d0) > 0.5,
+        "justify répartit : {}",
+        spread(&b0, &d0)
+    );
+    assert_eq!(spread(&b1, &d1), 0.0, "text-justify:none : plus de glu");
+}
+
+// ---------- R-282 — `text-wrap-style` (css-text-4 §7.3) ----------
+
+#[test]
+fn text_wrap_style_balance_egalise_les_lignes() {
+    // Trois mots tiennent, quatre non : glouton → "aa bb cc"/"dd" ;
+    // `balance` pousse "cc" vers le bas → "aa bb"/"cc dd".
+    let html = "<!doctype html><p>aa bb cc dd</p>";
+    let css = |v: &str| format!("p {{ font-size: 10px; line-height: 10px; text-wrap-style: {v} }}");
+    let last_text = |b: &explorer_layout::LayoutBox, d: &explorer_dom::Dom| {
+        let p = &find(b, by_tag(d, "p")).children[0];
+        p.lines.iter().map(line_text).collect::<Vec<_>>()
+    };
+    let (d0, b0) = laid_w(html, &css("auto"), 50.0);
+    let (d1, b1) = laid_w(html, &css("balance"), 50.0);
+    let t0 = last_text(&b0, &d0);
+    let t1 = last_text(&b1, &d1);
+    assert_eq!(t0.len(), 2, "2 lignes : {t0:?}");
+    assert_eq!(t1.len(), 2, "2 lignes : {t1:?}");
+    assert!(t0[1].starts_with('d'), "glouton : {t0:?}");
+    assert!(t1[1].starts_with('c'), "balance : {t1:?}");
+}
+
+#[test]
+fn text_wrap_style_pretty_evite_l_orphelin() {
+    // Même fixture : `pretty` fait descendre un mot vers la
+    // dernière ligne trop courte — pas d'égalisation au-delà.
+    let html = "<!doctype html><p>aa bb cc dd</p>";
+    let css = |v: &str| format!("p {{ font-size: 10px; line-height: 10px; text-wrap-style: {v} }}");
+    let (d1, b1) = laid_w(html, &css("pretty"), 50.0);
+    let p1 = &find(&b1, by_tag(&d1, "p")).children[0];
+    let t1: Vec<String> = p1.lines.iter().map(line_text).collect();
+    assert!(t1[1].starts_with('c'), "pretty : {t1:?}");
+}
