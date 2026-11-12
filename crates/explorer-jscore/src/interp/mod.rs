@@ -117,6 +117,17 @@ static BG_IO: std::sync::Mutex<Vec<(u32, &'static str)>> =
     std::sync::Mutex::new(Vec::new());
 static BG_IO_ARMED: std::sync::atomic::AtomicBool =
     std::sync::atomic::AtomicBool::new(false);
+/// N1.5 — `ObjId` du callback de complétion `V` passé en arg 1
+/// de `Q` (`trayride.a`) : il résout `hix` avec
+/// `{bWm,nXe,auT,nXm}`. `bg.v` atteste que la VM a achevé son
+/// init — son absence = halt interne avant complétion.
+static BG_V: std::sync::atomic::AtomicU32 =
+    std::sync::atomic::AtomicU32::new(u32::MAX);
+/// N1.5 — `ObjId` du logger `w` passé en arg 4 de `Q` : la VM y
+/// pousse des codes d'événements — `bg.wcb` révèle où le
+/// programme s'arrête dans sa machine à états.
+static BG_WCB: std::sync::atomic::AtomicU32 =
+    std::sync::atomic::AtomicU32::new(u32::MAX);
 /// N1.5 — enregistre un callable de la chaîne readiness dans
 /// `BG_IO` (borné à 48 — `wpc` est aussi un champ `this.wpc`
 /// des instances `vvI`, plusieurs écritures attendues).
@@ -9525,6 +9536,16 @@ impl Engine {
                         .unwrap_or_default();
                     tracing::info!(target: "dom_probe", site = "bg.a",
                         n = n, id = cid, from = %from, last = %last, tail = %ring);
+                    // N1.5 — capture `V` (arg1) et `w` (arg4) :
+                    // complétion + télémétrie de la machine VM.
+                    if let Some(Value::Obj(vid)) = args_ref.get(1) {
+                        BG_V.store(*vid, std::sync::atomic::Ordering::Relaxed);
+                        eprintln!("[ctxp] bg.v.id={vid}");
+                    }
+                    if let Some(Value::Obj(wid)) = args_ref.get(4) {
+                        BG_WCB.store(*wid, std::sync::atomic::Ordering::Relaxed);
+                        eprintln!("[ctxp] bg.wcb.id={wid}");
+                    }
                 }
             } else if cid == BG_SPQ.load(std::sync::atomic::Ordering::Relaxed) {
                 static BG_SPQ_N: std::sync::atomic::AtomicU32 =
@@ -9534,6 +9555,38 @@ impl Engine {
                     let (from, _, _) = self.stack_nearest_fn_src(120);
                     tracing::info!(target: "dom_probe", site = "bg.spq",
                         n = n, id = cid, argc = args_ref.len(), from = %from);
+                }
+            } else if cid == BG_V.load(std::sync::atomic::Ordering::Relaxed) {
+                // N1.5 — `bg.v` : la VM appelle la complétion —
+                // `hix` va résoudre (dans un microtask). argc=4
+                // attendu ({bWm,nXe,auT,nXm}).
+                static BG_V_N: std::sync::atomic::AtomicU32 =
+                    std::sync::atomic::AtomicU32::new(0);
+                let n = BG_V_N.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                if n < 16 {
+                    let (from, _, _) = self.stack_nearest_fn_src(120);
+                    tracing::info!(target: "dom_probe", site = "bg.v",
+                        n = n, argc = args_ref.len(), from = %from);
+                }
+            } else if cid == BG_WCB.load(std::sync::atomic::Ordering::Relaxed) {
+                // N1.5 — `bg.wcb` : la VM pousse un code
+                // d'événement — arg0 révèle l'étape atteinte dans
+                // sa machine à états avant l'halt.
+                static BG_WCB_N: std::sync::atomic::AtomicU32 =
+                    std::sync::atomic::AtomicU32::new(0);
+                let n = BG_WCB_N.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                if n < 64 {
+                    let a0 = args_ref
+                        .first()
+                        .map(|v| self.describe(v.clone()))
+                        .unwrap_or_default();
+                    let a1 = args_ref
+                        .get(1)
+                        .map(|v| self.describe(v.clone()))
+                        .unwrap_or_default();
+                    tracing::info!(target: "dom_probe", site = "bg.wcb",
+                        n = n, a0 = %a0.chars().take(60).collect::<String>(),
+                        a1 = %a1.chars().take(40).collect::<String>());
                 }
             } else if BG_IO_ARMED.load(std::sync::atomic::Ordering::Relaxed) {
                 // N1.5 — `bg.io` : invocation d'un callable de la
