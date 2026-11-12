@@ -4421,12 +4421,19 @@ le census `site_harvest` arbitre les ex æquo.
   sans `fallback_spans`, baseline = créneau (pas de centrage
   optique), pas de regroupement inter-styles.
 
+- [x] **R-289 — `ruby-overhang`** (~2, fin de famille ruby)
+  — `none` confine l'annotation au segment de base ;
+  `auto` (défaut) = débordement jusqu'à l'étendue de la
+  ligne (avant : borne conteneur `ruby*` fixe).
+  Approximation : borne ligne entière vs texte non-ruby
+  adjacent. `overhang_bounds` extrait de `lift_ruby`.
+
 `text-fit`/`interpolate-size` (chantier
 animation↔layout), `display` exotiques résiduels, `grid-*`/`flex-*`
 sous-features, `font-stretch`/`font-width` (fontes variables),
 `font-variant-*` OT fins, `overlay`,
 `reading-flow`, `scroll-snap-*` résiduel,
-`ruby-*` fins (`overhang:auto`), `math-*`.
+`math-*`.
 
 ### P3 — hors périmètre / bornes (décision requise)
 

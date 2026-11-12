@@ -2977,3 +2977,20 @@ cause** ; résidu = promesses des handlers d'erreur `Atn`
   `text-combine-upright`, `text-fit`, `interpolate-size`,
   `math-*`, `font-width`, `reading-flow`, `overlay` —
   prochain levier majeur = re-vol `geo_diff` post-R-284.
+
+### couture PIPE -> NAV — R-289+R-288 : ruby-overhang & text-combine-upright
+
+- **R-289 `ruby-overhang`** : `none` confine l'annotation a
+  son segment de base (x = bord start du segment quand
+  elle est plus large) ; `auto` = debordement sur le
+  voisinage jusqu'a l'etendue de la ligne (avant : toujours
+  conteneur `ruby*`). Non heritee. Borne honnete : `auto`
+  ≈ etendue de ligne entiere vs texte non-ruby adjacent.
+- **R-288 `text-combine-upright`** : tate-chu-yoko livre
+  (entree precedente) — sondage `affectsv` : fixture
+  `writing-mode:vertical-rl;text-orientation:upright` +
+  `text-combine-upright:digits 2|all|none` → visible par
+  nombre de `Text` items et compression x.
+- **Re-sonde** : `ruby-overhang:none|auto` (fixture base
+  « B » + annotation « AAAA » sur `x…y` — visible : x de
+  l'annotation = segment vs ligne).

@@ -2456,6 +2456,18 @@ impl LineAcc {
                         .sum::<f32>()
             }
         };
+        // Étendue de la ligne (hors annotations) — borne de
+        // `ruby-overhang:auto` : l'annotation peut déborder
+        // son conteneur sur le texte voisin jusqu'aux bouts
+        // de la ligne (css-ruby-1 §3.3 — approximation, la
+        // spécification borne au texte non-ruby adjacent).
+        let (line_l, line_r) = self
+            .frags
+            .iter()
+            .filter(|f| !is_ruby_text_frag(f))
+            .fold((f32::INFINITY, f32::NEG_INFINITY), |(l, r), f| {
+                (l.min(f.rect.x), r.max(f.rect.x + f.rect.width))
+            });
         let runs = rt_runs(&self.frags);
         for (lo, hi) in &runs {
             let t = ruby_tier(&self.frags[*lo]);
@@ -2466,7 +2478,7 @@ impl LineAcc {
                 tier_h[&t],
                 band_top(t, true),
                 band_top(t, false),
-                (cont_l, cont_r),
+                self.overhang_bounds(*lo, (line_l, line_r), (cont_l, cont_r)),
             );
         }
         if pos.as_str() == "inter-character" {
@@ -2483,6 +2495,33 @@ impl LineAcc {
         *h += rt_h;
         if over {
             *base += rt_h;
+        }
+    }
+
+    /// Bornes `ruby-overhang` du run d'annotation `lo`
+    /// (css-ruby-1 §3.3 — R-289) : `none` borne l'annotation
+    /// à son segment de base ; `auto` (défaut) permet le
+    /// débordement sur le voisinage jusqu'à l'étendue de la
+    /// ligne (approximation : la spec borne au texte non-
+    /// ruby adjacent), repli conteneur `ruby*`. Lu sur le
+    /// run, repli sur le fragment précédent — même
+    /// convention que `ruby-align`.
+    fn overhang_bounds(&self, lo: usize, line: (f32, f32), cont: (f32, f32)) -> (f32, f32) {
+        let oh = self.frags[lo]
+            .style
+            .get("ruby-overhang")
+            .or_else(|| {
+                (lo > 0)
+                    .then(|| self.frags[lo - 1].style.get("ruby-overhang"))
+                    .flatten()
+            })
+            .map_or("auto", str::trim);
+        if oh == "none" {
+            ruby_base_span(&self.frags, lo)
+        } else if line.0.is_finite() {
+            line
+        } else {
+            cont
         }
     }
 

@@ -1804,3 +1804,47 @@ fn text_wrap_style_pretty_evite_l_orphelin() {
     let t1: Vec<String> = p1.lines.iter().map(line_text).collect();
     assert!(t1[1].starts_with('c'), "pretty : {t1:?}");
 }
+
+/// `ruby-overhang` (css-ruby-1 §3.3 — R-289) : `none` borne
+/// l'annotation à son segment de base ; `auto` (défaut)
+/// laisse déborder sur le texte voisin jusqu'à l'étendue
+/// de la ligne. Annotation « AAAA » (40 px) sur base « B »
+/// (10 px) entourée de `x…y`.
+#[test]
+fn ruby_overhang_none_borne_au_segment() {
+    let rt_x = |css: &str| -> (f32, f32, f32) {
+        let (_d, bx) = laid("<!doctype html><p>x<ruby>B<rt>AAAA</rt></ruby>y</p>", css);
+        let line = &first_box_with_lines(&bx).lines[0];
+        let rt = line
+            .fragments
+            .iter()
+            .find(|f| f.style.get("display") == Some("ruby-text"))
+            .expect("frag rt");
+        let base = line
+            .fragments
+            .iter()
+            .find(|f| f.style.get("display") == Some("ruby"))
+            .expect("frag base");
+        (rt.rect.x, base.rect.x, base.rect.x + base.rect.width)
+    };
+    // `none` : plus large que le segment → plaquée au bord
+    // start du segment (pas de débordement sur x/y).
+    let (x_none, seg_l, seg_r) = rt_x(
+        "p{font-size:10px;width:400px;margin:0}\
+         rt{ruby-overhang:none}",
+    );
+    assert!(
+        (x_none - seg_l).abs() < 0.01,
+        "none → annotation calée au segment (x={x_none} vs seg {seg_l}..{seg_r})"
+    );
+    // `auto` : la déborde sur la ligne → x < seg_l
+    // (l'annotation de 40 px couvre les voisins x/y).
+    let (x_auto, seg_l2, _) = rt_x(
+        "p{font-size:10px;width:400px;margin:0}\
+         rt{ruby-overhang:auto}",
+    );
+    assert!(
+        x_auto < seg_l2 - 0.01,
+        "auto → débordement sur le voisinage (x={x_auto} vs seg {seg_l2})"
+    );
+}
