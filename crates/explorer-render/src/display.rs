@@ -699,7 +699,9 @@ impl DisplayList {
                     let _ = writeln!(out, "push-transform {m:?}");
                 }
                 DisplayItem::PopTransform => out.push_str("pop-transform\n"),
-                DisplayItem::PushFilter(_) => out.push_str("push-filter\n"),
+                DisplayItem::PushFilter(ops) => {
+                    let _ = writeln!(out, "push-filter {ops:?}");
+                }
                 DisplayItem::PopFilter => out.push_str("pop-filter\n"),
                 DisplayItem::PushBlend(b) => {
                     let _ = writeln!(out, "push-blend {b}");

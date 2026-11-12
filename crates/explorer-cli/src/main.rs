@@ -1120,6 +1120,23 @@ const INITIAL_EXTRA: &[(&str, &str)] = &[
     ("break-inside", "auto"),
     ("break-inside", "avoid-page"),
     ("break-inside", "paged_context"),
+    // Initiales `background-*` que `initial_value` ne
+    // connaît pas + neutres de l'oracle gradient (`local`
+    // ≡ `scroll` sans défilement, `cover`/`center` neutres
+    // sur une image déjà calibrée à la zone, `currentColor`
+    // ≡ `color` du contexte).
+    ("background-attachment", "scroll"),
+    ("background-attachment", "local"),
+    ("background-blend-mode", "normal"),
+    ("background-clip", "border-box"),
+    ("background-color", "currentColor"),
+    ("background-image", "none"),
+    ("background-origin", "padding-box"),
+    ("background-position", "0% 0%"),
+    ("background-position", "center"),
+    ("background-repeat", "repeat"),
+    ("background-size", "auto"),
+    ("background-size", "cover"),
 ];
 
 /// Propriétés **non observables** par l'oracle géométrique
@@ -1160,6 +1177,9 @@ const NO_ORACLE: &[&str] = &[
     "speak-as",
     "backface-visibility",
     "anchor-scope",
+    // `dominant-baseline` : prop à portée SVG (texte SVG) —
+    // aucun effet en layout bloc/inline HTML, pas d'oracle.
+    "dominant-baseline",
     // `mask-*` : la couche mask n'est résolue que depuis une
     // bitmap `url()` fetchée (`resolve_mask` — `PaintImages`
     // vide au harnais, les gradients ne passent pas par ce
