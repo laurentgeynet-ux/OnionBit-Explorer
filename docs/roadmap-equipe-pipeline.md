@@ -4032,9 +4032,20 @@ le census `site_harvest` arbitre les ex æquo.
   étendu aux blancs seuls (`box_is_ws_only`, `trim_css_ws`
   — `\u{A0}` = contenu). Reste : fixture jauge — `<td></td>`
   sans fond/bordure n'a rien à cacher → `na`, journal NAV.
-- [ ] `white-space` variantes — `pre-line`/`pre-wrap`/
-  `break-spaces` + `white-space-collapse` (règles de collapse
-  à compléter dans le tokenizer de lignes).
+- [x] `white-space` variantes — **R-264** : `white-space`
+  devient un vrai shorthand css-text-4 §7.1 — expansion en
+  `white-space-collapse` + `text-wrap-mode` +
+  `white-space-trim:none`, longhand déclaré après gagnant.
+  `ws_mode` (line-breaker) : `collapse`/`preserve`/
+  `preserve-breaks`/`preserve-spaces`/`discard`/
+  `break-spaces` (explosion 1 pièce/espace + pendaison de la
+  1ʳᵉ, blancs de fin comptés dans `close`). Projection
+  `text-wrap-mode → white-space` supprimée (elle écrasait
+  `pre`). Héritage ajouté : `white-space-collapse`,
+  `white-space-trim`, `text-wrap-mode/style`, `word-break`,
+  `word-wrap`, `overflow-wrap`, `line-break`, `hyphens` —
+  `intrinsic` mesure les modes verbatim. 6 verrous inline +
+  5 cascade.
 - [ ] `currentColor` — résolution vers `color` calculé au
   paint (`background-color`, `border-*` restants).
 - [ ] `vertical-align:top`/`text-top`/`text-bottom` —

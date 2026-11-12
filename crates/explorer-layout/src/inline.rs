@@ -925,14 +925,27 @@ fn text_item(
     // espaces/tabs mais garde `\n` (saut forcé) ; `pre`/`pre-wrap`
     // préservent tout. Sans ça, `\n`/`\t` bruts sont shapés →
     // glyphe `.notdef` visible (ex. carré Ahem des reftests WPT).
+    // R-264 : le mode effectif vient de `ws_mode` (css-text-4
+    // §7.1 — `white-space-collapse`/`text-wrap-mode` sont les
+    // longhands réels posés par l'expansion du shorthand ;
+    // `preserve-spaces`/`discard`/`break-spaces` s'ajoutent).
     let collapsed;
-    let src = match b.style.get("white-space") {
-        Some(v) if v.trim() == "pre" || v.trim() == "pre-wrap" => t,
-        Some(v) if v.trim() == "pre-line" => {
+    let (ws_collapse, _wrap) = ws_mode(&b.style);
+    let src = match ws_collapse {
+        WsCollapse::Preserve | WsCollapse::BreakSpaces => t,
+        WsCollapse::PreserveBreaks => {
             collapsed = collapse_spaces(t);
             &collapsed
         }
-        _ => {
+        WsCollapse::PreserveSpaces => {
+            collapsed = preserve_spaces(t);
+            &collapsed
+        }
+        WsCollapse::Discard => {
+            collapsed = discard_ws(t);
+            &collapsed
+        }
+        WsCollapse::Collapse => {
             collapsed = collapse_ws(t);
             &collapsed
         }
@@ -1055,6 +1068,15 @@ fn text_item(
     if pieces.iter().any(|p| p.text.contains('\t')) {
         pieces = split_tabs(pieces);
     }
+    // `break-spaces` (css-text-4 §4.1.3) : l'opportunité de
+    // coupure existe après CHAQUE espace préservée — chaque
+    // ` ` devient sa propre pièce pour que le boucleur puisse
+    // casser en plein milieu d'une suite d'espaces. La
+    // première espace d'une suite « pend » (la coupure est
+    // APRES elle — voir le point de décision plus bas).
+    if ws_collapse == WsCollapse::BreakSpaces {
+        pieces = pieces.into_iter().flat_map(explode_break_spaces).collect();
+    }
     let mut style = b.style.clone();
     if ruby_tier > 0 {
         // Marqueur interne (jamais déclaré en cascade) :
@@ -1117,6 +1139,54 @@ fn split_tabs(pieces: Vec<Piece>) -> Vec<Piece> {
     split
 }
 
+/// `break-spaces` (css-text-4 §4.1.3) — chaque espace
+/// préservée devient sa propre pièce : la coupure souple est
+/// permise APRÈS chacune, y compris à l'intérieur d'une
+/// suite. Les tabulations (pièces `tab` dédiées) et les
+/// caractères non-espaces restent agglomérés.
+fn explode_break_spaces(p: Piece) -> Vec<Piece> {
+    if !p.text.contains(' ') {
+        return vec![p];
+    }
+    let mut out = Vec::new();
+    let mut cur = String::with_capacity(p.text.len());
+    for c in p.text.chars() {
+        if c == ' ' && !cur.is_empty() {
+            out.push(Piece {
+                text: std::mem::take(&mut cur),
+                dir: p.dir,
+                level: p.level,
+                hard_after: false,
+                tab: false,
+            });
+        }
+        cur.push(c);
+        if c == ' ' {
+            out.push(Piece {
+                text: std::mem::take(&mut cur),
+                dir: p.dir,
+                level: p.level,
+                hard_after: false,
+                tab: false,
+            });
+        }
+    }
+    if !cur.is_empty() {
+        out.push(Piece {
+            text: cur,
+            dir: p.dir,
+            level: p.level,
+            hard_after: p.hard_after,
+            tab: false,
+        });
+    } else if p.hard_after {
+        if let Some(last) = out.last_mut() {
+            last.hard_after = true;
+        }
+    }
+    out
+}
+
 /// §8.1 — `tab-size` : `<number>` = multiple de l'avance
 /// d'une espace, `<length>` absolue ; initiale `8`. Les
 /// valeurs négatives sont hors grammaire — défense : bornées
@@ -1150,6 +1220,89 @@ pub(crate) fn collapse_ws(t: &str) -> String {
         }
     }
     out
+}
+
+/// css-text-4 §4.1 — mode d'effondrement des blancs, tiré de
+/// `white-space-collapse` (le shorthand `white-space` le pose
+/// via son expansion ; les hints `nowrap`/styles inline ne
+/// portant que `white-space` passent par le repli ci-dessous).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum WsCollapse {
+    /// `collapse` — toute suite de blancs → une espace.
+    Collapse,
+    /// `preserve` — tout verbatim (sauts = coupures dures,
+    /// tabulations = taquets `tab-size`).
+    Preserve,
+    /// `preserve-breaks` — sauts conservés, espaces et
+    /// tabulations effondrés (`pre-line`).
+    PreserveBreaks,
+    /// `preserve-spaces` — espaces verbatim ; tabulations et
+    /// sauts convertis en espaces (plus de coupure dure).
+    PreserveSpaces,
+    /// `discard` — tout blanc supprimé.
+    Discard,
+    /// `break-spaces` — verbatim + opportunité de coupure
+    /// après CHAQUE espace ; les blancs de fin de ligne
+    /// comptent dans la mesure (ils ne pendent pas, §4.1.3).
+    BreakSpaces,
+}
+
+/// Mode `white-space` effectif (css-text-4 §7.1) —
+/// `(collapse, wrap autorisé)`. Priorité aux longhands
+/// `white-space-collapse`/`text-wrap-mode` (l'expansion du
+/// shorthand les pose, un longhand déclaré ensuite gagne par
+/// ordre de cascade) ; `white-space` sert de repli pour les
+/// chemins qui le posent seul (hint `<td nowrap>`, valeurs
+/// inline héritées avant l'expansion).
+pub(crate) fn ws_mode(st: &ComputedStyle) -> (WsCollapse, bool) {
+    let mut collapse = match st.get("white-space").map(str::trim) {
+        Some("pre" | "pre-wrap") => WsCollapse::Preserve,
+        Some("pre-line") => WsCollapse::PreserveBreaks,
+        Some("break-spaces") => WsCollapse::BreakSpaces,
+        _ => WsCollapse::Collapse,
+    };
+    let mut wrap = !matches!(st.get("white-space").map(str::trim), Some("nowrap" | "pre"));
+    if let Some(v) = st.get("white-space-collapse").map(str::trim) {
+        collapse = match v {
+            "preserve" => WsCollapse::Preserve,
+            "preserve-breaks" => WsCollapse::PreserveBreaks,
+            "preserve-spaces" => WsCollapse::PreserveSpaces,
+            "discard" => WsCollapse::Discard,
+            "break-spaces" => WsCollapse::BreakSpaces,
+            _ => WsCollapse::Collapse,
+        };
+    }
+    if let Some(m) = st.get("text-wrap-mode").map(str::trim) {
+        wrap = m != "nowrap";
+    }
+    (collapse, wrap)
+}
+
+/// `white-space-collapse:preserve-spaces` (css-text-4 §4.1) :
+/// espaces conservées verbatim ; tabulations, retours et
+/// sauts de ligne → une espace chacun (`\r\n` = un seul saut
+/// de segment → une seule espace). Plus aucune coupure dure
+/// n'existe dans le résultat — le retour à la ligne n'est
+/// plus que souple, aux opportunités UAX #14 ordinaires.
+fn preserve_spaces(t: &str) -> String {
+    let mut out = String::with_capacity(t.len());
+    let mut prev_cr = false;
+    for c in t.chars() {
+        match c {
+            '\n' if prev_cr => {}
+            _ if text::is_css_ws(c) => out.push(' '),
+            _ => out.push(c),
+        }
+        prev_cr = c == '\r';
+    }
+    out
+}
+
+/// `white-space-collapse:discard` (css-text-4 §4.1) : tout
+/// blanc CSS est supprimé — le texte se soude (`a b` → `ab`),
+/// il ne reste plus d'opportunité de coupure sur blanc.
+fn discard_ws(t: &str) -> String {
+    t.chars().filter(|c| !text::is_css_ws(*c)).collect()
 }
 
 /// Variante `pre-line` : seuls espaces et tabulations sont
@@ -1291,19 +1444,28 @@ impl LineAcc {
         // §16.6.1 : les espaces en FIN de ligne sont retirées
         // (elles ne rendent rien et ne comptent pas dans la
         // largeur — `text-align` mesure sans elles).
-        while self
+        // R-264 — `break-spaces` (css-text-4 §4.1.3) : les
+        // blancs préservés sont du CONTENU — ils gardent leur
+        // avance et leur décoration, ils ne pendent pas.
+        let keep_trail = self
             .frags
             .last()
-            .is_some_and(|f| !f.atomic && text::trim_css_ws(&f.text).is_empty())
-        {
-            self.frags.pop();
-        }
-        // L'espace finale intra-fragment (pièce fusionnée
-        // `"mot "`) est exclue aussi : la ligne se mesure sur
-        // le contenu visible.
-        if let Some(f) = self.frags.last_mut() {
-            f.rect.width -= f.trail_w;
-            f.trail_w = 0.0;
+            .is_some_and(|f| ws_mode(&f.style).0 == WsCollapse::BreakSpaces && !f.atomic);
+        if !keep_trail {
+            while self
+                .frags
+                .last()
+                .is_some_and(|f| !f.atomic && text::trim_css_ws(&f.text).is_empty())
+            {
+                self.frags.pop();
+            }
+            // L'espace finale intra-fragment (pièce fusionnée
+            // `"mot "`) est exclue aussi : la ligne se mesure
+            // sur le contenu visible.
+            if let Some(f) = self.frags.last_mut() {
+                f.rect.width -= f.trail_w;
+                f.trail_w = 0.0;
+            }
         }
         if self.is_empty() {
             return;
@@ -1958,11 +2120,15 @@ fn break_into_lines(
             continue;
         }
 
-        // `pre`/`pre-wrap` : §16.6.1 ne s'applique pas — les
-        // espaces de tête de ligne sont préservées aussi.
+        // `pre`/`pre-wrap`/`preserve-spaces`/`break-spaces` :
+        // §16.6.1 ne s'applique pas — les espaces de tête de
+        // ligne sont préservées aussi (R-264 : mode effectif
+        // via `ws_mode` — `white-space-collapse`/`text-wrap-mode`
+        // réels, pas seulement le shorthand).
+        let (ws_collapse, ws_wrap) = ws_mode(&item.style);
         let keep_ws = matches!(
-            item.style.get("white-space"),
-            Some(v) if matches!(v.trim(), "pre" | "pre-wrap")
+            ws_collapse,
+            WsCollapse::Preserve | WsCollapse::PreserveSpaces | WsCollapse::BreakSpaces
         );
         for piece in &item.pieces {
             // §8.1 — taquet de tabulation (`pre`/`pre-wrap`) :
@@ -1992,11 +2158,10 @@ fn break_into_lines(
                         tab_w - r
                     }
                 };
-                let no_wrap = matches!(
-                    item.style.get("white-space"),
-                    Some(v) if matches!(v.trim(), "nowrap" | "pre")
-                );
-                if !no_wrap
+                // `text-wrap-mode:nowrap`/`pre` : les coupures
+                // souples sont interdites — une tabulation qui
+                // déborde continue à droite (R-264).
+                if ws_wrap
                     && cursor_x > line_x
                     && cursor_x - line_x + adv > line_w + 0.01
                     && !acc.is_empty()
@@ -2086,19 +2251,31 @@ fn break_into_lines(
                 continue;
             }
             let pw = measure(text);
-            // `nowrap`/`pre` : les coupures SOUPLES sont
-            // interdites (§16.6) — seul `hard_after` (<br>,
-            // \n en pre) force une ligne. Sans ce garde le
-            // texte `nowrap` se coupait comme `normal` —
-            // bloquait tout débordement `text-overflow`.
-            let no_wrap = matches!(
-                item.style.get("white-space"),
-                Some(v) if matches!(v.trim(), "nowrap" | "pre")
-            );
+            // `nowrap`/`pre` (`text-wrap-mode:nowrap` — R-264)
+            // : les coupures SOUPLES sont interdites (§16.6) —
+            // seul `hard_after` (<br>, \n en pre) force une
+            // ligne. Sans ce garde le texte `nowrap` se coupait
+            // comme `normal` — bloquait tout débordement
+            // `text-overflow`.
+            let no_wrap = !ws_wrap;
+            // `break-spaces` : l'opportunité de coupure est
+            // APRES chaque espace — la première espace d'une
+            // suite se pose donc sur la ligne courante même si
+            // elle la fait déborder (« hang », §4.1.3). Les
+            // suivantes — le fragment posé juste avant est un
+            // blanc — cassent normalement en pleine suite.
+            let hangs = ws_collapse == WsCollapse::BreakSpaces
+                && !text.is_empty()
+                && text.chars().all(text::is_css_ws)
+                && !acc
+                    .frags
+                    .last()
+                    .is_some_and(|f| !f.atomic && text::trim_css_ws(&f.text).is_empty());
             // Même tolérance `+ 0.01` que `descend_band!` :
             // dépassement sub-ulp agrégé → la pièce tient,
             // sinon `new_line!`.
             if !no_wrap
+                && !hangs
                 && cursor_x > line_x
                 && cursor_x - line_x + pw > line_w + 0.01
                 && !acc.is_empty()

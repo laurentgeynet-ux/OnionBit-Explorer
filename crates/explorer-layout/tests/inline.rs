@@ -1369,3 +1369,103 @@ fn ruby_rtc_niveaux_empiles() {
         tier2("n")
     );
 }
+
+// ---------- R-264 — `white-space` variantes (css-text-4 §4/§7) ----------
+
+/// Texte concaténé d'une ligne (les fragments ws comptent).
+fn line_text(line: &explorer_layout::inline::LineBox) -> String {
+    line.fragments.iter().map(|f| f.text.as_str()).collect()
+}
+
+#[test]
+fn white_space_collapse_discard_soude_le_texte() {
+    // `discard` : tout blanc supprimé — `a  b` se soude en
+    // `ab` sur une ligne, aucune coupure sur blanc.
+    let (dom, bx) = laid(
+        "<!doctype html><p>a  b\n c</p>",
+        "p{font-size:10px;width:400px;white-space-collapse:discard;margin:0}",
+    );
+    let p = find(&bx, by_tag(&dom, "p"));
+    let line = &p.children[0].lines[0];
+    assert_eq!(line_text(line), "abc", "blancs supprimés");
+    assert_eq!(p.children[0].lines.len(), 1, "le \n est discarté");
+}
+
+#[test]
+fn white_space_collapse_preserve_spaces_garde_les_espaces() {
+    // `preserve-spaces` : espaces verbatim, tabs/sauts →
+    // espaces (plus de coupure dure) — `a\tb\nc` → `a b c`.
+    let (dom, bx) = laid(
+        "<!doctype html><p>a\tb\nc</p>",
+        "p{font-size:10px;width:400px;white-space-collapse:preserve-spaces;margin:0}",
+    );
+    let p = find(&bx, by_tag(&dom, "p"));
+    assert_eq!(p.children[0].lines.len(), 1, "saut converti en espace");
+    let t: String = p.children[0].lines.iter().map(line_text).collect();
+    assert_eq!(t, "a b c", "tab+newline → espaces : {t:?}");
+}
+
+#[test]
+fn white_space_collapse_preserve_breaks_garde_les_sauts() {
+    // `preserve-breaks` (= `pre-line`) : `\n` reste dur,
+    // espaces effondrées.
+    let (dom, bx) = laid(
+        "<!doctype html><p>a  b\nc</p>",
+        "p{font-size:10px;width:400px;white-space-collapse:preserve-breaks;margin:0}",
+    );
+    let p = find(&bx, by_tag(&dom, "p"));
+    assert_eq!(p.children[0].lines.len(), 2, "\n forcé");
+    assert_eq!(line_text(&p.children[0].lines[0]), "a b");
+}
+
+#[test]
+fn white_space_shorthand_pilote_les_longhands() {
+    // `white-space:break-spaces` — les espaces préservées
+    // comptent : une suite en fin de ligne NE pend pas
+    // (§4.1.3) et la coupure existe après CHAQUE espace.
+    // Ici : ligne de 40 px, `aaaa` (20) + 6 espaces (30) +
+    // `b` — les espaces remplissent la ligne, `b` passe à la
+    // ligne suivante SANS qu'on ait retiré les blancs.
+    let (dom, bx) = laid(
+        "<!doctype html><p>aaaa      b</p>",
+        "p{font-size:10px;width:40px;white-space:break-spaces;margin:0}",
+    );
+    let p = find(&bx, by_tag(&dom, "p"));
+    let lines = &p.children[0].lines;
+    assert!(lines.len() >= 2, "le b doit passer à la ligne");
+    let l0 = line_text(&lines[0]);
+    assert!(l0.ends_with(' '), "espaces de fin conservées : {l0:?}");
+    assert!(l0.starts_with("aaaa"));
+}
+
+#[test]
+fn text_wrap_mode_nowrap_desactive_le_shorthand_wrap() {
+    // `white-space:pre-wrap` + `text-wrap-mode:nowrap` :
+    // le longhand l'emporte → plus de coupure souple (les
+    // sauts durs restent) = comportement `pre`.
+    let (dom, bx) = laid(
+        "<!doctype html><p>mot un mot deux trois quatre</p>",
+        "p{font-size:10px;width:40px;white-space:pre-wrap;\
+         text-wrap-mode:nowrap;margin:0}",
+    );
+    let p = find(&bx, by_tag(&dom, "p"));
+    assert_eq!(
+        p.children[0].lines.len(),
+        1,
+        "nowrap : une seule ligne malgré pre-wrap"
+    );
+}
+
+#[test]
+fn longhand_collapse_surclasse_le_shorthand_pre() {
+    // `white-space:pre` + `white-space-collapse:collapse` :
+    // les blancs s'effondrent (le longhand posé après gagne),
+    // nowrap du mode reste — `a   b` → `a b` en une ligne.
+    let (dom, bx) = laid(
+        "<!doctype html><p>a   b</p>",
+        "p{font-size:10px;width:400px;white-space:pre;\
+         white-space-collapse:collapse;margin:0}",
+    );
+    let p = find(&bx, by_tag(&dom, "p"));
+    assert_eq!(line_text(&p.children[0].lines[0]), "a b");
+}

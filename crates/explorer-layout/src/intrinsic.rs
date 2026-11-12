@@ -423,15 +423,17 @@ fn inline_level(c: &LayoutBox) -> bool {
 /// Mesure `text` : max = chaîne entière (espaces effondrés,
 /// §16.6.1) ; min = le mot le plus long.
 fn text_px(st: &ComputedStyle, text: &str, fs: f32, ctx: &BlockCtx, max: bool) -> f32 {
+    use crate::inline::{ws_mode, WsCollapse};
     let measure = measure_fn(st, fs, ctx);
-    // `pre`/`pre-wrap` : §16.6.1 hors jeu — lignes littérales
-    // et tabulations aux taquets `tab-size` (§8.1, avance au
-    // prochain multiple depuis le début de la ligne).
-    let pre = matches!(
-        st.get("white-space"),
-        Some(v) if matches!(v.trim(), "pre" | "pre-wrap")
-    );
-    if pre {
+    let (ws_collapse, _wrap) = ws_mode(st);
+    // `pre`/`pre-wrap`/`break-spaces` : §16.6.1 hors jeu —
+    // lignes littérales et tabulations aux taquets `tab-size`
+    // (§8.1, avance au prochain multiple depuis le début de
+    // la ligne). `preserve-breaks` garde les sauts durs mais
+    // effondre espaces/tabs par ligne ; `preserve-spaces`
+    // convertit tabs/sauts en espaces verbatim ;
+    // `discard` supprime tout blanc (texte soudé).
+    if matches!(ws_collapse, WsCollapse::Preserve | WsCollapse::BreakSpaces) {
         let tab_w = crate::inline::tab_size_px(st, measure(" "), fs, ctx);
         let line_w = |line: &str| -> f32 {
             let mut pos = 0.0_f32;
@@ -446,8 +448,10 @@ fn text_px(st: &ComputedStyle, text: &str, fs: f32, ctx: &BlockCtx, max: bool) -
         if max {
             return text.split('\n').map(line_w).fold(0.0, f32::max);
         }
-        // `pre-wrap` coupe aux espaces et après tabulation
-        // (UAX #14 BA) — min = mot le plus long ou un taquet.
+        // `pre-wrap`/`break-spaces` coupent aux espaces et
+        // après tabulation (UAX #14 BA — `break-spaces`
+        // casse même en pleine suite d'espaces) — min = mot
+        // le plus long ou un taquet.
         return text
             .split('\n')
             .flat_map(|l| l.split([' ', '\t']))
@@ -455,6 +459,40 @@ fn text_px(st: &ComputedStyle, text: &str, fs: f32, ctx: &BlockCtx, max: bool) -
             .map(&measure)
             .fold(0.0, f32::max)
             .max(if text.contains('\t') { tab_w } else { 0.0 });
+    }
+    if ws_collapse == WsCollapse::PreserveBreaks {
+        if max {
+            return text
+                .split('\n')
+                .map(|l| measure(&crate::inline::collapse_ws(l)))
+                .fold(0.0, f32::max);
+        }
+        return text
+            .split(crate::text::is_css_ws)
+            .filter(|w| !w.is_empty())
+            .map(&measure)
+            .fold(0.0, f32::max);
+    }
+    if ws_collapse == WsCollapse::PreserveSpaces {
+        let verbatim = text
+            .chars()
+            .map(|c| if crate::text::is_css_ws(c) { ' ' } else { c })
+            .collect::<String>();
+        if max {
+            return measure(&verbatim);
+        }
+        return verbatim
+            .split(' ')
+            .filter(|w| !w.is_empty())
+            .map(&measure)
+            .fold(0.0, f32::max);
+    }
+    if ws_collapse == WsCollapse::Discard {
+        let welded: String = text
+            .chars()
+            .filter(|c| !crate::text::is_css_ws(*c))
+            .collect();
+        return measure(&welded);
     }
     if max {
         return measure(&crate::inline::collapse_ws(text));

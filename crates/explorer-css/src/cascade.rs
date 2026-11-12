@@ -5064,11 +5064,20 @@ const INHERITED_PROPS: &[&str] = &[
     "text-indent",
     "text-orientation",
     "text-transform",
+    "text-wrap-mode",
+    "text-wrap-style",
     "visibility",
     "writing-mode",
     "white-space",
+    "white-space-collapse",
+    "white-space-trim",
     "widows",
+    "word-break",
     "word-spacing",
+    "word-wrap",
+    "overflow-wrap",
+    "line-break",
+    "hyphens",
 ];
 
 /// R-209 — une valeur **déclarée** qui échoue à la lecture
@@ -5405,25 +5414,6 @@ const FV_CAPS: &[&str] = &[
 const FV_EMOJI: &[&str] = &["emoji", "text", "unicode"];
 
 impl StyleEngine {
-    /// R-249 — `text-wrap-mode` → `white-space` (css-text-4
-    /// §7.1 : `nowrap` → nowrap, autres → normal).
-    /// `text-wrap-style` (balance/pretty/stable) dormant.
-    fn resolve_text_wrap_mode(map: &mut HashMap<NodeId, ComputedStyle>) {
-        for st in map.values_mut() {
-            let mode = st.get("text-wrap-mode").map(str::to_string);
-            if let Some(m) = mode {
-                st.set(
-                    "white-space",
-                    if m.trim() == "nowrap" {
-                        "nowrap"
-                    } else {
-                        "normal"
-                    },
-                );
-            }
-        }
-    }
-
     /// `font-variant` shorthand : chaque mot-clé est routé
     /// vers son longhand (css-fonts-4 §6.7) — les résolveurs
     /// `numeric`/`east-asian`/`ligatures`/`caps`/`position`
@@ -5596,7 +5586,6 @@ impl StyleEngine {
                 st.set("font-palette", &base);
             }
         }
-        Self::resolve_text_wrap_mode(map);
         Self::expand_font_variant(map);
         // R-241 — `font-variant-numeric` : mots-clés → tags
         // OT équivalents (spec css-fonts-4 §6.3) — concaténés

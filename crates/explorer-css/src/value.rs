@@ -1106,6 +1106,31 @@ pub fn expand_shorthand(name: &str, value: &str) -> Option<Vec<(String, String)>
             ),
         ]);
     }
+    // `white-space` (css-text-4 §7.1 — R-264) : le shorthand
+    // est `<'white-space-collapse'> <'text-wrap-mode'>
+    // <'white-space-trim'>?` — il pose les longhands (un
+    // longhand déclaré APRÈS l'emporte par ordre de cascade)
+    // et garde le nom `white-space` lui-même : consommateurs
+    // historiques (`inline`, `intrinsic`), hints
+    // présentationnels (`<td nowrap>`) et census y lisent la
+    // forme courte.
+    if name == "white-space" {
+        let (collapse, mode) = match kw.to_ascii_lowercase().as_str() {
+            "normal" => ("collapse", "wrap"),
+            "nowrap" => ("collapse", "nowrap"),
+            "pre" => ("preserve", "nowrap"),
+            "pre-wrap" => ("preserve", "wrap"),
+            "pre-line" => ("preserve-breaks", "wrap"),
+            "break-spaces" => ("break-spaces", "wrap"),
+            _ => return None,
+        };
+        return Some(vec![
+            ("white-space".to_string(), kw.to_string()),
+            ("white-space-collapse".to_string(), collapse.to_string()),
+            ("white-space-trim".to_string(), "none".to_string()),
+            ("text-wrap-mode".to_string(), mode.to_string()),
+        ]);
+    }
     // Shorthands `place-*` (css-align-3 — R-125) : 1 valeur
     // répétée ou 2 (`<align> <justify>`).
     if let Some((a, b)) = match name {
