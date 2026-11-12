@@ -316,6 +316,17 @@ fn http_stack(
     profile: &Path,
     resolver: Option<Arc<dyn explorer_net::resolver::Resolver>>,
 ) -> Arc<dyn HttpTransport> {
+    // Rejeu d'un vol enregistré (explorer-net `replay`, N0.1) —
+    // priorité absolue : aucun socket ouvert, la session rejoue
+    // les réponses du dossier (même convention qu'`explorer-cli`).
+    if let Ok(dir) = std::env::var("EXPLORER_NET_REPLAY") {
+        if !dir.is_empty() {
+            tracing::info!(dir = %dir, "EXPLORER_NET_REPLAY — rejeu offline");
+            return Arc::new(explorer_net::replay::DirTransport::new(
+                std::path::Path::new(&dir),
+            ));
+        }
+    }
     // Résolution injectable (étape 72) : `system` (défaut)
     // ou `doh` — le connecteur tente chaque IP résolue. Le
     // cache DNS persisté (PR-9) enveloppe le résolveur choisi.
@@ -353,7 +364,23 @@ fn http_stack(
         cached,
         Arc::new(explorer_core::JsonHstsStore::open(profile)),
     ));
-    Arc::new(RedirectTransport::wrap(hsts, cfg.max_redirects))
+    let stack: Arc<dyn HttpTransport> = Arc::new(RedirectTransport::wrap(hsts, cfg.max_redirects));
+    // Enregistrement de vol (N0.1) — par présence, comme
+    // `EXPLORER_DOM_KILL` : chaque réponse servie est écrite
+    // (`<clé>-<seq>.resp` + sidecar `.req` pour les corps) —
+    // rejouable via `EXPLORER_NET_REPLAY`. Couche externe :
+    // les redirections sont déjà résolues (même placement
+    // qu'`explorer-cli`, rejeu cohérent entre les deux binaires).
+    match std::env::var("EXPLORER_NET_RECORD") {
+        Ok(dir) if !dir.is_empty() => {
+            tracing::info!(dir = %dir, "EXPLORER_NET_RECORD — capture des réponses");
+            Arc::new(explorer_net::replay::RecordingTransport::wrap(
+                stack,
+                std::path::Path::new(&dir),
+            ))
+        }
+        _ => stack,
+    }
 }
 
 /// Construction de la `Session` — pile HTTP + dial WebSocket
