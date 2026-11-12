@@ -1982,6 +1982,31 @@ Lot PIPE livré depuis la piste YoutubeFix (R-260, crates `explorer-css`/`explor
   post-R-261…R-266 pour rebaser le score ; journaliser les `na`
   de fixture séparément des trous moteur réels.
 
+### couture PIPE → NAV — sprint css.values S2 soldé (2026-11-13)
+
+- **R-267/R-268/R-269 posés** : `position-try` couvre tout le
+  vocabulaire `<position-area>` (~95 misses visés) ; `break-*`
+  multicol + alias `page-break-*` + `avoid` ; `alignment-baseline`
+  complété (`top`/`bottom`/`above`/`below`/`over`/`under` =
+  bords de ligne).
+- **Artefacts `affectsv` probables à journaliser** :
+  - `position-area`/`position-try` : le déplacement est
+    **translate-only** — `span-*` retombe sur le côté de base,
+    `span-all` ≈ centré ; si la fixture sonde la taille spannée
+    ou le writing-mode vertical, le miss sera honnête mais
+    borné (approximation documentée, pas de re-flow).
+  - `position-area` mot-clé seul (`bottom`) : comportement
+    corrigé vers la spec — autre axe `span-all` ≈ **centré**
+    (était aligné-start) ; une fixture qui attendait le bord
+    gauche mesurera l'ancien défaut.
+  - `break-inside:*` : toutes valeurs ≡ `auto` honnête — les
+    unités multicol sont insécables de fait → `na` probable.
+  - `alignment-baseline:first|last|auto` : ≡ `baseline` sur
+    ligne unique → `na` honnête.
+- **Demande NAV** : second re-tour `check affectsv` post-S2 —
+  les ~95 `position-try` + ~16 `break-*` + ~10
+  `alignment-baseline` devraient basculer en masse.
+
 ### vitrine — livraisons M0/M1 amont (2026-11-12, nav/youtube-fix)
 
 - **N0.1 aval posé** (`9887a9d6`) : `DirTransport` discrimine
