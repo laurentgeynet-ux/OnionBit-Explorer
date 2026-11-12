@@ -705,7 +705,7 @@ fn fixture_for(name: &str) -> &'static str {
                 | "place-content" | "place-items" | "gap" | "row-gap" | "column-gap"
                 | "flex-direction" | "flex-wrap" | "flex-flow" | "grid-template-columns"
                 | "grid-template-rows" | "grid-auto-flow" | "grid-auto-columns"
-                | "grid-auto-rows" | "container-type" | "container-name"
+                | "grid-auto-rows"
         ) =>
         {
             // Multi-lignes + hauteur fixe : `align-content` a
@@ -918,6 +918,15 @@ fn fixture_for(name: &str) -> &'static str {
         // flottant dimensionné ; le `<p>` apporte les lignes.
         () if n == "shape-outside" || n == "shape-margin" || n == "shape-image-threshold" => {
             "<body><div><div class=x style=\"float:left;width:80px;height:80px\"></div><p>un deux trois quatre cinq six sept huit neuf dix onze douze treize quatorze quinze seize</p></div></body>"
+        }
+        // `container-type`/`container` (css-contain-3 — R-274) :
+        // le `contain:size` implicite ne se voit que sur une
+        // boîte **shrink-to-fit** dont la taille dépend de la
+        // contribution intrinsèque des enfants — `.x` absolu
+        // `width/height:auto` avec un enfant 100×40 :
+        // `size` → 0×0, `inline-size` → 0×40, `normal` → 100×40.
+        () if n == "container-type" || n == "container" => {
+            "<body><div style=\"position:relative;width:400px;height:200px\"><div class=x style=\"position:absolute\"><p style=\"width:100px;height:40px;margin:0\">a</p></div></div></body>"
         }
         // Conteneur **débordant** (étape 219) — `overflow-*`
         // et `overscroll-*` n'ont d'oracle que si le contenu
@@ -1311,6 +1320,9 @@ const INITIAL_EXTRA: &[(&str, &str)] = &[
     // contournement par défaut, neutre par construction.
     ("shape-outside", "none"),
     ("shape-outside", "margin-box"),
+    // css-contain-3 : `normal`/`none` = initiales.
+    ("container-type", "normal"),
+    ("container-name", "none"),
 ];
 
 /// Propriétés **non observables** par l'oracle géométrique
@@ -1382,6 +1394,10 @@ const NO_ORACLE: &[&str] = &[
     // (`url()`/`gradient`) — sources non analysées au harnais
     // (même borne que `mask-*`), aucun oracle statique.
     "shape-image-threshold",
+    // `container-name` : métadonnée pure de nommage pour les
+    // queries `@container` — aucun effet géométrique propre
+    // (le prédicat s'évalue dans la règle, pas la déclaration).
+    "container-name",
 ];
 
 fn affects_decl_verdict(decl: &str) -> Option<bool> {
@@ -1397,6 +1413,12 @@ fn affects_decl_verdict(decl: &str) -> Option<bool> {
         // (css-borders-4 §3.7 — exposant 1 = le rond
         // historique) — 17 noms, un seul repli.
         || (name.starts_with("corner-") && v == "round")
+        // `container:<nom>` sans `/` = nommage pur
+        // (css-contain-3 — `name / type` ; un token seul
+        // est le nom, pas le type) — métadonnée sans
+        // effet géométrique, même classe que
+        // `container-name` (NO_ORACLE).
+        || (name == "container" && !v.contains('/'))
     {
         return None;
     }

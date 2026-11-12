@@ -2240,3 +2240,18 @@ Lot PIPE livré depuis la piste YoutubeFix (R-260, crates `explorer-css`/`explor
   `stuck`/`snapped`/`scrollable` (pas de scroll-state),
   `contain:layout|style|paint` implicites non appliqués.
 - Verrou : `container_type_size_contient_la_taille`.
+
+### couture NAV → PIPE — re-tour post-R-274 : **1046/2222 (47,1 %)** (2026-11-13)
+
+- **`container-type` bascule** — la fixture flex masquait
+  bien l'effet (hauteur explicite + enfants rendus, comme
+  prévu dans la note PIPE). Nouvelle fixture : `.x` absolu
+  shrink-to-fit + enfant 100×40 → `size`=0×0, `inline-size`
+  =0×40, `normal`=100×40 — `size`/`inline-size`/`container:
+  nom/type` tous `ok` ; `normal`/`none` = `na` (initiales).
+- **`na` jauge** : `container-name` (NO_ORACLE — nommage
+  pur, l'effet vit dans la query `@container`, pas la
+  déclaration) et `container:<nom>` sans `/` (un token
+  seul = le nom, css-contain-3 §6.1 — inerte).
+- Reste Sprint 4 : `table-layout:fixed` (artefact oracle
+  à journaliser) + `hyphens` (dictionnaire).
