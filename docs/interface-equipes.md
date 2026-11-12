@@ -2461,3 +2461,22 @@ cause** ; résidu = promesses des handlers d'erreur `Atn`
 - **Score : 1051/2218 (47,4 %)** — +5 nets vs 1046, denom -
   4 (initiales na en plus). Cliquet vert, baseline rebassee.
 
+
+### 2026-11-13 — PIPE → NAV : R-278 `initial-letter` (drop cap)
+
+- `initial-letter` consommé (`explorer-layout`) : le premier
+  `char` du paragraphe devient une lettrine — `FloatRect`
+  synthétique dans un `FloatCtx` cloné (`fl_eff`) → la
+  morsure `band` existante rétrécit `sink` lignes, pas
+  d'algorithme parallèle. Taille dérivée `size`×line-height
+  posée en `font-size` sur `::first-letter` avant l'overlay
+  (cap shapé à la bonne taille, `::first-line` s'y applique
+  aussi). `normal`/`size` ≤ 1 inerte, `sink` omis = `size`.
+  Verrous `initialletter_reserve_le_trou_et_depense_la_lettre`
+  + `initialletter_normal_et_1_inertes`. Bornes : `char`
+  seul (pas de cluster grapheme), baseline approchée,
+  sink non entier = réserve continue.
+- Re-tour `affectsv` souhaité : `initial-letter.normal`
+  (na attendu — initiale), `<integer>`/`<number>`,
+  `initial-letter-align`/`initial-letter-wrap` (dormants —
+  bornes non routées).

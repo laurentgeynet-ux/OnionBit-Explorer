@@ -161,7 +161,7 @@ impl MarginRun {
 /// du même BFC — un enfant qui établit son propre BFC repart
 /// d'un registre vierge (§9.4.1 : ses flottants ne mordent
 /// pas l'extérieur, et réciproquement).
-#[derive(Default)]
+#[derive(Default, Clone)]
 pub(crate) struct FloatCtx {
     /// Flottants gauche (marge-rects + forme `shape-outside`).
     pub left: Vec<FloatRect>,
@@ -174,6 +174,7 @@ pub(crate) struct FloatCtx {
 /// n'influe que sur la morsure des lignes, pas sur ces
 /// algorithmes) et sa forme `shape-outside` éventuelle,
 /// déjà résolue en coords absolues (css-shapes-1 — R-273).
+#[derive(Clone)]
 pub(crate) struct FloatRect {
     /// Marge-rect du flottant.
     pub rect: Rect,
@@ -213,7 +214,7 @@ impl FloatRect {
 /// `shape-outside` résolu en coords absolues — formes de
 /// base de css-shapes-1 §3 : `inset`/`rect`/`xywh` bornés à
 /// leur rectangle, `polygon` en sommets.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub(crate) enum OutsideShape {
     /// `circle`/`ellipse` — centre + demi-axes (rx=ry pour
     /// `circle`).

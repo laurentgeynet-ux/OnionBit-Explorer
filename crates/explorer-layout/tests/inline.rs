@@ -1527,3 +1527,94 @@ fn hyphens_auto_coupe_avec_tiret_et_shy() {
         "hyphenate-character custom : {texts:?}"
     );
 }
+
+// ---------- R-278 — `initial-letter` drop cap (css-inline-3 §4) ----------
+
+#[test]
+fn initialletter_reserve_le_trou_et_depense_la_lettre() {
+    // `initial-letter: 2` : la première lettre est retirée du
+    // texte et devient un cap excluant 2 lignes ; les lignes
+    // 1-2 sont mordues à droite/gauche, la 3e reprend la
+    // pleine largeur. Le fragment cap porte le glyphe à la
+    // taille dérivée (2×line-height).
+    let (dom, bx) = laid_w(
+        "<!doctype html><p>alpha beta gamma delta epsilon</p>",
+        "p { font-size: 10px; line-height: 10px; width: 60px; initial-letter: 2 }",
+        60.0,
+    );
+    let p = &find(&bx, by_tag(&dom, "p")).children[0];
+    assert!(p.lines.len() >= 3, "lignes : {}", p.lines.len());
+    let first = &p.lines[0];
+    let cap = first
+        .fragments
+        .iter()
+        .find(|f| f.text == "a")
+        .unwrap_or_else(|| {
+            panic!(
+                "pas de cap : {:?}",
+                first
+                    .fragments
+                    .iter()
+                    .map(|f| f.text.as_str())
+                    .collect::<Vec<_>>()
+            )
+        });
+    // Taille dérivée = 2×10px ; largeur cap > un caractère
+    // ordinaire (10px de font-size → ~5px ; cap 20px → ~10px).
+    assert!(cap.rect.width > 8.0, "cap w={}", cap.rect.width);
+    // La lettre est dépensée : le reste du texte commence à
+    // « onjour ».
+    // La lettre est dépensée : le fragment texte ouvrant le
+    // reste commence à « lpha » (le cap « a » est isolé dans
+    // son propre fragment — la concaténation ré-épelle
+    // « alpha » par construction, pas par duplication).
+    assert!(
+        first.fragments.iter().any(|f| f.text.starts_with("lpha")),
+        "reste : {:?}",
+        first
+            .fragments
+            .iter()
+            .map(|f| f.text.as_str())
+            .collect::<Vec<_>>()
+    );
+    // Morsure : lignes 1-2 démarrent après le cap (x > 0),
+    // la 3e reprend le bord gauche (x ≈ 0) — LTR.
+    let start = |line: &explorer_layout::inline::LineBox| {
+        line.fragments
+            .iter()
+            .filter(|f| f.text.len() > 1)
+            .map(|f| f.rect.x)
+            .fold(f32::MAX, f32::min)
+    };
+    assert!(start(first) > 3.0, "l1 décalee : {}", start(first));
+    assert!(start(&p.lines[1]) > 3.0, "l2 décalee");
+    assert!(
+        start(&p.lines[2]) < 1.0,
+        "l3 pleine : {}",
+        start(&p.lines[2])
+    );
+}
+
+#[test]
+fn initialletter_normal_et_1_inertes() {
+    for raw in ["normal", "1"] {
+        let (dom, bx) = laid_w(
+            "<!doctype html><p>bonjour le monde</p>",
+            &format!("p {{ font-size: 10px; line-height: 10px; initial-letter: {raw} }}"),
+            100.0,
+        );
+        let p = &find(&bx, by_tag(&dom, "p")).children[0];
+        let first_text = line_text(&p.lines[0]);
+        assert!(
+            first_text.contains("bonjour"),
+            "{raw} : texte intact attendu, reçu {first_text:?}"
+        );
+        assert!(
+            !p.lines[0]
+                .fragments
+                .iter()
+                .any(|f| f.text.len() == 1 && f.rect.width > 8.0),
+            "{raw} : pas de cap attendu"
+        );
+    }
+}

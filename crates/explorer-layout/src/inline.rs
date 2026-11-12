@@ -28,6 +28,7 @@ use explorer_css::{value::Color, ComputedStyle};
 
 use crate::block::{
     css_px, font_size_px, layout_block, measure_fn, raw_length_px, side_px, BlockCtx, FloatCtx,
+    FloatRect,
 };
 use crate::boxtree::{BoxKind, LayoutBox, Rect};
 use crate::font::{self, ShapedRun};
@@ -311,7 +312,7 @@ pub(crate) fn layout_inline(
     let mut atomics: HashMap<usize, Rect> = HashMap::new();
     size_atomics(bx, w, cb_h, ctx, fs, abs_cb, &mut atomics);
 
-    let items = collect_items(bx, para_lv, fs, ctx);
+    let mut items = collect_items(bx, para_lv, fs, ctx);
     // Strut du conteneur (§10.8.1) : `line-height` de la
     // boîte — plancher de chaque ligne (`.chin` Acid2 :
     // `line-height:1em` tient la rangée à 12 px même si le
@@ -341,6 +342,27 @@ pub(crate) fn layout_inline(
     } else {
         side_px(&st, "text-indent", w, fs, ctx, 0.0)
     };
+    // R-278 — `initial-letter` (css-inline-3 §4) : la
+    // première lettre devient un **drop cap** — retirée du
+    // texte par `initial_letter_take` (retournée avec ses
+    // métriques), son `FloatRect` synthétique exclut les
+    // `sink` premières lignes via la morsure `band`
+    // ordinaire (gauche LTR / droite RTL), puis le glyphe
+    // géant est posé dans le trou réservé (fragment après
+    // les overlays — style déjà final).
+    let drop = initial_letter_take(bx, &mut items, strut_lh, (x, y, w), para_lv, ctx);
+    let mut fl_drop;
+    let fl_eff = if let Some(d) = &drop {
+        fl_drop = fl.clone();
+        if para_lv == 1 {
+            fl_drop.right.push(d.float.clone());
+        } else {
+            fl_drop.left.push(d.float.clone());
+        }
+        &fl_drop
+    } else {
+        fl
+    };
     let mut lines = break_into_lines(
         &items,
         &atomics,
@@ -349,7 +371,7 @@ pub(crate) fn layout_inline(
         w,
         ctx,
         fs,
-        fl,
+        fl_eff,
         strut_lh,
         // `each-line` → indent toutes lignes ; `hanging` →
         // indent sauf la première (css-text-4) — le delta
@@ -359,7 +381,7 @@ pub(crate) fn layout_inline(
         if hanging || each_line { indent } else { 0.0 },
         para_lv,
     );
-    align_lines(&st, &mut lines, x, w, fl, indent, hanging);
+    align_lines(&st, &mut lines, x, w, fl_eff, indent, hanging);
     apply_text_overflow(&st, &mut lines, x + w, ctx, fs);
     apply_line_clamp(&st, &mut lines, x + w, ctx, fs);
     apply_line_clamp(&st, &mut lines, x + w, ctx, fs);
@@ -381,6 +403,13 @@ pub(crate) fn layout_inline(
     // fragment texte — props hors liste ignorées, les
     // effets de mise en page (line-height, transform) restent
     // documentés non rejoués.
+    // R-278 — drop cap : posé AVANT les overlays —
+    // `::first-line` s'y applique (spec) et `::first-letter`
+    // le vise (son `font-size` est déjà la taille dérivée —
+    // cf. `initial_letter_take`).
+    if let (Some(cap), Some(l0)) = (drop, bx.lines.first_mut()) {
+        emit_drop_cap(l0, cap, para_lv);
+    }
     if let Some(fl) = bx.first_line.clone() {
         if let Some(line) = bx.lines.first_mut() {
             for f in &mut line.fragments {
@@ -431,6 +460,165 @@ fn overlay_pseudo(style: &mut ComputedStyle, ps: &ComputedStyle) {
         if PSEUDO_OVERLAY_PROPS.contains(&k) {
             style.set(k, v);
         }
+    }
+}
+
+/// R-278 — drop cap `initial-letter` : la lettre retirée du
+/// flux, ses métriques et le `FloatRect` qui réserve sa
+/// place (même morsure `band` qu'un flottant ordinaire).
+struct DropCap {
+    /// Glyphe — premier `char` du texte (clusters de
+    /// grapheme hors MVP, borne documentée).
+    text: String,
+    node: Option<explorer_dom::NodeId>,
+    owner: usize,
+    level: u8,
+    deco: Vec<TextDeco>,
+    /// Style du fragment : item + overlay `::first-letter`,
+    /// `font-size` = taille dérivée `size`×line-height.
+    style: ComputedStyle,
+    /// Run shapé à la taille dérivée (`None` sans fonte —
+    /// le fragment garde quand même sa géométrie).
+    shaped: Option<std::sync::Arc<ShapedRun>>,
+    /// Exclusion posée dans le `FloatCtx` (`sink` lignes).
+    float: FloatRect,
+    /// Position inline du fragment (bord du trou).
+    frag_x: f32,
+    /// Baseline dans le fragment — ≈ baseline de la
+    /// `sink`-ième ligne (alignement cap-height exact non
+    /// joué, borne documentée).
+    baseline: f32,
+    /// Hauteur du trou (= `float.rect.height`).
+    sink_h: f32,
+}
+
+/// `initial-letter` (css-inline-3 §4) : `normal` ou taille
+/// ≤ 1 → `None` ; sinon la première lettre du premier item
+/// texte est retirée de `items` et devient un drop cap de
+/// `size`×`strut_lh` s'enfonçant sur `sink` lignes (sink
+/// omis = size). `::first-letter` reçoit la taille dérivée
+/// comme `font-size` — l'overlay ultérieur applique donc
+/// naturellement la bonne taille (la taille déclarée perd
+/// face à la taille dérivée, spec « sized to span »).
+fn initial_letter_take(
+    bx: &mut LayoutBox,
+    items: &mut [Item],
+    strut_lh: f32,
+    band: (f32, f32, f32),
+    para_lv: u8,
+    ctx: &BlockCtx,
+) -> Option<DropCap> {
+    let (line_x, line_y, line_w) = band;
+    let raw = bx
+        .first_letter
+        .as_ref()
+        .and_then(|fl| fl.get("initial-letter"))
+        .or_else(|| bx.style.get("initial-letter"))?;
+    let mut nums = raw.split_whitespace().filter_map(|t| t.parse::<f32>().ok());
+    let size = nums.next().unwrap_or(0.0);
+    let sink = nums.next().unwrap_or(size);
+    if size <= 1.0 || sink <= 0.0 {
+        return None;
+    }
+    let ii = items
+        .iter()
+        .position(|i| i.pieces.iter().any(|p| !p.tab && !p.text.is_empty()))?;
+    let pj = items[ii]
+        .pieces
+        .iter()
+        .position(|p| !p.tab && !p.text.is_empty())?;
+    let it = &mut items[ii];
+    let pc = &mut it.pieces[pj];
+    let rest = pc.text.trim_start_matches(text::is_css_ws);
+    let cluster = rest.chars().next()?.to_string();
+    pc.text = rest.get(cluster.len()..).unwrap_or_default().to_string();
+    let (level, node, owner, deco) = (pc.level, it.node, it.owner, it.deco.clone());
+    let fs_drop = size * strut_lh;
+    // `::first-letter` porte désormais la taille dérivée :
+    // l'overlay (premier fragment = le cap) applique la
+    // bonne taille ; une déclaration auteur `font-size`
+    // explicite est remplacée par la taille « sized to
+    // span » (css-inline-3 §4).
+    if let Some(fl) = bx.first_letter.as_mut() {
+        fl.set("font-size", &format!("{fs_drop}px"));
+    }
+    let mut style = it.style.clone();
+    if let Some(fl) = &bx.first_letter {
+        overlay_pseudo(&mut style, fl);
+    }
+    style.set("font-size", &format!("{fs_drop}px"));
+    let dw = measure_fn(&style, fs_drop, ctx)(&cluster).max(1.0);
+    let sink_h = (sink * strut_lh).max(strut_lh);
+    let frag_x = if para_lv == 1 {
+        line_x + line_w - dw
+    } else {
+        line_x
+    };
+    let shaped = ctx.fonts.and_then(|src| {
+        ctx.font_cache.borrow_mut().shape(
+            src,
+            &font::request_of(&style, ctx),
+            &cluster,
+            fs_drop,
+            false,
+            crate::block::letter_spacing_px(&style, fs_drop, ctx),
+        )
+    });
+    let ascent = shaped.as_ref().map_or(fs_drop * 0.8, |s| s.metrics.ascent);
+    Some(DropCap {
+        text: cluster,
+        node,
+        owner,
+        level,
+        deco,
+        style,
+        shaped,
+        float: FloatRect {
+            rect: Rect {
+                x: frag_x,
+                y: line_y,
+                width: dw,
+                height: sink_h,
+            },
+            shape: None,
+        },
+        frag_x,
+        baseline: (ascent + (sink - 1.0) * strut_lh).min(sink_h),
+        sink_h,
+    })
+}
+
+/// R-278 — le glyphe géant rejoint la première ligne dans le
+/// trou que son `FloatRect` a réservé : en tête LTR, en fin
+/// RTL (`close` a déjà tourné les fragments en ordre visuel).
+fn emit_drop_cap(l0: &mut LineBox, cap: DropCap, para_lv: u8) {
+    let frag = Fragment {
+        node: cap.node,
+        owner: cap.owner,
+        text: cap.text,
+        atomic: false,
+        aid: None,
+        style: cap.style,
+        rect: Rect {
+            x: cap.frag_x,
+            y: l0.rect.y,
+            width: cap.float.rect.width,
+            height: cap.sink_h,
+        },
+        baseline: cap.baseline,
+        shaped: cap.shaped,
+        trail_w: 0.0,
+        marg_l: 0.0,
+        marg_r: 0.0,
+        marg_t: 0.0,
+        marg_b: 0.0,
+        deco: cap.deco,
+        level: cap.level,
+    };
+    if para_lv == 1 {
+        l0.fragments.push(frag);
+    } else {
+        l0.fragments.insert(0, frag);
     }
 }
 

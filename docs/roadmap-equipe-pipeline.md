@@ -4242,6 +4242,28 @@ le census `site_harvest` arbitre les ex æquo.
   verrou `hyphen_cesure_peint_un_run_1_glyphe` (render,
   fixture TTF) — 2 runs 1-glyphe présents end-to-end.
   Re-tour `affectsv` sur binaire ≥ `d5e545b2` attendu.
+- [x] **R-278 — `initial-letter` : drop cap réel** (~3) —
+  `initial-letter` était routé mais `::first-letter` ne
+  jouait que la typographie — aucune géométrie. Désormais
+  `initial_letter_take` retire la première lettre du premier
+  item texte et produit un `DropCap` : `FloatRect` synthétique
+  poussé dans un `FloatCtx` **cloné** (`fl_eff`) avant
+  `break_into_lines`/`align_lines` — la morsure `band`
+  existante rétrécit `sink` lignes sans algorithme
+  parallèle. Taille dérivée `size`×line-height (css-inline-3
+  §4 « sized to span ») : posée comme `font-size` sur
+  `::first-letter` avant l'overlay → le cap reçoit la bonne
+  taille même sans déclaration auteur, et une déclaration
+  explicite est remplacée par la taille dérivée. Glyphe
+  shapé à la taille dérivée, posé dans le trou en tête LTR /
+  fin RTL (ordre visuel déjà tourné). `normal`/absent/
+  `size` ≤ 1 → inerte. Bornes : premier `char` seulement
+  (clusters de grapheme hors MVP), sink non entier arrondi
+  à la ligne entière, alignement baseline ≈ (cap-height
+  exact non joué), pas de cap sous `display:inline` pur.
+  Verrou : `initialletter_reserve_le_trou_et_depense_la_lettre`
+  (cap extrait + morsure 2 lignes + reprise pleine largeur +
+  lettre non dupliquée), `initialletter_normal_et_1_inertes`.
 
 `text-box*`/`text-autospace`/`text-fit`/`initial-letter`/
 `text-combine-upright`, `counter-set`/`counter-increment` fins,
