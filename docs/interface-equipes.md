@@ -2192,3 +2192,22 @@ Lot PIPE livré depuis la piste YoutubeFix (R-260, crates `explorer-css`/`explor
   intégrée ; `shape-outside` circle/ellipse/inset/polygon/
   shape-margin mesurés `ok`, `url()`/`image()` restent
   `miss` attendus.
+
+### couture PIPE — R-274 `container-*` (css.values S4)
+
+- **`container-type` a désormais un effet géométrique** :
+  `size`/`inline-size` = `contain:size` implicite §2.2 —
+  la boîte se mesure « comme vide » (intrinsic inline = 0,
+  hauteur `auto` = 0 ; `width`/`height` directs font foi).
+  La jauge `affectsv` (fixture flex `height:200px`) risque
+  de marquer `na` sur `.x` — le delta est réel mais la
+  fixture le masque (hauteur explicite + enfants rendus).
+- **`measure_containers` token-wise** : `inline-size
+  scroll-state` reste un size container ; `container-name:
+  none` → noms vides (le nom littéral `none` aurait matché
+  une query `@container none`).
+- **Dormants honnêtes** : `style()` queries (prédicat sur le
+  style calculé — exigerait `ContainerMeasure.style`),
+  `stuck`/`snapped`/`scrollable` (pas de scroll-state),
+  `contain:layout|style|paint` implicites non appliqués.
+- Verrou : `container_type_size_contient_la_taille`.

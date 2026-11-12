@@ -4157,8 +4157,23 @@ le census `site_harvest` arbitre les ex æquo.
   `shape_outside_cercle_mord_selon_la_hauteur` (morsure non
   constante < rect témoin), `shape_outside_inset_bornee_et_
   shape_margin` (bande bornée + dilatation au-delà de la marge).
-- [ ] `container-type`/`container-name`/`container` (~10) —
-  container queries size/style : cascade contextuelle.
+- [x] **R-274 — `container-*` : containment de taille réel**
+  (~10) — `container-type:size`/`inline-size` impliquent
+  `contain:size` (§2.2) : la boîte se mesure « comme vide »
+  — intrinsic inline = 0 (`content_px_unclamped`, après le
+  `width` direct qui fait foi), hauteur `auto` = 0
+  (`block_size_contained` — `height`/`min|max-height`
+  s'appliquent). Token-wise : `inline-size scroll-state`
+  reste un size container (css-conditional-5), `scroll-state`
+  seul non. `container-name:none` → noms vides (était le
+  nom littéral `none`). Déjà en place (R-122/R-190) :
+  `@container` size queries, `container` shorthand →
+  longhands. Dormants bornés : `style()` queries (éval =
+  prédicat sur le style calculé du conteneur — plomberie
+  `ContainerMeasure` dédiée), features `stuck`/`snapped`/
+  `scrollable` (pas de moteur de scroll-state). Verrou :
+  `container_type_size_contient_la_taille` (size → h~0,
+  inline-size → h contenu, normal témoin, height:80px gagne).
 - [ ] `table-layout:fixed` — algo table fixe (largeurs par
   première ligne).
 - [ ] `hyphens` réel — dictionnaire de césure.

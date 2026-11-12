@@ -71,6 +71,29 @@ pub(crate) fn intrinsic_size_px(
     }
 }
 
+/// `container-type` pose-t-il un containment de taille sur
+/// l'axe **inline** de `bx` ? `size` (les deux axes) et
+/// `inline-size` (§2.2, token-wise — `inline-size
+/// scroll-state` reste un size container). Inerte sur les
+/// boîtes de niveau inline (§2.1 — containment uniquement
+/// sur principale non-inline).
+pub(crate) fn size_contained(st: &ComputedStyle, bx: &LayoutBox) -> bool {
+    !bx.kind.is_inline_level()
+        && st.get("container-type").is_some_and(|v| {
+            v.split_whitespace()
+                .any(|t| matches!(t, "size" | "inline-size"))
+        })
+}
+
+/// Idem sur l'axe **bloc** — seul `size` contient les deux
+/// axes (`inline-size` laisse la hauteur suivre le contenu).
+pub(crate) fn block_size_contained(st: &ComputedStyle, bx: &LayoutBox) -> bool {
+    !bx.kind.is_inline_level()
+        && st
+            .get("container-type")
+            .is_some_and(|v| v.split_whitespace().any(|t| t == "size"))
+}
+
 /// Largeur max-content du contenu de `bx` (content box).
 pub(crate) fn max_content_px(bx: &LayoutBox, fs: f32, ctx: &BlockCtx) -> f32 {
     content_px(bx, fs, ctx, true)
@@ -291,6 +314,15 @@ fn content_px_unclamped(
             w = w.max(mn);
         }
         return w;
+    }
+    // R-274 — `container-type: size|inline-size` = containment
+    // de taille sur l'axe inline (css-contain-3 §2.2) : la
+    // boîte se mesure « comme vide » — le contenu ne contribue
+    // pas à sa taille intrinsèque. Le `width` direct plus haut
+    // fait déjà foi ; inerte sur les boîtes de niveau inline
+    // (spec : containment sur principale non-inline seule).
+    if size_contained(&bx.style, bx) {
+        return 0.0;
     }
     // Boîte texte : mesure de la fonte réelle.
     if bx.kind == BoxKind::Text {

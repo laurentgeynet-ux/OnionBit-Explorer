@@ -2553,7 +2553,15 @@ fn layout_block_inner(
         }
     };
 
-    let content_h = cursor - (y + bt + pt);
+    // R-274 — `container-type:size` : contain size sur
+    // l'axe bloc — hauteur `auto` dimensionnée « comme
+    // vide » (le contenu est posé mais ne fait pas croître
+    // la boîte ; `min|max-height`/`height` s'appliquent).
+    let content_h = if h_spec.is_none() && crate::intrinsic::block_size_contained(&st, bx) {
+        0.0
+    } else {
+        cursor - (y + bt + pt)
+    };
     let mut used_h = h_spec.unwrap_or_else(|| {
         // css-sizing-4 §5.4 (R-123) : `aspect-ratio` s'applique
         // quand la hauteur est `auto` — le ratio du ratio

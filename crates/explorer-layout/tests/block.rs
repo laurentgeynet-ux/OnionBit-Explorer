@@ -3355,3 +3355,38 @@ fn shape_outside_inset_bornee_et_shape_margin() {
         "shape-margin repousse au-delà de la marge : {xs:?}"
     );
 }
+
+#[test]
+fn container_type_size_contient_la_taille() {
+    // css-contain-3 §2.2 : `container-type:size` = contain
+    // size sur les deux axes — `height:auto` dimensionnée
+    // « comme vide » : les enfants posés ne font pas
+    // croître la boîte (ils débordent).
+    let html = "<!doctype html><div id=c><p>a</p><p>b</p></div>";
+    let (dom, _) = laid(html, "");
+    let (_, bx) = laid(html, "#c{container-type:size}");
+    let h_size = find(&bx, by_id(&dom, "c")).rect.height;
+    assert!(h_size < 5.0, "size → hauteur ~0 : h={h_size}");
+    // `inline-size` : axe bloc NON contenu → la hauteur
+    // suit le contenu normalement.
+    let (_, bx) = laid(html, "#c{container-type:inline-size}");
+    let h_inline = find(&bx, by_id(&dom, "c")).rect.height;
+    assert!(
+        h_inline > 30.0,
+        "inline-size → hauteur contenu : h={h_inline}"
+    );
+    // `normal` témoin : même hauteur que sans déclaration.
+    let (_, bx) = laid(html, "#c{container-type:normal}");
+    let h_normal = find(&bx, by_id(&dom, "c")).rect.height;
+    assert!(
+        (h_normal - h_size).abs() > 20.0,
+        "normal ≠ size : normal={h_normal} size={h_size}"
+    );
+    // `height` spécifiée gagne quand même sur le containment.
+    let (_, bx) = laid(html, "#c{container-type:size;height:80px}");
+    let h_fixed = find(&bx, by_id(&dom, "c")).rect.height;
+    assert!(
+        (h_fixed - 80.0).abs() < 1.0,
+        "height explicit > contain : h={h_fixed}"
+    );
+}

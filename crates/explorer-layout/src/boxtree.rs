@@ -2023,11 +2023,22 @@ pub fn measure_containers(
     while let Some(bx) = stack.pop() {
         if let Some(n) = bx.node {
             let ty = bx.style.get("container-type").unwrap_or("normal");
-            if matches!(ty.trim(), "size" | "inline-size") && !bx.kind.is_inline_level() {
+            // R-274 — token-wise : `inline-size scroll-state`
+            // reste un size container (css-conditional-5) ;
+            // `scroll-state` seul n'en est pas un.
+            let is_size = ty
+                .split_whitespace()
+                .any(|t| matches!(t, "size" | "inline-size"));
+            if is_size && !bx.kind.is_inline_level() {
                 let names = bx
                     .style
                     .get("container-name")
-                    .map(|v| v.split_whitespace().map(str::to_string).collect())
+                    .map(|v| {
+                        v.split_whitespace()
+                            .filter(|n| *n != "none")
+                            .map(str::to_string)
+                            .collect()
+                    })
                     .unwrap_or_default();
                 out.entry(n).or_insert(explorer_css::ContainerMeasure {
                     w: bx.rect.width,
