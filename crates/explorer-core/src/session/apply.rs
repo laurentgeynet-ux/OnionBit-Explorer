@@ -2399,6 +2399,7 @@ pub(crate) fn repaint_payload(
             rect,
             color,
             radii: [0.0; 4],
+            corners: [1.0; 4],
         });
     }
     // Étape 180 (P4) — le framebuffer ne couvre plus que la
@@ -2567,6 +2568,7 @@ fn append_find_highlights(list: &mut DisplayList, f: &FindState) {
                 rect,
                 color,
                 radii: [0.0; 4],
+                corners: [1.0; 4],
             });
         }
     }

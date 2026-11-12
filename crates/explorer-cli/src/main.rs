@@ -746,13 +746,28 @@ fn fixture_for(name: &str) -> &'static str {
         {
             "<body><table class=x><caption>c</caption><tr><td style=\"border:1px solid black\"> </td><td style=\"border:1px solid black;width:100px;height:40px\">a</td></tr></table></body>"
         }
-        // `vertical-align`/`alignment-baseline`/`baseline-shift`
-        // — `.x` = cellule table (la ligne de base des
-        // cellules est observable : la cellule soeur est
-        // plus haute → `top`/`bottom`/`middle` déplacent le
-        // contenu).
-        () if matches!(n, "vertical-align" | "alignment-baseline" | "baseline-shift") => {
+        // `break-*`/`page-break-*` — s'appliquent à
+        // l'**unité enfant** du conteneur multicol, pas au
+        // conteneur : `.x` = 2ᵉ unité, `break-before:column`
+        // la pousse en colonne 2 (l'équilibre naturel
+        // l'y mettrait aussi → ctx 3 unités, `.x` au milieu
+        // serait ambigu — 2 unités + hauteur forçant
+        // l'équilibre en col 1 pour `avoid`).
+        () if n.starts_with("break-") || n.starts_with("page-break") => {
+            "<body><div style=\"columns:2;column-gap:10px;width:210px;height:60px;column-fill:auto\"><p style=\"margin:0\">a</p><p class=x style=\"margin:0\">b</p><p style=\"margin:0\">c</p></div></body>"
+        }
+        // `vertical-align`/`baseline-shift` — `.x` = cellule
+        // table (cellule soeur plus haute → `top`/`bottom`/
+        // `middle` déplacent le contenu).
+        () if matches!(n, "vertical-align" | "baseline-shift") => {
             "<body><table><tr><td class=x>a</td><td style=\"height:60px\">b</td></tr></table></body>"
+        }
+        // `alignment-baseline`/`dominant-baseline` — prop
+        // de format **inline** : `.x` = atome inline-block
+        // dans une ligne de 40 px (bords de ligne
+        // observables).
+        () if matches!(n, "alignment-baseline" | "dominant-baseline") => {
+            "<body><p style=\"font-size:40px\">x<span class=x style=\"display:inline-block;width:10px;height:10px\"></span></p></body>"
         }
         // `quotes` — n'a d'effet que sur le contenu généré
         // `<q>` (paires de guillemets par langue).
@@ -880,6 +895,14 @@ fn fixture_for(name: &str) -> &'static str {
         // (sans colonnes posées la famille est inerte).
         () if n.starts_with("column-") || n.starts_with("break-") || n == "columns" => {
             "<body><div class=x><p>a</p><p>b</p><p>c</p><p>d</p></div></body>"
+        }
+        // `rule`/`rule-*`/`row-rule*` (css-gaps-1 — R-271) :
+        // décorations de gap — `.x` = le conteneur multicol ;
+        // un spanner `column-span:all` au milieu coupe le
+        // trait en segments (défaut §5.1) pour que
+        // `rule-break:none` soit discriminant.
+        () if n == "rule" || n.starts_with("rule-") || n.starts_with("row-rule") => {
+            "<body><div class=x><p>a<br>a<br>a<br>a</p><h2 style=\"column-span:all;margin:0\">s</h2><p>b<br>b<br>b<br>b</p></div></body>"
         }
         // Conteneur **débordant** (étape 219) — `overflow-*`
         // et `overscroll-*` n'ont d'oracle que si le contenu
@@ -1028,7 +1051,19 @@ fn context_css(name: &str) -> &'static str {
         "text-decoration:underline"
     } else if n.starts_with("outline") {
         "outline:2px solid black;width:100px;height:80px"
-    } else if n.starts_with("column-") || n.starts_with("break-") || n == "columns" {
+    } else if n.starts_with("corner") {
+        // `corner-*-shape` ne ploie que les coins posés par
+        // `border-radius` (css-borders-4 §3.7 — sans rayon
+        // le coin est franc quelle que soit la forme) ;
+        // le fond porte les `corners` visibles du dump.
+        "border-radius:15px;background:#ccc;width:80px;height:60px"
+    } else if n == "rule" || n.starts_with("rule-") || n.starts_with("row-rule") {
+        // css-gaps-1 : le décor de gap n'existe qu'avec les
+        // colonnes posées ; `column-rule` en ctx rend les
+        // longhands `rule-*` discriminants (couleur/largeur/
+        // style/inset/break) — le shorthand `rule` l'écrase.
+        "columns:2;column-gap:20px;column-rule:2px solid black;height:100px"
+    } else if n.starts_with("column-") || n == "columns" {
         "columns:2;column-rule:2px solid black;height:200px"
     } else {
         ""
@@ -1139,6 +1174,8 @@ const INITIAL_EXTRA: &[(&str, &str)] = &[
     ("overflow-wrap", "normal"),
     ("overscroll-behavior", "auto"),
     ("pointer-events", "auto"),
+    ("position-try", "none"),
+    ("position-try-fallbacks", "none"),
     ("resize", "none"),
     ("scroll-behavior", "auto"),
     ("table-layout", "auto"),
@@ -1175,6 +1212,8 @@ const INITIAL_EXTRA: &[(&str, &str)] = &[
     ("break-before", "right"),
     ("break-before", "paged_context"),
     ("break-inside", "auto"),
+    ("break-inside", "avoid"),
+    ("break-inside", "avoid-column"),
     ("break-inside", "avoid-page"),
     ("break-inside", "paged_context"),
     // Initiales `background-*` que `initial_value` ne
@@ -1211,6 +1250,12 @@ const INITIAL_EXTRA: &[(&str, &str)] = &[
     ("vertical-align", "text-bottom"),
     ("vertical-align", "sub"),
     ("vertical-align", "super"),
+    // `rule-break` (css-gaps-1 §4.2) : `intersection` est
+    // l'initiale spec ; `spanning-item` produit le même
+    // découpage au spanner dans la fixture multicol (aucun
+    // oracle ne les distingue ici).
+    ("rule-break", "intersection"),
+    ("rule-break", "spanning-item"),
 ];
 
 /// Propriétés **non observables** par l'oracle géométrique
@@ -1289,6 +1334,10 @@ fn affects_decl_verdict(decl: &str) -> Option<bool> {
         "inherit" | "initial" | "unset" | "revert" | "revert-layer"
     ) || explorer_css::initial_value(name).is_some_and(|iv| iv == value)
         || INITIAL_EXTRA.iter().any(|&(n, iv)| n == name && iv == v)
+        // `corner-*-shape:round` = initiale spec uniforme
+        // (css-borders-4 §3.7 — exposant 1 = le rond
+        // historique) — 17 noms, un seul repli.
+        || (name.starts_with("corner-") && v == "round")
     {
         return None;
     }

@@ -2041,6 +2041,34 @@ Lot PIPE livré depuis la piste YoutubeFix (R-260, crates `explorer-css`/`explor
   post-S3 — les ~50 `corner-*` + ~45 `rule*` devraient
   basculer.
 
+### couture NAV → PIPE — re-tour post-S3 fait : **1026/2240 (45,8 %)** (2026-11-13)
+
+- **+104 flips nets** confirmés (`css.values` 922 → 1026,
+  baseline `bcd_baseline.json` rebasée — cliquet à jour).
+- **Rattrapage contrat côté NAV** : `DisplayItem::corners`
+  (champ additif R-270) cassait 6 littérateurs
+  `explorer-core` (`apply.rs` caret/find, `popup.rs`
+  fond/bordure/survol `<select>`) — passés à `[1.0;4]`
+  = rond historique. Compilation workspace restaurée.
+- **Jauge ajustée (NAV)** : `corner-*` → ctx
+  `border-radius+fond` (forme inerte sans rayon — normal) ;
+  `rule*` → fixture multicol + spanner `column-span:all`
+  + ctx `columns:2;column-rule` (`rule-break:none` = 1 trait
+  vs segments — discriminant). `na` : `corner-*-shape:round`
+  (initiale, repli générique) et `rule-break:intersection|
+  spanning-item` (≡ découpage défaut).
+- **`miss` honnêtes attendus, conformes aux bornes PIPE** :
+  `row-rule*`/`rule-outset`/`rule-overlap`/
+  `rule-visibility-items`/`rule-inset-cap*`/`rule-inset-
+  junction*` — stockés dormants, pas de traits de ligne en
+  multicol (flex/grid gap decorations = chantier dédié).
+- **File restante** : Sprint 4 (`offset-*` ~52,
+  `shape-outside`, `container-*`, `table-layout:fixed`,
+  `hyphens`) + résidus (`alignment-baseline:alphabetic`,
+  `background-position-x/y` offsets absolus sur image non
+  calibrée, `background-*:multiple_backgrounds` = sous-
+  feature BCD pas valeur).
+
 ### vitrine — livraisons M0/M1 amont (2026-11-12, nav/youtube-fix)
 
 - **N0.1 aval posé** (`9887a9d6`) : `DirTransport` discrimine
