@@ -92,6 +92,17 @@ static DYN_PROBE: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
 /// sous `EXPLORER_CTX_PROBE`.
 static DI_PROBE: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
 
+/// N1.5 — identité de la VM `BotGuard` par `ObjId` : le code de
+/// l'interpréteur est eval'd (`lit.src = None`, invisible à
+/// `bg.call`). `trayride` écrit sur le global → capture de son
+/// `ObjId` ; `.a` posé dessus → capture de la fonction d'entrée
+/// `K5`. `call_value_inner` compare ensuite le callee à
+/// `BG_ENTRY` — `bg.a` atteste que `_.aq` a bien lancé la VM.
+static BG_TRAYRIDE: std::sync::atomic::AtomicU32 =
+    std::sync::atomic::AtomicU32::new(u32::MAX);
+static BG_ENTRY: std::sync::atomic::AtomicU32 =
+    std::sync::atomic::AtomicU32::new(u32::MAX);
+
 /// Hidden env bindings installed in class member scopes — the names
 /// use private-use code points so no source identifier can collide
 /// (`super.x` / `super()` resolve through these).
@@ -4269,16 +4280,36 @@ impl Engine {
         self.set_own(obj, name, fv, false);
     }
 
+    /// N1.5 — capture l'identité de la VM `BotGuard` : `trayride`
+    /// écrit sur le global → `ObjId` de l'objet ; `.a`/`mtI_` posé
+    /// dessus → `ObjId` de la fonction d'entrée `K5` (`src`=None
+    /// pour le code eval'd — l'identité est le seul repère fiable).
+    fn ctxp_capture_bg(&self, obj: ObjId, key: &str, v: &Value) {
+        use std::sync::atomic::Ordering::Relaxed;
+        if key == "trayride" && obj == self.global {
+            if let Value::Obj(id) = v {
+                BG_TRAYRIDE.store(*id, Relaxed);
+                eprintln!("[ctxp] bg.trayride id={id}");
+            }
+        } else if (key == "a" || key == "mtI_") && obj == BG_TRAYRIDE.load(Relaxed) {
+            if let Value::Obj(id) = v {
+                BG_ENTRY.store(*id, Relaxed);
+                eprintln!("[ctxp] bg.entry key={key} id={id}");
+            }
+        }
+    }
+
     /// Attach a non-enumerable property.
     pub(crate) fn set_own(&mut self, obj: ObjId, key: &str, v: Value, enumerable: bool) {
         static CTXP: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
-        if *CTXP.get_or_init(|| std::env::var_os("EXPLORER_CTX_PROBE").is_some())
-            && (key == "trayride" || key == "t" || key == "ntpevasrs")
-        {
-            eprintln!(
-                "[ctxp] set_own key={} obj={:?} ctx={} global={:?}",
-                key, obj, self.cur_ctx, self.global
-            );
+        if *CTXP.get_or_init(|| std::env::var_os("EXPLORER_CTX_PROBE").is_some()) {
+            self.ctxp_capture_bg(obj, key, &v);
+            if key == "trayride" || key == "t" || key == "ntpevasrs" {
+                eprintln!(
+                    "[ctxp] set_own key={} obj={:?} ctx={} global={:?}",
+                    key, obj, self.cur_ctx, self.global
+                );
+            }
         }
         if let Some(o) = self.heap.obj_mut(obj) {
             o.set_own(key, v, enumerable);
@@ -4302,13 +4333,14 @@ impl Engine {
         attrs: crate::heap::PropAttrs,
     ) {
         static CTXP: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
-        if *CTXP.get_or_init(|| std::env::var_os("EXPLORER_CTX_PROBE").is_some())
-            && (key == "trayride" || key == "t" || key == "ntpevasrs")
-        {
-            eprintln!(
-                "[ctxp] set_own_attrs key={} obj={:?} ctx={} global={:?}",
+        if *CTXP.get_or_init(|| std::env::var_os("EXPLORER_CTX_PROBE").is_some()) {
+            self.ctxp_capture_bg(obj, key, &v);
+            if key == "trayride" || key == "t" || key == "ntpevasrs" {
+                eprintln!(
+                    "[ctxp] set_own_attrs key={} obj={:?} ctx={} global={:?}",
                 key, obj, self.cur_ctx, self.global
-            );
+                );
+            }
         }
         if let Some(o) = self.heap.obj_mut(obj) {
             o.define_data(key, v, attrs);
@@ -7620,13 +7652,14 @@ impl Engine {
         // du `set_prop` final : écrire sur le wrapper proxy serait
         // une fuite, J2 : délégation `Proxy(proxy)×N` sans borne).
         static CTXP: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
-        if *CTXP.get_or_init(|| std::env::var_os("EXPLORER_CTX_PROBE").is_some())
-            && (key == "trayride" || key == "t")
-        {
-            eprintln!(
-                "[ctxp] write_prop key={} base_id={:?} ctx={} global={:?}",
-                key, id, self.cur_ctx, self.global
-            );
+        if *CTXP.get_or_init(|| std::env::var_os("EXPLORER_CTX_PROBE").is_some()) {
+            self.ctxp_capture_bg(id, key, &v);
+            if key == "trayride" || key == "t" {
+                eprintln!(
+                    "[ctxp] write_prop key={} base_id={:?} ctx={} global={:?}",
+                    key, id, self.cur_ctx, self.global
+                );
+            }
         }
         let ai = array_index(key); // V-3b — hoisted hors de la marche
         let mut own = id;
@@ -9393,6 +9426,21 @@ impl Engine {
             self.deleg_hop(&mut depth)?;
         }
         let args_ref: &[Value] = args_owned.as_deref().unwrap_or(args);
+        // N1.5 — `bg.a` : invocation de l'entrée VM BotGuard
+        // (`trayride.a` = `K5`, capturée à l'écriture — le code
+        // eval'd n'a pas de `src`, l'identité le remplace).
+        if let Value::Obj(cid) = cur {
+            if cid == BG_ENTRY.load(std::sync::atomic::Ordering::Relaxed) {
+                static BG_A_N: std::sync::atomic::AtomicU32 =
+                    std::sync::atomic::AtomicU32::new(0);
+                let n = BG_A_N.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                if n < 32 {
+                    let (from, _, _) = self.stack_nearest_fn_src(120);
+                    tracing::info!(target: "dom_probe", site = "bg.a",
+                        n = n, id = cid, from = %from);
+                }
+            }
+        }
         let fun = match self.heap.obj(match cur {
             Value::Obj(i) => i,
             _ => return Err(self.type_error("value is not a function")),
