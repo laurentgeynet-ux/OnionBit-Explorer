@@ -78,7 +78,7 @@ pub enum DisplayItem {
         rect: Rect,
         /// Couleur RGBA.
         color: Color,
-        /// Rayons des 4 coins [tl,tr,br,bl] px (R-167) —
+        /// Rayons des 4 coins \[tl,tr,br,bl] px (R-167) —
         /// 0 = rectangle franc.
         radii: [f32; 4],
     },
@@ -122,7 +122,7 @@ pub enum DisplayItem {
         colors: [Color; 4],
         /// Style (`solid`/`dashed`/`dotted`/…) par côté.
         styles: [BorderStyle; 4],
-        /// Rayons des 4 coins [tl,tr,br,bl] px (R-167).
+        /// Rayons des 4 coins \[tl,tr,br,bl] px (R-167).
         radii: [f32; 4],
     },
     /// Run de glyphes shapés, posé depuis l'origine
