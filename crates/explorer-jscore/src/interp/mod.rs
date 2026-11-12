@@ -4430,6 +4430,42 @@ impl Engine {
             .unwrap_or_default()
     }
 
+    /// Variante sondage de `stack_top_fn_src` : descend la pile
+    /// jusqu'au premier frame porteur d'un extrait non vide et
+    /// le préfixe de `nom@l:c` (position d'appel `call_sites`).
+    /// Retourne `(extrait préfixé, frames sautés, hauteur pile)` —
+    /// diagnostic « pile vide ou top synthétique » pour le cas
+    /// `src=` resté vide au vol 814.
+    pub(crate) fn stack_nearest_fn_src(&self, max: usize) -> (String, usize, usize) {
+        for (i, lit) in self.call_stack.iter().enumerate().rev() {
+            let Some(t) = lit.src_text.as_ref() else {
+                continue;
+            };
+            let (lo, hi) = lit.span;
+            let ex: String = t
+                .chars()
+                .skip(lo)
+                .take(hi.saturating_sub(lo).min(max))
+                .collect();
+            if ex.trim().is_empty() {
+                continue;
+            }
+            let site = self.call_sites.get(i).copied().unwrap_or((0, 0));
+            return (
+                format!(
+                    "{}@{}:{} {}",
+                    lit.name.as_deref().unwrap_or("<anon>"),
+                    site.0,
+                    site.1,
+                    ex.trim()
+                ),
+                self.call_stack.len() - 1 - i,
+                self.call_stack.len(),
+            );
+        }
+        (String::new(), 0, self.call_stack.len())
+    }
+
     /// New `Error`-family object value (`{name, message}` on `proto`).
     pub(crate) fn error_value(&mut self, proto: ObjId, name: &str, msg: &str) -> Value {
         let id = self.heap.alloc_obj(Object::ordinary(Value::Obj(proto)));

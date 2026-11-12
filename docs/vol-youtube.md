@@ -107,7 +107,15 @@ $env:EXPLORER_PROFILE='C:\OnionBit-vol\youtube\prof-vol<N>'   # froid = défaut
 $env:EXPLORER_DYN_PROBE='1'
 
 # 1.4 daemon dédié — plage 9460+ réservée aux vols YouTube
+#     -Repo = le worktree de vol (obligatoire : sans lui le
+#     script résout l'exe du dépôt principal — vol 814 a
+#     mesuré un binaire périmé 16:25 au lieu du HEAD visé).
+#     Le résolveur retient l'exe le plus récent parmi
+#     target_dir/build_dir/CARGO_TARGET_DIR — le build §1.2
+#     gagne. Vérifier `daemon-<port>.exe.log` (chemin+âge) =
+#     le binaire du worktree avant de naviguer.
 pwsh -File scripts/spawn_daemon.ps1 -Port 946<N> `
+  -Repo "C:\OnionBit-Explorer-youtube-wt" `
   -LogDir "C:\OnionBit-vol\youtube\logs"
 
 # 1.5 watchdogs OBLIGATOIRES — PID = « daemon PID <n> » du spawn

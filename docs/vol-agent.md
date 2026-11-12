@@ -52,6 +52,12 @@ pwsh -File scripts/spawn_daemon.ps1 -Port 9385 `
 # (WMI n'hérite PAS l'env de l'appelant — le script cuit les
 # EXPLORER_* en `set` dans la ligne cmd ; -Profile <dir>
 # surchargerait EXPLORER_PROFILE)
+# -Repo <worktree> si le vol ne part PAS du dépôt du script
+# (sinon l'exe résolu = celui du dépôt principal, possiblement
+# périmé — post-mortem vol 814). Le résolveur retient l'exe
+# le plus récent parmi target_dir/build_dir/CARGO_TARGET_DIR ;
+# contrôle : `daemon-<port>.exe.log` = chemin + âge du binaire
+# lancé, à citer dans le rapport (un vol mesure UN binaire).
 
 # 0.4 watchdog OBLIGATOIRE — les deux lignes, dès le lancement
 # <pid> = la ligne « daemon PID <n> » de spawn_daemon.ps1

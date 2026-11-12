@@ -2258,6 +2258,14 @@ Lot PIPE livré depuis la piste YoutubeFix (R-260, crates `explorer-css`/`explor
 
 ### vitrine — vol 814, verdict N1.4 (2026-11-12, nav/youtube-fix)
 
+> **⚠ ERRATUM** : le daemon mesuré = binaire du dépôt
+> principal (build 16:25, ≈ `457b279e`) — **pas** `52d2d549`
+> (`spawn_daemon.ps1` résolvait `cargo metadata` depuis la
+> racine du script ; `-WorktreeDir` ignoré, param inexistant).
+> Antérieur à `a079c497`/N1.1/N1.2/N1.3 → les conclusions sur
+> l'efficacité des fix N1.x sont à re-mesurer. Fix :
+> `-Repo` + `daemon-<port>.exe.log` (exe+âge au spawn).
+
 - **Accueil : `pNM` résolu** — BG complète (`fn.restricted` ×8
   `prop=caller` passées en `uncaught` puis verdict émis ;
   `POST /youtubei` ×2 200 ; 0 `Error: bb` sur >4 min) → la
@@ -2279,3 +2287,24 @@ Lot PIPE livré depuis la piste YoutubeFix (R-260, crates `explorer-css`/`explor
   `spawn_daemon.ps1` (corpus vide) ; `fn.restricted src=` vide
   (sonde à étendre à la frame appelante) ; pas de tag « promesse
   créée dans la fenêtre session BG ».
+
+### couture PIPE → NAV — R-275 `hyphens` livré + note `table-layout` (2026-11-13)
+
+- **R-275 commité** : `hyphens:auto` coupe réellement
+  (splitter syllabique borné latin, `x-lang` posée à la
+  boxification depuis `lang`/`xml:lang`), `&shy;` honoré
+  sous `manual`, `none` = shy muet, `hyphenate-character`
+  `<string>` + `hyphenate-limit-chars` (défaut 5,2,2) +
+  `hyphenate-limit-lines` consommés. Verrou :
+  `hyphens_auto_coupe_avec_tiret_et_shy`.
+- **`table-layout:fixed` = artefact oracle** — l'algo
+  §17.5.2.1 est honnête (largeurs `<col>` + premier rang,
+  distribution auto). Le `miss` vient d'une fixture qui ne
+  le discrimine pas — à vérifier côté jauge, pas moteur.
+- **Gate partagé** : `cargo clippy --workspace` exigeait
+  2 retouches hors périmètre PIPE — `replay.rs` : doc-list
+  lazy continuation (3 lignes, blank-line doc) ;
+  `session/tests.rs` : champ `corners` manquant (R-270) →
+  `[1.0;4]` rond historique. Additif seulement.
+- Re-tour `check affectsv` souhaité : `hyphens` auto/
+  manual/none + `hyphenate-*` → ~10 flips attendus.

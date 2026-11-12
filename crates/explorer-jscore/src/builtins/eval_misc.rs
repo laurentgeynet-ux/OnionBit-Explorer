@@ -186,10 +186,13 @@ pub(crate) fn restricted_arguments(e: &mut Engine, _t: Value, _a: &[Value]) -> J
 
 /// Sonde commune : `dom_probe site=fn.restricted` nomme le
 /// frame script le plus proche (l'appelant de l'accesseur),
-/// puis sert le `TypeError` spec inchangé.
+/// puis sert le `TypeError` spec inchangé. `d` = profondeur
+/// du frame nommé (0 = top), `depth` = hauteur de pile —
+/// distingue « top synthétique » (d>0) de « pile vide »
+/// (src vide, depth=0), cas laissé ouvert par le vol 814.
 fn restricted_probe(e: &mut Engine, prop: &'static str) -> JsResult<Value> {
-    let src = e.stack_top_fn_src(140);
-    tracing::info!(target: "dom_probe", site = "fn.restricted", "prop={prop} src={src}");
+    let (src, d, depth) = e.stack_nearest_fn_src(140);
+    tracing::info!(target: "dom_probe", site = "fn.restricted", "prop={prop} d={d} depth={depth} src={src}");
     Err(e.type_error("caller/arguments are restricted function properties"))
 }
 

@@ -41,7 +41,12 @@ param(
   # l'emporte (même règle que le binaire : --profile > env).
   [string]$Profile = '',
   [string]$Exe = '',
-  [string]$LogDir = ''
+  [string]$LogDir = '',
+  # Racine pour `cargo metadata` — défaut = dépôt du script ;
+  # passer le worktree de vol (`-Repo C:\OnionBit-Explorer-youtube-wt`)
+  # sinon l'exe résolu est le binaire du dépôt principal
+  # (vol 814 : daemon 16:25 périmé mesuré au lieu du SHA claimé).
+  [string]$Repo = ''
 )
 
 # Résolution du binaire : -Exe explicite, sinon la canonique
@@ -53,40 +58,61 @@ param(
 # `<target>\<triple>\<prof>\` — la racine `<target>\<prof>\`
 # est alors vide et l'ancien script échouait « introuvable ».
 if ($Exe -eq '') {
-  $repo = Split-Path -Parent $PSScriptRoot
+  $repo = if ($Repo -ne '') { $Repo } else { Split-Path -Parent $PSScriptRoot }
   Push-Location $repo
   try {
-    $target = (cargo metadata --no-deps --format-version 1 |
-      ConvertFrom-Json).target_directory
+    $meta = cargo metadata --no-deps --format-version 1 |
+      ConvertFrom-Json
   } finally { Pop-Location }
+  # Racines de sortie possibles : `target_directory` (config
+  # projet), `build_directory` (build.build-dir global —
+  # {workspace-path-hash} déplace les artefacts HORS de
+  # target_dir), `CARGO_TARGET_DIR` de l'appelant, et le
+  # dossier historique `C:\cargo-target\<nom du repo>` (vols
+  # construits avec CARGO_TARGET_DIR explicite — vol 814 : le
+  # seul target_dir métadata datait du 9 nov, le binaire réel
+  # vivait sous cargo-target\OnionBit-Explorer-youtube-wt).
+  $roots = @(
+    $meta.target_directory
+    $meta.build_directory
+    $env:CARGO_TARGET_DIR
+    $(if ($env:CARGO_TARGET_DIR -eq '' -or $env:CARGO_TARGET_DIR -eq $null) {
+        $leaf = Split-Path -Leaf $repo
+        if ($leaf) { Join-Path 'C:\cargo-target' $leaf }
+      })
+  ) | Where-Object { $_ } | Select-Object -Unique
   # Triple hôte (`x86_64-pc-windows-msvc`…) — rustc absent =
-  # chaîne vide, le repli glob plus bas couvre alors.
+  # chaîne vide, le glob ci-dessous couvre alors.
   $triple = ''
   try {
     $v = & rustc -vV 2>$null | Select-String -Pattern '^host: (\S+)'
     if ($v) { $triple = $v.Matches[0].Groups[1].Value }
   } catch { }
-  $cands = @(
-    (Join-Path $target 'release\explorer-daemon.exe')
-    $(if ($triple) { Join-Path $target "$triple\release\explorer-daemon.exe" })
-    (Join-Path $target 'debug\explorer-daemon.exe')
-    $(if ($triple) { Join-Path $target "$triple\debug\explorer-daemon.exe" })
-  ) | Where-Object { $_ }
-  foreach ($cand in $cands) {
-    if (Test-Path $cand) { $Exe = $cand; break }
+  $hits = foreach ($root in $roots) {
+    foreach ($rel in @(
+        'release\explorer-daemon.exe'
+        $(if ($triple) { "$triple\release\explorer-daemon.exe" })
+        'debug\explorer-daemon.exe'
+        $(if ($triple) { "$triple\debug\explorer-daemon.exe" })
+      ) | Where-Object { $_ }) {
+      $cand = Join-Path $root $rel
+      if (Test-Path $cand) { Get-Item $cand }
+    }
   }
-  # Repli borné : tout `<target>\<triple>\<prof>\explorer-
-  # daemon.exe` — couvre un triple différent de `rustc -vV`
-  # (cross-build) ou un rustc absent du PATH.
-  if ($Exe -eq '') {
-    $hit = Get-ChildItem -Path $target -Recurse -Depth 2 `
-      -Filter 'explorer-daemon.exe' -ErrorAction SilentlyContinue |
-      Sort-Object `
-        { if ($_.FullName -match '\\release\\') { 0 } else { 1 } }, `
-        { -$_.LastWriteTime.Ticks } |
-      Select-Object -First 1
-    if ($hit) { $Exe = $hit.FullName }
-  }
+  # Le plus récent release gagne ; debug seulement si aucun
+  # release n'existe. Un exe « frais » sous une autre racine
+  # prime la racine canonique périmée — c'est le binaire que
+  # `cargo build` vient de produire, donc celui du SHA à
+  # mesurer.
+  # Le plus récent release gagne ; debug seulement si aucun
+  # release n'existe. Les autres exe coexistent sans souci —
+  # la règle du vol est que le daemon lancé soit frais
+  # (dernier `cargo build` du repo visé = le SHA à mesurer).
+  $Exe = ($hits |
+    Sort-Object `
+      { if ($_.FullName -match '\\release\\') { 0 } else { 1 } }, `
+      { -$_.LastWriteTime.Ticks } |
+    Select-Object -First 1 -ExpandProperty FullName)
 }
 if (-not (Test-Path $Exe)) {
   Write-Error "explorer-daemon.exe introuvable (cargo build ou -Exe)"
@@ -97,6 +123,14 @@ if ($LogDir -eq '') {
 }
 
 New-Item -ItemType Directory -Force -Path $LogDir | Out-Null
+# L'exe résolu est logué : un vol mesure un binaire précis —
+# `daemon-<port>.exe.log` garde chemin + âge pour le rapport
+# (vol 814 : le périmètre du binaire était invisible au
+# post-mortem).
+$exeStamp = (Get-Item $Exe).LastWriteTime.ToString('s')
+Write-Output "exe=$Exe (build $exeStamp)"
+"exe=$Exe" | Out-File -FilePath (Join-Path $LogDir "daemon-$Port.exe.log") -Encoding utf8
+"build=$exeStamp" | Out-File -FilePath (Join-Path $LogDir "daemon-$Port.exe.log") -Append -Encoding utf8
 $stdout = Join-Path $LogDir "daemon-$Port.stdout.log"
 $stderr = Join-Path $LogDir "daemon-$Port.stderr.log"
 $exitlog = Join-Path $LogDir "daemon-$Port.exit.log"
