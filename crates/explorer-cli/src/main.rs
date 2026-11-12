@@ -1331,6 +1331,14 @@ const INITIAL_EXTRA: &[(&str, &str)] = &[
     ("text-autospace", "auto"),
     ("text-autospace", "normal"),
     ("text-autospace", "no-autospace"),
+    // R-286 — `text-decoration-skip-ink` : `auto` est
+    // l'initiale spec (le moteur coupe déjà par défaut) ;
+    // `all` produit les mêmes cuts que `auto` ici →
+    // contextuellement neutre. `text-decoration-skip:auto`
+    // = shorthand sur le même comportement par défaut.
+    ("text-decoration-skip-ink", "auto"),
+    ("text-decoration-skip-ink", "all"),
+    ("text-decoration-skip", "auto"),
     // `text` ≡ `auto` (css-inline-3 : `auto` se résout en
     // bords texte — identique par construction).
     ("text-box-edge", "text"),
@@ -1569,6 +1577,10 @@ const NO_ORACLE: &[&str] = &[
     "marker-start",
     "marker-mid",
     "marker-end",
+    // `interactivity` (R-285) : exclusion du hit-test —
+    // aucun effet géométrique ni display-list, même classe
+    // que `pointer-events` (NO_ORACLE).
+    "interactivity",
 ];
 
 fn affects_decl_verdict(decl: &str) -> Option<bool> {

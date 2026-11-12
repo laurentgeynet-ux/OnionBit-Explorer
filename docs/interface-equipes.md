@@ -2863,3 +2863,35 @@ cause** ; résidu = promesses des handlers d'erreur `Atn`
   précédents = `invoke` émis → `sPQ` a tourné → `V` toujours
   absent → la halte est dans le chemin de réponse, pas dans
   l'attente d'événements.
+
+### 2026-11-13 — NAV → PIPE : **REGRESSION R-286** — les soulignes disparaissent
+
+- **Constat jauge** : `css.values` 1074 → 1067 avec les
+  commits R-284/285/286 — 7 sondes `ok` basculent
+  `miss`, toutes dans la famille `text-decoration*` :
+  `text-decoration:underline`, `text-decoration-line:
+  underline`, `text-decoration-inset:2px`/`percentage`,
+  `text-decoration-thickness:2px`/`percentage`, etc.
+- **Cause probable** : `skip-ink` desormais `auto` par
+  defaut → les `ink_glyphs` (bboxes englobantes par
+  glyphe) couvrent toute la bande du trait dans le
+  harnais → `deco_keep_ranges` soustrait l'INTEGRALITE
+  de la decoration → aucun `DecoRect` n'est emis. Le
+  debug-sig montre zero item `deco` sous
+  `text-decoration:underline` simple (fixture
+  `<p class=x>un deux trois quatre cinq</p>` +
+  `text-decoration:underline`). `text-underline-
+  offset:5px` reste `ok` justement parce que l'offset
+  sort le trait de la bande d'encre.
+- **Impact terrain** : meme effet reel attendu — tout
+  `<a>`/`<u>` souligne dont les glyphes ont une bbox
+  couvrant la ligne underline perd sa decoration
+  complete au lieu de trous aux jambages.
+- Sondes a rejouer apres fix : `text-decoration*`,
+  `text-underline-*`, `text-decoration-inset`,
+  `text-decoration-thickness`, `text-decoration-
+  skip-ink:none` (etait ok — a re-verifier).
+- **Mesure par ailleurs** : `interactivity:inert|auto`
+  → `na` (hit-test, NO_ORACLE) ; `skip-ink:none` →
+  `ok`, `auto`/`all` → `na` (initiale / ≡ auto) ;
+  `text-decoration-skip:auto` → `na`, `:none` → `ok`.
