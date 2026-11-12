@@ -4057,8 +4057,16 @@ le census `site_harvest` arbitre les ex æquo.
   `text-shadow`, `text-emphasis`, `drop-shadow()`.
   `text-decoration-color` consommé dans `text_deco`. 5
   verrous paint.
-- [ ] `vertical-align:top`/`text-top`/`text-bottom` —
-  alignement cellules (`top` manque) + baseline texte inline.
+- [x] `vertical-align:top`/`text-top`/`text-bottom` —
+  **R-266** : côté cellules, `cell_va()` borne le quatuor
+  §17.5.3.1 (`baseline`/`top`/`middle`/`bottom`) — `text-top`,
+  `text-bottom`, `<length>`, `sub`, `super` retombent sur
+  `baseline` (participent aussi à la baseline de rangée),
+  l'ancien `_ => 0` alignait en haut. Côté inline : déjà
+  complet (R-161 — `top`/`text-top`/`text-bottom` +
+  `alignment-baseline`/`dominant-baseline`/`baseline-shift`).
+  `top` sur cellule unique = artefact de fixture (journal
+  NAV). 1 verrou 4 valeurs + témoin `top`.
 
 ### Sprint 2 — familles à fort décompte (~115)
 

@@ -2948,6 +2948,53 @@ fn table_collapse_colonnes_et_baseline() {
     );
 }
 
+/// R-266 — §17.5.3.1 : sur une cellule, toute valeur hors
+/// `baseline`/`top`/`middle`/`bottom` retombe sur `baseline`
+/// (l'ancien `_ => 0` alignait `text-top`/`text-bottom`/
+/// `<length>` en haut). `top` reste le témoin distinct.
+#[test]
+fn table_cell_va_hors_quatuor_retombe_sur_baseline() {
+    let bl = |cell: &explorer_layout::LayoutBox| -> f32 {
+        cell.children
+            .iter()
+            .find_map(|c| c.lines.first())
+            .map_or(cell.rect.y + cell.rect.height, |l| l.rect.y + l.baseline)
+    };
+    for va in ["text-top", "text-bottom", "0.5em", "sub"] {
+        let (dom, bx) = laid(
+            "<table><tr><td id=g>Big</td><td id=p>small</td></tr></table>",
+            &format!(
+                "table{{border-collapse:collapse}} #g{{font-size:24px}} \
+                 #p{{font-size:8px;vertical-align:{va}}}"
+            ),
+        );
+        let g = find(&bx, by_id(&dom, "g"));
+        let p = find(&bx, by_id(&dom, "p"));
+        assert!(
+            (bl(g) - bl(p)).abs() < 1.0,
+            "va={va} traité baseline : {:?} vs {:?}",
+            bl(g),
+            bl(p)
+        );
+    }
+    // Témoin `top` : la petite cellule colle le haut de
+    // rangée — sa 1re ligne monte nettement plus haut que la
+    // baseline partagée.
+    let (dom, bx) = laid(
+        "<table><tr><td id=g>Big</td><td id=p>small</td></tr></table>",
+        "table{border-collapse:collapse} #g{font-size:24px} \
+         #p{font-size:8px;vertical-align:top}",
+    );
+    let g = find(&bx, by_id(&dom, "g"));
+    let p = find(&bx, by_id(&dom, "p"));
+    assert!(
+        bl(g) - bl(p) > 2.0,
+        "top ≠ baseline : {:?} vs {:?}",
+        bl(g),
+        bl(p)
+    );
+}
+
 /// R-180 — `list-style-position:inside` : la puce devient un
 /// `Text` « glyphe + espace » en tête des enfants du
 /// `list-item` — la ligne s'indente comme si c'était le
