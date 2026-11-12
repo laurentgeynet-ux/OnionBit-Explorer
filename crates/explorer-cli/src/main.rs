@@ -694,6 +694,7 @@ fn prop_affects(name: &str) -> bool {
 /// déclarée sur l'élément `.x` dans le contexte où sa valeur
 /// *peut* produire de la géométrie. `.x` = l'élément porteur
 /// de la déclaration (conteneur ou item selon la famille).
+#[allow(clippy::too_many_lines)]
 fn fixture_for(name: &str) -> &'static str {
     let n = name.trim_start_matches('-').trim_start_matches("webkit-");
     match () {
@@ -761,6 +762,26 @@ fn fixture_for(name: &str) -> &'static str {
             // `align-self` = stretch (line_cross) → offset 0
             // quel que soit le mot-clé (artefact mesuré).
             "<body><div style=\"display:flex;height:200px\"><p class=x>a</p><p style=\"height:150px\">b</p></div></body>"
+        }
+        // Ancrage css-anchor-1 — `.x` = l'élément positionné
+        // contre l'ancre `#a` (`position-area`, `position-try*`,
+        // `anchor()`/`anchor-size()` en insets,
+        // `position-visibility`, `anchor-scope`). Sans ancre
+        // référencée toute la famille est inerte par
+        // construction.
+        () if matches!(
+            n,
+            "position-area" | "position-try" | "position-try-order"
+                | "position-try-fallbacks" | "position-visibility" | "anchor-scope"
+        ) =>
+        {
+            "<body><div id=a style=\"anchor-name:--a;position:absolute;top:10px;left:10px;width:20px;height:20px\"></div><p class=x style=\"position:absolute;position-anchor:--a\">b</p></body>"
+        }
+        // `anchor-name` — `.x` = l'**ancre** elle-même ; un
+        // consommateur `position-anchor:--a` existe pour que
+        // le nom résolve (ancre non référencée = effet nul).
+        () if n == "anchor-name" => {
+            "<body><div class=x style=\"position:absolute;top:10px;left:10px;width:20px;height:20px\"></div><p style=\"position:absolute;position-anchor:--a\">b</p></body>"
         }
         // Formulaires — `accent-color`, `caret-color`, `appearance`,
         // `cursor`, `field-sizing`… n'ont d'effet que sur contrôle.
