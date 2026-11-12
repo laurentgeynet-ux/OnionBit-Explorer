@@ -11816,10 +11816,13 @@ croître la surface navigateur mesurée (`api` 1510/8099, 18,6 %).
 
 ### Sprint N1 — la vitrine (mur résiduel = BotGuard)
 
-- [ ] **N0 — reproductibilité** (plan M0) : hygiène `.eval/`
+- [x] **N0 — reproductibilité** (plan M0) : hygiène `.eval/`
   (N0.0), vol `EXPLORER_NET_RECORD` + rejeu `DirTransport`
-  déterministe (N0.1), baseline J17 (N0.2), shot de contrôle
-  `geo_diff` sur rejeu (N0.3).
+  déterministe (N0.1 — vol 813, corpus `replay-vol813`, PNG
+  bit-identiques), baseline J17 (N0.2 — `j17-vol813-baseline.txt`),
+  shot de contrôle `geo_diff` sur rejeu (N0.3 — 65 % divergents
+  dominés h=0 masthead → écart côté PIPE ; ref Chrome montre le
+  même feed vide à profil froid).
 - [ ] **`pNM`/`bb`** (plan M1) : le programme BG (`trayride.a`
   → `mr`) tourne mais **n'appelle jamais `g`** → `pNM` pend
   60 s → `bb` → session `v8Q` morte → `/youtubei` gatées →
