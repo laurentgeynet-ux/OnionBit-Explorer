@@ -2259,6 +2259,27 @@ Lot PIPE livré depuis la piste YoutubeFix (R-260, crates `explorer-css`/`explor
 
 
 
+
+### vitrine — N1.5 sonde fetch.rej : rejets = média bénin, modules JAMAIS demandés (rejeu 652d5e5a)
+
+Rejeu instrumenté (sonde `fetch.rej` host+path, commit
+`652d5e5a`) sur replay-vol815 /watch : `bb` ×2 reproduits,
+**20/20 rejets = `videoplayback` + `api/stats/qoe`** —
+zéro chunk `.js` rejeté. Et `fetch.send` : **aucune
+requête `ytmainappweb`** — le chargeur lazy ne demande
+rien → le stall est **en amont de l'insertion `<script>`**,
+pas au fetch. Décodages : `27269` = `_.Qj(_.iE,fn,10)`
+scheduler debounce/batché (`iE` = file mécanisme préfixée) ;
+`5506` = coroutines `_.p` ; `29861` = transitions
+`transitionTasksMap`. Modèle affiné : famine partagée —
+soit deadlock DI (`_.Xl` attend un provider enregistré
+dans un chunk que `mr` ne demande que si un service le
+permet), soit scheduler `iE` jamais drainé. Prochaine
+sonde : nommer la clé `k` des `resolve(VhV(k))` pendants
+(introspection arg au callsite `_.Xl`) ou marquer `mr`/
+`LgV` côté insertion — quel `await` précède la première
+demande de chunk.
+
 ### vitrine — N1.5 itération : le stall **reproduit en rejeu** (offline) + rail DI décodé
 
 Daemon `266cbc70` + `EXPLORER_NET_REPLAY=replay-vol815`,
