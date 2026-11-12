@@ -102,6 +102,10 @@ static BG_TRAYRIDE: std::sync::atomic::AtomicU32 =
     std::sync::atomic::AtomicU32::new(u32::MAX);
 static BG_ENTRY: std::sync::atomic::AtomicU32 =
     std::sync::atomic::AtomicU32::new(u32::MAX);
+/// N1.5 — dernier native invoqué depuis une frame VM BotGuard :
+/// relu au `bg.a` suivant (session d'après) — le dernier op
+/// hôte avant l'arrêt est exactement l'op attendu par la VM.
+static BG_LAST_HOST: std::sync::Mutex<String> = std::sync::Mutex::new(String::new());
 
 /// Hidden env bindings installed in class member scopes — the names
 /// use private-use code points so no source identifier can collide
@@ -9436,8 +9440,12 @@ impl Engine {
                 let n = BG_A_N.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                 if n < 32 {
                     let (from, _, _) = self.stack_nearest_fn_src(120);
+                    let last = BG_LAST_HOST
+                        .lock()
+                        .map(|g| g.clone())
+                        .unwrap_or_default();
                     tracing::info!(target: "dom_probe", site = "bg.a",
-                        n = n, id = cid, from = %from);
+                        n = n, id = cid, from = %from, last = %last);
                 }
             }
         }
@@ -9555,6 +9563,27 @@ impl Engine {
         this: Value,
         args: &[Value],
     ) -> JsResult<Value> {
+        // N1.5 — `bg.host` : native appelé depuis une frame VM
+        // BotGuard (`eval:google.com/js/th`). Chaque appel met à
+        // jour `BG_LAST_HOST` — le reliquat au prochain `bg.a`
+        // = dernier op hôte avant l'arrêt du programme.
+        static BG_HOST_N: std::sync::atomic::AtomicU32 =
+            std::sync::atomic::AtomicU32::new(0);
+        static CTXP: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+        if *CTXP.get_or_init(|| std::env::var_os("EXPLORER_CTX_PROBE").is_some())
+            && tracing::enabled!(target: "dom_probe", tracing::Level::INFO)
+            && self.frame_src_contains("google.com/js/th")
+        {
+            if let Ok(mut g) = BG_LAST_HOST.lock() {
+                *g = name.to_string();
+            }
+            let n = BG_HOST_N.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            if n < 512 {
+                let (from, _, _) = self.stack_nearest_fn_src(80);
+                tracing::info!(target: "dom_probe", site = "bg.host",
+                    n = n, name = name, argc = args.len(), from = %from);
+            }
+        }
         let target = match this {
             Value::Obj(id) => self.ctx_of_objid(id),
             _ => None,
