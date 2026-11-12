@@ -129,6 +129,13 @@ pub(crate) fn install(e: &mut Engine) {
     if let Value::Obj(eid) = error {
         e.add_method(eid, "captureStackTrace", error_capture_stack);
         e.add_method(eid, "isError", error_is_error);
+        // `Error.stackTraceLimit` (V8) : own data property,
+        // writable+configurable, non-énumérable, défaut 10 —
+        // **live** : `stack_text` la relit à chaque capture
+        // (fingerprint YouTube : la propriété absente lit
+        // `undefined`, et une valeur figée serait détectable
+        // en l'assignant).
+        e.set_own(eid, "stackTraceLimit", Value::Num(10.0), false);
     }
     let t_err = ctor(e, "TypeError", type_error_ctor, p_terr);
     let r_err = ctor(e, "ReferenceError", reference_error_ctor, p_rerr);

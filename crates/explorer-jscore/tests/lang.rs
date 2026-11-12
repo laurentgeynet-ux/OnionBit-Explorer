@@ -624,6 +624,35 @@ fn capture_stack_trace_a_des_frames() {
 }
 
 #[test]
+fn stack_trace_limit_defaut_10_non_enum_et_live() {
+    // `Error.stackTraceLimit` (V8) : own data property, défaut
+    // 10, non-énumérable — et **live** : la capture la relit à
+    // chaque `new Error` (une valeur figée serait un
+    // fingerprint BotGuard de plus).
+    assert_eq!(ev_str("Error.stackTraceLimit"), "10");
+    assert_eq!(
+        ev_str("Error.propertyIsEnumerable('stackTraceLimit')"),
+        "false"
+    );
+    assert_eq!(
+        ev_str(
+            "function d(n) { return n > 0 ? d(n - 1) : new Error('x').stack } \
+             Error.stackTraceLimit = 3; \
+             (d(9).match(/\\bat\\b/g) || []).length"
+        ),
+        "3"
+    );
+    assert_eq!(
+        ev_str(
+            "Error.stackTraceLimit = 0; \
+             function z() { return new Error('x').stack } \
+             z().indexOf('at ') < 0"
+        ),
+        "true"
+    );
+}
+
+#[test]
 fn stack_native_ne_laissent_pas_de_frame_orpheline() {
     // Les natives n'empilent pas : `map` invisible, mais la cb
     // script et son appelant encadrent correctement.

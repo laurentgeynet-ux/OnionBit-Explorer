@@ -73,8 +73,11 @@ const DEFAULT_EVAL_SRC_CAP: usize = 8 * 1024 * 1024;
 /// déclenchent une passe à la frontière de job suivante.
 const DEFAULT_GC_THRESHOLD: usize = 131_072;
 /// Frames rendues dans `error.stack`/`Uncaught` (JS-C47) —
-/// même borne que V8 (`Error.stackTraceLimit` = 10) : les
-/// frames utiles au diagnostic sont en tête de pile.
+/// défaut V8 (`Error.stackTraceLimit` = 10) quand la
+/// propriété du ctor est absente ou non lisible : les
+/// frames utiles au diagnostic sont en tête de pile. La
+/// valeur réellement appliquée est [`Self::stack_trace_limit`]
+/// — la propriété est **live** (assignable par la page).
 const STACK_TRACE_LIMIT: usize = 10;
 
 /// Hidden env bindings installed in class member scopes — the names
@@ -4257,19 +4260,20 @@ impl Engine {
     /// Rendu `stack` V8-style (JS-C47) : en-tête `Name: message`
     /// puis une ligne `    at <fn> (l:c)` par frame de la pile
     /// d'appels, appelant le plus récent d'abord — borné à
-    /// [`STACK_TRACE_LIMIT`] (V8 `stackTraceLimit` = 10 : une
-    /// récursion saturée ne rend pas mille lignes). La position
-    /// est celle de la **définition** de la fonction (l'AST ne
-    /// porte pas de span par statement — déviation documentée vs
-    /// le site d'appel de V8) ; `(0,0)` = fonction synthétique,
-    /// non rendue. Les natives n'empilent pas de frame.
+    /// [`Self::stack_trace_limit`] (V8 `stackTraceLimit`, live :
+    /// une récursion saturée ne rend pas mille lignes). La
+    /// position est celle de la **définition** de la fonction
+    /// (l'AST ne porte pas de span par statement — déviation
+    /// documentée vs le site d'appel de V8) ; `(0,0)` = fonction
+    /// synthétique, non rendue. Les natives n'empilent pas de
+    /// frame.
     pub(crate) fn stack_text(&self, name: &str, msg: &str) -> String {
         let mut s = if msg.is_empty() {
             name.to_string()
         } else {
             format!("{name}: {msg}")
         };
-        for lit in self.call_stack.iter().rev().take(STACK_TRACE_LIMIT) {
+        for lit in self.call_stack.iter().rev().take(self.stack_trace_limit()) {
             let n = lit.name.as_deref().unwrap_or("<anonymous>");
             s.push_str("\n    at ");
             s.push_str(n);
@@ -4284,6 +4288,29 @@ impl Engine {
             }
         }
         s
+    }
+
+    /// `Error.stackTraceLimit` **live** (V8) : own data
+    /// property du ctor `Error` relue à chaque capture —
+    /// `Error.stackTraceLimit = 3` borne le rendu à 3 frames,
+    /// `0`/négatif/`NaN`/non-nombre = aucune frame (V8 lit la
+    /// valeur en entier — un garbage coagule à 0 plutôt que
+    /// de casser). Borne interne [`STACK_TRACE_LIMIT`] si le
+    /// ctor ou la prop sont absents (boot précoce).
+    fn stack_trace_limit(&self) -> usize {
+        let Some(Value::Obj(err)) = self.heap.obj(self.global).and_then(|o| o.get_own("Error"))
+        else {
+            return STACK_TRACE_LIMIT;
+        };
+        match self
+            .heap
+            .obj(err)
+            .and_then(|o| o.get_own("stackTraceLimit"))
+        {
+            Some(Value::Num(n)) if n.is_finite() && n > 0.0 => n as usize,
+            Some(_) => 0,
+            None => STACK_TRACE_LIMIT,
+        }
     }
 
     /// Verbatim borné (`max` caractères) de la fonction en tête
