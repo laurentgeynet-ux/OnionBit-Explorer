@@ -12557,7 +12557,9 @@ File prioritaire courante — ordonnée sur les mesures
 YouTube ~212,6 s, JS ~50 % du wall). Assignation consolidée
 dans `interface-equipes.md` (entrée 2026-11-13) ; file PIPE
 miroir = « Plan perf archétypes » de
-`roadmap-equipe-pipeline.md`.
+`roadmap-equipe-pipeline.md` — **mode piste unique** : l'ordre
+séquentiel canonique y vit, les items N5.x s'y exécutent aux
+positions marquées.
 
 - [ ] **N5.0 — merge `performance` → `main`** : précondition à
   N5.4 et aux re-vols « sur main » (Étapes 232-235 livrées sur

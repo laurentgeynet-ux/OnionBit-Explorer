@@ -4476,6 +4476,17 @@ chantiers 8-12ter, entrée d'assignation `interface-equipes.md`
 étape prend le numéro R- suivant, les extensions de contrat
 restent journalisées.
 
+**Mode piste unique (2026-11-13)** — un opérateur porte les
+deux chapeaux séquentiellement ; l'ordre est imposé par les
+dépendances, pas par les équipes : N5.0 merge `performance` →
+`main` → **frontière** → câblage N5.4 + re-vol → **may_escape**
+→ **ops groupe** → vol `--release` N5.1/N5.2/N5.3 →
+opportunistes (N5.6 `entities`, sonde draw, `content-visibility`)
+→ Étape 239. Chaque commit reste étiqueté par périmètre
+(`css`/`layout`/`render` = PIPE, `core`/`jscore` = NAV) ; le
+sign-off croisé des specs devient une revue de design écrite
+au journal **avant** code.
+
 - [ ] **Cascade frontière** (`explorer-css`) — `incr.cascade`
   8,5-10,4 s = poste n°1 dev.to. Extension **additive** de
   `compute_scoped`/`apply_scoped` :
