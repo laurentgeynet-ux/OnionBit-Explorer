@@ -5856,7 +5856,7 @@ fn style_sheet_cache_reuses_and_tracks_edits() {
         explorer_css::ColorScheme::Light,
         false,
         1.0,
-        None,
+        &[],
         apply::PhaseKind::Flow,
         0,
     );
@@ -5871,7 +5871,7 @@ fn style_sheet_cache_reuses_and_tracks_edits() {
         explorer_css::ColorScheme::Light,
         false,
         1.0,
-        None,
+        &[],
         apply::PhaseKind::Flow,
         0,
     );
@@ -5885,7 +5885,7 @@ fn style_sheet_cache_reuses_and_tracks_edits() {
         explorer_css::ColorScheme::Light,
         false,
         1.0,
-        None,
+        &[],
         apply::PhaseKind::Flow,
         0,
     );
@@ -5924,7 +5924,7 @@ fn style_sheet_cache_bounded() {
         explorer_css::ColorScheme::Light,
         false,
         1.0,
-        None,
+        &[],
         apply::PhaseKind::Flow,
         0,
     );
@@ -5955,7 +5955,7 @@ fn styles_scoped_merges_dirty_subtree() {
         explorer_css::ColorScheme::Light,
         false,
         1.0,
-        None,
+        &[],
         apply::PhaseKind::Flow,
         0,
     );
@@ -5982,7 +5982,7 @@ fn styles_scoped_merges_dirty_subtree() {
         explorer_css::ColorScheme::Light,
         false,
         1.0,
-        Some(par),
+        &[par],
         apply::PhaseKind::Flow,
         0,
     );
@@ -6031,7 +6031,7 @@ fn styles_scoped_falls_back_on_has() {
         explorer_css::ColorScheme::Light,
         false,
         1.0,
-        None,
+        &[],
         apply::PhaseKind::Flow,
         0,
     );
@@ -6049,10 +6049,26 @@ fn styles_scoped_falls_back_on_has() {
     p.style_eng = Some(eng);
     // i : .a → .b — o cesse de matcher :has(.a), mais o est
     // HORS du sous-arbre scopé (parent(i) = w) : seule la
-    // cascade complète peut le restyler.
+    // cascade complète peut le restyler. Étape 234 : la
+    // garde voit l'op `SetAttr{class}` toucher la dep `.a`
+    // de l'arg → `has_dep_touched` → repli identique.
     let i = dom.by_id("i").unwrap();
     dom.set_attribute(i, "class", "b").unwrap();
     let w = dom.parent(i).ok().flatten().unwrap();
+    p.has_dep_touched = apply::journal_op_touches_has(
+        &explorer_js::DomMutation::SetAttr {
+            key: 0,
+            name: "class".to_string(),
+            value: Some("b".to_string()),
+        },
+        p.eng_has_deps.as_ref().unwrap(),
+        &dom,
+        &p.keymap,
+    );
+    assert!(
+        p.has_dep_touched,
+        "SetAttr{{class}} doit toucher la dep classe `.a`"
+    );
     let (styles2, _e2) = apply::styles_payload(
         &mut p,
         &dom,
@@ -6060,7 +6076,7 @@ fn styles_scoped_falls_back_on_has() {
         explorer_css::ColorScheme::Light,
         false,
         1.0,
-        Some(w),
+        &[w],
         apply::PhaseKind::Flow,
         0,
     );
@@ -6071,6 +6087,485 @@ fn styles_scoped_falls_back_on_has() {
     assert!(
         !color.contains("#ff0000"),
         ":has → repli complet — #o restylé hors scope, reçu {color}"
+    );
+}
+
+/// Étape 234 — extraction des dépendances d'args `:has(` :
+/// chaque catégorie (attr/classe/id/tag) alimente son jeu,
+/// les combinators et pseudos positionnels arment
+/// `structural`, le contenu non modélisable rend `None`, et
+/// le faux positif du substring-check est corrigé.
+#[test]
+fn has_deps_extraction() {
+    use apply::prelude_has_deps as pd;
+    // Le motif réel de dev.to — args d'attributs purs.
+    let d = pd("x:not(:has([data-u]:not([data-p='t'])))").unwrap();
+    assert_eq!(d.attrs, ["data-u", "data-p"]);
+    assert!(!d.structural && !d.unanalyzable);
+    assert_eq!(pd(".below:has([data-u])").unwrap().attrs, ["data-u"]);
+    // Classes, ids, tags.
+    assert_eq!(pd("div:has(.a .b)").unwrap().classes, ["a", "b"]);
+    assert_eq!(pd("div:has(#x)").unwrap().ids, ["x"]);
+    assert_eq!(pd("div:has(img)").unwrap().tags, ["img"]);
+    // `:has` niché — les deps fusionnent.
+    let d = pd("div:has(.a:has(#b))").unwrap();
+    assert_eq!(d.classes, ["a"]);
+    assert_eq!(d.ids, ["b"]);
+    // Structural : combinators, `*`, positionnels, `:empty`.
+    assert!(pd("div:has(> .a)").unwrap().structural);
+    assert!(pd("div:has(+ .a)").unwrap().structural);
+    assert!(pd("div:has(.a > .b)").unwrap().structural);
+    assert!(pd("div:has(*)").unwrap().structural);
+    assert!(pd("div:has(.a:nth-child(2))").unwrap().structural);
+    assert!(pd("div:has(.a:empty)").unwrap().structural);
+    assert!(!pd("div:has(.a .b)").unwrap().structural);
+    // Pseudos dynamiques : réfléchis par attribut → dep ;
+    // pointeur/clavier → aucune dep DOM.
+    assert_eq!(pd("div:has(:checked)").unwrap().attrs, ["checked"]);
+    assert!(pd("div:has(:hover)").unwrap().is_empty());
+    // Non analysables → `None` (repli étape 228).
+    assert!(pd("div:has(::part(x))").is_none());
+    assert!(pd("div:has(:valid)").is_none());
+    // Faux positif du substring-check : `:has(` dans une
+    // valeur d'attribut → aucun `PseudoClass::Has` réel →
+    // deps vides → le restyle scopé survit.
+    let d = pd("a[href=':has(']").unwrap();
+    assert!(d.is_empty() && !d.unanalyzable);
+    // Sans `:has` — deps vides.
+    assert!(pd("div.a").unwrap().is_empty());
+}
+
+/// Étape 234 — le prédicat op→deps : `SetAttr` touche par
+/// nom (attr/classe/id), `Insert` par tags et contenu, le
+/// `Remove` signe le sous-arbre retiré, `structural` et
+/// `AttachShadow` restent conservateurs.
+#[allow(clippy::too_many_lines)]
+#[test]
+fn journal_op_touches_has_variants() {
+    use explorer_js::DomMutation as M;
+    let dom = test_dom(
+        "<div id=o><span id=i data-x></span><ul><li>a</li></ul></div>\
+         <style id=st>p{}</style>",
+    );
+    // Deps « profil dev.to » : un seul attribut.
+    let deps = apply::HasDeps {
+        attrs: vec!["data-x".to_string()],
+        ..apply::HasDeps::default()
+    };
+    let keymap = HashMap::new();
+    let set = |name: &str| M::SetAttr {
+        key: 0,
+        name: name.to_string(),
+        value: None,
+    };
+    // SetAttr : nom exact, `class`/`id` routés sur leurs jeux.
+    assert!(apply::journal_op_touches_has(
+        &set("data-x"),
+        &deps,
+        &dom,
+        &keymap
+    ));
+    assert!(!apply::journal_op_touches_has(
+        &set("title"),
+        &deps,
+        &dom,
+        &keymap
+    ));
+    assert!(!apply::journal_op_touches_has(
+        &set("class"),
+        &deps,
+        &dom,
+        &keymap
+    ));
+    let classes = apply::HasDeps {
+        classes: vec!["a".to_string()],
+        ..apply::HasDeps::default()
+    };
+    // Clé inconnue → doute → touch.
+    assert!(apply::journal_op_touches_has(
+        &set("class"),
+        &classes,
+        &dom,
+        &keymap
+    ));
+    // Précision (étape 234) : le touch exige que
+    // l'appartenance à une classe-dep **bascule** —
+    // sinon tout toggle `class` replierait (mutations
+    // les plus fréquentes des journaux réels).
+    let dom2 = test_dom("<div id=n class='a b'></div><div id=m class='c'></div>");
+    let mut km2 = HashMap::new();
+    km2.insert(1u64, dom2.by_id("n").unwrap());
+    km2.insert(2u64, dom2.by_id("m").unwrap());
+    let setv = |key: u64, v: &str| M::SetAttr {
+        key,
+        name: "class".to_string(),
+        value: Some(v.to_string()),
+    };
+    // a → b : la dep `.a` est perdue → touch.
+    assert!(apply::journal_op_touches_has(
+        &setv(1, "b"),
+        &classes,
+        &dom2,
+        &km2
+    ));
+    // a → a c : `.a` conservée → pas de touch.
+    assert!(!apply::journal_op_touches_has(
+        &setv(1, "a c"),
+        &classes,
+        &dom2,
+        &km2
+    ));
+    // c → c d : aucune dep en jeu → pas de touch.
+    assert!(!apply::journal_op_touches_has(
+        &setv(2, "c d"),
+        &classes,
+        &dom2,
+        &km2
+    ));
+    // c → a : la dep `.a` apparaît → touch.
+    assert!(apply::journal_op_touches_has(
+        &setv(2, "a"),
+        &classes,
+        &dom2,
+        &km2
+    ));
+    let ids = apply::HasDeps {
+        ids: vec!["x".to_string()],
+        ..apply::HasDeps::default()
+    };
+    assert!(apply::journal_op_touches_has(
+        &set("id"),
+        &ids,
+        &dom,
+        &keymap
+    ));
+    // id précis : n→x arme la dep, m→y ne la touche pas.
+    let setid = |key: u64, v: &str| M::SetAttr {
+        key,
+        name: "id".to_string(),
+        value: Some(v.to_string()),
+    };
+    assert!(apply::journal_op_touches_has(
+        &setid(1, "x"),
+        &ids,
+        &dom2,
+        &km2
+    ));
+    assert!(!apply::journal_op_touches_has(
+        &setid(2, "y"),
+        &ids,
+        &dom2,
+        &km2
+    ));
+    // Insert : tag dans `tags` ; attrs/classes/ids dans l'html.
+    let ins = |html: &str, tags: Vec<&str>| M::Insert {
+        parent: 0,
+        index: 0,
+        html: html.to_string(),
+        ids: Vec::new(),
+        tags: tags.iter().map(|t| (*t).to_string()).collect(),
+    };
+    assert!(apply::journal_op_touches_has(
+        &ins("<b data-x>", vec!["b"]),
+        &deps,
+        &dom,
+        &keymap
+    ));
+    assert!(!apply::journal_op_touches_has(
+        &ins("<b>", vec!["b"]),
+        &deps,
+        &dom,
+        &keymap
+    ));
+    assert!(apply::journal_op_touches_has(
+        &ins("<i class=a>", vec!["i"]),
+        &classes,
+        &dom,
+        &keymap
+    ));
+    assert!(apply::journal_op_touches_has(
+        &ins("<article>", vec!["article"]),
+        &apply::HasDeps {
+            tags: vec!["article".to_string()],
+            ..apply::HasDeps::default()
+        },
+        &dom,
+        &keymap,
+    ));
+    // Structural : tout change structurel touche.
+    let structural = apply::HasDeps {
+        structural: true,
+        ..apply::HasDeps::default()
+    };
+    assert!(apply::journal_op_touches_has(
+        &ins("<b>", vec!["b"]),
+        &structural,
+        &dom,
+        &keymap
+    ));
+    assert!(apply::journal_op_touches_has(
+        &M::SetText {
+            key: 0,
+            text: "x".to_string()
+        },
+        &structural,
+        &dom,
+        &keymap,
+    ));
+    // `SetText` sans structural : sauf dans `<style>`
+    // (op_may_mutate_sheets — couvert plus bas).
+    assert!(!apply::journal_op_touches_has(
+        &M::SetText {
+            key: 0,
+            text: "x".to_string()
+        },
+        &deps,
+        &dom,
+        &keymap,
+    ));
+    // Remove : signature du sous-arbre retiré contre les deps.
+    let i = dom.by_id("i").unwrap();
+    let li = {
+        let o = dom.by_id("o").unwrap();
+        let kids = dom.children(o).unwrap();
+        kids[1] // <ul>
+    };
+    let mut km = HashMap::new();
+    km.insert(7u64, i);
+    km.insert(8u64, li);
+    km.insert(9u64, dom.by_id("o").unwrap());
+    // <span data-x> retiré → dep attr touchée.
+    assert!(apply::journal_op_touches_has(
+        &M::Remove { key: 7 },
+        &deps,
+        &dom,
+        &km
+    ));
+    // <ul> sans data-x → pas de hit.
+    assert!(!apply::journal_op_touches_has(
+        &M::Remove { key: 8 },
+        &deps,
+        &dom,
+        &km
+    ));
+    // <div id=o> contient un descendant data-x → hit.
+    assert!(apply::journal_op_touches_has(
+        &M::Remove { key: 9 },
+        &deps,
+        &dom,
+        &km
+    ));
+    // Clé inconnue → doute → touch (conservateur).
+    assert!(apply::journal_op_touches_has(
+        &M::Remove { key: 42 },
+        &deps,
+        &dom,
+        &km
+    ));
+    // AttachShadow : conservateur si deps non vides.
+    assert!(apply::journal_op_touches_has(
+        &M::AttachShadow {
+            host: 0,
+            root: 0,
+            open: true
+        },
+        &deps,
+        &dom,
+        &keymap,
+    ));
+    assert!(!apply::journal_op_touches_has(
+        &M::AttachShadow {
+            host: 0,
+            root: 0,
+            open: true
+        },
+        &apply::HasDeps::default(),
+        &dom,
+        &keymap,
+    ));
+    // Feuilles mutées : <style>/<link> insérés, texte dans <style>.
+    assert!(apply::op_may_mutate_sheets(
+        &ins("<style>p{}", vec!["style"]),
+        &dom,
+        &keymap
+    ));
+    assert!(apply::op_may_mutate_sheets(
+        &ins("<link rel=stylesheet>", vec!["link"]),
+        &dom,
+        &keymap,
+    ));
+    assert!(!apply::op_may_mutate_sheets(
+        &ins("<b>", vec!["b"]),
+        &dom,
+        &keymap
+    ));
+    let style_text = dom.children(dom.by_id("st").unwrap()).unwrap()[0];
+    let mut km2 = HashMap::new();
+    km2.insert(5u64, style_text);
+    assert!(apply::op_may_mutate_sheets(
+        &M::SetText {
+            key: 5,
+            text: "q{}".to_string()
+        },
+        &dom,
+        &km2,
+    ));
+    assert!(!apply::op_may_mutate_sheets(
+        &M::SetText {
+            key: 0,
+            text: "x".to_string()
+        },
+        &dom,
+        &km2,
+    ));
+}
+
+/// Étape 234 — restyle scopé **conservé** quand aucune op
+/// du journal ne touche une dépendance `:has` : la preuve
+/// est le nœud hors-scope `#other`, dont l'entrée reste
+/// figée (une cascade complète l'aurait ré-évalué en bleu).
+#[test]
+fn styles_scoped_survives_has_untouched_dep() {
+    let mut p = apply::PaintPayload::default();
+    let mut dom = test_dom(
+        "<style>div:has([data-x]) { color: #ff0000 } .b { color: #00ff00 }\
+         .x { color: #0000ff }</style>\
+         <div id=o><div id=w><span id=i data-x class=a></span></div></div>\
+         <div id=other></div>",
+    );
+    let (styles, eng) = apply::styles_payload(
+        &mut p,
+        &dom,
+        (800.0, 600.0),
+        explorer_css::ColorScheme::Light,
+        false,
+        1.0,
+        &[],
+        apply::PhaseKind::Flow,
+        0,
+    );
+    assert!(p.eng_has_relational, "le drapeau :has est posé");
+    assert_eq!(
+        p.eng_has_deps.as_ref().unwrap().attrs,
+        ["data-x"],
+        "dep extraite de l'arg"
+    );
+    let color_of = |m: &StyleMap, n: explorer_dom::NodeId| {
+        m.get(n)
+            .and_then(|c| c.get("color").map(str::to_string))
+            .unwrap_or_default()
+    };
+    let o = dom.by_id("o").unwrap();
+    assert!(
+        color_of(&styles, o).contains("#ff0000"),
+        "o matche :has initialement"
+    );
+    p.styles = Some(styles);
+    p.style_eng = Some(eng);
+    // Op : `class` changé sur i (hors dep `data-x`) +
+    // `class=x` ajouté sur #other (hors scope) — aucune dep
+    // touchée. Le verdict remplace `has_dep_touched` (posé
+    // à `true` par le rebuild ci-dessus — caducité index)
+    // comme le ferait `apply_journal` en vraie passe.
+    let i = dom.by_id("i").unwrap();
+    dom.set_attribute(i, "class", "b").unwrap();
+    let other = dom.by_id("other").unwrap();
+    dom.set_attribute(other, "class", "x").unwrap();
+    p.has_dep_touched = ["class", "class"].iter().any(|name| {
+        apply::journal_op_touches_has(
+            &explorer_js::DomMutation::SetAttr {
+                key: 0,
+                name: (*name).to_string(),
+                value: None,
+            },
+            p.eng_has_deps.as_ref().unwrap(),
+            &dom,
+            &p.keymap,
+        )
+    });
+    assert!(!p.has_dep_touched, "class hors deps → pas de touch");
+    let w = dom.parent(i).ok().flatten().unwrap();
+    let (styles2, _e2) = apply::styles_payload(
+        &mut p,
+        &dom,
+        (800.0, 600.0),
+        explorer_css::ColorScheme::Light,
+        false,
+        1.0,
+        &[w],
+        apply::PhaseKind::Flow,
+        0,
+    );
+    assert!(
+        color_of(&styles2, i).contains("#00ff00"),
+        "i reclassé .b → vert dans le scope"
+    );
+    assert!(
+        color_of(&styles2, o).contains("#ff0000"),
+        "o garde :has([data-x]) — dep non touchée, encore vrai"
+    );
+    assert!(
+        !color_of(&styles2, other).contains("#0000ff"),
+        "#other hors scope : entrée figée → preuve du scoped"
+    );
+}
+
+/// Étape 234 — arg `:has` non analysable (`:valid` dépend
+/// de l'interaction, hors journal) : `eng_has_deps = None`
+/// → le drapeau binaire de l'étape 228 fait foi — repli
+/// complet à chaque passe scopée.
+#[test]
+fn styles_scoped_falls_back_on_has_unanalyzable() {
+    let mut p = apply::PaintPayload::default();
+    let mut dom = test_dom(
+        "<style>div:has(input:valid) { color: #ff0000 }\
+         .x { color: #0000ff }</style>\
+         <div id=o><div id=w><input id=i></div></div>\
+         <div id=other></div>",
+    );
+    let (base, engine) = apply::styles_payload(
+        &mut p,
+        &dom,
+        (800.0, 600.0),
+        explorer_css::ColorScheme::Light,
+        false,
+        1.0,
+        &[],
+        apply::PhaseKind::Flow,
+        0,
+    );
+    assert!(p.eng_has_relational);
+    assert!(
+        p.eng_has_deps.is_none(),
+        ":valid non analysable → index absent → repli 228"
+    );
+    p.styles = Some(base);
+    p.style_eng = Some(engine);
+    let i = dom.by_id("i").unwrap();
+    dom.set_attribute(i, "data-y", "1").unwrap();
+    let other = dom.by_id("other").unwrap();
+    dom.set_attribute(other, "class", "x").unwrap();
+    let w = dom.parent(i).ok().flatten().unwrap();
+    let (styles2, _e2) = apply::styles_payload(
+        &mut p,
+        &dom,
+        (800.0, 600.0),
+        explorer_css::ColorScheme::Light,
+        false,
+        1.0,
+        &[w],
+        apply::PhaseKind::Flow,
+        0,
+    );
+    // Repli complet : #other hors scope est ré-évalué —
+    // preuve que compute_tree (global) a tourné.
+    assert_eq!(
+        styles2
+            .get(other)
+            .and_then(|c| c.get("color"))
+            .unwrap_or_default(),
+        "#0000ff",
+        "repli 228 conservé : hors-scope ré-évalué"
     );
 }
 
@@ -6090,7 +6585,7 @@ fn styles_scoped_needs_persisted_base() {
         explorer_css::ColorScheme::Light,
         false,
         1.0,
-        None,
+        &[],
         apply::PhaseKind::Flow,
         0,
     );
@@ -6106,7 +6601,7 @@ fn styles_scoped_needs_persisted_base() {
         explorer_css::ColorScheme::Light,
         false,
         1.0,
-        Some(some_el),
+        &[some_el],
         apply::PhaseKind::Flow,
         0,
     );

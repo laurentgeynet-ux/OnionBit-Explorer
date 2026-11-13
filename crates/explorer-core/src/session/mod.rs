@@ -410,6 +410,12 @@ pub(crate) struct Tab {
     /// mutation, portée non bornable côté NAV → re-cascade
     /// complète (conservateur).
     eng_has_relational: bool,
+    /// Index de dépendances des args `:has(` (étape 234) —
+    /// `Some` = tous analysables : le restyle scopé reste
+    /// possible tant qu'aucune op du journal ne touche une
+    /// dépendance ; `None` = pas de `:has` ou arg non
+    /// modélisable (le drapeau binaire fait foi).
+    eng_has_deps: Option<apply::HasDeps>,
     /// `StyleEnv` de la passe qui a produit `styles` — un
     /// viewport/schéma/scripting/dpr différent invalide la
     /// map (media queries).
@@ -1721,6 +1727,7 @@ impl Session {
                 style_eng: None,
                 style_sig: None,
                 eng_has_relational: false,
+                eng_has_deps: None,
                 styles_env: None,
                 defined_names: Vec::new(),
                 frames: Vec::new(),

@@ -289,7 +289,7 @@ impl Session {
             self.color_scheme,
             entry.js.is_some(),
             self.scale,
-            None,
+            &[],
             apply::PhaseKind::Flow,
             tab,
         );

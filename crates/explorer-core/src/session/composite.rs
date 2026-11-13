@@ -334,7 +334,7 @@ fn render_subframe(
         ctx.color_scheme,
         child_ctx.scripting,
         ctx.scale,
-        None,
+        &[],
         PhaseKind::Sub,
         tab,
     );

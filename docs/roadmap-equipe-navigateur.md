@@ -12368,6 +12368,65 @@ un crate PIPELINE.- [x] **JS-C422. Deadline honnête — canal session ↔ budge
   8,5-10,4 s = premier poste.
   Golden fenêtré + clips +
   masks verts.
+- [x] **Étape 234. Garde `:has`
+  par dépendances + restyle
+  multi-scope — mécanique prouvée
+  (68 nœuds → 0,19 s), dev.to
+  borné par la géométrie des
+  mutations** (audit perf chantier
+  12 — demande (a) soldée côté
+  NAV, **zéro modif PIPE** :
+  extraction sur l'AST public
+  `explorer-css`) : `HasDeps`
+  {attrs, classes, ids, tags,
+  structural, unanalyzable} uni
+  par feuille/moteur (y compris
+  `:has` nichés dans `:not`/`:is`/
+  `:where`, at-rules, args à
+  combinateur de tête) ; verdict
+  `journal_op_touches_has`
+  conservateur par op **avant
+  rejeu** (sous-arbres `Remove`
+  signables) — `SetAttr class/id`
+  précis : touch seulement si
+  l'appartenance à une dep
+  **bascule** (le toggle
+  `authentication-modal hidden`
+  ne replie plus) ; `Insert` =
+  tags + scan html borné 1 Mio,
+  `Remove` = signature sous-arbre
+  borné 512, `SetText`/`structural`,
+  `AttachShadow`/unanalyzable →
+  repli ; `op_may_mutate_sheets`
+  (`<style>`/`<link>` insérés,
+  `SetText` dans `<style>`) touche
+  d'office ; index caduc →
+  `has_dep_touched=true` au
+  rebuild. Multi-scope :
+  `journal_style_scopes` = un
+  `parent(touché)` par cible,
+  dédup + élagage ancêtre, cap
+  `MAX_STYLE_SCOPES=32` → repli
+  LCA ; `styles_payload` boucle
+  `compute_scoped`+`apply_scoped`
+  par racine. **Vol dev.to
+  surveillé (161 s)** : 0 op
+  réelle touchant une dep, 3
+  passes scoped autorisées —
+  `scope_nodes` 4 754 → 10,7 s,
+  5 317 → 9,5 s, **68 → 0,19 s**
+  (~×50 : la mécanique est
+  prouvée). Borne honnête : les
+  mutations dominantes partagent
+  un parent unique ~4,7-5,3k
+  nœuds (le conteneur de feed) →
+  dédup à 1 scope ≈ document →
+  le mur résiduel est la
+  granularité sous-arbre
+  (frontière ancêtres+frères =
+  chantier PIPE, journalisé).
+  148 lib verts, verrous
+  extraction/ops/survie/repli.
 
 ## Plan NAVIGATEUR — vitrine YouTube + surface navigateur (2026-11-12)
 

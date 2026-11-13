@@ -210,6 +210,7 @@ pub(crate) fn run_apply_job(
 /// sous-contexte `<iframe>` en consomme une par passe
 /// (étape 129 : `dom` reste `None`, l'arbre est passé
 /// par référence).
+#[allow(clippy::struct_excessive_bools)]
 #[derive(Default)]
 pub(crate) struct PaintPayload {
     /// DOM parsé commis.
@@ -308,6 +309,17 @@ pub(crate) struct PaintPayload {
     /// `:has(` présent dans les feuilles de `style_eng` —
     /// interdit le restyle scopé (portée non bornable).
     pub eng_has_relational: bool,
+    /// Index de dépendances des args `:has(` (étape 234) —
+    /// `Some` = tous les args analysables : la garde op par
+    /// op (`journal_op_touches_has`) décide alors ; `None` =
+    /// pas de `:has` **ou** arg non modélisable (le drapeau
+    /// binaire fait foi — repli de l'étape 228).
+    pub eng_has_deps: Option<HasDeps>,
+    /// Verdict de l'apply en cours : une op du journal a
+    /// touché une dépendance `:has` (ou une feuille —
+    /// `op_may_mutate_sheets`). Posé par `apply_journal`
+    /// avant le rejeu, lu par la garde `scoped_ok`.
+    pub has_dep_touched: bool,
     /// `StyleEnv` de la passe qui a produit `styles`.
     pub styles_env: Option<StyleEnv>,
     /// Styles bruts de la dernière cascade (transitions).
@@ -517,6 +529,8 @@ impl Tab {
             style_eng: self.style_eng.take(),
             style_sig: self.style_sig,
             eng_has_relational: self.eng_has_relational,
+            eng_has_deps: self.eng_has_deps.take(),
+            has_dep_touched: false,
             styles_env: self.styles_env.take(),
             prev_styles: std::mem::take(&mut self.prev_styles),
             transitions: std::mem::take(&mut self.transitions),
@@ -586,6 +600,7 @@ impl Tab {
         self.style_eng = p.style_eng;
         self.style_sig = p.style_sig;
         self.eng_has_relational = p.eng_has_relational;
+        self.eng_has_deps = p.eng_has_deps;
         self.styles_env = p.styles_env;
         self.prev_styles = p.prev_styles;
         self.transitions = p.transitions;
@@ -794,6 +809,7 @@ pub(crate) fn apply_payload(
                 t_old,
                 t_new,
                 &job.canvas_ops,
+                &[],
             )
         });
     out.incremental = incremental;
@@ -1726,6 +1742,37 @@ fn apply_journal(
         fp = journal.fingerprint,
         "journal: apply"
     );
+    // Étape 234 — verdict de la garde `:has` AVANT le
+    // rejeu : les sous-arbres des `Remove` sont encore
+    // accessibles pour la signature tag/attr/class/id, et
+    // `eng_has_deps` reflète les feuilles **avant** les ops
+    // (une op qui peut muter l'ensemble des feuilles touche
+    // d'office — deps fraîches inconnues à ce stade). Le
+    // break garde la première op fautive pour le diagnostic.
+    p.has_dep_touched = {
+        let Some(dom) = p.dom.as_ref() else {
+            return Err(JournalReject::NoDom);
+        };
+        let mut hit = None;
+        for (op_i, op) in journal.ops.iter().enumerate() {
+            if op_may_mutate_sheets(op, dom, &p.keymap)
+                || p.eng_has_deps
+                    .as_ref()
+                    .is_some_and(|d| journal_op_touches_has(op, d, dom, &p.keymap))
+            {
+                hit = Some(op_i);
+                break;
+            }
+        }
+        if let Some(op_i) = hit {
+            dlv_info!(
+                op_i,
+                op = %journal_op_desc(&journal.ops[op_i]),
+                "has_dep: op touchée → repli cascade"
+            );
+        }
+        hit.is_some()
+    };
     let mut touched = Vec::new();
     for (op_i, op) in journal.ops.iter().enumerate() {
         // §B-111 — breadcrumb opt-in : la dernière ligne avant
@@ -1840,7 +1887,20 @@ pub(crate) fn relayout_subtree_payload(
     target: explorer_dom::NodeId,
     canvas_ops: &CanvasOpsTable,
 ) -> Result<(), CoreError> {
-    if try_incr_payload(p, ctx, tab, Some(dom), dom, target, target, canvas_ops) {
+    // Scope de restyle = `parent(cible)` — le contrat de
+    // l'étape 228 porté au slice multi-scope de l'étape 234.
+    let scope = dom.parent(target).ok().flatten();
+    if try_incr_payload(
+        p,
+        ctx,
+        tab,
+        Some(dom),
+        dom,
+        target,
+        target,
+        canvas_ops,
+        scope.as_slice(),
+    ) {
         Ok(())
     } else {
         relayout_dom_payload(p, ctx, tab, dom, canvas_ops)
@@ -1876,7 +1936,18 @@ fn journal_relayout(
     };
     dlv_info!(touched = touched.len(), "journal: relayout");
     let incremental = journal_cover(&dom, touched).is_some_and(|t| {
-        try_incr_payload(p, ctx, job.tab, Some(&dom), &dom, t, t, &job.canvas_ops)
+        let scopes = journal_style_scopes(&dom, touched, t);
+        try_incr_payload(
+            p,
+            ctx,
+            job.tab,
+            Some(&dom),
+            &dom,
+            t,
+            t,
+            &job.canvas_ops,
+            &scopes,
+        )
     });
     if !incremental && relayout_dom_payload(p, ctx, job.tab, &dom, &job.canvas_ops).is_err() {
         p.dom = Some(dom);
@@ -1925,7 +1996,61 @@ pub(crate) fn journal_cover(
     chain.get(allowed).copied()
 }
 
-/// `try_sync_incremental` sur payload — mêmes gardes que
+/// Borne du nombre de fronts de restyle scopé par apply
+/// journal (étape 234) — au-delà, le scope LCA historique
+/// fait foi (un journal massif à cent fronts coûterait plus
+/// qu'une cascade unique). Règle §4.13.
+const MAX_STYLE_SCOPES: usize = 32;
+
+/// Scopes de restyle de la voie journal (étape 234) — un
+/// scope = `parent(nœud touché)`, par nœud plutôt qu'au
+/// parent du LCA : chacun couvre la cible, ses frères
+/// (`~`/`+`/`:nth-*`), son `:empty` et ses descendants —
+/// le contrat de l'étape 228, sans gonfler au LCA quand les
+/// mutations sont dispersées (un scope unique mesuré à
+/// 4 610 nœuds ≈ tout le document sur dev.to). Les scopes
+/// contenus dans un autre sont dédupliqués ; un scope sans
+/// parent (mutation de l'élément racine) replie la passe
+/// en cascade complète via la garde d'amont.
+fn journal_style_scopes(
+    dom: &Dom,
+    touched: &[explorer_dom::NodeId],
+    cover: explorer_dom::NodeId,
+) -> Vec<explorer_dom::NodeId> {
+    let mut scopes: Vec<explorer_dom::NodeId> = Vec::with_capacity(touched.len());
+    for &n in touched {
+        if let Ok(Some(par)) = dom.parent(n) {
+            if !scopes.contains(&par) {
+                scopes.push(par);
+            }
+        }
+    }
+    // Un scope descendant d'un autre est déjà couvert par
+    // le sous-arbre de celui-ci.
+    let keep: Vec<bool> = scopes
+        .iter()
+        .enumerate()
+        .map(|(i, &s)| {
+            !scopes
+                .iter()
+                .enumerate()
+                .any(|(j, &o)| j != i && dom.is_ancestor(o, s).unwrap_or(false))
+        })
+        .collect();
+    let mut kept = Vec::with_capacity(scopes.len());
+    for (s, k) in scopes.into_iter().zip(keep) {
+        if k {
+            kept.push(s);
+        }
+    }
+    let scopes = kept;
+    if scopes.len() > MAX_STYLE_SCOPES {
+        // Fronts trop nombreux — le scope LCA historique
+        // borne le coût (équivalent à l'étape 228).
+        return dom.parent(cover).ok().flatten().into_iter().collect();
+    }
+    scopes
+}
 /// la version session : cible résolue dans les deux DOM,
 /// remap des ids conservés, repli `false` → reflow global.
 #[allow(clippy::too_many_arguments)] // cible/canvas : même paquetage que `relayout_dom_payload`.
@@ -1938,6 +2063,7 @@ fn try_incr_payload(
     target_old: explorer_dom::NodeId,
     target_new: explorer_dom::NodeId,
     canvas_ops: &CanvasOpsTable,
+    style_scopes: &[explorer_dom::NodeId],
 ) -> bool {
     // Phase 1 — cible résolue par l'appelant (chemin DOM ou
     // `NodeId` d'op journal — 137a : les ops rejouées portent
@@ -1973,18 +2099,23 @@ fn try_incr_payload(
         &viewport_env(ctx.viewport, ctx.color_scheme, ctx.scripting, ctx.scale),
     );
     t = sync_phase(tab, "incr.rekey", t);
-    // Étape 228 — restyle scopé à `parent(target)` (voie
-    // journal in-place seule — `old_dom_opt` présent = même
-    // objet `Dom` ancien/nouveau ; `None` = re-parse, ids
-    // nouveaux → re-cascade complète). Le parent couvre les
-    // combinators `~`/`+`/`:nth-*` sur les frères, `:empty`
-    // et les descendants de la cible ; `:has(` et racine
-    // morte replient en interne. `eng` inutilisé en aval :
-    // la passe 2 `@container` est bornée à
+    // Étape 234 — restyle scopé multi-front (voie journal
+    // in-place seule — `old_dom_opt` présent = même objet
+    // `Dom` ancien/nouveau ; `None` = re-parse, ids
+    // nouveaux → re-cascade complète). `style_scopes` =
+    // les `parent(nœud touché)` dédupliqués — chacun couvre
+    // cible, frères (`~`/`+`/`:nth-*`), `:empty` et
+    // descendants ; la garde `:has` par dépendances et les
+    // racines mortes replient en interne. `eng` inutilisé
+    // en aval : la passe 2 `@container` est bornée à
     // `relayout_dom_payload` (demande PIPE journalisée — la
     // voie incrémentale garde les règles inertes) → il est
     // re-persisté tout de suite pour la passe suivante.
-    let scope_root = old_dom_opt.and_then(|_| new_dom.parent(target_new).ok().flatten());
+    let scope_roots: &[explorer_dom::NodeId] = if old_dom_opt.is_some() {
+        style_scopes
+    } else {
+        &[]
+    };
     let (styles, eng) = styles_payload(
         p,
         new_dom,
@@ -1992,7 +2123,7 @@ fn try_incr_payload(
         ctx.color_scheme,
         ctx.scripting,
         ctx.scale,
-        scope_root,
+        scope_roots,
         PhaseKind::Incr,
         tab,
     );
@@ -2143,61 +2274,481 @@ fn sheet_parsed<'a>(
     cache.get(css)
 }
 
-/// `true` si un prélude sélecteur porte `:has(` — le restyle
-/// scopé est alors interdit (étape 228) : un nœud hors du
-/// sous-arbre sale peut dépendre de la mutation. Le prélude
-/// est la chaîne brute — un `:has(` en argument
-/// d'attribut/pseudo faussement positif retombe sur la
-/// cascade complète (conservateur, jamais de faux négatif).
+/// `true` si un prélude sélecteur porte `:has(` —
+/// court-circuit du scan de dépendances (étape 234) : un
+/// prélude sans la sous-chaîne ne peut produire ni drapeau
+/// relationnel ni deps. Le prélude est la chaîne brute —
+/// un `:has(` en argument d'attribut/pseudo est un faux
+/// positif du test, corrigé en aval par [`prelude_has_deps`]
+/// qui ne trouve alors aucun `PseudoClass::Has` réel.
 fn prelude_has_relational(prelude: &str) -> bool {
     prelude.contains(":has(")
 }
 
-/// Récursion `Rule`/`AtRule` — les blocs `@media`/
-/// `@supports`/`@container`/`@layer`/`@scope`/`@starting-
-/// style` portent leurs règles imbriquées.
-fn rules_have_relational(rules: &[explorer_css::Rule]) -> bool {
-    rules.iter().any(|r| match r {
-        explorer_css::Rule::Qualified(q) => prelude_has_relational(&q.prelude),
-        explorer_css::Rule::At(a) => {
-            let nested: &Vec<explorer_css::Rule> = match &a.kind {
-                explorer_css::AtKind::Container { rules, .. }
-                | explorer_css::AtKind::Media { rules, .. }
-                | explorer_css::AtKind::Layer { rules, .. }
-                | explorer_css::AtKind::Scope { rules }
-                | explorer_css::AtKind::StartingStyle { rules } => rules,
-                _ => return false,
-            };
-            rules_have_relational(nested)
-        }
-    })
+// ── Garde `:has` par dépendances (étape 234) ─────────────
+//
+// Le drapeau binaire `eng_has_relational` (étape 228) replie
+// en cascade complète à CHAQUE apply journal dès qu'une
+// feuille porte `:has(` — 8,5-10,4 s mesurés sur dev.to
+// (vol sync_profile étape 233) alors que ses deux args ne
+// lisent que `data-display-unit`/`data-placement-hidden`.
+// La garde ci-dessous extrait un index de dépendances des
+// args et n'autorise le restyle scopé que si aucune op du
+// journal ne peut faire basculer un sujet `:has` — sinon
+// repli identique à l'étape 228 (jamais de faux négatif).
+
+/// Dépendances DOM des arguments `:has(` — union sur
+/// toutes les feuilles et tous les args du moteur courant.
+/// `Some` côté payload = tous les args analysables ; sinon
+/// `eng_has_deps = None` et la règle de l'étape 228
+/// (`eng_has_relational` seul) fait foi.
+#[derive(Debug, Clone, Default)]
+pub(crate) struct HasDeps {
+    /// Noms d'attributs lus par les args (`[x]`, `[x=v]`…).
+    pub(crate) attrs: Vec<String>,
+    /// Classes lues par les args (`.x`).
+    pub(crate) classes: Vec<String>,
+    /// `#id` lus par les args.
+    pub(crate) ids: Vec<String>,
+    /// Tags lus par les args (`div`, `img`…).
+    pub(crate) tags: Vec<String>,
+    /// L'arg dépend de la position/du nombre d'éléments :
+    /// combinateur `>`/`+`/`~` en tête ou interne, `*` (tout
+    /// élément compte), `:nth-*`, `:empty`, `:first/last/
+    /// only-*` — toute insertion/suppression est suspecte.
+    pub(crate) structural: bool,
+    /// Contenu d'arg non modélisable (`::part`,
+    /// `::slotted`, pseudo-élément, `:host*`, états de
+    /// validation, `:defined`…) — la garde ne peut rien
+    /// garantir : repli cascade complète.
+    pub(crate) unanalyzable: bool,
 }
 
-/// `:has(` quelque part dans la feuille (règles top-level
-/// et imbriquées).
-fn sheet_has_relational(sheet: &Stylesheet) -> bool {
-    rules_have_relational(&sheet.rules)
+impl HasDeps {
+    /// Fusionne un jeu de dépendances (union — les sujets
+    /// `:has` vivent n'importe où dans le document).
+    fn merge(&mut self, other: HasDeps) {
+        for n in other.attrs {
+            dep_push(&mut self.attrs, n);
+        }
+        for n in other.classes {
+            dep_push(&mut self.classes, n);
+        }
+        for n in other.ids {
+            dep_push(&mut self.ids, n);
+        }
+        for n in other.tags {
+            dep_push(&mut self.tags, n);
+        }
+        self.structural |= other.structural;
+        self.unanalyzable |= other.unanalyzable;
+    }
+
+    /// Aucune dépendance matérielle — un tel `:has` ne peut
+    /// être basculé par aucune op du journal.
+    pub(crate) fn is_empty(&self) -> bool {
+        self.attrs.is_empty()
+            && self.classes.is_empty()
+            && self.ids.is_empty()
+            && self.tags.is_empty()
+            && !self.structural
+    }
+}
+
+/// Insertion sans doublon (petits ensembles — linéaire ok).
+fn dep_push(set: &mut Vec<String>, n: String) {
+    if !set.contains(&n) {
+        set.push(n);
+    }
+}
+
+/// Union des deps de tous les `:has(` d'un sélecteur
+/// complexe — où qu'ils apparaissent dans le sujet (y
+/// compris nichés dans `:not`/`:is`/`:where`).
+fn selector_has_deps(sel: &explorer_css::ComplexSelector) -> HasDeps {
+    let mut d = HasDeps::default();
+    for (compound, _) in &sel.parts {
+        for s in &compound.simples {
+            match s {
+                explorer_css::SimpleSelector::Pseudo(explorer_css::PseudoClass::Has(args)) => {
+                    has_args_deps(args, &mut d);
+                }
+                explorer_css::SimpleSelector::Pseudo(
+                    explorer_css::PseudoClass::Not(list)
+                    | explorer_css::PseudoClass::Is(list)
+                    | explorer_css::PseudoClass::Where(list),
+                ) => {
+                    for inner in list {
+                        d.merge(selector_has_deps(inner));
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+    d
+}
+
+/// Deps des items d'une liste d'args `:has` — chaque item
+/// porte son combinateur de tête contre le sujet.
+fn has_args_deps(
+    args: &[(explorer_css::Combinator, explorer_css::ComplexSelector)],
+    d: &mut HasDeps,
+) {
+    for (lead, sel) in args {
+        // `Descendant` (implicite) n'est pas positionnel :
+        // seule la signature du contenu inséré/retiré peut
+        // le basculer. `>`/`+`/`~` dépendent de la place —
+        // toute mutation structurelle est suspecte.
+        if !matches!(lead, explorer_css::Combinator::Descendant) {
+            d.structural = true;
+        }
+        arg_complex_deps(sel, d);
+    }
+}
+
+/// Deps d'un sélecteur complexe **en position d'argument**
+/// `:has(…)` — ses simples sont les dépendances.
+fn arg_complex_deps(sel: &explorer_css::ComplexSelector, d: &mut HasDeps) {
+    for (compound, comb) in &sel.parts {
+        if !matches!(comb, None | Some(explorer_css::Combinator::Descendant)) {
+            d.structural = true;
+        }
+        for s in &compound.simples {
+            match s {
+                explorer_css::SimpleSelector::Type(t) => dep_push(&mut d.tags, t.clone()),
+                // `:has(*)` = « un descendant quelconque » :
+                // tout insert/remove en bascule le compte.
+                explorer_css::SimpleSelector::Universal => d.structural = true,
+                explorer_css::SimpleSelector::Class(c) => dep_push(&mut d.classes, c.clone()),
+                explorer_css::SimpleSelector::Id(i) => dep_push(&mut d.ids, i.clone()),
+                explorer_css::SimpleSelector::Attribute { name, .. } => {
+                    dep_push(&mut d.attrs, name.to_ascii_lowercase());
+                }
+                // Pseudo-éléments et traversées de frontière
+                // shadow : le modèle deps ne les couvre pas.
+                explorer_css::SimpleSelector::PseudoElement(_)
+                | explorer_css::SimpleSelector::Part(_)
+                | explorer_css::SimpleSelector::Slotted(_) => d.unanalyzable = true,
+                explorer_css::SimpleSelector::Pseudo(p) => arg_pseudo_deps(p, d),
+            }
+        }
+    }
+}
+
+/// Deps d'une pseudo-classe en position d'argument `:has`.
+fn arg_pseudo_deps(p: &explorer_css::PseudoClass, d: &mut HasDeps) {
+    use explorer_css::DynamicPseudo as D;
+    use explorer_css::PseudoClass as P;
+    match p {
+        P::Has(args) => has_args_deps(args, d),
+        // `:not`/`:is`/`:where` gardent la sémantique deps
+        // du côté arg (un basculement interne change le
+        // match du pseudo, `:not` inclus).
+        P::Not(list) | P::Is(list) | P::Where(list) => {
+            for sel in list {
+                arg_complex_deps(sel, d);
+            }
+        }
+        P::Lang(_) => dep_push(&mut d.attrs, "lang".to_string()),
+        P::Empty
+        | P::FirstChild
+        | P::LastChild
+        | P::OnlyChild
+        | P::NthChild(..)
+        | P::NthLastChild(..)
+        | P::FirstOfType
+        | P::LastOfType
+        | P::OnlyOfType
+        | P::NthOfType(..)
+        | P::NthLastOfType(..) => d.structural = true,
+        P::Root => {}
+        P::Host(_) | P::HostContext(_) => d.unanalyzable = true,
+        P::Dynamic(dy) => match dy {
+            // États réfléchis par un attribut — l'op
+            // `SetAttr` correspondante est la dépendance.
+            D::Checked => dep_push(&mut d.attrs, "checked".to_string()),
+            D::Disabled | D::Enabled => dep_push(&mut d.attrs, "disabled".to_string()),
+            D::Required | D::Optional => dep_push(&mut d.attrs, "required".to_string()),
+            D::ReadOnly | D::ReadWrite => dep_push(&mut d.attrs, "readonly".to_string()),
+            D::PlaceholderShown => {
+                dep_push(&mut d.attrs, "placeholder".to_string());
+                dep_push(&mut d.attrs, "value".to_string());
+            }
+            D::Link | D::Visited => dep_push(&mut d.attrs, "href".to_string()),
+            D::Target => dep_push(&mut d.attrs, "id".to_string()),
+            D::PopoverOpen => dep_push(&mut d.attrs, "popover".to_string()),
+            // Pointeur/clavier : aucune op du journal ne
+            // peut les faire basculer — pas de dépendance.
+            D::Hover | D::Active | D::Focus | D::FocusWithin | D::FocusVisible => {}
+            // Validation et registre custom : le bascule
+            // dépend de facteurs hors journal (interaction,
+            // `customElements.define`) — non bornable ici.
+            D::Valid | D::Invalid | D::UserValid | D::UserInvalid | D::Defined => {
+                d.unanalyzable = true;
+            }
+        },
+    }
+}
+
+/// Union des deps `:has(` d'un prélude sélecteur —
+/// `Some(vide)` sans `:has`, `Some(deps)` analysable,
+/// `None` = arg non analysable **ou** prélude qui ne se
+/// re-parse pas (repli complet, jamais de faux négatif).
+/// Effet secondaire mesuré : un `:has(` faux positif du
+/// substring-check (attribut/chaîne) produit `Some(vide)`
+/// → le restyle scopé survit.
+pub(crate) fn prelude_has_deps(prelude: &str) -> Option<HasDeps> {
+    if !prelude_has_relational(prelude) {
+        return Some(HasDeps::default());
+    }
+    let list = explorer_css::parse_selector_list(prelude)?;
+    let mut d = HasDeps::default();
+    for sel in &list {
+        d.merge(selector_has_deps(sel));
+    }
+    (!d.unanalyzable).then_some(d)
+}
+
+/// Passe unique par feuille (étape 234) : `(a_des_:has,
+/// deps_unies)`. `deps = None` = `:has` présent mais un arg
+/// non analysable — le repli de l'étape 228 s'applique.
+fn rules_has_scan(rules: &[explorer_css::Rule]) -> (bool, Option<HasDeps>) {
+    let mut rel = false;
+    let mut deps = HasDeps::default();
+    let mut analyzable = true;
+    for r in rules {
+        match r {
+            explorer_css::Rule::Qualified(q) if prelude_has_relational(&q.prelude) => {
+                rel = true;
+                match prelude_has_deps(&q.prelude) {
+                    Some(pd) => deps.merge(pd),
+                    None => analyzable = false,
+                }
+            }
+            explorer_css::Rule::At(a) => {
+                let nested: &Vec<explorer_css::Rule> = match &a.kind {
+                    explorer_css::AtKind::Container { rules, .. }
+                    | explorer_css::AtKind::Media { rules, .. }
+                    | explorer_css::AtKind::Layer { rules, .. }
+                    | explorer_css::AtKind::Scope { rules }
+                    | explorer_css::AtKind::StartingStyle { rules } => rules,
+                    _ => continue,
+                };
+                let (nrel, ndeps) = rules_has_scan(nested);
+                rel |= nrel;
+                match ndeps {
+                    Some(nd) => deps.merge(nd),
+                    None => analyzable = false,
+                }
+            }
+            explorer_css::Rule::Qualified(_) => {}
+        }
+    }
+    (rel, analyzable.then_some(deps))
+}
+
+/// Version feuille de [`rules_has_scan`].
+fn sheet_has_scan(sheet: &Stylesheet) -> (bool, Option<HasDeps>) {
+    rules_has_scan(&sheet.rules)
+}
+
+/// Borne du scan d'`html` des `Insert` pour la recherche de
+/// noms de deps (le sous-arbre sérialisé peut peser des
+/// Ko — au-delà, conservateur `touch`). Règle §4.13.
+const MAX_HAS_DEP_HTML: usize = 1 << 20;
+/// Borne du parcours de sous-arbre retiré (`Remove`) pour
+/// la signature tag/attr/class/id.
+const MAX_HAS_DEP_SUBTREE: usize = 512;
+
+/// `true` si `op` peut modifier l'ensemble des feuilles —
+/// une feuille fraîche porte des deps inconnues au moment
+/// du verdict (l'index `eng_has_deps` reflète les feuilles
+/// AVANT l'op) → conservateur `touch` (étape 234). Couvre
+/// `<style>`/`<link>` insérés et `SetText` dans `<style>`.
+pub(crate) fn op_may_mutate_sheets(
+    op: &explorer_js::DomMutation,
+    dom: &Dom,
+    keymap: &HashMap<u64, explorer_dom::NodeId>,
+) -> bool {
+    match op {
+        explorer_js::DomMutation::Insert { html, .. } => {
+            html.contains("<style") || html.contains("<link")
+        }
+        explorer_js::DomMutation::SetText { key, .. } => keymap
+            .get(key)
+            .and_then(|n| dom.parent(*n).ok().flatten())
+            .and_then(|par| dom.tag_name(par).ok())
+            .is_some_and(|t| t.eq_ignore_ascii_case("style")),
+        _ => false,
+    }
+}
+
+/// Signature `(tag, attrs, classes, id)` d'un nœud contre
+/// les deps — un hit = l'op a touché un argument `:has`
+/// potentiellement vivant.
+fn node_signature_hits(dom: &Dom, n: explorer_dom::NodeId, d: &HasDeps) -> bool {
+    if let Ok(tag) = dom.tag_name(n) {
+        if d.tags.iter().any(|t| t.eq_ignore_ascii_case(tag)) {
+            return true;
+        }
+    }
+    if let Ok(attrs) = dom.attributes(n) {
+        for a in attrs {
+            let name: &str = &a.name;
+            if d.attrs.iter().any(|x| x.eq_ignore_ascii_case(name)) {
+                return true;
+            }
+            if name == "class"
+                && d.classes
+                    .iter()
+                    .any(|c| a.value.split_ascii_whitespace().any(|v| v == c))
+            {
+                return true;
+            }
+            if name == "id" && d.ids.iter().any(|i| i == &a.value) {
+                return true;
+            }
+        }
+    }
+    false
+}
+
+/// Verdict de la garde (étape 234) : `op` peut-elle changer
+/// un match `:has(` dont les deps sont `d` ? **Conservateur
+/// — tout doute → `true`** (repli cascade complète). La
+/// dom/keymap reflètent l'état pré-rejeu (les sous-arbres
+/// des `Remove` y sont encore accessibles).
+pub(crate) fn journal_op_touches_has(
+    op: &explorer_js::DomMutation,
+    d: &HasDeps,
+    dom: &Dom,
+    keymap: &HashMap<u64, explorer_dom::NodeId>,
+) -> bool {
+    match op {
+        explorer_js::DomMutation::SetAttr { key, name, value } => {
+            if d.attrs.iter().any(|a| a.eq_ignore_ascii_case(name)) {
+                return true;
+            }
+            // `class`/`id` : le touch est précis — il n'y a
+            // bascule `:has` que si l'appartenance à une
+            // dep **change** (ancien ∩ deps ≠ nouveau ∩
+            // deps). Les mutations `class` sont le type
+            // dominant des journaux — la version « nom
+            // seulement » repliait sur chaque toggle.
+            match name.as_str() {
+                "class" => {
+                    if d.classes.is_empty() {
+                        return false;
+                    }
+                    let Some(&n) = keymap.get(key) else {
+                        return true;
+                    };
+                    let old = dom
+                        .attribute_str(n, "class")
+                        .ok()
+                        .flatten()
+                        .unwrap_or_default();
+                    let new = value.as_deref().unwrap_or_default();
+                    d.classes.iter().any(|c| {
+                        old.split_ascii_whitespace().any(|v| v == c)
+                            != new.split_ascii_whitespace().any(|v| v == c)
+                    })
+                }
+                "id" => {
+                    if d.ids.is_empty() {
+                        return false;
+                    }
+                    let Some(&n) = keymap.get(key) else {
+                        return true;
+                    };
+                    let old = dom
+                        .attribute_str(n, "id")
+                        .ok()
+                        .flatten()
+                        .unwrap_or_default();
+                    let new = value.as_deref().unwrap_or_default();
+                    d.ids.iter().any(|i| (old == *i) != (new == *i))
+                }
+                _ => false,
+            }
+        }
+        explorer_js::DomMutation::SetText { .. } => d.structural,
+        // Attacher une racine shadow crée une frontière —
+        // les args `:has` light-DOM ne la traversent pas,
+        // mais la garde ne prouve rien sans signature du
+        // fragment : conservateur si deps non vides.
+        explorer_js::DomMutation::AttachShadow { .. } => !d.is_empty(),
+        explorer_js::DomMutation::Insert { tags, html, .. } => {
+            if d.structural
+                || tags
+                    .iter()
+                    .any(|t| d.tags.iter().any(|x| x.eq_ignore_ascii_case(t)))
+            {
+                return true;
+            }
+            if d.attrs.is_empty() && d.classes.is_empty() && d.ids.is_empty() {
+                return false;
+            }
+            if html.len() > MAX_HAS_DEP_HTML {
+                return true;
+            }
+            // Noms de deps dans l'html sérialisé — les faux
+            // positifs (texte contenant le nom) restent
+            // conservateurs.
+            d.attrs.iter().any(|a| html.contains(a.as_str()))
+                || d.classes.iter().any(|c| html.contains(c.as_str()))
+                || d.ids.iter().any(|i| html.contains(i.as_str()))
+        }
+        explorer_js::DomMutation::Remove { key } => {
+            if d.structural || d.is_empty() {
+                return d.structural;
+            }
+            let Some(&n) = keymap.get(key) else {
+                // Clé inconnue (nœud créé+retiré dans la
+                // fenêtre) — contenu non signable : doute.
+                return true;
+            };
+            if node_signature_hits(dom, n, d) {
+                return true;
+            }
+            let Ok(it) = dom.descendants(n) else {
+                return true;
+            };
+            for (i, sub) in it.enumerate() {
+                if i >= MAX_HAS_DEP_SUBTREE {
+                    return true;
+                }
+                if node_signature_hits(dom, sub, d) {
+                    return true;
+                }
+            }
+            false
+        }
+    }
 }
 
 /// `StyleEngine::add_stylesheet` via le cache de la
 /// payload — saute la tokenisation+parse des textes déjà
 /// vus (la collecte des règles dans `eng` reste par
 /// passe : elle porte l'ordre de cascade). Retourne le
-/// drapeau `:has(` de la feuille (étape 228).
+/// drapeau `:has(` de la feuille (étape 228) et l'union
+/// des dépendances d'args — `None` = `:has` non
+/// analysable (étape 234).
 fn add_sheet(
     eng: &mut StyleEngine,
     cache: &mut HashMap<String, Stylesheet>,
     css: &str,
     origin: Origin,
-) -> bool {
+) -> (bool, Option<HasDeps>) {
     if let Some(s) = sheet_parsed(cache, css) {
         eng.add_stylesheet(s, origin);
-        sheet_has_relational(s)
+        sheet_has_scan(s)
     } else {
         let s = parse_stylesheet(css);
-        let rel = sheet_has_relational(&s);
+        let scan = sheet_has_scan(&s);
         eng.add_stylesheet(&s, origin);
-        rel
+        scan
     }
 }
 
@@ -2208,15 +2759,15 @@ fn add_sheet_scoped(
     css: &str,
     origin: Origin,
     scope: explorer_dom::NodeId,
-) -> bool {
+) -> (bool, Option<HasDeps>) {
     if let Some(s) = sheet_parsed(cache, css) {
         eng.add_scoped_stylesheet(s, origin, scope);
-        sheet_has_relational(s)
+        sheet_has_scan(s)
     } else {
         let s = parse_stylesheet(css);
-        let rel = sheet_has_relational(&s);
+        let scan = sheet_has_scan(&s);
         eng.add_scoped_stylesheet(&s, origin, scope);
-        rel
+        scan
     }
 }
 
@@ -2286,7 +2837,7 @@ pub(crate) fn styles_payload(
     color_scheme: explorer_css::ColorScheme,
     scripting: bool,
     dpr: f32,
-    scope: Option<explorer_dom::NodeId>,
+    scopes: &[explorer_dom::NodeId],
     prof: PhaseKind,
     tab: TabId,
 ) -> (StyleMap, StyleEngine) {
@@ -2322,22 +2873,37 @@ pub(crate) fn styles_payload(
         _ => {
             let mut e = StyleEngine::new();
             let mut rel = false;
+            let mut deps = HasDeps::default();
+            let mut deps_ok = true;
+            let mut merge_scan = |scan: (bool, Option<HasDeps>)| {
+                rel |= scan.0;
+                match scan.1 {
+                    Some(d) => deps.merge(d),
+                    None => deps_ok = false,
+                }
+            };
             let cache = &mut p.sheet_cache;
-            rel |= add_sheet(&mut e, cache, MEDIA_UA_CSS, Origin::UserAgent);
+            merge_scan(add_sheet(&mut e, cache, MEDIA_UA_CSS, Origin::UserAgent));
             // R-96 — chaque `<style>` se charge dans son
             // arbre : `scope = Some(racine)` → feuille
             // confinée shadow, `None` → feuille document.
             for (s, css) in &sheets {
-                rel |= match s {
+                merge_scan(match s {
                     Some(root) => add_sheet_scoped(&mut e, cache, css, Origin::Author, *root),
                     None => add_sheet(&mut e, cache, css, Origin::Author),
-                };
+                });
             }
             for css in p.linked_sheets.iter().chain(&p.adopted_sheets) {
-                rel |= add_sheet(&mut e, cache, css, Origin::Author);
+                merge_scan(add_sheet(&mut e, cache, css, Origin::Author));
             }
             p.style_sig = Some(sig);
             p.eng_has_relational = rel;
+            // Étape 234 — index reconstruit sur le NOUVEAU
+            // jeu de feuilles : le verdict `has_dep_touched`
+            // de la passe courante a été calculé contre
+            // l'ancien index → caduc → conservateur.
+            p.eng_has_deps = (rel && deps_ok).then_some(deps);
+            p.has_dep_touched = true;
             e
         }
     };
@@ -2347,23 +2913,51 @@ pub(crate) fn styles_payload(
     // le schéma de couleurs réglé (étape 97).
     let env = viewport_env(viewport, color_scheme, scripting, dpr);
     t = sync_phase(tab, ph_sheets, t);
-    // Restyle scopé (étape 228) : la map persistée est la
-    // base ; `compute_scoped` ne réécrit que le sous-arbre
-    // de `scope` (parent de la cible journal — couvre les
-    // combinators `~`/`+`/`:nth-*` sur les frères, le
-    // `:empty` du parent et les descendants). Replis
-    // cascade complète : map absente, `StyleEnv` changé,
-    // `:has(` dans les feuilles (portée non bornable) ou
-    // racine morte (cible retirée par le journal).
-    let scoped_ok = scope.is_some()
-        && !p.eng_has_relational
+    // Restyle scopé (étape 228, multi-front étape 234) : la
+    // map persistée est la base ; `compute_scoped` ne
+    // réécrit que le sous-arbre de chaque scope (`parent`
+    // de chaque cible journal — couvre les combinators
+    // `~`/`+`/`:nth-*` sur les frères, le `:empty` du
+    // parent et les descendants). Replis cascade complète :
+    // map absente, `StyleEnv` changé, garde `:has` bloquée
+    // ou une racine de scope morte (cible retirée par le
+    // journal).
+    // La garde `:has` est par dépendances :
+    // `eng_has_deps = Some` = tous les args analysables →
+    // seul un `has_dep_touched` (op du journal touchant
+    // une dépendance) interdit le scopé — les sujets des
+    // args non touchés ne peuvent pas basculer. `None` =
+    // arg non modélisable ou pas de `:has` : le drapeau
+    // binaire de l'étape 228 fait foi (conservateur).
+    let has_block = match &p.eng_has_deps {
+        Some(_) => p.has_dep_touched,
+        None => p.eng_has_relational,
+    };
+    let scoped_ok = !scopes.is_empty()
+        && !has_block
         && p.styles_env.as_ref().is_some_and(|e| *e == env)
-        && scope.is_some_and(|r| dom.parent(r).is_ok());
-    let mut styles = match (scope, p.styles.take()) {
-        (Some(root), Some(mut map)) if scoped_ok => {
-            let seed = dom.parent(root).ok().flatten().and_then(|par| map.get(par));
-            let scoped = eng.compute_scoped(dom, root, &env, seed);
-            map.apply_scoped(scoped);
+        && scopes.iter().all(|r| dom.parent(*r).is_ok());
+    dlv_info!(
+        n_scopes = scopes.len(),
+        scope_nodes = crate::session::dlv_trace().then(|| {
+            scopes
+                .iter()
+                .map(|r| dom.descendants(*r).map_or(0, Iterator::count))
+                .sum::<usize>()
+        }),
+        rel = p.eng_has_relational,
+        dep_idx = p.eng_has_deps.is_some(),
+        dep_touched = p.has_dep_touched,
+        scoped_ok,
+        "styles: garde scoped"
+    );
+    let mut styles = match (p.styles.take(), scoped_ok) {
+        (Some(mut map), true) => {
+            for &root in scopes {
+                let seed = dom.parent(root).ok().flatten().and_then(|par| map.get(par));
+                let sub = eng.compute_scoped(dom, root, &env, seed);
+                map.apply_scoped(sub);
+            }
             map
         }
         _ => eng.compute_tree(dom, dom.document(), &env),
@@ -2407,7 +3001,7 @@ pub(crate) fn relayout_dom_payload(
     // bitmap frais (étape 129).
     composite::purge_frame_bitmaps(p);
     dlv_info!("apply: relayout");
-    // `scope = None` : passe complète — la map produite
+    // `scopes = []` : passe complète — la map produite
     // devient la base persistée des restyles scopés de la
     // voie journal (étape 228). Phases `flow.*` à l'intérieur.
     let (mut styles, eng) = styles_payload(
@@ -2417,7 +3011,7 @@ pub(crate) fn relayout_dom_payload(
         ctx.color_scheme,
         ctx.scripting,
         ctx.scale,
-        None,
+        &[],
         PhaseKind::Flow,
         tab,
     );
