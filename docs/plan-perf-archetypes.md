@@ -57,10 +57,12 @@ NAV : Étape 236+) au commit.
 |---|---|---|
 | Décision opérateur : la suite de l'arc se fait **sur la branche** jusqu'à convergence (Étape 239) — `main` n'est mergé qu'en fin d'arc | — | branche verte à chaque commit ; dérive de `main` bornée |
 
-- **Réintégration périodique `main` → `performance`** (merge
-  ou rebase) dès que `main` reçoit des commits touchant les
-  zones de l'arc (`raster.rs`, `apply.rs`, `cascade.rs`) —
-  la dérive reste petite au lieu d'un merge final massif.
+- **`main` est figé pendant l'arc** — aucune autre piste ne
+  lande ; la dérive est nulle par construction (état au
+  2026-11-13 : branche +9 / −0). Si une piste reprend et
+  touche `raster.rs`/`apply.rs`/`cascade.rs`, réintégrer
+  `main` → `performance` aussitôt plutôt qu'un merge final
+  massif.
 - Le câblage §2.3 n'attend **que** la frontière sur la
   branche — `journal_style_scopes` y est déjà (Étape 234) ;
   le merge n'est plus une précondition.
