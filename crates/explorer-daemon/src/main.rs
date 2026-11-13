@@ -423,6 +423,12 @@ fn build_session(
         download_dir.unwrap_or_else(|| profile_dir.join("downloads")),
     ));
     session.set_js_factory(explorer_js::JscoreEngine::factory());
+    // Étape 3b — hôte à session partagée : les dispatches
+    // input tournent hors verrou (`handle_input_shared`) et
+    // le replay des entrées différées n'est jamais exécuté
+    // sous verrou dans un commit — il sort par
+    // `drain_deferred_inputs_shared` en fin de drain.
+    session.set_events_offlock(true);
     // Capacités média de l'hôte déclarées au spawn (étape
     // 178 — b-e2e) : `EXPLORER_MEDIA_CODECS` liste
     // séparée par `;` (MIME `codecs="a,b"` ou codecs nus —

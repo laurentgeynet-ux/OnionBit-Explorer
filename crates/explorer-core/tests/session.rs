@@ -15755,3 +15755,257 @@ async fn global_var_shared_between_script_els() {
         dom.chars().take(300).collect::<String>()
     );
 }
+
+// ————————————————————————————————————————————————————————
+// Étape 3b — input hors verrou, voie shared : les
+// dispatches JS tournent sur le moteur détaché
+// (`handle_input_shared`) avec la même sémantique
+// d'outcome que la voie synchrone.
+// ————————————————————————————————————————————————————————
+
+/// Étape 3b — `preventDefault` du `click` annule la
+/// bascule **et** restaure `checked` : activation avant
+/// `click` (le handler lit `.checked` post-bascule via
+/// l'`attrs` de l'event), revert au `preventDefault` —
+/// même outcome `Ignored` que la voie synchrone.
+#[tokio::test]
+async fn shared_click_prevent_default_restores_checkbox() {
+    let (mut s, t) = test_session();
+    t.route(
+        "/cb",
+        200,
+        "<!doctype html><html><body>\
+         <input type=checkbox id=c>\
+         <script>document.getElementById('c').addEventListener('click',\
+         function(e){e.preventDefault()})</script></body></html>",
+    );
+    s.set_js_factory(explorer_js::JscoreEngine::factory());
+    let sess = std::sync::Arc::new(tokio::sync::Mutex::new(s));
+    let id = {
+        let mut g = sess.lock().await;
+        let id = g.open_tab();
+        g.navigate(id, "http://h.test/cb").await.unwrap();
+        id
+    };
+    let out = explorer_core::handle_input_shared(&sess, id, InputEvent::Click { x: 6.0, y: 6.0 })
+        .await
+        .unwrap();
+    assert_eq!(out, InputOutcome::Ignored);
+    // Bascule annulée + revert : l'attribut `checked` du
+    // DOM hôte est retiré (la sérialisation du DOM le
+    // montre — `.checked` au miroir est la checkedness,
+    // pas l'attribut : il reste vrai comme en synchrone).
+    let dump = {
+        let g = sess.lock().await;
+        g.dom_dump(id).unwrap_or_default()
+    };
+    assert!(
+        !dump.contains("checked"),
+        "bascule annulée + revert — `checked` retiré du DOM : {}",
+        dump.chars().take(400).collect::<String>()
+    );
+}
+
+/// Étape 3b — bascule checkbox → `input`/`change`
+/// détachés : le handler `change` écrit, la mutation est
+/// enfilée puis drainée — même outcome `Edited` que la
+/// voie synchrone.
+#[tokio::test]
+async fn shared_checkbox_change_fires_and_edits() {
+    let (mut s, t) = test_session();
+    t.route(
+        "/cb2",
+        200,
+        "<!doctype html><html><body>\
+         <input type=checkbox id=c><div id=d></div>\
+         <script>document.getElementById('c').addEventListener('change',\
+         function(){document.getElementById('d').textContent='CHANGED'})</script>\
+         </body></html>",
+    );
+    t.route(
+        "/stat2",
+        200,
+        "<!doctype html><html><body>\
+         <input type=checkbox id=c checked><div id=d>CHANGED</div>\
+         </body></html>",
+    );
+    s.set_js_factory(explorer_js::JscoreEngine::factory());
+    let sess = std::sync::Arc::new(tokio::sync::Mutex::new(s));
+    let (id, b) = {
+        let mut g = sess.lock().await;
+        let id = g.open_tab();
+        g.navigate(id, "http://h.test/cb2").await.unwrap();
+        let b = g.open_tab();
+        g.navigate(b, "http://h.test/stat2").await.unwrap();
+        (id, b)
+    };
+    let out = explorer_core::handle_input_shared(&sess, id, InputEvent::Click { x: 6.0, y: 6.0 })
+        .await
+        .unwrap();
+    assert_eq!(out, InputOutcome::Edited);
+    // La mutation du handler `change` est enfilée — drainée
+    // comme n'importe quel apply post-dispatch.
+    explorer_core::drain_applies_shared(&sess, id).await;
+    let mut g = sess.lock().await;
+    assert_eq!(
+        g.frame_png(id),
+        g.frame_png(b),
+        "change hors verrou → DOM édité"
+    );
+}
+
+/// Étape 3b — la frappe éditée pousse `value` au miroir
+/// **avant** l'`input` détaché (l'`attrs` de l'event) : le
+/// handler lit la valeur post-édition — sinon il lisait
+/// l'ancienne valeur.
+#[tokio::test]
+async fn shared_key_edit_pushes_value_before_input() {
+    let (mut s, t) = test_session();
+    t.route(
+        "/ed",
+        200,
+        "<!doctype html><html><body>\
+         <input id=q><div id=d></div>\
+         <script>document.getElementById('q').addEventListener('input',\
+         function(){document.getElementById('d').textContent=\
+         document.getElementById('q').value})</script></body></html>",
+    );
+    s.set_js_factory(explorer_js::JscoreEngine::factory());
+    let sess = std::sync::Arc::new(tokio::sync::Mutex::new(s));
+    let id = {
+        let mut g = sess.lock().await;
+        let id = g.open_tab();
+        g.navigate(id, "http://h.test/ed").await.unwrap();
+        id
+    };
+    let out = explorer_core::handle_input_shared(&sess, id, InputEvent::Click { x: 6.0, y: 6.0 })
+        .await
+        .unwrap();
+    assert_eq!(out, InputOutcome::Focused);
+    let out = explorer_core::handle_input_shared(
+        &sess,
+        id,
+        InputEvent::Key {
+            key: "a".into(),
+            mods: KeyMods::NONE,
+        },
+    )
+    .await
+    .unwrap();
+    assert_eq!(out, InputOutcome::Edited);
+    explorer_core::drain_applies_shared(&sess, id).await;
+    // `d` = `.value` lue par le handler `input` détaché —
+    // "a" prouve que la poussée miroir précède le dispatch.
+    // (Pas de comparaison de frame : le champ live peint
+    // son caret, la statique pas.)
+    let explorer_core::EvalReply::Done { value, .. } = explorer_core::eval_shared(
+        &sess,
+        id,
+        "document.getElementById('d').textContent".to_string(),
+    )
+    .await
+    else {
+        panic!("éval indisponible");
+    };
+    assert_eq!(
+        value.as_deref().unwrap_or_default().trim(),
+        "a",
+        "le handler `input` lit `.value` post-édition : {value:?}"
+    );
+}
+
+/// Étape 3b — `wheel` `preventDefault` bloque le scroll
+/// (annulable) — même sémantique que `dispatch_wheel`
+/// synchrone.
+#[tokio::test]
+async fn shared_wheel_prevented_keeps_scroll() {
+    let (mut s, t) = test_session();
+    t.route(
+        "/w",
+        200,
+        "<!doctype html><html><body>\
+         <div style=\"height:6000px\">tall</div>\
+         <script>document.addEventListener('wheel',\
+         function(e){e.preventDefault()})</script></body></html>",
+    );
+    s.set_js_factory(explorer_js::JscoreEngine::factory());
+    let sess = std::sync::Arc::new(tokio::sync::Mutex::new(s));
+    let id = {
+        let mut g = sess.lock().await;
+        let id = g.open_tab();
+        g.navigate(id, "http://h.test/w").await.unwrap();
+        id
+    };
+    let out = explorer_core::handle_input_shared(&sess, id, InputEvent::Scroll { dy: 500.0 })
+        .await
+        .unwrap();
+    let InputOutcome::Scrolled { scroll_y } = out else {
+        panic!("scroll attendu : {out:?}");
+    };
+    assert_eq!(scroll_y, 0.0, "wheel preventDefault → pas de scroll");
+}
+
+/// Étape 3b — le moteur est **réinséré** en fin de
+/// fenêtre : la voie `&mut` synchrone fonctionne ensuite
+/// sur le même onglet (fenêtre refermée proprement,
+/// dispatches chaînés dans l'ordre).
+#[tokio::test]
+async fn shared_then_sync_input_share_engine() {
+    let (mut s, t) = test_session();
+    t.route(
+        "/n",
+        200,
+        "<!doctype html><html><body>\
+         <div id=d style=\"width:120px;height:60px\">x</div>\
+         <script>window.__n=0;\
+         document.getElementById('d').addEventListener('click',\
+         function(){window.__n++})</script></body></html>",
+    );
+    s.set_js_factory(explorer_js::JscoreEngine::factory());
+    let sess = std::sync::Arc::new(tokio::sync::Mutex::new(s));
+    let id = {
+        let mut g = sess.lock().await;
+        let id = g.open_tab();
+        g.navigate(id, "http://h.test/n").await.unwrap();
+        id
+    };
+    let out = explorer_core::handle_input_shared(&sess, id, InputEvent::Click { x: 10.0, y: 10.0 })
+        .await
+        .unwrap();
+    assert!(matches!(out, InputOutcome::Edited | InputOutcome::Ignored));
+    // Voie synchrone `&mut` — le moteur réinséré reçoit le
+    // clic suivant (compteur → 2).
+    let out = sess
+        .lock()
+        .await
+        .handle_input(id, InputEvent::Click { x: 10.0, y: 10.0 })
+        .await
+        .unwrap();
+    let _ = out;
+    let explorer_core::EvalReply::Done { value, .. } =
+        explorer_core::eval_shared(&sess, id, "window.__n".to_string()).await
+    else {
+        panic!("éval indisponible — moteur non réinséré");
+    };
+    assert_eq!(
+        value.as_deref().unwrap_or_default().trim(),
+        "2",
+        "les deux voies partagent le moteur dans l'ordre : {value:?}"
+    );
+}
+
+/// Étape 3b — onglet inconnu → `UnknownTab`, même erreur
+/// que la voie synchrone.
+#[tokio::test]
+async fn shared_input_unknown_tab_errs() {
+    let (mut s, _t) = test_session();
+    let id = s.open_tab();
+    s.close_tab(id).unwrap();
+    let sess = std::sync::Arc::new(tokio::sync::Mutex::new(s));
+    let r =
+        explorer_core::handle_input_shared(&sess, id, InputEvent::Click { x: 1.0, y: 1.0 }).await;
+    assert!(
+        matches!(r, Err(CoreError::UnknownTab(_))),
+        "onglet mort → UnknownTab : {r:?}"
+    );
+}

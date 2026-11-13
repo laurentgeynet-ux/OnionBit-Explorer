@@ -129,6 +129,77 @@ pub(crate) struct Delivered {
     pub mutated: Option<apply::ApplySync>,
 }
 
+/// Moteur sorti de l'onglet pour **toute la durée d'un
+/// input** (étape 3b — voie shared) : `js_detached` reste
+/// armé pendant les allers-retours dispatch — les réponses
+/// réseau et les events documentaires tamponnent (jamais de
+/// delivery sous verrou entre deux dispatches), les entrées
+/// concurrentes se diffèrent (`deferred_inputs`), et le
+/// moteur navette dans chaque `spawn_blocking` au lieu de
+/// quitter/reprendre à chaque event.
+pub(crate) struct EventEngine {
+    /// Moteur détaché — `None` si le worker est mort ou si
+    /// l'onglet n'a pas de JS (dispatches alors sautés).
+    pub eng: Option<Box<dyn JsEngine>>,
+    /// Epoch de détachement — garde nav à chaque commit et
+    /// à [`Session::finish_event_engine`].
+    pub epoch: u64,
+    /// Tampon cycle-de-vie rejoué au premier worker
+    /// (B-118 — `readystatechange`/`DOMContentLoaded`
+    /// tamponnés pendant le take, avant tout dispatch live).
+    pub lifecycle: Vec<types::DocLifecycle>,
+    /// `complete`/`load` à tirer au premier dispatch
+    /// (JS-C471 — flag armé sous verrou au take, idempotent).
+    pub fire_doc_load: bool,
+    /// Fenêtre morte — epoch supplantée, stall armé ou
+    /// worker perdu : les rafales suivantes sautent et
+    /// `finish_event_engine` referme au lieu de réarmer.
+    pub dead: bool,
+}
+
+/// Un dispatch à exécuter hors verrou — la `path` a été
+/// résolue sous verrou (le `NodeId` meurt au premier
+/// handler qui re-parse, le chemin survit).
+pub(crate) struct EventSpec {
+    /// Type DOM (`click`, `input`, `keydown`, `blur`…).
+    pub ty: String,
+    /// Chemin miroir de la cible — vide = événement
+    /// documentaire (susceptible d'être tamponné B-118).
+    pub path: Vec<(String, u32)>,
+    /// Propriétés de l'événement (`KeyboardEvent`…).
+    pub props: Vec<(String, EventProp)>,
+    /// Poussées miroir appliquées **avant** le dispatch —
+    /// les `sync_mirror_attr` de la session (édition →
+    /// `value`, bascule → `checked`, choix → `selected`)
+    /// doivent être vus par le handler, pas attendre la
+    /// pompe (la voie synchrone pousse au moteur présent ;
+    /// détaché, ça tamponnerait trop tard).
+    pub attrs: Vec<PendingMirrorAttr>,
+    /// `preventDefault` restaure les `attrs` au miroir
+    /// (activation avant `click` — checkbox/radio). Le
+    /// retrait est appliqué dans le worker juste après le
+    /// dispatch prévenu : le journal capture `set` puis
+    /// `remove`, rejoués dans l'ordre sur le DOM hôte —
+    /// même résultat que `flip_checked` sous verrou.
+    pub revert_on_prevent: bool,
+}
+
+/// Retour de [`Session::run_event_dispatch`] — les valeurs
+/// `prevented` par event, dans l'ordre de la rafale.
+pub(crate) struct EventOutcome {
+    /// `defaultPrevented` aligné sur les specs exécutées —
+    /// rafale coupée au premier stall (reste = `false`).
+    pub prevented: Vec<bool>,
+    /// Disjoncteur armé pendant un dispatch.
+    pub stall: Option<explorer_js::JsError>,
+    /// Erreur non-stall à rapporter par la porte partagée.
+    pub emit_err: Option<String>,
+    /// Synchros capturées après chaque dispatch — enfilées
+    /// dans l'ordre au commit (journal prolongé / keyed
+    /// subsume, même règle que la voie synchrone).
+    pub mutated: Vec<apply::ApplySync>,
+}
+
 impl Session {
     /// Circuit §B-1 : faut-il sauter cette éval de `bytes`
     /// octets ? Ouvert (`streak ≥ CAP`) : les gros scripts
@@ -2022,6 +2093,275 @@ impl Session {
         prevented
     }
 
+    /// Phase « take » du dispatch input détaché (étape 3b,
+    /// voie shared) — sort le moteur de l'onglet pour
+    /// **toute la durée de l'input** : `js_detached` reste
+    /// armé entre les rafales, donc les réponses réseau et
+    /// les events documentaires tamponnent (jamais de
+    /// delivery JS sous verrou pendant la gestion), et les
+    /// entrées concurrentes atterrissent dans
+    /// `deferred_inputs`.
+    ///
+    /// `None` sans moteur (page sans JS — les dispatches
+    /// sautent comme dans la voie synchrone, `prevented` =
+    /// `false`), disjoncteur armé (vol 25), ou détachement
+    /// déjà en vol — la pompe a normalement fait différer
+    /// l'input avant cet appel.
+    pub(crate) fn take_event_engine(&mut self, tab: TabId) -> Option<EventEngine> {
+        let entry = self.tabs.get_mut(&tab)?;
+        if entry.js_detached.is_some() {
+            return None;
+        }
+        if entry.js_stall_until.is_some_and(|u| Instant::now() < u) {
+            return None;
+        }
+        let eng = entry.js.take()?;
+        let epoch = entry.nav_epoch;
+        entry.js_detached = Some(epoch);
+        // §B-118 — le tampon voyage avec le moteur : il ne
+        // peut pas être rejoué tant que le moteur est sorti,
+        // et un event documentaire du worker doit le voir
+        // **avant** de tirer (`load` jamais devant
+        // `DOMContentLoaded`).
+        let lifecycle = std::mem::take(&mut entry.pending_doc_lifecycle);
+        // JS-C471 — armé sous verrou (`doc_load_epoch` rend
+        // le tir idempotent), exécuté au premier dispatch du
+        // worker, quel que soit le type d'event.
+        let fire_doc_load = entry.doc_dcl_epoch == epoch && entry.doc_load_epoch != epoch;
+        if fire_doc_load {
+            entry.doc_load_epoch = epoch;
+        }
+        Some(EventEngine {
+            eng: Some(eng),
+            epoch,
+            lifecycle,
+            fire_doc_load,
+            dead: false,
+        })
+    }
+
+    /// Worker de dispatch input (étape 3b) — tourne dans
+    /// `spawn_blocking`, moteur porté par [`EventEngine`].
+    /// Pour chaque spec : tampon lifecycle avant le premier
+    /// event documentaire (§B-118), `complete`/`load` une
+    /// fois (JS-C471), dispatch → `run_pending` → synchro
+    /// miroir — même ordre que
+    /// [`Self::dispatch_path_event_props_inner`]. Rafale
+    /// coupée au premier stall ; `prevented` reste aligné
+    /// sur la rafale (`false` pour les specs non tirées).
+    pub(crate) fn run_event_dispatch(
+        mut e: EventEngine,
+        events: Vec<EventSpec>,
+    ) -> (EventEngine, EventOutcome) {
+        let n = events.len();
+        let mut out = EventOutcome {
+            prevented: Vec::with_capacity(n),
+            stall: None,
+            emit_err: None,
+            mutated: Vec::new(),
+        };
+        let Some(eng) = e.eng.as_mut() else {
+            out.prevented.resize(n, false);
+            return (e, out);
+        };
+        let mut fire_load = std::mem::take(&mut e.fire_doc_load);
+        for spec in events {
+            if spec.path.is_empty() && spec.props.is_empty() && !e.lifecycle.is_empty() {
+                for step in std::mem::take(&mut e.lifecycle) {
+                    match step {
+                        types::DocLifecycle::ReadyState(ctx, s) => {
+                            eng.set_ready_state(ctx, &s);
+                        }
+                        types::DocLifecycle::Event(ctx, tty) => {
+                            if let Err(err) = eng.dispatch_event_ctx(ctx, &tty, &[]) {
+                                tracing::debug!(ty = %tty, error = %err,
+                                    "replay lifecycle avant dispatch input");
+                            }
+                        }
+                    }
+                }
+            }
+            if fire_load {
+                fire_load = false;
+                eng.set_ready_state(explorer_js::JS_CTX_TOP, "complete");
+                let _ = eng.dispatch_event_ctx(explorer_js::JS_CTX_TOP, "readystatechange", &[]);
+                let _ = eng.dispatch_event_ctx(explorer_js::JS_CTX_TOP, "load", &[]);
+            }
+            // Poussées session→miroir avant le dispatch —
+            // le handler lit l'état post-activation
+            // (`checked` basculé, `value` éditée) comme dans
+            // la voie synchrone.
+            for (p, a, v) in &spec.attrs {
+                eng.sync_mirror_attr(p, a, v.as_deref());
+            }
+            match eng.dispatch_event_props(&spec.ty, &spec.path, &spec.props) {
+                Ok(p) => {
+                    // `preventDefault` sur une poussée
+                    // d'activation (ex. `checked` avant
+                    // `click`) : le miroir est restauré —
+                    // le journal capture `set`+`remove`
+                    // dans l'ordre, le hôte rejoue les
+                    // deux comme la voie synchrone.
+                    if p && spec.revert_on_prevent {
+                        for (p2, a2, _) in &spec.attrs {
+                            eng.sync_mirror_attr(p2, a2, None);
+                        }
+                    }
+                    out.prevented.push(p);
+                }
+                Err(err) => {
+                    if out.emit_err.is_none() {
+                        out.emit_err = Some(err.to_string());
+                    }
+                    if Self::is_engine_stall(&err) {
+                        out.stall = Some(err);
+                        break;
+                    }
+                    out.prevented.push(false);
+                }
+            }
+            let _ = eng.run_pending();
+            if let Some(m) = Self::sync_for_apply(eng.as_mut()) {
+                out.mutated.push(m);
+            }
+        }
+        out.prevented.resize(n, false);
+        (e, out)
+    }
+
+    /// Commit d'une rafale de dispatch input (étape 3b) —
+    /// sous verrou court : garde epoch (onglet mort ou page
+    /// supplantée → fenêtre morte, moteur détruit **hors
+    /// verrou**, tampons jetés — même politique que le
+    /// commit de pompe), disjoncteur stall, synchros
+    /// enfilées dans l'ordre, drains budgetisés
+    /// (`after_script` + `poll_net` éventuel — `js_detached`
+    /// reste armé : leurs livrées tamponnent pour la pompe
+    /// au lieu d'exécuter du JS sous verrou).
+    ///
+    /// Le moteur **reste détaché** tant que l'input chaîne
+    /// d'autres rafales — la fenêtre est refermée par
+    /// [`Self::finish_event_engine`].
+    pub(crate) fn commit_event_round(
+        &mut self,
+        tab: TabId,
+        e: &mut EventEngine,
+        out: EventOutcome,
+        run_poll_net: bool,
+        t0: Instant,
+    ) -> Vec<bool> {
+        {
+            let Some(entry) = self.tabs.get_mut(&tab) else {
+                e.dead = true;
+                if let Some(eng) = e.eng.take() {
+                    self.destroy_engine_offlock(eng);
+                }
+                return out.prevented;
+            };
+            if entry.nav_epoch != e.epoch {
+                Self::clear_pending_queues(entry);
+                e.dead = true;
+                if let Some(eng) = e.eng.take() {
+                    self.destroy_engine_offlock(eng);
+                }
+                return out.prevented;
+            }
+            if let Some(err) = &out.stall {
+                if !self.js_stall_cooldown.is_zero() {
+                    tracing::warn!(tab, error = %err,
+                        "dispatch input en timeout — disjoncteur armé");
+                    entry.js_stall_until = Some(Instant::now() + self.js_stall_cooldown);
+                }
+                e.dead = true;
+            }
+        }
+        if let Some(m) = out.emit_err {
+            self.emit_pipeline_error(tab, m);
+        }
+        for s in out.mutated {
+            // Même sémantique que la voie synchrone :
+            // journal prolongé / keyed subsume
+            // (`queue_apply_sync`).
+            self.queue_apply_sync(tab, s);
+        }
+        if !self.event_tail_budget.is_zero() && t0.elapsed() > self.event_tail_budget {
+            tracing::warn!(
+                tab,
+                elapsed_ms = t0.elapsed().as_millis(),
+                "event.* au-delà du budget — queue différée à la pompe (B-54)"
+            );
+            return out.prevented;
+        }
+        self.after_script(tab);
+        if run_poll_net {
+            self.poll_net();
+        }
+        out.prevented
+    }
+
+    /// Fin de fenêtre input (étape 3b) — réinsertion du
+    /// moteur sous verrou court, garde epoch identique au
+    /// commit de pompe : onglet mort ou epoch supplantée →
+    /// tampons jetés + moteur détruit hors verrou ; moteur
+    /// absent (worker mort) → tampons jetés quand même
+    /// (page fraîche = miroir frais). Le tampon lifecycle
+    /// non rejoué (aucun event documentaire dans la
+    /// fenêtre) repasse **devant** les steps arrivés
+    /// pendant le détachement — l'ordre B-118 tient.
+    pub(crate) fn finish_event_engine(&mut self, tab: TabId, e: EventEngine) {
+        let Some(entry) = self.tabs.get_mut(&tab) else {
+            if let Some(eng) = e.eng {
+                self.destroy_engine_offlock(eng);
+            }
+            return;
+        };
+        entry.js_detached = None;
+        if !e.lifecycle.is_empty() {
+            let mut head = e.lifecycle;
+            head.append(&mut entry.pending_doc_lifecycle);
+            entry.pending_doc_lifecycle = head;
+        }
+        if entry.nav_epoch != e.epoch {
+            Self::clear_pending_queues(entry);
+            if let Some(eng) = e.eng {
+                self.destroy_engine_offlock(eng);
+            }
+            return;
+        }
+        if let Some(eng) = e.eng {
+            let cooldown = self.js_stall_cooldown;
+            Self::reinsert_engine(tab, entry, eng, None, 0, cooldown, self.shed_active);
+        } else {
+            Self::clear_pending_queues(entry);
+        }
+    }
+
+    /// Tamponnage doc-event de la voie détachée (étape 3b)
+    /// — même règle que le dispatch synchrone : event
+    /// documentaire (path + props vides) pendant que le
+    /// moteur est sorti → `pending_doc_lifecycle`, rejoué
+    /// au prochain point de synchro. Appelé quand une
+    /// rafale saute faute de moteur vivant dans la fenêtre.
+    pub(crate) fn buffer_doc_events(&mut self, tab: TabId, events: &[EventSpec]) {
+        let Some(entry) = self.tabs.get_mut(&tab) else {
+            return;
+        };
+        if entry.js_detached.is_none() {
+            return;
+        }
+        for spec in events {
+            if spec.path.is_empty()
+                && spec.props.is_empty()
+                && entry.pending_doc_lifecycle.len() < MAX_PENDING_LIFECYCLE
+            {
+                entry.pending_doc_lifecycle.push(types::DocLifecycle::Event(
+                    explorer_js::JS_CTX_TOP,
+                    spec.ty.clone(),
+                ));
+            }
+        }
+    }
+
     /// `keydown`/`keyup` : cible = champ focalisé s'il vit
     /// encore dans `dom`, document sinon. `key` devient les
     /// props `KeyboardEvent` (`key`/`code`/`keyCode`/`which`,
@@ -2248,7 +2588,7 @@ fn blank_frame_plan(dom: &Dom, node: NodeId, ord: usize, base: &Url) -> FramePla
 /// (lettres → ASCII majuscule, `Enter` 13, flèches 37-40…).
 /// Touche hors table → `code` "" / `keyCode` 0 — tolérant,
 /// jamais de panic.
-fn key_event_props(key: &str, mods: KeyMods) -> Vec<(String, EventProp)> {
+pub(crate) fn key_event_props(key: &str, mods: KeyMods) -> Vec<(String, EventProp)> {
     let (code, key_code) = key_code_of(key);
     vec![
         ("key".to_string(), EventProp::Str(key.to_string())),

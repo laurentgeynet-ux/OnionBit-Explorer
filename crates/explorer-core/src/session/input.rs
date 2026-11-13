@@ -4,6 +4,7 @@
 
 //! Entrées : hit-test, clics, clavier, focus, popup
 //! `<select>`, soumission de formulaires, scroll.
+use super::js_glue::EventSpec;
 use super::*;
 
 use explorer_dom::NodeId;
@@ -77,11 +78,14 @@ impl Session {
         // direct devant des entrées en attente brouillerait
         // l'ordre (frappe reçue avant le replay d'une touche
         // plus ancienne → texte interverti).
-        if self
-            .tabs
-            .get(&tab)
-            .is_some_and(|e| e.paint_detached || !e.deferred_inputs.is_empty())
-        {
+        // Même différé quand le **moteur** est détaché
+        // (étape 3b — pompe ou input shared en vol) : le
+        // dispatch échouerait à `js = None` — l'entrée
+        // rejouée à la réinsertion garde sa cible au lieu
+        // de mourir silencieusement.
+        if self.tabs.get(&tab).is_some_and(|e| {
+            e.paint_detached || e.js_detached.is_some() || !e.deferred_inputs.is_empty()
+        }) {
             let is_scroll = matches!(ev, InputEvent::Scroll { .. });
             self.defer_input(tab, ev);
             // Un scroll différé est **accepté**, pas ignoré
@@ -179,57 +183,15 @@ impl Session {
         x: f32,
         y: f32,
     ) -> Result<InputOutcome, CoreError> {
-        // Popup `<select>` ouvert : le curseur pilote le
-        // surlignage de ligne — capture chrome, pas
-        // d'événements DOM vers le document (étape 54).
-        let pop_hit = self.tabs.get_mut(&tab).and_then(|entry| {
-            entry.popup.as_mut().map(|pop| {
-                let row = popup_row(pop, x, y + entry.scroll_y, self.viewport.0, entry.doc_h);
-                let changed = pop.hovered != row;
-                pop.hovered = row;
-                changed
-            })
-        });
-        if let Some(changed) = pop_hit {
-            if changed {
-                self.repaint(tab)?;
-                self.emit_invalidated(tab);
-            }
-            return Ok(InputOutcome::Hover {
-                url: None,
-                editable: false,
-            });
-        }
-        let node = self.node_at(tab, x, y);
-        let path = node.and_then(|n| {
-            self.tabs
-                .get(&tab)
-                .and_then(|e| e.dom.as_ref())
-                .and_then(|d| element_path(d, n))
-        });
-        let prev = self.tabs.get(&tab).and_then(|t| t.hovered.clone());
-        if prev != path {
-            if let Some(o) = prev {
-                self.dispatch_path_event(tab, "mouseout", &o);
-            }
-            if let Some(p) = &path {
-                self.dispatch_path_event(tab, "mouseover", p);
-            }
-            if let Some(entry) = self.tabs.get_mut(&tab) {
-                entry.hovered.clone_from(&path);
+        match self.mouse_move_pre(tab, x, y)? {
+            MovePre::Popup(out) => Ok(out),
+            MovePre::Hover(events) => {
+                for spec in &events {
+                    self.dispatch_path_event_props(tab, &spec.ty, &spec.path, &spec.props);
+                }
+                Ok(self.mouse_move_post(tab, x, y))
             }
         }
-        if let Some(p) = &path {
-            self.dispatch_path_event(tab, "mousemove", p);
-        }
-        self.collect_script_navs(tab);
-        if self.nav_pending(tab) {
-            return Ok(InputOutcome::Navigated);
-        }
-        Ok(InputOutcome::Hover {
-            url: self.link_at(tab, x, y),
-            editable: self.field_at(tab, x, y).is_some(),
-        })
     }
 
     /// Clic : `click` DOM d'abord (`preventDefault` annule
@@ -243,34 +205,32 @@ impl Session {
         x: f32,
         y: f32,
     ) -> Result<InputOutcome, CoreError> {
-        // Popup `<select>` ouvert : le clic est consommé par
-        // l'overlay chrome — choix d'option ou fermeture,
-        // sans `click` DOM sur le document (étape 54).
-        if let Some(out) = self.popup_click(tab, x, y)? {
-            return Ok(out);
-        }
-        let node = self.node_at(tab, x, y);
-        // Contrôle à bascule : activation AVANT `click`
-        // (spec DOM — le handler lit `checked` post-bascule
-        // via le miroir synchronisé) ; `preventDefault`
-        // annule et restaure l'état.
-        let toggled = self.toggle_at(tab, x, y);
-        // Chemin du contrôle capté AVANT le `click` : le
-        // handler peut re-parser le document — le `NodeId`
-        // meurt, le chemin survit.
-        let ctrl_path = toggled.and_then(|c| {
-            self.tabs
-                .get(&tab)
-                .and_then(|e| e.dom.as_ref())
-                .and_then(|d| element_path(d, c))
-        });
-        if let Some(ctrl) = toggled {
-            self.flip_checked(tab, ctrl)?;
+        let (node, node_path, toggled, ctrl_path, flip_attr) = match self.click_pre(tab, x, y)? {
+            // Popup `<select>` ouvert : le clic est consommé
+            // par l'overlay chrome — choix d'option ou
+            // fermeture, sans `click` DOM (étape 54).
+            ClickPre::Popup { path, row } => return self.popup_choose(tab, &path, row),
+            ClickPre::Hit {
+                node,
+                node_path,
+                toggled,
+                ctrl_path,
+                flip_attr,
+            } => (node, node_path, toggled, ctrl_path, flip_attr),
+        };
+        // Poussée `checked` de l'activation avant le `click`
+        // — le handler lit l'état post-bascule via le miroir
+        // (voie shared : la même tuple voyage dans l'`attrs`
+        // de l'`EventSpec`, appliquée au moteur détaché).
+        if let Some(m) = flip_attr {
+            self.push_mirror_attr(tab, m);
         }
         // L'événement DOM précède l'action par défaut : un
         // handler peut muter la page (resynchronisée et
         // re-peinte ici) ou `preventDefault`.
-        let prevented = node.is_some_and(|n| self.dispatch_dom_event(tab, "click", n));
+        let prevented = node_path
+            .as_ref()
+            .is_some_and(|p| self.dispatch_path_event(tab, "click", p));
         if toggled.is_some() {
             // Re-résolution sur l'arbre courant pour le revert
             // ou la suite `input`/`change`.
@@ -330,98 +290,115 @@ impl Session {
         if let Some((form, sub)) = self.submit_at(tab, x, y) {
             return self.try_submit(tab, form, Some(sub), prevented);
         }
-        match self.link_node_at(tab, x, y) {
-            Some((anchor, url)) if !prevented => {
-                let u = Url::parse(&url).map_err(|e| CoreError::Url(e.to_string()))?;
-                let (tname, no_referer, policy, download) = {
-                    let entry = self.tabs.get(&tab);
-                    let dom = entry.and_then(|e| e.dom.as_ref());
-                    (
-                        // Nom de cible effectif (`target` >
-                        // `<base target>` — CAP-159 : le
-                        // drain réutilise le contexte nommé).
-                        dom.map_or_else(String::new, |d| {
-                            resolved_target_name(
-                                d,
-                                anchor,
-                                entry.and_then(|e| e.base_target.as_deref()),
-                            )
-                        }),
-                        dom.is_some_and(|d| rel_no_referrer(d, anchor)),
-                        dom.and_then(|d| element_referrer_policy(d, anchor)),
-                        // `<a download>` (CAP-148) : honoré
-                        // seulement si la cible est
-                        // same-origin avec le document —
-                        // cross-origin = attribut ignoré
-                        // (navigation normale, spec HTML
-                        // « downloading resources »).
-                        match dom.and_then(|d| d.attribute_str(anchor, "download").ok().flatten()) {
-                            Some(v)
-                                if entry
-                                    .and_then(|e| e.url.as_ref())
-                                    .is_some_and(|p| p.origin() == u.origin()) =>
-                            {
-                                Some(v.to_owned())
-                            }
-                            _ => None,
-                        },
-                    )
-                };
-                let mut req = Request::get(u);
-                // Clic lien = geste utilisateur — `?1` (125).
-                req.fetch_user = true;
-                // `rel=noreferrer` : pas de `Referer` émis
-                // (étape 131 — `noopener` implicite sans
-                // objet avant les ponts JS de l'étape 130).
-                req.no_referer = no_referer;
-                // `referrerpolicy=` de l'élément (étape 132)
-                // — sinon `nav_begin` posera la politique du
-                // document source.
-                req.referrer_policy = policy;
-                // `target=_blank`/nommé → contexte neuf ou
-                // nommé (étape 131, CAP-159) ; `_self`/
-                // `_parent`/`_top`/absent → onglet courant.
-                // `download` prime `target` (CAP-148 : la
-                // spec tranche avant la cible — pas
-                // d'onglet pour un fichier).
-                let act = if download.is_none() && target_name_new_context(&tname) {
-                    DrainAct::NewTab(Box::new(req), tname)
-                } else {
-                    req.download_hint = download;
-                    DrainAct::Req(Box::new(req), true)
-                };
-                self.enqueue_nav_act(tab, act, false);
-                Ok(InputOutcome::Navigated)
-            }
-            _ => {
-                // Vol 25 (airbnb cookie, canada « Français ») :
-                // `ignored` ne disait pas *pourquoi* — le motif
-                // est désormais tracé : pas de hit DOM, hit non
-                // actionnable (ni lien/champ/select/submit), ou
-                // `preventDefault` côté handler.
-                if node.is_some() && !prevented {
-                    // B-31 (photopea) : un élément a reçu le
-                    // `click` — handlers `on*`/`addEventListener`
-                    // possibles (attribut compilé paresseux au
-                    // tir, effets de bord libres) ; l'absence
-                    // d'action par défaut n'est pas un refus —
-                    // `ignored` reste aux clics hors contenu.
-                    tracing::info!(tab, x, y, "click livré au DOM — aucune action par défaut");
-                    self.relayout(tab)?;
-                    self.emit_invalidated(tab);
-                    return Ok(InputOutcome::Edited);
-                }
-                tracing::info!(
-                    tab,
-                    x,
-                    y,
-                    hit = node.is_some(),
-                    prevented,
-                    "click ignored — aucun contrôle/lien actionnable sous le point"
-                );
-                Ok(InputOutcome::Ignored)
-            }
+        if self.link_activate(tab, x, y, prevented)? {
+            return Ok(InputOutcome::Navigated);
         }
+        // Vol 25 (airbnb cookie, canada « Français ») :
+        // `ignored` ne disait pas *pourquoi* — le motif
+        // est désormais tracé : pas de hit DOM, hit non
+        // actionnable (ni lien/champ/select/submit), ou
+        // `preventDefault` côté handler.
+        if node.is_some() && !prevented {
+            // B-31 (photopea) : un élément a reçu le
+            // `click` — handlers `on*`/`addEventListener`
+            // possibles (attribut compilé paresseux au
+            // tir, effets de bord libres) ; l'absence
+            // d'action par défaut n'est pas un refus —
+            // `ignored` reste aux clics hors contenu.
+            tracing::info!(tab, x, y, "click livré au DOM — aucune action par défaut");
+            self.relayout(tab)?;
+            self.emit_invalidated(tab);
+            return Ok(InputOutcome::Edited);
+        }
+        tracing::info!(
+            tab,
+            x,
+            y,
+            hit = node.is_some(),
+            prevented,
+            "click ignored — aucun contrôle/lien actionnable sous le point"
+        );
+        Ok(InputOutcome::Ignored)
+    }
+
+    /// Activation `<a>` d'un clic (étape 3b — partagée
+    /// synchrone/shared) : construit la requête de
+    /// navigation (`target`/`rel`/`download`/`referrerpolicy`)
+    /// et pose l'intention `pending_nav`. `false` = pas de
+    /// lien actionnable sous le point, ou `prevented`
+    /// (`preventDefault` du `click`).
+    ///
+    /// # Errors
+    /// [`CoreError::Url`] — `href` irrésolvable.
+    pub(crate) fn link_activate(
+        &mut self,
+        tab: TabId,
+        x: f32,
+        y: f32,
+        prevented: bool,
+    ) -> Result<bool, CoreError> {
+        if prevented {
+            return Ok(false);
+        }
+        let Some((anchor, url)) = self.link_node_at(tab, x, y) else {
+            return Ok(false);
+        };
+        let u = Url::parse(&url).map_err(|e| CoreError::Url(e.to_string()))?;
+        let (tname, no_referer, policy, download) = {
+            let entry = self.tabs.get(&tab);
+            let dom = entry.and_then(|e| e.dom.as_ref());
+            (
+                // Nom de cible effectif (`target` >
+                // `<base target>` — CAP-159 : le
+                // drain réutilise le contexte nommé).
+                dom.map_or_else(String::new, |d| {
+                    resolved_target_name(d, anchor, entry.and_then(|e| e.base_target.as_deref()))
+                }),
+                dom.is_some_and(|d| rel_no_referrer(d, anchor)),
+                dom.and_then(|d| element_referrer_policy(d, anchor)),
+                // `<a download>` (CAP-148) : honoré
+                // seulement si la cible est
+                // same-origin avec le document —
+                // cross-origin = attribut ignoré
+                // (navigation normale, spec HTML
+                // « downloading resources »).
+                match dom.and_then(|d| d.attribute_str(anchor, "download").ok().flatten()) {
+                    Some(v)
+                        if entry
+                            .and_then(|e| e.url.as_ref())
+                            .is_some_and(|p| p.origin() == u.origin()) =>
+                    {
+                        Some(v.to_owned())
+                    }
+                    _ => None,
+                },
+            )
+        };
+        let mut req = Request::get(u);
+        // Clic lien = geste utilisateur — `?1` (125).
+        req.fetch_user = true;
+        // `rel=noreferrer` : pas de `Referer` émis
+        // (étape 131 — `noopener` implicite sans
+        // objet avant les ponts JS de l'étape 130).
+        req.no_referer = no_referer;
+        // `referrerpolicy=` de l'élément (étape 132)
+        // — sinon `nav_begin` posera la politique du
+        // document source.
+        req.referrer_policy = policy;
+        // `target=_blank`/nommé → contexte neuf ou
+        // nommé (étape 131, CAP-159) ; `_self`/
+        // `_parent`/`_top`/absent → onglet courant.
+        // `download` prime `target` (CAP-148 : la
+        // spec tranche avant la cible — pas
+        // d'onglet pour un fichier).
+        let act = if download.is_none() && target_name_new_context(&tname) {
+            DrainAct::NewTab(Box::new(req), tname)
+        } else {
+            req.download_hint = download;
+            DrainAct::Req(Box::new(req), true)
+        };
+        self.enqueue_nav_act(tab, act, false);
+        Ok(true)
     }
 
     /// `input`/`textarea` éditable sous `(x, y)` — hit-test +
@@ -495,27 +472,6 @@ impl Session {
             hovered: None,
         });
         self.repaint(tab)
-    }
-
-    /// Clic pendant qu'un popup `<select>` est ouvert — la
-    /// ligne choisie applique `selected`, `input`+`change`
-    /// partent, le popup se ferme ; un clic hors popup le
-    /// ferme simplement. `Some` = clic consommé.
-    pub(crate) fn popup_click(
-        &mut self,
-        tab: TabId,
-        x: f32,
-        y: f32,
-    ) -> Result<Option<InputOutcome>, CoreError> {
-        let entry = self.tabs.get(&tab).ok_or(CoreError::UnknownTab(tab))?;
-        let Some(pop) = &entry.popup else {
-            return Ok(None);
-        };
-        let row = popup_row(pop, x, y + entry.scroll_y, self.viewport.0, entry.doc_h);
-        let path = pop.path.clone();
-        // Consommé dans tous les cas : un clic hors popup le
-        // referme simplement (comportement natif).
-        self.popup_choose(tab, &path, row).map(Some)
     }
 
     /// `(form, submitter)` sous `(x, y)` — un contrôle submit
@@ -597,32 +553,60 @@ impl Session {
         path: &[(String, u32)],
         row: Option<usize>,
     ) -> Result<InputOutcome, CoreError> {
+        let (fire, attrs) = self.popup_choose_pre(tab, path, row)?;
+        // Le miroir JS reflète le nouveau `selected` — un
+        // handler `change` qui lit `option.selected` voit
+        // l'état post-choix (comme `flip_checked`). Voie
+        // synchrone : poussées directes avant les events.
+        for m in attrs {
+            self.push_mirror_attr(tab, m);
+        }
+        if fire {
+            self.dispatch_path_event(tab, "input", path);
+            self.dispatch_path_event(tab, "change", path);
+        }
+        self.emit_invalidated(tab);
+        Ok(InputOutcome::Edited)
+    }
+
+    /// Travail session du choix popup (étape 3b — partagée
+    /// synchrone/shared) : popup refermé, `selected`
+    /// appliqué dans `dom`, relayout/repaint. Retourne
+    /// `(feu, attrs)` — `feu` = `input`+`change` à tirer
+    /// sur `path`, `attrs` = poussées miroir à appliquer
+    /// **avant** ces events (un handler lit
+    /// `option.selected` post-choix).
+    pub(crate) fn popup_choose_pre(
+        &mut self,
+        tab: TabId,
+        path: &[(String, u32)],
+        row: Option<usize>,
+    ) -> Result<(bool, Vec<PendingMirrorAttr>), CoreError> {
         {
             let entry = self.tabs.get_mut(&tab).ok_or(CoreError::UnknownTab(tab))?;
             entry.popup = None;
         }
         let sel = row.and_then(|_| self.resolve_path(tab, Some(path)));
         if let (Some(sel), Some(idx)) = (sel, row) {
-            let opts = {
+            let attrs = {
                 let entry = self.tabs.get_mut(&tab).ok_or(CoreError::UnknownTab(tab))?;
                 let dom = entry.dom.as_mut().ok_or(CoreError::EmptyDocument)?;
                 choose_option(dom, sel, idx);
                 descendant_elements(dom, sel, "option")
+                    .iter()
+                    .enumerate()
+                    .filter_map(|(i, &o)| {
+                        element_path(dom, o)
+                            .map(|p| (p, "selected".to_string(), (i == idx).then(String::new)))
+                    })
+                    .collect()
             };
-            // Le miroir JS reflète le nouveau `selected` — un
-            // handler `change` qui lit `option.selected` voit
-            // l'état post-choix (comme `flip_checked`).
-            for (i, &o) in opts.iter().enumerate() {
-                self.sync_mirror_attr(tab, o, "selected", (i == idx).then_some(""));
-            }
             self.relayout(tab)?;
-            self.dispatch_path_event(tab, "input", path);
-            self.dispatch_path_event(tab, "change", path);
+            Ok((true, attrs))
         } else {
             self.repaint(tab)?;
+            Ok((false, Vec::new()))
         }
-        self.emit_invalidated(tab);
-        Ok(InputOutcome::Edited)
     }
 
     /// Séquence de soumission complète (HTML §4.10.22) —
@@ -888,7 +872,7 @@ impl Session {
     /// `scroll_y` projeté des deltas en file — la position
     /// qu'atteindra le drain des entrées différées (clampée
     /// sur le `doc_h` courant, comme `scroll_by`).
-    fn projected_scroll(&self, tab: TabId) -> f32 {
+    pub(crate) fn projected_scroll(&self, tab: TabId) -> f32 {
         let Some(e) = self.tabs.get(&tab) else {
             return 0.0;
         };
@@ -911,7 +895,7 @@ impl Session {
     /// ADR-0003) ; au-delà de [`MAX_DEFERRED_INPUTS`]
     /// l'entrée est abandonnée — jamais de mémoire sans
     /// borne sur du contenu hostile.
-    fn defer_input(&mut self, tab: TabId, ev: InputEvent) {
+    pub(crate) fn defer_input(&mut self, tab: TabId, ev: InputEvent) {
         const MAX_DEFERRED_INPUTS: usize = 32;
         let Some(entry) = self.tabs.get_mut(&tab) else {
             return;
@@ -934,7 +918,15 @@ impl Session {
     /// La file est vidée d'un coup : une entrée qui
     /// re-détache (apply enchaîné) réenfile sur la file
     /// fraîche, reprise à la livraison suivante.
+    ///
+    /// Hôte shared (`events_offlock`, étape 3b) : rejouer
+    /// ici tiendrait les dispatches sous verrou — le replay
+    /// attend `drain_deferred_inputs_shared` en fin de
+    /// `drain_applies_shared`.
     pub(crate) fn drain_deferred_inputs(&mut self, tab: TabId) {
+        if self.events_offlock {
+            return;
+        }
         let mut q = match self.tabs.get_mut(&tab) {
             Some(e) => std::mem::take(&mut e.deferred_inputs),
             None => return,
@@ -942,6 +934,21 @@ impl Session {
         while let Some(ev) = q.pop_front() {
             let _ = self.handle_input_now(tab, ev);
         }
+    }
+
+    /// Prend toute la file différée (étape 3b — replay
+    /// shared : même sémantique que `drain_deferred_inputs`,
+    /// les re-différés enfilent sur la file fraîche sans
+    /// être rejoués dans cette passe).
+    pub(crate) fn take_deferred_queue(
+        &mut self,
+        tab: TabId,
+    ) -> std::collections::VecDeque<InputEvent> {
+        self.tabs
+            .get_mut(&tab)
+            .map_or_else(std::collections::VecDeque::new, |e| {
+                std::mem::take(&mut e.deferred_inputs)
+            })
     }
 
     /// Focus champ (étape 52) : `blur` sur l'ancien nœud puis
@@ -1084,7 +1091,7 @@ impl Session {
 
     /// `(nœud `<a>`, URL résolue)` sous `(x, y)` — le nœud
     /// sert au dispatch `target`/`rel` (étape 131).
-    fn link_node_at(&self, tab: TabId, x: f32, y: f32) -> Option<(NodeId, String)> {
+    pub(crate) fn link_node_at(&self, tab: TabId, x: f32, y: f32) -> Option<(NodeId, String)> {
         let entry = self.tabs.get(&tab)?;
         let tree = entry.tree.as_ref()?;
         let dom = entry.dom.as_ref()?;
@@ -1119,4 +1126,413 @@ impl Session {
         }
         Ok(())
     }
+
+    // ————————————————————————————————————————————————
+    // Étape 3b — extractions de la voie shared : chaque
+    // helper est une « grappe verrou » d'un handler, les
+    // dispatches JS entre les grappes tournent hors verrou
+    // sur le moteur détaché (`EventEngine`). La voie
+    // synchrone (`handle_input_now`) consomme les mêmes
+    // grappes avec ses propres dispatches en ligne.
+    // ————————————————————————————————————————————————
+
+    /// Pré-traitement session du clic (étape 3b) — popup
+    /// chrome, hit-test, bascule d'activation **avant**
+    /// `click` (spec DOM — le handler lit `checked`
+    /// post-bascule) + chemins survivants. Le `click` DOM
+    /// est dispatché par l'appelant.
+    pub(crate) fn click_pre(&mut self, tab: TabId, x: f32, y: f32) -> Result<ClickPre, CoreError> {
+        let pop = {
+            let entry = self.tabs.get(&tab).ok_or(CoreError::UnknownTab(tab))?;
+            entry.popup.as_ref().map(|pop| {
+                (
+                    pop.path.clone(),
+                    popup_row(pop, x, y + entry.scroll_y, self.viewport.0, entry.doc_h),
+                )
+            })
+        };
+        if let Some((path, row)) = pop {
+            return Ok(ClickPre::Popup { path, row });
+        }
+        let node = self.node_at(tab, x, y);
+        let toggled = self.toggle_at(tab, x, y);
+        // Chemin du contrôle capté AVANT le `click` : le
+        // handler peut re-parser le document — le `NodeId`
+        // meurt, le chemin survit.
+        let ctrl_path = toggled.and_then(|c| {
+            self.tabs
+                .get(&tab)
+                .and_then(|e| e.dom.as_ref())
+                .and_then(|d| element_path(d, c))
+        });
+        let flip_attr = match toggled {
+            Some(c) => self.flip_checked_collect(tab, c)?,
+            None => None,
+        };
+        let node_path = node.and_then(|n| {
+            self.tabs
+                .get(&tab)
+                .and_then(|e| e.dom.as_ref())
+                .and_then(|d| element_path(d, n))
+        });
+        Ok(ClickPre::Hit {
+            node,
+            node_path,
+            toggled,
+            ctrl_path,
+            flip_attr,
+        })
+    }
+
+    /// Variante collectrice de [`Self::flip_checked`] (étape
+    /// 3b) — la bascule est faite dans `dom` mais la poussée
+    /// miroir **revient** à l'appelant : voie synchrone,
+    /// elle est poussée avant le `click`
+    /// (`push_mirror_attr`) ; voie shared, elle voyage dans
+    /// l'`attrs` de l'`EventSpec` (appliquée au moteur
+    /// détaché juste avant le dispatch — le handler lit
+    /// `.checked` post-activation, même sémantique).
+    fn flip_checked_collect(
+        &mut self,
+        tab: TabId,
+        ctrl: NodeId,
+    ) -> Result<Option<PendingMirrorAttr>, CoreError> {
+        let (path, checked) = {
+            let entry = self.tabs.get_mut(&tab).ok_or(CoreError::UnknownTab(tab))?;
+            let dom = entry.dom.as_mut().ok_or(CoreError::EmptyDocument)?;
+            toggle_checked(dom, ctrl)?;
+            let checked = dom.attribute_str(ctrl, "checked").ok().flatten().is_some();
+            (element_path(dom, ctrl), checked)
+        };
+        Ok(path.map(|p| (p, "checked".to_string(), checked.then(String::new))))
+    }
+
+    /// Pousse directe `(path, attr, value)` au moteur —
+    /// variante path-form de [`Self::sync_mirror_attr`]
+    /// pour les tuples collectés : tamponnée si le moteur
+    /// est détaché, écrite sinon (même règle).
+    pub(crate) fn push_mirror_attr(&mut self, tab: TabId, m: PendingMirrorAttr) {
+        let Some(entry) = self.tabs.get_mut(&tab) else {
+            return;
+        };
+        if entry.js_detached.is_some() {
+            entry.js_pending_attrs.push(m);
+            return;
+        }
+        if let Some(eng) = entry.js.as_mut() {
+            eng.sync_mirror_attr(&m.0, &m.1, m.2.as_deref());
+        }
+    }
+
+    /// Pré-traitement du survol (étape 3b) — popup
+    /// `<select>` (capture chrome) ou rafale d'events à
+    /// dispatcher dans l'ordre DOM (`mouseout`, `mouseover`,
+    /// `mousemove`). `entry.hovered` est mis à jour ici :
+    /// session-interne (cible `wheel`), invisible côté JS.
+    pub(crate) fn mouse_move_pre(
+        &mut self,
+        tab: TabId,
+        x: f32,
+        y: f32,
+    ) -> Result<MovePre, CoreError> {
+        let pop_hit = self.tabs.get_mut(&tab).and_then(|entry| {
+            entry.popup.as_mut().map(|pop| {
+                let row = popup_row(pop, x, y + entry.scroll_y, self.viewport.0, entry.doc_h);
+                let changed = pop.hovered != row;
+                pop.hovered = row;
+                changed
+            })
+        });
+        if let Some(changed) = pop_hit {
+            if changed {
+                self.repaint(tab)?;
+                self.emit_invalidated(tab);
+            }
+            return Ok(MovePre::Popup(InputOutcome::Hover {
+                url: None,
+                editable: false,
+            }));
+        }
+        let node = self.node_at(tab, x, y);
+        let path = node.and_then(|n| {
+            self.tabs
+                .get(&tab)
+                .and_then(|e| e.dom.as_ref())
+                .and_then(|d| element_path(d, n))
+        });
+        let prev = self.tabs.get(&tab).and_then(|t| t.hovered.clone());
+        let mut events = Vec::new();
+        if prev != path {
+            if let Some(o) = prev {
+                events.push(EventSpec {
+                    ty: "mouseout".to_string(),
+                    path: o,
+                    props: Vec::new(),
+                    attrs: Vec::new(),
+                    revert_on_prevent: false,
+                });
+            }
+            if let Some(p) = &path {
+                events.push(EventSpec {
+                    ty: "mouseover".to_string(),
+                    path: p.clone(),
+                    props: Vec::new(),
+                    attrs: Vec::new(),
+                    revert_on_prevent: false,
+                });
+            }
+            if let Some(entry) = self.tabs.get_mut(&tab) {
+                entry.hovered.clone_from(&path);
+            }
+        }
+        if let Some(p) = &path {
+            events.push(EventSpec {
+                ty: "mousemove".to_string(),
+                path: p.clone(),
+                props: Vec::new(),
+                attrs: Vec::new(),
+                revert_on_prevent: false,
+            });
+        }
+        Ok(MovePre::Hover(events))
+    }
+
+    /// Queue du survol (étape 3b) — intentions de nav
+    /// script puis cibles `Hover` **après** les dispatches
+    /// (les handlers `mouseover` ont pu muter le document).
+    pub(crate) fn mouse_move_post(&mut self, tab: TabId, x: f32, y: f32) -> InputOutcome {
+        self.collect_script_navs(tab);
+        if self.nav_pending(tab) {
+            return InputOutcome::Navigated;
+        }
+        InputOutcome::Hover {
+            url: self.link_at(tab, x, y),
+            editable: self.field_at(tab, x, y).is_some(),
+        }
+    }
+
+    /// Pré-scroll (étape 3b) — popup `<select>` refermé
+    /// (ancrage document) + cible `wheel` résolue : nœud
+    /// survolé vivant → son chemin, document sinon (path
+    /// vide = event documentaire).
+    pub(crate) fn scroll_pre(&mut self, tab: TabId) -> Vec<(String, u32)> {
+        if let Some(entry) = self.tabs.get_mut(&tab) {
+            entry.popup = None;
+        }
+        self.wheel_path(tab)
+    }
+
+    /// Cible `wheel` (étape 3b) — extraction de
+    /// [`Self::dispatch_wheel`] : survolé vivant → chemin,
+    /// document sinon (path vide = event documentaire).
+    pub(crate) fn wheel_path(&self, tab: TabId) -> Vec<(String, u32)> {
+        self.tabs
+            .get(&tab)
+            .and_then(|t| t.hovered.clone())
+            .filter(|p| {
+                self.tabs
+                    .get(&tab)
+                    .and_then(|t| t.dom.as_ref())
+                    .is_some_and(|d| dom_path_node(d, p).is_some())
+            })
+            .unwrap_or_default()
+    }
+
+    /// Cible `key*` (étape 3b) — extraction de
+    /// [`Self::dispatch_key`] : champ focalisé vivant → son
+    /// chemin ; `<body>` sinon (spec `activeElement`) ;
+    /// `None` = document nu (doc-event sans props, comme la
+    /// voie synchrone).
+    pub(crate) fn key_path(&mut self, tab: TabId) -> Option<Vec<(String, u32)>> {
+        match self.focused_node(tab) {
+            Some(n) => self
+                .tabs
+                .get(&tab)
+                .and_then(|entry| entry.dom.as_ref().and_then(|d| element_path(d, n))),
+            None => self
+                .tabs
+                .get(&tab)
+                .and_then(|entry| entry.dom.as_ref())
+                .map(|d| {
+                    descendant_elements(d, d.document(), "body")
+                        .first()
+                        .and_then(|b| element_path(d, *b))
+                        .unwrap_or_default()
+                }),
+        }
+    }
+
+    /// Lecture focus sans mutation (étape 3b) — `(ancien
+    /// chemin, nouveau chemin, nouvelle clé)` telle que
+    /// [`Self::set_focus_state`] la posera entre le `blur`
+    /// et le `focus` hors verrou, même ordre que
+    /// [`Self::set_focus`].
+    pub(crate) fn focus_paths(
+        &self,
+        tab: TabId,
+        field: Option<NodeId>,
+    ) -> (Option<DomPath>, Option<DomPath>, Option<(String, String)>) {
+        let entry = self.tabs.get(&tab);
+        let new_path = field.and_then(|f| {
+            entry
+                .and_then(|e| e.dom.as_ref())
+                .and_then(|d| element_path(d, f))
+        });
+        let new_key = field.and_then(|f| {
+            entry.and_then(|e| e.dom.as_ref()).and_then(|d| {
+                d.attribute_str(f, "id")
+                    .ok()
+                    .flatten()
+                    .map(|v| ("id".to_string(), v.to_owned()))
+                    .or_else(|| {
+                        d.attribute_str(f, "name")
+                            .ok()
+                            .flatten()
+                            .map(|v| ("name".to_string(), v.to_owned()))
+                    })
+            })
+        });
+        let old_path = entry.and_then(|e| e.focused.clone());
+        (old_path, new_path, new_key)
+    }
+
+    /// Pose d'état focus (étape 3b) — exécutée entre `blur`
+    /// et `focus` hors verrou, comme [`Self::set_focus`].
+    pub(crate) fn set_focus_state(
+        &mut self,
+        tab: TabId,
+        new_path: Option<DomPath>,
+        new_key: Option<(String, String)>,
+    ) {
+        if let Some(entry) = self.tabs.get_mut(&tab) {
+            entry.focused = new_path;
+            entry.focused_key = new_key;
+        }
+    }
+
+    /// Variante chemins de [`Self::focused_form_default`]
+    /// (étape 3b) — les `NodeId` mourraient aux dispatches
+    /// `blur`/`focus` du `set_focus` intermédiaire, les
+    /// chemins survivent et se re-résolvent dans
+    /// [`Self::submit_pre`].
+    pub(crate) fn focused_form_default_paths(
+        &self,
+        tab: TabId,
+    ) -> Option<(DomPath, Option<DomPath>)> {
+        let (form, sub) = self.focused_form_default(tab)?;
+        let dom = self.tabs.get(&tab).and_then(|e| e.dom.as_ref())?;
+        Some((
+            element_path(dom, form)?,
+            sub.and_then(|s| element_path(dom, s)),
+        ))
+    }
+
+    /// Pré-dispatch d'une soumission (étape 3b, voie
+    /// shared) — `novalidate` (`<form>`/`formnovalidate` du
+    /// submitter) + chemins des contrôles candidats
+    /// invalides (`invalid` à tirer avant blocage). Les
+    /// paths survivent aux re-parses — `form`/`sub` sont
+    /// re-résolus ici sur l'arbre courant.
+    pub(crate) fn submit_pre(
+        &self,
+        tab: TabId,
+        form_path: Option<&[(String, u32)]>,
+        sub_path: Option<&[(String, u32)]>,
+    ) -> (bool, Vec<DomPath>) {
+        let Some(dom) = self.tabs.get(&tab).and_then(|e| e.dom.as_ref()) else {
+            return (false, Vec::new());
+        };
+        let form = form_path.and_then(|p| dom_path_node(dom, p));
+        let sub = sub_path.and_then(|p| dom_path_node(dom, p));
+        let novalidate = form
+            .is_some_and(|f| dom.attribute_str(f, "novalidate").ok().flatten().is_some())
+            || sub.is_some_and(|s| {
+                dom.attribute_str(s, "formnovalidate")
+                    .ok()
+                    .flatten()
+                    .is_some()
+            });
+        let invalid = form.map_or_else(Vec::new, |f| {
+            invalid_controls(dom, f)
+                .into_iter()
+                .filter_map(|c| element_path(dom, c))
+                .collect()
+        });
+        (novalidate, invalid)
+    }
+
+    /// Édition d'une frappe (étape 3b, voie shared) —
+    /// `key` s'applique au champ focalisé, la valeur
+    /// résultante revient avec le chemin pour l'`attrs` de
+    /// l'`input` spec (le handler lit `.value` post-édition,
+    /// même motif que `checked`). `None` = plus de champ
+    /// focalisé (mutation entre-temps).
+    pub(crate) fn key_edit(
+        &mut self,
+        tab: TabId,
+        key: &str,
+    ) -> Result<Option<(DomPath, String)>, CoreError> {
+        let Some(field) = self.focused_node(tab) else {
+            return Ok(None);
+        };
+        let (value, path) = {
+            let entry = self.tabs.get_mut(&tab).ok_or(CoreError::UnknownTab(tab))?;
+            let dom = entry.dom.as_mut().ok_or(CoreError::EmptyDocument)?;
+            edit_field(dom, field, key)?;
+            (field_value(dom, field), element_path(dom, field))
+        };
+        Ok(path.map(|p| (p, value)))
+    }
+}
+
+/// Chemin DOM résolu (étape 3b) — une `NodeId` meurt au
+/// premier re-parse ; le chemin `(tag, index)` survit et
+/// se re-résout à chaque grappe verrou.
+pub(crate) type DomPath = Vec<(String, u32)>;
+
+/// Pré-traitement du clic (étape 3b) — sortie de
+/// [`Session::click_pre`] : tout l'aval session avant le
+/// `click` DOM.
+pub(crate) enum ClickPre {
+    /// Le popup `<select>` consomme le clic — le choix a des
+    /// dispatches propres (`popup_choose`), portés hors
+    /// verrou par l'appelant.
+    Popup {
+        /// Chemin du `<select>` propriétaire du popup.
+        path: Vec<(String, u32)>,
+        /// Ligne cliquée (`None` = hors lignes → fermeture
+        /// simple).
+        row: Option<usize>,
+    },
+    /// Clic documentaire — cible et bascule captées,
+    /// `click` DOM à dispatcher.
+    Hit {
+        /// Nœud frappé (`is_some()` décide `Edited` vs
+        /// `Ignored` en fin de chaîne).
+        node: Option<NodeId>,
+        /// Chemin du nœud — cible du `click` (`None` =
+        /// `element_path` mort → pas de dispatch, comme la
+        /// voie synchrone).
+        node_path: Option<Vec<(String, u32)>>,
+        /// Contrôle activé avant `click` (revert si
+        /// `preventDefault`, `input`/`change` sinon).
+        toggled: Option<NodeId>,
+        /// Chemin du contrôle — survit aux re-parses des
+        /// handlers `click`.
+        ctrl_path: Option<Vec<(String, u32)>>,
+        /// Poussée `checked` de l'activation — voyage dans
+        /// l'`attrs` de l'`EventSpec` `click` (voie shared)
+        /// ou poussée directe (voie synchrone).
+        flip_attr: Option<PendingMirrorAttr>,
+    },
+}
+
+/// Pré-traitement du survol (étape 3b) — sortie de
+/// [`Session::mouse_move_pre`].
+pub(crate) enum MovePre {
+    /// Popup `<select>` — outcome immédiat (capture chrome).
+    Popup(InputOutcome),
+    /// Survol documentaire — events à dispatcher dans
+    /// l'ordre DOM (`mouseout`, `mouseover`, `mousemove`).
+    Hover(Vec<js_glue::EventSpec>),
 }

@@ -1133,6 +1133,230 @@ fn commit_finish_epoch_supplantee_detruit_moteur() {
     );
 }
 
+/// Étape 3b — voie shared : `take_event_engine` sort le
+/// moteur pour **toute** la fenêtre input (tampon lifecycle
+/// embarqué, livrées tamponnées pendant la fenêtre), le
+/// commit de rafale garde la fenêtre ouverte et
+/// `finish_event_engine` réinsère epoch-gardé.
+#[test]
+fn event_engine_window_lifecycle_and_reinsert() {
+    let mut s = Session::new(Arc::new(FailTransport), Arc::new(TestFont));
+    s.set_js_factory(explorer_js::JscoreEngine::factory());
+    let tab = s.open_tab();
+    let html = "<!doctype html><html><body><div id=\"x\"></div></body></html>";
+    let eng = s.spawn_engine(tab, html, true, "");
+    {
+        let e = s.tabs.get_mut(&tab).unwrap();
+        let mut tb = TreeBuilder::new();
+        tb.push(html);
+        tb.finish();
+        e.dom = Some(tb.into_dom());
+        e.url = Some(Url::parse("http://h.test/ee").unwrap());
+        e.js = eng;
+        // Step tamponné → part avec le moteur au take.
+        e.pending_doc_lifecycle.push(types::DocLifecycle::Event(
+            explorer_js::JS_CTX_TOP,
+            "DOMContentLoaded".to_string(),
+        ));
+    }
+    let e = s.take_event_engine(tab).unwrap();
+    assert!(s.tabs.get(&tab).unwrap().js.is_none());
+    assert!(s.tabs.get(&tab).unwrap().js_detached.is_some());
+    assert_eq!(e.lifecycle.len(), 1, "le tampon voyage avec le moteur");
+    // Livrée pendant la fenêtre → tamponnée (jamais
+    // directe sous verrou).
+    s.tabs
+        .get_mut(&tab)
+        .unwrap()
+        .js_pending_attrs
+        .push((vec![], "x".to_string(), None));
+    // Worker : le `load` documentaire rejoue le DCL
+    // tamponné d'abord (§B-118 — ordre préservé).
+    let (mut e2, out) = Session::run_event_dispatch(
+        e,
+        vec![js_glue::EventSpec {
+            ty: "load".to_string(),
+            path: Vec::new(),
+            props: Vec::new(),
+            attrs: Vec::new(),
+            revert_on_prevent: false,
+        }],
+    );
+    assert!(
+        e2.lifecycle.is_empty(),
+        "lifecycle consommé au premier event documentaire"
+    );
+    assert_eq!(out.prevented, vec![false]);
+    let prevented = s.commit_event_round(tab, &mut e2, out, false, Instant::now());
+    assert_eq!(prevented, vec![false]);
+    // Fenêtre encore ouverte entre les rafales — moteur
+    // toujours sorti, `js_detached` armé.
+    assert!(s.tabs.get(&tab).unwrap().js.is_none());
+    assert!(s.tabs.get(&tab).unwrap().js_detached.is_some());
+    s.finish_event_engine(tab, e2);
+    let entry = s.tabs.get(&tab).unwrap();
+    assert!(entry.js.is_some(), "moteur réinséré en fin de fenêtre");
+    assert!(entry.js_detached.is_none());
+    assert_eq!(
+        entry.js_pending_attrs.len(),
+        1,
+        "poussée tamponnée pendant la fenêtre préservée"
+    );
+}
+
+/// Étape 3b — epoch supplantée pendant une fenêtre input :
+/// le commit de rafale tue la fenêtre (`dead`), jette les
+/// tampons et détruit le moteur hors verrou — même
+/// politique que le commit de pompe.
+#[test]
+fn event_engine_epoch_supplant_kills_window() {
+    let mut s = Session::new(Arc::new(FailTransport), Arc::new(TestFont));
+    s.set_js_factory(explorer_js::JscoreEngine::factory());
+    let tab = s.open_tab();
+    let html = "<!doctype html><html><body><div id=\"x\"></div></body></html>";
+    let eng = s.spawn_engine(tab, html, true, "");
+    {
+        let e = s.tabs.get_mut(&tab).unwrap();
+        e.dom = Some(test_dom("<div id=\"x\"></div>"));
+        e.url = Some(Url::parse("http://h.test/ee2").unwrap());
+        e.js = eng;
+    }
+    let mut e = s.take_event_engine(tab).unwrap();
+    // Page supplantée pendant la fenêtre + livrée arrivée
+    // en vol (à jeter avec le moteur).
+    s.tabs.get_mut(&tab).unwrap().nav_epoch += 1;
+    s.tabs
+        .get_mut(&tab)
+        .unwrap()
+        .js_pending_attrs
+        .push((vec![], "x".to_string(), None));
+    let out = js_glue::EventOutcome {
+        prevented: vec![false],
+        stall: None,
+        emit_err: None,
+        mutated: Vec::new(),
+    };
+    let drops_before = s.engines_dropped_offlock;
+    let prevented = s.commit_event_round(tab, &mut e, out, false, Instant::now());
+    assert_eq!(prevented, vec![false]);
+    assert!(e.dead, "epoch supplantée → fenêtre morte");
+    assert!(
+        s.tabs.get(&tab).unwrap().js_pending_attrs.is_empty(),
+        "tampons jetés"
+    );
+    assert!(
+        s.engines_dropped_offlock > drops_before,
+        "moteur de l'ancienne page détruit hors verrou"
+    );
+    s.finish_event_engine(tab, e);
+    assert!(s.tabs.get(&tab).unwrap().js.is_none());
+    assert!(s.tabs.get(&tab).unwrap().js_detached.is_none());
+}
+
+/// Étape 3b — `buffer_doc_events` ne tamponne que les
+/// events documentaires tant que `js_detached` est armé
+/// (même règle que le dispatch synchrone) ; fenêtre
+/// refermée → plus de tamponnage.
+#[test]
+fn buffer_doc_events_only_doc_while_detached() {
+    let mut s = Session::new(Arc::new(FailTransport), Arc::new(TestFont));
+    s.set_js_factory(explorer_js::JscoreEngine::factory());
+    let tab = s.open_tab();
+    let html = "<!doctype html><html><body><div id=\"x\"></div></body></html>";
+    let eng = s.spawn_engine(tab, html, true, "");
+    {
+        let e = s.tabs.get_mut(&tab).unwrap();
+        e.dom = Some(test_dom("<div id=\"x\"></div>"));
+        e.url = Some(Url::parse("http://h.test/ee3").unwrap());
+        e.js = eng;
+    }
+    let e = s.take_event_engine(tab).unwrap();
+    s.buffer_doc_events(
+        tab,
+        &[
+            js_glue::EventSpec {
+                ty: "scroll".to_string(),
+                path: Vec::new(),
+                props: Vec::new(),
+                attrs: Vec::new(),
+                revert_on_prevent: false,
+            },
+            js_glue::EventSpec {
+                ty: "click".to_string(),
+                path: vec![("div".to_string(), 0)],
+                props: Vec::new(),
+                attrs: Vec::new(),
+                revert_on_prevent: false,
+            },
+        ],
+    );
+    let pend = &s.tabs.get(&tab).unwrap().pending_doc_lifecycle;
+    assert_eq!(pend.len(), 1, "seul l'event documentaire tamponne");
+    assert!(
+        matches!(pend[0], types::DocLifecycle::Event(_, ref t) if t == "scroll"),
+        "event documentaire tamponné : {:?}",
+        pend[0]
+    );
+    s.finish_event_engine(tab, e);
+    s.buffer_doc_events(
+        tab,
+        &[js_glue::EventSpec {
+            ty: "scroll".to_string(),
+            path: Vec::new(),
+            props: Vec::new(),
+            attrs: Vec::new(),
+            revert_on_prevent: false,
+        }],
+    );
+    assert_eq!(
+        s.tabs.get(&tab).unwrap().pending_doc_lifecycle.len(),
+        1,
+        "fenêtre refermée → plus de tamponnage"
+    );
+}
+
+/// Étape 3b — une entrée qui arrive pendant une fenêtre
+/// moteur (`js_detached` armé — pompe ou input shared en
+/// vol) est différée et rejouée à la réinsertion, au lieu
+/// de mourir à `js = None`.
+#[tokio::test]
+async fn input_defers_while_engine_detached() {
+    let mut s = Session::new(Arc::new(FailTransport), Arc::new(TestFont));
+    s.set_js_factory(explorer_js::JscoreEngine::factory());
+    let tab = s.open_tab();
+    {
+        let e = s.tabs.get_mut(&tab).unwrap();
+        e.dom = Some(test_dom("<p>x</p>"));
+        e.frame = Some(Frame {
+            width: 8,
+            height: 8,
+            pixels: vec![0; 8 * 8 * 4],
+            scale: 1.0,
+        });
+        // Fenêtre moteur en vol (pompe shared ou input).
+        e.js_detached = Some(0);
+    }
+    let out = s
+        .handle_input(tab, InputEvent::Click { x: 1.0, y: 1.0 })
+        .await
+        .unwrap();
+    assert_eq!(out, InputOutcome::Ignored);
+    assert_eq!(
+        s.tabs.get(&tab).unwrap().deferred_inputs.len(),
+        1,
+        "clic différé pendant le détachement moteur"
+    );
+    // Un scroll différé reste **accepté** avec projection.
+    let out = s
+        .handle_input(tab, InputEvent::Scroll { dy: 50.0 })
+        .await
+        .unwrap();
+    assert!(
+        matches!(out, InputOutcome::Scrolled { .. }),
+        "scroll accepté/projeté : {out:?}"
+    );
+}
+
 /// Trou de liveness dyn-subresources : `<link rel=stylesheet>`
 /// inséré par JS ne devait son fetch qu'à `after_script`
 /// (gate `jobs>0` de la pompe) — une page qui marque le lien

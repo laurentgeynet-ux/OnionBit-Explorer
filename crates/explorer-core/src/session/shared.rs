@@ -840,7 +840,7 @@ pub async fn eval_shared(sess: &tokio::sync::Mutex<Session>, tab: TabId, src: St
 /// par les handlers d'entrée des hôtes partagés (après
 /// `handle_input_now`, avant `drain_navs_shared`).
 /// Retourne le nombre d'applies commis.
-pub async fn drain_applies_shared(sess: &tokio::sync::Mutex<Session>, _tab: TabId) -> usize {
+pub async fn drain_applies_shared(sess: &tokio::sync::Mutex<Session>, tab: TabId) -> usize {
     if let Ok(mut g) = crate::LAST_DRAIN.lock() {
         *g = "applies";
     }
@@ -906,5 +906,745 @@ pub async fn drain_applies_shared(sess: &tokio::sync::Mutex<Session>, _tab: TabI
         }
         applied += 1;
     }
+    // Étape 3b — hôte `events_offlock` : les entrées
+    // différées pendant la peinture ou la fenêtre moteur
+    // sont rejouées ici, dispatches détachés, plutôt que
+    // sous verrou dans les commits. Hôtes `&mut Session` :
+    // replay synchrone inchangé dans les commits.
+    let replay = {
+        let s = sess.lock().await;
+        s.events_offlock
+            && s.tabs
+                .get(&tab)
+                .is_some_and(|e| !e.deferred_inputs.is_empty() && !e.paint_detached)
+    };
+    if replay {
+        drain_deferred_inputs_shared(sess, tab).await;
+    }
     applied
+}
+
+// ————————————————————————————————————————————————————
+// Étape 3b — input hors verrou, voie shared uniquement.
+//
+// `handle_input_shared` est le pendant détaché de
+// `Session::handle_input_now` : chaque grappe session
+// (hit-test, édition DOM, focus, intentions nav) court
+// sous verrou court ; chaque dispatch JS
+// (`dispatch_event_props` + `run_pending` + synchro
+// miroir) court dans `spawn_blocking` sur le moteur
+// détaché — `js_detached` reste armé pour toute la durée
+// de l'input, donc les réponses réseau tamponnent au lieu
+// de livrer sous verrou, et les entrées concurrentes
+// atterrissent dans `deferred_inputs` (ordre préservé).
+// ————————————————————————————————————————————————————
+
+/// Entrée sur une session partagée (étape 3b) — même
+/// sémantique d'outcome et de drains que
+/// [`Session::handle_input_now`] + le spawn de drain de
+/// l'appelant, mais **zéro dispatch JS sous le verrou**.
+///
+/// Le moteur est sorti pour toute la durée de l'input
+/// ([`Session::take_event_engine`]) et réinséré en fin de
+/// fenêtre ([`Session::finish_event_engine`]) — toujours,
+/// même sur `Err`.
+///
+/// # Errors
+/// [`CoreError::UnknownTab`] — onglet inconnu ; erreurs de
+/// pipeline d'édition/re-layout, comme la voie synchrone.
+pub async fn handle_input_shared(
+    sess: &tokio::sync::Mutex<Session>,
+    tab: TabId,
+    ev: InputEvent,
+) -> Result<InputOutcome, CoreError> {
+    // Pré sous verrou : existence, auto-réparation frame,
+    // report différé — même ordre de garde que la voie
+    // synchrone (`paint_detached`, file non vide) +
+    // `js_detached` (pompe ou input en vol — l'entrée
+    // rejoue à la réinsertion plutôt que mourir à
+    // `js = None`).
+    let mut ee = {
+        let mut s = sess.lock().await;
+        if !s.tabs.contains_key(&tab) {
+            return Err(CoreError::UnknownTab(tab));
+        }
+        s.ensure_painted(tab);
+        if s.tabs.get(&tab).is_some_and(|e| {
+            e.paint_detached || e.js_detached.is_some() || !e.deferred_inputs.is_empty()
+        }) {
+            let is_scroll = matches!(ev, InputEvent::Scroll { .. });
+            s.defer_input(tab, ev);
+            if is_scroll {
+                return Ok(InputOutcome::Scrolled {
+                    scroll_y: s.projected_scroll(tab),
+                });
+            }
+            tracing::info!(tab, "input différé — paint/js en vol, rejeté comme ignored");
+            return Ok(InputOutcome::Ignored);
+        }
+        s.take_event_engine(tab)
+    };
+    let out = input_shared_body(sess, tab, ev, &mut ee).await;
+    // Fin de fenêtre — réinsertion epoch-gardée, quoi
+    // qu'il soit arrivé (`Err` compris).
+    {
+        let mut s = sess.lock().await;
+        if let Some(e) = ee.take() {
+            s.finish_event_engine(tab, e);
+        }
+    }
+    out
+}
+
+/// Corps de [`handle_input_shared`] — `ee` emprunté :
+/// les sorties `?`/`Err` laissent le moteur à refermer
+/// par l'appelant.
+#[allow(clippy::too_many_lines)] // même ordonnancement que `handle_input_now` — les bras sont les frontières verrou/dispatch
+async fn input_shared_body(
+    sess: &tokio::sync::Mutex<Session>,
+    tab: TabId,
+    ev: InputEvent,
+    ee: &mut Option<js_glue::EventEngine>,
+) -> Result<InputOutcome, CoreError> {
+    match ev {
+        InputEvent::Key { key, mods } => {
+            // `keydown` — `preventDefault` supprime l'édition
+            // et la soumission `Enter` (étape 103/105).
+            let (path, props) = {
+                let mut s = sess.lock().await;
+                (s.key_path(tab), js_glue::key_event_props(&key, mods))
+            };
+            // `None` = doc-event nu (props vides, comme
+            // `dispatch_doc_event` en voie synchrone).
+            let spec = js_glue::EventSpec {
+                ty: "keydown".to_string(),
+                path: path.clone().unwrap_or_default(),
+                props: if path.is_some() { props } else { Vec::new() },
+                attrs: Vec::new(),
+                revert_on_prevent: false,
+            };
+            let prevented = dispatch_events(sess, tab, ee, vec![spec], true)
+                .await
+                .first()
+                .copied()
+                .unwrap_or(false);
+            if prevented {
+                return Ok(InputOutcome::Ignored);
+            }
+            if mods.chord() {
+                return Ok(InputOutcome::Ignored);
+            }
+            // Popup `<select>` ouvert — clavier chrome.
+            if sess
+                .lock()
+                .await
+                .tabs
+                .get(&tab)
+                .is_some_and(|e| e.popup.is_some())
+            {
+                return popup_key_shared(sess, tab, ee, &key).await;
+            }
+            // Soumission implicite `Enter`.
+            if key == "Enter" {
+                let paths = {
+                    let s = sess.lock().await;
+                    s.focused_form_default_paths(tab)
+                };
+                if let Some((form, sub)) = paths {
+                    set_focus_shared(sess, tab, ee, None).await;
+                    return Ok(
+                        match try_submit_shared(sess, tab, ee, Some(form), sub, false).await? {
+                            InputOutcome::Ignored => InputOutcome::Unfocused,
+                            o => o,
+                        },
+                    );
+                }
+            }
+            handle_key_shared(sess, tab, ee, &key).await
+        }
+        InputEvent::KeyUp { key, mods } => {
+            let (path, props) = {
+                let mut s = sess.lock().await;
+                (s.key_path(tab), js_glue::key_event_props(&key, mods))
+            };
+            let spec = js_glue::EventSpec {
+                ty: "keyup".to_string(),
+                path: path.clone().unwrap_or_default(),
+                props: if path.is_some() { props } else { Vec::new() },
+                attrs: Vec::new(),
+                revert_on_prevent: false,
+            };
+            dispatch_events(sess, tab, ee, vec![spec], true).await;
+            Ok(InputOutcome::Ignored)
+        }
+        InputEvent::Scroll { dy } => {
+            let wpath = {
+                let mut s = sess.lock().await;
+                s.scroll_pre(tab)
+            };
+            let prevented = dispatch_events(
+                sess,
+                tab,
+                ee,
+                vec![js_glue::EventSpec {
+                    ty: "wheel".to_string(),
+                    path: wpath,
+                    props: Vec::new(),
+                    attrs: Vec::new(),
+                    revert_on_prevent: false,
+                }],
+                true,
+            )
+            .await
+            .first()
+            .copied()
+            .unwrap_or(false);
+            if !prevented {
+                {
+                    let mut s = sess.lock().await;
+                    s.scroll_by(tab, dy)?;
+                }
+                // `scroll` niveau document (non annulable).
+                dispatch_events(
+                    sess,
+                    tab,
+                    ee,
+                    vec![js_glue::EventSpec {
+                        ty: "scroll".to_string(),
+                        path: Vec::new(),
+                        props: Vec::new(),
+                        attrs: Vec::new(),
+                        revert_on_prevent: false,
+                    }],
+                    true,
+                )
+                .await;
+            }
+            Ok(InputOutcome::Scrolled {
+                scroll_y: sess.lock().await.tabs.get(&tab).map_or(0.0, |t| t.scroll_y),
+            })
+        }
+        InputEvent::MouseMove { x, y } => mouse_move_shared(sess, tab, ee, x, y).await,
+        InputEvent::Click { x, y } => click_shared(sess, tab, ee, x, y).await,
+    }
+}
+
+/// Rafale de dispatches détachée (étape 3b) — le moteur
+/// navette dans `spawn_blocking` via `ee` ; commit sous
+/// verrou court qui **garde** la fenêtre ouverte (sauf
+/// fenêtre morte : `finish_event_engine` la referme
+/// aussitôt). Retourne `prevented` par event.
+async fn dispatch_events(
+    sess: &tokio::sync::Mutex<Session>,
+    tab: TabId,
+    ee: &mut Option<js_glue::EventEngine>,
+    events: Vec<js_glue::EventSpec>,
+    run_poll_net: bool,
+) -> Vec<bool> {
+    let n = events.len();
+    let Some(e) = ee.take() else {
+        // Pas de moteur dans la fenêtre (page sans JS,
+        // stall, ou fenêtre morte plus tôt) — mêmes sauts
+        // que la voie synchrone, tampon doc-event inclus.
+        let mut s = sess.lock().await;
+        s.buffer_doc_events(tab, &events);
+        return vec![false; n];
+    };
+    if e.dead || e.eng.is_none() {
+        let mut s = sess.lock().await;
+        s.buffer_doc_events(tab, &events);
+        *ee = Some(e);
+        return vec![false; n];
+    }
+    let epoch = e.epoch;
+    let t0 = Instant::now();
+    let out = tokio::task::spawn_blocking(move || Session::run_event_dispatch(e, events)).await;
+    let (mut e, outcome) = match out {
+        Ok(pair) => pair,
+        Err(_) => {
+            // Worker perdu — fenêtre morte : le finish
+            // referme et jette les tampons (page fraîche =
+            // miroir frais), comme le commit de pompe.
+            (
+                js_glue::EventEngine {
+                    eng: None,
+                    epoch,
+                    lifecycle: Vec::new(),
+                    fire_doc_load: false,
+                    dead: true,
+                },
+                js_glue::EventOutcome {
+                    prevented: vec![false; n],
+                    stall: None,
+                    emit_err: None,
+                    mutated: Vec::new(),
+                },
+            )
+        }
+    };
+    let prevented = {
+        let mut s = sess.lock().await;
+        s.commit_event_round(tab, &mut e, outcome, run_poll_net, t0)
+    };
+    if e.dead {
+        let mut s = sess.lock().await;
+        s.finish_event_engine(tab, e);
+    } else {
+        *ee = Some(e);
+    }
+    prevented
+}
+
+/// Construit un [`js_glue::EventSpec`] sans props ni
+/// poussées (le cas courant des rafales input).
+fn spec(ty: &str, path: Vec<(String, u32)>) -> js_glue::EventSpec {
+    js_glue::EventSpec {
+        ty: ty.to_string(),
+        path,
+        props: Vec::new(),
+        attrs: Vec::new(),
+        revert_on_prevent: false,
+    }
+}
+
+/// `blur`/`focus` hors verrou (étape 3b) — même ordre que
+/// [`Session::set_focus`] : `blur` sur l'ancien chemin,
+/// pose d'état sous verrou, `focus` sur le nouveau.
+async fn set_focus_shared(
+    sess: &tokio::sync::Mutex<Session>,
+    tab: TabId,
+    ee: &mut Option<js_glue::EventEngine>,
+    field: Option<explorer_dom::NodeId>,
+) {
+    let (old_path, new_path, new_key) = {
+        let s = sess.lock().await;
+        s.focus_paths(tab, field)
+    };
+    if old_path == new_path {
+        return;
+    }
+    if let Some(o) = old_path {
+        dispatch_events(sess, tab, ee, vec![spec("blur", o)], false).await;
+    }
+    {
+        let mut s = sess.lock().await;
+        s.set_focus_state(tab, new_path.clone(), new_key);
+    }
+    if let Some(p) = new_path {
+        dispatch_events(sess, tab, ee, vec![spec("focus", p)], false).await;
+    }
+}
+
+/// Soumission hors verrou (étape 3b) — même séquence que
+/// [`Session::try_submit`] : contrôles invalides →
+/// `invalid` puis blocage ; `submit` puis action par
+/// défaut (nav script prioritaire, `submit_form` sinon).
+async fn try_submit_shared(
+    sess: &tokio::sync::Mutex<Session>,
+    tab: TabId,
+    ee: &mut Option<js_glue::EventEngine>,
+    form_path: Option<Vec<(String, u32)>>,
+    sub_path: Option<Vec<(String, u32)>>,
+    click_prevented: bool,
+) -> Result<InputOutcome, CoreError> {
+    let (novalidate, invalid_paths) = {
+        let s = sess.lock().await;
+        s.submit_pre(tab, form_path.as_deref(), sub_path.as_deref())
+    };
+    if !click_prevented && !novalidate && !invalid_paths.is_empty() {
+        let specs = invalid_paths
+            .into_iter()
+            .map(|p| spec("invalid", p))
+            .collect();
+        dispatch_events(sess, tab, ee, specs, true).await;
+        return Ok(InputOutcome::Ignored);
+    }
+    if !click_prevented {
+        let prevented = match &form_path {
+            Some(p) => dispatch_events(sess, tab, ee, vec![spec("submit", p.clone())], true)
+                .await
+                .first()
+                .copied()
+                .unwrap_or(false),
+            None => false,
+        };
+        if !prevented {
+            let nav = {
+                let mut s = sess.lock().await;
+                s.collect_script_navs(tab);
+                s.nav_pending(tab)
+            };
+            if nav {
+                return Ok(InputOutcome::Navigated);
+            }
+            let enqueued = {
+                let mut s = sess.lock().await;
+                let f = s.resolve_path(tab, form_path.as_deref());
+                let sub = s.resolve_path(tab, sub_path.as_deref());
+                match f {
+                    Some(f) => {
+                        s.submit_form(tab, f, sub)?;
+                        true
+                    }
+                    None => false,
+                }
+            };
+            if enqueued {
+                return Ok(InputOutcome::Navigated);
+            }
+        }
+    }
+    Ok(InputOutcome::Ignored)
+}
+
+/// Édition clavier hors verrou (étape 3b) — même
+/// séquence que [`Session::handle_key`] : `Enter`/`Escape`
+/// sortent du champ, sinon édition DOM + `input` avec la
+/// `value` poussée au miroir d'abord.
+async fn handle_key_shared(
+    sess: &tokio::sync::Mutex<Session>,
+    tab: TabId,
+    ee: &mut Option<js_glue::EventEngine>,
+    key: &str,
+) -> Result<InputOutcome, CoreError> {
+    let has_field = {
+        let mut s = sess.lock().await;
+        s.focused_node(tab).is_some()
+    };
+    if !has_field {
+        tracing::trace!(tab, key, "touche sans champ focalisé");
+        return Ok(InputOutcome::Unfocused);
+    }
+    if matches!(key, "Enter" | "Escape") {
+        set_focus_shared(sess, tab, ee, None).await;
+        {
+            let mut s = sess.lock().await;
+            // Le caret disparaît avec le focus (M-H1 #1).
+            let _ = s.repaint(tab);
+            s.emit_invalidated(tab);
+        }
+        return Ok(InputOutcome::Unfocused);
+    }
+    let edited = {
+        let mut s = sess.lock().await;
+        s.key_edit(tab, key)?
+    };
+    let Some((field_path, value)) = edited else {
+        tracing::trace!(tab, key, "touche — champ focalisé mort entre-temps");
+        return Ok(InputOutcome::Unfocused);
+    };
+    let mut input_spec = spec("input", field_path.clone());
+    input_spec
+        .attrs
+        .push((field_path, "value".to_string(), Some(value)));
+    dispatch_events(sess, tab, ee, vec![input_spec], true).await;
+    {
+        let mut s = sess.lock().await;
+        s.relayout(tab)?;
+        s.emit_invalidated(tab);
+    }
+    Ok(InputOutcome::Edited)
+}
+
+/// Clavier du popup `<select>` ouvert (étape 3b) — même
+/// logique que [`Session::popup_key`] : flèches bornées,
+/// `Enter` choisit (dispatches détachés via
+/// `popup_choose_shared`), autre touche = fermeture.
+async fn popup_key_shared(
+    sess: &tokio::sync::Mutex<Session>,
+    tab: TabId,
+    ee: &mut Option<js_glue::EventEngine>,
+    key: &str,
+) -> Result<InputOutcome, CoreError> {
+    enum Pop {
+        Choose(Vec<(String, u32)>, Option<usize>),
+        Out(InputOutcome),
+    }
+    let act = {
+        let mut s = sess.lock().await;
+        // Lecture du popup dans une portée dédiée — les
+        // bras appellent `repaint`/`emit_invalidated` sur
+        // `s` entier.
+        let (path, rows, hovered, first_sel) = {
+            let entry = s.tabs.get_mut(&tab).ok_or(CoreError::UnknownTab(tab))?;
+            let Some(pop) = &entry.popup else {
+                return Ok(InputOutcome::Ignored);
+            };
+            (
+                pop.path.clone(),
+                pop.options.len().min(MAX_POPUP_ROWS),
+                pop.hovered,
+                pop.options.iter().position(|&(_, sel)| sel),
+            )
+        };
+        match key {
+            "ArrowDown" | "ArrowUp" => {
+                let next = match hovered {
+                    Some(h) if key == "ArrowDown" => (h + 1).min(rows.saturating_sub(1)),
+                    Some(h) => h.saturating_sub(1),
+                    None if key == "ArrowDown" => 0,
+                    None => rows.saturating_sub(1),
+                };
+                if let Some(pop) = s.tabs.get_mut(&tab).and_then(|e| e.popup.as_mut()) {
+                    pop.hovered = Some(next);
+                }
+                s.repaint(tab)?;
+                s.emit_invalidated(tab);
+                Pop::Out(InputOutcome::Edited)
+            }
+            "Enter" => Pop::Choose(path, hovered.or(first_sel)),
+            _ => {
+                if let Some(e) = s.tabs.get_mut(&tab) {
+                    e.popup = None;
+                }
+                s.repaint(tab)?;
+                s.emit_invalidated(tab);
+                Pop::Out(InputOutcome::Ignored)
+            }
+        }
+    };
+    match act {
+        Pop::Out(o) => Ok(o),
+        Pop::Choose(path, row) => popup_choose_shared(sess, tab, ee, path, row).await,
+    }
+}
+
+/// Choix popup hors verrou (étape 3b) — `popup_choose_pre`
+/// sous verrou puis `input`/`change` détachés avec les
+/// poussées `selected` en `attrs` (le handler lit
+/// `option.selected` post-choix).
+async fn popup_choose_shared(
+    sess: &tokio::sync::Mutex<Session>,
+    tab: TabId,
+    ee: &mut Option<js_glue::EventEngine>,
+    path: Vec<(String, u32)>,
+    row: Option<usize>,
+) -> Result<InputOutcome, CoreError> {
+    let (fire, attrs) = {
+        let mut s = sess.lock().await;
+        s.popup_choose_pre(tab, &path, row)?
+    };
+    if fire {
+        let mut input = spec("input", path.clone());
+        input.attrs = attrs.clone();
+        let mut change = spec("change", path);
+        change.attrs = attrs;
+        dispatch_events(sess, tab, ee, vec![input, change], true).await;
+    }
+    {
+        let mut s = sess.lock().await;
+        s.emit_invalidated(tab);
+    }
+    Ok(InputOutcome::Edited)
+}
+
+/// Survol hors verrou (étape 3b) — `mouse_move_pre` sous
+/// verrou, rafale `mouseout`/`mouseover`/`mousemove`
+/// détachée, `mouse_move_post` sous verrou.
+async fn mouse_move_shared(
+    sess: &tokio::sync::Mutex<Session>,
+    tab: TabId,
+    ee: &mut Option<js_glue::EventEngine>,
+    x: f32,
+    y: f32,
+) -> Result<InputOutcome, CoreError> {
+    let pre = {
+        let mut s = sess.lock().await;
+        s.mouse_move_pre(tab, x, y)?
+    };
+    match pre {
+        input::MovePre::Popup(o) => Ok(o),
+        input::MovePre::Hover(events) => {
+            if !events.is_empty() {
+                dispatch_events(sess, tab, ee, events, true).await;
+            }
+            let mut s = sess.lock().await;
+            Ok(s.mouse_move_post(tab, x, y))
+        }
+    }
+}
+
+/// Clic hors verrou (étape 3b) — même chaîne que
+/// [`Session::handle_click`] : `click` puis revert-ou-
+/// `input`/`change`, focus, popup `<select>`, `submit`,
+/// activation `<a>`, `Edited`/`Ignored`.
+#[allow(clippy::too_many_lines)] // même séquence que la voie synchrone — les grappes sont les frontières
+async fn click_shared(
+    sess: &tokio::sync::Mutex<Session>,
+    tab: TabId,
+    ee: &mut Option<js_glue::EventEngine>,
+    x: f32,
+    y: f32,
+) -> Result<InputOutcome, CoreError> {
+    let pre = {
+        let mut s = sess.lock().await;
+        s.click_pre(tab, x, y)?
+    };
+    let (node, node_path, toggled, ctrl_path, flip_attr) = match pre {
+        input::ClickPre::Popup { path, row } => {
+            return popup_choose_shared(sess, tab, ee, path, row).await;
+        }
+        input::ClickPre::Hit {
+            node,
+            node_path,
+            toggled,
+            ctrl_path,
+            flip_attr,
+        } => (node, node_path, toggled, ctrl_path, flip_attr),
+    };
+    let prevented = match &node_path {
+        Some(p) => {
+            let mut click = spec("click", p.clone());
+            if let Some(m) = flip_attr {
+                click.attrs.push(m);
+                // `preventDefault` restaure `checked` —
+                // revert miroir dans le worker, journal
+                // `set`+`remove` en ordre sur le DOM hôte.
+                click.revert_on_prevent = true;
+            }
+            dispatch_events(sess, tab, ee, vec![click], true)
+                .await
+                .first()
+                .copied()
+                .unwrap_or(false)
+        }
+        None => false,
+    };
+    if toggled.is_some() {
+        if prevented {
+            // Revert de l'activation — `flip_checked`
+            // repousse `checked` (tamponné, livré à la
+            // prochaine synchro).
+            let r = {
+                let mut s = sess.lock().await;
+                match s.resolve_path(tab, ctrl_path.as_deref()) {
+                    Some(c) => s.flip_checked(tab, c),
+                    None => Ok(()),
+                }
+            };
+            r?;
+        } else if let Some(p) = ctrl_path {
+            // `input` puis `change` — ordre DOM.
+            dispatch_events(
+                sess,
+                tab,
+                ee,
+                vec![spec("input", p.clone()), spec("change", p)],
+                true,
+            )
+            .await;
+        }
+        {
+            let mut s = sess.lock().await;
+            s.relayout(tab)?;
+            s.emit_invalidated(tab);
+        }
+        return Ok(if prevented {
+            InputOutcome::Ignored
+        } else {
+            InputOutcome::Edited
+        });
+    }
+    // Navigation script (`location`, `history`) : priorité
+    // sur l'action par défaut du clic.
+    let nav = {
+        let mut s = sess.lock().await;
+        s.collect_script_navs(tab);
+        s.nav_pending(tab)
+    };
+    if nav {
+        return Ok(InputOutcome::Navigated);
+    }
+    let field = {
+        let s = sess.lock().await;
+        s.field_at(tab, x, y)
+    };
+    if let Some(field) = field {
+        set_focus_shared(sess, tab, ee, Some(field)).await;
+        {
+            let mut s = sess.lock().await;
+            s.repaint(tab)?;
+            s.emit_invalidated(tab);
+        }
+        return Ok(InputOutcome::Focused);
+    }
+    let had_focus = sess
+        .lock()
+        .await
+        .tabs
+        .get(&tab)
+        .is_some_and(|e| e.focused.is_some());
+    set_focus_shared(sess, tab, ee, None).await;
+    if had_focus {
+        let mut s = sess.lock().await;
+        s.repaint(tab)?;
+        s.emit_invalidated(tab);
+    }
+    let sel = {
+        let s = sess.lock().await;
+        s.select_at(tab, x, y)
+    };
+    if let Some(sel) = sel {
+        let mut s = sess.lock().await;
+        s.toggle_select_popup(tab, sel)?;
+        s.emit_invalidated(tab);
+        return Ok(InputOutcome::Edited);
+    }
+    let sub = {
+        let s = sess.lock().await;
+        s.submit_at(tab, x, y)
+    };
+    if let Some((form, sub_id)) = sub {
+        // Chemins captés sous verrou — le `submit` est
+        // dispatché hors verrou, les `NodeId` mourraient.
+        let paths = {
+            let s = sess.lock().await;
+            s.tabs
+                .get(&tab)
+                .and_then(|e| e.dom.as_ref())
+                .map(|d| (element_path(d, form), element_path(d, sub_id)))
+        };
+        let (form_path, sub_path) = paths.unwrap_or_default();
+        return try_submit_shared(sess, tab, ee, form_path, sub_path, prevented).await;
+    }
+    let linked = {
+        let mut s = sess.lock().await;
+        s.link_activate(tab, x, y, prevented)?
+    };
+    if linked {
+        return Ok(InputOutcome::Navigated);
+    }
+    if node.is_some() && !prevented {
+        // B-31 — élément cliqué, handlers possibles.
+        tracing::info!(tab, x, y, "click livré au DOM — aucune action par défaut");
+        let mut s = sess.lock().await;
+        s.relayout(tab)?;
+        s.emit_invalidated(tab);
+        return Ok(InputOutcome::Edited);
+    }
+    tracing::info!(
+        tab,
+        x,
+        y,
+        hit = node.is_some(),
+        prevented,
+        "click ignored — aucun contrôle/lien actionnable sous le point"
+    );
+    Ok(InputOutcome::Ignored)
+}
+
+/// Replay des entrées différées, voie shared (étape 3b) —
+/// la file est **prise d'un coup** puis chaque entrée est
+/// gérée hors verrou : une entrée qui re-diffère
+/// (re-détachement entre-temps) réenfile sur la file
+/// fraîche sans être rejouée dans cette passe, comme la
+/// voie synchrone.
+pub async fn drain_deferred_inputs_shared(sess: &tokio::sync::Mutex<Session>, tab: TabId) {
+    let mut q = {
+        let mut s = sess.lock().await;
+        s.take_deferred_queue(tab)
+    };
+    while let Some(ev) = q.pop_front() {
+        let _ = handle_input_shared(sess, tab, ev).await;
+    }
 }

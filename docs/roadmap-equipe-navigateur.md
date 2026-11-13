@@ -11942,6 +11942,61 @@ un crate PIPELINE.- [x] **JS-C422. Deadline honnête — canal session ↔ budge
   mutations`, `pump_shared_keeps_lock_free
   _during_js_burst`).
 
+- [x] **Étape 225. Dispatch événementiel
+  hors verrou, voie shared seule**
+  (`explorer-core` `session/js_glue.rs`/
+  `input.rs`/`shared.rs`/`mod.rs`,
+  `explorer-api` `lib.rs`, `explorer-daemon`
+  `main.rs`, audit perf chantier 3b) :
+  `dispatch_path_event_props` exécutait
+  dispatch JS + `run_pending` + `sync_for_
+  apply` + `after_script`/`poll_net` sous
+  `sess.lock()` — le site du
+  `deliver_dyn_script` 128,7 s YouTube,
+  atteint par les vols cliquer/scroller.
+  `handle_input_shared` (exporté, appelé
+  par `POST /input`) navette le moteur
+  détaché sur **toute** la durée de
+  l'input : `take_event_engine` (verrou
+  court — embarque `pending_doc_lifecycle`
+  + `fire_doc_load`), specs préparées sous
+  verrou (hit-test, chemins élément,
+  props clavier, `attrs` — les poussées
+  `checked`/`value`/`selected` que le
+  handler doit lire post-activation, sinon
+  miroir périmé), `run_event_dispatch`
+  en `spawn_blocking` (lifecycle →
+  `complete`/`load` → attrs → dispatch →
+  `run_pending` → `sync_for_apply`,
+  rafale coupée au stall), `commit_event_
+  round` sous verrou court (gardes epoch/
+  disjoncteur, applies enfilés dans
+  l'ordre journal-prolongé/keyed-subsume,
+  `prevented` aligné retourné au REST),
+  `finish_event_engine` referme epoch-
+  gardé. `revert_on_prevent` : un
+  `preventDefault` sur activation retire
+  l'attr au miroir **dans le worker** —
+  journal `set`+`remove` en ordre sur le
+  DOM hôte (sinon le drain rejouait `set`
+  après le revert hôte). Les entrées
+  pendant la fenêtre (`js_detached` armé)
+  joignent `deferred_inputs`, rejouées
+  par `drain_deferred_inputs_shared`
+  (file prise entière, ordre FIFO +
+  coalesce) — hôtes `events_offlock`
+  seuls (`daemon` l'arme) : FFI, CLI et
+  `&mut Session` gardent le dispatch
+  synchrone inchangé. Verrous : 4 internes
+  (fenêtre/lifecycle/réinsert, epoch
+  supplantée, buffer doc-only, defer
+  pendant `js_detached`) + 6 intégration
+  (prevented checkbox + revert, `change`
+  édite, `value` avant `input`, `wheel`
+  prevented, moteur partagé shared↔sync,
+  `UnknownTab`) — 473 intégration + 136
+  lib verts.
+
 ## Plan NAVIGATEUR — vitrine YouTube + surface navigateur (2026-11-12)
 
 Plan parallèle à la file `css.values` PIPE (§ roadmap équipe

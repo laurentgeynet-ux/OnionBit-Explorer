@@ -36,8 +36,9 @@ use axum::response::{IntoResponse, Response};
 use axum::routing::{delete, get, post};
 use axum::{Json, Router};
 use explorer_core::{
-    drain_applies_shared, drain_navs_shared, eval_shared, history_move_shared, navigate_shared,
-    CoreError, CoreEvent, EvalReply, InputEvent, InputOutcome, KeyMods, Session, TabId,
+    drain_applies_shared, drain_navs_shared, eval_shared, handle_input_shared, history_move_shared,
+    navigate_shared, CoreError, CoreEvent, EvalReply, InputEvent, InputOutcome, KeyMods, Session,
+    TabId,
 };
 use explorer_net::http::{Initiator, Method, Request};
 use explorer_net::url::Url;
@@ -820,23 +821,24 @@ async fn input(
             );
         }
     };
-    // `handle_input_now` pose les intentions (étape 53d) et
-    // la réponse rend l'outcome d'enfilement **immédiatement**
-    // (étape 73) : les drains — apply en `spawn_blocking`
-    // (>30 s sur heavy.html) et navs réseau — tournent en
-    // tâche détachée, pas dans l'attente HTTP. La vérité du
+    // `handle_input_shared` (étape 3b) pose les intentions
+    // (étape 53d) comme `handle_input_now`, mais les
+    // dispatches JS tournent hors verrou sur le moteur
+    // détaché — le verrou session vit entre les grappes
+    // au lieu de tenir toute la gestion. La réponse rend
+    // l'outcome d'enfilement à la fin de l'input (étape 73)
+    // ; les drains — apply en `spawn_blocking` (>30 s sur
+    // heavy.html) et navs réseau — tournent en tâche
+    // détachée, pas dans l'attente HTTP. La vérité du
     // commit arrive par SSE : `navigated`/`pipeline_error`
     // pour les navs, `frame_invalidated` pour la peinture ;
     // un apply supplanté par epoch est jeté par la garde
     // (observable via les events du gagnant). Les appelants
     // `&mut` (FFI/CLI) gardent `handle_input` qui draine en
     // synchrone et rapporte le commit réel.
-    let outcome = {
-        let mut session = st.session.lock().await;
-        match session.handle_input_now(id, ev) {
-            Ok(o) => o,
-            Err(e) => return err(err_status(&e), &e),
-        }
+    let outcome = match handle_input_shared(&st.session, id, ev).await {
+        Ok(o) => o,
+        Err(e) => return err(err_status(&e), &e),
     };
     {
         let sess = st.session.clone();

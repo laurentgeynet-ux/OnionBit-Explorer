@@ -29,11 +29,12 @@ pub static LAST_DRAIN: std::sync::Mutex<&'static str> = std::sync::Mutex::new(""
 pub use explorer_css::ColorScheme;
 pub use profile_store::{acquire_profile_lock, JsonDnsStore, JsonFileStore, JsonHstsStore};
 pub use session::{
-    download_event_json, drain_applies_shared, drain_navs_shared, eval_shared, history_move_shared,
-    media_codecs_from_json, media_event_json, media_host_state_str, media_offer_json,
-    media_report_from_json, navigate_shared, pump_timers_shared, Bookmark, CoreError, CoreEvent,
-    DownloadInfo, DownloadRecord, DownloadState, EvalReply, FrameRegion, FrameTop, GeomBox,
-    GeometryReport, HitTargets, InputEvent, InputOutcome, KeyMods, MediaAudioSpec, MediaCmd,
-    MediaError, MediaHostState, MediaKind, MediaOfferInfo, MediaRect, MediaReport, MsePull,
-    ProfileStore, Session, SessionConfig, StoredCookie, TabId, TabInfo, Visit,
+    download_event_json, drain_applies_shared, drain_deferred_inputs_shared, drain_navs_shared,
+    eval_shared, handle_input_shared, history_move_shared, media_codecs_from_json,
+    media_event_json, media_host_state_str, media_offer_json, media_report_from_json,
+    navigate_shared, pump_timers_shared, Bookmark, CoreError, CoreEvent, DownloadInfo,
+    DownloadRecord, DownloadState, EvalReply, FrameRegion, FrameTop, GeomBox, GeometryReport,
+    HitTargets, InputEvent, InputOutcome, KeyMods, MediaAudioSpec, MediaCmd, MediaError,
+    MediaHostState, MediaKind, MediaOfferInfo, MediaRect, MediaReport, MsePull, ProfileStore,
+    Session, SessionConfig, StoredCookie, TabId, TabInfo, Visit,
 };

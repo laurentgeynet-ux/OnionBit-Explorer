@@ -1048,6 +1048,13 @@ pub struct Session {
     /// navigations/onglets neufs sont refusés (`Overloaded`
     /// → REST 503) tant qu'il dure.
     shed_active: bool,
+    /// Hôte à session partagée (étape 3b) — `true` = le
+    /// replay des entrées différées ne tourne **pas** sous
+    /// verrou dans les commits : il attend
+    /// `drain_deferred_inputs_shared` (dispatches hors
+    /// verrou). Les hôtes `&mut Session` gardent `false` —
+    /// replay synchrone, sémantique inchangée.
+    events_offlock: bool,
     /// Dernier échantillon RSS (`maybe_rss_shed` borne la
     /// cadence — `memory_stats()` est un appel système).
     rss_shed_at: std::time::Instant,
@@ -1301,6 +1308,7 @@ impl Session {
             pending_script_net: std::collections::VecDeque::new(),
             rss_shed_mb: cfg.rss_shed_mb,
             shed_active: false,
+            events_offlock: false,
             rss_shed_at: std::time::Instant::now(),
             shed_retry_after_s: cfg.shed_retry_after_s,
             net_probe_seen: std::collections::HashSet::new(),
@@ -1428,6 +1436,16 @@ impl Session {
 
     pub fn set_js_factory(&mut self, f: JsFactory) {
         self.js_factory = Some(f);
+    }
+
+    /// Déclare l'hôte « session partagée » (étape 3b) : le
+    /// replay des entrées différées sort du verrou — les
+    /// commits le sautent, `drain_deferred_inputs_shared`
+    /// le rejoue avec dispatches détachés. Les hôtes `&mut
+    /// Session` (FFI, CLI, tests) gardent `false` — replay
+    /// synchrone inchangé.
+    pub fn set_events_offlock(&mut self, on: bool) {
+        self.events_offlock = on;
     }
 
     /// Valeur `Accept-Language` annoncée sur toutes les requêtes
