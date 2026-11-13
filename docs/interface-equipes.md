@@ -3283,3 +3283,24 @@ shadow n'atteint ni cascade ni boxification ») etait
 - **Impact** : trou générique — casse toute liste imbriquée
   sous un conteneur intermédiaire, pas seulement wiki.
   `geo_diff` wiki attendu ~-800 px sur `mp-bottom` au fix.
+
+### 2026-11-13 — N1.5 CONFIRMÉ : poToken attesté sur le fil
+
+- Sonde `req.hdrs` (`probe_youtubei`, xhr.rs) : dump
+  headers + extrait corps pour toute URL `/youtubei`.
+- Run dbg4 : `bg.v` tiré 00:02:55 → clic logo (nav SPA,
+  même document/session `trayride`) →
+  `POST /youtubei/v1/browse` à 00:13:35 portant
+  **`x-goog-eom-visitor-id`** (~700 car. base64) —
+  le jeton d'attestation BotGuard attaché à la requête.
+- `x-youtube-client-name=1`, `client-version`, en-têtes
+  complets ; corps JSON gzip 3025 o (le token est dans
+  l'en-tête, pas le corps).
+- Technique de déclenchement : clic `.click()` sur
+  `a#logo` = navigation **SPA** (même realm JS, même VM)
+  → appels Innertube attestés par la session déjà
+  complétée. Évite la ré-attente de 5 min d'un nouveau
+  document.
+- Verdict final N1.5 : moteur **fonctionnel de bout en
+  bout** — la VM complète (~5 min sampling), `V` tire,
+  la chaîne de signing produit et attache le poToken.
