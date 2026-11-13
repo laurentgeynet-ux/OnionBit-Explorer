@@ -19,14 +19,14 @@
 
 use crate::parser::{AtKind, Declaration, MediaQuery, Rule, Stylesheet};
 use crate::selector::{
-    matches_with_state_cached, parse_selector_list, AncestorFilter, ComplexSelector, MatchCache,
-    PseudoClass, SimpleSelector, Specificity,
+    matches_with_state_cached, parse_selector_list, AncestorFilter, Combinator, ComplexSelector,
+    MatchCache, PseudoClass, SimpleSelector, Specificity,
 };
 use crate::value::{
     expand_shorthand, parse_color, parse_length, value_is_valid_for, Color, Length,
 };
 use explorer_dom::{Dom, NodeId};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 /// Schéma de couleurs préféré de l'utilisateur (MQ5
@@ -1643,6 +1643,63 @@ fn rightmost_key(sel: &ComplexSelector) -> BucketKey {
     }
 }
 
+/// `true` si le sélecteur porte un composé **non-final**
+/// dont la vérité peut basculer sans changer le computed du
+/// nœud qui le porte — canal silencieux de la frontière
+/// (R-292) : `E + F G` bascule pour `G` quand `E` mute, même
+/// si `F` garde un computed identique ; idem `A:has(x) B`
+/// ou `A:nth-child(2) B` pour les descendants de `A`/`B`.
+/// Les composés en position frère (`+`/`~` en amont) et les
+/// composés à dépendance distante/structurale (`:has(`,
+/// `:nth-*`, `:empty`, `:first/last/only-*`) en position
+/// non-finale sont concernés.
+fn selector_deep_relational(sel: &ComplexSelector) -> bool {
+    let last = sel.parts.len().saturating_sub(1);
+    for (i, (compound, _)) in sel.parts.iter().enumerate().take(last) {
+        let via_sibling = i > 0
+            && matches!(
+                sel.parts[i - 1].1,
+                Some(Combinator::NextSibling | Combinator::SubsequentSibling)
+            );
+        if via_sibling || compound_remote_dependent(compound) {
+            return true;
+        }
+    }
+    false
+}
+
+/// `true` si le composé dépend d'un état **distant ou
+/// structural** : `:has(` (nœuds hors portée locale),
+/// `:nth-*`/`:empty`/`:first/last/only-*` (séquence de
+/// fratrie) — récursif dans `:not`/`:is`/`:where` (R-292).
+fn compound_remote_dependent(c: &crate::CompoundSelector) -> bool {
+    c.simples.iter().any(|s| match s {
+        SimpleSelector::Pseudo(
+            PseudoClass::Has(_)
+            | PseudoClass::Empty
+            | PseudoClass::FirstChild
+            | PseudoClass::LastChild
+            | PseudoClass::OnlyChild
+            | PseudoClass::FirstOfType
+            | PseudoClass::LastOfType
+            | PseudoClass::OnlyOfType
+            | PseudoClass::NthChild(..)
+            | PseudoClass::NthLastChild(..)
+            | PseudoClass::NthOfType(..)
+            | PseudoClass::NthLastOfType(..),
+        ) => true,
+        SimpleSelector::Pseudo(
+            PseudoClass::Not(list) | PseudoClass::Is(list) | PseudoClass::Where(list),
+        ) => list.iter().any(|inner| {
+            inner
+                .parts
+                .iter()
+                .any(|(ic, _)| compound_remote_dependent(ic))
+        }),
+        _ => false,
+    })
+}
+
 /// Moteur de cascade : accumulateur de feuilles + calcul.
 /// Enregistrement `@property` (css-properties-values-api-1 —
 /// R-118) : `syntax` conservée (non typée v1), `inherits`
@@ -2795,6 +2852,417 @@ impl StyleEngine {
             font_feature_values: self.font_feature_values.clone(),
             font_palettes: self.font_palettes.clone(),
         }
+    }
+
+    /// Restyle de **frontière** (R-292, journal 2026-11-13)
+    /// — contrepartie de [`compute_scoped`](Self::compute_scoped)
+    /// qui ne reparcourt pas le sous-arbre du scope entier :
+    /// `frontier` = les nœuds **touchés** (mutés) ; la passe
+    /// n'émet que la région dont le style peut dépendre de la
+    /// mutation :
+    ///
+    /// * chaque touché **et son sous-arbre** (restyle
+    ///   inconditionnel — un composé ancêtre des descendants
+    ///   peut lire l'attribut muté) ;
+    /// * les **ancêtres** des touchés jusqu'à `root`
+    ///   (évalués — `:has(`, `:empty`, héritage aval) ;
+    /// * les **frères précédents** de chaque nœud de chaîne
+    ///   (évalués — sujets `E:has(+ ~)` et `:nth-last-*`) ;
+    /// * les **frères suivants** des touchés (évalués —
+    ///   `+`, `~`, `:nth-*`).
+    ///
+    /// Sous un nœud évalué, la descente est inconditionnelle
+    /// ssi le nœud est touché, son style diffère de `base`
+    /// (héritage à propager), ou c'est un frère suivant de
+    /// touché sous feuilles `deep_relational` (canal
+    /// silencieux `E + F G` : la vérité du composé `E+F`
+    /// bascule sans changer le computed de `F`). Sinon le
+    /// sous-arbre est élagué — son style ne peut pas avoir
+    /// changé (contrat : la garde `:has` amont garantit
+    /// qu'aucune vérité `:has` ne bascule pendant la passe ;
+    /// les mutations structurelles se signalent en passant
+    /// le **parent** comme touché).
+    ///
+    /// `base` = la [`StyleMap`] persistée — sert à la
+    /// comparaison computed et à l'ensemencement du sommet
+    /// (`base[parent(sommet)]`, sinon `None`). La map
+    /// produite ne contient que les nœuds évalués ;
+    /// [`StyleMap::apply_scoped`] la fusionne comme une map
+    /// scopée ordinaire — hors région, les entrées de `base`
+    /// font foi.
+    ///
+    /// `root` borne la remontée des chaînes (typiquement
+    /// `dom.document()`) ; une chaîne qui somme hors du
+    /// sous-arbre de `root` marche quand même depuis son
+    /// sommet (conservateur). Nœuds morts filtrés (leur
+    /// purge reste au consommateur — même contrat que
+    /// `compute_scoped`). `frontier` vide → map vide
+    /// (no-op `apply_scoped`).
+    #[must_use]
+    pub fn compute_scoped_frontier(
+        &self,
+        dom: &Dom,
+        root: NodeId,
+        env: &StyleEnv,
+        base: &StyleMap,
+        frontier: &[NodeId],
+    ) -> StyleMap {
+        self.compute_scoped_frontier_with_state(dom, root, env, base, frontier, &|_| false)
+    }
+
+    /// Variante étatée de [`StyleEngine::compute_scoped_frontier`].
+    #[must_use]
+    pub fn compute_scoped_frontier_with_state(
+        &self,
+        dom: &Dom,
+        root: NodeId,
+        env: &StyleEnv,
+        base: &StyleMap,
+        frontier: &[NodeId],
+        state: &dyn Fn(&str) -> bool,
+    ) -> StyleMap {
+        self.compute_scoped_frontier_with_ctx(dom, root, env, base, frontier, state, None)
+    }
+
+    /// Variante contextuelle (R-190 — passe 2 `@container`)
+    /// de [`StyleEngine::compute_scoped_frontier`].
+    #[must_use]
+    #[allow(clippy::too_many_arguments)]
+    pub fn compute_scoped_frontier_with_ctx(
+        &self,
+        dom: &Dom,
+        root: NodeId,
+        env: &StyleEnv,
+        base: &StyleMap,
+        frontier: &[NodeId],
+        state: &dyn Fn(&str) -> bool,
+        containers: Option<&HashMap<NodeId, ContainerMeasure>>,
+    ) -> StyleMap {
+        let mut map = HashMap::new();
+        let mut pseudos = HashMap::new();
+        let mut mcache = MatchCache::default();
+        mcache.namespaces.clone_from(&self.namespaces);
+        // `spine` = union des chaînes ancêtres des touchés
+        // jusqu'à `root` (ou jusqu'en haut — une chaîne hors
+        // sous-arbre de `root` marche depuis son propre
+        // sommet, conservateur). `tops` = sommets distincts.
+        let mut touched: HashSet<NodeId> = HashSet::new();
+        let mut spine: HashSet<NodeId> = HashSet::new();
+        let mut tops: Vec<NodeId> = Vec::new();
+        for &t in frontier {
+            if dom.element(t).is_err() || touched.contains(&t) {
+                continue;
+            }
+            touched.insert(t);
+            let mut cur = t;
+            loop {
+                spine.insert(cur);
+                if cur == root {
+                    break;
+                }
+                match dom.parent(cur).ok().flatten() {
+                    Some(p) => cur = p,
+                    None => break,
+                }
+            }
+            if !tops.contains(&cur) {
+                tops.push(cur);
+            }
+        }
+        let deep_relational = self.deep_relational();
+        let mut root_fs = self.root_font_size(dom, env, state);
+        for top in tops {
+            let seed = dom.parent(top).ok().flatten().and_then(|p| base.get(p));
+            let anc = AncestorFilter::of_ancestors(dom, top);
+            explorer_common::deep(|| {
+                self.frontier_node(
+                    dom,
+                    top,
+                    env,
+                    seed,
+                    base,
+                    &spine,
+                    &touched,
+                    deep_relational,
+                    &mut map,
+                    &mut pseudos,
+                    state,
+                    &mut mcache,
+                    &anc,
+                    &mut root_fs,
+                    containers,
+                );
+            });
+        }
+        self.resolve_font_alternates(&mut map);
+        StyleMap {
+            map,
+            pseudos,
+            counter_styles: self.counter_styles.clone(),
+            font_feature_values: self.font_feature_values.clone(),
+            font_palettes: self.font_palettes.clone(),
+        }
+    }
+
+    /// Marche récursive de [`compute_scoped_frontier_with_ctx`]
+    /// : évalue `node` puis sélectionne les enfants à visiter
+    /// (cf. doc de la API — chaîne, frères précédents de chaîne,
+    /// frères des touchés). Les sous-arbres à restyle
+    /// inconditionnel délèguent à [`Self::compute_subtree`].
+    #[allow(clippy::too_many_arguments)]
+    fn frontier_node(
+        &self,
+        dom: &Dom,
+        node: NodeId,
+        env: &StyleEnv,
+        parent: Option<&ComputedStyle>,
+        base: &StyleMap,
+        spine: &HashSet<NodeId>,
+        touched: &HashSet<NodeId>,
+        deep_relational: bool,
+        map: &mut HashMap<NodeId, ComputedStyle>,
+        pseudos: &mut HashMap<NodeId, PseudoStyles>,
+        state: &dyn Fn(&str) -> bool,
+        mcache: &mut MatchCache,
+        anc: &AncestorFilter,
+        root_fs: &mut f32,
+        containers: Option<&HashMap<NodeId, ContainerMeasure>>,
+    ) {
+        let style = self.compute_with_parent(
+            dom, node, env, parent, None, state, mcache, anc, *root_fs, containers,
+        );
+        if dom.document_element() == Some(node) {
+            *root_fs = style
+                .get("font-size")
+                .and_then(|v| v.trim().trim_end_matches("px").trim().parse::<f32>().ok())
+                .unwrap_or(env.font_size_base);
+        }
+        if dom.element(node).is_ok() {
+            // Même politique de pseudo-éléments que
+            // `compute_subtree` (R-13/R-177).
+            let mut pseudo_style =
+                |pe: crate::PseudoElement, need_content: bool| -> Option<ComputedStyle> {
+                    if !self.has_pseudo_rules(dom, pe) {
+                        return None;
+                    }
+                    let s = self.compute_with_parent(
+                        dom,
+                        node,
+                        env,
+                        Some(&style),
+                        Some(pe),
+                        state,
+                        mcache,
+                        anc,
+                        *root_fs,
+                        containers,
+                    );
+                    let keep = if need_content {
+                        s.get("content").is_some()
+                    } else {
+                        s.iter().next().is_some()
+                    };
+                    keep.then_some(s)
+                };
+            let before = pseudo_style(crate::PseudoElement::Before, true);
+            let after = pseudo_style(crate::PseudoElement::After, true);
+            let ps = PseudoStyles {
+                before,
+                after,
+                first_line: pseudo_style(crate::PseudoElement::FirstLine, false),
+                first_letter: pseudo_style(crate::PseudoElement::FirstLetter, false),
+                marker: pseudo_style(crate::PseudoElement::Marker, false),
+                selection: pseudo_style(crate::PseudoElement::Selection, false),
+                backdrop: pseudo_style(crate::PseudoElement::Backdrop, false),
+            };
+            if ps.before.is_some()
+                || ps.after.is_some()
+                || ps.first_line.is_some()
+                || ps.first_letter.is_some()
+                || ps.marker.is_some()
+                || ps.selection.is_some()
+                || ps.backdrop.is_some()
+            {
+                pseudos.insert(node, ps);
+            }
+        }
+        let Ok(children) = dom.children_iter(node) else {
+            map.insert(node, style);
+            return;
+        };
+        // Sélection des enfants : sous un touché/changé tout
+        // descend (restyle inconditionnel) ; sous un nœud de
+        // chaîne on visite les enfants jusqu'au dernier enfant
+        // de chaîne, plus TOUS les enfants si l'un d'eux est
+        // touché (frères suivants des touchés — `+`/`~`) ;
+        // sinon le sous-arbre est élagué (style prouvé stable).
+        let is_spine = spine.contains(&node);
+        let is_touched = touched.contains(&node);
+        let changed = base.get(node).is_none_or(|b| *b != style);
+        let descend_all = is_touched || changed;
+        let mut child_anc = *anc;
+        child_anc.insert_node(dom, node);
+        let host_root = dom.shadow_root(node, true);
+        // Enfants shadow (flat tree) d'abord — les `<slot>`
+        // doivent être dans `map` avant les enfants light
+        // distribués (même ordre que `compute_subtree`).
+        if let Some(sroot) = host_root {
+            if let Ok(schildren) = dom.children_iter(sroot) {
+                let kids: Vec<NodeId> = schildren.filter(|c| dom.element(*c).is_ok()).collect();
+                self.frontier_children(
+                    dom,
+                    &kids,
+                    &style,
+                    base,
+                    spine,
+                    touched,
+                    is_spine,
+                    descend_all,
+                    deep_relational,
+                    env,
+                    map,
+                    pseudos,
+                    state,
+                    mcache,
+                    &child_anc,
+                    root_fs,
+                    containers,
+                    None,
+                );
+            }
+        }
+        let kids: Vec<NodeId> = children.filter(|c| dom.element(*c).is_ok()).collect();
+        self.frontier_children(
+            dom,
+            &kids,
+            &style,
+            base,
+            spine,
+            touched,
+            is_spine,
+            descend_all,
+            deep_relational,
+            env,
+            map,
+            pseudos,
+            state,
+            mcache,
+            &child_anc,
+            root_fs,
+            containers,
+            host_root.map(|_| (dom, base)),
+        );
+        map.insert(node, style);
+    }
+
+    /// Visite des enfants de [`Self::frontier_node`] — même
+    /// sélection pour une liste d'enfants (light ou shadow) ;
+    /// `slot_ctx` = `Some((dom, base))` sur liste light sous
+    /// hôte shadow (seed `<slot>` distribué : map courante,
+    /// puis `base` en repli — un slot élagué garde son style
+    /// persisté, qui vaut la valeur courante).
+    #[allow(clippy::too_many_arguments)]
+    fn frontier_children(
+        &self,
+        dom: &Dom,
+        kids: &[NodeId],
+        style: &ComputedStyle,
+        base: &StyleMap,
+        spine: &HashSet<NodeId>,
+        touched: &HashSet<NodeId>,
+        is_spine: bool,
+        descend_all: bool,
+        deep_relational: bool,
+        env: &StyleEnv,
+        map: &mut HashMap<NodeId, ComputedStyle>,
+        pseudos: &mut HashMap<NodeId, PseudoStyles>,
+        state: &dyn Fn(&str) -> bool,
+        mcache: &mut MatchCache,
+        child_anc: &AncestorFilter,
+        root_fs: &mut f32,
+        containers: Option<&HashMap<NodeId, ContainerMeasure>>,
+        slot_ctx: Option<(&Dom, &StyleMap)>,
+    ) {
+        if !descend_all && !is_spine {
+            return;
+        }
+        let last_path = kids.iter().rposition(|k| spine.contains(k));
+        let first_touched = kids.iter().position(|k| touched.contains(k));
+        for (i, &k) in kids.iter().enumerate() {
+            let on_path = spine.contains(&k);
+            let follows_touched = first_touched.is_some_and(|ft| i > ft);
+            let visit =
+                descend_all || on_path || last_path.is_some_and(|lp| i <= lp) || follows_touched;
+            if !visit {
+                continue;
+            }
+            // Enfant light distribué : seed `<slot>` (map
+            // courante puis `base` en repli — cf. doc).
+            let slot_style = slot_ctx.and_then(|(d, b)| {
+                d.assigned_slot(k)
+                    .and_then(|s| map.get(&s).cloned().or_else(|| b.get(s).cloned()))
+            });
+            let pstyle = slot_style.as_ref().unwrap_or(style);
+            // Frère suivant de touché sous feuilles
+            // `deep_relational` : canal silencieux (`E + F G`)
+            // → sous-arbre inconditionnel. Sinon le nœud
+            // évalué décide par sa propre comparaison.
+            let unconditional = descend_all || (deep_relational && follows_touched);
+            if unconditional {
+                explorer_common::deep(|| {
+                    self.compute_subtree(
+                        dom,
+                        k,
+                        env,
+                        Some(pstyle),
+                        map,
+                        pseudos,
+                        state,
+                        &mut *mcache,
+                        child_anc,
+                        root_fs,
+                        containers,
+                    );
+                });
+            } else {
+                explorer_common::deep(|| {
+                    self.frontier_node(
+                        dom,
+                        k,
+                        env,
+                        Some(pstyle),
+                        base,
+                        spine,
+                        touched,
+                        deep_relational,
+                        map,
+                        pseudos,
+                        state,
+                        &mut *mcache,
+                        child_anc,
+                        root_fs,
+                        containers,
+                    );
+                });
+            }
+        }
+    }
+
+    /// `true` si une feuille chargée porte un sélecteur dont
+    /// un composé **non-final** peut voir sa vérité basculer
+    /// à distance : combinateur `+`/`~` arrivant sur le
+    /// composé (frère précédent muté), ou `:has(`/pseudo
+    /// structurel dans le composé (état hors sous-arbre) —
+    /// canal silencieux : `E + F G` bascule pour `G` quand
+    /// `E` change même si le computed de `F` est stable
+    /// (la frontière descend alors les frères suivants des
+    /// touchés inconditionnellement).
+    fn deep_relational(&self) -> bool {
+        self.rules
+            .iter()
+            .chain(&self.quirks_rules)
+            .flat_map(|r| &r.selectors)
+            .any(selector_deep_relational)
     }
 
     #[allow(clippy::too_many_arguments)]

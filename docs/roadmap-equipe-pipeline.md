@@ -4476,8 +4476,13 @@ sous-features, `font-stretch`/`font-width` (fontes variables),
 > périmètre). **Prioritaire sur la file `css.values`** ;
 > cette section ne garde que les cases de suivi (§4.5).
 
-- [ ] **Frontière cascade** (`explorer-css`) — `incr.cascade`
-  8,5-10,4 s, poste n°1 dev.to → §2.2 du plan.
+- [x] **Frontière cascade** (`explorer-css`) — `incr.cascade`
+  8,5-10,4 s, poste n°1 dev.to → §2.2 du plan. **R-292** :
+  `compute_scoped_frontier{,_with_state,_with_ctx}` — émet
+  touchés+sous-arbres, ancêtres→`root`, frères précédents de
+  chaîne, frères suivants des touchés ; descend ssi touché ∨
+  computed≠base ∨ (`deep_relational` ∧ frère-suivant-de-touché)
+  ; design amendé+validé au journal (canal silencieux couvert).
 - [ ] **Câblage frontière** — exécuté côté NAV (§2.3).
 - [ ] **`may_escape` émission** (`explorer-layout` +
   `explorer-render`) — `incr.emit` ~1,5 s → §2.4.
