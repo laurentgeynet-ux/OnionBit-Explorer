@@ -3522,3 +3522,14 @@ shadow n'atteint ni cascade ni boxification ») etait
 - Gen/async : corps baissé = params réécrits → scope depth-only ;
   leurs `Stmt::Block` internes gardent leurs slots.
 - Verrous : `lang` 315 ×3 passes, `c502_slots` 20 tests.
+
+### 2026-11-13 — écriture par slot `(d,slot)` (JS-C503b)
+
+- `env_set_resolved` symétrique de `env_get_resolved_at` ;
+  `resolved_ancestor` factorisé. `Small[slot]` exige `Bind`
+  mutable — `Uninit` remonte (no TDZ), `const` garde son
+  `TypeError`/`sloppy_silent` via `env_set`.
+- `LValueRef::Ident` porte le site `ptr(Expr)` — `x=`, `x op=`,
+  cibles `for-in/of` couverts ; `read_lvalue_ref` gagne le
+  fast-path lecture au passage.
+- Verrous : `lang` 315 ×3 passes, `c502_slots` 24.

@@ -1194,7 +1194,9 @@ impl Engine {
         v: Value,
     ) -> JsResult<()> {
         match e {
-            Expr::Ident(name) => self.env_set(env, name, v),
+            Expr::Ident(name) => {
+                self.env_set_resolved(env, name, std::ptr::from_ref::<Expr>(e) as usize, v)
+            }
             Expr::Member(base, name) => {
                 let b = self.eval_expr(env, this, base)?;
                 self.set_prop_value(b, name, v)
@@ -1245,7 +1247,10 @@ impl Engine {
         e: &Expr,
     ) -> JsResult<Option<LValueRef>> {
         Ok(match e {
-            Expr::Ident(name) => Some(LValueRef::Ident(name.clone())),
+            Expr::Ident(name) => Some(LValueRef::Ident(
+                name.clone(),
+                std::ptr::from_ref::<Expr>(e) as usize,
+            )),
             Expr::Member(base, name) => {
                 let b = self.eval_expr(env, this, base)?;
                 Some(LValueRef::Prop(
@@ -1269,8 +1274,9 @@ impl Engine {
 
     pub(crate) fn read_lvalue_ref(&mut self, env: &EnvRef, lv: &LValueRef) -> JsResult<Value> {
         match lv {
-            LValueRef::Ident(name) => self
-                .env_get(env, name)
+            LValueRef::Ident(name, site) => self
+                .env_get_resolved_at(env, name, *site)
+                .or_else(|| self.env_get(env, name))
                 .ok_or_else(|| self.ref_error(format!("{name} is not defined"))),
             LValueRef::Prop(b, k, site) => self.get_prop_value_at(b.clone(), k, *site),
         }
@@ -1278,7 +1284,7 @@ impl Engine {
 
     pub(crate) fn store_lvalue(&mut self, env: &EnvRef, lv: LValueRef, v: Value) -> JsResult<()> {
         match lv {
-            LValueRef::Ident(name) => self.env_set(env, &name, v),
+            LValueRef::Ident(name, site) => self.env_set_resolved(env, &name, site, v),
             LValueRef::Prop(b, k, _) => self.set_prop_value(b, &k, v),
         }
     }

@@ -281,8 +281,10 @@ pub(crate) enum BindMode {
 /// expressions cibles dans `op=` (`a[i()] += x` appelle `i()` une
 /// seule fois).
 pub(crate) enum LValueRef {
-    /// Liaison de variable — l'`EnvRef` vit côté appelant.
-    Ident(Rc<str>),
+    /// Liaison de variable — l'`EnvRef` vit côté appelant ;
+    /// `site` = `ptr(Expr)` de la cible pour le fast-path
+    /// `(d,slot)` résolu (JS-C503b).
+    Ident(Rc<str>, usize),
     /// Propriété `base[key]` — `base` déjà évaluée ; `site` =
     /// `ptr(Expr)` de la cible pour l'IC own-prop (JS-C500).
     Prop(Value, Rc<str>, usize),
@@ -5804,6 +5806,20 @@ impl Engine {
         name: &str,
         e: &crate::ast::Expr,
     ) -> Option<Value> {
+        self.env_get_resolved_at(
+            env,
+            name,
+            std::ptr::from_ref::<crate::ast::Expr>(e) as usize,
+        )
+    }
+
+    /// Résolution `(env, site) → (ancêtre à profondeur `d`,
+    /// `d`, `slot`)` — partagée par le fast-path lecture
+    /// ([`Self::env_get_resolved_at`]) et écriture
+    /// ([`Self::env_set_resolved`]). `d ≤ 2` : marche directe
+    /// des parents (JS-C501) ; au-delà : `resolved_envs` (pin
+    /// `EnvRef` dans la clé = aucune réutilisation d'adresse).
+    fn resolved_ancestor(&mut self, env: &EnvRef, site: usize) -> Option<(EnvRef, u16, u16)> {
         const RESOLVED_ENVS_CAP: usize = 8192;
         /// JS-C501 — sous `d ≤ RES_WALK_MAX`, la marche des
         /// parents (`borrow`+`clone` ×d ≈ 5 ns/niveau) bat le
@@ -5812,16 +5828,9 @@ impl Engine {
         /// `EXPLORER_RES_WALK=1` force la marche pour tout `d`
         /// (A/B en vol sans rebuild).
         const RES_WALK_MAX: u16 = 2;
-        let &raw = self
-            .resolved_map
-            .get(&(std::ptr::from_ref::<crate::ast::Expr>(e) as usize))?;
+        let &raw = self.resolved_map.get(&site)?;
         let d = (raw >> 16) as u16;
         let slot = (raw & 0xFFFF) as u16;
-        // JS-C501 — `d == 0` = variable de l'env courant :
-        // `cur = env` direct, ni hash ni insert ni pin (le cas
-        // le plus fréquent payait le cache pour rien) ; `d ≤ 2`
-        // idem — quelques sauts de parent coûtent moins que le
-        // hash + le pin de deux `EnvRef` par env éphémère.
         let cur = if d <= RES_WALK_MAX || self.res_walk {
             let mut cur = env.clone();
             for _ in 0..d {
@@ -5860,6 +5869,19 @@ impl Engine {
                 cur
             }
         };
+        Some((cur, d, slot))
+    }
+
+    /// Variante [`Self::env_get_resolved`] cléée par pointeur de
+    /// site (`usize`) — les `LValueRef` réifiées portent déjà
+    /// leur site.
+    pub(crate) fn env_get_resolved_at(
+        &mut self,
+        env: &EnvRef,
+        name: &str,
+        site: usize,
+    ) -> Option<Value> {
+        let (cur, d, slot) = self.resolved_ancestor(env, site)?;
         // JS-C502 — fast-path slot : la vérif est sémantique
         // (`Small[slot].0 == name` puis `Bind`), toute divergence
         // d'ordre canonique, promotion `Map`, cellule `Uninit`/
@@ -5924,6 +5946,57 @@ impl Engine {
 
     pub(crate) fn env_get(&mut self, env: &EnvRef, name: &str) -> Option<Value> {
         self.env_get_seen(env, name, &mut HashSet::new())
+    }
+
+    /// JS-C503b — écriture d'identifiant via l'annotation :
+    /// `Small[slot]` vérifié `nom == clé` + `Bind` **mutable** →
+    /// écriture directe ; `Uninit` (remontée no-TDZ), `Bind`
+    /// immuable (chemin `TypeError`/`sloppy_silent` d'`env_set`),
+    /// `Map`, oob ou clé divergente → `env_set` complet depuis la
+    /// cible (sémantique intacte). `site` non annoté → marche
+    /// complète depuis `env`.
+    pub(crate) fn env_set_resolved(
+        &mut self,
+        env: &EnvRef,
+        name: &str,
+        site: usize,
+        v: Value,
+    ) -> JsResult<()> {
+        let Some((cur, _d, slot)) = self.resolved_ancestor(env, site) else {
+            return self.env_set(env, name, v);
+        };
+        if slot != u16::MAX && !self.slots_off {
+            let hit = {
+                let mut b = cur.borrow_mut();
+                match &mut b.kind {
+                    EnvKind::Local(m) | EnvKind::Block(m) | EnvKind::Global(m) => match m {
+                        crate::heap::BindingMap::Small(vec) => {
+                            vec.get_mut(slot as usize).is_some_and(|(k, c)| {
+                                if std::ptr::eq(&raw const **k, name) || &**k == name {
+                                    match c {
+                                        EnvCell::Bind(bnd) if bnd.mutable => {
+                                            bnd.value = v.clone();
+                                            true
+                                        }
+                                        _ => false,
+                                    }
+                                } else {
+                                    false
+                                }
+                            })
+                        }
+                        crate::heap::BindingMap::Map(_) => false,
+                    },
+                    EnvKind::With(_) => false,
+                }
+            };
+            if hit {
+                crate::j17_tick(&crate::J17_SLOT_HIT);
+                return Ok(());
+            }
+            crate::j17_tick(&crate::J17_SLOT_MISS);
+        }
+        self.env_set(&cur, name, v)
     }
 
     /// JS-C502 — pré-déclare les noms canoniques d'un env frais

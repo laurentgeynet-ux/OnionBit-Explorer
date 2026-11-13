@@ -220,6 +220,46 @@ fn c503_gen_correctness() {
     );
 }
 
+/// JS-C503b — écriture par slot : `x += …`/`x = …` sur une
+/// liaison mutable passe par `Small[slot]` direct.
+#[test]
+fn c503b_write_slots() {
+    assert_eq!(
+        eval("function f(){let x=0;for(var i=0;i<50;i++)x+=i;return x}f()"),
+        "1225"
+    );
+}
+
+/// Écriture sur `const` : le slot refuse (`mutable=false`) →
+/// `env_set` garde le `TypeError` spec.
+#[test]
+fn c503b_const_write_throws() {
+    assert_eq!(
+        eval("function f(){const x=1;try{x=2}catch(e){return 'thrown'}return 'no'}f()"),
+        "thrown"
+    );
+}
+
+/// `x = 1` avant `let x` : `Uninit` au slot → repli `env_set`
+/// → remontée au `var` externe (no TDZ préservé en écriture).
+#[test]
+fn c503b_write_before_let_climbs() {
+    assert_eq!(
+        eval("function f(){var x=0;{x=1;let x=2;return x}return x}f()"),
+        "2"
+    );
+}
+
+/// Cible `for-of` sur variable externe : le site `ForTarget::
+/// Expr` est annoté → écriture résolue, valeur exacte.
+#[test]
+fn c503b_forof_target_write() {
+    assert_eq!(
+        eval("function f(){var x=0;for(x of[1,2,3]);return x}f()"),
+        "3"
+    );
+}
+
 /// `slot_hit` s'engage sur les lectures de liaisons de bloc.
 #[test]
 fn c502_slot_hit_engages() {
