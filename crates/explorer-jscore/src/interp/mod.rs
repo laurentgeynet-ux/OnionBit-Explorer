@@ -330,6 +330,12 @@ pub(crate) enum IcKind {
     /// (`o[k]` dynamique, callsite Rust générique) peut exister ;
     /// mismatch → miss → relearn (verrou : `c506`, `c22_temporal`).
     Absent { chain: Box<[u64]>, key: Rc<str> },
+    /// JS-C508 — pierre tombale : le site a échoué à apprendre
+    /// (lien mort, maillon inéligible, `Acc`, chaîne > cap). Sans
+    /// elle, chaque accès repayait `Vec`+walk+tentative de learn à
+    /// l'infini — `miss` compte les échecs de learn jusqu'au
+    /// désarmement, comme les miss de vérif.
+    Dead,
 }
 
 /// JS-C500 — seuil de désarmement d'un site IC (miss cumulés).
@@ -7675,12 +7681,21 @@ impl Engine {
         // l'owner vérifie `key`/`pos`/`Data` ; `Absent` = idem
         // + proto terminal non-objet. Tout échec → miss →
         // `find_prop` + `ic_learn` (auto-correct par construction).
-        let verdict = {
-            let Some(ent) = self.ic_map.get(&site) else {
+        // JS-C508 — `ent` est emprunté mutable : un hit servi
+        // remet `miss` à zéro (échecs *consécutifs*), la divergence
+        // de clé `Absent` compte comme un miss.
+        let out = {
+            let Some(ent) = self.ic_map.get_mut(&site) else {
                 return IcOut::Fall;
             };
             if ent.miss == u8::MAX {
                 crate::j17_tick(&crate::J17_IC_BAIL);
+                return IcOut::Fall;
+            }
+            // JS-C508 — pierre tombale : site prouvé inapprenable,
+            // consulté sans compter (le learn-fail qui suit est ce
+            // qui fait progresser vers le désarmement).
+            if matches!(ent.kind, IcKind::Dead) {
                 return IcOut::Fall;
             }
             // Maillon attendu : `Ok(Some(o))` = vivant + éligible
@@ -7702,7 +7717,7 @@ impl Engine {
                 }
                 _ => IcVerdict::Miss,
             };
-            match &ent.kind {
+            let v = match &ent.kind {
                 IcKind::Own { shape, pos } => match link(id, *shape) {
                     Err(_) => IcVerdict::Pass,
                     Ok(None) => IcVerdict::Miss,
@@ -7710,64 +7725,74 @@ impl Engine {
                 },
                 IcKind::Chain { chain, .. } | IcKind::Absent { chain, .. } => {
                     // `Absent` n'est valide que pour la clé apprise —
-                    // testée AVANT la marche des maillons.
-                    if let IcKind::Absent { key: ek, .. } = &ent.kind {
-                        if &**ek != key {
-                            return IcOut::Fall;
-                        }
-                    }
-                    let mut cur = id;
-                    let mut v = IcVerdict::Miss;
-                    for (i, &sh) in chain.iter().enumerate() {
-                        match link(cur, sh) {
-                            Err(_) => {
-                                v = IcVerdict::Pass;
-                                break;
-                            }
-                            Ok(None) => {
-                                v = IcVerdict::Miss;
-                                break;
-                            }
-                            Ok(Some(o)) => {
-                                if i + 1 == chain.len() {
-                                    v = match &ent.kind {
-                                        IcKind::Chain { pos, .. } => own_at(o, *pos),
-                                        // Absent : le proto du dernier maillon
-                                        // ne doit pas être un objet.
-                                        _ => match o.proto {
-                                            Value::Obj(_) => IcVerdict::Miss,
-                                            _ => IcVerdict::Absent,
-                                        },
-                                    };
+                    // testée AVANT la marche des maillons. JS-C508 :
+                    // la divergence de clé compte comme un miss — les
+                    // sites à clés tournantes atteignent ainsi le
+                    // désarmement au lieu de thrasher le learn.
+                    if matches!(&ent.kind, IcKind::Absent { key: ek, .. } if &**ek != key) {
+                        IcVerdict::Miss
+                    } else {
+                        let mut cur = id;
+                        let mut v = IcVerdict::Miss;
+                        for (i, &sh) in chain.iter().enumerate() {
+                            match link(cur, sh) {
+                                Err(_) => {
+                                    v = IcVerdict::Pass;
                                     break;
                                 }
-                                cur = if let Value::Obj(p) = o.proto {
-                                    p
-                                } else {
+                                Ok(None) => {
                                     v = IcVerdict::Miss;
                                     break;
-                                };
+                                }
+                                Ok(Some(o)) => {
+                                    if i + 1 == chain.len() {
+                                        v = match &ent.kind {
+                                            IcKind::Chain { pos, .. } => own_at(o, *pos),
+                                            // Absent : le proto du dernier maillon
+                                            // ne doit pas être un objet.
+                                            _ => match o.proto {
+                                                Value::Obj(_) => IcVerdict::Miss,
+                                                _ => IcVerdict::Absent,
+                                            },
+                                        };
+                                        break;
+                                    }
+                                    cur = if let Value::Obj(p) = o.proto {
+                                        p
+                                    } else {
+                                        v = IcVerdict::Miss;
+                                        break;
+                                    };
+                                }
                             }
                         }
+                        v
                     }
-                    v
                 }
-            }
-        };
-        let out = match verdict {
-            IcVerdict::Hit(v) => IcOut::Hit(v),
-            IcVerdict::Absent => IcOut::Absent,
-            IcVerdict::Pass => return IcOut::Fall,
-            IcVerdict::Miss => {
-                crate::j17_tick(&crate::J17_IC_MISS);
-                if let Some(ent) = self.ic_map.get_mut(&site) {
+                IcKind::Dead => IcVerdict::Miss,
+            };
+            // JS-C508 — `miss` = échecs *consécutifs* : un hit servi
+            // le remet à zéro (il survit désormais au relearn — le
+            // relearn post-miss est lui-même la preuve de l'échec).
+            match v {
+                IcVerdict::Hit(val) => {
+                    ent.miss = 0;
+                    IcOut::Hit(val)
+                }
+                IcVerdict::Absent => {
+                    ent.miss = 0;
+                    IcOut::Absent
+                }
+                IcVerdict::Pass => return IcOut::Fall,
+                IcVerdict::Miss => {
+                    crate::j17_tick(&crate::J17_IC_MISS);
                     ent.miss = ent.miss.saturating_add(1);
                     if ent.miss >= IC_MISS_DISARM {
                         ent.miss = u8::MAX;
                         crate::j17_tick(&crate::J17_IC_DISARM);
                     }
+                    return IcOut::Fall;
                 }
-                return IcOut::Fall;
             }
         };
         crate::j17_tick(&crate::J17_IC_HIT);
@@ -7796,35 +7821,90 @@ impl Engine {
     /// sage. Ne s'exécute pas sur site désarmé, chaîne >
     /// [`IC_CHAIN_CAP`], ou maillon inéligible (props synthétisées
     /// devançant `o.find`, cf. [`Self::ic_eligible`]).
+    /// JS-C508 — un échec d'apprentissage compte comme un miss :
+    /// sur entrée existante on incrémente sa `miss` (elle reste
+    /// utile aux autres receveurs du site) ; sans entrée, on pose
+    /// une pierre tombale `Dead` — sinon le site repayait
+    /// `Vec`+walk+tentative à chaque accès, indéfiniment.
+    fn ic_note_nlearn(&mut self, site: usize) {
+        crate::j17_tick(&crate::J17_IC_NLEARN);
+        if let Some(e) = self.ic_map.get_mut(&site) {
+            e.miss = e.miss.saturating_add(1);
+            if e.miss >= IC_MISS_DISARM {
+                e.miss = u8::MAX;
+                crate::j17_tick(&crate::J17_IC_DISARM);
+            }
+        } else {
+            if self.ic_map.len() >= IC_MAP_CAP {
+                self.ic_purge();
+            }
+            self.ic_map.insert(
+                site,
+                IcEnt {
+                    kind: IcKind::Dead,
+                    miss: 1,
+                },
+            );
+        }
+    }
+
+    /// JS-C508 — purge au cap : on jette les transitoires (miss
+    /// en cours) mais on garde les entrées saines ET les
+    /// désarmés/tombales — un `clear()` aveugle déclenchait le
+    /// relearn général des sites sains et ré-ouvrait les sites
+    /// morts (orage learn/miss du vol N5.7). `clear()` de secours
+    /// si tout est sain (working set > cap).
+    fn ic_purge(&mut self) {
+        crate::j17_tick(&crate::J17_IC_PURGE);
+        self.ic_map.retain(|_, e| e.miss == 0 || e.miss == u8::MAX);
+        if self.ic_map.len() >= IC_MAP_CAP {
+            self.ic_map.clear();
+        }
+    }
+
     fn ic_learn(&mut self, site: usize, key: &str, links: &[ObjId], found: bool) {
-        if site == 0 || self.ic_off || links.is_empty() || links.len() > IC_CHAIN_CAP {
+        if site == 0 || self.ic_off {
             return;
         }
+        // JS-C508 — `miss` survit au relearn : le relearn post-miss
+        // est lui-même la preuve de l'échec — le remettre à zéro
+        // empêchait les sites oscillants (clés tournantes, shapes
+        // alternées) d'atteindre le désarmement (learn 251 k vs
+        // disarm 63 au vol N5.7).
         if self.ic_map.get(&site).is_some_and(|e| e.miss == u8::MAX) {
             return;
         }
+        if links.is_empty() || links.len() > IC_CHAIN_CAP {
+            self.ic_note_nlearn(site);
+            return;
+        }
         if self.ic_map.len() >= IC_MAP_CAP {
-            self.ic_map.clear();
+            self.ic_purge();
         }
         let ai = array_index(key);
         let mut shapes = Vec::with_capacity(links.len());
         let mut kind = None;
         for (i, &lid) in links.iter().enumerate() {
             let Some(o) = self.heap.obj(lid) else {
+                self.ic_note_nlearn(site);
                 return;
             };
             if !Self::ic_eligible(o, key, ai) {
+                self.ic_note_nlearn(site);
                 return;
             }
             shapes.push(o.shape());
             if found && i + 1 == links.len() {
                 let Some(pos) = o.prop_pos(key) else {
+                    self.ic_note_nlearn(site);
                     return;
                 };
                 if !matches!(o.props.get(pos), Some((_, Prop::Data { .. }))) {
+                    self.ic_note_nlearn(site);
                     return;
                 }
                 let Ok(pos) = u32::try_from(pos) else {
+                    self.ic_note_nlearn(site);
                     return;
                 };
                 kind = Some(if links.len() == 1 {
@@ -7846,9 +7926,13 @@ impl Engine {
                 key: crate::intern(key),
             })
         });
-        if let Some(kind) = kind {
-            crate::j17_tick(&crate::J17_IC_LEARN);
-            self.ic_map.insert(site, IcEnt { kind, miss: 0 });
+        match kind {
+            Some(kind) => {
+                crate::j17_tick(&crate::J17_IC_LEARN);
+                let miss = self.ic_map.get(&site).map_or(0, |e| e.miss);
+                self.ic_map.insert(site, IcEnt { kind, miss });
+            }
+            None => self.ic_note_nlearn(site),
         }
     }
 

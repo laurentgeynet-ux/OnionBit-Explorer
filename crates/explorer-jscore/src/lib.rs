@@ -298,6 +298,14 @@ pub static J17_IC_LEARN: std::sync::atomic::AtomicU64 = std::sync::atomic::Atomi
 pub static J17_IC_DISARM: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 /// Voir [`J17_IC_HIT`].
 pub static J17_IC_BAIL: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+/// JS-C508 — `ic_nlearn` = tentatives de learn échouées (lien
+/// mort, maillon inéligible, `Acc`, chaîne > cap) — elles posent
+/// une pierre tombale `Dead` ou incrémentent `miss` ;
+/// `ic_purge` = purges de `ic_map` au cap (partielles : sains et
+/// désarmés conservés).
+pub static J17_IC_NLEARN: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+/// Voir [`J17_IC_NLEARN`].
+pub static J17_IC_PURGE: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 /// JS-C502 — fast-path slot d'env `(d,slot)` : `slot_hit` =
 /// lecture directe `Small[slot]` vérifiée par nom ; `slot_miss`
 /// = échec de vérification (oob, clé différente, `Map`, cellule
@@ -461,7 +469,7 @@ pub fn j17_enable() {
 #[must_use]
 pub fn j17_snapshot() -> String {
     let r = std::sync::atomic::Ordering::Relaxed;
-    let pairs: [(&str, &std::sync::atomic::AtomicU64); 49] = [
+    let pairs: [(&str, &std::sync::atomic::AtomicU64); 51] = [
         ("prop_lookup", &J17_PROP_LOOKUP),
         ("proto_lvl", &J17_PROTO_LVL),
         ("prop_scan", &J17_PROP_SCAN),
@@ -477,6 +485,8 @@ pub fn j17_snapshot() -> String {
         ("ic_learn", &J17_IC_LEARN),
         ("ic_disarm", &J17_IC_DISARM),
         ("ic_bail", &J17_IC_BAIL),
+        ("ic_nlearn", &J17_IC_NLEARN),
+        ("ic_purge", &J17_IC_PURGE),
         ("slot_hit", &J17_SLOT_HIT),
         ("slot_miss", &J17_SLOT_MISS),
         ("sm_oob", &J17_SM_OOB),

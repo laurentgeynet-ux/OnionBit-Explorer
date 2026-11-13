@@ -413,3 +413,84 @@ fn c507_in_proto_chain() {
         "3300"
     );
 }
+
+// ── JS-C508 — économie du learn : miss survit, tombales, purge ──
+
+fn snap_counter(snap: &str, name: &str) -> u64 {
+    snap.split(' ')
+        .find_map(|p| p.strip_prefix(name).and_then(|v| v.parse::<u64>().ok()))
+        .unwrap_or(0)
+}
+
+/// Régression N5.7 : un site alternant deux shapes thrashait
+/// `miss → relearn(miss:=0)` sans jamais désarmer. Désormais le
+/// relearn préserve `miss` → 8 échecs consécutifs → désarmement.
+#[test]
+fn c508_polymorphic_disarms() {
+    let _g = IC_LOCK
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    explorer_jscore::j17_enable();
+    let before = snap_counter(&explorer_jscore::j17_snapshot(), "ic_disarm=");
+    assert_eq!(
+        eval(
+            "var a={x:1},b={y:9,x:2};var s=0;\
+             for(var i=0;i<200;i++){var o=i%2?a:b;s+=o.x}s"
+        ),
+        "300"
+    );
+    let after = snap_counter(&explorer_jscore::j17_snapshot(), "ic_disarm=");
+    assert!(
+        after > before,
+        "le site polymorphe doit désarmer : {before} → {after}"
+    );
+}
+
+/// Une clé tournante sur props absentes (helper `o[k]`) compte un
+/// miss par rotation → désarme au lieu de relearn `Absent` à
+/// l'infini. Les valeurs restent exactes.
+#[test]
+fn c508_rotating_key_disarms() {
+    let _g = IC_LOCK
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    explorer_jscore::j17_enable();
+    let before = snap_counter(&explorer_jscore::j17_snapshot(), "ic_disarm=");
+    assert_eq!(
+        eval(
+            "function f(o,k){return o[k]}var o={a:1};var s=0;\
+             for(var i=0;i<200;i++){var v=f(o,'k'+i);if(v===undefined)s++;}s"
+        ),
+        "200"
+    );
+    let after = snap_counter(&explorer_jscore::j17_snapshot(), "ic_disarm=");
+    assert!(
+        after > before,
+        "clé tournante doit désarmer : {before} → {after}"
+    );
+}
+
+/// Site inapprenable (maillon `Proxy` dans la chaîne) : la
+/// pierre tombale `Dead` borne les tentatives — `ic_nlearn`
+/// s'incrémente puis le site cesse de réessayer (désarmé) —
+/// sémantique intacte via la délégation proxy.
+#[test]
+fn c508_unlearnable_tombstones() {
+    let _g = IC_LOCK
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    explorer_jscore::j17_enable();
+    let before = snap_counter(&explorer_jscore::j17_snapshot(), "ic_nlearn=");
+    assert_eq!(
+        eval(
+            "var t={m:5};var p=new Proxy(t,{});var o=Object.create(p);\
+             var s=0;for(var i=0;i<300;i++){if(o.m===undefined)s++;}s"
+        ),
+        "300"
+    );
+    let after = snap_counter(&explorer_jscore::j17_snapshot(), "ic_nlearn=");
+    assert!(
+        after > before,
+        "learn-échecs attendus puis tombale : {before} → {after}"
+    );
+}

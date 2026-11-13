@@ -12696,3 +12696,11 @@ chaque gain rapporté contre les **deux** archétypes.
   peut résoudre hors `props[]`). `Spine::Bin` porte le
   site AST ; `has_prop` interne `#[track_caller]`.
   Verrous : lang 315 ×3, c500 23.
+- [x] **JS-C508 — économie du learn IC (correctif N5.7)** :
+  `miss` survit au relearn + reset au hit (échecs
+  consécutifs — avant : thrash learn/miss à l'infini,
+  learn 251 k vs disarm 63) ; divergence de clé `Absent`
+  comptée ; pierre tombale `IcKind::Dead` pour les sites
+  inapprenables ; purge partielle (sains+désarmés gardés).
+  Sondes `ic_nlearn`/`ic_purge`. Verrous : lang 315 ×3,
+  c500 26.
