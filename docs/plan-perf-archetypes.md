@@ -51,16 +51,21 @@ L'ordre est imposé par les dépendances, pas par les
 équipes. Chaque étape prend son numéro (PIPE : R-292+ ;
 NAV : Étape 236+) au commit.
 
-### 2.1 — Merge `performance` → `main` [NAV, précondition]
+### 2.1 — L'arc entier vit sur `performance` (merge différé)
 
 | Tâche | Fichiers | DoD |
 |---|---|---|
-| `verify_all` vert sur `performance`, puis merge | `scripts/verify_all.ps1` | `main` ≥ Étape 235 ; câblage §2.3 et re-vols « sur main » débloqués |
+| Décision opérateur : la suite de l'arc se fait **sur la branche** jusqu'à convergence (Étape 239) — `main` n'est mergé qu'en fin d'arc | — | branche verte à chaque commit ; dérive de `main` bornée |
 
-Précondition au §2.3 (`journal_style_scopes` n'existe que
-sur la branche) et à tout re-vol nominal. Si le gate
-bloque : continuer la séquence sur la branche, merger au
-premier vert.
+- **Réintégration périodique `main` → `performance`** (merge
+  ou rebase) dès que `main` reçoit des commits touchant les
+  zones de l'arc (`raster.rs`, `apply.rs`, `cascade.rs`) —
+  la dérive reste petite au lieu d'un merge final massif.
+- Le câblage §2.3 n'attend **que** la frontière sur la
+  branche — `journal_style_scopes` y est déjà (Étape 234) ;
+  le merge n'est plus une précondition.
+- Les re-vols se font sur le **binaire de branche frais** —
+  c'est l'état mesuré, la baseline post-235 vit ici.
 
 ### 2.2 — Frontière cascade (R-292) [PIPE `explorer-css`]
 
@@ -80,7 +85,7 @@ la frontière ≈ le sous-arbre.
 |---|---|---|
 | Dériver `frontier` (ancêtres + frères précédents des touchés) depuis `journal_style_scopes` ; appeler `compute_scoped_frontier` quand dispo, repli `compute_scoped` | `crates/explorer-core/src/session/apply.rs` | re-vol dev.to : `scope_nodes` géants évités, `incr.cascade` tranché |
 
-Dépend de §2.1 + §2.2.
+Dépend de §2.2.
 
 ### 2.4 — `may_escape` (R-293) [PIPE `explorer-layout` + `explorer-render`]
 

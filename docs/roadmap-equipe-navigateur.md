@@ -12558,8 +12558,9 @@ croître la surface navigateur mesurée (`api` 1510/8099, 18,6 %).
 > un opérateur, deux chapeaux). Cette section ne garde que
 > les cases de suivi (§4.5).
 
-- [ ] **N5.0 — merge `performance` → `main`** (§2.1 —
-  précondition à N5.4 et aux re-vols « sur main »).
+- [ ] **N5.0 — merge `performance` → `main` en fin d'arc**
+  (§2.1 — l'arc vit sur la branche ; `main` réintégré
+  périodiquement pour borner la dérive).
 - [ ] **N5.1-N5.3 — vol YouTube `--release` + attribution
   interne JS + correctif** (§2.6) — référencer Sprint N3,
   ne pas ré-instrumenter.
