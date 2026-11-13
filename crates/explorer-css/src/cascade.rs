@@ -1911,11 +1911,129 @@ const GUARANTEED_INVALID: &str = "\u{1}\u{fffd}giv\u{1}";
 /// clone-on-write une fois (`Arc::make_mut`). `Arc` et non
 /// `Rc` : le payload de peinture traverse `spawn_blocking`
 /// (`Send` requis). Props normales : `HashMap` plat inchangé.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Default)]
 pub struct ComputedStyle {
     props: HashMap<String, String>,
     /// Table `--*` effective (héritées ∪ déclarées propres).
     vars: Arc<HashMap<String, String>>,
+    /// R-295 — effets résolus paresseusement (ombres) :
+    /// le display-list re-parsait `box-shadow`/`text-shadow`
+    /// string→px par boîte et par passe (`incr.emit` ~1,5 s
+    /// dev.to ≈ 3,3 ms/boîte repeinte, mesuré `emit.parts`).
+    /// `OnceLock` : `Send`+`Sync` préservés (le payload de
+    /// peinture traverse `spawn_blocking`), cloné si déjà
+    /// résolu, sinon rempli au premier accès.
+    fx: std::sync::OnceLock<ResolvedFx>,
+}
+
+/// R-295 — une couche d'ombre résolue : `(dx, dy)` px,
+/// `blur`/`spread` px, couleur effective (`currentcolor`
+/// appliqué), `inset`. Parsée une fois par `ComputedStyle`.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct FxShadow {
+    /// Décalage horizontal px.
+    pub dx: f32,
+    /// Décalage vertical px.
+    pub dy: f32,
+    /// Rayon de flou px (≥ 0).
+    pub blur: f32,
+    /// Étalement px (`text-shadow` : toujours 0 — la spec
+    /// n'a pas de quatrième longueur).
+    pub spread: f32,
+    /// Couleur de la couche (défaut spec = `currentcolor`).
+    pub color: crate::value::Color,
+    /// Ombre interne (`box-shadow inset` seulement).
+    pub inset: bool,
+}
+
+/// R-295 — effets de rendu résolus une fois par style
+/// calculé. `None` = propriété absente ou `none` : même
+/// sémantique de saut que le re-parse par item (les couches
+/// sans ≥ 2 longueurs sont ignorées au parse).
+#[derive(Debug, Clone, Default)]
+pub struct ResolvedFx {
+    /// Couches `box-shadow` (`inset` inclus — l'émetteur
+    /// saute comme avant).
+    pub box_shadows: Option<Arc<[FxShadow]>>,
+    /// Couches `text-shadow`.
+    pub text_shadows: Option<Arc<[FxShadow]>>,
+}
+
+// `fx` est fonction pure de `props`/`vars` : deux styles
+// égaux résolvent à l'identique — l'égalité historique
+// (props ∪ vars) est préservée.
+impl PartialEq for ComputedStyle {
+    fn eq(&self, other: &Self) -> bool {
+        self.props == other.props && self.vars == other.vars
+    }
+}
+impl Eq for ComputedStyle {}
+
+impl ComputedStyle {
+    /// Effets résolus en px — paresseux : calculés au premier
+    /// accès puis partagés par tous les clones du style.
+    #[must_use]
+    pub fn resolved_fx(&self) -> &ResolvedFx {
+        self.fx.get_or_init(|| self.compute_fx())
+    }
+
+    fn compute_fx(&self) -> ResolvedFx {
+        ResolvedFx {
+            box_shadows: self.fx_shadows("box-shadow").map(Arc::from),
+            text_shadows: self.fx_shadows("text-shadow").map(Arc::from),
+        }
+    }
+
+    /// `name` → couches d'ombre parsées, `None` si la
+    /// propriété est absente ou `none`.
+    fn fx_shadows(&self, name: &str) -> Option<Vec<FxShadow>> {
+        let v = self.get(name)?;
+        if v.trim().eq_ignore_ascii_case("none") {
+            return None;
+        }
+        let mut out = Vec::new();
+        for layer in crate::value::split_top_commas(v) {
+            if let Some(s) = self.fx_shadow_layer(layer.trim()) {
+                out.push(s);
+            }
+        }
+        Some(out)
+    }
+
+    /// Une couche `inset? x y [blur [spread]] [color]` —
+    /// mêmes règles que le parseur de l'émetteur : ≥ 2
+    /// longueurs requises, blur ≥ 0, défaut couleur =
+    /// `currentcolor` (`text-shadow` ignore spread/inset en
+    /// pratique — tolérés ici comme le faisait le parseur
+    /// commun, `spread` vaut alors la 4e longueur si donnée).
+    #[allow(clippy::cast_possible_truncation)]
+    fn fx_shadow_layer(&self, raw: &str) -> Option<FxShadow> {
+        let mut lens = Vec::with_capacity(4);
+        let mut color = None;
+        let mut inset = false;
+        for tok in raw.split_whitespace() {
+            if tok.eq_ignore_ascii_case("inset") {
+                inset = true;
+            } else if let Some(l) = crate::value::parse_length(tok) {
+                lens.push(l.unit.px_factor().map_or(0.0, |f| l.value * f) as f32);
+            } else if let Some(c) = crate::value::parse_color(tok) {
+                color = Some(c);
+            }
+        }
+        if lens.len() < 2 {
+            return None;
+        }
+        Some(FxShadow {
+            dx: lens[0],
+            dy: lens[1],
+            blur: lens.get(2).copied().unwrap_or(0.0).max(0.0),
+            spread: lens.get(3).copied().unwrap_or(0.0),
+            color: color
+                .or_else(|| self.color("color"))
+                .unwrap_or(crate::value::Color::BLACK),
+            inset,
+        })
+    }
 }
 
 impl ComputedStyle {
@@ -3889,7 +4007,11 @@ impl StyleEngine {
                 }
             }
         }
-        ComputedStyle { props, vars }
+        ComputedStyle {
+            props,
+            vars,
+            fx: std::sync::OnceLock::new(),
+        }
     }
 
     /// Schéma usé sombre ? `color-scheme` : `only light` ou
@@ -6635,5 +6757,48 @@ mod tests {
         let sc = map.get(c).unwrap();
         assert!(Arc::ptr_eq(&sa.vars, &sb.vars));
         assert!(Arc::ptr_eq(&sb.vars, &sc.vars));
+    }
+
+    /// R-295 — `resolved_fx` : `box-shadow`/`text-shadow`
+    /// résolus une fois en px ; `currentcolor` → `color`
+    /// de l'élément ; `inset` retenu ; `none`/absent → `None`.
+    /// L'égalité des styles ignore `fx` (fonction pure des
+    /// props) et le clone partage le résultat.
+    #[test]
+    fn resolved_fx_parse_les_ombres_une_fois() {
+        use crate::value::Color;
+        let (_dom, a, _b, c, map) = three_gen(
+            "div { box-shadow: 2px 3px 4px rgba(0,0,0,.5), inset 0 1px; \
+                      text-shadow: 1px 1px; color: #336699 } \
+             p { box-shadow: none }",
+        );
+        let st = map.get(a).unwrap();
+        let fx = st.resolved_fx();
+        let bx = fx.box_shadows.as_deref().unwrap();
+        assert_eq!(bx.len(), 2);
+        assert_eq!((bx[0].dx, bx[0].dy, bx[0].blur), (2.0, 3.0, 4.0));
+        assert!(!bx[0].inset && bx[0].color.a < 255);
+        assert_eq!((bx[1].dx, bx[1].dy), (0.0, 1.0));
+        assert!(bx[1].inset, "couche `inset` conservée");
+        let tx = fx.text_shadows.as_deref().unwrap();
+        assert_eq!(tx.len(), 1);
+        assert_eq!(
+            tx[0].color,
+            Color {
+                r: 0x33,
+                g: 0x66,
+                b: 0x99,
+                a: 255
+            },
+            "`text-shadow` sans couleur → `currentcolor`"
+        );
+        // `box-shadow: none` → pas de couches.
+        let pc = map.get(c).unwrap();
+        assert!(pc.resolved_fx().box_shadows.is_none());
+        // Égalité historique préservée + clone partagé.
+        let st2 = st.clone();
+        assert_eq!(*st, st2);
+        let fx2 = st2.resolved_fx();
+        assert_eq!(fx2.box_shadows.as_deref().unwrap().len(), 2);
     }
 }

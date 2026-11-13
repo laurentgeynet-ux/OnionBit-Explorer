@@ -2045,69 +2045,26 @@ fn corner_ks(st: &explorer_css::ComputedStyle) -> [f32; 4] {
     .map(|v| v.and_then(k_of).unwrap_or(1.0))
 }
 
-/// Une couche `box-shadow` : `inset? x y [blur [spread]]
-/// [color]` dans n'importe quel ordre (spec : 2 à 4
-/// longueurs consécutives + couleur optionnelle).
-#[allow(clippy::cast_possible_truncation, clippy::type_complexity)]
-fn parse_box_shadow_layer(
-    st: &explorer_css::ComputedStyle,
-    raw: &str,
-) -> Option<((f32, f32), f32, f32, Color, bool)> {
-    let mut lens = Vec::with_capacity(4);
-    let mut color = None;
-    let mut inset = false;
-    for tok in raw.split_whitespace() {
-        if tok.eq_ignore_ascii_case("inset") {
-            inset = true;
-        } else if let Some(l) = parse_length(tok) {
-            lens.push(l.unit.px_factor().map_or(0.0, |f| l.value * f) as f32);
-        } else if let Some(c) = token_color(st, tok) {
-            color = Some(c);
-        }
-        // Fonctions couleur (`rgb(…)`, `var(…)`) déjà
-        // résolues en cascade quand supportées.
-    }
-    if lens.len() < 2 {
-        return None;
-    }
-    let blur = lens.get(2).copied().unwrap_or(0.0).max(0.0);
-    let spread = lens.get(3).copied().unwrap_or(0.0);
-    Some((
-        (lens[0], lens[1]),
-        blur,
-        spread,
-        // Défaut spec = `currentcolor` (R-265) — la `color`
-        // calculée de la boîte, plus du noir fixe.
-        color.or_else(|| st.color("color")).unwrap_or(Color::BLACK),
-        inset,
-    ))
-}
-
 /// `box-shadow` → un `DisplayItem::BoxShadow` par couche
-/// (`none`/couches sans 2 longueurs = sautés ; `inset`
-/// documenté non peint — ombres externes seulement).
+/// externe (R-295 : couches résolues une fois par style via
+/// [`explorer_css::ComputedStyle::resolved_fx`] — le re-parse
+/// par item coûtait ~3,3 ms/boîte mutée dev.to ; `inset`
+/// documenté non peint, approx. conservée).
 fn emit_box_shadows(st: &explorer_css::ComputedStyle, rect: &Rect, items: &mut Vec<DisplayItem>) {
-    let Some(v) = st.get("box-shadow") else {
+    let Some(shadows) = &st.resolved_fx().box_shadows else {
         return;
     };
-    if v.trim().eq_ignore_ascii_case("none") {
-        return;
-    }
     let radii = corner_radii(st, rect);
-    for layer in bg_layers(v) {
-        let Some((offset, blur, spread, color, inset)) = parse_box_shadow_layer(st, layer.trim())
-        else {
-            continue;
-        };
-        if inset {
+    for s in shadows.iter() {
+        if s.inset {
             continue; // ombre interne non peinte (approx.).
         }
         items.push(DisplayItem::BoxShadow {
             rect: *rect,
-            offset,
-            blur,
-            spread,
-            color,
+            offset: (s.dx, s.dy),
+            blur: s.blur,
+            spread: s.spread,
+            color: s.color,
             radii,
         });
     }
@@ -2652,17 +2609,15 @@ fn emphasis_kind(st: &explorer_css::ComputedStyle, ink: Color) -> Option<(u8, Co
 /// fragment : une run par couche sous le texte ; `blur`
 /// ≈ 4 fantômes croisés ±blur/2 à alpha/3 (documenté,
 /// pas de gaussien).
-#[allow(clippy::too_many_arguments)]
 fn emit_text_shadows(
     st: &explorer_css::ComputedStyle,
     x: f32,
     base_y: f32,
     run: &std::sync::Arc<ShapedRun>,
     fs: f32,
-    ink: Color,
     items: &mut Vec<DisplayItem>,
 ) {
-    for (soff, sblur, scolor) in text_shadows(st, ink) {
+    for (soff, sblur, scolor) in text_shadows(st) {
         let mut ghost = |dx: f32, dy: f32, a: u8| {
             let mut c = scolor;
             c.a = a;
@@ -2687,38 +2642,18 @@ fn emit_text_shadows(
 
 /// `text-shadow` → couches `(offset, blur, color)`
 /// (R-M4) : `x y [blur] [color]` par virgule de niveau
-/// 0 ; `none` → vide. Le flou est rendu en fantômes
-/// croisés à l'émission (approx. documentée).
-#[allow(clippy::cast_possible_truncation)]
-fn text_shadows(st: &explorer_css::ComputedStyle, default: Color) -> Vec<((f32, f32), f32, Color)> {
-    let Some(v) = st.get("text-shadow") else {
-        return Vec::new();
-    };
-    if v.trim().eq_ignore_ascii_case("none") {
-        return Vec::new();
-    }
-    bg_layers(v)
+/// 0 ; `none` → vide — résolues une fois par style
+/// (R-295). Le flou est rendu en fantômes croisés à
+/// l'émission (approx. documentée).
+fn text_shadows(
+    st: &explorer_css::ComputedStyle,
+) -> impl Iterator<Item = ((f32, f32), f32, Color)> + '_ {
+    st.resolved_fx()
+        .text_shadows
+        .as_deref()
+        .unwrap_or(&[])
         .iter()
-        .filter_map(|layer| {
-            let mut lens = Vec::with_capacity(3);
-            let mut color = None;
-            for tok in layer.split_whitespace() {
-                if let Some(l) = parse_length(tok) {
-                    lens.push(l.unit.px_factor().map_or(0.0, |f| l.value * f) as f32);
-                } else if let Some(c) = token_color(st, tok) {
-                    color = Some(c);
-                }
-            }
-            if lens.len() < 2 {
-                return None;
-            }
-            Some((
-                (lens[0], lens[1]),
-                lens.get(2).copied().unwrap_or(0.0).max(0.0),
-                color.unwrap_or(default),
-            ))
-        })
-        .collect()
+        .map(|s| ((s.dx, s.dy), s.blur, s.color))
 }
 
 /// Marqueur de `display: list-item` (issue #9) : la puce se
@@ -4668,15 +4603,7 @@ fn paint_lines(bx: &LayoutBox, items: &mut Vec<DisplayItem>, off: (f32, f32)) {
                         }
                     }
                 }
-                emit_text_shadows(
-                    &frag.style,
-                    frag.rect.x + off.0,
-                    base_y,
-                    run,
-                    fs,
-                    ink,
-                    items,
-                );
+                emit_text_shadows(&frag.style, frag.rect.x + off.0, base_y, run, fs, items);
                 if sideways_lr || sideways_rl {
                     // Rotation autour de (x, baseline) : lr
                     // −90° (x→−y), rl +90° (x→+y).
@@ -5055,25 +4982,18 @@ fn emit_child<'a>(
 /// sous-estimation : un sous-arbre sauté ne doit pouvoir
 /// déposer aucune encre dans la bande).
 fn ink_margin(bx: &LayoutBox) -> f32 {
+    let fx = bx.style.resolved_fx();
     let mut m = 0.0_f32;
-    for prop in ["box-shadow", "text-shadow"] {
-        let Some(v) = bx.style.get(prop) else {
-            continue;
-        };
-        if v.trim().eq_ignore_ascii_case("none") {
-            continue;
-        }
-        for layer in bg_layers(v) {
-            // Même grammaire de couches `x y blur spread`
-            // (`text-shadow` ignore spread/inset — le parseur
-            // commun les laisse à 0/false).
-            if let Some((off, blur, spread, _c, inset)) =
-                parse_box_shadow_layer(&bx.style, layer.trim())
-            {
-                if !inset {
-                    m = m.max(off.0.abs() + off.1.abs() + blur + spread.max(0.0));
-                }
+    if let Some(sh) = &fx.box_shadows {
+        for s in sh.iter() {
+            if !s.inset {
+                m = m.max(s.dx.abs() + s.dy.abs() + s.blur + s.spread.max(0.0));
             }
+        }
+    }
+    if let Some(sh) = &fx.text_shadows {
+        for s in sh.iter() {
+            m = m.max(s.dx.abs() + s.dy.abs() + s.blur + s.spread.max(0.0));
         }
     }
     m

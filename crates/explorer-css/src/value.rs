@@ -2155,7 +2155,7 @@ fn bg_tokens(value: &str) -> Vec<&str> {
 /// Un segment vide (`url(a),` ou `,url(a)`) produit une couche
 /// que [`parse_bg_layer`] rejettera — déclaration invalide,
 /// conforme à la spec.
-fn split_top_commas(value: &str) -> Vec<&str> {
+pub(crate) fn split_top_commas(value: &str) -> Vec<&str> {
     let mut out = Vec::new();
     let mut depth = 0u32;
     let mut start = 0usize;

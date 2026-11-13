@@ -129,6 +129,19 @@ partielles) ; poste `incr.emit` ~1,5 s rouvert → levier
 suivant = attribution interne de l'emit avant code
 (cf. §2.7).
 
+**Attribution livrée (`emit.parts`, commit `87788f6`)** :
+`incr.emit` 1,47 s = émission réelle des ~443 boîtes
+mutées (~3,3 ms/boîte debug) — copies+bookkeeping < 0,4 %,
+`culled=0` (tout ce qui est visité est on-band). Levier (a)
+choisi par l'utilisateur : **valeurs résolues cachées sur
+`ComputedStyle`** — livré R-295 (`ResolvedFx`/`FxShadow`,
+`OnceLock` paresseux partagé par clone, `PartialEq` manuel
+inchangé) : `box-shadow`/`text-shadow`/`ink_margin` ne
+re-parsent plus par item ; `bg_layers`/`corner_radii`
+restent des cibles du même cache si la mesure les nomme.
+Sonde `draw` par kind livrée dans `raster.parts`. Mesure
+avant/après au re-vol court (`LOBSTE_PROBE_HOVER=0`).
+
 ### 2.5 — Ops de groupe, résidu zone = cadre (R-294) [PIPE `explorer-render`]
 
 | Tâche | Fichiers | DoD |

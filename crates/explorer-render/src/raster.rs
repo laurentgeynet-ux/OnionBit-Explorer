@@ -1331,6 +1331,11 @@ fn replay_items(
     // `clips_real` = clips ayant payé un `Mask` plein frame —
     // le ratio vs `clips` mesure le taux de culle hors-fenêtre.
     let mut n_clip_real = 0u32;
+    // Attribution `draw_us` par kind d'item (P4 perf —
+    // texte / remplissages / ombres / images / autre) :
+    // `draw_us` ~1 s résiduel dev.to sans décomposition.
+    let mut kind_us = [0u64; DRAW_KINDS];
+    let mut kind_n = [0u32; DRAW_KINDS];
     for (idx, item) in items.iter().enumerate() {
         match item {
             DisplayItem::PushClip(r) => {
@@ -1695,6 +1700,7 @@ fn replay_items(
                     });
                 if draw {
                     n_draw += 1;
+                    let kind = draw_kind(item);
                     let t = std::time::Instant::now();
                     let dst = filtered.last_mut().map_or(&mut *pixmap, |g| &mut g.buf);
                     paint_item(
@@ -1705,7 +1711,10 @@ fn replay_items(
                         gc,
                         top_clip(&clips, empty_mask.as_ref()),
                     );
-                    us_draw += t.elapsed().as_micros();
+                    let us = t.elapsed().as_micros();
+                    us_draw += us;
+                    kind_us[usize::from(kind)] += u64::try_from(us).unwrap_or(u64::MAX);
+                    kind_n[usize::from(kind)] += 1;
                 } else {
                     n_skip += 1;
                 }
@@ -1726,6 +1735,12 @@ fn replay_items(
         clip_us = u64::try_from(us_clip).unwrap_or(u64::MAX),
         group_us = u64::try_from(us_group).unwrap_or(u64::MAX),
         draw_us = u64::try_from(us_draw).unwrap_or(u64::MAX),
+        draw_text_us = kind_us[0],
+        draw_fill_us = kind_us[1],
+        draw_shadow_us = kind_us[2],
+        draw_img_us = kind_us[3],
+        draw_other_us = kind_us[4],
+        draw_text_n = kind_n[0],
         "phase sync"
     );
 }
@@ -1734,6 +1749,26 @@ fn replay_items(
 /// « item × fenêtre » de `replay_items` (R-37).
 fn rects_overlap(a: explorer_layout::Rect, b: explorer_layout::Rect) -> bool {
     a.x < b.x + b.width && b.x < a.x + a.width && a.y < b.y + b.height && b.y < a.y + a.height
+}
+
+/// Familles de `draw_us` pour l'attribution `raster.parts`
+/// (P4 perf) : texte shapé, remplissages/bordures/décor,
+/// ombres, images/fond, reste (markers, emphasis, svg…).
+const DRAW_KINDS: usize = 5;
+
+/// Bucketing d'un item dessiné — ordre = index de `kind_us`.
+fn draw_kind(item: &DisplayItem) -> u8 {
+    match item {
+        DisplayItem::Text { .. } | DisplayItem::MarkerText { .. } => 0,
+        DisplayItem::FillRect { .. }
+        | DisplayItem::DecoRect { .. }
+        | DisplayItem::Border { .. }
+        | DisplayItem::MaskedFill { .. }
+        | DisplayItem::BorderImage { .. } => 1,
+        DisplayItem::BoxShadow { .. } => 2,
+        DisplayItem::Image { .. } | DisplayItem::BackgroundImage { .. } => 3,
+        _ => 4,
+    }
 }
 
 /// Peint un item de dessin (les clips sont gérés par

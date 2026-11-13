@@ -4483,12 +4483,19 @@ sous-features, `font-stretch`/`font-width` (fontes variables),
   chaîne, frères suivants des touchés ; descend ssi touché ∨
   computed≠base ∨ (`deep_relational` ∧ frère-suivant-de-touché)
   ; design amendé+validé au journal (canal silencieux couvert).
-- [ ] **Câblage frontière** — exécuté côté NAV (§2.3).
+- [x] **Câblage frontière** — exécuté côté NAV (§2.3).
 - [x] **`may_escape` émission** (`explorer-layout` +
   `explorer-render`) — `incr.emit` ~1,5 s → §2.4.
 - [ ] **Ops groupe résidu zone = cadre** (`explorer-render`) —
   `group_us` ~9,9 s YouTube → §2.5.
-- [ ] **Sonde `draw` par kind** (`explorer-render`) — §2.7.
+- [x] **Sonde `draw` par kind** (`explorer-render`) — §2.7.
+- [x] **R-295 — `ResolvedFx` : ombres résolues sur le style**
+  (`explorer-css` + `explorer-render`) — levier (a) du
+  poste `incr.emit` nommé par `emit.parts` : `box-shadow`/
+  `text-shadow` parsés une fois par `ComputedStyle`
+  (`OnceLock`, partagé par clone) au lieu de string→px
+  par boîte et par passe ; `PartialEq` manuel (props ∪
+  vars) préserve la sémantique. Test dédié + goldens verts.
 - [ ] **`content-visibility` viewport-aware**
   (`explorer-layout` + couture core) — §2.7.
 - **File propre continue** : `css.values` résiduel

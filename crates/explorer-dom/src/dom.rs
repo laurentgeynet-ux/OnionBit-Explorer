@@ -671,7 +671,7 @@ impl Dom {
     /// l'arbre du document). L'index `id_index` est rempli par
     /// [`Dom::set_attribute`]/[`Dom::remove_attribute`] ; les
     /// doublons d'`id` (web hostile) sont arbitrés ici par
-    /// [`Dom::doc_order_lt`], pas à l'insertion — les déplacements
+    /// `Dom::doc_order_lt`, pas à l'insertion — les déplacements
     /// (`insert_before`) ne réordonnent pas l'index.
     ///
     /// Ne retourne jamais un nœud hors de l'arbre document :

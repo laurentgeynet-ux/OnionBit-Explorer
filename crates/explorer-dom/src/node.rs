@@ -27,7 +27,7 @@ pub enum NodeData {
 }
 
 /// Plage `(début, longueur)` en octets dans
-/// [`crate::Dom::text_buffer`] — le buffer texte mutualisé de
+/// `crate::Dom::text_buffer` — le buffer texte mutualisé de
 /// l'arène (AR-14 : des milliers de petites `String` → une
 /// allocation, compactée par `collect`). `Copy` — résolution
 /// via [`crate::Dom::text_at`].
