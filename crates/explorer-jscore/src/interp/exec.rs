@@ -251,9 +251,7 @@ impl Engine {
         // §B-59 : le corps est atteint — le span fatal d'ici
         // est couvert par `last_stmt` ; `last_phase` resterait
         // « call » seulement si la mort précédait ce point.
-        if let Ok(mut g) = crate::LAST_PHASE.lock() {
-            *g = "body";
-        }
+        crate::phase_note(crate::last_phase::BODY);
         let has_using = body.iter().any(|s| matches!(s, Stmt::Using { .. }));
         if has_using {
             self.using_stack.push(Vec::new());

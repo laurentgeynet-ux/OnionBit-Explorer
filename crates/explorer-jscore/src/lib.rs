@@ -579,13 +579,58 @@ pub(crate) fn dlv_trace() -> bool {
     static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
     *ON.get_or_init(|| std::env::var_os("EXPLORER_DLV_TRACE").is_some())
 }
-/// Phase de l'appelant JS — **inconditionnelle** (`&'static
-/// str`, ~20 ns) : écrite à l'entrée de `call_value_impl` et
-/// `exec_body`, là où aucun tick n'a encore couru. Vide à
-/// l'abort = le span fatal est dans une statement/éval tickée
-/// (couvert par `LAST_STMT`) ou hors fil JS ; `"call"`/`"body"`
-/// = mort dans le préambule d'appel (liage, hoist, suspend).
-pub static LAST_PHASE: std::sync::Mutex<&'static str> = std::sync::Mutex::new("");
+/// Phase de l'appelant JS — **inconditionnelle** (store
+/// `Relaxed` ~2 ns ; le `Mutex` coûtait ~20 ns × ~6 écritures
+/// par appel dans le prologue — JS-C498) : écrite à l'entrée
+/// de `call_value_impl` et `exec_body`, là où aucun tick n'a
+/// encore couru. [`last_phase::NONE`] à l'abort = le span fatal
+/// est dans une statement/éval tickée (couvert par
+/// `LAST_STMT`) ou hors fil JS ; `call`/`body` = mort dans le
+/// préambule d'appel (liage, hoist, suspend).
+pub static LAST_PHASE: std::sync::atomic::AtomicU8 =
+    std::sync::atomic::AtomicU8::new(last_phase::NONE);
+
+/// Codes de [`LAST_PHASE`] — vocabulaire fixe des phases du
+/// fil JS (le `Mutex<&'static str>` pesait ~20 ns par écriture
+/// dans le prologue d'appel ; le code tient dans un `u8`).
+pub mod last_phase {
+    /// Aucune phase enregistrée.
+    pub const NONE: u8 = 0;
+    /// Préambule `call_value_impl` (délégations Bound/Proxy).
+    pub const CALL: u8 = 1;
+    /// Résolution du contexte/realm de la fonction (JS-C78).
+    pub const CTX: u8 = 2;
+    /// Switch transactionnel de contexte effectif (JS-C78).
+    pub const SW: u8 = 3;
+    /// Entrée `call_script_body`.
+    pub const CSB: u8 = 4;
+    /// Liage des paramètres (`bind_pat` × N, rest, défauts).
+    pub const BIND: u8 = 5;
+    /// Pose `arguments`/`new.target` (drapeaux JS-C497).
+    pub const ARGV: u8 = 6;
+    /// Hoist `var`/`function`/`export`.
+    pub const HOIST: u8 = 7;
+    /// Corps atteint — le span fatal est couvert par
+    /// `LAST_STMT`/`LAST_EXPR`.
+    pub const BODY: u8 = 8;
+    /// Libellés breadcrumb — index = code (`NAMES[NONE]` = "").
+    pub const NAMES: [&str; 9] = [
+        "", "call", "ctx", "sw", "csb", "bind", "argv", "hoist", "body",
+    ];
+}
+
+/// Écrit [`LAST_PHASE`] — ~2 ns, inconditionnelle (§B-59 : le
+/// postmortem ne dépend d'aucun flag armé).
+pub(crate) fn phase_note(code: u8) {
+    LAST_PHASE.store(code, std::sync::atomic::Ordering::Relaxed);
+}
+
+/// Libellé de la phase enregistrée — `""` si aucune ou code
+/// inconnu (lecteurs : journal breadcrumb, `rss_guard` daemon).
+pub fn last_phase_str() -> &'static str {
+    let c = LAST_PHASE.load(std::sync::atomic::Ordering::Relaxed) as usize;
+    last_phase::NAMES.get(c).copied().unwrap_or("")
+}
 /// §B-59 — fonction `Fun::Script` en cours d'entrée (écrit au
 /// début de `call_value_impl`, **avant** tout préambule) :
 /// `last_phase=call` figé + `last_fun` nommé = la mort vit
@@ -636,7 +681,7 @@ pub fn start_breadcrumb_journal() {
                     get(&LAST_EXPR),
                     get(&LAST_NAT),
                     gets(&LAST_HOST),
-                    get(&LAST_PHASE),
+                    last_phase_str(),
                     areq,
                     gets(&LAST_STATS),
                 );

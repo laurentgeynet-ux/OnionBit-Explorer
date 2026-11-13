@@ -3413,3 +3413,36 @@ shadow n'atteint ni cascade ni boxification ») etait
 - Note : recherche `?search_query=` = feed **server-side**
   non personnalisé — la piste vitrine peuplée passe
   par un corpus enregistrant une page `/results`.
+
+### 2026-11-13 — crans 0 `frame_ns` : `LAST_PHASE` atomique + liage direct des params (JS-C498/499)
+
+- **(a) `LAST_PHASE` `Mutex<&'static str>` → `AtomicU8`** :
+  le breadcrumb §B-59 est écrit inconditionnellement ~6×
+  par appel JS (`call`/`ctx`/`csb`/`bind`/`argv`/`hoist`,
+  + `body` par corps) — ~20 ns lock+store chacun →
+  vocabulaire `u8` (`last_phase::NAMES`), `phase_note` en
+  store `Relaxed` (~2 ns), `last_phase_str()` pour les
+  lecteurs (journal interne, `rss_guard` daemon — API
+  interne NAV). Diagnostics inchangés, ~100 ns/appel
+  économisés sur le poste `frame_ns` (967 ms / ~750 k au
+  vol `r300`).
+- **(b) `simple_params` fast-path** : params effectifs
+  tous `Pat::Ident` non-`rest` → `env_put` direct au lieu
+  de `bind_pat`/`env_declare`/`env_set` par paramètre
+  (stacker + ~4 sondes de map + marche de chaîne
+  économisés). Équivalence sur `Local` frais :
+  `BindMode::Var` de `Pat::Ident` =
+  `insert(Bind{value:v, mutable:true})`. Le test porte sur
+  la liste réellement itérée → couvre aussi les corps
+  baissés gen/async.
+- **Verrous** : `lang` 315/315, `c308_lazy_args` 11/11,
+  lib 48. Mesure = prochain vol (N5.5).
+- Piste perf v2 (revue au code) : cran suivant = IC
+  `site→(shape,pos)` own-prop (shape-hash `u64`
+  incrémental — capture le polymorphisme qu'un memo
+  `(ObjId,pos)` raterait), puis slots `(d,slot)` +
+  `EnvCell::Uninit` — **déviation assumée vs N4.2** (IC
+  `(env,nom)→cellule` appris → slot statique par site,
+  zéro table par env ; périmètre pré-déclare ~30 sites
+  incl. GExec `lazy.rs`, scopes empoisonnés exclus →
+  delta `eval` ≈ 0).

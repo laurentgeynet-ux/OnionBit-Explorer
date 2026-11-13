@@ -9452,9 +9452,7 @@ impl Engine {
         // (boucle Bound/Proxy, clone `Fun`, switch de realm,
         // liage des args) sans tick → `last_phase=call` nomme
         // la zone que `last_stmt` ne couvre pas.
-        if let Ok(mut g) = crate::LAST_PHASE.lock() {
-            *g = "call";
-        }
+        crate::phase_note(crate::last_phase::CALL);
         // JS-C421 : `f`/`this`/`args`/`nt` tenus par les frames
         // Rust appelantes pendant tout le corps — les pousser
         // racines pour les safepoints des corps en dessous.
@@ -9701,18 +9699,12 @@ impl Engine {
                 // emportent leurs `Rc` (DomRef/NodeCache), les
                 // objets same-origin restent donc valides.
                 let prev = self.cur_ctx;
-                if let Ok(mut g) = crate::LAST_PHASE.lock() {
-                    *g = "ctx";
-                }
+                crate::phase_note(crate::last_phase::CTX);
                 if let Some(t) = self.ctx_of_env(&env) {
-                    if let Ok(mut g) = crate::LAST_PHASE.lock() {
-                        *g = "sw";
-                    }
+                    crate::phase_note(crate::last_phase::SW);
                     self.switch_to(t);
                 }
-                if let Ok(mut g) = crate::LAST_PHASE.lock() {
-                    *g = "csb";
-                }
+                crate::phase_note(crate::last_phase::CSB);
                 let r = self.call_script_body(cur, &lit, env, lex_this, this, args_ref, nt);
                 if self.cur_ctx != prev {
                     self.switch_to(prev);
@@ -10013,28 +10005,44 @@ impl Engine {
         // §B-59 : sous-phase « bind » — `last_phase` figé à
         // « bind » = mort dans le liage de paramètres
         // (`bind_pat` × N params, `...rest`, défauts).
-        if let Ok(mut g) = crate::LAST_PHASE.lock() {
-            *g = "bind";
-        }
+        crate::phase_note(crate::last_phase::BIND);
         // Param binding: patterns + `= default` + `...rest`.
-        for (i, p) in lowered_fn
-            .as_ref()
-            .map_or(&lit.params, |lf| &lf.params)
+        let params = lowered_fn.as_ref().map_or(&lit.params, |lf| &lf.params);
+        // JS-C499 — chemin chaud : tous `Pat::Ident` non-rest
+        // (l'écrasante majorité des fonctions) → insertion
+        // directe `env_put`. `bind_pat` + `env_declare` +
+        // `env_set` (stacker, ~4 sondes de map et une marche de
+        // chaîne par paramètre) deviennent un `insert` — sur un
+        // `Local` frais, `BindMode::Var` de `Pat::Ident` fait
+        // exactement `insert(Bind{value:v, mutable:true})`.
+        if params
             .iter()
-            .enumerate()
+            .all(|p| !p.rest && matches!(p.pat, Pat::Ident(_)))
         {
-            let v = if p.rest {
-                self.new_array(args.get(i..).unwrap_or(&[]).to_vec())
-            } else {
-                args.get(i).cloned().unwrap_or(Value::Undefined)
-            };
-            // Param binding runs inside the new scope; a
-            // destructuring/throwing default aborts the call.
-            if let Err(t) = self.bind_pat(&local, this.clone(), &p.pat, v, BindMode::Var) {
-                self.call_depth -= 1;
-                self.call_stack.pop();
-                self.call_sites.pop();
-                return Err(t);
+            for (i, p) in params.iter().enumerate() {
+                let Pat::Ident(name) = &p.pat else {
+                    continue;
+                };
+                if !name.is_empty() {
+                    let v = args.get(i).cloned().unwrap_or(Value::Undefined);
+                    Self::env_put(&local, name, v, true);
+                }
+            }
+        } else {
+            for (i, p) in params.iter().enumerate() {
+                let v = if p.rest {
+                    self.new_array(args.get(i..).unwrap_or(&[]).to_vec())
+                } else {
+                    args.get(i).cloned().unwrap_or(Value::Undefined)
+                };
+                // Param binding runs inside the new scope; a
+                // destructuring/throwing default aborts the call.
+                if let Err(t) = self.bind_pat(&local, this.clone(), &p.pat, v, BindMode::Var) {
+                    self.call_depth -= 1;
+                    self.call_stack.pop();
+                    self.call_sites.pop();
+                    return Err(t);
+                }
             }
         }
         // Arrows have no own `arguments` — lookup falls
@@ -10042,9 +10050,7 @@ impl Engine {
         // Annex B sloppy : `arguments.callee` → la fonction
         // (strict : absent — déviation vs le poisoned
         // accessor de la spec, la lecture rend `undefined`).
-        if let Ok(mut g) = crate::LAST_PHASE.lock() {
-            *g = "argv";
-        }
+        crate::phase_note(crate::last_phase::ARGV);
         // `arguments` paresseux (JS-C308) : la construction de
         // l'objet (tableau + map sloppy + `callee` + nom de
         // liaison) est différée à la première lecture — 2 allocs
@@ -10071,9 +10077,7 @@ impl Engine {
         if !lit.is_arrow && lfl & LIT_USES_NT != 0 {
             Self::env_put(&local, NEW_TARGET, nt, false);
         }
-        if let Ok(mut g) = crate::LAST_PHASE.lock() {
-            *g = "hoist";
-        }
+        crate::phase_note(crate::last_phase::HOIST);
         let lowered_body = lowered_fn.as_ref().map(|lf| lf.body.clone());
         // JS-C490 — annotations de profondeur sur le corps qui
         // tournera (le corps baissé des gen/async).

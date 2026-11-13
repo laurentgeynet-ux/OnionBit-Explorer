@@ -529,7 +529,7 @@ fn main() {
                 // drain hôte (`poll_net`/`timers`/`commit`…) —
                 // « préambule JS vs drain core vs hors-fil »
                 // tranché en un seul abort.
-                let phase = explorer_jscore::LAST_PHASE.lock().map_or("?", |g| *g);
+                let phase = explorer_jscore::last_phase_str();
                 let drain = explorer_core::LAST_DRAIN.lock().map_or("?", |g| *g);
                 let _ = std::fs::write(
                     &p,

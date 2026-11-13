@@ -12595,6 +12595,18 @@ croître la surface navigateur mesurée (`api` 1510/8099, 18,6 %).
   fetches `mousemove` dev.to y vivaient ~80 s de wall) —
   vols perf ~2-3× plus courts, vol complet inchangé par
   défaut.
+- [x] **JS-C498+JS-C499 — crans 0 `frame_ns`** (correctifs
+  post-attribution N5.1-5.3) : `LAST_PHASE`
+  `Mutex`→`AtomicU8` + `phase_note`/`last_phase_str`
+  (~100 ns/appel × ~750 k — breadcrumb §B-59 inconditionnel
+  ~6×/appel) ; liage direct `env_put` des params
+  `Pat::Ident` non-rest (sort de `bind_pat`/`env_declare`/
+  `env_set` par paramètre — équivalent `BindMode::Var` sur
+  `Local` frais). Verrous : lang 315 + c308 11 + lib 48.
+  Mesure = N5.5. Crans suivants du plan réorganisé :
+  IC `site→(shape,pos)` own-prop puis slots `(d,slot)` +
+  `EnvCell::Uninit` (périmètre ~30 sites incl. GExec
+  `lazy.rs` — déviation N4.2 vers slot statique, journal).
 
 Convergence visée : **Étape 239** — plan global consolidé,
 chaque gain rapporté contre les **deux** archétypes.
