@@ -896,6 +896,11 @@ pub struct Engine {
     /// divergences sont loguées bornées (`res.bad`). Mode
     /// diagnostic — ~2× le coût de résolution.
     pub(crate) resolve_verify: bool,
+    /// JS-C501 — `EXPLORER_RES_WALK=1` : la marche des parents
+    /// remplace le cache `resolved_envs` pour tout `d` (A/B
+    /// hash+pin vs borrow+clone en vol — la décision du seuil
+    /// `RES_WALK_MAX` se mesure, pas se devine).
+    pub(crate) res_walk: bool,
     /// Cache des constructeurs d'interface par nom de classe
     /// (`HTMLInputElement`…) — JS-C82 : `el.constructor` typé +
     /// `.prototype` porteur des accesseurs IDL (surface
@@ -1429,6 +1434,7 @@ impl Engine {
             lit_flags: std::collections::HashMap::new(),
             resolve_off: std::env::var("EXPLORER_NO_RESOLVE").is_ok_and(|v| v == "1"),
             resolve_verify: std::env::var("EXPLORER_RESOLVE_VERIFY").is_ok_and(|v| v == "1"),
+            res_walk: std::env::var("EXPLORER_RES_WALK").is_ok_and(|v| v == "1"),
             dom_ctors: std::collections::HashMap::new(),
             native_caller: Vec::new(),
             ctor_fresh: None,
@@ -5782,17 +5788,22 @@ impl Engine {
         e: &crate::ast::Expr,
     ) -> Option<Value> {
         const RESOLVED_ENVS_CAP: usize = 8192;
+        /// JS-C501 — sous `d ≤ RES_WALK_MAX`, la marche des
+        /// parents (`borrow`+`clone` ×d ≈ 5 ns/niveau) bat le
+        /// hash du cache (~20 ns) et évite insert+pin `EnvRef` ;
+        /// au-delà le cache amortit les boucles profondes.
+        /// `EXPLORER_RES_WALK=1` force la marche pour tout `d`
+        /// (A/B en vol sans rebuild).
+        const RES_WALK_MAX: u16 = 2;
         let &d = self
             .resolved_map
             .get(&(std::ptr::from_ref::<crate::ast::Expr>(e) as usize))?;
-        // L'ancêtre est déterministe par (env, d) — `Env.parent`
-        // immuable post-création. Clé tuple exacte — jamais
-        // d'aplatissement (une collision `ptr+d<<20` entre envs
-        // proches rendait un ancêtre faux → liaison erronée).
-        let ekey = (Rc::as_ptr(env) as usize, d);
-        let cur = if let Some((_, anc)) = self.resolved_envs.get(&ekey) {
-            anc.clone()
-        } else {
+        // JS-C501 — `d == 0` = variable de l'env courant :
+        // `cur = env` direct, ni hash ni insert ni pin (le cas
+        // le plus fréquent payait le cache pour rien) ; `d ≤ 2`
+        // idem — quelques sauts de parent coûtent moins que le
+        // hash + le pin de deux `EnvRef` par env éphémère.
+        let cur = if d <= RES_WALK_MAX || self.res_walk {
             let mut cur = env.clone();
             for _ in 0..d {
                 let p = cur.borrow().parent.clone();
@@ -5801,14 +5812,34 @@ impl Engine {
                     None => break,
                 }
             }
-            if self.resolved_envs.len() >= RESOLVED_ENVS_CAP {
-                self.resolved_envs.clear();
-            }
-            // Le `EnvRef` épinglé dans la clé empêche la
-            // réutilisation de l'adresse de `env` par un autre
-            // env — aucune collision de pointeur possible.
-            self.resolved_envs.insert(ekey, (env.clone(), cur.clone()));
             cur
+        } else {
+            // L'ancêtre est déterministe par (env, d) —
+            // `Env.parent` immuable post-création. Clé tuple
+            // exacte — jamais d'aplatissement (une collision
+            // `ptr+d<<20` entre envs proches rendait un ancêtre
+            // faux → liaison erronée).
+            let ekey = (Rc::as_ptr(env) as usize, d);
+            if let Some((_, anc)) = self.resolved_envs.get(&ekey) {
+                anc.clone()
+            } else {
+                let mut cur = env.clone();
+                for _ in 0..d {
+                    let p = cur.borrow().parent.clone();
+                    match p {
+                        Some(p) => cur = p,
+                        None => break,
+                    }
+                }
+                if self.resolved_envs.len() >= RESOLVED_ENVS_CAP {
+                    self.resolved_envs.clear();
+                }
+                // Le `EnvRef` épinglé dans la clé empêche la
+                // réutilisation de l'adresse de `env` par un autre
+                // env — aucune collision de pointeur possible.
+                self.resolved_envs.insert(ekey, (env.clone(), cur.clone()));
+                cur
+            }
         };
         if let v @ Some(_) = self.env_get(&cur, name) {
             crate::j17_tick(&crate::J17_RES_HIT);

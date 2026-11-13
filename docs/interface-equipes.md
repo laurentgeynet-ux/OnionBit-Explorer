@@ -3481,3 +3481,13 @@ shadow n'atteint ni cascade ni boxification ») etait
 - Verrous : `lang` 315/315 ×2 (dont `IC_VERIFY=1`, zéro
   `ic.bad`), `c500_ic` 12, lib 48, suites
   proto/accessors/args/lazy vertes.
+
+### 2026-11-13 — amorce cran 2a : `env_get_resolved` `d≤2` sans cache (JS-C501)
+
+- `d==0` → `env` direct (ni hash ni pin — cas dominant),
+  `d≤RES_WALK_MAX=2` → marche `Env.parent` (immuables),
+  `d>2` → `resolved_envs` inchangé (pin nécessaire : la clé
+  `ptr(env)` resterait réutilisable sinon — load-bearing).
+- `EXPLORER_RES_WALK=1` force la marche pour tout `d` —
+  mesure A/B du seuil en vol, précédent `resolve_off`.
+- Verrous : `lang` 315 ×3 passes (défaut / VERIFY / WALK).

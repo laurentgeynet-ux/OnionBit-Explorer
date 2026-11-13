@@ -12621,6 +12621,12 @@ croître la surface navigateur mesurée (`api` 1510/8099, 18,6 %).
   315 (×2 dont VERIFY), c500 12, lib 48. Hits proto/absents
   non cachés → décision cran transitions sur `prop_scan`
   résiduel (N5.5).
+- [x] **JS-C501 — amorce cran 2a : `env_get_resolved`
+  `d ≤ 2` sans cache** : `d==0` (cas dominant) → `env`
+  direct, `d≤2` → marche des parents (~5 ns/niveau < hash
+  ~20 ns + pin `EnvRef`) ; `resolved_envs` conservé pour
+  `d>2` ; `EXPLORER_RES_WALK=1` = A/B seuil en vol.
+  Verrous : lang 315 ×3 passes.
 
 Convergence visée : **Étape 239** — plan global consolidé,
 chaque gain rapporté contre les **deux** archétypes.
