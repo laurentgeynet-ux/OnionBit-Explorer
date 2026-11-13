@@ -12662,6 +12662,13 @@ croître la surface navigateur mesurée (`api` 1510/8099, 18,6 %).
   (`proto_lvl` 1,57 M, `prop_scan` 7,28 M) = cible de ce
   cran ; `env_lvl`/`env_gets` redeviendront le goulot si
   `prop_ns` s'effondre (seuil `RES_WALK_MAX` à revoir).
+- [x] **JS-C505 — sondes N5.6** (télémétrie avant vol,
+  rend N5.6 triple-décisoire) : `slot_miss` décomposé en
+  `sm_oob`/`sm_key`/`sm_cell`/`sm_map`/`sm_kind` (`sm_key`
+  = divergence canonique attendu ≈ 0) ; histogramme
+  `binop:<op>=<n>` + `badd_num`/`badd_str`/`badd_oth` —
+  calibre la cible du premier quickening cran 3.
+  Verrous : lang 315, c500 19, c502 24.
 
 Convergence visée : **Étape 239** — plan global consolidé,
 chaque gain rapporté contre les **deux** archétypes.
