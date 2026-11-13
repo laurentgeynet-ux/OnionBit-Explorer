@@ -134,8 +134,10 @@ survives `await fetch()` over real I/O (suspension/resume of
 the interpreter, not a shim). **youtube.com** boots its real
 10.8 MB kevlar bundle (evaluated `ok` by our own interpreter),
 paints its SSR shell and runs Google's own **BotGuard** VM
-inside our engine — hydration and the residual `pNM`/`bb` wall
-are the open arms, instrumented under campaign `N1.x`.
+inside our engine — campaign `N1.x` delivered V8-shaped
+`Error.stack`, root-caused the `mr` stall to a pending `await`,
+and validated `dom-if`/`dom-repeat` stamping in flight;
+hydration and the residual `pNM`/`bb` wall stay open and named.
 **Video plays end-to-end**: progressive MP4 → decoded frames +
 audio 1:1 to EOS, and a real **hls.js** player over MSE multi-rail
 (11 fragments, section boundaries, ABR) — powered by the sister
