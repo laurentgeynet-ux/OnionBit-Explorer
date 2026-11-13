@@ -4489,6 +4489,12 @@ sous-features, `font-stretch`/`font-width` (fontes variables),
 - [ ] **Ops groupe résidu zone = cadre** (`explorer-render`) —
   `group_us` ~9,9 s YouTube → §2.5.
 - [x] **Sonde `draw` par kind** (`explorer-render`) — §2.7.
+- [x] **R-296 — cache de couches `box-shadow`**
+  (`explorer-render`) — poste nommé par la sonde (88 % du
+  `draw_us`) : tampon borné + clé bits-exacts (offset
+  exclu → hits inter-passes/scroll), repli direct
+  pixel-identique. Mesuré : `draw_shadow_us` 0,90 →
+  0,37 s/passe, `draw_us` 1,02 → 0,46 s dev.to.
 - [x] **R-295 — `ResolvedFx` : ombres résolues sur le style**
   (`explorer-css` + `explorer-render`) — levier (a) du
   poste `incr.emit` nommé par `emit.parts` : `box-shadow`/

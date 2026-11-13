@@ -2095,6 +2095,59 @@ fn box_blur(buf: &mut Pixmap, radius: f32) {
     clippy::cast_sign_loss,
     clippy::cast_possible_truncation
 )]
+/// R-296 — signature d'une couche `box-shadow` rasterisable
+/// en tampon : tout ce qui détermine les pixels (géométrie
+/// CSS + scale device + couleur). `offset` est EXCLU : il
+/// ne fait que translater — le tampon est blitté à sa
+/// position, donc les ombres identiques du feed (et les
+/// mêmes cartes entre passes incrémentales, et au scroll)
+/// partagent une seule rasterisation.
+#[derive(Clone, Copy, PartialEq, Eq, Hash)]
+struct ShadowKey {
+    w: u32,
+    h: u32,
+    radii: [u32; 4],
+    blur: u32,
+    spread: u32,
+    sx: u32,
+    sy: u32,
+    rgba: u32,
+}
+
+thread_local! {
+    /// Cache de couches d'ombre borné : `draw_shadow_us`
+    /// ≈ 88 % du `draw_us` dev.to (~0,9 s/passe — 8 fills
+    /// concentriques par ombre, re-rasterisés chaque passe).
+    /// Tampon clé par [`ShadowKey`] — pixels identiques au
+    /// chemin direct. `RefCell` : le raster est mono-thread
+    /// (`spawn_blocking`). Plein → vidé (les signatures
+    /// reviennent à chaque frame — coût = une rasterisation).
+    static SHADOW_CACHE: std::cell::RefCell<
+        std::collections::HashMap<ShadowKey, Pixmap>,
+    > = std::cell::RefCell::new(std::collections::HashMap::new());
+}
+
+/// Cap du cache d'ombres (entrées) — ~24 tampons bornés,
+/// largement au-delà du nombre de signatures distinctes
+/// d'une page réelle.
+const SHADOW_CACHE_CAP: usize = 24;
+
+/// Clé = bits `f32` exacts : deux signatures ne fusionnent
+/// que si leurs paramètres sont bit-à-bit égaux — le tampon
+/// réutilisé est alors strictement identique (les cartes du
+/// feed partagent la même déclaration ⇒ même bits).
+fn shadow_key_bits(v: f32) -> u32 {
+    v.to_bits()
+}
+
+#[allow(
+    clippy::too_many_arguments,
+    clippy::too_many_lines,
+    clippy::similar_names,
+    clippy::cast_sign_loss,
+    clippy::cast_possible_truncation,
+    clippy::cast_precision_loss
+)]
 fn paint_box_shadow(
     pixmap: &mut Pixmap,
     rect: &explorer_layout::Rect,
@@ -2107,6 +2160,104 @@ fn paint_box_shadow(
     clip: Option<&Mask>,
 ) {
     let steps: u16 = if blur > 0.0 { 8 } else { 1 };
+    // R-296 — voie tampon+cache : `blur>0` sous transform
+    // axis-aligned à origine de blit ENTIÈRE (sinon l'arrondi
+    // décalerait le dégradé d'un demi-px → repli direct,
+    // pixels toujours identiques au chemin historique).
+    if steps > 1
+        && dpi.kx == 0.0
+        && dpi.ky == 0.0
+        && dpi.sx > 0.0
+        && dpi.sy > 0.0
+        && rect.width > 0.0
+        && rect.height > 0.0
+    {
+        let reach = spread + blur + 1.0;
+        let bx_f = (rect.x + offset.0 - reach) * dpi.sx + dpi.tx;
+        let by_f = (rect.y + offset.1 - reach) * dpi.sy + dpi.ty;
+        let bx = bx_f.round() as i32;
+        let by = by_f.round() as i32;
+        if (bx_f - bx as f32).abs() < 0.01 && (by_f - by as f32).abs() < 0.01 {
+            let dw = ((rect.width + 2.0 * reach) * dpi.sx).ceil() as u32;
+            let dh = ((rect.height + 2.0 * reach) * dpi.sy).ceil() as u32;
+            // Borne : un tampon > 4 Kpx retombe sur le
+            // chemin direct (l'AA à l'échelle resterait
+            // identique, mais l'alloc devient prohibitive).
+            if dw > 0 && dh > 0 && dw <= 4096 && dh <= 4096 {
+                let key = ShadowKey {
+                    w: shadow_key_bits(rect.width),
+                    h: shadow_key_bits(rect.height),
+                    radii: [
+                        shadow_key_bits(radii[0]),
+                        shadow_key_bits(radii[1]),
+                        shadow_key_bits(radii[2]),
+                        shadow_key_bits(radii[3]),
+                    ],
+                    blur: shadow_key_bits(blur),
+                    spread: shadow_key_bits(spread),
+                    sx: shadow_key_bits(dpi.sx),
+                    sy: shadow_key_bits(dpi.sy),
+                    rgba: u32::from(color.r) << 24
+                        | u32::from(color.g) << 16
+                        | u32::from(color.b) << 8
+                        | u32::from(color.a),
+                };
+                let ready = SHADOW_CACHE.with(|c| c.borrow().contains_key(&key));
+                if !ready {
+                    let Some(mut buf) = Pixmap::new(dw, dh) else {
+                        return;
+                    };
+                    let buf_tf = Transform::from_scale(dpi.sx, dpi.sy)
+                        .post_translate(reach * dpi.sx, reach * dpi.sy);
+                    // Mêmes 8 fills que le chemin direct,
+                    // forme ancrée à (0,0) dans le tampon.
+                    for i in (0..steps).rev() {
+                        let grow = spread + blur * f32::from(i) / f32::from(steps);
+                        let mut paint = Paint {
+                            anti_alias: true,
+                            ..Paint::default()
+                        };
+                        let mut c = color;
+                        c.a = (f32::from(c.a) * (1.0 - f32::from(i) / f32::from(steps)))
+                            .round()
+                            .clamp(0.0, 255.0) as u8;
+                        paint.set_color(skia_color(c));
+                        let (x0, y0) = (-grow, -grow);
+                        let (x1, y1) = (rect.width + grow, rect.height + grow);
+                        let rr: [f32; 4] = [
+                            radii[0] + grow,
+                            radii[1] + grow,
+                            radii[2] + grow,
+                            radii[3] + grow,
+                        ];
+                        if let Some(path) = rounded_rect_path(x0, y0, x1, y1, &rr, &ROUND_CORNERS) {
+                            buf.fill_path(&path, &paint, FillRule::Winding, buf_tf, None);
+                        }
+                    }
+                    SHADOW_CACHE.with(|c| {
+                        let mut m = c.borrow_mut();
+                        if m.len() >= SHADOW_CACHE_CAP {
+                            m.clear();
+                        }
+                        m.insert(key, buf);
+                    });
+                }
+                SHADOW_CACHE.with(|c| {
+                    if let Some(buf) = c.borrow().get(&key) {
+                        pixmap.draw_pixmap(
+                            bx,
+                            by,
+                            buf.as_ref(),
+                            &tiny_skia::PixmapPaint::default(),
+                            Transform::default(),
+                            clip,
+                        );
+                    }
+                });
+                return;
+            }
+        }
+    }
     for i in (0..steps).rev() {
         let grow = spread + blur * f32::from(i) / f32::from(steps);
         let mut paint = Paint {
