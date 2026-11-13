@@ -3674,7 +3674,16 @@ async fn lobste_pipeline_errors() {
     eprintln!("[+{}s] navigate…", t_start.elapsed().as_secs());
     s.navigate(tab, &url).await.unwrap();
     eprintln!("[+{}s] navigate rendu", t_start.elapsed().as_secs());
-    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(60);
+    // Boutons de coût du vol (perf) : `LOBSTE_PROBE_WAIT=<s>`
+    // borne la boucle de charge (défaut 60 — inchangé) ;
+    // `LOBSTE_PROBE_HOVER=0` saute la grille de survol +
+    // la rafale clavier + la seconde pompe (les fetches
+    // `mousemove` de dev.to y vivaient ~80 s de wall).
+    let wait_secs: u64 = std::env::var("LOBSTE_PROBE_WAIT")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(60);
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(wait_secs);
     let mut errors = Vec::new();
     let mut navs = 0usize;
     loop {
@@ -3718,59 +3727,62 @@ async fn lobste_pipeline_errors() {
     // Grille de survol du harnais `site_smoke` : les listeners
     // `mouseover`/`mousemove` sont le déclencheur des TypeErrors
     // observés en vol — l'évaluation top-level seule est propre.
-    let mut y = 40.0f32;
-    while y <= 704.0 {
-        let mut x = 40.0f32;
-        while x <= 968.0 {
-            let _ = s.handle_input_now(tab, InputEvent::MouseMove { x, y });
+    let hover = std::env::var("LOBSTE_PROBE_HOVER").as_deref() != Ok("0");
+    if hover {
+        let mut y = 40.0f32;
+        while y <= 704.0 {
+            let mut x = 40.0f32;
+            while x <= 968.0 {
+                let _ = s.handle_input_now(tab, InputEvent::MouseMove { x, y });
+                while let Ok(ev) = rx.try_recv() {
+                    if let CoreEvent::PipelineError { message, .. } = ev {
+                        errors.push(message);
+                    }
+                }
+                x += 64.0;
+            }
+            y += 48.0;
+        }
+        // Rafale clavier (étape 103) : les listeners `keydown`/
+        // `keyup` lisent désormais `key`/`code`/`keyCode`/`which` —
+        // un handler réel qui se trompe de prop lève un PipelineError
+        // où `undefined` passait muet avant.
+        for key in ["a", "Enter", "Escape", "ArrowDown", "j", "k"] {
+            let _ = s.handle_input_now(
+                tab,
+                InputEvent::Key {
+                    key: key.into(),
+                    mods: KeyMods::NONE,
+                },
+            );
+            let _ = s.handle_input_now(
+                tab,
+                InputEvent::KeyUp {
+                    key: key.into(),
+                    mods: KeyMods::NONE,
+                },
+            );
             while let Ok(ev) = rx.try_recv() {
                 if let CoreEvent::PipelineError { message, .. } = ev {
                     errors.push(message);
                 }
             }
-            x += 64.0;
         }
-        y += 48.0;
-    }
-    // Rafale clavier (étape 103) : les listeners `keydown`/
-    // `keyup` lisent désormais `key`/`code`/`keyCode`/`which` —
-    // un handler réel qui se trompe de prop lève un PipelineError
-    // où `undefined` passait muet avant.
-    for key in ["a", "Enter", "Escape", "ArrowDown", "j", "k"] {
-        let _ = s.handle_input_now(
-            tab,
-            InputEvent::Key {
-                key: key.into(),
-                mods: KeyMods::NONE,
-            },
-        );
-        let _ = s.handle_input_now(
-            tab,
-            InputEvent::KeyUp {
-                key: key.into(),
-                mods: KeyMods::NONE,
-            },
-        );
-        while let Ok(ev) = rx.try_recv() {
-            if let CoreEvent::PipelineError { message, .. } = ev {
-                errors.push(message);
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(20);
+        loop {
+            s.pump_net().await;
+            s.pump_timers(tab);
+            while let Ok(ev) = rx.try_recv() {
+                if let CoreEvent::PipelineError { message, .. } = ev {
+                    errors.push(message);
+                }
             }
-        }
-    }
-    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(20);
-    loop {
-        s.pump_net().await;
-        s.pump_timers(tab);
-        while let Ok(ev) = rx.try_recv() {
-            if let CoreEvent::PipelineError { message, .. } = ev {
-                errors.push(message);
+            let idle = s.net_pending() == 0 && s.next_timer_deadline().is_none();
+            if idle || std::time::Instant::now() >= deadline {
+                break;
             }
+            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
         }
-        let idle = s.net_pending() == 0 && s.next_timer_deadline().is_none();
-        if idle || std::time::Instant::now() >= deadline {
-            break;
-        }
-        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
     }
     while let Ok(ev) = rx.try_recv() {
         if let CoreEvent::PipelineError { message, .. } = ev {

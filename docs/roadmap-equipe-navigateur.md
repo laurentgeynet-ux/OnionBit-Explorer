@@ -12584,6 +12584,13 @@ croître la surface navigateur mesurée (`api` 1510/8099, 18,6 %).
   `C:\OnionBit-vol\vol-236-*.log`.
 - [ ] **N5.6 — adoption `entities` jscore** (§2.7) — quasi
   gratuit.
+- [x] **N5.7 — boutons de coût du vol** (§2.7, mesures) :
+  `LOBSTE_PROBE_WAIT=<s>` borne la boucle de charge
+  (défaut 60 inchangé), `LOBSTE_PROBE_HOVER=0` saute
+  grille survol + rafale clavier + seconde pompe (les
+  fetches `mousemove` dev.to y vivaient ~80 s de wall) —
+  vols perf ~2-3× plus courts, vol complet inchangé par
+  défaut.
 
 Convergence visée : **Étape 239** — plan global consolidé,
 chaque gain rapporté contre les **deux** archétypes.
