@@ -67,6 +67,11 @@ fn radius_coin_logique_route_physique() {
 
 #[test]
 fn bare_border_logical_shorthand_route_physique() {
+    // Le shorthand nu `border-inline-end` éclate en longhands
+    // logiques, routées vers le physique (LTR → right) —
+    // `ComputedStyle.get` ne re-synthétise pas de shorthand.
     let st = style_of("p { border-inline-end: 2px solid blue }");
-    assert_eq!(st.get("border-right"), Some("2px solid blue"));
+    assert_eq!(st.get("border-right-width"), Some("2px"));
+    assert_eq!(st.get("border-right-style"), Some("solid"));
+    assert_eq!(st.get("border-right-color"), Some("blue"));
 }

@@ -106,6 +106,17 @@ fn body_poisons(stmts: &[Stmt]) -> bool {
 }
 
 fn stmt_poisons(s: &Stmt) -> bool {
+    // Chaque arête récursive re-bascule (même motif que
+    // `walk_expr`) — un AST hostile de 20 000 niveaux devient
+    // un coût tas, jamais un débordement de pile.
+    stacker::maybe_grow(
+        crate::parser::STACK_RED_ZONE,
+        crate::parser::STACK_GROW,
+        || stmt_poisons_inner(s),
+    )
+}
+
+fn stmt_poisons_inner(s: &Stmt) -> bool {
     match s {
         Stmt::Expr(e) | Stmt::Return(Some(e)) | Stmt::Throw(e) => expr_poisons(e),
         Stmt::Var(ds) | Stmt::Lexical { decls: ds, .. } | Stmt::Using { decls: ds, .. } => ds
@@ -183,6 +194,14 @@ fn target_poisons(t: &ForTarget) -> bool {
 }
 
 fn pat_poisons(p: &Pat) -> bool {
+    stacker::maybe_grow(
+        crate::parser::STACK_RED_ZONE,
+        crate::parser::STACK_GROW,
+        || pat_poisons_inner(p),
+    )
+}
+
+fn pat_poisons_inner(p: &Pat) -> bool {
     match p {
         Pat::Ident(_) => false,
         Pat::Lvalue(e) => expr_poisons(e),
@@ -198,6 +217,14 @@ fn pat_poisons(p: &Pat) -> bool {
 }
 
 fn expr_poisons(e: &Expr) -> bool {
+    stacker::maybe_grow(
+        crate::parser::STACK_RED_ZONE,
+        crate::parser::STACK_GROW,
+        || expr_poisons_inner(e),
+    )
+}
+
+fn expr_poisons_inner(e: &Expr) -> bool {
     match e {
         Expr::Ident(n) => &**n == "eval",
         Expr::Unary(UnOp::Delete, t) => matches!(&**t, Expr::Ident(_)) || expr_poisons(t),
@@ -247,6 +274,16 @@ fn expr_poisons(e: &Expr) -> bool {
 
 /// Noms d'un motif (`var`/`let`/param/catch…).
 fn pat_names(p: &Pat, out: &mut HashSet<Rc<str>>) {
+    stacker::maybe_grow(
+        crate::parser::STACK_RED_ZONE,
+        crate::parser::STACK_GROW,
+        || {
+            pat_names_inner(p, out);
+        },
+    );
+}
+
+fn pat_names_inner(p: &Pat, out: &mut HashSet<Rc<str>>) {
     match p {
         Pat::Ident(n) => {
             out.insert(n.clone());
@@ -286,6 +323,16 @@ fn fn_scope_names(lit: &FnLit, body: &[Stmt]) -> HashSet<Rc<str>> {
 /// du corps fonction ou du script) ; `false` (blocs imbriqués) :
 /// seuls `var` + `function` remontent vers le scope fonction.
 fn collect_names(stmts: &[Stmt], out: &mut HashSet<Rc<str>>, top: bool) {
+    stacker::maybe_grow(
+        crate::parser::STACK_RED_ZONE,
+        crate::parser::STACK_GROW,
+        || {
+            collect_names_inner(stmts, out, top);
+        },
+    );
+}
+
+fn collect_names_inner(stmts: &[Stmt], out: &mut HashSet<Rc<str>>, top: bool) {
     for s in stmts {
         match s {
             Stmt::Var(ds) => {
