@@ -12669,6 +12669,14 @@ croître la surface navigateur mesurée (`api` 1510/8099, 18,6 %).
   `binop:<op>=<n>` + `badd_num`/`badd_str`/`badd_oth` —
   calibre la cible du premier quickening cran 3.
   Verrous : lang 315, c500 19, c502 24.
+- [x] **JS-C506 — IC callsite Rust interne**
+  (`#[track_caller]` sur `get_prop`/`get_prop_value`/
+  `read_prop` — clé littérale → monomorphe) : attaque le
+  `prop_scan` résiduel côté natifs. **Fix C504** :
+  `Absent` mémorise la clé internée (clés tournantes
+  `o[k]`/helpers → `undefined` menteur, casé sur
+  `Temporal.PlainDate.from` — 5 tests c20/c22).
+  Verrous : lang 315 ×3, c500 21.
 
 Convergence visée : **Étape 239** — plan global consolidé,
 chaque gain rapporté contre les **deux** archétypes.
