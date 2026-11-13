@@ -3238,3 +3238,48 @@ shadow n'atteint ni cascade ni boxification ») etait
   ~3 s/pas, conçue ainsi) + le pacing bridé par
   `commit.anim`=3,2 s. La différence Chrome est la vitesse,
   pas un op manquant.
+
+### 2026-11-13 — PIPE → NAV (jscore) : bug `li` enchâssés nommé — parseur miroir mini-DOM
+
+- **Symptôme mesuré** (re-vol wiki) : les `li` des groupes
+  langues (`div.hlist wikipedia-languages-langs > ul > li`)
+  rendus **empilés** dans la geom session alors que
+  `.hlist li{display:inline}` est présent et matche — chaque
+  `li` langue **échappe** du `ul` hlist et devient enfant
+  direct de `ul.plainlinks`.
+- **Isolations faites** : feuille hlist réelle + markup réel
+  OK en fixture (li inline) ; CSP innocente (`style-src` a
+  `'unsafe-inline'`) ; feuilles externes Vector sans règle
+  `li` concurrente ; les hlist footers rendent inline sur la
+  session réelle (la feuille s'applique). Le `layout` du
+  fichier brut rend inline — le `dom` (session+jscore) du
+  **même fichier** montre les `li` échappés.
+- **Cause racine** : `Dom::from_html` construit le miroir
+  avec le **parseur propre** de jscore (`dom.rs`). Sa clôture
+  implicite `PAIRED_CLOSE` (`"li" → [dd,dt,li]`, ~5020) dépile
+  **à travers** les intermédiaires jusqu'à un ancêtre `li`.
+  Spec « close a list item » : la marche doit **s'arrêter**
+  au premier élément *special* hors {address,div,p}
+  (`ul`/`ol`/`dl`/`section`/`table`/`form`/`object`/
+  `template`/`html`…). Ici `ul.plainlinks > li.groupe >
+  div.hlist > ul > li.langue` : le `ul` interne devrait
+  borner → le `li` langue resterait niché. `job.html`
+  (sonde `apply.rs` posée puis retirée) confirme :
+  `<ul></ul></div></li><li>` — le `ul` hlist sérialisé vide.
+- **Fix attendu côté jscore** : dans la boucle de dépile
+  `PAIRED_CLOSE`, s'arrêter **sans dépiler** quand le sommet
+  est un élément *special* hors {address,div,p} — approximation
+  pragmatique : `ul`,`ol`,`dl`,`menu`,`table`,`td`,`th`,`tr`,
+  `tbody`,`thead`,`tfoot`,`caption`,`form`,`fieldset`,`object`,
+  `marquee`,`template`,`html` + sectionnels `article`,`aside`,
+  `nav`,`section`,`header`,`footer`,`main`,`h1..h6`,
+  `blockquote`,`pre`,`center`,`listing`,`xmp`,`plaintext`,
+  `button`,`select`,`details`,`dialog`,`summary`,`figure`,
+  `figcaption` (liste spec complète §12.1.2).
+- **Verrou suggéré** : fixture `ul>li>div.hlist>ul>li` via
+  `dom` session — le `li` interne doit rester enfant du `ul`
+  interne (`lh_escape.html` / `lh_real.html` sous
+  `target/harvest/revol/` reproduisent min puis réel).
+- **Impact** : trou générique — casse toute liste imbriquée
+  sous un conteneur intermédiaire, pas seulement wiki.
+  `geo_diff` wiki attendu ~-800 px sur `mp-bottom` au fix.
