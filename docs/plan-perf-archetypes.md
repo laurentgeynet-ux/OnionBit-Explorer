@@ -111,6 +111,24 @@ aucun composé ancêtre » à évaluer) et `has_dep_touched`
 Spec = proposition journalisée (même revue de design que
 §2.2).
 
+**Statut — fait et mesuré (R-293, commits `2a4b72a4` +
+`290d45b1`)** : champ + `compute_may_escape` (fin
+`layout_tree`/`relayout_subtree`) + culle dans
+`emit_scoped` (`cx.inc` seul, `shifted(rect,off) ⊕
+ink_margin ∩ vp = ∅`) + raffinement `relative` à insets
+`auto` non échappants. 7 tests verts, zéro régression.
+**Verdict DoD : NON ATTEINT et levier infirmé** —
+`incr.emit` dev.to ~1,48-1,53 s inchangé, `items`
+identique → la culle n'a jamais tiré : `reuse_delta`/
+`copy_span` absorbent déjà la traversée des sous-arbres
+stables, le résidu = re-paint des mutés + copies de
+spans. YouTube : `incr.emit` 0,07-0,60 s/passe (pas le
+poste), wall 209,7 s (variance JS), aucune régression.
+Mécanisme conservé (O(1), utile scroll/mutations
+partielles) ; poste `incr.emit` ~1,5 s rouvert → levier
+suivant = attribution interne de l'emit avant code
+(cf. §2.7).
+
 ### 2.5 — Ops de groupe, résidu zone = cadre (R-294) [PIPE `explorer-render`]
 
 | Tâche | Fichiers | DoD |
