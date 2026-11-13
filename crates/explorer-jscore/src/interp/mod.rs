@@ -359,12 +359,16 @@ enum IcVerdict {
 
 /// JS-C506 — sortie d'une consultation IC : `Hit`/`Absent` sont
 /// prouvés sémantiquement ; `Fall` = pas d'entrée, vérif échouée
-/// ou maillon inéligible → chemin complet.
+/// ou maillon inéligible → chemin complet ; `Bail` (JS-C509) =
+/// repli nu garanti — tête inéligible par construction ou site
+/// désarmé — l'appelant marche SANS aucune machinerie learn
+/// (ni `Vec` de maillons, ni tentative).
 #[derive(Debug)]
 enum IcOut {
     Hit(Value),
     Absent,
     Fall,
+    Bail,
 }
 /// JS-C500 — borne du cache de sites (purge complète — précédent
 /// `RESOLVED_ENVS_CAP`).
@@ -7291,7 +7295,10 @@ impl Engine {
     /// Own-property lookup with array/`length` semantics — returns
     /// the raw `Prop` so accessor pairs are visible to the caller.
     pub(crate) fn find_own(&mut self, id: ObjId, key: &str) -> Option<Prop> {
-        self.find_own_ai(id, key, array_index(key))
+        let s0 = Self::j17_scan();
+        let r = self.find_own_ai(id, key, array_index(key));
+        Self::j17_scan_add(&crate::J17_PS_OWN, s0);
+        r
     }
 
     /// `find_own` à indice pré-calculé (V-3b) : `find_prop` et
@@ -7673,6 +7680,17 @@ impl Engine {
             return IcOut::Fall;
         }
         let ai = array_index(key);
+        // JS-C509 — bail à coût ~0 : une tête inéligible par
+        // construction (indices/`length` d'Array, `args_map`,
+        // `Fun::Script.length`, vues binaires, Proxy) ne peut
+        // rien apprendre — ni lookup de la map, ni collecte de
+        // maillons côté appelant (28 % des décisions au vol N5.8).
+        if let Some(o) = self.heap.obj(id) {
+            if !Self::ic_eligible(o, key, ai) {
+                crate::j17_tick(&crate::J17_IC_BAIL);
+                return IcOut::Bail;
+            }
+        }
         // Verdict calculé sous emprunts immuables seulement —
         // `ent` vit dans `ic_map`, la marche lit `heap`, deux
         // champs disjoints. `Own` = objet vivant, éligible,
@@ -7690,7 +7708,7 @@ impl Engine {
             };
             if ent.miss == u8::MAX {
                 crate::j17_tick(&crate::J17_IC_BAIL);
-                return IcOut::Fall;
+                return IcOut::Bail;
             }
             // JS-C508 — pierre tombale : site prouvé inapprenable,
             // consulté sans compter (le learn-fail qui suit est ce
@@ -7821,6 +7839,22 @@ impl Engine {
     /// sage. Ne s'exécute pas sur site désarmé, chaîne >
     /// [`IC_CHAIN_CAP`], ou maillon inéligible (props synthétisées
     /// devançant `o.find`, cf. [`Self::ic_eligible`]).
+    /// JS-C509 — attribution `prop_scan` par entrée : delta de la
+    /// sonde autour d'un walk complet (deltas imbriqués possibles
+    /// — une marche qui en appelle une autre compte deux fois ;
+    /// indicatif d'ordre de grandeur, pas comptabilité exacte).
+    fn j17_scan() -> u64 {
+        crate::J17_PROP_SCAN.load(std::sync::atomic::Ordering::Relaxed)
+    }
+    fn j17_scan_add(c: &'static std::sync::atomic::AtomicU64, s0: u64) {
+        crate::j17_add(
+            c,
+            crate::J17_PROP_SCAN
+                .load(std::sync::atomic::Ordering::Relaxed)
+                .saturating_sub(s0),
+        );
+    }
+
     /// JS-C508 — un échec d'apprentissage compte comme un miss :
     /// sur entrée existante on incrémente sa `miss` (elle reste
     /// utile aux autres receveurs du site) ; sans entrée, on pose
@@ -7955,11 +7989,21 @@ impl Engine {
             // les appelants distinguent prop absente de prop
             // présente valant `undefined`.
             IcOut::Absent => return None,
+            // JS-C509 — bail : marche nue, zéro machinerie learn.
+            IcOut::Bail => {
+                let s0 = Self::j17_scan();
+                let v = self.find_prop(id, key).and_then(|p| p.data_value());
+                Self::j17_scan_add(&crate::J17_PS_GET, s0);
+                self.probe_lookup(id, key, v.clone());
+                return v;
+            }
             IcOut::Fall => {}
         }
         let mut links = Vec::new();
         let lp = if self.ic_off { None } else { Some(&mut links) };
+        let s0 = Self::j17_scan();
         let found = self.find_prop_owner_links(id, key, lp);
+        Self::j17_scan_add(&crate::J17_PS_GET, s0);
         match &found {
             Some((_, Prop::Data { .. })) => self.ic_learn(site, key, &links, true),
             None => self.ic_learn(site, key, &links, false),
@@ -8411,23 +8455,30 @@ impl Engine {
         // JS-C500 — IC own-prop : `(shape,pos)` vérifié à la
         // clé réelle → réponse immédiate ; tout échec retombe
         // sur la marche complète ci-dessous.
-        match self.ic_hit(site, id, key) {
+        let bail = match self.ic_hit(site, id, key) {
             IcOut::Hit(v) => return Ok(v),
             IcOut::Absent => return Ok(Value::Undefined),
-            IcOut::Fall => {}
-        }
+            // JS-C509 — bail : marche nue, ni collecte ni learn.
+            IcOut::Bail => true,
+            IcOut::Fall => false,
+        };
         // JS-C504 — les maillons traversés nourrissent
         // l'apprentissage (`Chain`/`Absent` en plus de `Own`) —
         // collecte seulement si le site peut apprendre.
         let mut links = Vec::new();
-        let lp = if site != 0 && !self.ic_off {
+        let lp = if !bail && site != 0 && !self.ic_off {
             Some(&mut links)
         } else {
             None
         };
-        match self.find_prop_owner_links(id, key, lp) {
+        let s0 = Self::j17_scan();
+        let found = self.find_prop_owner_links(id, key, lp);
+        Self::j17_scan_add(&crate::J17_PS_GET, s0);
+        match found {
             Some((_, Prop::Data { value, .. })) => {
-                self.ic_learn(site, key, &links, true);
+                if !bail {
+                    self.ic_learn(site, key, &links, true);
+                }
                 self.probe_lookup(id, key, Some(value.clone()));
                 Ok(value)
             }
@@ -8439,7 +8490,9 @@ impl Engine {
                 }
             }
             None => {
-                self.ic_learn(site, key, &links, false);
+                if !bail {
+                    self.ic_learn(site, key, &links, false);
+                }
                 Ok(Value::Undefined)
             }
         }
@@ -9010,6 +9063,13 @@ impl Engine {
     /// (non-writable, non-extensible, frozen). Le caller décide
     /// silence sloppy vs `TypeError` strict.
     pub(crate) fn set_prop(&mut self, id: ObjId, key: &str, v: Value) -> JsResult<bool> {
+        let s0 = Self::j17_scan();
+        let r = self.set_prop_walk(id, key, v);
+        Self::j17_scan_add(&crate::J17_PS_SET, s0);
+        r
+    }
+
+    fn set_prop_walk(&mut self, id: ObjId, key: &str, v: Value) -> JsResult<bool> {
         self.probe_store(id, key, v.clone());
         // Élément indexé d'une vue typée : la cible est le *buffer*
         // partagé, pas la vue ; hors-bornes canonique → ignoré
@@ -9198,9 +9258,21 @@ impl Engine {
         match self.ic_hit(site, id, key) {
             IcOut::Hit(_) => return Ok(true),
             IcOut::Absent if self.host_of(id).is_none() => return Ok(false),
-            _ => {}
+            // JS-C509 — bail : marche nue (délégation proxy,
+            // hôte de tête), aucune machinerie learn.
+            IcOut::Bail => {
+                let s0 = Self::j17_scan();
+                let r = self.has_prop_walk(id, key);
+                Self::j17_scan_add(&crate::J17_PS_HAS, s0);
+                return r;
+            }
+            // `Absent` avec hôte : l'hôte peut résoudre hors
+            // `props[]` → marche complète.
+            IcOut::Absent | IcOut::Fall => {}
         }
+        let s0 = Self::j17_scan();
         let r = self.has_prop_walk(id, key)?;
+        Self::j17_scan_add(&crate::J17_PS_HAS, s0);
         if !self.ic_off {
             let mut links = Vec::new();
             match self.find_prop_owner_links(id, key, Some(&mut links)) {

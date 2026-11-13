@@ -12704,3 +12704,9 @@ chaque gain rapporté contre les **deux** archétypes.
   inapprenables ; purge partielle (sains+désarmés gardés).
   Sondes `ic_nlearn`/`ic_purge`. Verrous : lang 315 ×3,
   c500 26.
+- [x] **JS-C509 — bail IC early-exit + sondes ps_\*** : tête
+  inéligible par construction ou site désarmé → `IcOut::Bail`
+  (marche nue, zéro learn — avant : lookup map + Vec +
+  tentative à chaque accès, 282 k bails N5.8). Attribution
+  `prop_scan` par entrée (`ps_get`/`ps_has`/`ps_own`/`ps_set`,
+  delta de sonde — indicatif). Verrous : lang 315 ×3, c500 28.

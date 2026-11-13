@@ -306,6 +306,18 @@ pub static J17_IC_BAIL: std::sync::atomic::AtomicU64 = std::sync::atomic::Atomic
 pub static J17_IC_NLEARN: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 /// Voir [`J17_IC_NLEARN`].
 pub static J17_IC_PURGE: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+/// JS-C509 — attribution de `prop_scan` par classe d'entrée
+/// (delta `PROP_SCAN` autour du walk — les deltas imbriqués
+/// peuvent sur-attribuer, sonde indicative) : `ps_get` lectures
+/// (AST+internes), `ps_has` `in`/`has_prop`, `ps_own` `find_own`
+/// (attr ops, `hasOwnProperty`…), `ps_set` écritures `[[Set]]`.
+pub static J17_PS_GET: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+/// Voir [`J17_PS_GET`].
+pub static J17_PS_HAS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+/// Voir [`J17_PS_GET`].
+pub static J17_PS_OWN: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+/// Voir [`J17_PS_GET`].
+pub static J17_PS_SET: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 /// JS-C502 — fast-path slot d'env `(d,slot)` : `slot_hit` =
 /// lecture directe `Small[slot]` vérifiée par nom ; `slot_miss`
 /// = échec de vérification (oob, clé différente, `Map`, cellule
@@ -469,7 +481,7 @@ pub fn j17_enable() {
 #[must_use]
 pub fn j17_snapshot() -> String {
     let r = std::sync::atomic::Ordering::Relaxed;
-    let pairs: [(&str, &std::sync::atomic::AtomicU64); 51] = [
+    let pairs: [(&str, &std::sync::atomic::AtomicU64); 55] = [
         ("prop_lookup", &J17_PROP_LOOKUP),
         ("proto_lvl", &J17_PROTO_LVL),
         ("prop_scan", &J17_PROP_SCAN),
@@ -487,6 +499,10 @@ pub fn j17_snapshot() -> String {
         ("ic_bail", &J17_IC_BAIL),
         ("ic_nlearn", &J17_IC_NLEARN),
         ("ic_purge", &J17_IC_PURGE),
+        ("ps_get", &J17_PS_GET),
+        ("ps_has", &J17_PS_HAS),
+        ("ps_own", &J17_PS_OWN),
+        ("ps_set", &J17_PS_SET),
         ("slot_hit", &J17_SLOT_HIT),
         ("slot_miss", &J17_SLOT_MISS),
         ("sm_oob", &J17_SM_OOB),

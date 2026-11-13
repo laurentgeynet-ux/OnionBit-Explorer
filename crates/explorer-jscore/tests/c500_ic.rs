@@ -494,3 +494,51 @@ fn c508_unlearnable_tombstones() {
         "learn-échecs attendus puis tombale : {before} → {after}"
     );
 }
+
+// ── JS-C509 — bail early-exit + attribution prop_scan ───────────
+
+/// Une tête inéligible par construction (`a.length`, `a[i]`)
+/// baille avant toute machinerie — `ic_bail` s'incrémente et les
+/// valeurs restent exactes, sans learn ni tombale inutile.
+#[test]
+fn c509_bail_early_exit() {
+    let _g = IC_LOCK
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    explorer_jscore::j17_enable();
+    let before = snap_counter(&explorer_jscore::j17_snapshot(), "ic_bail=");
+    assert_eq!(
+        eval(
+            "var a=[1,2,3];var s=0;\
+             for(var i=0;i<300;i++){s+=a.length+a[i%3]}s"
+        ),
+        "1500"
+    );
+    let after = snap_counter(&explorer_jscore::j17_snapshot(), "ic_bail=");
+    assert!(
+        after > before,
+        "bail attendu sur tête inéligible : {before} → {after}"
+    );
+}
+
+/// Les sondes d'attribution `prop_scan` émettent : lectures et
+/// `in` alimentent leurs classes.
+#[test]
+fn c509_scan_attrib_emits() {
+    let _g = IC_LOCK
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    explorer_jscore::j17_enable();
+    assert_eq!(
+        eval(
+            "var o={a:1,b:2,c:3,d:4};var s=0;\
+             for(var i=0;i<50;i++){s+=o.zz||0;if('q' in o)s++;}s"
+        ),
+        "0"
+    );
+    let snap = explorer_jscore::j17_snapshot();
+    assert!(snap.contains("ps_get="), "ps_get attendu : {snap}");
+    assert!(snap.contains("ps_has="), "ps_has attendu : {snap}");
+    assert!(snap.contains("ps_own="), "ps_own attendu : {snap}");
+    assert!(snap.contains("ps_set="), "ps_set attendu : {snap}");
+}
