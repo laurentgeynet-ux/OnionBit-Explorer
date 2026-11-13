@@ -142,6 +142,15 @@ restent des cibles du même cache si la mesure les nomme.
 Sonde `draw` par kind livrée dans `raster.parts`. Mesure
 avant/après au re-vol court (`LOBSTE_PROBE_HOVER=0`).
 
+**Vol court mesuré (85 s — boutons validés)** : `incr.emit`
+inchangé (levier (a) infirmé — vol `--release` tranchera
+debug vs réel) ; **`draw_shadow_us` ≈ 0,9 s = 88 % du
+`draw_us`** — `paint_box_shadow` = 8 `fill_path`
+concentriques/ombre, re-rasterisés par passe. **R-296
+arrêté** : cache de couches d'ombres sur `Pixmap` borné +
+`draw_pixmap` (pixels identiques) — prochain chantier
+PIPE, avant §2.5 dont le poste ne se reproduit plus.
+
 ### 2.5 — Ops de groupe, résidu zone = cadre (R-294) [PIPE `explorer-render`]
 
 | Tâche | Fichiers | DoD |
