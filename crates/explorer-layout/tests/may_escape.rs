@@ -147,6 +147,24 @@ fn nowrap_echappe() {
     assert!(bx.may_escape);
 }
 
+/// Un `position:relative` sans inset actif n'échappe pas
+/// (posé là où le flux l'a mis — son enfilement dans
+/// `pos_defer` n'est qu'ordre d'empilement) ; avec un inset
+/// non nul, son encre est décalée au paint → échappe.
+/// C'est ce raffinement qui rend la culle utile sur les
+/// pages où `position:relative` sert de bloc conteneur
+/// partout (dev.to).
+#[test]
+fn relatif_insets_auto_vs_actifs() {
+    let (dom, _s, bx) = setup(
+        "<div id=a><div id=b></div></div><div id=c><div id=d></div></div>",
+        "#a, #c { position: relative; width: 100px; height: 10px } \
+         #b, #d { width: 10px; height: 5px } #c { top: 5px }",
+    );
+    assert!(!find(&bx, by_id(&dom, "a")).may_escape);
+    assert!(find(&bx, by_id(&dom, "c")).may_escape);
+}
+
 /// Le relayout incrémental recalcule le drapeau : un
 /// `class` ajoutant `position:absolute` doit retourner
 /// l'ancêtre à `may_escape = true` après `relayout_subtree`.

@@ -359,7 +359,7 @@ pub fn compute_may_escape(bx: &mut LayoutBox) -> bool {
             esc = true;
         }
     }
-    esc |= bx.position != Position::Static
+    esc |= position_escapes(bx)
         || bx.float != Float::None
         || bx
             .style
@@ -379,6 +379,44 @@ pub fn compute_may_escape(bx: &mut LayoutBox) -> bool {
     }
     bx.may_escape = esc;
     esc
+}
+
+/// R-293 — la position fait-elle sortir l'encre du `rect` ?
+///
+/// `absolute`/`fixed`/`sticky` : toujours (reportées —
+/// `pos_defer`/`fixed_defer` se découvrent à la descente,
+/// `sticky` se translate au paint). `relative` : seulement
+/// si un inset `top|right|bottom|left` non nul décale
+/// l'encre au paint — un relatif à insets `auto`/nuls est
+/// posé exactement où le flux l'a mis ; le fait qu'il soit
+/// enfilé dans `pos_defer` n'est qu'un artefact d'ordre
+/// d'empilement : si son `rect` est hors bande, son
+/// enfilement manqué ne perd aucune encre (ses descendants
+/// échappants, eux, propagent `may_escape` normalement et
+/// rendent l'ancêtre incullable — la descente les atteint).
+fn position_escapes(bx: &LayoutBox) -> bool {
+    match bx.position {
+        Position::Static => false,
+        Position::Relative => ["top", "right", "bottom", "left"]
+            .iter()
+            .any(|k| inset_nonzero(bx, k)),
+        Position::Absolute | Position::Fixed | Position::Sticky => true,
+    }
+}
+
+/// Inset calculé non `auto` et non nul (`"0"`/`"0px"`/`"0%"`
+/// ne décalent rien — valeurs exotiques non parses →
+/// conservateur : échappe).
+fn inset_nonzero(bx: &LayoutBox, key: &str) -> bool {
+    bx.style.get(key).is_some_and(|v| {
+        let v = v.trim();
+        !v.is_empty()
+            && v != "auto"
+            && v.trim_end_matches(|c: char| c.is_ascii_alphabetic() || c == '%')
+                .parse::<f32>()
+                .ok()
+                .is_none_or(|n| n != 0.0)
+    })
 }
 
 /// Construit l'arbre de boîtes sous `root`.
