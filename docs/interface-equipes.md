@@ -3533,3 +3533,18 @@ shadow n'atteint ni cascade ni boxification ») etait
   cibles `for-in/of` couverts ; `read_lvalue_ref` gagne le
   fast-path lecture au passage.
 - Verrous : `lang` 315 ×3 passes, `c502_slots` 24.
+
+### 2026-11-13 — IC `Chain`/`Absent` : cran 1b décidé au vol N5.5 (JS-C504)
+
+- Verdict vol : `env_ns` −38 % yt / −68 % devto, `slot_hit` 97 %
+  (cran 2a validé) ; résiduels `proto_lvl` 1,57 M / `prop_scan`
+  7,28 M → les hits proto + absents entrent dans l'IC.
+- `IcKind` : `Chain` = shape par maillon jusqu'à l'owner +
+  `key`/`pos`/`Data` chez lui ; `Absent` = shape par maillon +
+  proto terminal non-objet. Vérif = marche des shapes (identité
+  layout, pas objet — mutation d'un maillon = shape sali → miss
+  → relearn). `IC_CHAIN_CAP = 8`.
+- Résiduel #2 nommé pour la suite : `env_lvl` 2,6 M / `env_gets`
+  893 k — si `prop_ns` s'effondre, revoir `RES_WALK_MAX` et les
+  3 % de `slot_miss`.
+- Verrous : `lang` 315 ×3 (défaut/`IC_VERIFY`/`NO_IC`), `c500_ic` 18.

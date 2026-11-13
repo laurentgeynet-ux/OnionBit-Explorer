@@ -12640,6 +12640,28 @@ croître la surface navigateur mesurée (`api` 1510/8099, 18,6 %).
   hoist, lex]` répliquant `compute_lit_flags` (partagé,
   `pub(crate)`) ; gen/async → depth-only (params baissés).
   Verrous : lang 315 ×3, c502 20 tests.
+- [x] **JS-C503b — écriture d'identifiant par slot**
+  : `env_set_resolved` symétrique — `Small[slot]` vérifié
+  `nom`+`Bind` mutable ; `Uninit` remonte (no TDZ), `const`
+  garde son `TypeError`, `Alias`/`LazyArgs`/poisoned →
+  `env_set` complet. `LValueRef::Ident` porte son site
+  `ptr(Expr)` — `x=`, `x op=`, cibles `for-in/of`.
+  Verrous : lang 315 ×3, c502 24 tests.
+- [x] **JS-C504 — cran 1b (décidé au vol N5.5) : IC
+  `Chain` + `Absent`** : `IcKind` — `Chain` = shape par
+  maillon jusqu'à l'owner + `pos`/`key`/`Data` chez lui ;
+  `Absent` = shape par maillon + proto terminal non-objet
+  → `undefined` sans scan (feature-detects). Vérif = la
+  marche des shapes : un proto muté ou ombragé change le
+  shape du maillon → miss → relearn. Cap `IC_CHAIN_CAP=8`.
+  Verrous : lang 315 ×3 (défaut/`IC_VERIFY`/`NO_IC`),
+  c500 18 tests (proto polymorphe, absent→croissance proto,
+  ombre posée après learn, accessor proto non caché,
+  chaîne > cap, proto `null`). **Mesuré N5.5** : env_ns
+  −38 % yt / −68 % devto, `slot_hit` 97 % — résiduels prop
+  (`proto_lvl` 1,57 M, `prop_scan` 7,28 M) = cible de ce
+  cran ; `env_lvl`/`env_gets` redeviendront le goulot si
+  `prop_ns` s'effondre (seuil `RES_WALK_MAX` à revoir).
 
 Convergence visée : **Étape 239** — plan global consolidé,
 chaque gain rapporté contre les **deux** archétypes.

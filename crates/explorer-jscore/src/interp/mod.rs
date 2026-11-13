@@ -301,18 +301,48 @@ pub(crate) enum LValueRef {
 /// échouées ; à [`IC_MISS_DISARM`] le site est désarmé
 /// (`miss == u8::MAX` — mégamorphe : clés calculées, receveurs
 /// hétérogènes, pointeur de site réutilisé).
-#[derive(Clone, Copy)]
+#[derive(Clone)]
 pub(crate) struct IcEnt {
-    /// Empreinte de layout attendue ([`crate::heap::Object::shape`]).
-    shape: u64,
-    /// Position attendue dans `props`.
-    pos: u32,
+    /// Forme de l'entrée (own, chaîne proto ou absent).
+    kind: IcKind,
     /// Échecs de vérification cumulés ; `u8::MAX` = désarmé.
     miss: u8,
 }
 
+/// JS-C504 — forme d'une entrée IC. `chain[i]` = [`shape`] attendue
+/// du maillon `i` de la chaîne de prototypes (`0` = receveur) —
+/// l'identité *layout*, pas l'identité objet : un maillon remplacé
+/// par un autre de même layout reste sémantiquement équivalent
+/// (mêmes clés ⇒ même réponse au lookup).
+///
+/// [`shape`]: crate::heap::Object::shape
+#[derive(Clone)]
+pub(crate) enum IcKind {
+    /// Own-prop du receveur : `(shape, pos)` — JS-C500.
+    Own { shape: u64, pos: u32 },
+    /// Hit proto : `chain[len-1]` = shape du propriétaire, `pos`
+    /// dans son `props` ; `chain[..len-1]` = maillons traversés.
+    Chain { chain: Box<[u64]>, pos: u32 },
+    /// Absent : tous les maillons vérifiés, le proto du dernier
+    /// n'est pas un objet — la réponse est `undefined` sans scan.
+    Absent { chain: Box<[u64]> },
+}
+
 /// JS-C500 — seuil de désarmement d'un site IC (miss cumulés).
 const IC_MISS_DISARM: u8 = 8;
+/// JS-C504 — profondeur max d'une entrée `Chain`/`Absent` (au-delà,
+/// pas d'apprentissage — le gain ne compense plus la vérif).
+const IC_CHAIN_CAP: usize = 8;
+
+/// JS-C504 — verdict d'une consultation IC : valeur prouvée,
+/// vérification échouée (→ miss compté), ou maillon inéligible
+/// (→ repli silencieux, l'entrée reste valable pour les autres
+/// receveurs du site).
+enum IcVerdict {
+    Hit(Value),
+    Miss,
+    Pass,
+}
 /// JS-C500 — borne du cache de sites (purge complète — précédent
 /// `RESOLVED_ENVS_CAP`).
 const IC_MAP_CAP: usize = 8192;
@@ -7519,6 +7549,19 @@ impl Engine {
     /// à la tête de chaîne (`owner == id`), les hits proto
     /// restent hors périmètre (cran transitions éventuel).
     pub(crate) fn find_prop_owner(&mut self, id: ObjId, key: &str) -> Option<(ObjId, Prop)> {
+        self.find_prop_owner_links(id, key, None)
+    }
+
+    /// [`Self::find_prop_owner`] + collecte optionnelle des maillons
+    /// visités (`links` = `[receveur, …, propriétaire|dernier]`,
+    /// receveur inclus) — JS-C504, apprentissage IC des hits proto
+    /// et des absents.
+    pub(crate) fn find_prop_owner_links(
+        &mut self,
+        id: ObjId,
+        key: &str,
+        mut links: Option<&mut Vec<ObjId>>,
+    ) -> Option<(ObjId, Prop)> {
         static CTXP: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
         if *CTXP.get_or_init(|| std::env::var_os("EXPLORER_CTX_PROBE").is_some())
             && (key == "trayride" || key == "t")
@@ -7533,6 +7576,9 @@ impl Engine {
         let mut depth = 0;
         while let Some(cid) = cur {
             crate::j17_tick(&crate::J17_PROTO_LVL);
+            if let Some(l) = links.as_deref_mut() {
+                l.push(cid);
+            }
             if let Some(p) = self.find_own_ai(cid, key, ai) {
                 return Some((cid, p));
             }
@@ -7583,46 +7629,106 @@ impl Engine {
         if site == 0 || self.ic_off {
             return None;
         }
-        let mut ent = *self.ic_map.get(&site)?;
-        if ent.miss == u8::MAX {
-            crate::j17_tick(&crate::J17_IC_BAIL);
-            return None;
-        }
         let ai = array_index(key);
-        // Objet mort ou inéligible (props synthétisées qui
-        // devancent `o.find`) → repli sans compter : l'entrée
-        // reste valable pour les receveurs éligibles du site.
-        let o = self.heap.obj(id)?;
-        if !Self::ic_eligible(o, key, ai) {
-            return None;
-        }
-        let hit = if o.shape() == ent.shape {
-            match o.props.get(ent.pos as usize) {
+        // Verdict calculé sous emprunts immuables seulement —
+        // `ent` vit dans `ic_map`, la marche lit `heap`, deux
+        // champs disjoints. `Own` = objet vivant, éligible,
+        // `shape` égale, `props[pos].0 == key`, `Prop::Data` ;
+        // `Chain` = chaque maillon éligible + shape attendue,
+        // l'owner vérifie `key`/`pos`/`Data` ; `Absent` = idem
+        // + proto terminal non-objet. Tout échec → miss →
+        // `find_prop` + `ic_learn` (auto-correct par construction).
+        let verdict = {
+            let ent = self.ic_map.get(&site)?;
+            if ent.miss == u8::MAX {
+                crate::j17_tick(&crate::J17_IC_BAIL);
+                return None;
+            }
+            // Maillon attendu : `Ok(Some(o))` = vivant + éligible
+            // (les props synthétisées qui devancent `o.find` ne
+            // peuvent pas être cachées) + `shape` égale ;
+            // `Ok(None)` = mort ou shape différente → miss ;
+            // `Err(())` = inéligible → `Pass` sans compter,
+            // l'entrée reste valable pour les autres receveurs.
+            let link = |cid: ObjId, sh: u64| match self.heap.obj(cid) {
+                Some(o) if !Self::ic_eligible(o, key, ai) => Err(o),
+                Some(o) => Ok((o.shape() == sh).then_some(o)),
+                None => Ok(None),
+            };
+            let own_at = |o: &crate::heap::Object, pos: u32| match o.props.get(pos as usize) {
                 Some((k, Prop::Data { value, .. }))
                     if std::ptr::eq(&raw const **k, key) || &**k == key =>
                 {
-                    Some(value.clone())
+                    IcVerdict::Hit(value.clone())
                 }
-                _ => None,
+                _ => IcVerdict::Miss,
+            };
+            match &ent.kind {
+                IcKind::Own { shape, pos } => match link(id, *shape) {
+                    Err(_) => IcVerdict::Pass,
+                    Ok(None) => IcVerdict::Miss,
+                    Ok(Some(o)) => own_at(o, *pos),
+                },
+                IcKind::Chain { chain, .. } | IcKind::Absent { chain } => {
+                    let mut cur = id;
+                    let mut v = IcVerdict::Miss;
+                    for (i, &sh) in chain.iter().enumerate() {
+                        match link(cur, sh) {
+                            Err(_) => {
+                                v = IcVerdict::Pass;
+                                break;
+                            }
+                            Ok(None) => {
+                                v = IcVerdict::Miss;
+                                break;
+                            }
+                            Ok(Some(o)) => {
+                                if i + 1 == chain.len() {
+                                    v = match &ent.kind {
+                                        IcKind::Chain { pos, .. } => own_at(o, *pos),
+                                        // Absent : le proto du dernier maillon
+                                        // ne doit pas être un objet.
+                                        _ => match o.proto {
+                                            Value::Obj(_) => IcVerdict::Miss,
+                                            _ => IcVerdict::Hit(Value::Undefined),
+                                        },
+                                    };
+                                    break;
+                                }
+                                cur = if let Value::Obj(p) = o.proto {
+                                    p
+                                } else {
+                                    v = IcVerdict::Miss;
+                                    break;
+                                };
+                            }
+                        }
+                    }
+                    v
+                }
             }
-        } else {
-            None
         };
-        let Some(v) = hit else {
-            crate::j17_tick(&crate::J17_IC_MISS);
-            ent.miss = ent.miss.saturating_add(1);
-            if ent.miss >= IC_MISS_DISARM {
-                ent.miss = u8::MAX;
-                crate::j17_tick(&crate::J17_IC_DISARM);
+        let v = match verdict {
+            IcVerdict::Hit(v) => v,
+            IcVerdict::Pass => return None,
+            IcVerdict::Miss => {
+                crate::j17_tick(&crate::J17_IC_MISS);
+                if let Some(ent) = self.ic_map.get_mut(&site) {
+                    ent.miss = ent.miss.saturating_add(1);
+                    if ent.miss >= IC_MISS_DISARM {
+                        ent.miss = u8::MAX;
+                        crate::j17_tick(&crate::J17_IC_DISARM);
+                    }
+                }
+                return None;
             }
-            self.ic_map.insert(site, ent);
-            return None;
         };
         crate::j17_tick(&crate::J17_IC_HIT);
         if self.ic_verify {
             let check = self.find_prop(id, key);
-            let same = match &check {
-                Some(Prop::Data { value: c, .. }) => self.strict_eq(c, &v),
+            let same = match (&check, &v) {
+                (Some(Prop::Data { value: c, .. }), _) => self.strict_eq(c, &v),
+                (None, Value::Undefined) => true,
                 _ => false,
             };
             if !same {
@@ -7632,14 +7738,19 @@ impl Engine {
         Some(v)
     }
 
-    /// JS-C500 — apprentissage après un `find_prop` qui a rendu
-    /// `Prop::Data` sur `owner == id` : la position réelle de la
-    /// clé est recherchée une fois (`prop_pos`, amorti sur la vie
-    /// du site) puis `(shape, pos)` mémorisée. Ne s'exécute pas
-    /// sur un site désarmé ni sur objet inéligible (les props
-    /// synthétisées primes `o.find`, cf. [`Self::ic_eligible`]).
-    fn ic_learn(&mut self, site: usize, id: ObjId, key: &str) {
-        if site == 0 || self.ic_off {
+    /// JS-C500 — apprentissage après `find_prop_owner` : `links` =
+    /// maillons visités `[receveur, …, owner|dernier]`, `found` = un
+    /// `Prop::Data` a été rendu par le dernier maillon. La position
+    /// réelle de la clé chez l'owner est recherchée une fois
+    /// (`prop_pos`, amorti sur la vie du site). JS-C504 — la forme
+    /// apprise couvre les hits proto (`Chain`) et les absents
+    /// (`Absent`) en plus de l'own-prop (`Own`) : la vérif d'un hit
+    /// *est* la marche des shapes, tout écart → miss → ré-apprentis-
+    /// sage. Ne s'exécute pas sur site désarmé, chaîne >
+    /// [`IC_CHAIN_CAP`], ou maillon inéligible (props synthétisées
+    /// devançant `o.find`, cf. [`Self::ic_eligible`]).
+    fn ic_learn(&mut self, site: usize, key: &str, links: &[ObjId], found: bool) {
+        if site == 0 || self.ic_off || links.is_empty() || links.len() > IC_CHAIN_CAP {
             return;
         }
         if self.ic_map.get(&site).is_some_and(|e| e.miss == u8::MAX) {
@@ -7649,23 +7760,47 @@ impl Engine {
             self.ic_map.clear();
         }
         let ai = array_index(key);
-        let ent = self.heap.obj(id).and_then(|o| {
+        let mut shapes = Vec::with_capacity(links.len());
+        let mut kind = None;
+        for (i, &lid) in links.iter().enumerate() {
+            let Some(o) = self.heap.obj(lid) else {
+                return;
+            };
             if !Self::ic_eligible(o, key, ai) {
-                return None;
+                return;
             }
-            let pos = o.prop_pos(key)?;
-            match o.props.get(pos) {
-                Some((_, Prop::Data { .. })) => Some(IcEnt {
-                    shape: o.shape(),
-                    pos: u32::try_from(pos).ok()?,
-                    miss: 0,
-                }),
-                _ => None,
+            shapes.push(o.shape());
+            if found && i + 1 == links.len() {
+                let Some(pos) = o.prop_pos(key) else {
+                    return;
+                };
+                if !matches!(o.props.get(pos), Some((_, Prop::Data { .. }))) {
+                    return;
+                }
+                let Ok(pos) = u32::try_from(pos) else {
+                    return;
+                };
+                kind = Some(if links.len() == 1 {
+                    IcKind::Own {
+                        shape: shapes[0],
+                        pos,
+                    }
+                } else {
+                    IcKind::Chain {
+                        chain: shapes.clone().into_boxed_slice(),
+                        pos,
+                    }
+                });
             }
+        }
+        let kind = kind.or_else(|| {
+            (!found).then(|| IcKind::Absent {
+                chain: shapes.into_boxed_slice(),
+            })
         });
-        if let Some(ent) = ent {
+        if let Some(kind) = kind {
             crate::j17_tick(&crate::J17_IC_LEARN);
-            self.ic_map.insert(site, ent);
+            self.ic_map.insert(site, IcEnt { kind, miss: 0 });
         }
     }
 
@@ -8118,13 +8253,18 @@ impl Engine {
         if let Some(v) = self.ic_hit(site, id, key) {
             return Ok(v);
         }
-        match self.find_prop_owner(id, key) {
-            Some((owner, Prop::Data { value, .. })) => {
-                // N'apprend que les own-props de la tête —
-                // les hits proto restent au cran transitions.
-                if owner == id {
-                    self.ic_learn(site, id, key);
-                }
+        // JS-C504 — les maillons traversés nourrissent
+        // l'apprentissage (`Chain`/`Absent` en plus de `Own`) —
+        // collecte seulement si le site peut apprendre.
+        let mut links = Vec::new();
+        let lp = if site != 0 && !self.ic_off {
+            Some(&mut links)
+        } else {
+            None
+        };
+        match self.find_prop_owner_links(id, key, lp) {
+            Some((_, Prop::Data { value, .. })) => {
+                self.ic_learn(site, key, &links, true);
                 self.probe_lookup(id, key, Some(value.clone()));
                 Ok(value)
             }
@@ -8135,7 +8275,10 @@ impl Engine {
                     Ok(Value::Undefined)
                 }
             }
-            None => Ok(Value::Undefined),
+            None => {
+                self.ic_learn(site, key, &links, false);
+                Ok(Value::Undefined)
+            }
         }
     }
 

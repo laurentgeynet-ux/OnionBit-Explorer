@@ -98,8 +98,8 @@ fn c500_delete_shifts_positions() {
 }
 
 /// Hit proto (méthode sur le prototype, pas own-prop) : valeur
-/// correcte, et l'IC n'apprend pas (owner ≠ tête) — comportement
-/// identique au chemin complet.
+/// correcte — l'entrée `Chain` JS-C504 la vérifie par les shapes
+/// des maillons, comportement identique au chemin complet.
 #[test]
 fn c500_proto_hit_unchanged() {
     assert_eq!(
@@ -216,5 +216,95 @@ fn c500_mapped_arguments() {
              a=9;return r+'/'+arguments[0]}f(1,2)"
         ),
         "3".repeat(30).as_str().to_owned() + "/9"
+    );
+}
+
+// ── JS-C504 — hits proto + absents dans l'IC ────────────────────
+
+/// Hit proto appris (`Chain`) : la vérif marche les shapes des
+/// maillons — deux instances de même layout partagent l'entrée,
+/// chacune rend sa méthode avec le bon `this`.
+#[test]
+fn c504_proto_hit_cached() {
+    assert_eq!(
+        eval(
+            "function P(){}P.prototype.m=function(){return this.v+1};\
+             var a=new P(),b=new P();a.v=10;b.v=20;\
+             var s=0;for(var i=0;i<200;i++){s+=a.m();s+=b.m()}s"
+        ),
+        "6400"
+    );
+}
+
+/// Absent appris (`Absent`) : feature-detect `o.noSuch` en boucle
+/// → `undefined` sans scan ; ajout ultérieur de la clé sur le
+/// proto (shape du maillon change) → miss → relearn → trouvée.
+#[test]
+fn c504_absent_then_proto_growth() {
+    assert_eq!(
+        eval(
+            "var p={};var o=Object.create(p);var hits=0;\
+             for(var i=0;i<300;i++){if(o.feat)hits++}\
+             var mid=hits;p.feat=42;\
+             for(var i=0;i<300;i++){if(o.feat)hits++}\
+             mid+'/'+hits"
+        ),
+        "0/300"
+    );
+}
+
+/// Ombre own-prop posée après apprentissage `Chain` : le shape de
+/// la tête change → miss → l'own-prop prime dès la lecture
+/// suivante (jamais la valeur du proto périmée).
+#[test]
+fn c504_shadow_after_chain() {
+    assert_eq!(
+        eval(
+            "var p={x:1};var o=Object.create(p);var r='';\
+             for(var i=0;i<50;i++)r+=o.x;o.x=9;\
+             for(var i=0;i<50;i++)r+=o.x;\
+             var e='';for(var i=0;i<50;i++)e+='1';\
+             for(var i=0;i<50;i++)e+='9';r.length+'/'+(r===e)"
+        ),
+        "100/true"
+    );
+}
+
+/// Accessor sur le proto (pas own) : le getter s'exécute à chaque
+/// lecture — `Prop::Acc` n'est jamais appris.
+#[test]
+fn c504_proto_accessor_not_cached() {
+    assert_eq!(
+        eval(
+            "var p={n:0};Object.defineProperty(p,'g',{get:function(){return ++this.n},enumerable:true});\
+             var o=Object.create(p);o.g+','+o.g+','+o.g"
+        ),
+        "1,2,3"
+    );
+}
+
+/// Chaîne > `IC_CHAIN_CAP` (9 maillons) : pas d'apprentissage,
+/// la marche complète rend toujours la bonne valeur.
+#[test]
+fn c504_deep_chain_no_learn() {
+    assert_eq!(
+        eval(
+            "var o={x:7};for(var i=0;i<10;i++)o=Object.create(o);\
+             var s=0;for(var i=0;i<200;i++)s+=o.x;s"
+        ),
+        "1400"
+    );
+}
+
+/// `o.x` absent avec proto `null` terminal : `Object.create(null)`
+/// — entrée `Absent` à un maillon, `undefined` répété.
+#[test]
+fn c504_absent_null_proto() {
+    assert_eq!(
+        eval(
+            "var o=Object.create(null);var c=0;\
+             for(var i=0;i<100;i++){if(o.q===undefined)c++}c"
+        ),
+        "100"
     );
 }
