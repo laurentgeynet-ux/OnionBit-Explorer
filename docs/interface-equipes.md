@@ -3560,3 +3560,18 @@ shadow n'atteint ni cascade ni boxification ») etait
   en scope fn → `sm_oob` (env non pré-déclaré au moment du read —
   fallback correct, coverage à creuser si `sm_oob` est significatif
   en vol).
+
+### 2026-11-13 — IC callsite Rust interne + fix `Absent` (JS-C506)
+
+- `get_prop`/`get_prop_value`/`read_prop` = `#[track_caller]` :
+  callsite Rust = site IC (clé littérale → monomorphe). Attaque
+  le `prop_scan` résiduel N5.6 (4,2 M) côté natifs.
+- **Bug C504 trouvé par les callsites génériques** : `Absent`
+  ne vérifiait pas la clé — `field(e,o,"month")` puis
+  `field(e,o,"day")` au même callsite rendait `None` pour une
+  prop existante (5 échecs `c20`/`c22` sous `IC_VERIFY`).
+  `IcKind::Absent` porte désormais la clé internée, comparée
+  avant la marche. Sites AST à clé littérale non concernés.
+- `IcOut { Hit, Absent, Fall }` — `get_prop` rend `None` pour
+  l'absent prouvé (≠ `Some(Undefined)` : distinction prop
+  absente / prop valant `undefined` visible côté appelants).

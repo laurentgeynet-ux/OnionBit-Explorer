@@ -325,7 +325,11 @@ pub(crate) enum IcKind {
     Chain { chain: Box<[u64]>, pos: u32 },
     /// Absent : tous les maillons vérifiés, le proto du dernier
     /// n'est pas un objet — la réponse est `undefined` sans scan.
-    Absent { chain: Box<[u64]> },
+    /// **`key` mémorisée** : les shapes prouvent seulement que la
+    /// clé *apprise* est absente — une clé différente au même site
+    /// (`o[k]` dynamique, callsite Rust générique) peut exister ;
+    /// mismatch → miss → relearn (verrou : `c506`, `c22_temporal`).
+    Absent { chain: Box<[u64]>, key: Rc<str> },
 }
 
 /// JS-C500 — seuil de désarmement d'un site IC (miss cumulés).
@@ -340,8 +344,21 @@ const IC_CHAIN_CAP: usize = 8;
 /// receveurs du site).
 enum IcVerdict {
     Hit(Value),
+    /// Absence prouvée (entrée `Absent` vérifiée) — distinct de
+    /// `Hit(Undefined)` : `get_prop` rend `None` pour l'absent.
+    Absent,
     Miss,
     Pass,
+}
+
+/// JS-C506 — sortie d'une consultation IC : `Hit`/`Absent` sont
+/// prouvés sémantiquement ; `Fall` = pas d'entrée, vérif échouée
+/// ou maillon inéligible → chemin complet.
+#[derive(Debug)]
+enum IcOut {
+    Hit(Value),
+    Absent,
+    Fall,
 }
 /// JS-C500 — borne du cache de sites (purge complète — précédent
 /// `RESOLVED_ENVS_CAP`).
@@ -7645,9 +7662,9 @@ impl Engine {
     /// la vérif *est* la sémantique du lookup, tout échec
     /// retombe sur `find_prop` + `ic_learn`. `site == 0` ou
     /// `ic_off` → `None` immédiat (hors chemin quand désarmé).
-    fn ic_hit(&mut self, site: usize, id: ObjId, key: &str) -> Option<Value> {
+    fn ic_hit(&mut self, site: usize, id: ObjId, key: &str) -> IcOut {
         if site == 0 || self.ic_off {
-            return None;
+            return IcOut::Fall;
         }
         let ai = array_index(key);
         // Verdict calculé sous emprunts immuables seulement —
@@ -7659,10 +7676,12 @@ impl Engine {
         // + proto terminal non-objet. Tout échec → miss →
         // `find_prop` + `ic_learn` (auto-correct par construction).
         let verdict = {
-            let ent = self.ic_map.get(&site)?;
+            let Some(ent) = self.ic_map.get(&site) else {
+                return IcOut::Fall;
+            };
             if ent.miss == u8::MAX {
                 crate::j17_tick(&crate::J17_IC_BAIL);
-                return None;
+                return IcOut::Fall;
             }
             // Maillon attendu : `Ok(Some(o))` = vivant + éligible
             // (les props synthétisées qui devancent `o.find` ne
@@ -7689,7 +7708,14 @@ impl Engine {
                     Ok(None) => IcVerdict::Miss,
                     Ok(Some(o)) => own_at(o, *pos),
                 },
-                IcKind::Chain { chain, .. } | IcKind::Absent { chain } => {
+                IcKind::Chain { chain, .. } | IcKind::Absent { chain, .. } => {
+                    // `Absent` n'est valide que pour la clé apprise —
+                    // testée AVANT la marche des maillons.
+                    if let IcKind::Absent { key: ek, .. } = &ent.kind {
+                        if &**ek != key {
+                            return IcOut::Fall;
+                        }
+                    }
                     let mut cur = id;
                     let mut v = IcVerdict::Miss;
                     for (i, &sh) in chain.iter().enumerate() {
@@ -7710,7 +7736,7 @@ impl Engine {
                                         // ne doit pas être un objet.
                                         _ => match o.proto {
                                             Value::Obj(_) => IcVerdict::Miss,
-                                            _ => IcVerdict::Hit(Value::Undefined),
+                                            _ => IcVerdict::Absent,
                                         },
                                     };
                                     break;
@@ -7728,9 +7754,10 @@ impl Engine {
                 }
             }
         };
-        let v = match verdict {
-            IcVerdict::Hit(v) => v,
-            IcVerdict::Pass => return None,
+        let out = match verdict {
+            IcVerdict::Hit(v) => IcOut::Hit(v),
+            IcVerdict::Absent => IcOut::Absent,
+            IcVerdict::Pass => return IcOut::Fall,
             IcVerdict::Miss => {
                 crate::j17_tick(&crate::J17_IC_MISS);
                 if let Some(ent) = self.ic_map.get_mut(&site) {
@@ -7740,22 +7767,22 @@ impl Engine {
                         crate::j17_tick(&crate::J17_IC_DISARM);
                     }
                 }
-                return None;
+                return IcOut::Fall;
             }
         };
         crate::j17_tick(&crate::J17_IC_HIT);
         if self.ic_verify {
             let check = self.find_prop(id, key);
-            let same = match (&check, &v) {
-                (Some(Prop::Data { value: c, .. }), _) => self.strict_eq(c, &v),
-                (None, Value::Undefined) => true,
+            let same = match (&check, &out) {
+                (Some(Prop::Data { value: c, .. }), IcOut::Hit(v)) => self.strict_eq(c, v),
+                (None, IcOut::Absent) => true,
                 _ => false,
             };
             if !same {
-                tracing::warn!(target: "ic", "ic.bad key={key} id={id:?} fast={v:?} walk={check:?}");
+                tracing::warn!(target: "ic", "ic.bad key={key} id={id:?} fast={out:?} walk={check:?}");
             }
         }
-        Some(v)
+        out
     }
 
     /// JS-C500 — apprentissage après `find_prop_owner` : `links` =
@@ -7816,6 +7843,7 @@ impl Engine {
         let kind = kind.or_else(|| {
             (!found).then(|| IcKind::Absent {
                 chain: shapes.into_boxed_slice(),
+                key: crate::intern(key),
             })
         });
         if let Some(kind) = kind {
@@ -7828,8 +7856,32 @@ impl Engine {
     /// reads must go through [`Engine::read_prop`] (the getter may
     /// run script code, needing `&mut self`); internal callers get
     /// `None` for accessor props.
+    ///
+    /// JS-C506 — `#[track_caller]` : le callsite Rust sert de site
+    /// IC (clé littérale par appel → monomorphe par construction,
+    /// `Location::caller()` = `&'static` stable). Mêmes vérifs
+    /// sémantiques que l'IC AST ; les sites mégamorphes (clé
+    /// tournante, helper générique) se désarment seuls.
+    #[track_caller]
     pub(crate) fn get_prop(&mut self, id: ObjId, key: &str) -> Option<Value> {
-        let v = self.find_prop(id, key).and_then(|p| p.data_value());
+        let site = std::ptr::from_ref(std::panic::Location::caller()) as usize;
+        match self.ic_hit(site, id, key) {
+            IcOut::Hit(v) => return Some(v),
+            // Absence prouvée → `None`, pas `Some(Undefined)` —
+            // les appelants distinguent prop absente de prop
+            // présente valant `undefined`.
+            IcOut::Absent => return None,
+            IcOut::Fall => {}
+        }
+        let mut links = Vec::new();
+        let lp = if self.ic_off { None } else { Some(&mut links) };
+        let found = self.find_prop_owner_links(id, key, lp);
+        match &found {
+            Some((_, Prop::Data { .. })) => self.ic_learn(site, key, &links, true),
+            None => self.ic_learn(site, key, &links, false),
+            _ => {}
+        }
+        let v = found.and_then(|(_, p)| p.data_value());
         self.probe_lookup(id, key, v.clone());
         v
     }
@@ -8113,8 +8165,13 @@ impl Engine {
     /// Property read with accessor invocation — `o.x` where `x` has a
     /// getter calls it with `this = recv` (differs from `base` only
     /// for `super.x` reads).
+    /// JS-C506 — `#[track_caller]` : callsite Rust = site IC,
+    /// propagé à [`Self::read_prop_at`]. Les vrais sites AST
+    /// appellent `read_prop_at` directement avec `ptr(Expr)`.
+    #[track_caller]
     pub(crate) fn read_prop(&mut self, base: Value, recv: Value, key: &str) -> JsResult<Value> {
-        self.read_prop_at(base, recv, key, 0)
+        let site = std::ptr::from_ref(std::panic::Location::caller()) as usize;
+        self.read_prop_at(base, recv, key, site)
     }
 
     /// [`Self::read_prop`] + site AST (`ptr(Expr)`/`ptr(ChainStep)`)
@@ -8270,8 +8327,10 @@ impl Engine {
         // JS-C500 — IC own-prop : `(shape,pos)` vérifié à la
         // clé réelle → réponse immédiate ; tout échec retombe
         // sur la marche complète ci-dessous.
-        if let Some(v) = self.ic_hit(site, id, key) {
-            return Ok(v);
+        match self.ic_hit(site, id, key) {
+            IcOut::Hit(v) => return Ok(v),
+            IcOut::Absent => return Ok(Value::Undefined),
+            IcOut::Fall => {}
         }
         // JS-C504 — les maillons traversés nourrissent
         // l'apprentissage (`Chain`/`Absent` en plus de `Own`) —
@@ -8570,8 +8629,14 @@ impl Engine {
     }
 
     /// `base[key]` on any value — wraps primitives via their prototype.
+    ///
+    /// JS-C506 — `#[track_caller]` : callsite Rust = site IC,
+    /// propagé à [`Self::get_prop_value_at`] (chemin `Obj` →
+    /// [`Self::read_prop_at`], accessors et fallback inclus).
+    #[track_caller]
     pub(crate) fn get_prop_value(&mut self, base: Value, key: &str) -> JsResult<Value> {
-        self.get_prop_value_at(base, key, 0)
+        let site = std::ptr::from_ref(std::panic::Location::caller()) as usize;
+        self.get_prop_value_at(base, key, site)
     }
 
     /// [`Self::get_prop_value`] + site AST pour l'IC own-prop

@@ -327,7 +327,7 @@ fn c505_probes_emit() {
              for(var i=0;i<50;i++){n+=f();s+='a'}\
              var z;for(var i=0;i<10;i++){z===undefined?'u':'?'}\
              var q=7;function g(){return q;let q=5}g();\
-             n+'/'+s.length"
+             n+'/'+s.length",
         )
         .expect("eval");
     assert_eq!(e.describe(r), "100/50");
@@ -337,4 +337,47 @@ fn c505_probes_emit() {
     assert!(snap.contains("badd_str="), "badd_str attendu : {snap}");
     assert!(snap.contains("binop:"), "histogramme attendu : {snap}");
     assert!(snap.contains("add="), "op add attendu : {snap}");
+}
+
+// ── JS-C506 — IC par callsite Rust interne ──────────────────────
+
+/// `#[track_caller]` sur `get_prop`/`get_prop_value`/`read_prop` :
+/// la coercition `Number(o)` lit `@@toPrimitive` (absent → entrée
+/// `Absent`) puis `valueOf` (own → entrée `Own`) aux MÊMES callsites
+/// internes — `ic_hit` doit croître comme pour les sites AST, et la
+/// valeur reste exacte.
+#[test]
+fn c506_internal_callsite_ic() {
+    let _g = IC_LOCK
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    explorer_jscore::j17_enable();
+    let mut e = Engine::new();
+    let r = e
+        .eval("var o={valueOf:function(){return 5}};var s=0;for(var i=0;i<1000;i++)s+=Number(o);s")
+        .expect("eval");
+    assert_eq!(e.describe(r), "5000");
+    let snap = explorer_jscore::j17_snapshot();
+    let hit = snap
+        .split(' ')
+        .find_map(|p| {
+            p.strip_prefix("ic_hit=")
+                .and_then(|v| v.parse::<u64>().ok())
+        })
+        .unwrap_or(0);
+    assert!(hit >= 1000, "ic_hit interne attendu : {snap}");
+}
+
+/// Un appelant interne polymorphe (clé tournante) se désarme seul
+/// — les valeurs restent exactes quel que soit l'état du cache.
+#[test]
+fn c506_internal_polymorphic_correct() {
+    assert_eq!(
+        eval(
+            "var o={};for(var i=0;i<20;i++)o['p'+i]=i;\
+             var s=0;for(var i=0;i<200;i++){s+=JSON.stringify(o['p'+(i%20)]).length}\
+             var t=0;for(var i=0;i<200;i++){t+=o['p'+(i%19)]}s+'/'+t"
+        ),
+        "300/1755"
+    );
 }
