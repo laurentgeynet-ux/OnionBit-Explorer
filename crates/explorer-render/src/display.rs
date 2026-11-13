@@ -5020,6 +5020,37 @@ fn emit_child<'a>(
 /// Variante pour les enfants peints hors-flux (flottants,
 /// positionnés, porteurs drainés) — portée propre.
 #[allow(clippy::too_many_arguments)]
+/// R-293 — marge d'encre hors `rect` pour la culle de bande
+/// de [`emit_scoped`] : `box-shadow`/`text-shadow` peignent
+/// au-delà de la boîte ; la marge couvre |offset| + blur +
+/// spread de chaque couche externe (majoration — jamais de
+/// sous-estimation : un sous-arbre sauté ne doit pouvoir
+/// déposer aucune encre dans la bande).
+fn ink_margin(bx: &LayoutBox) -> f32 {
+    let mut m = 0.0_f32;
+    for prop in ["box-shadow", "text-shadow"] {
+        let Some(v) = bx.style.get(prop) else {
+            continue;
+        };
+        if v.trim().eq_ignore_ascii_case("none") {
+            continue;
+        }
+        for layer in bg_layers(v) {
+            // Même grammaire de couches `x y blur spread`
+            // (`text-shadow` ignore spread/inset — le parseur
+            // commun les laisse à 0/false).
+            if let Some((off, blur, spread, _c, inset)) =
+                parse_box_shadow_layer(&bx.style, layer.trim())
+            {
+                if !inset {
+                    m = m.max(off.0.abs() + off.1.abs() + blur + spread.max(0.0));
+                }
+            }
+        }
+    }
+    m
+}
+
 fn emit_scoped<'a>(
     idx: usize,
     bx: &'a LayoutBox,
@@ -5030,6 +5061,28 @@ fn emit_scoped<'a>(
     fixed_defer: &mut Vec<(Vec<u16>, &'a LayoutBox)>,
 ) {
     cx.path.push(u16::try_from(idx).unwrap_or(u16::MAX));
+    // R-293 — culle de bande, re-passes seulement (`inc` :
+    // une liste précédente existe — la toute première passe
+    // émet tout). Un sous-arbre prouvé contenu dans son
+    // `rect` + marge d'encre (`!may_escape`) et entièrement
+    // hors viewport ne produit aucun item : la descente est
+    // sautée entière. `may_escape` couvre les reports
+    // `pos_defer`/`fixed_defer`, transforms, flottants et
+    // débords `overflow:visible` — ce qui est sauté ne peut
+    // peindre nulle part ailleurs (§2.5 du plan perf).
+    if cx.inc.is_some() && !bx.may_escape {
+        let m = ink_margin(bx);
+        let l = bx.rect.x + off.0;
+        let t = bx.rect.y + off.1;
+        if l - m >= cx.vp.0
+            || t - m >= cx.vp.1
+            || l + bx.rect.width + m <= 0.0
+            || t + bx.rect.height + m <= 0.0
+        {
+            cx.path.pop();
+            return;
+        }
+    }
     // R-134 : translation sticky enregistrée par le parent à
     // l'enfilement — entoure l'émission quel que soit le chemin
     // d'émission (phase z<0, flottant, inline reporté).

@@ -217,6 +217,18 @@ pub struct LayoutBox {
     /// propre : croisé → enfants en espace transposé +
     /// [`crate::transform::flow_transform`] au paint/hit.
     pub flow_mode: explorer_css::value::WritingMode,
+    /// R-293 — l'encre du sous-arbre peut sortir du `rect`
+    /// de cette boîte (positionné/transformé/flottant/
+    /// débord `overflow:visible` ou descendant dans l'un
+    /// de ces cas — la descente d'émission doit alors y
+    /// passer : les reports `pos_defer`/`fixed_defer` se
+    /// découvrent à la descente). Calculé post-ordre par
+    /// [`crate::compute_may_escape`] en fin de
+    /// `layout_tree`/`relayout_subtree` ; `true` au
+    /// constructeur (conservateur — une boîte greffée
+    /// sans recompute reste sûre). Lu par la culle de
+    /// bande de `explorer-render` (voie incrémentale).
+    pub may_escape: bool,
 }
 
 /// Contexte de pose enregistré par `layout_block` (R-12) :
@@ -314,6 +326,59 @@ impl Drop for LayoutBox {
             stack.append(&mut child.children);
         }
     }
+}
+
+/// R-293 — calcule `may_escape` en post-ordre sur tout le
+/// sous-arbre (`O(n)`, appelé en fin de [`crate::block::
+/// layout_tree`] et [`crate::relayout::relayout_subtree`]) ;
+/// retourne la valeur posée sur `bx`.
+///
+/// Une boîte « s'échappe » quand son encre ou celle d'un
+/// descendant peut sortir de son `rect` :
+/// - `position != static` (relative décalée, posé, sticky —
+///   les reports `pos_defer`/`fixed_defer` de l'émission se
+///   **découvrent à la descente** : couper la propagation
+///   sous un ancêtre empêcherait d'atteindre le porteur) ;
+/// - `transform` non `none` (l'encre sort du repère local) ;
+/// - `float != none` (sorti du flux au paint) ;
+/// - enfant en flux dont le `rect` déborde un axe
+///   `overflow:visible`, ou boîte `nowrap`/`pre` à lignes
+///   dont l'avancée peut dépasser la largeur.
+///
+/// La propagation remonte inconditionnellement — même sous
+/// `overflow:hidden`, qui clippe l'encre mais pas la
+/// structure des files de report (raffinement possible
+/// consigné §2.5 de `docs/plan-perf-archetypes.md`).
+#[must_use]
+pub fn compute_may_escape(bx: &mut LayoutBox) -> bool {
+    // Post-ordre : les enfants d'abord — `deep` borne la
+    // descente (arbres à milliers de niveaux, cf. Drop R-24).
+    let mut esc = false;
+    for c in &mut bx.children {
+        if explorer_common::deep(|| compute_may_escape(c)) {
+            esc = true;
+        }
+    }
+    esc |= bx.position != Position::Static
+        || bx.float != Float::None
+        || bx
+            .style
+            .get("transform")
+            .is_some_and(|t| !matches!(t.trim(), "" | "none"));
+    let vis_x = matches!(bx.overflow_x, Overflow::Visible);
+    let vis_y = matches!(bx.overflow, Overflow::Visible);
+    if !esc && (vis_x || vis_y) {
+        let r = &bx.rect;
+        esc = bx.children.iter().any(|c| {
+            (vis_x && (c.rect.x < r.x || c.rect.x + c.rect.width > r.x + r.width))
+                || (vis_y && (c.rect.y < r.y || c.rect.y + c.rect.height > r.y + r.height))
+        });
+    }
+    if !esc && vis_x && !bx.lines.is_empty() {
+        esc = matches!(bx.style.get("white-space"), Some("nowrap" | "pre"));
+    }
+    bx.may_escape = esc;
+    esc
 }
 
 /// Construit l'arbre de boîtes sous `root`.
@@ -448,6 +513,7 @@ fn inject_inside_markers(bx: &mut LayoutBox) {
                     is_body: false,
                     counter: None,
                     flow_mode: explorer_css::value::WritingMode::HorizontalTb,
+                    may_escape: true,
                 },
             );
         }
@@ -686,6 +752,7 @@ fn build_box_tree_env<S: ::std::hash::BuildHasher>(
             .and_then(|ty| styles.counter_styles.get(ty.trim()))
             .cloned(),
         flow_mode: explorer_css::value::WritingMode::HorizontalTb,
+        may_escape: true,
     };
     let children = child_boxes(dom, root, styles, &style, sizes, envs, qdepth);
     b.children = wrap_children(children, &style, kind);
@@ -908,6 +975,7 @@ fn child_boxes<S: ::std::hash::BuildHasher>(
                     is_body: false,
                     counter: None,
                     flow_mode: explorer_css::value::WritingMode::HorizontalTb,
+                    may_escape: true,
                 });
             }
         }
@@ -1439,6 +1507,7 @@ fn leaf_box_anon(kind: BoxKind, style: ComputedStyle) -> LayoutBox {
         is_body: false,
         counter: None,
         flow_mode: explorer_css::value::WritingMode::HorizontalTb,
+        may_escape: true,
     }
 }
 
@@ -1674,6 +1743,7 @@ fn flush_run(out: &mut Vec<LayoutBox>, run: &mut Vec<LayoutBox>, style: &Compute
             is_body: false,
             counter: None,
             flow_mode: explorer_css::value::WritingMode::HorizontalTb,
+            may_escape: true,
         });
     }
 }
@@ -1798,6 +1868,7 @@ fn object_box(
         is_body: false,
         counter: None,
         flow_mode: explorer_css::value::WritingMode::HorizontalTb,
+        may_escape: true,
     };
     // Ressource résolue → feuille remplacée ; sinon les
     // enfants prennent la place de l'objet.
@@ -1982,6 +2053,7 @@ fn leaf_box(
         is_body: false,
         counter: None,
         flow_mode: explorer_css::value::WritingMode::HorizontalTb,
+        may_escape: true,
     }
 }
 
@@ -2038,6 +2110,7 @@ fn control_box(
                     is_body: false,
                     counter: None,
                     flow_mode: explorer_css::value::WritingMode::HorizontalTb,
+                    may_escape: true,
                 }],
                 &style,
             )

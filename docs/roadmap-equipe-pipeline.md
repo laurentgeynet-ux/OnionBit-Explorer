@@ -4484,7 +4484,7 @@ sous-features, `font-stretch`/`font-width` (fontes variables),
   computed≠base ∨ (`deep_relational` ∧ frère-suivant-de-touché)
   ; design amendé+validé au journal (canal silencieux couvert).
 - [ ] **Câblage frontière** — exécuté côté NAV (§2.3).
-- [ ] **`may_escape` émission** (`explorer-layout` +
+- [x] **`may_escape` émission** (`explorer-layout` +
   `explorer-render`) — `incr.emit` ~1,5 s → §2.4.
 - [ ] **Ops groupe résidu zone = cadre** (`explorer-render`) —
   `group_us` ~9,9 s YouTube → §2.5.

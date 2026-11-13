@@ -673,6 +673,7 @@ pub fn layout_tree(root: &mut LayoutBox, viewport_w: f32, ctx: &BlockCtx) {
     root.rect.height = root.rect.height.max(deep);
     resolve_absolutes(root, viewport, ctx, ctx.base_font_size);
     resolve_anchor_positioning(root, ctx, ctx.base_font_size);
+    let _ = crate::boxtree::compute_may_escape(root);
 }
 
 /// R-254 — css-anchor-position-1 (MVP) : `anchor-name` pose
@@ -3564,6 +3565,7 @@ fn flow_children(
                 is_body: false,
                 counter: None,
                 flow_mode: bx.flow_mode,
+                may_escape: true,
             };
             let gap = if first && adjoining_top {
                 0.0

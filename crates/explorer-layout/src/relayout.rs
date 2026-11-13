@@ -81,7 +81,15 @@ pub fn relayout_subtree<S: BuildHasher>(
     match step(root, dom, styles, sizes, target, ctx) {
         Step::NotFound => Relayout::NotFound,
         Step::Full => Relayout::NeedsFullLayout,
-        Step::Relaid(_) => Relayout::Done,
+        Step::Relaid(_) => {
+            // R-293 — la greffe `fresh` et les translations
+            // de frères invalident `may_escape` : recomputé
+            // sur la racine (O(n), négligeable devant le
+            // relayout) plutôt qu'une propagation partielle
+            // fragile.
+            let _ = crate::boxtree::compute_may_escape(root);
+            Relayout::Done
+        }
     }
 }
 
