@@ -3491,3 +3491,24 @@ shadow n'atteint ni cascade ni boxification ») etait
 - `EXPLORER_RES_WALK=1` force la marche pour tout `d` —
   mesure A/B du seuil en vol, précédent `resolve_off`.
 - Verrous : `lang` 315 ×3 passes (défaut / VERIFY / WALK).
+
+### 2026-11-13 — cran 2a (scopes bloc) : slots `(d,slot)` + `EnvCell::Uninit` (JS-C502)
+
+- `EnvCell::Uninit` (pas `Hole`) — traité comme **absent** par
+  tous les consommateurs (`env_get_seen`, `env_set`/`env_declare`
+  via `BindingMap::has_live`, GC) → le delta sloppy `x=1` avant
+  `let x` et eval est nul par construction.
+- `resolved_map` passe en `u32` packé `(d<<16)|slot`,
+  `slot=u16::MAX` = depth-only (scope `Local` fonction —
+  convention `[params,arguments?,new.target?,hoist,lex]`
+  conditionnée par `lit_flags` → JS-C503).
+- `names_table` cléée par pointeurs AST (`as_ptr()` des Vec
+  enveloppés, `ptr(ForTarget)`, `Rc::as_ptr(FnLit)`) — même
+  durée de vie que `resolved_guard`, purge atomique.
+- Couverture : 11 sites `Env::block` exec.rs + fn-expr nommée
+  (eval.rs) + `Stmt::Block` GExec (lazy.rs) ; les autres envs
+  GExec n'ont pas d'entrée → pré-déclare no-op, slot fallback
+  `env_get` — toujours correct par vérif `nom`+`Bind`.
+- `EXPLORER_NO_SLOTS=1`, compteurs `slot_hit`/`slot_miss`
+  (un miss élevé trahit une divergence d'ordre canonique).
+- Verrous : `lang` 315 ×3 passes, `c502_slots` 13 tests.

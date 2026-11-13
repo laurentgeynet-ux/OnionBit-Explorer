@@ -12627,6 +12627,14 @@ croître la surface navigateur mesurée (`api` 1510/8099, 18,6 %).
   ~20 ns + pin `EnvRef`) ; `resolved_envs` conservé pour
   `d>2` ; `EXPLORER_RES_WALK=1` = A/B seuil en vol.
   Verrous : lang 315 ×3 passes.
+- [x] **JS-C502 — cran 2a (scopes bloc) : slots `(d,slot)`
+  + `EnvCell::Uninit`** : resolver émet `(d<<16)|slot` +
+  `names_table` canonique ; envs pré-déclarés `Uninit`
+  (=absent partout → delta no-TDZ nul) aux 11 sites
+  exec.rs + fn-expr + `Stmt::Block` GExec ; vérif slot
+  sémantique (`nom`+`Bind`) → fallback `env_get`.
+  `Local` fonction → JS-C503. `slot_hit`/`slot_miss` +
+  `EXPLORER_NO_SLOTS`. Verrous : lang 315 ×3, c502 13.
 
 Convergence visée : **Étape 239** — plan global consolidé,
 chaque gain rapporté contre les **deux** archétypes.

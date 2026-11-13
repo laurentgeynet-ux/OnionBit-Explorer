@@ -298,6 +298,14 @@ pub static J17_IC_LEARN: std::sync::atomic::AtomicU64 = std::sync::atomic::Atomi
 pub static J17_IC_DISARM: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 /// Voir [`J17_IC_HIT`].
 pub static J17_IC_BAIL: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+/// JS-C502 — fast-path slot d'env `(d,slot)` : `slot_hit` =
+/// lecture directe `Small[slot]` vérifiée par nom ; `slot_miss`
+/// = échec de vérification (oob, clé différente, `Map`, cellule
+/// non-`Bind`) → repli `env_get`. Un `slot_miss` élevé trahit
+/// une divergence d'ordre canonique resolver/runtime.
+pub static J17_SLOT_HIT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+/// Voir [`J17_SLOT_HIT`].
+pub static J17_SLOT_MISS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 /// `array_index(key)` tenté — multiplicité par `find_own`
 /// (× niveau, ×2 par niveau Array) — cible V-3b (hoist).
 pub static J17_ARRIDX_TRY: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
@@ -418,7 +426,7 @@ pub fn j17_enable() {
 #[must_use]
 pub fn j17_snapshot() -> String {
     let r = std::sync::atomic::Ordering::Relaxed;
-    let pairs: [(&str, &std::sync::atomic::AtomicU64); 39] = [
+    let pairs: [(&str, &std::sync::atomic::AtomicU64); 41] = [
         ("prop_lookup", &J17_PROP_LOOKUP),
         ("proto_lvl", &J17_PROTO_LVL),
         ("prop_scan", &J17_PROP_SCAN),
@@ -434,6 +442,8 @@ pub fn j17_snapshot() -> String {
         ("ic_learn", &J17_IC_LEARN),
         ("ic_disarm", &J17_IC_DISARM),
         ("ic_bail", &J17_IC_BAIL),
+        ("slot_hit", &J17_SLOT_HIT),
+        ("slot_miss", &J17_SLOT_MISS),
         ("arridx_try", &J17_ARRIDX_TRY),
         ("call", &J17_CALL),
         ("call_nat", &J17_CALL_NAT),

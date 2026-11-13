@@ -830,7 +830,20 @@ pub struct Engine {
     /// `ptr(Expr::Ident) → profondeur d'env` (niveaux à sauter
     /// avant le `BindingMap::get`). Clés = adresses des nœuds
     /// AST — stables tant que le `FnLit` gardien est vivant.
-    pub(crate) resolved_map: std::collections::HashMap<usize, u16>,
+    /// JS-C490/JS-C502 — `ptr(Expr::Ident) → (profondeur << 16) |
+    /// slot` ; `slot = u16::MAX` = depth-only.
+    pub(crate) resolved_map: std::collections::HashMap<usize, u32>,
+    /// JS-C502 — listes canoniques ordonnées des noms par site de
+    /// création d'env (clé = pointeur AST stable : `as_ptr()` du
+    /// Vec de statements/déclarateurs enveloppé, `ptr(ForTarget)`,
+    /// `ptr(Stmt)`…). Les envs créés à ces sites sont
+    /// pré-déclarés `EnvCell::Uninit` dans cet ordre — positions
+    /// de slots déterministes même si l'exécution saute des
+    /// déclarateurs.
+    pub(crate) names_table: std::collections::HashMap<usize, std::rc::Rc<[Rc<str>]>>,
+    /// `EXPLORER_NO_SLOTS=1` — coupe pré-déclare + fast-path
+    /// slot (A/B en vol, précédent `resolve_off`).
+    pub(crate) slots_off: bool,
     /// `FnLit` déjà résolus (`Rc::as_ptr`) — dédup par corps.
     pub(crate) resolved_lits: std::collections::HashSet<usize>,
     /// Gardiens : maintient les `Rc<FnLit>` résolus en vie pour
@@ -1424,6 +1437,8 @@ impl Engine {
             cjs_registry: Vec::new(),
             cjs_eval_name: None,
             resolved_map: std::collections::HashMap::new(),
+            names_table: std::collections::HashMap::new(),
+            slots_off: std::env::var("EXPLORER_NO_SLOTS").is_ok_and(|v| v == "1"),
             resolved_lits: std::collections::HashSet::new(),
             resolved_guard: Vec::new(),
             resolved_envs: std::collections::HashMap::new(),
@@ -5758,6 +5773,7 @@ impl Engine {
         }
         if self.resolved_lits.len() >= RESOLVED_LITS_CAP {
             self.resolved_map.clear();
+            self.names_table.clear();
             self.resolved_lits.clear();
             self.resolved_guard.clear();
             // JS-C492 — purge atomique avec `resolved_map` :
@@ -5772,8 +5788,9 @@ impl Engine {
         }
         self.resolved_lits.insert(key);
         self.resolved_guard.push(lit.clone());
-        let m = resolve::resolve_lit(lit, body);
-        self.resolved_map.extend(m);
+        let t = resolve::resolve_lit(lit, body);
+        self.resolved_map.extend(t.map);
+        self.names_table.extend(t.names);
     }
 
     /// JS-C490 — lecture d'identifiant via l'annotation du
@@ -5795,9 +5812,11 @@ impl Engine {
         /// `EXPLORER_RES_WALK=1` force la marche pour tout `d`
         /// (A/B en vol sans rebuild).
         const RES_WALK_MAX: u16 = 2;
-        let &d = self
+        let &raw = self
             .resolved_map
             .get(&(std::ptr::from_ref::<crate::ast::Expr>(e) as usize))?;
+        let d = (raw >> 16) as u16;
+        let slot = (raw & 0xFFFF) as u16;
         // JS-C501 — `d == 0` = variable de l'env courant :
         // `cur = env` direct, ni hash ni insert ni pin (le cas
         // le plus fréquent payait le cache pour rien) ; `d ≤ 2`
@@ -5841,7 +5860,44 @@ impl Engine {
                 cur
             }
         };
-        if let v @ Some(_) = self.env_get(&cur, name) {
+        // JS-C502 — fast-path slot : la vérif est sémantique
+        // (`Small[slot].0 == name` puis `Bind`), toute divergence
+        // d'ordre canonique, promotion `Map`, cellule `Uninit`/
+        // `Alias`/`LazyArgs` ou env non pré-déclaré retombe sur
+        // `env_get` — jamais de valeur fausse.
+        let v = if slot != u16::MAX && !self.slots_off {
+            let hit = {
+                let b = cur.borrow();
+                match &b.kind {
+                    EnvKind::Local(m) | EnvKind::Block(m) | EnvKind::Global(m) => match m {
+                        crate::heap::BindingMap::Small(v) => {
+                            v.get(slot as usize).and_then(|(k, c)| {
+                                if std::ptr::eq(&raw const **k, name) || &**k == name {
+                                    match c {
+                                        EnvCell::Bind(bnd) => Some(bnd.value.clone()),
+                                        _ => None,
+                                    }
+                                } else {
+                                    None
+                                }
+                            })
+                        }
+                        crate::heap::BindingMap::Map(_) => None,
+                    },
+                    EnvKind::With(_) => None,
+                }
+            };
+            if let Some(v) = hit {
+                crate::j17_tick(&crate::J17_SLOT_HIT);
+                Some(v)
+            } else {
+                crate::j17_tick(&crate::J17_SLOT_MISS);
+                self.env_get(&cur, name)
+            }
+        } else {
+            self.env_get(&cur, name)
+        };
+        if let v @ Some(_) = v {
             crate::j17_tick(&crate::J17_RES_HIT);
             if self.resolve_verify {
                 let check = self.env_get(env, name);
@@ -5868,6 +5924,34 @@ impl Engine {
 
     pub(crate) fn env_get(&mut self, env: &EnvRef, name: &str) -> Option<Value> {
         self.env_get_seen(env, name, &mut HashSet::new())
+    }
+
+    /// JS-C502 — pré-déclare les noms canoniques d'un env frais
+    /// (`EnvCell::Uninit`, ordre = `names_table[site]`) : les
+    /// positions de slots deviennent déterministes pour le
+    /// fast-path de [`Self::env_get_resolved`]. Les déclarations
+    /// réelles écrasent ensuite les cellules **in-place**
+    /// (`BindingMap::insert` réutilise le slot existant) — l'ordre
+    /// canonique survit à l'exécution. `site` sans entrée (env
+    /// créé hors resolveur, scope poisoned, exécuteur `GExec` sur
+    /// un nœud non modélisé) → no-op : l'env fonctionne alors
+    /// sans slots, la vérif `key == name` le détecte.
+    pub(crate) fn predeclare_slots(&self, env: &EnvRef, site: usize) {
+        if self.slots_off {
+            return;
+        }
+        let Some(names) = self.names_table.get(&site).cloned() else {
+            return;
+        };
+        let mut b = env.borrow_mut();
+        match &mut b.kind {
+            EnvKind::Local(m) | EnvKind::Block(m) | EnvKind::Global(m) => {
+                for n in names.iter() {
+                    m.insert(n.clone(), EnvCell::Uninit);
+                }
+            }
+            EnvKind::With(_) => {}
+        }
     }
 
     /// Matérialise une liaison `arguments` paresseuse (JS-C308) —
@@ -5941,7 +6025,9 @@ impl Engine {
                             Some(EnvCell::Bind(v)) => return Some(v.value.clone()),
                             Some(EnvCell::Alias(t, n)) => Next::Alias(t.clone(), n.clone()),
                             Some(EnvCell::LazyArgs(la)) => Next::Lazy(la.clone()),
-                            None => Next::Up(b.parent.clone()),
+                            // JS-C502 — `Uninit` = absent : la
+                            // lecture remonte (no TDZ préservé).
+                            Some(EnvCell::Uninit) | None => Next::Up(b.parent.clone()),
                         }),
                     ),
                     EnvKind::Global(m) => match m.get(name) {
@@ -5950,7 +6036,7 @@ impl Engine {
                             (None, Some(Next::Alias(t.clone(), n.clone())))
                         }
                         Some(EnvCell::LazyArgs(la)) => (None, Some(Next::Lazy(la.clone()))),
-                        None => {
+                        Some(EnvCell::Uninit) | None => {
                             // Declarative record first, then `window`
                             // props — data ET accessors (JS-C78 :
                             // `parent`/`top`/`frames`/`length`/`closed`
@@ -6168,10 +6254,14 @@ impl Engine {
             let act = {
                 let b = e.borrow();
                 match &b.kind {
-                    EnvKind::Local(m) | EnvKind::Block(m) if m.contains_key(name) => {
+                    // JS-C502 — `has_live` : une cellule `Uninit`
+                    // pré-déclarée compte comme absente — `x = 1`
+                    // avant `let x` continue de remonter (la
+                    // déclaration écrira dans le slot ensuite).
+                    EnvKind::Local(m) | EnvKind::Block(m) if m.has_live(name) => {
                         Act::Local(e.clone())
                     }
-                    EnvKind::Global(m) if m.contains_key(name) => Act::Local(e.clone()),
+                    EnvKind::Global(m) if m.has_live(name) => Act::Local(e.clone()),
                     EnvKind::Global(_) => Act::Global,
                     // `With` déjà géré au-dessus — repli défensif
                     // identique à `Local` sans la clé.
@@ -6190,6 +6280,10 @@ impl Engine {
                     };
                     if let Some(cell) = m.get_mut(name) {
                         match cell {
+                            // JS-C502 — inatteignable (`has_live`
+                            // a filtré) : la remontée a déjà eu
+                            // lieu, ne rien écrire.
+                            EnvCell::Uninit => {}
                             // Liaison d'import — immuable côté
                             // importeur (les modules sont stricts).
                             EnvCell::Alias(..) => {
@@ -6269,7 +6363,10 @@ impl Engine {
             let mut b = env.borrow_mut();
             match &mut b.kind {
                 EnvKind::Local(m) => {
-                    if !m.contains_key(name) {
+                    // JS-C502 — `has_live` : une cellule `Uninit`
+                    // pré-déclarée est écrasée **in-place** (le
+                    // slot de la liste canonique est préservé).
+                    if !m.has_live(name) {
                         m.insert(
                             Self::intern(name),
                             EnvCell::Bind(Binding {

@@ -311,6 +311,9 @@ impl Engine {
                 if let Some(name) = &lit.name {
                     // Named function expression: name binds inside only.
                     let scope = Env::local(env.clone());
+                    // JS-C502 — slot 0 = le nom (liste canonique
+                    // du resolver cléée `Rc::as_ptr(lit)`).
+                    self.predeclare_slots(&scope, Rc::as_ptr(lit) as usize);
                     let fv = self.make_function(lit, &scope, this);
                     if let EnvKind::Local(m) = &mut scope.borrow_mut().kind {
                         // ES3 §13 / ES5 : le nom d'une

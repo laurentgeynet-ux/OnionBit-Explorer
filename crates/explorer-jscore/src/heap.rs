@@ -789,6 +789,9 @@ pub(crate) fn trace_env(env: &EnvRef, out: &mut Vec<ObjId>, visited: &mut HashSe
                             // aussi une racine — ses liaisons restent
                             // vivantes tant qu'un importeur les référence.
                             EnvCell::Alias(target, _) => stack.push(target.clone()),
+                            // Pré-déclarée non initialisée (JS-C502)
+                            // — aucune `Value` à retenir.
+                            EnvCell::Uninit => {}
                         }
                     }
                 }
@@ -2092,6 +2095,13 @@ impl BindingMap {
         self.get(name).is_some()
     }
 
+    /// `name` lié **vivant** — les cellules [`EnvCell::Uninit`]
+    /// (pré-déclarées JS-C502) comptent comme absentes.
+    pub fn has_live(&self, name: &str) -> bool {
+        self.get(name)
+            .is_some_and(|c| !matches!(c, EnvCell::Uninit))
+    }
+
     /// Insert/overwrite — promeut en `Map` au seuil (une seule
     /// fois : la table est hachée ensuite).
     pub fn insert(&mut self, name: impl Into<Rc<str>>, cell: EnvCell) {
@@ -2168,6 +2178,15 @@ pub enum EnvCell {
     /// n'est pas observable). Une fois lu, la cellule est remplacée
     /// par un `Bind` ordinaire — identité stable et chemin chaud.
     LazyArgs(std::rc::Rc<LazyArgs>),
+    /// JS-C502 — cellule **pré-déclarée non initialisée** : posée
+    /// à la création de l'env pour fixer la position (slot) d'un
+    /// nom statique. Tous les consommateurs la traitent comme
+    /// *absente* — lecture → remonte au parent, `env_set`/`var`/
+    /// `let` → écriture in-place — ce qui préserve la sémantique
+    /// « no TDZ » du moteur (un `let` lu avant sa déclaration est
+    /// simplement non trouvé, comme avant). Ne contient aucune
+    /// `Value` → rien à tracer.
+    Uninit,
 }
 
 /// Payload d'[`EnvCell::LazyArgs`] — le nécessaire à la

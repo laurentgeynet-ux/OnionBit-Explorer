@@ -49,6 +49,13 @@ use crate::ast::{
 struct Scope {
     /// Noms liés à ce niveau.
     names: HashSet<Rc<str>>,
+    /// JS-C502 — liste **canonique ordonnée** des noms quand le
+    /// site de création d'env du runtime est pré-déclaré par
+    /// slot : `order[slot] = nom`. `None` pour les portées sans
+    /// convention de slots (scope `Local` fonction — JS-C503 —
+    /// `Global`, `cenv` de classe) : leurs annotations portent
+    /// `slot = u16::MAX` (depth-only).
+    order: Option<Rc<[Rc<str>]>>,
     /// `eval`/`delete` dans ce corps de fonction : les résolutions
     /// qui atterrissent sur ce niveau ou le traversent sont
     /// sautées (le scope peut gagner des noms dynamiquement).
@@ -56,15 +63,37 @@ struct Scope {
 }
 
 impl Scope {
-    fn new(names: HashSet<Rc<str>>, poisoned: bool) -> Self {
-        Self { names, poisoned }
+    fn new(names: HashSet<Rc<str>>, order: Option<Rc<[Rc<str>]>>, poisoned: bool) -> Self {
+        Self {
+            names,
+            order,
+            poisoned,
+        }
     }
+}
+
+/// `slot` sentinelle — « depth-only » (pas de convention de
+/// slots sur ce niveau).
+const NO_SLOT: u16 = u16::MAX;
+
+/// Tables produites par [`resolve_lit`].
+pub(crate) struct ResTables {
+    /// `ptr(Expr::Ident) → (profondeur << 16) | slot`.
+    pub map: HashMap<usize, u32>,
+    /// `clé de site AST → liste canonique ordonnée des noms` —
+    /// les envs créés à ces sites sont pré-déclarés
+    /// (`EnvCell::Uninit`) dans cet ordre. Clés : `as_ptr()` du
+    /// `Vec<Stmt>`/`Vec<VarDecl>` enveloppé, `ptr(ForTarget)`,
+    /// `ptr(Stmt)` switch, `Rc::as_ptr(FnLit)` d'expression nommée.
+    pub names: HashMap<usize, Rc<[Rc<str>]>>,
 }
 
 /// Marcheur : accumule les annotations `ptr(Expr) → profondeur`.
 pub(crate) struct Resolver {
-    /// Sortie — `ptr(Expr::Ident) → niveaux à sauter`.
-    pub map: HashMap<usize, u16>,
+    /// Sortie — `ptr(Expr::Ident) → niveaux à sauter (+ slot)`.
+    pub map: HashMap<usize, u32>,
+    /// Sortie — listes canoniques par site de création d'env.
+    pub names: HashMap<usize, Rc<[Rc<str>]>>,
     /// Pile de portées — `last()` = env courant (index 0 de
     /// profondeur). Parallèle : `poisoned` par entrée.
     scopes: Vec<Scope>,
@@ -75,9 +104,10 @@ pub(crate) struct Resolver {
 /// Résout les identifiants du corps d'un `FnLit` — scope propre
 /// (paramètres + hoisting) puis descente dans les sous-portées et
 /// les fonctions imbriquées déjà `Parsed`.
-pub(crate) fn resolve_lit(lit: &FnLit, body: &[Stmt]) -> HashMap<usize, u16> {
+pub(crate) fn resolve_lit(lit: &FnLit, body: &[Stmt]) -> ResTables {
     let mut r = Resolver {
         map: HashMap::new(),
+        names: HashMap::new(),
         scopes: Vec::new(),
         suppress: 0,
     };
@@ -87,10 +117,16 @@ pub(crate) fn resolve_lit(lit: &FnLit, body: &[Stmt]) -> HashMap<usize, u16> {
         .iter()
         .any(|s| matches!(s, Stmt::Import { .. } | Stmt::Export(_)))
     {
-        return r.map;
+        return ResTables {
+            map: r.map,
+            names: r.names,
+        };
     }
     r.walk_fn(lit, body);
-    r.map
+    ResTables {
+        map: r.map,
+        names: r.names,
+    }
 }
 
 /// `eval`/`delete <ident>` dans le corps — le scope local peut
@@ -283,6 +319,69 @@ fn pat_names(p: &Pat, out: &mut HashSet<Rc<str>>) {
     );
 }
 
+/// JS-C502 — noms d'un motif en **ordre de liaison** (première
+/// occurrence dedupée) — l'ordre canonique des slots.
+fn pat_names_ord(p: &Pat, out: &mut Vec<Rc<str>>) {
+    stacker::maybe_grow(
+        crate::parser::STACK_RED_ZONE,
+        crate::parser::STACK_GROW,
+        || {
+            pat_names_ord_inner(p, out);
+        },
+    );
+}
+
+fn pat_names_ord_inner(p: &Pat, out: &mut Vec<Rc<str>>) {
+    match p {
+        Pat::Ident(n) => {
+            if !out.iter().any(|x| x == n) {
+                out.push(n.clone());
+            }
+        }
+        Pat::Lvalue(_) => {}
+        Pat::Rest(p) | Pat::Default(p, _) => pat_names_ord(p, out),
+        Pat::Array(elems) => {
+            for e in elems.iter().flatten() {
+                pat_names_ord(e, out);
+            }
+        }
+        Pat::Object { props, rest } => {
+            for (_, p) in props {
+                pat_names_ord(p, out);
+            }
+            if let Some(r) = rest {
+                pat_names_ord(r, out);
+            }
+        }
+    }
+}
+
+/// JS-C502 — noms d'un scope **bloc** ordonnés : `let`/`const`/
+/// `using`/`class` en ordre source = ordre de déclaration à
+/// l'exécution (la pré-déclare fige les positions même si des
+/// chemins sauteraient des déclarateurs).
+fn block_names_ord(stmts: &[Stmt]) -> Vec<Rc<str>> {
+    let mut out = Vec::new();
+    for s in stmts {
+        match s {
+            Stmt::Lexical { decls, .. } | Stmt::Using { decls, .. } => {
+                for d in decls {
+                    pat_names_ord(&d.pat, &mut out);
+                }
+            }
+            Stmt::ClassDecl(cl) => {
+                if let Some(n) = &cl.name {
+                    if !out.iter().any(|x| x == n) {
+                        out.push(n.clone());
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+    out
+}
+
 fn pat_names_inner(p: &Pat, out: &mut HashSet<Rc<str>>) {
     match p {
         Pat::Ident(n) => {
@@ -406,32 +505,11 @@ fn collect_names_inner(stmts: &[Stmt], out: &mut HashSet<Rc<str>>, top: bool) {
     }
 }
 
-/// Noms d'un scope **bloc** : `let`/`const`/`class`/`using` de ce
-/// niveau seulement (les `function` restent fonction-scope chez
-/// nous, `var` est déjà collecté par `collect_names`).
-fn block_names(stmts: &[Stmt]) -> HashSet<Rc<str>> {
-    let mut out = HashSet::new();
-    for s in stmts {
-        match s {
-            Stmt::Lexical { decls, .. } | Stmt::Using { decls, .. } => {
-                for d in decls {
-                    pat_names(&d.pat, &mut out);
-                }
-            }
-            Stmt::ClassDecl(cl) => {
-                if let Some(n) = &cl.name {
-                    out.insert(n.clone());
-                }
-            }
-            _ => {}
-        }
-    }
-    out
-}
-
 impl Resolver {
     /// Annotation d'un `Expr::Ident` lu — depth = nombre de
-    /// niveaux à sauter (0 = env courant).
+    /// niveaux à sauter (0 = env courant) ; `slot` = index dans
+    /// la liste canonique du niveau (`NO_SLOT` si la portée
+    /// n'est pas pré-déclarée). Valeur packée `(d<<16)|slot`.
     fn annotate(&mut self, e: &Expr, name: &Rc<str>) {
         if self.suppress > 0 || &**name == "arguments" {
             return;
@@ -446,7 +524,16 @@ impl Resolver {
                     return;
                 }
                 if let Ok(d) = u16::try_from(n - 1 - i) {
-                    self.map.insert(std::ptr::from_ref::<Expr>(e) as usize, d);
+                    let slot = self.scopes[i]
+                        .order
+                        .as_deref()
+                        .and_then(|o| o.iter().position(|x| x == name))
+                        .and_then(|p| u16::try_from(p).ok())
+                        .unwrap_or(NO_SLOT);
+                    self.map.insert(
+                        std::ptr::from_ref::<Expr>(e) as usize,
+                        ((d as u32) << 16) | slot as u32,
+                    );
                 }
                 return;
             }
@@ -456,7 +543,17 @@ impl Resolver {
     }
 
     fn push(&mut self, names: HashSet<Rc<str>>, poisoned: bool) {
-        self.scopes.push(Scope::new(names, poisoned));
+        self.scopes.push(Scope::new(names, None, poisoned));
+    }
+
+    /// JS-C502 — pousse un scope **pré-déclaré par slots** :
+    /// `site` identifie le créateur d'env côté runtime (clé de
+    /// `names`), `order` est la liste canonique ; l'ensemble est
+    /// reconstruit pour la recherche de nom.
+    fn push_slots(&mut self, site: usize, order: Rc<[Rc<str>]>, poisoned: bool) {
+        let names: HashSet<Rc<str>> = order.iter().cloned().collect();
+        self.names.insert(site, order.clone());
+        self.scopes.push(Scope::new(names, Some(order), poisoned));
     }
 
     fn pop(&mut self) {
@@ -560,9 +657,10 @@ impl Resolver {
             }
             Stmt::FunctionDecl(l) => self.enter_lit(l),
             Stmt::ClassDecl(cl) => self.walk_class(cl),
-            // `{…}` → `Env::block` inconditionnel (exec.rs:500).
+            // `{…}` → `Env::block` inconditionnel (exec.rs:534).
+            // JS-C502 : noms canoniques ordonnés → pré-déclare.
             Stmt::Block(b) => {
-                self.push(block_names(b), false);
+                self.push_slots(b.as_ptr() as usize, Rc::from(block_names_ord(b)), false);
                 self.walk_stmts(b);
                 self.pop();
             }
@@ -584,16 +682,17 @@ impl Resolver {
                 body,
             } => {
                 // `for(let…)` → tête `Env::block` (un niveau,
-                // identique pour les copies par itération).
+                // identique pour les copies par itération —
+                // exec.rs:661/747/766, même clé `decls.as_ptr()`).
                 let has_head = matches!(init, Some(ForInit::Lexical { .. }));
                 if has_head {
-                    let mut ns = HashSet::new();
+                    let mut ord = Vec::new();
                     if let Some(ForInit::Lexical { decls, .. }) = init {
                         for d in decls {
-                            pat_names(&d.pat, &mut ns);
+                            pat_names_ord(&d.pat, &mut ord);
                         }
+                        self.push_slots(decls.as_ptr() as usize, Rc::from(ord), false);
                     }
-                    self.push(ns, false);
                 }
                 match init {
                     Some(ForInit::Var(ds) | ForInit::Lexical { decls: ds, .. }) => {
@@ -653,31 +752,46 @@ impl Resolver {
             }
             Stmt::Labeled { body, .. } => self.walk_stmt(body),
 
-            // Un bloc d'env par clause (exec.rs:1020/1027/1061).
+            // Un bloc d'env par clause (exec.rs:1054/1061/1095) —
+            // chacun pré-déclaré : le catch lie son paramètre
+            // AVANT le corps → liste canonique `[pat…, lex…]`.
             Stmt::Try {
                 block,
                 catch,
                 finally,
             } => {
-                self.push(block_names(block), false);
+                self.push_slots(
+                    block.as_ptr() as usize,
+                    Rc::from(block_names_ord(block)),
+                    false,
+                );
                 self.walk_stmts(block);
                 self.pop();
                 if let Some((pat, cbody)) = catch {
-                    let mut ns = block_names(cbody);
-                    pat_names(pat, &mut ns);
-                    self.push(ns, false);
+                    let mut ord = Vec::new();
+                    pat_names_ord(pat, &mut ord);
+                    for n in block_names_ord(cbody) {
+                        if !ord.contains(&n) {
+                            ord.push(n);
+                        }
+                    }
+                    self.push_slots(cbody.as_ptr() as usize, Rc::from(ord), false);
                     self.walk_pat(pat);
                     self.walk_stmts(cbody);
                     self.pop();
                 }
                 if let Some(fbody) = finally {
-                    self.push(block_names(fbody), false);
+                    self.push_slots(
+                        fbody.as_ptr() as usize,
+                        Rc::from(block_names_ord(fbody)),
+                        false,
+                    );
                     self.walk_stmts(fbody);
                     self.pop();
                 }
             }
             // Tous les `case` partagent UN bloc déclaratif
-            // (exec.rs:1097). Les tests sont évalués avant la
+            // (exec.rs:1131). Les tests sont évalués avant la
             // création de l'env → scope englobant.
             Stmt::Switch { disc, cases } => {
                 self.walk_expr(disc);
@@ -686,21 +800,23 @@ impl Resolver {
                         self.walk_expr(t);
                     }
                 }
-                let mut ns = HashSet::new();
+                let mut ord = Vec::new();
                 for c in cases {
                     for st in &c.body {
                         if let Stmt::Lexical { decls, .. } | Stmt::Using { decls, .. } = st {
                             for d in decls {
-                                pat_names(&d.pat, &mut ns);
+                                pat_names_ord(&d.pat, &mut ord);
                             }
                         } else if let Stmt::ClassDecl(cl) = st {
                             if let Some(n) = &cl.name {
-                                ns.insert(n.clone());
+                                if !ord.iter().any(|x| x == n) {
+                                    ord.push(n.clone());
+                                }
                             }
                         }
                     }
                 }
-                self.push(ns, false);
+                self.push_slots(cases.as_ptr() as usize, Rc::from(ord), false);
                 for c in cases {
                     self.walk_stmts(&c.body);
                 }
@@ -712,11 +828,16 @@ impl Resolver {
     fn walk_for_target(&mut self, t: &ForTarget) {
         match t {
             // Cible lexicale → `Env::block` par itération
-            // (exec.rs:777/865/936).
+            // (exec.rs:811/899/970) — clé `ptr(ForTarget)`,
+            // noms = le motif en ordre de liaison.
             ForTarget::Lexical { pat, .. } | ForTarget::Using { pat, .. } => {
-                let mut ns = HashSet::new();
-                pat_names(pat, &mut ns);
-                self.push(ns, false);
+                let mut ord = Vec::new();
+                pat_names_ord(pat, &mut ord);
+                self.push_slots(
+                    std::ptr::from_ref::<ForTarget>(t) as usize,
+                    Rc::from(ord),
+                    false,
+                );
                 self.walk_pat(pat);
             }
             ForTarget::Var(p) => self.walk_pat(p),
@@ -826,12 +947,10 @@ impl Resolver {
             }
             // Function-expression nommée : `Env::local` portant le
             // nom propre entre le corps et le scope englobant
-            // (eval.rs:307).
+            // (eval.rs:313) — slot 0 = le nom.
             Expr::Function(lit) => {
                 if let Some(n) = &lit.name {
-                    let mut ns = HashSet::new();
-                    ns.insert(n.clone());
-                    self.push(ns, false);
+                    self.push_slots(Rc::as_ptr(lit) as usize, Rc::from([n.clone()]), false);
                     self.enter_lit(lit);
                     self.pop();
                 } else {

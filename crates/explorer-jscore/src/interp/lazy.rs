@@ -1810,10 +1810,16 @@ impl GExec {
                 Ok(GFlow::Adv)
             }
             Stmt::Block(l) => {
+                // JS-C502 — même clé `l.as_ptr()` que le resolver
+                // (env `Local` ici vs `Block` en sync : la
+                // pré-déclare accepte les deux, `Uninit` reste
+                // transparente à `var`).
+                let benv = Env::local(env.clone());
+                e.predeclare_slots(&benv, l.as_ptr() as usize);
                 self.stack.push(GFrame {
                     list: Rc::new(l.clone()),
                     pc: 0,
-                    env: Env::local(env.clone()),
+                    env: benv,
                     labels: Vec::new(),
                     kind: FKind::Seq,
                 });

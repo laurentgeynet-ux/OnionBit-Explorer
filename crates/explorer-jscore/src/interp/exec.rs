@@ -532,6 +532,8 @@ impl Engine {
             // les a déjà déclarés dans l'env fonction).
             Stmt::Block(stmts) => {
                 let benv = Env::block(env.clone());
+                // JS-C502 — positions de slots canoniques.
+                self.predeclare_slots(&benv, stmts.as_ptr() as usize);
                 // JS-C460 — dispatch pur : le frame du bloc ne
                 // tient rien pendant les sous-statements.
                 self.young_stack[yslot] = u64::MAX;
@@ -647,6 +649,12 @@ impl Engine {
                 // courant ; `names` = liaisons à recopier.
                 let mut names: Vec<(Rc<str>, bool)> = Vec::new();
                 let mut ienv = env.clone();
+                // JS-C502 — clé de site de la tête `for(let…)` et
+                // de ses copies par itération (même `decls`).
+                let head_key = match init {
+                    Some(ForInit::Lexical { decls, .. }) => decls.as_ptr() as usize,
+                    _ => 0,
+                };
                 if let Some(init) = init {
                     match init {
                         ForInit::Var(decls) => {
@@ -659,6 +667,7 @@ impl Engine {
                         }
                         ForInit::Lexical { decls, constant } => {
                             let head = Env::block(env.clone());
+                            self.predeclare_slots(&head, decls.as_ptr() as usize);
                             for d in decls {
                                 Self::lex_pat_names(&d.pat, !constant, &mut names);
                                 Self::declare_pat_lex(&head, &d.pat, !constant);
@@ -745,6 +754,7 @@ impl Engine {
                             // les mute (spec). `next` racinée
                             // avant l'éval.
                             let next = Env::block(env.clone());
+                            self.predeclare_slots(&next, head_key);
                             for (n, m) in &names {
                                 let v = self.env_get(&ienv, n).unwrap_or(Value::Undefined);
                                 Self::env_declare_lex(&next, n, *m);
@@ -764,6 +774,7 @@ impl Engine {
                         // Sans `update` : recopier quand même entre
                         // les tours (les closures restent distinctes).
                         let next = Env::block(env.clone());
+                        self.predeclare_slots(&next, head_key);
                         for (n, m) in &names {
                             let v = self.env_get(&ienv, n).unwrap_or(Value::Undefined);
                             Self::env_declare_lex(&next, n, *m);
@@ -808,7 +819,9 @@ impl Engine {
                     self.young_stack[yslot] = self.heap.alloc_seq();
                     let kv = self.str_val(key);
                     let ienv = if per_iter {
-                        Env::block(env.clone())
+                        let e = Env::block(env.clone());
+                        self.predeclare_slots(&e, std::ptr::from_ref(target) as usize);
+                        e
                     } else {
                         env.clone()
                     };
@@ -896,7 +909,9 @@ impl Engine {
                                 self.using_stack.push(Vec::new());
                             }
                             let ienv = if lex {
-                                Env::block(env.clone())
+                                let e = Env::block(env.clone());
+                                self.predeclare_slots(&e, std::ptr::from_ref(target) as usize);
+                                e
                             } else {
                                 env.clone()
                             };
@@ -967,7 +982,9 @@ impl Engine {
                         self.using_stack.push(Vec::new());
                     }
                     let ienv = if lex {
-                        Env::block(env.clone())
+                        let e = Env::block(env.clone());
+                        self.predeclare_slots(&e, std::ptr::from_ref(target) as usize);
+                        e
                     } else {
                         env.clone()
                     };
@@ -1052,6 +1069,7 @@ impl Engine {
                 // `try {}`/`finally {}` sont des blocs — env enfant
                 // pour leurs `let`/`const` (même règle que Block).
                 let benv = Env::block(env.clone());
+                self.predeclare_slots(&benv, block.as_ptr() as usize);
                 // JS-C460 — dispatch pur des trois corps.
                 self.young_stack[yslot] = u64::MAX;
                 let mut r = self.exec_body(&benv, this.clone(), block);
@@ -1059,6 +1077,7 @@ impl Engine {
                 if let Err(Thrown(ref v)) = r {
                     if let Some((pat, cbody)) = catch {
                         let cenv = Env::block(env.clone());
+                        self.predeclare_slots(&cenv, cbody.as_ptr() as usize);
                         // Param en liaison lexicale : `bind_pat Var`
                         // traverserait le bloc vers le scope fonction.
                         if let Err(e) = self.bind_pat(
@@ -1093,6 +1112,7 @@ impl Engine {
                         _ => false,
                     };
                     let fenv = Env::block(env.clone());
+                    self.predeclare_slots(&fenv, fbody.as_ptr() as usize);
                     self.young_stack[yslot] = u64::MAX;
                     let fr = self.exec_body(&fenv, this, fbody);
                     self.young_stack[yslot] = self.heap.alloc_seq();
@@ -1129,6 +1149,7 @@ impl Engine {
                 // bloc déclaratif (spec — `let` dans un case est
                 // visible des suivants, jamais du scope englobant).
                 let senv = Env::block(env.clone());
+                self.predeclare_slots(&senv, cases.as_ptr() as usize);
                 // JS-C421 : `dv` vit à travers les corps de cases.
                 self.safepoint_roots.push(dv);
                 let mut out = Ok(Flow::Normal);
