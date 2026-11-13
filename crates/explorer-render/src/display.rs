@@ -1547,6 +1547,11 @@ fn build_list(
         dropped: 0,
         first_cycle_path: None,
         stats,
+        us_copy: 0,
+        us_book: 0,
+        n_reuse: 0,
+        n_paint: 0,
+        n_culled: 0,
         clip_stack: Vec::new(),
         pos_floor: 0,
         defer_clips: DeferClips::new(),
@@ -1711,6 +1716,17 @@ fn build_list(
             }
         }
     }
+    tracing::info!(
+        target: "sync_profile",
+        tab = 0u64,
+        phase = "emit.parts",
+        reuse = cx.n_reuse,
+        painted = cx.n_paint,
+        culled = cx.n_culled,
+        copy_us = cx.us_copy,
+        book_us = cx.us_book,
+        "phase sync"
+    );
     DisplayList {
         items,
         width: viewport_w,
@@ -1779,6 +1795,18 @@ struct PaintCx<'a> {
     /// Collecteur de répartition §B-118 — `Some` uniquement
     /// sur les variantes `*_stats` (comptage opt-in).
     stats: Option<&'a mut EmitStats>,
+    /// R-293 — sondes d'attribution de l'émission (audit
+    /// perf archétypes) : µs dans `copy_span`+`repush_
+    /// escaped`, µs dans le bookkeeping `escaped_paths`+
+    /// `record_span`, compteurs — spans réutilisés,
+    /// peintures fraîches, sous-arbres culés `may_escape`.
+    /// Rapportés en `emit.parts` une fois par passe ; le
+    /// reste du temps d'emit = traversée + émission réelle.
+    us_copy: u64,
+    us_book: u64,
+    n_reuse: u32,
+    n_paint: u32,
+    n_culled: u32,
     /// Pile des clips `overflow` actifs — poussée au
     /// `PushClip` de `paint_box_impl`, retirée au `PopClip`
     /// (R-212) : les porteurs reportés (positionnés, inlines,
@@ -5079,6 +5107,7 @@ fn emit_scoped<'a>(
             || l + bx.rect.width + m <= 0.0
             || t + bx.rect.height + m <= 0.0
         {
+            cx.n_culled += 1;
             cx.path.pop();
             return;
         }
@@ -5093,9 +5122,13 @@ fn emit_scoped<'a>(
         ));
     }
     if let Some((d, s, sig)) = reuse_delta(bx, off, cx) {
+        let t = std::time::Instant::now();
         copy_span(bx, s, d, sig, items, off, cx);
         repush_escaped(bx, &s.escaped, cx, pos_defer, fixed_defer, None);
+        cx.us_copy += u64::try_from(t.elapsed().as_micros()).unwrap_or(u64::MAX);
+        cx.n_reuse += 1;
     } else {
+        cx.n_paint += 1;
         let start = u32::try_from(items.len()).unwrap_or(u32::MAX);
         let pbase = pos_defer.len();
         let fbase = fixed_defer.len();
@@ -5109,6 +5142,7 @@ fn emit_scoped<'a>(
         // la copie — sinon un ré-usage perd leurs items
         // (under-paint incrémental). Les inlines restent
         // internes à `paint_scoped` : couverts par la plage.
+        let t = std::time::Instant::now();
         let mut esc = escaped_paths(pos_defer, pbase, &cx.path, cx).into_vec();
         esc.extend(escaped_paths(fixed_defer, fbase, &cx.path, cx).into_vec());
         cx.record_span(
@@ -5119,6 +5153,7 @@ fn emit_scoped<'a>(
             sig,
             esc.into_boxed_slice(),
         );
+        cx.us_book += u64::try_from(t.elapsed().as_micros()).unwrap_or(u64::MAX);
     }
     if delta.is_some() {
         items.push(DisplayItem::PopTransform);
@@ -5249,9 +5284,13 @@ fn emit_scoped_at<'a>(
         ));
     }
     if let Some((d, s, sig)) = reuse_delta(bx, off, cx) {
+        let t = std::time::Instant::now();
         copy_span(bx, s, d, sig, items, off, cx);
         repush_escaped(bx, &s.escaped, cx, pos_defer, fixed_defer, None);
+        cx.us_copy += u64::try_from(t.elapsed().as_micros()).unwrap_or(u64::MAX);
+        cx.n_reuse += 1;
     } else {
+        cx.n_paint += 1;
         let start = u32::try_from(items.len()).unwrap_or(u32::MAX);
         let pbase = pos_defer.len();
         let fbase = fixed_defer.len();
@@ -5263,6 +5302,7 @@ fn emit_scoped_at<'a>(
         // §B-26 : porteurs poussés pendant la fenêtre —
         // même bookkeeping que `emit_scoped` (sans `defer`,
         // portée interne à `paint_scoped`).
+        let t = std::time::Instant::now();
         let mut esc = escaped_paths(pos_defer, pbase, &cx.path, cx).into_vec();
         esc.extend(escaped_paths(fixed_defer, fbase, &cx.path, cx).into_vec());
         cx.record_span(
@@ -5273,6 +5313,7 @@ fn emit_scoped_at<'a>(
             sig,
             esc.into_boxed_slice(),
         );
+        cx.us_book += u64::try_from(t.elapsed().as_micros()).unwrap_or(u64::MAX);
     }
     if delta.is_some() {
         items.push(DisplayItem::PopTransform);
