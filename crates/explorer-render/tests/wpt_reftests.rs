@@ -322,6 +322,7 @@ fn render(src: &str, file_dir: &Path, tag: &str) -> Option<Frame> {
         masks_url: std::collections::HashMap::new(),
         canvases: explorer_render::CanvasTable::new(),
         svg_sources: std::collections::HashMap::new(),
+        borders_url: std::collections::HashMap::new(),
     };
     let mut bx = build_box_tree_sized(&dom, root, &styles, &sizes)?;
     layout_tree(&mut bx, VIEW_W, &ctx());

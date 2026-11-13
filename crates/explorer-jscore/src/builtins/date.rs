@@ -561,3 +561,17 @@ pub(crate) fn parse_legacy_date(s: &str) -> Option<f64> {
             + mss) as f64,
     )
 }
+
+/// `d.toTemporalInstant()` — ES2026 : `Temporal.Instant` à
+/// l'epoch ms du Date (NaN → `RangeError` comme toISOString).
+pub(crate) fn date_to_temporal_instant(
+    e: &mut Engine,
+    this: Value,
+    _a: &[Value],
+) -> JsResult<Value> {
+    let ms = date_ms(e, this)?;
+    if !ms.is_finite() {
+        return Err(e.range_error("Invalid time value"));
+    }
+    crate::temporal::instant_from_f64_ms(e, ms)
+}

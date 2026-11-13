@@ -919,3 +919,386 @@ fn slice_peint_seul_au_dessus_de_la_coupe() {
     // #b déborderait son conteneur.
     assert_eq!(px(&sl, 30, 70), [0, 0, 0, 0], "clip rejoué");
 }
+
+// ── R-252 : mask de groupe (css-masking-1) ─────────────────
+
+/// L'alpha du `mask-image` s'applique à TOUT le sous-arbre :
+/// un enfant plein (pas de `background-color` propre sur le
+/// parent) ne passe que par l'alpha du mask — motif wikipedia
+/// « élément masqué dont le contenu restait visible à tort ».
+#[test]
+fn mask_de_groupe_masque_le_contenu() {
+    let dom: Dom = TreeBuilder::parse("<div class=x><div class=c></div></div>");
+    let mut eng = StyleEngine::new();
+    eng.add_css("body{margin:0}", Origin::Author);
+    // Mask 20×20 moitié gauche opaque sur le parent ; l'enfant
+    // peint un carré rouge 20×20 — seule la moitié gauche doit
+    // survivre au composite masqué.
+    eng.add_css(
+        ".x{display:block;width:20px;height:20px;\
+         mask-image:url('data:image/svg+xml;utf8,<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"20\" height=\"20\"><rect x=\"0\" y=\"0\" width=\"10\" height=\"20\" fill=\"black\"/></svg>')}\
+         .c{display:block;width:20px;height:20px;background-color:#ff0000}",
+        Origin::Author,
+    );
+    let styles = eng.compute_tree(&dom, dom.document(), &StyleEnv::default());
+    let root_el = dom
+        .children(dom.document())
+        .into_iter()
+        .flatten()
+        .find(|&c| dom.element(c).is_ok())
+        .expect("élément racine");
+    let mut bx = build_box_tree(&dom, root_el, &styles).expect("arbre");
+    layout_tree(&mut bx, VIEW, &ctx());
+    let imgs = collect_data_images(&dom, &styles, 1 << 20);
+    let list = build_display_list_full(&bx, VIEW, 200.0, 0.0, &imgs);
+    assert!(
+        list.items
+            .iter()
+            .any(|i| matches!(i, explorer_render::DisplayItem::PushMask { .. })),
+        "PushMask attendu, got {}",
+        list.dump()
+    );
+    let f = rasterize(&list, font_src(), 1.0).expect("frame allouée");
+    assert_eq!(px(&f, 5, 10)[0], 255, "contenu sous alpha opaque = rouge");
+    assert_eq!(
+        px(&f, 15, 10),
+        [255, 255, 255, 255],
+        "contenu hors alpha du mask = canvas (masqué)"
+    );
+}
+
+/// Boîte feuille « icône » (sans enfant ni ligne) : le chemin
+/// `MaskedFill` reste celui utilisé — pas de groupe offscreen
+/// pour le motif dominant (perf).
+#[test]
+fn mask_feuille_reste_maskedfill() {
+    let dom: Dom = TreeBuilder::parse("<span class=icon></span>");
+    let mut eng = StyleEngine::new();
+    eng.add_css("body{margin:0}", Origin::Author);
+    eng.add_css(
+        ".icon{display:inline-block;width:20px;height:20px;\
+         mask-image:url('data:image/svg+xml;utf8,<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"20\" height=\"20\"><rect x=\"0\" y=\"0\" width=\"10\" height=\"20\" fill=\"black\"/></svg>');\
+         background-color:#ff0000}",
+        Origin::Author,
+    );
+    let styles = eng.compute_tree(&dom, dom.document(), &StyleEnv::default());
+    let root_el = dom
+        .children(dom.document())
+        .into_iter()
+        .flatten()
+        .find(|&c| dom.element(c).is_ok())
+        .expect("élément racine");
+    let mut bx = build_box_tree(&dom, root_el, &styles).expect("arbre");
+    layout_tree(&mut bx, VIEW, &ctx());
+    let imgs = collect_data_images(&dom, &styles, 1 << 20);
+    let list = build_display_list_full(&bx, VIEW, 200.0, 0.0, &imgs);
+    assert!(
+        !list
+            .items
+            .iter()
+            .any(|i| matches!(i, explorer_render::DisplayItem::PushMask { .. })),
+        "pas de groupe sur feuille, got {}",
+        list.dump()
+    );
+}
+
+/// Shorthand `mask` : `url()` + `position/size` + `repeat` —
+/// éclaté en longhands à la cascade, consommé comme les
+/// déclarations longhand (même rendu que le longhand).
+#[test]
+fn mask_shorthand_alimente_le_groupe() {
+    let dom: Dom = TreeBuilder::parse("<div class=x><div class=c></div></div>");
+    let mut eng = StyleEngine::new();
+    eng.add_css("body{margin:0}", Origin::Author);
+    eng.add_css(
+        ".x{display:block;width:20px;height:20px;\
+         mask:url('data:image/svg+xml;utf8,<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"20\" height=\"20\"><rect x=\"0\" y=\"0\" width=\"10\" height=\"20\" fill=\"black\"/></svg>') no-repeat}\
+         .c{display:block;width:20px;height:20px;background-color:#ff0000}",
+        Origin::Author,
+    );
+    let styles = eng.compute_tree(&dom, dom.document(), &StyleEnv::default());
+    let root_el = dom
+        .children(dom.document())
+        .into_iter()
+        .flatten()
+        .find(|&c| dom.element(c).is_ok())
+        .expect("élément racine");
+    let mut bx = build_box_tree(&dom, root_el, &styles).expect("arbre");
+    layout_tree(&mut bx, VIEW, &ctx());
+    let imgs = collect_data_images(&dom, &styles, 1 << 20);
+    let list = build_display_list_full(&bx, VIEW, 200.0, 0.0, &imgs);
+    let f = rasterize(&list, font_src(), 1.0).expect("frame allouée");
+    assert_eq!(px(&f, 5, 10)[0], 255, "shorthand : alpha opaque = rouge");
+    assert_eq!(
+        px(&f, 15, 10),
+        [255, 255, 255, 255],
+        "shorthand : hors alpha = canvas"
+    );
+}
+
+/// `mask-origin:content-box` + `mask-clip:content-box` :
+/// la tuile se place dans la content box (padding ignoré)
+/// et la peinture du groupe y est bornée.
+#[test]
+fn mask_origin_clip_content_box() {
+    let dom: Dom = TreeBuilder::parse("<div class=x><div class=c></div></div>");
+    let mut eng = StyleEngine::new();
+    eng.add_css("body{margin:0}", Origin::Author);
+    // Boîte 30×30, padding 5 → content 20×20 à (5,5). Mask
+    // plein 20×20 opaque, origin+clip content-box : le mask
+    // ne couvre que x,y∈[5,25) — le carré rouge enfant
+    // (20×20 à (5,5)) survit entier, rien hors content.
+    eng.add_css(
+        ".x{display:block;width:30px;height:30px;padding:5px;box-sizing:border-box;\
+         mask-image:url('data:image/svg+xml;utf8,<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"20\" height=\"20\"><rect x=\"0\" y=\"0\" width=\"20\" height=\"20\" fill=\"black\"/></svg>');\
+         mask-origin:content-box;mask-clip:content-box}\
+         .c{display:block;width:20px;height:20px;background-color:#ff0000}",
+        Origin::Author,
+    );
+    let styles = eng.compute_tree(&dom, dom.document(), &StyleEnv::default());
+    let root_el = dom
+        .children(dom.document())
+        .into_iter()
+        .flatten()
+        .find(|&c| dom.element(c).is_ok())
+        .expect("élément racine");
+    let mut bx = build_box_tree(&dom, root_el, &styles).expect("arbre");
+    layout_tree(&mut bx, VIEW, &ctx());
+    let imgs = collect_data_images(&dom, &styles, 1 << 20);
+    let list = build_display_list_full(&bx, VIEW, 200.0, 0.0, &imgs);
+    let f = rasterize(&list, font_src(), 1.0).expect("frame allouée");
+    assert_eq!(px(&f, 10, 10)[0], 255, "content box masquée opaque = rouge");
+    assert_eq!(
+        px(&f, 2, 2),
+        [255, 255, 255, 255],
+        "zone padding = hors clip → canvas"
+    );
+}
+
+/// `mask-mode:luminance` (R-252 suite) : la couverture du
+/// groupe suit la luminance ×alpha, pas l'alpha seul —
+/// moitié gauche rouge (lum≈0,21) → assombrie, droite blanche.
+#[test]
+fn mask_luminance_groupe() {
+    let dom: Dom = TreeBuilder::parse("<div class=x><div class=c></div></div>");
+    let mut eng = StyleEngine::new();
+    eng.add_css("body{margin:0}", Origin::Author);
+    // Mask 20×20 : moitié gauche noire opaque (lum 0),
+    // droite blanche opaque (lum 1). En luminance, gauche =
+    // invisible, droite = opaque — inverse du canal alpha.
+    eng.add_css(
+        ".x{display:block;width:20px;height:20px;\
+         mask-mode:luminance;\
+         mask-image:url('data:image/svg+xml;utf8,<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"20\" height=\"20\"><rect x=\"0\" y=\"0\" width=\"10\" height=\"20\" fill=\"white\"/></svg>');\
+         mask-position:10px 0}\
+         .c{display:block;width:20px;height:20px;background-color:#ff0000}",
+        Origin::Author,
+    );
+    let styles = eng.compute_tree(&dom, dom.document(), &StyleEnv::default());
+    let root_el = dom
+        .children(dom.document())
+        .into_iter()
+        .flatten()
+        .find(|&c| dom.element(c).is_ok())
+        .expect("élément racine");
+    let mut bx = build_box_tree(&dom, root_el, &styles).expect("arbre");
+    layout_tree(&mut bx, VIEW, &ctx());
+    let imgs = collect_data_images(&dom, &styles, 1 << 20);
+    let list = build_display_list_full(&bx, VIEW, 200.0, 0.0, &imgs);
+    let f = rasterize(&list, font_src(), 1.0).expect("frame allouée");
+    assert_eq!(
+        px(&f, 5, 10),
+        [255, 255, 255, 255],
+        "luminance : moitié noire du mask = invisible"
+    );
+    assert_eq!(px(&f, 15, 10)[0], 255, "luminance : blanc = opaque");
+}
+
+/// Multi-couches `mask-image` (R-252 suite) : couverture =
+/// union `add` — deux demi-masks complémentaires recomposent
+/// la boîte entière.
+#[test]
+fn mask_multi_couches_union() {
+    let dom: Dom = TreeBuilder::parse("<div class=x><div class=c></div></div>");
+    let mut eng = StyleEngine::new();
+    eng.add_css("body{margin:0}", Origin::Author);
+    // Couche 0 = moitié gauche, couche 1 = moitié droite
+    // (même bitmap, décalée) → union = boîte opaque entière.
+    eng.add_css(
+        ".x{display:block;width:20px;height:20px;\
+         mask-image:url('data:image/svg+xml;utf8,<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"20\" height=\"20\"><rect x=\"0\" y=\"0\" width=\"10\" height=\"20\" fill=\"black\"/></svg>'),url('data:image/svg+xml;utf8,<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"20\" height=\"20\"><rect x=\"10\" y=\"0\" width=\"10\" height=\"20\" fill=\"black\"/></svg>')}\
+         .c{display:block;width:20px;height:20px;background-color:#ff0000}",
+        Origin::Author,
+    );
+    let styles = eng.compute_tree(&dom, dom.document(), &StyleEnv::default());
+    let root_el = dom
+        .children(dom.document())
+        .into_iter()
+        .flatten()
+        .find(|&c| dom.element(c).is_ok())
+        .expect("élément racine");
+    let mut bx = build_box_tree(&dom, root_el, &styles).expect("arbre");
+    layout_tree(&mut bx, VIEW, &ctx());
+    let imgs = collect_data_images(&dom, &styles, 1 << 20);
+    let list = build_display_list_full(&bx, VIEW, 200.0, 0.0, &imgs);
+    let f = rasterize(&list, font_src(), 1.0).expect("frame allouée");
+    assert_eq!(px(&f, 5, 10)[0], 255, "couche 0 : gauche opaque");
+    assert_eq!(px(&f, 15, 10)[0], 255, "couche 1 : droite opaque — union");
+}
+
+/// `text-orientation:sideways` en flux vertical : le run
+/// est bracketé d'une rotation ±90° (PushTransform/Pop)
+/// autour de la baseline — `upright`/`mixed` inchangés.
+#[test]
+fn text_orientation_sideways_brackete() {
+    let dom: Dom = TreeBuilder::parse("<div class=v>ab</div><div class=h>cd</div>");
+    let mut eng = StyleEngine::new();
+    eng.add_css("body{margin:0}", Origin::Author);
+    eng.add_css(
+        ".v{display:block;writing-mode:vertical-rl;text-orientation:sideways}\
+         .h{display:block;writing-mode:vertical-rl;text-orientation:mixed}",
+        Origin::Author,
+    );
+    let styles = eng.compute_tree(&dom, dom.document(), &StyleEnv::default());
+    let root_el = dom
+        .children(dom.document())
+        .into_iter()
+        .flatten()
+        .find(|&c| dom.element(c).is_ok())
+        .expect("élément racine");
+    let mut bx = build_box_tree(&dom, root_el, &styles).expect("arbre");
+    layout_tree(&mut bx, VIEW, &ctx());
+    let imgs = collect_data_images(&dom, &styles, 1 << 20);
+    let list = build_display_list_full(&bx, VIEW, 200.0, 0.0, &imgs);
+    // Motif sideways : PushTransform suivi directement d'un
+    // Text puis PopTransform (le flow_transform R-183, lui,
+    // encadre toute la sous-arbre — on isole le triplet).
+    let items = &list.items;
+    let bracketed = items
+        .windows(3)
+        .filter(|w| {
+            matches!(w[0], explorer_render::DisplayItem::PushTransform(_))
+                && matches!(w[1], explorer_render::DisplayItem::Text { .. })
+                && matches!(w[2], explorer_render::DisplayItem::PopTransform)
+        })
+        .count();
+    // `.v` sideways = 1 triplet run-entier ; `.h` mixed
+    // (défaut spec) = 1 triplet par glyphe latin (« cd » → 2).
+    assert_eq!(
+        bracketed, 3,
+        "sideways run + mixed par glyphe ({bracketed})"
+    );
+}
+
+/// `text-orientation:upright` : chaque glyphe est un `Text`
+/// séparé empilé verticalement (avance = font-size) —
+/// `mixed` inchangé (résidu).
+#[test]
+fn text_orientation_upright_per_glyph() {
+    let dom: Dom = TreeBuilder::parse("<div class=v>ab</div>");
+    let mut eng = StyleEngine::new();
+    eng.add_css("body{margin:0}", Origin::Author);
+    eng.add_css(
+        ".v{display:block;writing-mode:vertical-rl;text-orientation:upright}",
+        Origin::Author,
+    );
+    let styles = eng.compute_tree(&dom, dom.document(), &StyleEnv::default());
+    let root_el = dom
+        .children(dom.document())
+        .into_iter()
+        .flatten()
+        .find(|&c| dom.element(c).is_ok())
+        .expect("élément racine");
+    let mut bx = build_box_tree(&dom, root_el, &styles).expect("arbre");
+    layout_tree(&mut bx, VIEW, &ctx());
+    let imgs = collect_data_images(&dom, &styles, 1 << 20);
+    let list = build_display_list_full(&bx, VIEW, 200.0, 0.0, &imgs);
+    let texts = list
+        .items
+        .iter()
+        .filter(|i| matches!(i, explorer_render::DisplayItem::Text { .. }))
+        .count();
+    assert_eq!(texts, 2, "« ab » = 2 glyphes empilés : {texts}");
+}
+
+/// `text-orientation:mixed` : glyphe CJK debout (pas de
+/// transform), glyphe Latin pivoté — par glyphe.
+#[test]
+fn text_orientation_mixed_per_glyph() {
+    let dom: Dom = TreeBuilder::parse("<div class=v>a\u{65e5}</div>");
+    let mut eng = StyleEngine::new();
+    eng.add_css("body{margin:0}", Origin::Author);
+    eng.add_css(
+        ".v{display:block;writing-mode:vertical-rl;text-orientation:mixed}",
+        Origin::Author,
+    );
+    let styles = eng.compute_tree(&dom, dom.document(), &StyleEnv::default());
+    let root_el = dom
+        .children(dom.document())
+        .into_iter()
+        .flatten()
+        .find(|&c| dom.element(c).is_ok())
+        .expect("élément racine");
+    let mut bx = build_box_tree(&dom, root_el, &styles).expect("arbre");
+    layout_tree(&mut bx, VIEW, &ctx());
+    let imgs = collect_data_images(&dom, &styles, 1 << 20);
+    let list = build_display_list_full(&bx, VIEW, 200.0, 0.0, &imgs);
+    // Le triplet Push→Text→Pop = le glyphe Latin couché ;
+    // l'autre Text (CJK) est nu.
+    let items = &list.items;
+    let rotated = items
+        .windows(3)
+        .filter(|w| {
+            matches!(w[0], explorer_render::DisplayItem::PushTransform(_))
+                && matches!(w[1], explorer_render::DisplayItem::Text { .. })
+                && matches!(w[2], explorer_render::DisplayItem::PopTransform)
+        })
+        .count();
+    let texts = items
+        .iter()
+        .filter(|i| matches!(i, explorer_render::DisplayItem::Text { .. }))
+        .count();
+    assert_eq!(
+        (texts, rotated),
+        (2, 1),
+        "1 CJK debout + 1 latin pivoté : {texts} texts/{rotated} rotés"
+    );
+}
+
+#[test]
+fn corner_shape_change_la_geometrie_peinte() {
+    // R-270 — `corner-shape` plie le chemin du coin (r=15
+    // sur boîte 40×40). Le remplissage garde l'intérieur de
+    // la superellipse centrée en (15,15) : sondes chacune
+    // discriminante vs `round` (arc à d≈4.4 en diagonale) —
+    // `bevel` retire la corde (6,6 vide), `square` garde le
+    // coin (1,1 plein), `squircle` aplatit (4,4 plein),
+    // `scoop` creuse en concave (10,10 vide), `notch` coupe
+    // jusqu'au centre (14,14 vide).
+    // Canal vert : 0 = plein rouge, 255 = blanc (fond frame).
+    let probe = |shape: &str, x: u32, y: u32| {
+        let f = frame(
+            "<div></div>",
+            &format!(
+                "div {{ width:40px; height:40px; background:#f00; \
+                 border-radius:15px; corner-shape:{shape} }}"
+            ),
+        );
+        px(&f, x, y)[1]
+    };
+    // Chaque forme peint bien quelque chose (20,20 = hors
+    // de tout carré de coin → plein quel que soit `e`).
+    for s in ["round", "bevel", "square", "squircle", "notch", "scoop"] {
+        assert!(probe(s, 20, 20) < 60, "{s} : 20,20 plein attendu");
+    }
+    // Témoins `round` (historique).
+    assert!(probe("round", 3, 3) > 200, "round 3,3 vide attendu");
+    assert!(probe("round", 6, 6) < 60, "round 6,6 plein attendu");
+    // Convexes.
+    assert!(probe("bevel", 6, 6) > 200, "bevel retire la corde");
+    assert!(probe("square", 1, 1) < 60, "square = coin franc");
+    assert!(probe("squircle", 4, 4) < 60, "squircle aplatit vs round");
+    // Concaves.
+    assert!(probe("notch", 14, 14) > 200, "notch coupe au centre");
+    assert!(probe("scoop", 10, 10) > 200, "scoop creuse vs round");
+}

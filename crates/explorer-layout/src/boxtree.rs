@@ -348,7 +348,10 @@ pub fn build_box_tree_sized<S: ::std::hash::BuildHasher>(
     // pré-calculé sur l'ordre du document (une passe) et
     // porté par le worker récursif.
     let envs = compute_counter_envs(dom, dom.document(), styles);
-    let mut bx = build_box_tree_env(dom, root, styles, sizes, &envs);
+    // R-276 — profondeur `quotes` document-ordre (même
+    // patron que `envs` : pré-passe, portée par le worker).
+    let qdepth = compute_quote_depths(dom, dom.document(), styles);
+    let mut bx = build_box_tree_env(dom, root, styles, sizes, &envs, &qdepth);
     // R-177 — la racine n'est pas couverte par `child_boxes` :
     // ses pseudos `::marker`/`::first-line`/`::first-letter`
     // se figent ici, puis les `first-*` des éléments se prêtent
@@ -488,6 +491,7 @@ fn build_box_tree_env<S: ::std::hash::BuildHasher>(
     styles: &StyleMap,
     sizes: &std::collections::HashMap<NodeId, (f32, f32), S>,
     envs: &HashMap<NodeId, HashMap<String, i32>>,
+    qdepth: &HashMap<NodeId, (i32, i32)>,
 ) -> Option<LayoutBox> {
     let style = styles.get(root)?.clone();
     if style.get("display") == Some("none") {
@@ -579,10 +583,29 @@ fn build_box_tree_env<S: ::std::hash::BuildHasher>(
             Some(sizes.get(&root).copied().unwrap_or(fallback)),
         ));
     }
+    // R-251 — `content-visibility`/`contain: size` +
+    // `contain-intrinsic-*` : la boîte devient **remplacée
+    // taille déclarée** — les enfants ne sont pas boxifiés
+    // (skip — l'effet rendu est une taille intrinsèque
+    // forcée, `contain` strict `size` seul suffit aussi).
+    if is_contained_skip(&style) {
+        let (w, h) = contain_intrinsic(&style);
+        if w.is_some() || h.is_some() {
+            return Some(leaf_box(
+                box_kind_of(&style),
+                root,
+                style.clone(),
+                Some((
+                    w.unwrap_or_else(|| sizes.get(&root).map_or(0.0, |s| s.0)),
+                    h.unwrap_or_else(|| sizes.get(&root).map_or(0.0, |s| s.1)),
+                )),
+            ));
+        }
+    }
     // `<object>` (R-13c) : élément **remplacé** si sa ressource
     // est résolue, sinon ses **enfants se substituent**.
     if dom.tag_name(root).is_ok_and(|t| t == "object") {
-        return Some(object_box(dom, root, &style, styles, sizes, envs));
+        return Some(object_box(dom, root, &style, styles, sizes, envs, qdepth));
     }
     // Contrôles de formulaire (étape 38) : `input`/`select` —
     // la valeur peinte est synthétisée en enfant `Text` (la
@@ -646,7 +669,7 @@ fn build_box_tree_env<S: ::std::hash::BuildHasher>(
             .cloned(),
         flow_mode: explorer_css::value::WritingMode::HorizontalTb,
     };
-    let children = child_boxes(dom, root, styles, &style, sizes, envs);
+    let children = child_boxes(dom, root, styles, &style, sizes, envs, qdepth);
     b.children = wrap_children(children, &style, kind);
     Some(b)
 }
@@ -665,14 +688,35 @@ fn box_kind_of(style: &ComputedStyle) -> BoxKind {
     // `list-item` n'est pas dans la table de blockification
     // (sa puce survit au positionnement).
     match style.get_or("display", "inline") {
-        "inline" | "inline-block" | "inline-table" | "inline-flex" | "inline-grid"
+        // `display:ruby` (css-ruby-1) : niveau inline — la
+        // famille `ruby*` est approchée `inline` (annotation
+        // `rt` posée en ligne dans le flux, pas au-dessus de
+        // la base — résidu documenté, meilleur que le repli
+        // `block` qui cassait la phrase).
+        "inline"
+        | "inline-block"
+        | "inline-table"
+        | "inline-flex"
+        | "inline-grid"
+        | "ruby"
+        | "ruby-base"
+        | "ruby-text"
+        | "ruby-text-container"
+        | "ruby-base-container"
             if matches!(style.get("position"), Some("absolute" | "fixed")) =>
         {
             BoxKind::Block
         }
-        "inline" | "inline-block" | "inline-table" | "inline-flex" | "inline-grid" => {
-            BoxKind::Inline
-        }
+        "inline"
+        | "inline-block"
+        | "inline-table"
+        | "inline-flex"
+        | "inline-grid"
+        | "ruby"
+        | "ruby-base"
+        | "ruby-text"
+        | "ruby-text-container"
+        | "ruby-base-container" => BoxKind::Inline,
         "list-item" => BoxKind::ListItem,
         // block, table* et tout l'inconnu → bloc (repli).
         _ => BoxKind::Block,
@@ -697,6 +741,7 @@ fn child_boxes<S: ::std::hash::BuildHasher>(
     parent_style: &ComputedStyle,
     sizes: &std::collections::HashMap<NodeId, (f32, f32), S>,
     envs: &HashMap<NodeId, HashMap<String, i32>>,
+    qdepth: &HashMap<NodeId, (i32, i32)>,
 ) -> Vec<LayoutBox> {
     let is_slot = dom
         .tag_name(parent)
@@ -726,6 +771,7 @@ fn child_boxes<S: ::std::hash::BuildHasher>(
         parent,
         PseudoElement::Before,
         envs.get(&parent),
+        qdepth.get(&parent).map_or(0, |d| d.0),
     ) {
         out.push(b);
     }
@@ -768,6 +814,7 @@ fn child_boxes<S: ::std::hash::BuildHasher>(
                         styles.get(child).unwrap_or(parent_style),
                         sizes,
                         envs,
+                        qdepth,
                     )
                 });
                 out.extend(inner);
@@ -776,9 +823,9 @@ fn child_boxes<S: ::std::hash::BuildHasher>(
             // Récursion ∝ profondeur DOM — pile garantie
             // (R-24 : `host-nest3000` ne doit plus tuer le
             // worker).
-            if let Some(mut b) =
-                explorer_common::deep(|| build_box_tree_env(dom, child, styles, sizes, envs))
-            {
+            if let Some(mut b) = explorer_common::deep(|| {
+                build_box_tree_env(dom, child, styles, sizes, envs, qdepth)
+            }) {
                 // `<br>` : saut de ligne forcé — texte sentinelle
                 // U+2028 LINE SEPARATOR, que l'itemisation UAX #14
                 // coupe durement (`ends_hard_break`). Choisi plutôt
@@ -809,10 +856,18 @@ fn child_boxes<S: ::std::hash::BuildHasher>(
             // éléments en-ligne (`<b>x</b> <b>y</b>`). C'est
             // `wrap_anonymous` qui les tronque en bord de run.
             if !text.is_empty() {
+                let mut tstyle = parent_style.clone();
+                // R-275 — `hyphens:auto` : la langue se résout
+                // au plus proche `lang`/`xml:lang` ancêtre
+                // (même règle que `:lang`, selector.rs) —
+                // pseudo-prop `x-lang` pour l'itemisation.
+                if let Some(l) = inherited_lang(dom, child) {
+                    tstyle.set("x-lang", &l);
+                }
                 out.push(LayoutBox {
                     kind: BoxKind::Text,
                     node: Some(child),
-                    style: parent_style.clone(),
+                    style: tstyle,
                     text: Some(text.to_string()),
                     children: Vec::new(),
                     lines: Vec::new(),
@@ -840,7 +895,14 @@ fn child_boxes<S: ::std::hash::BuildHasher>(
         }
     }
     // `::after` en fin de contenu.
-    if let Some(b) = pseudo_box(dom, styles, parent, PseudoElement::After, envs.get(&parent)) {
+    if let Some(b) = pseudo_box(
+        dom,
+        styles,
+        parent,
+        PseudoElement::After,
+        envs.get(&parent),
+        qdepth.get(&parent).map_or(0, |d| d.1),
+    ) {
         out.push(b);
     }
     // R-177 — pseudos appliqués : `::marker`/`::first-line`/
@@ -998,9 +1060,10 @@ fn pseudo_box(
     node: NodeId,
     which: explorer_css::PseudoElement,
     env: Option<&HashMap<String, i32>>,
+    depth: i32,
 ) -> Option<LayoutBox> {
     let st = styles.pseudo(node, which)?;
-    let text = pseudo_content(st.get("content")?, dom, node, env)?;
+    let text = pseudo_content(st.get("content")?, dom, node, env, depth, st)?;
     let kind = box_kind_of(st);
     let mut bx = leaf_box_anon(kind, st.clone());
     if !text.is_empty() {
@@ -1022,11 +1085,14 @@ fn pseudo_box(
 /// `'…'`/`"…"` ; `none`/`normal` ou valeurs non couvertes
 /// → `None` (pas de boîte). `""` → boîte vide (ses
 /// bordures/dimensions peignent quand même — Acid2 nose).
+#[allow(clippy::too_many_lines)]
 fn pseudo_content(
     raw: &str,
     dom: &Dom,
     node: NodeId,
     env: Option<&HashMap<String, i32>>,
+    depth: i32,
+    st: &ComputedStyle,
 ) -> Option<String> {
     let t = raw.trim();
     if t.eq_ignore_ascii_case("none") || t.eq_ignore_ascii_case("normal") {
@@ -1067,10 +1133,37 @@ fn pseudo_content(
     // le flux (attr entre deux chaînes concatène entre
     // elles). `attr(name type, fallback)` : le premier
     // token seul est lu (type/fallback non supportés).
+    let mut depth = depth;
     loop {
         let qpos = rest.find(['\'', '"']);
         let apos = rest.find("attr(");
         let cpos = rest.find("counter");
+        // Mots-clés guillemets (css-content-3 §6.1, R-276) :
+        // `open-quote` émet puis +1, `close-quote` −1 puis
+        // émet, `no-*-quote` déplace sans émettre. La paire
+        // vient de `quotes` sur le style du pseudo (hérité).
+        if let Some((k, kw)) = find_quote_kw(rest) {
+            let earliest = qpos.is_none_or(|q| k < q)
+                && apos.is_none_or(|a| k < a)
+                && cpos.is_none_or(|c| k < c);
+            if earliest {
+                let quotes = st.get("quotes");
+                match kw {
+                    "open-quote" => {
+                        out.push_str(&quote_pair(quotes, depth).0);
+                        depth += 1;
+                    }
+                    "no-open-quote" => depth += 1,
+                    "close-quote" => {
+                        depth -= 1;
+                        out.push_str(&quote_pair(quotes, depth).1);
+                    }
+                    _ => depth -= 1,
+                }
+                rest = &rest[k + kw.len()..];
+                continue;
+            }
+        }
         // `counter(name [,style])` / `counters(name,
         // sep [,style])` (R-169) : valeur de l'env des
         // compteurs de l'élément — `counters` rendu comme
@@ -1134,6 +1227,171 @@ fn pseudo_content(
     }
 }
 
+/// Premier mot-clé guillemets de `content` (`open-quote`,
+/// `close-quote`, `no-open-quote`, `no-close-quote`) avec
+/// frontières d'identifiant — `x-open-quote` ni
+/// `open-quotex` ne comptent.
+fn find_quote_kw(rest: &str) -> Option<(usize, &'static str)> {
+    const KW: [&str; 4] = [
+        "no-open-quote",
+        "no-close-quote",
+        "open-quote",
+        "close-quote",
+    ];
+    let mut best: Option<(usize, &'static str)> = None;
+    for kw in KW {
+        let mut at = 0usize;
+        while let Some(p) = rest[at..].find(kw) {
+            let p = at + p;
+            let before_ok = p == 0 || !is_ident(rest.as_bytes()[p - 1]);
+            let after_ok = rest
+                .as_bytes()
+                .get(p + kw.len())
+                .is_none_or(|&b| !is_ident(b));
+            if before_ok && after_ok {
+                if best.is_none_or(|(bp, _)| p < bp) {
+                    best = Some((p, kw));
+                }
+                break;
+            }
+            at = p + 1;
+        }
+    }
+    best
+}
+
+/// Caractère d'identifiant CSS (les mots-clés guillemets
+/// exigent des frontières nettes — cf. [`find_quote_kw`]).
+fn is_ident(b: u8) -> bool {
+    b.is_ascii_alphanumeric() || b == b'-' || b == b'_'
+}
+
+/// Paire (ouvrant, fermant) de `quotes` à la profondeur `d`
+/// (css-content-3 §6.1) : `auto` → paires latines usuelles
+/// (`“…”` puis `‘…’`) ; `none` → chaînes vides mais la
+/// profondeur avance ; liste explicite → la dernière paire
+/// se répète au-delà (la profondeur négative borne à 0).
+#[allow(
+    clippy::cast_sign_loss,
+    clippy::cast_possible_truncation,
+    clippy::cast_possible_wrap
+)]
+fn quote_pair(quotes: Option<&str>, depth: i32) -> (String, String) {
+    let pairs: Vec<(String, String)> = match quotes.map(str::trim) {
+        Some("none") => return (String::new(), String::new()),
+        Some(v) if v != "auto" => {
+            let mut strs = Vec::new();
+            let mut rest = v;
+            while let Some(p) = rest.find(['\'', '"']) {
+                let q = rest.as_bytes()[p] as char;
+                let Some(e) = rest[p + 1..].find(q) else {
+                    break;
+                };
+                strs.push(rest[p + 1..p + 1 + e].to_string());
+                rest = &rest[p + 1 + e + 1..];
+            }
+            strs.chunks(2)
+                .filter(|c| c.len() == 2)
+                .map(|c| (c[0].clone(), c[1].clone()))
+                .collect()
+        }
+        _ => vec![
+            ("\u{201c}".into(), "\u{201d}".into()),
+            ("\u{2018}".into(), "\u{2019}".into()),
+        ],
+    };
+    if pairs.is_empty() {
+        return (String::new(), String::new());
+    }
+    let i = depth.clamp(0, (pairs.len() - 1) as i32) as usize;
+    pairs[i].clone()
+}
+
+/// Delta de profondeur du `content` d'un pseudo — même
+/// sémantique que la boucle de [`pseudo_content`], sans
+/// l'émission (les chaînes littérales sont sautées).
+fn quote_delta(raw: &str) -> i32 {
+    let mut d = 0i32;
+    let bytes = raw.as_bytes();
+    let mut i = 0usize;
+    while i < bytes.len() {
+        let b = bytes[i];
+        if b == b'"' || b == b'\'' {
+            i += 1;
+            while i < bytes.len() && bytes[i] != b {
+                i += 1;
+            }
+            i += 1;
+            continue;
+        }
+        if i == 0 || !is_ident(bytes[i - 1]) {
+            for kw in [
+                "no-open-quote",
+                "no-close-quote",
+                "open-quote",
+                "close-quote",
+            ] {
+                if raw[i..].starts_with(kw)
+                    && raw
+                        .as_bytes()
+                        .get(i + kw.len())
+                        .is_none_or(|&c| !is_ident(c))
+                {
+                    d += if kw.contains("open") { 1 } else { -1 };
+                    i += kw.len() - 1;
+                    break;
+                }
+            }
+        }
+        i += 1;
+    }
+    d
+}
+
+/// Profondeur `quotes` par `NodeId` (R-276) : pré-passe en
+/// ordre du document — `(avant ::before, avant ::after)` par
+/// élément. La profondeur monte/descend avec les mots-clés
+/// rencontrés (css-content-3 §6.1 : `open-quote` et
+/// `no-open-quote` = +1 après/à l'émission, `close-quote` et
+/// `no-close-quote` = −1 avant).
+fn compute_quote_depths(dom: &Dom, root: NodeId, styles: &StyleMap) -> HashMap<NodeId, (i32, i32)> {
+    let mut depths = HashMap::new();
+    let mut depth = 0i32;
+    quote_walk(dom, root, styles, &mut depth, &mut depths);
+    depths
+}
+
+/// Bras récursif de [`compute_quote_depths`] — pile garantie
+/// (R-24, même patron que [`counter_walk`]).
+fn quote_walk(
+    dom: &Dom,
+    node: NodeId,
+    styles: &StyleMap,
+    depth: &mut i32,
+    depths: &mut HashMap<NodeId, (i32, i32)>,
+) {
+    if dom.element(node).is_ok() {
+        let before = *depth;
+        *depth += styles
+            .pseudo(node, PseudoElement::Before)
+            .and_then(|st| st.get("content"))
+            .map_or(0, quote_delta);
+        for c in dom.children(node).unwrap_or_default() {
+            explorer_common::deep(|| quote_walk(dom, c, styles, depth, depths));
+        }
+        let after = *depth;
+        *depth += styles
+            .pseudo(node, PseudoElement::After)
+            .and_then(|st| st.get("content"))
+            .map_or(0, quote_delta);
+        depths.insert(node, (before, after));
+    } else if let Ok(ch) = dom.children(node) {
+        for c in ch {
+            explorer_common::deep(|| quote_walk(dom, c, styles, depth, depths));
+        }
+    }
+}
+
 /// Feuille sans `node` (pseudo-éléments) — même gabarit que
 /// [`leaf_box`].
 fn leaf_box_anon(kind: BoxKind, style: ComputedStyle) -> LayoutBox {
@@ -1161,7 +1419,7 @@ fn leaf_box_anon(kind: BoxKind, style: ComputedStyle) -> LayoutBox {
         first_letter: None,
         quirks_mode: false,
         is_body: false,
-                    counter: None,
+        counter: None,
         flow_mode: explorer_css::value::WritingMode::HorizontalTb,
     }
 }
@@ -1396,7 +1654,7 @@ fn flush_run(out: &mut Vec<LayoutBox>, run: &mut Vec<LayoutBox>, style: &Compute
             first_letter: None,
             quirks_mode: false,
             is_body: false,
-                    counter: None,
+            counter: None,
             flow_mode: explorer_css::value::WritingMode::HorizontalTb,
         });
     }
@@ -1493,6 +1751,7 @@ fn object_box(
     styles: &StyleMap,
     sizes: &std::collections::HashMap<NodeId, (f32, f32), impl ::std::hash::BuildHasher>,
     envs: &HashMap<NodeId, HashMap<String, i32>>,
+    qdepth: &HashMap<NodeId, (i32, i32)>,
 ) -> LayoutBox {
     let kind = box_kind_of(style);
     let mut b = LayoutBox {
@@ -1519,16 +1778,65 @@ fn object_box(
         first_letter: None,
         quirks_mode: false,
         is_body: false,
-                    counter: None,
+        counter: None,
         flow_mode: explorer_css::value::WritingMode::HorizontalTb,
     };
     // Ressource résolue → feuille remplacée ; sinon les
     // enfants prennent la place de l'objet.
     if b.intrinsic.is_none() {
-        let children = child_boxes(dom, root, styles, style, sizes, envs);
+        let children = child_boxes(dom, root, styles, style, sizes, envs, qdepth);
         b.children = wrap_children(children, style, kind);
     }
     b
+}
+
+/// R-251 — la boîte doit-elle sauter son contenu pour une
+/// taille intrinsèque déclarée ? `contain: size|strict` OU
+/// `content-visibility: auto|hidden` (css-contain-2 §4).
+fn is_contained_skip(style: &explorer_css::ComputedStyle) -> bool {
+    let contained = style.get("contain").is_some_and(|v| {
+        v.split_ascii_whitespace()
+            .any(|t| matches!(t, "size" | "strict"))
+    });
+    let cv = style.get("content-visibility").is_some_and(|v| {
+        let t = v.trim();
+        t == "auto" || t == "hidden"
+    });
+    contained || cv
+}
+
+/// `contain-intrinsic-size`/`contain-intrinsic-{width,height}`
+/// — `(w, h)` en px (une valeur `auto` ou absente → `None`,
+/// repli sur la taille intrinsèque naturelle).
+/// `contain-intrinsic-size: <w> <h>` et les longhands
+/// `{width,height}`/`{block,inline}-size` (axis-mapped ici
+/// en horizontal-tb — `block-size`→h, `inline-size`→w).
+fn contain_intrinsic(style: &explorer_css::ComputedStyle) -> (Option<f32>, Option<f32>) {
+    let px = |v: &str| {
+        v.trim()
+            .strip_suffix("px")
+            .and_then(|n| n.parse::<f32>().ok())
+    };
+    let mut w = style.get("contain-intrinsic-width").and_then(px);
+    let mut h = style.get("contain-intrinsic-height").and_then(px);
+    if w.is_none() {
+        w = style.get("contain-intrinsic-inline-size").and_then(px);
+    }
+    if h.is_none() {
+        h = style.get("contain-intrinsic-block-size").and_then(px);
+    }
+    if w.is_none() || h.is_none() {
+        if let Some(v) = style.get("contain-intrinsic-size") {
+            let mut it = v.split_whitespace().filter(|p| *p != "auto");
+            if w.is_none() {
+                w = it.next().and_then(px);
+            }
+            if h.is_none() {
+                h = it.next().and_then(px).or(w);
+            }
+        }
+    }
+    (w, h)
 }
 
 fn svg_intrinsic(dom: &Dom, node: NodeId) -> (f32, f32) {
@@ -1595,16 +1903,15 @@ fn img_box<S: ::std::hash::BuildHasher>(
         // dimensions — `alt` est un texte de secours, pas
         // la géométrie). `input[type=image]` garde le
         // repli `alt` : là, c'est le libellé du bouton.
-        None if dom.tag_name(node).is_ok_and(|t| t == "img")
-            && {
-                let sized = |p: &str| {
-                    style.get(p).is_some_and(|v| {
-                        let v = v.trim();
-                        v != "auto" && !v.ends_with('%')
-                    })
-                };
-                sized("width") || sized("height")
-            } =>
+        None if dom.tag_name(node).is_ok_and(|t| t == "img") && {
+            let sized = |p: &str| {
+                style.get(p).is_some_and(|v| {
+                    let v = v.trim();
+                    v != "auto" && !v.ends_with('%')
+                })
+            };
+            sized("width") || sized("height")
+        } =>
         {
             (box_kind_of(&style), None)
         }
@@ -1648,7 +1955,7 @@ fn leaf_box(
         first_letter: None,
         quirks_mode: false,
         is_body: false,
-                    counter: None,
+        counter: None,
         flow_mode: explorer_css::value::WritingMode::HorizontalTb,
     }
 }
@@ -1835,6 +2142,11 @@ fn counter_walk(
             for (n, v) in counter_pairs(st.get("counter-reset"), 0) {
                 env.insert(n, v);
             }
+            // `counter-set` (css-lists-3) : set absolu, pas
+            // l'incrément de `counter-increment`.
+            for (n, v) in counter_pairs(st.get("counter-set"), 1) {
+                env.insert(n, v);
+            }
             for (n, v) in counter_pairs(st.get("counter-increment"), 1) {
                 *env.entry(n).or_insert(0) += v;
             }
@@ -1912,6 +2224,26 @@ fn counter_roman(n: i32, upper: bool) -> String {
     }
 }
 
+/// R-275 — `lang`/`xml:lang` héritée : attribut le plus
+/// proche en remontant depuis `node` (même règle que
+/// `:lang`, selector.rs — `hyphens:auto` la lit en
+/// `x-lang`).
+fn inherited_lang(dom: &Dom, node: NodeId) -> Option<String> {
+    let mut cur = Some(node);
+    while let Some(n) = cur {
+        for attr in ["lang", "xml:lang"] {
+            if let Ok(Some(l)) = dom.attribute(n, attr) {
+                let l = l.trim();
+                if !l.is_empty() {
+                    return Some(l.to_string());
+                }
+            }
+        }
+        cur = dom.parent(n).ok().flatten();
+    }
+    None
+}
+
 /// Mesures des conteneurs `@container` (R-190 — css-contain-3,
 /// passe 2) : `NodeId` → border-box posée + noms
 /// `container-name`. Une boîte est conteneur si son
@@ -1930,11 +2262,22 @@ pub fn measure_containers(
     while let Some(bx) = stack.pop() {
         if let Some(n) = bx.node {
             let ty = bx.style.get("container-type").unwrap_or("normal");
-            if matches!(ty.trim(), "size" | "inline-size") && !bx.kind.is_inline_level() {
+            // R-274 — token-wise : `inline-size scroll-state`
+            // reste un size container (css-conditional-5) ;
+            // `scroll-state` seul n'en est pas un.
+            let is_size = ty
+                .split_whitespace()
+                .any(|t| matches!(t, "size" | "inline-size"));
+            if is_size && !bx.kind.is_inline_level() {
                 let names = bx
                     .style
                     .get("container-name")
-                    .map(|v| v.split_whitespace().map(str::to_string).collect())
+                    .map(|v| {
+                        v.split_whitespace()
+                            .filter(|n| *n != "none")
+                            .map(str::to_string)
+                            .collect()
+                    })
                     .unwrap_or_default();
                 out.entry(n).or_insert(explorer_css::ContainerMeasure {
                     w: bx.rect.width,

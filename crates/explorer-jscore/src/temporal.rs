@@ -180,6 +180,25 @@ fn set_pub_props(e: &mut Engine, id: ObjId, t: &TempData) {
             let b = e.big_val(num_bigint::BigInt::from(*ns));
             p(e, id, "epochNanoseconds", b);
         }
+        TempData::Zoned { ns } => {
+            // Fuseau unique UTC — les champs civils sont les
+            // parties UTC de l'instant ; `timeZoneId`/`offset`
+            // exposés explicitement.
+            let ms = ns.div_euclid(1_000_000) as f64;
+            p(e, id, "epochMilliseconds", num(ms));
+            let b = e.big_val(num_bigint::BigInt::from(*ns));
+            p(e, id, "epochNanoseconds", b);
+            let (y, mo, d, _w, h, mi, s, mss) = crate::builtins::ms_to_parts(ms);
+            date_props(e, id, y, mo as u8, d as u8);
+            time_props(e, id, h as u8, mi as u8, s as u8, mss as u16, 0, 0);
+            let tz = e.str_val("UTC");
+            p(e, id, "timeZoneId", tz);
+            let off = e.str_val("+00:00");
+            p(e, id, "offset", off);
+            p(e, id, "offsetNanoseconds", Value::Num(0.0));
+            let cal = e.str_val("iso8601");
+            p(e, id, "calendarId", cal);
+        }
         TempData::PDate { y, m, d } => date_props(e, id, *y, *m, *d),
         TempData::PTime {
             h,
@@ -374,6 +393,27 @@ fn to_string_of(_e: &Engine, t: &TempData) -> String {
             );
             format!(
                 "{}-{:02}-{:02}T{:02}:{:02}:{:02}{}Z",
+                fmt_y(y),
+                m,
+                d,
+                h,
+                mi,
+                s,
+                fmt_frac(fms, fus, fns)
+            )
+        }
+        TempData::Zoned { ns } => {
+            // ISO étendu spec : `…+00:00[UTC]`.
+            let ms = ns.div_euclid(1_000_000);
+            let (y, m, d, _w, h, mi, s, mss) = crate::builtins::ms_to_parts(ms as f64);
+            let rem = ns.rem_euclid(1_000_000) as u32;
+            let (fms, fus, fns) = (
+                mss as u16,
+                (rem / 1_000) as u16 % 1_000,
+                (rem % 1_000) as u16,
+            );
+            format!(
+                "{}-{:02}-{:02}T{:02}:{:02}:{:02}{}+00:00[UTC]",
                 fmt_y(y),
                 m,
                 d,
@@ -630,7 +670,7 @@ fn parse_duration(s: &str) -> Option<[i64; 10]> {
 
 /// Durée → `TempData::Duration` : string ISO, objet-props, ou
 /// instance Duration (spec `ToTemporalDuration`).
-fn to_duration(e: &mut Engine, v: Value) -> JsResult<[i64; 10]> {
+pub(crate) fn to_duration(e: &mut Engine, v: Value) -> JsResult<[i64; 10]> {
     match v {
         Value::Str(id) => {
             let s = id.to_string();
@@ -1019,6 +1059,9 @@ fn to_instant(e: &mut Engine, v: Value) -> JsResult<TempData> {
     match v {
         Value::Obj(id) => match e.heap.obj(id).map(|o| &o.kind) {
             Some(crate::heap::ObjKind::Temp(t @ TempData::Instant { .. })) => Ok(*t),
+            Some(crate::heap::ObjKind::Temp(TempData::Zoned { ns })) => {
+                Ok(TempData::Instant { ns: *ns })
+            }
             _ => Err(e.type_error("Instant expected")),
         },
         Value::Str(id) => {
@@ -1077,6 +1120,7 @@ fn t_equals(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
 fn to_same(e: &mut Engine, t: &TempData, v: Value) -> JsResult<TempData> {
     match t {
         TempData::Instant { .. } => to_instant(e, v),
+        TempData::Zoned { .. } => to_zdt(e, v),
         TempData::PDate { .. } => to_pdate(e, v),
         TempData::PTime { .. } => to_ptime(e, v),
         TempData::PDateTime { .. } => to_pdatetime(e, v),
@@ -1189,7 +1233,7 @@ fn to_pmonthday(e: &mut Engine, v: Value) -> JsResult<TempData> {
 fn temporal_cmp(a: &TempData, b: &TempData) -> i32 {
     let key = |t: &TempData| -> i128 {
         match t {
-            TempData::Instant { ns } => *ns,
+            TempData::Instant { ns } | TempData::Zoned { ns } => *ns,
             TempData::PDate { y, m, d } | TempData::PDateTime { y, m, d, .. } => {
                 let base = match t {
                     TempData::PDateTime {
@@ -1356,6 +1400,26 @@ fn temp_add(e: &mut Engine, this: Value, args: &[Value], neg: bool) -> JsResult<
             }
             mk(e, "Duration", TempData::Duration { f: r })
         }
+        TempData::Zoned { ns } => {
+            // UTC : le jour est exactement 86400e9 ns ; les champs
+            // calendaires passent par la date civile.
+            let (y, mo, d, h, mi, s, ms, us, n2) = zdt_parts(ns);
+            let (carry, (h2, m2, s2, ms2, us2, ns2)) =
+                add_time(h, mi, s, ms, us, n2, dur_time_ns(&f));
+            let (ny, nm, nd) = add_ymd(y, mo, d, f[0], f[1], f[2] * 7 + f[3] + carry);
+            if !valid_date(ny, nm, nd) {
+                return Err(e.range_error("datetime out of range"));
+            }
+            let out = i128::from(days_from_civil(ny, i64::from(nm), i64::from(nd)))
+                * 86_400_000_000_000
+                + i128::from(h2) * 3_600_000_000_000
+                + i128::from(m2) * 60_000_000_000
+                + i128::from(s2) * 1_000_000_000
+                + i128::from(ms2) * 1_000_000
+                + i128::from(us2) * 1_000
+                + i128::from(ns2);
+            mk(e, "ZonedDateTime", TempData::Zoned { ns: out })
+        }
         TempData::PMonthDay { .. } => Err(e.type_error("PlainMonthDay has no add/subtract")),
     }
 }
@@ -1383,6 +1447,28 @@ fn temp_diff(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
 fn diff_fields(e: &mut Engine, a: &TempData, b: &TempData, lu: &str) -> JsResult<[i64; 10]> {
     let mut f = [0i64; 10];
     match (a, b) {
+        (TempData::Zoned { ns: x }, TempData::Zoned { ns: y }) => {
+            // UTC : différence exacte en ns ; largestUnit par
+            // défaut `days` (spec zdt).
+            let lu = if lu.is_empty() { "days" } else { lu };
+            if matches!(lu, "months" | "years") {
+                return Err(e.range_error("ZonedDateTime largestUnit ≤ weeks"));
+            }
+            let total = y - x;
+            match lu {
+                "weeks" | "days" | "auto" | "" => {
+                    let dd = if lu == "weeks" { 7 } else { 1 };
+                    let days = total / 86_400_000_000_000 / dd;
+                    f[if lu == "weeks" { 2 } else { 3 }] = days as i64;
+                    let rem = total - days * dd * 86_400_000_000_000;
+                    let tf = ns_to_dur(rem, "hours");
+                    f[4..].copy_from_slice(&tf[4..]);
+                }
+                _ => {
+                    f = ns_to_dur(total, lu);
+                }
+            }
+        }
         (TempData::Instant { ns: x }, TempData::Instant { ns: y }) => {
             let lu = if lu.is_empty() { "seconds" } else { lu };
             if matches!(lu, "days" | "weeks" | "months" | "years" | "auto") {
@@ -1686,6 +1772,38 @@ fn t_with(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
             mk(e, "Duration", TempData::Duration { f: r })
         }
         TempData::Instant { .. } => Err(e.type_error("Instant has no with()")),
+        TempData::Zoned { ns } => {
+            // Champs civils UTC écrasés un à un (spec zdt.with).
+            let (y0, mo0, d0, h0, mi0, s0, ms0, us0, ns0) = zdt_parts(ns);
+            let y = field(e, o, "year")?.unwrap_or(y0);
+            let m = field(e, o, "month")?.unwrap_or(i64::from(mo0)) as u8;
+            let d = field(e, o, "day")?.unwrap_or(i64::from(d0)) as u8;
+            let h = field(e, o, "hour")?.unwrap_or(i64::from(h0)) as u8;
+            let mi = field(e, o, "minute")?.unwrap_or(i64::from(mi0)) as u8;
+            let s_ = field(e, o, "second")?.unwrap_or(i64::from(s0)) as u8;
+            let ms = field(e, o, "millisecond")?.unwrap_or(i64::from(ms0)) as u16;
+            let us = field(e, o, "microsecond")?.unwrap_or(i64::from(us0)) as u16;
+            let ns2 = field(e, o, "nanosecond")?.unwrap_or(i64::from(ns0)) as u16;
+            if !valid_date(y, m, d)
+                || h > 23
+                || mi > 59
+                || s_ > 59
+                || ms > 999
+                || us > 999
+                || ns2 > 999
+            {
+                return Err(e.range_error("invalid datetime"));
+            }
+            let out = i128::from(days_from_civil(y, i64::from(m), i64::from(d)))
+                * 86_400_000_000_000
+                + i128::from(h) * 3_600_000_000_000
+                + i128::from(mi) * 60_000_000_000
+                + i128::from(s_) * 1_000_000_000
+                + i128::from(ms) * 1_000_000
+                + i128::from(us) * 1_000
+                + i128::from(ns2);
+            mk(e, "ZonedDateTime", TempData::Zoned { ns: out })
+        }
     }
 }
 
@@ -1794,6 +1912,215 @@ fn t_to_md(e: &mut Engine, this: Value, _a: &[Value]) -> JsResult<Value> {
             mk(e, "PlainMonthDay", TempData::PMonthDay { m, d })
         }
         _ => Err(e.type_error("toPlainMonthDay on incompatible receiver")),
+    }
+}
+
+// -- ZonedDateTime (fuseau unique UTC — JS-C31 partiel) ---------------------
+
+/// Parties civiles UTC d'un instant `ns` (+ reste sub-ms).
+fn zdt_parts(ns: i128) -> (i64, u8, u8, u8, u8, u8, u16, u16, u16) {
+    let ms = ns.div_euclid(1_000_000);
+    let rem = ns.rem_euclid(1_000_000);
+    let (y, mo, d, _w, h, mi, s, mss) = crate::builtins::ms_to_parts(ms as f64);
+    (
+        y,
+        mo as u8,
+        d as u8,
+        h as u8,
+        mi as u8,
+        s as u8,
+        mss as u16,
+        (rem / 1_000) as u16,
+        (rem % 1_000) as u16,
+    )
+}
+
+/// Convertit `v` en `ZonedDateTime` : objet `Zoned`/`Instant`/
+/// `PlainDateTime`, ou chaîne ISO (suffixe `[tz]` accepté, seul
+/// UTC est réel).
+fn to_zdt(e: &mut Engine, v: Value) -> JsResult<TempData> {
+    match v {
+        Value::Obj(id) => match e.heap.obj(id).map(|o| &o.kind) {
+            Some(crate::heap::ObjKind::Temp(t @ TempData::Zoned { .. })) => Ok(*t),
+            Some(crate::heap::ObjKind::Temp(TempData::Instant { ns })) => {
+                Ok(TempData::Zoned { ns: *ns })
+            }
+            Some(crate::heap::ObjKind::Temp(TempData::PDateTime {
+                y,
+                m,
+                d,
+                h,
+                mi,
+                s_,
+                ms,
+                us,
+                ns,
+            })) => Ok(TempData::Zoned {
+                ns: i128::from(days_from_civil(*y, i64::from(*m), i64::from(*d)))
+                    * 86_400_000_000_000
+                    + i128::from(*h) * 3_600_000_000_000
+                    + i128::from(*mi) * 60_000_000_000
+                    + i128::from(*s_) * 1_000_000_000
+                    + i128::from(*ms) * 1_000_000
+                    + i128::from(*us) * 1_000
+                    + i128::from(*ns),
+            }),
+            _ => Err(e.type_error("ZonedDateTime expected")),
+        },
+        Value::Str(id) => {
+            // `…[UTC]`/`[Etc/UTC]` tolérés ; autre fuseau → erreur
+            // honnête (fuseau unique).
+            let mut s = id.to_string();
+            if let Some(i) = s.find('[') {
+                let (head, tail) = s.split_at(i);
+                let tz = tail.trim_matches(['[', ']']);
+                match tz {
+                    "UTC" | "Etc/UTC" | "Z" | "+00:00" | "-00:00" => s = head.to_string(),
+                    _ => return Err(e.range_error("only UTC time zone is supported")),
+                }
+            }
+            let sv = e.str_val(&s);
+            let t = to_instant(e, sv)?;
+            match t {
+                TempData::Instant { ns } => Ok(TempData::Zoned { ns }),
+                _ => Err(e.type_error("invalid ZonedDateTime string")),
+            }
+        }
+        _ => Err(e.type_error("ZonedDateTime expected")),
+    }
+}
+
+fn zdt_ctor(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
+    // Spec : `new ZonedDateTime(epochNanoseconds, timeZone,
+    // calendar?)` — BigInt requis ; Number toléré (= ns).
+    let ns = match arg(args, 0) {
+        Value::Big(_) => e
+            .to_bigint(arg(args, 0))?
+            .to_i128()
+            .ok_or_else(|| e.range_error("epochNanoseconds out of range"))?,
+        Value::Num(n) => n as i128,
+        _ => return Err(e.type_error("ZonedDateTime expects epochNanoseconds")),
+    };
+    // Fuseau : seul "UTC" existe — autre valeur → RangeError.
+    if let Value::Str(s) = arg(args, 1) {
+        let tz = s.to_string();
+        if !matches!(tz.as_str(), "UTC" | "Etc/UTC" | "Z" | "+00:00") {
+            return Err(e.range_error("only UTC time zone is supported"));
+        }
+    }
+    mk(e, "ZonedDateTime", TempData::Zoned { ns })
+}
+
+fn zdt_from(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
+    let t = to_zdt(e, arg(args, 0))?;
+    mk(e, "ZonedDateTime", t)
+}
+
+fn zdt_compare(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
+    let a = to_zdt(e, arg(args, 0))?;
+    let b = to_zdt(e, arg(args, 1))?;
+    Ok(Value::Num(temporal_cmp(&a, &b) as i32 as f64))
+}
+
+fn zdt_to_instant(e: &mut Engine, this: Value, _a: &[Value]) -> JsResult<Value> {
+    let (_, t) = td_id(e, this)?;
+    match t {
+        TempData::Zoned { ns } => mk(e, "Instant", TempData::Instant { ns }),
+        _ => Err(e.type_error("toInstant on incompatible receiver")),
+    }
+}
+
+fn zdt_to_pdt(e: &mut Engine, this: Value, _a: &[Value]) -> JsResult<Value> {
+    let (_, t) = td_id(e, this)?;
+    match t {
+        TempData::Zoned { ns } => {
+            let (y, mo, d, h, mi, s, ms, us, ns2) = zdt_parts(ns);
+            mk(
+                e,
+                "PlainDateTime",
+                TempData::PDateTime {
+                    y,
+                    m: mo,
+                    d,
+                    h,
+                    mi,
+                    s_: s,
+                    ms,
+                    us,
+                    ns: ns2,
+                },
+            )
+        }
+        _ => Err(e.type_error("toPlainDateTime on incompatible receiver")),
+    }
+}
+
+fn zdt_to_pdate(e: &mut Engine, this: Value, _a: &[Value]) -> JsResult<Value> {
+    let (_, t) = td_id(e, this)?;
+    match t {
+        TempData::Zoned { ns } => {
+            let (y, mo, d, ..) = zdt_parts(ns);
+            mk(e, "PlainDate", TempData::PDate { y, m: mo, d })
+        }
+        _ => Err(e.type_error("toPlainDate on incompatible receiver")),
+    }
+}
+
+fn zdt_to_ptime(e: &mut Engine, this: Value, _a: &[Value]) -> JsResult<Value> {
+    let (_, t) = td_id(e, this)?;
+    match t {
+        TempData::Zoned { ns } => {
+            let (_, _, _, h, mi, s, ms, us, ns2) = zdt_parts(ns);
+            mk(
+                e,
+                "PlainTime",
+                TempData::PTime {
+                    h,
+                    mi,
+                    s_: s,
+                    ms,
+                    us,
+                    ns: ns2,
+                },
+            )
+        }
+        _ => Err(e.type_error("toPlainTime on incompatible receiver")),
+    }
+}
+
+fn zdt_to_ym(e: &mut Engine, this: Value, _a: &[Value]) -> JsResult<Value> {
+    let (_, t) = td_id(e, this)?;
+    match t {
+        TempData::Zoned { ns } => {
+            let (y, mo, ..) = zdt_parts(ns);
+            mk(e, "PlainYearMonth", TempData::PYearMonth { y, m: mo })
+        }
+        _ => Err(e.type_error("toPlainYearMonth on incompatible receiver")),
+    }
+}
+
+fn zdt_to_md(e: &mut Engine, this: Value, _a: &[Value]) -> JsResult<Value> {
+    let (_, t) = td_id(e, this)?;
+    match t {
+        TempData::Zoned { ns } => {
+            let (_, mo, d, ..) = zdt_parts(ns);
+            mk(e, "PlainMonthDay", TempData::PMonthDay { m: mo, d })
+        }
+        _ => Err(e.type_error("toPlainMonthDay on incompatible receiver")),
+    }
+}
+
+/// `zdt.withTimeZone(tz)` — UTC seul : identité ; autre fuseau
+/// → `RangeError` honnête (fuseau unique).
+fn zdt_with_tz(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
+    let (_, t) = td_id(e, this.clone())?;
+    let TempData::Zoned { .. } = t else {
+        return Err(e.type_error("withTimeZone on incompatible receiver"));
+    };
+    let tz = e.to_js_string(arg(args, 0))?;
+    match tz.as_str() {
+        "UTC" | "Etc/UTC" | "Z" | "+00:00" | "-00:00" => Ok(this),
+        _ => Err(e.range_error("only UTC time zone is supported")),
     }
 }
 
@@ -2115,6 +2442,18 @@ fn now_instant(e: &mut Engine, _t: Value, _a: &[Value]) -> JsResult<Value> {
     mk(e, "Instant", TempData::Instant { ns: now_ns() })
 }
 
+/// `Temporal.Instant` depuis epoch **ms flottant** — porte de
+/// `Date.prototype.toTemporalInstant`.
+pub(crate) fn instant_from_f64_ms(e: &mut Engine, ms: f64) -> JsResult<Value> {
+    mk(
+        e,
+        "Instant",
+        TempData::Instant {
+            ns: (ms * 1_000_000.0) as i128,
+        },
+    )
+}
+
 fn now_pdt(e: &mut Engine, _t: Value, _a: &[Value]) -> JsResult<Value> {
     let ms = (now_ns() / 1_000_000) as f64;
     let (y, m, d, _w, h, mi, s, mss) = crate::builtins::ms_to_parts(ms);
@@ -2308,6 +2647,26 @@ pub(crate) fn install(e: &mut Engine) {
             e.add_method(cid, "compare", duration_compare);
         }
         e.set_own(t, "Duration", c, false);
+    }
+    // -- ZonedDateTime (fuseau unique UTC) -----------------------------------
+    {
+        let p = e.new_object();
+        methods(e, p, COMMON);
+        methods(e, p, ARITH);
+        e.add_method(p, "toInstant", zdt_to_instant);
+        e.add_method(p, "toPlainDateTime", zdt_to_pdt);
+        e.add_method(p, "toPlainDate", zdt_to_pdate);
+        e.add_method(p, "toPlainTime", zdt_to_ptime);
+        e.add_method(p, "toPlainYearMonth", zdt_to_ym);
+        e.add_method(p, "toPlainMonthDay", zdt_to_md);
+        e.add_method(p, "withTimeZone", zdt_with_tz);
+        tag(e, p, "ZonedDateTime");
+        let c = ctor(e, "ZonedDateTime", zdt_ctor, p);
+        if let Value::Obj(cid) = c {
+            e.add_method(cid, "from", zdt_from);
+            e.add_method(cid, "compare", zdt_compare);
+        }
+        e.set_own(t, "ZonedDateTime", c, false);
     }
     // -- Now -----------------------------------------------------------------
     {

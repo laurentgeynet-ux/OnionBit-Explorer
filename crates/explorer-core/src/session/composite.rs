@@ -330,7 +330,8 @@ fn render_subframe(
             .entry(n)
             .or_insert_with(|| iframe_intrinsic(&f.dom, n));
     }
-    cp.images.svgs = explorer_render::svg::collect_svg(&f.dom, root_el, ctx.image_max_px);
+    cp.images.svgs =
+        explorer_render::svg::collect_svg_styled(&f.dom, root_el, &styles, ctx.image_max_px).0;
     // Pas de moteur JS enfant à cette tranche : les
     // `<canvas>` du sous-document n'ont pas d'op-lists.
     let mut bx = build_box_tree_sized(&f.dom, root_el, &styles, &sizes)?;

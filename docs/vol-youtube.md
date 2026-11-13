@@ -103,9 +103,19 @@ $env:EXPLORER_PROFILE='C:\OnionBit-vol\youtube\prof-vol<N>'   # froid = défaut
 # $env:EXPLORER_DOM_KILL='1'
 #   ⚠ testée par PRÉSENCE : EXPLORER_DOM_KILL=0 l'arme quand même —
 #   pour un vol propre, la désactiver (Remove-Item Env:EXPLORER_DOM_KILL)
+# optionnel — extrait borné (400 c) du corps des scripts dyn fautifs :
+$env:EXPLORER_DYN_PROBE='1'
 
 # 1.4 daemon dédié — plage 9460+ réservée aux vols YouTube
+#     -Repo = le worktree de vol (obligatoire : sans lui le
+#     script résout l'exe du dépôt principal — vol 814 a
+#     mesuré un binaire périmé 16:25 au lieu du HEAD visé).
+#     Le résolveur retient l'exe le plus récent parmi
+#     target_dir/build_dir/CARGO_TARGET_DIR — le build §1.2
+#     gagne. Vérifier `daemon-<port>.exe.log` (chemin+âge) =
+#     le binaire du worktree avant de naviguer.
 pwsh -File scripts/spawn_daemon.ps1 -Port 946<N> `
+  -Repo "C:\OnionBit-Explorer-youtube-wt" `
   -LogDir "C:\OnionBit-vol\youtube\logs"
 
 # 1.5 watchdogs OBLIGATOIRES — PID = « daemon PID <n> » du spawn
@@ -145,6 +155,10 @@ Pourquoi chaque variable est exigée :
   du site, pas un bug) — profil **froid** exigé.
 - **`EXPLORER_DOM_KILL`** — sonde de bissection §B-59 uniquement ;
   la laisser posée sur un vol de mesure fausse les constats DOM.
+- **`EXPLORER_DYN_PROBE`** — optionnelle ; joint `len` + extrait
+  borné (400 c, sauts aplatis) au `dyn.err` — un label `dyn:N`
+  ne nomme rien, la source d'un `<script>` injecté sans `src`
+  est sinon perdue (cible : `dyn:7` « syntax error 1:12 »).
 
 ## 2. Cibles canoniques
 

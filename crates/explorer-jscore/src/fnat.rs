@@ -313,7 +313,7 @@ fn find_in_expr(e: &Expr, off: usize, chain: &mut Vec<Rc<FnLit>>) {
                 find_in_expr(t, off, chain);
                 find_in_expr(f, off, chain);
             }
-            Expr::Call(f, args) | Expr::New(f, args) => {
+            Expr::Call(f, args, _) | Expr::New(f, args, _) => {
                 find_in_expr(f, off, chain);
                 for a in args {
                     find_in_expr(a, off, chain);

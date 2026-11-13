@@ -485,9 +485,54 @@ impl Session {
             let entry = self.tabs.get_mut(&tab).ok_or(CoreError::UnknownTab(tab))?;
             let max = (entry.doc_h - self.viewport.1).max(0.0);
             let next = y.clamp(0.0, max);
-            if (next - entry.scroll_y).abs() < f32::EPSILON {
+            // Position courante réelle : interpolée quand une
+            // lecture smooth est en vol (spec : une nouvelle
+            // cible repart de la position affichée).
+            let sm = self.smooth_scroll_ms;
+            let cur = entry.smooth_scroll.map_or(entry.scroll_y, |(f, t, s)| {
+                #[allow(clippy::cast_precision_loss, clippy::cast_possible_truncation)]
+                // durées ms ≪ 2^24.
+                let p = if sm == 0 {
+                    1.0
+                } else {
+                    (s.elapsed().as_secs_f64() * 1000.0 / sm as f64) as f32
+                };
+                f + (t - f) * p
+            });
+            if (next - cur).abs() < f32::EPSILON {
+                entry.smooth_scroll = None;
                 return Ok(false);
             }
+            // R-259 — `scroll-behavior:smooth` sur la boîte
+            // de l'élément racine (scrolling box du viewport,
+            // spec cssom-view) : la lecture est armée, le
+            // tick `advance_animations` interpole et repeint.
+            let smooth = self.smooth_scroll_ms > 0
+                && entry
+                    .dom
+                    .as_ref()
+                    .zip(entry.tree.as_ref())
+                    .is_some_and(|(dom, tree)| {
+                        let Some(el) = dom.document_element() else {
+                            return false;
+                        };
+                        let mut stack = vec![tree];
+                        while let Some(b) = stack.pop() {
+                            if b.node == Some(el) {
+                                return b
+                                    .style
+                                    .get("scroll-behavior")
+                                    .is_some_and(|v| v.trim() == "smooth");
+                            }
+                            stack.extend(b.children.iter());
+                        }
+                        false
+                    });
+            if smooth {
+                entry.smooth_scroll = Some((cur, next, std::time::Instant::now()));
+                return Ok(true);
+            }
+            entry.smooth_scroll = None;
             entry.set_scroll(next);
         }
         self.repaint(tab)?;
@@ -739,7 +784,14 @@ impl Session {
         );
         let mut sub = match self.nav_apply(tab, *tail, *done) {
             Ok(Some(s)) => s,
-            Ok(None) => return Ok(None),
+            Ok(None) => {
+                // Epoch supplantée — le document installé reste
+                // sans cycle de vie sinon (`readyState` figé
+                // `loading` : polyfill d'upgrade kevlar gelé,
+                // `[[ ]]` youtube non hydratés — JS-C471).
+                self.fire_top_doc_lifecycle(tab);
+                return Ok(None);
+            }
             Err(e) => {
                 self.paint_error_page(tab, &err_req, push, &e);
                 return Err(e);
@@ -935,8 +987,11 @@ impl Session {
         if !matches!(req.url.scheme(), "http" | "https") {
             return;
         }
-        let headers =
-            explorer_net::consent::seed_headers(self.consent_policy, std::time::SystemTime::now());
+        let headers = explorer_net::consent::seed_headers(
+            self.consent_policy,
+            std::time::SystemTime::now(),
+            &req.url.host(),
+        );
         if headers.is_empty() {
             return;
         }
@@ -1013,6 +1068,9 @@ impl Session {
     ) -> Result<Option<SubJob>, CoreError> {
         {
             let entry = self.tabs.get(&tab).ok_or(CoreError::UnknownTab(tab))?;
+            tracing::info!(target:"dom_probe", tab,
+                epoch = tail.epoch, cur = entry.nav_epoch,
+                site = "nav.apply", "nav_apply entrée");
             if entry.nav_epoch != tail.epoch {
                 self.unspec(tab);
                 return Ok(None);
@@ -1199,6 +1257,13 @@ impl Session {
             // `animationstart` pendants n'ont plus de cible
             // ni de listeners sur le document neuf.
             entry.pending_anim_births.clear();
+            // Marques `data-explorer-anim` : le miroir du
+            // document mort meurt avec son moteur — le diff
+            // repart d'un miroir nu (JS-C475).
+            entry.anim_marks.clear();
+            // Lecture `scroll-behavior:smooth` en vol — la
+            // cible appartient au document mort (R-259).
+            entry.smooth_scroll = None;
             entry.frame_ctxs.clear();
             entry.images = PaintImages::default();
             entry.bg_aliases.clear();
@@ -1211,6 +1276,7 @@ impl Session {
             entry.style_dirty.clear();
             entry.linked_sheets.clear();
             entry.adopted_sheets.clear();
+            entry.inline_css_expanded.clear();
             entry.defined_names.clear();
             entry.frames.clear();
             entry.prev_styles = HashMap::new();
@@ -1268,6 +1334,7 @@ impl Session {
             import_specs,
             mod_preloads,
             doc_sheets,
+            expanded_inline: HashMap::new(),
             eng,
             scripting,
             css_slots: Vec::new(),

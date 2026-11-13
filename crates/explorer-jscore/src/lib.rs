@@ -277,6 +277,14 @@ pub static J17_PROP_IDX_BUILD: std::sync::atomic::AtomicU64 = std::sync::atomic:
 /// Niveaux de scope parcourus par `env_get_seen` — profondeur
 /// de fermeture moyenne × `env_get` = coût résolution variable.
 pub static J17_ENV_LVL: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+/// Appels `env_get_seen` — `env_lvl / env_gets` = profondeur de
+/// chaîne moyenne par résolution (cran 73b).
+pub static J17_ENV_GETS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+/// Lecture d'identifiant servie par l'annotation du resolveur
+/// (JS-C490) / annotation présente mais cible manquante →
+/// repli sur la marche complète.
+pub static J17_RES_HIT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+pub static J17_RES_MISS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 /// `array_index(key)` tenté — multiplicité par `find_own`
 /// (× niveau, ×2 par niveau Array) — cible V-3b (hoist).
 pub static J17_ARRIDX_TRY: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
@@ -397,7 +405,7 @@ pub fn j17_enable() {
 #[must_use]
 pub fn j17_snapshot() -> String {
     let r = std::sync::atomic::Ordering::Relaxed;
-    let pairs: [(&str, &std::sync::atomic::AtomicU64); 31] = [
+    let pairs: [(&str, &std::sync::atomic::AtomicU64); 34] = [
         ("prop_lookup", &J17_PROP_LOOKUP),
         ("proto_lvl", &J17_PROTO_LVL),
         ("prop_scan", &J17_PROP_SCAN),
@@ -405,6 +413,9 @@ pub fn j17_snapshot() -> String {
         ("prop_idx_miss", &J17_PROP_IDX_MISS),
         ("prop_idx_build", &J17_PROP_IDX_BUILD),
         ("env_lvl", &J17_ENV_LVL),
+        ("env_gets", &J17_ENV_GETS),
+        ("res_hit", &J17_RES_HIT),
+        ("res_miss", &J17_RES_MISS),
         ("arridx_try", &J17_ARRIDX_TRY),
         ("call", &J17_CALL),
         ("call_nat", &J17_CALL_NAT),

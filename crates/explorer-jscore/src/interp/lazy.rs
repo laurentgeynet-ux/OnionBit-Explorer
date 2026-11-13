@@ -83,7 +83,9 @@ fn has_suspend_inner(e: &Expr) -> bool {
             has_suspend(l) || has_suspend(r)
         }
         Expr::Cond(c, t, e2) => has_suspend(c) || has_suspend(t) || has_suspend(e2),
-        Expr::Call(f, args) | Expr::New(f, args) => has_suspend(f) || args.iter().any(has_suspend),
+        Expr::Call(f, args, _) | Expr::New(f, args, _) => {
+            has_suspend(f) || args.iter().any(has_suspend)
+        }
         Expr::Array(items) => items.iter().flatten().any(has_suspend),
         Expr::Object(props) => props.iter().any(|p| match p {
             crate::ast::ObjProp::Prop(k, v) => key_has_suspend(k) || has_suspend(v),
@@ -259,7 +261,7 @@ fn lift_inner(e: &mut Expr, pre: &mut Vec<Stmt>, cx: &mut LowerCx) {
                 lift(e2, pre, cx);
             }
         }
-        Expr::Call(f, args) | Expr::New(f, args) => {
+        Expr::Call(f, args, _) | Expr::New(f, args, _) => {
             lift(f, pre, cx);
             for a in args {
                 lift(a, pre, cx);

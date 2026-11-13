@@ -71,6 +71,7 @@ fn shared_fonts_delegates_face_and_fallback() {
         caps: 0,
         kern_off: false,
         stretch: 100,
+        feature_settings: Vec::new(),
     };
     // `font_face` délégué (les faces web = index 0 — la
     // preuve forte porte sur `fallback_for` ci-dessous).
@@ -183,6 +184,7 @@ fn paintless_snapshot_repairs_on_restore() {
             images: PaintImages::default(),
             linked_sheets: Vec::new(),
             adopted_sheets: Vec::new(),
+            inline_css_expanded: HashMap::new(),
             defined_names: Vec::new(),
             prev_styles: HashMap::new(),
             dirty: Vec::new(),
@@ -281,6 +283,7 @@ async fn back_during_inflight_nav_restores_previous() {
             images: PaintImages::default(),
             linked_sheets: Vec::new(),
             adopted_sheets: Vec::new(),
+            inline_css_expanded: HashMap::new(),
             defined_names: Vec::new(),
             prev_styles: HashMap::new(),
             dirty: Vec::new(),
@@ -368,6 +371,7 @@ fn cull_keeps_only_in_frame_items() {
         },
         color: Color::BLACK,
         radii: [0.0; 4],
+        corners: [1.0; 4],
     };
     let mut list = DisplayList {
         items: vec![
@@ -1013,6 +1017,50 @@ async fn animationstart_fires_for_new_keyframe_animation() {
         .and_then(|eng| eng.eval("window.__as").ok())
         .unwrap_or_default();
     assert_eq!(out.trim(), "ghz@DIV", "animationstart livré : {out}");
+}
+
+/// JS-C475 — `getAnimations()` remonte les animations **CSS**
+/// : la session pose `data-explorer-anim` sur le miroir à
+/// chaque pompe (`drain_anim_marks`) ; la lecture
+/// matérialise l'`Animation` avec `animationName`.
+#[tokio::test]
+async fn css_animation_marked_getanimations_sees_it() {
+    let mut s = Session::new(Arc::new(FailTransport), Arc::new(TestFont));
+    s.set_js_factory(explorer_js::JscoreEngine::factory());
+    let tab = s.open_tab();
+    let html = "<!doctype html><html><head><style>\
+                @keyframes ghz { from { opacity:.9 } to { opacity:1 } }\
+                #x { animation-name: ghz; animation-duration: 5s }\
+                </style></head><body><div id=\"x\"></div></body></html>";
+    let eng = s.spawn_engine(tab, html, true, "");
+    {
+        let e = s.tabs.get_mut(&tab).unwrap();
+        let mut tb = TreeBuilder::new();
+        tb.push(html);
+        tb.finish();
+        e.dom = Some(tb.into_dom());
+        e.url = Some(Url::parse("http://h.test/as").unwrap());
+        e.js = eng;
+    }
+    s.relayout(tab).unwrap();
+    s.pump_timers(tab);
+    let out = s
+        .tabs
+        .get_mut(&tab)
+        .and_then(|e| e.js.as_mut())
+        .and_then(|eng| {
+            eng.eval(
+                "var a=document.getAnimations();\
+                 a.length+'@'+a[0].animationName+'@'+a[0].playState",
+            )
+            .ok()
+        })
+        .unwrap_or_default();
+    assert_eq!(
+        out.trim(),
+        "1@ghz@running",
+        "getAnimations remonte l'anim CSS : {out}"
+    );
 }
 
 /// §B-54 (flixbus vol 100) — `drain_anim_births` dispatchait
@@ -5109,4 +5157,33 @@ fn cors_unsafe_headers_excludes_forbidden() {
         explorer_net::http::FetchCredentials::Include,
     );
     assert_eq!(c2.unsafe_headers, vec!["x-goog-request-info".to_string()]);
+}
+
+/// Étape 220-suite — le snapshot `document.cookie` de
+/// `spawn_engine` doit refléter le jar session : les
+/// graines consent semées en `nav_begin` (ou persistées
+/// de profil) sont visibles côté JS dès la première
+/// lecture — le bump `ytd-consent-bump*` lit `SOCS` via
+/// `document.cookie`, pas le jar réseau (vol 806 : bump
+/// ouvert une fois malgré la graine émise — `header_for`
+/// la rendait au `Cookie:` mais pas à `document.cookie`).
+#[test]
+fn document_cookie_reflete_le_jar_session() {
+    let mut s = Session::new(Arc::new(FailTransport), Arc::new(TestFont));
+    s.set_js_factory(explorer_js::JscoreEngine::factory());
+    let tab = s.open_tab();
+    let url = Url::parse("https://www.youtube.com/").unwrap();
+    assert!(s.cookies.set_from_header_ctx(
+        &url,
+        "SEEDX=abc123; Path=/; SameSite=Lax; Max-Age=3600",
+        None
+    ));
+    s.tabs.get_mut(&tab).unwrap().url = Some(url);
+    let html = "<!doctype html><html><body></body></html>";
+    let mut eng = s.spawn_engine(tab, html, true, "").unwrap();
+    let out = eng.eval("document.cookie").unwrap_or_default();
+    assert!(
+        out.contains("SEEDX=abc123"),
+        "document.cookie doit refléter le jar session — reçu : {out}"
+    );
 }

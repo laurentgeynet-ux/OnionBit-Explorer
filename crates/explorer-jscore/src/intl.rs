@@ -29,6 +29,7 @@ pub(crate) fn install(e: &mut Engine) {
         ("Locale", intl_locale_ctor),
         ("DisplayNames", intl_display_ctor),
         ("Segmenter", intl_segmenter_ctor),
+        ("DurationFormat", intl_duration_ctor),
     ] {
         let p = e.new_object();
         let c = crate::builtins::ctor(e, name, f, p);
@@ -2021,5 +2022,173 @@ fn seg_resolved(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> 
     e.set_own(o, "locale", loc, true);
     let g = e.str_val(opt(&opts, "granularity").unwrap_or("grapheme"));
     e.set_own(o, "granularity", g, true);
+    Ok(Value::Obj(o))
+}
+
+// -- `Intl.DurationFormat` (ES2025) — borné en-US -------------------------
+//
+// `new Intl.DurationFormat(locales?, {style})` → `format(dur)` /
+// `formatToParts(dur)`. Entrée durée : `Temporal.Duration`, objet
+// champs `{years,…,nanoseconds}` ou chaîne ISO `PT…` (via
+// `crate::temporal::to_duration`). Styles en-US réels :
+// long/short/narrow/digital — pas de CLDR, singular/plural
+// anglais seul.
+
+/// (champ, type-de-part, long-sg, long-pl, short, narrow)
+const DURF_UNITS: [(&str, &str, &str, &str, &str, &str); 10] = [
+    ("years", "year", "year", "years", "yr", "y"),
+    ("months", "month", "month", "months", "mo", "m"),
+    ("weeks", "week", "week", "weeks", "wk", "w"),
+    ("days", "day", "day", "days", "d", "d"),
+    ("hours", "hour", "hour", "hours", "hr", "h"),
+    ("minutes", "minute", "minute", "minutes", "min", "m"),
+    ("seconds", "second", "second", "seconds", "sec", "s"),
+    (
+        "milliseconds",
+        "millisecond",
+        "millisecond",
+        "milliseconds",
+        "ms",
+        "ms",
+    ),
+    (
+        "microseconds",
+        "microsecond",
+        "microsecond",
+        "microseconds",
+        "\u{b5}s",
+        "\u{b5}s",
+    ),
+    (
+        "nanoseconds",
+        "nanosecond",
+        "nanosecond",
+        "nanoseconds",
+        "ns",
+        "ns",
+    ),
+];
+
+fn intl_duration_ctor(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
+    let opts = read_opts(
+        e,
+        arg(args, 1),
+        &[
+            "style",
+            "years",
+            "months",
+            "weeks",
+            "days",
+            "hours",
+            "minutes",
+            "seconds",
+            "milliseconds",
+            "microseconds",
+            "nanoseconds",
+        ],
+    )?;
+    Ok(intl_obj(
+        e,
+        "DurationFormat",
+        &opts,
+        &[
+            ("format", durfmt_format),
+            ("formatToParts", durfmt_parts),
+            ("resolvedOptions", durfmt_resolved),
+        ],
+    ))
+}
+
+/// `dur` → champs `[i64;10]` (entrée Duration/objet/ISO).
+fn durfmt_fields(e: &mut Engine, v: Value) -> JsResult<[i64; 10]> {
+    crate::temporal::to_duration(e, v)
+}
+
+/// Parties `(type, value)` en-US pour un style donné.
+fn durfmt_render(_e: &mut Engine, opts: &str, f: &[i64; 10]) -> JsResult<Vec<(String, String)>> {
+    let style = opt(opts, "style").unwrap_or("long");
+    let neg = f.iter().all(|&x| x <= 0) && f.iter().any(|&x| x != 0);
+    let mut parts: Vec<(String, String)> = Vec::new();
+    if style == "digital" {
+        // `h:mm:ss(.fff)` — champs sous-seconde repliés en
+        // fraction ; champs date ignorés si h/m/s présents.
+        let (h, m, s, ms, us, ns) = (f[4], f[5], f[6], f[7], f[8], f[9]);
+        let frac = ms * 1_000_000 + us * 1_000 + ns;
+        let mut out = format!("{}:{:02}:{:02}", h.abs(), m.abs(), s.abs());
+        if frac != 0 {
+            out += &format!(".{:03}", frac / 1_000_000);
+        }
+        parts.push(("integer".into(), out));
+        return Ok(parts);
+    }
+    let mut first = true;
+    for (i, &(fld, typ, lsg, lpl, sh, nw)) in DURF_UNITS.iter().enumerate() {
+        let v = f[i];
+        if v == 0 {
+            continue;
+        }
+        if !first {
+            parts.push(("literal".into(), ", ".to_string()));
+        }
+        first = false;
+        let a = v.abs();
+        let unit = match style {
+            "short" => format!(" {sh}"),
+            "narrow" => nw.to_string(),
+            _ => format!(" {}", if a == 1 { lsg } else { lpl }),
+        };
+        let _ = fld;
+        parts.push(("integer".into(), a.to_string()));
+        parts.push((typ.to_string(), unit));
+    }
+    if parts.is_empty() {
+        // Durée nulle : "0 seconds" selon le style.
+        let u = match style {
+            "short" => " sec",
+            "narrow" => "s",
+            _ => " seconds",
+        };
+        parts.push(("integer".into(), "0".to_string()));
+        parts.push(("second".into(), u.to_string()));
+    }
+    if neg {
+        parts.insert(0, ("literal".into(), "-".to_string()));
+    }
+    Ok(parts)
+}
+
+fn durfmt_format(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
+    let id = self_id(e, this, args, "DurationFormat")?;
+    let opts = self_opts(e, id);
+    let f = durfmt_fields(e, arg(args, 1))?;
+    let parts = durfmt_render(e, &opts, &f)?;
+    Ok(e.str_val(parts.iter().map(|(_, v)| v.as_str()).collect::<String>()))
+}
+
+fn durfmt_parts(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
+    let id = self_id(e, this, args, "DurationFormat")?;
+    let opts = self_opts(e, id);
+    let f = durfmt_fields(e, arg(args, 1))?;
+    let parts = durfmt_render(e, &opts, &f)?;
+    let mut out = Vec::with_capacity(parts.len());
+    for (ty, val) in parts {
+        let pid = e.new_object();
+        let tv = e.str_val(ty);
+        let vv = e.str_val(val);
+        e.set_own(pid, "type", tv, true);
+        e.set_own(pid, "value", vv, true);
+        out.push(Value::Obj(pid));
+    }
+    Ok(e.new_array(out))
+}
+
+fn durfmt_resolved(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
+    let id = self_id(e, this, args, "DurationFormat")?;
+    let opts = self_opts(e, id);
+    let o = e.new_object();
+    let loc = e.str_val("en-US");
+    let st = e.str_val(opt(&opts, "style").unwrap_or("long").to_string());
+    e.set_own(o, "locale", loc, true);
+    e.set_own(o, "style", st, true);
     Ok(Value::Obj(o))
 }

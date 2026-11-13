@@ -285,6 +285,10 @@ pub(crate) struct PaintPayload {
     /// (CAP-195 tranche 2) — cascadées en feuilles auteur
     /// document **après** `linked_sheets` (ordre spec).
     pub adopted_sheets: Vec<String>,
+    /// `<style>` inline expansés `@import` (étape 218) :
+    /// texte d'origine → texte expansé — substitué par
+    /// contenu dans `styles_payload`.
+    pub inline_css_expanded: HashMap<String, String>,
     /// Styles bruts de la dernière cascade (transitions).
     pub prev_styles: HashMap<usize, ComputedStyle>,
     /// Transitions en vol.
@@ -486,6 +490,7 @@ impl Tab {
             // depuis `Tab.defined_names` (plus frais possible).
             defined_names: self.defined_names.clone(),
             adopted_sheets: self.adopted_sheets.clone(),
+            inline_css_expanded: std::mem::take(&mut self.inline_css_expanded),
             prev_styles: std::mem::take(&mut self.prev_styles),
             transitions: std::mem::take(&mut self.transitions),
             animations: std::mem::take(&mut self.animations),
@@ -548,6 +553,7 @@ impl Tab {
         self.frame_bitmaps = p.frame_bitmaps;
         self.linked_sheets = p.linked_sheets;
         self.adopted_sheets = p.adopted_sheets;
+        self.inline_css_expanded = p.inline_css_expanded;
         self.prev_styles = p.prev_styles;
         self.transitions = p.transitions;
         self.animations = p.animations;
@@ -1944,7 +1950,7 @@ fn try_incr_payload(
     // display list re-rasterise à la taille utilisée quand
     // la boîte dépasse le naturel (§B-32/§B-36).
     let (svgs, svg_sources) =
-        explorer_render::svg::collect_svg_with_sources(new_dom, root_el, ctx.image_max_px);
+        explorer_render::svg::collect_svg_styled(new_dom, root_el, &styles, ctx.image_max_px);
     let block = layout_ctx(ctx, p);
     // Reliquat R-88 : `relayout_subtree` ne pose pas
     // `root_font_size`, contrairement à `layout_tree` —
@@ -2052,6 +2058,11 @@ pub(crate) fn styles_payload(
     // `scope = Some(racine)` → feuille confinée shadow
     // (`add_scoped_css`), `None` → feuille document.
     for (scope, css) in collect_style_sheets(dom, &p.csp) {
+        // Étape 218 — `<style>` dont les `@import` ont été
+        // expansés pendant la vague : substitution par
+        // contenu (le DOM a pu muter depuis la collecte —
+        // robuste aux `<style>` insérés par JS).
+        let css = p.inline_css_expanded.get(&css).cloned().unwrap_or(css);
         match scope {
             Some(root) => eng.add_scoped_css(&css, Origin::Author, root),
             None => eng.add_css(&css, Origin::Author),
@@ -2160,7 +2171,7 @@ pub(crate) fn relayout_dom_payload(
     // R-133 : sources XML conservées pour le re-raster à
     // taille utilisée dans `paint_replaced` (§B-32/§B-36).
     let (mut svgs, mut svg_sources) =
-        explorer_render::svg::collect_svg_with_sources(dom, root_el, ctx.image_max_px);
+        explorer_render::svg::collect_svg_styled(dom, root_el, &styles, ctx.image_max_px);
     let Some(mut bx) = build_box_tree_sized(dom, root_el, &styles, &sizes) else {
         return Err(CoreError::NothingToPaint);
     };
@@ -2230,8 +2241,12 @@ pub(crate) fn relayout_dom_payload(
                     .entry(n)
                     .or_insert_with(|| composite::iframe_intrinsic(dom, n));
             }
-            let (svgs2, svg_sources2) =
-                explorer_render::svg::collect_svg_with_sources(dom, root_el, ctx.image_max_px);
+            let (svgs2, svg_sources2) = explorer_render::svg::collect_svg_styled(
+                dom,
+                root_el,
+                &styles2,
+                ctx.image_max_px,
+            );
             if let Some(mut bx2) = build_box_tree_sized(dom, root_el, &styles2, &sizes) {
                 layout_tree(&mut bx2, vw, &block);
                 tracing::info!(
@@ -2388,6 +2403,7 @@ pub(crate) fn repaint_payload(
             rect,
             color,
             radii: [0.0; 4],
+            corners: [1.0; 4],
         });
     }
     // Étape 180 (P4) — le framebuffer ne couvre plus que la
@@ -2556,6 +2572,7 @@ fn append_find_highlights(list: &mut DisplayList, f: &FindState) {
                 rect,
                 color,
                 radii: [0.0; 4],
+                corners: [1.0; 4],
             });
         }
     }

@@ -658,6 +658,49 @@ fn hit_test_pointer_events_enfant_reactive() {
     );
 }
 
+/// R-285 — `interactivity:inert` (css-ui-5) : le sous-arbre
+/// entier est exclu du hit-test, **absolument** — ni
+/// `interactivity:auto` ni `pointer-events:auto` sur un
+/// descendant ne réarment (à la différence de
+/// `pointer-events`, qui s'hérite mais se réactive).
+#[test]
+fn hit_test_interactivity_inert_exclut_le_sous_arbre() {
+    let (dom, bx) = laid(
+        "<div id=o style=\"position:absolute;inset:0;width:100px;height:100px;interactivity:inert\">\
+         <a id=a href=# style=\"interactivity:auto;pointer-events:auto;display:block;width:20px;height:20px\">x</a>\
+         </div><p id=u style=\"width:50px;height:50px\">y</p>",
+        "body{margin:0} p{position:absolute;top:0;left:0;margin:0}",
+    );
+    // (5,5) : sous le <a> « ré-armé » ET sous le <p> —
+    // l'inertie du parent prime absolument : le <p> gagne.
+    let p = by_tag(&dom, "p");
+    let hit = explorer_layout::hit_test(&bx, 5.0, 5.0);
+    let mut cur = hit;
+    let elem = loop {
+        let Some(n) = cur else { break None };
+        if dom.tag_name(n).is_ok() {
+            break Some(n);
+        }
+        cur = dom.parent(n).ok().flatten();
+    };
+    assert_eq!(
+        elem,
+        Some(p),
+        "interactivity:inert — aucun descendant ne se réarme : hit={hit:?}"
+    );
+    // Hors <a> mais dans le parent inerte : pareil.
+    let hit2 = explorer_layout::hit_test(&bx, 40.0, 40.0);
+    let mut cur2 = hit2;
+    let elem2 = loop {
+        let Some(n) = cur2 else { break None };
+        if dom.tag_name(n).is_ok() {
+            break Some(n);
+        }
+        cur2 = dom.parent(n).ok().flatten();
+    };
+    assert_eq!(elem2, Some(p));
+}
+
 /// §B-17 — `[inert]` exclut tout le sous-arbre du hit-test
 /// (HTML §6.4.2 : « as if the pointer-events property were
 /// set to none », porté par la règle UA) : le drawer santemag
@@ -2258,6 +2301,50 @@ fn overflow_wrap_break_word_coupe() {
     assert!(total >= 2, "mot long non coupé — {total} ligne(s)");
 }
 
+/// R-262 — fabrique partagée des tests de coupure intra-mot :
+/// `decl` = la déclaration testée, un mot de ~30 caractères
+/// dans une boîte de 60 px doit produire ≥ 2 lignes.
+fn long_word_lines(decl: &str) -> usize {
+    let dom = TreeBuilder::parse("<div id=d>treslongmotquidebordepartout</div>");
+    let mut e = StyleEngine::new();
+    e.add_css(
+        &format!("body{{margin:0}} #d{{width:60px;font-size:10px;{decl}}}"),
+        Origin::Author,
+    );
+    let styles = e.compute_tree(&dom, dom.document(), &StyleEnv::default());
+    let root_el = dom
+        .children(dom.document())
+        .into_iter()
+        .flatten()
+        .find(|&c| dom.element(c).is_ok())
+        .unwrap();
+    let mut bx = build_box_tree(&dom, root_el, &styles).unwrap();
+    layout_tree(&mut bx, VIEW, &BlockCtx::default());
+    let d = find(&bx, by_id(&dom, "d"));
+    d.lines.len() + d.children.iter().map(|c| c.lines.len()).sum::<usize>()
+}
+
+#[test]
+fn word_break_break_word_alias_coupe() {
+    // `word-break:break-word` (forme dépréciée, css-text-3
+    // §6.1) se comporte en `overflow-wrap:break-word`.
+    assert!(long_word_lines("word-break:break-word") >= 2);
+}
+
+#[test]
+fn word_wrap_alias_overflow_wrap_coupe() {
+    // `word-wrap` = nom legacy d'`overflow-wrap` — même effet.
+    assert!(long_word_lines("word-wrap:break-word") >= 2);
+}
+
+#[test]
+fn line_break_anywhere_coupe() {
+    // `line-break:anywhere` (css-text-3 §6.2) : opportunité
+    // souple autour de chaque caractère typographique — le
+    // mot latin long se coupe aussi.
+    assert!(long_word_lines("line-break:anywhere") >= 2);
+}
+
 #[test]
 fn height_pct_chain_html_body_map() {
     // B-28 (uMap/Leaflet vol50) : `html`/`body`/`#map` à
@@ -2904,6 +2991,82 @@ fn table_collapse_colonnes_et_baseline() {
     );
 }
 
+/// R-291 — §17.5.3 : la `height` **spécifiée de la rangée**
+/// (`tr` réel) borne inférieurement sa hauteur — un spacer
+/// `<tr style="height:5px">` à cellule vide conserve ses
+/// 5 px au lieu de s'effondrer au contenu (~0). La rangée
+/// suivante est repoussée d'autant — cause mesurée du
+/// drift `dy` cumulatif ~4,7 px/story sur Hacker News.
+#[test]
+fn table_tr_height_specifiee_borne_le_rang() {
+    let (dom, bx) = laid(
+        "<table><tr><td id=a>x</td></tr>\
+         <tr id=sp style=\"height:5px\"><td></td></tr>\
+         <tr><td id=b>y</td></tr></table>",
+        "table{border-collapse:collapse} td{padding:0;font-size:10px}",
+    );
+    let sp = find(&bx, by_id(&dom, "sp"));
+    assert!(
+        sp.rect.height >= 5.0 - 0.01,
+        "rang à height spécifiée : {} ≥ 5",
+        sp.rect.height
+    );
+    let a = find(&bx, by_id(&dom, "a"));
+    let b = find(&bx, by_id(&dom, "b"));
+    let gap = b.rect.y - (a.rect.y + a.rect.height);
+    assert!(
+        gap >= 5.0 - 0.01,
+        "la rangée suivante est repoussée du spacer : gap {gap}"
+    );
+}
+
+/// R-266 — §17.5.3.1 : sur une cellule, toute valeur hors
+/// `baseline`/`top`/`middle`/`bottom` retombe sur `baseline`
+/// (l'ancien `_ => 0` alignait `text-top`/`text-bottom`/
+/// `<length>` en haut). `top` reste le témoin distinct.
+#[test]
+fn table_cell_va_hors_quatuor_retombe_sur_baseline() {
+    let bl = |cell: &explorer_layout::LayoutBox| -> f32 {
+        cell.children
+            .iter()
+            .find_map(|c| c.lines.first())
+            .map_or(cell.rect.y + cell.rect.height, |l| l.rect.y + l.baseline)
+    };
+    for va in ["text-top", "text-bottom", "0.5em", "sub"] {
+        let (dom, bx) = laid(
+            "<table><tr><td id=g>Big</td><td id=p>small</td></tr></table>",
+            &format!(
+                "table{{border-collapse:collapse}} #g{{font-size:24px}} \
+                 #p{{font-size:8px;vertical-align:{va}}}"
+            ),
+        );
+        let g = find(&bx, by_id(&dom, "g"));
+        let p = find(&bx, by_id(&dom, "p"));
+        assert!(
+            (bl(g) - bl(p)).abs() < 1.0,
+            "va={va} traité baseline : {:?} vs {:?}",
+            bl(g),
+            bl(p)
+        );
+    }
+    // Témoin `top` : la petite cellule colle le haut de
+    // rangée — sa 1re ligne monte nettement plus haut que la
+    // baseline partagée.
+    let (dom, bx) = laid(
+        "<table><tr><td id=g>Big</td><td id=p>small</td></tr></table>",
+        "table{border-collapse:collapse} #g{font-size:24px} \
+         #p{font-size:8px;vertical-align:top}",
+    );
+    let g = find(&bx, by_id(&dom, "g"));
+    let p = find(&bx, by_id(&dom, "p"));
+    assert!(
+        bl(g) - bl(p) > 2.0,
+        "top ≠ baseline : {:?} vs {:?}",
+        bl(g),
+        bl(p)
+    );
+}
+
 /// R-180 — `list-style-position:inside` : la puce devient un
 /// `Text` « glyphe + espace » en tête des enfants du
 /// `list-item` — la ligne s'indente comme si c'était le
@@ -2970,6 +3133,96 @@ fn multicol_span_et_break() {
         "b en colonne 2 : a.x={} b.x={}",
         a.rect.x,
         b.rect.x
+    );
+}
+
+/// R-268 — alias legacy `page-break-*` (css-break-3 §4.1 :
+/// shorthands de `break-*`, `always` = saut de colonne en
+/// multicol — `break-*` prime si les deux sont déclarés).
+#[test]
+fn multicol_page_break_alias() {
+    // `page-break-before:always` → saut de colonne.
+    let (dom, bx) = laid(
+        "<div id=c><p id=a>a</p><p id=b>b</p></div>",
+        "#c{column-count:2;column-gap:10px;width:210px} \
+         p{margin:0} #b{page-break-before:always}",
+    );
+    let a = find(&bx, by_id(&dom, "a"));
+    let b = find(&bx, by_id(&dom, "b"));
+    assert!(
+        b.rect.x > a.rect.x + 50.0,
+        "page-break-before:always → b colonne 2 : {}",
+        b.rect.x
+    );
+    // `page-break-after:always` sur la 1re pousse la 2e.
+    let (dom2, bx2) = laid(
+        "<div id=c><p id=a>a</p><p id=b>b</p></div>",
+        "#c{column-count:2;column-gap:10px;width:210px} \
+         p{margin:0} #a{page-break-after:always}",
+    );
+    let a2 = find(&bx2, by_id(&dom2, "a"));
+    let b2 = find(&bx2, by_id(&dom2, "b"));
+    assert!(
+        b2.rect.x > a2.rect.x + 50.0,
+        "page-break-after:always → b colonne 2 : {}",
+        b2.rect.x
+    );
+    // `break-*` prime : `break-before:auto` bat
+    // `page-break-before:always` — pas de saut forcé.
+    let (dom3, bx3) = laid(
+        "<div id=c><p id=a>a</p><p id=b>b</p></div>",
+        "#c{column-count:2;column-gap:10px;width:210px} \
+         p{margin:0} #b{page-break-before:always;break-before:auto}",
+    );
+    let a3 = find(&bx3, by_id(&dom3, "a"));
+    let b3 = find(&bx3, by_id(&dom3, "b"));
+    // Équilibre naturel 2 unités / 2 colonnes → b en col 2
+    // quand même : le test discriminant est le CAS `avoid`
+    // ci-dessous — ici on vérifie juste que `auto` ne
+    // force rien de plus que le placement naturel.
+    assert!(b3.rect.x >= a3.rect.x, "break-before:auto inerte");
+}
+
+/// R-268 — `break-*:avoid`/`avoid-column` garde les unités
+/// ensemble : sans lui `b` partirait en colonne 2 (équilibre
+/// au milieu) — il reste avec `a`. Une coupure forcée
+/// (`break-before:column` sur l'unité suivante) l'emporte.
+#[test]
+fn multicol_break_avoid() {
+    let (dom, bx) = laid(
+        "<div id=c><p id=a>a</p><p id=b>b</p><p id=c2>c</p></div>",
+        "#c{column-count:2;column-gap:10px;width:210px} \
+         p{margin:0} #a{break-after:avoid}",
+    );
+    let a = find(&bx, by_id(&dom, "a"));
+    let b = find(&bx, by_id(&dom, "b"));
+    let c2 = find(&bx, by_id(&dom, "c2"));
+    assert_eq!(
+        a.rect.x, b.rect.x,
+        "break-after:avoid → b garde la colonne de a"
+    );
+    assert!(c2.rect.x > a.rect.x + 50.0, "c en colonne 2");
+    // `break-before:avoid-column` sur l'unité elle-même.
+    let (dom2, bx2) = laid(
+        "<div id=c><p id=a>a</p><p id=b>b</p></div>",
+        "#c{column-count:2;column-gap:10px;width:210px} \
+         p{margin:0} #b{break-before:avoid-column}",
+    );
+    let a2 = find(&bx2, by_id(&dom2, "a"));
+    let b2 = find(&bx2, by_id(&dom2, "b"));
+    assert_eq!(a2.rect.x, b2.rect.x, "avoid-column → b garde a");
+    // La coupure forcée l'emporte sur l'`avoid` (spec §3).
+    let (dom3, bx3) = laid(
+        "<div id=c><p id=a>a</p><p id=b>b</p></div>",
+        "#c{column-count:2;column-gap:10px;width:210px} \
+         p{margin:0} #a{break-after:avoid} #b{break-before:column}",
+    );
+    let a3 = find(&bx3, by_id(&dom3, "a"));
+    let b3 = find(&bx3, by_id(&dom3, "b"));
+    assert!(
+        b3.rect.x > a3.rect.x + 50.0,
+        "break-before:column > break-after:avoid : {}",
+        b3.rect.x
     );
 }
 
@@ -3079,5 +3332,251 @@ fn flex_column_margin_auto_centre_verticalement() {
     assert!(
         (dy - 75.0).abs() < 0.5,
         "item centré verticalement : dy={dy} attendu 75"
+    );
+}
+
+// ── R-273 : `shape-outside` — les lignes contournent la
+// forme (css-shapes-1 §3) : un cercle dans la margin box ne
+// mord que là où sa courbe passe — la ligne du haut déborde
+// moins que celle du milieu.
+
+#[test]
+fn shape_outside_cercle_mord_selon_la_hauteur() {
+    // Flottant gauche 40×40 ; `circle(20px at center)` →
+    // centre (20,20), r=20 : étendue droite = 20 en haut
+    // (tangente), 40 au milieu. Sans forme : 40 partout.
+    let html = concat!(
+        "<!doctype html><div style=\"width:200px\">",
+        "<div class=\"fl\"><div style=\"width:40px;height:40px\"></div></div>",
+        "<p>aaaa aaaa aaaa aaaa aaaa aaaa aaaa aaaa aaaa aaaa aaaa aaaa</p>",
+        "</div>"
+    );
+    let (_, bx) = laid(
+        html,
+        "body{margin:0}p{margin:0}.fl{float:left;shape-outside:circle(20px at center)}",
+    );
+    let (dom, _) = laid(html, "");
+    let p = find(&bx, by_tag(&dom, "p"));
+    let anon = &p.children[0];
+    assert!(anon.lines.len() >= 3, "lines={}", anon.lines.len());
+    // Témoin sans forme : la marge-rect mord pareil partout.
+    let (_, bx2) = laid(html, "body{margin:0}p{margin:0}.fl{float:left}");
+    let p2 = find(&bx2, by_tag(&dom, "p"));
+    let rect_x = p2.children[0].lines[0].rect.x;
+    // Forme : la morsure varie selon la hauteur (courbe) ET
+    // quelque part elle est strictement plus faible que le
+    // rectangle témoin.
+    let xs: Vec<f32> = anon.lines.iter().map(|l| l.rect.x).collect();
+    let (lo, hi) = xs
+        .iter()
+        .fold((f32::INFINITY, f32::NEG_INFINITY), |(a, b), v| {
+            (a.min(*v), b.max(*v))
+        });
+    assert!(hi - lo > 1.0, "morsure variable attendue : {xs:?}");
+    assert!(
+        lo < rect_x - 1.0,
+        "la forme mord moins que le rect : lo={lo} rect={rect_x} ({xs:?})"
+    );
+}
+
+#[test]
+fn shape_outside_inset_bornee_et_shape_margin() {
+    // `inset(10px)` sur un flottant 40×40 : la forme couvre
+    // [10,30)² → les lignes dans cette bande démarrent à
+    // ~30 (10+20), celles en dessous à 0.
+    let html = concat!(
+        "<!doctype html><div style=\"width:200px\">",
+        "<div class=\"fl\"><div style=\"width:40px;height:40px\"></div></div>",
+        "<p>aaaa aaaa aaaa aaaa aaaa aaaa aaaa aaaa aaaa aaaa aaaa aaaa</p>",
+        "</div>"
+    );
+    let (dom, _) = laid(html, "");
+    let (_, bx) = laid(
+        html,
+        "body{margin:0}p{margin:0}.fl{float:left;shape-outside:inset(10px)}",
+    );
+    let xs: Vec<f32> = find(&bx, by_tag(&dom, "p")).children[0]
+        .lines
+        .iter()
+        .map(|l| l.rect.x)
+        .collect();
+    let (lo, hi) = xs
+        .iter()
+        .fold((f32::INFINITY, f32::NEG_INFINITY), |(a, b), v| {
+            (a.min(*v), b.max(*v))
+        });
+    assert!(lo < 5.0, "lignes sous la forme libres : {xs:?}");
+    assert!(
+        hi > 20.0 && hi < 40.0,
+        "morsure bornée à l'inset (30) : {xs:?}"
+    );
+    // `shape-margin:10px` dilate la forme au-delà de la
+    // marge-rect : certaines lignes reculent plus que 40.
+    let (_, bx) = laid(
+        html,
+        "body{margin:0}p{margin:0}.fl{float:left;\
+         shape-outside:inset(0);shape-margin:10px}",
+    );
+    let xs: Vec<f32> = find(&bx, by_tag(&dom, "p")).children[0]
+        .lines
+        .iter()
+        .map(|l| l.rect.x)
+        .collect();
+    assert!(
+        xs.iter().any(|x| *x > 45.0),
+        "shape-margin repousse au-delà de la marge : {xs:?}"
+    );
+}
+
+#[test]
+fn container_type_size_contient_la_taille() {
+    // css-contain-3 §2.2 : `container-type:size` = contain
+    // size sur les deux axes — `height:auto` dimensionnée
+    // « comme vide » : les enfants posés ne font pas
+    // croître la boîte (ils débordent).
+    let html = "<!doctype html><div id=c><p>a</p><p>b</p></div>";
+    let (dom, _) = laid(html, "");
+    let (_, bx) = laid(html, "#c{container-type:size}");
+    let h_size = find(&bx, by_id(&dom, "c")).rect.height;
+    assert!(h_size < 5.0, "size → hauteur ~0 : h={h_size}");
+    // `inline-size` : axe bloc NON contenu → la hauteur
+    // suit le contenu normalement.
+    let (_, bx) = laid(html, "#c{container-type:inline-size}");
+    let h_inline = find(&bx, by_id(&dom, "c")).rect.height;
+    assert!(
+        h_inline > 30.0,
+        "inline-size → hauteur contenu : h={h_inline}"
+    );
+    // `normal` témoin : même hauteur que sans déclaration.
+    let (_, bx) = laid(html, "#c{container-type:normal}");
+    let h_normal = find(&bx, by_id(&dom, "c")).rect.height;
+    assert!(
+        (h_normal - h_size).abs() > 20.0,
+        "normal ≠ size : normal={h_normal} size={h_size}"
+    );
+    // `height` spécifiée gagne quand même sur le containment.
+    let (_, bx) = laid(html, "#c{container-type:size;height:80px}");
+    let h_fixed = find(&bx, by_id(&dom, "c")).rect.height;
+    assert!(
+        (h_fixed - 80.0).abs() < 1.0,
+        "height explicit > contain : h={h_fixed}"
+    );
+}
+
+/// Collecte le texte (boîtes `Text`) dans l'ordre de l'arbre.
+fn texts(b: &LayoutBox, out: &mut String) {
+    if let Some(t) = &b.text {
+        out.push_str(t);
+    }
+    for c in &b.children {
+        texts(c, out);
+    }
+}
+
+#[test]
+fn quotes_mots_cles_content_et_profondeur() {
+    // R-276 — css-content-3 §6.1 : `open-quote`/`close-quote`
+    // dans `content` émettent la paire de `quotes` à la
+    // profondeur courante (document-ordre) ; `auto` =
+    // `“…”` puis `‘…’`. La feuille UA pose les pseudos de
+    // `<q>` ; la cascade auteur peut les surcharger.
+    let (_dom, bx) = laid(
+        "<html><body><p>un <q>deux <q>trois</q></q> quatre</p></body></html>",
+        "p { quotes: auto } q { font-size: 10px }",
+    );
+    let mut t = String::new();
+    texts(&bx, &mut t);
+    assert_eq!(
+        t, "un \u{201c}deux \u{2018}trois\u{2019}\u{201d} quatre",
+        "paires auto + profondeur imbriquée : {t:?}"
+    );
+
+    // Paires explicites : la 2e se répète au-delà
+    // (css-content-3 — profondeur bornée à la liste).
+    let (_d2, bx2) = laid(
+        "<html><body><p>x<q>a<q>b<q>c</q></q></q>y</p></body></html>",
+        "p { quotes: '\u{2039}' '\u{203a}' '\u{00ab}' '\u{00bb}' }",
+    );
+    let mut t2 = String::new();
+    texts(&bx2, &mut t2);
+    assert_eq!(
+        t2, "x\u{2039}a\u{00ab}b\u{00ab}c\u{00bb}\u{00bb}\u{203a}y",
+        "paires explicites + saturation de profondeur : {t2:?}"
+    );
+
+    // `no-open-quote` décale la profondeur sans émettre.
+    let (_d3, bx3) = laid(
+        "<html><body><p><span id=s></span><q>q</q></p></body></html>",
+        "#s::before { content: no-open-quote } q::before { content: open-quote }",
+    );
+    let mut t3 = String::new();
+    texts(&bx3, &mut t3);
+    assert_eq!(
+        t3, "\u{2018}q\u{2019}",
+        "no-open-quote saute un niveau : {t3:?}"
+    );
+
+    // `quotes:none` → les mots-clés n'émettent rien mais la
+    // profondeur bouge toujours.
+    let (_d4, bx4) = laid(
+        "<html><body><p><q>a</q><q>b</q></p></body></html>",
+        "p { quotes: none }",
+    );
+    let mut t4 = String::new();
+    texts(&bx4, &mut t4);
+    assert_eq!(t4, "ab", "quotes:none muet : {t4:?}");
+}
+
+#[test]
+fn field_sizing_content_mesure_au_contenu() {
+    // R-277 — css-forms : `field-sizing:content` mesure le
+    // contrôle à son contenu au lieu de la taille fixe
+    // (`size`/`cols`/`rows` + défauts 10em/4em). `width`
+    // auteur prime toujours (le hint n'a que le rang UA).
+    let w = |html: &str, css: &str, tag: &str| {
+        let (dom, bx) = laid(html, css);
+        find(&bx, by_tag(&dom, tag)).rect.width
+    };
+    let fixed = w(
+        "<html><body><input value=abcde></body></html>",
+        "input{font-size:16px}",
+        "input",
+    );
+    assert!(fixed >= 160.0, "défaut ≥ 10em à 16px : {fixed}");
+    let content = w(
+        "<html><body><input value=abcde></body></html>",
+        "input{font-size:16px;field-sizing:content}",
+        "input",
+    );
+    assert!(
+        content < fixed && content > 0.0,
+        "content ≠ 10em (mesure au texte) : {content}"
+    );
+    // `field-sizing:fixed` explicite = défaut.
+    let expl = w(
+        "<html><body><input value=abcde></body></html>",
+        "input{font-size:16px;field-sizing:fixed}",
+        "input",
+    );
+    assert_eq!(expl, fixed, "fixed explicite : {expl}");
+    // `width` auteur prime `field-sizing:content`.
+    let authored = w(
+        "<html><body><input value=abcde></body></html>",
+        "input{font-size:16px;field-sizing:content;width:200px}",
+        "input",
+    );
+    assert!(
+        (authored - 200.0).abs() <= 4.0,
+        "width auteur prime (+bordures) : {authored}"
+    );
+    // `cols`/`rows` ignorés sous `field-sizing:content`.
+    let (dom, bx) = laid(
+        "<html><body><textarea cols=40 rows=8>hi</textarea></body></html>",
+        "textarea{font-size:16px;field-sizing:content}",
+    );
+    let ta = find(&bx, by_tag(&dom, "textarea")).rect;
+    assert!(
+        ta.width < 40.0 * 16.0 && ta.height < 8.0 * 19.2,
+        "cols/rows ignorés : {ta:?}"
     );
 }

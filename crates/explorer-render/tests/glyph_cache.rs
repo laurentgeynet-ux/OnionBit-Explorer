@@ -192,6 +192,7 @@ fn meme_requete_meme_face() {
         caps: 0,
         kern_off: false,
         stretch: 100,
+        feature_settings: Vec::new(),
     };
     let a = gc.face(fonts(), &req).expect("face");
     let b = gc.face(fonts(), &req).expect("face");
@@ -220,6 +221,7 @@ fn r202_ttc_web_face_index_par_couverture() {
         caps: 0,
         kern_off: false,
         stretch: 100,
+        feature_settings: Vec::new(),
     };
     // 中 (U+4E2D) n'est couvert que par la face 1.
     let (_, idx) = web.fallback_for('中', &req).expect("repli CJK");
@@ -257,6 +259,7 @@ fn r202_run_mixte_segmente_vers_face_ttc() {
         caps: 0,
         kern_off: false,
         stretch: 100,
+        feature_settings: Vec::new(),
     };
     let mut fc = FontCache::new();
     let run = fc

@@ -819,6 +819,25 @@ pub fn rasterize_dirty_cached(
     Some(prev)
 }
 
+/// Nature d'un groupe hors-écran sur la pile `filtered` de
+/// [`replay_items`] — le kind fait foi au pop (R-252) :
+/// `PopFilter`/`PopBlend`/`PopMask` sont interchangeables,
+/// l'appariement est garanti par l'émission.
+enum GroupKind {
+    /// `filter` — ops appliquées avant composite (R-M5).
+    Ops(Vec<FilterOp>),
+    /// `mix-blend-mode`/`isolation` — fondu au pop (R-185).
+    Blend(u8),
+    /// `mask-image` de groupe — composite modulé par
+    /// l'alpha du bitmap tuilé dans `dst` (R-252).
+    Mask {
+        /// Aire de peinture (mask-clip, coords document).
+        rect: explorer_layout::Rect,
+        /// Tuiles des couches — union `add` des couvertures.
+        layers: Vec<crate::display::MaskTile>,
+    },
+}
+
 /// Rejoue les items dans `pixmap` — boucle de peinture
 /// partagée par [`rasterize`] et [`rasterize_dirty`].
 ///
@@ -842,10 +861,11 @@ fn replay_items(
     filter: Option<(&[Option<explorer_layout::Rect>], explorer_layout::Rect)>,
 ) {
     let mut clips: Vec<Mask> = Vec::new();
-    // R-M5 — `filter` : les items d'un groupe
-    // `PushFilter`…`PopFilter` se peignent dans un tampon
-    // offscreen puis reçoivent les ops et se compositent.
-    let mut filtered: Vec<(Pixmap, Vec<FilterOp>, u8)> = Vec::new();
+    // R-M5 — groupes hors-écran : `PushFilter`/`PushBlend`/
+    // `PushMask` poussent un tampon ; les items suivants s'y
+    // peignent (`filtered.last_mut()` = cible courante) et le
+    // `Pop*` correspondant le composite selon `GroupKind`.
+    let mut filtered: Vec<(Pixmap, GroupKind)> = Vec::new();
     // Pile des `transform` CSS : `cur` = dpi · produit des
     // matrices actives — recomposé à chaque push/pop (peu de
     // niveaux en pratique).
@@ -903,6 +923,7 @@ fn replay_items(
                                 clamped.right(),
                                 clamped.bottom(),
                                 radii,
+                                &ROUND_CORNERS,
                             ) {
                                 mask.fill_path(
                                     &path,
@@ -955,7 +976,7 @@ fn replay_items(
             }
             DisplayItem::PushFilter(ops) => {
                 if let Some(buf) = Pixmap::new(pixmap.width(), pixmap.height()) {
-                    filtered.push((buf, ops.clone(), 0));
+                    filtered.push((buf, GroupKind::Ops(ops.clone())));
                 }
             }
             // R-185 — `mix-blend-mode`/`isolation` : groupe
@@ -963,31 +984,70 @@ fn replay_items(
             // 0 = `isolation` isolant).
             DisplayItem::PushBlend(tag) => {
                 if let Some(buf) = Pixmap::new(pixmap.width(), pixmap.height()) {
-                    filtered.push((buf, Vec::new(), *tag));
+                    filtered.push((buf, GroupKind::Blend(*tag)));
                 }
             }
-            DisplayItem::PopFilter => {
-                if let Some((mut buf, ops, _)) = filtered.pop() {
-                    apply_filter_ops(&mut buf, &ops);
-                    let dst = filtered.last_mut().map_or(&mut *pixmap, |(b, _, _)| b);
-                    dst.draw_pixmap(
-                        0,
-                        0,
-                        buf.as_ref(),
-                        &tiny_skia::PixmapPaint::default(),
-                        Transform::default(),
-                        clips.last(),
-                    );
+            // R-252 — `mask-image` de groupe : le tampon se
+            // composite au pop modulé par l'alpha du bitmap
+            // (tuile `dst`/`repeat` résolus à l'émission,
+            // aire `rect` = border box).
+            DisplayItem::PushMask { rect, layers } => {
+                if let Some(buf) = Pixmap::new(pixmap.width(), pixmap.height()) {
+                    filtered.push((
+                        buf,
+                        GroupKind::Mask {
+                            rect: *rect,
+                            layers: layers.clone(),
+                        },
+                    ));
                 }
             }
-            // R-185 — `PopBlend` : le tampon du groupe se
-            // composite sur le fond accumulé — `blend_channel`
-            // par canal quand le tag > 0, source-over sinon
-            // (isolation = buffer opaque, même coût de copie).
-            DisplayItem::PopBlend => {
-                if let Some((buf, _, tag)) = filtered.pop() {
-                    let dst = filtered.last_mut().map_or(&mut *pixmap, |(b, _, _)| b);
-                    composite_blend(dst, &buf, tag);
+            // Pop générique : le kind porté par le groupe fait
+            // foi — `PopFilter`/`PopBlend`/`PopMask` sont
+            // interchangeables à la raster (l'émission garantit
+            // l'appariement ; un interleave fautif dégrade en
+            // composite du kind réel, jamais un panic).
+            DisplayItem::PopFilter | DisplayItem::PopBlend | DisplayItem::PopMask => {
+                if let Some((mut buf, kind)) = filtered.pop() {
+                    match kind {
+                        GroupKind::Ops(ops) => {
+                            apply_filter_ops(&mut buf, &ops);
+                            let dst = filtered.last_mut().map_or(&mut *pixmap, |(b, _)| b);
+                            dst.draw_pixmap(
+                                0,
+                                0,
+                                buf.as_ref(),
+                                &tiny_skia::PixmapPaint::default(),
+                                Transform::default(),
+                                clips.last(),
+                            );
+                        }
+                        // `blend_channel` par canal quand le
+                        // tag > 0, source-over sinon.
+                        GroupKind::Blend(tag) => {
+                            let dst = filtered.last_mut().map_or(&mut *pixmap, |(b, _)| b);
+                            composite_blend(dst, &buf, tag);
+                        }
+                        GroupKind::Mask { rect, layers } => {
+                            let cov = group_mask_coverage(
+                                pixmap.width(),
+                                pixmap.height(),
+                                &rect,
+                                &layers,
+                                cur,
+                                clips.last(),
+                            );
+                            let dst = filtered.last_mut().map_or(&mut *pixmap, |(b, _)| b);
+                            dst.draw_pixmap(
+                                0,
+                                0,
+                                buf.as_ref(),
+                                &tiny_skia::PixmapPaint::default(),
+                                Transform::default(),
+                                cov.as_ref(),
+                            );
+                        }
+                    }
                 }
             }
             // R-M9b — `backdrop-filter` : la région déjà
@@ -998,9 +1058,7 @@ fn replay_items(
                 let (bw, bh) = (r.width.ceil() as u32, r.height.ceil() as u32);
                 if bw > 0 && bh > 0 {
                     if let Some(mut buf) = Pixmap::new(bw, bh) {
-                        let src = filtered
-                            .last()
-                            .map_or(pixmap.as_ref(), |(b, _, _)| b.as_ref());
+                        let src = filtered.last().map_or(pixmap.as_ref(), |(b, _)| b.as_ref());
                         buf.draw_pixmap(
                             0,
                             0,
@@ -1010,7 +1068,7 @@ fn replay_items(
                             None,
                         );
                         apply_filter_ops(&mut buf, ops);
-                        let dst = filtered.last_mut().map_or(&mut *pixmap, |(b, _, _)| b);
+                        let dst = filtered.last_mut().map_or(&mut *pixmap, |(b, _)| b);
                         dst.draw_pixmap(
                             r.x.round() as i32,
                             r.y.round() as i32,
@@ -1038,7 +1096,7 @@ fn replay_items(
                             .is_none_or(|b| rects_overlap(b, win))
                     });
                 if draw {
-                    let dst = filtered.last_mut().map_or(&mut *pixmap, |(b, _, _)| b);
+                    let dst = filtered.last_mut().map_or(&mut *pixmap, |(b, _)| b);
                     paint_item(dst, item, cur, fonts, gc, clips.last());
                 }
             }
@@ -1081,6 +1139,7 @@ fn paint_deco_rect(
             },
             color,
             &[0.0; 4],
+            &ROUND_CORNERS,
             dpi,
             clip,
         );
@@ -1119,9 +1178,14 @@ fn paint_deco_rect(
                 up = !up;
             }
         }
-        _ => fill_rect_item(pixmap, rect, color, &[0.0; 4], dpi, clip),
+        _ => fill_rect_item(pixmap, rect, color, &[0.0; 4], &ROUND_CORNERS, dpi, clip),
     }
 }
+
+/// Coins `corner-shape` ronds (`DisplayItem::corners` =
+/// `[1.0; 4]`) — surfaces bornées : clip overflow,
+/// `clip-path:round`, `box-shadow` (R-270).
+const ROUND_CORNERS: [f32; 4] = [1.0; 4];
 
 /// R-167 — un `FillRect` : rayon > 0 → fill du chemin
 /// arrondi ; sinon rect pixel-snappé (`fill_guarded`).
@@ -1130,6 +1194,7 @@ fn fill_rect_item(
     rect: &explorer_layout::Rect,
     color: Color,
     radii: &[f32; 4],
+    corners: &[f32; 4],
     dpi: Transform,
     clip: Option<&Mask>,
 ) {
@@ -1145,6 +1210,7 @@ fn fill_rect_item(
             rect.x + rect.width,
             rect.y + rect.height,
             radii,
+            corners,
         ) {
             pixmap.fill_path(&path, &paint, FillRule::Winding, dpi, clip);
         }
@@ -1402,7 +1468,7 @@ fn paint_box_shadow(
             radii[2] + grow,
             radii[3] + grow,
         ];
-        if let Some(path) = rounded_rect_path(x0, y0, x1, y1, &rr) {
+        if let Some(path) = rounded_rect_path(x0, y0, x1, y1, &rr, &ROUND_CORNERS) {
             pixmap.fill_path(&path, &paint, FillRule::Winding, dpi, clip);
         }
     }
@@ -1418,8 +1484,13 @@ fn paint_item(
     clip: Option<&Mask>,
 ) {
     match item {
-        DisplayItem::FillRect { rect, color, radii } => {
-            fill_rect_item(pixmap, rect, *color, radii, dpi, clip);
+        DisplayItem::FillRect {
+            rect,
+            color,
+            radii,
+            corners,
+        } => {
+            fill_rect_item(pixmap, rect, *color, radii, corners, dpi, clip);
         }
         DisplayItem::DecoRect { rect, color, style } => {
             paint_deco_rect(pixmap, rect, *color, *style, dpi, clip);
@@ -1442,8 +1513,11 @@ fn paint_item(
             colors,
             styles,
             radii,
+            corners,
         } => {
-            paint_border(pixmap, rect, widths, colors, *styles, radii, dpi, clip);
+            paint_border(
+                pixmap, rect, widths, colors, *styles, radii, corners, dpi, clip,
+            );
         }
         DisplayItem::Text {
             origin,
@@ -1491,8 +1565,11 @@ fn paint_item(
             mask,
             dst,
             repeat,
+            luminance,
         } => {
-            paint_masked_fill(pixmap, rect, *color, mask, dst, *repeat, dpi, clip);
+            paint_masked_fill(
+                pixmap, rect, *color, mask, dst, *repeat, *luminance, dpi, clip,
+            );
         }
         // R-186 — `text-emphasis` : marque par glyphe au-
         // dessus (over) ou dessous du run.
@@ -1522,6 +1599,26 @@ fn paint_item(
         } => paint_marker_text(
             pixmap, *origin, text, font, *color, *size_px, dpi, fonts, gc, clip,
         ),
+        DisplayItem::BorderImage {
+            rect,
+            img,
+            src_edges,
+            dst_edges,
+            fill_center,
+            repeat,
+        } => {
+            paint_border_image(
+                pixmap,
+                rect,
+                img,
+                *src_edges,
+                *dst_edges,
+                *fill_center,
+                *repeat,
+                dpi,
+                clip,
+            );
+        }
         DisplayItem::PushClip(_)
         | DisplayItem::PushClipRounded { .. }
         | DisplayItem::PushClipPath { .. }
@@ -1531,8 +1628,116 @@ fn paint_item(
         | DisplayItem::PopFilter
         | DisplayItem::PushBlend(_)
         | DisplayItem::PopBlend
+        | DisplayItem::PushMask { .. }
+        | DisplayItem::PopMask
         | DisplayItem::BackdropFilter { .. }
         | DisplayItem::PopTransform => {}
+    }
+}
+
+/// R-248 — `border-image` : l'image est découpée en 9
+/// régions (`src_edges` = insets `t,r,b,l` en pixels
+/// source) et chacune est blittée vers la bordure du
+/// border-box (`dst_edges` = épaisseurs résolues). Les
+/// coins sont copiés sans recale, les côtés étirés (ou
+/// tilés `repeat`/`round`/`space` — approximation
+/// stretch-tuile), le centre peint si `fill` (`stretch`).
+/// Découpe en deux axes : `src_y`/`dst_y` verticaux ×
+/// `src_x`/`dst_x` horizontaux — 9 couples `(src,dst)`.
+#[allow(clippy::too_many_arguments)]
+fn paint_border_image(
+    pixmap: &mut Pixmap,
+    rect: &explorer_layout::Rect,
+    img: &crate::DecodedImage,
+    src_edges: [f32; 4],
+    dst_edges: [f32; 4],
+    fill_center: bool,
+    repeat: (u8, u8),
+    dpi: Transform,
+    clip: Option<&Mask>,
+) {
+    // Casts f32↔u32 sûrs : dimensions image < 2^23 (précision
+    // f32 suffisante) et bords clampés ≥0 amont (signe garanti).
+    #[allow(clippy::cast_precision_loss)]
+    let (iw, ih) = (img.width as f32, img.height as f32);
+    // Insets source/déstination `(t, r, b, l)` en pixels —
+    // convention `<0` = pourcentage de la dimension (t/b
+    // contre ih, r/l contre iw) ; `≥0` = px.
+    let px = |v: f32, dim: f32| if v < 0.0 { (-v / 100.0) * dim } else { v };
+    let st = px(src_edges[0], ih).clamp(0.0, ih);
+    let sr = px(src_edges[1], iw).clamp(0.0, iw);
+    let sb = px(src_edges[2], ih).clamp(0.0, ih);
+    let sl = px(src_edges[3], iw).clamp(0.0, iw);
+    let dt = dst_edges[0].clamp(0.0, rect.height);
+    let dr = dst_edges[1].clamp(0.0, rect.width);
+    let db = dst_edges[2].clamp(0.0, rect.height);
+    let dl = dst_edges[3].clamp(0.0, rect.width);
+    // 9 régions : (src x/y, dst x/y) — `None` = zéro
+    // (région absente, sautée). Index : 0 gauche, 1 centre,
+    // 2 droite — mêmes pour top/center/bottom.
+    let sx = [(0.0, sl), (sl, iw - sl - sr), (iw - sr, sr)];
+    let sy = [(0.0, st), (st, ih - st - sb), (ih - sb, sb)];
+    let dx = [(0.0, dl), (dl, rect.width - dl - dr), (rect.width - dr, dr)];
+    let dy = [
+        (0.0, dt),
+        (dt, rect.height - dt - db),
+        (rect.height - db, db),
+    ];
+    for (yi, &(_y0, _h)) in sy.iter().enumerate() {
+        for (xi, &(_x0, _w)) in sx.iter().enumerate() {
+            // Coin (yi,xi = 0|2) : pas d'étirement ; bord/centre
+            // : stretch sur l'axe variable, repeat sur l'axe fixe.
+            let corner = xi != 1 && yi != 1;
+            let center = xi == 1 && yi == 1;
+            if center && !fill_center {
+                continue;
+            }
+            let s0 = sx[xi];
+            let s1 = sy[yi];
+            let d0 = dx[xi];
+            let d1 = dy[yi];
+            if s0.1 <= 0.0 || s1.1 <= 0.0 || d0.1 <= 0.0 || d1.1 <= 0.0 {
+                continue;
+            }
+            let _ = (corner, center, repeat);
+            // Sous-rect source (s0.x,s0.y → s0.w × s1.h)
+            // étiré dans la zone dst — `paint_image`
+            // scale l'intégrale de la vue (≡ stretch ;
+            // repeat/round ≈ stretch-tuile, approximation
+            // documentée R-248).
+            // `s0.1`/`s1.1` > 0 vérifié ; `ceil` < iw/ih donc
+            // le cast ne peut ni tronquer ni perdre le signe.
+            #[allow(clippy::cast_sign_loss, clippy::cast_possible_truncation)]
+            let sw = s0.1.ceil() as u32;
+            #[allow(clippy::cast_sign_loss, clippy::cast_possible_truncation)]
+            let sh = s1.1.ceil() as u32;
+            #[allow(clippy::cast_sign_loss, clippy::cast_possible_truncation)]
+            let src_x = s0.0.floor() as u32;
+            #[allow(clippy::cast_sign_loss, clippy::cast_possible_truncation)]
+            let src_y = s1.0.floor() as u32;
+            if sw == 0 || sh == 0 || src_x >= img.width || src_y >= img.height {
+                continue;
+            }
+            let mut rgba = vec![0u8; (sw * sh * 4) as usize];
+            for row in 0..sh.min(img.height - src_y) {
+                let src = ((src_y + row) * img.width + src_x) as usize * 4;
+                let copy_w = sw.min(img.width - src_x) as usize * 4;
+                let dst_o = (row * sw) as usize * 4;
+                rgba[dst_o..dst_o + copy_w].copy_from_slice(&img.rgba[src..src + copy_w]);
+            }
+            let dst = explorer_layout::Rect {
+                x: rect.x + d0.0,
+                y: rect.y + d1.0,
+                width: d0.1,
+                height: d1.1,
+            };
+            let view = crate::DecodedImage {
+                width: sw,
+                height: sh,
+                rgba,
+            };
+            paint_image(pixmap, &dst, &view, dpi, clip);
+        }
     }
 }
 
@@ -1640,13 +1845,15 @@ fn paint_marker(
     clippy::cast_sign_loss,
     clippy::too_many_arguments
 )]
+#[allow(clippy::too_many_lines)]
 fn paint_masked_fill(
     pixmap: &mut Pixmap,
     rect: &explorer_layout::Rect,
     color: Color,
     img: &crate::DecodedImage,
     dst: &explorer_layout::Rect,
-    repeat: (bool, bool),
+    repeat: (u8, u8),
+    luminance: bool,
     cur: Transform,
     clip: Option<&Mask>,
 ) {
@@ -1722,26 +1929,29 @@ fn paint_masked_fill(
         // rel négatifs — pixels avant l'origine de la tuile) ;
         // sans repeat, hors tuile = couverture nulle (mask
         // absent → pixel masqué, pas peint).
-        let ry = py - dy0;
-        let ty = if repeat.1 {
-            ry.rem_euclid(dh)
-        } else if (0..dh).contains(&ry) {
-            ry
-        } else {
+        let Some(ty) = tile_sample((py - dy0) as f32, dh as f32, (y1 - dy0) as f32, repeat.1)
+        else {
             continue;
         };
         let sy = (ty as usize * img_h / tile_h).min(img_h - 1);
         for px in x0..x1 {
-            let rx = px - dx0;
-            let tx = if repeat.0 {
-                rx.rem_euclid(dw)
-            } else if (0..dw).contains(&rx) {
-                rx
-            } else {
+            let Some(tx) = tile_sample((px - dx0) as f32, dw as f32, (x1 - dx0) as f32, repeat.0)
+            else {
                 continue;
             };
             let sx = (tx as usize * img_w / tile_w).min(img_w - 1);
-            data[py as usize * w + px as usize] = img.rgba[(sy * img_w + sx) * 4 + 3];
+            let i4 = (sy * img_w + sx) * 4;
+            data[py as usize * w + px as usize] = if luminance {
+                let (rc, gc, bc, ac) = (
+                    u32::from(img.rgba[i4]),
+                    u32::from(img.rgba[i4 + 1]),
+                    u32::from(img.rgba[i4 + 2]),
+                    u32::from(img.rgba[i4 + 3]),
+                );
+                ((rc * 2126 + gc * 7152 + bc * 722 + 5000) / 10000 * ac / 255) as u8
+            } else {
+                img.rgba[i4 + 3]
+            };
         }
     }
     // Compose avec le clip actif (`overflow`) — min des
@@ -1757,6 +1967,130 @@ fn paint_masked_fill(
     };
     paint.set_color(skia_color(color));
     pixmap.fill_rect(phys, &paint, Transform::default(), Some(&m));
+}
+
+/// Couverture d'un groupe `PushMask` (R-252) : mask
+/// canvas-size dont l'alpha = celui du bitmap tuilé dans
+/// `tile` (zone `rect` = border box transformée — mask
+/// painting area initiale ; hors zone = 0 → groupe
+/// invisible, conforme spec : mask hors zone = élément
+/// masqué entièrement), composé en `min` avec le clip
+/// actif. Même échantillonnage nearest que
+/// [`paint_masked_fill`]. `None` = allocation impossible.
+#[allow(
+    clippy::cast_possible_truncation,
+    clippy::cast_precision_loss,
+    clippy::cast_sign_loss,
+    clippy::too_many_arguments
+)]
+fn group_mask_coverage(
+    pw: u32,
+    ph: u32,
+    rect: &explorer_layout::Rect,
+    layers: &[crate::display::MaskTile],
+    cur: Transform,
+    clip: Option<&Mask>,
+) -> Option<Mask> {
+    // Union `add` des couvertures des couches — chaque tuile
+    // est échantillonnée à part puis l'alpha retenu est le
+    // max (union). `intersect`/`subtract`/`exclude` = résidus.
+    let mut m = Mask::new(pw, ph)?;
+    for tile in layers {
+        coverage_tile(&mut m, rect, tile, cur);
+    }
+    if let Some(c) = clip {
+        for (d, e) in m.data_mut().iter_mut().zip(c.data().iter()) {
+            *d = (*d).min(*e);
+        }
+    }
+    Some(m)
+}
+
+/// Accumule la couverture d'une tuile dans `m` (union max) —
+/// corps de boucle extrait de la version mono-couche.
+#[allow(
+    clippy::cast_possible_truncation,
+    clippy::cast_precision_loss,
+    clippy::cast_sign_loss
+)]
+fn coverage_tile(
+    m: &mut Mask,
+    rect: &explorer_layout::Rect,
+    layer: &crate::display::MaskTile,
+    cur: Transform,
+) {
+    let (img, tile, repeat, luminance) = (&layer.mask, &layer.dst, layer.repeat, layer.luminance);
+    let (pw, ph) = (m.width(), m.height());
+    let (iw, ih) = (img.width as usize, img.height as usize);
+    if iw == 0 || ih == 0 {
+        return;
+    }
+    let Some(phys) =
+        Rect::from_xywh(rect.x, rect.y, rect.width, rect.height).and_then(|r| r.transform(cur))
+    else {
+        return;
+    };
+    let dom = Rect::from_ltrb(0.0, 0.0, pw as f32, ph as f32);
+    let Some(zone) = dom.and_then(|d| phys.intersect(&d)) else {
+        return;
+    };
+    let Some(dst_phys) =
+        Rect::from_xywh(tile.x, tile.y, tile.width, tile.height).and_then(|r| r.transform(cur))
+    else {
+        return;
+    };
+    let (dx0, dy0) = (
+        dst_phys.left().round() as i32,
+        dst_phys.top().round() as i32,
+    );
+    let (dw, dh) = (
+        dst_phys.width().round() as i32,
+        dst_phys.height().round() as i32,
+    );
+    if dw <= 0 || dh <= 0 {
+        return;
+    }
+    let (tile_w, tile_h) = (dw as usize, dh as usize);
+    let (x0, y0) = (zone.left().max(0.0) as i32, zone.top().max(0.0) as i32);
+    let (x1, y1) = (
+        zone.right().ceil().min(pw as f32) as i32,
+        zone.bottom().ceil().min(ph as f32) as i32,
+    );
+    let w = pw as usize;
+    let data = m.data_mut();
+    for py in y0..y1 {
+        let Some(ty) = tile_sample((py - dy0) as f32, dh as f32, (y1 - dy0) as f32, repeat.1)
+        else {
+            continue;
+        };
+        let sy = (ty as usize * ih / tile_h).min(ih - 1);
+        for px in x0..x1 {
+            let Some(tx) = tile_sample((px - dx0) as f32, dw as f32, (x1 - dx0) as f32, repeat.0)
+            else {
+                continue;
+            };
+            let sx = (tx as usize * iw / tile_w).min(iw - 1);
+            let i4 = (sy * iw + sx) * 4;
+            let cov = if luminance {
+                let (rc, gc, bc, ac) = (
+                    u32::from(img.rgba[i4]),
+                    u32::from(img.rgba[i4 + 1]),
+                    u32::from(img.rgba[i4 + 2]),
+                    u32::from(img.rgba[i4 + 3]),
+                );
+                ((rc * 2126 + gc * 7152 + bc * 722 + 5000) / 10000 * ac / 255) as u8
+            } else {
+                img.rgba[i4 + 3]
+            };
+            let d = &mut data[py as usize * w + px as usize];
+            *d = match layer.composite {
+                1 => (*d).min(cov),                 // intersect
+                2 => (*d) * (255 - cov) / 255,      // subtract
+                3 => (*d).max(cov) - (*d).min(cov), // exclude
+                _ => (*d).max(cov),                 // add (union)
+            };
+        }
+    }
 }
 
 /// Bitmap `img` blittée dans `rect` sous la transform `cur`.
@@ -2118,11 +2452,43 @@ fn blend_channel(tag: u8, s: f32, d: f32) -> f32 {
     clippy::too_many_lines,
     clippy::cast_precision_loss
 )]
+/// Index source `rel` dans une tuile de `tile` px sur une
+/// zone de `zone` px — `space` = N tuiles pleines + gap
+/// uniforme (non-peint dans les gaps → `None`), `round` =
+/// N tuiles étirées à `zone/N` (échantillonnage à l'échelle).
+/// Mode 0 `repeat`, 1 `no-repeat`.
+fn tile_sample(rel: f32, tile: f32, zone: f32, mode: u8) -> Option<f32> {
+    match mode {
+        1 => (0.0..tile).contains(&rel).then_some(rel),
+        2 | 3 => {
+            if tile <= 0.0 || zone <= 0.0 {
+                return None;
+            }
+            let n = ((zone / tile).floor() as i32).max(1) as f32;
+            let pitch = zone / n;
+            let local = rel.rem_euclid(pitch);
+            if mode == 2 {
+                (local < tile).then_some(local)
+            } else {
+                Some(local * tile / pitch)
+            }
+        }
+        _ => Some(rel.rem_euclid(tile)),
+    }
+}
+
+#[allow(
+    clippy::too_many_arguments,
+    clippy::cast_precision_loss,
+    clippy::cast_possible_truncation,
+    clippy::cast_sign_loss,
+    clippy::cast_possible_wrap
+)]
 fn paint_tiled(
     pixmap: &mut Pixmap,
     rect: &explorer_layout::Rect,
     img: &crate::DecodedImage,
-    repeat: (bool, bool),
+    repeat: (u8, u8),
     origin: (f32, f32),
     cur: Transform,
     clip: Option<&Mask>,
@@ -2159,23 +2525,17 @@ fn paint_tiled(
     let dst = pixmap.pixels_mut();
     for dy in dy0..dy1 {
         let rel_y = dy - oy;
-        let sy = if repeat.1 {
-            rel_y.rem_euclid(ih)
-        } else {
-            if rel_y < 0 || rel_y >= ih {
-                continue;
-            }
-            rel_y
+        let Some(sy) =
+            tile_sample(rel_y as f32, ih as f32, (dy1 - dy0) as f32, repeat.1).map(|v| v as i32)
+        else {
+            continue;
         };
         for dx in dx0..dx1 {
             let rel_x = dx - ox;
-            let sx = if repeat.0 {
-                rel_x.rem_euclid(iw)
-            } else {
-                if rel_x < 0 || rel_x >= iw {
-                    continue;
-                }
-                rel_x
+            let Some(sx) = tile_sample(rel_x as f32, iw as f32, (dx1 - dx0) as f32, repeat.0)
+                .map(|v| v as i32)
+            else {
+                continue;
             };
             let i = dy as usize * pw as usize + dx as usize;
             if clip_data.is_some_and(|m| m[i] == 0) {
@@ -2215,33 +2575,121 @@ fn paint_tiled(
 /// (cubiques Bézier κ≈0.5523 par coin, rayons 0 = coin
 /// droit ; approximation circulaire — l'elliptique `h/v`
 /// n'est pas encore supporté).
+/// Un coin de `rounded_rect_path` (R-270) : de l'entrée
+/// `S = C + r·u` à la sortie `E = C + r·v` (`u`,`v` =
+/// directions depuis le centre `C`, dans l'ordre du
+/// parcours). `o` = coin externe (pour `square`) et `k`
+/// l'exposant superellipse du coin : 1 = cubique ronde,
+/// ≥8 ≈ `square` (sommet), ≤-16 ≈ `notch` (coupure droite
+/// en `C`), sinon arc superellipse échantillonné — `e=2^k`,
+/// `p=2^{1-k}` : `bevel`(0) trace la corde, `squircle`(2)
+/// l'aplatie, `scoop`(-1) la creuse (concave). Le
+/// tracé paramétrique `cos^p`/`sin^p` suit exactement la
+/// superellipse pour tout `k` réel.
+#[allow(clippy::many_single_char_names, clippy::cast_precision_loss)]
+fn corner_arc(
+    pb: &mut PathBuilder,
+    o: (f32, f32),
+    c: (f32, f32),
+    u: (f32, f32),
+    v: (f32, f32),
+    r: f32,
+    k: f32,
+) {
+    if r <= 0.0 {
+        return;
+    }
+    if k >= 8.0 {
+        // `square` (ou exposant très grand) : sommet franc.
+        pb.line_to(o.0, o.1);
+        return;
+    }
+    if k <= -16.0 {
+        // `notch` : deux segments par le centre intérieur.
+        pb.line_to(c.0, c.1);
+        pb.line_to(c.0 + r * v.0, c.1 + r * v.1);
+        return;
+    }
+    if (k - 1.0).abs() < 1e-6 {
+        // `round` : cubique Bézier historique (constante
+        // classique du quart de cercle).
+        const CK: f32 = 0.552_284_8;
+        let s = (c.0 + r * u.0, c.1 + r * u.1);
+        let e = (c.0 + r * v.0, c.1 + r * v.1);
+        pb.cubic_to(
+            s.0 + CK * (o.0 - s.0),
+            s.1 + CK * (o.1 - s.1),
+            e.0 + CK * (o.0 - e.0),
+            e.1 + CK * (o.1 - e.1),
+            e.0,
+            e.1,
+        );
+        return;
+    }
+    // Arc superellipse générique — 9 cordes + extrémité
+    // exacte (`cos(π/2)` en f32 < 0 → `powf` NaN sinon).
+    let p = 2.0_f32.powf(1.0 - k);
+    for i in 1..10 {
+        let t = i as f32 * std::f32::consts::FRAC_PI_2 / 10.0;
+        let cu = t.cos().max(0.0).powf(p) * r;
+        let sv = t.sin().max(0.0).powf(p) * r;
+        pb.line_to(c.0 + cu * u.0 + sv * v.0, c.1 + cu * u.1 + sv * v.1);
+    }
+    pb.line_to(c.0 + r * v.0, c.1 + r * v.1);
+}
+
 fn rounded_rect_path(
     x0: f32,
     y0: f32,
     x1: f32,
     y1: f32,
     radii: &[f32; 4],
+    corners: &[f32; 4],
 ) -> Option<tiny_skia::Path> {
-    const K: f32 = 0.552_284_8;
     let [rtl, rtr, rbr, rbl] = *radii;
+    let [ktl, ktr, kbr, kbl] = *corners;
     let mut pb = PathBuilder::new();
     pb.move_to(x0 + rtl, y0);
     pb.line_to(x1 - rtr, y0);
-    if rtr > 0.0 {
-        pb.cubic_to(x1 - rtr + K * rtr, y0, x1, y0 + rtr - K * rtr, x1, y0 + rtr);
-    }
+    corner_arc(
+        &mut pb,
+        (x1, y0),
+        (x1 - rtr, y0 + rtr),
+        (0.0, -1.0),
+        (1.0, 0.0),
+        rtr,
+        ktr,
+    );
     pb.line_to(x1, y1 - rbr);
-    if rbr > 0.0 {
-        pb.cubic_to(x1, y1 - rbr + K * rbr, x1 - rbr + K * rbr, y1, x1 - rbr, y1);
-    }
+    corner_arc(
+        &mut pb,
+        (x1, y1),
+        (x1 - rbr, y1 - rbr),
+        (1.0, 0.0),
+        (0.0, 1.0),
+        rbr,
+        kbr,
+    );
     pb.line_to(x0 + rbl, y1);
-    if rbl > 0.0 {
-        pb.cubic_to(x0 + rbl - K * rbl, y1, x0, y1 - rbl + K * rbl, x0, y1 - rbl);
-    }
+    corner_arc(
+        &mut pb,
+        (x0, y1),
+        (x0 + rbl, y1 - rbl),
+        (-1.0, 0.0),
+        (0.0, 1.0),
+        rbl,
+        kbl,
+    );
     pb.line_to(x0, y0 + rtl);
-    if rtl > 0.0 {
-        pb.cubic_to(x0, y0 + rtl - K * rtl, x0 + rtl - K * rtl, y0, x0 + rtl, y0);
-    }
+    corner_arc(
+        &mut pb,
+        (x0, y0),
+        (x0 + rtl, y0 + rtl),
+        (-1.0, 0.0),
+        (0.0, -1.0),
+        rtl,
+        ktl,
+    );
     pb.close();
     pb.finish()
 }
@@ -2322,6 +2770,7 @@ fn paint_border(
     colors: &[Color; 4],
     styles: [BorderStyle; 4],
     radii: &[f32; 4],
+    corners: &[f32; 4],
     dpi: Transform,
     clip: Option<&Mask>,
 ) {
@@ -2349,10 +2798,13 @@ fn paint_border(
             (radii[3] - widths[2].max(widths[3])).max(0.0),
         ];
         let mut pb = PathBuilder::new();
-        if let Some(outer) = rounded_rect_path(ox0, oy0, ox1, oy1, radii) {
+        if let Some(outer) = rounded_rect_path(ox0, oy0, ox1, oy1, radii, corners) {
             pb.push_path(&outer);
         }
-        if let Some(inner) = rounded_rect_path(ix0, iy0, ix1, iy1, &inner_r) {
+        // R-270 — le contour interne garde l'exposant du
+        // coin (css-borders-4 : la forme se propage à la
+        // padding box, seul le rayon se réduit).
+        if let Some(inner) = rounded_rect_path(ix0, iy0, ix1, iy1, &inner_r, corners) {
             pb.push_path(&inner);
         }
         if let Some(ring) = pb.finish() {

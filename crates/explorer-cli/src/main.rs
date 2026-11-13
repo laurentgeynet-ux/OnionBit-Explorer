@@ -51,8 +51,10 @@ fn main() -> ExitCode {
         [_, cmd, url] if cmd == "dom" => dom_live(url),
         [_, cmd, url] if cmd == "mem" => mem_report(url),
         [_, cmd, url, dir] if cmd == "save" => save_fixture(url, dir),
-        [_, cmd, file] if cmd == "eval" => eval_js(file),
-        [_, cmd] if cmd == "props" => props_check(),
+        [_, cmd, file] if cmd == "eval" => eval_js(file, false),
+        [_, cmd, file] if cmd == "api" => eval_js(file, true),
+        [_, cmd] if cmd == "props" => check_names("prop"),
+        [_, cmd, kind] if cmd == "check" => check_names(kind),
         [_, cmd, url, out] if cmd == "download" => download(url, out),
         [_, cmd] if cmd == "mcp" => mcp_main("9377"),
         [_, cmd, port] if cmd == "mcp" => mcp_main(port),
@@ -70,8 +72,12 @@ fn main() -> ExitCode {
             eprintln!("        explorer-cli save <url> <dossier>");
             eprintln!("        explorer-cli eval <fichier.js>");
             eprintln!(
+                "        explorer-cli api <fichier.js>   (eval + surface navigateur installée)"
+            );
+            eprintln!(
                 "        explorer-cli props            (noms de props sur stdin → `nom\\tok|miss`)"
             );
+            eprintln!("        explorer-cli check prop|sel|at|routed|affects|affectsv|html");
             eprintln!("        explorer-cli download <url> <sortie>");
             eprintln!("        explorer-cli diff <a.png> <b.png>");
             eprintln!("        explorer-cli mcp [port]  (serveur MCP stdio → daemon)");
@@ -556,7 +562,12 @@ async fn save_fixture(url: &str, dir: &str) -> ExitCode {
 /// stderr. Brique du différentiel `scripts/js_diff.mjs`
 /// (confrontation à Node/V8 sur corpus). Bornes optionnelles :
 /// `EXPLORER_JS_OPS` (ops) — le défaut suit le moteur.
-fn eval_js(path: &str) -> ExitCode {
+/// `api <fichier.js>` : identique à `eval` mais avec la surface
+/// navigateur installée (`install_dom` — `document`,
+/// `navigator`, `fetch`, `MutationObserver`, etc.). Sondage de
+/// couverture `bcd.api.*` : les globals session sont testés en
+/// contexte réel, pas dans le moteur nu.
+fn eval_js(path: &str, with_dom: bool) -> ExitCode {
     let src = match std::fs::read_to_string(path) {
         Ok(s) => s,
         Err(e) => {
@@ -565,6 +576,12 @@ fn eval_js(path: &str) -> ExitCode {
         }
     };
     let mut e = explorer_jscore::Engine::new();
+    if with_dom {
+        let dom = std::rc::Rc::new(std::cell::RefCell::new(explorer_jscore::Dom::from_html(
+            "<!doctype html><body></body>",
+        )));
+        e.install_dom(&dom);
+    }
     if let Some(ops) = std::env::var("EXPLORER_JS_OPS")
         .ok()
         .and_then(|v| v.parse::<u64>().ok())
@@ -592,8 +609,1437 @@ fn eval_js(path: &str) -> ExitCode {
 /// [`explorer_css::prop_supported`] — critère `@supports`
 /// (nom seul). Brique de `scripts/bcd_coverage.mjs` : le
 /// script alimente les ~650 clés BCD et compte la couverture.
-fn props_check() -> ExitCode {
+/// `check <prop|sel|at>` (`props` = `check prop`) : lit des
+/// noms sur stdin (un par ligne) et émet `nom\tok` ou
+/// `nom\tmiss` selon le critère de reconnaissance du moteur —
+/// `prop_supported` / `selector_supported` /
+/// `at_rule_supported`. Brique de `scripts/bcd_coverage.mjs` :
+/// le script alimente les clés BCD et compte la couverture.
+/// R-246 — la prop change-t-elle la **geometrie/kind** de
+/// `.x` ? `x{name:v}` vs `x{}` — vrai pour `margin`/`all`/
+/// `block-size`, faux pour les noms stockés indifféremment
+/// (`xyz-bogus`, `mask-*` dormants). Valeurs de sonde par
+/// famille (longueur/couleur/mot-clé layout/keyword).
+fn prop_affects(name: &str) -> bool {
+    let dom = explorer_html::TreeBuilder::parse("<body><div><p class=x>ok</p></div></body>");
+    let root = {
+        let mut r = None;
+        walk_any(dom.document(), &dom, &mut r);
+        r.unwrap_or(dom.document())
+    };
+    let sig = |css: &str| -> String {
+        let mut eng = explorer_css::StyleEngine::new();
+        eng.add_css(css, explorer_css::Origin::Author);
+        let sm = eng.compute_tree(&dom, root, &explorer_css::StyleEnv::default());
+        match explorer_layout::build_box_tree(&dom, root, &sm) {
+            Some(mut bx) => {
+                explorer_layout::layout_tree(&mut bx, 800.0, &explorer_layout::BlockCtx::default());
+                bx.dump(&dom)
+            }
+            None => String::new(),
+        }
+    };
+    let base = sig("p {}");
+    for v in [
+        "10px",
+        "red",
+        "block",
+        "flex",
+        "none",
+        "nowrap",
+        "column",
+        "bold",
+        "italic",
+        "absolute",
+        "inherit",
+        "unset",
+        "initial",
+        // R-246 — axes d'écriture : `writing-mode`/`direction`/
+        // `text-orientation`/`unicode-bidi`/`dir`/`bdo`.
+        "vertical-rl",
+        "vertical-lr",
+        "sideways-rl",
+        "rtl",
+        "ltr",
+        "mixed",
+    ] {
+        if sig(&format!("p {{ {name}: {v} }}")) != base {
+            return true;
+        }
+    }
+    // Contexte flex — les props flex-*/grid-*/gap n'ont
+    // d'effet que dans un conteneur dédié.
+    let base_f = sig("div { display: flex } p {}");
+    for v in [
+        "row-reverse",
+        "wrap",
+        "10px",
+        "flex-start",
+        "column",
+        "stretch",
+    ] {
+        if sig(&format!("div {{ display: flex }} p {{ {name}: {v} }}")) != base_f {
+            return true;
+        }
+    }
+    false
+}
+
+/// `affectsv` : entrée `name:value` — la déclaration **exacte**
+/// `p { name:value }` change-t-elle le box tree vs `p {}` ?
+/// Alimente `bcd.css.values` (conformité par feature, pas par
+/// nom — `display:ruby` vs `display:grid`).
+/// Fixture par famille (R-247 — le `<p>` nu rendait 91 % des
+/// valeurs inertes par construction) : chaque prop est
+/// déclarée sur l'élément `.x` dans le contexte où sa valeur
+/// *peut* produire de la géométrie. `.x` = l'élément porteur
+/// de la déclaration (conteneur ou item selon la famille).
+#[allow(clippy::too_many_lines)]
+fn fixture_for(name: &str) -> &'static str {
+    let n = name.trim_start_matches('-').trim_start_matches("webkit-");
+    match () {
+        // Props de conteneur flex/grid — `.x` = le conteneur.
+        () if matches!(
+            n,
+            "align-content" | "align-items" | "justify-content"
+                | "place-content" | "place-items" | "gap" | "row-gap" | "column-gap"
+                | "flex-direction" | "flex-wrap" | "flex-flow" | "grid-template-columns"
+                | "grid-template-rows" | "grid-auto-flow" | "grid-auto-columns"
+                | "grid-auto-rows"
+        ) =>
+        {
+            // Multi-lignes + hauteur fixe : `align-content` a
+            // de l'espace libre à distribuer (conteneur auto
+            // → effet nul par construction).
+            "<body><div class=x style=\"display:flex;flex-wrap:wrap;height:200px\"><p style=\"width:100%\">a</p><p>b</p></div></body>"
+        }
+        // `justify-self` est **ignoré** dans un conteneur
+        // flex (css-align §8.3) — conteneur grid requis pour
+        // mesurer le vrai support.
+        () if n == "justify-self" => {
+            "<body><div style=\"display:grid;width:400px\"><p class=x>a</p><p>b</p></div></body>"
+        }
+        // `justify-items`/`place-items` — ignorés en flex
+        // (css-align §8.3) ; conteneur grid requis.
+        () if n == "justify-items" => {
+            "<body><div class=x style=\"display:grid;width:400px\"><p>a</p><p>b</p></div></body>"
+        }
+        // `place-self` — item grid (les deux axes self).
+        () if n == "place-self" => {
+            "<body><div style=\"display:grid;width:400px;height:200px\"><p class=x>a</p></div></body>"
+        }
+        // `flex` shorthand — item dans conteneur flex
+        // (`flex:1` grandit l'item → delta de largeur).
+        () if n == "flex" => {
+            "<body><div style=\"display:flex;width:400px\"><p class=x>a</p><p>b</p></div></body>"
+        }
+        // `list-style*` — contexte `<li>` requis (marqueur
+        // émis que sur un item de liste, §marker).
+        () if n.starts_with("list-style") || n == "list-style-type" => {
+            "<body><ul><li class=x>a</li><li>b</li></ul></body>"
+        }
+        // Props de **table** — `.x` = la table (caption
+        // présente pour `caption-side`, cellule vide pour
+        // `empty-cells`, bordures pour `border-collapse`).
+        () if matches!(n, "empty-cells" | "caption-side" | "border-collapse")
+        =>
+        {
+            "<body><table class=x><caption>c</caption><tr><td style=\"border:1px solid black\"> </td><td style=\"border:1px solid black;width:100px;height:40px\">a</td></tr></table></body>"
+        }
+        // `table-layout` (R-275, artefact oracle) : `fixed`
+        // n'est discriminant que si l'**auto** élargirait la
+        // colonne au contenu — une cellule à texte large
+        // sans `width` (auto = contenu, fixed = largeurs du
+        // premier rang uniquement §17.5.2.1).
+        () if n == "table-layout" => {
+            "<body><table class=x><tr><td>a</td><td>bbbbbbbbbbbbbbbbbbbbbbbbbbbb</td></tr></table></body>"
+        }
+        // `break-*`/`page-break-*` — s'appliquent à
+        // l'**unité enfant** du conteneur multicol, pas au
+        // conteneur : `.x` = 2ᵉ unité, `break-before:column`
+        // la pousse en colonne 2 (l'équilibre naturel
+        // l'y mettrait aussi → ctx 3 unités, `.x` au milieu
+        // serait ambigu — 2 unités + hauteur forçant
+        // l'équilibre en col 1 pour `avoid`).
+        () if n.starts_with("break-") || n.starts_with("page-break") => {
+            "<body><div style=\"columns:2;column-gap:10px;width:210px;height:60px;column-fill:auto\"><p style=\"margin:0\">a</p><p class=x style=\"margin:0\">b</p><p style=\"margin:0\">c</p></div></body>"
+        }
+        // `vertical-align`/`baseline-shift` — `.x` = cellule
+        // table (cellule soeur plus haute → `top`/`bottom`/
+        // `middle` déplacent le contenu).
+        () if matches!(n, "vertical-align" | "baseline-shift") => {
+            "<body><table><tr><td class=x>a</td><td style=\"height:60px\">b</td></tr></table></body>"
+        }
+        // `alignment-baseline`/`dominant-baseline` — prop
+        // de format **inline** : `.x` = atome inline-block
+        // dans une ligne de 40 px (bords de ligne
+        // observables).
+        () if matches!(n, "alignment-baseline" | "dominant-baseline") => {
+            "<body><p style=\"font-size:40px\">x<span class=x style=\"display:inline-block;width:10px;height:10px\"></span></p></body>"
+        }
+        // `quotes` — n'a d'effet que sur le contenu généré
+        // `<q>` (paires de guillemets par langue).
+        () if n == "quotes" => {
+            "<body><p class=x><q>a<q>b</q></q></p></body>"
+        }
+        // `initial-letter` — ne s'applique qu'au pseudo
+        // `::first-letter` (la sonde cible `.x::first-letter`,
+        // voir `prop_affects_decl`) et exige ≥3 lignes pour
+        // que la morsure de la lettrine soit observable.
+        () if n == "initial-letter" => {
+            "<body><p class=x style=\"width:120px;font-size:8px\">alpha beta gamma delta epsilon zeta eta theta iota kappa lambda mu nu xi omicron pi rho</p></body>"
+        }
+        // Coupure de ligne — `overflow-wrap`/`word-break`/
+        // `line-break`/`hyphens`/`tab-size` n'ont d'effet
+        // qu'avec un mot plus long que la ligne (conteneur
+        // étroit + mot long/tabulation).
+        () if matches!(
+            n,
+            "overflow-wrap" | "line-break" | "tab-size"
+                | "overflow" | "overflow-x" | "overflow-y" | "text-wrap"
+        ) =>
+        {
+            "<body><div class=x style=\"width:40px\"><p>averyveryveryverylongword\tb</p></div></body>"
+        }
+        // `word-break` (R-281) : `keep-all` n'a d'effet que
+        // sur des lettres CJK — le run latin sert `break-all`,
+        // le run  sert `keep-all`/`normal`.
+        () if n == "word-break" => {
+            "<body><div class=x style=\"width:40px\"><p>averyveryveryverylongword のテキストです</p></div></body>"
+        }
+        // `text-autospace` (R-282) — n'a d'effet qu'à une
+        // frontière CJK ↔ non-CJK adjacente.
+        () if n == "text-autospace" => {
+            "<body><div style=\"width:200px\"><p class=x>中文abc 中文def</p></div></body>"
+        }
+        // `text-justify`/`text-wrap-style` (R-282) — plusieurs
+        // lignes de longueurs inégales : `justify` redistribue
+        // l'espace, `balance`/`pretty` rééquilibrent la fin.
+        () if n == "text-justify" || n == "text-wrap-style" => {
+            "<body><div><p class=x style=\"width:200px\">un deux trois quatre cinq six sept huit neuf dix</p></div></body>"
+        }
+        // `text-decoration-skip*` (R-282) — la coupure de la
+        // deco ne se voit que sur un blanc **interne** à la
+        // ligne (les blancs de bord tombent à la cassure) :
+        // inline souligné avec espaces intérieurs, ligne large.
+        () if n.starts_with("text-decoration-skip") => {
+            "<body><p>zéro <u class=x> un deux trois quatre </u> cinq six</p></body>"
+        }
+        // `hyphens`/`hyphenate-*` (R-275) : la césure n'a
+        // d'oracle que s'il y a une **opportunité** — le mot
+        // porte un `&shy;` (manuel) ET assez de lettres pour
+        // les points `auto` ; `none` supprime le shy →
+        // discriminant vs la baseline `manual`.
+        () if n == "hyphens" || n.starts_with("hyphenate") => {
+            "<body><div style=\"width:40px\"><p class=x style=\"font-size:8px\">aver&shy;yverylong wordlong</p></div></body>"
+        }
+        // `ruby-*` — contexte `<ruby>` requis (rb/rt
+        // n'existent que sous ruby).
+        // `ruby-overhang` — annotation **plus large** que la
+        // base requise : sans débordement possible `none` et
+        // `auto` coïncident (neutre de contexte).
+        () if n == "ruby-overhang" => {
+            "<body><p>av <ruby>b<rt class=x>xxxxxxxxxxxx</rt></ruby> ap</p></body>"
+        }
+        () if n.starts_with("ruby") => {
+            "<body><ruby class=x>base<rt class=x>x</rt></ruby>"
+        }
+        // Props de transformée — n'ont d'effet que sur une
+        // boîte **transformée** (`transform-origin` déplace
+        // le pivot, `backface`/`perspective`/`transform-box`
+        // `transform-style` le référentiel).
+        () if matches!(
+            n,
+            "transform-origin" | "transform-box" | "perspective"
+                | "backface-visibility" | "transform-style"
+        ) =>
+        {
+            "<body><div class=x style=\"width:100px;height:80px;background:blue;transform:rotate(30deg)\"><p>a</p></div></body>"
+        }
+        // Props d'item dans un conteneur flex — `.x` = l'item.
+        () if matches!(
+            n,
+            "align-self" | "order" | "flex-grow" | "flex-shrink" | "flex-basis"
+                | "grid-column" | "grid-row" | "grid-column-start"
+                | "grid-column-end" | "grid-row-start" | "grid-row-end" | "grid-area"
+        ) =>
+        {
+            // 2 items de hauteurs variables : sans ça
+            // `align-self` = stretch (line_cross) → offset 0
+            // quel que soit le mot-clé (artefact mesuré).
+            "<body><div style=\"display:flex;height:200px\"><p class=x>a</p><p style=\"height:150px\">b</p></div></body>"
+        }
+        // Ancrage css-anchor-1 — `.x` = l'élément positionné
+        // contre l'ancre `#a` (`position-area`, `position-try*`,
+        // `anchor()`/`anchor-size()` en insets,
+        // `position-visibility`, `anchor-scope`). Sans ancre
+        // référencée toute la famille est inerte par
+        // construction.
+        // `position-try*` — fallbacks évalués **uniquement
+        // en débordement** (css-anchor-1 §3.5) : l'ancre est
+        // plaquée en haut à gauche et l'item trop grand
+        // (`position-area:top` → déborde en y, 900 px → en x)
+        // pour que `flip-block`/`flip-inline`/`flip-start`
+        // s'activent. Sans débordement toute la famille est
+        // inerte.
+        // `position-try-order` — l'ordre ne se voit que si
+        // AUCUN candidat ne rentre (la dernière essayée est
+        // appliquée, css-anchor-1 §3.5) : ancre en haut à
+        // droite — `bottom` déborde en x, `left` déborde en
+        // y ; `most-width` trie `left` en tête → le repli
+        // final diffère de l'ordre `normal`.
+        () if n == "position-try-order" => {
+            "<body><div id=a style=\"anchor-name:--a;position:absolute;top:5px;left:750px;width:20px;height:20px\"></div><p class=x style=\"position:absolute;position-anchor:--a;position-area:top;width:200px;height:100px\">b</p></body>"
+        }
+        () if matches!(n, "position-try" | "position-try-fallbacks") => {
+            "<body><div id=a style=\"anchor-name:--a;position:absolute;top:5px;left:5px;width:20px;height:20px\"></div><p class=x style=\"position:absolute;position-anchor:--a;position-area:top;width:900px;height:100px\">b</p></body>"
+        }
+        () if matches!(n, "position-area" | "position-visibility" | "anchor-scope") => {
+            "<body><div id=a style=\"anchor-name:--a;position:absolute;top:10px;left:10px;width:20px;height:20px\"></div><p class=x style=\"position:absolute;position-anchor:--a\">b</p></body>"
+        }
+        // `anchor-name` — `.x` = l'**ancre** elle-même ; un
+        // consommateur `position-anchor:--a` existe pour que
+        // le nom résolve (ancre non référencée = effet nul).
+        () if n == "anchor-name" => {
+            "<body><div class=x style=\"position:absolute;top:10px;left:10px;width:20px;height:20px\"></div><p style=\"position:absolute;position-anchor:--a\">b</p></body>"
+        }
+        // Bordures — `border*[-color|-style|-width]` n'ont
+        // d'effet que sur une boîte **déjà bordée** (une
+        // couleur sans `border-style` ne peint rien). La
+        // baseline porte `2px solid black` : chaque variante
+        // (couleur, style, largeur, côté logique, rayon,
+        // `none` = suppression) produit un delta de dump.
+        () if n.starts_with("border") => {
+            // Le contexte (bordure existante) passe par
+            // `context_css` — pas de `style=` inline (il
+            // écraserait la déclaration testée).
+            "<body><div class=x><p>a</p></div></body>"
+        }
+        // Contours — même classe : `outline*` observable si
+        // une outline existe (`display.rs` peint l'item).
+        () if n.starts_with("outline") => {
+            "<body><div class=x><p>a</p></div></body>"
+        }
+        // `clear` — n'a d'effet qu'avec un flottant amont :
+        // `.x` se cale sous le `<div float:left>` (le
+        // flottant porte `style=` — prop différente, pas de
+        // conflit de spécificité).
+        () if n == "clear" => {
+            "<body><div style=\"float:left;width:50px;height:50px\">a</div><p class=x>x</p><p>tail</p></body>"
+        }
+        // `float` — le flottant `.x` doit avoir du contenu
+        // qui le contourne pour que `left`/`right`/
+        // `inline-*` se mesurent.
+        () if n == "float" => {
+            "<body><div><p class=x>a</p><p>un deux trois quatre cinq six sept huit neuf dix</p></div></body>"
+        }
+        // Formulaires — `accent-color`, `caret-color`, `appearance`,
+        // `cursor`, `field-sizing`… n'ont d'effet que sur contrôle.
+        // `field-sizing:content` dimensionne le contrôle à
+        // son contenu — un contrôle textuel (pas un
+        // checkbox sans texte).
+        () if n == "field-sizing" => {
+            "<body><div><textarea class=x>plusieurs lignes de texte\net encore une</textarea></div></body>"
+        }
+        () if matches!(
+            n,
+            "accent-color" | "caret-color" | "appearance"
+                | "user-select" | "pointer-events"
+        ) =>
+        {
+            "<body><div><input class=x type=checkbox checked></div></body>"
+        }
+        // Listes — `list-style-*`, `counter-*`.
+        () if n.starts_with("list-style") || n.starts_with("counter") => {
+            "<body><ol><li class=x>a</li><li>b</li></ol></body>"
+        }
+        // Multi-colonnes — le conteneur porte `columns:2` +
+        // une `column-rule` : `column-rule-*`, `break-*`,
+        // `column-fill`, `column-span` produisent un delta
+        // (sans colonnes posées la famille est inerte).
+        () if n.starts_with("column-") || n.starts_with("break-") || n == "columns" => {
+            "<body><div class=x><p>a</p><p>b</p><p>c</p><p>d</p></div></body>"
+        }
+        // `rule`/`rule-*`/`row-rule*` (css-gaps-1 — R-271) :
+        // décorations de gap — `.x` = le conteneur multicol ;
+        // un spanner `column-span:all` au milieu coupe le
+        // trait en segments (défaut §5.1) pour que
+        // `rule-break:none` soit discriminant.
+        () if n == "rule" || n.starts_with("rule-") || n.starts_with("row-rule") => {
+            "<body><div class=x><p>a<br>a<br>a<br>a</p><h2 style=\"column-span:all;margin:0\">s</h2><p>b<br>b<br>b<br>b</p></div></body>"
+        }
+        // `offset-*` (css-motion-1 — R-272) : le chemin se
+        // trace dans le **bloc conteneur** — `.x` = enfant
+        // `position:absolute` d'un parent `relative` dimensionné
+        // (200×200), sinon aucun cb mesurable.
+        () if n == "offset" || n.starts_with("offset-") => {
+            "<body><div style=\"position:relative;width:200px;height:200px\"><div class=x style=\"position:absolute;width:10px;height:10px\"></div></div></body>"
+        }
+        // `shape-outside`/`shape-margin`/`shape-image-
+        // threshold` (css-shapes-1 — R-273) : la forme n'a
+        // d'effet que sur un **flottant** entouré de texte
+        // (les line boxes contournent la forme). `.x` = le
+        // flottant dimensionné ; le `<p>` apporte les lignes.
+        () if n == "shape-outside" || n == "shape-margin" || n == "shape-image-threshold" => {
+            "<body><div><div class=x style=\"float:left;width:80px;height:80px\"></div><p>un deux trois quatre cinq six sept huit neuf dix onze douze treize quatorze quinze seize</p></div></body>"
+        }
+        // `container-type`/`container` (css-contain-3 — R-274) :
+        // le `contain:size` implicite ne se voit que sur une
+        // boîte **shrink-to-fit** dont la taille dépend de la
+        // contribution intrinsèque des enfants — `.x` absolu
+        // `width/height:auto` avec un enfant 100×40 :
+        // `size` → 0×0, `inline-size` → 0×40, `normal` → 100×40.
+        () if n == "container-type" || n == "container" => {
+            "<body><div style=\"position:relative;width:400px;height:200px\"><div class=x style=\"position:absolute\"><p style=\"width:100px;height:40px;margin:0\">a</p></div></div></body>"
+        }
+        // Conteneur **débordant** (étape 219) — `overflow-*`
+        // et `overscroll-*` n'ont d'oracle que si le contenu
+        // excède la boîte : `hidden`/`clip` coupent vs
+        // `scroll`/`auto` posent la gouttière vs `visible`.
+        () if matches!(
+            n,
+            "overflow" | "overflow-x" | "overflow-y" | "overflow-block"
+                | "overflow-inline" | "overscroll-behavior" | "overscroll-behavior-x"
+                | "overscroll-behavior-y" | "overscroll-behavior-block"
+                | "overscroll-behavior-inline"
+        ) =>
+        {
+            "<body><div class=x style=\"width:100px;height:80px\"><p style=\"height:200px\">a</p></div></body>"
+        }
+        // Conteneur **déjà scrollable** — `scroll-snap-*`/
+        // `scroll-margin`/`scroll-padding` (étape 219) : la
+        // valeur n'a d'effet possible que sur un scroller.
+        () if matches!(
+            n,
+            "scroll-snap-type" | "scroll-snap-align" | "scroll-snap-stop" | "scroll-margin"
+                | "scroll-margin-top" | "scroll-margin-right" | "scroll-margin-bottom"
+                | "scroll-margin-left" | "scroll-margin-block" | "scroll-margin-inline"
+                | "scroll-margin-block-start" | "scroll-margin-block-end"
+                | "scroll-margin-inline-start" | "scroll-margin-inline-end" | "scroll-padding"
+                | "scroll-padding-top" | "scroll-padding-right" | "scroll-padding-bottom"
+                | "scroll-padding-left" | "scroll-padding-block" | "scroll-padding-inline"
+                | "scroll-padding-block-start" | "scroll-padding-block-end"
+                | "scroll-padding-inline-start" | "scroll-padding-inline-end"
+        ) =>
+        {
+            "<body><div class=x style=\"width:100px;height:80px;overflow:scroll\"><p style=\"height:200px\">a</p></div></body>"
+        }
+        // `background*`/`mask*` — pas de `background` inline
+        // (il écraserait la déclaration testée) : l'image de
+        // contexte est posée par `context_css` (gradient
+        // peint sans ressource externe).
+        () if n.starts_with("background") || n.starts_with("mask") => {
+            "<body><div class=x><p>a</p></div></body>"
+        }
+        // Boîte à dimensions fixes — `position`, `inset`,
+        // `transform`, `overflow`, `scroll-snap`, `contain`,
+        // `clip-*` : un box 100×80 suffit (les effets
+        // position/sizing/visibilité sont mesurables).
+        () if matches!(
+            n,
+            "position" | "top" | "right" | "bottom" | "left" | "inset"
+                | "z-index" | "transform"
+                | "contain" | "contain-intrinsic-size"
+                | "contain-intrinsic-width" | "contain-intrinsic-height" | "content-visibility"
+                | "clip" | "clip-path" | "visibility" | "opacity" | "filter"
+                | "mix-blend-mode" | "isolation" | "box-shadow" | "box-sizing"
+                | "object-fit" | "object-position"
+        ) =>
+        {
+            "<body><div class=x style=\"width:100px;height:80px;background:blue\"><p>a</p></div></body>"
+        }
+        // `text-box*` (R-279) — le trim retire le demi-
+        // leading des bords : il faut un `line-height` qui
+        // en crée un + plusieurs lignes pour discriminer
+        // `trim-start`/`trim-end` de `trim-both`.
+        () if n == "text-box" || n.starts_with("text-box-") => {
+            "<body><p class=x style=\"width:60px;line-height:3\">alpha beta gamma delta epsilon zeta</p></body>"
+        }
+        // Texte multi-mots — `text-*`, `white-space`,
+        // `word-*`, `line-*`, `font-*`, `text-wrap`,
+        // `hyphens`, `text-transform`, `letter/word-spacing` :
+        // la ligne wrappe ou se mesure différemment.
+        () if n.starts_with("text-")
+            || n.starts_with("font-")
+            || n.starts_with("letter-")
+            || n.starts_with("line-")
+            || n.starts_with("word-")
+            || n.starts_with("white-")
+            || n.starts_with("tab-")
+            || matches!(
+                n,
+                "direction" | "unicode-bidi" | "writing-mode" | "text-orientation"
+                    | "hyphens" | "text-transform" | "font" | "quotes" | "text-indent"
+            ) =>
+        {
+            "<body><div><p class=x style=\"width:80px\">un deux trois quatre cinq</p></div></body>"
+        }
+        // Défaut — `<p>` dans `<div>` (texte, box, décorations).
+        () => "<body><div><p class=x>ok</p></div></body>",
+    }
+}
+
+/// Fonte du harnais `affectsv` : Ahem (WPT) embarquée par
+/// `include_bytes!`, servie à **toute** requête — sans
+/// `FontSource` les fragments restent `shaped: None` et
+/// aucun item `Text` n'est émis (`color`, `font-*`,
+/// `text-decoration` invisibles à la jauge). Les octets
+/// identiques à toute requête n'importent pas : l'oracle
+/// mesure le `FontRequest` et la couleur de l'item, pas les
+/// contours.
+struct BcdAhem;
+impl explorer_layout::font::FontSource for BcdAhem {
+    fn font_data(&self, _req: &explorer_layout::font::FontRequest) -> Option<Vec<u8>> {
+        static AHEM: &[u8] = include_bytes!("../../explorer-render/tests/data/wpt/ahem.ttf");
+        Some(AHEM.to_vec())
+    }
+}
+
+/// Déclarations de **contexte** injectées dans la signature
+/// `.x` (`affectsv`) : la prop testée n'a d'effet observable
+/// que sur une boîte préparée — `border-color` sans style ne
+/// peint rien, `column-rule-*` sans colonnes non plus. La
+/// signature compare `.x { ctx }` à `.x { ctx; name:value }`
+/// — même règle, l'ordre fait gagner la déclaration testée.
+/// À distinguer du `<style>` embarqué (jamais collecté par
+/// `compute_tree` dans ce chemin) et de `style=` inline
+/// (rang inline > auteur — écraserait la déclaration).
+fn context_css(name: &str) -> &'static str {
+    let n = name.trim_start_matches('-').trim_start_matches("webkit-");
+    if n == "position-try-order" {
+        // `bottom` en tête : l'ordre `normal` finit sur
+        // `left` (aucun ne rentre) ; `most-width`/`most-size`
+        // trient différemment → repli final différent.
+        return "position-try-fallbacks:bottom,left";
+    }
+    if n.starts_with("border") {
+        // Logique (`border-block-*`/`border-inline-*`) : le
+        // mapping physique arrive APRÈS la cascade — un ctx
+        // uniforme poserait la même prop physique au même
+        // rang et gagnerait à égalité. `-color`/`-width`
+        // exigent juste un `border-style` existant (autre
+        // nom de prop — pas de conflit) ; `-style` et le
+        // shorthand nu créent la bordure seuls → pas de ctx.
+        if n.contains("-block") || n.contains("-inline") {
+            if n.ends_with("-style") || (!n.ends_with("-color") && !n.ends_with("-width")) {
+                ""
+            } else {
+                "border-style:solid"
+            }
+        } else {
+            "border:2px solid black;width:100px;height:80px;background:blue"
+        }
+    } else if n.starts_with("mask") {
+        // Les longhands `mask-*` n'ont d'effet que sur une
+        // source `mask-image` (même astuce gradient).
+        "mask-image:linear-gradient(red,blue);width:100px;height:80px"
+    } else if n.starts_with("background") {
+        // `position`/`repeat`/`size`/`attachment`/`blend` n'ont
+        // d'effet que sur une image de fond — gradient
+        // `linear-gradient` (peint sans ressource externe,
+        // `PaintImages` vide au harnais). La bordure distingue
+        // `content-box`/`padding-box`/`border-box` (sans elle
+        // les trois aires coïncident → `clip`/`origin` inertes).
+        "background-image:linear-gradient(red,blue);border:10px solid black;padding:10px;width:100px;height:80px"
+    } else if n.starts_with("text-decoration-") || n.starts_with("text-underline-") {
+        // `text-decoration-color`/`-line`/`-style`/`-thickness`,
+        // `text-underline-position`/`-offset` n'ont d'effet
+        // qu'avec un trait posé.
+        "text-decoration:underline"
+    } else if n.starts_with("outline") {
+        "outline:2px solid black;width:100px;height:80px"
+    } else if n.starts_with("corner") {
+        // `corner-*-shape` ne ploie que les coins posés par
+        // `border-radius` (css-borders-4 §3.7 — sans rayon
+        // le coin est franc quelle que soit la forme) ;
+        // le fond porte les `corners` visibles du dump.
+        "border-radius:15px;background:#ccc;width:80px;height:60px"
+    } else if n == "rule" || n.starts_with("rule-") || n.starts_with("row-rule") {
+        // css-gaps-1 : le décor de gap n'existe qu'avec les
+        // colonnes posées ; `column-rule` en ctx rend les
+        // longhands `rule-*` discriminants (couleur/largeur/
+        // style/inset/break) — le shorthand `rule` l'écrase.
+        "columns:2;column-gap:20px;column-rule:2px solid black;height:100px"
+    } else if n == "offset" || n.starts_with("offset-") {
+        // css-motion-1 : le transform n'existe que si le
+        // chemin est tracé ET la distance non nulle — les
+        // longhands seuls (`offset-distance`, `-rotate`…) sont
+        // inertes sans `offset-path` en ctx ; `offset-path`
+        // seul est inerte à distance 0 (point de départ =
+        // ancre). Le shorthand `offset` réinitialise la
+        // distance → inerte s'il n'en porte pas (borne
+        // honnête de la spec : `offset:<path>` = distance 0).
+        if matches!(n, "offset" | "offset-path") {
+            "offset-distance:20px"
+        } else if n == "offset-anchor" {
+            // L'ancre n'a d'effet que si la position du
+            // chemin est **fixe** — `offset-position:normal`
+            // (défaut) suit l'ancre et `T − A` est invariant.
+            "offset-path:ray(90deg);offset-distance:20px;offset-position:10px 10px"
+        } else {
+            "offset-path:ray(90deg);offset-distance:20px"
+        }
+    } else if n == "text-justify" {
+        // `text-justify` ne règle que la méthode de la
+        // justification — inerte sans `text-align:justify`.
+        "text-align:justify"
+    } else if n == "text-box-edge" {
+        // L'edge ne produit d'effet que sous un trim actif
+        // (css-inline-3 §10) — `trim-both` en ctx rend chaque
+        // valeur discriminable.
+        "text-box-trim:trim-both"
+    } else if n.starts_with("hyphenate") {
+        // `hyphenate-character`/`hyphenate-limit-*` n'ont
+        // d'effet que sous césure automatique.
+        "hyphens:auto"
+    } else if n == "shape-margin" || n == "shape-image-threshold" {
+        // `shape-margin` dilate la forme, `shape-image-
+        // threshold` n'a d'effet que contre une forme posée.
+        "shape-outside:circle(40%)"
+    } else if n.starts_with("column-") || n == "columns" {
+        "columns:2;column-rule:2px solid black;height:200px"
+    } else {
+        ""
+    }
+}
+
+fn prop_affects_decl(decl: &str) -> bool {
+    static SRC: BcdAhem = BcdAhem;
+    let Some((name, value)) = decl.split_once(':') else {
+        return false;
+    };
+    let name = name.trim();
+    let ctx = explorer_layout::BlockCtx {
+        fonts: Some(&SRC),
+        ..explorer_layout::BlockCtx::default()
+    };
+    let dom = explorer_html::TreeBuilder::parse(fixture_for(name));
+    let root = {
+        let mut r = None;
+        walk_any(dom.document(), &dom, &mut r);
+        r.unwrap_or(dom.document())
+    };
+    let sig = |css: &str| -> String {
+        let mut eng = explorer_css::StyleEngine::new();
+        eng.add_css(css, explorer_css::Origin::Author);
+        let sm = eng.compute_tree(&dom, root, &explorer_css::StyleEnv::default());
+        match explorer_layout::build_box_tree(&dom, root, &sm) {
+            Some(mut bx) => {
+                explorer_layout::layout_tree(&mut bx, 800.0, &ctx);
+                // Box tree + display list : la géométrie seule
+                // rate les effets paint (`accent-color`,
+                // `caret-color`, `text-shadow`…). Limite
+                // connue : la couleur du run texte n'est pas
+                // dans `dl.dump` — `color:*`/`caret-*` purs
+                // sur texte restent invisibles à la jauge.
+                let dl = explorer_render::build_display_list(&bx, 800.0, 600.0, 0.0);
+                format!("{}\n{}", bx.dump(&dom), dl.dump())
+            }
+            None => String::new(),
+        }
+    };
+    let cctx = context_css(name);
+    // `initial-letter` n'existe que sur `::first-letter`
+    // (css-inline-3 §4 — non hérité, inerte ailleurs) : la
+    // déclaration sondée porte sur le pseudo, le ctx reste
+    // sur `.x`.
+    let sel = if name == "initial-letter" {
+        ".x::first-letter"
+    } else {
+        ".x"
+    };
+    let (a, b) = (
+        sig(&format!("{sel} {{ {cctx}; {}: {} }}", name, value.trim())),
+        sig(&format!("{sel} {{ {cctx} }}")),
+    );
+    if std::env::var_os("EXPLORER_BCD_DEBUG_SIG").is_some() {
+        eprintln!("=== {name}:{value}\n--- with\n{a}\n--- base\n{b}");
+    }
+    a != b
+}
+
+/// `affectsv` tri-état (étape 219) : `None` = **neutre par
+/// construction** — la valeur est l'initiale spec de la prop
+/// ou un mot-clé CSS-wide ; sa déclaration a pour effet spec
+/// « identique à l'absence de déclaration » → aucun oracle
+/// géométrique n'existe. Hors dénominateur (`na`), documenté
+/// en note du rapport — sinon le score punissait les valeurs
+/// sans effet possible.
+///
+/// `initial_value` (css) ne couvre qu'une partie du
+/// catalogue — `INITIAL_EXTRA` complète par les initiales
+/// spec des familles les plus visibles du lot BCD (oracle
+/// vérifiable à la spec ; tout ce qui n'est pas initial
+/// reste un miss honnête).
+const INITIAL_EXTRA: &[(&str, &str)] = &[
+    ("accent-color", "auto"),
+    ("align-content", "normal"),
+    ("align-items", "normal"),
+    ("align-self", "auto"),
+    ("alignment-baseline", "baseline"),
+    ("anchor-name", "none"),
+    ("anchor-scope", "none"),
+    ("appearance", "none"),
+    ("aspect-ratio", "auto"),
+    ("backface-visibility", "visible"),
+    ("baseline-shift", "baseline"),
+    ("caret-color", "auto"),
+    ("dominant-baseline", "alphabetic"),
+    ("align-self", "normal"),
+    ("align-self", "stretch"),
+    ("justify-self", "normal"),
+    ("justify-self", "stretch"),
+    ("justify-items", "normal"),
+    ("justify-items", "legacy"),
+    ("clear", "none"),
+    ("column-fill", "balance"),
+    ("contain", "none"),
+    ("content", "normal"),
+    ("content-visibility", "visible"),
+    ("direction", "ltr"),
+    ("empty-cells", "show"),
+    ("field-sizing", "fixed"),
+    ("flex-wrap", "nowrap"),
+    ("float", "none"),
+    ("hyphens", "manual"),
+    ("initial-letter", "normal"),
+    ("text-underline-position", "auto"),
+    ("text-decoration-inset", "auto"),
+    ("text-underline-offset", "auto"),
+    ("text-decoration-thickness", "auto"),
+    ("text-box-trim", "none"),
+    // `text-box` shorthand — un bord `<text-box-edge>` seul
+    // (sans token `trim-*`) = trim `none` → inerte ; `none`/
+    // `normal` = initiales spec.
+    ("text-box", "none"),
+    ("text-box", "normal"),
+    ("text-box", "cap"),
+    ("text-box", "text"),
+    ("text-box", "ex"),
+    ("text-box", "alphabetic"),
+    ("text-box", "ideographic"),
+    ("text-box", "ideographic-ink"),
+    // `text-box-edge` sans trim actif = inerte (son ctx pose
+    // `trim-both`, donc seule l'initiale `auto` reste `na`).
+    ("text-box-edge", "auto"),
+    // R-282 — `text-justify` : `auto` est l'initiale spec ;
+    // `inter-word`/`inter-character`/`distribute` utilisent
+    // tous la distribution inter-mots (borne PIPE : pas de
+    // glu intra-mot) → déclaration ≡ baseline justifiée.
+    ("text-justify", "auto"),
+    ("text-justify", "inter-word"),
+    ("text-justify", "inter-character"),
+    ("text-justify", "distribute"),
+    // `text-wrap-style` : `auto` initiale ; `stable` = garder
+    // les césures stables au ré-écoulement — pas d'oracle
+    // statique.
+    ("text-wrap-style", "auto"),
+    ("text-wrap-style", "stable"),
+    // `text-decoration-skip-spaces` : l'implémentation ne
+    // saute aucun blanc par défaut → `none` ≡ absent.
+    ("text-decoration-skip-spaces", "none"),
+    // `text-autospace` : opt-in — `auto`/`normal`/`no-autospace`
+    // ≡ absent par construction.
+    ("text-autospace", "auto"),
+    ("text-autospace", "normal"),
+    ("text-autospace", "no-autospace"),
+    // R-286 — `text-decoration-skip-ink` : `auto` est
+    // l'initiale spec (le moteur coupe déjà par défaut) ;
+    // `all` produit les mêmes cuts que `auto` ici →
+    // contextuellement neutre. `text-decoration-skip:auto`
+    // = shorthand sur le même comportement par défaut.
+    ("text-decoration-skip-ink", "auto"),
+    ("text-decoration-skip-ink", "all"),
+    ("text-decoration-skip", "auto"),
+    // `text` ≡ `auto` (css-inline-3 : `auto` se résout en
+    // bords texte — identique par construction).
+    ("text-box-edge", "text"),
+    // `hyphenate-*` : initiales spec css-text-4 (`auto` =
+    // tiret par défaut / limite auto ; `no-limit` = pas de
+    // borne de lignes consécutives).
+    ("hyphenate-character", "auto"),
+    ("hyphenate-limit-chars", "auto"),
+    ("hyphenate-limit-lines", "no-limit"),
+    ("quotes", "auto"),
+    ("image-rendering", "auto"),
+    ("isolation", "auto"),
+    ("justify-content", "normal"),
+    ("justify-items", "legacy"),
+    ("justify-self", "auto"),
+    ("letter-spacing", "normal"),
+    ("line-break", "auto"),
+    ("list-style-position", "outside"),
+    ("mix-blend-mode", "normal"),
+    ("object-fit", "fill"),
+    ("order", "0"),
+    ("overflow-wrap", "normal"),
+    ("overscroll-behavior", "auto"),
+    ("pointer-events", "auto"),
+    ("position-try", "none"),
+    ("position-try-fallbacks", "none"),
+    // R-287 — `position-try-order` : `normal` = l'ordre
+    // déclaré des fallbacks, initiale spec.
+    ("position-try-order", "normal"),
+    // R-289 — `ruby-overhang:auto` = initiale spec
+    // (débordement autorisé — le défaut de l'impl).
+    ("ruby-overhang", "auto"),
+    ("resize", "none"),
+    ("scroll-behavior", "auto"),
+    ("table-layout", "auto"),
+    ("text-align", "start"),
+    ("text-orientation", "mixed"),
+    ("text-wrap", "wrap"),
+    ("transform", "none"),
+    ("transform-style", "flat"),
+    ("unicode-bidi", "normal"),
+    ("user-select", "auto"),
+    ("vertical-align", "baseline"),
+    ("white-space", "normal"),
+    ("word-break", "normal"),
+    ("word-spacing", "normal"),
+    ("writing-mode", "horizontal-tb"),
+    // Cran « oracle » : équivalents-initiale confirmés par
+    // mesure (`stretch` ≡ `normal` sur les alignements —
+    // css-align : `normal` se comporte en `stretch`) et
+    // contexte de pagination inexistant (valeurs `page`/
+    // `left`/`right`/`paged_context` des `break-*` = no-op
+    // hors média paginé → équivalent initiale ici).
+    ("appearance", "auto"),
+    ("align-content", "stretch"),
+    ("align-items", "stretch"),
+    ("backdrop-filter", "none"),
+    ("break-after", "auto"),
+    ("break-after", "page"),
+    ("break-after", "left"),
+    ("break-after", "right"),
+    ("break-after", "paged_context"),
+    ("break-before", "auto"),
+    ("break-before", "page"),
+    ("break-before", "left"),
+    ("break-before", "right"),
+    ("break-before", "paged_context"),
+    ("break-inside", "auto"),
+    ("break-inside", "avoid"),
+    ("break-inside", "avoid-column"),
+    ("break-inside", "avoid-page"),
+    ("break-inside", "paged_context"),
+    // Initiales `background-*` que `initial_value` ne
+    // connaît pas + neutres de l'oracle gradient (`local`
+    // ≡ `scroll` sans défilement, `cover`/`center` neutres
+    // sur une image déjà calibrée à la zone, `currentColor`
+    // ≡ `color` du contexte).
+    ("background-attachment", "scroll"),
+    ("background-attachment", "local"),
+    ("background-blend-mode", "normal"),
+    ("background-clip", "border-box"),
+    ("background-color", "currentColor"),
+    ("background-image", "none"),
+    ("background-origin", "padding-box"),
+    ("background-position", "0% 0%"),
+    ("background-position", "center"),
+    ("background-repeat", "repeat"),
+    ("background-size", "auto"),
+    ("background-size", "cover"),
+    // `background-position-x`/`-y` : neutres sur un dégradé
+    // calibré à la zone (même borne que `cover`/`center` —
+    // l'image a la dimension de la zone, l'offset est nul
+    // quelle que soit la valeur).
+    ("background-position-x", "left"),
+    ("background-position-x", "center"),
+    ("background-position-x", "right"),
+    ("background-position-y", "top"),
+    ("background-position-y", "center"),
+    ("background-position-y", "bottom"),
+    // Cellule : `text-top`/`text-bottom`/`sub`/`super`/
+    // `<length>` retombent spec sur `baseline` (R-266
+    // §17.5.3.1) = le défaut de la fixture cellule → neutre.
+    ("vertical-align", "text-top"),
+    ("vertical-align", "text-bottom"),
+    ("vertical-align", "sub"),
+    ("vertical-align", "super"),
+    // `rule-break` (css-gaps-1 §4.2) : `intersection` est
+    // l'initiale spec ; `spanning-item` produit le même
+    // découpage au spanner dans la fixture multicol (aucun
+    // oracle ne les distingue ici).
+    ("rule-break", "intersection"),
+    ("rule-break", "spanning-item"),
+    // css-motion-1 : initiales spec + équivalents moteur
+    // (`normal`/`auto` = repli ancre/position, `50% 50%` =
+    // le centre implicite de la boîte 10×10 de la fixture).
+    ("offset", "none"),
+    ("offset-path", "none"),
+    ("offset-rotate", "auto"),
+    ("offset-rotate", "normal"),
+    ("offset-anchor", "auto"),
+    ("offset-anchor", "normal"),
+    ("offset-anchor", "50% 50%"),
+    ("offset-position", "normal"),
+    ("offset-position", "auto"),
+    // css-shapes-1 : `none` est l'initiale ; `margin-box` seul
+    // = la boîte de marge du flottant — exactement le
+    // contournement par défaut, neutre par construction.
+    ("shape-outside", "none"),
+    ("shape-outside", "margin-box"),
+    // css-contain-3 : `normal`/`none` = initiales.
+    ("container-type", "normal"),
+    ("container-name", "none"),
+];
+
+/// Propriétés **non observables** par l'oracle géométrique
+/// statique (`affectsv`) — l'effet vit hors du box tree et
+/// du dump display-list (curseur, caret, hit-test, scroll
+/// dynamique, widget UA, pagination). `na` honnête, pas un
+/// « miss » : aucun dump ne peut discriminer la valeur.
+const NO_ORACLE: &[&str] = &[
+    "cursor",
+    "caret-color",
+    "accent-color",
+    "appearance",
+    "pointer-events",
+    "resize",
+    "touch-action",
+    "user-select",
+    "touch-callout",
+    "tap-highlight-color",
+    "scroll-behavior",
+    "overscroll-behavior",
+    "overscroll-behavior-x",
+    "overscroll-behavior-y",
+    "overscroll-behavior-block",
+    "overscroll-behavior-inline",
+    "overflow-anchor",
+    "image-rendering",
+    "shape-rendering",
+    "text-rendering",
+    "color-rendering",
+    "vector-effect",
+    "will-change",
+    "forced-color-adjust",
+    "print-color-adjust",
+    "color-adjust",
+    "orphans",
+    "widows",
+    "page",
+    "speak-as",
+    "backface-visibility",
+    "anchor-scope",
+    // `dominant-baseline` : prop à portée SVG (texte SVG) —
+    // aucun effet en layout bloc/inline HTML, pas d'oracle.
+    "dominant-baseline",
+    // `mask-*` : la couche mask n'est résolue que depuis une
+    // bitmap `url()` fetchée (`resolve_mask` — `PaintImages`
+    // vide au harnais, les gradients ne passent pas par ce
+    // chemin) — aucune valeur observable sans ressource
+    // externe.
+    "mask",
+    "mask-image",
+    "mask-mode",
+    "mask-repeat",
+    "mask-position",
+    "mask-position-x",
+    "mask-position-y",
+    "mask-size",
+    "mask-clip",
+    "mask-origin",
+    "mask-composite",
+    "mask-border",
+    "mask-border-mode",
+    "mask-border-repeat",
+    "mask-border-slice",
+    "mask-border-source",
+    "mask-border-width",
+    "mask-border-outset",
+    "mask-type",
+    // `shape-image-threshold` : seuil alpha des formes image
+    // (`url()`/`gradient`) — sources non analysées au harnais
+    // (même borne que `mask-*`), aucun oracle statique.
+    "shape-image-threshold",
+    // `container-name` : métadonnée pure de nommage pour les
+    // queries `@container` — aucun effet géométrique propre
+    // (le prédicat s'évalue dans la règle, pas la déclaration).
+    "container-name",
+    // Peinture/géométrie **à portée SVG** (svg2 §geometry /
+    // svg11 §painting) : l'effet vit dans l'îlot rasterisé
+    // `<svg>` (atome remplacé — son bitmap n'entre pas dans
+    // le dump display-list) ; déclarée sur un élément HTML
+    // elle est inerte par spec. Même classe que
+    // `dominant-baseline` : conformité prouvée par les
+    // verrous PIPE (R-283 `collect_svg_styled`), aucun
+    // oracle statique ici.
+    "fill",
+    "fill-opacity",
+    "fill-rule",
+    "stroke",
+    "stroke-width",
+    "stroke-opacity",
+    "stroke-dasharray",
+    "stroke-dashoffset",
+    "stroke-linecap",
+    "stroke-linejoin",
+    "stroke-miterlimit",
+    "paint-order",
+    "d",
+    "cx",
+    "cy",
+    "r",
+    "rx",
+    "ry",
+    "x",
+    "y",
+    "stop-color",
+    "stop-opacity",
+    "flood-color",
+    "flood-opacity",
+    "lighting-color",
+    "marker",
+    "marker-start",
+    "marker-mid",
+    "marker-end",
+    // `interactivity` (R-285) : exclusion du hit-test —
+    // aucun effet géométrique ni display-list, même classe
+    // que `pointer-events` (NO_ORACLE).
+    "interactivity",
+];
+
+fn affects_decl_verdict(decl: &str) -> Option<bool> {
+    let (name, value) = decl.split_once(':')?;
+    let (name, value) = (name.trim(), value.trim());
+    let v = value.to_ascii_lowercase();
+    if matches!(
+        v.as_str(),
+        "inherit" | "initial" | "unset" | "revert" | "revert-layer"
+    ) || explorer_css::initial_value(name).is_some_and(|iv| iv == value)
+        || INITIAL_EXTRA.iter().any(|&(n, iv)| n == name && iv == v)
+        // `corner-*-shape:round` = initiale spec uniforme
+        // (css-borders-4 §3.7 — exposant 1 = le rond
+        // historique) — 17 noms, un seul repli.
+        || (name.starts_with("corner-") && v == "round")
+        // `container:<nom>` sans `/` = nommage pur
+        // (css-contain-3 — `name / type` ; un token seul
+        // est le nom, pas le type) — métadonnée sans
+        // effet géométrique, même classe que
+        // `container-name` (NO_ORACLE).
+        || (name == "container" && !v.contains('/'))
+    {
+        return None;
+    }
+    // Familles **temporelles** : `animation-*`/`transition-*`
+    // ne produisent de valeur calculée qu'avec une horloge +
+    // `@keyframes` — aucun oracle géométrique statique
+    // n'existe par construction (même classe que les
+    // initiales spec : hors dénominateur). La conformité se
+    // mesure sur les verrous session (R-255/256/257), pas ici.
+    if name.starts_with("animation-")
+        || name.starts_with("transition-")
+        || matches!(name, "animation" | "transition")
+    {
+        return None;
+    }
+    // Familles **sans oracle statique** : l'effet de la prop
+    // vit hors du dump — curseur (rendu OS), caret/couleur
+    // de caret, hit-testing (`pointer-events`), comportement
+    // de scroll (`scroll-behavior`, `overscroll-behavior`,
+    // snap), interaction (`resize`, `touch-action`,
+    // `user-select`, `-webkit-touch-callout`), widget UA
+    // (`appearance`, `accent-color`), hints raster
+    // (`image/shape/text/color-rendering`, `will-change`),
+    // modes forcés/impression (`forced-color-adjust`,
+    // `*-print-color-adjust`), ancrage dynamique
+    // (`overflow-anchor`), pagination (`orphans`/`widows`/
+    // `page*`, `speak`). Un miss serait un artefact de
+    // jauge, pas un trou moteur — hors dénominateur.
+    let nn = name.trim_start_matches('-').trim_start_matches("webkit-");
+    if std::env::var_os("EXPLORER_BCD_NO_NOORACLE").is_none() && NO_ORACLE.contains(&nn) {
+        return None;
+    }
+    // `hyphens:language_<X>` (sous-features BCD, ~60 clés) =
+    // « la césure fonctionne pour la langue X » — pas une
+    // déclaration. Le splitter borné (R-275) couvre
+    // l'écriture **latine** via les règles génériques (`lang`
+    // vide ou latin) : pour ces langues la sonde honnête est
+    // `hyphens:auto` ; pour les autres scripts (cyrillique,
+    // arabe, indic…) le moteur ne césure réellement pas →
+    // `miss` mesuré, pas `na` (la capacité manque, ce n'est
+    // pas une borne d'oracle).
+    // Sous-features BCD `percentage` = « les valeurs `<percent>`
+    // sont supportées » — pas une déclaration en soi : sonder
+    // avec `10%` mesure la capacité réelle (honnie).
+    // Sous-features BCD `percentage` = « les valeurs `<percent>`
+    // sont supportées » — pas une déclaration en soi : sonder
+    // avec `40%` mesure la capacité réelle (10% retomberait
+    // pile sur le repli `auto` ~10%em de l'offset).
+    if v == "percentage" {
+        return Some(prop_affects_decl(&format!("{name}:40%")));
+    }
+    if name == "hyphens" && v.starts_with("language_") {
+        const LATIN: &[&str] = &[
+            "afrikaans", "albanian", "basque", "bosnian", "catalan", "croatian", "czech",
+            "danish", "dutch", "english", "esperanto", "estonian", "finnish", "french",
+            "galician", "german_reformed_orthography", "german_swiss_orthography",
+            "german_traditional_orthography", "hungarian", "icelandic", "interlingua",
+            "irish", "italian", "kurmanji", "latin", "latvian", "lithuanian",
+            "norwegian_nn", "norwegian_no", "polish", "portuguese", "slovak", "slovenian",
+            "spanish", "swedish", "turkish", "turkmen", "upper_sorbian", "welsh",
+        ];
+        let lang = &v["language_".len()..];
+        return if LATIN.contains(&lang) {
+            Some(prop_affects_decl("hyphens:auto"))
+        } else {
+            Some(false)
+        };
+    }
+    Some(prop_affects_decl(decl))
+}
+
+/// `check html` — oracle de comportement par élément
+/// (`bcd.html.elements`, étape 219). « Le tag parse » est
+/// trivial (toute balise produit un élément) : la jauge
+/// combine trois mesures par tag —
+///   1. **interface JS** : `document.createElement(tag)`
+///      est `instanceof` de l'interface spec (`HTMLDialog-
+///      Element`, `HTMLTemplateElement`…, défaut
+///      `HTMLElement`) ;
+///   2. **membres IDL clés** : `showModal`, `content`,
+///      `value`… présents sur l'élément ;
+///   3. **géométrie UA** : le box tree (feuille `UA_CSS`
+///      incluse par `StyleEngine::new`) montre l'effet
+///      attendu — boîte produite, `list-item`, `display:none`
+///      des éléments inertes, contenu replié (`details` sans
+///      `open`) ou promu (`slot` → `display:contents`).
+///
+/// Table `tag → assertion` artisanale : BCD fournit le
+/// dénominateur, chaque ligne mesure un vrai comportement.
+#[derive(Clone, Copy)]
+enum HtmlWant {
+    /// Une boîte nommée `<tag>` existe dans le dump.
+    Renders,
+    /// L'élément produit une boîte `list-item`.
+    ListItem,
+    /// Aucune boîte `<tag>` — `display:none` UA (script,
+    /// style, title, meta, link, source, template…).
+    Hidden,
+    /// Boîte `<tag>` présente mais le texte fils replié
+    /// (`details` sans `open`).
+    Collapsed(&'static str),
+    /// Pas de boîte `<tag>` mais le texte enfant promu dans
+    /// le flux (`slot` → `display:contents` UA).
+    Contents(&'static str),
+}
+
+/// Assertion d'un élément : interface JS attendue,
+/// expression IDL supplémentaire (sur `el`, conjointe),
+/// fixture HTML et attente géométrique.
+struct HtmlSpec {
+    ctor: &'static str,
+    extra: &'static str,
+    fixture: Option<&'static str>,
+    want: HtmlWant,
+}
+
+const fn hs(
+    ctor: &'static str,
+    extra: &'static str,
+    fixture: Option<&'static str>,
+    want: HtmlWant,
+) -> HtmlSpec {
+    HtmlSpec {
+        ctor,
+        extra,
+        fixture,
+        want,
+    }
+}
+
+/// Table `tag → assertion` — les interfaces viennent de la
+/// spec HTML (oracle indépendant de `tag_interface`), les
+/// membres IDL des propriétés qui distinguent un élément
+/// réel d'un conteneur générique. Les éléments non listés
+/// tombent sur le défaut « `HTMLElement` + boîte rendue »
+/// (conteneurs sans sémantique propre : `div`, `section`,
+/// `article`… — inclus au dénominateur, triviaux).
+#[allow(clippy::too_many_lines)]
+fn html_spec(tag: &str) -> HtmlSpec {
+    use HtmlWant::{Collapsed, Contents, Hidden, ListItem, Renders};
+    match tag {
+        "a" => hs("HTMLAnchorElement", "'href' in el", None, Renders),
+        "area" => hs("HTMLAreaElement", "true",
+            Some("<body><map name=m><area href=x></map></body>"), Hidden),
+        "audio" => hs("HTMLAudioElement", "true",
+            Some("<body><audio></audio></body>"), Hidden),
+        "base" => hs("HTMLBaseElement", "true", None, Hidden),
+        "blockquote" | "q" => hs("HTMLQuoteElement", "true", None, Renders),
+        // Parenthèse de repli pour les UAs sans ruby — ne
+        // génère jamais de boîte propre dans un contexte
+        // ruby (le texte `<rt>` est posé par le moteur).
+        "rp" => hs(
+            "HTMLElement",
+            "true",
+            Some("<body><ruby>base<rp>(</rp><rt>x</rt><rp>)</rp></ruby></body>"),
+            Hidden,
+        ),
+        "body" => hs("HTMLBodyElement", "true",
+            Some("<body><p>ok</p></body>"), Renders),
+        "br" => hs("HTMLBRElement", "true",
+            Some("<body><p>a<br>b</p></body>"), Renders),
+        "button" => hs("HTMLButtonElement", "'disabled' in el && 'value' in el",
+            None, Renders),
+        "canvas" => hs("HTMLCanvasElement", "true", None, Renders),
+        "caption" => hs("HTMLTableCaptionElement", "true",
+            Some("<body><table><caption>ok</caption><tr><td>c</td></tr></table></body>"),
+            Renders),
+        "col" | "colgroup" => hs("HTMLTableColElement", "true",
+            Some("<body><table><colgroup><col></colgroup><tr><td>c</td></tr></table></body>"),
+            Renders),
+        "data" => hs("HTMLDataElement", "'value' in el", None, Renders),
+        "datalist" => hs("HTMLDataListElement", "true", None, Hidden),
+        "del" | "ins" => hs("HTMLModElement", "true", None, Renders),
+        // Replié sans `open` — UA `details:not([open]) >
+        // :not(summary) { display: none }`.
+        "details" => hs("HTMLDetailsElement", "true",
+            Some("<body><details><summary>voir</summary><p>HIDEME</p></details></body>"),
+            Collapsed("HIDEME")),
+        "dialog" => hs("HTMLDialogElement",
+            "typeof el.showModal === 'function' && typeof el.close === 'function'",
+            Some("<body><dialog><p>HIDEME</p></dialog></body>"), Hidden),
+        "dir" => hs("HTMLDirectoryElement", "true", None, Renders),
+        "embed" => hs("HTMLEmbedElement", "true", None, Renders),
+        "fencedframe" => hs("HTMLFencedFrameElement", "true", None, Renders),
+        "fieldset" => hs("HTMLFieldSetElement", "true", None, Renders),
+        "font" => hs("HTMLFontElement", "true", None, Renders),
+        "form" => hs("HTMLFormElement", "'method' in el", None, Renders),
+        "h1" | "h2" | "h3" | "h4" | "h5" | "h6" =>
+            hs("HTMLHeadingElement", "true", None, Renders),
+        "head" => hs("HTMLHeadElement", "true",
+            Some("<body><p>ok</p></body>"), Hidden),
+        "hr" => hs("HTMLHRElement", "true", None, Renders),
+        "html" => hs("HTMLHtmlElement", "true",
+            Some("<body><p>ok</p></body>"), Renders),
+        "iframe" => hs("HTMLIFrameElement", "'src' in el", None, Renders),
+        "img" => hs("HTMLImageElement", "'src' in el && 'alt' in el",
+            Some("<body><img alt=x></body>"), Renders),
+        "input" => hs("HTMLInputElement", "'value' in el && 'checked' in el",
+            Some("<body><input type=checkbox></body>"), Renders),
+        "label" => hs("HTMLLabelElement", "true", None, Renders),
+        "legend" => hs("HTMLLegendElement", "true",
+            Some("<body><fieldset><legend>ok</legend></fieldset></body>"), Renders),
+        "li" => hs("HTMLLIElement", "true",
+            Some("<body><ul><li>ok</li></ul></body>"), ListItem),
+        "link" => hs("HTMLLinkElement", "true", None, Hidden),
+        "map" => hs("HTMLMapElement", "true", None, Renders),
+        "marquee" => hs("HTMLMarqueeElement", "true", None, Renders),
+        "menu" => hs("HTMLMenuElement", "true",
+            Some("<body><menu><li>ok</li></menu></body>"), Renders),
+        "meta" => hs("HTMLMetaElement", "true", None, Hidden),
+        "meter" => hs("HTMLMeterElement", "true", None, Renders),
+        "object" => hs("HTMLObjectElement", "true", None, Renders),
+        "ol" => hs("HTMLOListElement", "true",
+            Some("<body><ol><li>ok</li></ol></body>"), Renders),
+        // `option`/`optgroup` ne génèrent pas de boîte
+        // propre — le `<select>` peint le libellé de
+        // l'option courante dans son contrôle.
+        "optgroup" => hs("HTMLOptGroupElement", "true",
+            Some("<body><select><optgroup><option>OPTME</option></optgroup></select></body>"),
+            Contents("OPTME")),
+        "option" => hs("HTMLOptionElement", "'value' in el",
+            Some("<body><select><option>OPTME</option></select></body>"), Contents("OPTME")),
+        "output" => hs("HTMLOutputElement", "true", None, Renders),
+        "p" => hs("HTMLParagraphElement", "true", None, Renders),
+        "param" => hs("HTMLParamElement", "true", None, Hidden),
+        "picture" => hs("HTMLPictureElement", "true",
+            Some("<body><picture><img alt=x></picture></body>"), Renders),
+        "pre" => hs("HTMLPreElement", "true", None, Renders),
+        "progress" => hs("HTMLProgressElement", "'value' in el", None, Renders),
+        "script" => hs("HTMLScriptElement", "true", None, Hidden),
+        "select" => hs("HTMLSelectElement", "'value' in el",
+            Some("<body><select><option>o</option></select></body>"), Renders),
+        // `display:contents` UA — pas de boîte propre, le
+        // repli est promu dans le flux.
+        "slot" => hs("HTMLSlotElement", "true", None, Contents("ok")),
+        "source" => hs("HTMLSourceElement", "true", None, Hidden),
+        "span" => hs("HTMLSpanElement", "true", None, Renders),
+        "style" => hs("HTMLStyleElement", "true", None, Hidden),
+        "table" => hs("HTMLTableElement", "true",
+            Some("<body><table><tr><td>ok</td></tr></table></body>"), Renders),
+        "tbody" => hs("HTMLTableSectionElement", "true",
+            Some("<body><table><tbody><tr><td>ok</td></tr></tbody></table></body>"),
+            Renders),
+        "thead" => hs("HTMLTableSectionElement", "true",
+            Some("<body><table><thead><tr><th>h</th></tr></thead><tr><td>ok</td></tr></table></body>"),
+            Renders),
+        "tfoot" => hs("HTMLTableSectionElement", "true",
+            Some("<body><table><tfoot><tr><td>f</td></tr></tfoot><tr><td>ok</td></tr></table></body>"),
+            Renders),
+        "td" => hs("HTMLTableCellElement", "true",
+            Some("<body><table><tr><td>ok</td></tr></table></body>"), Renders),
+        "th" => hs("HTMLTableCellElement", "true",
+            Some("<body><table><tr><th>ok</th></tr></table></body>"), Renders),
+        // `.content` = DocumentFragment distinct ; les
+        // enfants du template n'appartiennent pas au DOM
+        // rendu (`display:none` UA de toute façon).
+        "template" => hs("HTMLTemplateElement",
+            "el.content instanceof DocumentFragment",
+            Some("<body><template><p>HIDEME</p></template></body>"), Hidden),
+        "textarea" => hs("HTMLTextAreaElement", "'value' in el", None, Renders),
+        "time" => hs("HTMLTimeElement", "'dateTime' in el", None, Renders),
+        "title" => hs("HTMLTitleElement", "true", None, Hidden),
+        "tr" => hs("HTMLTableRowElement", "true",
+            Some("<body><table><tr><td>ok</td></tr></table></body>"), Renders),
+        "track" => hs("HTMLTrackElement", "true", None, Hidden),
+        "ul" => hs("HTMLUListElement", "true",
+            Some("<body><ul><li>ok</li></ul></body>"), Renders),
+        "video" => hs("HTMLVideoElement", "true", None, Renders),
+        "wbr" => hs("HTMLElement", "true",
+            Some("<body><p>a<wbr>b</p></body>"), Renders),
+        // Conteneur générique — seule jauge honnête :
+        // interface `HTMLElement` + boîte produite.
+        _ => hs("HTMLElement", "true", None, Renders),
+    }
+}
+
+/// Dump du box tree d'une fixture (feuille UA comprise) —
+/// sondage géométrique partagé avec `prop_affects_decl`.
+fn html_box_dump(fixture: &str) -> String {
+    let dom = explorer_html::TreeBuilder::parse(fixture);
+    let root = {
+        let mut r = None;
+        walk_any(dom.document(), &dom, &mut r);
+        r.unwrap_or(dom.document())
+    };
+    let eng = explorer_css::StyleEngine::new();
+    let sm = eng.compute_tree(&dom, root, &explorer_css::StyleEnv::default());
+    match explorer_layout::build_box_tree(&dom, root, &sm) {
+        Some(mut bx) => {
+            explorer_layout::layout_tree(&mut bx, 800.0, &explorer_layout::BlockCtx::default());
+            bx.dump(&dom)
+        }
+        None => String::new(),
+    }
+}
+
+fn html_want_ok(dump: &str, tag: &str, want: HtmlWant) -> bool {
+    let pat = format!("<{tag}");
+    match want {
+        HtmlWant::Renders => dump.contains(&pat),
+        HtmlWant::Hidden => !dump.contains(&pat),
+        HtmlWant::ListItem => dump
+            .lines()
+            .any(|l| l.contains("list-item") && l.contains(&pat)),
+        HtmlWant::Collapsed(text) => dump.contains(&pat) && !dump.contains(text),
+        HtmlWant::Contents(text) => !dump.contains(&pat) && dump.contains(text),
+    }
+}
+
+/// Canal JS de `check html` — un moteur avec la surface
+/// navigateur (`install_dom`), une expression de sonde par
+/// tag passant par `console.log` (canal capturé, pas de
+/// parsing de `Value`).
+struct HtmlJsProbe {
+    eng: explorer_jscore::Engine,
+    out: std::rc::Rc<std::cell::RefCell<Vec<String>>>,
+}
+
+impl HtmlJsProbe {
+    fn new() -> Self {
+        let mut eng = explorer_jscore::Engine::new();
+        let dom = std::rc::Rc::new(std::cell::RefCell::new(explorer_jscore::Dom::from_html(
+            "<!doctype html><body></body>",
+        )));
+        eng.install_dom(&dom);
+        let out = std::rc::Rc::new(std::cell::RefCell::new(Vec::new()));
+        let o = out.clone();
+        eng.set_console_hook(std::rc::Rc::new(move |l| o.borrow_mut().push(l)));
+        Self { eng, out }
+    }
+
+    /// `createElement(tag) instanceof ctor && extra` — un
+    /// ctor absent du global (`HTMLFencedFrameElement`…)
+    /// jette `ReferenceError` = miss honnête.
+    fn ok(&mut self, tag: &str, spec: &HtmlSpec) -> bool {
+        self.out.borrow_mut().clear();
+        let src = format!(
+            "console.log(function(){{var el=document.createElement({tag:?});\
+             return el instanceof {} && ({})}}()?'ok':'miss')",
+            spec.ctor, spec.extra
+        );
+        if self.eng.eval_named(&src, "check-html").is_err() {
+            return false;
+        }
+        self.out.borrow().last().is_some_and(|l| l.trim() == "ok")
+    }
+}
+
+fn html_check(tag: &str, cell: &std::cell::RefCell<Option<HtmlJsProbe>>) -> bool {
+    let tag = tag.trim().to_ascii_lowercase();
+    let spec = html_spec(&tag);
+    let js_ok = {
+        let mut g = cell.borrow_mut();
+        g.get_or_insert_with(HtmlJsProbe::new).ok(&tag, &spec)
+    };
+    if !js_ok {
+        return false;
+    }
+    let fixture = spec
+        .fixture
+        .map_or_else(|| format!("<body><{tag}>ok</{tag}></body>"), str::to_string);
+    html_want_ok(&html_box_dump(&fixture), &tag, spec.want)
+}
+
+fn walk_any(
+    n: explorer_dom::NodeId,
+    dom: &explorer_dom::Dom,
+    out: &mut Option<explorer_dom::NodeId>,
+) {
+    if dom.element(n).is_ok() && out.is_none() {
+        *out = Some(n);
+    }
+    if let Ok(ch) = dom.children(n) {
+        for c in ch {
+            walk_any(c, dom, out);
+        }
+    }
+}
+
+fn check_names(kind: &str) -> ExitCode {
     use std::io::BufRead;
+    let routed_dom;
+    let test: Box<dyn Fn(&str) -> bool> = match kind {
+        "prop" => Box::new(explorer_css::prop_supported),
+        "sel" => Box::new(explorer_css::selector_supported),
+        "at" => Box::new(explorer_css::at_rule_supported),
+        // R-245/246 — `routed` : la déclaration atteint-elle
+        // `ComputedStyle` (saturante tant que la cascade
+        // stocke les inconnus) ; `affects` : la géométrie
+        // change-t-elle (jauge non-saturante).
+        "routed" => {
+            // Parent à `display:inline` : `display:inherit` sur
+            // `.x` hérite `inline` ≠ `block` UA — sans ça la
+            // sonde est aveugle (valeur héritée = initiale).
+            routed_dom = explorer_html::TreeBuilder::parse(
+                "<body style=display:inline><p class=x>ok</p></body>",
+            );
+            Box::new(move |name| explorer_css::prop_routed(&routed_dom, name))
+        }
+        "affects" => Box::new(prop_affects),
+        // `affectsv` est tri-état (`na` = valeur initiale spec
+        // ou CSS-wide — neutre par construction, hors
+        // dénominateur) : boucle dédiée plus bas.
+        "affectsv" => Box::new(prop_affects_decl),
+        // Étape 219 — `html` : oracle de comportement par
+        // élément (`bcd.html.elements`) — binding JS
+        // (interface + membres IDL) ET géométrie UA (box
+        // tree) ; un moteur jscore partagé, créé à la
+        // première ligne sondée.
+        "html" => {
+            let cell = std::cell::RefCell::new(None);
+            Box::new(move |tag| html_check(tag, &cell))
+        }
+        _ => {
+            eprintln!(
+                "check : kind inconnu {kind:?} — attendu prop|sel|at|routed|affects|affectsv|html"
+            );
+            return ExitCode::FAILURE;
+        }
+    };
     let stdin = std::io::stdin();
     for line in stdin.lock().lines() {
         let Ok(name) = line else { break };
@@ -601,8 +2047,13 @@ fn props_check() -> ExitCode {
         if name.is_empty() {
             continue;
         }
-        let ok = explorer_css::prop_supported(name);
-        println!("{name}\t{}", if ok { "ok" } else { "miss" });
+        if kind == "affectsv" {
+            let verdict =
+                affects_decl_verdict(name).map_or("na", |ok| if ok { "ok" } else { "miss" });
+            println!("{name}\t{verdict}");
+        } else {
+            println!("{name}\t{}", if test(name) { "ok" } else { "miss" });
+        }
     }
     ExitCode::SUCCESS
 }
@@ -898,5 +2349,30 @@ async fn fetch(src: &str) -> ExitCode {
             eprintln!("erreur : {e}");
             ExitCode::FAILURE
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    /// `affectsv` : les familles temporelles (`animation-*`/
+    /// `transition-*`) sont `na` — neutres par construction,
+    /// aucun oracle géométrique statique n'existe (verrous
+    /// session R-255/256/257 portent la conformité réelle).
+    #[test]
+    fn affectsv_familles_temporelles_neutres() {
+        for d in [
+            "animation-fill-mode:forwards",
+            "animation-play-state:paused",
+            "animation-timing-function:steps(4,end)",
+            "animation-composition:add",
+            "animation:spin 1s infinite",
+            "transition-property:opacity",
+            "transition-timing-function:steps(2)",
+            "transition:all .3s",
+        ] {
+            assert!(super::affects_decl_verdict(d).is_none(), "{d} doit être na");
+        }
+        // Garde-fou : une prop géométrique reste mesurée.
+        assert!(super::affects_decl_verdict("display:grid").is_some());
     }
 }

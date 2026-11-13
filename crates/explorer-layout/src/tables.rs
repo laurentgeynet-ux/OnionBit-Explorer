@@ -785,6 +785,25 @@ pub(crate) fn layout_table(
             row_h = row_h.max(used);
             used_list.push(used);
         }
+        // §17.5.3 — la `height` **spécifiée de la rangée**
+        // (`tr` réel, `path` présent) borne inférieurement
+        // `row_h` : `<tr style="height:5px">` garde ses 5 px
+        // même à cellules vides (spacer HN — avant : rang
+        // effondré à la hauteur de contenu ~0). Un rang
+        // spécifié est fixe pour la distribution d'excédent,
+        // comme une cellule à `height` ; les `%` restent
+        // `auto` (cb de hauteur indéfinie à ce stade).
+        if let Some(p) = &row.path {
+            if let Some(rb) = at_path(bx, p) {
+                let h = rb.style.get("height").map_or("", str::trim);
+                if !h.is_empty() && h != "auto" && !h.contains('%') {
+                    row_fixed[k] = true;
+                    if let Some(px) = css_px(&rb.style, "height", 0.0, fs, ctx) {
+                        row_h = row_h.max(px);
+                    }
+                }
+            }
+        }
         cell_used.push(used_list);
         row_tops.push((cursor_y, row_h));
         cursor_y += row_h + gap[k + 1];
@@ -846,7 +865,17 @@ pub(crate) fn layout_table(
                     .get("vertical-align")
                     .or(tr_va.as_deref())
                     .unwrap_or("baseline");
-                if va == "baseline" {
+                // R-266 — §17.5.3.1 : seuls `baseline`/`top`/
+                // `middle`/`bottom` ont une sémantique
+                // cellule ; toute autre valeur (`text-top`,
+                // `text-bottom`, `<length>`, `sub`, `super`)
+                // retombe sur `baseline` — l'ancien `_ => 0`
+                // alignait en haut au lieu d'aligner sur la
+                // ligne de base. La cellule effectivement
+                // baseline compte donc dans la baseline de
+                // rangée.
+                let va_eff = cell_va(va);
+                if va_eff == "baseline" {
                     // Lignes sur le conteneur ou son premier
                     // bloc anonyme enfant ; sans ligne, le bas
                     // de la boîte fait baseline (§17.5.3.1).
@@ -900,7 +929,7 @@ pub(crate) fn layout_table(
                 .get("vertical-align")
                 .or(tr_va.as_deref())
                 .unwrap_or("baseline");
-            let dy = match va {
+            let dy = match cell_va(va) {
                 "middle" => (cell_h - used) / 2.0,
                 "bottom" => cell_h - used,
                 // R-179 — `baseline` réel : la 1re ligne de la
@@ -1085,6 +1114,18 @@ fn border_spacing(st: &ComputedStyle, cb_w: f32, fs: f32, ctx: &BlockCtx) -> (f3
         (Some(h), Some(v)) => (h, v),
         (Some(h), None) => (h, h),
         _ => (0.0, 0.0),
+    }
+}
+
+/// `vertical-align` effectif d'une cellule (R-266,
+/// §17.5.3.1) : seuls `baseline`/`top`/`middle`/`bottom`
+/// ont une sémantique de cellule — toute autre valeur
+/// (`text-top`, `text-bottom`, `<length>`, `<percentage>`,
+/// `sub`, `super`, mots-clés SVG) est traitée `baseline`.
+fn cell_va(raw: &str) -> &str {
+    match raw.trim() {
+        "top" | "middle" | "bottom" | "baseline" => raw.trim(),
+        _ => "baseline",
     }
 }
 

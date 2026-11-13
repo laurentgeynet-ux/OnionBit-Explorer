@@ -211,6 +211,7 @@ impl Session {
         // il court à chaque battement.
         self.drain_script_net(tab);
         self.drain_anim_births(tab);
+        self.drain_anim_marks(tab);
         // Même famille pour `media_cmds` (vol MSE-DLL) : un
         // `play()` posé par une éval API avec `jobs==0` dormait
         // dans la file — jamais émis en `MediaCommand`, la
@@ -681,6 +682,7 @@ impl Session {
         if !drain_expired {
             self.drain_script_net(tab);
             self.drain_anim_births(tab);
+            self.drain_anim_marks(tab);
             // Claim/rapports retenus pendant le détachement —
             // relivrés avant le drain des commandes : les
             // events qu'ils tirent peuvent produire des
@@ -688,6 +690,7 @@ impl Session {
             self.sync_media_pending(tab);
             self.drain_media_commands(tab);
         }
+        sync_phase(tab, "commit.tail", t);
         // B-41 (flixbus) : une rafale `UnmappedKey` →
         // re-parse → éval produisait des jobs à chaque
         // pompe — la pompe repartait sans fin (pump_
@@ -797,6 +800,83 @@ impl Session {
             // `after_script`/`drain_script_net` dans le dispatch ;
             // l'entrant attend le tick de la pompe.
             self.dispatch_path_event_props_inner(tab, "animationstart", &path, &props, false);
+        }
+    }
+
+    /// Synchronise les marques `data-explorer-anim` du miroir
+    /// (JS-C475 — `getAnimations()` remonte les animations
+    /// **CSS** déclaratives, pas seulement les `el.animate`)
+    /// : chaque [`ActiveAnimation`] de l'onglet porte une
+    /// marque `nom` (ou `nom|paused` quand `paused_at` est
+    /// armé) sur l'élément miroir homologue ; le diff contre
+    /// `anim_marks` émet les `SyncField` add/remove — le
+    /// moteur détaché tamponne via `js_pending_attrs` comme
+    /// les autres états de champ.
+    pub(crate) fn drain_anim_marks(&mut self, tab: TabId) {
+        const ATTR: &str = "data-explorer-anim";
+        let Some(entry) = self.tabs.get(&tab) else {
+            return;
+        };
+        let Some(dom) = entry.dom.as_ref() else {
+            return;
+        };
+        // État désiré : path élément → `nom`/`nom|paused`.
+        let ord_of = element_ordinals(dom);
+        let node_of: HashMap<usize, NodeId> = ord_of.iter().map(|(n, o)| (*o, *n)).collect();
+        let mut desired: HashMap<Vec<(String, u32)>, String> = HashMap::new();
+        for a in &entry.animations {
+            let Some(&n) = node_of.get(&a.elem) else {
+                continue;
+            };
+            let Some(path) = element_path(dom, n) else {
+                continue;
+            };
+            let v = if a.paused_at.is_some() {
+                format!("{}|paused", a.decl.name)
+            } else {
+                a.decl.name.clone()
+            };
+            desired.insert(path, v);
+        }
+        if desired == entry.anim_marks {
+            return;
+        }
+        let Some(entry) = self.tabs.get_mut(&tab) else {
+            return;
+        };
+        let adds: Vec<(Vec<(String, u32)>, String)> = desired
+            .iter()
+            .filter(|(p, v)| entry.anim_marks.get(*p) != Some(*v))
+            .map(|(p, v)| (p.clone(), v.clone()))
+            .collect();
+        let removes: Vec<Vec<(String, u32)>> = entry
+            .anim_marks
+            .keys()
+            .filter(|p| !desired.contains_key(*p))
+            .cloned()
+            .collect();
+        entry.anim_marks = desired;
+        let detached = entry.js_detached.is_some();
+        let has_engine = entry.js.is_some();
+        for path in removes {
+            if detached {
+                entry.js_pending_attrs.push((path, ATTR.to_string(), None));
+            } else if has_engine {
+                if let Some(eng) = entry.js.as_mut() {
+                    eng.sync_mirror_attr(&path, ATTR, None);
+                }
+            }
+        }
+        for (path, v) in adds {
+            if detached {
+                entry
+                    .js_pending_attrs
+                    .push((path, ATTR.to_string(), Some(v)));
+            } else if has_engine {
+                if let Some(eng) = entry.js.as_mut() {
+                    eng.sync_mirror_attr(&path, ATTR, Some(&v));
+                }
+            }
         }
     }
 
@@ -1529,9 +1609,16 @@ impl Session {
         } else if entry.js_detached.is_some()
             && entry.pending_doc_lifecycle.len() < MAX_PENDING_LIFECYCLE
         {
+            tracing::info!(target: "dom_probe", tab, ctx, state,
+                site = "rs.buf", "ready_state tamponné (moteur détaché)");
             entry
                 .pending_doc_lifecycle
                 .push(types::DocLifecycle::ReadyState(ctx, state.to_string()));
+        } else {
+            tracing::info!(target: "dom_probe", tab, ctx, state,
+                js = entry.js.is_some(), det = entry.js_detached.is_some(),
+                pend = entry.pending_doc_lifecycle.len(),
+                site = "rs.skip", "ready_state non livré");
         }
     }
 
@@ -1631,6 +1718,23 @@ impl Session {
                         }
                     }
                 }
+            }
+            // JS-C471 — `complete`/`load` au premier point de
+            // synchro après `interactive`/`DOMContentLoaded` : sur
+            // un site au JS jamais idle (youtube), `sub_commit_head`
+            // ne rend pas la main et le tail qui porte la moitié
+            // basse ne court pas — `readyState` resterait
+            // « interactive » à vie et les listeners `load`
+            // pendraient (hydratation kevlar incomplète — `[[ ]]`
+            // résiduels). La garde `doc_load_epoch` rend l'appel
+            // idempotent : un commit normal est déjà passé par
+            // `fire_doc_complete` — no-op. `eng` direct : même voie
+            // que le rejeu ci-dessus.
+            if entry.doc_dcl_epoch == entry.nav_epoch && entry.doc_load_epoch != entry.nav_epoch {
+                entry.doc_load_epoch = entry.nav_epoch;
+                eng.set_ready_state(explorer_js::JS_CTX_TOP, "complete");
+                let _ = eng.dispatch_event_ctx(explorer_js::JS_CTX_TOP, "readystatechange", &[]);
+                let _ = eng.dispatch_event_ctx(explorer_js::JS_CTX_TOP, "load", &[]);
             }
             let p = match eng.dispatch_event_props(ty, path, props) {
                 Ok(p) => p,

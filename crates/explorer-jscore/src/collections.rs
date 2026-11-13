@@ -657,6 +657,11 @@ pub(crate) fn install(e: &mut Engine) {
     e.add_method(iterator, "some", it_some);
     e.add_method(iterator, "every", it_every);
     e.add_method(iterator, "find", it_find);
+    // ES2026 chunking/sequencing — snapshot eager (déviation).
+    e.add_method(iterator, "includes", it_includes);
+    e.add_method(iterator, "join", it_join);
+    e.add_method(iterator, "chunks", it_chunks);
+    e.add_method(iterator, "windows", it_windows);
 
     let map_proto = e.protos.map;
     e.add_method(map_proto, "set", map_set);
@@ -983,4 +988,143 @@ fn it_find(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
         }
     }
     Ok(Value::Undefined)
+}
+
+// -- Iterator helpers ES2026 (chunking/sequencing proposals) --------------
+// Snapshot eager, comme le reste de nos helpers (déviation
+// documentée vs la laziness spec).
+
+/// `iter.includes(v)` — `SameValueZero` (`===` + NaN).
+fn it_includes(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
+    let needle = arg(args, 0);
+    for v in it_pull_all(e, this)? {
+        let nan = matches!((v.clone(), needle.clone()), (Value::Num(a), Value::Num(b)) if a.is_nan() && b.is_nan());
+        if nan || e.strict_eq(&v, &needle) {
+            return Ok(Value::Bool(true));
+        }
+    }
+    Ok(Value::Bool(false))
+}
+
+/// `iter.join(sep?)` — joint les valeurs (défaut `,`).
+fn it_join(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
+    let sep = match arg(args, 0) {
+        Value::Undefined => ",".to_string(),
+        v => e.to_js_string(v)?,
+    };
+    let mut out = String::new();
+    for (i, v) in it_pull_all(e, this)?.into_iter().enumerate() {
+        if i > 0 {
+            out.push_str(&sep);
+        }
+        out.push_str(&e.to_js_string(v)?);
+    }
+    Ok(e.str_val(out))
+}
+
+/// Taille de lot `n` : entier ≥ 1, `RangeError` sinon (proposal).
+fn it_chunk_size(e: &mut Engine, v: Value) -> JsResult<usize> {
+    let n = e.to_number(v)?;
+    if n.is_nan() || n < 1.0 {
+        return Err(e.range_error("chunk size must be a positive integer"));
+    }
+    Ok(n as usize)
+}
+
+/// `iter.chunks(n)` — lots consécutifs de `n` éléments (le
+/// dernier peut être plus court) → itérateur d'arrays.
+fn it_chunks(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
+    let n = it_chunk_size(e, arg(args, 0))?;
+    let vals = it_pull_all(e, this)?;
+    let out: Vec<Value> = vals.chunks(n).map(|c| e.new_array(c.to_vec())).collect();
+    Ok(iter_obj(e, out, e.protos.iter_helper))
+}
+
+/// `iter.windows(n)` — fenêtres glissantes de `n` (rien si
+/// l'itérateur est plus court que `n`) → itérateur d'arrays.
+fn it_windows(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
+    let n = it_chunk_size(e, arg(args, 0))?;
+    let vals = it_pull_all(e, this)?;
+    let out: Vec<Value> = if vals.len() >= n {
+        vals.windows(n).map(|w| e.new_array(w.to_vec())).collect()
+    } else {
+        Vec::new()
+    };
+    Ok(iter_obj(e, out, e.protos.iter_helper))
+}
+
+/// `Iterator.zip(iterables, {mode?})` — proposal : itérateur
+/// d'arrays `[it1[i], it2[i], …]` ; mode `shortest` (défaut),
+/// `longest` (avec `padding`) ou `strict` (longueurs égales
+/// imposées → `RangeError`).
+pub(crate) fn iterator_zip(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
+    let iters = zip_iters(e, arg(args, 0))?;
+    let opts = arg(args, 1);
+    let mode = match &opts {
+        Value::Obj(id) => e.get_prop(*id, "mode").map_or_else(
+            || "shortest".to_string(),
+            |v| e.to_js_string(v).unwrap_or_default(),
+        ),
+        _ => "shortest".to_string(),
+    };
+    let max = iters.iter().map(Vec::len).max().unwrap_or(0);
+    let min = iters.iter().map(Vec::len).min().unwrap_or(0);
+    let len = match mode.as_str() {
+        "longest" => max,
+        "strict" => {
+            if max != min {
+                return Err(e.range_error("zip strict requires same-length iterators"));
+            }
+            max
+        }
+        "shortest" => min,
+        _ => return Err(e.type_error("unknown zip mode")),
+    };
+    let pad = match &opts {
+        Value::Obj(id) => e.get_prop(*id, "padding").unwrap_or(Value::Undefined),
+        _ => Value::Undefined,
+    };
+    let mut out = Vec::with_capacity(len);
+    for i in 0..len {
+        let row: Vec<Value> = iters
+            .iter()
+            .map(|it| it.get(i).cloned().unwrap_or_else(|| pad.clone()))
+            .collect();
+        out.push(e.new_array(row));
+    }
+    Ok(iter_obj(e, out, e.protos.iter_helper))
+}
+
+/// `Iterator.zipKeyed(obj, {mode?})` — proposal : chaque clé de
+/// `obj` est un itérable → itérateur d'objets `{k: it_k[i]}`.
+pub(crate) fn iterator_zip_keyed(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
+    let Value::Obj(id) = arg(args, 0) else {
+        return Err(e.type_error("zipKeyed expects an object of iterables"));
+    };
+    let keys = e.own_keys(id);
+    let mut iters = Vec::with_capacity(keys.len());
+    for k in &keys {
+        let v = e.get_prop(id, k).unwrap_or(Value::Undefined);
+        iters.push(e.iter_values(v)?);
+    }
+    let len = iters.iter().map(Vec::len).min().unwrap_or(0);
+    let mut out = Vec::with_capacity(len);
+    for i in 0..len {
+        let obj = e.new_object();
+        for (k, it) in keys.iter().zip(iters.iter()) {
+            e.set_own(obj, k, it[i].clone(), true);
+        }
+        out.push(Value::Obj(obj));
+    }
+    Ok(iter_obj(e, out, e.protos.iter_helper))
+}
+
+/// Déplie l'itérable d'itérables en `Vec<Vec<Value>>`.
+fn zip_iters(e: &mut Engine, v: Value) -> JsResult<Vec<Vec<Value>>> {
+    let outer = e.iter_values(v)?;
+    let mut iters = Vec::with_capacity(outer.len());
+    for it in outer {
+        iters.push(e.iter_values(it)?);
+    }
+    Ok(iters)
 }

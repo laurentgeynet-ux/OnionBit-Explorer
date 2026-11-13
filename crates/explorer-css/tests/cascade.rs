@@ -1619,6 +1619,34 @@ fn animation_shorthand_et_phase() {
     assert_eq!(left, Some("50px"), "props={props:?}");
 }
 
+/// R-256 — `animation-timing-function` posée dans la frame
+/// quittée pilote le segment (spec §3.4), et ne s'écrit pas
+/// dans le style animé.
+#[test]
+fn keyframe_timing_function_par_frame() {
+    use explorer_css::animation::{animation_decls, keyframe_style};
+    let (_dom, node, eng, styles) = styled(
+        "@keyframes k { 0% { left: 0px; animation-timing-function: steps(1) }\
+         100% { left: 100px } }\
+         #d { animation: k 1s linear }",
+    );
+    let st = styles.get(node).expect("style");
+    let d = &animation_decls(st)[0];
+    let frames = eng.keyframes("k").unwrap();
+    let props = keyframe_style(frames, 0.5, d.timing, st);
+    let left = props
+        .iter()
+        .find(|(n, _)| n == "left")
+        .map(|(_, v)| v.as_str());
+    // steps(1, jump-end) sur le segment → t = 0 → left = 0px
+    // (le `linear` de l'item donnerait 50px).
+    assert_eq!(left, Some("0px"), "props={props:?}");
+    assert!(
+        props.iter().all(|(n, _)| n != "animation-timing-function"),
+        "le timing ne s'écrit pas dans le style : {props:?}"
+    );
+}
+
 #[test]
 fn animation_fill_backwards_pendant_le_delai() {
     use explorer_css::animation::animation_decls;
@@ -3421,4 +3449,115 @@ fn subgrid_herite_template_parent() {
         Some("none"),
         "pas de template parent pour rows → none"
     );
+}
+
+/// `p { outline: inherit }` sur un parent indéclaré :
+/// l'expansion CSS-wide remplit les 3 longhands — le style
+/// diffère de `p {}` (jauge `routed`).
+#[test]
+fn outline_inherit_route_longhands() {
+    let f = fixture();
+    let mut e1 = StyleEngine::new();
+    e1.add_css("p {}", Origin::Author);
+    let mut e2 = StyleEngine::new();
+    e2.add_css("p { outline: inherit }", Origin::Author);
+    let m1 = e1.compute_tree(&f.dom, f.dom.document(), &env());
+    let m2 = e2.compute_tree(&f.dom, f.dom.document(), &env());
+    let (s1, s2) = (m1.get(f.p).expect("s1"), m2.get(f.p).expect("s2"));
+    assert_ne!(s1, s2, "outline:inherit doit router des longhands");
+    assert!(s2.get("outline-style").is_some());
+}
+
+/// Feuille UA ruby (css-ruby-1) : `rt` = `display:ruby-text`
+/// à 50 %, `rp` masqué, conteneurs aux niveaux spec.
+#[test]
+fn ua_ruby_rt_rp() {
+    let dom = TreeBuilder::parse("<ruby><rb></rb><rt>zi</rt><rp>(</rp></ruby>");
+    let eng = StyleEngine::new();
+    let m = eng.compute_tree(&dom, dom.document(), &StyleEnv::default());
+    let annot_el = find_tag(&dom, dom.document(), "rt").expect("rt");
+    let paren_el = find_tag(&dom, dom.document(), "rp").expect("rp");
+    let rt = m.get(annot_el).expect("style rt");
+    assert_eq!(rt.get("display"), Some("ruby-text"), "rt niveau annotation");
+    assert_eq!(rt.get("font-size"), Some("8px"), "rt 50 % de 16px");
+    assert_eq!(
+        m.get(paren_el).and_then(|s| s.get("display")),
+        Some("none"),
+        "rp masque"
+    );
+}
+
+// ===== Census P2 — alias vendor-prefix → canonique =====
+
+/// `-webkit-*`/`-moz-*`/`-ms-*`/`-o-*` aliasés vers les noms
+/// canoniques : déclaration consommée (routée dans le
+/// `ComputedStyle`), prop moderne déclarée prime sur l'alias.
+#[test]
+fn vendor_prefix_alias_canonique() {
+    let dom = TreeBuilder::parse("<div id=c><span id=k>x</span></div>");
+    let (c_node, k_node) = (
+        {
+            let mut stack: Vec<explorer_dom::NodeId> =
+                dom.children(dom.document()).into_iter().flatten().collect();
+            let mut out = None;
+            while let Some(n) = stack.pop() {
+                if dom.attribute_str(n, "id").ok().flatten() == Some("c") {
+                    out = Some(n);
+                    break;
+                }
+                stack.extend(dom.children(n).into_iter().flatten());
+            }
+            out.expect("div")
+        },
+        {
+            let mut stack: Vec<explorer_dom::NodeId> =
+                dom.children(dom.document()).into_iter().flatten().collect();
+            let mut out = None;
+            while let Some(n) = stack.pop() {
+                if dom.attribute_str(n, "id").ok().flatten() == Some("k") {
+                    out = Some(n);
+                    break;
+                }
+                stack.extend(dom.children(n).into_iter().flatten());
+            }
+            out.expect("span")
+        },
+    );
+    let mut eng = StyleEngine::new();
+    eng.add_css(
+        "#c{-webkit-transition:color 1s ease;-webkit-transform:rotate(5deg);\
+         -webkit-box-shadow:0 0 4px red;-webkit-user-select:none;\
+         -webkit-mask-image:url(m.png);-moz-appearance:none}\
+         #k{-ms-flex-positive:2;-o-transform:scale(2)}",
+        Origin::Author,
+    );
+    let map = eng.compute_tree(&dom, c_node, &env());
+    let c = map.get(c_node).expect("computed c");
+    assert_eq!(c.get("transition"), Some("color 1s ease"));
+    assert_eq!(c.get("transform"), Some("rotate(5deg)"));
+    assert_eq!(c.get("box-shadow"), Some("0 0 4px red"));
+    assert_eq!(c.get("user-select"), Some("none"));
+    assert_eq!(c.get("mask-image"), Some("url(m.png)"));
+    assert_eq!(c.get("appearance"), Some("none"));
+    let k = map.get(k_node).expect("computed k");
+    assert_eq!(k.get("flex-grow"), Some("2"));
+    assert_eq!(k.get("transform"), Some("scale(2)"));
+    // Alias = MÊME propriété : cascade normale, la dernière
+    // déclarée gagne (comportement Chrome — pas de priorité
+    // spéciale pour le nom moderne).
+    let mut eng2 = StyleEngine::new();
+    eng2.add_css(
+        "#c{transform:rotate(9deg);-webkit-transform:rotate(5deg)}",
+        Origin::Author,
+    );
+    let map2 = eng2.compute_tree(&dom, c_node, &env());
+    assert_eq!(
+        map2.get(c_node).expect("c2").get("transform"),
+        Some("rotate(5deg)")
+    );
+    // `prop_supported` accepte les formes préfixées via l'alias.
+    assert!(explorer_css::prop_supported("-webkit-transition"));
+    assert!(explorer_css::prop_supported("-moz-user-select"));
+    // `-ms-filter` délibérément non mappé (syntaxe IE incompatible).
+    assert!(!explorer_css::prop_supported("-ms-filter"));
 }

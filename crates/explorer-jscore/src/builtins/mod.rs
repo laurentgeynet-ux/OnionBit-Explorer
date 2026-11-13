@@ -129,6 +129,13 @@ pub(crate) fn install(e: &mut Engine) {
     if let Value::Obj(eid) = error {
         e.add_method(eid, "captureStackTrace", error_capture_stack);
         e.add_method(eid, "isError", error_is_error);
+        // `Error.stackTraceLimit` (V8) : own data property,
+        // writable+configurable, non-énumérable, défaut 10 —
+        // **live** : `stack_text` la relit à chaque capture
+        // (fingerprint YouTube : la propriété absente lit
+        // `undefined`, et une valeur figée serait détectable
+        // en l'assignant).
+        e.set_own(eid, "stackTraceLimit", Value::Num(10.0), false);
     }
     let t_err = ctor(e, "TypeError", type_error_ctor, p_terr);
     let r_err = ctor(e, "ReferenceError", reference_error_ctor, p_rerr);
@@ -181,6 +188,8 @@ pub(crate) fn install(e: &mut Engine) {
             e.set_own(iid, "prototype", Value::Obj(e.protos.iterator), false);
             e.add_method(iid, "from", iterator_from);
             e.add_method(iid, "concat", iterator_concat);
+            e.add_method(iid, "zip", crate::collections::iterator_zip);
+            e.add_method(iid, "zipKeyed", crate::collections::iterator_zip_keyed);
         }
         e.set_own(e.protos.iterator, "constructor", iter.clone(), false);
         e.set_own(g, "Iterator", iter, false);
@@ -669,6 +678,34 @@ pub(crate) fn install(e: &mut Engine) {
     e.add_method(console, "warn", crate::dom_host::console_line);
     e.add_method(console, "error", crate::dom_host::console_line);
     e.add_method(console, "debug", crate::dom_host::console_line);
+    // `console.*` étendu (étape 219 / `api` BCD — le Pareto
+    // terrain met `console.*` en tête des misses réels) :
+    // état porté par l'objet console (`__counts`,
+    // `__timers`, `__group`) — `assert`, `count`,
+    // `countReset`, `time`/`timeEnd`/`timeLog`, `group*`/
+    // `groupEnd`, `dir`/`dirxml`, `table`, `trace`,
+    // `clear`. Résidus documentés : pas de pile d'appel pour
+    // `trace`, `table` = lignes décrites (pas de rendu
+    // tabulaire), indent de groupe portée par nos émissions
+    // (pas par `console_line` partagé).
+    for (k, f2) in [
+        ("assert", con_assert as crate::heap::NativeFn),
+        ("count", con_count),
+        ("countReset", con_count_reset),
+        ("time", con_time),
+        ("timeEnd", con_time_end),
+        ("timeLog", con_time_log),
+        ("group", con_group),
+        ("groupCollapsed", con_group),
+        ("groupEnd", con_group_end),
+        ("dir", con_describe),
+        ("dirxml", con_describe),
+        ("table", con_describe),
+        ("trace", con_trace),
+        ("clear", con_clear),
+    ] {
+        e.add_method(console, k, f2);
+    }
     e.set_own(g, "console", Value::Obj(console), false);
 
     // Object ctor statics + prototype.
@@ -732,6 +769,8 @@ pub(crate) fn install(e: &mut Engine) {
     }
     let op = e.protos.object;
     e.add_method(op, "toString", object_to_string);
+    // Spec : `toLocaleString` délègue à `toString` par défaut.
+    e.add_method(op, "toLocaleString", object_to_string);
     e.add_method(op, "hasOwnProperty", has_own_property);
     e.add_method(op, "valueOf", object_value_of);
     e.add_method(op, "isPrototypeOf", object_is_prototype_of);
@@ -772,10 +811,7 @@ pub(crate) fn install(e: &mut Engine) {
     // (`AddRestrictedFunctionProperties`, interp `fn_obj`) qui
     // masque celui-ci — le `TypeError` spec est préservé.
     {
-        let na = e.native_fn(
-            "restricted_null",
-            crate::builtins::restricted_null_prop,
-        );
+        let na = e.native_fn("restricted_null", crate::builtins::restricted_null_prop);
         if let Some(o) = e.heap.obj_mut(fp) {
             o.set_accessor("caller", na.clone(), na.clone(), false);
             o.set_accessor("arguments", na.clone(), na, false);
@@ -979,6 +1015,61 @@ pub(crate) fn install(e: &mut Engine) {
     e.add_method(rp, crate::interp::SYM_REPLACE, re_sym_replace);
     e.add_method(rp, crate::interp::SYM_SEARCH, re_sym_search);
     e.add_method(rp, crate::interp::SYM_SPLIT, re_sym_split);
+    // Accesseurs spec du proto (`'flags' in RegExp.prototype`) —
+    // les instances ne portent plus que `lastIndex` propre.
+    for (n, f, gname) in [
+        (
+            "source",
+            re_source_get as crate::heap::NativeFn,
+            "get source",
+        ),
+        ("flags", re_flags_get as crate::heap::NativeFn, "get flags"),
+        (
+            "global",
+            re_global_get as crate::heap::NativeFn,
+            "get global",
+        ),
+        (
+            "ignoreCase",
+            re_ignore_case_get as crate::heap::NativeFn,
+            "get ignoreCase",
+        ),
+        (
+            "multiline",
+            re_multiline_get as crate::heap::NativeFn,
+            "get multiline",
+        ),
+        (
+            "dotAll",
+            re_dot_all_get as crate::heap::NativeFn,
+            "get dotAll",
+        ),
+        (
+            "sticky",
+            re_sticky_get as crate::heap::NativeFn,
+            "get sticky",
+        ),
+        (
+            "unicode",
+            re_unicode_get as crate::heap::NativeFn,
+            "get unicode",
+        ),
+        (
+            "unicodeSets",
+            re_unicode_sets_get as crate::heap::NativeFn,
+            "get unicodeSets",
+        ),
+        (
+            "hasIndices",
+            re_has_indices_get as crate::heap::NativeFn,
+            "get hasIndices",
+        ),
+    ] {
+        let gf = e.native_fn(gname, f);
+        if let Some(o) = e.heap.obj_mut(rp) {
+            o.set_accessor(n, gf, Value::Undefined, false);
+        }
+    }
     let regexp = ctor(e, "RegExp", regexp_ctor, rp);
     if let Value::Obj(rid) = regexp {
         e.add_method(rid, "escape", regexp_escape);
@@ -1038,6 +1129,7 @@ pub(crate) fn install(e: &mut Engine) {
     // 1900+n (utilisés par du code pré-2000 encore vivant).
     e.add_method(dp, "getYear", date_get_year);
     e.add_method(dp, "setYear", date_set_year);
+    e.add_method(dp, "toTemporalInstant", date_to_temporal_instant);
     e.add_method(dp, "toISOString", date_to_iso);
     e.add_method(dp, "toUTCString", date_to_utc_string);
     e.add_method(dp, "toGMTString", date_to_utc_string);
@@ -1087,6 +1179,9 @@ pub(crate) fn install(e: &mut Engine) {
     e.add_method(math, "sinh", math_sinh);
     e.add_method(math, "cosh", math_cosh);
     e.add_method(math, "tanh", math_tanh);
+    e.add_method(math, "asinh", math_asinh);
+    e.add_method(math, "acosh", math_acosh);
+    e.add_method(math, "atanh", math_atanh);
     e.add_method(math, "hypot", math_hypot);
     e.add_method(math, "imul", math_imul);
     e.add_method(math, "clz32", math_clz32);
@@ -1448,3 +1543,164 @@ pub(crate) use object::*;
 pub(crate) use species::*;
 pub(crate) use string::*;
 pub(crate) use url::*;
+
+// ── `console.*` étendu (étape 219 / `api` BCD) ────────────
+// État porté par l'objet console en props cachées :
+// `__c_<label>` = compteur `count`, `__t_<label>` = départ
+// `time` (ms UNIX), `__group` = profondeur de groupe.
+
+/// Émet une ligne vers le hook console (silencieux si aucun).
+fn con_emit(e: &mut Engine, s: &str) {
+    if let Some(f) = e.hooks.console.clone() {
+        f(s.to_string());
+    }
+}
+
+/// Libellé `console.*(label)` — `"default"` spec.
+fn con_label(e: &mut Engine, args: &[Value]) -> JsResult<String> {
+    match args.first() {
+        Some(v) if !matches!(v, Value::Undefined) => e.to_js_string(v.clone()),
+        _ => Ok("default".to_string()),
+    }
+}
+
+/// Props numériques cachées de l'objet console (`this`).
+fn con_num(e: &mut Engine, this: &Value, key: &str) -> f64 {
+    match e.get_prop_value(this.clone(), key) {
+        Ok(Value::Num(n)) => n,
+        _ => 0.0,
+    }
+}
+
+/// `console.assert(cond, …)` — « Assertion failed: … » si faux.
+fn con_assert(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
+    if !e.to_boolean(args.first().cloned().unwrap_or(Value::Undefined)) {
+        let mut msg = String::from("Assertion failed:");
+        for a in args.iter().skip(1) {
+            msg.push(' ');
+            msg.push_str(&e.to_js_string(a.clone())?);
+        }
+        if args.len() <= 1 {
+            msg.push_str(" console.assert");
+        }
+        con_emit(e, &msg);
+    }
+    Ok(Value::Undefined)
+}
+
+/// `console.count(label)` — compteur par libellé, émet `label: N`.
+fn con_count(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
+    let l = con_label(e, args)?;
+    let key = format!("__c_{l}");
+    let n = con_num(e, &this, &key) + 1.0;
+    e.set_prop_value(this, &key, Value::Num(n))?;
+    con_emit(e, &format!("{l}: {}", n as u64));
+    Ok(Value::Undefined)
+}
+
+/// `console.countReset(label)` — remet le compteur à zéro
+/// (avertit si le libellé n'a jamais compté, spec).
+fn con_count_reset(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
+    let l = con_label(e, args)?;
+    let key = format!("__c_{l}");
+    if con_num(e, &this, &key) == 0.0 {
+        con_emit(e, &format!("Count for '{l}' does not exist"));
+    } else {
+        e.set_prop_value(this, &key, Value::Num(0.0))?;
+    }
+    Ok(Value::Undefined)
+}
+
+/// `console.time(label)` — départ d'un chrono par libellé.
+fn con_time(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
+    let l = con_label(e, args)?;
+    let ms = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0.0, |d| d.as_secs_f64() * 1000.0);
+    e.set_prop_value(this, &format!("__t_{l}"), Value::Num(ms))?;
+    Ok(Value::Undefined)
+}
+
+/// `console.timeEnd(label)` — émet `label: X ms`, libère le chrono.
+fn con_time_end(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
+    let l = con_label(e, args)?;
+    let key = format!("__t_{l}");
+    let start = con_num(e, &this, &key);
+    if start == 0.0 {
+        con_emit(e, &format!("Timer '{l}' does not exist"));
+        return Ok(Value::Undefined);
+    }
+    let ms = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0.0, |d| d.as_secs_f64() * 1000.0)
+        - start;
+    e.set_prop_value(this, &key, Value::Num(0.0))?;
+    con_emit(e, &format!("{l}: {ms:.2} ms"));
+    Ok(Value::Undefined)
+}
+
+/// `console.timeLog(label)` — émet l'écart sans libérer.
+fn con_time_log(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
+    let l = con_label(e, args)?;
+    let key = format!("__t_{l}");
+    let start = con_num(e, &this, &key);
+    if start == 0.0 {
+        con_emit(e, &format!("Timer '{l}' does not exist"));
+        return Ok(Value::Undefined);
+    }
+    let ms = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0.0, |d| d.as_secs_f64() * 1000.0)
+        - start;
+    con_emit(e, &format!("{l}: {ms:.2} ms"));
+    Ok(Value::Undefined)
+}
+
+/// `console.group(…)` / `groupCollapsed(…)` — émet le libellé
+/// puis indente les émissions suivantes de deux espaces.
+fn con_group(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
+    let l = con_label(e, args)?;
+    con_emit(e, &l);
+    let g = con_num(e, &this, "__group") + 1.0;
+    e.set_prop_value(this, "__group", Value::Num(g))?;
+    Ok(Value::Undefined)
+}
+
+/// `console.groupEnd()` — remonte d'un niveau d'indentation.
+fn con_group_end(e: &mut Engine, this: Value, _a: &[Value]) -> JsResult<Value> {
+    let g = (con_num(e, &this, "__group") - 1.0).max(0.0);
+    e.set_prop_value(this, "__group", Value::Num(g))?;
+    Ok(Value::Undefined)
+}
+
+/// `console.dir`/`dirxml`/`table` — représentation décrite
+/// (borne documentée : pas de DOM-tree interactif ni de
+/// rendu tabulaire — `describe` du moteur).
+fn con_describe(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
+    for a in args {
+        let d = e.describe(a.clone());
+        con_emit(e, &d);
+    }
+    Ok(Value::Undefined)
+}
+
+/// `console.trace(…)` — args + marqueur `Trace` (borne : pas
+/// de pile d'appel matérialisée dans ce moteur).
+fn con_trace(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
+    let mut msg = String::from("Trace");
+    for a in args {
+        msg.push(' ');
+        msg.push_str(&e.to_js_string(a.clone())?);
+    }
+    con_emit(e, &msg);
+    Ok(Value::Undefined)
+}
+
+/// `console.clear()` — « Console was cleared » + reset
+/// des états (`__counts`/`__timers` restent — borne
+/// documentée : seule la sortie est purgée, comme Chrome
+/// hors « Preserve log »).
+fn con_clear(e: &mut Engine, _t: Value, _a: &[Value]) -> JsResult<Value> {
+    con_emit(e, "Console was cleared");
+    Ok(Value::Undefined)
+}

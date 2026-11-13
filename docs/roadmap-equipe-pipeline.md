@@ -3818,6 +3818,122 @@ chez NAVIGATEUR — non recopiés ici.
 - [x] **R-227 (diagnostic). `a.mw-logo` — pipeline sain** : box tree du vrai DOM+css → `a`/span w=140 = Chrome ; l'écart w9 (261) vit **uniquement dans le DOM live** — `html.client-js` (JS exécuté) + classes clientprefs gated → les règles conditionnelles divergent de la capture statique. À reprober avec le DOM du shot ; dépend du lot CSS-injecté-JS (journal NAV) ; **R-228. dy+1601 = listes `hlist`/`plainlist` empilées** — diagnostic : `li` Inline corrects en cascade+boxtree ; les blocs viennent des feuilles **injectées par JS** (mw.loader/site.styles) absentes de notre cascade — journalisé PIPE→NAV (EN COURS) : `.mw-header{display:grid;grid-template:.../15.5rem minmax(0,1fr);grid-template-areas}` — `a` display:flex s'étire au conteneur au lieu de shrink-wrap ; flex-in-flex + grid reproduisent correctement en isolation — reste une règle réelle spécifique.
 
 - [x] **R-229. `@font-feature-values` parse+registre+résolution** : corps de sous-at-rules (parse dédié), registre par famille, `font-variant-alternates`→`font-feature-settings` équivalent (ssNN/cvNN/nalt/swsh/salt). `at.unknown/unapplied` MDN éliminés. Verrous : 3 tests.
+- [x] **R-230. `decl.malformed.delim` diagnostic** : tokens `*`/`!`/`=` = hacks CSS historiques (star-hack, IE `!`) — rejetés par spec comme Chrome — pas de perte de rendu. Reste : `value.dropped.font-size` ×108 github (à nommer : forme de la valeur rejetée) + `number(0.0)` ×18 github.
+- [~] **R-231. `@import` (mur NAV)** : `at.unapplied.import` ×18 — feuilles manquantes → lobste.rs 99,98 % ; journalisé PIPE→NAV (résolution récursive à la collecte).
+- [x] **R-231. `@custom-media` alias de media query** : registre `Statement` + substitution `@media (--nom)` à la collecte (négation composée). `at.unapplied.custom-media` éliminé. Verrou : 2 env.
+- [x] **R-238. `value.dropped.<prop>.<valeur>` détaillé** : le compteur nomme le début de la valeur — font-size github à nommer r5.
+- [x] **R-241. `font-variant-numeric` → `font-feature-settings`** : 8 mots-clés → tags OT concaténés aux settings existants. Verrous : 2 tests.
+- [x] **R-242. `accent-color`/batch dormant** : accent consommé au paint contrôle coché + 10 props dormants reconnus. Verrous : 2 tests.
+- [x] **R-243. `SUPPORTED_PROPS` comblé — BCD prop 652/652 = 100 %** : 380 noms manquants ajoutés (dormants stockés, logiques/animations/border-image consommés via routage existant). Mesuré `check prop`.
+- [x] **R-244. `starting-style`/`position-try`/`view-transition`/`function` + restauration `font-palette-values`** — css.at **20/20 = 100 %** mesuré.
+- [x] **R-245. `check routed` + `prop_routed`** : plumbing livré — limite nommée (cascade stocke les inconnus → saturation). Prochain : `prop_affects` (delta layout) ou gate `decl_supported` à l’insert.
+- [x] **R-246. `check affects` + `prop_affects`** : delta box tree — vrai négatif dormants (`mask-*`/`anchor-*`/`xyz-bogus` miss), vrai positif consommables (`margin`/`all`/`block-size`/`display`). Aveugle aux props conteneur.
+- [x] **R-247. `font-feature-settings` → rustybuzz** : `FontRequest.feature_settings` parsé → `ot_features` — tnum/onum/nalt réels. `affects` aveugle au paint (prochaine jauge display-list).
+- [x] **R-259. `scroll-behavior:smooth` consommé** (session, même piste) : `Tab.smooth_scroll` + tick `advance_smooth_scroll` sur le battement anims, durée `smooth_scroll_ms` config. Verrou : `smooth_scroll_interpolates_instead_of_jumping`.
+- [x] **R-258. `font-size:xxx-large|math`** : validation + résolution css-fonts-4 — trou `value.dropped.font-size` terrain. Verrou : `font_size_mots_cles_css4`.
+- [x] **R-257. `animation-composition` consommé** (même piste, journalisé) : `Composite::{Replace,Add,Accumulate}` sur `AnimationDecl` + `composite_value` — `add` concatène les listes, `accumulate` additionne numériquement, appliqué contre `cs` en chaîne par index dans `apply_anim_overrides`. Verrou : `composition_longhand_et_combinaison`.
+- [x] **R-256. `animation-timing-function` par keyframe** : l'easing du segment vient de la frame quittée (`keyframe_style` lit la decl de `d1`, repli item) ; la prop exclue du style animé. Verrou : `keyframe_timing_function_par_frame`.
+- [x] **R-255. `animation-play-state` consommé + `steps()` dans les easing** (livré depuis `nav/youtube-fix`, journalisé — zone css en lecture-journal NAV→PIPE) : `PlayState` sur `AnimationDecl` (longhand par index + shorthand), pause = gel d'horloge session/reprise sans redémarrage ; `Timing::Steps(n, StepPos)` — `steps()`/`step-start`/`step-end` pour transitions **et** animations. Verrous : 2 tests css + 1 test session.
+- [x] **R-260. `css.values` — trous moteur comblés** (jauge `affectsv` 396→**433/2529**) : grid §12.8 stretch des pistes `auto` + `justify-self`≠stretch → `fit-content` (§10.1), sizing `stretch`/`fill-available`, baselines SVG (`dominant-baseline` repli, synonymes `vertical-align`), `font-variant` shorthand → longhands + `font-variant-ligatures`/`caps` (`smcp`…`titl` + uppercase synthétique)/`position` (sub/super → baseline), `transform-style:preserve-3d` = propriété de regroupement. Résidus = artefacts de fixture et `na` honnêtes — journalisés PIPE→NAV cran 32. Verrous : 3 tests `positioning` + 6 tests `font_variant_ligatures`.
+
+## Plan d'action long-terme — « tous les sites rendus correctement »
+
+Objectif : rendre tout site réel visuellement correct. La file ne
+s'épuise que si on mesure par le rendu, pas par la reconnaissance
+de noms. Ordre fixe (priorité par site-impact mesuré) :
+
+### Axe 1 — corpus vivant (file auto-alimentée)
+- Récoltes `site_harvest` périodiques (Tranco N+), ref Chrome,
+  diff pixel + `geometry_diff` + census `css.*`/`html.err.*`.
+- Chaque signal nommé par une fixture Chrome-vérifiée AVANT fix.
+- `bcd_coverage` = mesure d'entrée ; `affects`/`routed` = mesure
+  de consommation ; `value.dropped`/`unresolved` = file en vol.
+
+### Axe 2 — consommation des dormants (`affects`-miss, par usage réel)
+1. **`mask-*`** — livré (R-252) — wikipedia ×363 (icônes
+   Vector masquées → visibles à tort) : mask de groupe
+   `PushMask`/`PopMask` (tout le sous-arbre, pas seulement le
+   fond — `MaskedFill` gardé pour les feuilles) + shorthand
+   `mask`/`-webkit-mask` expansé. Résidus : luminance/
+   composite/clip-origin non initiaux, multi-couches.
+2. **`column-*`/`columns`** — déjà livré (R-181 + R-253
+   vérification au code 2026-11-10) : `flow_columns`,
+   `column-span`, `break-*`, `column-fill`, `columns`/
+   `column-rule` expansés, `column-rule` peint. Résidu :
+   fragmentation intra-boîte (déviation assumée).
+3. **`border-image-*`** — livré (R-248) (R-234) : source/slice/
+   width/outset/repeat → découpe 9 régions au paint.
+4. **`anchor-*`/`position-try`** — MVP livré (R-254) — github
+   ×96 : `anchor-name`/`position-anchor`/`anchor(<côté>|center|
+   <%>[,repli])` résolus post-layout (`resolve_anchor_positioning`).
+   Livrés en suite : `position-area` 3×3 + alias
+   `inset-area`, `@position-try` nommées, ordonnancement spec
+   des fallbacks (première option qui « fit », tri
+   `position-try-order` + `most-*` en valeur du shorthand),
+   `position-visibility` (`anchors-visible`/`no-overflow` →
+   `visibility:hidden`), `anchor()`/insets logiques ×
+   `writing-mode`/`direction` (`logical_insets` partagé
+   `abs_geometry` — 2026-11-10),
+   `anchor-center` (justify/align-self), `anchor-size()`,
+   `anchor()` dans `calc()`, flips `position-try`+
+   `position-try-order` sur débordement viewport.
+5. **`text-wrap`/`text-wrap-mode`/`text-wrap-style`** — livré (R-249) — `balance`
+   (titres) : mesure de ligne + répartiteur.
+6. **`unicode-bidi`/`text-orientation`** — vérifié 2026-11-10 :
+   `unicode-bidi` livré (R-176 — isolate/embed/override/
+   plaintext + UAX#9 §L2), `writing-mode` transposé (R-183).
+   Résidu : `text-orientation` au niveau glyphe (sideways/
+   upright dans les runs — hors MVP documenté transform.rs).
+7. **`gap`/`place-*`/`container-*`/`inset-area`** — vérifié
+   2026-11-10 : `gap` consommé flex+grid (`gap_px`), `place-*`
+   expansé (R-125), `@container` mesuré (R-190). Résidu :
+   `position-area`/`inset-area` (filet R-254).
+8. **`contain-intrinsic-*`/`content-visibility`** — livré (R-251) — tailles
+   virtuelles hors-écran → layout.
+9. **At-rules** : `@starting-style` (transitions d'entrée),
+   `@position-try` (résolu), `@function`/`@view-transition`
+   (dormants — consommateurs futurs).
+10. **`tab-size`** — livré : prop héritée consommée, `\t`
+    préservés (`pre`/`pre-wrap`) avancés aux taquets
+    (multiple depuis le bord de départ du bloc, RTL ancré
+    droite), mesure intrinsèque alignée. Résidus nommés :
+    tabs dans les contextes inline hors `pre*`
+    (effondrement §16.6.1, conforme), `tab-size` sur
+    `white-space:collapse` des futurs `break-spaces`.
+
+### Axe 3 — jauges non-saturantes
+- `check affects` (layout delta) — livré.
+- `check routed` (consommé par ComputedStyle — extension
+  user : shorthands expansés + `all` + longhand-prefixes) —
+  **581/581 (100 %)** : le dernier miss `display` était un
+  artefact de sonde (valeur héritée = initiale UA), fixture
+  corrigée 2026-11-10.
+- **Ruby réel (css-ruby-1, 2026-11-10)** : `rt` posé dans la
+  bande au-dessus de la base (`lift_ruby`), apparié au segment
+  `ruby*` précédent et **centré** (`ruby-align:center`
+  défaut), `ruby-position:over|under|inter-character`
+  (héritée), `ruby-align` (start/center/space-between/
+  space-around), `rtc` multi-annotations empilées (niveau
+  par conteneur), overhang borné au conteneur, feuille UA
+  aux niveaux `ruby*` spec. Résidu : positions mixtes sur
+  une même ligne.
+- Prochaine : display-list delta (plan paint — `text-decoration`,
+  `font-*`, `background-*`, `border-*`, `box-shadow`…).
+- Census en vol : `value.dropped.<prop>.<valeur>` (R-238) nomme
+  les valeurs réelles par site — file `font-size`×108 github.
+
+### Axe 4 — murs NAV (journalisés, hors périmètre PIPE)
+- `@import` imbriqué non re-expansé (lobste.rs layout).
+- Cycle de vie doc (`readyState`, `sub_commit_tail`).
+- CSSOM / styles injectés JS (`mw.loader`, `site.styles`).
+- Comparateur géométrique : faux appariements classes répétées.
+- `js.builtins` (82 %) — file JS-C468/469/471 NAV.
+
+### Discipline (par lot)
+fixture Chrome-vérifiée → implémentation → tests → clippy
+`-D warnings` → commit dédié + CHANGELOG + case cochée → merge
+→ re-mesure corpus/census. Sync `nav/youtube-fix` fréquent.
+
 ## Tâches continues
 
 - **Triage rendu** des échecs `site_smoke.ps1` : les écarts
@@ -3890,3 +4006,463 @@ R-104 ; `light-dark()` → R-105 ; marqueurs textuels +
 - [x] **R-212v. Reports `pos_defer` sous le clip `overflow` ancêtre** (`explorer-render/display.rs`) : `clip_stack`+`pos_floor`+`defer_clips` — instantané `(rect, radii)` par chemin, ré-émission `PushClip`/`PushClipRounded` au drain (§11.1.1 : in-flow = tous ; `absolute` = borné CB ; `fixed` = aucun).
 - [x] **R-213v. Descendants hors-flux exclus de la mesure intrinsèque flex** (`explorer-layout/intrinsic.rs`) : `a.inline-flex > div.absolute{width:100%}` gonflait le `li` à ~la ligne — nav vimeo « Contact sales » réparée.
 - [x] **R-214v. `color-mix()` + `oklch(from …)` relatifs (css-color-5)** (`explorer-css/value.rs`) : mix sRGB + canaux relatifs (mot-clé/`%`/`calc` restreint) + sRGB→OKLCH inverse — fond `bg-brand-50/50` plyr.
+
+## Plan `css.values` — file des trous moteur (NAV→PIPE, 2026-11-12)
+
+La jauge `check affectsv` (NAV) est épuisée : **834/2273 (36,7 %)**,
+~1440 misses dont chacun est un trou moteur documenté — plus un
+artefact de mesure. File ordonnée **impact produit × taille** ;
+le census `site_harvest` arbitre les ex æquo.
+
+### Sprint 1 — petits fixes, gros flips (~30)
+
+- [x] `background-position-x`/`background-position-y` — **R-261** :
+  `bg_axis_position` (grammaire mono-axe : `center`, `bord`,
+  `bord offset`, `<len>`/`<%>`) compose chaque axe sur le
+  shorthand au paint (`layer_value` par couche). 3 verrous.
+- [x] `overflow-wrap` (`anywhere`/`break-word`) +
+  `word-break:break-all`/`line-break` — **R-262** : `break_any`
+  couvre `word-break:break-word` (alias déprécié), `word-wrap`
+  (nom legacy d'`overflow-wrap`), `line-break:anywhere` (§6.2).
+  `line-break:loose|strict|normal` = règles CJK sans effet
+  latin (UAX #14 sans curseur de sévérité → `na` honnête,
+  journal NAV). 3 verrous.
+- [x] `empty-cells:hide` — cellule vide → fond/bordure non
+  peints (`layout`/`display`). **R-263** : critère R-164
+  étendu aux blancs seuls (`box_is_ws_only`, `trim_css_ws`
+  — `\u{A0}` = contenu). Reste : fixture jauge — `<td></td>`
+  sans fond/bordure n'a rien à cacher → `na`, journal NAV.
+- [x] `white-space` variantes — **R-264** : `white-space`
+  devient un vrai shorthand css-text-4 §7.1 — expansion en
+  `white-space-collapse` + `text-wrap-mode` +
+  `white-space-trim:none`, longhand déclaré après gagnant.
+  `ws_mode` (line-breaker) : `collapse`/`preserve`/
+  `preserve-breaks`/`preserve-spaces`/`discard`/
+  `break-spaces` (explosion 1 pièce/espace + pendaison de la
+  1ʳᵉ, blancs de fin comptés dans `close`). Projection
+  `text-wrap-mode → white-space` supprimée (elle écrasait
+  `pre`). Héritage ajouté : `white-space-collapse`,
+  `white-space-trim`, `text-wrap-mode/style`, `word-break`,
+  `word-wrap`, `overflow-wrap`, `line-break`, `hyphens` —
+  `intrinsic` mesure les modes verbatim. 6 verrous inline +
+  5 cascade.
+- [x] `currentColor` — **R-265** : tous les slots couleur du
+  paint passent par `st.color()` (résolution `currentcolor`
+  → `color` calculé, census R-209) : `background-color`
+  (canvas/paint_self/inline `has_bg`), `border-*-color` +
+  `outline-color` (`border_color_of`), `column-rule-color`,
+  `accent-color`, `color` des markers/encre de texte.
+  `token_color()` pour les tokens composés : `box-shadow`
+  (+ défaut spec → `currentcolor`, plus du noir fixe),
+  `text-shadow`, `text-emphasis`, `drop-shadow()`.
+  `text-decoration-color` consommé dans `text_deco`. 5
+  verrous paint.
+- [x] `vertical-align:top`/`text-top`/`text-bottom` —
+  **R-266** : côté cellules, `cell_va()` borne le quatuor
+  §17.5.3.1 (`baseline`/`top`/`middle`/`bottom`) — `text-top`,
+  `text-bottom`, `<length>`, `sub`, `super` retombent sur
+  `baseline` (participent aussi à la baseline de rangée),
+  l'ancien `_ => 0` alignait en haut. Côté inline : déjà
+  complet (R-161 — `top`/`text-top`/`text-bottom` +
+  `alignment-baseline`/`dominant-baseline`/`baseline-shift`).
+  `top` sur cellule unique = artefact de fixture (journal
+  NAV). 1 verrou 4 valeurs + témoin `top`.
+
+### Sprint 2 — familles à fort décompte (~115)
+
+- [x] **R-267** — `position-try`/`position-try-fallbacks` :
+  valeurs `<position-area>` dans les listes de fallbacks
+  (~95). Table `area_token`/`area_delta` partagée (`layout/
+  block.rs`) : tout le vocabulaire §3.1 — `top`/`left`,
+  `x-*`/`y-*`, `block-*`/`inline-*`, `self-*`, `x-self-*`/
+  `self-block-*`, `span-*` (→ côté de base, approximation
+  translate-only documentée), ambigus `start`/`end`/`self-*`
+  nus (1ᵉʳ→bloc, 2ᵉ→inline ; seul → répété), `center`/
+  `span-all` ; options séparées par virgule (spec) — une
+  paire area = UNE candidate. Le chemin `position-area`
+  propre passe par la même table (mot-clé seul → autre axe
+  `span-all` ≈ centré, plus proche spec que l'aligné-start).
+- [x] **R-268** — `break-*` multicol complété : alias
+  legacy `page-break-before`/`page-break-after` lus comme
+  shorthands de `break-*` (css-break-3 §4.1 — `break-*`
+  prime) ; `avoid`/`avoid-column` garde les unités
+  ensemble (best-effort, la coupure forcée l'emporte) ;
+  valeurs `recto`/`verso`/`all`/`region` absorbées dans
+  l'ensemble de forçage. `break-inside:avoid` +
+  `page-break-inside` honorés de fait (unités insécables).
+- [x] **R-269** — `alignment-baseline` complété (repli R-161
+  déjà en place) : `top`/`bottom` = bords de ligne,
+  `above`/`over`/`below`/`under` (termes writing-modes
+  verticaux, §10.3) approchés bord haut/bas en horizontal-tb.
+  `first`/`last`/`auto` = baseline honnête (ligne à baseline
+  unique — `na` jauge).
+- [x] `vertical-align:top` — soldé en Sprint 1 (R-266 :
+  quatuor cellule + top/text-top/text-bottom inline).
+
+### Sprint 3 — peinture (~95)
+
+- [x] **R-270** — `corner-shape`/`corner-*-shape` (~50) — css-borders-4
+  §3.7/3.8 : superellipse par coin (`DisplayItem::corners` =
+  exposant `K`, `round`=1 … `notch`=-∞) ; `FillRect`/`Border`
+  + raster `corner_arc` (cubique ronde, corde `bevel`,
+  échantillonnage 9 cordes, `square`/`notch` francs).
+  Shorthand 1..4 + `corner-{side}-shape` 1..2 + logiques
+  `corner-{block,inline}-*`/`{s|e}{s|e}-shape` (→ physiques
+  en cascade comme `border-*-radius`). Bornes : `BoxShadow`,
+  `PushClipRounded`, `clip-path:round` restent ronds ;
+  contour interne bordure = même exposant ; concave ≈ 9
+  cordes (AA). Verrous : `corner_shape_shorthand_longhands_
+  et_logiques_sur_items`, `corner_shape_change_la_geometrie_
+  peinte`.
+- [x] **R-271** — `rule`/`row-rule`/`rule-*`/`row-rule-*` (~45) —
+  css-gaps-1 : `rule` pose les deux axes → `column-rule-*`
+  expansés peignent en multicol ; `rule-break` (coupe aux
+  spanners `column-span:all`, défaut §5.1 multicol-1 ;
+  `none` traverse) ; `rule-inset*` raccourcit les traits.
+  `rule-{width,style,color,break,outset,overlap,
+  visibility-items,inset-*}` → longhands row+column.
+  Bornes : pas de traits de ligne peints (multicol sans
+  lignes — flex/grid gap rules = chantier à part) ;
+  `rule-overlap`/`visibility-items`/`inset-cap*`/
+  `junction*`/`row-rule-*` stockés dormants. Verrou :
+  `rule_shorthand_alimente_column_rule_spanner_et_inset`.
+
+### Sprint 4 — chantiers lourds (~75)
+
+- [x] **R-272 — `offset-*` motion-path** (~52) — `offset-path`
+  (`ray`/`circle`/`ellipse`/`inset`/`rect`/`xywh`/`polygon`),
+  `offset-distance` (px/%·périmètre), `offset-position`,
+  `offset-anchor`, `offset-rotate` (`auto`/`reverse`/angle),
+  shorthand `offset` expansé. Transform = PushTransform
+  composée au paint (stash par pointeur — le bloc conteneur
+  n'est connu que du parent, patron `sticky_deltas`). Dormants
+  bornés : `path('…')`, `url()`, `coord-box` nus.
+- [x] **R-273 — `shape-outside`** (13) — `FloatCtx` : `Vec<Rect>`
+  → `Vec<FloatRect{rect, shape}>` ; la marge-rect pilote
+  toujours placement/clear/containment, la **forme** ne mord
+  que les lignes (`band`/`band_over` via `bite_left`/`bite_right`
+  sur l'intervalle de la ligne, étendue verticale propre).
+  Formes résolues en absolu au push : `circle`/`ellipse`
+  (` at ` supporté, rayon % = √(w²+h²)/√2), `inset`/`rect`/
+  `xywh`, `polygon` (sommets + croisements d'arêtes sur
+  l'intervalle). `shape-margin` dilate (rayons/demi-axes/
+  insets ; ignoré sur `polygon`). `<shape-box>` : `margin-box`
+  défaut (§3), `border-box` explicite, `padding`/`content`
+  approchés à la bordure. Bornes honnêtes : `url()`/`image()`/
+  `gradient()` → `None` (pas d'analyse alpha —
+  `shape-image-threshold` dormant) ; `round <radii>` d'`
+  inset` ignoré. Fix annexe : `offset-anchor`/`offset-position`
+  ordre inversé `bottom left` (token vertical en tête → le
+  second pilote l'axe x). Verrous :
+  `shape_outside_cercle_mord_selon_la_hauteur` (morsure non
+  constante < rect témoin), `shape_outside_inset_bornee_et_
+  shape_margin` (bande bornée + dilatation au-delà de la marge).
+- [x] **R-274 — `container-*` : containment de taille réel**
+  (~10) — `container-type:size`/`inline-size` impliquent
+  `contain:size` (§2.2) : la boîte se mesure « comme vide »
+  — intrinsic inline = 0 (`content_px_unclamped`, après le
+  `width` direct qui fait foi), hauteur `auto` = 0
+  (`block_size_contained` — `height`/`min|max-height`
+  s'appliquent). Token-wise : `inline-size scroll-state`
+  reste un size container (css-conditional-5), `scroll-state`
+  seul non. `container-name:none` → noms vides (était le
+  nom littéral `none`). Déjà en place (R-122/R-190) :
+  `@container` size queries, `container` shorthand →
+  longhands. Dormants bornés : `style()` queries (éval =
+  prédicat sur le style calculé du conteneur — plomberie
+  `ContainerMeasure` dédiée), features `stuck`/`snapped`/
+  `scrollable` (pas de moteur de scroll-state). Verrou :
+  `container_type_size_contient_la_taille` (size → h~0,
+  inline-size → h contenu, normal témoin, height:80px gagne).
+- [x] `table-layout:fixed` — **déjà honnête** (§17.5.2.1 :
+  largeurs par `<col>` + premier rang, distribution auto) —
+  le `miss` restant est un artefact d'oracle, journalisé.
+- [x] **R-275 — `hyphens` réel** (~10) — `text::hyphen_points`
+  : splitter syllabique borné latin (`v-cv`, `vc-cv`,
+  clusters inséparables `ch`/`ph`/liquides → avant le groupe,
+  doublées → entre les deux, `y` contextuel, `e` muet final
+  FR ; `lang` via pseudo-prop `x-lang` posée à la
+  boxification depuis `lang`/`xml:lang` hérité). `Piece.
+  hyph_before` : `split_hyphens` redécoupe aux `&shy;`
+  (U+00AD — `manual`/`auto`, consommé ; `none` → caractère
+  supprimé du run) + points `auto` ; `carry_hyph` propage le
+  drapeau quand l'itemiseur UAX #14 a déjà coupé au shy
+  (fin/tête de pièce). `hyphenate-limit-chars` `[<int>{1,3}]`
+  = (total, avant, après), défaut borné (5,2,2) — ne
+  contraint que l'automatique. Coupure en coulage : le
+  fragment `hyphenate-character` (défaut `-`, `<string>`
+  supporté) est shapé puis posé en fin de ligne ; `word_tail`
+  (sommes de queue par run) permet de couper au **dernier
+  point valable** sans backtracking quand le tiret au point
+  suivant déborderait ; `hyphenate-limit-lines` borne les
+  lignes consécutives césurées. Verrou :
+  `hyphens_auto_coupe_avec_tiret_et_shy` (auto → tiret,
+  `none` → insécable, `&shy;` `manual` → coupure, caractère
+  `~` custom).
+
+### Queue P2 — valeurs unitaires exotiques (~300)
+
+- [x] **R-276 — `quotes` + mots-clés de `content`** —
+  `pseudo_content` consomme `open-quote`/`close-quote`/
+  `no-open-quote`/`no-close-quote` (css-content-3 §6.1) :
+  profondeur document-ordre pré-calculée
+  (`compute_quote_depths`, même patron que les envs
+  `counter-*` — `(avant ::before, avant ::after)` par
+  élément, deltas `quote_delta` hors chaînes). `quote_pair`
+  résout la paire : `auto` → `“…”` puis `‘…’`, liste
+  explicite `[<string> <string>]+` (dernière paire répétée
+  au-delà, profondeur négative bornée à 0), `none` → muet
+  mais la profondeur bouge. `find_quote_kw` pose des
+  frontières d'identifiant (`x-open-quote` ignoré).
+  `UA_CSS` : `q::before { content: open-quote }` /
+  `q::after { content: close-quote }`. Verrou :
+  `quotes_mots_cles_content_et_profondeur` (auto imbriqué,
+  paires explicites + saturation, `no-open-quote` saute un
+  niveau, `quotes:none` muet). Borne : `quotes:auto` ne
+  lit pas `lang` (paires latines fixes — CLDR par langue
+  hors MVP).
+- [x] **R-277 — `field-sizing`** (~2) — `content` mesure le
+  contrôle à son contenu au lieu des tailles fixes
+  `cols`/`rows`/`size` (+ défauts UA 10em/4em). La propriété
+  n'étant pas héritée (spec), la valeur est lisible dans
+  `props` à l'heure des *presentational hints* : les hints
+  de dimensions ne s'émettent simplement pas sous
+  `field-sizing:content` → `width`/`height` retombent sur
+  `auto` → `display:inline-block` UA mesure au texte
+  (shrink-to-fit). `width`/`height` auteur prime toujours
+  (rang des hints), `field-sizing:fixed` = défaut inchangé.
+  Verrou : `field_sizing_content_mesure_au_contenu` (content
+  < 10em, fixed ≡ défaut, auteur prime, `cols`/`rows`
+  ignorés). Bornes : `<select>`/boutons non concernés par
+  des hints fixes (rien à retirer) ; `min-/max-*` de
+  contenu non spéciaux.
+- [x] **Erratum jauge `hyphenate-*`** — le « miss moteur »
+  signalé par NAV (tiret poussé dans `acc.frags` mais
+  absent de la display list) est un **binaire périmé** :
+  verrou `hyphen_cesure_peint_un_run_1_glyphe` (render,
+  fixture TTF) — 2 runs 1-glyphe présents end-to-end.
+  Re-tour `affectsv` sur binaire ≥ `d5e545b2` attendu.
+- [x] **R-278 — `initial-letter` : drop cap réel** (~3) —
+  `initial-letter` était routé mais `::first-letter` ne
+  jouait que la typographie — aucune géométrie. Désormais
+  `initial_letter_take` retire la première lettre du premier
+  item texte et produit un `DropCap` : `FloatRect` synthétique
+  poussé dans un `FloatCtx` **cloné** (`fl_eff`) avant
+  `break_into_lines`/`align_lines` — la morsure `band`
+  existante rétrécit `sink` lignes sans algorithme
+  parallèle. Taille dérivée `size`×line-height (css-inline-3
+  §4 « sized to span ») : posée comme `font-size` sur
+  `::first-letter` avant l'overlay → le cap reçoit la bonne
+  taille même sans déclaration auteur, et une déclaration
+  explicite est remplacée par la taille dérivée. Glyphe
+  shapé à la taille dérivée, posé dans le trou en tête LTR /
+  fin RTL (ordre visuel déjà tourné). `normal`/absent/
+  `size` ≤ 1 → inerte. Bornes : premier `char` seulement
+  (clusters de grapheme hors MVP), sink non entier arrondi
+  à la ligne entière, alignement baseline ≈ (cap-height
+  exact non joué), pas de cap sous `display:inline` pur.
+  Verrou : `initialletter_reserve_le_trou_et_depense_la_lettre`
+  (cap extrait + morsure 2 lignes + reprise pleine largeur +
+  lettre non dupliquée), `initialletter_normal_et_1_inertes`.
+- [x] **R-279 — `text-box-trim`/`text-box-edge`/`text-box`** (~6) —
+  le bord block-start/-end du conteneur inline est tronqué
+  au `text-box-edge` de la première/dernière ligne : les
+  lignes remontent de `top_trim` (over edge → `y`) avant
+  pose des atomes, `bot_trim` retranché de la hauteur.
+  `auto`/`text` = ascent/descent (retire exactement le
+  half-leading), `alphabetic` = baseline, `cap`/`ex` ≈
+  0.7/0.5em faute de métriques OS/2 (même convention que
+  l'unité `ex`), `ideographic*` ≈ `text`. Longhands primes
+  les tokens du shorthand `text-box`. Bornes : appliqué par
+  conteneur de lignes (un bloc multi-enfants trime chacun
+  — spec ne trime que les lignes extrêmes), bords atomes
+  ignorés. Verrou : `text_box_trim_retire_le_half_leading`
+  (both < start ≡ end < none, remontée start, pas end,
+  shorthand ≡ longhand).
+- [x] **R-280 — `text-underline-position` + `text-decoration-inset`** (~4) —
+  `under` place le trait sous les jambages (|descent| +
+  filet, offset déclaré prime) ; `from-font`/`left`/`right`
+  retombent sur `auto` (pas de métrique `underlinePosition`
+  dans la pile fonte, bords verticaux — bornes).
+  `text-decoration-inset <length-%>{1,2}` rentre le trait
+  aux bords start/end (1 valeur = 2 bords, `%` = fraction
+  de la largeur du fragment résolue au paint). `TextDeco`
+  porte `under_pos` + insets résolus à l'itemisation.
+  Verrous : `text_underline_position_under_descend_le_trait`
+  (under > auto, from-font ≡ auto), `text_decoration_inset_rentre_le_trait`
+  (1/2 valeurs + `%` sur underline).
+- [x] **R-281 — `word-break:keep-all`** (~3) — les
+  opportunités souples UAX #14 adjacentes à une lettre CJK
+  (`text::is_cjk_letter` — plages du classifieur `mixed`
+  vertical) sont sautées à l'itemisation : le CJK ne se
+  coupe qu'aux séparateurs durs/espaces, comme le latin
+  sous `normal`. Un run CJK trop long déborde sa bande au
+  lieu de couper (§5.3). `normal`/`break-all`/`break-word`
+  inchangés. Verrou :
+  `word_break_keep_all_supprime_les_coupures_cjk`
+  (normal ≥ 3 lignes, keep-all ≤ 3 + mot entier sur une
+  ligne).
+- [x] **R-282 — lot final texte : `text-justify` +
+  `text-wrap-style` + `text-decoration-skip-spaces` +
+  `text-autospace`** (~12) — `text-justify:none`
+  désactive la justification même sous
+  `text-align:justify` (`auto`/`inter-word`/`distribute`/
+  `inter-character` → distribution inter-mots actuelle —
+  borne : pas de glu intra-mot, re-shaping hors scope).
+  `text-wrap-style` post-pass `rebalance_lines` avant
+  alignement : `balance` pousse les pièces de fin vers la
+  ligne suivante tant que l'écart de la paire se réduit,
+  `pretty` borne à la dernière paire (orphelin < 50 %) —
+  granularité fragment, LTR, pas de croissance verticale,
+  espace récupérée ≈⅓ em/glyph sans shaping. `TextDeco
+  .skip_sp` + `deco_keep_ranges` (render) découpent le
+  trait aux glyphes blancs : `all` = tous, `start`/`end`/
+  `auto` = bords réels de l'élément décoré (bornes
+  owner-first/last pré-calculées), shorthand Level 3
+  `text-decoration-skip:spaces` ≡ all. `text-autospace` :
+  `Piece.pad_l` = filet ⅛ em aux frontières CJK ↔
+  non-CJK (itemisation, compté dans le fit — opt-in,
+  `auto`/`normal`/absent inertes ; `punctuation` seul =
+  borne). Cascade : `text-autospace`/`text-justify`
+  ajoutées à `INHERITED_PROPS` (spec-correct).
+  Verrous : `text_autospace_insere_un_filet_inter_script`,
+  `text_justify_none_desactive_la_justification`,
+  `text_wrap_style_balance_egalise_les_lignes`,
+  `text_wrap_style_pretty_evite_l_orphelin`,
+  `text_decoration_skip_spaces_decoupe_le_trait`.
+- [x] **R-283 — `<svg>` inline style-aware** (~25, déblocage
+  icônes) — la chaîne R-9 sérialise le sous-arbre DOM en
+  XML puis rasterise via `usvg` ; elle ignorait les styles
+  **calculés** : un stylesheet `svg path{fill:red}` restait
+  sans effet, `fill="currentColor"` (icônes design systems —
+  YouTube inclus) tombait noir faute de `color` dans l'îlot,
+  et les propriétés géométriques SVG2 (`d`, `cx`, `r`…) en
+  CSS n'atteignaient jamais le rendu. Nouvelle API
+  `collect_svg_styled(dom, root, styles, max_px)` : la
+  sérialisation projette le `ComputedStyle` de chaque
+  élément en attributs XML — la valeur calculée prime
+  l'attribut de présentation de même nom (rang UA,
+  spec-correct), `none` sur `clip-path`/`mask`/`filter`/
+  `transform` supprime l'attribut, `transform` CSS est
+  re-syntaxée (px/deg → nombres), `d:path(…)` désenrobée.
+  Whitelist peinture + géométrie + fontes (`<text>`) +
+  `display`/`visibility` censurants ; les `url(#…)` émises
+  rejoignent le scan `inject_external_refs` (cibles CSS-
+  déclarées désormais injectées). `color` hérité du HTML
+  projeté partout → `currentColor` se résout dans usvg.
+  API **additive** (R-9 conservée intacte) — adoptée par
+  NAV aux 4 sites (`apply.rs` ×3, `composite.rs`) dès
+  `7e0c8a73` ; `net.rs` bfcache garde `collect_svg` (pas de
+  StyleMap en scope — repli honnête). Suite : whitelist
+  `marker*` (shorthand éclaté), `clip-rule`, `mask-type`,
+  `color-interpolation*`, `*-rendering`, `overflow`
+  censurant → `hidden` ; `strip_style_decls` retire du
+  `style` DOM les props projetées (sinon `style=` bat
+  l'attribut dans la cascade usvg). Verrous :
+  `svg_styled_fill_css_prime_l_attribut`,
+  `svg_styled_currentcolor_recoit_le_color_herite`,
+  `svg_styled_display_none_et_geom_css`,
+  `svg_styled_d_path_desenrobe`,
+  `svg_styled_clip_path_css_relie_les_refs`,
+  `svg_styled_style_attr_ne_prime_pas_le_calcule`,
+  `svg_styled_marker_shorthand_eclate_et_clip_rule`.
+  Restants SVG : `<style>` dans l'îlot (usvg le parse),
+  `foreignObject` (refus usvg — HTML imbriqué hors scope),
+  `<use>` externe (fetch), fonts `@font-face` pour `<text>`
+  (usvg n'a pas la table de fontes session).
+
+- [x] **R-284 — `width:%` remplacé : max-content =
+  intrinsèque** (fix `geo_diff` N0.3 — terrain, pas census) —
+  le R-51 traitait le `%` nu comme 0 dans les deux mesures
+  intrinsèques ; correct pour min-content (cyclique §4.1,
+  carte BBC sauve) mais un remplacé `width:100%` en item
+  flex shrink-to-fit mesurait 0×0 — cause dominante des
+  boîtes `h=0` masthead YouTube (`svg{w/h:100%}` des
+  `yt-icon` → `yt-icon-shape`/`#logo`/`#content` aplatis,
+  ~65 % de divergences). §5.1 : max-content traite `%`
+  comme `auto` → intrinsèque ; `height` résolue garde la
+  dérivation de ratio (B-38). Locks : verrou dédié +
+  R-51/R-224/R-226 verts. Re-mesure `geo_diff` demandée
+  à NAV (journal).
+
+- [x] **R-285 — `interactivity:inert`** (~2) — consommée au
+  hit-test : flag cumulatif dans `hit_test_m` /
+  `hit_test_delta_m_vp` — un ancêtre `inert` exclut tout
+  le sous-arbre, **sans** ré-arm (absolu par spec, à la
+  différence de `pointer-events` qui s'hérite et se
+  réactive). Non héritée : propagée en descente — valeur
+  calculée conforme. Volet pointer seul ; focus/find-in-
+  page = NAV. `overlay` reste borné (pas de top-layer).
+
+- [x] **R-286 — `text-decoration-skip-ink`** (~3, valeur
+  initiale `auto` → tous les soulignés) — `ink_glyphs`
+  bbox d'encre par glyphe au shaping ; `TextDeco.skip_ink`
+  (`none`/`auto`/`all`) ; `deco_keep_ranges` coupe le
+  trait aux croisements d'encre. Borne : bbox englobante,
+  pas le contour (Chrome est plus fin). Fix annexe :
+  early-return `mask==0` court-circuitait les cuts sans
+  `skip-spaces`. +`INHERITED_PROPS`.
+  **Erratum** : encre plein-em (Ahem harnais, fontes
+  plein-em réelles) annihilait le trait entier → garde-fou
+  « le trait ne disparaît jamais à cause du skip-ink ».
+
+- [x] **R-287 — `position-try-order:most-*` fins** (~5) —
+  tri par étendue réelle bord-d'ancre→bord-CB dans la
+  direction du dépôt (avant : présence d'un Δx/Δy seul) ;
+  `most-size` = produit des étendues (avant : ignoré).
+  Borne : inline/block ≈ width/height (horizontal-tb).
+  Verrou discriminant `anchor_try_most_mesure_la_place_reelle`.
+
+- [x] **R-288 — `text-combine-upright`** (~2, tate-chu-yoko)
+  — séries combinées peintes debout en un `Text` horizontal
+  compressé dans 1em sous `text-orientation:upright`/`mixed` :
+  `digits <n>` tronçons de chiffres, `all` série non-blanche,
+  `-webkit-text-combine:horizontal` ≡ all. Bornes : sous-run
+  sans `fallback_spans`, baseline = créneau (pas de centrage
+  optique), pas de regroupement inter-styles.
+
+- [x] **R-289 — `ruby-overhang`** (~2, fin de famille ruby)
+  — `none` confine l'annotation au segment de base ;
+  `auto` (défaut) = débordement jusqu'à l'étendue de la
+  ligne (avant : borne conteneur `ruby*` fixe).
+  Approximation : borne ligne entière vs texte non-ruby
+  adjacent. `overhang_bounds` extrait de `lift_ruby`.
+- [x] **R-290 — `ruby-overhang:spaces`** (~2, miss NAV
+  aabb4b6d) — borne réelle au whitespace adjacent :
+  `ws_advance` mesure les glyphes ws extrêmes des
+  fragments voisins (repli proportionnel sans fonte) ;
+  voisin droit = premier non-`rt` (base ruby = non-ws).
+  Clippé à l'étendue de la ligne. Verrou ordonné
+  `none` < `spaces` < `auto`.
+- [x] **R-291 — `tr{height}` borne le rang** (~2, terrain)
+  — cause mesurée du drift `dy` cumulatif `geo_diff`
+  (~4,7 px/story HN = spacer `tr height:5px` effondré) :
+  la `height` du `tr` borne inférieurement le rang
+  (avant : cellules seules) + `row_fixed`. `%` → `auto`.
+  Sonde Verdana `line-height:normal` = 16,0 ≈ Chrome —
+  les métriques de fonte étaient innocentes.
+
+`text-fit`/`interpolate-size` (chantier
+animation↔layout), `display` exotiques résiduels, `grid-*`/`flex-*`
+sous-features, `font-stretch`/`font-width` (fontes variables),
+`font-variant-*` OT fins, `overlay`,
+`reading-flow`, `scroll-snap-*` résiduel,
+`math-*`.
+
+### P3 — hors périmètre / bornes (décision requise)
+
+- **SVG (~80 → soldé structurellement)** : `fill`, `stroke*`,
+  `marker-*`, `lighting-*`, `flood-*`, `stop-*`, `d`, `rx`/
+  `ry`, `vector-effect` — chantier `<svg>` inline **livré**
+  par R-283 : la sérialisation style-aware projette toutes
+  ces valeurs dans l'îlot `usvg` (classées `NO_ORACLE` par
+  NAV — effet interne au bitmap, conformité par locks PIPE).
+  Restes bornés : `foreignObject`, `<use>` externe, fontes
+  `@font-face` pour `<text>` (fontdb session).
+- **Borne oracle** (mesure, pas moteur) : `filter:url(#ref)`,
+  `clip-path:url`, `background-attachment:multiple_backgrounds`
+  (sous-feature BCD), `position-try:--custom` (`@position-try`
+  hors ctx).
+
+**Plafond théorique** : Sprints 1-4 + P2 ≈ **~1400-1500/2273
+(~65 %)** ; le reste = SVG + sous-features non sondables.

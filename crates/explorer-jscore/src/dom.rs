@@ -715,6 +715,14 @@ pub struct Dom {
     /// Slots morts encore cités par des ops de journal en
     /// attente — passent en `free_nodes` une fois drainés.
     dead_blocked: Vec<NodeId>,
+    /// Nœuds épinglés contre `collect_garbage` — sous-arbres
+    /// détachés **encore sans wrapper JS** exposés à un
+    /// safepoint GC (constructeurs CE pendant
+    /// `importNode`/`cloneNode` profond : le clone était
+    /// récolté avant `node_value` → `importNode` rendait
+    /// `undefined` → `__noInsertionPoint` sur Undefined —
+    /// mur stamp Polymer `YouTube`, JS-C496).
+    pinned: HashSet<NodeId>,
     /// Ops drainées mais **non rejouées** — empoisonnement ou
     /// classement « re-parse » côté adaptateur (ADR-0025 :
     /// mesure du périmètre du pilote — un taux élevé signale
@@ -934,6 +942,7 @@ impl Dom {
             journal: Vec::new(),
             free_nodes: Vec::new(),
             dead_blocked: Vec::new(),
+            pinned: HashSet::new(),
             journal_poisoned: false,
             journal_dropped: 0,
             canvases: HashMap::new(),
@@ -1047,6 +1056,10 @@ impl Dom {
         keep.extend(self.pending_dyn_imgs.iter().copied());
         keep.extend(self.dyn_link_seen.keys().copied());
         keep.extend(self.pending_dyn_links.iter().copied());
+        // Racines épinglées : la fermeture descendante retient
+        // tout leur sous-arbre (clone frais en cours
+        // d'upgrade CE — JS-C496).
+        keep.extend(self.pinned.iter().copied());
         // ADR-0033 — tampons ordinaux **figés au parse** : le
         // design veut « un script/link retiré reste
         // identifiable » → les nœuds cités sont retenus,
@@ -1095,6 +1108,40 @@ impl Dom {
     /// audit AR-16). Les `seeds` sont closes sur les
     /// descendants : un wrapper vivant sur un nœud détaché
     /// retient tout son sous-arbre.
+    /// §cran-37 — nomme les tables qui citent encore un slot
+    /// libéré (`dom.zombie`) : `(template_contents, shadow,
+    /// journal)` — le canal par lequel le JS a lu l'id mort.
+    pub(crate) fn zombie_carriers(&self, node: NodeId) -> (bool, bool, bool) {
+        let in_tmpl = self
+            .template_contents
+            .iter()
+            .any(|(t, f)| *t == node || *f == node);
+        let in_shadow = self.shadow_roots.values().any(|(r, _)| *r == node)
+            || self.shadow_hosts.contains_key(&node)
+            || self.shadow_hosts.values().any(|h| *h == node);
+        let in_journal = self.journal.iter().any(|op| match op {
+            JournalOp::Insert { parent, added, .. } => *parent == node || added.contains(&node),
+            JournalOp::Remove { key }
+            | JournalOp::SetAttr { key, .. }
+            | JournalOp::SetText { key } => *key == node,
+            JournalOp::AttachShadow { host, root, .. } => *host == node || *root == node,
+        });
+        (in_tmpl, in_shadow, in_journal)
+    }
+
+    /// Épingle `n` contre [`Self::collect_garbage`] — la
+    /// fermeture descendante retient tout son sous-arbre. Pour
+    /// les clones frais exposés au JS avant leur premier
+    /// wrapper (upgrade CE synchrone — JS-C496).
+    pub(crate) fn pin_node(&mut self, n: NodeId) {
+        self.pinned.insert(n);
+    }
+
+    /// Retire l'épingle posée par [`Self::pin_node`].
+    pub(crate) fn unpin_node(&mut self, n: NodeId) {
+        self.pinned.remove(&n);
+    }
+
     pub(crate) fn collect_garbage(&mut self, seeds: &std::collections::HashSet<NodeId>) -> usize {
         let mut keep = self.extra_kept_nodes();
         keep.extend(seeds.iter().copied());
@@ -1118,7 +1165,14 @@ impl Dom {
         // aliasserait.
         let mut blocked = std::mem::take(&mut self.dead_blocked);
         blocked.retain(|&id| {
-            let reusable = !jids.contains(&id) && !self.nodes[id as usize].attached;
+            // §cran-32 — le drain ignorait `keep` : un slot
+            // bloqué puis **wrappé** entre deux passes était
+            // recyclé malgré son wrapper vivant (`u` inerte
+            // d'`I_o` recyclé en `#comment` pendant `ifV` —
+            // les writes `polymerController`+forwarding
+            // refusés silencieusement, pm jamais stampé).
+            let reusable =
+                !jids.contains(&id) && !self.nodes[id as usize].attached && !keep.contains(&id);
             if reusable {
                 self.free_nodes.push(id);
             }
@@ -1150,6 +1204,18 @@ impl Dom {
             // en attente ne cite cet id — sinon l'op rejouerait
             // sur le futur occupant du slot.
             node.free = true;
+            // Sonde §cran-32 — nomme les éléments CE libérés :
+            // `u` inerte d'`I_o` est passé ici (ou par le drain
+            // `dead_blocked`) avant son recyclage en
+            // `#comment`.
+            if node.kind == NodeKind::Element
+                && node.tag.contains('-')
+                && tracing::enabled!(target: "dom_probe", tracing::Level::INFO)
+                && self.ce.probe_seen.insert(format!("gf:{id}"))
+            {
+                tracing::info!(target: "dom_probe", site = "gc.free",
+                    "node={id} tag={} epoch={}", node.tag, node.epoch);
+            }
             if jids.contains(&id) {
                 self.dead_blocked.push(id);
             } else {
@@ -2078,7 +2144,14 @@ impl Dom {
             }
             if self.nodes[n as usize].tag == "script" && !self.dyn_started.contains(&n) {
                 self.dyn_started.insert(n);
-                self.pending_dyn.push(n);
+                // `type=` inerte (data-block `application/json`,
+                // `text/plain`…) : vu, jamais exécuté — même
+                // filtre `script_parse_exec` que le balayage
+                // `from_html` (l2090). Un bloc cloné depuis un
+                // template CE ne part plus en `dyn.err`.
+                if self.script_parse_exec(n) {
+                    self.pending_dyn.push(n);
+                }
             }
             // `innerHTML` n'inerte pas les cadres (spec) —
             // `note_attached_frame` filtre l'absence de
@@ -2108,15 +2181,6 @@ impl Dom {
         // miroir… tout passe par `alloc`), premier-par-tag —
         // discrimine « jamais né » vs « né mais jamais
         // upgradé » pour les `ytd-*` de l'accueil `YouTube`.
-        if kind == NodeKind::Element
-            && tag.contains('-')
-            && tracing::enabled!(target: "dom_probe", tracing::Level::INFO)
-        {
-            let t = tag.to_lowercase();
-            if self.ce.probe_seen.insert(t.clone()) {
-                tracing::info!(target: "dom_probe", site = "el.birth", tag = %t);
-            }
-        }
         // §B-59 — réutilise un slot libéré (payloads déjà
         // vidés, `parent` nul) : le churn `innerHTML` borne
         // l'arène au lieu de croître sans fin.
@@ -2128,7 +2192,7 @@ impl Dom {
         } else {
             tag.to_lowercase()
         };
-        if let Some(id) = self.free_nodes.pop() {
+        let id = if let Some(id) = self.free_nodes.pop() {
             let n = &mut self.nodes[id as usize];
             n.kind = kind;
             n.tag = stored_tag;
@@ -2138,22 +2202,38 @@ impl Dom {
             // handles JS créés pour l'occupant précédent
             // deviennent obsolètes (§B-126).
             n.epoch = n.epoch.wrapping_add(1);
-            return id;
+            id
+        } else {
+            self.nodes.push(Node {
+                kind,
+                tag: stored_tag,
+                attrs: Vec::new(),
+                children: Vec::new(),
+                parent: None,
+                text: String::new(),
+                listeners: Vec::new(),
+                inline_handlers: Vec::new(),
+                attached: false,
+                free: false,
+                epoch: 1,
+            });
+            (self.nodes.len() - 1) as NodeId
+        };
+        // Sonde §cran-29 — `node`+`epoch` au birth : corrèle le
+        // handle né (createElement/stamp) avec le `dom.stale`
+        // qui le frappe plus tard — nomme la couture
+        // naissance↔décoration qui perd la génération.
+        if kind == NodeKind::Element
+            && tag.contains('-')
+            && tracing::enabled!(target: "dom_probe", tracing::Level::INFO)
+        {
+            let t = tag.to_lowercase();
+            if self.ce.probe_seen.insert(format!("{t}:{id}")) {
+                tracing::info!(target: "dom_probe", site = "el.birth", tag = %t,
+                    node = %id, epoch = %self.nodes[id as usize].epoch);
+            }
         }
-        self.nodes.push(Node {
-            kind,
-            tag: stored_tag,
-            attrs: Vec::new(),
-            children: Vec::new(),
-            parent: None,
-            text: String::new(),
-            listeners: Vec::new(),
-            inline_handlers: Vec::new(),
-            attached: false,
-            free: false,
-            epoch: 1,
-        });
-        (self.nodes.len() - 1) as NodeId
+        id
     }
 
     /// Detached element (`document.createElement`).
@@ -2440,7 +2520,9 @@ impl Dom {
             if flag && self.nodes[c as usize].kind == NodeKind::Element {
                 if self.nodes[c as usize].tag == "script" && !self.dyn_started.contains(&c) {
                     self.dyn_started.insert(c);
-                    self.pending_dyn.push(c);
+                    if self.script_parse_exec(c) {
+                        self.pending_dyn.push(c);
+                    }
                 }
                 if self.nodes[c as usize].tag == "iframe" {
                     self.note_attached_frame(c);
@@ -6170,6 +6252,33 @@ mod tests {
         assert!(!d.parse_dyn.contains(&n), "parse_dyn purgé");
         assert_eq!(d.focused.get(), None, "focused purgé");
         assert_eq!(d.dirty_node.get(), None, "dirty_node purgé");
+    }
+
+    /// JS-C496 — `pin_node` : un clone détaché et sans wrapper
+    /// exposé au GC (ctors CE de `ce_upgrade_subtree`, avant
+    /// `node_value`) doit survivre — la fermeture descendante
+    /// retient tout le sous-arbre. Sans ça `importNode`
+    /// rendait `undefined` (mur stamp Polymer `YouTube`).
+    #[test]
+    fn collect_retient_clone_epingle() {
+        let mut d = Dom::from_html("<html><body><div><p>t</p><x-g></x-g></div></body></html>");
+        let src = d.by_tag(d.root, "div")[0];
+        let c = d.clone_node(src, true);
+        d.pin_node(c);
+        d.collect_garbage(&HashSet::new());
+        assert!(
+            !d.nodes[c as usize].free,
+            "la racine clonée épinglée survit à la passe"
+        );
+        let kids = d.nodes[c as usize].children.clone();
+        assert_eq!(kids.len(), 2);
+        for &k in &kids {
+            assert!(!d.nodes[k as usize].free, "descendant retenu par fermeture");
+        }
+        // Épingle levée → le sous-arbre redevient récoltable.
+        d.unpin_node(c);
+        d.collect_garbage(&HashSet::new());
+        assert!(d.nodes[c as usize].free, "dé-épinglé → libéré");
     }
 
     /// Un nœud **attaché** reste vivant et son `parent`

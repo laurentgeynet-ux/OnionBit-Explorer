@@ -972,6 +972,9 @@ pub struct FinRegEntry {
 pub enum TempData {
     /// `Temporal.Instant` — nanosecondes depuis l'époque UTC.
     Instant { ns: i128 },
+    /// `Temporal.ZonedDateTime` — fuseau unique UTC : l'instant
+    /// suffit (offset +00:00 implicite, `timeZoneId` = "UTC").
+    Zoned { ns: i128 },
     /// `Temporal.PlainDate` (calendrier iso8601).
     PDate { y: i64, m: u8, d: u8 },
     /// `Temporal.PlainTime` — `ms`/`us`/`ns` = milli/micro/nano
@@ -1414,7 +1417,12 @@ pub(crate) fn f64_to_f16(v: f64) -> u16 {
 
 /// Seuil de construction de l'index `props` (J15) : sous cette
 /// taille le scan linéaire coûte moins qu'une `HashMap`.
-const PROPS_IDX_MIN: usize = 24;
+/// Abaissé 24 → 12 (JS-C485, mesuré `YouTube` `prop_scan`=72 M de
+/// comparaisons en ~40 s) : les objets de 12-23 props — dicts
+/// d'options kevlar, petits protos — sont relus en boucle et
+/// gagnent l'index dès le premier lookup ; les littéraux
+/// one-shot (< 12 props, majorité) gardent le scan gratuit.
+const PROPS_IDX_MIN: usize = 12;
 
 impl Object {
     /// New object with the given prototype and kind — propriétés

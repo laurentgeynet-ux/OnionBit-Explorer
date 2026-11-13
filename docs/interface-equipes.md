@@ -1113,38 +1113,2281 @@ journal « livré ».
   rejoue ; une API `recompute(delta_css)` peut être ajoutée
   si le coût d'un recompute complet gêne (journal à rebondir).
 
+## PIPE → NAV — `@import` non résolu : feuilles entières manquantes (mesuré r4)
+
+- **Constat** : `css.at.unapplied.import` ×18 sur la r4 —
+  **lobste.rs (99,98 % de diff pixel)** utilise `@import` pour
+  sa feuille principale ; weather.gov ×6. Le corps de la
+  feuille externe n'atteint jamais la cascade → mise en page
+  quasi-nue.
+- **Demande NAV** : résolution récursive des `@import` à la
+  collecte des feuilles — parser `AtKind::Statement { prelude }`
+  (`@import url [media]` est déjà exposé par le parseur),
+  résoudre l'URL relative à la feuille, fetcher, substituer
+  avant `add_css`. Conditions média (`@import url(...) screen
+  and (…)`) à router dans le `media` de l'appel.
+- **Côté PIPE** : l'at-rule est déjà parsée en `Statement`;
+  si la feuille résolue arrive concaténée, tout le reste
+  (cascade, médias, couches) fonctionne — rien à changer.
+
 ---
 
-## Mur aval youtube nommé (NAV) — `readyState` figé `loading` → hydratation kevlar morte
+| 2026-11-10 | `explorer-core` — **Étape 218 : `@import` inline résolu (demande PIPE « @import non résolu »)** | `fetch_imports` n'expansait que les feuilles liées — le `<style>@import` (weather.gov) restait `unapplied`, corps jamais fetché. Même `expand_import` récursif sur `doc_sheets` (base `doc_base`, bornes partagées). Le texte expansé ne pouvant retourner dans le DOM, `expanded_inline` (origine→expansé) voyage `SubJob→Tab→PaintPayload→PageSnapshot` ; `styles_payload` substitue par contenu à `collect_style_sheets`. **Nuance census à connaître** : `css.at.unapplied.import` compte les statements vus par la cascade — les imports *expansés* compris (la règle littérale survit dans le texte préfixé) → le Pareto les confond avec les échecs réels. Nouveau funnel NAV `css.import.ok`/`.skip.*` donne le verdict fetch. Mesuré live : lobste.rs **déjà sain** à HEAD (expansion liée OK — vars `--base-*` résolues), ses 4 `@import` conditionnels `prefers-color-scheme`/`prefers-contrast` sont skip-media légitimes. Verrou `inline_style_import_expands_and_applies`. | NAV (core) | **livré** — reste : `<style>` inséré par JS après la vague (hors fenêtre) |
 
-Vol mesuré (daemon, sondes `lit.insert`/`lit.caller`/`rs.set`, binaire HEAD) :
+## Mur aval youtube — cycle de vie top-doc perdu (NAV, JS-C471)
 
-- `document.readyState === "loading"` en fin de vol ; `rs.set` montre
-  `interactive`/`complete` écrits sur `ctx=1` (frame —
-  `fire_frame_ctx_cycle`) mais **jamais sur `ctx=0`** : le bloc cycle
-  de vie du document top (`sub_commit_tail`,
-  `explorer-core/src/session/net.rs:529`/`563` →
-  `set_doc_ready_state(JS_CTX_TOP, …)`) n'a pas couru, ou est allé dans
-  `pending_doc_lifecycle` sans replay.
-- Conséquence nommée : le polyfill custom-elements kevlar laisse
-  `__isUpgradeDisabled` sur les éléments SSR (`disable-upgrade`) —
-  `connectedCallback` court-circuité → les marqueurs d'hydratation
-  `[[X]]` (annotation + valeur de repli dans le même nœud texte, ex.
-  `[[menuStrings.BACK_ALT_LABEL]] … Retour`) restent littéraux → ~51
-  `[[ ]]` visibles (`menuStrings`/`countryCode`/`tooltip` sont bien
-  dans `__data` — la machine à données est saine).
-- Exclus par mesure : `V0q`/`stampDomArray_`/`flushRenderStamper…`
-  fonctionnent (`#buttons` kids sans littéral) ; `MutationObserver`,
-  `IntersectionObserver`, `raf`, timers sains ; réseau `youtubei` 200
-  livré ; `items:0`/`vids:0` = nudge de consentement attendu.
-- `[[ ]]` n'entrent dans le DOM vivant que via `template.innerHTML`
-  (`lit.caller` : `function(H,w){w=_.Wz(_.u8(w));H.innerHTML=w}` sur
-  `<template>`) — chemins `appendChild`/`insertBefore`/`norm_children`/
-  `insertAdjacent*` propres.
-- Levier NAV : faire courir le cycle `interactive`→`readystatechange`→
-  `DOMContentLoaded`→`complete`→`load` du document top pour ce chemin
-  de commit (ou le rejouer depuis `pending_doc_lifecycle`), puis
-  re-mesurer `rs`/`[[ ]]`/`__isUpgradeDisabled`.
-- Sondes laissées (coût ~0, gardées `tracing::enabled!`) :
-  `lit.insert`/`lit.caller` (`dom.rs`, `dom_host.rs`), `rs.set`
-  (`interp/mod.rs`).
+`document.readyState === "loading"` mesuré → `[[X]]` SSR non hydratés
+(polyfill CE kevlar : `__isUpgradeDisabled` tant que `loading`).
+
+**Bras fautif nommé** : `sub_commit_tail` (cycle de vie doc top —
+`net.rs:529`/`563`) n'est appelé que sur commit paint réussi —
+`shared.rs:296` `(Ok(()), live==true)`. Bras `Err`/epoch supplantée =
+cycle `interactive`→`DCL`→`complete`→`load` **perdu** (`rs.set` : seul
+`ctx=1` frame reçoit le cycle ; aucun `rs.buf`/`rs.skip` → jamais invoqué).
+
+**Levier** : le cycle de vie doc top ne doit pas dépendre du sort du
+commit paint — rejouer `pending_doc_lifecycle` ou appeler le bloc
+cycle sur les bras non-`(Ok,true)` de `shared.rs`.
+
+## Mur aval youtube — bissection crans 5-7 (NAV, JS-C471)
+
+- **Cran 5** : `__dataClientsInitialized:false` sur `ytd-app`/`ytd-masthead`/`ytd-button-renderer` — `attached`/`dataReady`/`clientsReady` tous true mais l'init clients des enfants ne termine pas (Polymer `attached()`→`_readyClients` court-circuité, probablement par `__isUpgradeDisabled` dans le `connectedCallback` wrapper).
+- **Cran 6** : `__dataHost` résolu sur les enfants `disable-upgrade` (vers `ytd-button-renderer`) — enregistrés comme data-clients mais `__dataReady`/`__dataEnabled` jamais — la moitié `attach→_readyClients` du host s'arrête pour eux.
+- **Cran 7** : `onYtPageDataFetched` tourne (`pc.data` = page/endpoint/response/url/expirationTime) — la donnée atteint le contrôleur ; le maillon fautif est en aval : `dataUpdatePromise`/`bindCb`/la passe d'activation `disable-upgrade` qu'il devrait enchaîner.
+- **Prouvé** : la mécanique complète marche — clear flag + `removeAttribute` + `customElements.upgrade` → stamp → `__dataEnabled` → `[[ ]]` consommé.
+- Levier NAV : nommer ce qui doit enchaîner l'activation après `onYtPageDataFetched` — `dataUpdatePromise`, `bindCb`, `hydrate`/`attach` kevlar, observer `disable-upgrade`, ou le déclencheur `yt-visibility-update`/idle.
+
+## Mur aval youtube — cran 8 (NAV, JS-C471) : `connectedCallback` kevlar court-circuité par `__isUpgradeDisabled`
+
+Source minifiée mesurée en vol : `connectedCallback` = `this.__isUpgradeDisabled||(w.prototype.connectedCallback.call(this),this.isAttached=!0,this.attached())` — le flag **isole tout le cycle** (`isAttached`, `attached()`, `_readyClients`, `_enableProperties`, `__dataReady`/`__dataEnabled`). `isAttached:true` mesuré sur les hosts = Polymer a posé le marker avant court-circuit — `attached()` s'est arrêté **après** `isAttached` mais **avant** `_readyClients` → `__dataClientsInitialized:false`, `__dataPendingClients` inexistant.
+
+Signaux présents : `ytd-app-attached`, `yt-rendererstamper-finished`, `yt-page-data-fetched`/`updated`, `attached` — tous tirés (×5+). Donc le driver-enable n'est ni l'événement ni la mécanique (prouvée : clear flag → `__dataEnabled` → `[[ ]]` résolu) mais la **passe qui retire `disable-upgrade`/`__isUpgradeDisabled`** — reste à nommer dans le polyfill CE kevlar (hors `pluto_*.js` sauvegardés : terme absent du bundle capturé — vit dans la couche custom-elements/webcomponents).
+
+Candidats non exclus : `Polymer.dom.flush` (testé — no-op sur `lit`), `RenderStatus.flush` (testé — idem), MutationObserver (non armé vu), `yt-visibility-update`/scroll (lazy — `scrollIntoView` stampe de nouveaux `disable-upgrade` au lieu de consommer), sweep `querySelectorAll` dans le handler `ytd-app-attached`/`yt-rendererstamper-finished` (à vérifier — leur corps n'a pas produit le retrait).
+
+## Mur aval youtube — crans 9-10 (NAV, JS-C471) : sweep `disable-upgrade` absent
+
+- **Cran 9** : `__enableOrFlushClients` (host) = `for(d of __dataPendingClients){ d.__dataEnabled ? d._flushProperties() : d._enableProperties() }` — mais `__dataPendingClients` = `null` : les enfants `disable-upgrade` n'ont jamais été enfilés (leur `connectedCallback` baille sur `__isUpgradeDisabled` avant `_initDataProperties`/`_enqueueClient`).
+- **Cran 10** : la séquence d'activation est entièrement fonctionnelle côté moteur — `el.removeAttribute('disable-upgrade')` seul → `attributeChangedCallback` kevlar efface `__isUpgradeDisabled` → `connectedCallback`/`_initDataProperties`/`_enqueueClient`/`_enableProperties` → `[[ ]]` consommé (mesuré : `de:true, lit:""` sur éléments traités).
+- **Mur résiduel nommé** : la boucle `querySelectorAll('[disable-upgrade]') → removeAttribute` de kevlar — le sweep d'hydratation (`YtHydration`/`hydrate`/`attach`/`enableUpgrade`-adjacent). Exclus : `Polymer.dom.flush`, `RenderStatus.flush`, `onPolymerReady` (tick `apr` seulement), `yt-*` events (tous tirés), MO (non armé vu). Le terme `disable-upgrade`/`__isUpgradeDisabled` est **absent des `pluto_*.js` sauvegardés** — vit dans la couche custom-elements/webcomponents du bundle (base.js non capturé).
+- Levier : soit nommer le trigger manquant (observer filtré sur `disable-upgrade`, idle-time, `yt-visibility-update`, `DEFERRED_DETACH`-adjacent), soit driver le retrait côté `dom_host` quand `readyState` atteint `interactive`/`complete` (honnête : la page s'attend au sweep kevlar — le livrer nous-même couvre le trou tant que le déclencheur réel n'est pas identifié).
+
+## R-252 — `DisplayItem` : mask de groupe (PIPE → NAV, extension additive)
+
+`DisplayItem` gagne `PushMask{rect, dst, repeat, mask}` / `PopMask` —
+bracket hors-écran appliquant l'alpha d'un `mask-image` à tout le
+sous-arbre de la boîte (css-masking-1), posé à la racine de
+`paint_box` quand l'élément peint plus que son `background-color`
+(le cas « icône pure » garde `MaskedFill`, sans buffer). Ordre des
+brackets : `PushMask` **outermost** (spec : filter → clip → mask).
+
+Impact NAV : extension additive — les `match` exhaustifs sur
+`DisplayItem` gagnent un bras (`paint_helpers::display_item_bounds`
+→ `None`, item d'état ; `cull_display_list` conserve comme
+`PushFilter`). `masks`/`masks_url` inchangés. Résolus à l'émission :
+`mask-size`/`mask-position`/`mask-repeat` dans `dst`/`repeat` ;
+`mask-clip`/`mask-origin` non-initiaux, multi-couches, `mask-mode:
+luminance` et `mask-composite` = résidus documentés.
+
+## NAV — bissection kevlar, crans 11-14 (état honnête post-scrub)
+
+- **État mesuré** (vol du-sweep seul) : `rs:"complete"`, `du:0`, `lit:7` — dont 1 faux positif `SCRIPT` (`WIZ_global_data`) ; les 6 réels : `[[countryCode]]` ×2 (logo), `[[menuStrings.BACK/SEARCH_ALT_LABEL]]` (tooltips cachés), `[[getSimpleString(data.title)]]` ×2 (sidebar + titre du fil — **visible**, heading rendu).
+- **Rendu** : coquille YouTube fonctionnelle (consentement, recherche, "Se connecter") ; `[[countryCode]]` et `[[getSimpleString(data.title)]]` **rendus visibles** — ce ne sont PAS des différés légitimes (`logoDu:false`, `data`/`countryCode:"FR"` peuplés, `__dataEnabled:true`).
+- **Cran 11** : `guideIsVisibleButNotPersistent:false` — le setter n'a pas pris (`givAfter:false`), mais le logo n'est plus sous `disable-upgrade` de toute façon → paresse intentionnelle écartée pour ces 6.
+- **Cran 12** : `ytd-topbar-logo-renderer` = classe kevlar `F` (sous-classe du wrapper `H` — ES5 : pas de `connectedCallback`/`ready`/`instanceTemplate` exposés, `bindCb` + `__dataHost` + `__dataEnabled` + `__dataPending:{}` vide). `V0q` a posé ses params (`data` peuplé) — le binding texte `[[countryCode]]` interne n'a **jamais été enregistré**.
+- **Cran 13** — bundle `kevlar_base.js` lu : `_stampTemplate`/`_bindTemplate`/`nodeInfoList`/`dynamicFns`/`_evaluateBinding`/`iDo` (locator par index) — l'apply `isCompound` (`[[X]]`+fallback) tourne **au stamp**. Le binding des annotations **texte sur DOM SSR existant** (sans re-stamp) n'est atteignable ni via globales sondées (`yt.scheduler`/`ypc`/`Polymer.Settings`/`default_kevlar_base`), ni dans `kevlar_base.js`/`webcomponents-sd.js`/inline-766 Ko (données JSON). Driver = module-interne kevlar, chunk probablement non capturé.
+- **Cran 14** — ShadyDOM : `ShadyDOM.inUse:true`, `__shady_*` posés sur `Node.prototype` — polyfill sain ; `__shady_getRootNode is not a function` (vu en énumérant `pc`) = getter kevlar sur objet non-nœud, bénin.
+- **Levier suivant** : `EXPLORER_NET_RECORD` sur un vol complet → capturer **tous** les chunks jsbin → grep `annotate`/`_evaluateBinding`/`bind`/`iDo` — le driver SSR-bind vit dans l'un d'eux. Fallback contenu (`[[path]]`→`__data`) écarté : réécriture de contenu, pas la mécanique réelle.
+
+## R-252 — `DisplayItem` : mask de groupe (PIPE → NAV, extension additive)
+
+`DisplayItem` gagne `PushMask{rect, dst, repeat, mask}` / `PopMask` —
+bracket hors-écran appliquant l'alpha d'un `mask-image` à tout le
+sous-arbre de la boîte (css-masking-1), posé à la racine de
+`paint_box` quand l'élément peint plus que son `background-color`
+(le cas « icône pure » garde `MaskedFill`, sans buffer). Ordre des
+brackets : `PushMask` **outermost** (spec : filter → clip → mask).
+
+Impact NAV : extension additive — les `match` exhaustifs sur
+`DisplayItem` gagnent un bras (`paint_helpers::display_item_bounds`
+→ `None`, item d'état ; `cull_display_list` conserve comme
+`PushFilter`). `masks`/`masks_url` inchangés. Résolus à l'émission :
+`mask-size`/`mask-position`/`mask-repeat` dans `dst`/`repeat` ;
+`mask-clip`/`mask-origin` non-initiaux, multi-couches, `mask-mode:
+luminance` et `mask-composite` = résidus documentés.
+
+## NAV — cran 15 : mur tombé — `ShadyDOM.wrap` vs brand-check `node_for_in`
+
+- **Cause racine nommée** : `ShadyDOM.wrap(nœud)` (`webcomponents-sd`, `ShadyDOM.inUse:true`) rend un wrapper `{node, …}` non-`Node` ; kevlar le repasse à `appendChild`/`insertBefore`/`removeChild`/`contains` (polymer `dom.flush`/`_attachDom`/`_enableProperties`/`_readyClients`) → notre garde `TypeError: appendChild: not a node` tuait la passe d'hydratation mid-flight → binding `[[X]]` jamais enregistré. Le driver n'était pas absent — il **crashait sur nos gardes**.
+- **Fix** (`dom_host.rs`) : `node_for_in`/`foreign_node_in` déballent `.node` quand l'arg n'est ni `NodeHost` ni `DocumentHost` (`shady_unwrap_in`, récursion bornée) — couvre `appendChild`/`insertBefore`/`removeChild`/`replaceChild`/`contains`/`compareDocumentPosition`/`importNode`+adoption.
+- **Preuve** : `pc._enableProperties()`+`_readyClients()` sur le logo → `litKids:0` ; vol post-fix : `lit 7 → 3` (réels : cluster `YTD-MASTHEAD` — `[[countryCode]]` ×2, tooltips `BACK/SEARCH_ALT_LABEL` cachés, `[[label]]` dropdown caché) ; **`[[getSimpleString(data.title)]]` visible résolu** (sidebar + titre du fil). Restants = tooltips/dropdown cachés + `disable-upgrade$` lazy par design.
+
+## NAV — cran 16 : stamping débloqué, trigger CE→pc = frontière
+
+- Fix ShadyDOM vérifié (`pc._enableProperties`+`_readyClients` → `litKids:0` sur logo) ; premier vol post-fix `lit:3` avant sondes. Vol propre suivant `lit:27` — le stamp produit désormais du contenu annoté (`_attachDom`/`stampDom` aboutissent grâce au déballage), mais l'apply post-stamp ne suit pas partout : `TP-YT-PAPER-TOOLTIP` ×17 (lazy `dom-if`/hover — en partie par design), `[[countryCode]]` ×2 logo, `TP-YT-PAPER-BUTTON/MENU` ×5, settings+rich-grid ×2.
+- **Frontière nommée** : le trigger amont `element.connectedCallback → pc.connectedCallback → pc.attached → _readyClients → _enableProperties` ne court pas pour les classes `F`/`d` (les pcs résolvent quand appelés — c'est le déclencheur qui manque). `connectedCallback`/`attachedCallback` absents de l'élément (adaptateur ES5 les vit ailleurs — `pc` les porte).
+- **Résidu** : un site `appendChild` (dom_host:9055) rejette encore un arg non-wrapper/non-node sur `_readyClients` — forme à capturer (espions JS sur prototypes muts : pas un appel via `Element/Node/DocumentFragment/Document.prototype`).
+
+## NAV — cran 17 : grille rendue — `lit:1` (faux positif)
+
+- `dom_host` déballe `.node` (wrappers `ShadyDOM.wrap`) + sweep DCL pousse `pc._enableProperties()`+`pc._readyClients()` sur pcs non initialisés → **vol mesuré `lit:1` (=`WIZ_global_data` script), `du:0`, `rs:"complete"`** — frame : skeleton feed 3×3 correct, `[[countryCode]]`/`[[getSimpleString(data.title)]]`/tooltips liés.
+- Cause racine de la frontière : classes `F`/`d` (ytd-*-renderer) sans callbacks CE — `pc.attached`/`_readyClients` jamais invoqués par le cycle élément ; la passe pc est idempotente et honnête (vraie mécanique, pas de réécriture de contenu).
+
+## NAV — cran 18 : classe `zc` sans mixins — mur skeleton/masthead nommé
+
+- Skeleton `BODY>DIV#home-page-skeleton` (sibling `ytd-app`) ; `ytd-browse`/masthead/page-manager **vidés** (`innerHTML:0`, detach SSR couru, remplacement jamais stampé) ; `masthead-finish:false`, `ytd-browse:0`, `items:0` (feedNudgeRenderer anonyme — squelette honnête jusqu'au mount nudge).
+- **`ytd-masthead`/page-manager = classe `zc`** — `pc.ready()` → `TypeError _ensureAttributes` → patch stub → `_flushProperties` → cascade : la famille `zc` n'a **aucun** mixin Polymer-lite (`PropertyEffects`/`_ensureAttributes`/`_flushProperties`/`instanceTemplate`/`_attachDom` absents de la chaîne `zc→zc→DocumentFragment→Object`) — `kBo`/`_registered`/`behaviors` jamais appliqués à cette famille (les `d`-renderers les ont tous). Prochaine mesure : pourquoi `zc` n'a pas couru `kBo`/`_registered` (`__hasRegisterFinished`/`_initializeProperties`/`Polymer(...)`-branche).
+
+## PIPE → NAV — `html.elem` : 4 misses = interfaces IDL JS (pas PIPE)
+
+`bcd.html.elements` : `del`/`ins` (`HTMLModElement`), `menu`
+(`HTMLMenuElement`), `time` (`HTMLTimeElement`) échouent à
+`html_check` sur le **binding JS** — la géométrie UA est déjà
+correcte (`UA_CSS` : `del`/`strike` line-through, `ins` underline,
+`menu` listé disc + display). Action NAV : enregistrer les 3
+interfaces dans le host DOM jscore.
+
+
+## NAV — cran 19 : le cycle patché kevlar nommé (fA/E_/I_o/ifV/dR1)
+
+- **Driver** : kevlar patche `Element.prototype.{appendChild,insertBefore,removeChild,replaceChild}` (+`j3.Wrapper`) — chaque insert dans parent `isConnected` relance `fA(O)` → `lifecycleIsConnected=true` + `u.connectedCallback` sur `pc`. **Patch posé et fonctionnel** (`patched:true`, `upl:13/lic:13` flaggés — `fA` a couru).
+- **Hydratation `F`-renderers** : `I_o(MEo=ssrEl)` → `ifV` → `O=k(F,{beforeReady})` (pc `zc` créé — `F.polymerController=O` mesuré sur masthead) → `dR1(u,P,F,X)` (slots `_.QI(H).appendChild` + `F5Z` + callbackProps). `MEo`/`xrN[tag]`/`CAf`/`TLo`/`o3f`/`lOX` = registry+fabrique.
+- **Maillon fautif nommé** : `fA` → `u.connectedCallback` → **`undefined` sur `zc`** → saut silencieux → `inst` jamais connecté → `stampbuttons_`/`stampinterstitial_`/`stampskip_navigation_`/`_renderSelf`/`renderJobsMap_` (propres à `zc[77]`) jamais engagés → masthead/page-manager vides, skeleton non retiré, `masthead-finish` jamais posé. `pc.ready()` cascade `_ensureAttributes`→`_flushProperties` = mixins `PropertyEffects`/`hostAttributes` (`kBo`/`behaviors`) jamais appliqués à cette famille (les `d`-renderers les ont — `F.polymerController=Pgm` est le bon chemin, `G`/`v.inst` l'autre — masthead a pris le chemin `Pgm` sans `inst`/`controllerProxy`/`forwardMethods`/`connectedCallback`).
+- Prochaine mesure : `dR1`/`F5Z`/`beforeReady` — qui invoque `inst`/`pc.connected` pour `F`-family (soit via `G`-ctor `v.inst` — absent car `I_o` n'a pas couru `G`, soit via un call site `pc.connectedCallback`/`inst.connected`/`attach` non tiré).
+
+## NAV — cran 20 : `zc` sain mais mixins `PropertyEffects`/`TemplateInfo` absents
+
+- Mesures live : `isAttached:true`, `__dataReady:true`, `__dataClientsReady:true`, `renderJobsMap_`/`stamp*`/`ready`/`_renderSelf` présents — le pc `zc` du masthead est attaché, data-prêt — seul `ready()` cascade (`_ensureAttributes`→`_flushProperties`→… tous `undefined`).
+- `fA` (cycle patché) a flaggé 13 éléments — `u.connectedCallback` optional-call → no-op pour `F`-family (pas de cc — **by design**, leur connect vient du producteur signaux `_.he(…,"p")` via `a_1`/`I_o`/`MEo`).
+- **`xrN`/`K3q`/`MEo`/`zSg` = module-scope** (undefined sur window — normal, bundlés).
+- Mur nommé : la liste `u.behaviors`/`jna`/`TLo`/`CAf` pour la famille `zc` (dom-fragment, `is:"p"`-producteur `a_1`) n'inclut pas `PropertyEffects`/`TemplateInfo`/`MutableData`/`_ensureAttributes`/`_attachDom`/`instanceTemplate`/`_stampTemplate` — `TLo`/`CAf` les câble pour `H`-éléments (`d`-renderers) mais `zc` prend une autre branche de construction. Prochaine mesure : quel site `TLo`/`o3f`/`lOX`/`ZuN`/`kBo` applique les mixins à `zc`, et pourquoi `ready` (hérité `H`-element, appelant `_ensureAttributes`/`w.prototype.ready`) a été posé sur une classe dont `w.prototype` = `DocumentFragment` (sans ces méthodes).
+
+## NAV — cran 21 : `zc` = `dom`-fragment dépourvu de `MutableData`/`PropertyEffects` — construction `c2q`/`brX`/`DfM`/`huT` fautive
+
+- Live : `pc` (Proxy→`inst` `zc`) a `__dataReady`/`__dataClientsReady`/`isAttached`/`renderJobsMap_`/`stamp*`/`ready`/`_renderSelf`/`__shady_*` — mais **tous** `set`/`get`/`notifyPath`/`linkPaths`/`push`/`splice`/`_setPendingProperty`/`_createNotifyingProperty`/`_addPropertyEffect`/`_enableProperties`/`_flushProperties`/`_initDataProperties`/`_initializeProperties`/`_attachDom`/`instanceTemplate`/`_stampTemplate`/`_takeAttributes`/`setPropertiesFromInitialAttributeValues`/`_propertiesChanged` = `undefined`. `stampbuttons_()` → `cannot read 'path' of Undefined` (contexte template absent).
+- `zc.ready` = `z.beforeReady(); g()` — `beforeReady` (`ifV`'s `_takeAttributes`/`setPropertiesFromInitialAttributeValues` — absents) puis `g()` → `_ensureAttributes` → throw.
+- **Construction** : `I_o`/`ifV` → `u=xrN[tag]=CAf(H,w,F)` → `O=k(F,{beforeReady})` où `k=u.ctor=TLo(H,w,F)` = `c2q(H.prototype, brX=DfM(huT(C9(XXO))), H.prototype.behaviors)` — `brX`/`DfM`/`huT` devaient livrer la suite MutableData/PropertyEffects/`_ensureAttributes` — `zc` n'en a reçu que `ready`/`_renderSelf`/`stamp*`/`__shady_*`/`__data*` (fields) — la passe de mixins de base n'a pas couru pour cette famille (branche `u.ctor`/`CAf`/`F.polymerController=Pgm`, pas `G`-ctor/`v.inst` qui porte `inst`/`controllerProxy`/`forwardMethods`/`connectedCallback`).
+- Prochaine mesure : `DfM`/`huT`/`C9`/`ZuN` — quel site applique les mixins de `brX` aux protos `zc`, et pourquoi la liste `u.behaviors`/`brX` pour `ytd-*-renderer` (`xrN`/`CAf`) est incomplète (ou si `F.polymerController=O` court-circuite une seconde passe d'enrichissement que le `G`-ctor fait avec `v.inst`/`forwardMethods`/`wig`/`drX`/`XiZ`).
+
+## NAV — cran 22 : `data` jamais livrée — `topbarData`/`getCurrentPage`/`_`-internes tous absents de `zc`
+
+- `ypc.data` = `{page,endpoint,response,url,expirationTime}` (`onYtPageDataFetched` livré, `dataUpdatePromise` settled) — **`pc.data.topbarData:null`** → `computeTopbarData`/`updateMastheadData`/`onPageDataUpdated` jamais complétées → `mf.data:undef` → `stamp*`/`_renderSelf`/`renderJobsMap_` n'ont rien → masthead/page-manager vides.
+- `pc.onPageDataUpdated(pc.data)` → **`TypeError: getCurrentPage is not a function (on zc)`** — `zc`/`_.ke`/`PolymerFakeBaseClassWithoutHtml` manque aussi `getCurrentPage` — même trou que la suite `_`-interne (`_ensureAttributes`/`_flushProperties`/`_initDataProperties`/`_enableProperties`/`_attachDom`/`instanceTemplate`/`_stampTemplate`/`set`/`get`/`notifyPath`/`linkPaths`/`_takeAttributes`/`setPropertiesFromInitialAttributeValues`/`_propertiesChanged`/`_initializeProperties`/`_readyClients`/`_createNotifyingProperty`/`_addPropertyEffect`/`push`/`splice`/`_setPendingProperty`/`beforeReady`/`behaviors`/`properties` tous `undefined`).
+- `zc` a `__templateInfo`/`__dataReady`/`__dataClientsReady`/`isAttached`/`stamp*`/`_renderSelf`/`renderJobsMap_`/`ready`/`__shady_*`/`updateReduxProperties`/`bindCb` — les mixins `MutableData`/`PropertyEffects`/`TemplateInfo`/`PropertyAccessors`/`YtRouter`/`yt`-page (`getCurrentPage`) manquent — `ZuN`/`kBo`/`behaviors`/`Object.assign`/`_.OP`/`FnY`/`wig`/`XiZ`/`drX`/`getExtraMethodsToForward` ne les ont pas appliqués à `zc`/`_.ke`/`PolymerFakeBaseClassWithoutHtml` — soit la liste `u.behaviors`/`jna`/`X.behaviors`/`H.prototype.behaviors` pour `F`-renderers est vide/incomplète, soit `_.ke`/`PFB` n'est pas la bonne base (`brX=DfM(huT(C9(XXO)))` portait `_takeAttributes`/`_attachDom`/`_readyClients`/`connectedCallback` — `zc` n'hérite pas `brX` → `c2q`/`TLo` a câblé `_.ke`/`PFB` au lieu de `brX`).
+
+## PIPE — `@position-try` nommées : chemin de câblage retenu
+
+Parser déjà : `AtKind::Declarations{prelude:"--nom"}`.
+À faire : `StyleEngine.position_tries: HashMap<String,
+Vec<Declaration>>` → `StyleMap` (même transport que
+`counter_styles`) → `resolve_anchor_positioning` reçoit le
+registre (signature additive ou via `LayoutBox.style`
+porteur d'une clé synthétique `position-try--<nom>`
+sérialisée à la collecte — les décls de la règle ne
+s'appliquent qu'en débordement). `position-try-order` +
+tri multi-fallbacks = même passe.
+
+
+## NAV — cran 23 : mismatch exact — `ytd-page-manager` = `zc` au lieu de `Ae`
+
+- Mesure live (vol 9518) : `ytd-app`.pc = **`d`** (suite complète : `store`/`set`/`onPageDataFetched`/`dataUpdatePromise`/`updateMastheadData`/`computeTopbarData`/`bindCb`/`updateRenderGuideFromBinding`/`updateGuide*`) — correcte. `ytd-masthead`/renderers/`yt-icon-button` = `zc` (`dom`-fragment — `stamp*`/`_renderSelf`/`renderJobsMap_` — correct pour eux). **`ytd-page-manager` = `zc`** — mais sa famille attendue = `Ae`/`YC`/`_.LA` (`getCurrentPage`/`currentPage`/`pagePool`/`setActivePage`/`startLoadingShorts`/`isOnWatch`/`getCurrentData`/`store`/`getState`/`dispatch`/`useSignals`/`updateReduxProperties`/`beforeRegister`/`attached`/`detached`/`recomputeReduxSelector`/`behaviors`/`properties`) — **un seul tag mal mappé**.
+- `ytd-browse`/`ytd-mini-guide`/`tp-yt-paper-tooltip` = `nopc` — pc jamais créé (chemin d'attache différent/lazy).
+- Effet domino nommé : `ytd-app.onPageDataUpdated` → `pageManager.getCurrentPage()` → `TypeError (on zc)` → `topbarData`/`data` jamais calculée → `updateMastheadData`/`bindCb` jamais livrée → `stamp*`/`_renderSelf`/`renderJobsMap_` du masthead idle → contenu vide → `home-page-skeleton`/`masthead-finish` jamais.
+- Levier : `xrN["ytd-page-manager"].ctor`/`TLo`/`CAf`/`hSd`/`a_1`/`ucV` — le `ctor`/`brX`/`Ae`-mixin assigné à `page-manager` devait être `Ae`/`YC`/`_.LA` ; `zc`/`_.ke`/`PFB` a été livré — branche d'enregistrement `u.ctor`/`ctor`/`z4R`/`behaviors`/`k` fautive pour ce tag (ou `_.ke`/`PFB` devait recevoir la suite `Ae` via `ZuN`/`kBo`/`behaviors`/`Object.assign`/`_.L=`/`_.OP`/`mix`/`jna` — passe non courue).
+
+## R-252 suite — `DisplayItem` : modes `space`/`round` (PIPE → NAV, signature)
+
+`BgImage.repeat` et `MaskedFill.repeat` passent de
+`(bool, bool)` à `(u8, u8)` : 0 `repeat`, 1 `no-repeat`,
+2 `space`, 3 `round` — `background-repeat`/`mask-repeat`
+`space`/`round` consommés (gap distribué / tuile étirée au
+raster via `tile_sample`). Impact NAV : les bras lisant
+`repeat` reçoivent `(u8,u8)` (comparaison → `!= 0`).
+
+
+## NAV — cran 24 : le « `zc` » du cran 23 est la racine Shady du polyfill — timing/aliasing, pas mauvais `ctor`
+
+- **Mesures live (vol 9518, sondes eval)** : `ytd-page-manager.polymerController` = instance de **`zc` = `function zc(a,b,c)` de `webcomponents-sd.js`** — la fausse racine shadow du polyfill (`host`, `mode:'open'`, `_renderSelf`, `nb`/`mb`/`ib`…). Chaîne `zc > DocumentFragment > Object` = **correcte par design** (les pcs sink sont des contrôleurs fragment). `pc.host === el` — c'est le produit de `huT._attachDom` → `_.QI(el).attachShadow({mode:"open",shadyUpgradeFragment})`. La lecture « un seul tag mal mappé » du cran 23 est réfutée : le pc n'est pas une classe kevlar erronée, c'est **un shadow root assigné là où le contrôleur `d` était attendu**.
+- `customElements.get('ytd-page-manager')` = stub `F` (`superClass_` seul) — **nominal** pour la voie `a_1`/`useSink` (même forme pour masthead/renderers) ; `ce.define`+`ce.upgrade` courus, zéro échec. L'élément porte **toutes** les méthodes forwardées (`getCurrentPage`, `updatePageData`, `setActivePage`, `preparePage`…) — `getExtraMethodsToForward`/`FnY` ont fonctionné. Seul `pc` est faux.
+- **Réparation live** : `C.prototype.createElement.call(el)` rejoué sur l'élément SSR → pc devient `d` (chaîne `d>d>w>X>u>w>w`), `getCurrentPage` résout — la machinerie `ifV`/`CAf`/`TLo`/`c2q`/`brX`/`_.p`(`T09`=`Object.create`) est saine *au moment du rejeu*. Fresh `document.createElement` + attach : idem, un seul write `F.polymerController=O` (kevlar_base:3779), ctor `d`.
+- Builtins exonérés (moteur nu + page) : `getOwnPropertyDescriptors`, `Object.entries`, `instanceof Function`, `getPrototypeOf` sur fonctions, `Object.create`.
+- **Trou restant** : l'écriture qui a posé le `zc` à l'hydratation initiale — soit `O` était déjà `zc` au `F.polymerController=O`, soit écrasement post-ifV par la racine `__shady.root` (`el.__shady.root` = `zc` mesuré). `getCurrentPageOn:null` toute la chaîne confirme : l'assignation a court-circuité `u.ctor`/`new X`.
+- **Sondes livrées** : `dom.shady` (`element_attach_shadow` — tag hôte + `mode` + flag `shadyUpgradeFragment` + pile JS bornée 8 frames) et `pc.set` (`set_prop_value` — toute écriture `polymerController` sur hôte : classe, description de la valeur, pile JS bornée 8) — sous `dom_probe`, coût nul désarmé. Lecture au vol : `pc.set` ctor=`zc`+pile nomme le site fautif ; `dom.shady` ordonne `attachShadow` vs `pc.set`.
+
+
+## NAV → PIPE — cran 25 : R-255 livré depuis `nav/youtube-fix` (zone css, consommateur core)
+
+- Lot P3a du plan `animation-*` (ordonné par l'opérateur) : `explorer-css/animation.rs` + `transition.rs` touchés depuis la piste NAV.
+- Contrat **additif** : `AnimationDecl` gagne `play_state: PlayState` (champ nouveau — struct non exhaustive en pratique, `AnimationDecl::default()` couvre), `Timing` gagne `Steps(u32, StepPos)` + `StepPos` publique. Aucune signature cassée ; `same_decl` (core) exclut volontairement `play_state` de l'identité — la pause n'est pas un restart.
+- Consommateur côté NAV (`session/anim_items.rs`) : `paused_at` gèle l'horloge, `playing()` n'arme plus de relayout sous pause, reprise = `start` décalé de la durée de pause.
+- Verrous : `timing_steps_parse_et_apply`, `play_state_longhand_et_shorthand`, `keyframes_paused_freezes_playback`.
+- **R-256 (même piste)** : `keyframe_style` honore l'easing posé dans la frame quittée (`animation-timing-function` en decl de `d1` prime sur l'item) — additif, pas de signature cassée.
+
+## NAV — cran 25 (vol 9520, sondes JS-C474) : le DOM est re-parsé en pleine hydratation — handles périmés, `pc.set` jamais tiré
+
+- **Mesures** : `ce.define ytd-page-manager` 22:01:37.24, `el.birth` 22:01:38.14, `ce.upgrade` 22:01:38.42 — puis **6 × `dom.stale`** à 22:01:39.19 : `key=loggingStatus`/`polymerController`/`hasOwnProperty`/`getAttribute`/`contentKind`/`nodeType` sur **node 1930 `tag=#comment`, `epoch_me=1 epoch_now=Some(2)`** — pile `top=` = le corps d'`ifV` (`xrN[w]…u.ctor…`) : kevlar lit les propriétés d'un nœud **recyclé** en commentaire.
+- **`pc.set`/`dom.shady` = 0 sur tout le vol** : `F.polymerController=O` n'a jamais atteint `set_prop_value` (ni `attachShadow` natif — le `zc` polyfill est un objet JS pur, attendu). Le `zc` du cran 24 ne vient pas d'un write `polymerController` mal ciblé : c'est `__shady.root` produit par `_attachDom` — l'aliasage observé à 9518 est à re-lire à la lueur du stale.
+- **État final** : `domN=1181`, `ytd-app`=1, **`ytd-page-manager`=0, `ytd-masthead`=0** — les éléments chrome SSR ont **disparu de l'arbre** ; `epoch` 1→2 entre 22:01:39 et 22:01:40 (`event.mirror_sync` 634 ms à 22:01:40.42). `el.polymerController` = `null` à postériori (jamais assigné sur le nœud vivant).
+- **Cause racine candidate (forte)** : **re-synchro miroir → DOM en pleine hydratation** — l'arbre que kevlar hydrate est remplacé (epoch bump) pendant que `ifV`/`I_o` tourne ; les `NodeHost` déjà distribués au JS pointent vers des slots recyclés (`#comment` 1930) ; les writes (`polymerController`, `loggingStatus`, `usePatchedLifecycles`) atterrissent sur des nœuds morts, les reads dégradent, la cascade hydrate « dans le vide » — puis le nouvel arbre ne contient plus les éléments cibles. Le `dom.stale` a toléré l'accès (`valid=true`) au lieu de nommer le swap.
+- **Levier** : identifier qui déclenche le re-parse epoch 2 pendant l'hydratation (`event.mirror_sync` post-`commit.head` 22:01:32 — journal des ops/`resync_dom_keyed`/fallback `Fingerprint`/`TooManyOps` ?) — soit un re-parse parasite à inhiber pendant la fenêtre d'upgrade CE, soit une invalidation légitime dont les handles doivent être **revendus** (re-resolve par clé) plutôt que tolérés. Candidat naturel : le swap squelette→contenu qui `removeChild`/re-parse l'arbre SSR pendant que kevlar le hydrate.
+
+## NAV — cran 26 (vol 9520, suite) : la resynchro miroir est la candidate du re-parse ; le retrait des éléments est kevlar-side
+
+- **Qui libère les slots** : `Dom::alloc` réutilise `free_nodes` en bumpant `n.epoch` (`dom.rs` §B-59/B-126) — un `NodeHost` JS dont le `NodeId` est recyclé devient `!live_ok` → accesseur proto rend `Undefined` et `dom.stale` le narre (`tag=#comment` 1930 = slot vidé puis re-pris par un commentaire).
+- **Le re-parse epoch 2** : `event.mirror_sync` 634 ms à 22:01:40 — `Session::sync_frame_mirrors` (`js_glue.rs:1441`, invoquée à chaque livraison de cadre — `navigate.rs:453`, `net.rs:3954`) re-sérialise/re-parse le miroir dans le DOM, libérant des nœuds pendant que `ifV`/`I_o` tenait leurs handles.
+- **Le retrait des éléments** : `dom.kill` ×4 à 22:02:06 — `nativeRemoveChild` **patché kevlar** (`kevlar_base:3761` ← `3378`, fn `E_(O)` post-detach) retirant `div`, `div#primary`, `div#player-ads` de `<body>` — c'est le nettoyage SSR du site, pas notre moteur. `ytd-page-manager`/`ytd-masthead` à 0 en fin de vol = conséquence aval, pas la cause.
+- **`pc.set`/`dom.shady` muets expliqués** : l'écriture `polymerController` n'a jamais atteint `set_prop_value` sur hôte (handle périmé → `h.set` court-circuité avant le marqueur, ou write sur wrapper non-hôte) ; et le `zc` polyfill ne passe pas par `attachShadow` natif. Les sondes restent utiles : si un vol reproduit le `zc` de 9518, `pc.set` capturera son write exact.
+- **Levier affiné** : deux fronts — (a) **`sync_frame_mirrors` ne devrait pas re-parser le document top pendant une fenêtre d'upgrade CE** (borner la resync aux `SubFrame` ou reporter au prochain tick — `js_glue.rs:1441` + `resync_dom_keyed` apply.rs:2790) ; (b) **`live_ok` trop tolérant** : un handle périmé rend `Undefined` silencieusement au lieu d'être **revendu** (ADR-0008 : re-résolution par clé/position — `keyed` baseline existe déjà côté journal). Le `dom.stale` prouve que les deux produisent le mur : reads dégradés (`loggingStatus`/`getAttribute`/`polymerController` → undefined → `ifV`/`I_o` early-out silencieux) + writes dans le vide.
+- **Verrou possible** : reproduire en test in-process — DOM avec slot recyclé + `NodeHost` epoch 1 lisant `#comment` epoch 2 → `Undefined`/`stale` nommés (déjà couvert par la sonde — manque le harnais `resync` pendant upgrade).
+- **JS-C475 (même piste, couture NAV↔jscore)** : `data-explorer-anim` = rail `SyncField` réutilisé (pas de nouveau trait `JsEngine`) — la session marque chaque anim CSS active (`nom`/`nom|paused`), `get_animations` matérialise en `AnimData.css_name`. Aucune signature PIPE touchée.
+- **R-257 (même piste)** : `animation-composition` consommé — `Composite` additif sur `AnimationDecl`, `composite_value` publique dans `animation.rs`, `fmt_num` passé `pub(crate)` dans `transition.rs`. Aucune signature cassée.
+
+## NAV → PIPE — cran 27 : `vendor_alias` livré depuis `nav/youtube-fix` (zone css, census P2)
+
+- Census terrain P2 (10 sites SPA/média, `target/harvest/p2`) : 58 misses `props` dont ~55 = vendor prefixes — lot ordonné par l'opérateur, `explorer-css/cascade.rs` touché depuis la piste NAV.
+- Contrat **additif** : `vendor_alias(name)` privé — préfixe `-webkit-*`/`-moz-*`/`-ms-*`/`-o-*` → nom canonique, appliqué sur `lname` en entrée de cascade et dans `prop_supported`/`decl_supported`. Aucune signature cassée ; l'alias produit la MÊME propriété (cascade normale — la dernière déclarée gagne, comportement Chrome).
+- Non mappés volontairement : `-ms-filter` (syntaxe IE incompatible), `-ms-overflow-style`/`font-smoothing`/`overflow-scrolling` (non-standard-track — restent honnêtement non supportés).
+- Verrou : `vendor_prefix_alias_canonique` (consommation + priorité cascade + `prop_supported`). Misses corpus : 58 → 9 honnêtes.
+
+## NAV — crans 27-30 (vols 9521-9524) : `polymerController` jamais écrit via `set`/`defineProperty` sur hôte ; le pm est **omis du stamping `ytd-app`**
+
+- **Piège corrigé** : les vols 9520-9522 tournaient un **binaire périmé** (`scripts/spawn_daemon.ps1` résout `cargo metadata` → `target/x86_64-pc-windows-msvc/release/` — le `.cargo/config` déprécié écrit ailleurs + exe verrouillé par les daemons résiduels). Passer `-Exe` explicite + tuer les daemons avant rebuild.
+- `pc.def` (cran 27, `define_one_prop`) : `polymerController` est défini en **accesseur** sur objets `<plain>` (descripteurs kevlar `app:6169`+ — nominal `wig`/`drX`) ; `pc.set` (interp) : écrit sur `HTMLElement` depuis `base_module_set` (`app:616`/`293` — init early shim) — jamais vu `F.polymerController=O` du `kevlar_base:3779` aboutir sur l'élément vivant.
+- Vol 9524 (binaire frais, sondes cran 29) : **`dom.stale`/`op=set` = 0** — aucun handle périmé cette fois (le phénomène 9520 était réel mais non déterministe — probablement course). `el.birth` : 3 `ytd-page-manager` (1847/1927/2007) ; upgrade OK sur node=2007 epoch=1.
+- **Faits finals mesurés** : `ytd-masthead` pc=`d` + 5 enfants stampés ; `ytd-app` 15 enfants — mais `ytd-page-manager` absent du DOM vivant alors que le template `ytd-app` le liste à `res` index 15 ; `getElementById` null, `skel` présent, `grid`=0. **Le stamping/flatten `res→kids` de `ytd-app` omet l'élément slot-default `ytd-page-manager`** (ou il est retiré post-upgrade sans `dom.kill` — il est sous `ytd-app`, hors fenêtre de la sonde body).
+- Erreur annexe : `TypeError: cannot read addEventListener of Undefined` à `app:731` pendant un upgrade `class extends h` (avant la fenêtre pm).
+- **Levier** : sonder le flatten/stamp (nommer l'index sauté : non-sloté vs retiré après coup) — ou élargir `dom.kill` à tout parent custom-element (`ytd-*`).
+
+## NAV — cran 31 (vol 9525, corrélé node/epoch) : chaîne causale complète — `u` inerte d'`I_o` libéré puis recyclé **pendant** `ifV`
+
+- **Preuve directe** : `el.birth ytd-page-manager` node=1844 + node=1924 ; `ce.upgrade` sur 1924 ; puis **30+ `dom.stale op=set`** sur **node=1931 (epoch 1→2, recyclé `#comment`)** — `key=polymerController`, `_enableProperties`, `fire`, `get`, `set`, `linkPaths`, `notifyPath`, `attached`, `detached`, `computeHref_`… — la **décoration `ifV` entière atterrit sur le cadavre** (`u` = l'élément inerte de `I_o`, pas l'élément upgradé 1924). Fenêtre : `innerHTML=` sur `<template>` (`_.Wz(_.u8(w))` — `_stampTemplate` kevlar) à `.9739`, `el.birth yt-formatted-string node=1939 epoch=2` juste après — le churn template libère + recycle des slots pendant `ifV`.
+- **Cascade** : `h.set` sur handle périmé → `Ok(false)` silencieux → writes refusés → `u` jamais décoré (`polymerController`, méthodes forwardées) → stamping insère un élément nu OU `u.ctor` jette → `ytd-page-manager` absent du DOM vivant (`getElementById` null) → `topbarData`/skeleton gelés. `zc` (vol 9518) / `null` (9520-21) = variantes du même trou selon où la décoration casse.
+- **Inconnu restant (un seul)** : pourquoi 1931 n'était pas **seedé** — les seeds `gc.domgc` = clés du `NodeCache` (wrappers vivants). Le wrapper `u` existait (op=set prouve la voie host) → soit son `ObjId` a été balayé (racine manquante), soit le wrapper a été créé **hors cache** (chemin de wrap alternatif — `adopt_into`/`NodeHost {}` directs aux lignes 1258/2257/11365). GenLive `safepoint_roots` (JS-C421) couvre déjà la reprise.
+- **Sonde** : `gc.free` dans `collect_garbage` (tag+id de chaque élément libéré) — le prochain vol nomme si 1931 part via `gc.domgc` (wrapper balayé) vs autre.
+- **Faits de session** : daemon `:9474` chaud ; build propre après que les daemons résiduels verrouillant l'exe aient été tués ; binaire = `x86_64-pc-windows-msvc/release/explorer-daemon.exe` (spawn `-Exe` explicite requis — `cargo metadata` résout l'ancien chemin).
+
+## PIPE → NAV — cran 32 : `css.values` comblé côté moteur (396 → 433/2529) ; le reste est fixture/oracle
+
+Lot PIPE livré depuis la piste YoutubeFix (R-260, crates `explorer-css`/`explorer-layout`/`explorer-render`) : grid §12.8 (stretch des pistes auto) + `justify-self`≠stretch → fit-content, sizing `stretch`/`fill-available`, baselines SVG (`dominant-baseline` repli, synonymes `vertical-align`), `font-variant` shorthand → longhands + `font-variant-ligatures`/`caps`/`position` consommés, `transform-style:preserve-3d` = propriété de regroupement (CB + stacking).
+
+**Demande fixture `check affectsv`** (`explorer-cli` zone NAV) — les misses restants du lot sont inertes *par construction de la fixture*, pas par trou moteur :
+
+- `justify-items:*` — `.x` = conteneur `display:flex` (fixture famille conteneur) : la prop est **ignorée en flex par spec** (css-align §8.3) → fixture grid requise (comme `justify-self`).
+- `ruby-align`/`ruby-position`/`ruby-overhang` — fixture `<p>` nu : besoin `<ruby>a<rt>b</rt></ruby>` avec `.x` sur le `<ruby>`.
+- `stretch` sizing (`width`/`min-*`/`max-*`/logiques) — boîte block : `stretch`≡`auto` par spec → besoin contexte shrink-to-fit (`.x{position:absolute}` ou `display:inline-block`) pour les distinguer. `min-width:stretch`/`min-inline-size:stretch` flippent déjà dès qu'une base non nulle est visible.
+- `transform-origin`/`transform-box`/`backface-visibility:hidden`/`perspective`/`transform-style` — consommés mais invisibles sans `transform` dans la fixture : ajouter `transform:rotate(10deg)` (origin/box), `transform:rotateY(180deg)` (backface), un enfant absolu (preserve-3d/perspective CB).
+- `font-variant-{numeric,east-asian,ligatures,alternates}` + `text-transform` + `font-variant-caps` — tous consommés (tags OT + uppercase synthétique) mais la fonte headless ne porte ni feature ni avances variables → delta nul. Levier : fonte fixture avec `smcp`/`liga`/`tnum` (test-support Ahem a des ligatures ?), ou dump incluant le texte transformé (`bx.dump` label = texte DOM source, `dl.dump` = compte de glyphes seul — aucun des deux ne voit le casse).
+- `place-self:*` — pas de famille fixture item-grid/flex (retombe sur `<p>` block). `place-self` expansé en `align-self`+`justify-self` — même fixture grid que `justify-self` le mesurerait.
+- `flex:<v>` (`flex:auto`/`stretch`/… ) — shorthand non expansé dans le chemin oracle : `flex-basis:stretch` flippe `ok` mais `flex:stretch` reste `miss` — vérifier que `expand_shorthand` court dans `prop_affects_decl`.
+
+**Candidats `na` honnêtes** (équivalent-à-initial, pas initiale littérale — table type `INITIAL_EXTRA` ou nouvelle table `EQUIV_EXTRA` ?) : `justify-self:normal|stretch|auto`, `align-items|align-self|align-content|justify-items|place-*:stretch`, `alignment-baseline|dominant-baseline|vertical-align:alphabetic`, `vertical-align:first|last` (baseline tableau ≈ baseline), `dominant-baseline:auto`, `perspective:none`, `display:block` (sur `<p>`), `font-variant-*:normal`, `flex-basis:auto`, `flex-direction:row`, `flex-flow:row|nowrap`, `flex-wrap:nowrap`, `appearance:auto`.
+
+**Bug signalé (zone css, commit NAV `98657228`)** : `vendor_alias` mappe `-webkit-text-stroke` (shorthand) → `-webkit-text-stroke-width` — la couleur du shorthand est perdue ; le test `stroke_props_reconnus` (`tests/webkit_text_fill.rs`) rougit (pré-existant, non lié au lot). Corriger : laisser `-webkit-text-stroke` en identité ou expanser `(width, color)`.
+
+## NAV — cran 36 (vol 9529, fix cran 35) : zombies refusés → pm stampé proprement
+
+- `dom.zombie` nomme l'accès : **`HTMLTemplateElement.decorate` + `document.importNode`** (`_stampTemplate` kevlar) atteignait les slots morts 1931/1933/1935/1872 — des `content.children` référençant des ids libérés par `gc.domgc`.
+- Fix cran 35 (`node_value` refuse `node.free`) : **4 zombies refusés, 0 `dom.stale` en aval** — aucun write `polymerController`/forwarding perdu.
+- `ytd-page-manager` node 2031 : `el.birth` → `dom.wrap` → `ce.upgrade` → **présent dans le DOM vivant** (`<ytd-page-manager id="page-manager" class="style-scope ytd-app">`).
+- Reste : `appKids=0` à +2 min — re-swap tardif ou autre ctx ; l'hydratation continue (`ytd-browse` défini, `ce.define` vu). Le trou « wrap d'un nœud mort » est **fermé** ; l'amont (pourquoi `content.children` référençait des ids libérés — `template_contents` seedé mais ses enfants non clos) est le chantier suivant.
+- Chaîne de fixes : `99245c83` (dead_blocked+seeds) + `b14b06d4` (gc.cache) + `3e9de8c9` (dom.wrap) + `79af70ff` (node_value refuse free + dom.zombie).
+
+## NAV — cran 37 (vol 9530, sonde `dom.zombie` enrichie) : canal zombie muet — le mur remonte au **contrôleur `O=zc` de `ifV`**
+
+- **Vol propre** : daemon frais (`x86_64-pc-windows-msvc/release`, spawn `-Exe` explicite — cf. piège crans 27-30), nav youtube, ~4 min d'observation : **0 `dom.zombie`, 0 `dom.stale`, 0 `gc.free` CE**. Le trou « wrap d'un nœud mort » (crans 32-36 : `99245c83`/`b14b06d4`/`3e9de8c9`/`79af70ff`) reste fermé — la question amont « `template_contents` seedé mais enfants non clos » n'a pas produit de lecture zombie cette fois.
+- **Résidu cran-36 levé** : `appKids` n'est plus 0 — **26→27 enfants à T+50 s** (`#comment`, `yt-guide-manager`, `div#content`, `ytd-popup-container`, `dom-if`, `yt-page-navigation-progress`…). `ytd-page-manager#page-manager` **présent et connecté** sous `div#content` → `ytd-app` (chaîne complète vérifiée), `class="style-scope ytd-app"` — le stamping flatten `res→kids` fonctionne.
+- **Nouveau mur nommé au symbole** : `pm.polymerController` = **propre expando** écrit sur l'élément vivant (le write `F.polymerController=O` de `ifV`, `kevlar_base:3779`, aboutit désormais — plus de cadavre) **mais `O` est un `zc`**, pas un `d`. `O = u.ctor(F, {beforeReady})` où `u = xrN['ytd-page-manager']` (registry `CAf`, `kevlar_base:3720`) : `u.ctor` → `TLo(H,w,getTemplate)(F)` a retourné la fausse racine shady (`zc`, `kevlar_base:38084` `_.ke`) au lieu du contrôleur Polymer. `ytd-app` suit le même chemin et obtient `d` — la différence n'est pas le canal mais **l'entrée registry du tag**.
+- **État d'hydratation corrélé** : pm `hasTmpl:false` (`_template`/`__template` jamais posés), `__dataReady` absent, `kids:0`, `__shady`+`__CE_shadowRoot` présents (l'attach shady a couru, le stamp pas). `ytd-masthead` : même signature (`zc`, `kids:0`, `hasTmpl:false`). `ytd-app` : `_template` posé, `tmplContent:25` enfants, `__dataReady` — seul le premier niveau hydrate. Conséquence : `ytd-browse`/`ytd-watch-flexy` jamais créés, `items:0`, `readyState:complete`, `xhr /youtubei` partis (site vivant).
+- **Hypothèse affinée** : `TLo` ne fabrique `d` que si le *template* de l'élément est résolu (`getTemplate` → `_templateInfo`) ; pour pm/masthead (éléments SSR **upgradés**, nés au parse — 1844/1924, `ce.upgrade` 28,8 s) la résolution échoue → repli `zc` (stub racine). Levier : sonder `TLo`/`getTemplate` (valeur de retour, `templateInfo`) ou lire `__CE_shadowRoot`/`__shady.root` du pm — nommer si `getTemplate` retourne le `template` natif que ShadyDOM attend (`content` non materialisé côté wrapper ?).
+- **Sondes armées restantes** : `dom.zombie` porte désormais `parent`/`tmpl`/`shadow`/`journal` (commit `ef51ea1a`) — au prochain vol avec zombies elle nomme le porteur directement. `pc.set` enregistre `host=HTMLElement` sans tag ni node — **enrichissement suivant** : `node=`/`tag=` du wrapper hôte pour corréler write ↔ `el.birth`/`ce.upgrade`.
+- **Recette vol** : `pwsh -File scripts/spawn_daemon.ps1 -Port 95NN -Exe <absolu> -LogDir <absolu>` (un `-LogDir .` relatif écrit les logs dans le cwd du provider WMI — introuvables). Corps de sondes : `.eval/appkids_9530.json`, `.eval/deep_9530.json`, `.eval/pm_ancestry.json`, `.eval/pm_own.json`, `.eval/pm_tmpl.json` via `POST /api/tabs/1/eval` ; eval refuse « pompe en vol » sous charge — les jobs restent en file (`jobs:2`) et répondent au prochain tick.
+
+## NAV — cran 38 (vol 9531, `pc.set` corrélé node/tag) : le `zc` est **by design** — c'est une *racine-contrôleur* `DocumentFragment` à moitié initialisée
+
+- **`pc.set` enrichi** (`cf548b4f` — `node=`/`tag=` via `dom_node_of`) : `F.polymerController=O` vise directement **le pm vivant** (`node=1924`, né `el.birth` 1924, `ce.upgrade` 10 ms après) — deux writes à `:3779` (O puis probablement `Pgm(O,w)`). Plus aucune écriture n'atterrit sur un `u` inerte : le canal write est entièrement sain.
+- **Réfutation partielle des crans 24/37** : `O` n'est pas une « mauvaise valeur » — c'est le **PolySi root-controller by design** : `TLo` → `c2q(H.prototype, brX, behaviors)` fabrique `X` **sous-classe de `DocumentFragment`** (protoChain mesurée `zc>zc>DocumentFragment>Object`, `nodeType:11`, `isConnected:true`, `hostElement:YTD-PAGE-MANAGER`, `u.root=u`) et y mixe le data-mixin Polymer — own props mesurées : `__dataEnabled`/`__dataReady`/`__data`/`__dataPending`/`__dataHost`/`root`/`json`/`currentPage`/`updatePageDataJobId`/`actionMap`. `pm.polymerController` **est** un contrôleur — il n'est pas un `d` parce que `ytd-page-manager` n'est pas enregistré via `ucV` (chemin `controllerProxy`/accesseur de `ytd-app`) mais via `g_o`/`I_o`. Nb : `zc` est un nom minifié **non unique** (kevlar_base:38084 = `yt-flow-header-renderer` — la lecture « fausse racine shady » du cran 24 confondait deux classes homonymes).
+- **Le mur réel** : `pc` est **à moitié initialisé** — slots internes `ga`/`Xb` présents mais `undefined` → les accesseurs DOM du fragment jettent : `pc.childNodes`/`firstChild`/`lastChild` → `TypeError: cannot set 'item' of Undefined` (un accesseur JS du proto `c2q` pose `.item` sur une collection qui n'existe pas). `pc.querySelectorAll('*')` = fonction → **0 résultat** ; `pc.__data` = `{}` vide ; `currentPage` non posé. Corrélat ombre : `pm.__CE_shadowRoot` (classe `w`, CE-native) ne contient que **3 marqueurs `#comment`** — le stamp n'a livré aucun élément.
+- **Chaîne amont nommée** : `dR1` (`kevlar_base:2574`) fait `u = _.QI(H)` (= `ShadyDOM.wrap|patch`) puis `u.appendChild(...)` des nœuds stampés de `Hwf(F, X.slotProps)` — les slots `ga`/`Xb` du fragment sont probablement peuplés par ce chemin (ou par un init du `brX`) — jamais exécuté à terme. `pm.__dataHost` = `d` (le contrôleur de `ytd-app`, 27 enfants) : la liaison data-host existe.
+- **Ce qui reste** : `ytd-browse`/`ytd-watch-flexy` absents, `items:0`, `currentPage` unset — la page gère son cycle de vie (`lifecycleIsConnected`, `usePatchedLifecycles`) mais sans contenu stampé ni page attachée. `xhr /youtubei` partis (réponse 200 mesurée à 01:44).
+- **Levier cran 39** : sonder `dR1`/`Hwf`/`F5Z` — nommer si `Hwf` produit 0 nœud (template `F` vide — boucle sur « `template_contents` enfants non clos » du cran 37, cette fois en version silencieuse) ou si `u.appendChild`/`F5Z` meurt (le `TypeError childNodes` pourrait *être* la mort : un itérateur interne du stamp lisant `u.childNodes`). Candidate : wrapper `u` de `_.QI` = `ShadyDOM.wrap` — vérifier que `wrap` ré-entre dans le miroir (un wrapper JS portant `node` interne — cf. `l_Y` : `!(H instanceof Element)&&H.node instanceof Element?H.node:H`).
+- **Sondes en place** : `pc.set` node/tag, `dom.zombie` porteurs, `dom.stale`, `gc.free`, `gc.cache`, `el.birth`, `ce.upgrade`, `dom.wrap`, `dom.kill`, `pc.def`, `dom.shady` — toutes sous `dom_probe`, coût nul désarmé. Recette vol : `spawn_daemon.ps1 -Port 95NN -Exe <absolu> -LogDir <absolu>` ; corps de sondes `.eval/pm_*.json` / `pc_*.json` via `POST /api/tabs/{id}/eval` (« pompe en vol » = job en file, retenter).
+  - **Addendum vol 9531 — rejet nommé** : `promise.reject`/`unhandledrejection` ×2 à T+~40 s : `TypeError: 'updateReduxProperties' is not a function (on zc) [got undefined]`. La méthode vit sur le mixin redux `YC` (`kevlar_base:15583`, `attached` → `store.subscribe(() => H.updateReduxProperties())`) — le contrôleur `zc` du pm ne porte pas le mixin : soit `c2q` a mixé un `behaviors` incomplet (enregistrement `xrN[w]` figé trop tôt, avant le chargement du behavior chunk), soit l'appel est forwardé vers le mauvais objet (élément possédant le mixin, contrôleur non). C'est un **mécanisme candidat direct** du `__data` vide : la souscription redux meurt → `reduxPropertiesRecomputeTrigger` jamais incrémenté → computed `recomputeReduxSelector` jamais évalué → `currentPage` non posé → pas de `ytd-browse`. À vérifier au cran 39 : présence de `updateReduxProperties`/`store`/`getState` sur le `zc` vs sur l'élément hôte, et site de l'appel fautif (pile `promise.reject` à creuser — `reason` seul capturé).
+
+## NAV — cran 39 (vol 9531 bis, lectures kevlar) : la chaîne `c2q` a tourné **sans `behaviors`** — le rejet redux est structurel, pas un oubli d'appel
+
+- **Réfutations empilées, trois hypothèses closes** :
+  - *Clone de template sain* : sonde en page — source `["#comment","DIV","#comment","YTD-BROWSE"]`, `cloneNode(true)` et `importNode` préservent tout → la mécanique `template_contents` ne perd rien. L'ombre vide n'est **pas** le résidu « enfants non clos ».
+  - *L'ombre vide est **by design*** : le template `ytd-page-manager` du bundle = 3 commentaires `css-build:*` + `_.RQ().content.cloneNode(!0)` où `RQ()` retourne un template global **vide** — 3 commentaires et rien d'autre, exactement ce qui est stampé. `ytd-page-manager` est une coquille : son contenu vient de `currentPage` (redex) → `ytd-browse`. Ne pas « réparer » l'ombre.
+  - *Le contrôleur zc n'a aucune surface redux* : pm et son contrôleur — `updateReduxProperties`, `store`, `getState`, `reduxPropertiesRecomputeTrigger`, `behaviors` tous `undefined`/`none`. `ytd-app`/`d` ont tout. L'appel fautif du cran 38 est donc **dans le code YouTube, pas un forwarding raté** : il n'y a rien à forwarder — le mixin `YC` n'a jamais été mixé.
+- **Mécanisme nommé dans `c2q`** (`kevlar_base` ~3716) : `c2q(H.prototype, brX, F)` où `F = H.prototype.behaviors` — si `F` falsy, `k` reste `undefined`, `W()`/`k1Z` ne mixe rien, `d.prototype.behaviors` absent → `properties`/`observers`/`attached`/`updateReduxProperties` jamais créés. `brX = DfM(huT((0,_.C9)(XXO)))` apporte le plumbing data (`__data*`, `signalProxy` — présents sur le zc) mais **pas** les behaviors du tag.
+- **Preuve in situ** : `pc.constructor.generatedFrom` → **absent** (`hasGen:false`) et `pc.behaviors` → `none`, alors que `c2q` pose `d.generatedFrom=H` — le proto réel du zc porte les `__shady_*` + méthodes minifiées mais pas la signature d'une classe `c2q` complète. Cohérent avec un `ctor` enregistré **avant** la finalisation de la classe (`xrN['ytd-page-manager']` figé trop tôt — la forme « registry empoisonné » déjà soupçonnée au cran 38), ou avec un `H` (classe PolySi) dont `behaviors` se matérialise dans un `beforeRegister` jamais appelé pour ce tag.
+- **Carte causale complète** : `behaviors` absents → mixin `YC` (redux) jamais mixé → `attached` ne souscrit pas `store` → `updateReduxProperties` absent → appel externe (`recompute` du shell) → `TypeError` non rattrapé → `__data` `{}` → `currentPage` non posé → `dom-if` de page jamais résolu → pas de `ytd-browse`, pas de grille. Les slots `ga`/`Xb` `undefined` (TypeError `childNodes`) sont un **second** symptôme de la même semi-init — à re-vérifier après fix du premier.
+- **Levier cran 40** : deux sondes décisives — (a) `Object.getOwnPropertyNames` de la chaîne proto du zc *vs* du `d` de `ytd-app` pour dater la divergence ; (b) vérifier si `customElements.whenDefined('ytd-page-manager')` a précédé ou suivi `xrN[w]` (si `ifV` a tourné sur une classe stub encore non décorée, le fix est un ordre d'upgrade CE côté `ce.upgrade`, pas dans `c2q`). Côté moteur, l'hypothèse testable reste : une propriété de classe (`behaviors`, `properties`) que notre `get_prop_value`/`hasOwnProperty` ne remonte pas via `Object.getPrototypeOf` d'un constructeur décoré (`_.zo`, `disableElementRegistration`).
+- **État moteur** : aucun changement de code au cran 39 — diagnostic seul. Sondes `pc.set`/`dom.zombie`/`dom.shady` intactes. Vol 9531 conservé ~10 min, daemon arrêté proprement.
+
+## NAV — cran 40 (vol 9532, mécanisme PolySi nommé) : le pm passe par `a_1`/`g_o`/`jna` — les redux-schemas `NLN`/`xaZ` ne voient que `[InjectBehavior, yx.prototype]`
+
+- **Chemins discriminés au symbole** : `hSd` choisit `useSink` → `a_1` (`g_o` définit `F` wrapper natif `customElements.define`, `I_o`/`ifV` créent `inst` via registrar passé en 5ᵉ param — `jna`, **pas** `CAf`/`ucV`). Mesure in situ : `customElements.get('ytd-page-manager')` = `F` (proto `Element`, `gen:false`) — nominal ; `ytd-app` = `d` complet (`gen:true`, `beh:21`, `props:50`, `protoCtor:z4R`) car il prend la voie `ucV`/`CAf` legacy.
+- **Pile du rejet capturée** (`promise.reject` T+40 s) : throw à `kevlar:15581` (callback `store.subscribe` de `YC.attached`, killswitch `redux_disable_update_on_attached_killswitch`) ← `u` `:2189` ← `:15231/:15229/:15062` (dispatch interne du store). Donc le récepteur **a** `store` et `attached` de `YC`, mais pas `updateReduxProperties` — un mix **partiel** : les hooks de cycle de vie (`uLg`→`X.attached`) ont survécu, pas les méthodes ordinaires. Nb : `zc` reste un nom homonyme — l'objet fautif n'est pas prouvé être le contrôleur du pm.
+- **Sonde `createElement` frais — discrimination SSR vs global** : un `ytd-page-manager` créé à chaud obtient un **`d`** (voie `ucV` quand l'élément n'est pas SSR-upgradé) avec `behaviors:4` — mais `urp`/`store`/`reduxPropertiesRecomputeTrigger`/`currentPage` **absents aussi**. Le déficit est **global à la composition**, pas un artefact d'upgrade.
+- **Contenu des 4 behaviors** : `[Object(1 own), Object(1 own), Object(5 owns incl attached), yx(6 owns)]` — **aucun n'est `YC.prototype` ni `K_2.prototype`**. `_.onb.YtdReduxBehavior` (= `[YC.prototype, K_2.prototype]` alimenté par `push.apply(arr, _.tR)`) est *totalement absent* de la liste finale — ni item ni tableau vide.
+- **Cause nominale côté bundle** : `oOJ` (classe pm, `extends _.ke`) est décorée `_.zo({disableElementRegistration:!0})` + `_.q_` — **aucun `behaviors:` déclaré**, `oOJ.prototype.behaviors` jamais assigné → dans `NLN`, `F.behaviors` falsy → `irq` ne fusionne rien → `u.behaviors = [InjectBehavior, yx.prototype]` seuls. Les propriétés redux PolySi (`type:"redux"`, `selector:`) sont collectées par `xaZ`/`zCo` depuis `w.properties` des behaviors + métadonnées des décorateurs `_.e([_.S(...), _.WU(), _.n(...)])` — `oOJ` n'a qu'`ytActionHandlerBehavior` en `_.S` et aucun `selector:` sur `currentPage` (champ d'instance nu).
+- **Conséquence affinée du cran 38** : `store`/`updateReduxProperties` sur un élément PolySi viennent des `reactiveSchemas`/décorateurs (`_.WU()` enregistre la classe dans les registres PolySi ; `K_2` fournit le getter `store` via `_.VH.Object.defineProperties`). Le `zc` semi-vivant = classes/mixins appliqués partiellement — soupçon moteur : une étape de la machinerie décorateur (`_.e`/`_.S`/`_.WU`/`Reflect.getMetadata("design:type")` — `xaZ` lit `Reflect.getMetadata` quand `c.type` manque) ne produit pas les métadonnées attendues, donc `zCo`/`xaZ` collectent des listes vides. C'est la piste moteur la plus concrète à date : **vérifier `Reflect.getMetadata`/le registre `_.WU` sous notre runtime** (s'ils renvoient `undefined`, `v=Object` et les schemas redux ne sont jamais poussés — signature exacte : tout marche sauf les métadonnées décorateur).
+- **Levier cran 41** : (a) sonder `Reflect.getMetadata` + `Reflect.defineMetadata`/`metadata` en page — réponse `undefined` = coupable direct ; (b) vérifier `oOJ` via `_.q_`→`hSd`→`jna` : `u.reactiveSchemas` devrait contenir des entrées `type:"redux"` — compter via `polySiParams` du `inst` frais ; (c) capturer la stack complète du `pc.set`/`dR1` pour dater où `attached` du behavior-à-5-props souscrit `store` alors que `store` n'existe pas encore.
+- **Sondes ajoutées** : `.eval/c40_proto.json` (chaîne proto), `c40_cector.json` (ctor CE par tag), `c40_polysi.json`, `c40_pmown.json`, `c40_fresh.json` (createElement à chaud), `c40_behlist.json` (contenu des behaviors).
+  - **Addendum cran 40/41 — `Reflect.getMetadata` falsifié comme suspect** : round-trip complet mesuré en page — `R.metadata('design:type',Number)(proto,'y')` puis `getMetadata`/`getOwnMetadata`/`getMetadataKeys` → **tout fonctionne** (prototype+clé et niveau classe). Le premier test (`defineMetadata` direct, TypeError) était un artefact de signature (polyfill 2-param). Map/WeakMap réduits : sains (`g1..sym` tous justes). Conséquence : pour `oOJ`, `Reflect.getMetadata("design:type")` dans `xaZ` rend au pire `v=Object` — les schemas sont poussés quand même ; **la machinerie décorateur/metadata n'est pas le trou**.
+  - **Re-cadrage** : `oOJ` ne déclare **aucun** `behaviors:`/`selector:` — `currentPage`/`data` sont des champs d'instance remplis **impérativement** par `updatePageData`/`performDataUpdate`/`setActivePage` (appelés par `ytd-app` au `yt-navigate-finish` — dispatch vu au log, `ev.cb on=ytd-app n=1`). Le redux `YC` n'est *pas* dans la liste du pm par design ; le rejet `updateReduxProperties` frappe un objet qui a `store`+`attached` de `YC` mais pas la méthode — **probablement un autre `zc`** (élément legacy à mix partiel), pas prouvé être le contrôleur du pm. Question cran 41 reformulée : `updatePageData`/`performDataUpdate` arrivent-ils sur le zc, et si oui où meurent-ils (`pagePool`, `attachPage`, `data` absent) ? Le `TypeError` redux reste un bug réel (mix partiel) mais possiblement orthogonal à l'absence de `ytd-browse`.
+  - **Blocage instrumental** : pompe JS saturée ~10 min en fin de vol 9532 (évals en file, jamais servis) — la sonde d'état `c41_pmstate` (data/currentPage/pagePool/updatePageDataJobId) n'a pas abouti ; à relancer en début de vol prochain avant saturation.
+
+## NAV — cran 41 (vols 9533-9537, diag `(on X)` enrichi) : le rejet redux **tue le handler nav** — `hasNavigated`/`pagePreparer` jamais posés sur `ytd-app`
+
+- **État du `d` de `ytd-app`** (vol 9533) : `hasNavigated:false`, `pagePreparer:null`, `dataUpdatePromise:null`, `currentPage:undef`, `zwiebackInitJobId:-55` — le handler `onYtNavigateFinish` (`kevlar:7777160` : `F.prepareForNavigation` → `pagePreparer=new qR` → `preparePage` → `initHistoryManager` qui pose `hasNavigated` + lit `#page-manager.getCurrentData()`) **mourut avant son premier effet de bord** — alors que `ev.cb ty=yt-navigate-finish on=ytd-app n=1` avait dispatché. Les 2 rejets `updateReduxProperties` arrivent à la même milliseconde : le `TypeError` propagé dans le dispatch `store` casse la continuation → `hasNavigated`/`pagePreparer` jamais posés → `updatePageData`/`setActivePage` jamais appelés → `ytd-browse` absent. **Le rejet n'est plus un symptôme parallèle : c'est le mécanisme du mur.**
+- **`zc` du pm vivant** : `pagePool`/`dataHost`/`isAttached`/`__dataEnabled` tous OK, mais `data`/`currentPage`/`destinationPageType` `undef`, `updatePageDataJobId=0`, `renderLoadingStateJobId=0` — **aucune méthode n'a jamais été appelée sur lui**. L'amont (l'app) n'a jamais poussé la donnée.
+- **Carte des récepteurs redux** : `yt-guide-manager`/`yt-playlist-manager`/`ytd-mini-guide-renderer` ont `d`/`P` **complets** (`urp+store+attached+subscription`). `ytd-masthead`/`yt-mdx-manager`/`ytd-popup-container` ont `attached` présent mais **ni urp ni store** — mix partiel confirmé sur plusieurs tags (pas seulement le pm). Masthead : `updateReduxProperties` **forwardé sur l'élément** (méthodes de `u.behaviors` OK — `YC.prototype` y figurait) mais absent du contrôleur → `YC` est dans la liste au moment de `jna.d()` mais **pas au moment où le proto du contrôleur est mixé** — deux lectures différentes de la même liste (méthodes copiées depuis `u.behaviors`, props/schemas depuis `zCo`/`xaZ`) divergent : le collector de *méthodes* voit `YC.prototype`, le *mixer de proto* (`k1Z`/`W()` différé `zr`, ou `zCo`/`irq`) non.
+- **Diag `(on X)` enrichi (JS-C480)** — trois itérations, receveur toujours `(on zc)` nu : pas `Host` (indices `is`/`localName`/`hostElement` ajoutés), pas `Proxy` (`Proxy→cible` ajouté), pas de propres clés (échantillon `desc≤4` ajouté) → récepteur = objet `Ordinary`/`Other` de ctor `zc`, **zéro propre clé, aucune identité DOM** — ni élément ni `inst` PolySi (qui porterait `hostElement`). Candidat résiduel : un objet intermédiaire du machinery (`Pgm` non-Proxy ? `this` d'un hook lifecycle `call(P=Object.getPrototypeOf(this))` — les hooks `beforeRegister`/`registered`/`attached` peuvent s'invouquer sur le **prototype** — un proto a `attached`+`store` par héritage, zéro propre clé si `W()` n'a pas tourné sur lui).
+- **Commits diag** : `2fdcbfa7` (indices `is`/`localName`/`hostElement`/`id`), `3cef1e44` (own-keys quand nom ≤4), `2f3e65b7` (`Proxy→cible`), `5a3c3b09` (bras `Host`).
+- **Levier cran 42** : nommer le récepteur via son `store`/subscription plutôt que sa forme — au `promise.reject`, enrichir `reason` côté `js_glue`/`interp` avec la **valeur de `this` au throw** (le `TypeError` porte déjà `recv_desc` ; ajouter `toStringTag`/`@@toString` du receveur, ou son `isAttached`/`activeStoreSubscription`) ; OU instrumenter directement le point `attached`-de-YC : `pc.attached`/`el.attached` source dump sur `yt-mdx-manager`/`ytd-popup-container` (récepteurs à mix partiel identifiés — vérifier si leur `attached` est bien celui de `YC` et si `this.store` y est `undefined` → alors l'appel fautif viendrait du **callback** avec `H` différent de `this` — `H` capturé pourrait être un *autre* objet : `H.attached` bindé ailleurs).
+
+## NAV — cran 42 (vol 9541) : **le `zc` vivant est un wrapper ShadyDOM creux** — `this.h=null`, `Aa` jamais initialisé — le contrôleur n'a jamais existé
+
+- **`toString` du constructeur** : `function zc(a,b,c){if(a!==Ac)throw new TypeError("Illegal constructor");this.h=null;this.Aa(b,c)}` — `zc` = **classe wrapper du polyfill ShadyDOM** (token privé `Ac`, slot `h` = handle nœud, `Aa` = init). Le `pm.polymerController` vivant est un **wrapper de `DocumentFragment` sans nœud lié** — `h:null` permanent → `ga`/`Xb` `undefined` (cran 38), `childNodes`/`firstChild` qui jettent `'item' of Undefined`, `__data` vide, `currentPage` non posé.
+- **Contraste décisif frais vs SSR** : `document.createElement('ytd-page-manager')` → `d` (ctor `function(){return w.apply(...)||this}` = la fabrique `c2q`) — sain, 4 behaviors `[n3g?, InjectBehavior, YtActionHandler-ish, yx]`. `ytd-masthead` frais → `d` avec **14 behaviors dont `YC`,`K_2`** → `urp`/`store`/`attached` présents. `yt-guide-manager` → 7 behaviors redux OK. `yt-mdx-manager` → 4, pas de redux (comme pm — par design, `oOJ`-like sans `behaviors:` déclaré).
+- **Mécanisme unifié** : `TLo`/`c2q` → `X` = classe **`DocumentFragment`-dérivée** → `new X` remonte la chaîne `w.apply` → la construction retourne le **wrapper polyfill `zc`** (`DocumentFragment` polyfillé) au lieu de l'objet `X`-proto. En Chrome le wrapper est le fragment lui-même — `u.root=u;u.hostElement=d` puis la souscription s'appuie sur le proto `zc.prototype` — **toutes les méthodes mixées sur `X.prototype` sont invisibles** sur l'instance : `behaviors`/`urp`/`store`/`attached`/`currentPage` absents — exactement la signature mesurée (own props `__data*` du mixin `DfM` présents via le constructeur `H.apply`, méthodes du proto `X` absentes).
+- **Pourquoi le pm et pas l'app** : `ytd-app`/`d` = chemin `ucV` → `v.inst = new X` **où `X` n'est PAS `DocumentFragment`-dérivé** (contrôleur-objet) → pas de wrapper → tout marche. Les tags `useSink`/`_.q_ mode:2` (pm, masthead, mdx, popup) → contrôleurs `DocumentFragment`-dérivés → wrappers `zc` creux — **tous les PolySi-sink sont cassés de la même façon**.
+- **Le trou moteur nommé** : `Aa(b,c)` — l'init qui lie `h` au nœud — n'a pas tourné sur le wrapper rendu par `new X`. Hypothèses restantes (cible `dom_host`/`DocumentFragment`/`Reflect.construct`/`class extends`) : (a) notre `new`-sur-classe-avec-`apply`-retournant-objet garde le wrapper mais saute l'init `Aa` ; (b) `DocumentFragment` natif vs polyfillé — l'ordre d'installation du polyfill fait que `XXO`/`C9` capture le natif et `Aa` n'est jamais routé ; (c) `Reflect.construct`/`new.target` — `a!==Ac` aurait dû jeter « Illegal constructor » (le token `Ac` est passé par la voie interne du polyfill — si notre chemin `new` l'a contourné différemment, `Aa` peut avoir reçu `(b,c)` = args du ctor au lieu du nœud).
+- **Effet domino complet** : wrapper creux → `this.store` inexistant au attach → **mais** `YC.attached` tourne quand même sur l'objet (hook lifecycle du mixin `DfM`) → `this.updateReduxProperties` lookup sur proto `zc` (wrapper) → `undefined` → `TypeError` au premier dispatch `store` → tue `onYtNavigateFinish` (`hasNavigated` jamais posé, cran 41) → `updatePageData`/`setActivePage` jamais appelés → `ytd-browse` absent.
+- **Levier cran 43 — chirurgical côté moteur** : reproduire `class X extends DocumentFragment {}; new X()` (et variante `ctor.apply` retournant le wrapper, `Reflect.construct`, `DocumentFragment.call/apply(this)`) dans un test jscore — vérifier que l'instance rendue est le wrapper lié au nœud (`h` non nul, proto `zc.prototype`, méthodes `X.prototype` visibles ou non). Le delta Chrome/nôtre est dans le chemin `new`+`apply`-retour-objet sur une classe `DocumentFragment` polyfillée — chercher dans `dom_host`/`interp` la construction de `DocumentFragment` et le re-routage de `new.target`.
+
+
+## NAV — cran 43 (vols 9542-9546, JS-C481) : fix `docfrag_ctor` livré — **cause racine falsifiée**, le `zc` est le wrapper ShadyDOM de wc_sd (JS pur)
+
+- **Fix appliqué** (`6f9174d2`) : `docfrag_ctor` adopte le proto `newTarget` — `class X extends DocumentFragment` garde `X.prototype` (verrou `docfrag_derived_class_keeps_derived_proto`, 261/261 verts, clippy clean). Spec-correct et conservé, **mais le symptôme de production persiste** : 4× `updateReduxProperties (on zc)` par vol, inchangé.
+- **Falsification instrumentée** : sonde `docfrag.derive` ajoutée au fix (log `dom_probe` quand le proto adopté diffère du proto de base) — **0 tir** sur le vol 9546 → kevlar ne construit **aucun** `new X()` sur `DocumentFragment` dérivé pendant l'hydratation. La chaîne causale cran 42 (« zc creux = nœud natif à mauvais proto ») est close : réfutée.
+- **`zc` identifié définitivement** : `wc_sd.js:41961` — `function zc(a,b,c){if(a!==Ac)throw "Illegal constructor";this.h=null;this.Aa(b,c)}` = **wrapper ShadyDOM de `ShadowRoot`** (`k.Aa=function(a,b){this.host=a;this.mode=b&&b.mode;…}`), `h` = tableau de slots peuplé par `cb()`/`_renderSelf()` au premier rendu. **Objet JS `Ordinary` pur** — `docfrag_ctor` ne peut pas le produire. `h:null` est nominal tant que le root n'a jamais rendu.
+- **Site du throw localisé** : `kevlar_base.js:3411900` — `YC.attached` = `this.activeStoreSubscription=this.store.subscribe(()=>this.updateReduxProperties())` (+ killswitch `_.Z(...)`). Le `this` = `zc` a `attached` ET `store` mais pas `updateReduxProperties` (`_.L.updateReduxProperties`, même objet `_.L` = `YC.prototype`). → **mix partiel par copie membre-à-membre**, pas par proto : `attached`/`store` ont traversé un forwarding (controllerProxy ? `a instanceof Function` ? copie énumérable ?) qui a sauté `updateReduxProperties` — ordre de peuplement ou filtre.
+- **Levier cran 44** : énumérer own+proto du `zc` vivant vs `Object.getOwnPropertyNames(_.L)` — quels membres de `YC` ont traversé, et par quel chemin (`pc.def`/`pc.set` corrélés) ; la question tranchée : `attached` sur zc = copie own (forwarding) ou héritage proto (chaîne fabriquée avec un sous-ensemble) ?
+- **Watchdogs re-armés** : daemon lancé à nu = le trou qui a crashé la station (vol parallèle sans watchdog). Protocole rétabli : `spawn_daemon.ps1` (survie session + exit.log) + `vol_joblimit.ps1` (Job Object 4 Go — borne dure refusant l'alloc) + `vol_memwatch.ps1` (kill PID > 5 Go). Vols 9545/9546 : RSS stable ~1,25 Go, aucune fuite mesurée — la mémoire n'était pas le suspect ce vol.
+
+
+## NAV — cran 44 (vols 9547-9548) : **receveur nommé = masthead** ; `urp@absent` total — le mix de méthodes l'a sauté
+
+- **Receveur identifié** (diag `«host.localName»` étendu) : `(on zc«host.localName:ytd-masthead,host.id:masthead»)` — le fautif est le contrôleur PolySi de **ytd-masthead** (= wrapper `zc` ShadyDOM root upgradé en contrôleur `Ae`, qui porte `hostElement`). Suspect du cran 41 confirmé (son `activeStoreSubscription` prouvait le subscribe réussi).
+- **`«name@src»` tranché** : `updateReduxProperties@absent` — absent de **toute** la chaîne (own + 8 niveaux proto). Ni propriété masquante ni mauvais proto : **jamais mixé** sur le contrôleur.
+- **Mécanisme localisé au symbole** (`Ae.prototype`, kevlar `_.L.attached`) : les hooks sont invoqués **par nom** — `for b of polySiParams.behaviors: b.attached?.call(this)` — donc `attached` n'a pas besoin d'être mixé ; le throw est interne au callback : `this.store.subscribe(()=>this.updateReduxProperties())` + `this.updateReduxProperties()` (killswitch). `this` = zc : `store` résout, `updateReduxProperties` non → les méthodes ordinaires de `YC.prototype` (`urp`, `detached`, `recomputeReduxSelector`) devraient être mixés sur le proto contrôleur à la génération `jna`/`v3Z` — la collection les a sautés.
+- **Question cran 45** : les 4 membres `_.L` (attached/detached/urp/recompute) sont-ils tous absents (= pas de mix de méthodes du tout sur cette voie) ou urp seul (= filtre) ? Sonde `c44_ycmembers` en file. Corollaire à vérifier : `store` résout par quel chemin (getter K_2 copié, ou `__data`/`signalProxy`) — si `store` est `@proto` mais urp `@absent`, le mix a bien tourné et a exclu urp nommément.
+
+
+## NAV — cran 45 (vol 9771) : **le `zc` fautif est un contrôleur DÉTACHÉ** — kevlar tue le masthead SSR à mi-upgrade
+
+- **Séquence loguée** (`dom_probe`, T+~1 s) : `el.birth ytd-masthead node=86` → `pc.set` (controller write) → `ce.upgrade` → **`dom.kill parent=ytd-app child=ytd-masthead`** (`nativeRemoveChild` via `webcomponents-sd.js:107` ← `kevlar:3761`) → **`pc.set` #2 sur l'élément détaché** → `dom.kill` de ses enfants (`search-container`, `search-input`, `menu-icon`, `masthead-logo`, `skeleton-icons`). Kevlar remplace le masthead SSR par un rebuild — mais l'upgrade PolySi continue sur l'élément mort.
+- **Tout s'explique** : `document.querySelector("ytd-masthead")` → absent (`nomh` aux fenêtres d'eval — l'élément vivant n'existe plus dans l'arbre) ; `updateReduxProperties@absent` = finalisation des méthodes coupée par le détachement ; les 4 rejets = souscription `store` zombie sur contrôleur mort (`YC.detached` — qui désabonne `activeStoreSubscription` — jamais invoqué, `dom.kill` n'étant pas un `disconnectedCallback` ordinaire ou le hook sautant pareil).
+- **Causalité en cascade affinée** : le throw n'est pas « le pm manque redux » ni « mauvais proto » — c'est **un contrôleur orphelin** : `attached` invoqué par nom sur le `zc` (post-détachement), `store` accessible via `K_2`, callback `this.updateReduxProperties()` sur un proto jamais finalisé → `TypeError` propagé dans le dispatch `store` → tue la continuation `onYtNavigateFinish` → `hasNavigated` reste `false` → pas de `ytd-browse`.
+- **Piste moteur cran 46** : pourquoi le `pc.set` #2 et les hooks continuent-ils sur un nœud détaché ? En vrai Chrome l'upgrade CE `disconnectedCallback` coupe la finalisation (ou `isConnected` garde `upgradeDisabled`) — chez nous `ce.upgrade` post-kill a laissé tourner `I_o`/`dR1`. Sonder : `isConnected` du node 86 dans le chemin `I_o`, et si `disconnectedCallback`/`detached` ont été dispatchés au `dom.kill` (le `E_(O)` du wrapper sd appelle-t-il les callbacks ?).
+
+
+## NAV — cran 46 (vol 9772) : **chaîne `w.call(this)||this` mesurée en vol** — le `this` du contrôleur EST une racine shady ; suspect résiduel = re-proto `shadyUpgradeFragment`
+
+- **`didRegister`/`legacyOptimizations` sur le pm** : `polySiParams`/`polySiContext` **totalement absents** du `pm.polymerController` (pas `false` — `undefined`) → `Ae.call` n'a **jamais tourné** sur l'objet. `polymerController !== shadowRoot`/`__CE_shadowRoot`/`__shady` de l'élément ; `pm.inst` absent ; `observedAttributes` own → **l'objet EST bien `O` = le retour de `u.ctor(F,…)` d'`ifV`**.
+- **Chaîne proto mesurée** : `getPrototypeOf(pc) === zc.prototype` — **littéralement** (own names = `Aa`,`v`,`nb`,`mb`,`Y`,`ib`,`_renderSelf`,`cb`,`wa`,`Za`,`ta`,`xa`,`ab`,`bb`,`pb`,`Lb`,`hb`,`ua`,`ba`,`sb`,`Ca`,`Ga`,`zb`,`Mb` = signature `k=zc.prototype` de wc_sd, où `ShadowRoot===zc`). Niveaux suivants = wrappers Element/Node du polyfill → `Object`. **Ni `d.prototype` ni `brX`/`Ae`/`P` dans la chaîne** — le `this` n'a jamais porté le proto de la classe composée.
+- **Qui a tourné, prouvé par les props own** : `__dataEnabled…__serializing` (`Q07` mixin données), `__autoDirOptOut` (`Xa7`), `__isPropertyEffectsClient` (`kN6`), `root`,`hostElement` (`TLo` : `u.root=u;u.hostElement=d`), `allowedProps`,`__dataAttributes`,`ready`,`_overrideLegacyUndefined` (ctor `ifV`/`CAf` 691716), `observedAttributes` (`ifV`), `__templateInfo`,`$`,`isAttached`,`viewTransitionManager` + **props déclarées du pm** (`pagePool`,`actionMap`,`contextSwitcher`…). → Tous les mixins `H.call(this)||this` **ont tourné sur le `this` échangé** — chaque `F=H.call(this)||this` a récupéré le zc et posé ses champs dessus.
+- **Mécanisme nommé** : `c2q`/`TLo` → `d=function(){return w.apply(this,arguments)||this}`, `brX=DfM(huT(_.C9(XXO)))` — chaîne de mixins `K9`-dedupés (`W1v→Dol→Xa7→U97→Q07→KV6→kN6→HRJ→XXO`) — chaque niveau fait `F=w.call(this)||this`. En V8 `XXO.call(this)` rend `undefined` → `this` (proto `d.prototype`) remonte intact. Chez nous **un `call` dans la chaîne a rendu un objet** : la racine shady `new zc(Ac,host,opts)` (seul site créant un zc — `attachShadow` interne wc_sd).
+- **Falsifications** : `Reflect.construct(F,args,newTarget)` sain (`protoIsNT:true`) ; `Map`/`WeakMap` round-trip sains ; `Reflect.getMetadata` sain ; `docfrag.derive` 0 tir (base ≠ `DocumentFragment.call`) ; `ce.failed` 0 ; `ce.life` `disc`→`conn` masthead = reparenting transitoire, pas kill.
+- **Suspect résiduel unique** : `wc_sd` `attachShadow({shadyUpgradeFragment:d})` → **`b.__proto__=ShadowRoot.prototype` (=zc.prototype) + `b.Aa(host,opts)`** — re-prototypage d'un objet existant. Si le `this` du contrôleur (=le `new X` en cours, qui sert de fragment d'upgrade PolySi — `u.root=u` le désigne) est passé en `shadyUpgradeFragment` *pendant* la construction (hook `connectedCallback`/`_attachDom` synchrone dans la chaîne), il devient racine `zc` **en conservant ses props own** et perd `d.prototype` → `updateReduxProperties@absent`, `hostElement`/`mode`/`__shady`/`host` own, chaîne `zc.prototype` directe — **toutes les mesures concordent**. En V8 la même opération donne un vrai `ShadowRoot` DOM — et les méthodes `d.prototype` sont ensuite ré-appliquées par l'upgrade suivant (ou `d` n'est pas le contrôleur mais un fragment séparé → ordre d'appel différent chez nous : `_attachDom(this)` au lieu de `_attachDom(fragment)`).
+- **Levier cran 47** : sonder `dom_probe`/`attachShadow` — loguer l'entrée `shadyUpgradeFragment` avec `proto-before`/`proto-after` + `hostElement` présence → si le `d` passé a déjà `hostElement`/`__dataEnabled`, c'est le contrôleur `this` — la déviation est « `_attachDom` appelé avec `this` au lieu du fragment » (probablement via `W8(this)` qui déwrappe différemment chez nous — `this` n'est pas un `pg`/`zc` connu de `_.QI`).
+- **Watchdogs** : vol 9772 sous `spawn_daemon`+`vol_joblimit`(4 Go)+`vol_memwatch`(5 Go) — RSS stable ~564 Mo.
+
+
+## NAV — cran 47 (vol 9773, JS-C482) : **PREUVE** — le contrôleur `this` passe en `shadyUpgradeFragment` et se fait re-prototyper `zc.prototype` par wc_sd
+
+- **Sonde `proto.swap`** (dans `object_set_proto`, armée quand le receveur a `hostElement`/`__dataEnabled` own) : **22 tirs** — `host=ytd-masthead`, `yt-icon-button`, `yt-interaction`, `ytd-topbar-logo-renderer`, `ytd-logo`, `ytd-yoodle-renderer`… — stack = `webcomponents-sd.js:96:24` = **`b.__proto__ = ShadowRoot.prototype`** dans `attachShadow({shadyUpgradeFragment:b})`. L'objet re-prototypé porte `hostElement` → **c'est le contrôleur `new X` en personne**, pas un fragment DOM.
+- **Design réel confirmé** : `X.prototype._attachDom = function(d){ u=QI(this.hostElement); u.attachShadow({mode:"open",shadyUpgradeFragment:d}); …}` et l'appelant fait `this._attachDom(this.root)` avec `this.root = this` (`u.root=u` TLo + `this.root=this` `_readyClients`) — PolySi passe **délibérément** le contrôleur en fragment d'upgrade : `__proto__ → zc.prototype` le « promeut » racine shady en conservant les props own (d'où `host`,`mode`,`__shady` sur `b` via `Aa`).
+- **Le paradoxe restant** : après le swap, `d.prototype`/`Ae`/`P` sortent de la chaîne → en V8 aussi `urp` serait `@absent`… **sauf** que les mixins `H.call(this)||this` continuent de s'exécuter sur l'objet et que `zc.prototype` **n'aplanit pas** ce que `BSd`/`copyPropertiesToProto`/`PAX` posent ensuite. La divergence nôtre/V8 n'est donc probablement pas le swap lui-même (il tourne pareil) mais **l'ordre** : chez nous le swap survient **pendant** `new X` (les props own se posent sur un objet déjà `zc`-prototypé et les méthodes `d.prototype` ne sont jamais copiées own), alors qu'en V8 le swap doit intervenir **après** la copie de méthodes ou sur un objet dont les méthodes étaient déjà own.
+- **Levier cran 48** : vérifier si `urp`/méthodes behavior sont copiées **own** post-swap dans le flow réel (`BSd(behavior, this)` via `PAX`/`ZuN`/`k1Z` — `ZuN(H,w)` fait `H.apply(w)` = appel du ctor du behavior sur l'instance → ses `this.x=` posent own). Si `PAX(F,H,w.behaviors)` (dans `GSo`, `F`=l'inst) doit poser `urp` own et ne le fait pas → bug dans `ZuN`/`Reflect.construct(H,[],F)`-with-Proxy (le chemin `EuN` : `F.prototype=new Proxy(w, jYd(H.prototype))` — **notre `Reflect.construct` sur `F` dont le proto est un Proxy de l'instance** — suspect moteur très concret : `getPrototypeOf`/proto-d'instance-à-Proxy).
+- **État vol** : 4× rejet `urp@absent` inchangés (diag seul), daemon 9773 pid 15940 sous joblimit 4 Go + memwatch 5 Go, RSS ~356-514 Mo.
+
+
+## NAV — cran 48 (vol 9773) : **ShadyDOM `force+noPatch` confirmé** — le re-proto du contrôleur est le comportement nominal ; la vraie divergence : les méthodes doivent être re-copiées **own** après le swap
+
+- **`ShadyDOM.settings`** (mesuré en vol) : `{force:true, preferPerformance:true, noPatch:true, Sb:true, inUse:true, Ra:null}` — YouTube **force** le polyfill en mode wrap-on-demand (`Sb` sain : `Element.prototype.attachShadow`/`Node.prototype.getRootNode` existent chez nous). Donc le swap `b.__proto__=zc.prototype` à `webcomponents-sd.js:96` n'est **pas** une déviation — il tourne pareil en Chrome.
+- **Conséquence logique** : le re-proto retire `d.prototype`/`Ae`/`P` de la chaîne dans **tous** les navigateurs → `urp`/méthodes behavior doivent être posées **own** sur l'objet par une étape ultérieure. Chez nous `urp` est `@absent` partout → l'étape « copie own des méthodes post-swap » est la défaillance réelle. Candidates au symbole : `PAX(F,H,behaviors)` → `ZuN(behavior.constructor, F)` (chemin `EuN=false` → `H.apply(w)` — le ctor du behavior appliqué à l'inst : ses `this.méthode=`/`this.prop=` posent own) — **si `YC`'s ctor n'assigne pas `urp` own**, alors `urp` vit dans `_.L`=YC.prototype et seul un `BSd`-sur-inst le pose.
+- **`in`-sur-Proxy sans trap `has` → `false` (bug moteur trouvé en route)** : `Reflect.construct(H,[],F)` avec `F.prototype=Proxy` donne le bon proto mais `"m" in o` rend `false` — notre `in` ne délègue pas à la cible quand le trap `has` est absent (spec : `HasProperty` doit forwarder). Le chemin `ZuN`/`EuN`/`jYd` (`get:` `F in w ? w[F] : H[F]`) dépend de `in` correct sur l'inst — à creuser si PAX est confirmé dans la voie.
+- **Récepteur à raffiner** : le `zc` du masthead a-t-il `polySiParams`/`polySiInfo` own ? (le pm non — voie `TLo`/`c2q` ; le masthead pourrait être voie `GSo`/`P` avec `Ae.call` avant swap). Si oui, `Ae.prototype.attached` (hook par nom `b.attached.call(this)`) post-swap est inatteignable → `attached` invoqué par un autre rail (`NSX`/`hQ`/`_.IQ` lifecycle externe).
+- **Levier cran 49** : (a) tester `ZuN`/`PAX` en vol sur un inst réel (dump si `urp` own apparaît après `PAX` manuel) ; (b) si la copie own est absente par design, alors le vrai mécanisme Chrome = `BSd` sur `d.prototype` **avant** swap + `b.__proto__` qui ne serait **pas** zc.prototype mais `ShadowRoot.prototype` **distinct** en natif — c.-à-d. : vérifier si dans wc_sd `ShadowRoot.prototype === zc.prototype` en mode `noPatch` (`ShadowRoot=zc` lu statiquement — mais `k.__proto__` de zc.prototype pourrait chaîner `d.prototype` si `_.p` relie zc à la classe... à vérifier en vol : `Object.getPrototypeOf(zc.prototype)`).
+- **Daemon 9773** : pid 15940, watchdogs OK, RSS ~360 Mo — chaud pour cran 49.
+
+
+## NAV — cran 49 (vol 9773) : `Polymer.legacyOptimizations=true`, voie template-less confirmée — question résiduelle = *qui* invoque `YC.attached` sur le zc (car `attached` n'est **pas** mixé non plus)
+
+- **Template-less confirmé** : `pc.root === pc`, `pc._template`/`_stampTemplate` undefined, `h` jamais assigné (`Aa` sans `new zc`) — le contrôleur est promu racine par le re-proto, nominal.
+- **`Polymer.legacyOptimizations === true`** → `zr` diffère `W(d.prototype)` à `_registered` — **mais** `W` cible toujours `d.prototype` (pas `getPrototypeOf(this)`) → `urp` sur `d.prototype` dans tous les cas → sorti de la chaîne par le swap, quelle que soit la version de `zr`. `zc.prototype.__hasRegisterFinished` = false → `_registered`/`W` n'a jamais touché `zc.prototype`.
+- **Fait qui recadre tout** : `attached`/`created`/`_attachDom`/`urp` — **tous** `@absent` sur le zc (own + chaîne complète). Or `attached` fait partie des noms **exclus du mix** (`uLg`/`mEo` : hooks invoqués par nom, jamais copiés). Donc même sain, `zc.attached` n'existe pas → `YC.attached` ne peut être invoqué sur le zc que par un **rail externe** (`X.attached` bag → `call(inst)`, `Ae`/`polySiParams.behaviors` loop, ou un hook CE). Le pm-zc n'a pas `polySiParams` → rail `Ae.prototype.attached` impossible → l'invocation vient d'ailleurs.
+- **Hypothèse directrice reformulée** : en Chrome, `attached` n'est *jamais* invoqué sur le contrôleur-zc (le hook `d.prototype.attached` est inatteignable post-swap → `X.attached` bag jamais drainé → pas de subscribe → pas d'erreur ; le wiring redux se fait par `properties`/watchers/`signalProxy`, pas par `attached`). **Chez nous `YC.attached` tourne quand même** — un appelant l'invoque explicitement sur le zc (`b.attached.call(zc)` ou `zc` substitué à `d.prototype` dans un `call(P)` de hook lifecycle — rappel : `TLo` pose `hostElement` **aussi** sur `X.prototype` → le receveur `zc«host.localName:ytd-masthead»` pourrait être `X.prototype`/`d.prototype`-like — un PROTO qui porte `hostElement` — pas l'instance).
+- **Discrimination cran 50** : le receveur est-il `X.prototype`/`d.prototype` ? `d.prototype` aurait `__hasRegisterFinished`, `generatedFrom`, les méthodes mixées `k1Z` (dont `urp` !) — or `urp@absent` sur le receveur → le receveur n'est pas le proto *mixé*. Sauf si `W`/`k1Z` n'a pas tourné → `zc.prototype` de **notre** receveur : own = 82 noms, pas `__hasRegisterFinished`, pas `urp` → c'est le proto polyfill `zc` propre, pas un proto de classe décoré → receveur = **instance** (champs own `__dataEnabled` prouvent l'instanciation). Le rail d'invocation d'`attached` reste à nommer — chercher `NSX`/`ELO`/`connectedCallback`-wrapper qui itère `behaviors` et appelle `attached.call(inst)` indépendamment du proto.
+- **Bug moteur annexé (à fixer en cran 50)** : `"k" in proxy` → `false` quand le proxy n'a pas de trap `has` — doit forwarder à la cible (spec `[[HasProperty]]` → `Reflect.has(target)`). Le rail `ZuN`/`jYd` (`F in w ? w[F] : H[F]`) lit `in` sur l'inst — si notre `in` rate sur proxy-chaîne, le get-trap `jYd` rate aussi `H[F]` fallback → méthodes inaccessibles via `controllerProxy` — piste parallèle pour `urp` forwardé.
+
+
+## NAV — cran 50 (vols 9773×3) : rail du throw nommé (`ELO(H)`→`H.attached()`→bag `X.attached`/`_.L.attached`→`YC.attached`→subscribe→dispatch `u`→`urp`) — contradiction receveur documentée
+
+- **`in`-à-travers-proxy fixé (JS-C483, commit `e6ed2d11`)** : `has_prop` déléguait à la cible seulement si le receveur était le proxy — un `Ordinary` à ancêtre proxy rendait `false`. Verrou `proxy_traps`. **Sans effet sur le mur** : `urp@absent` ×4 identique post-fix → le rail `ZuN`/`jYd` (`F in w`) n'était pas la divergence.
+- **Tag `stk:` ajouté** (3 frames `call_stack` dans le tag de rejet) : le throw vient du dispatch redux — `<anon>:15581` (callback `subscribe` de `YC.attached`) ← `u:2189` (boucle `M[z]()` des subscribers du store) ← middleware `:15231`. La souscription est **vivante** — `YC.attached` a donc bel et bien tourné avec `this` = le zc.
+- **Rail d'appel identifié au symbole** : `ELO(H)` (`kevlar_base:3433827`) — `H.isAttached=!0; NSX(H.hostElement.localName); H.attached()` — invoqué depuis `_.L.connectedCallback` (`Ae`) et depuis l'init `iParams` post-`H.created()`. `H.attached()` doit résoudre `attached` sur `H`.
+- **Contradiction receveur consignée (non résolue)** : flags `psp`/`psi`/`psc`/`urpo`/`atto` (find_prop, chaîne complète) — **tous absents** du receveur → receveur = instance swappée `zc.prototype` nue (sans `d.prototype`/`Ae` en chaîne). Or `H.attached()` aurait dû jeter `attached is not a function` si `H` = ce receveur ; et `_.L.attached` exige `this.polySiParams`. → `YC.attached` a été invoqué sur le zc **sans passer par la résolution membre** : rail restant = drain du bag `X.attached` (`d.prototype.attached.call(zc)` — `P[c].call(this)`) ou `F.call(this)` d'un itérateur de behaviors où `this` est passé explicitement. Le rail exact qui fait `.call(zc)` reste à nommer — piste : `H.attached()` où `H` est un proxy `Pgm` dont le get-trap rend `d.prototype.attached` (méthode du proto de classe) appliquée au zc — le receveur membre serait le proxy, pas le zc… mais les hints `hostElement` prouvent un receveur `Ordinary`.
+- **Instrumentation accumulée** : `proto.swap`×22 (contrôleur=racine shady), `stk:` frames, flags `psp`/`psi`/`psc`/`urpo`/`atto`, `«name@src»` own/proto/absent.
+
+
+## NAV — cran 51 (vol 9773, sondes `sub.arm`) : la chaîne causale **complète** est nommée — `ready`→`attached`→subscribe→swap→dispatch→throw — divergence résiduelle = `this.root===this` au moment de `_attachDom`
+
+- **`sub.arm` posé dans `probe_store`** (set de `activeStoreSubscription` → 5 frames + `psp`/`atto`) : 7 tirs. Au moment de la souscription le receveur a `attached` en chaîne (`atto=true`) — la chaîne de classe est intacte — `psp` la plupart absent (hook invoqué hors rail `_.L.attached`).
+- **Rails d'appel nommés** (frames décodées) :
+  - Rail malade (5×) : `YC.attached` (`:15581`) ← `d.prototype.attached` (`:2083` — c2q, drain bag `X.attached` → `P[c].call(this)`) ← `H.prototype.connectedCallback` (`:9266` — mixin K9 `disable-upgrade`, `this.attached()`) ← `X.prototype.connectedCallback` (`:15681` — wrapper ShadyCSS) ← dispatch CE (`:2744` `_.DM`). `this` = le contrôleur PolySi tout du long.
+  - Rail sain (1×, `psp=true`) : `_.L.attached` (`:15716`) ← `ELO` (`:15701`) ← `_.L.connectedCallback` (`:15703`) — boucle `polySiParams.behaviors`.
+  - Throw (dispatch) : callback subscribe (`:15581:156`) ← `u` (`:2189` — boucle `M[z]()` du store) ← middleware `:15231`. **Le swap `proto.swap host=ytd-masthead` intervient entre la souscription (chaîne intacte) et le premier dispatch (chaîne `zc.prototype` nue).**
+- **`_.hQ` est synchrone** (`try{return H()}finally{Vr(w)}`) — pas une course d'ordonnanceur : `ready()` tourne avant `attached()` dans `ELO`.
+- **Le point de divergence restant, resserré à une seule question** : `_attachDom(this.root)` reçoit `this` lui-même (`pc.root === pc` mesuré — `this.root=this` dans `d.prototype._initializeProperties`, `X.prototype._readyClients` finit aussi par `this.root=this`). Le flux sain attend `ready()` → `this._template && (this.root=this._stampTemplate(this._template))` → `_attachDom` frappe le **fragment stampé** (sans `hostElement`), pas le contrôleur. Chez nous le swap frappe un objet à `hostElement` own → `this.root` était `this` → **`ready()` a sauté le stamping** : soit `this._template` falsy à ce moment, soit `ready`/`_readyClients` n'a pas tourné sur ce contrôleur (`pc.didCallReady` = absent sur le pm — `ELO` jamais passé ?), soit `_stampTemplate` a rendu `this`.
+- **Effet du rejet mesuré** : `ytd-browse` **naît quand même** (`el.birth` 57,9 s — le dispatch continue, la promesse rejette) ; le vrai dommage = la boucle `M[z]()` abortée → les subscribers post-masthead ratent l'action → propagation redux amputée à chaque dispatch.
+- Instrumentation en place : `sub.arm` (psp/atto/stk), `proto.swap` (host/heap-id), tag rejet `«name@src»`+flags+stk, `ce.life`, `docfrag.derive`.
+
+
+## NAV — crans 52-53 (vols 9773) : le swap frappe le **fragment stampé** (design `shadyUpgradeFragment`), `urp` était en chaîne → perdu — écart Chrome résiduel non identifié malgré falsification complète
+
+- `root.set` (set de `root` sur objet à `hostElement`) : séquence masthead = `this`(init :9272) → `this`(TLo :3716) → **fragment**(`ready`+`_stampTemplate` :8957 — le stamping a tourné !) → **shadowRoot**(`_readyClients`+`_attachDom` :8958) → `this`(`X.prototype._readyClients` :15680). `_template` était truthy (`tpl=true` à `sub.arm`), `_stampTemplate` a produit un vrai fragment — hypothèse « jamais stampé » **falsifiée**.
+- `reg.fin` (set de `__hasRegisterFinished`) : tiré pour ytd-masthead → `_registered`+`W(d.prototype)` ont tourné → `urp`+`_template` étaient sur `d.prototype` (mix complet).
+- `proto.swap` enrichi (`frag`/`roteq`/`urpc`/`urpo`) : **tous** les objets swappés sont `frag=true` (`templateInfo`/`nodeInfoList`/`$` own — les **fragments stampés**, `hostElement` own = binding host) ; `roteq=true` ; masthead `urpc=true, urpo=false` → `urp` était en **chaîne** (`d.prototype`), perdu au swap — mécanisme **sémantiquement correct** du polyfill.
+- `sub.arm` enrichi (`dcr`/`ipec`/`tpl`/`roteq`) : rail malade `dcr=false ipec=false` → ni `ELO` ni `_.L.connectedCallback` (Ae) — attendu pour la famille `c2q`/`d` (chaîne `X→H→w→…→HTMLElement`, `Ae` hors chaîne).
+- `EuN` (`/\bclass\b/.test(fn.toString())`) = `false` — nominal partout, pas la divergence.
+- `DocumentFragment.call({})` jette `TypeError:illegal constructor` — conforme Chrome.
+- **État de fait** : la souscription `YC.attached` court avec `this` = le fragment-contrôleur (proto `d.prototype` → `urp` présent) ; le swap `b.__proto__=zc.prototype` lui ôte la chaîne (design polyfill) ; au dispatch `H.updateReduxProperties` → `@absent`. En Chrome le même swap s'applique à un objet de même forme → **l'écart doit être que `urp` est own sur l'objet chez Chrome** (copie own par un rail non encore nommé — `PAX`/`ZuN`/`k1Z` own-copy) **ou** `this` au `YC.attached` est un proxy `jYd` dont le get-trap rend `d.prototype.urp`. `urpo=false` mesuré chez nous.
+- **Note produit** : `ytd-browse` naît (`el.birth` node=2520) mais n'est pas inséré dans l'arbre (`nobrowse` récursif) — `appKids=27`. Le rejet redux ampute la boucle de dispatch (subscribers post-masthead ratés) mais n'empêche pas la création.
+
+
+## NAV — cran 54 (vol 9773) : le proto remplacé est `d.prototype` — l'objet swappé est le **contrôleur `new d`**, jamais un vrai `DocumentFragment`
+
+- Sonde `pname` (proto remplacé, via `is`/`constructor.name`) : les 22 swaps portent `pname=<tag>/d` — `d.prototype` pour **chaque** élément PolySi. Aucun objet à proto `DocumentFragment.prototype` n'est jamais swappé.
+- Receveur du rejet : pas de flag `pxy` → `this` dans `YC.attached` n'est **pas** un proxy `jYd`/`Pgm` → option « fallback proxy vers le proto de classe » **éliminée**.
+- Tableau désormais complet : `shadyUpgradeFragment(this)` re-prototype le contrôleur `new d` (`root===self`, `hostElement`/champs template own) `d.prototype`→`zc.prototype`. `urp` n'existe que sur `d.prototype` (mix `W`/`k1Z` à `_registered`) → perdu. En Chrome, même mécanisme → `urp` doit donc être **own** sur l'instance là-bas : le seul rail de copie own identifié est `PAX`→`ZuN`(`behavior.constructor.apply(inst)`), ou un rail `k1Z`-sur-inst.
+- **Cran 55 ouvert** : vérifier si `PAX`/`ZuN` copie les méthodes own en Chrome (constructeur de behavior qui assigne `this.urp = fn`) et pourquoi ce rail ne produit pas `urpo=true` chez nous — ou instrumenter le get de `updateReduxProperties` au moment de `YC.attached` pour voir quel objet le fournit.
+- Garde-fous vol maintenus : spawn watchdog + joblimit 4 Go + memwatch 5 Go, daemon 7032 RSS stable.
+
+
+## NAV — cran 55 (vols 9773) : le vrai mur post-`urp` était le **kill-switch heap** — `EXPLORER_JS_MEM_MIB=2048` débloque l'upgrade complète de `ytd-browse`
+
+- **Découverte** : `RangeError: heap memory limit exceeded (275817 cells, 805306765 B allocated > 805306368 B hard cap)` à 13:48:54 — heap JS mort dans un callback `scheduler.js:37`, puis `heap_dead` fige le moteur : **46 304** rejets identiques, tout JS postérieur échoue instantanément. `ytd-browse` naissait à ~57 s — pile dans la fenêtre du kill → jamais inséré. Le `urp@absent` du masthead n'était **pas** le bloqueur.
+- `urp` est un membre de mixin `_.L` jamais assigné en constructeur → pas de rail de copie own ; kevlar ne scelle pas le contrôleur (`.seal(` = sondes $jscomp). L'écart `urp` est probablement **nominal** (existe aussi en Chrome réel) — le swap `shadyUpgradeFragment(this.root===this)` est le design PolySi (`pname=<tag>/d` sur les 22 objets).
+- **Vol à 2048 Mio** : zéro OOM, `ce.upgrade ytd-browse` (node 2528) + stamping complet de son template (`ytd-two-column-browse-results-renderer`, `ytd-refresh`, `yt-page-header-*`, `dom-if`… nés dans son fragment à 14:40:04) ; `yt-page-data-fetched`/`yt-navigate-finish`/`active-endpoint-changed` dispatchés ; `urp@absent` ×4 inchangé (nominal).
+- **Reste** : `ytd-browse` orphelin — créé et upgradé mais aucun `appendChild` ne l'insère (absent de tout l'arbre, shadow-walk compris). Le site d'insertion page-manager n'a pas tiré — cran 56 : pourquoi `yt-navigate-finish` ne conduit pas à l'insertion (probe appendChild ou rail dom-if/iron-pages).
+- **Question ouverte perf** : heap vivant réel ~275k cellules mais 805 Mio alloués au kill — backlog GC différé ou heap légitimement >512 Mio sous interpréteur. `EXPLORER_JS_MEM_MIB` est le levier produit existant ; décider si le défaut 512 tient pour les sites lourds.
+
+
+## NAV — cran 56 (vol 9773, 2048 Mio) : `ytd-browse` orphelin parce que le rail d'insertion page-manager n'a jamais tiré — le swap `shadyUpgradeFragment` est probablement **nominal même en Chrome**
+
+- `ytd-app` = Polymer **classique** (`d:ytd-app[314]` chaîne complète — `attached`/`urp`/`data`/`notifyPath` fonctions) ; `ytd-page-manager`/`#masthead`/`ytd-browse` = **PolySi** — classe élément volontairement mince (`F[2]` = `constructor`+`createElement`), logique dans `polymerController` (objet distinct du shadow root).
+- `pm.polymerController` : `proto===ShadowRoot.prototype`, `root===self`, `__data` présent, `loadPage`/`urp`/`attached` absents — le contrôleur PolySi **est sa propre racine** (`u.root=u`) → `shadyUpgradeFragment(this)` lui ôte `d.prototype`. Mécanisme **identique en Chrome** (même code, même swap — `urp@absent` est vraisemblablement un bruit de console YouTube nominal, non le bug).
+- Masthead élément : `urp`/`select` forwardés (fonctions) ; pm : rien. Le forwarding `FnY` (`ifV` : `O=u.ctor(F,{beforeReady})` + `getInitialMethods`/`getExtraMethodsToForward`/`wig`) a livré ~rien pour pm — à creuser si le rail forwarding est notre divergence.
+- **Insertion** : `ytd-browse` créé+upgradé+stampé (template complet) mais jamais inséré — racine du page-manager = 3 ancres `#comment` (`dom-if`/`iron-pages` placeholders non déclenchés). `yt-navigate-finish`/`yt-page-data-fetched` dispatchés → le rail `z2X`/insertBefore du routeur n'a pas tiré. Cran 57 : sonder `insertBefore`/`appendChild` sur les ancres pm + état `if` des dom-if.
+- `pm.__CE_shadowRoot.childNodes` fonctionne (3 enfants, tableau `.item` ok) — le throw `cannot set 'item' of Undefined` observé une fois était transitoire (pompe).
+
+
+## NAV — cran 57 (vol 9773) : `ytd-browse` orphelin = `loadPage` non forwardé/appelable — le contrôleur `oOJ` perd `_.L.*` au swap ; insertion = rail **impératif**, pas dom-if
+
+- La racine pm (3 commentaires css) est **correcte** : le template `TUO` de ytd-page-manager = 3 marqueurs css + `_.RQ()` base styles — PolySi n'utilise pas de contenu template pour les pages. `templateInfo.nodeInfoList=0` nominal.
+- `oOJ` = classe contrôleur du page-manager (`pagePool`, `contextSwitcher`, `actionMap`, `loadPage`…) — vit sur `oOJ.prototype`/`d.prototype`, perdu quand `shadyUpgradeFragment(this)` swap le contrôleur (`u.root=u`, `root===self`).
+- Rail d'insertion mesuré au symbole (`kevlar:9081800`) : `d.loadPage(H.response)` sur l'élément page — `typeof d.loadPage==="function"` requis sinon `_.fx(new _.R6("b/38014653",…))` → abandon. `d.loadPage` vient du forwarding `FnY`/`wig` (`ifV`) qui délègue à `this.polymerController[v]` → **le contrôleur doit garder ses méthodes post-swap** — donc en Chrome `oOJ.prototype` survit au swap (ou le forwarding copie la fonction own avant le swap).
+- `_template` = `null` sur pc/masthead (`tpl=false`) — normal PolySi (template minimal). `template.innerHTML` moteur OK.
+- **Cran 58** : déterminer si `wig`/`FnY` copie la référence de fonction (own sur `F.prototype` — survivrait) ou un déléguant (lit `pc[v]` à l'appel — casse) ; et pourquoi pm n'a même pas `urp`/`select` forwardés alors que masthead en a 2.
+
+
+## NAV — cran 58 (vol 9773, hpc) : chaîne causale complète — `ready()` jamais invoqué → swap du contrôleur, pas du fragment
+
+- `FnY` copie la référence de fonction en own sur l'élément (`H[w]=function(){…X[w]…}`), `wig` = accesseurs déléguants ; `Pgm` ne crée un Proxy que sous flag logging (`mA`), get-trap sans fallback proto. Pas de rail de survie.
+- **Mesure `hpc` (nouveau flag)** : 22 swaps, **un par élément**, tous `hpc=true` + `roteq=true` → l'objet passé à `shadyUpgradeFragment` est le `polymerController` lui-même (`u.root=u`), jamais un fragment stampé.
+- Site kevlar (`kevlar:…`): `F=_.QI(F); if(!F.shadowRoot||X)F.attachShadow({mode:"open",shadyUpgradeFragment:H.root})` — `H.root` = `u` tant que `_stampTemplate` n'a pas réassigné `u.root`.
+- `u.root` n'est réassigné que par `ready()`/`_stampTemplate`, atteints via `ELO(this)` ← `_.L.connectedCallback` ← le forward `connectedCallback` posé par `FnY` sur l'élément. `didCallReady=false` + `ipec=false` + pm sans aucun forward → **le contrôleur n'est jamais « connecté »** → `root` reste `u` → `attachShadow` promeut le contrôleur → `oOJ.prototype` (`loadPage`/`attached`/`pagePool`) perdu → `ytd-browse` orphelin.
+- En Chrome : `ready` tourne (CE `connectedCallback` de l'élément forwardé au contrôleur) → `root`=fragment → le swap frappe le fragment, `d.prototype` survit sur le contrôleur → `loadPage` forwardé → insertion.
+- **Divergence racine resserrée** : pourquoi `polySiParams`/`behaviors` sont vides au moment où `ifV` énumère les méthodes à forwarder pour pm (masthead en a 2 — `urp`/`select` — mais pas `connectedCallback` non plus). Suspect : `Ae.call`/`P` (ctor posant `polySiInfo`/`polySiParams`) jamais atteint dans la chaîne `new X` de `TLo` — le ctor `d` généré par `c2q` n'appelle pas la couche `Ae` chez nous.
+- Instrumentation ajoutée : flags `nt` (nodeType own) + `hpc` (b===hostElement.polymerController) au `proto.swap`.
+
+
+## NAV — cran 59 (vol 9773) : deux familles de contrôleurs ; le forwarding pm **fonctionne** ; `ytd-browse` jamais swappé
+
+- Deux chemins de contrôleur PolySi dans kevlar :
+  - `GSo`→`P extends Ae` (`Ae` @3432086 pose `polySiInfo`/`polySiParams`/`polySiContext`) — `_.L`=`Ae.prototype` porte `connectedCallback`/`ready`/`attached`/`registered` (`_.L.ready` fait stamping `q0f` + `attachShadow({shadyUpgradeFragment:H.root})` puis `this.root=F.shadowRoot`).
+  - `TLo`→`new X` (`X=c2q(H.prototype,brX,…)`, `u.root=u`, `u.hostElement=d`) — le `polymerController` des éléments, **sans** polySi* — `pc.polySiInfo/Params/Context` absents est **nominal** (pas notre bug).
+- `pm` a **54 méthodes forwardées** own (`attachPage`, `setActivePage`, `lazyPrepareCriticalPages`, `preparePage`, `updatePageData`…) — `FnY`/`wig` ont tourné correctement. `loadPage` n'y figure pas : le rail `d.loadPage(H.response)` @9082168 cible l'élément **`ytd-browse`** (`d.is==="ytd-browse"`), pas le page-manager.
+- `pm.getCurrentPage()` s'exécute (jette sur `.slice` interne — donnée absente) → les wrappers forwardés **vivent** post-swap (capture `F` ou chaîne résiduelle) → le swap n'ampute pas l'API élément.
+- `ytd-browse` n'apparaît dans **aucun** `proto.swap` (22 swaps : masthead, page-manager, logo, icon-button, interaction, player…) → son pc n'a pas été promu — attach par un autre rail (ou jamais connecté).
+- Reste à trancher : pourquoi l'insertion n'a pas suivi `yt-navigate-finish` — le rail `attachPage`/`setActivePage`/`pagePool` du contextSwitcher. Aucune erreur `b/38014653` dans le log → soit le check `typeof d.loadPage` a passé, soit le rail n'est pas atteint.
+
+
+## NAV — cran 60 (vol 9773) : coupure réelle = data-binding `{{data}}` jamais propagé vers `ytd-page-manager`
+
+- `attachPage` = `try{_.Kg(hostElement).appendChild(H)}catch → _.EX` (muet). `setActivePage` appelle `F.attachPage(H)` après `currentPage=H`. `performDataUpdate` = le rail complet (`d=Ma(pagePool,X)` → `u=setActivePage(d)` si `!renderLoadingStateJobId` → `d.loadPage(H.response)` sur l'élément **`ytd-browse`**).
+- `ytd-browse` est bien dans `pc.pagePool.pageNameToElement` (`"browse"→ytd-browse`, `parentNode:null`, hors document).
+- **`pm.data` = undefined** (élément ET contrôleur) alors que `app.data` = objet complet (`__data` 36 clés). `pm.__data` absent. → `updatePageData`/`performDataUpdate` n'ont jamais tourné sur ce pm ; le `yt-page-data-updated` observé vient d'un autre rail.
+- Donc : le binding `data="{{data}}"` du template ytd-app → ytd-page-manager **n'a jamais propagé** — soit les annotations `{{}}` du template stampé ne créent pas les effets de propriété chez nous, soit `notifyPath`/`_setPendingProperty` ne les déclenche pas. `appKids=27` + stamping OK → les nœuds existent ; ce sont les *bindings* qui manquent.
+- `pc.currentPage`/`pm.currentPage` = null ; `renderLoadingStateJobId="0"` ; `b.isAttached` falsy.
+- Faux suspects éliminés : `__shady_native_*` accesseurs bien installés sur `Node.prototype` (`typeof`="undefined" = getter natif appelé sur le proto, attendu) ; le throw `childNodes` wc_sd:61 = transitoire pré-`yc` snapshot (`pm.__shady.firstChild` maintenant object → `x()` true).
+- **Cran 61** : vérifier si le stamping (`q0f`/`_stampTemplate`/importNode) crée les binding-annotations (`propertyEffects`/`nodeInfo.bindings`) — la couche qui transforme `{{data}}` en `notifyPath` — c'est probablement notre vrai gap Polymer.
+
+
+## NAV — cran 61 (vol 9773) : pile du swap nommée — `_.L.created` (Ae.prototype) déclenche le swap du pc
+
+- `stack:` étendue (12 frames, tags kb:/wc: + queue `:line:col`) : `wc:96←wc:124←kb:15709(_.L.created)←kb:8995←kb:15711`. Le swap du pc est invoqué **depuis `_.L.created`** d'un objet Ae-family (lit `polySiParams` avec succès — absent sur notre pm/pc, own+chaîne).
+- Faits figés : `pm` et `pc` n'ont `polySi*` nulle part ; `pc.loadPage/updatePageData/attachPage/setActivePage` tous undefined (proto=zc). Le wrapper `FnY` forwardé : `W=(F!=null?F:X[w]); W?.call(X,…)` — `X[w]` mort → **no-op silencieux** (mesuré : `pm.updatePageData(app.data)` → undefined, aucun effet).
+- `data` sur `ytd-app` n'est lié par `{{}}` qu'au masthead (`topbarData`) — le pm reçoit ses données via `onYtPageDataFetched` → `_.Hu().resolve(_.Ru).updatePageData(this.data)` — `app.dataUpdatePromise`=null → probablement `_.Ru` non résolu ou updatePageData → forward no-op.
+- `ytd-browse` présent dans `pc.pagePool.pageNameToElement` (jamais attaché).
+- Hypothèse courante resserrée : le swap nominal frappe le **fragment stampé** en Chrome (`shadyUpgradeFragment:H.root` depuis `_.L.ready` ou `_attachDom(frag)`) — chez nous `root===self` au moment du second attach (`!F.shadowRoot` guard : `v(F).Xb` invisible → second `attachShadow` passe et promeut le pc). Le premier attach (frag, :8958) n'a PAS logué de swap — à vérifier : `_attachDom` a-t-il réellement appelé `attachShadow` ou a-t-il été court-circuité (`d.shadowRoot`/`!d`) ?
+
+### cran 62 (vol 9773, daemon 13796) : le swap = **second `X._readyClients`**, 675 ms après le premier cycle
+
+- Sonde `psp.hit` (read `polySiParams` non-undefined dans `read_prop`) : **61 hits, 3 hôtes** — `ytd-mini-guide-renderer`, `ytd-permission-role-bottom-bar-renderer`, `ytd-popup-container` — tous des éléments mode-1 (`new P` élément Ae, `is`+`hostElement`=soi-même). **`ytd-page-manager` absent** : son pc ne résout jamais `polySiParams` — le `_.L.created` du vol précédent appartenait à un de ces éléments P-family, pas au pc pm.
+- Pile du swap pm **ce vol-ci** : `wc:96(Aa)←wc:124(Bc.attachShadow)←kb:15678(_attachDom)←kb:8958(H._readyClients)←kb:15680(X._readyClients)` — différente de cran 61 : pas `_.L.created` mais le rail `_readyClients` direct.
+- Timeline pm : `root=this`(×2, init) → `root=frag`(:8957 stamp, 21.398) → `root=shadowRoot`(:8958 `_attachDom(frag)`, 21.399) → `root=this`(:15680 tail, 21.399) → **proto.swap à 22.074** (+675 ms). Le second `_readyClients` relit `this.root===this` (reset par le tail du 1er passage) → `_attachDom(pc)` → `u.attachShadow({shadyUpgradeFragment:pc})` → promotion du pc, `oOJ.prototype` mort.
+- Premier attach **nominal** : le frag stampé a bien reçu `shadyUpgradeFragment` (swap silencieux/inoffensif, proto déjà frag).
+- `__dataClientsReady`/`__dataReady` = true sur pc post-swap → le second `_readyClients` n'a pas pu passer par `_flushClients` (gate → `__enableOrFlushClients` qui ne rappelle pas `_readyClients`). Reste : invocation directe via un `connectedCallback`/`ready` re-dispatché (les `dom.kill` massifs à ~22.0 = `nativeRemoveChild` ShadyDOM `wc:107→96` = migration des enfants light-DOM des hosts à leur `Aa`).
+- `usePatchedLifecycles=true`/`lifecycleIsConnected=true` sur pm/masthead/yt-icon-button → ils passent par `I_o`/`a_1` (chemin `useSink`), `d`=CAf (mode≠1) → pc TLo **nominal** pour pm.
+- Écart résiduel honnête : **ce qui re-déclenche `_readyClients` sur le pc** — en Chrome soit le second appel n'a pas lieu, soit `this._template` y est falsy (getter `SOg`). Pistes : (a) `connectedCallback` re-tiré par un move ShadyDOM, (b) `_template` renvoyé là où Chrome rend `undefined` au 2e passage, (c) `_.L` lifecycle rappelant `ready`/`_flushClients`.
+
+### cran 63 (vol 9773, daemons 14120/11560) : timeline complète — `__dataClientsReady` **jamais réinitialisé**, le 2e `_readyClients` est un appel direct
+
+- Sondes `psp.hit` étendues (`_readyClients`/`_attachDom`/`_flushClients`, champ `dcr` = valeur de la gate à l'instant du read) + `dcr.set` (writes `__dataClientsReady` avec pile).
+- **Séquence mesurée pm** : `57.50 _initializeProperties → __dataClientsReady=!1` → `58.74 _flushClients(dcr=false→gate ouverte) → !0 → _readyClients → _attachDom(frag)` → `60.64 _readyClients ×2 (dcr=true) → _attachDom → proto.swap`.
+- **`__dataClientsReady` n'a JAMAIS été repassé falsy** — `_initializeProperties` unique → le second `_flushClients` n'a pas pu ouvrir la branche `_readyClients` → le 2e `this._readyClients()` sur pc est un **appel direct** (super-call `.call(this)` — read du callee invisible car sur le proto — ou dispatch natif).
+- `_flushClients` non-lu sur pc au 2e passage (read `this._flushClients` absent — seul `_flushClients` appelle `this._readyClients()` dans kevlar → invoqué via `.call(pc)` dont le read porte sur le proto, ou chemin ne passant pas par `read_prop`).
+- Frames basses du swap : `ot:<anonymous> (1:171) ← (1:362) ← (1:…)` — piles synthétiques `:1:` = appel d'origine **native** (drain microtask `_.hQ`/timer/réaction CE), pas une frame kevlar nommée.
+- Impasses éliminées : `w.Ra` = `userAgent.match("Trident")` (null — `Bc` swap toujours actif, nominal) ; `connectedCallback` élément unique (`ce.life conn` ×1, aucun `disc`) ; `dcr`/`didCallReady`/`ipec` confirment `_.L.connectedCallback`/`ELO` jamais invoqués sur le pc → `ready()` vient du rail `d.prototype.connectedCallback → _enableProperties → ready` (Polymer classique), et `ready` #2 ne peut pas produire `_readyClients` (`__dataClientsReady` gate + `_propertiesChanged` court-circuité sans `__dataPending`).
+- `dom.kill` massif ~60.6 = migration `Aa` des enfants light-DOM des hosts à leur propre second attach — confirmé : chaque élément subit le même second `_readyClients` (swap ×~22, un par élément — systémique, pas pm-spécifique).
+- Hypothèse résiduelle la plus probable : une **réaction CE/microtask rejouée en double** par le moteur (le second `_readyClients` part d'un frame natif `<anonymous> (1:col)`) — e.g., une microtask `_.hQ`/`job` drainée deux fois, ou un `connectedCallback` pc-forward appelé une seconde fois via un chemin non tracé par `ce.life`. En Chrome le même second `_readyClients` lirait aussi `this.root===this` et swapperait le pc — **à moins** que le second appel n'y ait tout simplement pas lieu.
+
+
+### cran 64 (vol 9773, daemon 12992) : vague **systémique** du second `_readyClients` — propagation `__enableOrFlushClients`, `Bc.attachShadow` sans garde
+
+- `psp.hit` étendu au rail page + lifecycle (`performDataUpdate`/`updatePageData`/`attachPage`/`setActivePage`/`enqueueClient`/`connectedCallback`).
+- **Le second `_readyClients` frappe TOUS les éléments à ~+0.5 s** (yt-icon, ytd-logo, ytd-yoodle-renderer, yt-formatted-string, ytd-page-manager…) — pas une anomalie pm mais une **vague de re-flush** synchronisée : `40624 connectedCallback`/`_readyClients` sur protos = super-calls `w.prototype.connectedCallback.call(this)` → `_enableProperties` → `ready` → `this._flushClients` → `__enableOrFlushClients` → `d._enableProperties`/`d._flushProperties` → `client._readyClients()`.
+- Pattern par élément : `this._readyClients` ×2 + `F.prototype._readyClients` lu sur proto (80123) + `this._attachDom` — la signature complète `X._readyClients → H._readyClients → F._readyClients`.
+- Pour pm : `this._readyClients` ×2 + `_attachDom` sur obj 529048 (`is=ytd-page-manager`), `dcr=true`, **aucun** `_flushClients`/`connectedCallback` lu sur cet objet ni sur les protos dans la fenêtre → `_flushClients` invoqué comme valeur capturée (`W.call(x)`) ou appel direct natif — frames `ot:<anonymous>(:1:…)` toujours natives.
+- `dcr` non discriminant en lecture (posé `!0` par `_flushClients` avant `_readyClients`) ; discriminant = writes `dcr.set` : toujours 2 seulement → le second `_readyClients` n'a pas traversé `_flushClients` en propre — invoqué via `.call` (callee cachée) ou callback stockée.
+- `Bc.attachShadow` lu en entier : `a.shadyUpgradeFragment&&!w.Ra → b.__proto__=ShadowRoot.prototype; b.Aa(this,a); yc(b,b); …; b.host.__shady_native_appendChild(b)` — **aucune garde « hôte déjà raciné »** (`w.Ra` = Trident). Un second `_readyClients` re-swap toujours, même en Chrome → **la vague elle-même est probablement notre divergence** (Chrome n'aurait pas ce re-flush massif).
+- Hypothèse fixante : un rail queue/job (`_.hQ`, `kAu`, `__dataPendingClients`) est re-drainé en masse ~0.5 s après le premier flush — piste suivante : sonder `enqueueClient`/`_enqueueClient`/`__enableOrFlushClients`/`_enableProperties` reads pour nommer le drain, et la pompe microtask côté moteur (double drain possible).
+
+
+### cran 65 (vol 9773, daemon 17960) : rail complet mesuré — `__enableOrFlushClients` re-drain + `element._readyClients()` forwardé via `.call`
+
+- `psp.hit` étendu à `ready`/`_enableProperties`/`_flushProperties`/`_propertiesChanged`/`__enableOrFlushClients`/`_enqueueClient`/`connectedCallback`.
+- **Passe 1 pm (57.2)** : `connectedCallback` → `_enableProperties` → `ready` → `_flushProperties` → `_flushClients` (dcr=false) → `_readyClients` → `_attachDom` → `__enableOrFlushClients` — nominal.
+- **Passe 2 pm (58.053, +0.84 s)** : `pc._enableProperties` ×2 (dcr=true) → `pc._readyClients` ×2 → `pc._attachDom` → swap. **Aucun `ready`/`_flushClients`/`_flushProperties`/`connectedCallback` sur pc ni proto** dans la fenêtre → `pc._readyClients` invoqué par callee capturée : `W.call(pc)`.
+- Le swap porte l'objet **528720 = pc** (`hpc=true`), même objet que les reads — `is=ytd-page-manager` et `hostElement.localName` via la chaîne proto.
+- `__enableOrFlushClients` ×144 à ~58.0 (re-drain de `__dataPendingClients` sur tous les éléments) + `_enqueueClient` ×54 → **vague systémique de réactivation** : chaque `_flushClients` (dcr=true) redrain ses clients en file → `d._enableProperties()` sur chaque pc en attente → pour pc déjà enabled (`__dataEnabled=true` — `_enableProperties` no-op confirmé), le `_readyClients` passe par `d._flushProperties`/`this._flushClients` (reads invisibles car **accessor gets** sur l'élément — notre sonde ne couvre que `read_prop` data-path) ou par callee capturée `W.call` — les frames `ot:<anonymous>(:1:…)` = trampolines `.call`/natifs.
+- `X.prototype._attachDom` lu : `u=_.QI(this.hostElement);u.attachShadow({mode:"open",shadyUpgradeFragment:d});u.shadowRoot.appendChild(d)` — `d=this.root=this` (tail `X._readyClients: this.root=this`) → `Bc` promeut le pc inconditionnellement.
+- **État final verrouillé** : `pc.__dataClientsReady`=true stable (2 writes dcr.set), `__dataEnabled`=true — le second `_readyClients` ne peut pas venir de `_flushClients`/`ready`/`_enableProperties` — c'est un appel `W.call(pc)` dont le `W` = `pc._readyClients`/`X._readyClients` capturé (forward `element._readyClients` ou `X[w]`). Double lecture `X[w]` ×2 = artefact d'évaluation (callee + call trampoline) ou appel doublé — indistinct sans sonde d'invocation.
+- Reste ouvert : nommer l'émetteur du `W.call` (frame `:1:`). Pistes : (a) sonder `call_value`/`invoke` quand callee résout `_readyClients`/`_enableProperties`, (b) `enqueueClient`→`__enableOrFlushClients` re-entry, (c) notre dispatch CE re-firant `connectedCallback` pendant la migration `Aa` des roots (chaque 2e attach ré-appose les enfants → re-connects en masse → drains).
+
+
+### cran 66 (vols 9773, daemons 11416/1592/15720) : **cause racine nommée et fixée** — le shim `DISABLE_UPGRADE_SWEEP` appelait `pc._readyClients()` en boucle
+
+- `life.call` (sonde d'invocation, `call_script_body`) : la pile du second `_readyClients` nomme les frames `(:1:171)<(:1:362)<(:1:2)` — `src_text` = `(function(){var rm=function(n){...removeAttribute('disable-upgrade')...` → **notre propre shim eval'd** `DISABLE_UPGRADE_SWEEP` (`explorer-core/src/session/net.rs`, JS-C471).
+- Le shim : `pcinit(n)` → `if(pc&&!pc.__dataClientsInitialized){pc._enableProperties();pc._readyClients()}` — `__dataClientsInitialized` **n'existe pas** (le vrai flag est `__dataClientsReady`) → condition toujours vraie → `scan(document.documentElement)` à DOMContentLoaded + `MutationObserver` (`childList+subtree+attributes`) → **`pc._readyClients()` direct sur chaque contrôleur à chaque mutation** — le rail `X._readyClients → H._readyClients → _attachDom(root===this) → attachShadow({shadyUpgradeFragment:pc})` → promotion sans garde → méthodes mortes ~1 s post-hydratation. Voilà pourquoi `ytd-browse` était orphelin : `updatePageData`/`performDataUpdate`/`attachPage` no-ops sur pc promu.
+- La « vague systémique » mesurée aux crans 63-65 = le storm de mutations du premier attach qui re-tirait `pcinit` sur tous les éléments — pas un bug Polymer ni de pompe microtask : un artefact de notre contournement.
+- **Fix** : `pcinit`/`scan` supprimés — `rm` seul suffit (`removeAttribute('disable-upgrade')` → `attributeChangedCallback` → `__isUpgradeDisabled=false` → `connectedCallback` → `_enableProperties` → `ready` → `_flushClients` → `_readyClients` avec gates nominales).
+- **Mesuré post-fix (daemon 15720)** : `proto.swap` = **0** (était ~22/vol), `pm.children` = `[ytd-browse, ytd-watch-flexy]`, `bKids=16`, `richGrid=true` — **insertion page-manager fonctionnelle pour la première fois**.
+- Reste : `hasNavigated=false` (rail distinct — zombie masthead `updateReduxProperties` sur élément retiré) et `items=0` rich-item (feed en cours d'hydratation ou mur suivant).
+
+
+### cran 67 (vol 9773, daemon 13012) : **mur `assignParentResizable` résolu** — `instanceof Event` pendant le dispatch ; `hasNavigated` = `initHistoryManager` jamais invoqué
+
+- Cause : `_.re(H)` teste `H instanceof Event` pour décider si l'event dispatché est natif — l'`EventHost` présenté aux listeners portait `Object.prototype` → wrapper `ohH` sans `rootTarget` → `TypeError: cannot read 'assignParentResizable' of Undefined` dans le handler `iron-request-resize-notifications` → `ce.cc_threw` (`connectedCallback` `tp-yt-iron-dropdown`/`tp-yt-paper-menu-button` tués) — 5 rejets par vol.
+- **Fix (JS-C484)** : `EventState.js_proto` retient le proto JS de l'event passé à `dispatchEvent` (`new CustomEvent` → `CustomEvent.prototype` — lu dans `event_state_of`, `Object.prototype` ignoré) ; `event_value` recopie `js_proto` (ou `%Event.prototype%` du realm via `event_realm_proto`) sur l'`EventHost` présenté aux listeners ; `EventHost::push` trace la valeur pour le GC. Ordre de lookup inchangé (`Host::get` prime la chaîne proto) → `e.type`/`e.detail`/`e.composedPath()` intacts, `instanceof` vrai. Verrou : `dispatched_event_keeps_instanceof` (CustomEvent/Event/createEvent+initEvent/literal/re-dispatch — suite `dom`).
+- **Mesuré post-fix (daemon 13012, JS_MEM_MIB=3072)** : `assignParentResizable` **5 → 0**, `ev.threw` 0, `cc_threw` 0 ; `iron-request-resize-notifications` cycle complet `ev.new → ev.try → ev.dispatch → ev.cb on=ytd-masthead#masthead n=1` ; `updateReduxProperties` **0** (le receveur zombie des crans 44-45 était un produit du swap — mort avec lui) ; `proto.swap` 0 ; rail page vivant — `updatePageData`/`performDataUpdate`/`setActivePage`/`attachPage` lus sur le pc `ytd-page-manager` (obj 529781) à 19:18:31 (+`attachPage` ×2) ; `pm.children` `[#comment×3, ytd-browse, ytd-watch-flexy]`, `browseKids=35`, `appKids=28`, `appData` objet, skeleton retiré.
+- **`hasNavigated=false` — nommé** : posé uniquement par `initHistoryManager(c)` (`if(!this.hasNavigated){=!0; _.eI(hostElement).querySelector("#page-manager").getCurrentData(); this.replaceState(W,H,c)}`) — **0 invocation observée**. `onYtNavigateFinish` n'appelle que `this.dataUpdatePromise.then(W.onYtNavigateFinishHandler)` → `finishNavigation()` (`hasPendingNavigation=!1` + `Cr2.finish()`) — `hasNavigated` n'y figure pas ; `dataUpdatePromise` est désormais une vraie promesse (était `null` aux crans 41-57). Rail suivant : nommer l'appelant d'`initHistoryManager` (`registerNavigationManagerListeners[WhenAvailable]` → résolution `_.Kl` ?) et pourquoi il ne tire pas — corrélat `ls.late ty=yt-navigate-finish` à +86 s (un listener lazy enregistré après le dispatch — en Chrome il serait arrivé à temps ; un `initHistoryManager` derrière ce listener expliquerait tout).
+- Frame = noir pur (786 432 px à 0,0,0) — cohérent `richItems=0`/`vidRend=0`/`grid.items`+`containerWidth` undef : le feed n'est pas encore stampé (mur suivant après `hasNavigated`) ; `shownItems=1`, `ytd-rich-grid-renderer` vivant dans `ytd-browse`.
+- Daemon 13012 mort `EXIT:1` ~19:26:54Z (fin de vol externe, pas un crash moteur).
+
+### cran 67b (vol 9773, daemon 10420, JS_MEM_MIB=3072) : exceptions de listeners rapportees, dispatch poursuivi ; verdict feed = donnee serveur
+
+- **Constat** : `fire_listeners` retournait `Err` au premier listener qui jetait -> listeners freres sautes ET exception remontee a `dispatchEvent`. Spec : exception = rapportee (window.onerror / event `error`), le dispatch continue. Mesure YouTube : un listener `yt-navigate-finish` fautif tuait `onYtNavigateFinish` de ytd-app.
+- **Fix (JS-C484b, 83cde888)** : `misc_apis::report_exception` (extraction du corps de `reportError`, `pub(crate)`) + `Engine::report_depth` (borne 4, anti-recursion `error` -> listener `error` fautif). `fire_listeners` + handler `on*` + `inline_handler` : l'erreur est rapportee (`th.0`) puis le dispatch **continue** ; `dispatchEvent` ne la propage jamais.
+- **Vol post-fix** : `yt-navigate-finish` frappe `ytd-app` (`ev.cb n=1`), `dataUpdatePromise` **resolue**, `onYtNavigateFinishHandler(false)` invoque manuellement sans faute, `ev.threw`=0, `assignParentResizable`=0, `proto.swap`=0, `pmKids=2`.
+- **`hasNavigated=false` = nominal** : arme uniquement par `initHistoryManager`/`onYtNavigate` (navigation client-side) ; `finishNavigation` ne pose que `hasPendingNavigation=!1`.
+- **`items=0` = fidelite des donnees** : `ytInitialData` brut contient 1 seul `richSectionRenderer` -> `feedNudgeRenderer` "Votre historique YouTube est desactive" — le serveur a servi la page nudge (session sans cookies/consent) ; le moteur a stamp fidelement (`#contents` -> `YTD-RICH-SECTION-RENDERER`). Pas un mur moteur.
+- Note : pic tas JS 805 Mio > cap 768 Mio (Fun 500k) — le fix instanceof a debouche le cascade iron-resize/notifyResize qui tourne a plein ; vol sous `EXPLORER_JS_MEM_MIB=3072` stable. Candidat ulterieur de reduction d'allocations.
+
+### cran 68 (vol 9773, daemon 12700, profil prof9773 + consentement, JS_MEM_MIB=3072) : watch s'hydrate en entier ; home = nudge fidele
+
+- **Profil** : cookies `SOCS=CAI` + `CONSENT=YES+...` injectes dans `.eval/prof9773/cookies.json`, `cookieconsent_status=deny -> allow`.
+- **Watch (/watch?v=jNQXAC9IVRw)** : `ytd-watch-flexy` **insere** dans `ytd-page-manager` (pmKids=1), `app.data.page="watch"`, titre `h1` rendu "Me at the zoo", `<video>` presente, `ytd-watch-next-secondary-results-renderer` stampe — chaine complete `handleNavigate -> N8Q -> publishPageData -> onYtPageDataFetched -> updatePageData -> performDataUpdate` fonctionnelle sur page=watch. Le vol precedent sans profil montrait shell-only (ytInitialData complet mais rail publishPageData jamais declenche — reponse serveur differente selon cookies).
+- **Home** : toujours 1 `richSectionRenderer` -> `feedNudgeRenderer` "Votre historique YouTube est desactive" — **comportement serveur nominal** pour une session sans historique (meme consentie, non connectee) : un Chrome vierge sign-out EEA recoit le meme nudge. Le feed exige historique active (endpoint `feedback` du bouton -> consent.youtube.com) ou un compte — hors perimetre moteur.
+- **Sante du vol** : `proto.swap`=0, `ev.threw`=0, `assignParentResizable`=0, `err=`=0 sur toute la session watch+home.
+- Piege opérationnel noté : double `spawn_daemon` sur meme port -> le second echoue au bind MAIS "en ligne" s'imprime quand meme (health check sur le daemon preexistant) et son stderr ecrase le log du vivant — pidfile non mis a jour. Toujours lire `daemon-<port>.pid` et verifier `Win32_Process explorer-daemon.exe` avant un vol.
+
+### cran 69 (vol 9773, daemon 12700) : navigation SPA interne validee — `hasNavigated` mesure true
+
+- Clic reel `a#logo` (masthead) depuis `/watch` -> `location.href` devient `https://www.youtube.com/` **sans reload** : `yt-navigate -> handleNavigate -> N8Q -> publishPageData -> onYtPageDataFetched` declenche par la delegation de clic, `ytd-browse` re-stampe dans le page-manager.
+- `hasNavigated` = **true** — le rail `initHistoryManager`/`onYtNavigate` s'est arme lors de la navigation interne (home->watch deja SPA : `can_back=true`), confirmant que `false` au chargement initial etait nominal.
+- Sante : `proto.swap`=0, `ev.threw`=0, `err=`=0, `heap memory`=0 sur l'ensemble watch + clic SPA + re-stamp ; RSS daemon stable ~830 Mio (joblimit 5 Go).
+- `items=0` persistant = nudge serveur (session sans historique), idem vols precedents.
+
+### cran 70 (vol 9773, daemon 2452, EXPLORER_J17_PROF=1, cap 768) : churn d'allocations attribue — trafic reel, pas fuite unique
+
+- Snapshot J17 (~40 s d'hydratation) : `call=4 275 286` appels dont `call_nat=2 066 626` (**48% d'appels natifs** — DOM/getters du cascade iron-resize + delegation), `env_new=2 208 660` cellules Env, `env_lvl=51.8M` niveaux de scope traverses, `prop_scan=72M` comparaisons lineaires de cles, `arridx_try=20.6M`.
+- `fn_mat=7 148` seulement → les `Fun:500k` du vol precedent n'etaient PAS de la materialisation de parse : ce sont des **closures runtime vivantes** — `Function.prototype.bind` (`_.HU(this,fn)` a chaque addEventListener), closures arrow par element par listener, wrappers `.call`/forward — retenues par les listes de listeners et les files Polymer. Pas de site de fuite unique : c'est l'echelle Polymer×DOM (cascade `_notifyDescendant`/`fire("iron-resize")` debloquee par le fix instanceof).
+- Goulots nommes par ordre : (1) `prop_scan=72M` — scan lineaire des props (`prop_ns=10.6 s` = le temps dominant du batch) — l'index paresseux ne s'arme qu'au-dela de PROPS_IDX_MIN ; abaisser le seuil ou indexer des le premier miss repete est le cran perf le plus prometteur. (2) `env_lvl=51.8M` — profondeur de fermeture des bundles closure/google3 (env_ns=2.7 s). (3) `call_nat` ~48% — le cout dispatch natif (host get/invoke) domine la moitie des appels.
+- Cap 768 non atteint ce vol (plus lent sous J17, hydratation amortie) — le pic 805 Mio du vol anterieur coincindait avec le storm iron-resize **pre-fix** (erreurs toutes les ~3 ms allouant piles+objets d'erreur) ; post-fix la consommation s'est stabilisee (RSS ~830 Mio).
+- Pas de fuite identifiee → pas de patch memoire ce cran ; le journal garde la decomposition pour le futur chantier perf (`prop_scan` premier candidat).
+
+### cran 71 (vol 805, daemon 12624, profil prof-vol805) : boucle consent causee par l'absence de `SOCS` — graine seedee par hote (Etape 220)
+
+- **Mesure** : 3 chargements document par vol (`nav:` 19:46:35 → 19:48:10 → 19:52:12) — pattern `iron-overlay-opened` (`ytd-consent-bump-v2-lightbox`) → `fetch.send GET youtube.com/` → re-boot. Le jar ne portait aucun cookie de decision Google : les graines Etape 171 couvrent OneTrust/Didomi/Cookiebot mais pas `SOCS` (`CONSENT` n'est plus relu par YouTube).
+- **`hasNavigated=false` solde — nominal, pas un bug** : `yt-navigate-finish` est tire par le chemin d'adoption des donnees initiales (`publishPageData`/`apN` → `fireEvent` offset 3499753 de `m=late,app`) **sans** `yt-navigate-start` — `initHistoryManager` ne vit que dans `onYtNavigateStart` (premiere nav SPA). Invocation manuelle `initHistoryManager(0)` en page → `hasNavigated=true` : le rail entier tient. Recoupe cran 69 (`hasNavigated=true` mesure en navigation interne).
+- **Fix (Etape 220)** : `seed_headers(policy, now, host)` — `SOCS` emis uniquement sur `youtube.com`/`youtube-nocookie.com`/`google.<tld>` : `CAISNQ…` (proto « tout refuser », valeur uAssets) sous `RejectAll`, `CAES…` (« tout accepter ») sous `AcceptAll`. La decision de politique est portee, pas l'accord — `Honest` reste vierge. Verrou `socs_scope_google_uniquement`.
+- **Posture multi-session** : le cran est ecrit en parallele des crans 68-70 (profil `.eval/prof9773`, daemon 2452) — meme conclusion atteinte des deux cotes : injection manuelle `SOCS`/`CONSENT` au profil (cran 68) vs graine codee scopée hote (ici).
+- Verdict feed : `items=0` = nudge serveur « historique desactive » (crans 67b/68) — orthogonal au bump ; la graine leve la boucle de reload, pas le nudge.
+
+### cran 72 (vol 9773, daemon 6640, EXPLORER_J17_PROF=1) : `PROPS_IDX_MIN` 24 -> 12 — prop_scan −20 % a volume egal
+
+- **Experience** : le scan lineaire de cles dominait le profil J17 (`prop_scan=72M`, `prop_ns`=temps dominant). Les objets de 12-23 props (dicts d'options kevlar, petits protos Polymer) sont relus en boucle sans jamais armer l'index ; seuil abaisse a 12 (JS-C485).
+- **Mesure a ~27M lookups** (baseline extrapolee a meme volume) : `prop_scan` ~88M -> **71.1M (−20 %)**, `prop_idx_hit` ~6.1M -> **8.16M (+64 %)**, `prop_idx_build` 2 494 -> **1 900** (l'index des objets moyens se construit a la premiere relecture, amorti sur tout le reste du vol). `prop_ns` brut non comparable (ce vol a fait ~29 % de travail en plus — `call` 5.5M vs 4.3M).
+- **Sante** : `ytd-browse` attache, `pm.children=2`, `proto.swap`=0, RSS ~1 740 Mo sous J17 — aucune regression fonctionnelle.
+- **Gates** : clippy/doc/fmt verts sur `explorer-jscore` ; echecs **pre-existants** hors scope : `explorer-cli::fixture_for` `too_many_lines` (fichier non modifie, HEAD casse par le travail PIPELINE parallele) et `interp::tests::gc_debt_arms_sweep_below_soft_limit` (echoue aussi a seuil 24 — independent du changement).
+- **Suivant candidat perf** : `env_lvl=62.6M` traverses de scope (env_ns) — desormais le premier poste apres la baisse du scan.
+
+### cran 73 (vol 806, daemon 19688, profil `.eval/prof9773`) : `document.cookie` lisait le jar de l'iframe — `cookie_jar` devient document-local (JS-C486)
+
+- **Mesure** : jar session = 7 cookies pour `www.youtube.com` (`SOCS` + 6 graines CMP, semés 20:40:09) — `document.cookie` dans le ctx top = `TESTCOOKIESENABLED` seul. Un `eval` force-refresh identique : le snapshot n'était pas vide, il n'était **pas le bon jar**.
+- **Cause (JS-C486)** : `hooks.cookie_jar` était le seul hook document-ish **engine-global** — `page_url` est garé par ctx depuis JS-C78, `cookie_jar` non. `install_dom_ctx` d'un `<iframe>` (`explorer-js` lib.rs, Cmd::InstallDomCtx : `context_switch(enfant)` → `set_cookie_jar(cjar)` — jar **isolé** semé du `cookie_header` de l'origine enfant) écrasait le hook global ; `context_switch(parent)` restaurait `page_url` mais pas le jar. Tout `document.cookie` ultérieur — **dans n'importe quel ctx** — lisait/écrivait le jar du dernier cadre installé : top lisait `cjar.get("youtube.com")` = "" (snapshot scopé autre origine) puis ne voyait que ses propres écritures (dans le mauvais jar, drainées sous l'origine enfant par `DrainSinksCtx` ou perdues).
+- **Fix** : `BrowsingContext.cookie_jar` ajouté aux champs swappés (`swap_ctx_fields`, à côté de `page_url`) — le jar devient document-local : top garde le jar session, chaque cadre le sien. Bonus d'isolation : un cadre cross-origin ne peut plus lire le jar du parent (le bug était symétrique — lecture ET écriture croisées).
+- **Verrou** : `c78_cookie_jar_isolated_between_contexts` — top seedé `SOCS`, enfant `childpref`, aller-retours + écritures des deux côtés, aucune fuite ; 21/21 `c78_contexts`, 262/262 `dom`, c259/c446/c79 verts, clippy `-D warnings` propre.
+- **Effet attendu au prochain vol** : le check cookie du bump `ytd-consent-bump` voit `SOCS` via `document.cookie` → plus de dialog « Enregistrement de votre choix… Une erreur s'est produite » (vol 806) ; les écritures page (PREF, VISITOR_…) atteignent enfin la session.
+- Numérotation : JS-C485 pris par le cran 72 (`PROPS_IDX_MIN`) — ce cran = **JS-C486**.
+
+### cran 73b (vol 9773, daemon 15212, J17_PROF) : `env_lvl/env_gets` = 1.88 — chaine peu profonde, cache resolution non rentable
+
+- **Compteur ajoute** : `J17_ENV_GETS` (tick a l'entree d'`env_get_seen`) — mesure la profondeur moyenne de chaine, absent du snapshot.
+- **Mesure a prop_lookup=39.5M** : `env_lvl=67.5M / env_gets=35.8M` = **1.88 niveau/get** ; `env_ns=3.85 s` (~107 ns/get). La marche est courte — le total venait du VOLUME de gets, pas de la profondeur des fermetures.
+- **Validation retro cran 72** : `prop_scan/lookup` 3.24 -> **1.11** (-66 % normalise), `prop_ns/lookup` 466 -> **125 ns** (~3.7x) — le seuil 12 a paye plus que le -20 % estime a mi-vol.
+- **Conclusion** : un cache `(env,name)->holder` ne raserait que ~0.9 niveau/get — ROI faible. Le surcout `env_ns` vient des ~2 `RefCell::borrow` + scans `BindingMap` par niveau, deja optimises (cles internees, `ptr_eq`). La suite structurelle = resolution compile-time (profondeur+slot a la materialisation) — chantier lourd, a arbitrer contre les autres crans.
+- Sante vol : `ytd-browse` attache, RSS ~2.4 Go sous J17 (le profilage enfle le pied) — aucune regression.
+
+### cran 74 (vol 9773, daemon 4836, J17_PROF) : fusion du double `borrow` par niveau — gain nul mesure, borne atteinte
+
+- **Change** : `env_get_seen` faisait 2 `RefCell::borrow` par niveau (check `With` puis lookup) — fusionne en un seul, semantique `Global` inchangee (find_prop + getter sous l'emprunt, comme avant).
+- **Mesure a ~38M lookups** : `env_ns` 3.85 s -> 3.78 s (**-2 %, bruit** ; ~107 ns/get des deux cotes). `env_lvl`=65.4M, `env_gets`=35.2M — travail identique.
+- **Conclusion** : le surcout par get est deja serre ; la couche lookup est epusee au niveau micro. Le levier restant = resolution compile-time (profondeur+slot) ou inline caches — chantier multi-jours, a arbitrer explicitement. Code conserve (equivalent, un borrow en moins = moins de surface de panique RefCell).
+- Sante : `ytd-browse` attache, RSS ~1.3-1.5 Go stable sous J17.
+
+### cran 75 (vol 9773, daemon 12260, J17) : pile de rejet capturee au settle — `unhandledrejection: undefined` = rail attestation poToken
+
+- **Sonde** : `pending_unhandled` porte desormais `(promise, reason, Option<Rc<str>>)` — la pile JS est capturee au `settle` (armee seulement sous `dom_probe`, 8 frames) car au drain la call_stack est repartie. Log `promise.reject` gagne `stk=`.
+- **`unhandledrejection: undefined` nomme** : `kevlar_base:27271` = rail **attestation/poToken** (`pw4` chemin « potato », `A2J` retry backoff, `attestation_challenge_fetch`, `integrityToken`, poToken via `H.poo(X)` — fetcher d'attestation WebView/GMS). L'appel au backend d'integrite echoue dans notre moteur -> `F.reject()` sans raison -> rafales ×27/×31 (le backoff `A2J` `currBackoffCount_<10`). **Echec attendu hors Google** — pas de backend d'attestation ; rendu non bloque.
+- **`AbortError: animation canceled`** : `web-animations-next-lite` + `kevlar_base:5497-5507` — annulation d'animation a la suppression/retrait d'element ; nominal.
+- Reste possible (non bloquant) : faire reussir le fetch XHR `Kus` (POST protobuf + Api-Key) si le rejet vient d'une 4xx mal geree — verification ulterieure via `media_probe net.*` sur l'endpoint attestation.
+
+### cran 76 (vol 9773, daemon 12260) : chaine attestation refermee — XHR sain, poToken absent = 403 videoplayback attendus
+
+- **XHR/fetch bout-en-bout sain** : POST `/youtubei` -> `net.arr status=200` (~7.9 s aller-retour). La mecanique n'est pas en cause.
+- **Rail attestation** : jamais d'XHR ouvert — le chemin `pw4` utilise le fetcher injecte `H.poo` (« potato ») qui rejette `undefined` ; `Kus` (XHR POST protobuf + Api-Key) n'est pas atteint.
+- **Consequence observee** : `rr5---*.googlevideo.com/videoplayback` -> **403** x3 — sans poToken Google refuse les flux ; coherent avec la politique serveur anti-bot (Chrome sign-out voit des 403 similaires). Pas un mur moteur — implementer IntegrityToken API est hors perimetre.
+- Etat des rejets : `unhandledrejection: undefined` (attestation) et `AbortError` (annulation animation) = classes expliquees, non bloquantes, journal fermees.
+
+### cran 77 (vol 808, daemon 9776, profil froid) : `textContent=` sur CharacterData tuait `Polymer.Async.microTask` — tout le stamping debounce gelait (JS-C487)
+
+- **Symptome** : bump consent `ytd-consent-bump-v2-lightbox` ouvert mais inerte — `showEOMV1Text:true`, `isLoading:false`, `hasError:false` pourtant zero bouton agree/refuse/customize rendu ; texte "Enregistrement de votre choix… Une erreur s'est produite" = gabarit loading present-mais-cache dans le textContent.
+- **Bissection live** : `ps-dom-if` du `dom-if [[showEOMV1Text]]` : `if=true`, `restamp`, `__renderDebouncer.isActive=true`, `_timer=42` — le stamp etait **planifie mais jamais execute** ; `db.flush()` manuel -> `#cb-header` + `.eom-button-row` apparaissent instantanement. Mecanique saine, declencheur mort.
+- **Cause racine (JS-C487)** : `Gy` (`Polymer.Async.microTask`, kevlar `base10239.js:1652097`) draine sa file via un `MutationObserver` sur un **noeud texte detache** (`S_n.textContent=PQg++`). Notre setter `textContent=`/`innerText=` appelait `replace_children` pour TOUTES les especes de noeud — sur `Text`/`Comment` il greffait un pseudo-enfant et emettait `childList` au lieu de `characterData` (spec `Node.textContent` : CharacterData -> `data=`). Le MO n'etait jamais notifie -> `ti[]` jamais draine -> **tout** le rendu debounce Polymer gele (dom-if, dom-repeat, effets de proprietes).
+- **Fix** : branche `Text|Comment -> set_text` dans les deux sites (`dom_nav_set` accesseur `Node.prototype`, invoke `ElementHost`). Verrou : `mutation_observer_character_data_via_text_content` (263/263 suite dom, clippy propre).
+- **Bonus mesure** : le save consent bout-en-bout fonctionne deja quand on l'invoque avec le vrai `command.saveConsentAction` (`socsCookie`+`savePreferenceUrl`) : `POST /upgrade_visitor_cookie?eom=1` -> 200, `POST consent.youtube.com/save` -> **204**, `location.reload` -> bump disparu au re-chargement (consent serveur persiste). `_.G8`/`_.Oy`/`_.DlV`/`_.IKh` tous presents et fonctionnels — les craintes `sCN`/`yKq` etaient des alias d'un **autre build** (base stale, pas le live `default_kevlar_base`).
+- Impact probable au-dela du bump : tout stamping debounce kevlar (grille riche, sections, menus) deboque — a re-mesurer en vol.
+
+### cran 77 (vols 9773, daemons 12260 + 8780) : `[[x]]` Polymer et titres renderers VERIFIES fonctionnels — le mur etait un etat transitoire
+
+- **Mesure en page** : tooltip masthead = « Retour » (binding `[[menuStrings.BACK_ALT_LABEL]]` resolu) ; `ytd-video-renderer` a#video-title = « Me at the zoo » (`[[getSimpleString(data.text)]]` resolu, `__dataClientsReady=true`). Un seul nœud `[[` residuel sur home = source `<script>` WIZ_global_data (faux positif).
+- **Reinterpretation** : les placeholders bruts vus sur la page recherche/post-SPA etaient des instants d'hydratation en cours (elements stampes avant le flush `__dataClientsReady`), pas un rail casse. `country-code` null = evaluation correcte (data.countryCode indefini).
+- **Instrumentation retiree** : compteurs `run_fx`/`eval_bind` par `lit.name` ne pouvaient pas tirer (fonctions minifiees anonymes, `lit.name=null`) — code revert avant commit.
+- **Nav SPA elargie** : home -> /results?search_query -> clic a#thumbnail -> /watch?v=jNQXAC9IVRw, `hasNavigated=true` a chaque rail. Resultats recherche = vrais renderers stampes (3+).
+
+### cran 77b — attribution : le rail `[[x]]` a ete repare par JS-C487 (`8c927827`, session parallele), pas un etat transitoire
+
+- Mon vol 8780 compilait l'arbre de travail incluant le fix non commis `textContent=` sur CharacterData -> `.data` (record `characterData`). C'est LE mecanisme qui vidait les placeholders : `Node.textContent=` sur un Text greffait un enfant au lieu d'ecrire `.data` -> le `[[x]]` restait litteral ET la mutation `childList` tuait `Polymer.Async.microTask` (MutationObserver sur texte detache) -> bindings jamais re-evalues.
+- Correction du cran 77 : les `[[x]]` n'etaient PAS des etats transitoires — ils etaient structuresllement casses jusqu'a JS-C487. `country-code=null` reste une evaluation correcte.
+- Piege ops note : un build release compile l'arbre non commis — un commit parallele peut atterrir pendant un build ; verifier `git log` avant d'attribuer un verdict de vol.
+
+### cran 77c (vol 809, daemon 9777, JS_MEM_MIB=2048, profil froid) : verification JS-C487 — boutons consent stampes, storm timers nomme
+
+- **Verification vol 809** : DOM dump -> `cb-header` + `eom-button-row` + boutons `<button aria-label="Refuser…">` "Tout refuser"/"Tout accepter" **stampes nativement** (aucun flush manuel). Effet de bord mesure : la resurrection du rail microTask rend l'app reellement vivante -> `fire.timer=52 471` + `post.raf=16 485` en ~9 min (storm de timers/raf kevlar — probablement un retry sur un autre gap, A INSTRUMENTER) -> pompe quasi-saturee, evals "pompe en vol" ~80 % du temps (passent par gaps). N'est PAS un mur stamping : les naissances d'elements convergent (fin a 22:55:38), le DOM se stabilise. Avec la borne par defaut (512 Mio) le heap sature en plein burst d'hydratation — config vol etablie = 3072 Mio.
+
+### cran 78 (vol 9773, daemon 8780, build post-JS-C487) : watch complete — titre rendu, rail binding sain
+
+- **Navigation directe /watch** : `document.title` = « Me at the zoo - YouTube », `<video>` presente, `ytd-watch-flexy.data` = reponse complete (contents, currentVideoEndpoint, engagementPanels...), secondary-results + comments stamps.
+- **Titre rendu** : « Me at the zoo » trouve dans un `YT-FORMATTED-STRING` de la watch page — le h1 vide vu plus tot etait un autre `h1` (searchbox/topbar) ; `ytInitialData` porte `videoPrimaryInfoRenderer` et le texte parvient au DOM.
+- **Zero `[[x]]` residuel** sur tout le document — le fix JS-C487 (`textContent=` -> `.data` sur CharacterData) a debouche le rail d'annotation complet : bindings texte ET attributs evalues, `Polymer.Async.microTask` vivant.
+- Bilan : apres JS-C487 la page watch est fonctionnellement complete ; SPA home/search/watch navigable ; rejets classes (attestation poToken, AbortError nominal).
+
+### cran 79 (vol 9773, daemon 8780) : pipeline media verifie jusqu'au 403 serveur — lecture bloquee par poToken, classifiee
+
+- **Shell lecteur OK** : `video` dans `html5-video-player`, `ytInitialPlayerResponse.streamingData` = 14 `adaptiveFormats`, `MediaSource` fonction + `createObjectURL` presente.
+- **Chaine** : player instancie -> URLs `videoplayback` obtenues -> fetch tentes -> **403** (cran 76 : pas de poToken sans backend attestation). `src`/`sources` vides en consequence.
+- Verdict : lecture video = blocage politique serveur Google, pas mur moteur. Rail `MediaSource`/player fonctionnel a hauteur de ce que le serveur autorise.
+- **Etat final de la campagne** : hydration Polymer, bindings `[[x]]`, SPA home/search/watch, recherche, titres — fonctionnels ; restants = perf structurelle (compile-time resolution) + politique serveur (poToken, nudge historique).
+
+### cran 82 (vols 9777f/9778, daemons 9777/9778, profils vol809 + vol810 vierge) : attribution du « storm timers » — heartbeat kevlar nominal + etat bump fige ; instrumentation de frequence
+
+- **Instrumentation** : `EXPLORER_TIMER_SRC` factorise en `timer_src_probe(e, tag)` sur les trois rails (`timeout`/`interval`/`raf`) — empreinte stack 4 frames dedupliquee **+ comptage par empreinte**, dump top-6 tous les 4096 posts (`timer-src:top`). Phases `commit.tail` (drain_script_net + anim births/marks + media cmds — zone non chronometree du commit) et `commit.anim` (`advance_animations`) ajoutees.
+- **Mesures regime stabilise** (bump resolu ou absent, `lb:false`, 428-1385 noeuds) : ~49-62 commits/s cadences par une echeance ~16 ms (`next_timer_deadline` — heartbeat scheduler kevlar, nominal), `commit_lock` avg 1,4-2,8 ms (~9-15 % duty), `commit.anim` ~0 us (animations innocentes), `commit.tail` ~1,2 ms (cout fixe drains), `commit.deliver` 60-280 us, drains quasi-jamais (`jobs=0`), evals 5/5 instantanees, CPU ~3 %. `fire.timer` ~6/s vs `post.timer` 160 cumules → le regime est **domine par les fires d'intervalles** (un `setInterval` poste une fois puis tire en continu — compter les posts ne nomme pas la tempete, d'ou le compteur par empreinte).
+- **Correlation bump/storm** : le run bump-ouvert (9777e, `lb:true`) montrait `commit_lock` avg ~2,9 s + **230** `apply: layout` ; les runs resolus montrent ~400 us + 2-8 layouts. La « tempete » post-JS-C487 (52k `fire.timer`, pompe ~80 %, evals « pompe en vol ») etait le regime **bump fige `isLoading` + machinerie de retry + burst d'hydratation** — disparue depuis que le save consent aboutit (204 + reload) et que la graine SOCS supprime le bump. Les `commit_lock` ~2,9 s du run tracke incluent l'overhead `EXPLORER_DLV_TRACE` (eprintln par rail sous verrou — ne pas profiler avec).
+- **Pics residuels** : `commit_lock` max ~1 s / `commit.deliver` max ~380 ms — livrées d'events dont le handler tourne reellement (dispatch_event_ctx sous verrou) ; travail JS legitime (Chrome bloque pareil son main-thread sur un handler de 380 ms). Pas un gap semantique.
+- Verdict : **aucune correction runtime** — l'instrumentation (compteurs d'empreintes + sections nommees) permettra d'attribuer la prochaine tempete par frequence. Sondes gardees, zero cout desarmees (`timer-src`) ; `commit.tail`/`commit.anim` suivent la convention sync_phase existante.
+
+## Cran 82 — postmortem regression JS-C490 + routes consent-gated
+
+- **Régression nommée et réparée** : vol `/results` sur binaire JS-C490 → `ytd-search` absent, `app.data` null, `TypeError: object is not a function: [object globalThis]` + `listeners of Undefined` (+XHR `/error_204`). A/B `EXPLER_NO_RESOLVE=1` → hydratation complète → régression resolveur. Cause : clé ancêtre aplatie `ptr+d<<20` → collision entre envs proches → ancêtre faux → liaison erronée **silencieuse** (repli ne tire que sur miss). Fix `b6d71a11` : clé tuple `HashMap<(usize,u16),…>` + `RESOLVE_VERIFY` (revérifie chaque hit, `res.bad`) — 181 alertes = 100 % faux positifs `NaN` → comparaison `strict_eq`. Re-mesuré : 0 divergence, `/results` sain resolveur ON.
+- **Routes `/shorts`, `/feed/*` (subscriptions+trending)** : renvoyées serveur vers `consent.youtube.com` (gate EEA, même SOCS) — pas un mur moteur ; la route `/results` reste le meilleur feed sign-out.
+- **Pompe « en vol » prolongée sur `consent.youtube.com`** : ~1 h à ~0 CPU, log muet après commit — signature du régime « bump figé `isLoading` + machinerie de retry » déjà documenté (tempête post-JS-C487). Non bloquant pour la navigation hors-consent ; à réétudier si le parcours consent devient périmètre.
+
+### cran 83 (daemons 9377/9378/9381, profils vol810/vol812) : `ev.path` legacy ShadyDOM — premier mur kevlar levé, eval de base débloquée
+
+- **Symptôme** : vol `/watch` → coquille réduite (`ytd-app` + masthead seuls, `<video>` présent, 0 `ytd-*` upgrade) ; `customElements.get("ytd-app")=false`. Log : listener `iron-iconset-added` → `ev.threw`/`ev.error` ×3 (`TypeError: 'push' is not a function`, `cannot read getAttribute of Undefined`, `matches: receiver is not an Element`) puis `dyn.err` tuait l'eval top-level de `base_module_set` → tout `ytd-*` postérieur jamais défini.
+- **Diagnostic** : probe live `typeof ev.path === "undefined"` alors que `composedPath()` fonctionne — trou de compat **legacy Blink/WebKit** : l'ère ShadyDOM/Polymer lit `e.path` directement (`e.path[0]`/`indexOf`/`push`) ; Chrome l'expose encore.
+- **Piège d'implémentation** : un arm `EventHost::get("path")` ne suffit pas — `new Event('x')` est un *literal* (pas `EventHost`) ; pendant le dispatch les listeners reçoivent l'`EventHost` (`event_value` crée le wrapper + proto de l'event), mais hors dispatch `new Event(...)` lit ses own-props. Fix = deux sites : `EventHost::get("path")` → `state.path` pendant le dispatch / `[]` sinon ; `event_ctor` → `path=[]` own-prop sur le literal. Verrou `event_dispatche_surface_honnete` : `arr|4|main|doc` + `path.length=0` hors dispatch.
+- **Effet mesuré en vol (daemon 9377, profil c491, /watch jNQXAC9IVRw)** : la signature `ev.threw`/`ev.error` iconset a disparu — **l'eval du bundle `kevlar_base` aboutit entièrement** : 1038 `ce.define`, `customElements.get` = true pour `ytd-app`/`ytd-watch-flexy`/`ytd-browse`/`ytd-page-manager`/`ytd-masthead`/`yt-icon`/`yt-formatted-string`/`iron-iconset-svg`. Le boot `$T2` (kevlar:27663) **s'exécute** : `ytd-app` porte `dataUpdatePromise`, `ytd-page-manager` contient `ytd-watch-flexy` (structure SPA correcte), **watch page pleinement hydratée** (3549 descendants flexy, `<video>` présent, 40+ suggestions up-next, machinerie commentaires `ytd-comments`/`ytd-item-section-renderer` active, data-binding Polymer `_flushProperties`/`_propertiesChanged` vivant).
+- **Navigation SPA interne prouvée** : clic sur lien `/watch?v=0PT5c1z3LL8` → `yt-navigate-start` émis avec le bon `videoId` → `history.pushState` met à jour `location` → `hasNavigated` passe à true → `ytd-watch-flexy` re-rend. Le cycle SPA démarre correctement.
+- **Mur résiduel nommé — `yt-navigate-finish` gaté par la session Innertube** : la nav démarre (`start`/`pushState`/`hasNavigated`) mais `finish` ne tire pas et la nouvelle donnée ne stamppe pas. Le transport est sain : un XHR manuel `POST /youtubei/v1/browse` (clé `ytcfg` réelle) retourne **`load200` + 139 704 octets** complets. Le rejet récurrent `Error: bb` (kevlar:6968) est nommé : `pw(c, H, ()=>reject(bb))` = `Promise.race([c, setTimeout(H)→reject(bb)])` — **timeout**, pas un échec réseau. La promesse `c` est `v.pNM` = `v8Q.promise` du gestionnaire de session `_.$6`/`q3` (`vLT` crée `nC` = session `ucU` via handshake) — **la session Innertube/attestation ne s'établit jamais → `v8Q` pend → la requête nav de l'app (gatée sur `pNM`) ne peut pas partir → `yt-navigate-finish` absent**. `czN` (garde réponse) n'abort pas (`yt-navigate-error` non émis) → le blocage est **en amont de la requête**, dans le bootstrap de session. **Preuve directe** : `ytd-app.data`/`currentVideoId` restent sur `jNQXAC9IVRw` (l'ancienne vidéo) après le clic — la donnée `0PT5c1z3LL8` n'a jamais atterri, donc la requête nav de l'app n'a jamais été émise (le client Innertube de l'app attend `pNM` = session prête ; le XHR manuel la contourne, d'où le 200). Même mur pour le playback : `/videoplayback` sur `googlevideo.com` → **403** (les URLs de stream exigent un `pot`/attestation botguard). **Preuve décisive du gate** : second clic nav → `yt-navigate-start|RRBN_4L09Mg` émis mais **delta 0 requête `/youtubei`** dans le log — la nav n'émet jamais sa requête de données, bloquée en amont du réseau sur `pNM` = session prête. Le mécanisme : `iYn` fetch `attestation_challenge_fetch` → lit `A.bgChallenge` → `M1T` le résout (solver botguard) — sans botguard fonctionnel `v8Q` pend → requêtes de l'app gatées → nav/playback impossibles. **Verdict : ce n'est plus un bug moteur, c'est l'anti-bot YouTube** — `ucU`/`nC.promise` attendent un handshake d'attestation (botguard/`GenerateIt`/vis) qu'aucun moteur non-bot ne satisfait sans implémenter le solver.
+- Suspicions résolueur écartée : `RESOLVE_VERIFY` = 0 divergence réelle, `NO_RESOLVE` A/B non conclusif (variante serveur différente servie entre les runs).
+
+## Cran 83 — triage vol 811 (google.com, agent parallele)
+
+- **B1 (critique, solde — commit `5b546ab8`)** : fuite de portee `for-in`/`for-of` lexical dans le resolveur JS-C490 — portee poussee jamais depilee → profondeurs surestimees pour les soeurs → liaison globale silencieuse → crash `xjs` google.com (`TypeError: cannot set 'we' of Undefined`, controleurs Wiz morts). Fix `JS-C490e` : pop apres le corps + `scopes.truncate(base)` defensif dans `walk_fn` ; verrou `c490_forin_forof_ne_fuient_pas_leur_portee`. Sous-point IC deja solde par `b6d71a11`.
+- **B2/B3/B5 (NAVIGATEUR, ouverts)** : `apply_payload` perd `document_mode` → Quirks (`apply.rs:709`) ; `set_attr` `"media"` sur `<link>` n'appelle pas `note_link` (`dom.rs:3885`) → feuille `ogb_ss` jamais chargee ; saisie `<textarea>` duplique le noeud texte entre `edit_field`/`sync_field` (`"rusrust"`).
+- **B4/B6/B7 (PIPELINE, signales)** : grid `fit-content` en passe 2 + empilement `grid-area:1/1` + `margin-top:auto` ; halo `box-shadow` trop dense ; centrage vertical des `<input type=submit>`.
+- **B8** : gate BotGuard `SG_SS` SERP — connu (`§B-110`), serveur-side.
+
+### cran 84 (fix JS-C492 / YT-2 du vol 811-812) : corruption `resolved_map` par `ptr(Expr)` pendants — corps baissé gen/async partagé par `lit`
+
+- **Anomalie YT-2 confirmée** (`explorer-jscore`, rapport `RAPPORT_VOL_2026-11-12_AGENT811_YOUTUBE.md`) : `lower_suspend_fn` allouait un `Rc<Vec<Stmt>>` **neuf à chaque appel** d'une fonction `async`/`function*` (`call_function_inner`). `resolved_map` (clé `ptr(Expr)→profondeur`, JS-C490) n'était rempli qu'au **premier** appel (`ensure_lit_resolved` dédup par `ptr(lit)`) et `resolved_guard` ne gardait que `lit`, **pas `lowered_body`**. Le corps baissé du 1er appel mourait avec son `GExec` → ses adresses `Expr` libérées restaient indexées → un corps baissé ultérieur réutilisant ces adresses lisait une **profondeur fantôme** → mauvaise porte lue **en silence** (même classe silencieuse que les collisions JS-C490) → corruption de la cascade async YouTube (`Error: bb`, `yt-navigate-finish` non émis).
+- **Fix** : `lowered_suspend_cache: HashMap<ptr(lit), Rc<LoweredSuspend>>` — un seul corps baissé **partagé** par littéral, cloné `Rc` dans chaque `GExec`. `LoweredSuspend` épingle `lit` (→ `ptr(lit)` clé non réutilisé) + `params` + `body` (→ adresses `Expr` vivantes). Chaque appel résout via `resolved_map` (correct + rapide, plus de marche complète au 2e+ appel). Purge **atomique** avec `resolved_map`/`resolved_lits`/`resolved_guard` au cap 512 — les corps épinglés ne libèrent qu'avec les `ptr` qu'ils indexaient.
+- **Verrou** : `suspend_lowered_body_shared_scope` (`lazy_gen`) — 64 générateurs + 32 `async` lisant une var de portée englobante, instanciés/libérés en boucle. Suites vertes : `lang` 313/313, `dom` 263/263, `lazy_gen`, `await_thenable`.
+- **Chaîne YouTube attendue** : si le bootstrap session Innertube (`_.$6`/`vLT` — générateurs `_.p`/`JSC$10237_yield`) était corrompu par les profondeurs fantômes, `v8Q`/`pNM` peut désormais s'établir → lever le gate `Error: bb` qui bloquait l'émission de la requête nav. À valider en vol.
+
+- **Suite cran 84 — validation en vol JS-C492 (daemon 9379, profil c492, /watch jNQXAC9IVRw)** : comportement **inchangé** — hydratation complète (1038 `ce.define`, `ytd-*` tous définis, `watch-flexy` rendu), nav SPA démarre (`yt-navigate-start` + `pushState`), mais **0 requête `/youtubei` post-clic**, `yt-navigate-finish` absent, `Error: bb` persiste (×10 à ~77 s puis silence = épuisement `maxAttempts` → `ucU(12h)`). Le fix de lifetime est réel et gardé, mais **le gate n'était pas la corruption `resolved_map`**.
+- **Chaîne `bb` tracée jusqu'au programme BotGuard** : `bb` = `pw(v.pNM, 60s)` (kevlar:6968 case 20) — `v = new _.$6({challenge:Qk})` extrait `program`+`globalName`("trayride") du protobuf → `O=window.trayride.a` exécute le programme BG → `pNM` = dérivé de `ntR`, résolu quand le programme appelle `g`. **État mesuré** : `trayride` VM chargée+exécutée (`/js/th/` 64 Ko), `ntpevasrs` registre installé (`IbO` a tourné → `Z2z`/`qwO`/`ytAtR` livré et consommé), iframe sandbox créée, `fk.w3T` posé (`blc()` → objet = `iYn` a complété le fetch challenge une fois — `eis` enregistré tôt). Mais le programme BG **n'appelle jamais `g`** → `ntR`/`pNM` pendent → `bb` → session `v8Q` morte → requêtes Innertube de l'app gatées → nav-finish absent. `trayride.a` 0 ré-invocation en 90 s (boucle épuisée avant armement du spy).
+- **Fingerprints moteur visibles** : `navigator.userAgent` ≠ en-tête HTTP (corrigé JS-C493), `Error().stack` = 8 chars (V8 ≈ 200+), `plugins` = null — le programme BG fingerprinte précisément ces surfaces ; son `g` non appelé est probablement une fin d'exécution anti-bot ou un stall sur un gap d'API non encore isolé. Mur résiduel = **BotGuard tournant dans notre moteur** — la frontière bug-moteur/anti-bot est là.
+- **JS-C493** : `navigator.userAgent` = chaîne `User-Agent` HTTP exacte (cohérence navigateur réelle — bug d'interne, pas du spoofing : token `Explorer` conservé).
+- **Suite cran 84 (daemon 9379, profil c493, JS-C492+C493) — instrumentation directe du chemin BG** : spies `window.trayride.a` (VM BotGuard, installée par `/js/th/`) et `ntpevasrs.bicf`/`bilaf`/`biup`/`bcr` armés **avant** les cycles `bb`. Résultat mesuré : **`trayride.a` = 0 appel**, `__reg` = 0 — alors qu'un `bb` a tiré (03:10:09) et que `fk.w3T` est posé (`blc()` → objet). Lecture : le `v` de `vLT` case 20 est construit (`pw` court sinon pas de `bb`) mais `O=_.gi[E].a` invoqué ≠ `window.trayride.a` — soit `E` (globalName extrait du challenge) nomme un autre global, soit `_.gi` n'est pas `window` dans ce scope — et le programme BG ne rejoint jamais la VM visible. `bicf` jamais appelé sur le registre courant (les `fk` antérieurs ont pu être servis par des registres `ntpevasrs` remplacés — `IbO` écrase le global à chaque `Z2z`). Boucle `vLT` en backoff `ucU` (jusqu'à 600 s) → `bb` cadence ~77 s puis silence. **Mur résiduel = exécution du programme BotGuard** (bytecode opaque fingerprintant le moteur) — VM chargée, jamais complétée.
+- **Bugs moteur réels séparés observés en vol (à traiter)** : `TypeError: importNode: nœud requis (reçu=undefined)` + `cannot read localName of Undefined` (kevlar 8890-9123/13278-284 — clonage de template `importNode`/stamping) ; `dyn.err dyn:7 syntax error at 1:12` (script dynamique) ; `fn.restricted` ×4 (`caller`/`arguments` sur fonction stricte — probes BG probables) ; `Error().stack` = 8 chars (V8 ≈ 200+) et `plugins` = null — fingerprints BG probables.
+
+### cran 85 (direction A — contradiction `trayride.a=0`/`bb` resolue en `_.gi != window`) : la VM BotGuard vit sur un autre objet global que `window`
+
+- **Instrumentation determinante (daemon 9379, tab fraiche, accessor arme AVANT eval BG ~04:50)** : `Object.defineProperty(window,'trayride',{get,set})` + `delete` posteriori. Mesure tab 2 : **`gets:4`, `sets:0`**, accessor jamais remplace (`hasGet:true` jusqu'au delete) — `window.trayride` n'a **jamais existe** dans le ctx top-level : pas de `set`, pas de `var` (un `var` top-level aurait remplace l'accessor), pas de `defineProperty`.
+- **`/js/th/` (VM BG, 63 896 o) evalue a 04:52:07 dans tab 2** — pendant que l'accessor rendait `undefined` — et `bb` a tire a **04:53:19** (`kevlar:6968`) → `v=new _.$6` construit ~04:52:19 → `O=_.gi["trayride"].a` invoque avec succes → `_.gi["trayride"]` etait truthy **alors que `window.trayride` etait `undefined`** → **`_.gi` n'est pas `window`** dans le scope `_.$6`.
+- **Eliminations** : `E="trayride"` confirme (`bgChallenge.globalName`); `trayride.a(...)` appele directement fonctionne (spy compte — integrite du wrapper prouvee); `this===window===self===globalThis` en eval ET en top-level d'un `<script>` reel injecte; `typeof trayride` (binding env) absent; aucun des 602 globals `window` n'a `.a` fonction; `window[0..2].a` absents; les 2 iframes `contentWindow` sans `trayride`; `worker-serialization` jamais charge; iframe ServiceLogin = 401 → ctx 1 vide.
+- **Conclusion** : `_.gi` (`this||self` evalue a la top-level de kevlar) et le global sur lequel la VM `/js/th/` installe `trayride` sont le **meme objet — mais pas le `window` du ctx 0**. Soit kevlar/le script BG evaluent dans un `CtxId != 0` (attribution ctx du script element), soit `self.global` passe en `this` a `exec_program_inner` est un objet global **distinct** de la facade `window` exposee aux sondes. **Bug moteur probable, pas anti-bot** — le programme BG tourne (il recoit ses appels), il vit juste sur un global que les sondes `window` ne voient pas.
+- **Prochaine instrumentation (engine-side)** : dans `exec_program_inner`/`eval_script_el`, logger `cur_ctx` + `ObjId(self.global)` + `ObjId(window)` par script — revelera si kevlar/`/js/th/` obtiennent un global/ctx different du ctx top-level des sondes `eval`. Puis tracer `_.gi[E]`/`O` directement.
+- **Reste en suspens (hors BG)** : `importNode(undefined)` + `localName` de `undefined` (stamping `dom-if`/`dom-repeat`), `dyn.err dyn:7` (syntax 1:12), `Error().stack`=8c, `plugins`=null.
+
+### cran 86 (sonde engine `EXPLORER_CTX_PROBE`, JS-C494) — `_.gi` EST `window` : la contradiction du cran 85 etait un artefact d'armement, le mur est le programme BG lui-meme
+
+- **Instrumentation moteur livree** (`find_prop`/`write_prop`/`set_own`/`set_own_attrs` + `eval_script_el`/`eval_source`, gated `EXPLORER_CTX_PROBE`) : chaque eval logge `ctx`/`global`/`window` ObjId ; chaque lecture/ecriture `trayride|t|ntpevasrs` logge `base_id`/`obj`/`ctx`.
+- **Verdict** : kevlar_base eval `ctx=0 global=37 window=37` — `_.gi` = `self.global` = **obj 37 = window**. `write_prop key=trayride base_id=37` ×2 → la VM BG s'installe sur `window` par un `set` ordinaire. `window.trayride` = `{mtI_,m,ad,a}` reel (probe live). `trayride.a` invoque (`calls:1`) — le programme `mr` **tourne**.
+- **Le paradoxe cran 85 explique** : `gets:4/sets:0` sous accessor = les `write_prop` d'installation avaient eu lieu **avant** l'armement de l'accessor (~t+10s vs eval `/js/th/` — l'install n'attend pas le checkpoint du script-el : le programme s'auto-installe). Sous accessor, `window.trayride` lisait `_t`=undefined → `Va` — et les `bb` ulterieurs venaient de `pw` crees avant l'armement ou d'une fenetre de backoff >60s. `_.gi` n'a jamais ete un autre objet — mes instrumentation de page ne pouvait pas voir l'install passee.
+- **Le vrai mur** : `O(W,g,...)` invoque → iterateur rendu → `_.P().next()` consomme → `pNM` pend 60s → `bb` — **le programme BG n'appelle jamais le callback `g`** (spy `args[1]` arme, `g:0`). Le stall est interne au bytecode `mr` — fingeprints moteur confirmes : `Error().stack` = `"Error: x"` (8c — V8 rend `Error: x\n    at <anonymous>:l:c`+frames ; notre `stack_text` n'emet rien quand `call_stack` est vide au top-level), `navigator.plugins` = `undefined` (PluginArray attendu), `Error.stackTraceLimit` = 50 (V8=10 — expose), `t.m` = 41. Reparer `stack` top-level exige un tracking de la position d'appel (invasif) — a evaluer comme prochain pas.
+- **Reste** : `importNode(undefined)`/`localName` (stamping dom-if/dom-repeat), `dyn.err dyn:7`, et la validation nav (post-clic `/youtubei` + `yt-navigate-finish`) toujours gatee par `pNM`/`bb`.
+
+- **JS-C495** : `navigator.plugins` = PluginArray vide `{length:0,item→null,namedItem→null,refresh()}` + `toStringTag` — `undefined` etait plus fingerprintable que la collection vide (tout navigateur reel l'expose). `Error().stack` top-level reste 8c : la frame d'appel-site V8 exige une position par expression que l'AST ne porte pas (`Expr` sans `pos`) — chantier a part si le gate BG le confirme.
+
+### cran 87 (direction C — bug moteur avéré résolu, JS-C496) : `importNode` rendait `undefined` — le clone détaché était récolté par le GC pendant `ce_upgrade_subtree`
+
+- **Bissection live (daemon 9379, /watch)** : `document.importNode(document.body,true)` → **`undefined`** ; `document.__shady_native_importNode(body,false)` → `1/body`, `(body,true)` → `undefined`. Le wrapper ShadyDOM est innocent — notre natif retourne `Undefined`. Calibre : `ytd-app` (9931 nœuds) et `html` profonds OK ; `<div>` petit OK ; `body` profond → UNDEF de façon reproductible.
+- **Cause racine** : `clone_node` produit un sous-arbre **détaché sans wrapper** ; `ce_upgrade_subtree` joue ensuite `call_value_ctor` par élément CE — du JS → `safepoint_gc` → `dom.collect_garbage(seeds)` où seeds = NodeIds des wrappers vivants. La racine **non-CE** (`body`) n'est jamais wrappée (`ce_upgrade_node` rend tôt sans def CE) → non seedée, non attachée → `free` → `node_value` final = `Undefined`. Les racines CE (`ytd-app`) survivent : wrappées d'office puis rootées comme `this` du ctor. Production : `myn`/`_stampTemplate` → `F=importNode(...)=undefined` → `F.__noInsertionPoint=` → `TypeError` — et les parses avortés laissaient des `F._templateInfo` partiels sans `.content` (cause probable de l'autre erreur `importNode: nœud requis (reçu=undefined)` — le TypeError lui-même est spec-Chrome, gardé).
+- **Fix** : `Dom.pinned: HashSet<NodeId>` fusionné dans `extra_kept_nodes` (fermeture descendante → tout le sous-arbre retenu) ; `ce_upgrade_subtree` épingle `root` avant la boucle, dé-épingle après (même en `Err`). Couvre `importNode` (même-doc, `adopt_from`, `clone_shallow_from`), `cloneNode`, `adoptNode`, `customElements.upgrade`.
+- **Verrous** : `collect_retient_clone_epingle` (dom.rs — pin → survie collect, unpin → libéré) ; `c496_clone_survives_gc_during_ce_upgrade` (tests/dom.rs — `set_mem_limit` calibré pour armer `gc_due` pendant le ctor CE ; sans pin → `undefined|-|undefined|-`, avec → `object|1:2|object|1:2` — test prouvé capturant par inversion).
+- **Validation en vol (N1.5 du plan vitrine)** : `importNode(body,true)` → `1/body`, `div`→`1:1`, `<template>`→`1/1`, wrapper ShadyDOM `wrapD`→`1` ; 206 `dom-if`/`dom-repeat`/`ps-*` scannés → **0 `_templateInfo` sans `.content`** ; 3 flips `if` sans erreur ; log sans `importNode`/`localName`/`noInsertionPoint`. L'élément empoisonné du cran précédent n'apparaît plus — cohérent avec l'hypothèse « clone récolté → parse avortée ».
+- **Non-retenu** : `HTMLTemplateElement.decorate` (API polyfill webcomponents-lite, absente de Chrome natif — Polymer la garde par `&&` et ne l'appelle que sur `!F.content` ; l'état qui l'exigeait provenait du bug réparé, pas d'un contrat à honorer).
+
+### couture NAV→PIPE — file `css.values` enregistrée (2026-11-12)
+
+- **Demande** : la jauge `check affectsv` (NAV, `explorer-cli`) est
+  épuisée à **834/2273 (36,7 %)** — chaque miss restant est un trou
+  moteur documenté. Le plan complet (sprints 1-4 + queue P2 +
+  périmètre SVG à arbitrer) est posé dans
+  `docs/roadmap-equipe-pipeline.md` § « Plan `css.values` — file
+  des trous moteur ». Ordre proposé : `background-position-x/y`,
+  `overflow-wrap`, `empty-cells`, `white-space` variantes,
+  `currentColor`, `vertical-align:top` (sprint 1, ROI max) →
+  `position-try` area-keywords, `break-*` multicol,
+  `alignment-baseline` (sprint 2) → `corner-shape`, `rule`/`row-rule`
+  (sprint 3) → `offset-*`, `shape-outside`, `container-*`,
+  `table-layout:fixed`, `hyphens` (sprint 4).
+- **Contrat touché (additif, fait)** : `DisplayList::dump`
+  (`explorer-render/src/display.rs`) — outil de mesure seul, pas
+  le contrat produit — imprime désormais `repeat`/`origin`/`blend`
+  de `BackgroundImage`, les couches de `PushMask` (`dst`/`repeat`/
+  `luminance`/`composite`), les ops de `PushFilter`, largeurs/
+  couleurs/styles/rayons de `Border`, couleur/`FontRequest`/glyph-ids
+  de `Text`, couleur de `DecoRect`, rayons de `FillRect`. Aucune
+  signature changée, sortie texte enrichie uniquement.
+- **Décision à prendre (PIPE/lead)** : le chantier `<svg>` inline
+  (~80 misses + surface SVG BCD) — lancer ou déclarer hors
+  périmètre assumé.
+
+### couture interne NAV — plan équipe enregistré (2026-11-12)
+
+- **Plan NAVIGATEUR posé** dans `docs/roadmap-equipe-navigateur.md`
+  § « Plan NAVIGATEUR — vitrine YouTube + surface navigateur » :
+  Sprint N1 vitrine (`pNM`/`bb` BotGuard — fingerprints `stack`=8c
+  top-level, `stackTraceLimit`=50, `t.m`=41 ; JS-C496 en vol ;
+  `dyn.err dyn:7` ; shot `EXPLORER_NET_RECORD`+rejeu), Sprint N2
+  `api` Pareto (`Range`/`Selection` profonds, IDL réel Element/
+  Document/Window, hors-périmètre sensors à déclarer), Sprint N3
+  perf jscore (`prop_scan` 72 M, inline-cache `(env,nom)→cellule`),
+  Sprint N4 terrain (`site_harvest` ordonne PIPE + N2, `geo_diff`,
+  replays versionnés).
+- **Complémentarité** : la file PIPE `css.values` (même commit)
+  couvre le domaine pur ; N2 couvre la surface navigateur ; les
+  deux convergent vers le shot vitrine (N1).
+- **Rév. 2 (même journée)** : le détail déménage dans
+  `docs/plan-navigateur-vitrine.md` — source de vérité unique ;
+  la section roadmap ne garde que les cases de suivi.
+  Corrections embarquées : `stackTraceLimit` = propriété
+  **absente** du moteur (le « 50 » lu en vol = assignement
+  kevlar collé en own property — tâche = propriété réelle
+  défaut 10 honorée par `stack_text`) ; **N0.0** hygiène
+  `.eval/` (partiellement tracké — session cookies/history
+  commitée, 1,8 Go → sorti de l'index + `.gitignore`) ;
+  **N0.3** shot de contrôle `geo_diff` sur rejeu avant tout
+  investissement BG ; `fn.restricted` ×4 (probes
+  `caller`/`arguments`, cran 84) et corrélation
+  `dyn.err dyn:7`/fenêtre `mr` (cause première possible de
+  `pNM`) ajoutés à la file BG ; limite `DirTransport` notée
+  (clé sans body POST — ordre de requêtes variable).
+
+### couture PIPE → NAV — artefacts de fixture `check affectsv` (2026-11-13)
+
+- **Constat sprint css.values S1** : plusieurs misses `affectsv`
+  résiduels ne sont plus des trous moteur mais des fixtures dont
+  l'effet n'est pas observable — le moteur peint déjà le bon
+  résultat, la valeur sondée est indiscernable du défaut.
+- **`empty-cells:hide`** (R-263) : la cellule vide de la fixture
+  n'a ni `border` ni `background` propre → rien à cacher, `show`
+  et `hide` peignent à l'identique. Pour que la valeur flipe, la
+  `<td>` vide doit porter un décor (`td{border:1px solid}` ou
+  `background`). Côté moteur, le critère est désormais complet
+  (blancs seuls = vide, `\u{A0}` = contenu).
+- **`line-break:loose|normal|strict`** (R-262) : règles de
+  rupture CJK (UAX #14 n'expose pas de niveau de sévérité et le
+  latin n'a pas de coupure à assouplir) — sur fixture latine le
+  rendu est identique par construction → `na` honnête sauf si la
+  fixture porte du CJK.
+- **`vertical-align:top`** sur cellule unique (R-266, en cours
+  d'analyse) : baseline cellule ≈ baseline sœur quand les fontes
+  coïncident → `top` indiscernable de `baseline`. Une sœur de
+  hauteur/ligne différente rend la valeur observable.
+- **Demande NAV** : re-tourner `check affectsv` sur un profil
+  post-R-261…R-266 pour rebaser le score ; journaliser les `na`
+  de fixture séparément des trous moteur réels.
+
+### couture PIPE → NAV — sprint css.values S2 soldé (2026-11-13)
+
+- **R-267/R-268/R-269 posés** : `position-try` couvre tout le
+  vocabulaire `<position-area>` (~95 misses visés) ; `break-*`
+  multicol + alias `page-break-*` + `avoid` ; `alignment-baseline`
+  complété (`top`/`bottom`/`above`/`below`/`over`/`under` =
+  bords de ligne).
+- **Artefacts `affectsv` probables à journaliser** :
+  - `position-area`/`position-try` : le déplacement est
+    **translate-only** — `span-*` retombe sur le côté de base,
+    `span-all` ≈ centré ; si la fixture sonde la taille spannée
+    ou le writing-mode vertical, le miss sera honnête mais
+    borné (approximation documentée, pas de re-flow).
+  - `position-area` mot-clé seul (`bottom`) : comportement
+    corrigé vers la spec — autre axe `span-all` ≈ **centré**
+    (était aligné-start) ; une fixture qui attendait le bord
+    gauche mesurera l'ancien défaut.
+  - `break-inside:*` : toutes valeurs ≡ `auto` honnête — les
+    unités multicol sont insécables de fait → `na` probable.
+  - `alignment-baseline:first|last|auto` : ≡ `baseline` sur
+    ligne unique → `na` honnête.
+- **Demande NAV** : second re-tour `check affectsv` post-S2 —
+  les ~95 `position-try` + ~16 `break-*` + ~10
+  `alignment-baseline` devraient basculer en masse.
+
+### couture PIPE → NAV — R-270 `corner-shape` posé (2026-11-13)
+
+- **`corner-*-shape` consommé** : les 17 noms étaient routés
+  mais lus nulle part (~50 misses visés). `corner-shape` +
+  `corner-{side}-shape` s'expansent en longhands physiques ;
+  les logiques `corner-{block,inline}-*`/`{s|e}{s|e}-shape`
+  passent par `resolve_logical_props` comme `border-*-radius`.
+- **Contrat touché** : `DisplayItem::FillRect` et
+  `DisplayItem::Border` gagnent `corners: [f32; 4]` (exposant
+  superellipse `K` par coin — `round`=1 = comportement
+  historique). **Extension additive de champ** : le dump
+  `fill`/`border` imprime désormais `c{…}` en fin de ligne —
+  si une fixture NAV parse ces lignes, tolérance requise.
+- **`affectsv`** : les sondes par coin devraient toutes
+  basculer (`superellipse(k)` compris). Bornes honnêtes à
+  journaliser si miss : `BoxShadow`/`PushClipRounded`/
+  `clip-path:round`/`border-image` restent ronds ;
+  `corner-shape` n'a d'effet qu'avec `border-radius` > 0
+  (pas de rayon propre — `corner-shape` seul = carré, comme
+  les navigateurs) ; concave (`scoop`/`notch`) approximé en
+  cordes — un oracle à sub-pixel fin pourrait diverger.
+- **Sprint 3 bouclé — R-271 `rule`/`row-rule`/`rule-*`** :
+  `rule` pose les deux axes → `column-rule-*` peints en
+  multicol ; `rule-break` (défaut : coupe aux `column-span:
+  all` — §5.1 multicol-1 ; `none` traverse) ; `rule-inset*`
+  raccourcit. Bornes `affectsv` à journaliser si miss :
+  pas de traits de ligne peints (multicol sans lignes —
+  flex/grid gap decorations = chantier dédié), et
+  `rule-overlap`/`visibility-items`/`inset-cap*`/`junction*`/
+  `row-rule-*`/`rule-outset` stockés dormants.
+- **Demande NAV** : troisième re-tour `check affectsv`
+  post-S3 — les ~50 `corner-*` + ~45 `rule*` devraient
+  basculer.
+
+### couture NAV → PIPE — re-tour post-S3 fait : **1026/2240 (45,8 %)** (2026-11-13)
+
+- **+104 flips nets** confirmés (`css.values` 922 → 1026,
+  baseline `bcd_baseline.json` rebasée — cliquet à jour).
+- **Rattrapage contrat côté NAV** : `DisplayItem::corners`
+  (champ additif R-270) cassait 6 littérateurs
+  `explorer-core` (`apply.rs` caret/find, `popup.rs`
+  fond/bordure/survol `<select>`) — passés à `[1.0;4]`
+  = rond historique. Compilation workspace restaurée.
+- **Jauge ajustée (NAV)** : `corner-*` → ctx
+  `border-radius+fond` (forme inerte sans rayon — normal) ;
+  `rule*` → fixture multicol + spanner `column-span:all`
+  + ctx `columns:2;column-rule` (`rule-break:none` = 1 trait
+  vs segments — discriminant). `na` : `corner-*-shape:round`
+  (initiale, repli générique) et `rule-break:intersection|
+  spanning-item` (≡ découpage défaut).
+- **`miss` honnêtes attendus, conformes aux bornes PIPE** :
+  `row-rule*`/`rule-outset`/`rule-overlap`/
+  `rule-visibility-items`/`rule-inset-cap*`/`rule-inset-
+  junction*` — stockés dormants, pas de traits de ligne en
+  multicol (flex/grid gap decorations = chantier dédié).
+- **File restante** : Sprint 4 (`offset-*` ~52,
+  `shape-outside`, `container-*`, `table-layout:fixed`,
+  `hyphens`) + résidus (`alignment-baseline:alphabetic`,
+  `background-position-x/y` offsets absolus sur image non
+  calibrée, `background-*:multiple_backgrounds` = sous-
+  feature BCD pas valeur).
+
+### vitrine — livraisons M0/M1 amont (2026-11-12, nav/youtube-fix)
+
+- **N0.1 aval posé** (`9887a9d6`) : `DirTransport` discrimine
+  les requêtes à corps par sidecar `.req` (match exact du corps
+  puis repli ordre d'enregistrement — corps volatil couvert) ;
+  enregistrements existants sans `.req` rejouables à
+  l'identique. Prérequis du vol enregistré : la clé de rejeu
+  est figée avant que le corpus ne soit écrit.
+- **N1.2 livré** (`fdfb8356`) : `Error.stackTraceLimit` réel —
+  own property défaut 10 non-énumérable, **live** (`=3` → 3
+  frames, `0`/`NaN` → 0 frame) ; couvre `Error().stack` et
+  `captureStackTrace`. Fingerprint BG soldé côté surface JS.
+- **N1.6 amont** (`7bf2ed1e`) : `dyn.err` joint `len` + extrait
+  borné (400 c, sauts aplatis) sous sonde opt-in
+  `EXPLORER_DYN_PROBE` — la source du `dyn:7` « 1:12 » sera
+  lisible au prochain vol/rejeu (variable ajoutée à la
+  batterie `vol-youtube.md`).
+- **Corrélation mesurée (offline, vols archivés)** : le
+  `dyn.err` tire **pendant l'hydratation Polymer**
+  (`ce.clone`/`psp.hit`/`life.call` sur `ytd-*`), hors fenêtre
+  `mr`/`bb` — la piste « `<script>` de template cloné »
+  (territoire JS-C496) est désormais plus probable que la
+  cause BG directe. Le plan garde les deux hypothèses ; la
+  source capturée tranchera.
+- **N1.3 — verdict (archéologie `vol_ctxp` + corpus
+  `replay-vol813`)** : `Error("bb")` = watchdog 60 s
+  (`pw(v.pNM, lUI=6E4, ()=>Promise.reject(Error("bb")))` —
+  kevlar l6987, config `BsO` l6990). La session BG construit
+  `v8Q`/`pNM` (l6968) qui ne se résout **ni par `h7H`**
+  (succès, l6979) **ni par `R7c`** (abort `Za`, l6975) →
+  le programme `_.$6` cale sur un **`await` pendu**, pas un
+  throw fatal : le polling `t`/`trayride` reste dense
+  jusqu'au bout du run et `fn.restricted` ×1 n'y coupe rien
+  (exécution continue 130 k lignes après). L'event loop est
+  sain (`sched.tally` drainé, réseau inflight→0). Awaits
+  dominants (prom.pending tardif) : **`_.mr(<token>)` —
+  chargeur paresseux kevlar** (`z.load`→`LgV`→`setLoaded`,
+  file sérialisée ; le module `Tx5i5b` n'apparaît **0 fois**
+  dans le log → bloqué en amont du réseau — un chunk
+  antérieur chargé mais jamais `setLoaded`) + complétions
+  événementielles (`script.onload/error`, `caches.match`,
+  deferreds internes BG l6931). **Bug moteur fixé** :
+  `note_attached_scripts` enfilait les `<script type=…>`
+  **inertes** (data-blocks `application/json` clonés depuis
+  les templates CE — 2 sites, `dom.rs` l2145/l2514, sans le
+  filtre `script_parse_exec` que `from_html` applique) →
+  source probable des `dyn.err` `syntax error at 1:12`
+  (`dyn:7`/`dyn:8`, tirés en plein `ce.clone`/`_attachDom`).
+  Sonde `dyn.err` étendue : `kind` (src/inline) + `ty`
+  (attribut `type`) sous `EXPLORER_DYN_PROBE` — le prochain
+  vol tranchera chunk fetché (vrai gel de file `mr`) vs
+  data-block inerte (faux-positif). Verrou :
+  `inserted_data_script_stays_inert`.
+
+### couture PIPE → NAV — R-272 `offset-*` motion-path (2026-11-13)
+
+- **`offset-path`/`offset-distance`/`offset-position`/
+  `offset-anchor`/`offset-rotate` + shorthand `offset`** :
+  transform de motion (point + tangente à distance `d`)
+  composée en `PushTransform` au paint. Chemins supportés :
+  `ray`/`circle`/`ellipse`/`inset`/`rect`/`xywh`/`polygon`.
+  Le bloc conteneur est pris = `content_rect` du parent
+  d'arbre (vrai cb abs = padding box de l'ancêtre
+  positionné — approximation journalisée). Dormants :
+  `path('…')`/`url()`/`coord-box` nus.
+- **Demande NAV** : quatrième re-tour `check affectsv`
+  post-S4 — les ~52 `offset-*` devraient basculer
+  (fixtures probables : `offset-path:circle()/ray()` +
+  distance `%`/px sur élément `position:absolute`).
+
+### couture NAV → PIPE — re-tour post-R-272/273 : **1041/2231 (46,7 %)** (2026-11-13)
+
+- **+15 flips nets** (baseline rebasée 1026 → 1041) :
+  `offset-path` (`ray`/`circle`/`ellipse`/`inset`/`polygon`),
+  `offset-distance` px/%, `offset-rotate`, `offset-position`,
+  `offset-anchor`, shorthand `offset` + **`shape-outside`
+  circle/ellipse/inset/polygon et `shape-margin` (R-273
+  mesuré dans la même passe)**.
+- **Jauge NAV ajoutée** : fixture `offset-*` (enfant
+  `position:absolute` dans parent `relative` 200×200 — cb),
+  fixture `shape-*` (flottant 80×80 + texte de
+  contournement). `na` : `offset:none`, `offset-path:none`,
+  `offset-rotate:auto|normal`, `offset-anchor:auto|normal|
+  50% 50%`, `offset-position:normal|auto`,
+  `shape-outside:none|margin-box` (≡ flottant nu),
+  `shape-image-threshold` (NO_ORACLE — sources image
+  dormantes, même borne que `mask-*`).
+- **`offset-anchor` après le fix annexe R-273** : la sonde
+  exige `offset-position` fixe (`normal` suit l'ancre —
+  `T − A` invariant, neutre par construction) : `bottom left`
+  /`right bottom`/`left top` tous `ok`. Reste `miss` honnête :
+  `shape-outside:url()/image()`
+  (analyse alpha absente), sous-features `offset-path`
+  (`ray()`/`coord-box`/`path()` dormants — bornes PIPE
+  documentées). Le delta attendu ~52 → réel +15 : la
+  majorité des clés `offset-*` BCD sont des sous-features
+  de formes dormantes, pas des valeurs flippables.
+
+### note NAV — vol 813 enregistré + mesures N0.2/N0.3 sur rejeu (2026-11-13)
+
+- **N0.1 bouclé** : corpus `replay-vol813` (300 fichiers/67 Mo,
+  commit corpus `67ccaf4`) rejoué offline déterministe — deux
+  `explorer-cli shot` consécutifs produisent des PNG **bit-identiques**
+  (3 923 098 octets). Fix rejeu h2 embarqué : `reason` vide →
+  décodage par lignes (`e8291838` + test `decode_reason_vide_http2`).
+  `EXPLORER_NET_RECORD`/`NET_REPLAY` désormais câblés dans le daemon
+  (`a079c497`), pas seulement le CLI.
+- **N0.2 — baseline J17 sur rejeu accueil** (archivée
+  `youtube/j17-vol813-baseline.txt`) : `prop_scan=7 526 464`,
+  `prop_lookup=3 613 547`, `env_gets=2 784 806`, `call=750 858`,
+  `call_nat=334 115`, `env_ns=305,7 ms`, `prop_ns=548,6 ms`.
+  `prop_scan` reste le goulot compté #1 (N4.1) mais 10× sous la
+  mesure « 72 M » de la carte des murs — re-mesurer sa source.
+- **N0.3 — shot de contrôle + oracle Chrome** : `ref_capture.mjs`
+  a gagné `--cookie nom=valeur@domaine` (CDP `Network.setCookie`
+  pré-nav) — `SOCS=CAI` saute le mur consentement EU. **Constat
+  produit majeur : Chrome réel en profil froid/consentement rejeté
+  affiche lui aussi un feed vide** (« Faites des recherches pour
+  commencer ») — le `items:0`/`shownItems:1` du moteur est le
+  comportement conforme, pas un mur NAV. La cible vitrine
+  « feed peuplé » exige un profil amorcé (historique/session).
+- **geo_diff accueil (rejeu vs Chrome, tol 2 px)** : 65,1 %
+  divergents sur 43 appariés, +212 moteur-seuls / +330 réf-seuls.
+  Divergences dominées par des **boîtes à h=0** dans le masthead
+  (`span.yt-icon-shape`, `a#logo`, `#content` h=0→176) — le
+  document matché est le bon (searchbox à +52 px près, même
+  structure). Verdict N0.3 : **écart résiduel dominé côté PIPE**
+  (sizing intrinsèque SVG/icônes, hauteurs flex) — la file M1
+  (BG/fingerprints) garde son ordre mais M3/paint ne gate pas
+  le squelette ; la parité feed attendra le profil amorcé.
+
+### couture PIPE — R-273 `shape-outside` (css.values S4)
+
+- **Modèle** : `FloatCtx.left/right` : `Vec<Rect>` →
+  `Vec<FloatRect{rect, shape}>` — la marge-rect pilote
+  placement §9.5 / clear / containment ; la forme ne mord
+  que les lignes (`band`/`band_over` → `bite_left/right`
+  sur l’intervalle vertical). Pas de changement d’API publique
+  (types `pub(crate)`).
+- **Formes** : `circle`/`ellipse` (`at`, rayon % = √(w²+h²)/√2),
+  `inset`/`rect`/`xywh`, `polygon` ; `shape-margin` dilate
+  (sauf polygon). Référence : `margin-box` défaut §3,
+  `border-box` explicite, `padding`/`content` → bordure (borne).
+- **Bornes** : `url()`/`image()`/`gradient()` → None (pas
+  d’analyse alpha — `shape-image-threshold` dormant ;
+  chantier dédié si la jauge le justifie).
+- **Fix annexe** : `offset-anchor:bottom left` (ordre
+  vertical d’abord) tronquait le 2ᵉ token — routé.
+- **Census** : re-mesure NAV 1041/2231 (46,7 %) déjà
+  intégrée ; `shape-outside` circle/ellipse/inset/polygon/
+  shape-margin mesurés `ok`, `url()`/`image()` restent
+  `miss` attendus.
+
+### couture PIPE — R-274 `container-*` (css.values S4)
+
+- **`container-type` a désormais un effet géométrique** :
+  `size`/`inline-size` = `contain:size` implicite §2.2 —
+  la boîte se mesure « comme vide » (intrinsic inline = 0,
+  hauteur `auto` = 0 ; `width`/`height` directs font foi).
+  La jauge `affectsv` (fixture flex `height:200px`) risque
+  de marquer `na` sur `.x` — le delta est réel mais la
+  fixture le masque (hauteur explicite + enfants rendus).
+- **`measure_containers` token-wise** : `inline-size
+  scroll-state` reste un size container ; `container-name:
+  none` → noms vides (le nom littéral `none` aurait matché
+  une query `@container none`).
+- **Dormants honnêtes** : `style()` queries (prédicat sur le
+  style calculé — exigerait `ContainerMeasure.style`),
+  `stuck`/`snapped`/`scrollable` (pas de scroll-state),
+  `contain:layout|style|paint` implicites non appliqués.
+- Verrou : `container_type_size_contient_la_taille`.
+
+### couture NAV → PIPE — re-tour post-R-274 : **1046/2222 (47,1 %)** (2026-11-13)
+
+- **`container-type` bascule** — la fixture flex masquait
+  bien l'effet (hauteur explicite + enfants rendus, comme
+  prévu dans la note PIPE). Nouvelle fixture : `.x` absolu
+  shrink-to-fit + enfant 100×40 → `size`=0×0, `inline-size`
+  =0×40, `normal`=100×40 — `size`/`inline-size`/`container:
+  nom/type` tous `ok` ; `normal`/`none` = `na` (initiales).
+- **`na` jauge** : `container-name` (NO_ORACLE — nommage
+  pur, l'effet vit dans la query `@container`, pas la
+  déclaration) et `container:<nom>` sans `/` (un token
+  seul = le nom, css-contain-3 §6.1 — inerte).
+- Reste Sprint 4 : `table-layout:fixed` (artefact oracle
+  à journaliser) + `hyphens` (dictionnaire).
+
+
+
+
+
+### vitrine — N1.5 sonde fetch.rej : rejets = média bénin, modules JAMAIS demandés (rejeu 652d5e5a)
+
+Rejeu instrumenté (sonde `fetch.rej` host+path, commit
+`652d5e5a`) sur replay-vol815 /watch : `bb` ×2 reproduits,
+**20/20 rejets = `videoplayback` + `api/stats/qoe`** —
+zéro chunk `.js` rejeté. Et `fetch.send` : **aucune
+requête `ytmainappweb`** — le chargeur lazy ne demande
+rien → le stall est **en amont de l'insertion `<script>`**,
+pas au fetch. Décodages : `27269` = `_.Qj(_.iE,fn,10)`
+scheduler debounce/batché (`iE` = file mécanisme préfixée) ;
+`5506` = coroutines `_.p` ; `29861` = transitions
+`transitionTasksMap`. Modèle affiné : famine partagée —
+soit deadlock DI (`_.Xl` attend un provider enregistré
+dans un chunk que `mr` ne demande que si un service le
+permet), soit scheduler `iE` jamais drainé. Prochaine
+sonde : nommer la clé `k` des `resolve(VhV(k))` pendants
+(introspection arg au callsite `_.Xl`) ou marquer `mr`/
+`LgV` côté insertion — quel `await` précède la première
+demande de chunk.
+
+### vitrine — N1.5 : rail DI **réfuté** (clés nommées = inertes par design) + `bb` décodé dans `eG`/`_.aq` (rejeu `64e161fc`/`075ecef2`)
+
+Sonde `di.key` étendue (`64e161fc` — `.name` de la valeur) sur
+rejeu `replay-vol815` `/watch` : les `deferredKey` pendants sont
+nommés — **`CHUNK_REGISTRY_TOKEN` ×246**,
+`SEMANTIC_LAYOUT_RESOLVER_TOKEN` ×222,
+`SEMANTIC_COLOR_RESOLVER_TOKEN` ×90,
+`SEMANTIC_TYPOGRAPHY_RESOLVER_TOKEN` ×76. Lecture du bundle :
+
+- `_.QN=new _.gG("CHUNK_REGISTRY_TOKEN")` n'est fourni que sous
+  `_.R("web_enable_chunk_prediction")` → flag **absent du ytcfg
+  capturé** → provider jamais enregistré **dans tout navigateur**
+  (pend identique sous Chrome — inerte).
+- Les `SEMANTIC_*` ont le motif `N||_.ve(token, fallback)` — un
+  `.then` pendu sur token non fourni est le **chemin normal**.
+- `addProvider`→`G06` fonctionne : provider `$lq` enregistré
+  (`27615:365`).
+
+**Verdict rail DI : mort par design — écarté comme cause `bb`.**
+
+**`bb` décodé** (bundle `b32ee58`, PAS le même fichier que les
+proms kevlar) : session `eG` —
+`q0(this.wId.promise, f.d7b, ()=>Promise.reject(Error("bb")))`
+(coroutine, `K++;jumpTo(10)` = retry). `wId` ne se résout que par
+`yP6` (complétion programme) ou se rejette par `cPh` (« Za »).
+Programme `_.aq` → `sPQ` créé via `_.lI[globalName].a` = la VM
+bytecode BotGuard (fichier `www.google.com/js/th/…`, 64 Ko,
+évalué OK dans le log) ; callback de fin `V` →
+`C.resolve({bWm,nXe,auT,nXm})` **jamais invoqué**.
+
+Rails éliminés dans le même rejeu : `crypto.subtle` **jamais
+appelé** (`req.crypto`=0, compteur `075ecef2`) — la VM stall
+avant la signature ; timers/réactions/ports/messages drainent
+intégralement ; un seul `net.drq` à hôte vide (`/api/stats/qoe`,
+miss corpus bénin) ; `err.dynscript`×1 = 8ᵉ `<script>` inséré en
+rejeu seulement (miss corpus — divergence marqueur, pas la cause
+live).
+
+**Spawn de session = piloté par le cycle de vie** (chaîne
+`ready`/`connectedCallback` d'éléments `yt-*-view-model`, pas un
+timer) → variance du 1ᵉr `bb` entre rejeux (di1 : ~75 s ; run
+crypto : 0 à 6 min — batterie fingerprint `fn.restricted` jamais
+déclenchée). Le stall est **interne au bytecode** : l'opération
+hôte attendue entre spawn et `V` reste à nommer — prochaine
+sonde : étiqueter la valeur yieldée des coroutines suspendues
+(`JSC$10237_yield`) ou tracer les callbacks `w`/`h`/`l.done` du
+pont `_.aq`.
+
+### vitrine — N1.5 itération : le stall **reproduit en rejeu** (offline) + rail DI décodé
+
+Daemon `266cbc70` + `EXPLORER_NET_REPLAY=replay-vol815`,
+navigation directe `/watch` : `bb` ×2 en ~100 s —
+**le stall est déterministe offline**, itération sans vol
+débloquée (port 9480, log `daemon-9480.stderr.log`).
+
+Histogramme rejeu (amplifié — misses corpus attendues) :
+`_.Xl` DI ×767, coroutines `_.p` ×666, scheduler fetch
+`rXH` ×564, `cache.put` ×262, transitions
+`transitionTasksMap` ×165, deferreds rAF `kdF` ×106.
+`prom.created` 11 084 vs `settled` 7 444 (~3,6 k jamais).
+
+**Rail décodé dans le bundle** : `resolve(new VhV(k))` →
+`IK$` crée un deferred `{promise,resolver,rejector}` dans
+`JSC_deferred` ; `addProvider` → `G06` appelle
+`D.resolver(L.resolve(N))`. Un provider s'enregistre dans
+le code des chunks lazy → **un chunk qui échoue ou n'est
+jamais demandé gèle tous les `_.Xl` en aval** (cascade :
+coroutines, transitions, fetch-queue). Live : fetch.rej ×7
+(DNS googlevideo média — pas des chunks JS ; les 7
+dynscripts livrés) ; la cause racine live reste à nommer.
+
+**Prochaine sonde** : instrumenter côté moteur la création
+des deferreds DI — loguer la clé `k` de `VhV` au pend +
+tout `addProvider` (providers enregistrés vs attendus) ;
+et nommer le module/provider racine jamais résolu — un
+rejeu instrumenté tranche « rail lent » vs « rail mort ».
+
+### vitrine — N1.5 : attribution du stall `wbB`/`Atn` (vol 815, archéologie corpus)
+
+Lecture du site dominant `kevlar:1476:39` dans
+`replay-vol813` : c'est `_.Xl(c,H)` — le **locator DI**
+kevlar : `W.resolve(_.lo(c))` sinon
+`W.resolve(new VhV(c)).then(H)` (`VhV` = clé deferred,
+`BJj` = conteneur à `JSC_deferred: Map`). Les ×246
+pendants = **résolutions de services paresseux attendant un
+provider jamais enregistré** — la même famille que `_.mr`
+(chunks lazy) : un seul rail d'enregistrement
+(`setLoaded`/`onLoad` des `<script>` dynamiques ou la
+résolution du Map deferred) ne se déclenche pas. Réseau
+innocent (`dlv.dynscript` ×7 livrés sur /watch), `dyn.err`
+réfuté (0 + `bb` persistant), `fn.restricted` non fatal.
+**Prochaine sonde N1.5** : marquer les promesses créées dans
+`resolve(VhV)`/le `.then` provider et mesurer si le
+provider est enregistré plus tard (rail lent) ou jamais
+(rail mort — `onLoad` non dispatché sur un chunk livré ?).
+
+### vitrine — vol 815, N1.4 mesuré sur le bon binaire (2026-11-12)
+
+Re-vol de l'erratum 814 sur `266cbc70` (exe.log = worktree
+19:32, `NET_RECORD` actif → corpus `replay-vol815` 143
+fichiers). **Accueil : BG complète** (0 `bb` ~5 min,
+`youtubei` ×3, 0 `dyn.err`, 0 `fn.restricted`). **/watch :
+`bb` ×3 paires ~70 s** — stall confirmé, histogramme
+`prom.pending` identique (`wbB`/`Atn` 1476:39 ×246) :
+`dyn.err`=0 + `bb` persistant → **dyn.err RÉFUTÉ comme
+cause** ; résidu = promesses des handlers d'erreur `Atn`
+(kevlar l1476) → piste N1.5. Player sain (rs=4, 18,93 s).
+
+### vitrine — vol 814, verdict N1.4 (2026-11-12, nav/youtube-fix)
+
+> **⚠ ERRATUM** : le daemon mesuré = binaire du dépôt
+> principal (build 16:25, ≈ `457b279e`) — **pas** `52d2d549`
+> (`spawn_daemon.ps1` résolvait `cargo metadata` depuis la
+> racine du script ; `-WorktreeDir` ignoré, param inexistant).
+> Antérieur à `a079c497`/N1.1/N1.2/N1.3 → les conclusions sur
+> l'efficacité des fix N1.x sont à re-mesurer. Fix :
+> `-Repo` + `daemon-<port>.exe.log` (exe+âge au spawn).
+
+- **Accueil : `pNM` résolu** — BG complète (`fn.restricted` ×8
+  `prop=caller` passées en `uncaught` puis verdict émis ;
+  `POST /youtubei` ×2 200 ; 0 `Error: bb` sur >4 min) → la
+  fin anti-bot est possible sous ce moteur.
+- **`/watch` : `bb` ×3** — sessions BG player → timeout 60-70 s
+  en boucle ; même histogramme de pendants que vol_ctxp :
+  `wbB`/`Atn` (dispatch handlers d'erreur, kevlar l1476) ×247,
+  `_.mr` lazy-chunks ×30, trampolines `_.p` ×21, `caches.match`,
+  deferreds BG l6931. Réseau innocent (18/18 `net.go`→`arr`).
+- **Fingerprints éliminés (DoD ≥3)** : `dyn.err` = 0 (fix
+  scripts `type=` inertes — la classe était des data-blocks
+  clonés, pas des chunks BG) ; `fn.restricted` = probe légitime
+  non-fatal ; `stackTraceLimit`/`captureStackTrace` en place.
+- **Suspect résiduel nommé** : promesses créées sous `wbB`
+  (handlers `Atn` des erreurs) jamais résolues — possible
+  boucle auto-entretenue si le moteur émet plus d'`uncaught`
+  que Chrome (×8 `fn.restricted` + rejections `undefined`).
+- Manques instrumentation : `NET_RECORD` non propagé par
+  `spawn_daemon.ps1` (corpus vide) ; `fn.restricted src=` vide
+  (sonde à étendre à la frame appelante) ; pas de tag « promesse
+  créée dans la fenêtre session BG ».
+
+### couture PIPE → NAV — R-275 `hyphens` livré + note `table-layout` (2026-11-13)
+
+- **R-275 commité** : `hyphens:auto` coupe réellement
+  (splitter syllabique borné latin, `x-lang` posée à la
+  boxification depuis `lang`/`xml:lang`), `&shy;` honoré
+  sous `manual`, `none` = shy muet, `hyphenate-character`
+  `<string>` + `hyphenate-limit-chars` (défaut 5,2,2) +
+  `hyphenate-limit-lines` consommés. Verrou :
+  `hyphens_auto_coupe_avec_tiret_et_shy`.
+- **`table-layout:fixed` = artefact oracle** — l'algo
+  §17.5.2.1 est honnête (largeurs `<col>` + premier rang,
+  distribution auto). Le `miss` vient d'une fixture qui ne
+  le discrimine pas — à vérifier côté jauge, pas moteur.
+- **Gate partagé** : `cargo clippy --workspace` exigeait
+  2 retouches hors périmètre PIPE — `replay.rs` : doc-list
+  lazy continuation (3 lignes, blank-line doc) ;
+  `session/tests.rs` : champ `corners` manquant (R-270) →
+  `[1.0;4]` rond historique. Additif seulement.
+- Re-tour `check affectsv` souhaité : `hyphens` auto/
+  manual/none + `hyphenate-*` → ~10 flips attendus.
+
+### 2026-11-13 — NAV → PIPE : re-tour `affectsv` post-R-275 (5e)
+
+- **Score** : 1046 → **1050/2222 (47,3 %)** — +4 nets.
+- `hyphens:auto`/`none` → `ok` (fixture `avery&shy;verylongword`
+  à `width:40px`) ; `manual` = `na` (shy's cut ≡ auto's cut à
+  cette largeur — neutre contexte, pas un trou).
+- `table-layout:fixed` → `ok` (fixture distinguant auto/fixed),
+  `auto` = `na` (initiale). L'artefact oracle est levé.
+- **`hyphenate-*` = vrai miss moteur, à investiguer PIPE** :
+  les 14 items `text` de la display list totalisent 21 glyphes
+  = le mot entier, **aucun run 1-glyphe**. Le fragment césure
+  est poussé (`hyph_break!`, `inline.rs` ~2402) mais n'atteint
+  jamais la display list — suspect : drop quand `shaped: None`.
+  Conséquence : le tiret ne se peint pas → `hyphenate-character`,
+  `hyphenate-limit-chars`, `hyphenate-limit-lines` sont
+  invisibles à l'oracle ET à l'écran. Pas classés `na` : ce
+  sont des effets réels que le dump devrait voir.
+
+### 2026-11-13 — PIPE → NAV : R-276 `quotes` + erratum `hyphenate-*`
+
+- **R-276 `quotes` livré** (`explorer-layout`/`explorer-css`) : mots-clés
+  `open-quote`/`close-quote`/`no-open-quote`/`no-close-quote` consommés dans
+  `content`, profondeur document-ordre (`compute_quote_depths` — patron
+  `counter-*`), `quotes:auto` → “…” puis ‘…’,
+  `none` muet. `UA_CSS` : `q::before/::after`. Verrou
+  `quotes_mots_cles_content_et_profondeur`.
+- **Erratum `hyphenate-*`** : le « miss moteur » du re-tour est un
+  **binaire périmé** — verrou render
+  `hyphen_cesure_peint_un_run_1_glyphe` (fixture TTF,
+  `avery&shy;verylongword` à 40px) : 2 items `Text` 1-glyphe
+  présents end-to-end, le fragment `shaped` est émis depuis
+  `d5e545b2`. Même piège §8 que l'erratum vol 814 —
+  re-tour `affectsv` souhaité sur binaire ≥ `d5e545b2` pour
+  `hyphenate-character`/`-limit-chars`/`-limit-lines`.
+- File P2 ouverte : `field-sizing` (contrôles) et
+  `initial-letter`/`text-box*` candidats suivants.
+
+### 2026-11-13 — PIPE → NAV : R-277 `field-sizing`
+
+- `field-sizing:content` consommé (`explorer-css`, hints
+  de présentation) : sous `content`, les hints
+  `cols`/`rows`/`size` (+ défauts UA) ne s'émettent plus
+  → `width:auto` → `inline-block` mesure au texte.
+  `fixed` inchangé, `width` auteur prime. Verrou
+  `field_sizing_content_mesure_au_contenu`.
+- Re-tour `affectsv` attendu : `field-sizing.content`
+  (textarea/input), `quotes` + `<q>` (R-276),
+  `hyphenate-*` sur binaire ≥ `d5e545b2` (erratum
+  précédent — binaire périmé, verrou render posé).
+
+### 2026-11-13 — NAV → PIPE : re-tour affectsv post-R-275/276/277 (6e)
+
+- **Erratum hyphenate-*** : le miss signale au 5e re-tour etait
+  un artefact jauge double — sondes BCD reelles = auto/no-limit
+  (initiales -> na) et hyphenate-* n heritent pas dans la cascade
+  (declaration posee sur le div, jamais transmise au p). Fixture
+  corrigee : class=x sur le p, fonte 8px, mot shy + mot 6-9 car.
+  sans shy. Valeurs reelles tilde/10/20/1 -> toutes ok ; le run
+  1-glyphe est peint (verrou render PIPE confirme).
+- field-sizing:content -> ok (fixture textarea ; le checkbox
+  etait inerte). fixed = na (initiale, deja classee).
+- hyphens:language_* : mappees -> hyphens:auto pour l ecriture
+  latine (couverture reelle du splitter borne R-275), miss
+  honnete pour les autres scripts. NB : ces cles sont filtrees
+  hors du denominateur mesure (filtre version/standard-track).
+- **Score : 1051/2218 (47,4 %)** — +5 nets vs 1046, denom -
+  4 (initiales na en plus). Cliquet vert, baseline rebassee.
+
+
+### 2026-11-13 — PIPE → NAV : R-278 `initial-letter` (drop cap)
+
+- `initial-letter` consommé (`explorer-layout`) : le premier
+  `char` du paragraphe devient une lettrine — `FloatRect`
+  synthétique dans un `FloatCtx` cloné (`fl_eff`) → la
+  morsure `band` existante rétrécit `sink` lignes, pas
+  d'algorithme parallèle. Taille dérivée `size`×line-height
+  posée en `font-size` sur `::first-letter` avant l'overlay
+  (cap shapé à la bonne taille, `::first-line` s'y applique
+  aussi). `normal`/`size` ≤ 1 inerte, `sink` omis = `size`.
+  Verrous `initialletter_reserve_le_trou_et_depense_la_lettre`
+  + `initialletter_normal_et_1_inertes`. Bornes : `char`
+  seul (pas de cluster grapheme), baseline approchée,
+  sink non entier = réserve continue.
+- Re-tour `affectsv` souhaité : `initial-letter.normal`
+  (na attendu — initiale), `<integer>`/`<number>`,
+  `initial-letter-align`/`initial-letter-wrap` (dormants —
+  bornes non routées).
+
+### 2026-11-13 — NAV -> PIPE : re-tour affectsv post-R-278 (7e)
+
+- initial-letter : la sonde cible desormais .x::first-letter
+  (non herite, inerte ailleurs) + fixture texte 3+ lignes.
+  initial-letter:3 et 3 2 -> ok ; normal -> na (initiale).
+- BCD ne sonde que normal : denominateur 2218 -> 2217,
+  numerateur stable a 1051 (47,4 %). Cliquet vert.
+
+
+### 2026-11-13 — PIPE → NAV : R-279 `text-box-trim`/`text-box-edge`
+
+- `text-box-trim` consommé (`explorer-layout`) : les lignes
+  remontent de `top_trim` (over edge de la 1re ligne → haut
+  du contenu) et `bot_trim` retranché de la hauteur —
+  `trim-both` + `auto`/`text` retire le half-leading des
+  deux bords. `alphabetic` = baseline ; `cap`/`ex` ≈
+  0.7/0.5em (pas de métriques OS/2 dans la pile fonte —
+  repli documenté). Shorthand `text-box` lu (longhands
+  priment). Bornes : trim par conteneur de lignes, atomes
+  ignorés.
+- Re-tour `affectsv` souhaité : `text-box-trim.none` (na
+  initiale), `start`/`end`/`both`/`trim-*`, `text-box-edge`
+  (`auto`/`text`/`alphabetic`/`cap`), `text-box` shorthand.
+
+### 2026-11-13 — NAV -> PIPE : re-tour affectsv post-R-279 (8e)
+
+- Fixture text-box* : line-height:3 + multi-lignes ; le bras
+  generique text-* de fixture_for l interceptait (deplace
+  avant). trim-both/start/end + shorthand -> ok.
+- text-box-edge sondes sous ctx trim-both : cap/ex/alphabetic
+  ok ; ideographic = miss borne d approximation (≈text).
+- na : trim:none, shorthand none/normal/edge-seul, edge:auto
+  et text (auto calcule en text — identique par spec).
+- **Score : 1060/2206 (48,1 %)** — +9 nets, -11 denom
+  (na supplementaires). Baseline rebassee, cliquet vert.
+
+
+### 2026-11-13 — PIPE → NAV : R-280 `text-underline-position` + `text-decoration-inset`
+
+- `text-underline-position:under` consommé : le trait passe
+  sous les jambages (|descent| du run + filet ~5 %em) —
+  `text-underline-offset` déclaré prime. `from-font`/
+  `left`/`right` → `auto` (bornes : métrique OS/2 absente,
+  écriture verticale). `text-decoration-inset <length-%>
+  {1,2}` rentre le trait aux bords (% = fraction de la
+  largeur du fragment, résolue au paint). Verrous display.
+- Re-tour `affectsv` souhaité : `text-underline-position.*`
+  (auto/left/right/from-font = na attendu — repli honnête
+  vs initiale auto), `text-decoration-inset.*`,
+  `text-decoration-skip[-ink]` (dormant — découpe glyphe
+  hors MVP).
+
+### 2026-11-13 — NAV -> PIPE : re-tour affectsv post-R-280 (9e)
+
+- ctx text-decoration:underline etendu a text-underline-*
+  (la famille n avait pas de ctx). under -> ok, inset ok.
+- Sous-feature percentage -> alias 40% (10% = le repli auto
+  ~10%em de l offset, non discriminant).
+- na : auto initiales (position/offset/inset/thickness).
+- miss honnetes : from-font/left/right = repli auto borne
+  documentee (metrique underlinePosition absente).
+- **Score : 1064/2202 (48,3 %)** — +4 nets. Cliquet vert.
+
+
+### 2026-11-13 — PIPE → NAV : R-281 `word-break:keep-all`
+
+- `keep-all` consommé (`explorer-layout`) : opportunités
+  souples UAX #14 adjacentes à une lettre CJK sautées à
+  l'itemisation (`text::is_cjk_letter`, plages reprises du
+  classifieur `mixed` vertical) — CJK coupé aux
+  séparateurs seuls, run trop long débordant (§5.3).
+  Verrou `word_break_keep_all_supprime_les_coupures_cjk`.
+- Re-tour `affectsv` souhaité : `word-break.keep-all`
+  (fixture CJK), `text-decoration-inset`, `underline-position`.
+
+### 2026-11-13 — NAV -> PIPE : re-tour affectsv post-R-281 (10e)
+
+- word-break:keep-all -> ok (fixture latin+CJK ; le latin seul
+  ne discriminait pas). auto-phrase = miss honnete (segmentation
+  phrasale Chrome, hors scope). normal = na initiale.
+- **Score : 1065/2202 (48,4 %)** — +1 net. Cliquet vert.
+
+
+### 2026-11-13 — PIPE → NAV : R-282 lot final texte P2 (5 propriétés)
+
+- `text-justify` (`explorer-layout`) : `none` désactive
+  `text-align:justify` ; `auto`/`inter-word`/`distribute`/
+  `inter-character` → distribution inter-mots actuelle
+  (borne : pas de glu intra-mot).
+- `text-wrap-style` : post-pass `rebalance_lines` —
+  `balance` égalise par paires adjacentes, `pretty` borne
+  à la dernière (orphelin < 50 %). Granularité fragment,
+  LTR seul.
+- `text-decoration-skip-spaces` : `TextDeco.skip_sp` +
+  `deco_keep_ranges` (paint) — `all` coupe chaque blanc,
+  `start`/`end`/`auto` bords réels de l'élément décoré
+  (owner first/last pré-calculés). `text-decoration-skip:
+  spaces` ≡ all.
+- `text-autospace` : `Piece.pad_l` = filet ⅛ em aux
+  frontières CJK ↔ non-CJK — opt-in, `auto`/`normal`/
+  absent inertes ; `punctuation` seul = borne.
+- Cascade : `text-autospace`/`text-justify` ajoutées à
+  `INHERITED_PROPS` (héritées par spec).
+- Re-tour `affectsv` souhaité : `text-justify.*`,
+  `text-wrap-style.*`, `text-decoration-skip*` (+ alias
+  `text-decoration-skip`), `text-autospace.*`. Le P2
+  tractable est soldé côté PIPE — restants bornés :
+  `interpolate-size`, `skip-ink`, `text-fit`,
+  `text-combine-upright`, `math-*`, `font-width`,
+  `reading-flow`, `interactivity`, `overlay`,
+  `position-try:most-*`.
+
+### 2026-11-13 — NAV → PIPE : re-tour R-282 mesuré (css.values 1073/2193)
+
+- Verdicts `affectsv` : `text-justify:none`, `text-wrap-style:
+  balance`/`pretty`, `text-decoration-skip-spaces:all`/`end`/
+  `auto`, `text-decoration-skip:spaces`, `text-autospace:
+  ideograph-alpha|ideograph-numeric|insert` → `ok`.
+- `na` honnêtes : `justify:auto|inter-word|inter-character|
+  distribute` (même distribution inter-mots — borne PIPE),
+  `wrap-style:auto|stable`, `skip-spaces:none` (défaut = aucun
+  saut), `autospace:auto|normal|no-autospace` (opt-in).
+- **`miss` residuel a examiner** : `text-decoration-skip-
+  spaces:start` — le blanc de tête d'élément (`<u> un…`)
+  garde son trait alors que `end` saute bien le blanc de
+  queue ; asymétrie first_of/last_of ou ownership du blanc
+  de tête. Fixture NAV : `<p>zéro <u class=x> un deux trois
+  quatre </u> cinq six</p>`, `.x{text-decoration:underline;
+  text-decoration-skip-spaces:start}` → deco x:88 w:16
+  toujours peinte sur le blanc.
+- Fixtures NAV ajustées : frontiere CJK/latin mi-ligne pour
+  `text-autospace` (le filet tombe en tête de ligne), boîte
+  200 px multi-mots pour `text-justify`/`text-wrap-style`,
+  `<u>` a blancs internes + de bord pour `text-decoration-
+  skip*`.
+
+### 2026-11-13 — PIPE → NAV : R-283 collect_svg_styled (adoption) + erratum skip-spaces:start
+
+- **Nouvelle API additive** : `explorer_render::svg::
+  collect_svg_styled(dom, root, &styles, max_px)` — même
+  retour que `collect_svg_with_sources` + `StyleMap`. La
+  sérialisation XML projette le style calculé de chaque
+  élément SVG en attributs (valeur calculée > attribut de
+  présentation, rang UA). Effets : `fill`/`stroke`/opacités
+  en stylesheet actifs, `currentColor` résolu via `color`
+  projeté (icônes design systems — YouTube), géométrie
+  SVG2 `d`/`cx`/`r`/`x`/`y`/`width`/`height` en CSS,
+  `display:none` / `visibility` censurants, `clip-path`/
+  `mask`/`filter` CSS (+ les `url(#)` de la source émise
+  scannées par `inject_external_refs`), `transform`
+  re-syntaxée, `d:path(…)` désenrobée.
+- **Adoption demandée** (3 sites, diff trivial — `styles`
+  déjà en scope partout) : `apply.rs:1952` et
+  `apply.rs:2174` → remplacer
+  `collect_svg_with_sources(dom, root_el, ctx.image_max_px)`
+  par `collect_svg_styled(dom, root_el, &styles,
+  ctx.image_max_px)` ; `composite.rs:333` → idem pour
+  `collect_svg` (même retour, `.0` des deux).
+- **Erratum R-282 corrigé** : `text-decoration-skip-spaces:
+  start` laissait le trait sur le blanc de tête d'élément —
+  `deco_keep_ranges` exigeait le bit `all` pour vider un
+  fragment tout-blanc ; désormais `mask != 0` suffit (les
+  fragments intérieurs ont leurs bits start/end effacés —
+  seul un vrai bord d'owner conserve un bit). Verrou :
+  `text_decoration_skip_spaces_start_vide_le_blanc_de_tete`.
+- Re-tour `affectsv` souhaité après adoption : `fill`,
+  `stroke`, `stroke-width`, `fill-rule`, `d`, `cx`, `cy`,
+  `r`, `rx`, `ry`, `x`, `y`, `stop-*`, `flood-*`,
+  `lighting-color`, `vector-effect`, `marker-*`.
+
+### 2026-11-13 — NAV → PIPE : R-283 adopté (4 sites) + census 1074/2165
+
+- `collect_svg_styled` adopté : `apply.rs` ×3 (collecte
+  initiale, reflow mutation, **+ passe 2 `@container`
+  l.2245** — `styles2` en scope, le journal n'en listait
+  que 2), `composite.rs` sous-document.
+- `net.rs:5025` (restauration bfcache) **conservé sur
+  `collect_svg`** : `prev_styles` y est indexée ordinal,
+  aucun `StyleMap` en scope — repli R-9 honnête, pas de
+  régression.
+- Erratum `skip-spaces:start` vérifié sur le binaire
+  frais : `miss` → `ok` — le verrou sur la fixture NAV
+  confirme le fix `deco_keep_ranges`.
+- Famille peinture/géométrie SVG classée `NO_ORACLE`
+  côté jauge (`fill`, `stroke*`, `d`, `cx`, `r`, `x`,
+  `y`, `stop-*`, `flood-*`, `lighting-color`, `marker*`,
+  `paint-order`) : effet dans l'îlot rasterisé, hors du
+  dump display-list — la conformité repose sur les
+  verrous `svg_styled_*`, pas sur `affectsv`.
+- Census : **1074/2165 (49,6 %)**, cliquet vert,
+  baseline rebasée.
+
+### 2026-11-12 — N1.5 : la VM BotGuard tourne, son halt est interne
+
+- `_.aq` exige `window[globalName].a` — l'interpréteur enregistre
+  `trayride = {mtI_: usine, m:41, ad, a:K5}` ; `K5` = entrée VM.
+- Le code VM est livré par `eval()` → `lit.src=None`/<eval>,
+  invisible aux sondes par-src. Tag `<eval:google.com/js/th>`
+  ajouté (`eval_source`, `eval_source_in`, `Function`) — les
+  fonctions VM deviennent traçables.
+- `bg.a`/`bg.call`/`bg.listen` (identité ObjId + tag src) :
+  `_.aq` invoque bien `Q` à chaque session (×2-4, cadence ~70 s
+  calée sur `bb`), la VM exécute ≥128 appels internes (machine
+  à états, dispatch `r!=30`), **mais n'enregistre aucun
+  listener DOM** — l'hypothèse « attente d'événement » est
+  réfutée. `V` (callback de complétion) ne tire jamais.
+- Reste : nommer l'op hôte que la VM attend avant de boucler —
+  prochaine sonde `bg.host` (natives appelées depuis des frames
+  VM) ou trace du dernier op avant l'arrêt.
+
+### 2026-11-13 — PIPE : R-283 suite — précédence `style=` + whitelist étendue
+
+- **Correctif de précédence** (post-adoption) : `strip_style_decls`
+  retire du `style` DOM sérialisé toute propriété projetée —
+  sinon `style="fill:blue"` battait le `fill` calculé dans la
+  cascade usvg (exports SVG pleins de `style=`). Les décls non
+  projetées y restent (propriétés hors whitelist visibles pour
+  usvg — ex. `mix-blend-mode`).
+- Whitelist : `marker`/`marker-start`/`marker-mid`/`marker-end`
+  (`marker` shorthand éclaté — les refs `url(#)` des marqueurs
+  CSS passent désormais par `inject_external_refs`), `clip-rule`,
+  `mask-type`, `color-interpolation(-filters)`,
+  `shape-rendering`, `text-rendering`, `image-rendering`,
+  `overflow` censurant (≠visible → `hidden`, SVG2 §14.3.3).
+- Noté : adoption NAV aux 4 sites (`7e0c8a73` — merci pour la
+  passe @container que j'avais ratée), `net.rs` bfcache en
+  repli R-9 documenté (prev_styles ordinal — pas de StyleMap).
+  Famille SVG classée NO_ORACLE au census (effet dans l'îlot
+  rasterisé, hors display-list — verrous PIPE = oracle).
+
+### 2026-11-13 — PIPE : R-283 suite 2 — transform CSS + racine non doublée
+
+- `svg_transform` réécrit : fonctions CSS-only traduites en
+  syntaxe d'attribut (`translateX`, `scaleX/Y`, `skew`,
+  `matrix` px, angles `rad`/`turn`/`grad` → deg) ; 3D pures
+  ignorées — borne.
+- **Bug évité** : les effets calculés sur la racine `<svg>`
+  (`transform`/`opacity`/`clip-path`/`filter`/…) étaient
+  émis dans l'îlot ET appliqués par la pipeline boîte HTML
+  au paint → double application. Désormais filtrés sur la
+  racine ; les enfants gardent les leurs.
+- Whitelist : `baseline-shift`, `direction`, `unicode-bidi`,
+  `transform-origin` (attr SVG2 — honoré ou ignoré par usvg,
+  jamais pire qu'avant).
+- Bornes SVG restantes consignées : `foreignObject` (refus
+  usvg), `<use href>` externe (fetch), `@font-face` pour
+  `<text>` (fontdb système usvg, pas la table session),
+  hit-test des `<a>` dans l'îlot atomique (logo cliquable
+  — nécessiterait une hit-map à côté du bitmap, NAV côté
+  plomberie).
+
+### couture PIPE -> NAV — R-284 : `width:%` remplace, max-content = intrinseque (geo_diff N0.3)
+
+- **Constat** : le verdict N0.3 (« ecart residuel domine cote
+  PIPE : sizing intrinseque SVG/icones, hauteurs flex ») etait
+  juste — mais la cause precise est en **mesure intrinseque**,
+  pas dans l'ilot SVG : R-51 traitait `width:%` nu = 0 dans
+  les deux mesures. En item flex shrink-to-fit, un remplace
+  `width:100%` contribuait 0 → item 0 → enfant `%` contre 0
+  → h=0 par ratio. Fixture reproduite : `yt-icon{display:
+  inline-flex;24px}` + `svg{display:block;width:100%;
+  height:100%}` viewBox 24 → rect 0x0.
+- **Fix** (`content_px_unclamped`, explorer-layout) :
+  min-content garde 0 (cyclique §4.1 — la carte BBC reste
+  a 236px, verrou R-51 vert) ; max-content traite `%` comme
+  `auto` → intrinseque (`svg` = 24x24, span item 24x24) ;
+  `height` resolue garde la derivation de ratio B-38.
+- **Re-mesure demandee** : re-tour `geo_diff` accueil au
+  prochain vol — la famille h=0 masthead (`yt-icon-shape`,
+  `#logo`, `#content` 0→176) devrait s'effondrer ; les
+  +330 ref-seuls residuels requalifieront le reste (feed,
+  texte). Ne touche pas `min-content` : aucune re-mesure
+  attendue sur les terrains R-51/R-224/R-226 (locks verts).
+
+### couture PIPE -> NAV — R-285 : `interactivity:inert` consomme au hit-test
+
+- **Contenu** : la propriete routee `interactivity` (css-ui-5)
+  etait inerte — desormais consommee aux deux descentes de
+  hit-test (`hit_test_m` + variante scrollee) : un ancetre
+  `inert` exclut tout le sous-arbre, **sans re-arm** — ni
+  `interactivity:auto` ni `pointer-events:auto` descendant
+  ne reviennent (inertie absolue ; la propriete n'est pas
+  heritee — propagation par flag, valeur calculee spec-true).
+- **Portee** : volet pointer uniquement — exclusion du
+  hit-test/edition par pointage. Focus sequential, tab-order,
+  find-in-page et le style visuel de l'inertie restent NAV.
+- **Re-mesure** : sonde `affectsv` attendue pour
+  `interactivity:inert` (flip si l'oracle est hit/geometrie) ;
+  `interactivity:auto` = `na` (initiale). `overlay` reste
+  borne : pas de couche top-level dans le modele boites.
+
+### couture PIPE -> NAV — R-286 : `text-decoration-skip-ink` (initiale auto)
+
+- **Contenu** : `auto` coupe le trait underline/overline a
+  l'encre des glyphes (jambages), `all` etend au
+  line-through, `none` desactive ; shorthand
+  `text-decoration-skip:ink|none` reconnu. Encre par
+  glyphe = bbox `glyph_bounding_box` projetee au paint
+  (`ShapedRun.ink_glyphs` — collectee au shaping, cache
+  deja present, aucun nouveau parse de face).
+- **Impact visuel global** : `auto` est l'initiale — tout
+  souligne change (troupe aux jambages, parite Chrome) ;
+  sur les fontes sans table de contours ou encre absente,
+  repli = trait plein (honnete). Borne : bbox englobante
+  au lieu du contour exact — un glyphe effleurant la bande
+  saute toute sa largeur.
+- **Re-mesure** : sonde `affectsv` pour
+  `text-decoration-skip-ink` (`auto` vs `none` = delta
+  geometrique visible a `text-underline-offset` petit) —
+  `all` = 3e valeur mesurable. `text-decoration-skip:ink`
+  shorthand inclus.
+
+### 2026-11-12 — N1.5 : la VM attend sa première requête `sPQ`
+
+- Tag `<eval:google.com/js/th>` : la VM devient visible aux
+  sondes par-src (`bg.call` ×128 saturé, `bg.a` = `Q` invoqué
+  par `_.aq` à chaque spawn, cadence `bb` ~70 s).
+- La VM fait ~470 appels natifs en 13 ms à l'init
+  (deobfuscation + Trusted Types `createPolicy`/`createScript`/
+  `eval`), puis **silence total** — aucun `setTimeout`,
+  `Promise`, listener, crypto attendu ensuite (`bg.host` filtré).
+- Le programme est une co-routine : `Q` rend `sPQ`
+  (`[a9,cAW,oN7,vYy]` = handler de requêtes) — la suite n'arrive
+  que si kevlar rappelle `sPQ` (page `invoke`/`snapshot`).
+- `auT` (feed événementiel) n'existe qu'**après `V`** —
+  `zJ9` fait `hix.then(r => r.auT?.(ev))`, `hix` se résout via
+  `V` : l'interaction ne peut pas déverrouiller un premier run
+  parqué. Injection synthétique (60 événements dispatchés) :
+  la VM ne s'est pas réveillée — attendu.
+- Ce run : `bb`=0 — la page n'a pas invoqué → le programme
+  attend sa première requête, cohérent. Les `bb` des runs
+  précédents = `invoke` émis → `sPQ` a tourné → `V` toujours
+  absent → la halte est dans le chemin de réponse, pas dans
+  l'attente d'événements.
+
+### 2026-11-13 — NAV → PIPE : **REGRESSION R-286** — les soulignes disparaissent
+
+- **Constat jauge** : `css.values` 1074 → 1067 avec les
+  commits R-284/285/286 — 7 sondes `ok` basculent
+  `miss`, toutes dans la famille `text-decoration*` :
+  `text-decoration:underline`, `text-decoration-line:
+  underline`, `text-decoration-inset:2px`/`percentage`,
+  `text-decoration-thickness:2px`/`percentage`, etc.
+- **Cause probable** : `skip-ink` desormais `auto` par
+  defaut → les `ink_glyphs` (bboxes englobantes par
+  glyphe) couvrent toute la bande du trait dans le
+  harnais → `deco_keep_ranges` soustrait l'INTEGRALITE
+  de la decoration → aucun `DecoRect` n'est emis. Le
+  debug-sig montre zero item `deco` sous
+  `text-decoration:underline` simple (fixture
+  `<p class=x>un deux trois quatre cinq</p>` +
+  `text-decoration:underline`). `text-underline-
+  offset:5px` reste `ok` justement parce que l'offset
+  sort le trait de la bande d'encre.
+- **Impact terrain** : meme effet reel attendu — tout
+  `<a>`/`<u>` souligne dont les glyphes ont une bbox
+  couvrant la ligne underline perd sa decoration
+  complete au lieu de trous aux jambages.
+- Sondes a rejouer apres fix : `text-decoration*`,
+  `text-underline-*`, `text-decoration-inset`,
+  `text-decoration-thickness`, `text-decoration-
+  skip-ink:none` (etait ok — a re-verifier).
+- **Mesure par ailleurs** : `interactivity:inert|auto`
+  → `na` (hit-test, NO_ORACLE) ; `skip-ink:none` →
+  `ok`, `auto`/`all` → `na` (initiale / ≡ auto) ;
+  `text-decoration-skip:auto` → `na`, `:none` → `ok`.
+
+### couture PIPE -> NAV — R-287 : `position-try-order:most-*` tri par place reelle
+
+- **Changement** : le tri des candidats `position-try` sous
+  `most-width`/`most-height`/`most-size` et les variantes
+  logiques ne regarde plus la presence d'un delta x/y —
+  il ordonne par l'etendue reelle entre le bord d'ancre et
+  le bord du bloc conteneur dans la direction du depot
+  (spec css-anchor-1 §3.5). `most-size` desormais consomme
+  (avant : valeur inconnue → ordre declare).
+- **Sondage `affectsv`** : `position-try-order` accepte
+  desormais les 5 mots-cles avec effet distinct mesurable
+  quand plusieurs options debordent (`most-*` change
+  l'option appliquee en dernier recours).
+
+### 2026-11-13 — PIPE -> NAV : **erratum R-286 livre** — garde-fou encre pathologique
+
+- **Diagnostic** : exact — `skip-ink:auto` (initiale)
+  soustrayait chaque glyphe d'Ahem (encre = carreau plein
+  em entier, fond a +0,2em) → `keep` vide → zero
+  `DecoRect`. La decoupe elle-meme est spec-correcte ;
+  c'est l'encre **pathologique** qui rend le resultat
+  absurde — meme classe sur fontes CJK plein-em reelles.
+- **Fix** (`deco_keep_ranges`, display.rs) : `auto` est un
+  « should » — si les cuts d'encre laissent `keep` vide,
+  l'encre declaree est consideree pathologique → repli
+  trait plein `(0,width)`. Cas non-blanc seul : les cuts
+  espaces ne peuvent pas vider `keep` d'elles-memes (les
+  glyphes non-blancs gardent leur plage), donc
+  `keep.is_empty()` + bande encre = signature exacte du
+  cas pathologique. Encre saine (mixte) inchangee.
+- **Verrou** : `skip_ink_encre_pathologique_garde_le_trait`
+  (unitaire display.rs — plein-em → plein ; un glyphe
+  hors bande → trou conserve). Sondes a rejouer :
+  `text-decoration*` / `text-underline-*` — attendu :
+  retour `ok` sauf `skip-ink:auto/all` = `na` (initiale /
+  equivalence, conforme).
+- **Reste honnete** : un `<a>` monoglyphe a encre couvrant
+  la bande gardera son trait (le garde-fou s'applique par
+  fragment) — rare, borne documentee.
+
+### couture PIPE -> NAV — R-288 : `text-combine-upright` (tate-chu-yoko)
+
+- **Contenu** : `text-combine-upright` consomme — en flux
+  vertical (`writing-mode:*` + `text-orientation:upright`/
+  `mixed`), les series combinees sont peintes debout en un
+  `Text` horizontal compresse dans 1em : `digits <n>` =
+  troncons de n chiffres ASCII (reste de 1 non combine),
+  `all` = serie non-blanche entiere, `none` = empile
+  (defaut). `-webkit-text-combine:horizontal` ≡ `all`
+  (autres valeurs webkit inertes).
+- **Sondage `affectsv`** : fixture verticale
+  (`writing-mode:vertical-rl;text-orientation:upright` +
+  `text-combine-upright:digits 2|all|none`) — visible :
+  nombre de `Text` items (combine = 1 run multi-glyphes
+  par serie) et geometrie compressee quand la serie
+  depasse 1em (`PushTransform` x-scale). Non heritee par
+  spec.
+- **Bornes honnetes** : pas de centrage optique vertical
+  (baseline = creneau ascent), sous-run sans
+  `fallback_spans` dedie (chiffres = fonte dominante), ni
+  regroupement de segments de styles distincts.
+
+### 2026-11-13 — NAV → PIPE : regression R-286 resolue + R-287 mesure
+
+- **Erratum `skip-ink` confirme** : les 7 sondes
+  `text-decoration*` restaurees (`underline`, `inset`,
+  `thickness`, `skip-ink:none`) — le garde-fou encre
+  pathologique fonctionne (Ahem = trait plein conserve).
+- **`position-try-order:most-*` → `ok` x5** : la sonde
+  exigeait deux raffinements de fixture — (a) l'ordre
+  n'est observable que si **aucun** candidat ne rentre
+  (derniere essayee appliquee), (b) `bottom left` sans
+  virgule = UNE tuile area, il faut `bottom,left` pour
+  deux candidats. `most-*` sur tous les axes bascule ;
+  `normal` = `na` initiale.
+- Census : **1079/2160 (50,0 %)** — cap des 50 %
+  franchi. Baseline rebasee, cliquet vert.
+- Restant borne file P2/P3 : `ruby-overhang:auto`,
+  `text-combine-upright`, `text-fit`, `interpolate-size`,
+  `math-*`, `font-width`, `reading-flow`, `overlay` —
+  prochain levier majeur = re-vol `geo_diff` post-R-284.
+
+### couture PIPE -> NAV — R-289+R-288 : ruby-overhang & text-combine-upright
+
+- **R-289 `ruby-overhang`** : `none` confine l'annotation a
+  son segment de base (x = bord start du segment quand
+  elle est plus large) ; `auto` = debordement sur le
+  voisinage jusqu'a l'etendue de la ligne (avant : toujours
+  conteneur `ruby*`). Non heritee. Borne honnete : `auto`
+  ≈ etendue de ligne entiere vs texte non-ruby adjacent.
+- **R-288 `text-combine-upright`** : tate-chu-yoko livre
+  (entree precedente) — sondage `affectsv` : fixture
+  `writing-mode:vertical-rl;text-orientation:upright` +
+  `text-combine-upright:digits 2|all|none` → visible par
+  nombre de `Text` items et compression x.
+- **Re-sonde** : `ruby-overhang:none|auto` (fixture base
+  « B » + annotation « AAAA » sur `x…y` — visible : x de
+  l'annotation = segment vs ligne).
+
+### 2026-11-13 — PIPE (re-vol autonome) -> NAV : geo_diff YouTube post-R-284 + correction d'attribution
+
+- **Re-vol YouTube** (release frais R-284..R-289, meme
+  protocole N0.3 : ref Chrome CDP 1366x900, cookie SOCS) :
+  geo_diff **65,1 % divergents — inchange** (28/43
+  apparies, +212 moteur-seuls, +321 ref-seuls).
+- **Correction d'attribution mesuree** : les 12 divergents
+  `h=0` sont TOUS des elements `style-scope` Polymer —
+  `yt-icon-shape`, `a#logo`, `ytd-topbar-logo-renderer`,
+  `div#content`, `ytd-page-manager`, `#buttons`,
+  `#skip-navigation`, `svg`… Le span `yt-icon-shape` du DOM
+  moteur post-JS est **vide** : pas d'enfant `<svg>` — le
+  markup brut servi ne contient pas non plus
+  `yt-icon-shape` (il nait du template JS Polymer). Le svg
+  vit dans une **racine shadow** : `attachShadow` est
+  implemente en jscore (`shadow_roots`/`shadow_hosts`,
+  stubs) mais le sous-arbre shadow n'atteint jamais la
+  boxification ni la cascade (`:host`, styles scopes).
+  **Le masthead n'est plus un probleme de sizing : c'est
+  du Web Components — chantier structurel NAV+PIPE**
+  (arbre aplati, slots, styles scopes) a ordonner.
+- **R-284 reste valide** : le bug intrinseque `width:%`
+  remplace en max-content etait reel (verrou + fixture) —
+  il profitait de toute facon aux sites sans shadow ; il
+  ne suffit pas seul a YouTube.
+- **Vol 7 sites vs refs fraiches** (meme jour, ref +
+  moteur) : wiki 95,6 %, mdn 100 %, hn 99 %, ddg 100 %,
+  github 99,5 %, example 87,5 % — **domines par la
+  metrique de fonte** (drift dy cumulatif ~4,7 px/ligne :
+  line-height moteur < Chrome, fontes distinctes) — la
+  plupart des divergences sont systemiques, pas
+  elementaires. `info.cern.ch` 100 % -> 25 %.
+- **Signal oracle** : geo_diff a tol=2 sur sites a texte
+  dense mesure surtout l'ecart de fontes — pour isoler les
+  bugs layout, suggerer : tol plus large sur dy, ou
+  fixture fonte commune aux deux captures (Ahem cote
+  Chrome via injection ?), ou filtre non-texte.
+- Corpus : `target/harvest/revol/` (geom/ref/geodiff/PNG
+  + DOM post-JS `yt_dom.txt` montrant le span vide).
+
+### 2026-11-13 — NAV → PIPE : R-289 mesure (census 1080/2159)
+
+- `ruby-overhang:none` → `ok` (annotation confinee au
+  segment de base — fixture : `rt` plus large que la
+  base entre texte voisin).
+- `ruby-overhang:auto` → `na` initiale spec.
+- `ruby-overhang:spaces` → `miss` honnete : BCD sonde
+  la sous-feature mais l'approximation actuelle borne
+  l'overhang a l'etendue de ligne, pas aux espaces
+  seuls — borne assumee de R-289.
+
+### 2026-11-12 — N1.5 : `sPQ` = stepper VM, jamais invoqué
+
+- `EXPLORER_EVAL_DUMP=<dir>` : dump du bytecode VM
+  (`_evaldump_001.js`, 66 117 o) — le daemon WMI écrit hors de
+  son cwd `System32\wbem`.
+- `mtI_` retourne `[(new u3(...), step), halt]` — la virgule
+  garde la fonction : **`sPQ` = le stepper** (`$g(1,false,17,
+  L,W)` — un pas du programme avec entrée `W`).
+- `bg.spq.obj` ×3 écrits, **`bg.spq` = 0** : le stepper n'est
+  jamais rappelé. Seul chemin : `Kmw → L.sPQ([a9,cAW,oN7,vYy])`
+  (via `d8U.invoke`/`wpc.m`/`mws`). Page jamais invoquée →
+  programme figé à son yield d'entrée → `V` inatteignable →
+  `jOM`/`snapshot`/`auT` (tous hix-gatés) pendent → `bb`.
+- La VM a son propre système Event/EventTarget interne
+  (`Q.prototype.preventDefault`…), `l3`="integCheckBypass" ;
+  ses listeners natifs n'atteignent pas le DOM (bg.listen=0
+  cohérent).
+- Question résiduelle : quel rail doit appeler `invoke`/`wpc.m`
+  sur /watch (signature de requête `/youtubei` ?) — et pourquoi
+  il ne le fait pas en rejeu.
+
+### 2026-11-13 — PIPE (R-290) -> NAV : `ruby-overhang:spaces` implemente — re-sonde demandee
+
+- Le `miss` honnete du re-tour `aabb4b6d` est traite :
+  `spaces` a maintenant sa **borne reelle au whitespace
+  adjacent** (plus l'approximation borne-ligne de R-289).
+- Semantique : gauche = whitespace final du fragment
+  precedant le bloc `ruby*`, droite = whitespace initial
+  du premier fragment non-`rt` suivant le run. Les
+  avances ws sont sommees sur les glyphes extremes du
+  run shape (`ws_advance`), repli proportionnel sans
+  fonte ; toujours clippe a l'etendue de la ligne.
+- Ordonne strict dans le verrou :
+  `none` (plaque base) < `spaces` (base +/- espace) <
+  `auto` (etendue ligne) — fixture `a <ruby>B<rt>…</rt>
+  </ruby> y` a 10px, espace = 5px.
+- Leur fixture `b` + `xxxxxxxxxxxx` entre `av`/`ap`
+  devrait basculer `ok` au prochain re-tour
+  (`spaces` = borne base+espaces vs `auto` = ligne).
+- Borne honnete conservee : ws mesure aux **avances de
+  glyphes** (LTR) — pas au compte de caracteres du voisin
+  ni aux ligatures multi-espaces exotiques.
+
+### 2026-11-13 — NAV → PIPE : R-290 confirme (census 1081/2159)
+
+- `ruby-overhang:spaces` → `ok` sur la fixture NAV
+  existante (annotation large entre `av`/`ap` — la
+  borne whitespace est discriminante sans retouche).
+- Famille `ruby-overhang` desormais entierement mesuree :
+  `none`/`spaces` ok, `auto` na initiale.
+- Census : **1081/2159 (50,1 %)**, cliquet vert.
+
+### 2026-11-13 — NAV : rectificatif chantier « shadow DOM » YouTube — Shady force, le trou est JS
+
+Re-analyse du re-vol (`target/harvest/revol/yt_dom.txt` +
+`yt_raw.html`) — le diagnostic precedent (« le sous-arbre
+shadow n'atteint ni cascade ni boxification ») etait
+**partiellement errone** :
+
+- **`window.ShadyDOM={force:true,preferPerformance:true,noPatch:true}`**
+  en tete de `yt_raw.html` : YouTube *force* le polyfill
+  Shady DOM. Le contenu est stampé en **light DOM** — d'ou
+  les classes `style-scope` et le `span.yt-icon-shape`
+  directement enfant light de `yt-icon`.
+- **0 `shadowrootmode` dans tout le dump commis** : aucune
+  racine shadow n'a jamais ete attachee en session —
+  `attachShadow` natif n'est jamais invoque (Shady le
+  neutralise, `noPatch:true`).
+- Verrou ajoute cote NAV
+  (`custom_element_upgrade_shadow_svg_boxifie`,
+  `explorer-core/tests/session.rs`) : upgrade
+  `customElements` + `attachShadow` + `<svg>` en ombre
+  → serialise + boxifie, bout-en-bout **vert**. La
+  chaine shadow native (R-96/97 : flat tree, slots,
+  styles scopes) est donc operationnelle et n'est **pas**
+  le bloqueur masthead.
+- Le trou reel est en amont, cote jscore : le stamping
+  Polymer produit bien la structure (`span.yt-icon-shape`
+  present) mais **l'injection d'icone ne tourne pas**
+  (`icon="yt-icons:arrow-back"` → registre
+  `yt-icons`/`iron-iconset-svg` → `<svg>` injecte dans
+  `.yt-icon-shape`). Suspects : `innerHTML` sur element,
+  `dom-module`/iconset registry, `MutationObserver`,
+  ou erreur JS en amont du stamping d'icone.
+- Corollaire mesure : une fois les `<svg>` injectes en
+  light DOM, `collect_svg_styled`/`svg_sizes` les
+  atteindront par le parcours `children` ordinaire —
+  **aucune extension shadow des collectes SVG n'est
+  requise pour YouTube** (le parcours shadow reste un
+  manque connu des traversées `collect_*`/`svg_sizes`/
+  `collect_images`, non bloquant aujourd'hui puisqu'il
+  n'y a pas d'ombre reelle sur ce site ; a garder en
+  file pour les sites a shadow natif).
+- En revanche la **geometrie** du span stampé reste a
+  traiter : `.yt-icon-shape` est `h=0` meme peuple ? Le
+  css `ytd-masthead svg{width:40px;height:40px}` est en
+  feuille document — verifier que le `width/height`
+  mordra sur le `<svg>` stampé (fix R-284 deja pose).
+
+### 2026-11-13 — PIPE -> NAV : rectificatif N0.3 endosse + prochain levier geo_diff
+
+- **Endossement** : le constat `626610e3` corrige mon
+  attribution « masthead = shadow DOM natif » —
+  `ShadyDOM={force:true}` : YouTube stampe en light DOM,
+  la chaine shadow native (R-96/97) est deja bout-en-bout
+  (verrou `custom_element_upgrade_shadow_svg_boxifie`
+  vert). Les `h=0` masthead = injection iconset jscore —
+  terrain NAV. Cote PIPE : rien a etendre (`collect_svg*`
+  atteint le light DOM ; `svg{width:40px}` en feuille
+  document couvert par R-284).
+- **Prochain levier PIPE suggere par le re-vol** : le
+  drift `dy` cumulatif ~4,7 px/ligne qui domine les
+  geo_diff des 7 sites — probablement le calcul
+  `line-height:normal` (metriques fonte : ascent+descent
+  vs +lineGap/usWin*). Si la cause est cote moteur je la
+  traite en R-291+ — c'est le resserrement d'oracle le
+  plus direct pour tous les sites texte.
+
+### 2026-11-13 — PIPE (R-291 f442fbd3) -> NAV : drift dy HN traite et verifie
+
+- **Diagnostic corrige** : `line-height:normal` innocent —
+  sonde directe Verdana 13,33px = **16,0 px moteur** vs
+  ~16,2 Chrome (fixture 3 lignes, `layout` local).
+- **Cause reelle** : `<tr style="height:5px">` spacer HN a
+  cellule vide s'effondrait a ~0 — `row_h` ne lisait que
+  les `height` de *cellules*, jamais celle du `tr` (§17.5.3
+  borne inferieure). Fix `tables.rs` : rang specifie borne
+  + `row_fixed` ; `%` → `auto` honnete.
+- **Verifie au geo_diff** (release frais, meme ref) :
+  HN **99 → 90,3 %** ; drift residuel **4,7 → 0,3 px/rang**
+  (cumul ~10 px/30 rangs au lieu de ~140). Wikipedia
+  inchange (95,6 % — pas de spacer `tr`).
+- **Dominante suivante wiki** : `span.vector-icon` ×79 a
+  dy>100 px — decalage structurel sidebar (icone Vector),
+  a investiguer au prochain tour si priorise.
+- **Census** : dernier re-tour NAV post-R-290 = **1081/2159
+  (50,1 %)** — `spaces` ok confirme, famille bouclee.
+
+### 2026-11-12 — N1.5 : la VM n'est pas figée — elle est *lente*
+
+- `bg.io` (chaîne readiness) : `wpc()` ×2 → `{f,c,m,mws}`
+  créés ×2 → `io.f`/`wPd`/`f` invoqués → `eO` assigné →
+  `kFI` atteint `wPd` → **pend sur `zZN.promise`**.
+- `wPd` = `zZN.promise` ; `zZN` ne résout qu'en `D8$` case 6
+  — or `D8$` case 2 attend `y7.snapshot` (hix-gaté) → `V`.
+  **Le bootstrap session exige `V` issu du run `Q()` lui-même.**
+- `bg.v` = **0** : `V` (callback arg1 de `Q`, résout `hix`
+  avec `{bWm,nXe,auT,nXm}`) **jamais invoqué**.
+- `bg.wcb` ×34+ : le logger `w` (arg4) reçoit des beats
+  `a0≈15 ms, e=true (y="h")` toutes les **~3,3 s** — la VM
+  exécute des unités de ~15 ms à cadence fixe : **vivante,
+  en boucle de collecte, jamais complétée**.
+- Corrélation cadence : `commit.anim` = **3,2 s/commit**
+  (`relayout_animated` sur le DOM /watch) — le battement
+  hôte (pump_timers) est bridé à cette cadence + sieste
+  plancher `elapsed` (JS-C293). Les livraisons/timers du
+  moteur n'avancent qu'à ce rythme.
+- Si le pacing VM est accroché aux livrées de commit
+  (observers/timers drainés à la pompe), il progresse
+  ~1 unité/3,3 s là où Chrome tourne à ~60 Hz → `V`
+  inatteignable dans la fenêtre `bb` (60 s) — **stall de
+  vitesse, pas de mécanisme**.
+
+### 2026-11-12 — N1.5 RÉSOLU : la VM complète — `V` tire — la signature suit
+
+- **`bg.v` a tiré** (23:32:23, `argc=4`) — la VM appelle le
+  callback de complétion : `hix` résout `{bWm,nXe,auT,nXm}`.
+- **Le « stall » était une phase de sampling par design** :
+  opcode `pY` → `v.setTimeout(cb, K.timeout≈3 s)` → ~64 beats
+  de ~15 ms (~4-5 min) avant complétion. Pas une famine
+  moteur : les délais demandés sont majoritairement ≥1 s
+  (mesure hook `/eval` sur `window.setTimeout` : 3 posts <10 ms
+  vs 123 ≥100 ms).
+- **Toute la chaîne s'est déverrouillée** après `V` :
+  `D8$` case 2 → `y7.snapshot` → `bWm` → `C9A` → `fBF` →
+  `pj` → `zZN.resolve` → `wPd`/`kFI` → `isReady` →
+  `a4`×13 / `hDo`×2 / `io.m`/`io.mws` invoqués.
+- **Requêtes attestées observées** : `POST /youtubei` XHR à
+  +3 s post-`V` ; `fetch.send /youtubei/v1/guide` +
+  `/v1/feedback` ensuite.
+- `bg.spq` = 0 cohérent : `L.sPQ` (stepper `mtI_`) n'est
+  invoqué que par `invoke`/`Kmw` — le flux principal passe
+  par `pj` (`i4F`/`AP$`/`mTM` — le wrapper de `fBF`), pas
+  par `aq.sPQ`.
+- `bb` ×3 = watchdogs `eG` (60 s) qui expirent pendant la
+  phase sampling → respawn — **bénin vis-à-vis de la
+  complétion** : les programmes continuent en arrière-plan.
+- Verdict : BotGuard **fonctionne** dans le moteur — le coût
+  est la durée intrinsèque du programme (~5 min à cadence
+  ~3 s/pas, conçue ainsi) + le pacing bridé par
+  `commit.anim`=3,2 s. La différence Chrome est la vitesse,
+  pas un op manquant.
+
+### 2026-11-13 — PIPE → NAV (jscore) : bug `li` enchâssés nommé — parseur miroir mini-DOM
+
+- **Symptôme mesuré** (re-vol wiki) : les `li` des groupes
+  langues (`div.hlist wikipedia-languages-langs > ul > li`)
+  rendus **empilés** dans la geom session alors que
+  `.hlist li{display:inline}` est présent et matche — chaque
+  `li` langue **échappe** du `ul` hlist et devient enfant
+  direct de `ul.plainlinks`.
+- **Isolations faites** : feuille hlist réelle + markup réel
+  OK en fixture (li inline) ; CSP innocente (`style-src` a
+  `'unsafe-inline'`) ; feuilles externes Vector sans règle
+  `li` concurrente ; les hlist footers rendent inline sur la
+  session réelle (la feuille s'applique). Le `layout` du
+  fichier brut rend inline — le `dom` (session+jscore) du
+  **même fichier** montre les `li` échappés.
+- **Cause racine** : `Dom::from_html` construit le miroir
+  avec le **parseur propre** de jscore (`dom.rs`). Sa clôture
+  implicite `PAIRED_CLOSE` (`"li" → [dd,dt,li]`, ~5020) dépile
+  **à travers** les intermédiaires jusqu'à un ancêtre `li`.
+  Spec « close a list item » : la marche doit **s'arrêter**
+  au premier élément *special* hors {address,div,p}
+  (`ul`/`ol`/`dl`/`section`/`table`/`form`/`object`/
+  `template`/`html`…). Ici `ul.plainlinks > li.groupe >
+  div.hlist > ul > li.langue` : le `ul` interne devrait
+  borner → le `li` langue resterait niché. `job.html`
+  (sonde `apply.rs` posée puis retirée) confirme :
+  `<ul></ul></div></li><li>` — le `ul` hlist sérialisé vide.
+- **Fix attendu côté jscore** : dans la boucle de dépile
+  `PAIRED_CLOSE`, s'arrêter **sans dépiler** quand le sommet
+  est un élément *special* hors {address,div,p} — approximation
+  pragmatique : `ul`,`ol`,`dl`,`menu`,`table`,`td`,`th`,`tr`,
+  `tbody`,`thead`,`tfoot`,`caption`,`form`,`fieldset`,`object`,
+  `marquee`,`template`,`html` + sectionnels `article`,`aside`,
+  `nav`,`section`,`header`,`footer`,`main`,`h1..h6`,
+  `blockquote`,`pre`,`center`,`listing`,`xmp`,`plaintext`,
+  `button`,`select`,`details`,`dialog`,`summary`,`figure`,
+  `figcaption` (liste spec complète §12.1.2).
+- **Verrou suggéré** : fixture `ul>li>div.hlist>ul>li` via
+  `dom` session — le `li` interne doit rester enfant du `ul`
+  interne (`lh_escape.html` / `lh_real.html` sous
+  `target/harvest/revol/` reproduisent min puis réel).
+- **Impact** : trou générique — casse toute liste imbriquée
+  sous un conteneur intermédiaire, pas seulement wiki.
+  `geo_diff` wiki attendu ~-800 px sur `mp-bottom` au fix.
+
+### 2026-11-13 — N1.5 CONFIRMÉ : poToken attesté sur le fil
+
+- Sonde `req.hdrs` (`probe_youtubei`, xhr.rs) : dump
+  headers + extrait corps pour toute URL `/youtubei`.
+- Run dbg4 : `bg.v` tiré 00:02:55 → clic logo (nav SPA,
+  même document/session `trayride`) →
+  `POST /youtubei/v1/browse` à 00:13:35 portant
+  **`x-goog-eom-visitor-id`** (~700 car. base64) —
+  le jeton d'attestation BotGuard attaché à la requête.
+- `x-youtube-client-name=1`, `client-version`, en-têtes
+  complets ; corps JSON gzip 3025 o (le token est dans
+  l'en-tête, pas le corps).
+- Technique de déclenchement : clic `.click()` sur
+  `a#logo` = navigation **SPA** (même realm JS, même VM)
+  → appels Innertube attestés par la session déjà
+  complétée. Évite la ré-attente de 5 min d'un nouveau
+  document.
+- Verdict final N1.5 : moteur **fonctionnel de bout en
+  bout** — la VM complète (~5 min sampling), `V` tire,
+  la chaîne de signing produit et attache le poToken.
+
+### 2026-11-13 — N1.4 tranché : `dyn.err` = data-blocks inertes, corrigé
+
+- Run dbg4 (sonde `kind`/`ty` armée, `/watch` complet) :
+  **0 `dyn.err`** sur 13 442 events d'hydratation
+  (`ce.clone`/`psp.hit`/`life.call`) + 2 `dlv.dynscript`
+  réels livrés sans erreur.
+- Verdict : les `dyn.err` historiques (`syntax error at
+  1:12`, `dyn:7`/`dyn:8`) étaient les **data-blocks
+  inertes** (`<script type="application/json">` clonés
+  des templates CE) évalués à tort par
+  `note_attached_scripts` — faux-positif, pas un gel de
+  file `mr`. Le filtre `script_parse_exec` (verrou
+  `inserted_data_script_stays_inert`) les exclut → 0.
+- L'hypothèse « chunk fetché qui gèle la file `mr` »
+  n'est pas corroborée par ce run — à revisiter si un
+  `dyn.err kind=src` réapparaît un jour.
+
+### 2026-11-13 — Vitrine `/` : page honnêtement caractérisée
+
+- Frame `?full=1` révélait un voile noir : **le bandeau
+  de consentement Google** (`ytd-consent-bump-v2`)
+  couvre le viewport — les clics (accepter/refuser)
+  togglent le layout sans fermer : le POST consentement
+  n'est pas dans le corpus → re-déclenché. Retiré au
+  DOM pour mesurer le dessous.
+- Sous le voile : **masthead complet** (burger, « Se
+  connecter ») + carte « **Votre historique YouTube est
+  désactivé** » — le message exact que YouTube sert à
+  un profil froid. `ytInitialData` = 160 Ko, 0
+  `videoRenderer`/`richItemRenderer` : **le feed est
+  absent des données enregistrées**, pas un échec
+  moteur.
+- Verdict vitrine : moteur **fidèle à l'enregistrement**
+  — page stylée, texte FR net, liens actifs.
+  Vignettes : absentes (données) ; icônes masthead :
+  misses corpus epoch≥2 (`fetch.rej` gstatic — les
+  `.resp` sont consommées une fois par nav).
+- État atteint : titre `YouTube`, `appKids=14`,
+  `[[…]]` absents, attestation fonctionnelle — reste
+  un corpus **warm-profile** pour un feed peuplé.
+
+### 2026-11-13 — Vitrine `/` vs Chrome non-identifié : écart précisé
+
+- Référence Chrome (screenshot) : masthead complet +
+  sidebar expanded + carte « historique désactivé ».
+- Mesure DOM chez nous (1024×768) : `yt-guide-manager`
+  a consommé la réponse guide — `getData()` = 13,4 Ko
+  avec `items` ; **mini-rail peuplé** : 4
+  `ytd-mini-guide-entry-renderer` (Accueil/Shorts/
+  Abonnements/Vous), chacune avec 1 `yt-icon`.
+- **Expanded guide correctement absente** :
+  `canFitPersistentGuide=false` à 1024 px (breakpoint
+  YouTube ~1312 px — Chrome pareil à cette largeur).
+- **Trou réel n°1 : les `yt-icon` ne peignent rien**
+  (18 dans le DOM, zéro SVG produit) — chaîne `k9`
+  iconset (`missingIconSet`→`onIconsetAdded`→
+  `renderIcon`→`applyStaticIcon`) instrumentée pour
+  nommer le maillon qui cale.
+- Trou n°2 : `ytd-searchbox` jamais stampé dans
+  `ytd-masthead #container` (logo+search+boutons
+  absents de la barre — le burger et « Se connecter »
+  seuls peignent).
+- Confirmé : `fetch /youtubei/v1/guide` parti **signé**
+  (`x-goog-eom-visitor-id`), réponse 200 consommée.
+  `/youtubei/v1/browse` rejeté (corpus sans entrée) ;
+  `/upgrade_visitor_cookie` rejeté (absent corpus).
+
+### 2026-11-13 — Searchbox : absente du markup, stamping jamais produit
+
+- `ytd-searchbox` n'existe dans le HTML corpus (1,03 Mo)
+  **qu'en `<style class="searchbox">`** — l'élément n'est
+  pas dans le markup : il naît du template du masthead
+  (slot `#center` de `#container`, dom-if/binding) au
+  runtime.
+- Chez nous : `ytd-masthead #container` a ses 3 slots,
+  `_flushClients`/`__enableOrFlushClients` ont tiré sur
+  `ytd-masthead` ET `ytd-topbar-logo-renderer` — mais
+  **zéro `ytd-searchbox` stampé** → barre de recherche
+  jamais créée.
+- Même famille que `yt-icon` : lifecycle Polymer
+  invoqué, descendants jamais matérialisés → la chaîne
+  `k9`/iconset + stamping est le mur commun (sondes
+  `iconsetName`/`iconType`/`attached` ajoutées).
+- Note : recherche `?search_query=` = feed **server-side**
+  non personnalisé — la piste vitrine peuplée passe
+  par un corpus enregistrant une page `/results`.

@@ -510,3 +510,81 @@ fn color_mix_et_oklch_relatif() {
             .unwrap();
     assert!(plyr.a > 100 && plyr.a < 160, "plyr bg : {plyr:?}");
 }
+
+/// R-252 — shorthand `mask` (css-masking-1) : couche complète
+/// `image position/size repeat composite mode box×2` éclatée
+/// en longhands standards ; `-webkit-mask` alias.
+#[test]
+fn mask_shorthand_expande() {
+    let e = expand_shorthand(
+        "mask",
+        "url(icon.svg) center / cover no-repeat padding-box content-box subtract luminance",
+    )
+    .unwrap();
+    let get = |n: &str| e.iter().find(|(k, _)| k == n).map(|(_, v)| v.as_str());
+    assert_eq!(get("mask-image"), Some("url(icon.svg)"));
+    assert_eq!(get("mask-position"), Some("center"));
+    assert_eq!(get("mask-size"), Some("cover"));
+    assert_eq!(get("mask-repeat"), Some("no-repeat"));
+    // Deux boxes : origin puis clip.
+    assert_eq!(get("mask-origin"), Some("padding-box"));
+    assert_eq!(get("mask-clip"), Some("content-box"));
+    assert_eq!(get("mask-composite"), Some("subtract"));
+    assert_eq!(get("mask-mode"), Some("luminance"));
+}
+
+/// `-webkit-mask` minimal : image seule → longhands
+/// standards aux initiales ailleurs (le shorthand
+/// réinitialise tout, comme `background`).
+#[test]
+fn webkit_mask_image_seule() {
+    let e = expand_shorthand("-webkit-mask", "url(i.svg)").unwrap();
+    let get = |n: &str| e.iter().find(|(k, _)| k == n).map(|(_, v)| v.as_str());
+    assert_eq!(get("mask-image"), Some("url(i.svg)"));
+    assert_eq!(get("mask-repeat"), Some("repeat"));
+    assert_eq!(get("mask-mode"), Some("match-source"));
+}
+
+/// Multi-couches : longhands joints par `, ` dans l'ordre.
+#[test]
+fn mask_multi_couches() {
+    let e = expand_shorthand("mask", "url(a), url(b) 50%").unwrap();
+    let get = |n: &str| e.iter().find(|(k, _)| k == n).map(|(_, v)| v.as_str());
+    assert_eq!(get("mask-image"), Some("url(a), url(b)"));
+    assert_eq!(get("mask-position"), Some("0% 0%, 50%"));
+}
+
+/// Mot-clé CSS-wide sur un shorthand (css-cascade-5
+/// §defaulting) : chaque longhand de l'expansion reçoit le
+/// mot-clé — les grammaires strictes le droppaient
+/// (jauge `affectsv` : `outline:inherit` & co).
+#[test]
+fn css_wide_sur_shorthands() {
+    for (sh, n) in [
+        ("outline", 3),
+        ("column-rule", 3),
+        ("flex-flow", 2),
+        ("margin", 4),
+        ("place-self", 2),
+        ("gap", 2),
+        ("border-top", 3),
+    ] {
+        let e = expand_shorthand(sh, "inherit").unwrap_or_else(|| panic!("{sh} expansion"));
+        assert_eq!(e.len(), n, "{sh} : {n} longhands attendus");
+        assert!(
+            e.iter().all(|(_, v)| v == "inherit"),
+            "{sh} : chaque longhand = inherit ({e:?})"
+        );
+    }
+}
+
+/// R-258 — `font-size` : mots-clés css-fonts-4 `xxx-large` +
+/// `math` acceptés à la validation (table stoppée à `xx-large`
+/// → `value.dropped.font-size` terrain).
+#[test]
+fn font_size_mots_cles_css4() {
+    use explorer_css::value::value_is_valid_for;
+    for v in ["xxx-large", "math", "smaller", "larger", "12px", "150%"] {
+        assert!(value_is_valid_for("font-size", v), "{v} refusé");
+    }
+}

@@ -391,6 +391,7 @@ pub(crate) fn install(e: &mut Engine) {
     e.add_method(abp, "slice", ab_slice);
     e.add_method(abp, "resize", ab_resize);
     e.add_method(abp, "transfer", ab_transfer);
+    e.add_method(abp, "transferToFixedLength", ab_transfer_fixed);
     {
         let ab = e.native_fn("ArrayBuffer", ab_ctor);
         let id = c_id(ab.clone());
@@ -404,6 +405,11 @@ pub(crate) fn install(e: &mut Engine) {
     // mais `ArrayBuffer.prototype.resizable` doit exister et lever
     // `TypeError` sur `this` non-buffer (spec `get resizable`).
     for (n, f, gname) in [
+        (
+            "byteLength",
+            ab_byte_length_get as crate::heap::NativeFn,
+            "get byteLength",
+        ),
         (
             "resizable",
             ab_resizable_get as crate::heap::NativeFn,
@@ -433,10 +439,27 @@ pub(crate) fn install(e: &mut Engine) {
     {
         let sabp = e.new_object();
         e.add_method(sabp, "grow", sab_grow);
-        {
-            let gg = e.native_fn("get growable", sab_growable_get);
+        e.add_method(sabp, "slice", sab_slice);
+        for (n, f, gname) in [
+            (
+                "byteLength",
+                ab_byte_length_get as crate::heap::NativeFn,
+                "get byteLength",
+            ),
+            (
+                "maxByteLength",
+                ab_max_get as crate::heap::NativeFn,
+                "get maxByteLength",
+            ),
+            (
+                "growable",
+                sab_growable_get as crate::heap::NativeFn,
+                "get growable",
+            ),
+        ] {
+            let gf = e.native_fn(gname, f);
             if let Some(o) = e.heap.obj_mut(sabp) {
-                o.set_accessor("growable", gg, Value::Undefined, false);
+                o.set_accessor(n, gf, Value::Undefined, false);
             }
         }
         let tag = e.str_val("SharedArrayBuffer");
@@ -471,6 +494,28 @@ pub(crate) fn install(e: &mut Engine) {
 
     // -- DataView ------------------------------------------------------
     let dvp = e.protos.data_view;
+    for (n, f, gname) in [
+        (
+            "buffer",
+            dv_buffer_get as crate::heap::NativeFn,
+            "get buffer",
+        ),
+        (
+            "byteLength",
+            dv_byte_length_get as crate::heap::NativeFn,
+            "get byteLength",
+        ),
+        (
+            "byteOffset",
+            dv_byte_offset_get as crate::heap::NativeFn,
+            "get byteOffset",
+        ),
+    ] {
+        let gf = e.native_fn(gname, f);
+        if let Some(o) = e.heap.obj_mut(dvp) {
+            o.set_accessor(n, gf, Value::Undefined, false);
+        }
+    }
     for (kind, gname, sname) in [
         (TaKind::I8, "getInt8", "setInt8"),
         (TaKind::U8, "getUint8", "setUint8"),
@@ -524,6 +569,43 @@ pub(crate) fn install(e: &mut Engine) {
     e.add_method(tap, "values", ta_values);
     e.add_method(tap, "entries", ta_entries);
     e.add_method(tap, "toString", ta_join);
+    e.add_method(tap, "toLocaleString", ta_join);
+    e.add_method(tap, "findLast", ta_find_last);
+    e.add_method(tap, "findLastIndex", ta_find_last_index);
+    e.add_method(tap, "with", ta_with);
+    e.add_method(tap, "toReversed", ta_to_reversed);
+    e.add_method(tap, "toSorted", ta_to_sorted);
+    // Accesseurs spec sur %TypedArray%.prototype — les instances
+    // résolvent déjà ces props en virtuelles propres (même
+    // valeur, `find_own` d'abord), l'accesseur rend le prototype
+    // conforme (`'byteLength' in Uint8Array.prototype`).
+    for (n, f, gname) in [
+        (
+            "buffer",
+            ta_buffer_get as crate::heap::NativeFn,
+            "get buffer",
+        ),
+        (
+            "byteLength",
+            ta_byte_length_get as crate::heap::NativeFn,
+            "get byteLength",
+        ),
+        (
+            "byteOffset",
+            ta_byte_offset_get as crate::heap::NativeFn,
+            "get byteOffset",
+        ),
+        (
+            "length",
+            ta_length_get as crate::heap::NativeFn,
+            "get length",
+        ),
+    ] {
+        let gf = e.native_fn(gname, f);
+        if let Some(o) = e.heap.obj_mut(tap) {
+            o.set_accessor(n, gf, Value::Undefined, false);
+        }
+    }
     {
         let it = e.native_fn("values", ta_values);
         e.set_own(tap, SYM_ITERATOR, it, false);
@@ -1809,6 +1891,184 @@ fn ab_max_get(e: &mut Engine, this: Value, _a: &[Value]) -> JsResult<Value> {
 fn ab_detached_get(e: &mut Engine, this: Value, _a: &[Value]) -> JsResult<Value> {
     let id = ab_this(e, this)?;
     Ok(e.get_prop(id, "detached").unwrap_or(Value::Bool(false)))
+}
+
+/// `get byteLength` — `ByteBuf` partagé `ArrayBuffer`/`SharedArrayBuffer`.
+fn ab_byte_length_get(e: &mut Engine, this: Value, _a: &[Value]) -> JsResult<Value> {
+    let id = ab_this(e, this)?;
+    match e.heap.obj(id).map(|o| &o.kind) {
+        Some(ObjKind::ByteBuf(b)) => Ok(Value::Num(b.len() as f64)),
+        _ => Ok(Value::Num(0.0)),
+    }
+}
+
+/// `buf.transferToFixedLength(len?)` — ES2024 : comme `transfer`
+/// mais le résultat est toujours **fixe** (`resizable:false`,
+/// `maxByteLength = len`).
+fn ab_transfer_fixed(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
+    let out = ab_transfer(e, this, args)?;
+    if let Value::Obj(nid) = out {
+        e.set_own(nid, "resizable", Value::Bool(false), false);
+        let len = match e.heap.obj(nid).map(|o| &o.kind) {
+            Some(ObjKind::ByteBuf(b)) => b.len(),
+            _ => 0,
+        };
+        e.set_own(nid, "maxByteLength", Value::Num(len as f64), false);
+    }
+    Ok(out)
+}
+
+/// `sab.slice(begin?, end?)` — même copie que `ArrayBuffer.slice`
+/// mais proto `SharedArrayBuffer.prototype` (spec).
+fn sab_slice(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
+    let out = ab_slice(e, this, args)?;
+    let proto = e
+        .get_prop(e.global, "SharedArrayBuffer")
+        .and_then(|c| match c {
+            Value::Obj(cid) => e.get_prop(cid, "prototype"),
+            _ => None,
+        });
+    if let (Value::Obj(id), Some(p)) = (out.clone(), proto) {
+        if let Some(o) = e.heap.obj_mut(id) {
+            o.proto = p;
+        }
+    }
+    Ok(out)
+}
+
+// -- Accesseurs `DataView.prototype` -------------------------------------
+
+fn dv_buffer_get(e: &mut Engine, this: Value, _a: &[Value]) -> JsResult<Value> {
+    let (bid, _, _) = dv_view(e, this)?;
+    Ok(Value::Obj(bid))
+}
+fn dv_byte_length_get(e: &mut Engine, this: Value, _a: &[Value]) -> JsResult<Value> {
+    let (_, _, len) = dv_view(e, this)?;
+    Ok(Value::Num(len as f64))
+}
+fn dv_byte_offset_get(e: &mut Engine, this: Value, _a: &[Value]) -> JsResult<Value> {
+    let (_, off, _) = dv_view(e, this)?;
+    Ok(Value::Num(off as f64))
+}
+
+// -- Accesseurs `%TypedArray%.prototype` ---------------------------------
+
+fn ta_buffer_get(e: &mut Engine, this: Value, _a: &[Value]) -> JsResult<Value> {
+    let (_, bid, _, _) = ta_view(e, this)?;
+    Ok(Value::Obj(bid))
+}
+fn ta_byte_length_get(e: &mut Engine, this: Value, _a: &[Value]) -> JsResult<Value> {
+    let (ta, _, _, len) = ta_view(e, this)?;
+    Ok(Value::Num((len * ta.size()) as f64))
+}
+fn ta_byte_offset_get(e: &mut Engine, this: Value, _a: &[Value]) -> JsResult<Value> {
+    let (_, _, off, _) = ta_view(e, this)?;
+    Ok(Value::Num(off as f64))
+}
+fn ta_length_get(e: &mut Engine, this: Value, _a: &[Value]) -> JsResult<Value> {
+    let (_, _, _, len) = ta_view(e, this)?;
+    Ok(Value::Num(len as f64))
+}
+
+// -- Méthodes %TypedArray% ES2023+ ---------------------------------------
+
+/// `ta.findLast(fn)` — premier élément *depuis la fin*.
+fn ta_find_last(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
+    let (_, vals) = ta_vals(e, this.clone())?;
+    let f = arg(args, 0);
+    if !e.is_callable(f.clone()) {
+        return Err(e.type_error("callback is not callable"));
+    }
+    let t = arg(args, 1);
+    for i in (0..vals.len()).rev() {
+        let r = e.call_value(
+            f.clone(),
+            t.clone(),
+            &[vals[i].clone(), Value::Num(i as f64), this.clone()],
+        )?;
+        if e.to_boolean(r) {
+            return Ok(vals[i].clone());
+        }
+    }
+    Ok(Value::Undefined)
+}
+
+/// `ta.findLastIndex(fn)`.
+fn ta_find_last_index(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
+    let (_, vals) = ta_vals(e, this.clone())?;
+    let f = arg(args, 0);
+    if !e.is_callable(f.clone()) {
+        return Err(e.type_error("callback is not callable"));
+    }
+    let t = arg(args, 1);
+    for i in (0..vals.len()).rev() {
+        let r = e.call_value(
+            f.clone(),
+            t.clone(),
+            &[vals[i].clone(), Value::Num(i as f64), this.clone()],
+        )?;
+        if e.to_boolean(r) {
+            return Ok(Value::Num(i as f64));
+        }
+    }
+    Ok(Value::Num(-1.0))
+}
+
+/// `ta.with(i, v)` — ES2023 : copie avec `ta[i] = v`.
+fn ta_with(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
+    let (ta, mut vals) = ta_vals(e, this)?;
+    let n = e.to_number(arg(args, 0))?;
+    let i = if n < 0.0 { vals.len() as f64 + n } else { n };
+    if i < 0.0 || i >= vals.len() as f64 {
+        return Err(e.range_error("invalid index"));
+    }
+    vals[i as usize] = arg(args, 1);
+    ta_from_vals(e, ta, &vals)
+}
+
+/// `ta.toReversed()` — copie inversée (non-destructive).
+fn ta_to_reversed(e: &mut Engine, this: Value, _a: &[Value]) -> JsResult<Value> {
+    let (ta, mut vals) = ta_vals(e, this)?;
+    vals.reverse();
+    ta_from_vals(e, ta, &vals)
+}
+
+/// `ta.toSorted(cmp?)` — copie triée, même tri que `ta.sort`.
+fn ta_to_sorted(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
+    let (ta, mut vals) = ta_vals(e, this.clone())?;
+    let cmp = arg(args, 0);
+    if matches!(cmp, Value::Undefined) {
+        vals.sort_by(|a, b| match (a.clone(), b.clone()) {
+            (Value::Num(x), Value::Num(y)) => {
+                x.partial_cmp(&y).unwrap_or(std::cmp::Ordering::Equal)
+            }
+            _ => match (e.bigint_of(a.clone()), e.bigint_of(b.clone())) {
+                (Some(x), Some(y)) => x.cmp(&y),
+                _ => std::cmp::Ordering::Equal,
+            },
+        });
+    } else {
+        if !e.is_callable(cmp.clone()) {
+            return Err(e.type_error("comparator is not callable"));
+        }
+        for i in 1..vals.len() {
+            let mut j = i;
+            while j > 0 {
+                let r = e.call_value(
+                    cmp.clone(),
+                    Value::Undefined,
+                    &[vals[j - 1].clone(), vals[j].clone()],
+                )?;
+                if e.to_number(r).unwrap_or(0.0) > 0.0 {
+                    vals.swap(j - 1, j);
+                    j -= 1;
+                } else {
+                    break;
+                }
+            }
+        }
+    }
+    ta_from_vals(e, ta, &vals)
 }
 
 /// Kinds Atomics (spec : hors `Uint8Clamped` et tout float).

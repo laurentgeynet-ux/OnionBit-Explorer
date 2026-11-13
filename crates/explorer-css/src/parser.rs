@@ -125,6 +125,15 @@ pub enum AtKind {
         /// Règles désucrées (préludes déjà préfixés).
         rules: Vec<Rule>,
     },
+    /// `@starting-style { rules }` — styles initiaux de
+    /// transition/transitions d'entrée (css-transitions-2).
+    /// R-244 : parsé mais dormant — les règles NE SONT PAS
+    /// appliquées (elles ne valent qu'à la première pose,
+    /// consommateur futur).
+    StartingStyle {
+        /// Règles imbriquées.
+        rules: Vec<Rule>,
+    },
     /// Sans bloc : `@name prelude ;` (`@import`, `@charset`,
     /// `@namespace`, `@supports` sans cas nominal ici, etc.) —
     /// le prélude est conservé brut.
@@ -515,11 +524,28 @@ impl<'t> Parser<'t> {
                         scope_wrap_rules(&mut rules, &root, bound.as_deref());
                         AtKind::Scope { rules }
                     }
-                    "font-face" | "page" | "viewport" | "counter-style" | "property" => {
+                    "font-face" | "page" | "viewport" | "counter-style" | "property"
+                    | "font-palette-values" | "position-try" | "view-transition"
+                    | "function" => {
                         AtKind::Declarations {
                             prelude,
                             declarations: self.declaration_block(),
                         }
+                    }
+                    // R-244 — `@starting-style` : container
+                    // de règles dormant (consommateur futur —
+                    // animations d'entrée).
+                    "starting-style" => {
+                        let rules = if self.nest_depth >= MAX_NESTING {
+                            self.skip_block();
+                            Vec::new()
+                        } else {
+                            self.nest_depth += 1;
+                            let r = self.nested_rules();
+                            self.nest_depth -= 1;
+                            r
+                        };
+                        AtKind::StartingStyle { rules }
                     }
                     // R-229 — `@font-feature-values <fam> {
                     // @<kind> { <nom>: <idx>+ } }` : corps de
@@ -1433,7 +1459,7 @@ fn parse_import(prelude: &str) -> ImportRule {
 }
 
 /// Parse une liste de media queries séparées par `,`.
-fn parse_media_queries(prelude: &str) -> Vec<MediaQuery> {
+pub(crate) fn parse_media_queries(prelude: &str) -> Vec<MediaQuery> {
     let queries: Vec<MediaQuery> = prelude
         .split(',')
         .map(|q| parse_one_media(q.trim()))
@@ -1449,13 +1475,15 @@ fn parse_media_queries(prelude: &str) -> Vec<MediaQuery> {
         }
         explorer_common::census::bump("css.mq.unknown");
         let frag = raw.trim();
-        let key = if frag.contains("<=") || frag.contains(">=")
-            || frag.matches(['<', '>']).count() > 1
-        {
-            "css.mq.unknown.range".to_string()
-        } else {
-            format!("css.mq.unknown.{}", frag.chars().take(48).collect::<String>())
-        };
+        let key =
+            if frag.contains("<=") || frag.contains(">=") || frag.matches(['<', '>']).count() > 1 {
+                "css.mq.unknown.range".to_string()
+            } else {
+                format!(
+                    "css.mq.unknown.{}",
+                    frag.chars().take(48).collect::<String>()
+                )
+            };
         explorer_common::census::bump(&key);
     }
     queries
@@ -1580,7 +1608,11 @@ fn parse_one_media(q: &str) -> MediaQuery {
         }
     }
     mq.conditions = groups.first().cloned().unwrap_or_default();
-    mq.or_groups = if groups.len() > 1 { groups[1..].to_vec() } else { Vec::new() };
+    mq.or_groups = if groups.len() > 1 {
+        groups[1..].to_vec()
+    } else {
+        Vec::new()
+    };
     mq
 }
 
@@ -1689,4 +1721,34 @@ fn find_matching_paren(s: &str) -> usize {
         }
     }
     s.len()
+}
+
+/// At-rule `name` reconnue par le moteur — sondage par parse
+/// d'un bloc `@name … {}` : tout nom qui produit un
+/// [`AtKind`] structuré (≠ [`AtKind::UnknownBlock`]) est
+/// reconnu ; les at-rules à statement gérées nominativement
+/// (`charset`, `import`) complètent la liste.
+///
+/// Critère *reconnu au parse*, pas *appliqué* — `unapplied`
+/// du census (R-207) mesure la seconde colonne ; le
+/// dénominateur de couverture BCD se veut « le moteur sait
+/// quoi faire de `@x` », pas « il l'applique »
+/// (`scripts/bcd_coverage.mjs`).
+#[must_use]
+pub fn at_rule_supported(name: &str) -> bool {
+    // Statements gérés nominativement : `charset`/`import`
+    // (feuille), `namespace` (R-237 — registre préfixe→URI),
+    // `custom-media` (R-231 — alias de media query). Un
+    // statement `@x …;` inconnu est indistinguable d'un
+    // reconnu au parse — la liste blanche est le critère.
+    const KNOWN_STATEMENTS: &[&str] = &["charset", "import", "namespace", "custom-media"];
+    if KNOWN_STATEMENTS.contains(&name.to_ascii_lowercase().as_str()) {
+        return true;
+    }
+    let probe = format!("@{name} x {{}}");
+    let sheet = parse_stylesheet(&probe);
+    matches!(
+        sheet.rules.first(),
+        Some(Rule::At(at)) if !matches!(at.kind, AtKind::UnknownBlock { .. })
+    )
 }

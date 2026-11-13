@@ -56,6 +56,21 @@ pub enum Unit {
     Vmin,
     /// Max des deux dimensions du viewport.
     Vmax,
+    /// `cq*` (css-contain-3 §4.2) : % de la dimension du
+    /// conteneur query le plus proche — résolu `Vw`/`Vh`
+    /// quand aucun `container-type` ancêtre n'est tracé
+    /// (fallback spec = small viewport, approx. documentée).
+    Cqw,
+    /// `cqh` — hauteur du conteneur.
+    Cqh,
+    /// `cqi`/`cqb` — axes inline/block.
+    Cqi,
+    /// `cqb`.
+    Cqb,
+    /// `cqmin`/`cqmax` — min/max des deux.
+    Cqmin,
+    /// `cqmax`.
+    Cqmax,
 }
 
 impl Unit {
@@ -78,7 +93,13 @@ impl Unit {
             | Self::Vw
             | Self::Vh
             | Self::Vmin
-            | Self::Vmax => return None,
+            | Self::Vmax
+            | Self::Cqw
+            | Self::Cqh
+            | Self::Cqi
+            | Self::Cqb
+            | Self::Cqmin
+            | Self::Cqmax => return None,
         })
     }
 
@@ -105,6 +126,12 @@ impl Unit {
             "vh" | "dvh" | "svh" | "lvh" => Self::Vh,
             "vmin" | "dvmin" | "svmin" | "lvmin" => Self::Vmin,
             "vmax" | "dvmax" | "svmax" | "lvmax" => Self::Vmax,
+            "cqw" => Self::Cqw,
+            "cqh" => Self::Cqh,
+            "cqi" => Self::Cqi,
+            "cqb" => Self::Cqb,
+            "cqmin" => Self::Cqmin,
+            "cqmax" => Self::Cqmax,
             _ => return None,
         })
     }
@@ -128,6 +155,12 @@ impl fmt::Display for Unit {
             Self::Vh => "vh",
             Self::Vmin => "vmin",
             Self::Vmax => "vmax",
+            Self::Cqw => "cqw",
+            Self::Cqh => "cqh",
+            Self::Cqi => "cqi",
+            Self::Cqb => "cqb",
+            Self::Cqmin => "cqmin",
+            Self::Cqmax => "cqmax",
         })
     }
 }
@@ -928,11 +961,28 @@ pub fn value_is_valid_for(name: &str, value: &str) -> bool {
         "width" | "height" | "min-width" | "min-height" | "max-width" | "max-height" => {
             matches!(
                 v,
-                "auto" | "none" | "min-content" | "max-content" | "fit-content"
+                "auto"
+                    | "none"
+                    | "min-content"
+                    | "max-content"
+                    | "fit-content"
+                    | "stretch"
+                    | "fill-available"
+                    | "-webkit-fill-available"
+                    | "-moz-available"
             ) || len_or_pct(v)
+                || v.trim_start().starts_with("anchor-size(")
         }
+        // R-254 — `anchor()`/`anchor-size()` dans les insets
+        // (css-anchor-position-1) : fonction à résolution
+        // retardée (layout) — acceptée ici comme `var(`.
         "margin-top" | "margin-right" | "margin-bottom" | "margin-left" | "top" | "right"
-        | "bottom" | "left" => v == "auto" || len_or_pct(v),
+        | "bottom" | "left" => {
+            v == "auto"
+                || len_or_pct(v)
+                || v.trim_start().starts_with("anchor(")
+                || v.trim_start().starts_with("anchor-size(")
+        }
         "padding-top" | "padding-right" | "padding-bottom" | "padding-left" => len_or_pct(v),
         "border-top-width" | "border-right-width" | "border-bottom-width" | "border-left-width" => {
             matches!(v, "thin" | "medium" | "thick") || len_or_pct(v)
@@ -947,6 +997,11 @@ pub fn value_is_valid_for(name: &str, value: &str) -> bool {
                     | "large"
                     | "x-large"
                     | "xx-large"
+                    // css-fonts-4 : `xxx-large` + `math` (taille
+                    // de l'élément math courant) — la table
+                    // s'arrêtait à `xx-large` (R-258).
+                    | "xxx-large"
+                    | "math"
                     | "smaller"
                     | "larger"
             ) || len_or_pct(v)
@@ -961,6 +1016,7 @@ pub fn value_is_valid_for(name: &str, value: &str) -> bool {
         // invalides : arrivés ici sans expansion, c'est qu'elle
         // a échoué — on revalide pour confirmer le drop.
         "background" => expand_background(v).is_some(),
+        "mask" | "-webkit-mask" => expand_mask(v).is_some(),
         "font" => expand_font(v).is_some(),
         _ => true,
     }
@@ -974,12 +1030,145 @@ pub fn value_is_valid_for(name: &str, value: &str) -> bool {
 /// aussi (la déclaration brute est conservée : la validation
 /// par propriété fera le tri).
 #[must_use]
+#[allow(clippy::too_many_lines)]
 pub fn expand_shorthand(name: &str, value: &str) -> Option<Vec<(String, String)>> {
+    // Mot-clé CSS-wide sur un shorthand (css-cascade-5
+    // §defaulting) : **chaque longhand** reçoit le mot-clé —
+    // les grammaires strictes des expansions le droppaient
+    // (`outline:inherit`, `flex-flow:inherit`, `column-rule:
+    // inherit`, `display:inherit` via la jauge affectsv).
+    // La liste des longhands est sondée via une valeur
+    // canonique de l'expansion concernée — `None` = repli
+    // sur l'ancien chemin (déclaration verbatim).
+    let kw = value.trim();
+    if matches!(
+        kw.to_ascii_lowercase().as_str(),
+        "inherit" | "initial" | "unset" | "revert" | "revert-layer"
+    ) {
+        let probe = match name {
+            "margin" | "padding" | "inset" | "gap" | "grid-gap" | "columns" | "border-radius" => {
+                "0"
+            }
+            "border" | "border-top" | "border-right" | "border-bottom" | "border-left"
+            | "column-rule" | "outline" => "1px solid black",
+            "border-width" | "border-style" | "border-color" => "thin",
+            "overflow" => "visible",
+            "flex-flow" => "row nowrap",
+            "flex" => "1",
+            "background" | "mask" | "-webkit-mask" | "grid-template" | "grid" | "container"
+            | "text-wrap" => "none",
+            "font" => "medium serif",
+            "-webkit-text-stroke" => "1px black",
+            "list-style" => "disc",
+            "place-items" | "place-content" | "place-self" => "center",
+            _ => "",
+        };
+        if !probe.is_empty() && !probe.eq_ignore_ascii_case(kw) {
+            if let Some(expanded) = expand_shorthand(name, probe) {
+                return Some(
+                    expanded
+                        .into_iter()
+                        .map(|(n, _)| (n, kw.to_string()))
+                        .collect(),
+                );
+            }
+        }
+    }
     // Propriétés logiques (css-logical-1 — R-124/R-183) :
     // shorthands `*-inline`/`*-block` éclatés en longhands
     // logiques ; la résolution physique attend la cascade.
     if let Some(expanded) = expand_logical(name, value) {
         return Some(expanded);
+    }
+    // `text-wrap` (css-text-4 — R-249) : `<mode> <style>?`
+    // → `text-wrap-mode` + `text-wrap-style`. `nowrap` n'est
+    // qu'un mode ; `balance`/`pretty`/`stable`/`auto` ne sont
+    // qu'un style — chaque absent retombe sur son initial.
+    if name == "text-wrap" {
+        let parts: Vec<&str> = split_ws_top(value);
+        let mut mode = None;
+        let mut style = None;
+        for p in parts {
+            match p {
+                "wrap" | "nowrap" => mode = Some(p),
+                "balance" | "pretty" | "stable" | "auto" => style = Some(p),
+                _ => return None,
+            }
+        }
+        return Some(vec![
+            (
+                "text-wrap-mode".to_string(),
+                mode.unwrap_or("wrap").to_string(),
+            ),
+            (
+                "text-wrap-style".to_string(),
+                style.unwrap_or("auto").to_string(),
+            ),
+        ]);
+    }
+    // `white-space` (css-text-4 §7.1 — R-264) : le shorthand
+    // est `<'white-space-collapse'> <'text-wrap-mode'>
+    // <'white-space-trim'>?` — il pose les longhands (un
+    // longhand déclaré APRÈS l'emporte par ordre de cascade)
+    // et garde le nom `white-space` lui-même : consommateurs
+    // historiques (`inline`, `intrinsic`), hints
+    // présentationnels (`<td nowrap>`) et census y lisent la
+    // forme courte.
+    if name == "white-space" {
+        let (collapse, mode) = match kw.to_ascii_lowercase().as_str() {
+            "normal" => ("collapse", "wrap"),
+            "nowrap" => ("collapse", "nowrap"),
+            "pre" => ("preserve", "nowrap"),
+            "pre-wrap" => ("preserve", "wrap"),
+            "pre-line" => ("preserve-breaks", "wrap"),
+            "break-spaces" => ("break-spaces", "wrap"),
+            _ => return None,
+        };
+        return Some(vec![
+            ("white-space".to_string(), kw.to_string()),
+            ("white-space-collapse".to_string(), collapse.to_string()),
+            ("white-space-trim".to_string(), "none".to_string()),
+            ("text-wrap-mode".to_string(), mode.to_string()),
+        ]);
+    }
+    // `offset` (css-motion-1 §4 — R-272) : `[ <'offset-
+    // position'>? [ <'offset-path'> <'offset-distance'>?
+    // <'offset-rotate'>? ]? / <'offset-anchor'>? ]` — le
+    // chemin est le token fonction/`none`/`<coord-box>` ; ce
+    // qui le précède est la position, ce qui suit distance
+    // puis rotation, ce qui suit `/` l'ancre.
+    if name == "offset" {
+        let (left, anchor) = value.split_once('/').map_or((value, ""), |(l, a)| (l, a));
+        let toks: Vec<&str> = split_ws_top(left);
+        let is_path = |t: &str| {
+            t.contains('(')
+                || matches!(
+                    t.trim(),
+                    "none"
+                        | "content-box"
+                        | "padding-box"
+                        | "border-box"
+                        | "fill-box"
+                        | "stroke-box"
+                        | "view-box"
+                )
+        };
+        let pi = toks.iter().position(|t| is_path(t))?;
+        let mut out: Vec<(String, String)> = Vec::new();
+        if pi > 0 {
+            out.push(("offset-position".to_string(), toks[..pi].join(" ")));
+        }
+        out.push(("offset-path".to_string(), toks[pi].to_string()));
+        if let Some(d) = toks.get(pi + 1) {
+            out.push(("offset-distance".to_string(), (*d).to_string()));
+        }
+        if let Some(r) = toks.get(pi + 2) {
+            out.push(("offset-rotate".to_string(), (*r).to_string()));
+        }
+        if !anchor.trim().is_empty() {
+            out.push(("offset-anchor".to_string(), anchor.trim().to_string()));
+        }
+        return Some(out);
     }
     // Shorthands `place-*` (css-align-3 — R-125) : 1 valeur
     // répétée ou 2 (`<align> <justify>`).
@@ -999,6 +1188,120 @@ pub fn expand_shorthand(name: &str, value: &str) -> Option<Vec<(String, String)>
             (a.to_string(), v1.to_string()),
             (b.to_string(), v2.to_string()),
         ]);
+    }
+    // `corner-shape` (css-borders-4 §3.8.2 — R-270) : 1..4
+    // formes → coins tl/tr/br/bl ; `corner-{side}-shape`
+    // (§3.8.1) : 1..2 formes → les 2 coins du côté ; les
+    // logiques `corner-{block,inline}-*-shape` émettent les
+    // longhands logiques `corner-{s|e}{s|e}-shape` (résolus
+    // physiques en cascade comme `border-*-radius`).
+    if name == "corner-shape" {
+        let parts: Vec<&str> = split_ws_top(value);
+        let [tl, tr, br, bl] = four_sides(&parts)?;
+        return Some(vec![
+            // Le nom est gardé (comme `white-space`) : le
+            // census `affectsv` lit la forme déclarée.
+            ("corner-shape".to_string(), value.to_string()),
+            ("corner-top-left-shape".to_string(), tl),
+            ("corner-top-right-shape".to_string(), tr),
+            ("corner-bottom-right-shape".to_string(), br),
+            ("corner-bottom-left-shape".to_string(), bl),
+        ]);
+    }
+    if let Some(pair) = match name {
+        "corner-top-shape" => Some(("corner-top-left-shape", "corner-top-right-shape")),
+        "corner-right-shape" => Some(("corner-top-right-shape", "corner-bottom-right-shape")),
+        "corner-bottom-shape" => Some(("corner-bottom-right-shape", "corner-bottom-left-shape")),
+        "corner-left-shape" => Some(("corner-bottom-left-shape", "corner-top-left-shape")),
+        "corner-block-start-shape" => Some(("corner-start-start-shape", "corner-start-end-shape")),
+        "corner-block-end-shape" => Some(("corner-end-start-shape", "corner-end-end-shape")),
+        "corner-inline-start-shape" => Some(("corner-start-start-shape", "corner-end-start-shape")),
+        "corner-inline-end-shape" => Some(("corner-start-end-shape", "corner-end-end-shape")),
+        _ => None,
+    } {
+        let parts: Vec<&str> = split_ws_top(value);
+        let (v1, v2) = match parts.as_slice() {
+            [v] => (*v, *v),
+            [a, b] => (*a, *b),
+            _ => return None,
+        };
+        return Some(vec![
+            (name.to_string(), value.to_string()),
+            (pair.0.to_string(), v1.to_string()),
+            (pair.1.to_string(), v2.to_string()),
+        ]);
+    }
+    // `rule`/`row-rule` (css-gaps-1 §4.3 — R-271) :
+    // `[<width>] [<style>] [<color>]` — `rule` pose les deux
+    // axes (row+column), `row-rule` l'axe bloc. Le nom
+    // déclaré reste stocké (census + repli `rule-*`).
+    if name == "rule" {
+        let mut out = vec![(name.to_string(), value.to_string())];
+        out.extend(expand_rule_parts(value, "row-rule"));
+        out.extend(expand_rule_parts(value, "column-rule"));
+        return Some(out);
+    }
+    if name == "row-rule" {
+        let mut out = vec![(name.to_string(), value.to_string())];
+        out.extend(expand_rule_parts(value, "row-rule"));
+        return Some(out);
+    }
+    // Longhands génériques `rule-*` : dupliqués sur les deux
+    // axes (`row-rule-*` + `column-rule-*`) — `rule-inset`
+    // = shorthand 1..2 de `-start`/`-end` (§4.4).
+    if name == "rule-inset" {
+        let parts: Vec<&str> = split_ws_top(value);
+        let (v1, v2) = match parts.as_slice() {
+            [v] => (*v, *v),
+            [a, b] => (*a, *b),
+            _ => return None,
+        };
+        let mut out = vec![(name.to_string(), value.to_string())];
+        for prefix in ["row-rule-inset", "column-rule-inset"] {
+            out.push((format!("{prefix}-start"), v1.to_string()));
+            out.push((format!("{prefix}-end"), v2.to_string()));
+        }
+        return Some(out);
+    }
+    if let Some(suf) = name.strip_prefix("rule-").filter(|s| {
+        matches!(
+            *s,
+            "width"
+                | "style"
+                | "color"
+                | "break"
+                | "outset"
+                | "overlap"
+                | "visibility-items"
+                | "inset-start"
+                | "inset-end"
+                | "inset-cap"
+                | "inset-junction"
+        )
+    }) {
+        return Some(vec![
+            (name.to_string(), value.to_string()),
+            (format!("row-rule-{suf}"), value.to_string()),
+            (format!("column-rule-{suf}"), value.to_string()),
+        ]);
+    }
+    // `row-rule-inset*` : shorthand 1..2 → `-start`/`-end`
+    // de son axe (même traitement sur `column-rule-inset*`
+    // si un jour routé — borne documentée).
+    if let Some(suf) = name.strip_prefix("row-rule-inset") {
+        if suf.is_empty() {
+            let parts: Vec<&str> = split_ws_top(value);
+            let (v1, v2) = match parts.as_slice() {
+                [v] => (*v, *v),
+                [a, b] => (*a, *b),
+                _ => return None,
+            };
+            return Some(vec![
+                (name.to_string(), value.to_string()),
+                ("row-rule-inset-start".to_string(), v1.to_string()),
+                ("row-rule-inset-end".to_string(), v2.to_string()),
+            ]);
+        }
     }
     // `border-radius` (R-167) : 1..4 rayons → coins tl/tr/
     // br/bl ; la forme elliptique `h/v` n'est pas encore
@@ -1048,9 +1351,15 @@ pub fn expand_shorthand(name: &str, value: &str) -> Option<Vec<(String, String)>
         "columns" => Some(expand_columns(value)),
         "column-rule" => Some(expand_column_rule(value)),
         "background" => expand_background(value),
+        "mask" | "-webkit-mask" => expand_mask(value),
         "font" => expand_font(value),
         "list-style" => expand_list_style(value),
         "outline" => Some(expand_outline(value)),
+        // `-webkit-text-stroke` = shorthand `<width> <color>`
+        // (ordre libre comme `outline`) — l'ancien alias le
+        // pliait sur `-webkit-text-stroke-width` et la couleur
+        // partait dans la largeur.
+        "-webkit-text-stroke" => Some(expand_webkit_text_stroke(value)),
         "container" => expand_container(value),
         _ => None,
     }
@@ -1217,20 +1526,47 @@ fn expand_gap(value: &str) -> Option<Vec<(String, String)>> {
 /// les mots-clés `thin`/`medium`/`thick` comptent comme
 /// largeur (valeurs de `border-width`).
 fn expand_column_rule(value: &str) -> Vec<(String, String)> {
+    expand_rule_parts(value, "column-rule")
+}
+
+/// Corps partagé des shorthands `column-rule`/`row-rule`/
+/// `rule` (css-gaps-1 §4.3 — R-271) : `[<width>] [<style>]
+/// [<color>]` ordre libre, émis sous le préfixe donné.
+fn expand_rule_parts(value: &str, prefix: &str) -> Vec<(String, String)> {
     const WIDTH_KW: &[&str] = &["thin", "medium", "thick"];
     let mut out = Vec::new();
     let mut pos = 0usize;
     for tok in split_ws_top(value) {
         let t = tok.to_ascii_lowercase();
         if is_border_style(&t) {
-            out.push(("column-rule-style".to_string(), t));
+            out.push((format!("{prefix}-style"), t));
         } else if WIDTH_KW.contains(&t.as_str()) || parse_length(tok).is_some() {
-            out.push(("column-rule-width".to_string(), tok.to_string()));
+            out.push((format!("{prefix}-width"), tok.to_string()));
         } else {
             let tail = value[pos..].trim();
-            if let Some(c) = parse_color(tail) {
-                let _ = c;
-                out.push(("column-rule-color".to_string(), tail.to_string()));
+            if parse_color(tail).is_some() {
+                out.push((format!("{prefix}-color"), tail.to_string()));
+            }
+            break;
+        }
+        pos += tok.len() + 1;
+    }
+    out
+}
+
+/// `-webkit-text-stroke` : `[<width>] [<color>]` — le token
+/// longueur est la largeur, le reste de la valeur est la
+/// couleur (tail, `calc`/fonctions de couleur comprises).
+fn expand_webkit_text_stroke(value: &str) -> Vec<(String, String)> {
+    let mut out = Vec::new();
+    let mut pos = 0usize;
+    for tok in split_ws_top(value) {
+        if parse_length(tok).is_some() {
+            out.push(("-webkit-text-stroke-width".to_string(), tok.to_string()));
+        } else {
+            let tail = value[pos..].trim();
+            if parse_color(tail).is_some() {
+                out.push(("-webkit-text-stroke-color".to_string(), tail.to_string()));
             }
             break;
         }
@@ -1597,6 +1933,170 @@ impl BgParts {
     }
 }
 
+/// Shorthand `mask` / `-webkit-mask` (css-masking-1 — R-252) :
+/// `<mask-layer>#` — même grammaire de couche que
+/// `background` (`image position/size repeat box×2`), plus
+/// `mask-composite` et `mask-mode`. Émis vers les noms
+/// **standards** (`mask-*`) pour les deux orthographes — les
+/// consommateurs lisent déjà l'alias `-webkit-mask-*` en
+/// repli ; normaliser ici évite de dupliquer la liste.
+fn expand_mask(value: &str) -> Option<Vec<(String, String)>> {
+    let layers: Vec<Vec<(String, String)>> = split_top_commas(value)
+        .into_iter()
+        .map(parse_mask_layer)
+        .collect::<Option<_>>()?;
+    let (last, _) = layers.split_last()?;
+    let mut out = Vec::with_capacity(last.len());
+    for (i, (name, _)) in last.iter().enumerate() {
+        let joined = layers
+            .iter()
+            .map(|l| l[i].1.clone())
+            .collect::<Vec<_>>()
+            .join(", ");
+        out.push((name.clone(), joined));
+    }
+    Some(out)
+}
+
+/// Parse **une** couche du shorthand `mask` — une valeur par
+/// composante, doublon ou token inconnu → `None` (déclaration
+/// entière droppée, même discipline que `background`).
+#[allow(clippy::too_many_lines)]
+fn parse_mask_layer(layer: &str) -> Option<Vec<(String, String)>> {
+    #[derive(Default)]
+    struct MaskParts {
+        image: Option<String>,
+        position: Vec<String>,
+        size: Vec<String>,
+        repeat: Vec<String>,
+        boxes: Vec<String>,
+        composite: Option<String>,
+        mode: Option<String>,
+        clip_keyword: Option<String>,
+        in_size: bool,
+        recognized: bool,
+    }
+    let mut acc = MaskParts::default();
+    for raw in bg_tokens(layer) {
+        let segs = split_top_slash(raw);
+        if segs.len() > 3 {
+            return None;
+        }
+        for (i, &part) in segs.iter().enumerate() {
+            if i > 0 {
+                acc.in_size = true;
+            }
+            if part.is_empty() {
+                continue;
+            }
+            // Segment post-`/` : `mask-size` tant que le token
+            // est une taille — sinon re-classement normal.
+            if acc.in_size && acc.size.len() < 2 && bg_size_token(part) {
+                acc.size.push(part.to_string());
+                acc.recognized = true;
+                continue;
+            }
+            acc.in_size = false;
+            acc.recognized = true;
+            let ok = if bg_image_token(part) {
+                acc.image.replace(part.to_string()).is_none()
+            } else if matches!(
+                part,
+                "repeat" | "repeat-x" | "repeat-y" | "no-repeat" | "space" | "round"
+            ) && acc.repeat.len() < 2
+            {
+                acc.repeat.push(part.to_string());
+                true
+            } else if matches!(part, "add" | "subtract" | "intersect" | "exclude") {
+                acc.composite.replace(part.to_string()).is_none()
+            } else if matches!(part, "alpha" | "luminance" | "match-source") {
+                acc.mode.replace(part.to_string()).is_none()
+            } else if part == "no-clip" {
+                acc.clip_keyword.replace(part.to_string()).is_none()
+            } else if matches!(
+                part,
+                "border-box"
+                    | "padding-box"
+                    | "content-box"
+                    | "margin-box"
+                    | "fill-box"
+                    | "stroke-box"
+                    | "view-box"
+            ) && acc.boxes.len() < 2
+            {
+                acc.boxes.push(part.to_string());
+                true
+            } else if (matches!(part, "left" | "right" | "top" | "bottom" | "center")
+                || parse_length(part).is_some()
+                || part.ends_with('%'))
+                && acc.position.len() < 4
+            {
+                acc.position.push(part.to_string());
+                true
+            } else {
+                false
+            };
+            if !ok {
+                return None;
+            }
+        }
+    }
+    if !acc.recognized {
+        return None;
+    }
+    Some(vec![
+        (
+            "mask-image".to_string(),
+            acc.image.unwrap_or_else(|| "none".to_string()),
+        ),
+        (
+            "mask-position".to_string(),
+            if acc.position.is_empty() {
+                "0% 0%".to_string()
+            } else {
+                acc.position.join(" ")
+            },
+        ),
+        (
+            "mask-size".to_string(),
+            if acc.size.is_empty() {
+                "auto".to_string()
+            } else {
+                acc.size.join(" ")
+            },
+        ),
+        (
+            "mask-repeat".to_string(),
+            if acc.repeat.is_empty() {
+                "repeat".to_string()
+            } else {
+                acc.repeat.join(" ")
+            },
+        ),
+        (
+            "mask-origin".to_string(),
+            acc.boxes
+                .first()
+                .cloned()
+                .unwrap_or_else(|| "border-box".to_string()),
+        ),
+        (
+            "mask-clip".to_string(),
+            acc.clip_keyword
+                .or_else(|| acc.boxes.last().cloned())
+                .unwrap_or_else(|| "border-box".to_string()),
+        ),
+        (
+            "mask-composite".to_string(),
+            acc.composite.unwrap_or_else(|| "add".to_string()),
+        ),
+        (
+            "mask-mode".to_string(),
+            acc.mode.unwrap_or_else(|| "match-source".to_string()),
+        ),
+    ])
+}
+
 /// Keywords `<blend-mode>` du shorthand `background` (R-184)
 /// — mêmes valeurs que `background-blend-mode` longhand.
 const BG_BLEND_TOKENS: [&str; 16] = [
@@ -1883,6 +2383,15 @@ fn expand_logical(name: &str, value: &str) -> Option<Vec<(String, String)>> {
             // `expand_border_parts` accepte les noms logiques
             // (le préfixe est recopié tel quel).
             return match name {
+                // `border-<logique>` nu (`border-block-end:solid`)
+                // : expansion en longhands LOGIQUES — le mapping
+                // physique se fait en cascade
+                // (`resolve_logical_props`), comme les autres
+                // noms logiques.
+                "border-inline-start"
+                | "border-inline-end"
+                | "border-block-start"
+                | "border-block-end" => Some(expand_border_parts(name, value)),
                 "border-inline" | "border-block" => {
                     let (p1, p2) = if name == "border-inline" {
                         ("border-inline-start", "border-inline-end")

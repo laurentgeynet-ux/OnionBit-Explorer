@@ -22,6 +22,7 @@
 use std::fmt::Write as _;
 use std::sync::Arc;
 
+use explorer_css::StyleMap;
 use explorer_dom::{Dom, Namespace, NodeData, NodeId};
 
 use crate::image::ImageTable;
@@ -56,6 +57,39 @@ pub fn collect_svg_with_sources(
     root: NodeId,
     max_px: u32,
 ) -> (ImageTable, std::collections::HashMap<NodeId, Arc<str>>) {
+    collect_impl(dom, root, None, max_px)
+}
+
+/// [`collect_svg_with_sources`] **style-aware** (R-283) : la
+/// sérialisation projette le style calculé de chaque élément
+/// SVG en attributs XML — les déclarations CSS auteur
+/// (`svg path { fill: red }`), le `color` hérité du contexte
+/// HTML (résolution `currentColor` — icônes de design
+/// systems), `display`/`visibility`, les propriétés
+/// géométriques SVG2 (`d`, `cx`, `r`, `x`…) et les refs
+/// `clip-path`/`mask`/`filter` issues du style. Les valeurs
+/// calculées priment l'attribut de présentation (rang UA) —
+/// conforme cascade. `styles` incomplet/absent sur un nœud =
+/// attributs seuls (dégradé = comportement R-9).
+#[must_use]
+pub fn collect_svg_styled(
+    dom: &Dom,
+    root: NodeId,
+    styles: &StyleMap,
+    max_px: u32,
+) -> (ImageTable, std::collections::HashMap<NodeId, Arc<str>>) {
+    collect_impl(dom, root, Some(styles), max_px)
+}
+
+/// Moteur commun de [`collect_svg_with_sources`] et
+/// [`collect_svg_styled`] — `styles` optionnel (la variante
+/// historique n'en a pas).
+fn collect_impl(
+    dom: &Dom,
+    root: NodeId,
+    styles: Option<&StyleMap>,
+    max_px: u32,
+) -> (ImageTable, std::collections::HashMap<NodeId, Arc<str>>) {
     let mut out = ImageTable::new();
     let mut sources = std::collections::HashMap::new();
     let mut stack = vec![root];
@@ -63,14 +97,14 @@ pub fn collect_svg_with_sources(
         if let Ok(NodeData::Element(_)) = dom.data(n) {
             if is_svg_root(dom, n) {
                 let mut src = String::new();
-                serialize_into(dom, n, &mut src);
+                serialize_into(dom, n, styles, &mut src);
                 // `<use href="#x">`/`url(#x)` cross-îlots (issue
                 // cosmétique synthèse — logo reddit aplati) :
                 // la cible vit souvent dans un autre îlot
                 // (`<symbol>` en début de document) — sans elle
                 // usvg rend l'usage vide. On l'injecte dans
                 // `<defs>` avant `</svg>` pour la résolution.
-                inject_external_refs(dom, n, &mut src);
+                inject_external_refs(dom, n, styles, &mut src);
                 // P3 — `xlink:href` survivant sans déclaration :
                 // HTML range `xlink:href` dans les attrs mais ne
                 // porte pas l'`xmlns` — le XML sérialisé est
@@ -179,23 +213,225 @@ fn parse_viewbox(v: &str) -> Option<(f32, f32, f32, f32)> {
     (nums.len() == 4).then(|| (nums[0], nums[1], nums[2], nums[3]))
 }
 
+/// Propriétés projetées dans la sérialisation style-aware
+/// (R-283) : peinture SVG + mécanismes d'affichage. La
+/// valeur calculée est émise comme attribut de même nom
+/// (SVG2 : ces propriétés sont toutes des attributs de
+/// présentation) — sauf exceptions listées en commentaire.
+/// `display`/`visibility` n'émettent que leurs valeurs
+/// censurantes ; `transform` est re-syntaxé (unités CSS →
+/// nombres SVG) ; `clip-path`/`mask`/`filter` à `none`
+/// suppriment l'attribut DOM.
+const SVG_STYLE_PROPS: &[&str] = &[
+    "color",
+    "fill",
+    "fill-opacity",
+    "fill-rule",
+    "stroke",
+    "stroke-width",
+    "stroke-opacity",
+    "stroke-dasharray",
+    "stroke-dashoffset",
+    "stroke-linecap",
+    "stroke-linejoin",
+    "stroke-miterlimit",
+    "paint-order",
+    "vector-effect",
+    "opacity",
+    "display",
+    "visibility",
+    "stop-color",
+    "stop-opacity",
+    "flood-color",
+    "flood-opacity",
+    "lighting-color",
+    "clip-path",
+    "clip-rule",
+    "mask",
+    "mask-type",
+    "filter",
+    "marker",
+    "marker-start",
+    "marker-mid",
+    "marker-end",
+    "color-interpolation",
+    "color-interpolation-filters",
+    "shape-rendering",
+    "text-rendering",
+    "image-rendering",
+    "overflow",
+    "font-family",
+    "font-size",
+    "font-weight",
+    "font-style",
+    "letter-spacing",
+    "text-anchor",
+    "dominant-baseline",
+    "alignment-baseline",
+    "baseline-shift",
+    "direction",
+    "unicode-bidi",
+    "transform-origin",
+];
+
+/// Propriétés géométriques SVG2 projetées sur les **enfants**
+/// (la racine est dimensionnée par le layout HTML — son
+/// `width`/`height` CSS n'a pas vocation à re-entrer dans la
+/// source, où `100%` deviendrait relatif au viewBox).
+const SVG_GEOM_PROPS: &[&str] = &[
+    "x", "y", "x1", "y1", "x2", "y2", "cx", "cy", "r", "rx", "ry", "width", "height",
+];
+
 /// Sérialise le sous-arbre `node` en source SVG — un seul
 /// document autonome : la racine reçoit `xmlns` si absente.
-/// Échappement XML des textes et attributs ; commentaires
-/// ignorés (non significatifs pour le rendu).
-fn serialize_into(dom: &Dom, node: NodeId, out: &mut String) {
+/// `styles` (R-283, optionnel) projette le style calculé en
+/// attributs : la valeur calculée **prime** l'attribut de
+/// présentation de même nom (rang UA — la déclaration auteur
+/// gagne), `transform` est re-syntaxée, `d:path(…)` est
+/// désenrobée. Échappement XML des textes et attributs ;
+/// commentaires ignorés (non significatifs pour le rendu).
+/// Projection style → attributs XML pour un élément
+/// (R-283) : `nom → valeur` (`None` = supprimer l'attribut
+/// DOM — CSS `none` sur `clip-path`/`mask`/`filter`/
+/// `transform`). Les filtres `display`/`visibility`/
+/// `overflow` n'émettent que leurs valeurs censurantes.
+fn project_style(
+    st: Option<&explorer_css::ComputedStyle>,
+    is_root_svg: bool,
+) -> Vec<(&'static str, Option<String>)> {
+    let mut projected: Vec<(&'static str, Option<String>)> = Vec::new();
+    let Some(st) = st else {
+        return projected;
+    };
+    for &p in SVG_STYLE_PROPS {
+        // Effets de boîte sur la racine : `transform`/
+        // `opacity`/`clip-path`/`mask`/`filter`/`display`/
+        // `visibility`/`overflow` sont déjà appliqués par la
+        // pipeline HTML (transform de boîte, clip, alpha) —
+        // les émettre dans l'îlot les appliquerait deux fois.
+        if is_root_svg
+            && matches!(
+                p,
+                "display"
+                    | "visibility"
+                    | "clip-path"
+                    | "mask"
+                    | "filter"
+                    | "overflow"
+                    | "opacity"
+                    | "transform-origin"
+            )
+        {
+            continue;
+        }
+        if let Some(v) = st.get(p) {
+            let v = v.trim();
+            match p {
+                "display" => {
+                    if v == "none" {
+                        projected.push((p, Some(v.to_string())));
+                    }
+                }
+                "visibility" => {
+                    if matches!(v, "hidden" | "collapse") {
+                        projected.push((p, Some(v.to_string())));
+                    }
+                }
+                "clip-path" | "mask" | "filter" => {
+                    // `none` = retirer l'effet → supprimer
+                    // l'attribut DOM s'il existe.
+                    projected.push((p, (v != "none").then(|| v.to_string())));
+                }
+                "marker" => {
+                    // Shorthand — pas d'attribut `marker` :
+                    // les trois longhands reçoivent la valeur.
+                    for m in ["marker-start", "marker-mid", "marker-end"] {
+                        projected.push((m, Some(v.to_string())));
+                    }
+                }
+                "overflow" => {
+                    // SVG2 §14.3.3 : sur svg/symbol/image/
+                    // marker/pattern `scroll`/`auto` ≡ `hidden`.
+                    if !matches!(v, "visible" | "initial" | "unset" | "inherit") {
+                        projected.push(("overflow", Some("hidden".to_string())));
+                    }
+                }
+                _ => projected.push((p, Some(v.to_string()))),
+            }
+        }
+    }
+    if !is_root_svg {
+        if let Some(v) = st.get("transform") {
+            let v = v.trim();
+            projected.push((
+                "transform",
+                (v != "none" && v != "initial").then(|| svg_transform(v)),
+            ));
+        }
+    }
+    if !is_root_svg {
+        for &p in SVG_GEOM_PROPS {
+            if let Some(v) = st.get(p) {
+                projected.push((p, Some(v.trim().to_string())));
+            }
+        }
+        if let Some(v) = st.get("d") {
+            if let Some(d) = css_path(v.trim()) {
+                projected.push(("d", Some(d)));
+            }
+        }
+    }
+    projected
+}
+
+fn serialize_into(dom: &Dom, node: NodeId, styles: Option<&StyleMap>, out: &mut String) {
     match dom.data(node) {
         Ok(NodeData::Element(e)) => {
+            let st = styles.and_then(|m| m.get(node));
+            let is_root_svg = e.namespace == Namespace::Svg && e.tag_name == "svg";
             out.push('<');
             out.push_str(&e.tag_name);
             let mut has_xmlns = false;
+            // Attributs projetés : nom → valeur de remplacement
+            // (`None` = supprimer l'attribut DOM — CSS `none`).
+            let mut projected = project_style(st, is_root_svg);
             for a in &e.attributes {
-                let _ = write!(out, " {}=\"", a.name);
-                escape_xml(&a.value, out, true);
-                out.push('"');
-                has_xmlns |= a.name == "xmlns";
+                // La valeur calculée remplace l'attribut de
+                // présentation de même nom (rang UA) — ou le
+                // supprime (`transform:none`, `clip-path:none`…).
+                let name = a.name.as_str();
+                // Cas `style` : dans la cascade usvg, l'attribut
+                // `style` bat les attributs de présentation — un
+                // `style="fill:blue"` DOM écraserait le `fill`
+                // calculé projeté (les exports SVG en sont
+                // pleins). On retire donc de la déclaration
+                // sérialisée toutes les propriétés projetées —
+                // leur valeur calculée (qui englobe déjà la
+                // déclaration inline) vit dans l'attribut émis.
+                let val = if name == "style" {
+                    let kept = strip_style_decls(&a.value, &projected);
+                    (!kept.is_empty()).then_some(kept)
+                } else {
+                    match projected.iter().position(|(n, _)| *n == name) {
+                        Some(i) => projected.remove(i).1,
+                        None => Some(a.value.clone()),
+                    }
+                };
+                if let Some(v) = val {
+                    let _ = write!(out, " {name}=\"");
+                    escape_xml(&v, out, true);
+                    out.push('"');
+                    has_xmlns |= name == "xmlns";
+                }
             }
-            if !has_xmlns && e.namespace == Namespace::Svg && e.tag_name == "svg" {
+            for (name, val) in projected {
+                if let Some(v) = val {
+                    let _ = write!(out, " {name}=\"");
+                    escape_xml(&v, out, true);
+                    out.push('"');
+                }
+            }
+            if !has_xmlns && is_root_svg {
                 out.push_str(" xmlns=\"http://www.w3.org/2000/svg\"");
             }
             let mut children = dom.children_iter(node).into_iter().flatten().peekable();
@@ -205,7 +441,7 @@ fn serialize_into(dom: &Dom, node: NodeId, out: &mut String) {
                 out.push('>');
                 for c in children {
                     // Arête ∝ profondeur DOM (R-24).
-                    explorer_common::deep(|| serialize_into(dom, c, out));
+                    explorer_common::deep(|| serialize_into(dom, c, styles, out));
                 }
                 let _ = write!(out, "</{}>", e.tag_name);
             }
@@ -213,6 +449,154 @@ fn serialize_into(dom: &Dom, node: NodeId, out: &mut String) {
         Ok(NodeData::Text(t)) => escape_xml(dom.text_at(*t), out, false),
         _ => {}
     }
+}
+
+/// Retire d'une valeur d'attribut `style` les déclarations
+/// dont la propriété est projetée en attribut — le reste est
+/// conservé tel quel (propriétés non couvertes par la
+/// projection restent visibles pour `usvg`).
+fn strip_style_decls(v: &str, projected: &[(&str, Option<String>)]) -> String {
+    v.split(';')
+        .filter(|decl| {
+            let name = decl
+                .split(':')
+                .next()
+                .unwrap_or("")
+                .trim()
+                .to_ascii_lowercase();
+            name.is_empty() || !projected.iter().any(|(p, _)| *p == name)
+        })
+        .collect::<Vec<_>>()
+        .join(";")
+}
+
+/// CSS `transform` → syntaxe d'attribut SVG. Les fonctions
+/// communes passent après strip des unités (`px`, `deg` —
+/// nombre implicite en SVG) ; les fonctions **CSS-only** sont
+/// traduites (`translateX` → `translate(x 0)`, `scaleX` →
+/// `scale(x 1)`, `skew` 2-arg → `skewX`+`skewY`, `translate3d`
+/// → plan xy) ; les 3D sans équivalent (`rotateX/Y/3d`,
+/// `perspective`, `matrix3d`, `translateZ`) sont ignorées —
+/// borne : une transform purement 3D est perdue plutôt que
+/// mal approximée.
+fn svg_transform(v: &str) -> String {
+    let mut out = String::new();
+    let mut rest = v.trim();
+    while let Some(open) = rest.find('(') {
+        let name = rest[..open].trim();
+        let Some(close) = rest[open..].find(')').map(|o| open + o) else {
+            break;
+        };
+        let args: Vec<String> = rest[open + 1..close]
+            .split(',')
+            .flat_map(|a| a.split_ascii_whitespace())
+            .filter(|s| !s.is_empty())
+            .map(str::to_string)
+            .collect();
+        rest = &rest[close + 1..];
+        let num = |k: usize, d: &str| {
+            args.get(k)
+                .map_or_else(|| d.to_string(), |s| strip_units(s))
+        };
+        let deg = |k: usize| -> String {
+            let arg = args.get(k).map_or("0", |s| s.as_str());
+            let split = arg
+                .find(|c: char| c.is_ascii_alphabetic())
+                .unwrap_or(arg.len());
+            let (num_part, unit) = arg.split_at(split);
+            let val: f32 = num_part.parse().unwrap_or(0.0);
+            let deg_val = match unit {
+                "rad" => val.to_degrees(),
+                "turn" => val * 360.0,
+                "grad" => val * 0.9,
+                _ => val, // deg ou nu
+            };
+            fmt_num(deg_val)
+        };
+        match name {
+            "translate" | "translate3d" => {
+                let _ = write!(out, "translate({} {}) ", num(0, "0"), num(1, "0"));
+            }
+            "translateX" => {
+                let _ = write!(out, "translate({} 0) ", num(0, "0"));
+            }
+            "translateY" => {
+                let _ = write!(out, "translate(0 {}) ", num(0, "0"));
+            }
+            "scale" => {
+                let _ = write!(out, "scale({} {}) ", num(0, "1"), num(1, &num(0, "1")));
+            }
+            "scaleX" => {
+                let _ = write!(out, "scale({} 1) ", num(0, "1"));
+            }
+            "scaleY" => {
+                let _ = write!(out, "scale(1 {}) ", num(0, "1"));
+            }
+            "scale3d" | "scaleZ" => {
+                // z sans plan → approximation xy documentée.
+                let _ = write!(out, "scale({} {}) ", num(0, "1"), num(1, "1"));
+            }
+            "rotate" | "rotateZ" => {
+                let _ = write!(out, "rotate({}) ", deg(0));
+            }
+            "skewX" => {
+                let _ = write!(out, "skewX({}) ", deg(0));
+            }
+            "skewY" => {
+                let _ = write!(out, "skewY({}) ", deg(0));
+            }
+            "skew" => {
+                let _ = write!(out, "skewX({}) ", deg(0));
+                if args.len() > 1 {
+                    let _ = write!(out, "skewY({}) ", deg(1));
+                }
+            }
+            "matrix" => {
+                let _ = write!(
+                    out,
+                    "matrix({} {} {} {} {} {}) ",
+                    num(0, "1"),
+                    num(1, "0"),
+                    num(2, "0"),
+                    num(3, "1"),
+                    num(4, "0"),
+                    num(5, "0")
+                );
+            }
+            // 3D sans équivalent 2D — ignoré (borne documentée).
+            _ => {}
+        }
+    }
+    let t = out.trim();
+    if t.is_empty() {
+        // Fonction non reconnue seule → repli strip (le
+        // parseur usvg ignorera ce qu'il ne comprend pas).
+        return v.replace("px", "").replace("deg", "");
+    }
+    t.to_string()
+}
+
+/// `12px`/`45deg`/`2.5` → nombre nu SVG.
+fn strip_units(s: &str) -> String {
+    s.trim_end_matches(|c: char| c.is_ascii_alphabetic())
+        .to_string()
+}
+
+/// Forme compacte : `2.00` → `2`.
+fn fmt_num(f: f32) -> String {
+    if f.fract() == 0.0 && f.abs() < 1e7 {
+        format!("{f:.0}")
+    } else {
+        format!("{f:.4}")
+    }
+}
+
+/// `d: path("M …")` (valeur CSS) → donnée `d` brute —
+/// l'attribut attend la séquence nue, sans `path(…)`.
+fn css_path(v: &str) -> Option<String> {
+    let inner = v.strip_prefix("path(")?.strip_suffix(')')?;
+    let inner = inner.trim().trim_matches('"').trim_matches('\'').trim();
+    (!inner.is_empty()).then(|| inner.to_string())
 }
 
 /// Échappement XML — `<`/`&` obligatoires, `>` et `"` en
@@ -235,7 +619,7 @@ fn escape_xml(s: &str, out: &mut String, attr: bool) {
 /// cible trouvée hors de l'îlot est sérialisée dans un
 /// `<defs>` injecté avant `</svg>` ; les refs introuvables
 /// ou auto-référencées sont ignorées (rendu dégradé usvg).
-fn inject_external_refs(dom: &Dom, svg: NodeId, src: &mut String) {
+fn inject_external_refs(dom: &Dom, svg: NodeId, styles: Option<&StyleMap>, src: &mut String) {
     let mut needed = Vec::<String>::new();
     let mut defined = Vec::<String>::new();
     let mut stack = vec![svg];
@@ -268,6 +652,21 @@ fn inject_external_refs(dom: &Dom, svg: NodeId, src: &mut String) {
             stack.extend(ch.iter().rev());
         }
     }
+    // R-283 — les attributs **émis** depuis le style calculé
+    // (`clip-path:url(#x)` projeté en CSS, `fill:url(#g)`…)
+    // ne sont pas dans le scan DOM : re-scanner la source.
+    {
+        let mut rest = src.as_str();
+        while let Some(i) = rest.find("url(#") {
+            rest = &rest[i + 5..];
+            if let Some(end) = rest.find([')', '"', '\'']) {
+                needed.push(rest[..end].to_string());
+                rest = &rest[end..];
+            } else {
+                break;
+            }
+        }
+    }
     // P3 — fixpoint borné : la cible injectée (`<symbol>`)
     // peut référencer d'AUTRES ids externes (`<use>` dans un
     // `<symbol>`, `fill="url(#g)"`…) — une seule passe les
@@ -283,7 +682,7 @@ fn inject_external_refs(dom: &Dom, svg: NodeId, src: &mut String) {
                 continue;
             }
             if let Some(target) = dom.by_id(id) {
-                serialize_into(dom, target, &mut defs);
+                serialize_into(dom, target, styles, &mut defs);
                 defined.push(id.clone());
                 injected.push(target);
                 progress = true;

@@ -25,6 +25,7 @@
 use explorer_css::value::Color;
 use explorer_css::value::{parse_color, parse_length, Unit};
 use explorer_layout::font::ShapedRun;
+use explorer_layout::text::{is_css_ws, trim_css_ws};
 use explorer_layout::{
     scrollable_overflow_bottom, BoxKind, Float, LayoutBox, Overflow, Position, Rect,
 };
@@ -77,9 +78,14 @@ pub enum DisplayItem {
         rect: Rect,
         /// Couleur RGBA.
         color: Color,
-        /// Rayons des 4 coins [tl,tr,br,bl] px (R-167) —
+        /// Rayons des 4 coins \[tl,tr,br,bl] px (R-167) —
         /// 0 = rectangle franc.
         radii: [f32; 4],
+        /// Formes des 4 coins \[tl,tr,br,bl] : exposant `K`
+        /// de la superellipse (css-borders-4 §3.7 — R-270 ;
+        /// `round`=1, `squircle`=2, `square`=+∞, `bevel`=0,
+        /// `scoop`=-1, `notch`=-∞). 1 = coin rond classique.
+        corners: [f32; 4],
     },
     /// Trait de `text-decoration` stylé (R-178) — `style` ∈
     /// `explorer_layout::inline::DECO_*` ; `double`/`dotted`/
@@ -121,8 +127,12 @@ pub enum DisplayItem {
         colors: [Color; 4],
         /// Style (`solid`/`dashed`/`dotted`/…) par côté.
         styles: [BorderStyle; 4],
-        /// Rayons des 4 coins [tl,tr,br,bl] px (R-167).
+        /// Rayons des 4 coins \[tl,tr,br,bl] px (R-167).
         radii: [f32; 4],
+        /// Formes des 4 coins \[tl,tr,br,bl] : exposant `K`
+        /// superellipse (R-270, même convention que
+        /// `FillRect::corners` — 1 = rond).
+        corners: [f32; 4],
     },
     /// Run de glyphes shapés, posé depuis l'origine
     /// baseline (`x`, `y` = ligne de base).
@@ -187,8 +197,9 @@ pub enum DisplayItem {
         rect: Rect,
         /// Pixels décodés.
         img: std::sync::Arc<crate::image::DecodedImage>,
-        /// Répétition `(x, y)` de `background-repeat`.
-        repeat: (bool, bool),
+        /// Mode `background-repeat` `(x, y)` — 0 `repeat`,
+        /// 1 `no-repeat`, 2 `space`, 3 `round`.
+        repeat: (u8, u8),
         /// Coin haut-gauche de la tuile (0,0) en coords document
         /// — inclut `background-position` résolu ; pour
         /// `background-attachment: fixed`, la zone de
@@ -221,9 +232,35 @@ pub enum DisplayItem {
         /// y est mis à l'échelle en nearest puis tuilé selon
         /// `repeat`.
         dst: Rect,
-        /// `mask-repeat` résolu `(x, y)` — défaut `repeat`
-        /// (tuilage ±∞ comme `background-repeat`).
-        repeat: (bool, bool),
+        /// Mode `mask-repeat` `(x, y)` — 0 `repeat`,
+        /// 1 `no-repeat`, 2 `space`, 3 `round`.
+        repeat: (u8, u8),
+        /// `mask-mode:luminance` — couverture = luma×alpha.
+        luminance: bool,
+    },
+    /// `border-image-*` résolu (R-248) — image découpée en 9
+    /// régions : coins copiés, bords étirés/tilés, centre
+    /// étiré ou omis selon `fill`.
+    BorderImage {
+        /// Boîte de destination (border box + `outset`).
+        rect: Rect,
+        /// Bitmap source.
+        img: std::sync::Arc<crate::image::DecodedImage>,
+        /// Tranches de découpe `(top, right, bottom, left)`
+        /// en pixels source (`border-image-slice` résolu).
+        src_edges: [f32; 4],
+        /// Épaisseurs de bordure `(top, right, bottom, left)`
+        /// en pixels document (`border-image-width` résolu —
+        /// `auto` → border-*-width calculé).
+        dst_edges: [f32; 4],
+        /// `fill` : la tranche centrale est peinte aussi.
+        fill_center: bool,
+        /// `border-image-repeat` `(x, y)` — 0 `stretch`,
+        /// 1 `repeat` (tilé, approximation stretch si les
+        /// deux bords ne tombent pas entiers), 2 `round`
+        /// (tilé + ajustement à un nombre entier de tuiles),
+        /// 3 `space` (tilé + espacement — approx `round`).
+        repeat: (u8, u8),
     },
     /// Entrée de zone de clipping (`overflow` ≠ `visible`).
     PushClip(Rect),
@@ -260,6 +297,32 @@ pub enum DisplayItem {
     PushBlend(u8),
     /// Fin du groupe fondu.
     PopBlend,
+    /// `mask-image` de groupe (R-252, css-masking-1) : les
+    /// items jusqu'à `PopMask` se peignent hors-écran puis
+    /// se compositent modulés par l'**alpha** du mask —
+    /// l'élément masqué cache TOUT son rendu (fond,
+    /// bordures, texte, descendants), pas seulement le
+    /// `background-color` du motif `MaskedFill`. Posé
+    /// **outermost** des brackets de la boîte (spec :
+    /// filter → clip → mask). Résidus documentés :
+    /// `mask-mode:luminance`, `mask-composite`, `mask-clip`/
+    /// `mask-origin` non initiaux, multi-couches — la
+    /// couche 0 seule est appliquée.
+    PushMask {
+        /// Aire de peinture du mask (border box, coords
+        /// document — `mask-clip` résolu).
+        rect: Rect,
+        /// Couches `mask-image` résolues (R-252 suite —
+        /// multi-couches) : chaque entrée = `(bitmap, tuile,
+        /// repeat, luminance)` ; la couverture du groupe est
+        /// l'**union** (`mask-composite:add`, initial) des
+        /// alphas — `intersect`/`subtract`/`exclude` =
+        /// résidus documentés.
+        layers: Vec<MaskTile>,
+    },
+    /// Fin du groupe masqué — composite du tampon modulé
+    /// par l'alpha du mask.
+    PopMask,
     /// `clip-path:polygon(...)` (R-187) : les items jusqu'à
     /// `PopClip` ne se peignent que dans le polygone — mask
     /// `fill_path` au raster, même pile que `PushClip`.
@@ -462,6 +525,7 @@ fn kind_name(it: &DisplayItem) -> &'static str {
         DisplayItem::Emphasis { .. } => "emphasis",
         DisplayItem::BackgroundImage { .. } => "bg_image",
         DisplayItem::MaskedFill { .. } => "masked",
+        DisplayItem::BorderImage { .. } => "border-image",
         DisplayItem::PushClip(_) => "push_clip",
         DisplayItem::PushClipRounded { .. } => "push_clip_r",
         DisplayItem::PopClip => "pop_clip",
@@ -471,6 +535,8 @@ fn kind_name(it: &DisplayItem) -> &'static str {
         DisplayItem::PopFilter => "pop_filter",
         DisplayItem::PushBlend(_) => "push_blend",
         DisplayItem::PopBlend => "pop_blend",
+        DisplayItem::PushMask { .. } => "push_mask",
+        DisplayItem::PopMask => "pop_mask",
         DisplayItem::PushClipPath { .. } => "push_clippath",
         DisplayItem::BackdropFilter { .. } => "backdrop",
         DisplayItem::Marker { .. } => "marker",
@@ -545,27 +611,62 @@ pub const F_STICKY_KID: u8 = 4;
 impl DisplayList {
     /// Dump texte indenté — debug/golden sans raster.
     #[must_use]
+    #[allow(clippy::too_many_lines)]
     pub fn dump(&self) -> String {
         let mut out = String::new();
         for item in &self.items {
             use std::fmt::Write as _;
             match item {
-                DisplayItem::FillRect { rect, color, .. } => {
-                    let _ = writeln!(out, "fill {rect:?} #{color:?}");
+                DisplayItem::FillRect {
+                    rect,
+                    color,
+                    radii,
+                    corners,
+                    ..
+                } => {
+                    let _ = writeln!(out, "fill {rect:?} #{color:?} r{radii:?} c{corners:?}");
                 }
-                DisplayItem::DecoRect { rect, style, .. } => {
-                    let _ = writeln!(out, "deco s{style} {rect:?}");
+                DisplayItem::DecoRect {
+                    rect, style, color, ..
+                } => {
+                    let _ = writeln!(out, "deco s{style} #{color:?} {rect:?}");
                 }
-                DisplayItem::Border { rect, .. } => {
-                    let _ = writeln!(out, "border {rect:?}");
-                }
-                DisplayItem::Text { origin, run, .. } => {
+                DisplayItem::Border {
+                    rect,
+                    widths,
+                    colors,
+                    styles,
+                    radii,
+                    corners,
+                    ..
+                } => {
                     let _ = writeln!(
                         out,
-                        "text @{:.1},{:.1} ({} glyphs)",
+                        "border {rect:?} w{widths:?} c{colors:?} s{styles:?} r{radii:?} c{corners:?}"
+                    );
+                }
+                DisplayItem::Text {
+                    origin,
+                    run,
+                    color,
+                    font,
+                    ..
+                } => {
+                    let gid_sum: u32 = run.glyphs.iter().map(|g| u32::from(g.id)).sum();
+                    let _ = writeln!(
+                        out,
+                        "text @{:.1},{:.1} ({} glyphs g{gid_sum} adv{:.2}) #{color:?} f[{},{},i{},c{},s{},k{},ft{:?}]",
                         origin.0,
                         origin.1,
-                        run.glyphs.len()
+                        run.glyphs.len(),
+                        run.advance,
+                        font.families.join("|"),
+                        font.weight,
+                        u8::from(font.italic),
+                        font.caps,
+                        font.stretch,
+                        u8::from(font.kern_off),
+                        font.feature_settings,
                     );
                 }
                 DisplayItem::Placeholder { rect, label } => {
@@ -574,11 +675,24 @@ impl DisplayList {
                 DisplayItem::Image { rect, img } => {
                     let _ = writeln!(out, "image {}x{} {rect:?}", img.width, img.height);
                 }
-                DisplayItem::BackgroundImage { rect, img, .. } => {
-                    let _ = writeln!(out, "bg-image {}x{} {rect:?}", img.width, img.height);
+                DisplayItem::BackgroundImage {
+                    rect,
+                    img,
+                    repeat,
+                    origin,
+                    blend,
+                } => {
+                    let _ = writeln!(
+                        out,
+                        "bg-image {}x{} {rect:?} r{repeat:?} o{origin:?} b{blend}",
+                        img.width, img.height
+                    );
                 }
                 DisplayItem::MaskedFill { rect, mask, .. } => {
                     let _ = writeln!(out, "masked-fill {}x{} {rect:?}", mask.width, mask.height);
+                }
+                DisplayItem::BorderImage { rect, img, .. } => {
+                    let _ = writeln!(out, "border-image {}x{} {rect:?}", img.width, img.height);
                 }
                 DisplayItem::BoxShadow { rect, .. } => {
                     let _ = writeln!(out, "box-shadow {rect:?}");
@@ -600,7 +714,9 @@ impl DisplayList {
                     let _ = writeln!(out, "push-transform {m:?}");
                 }
                 DisplayItem::PopTransform => out.push_str("pop-transform\n"),
-                DisplayItem::PushFilter(_) => out.push_str("push-filter\n"),
+                DisplayItem::PushFilter(ops) => {
+                    let _ = writeln!(out, "push-filter {ops:?}");
+                }
                 DisplayItem::PopFilter => out.push_str("pop-filter\n"),
                 DisplayItem::PushBlend(b) => {
                     let _ = writeln!(out, "push-blend {b}");
@@ -612,6 +728,21 @@ impl DisplayList {
                     let _ = writeln!(out, "emphasis k{kind} @{origin:?}");
                 }
                 DisplayItem::PopBlend => out.push_str("pop-blend\n"),
+                DisplayItem::PushMask { rect, layers, .. } => {
+                    let _ = write!(out, "push-mask x{} {rect:?}", layers.len());
+                    for l in layers {
+                        let _ = write!(
+                            out,
+                            " [d{dst:?} r{repeat:?} l{lumi} c{comp}]",
+                            dst = l.dst,
+                            repeat = l.repeat,
+                            lumi = l.luminance,
+                            comp = l.composite
+                        );
+                    }
+                    out.push('\n');
+                }
+                DisplayItem::PopMask => out.push_str("pop-mask\n"),
                 DisplayItem::BackdropFilter { rect, .. } => {
                     let _ = writeln!(out, "backdrop-filter {rect:?}");
                 }
@@ -709,6 +840,7 @@ fn item_bounds(item: &DisplayItem) -> Option<Rect> {
         | DisplayItem::Placeholder { rect, .. }
         | DisplayItem::Image { rect, .. }
         | DisplayItem::MaskedFill { rect, .. }
+        | DisplayItem::BorderImage { rect, .. }
         | DisplayItem::Marker { rect, .. }
         | DisplayItem::BackdropFilter { rect, .. }
         | DisplayItem::BackgroundImage { rect, .. } => Some(*rect),
@@ -771,7 +903,9 @@ fn item_bounds(item: &DisplayItem) -> Option<Rect> {
         | DisplayItem::PushFilter(_)
         | DisplayItem::PopFilter
         | DisplayItem::PushBlend(_)
-        | DisplayItem::PopBlend => None,
+        | DisplayItem::PopBlend
+        | DisplayItem::PushMask { .. }
+        | DisplayItem::PopMask => None,
         // Marques de texte — borne du run (avance × taille).
         DisplayItem::Emphasis {
             origin,
@@ -839,13 +973,15 @@ fn item_eq(a: &DisplayItem, b: &DisplayItem) -> bool {
                 rect: r1,
                 color: c1,
                 radii: ra1,
+                corners: k1,
             },
             D::FillRect {
                 rect: r2,
                 color: c2,
                 radii: ra2,
+                corners: k2,
             },
-        ) => r1 == r2 && c1 == c2 && ra1 == ra2,
+        ) => r1 == r2 && c1 == c2 && ra1 == ra2 && k1 == k2,
         (
             D::DecoRect {
                 rect: r1,
@@ -865,6 +1001,7 @@ fn item_eq(a: &DisplayItem, b: &DisplayItem) -> bool {
                 colors: c1,
                 styles: s1,
                 radii: ra1,
+                corners: k1,
             },
             D::Border {
                 rect: r2,
@@ -872,8 +1009,9 @@ fn item_eq(a: &DisplayItem, b: &DisplayItem) -> bool {
                 colors: c2,
                 styles: s2,
                 radii: ra2,
+                corners: k2,
             },
-        ) => r1 == r2 && w1 == w2 && c1 == c2 && s1 == s2 && ra1 == ra2,
+        ) => r1 == r2 && w1 == w2 && c1 == c2 && s1 == s2 && ra1 == ra2 && k1 == k2,
         (
             D::Text {
                 origin: o1,
@@ -926,6 +1064,7 @@ fn item_eq(a: &DisplayItem, b: &DisplayItem) -> bool {
                 mask: m1,
                 dst: d1,
                 repeat: p1,
+                luminance: u1,
             },
             D::MaskedFill {
                 rect: r2,
@@ -933,8 +1072,41 @@ fn item_eq(a: &DisplayItem, b: &DisplayItem) -> bool {
                 mask: m2,
                 dst: d2,
                 repeat: p2,
+                luminance: u2,
             },
-        ) => r1 == r2 && c1 == c2 && d1 == d2 && p1 == p2 && std::sync::Arc::ptr_eq(m1, m2),
+        ) => {
+            r1 == r2
+                && c1 == c2
+                && d1 == d2
+                && p1 == p2
+                && u1 == u2
+                && std::sync::Arc::ptr_eq(m1, m2)
+        }
+        (
+            D::BorderImage {
+                rect: r1,
+                img: i1,
+                src_edges: s1,
+                dst_edges: d1,
+                fill_center: f1,
+                repeat: p1,
+            },
+            D::BorderImage {
+                rect: r2,
+                img: i2,
+                src_edges: s2,
+                dst_edges: d2,
+                fill_center: f2,
+                repeat: p2,
+            },
+        ) => {
+            r1 == r2
+                && s1 == s2
+                && d1 == d2
+                && f1 == f2
+                && p1 == p2
+                && std::sync::Arc::ptr_eq(i1, i2)
+        }
         (
             D::Marker {
                 rect: r1,
@@ -1304,12 +1476,14 @@ fn emit_canvas_bg(
         )
     };
     let src = canvas_bx?;
-    if let Some(c) = src.style.get("background-color").and_then(parse_color) {
+    // R-265 — `currentcolor` résolu via `st.color`.
+    if let Some(c) = src.style.color("background-color") {
         if c.a > 0 {
             items.push(DisplayItem::FillRect {
                 rect: canvas,
                 color: c,
                 radii: [0.0; 4],
+                corners: [1.0; 4],
             });
         }
     }
@@ -1368,6 +1542,7 @@ fn build_list(
         canvas_bg_src: None,
         emit_per_path: std::collections::HashMap::new(),
         sticky_deltas: std::collections::HashMap::new(),
+        offset_tf: std::collections::HashMap::new(),
         emits_total: 0,
         dropped: 0,
         first_cycle_path: None,
@@ -1585,6 +1760,13 @@ struct PaintCx<'a> {
     /// phase positionnée, plus en flux, doit garder sa
     /// translation d'épingle quel que soit le drain final).
     sticky_deltas: std::collections::HashMap<usize, (f32, f32)>,
+    /// R-272 — transform `offset-*` des enfants à chemin
+    /// (`offset-path`), indexée par pointeur : le bloc
+    /// conteneur n'est connu qu'au niveau du parent — le
+    /// calcul y est fait à l'émission de l'enfant, consommé
+    /// dans `paint_box` au site `box_transform` (même patron
+    /// que `sticky_deltas`).
+    offset_tf: std::collections::HashMap<usize, explorer_layout::transform::Affine>,
     /// Total d'émissions reportées de la passe (§B-26) —
     /// plafond dur [`MAX_EMITS_TOTAL`] couvrant les cycles à
     /// chemins divergents que le cap par chemin ne voit pas.
@@ -1795,11 +1977,54 @@ fn corner_radii(st: &explorer_css::ComputedStyle, rect: &Rect) -> [f32; 4] {
     ]
 }
 
+/// `corner-*-shape` (css-borders-4 §3.7 — R-270) →
+/// exposants `K` de la superellipse par coin \[tl,tr,br,bl]
+/// : `round`=1 (e=2), `squircle`=2 (e=4), `square`=+∞,
+/// `bevel`=0 (e=1), `scoop`=-1 (e=0.5, concave),
+/// `notch`=-∞ ; `superellipse(k)`/`±infinity` = k/±∞.
+/// `round` absent → 1.0 partout (comportement historique).
+/// `PushClipRounded`/`BoxShadow`/`outline` restent ronds —
+/// borne documentée : la forme ne suit pas encore ces
+/// surfaces.
+fn corner_ks(st: &explorer_css::ComputedStyle) -> [f32; 4] {
+    fn k_of(v: &str) -> Option<f32> {
+        Some(match v.trim() {
+            "round" => 1.0,
+            "squircle" => 2.0,
+            "square" => f32::INFINITY,
+            "bevel" => 0.0,
+            "scoop" => -1.0,
+            "notch" => f32::NEG_INFINITY,
+            other => {
+                let inner = other
+                    .strip_prefix("superellipse(")
+                    .and_then(|s| s.strip_suffix(')'))?
+                    .trim();
+                match inner {
+                    "infinity" => f32::INFINITY,
+                    "-infinity" => f32::NEG_INFINITY,
+                    _ => inner.parse::<f32>().ok()?,
+                }
+            }
+        })
+    }
+    [
+        st.get("corner-top-left-shape"),
+        st.get("corner-top-right-shape"),
+        st.get("corner-bottom-right-shape"),
+        st.get("corner-bottom-left-shape"),
+    ]
+    .map(|v| v.and_then(k_of).unwrap_or(1.0))
+}
+
 /// Une couche `box-shadow` : `inset? x y [blur [spread]]
 /// [color]` dans n'importe quel ordre (spec : 2 à 4
 /// longueurs consécutives + couleur optionnelle).
 #[allow(clippy::cast_possible_truncation, clippy::type_complexity)]
-fn parse_box_shadow_layer(raw: &str) -> Option<((f32, f32), f32, f32, Color, bool)> {
+fn parse_box_shadow_layer(
+    st: &explorer_css::ComputedStyle,
+    raw: &str,
+) -> Option<((f32, f32), f32, f32, Color, bool)> {
     let mut lens = Vec::with_capacity(4);
     let mut color = None;
     let mut inset = false;
@@ -1808,7 +2033,7 @@ fn parse_box_shadow_layer(raw: &str) -> Option<((f32, f32), f32, f32, Color, boo
             inset = true;
         } else if let Some(l) = parse_length(tok) {
             lens.push(l.unit.px_factor().map_or(0.0, |f| l.value * f) as f32);
-        } else if let Some(c) = parse_color(tok) {
+        } else if let Some(c) = token_color(st, tok) {
             color = Some(c);
         }
         // Fonctions couleur (`rgb(…)`, `var(…)`) déjà
@@ -1823,7 +2048,9 @@ fn parse_box_shadow_layer(raw: &str) -> Option<((f32, f32), f32, f32, Color, boo
         (lens[0], lens[1]),
         blur,
         spread,
-        color.unwrap_or(Color::BLACK),
+        // Défaut spec = `currentcolor` (R-265) — la `color`
+        // calculée de la boîte, plus du noir fixe.
+        color.or_else(|| st.color("color")).unwrap_or(Color::BLACK),
         inset,
     ))
 }
@@ -1840,7 +2067,7 @@ fn emit_box_shadows(st: &explorer_css::ComputedStyle, rect: &Rect, items: &mut V
     }
     let radii = corner_radii(st, rect);
     for layer in bg_layers(v) {
-        let Some((offset, blur, spread, color, inset)) = parse_box_shadow_layer(layer.trim())
+        let Some((offset, blur, spread, color, inset)) = parse_box_shadow_layer(st, layer.trim())
         else {
             continue;
         };
@@ -2193,11 +2420,27 @@ fn emit_bg_layers(
             // `padding-box` = défaut — identique à l'aire reçue.
             _ => (area, base),
         };
-        let repeat = match layer_value("background-repeat", i).as_deref() {
-            Some("no-repeat") => (false, false),
-            Some("repeat-x") => (true, false),
-            Some("repeat-y") => (false, true),
-            _ => (true, true), // `repeat` = défaut.
+        // `space`/`round` (css-backgrounds-3 §3.5) : modes
+        // propres (gap distribué / tuile étirée) — pas
+        // l'approximation `repeat` des tuiles booléennes.
+        let mode = |t: &str| match t {
+            "no-repeat" => 1u8,
+            "space" => 2,
+            "round" => 3,
+            _ => 0,
+        };
+        let repeat = {
+            let v = layer_value("background-repeat", i).unwrap_or("repeat".to_string());
+            match v.trim() {
+                "repeat-x" => (0u8, 1u8),
+                "repeat-y" => (1u8, 0u8),
+                _ => {
+                    let mut it = v.split_whitespace();
+                    let a = it.next().map_or(0, mode);
+                    let b = it.next().map_or(a, mode);
+                    (a, b)
+                }
+            }
         };
         let img = if bg_has_url(layer) {
             let from_layers = node.and_then(|n| {
@@ -2256,12 +2499,35 @@ fn emit_bg_layers(
             // offsets absolus (`0 -667px` sprites) actifs —
             // conforme §14.2.1. La dimension retenue est la
             // tuile **mise à l'échelle** (spec §images-3).
-            let (px, py) = bg_position(
+            let (mut px, mut py) = bg_position(
                 layer_value("background-position", i).as_deref(),
                 l_area,
                 (img.width as f32, img.height as f32),
                 fs,
             );
+            // R-261 — longhands `background-position-x`/`-y`
+            // (css-backgrounds-4 §3.5) : chaque axe déclaré
+            // écrase l'axe correspondant du shorthand (la
+            // cascade les stocke verbatim, ce sont des
+            // longhands indépendants — `background`/
+            // `background-position` continuent de passer par
+            // le nom combiné).
+            if let Some(x) = bg_axis_position(
+                layer_value("background-position-x", i).as_deref(),
+                l_area.0,
+                img.width as f32,
+                fs,
+            ) {
+                px = x;
+            }
+            if let Some(y) = bg_axis_position(
+                layer_value("background-position-y", i).as_deref(),
+                l_area.1,
+                img.height as f32,
+                fs,
+            ) {
+                py = y;
+            }
             let blend = blend_tag(layer_value("background-blend-mode", i).as_deref());
             // R-184 — `background-clip:text` : la couche est
             // émise une fois par fragment de ligne (clip
@@ -2311,10 +2577,7 @@ fn emphasis_kind(st: &explorer_css::ComputedStyle, ink: Color) -> Option<(u8, Co
     }
     let mut kind = 0u8;
     let mut found = false;
-    let mut color = st
-        .get("text-emphasis-color")
-        .and_then(parse_color)
-        .unwrap_or(ink);
+    let mut color = st.color("text-emphasis-color").unwrap_or(ink);
     let over = st
         .get("text-emphasis-position")
         .is_none_or(|v| v.trim() != "under");
@@ -2343,7 +2606,7 @@ fn emphasis_kind(st: &explorer_css::ComputedStyle, ink: Color) -> Option<(u8, Co
             "open" => kind |= 8,
             "filled" => {}
             _ => {
-                if let Some(c) = parse_color(tok) {
+                if let Some(c) = token_color(st, tok) {
                     color = c;
                 }
             }
@@ -2414,7 +2677,7 @@ fn text_shadows(st: &explorer_css::ComputedStyle, default: Color) -> Vec<((f32, 
             for tok in layer.split_whitespace() {
                 if let Some(l) = parse_length(tok) {
                     lens.push(l.unit.px_factor().map_or(0.0, |f| l.value * f) as f32);
-                } else if let Some(c) = parse_color(tok) {
+                } else if let Some(c) = token_color(st, tok) {
                     color = Some(c);
                 }
             }
@@ -2500,7 +2763,7 @@ fn parse_filter(st: &explorer_css::ComputedStyle) -> Vec<FilterOp> {
                 .strip_suffix("deg")
                 .and_then(|d| d.trim().parse::<f32>().ok())
                 .map(FilterOp::HueRotate),
-            "drop-shadow" => parse_drop_shadow(arg),
+            "drop-shadow" => parse_drop_shadow(st, arg),
             // `url()` : hors scope.
             _ => None,
         };
@@ -2520,7 +2783,7 @@ fn parse_filter(st: &explorer_css::ComputedStyle) -> Vec<FilterOp> {
 /// Défauts spec : blur 0, couleur `currentcolor` →
 /// approximée à l'encre du déclarant (noir si absente).
 #[allow(clippy::cast_possible_truncation)]
-fn parse_drop_shadow(arg: &str) -> Option<FilterOp> {
+fn parse_drop_shadow(st: &explorer_css::ComputedStyle, arg: &str) -> Option<FilterOp> {
     let mut lens = Vec::new();
     let mut color = None;
     for tok in arg.split_whitespace() {
@@ -2529,9 +2792,10 @@ fn parse_drop_shadow(arg: &str) -> Option<FilterOp> {
         } else {
             // Tout le reste (le ou les tokens couleur,
             // éventuellement collés par l'espace dans
-            // `rgb(0, 0, 0)`) est recollé pour `parse_color`.
+            // `rgb(0, 0, 0)`) est recollé pour le parser
+            // couleur (`currentcolor` inclus — R-265).
             let tail = arg[arg.find(tok).unwrap_or(0)..].trim();
-            color = parse_color(tail);
+            color = token_color(st, tail);
             break;
         }
     }
@@ -2542,7 +2806,9 @@ fn parse_drop_shadow(arg: &str) -> Option<FilterOp> {
         dx: lens[0],
         dy: lens[1],
         blur: lens.get(2).copied().unwrap_or(0.0).max(0.0),
-        color: color.unwrap_or(Color::BLACK),
+        // Défaut spec = `currentcolor` — la `color` calculée
+        // du déclarant (R-265), plus du noir fixe.
+        color: color.or_else(|| st.color("color")).unwrap_or(Color::BLACK),
     })
 }
 
@@ -2669,23 +2935,84 @@ fn emit_column_rules(bx: &LayoutBox, items: &mut Vec<DisplayItem>, off: (f32, f3
         return;
     }
     let color = st
-        .get("column-rule-color")
-        .and_then(parse_color)
-        .or_else(|| st.get("color").and_then(parse_color))
+        .color("column-rule-color")
+        .or_else(|| st.color("color"))
         .unwrap_or(Color::BLACK);
+    // R-271 — `rule-break`/`rule-inset` (css-gaps-1 §4.2/4.4)
+    // via `gap_rule_segments` ; `column-rule-inset-*` est le
+    // longhand axe colonnes (expansion `rule-inset*`).
+    let segs = gap_rule_segments(bx, cr.y, cr.y + cr.height);
+    if segs.is_empty() {
+        return;
+    }
     for i in 1..n {
         let cx = cr.x + i as f32 * (col_w + gap) - gap * 0.5 - rw * 0.5;
-        items.push(DisplayItem::DecoRect {
-            rect: Rect {
-                x: cx + off.0,
-                y: cr.y + off.1,
-                width: rw,
-                height: cr.height,
-            },
-            color,
-            style: deco_style,
-        });
+        for (a, b) in &segs {
+            items.push(DisplayItem::DecoRect {
+                rect: Rect {
+                    x: cx + off.0,
+                    y: a + off.1,
+                    width: rw,
+                    height: b - a,
+                },
+                color,
+                style: deco_style,
+            });
+        }
     }
+}
+
+/// R-271 — segments verticaux d'une règle de gap
+/// (css-gaps-1 §4.2/4.4) : `column-rule-break`/`rule-break`
+/// ∈ `none` peint à travers les spanners ; `spanning-item`/
+/// `intersection` (et l'absence — css-multicol-1 §5.1 : les
+/// règles ne traversent pas un `column-span:all`) coupent à
+/// chaque spanner (rects des enfants `column-span:all` de
+/// `bx`, posés pleine largeur). `column-rule-inset-start`/
+/// `-end` raccourcissent les extrémités du trait.
+fn gap_rule_segments(bx: &LayoutBox, y0: f32, y1: f32) -> Vec<(f32, f32)> {
+    let st = &bx.style;
+    let break_t = st
+        .get("column-rule-break")
+        .or_else(|| st.get("rule-break"))
+        .map_or("spanning-item", str::trim);
+    let break_spans = !matches!(break_t, "none");
+    let y0 = y0 + prop_px(st, "column-rule-inset-start", 0.0);
+    let y1 = y1 - prop_px(st, "column-rule-inset-end", 0.0);
+    if y1 <= y0 {
+        return Vec::new();
+    }
+    let mut segs = vec![(y0, y1)];
+    if break_spans {
+        let mut spans: Vec<(f32, f32)> = bx
+            .children
+            .iter()
+            .filter(|c| {
+                c.style
+                    .get("column-span")
+                    .is_some_and(|v| v.trim() == "all")
+            })
+            .map(|c| (c.rect.y, c.rect.y + c.rect.height))
+            .collect();
+        spans.sort_by(|a, b| a.0.total_cmp(&b.0));
+        for (sy0, sy1) in spans {
+            let mut next = Vec::with_capacity(segs.len() + 1);
+            for (a, b) in segs {
+                if sy1 <= a || sy0 >= b {
+                    next.push((a, b));
+                } else {
+                    if sy0 > a {
+                        next.push((a, sy0));
+                    }
+                    if sy1 < b {
+                        next.push((sy1, b));
+                    }
+                }
+            }
+            segs = next;
+        }
+    }
+    segs
 }
 
 fn emit_list_marker(
@@ -2755,11 +3082,7 @@ fn emit_list_marker(
     } else {
         content_x - gap - d / 2.0
     };
-    let color = bx
-        .style
-        .get("color")
-        .and_then(parse_color)
-        .unwrap_or(Color::BLACK);
+    let color = bx.style.color("color").unwrap_or(Color::BLACK);
     items.push(DisplayItem::Marker {
         rect: Rect {
             x: cx - d / 2.0 + off.0,
@@ -2826,10 +3149,7 @@ fn emit_text_marker(bx: &LayoutBox, items: &mut Vec<DisplayItem>, off: (f32, f32
     } else {
         content_x - (fs * 0.4).max(1.0) - est_w
     };
-    let color = mstyle
-        .get("color")
-        .and_then(parse_color)
-        .unwrap_or(Color::BLACK);
+    let color = mstyle.color("color").unwrap_or(Color::BLACK);
     items.push(DisplayItem::MarkerText {
         origin: (x + off.0, baseline_y + off.1),
         text,
@@ -2844,9 +3164,7 @@ fn emit_text_marker(bx: &LayoutBox, items: &mut Vec<DisplayItem>, off: (f32, f32
 /// `url()`/dégradé (§14.2 — sélection de la source du fond de
 /// canvas).
 fn has_bg(st: &explorer_css::ComputedStyle) -> bool {
-    st.get("background-color")
-        .and_then(parse_color)
-        .is_some_and(|c| c.a > 0)
+    st.color("background-color").is_some_and(|c| c.a > 0)
         || st.get("background-image").is_some_and(bg_has_image)
 }
 
@@ -2884,10 +3202,21 @@ fn em_factor(u: explorer_css::value::Unit) -> f64 {
 /// `color` de la boîte, pas sur du noir (R-22 — les pastilles
 /// `a.tag` de lobste.rs peignaient un cadre noir).
 fn border_color_of(st: &explorer_css::ComputedStyle, side: &str) -> Color {
-    st.get(side)
-        .and_then(parse_color)
-        .or_else(|| st.get("color").and_then(parse_color))
+    st.color(side)
+        .or_else(|| st.color("color"))
         .unwrap_or(Color::BLACK)
+}
+
+/// R-265 — couleur d'un **token** de valeur composée
+/// (`box-shadow`, `text-shadow`, `text-emphasis`,
+/// `drop-shadow()`) : `currentcolor` résolu sur le `color`
+/// calculé de l'élément (css-color-3 §4.2) — un `parse_color`
+/// brut retournait `None` et laissait le repli noir.
+fn token_color(st: &explorer_css::ComputedStyle, tok: &str) -> Option<Color> {
+    if tok.trim().eq_ignore_ascii_case("currentcolor") {
+        return st.color("color").or(Some(Color::BLACK));
+    }
+    parse_color(tok)
 }
 
 /// Content box de la boîte = border box − bordures − padding
@@ -2937,29 +3266,6 @@ fn bg_position(raw: Option<&str>, area: (f32, f32), img: (f32, f32), fs: f64) ->
     if toks.is_empty() {
         return (0.0, 0.0);
     }
-    // Une dimension : longueur/`%` = offset depuis le coin,
-    // mot-clé → fraction de (zone − image).
-    let token = |t: &str, span: f32, dim: f32| -> f32 {
-        match t {
-            "left" | "top" => 0.0,
-            "center" => (span - dim) / 2.0,
-            "right" | "bottom" => span - dim,
-            _ => t
-                .strip_suffix('%')
-                .and_then(|p| p.parse::<f32>().ok())
-                .map_or_else(
-                    || {
-                        parse_length(t)
-                            .map(|l| match l.unit.px_factor() {
-                                Some(f) => l.value * f,
-                                None => l.value * fs * em_factor(l.unit),
-                            })
-                            .map_or(0.0, |v| v as f32)
-                    },
-                    |p| (span - dim) * p / 100.0,
-                ),
-        }
-    };
     let (x_tok, y_tok) = match toks.as_slice() {
         [a] => {
             // Seul un mot-clé vertical indique y.
@@ -2972,7 +3278,83 @@ fn bg_position(raw: Option<&str>, area: (f32, f32), img: (f32, f32), fs: f64) ->
         [a, b, ..] => (*a, *b),
         _ => ("left", "top"),
     };
-    (token(x_tok, area.0, img.0), token(y_tok, area.1, img.1))
+    (
+        bg_pos_token(x_tok, area.0, img.0, fs),
+        bg_pos_token(y_tok, area.1, img.1, fs),
+    )
+}
+
+/// Une dimension de `background-position` : longueur/`%` =
+/// offset depuis le coin, mot-clé → fraction de
+/// (zone − image).
+#[allow(clippy::cast_possible_truncation)]
+fn bg_pos_token(t: &str, span: f32, dim: f32, fs: f64) -> f32 {
+    match t {
+        "left" | "top" => 0.0,
+        "center" => (span - dim) / 2.0,
+        "right" | "bottom" => span - dim,
+        _ => t
+            .strip_suffix('%')
+            .and_then(|p| p.parse::<f32>().ok())
+            .map_or_else(
+                || {
+                    parse_length(t)
+                        .map(|l| match l.unit.px_factor() {
+                            Some(f) => l.value * f,
+                            None => l.value * fs * em_factor(l.unit),
+                        })
+                        .map_or(0.0, |v| v as f32)
+                },
+                |p| (span - dim) * p / 100.0,
+            ),
+    }
+}
+
+/// Longhand mono-axe `background-position-x`/`-y`
+/// (css-backgrounds-4 §3.5, R-261) → décalage (px) de la
+/// tuile sur cet axe : `center`, `bord` (seul ou avec offset
+/// — `left 10px`, `right 10px`), `<len>`/`<%>` nu mesuré
+/// depuis le bord de début. `x-start`/`y-start` = bord de
+/// début, `x-end`/`y-end` = bord de fin (approximation
+/// LTR/TB — le repère d'écriture n'est pas porté ici).
+/// `None` = absent ou hors grammaire → l'appelant garde
+/// l'axe du shorthand combiné.
+#[allow(clippy::cast_possible_truncation)]
+fn bg_axis_position(raw: Option<&str>, span: f32, dim: f32, fs: f64) -> Option<f32> {
+    let toks: Vec<&str> = raw?.split_whitespace().collect();
+    // `<len>`/`<%>` → px : le `%` mesure (zone − image) comme
+    // `bg_position` ; les longueurs font-relatives sur `fs`.
+    let len_px = |t: &str| -> Option<f32> {
+        if let Some(p) = t.strip_suffix('%') {
+            return p.parse::<f32>().ok().map(|n| (span - dim) * n / 100.0);
+        }
+        parse_length(t)
+            .map(|l| match l.unit.px_factor() {
+                Some(f) => l.value * f,
+                None => l.value * fs * em_factor(l.unit),
+            })
+            .map(|v| v as f32)
+    };
+    match toks.as_slice() {
+        [a] => match *a {
+            "left" | "top" | "x-start" | "y-start" => Some(0.0),
+            "center" => Some((span - dim) / 2.0),
+            "right" | "bottom" | "x-end" | "y-end" => Some(span - dim),
+            t => len_px(t),
+        },
+        // Forme `bord offset` : l'offset se mesure depuis le
+        // bord nommé (`right 10px` = bord droit − 10 px).
+        [a, b] => {
+            let off = len_px(b)?;
+            match *a {
+                "left" | "top" | "x-start" | "y-start" => Some(off),
+                "right" | "bottom" | "x-end" | "y-end" => Some(span - dim - off),
+                "center" => Some((span - dim) / 2.0),
+                t => len_px(t),
+            }
+        }
+        _ => None,
+    }
 }
 
 /// Plafond de la tuile `background-size` mise à l'échelle
@@ -3130,23 +3512,390 @@ fn mask_size(
     }
 }
 
+/// `mask-image` résolu pour `bx` → `(bitmap, tuile, repeat)`
+/// en coords document. Lookup R-52 : `NodeId` d'abord, repli
+/// par texte `url(...)` (`masks_url`) pour les boîtes pseudo
+/// sans `NodeId` et les masks fetchés par l'appelant. `rect` =
+/// border box **décalée** (`mask-clip` initial) ; `dst` porte
+/// `mask-size`/`mask-position` résolus. Partagé par
+/// `MaskedFill` (feuille « icône ») et `PushMask` (groupe
+/// R-252) — un seul site de résolution.
+/// Aire rectangulaire d'une boîte de référence mask
+/// (`border-box`/`padding-box`/`content-box`) — R-252
+/// `mask-origin`/`mask-clip`. `fill-box`/`stroke-box`/
+/// `view-box` (référence SVG) et `no-clip`/`margin-box`
+/// approchés : `fill|stroke|view|no-clip` → border box,
+/// `margin-box` → border box élargie des marges.
+fn mask_area(bx: &LayoutBox, kind: &str) -> Rect {
+    let st = &bx.style;
+    match kind {
+        "padding-box" => {
+            let l = border_side_w(st, "left");
+            let t = border_side_w(st, "top");
+            let r = border_side_w(st, "right");
+            let b = border_side_w(st, "bottom");
+            Rect {
+                x: bx.rect.x + l,
+                y: bx.rect.y + t,
+                width: (bx.rect.width - l - r).max(0.0),
+                height: (bx.rect.height - t - b).max(0.0),
+            }
+        }
+        "content-box" => content_rect(bx),
+        "margin-box" => {
+            let ml = prop_px(st, "margin-left", 0.0);
+            let mt = prop_px(st, "margin-top", 0.0);
+            let mr = prop_px(st, "margin-right", 0.0);
+            let mb = prop_px(st, "margin-bottom", 0.0);
+            Rect {
+                x: bx.rect.x - ml,
+                y: bx.rect.y - mt,
+                width: bx.rect.width + ml + mr,
+                height: bx.rect.height + mt + mb,
+            }
+        }
+        _ => bx.rect,
+    }
+}
+
+#[allow(clippy::cast_possible_truncation, clippy::cast_precision_loss)]
+fn resolve_mask(bx: &LayoutBox, rect: &Rect, images: &crate::PaintImages) -> Vec<MaskLayer> {
+    // Couches `mask-image` : texte → bitmap ; la couche 0 garde
+    // le lookup `NodeId` historique, les suivantes passent par
+    // `masks_url` (multi-couches R-252, union `add`).
+    let urls: Vec<String> = bx
+        .style
+        .get("mask-image")
+        .or_else(|| bx.style.get("-webkit-mask-image"))
+        .map(|v| top_commas(v).filter_map(crate::dataurl::url_arg).collect())
+        .unwrap_or_default();
+    let (ox, oy) = (rect.x - bx.rect.x, rect.y - bx.rect.y);
+    let shift = |mut a: Rect| {
+        a.x += ox;
+        a.y += oy;
+        a
+    };
+    let clip_kind = bx
+        .style
+        .get("mask-clip")
+        .or_else(|| bx.style.get("-webkit-mask-clip"))
+        .map_or("border-box", str::trim);
+    let origin_kind = bx
+        .style
+        .get("mask-origin")
+        .or_else(|| bx.style.get("-webkit-mask-origin"))
+        .map_or("border-box", str::trim);
+    let origin = shift(mask_area(bx, origin_kind));
+    let clip = shift(mask_area(bx, clip_kind));
+    let area = (origin.width, origin.height);
+    let fs = font_size_of(&bx.style);
+    let mut out = Vec::new();
+    for (i, url) in urls.iter().enumerate() {
+        let mask = if i == 0 {
+            bx.node
+                .and_then(|n| images.masks.get(&n))
+                .or_else(|| images.masks_url.get(url))
+        } else {
+            images.masks_url.get(url)
+        };
+        let Some(mask) = mask else { continue };
+        // Longhands à couches : i-ème valeur (ou dernière —
+        // répétition spec) ; la couche 0 reprend le helper
+        // historique pour les valeurs simples.
+        let size_raw = if i == 0 {
+            None
+        } else {
+            mask_layer_prop(&bx.style, "mask-size", i)
+        };
+        let (mw, mh) = if let Some(r) = size_raw {
+            mask_size_raw(r, area, (mask.width as f32, mask.height as f32), fs)
+        } else {
+            mask_size(&bx.style, area, (mask.width as f32, mask.height as f32), fs)
+        };
+        let pos_raw = mask_layer_prop(&bx.style, "mask-position", i);
+        let (px, py) = bg_position(pos_raw, area, (mw, mh), fs);
+        out.push(MaskLayer {
+            mask: mask.clone(),
+            dst: Rect {
+                x: origin.x + px,
+                y: origin.y + py,
+                width: mw,
+                height: mh,
+            },
+            clip,
+            repeat: mask_layer_prop(&bx.style, "mask-repeat", i)
+                .map_or_else(|| mask_repeat(&bx.style), mask_repeat_raw),
+            luminance: mask_layer_prop(&bx.style, "mask-mode", i).is_some_and(|v| v == "luminance"),
+            composite: mask_layer_prop(&bx.style, "mask-composite", i).map_or(0, |v| match v {
+                "intersect" => 1,
+                "subtract" => 2,
+                "exclude" => 3,
+                _ => 0,
+            }),
+        });
+    }
+    out
+}
+
+/// `mask-repeat` d'une couche → `(x, y)` — même table que
+/// [`mask_repeat`] sur un fragment déjà isolé.
+fn mask_repeat_raw(raw: &str) -> (u8, u8) {
+    let toks: Vec<&str> = raw.split_whitespace().collect();
+    // Modes css-masking-1 §7.2 : 0 repeat, 1 no-repeat,
+    // 2 space, 3 round.
+    let mode = |t: &str| match t {
+        "no-repeat" => 1u8,
+        "space" => 2,
+        "round" => 3,
+        _ => 0,
+    };
+    match toks.as_slice() {
+        [] => (0, 0),
+        ["repeat-x"] => (0, 1),
+        ["repeat-y"] => (1, 0),
+        [a] => (mode(a), mode(a)),
+        [a, b, ..] => (mode(a), mode(b)),
+    }
+}
+
+/// `mask-size` d'une couche → dimensions de la tuile — même
+/// grammaire que [`mask_size`] sur un fragment déjà isolé.
+#[allow(clippy::cast_possible_truncation)]
+fn mask_size_raw(raw: &str, area: (f32, f32), img: (f32, f32), fs: f64) -> (f32, f32) {
+    // Réutilise `mask_size` via un style temporaire impossible
+    // — version fragment : mêmes branches sur tokens simples.
+    let toks: Vec<&str> = raw.split_whitespace().collect();
+    let ratio = if img.1 > 0.0 { img.0 / img.1 } else { 1.0 };
+    let len = |t: &str, span: f32| -> Option<f32> {
+        t.strip_suffix('%')
+            .and_then(|p| p.parse::<f32>().ok())
+            .map(|p| span * p / 100.0)
+            .or_else(|| {
+                parse_length(t).map(|l| {
+                    (match l.unit.px_factor() {
+                        Some(f) => l.value * f,
+                        None => l.value * fs * em_factor(l.unit),
+                    }) as f32
+                })
+            })
+    };
+    match toks.as_slice() {
+        [] | ["auto"] | ["auto", "auto"] => area,
+        ["cover" | "contain"] => {
+            if img.0 <= 0.0 || img.1 <= 0.0 {
+                return area;
+            }
+            let s = if toks[0] == "cover" {
+                (area.0 / img.0).max(area.1 / img.1)
+            } else {
+                (area.0 / img.0).min(area.1 / img.1)
+            };
+            (img.0 * s, img.1 * s)
+        }
+        [a] => len(a, area.0).map_or(area, |w| (w, if ratio > 0.0 { w / ratio } else { w })),
+        [a, b, ..] => {
+            let w = if *a == "auto" {
+                len(b, area.1).map_or(img.0, |h| h * ratio)
+            } else {
+                len(a, area.0).unwrap_or(img.0)
+            };
+            let h = if *b == "auto" {
+                len(a, area.0).map_or(img.1, |w| if ratio > 0.0 { w / ratio } else { w })
+            } else {
+                len(b, area.1).unwrap_or(img.1)
+            };
+            (w, h)
+        }
+    }
+}
+
+/// i-ème valeur d'une longhand `mask-*` à couches — liste
+/// virgule top-level ; hors-portée → `None` (le site retombe
+/// sur la dernière — répétition spec — via `or_else` amont).
+fn mask_layer_prop<'a>(
+    st: &'a explorer_css::ComputedStyle,
+    name: &str,
+    i: usize,
+) -> Option<&'a str> {
+    let raw = st
+        .get(name)
+        .or_else(|| st.get(&format!("-webkit-{name}")))?;
+    let parts: Vec<&str> = top_commas(raw).collect();
+    parts
+        .get(i)
+        .or_else(|| parts.last())
+        .map(|s| s.trim())
+        .filter(|s| !s.is_empty())
+}
+
+/// Virgules top-level (parenthèses ignorées).
+fn top_commas(raw: &str) -> impl Iterator<Item = &str> {
+    let mut depth = 0u32;
+    let mut start = 0usize;
+    let mut out = Vec::new();
+    for (i, ch) in raw.char_indices() {
+        match ch {
+            '(' => depth += 1,
+            ')' => depth = depth.saturating_sub(1),
+            ',' if depth == 0 => {
+                out.push(&raw[start..i]);
+                start = i + 1;
+            }
+            _ => {}
+        }
+    }
+    out.push(&raw[start..]);
+    out.into_iter()
+}
+
+/// Une tuile de mask (R-252 multi-couches) : bitmap,
+/// `dst`/`repeat` résolus, `luminance`.
+#[derive(Debug, Clone)]
+pub struct MaskTile {
+    /// Bitmap — seul l'alpha (ou la luma) est lu.
+    pub mask: std::sync::Arc<crate::image::DecodedImage>,
+    /// Zone d'une tuile du mask (coords document).
+    pub dst: Rect,
+    /// `mask-repeat` `(x, y)`.
+    pub repeat: (u8, u8),
+    /// `mask-mode:luminance` de la couche.
+    pub luminance: bool,
+    /// `mask-composite` de la couche : 0 `add` (initial —
+    /// union max), 1 `intersect` (min), 2 `subtract`
+    /// (`d×(1−cov)`), 3 `exclude` (xor).
+    pub composite: u8,
+}
+
+/// Résolution d'une couche `mask-*` (R-252) : bitmap dont
+/// l'alpha (ou la luminance) masque, tuile `dst`
+/// (origin+size+position) et aire de peinture `clip` —
+/// coordonnées document.
+struct MaskLayer {
+    /// Bitmap — seul l'alpha est lu (luminance : luma×alpha).
+    mask: std::sync::Arc<crate::image::DecodedImage>,
+    /// Tuile résolue (`mask-origin`+`mask-size`+`mask-position`).
+    dst: Rect,
+    /// Aire de peinture (`mask-clip`) — hors d'elle, alpha 0.
+    clip: Rect,
+    /// `mask-repeat` `(x, y)` — mode u8 (0/1/2/3).
+    repeat: (u8, u8),
+    /// `mask-mode:luminance` résolu.
+    luminance: bool,
+    /// `mask-composite` de la couche (0 add…3 exclude).
+    composite: u8,
+}
+
 /// `mask-repeat` → `(x, y)` : `repeat` par défaut (tuilage),
 /// `space`/`round` approchés en `repeat` (nearest — l'écart
 /// de rendu est sub-pixel sur les motifs icon, où la tuile
 /// couvre la zone). Deux valeurs = x puis y.
-fn mask_repeat(st: &explorer_css::ComputedStyle) -> (bool, bool) {
+/// `border-image-slice` : insets `(t, r, b, l)` en pixels
+/// source — `%` rapportés à la dimension de l'image
+/// (t/b → hauteur, r/l → largeur), nombre nu = px.
+/// `fill` est lu à l'émission (pas un inset).
+fn border_img_slice(st: &explorer_css::ComputedStyle) -> [f32; 4] {
+    // `border-image-slice` : insets `(t, r, b, l)` —
+    // nombre nu = pixels source, `%` = pourcentage de la
+    // dimension image (t/b → hauteur, r/l → largeur).
+    // Convention interne : `≥0` = px, `<0` = -%×100
+    // (le raster décode contre iw/ih). `fill` lu ailleurs.
+    let v = st.get("border-image-slice").unwrap_or_default();
+    let mut out = [0.0f32; 4];
+    let vals: Vec<&str> = v.split_whitespace().filter(|p| *p != "fill").collect();
+    for (i, o) in out.iter_mut().enumerate() {
+        let t = vals
+            .get(i)
+            .or_else(|| vals.first())
+            .copied()
+            .unwrap_or("100%");
+        *o = if let Some(n) = t.strip_suffix('%') {
+            -n.parse::<f32>().unwrap_or(0.0)
+        } else {
+            t.parse::<f32>().unwrap_or(0.0)
+        };
+    }
+    out
+}
+
+/// `border-image-width` : épaisseurs `(t, r, b, l)` px —
+/// `auto`/absent → les `border-*-width` calculés.
+fn border_img_widths(st: &explorer_css::ComputedStyle, fallback: [f32; 4]) -> [f32; 4] {
+    let v = st.get("border-image-width");
+    let mut out = fallback;
+    if let Some(v) = v {
+        let parts: Vec<&str> = v.split_whitespace().collect();
+        for (i, o) in out.iter_mut().enumerate() {
+            if let Some(t) = parts.get(i).or_else(|| parts.first()) {
+                if let Some(px) = t.strip_suffix("px").and_then(|n| n.parse::<f32>().ok()) {
+                    *o = px;
+                } else if let Ok(n) = t.parse::<f32>() {
+                    *o = n; // multiplicateur de border-width — simplification.
+                }
+            }
+        }
+    }
+    out
+}
+
+/// `border-image-repeat` — 0 stretch, 1 repeat, 2 round, 3 space.
+fn border_img_repeat(st: &explorer_css::ComputedStyle) -> (u8, u8) {
+    let v = st.get("border-image-repeat").unwrap_or("stretch");
+    let mut it = v.split_whitespace();
+    let m = |t: &str| match t {
+        "repeat" => 1u8,
+        "round" => 2u8,
+        "space" => 3u8,
+        _ => 0u8,
+    };
+    (
+        m(it.next().unwrap_or("stretch")),
+        m(it.next().unwrap_or("stretch")),
+    )
+}
+
+fn mask_repeat(st: &explorer_css::ComputedStyle) -> (u8, u8) {
     let raw = st
         .get("mask-repeat")
         .or_else(|| st.get("-webkit-mask-repeat"));
     let toks: Vec<&str> = raw.unwrap_or("").split_whitespace().collect();
-    let on = |t: &str| !matches!(t, "no-repeat");
+    // Modes css-masking-1 §7.2 : 0 repeat, 1 no-repeat,
+    // 2 space, 3 round.
+    let mode = |t: &str| match t {
+        "no-repeat" => 1u8,
+        "space" => 2,
+        "round" => 3,
+        _ => 0,
+    };
     match toks.as_slice() {
-        [] => (true, true),
-        ["no-repeat"] => (false, false),
-        ["repeat-x"] => (true, false),
-        ["repeat-y"] => (false, true),
-        [a] => (on(a), on(a)),
-        [a, b, ..] => (on(a), on(b)),
+        [] => (0, 0),
+        ["repeat-x"] => (0, 1),
+        ["repeat-y"] => (1, 0),
+        [a] => (mode(a), mode(a)),
+        [a, b, ..] => (mode(a), mode(b)),
+    }
+}
+
+/// `true` si le fragment ne rend aucun glyphe : texte réduit
+/// à des blancs CSS collapsibles (un atome `inline-block`/
+/// remplacé EST du contenu — `\u{A0}` aussi, cf. `trim_css_ws`).
+fn frag_is_ws_only(f: &explorer_layout::inline::Fragment) -> bool {
+    !f.atomic && trim_css_ws(&f.text).is_empty()
+}
+
+/// `true` si la boîte est du blanc collapsible : texte tout
+/// blanc, ou bloc anonyme dont toute la descendance est
+/// blanche — sert au critère « cellule vide » de
+/// `empty-cells:hide` (§17.6.1.1, R-263).
+fn box_is_ws_only(b: &LayoutBox) -> bool {
+    match b.kind {
+        BoxKind::Text => b.text.as_deref().is_none_or(|t| trim_css_ws(t).is_empty()),
+        BoxKind::AnonymousBlock => {
+            b.children.iter().all(box_is_ws_only)
+                && b.lines
+                    .iter()
+                    .all(|l| l.fragments.iter().all(frag_is_ws_only))
+        }
+        _ => false,
     }
 }
 
@@ -3196,6 +3945,11 @@ fn paint_self(
     // modèle `separate`, une cellule sans contenu (ni
     // enfants ni lignes — `&nbsp;` compte comme contenu)
     // ne peint ni fond ni bordure.
+    // R-263 : une cellule réduite à des blancs collapsibles
+    // (`<td> </td>` — espace, tab, saut) est « vide » au
+    // sens de la spec : les boîtes texte/blocs anonymes qui
+    // ne portent que du blanc CSS ne comptent pas comme
+    // contenu (`\u{A0}` si — il rend de l'encre).
     let empty_hidden = bx
         .style
         .get("display")
@@ -3208,8 +3962,11 @@ fn paint_self(
             .style
             .get("border-collapse")
             .is_none_or(|v| v.trim() != "collapse")
-        && bx.children.is_empty()
-        && bx.lines.is_empty();
+        && bx.children.iter().all(box_is_ws_only)
+        && bx
+            .lines
+            .iter()
+            .all(|l| l.fragments.iter().all(frag_is_ws_only));
     // R-M9b — `backdrop-filter` : la zone déjà peinte
     // sous la boîte reçoit les ops AVANT que fond/contenu
     // ne s'affichent par-dessus (raster : extract →
@@ -3238,7 +3995,7 @@ fn paint_self(
         emit_box_shadows(&bx.style, &rect, items);
     }
     if !anonymous && !inline_flow && !bg_propagated && !empty_hidden {
-        if let Some(c) = bx.style.get("background-color").and_then(parse_color) {
+        if let Some(c) = bx.style.color("background-color") {
             if c.a > 0 {
                 // R-52 — `mask-image` présent : la couleur ne
                 // passe que par l'alpha du mask (icônes des
@@ -3250,38 +4007,52 @@ fn paint_self(
                 // texte `url(...)` du style (motif `.x:before`
                 // des icônes MDN), et les masks fetchés sont
                 // enregistrés par l'appelant sur la même clé.
-                let mask = bx.node.and_then(|n| images.masks.get(&n)).or_else(|| {
-                    crate::dataurl::mask_url(&bx.style).and_then(|u| images.masks_url.get(&u))
-                });
-                if let Some(mask) = mask {
-                    // `mask-size`/`mask-position`/`mask-repeat`
-                    // résolus en zone d'une tuile (`dst`) —
-                    // aire = border box (mask-origin/clip
-                    // initiaux, § mask-clip).
-                    let area = (rect.width, rect.height);
-                    let fs = font_size_of(&bx.style);
-                    let (mw, mh) =
-                        mask_size(&bx.style, area, (mask.width as f32, mask.height as f32), fs);
-                    let (px, py) = bg_position(
-                        bx.style
-                            .get("mask-position")
-                            .or_else(|| bx.style.get("-webkit-mask-position")),
-                        area,
-                        (mw, mh),
-                        fs,
-                    );
+                // R-252 — boîte à contenu (enfants/lignes) :
+                // le `PushMask` ancêtre masque déjà le groupe
+                // — fond plein ici, un `MaskedFill`
+                // re-masquerait (alpha² sur les bords doux).
+                let group_masked = !bx.children.is_empty() || !bx.lines.is_empty();
+                let mut mask_layers = if group_masked {
+                    Vec::new()
+                } else {
+                    resolve_mask(bx, &rect, images)
+                };
+                // Feuille **multi-couches** : `MaskedFill` ne
+                // porte qu'une couche — bracket groupe autour
+                // du remplissage, la couverture du groupe fait
+                // l'union des couches (R-252 suite).
+                let pushed_group = mask_layers.len() > 1;
+                if pushed_group {
+                    items.push(DisplayItem::PushMask {
+                        rect,
+                        layers: mask_layers
+                            .iter()
+                            .map(|l| MaskTile {
+                                mask: l.mask.clone(),
+                                dst: l.dst,
+                                repeat: l.repeat,
+                                luminance: l.luminance,
+                                composite: l.composite,
+                            })
+                            .collect(),
+                    });
+                }
+                if let Some(l) = if mask_layers.is_empty() {
+                    None
+                } else {
+                    Some(mask_layers.remove(0))
+                } {
                     items.push(DisplayItem::MaskedFill {
                         rect,
                         color: c,
-                        mask: mask.clone(),
-                        dst: Rect {
-                            x: rect.x + px,
-                            y: rect.y + py,
-                            width: mw,
-                            height: mh,
-                        },
-                        repeat: mask_repeat(&bx.style),
+                        mask: l.mask,
+                        dst: l.dst,
+                        repeat: l.repeat,
+                        luminance: l.luminance,
                     });
+                    if pushed_group {
+                        items.push(DisplayItem::PopMask);
+                    }
                 } else if bx
                     .style
                     .get("background-clip")
@@ -3299,6 +4070,7 @@ fn paint_self(
                                 rect,
                                 color: c,
                                 radii: corner_radii(&bx.style, &rect),
+                                corners: corner_ks(&bx.style),
                             });
                             items.push(DisplayItem::PopClip);
                         }
@@ -3308,6 +4080,7 @@ fn paint_self(
                         rect,
                         color: c,
                         radii: corner_radii(&bx.style, &rect),
+                        corners: corner_ks(&bx.style),
                     });
                 }
             }
@@ -3371,7 +4144,32 @@ fn paint_self(
                 border_style(bx.style.get("border-left-style")),
             ],
             radii: corner_radii(&bx.style, &rect),
+            corners: corner_ks(&bx.style),
         });
+    }
+    // R-248 — `border-image` : source url résolue par
+    // `borders_url` (data-url collectés, fetchés par
+    // `register_border_url`) → découpe 9 régions émise après
+    // la bordure classique (le style `border-image-*`
+    // **remplace** le visuel des côtés — l'item `Border` ci-
+    // dessus reste pour les coins/rayons et les bords non
+    // couverts par l'image).
+    if !anonymous && !inline_flow && !empty_hidden {
+        if let Some(img) =
+            crate::dataurl::border_img_url(&bx.style).and_then(|u| images.borders_url.get(&u))
+        {
+            items.push(DisplayItem::BorderImage {
+                rect,
+                img: img.clone(),
+                src_edges: border_img_slice(&bx.style),
+                dst_edges: border_img_widths(&bx.style, widths),
+                fill_center: bx
+                    .style
+                    .get("border-image-slice")
+                    .is_some_and(|v| v.split_whitespace().any(|p| p == "fill")),
+                repeat: border_img_repeat(&bx.style),
+            });
+        }
     }
     // `outline` (R-M13) : anneau autour de la bordure, sans
     // emprise au layout — peint hors border box à
@@ -3399,6 +4197,7 @@ fn paint_self(
                     colors: [oc; 4],
                     styles: [ow_style; 4],
                     radii: corner_radii(&bx.style, &orect),
+                    corners: corner_ks(&bx.style),
                 });
             }
         }
@@ -3411,10 +4210,12 @@ fn paint_self(
     if bx.control_checked {
         let side = (rect.width.min(rect.height) * 0.55).max(0.0);
         if side > 0.0 {
+            // `accent-color` prime sur `color` pour la marque
+            // de contrôle (css-ui-4 §accent-color).
             let ink = bx
                 .style
-                .get("color")
-                .and_then(parse_color)
+                .color("accent-color")
+                .or_else(|| bx.style.color("color"))
                 .unwrap_or(Color::BLACK);
             items.push(DisplayItem::FillRect {
                 rect: Rect {
@@ -3425,6 +4226,7 @@ fn paint_self(
                 },
                 color: ink,
                 radii: [0.0; 4],
+                corners: [1.0; 4],
             });
         }
     }
@@ -3445,6 +4247,123 @@ fn paint_self(
 /// `true` = boîte `display:inline` pure (ni atomique ni
 /// remplacée) : son `rect` n'est que l'union de fragments —
 /// sa décoration s'émet par pièce de ligne, pas sur la boîte.
+/// R-282 — `text-decoration-skip-spaces` (css-text-decor-4
+/// §5.5) : intervalles locaux au fragment où le trait reste
+/// peint, blancs exclus — positions de plume des glyphes
+/// espaces du [`ShapedRun`] (ordre logique, avance signée
+/// pour RTL). `mask` = `DECO_SKIP_START`/`END`/`ALL` :
+/// `all` coupe chaque blanc ; `start`/`end` la série de
+/// blancs touchant ce bord du fragment (borne : bord de
+/// fragment ≈ bord de l'élément décoré — les bits start/
+/// end des fragments intérieurs sont effacés à l'appelant,
+/// donc un fragment tout-blanc n'arrive ici en bord
+/// qu'avec son bit → vidé).
+fn deco_keep_ranges(
+    text: &str,
+    run: &ShapedRun,
+    width: f32,
+    mask: u8,
+    ink_band: Option<(f32, f32)>,
+) -> Vec<(f32, f32)> {
+    use explorer_layout::inline::{DECO_SKIP_ALL, DECO_SKIP_END, DECO_SKIP_START};
+    if width <= 0.0 {
+        return Vec::new();
+    }
+    if mask == 0 && ink_band.is_none() {
+        return vec![(0.0, width)];
+    }
+    // Fragment tout-blanc : vidé dès qu'un saut est demandé.
+    // `all` vide partout ; sous `start`/`end` seuls les
+    // fragments de bord d'owner gardent leur bit (les
+    // intérieurs ont `sk == 0` — première ligne) → un blanc
+    // de tête/queue d'élément est sauté, un blanc intérieur
+    // gardé (erratum re-tour : `start` laissait le trait
+    // sur le fragment tout-blanc de tête).
+    if text.chars().all(is_css_ws) {
+        return if mask != 0 {
+            Vec::new()
+        } else {
+            vec![(0.0, width)]
+        };
+    }
+    // Étendue de plume de chaque glyphe, + marque blanc.
+    let mut pen = 0.0_f32;
+    let mut spans: Vec<(f32, f32, bool)> = Vec::with_capacity(run.glyphs.len());
+    for g in &run.glyphs {
+        let a0 = pen;
+        pen += g.advance;
+        let is_ws = text
+            .get(g.cluster as usize..)
+            .and_then(|s| s.chars().next())
+            .is_some_and(is_css_ws);
+        spans.push((a0.min(pen), a0.max(pen), is_ws));
+    }
+    // Plages à couper : `all` = tous les blancs ; sinon les
+    // séries contiguës en tête (`start`) / queue (`end`).
+    let mut cuts: Vec<(f32, f32)> = Vec::new();
+    if mask & DECO_SKIP_ALL != 0 {
+        cuts.extend(spans.iter().filter(|s| s.2).map(|s| (s.0, s.1)));
+    } else {
+        if mask & DECO_SKIP_START != 0 {
+            for s in &spans {
+                if !s.2 {
+                    break;
+                }
+                cuts.push((s.0, s.1));
+            }
+        }
+        if mask & DECO_SKIP_END != 0 {
+            for s in spans.iter().rev() {
+                if !s.2 {
+                    break;
+                }
+                cuts.push((s.0, s.1));
+            }
+        }
+    }
+    // R-286 — `text-decoration-skip-ink` : coupe le trait
+    // là où une encre de glyphe traverse la bande.
+    // `ink_band` = (haut, bas) du trait dans le repère des
+    // `ink_glyphs` (baseline = 0, y positif vers le bas).
+    if let Some((top, bot)) = ink_band {
+        for r in &run.ink_glyphs {
+            if r.width > 0.0 && r.y < bot && r.y + r.height > top {
+                cuts.push((r.x, r.x + r.width));
+            }
+        }
+    }
+    if cuts.is_empty() {
+        return vec![(0.0, width)];
+    }
+    cuts.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal));
+    // Soustraction : intervalles conservés dans [0, width].
+    let mut keep = Vec::new();
+    let mut cur = 0.0_f32;
+    for (a, b) in cuts {
+        let a = a.clamp(0.0, width);
+        let b = b.clamp(0.0, width);
+        if a > cur + 0.01 {
+            keep.push((cur, a.min(width)));
+        }
+        cur = cur.max(b);
+    }
+    if cur < width - 0.01 {
+        keep.push((cur, width));
+    }
+    // Erratum re-tour NAV (régression mesurée) : avec une
+    // fonte dont l'encre couvre toute la bande du trait —
+    // Ahem (carreau plein sur tout l'em), fontes plein-em —
+    // le skip-ink soustrait `DecoRect` entier : le souligné
+    // **disparaît** au lieu de trouer aux jambages (7 sondes
+    // `text-decoration*` basculées `ok→miss`). `auto` est un
+    // « should » : quand l'encre déclarée annihilerait tout,
+    // elle est pathologique → trait plein conservé.
+    if keep.is_empty() && ink_band.is_some() {
+        return vec![(0.0, width)];
+    }
+    keep
+}
+
 fn is_inline_flow(bx: &LayoutBox) -> bool {
     bx.kind == BoxKind::Inline
         && bx.intrinsic.is_none()
@@ -3453,14 +4372,128 @@ fn is_inline_flow(bx: &LayoutBox) -> bool {
         && bx.display() != "inline-table"
 }
 
+/// `text-combine-upright` (css-writing-modes §4.3 — R-288) :
+/// mode lu sur le style du fragment — 0 `none`, 1 `all`,
+/// 2..=9 = `digits <n>` (séries de n chiffres max). L'alias
+/// `-webkit-text-combine` (`none`/`horizontal`) est lu en
+/// repli. La propriété n'est pas héritée par spec.
+fn combine_mode(style: &explorer_css::ComputedStyle) -> u8 {
+    let v = style
+        .get("text-combine-upright")
+        .or_else(|| style.get("-webkit-text-combine"))
+        .map_or("", |v| v.trim());
+    if v == "all" || v == "horizontal" {
+        return 1;
+    }
+    if let Some(rest) = v.strip_prefix("digits") {
+        // `digits` nu = 2 par spec.
+        let n = rest.trim().parse::<u8>().unwrap_or(2).clamp(2, 9);
+        return n;
+    }
+    0
+}
+
+/// Groupe `text-combine-upright` débutant au glyphe `gi`
+/// (R-288) : série contiguë de glyphes qualifiants — chiffre
+/// ASCII pour `digits <n>` (tronçons de `n` max), non-blanc
+/// pour `all`. Retourne la fin exclusive si ≥ 2 glyphes.
+fn combine_group(run: &ShapedRun, text: &str, gi: usize, mode: u8) -> Option<usize> {
+    let qual = |g: &explorer_layout::font::Glyph| {
+        text.get(g.cluster as usize..)
+            .and_then(|s| s.chars().next())
+            .is_some_and(|ch| {
+                if mode == 1 {
+                    !is_css_ws(ch)
+                } else {
+                    ch.is_ascii_digit()
+                }
+            })
+    };
+    if !qual(&run.glyphs[gi]) {
+        return None;
+    }
+    let mut end = gi + 1;
+    if mode == 1 {
+        // `all` = série contiguë entière (compressée à 1em).
+        while end < run.glyphs.len() && qual(&run.glyphs[end]) {
+            end += 1;
+        }
+    } else {
+        // `digits <n>` : tronçons de n chiffres max — un
+        // reste de 1 glyphe n'est jamais combiné seul.
+        let max = usize::from(mode);
+        while end < run.glyphs.len() && end - gi < max && qual(&run.glyphs[end]) {
+            end += 1;
+        }
+    }
+    (end - gi >= 2).then_some(end)
+}
+
 #[allow(clippy::too_many_lines)]
 fn paint_lines(bx: &LayoutBox, items: &mut Vec<DisplayItem>, off: (f32, f32)) {
+    // `text-orientation` (css-writing-modes §5.2) : en flux
+    // vertical, `sideways`/`sideways-rl`/`sideways-lr`
+    // pivote le run entier de ±90° autour de la baseline
+    // (rl → +90° horaire, lr → −90°). `upright`/`mixed` =
+    // résidus — avance verticale par glyphe hors MVP.
+    // NB : `flow_mode` = flux CONTENANT — la boîte verticale
+    // elle-même est horizontale pour son parent ; c'est son
+    // `writing-mode` propre qui transposé ses lignes.
+    let own_v = explorer_css::value::parse_writing_mode(bx.style.get("writing-mode").unwrap_or(""))
+        .is_vertical();
+    let sideways_lr = own_v
+        && matches!(
+            bx.style.get("text-orientation").map_or("", |v| v.trim()),
+            "sideways" | "sideways-lr"
+        );
+    let sideways_rl = own_v
+        && matches!(
+            bx.style.get("text-orientation").map_or("", |v| v.trim()),
+            "sideways" | "sideways-rl"
+        );
+    // `text-orientation:upright` (css-writing-modes §5.2) :
+    // glyphes debout empilés verticalement — avance =
+    // `font-size` ; `mixed` = résidu (pas de classification
+    // par script au niveau glyphe — `upright` explicite seul
+    // est consommé).
+    // `upright` : tout debout. `mixed` (défaut css) : upright
+    // pour les glyphes dont le caractère source (offset
+    // `cluster`) est CJK — Han/Hiragana/Katakana/Hangul/
+    // pleine-largeur — le reste reste couché (≈ `sideways`,
+    // approximation documentée : sans fonte verticale les
+    // accents CJK ne sont pas repositionnés).
+    let orientation = match bx
+        .style
+        .get("text-orientation")
+        .map_or("mixed", |v| v.trim())
+    {
+        _ if !own_v => 0u8,
+        "upright" => 1,
+        "mixed" => 2,
+        _ => 0,
+    };
     // Deux passes (R-70) : TOUTES les décorations inline
     // d'abord, TOUS les textes ensuite — un fond émis entre
     // deux textes couvrirait l'encre du premier (le fond du
     // bouton-langue Wikipedia mangeait la queue de
     // « language »).
-    for line in &bx.lines {
+    // R-282 — `text-decoration-skip-spaces` start/end : les
+    // vrais bords de l'élément décoré ≈ premier/dernier
+    // fragment de son `owner` (enfant direct de `bx`) dans
+    // l'ordre document — l'espace intérieur n'est sauté que
+    // sous `all` (borne : bord d'élément imbriqué ≈ bord de
+    // l'owner de tête, et ordre visuel pour RTL).
+    let mut first_of: std::collections::HashMap<usize, (usize, usize)> =
+        std::collections::HashMap::new();
+    let mut last_of: std::collections::HashMap<usize, (usize, usize)> =
+        std::collections::HashMap::new();
+    for (li, line) in bx.lines.iter().enumerate() {
+        for (fi, f) in line.fragments.iter().enumerate() {
+            first_of.entry(f.owner).or_insert((li, fi));
+            last_of.insert(f.owner, (li, fi));
+        }
+    }
+    for (li, line) in bx.lines.iter().enumerate() {
         // Décos — une pièce par élément et par ligne (approx.
         // `box-decoration-break: slice`, R-70) : l'union des
         // fragments de l'élément SUR LA LIGNE, padding aux
@@ -3509,16 +4542,12 @@ fn paint_lines(bx: &LayoutBox, items: &mut Vec<DisplayItem>, off: (f32, f32)) {
         if let Some((u, first)) = run {
             paint_inline_deco(&line.fragments[first].style, u, items, off);
         }
-        for frag in &line.fragments {
+        for (fi, frag) in line.fragments.iter().enumerate() {
             if frag.atomic {
                 continue;
             }
             if let Some(run) = &frag.shaped {
-                let ink = frag
-                    .style
-                    .get("color")
-                    .and_then(parse_color)
-                    .unwrap_or(Color::BLACK);
+                let ink = frag.style.color("color").unwrap_or(Color::BLACK);
                 let fs = prop_px(&frag.style, "font-size", 16.0);
                 // §16.3.1 / R-153 : `text-decoration` résolue
                 // à l'itemisation (`frag.deco`, couleur du
@@ -3528,11 +4557,51 @@ fn paint_lines(bx: &LayoutBox, items: &mut Vec<DisplayItem>, off: (f32, f32)) {
                 // usuelles (approx. métriques fonte absente).
                 let th = (fs * 0.0625).max(1.0);
                 let base_y = frag.rect.y + frag.baseline + off.1;
-                let deco_rect = |dy: f32, thick: f32| Rect {
-                    x: frag.rect.x + off.0,
-                    y: dy,
-                    width: frag.rect.width,
-                    height: thick,
+                // R-280 — `text-decoration-inset` : rentrée
+                // du trait aux bords start/end (`%` de la
+                // largeur du fragment — base connue ici).
+                let deco_rect = |d: &explorer_layout::inline::TextDeco,
+                                 dy: f32,
+                                 thick: f32,
+                                 ink_ok: bool|
+                 -> Vec<Rect> {
+                    let w = frag.rect.width;
+                    let il = if d.inset_l_pct {
+                        d.inset_l * w / 100.0
+                    } else {
+                        d.inset_l
+                    };
+                    let ir = if d.inset_r_pct {
+                        d.inset_r * w / 100.0
+                    } else {
+                        d.inset_r
+                    };
+                    // R-282 — `text-decoration-skip-spaces`
+                    // : le trait se découpe en segments
+                    // hors blancs (`deco_keep_ranges`),
+                    // dans les bornes `il..w-ir`. Les
+                    // bords start/end ne sautent qu'aux
+                    // bords RÉELS de l'élément décoré.
+                    let mut sk = d.skip_sp;
+                    if first_of.get(&frag.owner) != Some(&(li, fi)) {
+                        sk &= !explorer_layout::inline::DECO_SKIP_START;
+                    }
+                    if last_of.get(&frag.owner) != Some(&(li, fi)) {
+                        sk &= !explorer_layout::inline::DECO_SKIP_END;
+                    }
+                    // R-286 — `skip-ink` : bande du trait
+                    // en repère baseline (les `ink_glyphs`
+                    // du run vivent baseline = 0).
+                    let band = ink_ok.then_some((dy - base_y, dy - base_y + thick));
+                    deco_keep_ranges(&frag.text, run, (w - il - ir).max(0.0), sk, band)
+                        .into_iter()
+                        .map(|(a, b)| Rect {
+                            x: frag.rect.x + off.0 + il + a,
+                            y: dy,
+                            width: (b - a).max(0.0),
+                            height: thick,
+                        })
+                        .collect()
                 };
                 for d in &frag.deco {
                     let color = d.color.unwrap_or(ink);
@@ -3541,21 +4610,34 @@ fn paint_lines(bx: &LayoutBox, items: &mut Vec<DisplayItem>, off: (f32, f32)) {
                     // `text-underline-offset`) avant repli.
                     let dth = if d.thick_px > 0.0 { d.thick_px } else { th };
                     if d.lines & explorer_layout::inline::DECO_UNDERLINE != 0 {
-                        items.push(DisplayItem::DecoRect {
-                            rect: deco_rect(
-                                base_y + d.offset_px.unwrap_or((fs * 0.1).max(1.0)),
-                                dth,
-                            ),
-                            color,
-                            style: d.style,
-                        });
+                        // R-280 — `text-underline-position:under` :
+                        // sous les jambages (|descent| + petit
+                        // filet) quand l'offset est auto —
+                        // `text-underline-offset` déclaré prime.
+                        let dy = base_y
+                            + d.offset_px.unwrap_or_else(|| {
+                                if d.under_pos == 1 {
+                                    -run.metrics.descent + (fs * 0.05).max(1.0)
+                                } else {
+                                    (fs * 0.1).max(1.0)
+                                }
+                            });
+                        for rect in deco_rect(d, dy, dth, d.skip_ink >= 1) {
+                            items.push(DisplayItem::DecoRect {
+                                rect,
+                                color,
+                                style: d.style,
+                            });
+                        }
                     }
                     if d.lines & explorer_layout::inline::DECO_OVERLINE != 0 {
-                        items.push(DisplayItem::DecoRect {
-                            rect: deco_rect(base_y - fs * 0.85, dth),
-                            color,
-                            style: d.style,
-                        });
+                        for rect in deco_rect(d, base_y - fs * 0.85, dth, d.skip_ink >= 1) {
+                            items.push(DisplayItem::DecoRect {
+                                rect,
+                                color,
+                                style: d.style,
+                            });
+                        }
                     }
                 }
                 emit_text_shadows(
@@ -3567,13 +4649,134 @@ fn paint_lines(bx: &LayoutBox, items: &mut Vec<DisplayItem>, off: (f32, f32)) {
                     ink,
                     items,
                 );
-                items.push(DisplayItem::Text {
-                    origin: (frag.rect.x + off.0, base_y),
-                    run: run.clone(),
-                    font: font_request(&frag.style),
-                    color: ink,
-                    size_px: fs,
-                });
+                if sideways_lr || sideways_rl {
+                    // Rotation autour de (x, baseline) : lr
+                    // −90° (x→−y), rl +90° (x→+y).
+                    let (ox, oy) = (frag.rect.x + off.0, base_y);
+                    let t = if sideways_lr {
+                        tiny_skia::Transform::from_row(0.0, -1.0, 1.0, 0.0, ox - oy, ox + oy)
+                    } else {
+                        tiny_skia::Transform::from_row(0.0, 1.0, -1.0, 0.0, ox + oy, oy - ox)
+                    };
+                    items.push(DisplayItem::PushTransform(t));
+                }
+                if orientation != 0 {
+                    // Un `Text` par glyphe, x centré sur la
+                    // cellule verticale, y = avance cumulée
+                    // depuis le haut du fragment + ascent.
+                    // `mixed` : glyphe CJK debout ; glyphe non
+                    // CJK → pivote ±90° autour de sa plume.
+                    // R-288 — `text-combine-upright` : une
+                    // série combinée (digits N / all) est
+                    // peinte DEBOUT — un `Text` horizontal
+                    // compressé dans 1em (tate-chu-yoko),
+                    // occupant un seul créneau vertical.
+                    let combine = combine_mode(&frag.style);
+                    let mut y = frag.rect.y + run.metrics.ascent;
+                    let mut gi = 0usize;
+                    while gi < run.glyphs.len() {
+                        if combine != 0 {
+                            if let Some(end) = combine_group(run, &frag.text, gi, combine) {
+                                let sub = &run.glyphs[gi..end];
+                                let gw: f32 = sub.iter().map(|g| g.advance).sum();
+                                // Compressé à 1em quand la
+                                // série dépasse (spec :
+                                // tate-chu-yoko tient dans
+                                // le corps).
+                                let sc = if gw > fs && gw > 0.0 { fs / gw } else { 1.0 };
+                                let cx = frag.rect.x + frag.rect.width / 2.0;
+                                if sc < 1.0 {
+                                    items.push(DisplayItem::PushTransform(
+                                        tiny_skia::Transform::from_row(
+                                            sc,
+                                            0.0,
+                                            0.0,
+                                            1.0,
+                                            cx * (1.0 - sc),
+                                            0.0,
+                                        ),
+                                    ));
+                                }
+                                let solo = std::sync::Arc::new(ShapedRun {
+                                    glyphs: sub.to_vec(),
+                                    advance: gw,
+                                    metrics: run.metrics,
+                                    fallback_spans: Vec::new(),
+                                    ink: None,
+                                    ink_glyphs: Vec::new(),
+                                });
+                                let x = frag.rect.x + (frag.rect.width - gw * sc).max(0.0) / 2.0;
+                                items.push(DisplayItem::Text {
+                                    origin: (x, y),
+                                    run: solo,
+                                    font: font_request(&frag.style),
+                                    color: ink,
+                                    size_px: fs,
+                                });
+                                if sc < 1.0 {
+                                    items.push(DisplayItem::PopTransform);
+                                }
+                                y += fs;
+                                gi = end;
+                                continue;
+                            }
+                        }
+                        let g = &run.glyphs[gi];
+                        gi += 1;
+                        let cjk = frag
+                            .text
+                            .get(g.cluster as usize..)
+                            .and_then(|s| s.chars().next())
+                            .is_some_and(|ch| {
+                                matches!(ch as u32,
+                                    0x3000..=0x30FF | 0x3400..=0x4DBF | 0x4E00..=0x9FFF
+                                    | 0xAC00..=0xD7AF | 0xF900..=0xFAFF | 0xFF00..=0xFFEF)
+                            });
+                        let rot = orientation == 2 && !cjk;
+                        if rot {
+                            let ox = frag.rect.x + off.0;
+                            items.push(DisplayItem::PushTransform(tiny_skia::Transform::from_row(
+                                0.0,
+                                1.0,
+                                -1.0,
+                                0.0,
+                                ox + y,
+                                y - ox,
+                            )));
+                        }
+                        let solo = std::sync::Arc::new(ShapedRun {
+                            glyphs: vec![*g],
+                            advance: g.advance,
+                            metrics: run.metrics,
+                            fallback_spans: Vec::new(),
+                            ink: None,
+                            ink_glyphs: Vec::new(),
+                        });
+                        let x = frag.rect.x + (frag.rect.width - g.advance).max(0.0) / 2.0;
+                        items.push(DisplayItem::Text {
+                            origin: (x, y),
+                            run: solo,
+                            font: font_request(&frag.style),
+                            color: ink,
+                            size_px: fs,
+                        });
+                        if rot {
+                            items.push(DisplayItem::PopTransform);
+                        }
+                        y += fs;
+                    }
+                } else {
+                    items.push(DisplayItem::Text {
+                        origin: (frag.rect.x + off.0, base_y),
+                        run: run.clone(),
+                        font: font_request(&frag.style),
+                        color: ink,
+                        size_px: fs,
+                    });
+                }
+                if sideways_lr || sideways_rl {
+                    items.push(DisplayItem::PopTransform);
+                }
                 // R-186 — `text-emphasis` : marque par
                 // glyphe ; style+position lus sur le
                 // fragment (shorthand non expansé —
@@ -3591,11 +4794,15 @@ fn paint_lines(bx: &LayoutBox, items: &mut Vec<DisplayItem>, off: (f32, f32)) {
                 for d in &frag.deco {
                     if d.lines & explorer_layout::inline::DECO_LINE_THROUGH != 0 {
                         let dth = if d.thick_px > 0.0 { d.thick_px } else { th };
-                        items.push(DisplayItem::DecoRect {
-                            rect: deco_rect(base_y - fs * 0.3 - dth / 2.0, dth),
-                            color: d.color.unwrap_or(ink),
-                            style: d.style,
-                        });
+                        for rect in
+                            deco_rect(d, base_y - fs * 0.3 - dth / 2.0, dth, d.skip_ink >= 2)
+                        {
+                            items.push(DisplayItem::DecoRect {
+                                rect,
+                                color: d.color.unwrap_or(ink),
+                                style: d.style,
+                            });
+                        }
                     }
                 }
             }
@@ -3642,12 +4849,13 @@ fn paint_inline_deco(
         },
         off,
     );
-    if let Some(c) = st.get("background-color").and_then(parse_color) {
+    if let Some(c) = st.color("background-color") {
         if c.a > 0 {
             items.push(DisplayItem::FillRect {
                 rect: outer,
                 color: c,
                 radii: [0.0; 4],
+                corners: [1.0; 4],
             });
         }
     }
@@ -3676,6 +4884,7 @@ fn paint_inline_deco(
                 border_style(st.get("border-left-style")),
             ],
             radii: corner_radii(st, &outer),
+            corners: corner_ks(st),
         });
     }
 }
@@ -4322,10 +5531,16 @@ fn translate_item(it: &DisplayItem, d: (f32, f32)) -> DisplayItem {
         return it.clone();
     }
     match it {
-        D::FillRect { rect, color, radii } => D::FillRect {
+        D::FillRect {
+            rect,
+            color,
+            radii,
+            corners,
+        } => D::FillRect {
             rect: shifted(*rect, d),
             color: *color,
             radii: *radii,
+            corners: *corners,
         },
         D::DecoRect { rect, color, style } => D::DecoRect {
             rect: shifted(*rect, d),
@@ -4353,12 +5568,14 @@ fn translate_item(it: &DisplayItem, d: (f32, f32)) -> DisplayItem {
             colors,
             styles,
             radii,
+            corners,
         } => D::Border {
             rect: shifted(*rect, d),
             widths: *widths,
             colors: *colors,
             styles: *styles,
             radii: *radii,
+            corners: *corners,
         },
         D::Text {
             origin,
@@ -4400,11 +5617,28 @@ fn translate_item(it: &DisplayItem, d: (f32, f32)) -> DisplayItem {
             mask,
             dst,
             repeat,
+            luminance,
         } => D::MaskedFill {
             rect: shifted(*rect, d),
             color: *color,
             mask: mask.clone(),
             dst: shifted(*dst, d),
+            repeat: *repeat,
+            luminance: *luminance,
+        },
+        D::BorderImage {
+            rect,
+            img,
+            src_edges,
+            dst_edges,
+            fill_center,
+            repeat,
+        } => D::BorderImage {
+            rect: shifted(*rect, d),
+            img: img.clone(),
+            src_edges: *src_edges,
+            dst_edges: *dst_edges,
+            fill_center: *fill_center,
             repeat: *repeat,
         },
         D::Marker { rect, kind, color } => D::Marker {
@@ -4439,12 +5673,26 @@ fn translate_item(it: &DisplayItem, d: (f32, f32)) -> DisplayItem {
         D::PushClipPath { points } => D::PushClipPath {
             points: points.iter().map(|p| (p.0 + d.0, p.1 + d.1)).collect(),
         },
+        D::PushMask { rect, layers } => D::PushMask {
+            rect: shifted(*rect, d),
+            layers: layers
+                .iter()
+                .map(|l| MaskTile {
+                    mask: l.mask.clone(),
+                    dst: shifted(l.dst, d),
+                    repeat: l.repeat,
+                    luminance: l.luminance,
+                    composite: l.composite,
+                })
+                .collect(),
+        },
         D::PopClip
         | D::PopTransform
         | D::PushFilter(_)
         | D::PopFilter
         | D::PushBlend(_)
-        | D::PopBlend => it.clone(),
+        | D::PopBlend
+        | D::PopMask => it.clone(),
         D::Emphasis {
             origin,
             run,
@@ -4689,6 +5937,13 @@ fn stacking_ctx(bx: &LayoutBox) -> bool {
             .style
             .get("filter")
             .is_some_and(|v| v.trim() != "none")
+        // `transform-style: preserve-3d` — propriété de
+        // regroupement (css-transforms-2) : stacking context
+        // même aplati (moteur planaire, scène 3D = résidu).
+        || bx
+            .style
+            .get("transform-style")
+            .is_some_and(|v| v.trim() == "preserve-3d")
 }
 
 /// Enfile un enfant positionné dans la file de son contexte
@@ -4896,6 +6151,35 @@ fn paint_box<'a>(
         });
         return;
     }
+    // R-252 — `mask-image` de groupe (css-masking-1) : quand
+    // la boîte peint plus que son `background-color` (enfants
+    // ou lignes), l'alpha du mask s'applique à TOUT le
+    // sous-arbre — bracket **outermost** (ordre spec :
+    // filter → clip → mask). Les feuilles « icône pure »
+    // gardent `MaskedFill` (pas de buffer offscreen). Limites
+    // documentées — communes aux autres brackets : les
+    // descendants reportés hors racine (`pos_defer` au
+    // contexte ancêtre, `fixed_defer`) échappent au groupe.
+    let group_mask = if bx.children.is_empty() && bx.lines.is_empty() {
+        Vec::new()
+    } else {
+        resolve_mask(bx, &shifted(bx.rect, off), cx.images)
+    };
+    if let Some((first, layers)) = group_mask.split_first() {
+        items.push(DisplayItem::PushMask {
+            rect: first.clip,
+            layers: layers
+                .iter()
+                .map(|l| MaskTile {
+                    mask: l.mask.clone(),
+                    dst: l.dst,
+                    repeat: l.repeat,
+                    luminance: l.luminance,
+                    composite: l.composite,
+                })
+                .collect(),
+        });
+    }
     // R-M5 — `filter` encadre TOUTE la sous-arbre de la
     // boîte (contenu + descendants) : bracket hors-écran
     // `PushFilter`…`PopFilter` ; la récursion des enfants
@@ -4947,6 +6231,9 @@ fn paint_box<'a>(
     if filtered {
         items.push(DisplayItem::PopFilter);
     }
+    if !group_mask.is_empty() {
+        items.push(DisplayItem::PopMask);
+    }
 }
 
 /// Corps de [`paint_box`] — le wrapper pose le bracket
@@ -4997,7 +6284,22 @@ fn paint_box_impl<'a>(
 
     // `transform` : matrice poussée avant tout item du
     // sous-arbre, retiré après (imbrication additive).
-    let tf = box_transform(bx, &shifted(bx.rect, off));
+    // R-272 — `offset-path` : transform pré-calculée par le
+    // parent (bloc conteneur inconnu ici) — composée AVANT le
+    // `transform` propre (motion path d'abord, spec §5).
+    let off_t = cx.offset_tf.remove(&(std::ptr::from_ref(bx) as usize));
+    let tf = match (box_transform(bx, &shifted(bx.rect, off)), off_t) {
+        (Some(css), Some(off)) => Some(
+            // `transform` propre d'abord, motion ensuite :
+            // css.post_concat(off) = off ∘ css.
+            tiny_skia::Transform::from_row(off.a, off.b, off.c, off.d, off.e, off.f)
+                .post_concat(css),
+        ),
+        (None, Some(off)) => Some(tiny_skia::Transform::from_row(
+            off.a, off.b, off.c, off.d, off.e, off.f,
+        )),
+        (t, None) => t,
+    };
     if let Some(m) = tf {
         items.push(DisplayItem::PushTransform(m));
     }
@@ -5133,6 +6435,22 @@ fn paint_box_impl<'a>(
                 if d != (0.0, 0.0) {
                     cx.sticky_deltas
                         .insert(std::ptr::from_ref(child) as usize, d);
+                }
+            }
+            // R-272 — `offset-path` : le chemin se trace dans
+            // le bloc conteneur (padding box du parent, §5.2)
+            // — calculé ici, consommé au `box_transform` de
+            // l'enfant quel que soit le drain (reporté ou non).
+            if child.style.get("offset-path").is_some_and(|v| {
+                let v = v.trim();
+                !v.is_empty() && v != "none"
+            }) {
+                let cb = shifted(content_rect(bx), off);
+                let rect = shifted(child.rect, off);
+                if let Some(t) =
+                    explorer_layout::transform::offset_transform(&child.style, &rect, &cb)
+                {
+                    cx.offset_tf.insert(std::ptr::from_ref(child) as usize, t);
                 }
             }
         }
@@ -5347,5 +6665,48 @@ mod tests {
             "merge_rects trop lent : {:?}",
             t0.elapsed()
         );
+    }
+
+    /// Erratum R-286 (régression re-tour NAV) : avec une
+    /// fonte dont l'encre déclarée couvre toute la bande du
+    /// trait — Ahem, fontes plein-em — le skip-ink ne doit
+    /// **pas** annihiler le `DecoRect` entier : `auto` est
+    /// un « should », encre pathologique → trait plein.
+    #[test]
+    fn skip_ink_encre_pathologique_garde_le_trait() {
+        use super::deco_keep_ranges;
+        use explorer_layout::font::{FontMetrics, Glyph, ShapedRun};
+        let mk = || Glyph {
+            id: 1,
+            advance: 10.0,
+            offset_x: 0.0,
+            offset_y: 0.0,
+            cluster: 0,
+            invisible: false,
+        };
+        // Encre plein-em : chaque glyphe couvre la bande.
+        let run = ShapedRun {
+            glyphs: vec![mk(), mk()],
+            advance: 20.0,
+            metrics: FontMetrics {
+                ascent: 8.0,
+                descent: -2.0,
+                line_gap: 0.0,
+                units_per_em: 1000,
+            },
+            fallback_spans: Vec::new(),
+            ink: None,
+            ink_glyphs: vec![r(0.0, -8.0, 10.0, 10.0), r(10.0, -8.0, 10.0, 10.0)],
+        };
+        // Bande [1,2] sous la baseline — traversée par les
+        // deux encre — sans garde-fou : `keep` vide.
+        let keep = deco_keep_ranges("ab", &run, 20.0, 0, Some((1.0, 2.0)));
+        assert_eq!(keep, vec![(0.0, 20.0)], "encre plein-em → trait plein");
+        // Encre partielle (un glyphe n'atteint pas la
+        // bande) : le skip-ink normal continue de trouer.
+        let mut run2 = run.clone();
+        run2.ink_glyphs[1] = r(10.0, -8.0, 10.0, 5.0);
+        let keep2 = deco_keep_ranges("ab", &run2, 20.0, 0, Some((1.0, 2.0)));
+        assert_eq!(keep2, vec![(10.0, 20.0)], "encre saine → trou conservé");
     }
 }

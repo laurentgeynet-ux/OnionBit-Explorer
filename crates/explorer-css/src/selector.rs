@@ -440,6 +440,23 @@ pub fn parse_selector_list(prelude: &str) -> Option<Vec<ComplexSelector>> {
     p.list().filter(|l| !l.is_empty())
 }
 
+/// Sélecteur `name` reconnu par le moteur — sondage syntaxique
+/// via [`parse_selector_list`] (le nom BCD `hover`/`::before`/
+/// `:has` est essayé tel quel puis avec `:`/`::` selon le
+/// préfixe manquant). Critère *parsé*, pas *matché* : un
+/// pseudo dormant (`PseudoElement::Other`) compte reconnu —
+/// même biais que [`crate::prop_supported`] pour la couverture
+/// BCD (`scripts/bcd_coverage.mjs`).
+#[must_use]
+pub fn selector_supported(name: &str) -> bool {
+    if parse_selector_list(name).is_some() {
+        return true;
+    }
+    let t = name.trim_start_matches(':');
+    parse_selector_list(&format!(":{t}")).is_some()
+        || parse_selector_list(&format!("::{t}")).is_some()
+}
+
 struct SelectorParser<'t> {
     tokens: &'t [Token],
     pos: usize,
@@ -573,12 +590,51 @@ impl<'t> SelectorParser<'t> {
             match t {
                 Token::Delim('*') => {
                     self.pos += 1;
-                    simples.push(SimpleSelector::Universal);
+                    // `*|tag` — wildcard namespace (R-237).
+                    if matches!(self.peek(), Some(Token::Delim('|'))) {
+                        self.pos += 1;
+                        match self.next() {
+                            Some(Token::Ident(t)) => {
+                                simples.push(SimpleSelector::Type(format!("*|{t}")));
+                            }
+                            _ => return None,
+                        }
+                    } else {
+                        simples.push(SimpleSelector::Universal);
+                    }
                 }
                 Token::Ident(name) => {
                     let name = name.clone();
                     self.pos += 1;
-                    simples.push(SimpleSelector::Type(name));
+                    // `ns|tag` — préfixe namespace (R-237) :
+                    // `ident|ident` ou `ident|*`.
+                    if matches!(self.peek(), Some(Token::Delim('|'))) {
+                        self.pos += 1;
+                        match self.next() {
+                            Some(Token::Ident(t)) => {
+                                simples.push(SimpleSelector::Type(format!("{name}|{t}")));
+                            }
+                            Some(Token::Delim('*')) => {
+                                simples.push(SimpleSelector::Type(format!("{name}|*")));
+                            }
+                            _ => return None,
+                        }
+                    } else {
+                        simples.push(SimpleSelector::Type(name));
+                    }
+                }
+                // `|tag` (pas de namespace) et `*|tag` (tous).
+                Token::Delim('|') => {
+                    self.pos += 1;
+                    match self.next() {
+                        Some(Token::Ident(t)) => {
+                            simples.push(SimpleSelector::Type(format!("|{t}")));
+                        }
+                        Some(Token::Delim('*')) => {
+                            simples.push(SimpleSelector::Type("*|*".to_string()));
+                        }
+                        _ => return None,
+                    }
                 }
                 Token::Hash { value, is_id } if *is_id => {
                     let value = value.clone();
@@ -986,6 +1042,9 @@ pub(crate) struct MatchCache {
     /// Rangs fraternels par nœud (avant/après/de type) —
     /// 0 = non calculé (les rangs réels sont 1-basés).
     ranks: HashMap<NodeId, [usize; 4]>,
+    /// `@namespace` enregistrés (R-237) — préfixe → URI,
+    /// résolus à chaque `Type("ns|tag")`.
+    pub(crate) namespaces: HashMap<String, String>,
 }
 
 /// Borne du cache sélecteur — un document hostile au-delà
@@ -1106,7 +1165,7 @@ impl AncestorFilter {
     fn compound_possible(&self, c: &CompoundSelector) -> bool {
         c.simples.iter().all(|s| {
             let h = match s {
-                SimpleSelector::Type(t) => hash_key(t, true, SEED_TAG),
+                SimpleSelector::Type(t) => hash_key(t.rsplit('|').next().unwrap_or(t), true, SEED_TAG),
                 SimpleSelector::Class(cl) => hash_key(cl, false, SEED_CLASS),
                 SimpleSelector::Id(i) => hash_key(i, false, SEED_ID),
                 SimpleSelector::Attribute { name, .. } => hash_key(name, false, SEED_ATTR),
@@ -1534,9 +1593,35 @@ fn simple_matches(
     scope: Option<NodeId>,
 ) -> bool {
     match sel {
-        SimpleSelector::Type(name) => dom
-            .tag_name(node)
-            .is_ok_and(|t| t.eq_ignore_ascii_case(name)),
+        SimpleSelector::Type(name) => {
+            if let Some((ns, tag)) = name.split_once('|') {
+                // `ns|tag` — R-237 : l'URI du préfixe règle
+                // le namespace attendu (`*` = tout, `` = aucun).
+                let tag_ok = tag == "*"
+                    || dom.tag_name(node).is_ok_and(|t| t.eq_ignore_ascii_case(tag));
+                if !tag_ok {
+                    return false;
+                }
+                if ns == "*" {
+                    return true;
+                }
+                let Some(uri) = cache.namespaces.get(ns) else {
+                    // Préfixe inconnu → pas de correspondance
+                    // (spec : sélecteur inapplicable).
+                    return false;
+                };
+                return match dom.namespace(node).ok() {
+                    Some(explorer_dom::Namespace::Svg) => uri.contains("svg"),
+                    Some(explorer_dom::Namespace::MathMl) => uri.contains("math"),
+                    Some(explorer_dom::Namespace::Html) => {
+                        uri.contains("xhtml") || ns.is_empty()
+                    }
+                    _ => false,
+                };
+            }
+            dom.tag_name(node)
+                .is_ok_and(|t| t.eq_ignore_ascii_case(name))
+        }
         // `attributes` rend la slice empruntée : `attribute`
         // clonerait la valeur String à chaque test — chaud
         // dans la boucle candidats × nœuds (R-83).
@@ -1664,55 +1749,56 @@ fn has_matches(
     anc: AncestorFilter,
     scope: Option<NodeId>,
 ) -> bool {
-
-            for (head, sel) in list {
-                let mut hit = |c| dom.element(c).is_ok()
-                    && matches_any_with_state_in(
-                        dom,
-                        c,
-                        std::slice::from_ref(sel),
-                        state,
-                        cache,
-                        anc,
-                        scope,
-                    );
-                match head {
-                    Combinator::Descendant => {
-                        let mut stack: Vec<NodeId> = Vec::new();
-                        if let Ok(ch) = dom.children(node) {
-                            stack.extend(ch.iter().rev());
-                        }
-                        while let Some(c) = stack.pop() {
-                            if hit(c) {
-                                return true;
-                            }
-                            if let Ok(ch) = dom.children(c) {
-                                stack.extend(ch.iter().rev());
-                            }
-                        }
+    for (head, sel) in list {
+        let mut hit = |c| {
+            dom.element(c).is_ok()
+                && matches_any_with_state_in(
+                    dom,
+                    c,
+                    std::slice::from_ref(sel),
+                    state,
+                    cache,
+                    anc,
+                    scope,
+                )
+        };
+        match head {
+            Combinator::Descendant => {
+                let mut stack: Vec<NodeId> = Vec::new();
+                if let Ok(ch) = dom.children(node) {
+                    stack.extend(ch.iter().rev());
+                }
+                while let Some(c) = stack.pop() {
+                    if hit(c) {
+                        return true;
                     }
-                    Combinator::Child => {
-                        if let Ok(ch) = dom.children(node) {
-                            if ch.iter().any(|&c| hit(c)) {
-                                return true;
-                            }
-                        }
-                    }
-                    Combinator::NextSibling | Combinator::SubsequentSibling => {
-                        if let Some(sibs) = following_siblings(dom, node) {
-                            let mut it = sibs.into_iter().filter(|&c| dom.element(c).is_ok());
-                            let found = match head {
-                                Combinator::NextSibling => it.next().is_some_and(hit),
-                                _ => it.any(hit),
-                            };
-                            if found {
-                                return true;
-                            }
-                        }
+                    if let Ok(ch) = dom.children(c) {
+                        stack.extend(ch.iter().rev());
                     }
                 }
             }
-            false
+            Combinator::Child => {
+                if let Ok(ch) = dom.children(node) {
+                    if ch.iter().any(|&c| hit(c)) {
+                        return true;
+                    }
+                }
+            }
+            Combinator::NextSibling | Combinator::SubsequentSibling => {
+                if let Some(sibs) = following_siblings(dom, node) {
+                    let mut it = sibs.into_iter().filter(|&c| dom.element(c).is_ok());
+                    let found = match head {
+                        Combinator::NextSibling => it.next().is_some_and(hit),
+                        _ => it.any(hit),
+                    };
+                    if found {
+                        return true;
+                    }
+                }
+            }
+        }
+    }
+    false
 }
 
 /// Frères **suivants** de `node` (éléments et non-éléments,

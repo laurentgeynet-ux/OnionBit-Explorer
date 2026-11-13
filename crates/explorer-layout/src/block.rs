@@ -161,12 +161,156 @@ impl MarginRun {
 /// du même BFC — un enfant qui établit son propre BFC repart
 /// d'un registre vierge (§9.4.1 : ses flottants ne mordent
 /// pas l'extérieur, et réciproquement).
-#[derive(Default)]
+#[derive(Default, Clone)]
 pub(crate) struct FloatCtx {
-    /// Flottants gauche (marge-rects).
-    pub left: Vec<Rect>,
-    /// Flottants droit (marge-rects).
-    pub right: Vec<Rect>,
+    /// Flottants gauche (marge-rects + forme `shape-outside`).
+    pub left: Vec<FloatRect>,
+    /// Flottants droit (marge-rects + forme `shape-outside`).
+    pub right: Vec<FloatRect>,
+}
+
+/// Un flottant posé : sa **marge-box** (référence pour
+/// `clear`, le placement §9.5 et `bottom_of` — la forme
+/// n'influe que sur la morsure des lignes, pas sur ces
+/// algorithmes) et sa forme `shape-outside` éventuelle,
+/// déjà résolue en coords absolues (css-shapes-1 — R-273).
+#[derive(Clone)]
+pub(crate) struct FloatRect {
+    /// Marge-rect du flottant.
+    pub rect: Rect,
+    /// Forme extérieure éventuelle (`None` = marge-rect).
+    pub shape: Option<OutsideShape>,
+}
+
+impl FloatRect {
+    /// Bord le plus à droite qui mord `[y0, y1]` — marge-
+    /// rect sans forme, étendue max de la forme sinon.
+    fn bite_right(&self, y0: f32, y1: f32) -> f32 {
+        match &self.shape {
+            None => self.rect.x + self.rect.width,
+            Some(s) => s.max_x_over(y0, y1),
+        }
+    }
+
+    /// Bord le plus à gauche qui mord `[y0, y1]` — symétrique.
+    fn bite_left(&self, y0: f32, y1: f32) -> f32 {
+        match &self.shape {
+            None => self.rect.x,
+            Some(s) => s.min_x_over(y0, y1),
+        }
+    }
+
+    /// Étendue verticale de la **morsure** : la forme si
+    /// présente (un cercle court ne contraint pas la ligne
+    /// sous/sur lui), sinon la marge-rect.
+    fn y_extent(&self) -> (f32, f32) {
+        match &self.shape {
+            None => (self.rect.y, self.rect.y + self.rect.height),
+            Some(s) => s.y_extent(),
+        }
+    }
+}
+
+/// `shape-outside` résolu en coords absolues — formes de
+/// base de css-shapes-1 §3 : `inset`/`rect`/`xywh` bornés à
+/// leur rectangle, `polygon` en sommets.
+#[derive(Debug, Clone)]
+pub(crate) enum OutsideShape {
+    /// `circle`/`ellipse` — centre + demi-axes (rx=ry pour
+    /// `circle`).
+    Ellipse { c: (f32, f32), rx: f32, ry: f32 },
+    /// `inset`/`rect`/`xywh` — rectangle absolu.
+    Inset { x: f32, y: f32, w: f32, h: f32 },
+    /// `polygon(pts…)` — sommets absolus.
+    Poly { pts: Vec<(f32, f32)> },
+}
+
+impl OutsideShape {
+    /// Étendue verticale de la forme — le rect de marge
+    /// borne le *débogage* ; c'est la forme qui mord.
+    fn y_extent(&self) -> (f32, f32) {
+        match self {
+            Self::Ellipse { c, ry, .. } => (c.1 - ry, c.1 + ry),
+            Self::Inset { y, h, .. } => (*y, y + h),
+            Self::Poly { pts } => {
+                let (lo, hi) = pts
+                    .iter()
+                    .map(|p| p.1)
+                    .fold((f32::INFINITY, f32::NEG_INFINITY), |(a, b), y| {
+                        (a.min(y), b.max(y))
+                    });
+                (lo, hi)
+            }
+        }
+    }
+
+    /// Étendue x maximale de la forme sur `[y0, y1]`.
+    fn max_x_over(&self, y0: f32, y1: f32) -> f32 {
+        match self {
+            Self::Ellipse { c, rx, ry } => {
+                // Candidats : bornes + sommet de la courbe
+                // (cy dans l'intervalle → demi-axe plein).
+                let mut m = f32::NEG_INFINITY;
+                for y in [y0, y1, c.1.clamp(y0, y1)] {
+                    let t = ((y - c.1) / ry.max(f32::EPSILON)).clamp(-1.0, 1.0);
+                    m = m.max(c.0 + rx * (1.0 - t * t).sqrt());
+                }
+                m
+            }
+            Self::Inset { x, w, .. } => x + w,
+            Self::Poly { pts } => pts
+                .iter()
+                .filter(|p| p.1 >= y0 && p.1 <= y1)
+                .map(|p| p.0)
+                .chain(
+                    // Sommets des arêtes qui coupent
+                    // l'intervalle : l'étendue peut être
+                    // atteinte en traversée.
+                    Self::poly_crossings(pts, y0, y1).iter().copied(),
+                )
+                .fold(f32::NEG_INFINITY, f32::max),
+        }
+    }
+
+    /// Étendue x minimale de la forme sur `[y0, y1]`.
+    fn min_x_over(&self, y0: f32, y1: f32) -> f32 {
+        match self {
+            Self::Ellipse { c, rx, ry } => {
+                let mut m = f32::INFINITY;
+                for y in [y0, y1, c.1.clamp(y0, y1)] {
+                    let t = ((y - c.1) / ry.max(f32::EPSILON)).clamp(-1.0, 1.0);
+                    m = m.min(c.0 - rx * (1.0 - t * t).sqrt());
+                }
+                m
+            }
+            Self::Inset { x, .. } => *x,
+            Self::Poly { pts } => pts
+                .iter()
+                .filter(|p| p.1 >= y0 && p.1 <= y1)
+                .map(|p| p.0)
+                .chain(Self::poly_crossings(pts, y0, y1).iter().copied())
+                .fold(f32::INFINITY, f32::min),
+        }
+    }
+
+    /// Abscisses où le polygone coupe `[y0, y1]` —
+    /// intersections des arêtes avec les bornes.
+    fn poly_crossings(pts: &[(f32, f32)], y0: f32, y1: f32) -> Vec<f32> {
+        let mut xs = Vec::new();
+        for i in 0..pts.len() {
+            let (a, b) = (pts[i], pts[(i + 1) % pts.len()]);
+            let (dy, dx) = (b.1 - a.1, b.0 - a.0);
+            for y in [y0, y1] {
+                if (a.1 - y) * (b.1 - y) < 0.0 && dy.abs() > f32::EPSILON {
+                    xs.push(a.0 + dx * (y - a.1) / dy);
+                }
+            }
+            // L'étendue sur l'intervalle peut aussi venir d'un
+            // sommet **à l'intérieur** — déjà couvert par
+            // `pts` dans l'appelant.
+        }
+        xs
+    }
 }
 
 impl FloatCtx {
@@ -176,13 +320,15 @@ impl FloatCtx {
         let mut xl = cx;
         let mut xr = cx + cw;
         for f in &self.left {
-            if f.y <= top && f.y + f.height > top {
-                xl = xl.max(f.x + f.width);
+            let (fy0, fy1) = f.y_extent();
+            if fy0 <= top && fy1 > top {
+                xl = xl.max(f.bite_right(top, top));
             }
         }
         for f in &self.right {
-            if f.y <= top && f.y + f.height > top {
-                xr = xr.min(f.x);
+            let (fy0, fy1) = f.y_extent();
+            if fy0 <= top && fy1 > top {
+                xr = xr.min(f.bite_left(top, top));
             }
         }
         // Sans morsure effective (bords inchangés), `cw` est
@@ -198,8 +344,10 @@ impl FloatCtx {
 
     /// Bas le plus profond des flottants `side` (`None` si
     /// aucun) — pour `clear` et la containment BFC.
-    pub(crate) fn bottom_of(list: &[Rect]) -> Option<f32> {
-        list.iter().map(|f| f.y + f.height).reduce(f32::max)
+    pub(crate) fn bottom_of(list: &[FloatRect]) -> Option<f32> {
+        list.iter()
+            .map(|f| f.rect.y + f.rect.height)
+            .reduce(f32::max)
     }
 
     /// Haut le plus élevé des flottants déjà posés (§9.5.1
@@ -211,7 +359,7 @@ impl FloatCtx {
         self.left
             .iter()
             .chain(self.right.iter())
-            .map(|f| f.y)
+            .map(|f| f.rect.y)
             .reduce(f32::max)
     }
 
@@ -236,8 +384,8 @@ impl FloatCtx {
         self.left
             .iter()
             .chain(self.right.iter())
-            .filter(|f| f.y <= top && f.y + f.height > top)
-            .map(|f| f.y + f.height)
+            .filter(|f| f.rect.y <= top && f.rect.y + f.rect.height > top)
+            .map(|f| f.rect.y + f.rect.height)
             .reduce(f32::min)
     }
 
@@ -255,13 +403,15 @@ impl FloatCtx {
         let mut xl = cx;
         let mut xr = cx + cw;
         for f in &self.left {
-            if f.y < bottom && f.y + f.height > top {
-                xl = xl.max(f.x + f.width);
+            let (fy0, fy1) = f.y_extent();
+            if fy0 < bottom && fy1 > top {
+                xl = xl.max(f.bite_right(top, bottom));
             }
         }
         for f in &self.right {
-            if f.y < bottom && f.y + f.height > top {
-                xr = xr.min(f.x);
+            let (fy0, fy1) = f.y_extent();
+            if fy0 < bottom && fy1 > top {
+                xr = xr.min(f.bite_left(top, bottom));
             }
         }
         if xl <= cx && xr >= cx + cw {
@@ -278,10 +428,159 @@ impl FloatCtx {
         self.left
             .iter()
             .chain(self.right.iter())
-            .filter(|f| f.y < bottom && f.y + f.height > y)
-            .map(|f| f.y + f.height)
+            .filter(|f| f.rect.y < bottom && f.rect.y + f.rect.height > y)
+            .map(|f| f.rect.y + f.rect.height)
             .filter(|b| *b > y)
             .reduce(f32::min)
+    }
+}
+
+/// R-273 — `shape-outside` (css-shapes-1 §3) : forme de
+/// référence résolue en coords absolues contre la boîte de
+/// référence (`margin-box` défaut → `margin` ; `border-box`/
+/// `padding-box`/`content-box` approchés à la border box —
+/// la margin box englobe, borne documentée). `shape-margin`
+/// dilate la forme (rayons/demi-axes/insets — ignorée sur
+/// `polygon`, borne documentée). `none`/`url()`/`linear-
+/// gradient()`/`image()` → `None` (pas d'analyse alpha).
+#[allow(
+    clippy::cast_possible_truncation,
+    clippy::too_many_lines,
+    clippy::many_single_char_names
+)]
+fn parse_shape_outside(
+    st: &ComputedStyle,
+    margin: &Rect,
+    border: &Rect,
+    ctx: &BlockCtx,
+    fs: f32,
+) -> Option<OutsideShape> {
+    let raw = st.get("shape-outside")?.trim();
+    if raw.is_empty() || raw == "none" {
+        return None;
+    }
+    // `<shape-box>` + `<basic-shape>` combinables (`circle()
+    // border-box`) : la boîte choisit la référence — défaut
+    // **margin-box** (§3) ; `padding-box`/`content-box` sont
+    // approchés à la bordure (métriques indisponibles ici,
+    // borne documentée).
+    let reference = if raw
+        .split_whitespace()
+        .any(|t| t == "border-box" || t == "padding-box" || t == "content-box")
+    {
+        border
+    } else {
+        margin
+    };
+    let sm = css_px(st, "shape-margin", margin.width, fs, ctx).unwrap_or(0.0);
+    let (name, args) = raw.split_once('(')?;
+    let args = args.trim_end_matches(')').trim();
+    let px = |t: &str, basis: f32| {
+        let t = t.trim();
+        if let Some(p) = t.strip_suffix('%') {
+            return p.trim().parse::<f32>().ok().map(|v| v * basis / 100.0);
+        }
+        explorer_css::value::parse_length(t)
+            .and_then(|l| l.unit.px_factor().map(|f| (l.value * f) as f32))
+    };
+    let pos_at = |at: &str| -> (f32, f32) {
+        let mut it = at.split_whitespace();
+        let xa = it.next().unwrap_or("center");
+        let ya = it.next().unwrap_or("center");
+        let ax = |t: &str, lo: f32, len: f32| match t {
+            "left" | "top" => lo,
+            "right" | "bottom" => lo + len,
+            "center" => lo + len / 2.0,
+            _ => px(t, len).map_or(lo + len / 2.0, |v| lo + v),
+        };
+        (
+            ax(xa, reference.x, reference.width),
+            ax(ya, reference.y, reference.height),
+        )
+    };
+    match name.trim() {
+        "circle" | "ellipse" => {
+            let (dims, at) = args.split_once(" at ").map_or((args, ""), |(d, a)| (d, a));
+            let mut it = dims.split_whitespace();
+            let (rx, ry) = if name.trim() == "circle" {
+                // % du rayon : sqrt(w²+h²)/√2 (§3.1).
+                let basis = reference.width.hypot(reference.height) / std::f32::consts::SQRT_2;
+                let r = px(it.next()?, basis)? + sm;
+                (r, r)
+            } else {
+                (
+                    px(it.next()?, reference.width)? + sm,
+                    px(it.next()?, reference.height)? + sm,
+                )
+            };
+            let c = if at.is_empty() {
+                (
+                    reference.x + reference.width / 2.0,
+                    reference.y + reference.height / 2.0,
+                )
+            } else {
+                pos_at(at)
+            };
+            Some(OutsideShape::Ellipse { c, rx, ry })
+        }
+        "inset" | "rect" | "xywh" => {
+            // `rect`/`xywh` tolèrent la virgule (héritage
+            // `clip: rect()`) ; `inset` peut finir en
+            // `round <radii>` — ignoré (borne, documentée).
+            let body = args
+                .split_once(" round")
+                .map_or(args, |(b, _)| b)
+                .replace(',', " ");
+            let v: Vec<f32> = body
+                .split_whitespace()
+                .filter_map(|t| px(t, reference.width))
+                .collect();
+            let g = |i: usize| v.get(i).or_else(|| v.last()).copied().unwrap_or(0.0);
+            let (x, y, w, h) = match name.trim() {
+                "xywh" => (g(0), g(1), g(2), g(3)),
+                "rect" => {
+                    // rect(top right bottom left) — distances
+                    // depuis le coin haut-gauche de la référence.
+                    let (t, r, b, l) = (g(0), g(1), g(2), g(3));
+                    (l, t, (r - l).max(0.0), (b - t).max(0.0))
+                }
+                // inset(top right bottom left) — distances
+                // depuis chaque bord.
+                _ => {
+                    let (t, r, b, l) = (g(0), g(1), g(2), g(3));
+                    (
+                        l,
+                        t,
+                        (reference.width - l - r).max(0.0),
+                        (reference.height - t - b).max(0.0),
+                    )
+                }
+            };
+            // `shape-margin` dilate le rectangle résultat.
+            Some(OutsideShape::Inset {
+                x: reference.x + x - sm,
+                y: reference.y + y - sm,
+                w: w + 2.0 * sm,
+                h: h + 2.0 * sm,
+            })
+        }
+        "polygon" => {
+            // Saute le `fill-rule` éventuel en tête.
+            let body = args
+                .split(',')
+                .map(str::trim)
+                .filter(|p| !p.starts_with("nonzero") && !p.starts_with("evenodd"));
+            let pts: Vec<(f32, f32)> = body
+                .filter_map(|p| {
+                    let mut it = p.split_whitespace();
+                    let x = px(it.next()?, reference.width)?;
+                    let y = px(it.next()?, reference.height)?;
+                    Some((reference.x + x, reference.y + y))
+                })
+                .collect();
+            (pts.len() >= 3).then_some(OutsideShape::Poly { pts })
+        }
+        _ => None,
     }
 }
 
@@ -373,6 +672,840 @@ pub fn layout_tree(root: &mut LayoutBox, viewport_w: f32, ctx: &BlockCtx) {
         .max(FloatCtx::bottom_of(&floats.right).unwrap_or(0.0));
     root.rect.height = root.rect.height.max(deep);
     resolve_absolutes(root, viewport, ctx, ctx.base_font_size);
+    resolve_anchor_positioning(root, ctx, ctx.base_font_size);
+}
+
+/// R-254 — css-anchor-position-1 (MVP) : `anchor-name` pose
+/// une ancre nommée, `anchor(<côté>|center|<%>)` dans un
+/// inset (`top`/`right`/`bottom`/`left`) de boîte
+/// `absolute`/`fixed` y accroche le bord correspondant ;
+/// `position-anchor` nomme l'ancre par défaut (celle des
+/// `anchor()` sans nom).
+///
+/// Post-passe APRÈS `resolve_absolutes` : tous les rects sont
+/// en coords document (ancres absolues comprises). Une inset
+/// contenant `anchor(...)` n'était pas une longueur → la
+/// boîte est restée à sa position statique ; on la translate
+/// au bord d'ancre demandé (+ marge propre). `anchor()` sans
+/// nom utilise `position-anchor` ; nom absent de la carte →
+/// la longueur de fallback `anchor(…, <len>)` est utilisée,
+/// sinon la boîte reste en place (dégradation, jamais panic).
+///
+/// Résidus documentés : `position-area`, `anchor-center`,
+/// `anchor-size()`, `position-try*`/`@position-try`,
+/// `anchor()` dans `calc()`/insets logiques, auto-anchor
+/// `popover`/`implicit`. Multi-ancres `<dashed-ident>#` sur
+/// `anchor-name` couvertes ; doublon de nom = dernier en
+/// ordre d'arbre (spec).
+pub(crate) fn resolve_anchor_positioning(root: &mut LayoutBox, ctx: &BlockCtx, fs: f32) {
+    // Aucun `anchor-name` ne dispense de la passe : les
+    // replis `anchor(…, <len>)` doivent encore résoudre.
+    let mut anchors: Vec<(String, Rect)> = Vec::new();
+    collect_anchor_names(root, &mut anchors);
+    let (vw, vh) = (root.rect.width.max(1.0), root.rect.height.max(1.0));
+    fix_anchor_positioned(root, &anchors, vw, vh, ctx, fs);
+}
+
+/// Collecte `anchor-name` → rect (parcours préfixe = ordre
+/// de document : le dernier porteur d'un nom écrase, §4.2).
+fn collect_anchor_names(bx: &LayoutBox, out: &mut Vec<(String, Rect)>) {
+    if let Some(v) = bx.style.get("anchor-name") {
+        for name in v.split(',').map(str::trim) {
+            if !name.is_empty() && name != "none" {
+                // Un nom déjà posé est remplacé — swap_remove
+                // garderait l'ancien en tête ; on ré-insère en
+                // fin pour conserver « dernier gagnant ».
+                if let Some(i) = out.iter().position(|(n, _)| n == name) {
+                    out.remove(i);
+                }
+                out.push((name.to_string(), bx.rect));
+            }
+        }
+    }
+    for c in &bx.children {
+        explorer_common::deep(|| collect_anchor_names(c, out));
+    }
+}
+
+/// Point d'accroche résolu d'une valeur `anchor(…)` sur l'axe
+/// `x` (`left`/`right`) ou `y` (`top`/`bottom`), en coords
+/// document. `name_hint` = `position-anchor` quand `anchor()`
+/// n'en nomme pas. `None` = token irreconnaissable ou axe
+/// incompatible (dégradation — la boîte garde sa place).
+fn anchor_point(
+    raw: &str,
+    axis_x: bool,
+    name_hint: Option<&str>,
+    anchors: &[(String, Rect)],
+    cb_w: f32,
+    fs: f32,
+    ctx: &BlockCtx,
+) -> Option<f32> {
+    let open = raw.find("anchor(")?;
+    let inner = raw.get(open + 7..)?.strip_suffix(')')?.trim();
+    // `anchor([<nom>]? <côté> [, <repli>]?)` — le nom est un
+    // `<dashed-ident>` (`--x`) ; le reste est le côté.
+    let mut toks = inner.splitn(2, |c: char| c.is_whitespace() || c == ',');
+    let first = toks.next().unwrap_or("");
+    let rest = toks.next().unwrap_or("").trim();
+    let (name, side_part) = if first.starts_with("--") {
+        (Some(first), rest)
+    } else {
+        (name_hint, inner)
+    };
+    // Le repli éventuel suit la virgule top-level.
+    let (side, fallback) = {
+        let mut it = side_part.splitn(2, ',');
+        (it.next().unwrap_or("").trim(), it.next().map(str::trim))
+    };
+    let name = name?.trim_start_matches("--").to_string();
+    // Ancre absente de la carte → longueur de repli
+    // `anchor(…, <len>)` si présente, sinon `None` (la boîte
+    // garde sa position statique — `position-try` hors MVP).
+    let Some((_, ar)) = anchors
+        .iter()
+        .rev()
+        .find(|(n, _)| n.trim_start_matches("--") == name)
+    else {
+        return raw_length_px(fallback.unwrap_or(""), cb_w, fs, ctx);
+    };
+    Some(match side {
+        "left" | "start" | "self-start" if axis_x => ar.x,
+        "right" | "end" | "self-end" if axis_x => ar.x + ar.width,
+        "top" | "start" | "self-start" if !axis_x => ar.y,
+        "bottom" | "end" | "self-end" if !axis_x => ar.y + ar.height,
+        "center" => {
+            if axis_x {
+                ar.x + ar.width / 2.0
+            } else {
+                ar.y + ar.height / 2.0
+            }
+        }
+        p if p.ends_with('%') => {
+            let t = p.trim_end_matches('%').parse::<f32>().ok()? / 100.0;
+            if axis_x {
+                ar.x + ar.width * t
+            } else {
+                ar.y + ar.height * t
+            }
+        }
+        // Repli `anchor(…, <len>)` côté inset (peu usité —
+        // les fallbacks propres vivent dans `position-try`).
+        _ => return raw_length_px(fallback.unwrap_or(""), cb_w, fs, ctx),
+    })
+}
+
+/// `anchor-size(<dim>)` → dimension de l'ancre (R-254 suite) :
+/// `width`/`height`/`block`/`inline`/`self-*` — `auto` = même
+/// axe que la propriété porteuse ; nom d'ancre en préfixe
+/// (`anchor-size(--a width)`), repli `, <len>` ; `%` de repli
+/// sur la base `cb_w`. `axis_x` = la propriété porteuse est
+/// horizontale (`width`/`min-width`/`max-width`).
+fn anchor_size_px(
+    raw: &str,
+    axis_x: bool,
+    hint: Option<&str>,
+    anchors: &[(String, Rect)],
+    cb_w: f32,
+    fs: f32,
+    ctx: &BlockCtx,
+) -> Option<f32> {
+    use std::fmt::Write as _;
+    // Substitution `anchor-size(…)` par sa valeur — comme
+    // `anchor_len`, la fonction peut siéger dans `calc()`.
+    let mut out = String::with_capacity(raw.len());
+    let mut rest = raw.trim();
+    while let Some(i) = rest.find("anchor-size(") {
+        out.push_str(&rest[..i]);
+        let sub = &rest[i..];
+        let close = sub.find(')')?;
+        let inner = sub[12..close].trim();
+        // `[<nom>]? <dim> [, <repli>]?` — dim : width/height/
+        // block/inline/self-block/self-inline (LTR : block→h,
+        // inline→w).
+        let mut toks = inner.splitn(2, |c: char| c.is_whitespace() || c == ',');
+        let first = toks.next().unwrap_or("");
+        let rest2 = toks.next().unwrap_or("").trim();
+        let (name, dim_part) = if first.starts_with("--") {
+            (Some(first), rest2)
+        } else {
+            (hint, inner)
+        };
+        let mut it = dim_part.splitn(2, ',');
+        let dim = it.next().unwrap_or("").trim();
+        let fallback = it.next().map(str::trim);
+        let px = name.and_then(|nm| {
+            anchors
+                .iter()
+                .rev()
+                .find(|(n, _)| n.trim_start_matches("--") == nm.trim_start_matches("--"))
+                .map(|(_, ar)| {
+                    // `auto`/absent = axe de la propriété
+                    // porteuse (`axis_x`) ; `self-*` suit la
+                    // même convention LTR (block→h, inline→w).
+                    let w_axis = match dim {
+                        "height" | "block" | "self-block" => false,
+                        "width" | "inline" | "self-inline" => true,
+                        _ => axis_x,
+                    };
+                    if w_axis {
+                        ar.width
+                    } else {
+                        ar.height
+                    }
+                })
+        });
+        let v = px.or_else(|| fallback.and_then(|f| raw_length_px(f, cb_w, fs, ctx)))?;
+        let _ = write!(out, "{v}px");
+        rest = &sub[close + 1..];
+    }
+    out.push_str(rest);
+    raw_length_px(&out, cb_w, fs, ctx)
+}
+
+/// `anchor()` en position d'inset ou **dans `calc()`**
+/// (R-254 suite) : chaque occurrence `anchor(…)` est
+/// substituée par sa longueur document résolue (ou son
+/// repli), puis la valeur est évaluée comme longueur
+/// ordinaire. `None` = un `anchor()` irrésoluble — le côté
+/// reste inchangé.
+fn anchor_len(
+    raw: &str,
+    axis_x: bool,
+    hint: Option<&str>,
+    anchors: &[(String, Rect)],
+    cb_w: f32,
+    fs: f32,
+    ctx: &BlockCtx,
+) -> Option<f32> {
+    use std::fmt::Write as _;
+    let raw = raw.trim();
+    if raw.starts_with("anchor(") {
+        return anchor_point(raw, axis_x, hint, anchors, cb_w, fs, ctx);
+    }
+    // `calc(… anchor(…) …)` : substitution des occurrences.
+    let mut out = String::with_capacity(raw.len());
+    let mut rest = raw;
+    while let Some(i) = rest.find("anchor(") {
+        out.push_str(&rest[..i]);
+        let sub = &rest[i..];
+        let close = sub.find(')')?;
+        let pt = anchor_point(&sub[..=close], axis_x, hint, anchors, cb_w, fs, ctx)?;
+        let _ = write!(out, "{pt}px");
+        rest = &sub[close + 1..];
+    }
+    out.push_str(rest);
+    raw_length_px(&out, cb_w, fs, ctx)
+}
+
+/// Un mot-clé `<position-area>` (css-anchor-1 §3.1, R-267) →
+/// `(axe, côté)` : axe `0` = colonne (inline, LTR→x),
+/// `1` = rangée (bloc, horizontal-tb→y), `2` = **ambigu**
+/// (`start`/`end`/`self-*` nus — résolus par position dans
+/// la paire : 1ᵉʳ→bloc, 2ᵉ→inline ; seul → répété) ;
+/// côté `0` = start, `1` = center, `2` = end.
+/// `span-*` retombe sur le côté de base (approximation — le
+/// span complet exigerait un re-flow, déjà documenté au
+/// chemin `position-area`), `span-all`/`all`/`center` → 1.
+/// `self-*` = writing-mode propre de la boîte — mappé LTR
+/// comme le reste du chantier (approximation documentée).
+fn area_token(t: &str) -> Option<(u8, u8)> {
+    Some(match t {
+        "left"
+        | "x-start"
+        | "inline-start"
+        | "x-self-start"
+        | "self-inline-start"
+        | "span-left"
+        | "span-x-start"
+        | "span-inline-start"
+        | "span-x-self-start"
+        | "span-self-inline-start" => (0, 0),
+        "right"
+        | "x-end"
+        | "inline-end"
+        | "x-self-end"
+        | "self-inline-end"
+        | "span-right"
+        | "span-x-end"
+        | "span-inline-end"
+        | "span-x-self-end"
+        | "span-self-inline-end" => (0, 2),
+        "top"
+        | "y-start"
+        | "block-start"
+        | "y-self-start"
+        | "self-block-start"
+        | "span-top"
+        | "span-y-start"
+        | "span-block-start"
+        | "span-y-self-start"
+        | "span-self-block-start" => (1, 0),
+        "bottom"
+        | "y-end"
+        | "block-end"
+        | "y-self-end"
+        | "self-block-end"
+        | "span-bottom"
+        | "span-y-end"
+        | "span-block-end"
+        | "span-y-self-end"
+        | "span-self-block-end" => (1, 2),
+        "start" | "self-start" | "span-start" | "span-self-start" => (2, 0),
+        "end" | "self-end" | "span-end" | "span-self-end" => (2, 2),
+        "center" | "span-all" | "all" => (2, 1),
+        _ => return None,
+    })
+}
+
+/// `<position-area>` → Δ `(dx, dy)` à appliquer à `rect`
+/// pour rejoindre la tuile de la grille 3×3 autour de
+/// `ar` (css-anchor-1 §3.1). Un seul mot-clé explicite →
+/// l'autre axe ≈ `span-all` centré (pas de re-flow,
+/// approximation documentée) ; un ambigu seul → répété
+/// sur les deux axes (spec). Axe jamais couvert :
+/// aligné start-à-start (convention du chantier).
+fn area_delta(toks: &[&str], ar: &Rect, rect: &Rect) -> (f32, f32) {
+    let (w, h) = (rect.width, rect.height);
+    let (mut xs, mut ys) = (None::<u8>, None::<u8>);
+    let mut ambig = false;
+    for t in toks {
+        let Some((axis, side)) = area_token(t) else {
+            continue;
+        };
+        match axis {
+            0 => xs = Some(side),
+            1 => ys = Some(side),
+            _ => {
+                ambig = true;
+                if ys.is_none() {
+                    ys = Some(side);
+                } else if xs.is_none() {
+                    xs = Some(side);
+                }
+            }
+        }
+    }
+    if toks.len() == 1 {
+        match (xs, ys, ambig) {
+            // Ambigu seul (`start`, `self-end`, `center`…) :
+            // répété sur les deux axes (spec §3.1.2).
+            (None, Some(s), true) => xs = Some(s),
+            // Explicite seul (`top`, `left`…) : l'autre axe
+            // = `span-all` ≈ centré en translate-only.
+            (Some(_), None, _) => ys = Some(1),
+            (None, Some(_), false) => xs = Some(1),
+            _ => {}
+        }
+    }
+    let dx = match xs {
+        Some(0) => ar.x - w - rect.x,
+        Some(1) => ar.x + (ar.width - w) / 2.0 - rect.x,
+        Some(2) => ar.x + ar.width - rect.x,
+        _ => ar.x - rect.x,
+    };
+    let dy = match ys {
+        Some(0) => ar.y - h - rect.y,
+        Some(1) => ar.y + (ar.height - h) / 2.0 - rect.y,
+        Some(2) => ar.y + ar.height - rect.y,
+        _ => ar.y - rect.y,
+    };
+    (dx, dy)
+}
+
+/// Seconde moitié de la passe : translate chaque boîte
+/// positionnée dont un inset porte `anchor(…)` au bord
+/// d'ancre voulu. `cb_w` = base des `%`/margins de repli
+/// (largeur document — approximation documentée : la vraie
+/// base est la largeur du bloc conteneur, non retrouvable
+/// post-hoc sans la porter).
+#[allow(clippy::too_many_lines)]
+fn fix_anchor_positioned(
+    bx: &mut LayoutBox,
+    anchors: &[(String, Rect)],
+    cb_w: f32,
+    vp_h: f32,
+    ctx: &BlockCtx,
+    fs: f32,
+) {
+    if bx.out_of_flow() {
+        let st = &bx.style;
+        let hint = st
+            .get("position-anchor")
+            .map(str::trim)
+            .filter(|v| !v.is_empty() && *v != "auto" && *v != "implicit")
+            .map(|v| v.trim_start_matches("--").to_string());
+        // `position-area` (R-254 suite) : grille 3×3 autour de
+        // l'ancre — rang `top|bottom|center`, colonne
+        // `left|right|center` ; tokens logiques/`x-*`/`y-*`
+        // mappés LTR (approximation documentée), `span-*` →
+        // repli sur le côté de base. Axe absent = bord start
+        // de l'ancre.
+        // `inset-area` = nom d'origine de `position-area`
+        // (spec renommée, Chrome a shippe l'ancien) — repli
+        // quand la forme canonique est absente.
+        let area = st
+            .get("position-area")
+            .or_else(|| st.get("inset-area"))
+            .map(str::trim)
+            .filter(|v| !v.is_empty() && *v != "none" && *v != "normal");
+        let has = |p: &str| st.get(p).is_some_and(|v| v.contains("anchor("));
+        // `anchor-size()` dans `width`/`height` : redimension
+        // post-hoc de la border box — approximation documentée
+        // (le contenu n'est pas re-flown ; le motif réel est
+        // « bulle/flèche de la taille de l'ancre »).
+        let cfs = font_size_px(st, fs, ctx);
+        for (prop, axis_x) in [("width", true), ("height", false)] {
+            if let Some(v) = st.get(prop).filter(|v| v.contains("anchor-size(")) {
+                if let Some(px) =
+                    anchor_size_px(v, axis_x, hint.as_deref(), anchors, cb_w, cfs, ctx)
+                {
+                    if axis_x {
+                        bx.rect.width = px.max(0.0);
+                    } else {
+                        bx.rect.height = px.max(0.0);
+                    }
+                }
+            }
+        }
+        if let Some(av) = area {
+            if let Some(name) = hint.as_deref() {
+                if let Some((_, ar)) = anchors
+                    .iter()
+                    .rev()
+                    .find(|(n, _)| n.trim_start_matches("--") == name)
+                {
+                    // R-267 — table `area_token`/`area_delta`
+                    // partagée avec `position-try` : mêmes
+                    // mots-clés (`x-*`/`y-*`/`block-*`/`self-*`
+                    // + ambigus), mêmes approximations.
+                    let toks: Vec<&str> = av.split_ascii_whitespace().collect();
+                    let rect = bx.rect;
+                    let (dx, dy) = area_delta(&toks, ar, &rect);
+                    if dx != 0.0 || dy != 0.0 {
+                        crate::flex::translate_subtree(bx, dx, dy);
+                    }
+                }
+            }
+        } else if has("left")
+            || has("right")
+            || has("top")
+            || has("bottom")
+            || has("inset-inline-start")
+            || has("inset-inline-end")
+            || has("inset-block-start")
+            || has("inset-block-end")
+        {
+            let cfs = font_size_px(st, fs, ctx);
+            let mut dx = 0.0_f32;
+            let mut dy = 0.0_f32;
+            // Physique prioritaire, logique en repli — le nom
+            // logique alimentant chaque côté suit `writing-
+            // mode`/`direction` (`logical_insets`, même règle
+            // que `abs_geometry`).
+            let (log_l, log_r, log_t, log_b) = logical_insets(st);
+            let side_anchor =
+                |st: &ComputedStyle, phys: &str, log: &str, axis_x: bool| -> Option<f32> {
+                    let raw = st
+                        .get(phys)
+                        .or_else(|| st.get(log))
+                        .filter(|v| v.contains("anchor("))?;
+                    anchor_len(raw, axis_x, hint.as_deref(), anchors, cb_w, cfs, ctx)
+                };
+            // `left: anchor(bord)` → margin-box gauche sur le
+            // point ; `right: anchor(bord)` → margin-box droit.
+            if let Some(p) = side_anchor(st, "left", log_l, true) {
+                dx = p + side_px(st, "margin-left", cb_w, cfs, ctx, 0.0) - bx.rect.x;
+            } else if let Some(p) = side_anchor(st, "right", log_r, true) {
+                dx = p
+                    - side_px(st, "margin-right", cb_w, cfs, ctx, 0.0)
+                    - bx.rect.width
+                    - bx.rect.x;
+            }
+            if let Some(p) = side_anchor(st, "top", log_t, false) {
+                dy = p + side_px(st, "margin-top", cb_w, cfs, ctx, 0.0) - bx.rect.y;
+            } else if let Some(p) = side_anchor(st, "bottom", log_b, false) {
+                dy = p
+                    - side_px(st, "margin-bottom", cb_w, cfs, ctx, 0.0)
+                    - bx.rect.height
+                    - bx.rect.y;
+            }
+            if dx != 0.0 || dy != 0.0 {
+                crate::flex::translate_subtree(bx, dx, dy);
+            }
+        }
+        // `justify-self`/`align-self:anchor-center` (R-254
+        // suite) : centre de la boîte calé sur le centre de
+        // l'ancre sur l'axe nommé — compose avec l'ancrage
+        // d'insets ou `position-area` déjà appliqué.
+        if let Some(name) = hint.as_deref() {
+            if let Some((_, ar)) = anchors
+                .iter()
+                .rev()
+                .find(|(n, _)| n.trim_start_matches("--") == name)
+            {
+                let j = bx.style.get("justify-self").map_or("", |v| v.trim());
+                let a = bx.style.get("align-self").map_or("", |v| v.trim());
+                let (mut cx, mut cy) = (0.0_f32, 0.0_f32);
+                if j == "anchor-center" {
+                    cx = ar.x + ar.width / 2.0 - (bx.rect.x + bx.rect.width / 2.0);
+                }
+                if a == "anchor-center" {
+                    cy = ar.y + ar.height / 2.0 - (bx.rect.y + bx.rect.height / 2.0);
+                }
+                if cx != 0.0 || cy != 0.0 {
+                    crate::flex::translate_subtree(bx, cx, cy);
+                }
+            }
+        }
+        // `position-try`/`position-try-fallbacks` : les
+        // options sont évaluées dans l'ordre trié par
+        // `position-try-order` (css-anchor-1 §3.5) — la
+        // première dont la boîte translatée rentre dans le
+        // viewport est retenue ; si toutes débordent encore,
+        // la dernière essayée est appliquée (spec).
+        // `flip-block`/`flip-y`, `flip-inline`/`flip-x`,
+        // `flip-start` = miroir autour du centre de l'ancre
+        // sur l'axe en débordement ; `--nom` = règle
+        // `@position-try` sérialisée (`position-area` +
+        // insets px — autres props ignorées, MVP borné
+        // viewport).
+        if let Some(name) = hint.as_deref() {
+            if let Some(raw_try) = bx
+                .style
+                .get("position-try")
+                .or_else(|| bx.style.get("position-try-fallbacks"))
+            {
+                if let Some((_, ar)) = anchors
+                    .iter()
+                    .rev()
+                    .find(|(n, _)| n.trim_start_matches("--") == name)
+                {
+                    let over_l = bx.rect.x < 0.0;
+                    let over_r = bx.rect.x + bx.rect.width > cb_w;
+                    let over_t = bx.rect.y < 0.0;
+                    let over_b = bx.rect.y + bx.rect.height > vp_h;
+                    if over_l || over_r || over_t || over_b {
+                        // `position-try` = shorthand
+                        // `<'position-try-order'>? ||
+                        // <'position-try-fallbacks'>` : les
+                        // mots-clés `most-*`/`normal` fixent
+                        // l'ordre, le reste est la liste
+                        // (la prop longhand prime si déclarée).
+                        let has_order_prop = bx.style.get("position-try-order").is_some();
+                        let mut order = bx
+                            .style
+                            .get("position-try-order")
+                            .map_or("normal", |v| v.trim())
+                            .to_string();
+                        // R-267 — découpe en candidates :
+                        // la virgule sépare les options
+                        // (css-anchor-1 §3.4, `<try-fallback>#`).
+                        // Dans une option, `flip-*`/`--nom`
+                        // vaut une candidate seul ; les
+                        // mots-clés `<position-area>` (1..=2
+                        // = une tuile) forment UNE candidate
+                        // groupée passée à `area_delta`.
+                        let mut groups: Vec<Vec<&str>> = Vec::new();
+                        for opt in raw_try.split(',') {
+                            let mut area: Vec<&str> = Vec::new();
+                            for t in opt.split_ascii_whitespace() {
+                                match t {
+                                    "normal" | "most-width" | "most-inline-size"
+                                    | "most-height" | "most-block-size" | "most-size"
+                                        if !has_order_prop =>
+                                    {
+                                        order = t.to_string();
+                                    }
+                                    "flip-block" | "flip-y" | "flip-inline" | "flip-x"
+                                    | "flip-start" => {
+                                        if !area.is_empty() {
+                                            groups.push(std::mem::take(&mut area));
+                                        }
+                                        groups.push(vec![t]);
+                                    }
+                                    _ if t.starts_with("--") => {
+                                        if !area.is_empty() {
+                                            groups.push(std::mem::take(&mut area));
+                                        }
+                                        groups.push(vec![t]);
+                                    }
+                                    _ if area_token(t).is_some() => area.push(t),
+                                    _ => {}
+                                }
+                            }
+                            if !area.is_empty() {
+                                groups.push(area);
+                            }
+                        }
+                        // Δ de chaque option (flip → miroir
+                        // autour du centre d'ancre ; `--nom` →
+                        // `position-area`/insets px du try
+                        // sérialisé — autres props ignorées ;
+                        // groupe area → tuile via `area_delta`).
+                        let cand = |g: &[&str]| -> (f32, f32) {
+                            let (mut fx, mut fy) = (0.0_f32, 0.0_f32);
+                            match g {
+                                ["flip-block" | "flip-y"] if over_t || over_b => {
+                                    fy = 2.0 * (ar.y + ar.height / 2.0)
+                                        - 2.0 * bx.rect.y
+                                        - bx.rect.height;
+                                }
+                                ["flip-inline" | "flip-x"] if over_l || over_r => {
+                                    fx = 2.0 * (ar.x + ar.width / 2.0)
+                                        - 2.0 * bx.rect.x
+                                        - bx.rect.width;
+                                }
+                                ["flip-start"] => {
+                                    if over_t || over_b {
+                                        fy = 2.0 * (ar.y + ar.height / 2.0)
+                                            - 2.0 * bx.rect.y
+                                            - bx.rect.height;
+                                    }
+                                    if over_l || over_r {
+                                        fx = 2.0 * (ar.x + ar.width / 2.0)
+                                            - 2.0 * bx.rect.x
+                                            - bx.rect.width;
+                                    }
+                                }
+                                [n] if n.starts_with("--") => {
+                                    if let Some(body) =
+                                        bx.style.get(&format!("position-try-{}", n.trim()))
+                                    {
+                                        for kv in body.split(';').filter_map(|p| p.split_once(':'))
+                                        {
+                                            let (k, v) = (kv.0.trim(), kv.1.trim());
+                                            match k {
+                                                "position-area" => {
+                                                    let toks: Vec<&str> =
+                                                        v.split_ascii_whitespace().collect();
+                                                    let (dx, dy) = area_delta(&toks, ar, &bx.rect);
+                                                    fx = dx;
+                                                    fy = dy;
+                                                }
+                                                "top" | "bottom" => {
+                                                    if let Some(px) = v
+                                                        .strip_suffix("px")
+                                                        .and_then(|n| n.parse::<f32>().ok())
+                                                    {
+                                                        fy = if k == "top" {
+                                                            ar.y + ar.height + px - bx.rect.y
+                                                        } else {
+                                                            ar.y - px - bx.rect.height - bx.rect.y
+                                                        };
+                                                    }
+                                                }
+                                                "left" | "right" => {
+                                                    if let Some(px) = v
+                                                        .strip_suffix("px")
+                                                        .and_then(|n| n.parse::<f32>().ok())
+                                                    {
+                                                        fx = if k == "left" {
+                                                            ar.x + ar.width + px - bx.rect.x
+                                                        } else {
+                                                            ar.x - px - bx.rect.width - bx.rect.x
+                                                        };
+                                                    }
+                                                }
+                                                _ => {}
+                                            }
+                                        }
+                                    }
+                                }
+                                // Groupe `<position-area>` — R-267.
+                                _ => {
+                                    let (dx, dy) = area_delta(g, ar, &bx.rect);
+                                    fx = dx;
+                                    fy = dy;
+                                }
+                            }
+                            (fx, fy)
+                        };
+                        // `position-try-order` trie les options
+                        // (spec §3.5 : `most-*` préfère l'option
+                        // laissant le plus de place sur l'axe
+                        // demandé). « La place » = l'étendue
+                        // entre le bord de l'ancre et le bord
+                        // du bloc conteneur dans la direction
+                        // où le candidat dépose la boîte (CB
+                        // modifié par l'option) : gauche →
+                        // `ar.x`, droite → `cb_w − ar.right`,
+                        // dessus → `ar.y`, dessous →
+                        // `vp_h − ar.bottom` ; quand le candidat
+                        // reste dans l'axe de l'ancre, le côté
+                        // de la position **non flippée** garde
+                        // la mesure. Sort stable décroissant ;
+                        // `most-inline/block-size` ≈ width/height
+                        // (horizontal-tb — un mode vertical
+                        // échangerait les axes, borne assumée).
+                        // La première dont la boîte translatée
+                        // rentre entièrement gagne ; si toutes
+                        // débordent, la dernière est appliquée.
+                        let mut cands: Vec<(f32, f32)> = groups
+                            .iter()
+                            .map(|g| cand(g))
+                            .filter(|d| d.0 != 0.0 || d.1 != 0.0)
+                            .collect();
+                        if order.as_str() != "normal" {
+                            let space = |d: &(f32, f32)| {
+                                let (tx, ty) = (bx.rect.x + d.0, bx.rect.y + d.1);
+                                // Côté horizontal du dépôt.
+                                let xs = if tx + bx.rect.width <= ar.x {
+                                    ar.x
+                                } else if tx >= ar.x + ar.width {
+                                    cb_w - (ar.x + ar.width)
+                                } else if bx.rect.x + bx.rect.width <= ar.x {
+                                    ar.x
+                                } else {
+                                    cb_w - (ar.x + ar.width)
+                                };
+                                // Côté vertical du dépôt.
+                                let ys = if ty + bx.rect.height <= ar.y {
+                                    ar.y
+                                } else if ty >= ar.y + ar.height {
+                                    vp_h - (ar.y + ar.height)
+                                } else if bx.rect.y + bx.rect.height <= ar.y {
+                                    ar.y
+                                } else {
+                                    vp_h - (ar.y + ar.height)
+                                };
+                                (xs.max(0.0), ys.max(0.0))
+                            };
+                            cands.sort_by(|a, b| {
+                                let (ax, ay) = space(a);
+                                let (bx2, by2) = space(b);
+                                let key = match order.as_str() {
+                                    "most-width" | "most-inline-size" => bx2.partial_cmp(&ax),
+                                    "most-height" | "most-block-size" => by2.partial_cmp(&ay),
+                                    // `most-size` = produit des
+                                    // deux étendues.
+                                    "most-size" => (bx2 * by2).partial_cmp(&(ax * ay)),
+                                    _ => Some(std::cmp::Ordering::Equal),
+                                };
+                                key.unwrap_or(std::cmp::Ordering::Equal)
+                            });
+                        }
+                        let mut chosen = None;
+                        for &(fx, fy) in &cands {
+                            chosen = Some((fx, fy));
+                            let fits = bx.rect.x + fx >= 0.0
+                                && bx.rect.x + fx + bx.rect.width <= cb_w
+                                && bx.rect.y + fy >= 0.0
+                                && bx.rect.y + fy + bx.rect.height <= vp_h;
+                            if fits {
+                                break;
+                            }
+                        }
+                        if let Some((fx, fy)) = chosen {
+                            crate::flex::translate_subtree(bx, fx, fy);
+                        }
+                    }
+                }
+            }
+        }
+        // `position-visibility` (css-anchor-1 §5) — évaluée
+        // après tous les positionnements/fallbacks :
+        // `anchors-visible` = masquée tant que l'ancre
+        // n'intersecte pas le viewport (ancre absente →
+        // masquée) ; `no-overflow` = masquée si la boîte
+        // déborde encore ; `always` (défaut) = visible.
+        // Matérialisée en `visibility:hidden` sur le style —
+        // rail existant de la display list (§11.2),
+        // réactivable par un descendant `visible` (approxi-
+        // mation honnête : le flag spec est hors cascade).
+        let pos_vis = bx
+            .style
+            .get("position-visibility")
+            .map_or("", str::trim)
+            .to_string();
+        match pos_vis.as_str() {
+            "anchors-visible" => {
+                let vis = hint
+                    .as_deref()
+                    .and_then(|n| {
+                        anchors
+                            .iter()
+                            .rev()
+                            .find(|(nm, _)| nm.trim_start_matches("--") == n)
+                    })
+                    .is_some_and(|(_, ar)| {
+                        ar.x + ar.width > 0.0
+                            && ar.x < cb_w
+                            && ar.y + ar.height > 0.0
+                            && ar.y < vp_h
+                    });
+                if !vis {
+                    bx.style.set("visibility", "hidden");
+                }
+            }
+            "no-overflow" => {
+                let over = bx.rect.x < 0.0
+                    || bx.rect.x + bx.rect.width > cb_w
+                    || bx.rect.y < 0.0
+                    || bx.rect.y + bx.rect.height > vp_h;
+                if over {
+                    bx.style.set("visibility", "hidden");
+                }
+            }
+            _ => {}
+        }
+    }
+    for c in &mut bx.children {
+        explorer_common::deep(|| fix_anchor_positioned(c, anchors, cb_w, vp_h, ctx, fs));
+    }
+}
+
+/// Mapping css-logical-1 des insets logiques → physiques
+/// selon `writing-mode` + `direction` : rend `(gauche,
+/// droite, haut, bas)` = les **noms de props logiques**
+/// qui alimentent chaque côté physique. Horizontal LTR :
+/// `inline-start`→left… ; RTL : inline inversé ; vertical :
+/// `inline-*` sur l'axe haut/bas (`rl` : `block-start`→right,
+/// `lr` : `block-start`→left), `direction:rtl` inverse aussi
+/// l'axe inline vertical (§6.4).
+fn logical_insets(st: &ComputedStyle) -> (&'static str, &'static str, &'static str, &'static str) {
+    use explorer_css::value::WritingMode as W;
+    let rtl = st
+        .get("direction")
+        .is_some_and(|d| d.trim().eq_ignore_ascii_case("rtl"));
+    match explorer_css::value::parse_writing_mode(st.get("writing-mode").unwrap_or("")) {
+        W::HorizontalTb if rtl => (
+            "inset-inline-end",
+            "inset-inline-start",
+            "inset-block-start",
+            "inset-block-end",
+        ),
+        W::HorizontalTb => (
+            "inset-inline-start",
+            "inset-inline-end",
+            "inset-block-start",
+            "inset-block-end",
+        ),
+        W::VerticalRl | W::SidewaysRl if rtl => (
+            "inset-block-end",
+            "inset-block-start",
+            "inset-inline-end",
+            "inset-inline-start",
+        ),
+        W::VerticalRl | W::SidewaysRl => (
+            "inset-block-end",
+            "inset-block-start",
+            "inset-inline-start",
+            "inset-inline-end",
+        ),
+        _ if rtl => (
+            "inset-block-start",
+            "inset-block-end",
+            "inset-inline-end",
+            "inset-inline-start",
+        ),
+        _ => (
+            "inset-block-start",
+            "inset-block-end",
+            "inset-inline-start",
+            "inset-inline-end",
+        ),
+    }
 }
 
 /// Résout `font-size` en px : `em`/`rem` relatifs au parent
@@ -479,10 +1612,13 @@ pub(crate) fn raw_length_px(
         Unit::Ex | Unit::Ch => len.value as f32 * em_basis * 0.5,
         // Unités viewport (R-42) : `vw`/`vh` sur leurs axes,
         // `vmin`/`vmax` sur min/max des deux (§5.1.2 MQ4/CSS3).
-        Unit::Vw => len.value as f32 * ctx.viewport_w / 100.0,
-        Unit::Vh => len.value as f32 * ctx.viewport_h / 100.0,
-        Unit::Vmin => len.value as f32 * ctx.viewport_w.min(ctx.viewport_h) / 100.0,
-        Unit::Vmax => len.value as f32 * ctx.viewport_w.max(ctx.viewport_h) / 100.0,
+        // `cq*` (css-contain-3) : sans suivi de
+        // `container-type` ancêtre le repli spec = small
+        // viewport — axes inline→w, block→h (approx).
+        Unit::Vw | Unit::Cqw | Unit::Cqi => len.value as f32 * ctx.viewport_w / 100.0,
+        Unit::Vh | Unit::Cqh | Unit::Cqb => len.value as f32 * ctx.viewport_h / 100.0,
+        Unit::Vmin | Unit::Cqmin => len.value as f32 * ctx.viewport_w.min(ctx.viewport_h) / 100.0,
+        Unit::Vmax | Unit::Cqmax => len.value as f32 * ctx.viewport_w.max(ctx.viewport_h) / 100.0,
         u => (len.value * u.px_factor()?) as f32,
     })
 }
@@ -577,10 +1713,14 @@ fn eval_calc(expr: &str, pct_basis: f32, em_basis: f32, ctx: &BlockCtx) -> Optio
                 Unit::Em => l.value * f64::from(em),
                 Unit::Rem => l.value * f64::from(ctx.rem_basis()),
                 Unit::Ex | Unit::Ch => l.value * f64::from(em) * 0.5,
-                Unit::Vw => l.value * f64::from(ctx.viewport_w) / 100.0,
-                Unit::Vh => l.value * f64::from(ctx.viewport_h) / 100.0,
-                Unit::Vmin => l.value * f64::from(ctx.viewport_w.min(ctx.viewport_h)) / 100.0,
-                Unit::Vmax => l.value * f64::from(ctx.viewport_w.max(ctx.viewport_h)) / 100.0,
+                Unit::Vw | Unit::Cqw | Unit::Cqi => l.value * f64::from(ctx.viewport_w) / 100.0,
+                Unit::Vh | Unit::Cqh | Unit::Cqb => l.value * f64::from(ctx.viewport_h) / 100.0,
+                Unit::Vmin | Unit::Cqmin => {
+                    l.value * f64::from(ctx.viewport_w.min(ctx.viewport_h)) / 100.0
+                }
+                Unit::Vmax | Unit::Cqmax => {
+                    l.value * f64::from(ctx.viewport_w.max(ctx.viewport_h)) / 100.0
+                }
                 u => l.value * u.px_factor()?,
             };
             return Some(Term { px, dim: true });
@@ -1455,7 +2595,15 @@ fn layout_block_inner(
         }
     };
 
-    let content_h = cursor - (y + bt + pt);
+    // R-274 — `container-type:size` : contain size sur
+    // l'axe bloc — hauteur `auto` dimensionnée « comme
+    // vide » (le contenu est posé mais ne fait pas croître
+    // la boîte ; `min|max-height`/`height` s'appliquent).
+    let content_h = if h_spec.is_none() && crate::intrinsic::block_size_contained(&st, bx) {
+        0.0
+    } else {
+        cursor - (y + bt + pt)
+    };
     let mut used_h = h_spec.unwrap_or_else(|| {
         // css-sizing-4 §5.4 (R-123) : `aspect-ratio` s'applique
         // quand la hauteur est `auto` — le ratio du ratio
@@ -1663,7 +2811,8 @@ fn place_float(
         // « déjà aussi loin que possible » — un voisin de
         // même côté annule l'exception et force la descente).
         {
-            let overlapped = |o: &Rect| {
+            let overlapped = |o: &FloatRect| {
+                let o = &o.rect;
                 placed.y < o.y + o.height - 0.01
                     && placed.y + placed.height > o.y + 0.01
                     && placed.x < o.x + o.width - 0.01
@@ -1674,7 +2823,7 @@ fn place_float(
             let mut drop = foes
                 .iter()
                 .filter(|o| overlapped(o))
-                .map(|o| o.y + o.height)
+                .map(|o| o.rect.y + o.rect.height)
                 .fold(f32::NEG_INFINITY, f32::max);
             let overflows = if right_side {
                 placed.x < content_x - 0.01
@@ -1689,6 +2838,7 @@ fn place_float(
                 drop = drop.max(
                     kin.iter()
                         .filter(|o| {
+                            let o = &o.rect;
                             o.y + o.height > placed.y + 0.01
                                 && o.y < placed.y + placed.height - 0.01
                                 && if right_side {
@@ -1697,7 +2847,7 @@ fn place_float(
                                     o.x + o.width <= placed.x + 0.01
                                 }
                         })
-                        .map(|o| o.y + o.height)
+                        .map(|o| o.rect.y + o.rect.height)
                         .fold(f32::NEG_INFINITY, f32::max),
                 );
             }
@@ -1718,10 +2868,22 @@ fn place_float(
             _ => break,
         }
     }
+    // R-273 — `shape-outside` : la forme est résolue contre
+    // la margin box (défaut `<shape-box>`), déjà absolue.
+    let fr = float_record(&parent.children[i], placed, ctx, fs);
     if right_side {
-        fl.right.push(placed);
+        fl.right.push(fr);
     } else {
-        fl.left.push(placed);
+        fl.left.push(fr);
+    }
+}
+
+/// R-273 — `shape-outside` : enrôle le flottant posé avec la
+/// forme d'exclusion résolue sur son style (`None` = rectangle).
+fn float_record(cb: &LayoutBox, placed: Rect, ctx: &BlockCtx, fs: f32) -> FloatRect {
+    FloatRect {
+        rect: placed,
+        shape: parse_shape_outside(&cb.style, &placed, &cb.rect, ctx, fs),
     }
 }
 
@@ -2025,9 +3187,16 @@ fn partition_units(
 /// colonne atteinte par son sommet, §7.1) — puis translate
 /// chacune à sa place réelle. `break-before|after: column`
 /// force un saut vers la colonne suivante (R-181 ; `page`/
-/// `always`/`left`/`right` absorbés — pas de média paginé).
-/// `break-inside:avoid` est honoré de fait : aucune unité
-/// n'est jamais coupée. Renvoie la hauteur consommée.
+/// `always`/`left`/`right`/`recto`/`verso`/`all`/`region`
+/// absorbés — pas de média paginé). R-268 : alias legacy
+/// `page-break-*` lus comme shorthands de `break-*`
+/// (css-break-3 §4.1 — `break-*` prime si déclaré) ;
+/// `avoid`/`avoid-column` sur `break-*` = garder l'unité
+/// avec sa voisine (best-effort — une coupure forcée de
+/// l'autre côté l'emporte, spec §3). `break-inside:avoid`
+/// (+ `page-break-inside`, `avoid-*`) est honoré de fait :
+/// aucune unité n'est jamais coupée. Renvoie la hauteur
+/// consommée.
 #[allow(clippy::cast_possible_truncation)]
 #[allow(clippy::cast_sign_loss)]
 #[allow(clippy::cast_precision_loss)]
@@ -2052,11 +3221,31 @@ fn balance_segment(
     let mut max_h = 0.0_f32;
     let mut prev_col = usize::MAX;
     let mut prev_break = false;
-    let col_break = |c: &LayoutBox, prop: &str| {
+    let mut prev_keep = false;
+    // `break-*` prime sur l'alias `page-break-*` (§4.1).
+    let bv = |c: &LayoutBox, canon: &str, legacy: &str| -> Option<String> {
         c.style
-            .get(prop)
-            .is_some_and(|v| matches!(v.trim(), "column" | "page" | "always" | "left" | "right"))
+            .get(canon)
+            .or_else(|| c.style.get(legacy))
+            .map(|v| v.trim().to_ascii_lowercase())
     };
+    let force = |v: Option<&str>| {
+        matches!(
+            v,
+            Some(
+                "column"
+                    | "page"
+                    | "always"
+                    | "left"
+                    | "right"
+                    | "recto"
+                    | "verso"
+                    | "all"
+                    | "region"
+            )
+        )
+    };
+    let keep = |v: Option<&str>| matches!(v, Some("avoid" | "avoid-column"));
     for c in units.iter_mut() {
         let rel = if fill_cap.is_some() {
             c.rect.y - top
@@ -2068,11 +3257,24 @@ fn balance_segment(
         } else {
             0
         };
-        if (col_break(c, "break-before") || prev_break) && prev_col != usize::MAX && col <= prev_col
-        {
+        let before = bv(c, "break-before", "page-break-before");
+        let forced = force(before.as_deref()) || prev_break;
+        if forced && prev_col != usize::MAX && col <= prev_col {
             col = (prev_col + 1).min(n_cols - 1);
         }
-        prev_break = col_break(c, "break-after");
+        // `avoid` : sans coupure forcée, l'unité reste dans la
+        // colonne de sa voisine quand l'équilibre voulait
+        // les séparer.
+        if !forced
+            && col > prev_col
+            && prev_col != usize::MAX
+            && (prev_keep || keep(before.as_deref()))
+        {
+            col = prev_col;
+        }
+        let after = bv(c, "break-after", "page-break-after");
+        prev_break = force(after.as_deref());
+        prev_keep = keep(after.as_deref());
         prev_col = col;
         let origin = *origins[col].get_or_insert(c.rect.y);
         // `u.x - x0` préserve l'indentation propre à l'unité ;
@@ -2703,10 +3905,36 @@ fn abs_geometry(
     cfs: f32,
     ctx: &BlockCtx,
 ) -> AbsGeo {
-    let l = css_px(cst, "left", target.width, cfs, ctx);
-    let r = css_px(cst, "right", target.width, cfs, ctx);
-    let t = css_px(cst, "top", target.height, cfs, ctx);
-    let b = css_px(cst, "bottom", target.height, cfs, ctx);
+    // Insets logiques (css-logical-1) : le nom logique
+    // alimentant chaque côté physique suit `writing-mode`/
+    // `direction` ([`logical_insets`]) ; la valeur physique
+    // gagne quand les deux coexistent (la cascade garde
+    // l'ordre des déclarations — approximation : physique >
+    // logique).
+    let or_log = |phys: Option<f32>, log: &str, basis: f32| {
+        phys.or_else(|| css_px(cst, log, basis, cfs, ctx))
+    };
+    let (log_l, log_r, log_t, log_b) = logical_insets(cst);
+    let l = or_log(
+        css_px(cst, "left", target.width, cfs, ctx),
+        log_l,
+        target.width,
+    );
+    let r = or_log(
+        css_px(cst, "right", target.width, cfs, ctx),
+        log_r,
+        target.width,
+    );
+    let t = or_log(
+        css_px(cst, "top", target.height, cfs, ctx),
+        log_t,
+        target.height,
+    );
+    let b = or_log(
+        css_px(cst, "bottom", target.height, cfs, ctx),
+        log_b,
+        target.height,
+    );
     let ml = side_px(cst, "margin-left", target.width, cfs, ctx, 0.0);
     let mr = side_px(cst, "margin-right", target.width, cfs, ctx, 0.0);
     let mt = side_px(cst, "margin-top", target.width, cfs, ctx, 0.0);
@@ -2798,6 +4026,15 @@ fn establishes_fixed_cb(bx: &LayoutBox) -> bool {
         || non_none("filter")
         || non_none("backdrop-filter")
         || non_none("perspective")
+        // `transform-style: preserve-3d` = propriété de
+        // regroupement (css-transforms-2 §grouping) : CB +
+        // stacking context même quand le rendu aplatit
+        // (notre moteur planaire — la scène 3D est un
+        // résidu documenté).
+        || bx
+            .style
+            .get("transform-style")
+            .is_some_and(|v| v.trim().eq_ignore_ascii_case("preserve-3d"))
         || bx.style.get("will-change").is_some_and(|v| {
             v.split(&[',', ' '][..]).any(|t| {
                 matches!(

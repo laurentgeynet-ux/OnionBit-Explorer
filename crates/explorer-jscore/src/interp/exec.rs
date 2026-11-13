@@ -55,6 +55,19 @@ impl Engine {
     pub(crate) fn eval_source(&mut self, src: &str) -> JsResult<Value> {
         // `eval` direct : le texte hérite du strict appelant —
         // early errors (`01`, `delete x`) et effets runtime.
+        if std::env::var_os("EXPLORER_CTX_PROBE").is_some() {
+            let wid = match self.get_prop(self.global, "window") {
+                Some(Value::Obj(o)) => format!("{o:?}"),
+                _ => "-".to_string(),
+            };
+            eprintln!(
+                "[ctxp] kind=eval ctx={} global={:?} window={} bytes={}",
+                self.cur_ctx,
+                self.global,
+                wid,
+                src.len()
+            );
+        }
         if let Some(h) = &self.eval_hook {
             h(src);
         }
@@ -64,7 +77,7 @@ impl Engine {
             src,
             self.strict,
             self.nest_limit,
-            Some(std::rc::Rc::from("<eval>")),
+            Some(std::rc::Rc::from(Self::eval_src_tag(src))),
         )
         .map_err(|err| {
             Thrown(self.error_value(self.protos.syntax_error, "SyntaxError", &err.to_string()))
@@ -130,7 +143,7 @@ impl Engine {
             src,
             self.strict,
             self.nest_limit,
-            Some(std::rc::Rc::from("<eval>")),
+            Some(std::rc::Rc::from(Self::eval_src_tag(src))),
         )
         .map_err(|err| {
             Thrown(self.error_value(self.protos.syntax_error, "SyntaxError", &err.to_string()))
@@ -142,17 +155,40 @@ impl Engine {
         r
     }
 
+    /// N1.5 — le bytecode `VM BotGuard` est livré par `eval()`
+    /// (src="<eval>", invisible aux sondes par-src). Si la source
+    /// mentionne `trayride`, on la marque du src de l'interpréteur
+    /// → `bg.call`/`bg.listen`/frames la voient.
+    fn eval_src_tag(src: &str) -> &'static str {
+        if src.contains("trayride") {
+            "<eval:google.com/js/th>"
+        } else {
+            "<eval>"
+        }
+    }
+
     /// Dump des sources évaluées sous `EXPLORER_EVAL_DUMP`
     /// (diagnostic §B-59/J11 : nommer le blob `eval()` en
     /// boucle — `YouTube` hydrate via un gros payload évalué).
     /// Un fichier `_evaldump_NNN.js` par source, cwd du daemon.
     fn dump_eval_source(src: &str) {
         static N: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
-        if std::env::var_os("EXPLORER_EVAL_DUMP").is_none() {
+        static DIR: std::sync::OnceLock<Option<String>> = std::sync::OnceLock::new();
+        let Some(dir) = DIR
+            .get_or_init(|| std::env::var("EXPLORER_EVAL_DUMP").ok())
+            .as_ref()
+        else {
             return;
-        }
+        };
         let n = N.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-        let path = format!("_evaldump_{n:03}.js");
+        // Valeur = répertoire de sortie (cwd du daemon WMI =
+        // System32\wbem, non inscriptible — `dir` vide/`1` tombe
+        // sur le cwd historique).
+        let path = if dir.is_empty() || dir == "1" {
+            format!("_evaldump_{n:03}.js")
+        } else {
+            format!("{dir}/_evaldump_{n:03}.js")
+        };
         let _ = std::fs::write(&path, src);
         eprintln!("[eval-dump] {path} bytes={}", src.len());
     }

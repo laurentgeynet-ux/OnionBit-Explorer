@@ -722,3 +722,661 @@ fn pseudos_first_line_letter_marker() {
         "::marker figé sur la boîte"
     );
 }
+
+// ---------- R-254 : anchor positioning ----------
+
+/// `anchor-name` + `anchor(<bord>)` dans un inset : la boîte
+/// absolue s'accroche au bord de l'ancre nommée (css-anchor-1
+/// MVP — `top: anchor(bottom)` = menu sous l'ancre).
+#[test]
+fn anchor_positioning_base() {
+    let (dom, bx) = laid(
+        "<div id=a></div><div id=m></div>",
+        "#a{position:absolute;left:40px;top:50px;width:20px;height:10px;anchor-name:--menu}\
+         #m{position:absolute;left:anchor(--menu left);top:anchor(--menu bottom);width:30px;height:8px;background:red}",
+    );
+    let a = find(&bx, by_id(&dom, "a"));
+    let m = find(&bx, by_id(&dom, "m"));
+    assert_eq!(a.rect.x, 40.0);
+    // left: anchor(left) → bord gauche de l'ancre.
+    assert_eq!(m.rect.x, 40.0, "menu accroché au bord gauche de l'ancre");
+    // top: anchor(bottom) → sous l'ancre (50+10).
+    assert_eq!(m.rect.y, 60.0, "menu sous l'ancre");
+}
+
+/// `position-anchor` = ancre par défaut des `anchor()` sans
+/// nom ; `center` = milieu d'axe.
+#[test]
+fn anchor_positioning_nom_par_defaut_et_center() {
+    let (dom, bx) = laid(
+        "<div id=a></div><div id=m></div>",
+        "#a{position:absolute;left:0;top:100px;width:40px;height:20px;anchor-name:--a}\
+         #m{position:absolute;position-anchor:--a;left:anchor(right);top:anchor(center);width:10px;height:4px}",
+    );
+    let m = find(&bx, by_id(&dom, "m"));
+    assert_eq!(m.rect.x, 40.0, "bord droit de l'ancre");
+    assert_eq!(m.rect.y, 110.0, "centre vertical de l'ancre (100+10)");
+}
+
+/// Nom inconnu → repli `anchor(…, <len>)` ; sans repli la
+/// boîte garde sa position statique (dégradation, pas de trou).
+#[test]
+fn anchor_positioning_repli_nom_inconnu() {
+    let (dom, bx) = laid(
+        "<div id=m></div>",
+        "#m{position:absolute;left:anchor(--ghost left, 33px);top:anchor(--ghost top, 44px);width:10px;height:10px}",
+    );
+    let m = find(&bx, by_id(&dom, "m"));
+    assert_eq!(
+        (m.rect.x, m.rect.y),
+        (33.0, 44.0),
+        "repli horizontal/vertical — left={:?} top={:?}",
+        m.style.get("left"),
+        m.style.get("top")
+    );
+}
+
+/// `position-area` (R-254 suite) : grille 3×3 autour de
+/// l'ancre — `bottom` = sous l'ancre, `right` = à droite.
+#[test]
+fn anchor_position_area() {
+    let (dom, bx) = laid(
+        "<div id=a></div><div id=m></div><div id=n></div>",
+        "#a{position:absolute;left:100px;top:100px;width:40px;height:20px;anchor-name:--a}\
+         #m{position:absolute;position-anchor:--a;position-area:bottom;width:10px;height:8px}\
+         #n{position:absolute;position-anchor:--a;position-area:top right;width:10px;height:8px}",
+    );
+    let m = find(&bx, by_id(&dom, "m"));
+    let n = find(&bx, by_id(&dom, "n"));
+    // bottom : top = bas de l'ancre ; mot-clé seul →
+    // l'autre axe = `span-all` ≈ centré (R-267, spec :
+    // 100 + (40-10)/2 = 115).
+    assert_eq!((m.rect.x, m.rect.y), (115.0, 120.0), "area bottom");
+    // top right : au-dessus, bord gauche sur bord droit ancre.
+    assert_eq!((n.rect.x, n.rect.y), (140.0, 92.0), "area top right");
+}
+
+/// `anchor()` dans `calc()` (R-254 suite) : substitution
+/// avant évaluation — `calc(anchor(left) + 8px)`.
+#[test]
+fn anchor_dans_calc() {
+    let (dom, bx) = laid(
+        "<div id=a></div><div id=m></div>",
+        "#a{position:absolute;left:40px;top:50px;width:20px;height:10px;anchor-name:--a}\
+         #m{position:absolute;position-anchor:--a;left:calc(anchor(right) + 8px);top:anchor(top);width:5px;height:5px}",
+    );
+    let m = find(&bx, by_id(&dom, "m"));
+    assert_eq!(m.rect.x, 68.0, "anchor(right)+8 dans calc");
+    assert_eq!(m.rect.y, 50.0, "anchor(top) nu");
+}
+
+/// `anchor-size()` dans `width`/`height` (R-254 suite) :
+/// dimension de l'ancre reportée sur la boîte (post-hoc,
+/// contenu non re-flown — approximation documentée).
+#[test]
+fn anchor_size_dimensionne() {
+    let (dom, bx) = laid(
+        "<div id=a></div><div id=m></div>",
+        "#a{position:absolute;left:0;top:0;width:60px;height:14px;anchor-name:--a}\
+         #m{position:absolute;position-anchor:--a;left:anchor(left);top:anchor(bottom);\
+            width:anchor-size(width);height:anchor-size(height)}",
+    );
+    let m = find(&bx, by_id(&dom, "m"));
+    assert_eq!(
+        (m.rect.width, m.rect.height),
+        (60.0, 14.0),
+        "taille = ancre"
+    );
+}
+
+/// `position-try:flip-block` (R-254 suite) : la bulle
+/// ancrée sous l'ancre qui déborde le bas du viewport est
+/// mirée au-dessus de l'ancre.
+#[test]
+fn anchor_position_try_flip() {
+    let (dom, bx) = laid(
+        "<div id=a></div><div id=m></div><div id=n></div>",
+        // Viewport 600×800. Ancre à y=750 → la bulle
+        // `anchor(bottom)` (h=30 → y 770..800 pile ? on force
+        // le débordement : hauteur 80 → 750+20+80=850 > 800).
+        "#a{position:absolute;left:10px;top:750px;width:40px;height:20px;anchor-name:--a}\
+         #m{position:absolute;position-anchor:--a;top:anchor(bottom);left:anchor(left);\
+            width:30px;height:80px;position-try:flip-block}\
+         #n{position:absolute;position-anchor:--a;top:anchor(bottom);left:anchor(left);\
+            width:30px;height:80px}",
+    );
+    let m = find(&bx, by_id(&dom, "m"));
+    let n = find(&bx, by_id(&dom, "n"));
+    // Sans try : sous l'ancre → 770.
+    assert_eq!(n.rect.y, 770.0, "contrôle : ancré sous l'ancre");
+    // Avec flip-block : miroir → centre ancre 760, bulle 80
+    // → y = 2*760 - 770 - 80 = 670.
+    assert_eq!(m.rect.y, 670.0, "flip-block : mirée au-dessus");
+}
+
+/// `position-try-order` : le tri ne retire **aucune** option
+/// (css-anchor-1 §3.5 — il ordonne la priorité, ne filtre
+/// pas l'axe) — `flip-block` seul s'applique même avec
+/// `most-width`. Le tri devient visible quand aucune option
+/// ne « fit » : la **dernière essayée** est appliquée —
+/// `most-width` pousse les Δx en tête → le Δy reste dernier.
+#[test]
+fn anchor_position_try_order() {
+    let (dom, bx) = laid(
+        "<div id=a></div><div id=m></div><div id=n></div>",
+        // body{height} fixe la hauteur document (proxy viewport).
+        "body{height:800px}\
+         #a{position:absolute;left:350px;top:750px;width:40px;height:20px;anchor-name:--a}\
+         #m{position:absolute;position-anchor:--a;top:anchor(bottom);left:anchor(right);\
+            width:30px;height:80px;position-try:flip-block;position-try-order:most-width}\
+         #n{position:absolute;position-anchor:--a;top:anchor(bottom);left:anchor(right);\
+            width:30px;height:80px;position-try:flip-block flip-inline;position-try-order:most-width}",
+    );
+    let m = find(&bx, by_id(&dom, "m"));
+    // Option unique : appliquée quel que soit l'ordre.
+    assert_eq!(m.rect.y, 670.0, "option seule = appliquée");
+    let n = find(&bx, by_id(&dom, "n"));
+    // Débordement x+y, aucune candidate ne « fit » entièrement :
+    // `most-width` trie flip-inline (Δx) en tête → flip-block
+    // reste dernier → c'est lui qui est appliqué (spec).
+    assert_eq!(
+        n.rect.y, 670.0,
+        "most-width : Δx d'abord, Δy dernier appliqué"
+    );
+    assert_eq!(n.rect.x, 390.0, "x non flippé (rejeté)");
+}
+
+/// `position-try` shorthand : les mots-clés `most-*` dans la
+/// valeur portent l'ordre (css-anchor-1 — même sémantique
+/// que `position-try-order`).
+#[test]
+fn anchor_position_try_most_dans_le_shorthand() {
+    let (dom, bx) = laid(
+        "<div id=a></div><div id=n></div>",
+        "body{height:800px}\
+         #a{position:absolute;left:350px;top:750px;width:40px;height:20px;anchor-name:--a}\
+         #n{position:absolute;position-anchor:--a;top:anchor(bottom);left:anchor(right);\
+            width:30px;height:80px;position-try:most-width flip-block flip-inline}",
+    );
+    let n = find(&bx, by_id(&dom, "n"));
+    assert_eq!(n.rect.y, 670.0, "most-width du shorthand trie aussi");
+    assert_eq!(n.rect.x, 390.0);
+}
+
+/// `position-try-order:most-width` mesure la place **réelle**
+/// (R-287) — l'étendue entre le bord de l'ancre et le bord
+/// du bloc conteneur dans la direction du dépôt — pas juste
+/// « le candidat a un Δx ». Ancre près du bord gauche :
+/// `flip-inline` (à gauche de l'ancre) n'a que `ar.x` de
+/// place ; `flip-block` garde `cb_w − ar.right` — trié
+/// **dernier** par `most-width` bien que dénué de Δx, donc
+/// appliqué quand aucune option ne rentre.
+#[test]
+fn anchor_try_most_mesure_la_place_reelle() {
+    let (dom, bx) = laid(
+        "<div id=a></div><div id=n></div>",
+        "body{height:400px}\
+         #a{position:absolute;left:60px;top:350px;width:40px;height:20px;anchor-name:--a}\
+         #n{position:absolute;position-anchor:--a;top:anchor(bottom);left:anchor(right);\
+            width:320px;height:40px;position-try:flip-block flip-inline;\
+            position-try-order:most-width}",
+    );
+    let n = find(&bx, by_id(&dom, "n"));
+    // flip-inline : miroir autour de x=80 → x=−260 (espace
+    // 60) ; flip-block : miroir y → 310 (espace x = 300,
+    // toujours à droite). Les deux débordent encore → la
+    // dernière triée (`flip-inline`, moins de place) est
+    // appliquée — l'ancien tri « Δx d'abord » l'aurait mise
+    // en tête et appliqué `flip-block` à la place.
+    assert_eq!(n.rect.x, -260.0, "most-width : flip-inline dernier");
+    assert_eq!(n.rect.y, 370.0, "y non flippé");
+}
+
+/// `justify-self`/`align-self:anchor-center` (R-254 suite) :
+/// la bulle est centrée sur l'ancre selon chaque axe nommé.
+#[test]
+fn anchor_self_center() {
+    let (dom, bx) = laid(
+        "<div id=a></div><div id=m></div>",
+        "#a{position:absolute;left:100px;top:100px;width:60px;height:20px;anchor-name:--a}\
+         #m{position:absolute;position-anchor:--a;width:20px;height:10px;\
+            justify-self:anchor-center;align-self:anchor-center}",
+    );
+    let m = find(&bx, by_id(&dom, "m"));
+    assert_eq!(m.rect.x, 120.0, "centré h : 100+30−10");
+    assert_eq!(m.rect.y, 105.0, "centré v : 100+10−5");
+}
+
+/// Insets logiques (css-logical-1) : `inset-inline-start`/
+/// `inset-block-start` mappés LTR sur `left`/`top` —
+/// la valeur physique gagne.
+#[test]
+fn insets_logiques_absolus() {
+    let (dom, bx) = laid(
+        "<div id=m></div><div id=n></div>",
+        "#m{position:absolute;inset-inline-start:50px;inset-block-start:60px;width:10px;height:10px}\
+         #n{position:absolute;inset-inline-start:50px;left:70px;inset-block-start:60px;width:10px;height:10px}",
+    );
+    let m = find(&bx, by_id(&dom, "m"));
+    let n = find(&bx, by_id(&dom, "n"));
+    assert_eq!((m.rect.x, m.rect.y), (50.0, 60.0), "logiques → physiques");
+    assert_eq!(n.rect.x, 70.0, "physique > logique");
+    assert_eq!(n.rect.y, 60.0, "logique seul = résolu");
+}
+
+/// `anchor()` en inset **logique** (R-254 suite) :
+/// `inset-inline-start:anchor(left)` se comporte comme
+/// `left:anchor(left)` en LTR.
+#[test]
+fn anchor_inset_logique() {
+    let (dom, bx) = laid(
+        "<div id=a></div><div id=m></div>",
+        "#a{position:absolute;left:40px;top:50px;width:20px;height:10px;anchor-name:--a}\
+         #m{position:absolute;position-anchor:--a;inset-inline-start:anchor(right);inset-block-start:anchor(top);width:5px;height:5px}",
+    );
+    let m = find(&bx, by_id(&dom, "m"));
+    assert_eq!(m.rect.x, 60.0, "inline-start = left → bord droit");
+    assert_eq!(m.rect.y, 50.0, "block-start = top");
+}
+
+/// `justify-self`/`align-self` dans la cellule grid :
+/// `<self-position>` complet — `safe`/`unsafe`/`self-end`
+///`anchor-center` consommés (file affectsv).
+#[test]
+fn grid_self_position() {
+    let (dom, bx) = laid(
+        "<div id=g><div id=a></div></div>",
+        "#g{display:grid;grid-template-columns:100px;grid-template-rows:50px}\
+         #a{justify-self:self-end;align-self:safe center;width:30px;height:10px}",
+    );
+    let a = find(&bx, by_id(&dom, "a"));
+    assert_eq!(a.rect.x, 70.0, "self-end → bout de cellule");
+    assert_eq!(a.rect.y, 20.0, "safe center → centre cellule");
+}
+
+/// §12.8 « Stretch auto Tracks » : une colonne `auto` seule
+/// absorbe tout l'espace libre sous `justify-content`
+/// normal/stretch (défaut) — la cellule fait la largeur du
+/// conteneur, l'item s'y aligne.
+#[test]
+fn grid_colonne_auto_stretch() {
+    let (dom, bx) = laid(
+        "<div id=g><div id=a></div></div>",
+        "#g{display:grid;width:400px}#a{justify-self:end;width:30px;height:10px}",
+    );
+    let g = find(&bx, by_id(&dom, "g"));
+    assert_eq!(g.rect.width, 400.0);
+    let a = find(&bx, by_id(&dom, "a"));
+    // Piste auto étirée à 400 → item aligné en fin de cellule.
+    assert_eq!(a.rect.x + a.rect.width, 400.0, "end → bord droit");
+}
+
+/// `justify-self` ≠ `stretch` → l'item `width:auto` se
+/// comporte en `fit-content` (css-grid §10.1) : sa boîte
+/// retombe sur le contenu au lieu de remplir la cellule.
+#[test]
+fn grid_justify_self_shrink_wrap() {
+    let (dom, bx) = laid(
+        "<div id=g><div id=a>x</div><div id=b></div></div>",
+        "#g{display:grid;width:400px;grid-template-columns:400px}\
+         #a{justify-self:center}#b{justify-self:start;width:30px;height:10px}",
+    );
+    let a = find(&bx, by_id(&dom, "a"));
+    let b = find(&bx, by_id(&dom, "b"));
+    // `a` shrink-wrappe (fit-content ≈ quelques px de texte)
+    // — `center` la décale ; `b` à largeur explicite garde
+    // ses 30 px alignés en début de cellule.
+    assert!(a.rect.width < 100.0, "pas de remplissage 400px");
+    let expected = (400.0 - a.rect.width) / 2.0;
+    assert!(
+        (a.rect.x - expected).abs() < 0.5,
+        "centré dans la cellule : x={} attendu≈{expected}",
+        a.rect.x
+    );
+    assert_eq!(b.rect.x, 0.0, "start → début de cellule");
+    assert_eq!(b.rect.width, 30.0);
+}
+
+/// `font-variant-position:sub|super` déplace la baseline du
+/// run (css-fonts-4 §6.8) quand `vertical-align` est absent.
+#[test]
+fn font_variant_position_decale_baseline() {
+    let base = |css: &str| -> f32 {
+        let (d, b) = laid("<p>l<a id=x>i</a>m</p>", css);
+        find(&b, by_id(&d, "x")).rect.y
+    };
+    let y_ref = base("");
+    let y_sub = base("#x{font-variant-position:sub}");
+    let y_above = base("#x{font-variant-position:super}");
+    assert!(y_sub > y_ref, "sub descend : {y_sub} > {y_ref}");
+    assert!(y_above < y_ref, "super monte : {y_above} < {y_ref}");
+}
+
+/// `alignment-baseline`/`baseline-shift` replient sur la
+/// table `vertical-align` (css-inline-3 / SVG) quand
+/// `vertical-align` est absent.
+#[test]
+fn alignment_baseline_repli() {
+    let (dom, bx) = laid(
+        "<div><span id=a></span><span id=b></span></div>",
+        "div{font-size:40px}\
+         span{display:inline-block;width:10px;height:10px}\
+         #a{alignment-baseline:hanging}\
+         #b{baseline-shift:super}\
+",
+    );
+    let a = find(&bx, by_id(&dom, "a"));
+    let b = find(&bx, by_id(&dom, "b"));
+    // `hanging`→top : ancre la margin box au bord haut (y=0).
+    assert_eq!(a.rect.y, 0.0, "hanging → top");
+    // `super` remonte ≈ 0.33em — le run remonte d'au moins
+    // 1/4 d'em (métriques fonte approximées).
+    assert!(b.rect.y < 0.0, "super : dy négatif ({})", b.rect.y);
+}
+
+/// R-269 — `alignment-baseline` : `top`/`bottom` (bords de
+/// ligne) et `above`/`below`/`over`/`under` (termes WM
+/// verticaux, approchés bord haut/bas) étaient absorbés en
+/// `baseline`. `first`/`auto` restent baseline honnête
+/// (ligne à baseline unique).
+#[test]
+fn alignment_baseline_bords() {
+    let (dom, bx) = laid(
+        // Le run texte garde le strut actif (ligne ≈48px) —
+        // toute-atomes le neutraliserait (quirks §images).
+        "<div>x<span id=a></span><span id=b></span><span id=c></span><span id=d></span></div>",
+        "div{font-size:40px}\
+         span{display:inline-block;width:10px;height:10px}\
+         #a{alignment-baseline:bottom}\
+         #b{alignment-baseline:above}\
+         #c{alignment-baseline:under}\
+         #d{alignment-baseline:first}",
+    );
+    let a = find(&bx, by_id(&dom, "a"));
+    let b = find(&bx, by_id(&dom, "b"));
+    let c = find(&bx, by_id(&dom, "c"));
+    let d = find(&bx, by_id(&dom, "d"));
+    // `bottom`/`under` : margin box au bord BAS de la ligne
+    // (h ≥ fonte 40px ×1.2 ≈ 48 — y > 0 net).
+    assert!(a.rect.y > 20.0, "bottom → bas de ligne ({})", a.rect.y);
+    assert_eq!(a.rect.y, c.rect.y, "under ≈ bottom");
+    // `above` : bord haut → y=0.
+    assert_eq!(b.rect.y, 0.0, "above → haut de ligne");
+    // `first` = baseline → y intermédiaire (descend de
+    // `top`, monte de `bottom`).
+    assert!(d.rect.y > b.rect.y, "first = baseline > top");
+    assert!(d.rect.y < a.rect.y, "first = baseline < bottom");
+}
+
+/// `position-area` `span-*` : mappés sur le côté de base
+/// (la taille spannée exige un re-flow — approximation
+/// documentée, la position change).
+#[test]
+fn anchor_position_area_spans() {
+    let (dom, bx) = laid(
+        "<div><div id=anc></div><div id=t></div></div>",
+        "#anc{position:absolute;left:100px;top:50px;width:40px;height:40px;anchor-name:--a}\
+         #t{position:absolute;position-anchor:--a;position-area:span-bottom span-right;width:10px;height:10px}",
+    );
+    let anc = find(&bx, by_id(&dom, "anc"));
+    let t = find(&bx, by_id(&dom, "t"));
+    assert_eq!(
+        t.rect.y,
+        anc.rect.y + anc.rect.height,
+        "span-bottom → sous ancre"
+    );
+    assert_eq!(
+        t.rect.x,
+        anc.rect.x + anc.rect.width,
+        "span-right → à droite"
+    );
+}
+
+/// `@position-try --nom { … }` : la règle nommée s'applique
+/// quand la boîte déborde (fallback `position-area` +
+/// insets px — MVP css-anchor-1).
+#[test]
+fn anchor_position_try_named() {
+    let (dom, bx) = laid(
+        "<div><div id=anc></div><div id=t></div></div>",
+        "#anc{position:absolute;left:100px;top:4px;width:40px;height:20px;anchor-name:--a}\
+         #t{position:absolute;position-anchor:--a;position-area:top;\
+            position-try:--move;width:10px;height:10px}\
+         @position-try --move{position-area:bottom}",
+    );
+    let anc = find(&bx, by_id(&dom, "anc"));
+    let t = find(&bx, by_id(&dom, "t"));
+    // `top` = y = 4-10 = -6 → déborde → `--move` pose sous
+    // l'ancre (y = 4+20 = 24).
+    assert_eq!(
+        t.rect.y,
+        anc.rect.y + anc.rect.height,
+        "@position-try → sous ancre"
+    );
+}
+
+/// `cq*` (css-contain-3) : sans `container-type` ancêtre le
+/// repli spec = small viewport — `50cqw` = moitié viewport.
+#[test]
+fn container_units_fallback_viewport() {
+    let (dom, bx) = laid("<div id=a></div>", "#a{width:50cqw;height:10cqh}");
+    let a = find(&bx, by_id(&dom, "a"));
+    assert_eq!(a.rect.width, 400.0, "cqw = % viewport");
+    assert_eq!(a.rect.height, 60.0, "cqh = % viewport");
+}
+
+/// R-267 — `<position-area>` dans `position-try` : les
+/// mots-clés de la grille 3×3 (css-anchor-1 §3.4) sont
+/// des candidates qui déplacent la boîte vers la tuile
+/// nommée — ici la paire `top left` (rangée haut,
+/// colonne gauche).
+#[test]
+fn anchor_position_try_area_pair() {
+    let (dom, bx) = laid(
+        "<div id=a></div><div id=m></div><div id=n></div>",
+        "body{height:800px}\
+         #a{position:absolute;left:350px;top:400px;width:40px;height:20px;anchor-name:--a}\
+         #m{position:absolute;position-anchor:--a;left:anchor(right);top:anchor(top);\
+            width:30px;height:20px;position-try:top left}\
+         #n{position:absolute;position-anchor:--a;left:anchor(right);top:anchor(top);\
+            width:30px;height:20px}",
+    );
+    let m = find(&bx, by_id(&dom, "m"));
+    let n = find(&bx, by_id(&dom, "n"));
+    assert_eq!(
+        (n.rect.x, n.rect.y),
+        (390.0, 400.0),
+        "contrôle : déborde à droite"
+    );
+    // Tuile haut-gauche : y = 400-20 = 380, x = 350-30 = 320.
+    assert_eq!(
+        (m.rect.x, m.rect.y),
+        (320.0, 380.0),
+        "top left → tuile haut-gauche"
+    );
+}
+
+/// R-267 — options séparées par virgule (`<try-fallback>#`)
+/// et mot-clé explicite seul : `top` = rangée haut +
+/// colonne `span-all` ≈ centrée ; `right` = Δ nulle
+/// (déjà à droite) → filtrée, boîte inchangée.
+#[test]
+fn anchor_position_try_area_virgules() {
+    let (dom, bx) = laid(
+        "<div id=a></div><div id=m></div><div id=n></div><div id=o></div>",
+        "body{height:800px}\
+         #a{position:absolute;left:350px;top:400px;width:40px;height:20px;anchor-name:--a}\
+         #m{position:absolute;position-anchor:--a;left:anchor(right);top:anchor(top);\
+            width:30px;height:20px;position-try:top, left}\
+         #n{position:absolute;position-anchor:--a;left:anchor(right);top:anchor(top);\
+            width:30px;height:20px;position-try:left, top}\
+         #o{position:absolute;position-anchor:--a;left:anchor(right);top:anchor(top);\
+            width:30px;height:20px;position-try:right}",
+    );
+    let m = find(&bx, by_id(&dom, "m"));
+    let n = find(&bx, by_id(&dom, "n"));
+    let o = find(&bx, by_id(&dom, "o"));
+    // `top` essayée en premier : y = 380, x ≈ 350+5 = 355.
+    assert_eq!(
+        (m.rect.x, m.rect.y),
+        (355.0, 380.0),
+        "top seul → centrée dessus"
+    );
+    // `left` essayée en premier : x = 320, y inchangé.
+    assert_eq!((n.rect.x, n.rect.y), (320.0, 400.0), "left seul → à gauche");
+    // `right` = tuile déjà occupée → Δ(0,0) filtrée.
+    assert_eq!(
+        (o.rect.x, o.rect.y),
+        (390.0, 400.0),
+        "right = candidate nulle"
+    );
+}
+
+/// R-267 — mots-clés ambigus et `self-*` : `start` seul
+/// (ambigu) se répète → tuile start×start (haut-gauche
+/// LTR) ; `self-block-end` = rangée end explicite →
+/// colonne `span-all` ≈ centrée ; `span-left` retombe
+/// sur le côté de base (approximation documentée).
+#[test]
+fn anchor_position_try_area_ambigus() {
+    let (dom, bx) = laid(
+        "<div id=a></div><div id=m></div><div id=n></div><div id=o></div>",
+        "body{height:800px}\
+         #a{position:absolute;left:350px;top:400px;width:40px;height:20px;anchor-name:--a}\
+         #m{position:absolute;position-anchor:--a;left:anchor(right);top:anchor(top);\
+            width:30px;height:20px;position-try:start}\
+         #n{position:absolute;position-anchor:--a;left:anchor(right);top:anchor(top);\
+            width:30px;height:20px;position-try:self-block-end}\
+         #o{position:absolute;position-anchor:--a;left:anchor(right);top:anchor(top);\
+            width:30px;height:20px;position-try:span-left}",
+    );
+    let m = find(&bx, by_id(&dom, "m"));
+    let n = find(&bx, by_id(&dom, "n"));
+    let o = find(&bx, by_id(&dom, "o"));
+    assert_eq!((m.rect.x, m.rect.y), (320.0, 380.0), "start → haut-gauche");
+    assert_eq!(
+        (n.rect.x, n.rect.y),
+        (355.0, 420.0),
+        "self-block-end → dessous centré"
+    );
+    assert_eq!((o.rect.x, o.rect.y), (320.0, 400.0), "span-left → gauche");
+}
+
+/// `position-try` ordonné (css-anchor-1 §3.5) : la première
+/// option dont la boîte rentre dans le viewport gagne —
+/// `--stay` n'est jamais évaluée quand `flip-block` résout
+/// le débordement ; seule, elle est appliquée même si elle
+/// déborde encore (dernière essayée, spec).
+#[test]
+fn anchor_position_try_ordre_declare() {
+    let (dom, bx) = laid(
+        "<div id=a></div><div id=m></div><div id=n></div>",
+        // `body{height}` fixe la hauteur document (proxy
+        // viewport de la passe — tout est abs-pos, sinon la
+        // racine ne fait que ~16 px et rien ne « fit »).
+        "body{height:800px}\
+         #a{position:absolute;left:10px;top:750px;width:40px;height:20px;anchor-name:--a}\
+         #m{position:absolute;position-anchor:--a;top:anchor(bottom);left:anchor(left);\
+            width:30px;height:80px;position-try:flip-block --stay}\
+         #n{position:absolute;position-anchor:--a;top:anchor(bottom);left:anchor(left);\
+            width:30px;height:80px;position-try:--stay}\
+         @position-try --stay{top:50px}",
+    );
+    let m = find(&bx, by_id(&dom, "m"));
+    let n = find(&bx, by_id(&dom, "n"));
+    // flip-block rentre → 670 (miroir) ; --stay jamais lu.
+    assert_eq!(m.rect.y, 670.0, "première option qui fit gagne");
+    // --stay seul : `top:50px` du try → y = 770+50 = 820 —
+    // appliqué bien que débordant (dernière option, spec).
+    assert_eq!(n.rect.y, 820.0, "--stay seul = son inset");
+}
+
+/// `inset-area` = nom d'origine de `position-area` (repli
+/// quand la forme canonique est absente).
+#[test]
+fn anchor_inset_area_alias() {
+    let (dom, bx) = laid(
+        "<div id=a></div><div id=m></div>",
+        "#a{position:absolute;left:10px;top:100px;width:40px;height:20px;anchor-name:--a}\
+         #m{position:absolute;position-anchor:--a;inset-area:bottom;width:30px;height:10px}",
+    );
+    let m = find(&bx, by_id(&dom, "m"));
+    assert_eq!(m.rect.y, 120.0, "inset-area:bottom = sous l'ancre");
+}
+
+/// `position-visibility` (css-anchor-1 §5) : `anchors-
+/// visible` masque la boîte tant que l'ancre est hors
+/// viewport ; `no-overflow` la masque si elle déborde
+/// encore après les fallbacks.
+#[test]
+fn anchor_position_visibility() {
+    let (dom, bx) = laid(
+        "<div id=a></div><div id=b></div><div id=m></div><div id=n></div>",
+        "body{height:800px}\
+         #a{position:absolute;left:10px;top:900px;width:40px;height:20px;anchor-name:--a}\
+         #b{position:absolute;left:10px;top:100px;width:40px;height:20px;anchor-name:--b}\
+         #m{position:absolute;position-anchor:--a;top:anchor(bottom);left:anchor(left);\
+            width:30px;height:10px;position-visibility:anchors-visible}\
+         #n{position:absolute;position-anchor:--b;top:anchor(bottom);left:anchor(left);\
+            width:30px;height:10px;position-visibility:anchors-visible}",
+    );
+    let m = find(&bx, by_id(&dom, "m"));
+    let n = find(&bx, by_id(&dom, "n"));
+    assert_eq!(
+        m.style.get("visibility"),
+        Some("hidden"),
+        "ancre hors viewport → masquée"
+    );
+    assert_ne!(
+        n.style.get("visibility"),
+        Some("hidden"),
+        "ancre visible → rendue"
+    );
+
+    // `no-overflow` : déborde → masquée ; flip qui fit → visible.
+    let (dom2, bx2) = laid(
+        "<div id=a></div><div id=m></div><div id=n></div>",
+        "body{height:800px}\
+         #a{position:absolute;left:10px;top:750px;width:40px;height:20px;anchor-name:--a}\
+         #m{position:absolute;position-anchor:--a;top:anchor(bottom);left:anchor(left);\
+            width:30px;height:80px;position-visibility:no-overflow}\
+         #n{position:absolute;position-anchor:--a;top:anchor(bottom);left:anchor(left);\
+            width:30px;height:80px;position-visibility:no-overflow;position-try:flip-block}",
+    );
+    let m2 = find(&bx2, by_id(&dom2, "m"));
+    let n2 = find(&bx2, by_id(&dom2, "n"));
+    assert_eq!(
+        m2.style.get("visibility"),
+        Some("hidden"),
+        "déborde sans fallback → masquée"
+    );
+    assert_ne!(
+        n2.style.get("visibility"),
+        Some("hidden"),
+        "fallback qui rentre → visible"
+    );
+}
+
+/// Insets logiques × `writing-mode` (css-logical-1) :
+/// `inset-inline-start` en `vertical-rl` alimente `top` ;
+/// `direction:rtl` en horizontal inverse l'axe inline.
+#[test]
+fn anchor_insets_logiques_writing_mode() {
+    let (dom, bx) = laid(
+        "<div id=a></div><div id=m></div><div id=n></div>",
+        "#a{position:absolute;left:40px;top:50px;width:20px;height:10px;anchor-name:--a}\
+         #m{position:absolute;position-anchor:--a;writing-mode:vertical-rl;\
+            inset-inline-start:anchor(top);inset-block-start:anchor(left);width:5px;height:5px}\
+         #n{position:absolute;position-anchor:--a;direction:rtl;\
+            inset-inline-start:anchor(left);width:5px;height:5px}",
+    );
+    let m = find(&bx, by_id(&dom, "m"));
+    // vertical-rl : inline-start → top (y = ancre top),
+    // block-start → right (bord droit sur ancre left).
+    assert_eq!(m.rect.y, 50.0, "vrl : inline-start → top");
+    assert_eq!(m.rect.x + m.rect.width, 40.0, "vrl : block-start → right");
+    let n = find(&bx, by_id(&dom, "n"));
+    // rtl : inline-start → right — le bord DROIT de la
+    // boîte se cale sur l'ancre left.
+    assert_eq!(n.rect.x + n.rect.width, 40.0, "rtl : inline-start → right");
+}

@@ -780,9 +780,14 @@ pub enum Expr {
     /// `o[key]`.
     Index(Box<Expr>, Box<Expr>),
     /// `f(a, b)` — `this` is the base object for `o.m(…)` calls.
-    Call(Box<Expr>, Vec<Expr>),
-    /// `new F(a)`.
-    New(Box<Expr>, Vec<Expr>),
+    /// Le troisième champ porte la position 1-based `(ligne,
+    /// colonne)` du `(` — site d'appel rendu dans les frames
+    /// `error.stack` (N1.1) ; `(0, 0)` pour les nœuds
+    /// synthétisés par le moteur.
+    Call(Box<Expr>, Vec<Expr>, (usize, usize)),
+    /// `new F(a)` — même convention d'appel-site que `Call`
+    /// (position du mot-clé `new`).
+    New(Box<Expr>, Vec<Expr>, (usize, usize)),
     /// `a, b` comma sequence.
     Seq(Vec<Expr>),
     /// `` `t${e}…` `` — `parts.len() == exprs.len() + 1`.
@@ -887,8 +892,8 @@ impl Expr {
             Self::Cond(c, t, e) => Self::Cond(c.clone(), t.clone(), e.clone()),
             Self::Member(o, p) => Self::Member(o.clone(), p.clone()),
             Self::Index(o, k) => Self::Index(o.clone(), k.clone()),
-            Self::Call(f, args) => Self::Call(f.clone(), args.clone()),
-            Self::New(f, args) => Self::New(f.clone(), args.clone()),
+            Self::Call(f, args, p) => Self::Call(f.clone(), args.clone(), *p),
+            Self::New(f, args, p) => Self::New(f.clone(), args.clone(), *p),
             Self::Seq(items) => Self::Seq(items.clone()),
             Self::Template { parts, exprs } => Self::Template {
                 parts: parts.clone(),
@@ -957,7 +962,7 @@ impl Expr {
                 take(t, out);
                 take(e, out);
             }
-            Expr::Call(f, args) | Expr::New(f, args) => {
+            Expr::Call(f, args, _) | Expr::New(f, args, _) => {
                 take(f, out);
                 out.append(args);
             }

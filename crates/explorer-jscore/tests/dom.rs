@@ -167,6 +167,36 @@ fn element_load_does_not_bubble_to_window() {
 }
 
 #[test]
+fn inserted_data_script_stays_inert() {
+    // N1.3 — un `<script type="application/json">` (data-block,
+    // inerte spec) inséré dynamiquement ne doit pas partir en
+    // `pending_dyn` : avant le fix, `note_attached_scripts`
+    // enfilait tout `script` attaché — les data-blocks clonés
+    // depuis un template CE finissaient en `dyn.err` syntaxique
+    // (vol_ctxp : `dyn:7`/`dyn:8` `expected ;` à 1:12).
+    let dom = Rc::new(RefCell::new(Dom::from_html(PAGE)));
+    let mut e = Engine::new();
+    e.install_dom(&dom);
+    e.eval(
+        "var s = document.createElement('script');\
+         s.type = 'application/json';\
+         s.text = '{\"a\": 1}';\
+         document.body.appendChild(s);\
+         var s2 = document.createElement('script');\
+         s2.textContent = 'var __ran2 = 1';\
+         document.body.appendChild(s2)",
+    )
+    .expect("insert");
+    let reqs = e.drain_dyn_scripts();
+    assert_eq!(reqs.len(), 1, "seul le script exécutable part");
+    assert_eq!(reqs[0].src, None);
+    assert_eq!(
+        reqs[0].text.as_deref().map(str::trim),
+        Some("var __ran2 = 1")
+    );
+}
+
+#[test]
 fn document_written_script_stays_inert() {
     // Un `<script>` écrit n'exécute pas dans le miroir —
     // l'ordonnancement revient à l'amont (étape 50), qui le
@@ -297,12 +327,44 @@ fn html_element_interfaces_detectable() {
 }
 
 #[test]
+fn tag_interfaces_mod_menu_time() {
+    // Étape 219 / `html.elem` BCD — `del`/`ins` →
+    // `HTMLModElement`, `menu` → `HTMLMenuElement` (câblage
+    // `tag_interface`) ; `time.dateTime` reflète l'attribut
+    // `datetime`.
+    assert_eq!(
+        ev("['del','ins','menu','time'].map(function(t){\
+            return document.createElement(t) instanceof \
+            globalThis[{del:'HTMLModElement',ins:'HTMLModElement',\
+            menu:'HTMLMenuElement',time:'HTMLTimeElement'}[t]]}).join(',')"),
+        "true,true,true,true"
+    );
+    assert_eq!(
+        ev("var t=document.createElement('time');t.dateTime='2026-11';\
+            t.getAttribute('datetime')+':'+t.dateTime"),
+        "2026-11:2026-11"
+    );
+}
+
+#[test]
 fn navigator_is_fixed_and_poor() {
-    assert_eq!(ev("navigator.userAgent"), "Explorer/0.1 (explorer-jscore)");
-    // Deliberately absent: plugins et APIs matérielles ;
+    // `userAgent` identique à l'en-tête HTTP `User-Agent`
+    // (h1.rs) — token `Explorer` honnête conservé, forme
+    // navigateur standard (JS-C493).
+    assert_eq!(
+        ev("navigator.userAgent"),
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Explorer/0.2 Safari/537.36"
+    );
+    // `plugins` = PluginArray vide honnête (JS-C495 — les
+    // navigateurs réels exposent toujours la collection, même
+    // vide : `undefined` est plus fingerprintable que la forme
+    // spec) ; APIs matérielles restent absentes ;
     // `geolocation` existe depuis B-14 (stub honnête
     // `POSITION_UNAVAILABLE`, jamais de succès fabriqué).
-    assert_eq!(ev("navigator.plugins === undefined"), "true");
+    assert_eq!(ev("navigator.plugins.length"), "0");
+    assert_eq!(ev("navigator.plugins.item(0)"), "null");
+    assert_eq!(ev("navigator.plugins.namedItem('x')"), "null");
+    assert_eq!(ev("navigator.plugins.toString()"), "[object PluginArray]");
     assert_eq!(ev("typeof navigator.geolocation"), "object");
 }
 
@@ -759,6 +821,38 @@ fn define_duplicate_throws_domexception_not_supported() {
             catch (e) { [e instanceof DOMException, e.name].join('|') }"
         ),
         "true|SyntaxError"
+    );
+}
+
+#[test]
+fn docfrag_derived_class_keeps_derived_proto() {
+    // kevlar JS-C481 : `class X extends DocumentFragment` (le
+    // contrôleur PolySi `c2q`) — le nœud fragment rendu par le
+    // ctor natif doit porter `X.prototype` (newTarget), sinon
+    // les membres mixés de `X` sont invisibles sur l'instance
+    // (wrapper `zc` creux : `h`/`ga`/`Xb` null, méthodes
+    // `updateReduxProperties` injoignables).
+    assert_eq!(
+        ev("class X extends DocumentFragment {};\
+            X.prototype.marker = 'mix';\
+            var x = new X();\
+            [x instanceof X, x instanceof DocumentFragment, x.nodeType, x.marker].join('|')"),
+        "true|true|11|mix"
+    );
+    // Même sémantique via la voie « fake-inheritance » kevlar :
+    // `d = function(){ return Base.apply(this) || this }` —
+    // `DocumentFragment.apply(this)` sur un `this` frais de
+    // `new d` doit lier le nœud au proto de `d`.
+    assert_eq!(
+        ev(
+            "function Base() { return DocumentFragment.apply(this) || this; }\
+            function D() { return Base.apply(this, arguments) || this; }\
+            Object.setPrototypeOf(D, Base);\
+            D.prototype.marker = 'mix';\
+            var u = new D();\
+            [u instanceof D, u.nodeType, u.marker].join('|')"
+        ),
+        "true|11|mix"
     );
 }
 
@@ -2039,6 +2133,29 @@ fn mutation_observer_character_data() {
 }
 
 #[test]
+fn mutation_observer_character_data_via_text_content() {
+    // JS-C487 — `textContent=` sur un nœud `CharacterData`
+    // (Text/Comment) écrit `.data` et émet `characterData`
+    // (spec `Node.textContent`), pas un `replace_children` —
+    // rail `Polymer.Async.microTask` (MutationObserver sur un
+    // texte détaché).
+    assert_eq!(
+        ev2(
+            PAGE,
+            "var log='';\
+             var tn=document.createTextNode('abc');\
+             var mo=new MutationObserver(function(rs){\
+               log=rs[0].type+'|'+rs[0].oldValue+'|'+tn.data+'|'+tn.children.length;\
+             });\
+             mo.observe(tn,{characterData:true,characterDataOldValue:true});\
+             tn.textContent='xyz';",
+            "log"
+        ),
+        "characterData|abc|xyz|0"
+    );
+}
+
+#[test]
 fn mutation_observer_callback_can_mutate_again() {
     assert_eq!(
         ev2(
@@ -2341,6 +2458,23 @@ fn event_dispatche_surface_honnete() {
         ),
         "1"
     );
+    // JS-C491 — `ev.path` (legacy Blink/WebKit, ère ShadyDOM/
+    // Polymer — le code kevlar lit `e.path` directement) : le
+    // tableau du chemin de composition pendant le dispatch,
+    // `[]` hors dispatch — alias de `composedPath()`.
+    assert_eq!(
+        ev2(
+            PAGE,
+            "var r='';var el=document.getElementById('main');\
+             el.addEventListener('x',function(e){\
+             r=(Array.isArray(e.path)?'arr':'?')+'|'+e.path.length+'|'+e.path[0].id+'|'+\
+             (e.path[e.path.length-1]===document?'doc':'?')});\
+             el.dispatchEvent(new Event('x',{bubbles:true}));\
+             r=r+'|'+(new Event('x').path.length)",
+            "r"
+        ),
+        "arr|4|main|doc|0"
+    );
     // `preventDefault` est no-op sans `cancelable` (spec) ;
     // `dispatchEvent` rend `!defaultPrevented`.
     assert_eq!(
@@ -2380,6 +2514,83 @@ fn event_dispatche_surface_honnete() {
             "r"
         ),
         "true|false|true|undefined"
+    );
+}
+
+/// JS-C484 — `instanceof` pendant le dispatch : l'`EventHost`
+/// présenté aux listeners porte le proto JS de l'event
+/// dispatché (`new CustomEvent` → `CustomEvent.prototype`,
+/// sinon `%Event.prototype%` du realm). Mesuré `YouTube` :
+/// `_.re(H)` teste `H instanceof Event` — faux sinon →
+/// wrapper `ohH` sans `rootTarget` → `TypeError:
+/// assignParentResizable of Undefined` dans iron-resize →
+/// `connectedCallback` tué (`ce.cc_threw` tp-yt-*).
+#[test]
+fn dispatched_event_keeps_instanceof() {
+    // `new CustomEvent` dispatché : le listener voit
+    // `e instanceof CustomEvent` *et* `e instanceof Event`,
+    // et les props servies par le host (`type`/`detail`)
+    // restent intactes (le host prime sur la chaîne proto).
+    assert_eq!(
+        ev2(
+            PAGE,
+            "var r='';var el=document.getElementById('main');\
+             el.addEventListener('ce',function(e){\
+             r=(e instanceof CustomEvent)+'|'+(e instanceof Event)+'|'+\
+             e.type+'|'+e.detail.n+'|'+(e instanceof MouseEvent)});\
+             el.dispatchEvent(new CustomEvent('ce',{detail:{n:3}}))",
+            "r"
+        ),
+        "true|true|ce|3|false"
+    );
+    // `new Event` → `e instanceof Event` dans le listener.
+    assert_eq!(
+        ev2(
+            PAGE,
+            "var r='';var el=document.getElementById('main');\
+             el.addEventListener('x',function(e){r=(e instanceof Event)+'|'+e.type});\
+             el.dispatchEvent(new Event('x'))",
+            "r"
+        ),
+        "true|x"
+    );
+    // `createEvent` + `initEvent` (EventHost dispatché en
+    // arg) : proto hôte générique → repli `%Event.prototype%`.
+    assert_eq!(
+        ev2(
+            PAGE,
+            "var r='';var el=document.getElementById('main');\
+             el.addEventListener('y',function(e){r=(e instanceof Event)+'|'+e.type});\
+             var ev=document.createEvent('HTMLEvents');ev.initEvent('y',false,false);\
+             el.dispatchEvent(ev)",
+            "r"
+        ),
+        "true|y"
+    );
+    // Literal `{type}` dispatché : repli `%Event.prototype%`.
+    assert_eq!(
+        ev2(
+            PAGE,
+            "var r='';var el=document.getElementById('main');\
+             el.addEventListener('z',function(e){r=(e instanceof Event)+'|'+e.type});\
+             el.dispatchEvent({type:'z'})",
+            "r"
+        ),
+        "true|z"
+    );
+    // Re-dispatch de l'event reçu : le proto survit au second
+    // passage (receveur #2 voit encore `instanceof`).
+    assert_eq!(
+        ev2(
+            PAGE,
+            "var r='';var a=document.getElementById('main');\
+             var b=document.getElementById('list');\
+             b.addEventListener('w',function(e){r=(e instanceof CustomEvent)+'|'+e.detail.k});\
+             a.addEventListener('w',function(e){b.dispatchEvent(e)});\
+             a.dispatchEvent(new CustomEvent('w',{detail:{k:5}}))",
+            "r"
+        ),
+        "true|5"
     );
 }
 
@@ -3760,6 +3971,37 @@ fn c294_el_constructor_suit_le_proto() {
         ),
         "true|false|T:x|true"
     );
+}
+
+#[test]
+fn c496_clone_survives_gc_during_ce_upgrade() {
+    // JS-C496 — `cloneNode(true)`/`importNode(·,true)` sur une
+    // racine **non-CE** : `ce_upgrade_subtree` joue les ctors CE
+    // des descendants **avant** `node_value` — le clone détaché
+    // et sans wrapper était récolté par le safepoint GC →
+    // retour `undefined` → `__noInsertionPoint` posé sur
+    // Undefined (mur stamp Polymer `dom-if`/`dom-repeat`,
+    // YouTube). La racine est épinglée le temps de la passe.
+    let mut e =
+        engine_with("<html><body><div id=\"h\"><p>t</p><x-g a=\"1\"></x-g></div></body></html>");
+    e.eval(
+        "class XG extends HTMLElement{constructor(){super();\
+         for(var i=0;i<60000;i++){var o=[i,'q'+i,i*2];this.n=i}}}\
+         customElements.define('x-g',XG);",
+    )
+    .unwrap();
+    // `gc_debt(4 Mio)` = 1 Mio — le churn du ctor arme `gc_due`
+    // → safepoint GC en plein `ce_upgrade_subtree`.
+    e.set_mem_limit(4 * 1024 * 1024);
+    let v = e
+        .eval(
+            "var c=document.getElementById('h').cloneNode(true);\
+             var d=document.importNode(document.getElementById('h'),true);\
+             [typeof c,c?c.nodeType+':'+c.childNodes.length:'-',\
+              typeof d,d?d.nodeType+':'+d.childNodes.length:'-'].join('|')",
+        )
+        .unwrap();
+    assert_eq!(e.describe(v), "object|1:2|object|1:2");
 }
 
 /// Eval via `describe` — multi-appels sur le même moteur.
@@ -5601,12 +5843,15 @@ fn cap179_fullscreen_popover() {
         "true|false"
     );
     // Popover : show/hide/toggle + `InvalidStateError` rules.
+    // `typeof q.showPopover` = 'function' même hors `popover`
+    // (méthode `HTMLElement` — visible partout, Pareto `api`
+    // lot 3 ; l'ancien `undefined` était l'absence historique).
     assert_eq!(
         evf(&mut e,
             "var tg='';p.addEventListener('toggle',function(){tg+='T'});p.addEventListener('beforetoggle',function(){tg+='b'});\
             p.showPopover();p.showPopover===undefined;\
             [tg, typeof q.showPopover].join('|')"),
-        "bT|undefined"
+        "bT|function"
     );
     assert_eq!(
         evf(
@@ -7307,5 +7552,373 @@ var li2 = list.children[0];\
 Node.prototype.removeChild.call(list, li2);\
 list.children.length"),
         "1"
+    );
+}
+
+// ===== Pareto `api` lot 3 (étape 219 suite) — réflexions
+// `ARIAMixin`, `Element` triviaux, `CustomEvent.detail`,
+// substitutions console, `HTMLElement` restants.
+
+/// `ariaXxx` reflète `aria-xxx` en `DOMString?` : absent →
+/// `null`, `null` écrit → retrait d'attribut, table bornée à
+/// la liste spec (`ariaFoo` arbitraire non réfléchi).
+#[test]
+fn aria_reflections() {
+    assert_eq!(
+        ev("var b=document.getElementById('main');\
+            ('ariaLabel' in b)+'/'+b.ariaLabel+'/'+('ariaFoobar' in b)"),
+        "true/null/false"
+    );
+    assert_eq!(
+        ev("var b=document.getElementById('main');\
+            b.ariaLabel='titre';\
+            b.getAttribute('aria-label')+'/'+b.ariaLabel;\
+            "),
+        "titre/titre"
+    );
+    // `= null` → `removeAttribute` (spec `DOMString?`).
+    assert_eq!(
+        ev("var b=document.getElementById('main');\
+            b.setAttribute('aria-hidden','true');\
+            var a=b.ariaHidden;\
+            b.ariaHidden=null;\
+            a+'/'+b.ariaHidden+'/'+b.hasAttribute('aria-hidden')"),
+        "true/null/false"
+    );
+}
+
+/// `Element` triviaux : `role`/`prefix`/`clientTop`/`part`,
+/// `getElementsByTagNameNS`, capture de pointeur.
+#[test]
+fn element_misc_lot3() {
+    assert_eq!(
+        ev("var b=document.getElementById('main');\
+            b.setAttribute('role','note');\
+            b.role+'/'+b.prefix+'/'+b.clientTop+'/'+('part' in b)"),
+        "note/null/0/true"
+    );
+    // `part` = DOMTokenList vivante sur l'attribut `part`.
+    assert_eq!(
+        ev("var b=document.getElementById('main');\
+            b.part.add('thumb');\
+            b.getAttribute('part')+'/'+b.part.contains('thumb')"),
+        "thumb/true"
+    );
+    // `getElementsByTagNameNS` — `*`/`ns xhtml`/`ns raté`.
+    assert_eq!(
+        ev("var d=document;\
+            d.getElementsByTagNameNS('*','li').length+'/'+\
+            d.getElementsByTagNameNS('http://www.w3.org/1999/xhtml','li').length+'/'+\
+            d.getElementsByTagNameNS('http://www.w3.org/2000/svg','li').length"),
+        "2/2/0"
+    );
+    // Capture : set → has(id) ; release(id) ne relâche que
+    // le capturé.
+    assert_eq!(
+        ev("var b=document.getElementById('main');\
+            b.setPointerCapture(7);\
+            var a=b.hasPointerCapture(7),c=b.hasPointerCapture(9);\
+            b.releasePointerCapture(9);\
+            var still=b.hasPointerCapture(7);\
+            b.releasePointerCapture(7);\
+            a+'/'+c+'/'+still+'/'+b.hasPointerCapture(7)"),
+        "true/false/true/false"
+    );
+}
+
+/// Handlers `on*` ajoutés — présents en props (`null`), pas
+/// en `undefined` (le nom inconnu reste `undefined`).
+#[test]
+fn event_handler_props_lot3() {
+    assert_eq!(
+        ev("var b=document.getElementById('main');\
+            ('onfocusin' in b)+'/'+b.onfocusin+'/'+('onpaste' in b)+'/'+\
+            ('oncommand' in b)+'/'+('onfullscreenchange' in b)+'/'+b.onarbitrarybogus"),
+        "true/null/true/true/true/undefined"
+    );
+}
+
+/// `CustomEvent` : `detail` propre `null` par défaut (clé
+/// présente), init `detail` copié tel quel.
+#[test]
+fn custom_event_detail() {
+    assert_eq!(
+        ev("var c=new CustomEvent('x');('detail' in c)+'/'+c.detail"),
+        "true/null"
+    );
+    assert_eq!(
+        ev("var c=new CustomEvent('x',{detail:{a:41}});c.detail.a+1"),
+        "42"
+    );
+}
+
+/// `console.log` — substitutions `%s`/`%d`/`%f`/`%o`/`%j`/`%%`,
+/// `%c` consommé silencieusement.
+#[test]
+fn console_substitution_strings() {
+    let lines = Rc::new(RefCell::new(Vec::new()));
+    let cap = lines.clone();
+    let mut e = engine_with("<html><body></body></html>");
+    e.set_console_hook(Rc::new(move |l| cap.borrow_mut().push(l)));
+    e.eval(
+        "console.log('n=%d s=%s f=%f', 41.7, 'hi', 1.5);\
+            console.log('o=%o j=%j pct=100%%', {k:1}, [1]);\
+            console.log('%cred %s', 'color:red', 'plain');",
+    )
+    .expect("eval");
+    let l = lines.borrow();
+    assert_eq!(l[0], "n=41 s=hi f=1.5");
+    assert_eq!(l[1], "o=[object Object] j=[1] pct=100%");
+    assert_eq!(l[2], "red plain");
+}
+
+/// `HTMLElement` restants : `isContentEditable` résolu par
+/// remontée d'ancêtres ; `outerText` lit `textContent`,
+/// écrit = remplacement par nœud texte ; méthodes popover
+/// lisibles.
+#[test]
+fn htmlelement_lot3() {
+    // Hérité du `contenteditable` de l'ancêtre ; `"false"`
+    // du plus proche déclarant prime.
+    assert_eq!(
+        ev_in(
+            "<html><body><div id=p contenteditable><span id=c>x</span></div>\
+             <div id=q contenteditable=false><span id=r>x</span></div></body></html>",
+            "document.getElementById('c').isContentEditable+'/'+\
+             document.getElementById('r').isContentEditable+'/'+\
+             ('virtualKeyboardPolicy' in document.getElementById('c'))+'/'+\
+             ('writingSuggestions' in document.getElementById('c'))+'/'+\
+             ('headingOffset' in document.getElementById('c'))",
+        ),
+        "true/false/true/true/true"
+    );
+    // `outerText=` remplace l'élément par un texte (spec) —
+    // le fils `#c` disparaît de l'arbre, son texte subsiste.
+    assert_eq!(
+        ev_in(
+            "<html><body><div id=p><span id=c>old</span></div></body></html>",
+            "var c=document.getElementById('c');\
+             c.outerText='new';\
+             document.getElementById('p').innerHTML+'/'+\
+             (document.getElementById('c')==null)",
+        ),
+        "new/true"
+    );
+    // Popover : lisible (`in`/`typeof`) + bascule existante.
+    assert_eq!(
+        ev("var b=document.getElementById('main');\
+            ('togglePopover' in b)+'/'+typeof b.showPopover+'/'+('hidePopover' in b)"),
+        "true/function/true"
+    );
+}
+
+// ===== Pareto `api` lot 3b — méthodes d'insertion `*HTML`
+// (HTML insertion methods) : rails `insertAdjacentHTML`/
+// `innerHTML`, `*Unsafe` même rail (pas de sanitiser).
+
+/// `beforeHTML`/`afterHTML`/`prependHTML`/`appendHTML` insèrent
+/// le fragment parsé à la bonne position ; `setHTML` ≙
+/// `innerHTML=` ; `replaceWithHTML` substitue l'élément.
+#[test]
+fn html_insertion_methods_lot3b() {
+    assert_eq!(
+        ev_in(
+            "<html><body><div id=h><span id=c>x</span></div></body></html>",
+            "var h=document.getElementById('h');\
+             h.beforeHTML('<b id=B1>i</b>');\
+             h.afterHTML('<b id=A1>f</b>');\
+             h.prependHTML('<i id=P>i</i>');\
+             h.appendHTML('<u id=U>u</u>');\
+             document.body.innerHTML",
+        ),
+        "<b id=\"B1\">i</b><div id=\"h\"><i id=\"P\">i</i><span id=\"c\">x</span><u id=\"U\">u</u></div><b id=\"A1\">f</b>"
+    );
+    // `setHTML` remplace le contenu (rail `set_inner_html`).
+    assert_eq!(
+        ev_in(
+            "<html><body><div id=h><span>x</span></div></body></html>",
+            "document.getElementById('h').setHTML('<em>s</em>');\
+             document.getElementById('h').innerHTML",
+        ),
+        "<em>s</em>"
+    );
+    // `replaceWithHTML` — l'élément sort du document.
+    assert_eq!(
+        ev_in(
+            "<html><body><div id=p><div id=h>x</div></div></body></html>",
+            "document.getElementById('h').replaceWithHTML('<q id=R>rq</q>');\
+             document.getElementById('p').innerHTML+'|'+\
+             (document.getElementById('h')==null)+'|'+\
+             document.getElementById('R').tagName",
+        ),
+        "<q id=\"R\">rq</q>|true|Q"
+    );
+    // Lisibilité + variantes `*Unsafe` (même rail).
+    assert_eq!(
+        ev("var d=document.createElement('div');\
+            ('beforeHTML' in d)+'/'+('setHTML' in d)+'/'+\
+            ('replaceWithHTMLUnsafe' in d)+'/'+('appendHTMLUnsafe' in d)+'/'+\
+            typeof d.beforeHTML"),
+        "true/true/true/true/function"
+    );
+}
+
+// ===== Pareto `api` lot 4 — reflets `aria*Elements`/`aria*Element`
+// (ARIAMixin §6) : attribut idref(s) → élément(s) résolu(s)
+// `by_id` ; setter = ids sérialisés (approximation — les
+// références explicites de la spec ne sont pas conservées).
+
+/// `ariaLabelledByElements`/`ariaControlsElements` rendent un
+/// tableau ordonné d'éléments (ids morts filtrés) ;
+/// `ariaActiveDescendantElement`/`ariaErrorMessageElement` un
+/// élément ou `null` ; setter écrit les `id`.
+#[test]
+fn aria_elements_reflections() {
+    assert_eq!(
+        ev_in(
+            "<html><body><div id=t aria-labelledby='a b ghost'></div>\
+             <span id=a></span><span id=b></span></body></html>",
+            "var t=document.getElementById('t');\
+             var r=t.ariaLabelledByElements;\
+             r.length+'/'+r[0].id+'/'+r[1].id+'|'+\
+             (t.ariaActiveDescendantElement===null)+'|'+\
+             ('ariaOwnsElements' in t)+'/'+typeof t.ariaControlsElements",
+        ),
+        "2/a/b|true|true/object"
+    );
+    // Multi : `aria-controls` résolu dans l'ordre + setter.
+    assert_eq!(
+        ev_in(
+            "<html><body><div id=t aria-controls='x'></div>\
+             <b id=x></b><b id=y></b><div id=d></div></body></html>",
+            "var t=document.getElementById('t');\
+             t.ariaDescribedByElements=[document.getElementById('x'),document.getElementById('y')];\
+             t.ariaActiveDescendantElement=document.getElementById('y');\
+             document.getElementById('d').ariaErrorMessageElement=null;\
+             t.getAttribute('aria-controls')+'|'+t.getAttribute('aria-describedby')+'|'+\
+             t.getAttribute('aria-activedescendant')+'|'+\
+             document.getElementById('d').hasAttribute('aria-errormessage')",
+        ),
+        "x|x y|y|false"
+    );
+}
+
+/// `parent.moveBefore(node, ref)` — déplacement sans clone
+/// (dom-parts spec) : identité et état conservés, même rail
+/// `insert_before` que `insertBefore`.
+#[test]
+fn move_before_preserves_identity() {
+    assert_eq!(
+        ev_in(
+            "<html><body><div id=a><b id=x>1</b></div><div id=b><i id=y>2</i></div></body></html>",
+            "var x=document.getElementById('x'),b=document.getElementById('b');\
+             var before=x;\
+             b.moveBefore(x,null);\
+             b.moveBefore(document.getElementById('y'),x);\
+             (x===before)+'|'+b.children[0].id+'|'+b.children[1].id+'|'+x.parentNode.id",
+        ),
+        "true|y|x|b"
+    );
+    // Lisibilité `in`.
+    assert_eq!(
+        ev("var d=document.createElement('div');('moveBefore' in d)+'/'+typeof d.moveBefore"),
+        "true/function"
+    );
+}
+
+// ===== Pareto `api` lot 4 — `Text.*` + `Animation` lisibles.
+
+/// `wholeText` concatène les frères texte contigus ;
+/// `splitText` divise le nœud et retourne la queue insérée ;
+/// `getBoxQuads` = tableau vide (pas de géométrie fine).
+#[test]
+fn text_members_lot4() {
+    assert_eq!(
+        ev_in(
+            "<html><body><div id=d>ab<!--c--><span>x</span>tail</div></body></html>",
+            "var t=document.getElementById('d').firstChild;\
+             t.wholeText+'|'+('splitText' in t)+'|'+('getBoxQuads' in t)+'|'+t.getBoxQuads().length",
+        ),
+        "ab|true|true|0"
+    );
+    // `splitText(1)` : `a|b` — le nouveau nœud suit, contigus
+    // → `wholeText` du premier = `ab`.
+    assert_eq!(
+        ev_in(
+            "<html><body><div id=d>ab</div></body></html>",
+            "var t=document.getElementById('d').firstChild;\
+             var q=t.splitText(1);\
+             t.data+'|'+q.data+'|'+t.wholeText+'|'+(t.nextSibling===q)+'|'+document.getElementById('d').childNodes.length",
+        ),
+        "a|b|ab|true|2"
+    );
+    // Erreur hors-bornes → exception (spec `IndexSizeError`).
+    assert_eq!(
+        ev_in(
+            "<html><body><div id=d>ab</div></body></html>",
+            "try{document.getElementById('d').firstChild.splitText(9);'no'}catch(e){e.name}",
+        ),
+        "TypeError"
+    );
+}
+
+/// `Animation` — méthodes lisibles (`in`/`typeof`), `id`
+/// mutable, `replaceState`/`startTime`/`overallProgress`
+/// servis, `onremove` posable.
+#[test]
+fn animation_readable_lot4() {
+    assert_eq!(
+        ev("var a=document.body.animate([{opacity:0}],{duration:9});\
+            ('play' in a)+'|'+('cancel' in a)+'|'+('commitStyles' in a)+'|'+typeof a.pause+'|'+\
+            ('id' in a)+'|'+a.replaceState+'|'+a.startTime+'|'+a.overallProgress+'|'+('onremove' in a)"),
+        "true|true|true|function|true|active|null|null|true"
+    );
+    // `id`/`onremove` mutables ; l'invocation dispatchée.
+    assert_eq!(
+        ev("var a=document.body.animate([{opacity:0}],{duration:9});\
+            a.id='x';var f=0;a.onremove=function(){f=1};\
+            a.pause();a.playState+'|'+a.id+'|'+f"),
+        "paused|x|0"
+    );
+}
+
+// ===== Pareto `api` lot 4 — Typed OM (`attributeStyleMap`
+// mutable, `computedStyleMap` read-only, css-typed-om-1) :
+// vue map-like de la même liste inline que `el.style`.
+
+/// `get`/`has`/`size` lisent les déclarations ; `set`/`append`
+/// `delete`/`clear` écrivent l'attribut ; le read-only jette.
+#[test]
+fn style_typed_om_maps() {
+    assert_eq!(
+        ev_in(
+            "<html><body><div id=t style='color:red;margin-top:4px'></div></body></html>",
+            "var m=document.getElementById('t').attributeStyleMap;\
+             m.size+'|'+m.get('color')+'|'+m.has('margin-top')+'|'+\
+             (typeof m.getAll)+'|'+(typeof m.set)",
+        ),
+        "2|red|true|function|function"
+    );
+    // set/append/delete → rail `style` attr ; forEach ordonné.
+    assert_eq!(
+        ev_in(
+            "<html><body><div id=t style='a:1'></div></body></html>",
+            "var m=document.getElementById('t').attributeStyleMap;\
+             m.set('b','2');m.append('a','3');m.delete('zz');\
+             var seen=[];m.forEach(function(v,k){seen.push(k+'='+v)});\
+             m.clear?document.getElementById('t').style.cssText+':'+seen.join(',')\
+                  :seen.join(',')",
+        ),
+        "a: 1; b: 2; a: 3:a=1,b=2,a=3"
+    );
+    // `computedStyleMap` : même table, `set` jette TypeError.
+    assert_eq!(
+        ev_in(
+            "<html><body><div id=t style='x:9'></div></body></html>",
+            "var c=document.getElementById('t').computedStyleMap();\
+             var ok;try{c.set('y','1');ok='no'}catch(e){ok=e.name||'TypeError'}\
+             c.get('x')+'|'+ok+'|'+('attributeStyleMap' in document.getElementById('t'))",
+        ),
+        "9|TypeError|true"
     );
 }

@@ -43,7 +43,45 @@ impl Session {
     /// plus un reflow). Partagé par [`Self::tick_animations`]
     /// (pull UI) et [`Self::pump_timers_all`] (battement hôte,
     /// étape 55e). `Ok(true)` = frame produite + émise.
+    /// Progression `[0,1]` d'une lecture smooth démarrée à
+    /// `start` (linéaire MVP — `smooth_scroll_ms` de config).
+    pub(crate) fn smooth_progress(&self, start: std::time::Instant) -> f32 {
+        let ms = self.smooth_scroll_ms;
+        if ms == 0 {
+            return 1.0;
+        }
+        #[allow(clippy::cast_precision_loss, clippy::cast_possible_truncation)]
+        // durées ms ≪ 2^24.
+        let p = (start.elapsed().as_secs_f64() * 1000.0 / ms as f64) as f32;
+        p
+    }
+
+    /// Tick `scroll-behavior:smooth` (R-259) : interpole la
+    /// position et repeint à chaque battement — `true` tant
+    /// que la lecture court (le battement reste armé).
+    pub(crate) fn advance_smooth_scroll(&mut self, tab: TabId) -> Result<bool, CoreError> {
+        let Some((from, to, start)) = self.tabs.get(&tab).and_then(|e| e.smooth_scroll) else {
+            return Ok(false);
+        };
+        let p = self.smooth_progress(start).clamp(0.0, 1.0);
+        let y = from + (to - from) * p;
+        let done = p >= 1.0;
+        {
+            let entry = self.tabs.get_mut(&tab).ok_or(CoreError::UnknownTab(tab))?;
+            if done {
+                entry.smooth_scroll = None;
+            }
+            entry.set_scroll(if done { to } else { y });
+        }
+        if !self.tabs.get(&tab).is_some_and(|e| e.paint_detached) {
+            self.repaint(tab)?;
+            self.emit_invalidated(tab);
+        }
+        Ok(!done)
+    }
+
     pub(crate) fn advance_animations(&mut self, tab: TabId) -> Result<bool, CoreError> {
+        let scrolling = self.advance_smooth_scroll(tab)?;
         let now = Instant::now();
         let (active, ords) = self.tabs.get(&tab).map_or((false, Vec::new()), |t| {
             let playing = !t.transitions.is_empty() || t.animations.iter().any(|a| a.playing(now));
@@ -57,7 +95,7 @@ impl Session {
             (playing, o)
         });
         if !active {
-            return Ok(false);
+            return Ok(scrolling);
         }
         match self.relayout_animated(tab, &ords) {
             Ok(()) => {
@@ -67,7 +105,7 @@ impl Session {
             // Peinture détachée pour un apply hors verrou
             // (étape 55h) — l'onglet est transitoirement sans
             // arbre : tick sauté, pas une erreur.
-            Err(CoreError::EmptyDocument) => Ok(false),
+            Err(CoreError::EmptyDocument) => Ok(scrolling),
             Err(e) => Err(e),
         }
     }

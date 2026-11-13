@@ -235,6 +235,111 @@ pub(crate) fn object_set_proto(e: &mut Engine, _t: Value, args: &[Value]) -> JsR
         }
         cur = e.heap.obj(cid).map_or(Value::Null, |o| o.proto.clone());
     }
+    // Sonde cran 47 : `b.__proto__ = ShadowRoot.prototype`
+    // (wc_sd `shadyUpgradeFragment`) re-prototype l'objet. Si le
+    // receveur porte déjà des champs de contrôleur PolySi
+    // (`hostElement`/`__dataEnabled`), c'est le `this` de
+    // `new X` qui passe en fragment d'upgrade — signature du
+    // `zc` creux (`urp@absent`).
+    if crate::builtins::extras::has_own(e, id, "hostElement")
+        || crate::builtins::extras::has_own(e, id, "__dataEnabled")
+    {
+        let host = e
+            .get_prop_value(Value::Obj(id), "hostElement")
+            .ok()
+            .and_then(|h| e.get_prop_value(h, "localName").ok())
+            .and_then(|l| e.to_js_string(l).ok())
+            .unwrap_or_else(|| "?".to_string());
+        // Cran 53c — distinguer fragment stampé (`templateInfo`/
+        // `nodeInfoList`/`$` own) du contrôleur (`root`/`attached`
+        // /`urp` dans la chaîne AVANT le swap — mesure la perte
+        // réelle de la chaîne de classe).
+        let is_frag = crate::builtins::extras::has_own(e, id, "templateInfo")
+            || crate::builtins::extras::has_own(e, id, "nodeInfoList")
+            || crate::builtins::extras::has_own(e, id, "$");
+        let roteq =
+            matches!(e.get_prop_value(Value::Obj(id), "root"), Ok(Value::Obj(r)) if r == id);
+        let urpc = e.find_prop(id, "updateReduxProperties").is_some();
+        let urpo = crate::builtins::extras::has_own(e, id, "updateReduxProperties");
+        // Cran 54 — nommer le proto **remplacé** : en Chrome un
+        // fragment stampé hérite `DocumentFragment.prototype` ;
+        // si le nôtre porte `d.prototype` (proto de classe
+        // Polymer, repérable par `is`/`ctor`), la déviation est
+        // l'héritage du fragment, pas le swap.
+        let pname = e
+            .heap
+            .obj(id)
+            .and_then(|o| match o.proto {
+                Value::Obj(pid) => Some(pid),
+                _ => None,
+            })
+            .map_or_else(
+                || "null".to_string(),
+                |pid| {
+                    let is = e
+                        .get_prop_value(Value::Obj(pid), "is")
+                        .ok()
+                        .and_then(|v| e.to_js_string(v).ok())
+                        .filter(|s| !s.is_empty());
+                    let ctor = e
+                        .get_prop_value(Value::Obj(pid), "constructor")
+                        .ok()
+                        .and_then(|c| e.get_prop_value(c, "name").ok())
+                        .and_then(|n| e.to_js_string(n).ok())
+                        .filter(|s| !s.is_empty());
+                    match (is, ctor) {
+                        (Some(i), Some(c)) => format!("{i}/{c}"),
+                        (Some(i), None) => i,
+                        (None, Some(c)) => c,
+                        (None, None) => "?".to_string(),
+                    }
+                },
+            );
+        // Cran 58 — `nodeType` own (11 = vrai fragment) et
+        // `hpc` : `b` est-il le `polymerController` de son
+        // hôte ? (contrôleur swappé → méthodes de classe
+        // perdues → `loadPage` meurt).
+        let nt = e
+            .get_prop_value(Value::Obj(id), "nodeType")
+            .ok()
+            .and_then(|v| e.to_js_string(v).ok())
+            .unwrap_or_else(|| "?".to_string());
+        let hpc = e
+            .get_prop_value(Value::Obj(id), "hostElement")
+            .ok()
+            .and_then(|h| e.get_prop_value(h, "polymerController").ok())
+            .is_some_and(|pc| e.strict_eq(&pc, &Value::Obj(id)));
+        let stack: String = e
+            .stack_text("", "")
+            .lines()
+            .map(str::trim)
+            .filter(|l| l.starts_with("at "))
+            .take(12)
+            .map(|l| {
+                // Les URLs kevlar (~200 chars) noient le
+                // `:line:col` final — tag du script + queue.
+                let tag = if l.contains("kevlar") {
+                    "kb:"
+                } else if l.contains("webcomponents") {
+                    "wc:"
+                } else {
+                    "ot:"
+                };
+                if l.len() > 60 {
+                    format!("{tag}{}", &l[l.len().saturating_sub(14)..])
+                } else {
+                    format!("{tag}{l}")
+                }
+            })
+            .collect::<Vec<_>>()
+            .join(" <- ");
+        tracing::info!(target: "dom_probe",
+            site = "proto.swap", host = %host,
+            frag = is_frag, roteq, urpc, urpo, pname = %pname,
+            ext = e.heap.obj(id).is_some_and(|o| o.extensible),
+            nt = %nt, hpc,
+            stack = %stack.chars().take(400).collect::<String>());
+    }
     if let Some(o) = e.heap.obj_mut(id) {
         o.proto = proto;
     }
@@ -336,6 +441,30 @@ pub(crate) fn define_one_prop(
     key: &str,
     desc_id: ObjId,
 ) -> JsResult<()> {
+    // Sonde kevlar §cran-27 : `polymerController` peut être
+    // posé par `Object.defineProperty` (acc `get/set` ou
+    // valeur) sans passer `set_prop_value` — la sonde `pc.set`
+    // de l'interp ne le voit pas ; celle-ci le nomme (classe
+    // hôte + forme du descripteur + pile JS bornée).
+    if key == "polymerController" && tracing::enabled!(target: "dom_probe", tracing::Level::INFO) {
+        let cls = e.host_of(id).map_or("<plain>", |h| h.class_name());
+        let dv = e
+            .get_prop(desc_id, "value")
+            .map_or_else(|| "<acc/none>".into(), |v| e.describe(v));
+        let stack: String = e
+            .stack_text("", "")
+            .lines()
+            .map(str::trim)
+            .filter(|l| l.starts_with("at "))
+            .take(8)
+            .collect::<Vec<_>>()
+            .join(" <- ");
+        let stack: String = stack.chars().take(600).collect();
+        tracing::info!(target: "dom_probe",
+            site = "pc.def", host = %cls,
+            v = %dv.chars().take(120).collect::<String>(),
+            stack = %stack);
+    }
     let r = define_one_prop_impl(e, id, key, desc_id);
     if let Err(t) = &r {
         crate::defprop_note(defprop_err_desc(e, id, key, t));

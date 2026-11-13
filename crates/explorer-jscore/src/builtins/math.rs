@@ -31,6 +31,9 @@ math1!(math_sin, f64::sin);
 math1!(math_cos, f64::cos);
 math1!(math_tan, f64::tan);
 math1!(math_atan, f64::atan);
+math1!(math_asinh, f64::asinh);
+math1!(math_acosh, f64::acosh);
+math1!(math_atanh, f64::atanh);
 
 pub(crate) fn math_round(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
     // JS rounds half up (toward +∞).

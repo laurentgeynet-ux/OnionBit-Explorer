@@ -22,6 +22,7 @@
 //   node scripts/ref_capture.mjs --list sites.txt --out refs/
 //     [--viewport 1366x900] [--timeout 45000] [--settle 2000]
 //     [--exe "C:\...\chrome.exe"] [--max N]
+//     [--cookie "SOCS=CAI@.youtube.com"]  (répétable, pré-nav)
 //   node scripts/ref_capture.mjs https://example.com --out refs/
 
 import { spawn } from 'node:child_process';
@@ -42,10 +43,16 @@ const timeoutMs = Number(opt('timeout', 45000));
 const settleMs = Number(opt('settle', 2000));
 const maxSites = Number(opt('max', 0));
 const exeOpt = opt('exe', '');
+// `--cookie nom=valeur@domaine` répétable — posés via CDP avant
+// la première navigation (mur de consentement EU : `SOCS=CAI@.youtube.com`).
+const cookieArgs = [];
+for (let i = 0; i < args.length; i++) {
+  if (args[i] === '--cookie' && i + 1 < args.length) cookieArgs.push(args[i + 1]);
+}
 // URLs positionnelles : tout argument non-option qui n'est pas
 // la valeur d'une option précédente.
 const VALUE_OPTS = new Set(
-  ['--list', '--out', '--viewport', '--timeout', '--settle', '--max', '--exe']);
+  ['--list', '--out', '--viewport', '--timeout', '--settle', '--max', '--exe', '--cookie']);
 const urls = args.filter(
   (a, i) => !a.startsWith('--') && !VALUE_OPTS.has(args[i - 1]));
 
@@ -173,6 +180,15 @@ async function main() {
     await cdp.send('Page.enable', {}, sessionId);
     await cdp.send('Emulation.setDeviceMetricsOverride',
       { width: vw, height: vh, deviceScaleFactor: 1, mobile: false }, sessionId);
+
+    // Cookies pré-navigation (`--cookie nom=valeur@domaine`).
+    for (const spec of cookieArgs) {
+      const [nv, domain] = spec.split('@');
+      const eq = nv.indexOf('=');
+      if (!domain || eq < 0) { console.log(`  SKIP cookie malformé : ${spec}`); continue; }
+      await cdp.send('Network.setCookie',
+        { name: nv.slice(0, eq), value: nv.slice(eq + 1), domain }, sessionId);
+    }
 
     let ok = 0, fail = 0;
     for (const site of sites) {

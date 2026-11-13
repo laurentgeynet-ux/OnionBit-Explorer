@@ -292,6 +292,9 @@ async fn nav_commit_shared(
     match work {
         Ok(Ok((g, r))) => {
             let live = s.commit_nav_paint(tab, epoch, (*g).into_payload());
+            tracing::info!(target: "dom_probe", tab,
+                ok = r.is_ok(), live,
+                site = "commit.nav", "bras commit paint");
             match (r, live) {
                 (Ok(()), true) => {
                     s.sub_commit_tail(tab, tail);
@@ -308,8 +311,17 @@ async fn nav_commit_shared(
                     Err(s.emit_error(tab, e))
                 }
                 // Epoch supplantée pendant le rendu — la
-                // payload a été jetée, silencieux.
-                _ => Ok(()),
+                // payload a été jetée, mais le document reste
+                // celui installé : son cycle de vie
+                // (`interactive`/`DOMContentLoaded`/`complete`/
+                // `load`) n'est pas la propriété du payload —
+                // `sub_commit_tail` sauté = `readyState` figé
+                // `loading`, polyfills d'upgrade gelés
+                // (JS-C471, youtube `[[ ]]` non hydratés).
+                _ => {
+                    s.fire_top_doc_lifecycle(tab);
+                    Ok(())
+                }
             }
         }
         Ok(Err(e)) => {
@@ -591,7 +603,9 @@ pub async fn pump_timers_shared(sess: &tokio::sync::Mutex<Session>, tab: TabId) 
     let jobs = s.commit_js_pump(tab, epoch, out.ok(), sync_ok);
     // 55e : les animations cadencées par ce battement.
     dlv_info!("pump: anim");
+    let ta = Instant::now();
     let _ = s.advance_animations(tab);
+    sync_phase(tab, "commit.anim", ta);
     sync_phase(tab, "pump.commit_lock", tc);
     drop(s);
     // 55h : la mutation rapportée par le miroir a été

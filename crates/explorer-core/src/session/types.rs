@@ -1332,6 +1332,11 @@ pub struct SessionConfig {
     /// indice client : le shed se lève sur la marge RSS
     /// réelle, pas sur cette durée.
     pub shed_retry_after_s: u32,
+    /// Durée d'une lecture `scroll-behavior:smooth`
+    /// (millisecondes, interpolation linéaire MVP — Chrome
+    /// ~300-500 ms, easing non sondable). `0` = smooth
+    /// désarmé (tout scroll instantané). Défaut 350.
+    pub smooth_scroll_ms: u64,
 }
 
 impl Default for SessionConfig {
@@ -1381,6 +1386,7 @@ impl Default for SessionConfig {
             // était précisément « rien d'armé »).
             rss_shed_mb: 4_096,
             shed_retry_after_s: 5,
+            smooth_scroll_ms: 350,
         }
     }
 }

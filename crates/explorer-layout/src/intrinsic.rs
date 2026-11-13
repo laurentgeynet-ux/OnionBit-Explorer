@@ -39,18 +39,59 @@ pub(crate) fn intrinsic_size_px(
     fs: f32,
     ctx: &BlockCtx,
 ) -> Option<f32> {
+    // Marges de l'axe concerné : `stretch`/`fit-content`
+    // remplissent le bloc conteneur **moins** les marges
+    // (css-sizing-4 §4.1 — la margin box comble l'espace).
+    let (m1, m2) = if matches!(
+        prop,
+        "height" | "min-height" | "max-height" | "block-size" | "min-block-size" | "max-block-size"
+    ) {
+        ("margin-top", "margin-bottom")
+    } else {
+        ("margin-left", "margin-right")
+    };
+    let avail =
+        (basis - side_px(st, m1, basis, fs, ctx, 0.0) - side_px(st, m2, basis, fs, ctx, 0.0))
+            .max(0.0);
     match st.get(prop)?.trim() {
         "max-content" => Some(max_content_px(bx, fs, ctx)),
         "min-content" => Some(min_content_px(bx, fs, ctx)),
+        // `stretch` et alias vendor (`-webkit-fill-available`
+        // ≈ `stretch`, `-moz-available` ≈ `fit-content` au
+        // sens « disponible » — approximations documentées,
+        // css-sizing-4 §4) : la margin box comble le bloc
+        // conteneur — différent d'`auto` dès que la boîte
+        // est shrink-to-fit (absolu, flottant, item non
+        // étiré, `flex-basis`).
+        "stretch" | "fill-available" | "-webkit-fill-available" | "-moz-available" => Some(avail),
         "fit-content" => {
-            let avail = (basis
-                - side_px(st, "margin-left", basis, fs, ctx, 0.0)
-                - side_px(st, "margin-right", basis, fs, ctx, 0.0))
-            .max(0.0);
             Some(max_content_px(bx, fs, ctx).min(min_content_px(bx, fs, ctx).max(avail)))
         }
         _ => None,
     }
+}
+
+/// `container-type` pose-t-il un containment de taille sur
+/// l'axe **inline** de `bx` ? `size` (les deux axes) et
+/// `inline-size` (§2.2, token-wise — `inline-size
+/// scroll-state` reste un size container). Inerte sur les
+/// boîtes de niveau inline (§2.1 — containment uniquement
+/// sur principale non-inline).
+pub(crate) fn size_contained(st: &ComputedStyle, bx: &LayoutBox) -> bool {
+    !bx.kind.is_inline_level()
+        && st.get("container-type").is_some_and(|v| {
+            v.split_whitespace()
+                .any(|t| matches!(t, "size" | "inline-size"))
+        })
+}
+
+/// Idem sur l'axe **bloc** — seul `size` contient les deux
+/// axes (`inline-size` laisse la hauteur suivre le contenu).
+pub(crate) fn block_size_contained(st: &ComputedStyle, bx: &LayoutBox) -> bool {
+    !bx.kind.is_inline_level()
+        && st
+            .get("container-type")
+            .is_some_and(|v| v.split_whitespace().any(|t| t == "size"))
 }
 
 /// Largeur max-content du contenu de `bx` (content box).
@@ -215,22 +256,32 @@ fn content_px_unclamped(
         }
         css_px(st, p, 0.0, fs, ctx)
     };
-    // §4.1 : un `width:%` en mesure intrinsèque est indéfini
-    // (le bloc contenant dépend de cette mesure) — un
-    // remplacé n'impose alors **pas** son intrinsèque : sa
-    // contribution est nulle, sans quoi un `img{width:100%}`
-    // gonflerait tout ancêtre shrink-to-fit à la taille du
-    // bitmap (terrain : carte BBC `min-width:fit-content` à
-    // 480px dès l'arrivée du bitmap, débordant sa piste de
-    // grille 236px). Un non-remplacé retombe sur son contenu
-    // (`bx.intrinsic` absent → `None` → mesure des enfants).
-    // `%` **nu** seulement (`width:100%` → 0). Une fonction
-    // math contenant un `%` (`min(300px, 100%)` — le hint UA
-    // des `<svg viewBox>` sans attr) garde une borne définie :
+    // §4.1 cyclique : un `width:%` en mesure intrinsèque est
+    // indéfini (le bloc contenant dépend de cette mesure).
+    // R-284 — la réponse dépend de la mesure :
+    // * **min-content** → contribution **0** : sinon un
+    //   `img{width:100%}` imposerait son bitmap entier aux
+    //   ancêtres shrink-to-fit (R-51, terrain : carte BBC
+    //   `min-width:fit-content` à 480px — `fit-content` =
+    //   `min(max, max(min, avail))` ne pouvait plus clamp
+    //   à la piste 236, le plancher `min` valant déjà 480).
+    // * **max-content** → `%` traité `auto` → **intrinsèque**
+    //   (§5.1 : remplacé `auto` = taille intrinsèque) — sinon
+    //   tout remplacé `width:100%` en item flex shrink-to-fit
+    //   mesurait 0 (geo_diff N0.3 : `svg{w/h:100%}` des
+    //   icônes masthead YouTube → 0×0, `yt-icon-shape`/
+    //   `#logo`/`#content` à h=0). `height` résolue garde la
+    //   dérivation de ratio (B-38 : `height:28px` + bitmap
+    //   5839×745 contribue ~220, pas 5839).
+    // Un non-remplacé retombe sur son contenu (`bx.intrinsic`
+    // absent → `None` → mesure des enfants). `%` **nu**
+    // seulement (`width:100%`) — une fonction math contenant
+    // un `%` (`min(300px, 100%)` — le hint UA des `<svg
+    // viewBox>` sans attr) garde une borne définie :
     // `bound()` l'évalue contre `cb` quand elle est définie,
-    // l'intrinsèque/ratio reprend sinon — la tuer à 0 écrasait
-    // tout ancêtre shrink-to-fit (logos svg w=0, vols pluto/
-    // lichess).
+    // l'intrinsèque/ratio reprend sinon — la tuer à 0
+    // écrasait tout ancêtre shrink-to-fit (logos svg w=0,
+    // vols pluto/lichess).
     let pct = st.get("width").is_some_and(|v| {
         v.trim()
             .strip_suffix('%')
@@ -250,7 +301,12 @@ fn content_px_unclamped(
         bx.intrinsic
             .map(|(iw, ih)| bound_v("height").map_or(iw, |h| h * iw / ih))
     } else if pct && bx.intrinsic.is_some() {
-        Some(0.0)
+        if max {
+            bx.intrinsic
+                .map(|(iw, ih)| bound_v("height").map_or(iw, |h| h * iw / ih))
+        } else {
+            Some(0.0)
+        }
     } else {
         bound("width")
             .or_else(|| {
@@ -273,6 +329,15 @@ fn content_px_unclamped(
             w = w.max(mn);
         }
         return w;
+    }
+    // R-274 — `container-type: size|inline-size` = containment
+    // de taille sur l'axe inline (css-contain-3 §2.2) : la
+    // boîte se mesure « comme vide » — le contenu ne contribue
+    // pas à sa taille intrinsèque. Le `width` direct plus haut
+    // fait déjà foi ; inerte sur les boîtes de niveau inline
+    // (spec : containment sur principale non-inline seule).
+    if size_contained(&bx.style, bx) {
+        return 0.0;
     }
     // Boîte texte : mesure de la fonte réelle.
     if bx.kind == BoxKind::Text {
@@ -405,7 +470,77 @@ fn inline_level(c: &LayoutBox) -> bool {
 /// Mesure `text` : max = chaîne entière (espaces effondrés,
 /// §16.6.1) ; min = le mot le plus long.
 fn text_px(st: &ComputedStyle, text: &str, fs: f32, ctx: &BlockCtx, max: bool) -> f32 {
+    use crate::inline::{ws_mode, WsCollapse};
     let measure = measure_fn(st, fs, ctx);
+    let (ws_collapse, _wrap) = ws_mode(st);
+    // `pre`/`pre-wrap`/`break-spaces` : §16.6.1 hors jeu —
+    // lignes littérales et tabulations aux taquets `tab-size`
+    // (§8.1, avance au prochain multiple depuis le début de
+    // la ligne). `preserve-breaks` garde les sauts durs mais
+    // effondre espaces/tabs par ligne ; `preserve-spaces`
+    // convertit tabs/sauts en espaces verbatim ;
+    // `discard` supprime tout blanc (texte soudé).
+    if matches!(ws_collapse, WsCollapse::Preserve | WsCollapse::BreakSpaces) {
+        let tab_w = crate::inline::tab_size_px(st, measure(" "), fs, ctx);
+        let line_w = |line: &str| -> f32 {
+            let mut pos = 0.0_f32;
+            for (i, seg) in line.split('\t').enumerate() {
+                if i > 0 && tab_w > f32::EPSILON {
+                    pos += tab_w - pos.rem_euclid(tab_w);
+                }
+                pos += measure(seg);
+            }
+            pos
+        };
+        if max {
+            return text.split('\n').map(line_w).fold(0.0, f32::max);
+        }
+        // `pre-wrap`/`break-spaces` coupent aux espaces et
+        // après tabulation (UAX #14 BA — `break-spaces`
+        // casse même en pleine suite d'espaces) — min = mot
+        // le plus long ou un taquet.
+        return text
+            .split('\n')
+            .flat_map(|l| l.split([' ', '\t']))
+            .filter(|w| !w.is_empty())
+            .map(&measure)
+            .fold(0.0, f32::max)
+            .max(if text.contains('\t') { tab_w } else { 0.0 });
+    }
+    if ws_collapse == WsCollapse::PreserveBreaks {
+        if max {
+            return text
+                .split('\n')
+                .map(|l| measure(&crate::inline::collapse_ws(l)))
+                .fold(0.0, f32::max);
+        }
+        return text
+            .split(crate::text::is_css_ws)
+            .filter(|w| !w.is_empty())
+            .map(&measure)
+            .fold(0.0, f32::max);
+    }
+    if ws_collapse == WsCollapse::PreserveSpaces {
+        let verbatim = text
+            .chars()
+            .map(|c| if crate::text::is_css_ws(c) { ' ' } else { c })
+            .collect::<String>();
+        if max {
+            return measure(&verbatim);
+        }
+        return verbatim
+            .split(' ')
+            .filter(|w| !w.is_empty())
+            .map(&measure)
+            .fold(0.0, f32::max);
+    }
+    if ws_collapse == WsCollapse::Discard {
+        let welded: String = text
+            .chars()
+            .filter(|c| !crate::text::is_css_ws(*c))
+            .collect();
+        return measure(&welded);
+    }
     if max {
         return measure(&crate::inline::collapse_ws(text));
     }

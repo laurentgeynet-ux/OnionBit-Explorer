@@ -7417,6 +7417,69 @@ incrément.
   gèle l'event loop → spawn async.
   Vérifié : 322 → 97 octets en 8 évals.
 
+- [x] **Étape 218. `@import` en feuille
+  inline (`<style>`) + funnel `css.import.*`** :
+  `fetch_imports` n'expansait que les
+  feuilles liées — le `<style>@import`
+  (weather.gov, demande journal) restait
+  `unapplied`, corps jamais fetché. Même
+  `expand_import` sur `doc_sheets` (base
+  `doc_base`) ; `expanded_inline` (origine→
+  expansé) voyage `SubJob→Tab→PaintPayload→
+  PageSnapshot`, substitué par contenu à
+  `collect_style_sheets` (robuste aux
+  `<style>` JS insérés entre vague et
+  commit). Census `css.import.ok`/`.skip.*`
+  — `at.unapplied.import` confondait
+  expansés et échecs réels. Verrou
+  `inline_style_import_expands_and_applies`.
+
+- [x] **Étape 219. `check html` — oracle de
+  comportement par élément
+  (`bcd.html.elements`)** (`explorer-cli` +
+  `scripts/bcd_coverage.mjs`) : « le tag
+  parse » est trivial — toute balise
+  produit un élément. Table
+  `tag → assertion` artisanale combinant
+  trois jauges : **interface JS**
+  (`createElement(tag) instanceof
+  HTML<Name>Element`, oracle spec
+  indépendant de `tag_interface`),
+  **membres IDL clés** (`showModal`,
+  `template.content`, `input.value`…) et
+  **géométrie UA** (box tree : boîte
+  produite, `list-item`, `display:none`
+  des inertes — `script`/`style`/`title`/
+  `source`/`template`, `details` replié
+  sans `open`, `slot` → `display:contents`,
+  `option` peint par son `select`). Les
+  conteneurs génériques (`div`,
+  `section`…) tombent sur le défaut
+  `HTMLElement` + boîte rendue — au
+  dénominateur, triviaux. Mesure :
+  **115/119 (96,6 %) puis 119/119
+  (100 %)** — les 4 manques du premier
+  jet étaient des trous de binding
+  jscore, soldés : `tag_interface`
+  câble `del`/`ins`→`HTMLModElement`
+  et `menu`→`HTMLMenuElement`,
+  `time.dateTime` reflète `datetime`.
+  Verrou `tag_interfaces_mod_menu_time`.
+  **Suite** : (a) `affectsv` tri-état —
+  initiales spec + CSS-wide = `na`
+  hors dénominateur (90 exclues,
+  `INITIAL_EXTRA` oracle local) ;
+  (b) probe `api` honnête — `_static`/
+  `_event` décodés, membres d'instance
+  via `new A()` + `FACTORY` singletons
+  → 802→1040 ; (c) `Performance.prototype`
+  chaîné sur le singleton ; (d) fixtures
+  débordant/scrollable (`overflow-*`,
+  `scroll-snap-*`) ; (e) `rp` = repli
+  ruby → `Hidden`. `css.values`
+  395/2608, `api` 1040/8099,
+  `html.elem` 119/119.
+
 - [ ] **Écarts terrain — vol humain
   22/10 (release `39ab821`, FFI)** :
   second run humain — trois constats
@@ -7831,6 +7894,76 @@ github.com — bundle > plafonds (JS-C41 livré le cadre).
   qui les découvre à la re-sérialisation.
   *Déclencheur : insertion dynamique constatée sur sites
   réels.*
+
+**Manques mesurés BCD (`scripts/bcd_coverage.mjs`,
+2026-11-10 — `js.builtins` 533/649 = 82,1 %, moteur nu)** —
+lots ordonnés par impact (3/3 moteurs d'abord) ; la mesure
+est reproductible, les scores servent de cliquet
+documentaire (ADR-0010) :
+
+- [x] **JS-C468. Accesseurs d'instance TypedArrays/DataView**
+  (`ArrayBuffer.byteLength`, `DataView.buffer/byteLength/
+  byteOffset`, `ArrayBuffer.transferToFixedLength`) — les
+  bundles JS modernes et les chemins binaires (MSE, wasm)
+  les lisent en boot. *Déclencheur : déjà mesuré.*
+  **Livré (2026-11-10)** — étendu à la surface complète :
+  accesseurs spec sur `ArrayBuffer.prototype.byteLength`,
+  `SharedArrayBuffer.prototype.{byteLength,maxByteLength}` +
+  `slice`, `DataView.prototype.{buffer,byteLength,byteOffset}`,
+  `%TypedArray%.prototype.{buffer,byteLength,byteOffset,length}`
+  (les props restent aussi virtuelles propres côté instance,
+  même valeur) + `transferToFixedLength` ; méthodes TA ES2023
+  `findLast`/`findLastIndex`/`with`/`toReversed`/`toSorted`/
+  `toLocaleString`.
+- [x] **JS-C469. Objets itérateurs avancés** (`Generator`,
+  `AsyncGenerator` + `.next/.return/.throw`, `AsyncIterator`,
+  `AsyncFunction`, `AsyncGeneratorFunction`,
+  `AsyncDisposableStack`) — surface async itérative ES2018+.
+  *Déclencheur : site réel async-iter (streams, for-await).*
+  **Soldé par la mesure (2026-11-10)** — ces constructeurs
+  sont des intrinsèques abstraites jamais exposées en global
+  (spec : `typeof Generator === "undefined"` même sous V8) ;
+  la sonde les atteint désormais par leurs chemins spec et
+  tout passe. Élargi aux helpers ES2026 réellement manquants :
+  `Iterator.prototype.{includes,join,chunks,windows}` +
+  `Iterator.{zip,zipKeyed}` statiques (snapshot eager, même
+  déviation que les autres helpers).
+- [x] **JS-C471. Détails Error modernes** (`AggregateError.
+  errors`, `Error.cause`, `*.serializable_object`) —
+  `cause` circule dans les boot-chains (diagnostic des
+  « morts silencieuses »). *Déclencheur : déjà mesuré.*
+  **Soldé par la mesure (2026-11-10)** — toutes présentes
+  et fonctionnelles : les sous-features non-propriétés sont
+  sondées comportementalement (`structuredClone(new X) instanceof X`,
+  `new Error('x',{cause:7}).cause===7`, `SuppressedError`
+  champs propres) — 8/8 ok.
+- [x] **JS-C472. `Date.toTemporalInstant`, `Atomics` hors
+  buffers partagés** — ponts vers `Temporal` (JS-C31) et
+  workers. *Déclencheur : site réel.*
+  **Livré (2026-11-10)** — `Date.prototype.toTemporalInstant`
+  (epoch ms → `Temporal.Instant`) ; `Atomics` sur buffers
+  non-partagés fonctionnait déjà (sonde corrigée : `add`
+  retourne la valeur *antérieure*) ; `Temporal.ZonedDateTime`
+  ajouté en fuseau unique UTC (`from`/ctor BigInt/`compare`/
+  `toInstant`/`toPlainDate(Time)`/`toPlainTime`/`with`/
+  `add`/`subtract`/`since`/`until`/`withTimeZone`,
+  `toString` = `…+00:00[UTC]`, `RangeError` honnête hors UTC).
+- [x] **JS-C473. Complément de surface BCD (100 %)** —
+  `RegExp.prototype` getters spec (`source`,`flags`,`global`,
+  `ignoreCase`,`multiline`,`dotAll`,`sticky`,`unicode`,
+  `unicodeSets`,`hasIndices` — les flags quittent les props
+  propres d'instance pour devenir de vrais accesseurs ;
+  flag `v`/unicodeSets tracké, `/uv/` rejeté) ;
+  `Math.{acosh,asinh,atanh}` ; `Object.prototype.toLocaleString`
+  ; `Promise.{allKeyed,allSettledKeyed}` (proposal ES2026,
+  résolution `{k: v}` / `{k: {status,…}}`) ;
+  `Intl.DurationFormat` (en-US long/short/narrow/digital,
+  `format`/`formatToParts`/`resolvedOptions`, entrée
+  `Temporal.Duration`/objet/ISO). **Mesure finale :
+  `js.builtins` 648/648 = 100 %** (moteur nu ; seule entrée
+  hors dénominateur : `Promise.incumbent_settings_object_tracking`,
+  intégration hôte HTML non observable en moteur nu —
+  documentée dans la note du rapport).
 
 ### J-C — Mesure, perf, robustesse
 
@@ -11645,3 +11778,110 @@ un crate PIPELINE.- [x] **JS-C422. Deadline honnête — canal session ↔ budge
   `TypeError` toujours servi). Verrou
   `c463_fn_caller_arguments` ×3 (sloppy/arrow→null,
   strict→TypeError, boucle d'accès) ; dom 246/246.
+
+- [x] **Étape 220. Graine `SOCS` scopée
+  Google — décision de consentement pour
+  `ytd-consent-bump*`** (`explorer-net`
+  `consent.rs` + `explorer-core`
+  `navigate.rs`, vol 805) : sans cookie de
+  décision Google, le lightbox
+  `ytd-consent-bump-v2` bouclait les
+  re-navigations (3 chargements/vol).
+  `seed_headers(policy, now, host)` émet
+  `SOCS` uniquement sur
+  `youtube.com`/`youtube-nocookie.com`/
+  `google.<tld>` — `CAISNQ…` (refus,
+  valeur uAssets) sous `RejectAll`,
+  `CAES…` (accord) sous `AcceptAll` ;
+  `CONSENT` omis (non relu). La décision
+  est portée, pas l'accord. Verrou
+  `socs_scope_google_uniquement`.
+  Diagnostic soldé : `hasNavigated=false`
+  post-boot nominal (adoption initiale
+  sans `yt-navigate-start`).
+
+## Plan NAVIGATEUR — vitrine YouTube + surface navigateur (2026-11-12)
+
+Plan parallèle à la file `css.values` PIPE (§ roadmap équipe
+pipeline). Objectif produit déclaré : **le screenshot YouTube
+vitrine GitHub** — feed monté, masthead rendu, miniatures. Les
+deux axes : lever les murs résiduels kevlar/BG **et** faire
+croître la surface navigateur mesurée (`api` 1510/8099, 18,6 %).
+
+> **Document de pilotage détaillé** :
+> `docs/plan-navigateur-vitrine.md` (jalons M0-M4 — fichiers,
+> verrous, DoD par tâche, DAG, risques). Cette section ne
+> garde que les cases de suivi §4.5 ; le détail ne se
+> duplique pas.
+
+### Sprint N1 — la vitrine (mur résiduel = BotGuard)
+
+- [x] **N0 — reproductibilité** (plan M0) : hygiène `.eval/`
+  (N0.0), vol `EXPLORER_NET_RECORD` + rejeu `DirTransport`
+  déterministe (N0.1 — vol 813, corpus `replay-vol813`, PNG
+  bit-identiques), baseline J17 (N0.2 — `j17-vol813-baseline.txt`),
+  shot de contrôle `geo_diff` sur rejeu (N0.3 — 65 % divergents
+  dominés h=0 masthead → écart côté PIPE ; ref Chrome montre le
+  même feed vide à profil froid).
+- [ ] **`pNM`/`bb`** (plan M1) : le programme BG (`trayride.a`
+  → `mr`) tourne mais **n'appelle jamais `g`** → `pNM` pend
+  60 s → `bb` → session `v8Q` morte → `/youtubei` gatées →
+  `yt-navigate-finish` absent. Étapes N1.1-N1.6 du plan :
+  `Error().stack` 8c → forme V8 (appel-site borné),
+  `Error.stackTraceLimit` réel défaut 10 honoré, attribution
+  du stall `mr`, boucle d'élimination (`t.m`=41,
+  `fn.restricted` ×4, `dyn.err dyn:7` à corréler avec la
+  fenêtre `mr` — cause première possible).
+- [x] **JS-C496 (→ N1.5 validé)** — `importNode`/`localName` :
+  cause nommée = clone détaché récolté par le GC pendant
+  `ce_upgrade_subtree` (racine non-CE jamais wrappée) ;
+  `pin_node` posé, erreurs → 0 en vol, stamping
+  `dom-if`/`dom-repeat` effectif (cran 87).
+- [ ] **Shot vitrine (N2.2)** : `shot` sur rejeu M0 → PNG
+  feed+masthead selon critères §0 du plan.
+
+### Sprint N2 — `api` par Pareto (18,6 % → cible ~30 %)
+
+- [ ] **`Range`/`Selection` profonds (N3.1/N3.2)** — chantier
+  DOM/JS : `getSelection`, `createRange`, points DOM,
+  `AbstractRange` IDL, `toString`.
+- [ ] **IDL à fort retour par fréquence BCD (N3.3)** —
+  `Element`/`Document`/`Window` membres manquants,
+  `CSSStyleDeclaration` accesseurs, `fetch`/`Response`
+  membres, observers — cap +200 clés (`api` ≥ 1700).
+- [ ] **Hors périmètre déclaré (N3.4)** : sensors/WebAuthn/
+  WebTransport/BT — sous-ensemble explicite du dénominateur
+  ou file assumée.
+
+### Sprint N3 — perf `jscore` (le goulot nommé)
+
+- [ ] **`prop_scan` (72 M) → N4.1** : armement au premier
+  miss répété (compteur de scans par objet) si `prop_ns`
+  reste dominant post-C490.
+- [ ] **Inline-cache `(env, nom) → cellule` (N4.2)** : garde
+  `RESOLVE_VERIFY` obligatoire (postmortem C490 cran 82 —
+  même classe de bug : clé aplatie → liaison fausse).
+- [ ] **Gate perf + mesure produit (N4.3)** : pas de
+  régression > 5 % `env_ns`/`prop_ns` sur vol de référence ;
+  chaque cran perf → `shot`/vol de contrôle.
+
+### Sprint N4 — terrain (`site_harvest` = le signal qui ordonne)
+
+- [ ] **Census corpus réel** : `css.value.dropped.*`/`html.err.*`
+  par fréquence — ordonne la file PIPE (sprint 1 candidats déjà
+  posés) et les priorités api N2.
+- [ ] **`geo_diff`/captures YouTube** : différentiel rendu vs
+  Chrome — outil du shot de contrôle N0.3.
+- [ ] **Replays versionnés** : fixtures `DirTransport` des vols
+  YouTube promus en corpus `fuzz/` (le shot vitrine doit être
+  rejouable hors-ligne) — `.eval/` reste non suivi (N0.0).
+
+### Verrous et discipline
+
+- Chaque cran JS-Cxxx = commit dédié + `CHANGELOG` + verrou test.
+- Suites de garde : `lang` 313, `dom` 263 + fumées ciblées
+  (`lazy_gen`, `await_thenable`, `c49x`).
+- `baseline bcd` re-sauvée après chaque lot mesure ;
+  `--gate scripts/bcd_baseline.json` en régression.
+- Journal : crans numérotés dans `interface-equipes.md` —
+  toute mesure en vol y est tracée (daemon, profil, métriques).

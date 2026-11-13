@@ -248,6 +248,7 @@ fn decl_supported(name: &str, value: &str) -> bool {
     let (prop, neg) = name
         .strip_prefix("not-")
         .map_or((name, false), |p| (p, true));
+    let prop = vendor_alias(prop);
     let supported = prop.starts_with("--")
         || crate::value::expand_shorthand(prop, value).is_some()
         || SUPPORTED_PROPS.contains(&prop);
@@ -255,6 +256,125 @@ fn decl_supported(name: &str, value: &str) -> bool {
         !supported
     } else {
         supported
+    }
+}
+
+/// Alias vendor-prefix → nom canonique (census terrain P2 :
+/// les misses réelles des sites SPA/média sont à ~55 % des
+/// props `-webkit-*`/`-moz-*`/`-ms-*`/`-o-*`). Le nom
+/// canonique est rendu quand la spec le standardise — les
+/// props restées préfixées-de-fait (`-webkit-line-clamp`,
+/// `-webkit-box-*` legacy, `-webkit-tap-highlight-color`)
+/// gardent leur nom dans `SUPPORTED_PROPS` et ne passent
+/// pas ici. `-ms-filter` est délibérément **non** mappé
+/// (syntaxe IE pré-CSS3 incompatible).
+#[allow(clippy::too_many_lines, clippy::match_same_arms)]
+fn vendor_alias(name: &str) -> &str {
+    match name {
+        "-webkit-animation" | "-moz-animation" | "-o-animation" => "animation",
+        "-webkit-animation-delay" | "-moz-animation-delay" | "-o-animation-delay" => {
+            "animation-delay"
+        }
+        "-webkit-animation-direction" | "-moz-animation-direction" | "-o-animation-direction" => {
+            "animation-direction"
+        }
+        "-webkit-animation-duration" | "-moz-animation-duration" | "-o-animation-duration" => {
+            "animation-duration"
+        }
+        "-webkit-animation-fill-mode" | "-moz-animation-fill-mode" | "-o-animation-fill-mode" => {
+            "animation-fill-mode"
+        }
+        "-webkit-animation-iteration-count"
+        | "-moz-animation-iteration-count"
+        | "-o-animation-iteration-count" => "animation-iteration-count",
+        "-webkit-animation-name" | "-moz-animation-name" | "-o-animation-name" => "animation-name",
+        "-webkit-animation-play-state"
+        | "-moz-animation-play-state"
+        | "-o-animation-play-state" => "animation-play-state",
+        "-webkit-animation-timing-function"
+        | "-moz-animation-timing-function"
+        | "-o-animation-timing-function" => "animation-timing-function",
+        "-webkit-appearance" | "-moz-appearance" => "appearance",
+        "-webkit-backface-visibility" | "-moz-backface-visibility" => "backface-visibility",
+        "-webkit-background-clip" | "-moz-background-clip" => "background-clip",
+        "-webkit-background-origin" | "-moz-background-origin" => "background-origin",
+        "-webkit-background-size" | "-moz-background-size" => "background-size",
+        "-webkit-backdrop-filter" => "backdrop-filter",
+        "-webkit-border-image" | "-moz-border-image" | "-o-border-image" => "border-image",
+        "-webkit-box-decoration-break" => "box-decoration-break",
+        "-webkit-box-shadow" | "-moz-box-shadow" => "box-shadow",
+        "-webkit-box-sizing" | "-moz-box-sizing" => "box-sizing",
+        "-webkit-clip-path" => "clip-path",
+        "-webkit-column-count" | "-moz-column-count" => "column-count",
+        "-webkit-column-gap" | "-moz-column-gap" => "column-gap",
+        "-webkit-column-rule" | "-moz-column-rule" => "column-rule",
+        "-webkit-columns" | "-moz-columns" => "columns",
+        "-webkit-filter" => "filter",
+        "-webkit-flex" | "-ms-flex" => "flex",
+        "-webkit-flex-align" | "-ms-flex-align" => "align-items",
+        "-webkit-flex-direction" | "-ms-flex-direction" => "flex-direction",
+        "-webkit-flex-pack" | "-ms-flex-pack" => "justify-content",
+        "-webkit-flex-wrap" | "-ms-flex-wrap" => "flex-wrap",
+        "-webkit-font-feature-settings" | "-moz-font-feature-settings" => "font-feature-settings",
+        "-webkit-font-kerning" => "font-kerning",
+        "-webkit-font-smoothing" | "-moz-osx-font-smoothing" => "font-smoothing",
+        "-webkit-hyphens" | "-moz-hyphens" | "-ms-hyphens" => "hyphens",
+        "-webkit-justify-content" => "justify-content",
+        "-webkit-mask" => "mask",
+        "-webkit-mask-clip" => "mask-clip",
+        "-webkit-mask-composite" => "mask-composite",
+        "-webkit-mask-image" => "mask-image",
+        "-webkit-mask-origin" => "mask-origin",
+        "-webkit-mask-position" => "mask-position",
+        "-webkit-mask-repeat" => "mask-repeat",
+        "-webkit-mask-size" => "mask-size",
+        "-webkit-overflow-scrolling" => "overflow-scrolling",
+        "-webkit-perspective" | "-moz-perspective" => "perspective",
+        "-webkit-perspective-origin" | "-moz-perspective-origin" => "perspective-origin",
+        "-webkit-text-decoration" | "-moz-text-decoration" => "text-decoration",
+        "-webkit-text-size-adjust" | "-moz-text-size-adjust" | "-ms-text-size-adjust" => {
+            "text-size-adjust"
+        }
+        "-webkit-text-stroke-width" => "-webkit-text-stroke-width",
+        "-webkit-text-stroke-color" => "-webkit-text-stroke-color",
+        "-webkit-text-fill-color" => "-webkit-text-fill-color",
+        "-webkit-touch-callout" => "-webkit-touch-callout",
+        "-webkit-tap-highlight-color" => "-webkit-tap-highlight-color",
+        "-webkit-transform" | "-moz-transform" | "-ms-transform" | "-o-transform" => "transform",
+        "-webkit-transform-origin"
+        | "-moz-transform-origin"
+        | "-ms-transform-origin"
+        | "-o-transform-origin" => "transform-origin",
+        "-webkit-transform-style" | "-moz-transform-style" => "transform-style",
+        "-webkit-transition" | "-moz-transition" | "-o-transition" => "transition",
+        "-webkit-transition-delay" | "-moz-transition-delay" | "-o-transition-delay" => {
+            "transition-delay"
+        }
+        "-webkit-transition-duration" | "-moz-transition-duration" | "-o-transition-duration" => {
+            "transition-duration"
+        }
+        "-webkit-transition-property" | "-moz-transition-property" | "-o-transition-property" => {
+            "transition-property"
+        }
+        "-webkit-transition-timing-function"
+        | "-moz-transition-timing-function"
+        | "-o-transition-timing-function" => "transition-timing-function",
+        "-webkit-user-select" | "-moz-user-select" | "-ms-user-select" => "user-select",
+        "-webkit-user-drag" => "-webkit-user-drag",
+        "-webkit-word-break" | "-ms-word-break" => "word-break",
+        "-moz-float-edge" => "-moz-float-edge",
+        "-moz-force-broken-image-icon" => "-moz-force-broken-image-icon",
+        "-moz-orient" => "-moz-orient",
+        "-moz-user-input" => "-moz-user-input",
+        "-ms-flex-negative" => "flex-shrink",
+        "-ms-flex-positive" => "flex-grow",
+        "-ms-flex-preferred-size" => "flex-basis",
+        "-ms-touch-action" => "touch-action",
+        "-ms-overflow-style" => "-ms-overflow-style",
+        "-o-user-select" => "user-select",
+        "-o-text-overflow" => "text-overflow",
+        "-o-background-size" => "background-size",
+        _ => name,
     }
 }
 
@@ -314,6 +434,14 @@ const SUPPORTED_PROPS: &[&str] = &[
     "align-items",
     "align-self",
     "animation",
+    "animation-name",
+    "animation-duration",
+    "animation-timing-function",
+    "animation-delay",
+    "animation-iteration-count",
+    "animation-direction",
+    "animation-fill-mode",
+    "animation-play-state",
     "appearance",
     "aspect-ratio",
     "backdrop-filter",
@@ -325,6 +453,8 @@ const SUPPORTED_PROPS: &[&str] = &[
     "background-image",
     "background-origin",
     "background-position",
+    "background-position-x",
+    "background-position-y",
     "background-repeat",
     "background-size",
     "block-ellipsis",
@@ -356,15 +486,51 @@ const SUPPORTED_PROPS: &[&str] = &[
     "border-top-style",
     "border-top-width",
     "border-width",
+    "border-block-start",
+    "border-block-end",
+    "border-inline-start",
+    "border-inline-end",
+    "border-block-start-color",
+    "border-block-start-style",
+    "border-block-start-width",
+    "border-block-end-color",
+    "border-block-end-style",
+    "border-block-end-width",
+    "border-inline-start-color",
+    "border-inline-start-style",
+    "border-inline-start-width",
+    "border-inline-end-color",
+    "border-inline-end-style",
+    "border-inline-end-width",
+    "border-start-start-radius",
+    "border-start-end-radius",
+    "border-end-start-radius",
+    "border-end-end-radius",
     "bottom",
     "box-shadow",
     "box-sizing",
     "caption-side",
     "caret-color",
+    "accent-color",
+    "overflow-anchor",
+    "overscroll-behavior",
+    "overscroll-behavior-x",
+    "overscroll-behavior-y",
+    "print-color-adjust",
+    "forced-color-adjust",
+    "field-sizing",
+    "contain-intrinsic-size",
+    "text-wrap",
+    "text-wrap-mode",
+    "text-wrap-style",
     "clear",
     "clip",
     "clip-path",
     "color",
+    "-webkit-text-fill-color",
+    "-webkit-text-stroke",
+    "-webkit-text-stroke-color",
+    "-webkit-text-stroke-width",
     "column-count",
     "column-gap",
     "contain",
@@ -393,7 +559,9 @@ const SUPPORTED_PROPS: &[&str] = &[
     "font-style",
     "font-variant",
     "font-variant-alternates",
+    "font-variant-numeric",
     "font-feature-settings",
+    "font-palette",
     "font-stretch",
     "font-size-adjust",
     "font-synthesis",
@@ -419,6 +587,12 @@ const SUPPORTED_PROPS: &[&str] = &[
     "height",
     "hyphens",
     "inset",
+    "inset-block",
+    "inset-block-end",
+    "inset-block-start",
+    "inset-inline",
+    "inset-inline-end",
+    "inset-inline-start",
     "isolation",
     "justify-content",
     "justify-items",
@@ -542,6 +716,391 @@ const SUPPORTED_PROPS: &[&str] = &[
     "word-wrap",
     "writing-mode",
     "z-index",
+    // R-243 — props reconnues au plan BCD (`prop_supported`)
+    // — dormant tant qu'aucun consommateur ne les lit ; les
+    // familles consommables (`*size` logiques, `border-image-*`)
+    // sont déjà routées par `logical_name`/`expand`.
+    "-moz-float-edge",
+    "-moz-force-broken-image-icon",
+    "-moz-orient",
+    "-moz-user-input",
+    "-webkit-app-region",
+    "-webkit-border-before",
+    "-webkit-border-horizontal-spacing",
+    "-webkit-border-vertical-spacing",
+    "-webkit-box-reflect",
+    "-webkit-column-axis",
+    "-webkit-column-break-after",
+    "-webkit-column-break-before",
+    "-webkit-column-break-inside",
+    "-webkit-column-progression",
+    "-webkit-cursor-visibility",
+    "-webkit-hyphenate-limit-after",
+    "-webkit-hyphenate-limit-before",
+    "-webkit-hyphenate-limit-lines",
+    "-webkit-line-align",
+    "-webkit-line-box-contain",
+    "-webkit-line-grid",
+    "-webkit-line-snap",
+    "-webkit-locale",
+    "-webkit-logical-height",
+    "-webkit-logical-width",
+    "-webkit-mask-box-image",
+    "-webkit-mask-composite",
+    "-webkit-mask-position-x",
+    "-webkit-mask-position-y",
+    "-webkit-mask-source-type",
+    "-webkit-max-logical-height",
+    "-webkit-max-logical-width",
+    "-webkit-min-logical-height",
+    "-webkit-min-logical-width",
+    "-webkit-nbsp-mode",
+    "-webkit-perspective-origin-x",
+    "-webkit-perspective-origin-y",
+    "-webkit-rtl-ordering",
+    "-webkit-tap-highlight-color",
+    "-webkit-text-combine",
+    "-webkit-text-decorations-in-effect",
+    "-webkit-text-security",
+    "-webkit-text-zoom",
+    "-webkit-touch-callout",
+    "-webkit-transform-origin-x",
+    "-webkit-transform-origin-y",
+    "-webkit-transform-origin-z",
+    "-webkit-user-drag",
+    "alignment-baseline",
+    "all",
+    "alt",
+    "anchor-name",
+    "anchor-scope",
+    "animation-composition",
+    "animation-range",
+    "animation-range-end",
+    "animation-range-start",
+    "animation-timeline",
+    "animation-trigger",
+    "background-repeat-x",
+    "background-repeat-y",
+    "baseline-shift",
+    "baseline-source",
+    "block-size",
+    "border-image-outset",
+    "border-image-repeat",
+    "border-image-slice",
+    "border-image-source",
+    "border-image-width",
+    "border-shape",
+    "box-align",
+    "box-decoration-break",
+    "box-direction",
+    "box-flex",
+    "box-flex-group",
+    "box-lines",
+    "box-ordinal-group",
+    "box-orient",
+    "box-pack",
+    "break-after",
+    "break-before",
+    "break-inside",
+    "buffered-rendering",
+    "caret-animation",
+    "caret-shape",
+    "clip-rule",
+    "color-adjust",
+    "color-interpolation",
+    "color-interpolation-filters",
+    "color-rendering",
+    "color-scheme",
+    "column-fill",
+    "column-height",
+    "column-rule-break",
+    "column-rule-color",
+    "column-rule-inset",
+    "column-rule-inset-cap",
+    "column-rule-inset-cap-end",
+    "column-rule-inset-cap-start",
+    "column-rule-inset-end",
+    "column-rule-inset-junction",
+    "column-rule-inset-junction-end",
+    "column-rule-inset-junction-start",
+    "column-rule-inset-start",
+    "column-rule-style",
+    "column-rule-visibility-items",
+    "column-rule-width",
+    "column-span",
+    "column-width",
+    "column-wrap",
+    "contain-intrinsic-block-size",
+    "contain-intrinsic-height",
+    "contain-intrinsic-inline-size",
+    "contain-intrinsic-size",
+    "contain-intrinsic-width",
+    "content-visibility",
+    "continue",
+    "corner-block-end-shape",
+    "corner-block-start-shape",
+    "corner-bottom-left-shape",
+    "corner-bottom-right-shape",
+    "corner-bottom-shape",
+    "corner-end-end-shape",
+    "corner-end-start-shape",
+    "corner-inline-end-shape",
+    "corner-inline-start-shape",
+    "corner-left-shape",
+    "corner-right-shape",
+    "corner-shape",
+    "corner-start-end-shape",
+    "corner-start-start-shape",
+    "corner-top-left-shape",
+    "corner-top-right-shape",
+    "corner-top-shape",
+    "counter-set",
+    "custom-property",
+    "cx",
+    "cy",
+    "d",
+    "dominant-baseline",
+    "dynamic-range-limit",
+    "field-sizing",
+    "fill",
+    "fill-opacity",
+    "fill-rule",
+    "fit-tolerance",
+    "flex-line-count",
+    "flood-color",
+    "flood-opacity",
+    "font-language-override",
+    "font-optical-sizing",
+    "font-palette",
+    "font-smooth",
+    "font-synthesis-position",
+    "font-synthesis-small-caps",
+    "font-synthesis-style",
+    "font-synthesis-weight",
+    "font-variant-caps",
+    "font-variant-east-asian",
+    "font-variant-emoji",
+    "font-variant-ligatures",
+    "font-variant-numeric",
+    "font-variant-position",
+    "font-variation-settings",
+    "font-width",
+    "forced-color-adjust",
+    "frame-sizing",
+    "glyph-orientation-vertical",
+    "hyphenate-character",
+    "hyphenate-limit-chars",
+    "hyphenate-limit-lines",
+    "image-orientation",
+    "image-rendering",
+    "ime-mode",
+    "initial-letter",
+    "inline-size",
+    "interactivity",
+    "interest-delay",
+    "interest-delay-end",
+    "interest-delay-start",
+    "interpolate-size",
+    "lighting-color",
+    "line-break",
+    "link-parameters",
+    "margin-trim",
+    "marker",
+    "marker-end",
+    "marker-mid",
+    "marker-start",
+    "mask-border",
+    "mask-border-outset",
+    "mask-border-repeat",
+    "mask-border-slice",
+    "mask-border-source",
+    "mask-border-width",
+    "mask-clip",
+    "mask-composite",
+    "mask-mode",
+    "mask-origin",
+    "mask-position",
+    "mask-repeat",
+    "mask-size",
+    "mask-type",
+    "math-depth",
+    "math-shift",
+    "math-style",
+    "max-block-size",
+    "max-inline-size",
+    "max-lines",
+    "max-size",
+    "min-block-size",
+    "min-inline-size",
+    "min-size",
+    "object-view-box",
+    "offset",
+    "offset-anchor",
+    "offset-distance",
+    "offset-path",
+    "offset-position",
+    "offset-rotate",
+    "overflow-anchor",
+    "overflow-block",
+    "overflow-clip-margin",
+    "overflow-inline",
+    "overlay",
+    "overscroll-behavior",
+    "overscroll-behavior-block",
+    "overscroll-behavior-inline",
+    "overscroll-behavior-x",
+    "overscroll-behavior-y",
+    "page",
+    "page-break-after",
+    "page-break-before",
+    "page-break-inside",
+    "paint-order",
+    "path-length",
+    "position-anchor",
+    "position-area",
+    // `inset-area` = nom d'origine de `position-area`
+    // (css-anchor-1, renommé — Chrome a shippe l'ancien).
+    "inset-area",
+    "position-try",
+    "position-try-fallbacks",
+    "position-try-order",
+    "position-visibility",
+    "print-color-adjust",
+    "r",
+    "reading-flow",
+    "reading-order",
+    "row-rule",
+    "row-rule-break",
+    "row-rule-color",
+    "row-rule-inset",
+    "row-rule-inset-cap",
+    "row-rule-inset-cap-end",
+    "row-rule-inset-cap-start",
+    "row-rule-inset-end",
+    "row-rule-inset-junction",
+    "row-rule-inset-junction-end",
+    "row-rule-inset-junction-start",
+    "row-rule-inset-start",
+    "row-rule-style",
+    "row-rule-visibility-items",
+    "row-rule-width",
+    "ruby-align",
+    "ruby-overhang",
+    "ruby-position",
+    "rule",
+    "rule-break",
+    "rule-color",
+    "rule-inset",
+    "rule-inset-cap",
+    "rule-inset-end",
+    "rule-inset-junction",
+    "rule-inset-start",
+    "rule-overlap",
+    "rule-style",
+    "rule-visibility-items",
+    "rule-width",
+    "rx",
+    "ry",
+    "scroll-axis-lock",
+    "scroll-initial-target",
+    "scroll-margin",
+    "scroll-margin-block",
+    "scroll-margin-block-end",
+    "scroll-margin-block-start",
+    "scroll-margin-bottom",
+    "scroll-margin-inline",
+    "scroll-margin-inline-end",
+    "scroll-margin-inline-start",
+    "scroll-margin-left",
+    "scroll-margin-right",
+    "scroll-margin-top",
+    "scroll-marker-group",
+    "scroll-padding",
+    "scroll-padding-block",
+    "scroll-padding-block-end",
+    "scroll-padding-block-start",
+    "scroll-padding-bottom",
+    "scroll-padding-inline",
+    "scroll-padding-inline-end",
+    "scroll-padding-inline-start",
+    "scroll-padding-left",
+    "scroll-padding-right",
+    "scroll-padding-top",
+    "scroll-snap-align",
+    "scroll-snap-stop",
+    "scroll-snap-type",
+    "scroll-target-group",
+    "scroll-timeline",
+    "scroll-timeline-axis",
+    "scroll-timeline-name",
+    "scrollbar-color",
+    "scrollbar-gutter",
+    "scrollbar-width",
+    "shape-image-threshold",
+    "shape-margin",
+    "shape-outside",
+    "shape-rendering",
+    "size",
+    "speak",
+    "speak-as",
+    "stop-color",
+    "stop-opacity",
+    "stroke",
+    "stroke-color",
+    "stroke-dasharray",
+    "stroke-dashoffset",
+    "stroke-linecap",
+    "stroke-linejoin",
+    "stroke-miterlimit",
+    "stroke-opacity",
+    "stroke-width",
+    "table-layout",
+    "text-anchor",
+    "text-autospace",
+    "text-box",
+    "text-box-edge",
+    "text-box-trim",
+    "text-decoration-inset",
+    "text-decoration-skip",
+    "text-decoration-skip-ink",
+    "text-decoration-skip-spaces",
+    "text-fit",
+    "text-rendering",
+    "text-size-adjust",
+    "text-underline-position",
+    "text-wrap",
+    "text-wrap-mode",
+    "text-wrap-style",
+    "timeline-scope",
+    "timeline-trigger",
+    "timeline-trigger-activation-range",
+    "timeline-trigger-activation-range-end",
+    "timeline-trigger-activation-range-start",
+    "timeline-trigger-active-range",
+    "timeline-trigger-active-range-end",
+    "timeline-trigger-active-range-start",
+    "timeline-trigger-name",
+    "timeline-trigger-source",
+    "touch-action",
+    "transition-behavior",
+    "trigger-scope",
+    "user-modify",
+    "vector-effect",
+    "view-timeline",
+    "view-timeline-axis",
+    "view-timeline-inset",
+    "view-timeline-name",
+    "view-transition-class",
+    "view-transition-group",
+    "view-transition-name",
+    "view-transition-scope",
+    "white-space-collapse",
+    "white-space-trim",
+    "window-drag",
+    "wrap-inside",
+    "x",
+    "y",
+    "zoom",
 ];
 
 /// Propriété `name` reconnue par le moteur — même critère que
@@ -555,7 +1114,63 @@ const SUPPORTED_PROPS: &[&str] = &[
 /// data` — « où en est le navigateur » mesuré en x/y).
 #[must_use]
 pub fn prop_supported(name: &str) -> bool {
+    let name = vendor_alias(name);
     SUPPORTED_PROPS.contains(&name) || crate::value::expand_shorthand(name, "0").is_some()
+}
+
+/// R-245 — **routée** : la déclaration `x{name:inherit}`
+/// atteint-elle le `ComputedStyle` (nom posé, ou shorthand
+/// expansé en longhands) ? Le critère `prop_supported`
+/// sature une fois la table comblée — cette sonde mesure
+/// si la déclaration *survit* à la cascade au lieu de
+/// répondre seulement « nom reconnu ».
+/// L'appelant fournit le DOM (`<p class=x>` attendu) —
+/// explorer-css ne peut pas construire de DOM (pas de dep
+/// vers explorer-html). Critère honnête : `x{name:inherit}`
+/// doit produire un `ComputedStyle` **différent** de `x{}`
+/// — un nom stocké indifféremment (`xyz-bogus`) ne compte
+/// pas. `all`/shorthands routent via leurs longhands.
+#[must_use]
+pub fn prop_routed(dom: &explorer_dom::Dom, name: &str) -> bool {
+    let baseline = {
+        let mut eng = StyleEngine::new();
+        eng.add_css("p {}", Origin::Author);
+        eng.compute_tree(dom, dom.document(), &StyleEnv::default())
+    };
+    let with = {
+        let mut eng = StyleEngine::new();
+        eng.add_css(&format!("p {{ {name}: inherit }}"), Origin::Author);
+        eng.compute_tree(dom, dom.document(), &StyleEnv::default())
+    };
+    let (mut b, mut w) = (None, None);
+    st_of_x(dom, dom.document(), &baseline, &mut b);
+    st_of_x(dom, dom.document(), &with, &mut w);
+    match (b, w) {
+        (Some(b), Some(w)) => b != w,
+        _ => false,
+    }
+}
+
+/// R-245 — descend jusqu'au `class=x` et lit son style.
+fn st_of_x<'a>(
+    dom: &explorer_dom::Dom,
+    n: explorer_dom::NodeId,
+    sm: &'a StyleMap,
+    out: &mut Option<&'a ComputedStyle>,
+) {
+    if dom
+        .attribute_str(n, "class")
+        .ok()
+        .flatten()
+        .is_some_and(|c| c == "x")
+    {
+        *out = sm.get(n);
+    }
+    if let Ok(ch) = dom.children(n) {
+        for c in ch {
+            st_of_x(dom, c, sm, out);
+        }
+    }
 }
 
 /// `(name: value)` d'une media query — px pour *-width/-height.
@@ -1008,7 +1623,9 @@ fn rightmost_key(sel: &ComplexSelector) -> BucketKey {
                 attr.get_or_insert(name);
             }
             SimpleSelector::Type(t) => {
-                tag.get_or_insert(t);
+                // `ns|tag` indexé sous `tag` nu — le filtrage
+                // ns reste côté `simple_matches` (R-237).
+                tag.get_or_insert(t.rsplit('|').next().unwrap_or(t.as_str()));
             }
             SimpleSelector::Universal
             | SimpleSelector::Pseudo(_)
@@ -1040,6 +1657,19 @@ pub(crate) struct RegisteredProp {
     pub inherits: bool,
     /// `initial-value` (`None` → guaranteed-invalid à l'usage).
     pub initial: Option<String>,
+}
+
+/// R-239 — une palette nommée `@font-palette-values` :
+/// `font-family`, `base-palette`, `override-colors`
+/// (index→couleur) — consommée par `font-palette: --nom`.
+#[derive(Debug, Clone, Default)]
+pub struct FontPalette {
+    /// Famille de police à laquelle la palette s'applique.
+    pub font_family: String,
+    /// `base-palette` (numéro ou mot-clé).
+    pub base_palette: String,
+    /// `override-colors` : index → valeur couleur.
+    pub override_colors: Vec<(u32, String)>,
 }
 
 /// R-229 — une valeur nommée de `@font-feature-values` :
@@ -1148,6 +1778,20 @@ pub struct StyleEngine {
     /// famille → nom → tag+indices (résolution
     /// `font-variant-alternates`).
     pub font_feature_values: HashMap<String, HashMap<String, FontFeatureValues>>,
+    /// `@font-palette-values` enregistrés (R-239) —
+    /// `--nom` → palette (consommée par `font-palette`).
+    pub font_palettes: HashMap<String, FontPalette>,
+    /// `@custom-media <--nom> (query)` enregistrés (R-231) —
+    /// alias de media query : `@media (--nom)` → substitution
+    /// du query enregistré à la collecte.
+    pub custom_media: HashMap<String, String>,
+    /// `@position-try --nom { … }` enregistrés (css-anchor-1) —
+    /// appliqués par la passe de flip quand la boîte déborde.
+    pub position_tries: HashMap<String, Vec<Declaration>>,
+    /// `@namespace` enregistrés (R-237) — préfixe → URI,
+    /// transportés au `MatchCache` à chaque `compute_*` pour
+    /// résoudre les sélecteurs `ns|tag`.
+    pub namespaces: HashMap<String, String>,
     rules: Vec<CollectedRule>,
     /// Règles UA **quirks-only** (HTML Rendering, « In quirks
     /// mode ») — parsées avec la feuille UA, ne candidatent
@@ -1341,6 +1985,8 @@ pub struct StyleMap {
     pub counter_styles: HashMap<String, CounterStyle>,
     /// `@font-feature-values` enregistrés (R-229).
     pub font_feature_values: HashMap<String, HashMap<String, FontFeatureValues>>,
+    /// `@font-palette-values` enregistrés (R-239).
+    pub font_palettes: HashMap<String, FontPalette>,
 }
 
 impl StyleMap {
@@ -1590,10 +2236,14 @@ impl StyleEngine {
                 }
                 Rule::At(at) => {
                     if let AtKind::Media { queries, rules } = &at.kind {
+                        // R-231 — `@custom-media` : un groupe
+                        // `(--nom)` enregistré se substitue à
+                        // son query (un niveau de récursion).
+                        let queries = self.expand_custom_media(queries);
                         // `@media` imbriqué = AND : on empile la
                         // liste de queries du niveau.
                         let mut nested = media.to_vec();
-                        nested.push(queries.clone());
+                        nested.push(queries);
                         self.collect_rules_into(
                             rules, origin, &nested, layer, quirks, scope, container,
                         );
@@ -1627,7 +2277,35 @@ impl StyleEngine {
                         // `@layer a, b;` : déclare l'ordre sans
                         // règles (les corps s'y raccordent par
                         // nom — premier arrivé fixe le rang).
-                        if at.name == "layer" {
+                        if at.name == "namespace" {
+                            // R-237 — `@namespace [préfixe]
+                            // "uri"` : l'absence de préfixe
+                            // déclare le défaut (clé vide).
+                            let toks: Vec<&str> = prelude
+                                .split_whitespace()
+                                .map(|t| t.trim_matches('"').trim_matches('\''))
+                                .filter(|t| !t.is_empty())
+                                .collect();
+                            match toks.as_slice() {
+                                [uri] => {
+                                    self.namespaces.insert(String::new(), (*uri).to_string());
+                                }
+                                [pfx, uri] => {
+                                    self.namespaces
+                                        .insert((*pfx).to_string(), (*uri).to_string());
+                                }
+                                _ => {}
+                            }
+                        } else if at.name == "custom-media" {
+                            // R-231 — `@custom-media --nom (q)` :
+                            // l'alias vit dans `custom_media` —
+                            // `@media (--nom)` substitué à la
+                            // collecte ci-dessous.
+                            if let Some((name, q)) = prelude.split_once(char::is_whitespace) {
+                                self.custom_media
+                                    .insert(name.trim().to_string(), q.trim().to_string());
+                            }
+                        } else if at.name == "layer" {
                             let mut path = layer.to_vec();
                             for part in prelude.split(',') {
                                 for seg in part.split('.') {
@@ -1691,6 +2369,42 @@ impl StyleEngine {
                             }
                             self.counter_styles
                                 .insert(prelude.trim().to_ascii_lowercase(), cs);
+                        } else if at.name.eq_ignore_ascii_case("position-try") {
+                            // `@position-try --nom { décls }` —
+                            // registre nommé : `position-try:
+                            // --nom` référence la règle.
+                            self.position_tries
+                                .insert(prelude.trim().to_string(), declarations.clone());
+                        } else if at.name.eq_ignore_ascii_case("font-palette-values") {
+                            // R-239 — `@font-palette-values --nom
+                            // { font-family; base-palette;
+                            // override-colors }` — registre par nom.
+                            let mut fp = FontPalette::default();
+                            for d in declarations {
+                                match d.name.as_str() {
+                                    "font-family" => {
+                                        fp.font_family =
+                                            d.value.trim().trim_matches('"').to_string();
+                                    }
+                                    "base-palette" => {
+                                        fp.base_palette = d.value.trim().to_string();
+                                    }
+                                    "override-colors" => {
+                                        for pair in d.value.split(',') {
+                                            let mut it = pair.trim().splitn(2, char::is_whitespace);
+                                            if let (Some(i), Some(c)) = (it.next(), it.next()) {
+                                                if let Ok(idx) = i.parse::<u32>() {
+                                                    fp.override_colors
+                                                        .push((idx, c.trim().to_string()));
+                                                }
+                                            }
+                                        }
+                                    }
+                                    _ => {}
+                                }
+                            }
+                            self.font_palettes
+                                .insert(prelude.trim().to_ascii_lowercase(), fp);
                         } else {
                             // R-207 — bloc de déclarations parsé
                             // mais inerte (`@page`, `@viewport`,
@@ -1819,6 +2533,7 @@ impl StyleEngine {
         containers: Option<&HashMap<NodeId, ContainerMeasure>>,
     ) -> ComputedStyle {
         let mut mcache = MatchCache::default();
+        mcache.namespaces.clone_from(&self.namespaces);
         let root_fs = self.root_font_size(dom, env, state);
         let parent = parent_computed(
             self,
@@ -1858,6 +2573,7 @@ impl StyleEngine {
         // `compute_with_parent`. Appel direct : passer par
         // `compute_with_state` re-bouclerait ici sans fin.
         let mut mcache = MatchCache::default();
+        mcache.namespaces.clone_from(&self.namespaces);
         self.compute_with_parent(
             dom,
             doc_el,
@@ -1960,6 +2676,7 @@ impl StyleEngine {
         let mut map = HashMap::new();
         let mut pseudos = HashMap::new();
         let mut mcache = MatchCache::default();
+        mcache.namespaces.clone_from(&self.namespaces);
         // Ancêtres de `root` : un sous-arbre peut être stylé
         // hors racine document — leurs clés restent visibles
         // pour les combinators ancêtres (même contrat que
@@ -1988,6 +2705,7 @@ impl StyleEngine {
             pseudos,
             counter_styles: self.counter_styles.clone(),
             font_feature_values: self.font_feature_values.clone(),
+            font_palettes: self.font_palettes.clone(),
         }
     }
 
@@ -2051,6 +2769,7 @@ impl StyleEngine {
         let mut map = HashMap::new();
         let mut pseudos = HashMap::new();
         let mut mcache = MatchCache::default();
+        mcache.namespaces.clone_from(&self.namespaces);
         // Les ancêtres au-dessus du sous-arbre restent
         // visibles au matching (contrat du restyle scopé).
         let anc = AncestorFilter::of_ancestors(dom, root);
@@ -2074,6 +2793,7 @@ impl StyleEngine {
             pseudos,
             counter_styles: self.counter_styles.clone(),
             font_feature_values: self.font_feature_values.clone(),
+            font_palettes: self.font_palettes.clone(),
         }
     }
 
@@ -2358,8 +3078,24 @@ impl StyleEngine {
             let lname = if d.name.starts_with("--") {
                 d.name.clone()
             } else {
-                d.name.to_ascii_lowercase()
+                vendor_alias(&d.name.to_ascii_lowercase()).to_string()
             };
+            // R-232 — `all: kw` : reset de TOUTES les longhands
+            // connues au mot-clé (`initial`/`inherit`/`unset`/
+            // `revert[-layer]` — chacune rejoint son repli
+            // aval : hérité→parent, sinon initiale).
+            if lname == "all"
+                && matches!(
+                    d.value.trim().to_ascii_lowercase().as_str(),
+                    "initial" | "inherit" | "unset" | "revert" | "revert-layer"
+                )
+            {
+                for p in SUPPORTED_PROPS {
+                    ranks.insert((*p).to_string(), *rank);
+                    props.insert((*p).to_string(), d.value.clone());
+                }
+                continue;
+            }
             // Shorthand → longhands (spec : `margin: x` fixe les
             // quatre côtés, chacun à la spécificité de la règle).
             match expand_shorthand(&lname, &d.value) {
@@ -2388,8 +3124,27 @@ impl StyleEngine {
                     } else {
                         // R-207 — déclaration ignorée sur la
                         // validation par propriété (`width:
-                        // 200`…) : signalée par nom.
+                        // 200`…) : signalée par nom ; le détail
+                        // porte le début de la valeur pour que
+                        // le Pareto nomme la forme fautive
+                        // (github : `font-size` ×108).
                         explorer_common::census::bump(&format!("css.value.dropped.{lname}"));
+                        let v = d.value.trim();
+                        let v = v.strip_prefix("var(--").unwrap_or(v);
+                        let key: String = v
+                            .chars()
+                            .take(30)
+                            .map(|c| {
+                                if c.is_ascii_alphanumeric()
+                                    || matches!(c, '-' | '.' | '(' | ')' | '%')
+                                {
+                                    c
+                                } else {
+                                    '_'
+                                }
+                            })
+                            .collect();
+                        explorer_common::census::bump(&format!("css.value.dropped.{lname}.{key}"));
                     }
                 }
             }
@@ -2419,6 +3174,14 @@ impl StyleEngine {
         // (l'ordre fin n'est pas préservable en `HashMap` —
         // approximation documentée).
         resolve_logical_props(&mut props, parent, &ranks);
+        // R-235 — `-webkit-text-fill-color` remplace `color`
+        // pour le remplissage du texte (spec compat : le fill
+        // l'emporte quand présent, sauf `transparent`).
+        if let Some(v) = props.get("-webkit-text-fill-color").cloned() {
+            if v.trim() != "transparent" {
+                props.insert("color".to_string(), v);
+            }
+        }
         // Propriétés custom `--*` : héritées par défaut (spec)
         // — R-57 : la table effective du parent est PARTAGÉE
         // (bump `Arc` O(1)) au lieu de recopier chaque entrée ;
@@ -2636,6 +3399,26 @@ impl StyleEngine {
                     axis.to_string(),
                     inherited.unwrap_or_else(|| "none".to_string()),
                 );
+            }
+        }
+        // 12. `@position-try --nom` (css-anchor-1) : la règle
+        //     nommée référencée par `position-try`/
+        //     `position-try-fallbacks` est sérialisée dans une
+        //     clé porteuse `position-try--nom` — le layout ne
+        //     connaît pas la feuille, seules ses déclarations
+        //     servent en débordement (pas de style anticipé).
+        for prop in ["position-try", "position-try-fallbacks"] {
+            if let Some(names) = props.get(prop).cloned() {
+                for name in names.split_whitespace().filter(|t| t.starts_with("--")) {
+                    if let Some(decls) = self.position_tries.get(name) {
+                        let body: String = decls
+                            .iter()
+                            .map(|d| format!("{}:{}", d.name, d.value.trim()))
+                            .collect::<Vec<_>>()
+                            .join(";");
+                        props.insert(format!("position-try-{}", name.trim()), body);
+                    }
+                }
             }
         }
         ComputedStyle { props, vars }
@@ -3105,6 +3888,8 @@ fn resolve_font_size(raw: &str, parent_fs: f32, env: &StyleEnv, rem_base: f32) -
         "xxx-large" => return Some(base * 2.0736),
         "smaller" => return Some(parent_fs / 1.2),
         "larger" => return Some(parent_fs * 1.2),
+        // css-fonts-4 : `math` = taille calculée du parent.
+        "math" => return Some(parent_fs),
         _ => {}
     }
     if let Some(pct) = v.strip_suffix('%') {
@@ -3151,6 +3936,17 @@ fn apply_presentational_hints(
     let Ok(tag) = dom.tag_name(node) else {
         return;
     };
+    // `field-sizing:content` (css-forms / R-277) : le
+    // contrôle se mesure au **contenu** — les dimensions
+    // fixes issues de `cols`/`rows`/`size` (et leurs
+    // défauts UA) ne s'appliquent plus. La propriété n'est
+    // PAS héritée : seule la déclaration propre compte,
+    // déjà résolue dans `props` quand les hints passent.
+    // `width`/`height` auteur priment de toute façon
+    // (rang des hints) — ici on supprime le hint lui-même.
+    let field_content = props
+        .get("field-sizing")
+        .is_some_and(|v| v.trim() == "content");
     match tag {
         "table" | "td" | "th" | "tr" | "col" | "colgroup" | "img" | "iframe" | "object"
         | "embed" | "canvas" | "video" => {
@@ -3189,7 +3985,10 @@ fn apply_presentational_hints(
             // exclus (approximation documentée).
             hint(props, "height", dim(hint_attr(dom, node, "size")));
         }
-        "textarea" => {
+        // `field-sizing:content` → pas de taille fixe sur
+        // textarea/input (mesure au contenu) : la garde
+        // laisse le tag tomber sur `_`.
+        "textarea" if !field_content => {
             // `cols`/`rows` → taille en caractères (HTML
             // Rendering) : `cols` → `width` en `ch`,
             // `rows` → `height` ≈ rows × hauteur de ligne.
@@ -3210,7 +4009,7 @@ fn apply_presentational_hints(
                 lines(hint_attr(dom, node, "rows")).or_else(|| Some("4em".to_string())),
             );
         }
-        "input" => {
+        "input" if !field_content => {
             // `size` → `width` en `ch` — ignoré sur les
             // états à contrôle propre (checkbox/radio/
             // submit : leur `width` UA est une vraie règle,
@@ -4188,8 +4987,8 @@ fn logical_name(
             let rh = logical_edge(own, rtl, he);
             return Some(format!(
                 "border-{}-{}-radius",
-                stored_side(rh, pmode),
-                stored_side(rv, pmode)
+                stored_side(rv, pmode),
+                stored_side(rh, pmode)
             ));
         }
         for (suf, idx) in [
@@ -4198,6 +4997,14 @@ fn logical_name(
             ("block-start", 2),
             ("block-end", 3),
         ] {
+            if rest == suf {
+                // Nu `border-{i,b}-{s,e}` → shorthand
+                // `border-{side}` (expansion aval).
+                return Some(format!(
+                    "border-{}",
+                    stored_side(logical_edge(own, rtl, idx), pmode)
+                ));
+            }
             if let Some(tail) = rest.strip_prefix(suf).and_then(|t| t.strip_prefix('-')) {
                 return Some(format!(
                     "border-{}-{}",
@@ -4205,6 +5012,25 @@ fn logical_name(
                     tail
                 ));
             }
+        }
+        return None;
+    }
+    if let Some(rest) = k
+        .strip_prefix("corner-")
+        .and_then(|t| t.strip_suffix("-shape"))
+    {
+        // `corner-{s|e}{s|e}-shape` : coin logique — premier
+        // = bloc, second = inline (css-borders-4 §3.8.1,
+        // même convention que `border-{s|e}{s|e}-radius`).
+        let toks: Vec<&str> = rest.split('-').collect();
+        if let [a @ ("start" | "end"), b @ ("start" | "end")] = toks.as_slice() {
+            let ve = 2 + usize::from(*a != "start");
+            let he = usize::from(*b != "start");
+            return Some(format!(
+                "corner-{}-{}-shape",
+                stored_side(logical_edge(own, rtl, ve), pmode),
+                stored_side(logical_edge(own, rtl, he), pmode)
+            ));
         }
         return None;
     }
@@ -4239,7 +5065,9 @@ const INHERITED_PROPS: &[&str] = &[
     "unicode-bidi",
     "font-variant",
     "font-variant-alternates",
+    "font-variant-numeric",
     "font-feature-settings",
+    "font-palette",
     "font-stretch",
     "font-size-adjust",
     "font-synthesis",
@@ -4254,7 +5082,12 @@ const INHERITED_PROPS: &[&str] = &[
     "orphans",
     "pointer-events",
     "quotes",
+    // css-ruby-1 §3.1 : `ruby-position` est héritée — une
+    // valeur posée sur `<ruby>`/`rtc` atteint le `rt`.
+    "ruby-position",
+    "tab-size",
     "text-align",
+    "text-decoration-skip-ink",
     "text-combine-upright",
     "text-emphasis",
     "text-emphasis-color",
@@ -4262,14 +5095,27 @@ const INHERITED_PROPS: &[&str] = &[
     "text-emphasis-style",
     "text-spacing-trim",
     "hanging-punctuation",
+    // css-text-4 §9/§7.3 (R-282) : `text-autospace` et
+    // `text-justify` sont héritées.
+    "text-autospace",
+    "text-justify",
     "text-indent",
     "text-orientation",
     "text-transform",
+    "text-wrap-mode",
+    "text-wrap-style",
     "visibility",
     "writing-mode",
     "white-space",
+    "white-space-collapse",
+    "white-space-trim",
     "widows",
+    "word-break",
     "word-spacing",
+    "word-wrap",
+    "overflow-wrap",
+    "line-break",
+    "hyphens",
 ];
 
 /// R-209 — une valeur **déclarée** qui échoue à la lecture
@@ -4376,6 +5222,7 @@ pub fn initial_value(name: &str) -> Option<&'static str> {
         "font-style" | "font-variant" | "font-weight" | "line-height" | "letter-spacing"
         | "word-spacing" | "white-space" | "unicode-bidi" => "normal",
         "text-align" => "start",
+        "tab-size" => "8",
         "visibility" | "overflow" | "overflow-x" | "overflow-y" => "visible",
         "vertical-align" => "baseline",
         "list-style" | "list-style-type" => "disc",
@@ -4467,11 +5314,28 @@ b, strong { font-weight: bold }
 i, em, cite, dfn, var, address { font-style: italic }
 u, ins { text-decoration: underline }
 s, del, strike { text-decoration: line-through }
+/* HTML Rendering : `<q>` génère ses guillemets via
+   `content` + les mots-clés `open-quote`/`close-quote`
+   (css-content-3 §6.1, R-276 — la paire vient de `quotes`,
+   `auto` = latines usuelles). */
+q::before { content: open-quote }
+q::after { content: close-quote }
 big { font-size: larger }
 small, sub, sup { font-size: smaller }
 nobr { white-space: nowrap }
 sub { vertical-align: sub }
 sup { vertical-align: super }
+/* css-ruby-1 : vrais niveaux `display:ruby*` (le boxtree les
+   approxime inline ; la pose de l'annotation au-dessus de la
+   base est faite côté inline.rs — `ruby-position:over|under`).
+   `rt` à demi fonte ; `rp` (parenthèses pleine largeur pour
+   navigateurs sans ruby) est masqué — le rt est affiché. */
+ruby { display: ruby }
+rbc { display: ruby-base-container }
+rb { display: ruby-base }
+rtc { display: ruby-text-container }
+rt { display: ruby-text; font-size: 50% }
+rp { display: none }
 abbr[title], acronym[title] { text-decoration: underline }
 mark { background-color: yellow; color: black }
 figure { margin-top: 1em; margin-bottom: 1em; margin-left: 40px; margin-right: 40px }
@@ -4534,13 +5398,261 @@ table {
 /// (un `light-dark` peut nicher dans une autre valeur), la
 /// virgule de tête sépare les deux branches ; un argument
 /// manquant conserve le texte source (dégradation).
+/// R-250 — `font-variant-east-asian` : mots-clés → tags OT
+/// (css-fonts-4 §6.5).
+const FVE_TAGS: &[(&str, &str)] = &[
+    ("full-width", "fwid"),
+    ("proportional-width", "pwid"),
+    ("jis78", "jp78"),
+    ("jis83", "jp83"),
+    ("jis90", "jp90"),
+    ("jis04", "jp04"),
+    ("simplified", "smpl"),
+    ("traditional", "trad"),
+    ("hojo", "hojo"),
+    ("nlc-kanji", "nlck"),
+    ("ruby", "ruby"),
+];
+
+/// R-241 — `font-variant-numeric` : mots-clés → tags OT
+/// (css-fonts-4 §6.3).
+const FVN_TAGS: &[(&str, &str)] = &[
+    ("lining-nums", "lnum"),
+    ("oldstyle-nums", "onum"),
+    ("proportional-nums", "pnum"),
+    ("tabular-nums", "tnum"),
+    ("diagonal-fractions", "frac"),
+    ("stacked-fractions", "afrc"),
+    ("ordinal", "ordn"),
+    ("slashed-zero", "zero"),
+];
+
+/// `font-variant-ligatures` : mots-clés → `(tag OT, valeur)`
+/// (css-fonts-4 §6.4) — `none` coupe toutes les ligatures.
+const FVL_TAGS: &[(&str, &[(&str, u32)])] = &[
+    ("common-ligatures", &[("liga", 1), ("clig", 1)]),
+    ("no-common-ligatures", &[("liga", 0), ("clig", 0)]),
+    ("discretionary-ligatures", &[("dlig", 1)]),
+    ("no-discretionary-ligatures", &[("dlig", 0)]),
+    ("historical-ligatures", &[("hlig", 1)]),
+    ("no-historical-ligatures", &[("hlig", 0)]),
+    ("contextual", &[("calt", 1)]),
+    ("no-contextual", &[("calt", 0)]),
+    (
+        "none",
+        &[("liga", 0), ("clig", 0), ("dlig", 0), ("hlig", 0)],
+    ),
+];
+
+/// `font-variant` shorthand : répartition des mots-clés par
+/// longhand (css-fonts-4 §6.7). Les fonctions `stylistic()`
+/// /`styleset()`… vont à `font-variant-alternates` brut.
+const FV_CAPS: &[&str] = &[
+    "small-caps",
+    "all-small-caps",
+    "petite-caps",
+    "all-petite-caps",
+    "unicase",
+    "titling-caps",
+];
+const FV_EMOJI: &[&str] = &["emoji", "text", "unicode"];
+
 impl StyleEngine {
+    /// `font-variant` shorthand : chaque mot-clé est routé
+    /// vers son longhand (css-fonts-4 §6.7) — les résolveurs
+    /// `numeric`/`east-asian`/`ligatures`/`caps`/`position`
+    /// consomment alors le résultat. `normal`/`none` et les
+    /// formes fonctionnelles des alternates gardent leur
+    /// valeur brute sur `font-variant` (lues par font.rs
+    /// pour les caps, dégradées sinon). Un longhand déjà
+    /// présent n'est pas écrasé (la cascade a tranché).
+    fn expand_font_variant(map: &mut HashMap<NodeId, ComputedStyle>) {
+        for st in map.values_mut() {
+            let Some(v) = st.get("font-variant") else {
+                continue;
+            };
+            let v = v.trim().to_string();
+            if matches!(v.as_str(), "normal" | "inherit" | "initial" | "unset") {
+                continue;
+            }
+            let mut numeric = Vec::new();
+            let mut asian = Vec::new();
+            let mut ligs = Vec::new();
+            let mut alts = Vec::new();
+            for kw in v.split_whitespace() {
+                if FV_CAPS.contains(&kw) {
+                    if st.get("font-variant-caps").is_none() {
+                        st.set("font-variant-caps", kw);
+                    }
+                } else if matches!(kw, "sub" | "super") {
+                    if st.get("font-variant-position").is_none() {
+                        st.set("font-variant-position", kw);
+                    }
+                } else if FV_EMOJI.contains(&kw) {
+                    if st.get("font-variant-emoji").is_none() {
+                        st.set("font-variant-emoji", kw);
+                    }
+                } else if FVN_TAGS.iter().any(|(k, _)| *k == kw) {
+                    numeric.push(kw);
+                } else if FVE_TAGS.iter().any(|(k, _)| *k == kw) {
+                    asian.push(kw);
+                } else if FVL_TAGS.iter().any(|(k, _)| *k == kw) {
+                    ligs.push(kw);
+                } else if kw == "none" {
+                    // `font-variant: none` = ligatures coupées
+                    // (css-fonts-4 §6.7 : none ≡
+                    // `font-variant-ligatures: none` + caps
+                    // normal…).
+                    ligs.push("none");
+                } else if kw != "normal" {
+                    // `historical-forms`, fonctions
+                    // `styleset(`… — vers alternates brut.
+                    alts.push(kw);
+                }
+            }
+            let merge = |st: &mut ComputedStyle, prop: &str, kws: Vec<&str>| {
+                if kws.is_empty() {
+                    return;
+                }
+                let joined = match st.get(prop) {
+                    Some(prev) if !prev.trim().is_empty() && prev.trim() != "normal" => {
+                        format!("{} {}", prev.trim(), kws.join(" "))
+                    }
+                    _ => kws.join(" "),
+                };
+                st.set(prop, &joined);
+            };
+            merge(st, "font-variant-numeric", numeric);
+            merge(st, "font-variant-east-asian", asian);
+            merge(st, "font-variant-ligatures", ligs);
+            if !alts.is_empty() && st.get("font-variant-alternates").is_none() {
+                st.set("font-variant-alternates", &alts.join(" "));
+            }
+        }
+    }
+
+    /// `font-variant-ligatures` : mots-clés → réglages OT
+    /// concaténés (css-fonts-4 §6.4) — les valeurs `0`
+    /// coupent la feature, le parsing
+    /// `font-feature-settings` les porte déjà.
+    fn resolve_font_ligatures(map: &mut HashMap<NodeId, ComputedStyle>) {
+        for st in map.values_mut() {
+            let Some(v) = st.get("font-variant-ligatures") else {
+                continue;
+            };
+            let mut settings: Vec<String> = st
+                .get("font-feature-settings")
+                .map(|s| s.split(',').map(str::to_owned).collect())
+                .unwrap_or_default();
+            for kw in v.split_whitespace() {
+                if let Some((_, pairs)) = FVL_TAGS.iter().find(|(k, _)| *k == kw) {
+                    for (tag, val) in *pairs {
+                        settings.push(format!("\"{tag}\" {val}"));
+                    }
+                }
+            }
+            if !settings.is_empty() {
+                st.set("font-feature-settings", &settings.join(", "));
+            }
+        }
+    }
+
+    /// R-250 — `font-variant-east-asian` : mots-clés → tags
+    /// OT concaténés (css-fonts-4 §6.5).
+    fn resolve_font_east_asian(map: &mut HashMap<NodeId, ComputedStyle>) {
+        for st in map.values_mut() {
+            let Some(v) = st.get("font-variant-east-asian") else {
+                continue;
+            };
+            let mut settings: Vec<String> = st
+                .get("font-feature-settings")
+                .map(|s| s.split(',').map(str::to_owned).collect())
+                .unwrap_or_default();
+            for kw in v.split_whitespace() {
+                if let Some(tag) = FVE_TAGS.iter().find(|(k, _)| *k == kw).map(|(_, t)| t) {
+                    settings.push(format!("\"{tag}\" 1"));
+                }
+            }
+            if !settings.is_empty() {
+                st.set("font-feature-settings", &settings.join(", "));
+            }
+        }
+    }
+
+    /// R-231 — `@custom-media` : chaque `MediaQuery` du lot
+    /// dont l'unique condition est un `--nom` enregistré est
+    /// remplacée par le parse du query alias (un niveau —
+    /// l'alias peut à son tour contenir un alias, mais la
+    /// chaîne est bornée à une substitution).
+    fn expand_custom_media(&self, queries: &[MediaQuery]) -> Vec<MediaQuery> {
+        let mut out = Vec::new();
+        for q in queries {
+            let custom = q.conditions.len() == 1
+                && q.conditions[0].1.is_empty()
+                && q.conditions[0].0.starts_with("--")
+                && self.custom_media.contains_key(&q.conditions[0].0);
+            if custom {
+                let alias = self.custom_media[&q.conditions[0].0].clone();
+                let mut expanded = crate::parser::parse_media_queries(&alias);
+                for e in &mut expanded {
+                    e.negated = e.negated != q.negated;
+                }
+                out.extend(expanded);
+            } else {
+                out.push(q.clone());
+            }
+        }
+        out
+    }
+
     /// R-229 — `font-variant-alternates` : résout les noms
     /// enregistrés `@font-feature-values` en réglages
     /// `font-feature-settings` équivalents (concatenés) —
     /// la clé de famille vient de `font-family` calculé.
     /// `normal`/absent ne touche à rien.
     fn resolve_font_alternates(&self, map: &mut HashMap<NodeId, ComputedStyle>) {
+        // R-239 — `font-palette: --nom` : le registre livre
+        // la palette → `base-palette` normalisée en valeur
+        // (`light`/`dark`/index — `normal` si absent).
+        if !self.font_palettes.is_empty() {
+            for st in map.values_mut() {
+                let Some(name) = st.get("font-palette") else {
+                    continue;
+                };
+                let Some(fp) = self.font_palettes.get(name.trim()) else {
+                    continue;
+                };
+                let base = if fp.base_palette.is_empty() {
+                    "normal".to_string()
+                } else {
+                    fp.base_palette.clone()
+                };
+                st.set("font-palette", &base);
+            }
+        }
+        Self::expand_font_variant(map);
+        // R-241 — `font-variant-numeric` : mots-clés → tags
+        // OT équivalents (spec css-fonts-4 §6.3) — concaténés
+        // aux `font-feature-settings` existants.
+        for st in map.values_mut() {
+            let Some(v) = st.get("font-variant-numeric") else {
+                continue;
+            };
+            let mut settings: Vec<String> = st
+                .get("font-feature-settings")
+                .map(|s| s.split(',').map(str::to_owned).collect())
+                .unwrap_or_default();
+            for kw in v.split_whitespace() {
+                if let Some(tag) = FVN_TAGS.iter().find(|(k, _)| *k == kw).map(|(_, t)| t) {
+                    settings.push(format!("\"{tag}\" 1"));
+                }
+            }
+            if !settings.is_empty() {
+                st.set("font-feature-settings", &settings.join(", "));
+            }
+        }
+        Self::resolve_font_ligatures(map);
+        Self::resolve_font_east_asian(map);
         if self.font_feature_values.is_empty() {
             return;
         }

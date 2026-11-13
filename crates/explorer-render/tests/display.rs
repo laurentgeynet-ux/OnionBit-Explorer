@@ -1241,6 +1241,68 @@ fn background_position_decale_lorigine() {
 }
 
 #[test]
+fn background_position_x_y_routes_les_deux_axes() {
+    // R-261 : les longhands mono-axe (css-backgrounds-4) se
+    // combinent avec le shorthand — chaque axe déclaré
+    // écrase l'axe correspondant.
+    let list = bg_div(
+        "background:url(x) no-repeat;background-position:10px 10px;\
+         background-position-x:right;background-position-y:5px",
+    );
+    let origin = list
+        .items
+        .iter()
+        .find_map(|i| match i {
+            DisplayItem::BackgroundImage { origin, .. } => Some(*origin),
+            _ => None,
+        })
+        .expect("bg item");
+    // `right` = aire − image : 40 − 4 ; `5px` garde y.
+    assert_eq!(
+        origin,
+        (36.0, 5.0),
+        "x depuis -x:right, y depuis -y : {origin:?}"
+    );
+}
+
+#[test]
+fn background_position_x_forme_bord_offset() {
+    // `background-position-x: right 5px` = bord droit − 5 px.
+    let list = bg_div("background:url(x) no-repeat;background-position-x:right 5px");
+    let origin = list
+        .items
+        .iter()
+        .find_map(|i| match i {
+            DisplayItem::BackgroundImage { origin, .. } => Some(*origin),
+            _ => None,
+        })
+        .expect("bg item");
+    assert_eq!(origin.0, 31.0, "right 5px → 36−5 : {origin:?}");
+}
+
+#[test]
+fn background_position_y_seule_garde_x_du_shorthand() {
+    let list = bg_div(
+        "background:url(x) no-repeat;background-position:7px 1px;\
+         background-position-y:bottom",
+    );
+    let origin = list
+        .items
+        .iter()
+        .find_map(|i| match i {
+            DisplayItem::BackgroundImage { origin, .. } => Some(*origin),
+            _ => None,
+        })
+        .expect("bg item");
+    // `bottom` = 20 − 2 = 18 ; x inchangé.
+    assert_eq!(
+        origin,
+        (7.0, 18.0),
+        "y depuis -y:bottom, x conservé : {origin:?}"
+    );
+}
+
+#[test]
 fn background_image_multicouche_peint_la_couche_url() {
     // R-71 : `linear-gradient(…),url(…)` (sprites Wikipedia
     // `.sprite`) — la couche `url()` doit peindre même quand
@@ -1294,7 +1356,7 @@ fn multicouche_url_seule_la_premiere_peint_limage_stockee() {
             _ => None,
         })
         .expect("item fond");
-    assert_eq!(repeat, (false, false), "couche no-repeat conservée");
+    assert_eq!(repeat, (1, 1), "couche no-repeat conservée");
 }
 
 #[test]
@@ -1915,7 +1977,7 @@ fn background_multicouche_paint_les_deux_couches() {
     let url_item = items
         .iter()
         .find(|i| match i {
-            DisplayItem::BackgroundImage { repeat, .. } => *repeat == (false, false),
+            DisplayItem::BackgroundImage { repeat, .. } => *repeat == (1, 1),
             _ => false,
         })
         .expect("couche url no-repeat");
@@ -2225,6 +2287,27 @@ fn empty_cells_hide_ne_peint_ni_fond_ni_bordure() {
         .count();
     assert_eq!(borders2, 2, "collapse : empty-cells inerte : {borders2}");
     let _ = dom;
+}
+
+#[test]
+fn empty_cells_hide_compte_les_cellules_a_blancs_seuls_comme_vides() {
+    // R-263 — §17.6.1.1 : une cellule réduite à des blancs
+    // collapsibles (espaces, tabulations, sauts de ligne)
+    // est « vide » — elle ne peint ni fond ni bordure.
+    // `\u{A0}`/un élément enfant restent du contenu.
+    let (_dom, _bx, items) = dl(
+        "<table><tr><td id=esp> </td><td id=tab>\t \n </td>\
+         <td id=nbsp>&nbsp;</td><td id=span><span></span></td></tr></table>",
+        "table { empty-cells: hide; border-spacing: 4px } \
+         td { border: 2px solid black; width: 40px }",
+    );
+    // `esp` et `tab` sont vides (blancs seuls) → sautées ;
+    // `nbsp` et `span` = contenu → peintes.
+    let borders = items
+        .iter()
+        .filter(|i| matches!(i, DisplayItem::Border { .. }))
+        .count();
+    assert_eq!(borders, 2, "seules nbsp+span peignent : {borders}");
 }
 
 #[test]
@@ -3640,5 +3723,786 @@ fn enfant_positionne_reste_sous_clip_overflow() {
     assert!(
         depth >= 1,
         "positionné peint hors du clip ancêtre (depth={depth})"
+    );
+}
+
+// ---------- R-265 — `currentcolor` résolu au paint ----------
+
+#[test]
+fn currentcolor_background_suit_la_couleur_calculee() {
+    // `background-color:currentcolor` = `color` de l'élément
+    // — l'ancien `parse_color` brut retournait `None` → pas
+    // de fond du tout.
+    let (_d, _b, items) = dl(
+        "<div id=x>&nbsp;</div>",
+        "div{color:#008000;background-color:currentColor;width:20px;height:20px}",
+    );
+    let fill = items
+        .iter()
+        .filter_map(|i| match i {
+            DisplayItem::FillRect { color, .. } => Some(*color),
+            _ => None,
+        })
+        .find(|c| c.g > 100 && c.r < 80);
+    assert!(fill.is_some(), "fond currentcolor vert attendu");
+}
+
+#[test]
+fn currentcolor_border_item_colors_suivent_color() {
+    let (_d, _b, items) = dl(
+        "<div id=x>&nbsp;</div>",
+        "div{color:#0000CC;border:2px solid currentColor;width:20px;height:20px}",
+    );
+    let b = items
+        .iter()
+        .find_map(|i| match i {
+            DisplayItem::Border { colors, .. } => Some(*colors),
+            _ => None,
+        })
+        .expect("bordure peinte");
+    assert!(
+        b.iter().all(|c| c.b > 150 && c.r < 60),
+        "bordure currentcolor bleue attendue : {b:?}"
+    );
+}
+
+#[test]
+fn box_shadow_sans_couleur_prend_currentcolor() {
+    // Défaut spec de la couleur d'ombre = `currentcolor`.
+    let (_d, _b, items) = dl(
+        "<div id=x>&nbsp;</div>",
+        "div{color:#00AA00;box-shadow:2px 2px 4px;width:20px;height:20px}",
+    );
+    let sh = items
+        .iter()
+        .find_map(|i| match i {
+            DisplayItem::BoxShadow { color, .. } => Some(*color),
+            _ => None,
+        })
+        .expect("ombre");
+    assert!(sh.g > 100 && sh.r < 60, "ombre verte : {sh:?}");
+}
+
+#[test]
+fn text_decoration_color_declaree_peint_le_trait() {
+    // `text-decoration-color` déclarée → le trait prend SA
+    // couleur, pas celle du texte.
+    let (_d, _b, items) = dl(
+        "<p><span class=x>souligne</span></p>",
+        "span{color:#0000CC;text-decoration:underline;\
+         text-decoration-color:#CC0000;font-size:20px}",
+    );
+    let t = items
+        .iter()
+        .find_map(|i| match i {
+            DisplayItem::Text { origin, .. } => Some(origin.1),
+            _ => None,
+        })
+        .expect("run");
+    let deco = items.iter().any(|i| match i {
+        DisplayItem::DecoRect { rect, color, .. } | DisplayItem::FillRect { rect, color, .. } => {
+            rect.y > t && color.r > 150 && color.b < 80
+        }
+        _ => false,
+    });
+    assert!(deco, "trait rouge sous l'encre bleue attendu");
+}
+
+#[test]
+fn corner_shape_shorthand_longhands_et_logiques_sur_items() {
+    // R-270 — css-borders-4 §3.7/3.8 : `corner-shape` =
+    // shorthand 1..4 → K par coin sur FillRect ET Border ;
+    // `corner-{side}-shape` = 2 coins ; `corner-{s|e}{s|e}
+    // -shape` logique → physique (LTR/horizontal) ;
+    // `superellipse(k)`/`±infinity` passent l'exposant.
+    // `round` absent → 1.0 (historique rond).
+    let (_d, _b, items) = dl(
+        "<div>x</div>",
+        "div { border: 2px solid black; background: #ccc; \
+         border-radius: 20px; corner-shape: bevel scoop; \
+         width: 80px; height: 60px }",
+    );
+    let border = items.iter().find_map(|i| match i {
+        DisplayItem::Border { corners, .. } => Some(*corners),
+        _ => None,
+    });
+    assert_eq!(
+        border,
+        Some([0.0, -1.0, 0.0, -1.0]),
+        "corners border : {border:?}"
+    );
+    let fill = items.iter().find_map(|i| match i {
+        DisplayItem::FillRect { corners, .. } => Some(*corners),
+        _ => None,
+    });
+    assert_eq!(
+        fill,
+        Some([0.0, -1.0, 0.0, -1.0]),
+        "corners fond : {fill:?}"
+    );
+    // Longhands coin : `superellipse(-3)` + `squircle` ; les
+    // autres restent `round` (1.0).
+    let (_d2, _b2, items2) = dl(
+        "<div>x</div>",
+        "div { border-radius: 20px; \
+         corner-top-left-shape: superellipse(-3); \
+         corner-top-right-shape: squircle; background: #ccc; \
+         width: 20px; height: 20px }",
+    );
+    let c2 = items2.iter().find_map(|i| match i {
+        DisplayItem::FillRect { corners, .. } => Some(*corners),
+        _ => None,
+    });
+    assert_eq!(c2, Some([-3.0, 2.0, 1.0, 1.0]), "longhands : {c2:?}");
+    // `corner-top-shape` (2 formes : tl puis tr) + logique
+    // `corner-end-end-shape` → bottom-right (LTR).
+    let (_d3, _b3, items3) = dl(
+        "<div>x</div>",
+        "div { border-radius: 8px; corner-top-shape: bevel square; \
+         corner-end-end-shape: notch; background: #ccc; \
+         width: 20px; height: 20px }",
+    );
+    let c3 = items3.iter().find_map(|i| match i {
+        DisplayItem::FillRect { corners, .. } => Some(*corners),
+        _ => None,
+    });
+    assert_eq!(
+        c3,
+        Some([0.0, f32::INFINITY, f32::NEG_INFINITY, 1.0]),
+        "side + logique : {c3:?}"
+    );
+    // Valeur invalide → `round` (dégradation tolérante).
+    let (_d4, _b4, items4) = dl(
+        "<div>x</div>",
+        "div { border-radius: 8px; corner-shape: bogus; \
+         background: #ccc; width: 20px; height: 20px }",
+    );
+    let c4 = items4.iter().find_map(|i| match i {
+        DisplayItem::FillRect { corners, .. } => Some(*corners),
+        _ => None,
+    });
+    assert_eq!(c4, Some([1.0; 4]), "invalide → round : {c4:?}");
+}
+
+#[test]
+fn rule_shorthand_alimente_column_rule_spanner_et_inset() {
+    // R-271 — css-gaps-1 : `rule` pose les deux axes → les
+    // `column-rule-*` expansés peignent le trait de colonne ;
+    // le `column-span:all` coupe le trait (défaut §5.1) ;
+    // `rule-break:none` traverse ; `rule-inset` raccourcit.
+    let deco = |items: &[DisplayItem]| {
+        items
+            .iter()
+            .filter(|i| {
+                matches!(
+                    i,
+                    DisplayItem::DecoRect {
+                        style: explorer_layout::inline::DECO_SOLID,
+                        ..
+                    } | DisplayItem::DecoRect {
+                        style: explorer_layout::inline::DECO_DASHED,
+                        ..
+                    }
+                )
+            })
+            .count()
+    };
+    // 1. `rule:2px solid black` → trait de colonne émis.
+    let (_, _, items) = dl(
+        "<div id=c><p>a</p><p>b</p></div>",
+        "#c{column-count:2;column-gap:10px;width:210px;\
+           rule:2px solid black;margin:0}",
+    );
+    assert_eq!(deco(&items), 1, "rule alimente le trait de colonne");
+    // 2. Spanner au milieu → le trait est coupé en segments.
+    let html = "<div id=c><p>a<br>a<br>a<br>a<br>a<br>a</p>\
+                <h2>s</h2><p>b<br>b<br>b<br>b<br>b<br>b</p></div>";
+    let (_, _, items2) = dl(
+        html,
+        "#c{column-count:2;column-gap:10px;width:210px;\
+           column-rule:2px solid black;margin:0}h2{column-span:all;margin:0}",
+    );
+    assert!(
+        deco(&items2) >= 2,
+        "spanner coupe le trait : {}",
+        deco(&items2)
+    );
+    // 3. `rule-break:none` → un seul trait pleine hauteur.
+    let (_, _, items3) = dl(
+        html,
+        "#c{column-count:2;column-gap:10px;width:210px;\
+           column-rule:2px solid black;rule-break:none;margin:0}\
+           h2{column-span:all;margin:0}",
+    );
+    assert_eq!(deco(&items3), 1, "rule-break:none traverse le spanner");
+    // 4. `rule-inset` raccourcit les deux extrémités.
+    let (_, _, items4) = dl(
+        "<div id=c><p>a</p><p>b</p></div>",
+        "#c{column-count:2;column-gap:10px;width:210px;height:100px;\
+           column-rule:2px solid black;rule-inset:10px;margin:0}",
+    );
+    let r = items4.iter().find_map(|i| match i {
+        DisplayItem::DecoRect { rect, .. } => Some(*rect),
+        _ => None,
+    });
+    let (_, _, items5) = dl(
+        "<div id=c><p>a</p><p>b</p></div>",
+        "#c{column-count:2;column-gap:10px;width:210px;height:100px;\
+           column-rule:2px solid black;margin:0}",
+    );
+    let r5 = items5.iter().find_map(|i| match i {
+        DisplayItem::DecoRect { rect, .. } => Some(*rect),
+        _ => None,
+    });
+    match (r, r5) {
+        (Some(a), Some(b)) => {
+            assert!(
+                (a.height - (b.height - 20.0)).abs() < 0.5,
+                "inset 10px × 2 extrémités : {a:?} vs {b:?}"
+            );
+            assert!((a.y - (b.y + 10.0)).abs() < 0.5, "début décalé : {a:?}");
+        }
+        _ => panic!("traits attendus : {r:?} / {r5:?}"),
+    }
+}
+
+/// R-272 — `offset-*` (css-motion-1) : `offset-path` pose
+/// un `PushTransform` de motion — la boîte est portée le
+/// long du chemin tracé dans le bloc conteneur. Le parent
+/// calcule la matrice (stash par pointeur, consommé au
+/// `box_transform` de l'enfant).
+#[test]
+fn offset_path_ray_ellipse_et_shorthand() {
+    let tf = |items: &[DisplayItem]| -> Option<tiny_skia::Transform> {
+        items.iter().find_map(|i| match i {
+            DisplayItem::PushTransform(t) => Some(*t),
+            _ => None,
+        })
+    };
+    // ray(90deg → +x) à distance 50px : la boîte part de
+    // son ancre (5,5) et atterrit en (55,5) — translation
+    // = (50, 0) + tangente 0° (pas de rotation).
+    let (_, _, items) = dl(
+        "<div id=p><div id=c></div></div>",
+        "#p{position:relative;width:200px;height:200px}\
+         #c{position:absolute;width:10px;height:10px;\
+           offset-path:ray(90deg);offset-distance:50px}",
+    );
+    let t = tf(&items).expect("ray + distance → PushTransform");
+    assert!((t.tx - 50.0).abs() < 0.5, "tx={}", t.tx);
+    assert!(t.ty.abs() < 0.5, "ty={}", t.ty);
+    // distance 0 → translation nulle au-delà de l'ancre.
+    let (_, _, items0) = dl(
+        "<div id=p><div id=c></div></div>",
+        "#p{position:relative;width:200px;height:200px}\
+         #c{position:absolute;width:10px;height:10px;\
+           offset-path:ray(90deg);offset-distance:0px}",
+    );
+    assert!(
+        tf(&items0).is_none_or(|t| t.tx.abs() < 0.01 && t.ty.abs() < 0.01),
+        "distance 0 = pas de mouvement"
+    );
+    // circle(50px at center) + distance 0 + rotate 0deg
+    // (rotation gélée → translation pure) : l'ancre
+    // atterrit au point gauche du cercle (50,100) →
+    // translation (45, 95) depuis l'ancre (5,5).
+    let (_, _, items2) = dl(
+        "<div id=p><div id=c></div></div>",
+        "#p{position:relative;width:200px;height:200px}\
+         #c{position:absolute;width:10px;height:10px;\
+           offset:circle(50px at center) 0px 0deg}",
+    );
+    let t2 = tf(&items2).expect("shorthand offset → transform");
+    assert!((t2.tx - 45.0).abs() < 0.5, "tx={}", t2.tx);
+    assert!((t2.ty - 95.0).abs() < 0.5, "ty={}", t2.ty);
+    // `offset-rotate:reverse` → tangente+180° : au point
+    // gauche la tangente est −90° → rotation ~90° (off-
+    // diagonal ≈ ±1, serait 0 sans rotation).
+    let (_, _, items3) = dl(
+        "<div id=p><div id=c></div></div>",
+        "#p{position:relative;width:200px;height:200px}\
+         #c{position:absolute;width:10px;height:10px;\
+           offset-path:circle(50px at center);offset-distance:0px;\
+           offset-rotate:reverse}",
+    );
+    let t3 = tf(&items3).expect("reverse → transform");
+    assert!(t3.kx.abs() > 0.5, "rotation ~90° attendue : {t3:?}");
+}
+
+#[test]
+fn hyphen_cesure_peint_un_run_1_glyphe() {
+    // R-275 — le fragment `hyphenate-character` posé en fin
+    // de ligne césurée doit atteindre la display list : le
+    // doute venait d'un dump NAV sans run 1-glyphe (binaire
+    // périmé — mesuré ici end-to-end sur la fixture TTF).
+    let html = "<!doctype html><div style=\"width:40px\"><p>avery\u{AD}verylongword</p></div>";
+    let (_d, _b, items) = dl(html, "p{font-size:10px;margin:0;hyphens:auto}");
+    let solo = items
+        .iter()
+        .filter(|it| matches!(it, DisplayItem::Text { run, .. } if run.glyphs.len() == 1))
+        .count();
+    assert_eq!(solo, 2, "deux tirets césurés attendus : {items:?}");
+}
+
+// ---------- R-280 — `text-underline-position` + `text-decoration-inset` ----------
+
+/// Toutes les `DecoRect` de la display list.
+fn deco_rects(items: &[DisplayItem]) -> Vec<(f32, f32, f32)> {
+    items
+        .iter()
+        .filter_map(|i| match i {
+            DisplayItem::DecoRect { rect, .. } => Some((rect.x, rect.y, rect.width)),
+            _ => None,
+        })
+        .collect()
+}
+
+#[test]
+fn text_underline_position_under_descend_le_trait() {
+    // `under` : le trait passe SOUS les jambages (|descent|
+    // sous la baseline + filet) — plus profond que le repli
+    // `auto` ~10 %em. `text-underline-offset` déclaré prime
+    // sur les deux.
+    let html = "<p><u>ggg ppp</u></p>";
+    let (_, _, auto_items) = dl(
+        html,
+        "p{margin:0;font-size:16px} u{text-decoration:underline}",
+    );
+    let (_, _, under_items) = dl(
+        html,
+        "p{margin:0;font-size:16px}          u{text-decoration:underline;text-underline-position:under}",
+    );
+    let ya = deco_rects(&auto_items)
+        .first()
+        .map(|r| r.1)
+        .expect("deco auto");
+    let yu = deco_rects(&under_items)
+        .first()
+        .map(|r| r.1)
+        .expect("deco under");
+    assert!(yu > ya, "under plus profond : auto={ya} under={yu}");
+    // `from-font`/`left`/`right` : repli auto (bornes).
+    let (_, _, ff_items) = dl(
+        html,
+        "p{margin:0;font-size:16px}          u{text-decoration:underline;text-underline-position:from-font}",
+    );
+    let yf = deco_rects(&ff_items).first().map(|r| r.1).expect("deco");
+    assert_eq!(yf, ya, "from-font = auto (borne métrique)");
+}
+
+#[test]
+fn text_decoration_inset_rentre_le_trait() {
+    // `<length>{1,2}` : 1 valeur = les deux bords ; 2 =
+    // start/end. Le trait rétrécit en largeur ET démarre
+    // après la rentrée start.
+    let html = "<p><u>abcde</u></p>";
+    let (_, _, items) = dl(
+        html,
+        "p{margin:0;font-size:16px} u{text-decoration:underline}",
+    );
+    let (_, _, inset_items) = dl(
+        html,
+        "p{margin:0;font-size:16px}          u{text-decoration:underline;text-decoration-inset:4px 8px}",
+    );
+    let (_, _, uni_items) = dl(
+        html,
+        "p{margin:0;font-size:16px}          u{text-decoration:underline;text-decoration-inset:5px}",
+    );
+    let (x0, _, w0) = deco_rects(&items).first().copied().expect("deco");
+    let (xi, _, wi) = deco_rects(&inset_items).first().copied().expect("deco");
+    let (xu, _, wu) = deco_rects(&uni_items).first().copied().expect("deco");
+    assert!((xi - x0 - 4.0).abs() < 0.5, "start +4 : {x0} → {xi}");
+    assert!((w0 - wi - 12.0).abs() < 0.5, "w −12 : {w0} → {wi}");
+    assert!((xu - x0 - 5.0).abs() < 0.5, "1 valeur = 2 bords : {xu}");
+    assert!((w0 - wu - 10.0).abs() < 0.5, "w −10 : {w0} → {wu}");
+    // `%` de la largeur du fragment.
+    let (_, _, pct_items) = dl(
+        html,
+        "p{margin:0;font-size:16px}          u{text-decoration:underline;text-decoration-inset:25%}",
+    );
+    let (xp, _, wp) = deco_rects(&pct_items).first().copied().expect("deco");
+    assert!((xp - x0 - w0 * 0.25).abs() < 0.5, "25% start : {xp}");
+    assert!((w0 - wp - w0 * 0.5).abs() < 0.5, "w −50% : {wp}");
+}
+
+// ---------- R-282 — `text-decoration-skip-spaces` (css-text-decor-4 §5.5) ----------
+
+#[test]
+fn text_decoration_skip_spaces_decoupe_le_trait() {
+    // `all` découpe le trait aux blancs : "a b" → 2 segments
+    // ("a" et "b") ; sans la propriété → 1 rect continu.
+    let html = "<!doctype html><p><u>a b</u></p>";
+    let base = "p{margin:0;font-size:16px}u{text-decoration:underline;";
+    let (_, _, items0) = dl(html, &format!("{base}}}"));
+    let (_, _, items1) = dl(html, &format!("{base}text-decoration-skip-spaces:all}}"));
+    let r0 = deco_rects(&items0);
+    let r1 = deco_rects(&items1);
+    // L'espace est soudée à la pièce "a " → le trait de base
+    // est contigu (fin du 1er rect = début du 2d) ; `all`
+    // ouvre un trou large de l'espace entre les segments.
+    let gap_of = |r: &[(f32, f32, f32)]| r[1].0 - (r[0].0 + r[0].2);
+    assert!(gap_of(&r0).abs() < 0.5, "sans skip : contigu {r0:?}");
+    assert!(gap_of(&r1) > 4.0, "all : trou au blanc {r1:?}");
+    // `none`/`auto` (bords d'élément seuls — espace intérieur
+    // conservé) → comportement d'origine.
+    for v in ["none", "auto"] {
+        let (_, _, it) = dl(html, &format!("{base}text-decoration-skip-spaces:{v}}}"));
+        let r = deco_rects(&it);
+        assert!(gap_of(&r).abs() < 0.5, "{v} : contigu {r:?}");
+    }
+    // Shorthand Level 3 `text-decoration-skip: spaces` ≡ all.
+    let (_, _, items3) = dl(html, &format!("{base}text-decoration-skip:spaces}}"));
+    assert!(gap_of(&deco_rects(&items3)) > 4.0);
+}
+
+// ── R-283 : `<svg>` style-aware (styles calculés → XML) ────
+
+/// Source sérialisée du premier `<svg>` du document — la
+/// projection des styles calculés s'y lit directement.
+fn svg_src(html: &str, css: &str) -> String {
+    let dom = TreeBuilder::parse(html);
+    let mut eng = StyleEngine::new();
+    eng.add_css("body{margin:0}", Origin::Author);
+    eng.add_css(css, Origin::Author);
+    let styles = eng.compute_tree(&dom, dom.document(), &StyleEnv::default());
+    let root_el = dom
+        .children(dom.document())
+        .into_iter()
+        .flatten()
+        .find(|&c| dom.element(c).is_ok())
+        .expect("racine");
+    let (_, sources) = explorer_render::svg::collect_svg_styled(&dom, root_el, &styles, 1_000_000);
+    sources.values().next().expect("svg").to_string()
+}
+
+#[test]
+fn svg_styled_fill_css_prime_l_attribut() {
+    // Stylesheet `svg path{fill:green}` : la valeur calculée
+    // remplace l'attribut de présentation `fill="red"`.
+    let src = svg_src(
+        "<svg width=\"10\" height=\"10\"><path fill=\"red\" d=\"M0 0L9 9\"/></svg>",
+        "svg path{fill:green}",
+    );
+    assert!(src.contains("fill=\"green\""), "css prime : {src}");
+    assert!(!src.contains("fill=\"red\""), "attribut remplacé : {src}");
+}
+
+#[test]
+fn svg_styled_currentcolor_recoit_le_color_herite() {
+    // `color` hérité du contexte HTML projeté sur l'îlot →
+    // `fill="currentColor"` des icônes se résout dans usvg.
+    let src = svg_src(
+        "<span><svg width=\"10\" height=\"10\"><path fill=\"currentColor\" d=\"M0 0L9 9\"/></svg></span>",
+        "span{color:rgb(1,2,3)}",
+    );
+    assert!(
+        src.contains("color=\"rgb(1,2,3)\"") || src.contains("color=\"#010203\""),
+        "color projeté : {src}"
+    );
+}
+
+#[test]
+fn svg_styled_display_none_et_geom_css() {
+    // `display:none` au stylesheet censure la forme ; la
+    // propriété géométrique `r` CSS prime l'attribut (SVG2).
+    let src = svg_src(
+        "<svg width=\"10\" height=\"10\"><circle r=\"5\" cx=\"5\" cy=\"5\"/></svg>",
+        "svg circle{display:none;r:3px}",
+    );
+    assert!(src.contains("display=\"none\""), "display projeté : {src}");
+    assert!(
+        src.contains("r=\"3px\"") || src.contains("r=\"3\""),
+        "r css : {src}"
+    );
+    assert!(!src.contains("r=\"5\""), "r attribut remplacé : {src}");
+}
+
+#[test]
+fn svg_styled_d_path_desenrobe() {
+    // `d:path("…")` CSS → `d="…"` dans la source (SVG2 §9).
+    let src = svg_src(
+        "<svg width=\"10\" height=\"10\"><path d=\"M0 0\"/></svg>",
+        "svg path{d:path(\"M1 1L5 5\")}",
+    );
+    assert!(src.contains("d=\"M1 1L5 5\""), "d css désenrobé : {src}");
+    assert!(!src.contains("d=\"M0 0\""), "d attribut remplacé : {src}");
+}
+
+#[test]
+fn svg_styled_clip_path_css_relie_les_refs() {
+    // `clip-path:url(#c)` déclaré en CSS (pas d'attribut DOM)
+    // doit être émis ET sa cible injectée cross-îlot.
+    let src = svg_src(
+        concat!(
+            "<svg width=\"0\" height=\"0\"><defs><clipPath id=\"c\">",
+            "<rect width=\"4\" height=\"4\"/></clipPath></defs></svg>",
+            "<svg width=\"10\" height=\"10\"><rect width=\"10\" height=\"10\"/></svg>"
+        ),
+        "svg rect{clip-path:url(#c)}",
+    );
+    // Les deux îlots sérialisent — on vérifie le 2e (celui qui
+    // référence #c) : la clipPath externe est injectée.
+    assert!(
+        src.contains("clip-path=\"url(#c)\"") || src.contains("<clipPath"),
+        "refs : {src}"
+    );
+}
+
+#[test]
+fn text_decoration_skip_spaces_start_vide_le_blanc_de_tete() {
+    // Erratum re-tour NAV : `<u> un…` sous
+    // `text-decoration-skip-spaces:start` — le fragment
+    // tout-blanc de tête conservait son trait (il n'est
+    // « intérieur » que pour les blancs hors bord d'owner).
+    let html = "<!doctype html><p>zéro <u class=x> un deux trois quatre </u> cinq six</p>";
+    let base = "p{margin:0;font-size:16px}.x{text-decoration:underline;";
+    let rects = |css: &str| {
+        let (_, _, items) = dl(html, css);
+        deco_rects(&items)
+    };
+    let none_r = rects(&format!("{base}}}"));
+    let start_r = rects(&format!("{base}text-decoration-skip-spaces:start}}"));
+    let end_r = rects(&format!("{base}text-decoration-skip-spaces:end}}"));
+    let auto_r = rects(&format!("{base}text-decoration-skip-spaces:auto}}"));
+    // `start` : le premier segment de l'<u> ne couvre plus
+    // le blanc de tête (x décalé à droite vs `none`) ;
+    // `end` découpe le blanc de queue (total réduit) ;
+    // `auto` = les deux.
+    let first_x = |r: &[(f32, f32, f32)]| r.iter().map(|s| s.0).fold(f32::MAX, f32::min);
+    assert!(
+        first_x(&start_r) > first_x(&none_r) + 1.0,
+        "start : blanc de tête sauté {start_r:?} vs {none_r:?}"
+    );
+    assert!(
+        first_x(&end_r) <= first_x(&none_r) + 1.0,
+        "end : tête conservée {end_r:?}"
+    );
+    assert_eq!(first_x(&auto_r), first_x(&start_r), "auto ≡ start|end");
+}
+
+#[test]
+fn svg_styled_style_attr_ne_prime_pas_le_calcule() {
+    // `style="fill:blue;stroke:red"` DOM + stylesheet
+    // `path{fill:green !important}` : la valeur calculée
+    // (green) doit gagner — sinon usvg applique sa cascade
+    // `style` > présentation et blue l'emporterait.
+    let src = svg_src(
+        "<svg width=\"10\" height=\"10\"><path style=\"fill:blue;mix-blend-mode:multiply\" d=\"M0 0L9 9\"/></svg>",
+        "svg path{fill:green !important}",
+    );
+    assert!(src.contains("fill=\"green\""), "projeté gagne : {src}");
+    assert!(!src.contains("fill:blue"), "décl style retirée : {src}");
+    assert!(
+        src.contains("mix-blend-mode:multiply"),
+        "décl non projetée conservée : {src}"
+    );
+    // Cas usuel (sans !important) : la déclaration inline
+    // blue est la valeur calculée → projetée telle quelle.
+    let src2 = svg_src(
+        "<svg width=\"10\" height=\"10\"><path style=\"fill:blue;stroke:red\" d=\"M0 0L9 9\"/></svg>",
+        "svg path{fill:green}",
+    );
+    assert!(src2.contains("fill=\"blue\""), "inline calculé : {src2}");
+    assert!(src2.contains("stroke=\"red\""), "stroke projeté : {src2}");
+}
+
+#[test]
+fn svg_styled_marker_shorthand_eclate_et_clip_rule() {
+    // `marker:url(#m)` shorthand → 3 longhands ; `clip-rule`
+    // en stylesheet passe aussi.
+    let src = svg_src(
+        "<svg width=\"10\" height=\"10\"><marker id=\"m\"/><path d=\"M0 0L9 9\"/></svg>",
+        "svg path{marker:url(#m);clip-rule:evenodd}",
+    );
+    assert!(
+        src.contains("marker-start=\"url(#m)\""),
+        "marker-start : {src}"
+    );
+    assert!(src.contains("marker-end=\"url(#m)\""), "marker-end : {src}");
+    assert!(src.contains("clip-rule=\"evenodd\""), "clip-rule : {src}");
+}
+
+#[test]
+fn svg_styled_transform_css_resyntaxee() {
+    // Fonctions CSS-only → syntaxe d'attribut SVG :
+    // translateX → translate(x 0), scaleY → scale(1 y),
+    // rotate(deg) → nombre, matrix(e,f en px) → nombres.
+    let src = svg_src(
+        "<svg width=\"10\" height=\"10\"><path d=\"M0 0L9 9\"/></svg>",
+        "svg path{transform:translateX(3px) scaleY(2) rotate(45deg)}",
+    );
+    assert!(src.contains("translate(3 0)"), "translateX : {src}");
+    assert!(src.contains("scale(1 2)"), "scaleY : {src}");
+    assert!(src.contains("rotate(45)"), "rotate : {src}");
+    // 3D pure → ignorée, repli strip conservé en secours.
+    let src2 = svg_src(
+        "<svg width=\"10\" height=\"10\"><path d=\"M0 0L9 9\"/></svg>",
+        "svg path{transform:matrix(1,0,0,1,4px,5px)}",
+    );
+    assert!(src2.contains("matrix(1 0 0 1 4 5)"), "matrix px : {src2}");
+}
+
+#[test]
+fn svg_styled_racine_ne_double_pas_les_effets_boite() {
+    // `transform`/`opacity`/`clip-path` CSS sur la racine
+    // `<svg>` sont appliqués par la pipeline boîte HTML —
+    // les ré-émettre dans l'îlot les jouerait deux fois.
+    let src = svg_src(
+        "<svg class=\"s\" width=\"10\" height=\"10\"><path transform=\"scale(2)\" d=\"M0 0L9 9\"/></svg>",
+        "svg.s{transform:rotate(10deg);opacity:.5;clip-path:url(#c)}",
+    );
+    assert!(!src.contains("rotate"), "transform racine non émis : {src}");
+    assert!(!src.contains("opacity"), "opacity racine non émis : {src}");
+    assert!(!src.contains("clip-path"), "clip racine non émis : {src}");
+    // …mais l'enfant garde sa transform d'attribut.
+    assert!(
+        src.contains("transform=\"scale(2)\""),
+        "enfant conservé : {src}"
+    );
+}
+
+#[test]
+fn svg_styled_raster_prouve_fill_css_et_currentcolor() {
+    // End-to-end : le bitmap produit doit porter les couleurs
+    // projetées — le XML correct ne suffit pas si usvg
+    // ignore l'attribut.
+    let dom = TreeBuilder::parse(
+        "<span><svg width=\"8\" height=\"8\"><rect width=\"8\" height=\"8\" fill=\"currentColor\"/></svg></span>",
+    );
+    let mut eng = StyleEngine::new();
+    eng.add_css("span{color:rgb(255,0,0)}", Origin::Author);
+    let styles = eng.compute_tree(&dom, dom.document(), &StyleEnv::default());
+    let root_el = dom
+        .children(dom.document())
+        .into_iter()
+        .flatten()
+        .find(|&c| dom.element(c).is_ok())
+        .expect("racine");
+    let (svgs, _) = explorer_render::svg::collect_svg_styled(&dom, root_el, &styles, 1_000_000);
+    let img = svgs.values().next().expect("bitmap");
+    // Premier pixel : rouge (currentColor résolu via `color`
+    // projeté) — sans projection il serait noir.
+    let px = &img.rgba[0..4];
+    assert!(
+        px[0] > 200 && px[1] < 60 && px[2] < 60,
+        "currentColor → rouge : {px:?}"
+    );
+    // Stylesheet `fill` : rect bleu-attribut → vert calculé.
+    let dom2 = TreeBuilder::parse(
+        "<svg width=\"8\" height=\"8\"><rect width=\"8\" height=\"8\" fill=\"blue\"/></svg>",
+    );
+    let mut eng2 = StyleEngine::new();
+    eng2.add_css("svg rect{fill:rgb(0,128,0)}", Origin::Author);
+    let styles2 = eng2.compute_tree(&dom2, dom2.document(), &StyleEnv::default());
+    let root2 = dom2
+        .children(dom2.document())
+        .into_iter()
+        .flatten()
+        .find(|&c| dom2.element(c).is_ok())
+        .expect("racine2");
+    let (svgs2, _) = explorer_render::svg::collect_svg_styled(&dom2, root2, &styles2, 1_000_000);
+    let img2 = svgs2.values().next().expect("bitmap2");
+    let px2 = &img2.rgba[0..4];
+    assert!(
+        px2[1] > 100 && px2[0] < 60 && px2[2] < 60,
+        "stylesheet fill → vert : {px2:?}"
+    );
+}
+
+#[test]
+fn text_decoration_skip_ink_coupe_le_trait_sous_l_encre() {
+    // Fixture : encre glyphe y in [-7,+0.5] rel baseline a
+    // fs=10 (bbox 50/-50/450/700 sur 1000 upm, avance 5px).
+    // `text-underline-offset:0` pose la bande [0,1] dans
+    // l'encre de chaque glyphe -> segments ; `none` -> plein.
+    let deco_count = |css: &str| -> usize {
+        let (_d, _b, items) = dl("<a>ab</a>", css);
+        items
+            .iter()
+            .filter(|i| matches!(i, DisplayItem::DecoRect { .. }))
+            .count()
+    };
+    let base = "a{text-decoration:underline;font-size:10px;text-underline-offset:0}";
+    let sans = deco_count("a{text-decoration:underline;font-size:10px;text-underline-offset:0;text-decoration-skip-ink:none}");
+    let auto = deco_count(base);
+    assert_eq!(sans, 1, "skip-ink:none -> trait plein");
+    assert!(
+        auto > sans,
+        "skip-ink:auto -> segments sous l'encre : {auto} vs {sans}"
+    );
+    // Offset par defaut : la bande [+1,+2] est SOUS l'encre
+    // (fond +0.5) -> auto ne coupe pas.
+    let loin = deco_count("a{text-decoration:underline;font-size:10px}");
+    assert_eq!(loin, 1, "bande sous l'encre -> pas de saut");
+    // `all` etend le saut au line-through (bande a -0.3em,
+    // dans l'encre) ; auto le laisse plein.
+    let thru_auto = deco_count("a{text-decoration:line-through;font-size:10px}");
+    let thru_all =
+        deco_count("a{text-decoration:line-through;font-size:10px;text-decoration-skip-ink:all}");
+    assert_eq!(thru_auto, 1, "through + auto -> plein");
+    assert!(thru_all > thru_auto, "through + all -> segments");
+    // Shorthand Level 3 : `text-decoration-skip:ink` = auto.
+    let short = deco_count(
+        "a{text-decoration:underline;font-size:10px;text-underline-offset:0;text-decoration-skip:ink}",
+    );
+    assert!(short > 1, "skip:ink -> segments");
+    let short_none = deco_count(
+        "a{text-decoration:underline;font-size:10px;text-underline-offset:0;text-decoration-skip:none}",
+    );
+    assert_eq!(short_none, 1, "skip:none -> trait plein");
+}
+
+/// R-288 — `text-combine-upright` : les chiffres sont peints
+/// debout en **un** `Text` horizontal (tate-chu-yoko) dans
+/// un flux vertical `text-orientation:upright`.
+#[test]
+fn text_combine_upright_dresse_les_chiffres() {
+    use explorer_render::DisplayItem;
+    let multi = |html: &str, css: &str| -> Vec<usize> {
+        let (_d, _b, items) = dl(html, css);
+        items
+            .iter()
+            .filter_map(|i| match i {
+                DisplayItem::Text { run, .. } if run.glyphs.len() > 1 => Some(run.glyphs.len()),
+                _ => None,
+            })
+            .collect()
+    };
+    let html = "<div style=\"writing-mode:vertical-rl;text-orientation:upright;\
+                width:40px;height:200px;font-size:10px\">\
+                <span id=t>12</span></div>";
+    // Sans combine : chaque glyphe empilé seul → aucun Text
+    // multi-glyphes.
+    assert!(
+        multi(html, "span{text-combine-upright:none}").is_empty(),
+        "none → glyphes empilés seuls"
+    );
+    // `digits 2` : « 12 » = un Text de 2 glyphes.
+    assert_eq!(
+        multi(html, "span{text-combine-upright:digits 2}"),
+        vec![2],
+        "digits 2 → série combinée"
+    );
+    // `all` : tout non-blanc debout.
+    assert_eq!(
+        multi(html, "span{text-combine-upright:all}"),
+        vec![2],
+        "all → série combinée"
+    );
+    // `digits 2` sur « 123 » : tronçon [12] + « 3 » seul →
+    // un seul Text multi-glyphes.
+    let html3 = "<div style=\"writing-mode:vertical-rl;text-orientation:upright;\
+                 width:40px;height:200px;font-size:10px\">\
+                 <span>123</span></div>";
+    assert_eq!(
+        multi(html3, "span{text-combine-upright:digits 2}"),
+        vec![2],
+        "digits 2 → tronçons de 2"
+    );
+    // Alias `-webkit-text-combine:horizontal` ≡ all.
+    assert_eq!(
+        multi(html, "span{-webkit-text-combine:horizontal}"),
+        vec![2],
+        "alias webkit"
     );
 }

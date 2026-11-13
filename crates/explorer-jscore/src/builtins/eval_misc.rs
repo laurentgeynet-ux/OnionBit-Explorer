@@ -68,12 +68,15 @@ fn function_ctor_kind(e: &mut Engine, _t: Value, args: &[Value], kw: &str) -> Js
         h(&src);
     }
     e.note_eval_src(&src)?;
-    let prog = crate::parser::parse_in(
-        &src,
-        false,
-        e.nest_limit,
-        Some(std::rc::Rc::from("<Function>")),
-    )
+    // N1.5 — même marquage que `eval_source` : le bytecode VM
+    // BotGuard livré par `new Function(...)` porterait sinon le
+    // src muet "<Function>", invisible aux sondes par-src.
+    let src_tag: &'static str = if src.contains("trayride") {
+        "<eval:google.com/js/th>"
+    } else {
+        "<Function>"
+    };
+    let prog = crate::parser::parse_in(&src, false, e.nest_limit, Some(std::rc::Rc::from(src_tag)))
     .map_err(|err| {
         crate::heap::Thrown(e.error_value(
             e.protos.syntax_error,
@@ -175,29 +178,24 @@ pub(crate) fn math_sum_precise(e: &mut Engine, _t: Value, args: &[Value]) -> JsR
 /// ; §B-125 vol 734 : `uncaught TypeError` ×8+ persistant
 /// post-JS-C463 — strict flaggé juste ou lecture bénigne ?
 /// La sonde nomme la fonction source de l'accès pour trancher.
-pub(crate) fn restricted_caller(
-    e: &mut Engine,
-    _t: Value,
-    _a: &[Value],
-) -> JsResult<Value> {
+pub(crate) fn restricted_caller(e: &mut Engine, _t: Value, _a: &[Value]) -> JsResult<Value> {
     restricted_probe(e, "caller")
 }
 
 /// Voir `restricted_caller` — variante `arguments`.
-pub(crate) fn restricted_arguments(
-    e: &mut Engine,
-    _t: Value,
-    _a: &[Value],
-) -> JsResult<Value> {
+pub(crate) fn restricted_arguments(e: &mut Engine, _t: Value, _a: &[Value]) -> JsResult<Value> {
     restricted_probe(e, "arguments")
 }
 
 /// Sonde commune : `dom_probe site=fn.restricted` nomme le
 /// frame script le plus proche (l'appelant de l'accesseur),
-/// puis sert le `TypeError` spec inchangé.
+/// puis sert le `TypeError` spec inchangé. `d` = profondeur
+/// du frame nommé (0 = top), `depth` = hauteur de pile —
+/// distingue « top synthétique » (d>0) de « pile vide »
+/// (src vide, depth=0), cas laissé ouvert par le vol 814.
 fn restricted_probe(e: &mut Engine, prop: &'static str) -> JsResult<Value> {
-    let src = e.stack_top_fn_src(140);
-    tracing::info!(target: "dom_probe", site = "fn.restricted", "prop={prop} src={src}");
+    let (src, d, depth) = e.stack_nearest_fn_src(140);
+    tracing::info!(target: "dom_probe", site = "fn.restricted", "prop={prop} d={d} depth={depth} src={src}");
     Err(e.type_error("caller/arguments are restricted function properties"))
 }
 

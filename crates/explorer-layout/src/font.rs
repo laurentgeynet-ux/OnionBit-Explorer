@@ -72,11 +72,13 @@ pub struct FontRequest {
     pub weight: u16,
     /// Italique / oblique.
     pub italic: bool,
-    /// `font-variant` petites capitales (R-186) : 0 normal,
-    /// 1 `small-caps` (`smcp`), 2 `all-small-caps`
-    /// (`smcp`+`c2sc`), 3 `petite-caps` (`pcap`),
-    /// 4 `all-petite-caps` (`pcap`+`c2pc`) — features OT
-    /// réelles, polices sans support → no-op documenté.
+    /// `font-variant-caps`/`font-variant` petites capitales
+    /// (R-186) : 0 normal, 1 `small-caps` (`smcp`),
+    /// 2 `all-small-caps`/`unicase` (`smcp`+`c2sc`),
+    /// 3 `petite-caps` (`pcap`), 4 `all-petite-caps`
+    /// (`pcap`+`c2pc`), 5 `titling-caps` (`titl`) —
+    /// features OT réelles, polices sans support → repli
+    /// uppercase synthétique au niveau texte (inline.rs).
     pub caps: u8,
     /// `font-kerning:none` (R-186) — feature `kern` coupée.
     pub kern_off: bool,
@@ -84,6 +86,9 @@ pub struct FontRequest {
     /// normal, 0 = normal aussi — variable fontes seules
     /// le consomment ; repli no-op documenté).
     pub stretch: u16,
+    /// `font-feature-settings` résolus (R-229/241) —
+    /// `(tag 4 car., valeur)` ex : `tnum`/`onum`/`lnum`/`frac`.
+    pub feature_settings: Vec<(String, u32)>,
 }
 
 /// Métriques verticales de la fonte à une taille donnée (px).
@@ -190,6 +195,14 @@ pub struct ShapedRun {
     /// n'a de contour (run d'espaces). Sert aux bounds de
     /// peinture du raster — R-37.
     pub ink: Option<crate::Rect>,
+    /// Bbox d'encre **par glyphe** (R-286 — même repère que
+    /// [`Self::ink`] : plume du premier glyphe = origine x,
+    /// baseline = 0, y négatif au-dessus) — `ink_glyphs[i]`
+    /// = encre de `glyphs[i]` ; rect à `width == 0` pour un
+    /// glyphe sans contour. Vide quand aucune fonte n'a
+    /// servi les contours ; sert à `text-decoration-
+    /// skip-ink` (le trait saute les croisements d'encre).
+    pub ink_glyphs: Vec<crate::Rect>,
 }
 
 /// Cache de la pipeline fonte, borné à une passe de layout
@@ -596,6 +609,7 @@ impl FontCache {
         let mut glyphs = Vec::new();
         let mut advance = 0.0;
         let mut ink: Option<crate::Rect> = None;
+        let mut ink_glyphs: Vec<crate::Rect> = Vec::new();
         let mut spans: Vec<FallbackSpan> = Vec::new();
         for si in order {
             let (start, end, choice) = &segs[si];
@@ -640,6 +654,12 @@ impl FontCache {
                 g.cluster = g
                     .cluster
                     .saturating_add(u32::try_from(*start).unwrap_or(u32::MAX));
+                let mut gink = crate::Rect {
+                    x: 0.0,
+                    y: 0.0,
+                    width: 0.0,
+                    height: 0.0,
+                };
                 if let Some(f) = tf {
                     if let Some(b) = ink_bbox(&mut self.ink, seg_key, f, g.id) {
                         let r = crate::Rect {
@@ -648,6 +668,7 @@ impl FontCache {
                             width: f32::from(b.x_max - b.x_min) * scale,
                             height: f32::from(b.y_max - b.y_min) * scale,
                         };
+                        gink = r;
                         ink = Some(match ink {
                             Some(i) => crate::inline::union_rect(i, r),
                             None => r,
@@ -656,6 +677,7 @@ impl FontCache {
                 }
                 pen += g.advance;
                 glyphs.push(g);
+                ink_glyphs.push(gink);
             }
             if let Choice::Fallback(d, i) = choice {
                 spans.push(FallbackSpan {
@@ -673,6 +695,7 @@ impl FontCache {
             metrics,
             fallback_spans: spans,
             ink,
+            ink_glyphs,
         }
     }
 }
@@ -721,13 +744,24 @@ pub fn request_of_family(style: &explorer_css::ComputedStyle, default_family: &s
     let italic = matches!(style.get("font-style"), Some("italic" | "oblique"));
     // R-186 — typo longue traîne : `font-variant` (caps),
     // `font-kerning:none`, `font-stretch` (%).
-    let caps = match style.get("font-variant").unwrap_or("").trim() {
-        "small-caps" => 1,
-        "all-small-caps" => 2,
-        "petite-caps" => 3,
-        "all-petite-caps" => 4,
-        _ => 0,
-    };
+    // `font-variant-caps` prime ; le shorthand `font-variant`
+    // est scanné par jetons (il peut cumuler
+    // `small-caps`+numeric+…, css-fonts-4 §6.7).
+    let caps_src = style
+        .get("font-variant-caps")
+        .or_else(|| style.get("font-variant"))
+        .map_or("", |v| v.trim());
+    let caps = caps_src
+        .split_whitespace()
+        .find_map(|kw| match kw {
+            "small-caps" => Some(1),
+            "all-small-caps" | "unicase" => Some(2),
+            "petite-caps" => Some(3),
+            "all-petite-caps" => Some(4),
+            "titling-caps" => Some(5),
+            _ => None,
+        })
+        .unwrap_or(0);
     let kern_off = style
         .get("font-kerning")
         .is_some_and(|v| v.trim() == "none");
@@ -751,6 +785,26 @@ pub fn request_of_family(style: &explorer_css::ComputedStyle, default_family: &s
                 })
         })
         .unwrap_or(100);
+    // R-247 — `font-feature-settings` : `"tag" valeur` par
+    // paire (R-229/241 y ont mis les tags alternates/numeric
+    // — `nalt`/`tnum`/…). Tolérance : paire mal formée
+    // ignorée, jamais d'échec global.
+    let feature_settings = style
+        .get("font-feature-settings")
+        .map(|v| {
+            v.split(',')
+                .filter_map(|part| {
+                    let mut it = part.split_whitespace();
+                    let tag = it.next()?.trim_matches('"');
+                    if tag.len() != 4 {
+                        return None;
+                    }
+                    let val = it.next().and_then(|x| x.parse::<u32>().ok()).unwrap_or(1);
+                    Some((tag.to_string(), val))
+                })
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
     FontRequest {
         families,
         weight,
@@ -758,6 +812,7 @@ pub fn request_of_family(style: &explorer_css::ComputedStyle, default_family: &s
         caps,
         kern_off,
         stretch,
+        feature_settings,
     }
 }
 
@@ -885,10 +940,23 @@ fn ot_features(req: &FontRequest) -> Vec<rustybuzz::Feature> {
             push(&mut feats, b"pcap");
             push(&mut feats, b"c2pc");
         }
+        5 => push(&mut feats, b"titl"),
         _ => {}
     }
     if req.kern_off {
         feats.push(rustybuzz::Feature::new(Tag::from_bytes(b"kern"), 0, ..));
+    }
+    // R-247 — `font-feature-settings` : tags utilisateur
+    // appliqués après les features déduites (ils priment —
+    // css-fonts-4 §7.1 : le shorthand écrase les autres).
+    for (tag, val) in &req.feature_settings {
+        if tag.len() == 4 {
+            feats.push(rustybuzz::Feature::new(
+                Tag::from_bytes(tag.as_bytes().try_into().unwrap_or(b"    ")),
+                *val,
+                ..,
+            ));
+        }
     }
     feats
 }
@@ -953,7 +1021,14 @@ fn shape_parsed(
     // glyphe peut sortir de la boîte de métriques.
     let mut pen = 0.0_f32;
     let mut cumul: Option<crate::Rect> = None;
+    let mut ink_glyphs = Vec::with_capacity(glyphs.len());
     for g in &glyphs {
+        let mut gink = crate::Rect {
+            x: 0.0,
+            y: 0.0,
+            width: 0.0,
+            height: 0.0,
+        };
         if let Some(b) = ink_bbox(ink, font_key, face, g.id) {
             let r = crate::Rect {
                 x: pen + g.offset_x + f32::from(b.x_min) * scale,
@@ -961,11 +1036,13 @@ fn shape_parsed(
                 width: f32::from(b.x_max - b.x_min) * scale,
                 height: f32::from(b.y_max - b.y_min) * scale,
             };
+            gink = r;
             cumul = Some(match cumul {
                 Some(i) => crate::inline::union_rect(i, r),
                 None => r,
             });
         }
+        ink_glyphs.push(gink);
         pen += g.advance;
     }
     Some(ShapedRun {
@@ -974,6 +1051,7 @@ fn shape_parsed(
         metrics: met,
         fallback_spans: Vec::new(),
         ink: cumul,
+        ink_glyphs,
     })
 }
 
@@ -1076,6 +1154,7 @@ mod tests {
                 caps: 0,
                 kern_off: false,
                 stretch: 100,
+                feature_settings: Vec::new(),
             }
         }
     }
@@ -1246,6 +1325,7 @@ mod tests {
                 caps: 0,
                 kern_off: false,
                 stretch: 100,
+                feature_settings: Vec::new(),
             };
             let run = cache
                 .shape(&src, &req, "ABC", 10.0, false, 0.0)

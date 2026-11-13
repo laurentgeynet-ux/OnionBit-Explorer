@@ -446,9 +446,15 @@ fn vendor_section(r: &mut BitReader<'_>) -> Option<Vec<bool>> {
 /// (USP/CCPA). Les formats plus exotiques (`didomi_token`
 /// signé, `sp_`/`consentUUID` Sourcepoint encodés) ne sont pas
 /// forgés — une valeur invalide y serait pire qu'une absence.
+///
+/// `host` filtre les graines **spécifiques à un domaine** :
+/// `SOCS` (le proto sérialisé du bump Google, lu par
+/// `ytd-consent-bump*` — `CONSENT` n'est plus relu par
+/// `YouTube`) n'est émis que sur [`is_google_consent_host`],
+/// jamais sur un hôte tiers où il serait un cookie fantôme.
 /// `Honest` → vecteur vide (statu quo).
 #[must_use]
-pub fn seed_headers(policy: ConsentPolicy, now: SystemTime) -> Vec<String> {
+pub fn seed_headers(policy: ConsentPolicy, now: SystemTime, host: &str) -> Vec<String> {
     if matches!(policy, ConsentPolicy::Honest) {
         return Vec::new();
     }
@@ -461,7 +467,7 @@ pub fn seed_headers(policy: ConsentPolicy, now: SystemTime) -> Vec<String> {
     } else {
         "C0001:1,C0002:0,C0003:0,C0004:0,C0005:0"
     };
-    vec![
+    let mut out = vec![
         format!("euconsent-v2={tc}{attrs}"),
         format!("OptanonAlertBoxClosed={iso}{attrs}"),
         format!(
@@ -470,7 +476,40 @@ pub fn seed_headers(policy: ConsentPolicy, now: SystemTime) -> Vec<String> {
         format!("notice_behavior=expressed,eu{attrs}"),
         format!("cookieconsent_status={}{attrs}", if agreed { "allow" } else { "deny" }),
         format!("usprivacy={}{attrs}", if agreed { "1YNN" } else { "1YYY" }),
-    ]
+    ];
+    if is_google_consent_host(host) {
+        let socs = if agreed {
+            SOCS_ACCEPT_ALL
+        } else {
+            SOCS_REJECT_ALL
+        };
+        out.push(format!("SOCS={socs}{attrs}"));
+    }
+    out
+}
+
+/// `SOCS` posé par « Tout refuser » sur le bump Google —
+/// proto de décision sérialisé (`CAISNQ` = refus explicite,
+/// valeur mesurée par uAssets/uBlock sur le bouton réel).
+const SOCS_REJECT_ALL: &str =
+    "CAISNQgDEitib3FfaWRlbnRpdHlmcm9udGVuZHVpZXJ2ZXJfMjAyMzA4MjkuMDdfcDEaAmVuIAMaBgiAmc-nBg";
+
+/// `SOCS` posé par « Tout accepter » (`CAES` = accord,
+/// forme minimale reconnue par le serveur).
+const SOCS_ACCEPT_ALL: &str = "CAESEwgDEgk0ODE3Nzk3MjQaAmVuIAEaBgiA_LyaBg";
+
+/// Hôtes dont la CMP est celle de Google — `SOCS` n'y a de
+/// sens que là (`youtube.com`/`youtube-nocookie.com` et
+/// `google.<tld>` : le bump `ytd-consent-bump*` et le
+/// frontal `consent.google.com`).
+fn is_google_consent_host(host: &str) -> bool {
+    let h = host.trim_end_matches('.');
+    h == "youtube.com"
+        || h.ends_with(".youtube.com")
+        || h == "youtube-nocookie.com"
+        || h.ends_with(".youtube-nocookie.com")
+        || h.starts_with("google.")
+        || h.contains(".google.")
 }
 
 /// `SystemTime` → `YYYY-MM-DDTHH:MM:SSZ` (format ISO des
@@ -636,12 +675,15 @@ mod tests {
 
     #[test]
     fn seeds_honest_vides() {
-        assert_eq!(seed_headers(ConsentPolicy::Honest, NOW).len(), 0);
+        assert_eq!(
+            seed_headers(ConsentPolicy::Honest, NOW, "www.youtube.com").len(),
+            0
+        );
     }
 
     #[test]
     fn seeds_portent_la_decision() {
-        let headers = seed_headers(ConsentPolicy::RejectAll, NOW);
+        let headers = seed_headers(ConsentPolicy::RejectAll, NOW, "example.org");
         assert_eq!(headers.len(), 6);
         let joined = headers.join("\n");
         assert!(joined.contains("euconsent-v2="));
@@ -650,7 +692,11 @@ mod tests {
         assert!(joined.contains("cookieconsent_status=deny"));
         assert!(joined.contains("usprivacy=1YYY"));
         assert!(joined.contains("Max-Age="));
-        let accept = seed_headers(ConsentPolicy::AcceptAll, NOW).join("\n");
+        assert!(
+            !joined.contains("SOCS="),
+            "SOCS reste scopé Google — pas sur example.org"
+        );
+        let accept = seed_headers(ConsentPolicy::AcceptAll, NOW, "example.org").join("\n");
         assert!(accept.contains("C0002:1"));
         assert!(accept.contains("cookieconsent_status=allow"));
         // Le TC string du seed re-décode à la politique posée.
@@ -662,6 +708,28 @@ mod tests {
             .unwrap_or_default();
         let tc = decode_tc_string(&tc_line).unwrap();
         assert_eq!(tc.purpose_consents, 0);
+    }
+
+    #[test]
+    fn socs_scope_google_uniquement() {
+        let yt = seed_headers(ConsentPolicy::RejectAll, NOW, "www.youtube.com").join("\n");
+        assert!(yt.contains("SOCS=CAISNQ"), "reject : variante refus");
+        let yt_accept = seed_headers(ConsentPolicy::AcceptAll, NOW, "m.youtube.com").join("\n");
+        assert!(yt_accept.contains("SOCS=CAES"), "accept : variante accord");
+        assert!(yt_accept.contains("Max-Age="));
+        for h in [
+            "consent.youtube.com",
+            "www.youtube-nocookie.com",
+            "www.google.fr",
+            "google.com",
+        ] {
+            let s = seed_headers(ConsentPolicy::RejectAll, NOW, h).join("\n");
+            assert!(s.contains("SOCS="), "{h} doit recevoir SOCS");
+        }
+        for h in ["example.org", "myyoutube.com", "notgoogle.com.evil"] {
+            let s = seed_headers(ConsentPolicy::RejectAll, NOW, h).join("\n");
+            assert!(!s.contains("SOCS="), "{h} ne doit pas recevoir SOCS");
+        }
     }
 
     #[test]

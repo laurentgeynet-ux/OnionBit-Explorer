@@ -10,7 +10,7 @@
 //! `MessageEvent` livré après la frontière de jobs de
 //! l'émetteur, jamais en réentrance.
 
-use explorer_jscore::{Dom, Engine};
+use explorer_jscore::{CookieJar, Dom, Engine};
 use std::cell::RefCell;
 use std::rc::Rc;
 
@@ -592,4 +592,63 @@ fn etape207ter_child_ctx_inherits_declared_codecs() {
         ),
         ""
     );
+}
+
+// -- jar `document.cookie` document-local (JS-C486) ---------------------
+
+/// Jar `document.cookie` in-memory — `set` empile le `k=v`
+/// brut (miroir du `TestJar` de la suite `dom`).
+#[derive(Default)]
+struct TestJar {
+    inner: RefCell<Vec<String>>,
+}
+
+impl explorer_jscore::CookieJar for TestJar {
+    fn get(&self, _url: &str) -> String {
+        self.inner.borrow().join("; ")
+    }
+    fn set(&self, _url: &str, cookie: &str) {
+        let kv = cookie.split(';').next().unwrap_or("").trim().to_string();
+        self.inner.borrow_mut().push(kv);
+    }
+}
+
+#[test]
+fn c78_cookie_jar_isolated_between_contexts() {
+    // JS-C486 : `hooks.cookie_jar` était engine-global —
+    // `install_dom_ctx` d'un cadre écrasait le jar du
+    // top-level : `document.cookie` (top) lisait/écrivait le
+    // jar de l'iframe et les graines de consentement du jar
+    // session devenaient invisibles (mur consent YouTube).
+    let (mut e, d) = top_engine();
+    let top_jar = Rc::new(TestJar::default());
+    top_jar.set(TOP_URL, "SOCS=seeded");
+    e.set_cookie_jar(top_jar.clone());
+
+    // Cadre enfant avec SON jar isolé (miroir de
+    // `install_dom_ctx` : jar scopé à l'origine enfant).
+    let node = iframe_node(&d);
+    let child = e.context_new(CHILD_URL, Some((Rc::as_ptr(&d) as usize, node)));
+    let cd = Rc::new(RefCell::new(Dom::from_html(CHILD_HTML)));
+    e.install_dom(&cd);
+    e.set_page_url(CHILD_URL);
+    e.install_timers();
+    let child_jar = Rc::new(TestJar::default());
+    child_jar.set(CHILD_URL, "childpref=on");
+    e.set_cookie_jar(child_jar.clone());
+    e.context_switch(0);
+
+    // Le top relit SON jar — pas celui de l'enfant — et son
+    // `location.href` reste le sien (`page_url` déjà garé).
+    assert_eq!(ev(&mut e, "document.cookie"), "SOCS=seeded");
+    assert_eq!(ev(&mut e, "location.href"), TOP_URL);
+    // Une écriture top atterrit dans le jar top, pas l'enfant.
+    ev(&mut e, "document.cookie = 'sess=abc'; 'ok'");
+    assert_eq!(ev(&mut e, "document.cookie"), "SOCS=seeded; sess=abc");
+
+    // L'enfant voit son propre jar, pas les écritures du top.
+    assert_eq!(ev_ctx(&mut e, child, "document.cookie"), "childpref=on");
+    ev_ctx(&mut e, child, "document.cookie = 'cj=1'; 'ok'");
+    // Retour top : rien n'a fuité.
+    assert_eq!(ev(&mut e, "document.cookie"), "SOCS=seeded; sess=abc");
 }

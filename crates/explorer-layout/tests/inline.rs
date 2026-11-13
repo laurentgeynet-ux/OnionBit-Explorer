@@ -820,6 +820,30 @@ fn counter_increment_reset_dans_content() {
     let _ = dom;
 }
 
+/// `counter-set` (css-lists-3) : valeur absolue, pas
+/// l'incrément — « ch » saute de 1 à 10 sur le 2e h2.
+#[test]
+fn counter_set_absolu() {
+    let (dom, bx) = laid_w(
+        "<!doctype html><div><h2>a</h2><h2 class=skip>b</h2></div>",
+        "body { margin: 0 } div { counter-reset: ch 0 } \
+         h2 { counter-increment: ch } h2.skip { counter-set: ch 10 } \
+         h2::before { content: counter(ch) \". \" } h2 { margin: 0 }",
+        800.0,
+    );
+    let mut out = Vec::new();
+    let mut stack = vec![bx.clone()];
+    while let Some(b) = stack.pop() {
+        if let Some(t) = &b.text {
+            out.push(t.clone());
+        }
+        stack.extend(b.children.iter().cloned());
+    }
+    let all = out.join("");
+    assert!(all.contains("1. "), "1er h2 → 1 : {all:?}");
+    assert!(all.contains("11. "), "skip → set 10 + increment : {all:?}");
+    let _ = dom;
+}
 /// R-169 fix — `counter-reset: a b 2` : le token suivant
 /// n'est un pas que s'il PARSE en entier — sinon c'est le
 /// nom suivant. Régression post-revue : `b` était avalé
@@ -993,4 +1017,879 @@ fn padding_horizontal_inline_consomme_la_ligne() {
     assert_eq!(x_of("x1"), 40.0, "padding-left de <a> ignoré");
     // x2 : 40 (pad) + 10 (x1) + 40 (pad) + 40 (pad) = 130.
     assert_eq!(x_of("x2"), 130.0, "padding-right de <a> ignoré");
+}
+
+fn first_box_with_lines(bx: &LayoutBox) -> &LayoutBox {
+    if !bx.lines.is_empty() {
+        return bx;
+    }
+    bx.children
+        .iter()
+        .find_map(|c| {
+            let c = first_box_with_lines(c);
+            (!c.lines.is_empty()).then_some(c)
+        })
+        .expect("boîte p")
+}
+
+/// `text-indent` `hanging`/`each-line` (css-text-4) :
+/// `hanging` = indent sauf la première ligne ; `each-line`
+/// = toutes les lignes.
+#[test]
+fn text_indent_keywords() {
+    let long = "aaaa bbbb cccc dddd eeee ffff gggg hhhh iiii jjjj";
+    let html = format!("<p>{long}</p>");
+    // `hanging` : la 2e ligne est décalée de 20px.
+    let (_dom, bx) = laid_w(
+        &html,
+        "p{width:100px;text-indent:20px hanging;margin:0}",
+        800.0,
+    );
+    let p = first_box_with_lines(&bx);
+    let (first, rest) = (p.lines.first().unwrap().rect.x, p.lines[1].rect.x);
+    assert_eq!(first, 0.0, "hanging : L1 sans indent");
+    assert_eq!(rest, 20.0, "hanging : L2+ indentées ({rest})");
+    // `each-line` : toutes indentées.
+    let (_d2, bx2) = laid_w(
+        &html,
+        "p{width:100px;text-indent:20px each-line;margin:0}",
+        800.0,
+    );
+    let p2 = first_box_with_lines(&bx2);
+    assert_eq!(p2.lines[1].rect.x, 20.0, "each-line : L2 indentée");
+}
+
+/// §8.1 `tab-size` : les `\t` préservés (`pre`/`pre-wrap`)
+// avancent au prochain taquet — multiple de `tab-size` ×
+// avance d'espace — depuis le bord de départ du bloc.
+#[test]
+fn tab_size_avance_aux_taquets() {
+    // Fixture 5px/car à font-size:10px → espace 5px,
+    // tab-size:4 → taquets tous les 20px.
+    let (_dom, bx) = laid(
+        "<!doctype html><p>a\tb</p>",
+        "p{font-size:10px;width:400px;white-space:pre;tab-size:4;margin:0}",
+    );
+    let p = first_box_with_lines(&bx);
+    let frags = &p.lines[0].fragments;
+    let b = frags
+        .iter()
+        .find(|f| f.text == "b")
+        .unwrap_or_else(|| panic!("frags={frags:?}"));
+    // « a » occupe [0,5] → taquet suivant = 20.
+    assert_eq!(
+        b.rect.x,
+        20.0,
+        "b doit partir au taquet 20 ({:?})",
+        frags
+            .iter()
+            .map(|f| (&f.text, f.rect.x, f.rect.width))
+            .collect::<Vec<_>>()
+    );
+    // Le fragment tabulation porte l'avance, aucun glyphe.
+    let tab = frags.iter().find(|f| f.text == "\t").expect("frag tab");
+    assert_eq!(tab.rect.width, 15.0, "avance tab 5→20");
+    assert!(tab.shaped.is_none(), "pas de shaping sur une tab");
+
+    // Taquet déjà atteint → avance au taquet SUIVANT.
+    let (_d2, bx2) = laid(
+        "<!doctype html><p>aaaa\tb</p>",
+        "p{font-size:10px;width:400px;white-space:pre;tab-size:4;margin:0}",
+    );
+    let p2 = first_box_with_lines(&bx2);
+    let b2 = p2.lines[0]
+        .fragments
+        .iter()
+        .find(|f| f.text == "b")
+        .expect("b");
+    assert_eq!(b2.rect.x, 40.0, "sur un taquet → suivant ({})", b2.rect.x);
+
+    // `\t` en tête de ligne : taquet depuis le bord du bloc.
+    let (_d3, bx3) = laid(
+        "<!doctype html><p>\ta</p>",
+        "p{font-size:10px;width:400px;white-space:pre;tab-size:4;margin:0}",
+    );
+    let p3 = first_box_with_lines(&bx3);
+    let a3 = p3.lines[0]
+        .fragments
+        .iter()
+        .find(|f| f.text == "a")
+        .expect("a");
+    assert_eq!(a3.rect.x, 20.0, "tab en tête → taquet 20 ({})", a3.rect.x);
+
+    // tab-size en <length> : taquets absolus de 30px.
+    let (_d4, bx4) = laid(
+        "<!doctype html><p>a\tb</p>",
+        "p{font-size:10px;width:400px;white-space:pre;tab-size:30px;margin:0}",
+    );
+    let p4 = first_box_with_lines(&bx4);
+    let b4 = p4.lines[0]
+        .fragments
+        .iter()
+        .find(|f| f.text == "b")
+        .expect("b");
+    assert_eq!(b4.rect.x, 30.0, "length → taquet 30 ({})", b4.rect.x);
+
+    // Sans `pre`, les tabs s'effondrent en espace ordinaire.
+    let (_d5, bx5) = laid(
+        "<!doctype html><p>a\tb</p>",
+        "p{font-size:10px;width:400px;margin:0}",
+    );
+    let p5 = first_box_with_lines(&bx5);
+    assert!(
+        !p5.lines[0].fragments.iter().any(|f| f.text == "\t"),
+        "hors pre : pas de frag tab"
+    );
+}
+
+/// css-ruby-1 : l'annotation `rt` (`display:ruby-text`)
+/// sort du flux vertical — posée dans la bande au-dessus
+/// de la base (`ruby-position:over`), la ligne grandit ;
+/// `under` la pose en dessous.
+#[test]
+fn ruby_rt_au_dessus_de_la_base() {
+    let (_d, bx) = laid(
+        "<!doctype html><p>x<ruby>B<rt>a</rt></ruby>y</p>",
+        "p{font-size:20px;width:400px;margin:0}",
+    );
+    let p = first_box_with_lines(&bx);
+    let line = &p.lines[0];
+    let rt = line
+        .fragments
+        .iter()
+        .find(|f| f.style.get("display") == Some("ruby-text"))
+        .expect("frag rt");
+    let base = line
+        .fragments
+        .iter()
+        .filter(|f| f.style.get("display") != Some("ruby-text"))
+        .map(|f| f.rect.y)
+        .fold(f32::INFINITY, f32::min);
+    assert!(
+        rt.rect.y + rt.rect.height <= base + 0.01,
+        "rt au-dessus de la base (rt {:?} vs base {base})",
+        rt.rect
+    );
+    // La ligne a grandi de la hauteur de l'annotation.
+    assert!(
+        line.rect.height > 20.0 + rt.rect.height - 0.01,
+        "ligne agrandie de l'annotation ({})",
+        line.rect.height
+    );
+
+    // `ruby-position:under` : annotation sous la base, la
+    // base ne bouge pas.
+    let (_d2, bx2) = laid(
+        "<!doctype html><p>x<ruby style=ruby-position:under>B<rt>a</rt></ruby>y</p>",
+        "p{font-size:20px;width:400px;margin:0}",
+    );
+    let line2 = &first_box_with_lines(&bx2).lines[0];
+    let rt2 = line2
+        .fragments
+        .iter()
+        .find(|f| f.style.get("display") == Some("ruby-text"))
+        .expect("frag rt under");
+    let base_bot = line2
+        .fragments
+        .iter()
+        .filter(|f| f.style.get("display") != Some("ruby-text"))
+        .map(|f| f.rect.y + f.rect.height)
+        .fold(0.0_f32, f32::max);
+    assert!(
+        rt2.rect.y >= base_bot - 0.01,
+        "rt sous la base (rt {:?} vs bas {base_bot})",
+        rt2.rect
+    );
+}
+
+/// css-ruby-1 suite : l'annotation est **centrée** sur le
+/// segment de base qui la précède (ruby-align:center
+/// défaut) ; `inter-character` la cale après la base sur la
+/// même ligne de base.
+#[test]
+fn ruby_rt_centre_et_inter_character() {
+    // Base "BB" (20 px) + annotation "a" (5 px) : centre à
+    // x_seg(10) + 10 - 2.5 = 17.5.
+    let (_d, bx) = laid(
+        "<!doctype html><p><ruby>BB<rt>a</rt></ruby></p>",
+        "p{font-size:20px;width:400px;margin:0}",
+    );
+    let line = &first_box_with_lines(&bx).lines[0];
+    let rt = line
+        .fragments
+        .iter()
+        .find(|f| f.style.get("display") == Some("ruby-text"))
+        .expect("frag rt");
+    let bb = line
+        .fragments
+        .iter()
+        .find(|f| f.style.get("display") == Some("ruby"))
+        .expect("frag base");
+    let want = bb.rect.x + (bb.rect.width - rt.rect.width) / 2.0;
+    assert!(
+        (rt.rect.x - want).abs() < 0.01,
+        "rt centré sur la base : x={} attendu {want}",
+        rt.rect.x
+    );
+
+    // `inter-character` : après la base, baseline alignée.
+    let (_d2, bx2) = laid(
+        "<!doctype html><p><ruby style=ruby-position:inter-character>BB<rt>a</rt></ruby></p>",
+        "p{font-size:20px;width:400px;margin:0}",
+    );
+    let line2 = &first_box_with_lines(&bx2).lines[0];
+    let rt2 = line2
+        .fragments
+        .iter()
+        .find(|f| f.style.get("display") == Some("ruby-text"))
+        .expect("frag rt ic");
+    let bb2 = line2
+        .fragments
+        .iter()
+        .find(|f| f.style.get("display") == Some("ruby"))
+        .expect("frag base ic");
+    assert!(
+        (rt2.rect.x - (bb2.rect.x + bb2.rect.width)).abs() < 0.01,
+        "inter-character : rt après la base ({} vs {})",
+        rt2.rect.x,
+        bb2.rect.x + bb2.rect.width
+    );
+    assert!(
+        (rt2.rect.y + rt2.baseline - (bb2.rect.y + bb2.baseline)).abs() < 0.5,
+        "inter-character : baselines alignées"
+    );
+}
+
+/// `ruby-align:start` colle l'annotation au début de la
+/// base ; l'overhang est borné à l'étendue `ruby*` de la
+/// ligne (conteneur — pas de fuite sur les voisins).
+#[test]
+fn ruby_align_start_et_overhang_borne() {
+    // `start` : rt collé au bord gauche de "BB".
+    let (_d, bx) = laid(
+        "<!doctype html><p><ruby style=ruby-align:start>BB<rt>a</rt></ruby></p>",
+        "p{font-size:20px;width:400px;margin:0}",
+    );
+    let line = &first_box_with_lines(&bx).lines[0];
+    let rt = line
+        .fragments
+        .iter()
+        .find(|f| f.style.get("display") == Some("ruby-text"))
+        .expect("frag rt");
+    let bb = line
+        .fragments
+        .iter()
+        .find(|f| f.style.get("display") == Some("ruby"))
+        .expect("frag base");
+    assert!(
+        (rt.rect.x - bb.rect.x).abs() < 0.01,
+        "start : rt au début de la base ({} vs {})",
+        rt.rect.x,
+        bb.rect.x
+    );
+
+    // Overhang borné : annotation large (4 glyphes) centrée
+    // sur base étroite "B" — le run ne dépasse pas
+    // l'étendue ruby* de la ligne.
+    let (_d2, bx2) = laid(
+        "<!doctype html><p><ruby>B<rt>WWWW</rt></ruby></p>",
+        "p{font-size:20px;width:400px;margin:0}",
+    );
+    let line2 = &first_box_with_lines(&bx2).lines[0];
+    let rt2 = line2
+        .fragments
+        .iter()
+        .find(|f| f.style.get("display") == Some("ruby-text"))
+        .expect("frag rt large");
+    let bb2 = line2
+        .fragments
+        .iter()
+        .find(|f| f.style.get("display") == Some("ruby"))
+        .expect("frag base étroite");
+    // Centré pur sortirait à gauche de la base : borné ≥ seg.
+    assert!(
+        rt2.rect.x >= bb2.rect.x - 0.01,
+        "overhang borné au conteneur (rt {} vs base {})",
+        rt2.rect.x,
+        bb2.rect.x
+    );
+}
+
+/// css-ruby-1 §3.2 — `rtc` multi-annotations : chaque
+/// conteneur d'annotation ouvre un niveau empilé (le
+/// premier `rtc` le plus proche de la base), la ligne
+/// grandit de la somme des bandes.
+#[test]
+fn ruby_rtc_niveaux_empiles() {
+    let (_d, bx) = laid(
+        "<!doctype html><p><ruby>B<rtc><rt>a1</rt></rtc><rtc><rt>a2</rt></rtc></ruby></p>",
+        "p{font-size:20px;width:400px;margin:0}",
+    );
+    let line = &first_box_with_lines(&bx).lines[0];
+    let tier = |t: &str| {
+        line.fragments
+            .iter()
+            .find(|f| f.text == t)
+            .expect("frag")
+            .rect
+            .y
+    };
+    let (y_a1, y_a2) = (tier("a1"), tier("a2"));
+    let y_base = tier("B");
+    // a1 (premier rtc) sous a2 (second rtc), tous deux
+    // au-dessus de la base ; bandes distinctes empilées.
+    assert!(y_a2 < y_a1, "tier2 au-dessus de tier1 ({y_a2} vs {y_a1})");
+    assert!(y_a1 < y_base, "annotations au-dessus de la base");
+    // La ligne couvre les deux bandes + la base.
+    assert!(
+        line.rect.height > 20.0 + 2.0 * 5.0,
+        "deux bandes d'annotation dans la ligne ({})",
+        line.rect.height
+    );
+
+    // `rt` nu + `rtc` mélangés : le nu reste le plus proche.
+    let (_d2, bx2) = laid(
+        "<!doctype html><p><ruby>B<rt>n</rt><rtc><rt>a</rt></rtc></ruby></p>",
+        "p{font-size:20px;width:400px;margin:0}",
+    );
+    let line2 = &first_box_with_lines(&bx2).lines[0];
+    let tier2 = |t: &str| {
+        line2
+            .fragments
+            .iter()
+            .find(|f| f.text == t)
+            .expect("frag")
+            .rect
+            .y
+    };
+    assert!(
+        tier2("a") < tier2("n"),
+        "rtc au-dessus du rt nu ({} vs {})",
+        tier2("a"),
+        tier2("n")
+    );
+}
+
+// ---------- R-264 — `white-space` variantes (css-text-4 §4/§7) ----------
+
+/// Texte concaténé d'une ligne (les fragments ws comptent).
+fn line_text(line: &explorer_layout::inline::LineBox) -> String {
+    line.fragments.iter().map(|f| f.text.as_str()).collect()
+}
+
+#[test]
+fn white_space_collapse_discard_soude_le_texte() {
+    // `discard` : tout blanc supprimé — `a  b` se soude en
+    // `ab` sur une ligne, aucune coupure sur blanc.
+    let (dom, bx) = laid(
+        "<!doctype html><p>a  b\n c</p>",
+        "p{font-size:10px;width:400px;white-space-collapse:discard;margin:0}",
+    );
+    let p = find(&bx, by_tag(&dom, "p"));
+    let line = &p.children[0].lines[0];
+    assert_eq!(line_text(line), "abc", "blancs supprimés");
+    assert_eq!(p.children[0].lines.len(), 1, "le \n est discarté");
+}
+
+#[test]
+fn white_space_collapse_preserve_spaces_garde_les_espaces() {
+    // `preserve-spaces` : espaces verbatim, tabs/sauts →
+    // espaces (plus de coupure dure) — `a\tb\nc` → `a b c`.
+    let (dom, bx) = laid(
+        "<!doctype html><p>a\tb\nc</p>",
+        "p{font-size:10px;width:400px;white-space-collapse:preserve-spaces;margin:0}",
+    );
+    let p = find(&bx, by_tag(&dom, "p"));
+    assert_eq!(p.children[0].lines.len(), 1, "saut converti en espace");
+    let t: String = p.children[0].lines.iter().map(line_text).collect();
+    assert_eq!(t, "a b c", "tab+newline → espaces : {t:?}");
+}
+
+#[test]
+fn white_space_collapse_preserve_breaks_garde_les_sauts() {
+    // `preserve-breaks` (= `pre-line`) : `\n` reste dur,
+    // espaces effondrées.
+    let (dom, bx) = laid(
+        "<!doctype html><p>a  b\nc</p>",
+        "p{font-size:10px;width:400px;white-space-collapse:preserve-breaks;margin:0}",
+    );
+    let p = find(&bx, by_tag(&dom, "p"));
+    assert_eq!(p.children[0].lines.len(), 2, "\n forcé");
+    assert_eq!(line_text(&p.children[0].lines[0]), "a b");
+}
+
+#[test]
+fn white_space_shorthand_pilote_les_longhands() {
+    // `white-space:break-spaces` — les espaces préservées
+    // comptent : une suite en fin de ligne NE pend pas
+    // (§4.1.3) et la coupure existe après CHAQUE espace.
+    // Ici : ligne de 40 px, `aaaa` (20) + 6 espaces (30) +
+    // `b` — les espaces remplissent la ligne, `b` passe à la
+    // ligne suivante SANS qu'on ait retiré les blancs.
+    let (dom, bx) = laid(
+        "<!doctype html><p>aaaa      b</p>",
+        "p{font-size:10px;width:40px;white-space:break-spaces;margin:0}",
+    );
+    let p = find(&bx, by_tag(&dom, "p"));
+    let lines = &p.children[0].lines;
+    assert!(lines.len() >= 2, "le b doit passer à la ligne");
+    let l0 = line_text(&lines[0]);
+    assert!(l0.ends_with(' '), "espaces de fin conservées : {l0:?}");
+    assert!(l0.starts_with("aaaa"));
+}
+
+#[test]
+fn text_wrap_mode_nowrap_desactive_le_shorthand_wrap() {
+    // `white-space:pre-wrap` + `text-wrap-mode:nowrap` :
+    // le longhand l'emporte → plus de coupure souple (les
+    // sauts durs restent) = comportement `pre`.
+    let (dom, bx) = laid(
+        "<!doctype html><p>mot un mot deux trois quatre</p>",
+        "p{font-size:10px;width:40px;white-space:pre-wrap;\
+         text-wrap-mode:nowrap;margin:0}",
+    );
+    let p = find(&bx, by_tag(&dom, "p"));
+    assert_eq!(
+        p.children[0].lines.len(),
+        1,
+        "nowrap : une seule ligne malgré pre-wrap"
+    );
+}
+
+#[test]
+fn longhand_collapse_surclasse_le_shorthand_pre() {
+    // `white-space:pre` + `white-space-collapse:collapse` :
+    // les blancs s'effondrent (le longhand posé après gagne),
+    // nowrap du mode reste — `a   b` → `a b` en une ligne.
+    let (dom, bx) = laid(
+        "<!doctype html><p>a   b</p>",
+        "p{font-size:10px;width:400px;white-space:pre;\
+         white-space-collapse:collapse;margin:0}",
+    );
+    let p = find(&bx, by_tag(&dom, "p"));
+    assert_eq!(line_text(&p.children[0].lines[0]), "a b");
+}
+
+#[test]
+fn hyphens_auto_coupe_avec_tiret_et_shy() {
+    // R-275 — `hyphens:auto` : un mot plus long que la
+    // bande se césure aux points syllabiques (`x-lang`
+    // absent → règles latines génériques), le fragment
+    // `hyphenate-character` (défaut `-`) ferme la ligne.
+    let html = "<!doctype html><div style=\"width:80px\"><p>internationalization</p></div>";
+    let (dom, bx) = laid(html, "p{font-size:10px;margin:0;hyphens:auto}");
+    let p = find(&bx, by_tag(&dom, "p"));
+    let texts: Vec<String> = p.children[0].lines.iter().map(line_text).collect();
+    assert!(texts.len() >= 2, "mot césuré : {texts:?}");
+    assert!(
+        texts.iter().any(|t| t.ends_with('-')),
+        "tiret en fin de ligne césurée : {texts:?}"
+    );
+    // `hyphens:none` : même fixture → aucun tiret, le mot
+    // déborde sans se couper.
+    let (_, bx) = laid(html, "p{font-size:10px;margin:0;hyphens:none}");
+    let texts: Vec<String> = find(&bx, by_tag(&dom, "p")).children[0]
+        .lines
+        .iter()
+        .map(line_text)
+        .collect();
+    assert!(
+        !texts.iter().any(|t| t.ends_with('-')),
+        "none → pas de tiret : {texts:?}"
+    );
+    // `&shy;` explicite : `manual` (la défaut) l'honore —
+    // coupure avec tiret au shy. Le mot entier tient dans
+    // 80px (13 car. ≈ 65px, shy muet) — la bande rétrécit
+    // à 60px pour que l'opportunité soit prise.
+    let html2 = "<!doctype html><div style=\"width:60px\"><p>inter\u{AD}national</p></div>";
+    let (_, bx) = laid(html2, "p{font-size:10px;margin:0}");
+    let texts: Vec<String> = find(&bx, by_tag(&dom, "p")).children[0]
+        .lines
+        .iter()
+        .map(line_text)
+        .collect();
+    assert!(
+        texts.iter().any(|t| t.ends_with('-')),
+        "&shy; → césure : {texts:?}"
+    );
+    // `hyphenate-character` déclaré remplace le tiret.
+    let (_, bx) = laid(
+        html,
+        "p{font-size:10px;margin:0;hyphens:auto;hyphenate-character:\"~\"}",
+    );
+    let texts: Vec<String> = find(&bx, by_tag(&dom, "p")).children[0]
+        .lines
+        .iter()
+        .map(line_text)
+        .collect();
+    assert!(
+        texts.iter().any(|t| t.ends_with('~')),
+        "hyphenate-character custom : {texts:?}"
+    );
+}
+
+// ---------- R-278 — `initial-letter` drop cap (css-inline-3 §4) ----------
+
+#[test]
+fn initialletter_reserve_le_trou_et_depense_la_lettre() {
+    // `initial-letter: 2` : la première lettre est retirée du
+    // texte et devient un cap excluant 2 lignes ; les lignes
+    // 1-2 sont mordues à droite/gauche, la 3e reprend la
+    // pleine largeur. Le fragment cap porte le glyphe à la
+    // taille dérivée (2×line-height).
+    let (dom, bx) = laid_w(
+        "<!doctype html><p>alpha beta gamma delta epsilon</p>",
+        "p { font-size: 10px; line-height: 10px; width: 60px; initial-letter: 2 }",
+        60.0,
+    );
+    let p = &find(&bx, by_tag(&dom, "p")).children[0];
+    assert!(p.lines.len() >= 3, "lignes : {}", p.lines.len());
+    let first = &p.lines[0];
+    let cap = first
+        .fragments
+        .iter()
+        .find(|f| f.text == "a")
+        .unwrap_or_else(|| {
+            panic!(
+                "pas de cap : {:?}",
+                first
+                    .fragments
+                    .iter()
+                    .map(|f| f.text.as_str())
+                    .collect::<Vec<_>>()
+            )
+        });
+    // Taille dérivée = 2×10px ; largeur cap > un caractère
+    // ordinaire (10px de font-size → ~5px ; cap 20px → ~10px).
+    assert!(cap.rect.width > 8.0, "cap w={}", cap.rect.width);
+    // La lettre est dépensée : le reste du texte commence à
+    // « onjour ».
+    // La lettre est dépensée : le fragment texte ouvrant le
+    // reste commence à « lpha » (le cap « a » est isolé dans
+    // son propre fragment — la concaténation ré-épelle
+    // « alpha » par construction, pas par duplication).
+    assert!(
+        first.fragments.iter().any(|f| f.text.starts_with("lpha")),
+        "reste : {:?}",
+        first
+            .fragments
+            .iter()
+            .map(|f| f.text.as_str())
+            .collect::<Vec<_>>()
+    );
+    // Morsure : lignes 1-2 démarrent après le cap (x > 0),
+    // la 3e reprend le bord gauche (x ≈ 0) — LTR.
+    let start = |line: &explorer_layout::inline::LineBox| {
+        line.fragments
+            .iter()
+            .filter(|f| f.text.len() > 1)
+            .map(|f| f.rect.x)
+            .fold(f32::MAX, f32::min)
+    };
+    assert!(start(first) > 3.0, "l1 décalee : {}", start(first));
+    assert!(start(&p.lines[1]) > 3.0, "l2 décalee");
+    assert!(
+        start(&p.lines[2]) < 1.0,
+        "l3 pleine : {}",
+        start(&p.lines[2])
+    );
+}
+
+#[test]
+fn initialletter_normal_et_1_inertes() {
+    for raw in ["normal", "1"] {
+        let (dom, bx) = laid_w(
+            "<!doctype html><p>bonjour le monde</p>",
+            &format!("p {{ font-size: 10px; line-height: 10px; initial-letter: {raw} }}"),
+            100.0,
+        );
+        let p = &find(&bx, by_tag(&dom, "p")).children[0];
+        let first_text = line_text(&p.lines[0]);
+        assert!(
+            first_text.contains("bonjour"),
+            "{raw} : texte intact attendu, reçu {first_text:?}"
+        );
+        assert!(
+            !p.lines[0]
+                .fragments
+                .iter()
+                .any(|f| f.text.len() == 1 && f.rect.width > 8.0),
+            "{raw} : pas de cap attendu"
+        );
+    }
+}
+
+// ---------- R-279 — `text-box-trim` (css-inline-3 §10) ----------
+
+#[test]
+fn text_box_trim_retire_le_half_leading() {
+    // line-height:20px / font-size:10px → ~5px de
+    // half-leading par bord. `trim-both` retire ~10px de
+    // hauteur et la première ligne remonte au bord haut.
+    let html = "<!doctype html><p>alpha beta</p>";
+    let css = |extra: &str| format!("p {{ font-size: 10px; line-height: 20px; {extra} }}");
+    let (d0, b0) = laid(html, &css(""));
+    let (d1, b1) = laid(html, &css("text-box-trim: trim-both"));
+    let p0 = &find(&b0, by_tag(&d0, "p")).children[0];
+    let p1 = &find(&b1, by_tag(&d1, "p")).children[0];
+    assert_eq!(p0.lines.len(), p1.lines.len());
+    // La hauteur baisse d'environ 2 half-leadings.
+    let h0 = p0.rect.height;
+    let h1 = p1.rect.height;
+    assert!(h1 < h0, "trim doit réduire : h0={h0} h1={h1}");
+    // Le texte remonte : l'over edge de la 1re ligne rejoint
+    // le haut (y ≈ 0 → baseline monte de ~half-leading).
+    let f0 = p0.lines[0]
+        .fragments
+        .iter()
+        .find(|f| !f.text.is_empty())
+        .expect("frag");
+    let f1 = p1.lines[0]
+        .fragments
+        .iter()
+        .find(|f| !f.text.is_empty())
+        .expect("frag");
+    assert!(
+        f1.rect.y < f0.rect.y,
+        "remontée : f0.y={} f1.y={}",
+        f0.rect.y,
+        f1.rect.y
+    );
+    // `trim-start` seul : hauteur réduite d'un bord.
+    let (d2, b2) = laid(html, &css("text-box-trim: trim-start"));
+    let p2 = &find(&b2, by_tag(&d2, "p")).children[0];
+    let h2 = p2.rect.height;
+    assert!(h2 < h0 && h2 > h1, "trim-start : {h1} < {h2} < {h0}");
+    // `trim-end` seul : hauteur réduite du bord bas, sans
+    // remonter la première ligne.
+    let (d5, b5) = laid(html, &css("text-box-trim: trim-end"));
+    let p5 = &find(&b5, by_tag(&d5, "p")).children[0];
+    let f5 = p5.lines[0]
+        .fragments
+        .iter()
+        .find(|f| !f.text.is_empty())
+        .expect("frag");
+    assert_eq!(p5.rect.height, h2, "trim-end ≡ trim-start en hauteur");
+    assert_eq!(f5.rect.y, f0.rect.y, "trim-end ne remonte pas");
+    // `none` et absent : inchangé.
+    let (d3, b3) = laid(html, &css("text-box-trim: none"));
+    let p3 = &find(&b3, by_tag(&d3, "p")).children[0];
+    assert_eq!(p3.rect.height, h0);
+    // Shorthand `text-box: trim-both` ≡ longhand.
+    let (d4, b4) = laid(html, &css("text-box: trim-both"));
+    let p4 = &find(&b4, by_tag(&d4, "p")).children[0];
+    assert_eq!(p4.rect.height, h1);
+}
+
+// ---------- R-281 — `word-break:keep-all` (css-text-3 §5.2) ----------
+
+#[test]
+fn word_break_keep_all_supprime_les_coupures_cjk() {
+    // Texte CJK dans un conteneur étroit : `normal` casse
+    // n'importe où (UAX #14) ; `keep-all` ne coupe qu'aux
+    // espaces — les pièces CJK restent entières.
+    let html = "<!doctype html><p>中文文字 abc</p>";
+    let css = |wb: &str| format!("p {{ font-size: 10px; line-height: 10px; word-break: {wb} }}");
+    let (d0, b0) = laid_w(html, &css("normal"), 12.0);
+    let (d1, b1) = laid_w(html, &css("keep-all"), 12.0);
+    let p0 = &find(&b0, by_tag(&d0, "p")).children[0];
+    let p1 = &find(&b1, by_tag(&d1, "p")).children[0];
+    // normal : le run CJK (4×10px > 30px de bande) casse
+    // intra-mot → plusieurs lignes de 1-2 glyphes.
+    let l0 = p0.lines.len();
+    let l1 = p1.lines.len();
+    assert!(l0 >= 3, "normal casse le CJK : {l0} lignes");
+    assert!(l1 <= 3, "keep-all : {l1} lignes");
+    // keep-all : le mot CJK tient (ou déborde) sur UNE ligne
+    // → moins de lignes.
+    assert!(l1 < l0, "keep-all réduit les coupures : {l1} < {l0}");
+    // Le run CJK survit entier sur une ligne (déborde la
+    // bande — dégradation §5.3 — plutôt que coupé).
+    let l1_text: Vec<String> = p1.lines.iter().map(line_text).collect();
+    assert!(
+        l1_text.iter().any(|t| t.contains("中文文字")),
+        "mot CJK entier sur une ligne : {l1_text:?}"
+    );
+}
+
+// ---------- R-282 — `text-autospace` (css-text-4 §9) ----------
+
+#[test]
+fn text_autospace_insere_un_filet_inter_script() {
+    // Frontière CJK ↔ latin : `ideographic-alpha` insère un
+    // filet ~⅛ em avant la pièce latine ; absent/`no-autospace`
+    // → rien.
+    let html = "<!doctype html><p>中文abc</p>";
+    let css = |v: &str| format!("p {{ font-size: 10px; line-height: 10px; text-autospace: {v} }}");
+    let gap_of = |b: &explorer_layout::LayoutBox, d: &explorer_dom::Dom| {
+        let p = &find(b, by_tag(d, "p")).children[0];
+        let l = &p.lines[0];
+        // Le run CJK est éclaté par glyphe (UAX #14) — le
+        // voisin immédiat d'"abc" est le dernier frag CJK.
+        let abi = l
+            .fragments
+            .iter()
+            .position(|f| f.text.contains("abc"))
+            .expect("frag latin");
+        let prev = &l.fragments[abi - 1];
+        l.fragments[abi].rect.x - (prev.rect.x + prev.rect.width)
+    };
+    let (d0, b0) = laid(html, &css("no-autospace"));
+    let (d1, b1) = laid(html, &css("ideographic-alpha"));
+    let (d2, b2) = laid(html, &css("auto"));
+    assert_eq!(gap_of(&b0, &d0), 0.0, "no-autospace : pas de filet");
+    let g = gap_of(&b1, &d1);
+    assert!((g - 10.0 * 0.125).abs() < 0.5, "filet ≈⅛ em : {g}");
+    assert_eq!(gap_of(&b2, &d2), 0.0, "auto : opt-in non activé");
+}
+
+// ---------- R-282 — `text-justify` (css-text-3 §7.3) ----------
+
+#[test]
+fn text_justify_none_desactive_la_justification() {
+    // `text-align:justify` répartit le slack entre fragments ;
+    // `text-justify:none` le neutralise (ligne rasa-start).
+    let html = "<!doctype html><p>aa bb cc dd</p>";
+    let css =
+        |tj: &str| format!("p {{ font-size: 10px; line-height: 10px; text-align: justify; {tj} }}");
+    // Écarts inter-fragments de la première ligne.
+    let spread = |b: &explorer_layout::LayoutBox, d: &explorer_dom::Dom| {
+        let p = &find(b, by_tag(d, "p")).children[0];
+        let l = &p.lines[0];
+        l.fragments
+            .windows(2)
+            .map(|w| w[1].rect.x - (w[0].rect.x + w[0].rect.width))
+            .fold(0.0_f32, f32::max)
+    };
+    let (d0, b0) = laid_w(html, &css(""), 50.0);
+    let (d1, b1) = laid_w(html, &css("text-justify: none"), 50.0);
+    assert!(
+        spread(&b0, &d0) > 0.5,
+        "justify répartit : {}",
+        spread(&b0, &d0)
+    );
+    assert_eq!(spread(&b1, &d1), 0.0, "text-justify:none : plus de glu");
+}
+
+// ---------- R-282 — `text-wrap-style` (css-text-4 §7.3) ----------
+
+#[test]
+fn text_wrap_style_balance_egalise_les_lignes() {
+    // Trois mots tiennent, quatre non : glouton → "aa bb cc"/"dd" ;
+    // `balance` pousse "cc" vers le bas → "aa bb"/"cc dd".
+    let html = "<!doctype html><p>aa bb cc dd</p>";
+    let css = |v: &str| format!("p {{ font-size: 10px; line-height: 10px; text-wrap-style: {v} }}");
+    let last_text = |b: &explorer_layout::LayoutBox, d: &explorer_dom::Dom| {
+        let p = &find(b, by_tag(d, "p")).children[0];
+        p.lines.iter().map(line_text).collect::<Vec<_>>()
+    };
+    let (d0, b0) = laid_w(html, &css("auto"), 50.0);
+    let (d1, b1) = laid_w(html, &css("balance"), 50.0);
+    let t0 = last_text(&b0, &d0);
+    let t1 = last_text(&b1, &d1);
+    assert_eq!(t0.len(), 2, "2 lignes : {t0:?}");
+    assert_eq!(t1.len(), 2, "2 lignes : {t1:?}");
+    assert!(t0[1].starts_with('d'), "glouton : {t0:?}");
+    assert!(t1[1].starts_with('c'), "balance : {t1:?}");
+}
+
+#[test]
+fn text_wrap_style_pretty_evite_l_orphelin() {
+    // Même fixture : `pretty` fait descendre un mot vers la
+    // dernière ligne trop courte — pas d'égalisation au-delà.
+    let html = "<!doctype html><p>aa bb cc dd</p>";
+    let css = |v: &str| format!("p {{ font-size: 10px; line-height: 10px; text-wrap-style: {v} }}");
+    let (d1, b1) = laid_w(html, &css("pretty"), 50.0);
+    let p1 = &find(&b1, by_tag(&d1, "p")).children[0];
+    let t1: Vec<String> = p1.lines.iter().map(line_text).collect();
+    assert!(t1[1].starts_with('c'), "pretty : {t1:?}");
+}
+
+/// `ruby-overhang` (css-ruby-1 §3.3 — R-289) : `none` borne
+/// l'annotation à son segment de base ; `auto` (défaut)
+/// laisse déborder sur le texte voisin jusqu'à l'étendue
+/// de la ligne. Annotation « AAAA » (40 px) sur base « B »
+/// (10 px) entourée de `x…y`.
+#[test]
+fn ruby_overhang_none_borne_au_segment() {
+    let rt_x = |css: &str| -> (f32, f32, f32) {
+        let (_d, bx) = laid("<!doctype html><p>x<ruby>B<rt>AAAA</rt></ruby>y</p>", css);
+        let line = &first_box_with_lines(&bx).lines[0];
+        let rt = line
+            .fragments
+            .iter()
+            .find(|f| f.style.get("display") == Some("ruby-text"))
+            .expect("frag rt");
+        let base = line
+            .fragments
+            .iter()
+            .find(|f| f.style.get("display") == Some("ruby"))
+            .expect("frag base");
+        (rt.rect.x, base.rect.x, base.rect.x + base.rect.width)
+    };
+    // `none` : plus large que le segment → plaquée au bord
+    // start du segment (pas de débordement sur x/y).
+    let (x_none, seg_l, seg_r) = rt_x(
+        "p{font-size:10px;width:400px;margin:0}\
+         rt{ruby-overhang:none}",
+    );
+    assert!(
+        (x_none - seg_l).abs() < 0.01,
+        "none → annotation calée au segment (x={x_none} vs seg {seg_l}..{seg_r})"
+    );
+    // `auto` : la déborde sur la ligne → x < seg_l
+    // (l'annotation de 40 px couvre les voisins x/y).
+    let (x_auto, seg_l2, _) = rt_x(
+        "p{font-size:10px;width:400px;margin:0}\
+         rt{ruby-overhang:auto}",
+    );
+    assert!(
+        x_auto < seg_l2 - 0.01,
+        "auto → débordement sur le voisinage (x={x_auto} vs seg {seg_l2})"
+    );
+}
+
+/// `ruby-overhang:spaces` (§3.3 — R-290) : l'annotation ne
+/// déborde que sur le whitespace adjacent — ici une
+/// espace de part et d'autre (`a … y`). L'annotation
+/// « AAAAAAAA » (20 px) centrée déborderait de 10 px ;
+/// `spaces` la borne à l'espace (5 px) — entre `none`
+/// (plaqué base) et `auto` (étendue ligne).
+#[test]
+fn ruby_overhang_spaces_borne_aux_espaces() {
+    let rt_x = |css: &str| -> (f32, f32) {
+        let (_d, bx) = laid(
+            "<!doctype html><p>a <ruby>B<rt>AAAAAAAA</rt></ruby> y</p>",
+            css,
+        );
+        let line = &first_box_with_lines(&bx).lines[0];
+        let rt = line
+            .fragments
+            .iter()
+            .find(|f| f.style.get("display") == Some("ruby-text"))
+            .expect("frag rt");
+        let base = line
+            .fragments
+            .iter()
+            .find(|f| f.style.get("display") == Some("ruby"))
+            .expect("frag base");
+        (rt.rect.x, base.rect.x)
+    };
+    let css =
+        |oh: &str| format!("p{{font-size:10px;width:400px;margin:0}}rt{{ruby-overhang:{oh}}}");
+    let (x_none, seg_l) = rt_x(&css("none"));
+    let (x_spaces, seg_l2) = rt_x(&css("spaces"));
+    let (x_auto, _) = rt_x(&css("auto"));
+    assert!(
+        (x_none - seg_l).abs() < 0.01 && (seg_l2 - seg_l).abs() < 0.01,
+        "none → plaque base (x={x_none} vs {seg_l})"
+    );
+    assert!(
+        x_spaces < seg_l - 0.5,
+        "spaces → déborde sur l'espace (x={x_spaces} vs base {seg_l})"
+    );
+    assert!(
+        x_spaces > x_auto + 0.01,
+        "spaces → borné avant les lettres (x={x_spaces} vs auto {x_auto})"
+    );
 }

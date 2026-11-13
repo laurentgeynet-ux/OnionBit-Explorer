@@ -363,6 +363,7 @@ fn subtle_digest(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
                         key: Vec::new(),
                     });
                     e.crypto.pending.push((h, pid, PendingKind::Bytes));
+                    e.sched_tick("req.crypto");
                 }
             }
         }
@@ -747,6 +748,7 @@ fn subtle_import_key(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Valu
                             algo,
                         },
                     ));
+                    e.sched_tick("req.crypto");
                 }
             }
         }
@@ -808,6 +810,10 @@ fn subtle_sign(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
                 key: key_bytes,
             });
             e.crypto.pending.push((h, pid, PendingKind::Bytes));
+            // N1.5 — rail crypto dans le tally : une réponse
+            // jamais livrée = promesse pendue (le programme BG
+            // signe son attestation juste avant `V`).
+            e.sched_tick("req.crypto");
         }
     }
     Ok(Value::Obj(pid))
@@ -870,6 +876,7 @@ fn subtle_verify(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
                 key: key_bytes,
             });
             e.crypto.pending.push((h, pid, PendingKind::Bool));
+            e.sched_tick("req.crypto");
         }
     }
     Ok(Value::Obj(pid))
@@ -924,6 +931,7 @@ impl Engine {
                 return Ok(());
             };
             let (_, pid, kind) = self.crypto.pending.remove(pos);
+            self.sched_tick("dlv.crypto");
             match (kind, resp.result) {
                 (PendingKind::Bytes, Ok(bytes)) => {
                     let ab = crate::typed_array::new_array_buffer(self, bytes);

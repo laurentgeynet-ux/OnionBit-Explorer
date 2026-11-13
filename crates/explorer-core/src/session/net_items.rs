@@ -871,6 +871,13 @@ pub(crate) struct SubJob {
     /// `@font-face` (le DOM n'est pas accessible hors
     /// session).
     pub(crate) doc_sheets: Vec<String>,
+    /// `<style>` inline dont les `@import` ont été expansés
+    /// (étape 218) : texte d'origine → texte expansé. La
+    /// cascade relit les `<style>` depuis le DOM
+    /// (`collect_style_sheets`) — la substitution par
+    /// contenu a lieu dans `styles_payload` (robuste aux
+    /// `<style>` insérés par JS entre vague et commit).
+    pub(crate) expanded_inline: HashMap<String, String>,
     /// Moteur du document — les `async` classiques sont
     /// évalués en ligne à réception pendant la vague.
     pub(crate) eng: Option<Box<dyn JsEngine>>,
@@ -1277,7 +1284,9 @@ impl SubJob {
         tracing::info!(tab, ms = ms_u64(t_phase), "sub: modules prefetchés");
     }
 
-    /// Expansion des `@import` des feuilles liées (étape 96) :
+    /// Expansion des `@import` des feuilles liées (étape 96)
+    /// **et des `<style>` inline** (étape 218 — journal «
+    /// @import non résolu ») :
     /// chaque feuille reçue est re-parsée, ses imports dont
     /// la media matche l'env viewport sont fetchés
     /// récursivement et **préfixés** au slot — le contenu
@@ -1316,6 +1325,29 @@ impl SubJob {
             let prefix = std::mem::take(&mut ctx.out);
             self.css_slots[i] = Some(prefix + &text);
         }
+        // `<style>` inline : même expansion — la base est le
+        // document (`doc_base`). Journal « @import non
+        // résolu » : un `@import` en feuille inline n'était
+        // jamais fetché (weather.gov), la règle restait
+        // `unapplied` et son contenu manquait à la cascade.
+        for i in 0..self.doc_sheets.len() {
+            if ctx.left == 0 {
+                break;
+            }
+            let text = std::mem::take(&mut self.doc_sheets[i]);
+            let base = self.doc_base.clone();
+            for imp in parse_stylesheet(&text).imports {
+                self.expand_import(&imp, &base, 1, &mut ctx).await;
+            }
+            let prefix = std::mem::take(&mut ctx.out);
+            if prefix.is_empty() {
+                self.doc_sheets[i] = text;
+            } else {
+                let expanded = prefix + &text;
+                self.expanded_inline.insert(text, expanded.clone());
+                self.doc_sheets[i] = expanded;
+            }
+        }
     }
 
     /// Fetch + expansion récursive d'un `@import` — l'async
@@ -1333,22 +1365,32 @@ impl SubJob {
         ctx: &'a mut ImportCtx,
     ) -> Pin<Box<dyn Future<Output = ()> + Send + 'a>> {
         Box::pin(async move {
-            if depth > MAX_IMPORT_DEPTH
-                || ctx.left == 0
-                || !media_attr_matches(&ctx.env, &imp.media)
-            {
+            // Funnel census (R-207 suite) : `css.at.unapplied.
+            // import` compte les statements `@import` vus par la
+            // cascade — y compris ceux **expansés** (la règle
+            // littérale survit dans le texte). `css.import.*`
+            // donne le verdict réel côté fetch : `ok` / `skip.*`.
+            if depth > MAX_IMPORT_DEPTH || ctx.left == 0 {
+                explorer_common::census::bump("css.import.skip.budget");
+                return;
+            }
+            if !media_attr_matches(&ctx.env, &imp.media) {
+                explorer_common::census::bump("css.import.skip.media");
                 return;
             }
             let Ok(url) = Url::resolve(base, &imp.url)
                 .map(|u| explorer_net::csp::csp_upgrade(&self.csp, &u).unwrap_or(u))
             else {
+                explorer_common::census::bump("css.import.skip.url");
                 return;
             };
             if !matches!(url.scheme(), "http" | "https") || !ctx.seen.insert(url.to_string()) {
+                explorer_common::census::bump("css.import.skip.url");
                 return;
             }
             // CSP `style-src` (CAP-145).
             if !explorer_net::csp::csp_allows(&self.csp, &self.url, FetchDest::Style, &url) {
+                explorer_common::census::bump("css.import.skip.policy");
                 return;
             }
             ctx.left -= 1;
@@ -1363,14 +1405,17 @@ impl SubJob {
                 ))
                 .await
             else {
+                explorer_common::census::bump("css.import.skip.net");
                 return;
             };
             if !(200..300).contains(&resp.status) {
+                explorer_common::census::bump("css.import.skip.net");
                 return;
             }
             // En-têtes de sécurité de réponse (étape 134) —
             // même règle que la vague (dest `style`).
             if !subresp_security_allows(&self.url, &url, FetchDest::Style, &resp) {
+                explorer_common::census::bump("css.import.skip.policy");
                 return;
             }
             let text = decode_stylesheet(&resp.body, &resp.headers);
@@ -1379,6 +1424,7 @@ impl SubJob {
             }
             ctx.out.push_str(&text);
             ctx.out.push('\n');
+            explorer_common::census::bump("css.import.ok");
         })
     }
 

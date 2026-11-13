@@ -313,6 +313,7 @@ fn test_session_policy(
         event_tail_budget: std::time::Duration::from_secs(15),
         rss_shed_mb: 0,
         shed_retry_after_s: 5,
+        smooth_scroll_ms: 0,
     })
 }
 
@@ -801,6 +802,7 @@ async fn download_url_bound_fails_mid_stream() {
         event_tail_budget: std::time::Duration::from_secs(15),
         rss_shed_mb: 0,
         shed_retry_after_s: 5,
+        smooth_scroll_ms: 0,
     });
     let dir = std::env::temp_dir().join("explorer-dl-174-bound");
     let _ = std::fs::remove_dir_all(&dir);
@@ -2993,6 +2995,41 @@ fn solid_png(w: u32, h: u32, px: [u8; 4]) -> Vec<u8> {
         .write_image(&px.repeat((w * h) as usize), w, h, ExtendedColorType::Rgba8)
         .expect("encode png");
     buf
+}
+
+/// Étape 218 — `@import` en feuille inline (`<style>`) :
+/// même expansion récursive que les feuilles liées — gap
+/// nommé par le Pareto r4 (weather.gov) : la règle restait
+/// `unapplied`, le corps de la feuille importée jamais
+/// fetché. Verrou : la feuille importée part en fetch et
+/// ses règles s'appliquent (fond rouge peint).
+#[tokio::test]
+async fn inline_style_import_expands_and_applies() {
+    let (mut s, t) = test_session();
+    t.route(
+        "/m",
+        200,
+        "<html><body><style>@import url(/th.css)</style>\
+         <div id=\"x\"></div></body></html>",
+    );
+    t.route(
+        "/th.css",
+        200,
+        "body{margin:0}#x{background-color:#ff0000;width:2px;height:2px}",
+    );
+    let id = s.open_tab();
+    s.navigate(id, "http://h.test/m").await.unwrap();
+    assert!(
+        t.paths().iter().any(|p| p == "/th.css"),
+        "la feuille inline @import doit être fetchée — {:?}",
+        t.paths()
+    );
+    let (w, _h, px) = s.frame_pixels(id).unwrap();
+    assert_eq!(
+        px_at(px, w, 1, 1),
+        [255, 0, 0, 255],
+        "règle de la feuille importée inline appliquée"
+    );
 }
 
 /// P4.F (consommation NAV de R-203) — `background-image`
@@ -7420,6 +7457,52 @@ async fn shared_pump_advances_scriptless_animations() {
     );
 }
 
+/// R-259 — `scroll-behavior:smooth` : `scroll_to_y` arme
+/// une lecture interpolée (la position ne saute pas), le
+/// tick `advance_animations` l'avance jusqu'à la cible.
+/// `scroll-behavior` absent → saut instantané (garde).
+#[tokio::test]
+async fn smooth_scroll_interpolates_instead_of_jumping() {
+    // `smooth_scroll_ms` très long (60 s) : la lecture est
+    // armée mais la progression reste ≈ 0 — déterministe,
+    // le saut instantané donnerait la cible complète.
+    let (mut sess, tr) = test_session_with(SessionConfig {
+        smooth_scroll_ms: 60_000,
+        ..SessionConfig::default()
+    });
+    let page = "<!doctype html><html><head><style>\
+        html { scroll-behavior: smooth }\
+        .sp{height:2000px}</style></head>\
+        <body><div class=\"sp\">haut</div><p id=\"t\">cible</p></body></html>";
+    let instant = "<!doctype html><html><body><div style=\"height:2000px\">haut</div><p id=\"t\">cible</p></body></html>";
+    tr.route("/s", 200, page);
+    tr.route("/i", 200, instant);
+    let tab = sess.open_tab();
+    sess.navigate(tab, "http://h.test/s").await.unwrap();
+    // Fragment same-document : sous `smooth`, la lecture est
+    // armée — la position n'est PAS encore arrivée.
+    sess.navigate(tab, "http://h.test/s#t").await.unwrap();
+    let mid = scroll_pos(&mut sess, tab).await;
+    assert!(mid < 500.0, "smooth : interpolée, pas saut ({mid})");
+    // `scroll-behavior` absent → saut instantané (garde).
+    let tab2 = sess.open_tab();
+    sess.navigate(tab2, "http://h.test/i").await.unwrap();
+    sess.navigate(tab2, "http://h.test/i#t").await.unwrap();
+    let pos = scroll_pos(&mut sess, tab2).await;
+    assert!(pos > 1000.0, "auto = saut instantané (pos={pos})");
+}
+
+async fn scroll_pos(s: &mut Session, tab: explorer_core::TabId) -> f32 {
+    match s
+        .handle_input(tab, InputEvent::Scroll { dy: 0.0 })
+        .await
+        .unwrap()
+    {
+        InputOutcome::Scrolled { scroll_y } => scroll_y,
+        o => panic!("inattendu : {o:?}"),
+    }
+}
+
 /// Étape 55e — garde : un élément sans `animation` (ou
 /// `animation-name: none`) ne déclenche aucun tick de
 /// relayout — `tick_animations` reste inerte.
@@ -7441,6 +7524,34 @@ async fn keyframes_absent_means_no_animation_ticks() {
         !sess.tick_animations(tab).unwrap(),
         "aucun relayout sans animation en lecture (55e)"
     );
+}
+
+/// R-255 — `animation-play-state: paused` est consommé :
+/// la lecture est gelée — `tick_animations` n'arme aucun
+/// relayout et deux frames à 150 ms d'écart sont identiques.
+#[tokio::test]
+async fn keyframes_paused_freezes_playback() {
+    let (mut sess, tr) = test_session();
+    tr.route(
+        "/p",
+        200,
+        "<html><head><style>\
+         @keyframes k { from { background-color: #ff0000 }\
+         to { background-color: #0000ff } }\
+         #b { width:2px; height:2px; animation: k 500ms linear;\
+         animation-play-state: paused }\
+         </style></head><body><div id=\"b\"></div></body></html>",
+    );
+    let tab = sess.open_tab();
+    sess.navigate(tab, "http://h.test/p").await.unwrap();
+    let start = sess.frame_png(tab).unwrap();
+    tokio::time::sleep(std::time::Duration::from_millis(150)).await;
+    assert!(
+        !sess.tick_animations(tab).unwrap(),
+        "une animation paused ne doit pas armer de relayout (R-255)"
+    );
+    let later = sess.frame_png(tab).unwrap();
+    assert_eq!(start, later, "lecture gelée — frame identique (R-255)");
 }
 
 /// Moteur de test : `run_pending` signale son entrée puis
@@ -7804,6 +7915,7 @@ async fn redirect_commits_final_url_and_fragment() {
             event_tail_budget: std::time::Duration::from_secs(15),
             rss_shed_mb: 0,
             shed_retry_after_s: 5,
+            smooth_scroll_ms: 0,
         },
     );
 
@@ -14522,6 +14634,42 @@ async fn journal_attach_shadow_rejoue_en_place() {
     assert!(
         dump.contains("<b>ombre</b>"),
         "enfant de l'ombre absent : {dump}"
+    );
+}
+
+/// Motif Polymer `YouTube` (revol masthead `h=0`) : un
+/// custom element **déjà présent** au parse est upgradé par
+/// `customElements.define`, son `connectedCallback` pose
+/// `attachShadow` + un `<svg>` dans l'ombre — la chaîne doit
+/// livrer la racine au flat tree (le `<svg>` shadow apparaît
+/// dans le dump et produit une boîte dimensionnée).
+#[tokio::test]
+async fn custom_element_upgrade_shadow_svg_boxifie() {
+    let (mut s, t) = test_session();
+    t.route(
+        "/m",
+        200,
+        "<html><body><x-ic id=\"h\"></x-ic>\
+         <script>class C extends HTMLElement{\
+         connectedCallback(){var r=this.attachShadow({mode:'open'});\
+         r.innerHTML='<svg viewBox=\"0 0 24 24\" width=\"24\" height=\"24\"></svg>'}}\
+         customElements.define('x-ic',C)</script>\
+         </body></html>",
+    );
+    s.set_js_factory(explorer_js::JscoreEngine::factory());
+    let a = s.open_tab();
+    s.navigate(a, "http://h.test/m").await.unwrap();
+    std::thread::sleep(std::time::Duration::from_millis(60));
+    s.pump_timers(a);
+    let dump = s.dom_dump(a).unwrap_or_default();
+    assert!(
+        dump.contains("<svg"),
+        "svg de l'ombre absent du dump : {dump}"
+    );
+    let layout = s.layout_dump(a).unwrap_or_default();
+    assert!(
+        layout.contains("svg"),
+        "svg de l'ombre non boxifié : {layout}"
     );
 }
 

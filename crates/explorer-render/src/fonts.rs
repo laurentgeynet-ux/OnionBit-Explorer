@@ -583,6 +583,7 @@ mod tests {
             caps: 0,
             kern_off: false,
             stretch: 100,
+            feature_settings: Vec::new(),
         }
     }
 

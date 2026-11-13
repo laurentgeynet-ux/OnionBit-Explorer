@@ -159,7 +159,7 @@ impl Engine {
                 // dépilée — un callee Member/Index garde le
                 // bras `Expr::Call` complet (référence
                 // receveur/`this`).
-                Expr::Call(f, args) if matches!(&**f, Expr::Call(..)) => {
+                Expr::Call(f, args, _) if matches!(&**f, Expr::Call(..)) => {
                     spine.push(Spine::Call(args));
                     f
                 }
@@ -219,7 +219,8 @@ impl Engine {
             Expr::Null => Ok(Value::Null),
             Expr::This => Ok(this),
             Expr::Ident(name) => self
-                .env_get(env, name)
+                .env_get_resolved(env, name, e)
+                .or_else(|| self.env_get(env, name))
                 .ok_or_else(|| self.ref_error(format!("{name} is not defined"))),
             Expr::Array(elems) => {
                 let mut v = Vec::with_capacity(elems.len());
@@ -556,7 +557,7 @@ impl Engine {
                 let k = self.prop_key(k)?;
                 self.get_prop_value(b, &k)
             }
-            Expr::Call(callee, arg_exprs) => {
+            Expr::Call(callee, arg_exprs, call_pos) => {
                 enum Callee {
                     /// `expr(…)` — f pre-evaluated, global receiver.
                     Bare(Value),
@@ -608,6 +609,13 @@ impl Engine {
                     _ => Callee::Bare(self.eval_expr(env, this.clone(), callee)?),
                 };
                 let args = self.eval_args(env, this.clone(), arg_exprs)?;
+                // N1.1 — site d'appel de CE `Call` : posé après
+                // l'évaluation des args (un appel imbriqué dans
+                // les args a déjà consommé sa propre position ;
+                // le dernier écrivain avant le dispatch est le
+                // bon). Consommé au push de frame (appel JS) ou
+                // écrasé au prochain bras Call/New (callee natif).
+                self.pending_call_pos = *call_pos;
                 match callee {
                     // Receiver `undefined` — le callee sloppy le
                     // coercera vers l'objet global, le strict le
@@ -675,7 +683,38 @@ impl Engine {
                             // classe fautive dans du code minifié.
                             let recv_desc = match &recv {
                                 Value::Obj(rid) => match self.heap.obj(*rid).map(|o| &o.kind) {
-                                    Some(ObjKind::Host(h)) => h.class_name().to_string(),
+                                    Some(ObjKind::Host(h)) => {
+                                        let base = h.class_name().to_string();
+                                        let mut hints = Vec::new();
+                                        for k in ["is", "localName", "id"] {
+                                            if let Some(s) = self
+                                                .get_prop(*rid, k)
+                                                .as_ref()
+                                                .and_then(Self::heap_string_of)
+                                                .filter(|v| !v.is_empty())
+                                            {
+                                                hints.push(format!("{k}:{s}"));
+                                            }
+                                        }
+                                        if let Some(host) = self.get_prop(*rid, "hostElement") {
+                                            for k in ["localName", "id"] {
+                                                if let Some(s) = self
+                                                    .get_prop_value(host.clone(), k)
+                                                    .ok()
+                                                    .as_ref()
+                                                    .and_then(Self::heap_string_of)
+                                                    .filter(|v| !v.is_empty())
+                                                {
+                                                    hints.push(format!("host.{k}:{s}"));
+                                                }
+                                            }
+                                        }
+                                        if hints.is_empty() {
+                                            base
+                                        } else {
+                                            format!("{}«{}»", base, hints.join(","))
+                                        }
+                                    }
                                     // Un callable receveur : le nom du
                                     // FnLit identifie la fonction dont
                                     // l'accesseur manque (`kW.vG`).
@@ -689,6 +728,15 @@ impl Engine {
                                         Fun::Native { name, .. } | Fun::BoundNative { name, .. },
                                     )) => {
                                         format!("native {name}")
+                                    }
+                                    Some(ObjKind::Proxy { target, .. }) => {
+                                        // Le nom « (on zc) » venait du
+                                        // constructeur de la cible —
+                                        // nommer le proxy lui-même puis
+                                        // décrire la cible (kevlar :
+                                        // `Pgm(controller)`).
+                                        let d = self.describe(target.clone());
+                                        format!("Proxy→{d}")
                                     }
                                     Some(_) if self.is_callable(recv.clone()) => self
                                         .get_prop(*rid, "name")
@@ -704,6 +752,42 @@ impl Engine {
                                             .and_then(Self::heap_string_of)
                                             .filter(|n| !n.is_empty())
                                             .unwrap_or_else(|| "Object".to_string());
+                                        // JS-C481/cran 44 : où siège le
+                                        // membre manquant — own (copie
+                                        // partielle) vs proto (chaîne
+                                        // fabriquée) vs absent du tout.
+                                        let src = {
+                                            let keys0 = self.own_keys(*rid);
+                                            if keys0.iter().any(|k| k.as_str() == name.as_ref()) {
+                                                "own"
+                                            } else {
+                                                let mut cur =
+                                                    self.heap.obj(*rid).map(|o| o.proto.clone());
+                                                let mut hit = false;
+                                                for _ in 0..8 {
+                                                    match cur {
+                                                        Some(Value::Obj(pid)) => {
+                                                            if self.own_keys(pid).iter().any(|k| {
+                                                                k.as_str() == name.as_ref()
+                                                            }) {
+                                                                hit = true;
+                                                                break;
+                                                            }
+                                                            cur = self
+                                                                .heap
+                                                                .obj(pid)
+                                                                .map(|o| o.proto.clone());
+                                                        }
+                                                        _ => break,
+                                                    }
+                                                }
+                                                if hit {
+                                                    "proto"
+                                                } else {
+                                                    "absent"
+                                                }
+                                            }
+                                        };
                                         // « on Object » ne nomme rien —
                                         // enrichir par `@@toStringTag`
                                         // puis les propres clés (objets
@@ -746,7 +830,113 @@ impl Engine {
                                                 }
                                             }
                                         } else {
-                                            desc
+                                            // Nom de classe minifié
+                                            // (`zc`…) : enrichir par les
+                                            // indices d'identité DOM/
+                                            // Polymer — `is`, `localName`,
+                                            // `hostElement.localName`,
+                                            // `id` — pour nommer le vrai
+                                            // receveur parmi les
+                                            // homonymes (kevlar JS-C479).
+                                            let mut hints = Vec::new();
+                                            for k in ["is", "localName"] {
+                                                if let Some(s) = self
+                                                    .get_prop(*rid, k)
+                                                    .as_ref()
+                                                    .and_then(Self::heap_string_of)
+                                                    .filter(|v| !v.is_empty())
+                                                {
+                                                    hints.push(format!("{k}:{s}"));
+                                                }
+                                            }
+                                            if let Some(host) = self.get_prop(*rid, "hostElement") {
+                                                for k in ["localName", "id"] {
+                                                    if let Some(s) = self
+                                                        .get_prop_value(host.clone(), k)
+                                                        .ok()
+                                                        .as_ref()
+                                                        .and_then(Self::heap_string_of)
+                                                        .filter(|v| !v.is_empty())
+                                                    {
+                                                        hints.push(format!("host.{k}:{s}"));
+                                                    }
+                                                }
+                                            }
+                                            if let Some(s) = self
+                                                .get_prop(*rid, "id")
+                                                .as_ref()
+                                                .and_then(Self::heap_string_of)
+                                                .filter(|v| !v.is_empty())
+                                            {
+                                                hints.push(format!("id:{s}"));
+                                            }
+                                            // Le receveur est-il un
+                                            // proxy `jYd`/`Pgm` ? — son
+                                            // get-trap lit la méthode
+                                            // depuis le proto de classe
+                                            // en fallback (cran 54).
+                                            if self.heap.obj(*rid).is_some_and(|o| {
+                                                matches!(o.kind, ObjKind::Proxy { .. })
+                                            }) {
+                                                hints.push("pxy".to_string());
+                                            }
+                                            // JS-C483 — le receveur
+                                            // zc porte-t-il la machinerie
+                                            // PolySi (own, survivant au
+                                            // re-proto) ? `psp`/`psi`/
+                                            // `urpo` (urp own ?).
+                                            for (k, tag) in [
+                                                ("polySiParams", "psp"),
+                                                ("polySiInfo", "psi"),
+                                                ("polySiContext", "psc"),
+                                                ("updateReduxProperties", "urpo"),
+                                                ("attached", "atto"),
+                                            ] {
+                                                if self.find_prop(*rid, k).is_some() {
+                                                    hints.push(tag.to_string());
+                                                }
+                                            }
+                                            // Rail d'invocation : les 3
+                                            // frames JS au sommet nomment
+                                            // qui appelle le hook sur le
+                                            // receveur swappé (cran 50).
+                                            let frames: Vec<String> = self
+                                                .call_stack
+                                                .iter()
+                                                .rev()
+                                                .take(3)
+                                                .map(Self::fn_label_of)
+                                                .collect();
+                                            if !frames.is_empty() {
+                                                hints.push(format!("stk:{}", frames.join("<")));
+                                            }
+                                            if !hints.is_empty() {
+                                                format!(
+                                                    "{}«{}»«{name}@{src}»",
+                                                    desc,
+                                                    hints.join(",")
+                                                )
+                                            } else if desc.chars().count() <= 4 {
+                                                // Nom minifié muet (classe
+                                                // `zc`, proxy `Pgm`…) :
+                                                // échantillon des propres
+                                                // clés pour nommer
+                                                // l'objet (kevlar JS-C480).
+                                                let keys = self.own_keys(*rid);
+                                                let shown: Vec<&str> = keys
+                                                    .iter()
+                                                    .take(8)
+                                                    .map(String::as_str)
+                                                    .collect();
+                                                let base = if shown.is_empty() {
+                                                    desc.clone()
+                                                } else {
+                                                    format!("{desc}{{{}}}", shown.join(","))
+                                                };
+                                                format!("{base}«{name}@{src}»")
+                                            } else {
+                                                format!("{desc}«{name}@{src}»")
+                                            }
                                         }
                                     }
                                     None => "?".to_string(),
@@ -773,13 +963,16 @@ impl Engine {
                     }
                 }
             }
-            Expr::New(callee, arg_exprs) => {
+            Expr::New(callee, arg_exprs, call_pos) => {
                 // JS-C460 — même drapeau « call-only » que le
                 // bras Call : masquage au dispatch constructeur
                 // (`f`+args racinés pendant le chemin `new`).
                 let mask_slot = self.call_only_slot.take();
                 let f = self.eval_expr(env, this.clone(), callee)?;
                 let args = self.eval_args(env, this, arg_exprs)?;
+                // N1.1 — site du `new` posé après l'éval des args
+                // (même convention que le bras `Expr::Call`).
+                self.pending_call_pos = *call_pos;
                 // `new` sur non-ctor : le callee est nommé —
                 // les sondes de sites réels identifient l'API
                 // hôte manquante du premier coup.
@@ -935,7 +1128,8 @@ impl Engine {
     pub(crate) fn read_lvalue(&mut self, env: &EnvRef, this: Value, e: &Expr) -> JsResult<Value> {
         match e {
             Expr::Ident(name) => self
-                .env_get(env, name)
+                .env_get_resolved(env, name, e)
+                .or_else(|| self.env_get(env, name))
                 .ok_or_else(|| self.ref_error(format!("{name} is not defined"))),
             Expr::Member(base, name) => {
                 let b = self.eval_expr(env, this, base)?;

@@ -73,9 +73,90 @@ const DEFAULT_EVAL_SRC_CAP: usize = 8 * 1024 * 1024;
 /// déclenchent une passe à la frontière de job suivante.
 const DEFAULT_GC_THRESHOLD: usize = 131_072;
 /// Frames rendues dans `error.stack`/`Uncaught` (JS-C47) —
-/// même borne que V8 (`Error.stackTraceLimit` = 10) : les
-/// frames utiles au diagnostic sont en tête de pile.
+/// défaut V8 (`Error.stackTraceLimit` = 10) quand la
+/// propriété du ctor est absente ou non lisible : les
+/// frames utiles au diagnostic sont en tête de pile. La
+/// valeur réellement appliquée est [`Self::stack_trace_limit`]
+/// — la propriété est **live** (assignable par la page).
 const STACK_TRACE_LIMIT: usize = 10;
+
+/// N1.6 — sonde `dyn.err` opt-in : `EXPLORER_DYN_PROBE` pose un
+/// extrait borné du corps fautif dans le log `dom_probe` (les
+/// scripts injectés sans `src` n'ont ni URL ni cache réseau —
+/// leur source est sinon perdue). Loquet module-level :
+/// `items_after_statements` interdit un `static` dans le corps.
+static DYN_PROBE: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+
+/// Sonde DI N1.5 — nomme les clés `deferredKey`/`provide`
+/// lues par le rail kevlar (`resolve(VhV)`/`addProvider`)
+/// sous `EXPLORER_CTX_PROBE`.
+static DI_PROBE: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+
+/// N1.5 — identité de la VM `BotGuard` par `ObjId` : le code de
+/// l'interpréteur est eval'd (`lit.src = None`, invisible à
+/// `bg.call`). `trayride` écrit sur le global → capture de son
+/// `ObjId` ; `.a` posé dessus → capture de la fonction d'entrée
+/// `K5`. `call_value_inner` compare ensuite le callee à
+/// `BG_ENTRY` — `bg.a` atteste que `_.aq` a bien lancé la VM.
+static BG_TRAYRIDE: std::sync::atomic::AtomicU32 =
+    std::sync::atomic::AtomicU32::new(u32::MAX);
+static BG_ENTRY: std::sync::atomic::AtomicU32 =
+    std::sync::atomic::AtomicU32::new(u32::MAX);
+/// N1.5 — `ObjId` du handler de requêtes `sPQ` (yield du
+/// programme `Q`, stocké `this.sPQ`) — `bg.spq` logue les
+/// appels page→VM : la page a-t-elle invoqué, la VM a-t-elle
+/// répondu.
+static BG_SPQ: std::sync::atomic::AtomicU32 =
+    std::sync::atomic::AtomicU32::new(u32::MAX);
+/// N1.5 — chaîne readiness `BotGuard` : `ObjId` des callables et
+/// objets-clés capturés à l'écriture (`wpc` thunk `NdQ`, méthodes
+/// `wPd`/`jOM`/`hDo`/`a4`, interface `{f,c,m,mws}` — indexée sur
+/// l'écriture de `mws`, dernier membre du littéral).
+/// `bg.io` nomme le maillon invoqué entre `eO` et `sPQ`.
+static BG_IO: std::sync::Mutex<Vec<(u32, &'static str)>> =
+    std::sync::Mutex::new(Vec::new());
+static BG_IO_ARMED: std::sync::atomic::AtomicBool =
+    std::sync::atomic::AtomicBool::new(false);
+/// N1.5 — `ObjId` du callback de complétion `V` passé en arg 1
+/// de `Q` (`trayride.a`) : il résout `hix` avec
+/// `{bWm,nXe,auT,nXm}`. `bg.v` atteste que la VM a achevé son
+/// init — son absence = halt interne avant complétion.
+static BG_V: std::sync::atomic::AtomicU32 =
+    std::sync::atomic::AtomicU32::new(u32::MAX);
+/// N1.5 — `ObjId` du logger `w` passé en arg 4 de `Q` : la VM y
+/// pousse des codes d'événements — `bg.wcb` révèle où le
+/// programme s'arrête dans sa machine à états.
+static BG_WCB: std::sync::atomic::AtomicU32 =
+    std::sync::atomic::AtomicU32::new(u32::MAX);
+/// N1.5 — enregistre un callable de la chaîne readiness dans
+/// `BG_IO` (borné à 48 — `wpc` est aussi un champ `this.wpc`
+/// des instances `vvI`, plusieurs écritures attendues).
+fn bg_io_register(id: u32, lbl: &'static str) {
+    if let Ok(mut g) = BG_IO.lock() {
+        if g.len() < 48 {
+            g.push((id, lbl));
+        }
+    }
+    BG_IO_ARMED.store(true, std::sync::atomic::Ordering::Relaxed);
+}
+/// N1.5 — label `BG_IO` d'un callee `ObjId`, s'il est capturé.
+fn bg_io_label(id: u32) -> Option<&'static str> {
+    BG_IO.lock()
+        .ok()?
+        .iter()
+        .find(|(i, _)| *i == id)
+        .map(|(_, l)| *l)
+}
+/// N1.5 — dernier native invoqué depuis une frame `VM BotGuard` :
+/// relu au `bg.a` suivant (session d'après) — le dernier op
+/// hôte avant l'arrêt est exactement l'op attendu par la VM.
+static BG_LAST_HOST: std::sync::Mutex<String> = std::sync::Mutex::new(String::new());
+/// N1.5 — anneau des 24 derniers natives VM : le reliquat au
+/// `bg.a` suivant = la queue d'ops avant l'arrêt (les purs
+/// natives de donnée — `charCodeAt`/`fromCharCode`/`push`… —
+/// dominent sinon le log borné).
+static BG_LAST_RING: std::sync::Mutex<std::collections::VecDeque<String>> =
+    std::sync::Mutex::new(std::collections::VecDeque::new());
 
 /// Hidden env bindings installed in class member scopes — the names
 /// use private-use code points so no source identifier can collide
@@ -294,6 +375,21 @@ pub struct Engine {
     /// rendue dans `error.stack` et `Error::Uncaught`. Les
     /// natives n'y figurent pas (déviation documentée).
     call_stack: Vec<Rc<crate::ast::FnLit>>,
+    /// Sites d'invocation parallèles à `call_stack` (N1.1) —
+    /// `call_sites[i]` = position `(ligne, colonne)` du `Call`/
+    /// `New` qui a invoqué la frame `i`, `(0,0)` quand l'appel
+    /// vient d'un chemin non-AST (microtask, callback natif).
+    /// Rendue comme position d'exécution de la frame **parente**
+    /// (forme V8 : chaque frame nomme le point où elle tourne).
+    call_sites: Vec<(usize, usize)>,
+    /// Site du `Call`/`New` en cours de dispatch (N1.1) — posé
+    /// par les bras `Expr::Call`/`Expr::New` après l'éval des
+    /// args, consommé au push de frame (callee script) ou lu par
+    /// `stack_text` comme point d'exécution courant (callee
+    /// natif — `new Error()` y laisse sa position). Peut rester
+    /// sur un site consommé par un natif : approximation
+    /// documentée, toujours une position réelle du bundle.
+    pending_call_pos: (usize, usize),
     /// Hook d'observabilité des sources `eval`/`Function`/
     /// timer-string (JS-C50) — le code obfusqué des pages réelles
     /// vit dans ces sources, pas dans le `<script>` parent ; le
@@ -390,6 +486,11 @@ pub struct Engine {
     /// saturant un cœur meurt en ms, pas au timeout canal 30 s —
     /// allrecipes : API muette 3-6 min, 6 pompes × 30 s).
     eval_deadline: Option<Instant>,
+    /// Profondeur du rail « report exception » (listener qui
+    /// jette → `error` sur window → son listener qui jette →
+    /// …). Borné : au-delà le rapport est élidé, le dispatch
+    /// continue quand même (spec).
+    pub(crate) report_depth: std::cell::Cell<u8>,
     /// Budget wall-clock d'un batch, ms — `EXPLORER_JS_EVAL_
     /// TIMEOUT_MS` lu une fois (défaut : voir `DEFAULT_EVAL_MS`).
     pub(crate) eval_timeout_ms: u64,
@@ -543,7 +644,11 @@ pub struct Engine {
     /// Promesses rejetées sans `then` (JS-C154) — candidates
     /// `unhandledrejection`, revues en fin de checkpoint
     /// (un `.then` tardif pose `handled` et les retire).
-    pub(crate) pending_unhandled: Vec<(Value, Value)>,
+    /// `(promesse, raison, pile optionnelle)` — la pile est
+    /// capturée au `settle` quand la sonde `dom_probe` est
+    /// armée (cran 75 : nommer le site des rejets
+    /// `unhandledrejection: undefined`).
+    pub(crate) pending_unhandled: Vec<(Value, Value, Option<std::rc::Rc<str>>)>,
     /// Descriptions des rejets non gérés — drainées par la
     /// session (`report_unhandled_rejection` → ring console).
     pub(crate) unhandled_reports: Vec<String>,
@@ -699,6 +804,46 @@ pub struct Engine {
     /// Nom du script en cours d'éval — clé du registre
     /// `cjs_registry` et `module.id`/`filename` du sandbox.
     pub(crate) cjs_eval_name: Option<Rc<str>>,
+    /// JS-C490 — annotations du resolveur statique :
+    /// `ptr(Expr::Ident) → profondeur d'env` (niveaux à sauter
+    /// avant le `BindingMap::get`). Clés = adresses des nœuds
+    /// AST — stables tant que le `FnLit` gardien est vivant.
+    pub(crate) resolved_map: std::collections::HashMap<usize, u16>,
+    /// `FnLit` déjà résolus (`Rc::as_ptr`) — dédup par corps.
+    pub(crate) resolved_lits: std::collections::HashSet<usize>,
+    /// Gardiens : maintient les `Rc<FnLit>` résolus en vie pour
+    /// que les adresses AST indexées dans `resolved_map` restent
+    /// uniques (un lit libéré → adresses réutilisables).
+    pub(crate) resolved_guard: Vec<Rc<crate::ast::FnLit>>,
+    /// JS-C490b — cache `(ptr(env), profondeur) → env ancêtre` :
+    /// `Env.parent` est immuable post-création → l'ancêtre à
+    /// profondeur `d` est déterministe. La **clé épingle son
+    /// env** (le `EnvRef` gardé vivant empêche la réutilisation
+    /// de son adresse par un autre env → pas de collision).
+    /// Borné — purge complète. Clé **tuple** `(ptr, profondeur)` :
+    /// une clé composite aplatie `ptr+d<<20` peut collisionner
+    /// entre envs proches → ancêtre faux → liaison erronée
+    /// silencieuse (régression constatée vol 9773 `/results`).
+    pub(crate) resolved_envs: std::collections::HashMap<(usize, u16), (EnvRef, EnvRef)>,
+    /// JS-C492 — corps baissé (générateur/async) **partagé par
+    /// `lit`** : `lower_suspend_fn` alloue un `Rc<Vec<Stmt>>`
+    /// neuf à chaque appel ; sans cache, le `resolved_map`
+    /// rempli au 1er appel indexait des `ptr(Expr)` d'un corps
+    /// baissé éphémère — libéré avec son `GExec`, ses adresses
+    /// réutilisées par un corps baissé ultérieur → profondeur
+    /// fantôme → mauvaise porte lue (corruption async,
+    /// `Error: bb`/`yt-navigate-finish`). Un seul corps baissé
+    /// par `lit` → adresses stables + chaque appel résout.
+    /// La valeur épingle `lit` → `ptr(lit)` (clé) non réutilisé.
+    pub(crate) lowered_suspend_cache: std::collections::HashMap<usize, Rc<LoweredSuspend>>,
+    /// JS-C490c — kill-switch A/B : `EXPLORER_NO_RESOLVE=1`
+    /// désarme la résolution statique (A/B en vol sans rebuild).
+    pub(crate) resolve_off: bool,
+    /// JS-C490d — `EXPLORER_RESOLVE_VERIFY=1` : chaque hit du
+    /// fast-path est revérifié par la marche complète ; les
+    /// divergences sont loguées bornées (`res.bad`). Mode
+    /// diagnostic — ~2× le coût de résolution.
+    pub(crate) resolve_verify: bool,
     /// Cache des constructeurs d'interface par nom de classe
     /// (`HTMLInputElement`…) — JS-C82 : `el.constructor` typé +
     /// `.prototype` porteur des accesseurs IDL (surface
@@ -806,6 +951,19 @@ pub struct Engine {
     /// immédiatement — la page cesse de réessayer, le daemon
     /// survit à ~seuil au lieu d'aborter au double.
     pub(crate) rss_kill_latched: bool,
+}
+
+/// JS-C492 — corps baissé d'un générateur/async **partagé par
+/// `lit`** : `_lit` épingle le `FnLit` (son adresse = clé du
+/// cache ne peut pas être réutilisée) et `body` épingle les
+/// adresses `Expr` indexées par `resolved_map`.
+pub(crate) struct LoweredSuspend {
+    /// Gardien — maintient `lit` vivant (clé `Rc::as_ptr` stable).
+    _lit: Rc<crate::ast::FnLit>,
+    /// Paramètres baissés (défauts suspend déplacés dans le corps).
+    pub(crate) params: Vec<crate::ast::Param>,
+    /// Corps baissé partagé — `Rc` cloné dans chaque `GExec`.
+    pub(crate) body: Rc<Vec<crate::ast::Stmt>>,
 }
 
 /// Dernier match `RegExp` — `RegExp.$1…$9`/`input`/`lastMatch`/…
@@ -1088,6 +1246,8 @@ impl Engine {
             call_depth: 0,
             call_depth_limit: DEFAULT_CALL_DEPTH,
             call_stack: Vec::new(),
+            call_sites: Vec::new(),
+            pending_call_pos: (0, 0),
             eval_hook: None,
             expr_depth: 0,
             expr_dump_n: 4,
@@ -1103,6 +1263,7 @@ impl Engine {
             ops_left: DEFAULT_OP_LIMIT,
             op_limit: DEFAULT_OP_LIMIT,
             eval_deadline: None,
+            report_depth: std::cell::Cell::new(0),
             eval_timeout_boot_ms: std::env::var("EXPLORER_JS_EVAL_BOOT_TIMEOUT_MS")
                 .ok()
                 .and_then(|s| s.parse().ok())
@@ -1205,6 +1366,13 @@ impl Engine {
             port_msgs: std::collections::VecDeque::new(),
             cjs_registry: Vec::new(),
             cjs_eval_name: None,
+            resolved_map: std::collections::HashMap::new(),
+            resolved_lits: std::collections::HashSet::new(),
+            resolved_guard: Vec::new(),
+            resolved_envs: std::collections::HashMap::new(),
+            lowered_suspend_cache: std::collections::HashMap::new(),
+            resolve_off: std::env::var("EXPLORER_NO_RESOLVE").is_ok_and(|v| v == "1"),
+            resolve_verify: std::env::var("EXPLORER_RESOLVE_VERIFY").is_ok_and(|v| v == "1"),
             dom_ctors: std::collections::HashMap::new(),
             native_caller: Vec::new(),
             ctor_fresh: None,
@@ -1417,6 +1585,7 @@ impl Engine {
         swap(&mut self.current_module, &mut ctx.current_module);
         swap(&mut self.import_map, &mut ctx.import_map);
         swap(&mut self.hooks.page_url, &mut ctx.page_url);
+        swap(&mut self.hooks.cookie_jar, &mut ctx.cookie_jar);
         swap(&mut self.hooks.screen_obj, &mut ctx.screen_obj);
         swap(&mut self.hooks.navigate, &mut ctx.navigate);
         swap(&mut self.hooks.history_go, &mut ctx.history_go);
@@ -1983,7 +2152,36 @@ impl Engine {
             if let Err(th) = self.eval_named(text, &label) {
                 let msg = th.to_string();
                 let msg: String = msg.chars().take(240).collect();
-                tracing::info!(target: "dom_probe", site = "dyn.err", src = %label, error = %msg);
+                // N1.6 — le label `dyn:N` ne nomme rien : sous
+                // sonde opt-in `EXPLORER_DYN_PROBE`, extrait
+                // borné (400 c, sauts aplatis) + longueur du
+                // corps fautif — sinon la source d'un <script>
+                // injecté sans `src` est perdue.
+                if *DYN_PROBE.get_or_init(|| std::env::var_os("EXPLORER_DYN_PROBE").is_some()) {
+                    let head: String = text
+                        .chars()
+                        .take(400)
+                        .collect::<String>()
+                        .replace('\n', "\u{240a}")
+                        .replace('\r', "\u{240d}");
+                    // N1.3 — `kind`/`ty` distinguent un chunk
+                    // `src` fetché (file `mr`/`LgV`) d'un bloc
+                    // de données inline cloné (template CE) :
+                    // le premier gèle la file du chargeur, le
+                    // second est juste un faux-positif inerte.
+                    let (has_src, ty_attr) = {
+                        let d = dom.borrow();
+                        (
+                            d.attr(node, "src").is_some_and(|s| !s.trim().is_empty()),
+                            d.attr(node, "type").map(str::to_string),
+                        )
+                    };
+                    let kind = if has_src { "src" } else { "inline" };
+                    let ty_attr = ty_attr.unwrap_or_default();
+                    tracing::info!(target: "dom_probe", site = "dyn.err", src = %label, error = %msg, kind = kind, ty = %ty_attr, len = text.len(), head = %head);
+                } else {
+                    tracing::info!(target: "dom_probe", site = "dyn.err", src = %label, error = %msg);
+                }
             }
             self.hooks.current_script = prev;
             self.sched_tick("dlv.dynscript");
@@ -3002,6 +3200,27 @@ impl Engine {
             // un borrow traversant l'éval rend domgc non licite,
             // on le saute pour cette passe.
             if let Ok(mut c) = cache.try_borrow_mut() {
+                // Sonde §cran-33 : wrapper balayé au mark-sweep
+                // AVANT collect_garbage → son nœud n'est plus
+                // seedé et part en `free_nodes`/`dead_blocked`
+                // au même safepoint — nomme les cache-entry
+                // de tags CE qui tombent ici.
+                if tracing::enabled!(target: "dom_probe", tracing::Level::INFO) {
+                    let dead: Vec<(crate::dom::NodeId, String)> = c
+                        .iter()
+                        .filter(|(_, oid)| self.heap.obj(**oid).is_none())
+                        .filter_map(|(&n, _)| {
+                            let d = dom.borrow();
+                            let t = d.nodes.get(n as usize).map(|x| x.tag.clone())?;
+                            t.contains('-').then_some((n, t))
+                        })
+                        .collect();
+                    for (n, t) in dead {
+                        tracing::info!(target: "dom_probe", site = "gc.cache",
+                            "node={n} tag={t} epoch={:?}",
+                            dom.borrow().nodes.get(n as usize).map(|x| x.epoch));
+                    }
+                }
                 c.retain(|_, &mut oid| self.heap.obj(oid).is_some());
                 let mut seeds: std::collections::HashSet<crate::dom::NodeId> =
                     c.keys().copied().collect();
@@ -3254,7 +3473,7 @@ impl Engine {
         }
         // `unhandledrejection` en attente (JS-C154) — promesse
         // + raison racines jusqu'au tir du checkpoint.
-        for (p, r) in &self.pending_unhandled {
+        for (p, r, _) in &self.pending_unhandled {
             crate::heap::push_value(&mut ids, p);
             crate::heap::push_value(&mut ids, r);
         }
@@ -3501,6 +3720,20 @@ impl Engine {
         let prev = self.hooks.current_script;
         self.hooks.current_script = el;
         self.reset_eval_split();
+        if std::env::var_os("EXPLORER_CTX_PROBE").is_some() {
+            let wid = match self.get_prop(self.global, "window") {
+                Some(Value::Obj(o)) => format!("{o:?}"),
+                _ => "-".to_string(),
+            };
+            eprintln!(
+                "[ctxp] kind=script_el ctx={} global={:?} window={} name={:?} bytes={}",
+                self.cur_ctx,
+                self.global,
+                wid,
+                name.unwrap_or(""),
+                src.len()
+            );
+        }
         let tp = Instant::now();
         let prog = parser::parse_in(src, false, self.nest_limit, name.map(std::rc::Rc::from));
         self.note_parse(tp);
@@ -4102,8 +4335,70 @@ impl Engine {
         self.set_own(obj, name, fv, false);
     }
 
+    /// N1.5 — capture l'identité de la VM `BotGuard` : `trayride`
+    /// écrit sur le global → `ObjId` de l'objet ; `.a`/`mtI_` posé
+    /// dessus → `ObjId` de la fonction d'entrée `K5` (`src`=None
+    /// pour le code eval'd — l'identité est le seul repère fiable).
+    fn ctxp_capture_bg(&self, obj: ObjId, key: &str, v: &Value) {
+        use std::sync::atomic::Ordering::Relaxed;
+        if key == "trayride" && obj == self.global {
+            if let Value::Obj(id) = v {
+                BG_TRAYRIDE.store(*id, Relaxed);
+                eprintln!("[ctxp] bg.trayride id={id}");
+            }
+        } else if (key == "a" || key == "mtI_") && obj == BG_TRAYRIDE.load(Relaxed) {
+            if let Value::Obj(id) = v {
+                BG_ENTRY.store(*id, Relaxed);
+                eprintln!("[ctxp] bg.entry key={key} id={id}");
+            }
+        } else if key == "sPQ" {
+            if let Value::Obj(id) = v {
+                BG_SPQ.store(*id, Relaxed);
+                eprintln!("[ctxp] bg.spq.obj id={id}");
+            }
+        } else if matches!(key, "wpc" | "wPd" | "jOM" | "hDo" | "a4") {
+            if let Value::Obj(id) = v {
+                let lbl: &'static str = match key {
+                    "wpc" => "wpc",
+                    "wPd" => "wPd",
+                    "jOM" => "jOM",
+                    "hDo" => "hDo",
+                    _ => "a4",
+                };
+                bg_io_register(*id, lbl);
+                eprintln!("[ctxp] bg.io.reg key={key} id={id} obj={obj}");
+            }
+        } else if key == "mws" {
+            if let Value::Obj(id) = v {
+                bg_io_register(*id, "io.mws");
+            }
+            if let Some(o) = self.heap.obj(obj) {
+                for (k, lbl) in [("f", "io.f"), ("c", "io.c"), ("m", "io.m")] {
+                    if let Some(Value::Obj(id)) = o.get_own(k) {
+                        bg_io_register(id, lbl);
+                    }
+                }
+            }
+            eprintln!("[ctxp] bg.io.reg mws obj={obj}");
+        } else if key == "eO" {
+            if let Value::Obj(id) = v {
+                eprintln!("[ctxp] bg.eo id={id} obj={obj}");
+            }
+        }
+    }
+
     /// Attach a non-enumerable property.
     pub(crate) fn set_own(&mut self, obj: ObjId, key: &str, v: Value, enumerable: bool) {
+        static CTXP: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+        if *CTXP.get_or_init(|| std::env::var_os("EXPLORER_CTX_PROBE").is_some()) {
+            self.ctxp_capture_bg(obj, key, &v);
+            if key == "trayride" || key == "t" || key == "ntpevasrs" {
+                eprintln!(
+                    "[ctxp] set_own key={} obj={:?} ctx={} global={:?}",
+                    key, obj, self.cur_ctx, self.global
+                );
+            }
+        }
         if let Some(o) = self.heap.obj_mut(obj) {
             o.set_own(key, v, enumerable);
         }
@@ -4125,6 +4420,16 @@ impl Engine {
         v: Value,
         attrs: crate::heap::PropAttrs,
     ) {
+        static CTXP: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+        if *CTXP.get_or_init(|| std::env::var_os("EXPLORER_CTX_PROBE").is_some()) {
+            self.ctxp_capture_bg(obj, key, &v);
+            if key == "trayride" || key == "t" || key == "ntpevasrs" {
+                eprintln!(
+                    "[ctxp] set_own_attrs key={} obj={:?} ctx={} global={:?}",
+                key, obj, self.cur_ctx, self.global
+                );
+            }
+        }
         if let Some(o) = self.heap.obj_mut(obj) {
             o.define_data(key, v, attrs);
         }
@@ -4133,33 +4438,101 @@ impl Engine {
     /// Rendu `stack` V8-style (JS-C47) : en-tête `Name: message`
     /// puis une ligne `    at <fn> (l:c)` par frame de la pile
     /// d'appels, appelant le plus récent d'abord — borné à
-    /// [`STACK_TRACE_LIMIT`] (V8 `stackTraceLimit` = 10 : une
-    /// récursion saturée ne rend pas mille lignes). La position
-    /// est celle de la **définition** de la fonction (l'AST ne
-    /// porte pas de span par statement — déviation documentée vs
-    /// le site d'appel de V8) ; `(0,0)` = fonction synthétique,
-    /// non rendue. Les natives n'empilent pas de frame.
+    /// [`Self::stack_trace_limit`] (V8 `stackTraceLimit`, live :
+    /// une récursion saturée ne rend pas mille lignes). La
+    /// position est celle de la **définition** de la fonction
+    /// (l'AST ne porte pas de span par statement — déviation
+    /// documentée vs le site d'appel de V8) ; `(0,0)` = fonction
+    /// synthétique, non rendue. Les natives n'empilent pas de
+    /// frame.
     pub(crate) fn stack_text(&self, name: &str, msg: &str) -> String {
         let mut s = if msg.is_empty() {
             name.to_string()
         } else {
             format!("{name}: {msg}")
         };
-        for lit in self.call_stack.iter().rev().take(STACK_TRACE_LIMIT) {
-            let n = lit.name.as_deref().unwrap_or("<anonymous>");
+        let n = self.call_stack.len();
+        // Forme V8 (N1.1) : chaque frame nomme le point où elle
+        // **exécute** — la frame du haut le site courant (posé
+        // par le `Call`/`New` de l'erreur), une frame plus basse
+        // le site qui a invoqué la frame au-dessus d'elle. Repli
+        // sur la position de définition (`lit.pos`) quand le site
+        // est inconnu `(0,0)` — chemins non-AST, vieux corpus.
+        let frame_pos = |i: usize| -> (usize, usize) {
+            if i + 1 == n {
+                let p = self.pending_call_pos;
+                if p.0 > 0 {
+                    return p;
+                }
+            } else {
+                let p = self.call_sites.get(i + 1).copied().unwrap_or((0, 0));
+                if p.0 > 0 {
+                    return p;
+                }
+            }
+            self.call_stack[i].pos
+        };
+        let render = |s: &mut String, nm: &str, src: Option<&Rc<str>>, pos: (usize, usize)| {
             s.push_str("\n    at ");
-            s.push_str(n);
-            if lit.pos.0 > 0 {
+            s.push_str(nm);
+            if pos.0 > 0 {
                 // `src` (nom de module / `<eval>`) préfixe la
                 // position — `at f (bundle.js:l:c)` attribue
                 // chaque frame à son bundle (JS-C56).
-                match &lit.src {
-                    Some(src) => s.push_str(&format!(" ({}:{}:{})", src, lit.pos.0, lit.pos.1)),
-                    None => s.push_str(&format!(" ({}:{})", lit.pos.0, lit.pos.1)),
+                match src {
+                    Some(src) => s.push_str(&format!(" ({}:{}:{})", src, pos.0, pos.1)),
+                    None => s.push_str(&format!(" ({}:{})", pos.0, pos.1)),
                 }
             }
+        };
+        for i in (0..n).rev().take(self.stack_trace_limit()) {
+            let lit = &self.call_stack[i];
+            render(
+                &mut s,
+                lit.name.as_deref().unwrap_or("<anonymous>"),
+                lit.src.as_ref(),
+                frame_pos(i),
+            );
+        }
+        // Frame script synthétique : le contexte qui a invoqué la
+        // frame du bas (top-level `f()` → `at <anonymous>:l:c`),
+        // ou — pile vide — le `new Error()` top-level lui-même.
+        // Nécessaire à la forme V8 : une erreur top-level produit
+        // une frame, pas un stack à zéro ligne.
+        if n > 0 {
+            if let Some(&p) = self.call_sites.first() {
+                if p.0 > 0 && self.stack_trace_limit() > n {
+                    render(&mut s, "<anonymous>", self.call_stack[0].src.as_ref(), p);
+                }
+            }
+        } else if self.pending_call_pos.0 > 0 && self.stack_trace_limit() > 0 {
+            let p = self.pending_call_pos;
+            render(&mut s, "<anonymous>", None, p);
         }
         s
+    }
+
+    /// `Error.stackTraceLimit` **live** (V8) : own data
+    /// property du ctor `Error` relue à chaque capture —
+    /// `Error.stackTraceLimit = 3` borne le rendu à 3 frames,
+    /// `0`/négatif/`NaN`/non-nombre = aucune frame (V8 lit la
+    /// valeur en entier — un garbage coagule à 0 plutôt que
+    /// de casser). Borne interne [`STACK_TRACE_LIMIT`] si le
+    /// ctor ou la prop sont absents (boot précoce).
+    fn stack_trace_limit(&self) -> usize {
+        let Some(Value::Obj(err)) = self.heap.obj(self.global).and_then(|o| o.get_own("Error"))
+        else {
+            return STACK_TRACE_LIMIT;
+        };
+        match self
+            .heap
+            .obj(err)
+            .and_then(|o| o.get_own("stackTraceLimit"))
+        {
+            Some(Value::Num(n)) if n.is_finite() && n > 0.0 => n as usize,
+            Some(_) => 0,
+            None => STACK_TRACE_LIMIT,
+        }
     }
 
     /// Verbatim borné (`max` caractères) de la fonction en tête
@@ -4180,6 +4553,51 @@ impl Engine {
                 })
             })
             .unwrap_or_default()
+    }
+
+    /// Variante sondage de `stack_top_fn_src` : descend la pile
+    /// jusqu'au premier frame porteur d'un extrait non vide et
+    /// le préfixe de `nom@l:c` (position d'appel `call_sites`).
+    /// Retourne `(extrait préfixé, frames sautés, hauteur pile)` —
+    /// diagnostic « pile vide ou top synthétique » pour le cas
+    /// `src=` resté vide au vol 814.
+    /// `true` si un frame de la pile courante a `lit.src` (URL du
+    /// script évalué) contenant `needle` — filtre d'origine pour
+    /// les sondes (ex. `google.com/js/th` = interpréteur BG).
+    pub(crate) fn frame_src_contains(&self, needle: &str) -> bool {
+        self.call_stack
+            .iter()
+            .any(|lit| lit.src.as_deref().is_some_and(|s| s.contains(needle)))
+    }
+
+    pub(crate) fn stack_nearest_fn_src(&self, max: usize) -> (String, usize, usize) {
+        for (i, lit) in self.call_stack.iter().enumerate().rev() {
+            let Some(t) = lit.src_text.as_ref() else {
+                continue;
+            };
+            let (lo, hi) = lit.span;
+            let ex: String = t
+                .chars()
+                .skip(lo)
+                .take(hi.saturating_sub(lo).min(max))
+                .collect();
+            if ex.trim().is_empty() {
+                continue;
+            }
+            let site = self.call_sites.get(i).copied().unwrap_or((0, 0));
+            return (
+                format!(
+                    "{}@{}:{} {}",
+                    lit.name.as_deref().unwrap_or("<anon>"),
+                    site.0,
+                    site.1,
+                    ex.trim()
+                ),
+                self.call_stack.len() - 1 - i,
+                self.call_stack.len(),
+            );
+        }
+        (String::new(), 0, self.call_stack.len())
     }
 
     /// New `Error`-family object value (`{name, message}` on `proto`).
@@ -4247,7 +4665,6 @@ impl Engine {
             Ok(r) => r,
             Err(msg) => return Err(self.syntax_error(msg)),
         };
-        let flag_str = re.flag_string();
         let id = self.heap.alloc_obj(Object {
             proto: Value::Obj(self.protos.regexp),
             props: Vec::new(),
@@ -4257,21 +4674,9 @@ impl Engine {
             elem_integrity: 0,
             args_map: None,
         });
-        let src = self.str_val(pattern.to_string());
-        let fl = self.str_val(flag_str);
-        self.set_own(id, "source", src, false);
-        self.set_own(id, "flags", fl, false);
-        let re = match self.heap.obj(id).map(|o| &o.kind) {
-            Some(ObjKind::RegExp(r)) => r.clone(),
-            _ => return Err(self.type_error("internal regexp error")),
-        };
-        self.set_own(id, "global", Value::Bool(re.global), false);
-        self.set_own(id, "ignoreCase", Value::Bool(re.ignore_case), false);
-        self.set_own(id, "multiline", Value::Bool(re.multiline), false);
-        self.set_own(id, "dotAll", Value::Bool(re.dot_all), false);
-        self.set_own(id, "sticky", Value::Bool(re.sticky), false);
-        self.set_own(id, "unicode", Value::Bool(re.unicode), false);
-        self.set_own(id, "hasIndices", Value::Bool(re.has_indices), false);
+        // `source`/`flags`/flags booléens sont des accesseurs sur
+        // `RegExp.prototype` (spec) — seul `lastIndex` reste une
+        // data prop propre non énumérable et réinscriptible.
         self.set_own_attrs(
             id,
             "lastIndex",
@@ -5270,6 +5675,104 @@ impl Engine {
     /// d'import de module renvoient vers l'env exporteur (live
     /// binding) ; `visited` borne les chaînes cycliques
     /// (`export {a} from 'b'` ↔ `export {b} from 'a'`).
+    /// JS-C490 — résout les identifiants du corps d'un lit
+    /// nouvellement matérialisé (dédup par `Rc::as_ptr`). La
+    /// table est bornée : pleine → purge complète (les entrées
+    /// obsolètes partent avec leurs gardiens).
+    fn ensure_lit_resolved(
+        &mut self,
+        lit: &Rc<crate::ast::FnLit>,
+        body: &Rc<Vec<crate::ast::Stmt>>,
+    ) {
+        const RESOLVED_LITS_CAP: usize = 512;
+        if self.resolve_off {
+            return;
+        }
+        let key = Rc::as_ptr(lit) as usize;
+        if self.resolved_lits.contains(&key) {
+            return;
+        }
+        if self.resolved_lits.len() >= RESOLVED_LITS_CAP {
+            self.resolved_map.clear();
+            self.resolved_lits.clear();
+            self.resolved_guard.clear();
+            // JS-C492 — purge atomique avec `resolved_map` :
+            // les corps baissés épinglés doivent libérer en même
+            // temps que les `ptr(Expr)` qu'ils indexaient, sinon
+            // réutilisation d'adresses → profondeurs fantômes.
+            self.lowered_suspend_cache.clear();
+        }
+        self.resolved_lits.insert(key);
+        self.resolved_guard.push(lit.clone());
+        let m = resolve::resolve_lit(lit, body);
+        self.resolved_map.extend(m);
+    }
+
+    /// JS-C490 — lecture d'identifiant via l'annotation du
+    /// resolveur : saute `d` niveaux sans sonder leurs maps,
+    /// puis `env_get` complet depuis la cible (la marche remonte
+    /// au-delà si elle rate). `None` si non annoté ou cible
+    /// manquante → l'appelant reprend la marche complète.
+    pub(crate) fn env_get_resolved(
+        &mut self,
+        env: &EnvRef,
+        name: &str,
+        e: &crate::ast::Expr,
+    ) -> Option<Value> {
+        const RESOLVED_ENVS_CAP: usize = 8192;
+        let &d = self
+            .resolved_map
+            .get(&(std::ptr::from_ref::<crate::ast::Expr>(e) as usize))?;
+        // L'ancêtre est déterministe par (env, d) — `Env.parent`
+        // immuable post-création. Clé tuple exacte — jamais
+        // d'aplatissement (une collision `ptr+d<<20` entre envs
+        // proches rendait un ancêtre faux → liaison erronée).
+        let ekey = (Rc::as_ptr(env) as usize, d);
+        let cur = if let Some((_, anc)) = self.resolved_envs.get(&ekey) {
+            anc.clone()
+        } else {
+            let mut cur = env.clone();
+            for _ in 0..d {
+                let p = cur.borrow().parent.clone();
+                match p {
+                    Some(p) => cur = p,
+                    None => break,
+                }
+            }
+            if self.resolved_envs.len() >= RESOLVED_ENVS_CAP {
+                self.resolved_envs.clear();
+            }
+            // Le `EnvRef` épinglé dans la clé empêche la
+            // réutilisation de l'adresse de `env` par un autre
+            // env — aucune collision de pointeur possible.
+            self.resolved_envs.insert(ekey, (env.clone(), cur.clone()));
+            cur
+        };
+        if let v @ Some(_) = self.env_get(&cur, name) {
+            crate::j17_tick(&crate::J17_RES_HIT);
+            if self.resolve_verify {
+                let check = self.env_get(env, name);
+                // `strict_eq`, pas `PartialEq` — `NaN != NaN`
+                // signalait 181 faux positifs/vol.
+                let same = match (&check, &v) {
+                    (Some(c), Some(f)) => self.strict_eq(c, f),
+                    _ => check == v,
+                };
+                if !same {
+                    crate::j17_tick(&crate::J17_RES_MISS);
+                    tracing::warn!(
+                        target: "resolve",
+                        "res.bad name={name} d={d} fast={v:?} walk={check:?}"
+                    );
+                }
+            }
+            v
+        } else {
+            crate::j17_tick(&crate::J17_RES_MISS);
+            None
+        }
+    }
+
     pub(crate) fn env_get(&mut self, env: &EnvRef, name: &str) -> Option<Value> {
         self.env_get_seen(env, name, &mut HashSet::new())
     }
@@ -5316,6 +5819,7 @@ impl Engine {
     ) -> Option<Value> {
         // V-7 : temps cumulé de la marche de chaîne de portées.
         let _t = crate::j17_scope(&crate::J17_ENV_NS);
+        crate::j17_tick(&crate::J17_ENV_GETS);
         let mut cur = Some(env.clone());
         while let Some(e) = cur {
             enum Next {
@@ -5327,12 +5831,60 @@ impl Engine {
             }
             crate::j17_tick(&crate::J17_ENV_LVL);
             // `with (o)` — la résolution passe par les props de
-            // l'objet (hors `@@unscopables`) puis remonte.
-            let with_oid = {
+            // l'objet (hors `@@unscopables`) puis remonte. Le
+            // `borrow` est mutualisé avec la lookup ci-dessous :
+            // un seul `RefCell::borrow` par niveau (cran 74 —
+            // env_lvl ~67M sur YouTube, ~107 ns/get).
+            // Un seul `borrow` pour `with`-check + lookup (cran 74)
+            // — le cas `Global` garde sa sémantique (find_prop +
+            // getter invoqué sous l'emprunt, comme avant).
+            let (with_oid, next) = {
                 let b = e.borrow();
                 match &b.kind {
-                    EnvKind::With(oid) => Some(*oid),
-                    _ => None,
+                    EnvKind::With(oid) => (Some(*oid), None),
+                    EnvKind::Local(m) | EnvKind::Block(m) => (
+                        None,
+                        Some(match m.get(name) {
+                            Some(EnvCell::Bind(v)) => return Some(v.value.clone()),
+                            Some(EnvCell::Alias(t, n)) => Next::Alias(t.clone(), n.clone()),
+                            Some(EnvCell::LazyArgs(la)) => Next::Lazy(la.clone()),
+                            None => Next::Up(b.parent.clone()),
+                        }),
+                    ),
+                    EnvKind::Global(m) => match m.get(name) {
+                        Some(EnvCell::Bind(v)) => return Some(v.value.clone()),
+                        Some(EnvCell::Alias(t, n)) => {
+                            (None, Some(Next::Alias(t.clone(), n.clone())))
+                        }
+                        Some(EnvCell::LazyArgs(la)) => (None, Some(Next::Lazy(la.clone()))),
+                        None => {
+                            // Declarative record first, then `window`
+                            // props — data ET accessors (JS-C78 :
+                            // `parent`/`top`/`frames`/`length`/`closed`
+                            // sont des getters posés sur le global —
+                            // un identifiant libre doit les invoquer).
+                            let g = self.global;
+                            match self.find_prop(g, name) {
+                                Some(Prop::Data { value, .. }) => return Some(value),
+                                Some(Prop::Acc {
+                                    get: Value::Obj(gf),
+                                    ..
+                                }) => {
+                                    if let Ok(v) =
+                                        self.call_value(Value::Obj(gf), Value::Obj(g), &[])
+                                    {
+                                        return Some(v);
+                                    }
+                                    // Getter qui jette → prop non
+                                    // liée (la chaîne remonte —
+                                    // `ReferenceError` honnête plutôt
+                                    // qu'un `undefined` silencieux).
+                                }
+                                _ => {}
+                            }
+                            (None, Some(Next::Up(b.parent.clone())))
+                        }
+                    },
                 }
             };
             if let Some(oid) = with_oid {
@@ -5364,51 +5916,10 @@ impl Engine {
                 }
                 continue;
             }
-            let next = {
-                let b = e.borrow();
-                match &b.kind {
-                    EnvKind::Local(m) | EnvKind::Block(m) => match m.get(name) {
-                        Some(EnvCell::Bind(v)) => return Some(v.value.clone()),
-                        Some(EnvCell::Alias(t, n)) => Next::Alias(t.clone(), n.clone()),
-                        Some(EnvCell::LazyArgs(la)) => Next::Lazy(la.clone()),
-                        None => Next::Up(b.parent.clone()),
-                    },
-                    EnvKind::Global(m) => match m.get(name) {
-                        Some(EnvCell::Bind(v)) => return Some(v.value.clone()),
-                        Some(EnvCell::Alias(t, n)) => Next::Alias(t.clone(), n.clone()),
-                        Some(EnvCell::LazyArgs(la)) => Next::Lazy(la.clone()),
-                        None => {
-                            // Declarative record first, then `window`
-                            // props — data ET accessors (JS-C78 :
-                            // `parent`/`top`/`frames`/`length`/`closed`
-                            // sont des getters posés sur le global —
-                            // un identifiant libre doit les invoquer).
-                            let g = self.global;
-                            match self.find_prop(g, name) {
-                                Some(Prop::Data { value, .. }) => return Some(value),
-                                Some(Prop::Acc {
-                                    get: Value::Obj(gf),
-                                    ..
-                                }) => {
-                                    if let Ok(v) =
-                                        self.call_value(Value::Obj(gf), Value::Obj(g), &[])
-                                    {
-                                        return Some(v);
-                                    }
-                                    // Getter qui jette → prop non
-                                    // liée (la chaîne remonte —
-                                    // `ReferenceError` honnête plutôt
-                                    // qu'un `undefined` silencieux).
-                                }
-                                _ => {}
-                            }
-                            Next::Up(b.parent.clone())
-                        }
-                    },
-                    // Déjà géré au-dessus — repli défensif.
-                    EnvKind::With(_) => Next::Up(b.parent.clone()),
-                }
-            };
+            // `With` a déjà `continue` — `next` est toujours
+            // `Some` ici ; le repli `None` reste une dégradation
+            // sûre (nom non lié), jamais un panic.
+            let next = next?;
             match next {
                 Next::Up(p) => cur = p,
                 Next::Alias(t, n) => {
@@ -6737,6 +7248,15 @@ impl Engine {
 
     /// First `Prop` found on `id`'s prototype chain.
     pub(crate) fn find_prop(&mut self, id: ObjId, key: &str) -> Option<Prop> {
+        static CTXP: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+        if *CTXP.get_or_init(|| std::env::var_os("EXPLORER_CTX_PROBE").is_some())
+            && (key == "trayride" || key == "t")
+        {
+            eprintln!(
+                "[ctxp] lookup key={} base_id={:?} ctx={} global={:?}",
+                key, id, self.cur_ctx, self.global
+            );
+        }
         let ai = array_index(key); // V-3b — hoisted hors de la marche
         let mut cur = Some(id);
         let mut depth = 0;
@@ -6881,6 +7401,138 @@ impl Engine {
     /// `o` tagué → `{label}w {k} ty={type}` (`g.cfgw` =
     /// `ytcfg.set(k,v)`/`data_.k=v` — clés de config posées).
     fn probe_store(&mut self, id: ObjId, key: &str, v: Value) {
+        // JS-C483/cran 51 — `activeStoreSubscription` posé =
+        // `YC.attached` vient de souscrire au store redux avec
+        // `this` = le receveur swappé : les 5 frames du sommet
+        // nomment le rail d'invocation (`ELO`/bag `X.attached`/
+        // `_.L.attached`) qui a appelé le hook sur un objet
+        // sans `attached` dans sa chaîne.
+        if key == "activeStoreSubscription"
+            && tracing::enabled!(target: "dom_probe", tracing::Level::INFO)
+        {
+            let frames: Vec<String> = self
+                .call_stack
+                .iter()
+                .rev()
+                .take(5)
+                .map(Self::fn_label_of)
+                .collect();
+            let psp = self.find_prop(id, "polySiParams").is_some();
+            let atto = self.find_prop(id, "attached").is_some();
+            // Cran 52 — pourquoi `this.root===this` au `_attachDom` ?
+            // `dcr` = `ready()` a-t-il tourné (ELO), `tpl` = `_template`
+            // présent (le stamping aurait dû réassigner `root`),
+            // `roteq` = `root===self` déjà vrai à la souscription.
+            let dcr = self
+                .get_prop(id, "didCallReady")
+                .is_some_and(|v| self.to_boolean(v));
+            let tpl = self.find_prop(id, "_template").is_some();
+            let roteq = matches!(self.get_prop(id, "root"), Some(Value::Obj(r)) if r == id);
+            // `ipec` = `isPolySiElementConnected` — posé par
+            // `_.L.connectedCallback` (Ae) juste avant `ELO` :
+            // distingue « chaîne `w.prototype.connectedCallback`
+            // a atteint `_.L` » vs « court-circuitée en amont ».
+            let ipec = self
+                .get_prop(id, "isPolySiElementConnected")
+                .is_some_and(|v| self.to_boolean(v));
+            tracing::info!(
+                target: "dom_probe",
+                site = "sub.arm",
+                psp,
+                atto,
+                dcr,
+                ipec,
+                tpl,
+                roteq,
+                stk = %frames.join("<")
+            );
+        }
+        // Cran 53 — `__hasRegisterFinished` posé sur le proto de
+        // classe = `_registered` a tourné : si le corps jette
+        // après le flag, `W(d.prototype)` (mix méthodes +
+        // `_template`) est sauté → classe nue définitivement.
+        if key == "__hasRegisterFinished"
+            && tracing::enabled!(target: "dom_probe", tracing::Level::INFO)
+        {
+            let is_ = self
+                .get_prop(id, "is")
+                .as_ref()
+                .and_then(Self::heap_string_of)
+                .unwrap_or_default();
+            let frames: Vec<String> = self
+                .call_stack
+                .iter()
+                .rev()
+                .take(3)
+                .map(Self::fn_label_of)
+                .collect();
+            tracing::info!(
+                target: "dom_probe",
+                site = "reg.fin",
+                is = %is_,
+                stk = %frames.join("<")
+            );
+        }
+        // Cran 63 — `__dataClientsReady` repassé falsy =
+        // `_initializeProperties` rejoué sur le contrôleur →
+        // rouvre la gate `_readyClients` → second `_attachDom`
+        // → swap du pc. La pile nomme le ré-initialiseur.
+        if key == "__dataClientsReady"
+            && tracing::enabled!(target: "dom_probe", tracing::Level::INFO)
+        {
+            let host = self
+                .get_prop(id, "hostElement")
+                .and_then(|h| self.get_prop_value(h, "localName").ok())
+                .as_ref()
+                .and_then(Self::heap_string_of)
+                .unwrap_or_default();
+            if !host.is_empty() {
+                let falsy = !self.to_boolean(v.clone());
+                let frames: Vec<String> = self
+                    .call_stack
+                    .iter()
+                    .rev()
+                    .take(6)
+                    .map(Self::fn_label_of)
+                    .collect();
+                tracing::info!(
+                    target: "dom_probe",
+                    site = "dcr.set",
+                    host = %host,
+                    falsy,
+                    obj = ?id,
+                    stk = %frames.join("<")
+                );
+            }
+        }
+        // Cran 53b — `root` réassigné : `this.root=this` (init),
+        // `=_stampTemplate` (stamp), `=_attachDom` (final). Trace
+        // la provenance pour savoir si `_stampTemplate` a tourné.
+        if key == "root" && tracing::enabled!(target: "dom_probe", tracing::Level::INFO) {
+            let host = self
+                .get_prop(id, "hostElement")
+                .and_then(|h| self.get_prop_value(h, "localName").ok())
+                .as_ref()
+                .and_then(Self::heap_string_of)
+                .unwrap_or_default();
+            if !host.is_empty() {
+                let selfref = matches!(v, Value::Obj(r) if r == id);
+                let frames: Vec<String> = self
+                    .call_stack
+                    .iter()
+                    .rev()
+                    .take(3)
+                    .map(Self::fn_label_of)
+                    .collect();
+                tracing::info!(
+                    target: "dom_probe",
+                    site = "root.set",
+                    host = %host,
+                    selfref,
+                    stk = %frames.join("<")
+                );
+            }
+        }
         // Filtres cheap d'abord (global + clé surveillée, ou
         // conteneur tagué) — puis tout le travail armé est gaté
         // par le niveau du target (même fix V-2i que
@@ -6954,6 +7606,108 @@ impl Engine {
             id = tid;
             self.deleg_hop(&mut depth)?;
         }
+        // Cran 62 — `_.L.created` lit `this.polySiParams` avec
+        // succès au sommet de la pile du swap alors que ni
+        // l'élément pm ni son pc n'en portent : chaque
+        // résolution non-undefined nomme le receveur réel
+        // (`is` élément ou `hostElement` du contrôleur) + la
+        // pile → identifie l'objet Ae-family qui invoque
+        // l'attachShadow promouvant le pc.
+        // Cran 63 — mêmes clés pour `_readyClients`/`_attachDom`/
+        // `_flushClients` : nommer le rail qui re-déclenche le
+        // second `_readyClients` sur le pc (`__dataClientsReady`
+        // déjà posé → `_flushClients` gate fermée → le re-
+        // déclencheur est ailleurs : microtask `_.hQ`, CE re-
+        // dispatch, ou `_enableOrFlushClients` → `d.ready`).
+        // Cran 64 — rail de mise à jour de page + lifecycle :
+        // `performDataUpdate`/`updatePageData`/`attachPage`/
+        // `setActivePage`/`enqueueClient`/`connectedCallback` —
+        // si le second `_readyClients` vient d'un `call(pc)`
+        // depuis un job `kAu` ou un dispatch natif, le read du
+        // callee sur l'objet appelant nomme la fonction source.
+        // Cran 65 — chaîne de propagation de la vague : `ready`/
+        // `_enableProperties`/`_flushProperties`/`_propertiesChanged`/
+        // `__enableOrFlushClients`/`_enqueueClient` — reconstruire le
+        // chemin exact `ready → _flushProperties → _propertiesChanged →
+        // _flushClients → _readyClients` (ou un appel direct) pour le
+        // second flush ; si aucune clé amont ne tire sur le receveur,
+        // le callee est une valeur capturée (closure/job natif).
+        if matches!(
+            key,
+            "polySiParams"
+                | "_readyClients"
+                | "_attachDom"
+                | "_flushClients"
+                | "performDataUpdate"
+                | "updatePageData"
+                | "attachPage"
+                | "setActivePage"
+                | "enqueueClient"
+                | "connectedCallback"
+                | "ready"
+                | "_enableProperties"
+                | "_flushProperties"
+                | "_propertiesChanged"
+                | "__enableOrFlushClients"
+                | "_enqueueClient"
+        ) && tracing::enabled!(target: "dom_probe", tracing::Level::INFO)
+            && self
+                .find_prop(id, key)
+                .and_then(|p| p.data_value())
+                .is_some()
+        {
+            // Dédup par (clé, receveur) sur `polySiParams` seul
+            // — les clés lifecycle restent exhaustives : le
+            // rail fautif est justement le SECOND appel
+            // (cran 63 : `_flushClients` dédupliqué avait rendu
+            // le second `this._readyClients()` orphelin de sa
+            // cause).
+            let fresh = if key != "polySiParams" {
+                true
+            } else if let Some((dom, _)) = &self.dom_ctx {
+                dom.try_borrow_mut()
+                    .is_ok_and(|mut d| d.ce.probe_seen.insert(format!("life:{key}:{id:?}")))
+            } else {
+                true
+            };
+            if fresh {
+                // `dcr` = la gate de `_flushClients` au moment
+                // du read — `true` → `__enableOrFlushClients`
+                // (pas de `_readyClients`), `false`/`undef` →
+                // branche `_readyClients` ouverte.
+                let dcr = self
+                    .get_prop(id, "__dataClientsReady")
+                    .is_some_and(|v| self.to_boolean(v));
+                let host = self
+                    .get_prop(id, "hostElement")
+                    .and_then(|h| self.get_prop_value(h, "localName").ok())
+                    .as_ref()
+                    .and_then(Self::heap_string_of)
+                    .unwrap_or_default();
+                let is_ = self
+                    .get_prop(id, "is")
+                    .as_ref()
+                    .and_then(Self::heap_string_of)
+                    .unwrap_or_default();
+                let frames: Vec<String> = self
+                    .call_stack
+                    .iter()
+                    .rev()
+                    .take(6)
+                    .map(Self::fn_label_of)
+                    .collect();
+                tracing::info!(
+                    target: "dom_probe",
+                    site = "psp.hit",
+                    key = %key,
+                    host = %host,
+                    is = %is_,
+                    obj = ?id,
+                    dcr,
+                    stk = %frames.join("<")
+                );
+            }
+        }
         match self.find_prop(id, key) {
             Some(Prop::Data { value, .. }) => {
                 self.probe_lookup(id, key, Some(value.clone()));
@@ -6985,6 +7739,16 @@ impl Engine {
         // bornée — `own` suit le dernier non-proxy (cible réelle
         // du `set_prop` final : écrire sur le wrapper proxy serait
         // une fuite, J2 : délégation `Proxy(proxy)×N` sans borne).
+        static CTXP: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+        if *CTXP.get_or_init(|| std::env::var_os("EXPLORER_CTX_PROBE").is_some()) {
+            self.ctxp_capture_bg(id, key, &v);
+            if key == "trayride" || key == "t" {
+                eprintln!(
+                    "[ctxp] write_prop key={} base_id={:?} ctx={} global={:?}",
+                    key, id, self.cur_ctx, self.global
+                );
+            }
+        }
         let ai = array_index(key); // V-3b — hoisted hors de la marche
         let mut own = id;
         let mut cur = Some(id);
@@ -7268,6 +8032,36 @@ impl Engine {
                     }
                 }
                 let v = self.read_prop(base.clone(), base, key)?;
+                // N1.5 — sonde DI kevlar : nomme la clé des
+                // deferreds `resolve(new VhV(k))` (`deferredKey`
+                // lu par `IK$`) + les providers enregistrés
+                // (`provide` lu par `addProvider`/`G06`) —
+                // providers attendus vs enregistrés tranchent
+                // « rail mort » (clé jamais fournie) vs « rail
+                // lent ». Sous `EXPLORER_CTX_PROBE`.
+                if (key == "deferredKey" || key == "provide")
+                    && tracing::enabled!(target: "dom_probe", tracing::Level::INFO)
+                    && *DI_PROBE.get_or_init(|| std::env::var_os("EXPLORER_CTX_PROBE").is_some())
+                {
+                    let kv = match &v {
+                        Value::Str(_) | Value::Num(_) | Value::Bool(_) => {
+                            self.to_js_string(v.clone()).unwrap_or_default()
+                        }
+                        Value::Obj(o) => {
+                            let nm = self
+                                .read_prop(v.clone(), v.clone(), "name")
+                                .ok()
+                                .filter(|n| matches!(n, Value::Str(_)))
+                                .and_then(|n| self.to_js_string(n).ok())
+                                .unwrap_or_default();
+                            format!("<obj:{o}:{nm}>")
+                        }
+                        _ => format!("{v:?}"),
+                    };
+                    let (src, d, depth) = self.stack_nearest_fn_src(120);
+                    tracing::info!(target: "dom_probe", site = "di.key",
+                        "k={key} v={kv} d={d} depth={depth} src={src}");
+                }
                 // Feature-detect : les méthodes host sont
                 // invoke-only — quand ni `get` ni la chaîne
                 // proto ne produisent de valeur, exposer le
@@ -7341,6 +8135,49 @@ impl Engine {
             Value::Obj(id) => {
                 if let Some(h) = self.host_of(id) {
                     crate::host_mark(h.class_name(), key);
+                    // Sonde kevlar §cran-24 : qui écrit
+                    // `polymerController` sur un élément — la
+                    // pile nomme le site qui livre un pc
+                    // racine-Shady (`zc`) au lieu du `d`.
+                    if key == "polymerController"
+                        && tracing::enabled!(target: "dom_probe", tracing::Level::INFO)
+                    {
+                        let cls = h.class_name();
+                        let vdesc = self.describe(v.clone());
+                        // §cran-38 — `node=`/`tag=` du wrapper
+                        // hôte : corréler le write à
+                        // `el.birth`/`ce.upgrade` (cran 37 :
+                        // l'expando atterrit sur le bon élément
+                        // mais porte `O=zc` — le nœud visé nomme
+                        // si c'est l'élément vivant ou l'inerte
+                        // `u` d'`I_o`).
+                        let (node, tag) = crate::dom_host::dom_node_of(self, base.clone())
+                            .map_or_else(
+                                || ("-".to_string(), "-".to_string()),
+                                |(d, n)| {
+                                    let t = d
+                                        .borrow()
+                                        .nodes
+                                        .get(n as usize)
+                                        .map(|x| x.tag.clone())
+                                        .unwrap_or_default();
+                                    (n.to_string(), t)
+                                },
+                            );
+                        let stack: String = self
+                            .stack_text("", "")
+                            .lines()
+                            .map(str::trim)
+                            .filter(|l| l.starts_with("at "))
+                            .take(8)
+                            .collect::<Vec<_>>()
+                            .join(" <- ");
+                        let stack: String = stack.chars().take(600).collect();
+                        tracing::info!(target: "dom_probe",
+                            site = "pc.set", host = %cls, node = %node, tag = %tag,
+                            v = %vdesc.chars().take(120).collect::<String>(),
+                            stack = %stack);
+                    }
                     if h.set(self, base.clone(), key, v.clone())? {
                         // Réactions CE synchrones (JS-C68) — un
                         // setter host a pu muter le miroir
@@ -7638,7 +8475,42 @@ impl Engine {
                 return Ok(true);
             }
         }
-        Ok(self.find_prop(id, key).is_some())
+        // Marche chaîne-de-proto **consciente des proxies** : un
+        // `Ordinary` dont un ancêtre est un `Proxy` doit déléguer
+        // à la cible (spec `[[HasProperty]]` — la chaîne passe
+        // par `proxy.[[GetPrototypeOf]]` puis `has` sur le
+        // proxy). `find_prop` ne lisait que les `proto` bruts :
+        // `"m" in o` rendait `false` quand un proto de la chaîne
+        // était un proxy (mesuré en vol YouTube — `ZuN`/`jYd`
+        // kevlar s'appuie sur `F in w` à travers des protos
+        // proxyfiés).
+        let ai = array_index(key);
+        let mut cur = Some(id);
+        let mut pdepth = 0;
+        while let Some(cid) = cur {
+            crate::j17_tick(&crate::J17_PROTO_LVL);
+            if self
+                .heap
+                .obj(cid)
+                .is_some_and(|o| matches!(o.kind, ObjKind::Proxy { .. }))
+            {
+                // Re-entre dans `has_prop` : le bras proxy gère le
+                // trap `has` ou la délégation à la cible.
+                return self.has_prop(cid, key);
+            }
+            if self.find_own_ai(cid, key, ai).is_some() {
+                return Ok(true);
+            }
+            cur = match self.heap.obj(cid).map(|o| o.proto.clone()) {
+                Some(Value::Obj(p)) => Some(p),
+                _ => None,
+            };
+            pdepth += 1;
+            if pdepth > MAX_PROTO_DEPTH {
+                return Ok(false);
+            }
+        }
+        Ok(false)
     }
 
     pub(crate) fn delete_prop(&mut self, id: ObjId, key: &str) -> bool {
@@ -8642,6 +9514,110 @@ impl Engine {
             self.deleg_hop(&mut depth)?;
         }
         let args_ref: &[Value] = args_owned.as_deref().unwrap_or(args);
+        // N1.5 — `bg.a` : invocation de l'entrée VM BotGuard
+        // (`trayride.a` = `K5`, capturée à l'écriture — le code
+        // eval'd n'a pas de `src`, l'identité le remplace).
+        if let Value::Obj(cid) = cur {
+            if cid == BG_ENTRY.load(std::sync::atomic::Ordering::Relaxed) {
+                static BG_A_N: std::sync::atomic::AtomicU32 =
+                    std::sync::atomic::AtomicU32::new(0);
+                let n = BG_A_N.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                if n < 32 {
+                    let (from, _, _) = self.stack_nearest_fn_src(120);
+                    let last = BG_LAST_HOST
+                        .lock()
+                        .map(|g| g.clone())
+                        .unwrap_or_default();
+                    let ring = BG_LAST_RING
+                        .lock()
+                        .map(|r| {
+                            r.iter().cloned().collect::<Vec<_>>().join("→")
+                        })
+                        .unwrap_or_default();
+                    tracing::info!(target: "dom_probe", site = "bg.a",
+                        n = n, id = cid, from = %from, last = %last, tail = %ring);
+                    // N1.5 — capture `V` (arg1) et `w` (arg4) :
+                    // complétion + télémétrie de la machine VM.
+                    if let Some(Value::Obj(vid)) = args_ref.get(1) {
+                        BG_V.store(*vid, std::sync::atomic::Ordering::Relaxed);
+                        eprintln!("[ctxp] bg.v.id={vid}");
+                    }
+                    if let Some(Value::Obj(wid)) = args_ref.get(4) {
+                        BG_WCB.store(*wid, std::sync::atomic::Ordering::Relaxed);
+                        eprintln!("[ctxp] bg.wcb.id={wid}");
+                    }
+                }
+            } else if cid == BG_SPQ.load(std::sync::atomic::Ordering::Relaxed) {
+                static BG_SPQ_N: std::sync::atomic::AtomicU32 =
+                    std::sync::atomic::AtomicU32::new(0);
+                let n = BG_SPQ_N.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                if n < 64 {
+                    let (from, _, _) = self.stack_nearest_fn_src(120);
+                    tracing::info!(target: "dom_probe", site = "bg.spq",
+                        n = n, id = cid, argc = args_ref.len(), from = %from);
+                }
+            } else if cid == BG_V.load(std::sync::atomic::Ordering::Relaxed) {
+                // N1.5 — `bg.v` : la VM appelle la complétion —
+                // `hix` va résoudre (dans un microtask). argc=4
+                // attendu ({bWm,nXe,auT,nXm}).
+                static BG_V_N: std::sync::atomic::AtomicU32 =
+                    std::sync::atomic::AtomicU32::new(0);
+                let n = BG_V_N.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                if n < 16 {
+                    let (from, _, _) = self.stack_nearest_fn_src(120);
+                    tracing::info!(target: "dom_probe", site = "bg.v",
+                        n = n, argc = args_ref.len(), from = %from);
+                }
+            } else if cid == BG_WCB.load(std::sync::atomic::Ordering::Relaxed) {
+                // N1.5 — `bg.wcb` : la VM pousse un code
+                // d'événement — arg0 révèle l'étape atteinte dans
+                // sa machine à états avant l'halt.
+                static BG_WCB_N: std::sync::atomic::AtomicU32 =
+                    std::sync::atomic::AtomicU32::new(0);
+                let n = BG_WCB_N.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                if n < 64 {
+                    let a0 = args_ref
+                        .first()
+                        .map(|v| self.describe(v.clone()))
+                        .unwrap_or_default();
+                    let a1 = args_ref
+                        .get(1)
+                        .map(|v| self.describe(v.clone()))
+                        .unwrap_or_default();
+                    let a2 = args_ref
+                        .get(2)
+                        .map(|v| self.describe(v.clone()))
+                        .unwrap_or_default();
+                    let a3 = args_ref
+                        .get(3)
+                        .map(|v| self.describe(v.clone()))
+                        .unwrap_or_default();
+                    let (from, _, _) = self.stack_nearest_fn_src(120);
+                    tracing::info!(target: "dom_probe", site = "bg.wcb",
+                        n = n, a0 = %a0.chars().take(40).collect::<String>(),
+                        a1 = %a1.chars().take(24).collect::<String>(),
+                        a2 = %a2.chars().take(24).collect::<String>(),
+                        a3 = %a3.chars().take(24).collect::<String>(),
+                        from = %from);
+                }
+            } else if BG_IO_ARMED.load(std::sync::atomic::Ordering::Relaxed) {
+                // N1.5 — `bg.io` : invocation d'un callable de la
+                // chaîne readiness (`wpc`/`wPd`/`jOM`/`hDo`/`a4`/
+                // `io.*`) — nomme le maillon atteint entre `eO`
+                // et le stepper `sPQ`.
+                if let Some(lbl) = bg_io_label(cid) {
+                    static BG_IO_N: std::sync::atomic::AtomicU32 =
+                        std::sync::atomic::AtomicU32::new(0);
+                    let n = BG_IO_N.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                    if n < 96 {
+                        let (from, _, _) = self.stack_nearest_fn_src(120);
+                        tracing::info!(target: "dom_probe", site = "bg.io",
+                            n = n, lbl = lbl, id = cid, argc = args_ref.len(),
+                            from = %from);
+                    }
+                }
+            }
+        }
         let fun = match self.heap.obj(match cur {
             Value::Obj(i) => i,
             _ => return Err(self.type_error("value is not a function")),
@@ -8676,6 +9652,31 @@ impl Engine {
                 Err(self.type_error("bound function dispatch failed"))
             }
             Fun::Script { lit, env, lex_this } => {
+                // N1.5 — sonde `bg.call` : une fonction du fichier
+                // interpréteur BotGuard (`google.com/js/th`) est
+                // invoquée. Bornée (128) — nomme le callee et la
+                // cible la plus proche côté appelant. Tranche
+                // « VM jamais lancée » vs « VM lancée puis halt ».
+                static BG_CALL_N: std::sync::atomic::AtomicU32 =
+                    std::sync::atomic::AtomicU32::new(0);
+                static CTXP: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+                if *CTXP.get_or_init(|| std::env::var_os("EXPLORER_CTX_PROBE").is_some())
+                    && tracing::enabled!(target: "dom_probe", tracing::Level::INFO)
+                    && lit
+                        .src
+                        .as_deref()
+                        .is_some_and(|s| s.contains("google.com/js/th"))
+                {
+                    let n = BG_CALL_N.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                    if n < 128 {
+                        let (from, _, _) = self.stack_nearest_fn_src(120);
+                        tracing::info!(target: "dom_probe", site = "bg.call",
+                            n = n,
+                            callee = %lit.name.as_deref().unwrap_or("<anon>"),
+                            pos = ?lit.pos,
+                            from = %from);
+                    }
+                }
                 // §B-59 : nomme la fonction avant son préambule —
                 // `last_phase=call` figé + `last_fun` nommé =
                 // mort dans le liage/hoist/`arguments` de celle-ci.
@@ -8731,6 +9732,44 @@ impl Engine {
         this: Value,
         args: &[Value],
     ) -> JsResult<Value> {
+        // N1.5 — `bg.host` : native appelé depuis une frame VM
+        // BotGuard (`eval:google.com/js/th`). Chaque appel met à
+        // jour `BG_LAST_HOST` — le reliquat au prochain `bg.a`
+        // = dernier op hôte avant l'arrêt du programme.
+        static BG_HOST_N: std::sync::atomic::AtomicU32 =
+            std::sync::atomic::AtomicU32::new(0);
+        static CTXP: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+        if *CTXP.get_or_init(|| std::env::var_os("EXPLORER_CTX_PROBE").is_some())
+            && tracing::enabled!(target: "dom_probe", tracing::Level::INFO)
+            && self.frame_src_contains("google.com/js/th")
+        {
+            if let Ok(mut g) = BG_LAST_HOST.lock() {
+                *g = name.to_string();
+            }
+            if let Ok(mut ring) = BG_LAST_RING.lock() {
+                ring.push_back(name.to_string());
+                if ring.len() > 24 {
+                    ring.pop_front();
+                }
+            }
+            let n = BG_HOST_N.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            // Bruit interne VM (déobfuscation/strings) filtré du
+            // log — l'anneau lui garde tout.
+            if n < 512
+                && !matches!(
+                    name,
+                    "fromCharCode" | "charCodeAt" | "push" | "toString" | "call"
+                        | "valueOf" | "substring" | "split" | "pop" | "join" | "splice"
+                        | "concat" | "bind" | "freeze" | "setPrototypeOf"
+                        | "hasOwnProperty" | "defineProperty" | "Array" | "random"
+                        | "create" | "indexOf" | "slice" | "atob" | "apply"
+                )
+            {
+                let (from, _, _) = self.stack_nearest_fn_src(80);
+                tracing::info!(target: "dom_probe", site = "bg.host",
+                    n = n, name = name, argc = args.len(), from = %from);
+            }
+        }
         let target = match this {
             Value::Obj(id) => self.ctx_of_objid(id),
             _ => None,
@@ -8802,6 +9841,75 @@ impl Engine {
         // un appel refusé ne laisse pas de résidu dans
         // `error.stack`/`Uncaught`.
         self.call_stack.push(lit.clone());
+        // N1.1 — site d'invocation parallèle : consommé ici,
+        // `(0,0)` si l'appel n'a pas traversé un bras `Call`/
+        // `New` (microtask drain, callback natif…).
+        self.call_sites
+            .push(std::mem::take(&mut self.pending_call_pos));
+        // Cran 66 — sonde d'invocation : les reads `psp.hit`
+        // nomment le callee résolu mais l'émetteur du second
+        // `_readyClients` reste sur des trampolines `.call`/
+        // natives (`<anon>:1:`). Ici le frame est empilé —
+        // quand un lifecycle chaud (`_readyClients`, `_attachDom`,
+        // `_flushClients`, `_enableProperties`, `ready`) tourne
+        // sur un contrôleur (receveur avec `hostElement`), on
+        // nomme le receveur + les appelants JS réels. Filtré
+        // par `enabled!` : zéro coût quand la sonde dort.
+        let life_probe = tracing::enabled!(target: "dom_probe", tracing::Level::INFO)
+            && (matches!(
+                lit.name.as_deref(),
+                Some(
+                    "_readyClients"
+                        | "_attachDom"
+                        | "_flushClients"
+                        | "_enableProperties"
+                        | "ready"
+                        | "connectedCallback"
+                )
+            ) || (lit.name.is_none() && matches!(lit.pos.0, 8950..=8960 | 15670..=15690)));
+        if life_probe {
+            let rid = match &this {
+                Value::Obj(r) => *r,
+                _ => self.global,
+            };
+            let host = self
+                .get_prop(rid, "hostElement")
+                .and_then(|h| self.get_prop_value(h, "localName").ok())
+                .as_ref()
+                .and_then(Self::heap_string_of)
+                .unwrap_or_default();
+            if !host.is_empty() {
+                let frames: Vec<String> = self
+                    .call_stack
+                    .iter()
+                    .rev()
+                    .take(8)
+                    .map(Self::fn_label_of)
+                    .collect();
+                // Les trampolines du second `_readyClients` sont
+                // des `FnLit` sans `src` (`:1:`) — eval/`Function`/
+                // shims moteur : `src_text` porte le corps compilé
+                // et nomme le rail réel.
+                let anon_src: String = self
+                    .call_stack
+                    .iter()
+                    .rev()
+                    .filter(|l| l.src.is_none())
+                    .filter_map(|l| l.src_text.as_deref())
+                    .map(|t| t.chars().take(120).collect::<String>())
+                    .next()
+                    .unwrap_or_default();
+                tracing::info!(
+                    target: "dom_probe",
+                    site = "life.call",
+                    name = %lit.name.as_deref().unwrap_or("?"),
+                    host = %host,
+                    obj = ?rid,
+                    anon = %anon_src,
+                    stk = %frames.join("<")
+                );
+            }
+        }
         // Arrow functions ignore the caller's receiver —
         // `this` was captured at creation time. En sloppy,
         // `this` null/undefined est coercé vers l'objet
@@ -8836,6 +9944,7 @@ impl Engine {
             Err(t) => {
                 self.call_depth -= 1;
                 self.call_stack.pop();
+                self.call_sites.pop();
                 self.strict = outer_strict;
                 return Err(t);
             }
@@ -8845,8 +9954,24 @@ impl Engine {
         // le corps (la liaison s'exécute hors `GExec`, un
         // `await` pendante y jetterait). `lit` reste la
         // référence (`fn.length`, `args_map`).
-        let lowered_fn = (lit.is_gen || lit.is_async)
-            .then(|| crate::interp::lazy::lower_suspend_fn(lit, &body_rc));
+        // JS-C492 — corps baissé partagé par `lit` : un seul
+        // `lower_suspend_fn` par littéral (cache) → adresses
+        // `Expr` stables pour `resolved_map` (avant : réalloué
+        // à chaque appel → `ptr` pendants après mort du `GExec`).
+        let lowered_fn: Option<Rc<LoweredSuspend>> = (lit.is_gen || lit.is_async).then(|| {
+            let key = Rc::as_ptr(lit) as usize;
+            self.lowered_suspend_cache
+                .entry(key)
+                .or_insert_with(|| {
+                    let (params, body) = crate::interp::lazy::lower_suspend_fn(lit, &body_rc);
+                    Rc::new(LoweredSuspend {
+                        _lit: lit.clone(),
+                        params,
+                        body,
+                    })
+                })
+                .clone()
+        });
         // §B-59 : sous-phase « bind » — `last_phase` figé à
         // « bind » = mort dans le liage de paramètres
         // (`bind_pat` × N params, `...rest`, défauts).
@@ -8856,7 +9981,7 @@ impl Engine {
         // Param binding: patterns + `= default` + `...rest`.
         for (i, p) in lowered_fn
             .as_ref()
-            .map_or(&lit.params, |(params, _)| params)
+            .map_or(&lit.params, |lf| &lf.params)
             .iter()
             .enumerate()
         {
@@ -8870,6 +9995,7 @@ impl Engine {
             if let Err(t) = self.bind_pat(&local, this.clone(), &p.pat, v, BindMode::Var) {
                 self.call_depth -= 1;
                 self.call_stack.pop();
+                self.call_sites.pop();
                 return Err(t);
             }
         }
@@ -8910,7 +10036,10 @@ impl Engine {
         if let Ok(mut g) = crate::LAST_PHASE.lock() {
             *g = "hoist";
         }
-        let lowered_body = lowered_fn.as_ref().map(|(_, b)| b.clone());
+        let lowered_body = lowered_fn.as_ref().map(|lf| lf.body.clone());
+        // JS-C490 — annotations de profondeur sur le corps qui
+        // tournera (le corps baissé des gen/async).
+        self.ensure_lit_resolved(lit, lowered_body.as_ref().unwrap_or(&body_rc));
         self.hoist(
             lowered_body.as_deref().map_or(&body_rc[..], |b| &b[..]),
             &local,
@@ -8932,6 +10061,7 @@ impl Engine {
             }
             self.call_depth -= 1;
             self.call_stack.pop();
+            self.call_sites.pop();
             self.strict = outer_strict;
             return Ok(it);
         }
@@ -8958,6 +10088,7 @@ impl Engine {
             }
             self.call_depth -= 1;
             self.call_stack.pop();
+            self.call_sites.pop();
             self.strict = outer_strict;
             return Ok(Value::Obj(prom));
         }
@@ -8984,6 +10115,7 @@ impl Engine {
         let _frame = crate::j17_scope(&crate::J17_FRAME_NS);
         self.call_depth -= 1;
         self.call_stack.pop();
+        self.call_sites.pop();
         self.strict = outer_strict;
 
         match r {
@@ -9350,6 +10482,7 @@ mod eval;
 mod exec;
 pub(crate) mod lazy;
 mod ops;
+mod resolve;
 
 pub(crate) use ops::*;
 
@@ -9654,5 +10787,73 @@ mod tests {
             e.heap.live_count(),
             e.gc_threshold
         );
+    }
+}
+
+#[cfg(test)]
+mod c490_tests {
+    use super::*;
+
+    /// JS-C490 — les identifiants de scope propre sont servis par
+    /// l'annotation du resolveur (hit), jamais par une valeur
+    /// fausse : les lectures doivent retourner les bonnes liaisons
+    /// à travers blocs, boucles, try/catch et captures.
+    #[test]
+    fn c490_resolution_sert_les_bonnes_liaisons() {
+        let mut e = Engine::new();
+        crate::j17_enable();
+        let r = e
+            .eval(
+                "var out=[];\
+                 function f(a){ var b=a+1; { let c=a+b; out.push(c) } return b }\
+                 out.push(f(2));\
+                 function g(){ for(let i=0;i<3;i++){ let d=i*2; out.push(d) } }\
+                 g();\
+                 function h(){ try { let t=9; throw t } catch(e){ out.push(e+1) } }\
+                 h();\
+                 function outer(){ var x=7; return function(){ return x+1 } }\
+                 out.push(outer()());\
+                 out.join(',')",
+            )
+            .unwrap();
+        assert_eq!(format!("{r:?}"), "Str(\"5,3,0,2,4,10,8\")");
+        let hits = crate::J17_RES_HIT.load(std::sync::atomic::Ordering::Relaxed);
+        assert!(
+            hits > 0,
+            "le fast-path doit servir des lectures — hits={hits}"
+        );
+    }
+
+    /// JS-C490e — régression du vol 811 (B1) : une portée
+    /// `for (let/const … in/of)` oubliée sur la pile décalait la
+    /// profondeur de tous les identifiants suivants de la fonction
+    /// englobante → `_` résolu sur le global au lieu du paramètre
+    /// de l'IIFE (`TypeError: cannot set 'we' of Undefined`).
+    #[test]
+    fn c490_forin_forof_ne_fuient_pas_leur_portee() {
+        let mut e = Engine::new();
+        crate::j17_enable();
+        let r = e
+            .eval(
+                "var _ = { mark: 'GLOBAL' };\
+                 (function(_) {\
+                   var f = function(a, b) { for (let d in a) b(a[d], d) };\
+                   var g = function(a) { for (const x of a) x };\
+                   return _.mark\
+                 })({ mark: 'param' })",
+            )
+            .unwrap();
+        assert_eq!(format!("{r:?}"), "Str(\"param\")");
+        // `for` lexical classique couvert par le même garde-fou.
+        let r2 = e
+            .eval(
+                "var v = 'G';\
+                 (function(v) {\
+                   var h = function() { for (let i = 0; i < 1; i++) i };\
+                   return v\
+                 })('P')",
+            )
+            .unwrap();
+        assert_eq!(format!("{r2:?}"), "Str(\"P\")");
     }
 }

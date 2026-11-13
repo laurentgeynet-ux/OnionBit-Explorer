@@ -74,6 +74,11 @@ pub(crate) struct ActiveAnimation {
     /// Déclaration résolue à l'enregistrement.
     pub(crate) decl: AnimationDecl,
     pub(crate) start: Instant,
+    /// `Some(instant)` tant que `animation-play-state:
+    /// paused` est en vigueur — l'horloge de lecture est
+    /// gelée à cet instant (R-255, consommation du longhand
+    /// reconnu par R-233).
+    pub(crate) paused_at: Option<Instant>,
     /// La dernière passe a écrit des surcharges — tant que
     /// c'est vrai, une lecture qui vient de se terminer sans
     /// `fill` doit encore produire **un** reflow pour
@@ -89,17 +94,32 @@ impl ActiveAnimation {
     /// ou qu'un repli final reste à peindre (`applied` +
     /// phase désormais `None`). Une animation terminée en
     /// `forwards` ne retourne pas `true` : sa valeur figée
-    /// est ré-appliquée à chaque passe, sans reflow.
+    /// est ré-appliquée à chaque passe, sans reflow. Une
+    /// animation `paused` n'anime plus : la valeur gelée
+    /// est ré-appliquée sans cadence (pas de tick armé).
     pub(crate) fn playing(&self, now: Instant) -> bool {
+        if self.paused_at.is_some() {
+            return false;
+        }
         let elapsed = now.saturating_duration_since(self.start).as_secs_f64();
         elapsed - self.decl.delay < self.decl.iterations * self.decl.duration
             || (self.applied && self.decl.phase(elapsed).is_none())
+    }
+
+    /// Horloge de lecture : `now`, ou l'instant de pause
+    /// quand la lecture est gelée (`animation-play-state:
+    /// paused` — R-255).
+    pub(crate) fn clock(&self, now: Instant) -> Instant {
+        self.paused_at.unwrap_or(now)
     }
 }
 
 /// Identité de déclaration — un re-style identique ne
 /// redémarre pas l'animation (champ par champ :
 /// `AnimationDecl` ne dérive pas `PartialEq` côté PIPE).
+/// `play_state` est volontairement hors identité : basculer
+/// `paused` ↔ `running` gèle/dégèle l'horloge en place
+/// (R-255), ce n'est **pas** un redémarrage.
 pub(crate) fn same_decl(a: &AnimationDecl, b: &AnimationDecl) -> bool {
     a.name == b.name
         && a.duration.to_bits() == b.duration.to_bits()
@@ -281,7 +301,28 @@ pub(crate) fn sync_animations(
                 .iter()
                 .find(|a| a.elem == ord && a.idx == idx && same_decl(&a.decl, decl));
             fresh.push(if let Some(a) = same {
-                a.clone()
+                let mut a = a.clone();
+                // Bascule `paused` ↔ `running` en place (R-255) :
+                // pause → gel à `now` ; reprise → `start`
+                // décalé de la durée de pause (la phase
+                // reprend où elle s'était arrêtée).
+                if a.decl.play_state != decl.play_state {
+                    use explorer_css::animation::PlayState;
+                    match decl.play_state {
+                        PlayState::Paused => a.paused_at = Some(now),
+                        PlayState::Running => {
+                            if let Some(p) = a.paused_at.take() {
+                                a.start += now.saturating_duration_since(p);
+                            }
+                        }
+                    }
+                }
+                // `composite` est hors identité comme
+                // `play_state` (R-257) : changer de mode ne
+                // redémarre pas la lecture — la déclaration
+                // est rafraîchie en place.
+                a.decl = decl.clone();
+                a
             } else {
                 births.push((node, decl.name.clone()));
                 ActiveAnimation {
@@ -289,6 +330,11 @@ pub(crate) fn sync_animations(
                     idx,
                     decl: decl.clone(),
                     start: now,
+                    paused_at: matches!(
+                        decl.play_state,
+                        explorer_css::animation::PlayState::Paused
+                    )
+                    .then_some(now),
                     applied: false,
                 }
             });
@@ -320,7 +366,10 @@ pub(crate) fn apply_anim_overrides(
         let Some(frames) = eng.keyframes(&a.decl.name) else {
             continue;
         };
-        let elapsed = now.saturating_duration_since(a.start).as_secs_f64();
+        let elapsed = a
+            .clock(now)
+            .saturating_duration_since(a.start)
+            .as_secs_f64();
         let Some(phase) = a.decl.phase(elapsed) else {
             continue;
         };
@@ -328,7 +377,14 @@ pub(crate) fn apply_anim_overrides(
             continue;
         };
         for (k, v) in keyframe_style(frames, phase, a.decl.timing, cs) {
-            cs.set(&k, &v);
+            // `animation-composition` (R-257) : `add`/
+            // `accumulate` combinent la valeur animée à la
+            // valeur courante de `cs` (base ou composition
+            // d'une animation d'index inférieur — spec :
+            // composition par ordre de la liste).
+            let cur = cs.get(&k).unwrap_or_default();
+            let out = explorer_css::animation::composite_value(&k, cur, &v, a.decl.composite);
+            cs.set(&k, &out);
         }
         a.applied = true;
     }

@@ -375,6 +375,10 @@ pub(crate) struct Tab {
     /// `drain_script_net`, cascadé en feuilles auteur document
     /// après `linked_sheets` (ordre spec).
     adopted_sheets: Vec<String>,
+    /// `<style>` inline dont les `@import` ont été expansés
+    /// (étape 218) : texte d'origine → texte expansé —
+    /// substitué par contenu dans `styles_payload`.
+    inline_css_expanded: HashMap<String, String>,
     /// Noms des custom elements définis — gel bfcache du
     /// champ `Tab.defined_names` (registre `customElements`
     /// du miroir, re-poussé dans `Dom::set_defined_names`
@@ -483,6 +487,14 @@ pub(crate) struct Tab {
     /// automatiquement une navigation abandonnée au profit
     /// d'une plus récente (double-clic, script redirect).
     nav_epoch: u64,
+    /// Epoch pour lequel `interactive`/`DOMContentLoaded` a déjà
+    /// été tiré (JS-C471) — anti double-feu quand le cycle est
+    /// livré tôt (post-`nav_apply`, `sub_commit_head` en cours)
+    /// puis re-délivré par `sub_commit_tail`/un bras avorté.
+    doc_dcl_epoch: u64,
+    /// Même garde pour `complete`/`load` — le tail ou un bras
+    /// avorté livre sans re-tirer (JS-C471).
+    doc_load_epoch: u64,
     /// Intentions de navigation en attente (étape 53d) —
     /// input (`Req`) et script (`collect_script_navs` y
     /// déverse `location`/`history`/`form.submit()`) :
@@ -609,6 +621,18 @@ pub(crate) struct Tab {
     /// présent (sinon conservées — la découverte lazy des
     /// registries CE dépend de chaque événement).
     pending_anim_births: std::collections::VecDeque<(explorer_dom::NodeId, String)>,
+    /// Marques `data-explorer-anim` actuellement posées sur
+    /// le miroir (JS-C475 — `getAnimations()` remonte les
+    /// animations CSS déclaratives) : chemin élément →
+    /// `nom` ou `nom|paused`. Vidée à la navigation comme
+    /// `animations` — le diff repart d'un miroir nu.
+    anim_marks: std::collections::HashMap<Vec<(String, u32)>, String>,
+    /// Lecture `scroll-behavior:smooth` en vol (R-259) —
+    /// `(départ, cible, début)` interpolé par
+    /// `advance_animations` sur `smooth_scroll_ms`. Effacée
+    /// à la navigation ; une nouvelle cible repart de la
+    /// position interpolée courante.
+    smooth_scroll: Option<(f32, f32, std::time::Instant)>,
     /// Événements `EventSource` tamponnés pendant le
     /// détachement (JS-C92) — `(ctx, handle, ev)`, même
     /// règle que `js_pending_crypto`.
@@ -725,6 +749,9 @@ pub(crate) struct PageSnapshot {
     /// pompe (`drain_script_net`), cascadé en feuilles auteur
     /// document après `linked_sheets` (ordre spec).
     adopted_sheets: Vec<String>,
+    /// `<style>` inline expansés `@import` (étape 218) —
+    /// gel/restauration comme `linked_sheets`.
+    inline_css_expanded: HashMap<String, String>,
     /// Noms des custom elements définis (`customElements.
     /// define`) — snapshot miroir rafraîchi au même drain ;
     /// poussé dans `Dom::set_defined_names` pour `:defined`
@@ -1058,6 +1085,9 @@ pub struct Session {
     /// Budget du chemin `event.*` sous verrou (Étape 151 /
     /// §B-54 — `event_tail_budget` de config ; `ZERO` = illimité).
     event_tail_budget: std::time::Duration,
+    /// Durée d'une lecture `scroll-behavior:smooth`
+    /// (`smooth_scroll_ms` de config, R-259 — `0` = désarmé).
+    smooth_scroll_ms: u64,
     /// Pages gelées par onglet dans le bfcache
     /// (`bfcache_pages` de config, étape 56).
     bfcache_pages: usize,
@@ -1274,6 +1304,7 @@ impl Session {
             slow_eval_ms: js_glue::SLOW_EVAL_MS,
             poll_net_budget: cfg.poll_net_budget,
             event_tail_budget: cfg.event_tail_budget,
+            smooth_scroll_ms: cfg.smooth_scroll_ms,
             bfcache_pages: cfg.bfcache_pages,
             incremental_syncs: 0,
             dom_journal_max_ops: cfg.dom_journal_max_ops,
@@ -1598,6 +1629,7 @@ impl Session {
                 images: PaintImages::default(),
                 linked_sheets: Vec::new(),
                 adopted_sheets: Vec::new(),
+                inline_css_expanded: HashMap::new(),
                 defined_names: Vec::new(),
                 frames: Vec::new(),
                 frame_ctxs: Vec::new(),
@@ -1617,6 +1649,8 @@ impl Session {
                 transitions: Vec::new(),
                 animations: Vec::new(),
                 nav_epoch: 0,
+                doc_dcl_epoch: 0,
+                doc_load_epoch: 0,
                 frame_epoch: 0,
                 pending_nav: std::collections::VecDeque::new(),
                 pending_nav_reqs: std::collections::VecDeque::new(),
@@ -1639,6 +1673,8 @@ impl Session {
                 js_pending_crypto: Vec::new(),
                 pending_doc_lifecycle: Vec::new(),
                 pending_anim_births: std::collections::VecDeque::new(),
+                anim_marks: std::collections::HashMap::new(),
+                smooth_scroll: None,
                 js_pending_es: Vec::new(),
                 js_pending_ws: Vec::new(),
                 js_pending_attrs: Vec::new(),

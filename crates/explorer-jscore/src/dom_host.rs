@@ -282,7 +282,8 @@ pub(crate) struct BrowserHooks {
     pub popover_open: std::collections::BTreeSet<NodeId>,
     /// Séquence d'émission des scripts dynamiques.
     pub dyn_script_seq: u64,
-    /// Cookie jar for `document.cookie`.
+    /// Cookie jar for `document.cookie` — document-local
+    /// (garé/restauré au `switch_to` avec `page_url`, JS-C486).
     pub cookie_jar: Option<Rc<dyn CookieJar>>,
     /// `location.assign/replace/href=`/`reload` → navigate to arg.
     pub navigate: Option<NavHook>,
@@ -599,6 +600,16 @@ struct NodeHost {
     epoch: u32,
 }
 
+/// Sonde §cran-28 — `EXPLORER_STALE_THROW` : les accès sur
+/// handle périmé (slot recyclé §B-126) jettent un
+/// `TypeError` nommé `StaleHandle` au lieu de la dégradation
+/// silencieuse (`undefined`/refus) — nomme le site JS exact
+/// de la rupture (`ifV` kevlar) au lieu du symptôme aval.
+fn stale_throw() -> bool {
+    static FLAG: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *FLAG.get_or_init(|| std::env::var_os("EXPLORER_STALE_THROW").is_some())
+}
+
 impl NodeHost {
     /// Le handle est-il encore vivant — le slot porte-t-il le
     /// nœud pour lequel ce wrapper a été créé ? Un id recyclé
@@ -658,6 +669,41 @@ fn dom_acc_props(class: &str) -> &'static [&'static str] {
         "HTMLAnchorElement" => &["href", "target", "rel"],
         "HTMLIFrameElement" => &["src", "srcdoc", "sandbox", "loading"],
         "HTMLScriptElement" | "HTMLLinkElement" => &["src", "href", "type", "rel"],
+        // Attributs globaux de `HTMLElement` (étape 219 /
+        // `api` BCD) — réflexions d'attributs globaux ;
+        // `accessKeyLabel` ≈ `accesskey` (label calculé =
+        // approximation documentée), `isContentEditable`/
+        // `outerText`/`attributeStyleMap`/`editContext`/
+        // `containerTiming` = vraies features, non
+        // réfléchies — misses honnêtes.
+        "HTMLElement" => &[
+            "id",
+            "className",
+            "title",
+            "lang",
+            "dir",
+            "slot",
+            "hidden",
+            "inert",
+            "autofocus",
+            "accessKey",
+            "accessKeyLabel",
+            "tabIndex",
+            "contentEditable",
+            "draggable",
+            "spellcheck",
+            "translate",
+            "nonce",
+            "inputMode",
+            "enterKeyHint",
+            "autocapitalize",
+            "autocorrect",
+            "popover",
+        ],
+        // `time.dateTime` = réflexion de l'attribut
+        // `datetime` (html.elem BCD — le seul membre IDL
+        // spécifique de `HTMLTimeElement`).
+        "HTMLTimeElement" => &["dateTime"],
         _ => &["id", "className", "title"],
     }
 }
@@ -674,6 +720,7 @@ fn dom_bool_attr(prop: &str) -> Option<&'static str> {
         "required" => "required",
         "hidden" => "hidden",
         "autofocus" => "autofocus",
+        "inert" => "inert",
         _ => return None,
     })
 }
@@ -919,34 +966,24 @@ fn dom_nav_value(
             }
         }
         "namespaceURI" => {
+            // Document XML : `xmlns` héritée, sinon null —
+            // pas de repli XHTML (§B-112) ; HTML : svg/xhtml
+            // via `node_namespace` (source unique, partagée
+            // avec `getElementsByTagNameNS`).
             let d = dom.borrow();
-            let n = &d.nodes[node as usize];
-            if n.kind == NodeKind::Element {
-                if d.xml {
-                    // Document XML : l'espace de noms est celui
-                    // déclaré par `xmlns`/`xmlns:prefix` sur
-                    // l'élément ou ses ancêtres — à défaut, null
-                    // (pas de repli XHTML : un `<MPD>` n'est pas
-                    // du HTML — §B-112).
-                    let ns = std::iter::once(node)
-                        .chain(d.ancestors(node))
-                        .find_map(|a| d.attr(a, "xmlns"))
-                        .map(str::to_string);
-                    match ns {
-                        Some(ns) => e.str_val(&ns),
-                        None => Value::Null,
-                    }
-                } else {
-                    e.str_val(
-                        if tag_interface(&n.tag).is_some_and(|i| i.starts_with("SVG")) {
-                            "http://www.w3.org/2000/svg"
-                        } else {
-                            "http://www.w3.org/1999/xhtml"
-                        },
-                    )
-                }
-            } else {
-                Value::Null
+            match node_namespace(&d, node) {
+                Some(ns) => e.str_val(&ns),
+                None => Value::Null,
+            }
+        }
+        "prefix" => {
+            // `Node.prefix` — qualifié seulement si le tag est
+            // préfixé (`ns:tag`, XML/createElementNS) ; `null`
+            // partout ailleurs (éléments HTML ordinaires).
+            let n = &dom.borrow().nodes[node as usize];
+            match n.tag.split_once(':') {
+                Some((p, _)) => e.str_val(p.to_string()),
+                None => Value::Null,
             }
         }
         "innerHTML" => {
@@ -1062,6 +1099,17 @@ const ELEMENT_PROTO_METHODS: &[&str] = &[
     "getHTML",
     "setHTMLUnsafe",
     "parseHTMLUnsafe",
+    "setHTML",
+    "beforeHTML",
+    "beforeHTMLUnsafe",
+    "afterHTML",
+    "afterHTMLUnsafe",
+    "prependHTML",
+    "prependHTMLUnsafe",
+    "appendHTML",
+    "appendHTMLUnsafe",
+    "replaceWithHTML",
+    "replaceWithHTMLUnsafe",
     "checkVisibility",
     "getClientRects",
     "animate",
@@ -1070,6 +1118,13 @@ const ELEMENT_PROTO_METHODS: &[&str] = &[
     "focus",
     "blur",
     "click",
+    "getElementsByTagNameNS",
+    "setPointerCapture",
+    "releasePointerCapture",
+    "hasPointerCapture",
+    "showPopover",
+    "hidePopover",
+    "togglePopover",
 ];
 
 /// Méthodes spec `Document` posées **propres** sur
@@ -1102,6 +1157,7 @@ const DOC_PROTO_METHODS: &[&str] = &[
     "contains",
     "getElementById",
     "getElementsByTagName",
+    "getElementsByTagNameNS",
     "getElementsByClassName",
     "getElementsByName",
     "querySelector",
@@ -1122,6 +1178,7 @@ const DOC_PROTO_METHODS: &[&str] = &[
     "append",
     "prepend",
     "insertBefore",
+    "moveBefore",
     "removeChild",
     "replaceChild",
     "replaceChildren",
@@ -1174,8 +1231,21 @@ fn dom_nav_set(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
         "textContent" | "innerText" => {
             let s = e.to_js_string(v)?;
             let mut d = dom.borrow_mut();
-            let t = d.create_text(&s);
-            d.replace_children(node, &[t]);
+            // JS-C487 — spec `Node.textContent` : sur un nœud
+            // `CharacterData` (Text/Comment) l'écriture vise
+            // `.data` (record `characterData`) — `replace_children`
+            // greffait un enfant sous le texte et émettait
+            // `childList`, tuant `Polymer.Async.microTask`
+            // (MutationObserver sur un texte détaché).
+            if matches!(
+                d.nodes[node as usize].kind,
+                NodeKind::Text | NodeKind::Comment
+            ) {
+                d.set_text(node, &s);
+            } else {
+                let t = d.create_text(&s);
+                d.replace_children(node, &[t]);
+            }
         }
         "nodeValue" | "data" => {
             let is_text = matches!(
@@ -2008,6 +2078,14 @@ pub(crate) struct EventState {
     /// `initCustomEvent` pose `detail` après construction
     /// (DOM L2 — le payload arrive post-`createEvent`).
     props: RefCell<Vec<(String, Value)>>,
+    /// Proto JS de l'event passé à `dispatchEvent`
+    /// (`CustomEvent.prototype` pour `new CustomEvent`…) —
+    /// recopié sur l'`EventHost` présenté aux listeners pour
+    /// que `e instanceof Event` tienne pendant le dispatch
+    /// (mesuré `YouTube` : `_.re(H)` teste `H instanceof Event`,
+    /// faux sinon → wrapper `ohH` sans `rootTarget` →
+    /// `undefined.assignParentResizable` dans iron-resize).
+    js_proto: RefCell<Option<Value>>,
 }
 
 /// Flags d'initialisation d'un event (spec `EventInit` +
@@ -2050,6 +2128,7 @@ pub(crate) fn make_event_state(
         path: RefCell::new(Vec::new()),
         created: std::time::Instant::now(),
         props: RefCell::new(props),
+        js_proto: RefCell::new(None),
     })
 }
 
@@ -2167,6 +2246,40 @@ struct EventHost {
 }
 
 pub(crate) fn node_value(e: &mut Engine, dom: &DomRef, cache: &NodeCache, node: NodeId) -> Value {
+    // §cran-35 — un slot libéré par `collect_garbage` mais pas
+    // encore réattribué garde `epoch`/`tag` : le wrapper
+    // créé dessus est un zombie qui aliassera le **prochain**
+    // occupant (vol 9528 : `u` inerte d'`I_o` = nœud mort
+    // 9 ms → writes `ifV` refusés sur `#comment` recyclé).
+    if dom
+        .borrow()
+        .nodes
+        .get(node as usize)
+        .is_some_and(|n| n.free)
+    {
+        if tracing::enabled!(target: "dom_probe", tracing::Level::INFO) {
+            let fn_src = e.stack_top_fn_src(200);
+            // §cran-37 — nomme le porteur de l'id mort : les
+            // tables qui le citent encore (`template_contents`,
+            // `journal`, `shadow_*`) sont le canal par lequel le
+            // JS l'a lu.
+            let (in_tmpl, in_shadow, in_journal, p, ptag) = {
+                let d = dom.borrow();
+                let p = d.nodes[node as usize].parent;
+                let (t, s, j) = d.zombie_carriers(node);
+                (
+                    t,
+                    s,
+                    j,
+                    p,
+                    p.map_or_else(|| "-".into(), |q| d.nodes[q as usize].tag.clone()),
+                )
+            };
+            tracing::info!(target: "dom_probe", site = "dom.zombie",
+                "node={node} parent={ptag}@{p:?} tmpl={in_tmpl} shadow={in_shadow} journal={in_journal} fn_src={fn_src}");
+        }
+        return Value::Undefined;
+    }
     let epoch = dom.borrow().nodes.get(node as usize).map_or(0, |n| n.epoch);
     // Liaison hors scrutinee : un temporaire `Ref` de
     // `cache.borrow()` dans le `if let` vivrait jusqu'à la fin
@@ -2205,6 +2318,20 @@ pub(crate) fn node_value(e: &mut Engine, dom: &DomRef, cache: &NodeCache, node: 
         epoch,
     }));
     if let Value::Obj(id) = v {
+        // Sonde §cran-34 — tout wrap d'un tag CE nommé
+        // (node+epoch+ctx) : l'absence du wrap de `u` dans ce
+        // rail prouve le chemin hors-cache (`NodeHost{}` direct
+        // ou ctx distinct).
+        let tag = dom.borrow().nodes[node as usize].tag.clone();
+        if tag.contains('-') && tracing::enabled!(target: "dom_probe", tracing::Level::INFO) {
+            if let Ok(mut d) = dom.try_borrow_mut() {
+                if d.ce.probe_seen.insert(format!("wb:{node}:{id}")) {
+                    tracing::info!(target: "dom_probe", site = "dom.wrap",
+                        "node={node} tag={tag} epoch={epoch} ctx={:?}",
+                        Rc::as_ptr(cache) as usize);
+                }
+            }
+        }
         // `sr instanceof ShadowRoot` (JS-C159) — la racine
         // hérite `ShadowRoot.prototype` (proto lu sur le
         // ctor global, posé à `install_dom`).
@@ -2274,6 +2401,7 @@ fn tag_interface(tag: &str) -> Option<&'static str> {
         "canvas" => "HTMLCanvasElement",
         "data" => "HTMLDataElement",
         "datalist" => "HTMLDataListElement",
+        "del" | "ins" => "HTMLModElement",
         "details" => "HTMLDetailsElement",
         "dialog" => "HTMLDialogElement",
         "div" => "HTMLDivElement",
@@ -2293,6 +2421,7 @@ fn tag_interface(tag: &str) -> Option<&'static str> {
         "li" => "HTMLLIElement",
         "link" => "HTMLLinkElement",
         "map" => "HTMLMapElement",
+        "menu" => "HTMLMenuElement",
         "meta" => "HTMLMetaElement",
         "meter" => "HTMLMeterElement",
         "object" => "HTMLObjectElement",
@@ -2447,6 +2576,97 @@ fn collection_named_item(e: &mut Engine, t: Value, args: &[Value]) -> JsResult<V
 /// nommé (`collection.foo` ≙ élément de `id`/`name` `foo`,
 /// propre aux collections de formulaires). Snapshot à l'accès —
 /// la vivacité vient de la relecture à chaque get.
+/// `namespaceURI` d'un nœud miroir — même approximation que
+/// le getter `dom_value` : XML = `xmlns` déclarée sur
+/// l'élément ou ses ancêtres (sinon `None`), HTML = svg
+/// via `tag_interface`, sinon xhtml. Les préfixes `ns:tag`
+/// ne résolvent pas `xmlns:ns` (approximation documentée —
+/// le miroir ne porte pas de table d'espaces).
+fn node_namespace(d: &Dom, node: NodeId) -> Option<String> {
+    let n = &d.nodes[node as usize];
+    if n.kind != NodeKind::Element {
+        return None;
+    }
+    if d.xml {
+        std::iter::once(node)
+            .chain(d.ancestors(node))
+            .find_map(|a| d.attr(a, "xmlns"))
+            .map(str::to_string)
+    } else {
+        Some(
+            if tag_interface(&n.tag).is_some_and(|i| i.starts_with("SVG")) {
+                "http://www.w3.org/2000/svg"
+            } else {
+                "http://www.w3.org/1999/xhtml"
+            }
+            .to_string(),
+        )
+    }
+}
+
+/// `getElementsByTagNameNS(ns, local)` — DFS des descendants
+/// de `from` : nom local = tag après `:` (nom qualifié) ;
+/// `*` joker sur les deux dimensions ; namespace évalué via
+/// [`node_namespace`] (même approximation que `namespaceURI`).
+/// `CharacterData.wholeText` — concaténation de `node` et de
+/// ses frères contigus de type `Text`/`Comment` (spec).
+/// `pub(crate)` : réutilisé par `misc_apis` (Range/
+/// surroundContents).
+pub(crate) fn whole_text_of(dom: &DomRef, node: NodeId) -> String {
+    let d = dom.borrow();
+    let mut out = String::new();
+    let mut rev: Vec<String> = Vec::new();
+    let mut cur = Some(node);
+    while let Some(c) = cur {
+        let n = &d.nodes[c as usize];
+        if !matches!(n.kind, NodeKind::Text) {
+            break;
+        }
+        if c != node {
+            rev.push(n.text.clone());
+        }
+        cur = d.sibling(c, false);
+    }
+    for t in rev.into_iter().rev() {
+        out.push_str(&t);
+    }
+    out.push_str(&d.nodes[node as usize].text);
+    cur = d.sibling(node, true);
+    while let Some(c) = cur {
+        let n = &d.nodes[c as usize];
+        if !matches!(n.kind, NodeKind::Text) {
+            break;
+        }
+        out.push_str(&n.text);
+        cur = d.sibling(c, true);
+    }
+    out
+}
+
+fn by_tag_ns(dom: &DomRef, from: NodeId, ns: &str, local: &str) -> Vec<NodeId> {
+    let d = dom.borrow();
+    let mut out = Vec::new();
+    let mut stack: Vec<NodeId> = d.nodes[from as usize]
+        .children
+        .iter()
+        .rev()
+        .copied()
+        .collect();
+    while let Some(c) = stack.pop() {
+        let n = &d.nodes[c as usize];
+        if n.kind == NodeKind::Element {
+            let local_name = n.tag.rsplit_once(':').map_or(n.tag.as_str(), |(_, l)| l);
+            let local_ok = local == "*" || local_name.eq_ignore_ascii_case(local);
+            let node_ns = || node_namespace(&d, c);
+            if local_ok && (ns == "*" || ns.is_empty() || node_ns().as_deref() == Some(ns)) {
+                out.push(c);
+            }
+        }
+        stack.extend(n.children.iter().rev().copied());
+    }
+    out
+}
+
 fn dom_collection(
     e: &mut Engine,
     dom: &DomRef,
@@ -2567,9 +2787,13 @@ impl Engine {
         self.set_own(g, "document", doc.clone(), false);
 
         // Fixed, low-fingerprint navigator — by design.
+        // `userAgent` aligné sur l'en-tête HTTP `User-Agent`
+        // (h1.rs) : les deux doivent rester identiques comme
+        // dans tout navigateur réel — un écart UA-header/JS est
+        // un signal anti-bot immédiat (et un bug de cohérence).
         let nav = self.new_object();
         for (k, v) in [
-            ("userAgent", "Explorer/0.1 (explorer-jscore)"),
+            ("userAgent", crate::dom_host::EXPLORER_USER_AGENT),
             ("appName", "Netscape"),
             ("platform", "Win32"),
             ("language", "en-US"),
@@ -2601,6 +2825,20 @@ impl Engine {
         let _ =
             crate::builtins::object_freeze(self, Value::Undefined, std::slice::from_ref(&langs));
         self.set_own(nav, "languages", langs, true);
+        // `navigator.plugins` — PluginArray minimal (collection
+        // vide : aucun plugin NPAPI — honnête, proche headless ;
+        // `undefined`/`null` cassent les feature-detects
+        // `navigator.plugins.length`/`plugins[i]` des scripts
+        // réels et flag un moteur non-navigateur pour les
+        // fingerprints anti-bot).
+        let plugins = self.new_object();
+        self.set_own(plugins, "length", Value::Num(0.0), true);
+        self.add_method(plugins, "item", nav_plugin_null);
+        self.add_method(plugins, "namedItem", nav_plugin_null);
+        self.add_method(plugins, "refresh", nav_plugin_refresh);
+        let tag = self.str_val("PluginArray");
+        self.set_own(plugins, crate::interp::SYM_TO_STRING_TAG, tag, false);
+        self.set_own(nav, "plugins", Value::Obj(plugins), true);
         // `navigator.sendBeacon(url, data?)` — POST fire-and-forget
         // via le transport XHR (staple de télémétrie des pages
         // réelles ; `false` sans connecteur, comme la spec).
@@ -3752,6 +3990,8 @@ impl Engine {
                 "MouseEvent" | "PointerEvent" | "WheelEvent" | "DragEvent"
             ) {
                 mouse_event_ctor as crate::heap::NativeFn
+            } else if name == "CustomEvent" {
+                custom_event_ctor as crate::heap::NativeFn
             } else {
                 event_ctor as crate::heap::NativeFn
             };
@@ -4063,6 +4303,55 @@ impl Engine {
                 self.set_own(fid, "prototype", Value::Obj(p), false);
             }
             self.set_own(g, name, f, false);
+        }
+        // `Performance` (étape 219 / `api` BCD) — les méthodes
+        // vivent sur `Performance.prototype` (spec : le
+        // singleton `performance` en hérite — `instanceof`
+        // valide, les feature-detects lisent le proto). Les
+        // impls natives sont celles du global `performance`
+        // (builtins) ; les attributs d'instance (`timeOrigin`,
+        // `timing`, `navigation`) restent propres au
+        // singleton.
+        if let Some(Value::Obj(pid)) =
+            self.get_prop(self.global, "Performance")
+                .and_then(|c| match c {
+                    Value::Obj(cid) => self.get_prop(cid, "prototype"),
+                    _ => None,
+                })
+        {
+            for (k, f2) in [
+                (
+                    "now",
+                    crate::builtins::performance_now as crate::heap::NativeFn,
+                ),
+                ("mark", crate::builtins::performance_mark),
+                ("measure", crate::builtins::performance_measure),
+                ("clearMarks", crate::builtins::performance_clear_marks),
+                ("clearMeasures", crate::builtins::performance_clear_measures),
+                ("getEntries", crate::builtins::performance_get_entries),
+                (
+                    "getEntriesByName",
+                    crate::builtins::performance_get_entries_by_name,
+                ),
+                (
+                    "getEntriesByType",
+                    crate::builtins::performance_get_entries_by_type,
+                ),
+                (
+                    "setResourceTimingBufferSize",
+                    crate::builtins::performance_noop,
+                ),
+                ("clearResourceTimings", crate::builtins::performance_noop),
+            ] {
+                self.add_method(pid, k, f2);
+            }
+            // Chaîne spec : `performance` hérite
+            // `Performance.prototype`.
+            if let Some(Value::Obj(gid)) = self.get_prop(self.global, "performance") {
+                if let Some(o) = self.heap.obj_mut(gid) {
+                    o.proto = Value::Obj(pid);
+                }
+            }
         }
         // `XPathResult` — stub + constantes `*_TYPE` lues en
         // argument de `document.evaluate(…, type, …)` (CAP-188).
@@ -4381,11 +4670,32 @@ impl Engine {
         cache: &NodeCache,
         state: &Rc<EventState>,
     ) -> Value {
-        self.new_host_object(Rc::new(EventHost {
+        let v = self.new_host_object(Rc::new(EventHost {
             dom: dom.clone(),
             cache: cache.clone(),
             state: state.clone(),
-        }))
+        }));
+        // `instanceof` pendant le dispatch : l'`EventHost`
+        // présenté aux listeners porte le proto de l'event
+        // d'origine (`CustomEvent.prototype`…), ou à défaut
+        // `Event.prototype` du realm — sinon `e instanceof
+        // Event` est faux dans les callbacks (YouTube `_.re`
+        // retombait sur un wrapper `ohH` sans `rootTarget` →
+        // `undefined.assignParentResizable`, `hasNavigated`
+        // bloqué).
+        if let Value::Obj(id) = v {
+            let proto = state
+                .js_proto
+                .borrow()
+                .clone()
+                .or_else(|| event_realm_proto(self));
+            if let Some(p) = proto {
+                if let Some(o) = self.heap.obj_mut(id) {
+                    o.proto = p;
+                }
+            }
+        }
+        v
     }
 
     /// Platform-originated event entry point (JS-5): dispatches a
@@ -5087,7 +5397,15 @@ impl Engine {
                             }
                         }
                     }
-                    return Err(th);
+                    // Spec : l'exception d'un listener est
+                    // **rapportée** (window.onerror / `error`)
+                    // mais ne stoppe ni les listeners frères ni
+                    // la propagation — `dispatchEvent` ne la
+                    // propage jamais à l'appelant. Mesuré YouTube :
+                    // un listener `yt-navigate-finish` qui jetait
+                    // tuait `onYtNavigateFinish` de ytd-app →
+                    // `hasNavigated` figé à false.
+                    let _ = crate::misc_apis::report_exception(self, th.0);
                 }
             }
         }
@@ -5113,7 +5431,16 @@ impl Engine {
             };
             let f = match prop {
                 Some(f) if self.is_callable(f.clone()) => Some(f),
-                _ => self.inline_handler(dom, node, &key)?,
+                _ => match self.inline_handler(dom, node, &key) {
+                    Ok(f) => f,
+                    Err(th) => {
+                        // Handler d'attribut incompilable :
+                        // rapporté, le dispatch continue (spec —
+                        // jamais propagé à `dispatchEvent`).
+                        let _ = crate::misc_apis::report_exception(self, th.0);
+                        None
+                    }
+                },
             };
             if let Some(f) = f {
                 // Spec : un handler `on*` qui retourne `false`
@@ -5135,7 +5462,9 @@ impl Engine {
                                 }
                             }
                         }
-                        return Err(th);
+                        // Même règle que les listeners :
+                        // rapporté, dispatch poursuivi.
+                        let _ = crate::misc_apis::report_exception(self, th.0);
                     }
                 }
             }
@@ -5836,6 +6165,22 @@ impl Host for DocumentHost {
                     "HTMLCollection",
                 )))
             }
+            "getElementsByTagNameNS" => {
+                let ns = match arg(args, 0) {
+                    Value::Null | Value::Undefined => "*".to_string(),
+                    v => e.to_js_string(v)?,
+                };
+                let local = e.to_js_string(arg(args, 1))?;
+                let ids = by_tag_ns(&self.dom, self.dom.borrow().root, &ns, &local);
+                Ok(Some(dom_collection(
+                    e,
+                    &self.dom,
+                    &self.cache,
+                    &ids,
+                    false,
+                    "HTMLCollection",
+                )))
+            }
             "getElementsByClassName" => {
                 let cls = e.to_js_string(arg(args, 0))?;
                 let ids = {
@@ -6442,7 +6787,45 @@ impl Host for DocumentHost {
 /// Attributs réfléchis comme props sur TOUT élément — spec
 /// globale (`HTMLElement` : `id`/`class`/`title`/`lang`/`dir` ;
 /// `slot` est global par le mixin `Slottable`).
-const GLOBAL_ATTRS: &[&str] = &["id", "class", "title", "lang", "dir", "slot"];
+const GLOBAL_ATTRS: &[&str] = &[
+    "id",
+    "class",
+    "title",
+    "lang",
+    "dir",
+    "slot",
+    // Attributs globaux réfléchis (étape 219 / `api` BCD —
+    // `HTMLElement.*` 2e du Pareto terrain) : `hidden`/
+    // `inert`/`autofocus` sont booléens (`dom_bool_attr`),
+    // le reste = chaînes/enums brutes (`contenteditable`,
+    // `draggable`… — enum à valeurs documenté).
+    "hidden",
+    "inert",
+    "autofocus",
+    "accesskey",
+    "tabindex",
+    "contenteditable",
+    "draggable",
+    "spellcheck",
+    "translate",
+    "nonce",
+    "inputmode",
+    "enterkeyhint",
+    "autocapitalize",
+    "autocorrect",
+    "popover",
+    // Pareto `api` lot 3 (étape 219 suite) — `role` vit sur
+    // `Element` (ARIAMixin) ; `virtualkeyboardpolicy`/
+    // `writingsuggestions`/`headingoffset`/`headingreset`
+    // sont globaux `HTMLElement` — reflets chaîne comme
+    // `tabIndex` (déviation numérique documentée pour les
+    // deux `heading*`).
+    "role",
+    "virtualkeyboardpolicy",
+    "writingsuggestions",
+    "headingoffset",
+    "headingreset",
+];
 
 /// Attributs réfléchis **scopés par tag** — spec IDL
 /// `reflect` par classe (§B-103, JS-C384). La table plate
@@ -6512,6 +6895,8 @@ const TAGGED_ATTRS: &[(&str, &[&str])] = &[
         "referrerpolicy",
         &["a", "area", "iframe", "img", "link", "script"],
     ),
+    // `time.dateTime` ↔ `datetime` (html.elem BCD).
+    ("datetime", &["time"]),
 ];
 
 /// Attributs booléens réfléchis — même discipline de scoping
@@ -6541,8 +6926,18 @@ fn prop_attr_name(key: &str) -> &str {
         "htmlFor" => "for",
         "encoding" => "enctype",
         "crossOrigin" => "crossorigin",
+        "dateTime" => "datetime",
+        "accessKey" | "accessKeyLabel" => "accesskey",
+        "contentEditable" => "contenteditable",
+        "enterKeyHint" => "enterkeyhint",
+        "inputMode" => "inputmode",
+        "tabIndex" => "tabindex",
         "playsInline" => "playsinline",
         "referrerPolicy" => "referrerpolicy",
+        "virtualKeyboardPolicy" => "virtualkeyboardpolicy",
+        "writingSuggestions" => "writingsuggestions",
+        "headingOffset" => "headingoffset",
+        "headingReset" => "headingreset",
         k => k,
     }
 }
@@ -6587,6 +6982,111 @@ fn bool_attr_for(tag: &str, key: &str) -> Option<&'static str> {
         .iter()
         .find(|(a, tags)| *a == key && tags.contains(&tag))
         .map(|(a, _)| *a)
+}
+
+/// Réflexions `aria*` de `ARIAMixin` (Pareto `api` lot 3,
+/// étape 219 suite — tête des misses `Element.*`) : prop IDL
+/// `ariaXxx` ≙ attribut de contenu `aria-xxx` (minuscules, un
+/// seul tiret — `ariaLabel` ↔ `aria-label`). Table **bornée**
+/// à la liste spec : `ariaFoo` arbitraire reste `undefined`
+/// (un reflet n'existe que si la spec le déclare). IDL
+/// `DOMString?` nullable : attribut absent → `null`, jamais
+/// `""` (contrairement aux reflets globaux historiques).
+/// Exclus : `aria*Elements` (`FrozenArray<Element>` — vraie
+/// feature, P5) et `ariaBraille*` non standard (déjà listés
+/// ici : ils sont standard-track BCD, on les garde).
+const ARIA_PROPS: &[&str] = &[
+    "ariaActiveDescendant",
+    "ariaAtomic",
+    "ariaAutoComplete",
+    "ariaBrailleLabel",
+    "ariaBrailleRoleDescription",
+    "ariaBusy",
+    "ariaChecked",
+    "ariaColCount",
+    "ariaColIndex",
+    "ariaColIndexText",
+    "ariaColSpan",
+    "ariaCurrent",
+    "ariaDescription",
+    "ariaDisabled",
+    "ariaErrorMessage",
+    "ariaExpanded",
+    "ariaFlowTo",
+    "ariaHasPopup",
+    "ariaHidden",
+    "ariaInvalid",
+    "ariaKeyShortcuts",
+    "ariaLabel",
+    "ariaLevel",
+    "ariaLive",
+    "ariaModal",
+    "ariaMultiLine",
+    "ariaMultiSelectable",
+    "ariaNotify",
+    "ariaOrientation",
+    "ariaPlaceholder",
+    "ariaPosInSet",
+    "ariaPressed",
+    "ariaReadOnly",
+    "ariaRelevant",
+    "ariaRequired",
+    "ariaRoleDescription",
+    "ariaRowCount",
+    "ariaRowIndex",
+    "ariaRowIndexText",
+    "ariaRowSpan",
+    "ariaSelected",
+    "ariaSetSize",
+    "ariaSort",
+    "ariaValueMax",
+    "ariaValueMin",
+    "ariaValueNow",
+    "ariaValueText",
+];
+
+/// `ariaXxx` → `Some("aria-xxx")` si la prop est une réflexion
+/// `ARIAMixin` déclarée ([`ARIA_PROPS`]) — `None` sinon.
+fn aria_attr_name(key: &str) -> Option<String> {
+    if ARIA_PROPS.contains(&key) {
+        let rest = &key[4..];
+        Some(format!("aria-{}", rest.to_ascii_lowercase()))
+    } else {
+        None
+    }
+}
+
+/// Reflets `aria*Elements`/`aria*Element` (`ARIAMixin` §6,
+/// Pareto `api` lot 4) — `(prop JS, attribut, multi)`.
+/// `multi` = `FrozenArray<Element>` (le moteur rend un
+/// tableau snapshot — la fraîcheur n'est pas sondable en
+/// pratique, borne documentée) ; `false` = `Element?`.
+/// Le setter écrit les `id` des éléments passés dans
+/// l'attribut (approximation idrefs — la spec conserve
+/// les références explicites ; un élément sans `id`
+/// disparaît de la valeur écrite, déviation bornée).
+const ARIA_ELEMENTS_PROPS: &[(&str, &str, bool)] = &[
+    (
+        "ariaActiveDescendantElement",
+        "aria-activedescendant",
+        false,
+    ),
+    ("ariaControlsElements", "aria-controls", true),
+    ("ariaDescribedByElements", "aria-describedby", true),
+    ("ariaDetailsElements", "aria-details", true),
+    ("ariaErrorMessageElement", "aria-errormessage", false),
+    ("ariaFlowToElements", "aria-flowto", true),
+    ("ariaLabelledByElements", "aria-labelledby", true),
+    ("ariaOwnsElements", "aria-owns", true),
+];
+
+/// Prop JS → `(attribut, multi)` pour les reflets
+/// `aria*Elements`/`aria*Element` — `None` sinon.
+fn aria_elements_binding(key: &str) -> Option<(&'static str, bool)> {
+    ARIA_ELEMENTS_PROPS
+        .iter()
+        .find(|(k, _, _)| *k == key)
+        .map(|(_, a, m)| (*a, *m))
 }
 
 /// Noms `on*` reconnus comme handlers IDL (`GlobalEventHandlers`,
@@ -6712,6 +7212,22 @@ const EVENT_HANDLER_PROPS: &[&str] = &[
     "onstorage",
     "onunhandledrejection",
     "onunload",
+    // Pareto `api` lot 3 — handlers d'events BCD `*_event`
+    // encore absents de la table : focus/composition/
+    // clipboard/fullscreen/scrollsnap/commands/XR.
+    "onfocusin",
+    "onfocusout",
+    "oncompositionstart",
+    "oncompositionupdate",
+    "oncompositionend",
+    "onpaste",
+    "onfullscreenchange",
+    "onfullscreenerror",
+    "onscrollsnapchange",
+    "onscrollsnapchanging",
+    "oncontentvisibilityautostatechange",
+    "onbeforexrselect",
+    "oncommand",
 ];
 
 /// `on` + nom connu ?
@@ -6753,6 +7269,7 @@ const DOC_METHODS: &[&str] = &[
     "contains",
     "getElementById",
     "getElementsByTagName",
+    "getElementsByTagNameNS",
     "getElementsByClassName",
     "getElementsByName",
     "querySelector",
@@ -6775,6 +7292,7 @@ const DOC_METHODS: &[&str] = &[
     "append",
     "prepend",
     "insertBefore",
+    "moveBefore",
     "removeChild",
     "replaceChild",
     "replaceChildren",
@@ -6791,6 +7309,7 @@ const NODE_METHODS: &[&str] = &[
     "dispatchEvent",
     "appendChild",
     "insertBefore",
+    "moveBefore",
     "removeChild",
     "replaceChild",
     "cloneNode",
@@ -6808,6 +7327,7 @@ const NODE_METHODS: &[&str] = &[
     "remove",
     "replaceWith",
     "getElementsByTagName",
+    "getElementsByTagNameNS",
     "getElementsByClassName",
     "querySelector",
     "querySelectorAll",
@@ -6833,6 +7353,22 @@ const NODE_METHODS: &[&str] = &[
     "getHTML",
     "setHTMLUnsafe",
     "parseHTMLUnsafe",
+    // Méthodes d'insertion `*HTML` (Pareto `api` lot 3b,
+    // HTML insertion methods) — rails existants
+    // `insert_adjacent`/`set_inner_html` ; variantes
+    // `*Unsafe` partagent le même rail (pas de sanitiser
+    // dans le moteur — borne documentée).
+    "setHTML",
+    "beforeHTML",
+    "beforeHTMLUnsafe",
+    "afterHTML",
+    "afterHTMLUnsafe",
+    "prependHTML",
+    "prependHTMLUnsafe",
+    "appendHTML",
+    "appendHTMLUnsafe",
+    "replaceWithHTML",
+    "replaceWithHTMLUnsafe",
     "checkVisibility",
     "replaceChildren",
     "closest",
@@ -6851,7 +7387,37 @@ const NODE_METHODS: &[&str] = &[
     "focus",
     "blur",
     "click",
+    // Pointer Events capture (Pareto `api` lot 3) —
+    // bookkeeping honnête sur slot interne `PC_ATTR` : le
+    // dispatch pointer réel est hors moteur, mais la
+    // sémantique capture/release/existe est vérifiable.
+    "setPointerCapture",
+    "releasePointerCapture",
+    "hasPointerCapture",
 ];
+
+/// Méthodes `HTMLElement` scopées au tag non-SVG (Pareto `api`
+/// lot 3) — `showPopover`/`hidePopover`/`togglePopover` : IDL
+/// `HTMLElement`, absentes de `SVGElement`/`MathMLElement`.
+/// État `:popover-open` porté par le slot interne
+/// `POPOVER_OPEN_ATTR` (pas de couche top-layer dans le
+/// miroir — borne documentée).
+const HTML_EL_METHODS: &[&str] = &["showPopover", "hidePopover", "togglePopover"];
+
+/// Slot interne pointer-capture (motif `SEL_START_ATTR`) —
+/// `data-explorer-pc` = pointerId capturé sur l'élément.
+const PC_ATTR: &str = "data-explorer-pc";
+
+/// `true` si le nœud est un élément **HTML** (hors SVG/
+/// `MathML`) — le mixin `HTMLElement` (popover methods,
+/// `isContentEditable`…) ne s'y applique que là.
+fn is_html_element(dom: &DomRef, node: NodeId) -> bool {
+    let d = dom.borrow();
+    let n = &d.nodes[node as usize];
+    n.kind == NodeKind::Element
+        && !tag_interface(&n.tag).is_some_and(|i| i.starts_with("SVG"))
+        && !n.tag.contains(':')
+}
 
 /// Méthodes `HTMLMediaElement` lisibles (§B-82) — les players
 /// MSE feature-détectent `typeof v.canPlayType` avant tout
@@ -7759,6 +8325,9 @@ impl Host for NodeHost {
             // si l'élément est un popover — feature-detect
             // honnête).
             || name == "requestFullscreen"
+            // `computedStyleMap()` — Typed OM read-only
+            // (tout élément, spec css-typed-om-1).
+            || name == "computedStyleMap"
             || (self.dom.borrow().has_attr(self.node, "popover")
                 && matches!(name, "showPopover" | "hidePopover" | "togglePopover"))
             // §B-82 — `"canPlayType" in v` (hasown des sniffs).
@@ -7805,6 +8374,18 @@ impl Host for NodeHost {
                             self.epoch);
                     }
                 }
+            }
+            // §cran-28 — sonde : sous `EXPLORER_STALE_THROW`
+            // la lecture périmée devient un TypeError nommé —
+            // transforme les early-outs silencieux (`ifV` lit
+            // `loggingStatus`/`polymerController` → undefined)
+            // en pile exploitable au point de rupture.
+            if stale_throw() {
+                return Err(e.type_error(format!(
+                    "StaleHandle: get `{key}` on recycled node {node} (epoch_me={}, epoch_now={:?})",
+                    self.epoch,
+                    self.dom.borrow().nodes.get(node as usize).map(|n| n.epoch)
+                )));
             }
             return Ok(None);
         }
@@ -8036,6 +8617,15 @@ impl Host for NodeHost {
                     computed: false,
                 }))));
             }
+            // `attributeStyleMap` — vue Typed OM de la même
+            // liste inline (Pareto api, css-typed-om-1).
+            "attributeStyleMap" => {
+                return Ok(Some(e.new_host_object(Rc::new(StyleMapHost {
+                    dom: self.dom.clone(),
+                    node,
+                    computed: false,
+                }))));
+            }
             "classList" => {
                 return Ok(Some(e.new_iterable_host(Rc::new(ClassListHost {
                     dom: self.dom.clone(),
@@ -8060,6 +8650,24 @@ impl Host for NodeHost {
                         attr: "rel",
                     })),
                     _ => Value::Undefined,
+                }));
+            }
+            // `el.part` (Pareto `api` lot 3) — `DOMTokenList`
+            // reflétant `part` (CSS Shadow Parts) ; même rail
+            // `ClassListHost` que `classList`/`relList`.
+            "part" => {
+                let is_el = matches!(
+                    self.dom.borrow().nodes[node as usize].kind,
+                    NodeKind::Element
+                );
+                return Ok(Some(if is_el {
+                    e.new_iterable_host(Rc::new(ClassListHost {
+                        dom: self.dom.clone(),
+                        node,
+                        attr: "part",
+                    }))
+                } else {
+                    Value::Undefined
                 }));
             }
             // Navigation/traversal brute (JS-C340) — déléguée à
@@ -8087,6 +8695,7 @@ impl Host for NodeHost {
             | "nodeName"
             | "localName"
             | "namespaceURI"
+            | "prefix"
             | "innerHTML"
             | "textContent"
             | "innerText"
@@ -8109,6 +8718,56 @@ impl Host for NodeHost {
                     return dom_nav_value(e, &self.dom, &self.cache, node, key);
                 }
                 return Ok(None);
+            }
+            // `CharacterData.wholeText` — concaténation des nœuds
+            // texte contigus (soi compris), spec `CharacterData`.
+            "wholeText" => {
+                let is_cd = matches!(
+                    self.dom.borrow().nodes[node as usize].kind,
+                    NodeKind::Text | NodeKind::Comment
+                );
+                if !is_cd {
+                    return Ok(None);
+                }
+                let s = whole_text_of(&self.dom, node);
+                return Ok(Some(e.str_val(s)));
+            }
+            // `Text.splitText` lisible (Pareto `api` lot 4) —
+            // `typeof`/`in` exigent une fonction (trampoline
+            // invoke, même motif `matches`). Garde `Text` seul.
+            "splitText" => {
+                let is_text = matches!(self.dom.borrow().nodes[node as usize].kind, NodeKind::Text);
+                if !is_text || matches!(this, Value::Obj(id) if e.host_method_shadowed(id, key)) {
+                    return Ok(None);
+                }
+                let nv = e.str_val(key);
+                return Ok(Some(e.bound_native(
+                    "node.method",
+                    host_method_trampoline,
+                    vec![nv, this],
+                )));
+            }
+            // `Range.getBoxQuads`/`Text.getBoxQuads` — pas de
+            // géométrie fine de quads dans le miroir : tableau
+            // vide honnête (même borne `getClientRects`).
+            // `getBoxQuads` — méthode lisible (garde `Text`/
+            // `Comment`) ; l'invoke rend un tableau vide
+            // honnête (pas de géométrie de quads — même borne
+            // `getClientRects`).
+            "getBoxQuads" => {
+                let is_text = matches!(
+                    self.dom.borrow().nodes[node as usize].kind,
+                    NodeKind::Text | NodeKind::Comment
+                );
+                if !is_text || matches!(this, Value::Obj(id) if e.host_method_shadowed(id, key)) {
+                    return Ok(None);
+                }
+                let nv = e.str_val(key);
+                return Ok(Some(e.bound_native(
+                    "node.method",
+                    host_method_trampoline,
+                    vec![nv, this],
+                )));
             }
             // `el.attributes` — `NamedNodeMap` vivante (JS-C76) :
             // itérable + `length` + indexés — les helpers
@@ -8438,6 +9097,13 @@ impl Host for NodeHost {
                 };
                 return Ok(Some(Value::Num(px)));
             }
+            // `clientLeft`/`clientTop` = largeur de bordure —
+            // le miroir ne porte pas de boîte de bordure
+            // détaillée (borne documentée) : `0` honnête, même
+            // discipline que `scrollTop` non-racine.
+            "clientLeft" | "clientTop" => {
+                return Ok(Some(Value::Num(0.0)));
+            }
             "clientWidth" | "clientHeight" | "scrollWidth" | "scrollHeight" | "offsetWidth"
             | "offsetHeight" => {
                 let (vw, vh) = e.hooks.viewport;
@@ -8564,6 +9230,26 @@ impl Host for NodeHost {
                     .to_string();
                 return Ok(Some(e.str_val(v)));
             }
+            // `HTMLElement.isContentEditable` — état résolu :
+            // `true` si le plus proche ancêtre (soi compris)
+            // déclarant `contenteditable` n'est pas `"false"`.
+            "isContentEditable" => {
+                let v = {
+                    let d = self.dom.borrow();
+                    let val = std::iter::once(node)
+                        .chain(d.ancestors(node))
+                        .find_map(|a| d.attr(a, "contenteditable"))
+                        .unwrap_or("false");
+                    !matches!(val, "false")
+                };
+                return Ok(Some(Value::Bool(v)));
+            }
+            // `HTMLElement.outerText` — lecture ≙ `textContent`
+            // (spec : même rendu que `innerText` à la lecture).
+            "outerText" => {
+                let s = self.dom.borrow().text_content(node);
+                return Ok(Some(e.str_val(s)));
+            }
             // Référence lisible (même motif que `matches`) —
             // les scripts mesurent aussi via
             // `Element.prototype.getBoundingClientRect.call(el)`
@@ -8597,6 +9283,19 @@ impl Host for NodeHost {
         // JS-C341 : un `el.play = f` auteur prime le natif.
         if is_media(&self.dom, node)
             && MEDIA_METHODS.contains(&key)
+            && !matches!(this, Value::Obj(id) if e.host_method_shadowed(id, key))
+        {
+            let nv = e.str_val(key);
+            return Ok(Some(e.bound_native(
+                "node.method",
+                host_method_trampoline,
+                vec![nv, this],
+            )));
+        }
+        // Méthodes `HTMLElement` lisibles (Pareto `api` lot 3)
+        // — popover : IDL `HTMLElement`, absentes sur SVG/MathML.
+        if is_html_element(&self.dom, node)
+            && HTML_EL_METHODS.contains(&key)
             && !matches!(this, Value::Obj(id) if e.host_method_shadowed(id, key))
         {
             let nv = e.str_val(key);
@@ -8670,6 +9369,41 @@ impl Host for NodeHost {
             let has = self.dom.borrow().has_attr(node, attr);
             return Ok(Some(Value::Bool(has)));
         }
+        // Reflets `aria*Elements`/`aria*Element` (ARIAMixin
+        // §6 — lot 4) : attribut idref(s) → éléments
+        // résolus `by_id` (ordre de la liste, ids morts
+        // filtrés — spec). Multi → tableau snapshot ;
+        // single → élément ou `null`.
+        if let Some((attr, multi)) = aria_elements_binding(key) {
+            let ids: Vec<String> = self
+                .dom
+                .borrow()
+                .attr(node, attr)
+                .map(|s| s.split_whitespace().map(str::to_string).collect())
+                .unwrap_or_default();
+            if multi {
+                let vals: Vec<Value> = ids
+                    .iter()
+                    .filter_map(|i| self.dom.borrow().by_id(i))
+                    .map(|n| node_value(e, &self.dom, &self.cache, n))
+                    .collect();
+                return Ok(Some(e.new_array(vals)));
+            }
+            return Ok(Some(
+                ids.first()
+                    .and_then(|i| self.dom.borrow().by_id(i))
+                    .map_or(Value::Null, |n| node_value(e, &self.dom, &self.cache, n)),
+            ));
+        }
+        // Réflexions `ARIAMixin` (Pareto `api` lot 3) —
+        // `DOMString?` : attribut absent → `null` (spec).
+        if let Some(attr) = aria_attr_name(key) {
+            let v = self.dom.borrow().attr(node, &attr).map(str::to_string);
+            return Ok(Some(match v {
+                Some(s) => e.str_val(s),
+                None => Value::Null,
+            }));
+        }
         // Named getter du `<form>` (HTML §4.10.3) : `form.username`
         // ≙ contrôle listé de `id`/`name` — multi-match (radio)
         // ≙ collection (RadioNodeList spec → tableau snapshot,
@@ -8701,6 +9435,41 @@ impl Host for NodeHost {
         // refusée (set expando ailleurs), jamais mutation du
         // nouvel occupant.
         if !self.live() {
+            // §cran-29 — le write refusé est nommé aussi :
+            // `F.polymerController=O` sur handle mort passe ici
+            // (refus silencieux `Ok(false)` = pc fantôme).
+            if tracing::enabled!(target: "dom_probe", tracing::Level::INFO) {
+                let (valid, epoch_now, tag) = {
+                    let d = self.dom.borrow();
+                    (
+                        d.node_valid(node),
+                        d.nodes.get(node as usize).map(|n| n.epoch),
+                        d.nodes
+                            .get(node as usize)
+                            .map(|n| n.tag.clone())
+                            .unwrap_or_default(),
+                    )
+                };
+                if let Ok(mut d) = self.dom.try_borrow_mut() {
+                    if d.ce.probe_seen.insert(format!("sw:{key}:{node}")) {
+                        let src = e.stack_top_fn_src(160);
+                        tracing::info!(target: "dom_probe", site = "dom.stale",
+                            "op=set key={key} node={node} tag={tag} valid={valid} epoch_me={} epoch_now={epoch_now:?} top={src}",
+                            self.epoch);
+                    }
+                }
+            }
+            // §cran-28 — sonde : sous `EXPLORER_STALE_THROW`
+            // le write silencieux devient un TypeError nommé —
+            // `ifV`/`I_o` jettent et la pile nomme le site
+            // exact du write sur handle périmé.
+            if stale_throw() {
+                return Err(e.type_error(format!(
+                    "StaleHandle: set `{key}` on recycled node {node} (epoch_me={}, epoch_now={:?})",
+                    self.epoch,
+                    self.dom.borrow().nodes.get(node as usize).map(|n| n.epoch)
+                )));
+            }
             return Ok(false);
         }
         // Accesseur propre `defineProperty` (JS-C82) : refuser
@@ -8746,8 +9515,32 @@ impl Host for NodeHost {
                         parent = %ptag, fn_src = %fn_src);
                 }
                 let mut d = self.dom.borrow_mut();
-                let t = d.create_text(&s);
-                d.replace_children(node, &[t]);
+                // JS-C487 — même branche `CharacterData` que
+                // l'accesseur `Node.prototype` : `data`, pas un
+                // « replace all » (record `characterData`).
+                if matches!(
+                    d.nodes[node as usize].kind,
+                    NodeKind::Text | NodeKind::Comment
+                ) {
+                    d.set_text(node, &s);
+                } else {
+                    let t = d.create_text(&s);
+                    d.replace_children(node, &[t]);
+                }
+                Ok(true)
+            }
+            // `HTMLElement.outerText` (Pareto `api` lot 3) —
+            // écriture = remplacement de l'élément par un nœud
+            // texte (spec `outerText=`), même rail que
+            // `replaceWith` ; sans parent → no-op spec.
+            "outerText" => {
+                let s = e.to_js_string(v)?;
+                let mut d = self.dom.borrow_mut();
+                if let Some(p) = d.parent(node) {
+                    let t = d.create_text(&s);
+                    d.insert_before(p, t, Some(node));
+                    d.detach(node);
+                }
                 Ok(true)
             }
             // `CharacterData` — écriture directe du payload
@@ -8937,6 +9730,62 @@ impl Host for NodeHost {
                     self.dom.borrow_mut().set_attr(node, attr, &s);
                     return Ok(true);
                 }
+                // Reflets `aria*Elements`/`aria*Element`
+                // (ARIAMixin §6) : écrire = sérialiser les
+                // `id` des éléments passés en attribut
+                // (approximation idrefs — les références
+                // explicites de la spec ne sont pas
+                // conservées ; élément sans `id` ignoré).
+                if let Some((attr, multi)) = aria_elements_binding(key) {
+                    if matches!(v, Value::Null) {
+                        self.dom.borrow_mut().remove_attr(node, attr);
+                        return Ok(true);
+                    }
+                    let mut ids: Vec<String> = Vec::new();
+                    let collect = |n: NodeId, ids: &mut Vec<String>| {
+                        if let Some(id) = self.dom.borrow().attr(n, "id") {
+                            let id = id.to_string();
+                            if !id.is_empty() {
+                                ids.push(id);
+                            }
+                        }
+                    };
+                    if multi {
+                        let elems = match v {
+                            Value::Obj(oid) => match e.heap.obj(oid).map(|o| &o.kind) {
+                                Some(ObjKind::Array(elems)) => elems.clone(),
+                                _ => Vec::new(),
+                            },
+                            _ => Vec::new(),
+                        };
+                        for ev in elems {
+                            if let Some(n) = node_for_in(e, ev, &self.dom) {
+                                collect(n, &mut ids);
+                            }
+                        }
+                    } else if let Some(n) = node_for_in(e, v, &self.dom) {
+                        collect(n, &mut ids);
+                    }
+                    let mut d = self.dom.borrow_mut();
+                    if ids.is_empty() {
+                        d.remove_attr(node, attr);
+                    } else {
+                        d.set_attr(node, attr, &ids.join(" "));
+                    }
+                    return Ok(true);
+                }
+                // Réflexions `ARIAMixin` : `el.ariaLabel = "x"`
+                // → `setAttribute('aria-label', 'x')` ; `null`
+                // → `removeAttribute` (spec `DOMString?`).
+                if let Some(attr) = aria_attr_name(key) {
+                    if matches!(v, Value::Null) {
+                        self.dom.borrow_mut().remove_attr(node, &attr);
+                    } else {
+                        let s = e.to_js_string(v)?;
+                        self.dom.borrow_mut().set_attr(node, &attr, &s);
+                    }
+                    return Ok(true);
+                }
                 Ok(false)
             }
         }
@@ -8960,6 +9809,24 @@ impl Host for NodeHost {
             "getElementsByTagName" => {
                 let tag = e.to_js_string(arg(args, 0))?;
                 let ids = self.dom.borrow().by_tag(node, &tag);
+                Ok(Some(dom_collection(
+                    e,
+                    &self.dom,
+                    &self.cache,
+                    &ids,
+                    false,
+                    "HTMLCollection",
+                )))
+            }
+            // `getElementsByTagNameNS(ns, local)` (Pareto `api`
+            // lot 3) — rail partagé [`by_tag_ns`].
+            "getElementsByTagNameNS" => {
+                let ns = match arg(args, 0) {
+                    Value::Null | Value::Undefined => "*".to_string(),
+                    v => e.to_js_string(v)?,
+                };
+                let local = e.to_js_string(arg(args, 1))?;
+                let ids = by_tag_ns(&self.dom, node, &ns, &local);
                 Ok(Some(dom_collection(
                     e,
                     &self.dom,
@@ -9082,7 +9949,13 @@ impl Host for NodeHost {
                             let mut d = self.dom.borrow_mut();
                             let ptag = d.nodes[node as usize].tag.clone();
                             let mut slot = None;
-                            if matches!(ptag.as_str(), "body" | "html" | "#document") {
+                            // §cran-31 — étendu aux parents
+                            // custom-element : un retrait sous
+                            // `ytd-app`/`ytd-browse` (pm omis du
+                            // stamping ?) sortait du cadre body.
+                            if matches!(ptag.as_str(), "body" | "html" | "#document")
+                                || ptag.contains('-')
+                            {
                                 for i in 0..12u8 {
                                     if d.ce.probe_seen.insert(format!("dk:{ptag}:{i}")) {
                                         slot = Some(i);
@@ -9473,7 +10346,12 @@ impl Host for NodeHost {
                 Ok(Some(Value::Bool(self.check_validity_of(e, node)?)))
             }
             // -- JS-7g structural ops ------------------------------------
-            "insertBefore" => {
+            // `moveBefore(node, child)` (dom-parts spec) —
+            // déplacement **sans** clone ni re-exécution :
+            // `insert_before` de l'arène est déjà un move
+            // (detach+insert, identité conservée) — même
+            // chemin, même repère `ref_node` (Pareto api).
+            "insertBefore" | "moveBefore" => {
                 let new_n = node_for_in(e, arg(args, 0), &self.dom)
                     .or_else(|| adopt_into(e, arg(args, 0), &self.dom, &self.cache));
                 let ref_n = node_for_in(e, arg(args, 1), &self.dom);
@@ -9868,6 +10746,67 @@ impl Host for NodeHost {
             }
             // Same slots as `insertAdjacentHTML` but the payload is a
             // text node — never parsed (spec).
+            // Pointer Events capture (Pareto `api` lot 3) —
+            // bookkeeping honnête : `setPointerCapture(id)`
+            // pose le pointerId, `hasPointerCapture` le vérifie,
+            // `releasePointerCapture` ne relâche que le capturé
+            // (spec : mismatched id → no-op).
+            "setPointerCapture" => {
+                let id = e.to_js_string(arg(args, 0))?;
+                self.dom.borrow_mut().set_attr(node, PC_ATTR, &id);
+                Ok(Some(Value::Undefined))
+            }
+            "releasePointerCapture" => {
+                let id = e.to_js_string(arg(args, 0))?;
+                let mut d = self.dom.borrow_mut();
+                if d.attr(node, PC_ATTR) == Some(id.as_str()) {
+                    d.remove_attr(node, PC_ATTR);
+                }
+                Ok(Some(Value::Undefined))
+            }
+            "hasPointerCapture" => {
+                let id = e.to_js_string(arg(args, 0))?;
+                let has = self.dom.borrow().attr(node, PC_ATTR) == Some(id.as_str());
+                Ok(Some(Value::Bool(has)))
+            }
+            // `Text.splitText(offset)` (Pareto `api` lot 4) —
+            // spec : le nœud garde `[0, off)`, un nouveau nœud
+            // texte `[off, len)` est inséré après et retourné.
+            "splitText" => {
+                let is_text = matches!(self.dom.borrow().nodes[node as usize].kind, NodeKind::Text);
+                if !is_text {
+                    return Ok(None);
+                }
+                let off = e.to_number(arg(args, 0))?.max(0.0) as usize;
+                let mut d = self.dom.borrow_mut();
+                let text = d.nodes[node as usize].text.clone();
+                let chars: Vec<char> = text.chars().collect();
+                if off > chars.len() {
+                    return Err(e.type_error("IndexSizeError: splitText offset"));
+                }
+                let tail: String = chars[off..].iter().collect();
+                let head: String = chars[..off].iter().collect();
+                d.set_text(node, &head);
+                let t2 = d.create_text(&tail);
+                if let Some(p) = d.parent(node) {
+                    let next = d.sibling(node, true);
+                    d.insert_before(p, t2, next);
+                }
+                drop(d);
+                Ok(Some(node_value(e, &self.dom, &self.cache, t2)))
+            }
+            "getBoxQuads" => {
+                // Garde `Text`/`Comment` — tableau vide
+                // honnête (pas de géométrie de quads).
+                let is_text = matches!(
+                    self.dom.borrow().nodes[node as usize].kind,
+                    NodeKind::Text | NodeKind::Comment
+                );
+                if !is_text {
+                    return Ok(None);
+                }
+                Ok(Some(e.new_array(Vec::new())))
+            }
             "insertAdjacentText" => {
                 let pos = e.to_js_string(arg(args, 0))?;
                 let s = e.to_js_string(arg(args, 1))?;
@@ -9904,9 +10843,48 @@ impl Host for NodeHost {
                 let s = self.dom.borrow().outer_html(node);
                 Ok(Some(e.str_val(s)))
             }
-            "setHTMLUnsafe" => {
+            "setHTML" | "setHTMLUnsafe" => {
                 let html = e.to_js_string(arg(args, 0))?;
                 self.set_inner_html(node, &html);
+                Ok(Some(Value::Undefined))
+            }
+            // Méthodes `*HTML` d'insertion positionnelle (Pareto
+            // `api` lot 3b — spec HTML insertion methods) :
+            // before/after/prepend/append ≙ positions
+            // `insertAdjacentHTML` ; `replaceWithHTML` remplace
+            // l'élément par les nœuds parsés (rail `outerHTML=`).
+            // `*Unsafe` = même rail (pas de sanitiser — borne).
+            "beforeHTML"
+            | "beforeHTMLUnsafe"
+            | "afterHTML"
+            | "afterHTMLUnsafe"
+            | "prependHTML"
+            | "prependHTMLUnsafe"
+            | "appendHTML"
+            | "appendHTMLUnsafe"
+            | "replaceWithHTML"
+            | "replaceWithHTMLUnsafe" => {
+                let html = e.to_js_string(arg(args, 0))?;
+                if name.starts_with("replaceWith") {
+                    let mut d = self.dom.borrow_mut();
+                    if let Some(p) = d.parent(node) {
+                        let scratch = d.create_element("div");
+                        d.parse_fragment_into(scratch, &html);
+                        let kids = d.child_nodes(scratch);
+                        for k in kids {
+                            d.insert_before(p, k, Some(node));
+                        }
+                        d.detach(node);
+                    }
+                } else {
+                    let pos = match name {
+                        n if n.starts_with("before") => "beforebegin",
+                        n if n.starts_with("after") => "afterend",
+                        n if n.starts_with("prepend") => "afterbegin",
+                        _ => "beforeend",
+                    };
+                    self.insert_adjacent(e, node, pos, &html)?;
+                }
                 Ok(Some(Value::Undefined))
             }
             // `el.parseHTMLUnsafe(html)` — spec : parse en
@@ -10230,6 +11208,15 @@ impl Host for NodeHost {
             // Élément détaché → promesse rejetée `TypeError`
             // (spec). Borné : état logique honnête — la peinture
             // n'a pas d'overlay plein-écran à changer.
+            // `el.computedStyleMap()` — vue read-only des
+            // valeurs calculées (css-typed-om-1) : même liste
+            // que `getComputedStyle` (inline + repli
+            // géométrie borné), `set`/`delete` → TypeError.
+            "computedStyleMap" => Ok(Some(e.new_host_object(Rc::new(StyleMapHost {
+                dom: self.dom.clone(),
+                node,
+                computed: true,
+            })))),
             "requestFullscreen" => {
                 let pid = e.new_promise();
                 let attached = {
@@ -10358,7 +11345,22 @@ pub(crate) fn node_for_in(e: &mut Engine, v: Value, dom: &DomRef) -> Option<Node
         }
         return Some(dh.dom.borrow().root);
     }
-    None
+    shady_unwrap_in(e, v.clone(), dom)
+}
+
+/// Wrapper `ShadyDOM` (`webcomponents-sd`, youtube) :
+/// `ShadyDOM.wrap(nœud)` rend un objet `{node, …}` qui n'est
+/// pas `instanceof Node` — kevlar le repasse tel quel à
+/// `appendChild`/`insertBefore`/`removeChild`/`contains`
+/// (polymer `dom.flush`/`_attachDom`) et la garde « not a
+/// node » tuait la passe d'hydratation (`[[X]]` non liés).
+/// On déballe `.node` quand il désigne un nœud valide.
+fn shady_unwrap_in(e: &mut Engine, v: Value, dom: &DomRef) -> Option<NodeId> {
+    let inner = e.get_prop_value(v, "node").ok()?;
+    if !matches!(inner, Value::Obj(_)) {
+        return None;
+    }
+    node_for_in(e, inner, dom)
 }
 
 /// `(node, dom)` d'un `NodeHost` d'un **autre** miroir que
@@ -10394,7 +11396,16 @@ fn foreign_node_in(e: &mut Engine, v: Value, dom: &DomRef) -> Option<(NodeId, Do
         let root = dh.dom.borrow().root;
         return Some((root, dh.dom.clone()));
     }
-    None
+    // Wrapper ShadyDOM (cf. `shady_unwrap_in`) — le nœud
+    // déballé peut vivre dans le miroir cible ou ailleurs.
+    let inner = e.get_prop_value(v.clone(), "node").ok()?;
+    if !matches!(inner, Value::Obj(_)) {
+        return None;
+    }
+    if let Some(pair) = foreign_node_in(e, inner.clone(), dom) {
+        return Some(pair);
+    }
+    node_for_in(e, inner, dom).map(|n| (n, dom.clone()))
 }
 
 /// Reconnaît un objet **Attr-shaped** (`{nodeType:2, name,
@@ -11065,7 +12076,44 @@ fn docfrag_ctor(e: &mut Engine, this: Value, _a: &[Value]) -> JsResult<Value> {
         return Err(e.type_error("DocumentFragment: no document"));
     };
     let n = dom.borrow_mut().create_fragment();
-    Ok(node_value(e, &dom, &cache, n))
+    let v = node_value(e, &dom, &cache, n);
+    // JS-C481 — `class X extends DocumentFragment` et la voie
+    // « fake-inheritance » kevlar (`DocumentFragment.apply(this)`
+    // dans un ctor qui rend l'objet) : le nœud retourné prime
+    // sur `this` — il doit porter le proto `newTarget`
+    // (`this`'s proto), sinon les membres de la classe dérivée
+    // sont invisibles sur l'instance (contrôleur PolySi
+    // `zc` creux : `h`/`ga`/`Xb` null, méthodes mixées
+    // injoignables → `updateReduxProperties` TypeError →
+    // `onYtNavigateFinish` mort → `ytd-browse` jamais créé).
+    // `new DocumentFragment()` direct : `this`'s proto est déjà
+    // `DocumentFragment.prototype` — no-op.
+    if let (Value::Obj(wid), Value::Obj(tid)) = (v.clone(), this.clone()) {
+        if let Some(tp) = e.heap.obj(tid).map(|o| o.proto.clone()) {
+            let changed = e.heap.obj(wid).is_some_and(|w| w.proto != tp);
+            if let Some(w) = e.heap.obj_mut(wid) {
+                w.proto = tp;
+            }
+            if changed {
+                // Sonde cran 43 : le chemin dérivé est-il
+                // emprunté en vol ? (falsification cran 42 —
+                // si jamais logué, le `zc` creux ne vient pas
+                // d'un `new`-sur-DocumentFragment dérivé).
+                let stack: String = e
+                    .stack_text("", "")
+                    .lines()
+                    .map(str::trim)
+                    .filter(|l| l.starts_with("at "))
+                    .take(6)
+                    .collect::<Vec<_>>()
+                    .join(" <- ");
+                tracing::info!(target: "dom_probe",
+                    site = "docfrag.derive", node = %n,
+                    stack = %stack.chars().take(500).collect::<String>());
+            }
+        }
+    }
+    Ok(v)
 }
 
 /// JS-C427 — `new DOMRect(ReadOnly)(x, y, w, h)` — `bound[0]` =
@@ -11203,6 +12251,16 @@ pub(crate) fn misc_event_state(
     event_state_of(e, node, dom, cache, v)
 }
 
+/// `%Event.prototype%` du realm — résolu via le global
+/// (`dispatchEvent` d'un literal/`EventHost` nu recoit le proto
+/// pour que `instanceof` tienne côté listeners).
+fn event_realm_proto(e: &mut Engine) -> Option<Value> {
+    let Value::Obj(f) = e.get_prop(e.global, "Event")? else {
+        return None;
+    };
+    e.get_prop(f, "prototype")
+}
+
 fn event_state_of(
     e: &mut Engine,
     node: NodeId,
@@ -11213,10 +12271,24 @@ fn event_state_of(
     let Value::Obj(id) = v else {
         return Ok(None);
     };
+    // Le proto de l'arg est conservé quand il est spécialisé
+    // (`new CustomEvent` → `CustomEvent.prototype`) — les
+    // listeners verront `e instanceof CustomEvent` vrai comme
+    // dans un vrai moteur.
+    let arg_proto = e.heap.obj(id).map(|o| o.proto.clone());
+    let obj_proto = e.protos.object;
+    let keep_proto = |st: &Rc<EventState>| {
+        if let Some(p) = &arg_proto {
+            if !matches!(p, Value::Obj(p) if *p == obj_proto) {
+                st.js_proto.replace(Some(p.clone()));
+            }
+        }
+    };
     if let Some(ObjKind::Host(h)) = e.heap.obj(id).map(|o| &o.kind) {
         if let Some(ev) = h.as_any().downcast_ref::<EventHost>() {
             let state = ev.state.clone();
             state.target.set(node);
+            keep_proto(&state);
             return Ok(Some(state));
         }
     }
@@ -11310,7 +12382,7 @@ fn event_state_of(
     .into_iter()
     .filter_map(|k| e.get_prop(id, k).map(|v| (k.to_string(), v)))
     .collect();
-    Ok(Some(make_event_state(
+    let st = make_event_state(
         &ty,
         node,
         EventFlags {
@@ -11320,7 +12392,9 @@ fn event_state_of(
             trusted: false,
         },
         props,
-    )))
+    );
+    keep_proto(&st);
+    Ok(Some(st))
 }
 
 // ------------------------------------------------------------------
@@ -11339,6 +12413,9 @@ impl Host for EventHost {
     fn trace(&self, out: &mut Vec<ObjId>) {
         trace_node_cache(&self.cache, out);
         for (_, v) in self.state.props.borrow().iter() {
+            crate::heap::push_value(out, v);
+        }
+        if let Some(v) = self.state.js_proto.borrow().as_ref() {
             crate::heap::push_value(out, v);
         }
     }
@@ -11362,6 +12439,25 @@ impl Host for EventHost {
                 Some(n) => node_value(e, &self.dom, &self.cache, n),
                 None => Value::Null,
             },
+            // Legacy Blink/WebKit : `ev.path` = tableau du chemin
+            // de composition (ère ShadyDOM/Polymer, antérieure à
+            // `composedPath()`). Chrome l'expose encore — le code
+            // kevlar lit `e.path` directement. Même sémantique :
+            // le chemin pendant le dispatch, `[]` hors dispatch.
+            "path" => {
+                if self.state.current.get().is_none() {
+                    e.new_array(Vec::new())
+                } else {
+                    let vals: Vec<Value> = self
+                        .state
+                        .path
+                        .borrow()
+                        .iter()
+                        .map(|&n| node_value(e, &self.dom, &self.cache, n))
+                        .collect();
+                    e.new_array(vals)
+                }
+            }
             "bubbles" => Value::Bool(self.state.bubbles.get()),
             "cancelable" => Value::Bool(self.state.cancelable.get()),
             "composed" => Value::Bool(self.state.composed.get()),
@@ -11825,8 +12921,211 @@ impl Host for StyleHost {
 }
 
 // ------------------------------------------------------------------
-// classList
+// attributeStyleMap / computedStyleMap — Typed OM
+// (`StylePropertyMap` / `StylePropertyMapReadOnly`, css-typed-om-1).
+// Vue map-like de la MÊME `style_map` que `el.style` — valeurs
+// servies en chaîne (les `CSSUnitValue`/`CSSKeywordValue` typés
+// sont une déviation bornée : la plupart des sites lisent
+// `.get('x')` et n'inspectent pas `.unit`).
 // ------------------------------------------------------------------
+
+/// `el.attributeStyleMap` (mutable) / `el.computedStyleMap()`
+/// (read-only spec — `set`/`append`/`delete`/`clear` →
+/// `TypeError` css-typed-om-1).
+struct StyleMapHost {
+    dom: DomRef,
+    node: NodeId,
+    /// `true` = `computedStyleMap()` — lecture seule.
+    computed: bool,
+}
+
+/// Réécrit l'attribut `style` depuis une `style_map`
+/// (même sérialisation que `removeProperty` — `css: v`).
+fn style_map_write(d: &mut Dom, node: NodeId, map: &[(String, String)]) {
+    if map.is_empty() {
+        d.remove_attr(node, "style");
+    } else {
+        let css = map
+            .iter()
+            .map(|(k, v)| format!("{k}: {v}"))
+            .collect::<Vec<_>>()
+            .join("; ");
+        d.set_attr(node, "style", &css);
+    }
+}
+
+impl Host for StyleMapHost {
+    fn class_name(&self) -> &'static str {
+        if self.computed {
+            "StylePropertyMapReadOnly"
+        } else {
+            "StylePropertyMap"
+        }
+    }
+
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
+
+    fn get(&self, _e: &mut Engine, _t: Value, key: &str) -> JsResult<Option<Value>> {
+        if key == "size" {
+            let n = {
+                let d = self.dom.borrow();
+                style_map(&d, self.node).len()
+            };
+            return Ok(Some(Value::Num(n as f64)));
+        }
+        Ok(None)
+    }
+
+    fn set(&self, _e: &mut Engine, _t: Value, _key: &str, _v: Value) -> JsResult<bool> {
+        // `StylePropertyMap` n'est pas indexable par
+        // prop arbitraire (spec) — refus.
+        Ok(false)
+    }
+
+    fn invoke(
+        &self,
+        e: &mut Engine,
+        this: Value,
+        name: &str,
+        args: &[Value],
+    ) -> JsResult<Option<Value>> {
+        let readonly = self.computed;
+        match name {
+            "get" => {
+                let k = prop_key(&e.to_js_string(arg(args, 0))?);
+                let v = {
+                    let d = self.dom.borrow();
+                    style_map(&d, self.node)
+                        .into_iter()
+                        .find(|(kk, _)| kk == &k)
+                        .map(|(_, v)| v)
+                };
+                Ok(Some(match v {
+                    Some(v) => e.str_val(v),
+                    None => Value::Undefined,
+                }))
+            }
+            "getAll" => {
+                let k = prop_key(&e.to_js_string(arg(args, 0))?);
+                let vals: Vec<Value> = {
+                    let d = self.dom.borrow();
+                    style_map(&d, self.node)
+                        .into_iter()
+                        .filter(|(kk, _)| kk == &k)
+                        .map(|(_, v)| v)
+                        .collect::<Vec<_>>()
+                }
+                .into_iter()
+                .map(|v| e.str_val(v))
+                .collect();
+                Ok(Some(e.new_array(vals)))
+            }
+            "has" => {
+                let k = prop_key(&e.to_js_string(arg(args, 0))?);
+                let has = {
+                    let d = self.dom.borrow();
+                    style_map(&d, self.node).iter().any(|(kk, _)| kk == &k)
+                };
+                Ok(Some(Value::Bool(has)))
+            }
+            "set" | "append" => {
+                if readonly {
+                    return Err(e.type_error("TypeError: read only"));
+                }
+                let k = prop_key(&e.to_js_string(arg(args, 0))?);
+                let vals: Vec<String> = (1..args.len())
+                    .map(|i| e.to_js_string(arg(args, i)))
+                    .collect::<Result<_, _>>()?;
+                let mut d = self.dom.borrow_mut();
+                let mut map = style_map(&d, self.node);
+                // `set` = remplace toutes les entrées du nom ;
+                // `append` = ajoute une entrée par valeur
+                // (spec : doublons possibles — `getAll` les
+                // voit, `el.style` les ignore en cascade).
+                if name == "set" {
+                    map.retain(|(kk, _)| kk != &k);
+                }
+                for v in vals {
+                    map.push((k.clone(), v));
+                }
+                style_map_write(&mut d, self.node, &map);
+                Ok(Some(Value::Undefined))
+            }
+            "delete" => {
+                if readonly {
+                    return Err(e.type_error("TypeError: read only"));
+                }
+                let k = prop_key(&e.to_js_string(arg(args, 0))?);
+                let mut d = self.dom.borrow_mut();
+                let mut map = style_map(&d, self.node);
+                map.retain(|(kk, _)| kk != &k);
+                style_map_write(&mut d, self.node, &map);
+                Ok(Some(Value::Undefined))
+            }
+            "clear" => {
+                if readonly {
+                    return Err(e.type_error("TypeError: read only"));
+                }
+                self.dom.borrow_mut().remove_attr(self.node, "style");
+                Ok(Some(Value::Undefined))
+            }
+            // `entries`/`keys`/`values` — snapshots de
+            // tableaux (l'iterable Symbol reste une borne,
+            // cf. autres surfaces). `forEach(cb, this?)` =
+            // `(valeur, nom, map)` spec.
+            "entries" | "keys" | "values" | "forEach" => {
+                let map = {
+                    let d = self.dom.borrow();
+                    style_map(&d, self.node)
+                };
+                if name == "forEach" {
+                    let cb = arg(args, 0);
+                    let this_arg = arg(args, 1);
+                    for (k, v) in map {
+                        let kv = e.str_val(k);
+                        let vv = e.str_val(v);
+                        let _ = e.call_value(cb.clone(), this_arg.clone(), &[vv, kv, this.clone()]);
+                    }
+                    Ok(Some(Value::Undefined))
+                } else {
+                    let vals: Vec<Value> = match name {
+                        "keys" => map.iter().map(|(k, _)| e.str_val(k)).collect(),
+                        "values" => map.iter().map(|(_, v)| e.str_val(v)).collect(),
+                        _ => map
+                            .iter()
+                            .map(|(k, v)| {
+                                let kk = e.str_val(k);
+                                let vv = e.str_val(v);
+                                e.new_array(vec![kk, vv])
+                            })
+                            .collect(),
+                    };
+                    Ok(Some(e.new_array(vals)))
+                }
+            }
+            _ => Ok(None),
+        }
+    }
+
+    fn has_method(&self, name: &str) -> bool {
+        matches!(
+            name,
+            "get"
+                | "getAll"
+                | "has"
+                | "set"
+                | "append"
+                | "delete"
+                | "clear"
+                | "forEach"
+                | "entries"
+                | "keys"
+                | "values"
+        )
+    }
+}
 
 /// Types de liens supportés pour `relList.supports` (spec
 /// linkTypes courants — la liste exacte évolue avec le moteur ;
@@ -12521,7 +13820,8 @@ fn ce_upgrade_node(e: &mut Engine, dom: &DomRef, cache: &NodeCache, node: NodeId
     if tracing::enabled!(target: "dom_probe", tracing::Level::INFO) {
         if let Ok(mut d) = dom.try_borrow_mut() {
             if d.ce.probe_seen.insert(format!("+{name}")) {
-                tracing::info!(target: "dom_probe", site = "ce.upgrade", tag = %name);
+                tracing::info!(target: "dom_probe", site = "ce.upgrade", tag = %name, node = %node,
+                    epoch = %d.nodes.get(node as usize).map_or(0, |n| n.epoch));
             }
         }
     }
@@ -12889,6 +14189,27 @@ fn ce_upgrade_subtree(
     cache: &NodeCache,
     root: NodeId,
 ) -> JsResult<()> {
+    // §cran-87 — le clone frais (`importNode`/`cloneNode`)
+    // est **détaché et encore sans wrapper JS** : les ctors
+    // CE ci-dessous ouvrent des safepoints GC qui récoltaient
+    // le sous-arbre avant `node_value` → `importNode` rendait
+    // `undefined` → `F.__noInsertionPoint=` plantait sur
+    // Undefined (mur stamp Polymer YouTube, JS-C496). La
+    // racine est épinglée le temps de la passe — la
+    // fermeture descendante de `collect_garbage` retient
+    // tous les descendants.
+    dom.borrow_mut().pin_node(root);
+    let r = ce_upgrade_subtree_pinned(e, dom, cache, root);
+    dom.borrow_mut().unpin_node(root);
+    r
+}
+
+fn ce_upgrade_subtree_pinned(
+    e: &mut Engine,
+    dom: &DomRef,
+    cache: &NodeCache,
+    root: NodeId,
+) -> JsResult<()> {
     ce_upgrade_node(e, dom, cache, root)?;
     let kids = dom.borrow().by_tag(root, "*");
     for n in kids {
@@ -12950,6 +14271,21 @@ impl Engine {
                     let d = dom.borrow();
                     (d.ce.upgraded.contains_key(&n), d.ce.failed.contains(&n))
                 };
+                // Sonde cran 46 — ordre des callbacks vie vs
+                // kill/re-append (masthead détaché JS-C481) :
+                // si `attached` re-tire sur nœud mort, un
+                // `Connected` a suivi le `dom.kill` ou le
+                // `pc.set` post-kill a relancé la séquence.
+                if tracing::enabled!(target: "dom_probe", tracing::Level::INFO) {
+                    let d = dom.borrow();
+                    if let Some(nd) = d.nodes.get(n as usize) {
+                        if nd.tag == "ytd-masthead" || nd.tag == "ytd-page-manager" {
+                            tracing::info!(target: "dom_probe",
+                                site = "ce.life", ev = "conn", tag = %nd.tag,
+                                node = %n, upg = upgraded, failed = failed);
+                        }
+                    }
+                }
                 if failed {
                     return Ok(());
                 }
@@ -12967,6 +14303,16 @@ impl Engine {
                     let d = dom.borrow();
                     d.ce.upgraded.contains_key(&n) && !d.ce.failed.contains(&n)
                 };
+                if tracing::enabled!(target: "dom_probe", tracing::Level::INFO) {
+                    let d = dom.borrow();
+                    if let Some(nd) = d.nodes.get(n as usize) {
+                        if nd.tag == "ytd-masthead" || nd.tag == "ytd-page-manager" {
+                            tracing::info!(target: "dom_probe",
+                                site = "ce.life", ev = "disc", tag = %nd.tag,
+                                node = %n, upg = live);
+                        }
+                    }
+                }
                 if !live {
                     return Ok(());
                 }
@@ -14247,6 +15593,12 @@ fn event_ctor(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
             e.set_prop_value(this.clone(), k, v)?;
         }
     }
+    // `ev.path` (legacy Blink/WebKit, ère ShadyDOM/Polymer) —
+    // l'`Event` scripté est un literal ordinaire (pas
+    // `EventHost`) : `[]` hors dispatch (le chemin réel n'est
+    // exposé que sur l'`EventHost` livré aux listeners).
+    let arr = e.new_array(Vec::new());
+    e.set_prop_value(this.clone(), "path", arr)?;
     // `CustomEvent`/`ErrorEvent`/`PromiseRejectionEvent`/
     // `KeyboardEvent` portent des payloads d'init — copiés
     // tels quels.
@@ -14339,6 +15691,17 @@ fn event_ctor(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
     let rt_set = matches!(this, Value::Obj(id) if e.find_own(id, "relatedTarget").is_some());
     if !rt_set {
         e.set_prop_value(this, "relatedTarget", Value::Null)?;
+    }
+    Ok(Value::Undefined)
+}
+
+/// `CustomEvent` (Pareto `api` lot 3) — `event_ctor` + défaut
+/// spec `detail = null` : sans init la clé doit quand même
+/// exister (`'detail' in new CustomEvent('x')` → `true`).
+fn custom_event_ctor(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
+    event_ctor(e, this.clone(), args)?;
+    if matches!(this, Value::Obj(id) if e.find_own(id, "detail").is_none()) {
+        e.set_prop_value(this, "detail", Value::Null)?;
     }
     Ok(Value::Undefined)
 }
@@ -14590,6 +15953,34 @@ fn element_attach_shadow(e: &mut Engine, this: Value, args: &[Value]) -> JsResul
         _ => true,
     };
     let existing = dom.borrow().shadow_root(node, true);
+    // Sonde kevlar §cran-24 : `attachShadow` produit la
+    // racine Shady (`zc`) qui se retrouve posée en
+    // `polymerController` — tag hôte + init + pile JS.
+    if existing.is_none() && tracing::enabled!(target: "dom_probe", tracing::Level::INFO) {
+        let (tag, frag) = {
+            let d = dom.borrow();
+            let tag = d.nodes[node as usize].tag.clone();
+            let frag = match args.first() {
+                Some(Value::Obj(id)) => e
+                    .get_prop(*id, "shadyUpgradeFragment")
+                    .is_some_and(|f| !matches!(f, Value::Undefined | Value::Null)),
+                _ => false,
+            };
+            (tag, frag)
+        };
+        let stack: String = e
+            .stack_text("", "")
+            .lines()
+            .map(str::trim)
+            .filter(|l| l.starts_with("at "))
+            .take(8)
+            .collect::<Vec<_>>()
+            .join(" <- ");
+        let stack: String = stack.chars().take(600).collect();
+        tracing::info!(target: "dom_probe",
+            site = "dom.shady", tag = %tag, open = %open, frag = %frag,
+            stack = %stack);
+    }
     let root = if let Some(r) = existing {
         r
     } else {
@@ -14999,6 +16390,18 @@ pub(crate) fn et_add_listener(e: &mut Engine, this: Value, args: &[Value]) -> Js
                 probe_node_desc(&d, node)
             };
             probe_el_listen(&dom, &ty, &on);
+            // N1.5 — `bg.listen` : les abonnements posés depuis
+            // l'interpréteur BotGuard (`www.google.com/js/th/…`)
+            // nomment les événements que la VM attend ; un type
+            // jamais dispatché = l'op qui gèle `S.J`/`V`.
+            if tracing::enabled!(target: "dom_probe", tracing::Level::INFO)
+                && std::env::var_os("EXPLORER_CTX_PROBE").is_some()
+                && e.frame_src_contains("google.com/js/th")
+            {
+                let (src, _, _) = e.stack_nearest_fn_src(120);
+                tracing::info!(target: "dom_probe", site = "bg.listen",
+                    ty = %ty, on = %on, src = %src);
+            }
             push_dom_listener(&dom, node, &ty, &on, cb, capture);
             return Ok(Value::Undefined);
         }
@@ -15006,6 +16409,17 @@ pub(crate) fn et_add_listener(e: &mut Engine, this: Value, args: &[Value]) -> Js
     let Value::Obj(sid) = this else {
         return Ok(Value::Undefined);
     };
+    // N1.5 — même sonde `bg.listen` sur la voie `__et` (cible
+    // non-DOM : wrapper JS `window`/shim — la VM BG peut y
+    // attacher hors de la file `node.listeners`).
+    if tracing::enabled!(target: "dom_probe", tracing::Level::INFO)
+        && std::env::var_os("EXPLORER_CTX_PROBE").is_some()
+        && e.frame_src_contains("google.com/js/th")
+    {
+        let (src, _, _) = e.stack_nearest_fn_src(120);
+        tracing::info!(target: "dom_probe", site = "bg.listen",
+            ty = %ty, on = %format!("__et:{sid}"), src = %src);
+    }
     if e.get_prop(sid, "__et").is_none() {
         let mid = e.new_object();
         e.set_own(sid, "__et", Value::Obj(mid), true);
@@ -15397,6 +16811,29 @@ fn nav_java_enabled(_e: &mut Engine, _t: Value, _a: &[Value]) -> JsResult<Value>
     Ok(Value::Bool(false))
 }
 
+/// `PluginArray.item(i)`/`namedItem(name)` — `null` hors borne
+/// (tableau vide : aucun plugin — honnête, headless-like).
+fn nav_plugin_null(_e: &mut Engine, _t: Value, _a: &[Value]) -> JsResult<Value> {
+    Ok(Value::Null)
+}
+
+/// `PluginArray.refresh()` — no-op (collection vide).
+fn nav_plugin_refresh(_e: &mut Engine, _t: Value, _a: &[Value]) -> JsResult<Value> {
+    Ok(Value::Undefined)
+}
+
+/// `navigator.userAgent` = la chaîne `User-Agent` exacte envoyée
+/// par `explorer-net` (`h1.rs`) — les navigateurs réels gardent
+/// header et prop JS identiques ; un écart est un signal anti-bot
+/// trivial. Dupliquée ici : `explorer-jscore` reste autonome
+/// (aucune dépendance interne — garder les deux en phase à la
+/// main, le token `Explorer` reste honnêtement présent).
+pub(crate) const EXPLORER_USER_AGENT: &str = concat!(
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) ",
+    "AppleWebKit/537.36 (KHTML, like Gecko) ",
+    "Explorer/0.2 Safari/537.36"
+);
+
 /// `navigator.userAgentData` — réponse desktop spec-honnête
 /// (`brands` vide, `mobile:false`, `platform` figé — low-
 /// fingerprint) ; partagée `Navigator`/`WorkerNavigator`
@@ -15470,7 +16907,7 @@ fn navigator_uad(e: &mut Engine) -> Value {
 pub(crate) fn install_worker_navigator(e: &mut Engine) {
     let nav = e.new_object();
     for (k, v) in [
-        ("userAgent", "Explorer/0.1 (explorer-jscore)"),
+        ("userAgent", EXPLORER_USER_AGENT),
         ("appName", "Netscape"),
         ("platform", "Win32"),
         ("language", "en-US"),
@@ -15633,6 +17070,52 @@ fn creds_psa(e: &mut Engine, _t: Value, _a: &[Value]) -> JsResult<Value> {
 // ------------------------------------------------------------------
 
 fn fmt_args(e: &mut Engine, args: &[Value]) -> JsResult<String> {
+    // Chaîne de substitution console (spec `Formatter`) :
+    // `console.log("a=%s n=%d", a, n)` — `%s` string, `%d`/`%i`
+    // int, `%f` float, `%o`/`%O` objet décrit, `%j` JSON,
+    // `%c` style consommé-silencieusement (pas de rendu CSS
+    // console — borne documentée), `%%` littéral.
+    if let Some(Value::Str(fmt)) = args.first() {
+        if fmt.contains('%') {
+            let mut out = String::with_capacity(fmt.len());
+            let mut it = args[1..].iter();
+            let mut chars = fmt.chars().peekable();
+            while let Some(c) = chars.next() {
+                if c != '%' {
+                    out.push(c);
+                    continue;
+                }
+                match chars.next() {
+                    Some('%') | None => out.push('%'),
+                    Some('c') => {
+                        it.next();
+                    }
+                    Some(spec @ ('s' | 'd' | 'i' | 'f' | 'o' | 'O' | 'j')) => {
+                        let v = it.next().cloned().unwrap_or(Value::Undefined);
+                        match spec {
+                            's' => out.push_str(&e.to_js_string(v)?),
+                            'd' | 'i' => out.push_str(&format!("{}", e.to_number(v)? as i64)),
+                            'f' => out.push_str(&format!("{}", e.to_number(v)?)),
+                            'j' => match crate::json::stringify(e, v) {
+                                Ok(j) => out.push_str(&e.to_js_string(j)?),
+                                Err(_) => out.push_str("undefined"),
+                            },
+                            _ => out.push_str(&e.describe(v)),
+                        }
+                    }
+                    Some(other) => {
+                        out.push('%');
+                        out.push(other);
+                    }
+                }
+            }
+            for a in it {
+                out.push(' ');
+                out.push_str(&e.to_js_string(a.clone())?);
+            }
+            return Ok(out);
+        }
+    }
     let mut parts = Vec::with_capacity(args.len());
     for a in args {
         parts.push(e.to_js_string(a.clone())?);

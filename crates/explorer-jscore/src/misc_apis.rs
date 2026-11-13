@@ -877,7 +877,26 @@ impl Host for SelectionHost {
 /// racine empêche le rapport — sinon `console` embedder log
 /// `Uncaught: <v>` (sortie réelle d'un uncaught).
 fn report_error(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
-    let v = arg(args, 0);
+    report_exception(e, arg(args, 0))?;
+    Ok(Value::Undefined)
+}
+
+/// « Report the exception » réutilisable (JS listener qui
+/// jette pendant `dispatchEvent` — spec : rapporté, jamais
+/// propagé à l'appelant, dispatch poursuivi).
+pub(crate) fn report_exception(e: &mut Engine, v: Value) -> JsResult<()> {
+    // Borne anti-récursion : un listener `error` qui jette
+    // redéclencherait ce rail à l'infini.
+    if e.report_depth.get() >= 4 {
+        return Ok(());
+    }
+    e.report_depth.set(e.report_depth.get() + 1);
+    let r = report_exception_inner(e, v);
+    e.report_depth.set(e.report_depth.get() - 1);
+    r
+}
+
+fn report_exception_inner(e: &mut Engine, v: Value) -> JsResult<()> {
     let message = e.to_js_string(v.clone()).unwrap_or_default();
     // 1. `window.onerror` legacy — 5 arguments (spec HTML) ;
     //    retour truthy = erreur « gérée », pas de rapport.
@@ -892,7 +911,7 @@ fn report_error(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
                 &[m, src, Value::Num(0.0), Value::Num(0.0), v.clone()],
             )?;
             if e.to_boolean(ret) {
-                return Ok(Value::Undefined);
+                return Ok(());
             }
         }
     }
@@ -923,7 +942,7 @@ fn report_error(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
             f(format!("Uncaught: {message}"));
         }
     }
-    Ok(Value::Undefined)
+    Ok(())
 }
 
 // ------------------------------------------------------------------
@@ -2216,14 +2235,23 @@ struct AnimData {
     /// Wrapper `Animation` déjà rendu — `getAnimations`
     /// rend le même objet (identité spec).
     wrapper: Option<ObjId>,
-    /// Handlers `onfinish`/`oncancel`.
+    /// Handlers `onfinish`/`oncancel`/`onremove`.
     onfinish: Value,
     oncancel: Value,
+    /// `onremove` (WAAPI `remove` event) — valeur du handler.
+    onremove: Value,
+    /// `id` spec (chaîne, mutable).
+    id: String,
     /// `effect`/`timeline` (JS-C461) — `new Animation(kfe,
     /// tl)` les porte ; `el.animate` pose un `KeyframeEffect`
     /// implicite + `document.timeline`.
     effect: Value,
     timeline: Value,
+    /// `animationName` (JS-C475) — `Some` pour une animation
+    /// **CSS déclarative** remontée par la session via la
+    /// marque `data-explorer-anim` du miroir ; `None` pour
+    /// les `Animation` nées du script (`el.animate`, ctor).
+    css_name: Option<String>,
 }
 
 struct AnimHost {
@@ -2391,8 +2419,11 @@ pub(crate) fn animation_ctor(e: &mut Engine, _t: Value, args: &[Value]) -> JsRes
         wrapper: None,
         onfinish: Value::Undefined,
         oncancel: Value::Undefined,
+        onremove: Value::Undefined,
+        id: String::new(),
         effect,
         timeline: tl,
+        css_name: None,
     }));
     e.misc.anims.push(data.clone());
     Ok(anim_wrapper(e, &data))
@@ -2436,19 +2467,108 @@ pub(crate) fn animate(e: &mut Engine, t: Value, args: &[Value]) -> JsResult<Valu
         wrapper: None,
         onfinish: Value::Undefined,
         oncancel: Value::Undefined,
+        onremove: Value::Undefined,
+        id: String::new(),
         effect: kfe,
         timeline: Value::Obj(document_timeline(e)),
+        css_name: None,
     }));
     e.misc.anims.push(data.clone());
     Ok(anim_wrapper(e, &data))
 }
 
+/// Marque posée par la session sur le miroir pour chaque
+/// animation **CSS** active (JS-C475) — `data-explorer-anim`
+/// = `nom` ou `nom|paused`. `get_animations` les matérialise
+/// en `Animation` honnêtes : identité `(nœud, nom)` stable
+/// entre deux appels, mortes retirées du registre.
+const CSS_ANIM_ATTR: &str = "data-explorer-anim";
+
+/// Matérialise les animations CSS marquées du miroir en
+/// `AnimData` — crée les entrées manquantes, retire les
+/// mortes, met à jour `paused` en place. Retourne les
+/// `NodeId` des éléments marqués (pour le filtre de scope).
+fn sync_css_anims(e: &mut Engine) -> Vec<(crate::dom::NodeId, String, bool)> {
+    let Some((dom, _)) = e.dom_ctx.clone() else {
+        return Vec::new();
+    };
+    let mut marks: Vec<(crate::dom::NodeId, String, bool)> = Vec::new();
+    {
+        let d = dom.borrow();
+        for (id, n) in d.nodes.iter().enumerate() {
+            if n.kind != crate::dom::NodeKind::Element {
+                continue;
+            }
+            let Some((_, v)) = n
+                .attrs
+                .iter()
+                .find(|(k, _)| k.eq_ignore_ascii_case(CSS_ANIM_ATTR))
+            else {
+                continue;
+            };
+            // `nom` ou `nom|paused` — `|` ne peut pas figurer
+            // dans un ident CSS (grammaire des noms @keyframes).
+            let (name, paused) = match v.rsplit_once('|') {
+                Some((name, "paused")) => (name, true),
+                _ => (v.as_str(), false),
+            };
+            marks.push((id as crate::dom::NodeId, name.to_string(), paused));
+        }
+    }
+    // Mortes : une entrée CSS dont la marque a disparu du
+    // miroir quitte le registre (spec : `getAnimations` ne
+    // rend que les animations « relevant »).
+    e.misc.anims.retain(|a| {
+        let d = a.borrow();
+        d.css_name
+            .as_ref()
+            .is_none_or(|cn| marks.iter().any(|(n, name, _)| *n == d.node && name == cn))
+    });
+    for (node, name, paused) in &marks {
+        let state = if *paused { "paused" } else { "running" };
+        if let Some(a) = e.misc.anims.iter().find(|a| {
+            let d = a.borrow();
+            d.node == *node && d.css_name.as_deref() == Some(name.as_str())
+        }) {
+            let cur = a.borrow().state;
+            if cur != "finished" {
+                a.borrow_mut().state = state;
+            }
+            continue;
+        }
+        let finished = e.new_promise();
+        let ready = e.new_promise();
+        e.resolve_promise(ready, Value::Undefined);
+        let data = Rc::new(RefCell::new(AnimData {
+            node: *node,
+            state,
+            rate: 1.0,
+            finished,
+            ready,
+            wrapper: None,
+            onfinish: Value::Undefined,
+            oncancel: Value::Undefined,
+            onremove: Value::Undefined,
+            id: String::new(),
+            effect: Value::Null,
+            timeline: Value::Obj(document_timeline(e)),
+            css_name: Some(name.clone()),
+        }));
+        e.misc.anims.push(data);
+    }
+    marks
+}
+
 /// `el.getAnimations()`/`document.getAnimations()`
-/// (CAP-187) — wrappers des animations vivantes (le
+/// (CAP-187 + JS-C475) — wrappers des animations vivantes :
+/// celles nées du script (`el.animate`, `new Animation`)
+/// **et** les animations `@keyframes` CSS déclaratives
+/// remontées par la session via `data-explorer-anim` (le
 /// filtre élément borne aux animations de ce nœud ;
 /// document → toutes — borné : pas de sous-arbre).
 pub(crate) fn get_animations(e: &mut Engine, this: Value, _a: &[Value]) -> JsResult<Value> {
     let scope = node_for(e, this);
+    sync_css_anims(e);
     let datas: Vec<Rc<RefCell<AnimData>>> = e
         .misc
         .anims
@@ -2486,9 +2606,30 @@ impl Host for AnimHost {
         )
     }
 
-    fn get(&self, e: &mut Engine, _t: Value, key: &str) -> JsResult<Option<Value>> {
+    fn get(&self, e: &mut Engine, t: Value, key: &str) -> JsResult<Option<Value>> {
+        // Méthodes lisibles (Pareto `api` lot 4) — même
+        // discipline que les nœuds : `typeof anim.play` et
+        // `'play' in anim` exigent une fonction en lecture ;
+        // le trampoline redispatche `Host::invoke`.
+        if self.has_method(key) {
+            let nv = e.str_val(key);
+            return Ok(Some(e.bound_native(
+                "anim.method",
+                anim_method_trampoline,
+                vec![nv, t],
+            )));
+        }
         let d = self.data.borrow();
         Ok(Some(match key {
+            "id" => e.str_val(d.id.clone()),
+            // `startTime`/`overallProgress` — `null` spec sans
+            // horloge de timeline dans le miroir (borne).
+            "startTime" | "overallProgress" => Value::Null,
+            // `replaceState` — `"active"` honnête : la machine
+            // n'a pas de compositeur (pas d'état `removed`
+            // sans timeline — même borne CAP-187).
+            "replaceState" => return Ok(Some(e.str_val("active"))),
+            "onremove" => d.onremove.clone(),
             "playState" => return Ok(Some(e.str_val(d.state))),
             "playbackRate" => Value::Num(d.rate),
             "pending" => Value::Bool(false),
@@ -2498,6 +2639,13 @@ impl Host for AnimHost {
             // ou l'implicite `el.animate` (KFE + timeline).
             "effect" => d.effect.clone(),
             "timeline" => d.timeline.clone(),
+            // `CSSAnimation.animationName` (JS-C475) —
+            // `undefined` sur les `Animation` nées du script
+            // (WAAPI : pas de nom déclaratif).
+            "animationName" => d
+                .css_name
+                .as_ref()
+                .map_or(Value::Undefined, |n| e.str_val(n.clone())),
             "finished" => Value::Obj(d.finished),
             "ready" => Value::Obj(d.ready),
             "onfinish" => d.onfinish.clone(),
@@ -2514,6 +2662,14 @@ impl Host for AnimHost {
             }
             "oncancel" => {
                 self.data.borrow_mut().oncancel = v;
+                Ok(true)
+            }
+            "onremove" => {
+                self.data.borrow_mut().onremove = v;
+                Ok(true)
+            }
+            "id" => {
+                self.data.borrow_mut().id = e.to_js_string(v)?;
                 Ok(true)
             }
             "playbackRate" => {
@@ -3298,4 +3454,22 @@ impl Host for XrHost {
             _ => Ok(None),
         }
     }
+}
+
+/// Trampoline « méthode `Animation` lisible » (Pareto `api`
+/// lot 4) — redispatche `Host::invoke` sur le receveur lié,
+/// même motif que `host_method_trampoline` des nœuds.
+fn anim_method_trampoline(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
+    let Some((Value::Str(m), rest)) = args.split_first() else {
+        return Ok(Value::Undefined);
+    };
+    let name = m.to_string();
+    let Some(Value::Obj(id)) = rest.first().cloned() else {
+        return Ok(Value::Undefined);
+    };
+    let Some(h) = e.host_of(id) else {
+        return Ok(Value::Undefined);
+    };
+    Ok(h.invoke(e, Value::Obj(id), &name, &rest[1..])?
+        .unwrap_or(Value::Undefined))
 }

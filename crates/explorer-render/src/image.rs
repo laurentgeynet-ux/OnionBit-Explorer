@@ -79,6 +79,9 @@ pub struct PaintImages {
     /// fetchés que l'appelant enregistre via
     /// [`PaintImages::register_mask`].
     pub masks_url: HashMap<String, Arc<DecodedImage>>,
+    /// `border-image-source` brut → bitmap — même canal
+    /// `url()`→`Arc<DecodedImage>` que `masks_url` (R-248).
+    pub borders_url: HashMap<String, Arc<DecodedImage>>,
     /// `<canvas>` : op-list 2D enregistrée par `explorer-jscore`
     /// (`NodeId` → `Vec<CanvasOp>` — R-11, contrat
     /// [`crate::canvas`]) ; rejouée vers un bitmap au moment
@@ -98,6 +101,7 @@ impl PaintImages {
             svg_sources: HashMap::new(),
             masks: ImageTable::new(),
             masks_url: HashMap::new(),
+            borders_url: HashMap::new(),
             canvases: crate::canvas::CanvasTable::new(),
         }
     }
@@ -111,6 +115,12 @@ impl PaintImages {
     /// (comme `bg_aliases` pour `background-image`).
     pub fn register_mask(&mut self, url: &str, img: Arc<DecodedImage>) {
         self.masks_url.insert(url.to_string(), img);
+    }
+
+    /// `border-image-source` — enregistre l'image décodée
+    /// (couture réseau symétrique de `register_mask_url`).
+    pub fn register_border_url(&mut self, url: &str, img: Arc<DecodedImage>) {
+        self.borders_url.insert(url.to_string(), img);
     }
 
     /// Purge les entrées clées `NodeId` dont le nœud a été

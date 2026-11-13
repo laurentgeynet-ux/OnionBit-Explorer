@@ -34,6 +34,9 @@ pub struct JsRegExp {
     pub sticky: bool,
     /// `u` — accepted, always on (regex crate is Unicode-native).
     pub unicode: bool,
+    /// `v` — unicodeSets accepted (`unicodeSets` getter; matching
+    /// encore traité comme `u`).
+    pub unicode_sets: bool,
     /// `d` — `exec` results carry `indices` (start/end per group).
     pub has_indices: bool,
     /// Noms de groupes **synthétiques** `__eN` émis pour le
@@ -79,6 +82,7 @@ impl JsRegExp {
         let mut dot_all = false;
         let mut sticky = false;
         let mut unicode = false;
+        let mut unicode_sets = false;
         let mut has_indices = false;
         for f in flags.chars() {
             match f {
@@ -89,16 +93,21 @@ impl JsRegExp {
                 'y' if !sticky => sticky = true,
                 'u' if !unicode => unicode = true,
                 'd' if !has_indices => has_indices = true,
-                'v' => {} // accepted, unicodeSets not implemented
+                'v' if !unicode_sets => unicode_sets = true,
                 _ => return Err(format!("invalid regex flag `{f}`")),
             }
+        }
+        // Spec : `u` et `v` sont mutuellement exclusifs (`/x/uv`
+        // = SyntaxError).
+        if unicode && unicode_sets {
+            return Err("invalid regex flags `uv`".to_string());
         }
         let mut pat = String::new();
         // `i` : le backend fait du folding Unicode complet — exact
         // en mode `u`, trop large en non-`u` où JS canonise par
         // `ToUppercase` simple (`/\u{212a}/i` ne doit pas matcher
         // 'k'). Non-`u` → folding manuel dans `translate_pattern`.
-        if ignore_case && unicode {
+        if ignore_case && (unicode || unicode_sets) {
             pat.push_str("(?i)");
         }
         if multiline {
@@ -107,7 +116,10 @@ impl JsRegExp {
         if dot_all {
             pat.push_str("(?s)");
         }
-        let (translated, synth) = translate_pattern(source, unicode, ignore_case && !unicode)?;
+        // `v` ≈ `u` côté moteur (unicodeSets non implémenté) —
+        // même traduction unicode.
+        let uni = unicode || unicode_sets;
+        let (translated, synth) = translate_pattern(source, uni, ignore_case && !uni)?;
         pat.push_str(&translated);
         let re = fancy_regex::RegexBuilder::new(&pat)
             .backtrack_limit(BACKTRACK_LIMIT)
@@ -123,6 +135,7 @@ impl JsRegExp {
             dot_all,
             sticky,
             unicode,
+            unicode_sets,
             has_indices,
             synth,
         })
@@ -149,6 +162,9 @@ impl JsRegExp {
         }
         if self.unicode {
             f.push('u');
+        }
+        if self.unicode_sets {
+            f.push('v');
         }
         if self.sticky {
             f.push('y');

@@ -59,6 +59,16 @@ const TIMER_FAIL_CAP: u32 = 8;
 static TIMER_SRC_SEEN: std::sync::LazyLock<std::sync::Mutex<std::collections::HashSet<u64>>> =
     std::sync::LazyLock::new(|| std::sync::Mutex::new(std::collections::HashSet::new()));
 
+/// Compteur par empreinte — le top posteur d'une tempête se
+/// nomme par fréquence, pas par simple présence (vol 809 :
+/// 47 producteurs uniques, un seul dominant).
+static TIMER_SRC_COUNT: std::sync::LazyLock<
+    std::sync::Mutex<std::collections::HashMap<u64, (u64, String)>>,
+> = std::sync::LazyLock::new(|| std::sync::Mutex::new(std::collections::HashMap::new()));
+
+/// Nombre total de posts sondés — cadence le dump du top.
+static TIMER_SRC_POSTS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
 /// Pending timers for one engine (page).
 #[derive(Debug, Default)]
 pub(crate) struct TimerQueue {
@@ -379,26 +389,50 @@ fn timer_set_timeout(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Valu
     // d'une tempête de timers : stack JS bornée (4 frames),
     // dédupliquée par empreinte — un posteur en boucle se dénonce
     // en une ligne au lieu de 1,3 M de `job-trace`.
-    if std::env::var_os("EXPLORER_TIMER_SRC").is_some() {
-        let stack: String = e
-            .stack_text("", "")
-            .lines()
-            .map(str::trim)
-            .filter(|l| l.starts_with("at "))
-            .take(4)
-            .collect::<Vec<_>>()
-            .join(" <- ");
-        let stack: String = stack.chars().take(400).collect();
-        let mut h = 0xcbf2_9ce4_8422_2325_u64;
-        for b in stack.as_bytes() {
-            h = (h ^ u64::from(*b)).wrapping_mul(0x0100_0000_01b3);
-        }
-        if TIMER_SRC_SEEN.lock().is_ok_and(|mut s| s.insert(h)) {
-            eprintln!("[timer-src] ms={ms} {stack}");
-        }
-    }
+    timer_src_probe(e, "timeout");
     let id = e.timers.schedule(cb, ms, false, cb_args);
     Ok(Value::Num(id as f64))
+}
+
+/// Sonde `EXPLORER_TIMER_SRC` partagée — empreinte stack
+/// dédupliquée, `tag` nomme le rail (`timeout`/`interval`/`raf`).
+fn timer_src_probe(e: &mut Engine, tag: &str) {
+    if std::env::var_os("EXPLORER_TIMER_SRC").is_none() {
+        return;
+    }
+    let stack: String = e
+        .stack_text("", "")
+        .lines()
+        .map(str::trim)
+        .filter(|l| l.starts_with("at "))
+        .take(4)
+        .collect::<Vec<_>>()
+        .join(" <- ");
+    let stack: String = stack.chars().take(400).collect();
+    let mut h = 0xcbf2_9ce4_8422_2325_u64;
+    for b in stack.as_bytes() {
+        h = (h ^ u64::from(*b)).wrapping_mul(0x0100_0000_01b3);
+    }
+    if TIMER_SRC_SEEN.lock().is_ok_and(|mut s| s.insert(h)) {
+        eprintln!("[timer-src:{tag}] {stack}");
+    }
+    // Comptage par empreinte : tous les 4096 posts, le top-6
+    // des producteurs — la tempête se nomme par sa fréquence.
+    if let Ok(mut counts) = TIMER_SRC_COUNT.lock() {
+        let e2 = counts
+            .entry(h)
+            .or_insert_with(|| (0, format!("[{tag}] {stack}")));
+        e2.0 += 1;
+        let posts = TIMER_SRC_POSTS.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1;
+        if posts % 4096 == 0 {
+            let mut top: Vec<_> = counts.iter().collect();
+            top.sort_by_key(|(_, (n, _))| std::cmp::Reverse(*n));
+            eprintln!("[timer-src:top] posts={posts}");
+            for (_, (n, s)) in top.iter().take(6) {
+                eprintln!("[timer-src:top]   x{n} {s}");
+            }
+        }
+    }
 }
 
 /// `setInterval(fn, ms, ...args)` → timer id.
@@ -407,6 +441,7 @@ fn timer_set_interval(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Val
     let ms = delay_ms(e, args.get(1).cloned())?;
     let cb_args = args.get(2..).unwrap_or(&[]).to_vec();
     e.sched_tick("post.timer");
+    timer_src_probe(e, "interval");
     let id = e.timers.schedule(cb, ms, true, cb_args);
     Ok(Value::Num(id as f64))
 }
@@ -418,6 +453,7 @@ fn timer_raf(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
     let cb = arg(args, 0);
     let ts = Value::Num(e.t0.elapsed().as_secs_f64() * 1000.0);
     e.sched_tick("post.raf");
+    timer_src_probe(e, "raf");
     let id = e.timers.schedule(cb, 16, false, vec![ts]);
     Ok(Value::Num(id as f64))
 }

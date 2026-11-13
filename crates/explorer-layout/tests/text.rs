@@ -52,6 +52,7 @@ fn fixture_req() -> FontRequest {
         caps: 0,
         kern_off: false,
         stretch: 100,
+        feature_settings: Vec::new(),
     }
 }
 
@@ -185,6 +186,7 @@ fn port_fontsource() {
         caps: 0,
         kern_off: false,
         stretch: 100,
+        feature_settings: Vec::new(),
     });
     assert_eq!(ok.as_deref(), Some(ttf.as_slice()));
     let ko = src.font_data(&FontRequest {
@@ -194,6 +196,7 @@ fn port_fontsource() {
         caps: 0,
         kern_off: false,
         stretch: 100,
+        feature_settings: Vec::new(),
     });
     assert!(ko.is_none());
 }
@@ -219,6 +222,7 @@ fn cache_dedupe_font_data() {
         caps: 0,
         kern_off: false,
         stretch: 100,
+        feature_settings: Vec::new(),
     };
     for _ in 0..5 {
         assert!(fc.data(&src, &miss).is_none());

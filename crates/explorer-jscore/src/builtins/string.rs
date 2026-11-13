@@ -757,6 +757,56 @@ pub(crate) fn regexp_to_string(e: &mut Engine, this: Value, _a: &[Value]) -> JsR
     Ok(e.str_val(format!("/{src}/{}", re.flag_string())))
 }
 
+// -- Accesseurs `RegExp.prototype` (spec) ---------------------------------
+// Getters en proto : `TypeError` sur `this` non-RegExp ; les
+// instances ne portent que `lastIndex` en prop propre.
+
+fn re_get(e: &mut Engine, this: Value) -> JsResult<std::rc::Rc<crate::regexp::JsRegExp>> {
+    match re_of(e, this) {
+        Some(re) => Ok(re),
+        None => Err(e.type_error("not a RegExp")),
+    }
+}
+
+/// `get source` — `"(?:)"` quand le pattern est vide (spec).
+pub(crate) fn re_source_get(e: &mut Engine, this: Value, _a: &[Value]) -> JsResult<Value> {
+    let re = re_get(e, this)?;
+    Ok(e.str_val(if re.source.is_empty() {
+        "(?:)".to_string()
+    } else {
+        re.source.clone()
+    }))
+}
+/// `get flags` — ordre canonique `dgimsuvy`.
+pub(crate) fn re_flags_get(e: &mut Engine, this: Value, _a: &[Value]) -> JsResult<Value> {
+    let re = re_get(e, this)?;
+    Ok(e.str_val(re.flag_string()))
+}
+pub(crate) fn re_global_get(e: &mut Engine, this: Value, _a: &[Value]) -> JsResult<Value> {
+    Ok(Value::Bool(re_get(e, this)?.global))
+}
+pub(crate) fn re_ignore_case_get(e: &mut Engine, this: Value, _a: &[Value]) -> JsResult<Value> {
+    Ok(Value::Bool(re_get(e, this)?.ignore_case))
+}
+pub(crate) fn re_multiline_get(e: &mut Engine, this: Value, _a: &[Value]) -> JsResult<Value> {
+    Ok(Value::Bool(re_get(e, this)?.multiline))
+}
+pub(crate) fn re_dot_all_get(e: &mut Engine, this: Value, _a: &[Value]) -> JsResult<Value> {
+    Ok(Value::Bool(re_get(e, this)?.dot_all))
+}
+pub(crate) fn re_sticky_get(e: &mut Engine, this: Value, _a: &[Value]) -> JsResult<Value> {
+    Ok(Value::Bool(re_get(e, this)?.sticky))
+}
+pub(crate) fn re_unicode_get(e: &mut Engine, this: Value, _a: &[Value]) -> JsResult<Value> {
+    Ok(Value::Bool(re_get(e, this)?.unicode))
+}
+pub(crate) fn re_unicode_sets_get(e: &mut Engine, this: Value, _a: &[Value]) -> JsResult<Value> {
+    Ok(Value::Bool(re_get(e, this)?.unicode_sets))
+}
+pub(crate) fn re_has_indices_get(e: &mut Engine, this: Value, _a: &[Value]) -> JsResult<Value> {
+    Ok(Value::Bool(re_get(e, this)?.has_indices))
+}
+
 pub(crate) fn string_match(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
     let s = this_str(e, this.clone())?;
     // `rx[Symbol.match](this)` (spec `GetMethod`).

@@ -146,6 +146,17 @@ fn unhittable(bx: &LayoutBox) -> bool {
     hidden(bx) || bx.style.get("pointer-events") == Some("none")
 }
 
+/// `interactivity:inert` (css-ui-5) : l'élément ET tout son
+/// sous-arbre sont exclus du hit-test — l'inertie est
+/// **absolue** (ni `interactivity:auto` ni `pointer-events`
+/// sur un descendant ne réarment, à la différence de
+/// `pointer-events` qui s'hérite). Non héritée : la
+/// propagation se fait par le flag cumulatif des descents
+/// [`hit_test_m`]/[`hit_test_delta_m_vp`], pas par cascade.
+fn is_inert(bx: &LayoutBox) -> bool {
+    bx.style.get("interactivity") == Some("inert")
+}
+
 /// Rang de peinture d'une boîte au sein de son parent
 /// (CSS 2.1 §9.9.1 / css-position §3.5 — ordre d'empilement
 /// simplifié) : les éléments positionnés (`relative`,
@@ -211,7 +222,7 @@ fn hit_order(bx: &LayoutBox) -> Vec<usize> {
 
 #[must_use]
 pub fn hit_test(bx: &LayoutBox, x: f32, y: f32) -> Option<NodeId> {
-    hit_test_m(bx, x, y, Affine::IDENTITY)
+    hit_test_m(bx, x, y, Affine::IDENTITY, false)
 }
 
 /// Descente sous une matrice cumulative `m` (produit des
@@ -221,7 +232,13 @@ pub fn hit_test(bx: &LayoutBox, x: f32, y: f32) -> Option<NodeId> {
 /// avant transform, comme la display list qui les émet sous
 /// `PushTransform`. Une matrice non inversible (`scale(0)`)
 /// aplatit le sous-arbre : rien n'y est cliquable.
-fn hit_test_m(bx: &LayoutBox, x: f32, y: f32, m: Affine) -> Option<NodeId> {
+fn hit_test_m(bx: &LayoutBox, x: f32, y: f32, m: Affine, inert: bool) -> Option<NodeId> {
+    // Sous-arbre inerte : rien n'y est ciblable — sortie
+    // avant toute descente (l'inertie englobe la boîte).
+    let inert = inert || is_inert(bx);
+    if inert {
+        return None;
+    }
     // La transform propre de la boîte s'applique à elle-même
     // ET à ses descendants (même portée que `PushTransform`).
     let m = box_transform(bx, &bx.rect).map_or(m, |t| t.post_concat(m));
@@ -237,7 +254,7 @@ fn hit_test_m(bx: &LayoutBox, x: f32, y: f32, m: Affine) -> Option<NodeId> {
     }
     for i in hit_order(bx) {
         let child = &bx.children[i];
-        if let Some(n) = explorer_common::deep(|| hit_test_m(child, x, y, m)) {
+        if let Some(n) = explorer_common::deep(|| hit_test_m(child, x, y, m, inert)) {
             return Some(n);
         }
     }
@@ -266,7 +283,7 @@ pub fn hit_test_scrolled(bx: &LayoutBox, x: f32, y: f32, scroll_y: f32) -> Optio
     // axe (comportement antérieur, pas de régression) ;
     // `top`/`left` restent exacts. Préférer
     // [`hit_test_scrolled_vp`] dès que le viewport est connu.
-    hit_test_delta_m_vp(bx, x, y, scroll_y, (0.0, 0.0), Affine::IDENTITY)
+    hit_test_delta_m_vp(bx, x, y, scroll_y, (0.0, 0.0), Affine::IDENTITY, false)
 }
 
 /// [`hit_test_scrolled`] avec le scrollport `(w, h)` —
@@ -280,7 +297,7 @@ pub fn hit_test_scrolled_vp(
     scroll_y: f32,
     vp: (f32, f32),
 ) -> Option<NodeId> {
-    hit_test_delta_m_vp(bx, x, y, scroll_y, vp, Affine::IDENTITY)
+    hit_test_delta_m_vp(bx, x, y, scroll_y, vp, Affine::IDENTITY, false)
 }
 
 /// Variante scrollée de [`hit_test_m`] : `m` cumule les
@@ -296,7 +313,12 @@ fn hit_test_delta_m_vp(
     delta: f32,
     vp: (f32, f32),
     m: Affine,
+    inert: bool,
 ) -> Option<NodeId> {
+    let inert = inert || is_inert(bx);
+    if inert {
+        return None;
+    }
     let m = box_transform(bx, &bx.rect).map_or(m, |t| t.post_concat(m));
     let (px, py) = m.invert()?.apply(x, y_vp + delta);
     if !contains(paint_bounds(bx), px, py) {
@@ -326,7 +348,7 @@ fn hit_test_delta_m_vp(
             (0.0, 0.0)
         };
         if let Some(n) =
-            explorer_common::deep(|| hit_test_delta_m_vp(child, x - sx, y_vp - sy, d, vp, m))
+            explorer_common::deep(|| hit_test_delta_m_vp(child, x - sx, y_vp - sy, d, vp, m, inert))
         {
             return Some(n);
         }
