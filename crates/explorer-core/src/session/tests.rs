@@ -5828,3 +5828,85 @@ fn document_cookie_reflete_le_jar_session() {
         "document.cookie doit refléter le jar session — reçu : {out}"
     );
 }
+
+/// Étape 227 — feuilles déjà parsées persistées : même
+/// texte = même entrée de cache entre deux passes (hit),
+/// édition = nouvelle clé et nouvelle cascade (jamais de
+/// feuille périmée servie).
+#[test]
+fn style_sheet_cache_reuses_and_tracks_edits() {
+    let mut p = apply::PaintPayload::default();
+    let dom = test_dom("<style>#t { color: #ff0000 }</style><div id=t>x</div>");
+    let _ = apply::styles_payload(
+        &mut p,
+        &dom,
+        (800.0, 600.0),
+        explorer_css::ColorScheme::Light,
+        false,
+        1.0,
+    );
+    let n1 = p.sheet_cache.len();
+    // UA + feuille auteur au minimum.
+    assert!(n1 >= 2, "UA + auteur attendus en cache — {n1}");
+    // Même texte → hit : aucune entrée ajoutée.
+    let _ = apply::styles_payload(
+        &mut p,
+        &dom,
+        (800.0, 600.0),
+        explorer_css::ColorScheme::Light,
+        false,
+        1.0,
+    );
+    assert_eq!(p.sheet_cache.len(), n1, "même texte = même clé");
+    // Édition : nouveau texte → nouvelle clé, nouvelle cascade.
+    let dom2 = test_dom("<style>#t { color: #00ff00 }</style><div id=t>x</div>");
+    let (styles, _eng) = apply::styles_payload(
+        &mut p,
+        &dom2,
+        (800.0, 600.0),
+        explorer_css::ColorScheme::Light,
+        false,
+        1.0,
+    );
+    assert_eq!(
+        p.sheet_cache.len(),
+        n1 + 1,
+        "le texte édité est une clé distincte"
+    );
+    let n = dom2.by_id("t").unwrap();
+    let color = styles
+        .get(n)
+        .and_then(|c| c.get("color").map(str::to_string))
+        .unwrap_or_default();
+    assert!(
+        color.contains("0, 255, 0") || color.contains("#00ff00"),
+        "la feuille éditée doit cascader — color = {color}"
+    );
+}
+
+/// Étape 227 — borne du cache : au-delà de
+/// `MAX_SHEET_CACHE` la feuille est parsée à l'usage sans
+/// stockage (churn hostile de `<style>` borné).
+#[test]
+fn style_sheet_cache_bounded() {
+    let mut p = apply::PaintPayload {
+        linked_sheets: (0..(types::MAX_SHEET_CACHE + 10))
+            .map(|i| format!("a {{ color: #{i:06x} }}"))
+            .collect(),
+        ..apply::PaintPayload::default()
+    };
+    let dom = test_dom("<div>x</div>");
+    let _ = apply::styles_payload(
+        &mut p,
+        &dom,
+        (800.0, 600.0),
+        explorer_css::ColorScheme::Light,
+        false,
+        1.0,
+    );
+    assert_eq!(
+        p.sheet_cache.len(),
+        types::MAX_SHEET_CACHE,
+        "le cache est borné"
+    );
+}

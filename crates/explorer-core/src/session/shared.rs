@@ -945,8 +945,8 @@ pub async fn drain_applies_shared(sess: &tokio::sync::Mutex<Session>, tab: TabId
 /// l'appelant, mais **zéro dispatch JS sous le verrou**.
 ///
 /// Le moteur est sorti pour toute la durée de l'input
-/// ([`Session::take_event_engine`]) et réinséré en fin de
-/// fenêtre ([`Session::finish_event_engine`]) — toujours,
+/// (`Session::take_event_engine`) et réinséré en fin de
+/// fenêtre (`Session::finish_event_engine`) — toujours,
 /// même sur `Err`.
 ///
 /// # Errors

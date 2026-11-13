@@ -227,8 +227,16 @@ pub(crate) fn composite_frames(p: &mut PaintPayload, ctx: &ApplyCtx, dom: &Dom) 
             .frame_bitmaps
             .entry(key)
             .or_insert_with(|| {
-                render_subframe(f, rect.width, rect.height, ctx, base.as_ref(), &p.csp)
-                    .map_or_else(|| Arc::new(blank(wp, hp)), Arc::new)
+                render_subframe(
+                    f,
+                    rect.width,
+                    rect.height,
+                    ctx,
+                    base.as_ref(),
+                    &p.csp,
+                    &mut p.sheet_cache,
+                )
+                .map_or_else(|| Arc::new(blank(wp, hp)), Arc::new)
             })
             .clone();
         p.images.replaced.insert(node, img);
@@ -280,6 +288,7 @@ fn render_subframe(
     ctx: &ApplyCtx,
     parent_base: Option<&Url>,
     parent_csp: &[explorer_net::csp::CspPolicy],
+    sheet_cache: &mut HashMap<String, explorer_css::Stylesheet>,
 ) -> Option<DecodedImage> {
     let mut cp = PaintPayload {
         base_url: Some(match &f.srcdoc {
@@ -308,6 +317,12 @@ fn render_subframe(
         scripting: ctx.scripting && f.sandbox.is_none_or(|s| s.scripts),
     };
     let root_el = f.dom.document_element()?;
+    // Étape 227 — le cache de feuilles du parent est prêté
+    // à la passe enfant : UA + `<style>` du cadre (stable
+    // d'une frame à l'autre) ne sont parsés qu'une fois.
+    // Aucun `?` entre le take et la restitution — le cache
+    // ne peut pas être perdu en chemin d'erreur.
+    cp.sheet_cache = std::mem::take(sheet_cache);
     let (styles, _eng) = styles_payload(
         &mut cp,
         &f.dom,
@@ -316,6 +331,7 @@ fn render_subframe(
         child_ctx.scripting,
         ctx.scale,
     );
+    *sheet_cache = std::mem::take(&mut cp.sheet_cache);
     let data_imgs = collect_data_images(&f.dom, &styles, ctx.image_max_px);
     cp.images.replaced.extend(data_imgs.replaced);
     cp.images.backgrounds.extend(data_imgs.backgrounds);

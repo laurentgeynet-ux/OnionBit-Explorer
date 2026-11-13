@@ -44,7 +44,9 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use explorer_css::value::Color;
-use explorer_css::{ComputedStyle, Origin, StyleEngine, StyleEnv, StyleMap};
+use explorer_css::{
+    parse_stylesheet, ComputedStyle, Origin, StyleEngine, StyleEnv, StyleMap, Stylesheet,
+};
 use explorer_dom::Dom;
 use explorer_html::TreeBuilder;
 use explorer_js::CanvasOpsTable;
@@ -289,6 +291,10 @@ pub(crate) struct PaintPayload {
     /// texte d'origine → texte expansé — substitué par
     /// contenu dans `styles_payload`.
     pub inline_css_expanded: HashMap<String, String>,
+    /// Feuilles déjà **parsées** clées par texte CSS
+    /// (étape 227) — voyage avec la payload ; miroir de
+    /// `Tab::sheet_cache`, borné à `types::MAX_SHEET_CACHE`.
+    pub sheet_cache: HashMap<String, Stylesheet>,
     /// Styles bruts de la dernière cascade (transitions).
     pub prev_styles: HashMap<usize, ComputedStyle>,
     /// Transitions en vol.
@@ -491,6 +497,7 @@ impl Tab {
             defined_names: self.defined_names.clone(),
             adopted_sheets: self.adopted_sheets.clone(),
             inline_css_expanded: std::mem::take(&mut self.inline_css_expanded),
+            sheet_cache: std::mem::take(&mut self.sheet_cache),
             prev_styles: std::mem::take(&mut self.prev_styles),
             transitions: std::mem::take(&mut self.transitions),
             animations: std::mem::take(&mut self.animations),
@@ -554,6 +561,7 @@ impl Tab {
         self.linked_sheets = p.linked_sheets;
         self.adopted_sheets = p.adopted_sheets;
         self.inline_css_expanded = p.inline_css_expanded;
+        self.sheet_cache = p.sheet_cache;
         self.prev_styles = p.prev_styles;
         self.transitions = p.transitions;
         self.animations = p.animations;
@@ -2062,6 +2070,49 @@ pub(crate) fn viewport_env(
     }
 }
 
+/// Feuille déjà parsée dans le cache texte→`Stylesheet`
+/// (étape 227). `None` = cache plein et texte absent —
+/// l'appelant re-parse à l'usage sans stocker.
+fn sheet_parsed<'a>(
+    cache: &'a mut HashMap<String, Stylesheet>,
+    css: &str,
+) -> Option<&'a Stylesheet> {
+    if !cache.contains_key(css) && cache.len() < types::MAX_SHEET_CACHE {
+        cache.insert(css.to_string(), parse_stylesheet(css));
+    }
+    cache.get(css)
+}
+
+/// `StyleEngine::add_stylesheet` via le cache de la
+/// payload — saute la tokenisation+parse des textes déjà
+/// vus (la collecte des règles dans `eng` reste par
+/// passe : elle porte l'ordre de cascade).
+fn add_sheet(
+    eng: &mut StyleEngine,
+    cache: &mut HashMap<String, Stylesheet>,
+    css: &str,
+    origin: Origin,
+) {
+    match sheet_parsed(cache, css) {
+        Some(s) => eng.add_stylesheet(s, origin),
+        None => eng.add_stylesheet(&parse_stylesheet(css), origin),
+    }
+}
+
+/// Variante confinée shadow (R-96) de [`add_sheet`].
+fn add_sheet_scoped(
+    eng: &mut StyleEngine,
+    cache: &mut HashMap<String, Stylesheet>,
+    css: &str,
+    origin: Origin,
+    scope: explorer_dom::NodeId,
+) {
+    match sheet_parsed(cache, css) {
+        Some(s) => eng.add_scoped_stylesheet(s, origin, scope),
+        None => eng.add_scoped_stylesheet(&parse_stylesheet(css), origin, scope),
+    }
+}
+
 /// Cascade + transitions/animations sur payload — la passe
 /// de styles partagée par reflow complet et relayout
 /// incrémental. Écrit `prev_styles`/`transitions`/
@@ -2075,7 +2126,16 @@ pub(crate) fn styles_payload(
     dpr: f32,
 ) -> (StyleMap, StyleEngine) {
     let mut eng = StyleEngine::new();
-    eng.add_css(MEDIA_UA_CSS, Origin::UserAgent);
+    // Étape 227 — parse par texte via `p.sheet_cache` :
+    // UA + chaque `<style>`/`linked`/`adopted` n'est
+    // tokenisé/parsé qu'à sa première forme de texte ; une
+    // édition produit une nouvelle clé (re-parse unique),
+    // le reste des passes ré-emprunte la `Stylesheet`
+    // déjà construite (`add_stylesheet` collecte sans
+    // re-parser). Le cache se prête aussi aux passes des
+    // sous-contextes (`composite::frame_payload`).
+    let cache = &mut p.sheet_cache;
+    add_sheet(&mut eng, cache, MEDIA_UA_CSS, Origin::UserAgent);
     // Une passe de parse par feuille (étape 104) : l'ordre de
     // cascade est l'ordre d'insertion, donc inchangé — mais un
     // défaut de fermeture (accolade, commentaire) ne peut plus
@@ -2088,20 +2148,22 @@ pub(crate) fn styles_payload(
         // Étape 218 — `<style>` dont les `@import` ont été
         // expansés pendant la vague : substitution par
         // contenu (le DOM a pu muter depuis la collecte —
-        // robuste aux `<style>` insérés par JS).
+        // robuste aux `<style>` insérés par JS). Clé de
+        // cache = texte **substitué** (celui effectivement
+        // parsé).
         let css = p.inline_css_expanded.get(&css).cloned().unwrap_or(css);
         match scope {
-            Some(root) => eng.add_scoped_css(&css, Origin::Author, root),
-            None => eng.add_css(&css, Origin::Author),
+            Some(root) => add_sheet_scoped(&mut eng, cache, &css, Origin::Author, root),
+            None => add_sheet(&mut eng, cache, &css, Origin::Author),
         }
     }
     for css in &p.linked_sheets {
-        eng.add_css(css, Origin::Author);
+        add_sheet(&mut eng, cache, css, Origin::Author);
     }
     // `adoptedStyleSheets` : spec — feuilles construites,
     // ordre du tableau, après les `<link>`/`<style>`.
     for css in &p.adopted_sheets {
-        eng.add_css(css, Origin::Author);
+        add_sheet(&mut eng, cache, css, Origin::Author);
     }
     // Media queries évaluées contre le viewport RÉEL de la
     // session (demande PIPE→NAV : `max-width:1007` doit être

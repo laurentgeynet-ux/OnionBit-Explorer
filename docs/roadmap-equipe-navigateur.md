@@ -12047,6 +12047,56 @@ un crate PIPELINE.- [x] **JS-C422. Deadline honnête — canal session ↔ budge
   `color_reaches_own_fragments` (runs du
   target recolorés, descendant figé) —
   143 lib + 473 intégration verts.
+- [x] **Étape 227. Cache de parse des
+  feuilles** (`explorer-core`
+  `session/apply.rs`/`mod.rs`/`types.rs`/
+  `composite.rs`, audit perf chantier 5) :
+  `styles_payload` re-parsait **toutes**
+  les feuilles à chaque passe de styles —
+  UA + chaque `<style>`/`linked`/
+  `adopted` tokenisées puis parsées à
+  chaque navigation, sync incrémentale,
+  tick anim re-layout (Étape 223/226) et
+  passe sous-contexte `<iframe>`. Le
+  cache `Tab::sheet_cache`
+  (`HashMap<texte CSS → Stylesheet>`,
+  miroir sur `PaintPayload` via
+  take/put, borné à
+  `types::MAX_SHEET_CACHE` = 64)
+  ré-emprunte la feuille déjà parsée à
+  `add_stylesheet`/`add_scoped_
+  stylesheet` — la clé est le texte
+  exact (une édition = nouvelle clé =
+  re-parse unique ; `inline_css_
+  expanded` substitué avant la clé).
+  Cache plein → parse à l'usage non
+  stocké (churn hostile borné). Le cache
+  du parent est **prêté** à la passe
+  `render_subframe` (take/restore
+  autour de `styles_payload`, aucun
+  `?` entre les deux — pas de perte en
+  chemin d'erreur) : UA + feuilles du
+  cadre ne sont parsées qu'une fois. La
+  collecte des règles dans `eng` reste
+  par passe (ordre de cascade) — c'est
+  le parse, pas l'indexation, qui saute.
+  Analysés et écartés : cache
+  `element_ordinals` (pas de compteur
+  de mutation `Dom` → invalidation non
+  prouvable), recollecte d'assets
+  réduite au sous-arbre sale (les styles
+  sont recalculés **globalement** — un
+  `background-image` hors du sous-arbre
+  peut changer), décodage `data:` (les
+  bitmaps persistent déjà via
+  `img_decoded`/`bg_decoded` clés src —
+  la recollecte ne re-clé que des
+  `Arc`). Verrous : `style_sheet_cache_
+  reuses_and_tracks_edits` (hit = len
+  stable, édition = clé+cascade
+  nouvelles), `style_sheet_cache_
+  bounded` — 143 lib + 473 intégration
+  verts.
 
 ## Plan NAVIGATEUR — vitrine YouTube + surface navigateur (2026-11-12)
 

@@ -210,7 +210,7 @@ impl std::fmt::Display for JsStr {
 }
 
 /// A JavaScript value. `Clone` — les indirections `ObjId` sont
-/// `Copy`, [`JsStr`] est un `Rc` (bump de compteur).
+/// `Copy`, `JsStr` est un `Rc` (bump de compteur).
 #[derive(Debug, Clone, PartialEq)]
 pub enum Value {
     /// `undefined`

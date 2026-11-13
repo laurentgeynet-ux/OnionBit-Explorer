@@ -969,6 +969,12 @@ pub(crate) const MAX_PENDING_LIFECYCLE: usize = 32;
 /// qui recalcule en boucle ne peut saturer la file.
 pub(crate) const MAX_ANIM_BIRTHS: usize = 256;
 
+/// Borne de `Tab::sheet_cache` (étape 227) — feuilles
+/// déjà parsées clées par texte CSS. Au-delà, la feuille
+/// est re-parsée à l'usage sans stockage : une page qui
+/// génère du `<style>` en boucle ne gonfle pas la map.
+pub(crate) const MAX_SHEET_CACHE: usize = 64;
+
 /// `Cookie` filaire → forme persistée (expiration → secs
 /// unix ; les expirés ne sont jamais exportés —
 /// [`CookieJar::export`] purge déjà).

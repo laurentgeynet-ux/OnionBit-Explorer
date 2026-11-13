@@ -450,7 +450,7 @@ fn vendor_section(r: &mut BitReader<'_>) -> Option<Vec<bool>> {
 /// `host` filtre les graines **spécifiques à un domaine** :
 /// `SOCS` (le proto sérialisé du bump Google, lu par
 /// `ytd-consent-bump*` — `CONSENT` n'est plus relu par
-/// `YouTube`) n'est émis que sur [`is_google_consent_host`],
+/// `YouTube`) n'est émis que sur `is_google_consent_host`,
 /// jamais sur un hôte tiers où il serait un cookie fantôme.
 /// `Honest` → vecteur vide (statu quo).
 #[must_use]

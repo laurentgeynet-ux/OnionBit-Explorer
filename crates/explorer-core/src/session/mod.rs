@@ -379,6 +379,15 @@ pub(crate) struct Tab {
     /// (étape 218) : texte d'origine → texte expansé —
     /// substitué par contenu dans `styles_payload`.
     inline_css_expanded: HashMap<String, String>,
+    /// Feuilles déjà **parsées**, clé = texte CSS exact
+    /// (étape 227) : `styles_payload` re-parsait UA + chaque
+    /// `<style>`/`linked`/`adopted` à chaque passe de styles
+    /// (navigations, syncs incrémentales, ticks anim
+    /// re-layout). Une édition = nouvelle clé = re-parse
+    /// unique ; borné à `types::MAX_SHEET_CACHE` — non
+    /// snapshoté bfcache (le texte re-parse une fois à la
+    /// restauration).
+    sheet_cache: HashMap<String, explorer_css::Stylesheet>,
     /// Noms des custom elements définis — gel bfcache du
     /// champ `Tab.defined_names` (registre `customElements`
     /// du miroir, re-poussé dans `Dom::set_defined_names`
@@ -1661,6 +1670,7 @@ impl Session {
                 linked_sheets: Vec::new(),
                 adopted_sheets: Vec::new(),
                 inline_css_expanded: HashMap::new(),
+                sheet_cache: HashMap::new(),
                 defined_names: Vec::new(),
                 frames: Vec::new(),
                 frame_ctxs: Vec::new(),
