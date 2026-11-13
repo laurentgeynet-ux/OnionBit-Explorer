@@ -3321,3 +3321,27 @@ shadow n'atteint ni cascade ni boxification ») etait
 - L'hypothèse « chunk fetché qui gèle la file `mr` »
   n'est pas corroborée par ce run — à revisiter si un
   `dyn.err kind=src` réapparaît un jour.
+
+### 2026-11-13 — Vitrine `/` : page honnêtement caractérisée
+
+- Frame `?full=1` révélait un voile noir : **le bandeau
+  de consentement Google** (`ytd-consent-bump-v2`)
+  couvre le viewport — les clics (accepter/refuser)
+  togglent le layout sans fermer : le POST consentement
+  n'est pas dans le corpus → re-déclenché. Retiré au
+  DOM pour mesurer le dessous.
+- Sous le voile : **masthead complet** (burger, « Se
+  connecter ») + carte « **Votre historique YouTube est
+  désactivé** » — le message exact que YouTube sert à
+  un profil froid. `ytInitialData` = 160 Ko, 0
+  `videoRenderer`/`richItemRenderer` : **le feed est
+  absent des données enregistrées**, pas un échec
+  moteur.
+- Verdict vitrine : moteur **fidèle à l'enregistrement**
+  — page stylée, texte FR net, liens actifs.
+  Vignettes : absentes (données) ; icônes masthead :
+  misses corpus epoch≥2 (`fetch.rej` gstatic — les
+  `.resp` sont consommées une fois par nav).
+- État atteint : titre `YouTube`, `appKids=14`,
+  `[[…]]` absents, attestation fonctionnelle — reste
+  un corpus **warm-profile** pour un feed peuplé.
