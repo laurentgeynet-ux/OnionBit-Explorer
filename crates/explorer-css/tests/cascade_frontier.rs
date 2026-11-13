@@ -87,6 +87,19 @@ fn assert_equiv(
     base: &StyleMap,
     frontier: &[NodeId],
 ) -> StyleMap {
+    let keyed: Vec<(NodeId, Option<&str>)> = frontier.iter().map(|&n| (n, None)).collect();
+    assert_equiv_keyed(e, dom, env, base, &keyed)
+}
+
+/// Variante cléée (R-297) : `Some(attr)` = mutation
+/// d'attribut, `None` = structurelle/contenu.
+fn assert_equiv_keyed(
+    e: &StyleEngine,
+    dom: &Dom,
+    env: &StyleEnv,
+    base: &StyleMap,
+    frontier: &[(NodeId, Option<&str>)],
+) -> StyleMap {
     let sub = e.compute_scoped_frontier(dom, dom.document(), env, base, frontier);
     let mut merged = base.clone();
     merged.apply_scoped(sub);
@@ -253,7 +266,7 @@ fn frontier_elague_le_sous_arbre_stable() {
     let base = e.compute_tree(&f.dom, f.dom.document(), &env());
 
     f.dom.set_attribute(f.f1, "class", "on").unwrap();
-    let sub = e.compute_scoped_frontier(&f.dom, f.dom.document(), &env(), &base, &[f.f1]);
+    let sub = e.compute_scoped_frontier(&f.dom, f.dom.document(), &env(), &base, &[(f.f1, None)]);
     // `mid`, `t` (sous-arbre profond disjoint) et `f4`
     // (sous un frère évalué-inchangé) restent hors émission.
     assert!(sub.get(f.t).is_none(), "sous-arbre disjoint élagué");
@@ -313,4 +326,128 @@ fn frontier_insertion_parent_touche() {
     // Et le nouvel inséré a son style calculé (nœud absent
     // de `base`, couvert par le sous-arbre du parent touché).
     assert!(merged.get(ins).is_some(), "le nœud inséré est stylé");
+}
+
+// ── R-297 — clé de mutation : descente sous un touché d'attr ─
+
+/// `SetAttr` dont l'attribut n'apparaît dans AUCUN composé
+/// non-sujet + computed inchangé ⇒ le sous-arbre du touché
+/// est élagué (cas `data-is-billboard-visible` : restyle
+/// d'un conteneur géant sans sélecteur dépendant).
+#[test]
+fn frontier_attr_hors_selecteurs_elaque_le_sous_arbre() {
+    let mut f = fixture();
+    // `.c` existe en position SUJET seule — `mid` prend la
+    // classe mais aucun composé ancêtre ne lit `class`.
+    let e = eng(".c { color: rgb(8, 8, 8) }");
+    let base = e.compute_tree(&f.dom, f.dom.document(), &env());
+
+    f.dom.set_attribute(f.mid, "data-zzz", "1").unwrap();
+    let sub = f
+        .dom
+        .element(f.mid)
+        .map(|_| {
+            let e2 = &e;
+            e2.compute_scoped_frontier(
+                &f.dom,
+                f.dom.document(),
+                &env(),
+                &base,
+                &[(f.mid, Some("data-zzz"))],
+            )
+        })
+        .unwrap();
+    // `t` (descendant de `mid`) n'est PAS ré-émis — preuve
+    // de l'élagage ; l'invariant global reste vérifié par
+    // `assert_equiv_keyed` ci-dessous.
+    assert!(
+        sub.get(f.t).is_none(),
+        "attr hors sélecteurs + computed stable ⇒ sous-arbre élagué"
+    );
+    let merged = assert_equiv_keyed(&e, &f.dom, &env(), &base, &[(f.mid, Some("data-zzz"))]);
+    assert!(merged.get(f.t).is_some(), "le style persisté fait foi");
+}
+
+/// Même attr mais présent dans un composé ancêtre
+/// (`[data-flag] p`) ⇒ la descente a lieu et le descendant
+/// bascule — l'élagage ne doit jamais perdre un restyle.
+#[test]
+fn frontier_attr_en_compose_ancetre_descend() {
+    let mut f = fixture();
+    let e = eng("[data-flag] p { color: rgb(9, 9, 9) }");
+    let base = e.compute_tree(&f.dom, f.dom.document(), &env());
+    assert_ne!(
+        base.get(f.t).and_then(|s| s.get("color")),
+        Some("rgb(9, 9, 9)")
+    );
+
+    f.dom.set_attribute(f.mid, "data-flag", "1").unwrap();
+    let merged = assert_equiv_keyed(&e, &f.dom, &env(), &base, &[(f.mid, Some("data-flag"))]);
+    assert_eq!(
+        merged.get(f.t).and_then(|s| s.get("color")),
+        Some("rgb(9, 9, 9)"),
+        "le descendant sous le composé ancêtre doit basculer"
+    );
+}
+
+/// Fan-out de fratrie borné (R-297) : sous une frontière
+/// 100 % `Some(attr)` la garde `:has` amont rend tout flip
+/// de frère précédent impossible et `:nth-last-*` est un
+/// comptage ; un frère suivant ne peut basculer que si
+/// l'attr vit en composé non-sujet. `data-zzz` n'est dans
+/// aucun sélecteur ⇒ ni frères précédents de chaîne ni
+/// frères suivants du touché ne sont ré-émis.
+#[test]
+fn frontier_attr_ne_visite_pas_les_freres() {
+    let mut f = fixture();
+    // `.x` en position sujet seule — aucun composé
+    // non-sujet ne lit `data-zzz` (ni `class`/`id`).
+    let e = eng(".x { color: rgb(4, 4, 4) }");
+    let base = e.compute_tree(&f.dom, f.dom.document(), &env());
+
+    f.dom.set_attribute(f.f2, "data-zzz", "1").unwrap();
+    let sub = e.compute_scoped_frontier(
+        &f.dom,
+        f.dom.document(),
+        &env(),
+        &base,
+        &[(f.f2, Some("data-zzz"))],
+    );
+    for n in [f.host, f.mid, f.t, f.f1, f.f3, f.f4] {
+        assert!(
+            sub.get(n).is_none(),
+            "{n:?} hors touché+spine ne doit pas être ré-émis"
+        );
+    }
+    let probe = explorer_css::take_frontier_probe();
+    assert_eq!(
+        (probe.visited, probe.touched, probe.descend_attr),
+        (3, 1, 0),
+        "seuls doc+body+f2 sont évalués"
+    );
+    let merged = assert_equiv_keyed(&e, &f.dom, &env(), &base, &[(f.f2, Some("data-zzz"))]);
+    assert!(merged.get(f.f3).is_some(), "le style persisté fait foi");
+}
+
+/// L'attr vit dans un composé non-sujet frère
+/// (`#f1[data-flag] + #f2`) ⇒ le frère suivant bascule : la
+/// visite des suivants reste obligatoire quand
+/// `attr_descends` le dicte.
+#[test]
+fn frontier_attr_compose_suivant_visite_les_suivants() {
+    let mut f = fixture();
+    let e = eng("#f1[data-flag] + #f2 { color: rgb(7, 7, 7) }");
+    let base = e.compute_tree(&f.dom, f.dom.document(), &env());
+    assert_ne!(
+        base.get(f.f2).and_then(|s| s.get("color")),
+        Some("rgb(7, 7, 7)")
+    );
+
+    f.dom.set_attribute(f.f1, "data-flag", "1").unwrap();
+    let merged = assert_equiv_keyed(&e, &f.dom, &env(), &base, &[(f.f1, Some("data-flag"))]);
+    assert_eq!(
+        merged.get(f.f2).and_then(|s| s.get("color")),
+        Some("rgb(7, 7, 7)"),
+        "le frère suivant doit basculer via `+` sur l'attr muté"
+    );
 }

@@ -6002,7 +6002,7 @@ fn styles_scoped_merges_dirty_subtree() {
         false,
         1.0,
         &[],
-        &[x],
+        &[(x, None)],
         apply::PhaseKind::Flow,
         0,
     );

@@ -1653,6 +1653,143 @@ fn rightmost_key(sel: &ComplexSelector) -> BucketKey {
 /// composés à dépendance distante/structurale (`:has(`,
 /// `:nth-*`, `:empty`, `:first/last/only-*`) en position
 /// non-finale sont concernés.
+/// R-297 — ensemble de sensibilité d'attribut sur les
+/// composés non-sujets des sélecteurs du moteur.
+#[derive(Default)]
+struct AncestorKeys {
+    /// Noms d'attributs utilisés dans `[attr…]` ou pilotant
+    /// un pseudo d'état (`:disabled` → `disabled`, …).
+    attrs: HashSet<String>,
+    /// `.class` présent en position non-finale.
+    cls: bool,
+    /// `#id` présent en position non-finale.
+    id: bool,
+}
+
+/// Sondes R-297 — attribution de la descente de frontière.
+/// `thread_local` : la marche est mono-fil (même thread que
+/// l'appelant, `explorer_common::deep` inclus) ; relire via
+/// [`take_frontier_probe`] — coût nul quand non relue.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+pub struct FrontierProbe {
+    /// Nœuds évalués par la marche (spine + frères +
+    /// descendus) — la jauge du fan-out de fratrie.
+    pub visited: u32,
+    /// Touchés rencontrés dans la marche.
+    pub touched: u32,
+    /// Descentes décidées par `attr_descends` (`Some(attr)`
+    /// dont la clé vit dans un composé non-sujet).
+    pub descend_attr: u32,
+    /// Descentes décidées par clé `None` (mutation
+    /// structurelle/texte — inconditionnelle par design).
+    pub descend_struct: u32,
+    /// Touchés dont le computed a basculé (`changed` —
+    /// descente par héritage, indépendante de la clé).
+    pub changed: u32,
+}
+
+thread_local! {
+    static FRONTIER_PROBE: std::cell::Cell<FrontierProbe> =
+        const { std::cell::Cell::new(FrontierProbe { visited: 0, touched: 0, descend_attr: 0, descend_struct: 0, changed: 0 }) };
+}
+
+#[inline]
+fn fr_probe(f: impl Fn(&mut FrontierProbe)) {
+    FRONTIER_PROBE.with(|c| {
+        let mut p = c.get();
+        f(&mut p);
+        c.set(p);
+    });
+}
+
+/// Relit et remet à zéro les compteurs de la dernière passe
+/// [`StyleEngine::compute_scoped_frontier`] sur ce thread.
+#[must_use]
+pub fn take_frontier_probe() -> FrontierProbe {
+    FRONTIER_PROBE.with(|c| c.replace(FrontierProbe::default()))
+}
+
+/// `true` si la mutation de l'attribut `a` (en minuscules)
+/// peut affecter les descendants d'un touché porteur.
+fn attr_descends(k: &AncestorKeys, a: &str) -> bool {
+    (a == "class" && k.cls) || (a == "id" && k.id) || k.attrs.contains(a)
+}
+
+/// Alimente [`AncestorKeys`] depuis un composé en position
+/// non-sujet — récursif dans `:not`/`:is`/`:where`/`:has`/
+/// `:host*` (tout composé interne qualifie des éléments liés
+/// au porteur non-sujet — inclusion large = conservateur).
+fn compound_attr_keys(c: &crate::CompoundSelector, k: &mut AncestorKeys) {
+    for s in &c.simples {
+        match s {
+            SimpleSelector::Class(_) => k.cls = true,
+            SimpleSelector::Id(_) => k.id = true,
+            SimpleSelector::Attribute { name, .. } => {
+                k.attrs.insert(name.to_ascii_lowercase());
+            }
+            SimpleSelector::Pseudo(PseudoClass::Lang(_)) => {
+                k.attrs.insert("lang".into());
+            }
+            SimpleSelector::Pseudo(PseudoClass::Dynamic(d)) => {
+                for a in dynamic_pseudo_attrs(*d) {
+                    k.attrs.insert((*a).into());
+                }
+            }
+            SimpleSelector::Pseudo(
+                PseudoClass::Not(l) | PseudoClass::Is(l) | PseudoClass::Where(l),
+            ) => {
+                for inner in l {
+                    for (ic, _) in &inner.parts {
+                        compound_attr_keys(ic, k);
+                    }
+                }
+            }
+            SimpleSelector::Pseudo(PseudoClass::Has(l)) => {
+                for (_, inner) in l {
+                    for (ic, _) in &inner.parts {
+                        compound_attr_keys(ic, k);
+                    }
+                }
+            }
+            SimpleSelector::Pseudo(PseudoClass::Host(Some(h)) | PseudoClass::HostContext(h)) => {
+                compound_attr_keys(h, k);
+            }
+            _ => {}
+        }
+    }
+}
+
+/// Attributs HTML pilotant chaque [`DynamicPseudo`] (la
+/// mutation de l'un d'eux peut basculer le pseudo sans
+/// changer le computed du porteur).
+fn dynamic_pseudo_attrs(d: crate::DynamicPseudo) -> &'static [&'static str] {
+    use crate::DynamicPseudo as P;
+    match d {
+        P::Checked => &["checked", "selected"],
+        P::Disabled | P::Enabled => &["disabled"],
+        P::Required | P::Optional => &["required"],
+        P::ReadOnly | P::ReadWrite => &["readonly", "contenteditable"],
+        P::PlaceholderShown => &["placeholder"],
+        P::Target => &["id"],
+        P::Link | P::Visited => &["href"],
+        P::PopoverOpen => &["popover"],
+        P::Valid | P::Invalid | P::UserValid | P::UserInvalid => &[
+            "required",
+            "pattern",
+            "type",
+            "value",
+            "min",
+            "max",
+            "step",
+            "minlength",
+            "maxlength",
+        ],
+        // Pointer/clavier/historique/nom d'élément : pas de
+        // pilote attribut → aucune entrée.
+        P::Hover | P::Active | P::Focus | P::FocusWithin | P::FocusVisible | P::Defined => &[],
+    }
+}
+
 fn selector_deep_relational(sel: &ComplexSelector) -> bool {
     let last = sel.parts.len().saturating_sub(1);
     for (i, (compound, _)) in sel.parts.iter().enumerate().take(last) {
@@ -3023,7 +3160,7 @@ impl StyleEngine {
         root: NodeId,
         env: &StyleEnv,
         base: &StyleMap,
-        frontier: &[NodeId],
+        frontier: &[(NodeId, Option<&str>)],
     ) -> StyleMap {
         self.compute_scoped_frontier_with_state(dom, root, env, base, frontier, &|_| false)
     }
@@ -3036,7 +3173,7 @@ impl StyleEngine {
         root: NodeId,
         env: &StyleEnv,
         base: &StyleMap,
-        frontier: &[NodeId],
+        frontier: &[(NodeId, Option<&str>)],
         state: &dyn Fn(&str) -> bool,
     ) -> StyleMap {
         self.compute_scoped_frontier_with_ctx(dom, root, env, base, frontier, state, None)
@@ -3044,6 +3181,14 @@ impl StyleEngine {
 
     /// Variante contextuelle (R-190 — passe 2 `@container`)
     /// de [`StyleEngine::compute_scoped_frontier`].
+    ///
+    /// R-297 — chaque item de `frontier` porte la **clé de
+    /// mutation** : `Some(attr)` pour un `SetAttr` (nom en
+    /// minuscules), `None` pour une mutation structurelle
+    /// ou de contenu. Sous un touché `Some(a)` la descente
+    /// n'a lieu que si `a` peut affecter un descendant
+    /// (clés de sélecteurs ancêtres collectées en interne)
+    /// — sinon `changed` seul décide.
     #[must_use]
     #[allow(clippy::too_many_arguments)]
     pub fn compute_scoped_frontier_with_ctx(
@@ -3052,7 +3197,7 @@ impl StyleEngine {
         root: NodeId,
         env: &StyleEnv,
         base: &StyleMap,
-        frontier: &[NodeId],
+        frontier: &[(NodeId, Option<&str>)],
         state: &dyn Fn(&str) -> bool,
         containers: Option<&HashMap<NodeId, ContainerMeasure>>,
     ) -> StyleMap {
@@ -3064,14 +3209,14 @@ impl StyleEngine {
         // jusqu'à `root` (ou jusqu'en haut — une chaîne hors
         // sous-arbre de `root` marche depuis son propre
         // sommet, conservateur). `tops` = sommets distincts.
-        let mut touched: HashSet<NodeId> = HashSet::new();
+        let mut touched: HashMap<NodeId, Option<String>> = HashMap::new();
         let mut spine: HashSet<NodeId> = HashSet::new();
         let mut tops: Vec<NodeId> = Vec::new();
-        for &t in frontier {
-            if dom.element(t).is_err() || touched.contains(&t) {
+        for &(t, key) in frontier {
+            if dom.element(t).is_err() || touched.contains_key(&t) {
                 continue;
             }
-            touched.insert(t);
+            touched.insert(t, key.map(str::to_ascii_lowercase));
             let mut cur = t;
             loop {
                 spine.insert(cur);
@@ -3088,6 +3233,8 @@ impl StyleEngine {
             }
         }
         let deep_relational = self.deep_relational();
+        let akeys = self.ancestor_keys();
+        fr_probe(|p| *p = FrontierProbe::default());
         let mut root_fs = self.root_font_size(dom, env, state);
         for top in tops {
             let seed = dom.parent(top).ok().flatten().and_then(|p| base.get(p));
@@ -3102,6 +3249,7 @@ impl StyleEngine {
                     &spine,
                     &touched,
                     deep_relational,
+                    &akeys,
                     &mut map,
                     &mut pseudos,
                     state,
@@ -3136,8 +3284,9 @@ impl StyleEngine {
         parent: Option<&ComputedStyle>,
         base: &StyleMap,
         spine: &HashSet<NodeId>,
-        touched: &HashSet<NodeId>,
+        touched: &HashMap<NodeId, Option<String>>,
         deep_relational: bool,
+        akeys: &AncestorKeys,
         map: &mut HashMap<NodeId, ComputedStyle>,
         pseudos: &mut HashMap<NodeId, PseudoStyles>,
         state: &dyn Fn(&str) -> bool,
@@ -3146,6 +3295,7 @@ impl StyleEngine {
         root_fs: &mut f32,
         containers: Option<&HashMap<NodeId, ContainerMeasure>>,
     ) {
+        fr_probe(|p| p.visited += 1);
         let style = self.compute_with_parent(
             dom, node, env, parent, None, state, mcache, anc, *root_fs, containers,
         );
@@ -3215,9 +3365,35 @@ impl StyleEngine {
         // touché (frères suivants des touchés — `+`/`~`) ;
         // sinon le sous-arbre est élagué (style prouvé stable).
         let is_spine = spine.contains(&node);
-        let is_touched = touched.contains(&node);
+        // R-297 — sous un touché porteur d'un attr (`SetAttr`),
+        // la descente n'est inconditionnelle que si l'attr
+        // peut affecter un composé ancêtre de règle
+        // (`AncestorKeys`) ; sinon `changed` seul décide —
+        // un `data-*` hors des sélecteurs + computed stable
+        // élaque tout le sous-arbre.
+        let descend_touch = match touched.get(&node) {
+            None => false,
+            Some(None) => true,
+            Some(Some(a)) => attr_descends(akeys, a),
+        };
         let changed = base.get(node).is_none_or(|b| *b != style);
-        let descend_all = is_touched || changed;
+        // R-297 — sonde d'attribution : pourquoi le touché
+        // descend (clé en deps vs héritage d'un basculement
+        // computed) vs combien élaguent.
+        if let Some(key) = touched.get(&node) {
+            fr_probe(|p| {
+                p.touched += 1;
+                if descend_touch && key.is_some() {
+                    p.descend_attr += 1;
+                } else if descend_touch {
+                    p.descend_struct += 1;
+                }
+                if changed {
+                    p.changed += 1;
+                }
+            });
+        }
+        let descend_all = descend_touch || changed;
         let mut child_anc = *anc;
         child_anc.insert_node(dom, node);
         let host_root = dom.shadow_root(node, true);
@@ -3237,6 +3413,7 @@ impl StyleEngine {
                     is_spine,
                     descend_all,
                     deep_relational,
+                    akeys,
                     env,
                     map,
                     pseudos,
@@ -3260,6 +3437,7 @@ impl StyleEngine {
             is_spine,
             descend_all,
             deep_relational,
+            akeys,
             env,
             map,
             pseudos,
@@ -3287,10 +3465,11 @@ impl StyleEngine {
         style: &ComputedStyle,
         base: &StyleMap,
         spine: &HashSet<NodeId>,
-        touched: &HashSet<NodeId>,
+        touched: &HashMap<NodeId, Option<String>>,
         is_spine: bool,
         descend_all: bool,
         deep_relational: bool,
+        akeys: &AncestorKeys,
         env: &StyleEnv,
         map: &mut HashMap<NodeId, ComputedStyle>,
         pseudos: &mut HashMap<NodeId, PseudoStyles>,
@@ -3305,12 +3484,34 @@ impl StyleEngine {
             return;
         }
         let last_path = kids.iter().rposition(|k| spine.contains(k));
-        let first_touched = kids.iter().position(|k| touched.contains(k));
+        // R-297 — fan-out de fratrie borné aux besoins :
+        // (a) les frères précédents d'un nœud de chaîne ne
+        // servent qu'aux mutations structurelles — sous
+        // `Some(attr)` la garde `:has` amont garantit qu'aucune
+        // vérité `E:has(+ ~)` ne bascule et `:nth-last-*`
+        // est un comptage insensible aux attributs ;
+        // (b) un frère suivant d'un touché `Some(a)` ne peut
+        // basculer que via `a` en composé non-sujet — même
+        // prédicat `attr_descends` que la descente ; `None`
+        // (structurel) garde la visite inconditionnelle.
+        let struct_sibs = touched.values().any(Option::is_none);
+        let mut follow_active = false;
         for (i, &k) in kids.iter().enumerate() {
             let on_path = spine.contains(&k);
-            let follows_touched = first_touched.is_some_and(|ft| i > ft);
-            let visit =
-                descend_all || on_path || last_path.is_some_and(|lp| i <= lp) || follows_touched;
+            let follows_touched = follow_active;
+            // Activation pour les indices suivants — un touché
+            // n'est pas son propre « suivant » (touched ⊆ spine,
+            // donc tout touché est visité par `on_path`).
+            if let Some(key) = touched.get(&k) {
+                follow_active |= match key {
+                    None => true,
+                    Some(a) => attr_descends(akeys, a),
+                };
+            }
+            let visit = descend_all
+                || on_path
+                || (struct_sibs && last_path.is_some_and(|lp| i <= lp))
+                || follows_touched;
             if !visit {
                 continue;
             }
@@ -3353,6 +3554,7 @@ impl StyleEngine {
                         spine,
                         touched,
                         deep_relational,
+                        akeys,
                         map,
                         pseudos,
                         state,
@@ -3381,6 +3583,32 @@ impl StyleEngine {
             .chain(&self.quirks_rules)
             .flat_map(|r| &r.selectors)
             .any(selector_deep_relational)
+    }
+
+    /// Sensibilité des composés **non-sujets** aux attributs
+    /// (R-297) : collectée par passe frontière, elle décide
+    /// si un `SetAttr` sur un touché peut basculer un
+    /// descendant (`E[attr] F`, `E.c F`, `E#i F`, pseudo
+    /// d'état `E:disabled F`, `:lang`, composés internes
+    /// `:not`/`:is`/`:has`). `class`/`id` isolés (trop
+    /// fréquents pour un `HashSet` utile) ; les noms `data-*`
+    /// tombent dans `attrs` — un `data-*` absent de tout
+    /// composé ancêtre + computed inchangé ⇒ sous-arbre
+    /// élagué (le cas `data-is-billboard-visible` 7,7 s).
+    fn ancestor_keys(&self) -> AncestorKeys {
+        let mut k = AncestorKeys::default();
+        for sel in self
+            .rules
+            .iter()
+            .chain(&self.quirks_rules)
+            .flat_map(|r| &r.selectors)
+        {
+            let last = sel.parts.len().saturating_sub(1);
+            for (compound, _) in sel.parts.iter().take(last) {
+                compound_attr_keys(compound, &mut k);
+            }
+        }
+        k
     }
 
     #[allow(clippy::too_many_arguments)]

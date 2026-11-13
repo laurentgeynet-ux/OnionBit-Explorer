@@ -4484,6 +4484,15 @@ sous-features, `font-stretch`/`font-width` (fontes variables),
   computed≠base ∨ (`deep_relational` ∧ frère-suivant-de-touché)
   ; design amendé+validé au journal (canal silencieux couvert).
 - [x] **Câblage frontière** — exécuté côté NAV (§2.3).
+- [x] **R-297 — frontière à clé de mutation + fan-out borné**
+  (`explorer-css` + `explorer-core`) — raffinement §2.3 :
+  `frontier` typée `(NodeId, Option<&str>)` (casse
+  journalisée), `AncestorKeys` non-sujet + fan-out de
+  fratrie borné (`Some`-only : précédents non visités,
+  suivants ssi `attr_descends`) — mesuré `incr.cascade`
+  6,41 s → 79,5 ms (×80, `visited` 4 700 → 11) sur
+  `data-is-billboard-visible` ; 13/13 tests d'équivalence,
+  sonde `FrontierProbe` additive.
 - [x] **`may_escape` émission** (`explorer-layout` +
   `explorer-render`) — `incr.emit` ~1,5 s → §2.4.
 - [ ] **Ops groupe résidu zone = cadre** (`explorer-render`) —

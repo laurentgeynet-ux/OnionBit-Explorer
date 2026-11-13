@@ -99,8 +99,30 @@ touchés → `incr.cascade` **0,31-0,34 s ≈ ×30** vs scope
 ~4 800 nœuds (~10 s) ; mur résiduel hors frontière :
 `SetAttr` sur conteneur géant (`descend_all` requis, 7,66 s
 — levier « descend-on-change si l'attribut n'est dans
-aucun composé ancêtre » à évaluer) et `has_dep_touched`
-→ cascade complète 8,74 s (garde 234, trou (e)).
+aucun composé ancêtre » **livré en R-297**, voir ci-dessous)
+et `has_dep_touched` → cascade complète 8,74 s (garde 234,
+trou (e)).
+
+**R-297 — frontière à clé de mutation + fan-out borné
+(livré, mesuré ×80)** : `frontier` typée `(NodeId,
+Option<&str>)` — `Some(attr)` pour `SetAttr`, `None`
+structurel/texte. `AncestorKeys` (clés `[attr]`/pseudos
+dynamiques/`.class`/`#id` en position non-sujet, traversée
+`:not`/`:is`/`:has`/`:host*`) : sous `Some(a)` la descente
+exige `attr_descends ∨ computed ≠ base` — un `data-*` hors
+sélecteurs élaque le sous-arbre, `A[b] .c` force la
+descente. **Raffinement fan-out** nommé par la sonde
+`FrontierProbe` (`visited`) : frères précédents non visités
+sous frontière 100 % `Some` (`:has` gardé amont,
+`:nth-last-*` = comptage) ; frères suivants visités ssi
+`None` ∨ `attr_descends`. Verrous : 13/13
+`cascade_frontier` (+4 tests — élagage, descente forcée,
+frères non visités `visited=3`, bascule `+`-sur-attr),
+`base ⊕ frontier ≡ compute_tree`. Casse de signature
+journalisée — commit atomique css + core. **Mesuré
+(`vol-297c`)** : `visited` 4 700 → 11, `incr.cascade`
+**6,41 s → 79,5 ms ≈ ×80** sur `data-is-billboard-visible` ;
+résidu = repli `has_dep_touched` 8,8 s (trou (e)).
 
 ### 2.4 — `may_escape` (R-293) [PIPE `explorer-layout` + `explorer-render`]
 

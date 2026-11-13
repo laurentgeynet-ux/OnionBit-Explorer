@@ -1543,7 +1543,7 @@ fn apply_journal_op(
     ctx: &ApplyCtx,
     op: &explorer_js::DomMutation,
     touched: &mut Vec<explorer_dom::NodeId>,
-    style_touched: &mut Vec<explorer_dom::NodeId>,
+    style_touched: &mut Vec<(explorer_dom::NodeId, Option<String>)>,
 ) -> Result<(), JournalReject> {
     match op {
         explorer_js::DomMutation::Remove { key } => {
@@ -1589,7 +1589,7 @@ fn apply_journal_op(
             // Op structurelle : la frontière style reçoit le
             // parent (ses enfants restants flip `:nth-*`/`+`/`~`
             // — la borne descendante s'applique).
-            style_touched.push(par);
+            style_touched.push((par, None));
             dom.remove(id).map_err(|_| JournalReject::Dom)?;
             p.keymap.retain(|_, v| !gone.contains(v));
         }
@@ -1611,8 +1611,11 @@ fn apply_journal_op(
             // la frontière couvre elle-même frères et
             // ancêtres ; pousser le parent lui ferait
             // re-styler tout son sous-arbre (= l'ancien
-            // scope, 9-10 s sur dev.to).
-            style_touched.push(id);
+            // scope, 9-10 s sur dev.to). R-297 : le nom de
+            // l'attribut voyage avec — la descente sous le
+            // touché peut être élaguée quand l'attr n'est
+            // dans aucun composé ancêtre (`data-*` du feed).
+            style_touched.push((id, Some(name.to_ascii_lowercase())));
         }
         explorer_js::DomMutation::SetText { key, text } => {
             let id = key_node(p, *key)?;
@@ -1623,7 +1626,7 @@ fn apply_journal_op(
             // → parent comme touché, borne descendante.
             let par = dom.parent(id).ok().flatten().unwrap_or(id);
             touched.push(par);
-            style_touched.push(par);
+            style_touched.push((par, None));
             dom.set_text(id, text).map_err(|_| JournalReject::Dom)?;
         }
         // Étape 137b — `attachShadow` programmatique : le
@@ -1635,7 +1638,7 @@ fn apply_journal_op(
         explorer_js::DomMutation::AttachShadow { host, root, open } => {
             let h = journal_attach_shadow(p, *host, *root, *open)?;
             touched.push(h);
-            style_touched.push(h);
+            style_touched.push((h, None));
         }
         explorer_js::DomMutation::Insert {
             parent,
@@ -1646,7 +1649,7 @@ fn apply_journal_op(
         } => {
             let par = journal_insert(p, ctx, *parent, *index, html, ids, tags)?;
             touched.push(par);
-            style_touched.push(par);
+            style_touched.push((par, None));
         }
     }
     Ok(())
@@ -1932,7 +1935,7 @@ pub(crate) fn relayout_subtree_payload(
         target,
         canvas_ops,
         scope.as_slice(),
-        std::slice::from_ref(&target),
+        &[(target, None)],
     ) {
         Ok(())
     } else {
@@ -1949,7 +1952,7 @@ fn journal_relayout(
     ctx: &ApplyCtx,
     job: &PendingApply,
     touched: &[explorer_dom::NodeId],
-    style_touched: &[explorer_dom::NodeId],
+    style_touched: &[(explorer_dom::NodeId, Option<String>)],
     out: &mut ApplyOutcome,
 ) -> Result<(), JournalReject> {
     let dom = p.dom.take().ok_or(JournalReject::NoDom)?;
@@ -1960,19 +1963,21 @@ fn journal_relayout(
     let debt = std::mem::take(&mut p.style_dirty);
     let mut touched_all;
     let mut style_touched_all;
-    let (touched, style_touched): (&[explorer_dom::NodeId], &[explorer_dom::NodeId]) =
-        if debt.is_empty() {
-            (touched, style_touched)
-        } else {
-            touched_all = touched.to_vec();
-            style_touched_all = style_touched.to_vec();
-            for path in &debt {
-                let n = dom_path_node(&dom, path).unwrap_or_else(|| dom.document());
-                touched_all.push(n);
-                style_touched_all.push(n);
-            }
-            (&touched_all, &style_touched_all)
-        };
+    let (touched, style_touched): (
+        &[explorer_dom::NodeId],
+        &[(explorer_dom::NodeId, Option<String>)],
+    ) = if debt.is_empty() {
+        (touched, style_touched)
+    } else {
+        touched_all = touched.to_vec();
+        style_touched_all = style_touched.to_vec();
+        for path in &debt {
+            let n = dom_path_node(&dom, path).unwrap_or_else(|| dom.document());
+            touched_all.push(n);
+            style_touched_all.push((n, None));
+        }
+        (&touched_all, &style_touched_all)
+    };
     dlv_info!(touched = touched.len(), "journal: relayout");
     let incremental = journal_cover(&dom, touched).is_some_and(|t| {
         let scopes = journal_style_scopes(&dom, touched, t);
@@ -2104,7 +2109,7 @@ fn try_incr_payload(
     target_new: explorer_dom::NodeId,
     canvas_ops: &CanvasOpsTable,
     style_scopes: &[explorer_dom::NodeId],
-    style_frontier: &[explorer_dom::NodeId],
+    style_frontier: &[(explorer_dom::NodeId, Option<String>)],
 ) -> bool {
     // Phase 1 — cible résolue par l'appelant (chemin DOM ou
     // `NodeId` d'op journal — 137a : les ops rejouées portent
@@ -2152,12 +2157,14 @@ fn try_incr_payload(
     // `relayout_dom_payload` (demande PIPE journalisée — la
     // voie incrémentale garde les règles inertes) → il est
     // re-persisté tout de suite pour la passe suivante.
-    let (scope_roots, frontier): (&[explorer_dom::NodeId], &[explorer_dom::NodeId]) =
-        if old_dom_opt.is_some() {
-            (style_scopes, style_frontier)
-        } else {
-            (&[], &[])
-        };
+    let (scope_roots, frontier): (
+        &[explorer_dom::NodeId],
+        &[(explorer_dom::NodeId, Option<String>)],
+    ) = if old_dom_opt.is_some() {
+        (style_scopes, style_frontier)
+    } else {
+        (&[], &[])
+    };
     let (styles, eng) = styles_payload(
         p,
         new_dom,
@@ -2891,7 +2898,7 @@ pub(crate) fn styles_payload(
     scripting: bool,
     dpr: f32,
     scopes: &[explorer_dom::NodeId],
-    frontier: &[explorer_dom::NodeId],
+    frontier: &[(explorer_dom::NodeId, Option<String>)],
     prof: PhaseKind,
     tab: TabId,
 ) -> (StyleMap, StyleEngine) {
@@ -2998,7 +3005,7 @@ pub(crate) fn styles_payload(
         && !has_block
         && env_same
         && frontier.len() <= MAX_STYLE_SCOPES
-        && frontier.iter().all(|n| dom.element(*n).is_ok());
+        && frontier.iter().all(|(n, _)| dom.element(*n).is_ok());
     let scoped_ok = !scopes.is_empty()
         && !has_block
         && env_same
@@ -3021,8 +3028,14 @@ pub(crate) fn styles_payload(
     );
     let mut styles = match (p.styles.take(), frontier_ok, scoped_ok) {
         (Some(mut map), true, _) => {
-            let sub = eng.compute_scoped_frontier(dom, dom.document(), &env, &map, frontier);
+            let keyed: Vec<(explorer_dom::NodeId, Option<&str>)> =
+                frontier.iter().map(|(n, a)| (*n, a.as_deref())).collect();
+            let sub = eng.compute_scoped_frontier(dom, dom.document(), &env, &map, &keyed);
             map.apply_scoped(sub);
+            dlv_info!(
+                probe = ?explorer_css::take_frontier_probe(),
+                "frontier: descente"
+            );
             map
         }
         (Some(mut map), false, true) => {
@@ -4999,7 +5012,11 @@ mod reloc_tests {
         assert!(
             super::apply_journal_op(&mut p, &ctx, &op, &mut touched, &mut style_touched).is_ok()
         );
-        assert_eq!(style_touched, vec![x], "SetAttr → nœud réel en frontière");
+        assert_eq!(
+            style_touched,
+            vec![(x, Some("class".to_string()))],
+            "SetAttr → nœud réel + nom d'attr en frontière"
+        );
         assert_eq!(touched, vec![par], "touched garde le parent (layout)");
         // `SetText` vise le nœud Texte enfant — le parent du
         // texte = l'élément `x` porteur (`:empty`/`::first-
@@ -5016,7 +5033,7 @@ mod reloc_tests {
         );
         assert_eq!(
             style_touched,
-            vec![x, x],
+            vec![(x, Some("class".to_string())), (x, None)],
             "SetText → élément porteur du texte"
         );
         let op = explorer_js::DomMutation::Remove { key: kx };
@@ -5024,8 +5041,8 @@ mod reloc_tests {
             super::apply_journal_op(&mut p, &ctx, &op, &mut touched, &mut style_touched).is_ok()
         );
         assert_eq!(
-            style_touched.last().copied(),
-            Some(par),
+            style_touched.last(),
+            Some(&(par, None)),
             "Remove → parent (structurel : :nth-*/+/~ sous le parent)"
         );
     }
