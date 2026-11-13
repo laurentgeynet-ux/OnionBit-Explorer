@@ -284,9 +284,13 @@ fn corpus_listener_exception_isolated() {
          d.addEventListener('click', function () { ran++; });",
     )
     .unwrap_or_else(|x| panic!("{x:?}"));
-    // Le premier listener lève → dispatch_simple s'arrête sur l'erreur
-    // (comportement ≙ « exception non catchée » amont : le handler
-    // suivant ne court pas — noté, isolation par événement).
+    // Spec DOM (cran 67b) : l'exception du premier listener
+    // est rapportée, le dispatch continue — `click()` rend Ok
+    // et le second listener court.
     let r = e.eval("d.click();");
-    assert!(r.is_err());
+    assert!(r.is_ok(), "click ne propage pas l'exception : {r:?}");
+    assert_eq!(
+        e.eval("ran").map(|v| e.describe(v)).unwrap_or_default(),
+        "1"
+    );
 }
