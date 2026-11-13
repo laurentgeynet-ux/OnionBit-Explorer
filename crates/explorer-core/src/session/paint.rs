@@ -291,6 +291,7 @@ impl Session {
             self.scale,
             &[],
             &[],
+            None,
             apply::PhaseKind::Flow,
             tab,
         );

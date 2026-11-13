@@ -336,6 +336,7 @@ fn render_subframe(
         ctx.scale,
         &[],
         &[],
+        None,
         PhaseKind::Sub,
         tab,
     );

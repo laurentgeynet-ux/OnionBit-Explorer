@@ -7,7 +7,7 @@
 //! touchés ; élagage des sous-arbres prouvés stables ;
 //! équivalence avec la cascade complète après `apply_scoped`.
 
-use explorer_css::{Origin, StyleEngine, StyleEnv, StyleMap};
+use explorer_css::{Origin, StyleEngine, StyleEnv, StyleMap, TouchedDeps};
 use explorer_dom::{Dom, NodeId};
 
 fn env() -> StyleEnv {
@@ -450,4 +450,402 @@ fn frontier_attr_compose_suivant_visite_les_suivants() {
         Some("rgb(7, 7, 7)"),
         "le frère suivant doit basculer via `+` sur l'attr muté"
     );
+}
+
+// ── R-298 — frontière à dépendances `:has` ──────────────────
+
+/// Canal silencieux `E:has(x) .d` sur sujet ANCÊTRE : la
+/// vérité `:has` de `host` bascule quand `t` prend `.x`, mais
+/// le computed de `host` ne change pas (la règle ne style que
+/// `span`) — `changed` seul raterait `sp` dans la branche
+/// disjointe. `deps` force la descente des sujets plausibles.
+#[test]
+fn frontier_deps_has_canal_silencieux_ancetre() {
+    let mut f = fixture();
+    // `host > branch > sp` — branche disjointe de la spine
+    // (ni ancêtre, ni frère précédent/suivant du touché).
+    let branch = f.dom.create_element("div").unwrap();
+    f.dom.append_child(f.host, branch).unwrap();
+    let sp = f.dom.create_element("span").unwrap();
+    f.dom.append_child(branch, sp).unwrap();
+    let e = eng("div:has(.x) span { color: rgb(6, 6, 6) }");
+    let base = e.compute_tree(&f.dom, f.dom.document(), &env());
+    assert_ne!(
+        base.get(sp).and_then(|s| s.get("color")),
+        Some("rgb(6, 6, 6)")
+    );
+
+    f.dom.set_attribute(f.t, "class", "x").unwrap();
+    // Sans `deps` : la branche n'est même pas visitée.
+    let sub_dry = e.compute_scoped_frontier(
+        &f.dom,
+        f.dom.document(),
+        &env(),
+        &base,
+        &[(f.t, Some("class"))],
+    );
+    assert!(
+        sub_dry.get(sp).is_none(),
+        "sans deps, la branche disjointe reste hors émission"
+    );
+    // Avec `deps` : `host` (sujet plausible `div`) obtient
+    // `descend_all` → `sp` est rattrapé.
+    let deps = TouchedDeps {
+        classes: ["x".to_string()].into_iter().collect(),
+        ..Default::default()
+    };
+    let sub = e.compute_scoped_frontier_deps(
+        &f.dom,
+        f.dom.document(),
+        &env(),
+        &base,
+        &[(f.t, Some("class"))],
+        Some(&deps),
+    );
+    assert_eq!(
+        sub.get(sp).and_then(|s| s.get("color")),
+        Some("rgb(6, 6, 6)"),
+        "le descendant `.d` sous sujet `:has` plausible doit basculer"
+    );
+    let probe = explorer_css::take_frontier_probe();
+    assert!(probe.descend_has > 0, "la sonde compte la descente sujet");
+    let mut merged = base.clone();
+    merged.apply_scoped(sub);
+    let full = e.compute_tree(&f.dom, f.dom.document(), &env());
+    for (n, s) in full.iter() {
+        assert_eq!(merged.get(n), Some(s), "nœud {n:?} diverge");
+    }
+    assert_eq!(
+        merged.get(f.host),
+        base.get(f.host),
+        "le computed du sujet n'a pas bougé — canal silencieux prouvé"
+    );
+}
+
+/// Canal silencieux `E:has(+ x) .d` sur sujet FRÈRE
+/// PRÉCÉDENT : `f1` vit à gauche du match — hors `deps` il
+/// n'est pas visité (frontière attr-only) ; `deps` ouvre la
+/// couverture des frères précédents ET la descente sujet.
+#[test]
+fn frontier_deps_has_canal_silencieux_frere() {
+    let mut f = fixture();
+    let sp1 = f.dom.create_element("span").unwrap();
+    f.dom.append_child(f.f1, sp1).unwrap();
+    // f1 (div) précède immédiatement f2 sous body.
+    let e = eng("div:has(+ .x) span { color: rgb(1, 2, 3) }");
+    let base = e.compute_tree(&f.dom, f.dom.document(), &env());
+
+    f.dom.set_attribute(f.f2, "class", "x").unwrap();
+    let deps = TouchedDeps {
+        classes: ["x".to_string()].into_iter().collect(),
+        ..Default::default()
+    };
+    let sub = e.compute_scoped_frontier_deps(
+        &f.dom,
+        f.dom.document(),
+        &env(),
+        &base,
+        &[(f.f2, Some("class"))],
+        Some(&deps),
+    );
+    assert_eq!(
+        sub.get(sp1).and_then(|s| s.get("color")),
+        Some("rgb(1, 2, 3)"),
+        "le frère-sujet plausible doit descendre pour `.d`"
+    );
+    let mut merged = base.clone();
+    merged.apply_scoped(sub);
+    let full = e.compute_tree(&f.dom, f.dom.document(), &env());
+    for (n, s) in full.iter() {
+        assert_eq!(merged.get(n), Some(s), "nœud {n:?} diverge");
+    }
+    assert_eq!(merged.get(f.f1), base.get(f.f1));
+}
+
+/// `deps` qui n'intersectent pas l'arg `:has` ⇒ aucune
+/// descente sujet, émission identique au chemin sec.
+#[test]
+fn frontier_deps_arg_non_touchee_elague() {
+    let mut f = fixture();
+    let branch = f.dom.create_element("div").unwrap();
+    f.dom.append_child(f.host, branch).unwrap();
+    let sp = f.dom.create_element("span").unwrap();
+    f.dom.append_child(branch, sp).unwrap();
+    let e = eng("div:has(.x) span { color: rgb(6, 6, 6) }");
+    let base = e.compute_tree(&f.dom, f.dom.document(), &env());
+
+    f.dom.set_attribute(f.t, "class", "y").unwrap();
+    let deps = TouchedDeps {
+        classes: ["y".to_string()].into_iter().collect(),
+        ..Default::default()
+    };
+    let sub = e.compute_scoped_frontier_deps(
+        &f.dom,
+        f.dom.document(),
+        &env(),
+        &base,
+        &[(f.t, Some("class"))],
+        Some(&deps),
+    );
+    assert!(
+        sub.get(sp).is_none(),
+        "arg `.x` non touchée ⇒ la branche reste élaguée"
+    );
+    let probe = explorer_css::take_frontier_probe();
+    assert_eq!(probe.descend_has, 0);
+}
+
+/// `all` (deps inconnues — index caduc ou appelant hors
+/// journal) ⇒ tout composé non-sujet porteur de `:has`
+/// qualifie ses sujets plausibles : couverture conservatrice
+/// sans faux négatif.
+#[test]
+fn frontier_deps_all_couvre_les_sujets() {
+    let mut f = fixture();
+    let branch = f.dom.create_element("div").unwrap();
+    f.dom.append_child(f.host, branch).unwrap();
+    let sp = f.dom.create_element("span").unwrap();
+    f.dom.append_child(branch, sp).unwrap();
+    let e = eng("div:has(.x) span { color: rgb(6, 6, 6) }");
+    let base = e.compute_tree(&f.dom, f.dom.document(), &env());
+
+    f.dom.set_attribute(f.t, "data-z", "1").unwrap();
+    let deps = TouchedDeps {
+        all: true,
+        ..Default::default()
+    };
+    let sub = e.compute_scoped_frontier_deps(
+        &f.dom,
+        f.dom.document(),
+        &env(),
+        &base,
+        &[(f.t, Some("data-z"))],
+        Some(&deps),
+    );
+    // `data-z` ne fait pas basculer `.x` — le span garde
+    // son état, mais la couverture l'a visité (émis ou non,
+    // l'invariant cascade complète tient).
+    let probe = explorer_css::take_frontier_probe();
+    assert!(
+        probe.descend_has > 0,
+        "`all` doit armer la couverture sujet"
+    );
+    let mut merged = base.clone();
+    merged.apply_scoped(sub);
+    let full = e.compute_tree(&f.dom, f.dom.document(), &env());
+    for (n, s) in full.iter() {
+        assert_eq!(merged.get(n), Some(s), "nœud {n:?} diverge");
+    }
+}
+
+// ── R-299 — delta de feuilles ───────────────────────────────
+
+/// `merged = base ⊕ delta(new, old)` ≡ `compute_tree(new)` —
+/// l'invariant fort du restyle par delta, mêmes conventions
+/// que [`assert_equiv`]. Renvoie `merged` pour assertions fines.
+fn assert_equiv_delta(
+    new_e: &StyleEngine,
+    old_e: &StyleEngine,
+    dom: &Dom,
+    base: &StyleMap,
+) -> StyleMap {
+    let sub = new_e
+        .compute_sheet_delta(
+            dom,
+            dom.document(),
+            &env(),
+            base,
+            &[],
+            &|_| false,
+            None,
+            None,
+            old_e,
+        )
+        .expect("delta prouvable attendu");
+    let mut merged = base.clone();
+    merged.apply_scoped(sub);
+    let full = new_e.compute_tree(dom, dom.document(), &env());
+    for (n, s) in full.iter() {
+        assert_eq!(
+            merged.get(n),
+            Some(s),
+            "nœud {n:?} diverge de la cascade complète"
+        );
+    }
+    merged
+}
+
+/// Ajout d'une règle en fin : seuls les matchs du nouveau
+/// sélecteur sont seedés — restyle borné, résultat complet.
+#[test]
+fn delta_ajout_restyle_borne() {
+    let f = fixture();
+    let old_e = eng("div { color: rgb(9, 9, 9) }");
+    let new_e = eng("div { color: rgb(9, 9, 9) } p#t { color: rgb(1, 2, 3) }");
+    let base = old_e.compute_tree(&f.dom, f.dom.document(), &env());
+    let merged = assert_equiv_delta(&new_e, &old_e, &f.dom, &base);
+    assert_eq!(
+        merged.get(f.t).and_then(|s| s.get("color")),
+        Some("rgb(1, 2, 3)")
+    );
+    // Hors match : entrée identique à la base.
+    assert_eq!(merged.get(f.f1), base.get(f.f1));
+    let probe = explorer_css::take_frontier_probe();
+    assert_eq!(probe.delta_seeds, 1, "un seul seed attendu (t)");
+    assert!(
+        probe.visited <= 8,
+        "marche bornée, visited={}",
+        probe.visited
+    );
+}
+
+/// Retrait d'une règle : les éléments qu'elle matchait sont
+/// seedés (son évaluation sur le DOM courant les trouve) —
+/// retour aux déclarations survivantes.
+#[test]
+fn delta_retrait_restyle_borne() {
+    let f = fixture();
+    let old_e = eng("div { color: rgb(9, 9, 9) } p#t { color: rgb(1, 2, 3) }");
+    let new_e = eng("div { color: rgb(9, 9, 9) }");
+    let base = old_e.compute_tree(&f.dom, f.dom.document(), &env());
+    assert_eq!(
+        base.get(f.t).and_then(|s| s.get("color")),
+        Some("rgb(1, 2, 3)")
+    );
+    let merged = assert_equiv_delta(&new_e, &old_e, &f.dom, &base);
+    assert_ne!(
+        merged.get(f.t).and_then(|s| s.get("color")),
+        Some("rgb(1, 2, 3)"),
+        "la règle retirée ne doit plus produire sa déclaration"
+    );
+}
+
+/// Insertion en milieu de table : la zone médiane marque les
+/// règles voisines — le delta reste complet.
+#[test]
+fn delta_insertion_milieu_equiv() {
+    let f = fixture();
+    let old_e = eng("div { color: rgb(9, 9, 9) } section { color: rgb(8, 8, 8) }");
+    let new_e = eng(
+        "div { color: rgb(9, 9, 9) } p { color: rgb(1, 2, 3) } section { color: rgb(8, 8, 8) }",
+    );
+    let base = old_e.compute_tree(&f.dom, f.dom.document(), &env());
+    let merged = assert_equiv_delta(&new_e, &old_e, &f.dom, &base);
+    assert_eq!(
+        merged.get(f.f4).and_then(|s| s.get("color")),
+        Some("rgb(1, 2, 3)")
+    );
+}
+
+/// Réordonnancement : la zone médiane couvre les deux règles —
+/// les matchs des deux sont seedés, équivalence complète.
+#[test]
+fn delta_reordonnancement_equiv() {
+    let f = fixture();
+    let old_e = eng("div { color: rgb(9, 9, 9) } p { color: rgb(1, 2, 3) }");
+    let new_e = eng("p { color: rgb(1, 2, 3) } div { color: rgb(9, 9, 9) }");
+    let base = old_e.compute_tree(&f.dom, f.dom.document(), &env());
+    assert_equiv_delta(&new_e, &old_e, &f.dom, &base);
+}
+
+/// Tables identiques mais DOM grossi : les nœuds jamais stylés
+/// sont seedés structurels (clé `None`), l'équivalence tient.
+#[test]
+fn delta_neud_jamais_style_seed_structurel() {
+    let mut f = fixture();
+    let old_e = eng("p { color: rgb(1, 2, 3) }");
+    let base = old_e.compute_tree(&f.dom, f.dom.document(), &env());
+    let n = f.dom.create_element("p").unwrap();
+    f.dom.append_child(f.host, n).unwrap();
+    let new_e = eng("p { color: rgb(1, 2, 3) }");
+    let merged = assert_equiv_delta(&new_e, &old_e, &f.dom, &base);
+    assert_eq!(
+        merged.get(n).and_then(|s| s.get("color")),
+        Some("rgb(1, 2, 3)"),
+        "le nœud jamais stylé doit recevoir la cascade complète"
+    );
+    let probe = explorer_css::take_frontier_probe();
+    assert_eq!(probe.delta_seeds, 1);
+}
+
+/// La frontière journal fusionne avec les seeds delta — un
+/// `SetAttr` simultané au rebuild est couvert par les deux.
+#[test]
+fn delta_fusionne_frontiere_journal() {
+    let mut f = fixture();
+    f.dom.set_attribute(f.f1, "class", "x").unwrap();
+    let old_e = eng("");
+    let base = old_e.compute_tree(&f.dom, f.dom.document(), &env());
+    let new_e = eng(".x { color: rgb(1, 2, 3) }");
+    let sub = new_e
+        .compute_sheet_delta(
+            &f.dom,
+            f.dom.document(),
+            &env(),
+            &base,
+            &[(f.f1, Some("class"))],
+            &|_| false,
+            None,
+            None,
+            &old_e,
+        )
+        .expect("delta prouvable");
+    let mut merged = base.clone();
+    merged.apply_scoped(sub);
+    let full = new_e.compute_tree(&f.dom, f.dom.document(), &env());
+    for (n, s) in full.iter() {
+        assert_eq!(merged.get(n), Some(s), "nœud {n:?} diverge");
+    }
+    assert_eq!(
+        merged.get(f.f1).and_then(|s| s.get("color")),
+        Some("rgb(1, 2, 3)")
+    );
+}
+
+/// Gate `@property` : le registre affecte les valeurs calculées
+/// sans sélecteur changé → repli (`None`).
+#[test]
+fn delta_property_registry_differe_repli() {
+    let f = fixture();
+    let old_e = eng("");
+    let base = old_e.compute_tree(&f.dom, f.dom.document(), &env());
+    let new_e = eng(
+        "@property --brand { syntax: '<color>'; inherits: false; initial-value: rgb(255,0,0) }",
+    );
+    assert!(new_e
+        .compute_sheet_delta(
+            &f.dom,
+            f.dom.document(),
+            &env(),
+            &base,
+            &[],
+            &|_| false,
+            None,
+            None,
+            &old_e,
+        )
+        .is_none());
+}
+
+/// Gate `@namespace` : la résolution des sélecteurs `ns|tag`
+/// change sans sélecteur changé → repli (`None`).
+#[test]
+fn delta_namespaces_different_repli() {
+    let f = fixture();
+    let old_e = eng("");
+    let base = old_e.compute_tree(&f.dom, f.dom.document(), &env());
+    let new_e = eng("@namespace svg \"urn:x\"");
+    assert!(new_e
+        .compute_sheet_delta(
+            &f.dom,
+            f.dom.document(),
+            &env(),
+            &base,
+            &[],
+            &|_| false,
+            None,
+            None,
+            &old_e,
+        )
+        .is_none());
 }

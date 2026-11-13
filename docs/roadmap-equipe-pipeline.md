@@ -4493,6 +4493,34 @@ sous-features, `font-stretch`/`font-width` (fontes variables),
   6,41 s → 79,5 ms (×80, `visited` 4 700 → 11) sur
   `data-is-billboard-visible` ; 13/13 tests d'équivalence,
   sonde `FrontierProbe` additive.
+- [x] **R-298 — `compute_scoped_frontier_deps` : sujets
+  `:has` plausibles du canal silencieux `E:has(x) .d`**
+  (`explorer-css`, §2.3 — trou (e), API additive
+  journalisée) : la vérité `:has` de `E` bascule sans
+  changer son computed → `TouchedDeps` public (ce que le
+  journal a muté) + index par passe des composés
+  non-sujets porteurs de `:has` (privés du pseudo +
+  `arg_deps` + scope) ; sous `deps`, tout nœud visité
+  sujet plausible dont l'arg croise les deps obtient
+  `descend_all`, et les frères précédents sont couverts
+  (sujets `E:has(+ ~)`). 17/17 tests d'équivalence,
+  `FrontierProbe.descend_has` ajouté.
+- [x] **R-299 — `compute_sheet_delta` : restyle borné par
+  delta de feuilles** (`explorer-css` + `explorer-core`,
+  §2.3 — poste mesuré ~30 s/75 s de cascades rebuild
+  dev.to, ~12 s YouTube, API additive journalisée) : diff
+  préfixe/suffixe des tables de règles (`rule_semantic_eq`
+  sans `order`) → zone médiane ; `delta_walk` seede les
+  matchs des sélecteurs changés (mini-index, média+scope,
+  clé sentinelle) **+** tout nœud jamais stylé (clé `None`
+  structurelle) ; fusion frontière journal → `frontier_ctx`.
+  Gates → `compute_tree` : `namespaces`/`@property`/
+  `@container` différents, `MAX_DELTA_*`. `apply_scoped`
+  propage les tables `@counter-style`/`@font-*` (staleness
+  préexistante soldée). Bras delta **prioritaire** sous
+  `eng_rebuilt` (trou latent R-298 fermé). 25/25
+  `cascade_frontier` + `r299_delta_feuilles_restyle_borne`
+  NAV ; `FrontierProbe.delta_visited/delta_seeds`.
 - [x] **`may_escape` émission** (`explorer-layout` +
   `explorer-render`) — `incr.emit` ~1,5 s → §2.4.
 - [ ] **Ops groupe résidu zone = cadre** (`explorer-render`) —

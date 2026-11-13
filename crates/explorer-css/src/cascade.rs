@@ -1394,7 +1394,7 @@ pub(crate) struct CollectedFontFace {
 /// seconde passe contre la border-box **mesurée** du
 /// conteneur ancêtre (inconnue à la cascade : elle
 /// n'existe qu'après layout).
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct CollectedContainer {
     /// Nom de conteneur ciblé (`container-name`), si donné.
     pub name: Option<String>,
@@ -1484,6 +1484,14 @@ impl SelectorIndex {
     /// Range chaque sélecteur de `rules` sous la clé de son
     /// composé final — une entrée par (règle, sélecteur).
     fn build(rules: &[CollectedRule]) -> Self {
+        Self::build_refs(&rules.iter().collect::<Vec<_>>())
+    }
+
+    /// Variante à emprunts de [`SelectorIndex::build`] (R-299) —
+    /// indexe un sous-ensemble de règles sans les cloner (le
+    /// `rule` des entrées pointe alors sur la position dans
+    /// `rules`, pas dans la table du moteur).
+    fn build_refs(rules: &[&CollectedRule]) -> Self {
         let mut idx = Self::default();
         for (ri, rule) in rules.iter().enumerate() {
             for (si, sel) in rule.selectors.iter().enumerate() {
@@ -1686,11 +1694,19 @@ pub struct FrontierProbe {
     /// Touchés dont le computed a basculé (`changed` —
     /// descente par héritage, indépendante de la clé).
     pub changed: u32,
+    /// Descentes forcées par sujet `:has` plausible sous
+    /// `TouchedDeps` (R-298 — canal `E:has(x) .d`).
+    pub descend_has: u32,
+    /// Éléments évalués par la marche **delta de feuilles**
+    /// (R-299 — `compute_sheet_delta`, hors marche frontière).
+    pub delta_visited: u32,
+    /// Seeds produits par la marche delta (R-299).
+    pub delta_seeds: u32,
 }
 
 thread_local! {
     static FRONTIER_PROBE: std::cell::Cell<FrontierProbe> =
-        const { std::cell::Cell::new(FrontierProbe { visited: 0, touched: 0, descend_attr: 0, descend_struct: 0, changed: 0 }) };
+        const { std::cell::Cell::new(FrontierProbe { visited: 0, touched: 0, descend_attr: 0, descend_struct: 0, changed: 0, descend_has: 0, delta_visited: 0, delta_seeds: 0 }) };
 }
 
 #[inline]
@@ -1707,6 +1723,165 @@ fn fr_probe(f: impl Fn(&mut FrontierProbe)) {
 #[must_use]
 pub fn take_frontier_probe() -> FrontierProbe {
     FRONTIER_PROBE.with(|c| c.replace(FrontierProbe::default()))
+}
+
+/// Dépendances effectives d'un journal (R-298) — NAV les
+/// collecte en rejouant les ops ; la frontière s'en sert
+/// pour décider quels sujets de `:has` non-sujet peuvent
+/// avoir une vérité basculée (canal silencieux
+/// `E:has(x) .d` — `changed` seul le raterait).
+#[derive(Debug, Clone, Default)]
+pub struct TouchedDeps {
+    /// Noms d'attributs mutés (minuscules).
+    pub attrs: HashSet<String>,
+    /// Classes dont l'appartenance a pu basculer (old ∪ new).
+    pub classes: HashSet<String>,
+    /// Valeurs `id` avant/après.
+    pub ids: HashSet<String>,
+    /// Une op structurelle/de contenu a eu lieu
+    /// (`Insert`/`Remove`/`SetText`/`AttachShadow`).
+    pub structural: bool,
+    /// Deps inconnues (index indisponible ou arg
+    /// non analysable) — tout composé `:has` non-sujet est
+    /// traité comme affecté (conservateur).
+    pub all: bool,
+}
+
+/// Contexte `:has` optionnel (R-298) — présent seulement
+/// quand l'appelant rapporte des deps mutées : `deps` =
+/// ce qui a changé, `subjects` = index des sujets
+/// plausibles à réévaluer pour le canal `E:has(x) .d`.
+#[derive(Clone, Copy)]
+struct DepCtx<'a> {
+    deps: &'a TouchedDeps,
+    subjects: &'a [(crate::ComplexSelector, ArgDeps, Option<NodeId>)],
+}
+
+/// R-299 — borne du nombre de règles dans la zone médiane
+/// changée (somme des deux tables, deux moteurs) : au-delà,
+/// la marche d'évaluation des sélecteurs changés approche
+/// le coût d'une cascade complète → repli `compute_tree`.
+const MAX_DELTA_RULES: usize = 2_048;
+
+/// R-299 — borne du nombre de seeds (matchs delta + nœuds
+/// jamais stylés) : au-delà, la frontière devient une
+/// quasi-cascade — repli (le cas chargeur est un DOM en
+/// croissance de streaming, déjà couvert par le full).
+const MAX_DELTA_SEEDS: usize = 1_024;
+
+/// R-299 — clé sentinelle des seeds issus du delta de
+/// feuilles : nom d'attribut impossible dans le DOM comme
+/// dans un sélecteur (`\u{1}`, même convention que
+/// [`GUARANTEED_INVALID`]) — `attr_descends` répond donc
+/// faux et le nœud seedé ne descend QUE si son computed a
+/// basculé. Si un sélecteur l'utilisait malgré tout, la
+/// descente devient inconditionnelle — encore correcte.
+const DELTA_SEED_KEY: &str = "\u{1}delta";
+
+/// Dépendances d'un argument `:has(` (R-298) — mêmes
+/// champs que `TouchedDeps` côté lecture : l'arg est
+/// **affecté** par la mutation quand l'intersection est
+/// non vide (`unanalyzable`/`all` → toujours affecté).
+#[derive(Debug, Default)]
+struct ArgDeps {
+    attrs: HashSet<String>,
+    classes: HashSet<String>,
+    ids: HashSet<String>,
+    /// Combinateur ou pseudo positionnel dans l'arg —
+    /// l'arg dépend du nombre/ordre d'éléments.
+    structural: bool,
+    /// Contenu non modélisable — jamais de faux négatif.
+    unanalyzable: bool,
+}
+
+impl ArgDeps {
+    fn hit(&self, d: &TouchedDeps) -> bool {
+        d.all
+            || self.unanalyzable
+            || (self.structural && d.structural)
+            || self.attrs.iter().any(|a| d.attrs.contains(a))
+            || self.classes.iter().any(|c| d.classes.contains(c))
+            || self.ids.iter().any(|i| d.ids.contains(i))
+    }
+}
+
+/// Dépendances d'un sélecteur d'argument `:has` (R-298) —
+/// tout ce qui peut faire basculer son match : attributs/
+/// classes/ids lus, sensibilité positionnelle (combinateurs,
+/// `*`, tags, pseudos structurels) ; le reste = unanalyzable
+/// (jamais de faux négatif).
+fn arg_deps(sel: &crate::ComplexSelector, d: &mut ArgDeps) {
+    for (compound, comb) in &sel.parts {
+        if comb.is_some() {
+            d.structural = true;
+        }
+        for s in &compound.simples {
+            match s {
+                SimpleSelector::Class(c) => {
+                    d.classes.insert(c.clone());
+                }
+                SimpleSelector::Id(i) => {
+                    d.ids.insert(i.clone());
+                }
+                SimpleSelector::Attribute { name, .. } => {
+                    d.attrs.insert(name.to_ascii_lowercase());
+                }
+                SimpleSelector::Type(_) | SimpleSelector::Universal => {
+                    d.structural = true;
+                }
+                SimpleSelector::Pseudo(p) => match p {
+                    PseudoClass::Not(l) | PseudoClass::Is(l) | PseudoClass::Where(l) => {
+                        for inner in l {
+                            arg_deps(inner, d);
+                        }
+                    }
+                    PseudoClass::Has(l) => {
+                        for (_, inner) in l {
+                            arg_deps(inner, d);
+                        }
+                    }
+                    PseudoClass::Lang(_) => {
+                        d.attrs.insert("lang".into());
+                    }
+                    PseudoClass::Dynamic(dp) => {
+                        for a in dynamic_pseudo_attrs(*dp) {
+                            d.attrs.insert((*a).into());
+                        }
+                    }
+                    PseudoClass::NthChild(..)
+                    | PseudoClass::NthLastChild(..)
+                    | PseudoClass::NthOfType(..)
+                    | PseudoClass::NthLastOfType(..)
+                    | PseudoClass::FirstChild
+                    | PseudoClass::LastChild
+                    | PseudoClass::OnlyChild
+                    | PseudoClass::FirstOfType
+                    | PseudoClass::LastOfType
+                    | PseudoClass::OnlyOfType
+                    | PseudoClass::Empty => {
+                        d.structural = true;
+                    }
+                    PseudoClass::Root => {}
+                    PseudoClass::Host(_) | PseudoClass::HostContext(_) => {
+                        d.unanalyzable = true;
+                    }
+                },
+                _ => d.unanalyzable = true,
+            }
+        }
+    }
+}
+
+/// Portée shadow contenant `n` — première racine shadow
+/// rencontrée en remontant `parent` (`None` = document).
+fn node_scope(dom: &Dom, mut n: NodeId) -> Option<NodeId> {
+    for _ in 0..4096 {
+        if dom.is_shadow_root(n) {
+            return Some(n);
+        }
+        n = dom.parent(n).ok().flatten()?;
+    }
+    None
 }
 
 /// `true` si la mutation de l'attribut `a` (en minuscules)
@@ -1841,7 +2016,7 @@ fn compound_remote_dependent(c: &crate::CompoundSelector) -> bool {
 /// Enregistrement `@property` (css-properties-values-api-1 —
 /// R-118) : `syntax` conservée (non typée v1), `inherits`
 /// et `initial-value` appliqués à la valeur calculée.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub(crate) struct RegisteredProp {
     /// `syntax` de la registration (`"*"` = tout) — stockée
     /// pour le typage futur, jamais lue en v1.
@@ -2345,7 +2520,16 @@ impl StyleMap {
     /// reproduits sont purgés — la map scopée fait autorité
     /// sur son sous-arbre). Les nœuds hors du sous-arbre
     /// recalculé sont inchangés.
+    ///
+    /// Les tables `@counter-style`/`@font-feature-values`/
+    /// `@font-palette-values` suivent la map scopée (R-299) :
+    /// elles sont un cliché complet du moteur de la passe —
+    /// sur une passe scopée après **rebuild** de feuilles, la
+    /// base garderait sinon le registre de l'ancien moteur.
     pub fn apply_scoped(&mut self, scoped: StyleMap) {
+        self.counter_styles = scoped.counter_styles;
+        self.font_feature_values = scoped.font_feature_values;
+        self.font_palettes = scoped.font_palettes;
         for (node, style) in scoped.map {
             self.map.insert(node, style);
             // La map scopée fait autorité par nœud couvert :
@@ -3201,6 +3385,47 @@ impl StyleEngine {
         state: &dyn Fn(&str) -> bool,
         containers: Option<&HashMap<NodeId, ContainerMeasure>>,
     ) -> StyleMap {
+        self.frontier_ctx(dom, root, env, base, frontier, state, containers, None)
+    }
+
+    /// Variante à dépendances (R-298) de
+    /// [`StyleEngine::compute_scoped_frontier`] — `deps` =
+    /// ce que le journal a effectivement muté. Sous
+    /// `Some(d)`, tout nœud visité sujet plausible d'un
+    /// composé **non-sujet** porteur de `:has` dont l'arg
+    /// croise `d` obtient `descend_all` : couvre le canal
+    /// silencieux `E:has(x) .d` (la vérité `:has` de `E`
+    /// bascule sans changer son computed — `changed` seul
+    /// raterait `.d`). `None` = comportement R-297 inchangé
+    /// (l'appelant garantit alors qu'aucune vérité `:has`
+    /// ne peut basculer — la garde amont habituelle).
+    #[must_use]
+    #[allow(clippy::too_many_arguments)]
+    pub fn compute_scoped_frontier_deps(
+        &self,
+        dom: &Dom,
+        root: NodeId,
+        env: &StyleEnv,
+        base: &StyleMap,
+        frontier: &[(NodeId, Option<&str>)],
+        deps: Option<&TouchedDeps>,
+    ) -> StyleMap {
+        self.frontier_ctx(dom, root, env, base, frontier, &|_| false, None, deps)
+    }
+
+    /// Corps commun des variantes `compute_scoped_frontier*`.
+    #[allow(clippy::too_many_arguments)]
+    fn frontier_ctx(
+        &self,
+        dom: &Dom,
+        root: NodeId,
+        env: &StyleEnv,
+        base: &StyleMap,
+        frontier: &[(NodeId, Option<&str>)],
+        state: &dyn Fn(&str) -> bool,
+        containers: Option<&HashMap<NodeId, ContainerMeasure>>,
+        deps: Option<&TouchedDeps>,
+    ) -> StyleMap {
         let mut map = HashMap::new();
         let mut pseudos = HashMap::new();
         let mut mcache = MatchCache::default();
@@ -3234,6 +3459,11 @@ impl StyleEngine {
         }
         let deep_relational = self.deep_relational();
         let akeys = self.ancestor_keys();
+        let hsubjects = deps.map(|_| self.has_subject_index());
+        let dep_ctx = deps.map(|d| DepCtx {
+            deps: d,
+            subjects: hsubjects.as_deref().unwrap_or(&[]),
+        });
         fr_probe(|p| *p = FrontierProbe::default());
         let mut root_fs = self.root_font_size(dom, env, state);
         for top in tops {
@@ -3250,6 +3480,7 @@ impl StyleEngine {
                     &touched,
                     deep_relational,
                     &akeys,
+                    dep_ctx,
                     &mut map,
                     &mut pseudos,
                     state,
@@ -3270,6 +3501,238 @@ impl StyleEngine {
         }
     }
 
+    /// Restyle borné par **delta de feuilles** (R-299) — la
+    /// passe où le moteur a été reconstruit (feuille ajoutée/
+    /// retirée) et où le journal ne fournit aucune frontière
+    /// exploitable. `old` = moteur de la passe précédente.
+    ///
+    /// Principe : le seul moyen pour une règle de changer le
+    /// computed d'un élément est qu'un sélecteur **changé**
+    /// (ajouté ou retiré) la matche — les règles identiques
+    /// gardent ensemble ordre relatif et verdicts. Le delta
+    /// diff les tables de règles en zone médiane (préfixe/
+    /// suffixe communs exclus — un retrait/ajout au milieu
+    /// marque conservateur toute la zone), évalue ces seuls
+    /// sélecteurs sur le DOM, et seede la frontière des
+    /// éléments touchés **plus** les nœuds jamais stylés
+    /// (nouveau DOM hors `base`) — puis délègue toute la
+    /// marche à `frontier_ctx`.
+    ///
+    /// Retour `None` (repli `compute_tree` à la charge de
+    /// l'appelant) quand le delta est improuvable : registre
+    /// `namespaces`/`@property`/`container_queries` différent
+    /// (computed ou matching affecté sans sélecteur changé),
+    /// zone changée au-delà de `MAX_DELTA_RULES`, ou seeds
+    /// au-delà de `MAX_DELTA_SEEDS`.
+    #[must_use]
+    #[allow(clippy::too_many_arguments)]
+    pub fn compute_sheet_delta(
+        &self,
+        dom: &Dom,
+        root: NodeId,
+        env: &StyleEnv,
+        base: &StyleMap,
+        frontier: &[(NodeId, Option<&str>)],
+        state: &dyn Fn(&str) -> bool,
+        containers: Option<&HashMap<NodeId, ContainerMeasure>>,
+        deps: Option<&TouchedDeps>,
+        old: &StyleEngine,
+    ) -> Option<StyleMap> {
+        // Gates : ces tables affectent computed ou matching
+        // SANS passer par un sélecteur de règle — le delta de
+        // règles ne les voit pas → repli.
+        if self.namespaces != old.namespaces
+            || self.property_registry != old.property_registry
+            || self.container_queries != old.container_queries
+        {
+            return None;
+        }
+        // Zone médiane changée de chaque table (préfixe et
+        // suffixe identiques exclus — `order` n'entre pas dans
+        // l'égalité : sa variation sur les survivants est sans
+        // effet, leur ordre relatif est préservé).
+        let (pr, sr) = Self::delta_span(&old.rules, &self.rules);
+        let (pq, sq) = Self::delta_span(&old.quirks_rules, &self.quirks_rules);
+        let mut changed: Vec<&CollectedRule> = Vec::new();
+        changed.extend(&old.rules[pr..old.rules.len() - sr]);
+        changed.extend(&self.rules[pr..self.rules.len() - sr]);
+        changed.extend(&old.quirks_rules[pq..old.quirks_rules.len() - sq]);
+        changed.extend(&self.quirks_rules[pq..self.quirks_rules.len() - sq]);
+        if changed.len() > MAX_DELTA_RULES {
+            return None;
+        }
+        // Seeds : la frontière journal d'abord (elle a priorité
+        // dans `touched` — ses clés portent la sémantique des
+        // ops réelles), puis les matchs des sélecteurs changés
+        // et les nœuds jamais stylés.
+        let mut seeds: Vec<(NodeId, Option<String>)> = frontier
+            .iter()
+            .map(|(n, k)| (*n, k.map(str::to_string)))
+            .collect();
+        let index = SelectorIndex::build_refs(&changed);
+        let mut mcache = MatchCache::default();
+        mcache.namespaces.clone_from(&self.namespaces);
+        let anc = AncestorFilter::of_ancestors(dom, root);
+        let mut over = false;
+        Self::delta_walk(
+            dom,
+            root,
+            base,
+            &changed,
+            &index,
+            env,
+            state,
+            &mut mcache,
+            &anc,
+            &mut seeds,
+            &mut over,
+        );
+        if over {
+            return None;
+        }
+        let keyed: Vec<(NodeId, Option<&str>)> =
+            seeds.iter().map(|(n, k)| (*n, k.as_deref())).collect();
+        // `frontier_ctx` réinitialise la sonde à son entrée —
+        // les compteurs de la marche delta sont sauvés puis
+        // réinjectés après le restyle.
+        let mut probe = take_frontier_probe();
+        let map = self.frontier_ctx(dom, root, env, base, &keyed, state, containers, deps);
+        probe.delta_seeds = u32::try_from(seeds.len()).unwrap_or(u32::MAX);
+        fr_probe(|p| {
+            p.delta_visited = probe.delta_visited;
+            p.delta_seeds = probe.delta_seeds;
+        });
+        Some(map)
+    }
+
+    /// `(préfixe, suffixe)` communs de deux tables de règles —
+    /// la zone médiane entre les deux est le delta : un ajout
+    /// en fin de feuilles donne un préfixe = l'ancienne table
+    /// entière, un retrait/reordre en milieu marque la zone.
+    fn delta_span(old: &[CollectedRule], new: &[CollectedRule]) -> (usize, usize) {
+        let mut p = 0;
+        while p < old.len() && p < new.len() && Self::rule_semantic_eq(&old[p], &new[p]) {
+            p += 1;
+        }
+        let mut s = 0;
+        while s < old.len() - p
+            && s < new.len() - p
+            && Self::rule_semantic_eq(&old[old.len() - 1 - s], &new[new.len() - 1 - s])
+        {
+            s += 1;
+        }
+        (p, s)
+    }
+
+    /// Égalité **sémantique** de deux règles collectées —
+    /// tout sauf `order` (positionnel : le span médian couvre
+    /// déjà les déplacements) ; `container` compare l'index,
+    /// valide car la gate amont impose `container_queries`
+    /// identiques.
+    fn rule_semantic_eq(a: &CollectedRule, b: &CollectedRule) -> bool {
+        a.selectors == b.selectors
+            && a.declarations == b.declarations
+            && a.origin == b.origin
+            && a.scope == b.scope
+            && a.layer == b.layer
+            && a.media == b.media
+            && a.container == b.container
+    }
+
+    /// Marche DOM de [`StyleEngine::compute_sheet_delta`] —
+    /// seede (a) tout élément matchant ≥ 1 sélecteur changé
+    /// (clé sentinelle : évalué, descente seulement sur
+    /// delta computed) et (b) tout élément jamais stylé
+    /// (clé `None` — nouveau DOM : couverture structurelle,
+    /// sous-arbre élagué de la marche puisque son restyle
+    /// est inconditionnel de toute façon).
+    #[allow(clippy::too_many_arguments)]
+    fn delta_walk(
+        dom: &Dom,
+        node: NodeId,
+        base: &StyleMap,
+        changed: &[&CollectedRule],
+        index: &SelectorIndex,
+        env: &StyleEnv,
+        state: &dyn Fn(&str) -> bool,
+        mcache: &mut MatchCache,
+        anc: &AncestorFilter,
+        seeds: &mut Vec<(NodeId, Option<String>)>,
+        over: &mut bool,
+    ) {
+        if *over {
+            return;
+        }
+        if dom.element(node).is_ok() {
+            fr_probe(|p| p.delta_visited += 1);
+            if base.get(node).is_none() {
+                seeds.push((node, None));
+                if seeds.len() > MAX_DELTA_SEEDS {
+                    *over = true;
+                }
+                return; // sous-arbre neuf : restyle total déjà garanti
+            }
+            if !changed.is_empty() {
+                let node_scope = dom.containing_shadow_root(node);
+                let mut hit = false;
+                index.candidates(dom, node, &mut |e| {
+                    if hit {
+                        return;
+                    }
+                    let Some(rule) = changed.get(e.rule as usize) else {
+                        return;
+                    };
+                    if !rule.media.is_empty() && !rule.media.iter().all(|qs| media_matches(env, qs))
+                    {
+                        return;
+                    }
+                    if !Self::selector_reaches(dom, rule, node, node_scope, e.selector as usize) {
+                        return;
+                    }
+                    let Some(sel) = rule.selectors.get(e.selector as usize) else {
+                        return;
+                    };
+                    if matches_with_state_cached(dom, node, sel, state, mcache, *anc, rule.scope) {
+                        hit = true;
+                    }
+                });
+                if hit {
+                    seeds.push((node, Some(DELTA_SEED_KEY.to_string())));
+                    if seeds.len() > MAX_DELTA_SEEDS {
+                        *over = true;
+                        return;
+                    }
+                }
+            }
+        }
+        let mut child_anc = *anc;
+        child_anc.insert_node(dom, node);
+        // Même ordre de visite que `compute_subtree` : shadow
+        // d'abord, puis enfants light — le filtre d'ancêtres
+        // doit refléter l'hôte pour les nœuds shadow.
+        if let Some(sroot) = dom.shadow_root(node, true) {
+            if let Ok(schildren) = dom.children_iter(sroot) {
+                for c in schildren {
+                    explorer_common::deep(|| {
+                        Self::delta_walk(
+                            dom, c, base, changed, index, env, state, mcache, &child_anc, seeds,
+                            over,
+                        );
+                    });
+                }
+            }
+        }
+        if let Ok(children) = dom.children_iter(node) {
+            for c in children {
+                explorer_common::deep(|| {
+                    Self::delta_walk(
+                        dom, c, base, changed, index, env, state, mcache, &child_anc, seeds, over,
+                    );
+                });
+            }
+        }
+    }
+
     /// Marche récursive de [`compute_scoped_frontier_with_ctx`]
     /// : évalue `node` puis sélectionne les enfants à visiter
     /// (cf. doc de la API — chaîne, frères précédents de chaîne,
@@ -3287,6 +3750,7 @@ impl StyleEngine {
         touched: &HashMap<NodeId, Option<String>>,
         deep_relational: bool,
         akeys: &AncestorKeys,
+        dep_ctx: Option<DepCtx<'_>>,
         map: &mut HashMap<NodeId, ComputedStyle>,
         pseudos: &mut HashMap<NodeId, PseudoStyles>,
         state: &dyn Fn(&str) -> bool,
@@ -3393,7 +3857,22 @@ impl StyleEngine {
                 }
             });
         }
-        let descend_all = descend_touch || changed;
+        // R-298 — canal silencieux `E:has(x) .d` : sous
+        // `deps`, un nœud sujet plausible d'un composé
+        // non-sujet porteur de `:has` affecté peut avoir une
+        // vérité basculée sans delta computed — descendre
+        // pour réévaluer les `.d` (le seul cas où `changed`
+        // ne suffit pas : la règle ne style que le composé
+        // FINAL).
+        let mut descend_all = descend_touch || changed;
+        if !descend_all {
+            if let Some(dc) = dep_ctx {
+                if Self::has_subject_hit(dom, node, dc.subjects, dc.deps, state, mcache, anc) {
+                    descend_all = true;
+                    fr_probe(|p| p.descend_has += 1);
+                }
+            }
+        }
         let mut child_anc = *anc;
         child_anc.insert_node(dom, node);
         let host_root = dom.shadow_root(node, true);
@@ -3414,6 +3893,7 @@ impl StyleEngine {
                     descend_all,
                     deep_relational,
                     akeys,
+                    dep_ctx,
                     env,
                     map,
                     pseudos,
@@ -3438,6 +3918,7 @@ impl StyleEngine {
             descend_all,
             deep_relational,
             akeys,
+            dep_ctx,
             env,
             map,
             pseudos,
@@ -3470,6 +3951,7 @@ impl StyleEngine {
         descend_all: bool,
         deep_relational: bool,
         akeys: &AncestorKeys,
+        dep_ctx: Option<DepCtx<'_>>,
         env: &StyleEnv,
         map: &mut HashMap<NodeId, ComputedStyle>,
         pseudos: &mut HashMap<NodeId, PseudoStyles>,
@@ -3494,7 +3976,12 @@ impl StyleEngine {
         // basculer que via `a` en composé non-sujet — même
         // prédicat `attr_descends` que la descente ; `None`
         // (structurel) garde la visite inconditionnelle.
-        let struct_sibs = touched.values().any(Option::is_none);
+        // R-298 — `dep_ctx` rapporte des mutations de deps
+        // `:has` : les sujets d'un `:has(+ ~)` vivent à GAUCHE
+        // du match — la couverture des frères précédents est
+        // requise pour les réévaluer (`changed` ou descente
+        // plausible du canal silencieux).
+        let struct_sibs = touched.values().any(Option::is_none) || dep_ctx.is_some();
         let mut follow_active = false;
         for (i, &k) in kids.iter().enumerate() {
             let on_path = spine.contains(&k);
@@ -3555,6 +4042,7 @@ impl StyleEngine {
                         touched,
                         deep_relational,
                         akeys,
+                        dep_ctx,
                         map,
                         pseudos,
                         state,
@@ -3609,6 +4097,72 @@ impl StyleEngine {
             }
         }
         k
+    }
+
+    /// Index par passe (R-298) — composés **non-sujets**
+    /// porteurs de `:has`, privés du pseudo + deps de leurs
+    /// args + portée de la règle : un nœud visité qui matche
+    /// ce « sujet plausible » peut avoir une vérité `:has`
+    /// basculée SANS que son computed change (`E:has(x) .d`
+    /// — le canal silencieux que la garde 234 couvrait par
+    /// repli complet ; `changed` seul le raterait).
+    fn has_subject_index(&self) -> Vec<(ComplexSelector, ArgDeps, Option<NodeId>)> {
+        let mut out = Vec::new();
+        for rule in self.rules.iter().chain(&self.quirks_rules) {
+            for sel in &rule.selectors {
+                let last = sel.parts.len().saturating_sub(1);
+                for (compound, _) in sel.parts.iter().take(last) {
+                    let mut argdeps = ArgDeps::default();
+                    let mut stripped = compound.clone();
+                    let mut any = false;
+                    stripped.simples.retain(|s| match s {
+                        SimpleSelector::Pseudo(PseudoClass::Has(l)) => {
+                            any = true;
+                            for (_, inner) in l {
+                                arg_deps(inner, &mut argdeps);
+                            }
+                            false
+                        }
+                        _ => true,
+                    });
+                    if any {
+                        out.push((
+                            ComplexSelector {
+                                parts: vec![(stripped, None)],
+                            },
+                            argdeps,
+                            rule.scope,
+                        ));
+                    }
+                }
+            }
+        }
+        out
+    }
+
+    /// Un nœud visité est-il sujet plausible d'un `:has`
+    /// dont l'arg croise les deps mutées ? (R-298 — la
+    /// vérité peut avoir basculé dans les deux sens : la
+    /// vérification porte sur le composé privé de `:has`,
+    /// jamais sur la vérité courante seule.)
+    #[allow(clippy::too_many_arguments)]
+    fn has_subject_hit(
+        dom: &Dom,
+        node: NodeId,
+        subjects: &[(ComplexSelector, ArgDeps, Option<NodeId>)],
+        deps: &TouchedDeps,
+        state: &dyn Fn(&str) -> bool,
+        mcache: &mut MatchCache,
+        anc: &AncestorFilter,
+    ) -> bool {
+        let scope = node_scope(dom, node);
+        subjects.iter().any(|(c, a, sc)| {
+            *sc == scope
+                && a.hit(deps)
+                && crate::selector::matches_with_state_cached(
+                    dom, node, c, state, mcache, *anc, *sc,
+                )
+        })
     }
 
     #[allow(clippy::too_many_arguments)]

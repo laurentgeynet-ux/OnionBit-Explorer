@@ -811,6 +811,7 @@ pub(crate) fn apply_payload(
                 &job.canvas_ops,
                 &[],
                 &[],
+                None,
             )
         });
     out.incremental = incremental;
@@ -1538,13 +1539,39 @@ fn journal_op_desc(op: &explorer_js::DomMutation) -> String {
 /// de la boucle pour nommer l'op fautive au rejet
 /// (diagnostic JS-C289). Alimente `touched` des cibles
 /// réelles (relayout incrémental, Étape 137a).
+#[allow(clippy::too_many_lines)] // une branche par variante DomMutation + accumulation tdeps (Étape 238).
 fn apply_journal_op(
     p: &mut PaintPayload,
     ctx: &ApplyCtx,
     op: &explorer_js::DomMutation,
     touched: &mut Vec<explorer_dom::NodeId>,
     style_touched: &mut Vec<(explorer_dom::NodeId, Option<String>)>,
+    tdeps: &mut explorer_css::TouchedDeps,
 ) -> Result<(), JournalReject> {
+    // Étape 238 — verdict dep par op AVANT mutation (le DOM
+    // évolue pendant le rejeu : le pré-scan de `apply_journal`
+    // peut diverger). Les effets des ops touchant une dep
+    // `:has` alimentent `tdeps` — la frontière s'en sert pour
+    // descendre les sujets plausibles du canal silencieux
+    // `E:has(x) .d`. Les CLÉS restent naturelles : un attr
+    // de dep vit dans un arg `:has` donc dans les clés
+    // ancêtres → la descente `Some` et le fan-out suivant
+    // suffisent ; la couverture des frères précédents vient
+    // de `dep_ctx` côté frontière, pas d'une clé `None`.
+    let (dep_touch, sheet_touch) = p.dom.as_ref().map_or((false, false), |dom| {
+        let st = op_may_mutate_sheets(op, dom, &p.keymap);
+        let dt = st
+            || p.eng_has_deps
+                .as_ref()
+                .is_some_and(|d| journal_op_touches_has(op, d, dom, &p.keymap));
+        (dt, st)
+    });
+    p.has_dep_touched |= dep_touch;
+    if sheet_touch {
+        // Feuilles mutées : les args `:has` du NOUVEAU jeu
+        // sont inconnus → couverture totale, jamais de trou.
+        tdeps.all = true;
+    }
     match op {
         explorer_js::DomMutation::Remove { key } => {
             // JS-C292 — un nœud créé puis retiré **entre deux
@@ -1592,9 +1619,49 @@ fn apply_journal_op(
             style_touched.push((par, None));
             dom.remove(id).map_err(|_| JournalReject::Dom)?;
             p.keymap.retain(|_, v| !gone.contains(v));
+            if dep_touch {
+                // La signature du sous-arbre retiré a frappé
+                // une dep — quel nom exactement n'est pas
+                // réductible → couverture totale.
+                tdeps.all = true;
+            }
         }
         explorer_js::DomMutation::SetAttr { key, name, value } => {
             let id = key_node(p, *key)?;
+            if dep_touch {
+                // Effet complet sur les deps : le nom + (pour
+                // `class`/`id`) anciennes ∪ nouvelles valeurs —
+                // la bascule d'appartenance va dans les deux
+                // sens.
+                let dom = p.dom.as_ref().ok_or(JournalReject::NoDom)?;
+                tdeps.attrs.insert(name.to_ascii_lowercase());
+                match name.as_str() {
+                    "class" => {
+                        let old = dom
+                            .attribute_str(id, "class")
+                            .ok()
+                            .flatten()
+                            .unwrap_or_default();
+                        for c in old.split_ascii_whitespace().chain(
+                            value
+                                .as_deref()
+                                .unwrap_or_default()
+                                .split_ascii_whitespace(),
+                        ) {
+                            tdeps.classes.insert(c.to_string());
+                        }
+                    }
+                    "id" => {
+                        if let Some(old) = dom.attribute_str(id, "id").ok().flatten() {
+                            tdeps.ids.insert(old.to_string());
+                        }
+                        if let Some(v) = value.as_deref() {
+                            tdeps.ids.insert(v.to_string());
+                        }
+                    }
+                    _ => {}
+                }
+            }
             let dom = p.dom.as_mut().ok_or(JournalReject::NoDom)?;
             match value {
                 Some(v) => dom.set_attribute(id, name, v),
@@ -1628,6 +1695,11 @@ fn apply_journal_op(
             touched.push(par);
             style_touched.push((par, None));
             dom.set_text(id, text).map_err(|_| JournalReject::Dom)?;
+            if dep_touch {
+                // Canal `:empty`/positionnel — dépendance
+                // structurelle pure.
+                tdeps.structural = true;
+            }
         }
         // Étape 137b — `attachShadow` programmatique : le
         // fragment est créé côté `explorer-dom` et attaché à
@@ -1639,6 +1711,11 @@ fn apply_journal_op(
             let h = journal_attach_shadow(p, *host, *root, *open)?;
             touched.push(h);
             style_touched.push((h, None));
+            if dep_touch {
+                // Frontière shadow : la garde ne signe pas le
+                // contenu du fragment → couverture totale.
+                tdeps.all = true;
+            }
         }
         explorer_js::DomMutation::Insert {
             parent,
@@ -1650,6 +1727,23 @@ fn apply_journal_op(
             let par = journal_insert(p, ctx, *parent, *index, html, ids, tags)?;
             touched.push(par);
             style_touched.push((par, None));
+            if dep_touch {
+                // Positions/tag déjà couverts par `structural` ;
+                // les hits de noms de deps dans le fragment
+                // sont extraits pour garder des deps serrées.
+                tdeps.structural = true;
+                if let Some(d) = p.eng_has_deps.as_ref() {
+                    for a in d.attrs.iter().filter(|a| html.contains(a.as_str())) {
+                        tdeps.attrs.insert(a.clone());
+                    }
+                    for c in d.classes.iter().filter(|c| html.contains(c.as_str())) {
+                        tdeps.classes.insert(c.clone());
+                    }
+                    for i in d.ids.iter().filter(|i| html.contains(i.as_str())) {
+                        tdeps.ids.insert(i.clone());
+                    }
+                }
+            }
         }
     }
     Ok(())
@@ -1803,13 +1897,17 @@ fn apply_journal(
     // Étape 236 — `style_touched` = les nœuds RÉELLEMENT
     // mutés pour la frontière de restyle (`touched` garde
     // les parents — cibles du relayout : la géométrie fuit
-    // vers le haut, pas le style).
+    // vers le haut, pas le style). Étape 238 — `tdeps` =
+    // les effets des ops touchant une dep `:has` (couverture
+    // frontière R-298 : sujets plausibles du canal
+    // silencieux `E:has(x) .d`).
     let mut style_touched = Vec::new();
+    let mut tdeps = explorer_css::TouchedDeps::default();
     for (op_i, op) in journal.ops.iter().enumerate() {
         // §B-111 — breadcrumb opt-in : la dernière ligne avant
         // la mort nomme l'op fautive (gate `dlv_trace` interne).
         dlv_info!(op_i, "journal: op {}", journal_op_desc(op));
-        if let Err(e) = apply_journal_op(p, ctx, op, &mut touched, &mut style_touched) {
+        if let Err(e) = apply_journal_op(p, ctx, op, &mut touched, &mut style_touched, &mut tdeps) {
             // Diagnostic JS-C289 — nomme l'op et la clé
             // fautive (le `html` d'un Insert peut peser des
             // Ko : résumé borné).
@@ -1887,7 +1985,7 @@ fn apply_journal(
     // ci-dessus reste l'arbitre, mais rien n'a bougé → pas de
     // relayout (un relayout complet par pompe sinon).
     if job.relayout && !journal.ops.is_empty() {
-        journal_relayout(p, ctx, job, &touched, &style_touched, &mut out)?;
+        journal_relayout(p, ctx, job, &touched, &style_touched, &tdeps, &mut out)?;
     } else {
         // §B-17 — même trou que la voie re-parse : les
         // sous-arbres touchés ne seront pas restylés, leurs
@@ -1925,6 +2023,14 @@ pub(crate) fn relayout_subtree_payload(
     // plus que de repli si la cible n'est pas un élément
     // vivant.
     let scope = dom.parent(target).ok().flatten();
+    // Étape 238 — hors journal, la mutation qui motive ce
+    // restyle n'est pas mesurée : `all` couvre le canal
+    // `E:has(x) .d` borné aux nœuds visités (strictement
+    // plus sûr que la voie d'avant, même exposition bornée).
+    let all_deps = explorer_css::TouchedDeps {
+        all: true,
+        ..Default::default()
+    };
     if try_incr_payload(
         p,
         ctx,
@@ -1936,6 +2042,7 @@ pub(crate) fn relayout_subtree_payload(
         canvas_ops,
         scope.as_slice(),
         &[(target, None)],
+        Some(&all_deps),
     ) {
         Ok(())
     } else {
@@ -1953,6 +2060,7 @@ fn journal_relayout(
     job: &PendingApply,
     touched: &[explorer_dom::NodeId],
     style_touched: &[(explorer_dom::NodeId, Option<String>)],
+    tdeps: &explorer_css::TouchedDeps,
     out: &mut ApplyOutcome,
 ) -> Result<(), JournalReject> {
     let dom = p.dom.take().ok_or(JournalReject::NoDom)?;
@@ -1979,6 +2087,11 @@ fn journal_relayout(
         (&touched_all, &style_touched_all)
     };
     dlv_info!(touched = touched.len(), "journal: relayout");
+    // Étape 238 — `deps` = les effets mesurés du journal :
+    // armée seulement quand une op a réellement touché une
+    // dep `:has` (sinon le chemin R-297 reste serré — pas
+    // de couverture fratrie en cadeau).
+    let dep_arg = p.has_dep_touched.then_some(tdeps);
     let incremental = journal_cover(&dom, touched).is_some_and(|t| {
         let scopes = journal_style_scopes(&dom, touched, t);
         try_incr_payload(
@@ -1992,6 +2105,7 @@ fn journal_relayout(
             &job.canvas_ops,
             &scopes,
             style_touched,
+            dep_arg,
         )
     });
     if !incremental && relayout_dom_payload(p, ctx, job.tab, &dom, &job.canvas_ops).is_err() {
@@ -2098,7 +2212,7 @@ fn journal_style_scopes(
 }
 /// la version session : cible résolue dans les deux DOM,
 /// remap des ids conservés, repli `false` → reflow global.
-#[allow(clippy::too_many_arguments)] // cible/canvas : même paquetage que `relayout_dom_payload`.
+#[allow(clippy::too_many_arguments, clippy::too_many_lines)] // cible/canvas/deps : même paquetage que `relayout_dom_payload`.
 fn try_incr_payload(
     p: &mut PaintPayload,
     ctx: &ApplyCtx,
@@ -2110,6 +2224,7 @@ fn try_incr_payload(
     canvas_ops: &CanvasOpsTable,
     style_scopes: &[explorer_dom::NodeId],
     style_frontier: &[(explorer_dom::NodeId, Option<String>)],
+    style_deps: Option<&explorer_css::TouchedDeps>,
 ) -> bool {
     // Phase 1 — cible résolue par l'appelant (chemin DOM ou
     // `NodeId` d'op journal — 137a : les ops rejouées portent
@@ -2174,6 +2289,7 @@ fn try_incr_payload(
         ctx.scale,
         scope_roots,
         frontier,
+        style_deps,
         PhaseKind::Incr,
         tab,
     );
@@ -2899,6 +3015,7 @@ pub(crate) fn styles_payload(
     dpr: f32,
     scopes: &[explorer_dom::NodeId],
     frontier: &[(explorer_dom::NodeId, Option<String>)],
+    deps: Option<&explorer_css::TouchedDeps>,
     prof: PhaseKind,
     tab: TabId,
 ) -> (StyleMap, StyleEngine) {
@@ -2929,9 +3046,11 @@ pub(crate) fn styles_payload(
     // identique — saute la collecte des règles entière en
     // hit (ordre de cascade), pas seulement le parse
     // (étape 227 garde `sheet_cache` pour la reconstruction).
-    let eng = match p.style_eng.take() {
-        Some(e) if p.style_sig == Some(sig) => e,
-        _ => {
+    let mut eng_rebuilt = false;
+    let (eng, old_eng) = match p.style_eng.take() {
+        Some(e) if p.style_sig == Some(sig) => (e, None),
+        prev => {
+            eng_rebuilt = true;
             let mut e = StyleEngine::new();
             let mut rel = false;
             let mut deps = HasDeps::default();
@@ -2965,7 +3084,7 @@ pub(crate) fn styles_payload(
             // l'ancien index → caduc → conservateur.
             p.eng_has_deps = (rel && deps_ok).then_some(deps);
             p.has_dep_touched = true;
-            e
+            (e, prev)
         }
     };
     // Media queries évaluées contre le viewport RÉEL de la
@@ -2983,16 +3102,35 @@ pub(crate) fn styles_payload(
     // map absente, `StyleEnv` changé, garde `:has` bloquée
     // ou une racine de scope morte (cible retirée par le
     // journal).
-    // La garde `:has` est par dépendances :
-    // `eng_has_deps = Some` = tous les args analysables →
-    // seul un `has_dep_touched` (op du journal touchant
-    // une dépendance) interdit le scopé — les sujets des
-    // args non touchés ne peuvent pas basculer. `None` =
-    // arg non modélisable ou pas de `:has` : le drapeau
-    // binaire de l'étape 228 fait foi (conservateur).
+    // La garde `:has` est par dépendances. Étape 238 — sous
+    // `eng_has_deps = Some` (tous les args analysables), un
+    // `has_dep_touched` n'interdit plus la **frontière** :
+    // les effets des ops touchées sont mesurés dans
+    // `tdeps` (journal) ou couverts `all` (appelants hors
+    // journal) et `compute_scoped_frontier_deps` descend
+    // les sujets plausibles du canal silencieux
+    // `E:has(x) .d` — plus de repli cascade ici. Le chemin
+    // `scoped` reste interdit sous dep touchée (il ne
+    // descend pas les sujets plausibles). `None` = arg non
+    // modélisable ou pas de `:has` : le drapeau binaire de
+    // l'étape 228 fait foi (conservateur).
     let has_block = match &p.eng_has_deps {
-        Some(_) => p.has_dep_touched,
+        Some(_) => false,
         None => p.eng_has_relational,
+    };
+    let scoped_block = has_block || p.has_dep_touched;
+    // Feuilles reconstruites cette passe : le verdict dep
+    // de `apply_journal` visait l'ancien index → caduc →
+    // couverture totale pour cette passe.
+    let dep_store;
+    let dep_arg = if eng_rebuilt {
+        dep_store = explorer_css::TouchedDeps {
+            all: true,
+            ..Default::default()
+        };
+        Some(&dep_store)
+    } else {
+        deps
     };
     let env_same = p.styles_env.as_ref().is_some_and(|e| *e == env);
     // Étape 236 — la frontière n'opère que sur des
@@ -3007,7 +3145,7 @@ pub(crate) fn styles_payload(
         && frontier.len() <= MAX_STYLE_SCOPES
         && frontier.iter().all(|(n, _)| dom.element(*n).is_ok());
     let scoped_ok = !scopes.is_empty()
-        && !has_block
+        && !scoped_block
         && env_same
         && scopes.iter().all(|r| dom.parent(*r).is_ok());
     dlv_info!(
@@ -3026,27 +3164,70 @@ pub(crate) fn styles_payload(
         scoped_ok,
         "styles: garde scoped"
     );
-    let mut styles = match (p.styles.take(), frontier_ok, scoped_ok) {
-        (Some(mut map), true, _) => {
-            let keyed: Vec<(explorer_dom::NodeId, Option<&str>)> =
-                frontier.iter().map(|(n, a)| (*n, a.as_deref())).collect();
-            let sub = eng.compute_scoped_frontier(dom, dom.document(), &env, &map, &keyed);
-            map.apply_scoped(sub);
-            dlv_info!(
-                probe = ?explorer_css::take_frontier_probe(),
-                "frontier: descente"
-            );
-            map
-        }
-        (Some(mut map), false, true) => {
-            for &root in scopes {
-                let seed = dom.parent(root).ok().flatten().and_then(|par| map.get(par));
-                let sub = eng.compute_scoped(dom, root, &env, seed);
-                map.apply_scoped(sub);
+    let keyed: Vec<(explorer_dom::NodeId, Option<&str>)> =
+        frontier.iter().map(|(n, a)| (*n, a.as_deref())).collect();
+    let mut styles = if eng_rebuilt {
+        // R-299 — moteur reconstruit : la frontière seule ne
+        // couvre PAS les règles ajoutées/retirées — des
+        // éléments hors du journal peuvent matcher les
+        // sélecteurs changés (trou de correction fermé ici).
+        // `env` changé → médias réévalués partout → repli ;
+        // sinon le delta seede matchs + nœuds jamais stylés
+        // et fusionne la frontière journal.
+        match (p.styles.take(), env_same, old_eng.as_ref()) {
+            (Some(mut map), true, Some(old)) => {
+                match eng.compute_sheet_delta(
+                    dom,
+                    dom.document(),
+                    &env,
+                    &map,
+                    &keyed,
+                    &|_| false,
+                    None,
+                    dep_arg,
+                    old,
+                ) {
+                    Some(sub) => {
+                        map.apply_scoped(sub);
+                        dlv_info!(
+                            probe = ?explorer_css::take_frontier_probe(),
+                            "delta: descente"
+                        );
+                        map
+                    }
+                    None => eng.compute_tree(dom, dom.document(), &env),
+                }
             }
-            map
+            _ => eng.compute_tree(dom, dom.document(), &env),
         }
-        _ => eng.compute_tree(dom, dom.document(), &env),
+    } else {
+        match (p.styles.take(), frontier_ok, scoped_ok) {
+            (Some(mut map), true, _) => {
+                let sub = eng.compute_scoped_frontier_deps(
+                    dom,
+                    dom.document(),
+                    &env,
+                    &map,
+                    &keyed,
+                    dep_arg,
+                );
+                map.apply_scoped(sub);
+                dlv_info!(
+                    probe = ?explorer_css::take_frontier_probe(),
+                    "frontier: descente"
+                );
+                map
+            }
+            (Some(mut map), false, true) => {
+                for &root in scopes {
+                    let seed = dom.parent(root).ok().flatten().and_then(|par| map.get(par));
+                    let sub = eng.compute_scoped(dom, root, &env, seed);
+                    map.apply_scoped(sub);
+                }
+                map
+            }
+            _ => eng.compute_tree(dom, dom.document(), &env),
+        }
     };
     t = sync_phase(tab, ph_cascade, t);
     let ord_of = element_ordinals(dom);
@@ -3099,6 +3280,7 @@ pub(crate) fn relayout_dom_payload(
         ctx.scale,
         &[],
         &[],
+        None,
         PhaseKind::Flow,
         tab,
     );
@@ -4871,10 +5053,26 @@ mod reloc_tests {
         let mut touched = Vec::new();
         let mut style_touched = Vec::new();
         let op = explorer_js::DomMutation::Remove { key: 9999 };
-        assert!(apply_journal_op(&mut p, &ctx, &op, &mut touched, &mut style_touched).is_ok());
+        assert!(apply_journal_op(
+            &mut p,
+            &ctx,
+            &op,
+            &mut touched,
+            &mut style_touched,
+            &mut explorer_css::TouchedDeps::default()
+        )
+        .is_ok());
         // Con clave conocida el Remove sigue funcionando.
         let op = explorer_js::DomMutation::Remove { key: 1 };
-        assert!(apply_journal_op(&mut p, &ctx, &op, &mut touched, &mut style_touched).is_ok());
+        assert!(apply_journal_op(
+            &mut p,
+            &ctx,
+            &op,
+            &mut touched,
+            &mut style_touched,
+            &mut explorer_css::TouchedDeps::default()
+        )
+        .is_ok());
         assert!(p.keymap.is_empty());
     }
 
@@ -5009,9 +5207,15 @@ mod reloc_tests {
             name: "class".to_string(),
             value: Some("a".to_string()),
         };
-        assert!(
-            super::apply_journal_op(&mut p, &ctx, &op, &mut touched, &mut style_touched).is_ok()
-        );
+        assert!(super::apply_journal_op(
+            &mut p,
+            &ctx,
+            &op,
+            &mut touched,
+            &mut style_touched,
+            &mut explorer_css::TouchedDeps::default()
+        )
+        .is_ok());
         assert_eq!(
             style_touched,
             vec![(x, Some("class".to_string()))],
@@ -5028,22 +5232,267 @@ mod reloc_tests {
             key: kt,
             text: "z".to_string(),
         };
-        assert!(
-            super::apply_journal_op(&mut p, &ctx, &op, &mut touched, &mut style_touched).is_ok()
-        );
+        assert!(super::apply_journal_op(
+            &mut p,
+            &ctx,
+            &op,
+            &mut touched,
+            &mut style_touched,
+            &mut explorer_css::TouchedDeps::default()
+        )
+        .is_ok());
         assert_eq!(
             style_touched,
             vec![(x, Some("class".to_string())), (x, None)],
             "SetText → élément porteur du texte"
         );
         let op = explorer_js::DomMutation::Remove { key: kx };
-        assert!(
-            super::apply_journal_op(&mut p, &ctx, &op, &mut touched, &mut style_touched).is_ok()
-        );
+        assert!(super::apply_journal_op(
+            &mut p,
+            &ctx,
+            &op,
+            &mut touched,
+            &mut style_touched,
+            &mut explorer_css::TouchedDeps::default()
+        )
+        .is_ok());
         assert_eq!(
             style_touched.last(),
             Some(&(par, None)),
             "Remove → parent (structurel : :nth-*/+/~ sous le parent)"
+        );
+    }
+
+    /// Étape 238 — une op touchant une dep `:has` alimente
+    /// `tdeps` (nom d'attribut + anciennes ∪ nouvelles
+    /// valeurs de `class`) et arme `has_dep_touched`
+    /// in-stream ; la clé de frontière reste `Some(attr)`
+    /// (la descente passe par `attr_descends`, la couverture
+    /// fratrie par `dep_ctx`). Une op non-dep n'alimente
+    /// rien et n'arme rien.
+    #[test]
+    fn etape238_apply_journal_op_alimente_tdeps() {
+        use crate::session::apply::PaintPayload;
+        let dom = TreeBuilder::parse_scripting(
+            "<html><body><div id=d><p id=x>t</p></div></body></html>",
+            false,
+        );
+        let mut p = PaintPayload {
+            dom: Some(dom),
+            ..PaintPayload::default()
+        };
+        p.eng_has_deps = Some(super::HasDeps {
+            classes: vec!["x".to_string()],
+            ..Default::default()
+        });
+        let e = super::engine_preorder(p.dom.as_ref().unwrap());
+        for (i, id) in e.iter().enumerate() {
+            p.keymap.insert(i as u64 + 1, *id);
+        }
+        let ctx = c293_ctx();
+        let (x, kx) = {
+            let d = p.dom.as_ref().unwrap();
+            let x = d.by_id("x").unwrap();
+            let kx = p
+                .keymap
+                .iter()
+                .find(|(_, v)| **v == x)
+                .map(|(k, _)| *k)
+                .unwrap();
+            (x, kx)
+        };
+        let mut touched = Vec::new();
+        let mut style_touched = Vec::new();
+        let mut tdeps = explorer_css::TouchedDeps::default();
+        // `class` gagne `x` : bascule d'appartenance → dep
+        // touchée → accumulation complète.
+        let op = explorer_js::DomMutation::SetAttr {
+            key: kx,
+            name: "class".to_string(),
+            value: Some("x".to_string()),
+        };
+        assert!(super::apply_journal_op(
+            &mut p,
+            &ctx,
+            &op,
+            &mut touched,
+            &mut style_touched,
+            &mut tdeps
+        )
+        .is_ok());
+        assert!(tdeps.attrs.contains("class"), "l'attr muté est en deps");
+        assert!(
+            tdeps.classes.contains("x"),
+            "la nouvelle classe est en deps"
+        );
+        assert!(p.has_dep_touched, "le drapeau s'arme in-stream");
+        assert_eq!(
+            style_touched.last(),
+            Some(&(x, Some("class".to_string()))),
+            "la clé reste `Some(attr)` — descend via attr_descends"
+        );
+        // Op non-dep : ni accumulation ni armement.
+        p.has_dep_touched = false;
+        let mut tdeps2 = explorer_css::TouchedDeps::default();
+        let op2 = explorer_js::DomMutation::SetAttr {
+            key: kx,
+            name: "data-z".to_string(),
+            value: Some("1".to_string()),
+        };
+        assert!(super::apply_journal_op(
+            &mut p,
+            &ctx,
+            &op2,
+            &mut touched,
+            &mut style_touched,
+            &mut tdeps2
+        )
+        .is_ok());
+        assert!(
+            tdeps2.attrs.is_empty() && !tdeps2.structural && !tdeps2.all,
+            "l'op non-dep ne touche pas tdeps"
+        );
+        assert!(!p.has_dep_touched, "l'op non-dep n'arme pas le drapeau");
+    }
+
+    /// Étape 238 — sous index de deps complet,
+    /// `has_dep_touched` n'interdit plus la frontière :
+    /// `deps` descend les sujets plausibles du canal
+    /// silencieux `div:has(.x) span` (la sonde `descend_has`
+    /// prouve l'armement — la cascade complète ne la
+    /// déclenche pas).
+    #[test]
+    fn etape238_frontiere_armee_sous_dep_touchee() {
+        let mut p = crate::session::apply::PaintPayload::default();
+        let mut dom = TreeBuilder::parse_scripting(
+            "<html><body><style>div:has(.x) span { color: #11aa22 }</style>\
+             <div id=host><div id=mid><p id=t>u</p></div>\
+             <div id=branch><span id=sp>v</span></div></div><div id=o>w</div></body></html>",
+            false,
+        );
+        let (styles, eng) = super::styles_payload(
+            &mut p,
+            &dom,
+            (800.0, 600.0),
+            explorer_css::ColorScheme::Light,
+            false,
+            1.0,
+            &[],
+            &[],
+            None,
+            super::PhaseKind::Flow,
+            0,
+        );
+        p.styles = Some(styles);
+        p.style_eng = Some(eng);
+        assert!(p.eng_has_deps.is_some(), "l'index dep est collecté");
+        let _ = explorer_css::take_frontier_probe();
+        let t = dom.by_id("t").unwrap();
+        dom.set_attribute(t, "class", "x").unwrap();
+        p.has_dep_touched = true;
+        let deps = explorer_css::TouchedDeps {
+            classes: ["x".to_string()].into_iter().collect(),
+            ..Default::default()
+        };
+        let (styles2, _e2) = super::styles_payload(
+            &mut p,
+            &dom,
+            (800.0, 600.0),
+            explorer_css::ColorScheme::Light,
+            false,
+            1.0,
+            &[],
+            &[(t, Some("class".to_string()))],
+            Some(&deps),
+            super::PhaseKind::Flow,
+            0,
+        );
+        let probe = explorer_css::take_frontier_probe();
+        assert!(probe.visited > 0, "la frontière s'exécute (pas de repli)");
+        assert!(probe.descend_has > 0, "la descente sujet plausible a tiré");
+        let sp = dom.by_id("sp").unwrap();
+        assert!(
+            styles2
+                .get(sp)
+                .and_then(|c| c.get("color"))
+                .is_some_and(|c| c.contains("#11aa22")),
+            "le descendant `.d` du sujet `:has` bascule via la frontière"
+        );
+    }
+
+    /// R-299 — rebuild de feuilles (ajout `linked_sheets`) :
+    /// le delta de règles seede les matchs des sélecteurs
+    /// changés — plus de cascade complète sur `n_frontier=0`
+    /// (`delta_seeds` prouvé, résultat identique au full).
+    #[test]
+    fn r299_delta_feuilles_restyle_borne() {
+        let mut p = crate::session::apply::PaintPayload::default();
+        let dom = TreeBuilder::parse_scripting(
+            "<html><body><style>div { color: #090909 }</style>\
+             <div id=host><p id=t>u</p></div><div id=o>w</div></body></html>",
+            false,
+        );
+        let (styles, eng) = super::styles_payload(
+            &mut p,
+            &dom,
+            (800.0, 600.0),
+            explorer_css::ColorScheme::Light,
+            false,
+            1.0,
+            &[],
+            &[],
+            None,
+            super::PhaseKind::Flow,
+            0,
+        );
+        p.styles = Some(styles);
+        p.style_eng = Some(eng);
+        let _ = explorer_css::take_frontier_probe();
+        // Feuille ajoutée → signature change → moteur reconstruit
+        // → voie delta (journal vide, map persistée, env stable).
+        p.linked_sheets.push("p { color: #123456 }".to_string());
+        let (styles2, _e2) = super::styles_payload(
+            &mut p,
+            &dom,
+            (800.0, 600.0),
+            explorer_css::ColorScheme::Light,
+            false,
+            1.0,
+            &[],
+            &[],
+            None,
+            super::PhaseKind::Flow,
+            0,
+        );
+        let probe = explorer_css::take_frontier_probe();
+        assert!(
+            probe.delta_visited > 0,
+            "la marche delta s'est exécutée (pas de repli full)"
+        );
+        assert_eq!(
+            probe.delta_seeds, 1,
+            "seul `p#t` matche le nouveau sélecteur"
+        );
+        assert!(
+            probe.visited <= 8,
+            "restyle borné, visited={}",
+            probe.visited
+        );
+        let t = dom.by_id("t").unwrap();
+        assert!(
+            styles2
+                .get(t)
+                .and_then(|c| c.get("color"))
+                .is_some_and(|c| c.contains("#123456")),
+            "la nouvelle règle s'applique à son match"
+        );
+        let o = dom.by_id("o").unwrap();
+        assert!(
+            styles2
+                .get(o)
+                .and_then(|c| c.get("color"))
+                .is_some_and(|c| c.contains("#090909")),
+            "l'élément hors-delta garde son style"
         );
     }
 

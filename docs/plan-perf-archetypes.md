@@ -124,6 +124,80 @@ journalisée — commit atomique css + core. **Mesuré
 **6,41 s → 79,5 ms ≈ ×80** sur `data-is-billboard-visible` ;
 résidu = repli `has_dep_touched` 8,8 s (trou (e)).
 
+**R-298 + Étape 238 — frontière à dépendances `:has`
+(trou (e) fermé, mesuré)** : le repli `has_dep_touched` →
+cascade complète 8,8 s existait pour un cas précis —
+`E:has(x) .d` où la vérité `:has` de `E` bascule **sans**
+changer son computed (la règle ne style que le composé
+final `.d`) : `changed` seul rate `.d`. Correctif borné en
+deux moitiés. *R-298 (PIPE)* : `TouchedDeps`
+(attrs/classes/ids/structural/all effectivement mutés) +
+index par passe `has_subject_index` = composés **non-
+sujets** porteurs de `:has`, privés du pseudo + deps de
+leurs args (`arg_deps`) + scope de la règle ;
+`compute_scoped_frontier_deps(dom, root, env, base,
+frontier, deps)` — sous `Some(d)` tout nœud visité
+matchant un sujet plausible dont l'arg croise `d` obtient
+`descend_all` (`has_subject_hit` via
+`matches_with_state_cached`, même scope shadow), et la
+couverture des frères précédents s'ouvre (sujets
+`E:has(+ ~)` vivent à gauche du match). *Étape 238 (NAV)* :
+`apply_journal_op` calcule le verdict dep **par op** avant
+mutation (`journal_op_touches_has` ∪ `op_may_mutate_sheets`),
+accumule les effets dans `tdeps` (SetAttr → attr +
+class/id old∪new ; Insert → structural + noms dans
+l'html ; Remove/AttachShadow/SetText → `all`/`structural`)
+et arme `has_dep_touched` in-stream ; la gate devient
+`has_block = eng_has_deps.is_none() && rel` (frontière
+armée sous index complet), `scoped` reste interdit sous
+dep touchée (pas de descente plausible → canal non
+couvert), jeu de feuilles reconstruit → `deps.all`.
+Clés de mutation **inchangées** (un attr de dep vit dans
+un arg `:has` donc dans `AncestorKeys` → `Some` suffit).
+API additive (R-298) journalisée. Verrous : 17/17
+`cascade_frontier` (+4 tests canal ancêtre/frère,
+non-touche élagué, `all` conservateur) + 2 tests NAV
+(`tdeps` alimenté/non-dep, frontière armée `descend_has>0`
+sous dep touchée) + verrous `falls_back_on_has_unanalyzable`
+/`survives_has_untouched_dep` inchangés. Sonde
+`FrontierProbe.descend_has` ajoutée.
+
+**R-299 — delta de feuilles (poste résiduel nommé par le
+vol R-298 : ~30 s/75 s de cascades complètes dev.to, ~12 s
+YouTube — rebuild de feuilles → `n_frontier=0` →
+`compute_tree`)** : `compute_sheet_delta(new, …, old)` diff
+les tables de règles en zone médiane (préfixe/suffixe
+communs exclus — `rule_semantic_eq` sans `order`) ; une
+marche DOM seede les éléments matchant ≥1 sélecteur
+changé (mini-`SelectorIndex` sur refs, média+scope, clé
+sentinelle `\u{1}delta` = évalué, descente sur delta
+computed seul) **et** tout nœud jamais stylé (streaming,
+clé `None`), fusionne la frontière journal, délègue à
+`frontier_ctx`. Gates → `compute_tree` : `namespaces`/
+`@property`/`@container` différents (computed/matching
+sans sélecteur), `MAX_DELTA_RULES`/`MAX_DELTA_SEEDS`.
+`apply_scoped` propage `counter_styles`/`font_*` (correctif
+de staleness). Le bras delta est **prioritaire** sur
+`frontier`/`scoped` sous `eng_rebuilt` — ferme le trou
+latent de R-298 (frontière seule sur rebuild). API
+additive journalisée ; verrous 25/25 `cascade_frontier`
+(+8) + `r299_delta_feuilles_restyle_borne`. Sondes
+`delta_visited`/`delta_seeds`. **Mesuré release, protocole
+fixe doublé** (`vol.sh` `--release`, dev.to 52,6 s /
+YouTube 62,9 s, `76785796`) : cascade totale 30,8 s →
+**2,86 s** dev.to (frontière 7,65 ms `visited=11` + delta
+1,07 s `delta_visited=372, seeds=99` ; 2 `flow.cascade`
+~0,9 s pleins — pas d'ancien moteur/nav, attendu) et
+12,2 s → **3,08 s** YouTube (delta **180 ms**
+`delta_visited=809, seeds=37`, frontière 156 ms
+`descend_has=1`, scoped ~1,3 s). Pas de baseline release
+pré-R-299 : la part exacte codegen-vs-delta n'est pas
+séparable, mais les marches bornées (372/809 évals vs
+arbres ~4 700) prouvent le mécanisme. Nouveau poste n°1
+YouTube : **jambes JS 30 s = 48 % du wall en release**
+(`pump.js_run_sync` 22,6 s + `commit_scripts` 7,5 s) —
+coût réel, pas artefact debug (§2.6bis tranché).
+
 ### 2.4 — `may_escape` (R-293) [PIPE `explorer-layout` + `explorer-render`]
 
 | Tâche | Fichiers | DoD |
