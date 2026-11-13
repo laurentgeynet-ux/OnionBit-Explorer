@@ -5,6 +5,9 @@
 **A web browser engine written from scratch in Rust — HTTP/TLS, HTML/CSS, layout, raster, JavaScript — with a Flutter desktop client. No imported engine: every layer is implemented here.**
 *Un navigateur web écrit de zéro en Rust — HTTP/TLS, HTML/CSS, layout, raster, JavaScript — avec un client desktop Flutter. Aucun moteur importé : chaque couche est implémentée ici.*
 
+**`#![forbid(unsafe_code)]` engine-wide · runs off a USB key — nothing to install · executes YouTube's real BotGuard VM in its own interpreter**
+*`forbid(unsafe_code)` sur tout le moteur · tourne depuis une clé USB — rien à installer · exécute la vraie VM BotGuard de YouTube dans son propre interpréteur*
+
 [![CI](https://github.com/laurentgeynet-ux/OnionBit-Explorer/actions/workflows/ci.yml/badge.svg)](https://github.com/laurentgeynet-ux/OnionBit-Explorer/actions/workflows/ci.yml)
 [![Nightly terrain](https://github.com/laurentgeynet-ux/OnionBit-Explorer/actions/workflows/nightly-terrain.yml/badge.svg)](https://github.com/laurentgeynet-ux/OnionBit-Explorer/actions/workflows/nightly-terrain.yml)
 [![License](https://img.shields.io/badge/license-MIT%20%2F%20Apache--2.0-blue.svg)](LICENSE-MIT)
