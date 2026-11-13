@@ -12635,6 +12635,11 @@ croître la surface navigateur mesurée (`api` 1510/8099, 18,6 %).
   sémantique (`nom`+`Bind`) → fallback `env_get`.
   `Local` fonction → JS-C503. `slot_hit`/`slot_miss` +
   `EXPLORER_NO_SLOTS`. Verrous : lang 315 ×3, c502 13.
+- [x] **JS-C503 — cran 2a fin : slots du scope `Local`**
+  : liste canonique `[params, arguments?, new.target?,
+  hoist, lex]` répliquant `compute_lit_flags` (partagé,
+  `pub(crate)`) ; gen/async → depth-only (params baissés).
+  Verrous : lang 315 ×3, c502 20 tests.
 
 Convergence visée : **Étape 239** — plan global consolidé,
 chaque gain rapporté contre les **deux** archétypes.

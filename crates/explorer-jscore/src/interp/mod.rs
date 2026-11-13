@@ -10351,6 +10351,15 @@ impl Engine {
                 })
                 .clone()
         });
+        // JS-C503 — slots du scope `Local` : positions canoniques
+        // `[params…, "arguments"?, new.target?, hoist…, lex…]`
+        // alignées sur le prologue ci-dessous (params →
+        // `LazyArgs` → `new.target` → `hoist` → `let` de corps).
+        // Gen/async : le corps baissé réécrit les params —
+        // le resolver ne l'a pas émis (depth-only, clé absente).
+        if !(lit.is_gen || lit.is_async) {
+            self.predeclare_slots(&local, body_rc.as_ptr() as usize);
+        }
         // §B-59 : sous-phase « bind » — `last_phase` figé à
         // « bind » = mort dans le liage de paramètres
         // (`bind_pat` × N params, `...rest`, défauts).
@@ -10833,13 +10842,13 @@ impl Drop for Engine {
 /// → `LazyArgs` armé au prologue d'appel. `eval` couvre la
 /// lecture dynamique `eval("arguments")` (la liaison doit
 /// exister dès l'entrée — la lecture échappe au scan).
-const LIT_USES_ARGS: u8 = 1;
+pub(crate) const LIT_USES_ARGS: u8 = 1;
 /// JS-C497 — `var`/`function`/`export` plausibles → `hoist`
 /// utile. Un corps sans ces mots-clés n'a rien à hoister
 /// (`let`/`const`/`class` ne hoistent pas — exclus à bon droit).
-const LIT_MAY_HOIST: u8 = 2;
+pub(crate) const LIT_MAY_HOIST: u8 = 2;
 /// JS-C497 — `new.target` plausibly lu → liaison env armée.
-const LIT_USES_NT: u8 = 4;
+pub(crate) const LIT_USES_NT: u8 = 4;
 /// Tous flags armés — repli quand aucune preuve d'absence
 /// n'existe (corps synthétisé sans source).
 const LIT_ALL: u8 = LIT_USES_ARGS | LIT_MAY_HOIST | LIT_USES_NT;
@@ -10859,7 +10868,7 @@ const LIT_ALL: u8 = LIT_USES_ARGS | LIT_MAY_HOIST | LIT_USES_NT;
 /// Corps parsé : `src_text`+`span` donnent la source verbatim
 /// du littéral — recherche bornée par mot (chaîne, commentaire
 /// ou propriété homonyme → flag armé, jamais l'inverse).
-fn compute_lit_flags(lit: &crate::ast::FnLit) -> u8 {
+pub(crate) fn compute_lit_flags(lit: &crate::ast::FnLit) -> u8 {
     if let crate::ast::FnBody::Deferred(d) = &lit.body {
         if d.toks.get(d.start..=d.end).is_none() {
             return LIT_ALL;

@@ -145,6 +145,81 @@ fn c502_poisoned_scope_dynamic() {
     assert_eq!(eval("function f(){let x=1;eval('x=42');return x}f()"), "42");
 }
 
+/// JS-C503 — slots du scope `Local` : paramètres lus en boucle.
+#[test]
+fn c503_param_slots() {
+    assert_eq!(
+        eval("function f(a,b){var s=0;for(var i=0;i<40;i++)s+=a+b*i;return s}f(2,3)"),
+        "2420"
+    );
+}
+
+/// `arguments` occupe son slot canonique (après params) — les
+/// lectures passent par `LazyArgs`, jamais par le fast-path
+/// (`Bind` seul hit) — la valeur reste exacte.
+#[test]
+fn c503_arguments_position() {
+    assert_eq!(
+        eval("function f(a){var s=a;for(var i=1;i<arguments.length;i++)s+=arguments[i];return s}f(1,2,3)"),
+        "6"
+    );
+}
+
+/// `new.target` est lié après `arguments` — les noms hoistés
+/// après lui gardent leur slot.
+#[test]
+fn c503_hoist_after_synthetics() {
+    assert_eq!(
+        eval("function f(){var t=new.target;return ''+h()+t}function h(){return 9}f()"),
+        "9undefined"
+    );
+}
+
+/// Ordre hoist : `var` profonds + `function` déclarés en bloc
+/// remontent dans l'ordre de `hoist_vars_only`.
+#[test]
+fn c503_hoist_order_deep() {
+    assert_eq!(
+        eval(
+            "function f(){var a=1;{var b=2;if(a){var c=3}}\
+              while(a<0){var d=4}return a*100+b*10+c}f()"
+        ),
+        "123"
+    );
+}
+
+/// `let` de niveau corps = slots en fin de liste canonique.
+#[test]
+fn c503_body_lex_slots() {
+    assert_eq!(
+        eval("function f(p){var v=p*2;let x=v+1;const y=x*2;return x+y}f(3)"),
+        "21"
+    );
+}
+
+/// Défauts de paramètres : le nom lié occupe le même slot que
+/// son motif, qu'il soit passé ou défaut.
+#[test]
+fn c503_default_params() {
+    assert_eq!(
+        eval("function f(a,b=a+1,c){var s=0;for(var i=0;i<3;i++)s+=a+b;return s}f(2)"),
+        "15"
+    );
+}
+
+/// Gen : corps baissé → scope `Local` depth-only, mais les
+/// valeurs (et les slots des blocs internes) restent exacts.
+#[test]
+fn c503_gen_correctness() {
+    assert_eq!(
+        eval(
+            "function*g(){let x=1;{let y=2;yield x+y}var z=5;yield z}\
+              var it=g(),s=0,r;while(!(r=it.next()).done)s+=r.value;s"
+        ),
+        "8"
+    );
+}
+
 /// `slot_hit` s'engage sur les lectures de liaisons de bloc.
 #[test]
 fn c502_slot_hit_engages() {

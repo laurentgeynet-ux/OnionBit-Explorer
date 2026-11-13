@@ -3512,3 +3512,13 @@ shadow n'atteint ni cascade ni boxification ») etait
 - `EXPLORER_NO_SLOTS=1`, compteurs `slot_hit`/`slot_miss`
   (un miss élevé trahit une divergence d'ordre canonique).
 - Verrous : `lang` 315 ×3 passes, `c502_slots` 13 tests.
+
+### 2026-11-13 — fin cran 2a : slots du scope `Local` (JS-C503)
+
+- Liste canonique `[params, "arguments"?, new.target?, hoist,
+  lex]` répliquant `compute_lit_flags` — la fonction est
+  maintenant `pub(crate)`, appelée par le resolver (parité
+  par construction, pas par duplication).
+- Gen/async : corps baissé = params réécrits → scope depth-only ;
+  leurs `Stmt::Block` internes gardent leurs slots.
+- Verrous : `lang` 315 ×3 passes, `c502_slots` 20 tests.

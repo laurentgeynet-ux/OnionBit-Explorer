@@ -40,6 +40,7 @@
 use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
 
+use super::{LIT_MAY_HOIST, LIT_USES_ARGS, LIT_USES_NT, NEW_TARGET};
 use crate::ast::{
     ChainStep, ClassLit, Expr, FnBody, FnLit, ForInit, ForTarget, ObjProp, Pat, PropKey, Stmt,
     UnOp, VarDecl,
@@ -418,6 +419,170 @@ fn fn_scope_names(lit: &FnLit, body: &[Stmt]) -> HashSet<Rc<str>> {
     out
 }
 
+/// JS-C503 — liste canonique ordonnée du scope `Local`
+/// **synchrone** : réplique exacte de l'ordre d'insertion du
+/// prologue `call_script_body` — params (ordre de motifs),
+/// `"arguments"` si `!arrow && LIT_USES_ARGS`, `new.target`
+/// (nom privé [`NEW_TARGET`]) si `!arrow && LIT_USES_NT`,
+/// noms hoistés dans l'ordre de `hoist`, puis `let`/`const`/
+/// `class`/`using` du niveau corps (ordre source). Première
+/// occurrence dedupée (`env_declare`/`insert` sautent un nom
+/// déjà présent — le slot de la première liaison gagne).
+/// Gen/async : params du corps **baissé** ≠ `lit.params` →
+/// non modélisé (`depth-only`).
+fn fn_scope_ord(lit: &FnLit, body: &[Stmt], lfl: u8) -> Vec<Rc<str>> {
+    let mut out: Vec<Rc<str>> = Vec::new();
+    for p in &lit.params {
+        pat_names_ord(&p.pat, &mut out);
+    }
+    if !lit.is_arrow && lfl & LIT_USES_ARGS != 0 {
+        out.push(Rc::from("arguments"));
+    }
+    if !lit.is_arrow && lfl & LIT_USES_NT != 0 {
+        out.push(Rc::from(NEW_TARGET));
+    }
+    if lfl & LIT_MAY_HOIST != 0 {
+        hoist_ord(body, &mut out);
+    }
+    lex_top_ord(body, &mut out);
+    out
+}
+
+/// `let`/`const`/`using`/`class` du niveau corps — en ordre
+/// source, après les noms hoistés.
+fn lex_top_ord(body: &[Stmt], out: &mut Vec<Rc<str>>) {
+    for s in body {
+        match s {
+            Stmt::Lexical { decls, .. } | Stmt::Using { decls, .. } => {
+                for d in decls {
+                    pat_names_ord(&d.pat, out);
+                }
+            }
+            Stmt::ClassDecl(cl) => {
+                if let Some(n) = &cl.name {
+                    if !out.iter().any(|x| x == n) {
+                        out.push(n.clone());
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+}
+
+/// Réplique de `Engine::hoist` : `var` + `function` en ordre de
+/// parcours (les `function` sont déclarées ET initialisées au
+/// hoist — même position), autres statements → marche
+/// [`hoist_vars_ord_inner`].
+fn hoist_ord(body: &[Stmt], out: &mut Vec<Rc<str>>) {
+    stacker::maybe_grow(
+        crate::parser::STACK_RED_ZONE,
+        crate::parser::STACK_GROW,
+        || hoist_ord_inner(body, out),
+    );
+}
+
+fn hoist_ord_inner(body: &[Stmt], out: &mut Vec<Rc<str>>) {
+    for s in body {
+        match s {
+            Stmt::Var(ds) => {
+                for d in ds {
+                    pat_names_ord(&d.pat, out);
+                }
+            }
+            Stmt::FunctionDecl(l) => {
+                if let Some(n) = &l.name {
+                    if !out.iter().any(|x| x == n) {
+                        out.push(n.clone());
+                    }
+                }
+            }
+            Stmt::Export(crate::ast::ExportDecl::Decl(inner)) => {
+                hoist_ord(std::slice::from_ref(&**inner), out);
+            }
+            other => hoist_vars_ord_inner(std::slice::from_ref(other), out),
+        }
+    }
+}
+
+/// Réplique de `Engine::hoist_vars_only_inner` — `var` +
+/// `function` remontés de toute la profondeur des blocs.
+fn hoist_vars_ord_inner(body: &[Stmt], out: &mut Vec<Rc<str>>) {
+    stacker::maybe_grow(
+        crate::parser::STACK_RED_ZONE,
+        crate::parser::STACK_GROW,
+        || hoist_vars_ord_inner_shallow(body, out),
+    );
+}
+
+fn hoist_vars_ord_inner_shallow(body: &[Stmt], out: &mut Vec<Rc<str>>) {
+    for s in body {
+        match s {
+            Stmt::Var(ds) => {
+                for d in ds {
+                    pat_names_ord(&d.pat, out);
+                }
+            }
+            Stmt::FunctionDecl(l) => {
+                if let Some(n) = &l.name {
+                    if !out.iter().any(|x| x == n) {
+                        out.push(n.clone());
+                    }
+                }
+            }
+            Stmt::Block(b) => hoist_vars_ord_inner(b, out),
+            Stmt::If { then, else_, .. } => {
+                hoist_vars_ord_inner(std::slice::from_ref(then.as_ref()), out);
+                if let Some(e) = else_ {
+                    hoist_vars_ord_inner(std::slice::from_ref(e.as_ref()), out);
+                }
+            }
+            Stmt::While { body, .. }
+            | Stmt::DoWhile { body, .. }
+            | Stmt::With { body, .. }
+            | Stmt::Labeled { body, .. } => {
+                hoist_vars_ord_inner(std::slice::from_ref(body.as_ref()), out);
+            }
+            Stmt::For { init, body, .. } => {
+                if let Some(ForInit::Var(ds)) = init {
+                    for d in ds {
+                        pat_names_ord(&d.pat, out);
+                    }
+                }
+                hoist_vars_ord_inner(std::slice::from_ref(body.as_ref()), out);
+            }
+            Stmt::ForIn { target, body, .. } | Stmt::ForOf { target, body, .. } => {
+                if let ForTarget::Var(p) = target {
+                    pat_names_ord(p, out);
+                }
+                hoist_vars_ord_inner(std::slice::from_ref(body.as_ref()), out);
+            }
+            Stmt::Try {
+                block,
+                catch,
+                finally,
+            } => {
+                hoist_vars_ord_inner(block, out);
+                if let Some((_, b)) = catch {
+                    hoist_vars_ord_inner(b, out);
+                }
+                if let Some(b) = finally {
+                    hoist_vars_ord_inner(b, out);
+                }
+            }
+            Stmt::Switch { cases, .. } => {
+                for c in cases {
+                    hoist_vars_ord_inner(&c.body, out);
+                }
+            }
+            Stmt::Export(crate::ast::ExportDecl::Decl(inner)) => {
+                hoist_vars_ord_inner(std::slice::from_ref(inner.as_ref()), out);
+            }
+            _ => {}
+        }
+    }
+}
+
 /// `top = true` : tous les déclarateurs comptent (niveau supérieur
 /// du corps fonction ou du script) ; `false` (blocs imbriqués) :
 /// seuls `var` + `function` remontent vers le scope fonction.
@@ -570,7 +735,21 @@ impl Resolver {
         // des fonctions sœurs (régression `for-in`/`for-of` B1 du
         // vol 811).
         let base = self.scopes.len();
-        self.push(fn_scope_names(lit, body), poisoned);
+        if !poisoned && !lit.is_gen && !lit.is_async {
+            // JS-C503 — slots du scope `Local` : liste canonique
+            // alignée sur le prologue (params → arguments? →
+            // new.target? → hoist → lex), clé `body.as_ptr()`.
+            // Gen/async : le corps baissé réécrit les params —
+            // depth-only. Poisoned : idem (règle « certifié »).
+            let lfl = crate::interp::compute_lit_flags(lit);
+            self.push_slots(
+                body.as_ptr() as usize,
+                Rc::from(fn_scope_ord(lit, body, lfl)),
+                false,
+            );
+        } else {
+            self.push(fn_scope_names(lit, body), poisoned);
+        }
         // `= défaut` de paramètres : évalués dans l'env `Local`.
         for p in &lit.params {
             self.walk_pat(&p.pat);
