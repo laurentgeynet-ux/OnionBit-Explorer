@@ -2121,14 +2121,7 @@ pub(crate) fn styles_payload(
         p.anim_births.extend(births);
         p.anim_births.truncate(types::MAX_ANIM_BIRTHS);
     }
-    apply_anim_overrides(
-        &p.transitions,
-        &mut p.animations,
-        &eng,
-        &mut styles,
-        &ord_of,
-        now,
-    );
+    apply_anim_overrides(&p.transitions, &mut p.animations, &mut styles, &ord_of, now);
     p.prev_styles = raw;
     (styles, eng)
 }
@@ -2240,7 +2233,6 @@ pub(crate) fn relayout_dom_payload(
             apply_anim_overrides(
                 &p.transitions,
                 &mut p.animations,
-                &eng,
                 &mut styles2,
                 &ord_of,
                 Instant::now(),

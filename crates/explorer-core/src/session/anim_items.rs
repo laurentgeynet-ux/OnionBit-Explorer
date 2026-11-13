@@ -85,6 +85,12 @@ pub(crate) struct ActiveAnimation {
     /// replier le style de base (sinon la frame reste figée
     /// sur la valeur animée).
     pub(crate) applied: bool,
+    /// Frames `@keyframes` résolues à la dernière passe de
+    /// styles (étape 4 — paint-only) : le tick les consulte
+    /// sans reconstruire le `StyleEngine` — la table est
+    /// rafraîchie à chaque `sync_animations` (une feuille
+    /// mutée réécrit les frames en place).
+    pub(crate) frames: Vec<(f64, Vec<explorer_css::Declaration>)>,
 }
 
 impl ActiveAnimation {
@@ -133,6 +139,76 @@ pub(crate) fn same_decl(a: &AnimationDecl, b: &AnimationDecl) -> bool {
 /// Borne anti-hostile : transitions simultanées par onglet
 /// (une page hostile peut déclencher des milliers de diffs).
 pub(crate) const MAX_TRANSITIONS: usize = 256;
+
+/// Whitelist « peinture seule » **non héritée** (étape 4) —
+/// un changement n'altère ni les boîtes ni les lignes posées,
+/// seulement la display list ré-émise. Exclusions volontaires :
+/// `transform`/`translate`/`rotate`/`scale`/`offset-*`
+/// (étendue scrollable), `background-image`/`mask`/`content`
+/// (machinerie assets), `z-index`/`position`/`display`
+/// (champs boîte dérivés), `font-*`/`text-*` géométriques,
+/// `pointer-events`/`user-select` (hit-test), SVG
+/// (`fill`/`stroke`… — l'îlot est sérialisé à la pose).
+const PAINT_ONLY_PROPS: &[&str] = &[
+    "opacity",
+    "background-color",
+    "background-position",
+    "background-position-x",
+    "background-position-y",
+    "background-size",
+    "background-repeat",
+    "background-attachment",
+    "background-clip",
+    "background-origin",
+    "background-blend-mode",
+    "box-shadow",
+    "outline",
+    "outline-color",
+    "outline-style",
+    "outline-width",
+    "outline-offset",
+    "border-color",
+    "border-top-color",
+    "border-right-color",
+    "border-bottom-color",
+    "border-left-color",
+    "clip-path",
+    "object-fit",
+    "object-position",
+];
+
+/// Whitelist « peinture seule » **héritée** — la propagation
+/// suit la règle valeur-pour-valeur : un descendant dont la
+/// valeur courante égale l'ancienne valeur du déclarant
+/// l'héritait → patché ; valeur différente = valeur propre →
+/// branche arrêtée (ses descendants héritent de lui).
+/// Whitelist « peinture seule » **héritée** — héritées par
+/// nature mais patchées comme les autres : la sémantique
+/// d'`apply_anim_overrides` est locale à l'élément (pas de
+/// propagation aux descendants), seuls la boîte du target,
+/// ses anonymes et ses runs texte reprennent la valeur.
+const INHERITED_PAINT_PROPS: &[&str] = &[
+    "color",
+    "text-shadow",
+    "cursor",
+    "caret-color",
+    "accent-color",
+    "-webkit-text-fill-color",
+    "image-rendering",
+    "visibility",
+];
+
+/// Prop animable en « peinture seule » ? `old`/`new` servent
+/// aux bascules dangereuses : `filter: none` ↔ fonction
+/// change le bloc englobant de `fixed`/`absolute` (relayout),
+/// `visibility: collapse` plie les lignes de tableau.
+pub(crate) fn prop_paint_safe(prop: &str, old: &str, new: &str) -> bool {
+    match prop {
+        "filter" => old != "none" && new != "none",
+        "visibility" => old != "collapse" && new != "collapse",
+        _ => PAINT_ONLY_PROPS.contains(&prop) || INHERITED_PAINT_PROPS.contains(&prop),
+    }
+}
 
 /// `NodeId` → ordinal d'élément en ordre document (étape
 /// 45) — clé stable au re-parse des synchronisations DOM :
@@ -297,10 +373,14 @@ pub(crate) fn sync_animations(
             if decl.name == "none" || eng.keyframes(&decl.name).is_none() {
                 continue;
             }
+            let frames = eng
+                .keyframes(&decl.name)
+                .map(<[_]>::to_vec)
+                .unwrap_or_default();
             let same = animations
                 .iter()
                 .find(|a| a.elem == ord && a.idx == idx && same_decl(&a.decl, decl));
-            fresh.push(if let Some(a) = same {
+            let mut a = if let Some(a) = same {
                 let mut a = a.clone();
                 // Bascule `paused` ↔ `running` en place (R-255) :
                 // pause → gel à `now` ; reprise → `start`
@@ -336,8 +416,13 @@ pub(crate) fn sync_animations(
                     )
                     .then_some(now),
                     applied: false,
+                    frames: Vec::new(),
                 }
-            });
+            };
+            // Frames rafraîchies à chaque passe — une feuille
+            // mutée réécrit la table en place (étape 4).
+            a.frames = frames;
+            fresh.push(a);
         }
     }
     *animations = fresh;
@@ -355,7 +440,6 @@ pub(crate) fn sync_animations(
 pub(crate) fn apply_anim_overrides(
     transitions: &[ActiveTransition],
     animations: &mut [ActiveAnimation],
-    eng: &StyleEngine,
     styles: &mut StyleMap,
     ord_of: &HashMap<NodeId, usize>,
     now: Instant,
@@ -363,9 +447,10 @@ pub(crate) fn apply_anim_overrides(
     let node_of: HashMap<usize, NodeId> = ord_of.iter().map(|(n, o)| (*o, *n)).collect();
     for a in animations.iter_mut() {
         a.applied = false;
-        let Some(frames) = eng.keyframes(&a.decl.name) else {
+        let frames = &a.frames;
+        if frames.is_empty() {
             continue;
-        };
+        }
         let elapsed = a
             .clock(now)
             .saturating_duration_since(a.start)

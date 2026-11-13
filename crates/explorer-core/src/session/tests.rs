@@ -2921,6 +2921,140 @@ fn anim_tick_detached_take_commit_and_supersede() {
     assert!(e.dom.is_some(), "payload réinsérée");
 }
 
+/// Étape 4 — fast path « peinture seule » : une animation
+/// sur prop de la whitelist (`background-color`) patche le
+/// style posé + repaint, sans cascade ni relayout —
+/// `tree_epoch` inchangé (l'arbre n'est pas reconstruit).
+#[test]
+fn anim_tick_paint_only_patches_without_relayout() {
+    let mut s = Session::new(Arc::new(FailTransport), Arc::new(TestFont));
+    let tab = s.open_tab();
+    s.tabs.get_mut(&tab).unwrap().dom = Some(test_dom(
+        "<style>@keyframes c{from{background-color:#ff0000}\
+         to{background-color:#0000ff}}\
+         #b{width:2px;height:2px;animation:c 10s linear}\
+         </style><div id=\"b\"></div>",
+    ));
+    s.relayout(tab).unwrap();
+    {
+        let e = s.tabs.get_mut(&tab).unwrap();
+        assert_eq!(e.animations.len(), 1, "keyframe enregistrée");
+        // Phase médiane → la valeur interpolée diffère de la
+        // base posée.
+        e.animations[0].start -= std::time::Duration::from_millis(1200);
+        e.last_frame_pull = Some(Instant::now());
+    }
+    let epoch0 = s.tabs.get(&tab).unwrap().tree_epoch;
+    s.advance_animations(tab).unwrap();
+    let e = s.tabs.get(&tab).unwrap();
+    assert_eq!(e.tree_epoch, epoch0, "zéro relayout");
+    // Le style posé a réellement pris la valeur interpolée.
+    let node = e.dom.as_ref().unwrap().by_id("b").unwrap();
+    let bx = paint::find_box(e.tree.as_ref().unwrap(), node).unwrap();
+    let bg = bx.style.get("background-color").unwrap_or_default();
+    assert_ne!(bg, "#ff0000", "valeur animée posée, pas la base");
+    assert!(e.animations[0].applied, "override marqué appliqué");
+}
+
+/// Étape 4 — repli conservateur : une prop géométrique
+/// (`width`, hors whitelist) refuse le patch → le tick
+/// repasse par le relayout ciblé/global — `tree_epoch` bump.
+#[test]
+fn anim_tick_layout_prop_falls_back() {
+    let mut s = Session::new(Arc::new(FailTransport), Arc::new(TestFont));
+    let tab = s.open_tab();
+    s.tabs.get_mut(&tab).unwrap().dom = Some(test_dom(
+        "<style>@keyframes w{from{width:2px}to{width:40px}}\
+         #b{height:2px;animation:w 10s linear}\
+         </style><div id=\"b\"></div>",
+    ));
+    s.relayout(tab).unwrap();
+    {
+        let e = s.tabs.get_mut(&tab).unwrap();
+        e.animations[0].start -= std::time::Duration::from_millis(1200);
+        e.last_frame_pull = Some(Instant::now());
+    }
+    let epoch0 = s.tabs.get(&tab).unwrap().tree_epoch;
+    s.advance_animations(tab).unwrap();
+    assert_ne!(
+        s.tabs.get(&tab).unwrap().tree_epoch,
+        epoch0,
+        "width replie sur le relayout"
+    );
+}
+
+/// Étape 4 — `color` animée : le patch atteint les runs
+/// texte **du target** (leur `frag.style` clone son computed)
+/// sans relayout ; les runs d'un élément descendant gardent
+/// leur style figé — contrat `apply_anim_overrides`.
+#[test]
+fn anim_tick_color_reaches_own_fragments() {
+    /// Couleurs des runs, groupées par élément propriétaire.
+    fn frag_colors(
+        bx: &explorer_layout::LayoutBox,
+        dom: &Dom,
+        out: &mut Vec<(explorer_dom::NodeId, String)>,
+    ) {
+        for line in &bx.lines {
+            for f in &line.fragments {
+                let owner = f.node.and_then(|n| paint::owner_element(dom, n));
+                if let Some(o) = owner {
+                    out.push((o, f.style.get("color").unwrap_or_default().to_string()));
+                }
+            }
+        }
+        for c in &bx.children {
+            frag_colors(c, dom, out);
+        }
+    }
+    let mut s = Session::new(Arc::new(FailTransport), Arc::new(TestFont));
+    let tab = s.open_tab();
+    s.tabs.get_mut(&tab).unwrap().dom = Some(test_dom(
+        "<style>@keyframes k{from{color:#ff0000}to{color:#0000ff}}\
+         #p{color:#ff0000;animation:k 10s linear}</style>\
+         <p id=\"p\">propre<span id=\"s\" style=\"color:#00ff00\">figé</span></p>",
+    ));
+    s.relayout(tab).unwrap();
+    let (before, p_node, span_node) = {
+        let e = s.tabs.get(&tab).unwrap();
+        let dom = e.dom.as_ref().unwrap();
+        let mut v = Vec::new();
+        frag_colors(e.tree.as_ref().unwrap(), dom, &mut v);
+        (v, dom.by_id("p").unwrap(), dom.by_id("s"))
+    };
+    {
+        let e = s.tabs.get_mut(&tab).unwrap();
+        e.animations[0].start -= std::time::Duration::from_millis(2500);
+        e.last_frame_pull = Some(Instant::now());
+    }
+    let epoch0 = s.tabs.get(&tab).unwrap().tree_epoch;
+    s.advance_animations(tab).unwrap();
+    let e = s.tabs.get(&tab).unwrap();
+    assert_eq!(e.tree_epoch, epoch0, "color patchée sans relayout");
+    let mut after = Vec::new();
+    frag_colors(
+        e.tree.as_ref().unwrap(),
+        e.dom.as_ref().unwrap(),
+        &mut after,
+    );
+    let own = |v: &[(explorer_dom::NodeId, String)], n: explorer_dom::NodeId| {
+        v.iter()
+            .filter(|(o, _)| *o == n)
+            .map(|(_, c)| c.clone())
+            .collect::<Vec<_>>()
+    };
+    assert_ne!(
+        own(&before, p_node),
+        own(&after, p_node),
+        "runs du target recolorés"
+    );
+    assert_eq!(
+        own(&before, span_node.unwrap()),
+        own(&after, span_node.unwrap()),
+        "runs du descendant figés — pas de propagation"
+    );
+}
+
 /// Issue #23 — mort permanente des sondes : un futur de
 /// navigation droppé pendant le rendu détaché (timeout du
 /// client HTTP de `POST /navigate`, drain interrompu)

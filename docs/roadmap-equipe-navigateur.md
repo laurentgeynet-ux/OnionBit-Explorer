@@ -11997,6 +11997,57 @@ un crate PIPELINE.- [x] **JS-C422. Deadline honnête — canal session ↔ budge
   `UnknownTab`) — 473 intégration + 136
   lib verts.
 
+- [x] **Étape 226. Fast path « peinture
+  seule » du tick anim** (`explorer-core`
+  `session/paint.rs`/`anim_items.rs`/
+  `apply.rs`, audit perf chantier 4) : même
+  détaché (Étape 223), chaque tick anim
+  payait cascade globale + relayout ciblé
+  — or la plupart des anims de la jungle
+  ne bougent que des couleurs/ombres/
+  opacité. `paint_only_patch` recomputé le
+  style du tick depuis `prev_styles` (base
+  cascade pré-override — pas de
+  `StyleEngine` à reconstruire ; les
+  `frames` `@keyframes` sont désormais
+  cachées sur `ActiveAnimation`, peuplées
+  par `sync_animations`), diffe contre le
+  style posé `bx.style` et, si **toutes**
+  les props changées sont de la whitelist
+  (`PAINT_ONLY_PROPS` +
+  `INHERITED_PAINT_PROPS`, `prop_paint_
+  safe` garde `filter:none↔fn` et
+  `visibility:collapse`), applique par
+  `set` sur la boîte target + anonymes +
+  runs dont l'élément propriétaire est le
+  target (`owner_element` — fidèle à
+  `apply_anim_overrides`, strictement
+  local, pas de propagation aux
+  descendants). La mutation in-place de
+  `style` violait le contrat R-37
+  (`same_obj` saute la signature sur
+  boîte non-feuille) : `reemit` ré-alloue
+  `children`/`lines` (drain+collect,
+  memcpy) → flip de ptr → `box_sig`
+  comparée → la boîte seule est ré-émise,
+  enfants réutilisés — puis
+  `repaint_payload` seul (`tree_epoch`
+  inchangé, `same_tree` tenu). Repli
+  relayout ciblé/global sur : prop hors
+  whitelist, style de base ou boîte
+  absents, sous-arbre `<svg>` (îlot
+  sérialisé à la pose). `diff` restreint
+  aux clés `cs` ∪ props déclarées par les
+  anims — les clés matérialisées au
+  layout (`font-size`…) ne sont pas des
+  overrides. Verrous : `paint_only_
+  patches_without_relayout` (epoch stable
+  + valeur posée), `layout_prop_falls_
+  back` (`width` → epoch bump),
+  `color_reaches_own_fragments` (runs du
+  target recolorés, descendant figé) —
+  143 lib + 473 intégration verts.
+
 ## Plan NAVIGATEUR — vitrine YouTube + surface navigateur (2026-11-12)
 
 Plan parallèle à la file `css.values` PIPE (§ roadmap équipe
