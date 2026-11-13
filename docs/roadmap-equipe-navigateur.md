@@ -12315,6 +12315,19 @@ un crate PIPELINE.- [x] **JS-C422. Deadline honnête — canal session ↔ budge
   `incr.emit` vs `incr.raster` et
   `incr.cascade` vs `incr.stylpost` qui
   ordonne les chantiers PIPELINE (a)/(b).
+  **Re-vol dev.to livré** (3 cycles
+  `incr`, somme ~44 s vs ~46 s wall —
+  couverture ~96 %) : `incr.raster`
+  **33,5 s (~76 %)** ≫ `incr.emit`
+  1,1 s → la cible PIPE est
+  `resolved_bounds`/`replay_items`
+  O(items), pas l'émission ;
+  `incr.cascade` **8,5 s (~19 %)** ≫
+  `incr.stylpost` 64 ms → le repli
+  `:has` est ~99 % du poste style ;
+  JS non-goulot confirmé jambes
+  mesurées (`net.commit_scripts`
+  1,35 s, `net.dl_*` ≤ 115 ms).
 
 ## Plan NAVIGATEUR — vitrine YouTube + surface navigateur (2026-11-12)
 
