@@ -9,6 +9,7 @@
 //! servir indifféremment le chemin `&mut self` et le chemin
 //! détaché `spawn_blocking`.
 use super::*;
+use std::time::Instant;
 
 use explorer_net::http::Request;
 use explorer_net::url::Url;
@@ -265,6 +266,7 @@ impl Session {
             entry.put_paint(p);
             return Err(CoreError::EmptyDocument);
         };
+        let mut t = Instant::now();
         let ord_to_node: std::collections::HashMap<usize, explorer_dom::NodeId> =
             anim_items::element_ordinals(&dom)
                 .into_iter()
@@ -274,10 +276,14 @@ impl Session {
             .iter()
             .filter_map(|o| ord_to_node.get(o).copied())
             .collect();
+        t = sync_phase(tab, "anim.ordinals", t);
         let r = match apply::journal_cover(&dom, &touched) {
-            Some(t) => apply::relayout_subtree_payload(&mut p, &ctx, &dom, t, &canvas_ops),
+            Some(cover) => {
+                apply::relayout_subtree_payload(&mut p, &ctx, tab, &dom, cover, &canvas_ops)
+            }
             None => apply::relayout_dom_payload(&mut p, &ctx, &dom, &canvas_ops),
         };
+        sync_phase(tab, "anim.relayout", t);
         p.dom = Some(dom);
         if let Some(entry) = self.tabs.get_mut(&tab) {
             entry.put_paint(p);

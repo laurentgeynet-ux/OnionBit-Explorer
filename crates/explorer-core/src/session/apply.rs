@@ -740,7 +740,16 @@ pub(crate) fn apply_payload(
             ) else {
                 return false;
             };
-            try_incr_payload(p, ctx, None, &new_dom, t_old, t_new, &job.canvas_ops)
+            try_incr_payload(
+                p,
+                ctx,
+                job.tab,
+                None,
+                &new_dom,
+                t_old,
+                t_new,
+                &job.canvas_ops,
+            )
         });
     out.incremental = incremental;
     tracing::debug!(
@@ -1774,11 +1783,12 @@ fn apply_journal(
 pub(crate) fn relayout_subtree_payload(
     p: &mut PaintPayload,
     ctx: &ApplyCtx,
+    tab: TabId,
     dom: &Dom,
     target: explorer_dom::NodeId,
     canvas_ops: &CanvasOpsTable,
 ) -> Result<(), CoreError> {
-    if try_incr_payload(p, ctx, Some(dom), dom, target, target, canvas_ops) {
+    if try_incr_payload(p, ctx, tab, Some(dom), dom, target, target, canvas_ops) {
         Ok(())
     } else {
         relayout_dom_payload(p, ctx, dom, canvas_ops)
@@ -1813,8 +1823,9 @@ fn journal_relayout(
         &touched_all
     };
     dlv_info!(touched = touched.len(), "journal: relayout");
-    let incremental = journal_cover(&dom, touched)
-        .is_some_and(|t| try_incr_payload(p, ctx, Some(&dom), &dom, t, t, &job.canvas_ops));
+    let incremental = journal_cover(&dom, touched).is_some_and(|t| {
+        try_incr_payload(p, ctx, job.tab, Some(&dom), &dom, t, t, &job.canvas_ops)
+    });
     if !incremental && relayout_dom_payload(p, ctx, &dom, &job.canvas_ops).is_err() {
         p.dom = Some(dom);
         p.style_dirty = debt;
@@ -1865,9 +1876,11 @@ pub(crate) fn journal_cover(
 /// `try_sync_incremental` sur payload — mêmes gardes que
 /// la version session : cible résolue dans les deux DOM,
 /// remap des ids conservés, repli `false` → reflow global.
+#[allow(clippy::too_many_arguments)] // cible/canvas : même paquetage que `relayout_dom_payload`.
 fn try_incr_payload(
     p: &mut PaintPayload,
     ctx: &ApplyCtx,
+    tab: TabId,
     old_dom_opt: Option<&Dom>,
     new_dom: &Dom,
     target_old: explorer_dom::NodeId,
@@ -1881,6 +1894,7 @@ fn try_incr_payload(
     // chemin re-parse (l'ancien vit dans `p.dom`). L'emprunt
     // de `p.dom` n'est pris qu'en Phase 2 — disjoint de
     // `p.tree`, jamais à travers un `&mut p`.
+    let mut t = Instant::now();
     if (p.dom.is_none() && old_dom_opt.is_none()) || p.tree.is_none() {
         return false;
     }
@@ -1906,6 +1920,7 @@ fn try_incr_payload(
         &p.img_decoded,
         &viewport_env(ctx.viewport, ctx.color_scheme, ctx.scripting, ctx.scale),
     );
+    t = sync_phase(tab, "incr.rekey", t);
     // `eng` inutilisé : la passe 2 `@container` est bornée
     // à `relayout_dom_payload` (demande PIPE journalisée —
     // la voie incrémentale garde les règles inertes).
@@ -1917,6 +1932,7 @@ fn try_incr_payload(
         ctx.scripting,
         ctx.scale,
     );
+    t = sync_phase(tab, "incr.style", t);
     let data_imgs = collect_data_images(new_dom, &styles, ctx.image_max_px);
     p.images.replaced.extend(data_imgs.replaced);
     p.images.backgrounds.extend(data_imgs.backgrounds);
@@ -1960,6 +1976,7 @@ fn try_incr_payload(
     block
         .root_font_size
         .set(root_font_size_px(new_dom, &styles));
+    t = sync_phase(tab, "incr.assets", t);
     // Phase 2 — remap + relayout local (le remap précède :
     // `bx.node == target` compare des ids du nouveau DOM).
     // Le cache fonte est restitué sur tous les chemins —
@@ -1983,6 +2000,7 @@ fn try_incr_payload(
             _ => None,
         };
         restitute_font_cache(p, &block);
+        t = sync_phase(tab, "incr.relayout", t);
         match res {
             Some(h) => h,
             None => return false,
@@ -1998,7 +2016,9 @@ fn try_incr_payload(
     // surfaces `frame_bitmaps` clées `(url,w,h)` rendent
     // la passe gratuite si les cadres n'ont pas bougé.
     composite::composite_frames(p, ctx, new_dom);
-    repaint_payload(p, ctx, None).is_ok()
+    let ok = repaint_payload(p, ctx, None).is_ok();
+    sync_phase(tab, "incr.repaint", t);
+    ok
 }
 
 /// `StyleEnv` dérivé du viewport session (f32 → px entiers,

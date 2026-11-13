@@ -11800,6 +11800,33 @@ un crate PIPELINE.- [x] **JS-C422. Deadline honnête — canal session ↔ budge
   post-boot nominal (adoption initiale
   sans `yt-navigate-start`).
 
+- [x] **Étape 221. Sous-phases `sync_profile`
+  de la voie incrémentale + tick anim**
+  (`explorer-core` `session/apply.rs` +
+  `session/paint.rs`, audit perf — mesurer
+  avant de coder les chantiers verrou/anim) :
+  `commit.anim` englobait tout
+  `advance_animations` et `try_incr_payload`
+  n'émettait que des `dlv_info!` désarmés —
+  la voie réellement empruntée par les ticks
+  (journal + `relayout_animated`) restait
+  opaque. `try_incr_payload` gagne `tab` et
+  émet `incr.rekey` (purge + re-clé images),
+  `incr.style` (cascade globale
+  `styles_payload`), `incr.assets`
+  (recollectes plein-DOM : data-imgs,
+  fetched, sizes, svg, iframes),
+  `incr.relayout` (remap + `relayout_subtree`
+  + restitution cache fonte), `incr.repaint`
+  (composite + `repaint_payload`) ;
+  `relayout_animated` émet `anim.ordinals`
+  (`element_ordinals` + résolution des
+  cibles) puis `anim.relayout` (cover +
+  relayout — englobant des `incr.*` en voie
+  ciblée). Même cible `sync_profile`,
+  attribution µs + `alloc_b`/`alloc_n` —
+  coût quasi nul filtre inactif.
+
 ## Plan NAVIGATEUR — vitrine YouTube + surface navigateur (2026-11-12)
 
 Plan parallèle à la file `css.values` PIPE (§ roadmap équipe
