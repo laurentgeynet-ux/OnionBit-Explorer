@@ -3304,3 +3304,20 @@ shadow n'atteint ni cascade ni boxification ») etait
 - Verdict final N1.5 : moteur **fonctionnel de bout en
   bout** — la VM complète (~5 min sampling), `V` tire,
   la chaîne de signing produit et attache le poToken.
+
+### 2026-11-13 — N1.4 tranché : `dyn.err` = data-blocks inertes, corrigé
+
+- Run dbg4 (sonde `kind`/`ty` armée, `/watch` complet) :
+  **0 `dyn.err`** sur 13 442 events d'hydratation
+  (`ce.clone`/`psp.hit`/`life.call`) + 2 `dlv.dynscript`
+  réels livrés sans erreur.
+- Verdict : les `dyn.err` historiques (`syntax error at
+  1:12`, `dyn:7`/`dyn:8`) étaient les **data-blocks
+  inertes** (`<script type="application/json">` clonés
+  des templates CE) évalués à tort par
+  `note_attached_scripts` — faux-positif, pas un gel de
+  file `mr`. Le filtre `script_parse_exec` (verrou
+  `inserted_data_script_stays_inert`) les exclut → 0.
+- L'hypothèse « chunk fetché qui gèle la file `mr` »
+  n'est pas corroborée par ce run — à revisiter si un
+  `dyn.err kind=src` réapparaît un jour.
