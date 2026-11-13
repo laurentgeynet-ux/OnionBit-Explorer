@@ -14290,10 +14290,12 @@ async fn subtle_hmac_import_sign_verify() {
     s.set_js_factory(explorer_js::JscoreEngine::factory());
     let id = s.open_tab();
     s.navigate(id, "http://h.test/").await.unwrap();
-    // 5 promesses chaînées — sous charge parallèle de la
-    // suite (runners CI), 32 pompes n'ont pas suffi ; borne
-    // haute avec sortie anticipée (même motif que
-    // `worker_loads…`).
+    // 5 promesses chaînées résolues par le thread crypto —
+    // sans `sleep`, 128 itérations synchrones filent en
+    // microsecondes avant que l'OS ne schedule le worker
+    // (mesuré : échec CI reproductible, succès local). La
+    // pause donne du temps réel au backend ; sortie anticipée
+    // dès la résolution (même motif que `worker_loads…`).
     let mut dump = String::new();
     for _ in 0..128 {
         s.pump_net().await;
@@ -14302,6 +14304,7 @@ async fn subtle_hmac_import_sign_verify() {
         if dump.contains("k:secret/HMAC") || dump.contains("err:") {
             break;
         }
+        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
     }
     // Tag HMAC-SHA256 = 32 octets ; ok:true, bad:false.
     assert!(

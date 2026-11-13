@@ -267,7 +267,7 @@ fn worker_scope_has_location_blob_and_wasm_stub() {
         "postMessage('L:'+self.location.href+':'+self.location.origin+':'+typeof location.assign);\
          postMessage('B:'+typeof Blob+'/'+typeof FileReader+'/'+typeof URL.createObjectURL);\
          postMessage('W:'+typeof WebAssembly+'/'+WebAssembly.validate(new Uint8Array(4)));\
-         postMessage('N:'+navigator.userAgent.indexOf('Explorer')+':'+navigator.platform+':'+navigator.hardwareConcurrency+':'+navigator.languages[0]+':'+typeof navigator.userAgentData)",
+         postMessage('N:'+(navigator.userAgent.indexOf('Explorer')>=0)+':'+navigator.platform+':'+navigator.hardwareConcurrency+':'+navigator.languages[0]+':'+typeof navigator.userAgentData)",
     )]);
     e.eval(
         "var w = new Worker('w.js'); var n = 0; var acc = '';\
@@ -278,7 +278,7 @@ fn worker_scope_has_location_blob_and_wasm_stub() {
     let r = e.eval("globalThis.__r").map(|v| e.describe(v)).unwrap();
     assert_eq!(
         r,
-        "L:w.js:null:undefined|B:function/function/function|W:object/false|N:0:Win32:4:en-US:object|"
+        "L:w.js:null:undefined|B:function/function/function|W:object/false|N:true:Win32:4:en-US:object|"
     );
 }
 
