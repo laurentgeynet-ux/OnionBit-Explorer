@@ -14291,10 +14291,11 @@ async fn subtle_hmac_import_sign_verify() {
     let id = s.open_tab();
     s.navigate(id, "http://h.test/").await.unwrap();
     // 5 promesses chaînées — sous charge parallèle de la
-    // suite, 4 pompes ne suffisent pas ; borne haute avec
-    // sortie anticipée (même motif que `worker_loads…`).
+    // suite (runners CI), 32 pompes n'ont pas suffi ; borne
+    // haute avec sortie anticipée (même motif que
+    // `worker_loads…`).
     let mut dump = String::new();
-    for _ in 0..32 {
+    for _ in 0..128 {
         s.pump_net().await;
         s.pump_timers(id);
         dump = s.dom_dump(id).unwrap_or_default();

@@ -8432,65 +8432,69 @@ impl Engine {
         }
     }
 
-    pub(crate) fn has_prop(&mut self, mut id: ObjId, key: &str) -> JsResult<bool> {
-        // Délégation bornée, même motif que `read_prop` (J2).
-        let mut depth = 0;
-        while let Some((tid, target, handler)) = self.proxy_th(id)? {
-            let trap = self.proxy_trap(handler.clone(), "has")?;
-            if matches!(trap, Value::Obj(_)) {
-                let kv = self.prop_trap_key(key);
-                let r = self.call_value(trap, handler, &[target, kv])?;
-                if !self.to_boolean(r.clone()) {
-                    // Invariants spec `[[HasProperty]]` : prop
-                    // non-config ou cible non-extensible → la prop
-                    // ne peut pas être cachée.
-                    match self.non_config_own(tid, key) {
-                        Some(true) => {
-                            return Err(
-                                self.type_error("proxy has: cannot hide non-configurable prop")
-                            );
-                        }
-                        Some(false) if !self.target_extensible(tid) => {
-                            return Err(self.type_error(
-                                "proxy has: cannot hide prop on non-extensible target",
-                            ));
-                        }
-                        _ => {}
-                    }
-                }
-                return Ok(self.to_boolean(r));
-            }
-            id = tid;
-            self.deleg_hop(&mut depth)?;
-        }
-        if let Some(h) = self.host_of(id) {
-            crate::host_mark(h.class_name(), key);
-            if h.get(self, Value::Obj(id), key)?.is_some() {
-                return Ok(true);
-            }
-        }
-        // Marche chaîne-de-proto **consciente des proxies** : un
-        // `Ordinary` dont un ancêtre est un `Proxy` doit déléguer
-        // à la cible (spec `[[HasProperty]]` — la chaîne passe
-        // par `proxy.[[GetPrototypeOf]]` puis `has` sur le
-        // proxy). `find_prop` ne lisait que les `proto` bruts :
-        // `"m" in o` rendait `false` quand un proto de la chaîne
-        // était un proxy (mesuré en vol YouTube — `ZuN`/`jYd`
-        // kevlar s'appuie sur `F in w` à travers des protos
-        // proxyfiés).
+    pub(crate) fn has_prop(&mut self, id: ObjId, key: &str) -> JsResult<bool> {
+        // Chaîne [[HasProperty]] complète en UNE boucle —
+        // délégation proxy et marche proto partagent les bornes.
+        // L'ancienne marche re-entrait dans `has_prop` à chaque
+        // proxy rencontré : `Object.setPrototypeOf(p,p)` puis
+        // `'x' in p` récurait `p→cible→proto(p)→p→…` sans borne
+        // (les compteurs repartaient à 0 par re-entrée) →
+        // overflow natif sur l'opérateur `in` (batterie hostile).
+        //
+        // Un `Ordinary` dont un ancêtre est un `Proxy` délègue à
+        // la cible (spec — la chaîne passe par
+        // `proxy.[[GetPrototypeOf]]` puis `has` sur le proxy) :
+        // `"m" in o` est vrai quand un proto de la chaîne est un
+        // proxy (mesuré en vol YouTube — `ZuN`/`jYd` kevlar
+        // s'appuie sur `F in w` à travers des protos proxyfiés).
         let ai = array_index(key);
         let mut cur = Some(id);
+        let mut phops = 0;
         let mut pdepth = 0;
+        // L'hôte n'est consulté que sur la tête de chaîne et sur
+        // la cible de chaque délégation proxy (sémantique de la
+        // re-entrée historique), pas sur les maillons proto.
+        let mut check_host = true;
         while let Some(cid) = cur {
             crate::j17_tick(&crate::J17_PROTO_LVL);
-            if self
-                .heap
-                .obj(cid)
-                .is_some_and(|o| matches!(o.kind, ObjKind::Proxy { .. }))
-            {
-                // Re-entre dans `has_prop` : le bras proxy gère le
-                // trap `has` ou la délégation à la cible.
-                return self.has_prop(cid, key);
+            if let Some((tid, target, handler)) = self.proxy_th(cid)? {
+                let trap = self.proxy_trap(handler.clone(), "has")?;
+                if matches!(trap, Value::Obj(_)) {
+                    let kv = self.prop_trap_key(key);
+                    let r = self.call_value(trap, handler, &[target, kv])?;
+                    if !self.to_boolean(r.clone()) {
+                        // Invariants spec `[[HasProperty]]` : prop
+                        // non-config ou cible non-extensible → la
+                        // prop ne peut pas être cachée.
+                        match self.non_config_own(tid, key) {
+                            Some(true) => {
+                                return Err(
+                                    self.type_error("proxy has: cannot hide non-configurable prop")
+                                );
+                            }
+                            Some(false) if !self.target_extensible(tid) => {
+                                return Err(self.type_error(
+                                    "proxy has: cannot hide prop on non-extensible target",
+                                ));
+                            }
+                            _ => {}
+                        }
+                    }
+                    return Ok(self.to_boolean(r));
+                }
+                cur = Some(tid);
+                check_host = true;
+                self.deleg_hop(&mut phops)?;
+                continue;
+            }
+            if check_host {
+                check_host = false;
+                if let Some(h) = self.host_of(cid) {
+                    crate::host_mark(h.class_name(), key);
+                    if h.get(self, Value::Obj(cid), key)?.is_some() {
+                        return Ok(true);
+                    }
+                }
             }
             if self.find_own_ai(cid, key, ai).is_some() {
                 return Ok(true);
