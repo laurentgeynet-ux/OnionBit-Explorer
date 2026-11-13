@@ -140,6 +140,11 @@ impl Tab {
         self.scroll_y = snap.scroll_y;
         self.doc_h = snap.doc_h;
         self.dom = snap.dom;
+        // Étape 228 — le Dom restauré est un objet neuf :
+        // la map de styles persistée (clée `NodeId`
+        // arénaire du document précédent) est invalidée —
+        // re-cascade complète à la prochaine passe.
+        self.styles = None;
         self.tree = snap.tree;
         self.tree_epoch = snap.tree_epoch;
         self.list = snap.list;

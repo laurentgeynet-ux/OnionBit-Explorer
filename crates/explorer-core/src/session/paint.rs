@@ -289,6 +289,7 @@ impl Session {
             self.color_scheme,
             entry.js.is_some(),
             self.scale,
+            None,
         );
         entry.put_paint(p);
         styles

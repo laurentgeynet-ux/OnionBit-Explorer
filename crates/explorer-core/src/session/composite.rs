@@ -330,6 +330,7 @@ fn render_subframe(
         ctx.color_scheme,
         child_ctx.scripting,
         ctx.scale,
+        None,
     );
     *sheet_cache = std::mem::take(&mut cp.sheet_cache);
     let data_imgs = collect_data_images(&f.dom, &styles, ctx.image_max_px);

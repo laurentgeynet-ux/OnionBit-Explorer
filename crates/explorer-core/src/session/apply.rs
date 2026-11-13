@@ -295,6 +295,21 @@ pub(crate) struct PaintPayload {
     /// (étape 227) — voyage avec la payload ; miroir de
     /// `Tab::sheet_cache`, borné à `types::MAX_SHEET_CACHE`.
     pub sheet_cache: HashMap<String, Stylesheet>,
+    /// Map de styles persistée (étape 228) — base du restyle
+    /// scopé sur la voie journal in-place ; `None` =
+    /// invalide (DOM neuf installé). Miroir de `Tab::styles`.
+    pub styles: Option<StyleMap>,
+    /// Moteur de cascade persisté (étape 228) — réutilisé
+    /// tant que `style_sig` tient (feuilles identiques,
+    /// DOM indifférent).
+    pub style_eng: Option<StyleEngine>,
+    /// Signature des feuilles de `style_eng`.
+    pub style_sig: Option<u64>,
+    /// `:has(` présent dans les feuilles de `style_eng` —
+    /// interdit le restyle scopé (portée non bornable).
+    pub eng_has_relational: bool,
+    /// `StyleEnv` de la passe qui a produit `styles`.
+    pub styles_env: Option<StyleEnv>,
     /// Styles bruts de la dernière cascade (transitions).
     pub prev_styles: HashMap<usize, ComputedStyle>,
     /// Transitions en vol.
@@ -498,6 +513,11 @@ impl Tab {
             adopted_sheets: self.adopted_sheets.clone(),
             inline_css_expanded: std::mem::take(&mut self.inline_css_expanded),
             sheet_cache: std::mem::take(&mut self.sheet_cache),
+            styles: self.styles.take(),
+            style_eng: self.style_eng.take(),
+            style_sig: self.style_sig,
+            eng_has_relational: self.eng_has_relational,
+            styles_env: self.styles_env.take(),
             prev_styles: std::mem::take(&mut self.prev_styles),
             transitions: std::mem::take(&mut self.transitions),
             animations: std::mem::take(&mut self.animations),
@@ -562,6 +582,11 @@ impl Tab {
         self.adopted_sheets = p.adopted_sheets;
         self.inline_css_expanded = p.inline_css_expanded;
         self.sheet_cache = p.sheet_cache;
+        self.styles = p.styles;
+        self.style_eng = p.style_eng;
+        self.style_sig = p.style_sig;
+        self.eng_has_relational = p.eng_has_relational;
+        self.styles_env = p.styles_env;
         self.prev_styles = p.prev_styles;
         self.transitions = p.transitions;
         self.animations = p.animations;
@@ -781,6 +806,12 @@ pub(crate) fn apply_payload(
     // suit le DOM frais (vide hors synchro cléée → le journal
     // suivant tombera en `NoBaseline` → re-parse, jamais à
     // faux) — reconstruite plus haut, avant le diff §B-17.
+    // Étape 228 : DOM neuf — la map de styles persistée
+    // (clée `NodeId` de l'ancien document) est invalidée,
+    // sinon un index+génération coincident servirait un
+    // style du document mort. `style_eng` survit : sa
+    // validité est la signature des feuilles, pas le DOM.
+    p.styles = None;
     p.dom = Some(new_dom);
     p.images = PaintImages::default();
     p.images.canvases = canvases;
@@ -1936,17 +1967,28 @@ fn try_incr_payload(
         &viewport_env(ctx.viewport, ctx.color_scheme, ctx.scripting, ctx.scale),
     );
     t = sync_phase(tab, "incr.rekey", t);
-    // `eng` inutilisé : la passe 2 `@container` est bornée
-    // à `relayout_dom_payload` (demande PIPE journalisée —
-    // la voie incrémentale garde les règles inertes).
-    let (styles, _eng) = styles_payload(
+    // Étape 228 — restyle scopé à `parent(target)` (voie
+    // journal in-place seule — `old_dom_opt` présent = même
+    // objet `Dom` ancien/nouveau ; `None` = re-parse, ids
+    // nouveaux → re-cascade complète). Le parent couvre les
+    // combinators `~`/`+`/`:nth-*` sur les frères, `:empty`
+    // et les descendants de la cible ; `:has(` et racine
+    // morte replient en interne. `eng` inutilisé en aval :
+    // la passe 2 `@container` est bornée à
+    // `relayout_dom_payload` (demande PIPE journalisée — la
+    // voie incrémentale garde les règles inertes) → il est
+    // re-persisté tout de suite pour la passe suivante.
+    let scope_root = old_dom_opt.and_then(|_| new_dom.parent(target_new).ok().flatten());
+    let (styles, eng) = styles_payload(
         p,
         new_dom,
         ctx.viewport,
         ctx.color_scheme,
         ctx.scripting,
         ctx.scale,
+        scope_root,
     );
+    p.style_eng = Some(eng);
     t = sync_phase(tab, "incr.style", t);
     let data_imgs = collect_data_images(new_dom, &styles, ctx.image_max_px);
     p.images.replaced.extend(data_imgs.replaced);
@@ -2016,11 +2058,19 @@ fn try_incr_payload(
         };
         restitute_font_cache(p, &block);
         t = sync_phase(tab, "incr.relayout", t);
-        match res {
-            Some(h) => h,
-            None => return false,
+        if let Some(h) = res {
+            h
+        } else {
+            // La map fusionnée reste valide pour la
+            // passe suivante — la re-persister avant
+            // le repli reflow complet.
+            p.styles = Some(styles);
+            return false;
         }
     };
+    // Map fusionnée persistée (étape 228) — base du
+    // prochain restyle scopé sur cette voie journal.
+    p.styles = Some(styles);
     p.doc_h = doc_h;
     p.images.svgs = svgs;
     p.images.svg_sources = svg_sources;
@@ -2083,19 +2133,61 @@ fn sheet_parsed<'a>(
     cache.get(css)
 }
 
+/// `true` si un prélude sélecteur porte `:has(` — le restyle
+/// scopé est alors interdit (étape 228) : un nœud hors du
+/// sous-arbre sale peut dépendre de la mutation. Le prélude
+/// est la chaîne brute — un `:has(` en argument
+/// d'attribut/pseudo faussement positif retombe sur la
+/// cascade complète (conservateur, jamais de faux négatif).
+fn prelude_has_relational(prelude: &str) -> bool {
+    prelude.contains(":has(")
+}
+
+/// Récursion `Rule`/`AtRule` — les blocs `@media`/
+/// `@supports`/`@container`/`@layer`/`@scope`/`@starting-
+/// style` portent leurs règles imbriquées.
+fn rules_have_relational(rules: &[explorer_css::Rule]) -> bool {
+    rules.iter().any(|r| match r {
+        explorer_css::Rule::Qualified(q) => prelude_has_relational(&q.prelude),
+        explorer_css::Rule::At(a) => {
+            let nested: &Vec<explorer_css::Rule> = match &a.kind {
+                explorer_css::AtKind::Container { rules, .. }
+                | explorer_css::AtKind::Media { rules, .. }
+                | explorer_css::AtKind::Layer { rules, .. }
+                | explorer_css::AtKind::Scope { rules }
+                | explorer_css::AtKind::StartingStyle { rules } => rules,
+                _ => return false,
+            };
+            rules_have_relational(nested)
+        }
+    })
+}
+
+/// `:has(` quelque part dans la feuille (règles top-level
+/// et imbriquées).
+fn sheet_has_relational(sheet: &Stylesheet) -> bool {
+    rules_have_relational(&sheet.rules)
+}
+
 /// `StyleEngine::add_stylesheet` via le cache de la
 /// payload — saute la tokenisation+parse des textes déjà
 /// vus (la collecte des règles dans `eng` reste par
-/// passe : elle porte l'ordre de cascade).
+/// passe : elle porte l'ordre de cascade). Retourne le
+/// drapeau `:has(` de la feuille (étape 228).
 fn add_sheet(
     eng: &mut StyleEngine,
     cache: &mut HashMap<String, Stylesheet>,
     css: &str,
     origin: Origin,
-) {
-    match sheet_parsed(cache, css) {
-        Some(s) => eng.add_stylesheet(s, origin),
-        None => eng.add_stylesheet(&parse_stylesheet(css), origin),
+) -> bool {
+    if let Some(s) = sheet_parsed(cache, css) {
+        eng.add_stylesheet(s, origin);
+        sheet_has_relational(s)
+    } else {
+        let s = parse_stylesheet(css);
+        let rel = sheet_has_relational(&s);
+        eng.add_stylesheet(&s, origin);
+        rel
     }
 }
 
@@ -2106,17 +2198,54 @@ fn add_sheet_scoped(
     css: &str,
     origin: Origin,
     scope: explorer_dom::NodeId,
-) {
-    match sheet_parsed(cache, css) {
-        Some(s) => eng.add_scoped_stylesheet(s, origin, scope),
-        None => eng.add_scoped_stylesheet(&parse_stylesheet(css), origin, scope),
+) -> bool {
+    if let Some(s) = sheet_parsed(cache, css) {
+        eng.add_scoped_stylesheet(s, origin, scope);
+        sheet_has_relational(s)
+    } else {
+        let s = parse_stylesheet(css);
+        let rel = sheet_has_relational(&s);
+        eng.add_scoped_stylesheet(&s, origin, scope);
+        rel
     }
+}
+
+/// Signature du jeu de feuilles d'une passe (étape 228) :
+/// UA + `<style>` par (scope, texte substitué) + `linked` +
+/// `adopted`, dans l'ordre de cascade — `style_eng` est
+/// réutilisable ssi cette signature tient.
+fn sheets_sig(
+    sheets: &[(Option<explorer_dom::NodeId>, String)],
+    linked: &[String],
+    adopted: &[String],
+) -> u64 {
+    use std::hash::{Hash, Hasher};
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    MEDIA_UA_CSS.hash(&mut h);
+    for (scope, css) in sheets {
+        scope.hash(&mut h);
+        css.hash(&mut h);
+    }
+    for css in linked.iter().chain(adopted) {
+        css.hash(&mut h);
+    }
+    h.finish()
 }
 
 /// Cascade + transitions/animations sur payload — la passe
 /// de styles partagée par reflow complet et relayout
 /// incrémental. Écrit `prev_styles`/`transitions`/
 /// `animations` de la payload.
+///
+/// Étape 228 — `scope` = racine de restyle scopé (voie
+/// journal in-place : `parent` de la cible — couvre les
+/// combinators `~`/`+`/`:nth-*` sur les frères et le
+/// `:empty` du parent ; seul `:has(` force le repli). La
+/// map persistée `p.styles` sert de base : le restyle
+/// écrit seulement le sous-arbre (`apply_scoped`), hors
+/// portée les entrées survivent. Replis cascade complète :
+/// map/env absents ou changés, `:has(` dans les feuilles,
+/// racine morte.
 pub(crate) fn styles_payload(
     p: &mut PaintPayload,
     dom: &Dom,
@@ -2124,53 +2253,72 @@ pub(crate) fn styles_payload(
     color_scheme: explorer_css::ColorScheme,
     scripting: bool,
     dpr: f32,
+    scope: Option<explorer_dom::NodeId>,
 ) -> (StyleMap, StyleEngine) {
-    let mut eng = StyleEngine::new();
-    // Étape 227 — parse par texte via `p.sheet_cache` :
-    // UA + chaque `<style>`/`linked`/`adopted` n'est
-    // tokenisé/parsé qu'à sa première forme de texte ; une
-    // édition produit une nouvelle clé (re-parse unique),
-    // le reste des passes ré-emprunte la `Stylesheet`
-    // déjà construite (`add_stylesheet` collecte sans
-    // re-parser). Le cache se prête aussi aux passes des
-    // sous-contextes (`composite::frame_payload`).
-    let cache = &mut p.sheet_cache;
-    add_sheet(&mut eng, cache, MEDIA_UA_CSS, Origin::UserAgent);
-    // Une passe de parse par feuille (étape 104) : l'ordre de
-    // cascade est l'ordre d'insertion, donc inchangé — mais un
-    // défaut de fermeture (accolade, commentaire) ne peut plus
-    // absorber la feuille suivante, et `@import`/`@charset`
-    // en tête de feuille redeviennent valides (cf. R-68).
-    // R-96 — chaque `<style>` se charge dans son arbre :
-    // `scope = Some(racine)` → feuille confinée shadow
-    // (`add_scoped_css`), `None` → feuille document.
-    for (scope, css) in collect_style_sheets(dom, &p.csp) {
-        // Étape 218 — `<style>` dont les `@import` ont été
-        // expansés pendant la vague : substitution par
-        // contenu (le DOM a pu muter depuis la collecte —
-        // robuste aux `<style>` insérés par JS). Clé de
-        // cache = texte **substitué** (celui effectivement
-        // parsé).
-        let css = p.inline_css_expanded.get(&css).cloned().unwrap_or(css);
-        match scope {
-            Some(root) => add_sheet_scoped(&mut eng, cache, &css, Origin::Author, root),
-            None => add_sheet(&mut eng, cache, &css, Origin::Author),
+    // Collecte + substitution `inline_css_expanded` en une
+    // passe (étape 218 — le DOM a pu muter depuis la
+    // collecte ; substitution par contenu, robuste aux
+    // `<style>` insérés par JS) : la signature et les
+    // ajouts au moteur portent le même texte.
+    let sheets: Vec<(Option<explorer_dom::NodeId>, String)> = collect_style_sheets(dom, &p.csp)
+        .into_iter()
+        .map(|(s, css)| (s, p.inline_css_expanded.get(&css).cloned().unwrap_or(css)))
+        .collect();
+    let sig = sheets_sig(&sheets, &p.linked_sheets, &p.adopted_sheets);
+    // `style_eng` réutilisé tant que le jeu de feuilles est
+    // identique — saute la collecte des règles entière en
+    // hit (ordre de cascade), pas seulement le parse
+    // (étape 227 garde `sheet_cache` pour la reconstruction).
+    let eng = match p.style_eng.take() {
+        Some(e) if p.style_sig == Some(sig) => e,
+        _ => {
+            let mut e = StyleEngine::new();
+            let mut rel = false;
+            let cache = &mut p.sheet_cache;
+            rel |= add_sheet(&mut e, cache, MEDIA_UA_CSS, Origin::UserAgent);
+            // R-96 — chaque `<style>` se charge dans son
+            // arbre : `scope = Some(racine)` → feuille
+            // confinée shadow, `None` → feuille document.
+            for (s, css) in &sheets {
+                rel |= match s {
+                    Some(root) => add_sheet_scoped(&mut e, cache, css, Origin::Author, *root),
+                    None => add_sheet(&mut e, cache, css, Origin::Author),
+                };
+            }
+            for css in p.linked_sheets.iter().chain(&p.adopted_sheets) {
+                rel |= add_sheet(&mut e, cache, css, Origin::Author);
+            }
+            p.style_sig = Some(sig);
+            p.eng_has_relational = rel;
+            e
         }
-    }
-    for css in &p.linked_sheets {
-        add_sheet(&mut eng, cache, css, Origin::Author);
-    }
-    // `adoptedStyleSheets` : spec — feuilles construites,
-    // ordre du tableau, après les `<link>`/`<style>`.
-    for css in &p.adopted_sheets {
-        add_sheet(&mut eng, cache, css, Origin::Author);
-    }
+    };
     // Media queries évaluées contre le viewport RÉEL de la
     // session (demande PIPE→NAV : `max-width:1007` doit être
     // vrai à 800px, pas lue sur le 1024×768 par défaut) et
     // le schéma de couleurs réglé (étape 97).
     let env = viewport_env(viewport, color_scheme, scripting, dpr);
-    let mut styles = eng.compute_tree(dom, dom.document(), &env);
+    // Restyle scopé (étape 228) : la map persistée est la
+    // base ; `compute_scoped` ne réécrit que le sous-arbre
+    // de `scope` (parent de la cible journal — couvre les
+    // combinators `~`/`+`/`:nth-*` sur les frères, le
+    // `:empty` du parent et les descendants). Replis
+    // cascade complète : map absente, `StyleEnv` changé,
+    // `:has(` dans les feuilles (portée non bornable) ou
+    // racine morte (cible retirée par le journal).
+    let scoped_ok = scope.is_some()
+        && !p.eng_has_relational
+        && p.styles_env.as_ref().is_some_and(|e| *e == env)
+        && scope.is_some_and(|r| dom.parent(r).is_ok());
+    let mut styles = match (scope, p.styles.take()) {
+        (Some(root), Some(mut map)) if scoped_ok => {
+            let seed = dom.parent(root).ok().flatten().and_then(|par| map.get(par));
+            let scoped = eng.compute_scoped(dom, root, &env, seed);
+            map.apply_scoped(scoped);
+            map
+        }
+        _ => eng.compute_tree(dom, dom.document(), &env),
+    };
     let ord_of = element_ordinals(dom);
     let raw: HashMap<usize, ComputedStyle> = styles
         .iter()
@@ -2185,6 +2333,7 @@ pub(crate) fn styles_payload(
     }
     apply_anim_overrides(&p.transitions, &mut p.animations, &mut styles, &ord_of, now);
     p.prev_styles = raw;
+    p.styles_env = Some(env);
     (styles, eng)
 }
 
@@ -2206,13 +2355,17 @@ pub(crate) fn relayout_dom_payload(
     // bitmap frais (étape 129).
     composite::purge_frame_bitmaps(p);
     dlv_info!("apply: relayout");
-    let (styles, eng) = styles_payload(
+    // `scope = None` : passe complète — la map produite
+    // devient la base persistée des restyles scopés de la
+    // voie journal (étape 228).
+    let (mut styles, eng) = styles_payload(
         p,
         dom,
         ctx.viewport,
         ctx.color_scheme,
         ctx.scripting,
         ctx.scale,
+        None,
     );
     tracing::info!(
         ms = u64::try_from(t0.elapsed().as_millis()).unwrap_or(u64::MAX),
@@ -2332,10 +2485,20 @@ pub(crate) fn relayout_dom_payload(
                 );
                 svgs = svgs2;
                 svg_sources = svg_sources2;
+                // La map persistée porte les bascules
+                // `@container` — sinon les restyles
+                // scopés suivants compareraient à une
+                // base passe-1.
+                styles = styles2;
                 bx = bx2;
             }
         }
     }
+    // Étape 228 — map + moteur persistés : base du restyle
+    // scopé de la prochaine voie journal (mêmes feuilles →
+    // `style_eng` réutilisé, parse ET collecte sautés).
+    p.styles = Some(styles);
+    p.style_eng = Some(eng);
     restitute_font_cache(p, &block);
     // Hauteur défilante ≠ hauteur de boîte : le contenu qui
     // déborde un ancêtre à hauteur spécifiée (`height:100%` de

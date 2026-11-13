@@ -25,7 +25,7 @@ use std::sync::mpsc::{channel, Receiver, Sender};
 use std::sync::Arc;
 use std::time::Instant;
 
-use explorer_css::ComputedStyle;
+use explorer_css::{ComputedStyle, StyleEngine, StyleEnv, StyleMap};
 use explorer_dom::Dom;
 use explorer_js::{JsEngine, JsFactory, NetResponse};
 use explorer_layout::font::FontSource;
@@ -388,6 +388,32 @@ pub(crate) struct Tab {
     /// snapshoté bfcache (le texte re-parse une fois à la
     /// restauration).
     sheet_cache: HashMap<String, explorer_css::Stylesheet>,
+    /// Map de styles persistée (étape 228) — base du restyle
+    /// **scopé** (`compute_scoped` + `apply_scoped`) sur la
+    /// voie journal in-place. `None` = invalide : vidée à
+    /// chaque installation d'un DOM neuf (re-parse,
+    /// restauration bfcache) — les `NodeId` sont arénaires,
+    /// un index+génération coincident d'un document mort
+    /// servirait le style faux.
+    styles: Option<StyleMap>,
+    /// Moteur de cascade persisté (étape 228) — indépendant
+    /// du DOM (règles seules) : survit aux re-parses tant
+    /// que `style_sig` tient — saute la collecte des
+    /// règles entière en hit.
+    style_eng: Option<StyleEngine>,
+    /// Signature des feuilles de `style_eng` — textes
+    /// substitués + scopes + ordre (UA comprise).
+    style_sig: Option<u64>,
+    /// L'engine courant porte-t-il des sélecteurs `:has(`
+    /// (étape 228) — le restyle scopé est alors interdit :
+    /// un nœud hors du sous-arbre sale peut dépendre de la
+    /// mutation, portée non bornable côté NAV → re-cascade
+    /// complète (conservateur).
+    eng_has_relational: bool,
+    /// `StyleEnv` de la passe qui a produit `styles` — un
+    /// viewport/schéma/scripting/dpr différent invalide la
+    /// map (media queries).
+    styles_env: Option<StyleEnv>,
     /// Noms des custom elements définis — gel bfcache du
     /// champ `Tab.defined_names` (registre `customElements`
     /// du miroir, re-poussé dans `Dom::set_defined_names`
@@ -1671,6 +1697,11 @@ impl Session {
                 adopted_sheets: Vec::new(),
                 inline_css_expanded: HashMap::new(),
                 sheet_cache: HashMap::new(),
+                styles: None,
+                style_eng: None,
+                style_sig: None,
+                eng_has_relational: false,
+                styles_env: None,
                 defined_names: Vec::new(),
                 frames: Vec::new(),
                 frame_ctxs: Vec::new(),

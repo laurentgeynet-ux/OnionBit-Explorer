@@ -12097,6 +12097,55 @@ un crate PIPELINE.- [x] **JS-C422. Deadline honnête — canal session ↔ budge
   nouvelles), `style_sheet_cache_
   bounded` — 143 lib + 473 intégration
   verts.
+- [x] **Étape 228. Restyle scopé sur la
+  voie journal** (`explorer-core`
+  `session/apply.rs`/`mod.rs`/`tab.rs`/
+  `composite.rs`/`paint.rs`, audit perf
+  chantier 6) : consommateur production
+  de `compute_scoped`/`apply_scoped`
+  (R-63, demande 55g-suite) — chaque
+  synchro incrémentale re-cascadait le
+  document entier pour une mutation
+  locale. `p.styles` (map fusionnée,
+  clés `NodeId` générationnels) +
+  `p.style_eng` persistés sur la
+  payload/`Tab` via take/put : la voie
+  journal in-place (`try_incr`,
+  `old_dom_opt` présent) ne recalcule
+  que le sous-arbre de
+  `parent(cible)` — couvre `~`/`+`/
+  `:nth-*` sur les frères, `:empty` du
+  parent et descendants ; le matching
+  lit le DOM entier, l'écriture reste
+  bornée (`apply_scoped` fait autorité,
+  pseudos purgés). Replis conservateurs
+  : map/env absents ou changés, racine
+  morte, `:has(` dans les feuilles —
+  détecté au build par scan des préludes
+  (`eng_has_relational`, portée non
+  bornable côté NAV). Le moteur est
+  réutilisé tant que `style_sig` tient
+  (textes substitués + scopes + ordre)
+  — parse ET collecte sautés en hit
+  (suite de 227). Invalidation : map
+  vidée à chaque installation de DOM
+  neuf (`apply_payload` re-parse,
+  `Tab::restore` bfcache) — un
+  index+génération coincident d'un
+  document mort servirait le style
+  faux. `styles_env` borne la réutil
+  aux media queries identiques. La voie
+  anim `relayout_subtree_payload`
+  hérite du scopé gratuitement
+  (`old_dom_opt` présent →
+  `parent(cible)`). Verrous :
+  `styles_scoped_merges_dirty_subtree`
+  (frère `+` recalculé, hors-portée
+  intact), `styles_scoped_falls_back_
+  on_has` (ancêtre `:has()` restylé →
+  repli complet), `styles_scoped_needs_
+  persisted_base` — 144 lib + 473
+  intégration verts.
 
 ## Plan NAVIGATEUR — vitrine YouTube + surface navigateur (2026-11-12)
 

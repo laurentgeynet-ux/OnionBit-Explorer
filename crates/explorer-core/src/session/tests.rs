@@ -5844,6 +5844,7 @@ fn style_sheet_cache_reuses_and_tracks_edits() {
         explorer_css::ColorScheme::Light,
         false,
         1.0,
+        None,
     );
     let n1 = p.sheet_cache.len();
     // UA + feuille auteur au minimum.
@@ -5856,6 +5857,7 @@ fn style_sheet_cache_reuses_and_tracks_edits() {
         explorer_css::ColorScheme::Light,
         false,
         1.0,
+        None,
     );
     assert_eq!(p.sheet_cache.len(), n1, "même texte = même clé");
     // Édition : nouveau texte → nouvelle clé, nouvelle cascade.
@@ -5867,6 +5869,7 @@ fn style_sheet_cache_reuses_and_tracks_edits() {
         explorer_css::ColorScheme::Light,
         false,
         1.0,
+        None,
     );
     assert_eq!(
         p.sheet_cache.len(),
@@ -5903,10 +5906,180 @@ fn style_sheet_cache_bounded() {
         explorer_css::ColorScheme::Light,
         false,
         1.0,
+        None,
     );
     assert_eq!(
         p.sheet_cache.len(),
         types::MAX_SHEET_CACHE,
         "le cache est borné"
+    );
+}
+
+/// Étape 228 — restyle scopé : la map persistée sert de
+/// base ; `compute_scoped` sur le parent de la cible
+/// recalcule cible + frères + descendants, hors portée les
+/// entrées survivent.
+#[test]
+fn styles_scoped_merges_dirty_subtree() {
+    let mut p = apply::PaintPayload::default();
+    let mut dom = test_dom(
+        "<style>.a { color: #ff0000 } .b { color: #00ff00 } \
+         .a + span { color: #0000ff } #other { color: #000000 }</style>\
+         <div id=par><span class=a id=x>t</span><span id=s>u</span></div>\
+         <div id=other>v</div>",
+    );
+    let (styles, eng) = apply::styles_payload(
+        &mut p,
+        &dom,
+        (800.0, 600.0),
+        explorer_css::ColorScheme::Light,
+        false,
+        1.0,
+        None,
+    );
+    // Le frère #s matche `.a + span` en état initial.
+    let s = dom.by_id("s").unwrap();
+    let s_color0 = styles
+        .get(s)
+        .and_then(|c| c.get("color"))
+        .unwrap_or_default();
+    assert!(
+        s_color0.contains("#0000ff"),
+        "#s bleu au départ — reçu {s_color0}"
+    );
+    p.styles = Some(styles);
+    p.style_eng = Some(eng);
+    // Mutation : x.a → x.b — scoped à parent(x) = #par.
+    let x = dom.by_id("x").unwrap();
+    dom.set_attribute(x, "class", "b").unwrap();
+    let par = dom.parent(x).ok().flatten().unwrap();
+    let (styles2, _e2) = apply::styles_payload(
+        &mut p,
+        &dom,
+        (800.0, 600.0),
+        explorer_css::ColorScheme::Light,
+        false,
+        1.0,
+        Some(par),
+    );
+    let color_of = |m: &StyleMap, n: explorer_dom::NodeId| {
+        m.get(n)
+            .and_then(|c| c.get("color").map(str::to_string))
+            .unwrap_or_default()
+    };
+    // x recoloré par sa nouvelle classe.
+    assert!(
+        color_of(&styles2, x).contains("#00ff00"),
+        "x reclassé .b → vert — reçu {}",
+        color_of(&styles2, x)
+    );
+    // #s ne matche plus `.a + span` — preuve que le scope
+    // couvre les FRÈRES de la cible (combinator `+`).
+    assert!(
+        !color_of(&styles2, s).contains("#0000ff"),
+        "s doit perdre le bleu — hors scope il resterait stale"
+    );
+    // Hors portée : #other conserve son entrée — sa couleur
+    // déclarée `#000000` survit intacte au scoped.
+    let other = dom.by_id("other").unwrap();
+    assert_eq!(
+        color_of(&styles2, other),
+        "#000000",
+        "hors scope : entrée conservée à l'identique"
+    );
+}
+
+/// Étape 228 — `:has(` dans les feuilles → restyle scopé
+/// interdit : un ancêtre hors du sous-arbre peut dépendre
+/// de la mutation — repli cascade complète mesuré par le
+/// style d'un ancêtre `:has()` effectivement restylé.
+#[test]
+fn styles_scoped_falls_back_on_has() {
+    let mut p = apply::PaintPayload::default();
+    let mut dom = test_dom(
+        "<style>div:has(.a) { color: #ff0000 } .b { color: #00ff00 }</style>\
+         <div id=o><div id=w><span id=i class=a></span></div></div>",
+    );
+    let (styles, eng) = apply::styles_payload(
+        &mut p,
+        &dom,
+        (800.0, 600.0),
+        explorer_css::ColorScheme::Light,
+        false,
+        1.0,
+        None,
+    );
+    assert!(p.eng_has_relational, "le drapeau :has doit être posé");
+    let o = dom.by_id("o").unwrap();
+    assert!(
+        styles
+            .get(o)
+            .and_then(|c| c.get("color"))
+            .unwrap_or_default()
+            .contains("#ff0000"),
+        "#o matche :has(.a) initialement"
+    );
+    p.styles = Some(styles);
+    p.style_eng = Some(eng);
+    // i : .a → .b — o cesse de matcher :has(.a), mais o est
+    // HORS du sous-arbre scopé (parent(i) = w) : seule la
+    // cascade complète peut le restyler.
+    let i = dom.by_id("i").unwrap();
+    dom.set_attribute(i, "class", "b").unwrap();
+    let w = dom.parent(i).ok().flatten().unwrap();
+    let (styles2, _e2) = apply::styles_payload(
+        &mut p,
+        &dom,
+        (800.0, 600.0),
+        explorer_css::ColorScheme::Light,
+        false,
+        1.0,
+        Some(w),
+    );
+    let color = styles2
+        .get(o)
+        .and_then(|c| c.get("color"))
+        .unwrap_or_default();
+    assert!(
+        !color.contains("#ff0000"),
+        ":has → repli complet — #o restylé hors scope, reçu {color}"
+    );
+}
+
+/// Étape 228 — invalidation : map persistée d'un document
+/// mort — `p.styles = None` à l'installation du DOM neuf
+/// (ici simulée) → la passe scoped replie en cascade
+/// complète plutôt que servir des entrées arénaires
+/// coincidentes.
+#[test]
+fn styles_scoped_needs_persisted_base() {
+    let mut p = apply::PaintPayload::default();
+    let dom = test_dom("<style>div { color: #ff0000 }</style><div>x</div>");
+    let (styles, eng) = apply::styles_payload(
+        &mut p,
+        &dom,
+        (800.0, 600.0),
+        explorer_css::ColorScheme::Light,
+        false,
+        1.0,
+        None,
+    );
+    p.styles = Some(styles);
+    p.style_eng = Some(eng);
+    // Sans base persistée → repli complet (scoped ignoré).
+    p.styles = None;
+    let some_el = dom.document_element().unwrap();
+    let (styles2, _e2) = apply::styles_payload(
+        &mut p,
+        &dom,
+        (800.0, 600.0),
+        explorer_css::ColorScheme::Light,
+        false,
+        1.0,
+        Some(some_el),
+    );
+    assert!(
+        styles2.get(some_el).is_some(),
+        "repli complet : la map couvre tout le document"
     );
 }
