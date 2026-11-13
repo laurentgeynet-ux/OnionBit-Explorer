@@ -237,7 +237,7 @@ impl Session {
             jobs += self.pump_timers(t);
             // Dégradation silencieuse : un onglet sans arbre
             // posé ne produit pas d'erreur de pompe.
-            let _ = self.advance_animations(t);
+            let _ = self.pump_advance_animations(t);
         }
         jobs
     }

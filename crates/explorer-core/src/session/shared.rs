@@ -552,7 +552,7 @@ pub async fn pump_timers_shared(sess: &tokio::sync::Mutex<Session>, tab: TabId) 
         // purement CSS, un document sans JS doit animer
         // (55e rouvert — 6 frames identiques sur anim.html).
         let mut s = sess.lock().await;
-        let _ = s.advance_animations(tab);
+        let _ = s.pump_advance_animations(tab);
         return 0;
     };
     // Hors verrou : le burst JS n'occupe ni le verrou ni le
@@ -604,7 +604,7 @@ pub async fn pump_timers_shared(sess: &tokio::sync::Mutex<Session>, tab: TabId) 
     // 55e : les animations cadencées par ce battement.
     dlv_info!("pump: anim");
     let ta = Instant::now();
-    let _ = s.advance_animations(tab);
+    let _ = s.pump_advance_animations(tab);
     sync_phase(tab, "commit.anim", ta);
     sync_phase(tab, "pump.commit_lock", tc);
     drop(s);

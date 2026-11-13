@@ -131,6 +131,7 @@ fn bench_session() -> (Session, Arc<FakeTransport>) {
             event_tail_budget: std::time::Duration::from_secs(15),
             rss_shed_mb: 0,
             shed_retry_after_s: 5,
+            anim_pull_idle_ms: 2_000,
         },
     );
     (s, t)

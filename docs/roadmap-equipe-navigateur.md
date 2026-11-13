@@ -11827,6 +11827,36 @@ un crate PIPELINE.- [x] **JS-C422. Deadline honnête — canal session ↔ budge
   attribution µs + `alloc_b`/`alloc_n` —
   coût quasi nul filtre inactif.
 
+- [x] **Étape 222. Gate consommateur du
+  tick anim de pompe** (`explorer-core`
+  `session/anim.rs`/`frame.rs`, audit
+  perf chantier 2) : `advance_animations`
+  relayoutait la page à chaque battement
+  de pompe (~20 Hz sous `sess.lock()`) pour
+  produire des frames que personne ne lit —
+  en vol headless `commit.anim` tournait à
+  vide (`3,2 s` YouTube mesurés sur des
+  relayouts invisibles). `Tab::last_frame_pull`
+  est armé par les lectures réelles —
+  `tick_animations` (`/frame` REST, pull
+  FFI), `frame_top`, `frame_png`,
+  `frame_png_full` — et
+  `pump_advance_animations` (trois sites :
+  `pump_timers_shared` no-take et
+  post-commit, `pump_timers_all`) ne tick
+  que si un pull a eu lieu dans
+  `anim_pull_idle_ms` (défaut 2 000 ms,
+  `0` = jamais de tick pompe). Le pull
+  reste non gaté : `tick_animations`
+  avance à `now` puis sert — frame
+  fraîche garantie. `advance_smooth_scroll`
+  suit la gate : sa cible interpole au
+  temps courant, le pull rattrape.
+  Test : `pump_anim_gate_skips_ticks_until
+  _frame_pull` (frame figée sans pull,
+  reprise après `frame_png` — `frame_pull`
+  `&self` témoin sans effet de bord).
+
 ## Plan NAVIGATEUR — vitrine YouTube + surface navigateur (2026-11-12)
 
 Plan parallèle à la file `css.values` PIPE (§ roadmap équipe

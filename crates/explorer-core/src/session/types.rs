@@ -1337,6 +1337,20 @@ pub struct SessionConfig {
     /// ~300-500 ms, easing non sondable). `0` = smooth
     /// désarmé (tout scroll instantané). Défaut 350.
     pub smooth_scroll_ms: u64,
+    /// Fenêtre « quelqu'un regarde » du tick d'animations
+    /// poussé par la pompe (Étape 222 — audit perf) : le
+    /// battement `pump_timers_shared`/`pump_timers_all`
+    /// (~20 Hz) relayoutait la page à chaque passe pour
+    /// produire des frames que personne ne lit en vol
+    /// headless — `commit.anim` 3,2 s mesuré `YouTube` pour
+    /// des relayouts jamais consommés. Un tick pompe ne
+    /// tourne que si une lecture de frame (`tick_animations`
+    /// via `/frame`, `frame_pull` FFI, `frame_top`) a eu
+    /// lieu dans cette fenêtre ; le pull lui-même avance
+    /// toujours (non gaté — `tick_animations` sert la frame
+    /// fraîche). `0` = jamais de tick pompe (pull seul).
+    /// Défaut 2 000 ms.
+    pub anim_pull_idle_ms: u64,
 }
 
 impl Default for SessionConfig {
@@ -1387,6 +1401,7 @@ impl Default for SessionConfig {
             rss_shed_mb: 4_096,
             shed_retry_after_s: 5,
             smooth_scroll_ms: 350,
+            anim_pull_idle_ms: 2_000,
         }
     }
 }

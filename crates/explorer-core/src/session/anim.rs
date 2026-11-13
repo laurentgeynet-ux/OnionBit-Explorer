@@ -28,6 +28,13 @@ impl Session {
     /// # Errors
     /// [`CoreError::UnknownTab`], ou erreur de rendu.
     pub fn tick_animations(&mut self, tab: TabId) -> Result<bool, CoreError> {
+        // Pull consommateur (Étape 222) : `/frame` REST et le
+        // pull FFI passent par ici — la lecture arme la fenêtre
+        // `anim_pull_idle` des ticks de pompe (un headless qui
+        // ne pull jamais ne paie aucun relayout anim).
+        if let Some(e) = self.tabs.get_mut(&tab) {
+            e.last_frame_pull = Some(Instant::now());
+        }
         let jobs = self.pump_timers(tab);
         if !self.advance_animations(tab)? {
             // Les timers ont pu invalider seuls (synchro DOM)
@@ -78,6 +85,29 @@ impl Session {
             self.emit_invalidated(tab);
         }
         Ok(!done)
+    }
+
+    /// Tick anim **poussé par la pompe** (Étape 222 — gate
+    /// consommateur) : ne relayoute que si un pull de frame a
+    /// eu lieu dans `anim_pull_idle`. En vol headless (ou UI
+    /// en pause) personne ne lit les frames produites — la
+    /// production est sautée, l'état anim ne diverge pas :
+    /// `advance_animations` interpole à `now` au prochain
+    /// pull (`tick_animations`, non gaté — la frame servie
+    /// est fraîche). `0` = jamais de tick pompe (pull seul).
+    /// `advance_smooth_scroll` suit la même gate : sa cible
+    /// est interpolée au temps courant, le prochain pull
+    /// rattrape la lecture — un scroll smooth en vol n'est
+    /// pas figé, seulement non peint entre-deux.
+    pub(crate) fn pump_advance_animations(&mut self, tab: TabId) -> Result<bool, CoreError> {
+        let watching = self.tabs.get(&tab).is_some_and(|e| {
+            e.last_frame_pull
+                .is_some_and(|t| t.elapsed() <= self.anim_pull_idle)
+        });
+        if !watching {
+            return Ok(false);
+        }
+        self.advance_animations(tab)
     }
 
     pub(crate) fn advance_animations(&mut self, tab: TabId) -> Result<bool, CoreError> {

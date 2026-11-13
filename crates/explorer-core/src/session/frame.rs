@@ -256,6 +256,10 @@ impl Session {
         let Some(entry) = self.tabs.get_mut(&tab) else {
             return FrameTop::None;
         };
+        // Pull consommateur (Étape 222) — même armeur que
+        // `tick_animations` : le slice est servi sans tick
+        // (epoch figée), il arme quand même la fenêtre anim.
+        entry.last_frame_pull = Some(std::time::Instant::now());
         if epoch.is_some_and(|e| e != entry.frame_epoch) {
             return FrameTop::Stale;
         }
@@ -299,6 +303,9 @@ impl Session {
     pub fn frame_png(&mut self, tab: TabId) -> Option<Vec<u8>> {
         self.ensure_painted(tab);
         let entry = self.tabs.get_mut(&tab)?;
+        // Pull consommateur (Étape 222) — lire des pixels
+        // arme la fenêtre `anim_pull_idle` des ticks pompe.
+        entry.last_frame_pull = Some(std::time::Instant::now());
         if entry.png.is_none() {
             // Un encodage vide n'est jamais un PNG serviable
             // — rejeté plutôt que caché : la prochaine
@@ -330,6 +337,8 @@ impl Session {
         let fonts = self.apply_ctx().fonts;
         let scale = self.scale.max(f32::EPSILON);
         let entry = self.tabs.get_mut(&tab)?;
+        // Pull consommateur (Étape 222) — raster plein-doc.
+        entry.last_frame_pull = Some(std::time::Instant::now());
         let list = entry.list.as_ref()?;
         if list.height > MAX_FRAME_DIM / scale {
             let (list_h, doc_h) = (list.height, entry.doc_h);

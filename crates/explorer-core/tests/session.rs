@@ -314,12 +314,14 @@ fn test_session_policy(
         rss_shed_mb: 0,
         shed_retry_after_s: 5,
         smooth_scroll_ms: 0,
+        anim_pull_idle_ms: 2_000,
     })
 }
 
 /// `test_session` paramétrable — les tests de réglage
 /// (bornes heap…) surchargent la config sans dupliquer le
 /// transport/fixture (étape 123).
+#[allow(clippy::large_types_passed_by_value)] // config consommée — helper de test
 fn test_session_with(cfg: SessionConfig) -> (Session, Arc<FakeTransport>) {
     let t = Arc::new(FakeTransport::new());
     let s = Session::with_config(t.clone(), Arc::new(FixtureFont), cfg);
@@ -803,6 +805,7 @@ async fn download_url_bound_fails_mid_stream() {
         rss_shed_mb: 0,
         shed_retry_after_s: 5,
         smooth_scroll_ms: 0,
+        anim_pull_idle_ms: 2_000,
     });
     let dir = std::env::temp_dir().join("explorer-dl-174-bound");
     let _ = std::fs::remove_dir_all(&dir);
@@ -5035,6 +5038,7 @@ async fn xhr_set_cookie_same_origin_captured() {
 /// le jar de la session (injection `Cookie:` + capture
 /// `Set-Cookie`) — reproduit le branchement du daemon
 /// (`CookieTransport::wrap` + `set_cookie_jar`).
+#[allow(clippy::large_types_passed_by_value)] // config consommée — helper de test
 fn cookie_session_with(cfg: SessionConfig) -> (Session, Arc<FakeTransport>) {
     let inner = Arc::new(FakeTransport::new());
     let jar = Arc::new(explorer_net::cookies::CookieJar::new());
@@ -7459,6 +7463,67 @@ async fn shared_pump_advances_scriptless_animations() {
     );
 }
 
+/// Étape 222 — gate consommateur du tick anim de pompe :
+/// sans pull de frame dans `anim_pull_idle`, la pompe ne
+/// relayoute plus les anims (vol headless — `commit.anim`
+/// tournait à vide). `frame_pull` (&self) observe la frame
+/// stockée **sans armer** la fenêtre — témoin sans effet
+/// de bord. Un pull réel (`frame_png`) arme la fenêtre →
+/// la pompe reprend l'avance.
+#[tokio::test]
+async fn pump_anim_gate_skips_ticks_until_frame_pull() {
+    let (sess0, tr) = test_session();
+    tr.route(
+        "/a",
+        200,
+        "<html><head><style>\
+         @keyframes k { from { background-color: #ff0000 }\
+         to { background-color: #0000ff } }\
+         #b { width:2px; height:2px; animation: k 500ms linear }\
+         </style></head><body><div id=\"b\"></div></body></html>",
+    );
+    let sess = std::sync::Arc::new(tokio::sync::Mutex::new(sess0));
+    let tab = sess.lock().await.open_tab();
+    sess.lock()
+        .await
+        .navigate(tab, "http://h.test/a")
+        .await
+        .unwrap();
+    // Témoin `&self` : lit (w, h, rgba, meta) de la frame
+    // stockée — aucun armement, aucune peinture.
+    let start = sess
+        .lock()
+        .await
+        .frame_pull(tab)
+        .map(|(w, h, p, _)| (w, h, p.to_vec()));
+    tokio::time::sleep(std::time::Duration::from_millis(150)).await;
+    // Personne ne pull : le tick de pompe est sauté — la
+    // frame stockée ne bouge pas même avec l'anim en vol.
+    explorer_core::pump_timers_shared(&sess, tab).await;
+    let still = sess
+        .lock()
+        .await
+        .frame_pull(tab)
+        .map(|(w, h, p, _)| (w, h, p.to_vec()));
+    assert_eq!(
+        start, still,
+        "gate fermée : tick pompe sauté sans consommateur (222)"
+    );
+    // Un pull réel arme la fenêtre → le tick reprend.
+    let _ = sess.lock().await.frame_png(tab);
+    tokio::time::sleep(std::time::Duration::from_millis(150)).await;
+    explorer_core::pump_timers_shared(&sess, tab).await;
+    let after = sess
+        .lock()
+        .await
+        .frame_pull(tab)
+        .map(|(w, h, p, _)| (w, h, p.to_vec()));
+    assert_ne!(
+        still, after,
+        "gate armée par un pull : le tick pompe relayoute (222)"
+    );
+}
+
 /// R-259 — `scroll-behavior:smooth` : `scroll_to_y` arme
 /// une lecture interpolée (la position ne saute pas), le
 /// tick `advance_animations` l'avance jusqu'à la cible.
@@ -7918,6 +7983,7 @@ async fn redirect_commits_final_url_and_fragment() {
             rss_shed_mb: 0,
             shed_retry_after_s: 5,
             smooth_scroll_ms: 0,
+            anim_pull_idle_ms: 2_000,
         },
     );
 

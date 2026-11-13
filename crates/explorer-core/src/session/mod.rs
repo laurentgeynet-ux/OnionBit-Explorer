@@ -633,6 +633,13 @@ pub(crate) struct Tab {
     /// à la navigation ; une nouvelle cible repart de la
     /// position interpolée courante.
     smooth_scroll: Option<(f32, f32, std::time::Instant)>,
+    /// Dernier pull de frame par un consommateur (Étape 222 —
+    /// `/frame` via `tick_animations`, `frame_pull` FFI,
+    /// `frame_top`) : le tick anim de la pompe ne relayoute
+    /// que si une lecture a eu lieu dans `anim_pull_idle` —
+    /// en vol headless personne ne pull, les relayouts de
+    /// production de frames invisibles sont sautés.
+    last_frame_pull: Option<std::time::Instant>,
     /// Événements `EventSource` tamponnés pendant le
     /// détachement (JS-C92) — `(ctx, handle, ev)`, même
     /// règle que `js_pending_crypto`.
@@ -1088,6 +1095,10 @@ pub struct Session {
     /// Durée d'une lecture `scroll-behavior:smooth`
     /// (`smooth_scroll_ms` de config, R-259 — `0` = désarmé).
     smooth_scroll_ms: u64,
+    /// Fenêtre « consommateur de frames présent » des ticks
+    /// anim de pompe (`anim_pull_idle_ms` de config, Étape
+    /// 222 — `ZERO` = jamais de tick pompe).
+    anim_pull_idle: std::time::Duration,
     /// Pages gelées par onglet dans le bfcache
     /// (`bfcache_pages` de config, étape 56).
     bfcache_pages: usize,
@@ -1305,6 +1316,7 @@ impl Session {
             poll_net_budget: cfg.poll_net_budget,
             event_tail_budget: cfg.event_tail_budget,
             smooth_scroll_ms: cfg.smooth_scroll_ms,
+            anim_pull_idle: std::time::Duration::from_millis(cfg.anim_pull_idle_ms),
             bfcache_pages: cfg.bfcache_pages,
             incremental_syncs: 0,
             dom_journal_max_ops: cfg.dom_journal_max_ops,
@@ -1583,6 +1595,7 @@ impl Session {
         t
     }
 
+    #[allow(clippy::too_many_lines)] // initialisation de l'entrée onglet — chaque champ documenté in situ
     pub fn open_tab(&mut self) -> TabId {
         let id = self.next_tab;
         self.next_tab += 1;
@@ -1675,6 +1688,7 @@ impl Session {
                 pending_anim_births: std::collections::VecDeque::new(),
                 anim_marks: std::collections::HashMap::new(),
                 smooth_scroll: None,
+                last_frame_pull: None,
                 js_pending_es: Vec::new(),
                 js_pending_ws: Vec::new(),
                 js_pending_attrs: Vec::new(),
