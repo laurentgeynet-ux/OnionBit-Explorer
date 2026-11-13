@@ -150,7 +150,10 @@ pub struct LayoutBox {
     /// Taille préférée d'un élément remplacé (`img`) en px —
     /// déjà résolue amont (attribut `width`/`height` s'il est
     /// sain, sinon dimensions intrinsèques décodées). Chaque
-    /// axe : CSS `width`/`height` > cette valeur.
+    /// axe : CSS `width`/`height` > cette valeur. Étape 230 :
+    /// sert aussi `contain: size|strict` — la taille déclarée
+    /// (`contain-intrinsic-*`, (0,0) sinon) s'impose alors
+    /// quel que soit le contenu boxifié.
     pub intrinsic: Option<(f32, f32)>,
     /// État coché d'un contrôle `checkbox`/`radio` (étape 38) —
     /// le rendu peint une marque pleine centrée. La valeur des
@@ -583,25 +586,40 @@ fn build_box_tree_env<S: ::std::hash::BuildHasher>(
             Some(sizes.get(&root).copied().unwrap_or(fallback)),
         ));
     }
-    // R-251 — `content-visibility`/`contain: size` +
-    // `contain-intrinsic-*` : la boîte devient **remplacée
-    // taille déclarée** — les enfants ne sont pas boxifiés
-    // (skip — l'effet rendu est une taille intrinsèque
-    // forcée, `contain` strict `size` seul suffit aussi).
-    if is_contained_skip(&style) {
+    // Étape 230 — `content-visibility: hidden` : les
+    // contenus sont sautés **sans condition de visibilité**
+    // (css-contain-2 §4) → boîte feuille à taille intrinsèque
+    // déclarée (`contain-intrinsic-*`, (0,0) sinon : seule
+    // la taille propre CSS s'applique alors).
+    if content_visibility_hidden(&style) {
         let (w, h) = contain_intrinsic(&style);
-        if w.is_some() || h.is_some() {
-            return Some(leaf_box(
-                box_kind_of(&style),
-                root,
-                style.clone(),
-                Some((
-                    w.unwrap_or_else(|| sizes.get(&root).map_or(0.0, |s| s.0)),
-                    h.unwrap_or_else(|| sizes.get(&root).map_or(0.0, |s| s.1)),
-                )),
-            ));
-        }
+        return Some(leaf_box(
+            box_kind_of(&style),
+            root,
+            style.clone(),
+            Some((w.unwrap_or(0.0), h.unwrap_or(0.0))),
+        ));
     }
+    // `contain: size|strict` : la taille est indépendante du
+    // contenu — `intrinsic` la force (`contain-intrinsic-*`,
+    // (0,0) sinon — la boîte se comporte comme vide) mais
+    // les enfants SE BOXIFIENT ET SE PEIGNENT : ils débordent
+    // le cas échéant (Étape 230 — le leaf-skip R-251 les
+    // rendait invisibles, ce que `contain:size` n'autorise
+    // pas). `content-visibility: auto` n'entre dans aucun
+    // des deux bras : son skip n'existe que tant que
+    // l'élément n'est « pas pertinent pour l'utilisateur »
+    // (hors-écran) — indécidable à la boxification (le
+    // scroll ne re-layout pas) : sauter figeait le contenu
+    // invisible, le garder boxifié rend le contenu à tout
+    // scroll (correctness > perf — la promotion pilotée par
+    // le viewport pourra un jour ré-introduire le skip).
+    let size_intrinsic = if is_size_contained(&style) {
+        let (w, h) = contain_intrinsic(&style);
+        Some((w.unwrap_or(0.0), h.unwrap_or(0.0)))
+    } else {
+        None
+    };
     // `<object>` (R-13c) : élément **remplacé** si sa ressource
     // est résolue, sinon ses **enfants se substituent**.
     if dom.tag_name(root).is_ok_and(|t| t == "object") {
@@ -649,7 +667,7 @@ fn build_box_tree_env<S: ::std::hash::BuildHasher>(
         overflow: Overflow::Visible,
         overflow_x: Overflow::Visible,
         z_index: 0,
-        intrinsic: None,
+        intrinsic: size_intrinsic,
         control_checked: false,
         slot: BoxSlot::default(),
         height_raised: false,
@@ -1790,19 +1808,26 @@ fn object_box(
     b
 }
 
-/// R-251 — la boîte doit-elle sauter son contenu pour une
-/// taille intrinsèque déclarée ? `contain: size|strict` OU
-/// `content-visibility: auto|hidden` (css-contain-2 §4).
-fn is_contained_skip(style: &explorer_css::ComputedStyle) -> bool {
-    let contained = style.get("contain").is_some_and(|v| {
+/// Étape 230 — `content-visibility: hidden` (css-contain-2
+/// §4) : seule valeur qui saute les contenus **sans
+/// condition**. `auto` n'y répond pas : son skip est
+/// conditionné à « l'élément n'est pas pertinent pour
+/// l'utilisateur » (hors-écran, hors-accessibilité…) —
+/// indécidable à la boxification.
+fn content_visibility_hidden(style: &explorer_css::ComputedStyle) -> bool {
+    style
+        .get("content-visibility")
+        .is_some_and(|v| v.trim() == "hidden")
+}
+
+/// `contain: size|strict` (css-contain-2 §3) — la taille de
+/// la boîte est indépendante de ses contenus (Étape 230 :
+/// portée par `intrinsic`, les enfants restent boxifiés).
+fn is_size_contained(style: &explorer_css::ComputedStyle) -> bool {
+    style.get("contain").is_some_and(|v| {
         v.split_ascii_whitespace()
             .any(|t| matches!(t, "size" | "strict"))
-    });
-    let cv = style.get("content-visibility").is_some_and(|v| {
-        let t = v.trim();
-        t == "auto" || t == "hidden"
-    });
-    contained || cv
+    })
 }
 
 /// `contain-intrinsic-size`/`contain-intrinsic-{width,height}`

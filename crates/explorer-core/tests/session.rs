@@ -16130,3 +16130,85 @@ async fn loading_lazy_promoted_img_paints() {
         .count();
     assert!(red > 0, "image lazy promue attendue peinte");
 }
+
+/// Étape 230 — `content-visibility: auto` : le contenu reste
+/// boxifié et se peint quand il entre au viewport au scroll
+/// (l'ancien leaf-skip R-251 le figeait invisible dès que
+/// `contain-intrinsic-*` était déclaré).
+#[tokio::test]
+async fn content_visibility_auto_paints_after_scroll() {
+    let (mut s, t) = test_session();
+    t.route(
+        "/i",
+        200,
+        "<html><head><style>\
+         .x{content-visibility:auto;contain-intrinsic-size:100px 100px}\
+         .k{width:50px;height:50px;background:#00ff00}\
+         </style></head><body>\
+         <div style=\"height:2000px\"></div>\
+         <div class=\"x\"><div class=\"k\"></div></div>\
+         </body></html>",
+    );
+    let a = s.open_tab();
+    s.navigate(a, "http://h.test/i").await.unwrap();
+    for _ in 0..4 {
+        s.pump_net().await;
+    }
+    let (fw, fh, px) = s.frame_pixels(a).unwrap();
+    assert_eq!(
+        count_color(fw as usize, fh as usize, px, [0, 255, 0]),
+        0,
+        "sous le pli : rien de vert dans le viewport initial"
+    );
+    s.handle_input(a, InputEvent::Scroll { dy: 2000.0 })
+        .await
+        .unwrap();
+    for _ in 0..4 {
+        s.pump_net().await;
+    }
+    let (fw, fh, px) = s.frame_pixels(a).unwrap();
+    assert!(
+        count_color(fw as usize, fh as usize, px, [0, 255, 0]) > 0,
+        "contenu `auto` attendu peint après scroll dans son voisinage"
+    );
+}
+
+/// `content-visibility: hidden` : la boîte se peint (fond
+/// propre) à la taille intrinsèque déclarée mais ses
+/// contenus restent sautés, même visible à l'écran.
+#[tokio::test]
+async fn content_visibility_hidden_never_paints_contents() {
+    let (mut s, t) = test_session();
+    t.route(
+        "/i",
+        200,
+        "<html><head><style>\
+         .x{content-visibility:hidden;contain-intrinsic-size:100px 100px;background:#0000ff}\
+         .k{width:50px;height:50px;background:#00ff00}\
+         </style></head><body>\
+         <div style=\"height:2000px\"></div>\
+         <div class=\"x\"><div class=\"k\"></div></div>\
+         </body></html>",
+    );
+    let a = s.open_tab();
+    s.navigate(a, "http://h.test/i").await.unwrap();
+    for _ in 0..4 {
+        s.pump_net().await;
+    }
+    s.handle_input(a, InputEvent::Scroll { dy: 2000.0 })
+        .await
+        .unwrap();
+    for _ in 0..4 {
+        s.pump_net().await;
+    }
+    let (fw, fh, px) = s.frame_pixels(a).unwrap();
+    assert_eq!(
+        count_color(fw as usize, fh as usize, px, [0, 255, 0]),
+        0,
+        "contenu `hidden` ne doit jamais se peindre"
+    );
+    assert!(
+        count_color(fw as usize, fh as usize, px, [0, 0, 255]) > 0,
+        "la boîte `hidden` elle-même (fond) doit se peindre"
+    );
+}

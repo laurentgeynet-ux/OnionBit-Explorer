@@ -12201,6 +12201,45 @@ un crate PIPELINE.- [x] **JS-C422. Deadline honnête — canal session ↔ budge
   `loading_lazy_promoted_img_paints` —
   144 lib + 476 intégration verts.
 
+- [x] **Étape 230. `content-visibility: auto`
+  ne fige plus son contenu invisible**
+  (`explorer-layout` `boxtree.rs`, audit
+  perf chantier 8 — **intervention NAV
+  dans le périmètre PIPELINE**, journalisée
+  `interface-equipes.md`) : le leaf-skip
+  R-251 traitait `auto` comme un skip
+  inconditionnel dès que
+  `contain-intrinsic-*` était déclaré —
+  un contenu `auto` sous le pli restait
+  **définitivement invisible** au scroll
+  (son skip n'existe que tant que
+  l'élément n'est « pas pertinent pour
+  l'utilisateur », indécidable à la
+  boxification : le scroll ne re-layout
+  pas). Désormais : seul
+  `content-visibility: hidden` saute les
+  enfants (feuille à taille
+  `contain-intrinsic-*`, (0,0) sinon —
+  seule la taille propre CSS s'applique
+  alors) ; `contain: size|strict` force
+  la taille via `bx.intrinsic` tout en
+  **gardant les enfants boxifiés et
+  peints** (débordement le cas échéant) ;
+  `auto` n'entre dans aucun bras — le
+  contenu se comporte comme `visible`.
+  Correctness > perf : la promotion
+  viewport-aware d'`auto` (skip
+  réversible piloté par le scroll)
+  resterait un chantier PIPELINE dédié.
+  Verrous : `content_visibility_auto_
+  keeps_children`, `content_visibility_
+  hidden_skips_children`,
+  `contain_size_intrinsic` (layout) +
+  `content_visibility_auto_paints_
+  after_scroll`, `content_visibility_
+  hidden_never_paints_contents`
+  (session).
+
 ## Plan NAVIGATEUR — vitrine YouTube + surface navigateur (2026-11-12)
 
 Plan parallèle à la file `css.values` PIPE (§ roadmap équipe
