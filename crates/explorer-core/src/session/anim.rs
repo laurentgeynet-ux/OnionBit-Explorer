@@ -110,6 +110,69 @@ impl Session {
         self.advance_animations(tab)
     }
 
+    /// Sous-verrou du tick anim détaché (Étape 3c) — même
+    /// séquence que [`Self::pump_advance_animations`] (gate
+    /// consommateur → smooth scroll → activité) mais au lieu
+    /// de relayout sous le verrou, la payload est **détachée**
+    /// : le worker exécute [`paint::anim_tick_payload`] hors
+    /// verrou, puis [`Self::commit_anim_tick`] réinsère.
+    /// `None` = rien à produire : gate fermée (pas de pull
+    /// dans `anim_pull_idle`), aucune anim en vol, onglet
+    /// inconnu, ou peinture déjà détachée — un apply/nav en
+    /// vol gagne, la pompe suivante rattrape.
+    pub(crate) fn take_anim_tick(&mut self, tab: TabId) -> Option<AnimTickJob> {
+        let watching = self.tabs.get(&tab).is_some_and(|e| {
+            e.last_frame_pull
+                .is_some_and(|t| t.elapsed() <= self.anim_pull_idle)
+        });
+        if !watching {
+            return None;
+        }
+        // Smooth scroll — synchrone (avance `scroll_y` +
+        // repaint borné) ; son repaint saute si la peinture
+        // est déjà détachée (garde `paint_detached` dedans).
+        let _ = self.advance_smooth_scroll(tab);
+        let now = Instant::now();
+        let (active, ords) = self.tabs.get(&tab).map_or((false, Vec::new()), |t| {
+            let playing = !t.transitions.is_empty() || t.animations.iter().any(|a| a.playing(now));
+            let mut o: Vec<usize> = t.transitions.iter().map(|tr| tr.elem).collect();
+            o.extend(
+                t.animations
+                    .iter()
+                    .filter(|a| a.playing(now))
+                    .map(|a| a.elem),
+            );
+            (playing, o)
+        });
+        if !active {
+            return None;
+        }
+        let ctx = self.apply_ctx();
+        let entry = self.tabs.get_mut(&tab)?;
+        if entry.paint_detached {
+            return None;
+        }
+        let epoch = entry.nav_epoch;
+        let ops = entry.js.as_deref_mut().map_or_else(
+            explorer_js::CanvasOpsTable::new,
+            explorer_js::JsEngine::canvas_ops,
+        );
+        entry.paint_detached = true;
+        let p = entry.take_paint();
+        self.paint_in_flight.insert(tab, Instant::now());
+        Some(AnimTickJob {
+            g: Box::new(apply::DetachedPaint::new(
+                std::sync::Arc::clone(&self.orphaned_paints),
+                tab,
+                epoch,
+                p,
+            )),
+            ctx,
+            ops,
+            ords,
+        })
+    }
+
     pub(crate) fn advance_animations(&mut self, tab: TabId) -> Result<bool, CoreError> {
         let scrolling = self.advance_smooth_scroll(tab)?;
         let now = Instant::now();
@@ -139,4 +202,24 @@ impl Session {
             Err(e) => Err(e),
         }
     }
+}
+
+/// Tâche de tick anim détachée (Étape 3c — même mécanique
+/// que `take_nav_paint`/55h) : la payload de peinture vit
+/// hors de `Tab` sous garde [`apply::DetachedPaint`] pendant
+/// que le worker `spawn_blocking` exécute
+/// [`paint::anim_tick_payload`] — `commit.anim` sort de
+/// `commit_lock` même quand le tick tire (audit perf :
+/// `relayout_animated` tenait tout le pipeline
+/// style→layout→raster sous `sess.lock()`).
+pub(crate) struct AnimTickJob {
+    /// Garde anti-perte de la payload (issue #23) — un
+    /// worker mort en vol la parque au lieu de la perdre.
+    pub g: Box<apply::DetachedPaint>,
+    /// Contexte de rendu capturé sous verrou.
+    pub ctx: apply::ApplyCtx,
+    /// Table canvas capturée — le moteur reste sur `Tab`.
+    pub ops: explorer_js::CanvasOpsTable,
+    /// Ordinals des éléments animés/transitions en vol.
+    pub ords: Vec<usize>,
 }

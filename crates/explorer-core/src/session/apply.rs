@@ -643,6 +643,13 @@ impl DetachedPaint {
         self.p.get_or_insert_with(PaintPayload::default)
     }
 
+    /// Epoch de navigation capturée au détachement — le
+    /// commit la confronte à `Tab::nav_epoch` (garde
+    /// anti-réinsertion d'une passe supplantée).
+    pub(crate) fn epoch(&self) -> u64 {
+        self.epoch
+    }
+
     /// Extrait la payload pour le commit — désarme la
     /// garde (rien à parquer, la propriété a été cédée).
     pub(crate) fn into_payload(mut self) -> PaintPayload {
@@ -2941,6 +2948,59 @@ impl Session {
         }
         // Epoch changée : la page a été supplantée — la
         // payload est abandonnée (sa propre nav repeint).
+    }
+
+    /// Réinsère la payload d'un tick anim détaché (Étape
+    /// 3c — pendant allégé de [`Self::commit_apply_detached`],
+    /// sans `ApplyOutcome`) : `produced` = le worker a mené
+    /// relayout+repaint à terme → `FrameInvalidated` émis.
+    /// Garde epoch : une navigation supplantée jette la
+    /// passe (sa propre peinture arrive). Un scroll survenu
+    /// pendant le worker déclenche le repaint de
+    /// repositionnement (`p.scroll_y` date du take ; le
+    /// `scroll_y` de `Tab` fait foi — même règle que
+    /// l'apply détaché).
+    pub(crate) fn commit_anim_tick(
+        &mut self,
+        tab: TabId,
+        epoch: u64,
+        payload: PaintPayload,
+        produced: bool,
+    ) {
+        self.paint_in_flight.remove(&tab);
+        self.reclaim_orphaned_paint(tab);
+        let Some(entry) = self.tabs.get_mut(&tab) else {
+            return; // onglet fermé pendant le worker
+        };
+        if !entry.paint_detached {
+            // Drapeau déjà libéré (réarmement d'urgence) :
+            // la payload est parquée plutôt que jetée —
+            // la prochaine réclamation la réinsère si
+            // encore vivante (issue #23).
+            let _ = self
+                .orphaned_paints
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .insert(tab, (epoch, payload));
+            return;
+        }
+        entry.paint_detached = false;
+        if entry.nav_epoch == epoch {
+            let scrolled = (entry.scroll_y - payload.scroll_y).abs() > f32::EPSILON;
+            entry.put_paint(payload);
+            if produced {
+                self.emit_invalidated(tab);
+            }
+            if scrolled && self.repaint(tab).is_ok() {
+                self.emit_invalidated(tab);
+            }
+            // Étape 91 : les entrées différées pendant la
+            // fenêtre détachée rejouent une fois `dom`/`tree`
+            // réinsérés (focus/édition restaurés).
+            self.drain_deferred_inputs(tab);
+        }
+        // Epoch changée : supplantée — la nouvelle nav porte
+        // sa propre peinture (même règle que l'apply détaché).
     }
 
     /// Détache la payload de l'onglet pour le rendu de

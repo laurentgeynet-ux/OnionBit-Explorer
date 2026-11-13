@@ -11857,6 +11857,42 @@ un crate PIPELINE.- [x] **JS-C422. Deadline honnête — canal session ↔ budge
   reprise après `frame_png` — `frame_pull`
   `&self` témoin sans effet de bord).
 
+- [x] **Étape 223. Tick anim détaché hors
+  verrou** (`explorer-core` `session/anim.rs`/
+  `paint.rs`/`apply.rs`/`shared.rs`, audit
+  perf chantier 3c) : `relayout_animated`
+  tenait tout le pipeline style→layout→
+  raster sous `sess.lock()` dans la fenêtre
+  `commit_lock` (33,5 s mesurés github =
+  ~800 ms × 42 tours de relayout animé). La
+  voie partagée gagne le même trident
+  take/spawn/commit que l'apply 55h :
+  `take_anim_tick` ne garde sous verrou que
+  gate consommateur (Étape 222) + smooth
+  scroll + activité + détachement de la
+  `PaintPayload` sous garde `DetachedPaint`
+  (orphelins parqués, issue #23) ;
+  `paint::anim_tick_payload` — corps
+  partagé extrait de `relayout_animated`
+  (ordinals→cover→`relayout_subtree`/
+  repli reflow, mêmes phases
+  `anim.ordinals`/`anim.relayout`) — tourne
+  en `spawn_blocking` ; `commit_anim_tick`
+  réinsère sous garde epoch (nav
+  supplantée = passe jetée), émet
+  `FrameInvalidated` si produit, repeint
+  le scroll survenu entre-temps et rejoue
+  les `deferred_inputs`. `pump_timers_shared`
+  route les deux sites (post-commit et
+  no-engine) ; le chemin `&mut`
+  (`pump_timers_all`, FFI/CLI/tests) reste
+  synchrone — `advance_animations` inchangé.
+  Verrous : `anim_tick_detached_take_commit
+  _and_supersede` (unitaire — gate, epoch
+  supplantée, drapeau libéré) +
+  `shared_pump_advances_scriptless_
+  animations` (bout-en-bout détaché).
+
 ## Plan NAVIGATEUR — vitrine YouTube + surface navigateur (2026-11-12)
 
 Plan parallèle à la file `css.values` PIPE (§ roadmap équipe

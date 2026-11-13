@@ -2414,6 +2414,79 @@ fn deferred_inputs_fifo_and_coalesce() {
     assert_eq!(v, Some("abc"));
 }
 
+/// Étape 3c — cycle du tick anim détaché (take/spawn/commit
+/// hors verrou, même mécanique que l'apply 55h) :
+/// `take_anim_tick` est gaté par le pull consommateur et par
+/// `paint_detached` (l'apply en vol gagne — la pompe
+/// rattrape) ; `commit_anim_tick` réinsère sous epoch — une
+/// passe supplantée est jetée sans toucher la peinture
+/// vivante et le drapeau est toujours libéré.
+#[test]
+fn anim_tick_detached_take_commit_and_supersede() {
+    let mut s = Session::new(Arc::new(FailTransport), Arc::new(TestFont));
+    let tab = s.open_tab();
+    {
+        let e = s.tabs.get_mut(&tab).unwrap();
+        e.dom = Some(test_dom("<div>x</div>"));
+        e.transitions.push(anim_items::ActiveTransition {
+            elem: 0,
+            prop: "opacity".into(),
+            from: "0".into(),
+            to: "1".into(),
+            start: Instant::now(),
+            duration: 60.0,
+            delay: 0.0,
+            timing: explorer_css::transition::Timing::Linear,
+        });
+    }
+    // Gate consommateur fermée : aucun pull → pas de tick.
+    assert!(s.take_anim_tick(tab).is_none(), "gate sans pull");
+    // Pull arme la fenêtre → le take détache la payload.
+    s.tabs.get_mut(&tab).unwrap().last_frame_pull = Some(Instant::now());
+    let epoch = s.tabs.get(&tab).unwrap().nav_epoch;
+    let job = s.take_anim_tick(tab).expect("take sous gate armée");
+    assert_eq!(job.g.epoch(), epoch, "epoch capturée au take");
+    assert!(s.tabs.get(&tab).unwrap().paint_detached);
+    assert!(
+        s.tabs.get(&tab).unwrap().dom.is_none(),
+        "payload sortie de l'onglet"
+    );
+    // Epoch supplantée : la passe est jetée, jamais
+    // réinsérée (la nouvelle nav porte sa peinture) ; le
+    // drapeau est libéré quand même.
+    s.tabs.get_mut(&tab).unwrap().nav_epoch += 1;
+    s.commit_anim_tick(tab, job.g.epoch(), job.g.into_payload(), true);
+    let e = s.tabs.get(&tab).unwrap();
+    assert!(!e.paint_detached, "drapeau libéré même supplanté");
+    assert!(e.dom.is_none(), "payload supplantée non réinsérée");
+
+    // Voie heureuse : take + commit à epoch égale →
+    // peinture réinsérée, drapeau libre.
+    {
+        let e = s.tabs.get_mut(&tab).unwrap();
+        e.dom = Some(test_dom("<div>x</div>"));
+        e.last_frame_pull = Some(Instant::now());
+        // Les transitions vivaient dans la payload jetée —
+        // réarmer une lecture pour le second take.
+        e.transitions.push(anim_items::ActiveTransition {
+            elem: 0,
+            prop: "opacity".into(),
+            from: "0".into(),
+            to: "1".into(),
+            start: Instant::now(),
+            duration: 60.0,
+            delay: 0.0,
+            timing: explorer_css::transition::Timing::Linear,
+        });
+    }
+    let job = s.take_anim_tick(tab).expect("take heureux");
+    let epoch2 = job.g.epoch();
+    s.commit_anim_tick(tab, epoch2, job.g.into_payload(), true);
+    let e = s.tabs.get(&tab).unwrap();
+    assert!(!e.paint_detached);
+    assert!(e.dom.is_some(), "payload réinsérée");
+}
+
 /// Issue #23 — mort permanente des sondes : un futur de
 /// navigation droppé pendant le rendu détaché (timeout du
 /// client HTTP de `POST /navigate`, drain interrompu)

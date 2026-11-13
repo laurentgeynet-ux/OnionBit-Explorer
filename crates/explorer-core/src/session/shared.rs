@@ -551,8 +551,8 @@ pub async fn pump_timers_shared(sess: &tokio::sync::Mutex<Session>, tab: TabId) 
         // d'animation tourne quand même : `@keyframes` est
         // purement CSS, un document sans JS doit animer
         // (55e rouvert — 6 frames identiques sur anim.html).
-        let mut s = sess.lock().await;
-        let _ = s.pump_advance_animations(tab);
+        // Étape 3c : le relayout anim tourne hors verrou.
+        let _ = advance_animations_detached(sess, tab).await;
         return 0;
     };
     // Hors verrou : le burst JS n'occupe ni le verrou ni le
@@ -601,19 +601,90 @@ pub async fn pump_timers_shared(sess: &tokio::sync::Mutex<Session>, tab: TabId) 
     let tc = Instant::now();
     dlv_info!("pump: commit");
     let jobs = s.commit_js_pump(tab, epoch, out.ok(), sync_ok);
-    // 55e : les animations cadencées par ce battement.
+    // 55e + Étape 3c : les animations cadencées par ce
+    // battement — la payload est détachée sous verrou court,
+    // le relayout tourne hors verrou (`commit.anim` mesure
+    // take+worker+commit, dont le relayout est désormais
+    // hors `pump.commit_lock`).
     dlv_info!("pump: anim");
-    let ta = Instant::now();
-    let _ = s.pump_advance_animations(tab);
-    sync_phase(tab, "commit.anim", ta);
+    let anim = s.take_anim_tick(tab);
     sync_phase(tab, "pump.commit_lock", tc);
     drop(s);
+    let ta = Instant::now();
+    if let Some(job) = anim {
+        let _ = run_anim_tick_detached(sess, tab, job).await;
+    }
+    sync_phase(tab, "commit.anim", ta);
     // 55h : la mutation rapportée par le miroir a été
     // enfilée — l'apply (re-parse → cascade → relayout →
     // repaint) tourne en `spawn_blocking` hors verrou.
     dlv_info!("pump: dapply");
     drain_applies_shared(sess, tab).await;
     jobs
+}
+
+/// Tick anim détaché (Étape 3c — complément de la gate
+/// Étape 222) : le relayout animé quittait `sess.lock()`…
+/// ne sortait **pas** — `relayout_animated` tenait tout le
+/// pipeline style→layout→raster dans la fenêtre
+/// `commit_lock` (33,5 s mesurés github). Ici
+/// `take_anim_tick` ne fait sous verrou que gate + smooth
+/// scroll + détachement ; [`paint::anim_tick_payload`]
+/// tourne en `spawn_blocking` ; [`Session::commit_anim_tick`]
+/// réinsère sous verrou court (garde epoch, repaint de
+/// repositionnement si scroll en vol). `take_nav_paint`/
+/// `take_next_apply` voient `paint_detached` et sautent ou
+/// attendent — un tick perdu est rattrapé par la pompe
+/// suivante, un apply n'est jamais supplanté. `true` = une
+/// frame a été produite et invalidée.
+async fn advance_animations_detached(sess: &tokio::sync::Mutex<Session>, tab: TabId) -> bool {
+    let job = {
+        let mut s = sess.lock().await;
+        s.take_anim_tick(tab)
+    };
+    let Some(job) = job else {
+        return false;
+    };
+    run_anim_tick_detached(sess, tab, job).await
+}
+
+/// Corps async du tick détaché : worker `spawn_blocking`
+/// puis commit. Un panic worker laisse la payload parquée
+/// par [`apply::DetachedPaint`] — le drapeau est libéré,
+/// la prochaine opportunité sous verrou la réinsère.
+async fn run_anim_tick_detached(
+    sess: &tokio::sync::Mutex<Session>,
+    tab: TabId,
+    job: anim::AnimTickJob,
+) -> bool {
+    let anim::AnimTickJob {
+        mut g,
+        ctx,
+        ops,
+        ords,
+    } = job;
+    let out = tokio::task::spawn_blocking(move || {
+        dlv_info!("pump: animjob tab={tab}");
+        let r = paint::anim_tick_payload(g.payload_mut(), &ctx, &ops, &ords, tab);
+        dlv_info!("pump: animjob_done tab={tab}");
+        (g, r)
+    })
+    .await;
+    let mut s = sess.lock().await;
+    if let Ok((g, r)) = out {
+        let produced = r.is_ok();
+        s.commit_anim_tick(tab, g.epoch(), g.into_payload(), produced);
+        produced
+    } else {
+        // Le worker est mort avec sa payload — `Drop`
+        // de la garde l'a parquée : libérer le drapeau
+        // pour que la réclamation la réinsère (issue #23).
+        s.paint_in_flight.remove(&tab);
+        if let Some(e) = s.tabs.get_mut(&tab) {
+            e.paint_detached = false;
+        }
+        false
+    }
 }
 
 /// Réponse d'une évaluation JS à la demande (sonde `/eval`).

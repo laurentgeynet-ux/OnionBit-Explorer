@@ -262,29 +262,7 @@ impl Session {
             explorer_js::JsEngine::canvas_ops,
         );
         let mut p = entry.take_paint();
-        let Some(dom) = p.dom.take() else {
-            entry.put_paint(p);
-            return Err(CoreError::EmptyDocument);
-        };
-        let mut t = Instant::now();
-        let ord_to_node: std::collections::HashMap<usize, explorer_dom::NodeId> =
-            anim_items::element_ordinals(&dom)
-                .into_iter()
-                .map(|(n, o)| (o, n))
-                .collect();
-        let touched: Vec<explorer_dom::NodeId> = ords
-            .iter()
-            .filter_map(|o| ord_to_node.get(o).copied())
-            .collect();
-        t = sync_phase(tab, "anim.ordinals", t);
-        let r = match apply::journal_cover(&dom, &touched) {
-            Some(cover) => {
-                apply::relayout_subtree_payload(&mut p, &ctx, tab, &dom, cover, &canvas_ops)
-            }
-            None => apply::relayout_dom_payload(&mut p, &ctx, &dom, &canvas_ops),
-        };
-        sync_phase(tab, "anim.relayout", t);
-        p.dom = Some(dom);
+        let r = anim_tick_payload(&mut p, &ctx, &canvas_ops, ords, tab);
         if let Some(entry) = self.tabs.get_mut(&tab) {
             entry.put_paint(p);
         }
@@ -350,6 +328,49 @@ impl Session {
         entry.put_paint(p);
         r
     }
+}
+
+/// Corps du tick anim (Étape 3c) — exécutable sous
+/// `&mut Session` ([`Session::relayout_animated`]) ou en
+/// `spawn_blocking` sur payload détachée : les ordinals
+/// `elem` des transitions/animations actives sont résolus
+/// en `NodeId` par `element_ordinals`, `journal_cover`
+/// pose `relayout_subtree` sur leur ancêtre commun — repli
+/// reflow complet si la cible n'est pas trouvable. Mêmes
+/// phases `anim.ordinals`/`anim.relayout` que la voie
+/// synchrone (même instrumentation, hors verrou ici).
+/// `Ok(())` = relayout + repaint produits ;
+/// [`CoreError::EmptyDocument`] = peinture déjà détachée
+/// par un apply/nav — tick sauté, la pompe suivante
+/// rattrape.
+pub(crate) fn anim_tick_payload(
+    p: &mut apply::PaintPayload,
+    ctx: &apply::ApplyCtx,
+    ops: &explorer_js::CanvasOpsTable,
+    ords: &[usize],
+    tab: TabId,
+) -> Result<(), CoreError> {
+    let Some(dom) = p.dom.take() else {
+        return Err(CoreError::EmptyDocument);
+    };
+    let mut t = Instant::now();
+    let ord_to_node: std::collections::HashMap<usize, explorer_dom::NodeId> =
+        anim_items::element_ordinals(&dom)
+            .into_iter()
+            .map(|(n, o)| (o, n))
+            .collect();
+    let touched: Vec<explorer_dom::NodeId> = ords
+        .iter()
+        .filter_map(|o| ord_to_node.get(o).copied())
+        .collect();
+    t = sync_phase(tab, "anim.ordinals", t);
+    let r = match apply::journal_cover(&dom, &touched) {
+        Some(cover) => apply::relayout_subtree_payload(p, ctx, tab, &dom, cover, ops),
+        None => apply::relayout_dom_payload(p, ctx, &dom, ops),
+    };
+    sync_phase(tab, "anim.relayout", t);
+    p.dom = Some(dom);
+    r
 }
 
 #[cfg(test)]
