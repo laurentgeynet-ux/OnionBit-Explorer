@@ -810,6 +810,7 @@ pub(crate) fn apply_payload(
                 t_new,
                 &job.canvas_ops,
                 &[],
+                &[],
             )
         });
     out.incremental = incremental;
@@ -1542,6 +1543,7 @@ fn apply_journal_op(
     ctx: &ApplyCtx,
     op: &explorer_js::DomMutation,
     touched: &mut Vec<explorer_dom::NodeId>,
+    style_touched: &mut Vec<explorer_dom::NodeId>,
 ) -> Result<(), JournalReject> {
     match op {
         explorer_js::DomMutation::Remove { key } => {
@@ -1582,7 +1584,12 @@ fn apply_journal_op(
                     gone.insert(r);
                 }
             }
-            touched.push(dom.parent(id).ok().flatten().unwrap_or(id));
+            let par = dom.parent(id).ok().flatten().unwrap_or(id);
+            touched.push(par);
+            // Op structurelle : la frontière style reçoit le
+            // parent (ses enfants restants flip `:nth-*`/`+`/`~`
+            // — la borne descendante s'applique).
+            style_touched.push(par);
             dom.remove(id).map_err(|_| JournalReject::Dom)?;
             p.keymap.retain(|_, v| !gone.contains(v));
         }
@@ -1600,11 +1607,23 @@ fn apply_journal_op(
             // `[inert]` posé ici doit exclure le
             // sous-arbre, pas seulement la boîte cible).
             touched.push(dom.parent(id).ok().flatten().unwrap_or(id));
+            // Frontière style (Étape 236) : le nœud RÉEL —
+            // la frontière couvre elle-même frères et
+            // ancêtres ; pousser le parent lui ferait
+            // re-styler tout son sous-arbre (= l'ancien
+            // scope, 9-10 s sur dev.to).
+            style_touched.push(id);
         }
         explorer_js::DomMutation::SetText { key, text } => {
             let id = key_node(p, *key)?;
             let dom = p.dom.as_mut().ok_or(JournalReject::NoDom)?;
-            touched.push(dom.parent(id).ok().flatten().unwrap_or(id));
+            // `id` = nœud Text (pas un élément — la gate
+            // frontière le rejetterait) ; l'effet style vit
+            // sur l'élément parent (`:empty`, `::first-line`)
+            // → parent comme touché, borne descendante.
+            let par = dom.parent(id).ok().flatten().unwrap_or(id);
+            touched.push(par);
+            style_touched.push(par);
             dom.set_text(id, text).map_err(|_| JournalReject::Dom)?;
         }
         // Étape 137b — `attachShadow` programmatique : le
@@ -1614,7 +1633,9 @@ fn apply_journal_op(
         // l'ombre résolvent (API `Dom::attach_shadow_root`
         // PIPE livrée R-96 — consommation pure).
         explorer_js::DomMutation::AttachShadow { host, root, open } => {
-            touched.push(journal_attach_shadow(p, *host, *root, *open)?);
+            let h = journal_attach_shadow(p, *host, *root, *open)?;
+            touched.push(h);
+            style_touched.push(h);
         }
         explorer_js::DomMutation::Insert {
             parent,
@@ -1623,7 +1644,9 @@ fn apply_journal_op(
             ids,
             tags,
         } => {
-            touched.push(journal_insert(p, ctx, *parent, *index, html, ids, tags)?);
+            let par = journal_insert(p, ctx, *parent, *index, html, ids, tags)?;
+            touched.push(par);
+            style_touched.push(par);
         }
     }
     Ok(())
@@ -1774,11 +1797,16 @@ fn apply_journal(
         hit.is_some()
     };
     let mut touched = Vec::new();
+    // Étape 236 — `style_touched` = les nœuds RÉELLEMENT
+    // mutés pour la frontière de restyle (`touched` garde
+    // les parents — cibles du relayout : la géométrie fuit
+    // vers le haut, pas le style).
+    let mut style_touched = Vec::new();
     for (op_i, op) in journal.ops.iter().enumerate() {
         // §B-111 — breadcrumb opt-in : la dernière ligne avant
         // la mort nomme l'op fautive (gate `dlv_trace` interne).
         dlv_info!(op_i, "journal: op {}", journal_op_desc(op));
-        if let Err(e) = apply_journal_op(p, ctx, op, &mut touched) {
+        if let Err(e) = apply_journal_op(p, ctx, op, &mut touched, &mut style_touched) {
             // Diagnostic JS-C289 — nomme l'op et la clé
             // fautive (le `html` d'un Insert peut peser des
             // Ko : résumé borné).
@@ -1856,7 +1884,7 @@ fn apply_journal(
     // ci-dessus reste l'arbitre, mais rien n'a bougé → pas de
     // relayout (un relayout complet par pompe sinon).
     if job.relayout && !journal.ops.is_empty() {
-        journal_relayout(p, ctx, job, &touched, &mut out)?;
+        journal_relayout(p, ctx, job, &touched, &style_touched, &mut out)?;
     } else {
         // §B-17 — même trou que la voie re-parse : les
         // sous-arbres touchés ne seront pas restylés, leurs
@@ -1889,6 +1917,10 @@ pub(crate) fn relayout_subtree_payload(
 ) -> Result<(), CoreError> {
     // Scope de restyle = `parent(cible)` — le contrat de
     // l'étape 228 porté au slice multi-scope de l'étape 234.
+    // Étape 236 — la frontière reçoit la cible elle-même :
+    // elle couvre frères/ancêtres, le scope parent ne sert
+    // plus que de repli si la cible n'est pas un élément
+    // vivant.
     let scope = dom.parent(target).ok().flatten();
     if try_incr_payload(
         p,
@@ -1900,6 +1932,7 @@ pub(crate) fn relayout_subtree_payload(
         target,
         canvas_ops,
         scope.as_slice(),
+        std::slice::from_ref(&target),
     ) {
         Ok(())
     } else {
@@ -1916,6 +1949,7 @@ fn journal_relayout(
     ctx: &ApplyCtx,
     job: &PendingApply,
     touched: &[explorer_dom::NodeId],
+    style_touched: &[explorer_dom::NodeId],
     out: &mut ApplyOutcome,
 ) -> Result<(), JournalReject> {
     let dom = p.dom.take().ok_or(JournalReject::NoDom)?;
@@ -1925,15 +1959,20 @@ fn journal_relayout(
     // (couverture conservatrice, jamais de dette perdue).
     let debt = std::mem::take(&mut p.style_dirty);
     let mut touched_all;
-    let touched: &[explorer_dom::NodeId] = if debt.is_empty() {
-        touched
-    } else {
-        touched_all = touched.to_vec();
-        for path in &debt {
-            touched_all.push(dom_path_node(&dom, path).unwrap_or_else(|| dom.document()));
-        }
-        &touched_all
-    };
+    let mut style_touched_all;
+    let (touched, style_touched): (&[explorer_dom::NodeId], &[explorer_dom::NodeId]) =
+        if debt.is_empty() {
+            (touched, style_touched)
+        } else {
+            touched_all = touched.to_vec();
+            style_touched_all = style_touched.to_vec();
+            for path in &debt {
+                let n = dom_path_node(&dom, path).unwrap_or_else(|| dom.document());
+                touched_all.push(n);
+                style_touched_all.push(n);
+            }
+            (&touched_all, &style_touched_all)
+        };
     dlv_info!(touched = touched.len(), "journal: relayout");
     let incremental = journal_cover(&dom, touched).is_some_and(|t| {
         let scopes = journal_style_scopes(&dom, touched, t);
@@ -1947,6 +1986,7 @@ fn journal_relayout(
             t,
             &job.canvas_ops,
             &scopes,
+            style_touched,
         )
     });
     if !incremental && relayout_dom_payload(p, ctx, job.tab, &dom, &job.canvas_ops).is_err() {
@@ -2064,6 +2104,7 @@ fn try_incr_payload(
     target_new: explorer_dom::NodeId,
     canvas_ops: &CanvasOpsTable,
     style_scopes: &[explorer_dom::NodeId],
+    style_frontier: &[explorer_dom::NodeId],
 ) -> bool {
     // Phase 1 — cible résolue par l'appelant (chemin DOM ou
     // `NodeId` d'op journal — 137a : les ops rejouées portent
@@ -2111,11 +2152,12 @@ fn try_incr_payload(
     // `relayout_dom_payload` (demande PIPE journalisée — la
     // voie incrémentale garde les règles inertes) → il est
     // re-persisté tout de suite pour la passe suivante.
-    let scope_roots: &[explorer_dom::NodeId] = if old_dom_opt.is_some() {
-        style_scopes
-    } else {
-        &[]
-    };
+    let (scope_roots, frontier): (&[explorer_dom::NodeId], &[explorer_dom::NodeId]) =
+        if old_dom_opt.is_some() {
+            (style_scopes, style_frontier)
+        } else {
+            (&[], &[])
+        };
     let (styles, eng) = styles_payload(
         p,
         new_dom,
@@ -2124,6 +2166,7 @@ fn try_incr_payload(
         ctx.scripting,
         ctx.scale,
         scope_roots,
+        frontier,
         PhaseKind::Incr,
         tab,
     );
@@ -2829,7 +2872,17 @@ pub(crate) enum PhaseKind {
 /// portée les entrées survivent. Replis cascade complète :
 /// map/env absents ou changés, `:has(` dans les feuilles,
 /// racine morte.
-#[allow(clippy::too_many_arguments)] // viewport/schéma/scripting/dpr = l'env ; prof+tab = attribution sync_profile (étape 232).
+///
+/// Étape 236 — `frontier` = nœuds RÉELLEMENT mutés (voie
+/// journal) : prioritaire sur `scopes`, la passe
+/// `compute_scoped_frontier` n'émet que la région prouvée
+/// affectée (touchés + descendants, ancêtres ré-évalués,
+/// frères précédents/suivants, canaux relationnels
+/// conservateurs) au lieu du sous-arbre entier du parent
+/// — les ~9-10 s `incr.cascade` de dev.to viennent de là.
+/// Repli `scopes` si un nœud frontière est mort ou
+/// non-élément, ou au-delà de [`MAX_STYLE_SCOPES`].
+#[allow(clippy::too_many_arguments, clippy::too_many_lines)] // viewport/schéma/scripting/dpr = l'env ; prof+tab = attribution sync_profile (étape 232) ; gates scopé/frontière = une passe séquentielle.
 pub(crate) fn styles_payload(
     p: &mut PaintPayload,
     dom: &Dom,
@@ -2838,6 +2891,7 @@ pub(crate) fn styles_payload(
     scripting: bool,
     dpr: f32,
     scopes: &[explorer_dom::NodeId],
+    frontier: &[explorer_dom::NodeId],
     prof: PhaseKind,
     tab: TabId,
 ) -> (StyleMap, StyleEngine) {
@@ -2933,12 +2987,25 @@ pub(crate) fn styles_payload(
         Some(_) => p.has_dep_touched,
         None => p.eng_has_relational,
     };
+    let env_same = p.styles_env.as_ref().is_some_and(|e| *e == env);
+    // Étape 236 — la frontière n'opère que sur des
+    // éléments vivants (un nœud mort → son parent, poussé
+    // par le `Remove`, est déjà dans `scopes` ; un
+    // non-élément — racine `document()` — relève du
+    // chemin scopes/complet d'avant). Le repli `scopes`
+    // garde la borne multi-front de l'étape 234.
+    let frontier_ok = !frontier.is_empty()
+        && !has_block
+        && env_same
+        && frontier.len() <= MAX_STYLE_SCOPES
+        && frontier.iter().all(|n| dom.element(*n).is_ok());
     let scoped_ok = !scopes.is_empty()
         && !has_block
-        && p.styles_env.as_ref().is_some_and(|e| *e == env)
+        && env_same
         && scopes.iter().all(|r| dom.parent(*r).is_ok());
     dlv_info!(
         n_scopes = scopes.len(),
+        n_frontier = frontier.len(),
         scope_nodes = crate::session::dlv_trace().then(|| {
             scopes
                 .iter()
@@ -2948,11 +3015,17 @@ pub(crate) fn styles_payload(
         rel = p.eng_has_relational,
         dep_idx = p.eng_has_deps.is_some(),
         dep_touched = p.has_dep_touched,
+        frontier_ok,
         scoped_ok,
         "styles: garde scoped"
     );
-    let mut styles = match (p.styles.take(), scoped_ok) {
-        (Some(mut map), true) => {
+    let mut styles = match (p.styles.take(), frontier_ok, scoped_ok) {
+        (Some(mut map), true, _) => {
+            let sub = eng.compute_scoped_frontier(dom, dom.document(), &env, &map, frontier);
+            map.apply_scoped(sub);
+            map
+        }
+        (Some(mut map), false, true) => {
             for &root in scopes {
                 let seed = dom.parent(root).ok().flatten().and_then(|par| map.get(par));
                 let sub = eng.compute_scoped(dom, root, &env, seed);
@@ -3011,6 +3084,7 @@ pub(crate) fn relayout_dom_payload(
         ctx.color_scheme,
         ctx.scripting,
         ctx.scale,
+        &[],
         &[],
         PhaseKind::Flow,
         tab,
@@ -4782,11 +4856,12 @@ mod reloc_tests {
         let e = super::engine_preorder(p.dom.as_ref().unwrap());
         p.keymap.insert(1, e[0]);
         let mut touched = Vec::new();
+        let mut style_touched = Vec::new();
         let op = explorer_js::DomMutation::Remove { key: 9999 };
-        assert!(apply_journal_op(&mut p, &ctx, &op, &mut touched).is_ok());
+        assert!(apply_journal_op(&mut p, &ctx, &op, &mut touched, &mut style_touched).is_ok());
         // Con clave conocida el Remove sigue funcionando.
         let op = explorer_js::DomMutation::Remove { key: 1 };
-        assert!(apply_journal_op(&mut p, &ctx, &op, &mut touched).is_ok());
+        assert!(apply_journal_op(&mut p, &ctx, &op, &mut touched, &mut style_touched).is_ok());
         assert!(p.keymap.is_empty());
     }
 
@@ -4876,6 +4951,83 @@ mod reloc_tests {
             super::apply_journal(&mut p, &ctx, &job, &j, None, 100),
             Err(super::JournalReject::Fingerprint)
         ));
+    }
+
+    /// Étape 236 — `style_touched` (frontière de restyle)
+    /// reçoit le nœud RÉELLEMENT muté pour `SetAttr`/
+    /// `SetText` (la frontière couvre frères et ancêtres
+    /// elle-même — pousser le parent lui ferait re-styler
+    /// tout son sous-arbre) ; `touched` garde le parent
+    /// (le relayout fuit vers le haut). `Remove` pousse
+    /// le parent dans les deux (op structurelle : `:nth-*`/
+    /// `+`/`~` basculent sous le parent).
+    #[test]
+    fn etape236_style_touched_noeud_reel_vs_parent() {
+        use crate::session::apply::PaintPayload;
+        let dom = TreeBuilder::parse_scripting(
+            "<html><body><div><p id=x>t</p><p id=y>u</p></div></body></html>",
+            false,
+        );
+        let mut p = PaintPayload {
+            dom: Some(dom),
+            ..PaintPayload::default()
+        };
+        let e = super::engine_preorder(p.dom.as_ref().unwrap());
+        for (i, id) in e.iter().enumerate() {
+            p.keymap.insert(i as u64 + 1, *id);
+        }
+        let ctx = c293_ctx();
+        let (x, kx) = {
+            let d = p.dom.as_ref().unwrap();
+            let x = d.by_id("x").unwrap();
+            let kx = p
+                .keymap
+                .iter()
+                .find(|(_, v)| **v == x)
+                .map(|(k, _)| *k)
+                .unwrap();
+            (x, kx)
+        };
+        let par = p.dom.as_ref().unwrap().parent(x).ok().flatten().unwrap();
+        let mut touched = Vec::new();
+        let mut style_touched = Vec::new();
+        let op = explorer_js::DomMutation::SetAttr {
+            key: kx,
+            name: "class".to_string(),
+            value: Some("a".to_string()),
+        };
+        assert!(
+            super::apply_journal_op(&mut p, &ctx, &op, &mut touched, &mut style_touched).is_ok()
+        );
+        assert_eq!(style_touched, vec![x], "SetAttr → nœud réel en frontière");
+        assert_eq!(touched, vec![par], "touched garde le parent (layout)");
+        // `SetText` vise le nœud Texte enfant — le parent du
+        // texte = l'élément `x` porteur (`:empty`/`::first-
+        // letter` basculent là) → `x` comme touché.
+        let tnode = p.dom.as_ref().unwrap().children(x).unwrap()[0];
+        p.keymap.insert(999, tnode);
+        let kt = 999_u64;
+        let op = explorer_js::DomMutation::SetText {
+            key: kt,
+            text: "z".to_string(),
+        };
+        assert!(
+            super::apply_journal_op(&mut p, &ctx, &op, &mut touched, &mut style_touched).is_ok()
+        );
+        assert_eq!(
+            style_touched,
+            vec![x, x],
+            "SetText → élément porteur du texte"
+        );
+        let op = explorer_js::DomMutation::Remove { key: kx };
+        assert!(
+            super::apply_journal_op(&mut p, &ctx, &op, &mut touched, &mut style_touched).is_ok()
+        );
+        assert_eq!(
+            style_touched.last().copied(),
+            Some(par),
+            "Remove → parent (structurel : :nth-*/+/~ sous le parent)"
+        );
     }
 
     /// Étape 208 (AR-3) — la voie journal réclame l'arène :

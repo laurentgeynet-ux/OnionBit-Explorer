@@ -290,6 +290,7 @@ impl Session {
             entry.js.is_some(),
             self.scale,
             &[],
+            &[],
             apply::PhaseKind::Flow,
             tab,
         );

@@ -12564,8 +12564,14 @@ croître la surface navigateur mesurée (`api` 1510/8099, 18,6 %).
 - [ ] **N5.1-N5.3 — vol YouTube `--release` + attribution
   interne JS + correctif** (§2.6) — référencer Sprint N3,
   ne pas ré-instrumenter.
-- [ ] **N5.4 — câblage `compute_scoped_frontier`** (§2.3) —
-  dépend de N5.0 + de la frontière PIPE.
+- [x] **N5.4 — câblage `compute_scoped_frontier`** (§2.3) —
+  livré sur `performance` : `style_touched` (nœud réel
+  `SetAttr`, parent `Remove`/`Insert`/`SetText`) →
+  `styles_payload` émet `compute_scoped_frontier` +
+  `apply_scoped` quand `frontier_ok` (éléments vivants,
+  ≤ 32, env inchangé, garde `:has` non bloquée) ;
+  repli multi-scope Étape 234 intact. 149 lib verts.
+  Mesure = N5.5.
 - [ ] **N5.5 — re-vols dev.to + YouTube** après chaque
   livraison — jamais l'un sans l'autre (discipline §3).
 - [ ] **N5.6 — adoption `entities` jscore** (§2.7) — quasi

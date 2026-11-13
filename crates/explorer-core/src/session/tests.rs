@@ -5857,6 +5857,7 @@ fn style_sheet_cache_reuses_and_tracks_edits() {
         false,
         1.0,
         &[],
+        &[],
         apply::PhaseKind::Flow,
         0,
     );
@@ -5872,6 +5873,7 @@ fn style_sheet_cache_reuses_and_tracks_edits() {
         false,
         1.0,
         &[],
+        &[],
         apply::PhaseKind::Flow,
         0,
     );
@@ -5885,6 +5887,7 @@ fn style_sheet_cache_reuses_and_tracks_edits() {
         explorer_css::ColorScheme::Light,
         false,
         1.0,
+        &[],
         &[],
         apply::PhaseKind::Flow,
         0,
@@ -5925,6 +5928,7 @@ fn style_sheet_cache_bounded() {
         false,
         1.0,
         &[],
+        &[],
         apply::PhaseKind::Flow,
         0,
     );
@@ -5956,6 +5960,7 @@ fn styles_scoped_merges_dirty_subtree() {
         false,
         1.0,
         &[],
+        &[],
         apply::PhaseKind::Flow,
         0,
     );
@@ -5971,10 +5976,12 @@ fn styles_scoped_merges_dirty_subtree() {
     );
     p.styles = Some(styles);
     p.style_eng = Some(eng);
-    // Mutation : x.a → x.b — scoped à parent(x) = #par.
+    // Mutation : x.a → x.b — frontière = x lui-même
+    // (Étape 236 : `compute_scoped_frontier` couvre
+    // cible + frères + ancêtres — le scope parent ne
+    // sert plus que de repli).
     let x = dom.by_id("x").unwrap();
     dom.set_attribute(x, "class", "b").unwrap();
-    let par = dom.parent(x).ok().flatten().unwrap();
     let (styles2, _e2) = apply::styles_payload(
         &mut p,
         &dom,
@@ -5982,7 +5989,8 @@ fn styles_scoped_merges_dirty_subtree() {
         explorer_css::ColorScheme::Light,
         false,
         1.0,
-        &[par],
+        &[],
+        &[x],
         apply::PhaseKind::Flow,
         0,
     );
@@ -6032,6 +6040,7 @@ fn styles_scoped_falls_back_on_has() {
         false,
         1.0,
         &[],
+        &[],
         apply::PhaseKind::Flow,
         0,
     );
@@ -6077,6 +6086,7 @@ fn styles_scoped_falls_back_on_has() {
         false,
         1.0,
         &[w],
+        &[],
         apply::PhaseKind::Flow,
         0,
     );
@@ -6441,6 +6451,7 @@ fn styles_scoped_survives_has_untouched_dep() {
         false,
         1.0,
         &[],
+        &[],
         apply::PhaseKind::Flow,
         0,
     );
@@ -6493,6 +6504,7 @@ fn styles_scoped_survives_has_untouched_dep() {
         false,
         1.0,
         &[w],
+        &[],
         apply::PhaseKind::Flow,
         0,
     );
@@ -6531,6 +6543,7 @@ fn styles_scoped_falls_back_on_has_unanalyzable() {
         false,
         1.0,
         &[],
+        &[],
         apply::PhaseKind::Flow,
         0,
     );
@@ -6554,6 +6567,7 @@ fn styles_scoped_falls_back_on_has_unanalyzable() {
         false,
         1.0,
         &[w],
+        &[],
         apply::PhaseKind::Flow,
         0,
     );
@@ -6586,6 +6600,7 @@ fn styles_scoped_needs_persisted_base() {
         false,
         1.0,
         &[],
+        &[],
         apply::PhaseKind::Flow,
         0,
     );
@@ -6602,6 +6617,7 @@ fn styles_scoped_needs_persisted_base() {
         false,
         1.0,
         &[some_el],
+        &[],
         apply::PhaseKind::Flow,
         0,
     );

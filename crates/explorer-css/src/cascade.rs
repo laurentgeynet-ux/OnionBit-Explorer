@@ -3009,7 +3009,7 @@ impl StyleEngine {
     /// (cf. doc de la API — chaîne, frères précédents de chaîne,
     /// frères des touchés). Les sous-arbres à restyle
     /// inconditionnel délèguent à [`Self::compute_subtree`].
-    #[allow(clippy::too_many_arguments)]
+    #[allow(clippy::too_many_arguments, clippy::too_many_lines)]
     fn frontier_node(
         &self,
         dom: &Dom,
