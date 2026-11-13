@@ -697,7 +697,7 @@ pub(crate) struct Tab {
 
 /// Push d'attribut session→miroir tamponné pendant le
 /// détachement JS (53f) : `(chemin d'élément, nom, valeur)`.
-type PendingMirrorAttr = (Vec<(String, u32)>, String, Option<String>);
+pub(crate) type PendingMirrorAttr = (Vec<(String, u32)>, String, Option<String>);
 
 /// Page gelée pour le bfcache (étape 56) — tout l'état qui
 /// reconstruit la page **sans réseau** : DOM, arbre posé,

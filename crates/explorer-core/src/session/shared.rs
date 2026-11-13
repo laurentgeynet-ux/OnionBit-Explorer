@@ -597,10 +597,61 @@ pub async fn pump_timers_shared(sess: &tokio::sync::Mutex<Session>, tab: TabId) 
     })
     .await;
     sync_phase(tab, "pump.offlock", tb);
+    // Étape 3a : commit = swap des tampons sous verrou court
+    // → livrées sur le moteur détaché **hors verrou** →
+    // réinsertion + tail sous verrou. `js_detached` reste
+    // armé pendant la fenêtre : une réponse qui arrive en
+    // vol retombe dans les Vec de l'onglet, prise à la
+    // pompe suivante.
+    dlv_info!("pump: commit");
+    let tc = Instant::now();
+    let stage = {
+        let mut s = sess.lock().await;
+        s.commit_js_pump_stage(tab, epoch, out.ok(), sync_ok)
+    };
+    sync_phase(tab, "commit.stage", tc);
+    let del = match stage {
+        js_glue::PumpStage::Done => None,
+        js_glue::PumpStage::Tail { jobs, mutated, eng } => Some((
+            jobs,
+            mutated,
+            js_glue::Delivered {
+                eng: Some(eng),
+                stall: None,
+                jobs: 0,
+                mutated: None,
+            },
+        )),
+        js_glue::PumpStage::Deliver(d) => {
+            let js_glue::PumpDeliver {
+                eng,
+                queues,
+                jobs,
+                mutated,
+                sync_ok,
+            } = d;
+            let res = tokio::task::spawn_blocking(move || {
+                dlv_info!("pump: deliver tab={tab}");
+                Session::deliver_pending(eng, queues, sync_ok, max, tab)
+            })
+            .await;
+            // Worker mort en vol — moteur perdu (l'onglet
+            // continue sans JS ; le finish libère
+            // `js_detached` et jette les arrivées).
+            let d = res.unwrap_or_else(|_| js_glue::Delivered {
+                eng: None,
+                stall: None,
+                jobs: 0,
+                mutated: None,
+            });
+            Some((jobs, mutated, d))
+        }
+    };
     let mut s = sess.lock().await;
     let tc = Instant::now();
-    dlv_info!("pump: commit");
-    let jobs = s.commit_js_pump(tab, epoch, out.ok(), sync_ok);
+    let jobs = del.map_or(0, |(j, m, d)| {
+        s.commit_js_pump_finish(tab, epoch, d, j, m, tc)
+    });
     // 55e + Étape 3c : les animations cadencées par ce
     // battement — la payload est détachée sous verrou court,
     // le relayout tourne hors verrou (`commit.anim` mesure

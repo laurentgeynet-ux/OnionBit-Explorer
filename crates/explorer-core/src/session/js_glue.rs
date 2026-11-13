@@ -43,6 +43,92 @@ pub(crate) const SLOW_EVAL_PROBE_BYTES: usize = 8 * 1024;
 /// second probe qu'après la fenêtre.
 pub(crate) const SLOW_EVAL_PROBE_MS: u64 = 10_000;
 
+/// Tampons de livraisons sortis de `Tab` au commit (étape
+/// 3a — chantier verrou) : `js_pending_*` + cycle de vie
+/// document + pushes d'attributs. Pris en une passe courte
+/// sous verrou ([`Session::commit_js_pump_stage`]), rejoués
+/// sur le moteur détaché **hors verrou** par
+/// [`Session::deliver_pending`] — les arrivées pendant la
+/// fenêtre retombent dans les `Vec` de l'onglet
+/// (`js_detached` reste armé) et attendent la pompe
+/// suivante : rien ne se perd, l'ordre est préservé.
+pub(crate) struct PendingQueues {
+    /// Cycle de vie document (`readyState`,
+    /// `DOMContentLoaded`, `load`…) — rejoué **avant** les
+    /// livraisons : une porte `readystatechange` qui se lève
+    /// enfile ses `import()`/`fetch` avant elles.
+    pub lifecycle: Vec<types::DocLifecycle>,
+    /// Réponses `fetch`/`XHR`/`import()` tamponnées.
+    pub net: Vec<NetResponse>,
+    /// Réponses `crypto.subtle` (JS-C79).
+    pub crypto: Vec<explorer_js::CryptoResponse>,
+    /// Événements `EventSource` — `(ctx, handle, ev)`.
+    pub es: Vec<(explorer_js::JsCtxId, u64, explorer_js::EsEvent)>,
+    /// Événements `WebSocket` — `(ctx, handle, ev)`.
+    pub ws: Vec<(explorer_js::JsCtxId, u64, explorer_js::WsEventKind)>,
+    /// `<script>` dynamiques — `(ctx, seq, corps)`, `None` =
+    /// refus réseau.
+    pub dyn_s: Vec<(u32, u64, Option<String>)>,
+    /// Modules dynamiques (CAP-186) — `(ctx, seq, ModEval)`.
+    pub mods: Vec<(u32, u64, Option<ModEval>)>,
+    /// Pushes d'attributs session→miroir (53f — saisie
+    /// pendant le burst).
+    pub attrs: Vec<PendingMirrorAttr>,
+}
+
+/// Livrée à effectuer hors verrou — sortie
+/// [`PumpStage::Deliver`] de [`Session::commit_js_pump_stage`].
+pub(crate) struct PumpDeliver {
+    /// Moteur détaché à livrer.
+    pub eng: Box<dyn JsEngine>,
+    /// Tampons sortis de l'onglet.
+    pub queues: PendingQueues,
+    /// Jobs de la fenêtre détachée (`run_pending` #1).
+    pub jobs: usize,
+    /// Mutation miroir de la fenêtre détachée (sync #1).
+    pub mutated: Option<apply::ApplySync>,
+    /// `sync_floor` autorise la resynchro post-livrées.
+    pub sync_ok: bool,
+}
+
+/// Sortie de [`Session::commit_js_pump_stage`] — le swap
+/// des tampons a tranché ce qui part hors verrou.
+pub(crate) enum PumpStage {
+    /// Commit soldé à l'étape (onglet mort, worker perdu,
+    /// epoch supplantée) — retourner 0.
+    Done,
+    /// Rien à livrer hors verrou (disjoncteur armé ou
+    /// tampons vides) — [`Session::commit_js_pump_finish`]
+    /// réinsère et fait le tail au verrou.
+    Tail {
+        /// Jobs de la fenêtre détachée.
+        jobs: usize,
+        /// Mutation miroir de la fenêtre détachée.
+        mutated: Option<apply::ApplySync>,
+        /// Moteur à réinsérer.
+        eng: Box<dyn JsEngine>,
+    },
+    /// Tampons pris — [`Session::deliver_pending`] tourne
+    /// hors verrou puis le finish réinsère.
+    Deliver(PumpDeliver),
+}
+
+/// Retour du worker [`Session::deliver_pending`] — la
+/// réinsertion/le tail restent au verrou.
+pub(crate) struct Delivered {
+    /// Moteur après livrées — `None` = worker mort en vol.
+    pub eng: Option<Box<dyn JsEngine>>,
+    /// Disjoncteur armé pendant les livrées.
+    pub stall: Option<explorer_js::JsError>,
+    /// Microtasks drainées après les livrées (les promesses
+    /// résolues enfilent — sans ce drain chaque réponse
+    /// réseau paierait +1 pompe de latence).
+    pub jobs: usize,
+    /// Mutation miroir post-livrées (sync #2 — mutations
+    /// des livrées + microtasks + attrs).
+    pub mutated: Option<apply::ApplySync>,
+}
+
 impl Session {
     /// Circuit §B-1 : faut-il sauter cette éval de `bytes`
     /// octets ? Ouvert (`streak ≥ CAP`) : les gros scripts
@@ -428,17 +514,13 @@ impl Session {
         );
     }
 
-    /// Phase « commit » de la pompe détachée (53f) : réinsère
-    /// le moteur si l'onglet n'a pas navigué pendant le run —
-    /// une epoch différente jette le moteur et ses tampons
-    /// (le miroir parlerait de l'ancienne page, jamais
-    /// appliqué par-dessus la neuve). Livre les réponses net
-    /// tamponnées, rejoue les pushes d'attributs **avant**
-    /// re-sérialisation, applique la synchro DOM puis les
-    /// drains de fin de script — même ordre que
-    /// [`Self::pump_timers`]. `out: None` = le bloc a paniqué
-    /// (moteur perdu : l'onglet continue sans JS).
-    #[allow(clippy::too_many_lines)] // phase commit : file de livrées ordonnée, pas de sous-fonction nette
+    /// Phase « commit » de la pompe détachée (53f) — forme
+    /// synchrone `&mut` (hôtes FFI/CLI/tests) : compose
+    /// [`Self::commit_js_pump_stage`] → livrées **en ligne**
+    /// → [`Self::commit_js_pump_finish`]. La voie shared
+    /// (`pump_timers_shared`) appelle les trois étapes avec
+    /// le worker en `spawn_blocking` — les livrées y
+    /// quittent le verrou (étape 3a).
     pub(crate) fn commit_js_pump(
         &mut self,
         tab: TabId,
@@ -446,194 +528,339 @@ impl Session {
         out: Option<(usize, Option<apply::ApplySync>, Box<dyn JsEngine>)>,
         sync_ok: bool,
     ) -> usize {
+        let t0 = Instant::now();
+        match self.commit_js_pump_stage(tab, epoch, out, sync_ok) {
+            PumpStage::Done => 0,
+            PumpStage::Tail { jobs, mutated, eng } => self.commit_js_pump_finish(
+                tab,
+                epoch,
+                Delivered {
+                    eng: Some(eng),
+                    stall: None,
+                    jobs: 0,
+                    mutated: None,
+                },
+                jobs,
+                mutated,
+                t0,
+            ),
+            PumpStage::Deliver(d) => {
+                let max = self.max_timer_jobs;
+                let del = Self::deliver_pending(d.eng, d.queues, d.sync_ok, max, tab);
+                self.commit_js_pump_finish(tab, epoch, del, d.jobs, d.mutated, t0)
+            }
+        }
+    }
+
+    /// Étape 1 du commit (étape 3a) : gardes epoch /
+    /// disjoncteur puis **swap des tampons en une passe
+    /// courte** — les livrées partent hors verrou via
+    /// [`PumpStage::Deliver`]. `js_detached` reste armé
+    /// pendant la fenêtre : une réponse qui arrive entre le
+    /// swap et le finish retombe dans les `Vec` neufs de
+    /// l'onglet et attend la pompe suivante — rien ne se
+    /// perd, l'ordre des files est préservé. Onglet mort /
+    /// epoch supplantée / worker perdu → `Done` (moteur
+    /// détruit hors verrou, tampons jetés — même politique
+    /// qu'avant).
+    pub(crate) fn commit_js_pump_stage(
+        &mut self,
+        tab: TabId,
+        epoch: u64,
+        out: Option<(usize, Option<apply::ApplySync>, Box<dyn JsEngine>)>,
+        sync_ok: bool,
+    ) -> PumpStage {
         if let Ok(mut g) = crate::LAST_DRAIN.lock() {
             *g = "commit";
         }
-        let t0 = Instant::now();
-        let phase = {
+        let Some(entry) = self.tabs.get_mut(&tab) else {
+            // Onglet supprimé pendant le détachement —
+            // le moteur rapatrié est orphelin : sa GC
+            // (heap multi-Go) part sur un fil dédié,
+            // jamais droppée sous le verrou (§B-30,
+            // pompe orpheline post-DELETE, flixbus).
+            if let Some((_, _, eng)) = out {
+                self.destroy_engine_offlock(eng);
+            }
+            return PumpStage::Done;
+        };
+        let Some((jobs, mutated, eng)) = out else {
+            // Worker mort en vol — moteur perdu, les tampons
+            // sont pour une page sans moteur : jetés (même
+            // politique qu'avant, `js_pending_mod` inclus —
+            // il survivait aux deux premiers chemins).
+            entry.js_detached = None;
+            Self::clear_pending_queues(entry);
+            return PumpStage::Done;
+        };
+        if entry.nav_epoch != epoch {
+            entry.js_detached = None;
+            Self::clear_pending_queues(entry);
+            // Epoch supplantée : la nav suivante a fait
+            // mourir ce moteur — destruction hors
+            // verrou, pas de drop sous verrou (§B-30).
+            self.destroy_engine_offlock(eng);
+            return PumpStage::Done;
+        }
+        // Disjoncteur « moteur figé » (vol 25) : chaque
+        // livrée/dispatch/eval attend une réponse du worker
+        // (`recv_eval`, 30 s) — sur worker saturé la rafale
+        // figeait l'API ~90 s (kayak). Ouvert → tampons
+        // jetés, moteur réinséré sans l'appeler : le verrou
+        // repasse aux handlers HTTP.
+        if entry.js_stall_until.is_some_and(|u| Instant::now() < u) {
+            let dropped = entry.js_pending_net.len()
+                + entry.js_pending_crypto.len()
+                + entry.js_pending_es.len()
+                + entry.js_pending_ws.len()
+                + entry.js_pending_dyn.len()
+                + entry.js_pending_mod.len()
+                + entry.pending_doc_lifecycle.len();
+            Self::clear_pending_queues(entry);
+            if dropped > 0 {
+                tracing::warn!(tab, dropped, "moteur figé — livrées tamponnées jetées");
+            }
+            return PumpStage::Tail { jobs, mutated, eng };
+        }
+        if Self::pending_queues_empty(entry) {
+            return PumpStage::Tail { jobs, mutated, eng };
+        }
+        // Swap des tampons — `js_detached` reste armé pendant
+        // la livraison : les arrivées de la fenêtre
+        // tamponnent dans les Vec neufs, prises à la pompe
+        // suivante.
+        let queues = PendingQueues {
+            lifecycle: std::mem::take(&mut entry.pending_doc_lifecycle),
+            net: std::mem::take(&mut entry.js_pending_net),
+            crypto: std::mem::take(&mut entry.js_pending_crypto),
+            es: std::mem::take(&mut entry.js_pending_es),
+            ws: std::mem::take(&mut entry.js_pending_ws),
+            dyn_s: std::mem::take(&mut entry.js_pending_dyn),
+            mods: std::mem::take(&mut entry.js_pending_mod),
+            attrs: std::mem::take(&mut entry.js_pending_attrs),
+        };
+        PumpStage::Deliver(PumpDeliver {
+            eng,
+            queues,
+            jobs,
+            mutated,
+            sync_ok,
+        })
+    }
+
+    /// Vide tous les tampons de livrées — page morte, epoch
+    /// supplantée, disjoncteur armé ou worker perdu (mêmes
+    /// files que le swap [`PendingQueues`]).
+    fn clear_pending_queues(entry: &mut Tab) {
+        entry.js_pending_net.clear();
+        entry.js_pending_crypto.clear();
+        entry.js_pending_es.clear();
+        entry.js_pending_ws.clear();
+        entry.js_pending_dyn.clear();
+        entry.js_pending_mod.clear();
+        entry.js_pending_attrs.clear();
+        entry.pending_doc_lifecycle.clear();
+    }
+
+    /// `true` si aucun tampon n'a rien à livrer — le commit
+    /// prend la tail directe, pas de fenêtre hors verrou
+    /// pour des boucles vides.
+    fn pending_queues_empty(entry: &Tab) -> bool {
+        entry.js_pending_net.is_empty()
+            && entry.js_pending_crypto.is_empty()
+            && entry.js_pending_es.is_empty()
+            && entry.js_pending_ws.is_empty()
+            && entry.js_pending_dyn.is_empty()
+            && entry.js_pending_mod.is_empty()
+            && entry.js_pending_attrs.is_empty()
+            && entry.pending_doc_lifecycle.is_empty()
+    }
+
+    /// Étape 2 du commit (étape 3a) — worker **hors verrou**
+    /// : rejoue les tampons sur le moteur détaché dans
+    /// l'ordre `lifecycle → net → crypto → es → ws → dyn →
+    /// mod → attrs`, puis `run_pending` (les livraisons
+    /// résolvent des promesses → microtasks ; sans ce drain
+    /// chaque réponse réseau paierait +1 pompe de latence)
+    /// et `sync_for_apply` (mutations des livrées capturées
+    /// à la même pompe — avant elles attendaient la suivante,
+    /// ou disparaissaient quand des pushes attrs écrasaient
+    /// la sync #1). Disjoncteur stall et plafond 45 s
+    /// identiques à la version sous verrou (B-39).
+    #[allow(clippy::too_many_lines)] // file de livrées ordonnée — pas de sous-fonction nette
+    pub(crate) fn deliver_pending(
+        mut eng: Box<dyn JsEngine>,
+        q: PendingQueues,
+        sync_ok: bool,
+        max_jobs: usize,
+        tab: TabId,
+    ) -> Delivered {
+        let mut stall: Option<explorer_js::JsError> = None;
+        for step in q.lifecycle {
+            match step {
+                types::DocLifecycle::ReadyState(ctx, s) => {
+                    eng.set_ready_state(ctx, &s);
+                }
+                types::DocLifecycle::Event(ctx, ty) => {
+                    if let Err(e) = eng.dispatch_event_ctx(ctx, &ty, &[]) {
+                        if Self::is_engine_stall(&e) {
+                            stall = Some(e);
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+        // Sous-phases `commit.dl_*` — mêmes noms que la
+        // version sous verrou : l'attribution mesure
+        // désormais du temps worker hors `commit_lock`.
+        let mut t = Instant::now();
+        // B-39/vol59 : plafond par phase (mesuré entre deux
+        // `sync_phase`) — au-delà, la suivante saute et le
+        // stall est marqué.
+        let expired = |t: &Instant| t.elapsed() > Duration::from_secs(45);
+        if stall.is_none() && !expired(&t) {
+            for resp in q.net {
+                if let Err(e) = eng.deliver_net_response(resp) {
+                    if Self::is_engine_stall(&e) {
+                        stall = Some(e);
+                        break;
+                    }
+                }
+            }
+        }
+        t = sync_phase(tab, "commit.dl_net", t);
+        if stall.is_none() && !expired(&t) {
+            for resp in q.crypto {
+                if let Err(e) = eng.deliver_crypto_response(resp) {
+                    if Self::is_engine_stall(&e) {
+                        stall = Some(e);
+                        break;
+                    }
+                }
+            }
+        }
+        t = sync_phase(tab, "commit.dl_crypto", t);
+        if stall.is_none() && !expired(&t) {
+            for (ctx, handle, ev) in q.es {
+                if let Err(e) = eng.deliver_es_event(ctx, handle, ev) {
+                    if Self::is_engine_stall(&e) {
+                        stall = Some(e);
+                        break;
+                    }
+                }
+            }
+        }
+        t = sync_phase(tab, "commit.dl_es", t);
+        if stall.is_none() && !expired(&t) {
+            for (ctx, handle, ev) in q.ws {
+                if let Err(e) = eng.deliver_ws_event(ctx, handle, ev) {
+                    if Self::is_engine_stall(&e) {
+                        stall = Some(e);
+                        break;
+                    }
+                }
+            }
+        }
+        t = sync_phase(tab, "commit.dl_ws", t);
+        for (ctx, seq, body) in q.dyn_s {
+            eng.deliver_dyn_script(ctx, seq, body);
+        }
+        t = sync_phase(tab, "commit.dl_dyn", t);
+        if stall.is_none() && !expired(&t) {
+            for (ctx, seq, me) in q.mods {
+                let ok = me.is_some_and(|me| Self::eval_mod(eng.as_mut(), &me).is_ok());
+                eng.deliver_dyn_module(ctx, seq, ok);
+            }
+        }
+        t = sync_phase(tab, "commit.eval_mod", t);
+        // Les pushes sont **toujours** rejoués dans le miroir
+        // (la saisie ne se perd pas), même stall armé — un
+        // moteur mort les ignore, un lent les rattrape.
+        for (path, attr, value) in q.attrs {
+            eng.sync_mirror_attr(&path, &attr, value.as_deref());
+        }
+        t = sync_phase(tab, "commit.attrs_sync", t);
+        if stall.is_none() && expired(&t) {
+            stall = Some(explorer_js::JsError::Timeout);
+        }
+        // Promesses résolues par les livrées → microtasks.
+        let jobs = if stall.is_none() {
+            eng.run_pending_bounded(max_jobs).unwrap_or(0)
+        } else {
+            0
+        };
+        t = sync_phase(tab, "commit.dl_run", t);
+        // Sync #2 : mutations des livrées + microtasks +
+        // pushes attrs — enfilée après la sync #1 au finish
+        // (journal prolongé dans l'ordre, keyed subsume).
+        let mutated = if sync_ok {
+            Self::sync_for_apply(eng.as_mut())
+        } else {
+            None
+        };
+        sync_phase(tab, "commit.dl_sync", t);
+        Delivered {
+            eng: Some(eng),
+            stall,
+            jobs,
+            mutated,
+        }
+    }
+
+    /// Étape 3 du commit (étape 3a) — sous verrou : garde
+    /// epoch re-vérifiée (la nav a pu supplanter pendant les
+    /// livrées), `js_detached` libéré, moteur réinséré, les
+    /// deux synchros enfilées dans l'ordre puis drains de
+    /// fin de script — même tail que la version initiale
+    /// (`after_script`/`poll_net`, `drain_*`, série B-41).
+    /// `jobs`/`mutated` sont ceux de la fenêtre détachée ;
+    /// `d` porte le retour du worker de livraisons.
+    #[allow(clippy::too_many_lines)] // queue de commit ordonnée — pas de sous-fonction nette
+    pub(crate) fn commit_js_pump_finish(
+        &mut self,
+        tab: TabId,
+        epoch: u64,
+        d: Delivered,
+        jobs: usize,
+        mutated: Option<apply::ApplySync>,
+        t0: Instant,
+    ) -> usize {
+        let Delivered {
+            eng,
+            stall,
+            jobs: dl_jobs,
+            mutated: post,
+        } = d;
+        let jobs = jobs + dl_jobs;
+        {
             let Some(entry) = self.tabs.get_mut(&tab) else {
-                // Onglet supprimé pendant le détachement —
-                // le moteur rapatrié est orphelin : sa GC
-                // (heap multi-Go) part sur un fil dédié,
-                // jamais droppée sous le verrou (§B-30,
-                // pompe orpheline post-DELETE, flixbus).
-                if let Some((_, _, eng)) = out {
+                // Onglet mort pendant les livrées — moteur
+                // orphelin → fil dédié (§B-30).
+                if let Some(eng) = eng {
                     self.destroy_engine_offlock(eng);
                 }
                 return 0;
             };
             entry.js_detached = None;
-            let Some((jobs, mutated, mut eng)) = out else {
-                entry.js_pending_net.clear();
-                entry.js_pending_crypto.clear();
-                entry.js_pending_es.clear();
-                entry.js_pending_ws.clear();
-                entry.js_pending_dyn.clear();
-                entry.js_pending_attrs.clear();
-                entry.pending_doc_lifecycle.clear();
-                return 0;
-            };
             if entry.nav_epoch != epoch {
-                entry.js_pending_net.clear();
-                entry.js_pending_crypto.clear();
-                entry.js_pending_es.clear();
-                entry.js_pending_ws.clear();
-                entry.js_pending_dyn.clear();
-                entry.js_pending_attrs.clear();
-                entry.pending_doc_lifecycle.clear();
-                // Epoch supplantée : la nav suivante a fait
-                // mourir ce moteur — destruction hors
-                // verrou, pas de drop sous verrou (§B-30).
-                self.destroy_engine_offlock(eng);
+                Self::clear_pending_queues(entry);
+                if let Some(eng) = eng {
+                    self.destroy_engine_offlock(eng);
+                }
                 return 0;
             }
-            // Disjoncteur « moteur figé » (vol 25) : chaque
-            // livrée/dispatch/eval ci-dessous attend une
-            // réponse du worker (`recv_eval`, 30 s) **sous
-            // verrou** — sur worker saturé la rafale figeait
-            // l'API ~90 s (kayak). Disjoncteur ouvert → on
-            // jette les tampons et on réinsère le moteur sans
-            // l'appeler : le verrou repasse aux handlers HTTP.
-            let mut stall: Option<explorer_js::JsError> = None;
-            if entry.js_stall_until.is_some_and(|u| Instant::now() < u) {
-                let dropped = entry.js_pending_net.len()
-                    + entry.js_pending_crypto.len()
-                    + entry.js_pending_es.len()
-                    + entry.js_pending_ws.len()
-                    + entry.js_pending_dyn.len()
-                    + entry.js_pending_mod.len()
-                    + entry.pending_doc_lifecycle.len();
-                entry.js_pending_net.clear();
-                entry.js_pending_crypto.clear();
-                entry.js_pending_es.clear();
-                entry.js_pending_ws.clear();
-                entry.js_pending_dyn.clear();
-                entry.js_pending_mod.clear();
-                entry.js_pending_attrs.clear();
-                entry.pending_doc_lifecycle.clear();
-                if dropped > 0 {
-                    tracing::warn!(tab, dropped, "moteur figé — livrées tamponnées jetées");
-                }
-            }
-            let mutated = if entry.js_stall_until.is_some_and(|u| Instant::now() < u) {
-                mutated
+            if let Some(eng) = eng {
+                let cooldown = self.js_stall_cooldown;
+                Self::reinsert_engine(tab, entry, eng, stall, jobs, cooldown, self.shed_active);
             } else {
-                // Cycle de vie document émis pendant le
-                // détachement (le tail de commit a pu courir sans
-                // moteur) — rejoué **avant** les livraisons
-                // tamponnées : une porte `readystatechange` qui se
-                // lève enfile ses `import()`/`fetch` avant elles,
-                // comme l'aurait fait l'événement à l'heure.
-                for step in std::mem::take(&mut entry.pending_doc_lifecycle) {
-                    match step {
-                        types::DocLifecycle::ReadyState(ctx, s) => {
-                            eng.set_ready_state(ctx, &s);
-                        }
-                        types::DocLifecycle::Event(ctx, ty) => {
-                            if let Err(e) = eng.dispatch_event_ctx(ctx, &ty, &[]) {
-                                if Self::is_engine_stall(&e) {
-                                    stall = Some(e);
-                                    break;
-                                }
-                            }
-                        }
-                    }
-                }
-                // Sous-phases `commit_lock` (tâche profil github
-                // doc 20,6 s — attribution fine des ~800 ms/round :
-                // chaque livraison exécute du moteur sous verrou).
-                let mut t = Instant::now();
-                // B-39/vol59 : le disjoncteur stall couvre un
-                // moteur MORT, pas un worker lent-mais-vivant —
-                // ~90 s de livraisons sous verrou ont figé l'API
-                // (commit_lock us=89,9 M, tab DELETÉ). Plafond
-                // temps de la section : au-delà, tampons jetés +
-                // stall marqué (le moteur se réévalue sans verrou).
-                let expired = |t: &Instant| t.elapsed() > Duration::from_secs(45);
-                if stall.is_none() && !expired(&t) {
-                    for resp in std::mem::take(&mut entry.js_pending_net) {
-                        if let Err(e) = eng.deliver_net_response(resp) {
-                            if Self::is_engine_stall(&e) {
-                                stall = Some(e);
-                                break;
-                            }
-                        }
-                    }
-                }
-                t = sync_phase(tab, "commit.dl_net", t);
-                if stall.is_none() && !expired(&t) {
-                    for resp in std::mem::take(&mut entry.js_pending_crypto) {
-                        if let Err(e) = eng.deliver_crypto_response(resp) {
-                            if Self::is_engine_stall(&e) {
-                                stall = Some(e);
-                                break;
-                            }
-                        }
-                    }
-                }
-                t = sync_phase(tab, "commit.dl_crypto", t);
-                if stall.is_none() && !expired(&t) {
-                    for (ctx, handle, ev) in std::mem::take(&mut entry.js_pending_es) {
-                        if let Err(e) = eng.deliver_es_event(ctx, handle, ev) {
-                            if Self::is_engine_stall(&e) {
-                                stall = Some(e);
-                                break;
-                            }
-                        }
-                    }
-                }
-                t = sync_phase(tab, "commit.dl_es", t);
-                if stall.is_none() && !expired(&t) {
-                    for (ctx, handle, ev) in std::mem::take(&mut entry.js_pending_ws) {
-                        if let Err(e) = eng.deliver_ws_event(ctx, handle, ev) {
-                            if Self::is_engine_stall(&e) {
-                                stall = Some(e);
-                                break;
-                            }
-                        }
-                    }
-                }
-                t = sync_phase(tab, "commit.dl_ws", t);
-                for (ctx, seq, body) in std::mem::take(&mut entry.js_pending_dyn) {
-                    eng.deliver_dyn_script(ctx, seq, body);
-                }
-                t = sync_phase(tab, "commit.dl_dyn", t);
-                if stall.is_none() && !expired(&t) {
-                    for (ctx, seq, me) in std::mem::take(&mut entry.js_pending_mod) {
-                        let ok = me.is_some_and(|me| Self::eval_mod(eng.as_mut(), &me).is_ok());
-                        eng.deliver_dyn_module(ctx, seq, ok);
-                    }
-                }
-                t = sync_phase(tab, "commit.eval_mod", t);
-                let attrs = std::mem::take(&mut entry.js_pending_attrs);
-                // Les pushes sont **toujours** rejoués dans le
-                // miroir (la saisie ne se perd pas) ; la
-                // re-sérialisation attend la fin de la fenêtre de
-                // coalescence — le bit sale persiste jusqu'au
-                // prochain apply autorisé (55g-suite).
-                let mutated = if attrs.is_empty() {
-                    mutated
-                } else {
-                    for (path, attr, value) in attrs {
-                        eng.sync_mirror_attr(&path, &attr, value.as_deref());
-                    }
-                    if sync_ok {
-                        Self::sync_for_apply(eng.as_mut())
-                    } else {
-                        None
-                    }
-                };
-                sync_phase(tab, "commit.attrs_sync", t);
-                if stall.is_none() && expired(&t) {
-                    stall = Some(explorer_js::JsError::Timeout);
-                }
-                mutated
-            };
-            let cooldown = self.js_stall_cooldown;
-            Self::reinsert_engine(tab, entry, eng, stall, jobs, cooldown, self.shed_active);
-            (jobs, mutated)
-        };
-        let (jobs, mutated) = phase;
+                // Worker mort pendant les livrées — moteur
+                // perdu : les arrivées de la fenêtre sont
+                // pour une page sans moteur (même politique
+                // que « pompe perdue »).
+                Self::clear_pending_queues(entry);
+            }
+        }
         // JS-C293 : « productive » = vrai travail DOM —
         // les intervalles légitimes (YouTube arme deux
         // `setInterval` 25 ms) produisent des jobs à
@@ -641,14 +868,17 @@ impl Session {
         // armait le disjoncteur sur une page saine.
         // Synchro masquée par `sync_floor` → comptée
         // (conservateur : le streak ne peut qu'être
-        // raccourci par un drain prouvé propre).
+        // raccourci par un drain prouvé propre). Les deux
+        // synchros s'enfilent — « productive » dès qu'une
+        // porte des ops réelles.
         let productive = jobs > 0
-            && match &mutated {
-                Some(apply::ApplySync::Journal(j)) => !j.ops.is_empty(),
-                Some(apply::ApplySync::Keyed(_)) | None => true,
-            };
+            && !([&mutated, &post]
+                .into_iter()
+                .flatten()
+                .all(|s| matches!(s, apply::ApplySync::Journal(j) if j.ops.is_empty()))
+                && (mutated.is_some() || post.is_some()));
         let mut t = sync_phase(tab, "commit.deliver", t0);
-        if let Some(s) = mutated {
+        for s in [mutated, post].into_iter().flatten() {
             let ta = Instant::now();
             // La mutation est enfilée — l'apply tournera hors
             // verrou via `drain_applies_shared` (étape 55h,

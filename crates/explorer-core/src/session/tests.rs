@@ -923,6 +923,216 @@ fn doc_lifecycle_buffered_step_precedes_live_dispatch() {
     assert!(s.tabs.get(&tab).unwrap().pending_doc_lifecycle.is_empty());
 }
 
+/// Étape 3a — le commit prend les tampons **au stage**
+/// (pas au take : ils se remplissent pendant la fenêtre
+/// détachée), les livre hors verrou via `deliver_pending`,
+/// puis le finish réinsère. Ici : réponse `fetch`
+/// tamponnée → `.then` exécuté dans la même passe
+/// (`run_pending` post-livrées — avant, +1 pompe) ; une
+/// arrivée *pendant* la fenêtre retombe dans les `Vec` de
+/// l'onglet et attend la pompe suivante.
+#[tokio::test(flavor = "current_thread")]
+async fn commit_stage_swap_deliver_run_pending() {
+    let mut s = Session::new(Arc::new(FailTransport), Arc::new(TestFont));
+    s.set_js_factory(explorer_js::JscoreEngine::factory());
+    let tab = s.open_tab();
+    let html = "<!doctype html><html><body><div id=\"x\"></div></body></html>";
+    let eng = s.spawn_engine(tab, html, true, "");
+    {
+        let e = s.tabs.get_mut(&tab).unwrap();
+        let mut tb = TreeBuilder::new();
+        tb.push(html);
+        tb.finish();
+        e.dom = Some(tb.into_dom());
+        e.url = Some(Url::parse("http://h.test/3a").unwrap());
+        e.js = eng;
+    }
+    // `fetch()` armé → promesse pendante, mutation DOM dans
+    // le `.then` final (observable dans la sync #2).
+    let _ = s.tabs.get_mut(&tab).and_then(|e| e.js.as_mut()).map(|eng| {
+        eng.eval(
+            "fetch('/r').then(r=>r.text()).then(t=>{\
+                 document.getElementById('x').textContent=t;});",
+        )
+    });
+    // Sort la requête du moteur → `net_tasks`, handle réel.
+    s.after_script(tab);
+    let handle = s
+        .net_tasks
+        .keys()
+        .find(|(t, _)| *t == tab)
+        .map(|(_, h)| *h)
+        .expect("requête fetch émise");
+
+    // Fenêtre détachée : la réponse tamponne (js_detached).
+    let (eng, _max, epoch, sync_ok) = s.take_js_engine(tab).unwrap();
+    s.deliver_net_response(
+        tab,
+        NetResponse {
+            handle,
+            status: 200,
+            status_text: "OK".to_string(),
+            headers: Vec::new(),
+            body: b"corps!".to_vec(),
+        },
+    );
+    assert_eq!(
+        s.tabs.get(&tab).unwrap().js_pending_net.len(),
+        1,
+        "réponse tamponnée pendant le détachement"
+    );
+
+    // Stage : swap des files → Deliver, fenêtre restée armée.
+    let stage = s.commit_js_pump_stage(tab, epoch, Some((0, None, eng)), sync_ok);
+    let js_glue::PumpStage::Deliver(d) = stage else {
+        panic!("tampons non vides → Deliver attendu");
+    };
+    assert!(
+        s.tabs.get(&tab).unwrap().js_pending_net.is_empty(),
+        "file swappée hors de l'onglet"
+    );
+    assert!(
+        s.tabs.get(&tab).unwrap().js_detached.is_some(),
+        "js_detached reste armé pendant la livraison"
+    );
+    // Arrivée PENDANT la fenêtre → tampon neuf, prochaine
+    // pompe (jamais mélangée à la rafale en cours).
+    s.deliver_net_response(
+        tab,
+        NetResponse {
+            handle,
+            status: 200,
+            status_text: "OK".to_string(),
+            headers: Vec::new(),
+            body: b"tard".to_vec(),
+        },
+    );
+    assert_eq!(
+        s.tabs.get(&tab).unwrap().js_pending_net.len(),
+        1,
+        "arrivée en vol tamponnée pour la prochaine pompe"
+    );
+
+    // Worker hors verrou : livraison → promesse résolue →
+    // microtasks `.then` drainées (le moteur paie son
+    // checkpoint par livrée — `jobs` peut rester 0, le
+    // `run_pending` post-livrées reste le filet pour les
+    // moteurs qui enfilent au lieu d'exécuter) + sync #2.
+    let max = s.max_timer_jobs;
+    let del = Session::deliver_pending(d.eng, d.queues, d.sync_ok, max, tab);
+    assert!(del.mutated.is_some(), "mutation DOM capturée (sync #2)");
+    let _ = s.commit_js_pump_finish(tab, epoch, del, d.jobs, d.mutated, Instant::now());
+    assert!(s.tabs.get(&tab).unwrap().js.is_some(), "moteur réinséré");
+    assert!(
+        s.tabs.get(&tab).unwrap().js_detached.is_none(),
+        "fenêtre refermée"
+    );
+    // La réponse tardive est restée en file — pas livrée
+    // deux fois, pas perdue.
+    assert_eq!(s.tabs.get(&tab).unwrap().js_pending_net.len(), 1);
+    let out = s
+        .tabs
+        .get_mut(&tab)
+        .and_then(|e| e.js.as_mut())
+        .and_then(|eng| eng.eval("document.getElementById('x').textContent").ok())
+        .unwrap_or_default();
+    assert_eq!(out.trim(), "corps!", "promesse résolue au deliver : {out}");
+}
+
+/// Étape 3a — disjoncteur armé au commit : le stage jette
+/// les tampons et prend la tail directe — aucune livrée ne
+/// part hors verrou (vol 25 : un moteur figé ne doit plus
+/// recevoir de `recv_eval`).
+#[test]
+fn commit_stage_disjoncteur_jette_tampons() {
+    let mut s = Session::new(Arc::new(FailTransport), Arc::new(TestFont));
+    s.set_js_factory(explorer_js::JscoreEngine::factory());
+    let tab = s.open_tab();
+    let html = "<!doctype html><html><body><div id=\"x\"></div></body></html>";
+    let eng = s.spawn_engine(tab, html, true, "");
+    {
+        let e = s.tabs.get_mut(&tab).unwrap();
+        e.dom = Some(test_dom("<div id=\"x\"></div>"));
+        e.url = Some(Url::parse("http://h.test/3b").unwrap());
+        e.js = eng;
+    }
+    let (eng, _max, epoch, sync_ok) = s.take_js_engine(tab).unwrap();
+    s.deliver_net_response(
+        tab,
+        NetResponse {
+            handle: 0,
+            status: 200,
+            status_text: "OK".to_string(),
+            headers: Vec::new(),
+            body: b"x".to_vec(),
+        },
+    );
+    // Disjoncteur armé APRÈS le take (`take_js_engine`
+    // refuse lui-même de détacher sous stall).
+    s.tabs.get_mut(&tab).unwrap().js_stall_until =
+        Some(Instant::now() + std::time::Duration::from_secs(60));
+    let stage = s.commit_js_pump_stage(tab, epoch, Some((0, None, eng)), sync_ok);
+    let js_glue::PumpStage::Tail { .. } = stage else {
+        panic!("disjoncteur armé → Tail attendu");
+    };
+    assert!(
+        s.tabs.get(&tab).unwrap().js_pending_net.is_empty(),
+        "tampons jetés sous disjoncteur"
+    );
+}
+
+/// Étape 3a — epoch supplantée pendant le deliver : le
+/// finish re-vérifie `nav_epoch`, détruit le moteur hors
+/// verrou (§B-30) et jette les arrivées de la fenêtre.
+#[test]
+fn commit_finish_epoch_supplantee_detruit_moteur() {
+    let mut s = Session::new(Arc::new(FailTransport), Arc::new(TestFont));
+    s.set_js_factory(explorer_js::JscoreEngine::factory());
+    let tab = s.open_tab();
+    let html = "<!doctype html><html><body><div id=\"x\"></div></body></html>";
+    let eng = s.spawn_engine(tab, html, true, "");
+    {
+        let e = s.tabs.get_mut(&tab).unwrap();
+        e.dom = Some(test_dom("<div id=\"x\"></div>"));
+        e.url = Some(Url::parse("http://h.test/3c").unwrap());
+        e.js = eng;
+    }
+    let (eng, _max, epoch, sync_ok) = s.take_js_engine(tab).unwrap();
+    s.deliver_net_response(
+        tab,
+        NetResponse {
+            handle: 0,
+            status: 200,
+            status_text: "OK".to_string(),
+            headers: Vec::new(),
+            body: b"x".to_vec(),
+        },
+    );
+    let stage = s.commit_js_pump_stage(tab, epoch, Some((0, None, eng)), sync_ok);
+    let js_glue::PumpStage::Deliver(d) = stage else {
+        panic!("tampon → Deliver attendu");
+    };
+    // La nav supplante pendant que le worker livre.
+    s.tabs.get_mut(&tab).unwrap().nav_epoch += 1;
+    let max = s.max_timer_jobs;
+    let del = Session::deliver_pending(d.eng, d.queues, d.sync_ok, max, tab);
+    let before = s.engines_dropped_offlock;
+    let jobs = s.commit_js_pump_finish(tab, epoch, del, d.jobs, d.mutated, Instant::now());
+    assert_eq!(jobs, 0, "epoch supplantée → commit soldé");
+    assert!(
+        s.tabs.get(&tab).unwrap().js.is_none(),
+        "moteur de l'ancienne page détruit"
+    );
+    assert!(
+        s.engines_dropped_offlock > before,
+        "destruction routée hors verrou (§B-30)"
+    );
+    assert!(
+        s.tabs.get(&tab).unwrap().js_detached.is_none(),
+        "fenêtre refermée malgré le rejet"
+    );
+}
+
 /// Trou de liveness dyn-subresources : `<link rel=stylesheet>`
 /// inséré par JS ne devait son fetch qu'à `after_script`
 /// (gate `jobs>0` de la pompe) — une page qui marque le lien

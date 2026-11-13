@@ -11893,6 +11893,55 @@ un crate PIPELINE.- [x] **JS-C422. Deadline honnête — canal session ↔ budge
   `shared_pump_advances_scriptless_
   animations` (bout-en-bout détaché).
 
+- [x] **Étape 224. Livrées JS hors verrou au
+  commit** (`explorer-core` `session/js_glue.rs`/
+  `shared.rs`/`tests.rs`, audit perf chantier
+  3a) : `commit_js_pump` exécutait tout le
+  rejeu des tampons — cycle de vie document +
+  `js_pending_{net,crypto,es,ws,dyn,mod}` +
+  pushes attrs — sous `sess.lock()`, chaque
+  livrée étant un `recv_eval` moteur (mur
+  `commit.dl_*` mesuré : 128,7 s YouTube). Le
+  commit est découpé en trois étapes :
+  `commit_js_pump_stage` — gardes epoch/
+  disjoncteur + **swap des tampons en une
+  passe courte** (prise au commit, pas au
+  take : les files se remplissent pendant la
+  fenêtre détachée) — puis
+  `deliver_pending` rejoue sur le moteur
+  détaché **hors verrou** dans l'ordre
+  `lifecycle→net→crypto→es→ws→dyn→mod→attrs`,
+  suivi d'un `run_pending` post-livrées (les
+  promesses résolues enfilent des microtasks
+  — avant, chaque réponse réseau paiait +1
+  pompe de latence) et d'une seconde
+  `sync_for_apply` (mutations des livrées
+  capturées à la même pompe ; au passage la
+  sync #1 n'est plus écrasée quand des
+  pushes attrs existaient — les deux
+  synchros s'enfilent, journal prolongé /
+  keyed subsume), et `commit_js_pump_finish`
+  réinsère sous garde epoch re-vérifiée +
+  tail identique (apply enfilé,
+  `after_script`/`poll_net`, drains,
+  série B-41). `js_detached` reste armé
+  pendant la livraison : une arrivée en vol
+  retombe dans les `Vec` neufs de l'onglet,
+  prise à la pompe suivante (ordre
+  préservé). `pump_timers_shared` route
+  stage→`spawn_blocking`→finish ; les
+  chemins `&mut` (`eval_shared`, tests)
+  gardent la composition synchrone
+  `commit_js_pump`. Verrous : `commit_stage_
+  swap_deliver_run_pending` (swap, livraison
+  hors verrou, microtask `.then` exécutée,
+  arrivée en vol tamponnée), `commit_stage_
+  disjoncteur_jette_tampons`, `commit_finish
+  _epoch_supplantee_detruit_moteur` +
+  suite shared (`pump_shared_applies_dom_
+  mutations`, `pump_shared_keeps_lock_free
+  _during_js_burst`).
+
 ## Plan NAVIGATEUR — vitrine YouTube + surface navigateur (2026-11-12)
 
 Plan parallèle à la file `css.values` PIPE (§ roadmap équipe
