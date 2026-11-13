@@ -3345,3 +3345,29 @@ shadow n'atteint ni cascade ni boxification ») etait
 - État atteint : titre `YouTube`, `appKids=14`,
   `[[…]]` absents, attestation fonctionnelle — reste
   un corpus **warm-profile** pour un feed peuplé.
+
+### 2026-11-13 — Vitrine `/` vs Chrome non-identifié : écart précisé
+
+- Référence Chrome (screenshot) : masthead complet +
+  sidebar expanded + carte « historique désactivé ».
+- Mesure DOM chez nous (1024×768) : `yt-guide-manager`
+  a consommé la réponse guide — `getData()` = 13,4 Ko
+  avec `items` ; **mini-rail peuplé** : 4
+  `ytd-mini-guide-entry-renderer` (Accueil/Shorts/
+  Abonnements/Vous), chacune avec 1 `yt-icon`.
+- **Expanded guide correctement absente** :
+  `canFitPersistentGuide=false` à 1024 px (breakpoint
+  YouTube ~1312 px — Chrome pareil à cette largeur).
+- **Trou réel n°1 : les `yt-icon` ne peignent rien**
+  (18 dans le DOM, zéro SVG produit) — chaîne `k9`
+  iconset (`missingIconSet`→`onIconsetAdded`→
+  `renderIcon`→`applyStaticIcon`) instrumentée pour
+  nommer le maillon qui cale.
+- Trou n°2 : `ytd-searchbox` jamais stampé dans
+  `ytd-masthead #container` (logo+search+boutons
+  absents de la barre — le burger et « Se connecter »
+  seuls peignent).
+- Confirmé : `fetch /youtubei/v1/guide` parti **signé**
+  (`x-goog-eom-visitor-id`), réponse 200 consommée.
+  `/youtubei/v1/browse` rejeté (corpus sans entrée) ;
+  `/upgrade_visitor_cookie` rejeté (absent corpus).
