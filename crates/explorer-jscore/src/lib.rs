@@ -285,6 +285,19 @@ pub static J17_ENV_GETS: std::sync::atomic::AtomicU64 = std::sync::atomic::Atomi
 /// repli sur la marche complète.
 pub static J17_RES_HIT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 pub static J17_RES_MISS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+/// JS-C500 — inline cache own-prop `site → (shape,pos)` :
+/// hits vérifiés (`ic_hit`), échecs de vérification (`ic_miss`),
+/// apprentissages (`ic_learn`), sites désarmés au seuil
+/// (`ic_disarm`), consultations sur site désarmé (`ic_bail`).
+pub static J17_IC_HIT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+/// Voir [`J17_IC_HIT`].
+pub static J17_IC_MISS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+/// Voir [`J17_IC_HIT`].
+pub static J17_IC_LEARN: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+/// Voir [`J17_IC_HIT`].
+pub static J17_IC_DISARM: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+/// Voir [`J17_IC_HIT`].
+pub static J17_IC_BAIL: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 /// `array_index(key)` tenté — multiplicité par `find_own`
 /// (× niveau, ×2 par niveau Array) — cible V-3b (hoist).
 pub static J17_ARRIDX_TRY: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
@@ -405,7 +418,7 @@ pub fn j17_enable() {
 #[must_use]
 pub fn j17_snapshot() -> String {
     let r = std::sync::atomic::Ordering::Relaxed;
-    let pairs: [(&str, &std::sync::atomic::AtomicU64); 34] = [
+    let pairs: [(&str, &std::sync::atomic::AtomicU64); 39] = [
         ("prop_lookup", &J17_PROP_LOOKUP),
         ("proto_lvl", &J17_PROTO_LVL),
         ("prop_scan", &J17_PROP_SCAN),
@@ -416,6 +429,11 @@ pub fn j17_snapshot() -> String {
         ("env_gets", &J17_ENV_GETS),
         ("res_hit", &J17_RES_HIT),
         ("res_miss", &J17_RES_MISS),
+        ("ic_hit", &J17_IC_HIT),
+        ("ic_miss", &J17_IC_MISS),
+        ("ic_learn", &J17_IC_LEARN),
+        ("ic_disarm", &J17_IC_DISARM),
+        ("ic_bail", &J17_IC_BAIL),
         ("arridx_try", &J17_ARRIDX_TRY),
         ("call", &J17_CALL),
         ("call_nat", &J17_CALL_NAT),

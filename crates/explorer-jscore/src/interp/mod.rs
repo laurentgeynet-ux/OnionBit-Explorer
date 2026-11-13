@@ -283,9 +283,37 @@ pub(crate) enum BindMode {
 pub(crate) enum LValueRef {
     /// Liaison de variable — l'`EnvRef` vit côté appelant.
     Ident(Rc<str>),
-    /// Propriété `base[key]` — `base` déjà évaluée.
-    Prop(Value, Rc<str>),
+    /// Propriété `base[key]` — `base` déjà évaluée ; `site` =
+    /// `ptr(Expr)` de la cible pour l'IC own-prop (JS-C500).
+    Prop(Value, Rc<str>, usize),
 }
+
+/// JS-C500 — entrée d'inline cache own-prop pour un site AST :
+/// `(shape, pos)` où `shape` = [`crate::heap::Object::shape`]
+/// (empreinte du tuple ordonné de clés — partagée entre objets
+/// polymorphes de même layout, là où un `(ObjId, pos)` raterait
+/// chaque instance) et `pos` = position dans `props`. Vérifiée
+/// à chaque hit par la clé réelle à la position + `Prop::Data`
+/// → correction par construction, tout échec retombe sur la
+/// marche `find_prop` complète. `miss` compte les vérifications
+/// échouées ; à [`IC_MISS_DISARM`] le site est désarmé
+/// (`miss == u8::MAX` — mégamorphe : clés calculées, receveurs
+/// hétérogènes, pointeur de site réutilisé).
+#[derive(Clone, Copy)]
+pub(crate) struct IcEnt {
+    /// Empreinte de layout attendue ([`crate::heap::Object::shape`]).
+    shape: u64,
+    /// Position attendue dans `props`.
+    pos: u32,
+    /// Échecs de vérification cumulés ; `u8::MAX` = désarmé.
+    miss: u8,
+}
+
+/// JS-C500 — seuil de désarmement d'un site IC (miss cumulés).
+const IC_MISS_DISARM: u8 = 8;
+/// JS-C500 — borne du cache de sites (purge complète — précédent
+/// `RESOLVED_ENVS_CAP`).
+const IC_MAP_CAP: usize = 8192;
 
 /// Hook d'observabilité des sources évaluées dynamiquement
 /// (`eval`, `Function`, timer-string) — voir
@@ -830,6 +858,24 @@ pub struct Engine {
     /// par `lit` → adresses stables + chaque appel résout.
     /// La valeur épingle `lit` → `ptr(lit)` (clé) non réutilisé.
     pub(crate) lowered_suspend_cache: std::collections::HashMap<usize, Rc<LoweredSuspend>>,
+    /// JS-C500 — inline cache own-prop : `ptr(Expr|ChainStep)
+    /// → (shape, pos)` appris au premier hit own-data et revérifié
+    /// **sémantiquement** à chaque consultation (`props[pos].0 ==
+    /// key` + `Prop::Data` + éligibilité du kind) — une entrée
+    /// périmée (adresse de site réutilisée, layout muté) ne peut
+    /// produire qu'un miss suivi d'un relearn, jamais une valeur
+    /// fausse. Purge atomique avec `resolved_map`/`resolved_guard`
+    /// (même classe de pointeurs AST — précédent JS-C492).
+    /// `EXPLORER_NO_IC=1` désarme tout (kill-switch A/B) ;
+    /// `EXPLORER_IC_VERIFY=1` revérifie chaque hit par
+    /// `find_prop` (diagnostic, ~2× le coût de lookup).
+    pub(crate) ic_map: std::collections::HashMap<usize, IcEnt>,
+    /// Kill-switch IC (`EXPLORER_NO_IC=1`) — A/B en vol sans
+    /// rebuild, précédent `resolve_off` (JS-C490c).
+    pub(crate) ic_off: bool,
+    /// `EXPLORER_IC_VERIFY=1` — chaque hit revérifié par la
+    /// marche complète ; divergences loguées bornées (`ic.bad`).
+    pub(crate) ic_verify: bool,
     /// JS-C497 — flags de prologue par littéral (`Rc::as_ptr`),
     /// calculés une fois : bit [`LIT_USES_ARGS`] (`LazyArgs`
     /// utile), [`LIT_MAY_HOIST`] (decls `var`/`function`/`export`
@@ -1376,6 +1422,9 @@ impl Engine {
             resolved_lits: std::collections::HashSet::new(),
             resolved_guard: Vec::new(),
             resolved_envs: std::collections::HashMap::new(),
+            ic_map: std::collections::HashMap::new(),
+            ic_off: std::env::var("EXPLORER_NO_IC").is_ok_and(|v| v == "1"),
+            ic_verify: std::env::var("EXPLORER_IC_VERIFY").is_ok_and(|v| v == "1"),
             lowered_suspend_cache: std::collections::HashMap::new(),
             lit_flags: std::collections::HashMap::new(),
             resolve_off: std::env::var("EXPLORER_NO_RESOLVE").is_ok_and(|v| v == "1"),
@@ -4132,6 +4181,7 @@ impl Engine {
             proto,
             props: Vec::new(),
             idx: std::cell::OnceCell::new(),
+            shape: std::cell::Cell::new(0),
             kind: ObjKind::BigInt(b),
             extensible: true,
             elem_integrity: 0,
@@ -4676,6 +4726,7 @@ impl Engine {
             proto: Value::Obj(self.protos.regexp),
             props: Vec::new(),
             idx: std::cell::OnceCell::new(),
+            shape: std::cell::Cell::new(0),
             kind: ObjKind::RegExp(Rc::new(re)),
             extensible: true,
             elem_integrity: 0,
@@ -5708,6 +5759,10 @@ impl Engine {
             // temps que les `ptr(Expr)` qu'ils indexaient, sinon
             // réutilisation d'adresses → profondeurs fantômes.
             self.lowered_suspend_cache.clear();
+            // JS-C500 — mêmes clés `ptr(Expr)` : purgées en même
+            // temps (une entrée survivante ne ferait que thrasher
+            // — la vérif est sémantique — mais le cap les écope).
+            self.ic_map.clear();
         }
         self.resolved_lits.insert(key);
         self.resolved_guard.push(lit.clone());
@@ -7255,6 +7310,14 @@ impl Engine {
 
     /// First `Prop` found on `id`'s prototype chain.
     pub(crate) fn find_prop(&mut self, id: ObjId, key: &str) -> Option<Prop> {
+        self.find_prop_owner(id, key).map(|(_, p)| p)
+    }
+
+    /// [`Self::find_prop`] + maillon propriétaire — JS-C500 :
+    /// l'IC own-prop n'apprend que si la prop trouvée appartient
+    /// à la tête de chaîne (`owner == id`), les hits proto
+    /// restent hors périmètre (cran transitions éventuel).
+    pub(crate) fn find_prop_owner(&mut self, id: ObjId, key: &str) -> Option<(ObjId, Prop)> {
         static CTXP: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
         if *CTXP.get_or_init(|| std::env::var_os("EXPLORER_CTX_PROBE").is_some())
             && (key == "trayride" || key == "t")
@@ -7270,7 +7333,7 @@ impl Engine {
         while let Some(cid) = cur {
             crate::j17_tick(&crate::J17_PROTO_LVL);
             if let Some(p) = self.find_own_ai(cid, key, ai) {
-                return Some(p);
+                return Some((cid, p));
             }
             cur = match self.heap.obj(cid).map(|o| o.proto.clone()) {
                 Some(Value::Obj(p)) => Some(p),
@@ -7282,6 +7345,127 @@ impl Engine {
             }
         }
         None
+    }
+
+    /// JS-C500 — éligibilité own-prop à l'IC : `find_own_ai`
+    /// répond *avant* `o.find` pour les props synthétisées des
+    /// kinds spéciaux — une entrée `(shape,pos)` ne doit jamais
+    /// court-circuiter ces chemins. Bails : `args_map` (indices
+    /// mappés), `Array` pour `length`/indices, `Fun::Script` pour
+    /// `length`, toutes les vues binaires (`ta_prop`), `Proxy`
+    /// (la lecture passe par les traps, jamais par `props`).
+    /// Les synthèses *post*-`o.find` (`fn.name`, `@@toStringTag`,
+    /// statiques `RegExp` du ctor) restent éligibles : une own
+    /// prop réelle les prime toujours dans l'ordre de lookup.
+    fn ic_eligible(o: &crate::heap::Object, key: &str, ai: Option<usize>) -> bool {
+        if o.args_map.is_some() {
+            return false;
+        }
+        match &o.kind {
+            ObjKind::Proxy { .. }
+            | ObjKind::ByteBuf(_)
+            | ObjKind::DataView { .. }
+            | ObjKind::TypedArray { .. } => false,
+            ObjKind::Array(_) => ai.is_none() && key != "length",
+            ObjKind::Fun(Fun::Script { .. }) => key != "length",
+            _ => true,
+        }
+    }
+
+    /// JS-C500 — consultation IC own-prop par site AST. `Some(v)`
+    /// = hit vérifié sémantiquement (objet vivant, éligible,
+    /// `shape` égale, `props[pos].0 == key`, `Prop::Data`) —
+    /// la vérif *est* la sémantique du lookup, tout échec
+    /// retombe sur `find_prop` + `ic_learn`. `site == 0` ou
+    /// `ic_off` → `None` immédiat (hors chemin quand désarmé).
+    fn ic_hit(&mut self, site: usize, id: ObjId, key: &str) -> Option<Value> {
+        if site == 0 || self.ic_off {
+            return None;
+        }
+        let mut ent = *self.ic_map.get(&site)?;
+        if ent.miss == u8::MAX {
+            crate::j17_tick(&crate::J17_IC_BAIL);
+            return None;
+        }
+        let ai = array_index(key);
+        // Objet mort ou inéligible (props synthétisées qui
+        // devancent `o.find`) → repli sans compter : l'entrée
+        // reste valable pour les receveurs éligibles du site.
+        let o = self.heap.obj(id)?;
+        if !Self::ic_eligible(o, key, ai) {
+            return None;
+        }
+        let hit = if o.shape() == ent.shape {
+            match o.props.get(ent.pos as usize) {
+                Some((k, Prop::Data { value, .. }))
+                    if std::ptr::eq(&raw const **k, key) || &**k == key =>
+                {
+                    Some(value.clone())
+                }
+                _ => None,
+            }
+        } else {
+            None
+        };
+        let Some(v) = hit else {
+            crate::j17_tick(&crate::J17_IC_MISS);
+            ent.miss = ent.miss.saturating_add(1);
+            if ent.miss >= IC_MISS_DISARM {
+                ent.miss = u8::MAX;
+                crate::j17_tick(&crate::J17_IC_DISARM);
+            }
+            self.ic_map.insert(site, ent);
+            return None;
+        };
+        crate::j17_tick(&crate::J17_IC_HIT);
+        if self.ic_verify {
+            let check = self.find_prop(id, key);
+            let same = match &check {
+                Some(Prop::Data { value: c, .. }) => self.strict_eq(c, &v),
+                _ => false,
+            };
+            if !same {
+                tracing::warn!(target: "ic", "ic.bad key={key} id={id:?} fast={v:?} walk={check:?}");
+            }
+        }
+        Some(v)
+    }
+
+    /// JS-C500 — apprentissage après un `find_prop` qui a rendu
+    /// `Prop::Data` sur `owner == id` : la position réelle de la
+    /// clé est recherchée une fois (`prop_pos`, amorti sur la vie
+    /// du site) puis `(shape, pos)` mémorisée. Ne s'exécute pas
+    /// sur un site désarmé ni sur objet inéligible (les props
+    /// synthétisées primes `o.find`, cf. [`Self::ic_eligible`]).
+    fn ic_learn(&mut self, site: usize, id: ObjId, key: &str) {
+        if site == 0 || self.ic_off {
+            return;
+        }
+        if self.ic_map.get(&site).is_some_and(|e| e.miss == u8::MAX) {
+            return;
+        }
+        if self.ic_map.len() >= IC_MAP_CAP {
+            self.ic_map.clear();
+        }
+        let ai = array_index(key);
+        let ent = self.heap.obj(id).and_then(|o| {
+            if !Self::ic_eligible(o, key, ai) {
+                return None;
+            }
+            let pos = o.prop_pos(key)?;
+            match o.props.get(pos) {
+                Some((_, Prop::Data { .. })) => Some(IcEnt {
+                    shape: o.shape(),
+                    pos: u32::try_from(pos).ok()?,
+                    miss: 0,
+                }),
+                _ => None,
+            }
+        });
+        if let Some(ent) = ent {
+            crate::j17_tick(&crate::J17_IC_LEARN);
+            self.ic_map.insert(site, ent);
+        }
     }
 
     /// Full prototype-chain lookup — *data* value only. Accessor
@@ -7574,6 +7758,18 @@ impl Engine {
     /// getter calls it with `this = recv` (differs from `base` only
     /// for `super.x` reads).
     pub(crate) fn read_prop(&mut self, base: Value, recv: Value, key: &str) -> JsResult<Value> {
+        self.read_prop_at(base, recv, key, 0)
+    }
+
+    /// [`Self::read_prop`] + site AST (`ptr(Expr)`/`ptr(ChainStep)`)
+    /// pour l'inline cache own-prop JS-C500 — `0` = pas de site.
+    pub(crate) fn read_prop_at(
+        &mut self,
+        base: Value,
+        recv: Value,
+        key: &str,
+        site: usize,
+    ) -> JsResult<Value> {
         let Value::Obj(mut id) = base else {
             return self.get_prop_value(base, key);
         };
@@ -7715,12 +7911,23 @@ impl Engine {
                 );
             }
         }
-        match self.find_prop(id, key) {
-            Some(Prop::Data { value, .. }) => {
+        // JS-C500 — IC own-prop : `(shape,pos)` vérifié à la
+        // clé réelle → réponse immédiate ; tout échec retombe
+        // sur la marche complète ci-dessous.
+        if let Some(v) = self.ic_hit(site, id, key) {
+            return Ok(v);
+        }
+        match self.find_prop_owner(id, key) {
+            Some((owner, Prop::Data { value, .. })) => {
+                // N'apprend que les own-props de la tête —
+                // les hits proto restent au cran transitions.
+                if owner == id {
+                    self.ic_learn(site, id, key);
+                }
                 self.probe_lookup(id, key, Some(value.clone()));
                 Ok(value)
             }
-            Some(Prop::Acc { get, .. }) => {
+            Some((_, Prop::Acc { get, .. })) => {
                 if self.is_callable(get.clone()) {
                     self.call_value(get, recv, &[])
                 } else {
@@ -7975,6 +8182,7 @@ impl Engine {
             proto,
             props: Vec::new(),
             idx: std::cell::OnceCell::new(),
+            shape: std::cell::Cell::new(0),
             kind: ObjKind::Host(host),
             extensible: true,
             elem_integrity: 0,
@@ -7999,6 +8207,18 @@ impl Engine {
 
     /// `base[key]` on any value — wraps primitives via their prototype.
     pub(crate) fn get_prop_value(&mut self, base: Value, key: &str) -> JsResult<Value> {
+        self.get_prop_value_at(base, key, 0)
+    }
+
+    /// [`Self::get_prop_value`] + site AST pour l'IC own-prop
+    /// (JS-C500) — `0` = pas de site ; seuls les accès issus de
+    /// nœuds `Expr`/`ChainStep` stables en portent un.
+    pub(crate) fn get_prop_value_at(
+        &mut self,
+        base: Value,
+        key: &str,
+        site: usize,
+    ) -> JsResult<Value> {
         // V-7 : temps cumulé de résolution (inclusif — un getter
         // JS re-entrant cumule dans le span englobant).
         let _t = crate::j17_scope(&crate::J17_PROP_NS);
@@ -8038,7 +8258,7 @@ impl Engine {
                         return Ok(v);
                     }
                 }
-                let v = self.read_prop(base.clone(), base, key)?;
+                let v = self.read_prop_at(base.clone(), base, key, site)?;
                 // N1.5 — sonde DI kevlar : nomme la clé des
                 // deferreds `resolve(new VhV(k))` (`deferredKey`
                 // lu par `IK$`) + les providers enregistrés
@@ -9294,6 +9514,7 @@ impl Engine {
             proto,
             props: Vec::new(),
             idx: std::cell::OnceCell::new(),
+            shape: std::cell::Cell::new(0),
             kind: ObjKind::Symbol {
                 desc,
                 key: key.clone(),

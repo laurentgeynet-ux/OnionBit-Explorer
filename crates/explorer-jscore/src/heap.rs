@@ -928,6 +928,23 @@ pub struct Object {
     /// inline (~56 o) sur **chaque** objet.
     #[allow(clippy::box_collection)]
     pub(crate) idx: std::cell::OnceCell<Box<std::collections::HashMap<std::rc::Rc<str>, u32>>>,
+    /// JS-C500 — empreinte de layout own-prop (ordre des clés
+    /// internées) pour l'inline cache `site → (shape, pos)`.
+    /// Paresseuse : `0` = sale/non calculée, [`Object::shape`]
+    /// plie les pointeurs de clés au premier besoin — `Cell`
+    /// car le calcul doit pouvoir tourner sous `&self`
+    /// (emprunt `heap.obj` partagé). Le bit haut est forcé à
+    /// chaque pas du pli → une valeur calculée n'est jamais `0`
+    /// et le pas incrémental de [`Object::push_prop`] produit
+    /// exactement le pli complet (même entrée, même bit haut).
+    /// Collision possible (hash) — sans effet sur la correction :
+    /// la vérif IC compare `props[pos].0` à la clé. Suit le
+    /// contenu au `swap_obj` (champ de `Object` échangé avec la
+    /// cellule). `+8 o` par objet — justification identique à
+    /// `idx` : borné par `mem_over`, non tracé par le GC.
+    /// `pub(crate)` : les littéraux `Object { … }` hors module le
+    /// posent `Cell::new(0)` — jamais autre chose.
+    pub(crate) shape: std::cell::Cell<u64>,
     /// Kind-specific payload.
     pub kind: ObjKind,
     /// `[[Extensible]]` — `Object.preventExtensions`/`seal`/`freeze`
@@ -1424,7 +1441,39 @@ pub(crate) fn f64_to_f16(v: f64) -> u16 {
 /// one-shot (< 12 props, majorité) gardent le scan gratuit.
 const PROPS_IDX_MIN: usize = 12;
 
+/// JS-C500 — graine d'empreinte de layout (bit haut posé :
+/// `0` est la sentinelle « sale » de `Object::shape`).
+const SHAPE_SEED: u64 = 0x9E37_79B9_7F4A_7C15;
+
+/// JS-C500 — un pas du pli d'empreinte : mixe l'adresse de la
+/// clé internée (stable pour la session — C310) avec ordre.
+/// Le bit haut est re-posé à chaque pas → le résultat n'est
+/// jamais `0`, et `push_prop` peut alimenter le pli
+/// incrémentalement avec un résultat identique au recomputé
+/// complet. Collisions admises : la vérif IC compare la clé à
+/// `props[pos]`, l'empreinte ne sert qu'à trier vite.
+fn shape_step(h: u64, key: &std::rc::Rc<str>) -> u64 {
+    (h.wrapping_mul(0xA24B_AED4_963E_E407).rotate_left(5) ^ (key.as_ptr() as usize as u64))
+        | (1u64 << 63)
+}
+
 impl Object {
+    /// Empreinte de layout own-prop — `0` en magasin = sale →
+    /// pli complet des clés internées, mémorisé en `Cell`.
+    /// Jamais `0` en retour (bit haut forcé par `shape_step`/
+    /// la graine).
+    pub(crate) fn shape(&self) -> u64 {
+        let h = self.shape.get();
+        if h != 0 {
+            return h;
+        }
+        let mut h = SHAPE_SEED;
+        for (k, _) in &self.props {
+            h = shape_step(h, k);
+        }
+        self.shape.set(h);
+        h
+    }
     /// New object with the given prototype and kind — propriétés
     /// vides, extensible, intégrité par défaut. Remplace les
     /// littéraux `Object { … }` : `idx` est privé et naît `None`.
@@ -1433,6 +1482,7 @@ impl Object {
             proto,
             props: Vec::new(),
             idx: std::cell::OnceCell::new(),
+            shape: std::cell::Cell::new(0),
             kind,
             extensible: true,
             elem_integrity: 0,
@@ -1501,7 +1551,14 @@ impl Object {
                 m.insert(key.clone(), pos);
             }
         }
-        self.props.push((key, prop));
+        self.props.push((key.clone(), prop));
+        // JS-C500 — pas incrémental de l'empreinte : identique au
+        // pli complet (même entrée `shape_step`, bit haut inclus).
+        // `0` = sale → reste sale, recomputée au prochain `shape()`.
+        let h = self.shape.get();
+        if h != 0 {
+            self.shape.set(shape_step(h, &key));
+        }
     }
 
     /// Raw own property lookup (no prototype walk, no array-index
@@ -1739,6 +1796,9 @@ impl Object {
                 // `remove` décale toutes les positions > i :
                 // index invalidé, reconstruit au prochain lookup.
                 self.idx.take();
+                // JS-C500 — layout changé : empreinte sale,
+                // recomputée au prochain `shape()`.
+                self.shape.set(0);
                 true
             }
             None => true,

@@ -318,6 +318,7 @@ impl Engine {
             proto: Value::Obj(self.protos.promise),
             props: Vec::new(),
             idx: std::cell::OnceCell::new(),
+            shape: std::cell::Cell::new(0),
             // Placeholder: resolved below once the bound fns exist.
             kind: ObjKind::Promise(JsPromise {
                 state: PromiseState::Pending,

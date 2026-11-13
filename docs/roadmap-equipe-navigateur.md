@@ -12607,6 +12607,20 @@ croître la surface navigateur mesurée (`api` 1510/8099, 18,6 %).
   IC `site→(shape,pos)` own-prop puis slots `(d,slot)` +
   `EnvCell::Uninit` (périmètre ~30 sites incl. GExec
   `lazy.rs` — déviation N4.2 vers slot statique, journal).
+- [x] **JS-C500 — cran 1a' : IC own-prop `site→(shape,pos)`**
+  (remplace le memo `(ObjId,pos)` de la v1 — capture le
+  polymorphisme d'instances) : `Object::shape: Cell<u64>`
+  incrémental au `push_prop`, sale au `remove_own`, suit
+  `swap_obj` ; `ic_map` bornée 8192 purge atomique avec
+  `resolved_map` ; vérif sémantique à chaque hit (clé à pos
+  + `Prop::Data` + éligibilité kind : `args_map`/Array-length/
+  TA/`Proxy` exclus) ; désarmement à 8 miss ; sites =
+  `ptr(Expr|ChainStep)` threadés (spine itérative comprise) ;
+  `EXPLORER_NO_IC`/`EXPLORER_IC_VERIFY`. Compteurs
+  `ic_hit`/`miss`/`learn`/`disarm`/`bail`. Verrous : lang
+  315 (×2 dont VERIFY), c500 12, lib 48. Hits proto/absents
+  non cachés → décision cran transitions sur `prop_scan`
+  résiduel (N5.5).
 
 Convergence visée : **Étape 239** — plan global consolidé,
 chaque gain rapporté contre les **deux** archétypes.

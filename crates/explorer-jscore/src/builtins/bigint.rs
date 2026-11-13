@@ -406,6 +406,7 @@ pub(crate) fn new_proxy(e: &mut Engine, target: Value, handler: Value) -> JsResu
         proto,
         props: Vec::new(),
         idx: std::cell::OnceCell::new(),
+        shape: std::cell::Cell::new(0),
         kind: ObjKind::Proxy {
             target,
             handler: Some(handler),

@@ -2132,6 +2132,7 @@ pub(crate) fn gen_lazy_obj(e: &mut Engine, env: EnvRef, this: Value, body: Rc<Ve
         proto: Value::Obj(e.protos.iterator),
         props: Vec::new(),
         idx: std::cell::OnceCell::new(),
+        shape: std::cell::Cell::new(0),
         kind: ObjKind::GenLive { exec },
         extensible: true,
         elem_integrity: 0,
@@ -2159,6 +2160,7 @@ fn bound_resume(e: &mut Engine, gen: Value, outer: Option<ObjId>, ok: bool) -> V
         proto: Value::Obj(e.protos.function),
         props: Vec::new(),
         idx: std::cell::OnceCell::new(),
+        shape: std::cell::Cell::new(0),
         kind: ObjKind::Fun(Fun::BoundNative {
             name: "async_resume",
             f,

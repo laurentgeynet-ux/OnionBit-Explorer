@@ -3446,3 +3446,38 @@ shadow n'atteint ni cascade ni boxification ») etait
   zéro table par env ; périmètre pré-déclare ~30 sites
   incl. GExec `lazy.rs`, scopes empoisonnés exclus →
   delta `eval` ≈ 0).
+
+### 2026-11-13 — cran 1a' : IC own-prop `site→(shape,pos)` (JS-C500)
+
+- **`Object::shape: Cell<u64>`** (+8 o/objet, non tracé GC) :
+  pli paresseux des pointeurs de clés internées, bit haut
+  forcé à chaque pas → `push_prop` incrémental ≡ recomputé ;
+  `remove_own` salit ; `swap_obj` emporte le champ avec le
+  contenu. 43 littéraux `Object{…}` mis à jour
+  (`Cell::new(0)`).
+- **`ic_map` Engine** `ptr(Expr|ChainStep) → (shape,pos)`
+  bornée 8192, purge atomique avec `resolved_map` (JS-C492).
+  Vérif sémantique à chaque hit : objet vivant + éligible +
+  `shape` égale + `props[pos].0 == key` + `Prop::Data` →
+  correction par construction, tout échec → `find_prop`.
+- **Bails d'éligibilité** = les bras de `find_own_ai` qui
+  devancent `o.find` : `args_map`, `Array`(`length`/ai),
+  `Fun::Script`(`length`), `ta_prop` kinds, `Proxy`. Les
+  synthèses post-`o.find` (`fn.name`, `@@toStringTag`,
+  statics `RegExp`) restent éligibles.
+- **Anti-thrash** : 8 miss → site désarmé (`u8::MAX`,
+  consultation = 2 comparaisons). Compteurs J17
+  `ic_hit/miss/learn/disarm/bail` + `EXPLORER_NO_IC` /
+  `EXPLORER_IC_VERIFY` (hit revérifié par la marche).
+- **Sites threadés par `ptr(Expr)`** (pas `#[track_caller]` :
+  locations Rust convergent → mégamorphisme) : spine
+  itérative `Member`/`Index`, bras `eval_inner` ×4,
+  `Callee::Member` (variant +site), `ChainStep` ×4,
+  `TaggedTemplate`, `LValueRef::Prop` (+champ `site`,
+  lecture seule — écritures hors périmètre 1a').
+- Hits proto / absents **non cachés** — `find_prop` rend
+  désormais `find_prop_owner` (maillon propriétaire) ;
+  `ic_learn` n'écrit que si `owner == id`.
+- Verrous : `lang` 315/315 ×2 (dont `IC_VERIFY=1`, zéro
+  `ic.bad`), `c500_ic` 12, lib 48, suites
+  proto/accessors/args/lazy vertes.

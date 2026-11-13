@@ -156,6 +156,7 @@ fn mk(e: &mut Engine, name: &str, data: TempData) -> JsResult<Value> {
         proto,
         props: Vec::new(),
         idx: std::cell::OnceCell::new(),
+        shape: std::cell::Cell::new(0),
         kind: crate::heap::ObjKind::Temp(data),
         extensible: true,
         elem_integrity: 0,

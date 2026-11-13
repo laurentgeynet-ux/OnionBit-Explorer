@@ -135,8 +135,10 @@ impl Engine {
     fn eval_spine(&mut self, env: &EnvRef, this: Value, e: &Expr) -> JsResult<Value> {
         enum Spine<'a> {
             Bin(BinOp, &'a Expr),
-            Member(&'a str),
-            Index(&'a Expr),
+            /// `o.n` — `usize` = site AST (`ptr(Expr)`, IC JS-C500).
+            Member(&'a str, usize),
+            /// `o[k]` — idem.
+            Index(&'a Expr, usize),
             Call(&'a [Expr]),
         }
         let mut spine: Vec<Spine<'_>> = Vec::new();
@@ -148,11 +150,14 @@ impl Engine {
                     l
                 }
                 Expr::Member(b, name) => {
-                    spine.push(Spine::Member(name));
+                    spine.push(Spine::Member(
+                        name,
+                        std::ptr::from_ref::<Expr>(cur) as usize,
+                    ));
                     b
                 }
                 Expr::Index(b, k) => {
-                    spine.push(Spine::Index(k));
+                    spine.push(Spine::Index(k, std::ptr::from_ref::<Expr>(cur) as usize));
                     b
                 }
                 // `f()()` : seule la chaîne Call←Call est
@@ -184,15 +189,15 @@ impl Engine {
                         self.binary_op(op, acc, rv)?
                     }
                 },
-                Spine::Member(name) => self.get_prop_value(acc.clone(), name)?,
-                Spine::Index(k) => {
+                Spine::Member(name, site) => self.get_prop_value_at(acc.clone(), name, site)?,
+                Spine::Index(k, site) => {
                     let kv = self.eval_expr(env, this.clone(), k)?;
                     if let Some(v) = self.arr_index_get(acc.clone(), kv.clone()) {
                         acc = v;
                         continue;
                     }
                     let key = self.prop_key(kv)?;
-                    self.get_prop_value(acc, &key)?
+                    self.get_prop_value_at(acc, &key, site)?
                 }
                 Spine::Call(arg_exprs) => {
                     let args = self.eval_args(env, this.clone(), arg_exprs)?;
@@ -355,13 +360,27 @@ impl Engine {
                 let (f, recv) = match &**tag {
                     Expr::Member(base, name) => {
                         let b = self.eval_expr(env, this.clone(), base)?;
-                        (self.get_prop_value(b.clone(), name)?, b)
+                        (
+                            self.get_prop_value_at(
+                                b.clone(),
+                                name,
+                                std::ptr::from_ref::<Expr>(&**tag) as usize,
+                            )?,
+                            b,
+                        )
                     }
                     Expr::Index(base, key) => {
                         let b = self.eval_expr(env, this.clone(), base)?;
                         let kv = self.eval_expr(env, this.clone(), key)?;
                         let k = self.prop_key(kv)?;
-                        (self.get_prop_value(b.clone(), &k)?, b)
+                        (
+                            self.get_prop_value_at(
+                                b.clone(),
+                                &k,
+                                std::ptr::from_ref::<Expr>(&**tag) as usize,
+                            )?,
+                            b,
+                        )
                     }
                     _ => (self.eval_expr(env, this.clone(), tag)?, Value::Undefined),
                 };
@@ -536,17 +555,17 @@ impl Engine {
             Expr::NewTarget => Ok(self.env_get(env, NEW_TARGET).unwrap_or(Value::Undefined)),
             Expr::SuperMember(name) => {
                 let base = self.super_base(env)?;
-                self.read_prop(base, this, name)
+                self.read_prop_at(base, this, name, std::ptr::from_ref::<Expr>(e) as usize)
             }
             Expr::SuperIndex(k) => {
                 let base = self.super_base(env)?;
                 let kv = self.eval_expr(env, this.clone(), k)?;
                 let key = self.prop_key(kv)?;
-                self.read_prop(base, this, &key)
+                self.read_prop_at(base, this, &key, std::ptr::from_ref::<Expr>(e) as usize)
             }
             Expr::Member(base, name) => {
                 let b = self.eval_expr(env, this, base)?;
-                self.get_prop_value(b, name)
+                self.get_prop_value_at(b, name, std::ptr::from_ref::<Expr>(e) as usize)
             }
             Expr::Index(base, key) => {
                 let b = self.eval_expr(env, this.clone(), base)?;
@@ -555,14 +574,15 @@ impl Engine {
                     return Ok(v);
                 }
                 let k = self.prop_key(k)?;
-                self.get_prop_value(b, &k)
+                self.get_prop_value_at(b, &k, std::ptr::from_ref::<Expr>(e) as usize)
             }
             Expr::Call(callee, arg_exprs, call_pos) => {
                 enum Callee {
                     /// `expr(…)` — f pre-evaluated, global receiver.
                     Bare(Value),
-                    /// `o.m(…)`/`o[k](…)` — receiver is the base.
-                    Member(Value, Rc<str>),
+                    /// `o.m(…)`/`o[k](…)` — receiver is the base ;
+                    /// `usize` = site AST du callee (IC JS-C500).
+                    Member(Value, Rc<str>, usize),
                     /// `super.m(…)`/`super[k](…)` — home-object proto
                     /// lookup, receiver stays `this`.
                     Super(Rc<str>),
@@ -593,13 +613,21 @@ impl Engine {
                     Expr::Member(base, name) => {
                         let b = self.eval_expr(env, this.clone(), base)?;
                         crate::j17_tick(&crate::J17_MEMBER_KEY);
-                        Callee::Member(b, name.clone())
+                        Callee::Member(
+                            b,
+                            name.clone(),
+                            std::ptr::from_ref::<Expr>(&**callee) as usize,
+                        )
                     }
                     Expr::Index(base, key) => {
                         let b = self.eval_expr(env, this.clone(), base)?;
                         let k = self.eval_expr(env, this.clone(), key)?;
                         crate::j17_tick(&crate::J17_MEMBER_KEY);
-                        Callee::Member(b, Rc::from(self.prop_key(k)?))
+                        Callee::Member(
+                            b,
+                            Rc::from(self.prop_key(k)?),
+                            std::ptr::from_ref::<Expr>(&**callee) as usize,
+                        )
                     }
                     Expr::SuperMember(name) => Callee::Super(name.clone()),
                     Expr::SuperIndex(key) => {
@@ -646,7 +674,7 @@ impl Engine {
                             _ => r,
                         }
                     }
-                    Callee::Member(recv, name) => {
+                    Callee::Member(recv, name, site) => {
                         // Host method dispatch first: `hostObj.m(…)`
                         // hits the host's `invoke` before prop lookup —
                         // sauf shadow : `hostObj.m = f` (patch
@@ -673,7 +701,7 @@ impl Engine {
                                 }
                             }
                         }
-                        let f = self.get_prop_value(recv.clone(), &name)?;
+                        let f = self.get_prop_value_at(recv.clone(), &name, site)?;
                         if !self.is_callable(f.clone()) {
                             // Diagnostic : nommer la méthode + le
                             // receveur — les erreurs de pages
@@ -1133,23 +1161,23 @@ impl Engine {
                 .ok_or_else(|| self.ref_error(format!("{name} is not defined"))),
             Expr::Member(base, name) => {
                 let b = self.eval_expr(env, this, base)?;
-                self.get_prop_value(b, name)
+                self.get_prop_value_at(b, name, std::ptr::from_ref::<Expr>(e) as usize)
             }
             Expr::Index(base, key) => {
                 let b = self.eval_expr(env, this.clone(), base)?;
                 let k = self.eval_expr(env, this, key)?;
                 let k = self.prop_key(k)?;
-                self.get_prop_value(b, &k)
+                self.get_prop_value_at(b, &k, std::ptr::from_ref::<Expr>(e) as usize)
             }
             Expr::SuperMember(name) => {
                 let base = self.super_base(env)?;
-                self.read_prop(base, this, name)
+                self.read_prop_at(base, this, name, std::ptr::from_ref::<Expr>(e) as usize)
             }
             Expr::SuperIndex(k) => {
                 let base = self.super_base(env)?;
                 let kv = self.eval_expr(env, this.clone(), k)?;
                 let key = self.prop_key(kv)?;
-                self.read_prop(base, this, &key)
+                self.read_prop_at(base, this, &key, std::ptr::from_ref::<Expr>(e) as usize)
             }
             _ => Err(self.type_error("invalid assignment target")),
         }
@@ -1217,12 +1245,20 @@ impl Engine {
             Expr::Ident(name) => Some(LValueRef::Ident(name.clone())),
             Expr::Member(base, name) => {
                 let b = self.eval_expr(env, this, base)?;
-                Some(LValueRef::Prop(b, name.clone()))
+                Some(LValueRef::Prop(
+                    b,
+                    name.clone(),
+                    std::ptr::from_ref::<Expr>(e) as usize,
+                ))
             }
             Expr::Index(base, key) => {
                 let b = self.eval_expr(env, this.clone(), base)?;
                 let k = self.eval_expr(env, this, key)?;
-                Some(LValueRef::Prop(b, Rc::from(self.prop_key(k)?)))
+                Some(LValueRef::Prop(
+                    b,
+                    Rc::from(self.prop_key(k)?),
+                    std::ptr::from_ref::<Expr>(e) as usize,
+                ))
             }
             _ => None,
         })
@@ -1233,14 +1269,14 @@ impl Engine {
             LValueRef::Ident(name) => self
                 .env_get(env, name)
                 .ok_or_else(|| self.ref_error(format!("{name} is not defined"))),
-            LValueRef::Prop(b, k) => self.get_prop_value(b.clone(), k),
+            LValueRef::Prop(b, k, site) => self.get_prop_value_at(b.clone(), k, *site),
         }
     }
 
     pub(crate) fn store_lvalue(&mut self, env: &EnvRef, lv: LValueRef, v: Value) -> JsResult<()> {
         match lv {
             LValueRef::Ident(name) => self.env_set(env, &name, v),
-            LValueRef::Prop(b, k) => self.set_prop_value(b, &k, v),
+            LValueRef::Prop(b, k, _) => self.set_prop_value(b, &k, v),
         }
     }
 
@@ -1547,18 +1583,19 @@ impl Engine {
         let mut recv = Value::Obj(self.global);
         let mut recv_key: Option<Rc<str>> = None;
         for step in steps {
+            let site = std::ptr::from_ref::<ChainStep>(step) as usize;
             match step {
                 ChainStep::Member(name) => {
                     recv = cur.clone();
                     recv_key = Some(name.clone());
-                    cur = self.get_prop_value(cur, name)?;
+                    cur = self.get_prop_value_at(cur, name, site)?;
                 }
                 ChainStep::Index(k) => {
                     let kv = self.eval_expr(env, this.clone(), k)?;
                     let key = self.prop_key(kv)?;
                     recv = cur.clone();
                     recv_key = Some(Rc::from(&*key));
-                    cur = self.get_prop_value(cur, &key)?;
+                    cur = self.get_prop_value_at(cur, &key, site)?;
                 }
                 ChainStep::OptMember(name) => {
                     if matches!(cur, Value::Null | Value::Undefined) {
@@ -1566,7 +1603,7 @@ impl Engine {
                     }
                     recv = cur.clone();
                     recv_key = Some(name.clone());
-                    cur = self.get_prop_value(cur, name)?;
+                    cur = self.get_prop_value_at(cur, name, site)?;
                 }
                 ChainStep::OptIndex(k) => {
                     if matches!(cur, Value::Null | Value::Undefined) {
@@ -1576,7 +1613,7 @@ impl Engine {
                     let key = self.prop_key(kv)?;
                     recv = cur.clone();
                     recv_key = Some(Rc::from(&*key));
-                    cur = self.get_prop_value(cur, &key)?;
+                    cur = self.get_prop_value_at(cur, &key, site)?;
                 }
                 ChainStep::Call(arg_exprs) | ChainStep::OptCall(arg_exprs) => {
                     if matches!(step, ChainStep::OptCall(_))
