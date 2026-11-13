@@ -12574,6 +12574,14 @@ croître la surface navigateur mesurée (`api` 1510/8099, 18,6 %).
   Mesure = N5.5.
 - [ ] **N5.5 — re-vols dev.to + YouTube** après chaque
   livraison — jamais l'un sans l'autre (discipline §3).
+  Premier double-vol (post-Étape 236) : dev.to 154 s —
+  `incr.cascade` 0,31-0,34 s ≈ ×30 sur passes petits
+  touchés (mur résiduel : `descend_all` touché-conteneur
+  géant 7,66 s + garde `:has` 8,74 s, hors cause
+  frontière) ; YouTube 186,6 s — `incr.cascade`
+  1,7-2,2 s/passe, `group_us` 1,98 s sur une frame
+  (résidu timing-dépendant non reproduit). Artefacts :
+  `C:\OnionBit-vol\vol-236-*.log`.
 - [ ] **N5.6 — adoption `entities` jscore** (§2.7) — quasi
   gratuit.
 

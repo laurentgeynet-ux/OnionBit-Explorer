@@ -69,7 +69,7 @@ NAV : Étape 236+) au commit.
 - Les re-vols se font sur le **binaire de branche frais** —
   c'est l'état mesuré, la baseline post-235 vit ici.
 
-### 2.2 — Frontière cascade (R-292) [PIPE `explorer-css`]
+### 2.2 — Frontière cascade (R-292) [PIPE `explorer-css`] — **LIVRÉ** (`570c18f5`)
 
 | Tâche | Fichiers | DoD |
 |---|---|---|
@@ -79,15 +79,28 @@ Spec = proposition journalisée (chantier 12ter). **Revue
 de design écrite au journal avant code** (remplace le
 sign-off croisé en piste unique) : couverture des cas
 `~`/`+`/`:nth-*` frères, héritage transitif, repli quand
-la frontière ≈ le sous-arbre.
+la frontière ≈ le sous-arbre. **Livré** : API 3 niveaux
+additifs, 9 tests `cascade_frontier` verts (invariant
+`base ⊕ frontier ≡ compute_tree`), canal silencieux
+couvert par flag `deep_relational`.
 
-### 2.3 — Câblage frontière + re-vol [NAV `explorer-core`]
+### 2.3 — Câblage frontière + re-vol [NAV `explorer-core`] — **LIVRÉ** (`63043aef`, Étape 236)
 
 | Tâche | Fichiers | DoD |
 |---|---|---|
 | Dériver `frontier` (ancêtres + frères précédents des touchés) depuis `journal_style_scopes` ; appeler `compute_scoped_frontier` quand dispo, repli `compute_scoped` | `crates/explorer-core/src/session/apply.rs` | re-vol dev.to : `scope_nodes` géants évités, `incr.cascade` tranché |
 
-Dépend de §2.2.
+Dépend de §2.2. **Livré** : `style_touched` (nœud réel
+`SetAttr`, parent `Remove`/`Insert`/`SetText`) →
+`compute_scoped_frontier` quand `frontier_ok`, repli
+multi-scope 234 sinon. **Mesuré** (`vol-236-devto-dlv.log`,
+sondes `frontier_ok`/`n_frontier` armées) : passes petits
+touchés → `incr.cascade` **0,31-0,34 s ≈ ×30** vs scope
+~4 800 nœuds (~10 s) ; mur résiduel hors frontière :
+`SetAttr` sur conteneur géant (`descend_all` requis, 7,66 s
+— levier « descend-on-change si l'attribut n'est dans
+aucun composé ancêtre » à évaluer) et `has_dep_touched`
+→ cascade complète 8,74 s (garde 234, trou (e)).
 
 ### 2.4 — `may_escape` (R-293) [PIPE `explorer-layout` + `explorer-render`]
 
