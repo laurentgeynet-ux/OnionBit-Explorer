@@ -12146,6 +12146,60 @@ un crate PIPELINE.- [x] **JS-C422. Deadline honnête — canal session ↔ budge
   repli complet), `styles_scoped_needs_
   persisted_base` — 144 lib + 473
   intégration verts.
+- [x] **Étape 229. `loading="lazy"` sur
+  `<img>` honoré** (`explorer-core`
+  `session/net.rs`/`net_items.rs`/
+  `dom_helpers.rs`/`input.rs`/`apply.rs`/
+  `mod.rs`/`tab.rs`/`types.rs`, audit
+  perf chantier 7) : l'attribut était
+  fetché d'emblée — lemonde/bbc
+  alignent ~200 `<img>` lazy sous le
+  pli, toutes téléchargées à la vague.
+  `plan_img_urls` partitionne :
+  `loading="lazy"` (ASCII
+  case-insensitive — `eager`/absent/
+  invalide = eager, spec) résout,
+  upgrade CSP, filtre mixed-content +
+  `img-src` et déduplique **comme les
+  eager** (URL partagée — un fetch sert
+  tous les frères de même cible) mais
+  rejoint `SubPlan.lazy_imgs` au lieu
+  des jobs — rangée sur
+  `Tab::lazy_imgs` au commit, gelée
+  avec la page (bfcache). Promotion :
+  `promote_lazy` émet le fetch quand la
+  boîte posée entre dans
+  `[scroll_y - lazy_margin, scroll_y +
+  viewport + lazy_margin]`
+  (`SessionConfig::lazy_margin_px`,
+  défaut 1250 px) — accrochée à
+  `poll_net`, `drain_applies` et
+  `scroll_by` ; entrées sans boîte
+  (`display:none`, détaché) conservées
+  — réévaluées au prochain apply,
+  jamais perdues. Livraison par slot
+  `NetDone.lazy` (sécurité
+  sous-ressource + décodage
+  `img_decoded`/`img_bodies` comme
+  `commit_dyn_img`, insertion
+  `images.replaced` de tous les nœuds
+  de même URL quand la payload est
+  attachée, repaint) — pas de
+  `load`/`error` miroir, comme les
+  `<img>` de la vague. Tâches dans
+  `dyn_tasks` sous `lazy_seq`
+  décroissant depuis `u64::MAX`
+  (collision-free avec les `seq`
+  moteur). Reste : `<iframe
+  loading=lazy>` (même attribut, pile
+  sous-contexte distincte — non
+  couvert). Verrous :
+  `loading_lazy_defers_far_img_until_
+  scroll` (différée sous le pli, fetch
+  au scroll), `loading_eager_and_
+  invalid_fetch_immediately`,
+  `loading_lazy_promoted_img_paints` —
+  144 lib + 476 intégration verts.
 
 ## Plan NAVIGATEUR — vitrine YouTube + surface navigateur (2026-11-12)
 

@@ -247,6 +247,7 @@ impl Session {
             bg_bodies,
             mask_aliases,
             expanded_inline,
+            lazy_imgs,
             mut eng,
             fonts,
             arrival_classic,
@@ -270,6 +271,10 @@ impl Session {
             // à chaque commit → les contextes du document
             // mort ne survivent pas.
             entry.frames = frames;
+            // `<img loading="lazy">` différées (étape 229) —
+            // promues par `promote_lazy` dès que leurs boîtes
+            // posées approchent du viewport.
+            entry.lazy_imgs = lazy_imgs;
             // Surfaces composites (étape 129) : les bitmaps
             // clés `(url,w,h)` datent de la vague
             // précédente — même URL ≠ même contenu d'un
@@ -1586,6 +1591,7 @@ impl Session {
                 link: None,
                 dyn_module: None,
                 import: Some(meta),
+                lazy: None,
             });
         });
     }
@@ -1884,6 +1890,7 @@ impl Session {
                 link: None,
                 dyn_module: None,
                 import: None,
+                lazy: None,
             });
         });
         self.dyn_tasks.insert((tab, seq), j);
@@ -1959,6 +1966,7 @@ impl Session {
                     graph: Some(graph),
                 }),
                 import: None,
+                lazy: None,
             });
         });
         self.dyn_tasks.insert((tab, seq), j);
@@ -2238,6 +2246,7 @@ impl Session {
                 link: None,
                 dyn_module: None,
                 import: None,
+                lazy: None,
             });
         });
         self.dyn_tasks.insert((tab, seq), j);
@@ -2351,6 +2360,7 @@ impl Session {
                 link: None,
                 dyn_module: None,
                 import: None,
+                lazy: None,
             });
         });
         self.dyn_tasks.insert((tab, seq), j);
@@ -2423,6 +2433,201 @@ impl Session {
         // n'est pas une image chargée (spec), et rien n'est
         // retenu (un blob invalide ne re-servirait pas).
         self.deliver_dyn_img_el(tab, ctx, seq, ok);
+    }
+
+    /// Promotion `loading="lazy"` (étape 229) — parcourt les
+    /// `<img>` différées de l'onglet et émet le fetch de
+    /// celles dont la boîte posée entre dans le viewport
+    /// élargi de `lazy_margin` (`[scroll_y - m, scroll_y +
+    /// vh + m]`). Les entrées sans boîte (`display:none`,
+    /// nœud détaché, arbre absent) restent différées : un
+    /// apply ultérieur les re-évaluera — jamais de perte
+    /// muette. `&mut` court : les spawns ne prennent pas le
+    /// transport.
+    pub(crate) fn promote_lazy(&mut self, tab: TabId) {
+        let margin = self.lazy_margin;
+        let vh = self.viewport.1;
+        let (lo, hi) = {
+            let Some(entry) = self.tabs.get(&tab) else {
+                return;
+            };
+            if entry.lazy_imgs.is_empty() {
+                return;
+            }
+            (entry.scroll_y - margin, entry.scroll_y + vh + margin)
+        };
+        // Extraction bornée sous le même emprunt : l'arbre
+        // posé est relu sans le déplacer.
+        let mut due: Vec<net_items::LazyImgReq> = Vec::new();
+        {
+            let Some(entry) = self.tabs.get_mut(&tab) else {
+                return;
+            };
+            let Some(tree) = entry.tree.as_ref() else {
+                return;
+            };
+            entry.lazy_imgs.retain(|r| {
+                let hit = super::paint::find_box(tree, r.node)
+                    .is_some_and(|b| b.rect.y + b.rect.height > lo && b.rect.y < hi);
+                if hit {
+                    due.push(r.clone());
+                }
+                !hit
+            });
+        }
+        for r in due {
+            self.spawn_lazy_img(tab, &r);
+        }
+    }
+
+    /// Promotion sur tous les onglets (étape 229) — fin de
+    /// `poll_net`/`drain_applies` : un commit d'apply ou une
+    /// navigation peut avoir posé l'arbre depuis le dernier
+    /// passage. Coût borné par la taille des files
+    /// (`max_images` chacune).
+    pub(crate) fn promote_lazy_all(&mut self) {
+        let tabs: Vec<TabId> = self.tabs.keys().copied().collect();
+        for tab in tabs {
+            self.promote_lazy(tab);
+        }
+    }
+
+    /// Émission du fetch d'une `<img>` promue (étape 229) —
+    /// même pile `sub_request` que la vague (`Sec-Fetch-Dest:
+    /// image`, politique `Referer` du document), tâche
+    /// tokio rangée dans `dyn_tasks` sous un `seq` propre à
+    /// la famille lazy (`lazy_seq` décroissant — jamais de
+    /// collision avec les `seq` moteur croissantes).
+    fn spawn_lazy_img(&mut self, tab: TabId, r: &net_items::LazyImgReq) {
+        let Some(entry) = self.tabs.get(&tab) else {
+            return;
+        };
+        let Some(page) = entry.url.clone() else {
+            return;
+        };
+        let req = sub_request(
+            &page,
+            &r.url,
+            explorer_net::http::FetchDest::Image,
+            entry.referrer_policy,
+            None,
+        );
+        let is_cross = page.origin() != r.url.origin();
+        let credentials = explorer_net::http::FetchCredentials::SameOrigin;
+        let fetch_mode = req.fetch_mode;
+        let page_origin = origin_header_value(&page);
+        let partition = explorer_net::cookies::request_partition(&req);
+        let req_url = req.url.clone();
+        let seq = self.lazy_seq;
+        self.lazy_seq = self.lazy_seq.wrapping_sub(1);
+        let meta = net_items::LazyImgMeta {
+            seq,
+            src_key: r.src_key.clone(),
+            url: r.url.clone(),
+            page,
+        };
+        let tr = self.transport.clone();
+        let tx = self.net_tx.clone();
+        let j = tokio::spawn(async move {
+            let out = fetch_maybe_data(&tr, &req).await;
+            let _ = tx.send(NetDone {
+                tab,
+                handle: seq,
+                cross: is_cross,
+                mode: fetch_mode,
+                credentials,
+                page_origin,
+                cors_unsafe: req
+                    .cors
+                    .as_ref()
+                    .map(|c| c.unsafe_headers.clone())
+                    .unwrap_or_default(),
+                req_url,
+                partition,
+                out,
+                script: None,
+                frame: None,
+                img: None,
+                link: None,
+                dyn_module: None,
+                import: None,
+                lazy: Some(meta),
+            });
+        });
+        self.dyn_tasks.insert((tab, seq), j);
+    }
+
+    /// Réception d'une `<img>` lazy promue (étape 229) —
+    /// statut 2xx + sécurité sous-ressource (même règle que
+    /// `commit_dyn_img`), puis le corps est décodé dans les
+    /// caches persistants (`img_decoded` par `src_key`,
+    /// `img_bodies` par URL — un apply ultérieur re-matche
+    /// même si la payload était détachée) et inséré dans
+    /// `images.replaced` de **tous** les nœuds résolvant à la
+    /// même URL (dédup `seen_img` du plan : un fetch sert
+    /// tous les frères de même cible), puis repaint.
+    /// `load`/`error` ne partent pas sur l'élément — les
+    /// `<img>` de la vague n'en tirent pas non plus
+    /// (sémantique existante conservée).
+    fn commit_lazy_img(
+        &mut self,
+        tab: TabId,
+        meta: &net_items::LazyImgMeta,
+        out: &NetResult<Response>,
+    ) {
+        let body = match out {
+            Ok(resp)
+                if (200..300).contains(&resp.status)
+                    && subresp_security_allows(
+                        &meta.page,
+                        &meta.url,
+                        explorer_net::http::FetchDest::Image,
+                        resp,
+                    ) =>
+            {
+                Some(resp.body.clone())
+            }
+            _ => None,
+        };
+        let Some(body) = body else {
+            return;
+        };
+        let img = decode_image(&body, self.image_max_px).map(Arc::new);
+        let Some(img) = img else {
+            return;
+        };
+        let Some(entry) = self.tabs.get_mut(&tab) else {
+            return;
+        };
+        retain_img_body(&mut entry.img_bodies, &meta.url.as_str(), body);
+        // Budget octets global (§B-59) — au-delà, le corps
+        // compressé reste retenu mais le bitmap n'entre pas.
+        let held = decoded_cache_bytes(&entry.img_decoded, &entry.bg_decoded);
+        if held.saturating_add(img.rgba.len()) > self.image_max_bytes {
+            return;
+        }
+        entry.img_decoded.insert(meta.src_key.clone(), img.clone());
+        entry
+            .bg_decoded
+            .insert(meta.url.as_str(), Some(img.clone()));
+        // Insertion directe dans la table peinte — la payload
+        // détachée (apply en vol) a vidé `images` : les caches
+        // ci-dessus suffisent, le prochain relayout re-matche.
+        if let (Some(dom), false) = (entry.dom.as_ref(), entry.paint_detached) {
+            let base = entry.nav_base().cloned();
+            let scripting = entry.js.is_some();
+            let env =
+                super::apply::viewport_env(self.viewport, self.color_scheme, scripting, self.scale);
+            if let Some(base) = base {
+                for (node, src) in collect_images(dom, &env) {
+                    if Url::resolve(&base, &src).is_ok_and(|u| u.as_str() == meta.url.as_str()) {
+                        entry.images.replaced.insert(node, img.clone());
+                    }
+                }
+            }
+        }
+        let _ = self.repaint(tab);
+        self.emit_invalidated(tab);
     }
 
     /// Un `<link rel=stylesheet>` dynamique (CAP-173) :
@@ -2516,6 +2721,7 @@ impl Session {
                 link: Some(meta),
                 dyn_module: None,
                 import: None,
+                lazy: None,
             });
         });
         self.dyn_tasks.insert((tab, seq), j);
@@ -3065,6 +3271,7 @@ impl Session {
                 link: None,
                 dyn_module: None,
                 import: None,
+                lazy: None,
             });
         });
         self.net_tasks.insert((tab, handle), j);
@@ -4008,6 +4215,7 @@ impl Session {
                 && d.img.is_none()
                 && d.link.is_none()
                 && d.import.is_none()
+                && d.lazy.is_none()
             {
                 self.net_tasks.remove(&(d.tab, d.handle));
             }
@@ -4296,6 +4504,14 @@ impl Session {
                 self.commit_dyn_import(d.tab, &meta, &d.out);
                 continue;
             }
+            // `<img loading="lazy">` promue (étape 229) —
+            // `handle` = `seq` lazy (espace décroissant).
+            if let Some(meta) = d.lazy.take() {
+                self.dyn_tasks.remove(&(d.tab, meta.seq));
+                self.probe_net_arr(&d);
+                self.commit_lazy_img(d.tab, &meta, &d.out);
+                continue;
+            }
             self.net_tasks.remove(&(d.tab, d.handle));
             self.probe_net_arr(&d);
             // `Set-Cookie` capturé : same-origin sauf
@@ -4379,6 +4595,11 @@ impl Session {
         for tab in touched {
             self.finish_net_turn(tab);
         }
+        // Étape 229 — les `<img loading="lazy">` dont la
+        // boîte a rejoint le voisinage du viewport (apply
+        // commis depuis la passe précédente) partent en
+        // fetch ici, au rythme de la pompe existante.
+        self.promote_lazy_all();
     }
 
     /// Pompe les réponses des requêtes script-initiées
@@ -4424,7 +4645,7 @@ impl Session {
         env: &StyleEnv,
         upg: &dyn Fn(Url) -> Url,
         allow: &dyn Fn(explorer_net::http::FetchDest, &Url) -> bool,
-    ) -> Vec<Url> {
+    ) -> (Vec<Url>, Vec<net_items::LazyImgReq>) {
         let mut seen_img = std::collections::HashSet::new();
         let img_probe = tracing::enabled!(target: "media_probe", tracing::Level::INFO);
         let mut noresolve = 0u64;
@@ -4433,41 +4654,56 @@ impl Session {
         let mut dup = 0u64;
         let img_cands = collect_images(dom, env);
         let img_cand_n = img_cands.len();
-        let imgs: Vec<Url> = img_cands
-            .into_iter()
-            .filter_map(|(_, src)| {
-                Url::resolve(base, &src).ok().or_else(|| {
-                    if img_probe {
-                        noresolve += 1;
-                    }
-                    None
-                })
-            })
-            .map(upg)
+        // Étape 229 : `loading="lazy"` — la requête n'est pas
+        // émise au plan : l'entrée rejoint `lazy` et sera
+        // promue par `promote_lazy` quand sa boîte posée
+        // approche du viewport. La dédup URL est **partagée**
+        // (un eager et un lazy de même cible = un seul
+        // fetch) ; chaque liste garde la borne `max_images`
+        // propre — la différée borne la file, pas le budget
+        // réseau immédiat.
+        let mut imgs: Vec<Url> = Vec::new();
+        let mut lazy: Vec<net_items::LazyImgReq> = Vec::new();
+        for (node, src) in img_cands {
+            let Some(u) = Url::resolve(base, &src).ok() else {
+                if img_probe {
+                    noresolve += 1;
+                }
+                continue;
+            };
+            let u = upg(u);
             // `data:` (et autres non-http) ne se fetch pas —
             // peints inline par `collect_data_images` (56f).
-            .filter(|u| {
-                let ok = matches!(u.scheme(), "http" | "https");
-                if !ok && img_probe {
+            if !matches!(u.scheme(), "http" | "https") {
+                if img_probe {
                     nonhttp += 1;
                 }
-                ok
-            })
-            .filter(|u| {
-                if is_mixed_content(page, u) || !allow(explorer_net::http::FetchDest::Image, u) {
-                    if img_probe {
-                        blocked += 1;
-                    }
-                    return false;
+                continue;
+            }
+            if is_mixed_content(page, &u) || !allow(explorer_net::http::FetchDest::Image, &u) {
+                if img_probe {
+                    blocked += 1;
                 }
-                let fresh = seen_img.insert(u.as_str());
-                if !fresh && img_probe {
+                continue;
+            }
+            if !seen_img.insert(u.as_str()) {
+                if img_probe {
                     dup += 1;
                 }
-                fresh
-            })
-            .take(self.max_images)
-            .collect();
+                continue;
+            }
+            if el_loading_lazy(dom, node) {
+                lazy.push(net_items::LazyImgReq {
+                    node,
+                    src_key: src,
+                    url: u,
+                });
+            } else {
+                imgs.push(u);
+            }
+        }
+        imgs.truncate(self.max_images);
+        lazy.truncate(self.max_images);
         if img_probe {
             tracing::info!(
                 target: "media_probe",
@@ -4477,10 +4713,11 @@ impl Session {
                 nonhttp,
                 blocked,
                 dup,
-                fetch = imgs.len()
+                fetch = imgs.len(),
+                lazy = lazy.len()
             );
         }
-        imgs
+        (imgs, lazy)
     }
 
     /// Collecte des sous-ressources du document (étape 50) :
@@ -4569,7 +4806,7 @@ impl Session {
         } else {
             Vec::new()
         };
-        let imgs = self.plan_img_urls(dom, page, base, &env, &upg, &allow);
+        let (imgs, lazy_imgs) = self.plan_img_urls(dom, page, base, &env, &upg, &allow);
         // `<iframe>` (étape 128 + CAP-142) — un sous-contexte
         // est un document complet : `src` = fetch http(s),
         // mixed-content filtré, dédup par URL résolue ;
@@ -4622,6 +4859,7 @@ impl Session {
             frames,
             srcdoc_frames,
             mod_preloads,
+            lazy_imgs,
         }
     }
 

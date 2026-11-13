@@ -1169,6 +1169,13 @@ pub struct SessionConfig {
     /// bornée) ; les corps compressés `img_bodies` restent
     /// re-décodables. Défaut 512 Mio.
     pub image_max_bytes: usize,
+    /// Marge de promotion `loading="lazy"` (étape 229), en px
+    /// CSS autour du viewport : une `<img>` différée n'est
+    /// fetchée que quand sa boîte posée entre dans
+    /// `[scroll_y - marge, scroll_y + viewport + marge]`.
+    /// Défaut 1250 px — ordre de grandeur du rayon utilisé
+    /// par les navigateurs (~1 écran et demi sous le pli).
+    pub lazy_margin_px: f32,
     /// Nombre max de feuilles `<link>` fetchées par document
     /// (bornes sous-ressources — une page peut en chaîner
     /// des centaines). La borne s'applique **après** le
@@ -1374,6 +1381,7 @@ impl Default for SessionConfig {
             max_images: 256,
             image_max_px: 16_000_000,
             image_max_bytes: 512 * 1024 * 1024,
+            lazy_margin_px: 1250.0,
             max_sheets: 32,
             max_imports: 16,
             max_fonts: 16,

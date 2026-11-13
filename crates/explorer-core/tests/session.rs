@@ -288,6 +288,7 @@ fn test_session_policy(
         max_images: 32,
         image_max_px: 16_000_000,
         image_max_bytes: 512 * 1024 * 1024,
+        lazy_margin_px: 1250.0,
         max_sheets: 8,
         max_imports: 8,
         max_fonts: 16,
@@ -779,6 +780,7 @@ async fn download_url_bound_fails_mid_stream() {
         max_images: 32,
         image_max_px: 16_000_000,
         image_max_bytes: 512 * 1024 * 1024,
+        lazy_margin_px: 1250.0,
         max_sheets: 8,
         max_imports: 8,
         max_fonts: 16,
@@ -7957,6 +7959,7 @@ async fn redirect_commits_final_url_and_fragment() {
             max_images: 32,
             image_max_px: 16_000_000,
             image_max_bytes: 512 * 1024 * 1024,
+            lazy_margin_px: 1250.0,
             max_sheets: 8,
             max_imports: 8,
             max_fonts: 16,
@@ -16008,4 +16011,122 @@ async fn shared_input_unknown_tab_errs() {
         matches!(r, Err(CoreError::UnknownTab(_))),
         "onglet mort → UnknownTab : {r:?}"
     );
+}
+
+// ------------------------------------------------------------------
+// Étape 229 — `loading="lazy"` sur `<img>`
+// ------------------------------------------------------------------
+
+/// Lazy sous le pli : différée au plan (pas de fetch),
+/// promue par la position posée quand le scroll l'approche.
+#[tokio::test]
+async fn loading_lazy_defers_far_img_until_scroll() {
+    let (mut s, t) = test_session();
+    t.route(
+        "/i",
+        200,
+        "<html><body>\
+         <img src=\"/a.png\" width=\"10\" height=\"10\">\
+         <img src=\"/c.png\" loading=\"lazy\" width=\"10\" height=\"10\">\
+         <div style=\"height:3000px\"></div>\
+         <img src=\"/b.png\" loading=\"lazy\" width=\"10\" height=\"10\">\
+         </body></html>",
+    );
+    t.route_bin("/a.png", 200, red_png());
+    t.route_bin("/b.png", 200, red_png());
+    t.route_bin("/c.png", 200, red_png());
+    let a = s.open_tab();
+    s.navigate(a, "http://h.test/i").await.unwrap();
+    for _ in 0..6 {
+        s.pump_net().await;
+    }
+    let paths = t.paths();
+    assert!(
+        paths.iter().any(|p| p == "/a.png"),
+        "eager attendu : {paths:?}"
+    );
+    assert!(
+        paths.iter().any(|p| p == "/c.png"),
+        "lazy dans le viewport doit être promue : {paths:?}"
+    );
+    assert!(
+        !paths.iter().any(|p| p == "/b.png"),
+        "lazy à ~3000px sous le pli ne doit pas être fetchée : {paths:?}"
+    );
+    s.handle_input(a, InputEvent::Scroll { dy: 3000.0 })
+        .await
+        .unwrap();
+    for _ in 0..6 {
+        s.pump_net().await;
+    }
+    assert!(
+        t.paths().iter().any(|p| p == "/b.png"),
+        "scroll dans le voisinage doit promouvoir la lazy : {:?}",
+        t.paths()
+    );
+}
+
+/// `loading="eager"` et attribut invalide : fetch immédiat,
+/// comportement inchangé.
+#[tokio::test]
+async fn loading_eager_and_invalid_fetch_immediately() {
+    let (mut s, t) = test_session();
+    t.route(
+        "/i",
+        200,
+        "<html><body><div style=\"height:3000px\"></div>\
+         <img src=\"/e.png\" loading=\"eager\" width=\"10\" height=\"10\">\
+         <img src=\"/x.png\" loading=\"bogus\" width=\"10\" height=\"10\">\
+         </body></html>",
+    );
+    t.route_bin("/e.png", 200, red_png());
+    t.route_bin("/x.png", 200, red_png());
+    let a = s.open_tab();
+    s.navigate(a, "http://h.test/i").await.unwrap();
+    let paths = t.paths();
+    for p in ["/e.png", "/x.png"] {
+        assert!(paths.iter().any(|q| q == p), "{p} attendu : {paths:?}");
+    }
+}
+
+/// La lazy promue se peint après livraison (bitmap dans la
+/// table `replaced` → repaint).
+#[tokio::test]
+async fn loading_lazy_promoted_img_paints() {
+    let (mut s, t) = test_session();
+    t.route(
+        "/i",
+        200,
+        "<html><body><div style=\"height:2500px\"></div>\
+         <img src=\"/z.png\" loading=\"lazy\" width=\"40\" height=\"40\">\
+         <div style=\"height:100px\"></div></body></html>",
+    );
+    t.route_bin("/z.png", 200, red_png());
+    let a = s.open_tab();
+    s.navigate(a, "http://h.test/i").await.unwrap();
+    for _ in 0..6 {
+        s.pump_net().await;
+    }
+    assert!(
+        !t.paths().iter().any(|p| p == "/z.png"),
+        "lazy à ~1500px sous le pli différée : {:?}",
+        t.paths()
+    );
+    s.handle_input(a, InputEvent::Scroll { dy: 2600.0 })
+        .await
+        .unwrap();
+    for _ in 0..8 {
+        s.pump_net().await;
+    }
+    assert!(
+        t.paths().iter().any(|p| p == "/z.png"),
+        "lazy non promue au scroll : {:?}",
+        t.paths()
+    );
+    let (_, _, px) = s.frame_pixels(a).unwrap();
+    let red = px
+        .chunks_exact(4)
+        .filter(|p| p[0] > 230 && p[1] < 40 && p[2] < 40)
+        .count();
+    assert!(red > 0, "image lazy promue attendue peinte");
 }

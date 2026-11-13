@@ -3481,6 +3481,10 @@ impl Session {
         while let Some(mut job) = self.pending_applies.pop_front() {
             self.run_apply(&mut job);
         }
+        // `<img loading="lazy">` (étape 229) — les applies
+        // viennent de poser/déplacer des boîtes : promouvoir
+        // ce qui a rejoint le voisinage du viewport.
+        self.promote_lazy_all();
     }
 
     /// Nombre d'applies en file (observabilité/tests).

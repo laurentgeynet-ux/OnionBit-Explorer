@@ -1116,6 +1116,10 @@ impl Session {
             }
             entry.set_scroll(next);
         }
+        // `<img loading="lazy">` (étape 229) — la fenêtre a
+        // bougé : les différées entrées dans le voisinage
+        // partent en fetch avant le repaint.
+        self.promote_lazy(tab);
         // Peinture détachée pour un apply hors verrou (étape
         // 55h) : la position est acceptée tout de suite — le
         // commit de l'apply en vol repeint à la position

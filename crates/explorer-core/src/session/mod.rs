@@ -479,6 +479,13 @@ pub(crate) struct Tab {
     /// corps permettent la restauration **sans réseau**.
     /// Borné `MAX_IMG_BODY_STORE`, vidé à la navigation.
     img_bodies: HashMap<String, Vec<u8>>,
+    /// `<img loading="lazy">` différées (étape 229) — non
+    /// fetchées à la vague ; `promote_lazy` émet la requête
+    /// quand la boîte posée entre dans le viewport élargi
+    /// (`lazy_margin`). Vidée à la navigation, gélée avec la
+    /// page (le gel conserve les ids — la restauration
+    /// reprend la promotion).
+    lazy_imgs: Vec<net_items::LazyImgReq>,
     /// Table d'identité `miroir → NodeId` (ADR-0025, étape
     /// 111) — montée à chaque baseline cléée (`DomSyncKeyed`),
     /// voyage avec la payload (`take_paint`/`put_paint`).
@@ -842,6 +849,10 @@ pub(crate) struct PageSnapshot {
     /// restaurée : les requêtes émises après un retour
     /// bfcache suivent la même politique.
     referrer_policy: Option<explorer_net::http::ReferrerPolicy>,
+    /// `<img loading="lazy">` encore différées au gel (étape
+    /// 229) — la promotion reprend à la restauration (les
+    /// `NodeId` du DOM gelé restent valides).
+    lazy_imgs: Vec<net_items::LazyImgReq>,
     /// `<base href>`/`target` gelés (étape 135) — la base de
     /// résolution survit à un aller-retour bfcache.
     base_url: Option<Url>,
@@ -902,6 +913,13 @@ pub struct Session {
     max_images: usize,
     image_max_px: u32,
     image_max_bytes: usize,
+    /// Marge de promotion `loading="lazy"` en px CSS autour
+    /// du viewport (étape 229 — `SessionConfig::lazy_margin_px`).
+    lazy_margin: f32,
+    /// Corrélation des tâches `lazy` dans `dyn_tasks`
+    /// (étape 229) — **décroît** depuis `u64::MAX` : jamais
+    /// de collision avec les `seq` moteur croissantes.
+    lazy_seq: u64,
     /// Bornes sous-ressources (`max_sheets` feuilles liées,
     /// `max_imports` chaîne `@import` — étape 96).
     max_sheets: usize,
@@ -1314,6 +1332,8 @@ impl Session {
             max_images: cfg.max_images,
             image_max_px: cfg.image_max_px,
             image_max_bytes: cfg.image_max_bytes,
+            lazy_margin: cfg.lazy_margin_px,
+            lazy_seq: u64::MAX,
             max_sheets: cfg.max_sheets,
             max_imports: cfg.max_imports,
             max_fonts: cfg.max_fonts,
@@ -1713,6 +1733,7 @@ impl Session {
                 img_decoded: HashMap::new(),
                 bg_decoded: HashMap::new(),
                 img_bodies: HashMap::new(),
+                lazy_imgs: Vec::new(),
                 dom_keymap: HashMap::new(),
                 dom_gc_mark: 0,
                 cycle_warned: std::collections::HashSet::new(),

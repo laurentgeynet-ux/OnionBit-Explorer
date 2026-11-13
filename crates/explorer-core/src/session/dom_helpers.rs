@@ -1007,6 +1007,18 @@ fn picture_pick(dom: &Dom, img: NodeId, env: &StyleEnv) -> Option<String> {
 /// poster>` du document dans l'ordre — `src`/`poster`
 /// absent ou vide est sauté (étape 58 : l'affiche suit le
 /// canal image, se peint dans la boîte vidéo). CAP-157 :
+/// `loading="lazy"` déclaré sur l'élément (étape 229) —
+/// valeur exacte ASCII case-insensitive (spec HTML) :
+/// `eager`, absent ou invalide = eager. Seuls `<img>` et
+/// `<iframe>` portent l'attribut ; la lecture reste
+/// générique.
+pub(crate) fn el_loading_lazy(dom: &Dom, n: NodeId) -> bool {
+    dom.attribute_str(n, "loading")
+        .ok()
+        .flatten()
+        .is_some_and(|v| v.eq_ignore_ascii_case("lazy"))
+}
+
 /// `<img srcset>` présent et résoluble **prime** sur `src`
 /// — choix `w`/`x` de `pick_srcset` contre `env`
 /// (largeur viewport CSS px, densité `env.dpr`, `sizes`

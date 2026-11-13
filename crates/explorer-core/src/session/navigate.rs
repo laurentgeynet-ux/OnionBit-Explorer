@@ -1104,6 +1104,7 @@ impl Session {
             frames: frame_urls,
             srcdoc_frames,
             mod_preloads,
+            lazy_imgs,
         } = self.plan_subresources(&dom, &url, &base, scripting, &csp);
         let doc_sheets = collect_style_sheets(&dom, &csp)
             .into_iter()
@@ -1272,6 +1273,7 @@ impl Session {
             entry.img_decoded.clear();
             entry.bg_decoded.clear();
             entry.img_bodies.clear();
+            entry.lazy_imgs.clear();
             entry.cycle_warned.clear();
             entry.style_dirty.clear();
             entry.linked_sheets.clear();
@@ -1327,6 +1329,7 @@ impl Session {
             sheet_urls,
             scripts,
             img_urls,
+            lazy_imgs,
             frame_urls,
             srcdoc_frames,
             csp,

@@ -80,6 +80,10 @@ impl Tab {
             // restauration (étape 134).
             frame_ctxs: std::mem::take(&mut self.frame_ctxs),
             img_bodies: std::mem::take(&mut self.img_bodies),
+            // `<img loading="lazy">` encore différées — la
+            // promotion reprend à la restauration (DOM gelé,
+            // ids valides).
+            lazy_imgs: std::mem::take(&mut self.lazy_imgs),
             bg_aliases: std::mem::take(&mut self.bg_aliases),
             mask_aliases: std::mem::take(&mut self.mask_aliases),
             style_dirty: std::mem::take(&mut self.style_dirty),
@@ -208,6 +212,10 @@ impl Tab {
         // (re-gelables) — le re-décodage des bitmaps est fait
         // par l'appelant via `Session::restore_images`.
         self.img_bodies = snap.img_bodies;
+        // `<img loading="lazy">` gelées différées — la
+        // promotion reprend au prochain pump/scroll (les ids
+        // du DOM restauré restent valides).
+        self.lazy_imgs = snap.lazy_imgs;
         self.bg_aliases = snap.bg_aliases;
         self.mask_aliases = snap.mask_aliases;
         // §B-17 — la dette de restyle survit au gel : sans

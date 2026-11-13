@@ -202,6 +202,7 @@ fn paintless_snapshot_repairs_on_restore() {
             mask_aliases: HashMap::new(),
             frame_ctxs: Vec::new(),
             style_dirty: Vec::new(),
+            lazy_imgs: Vec::new(),
         });
     }
 
@@ -301,6 +302,7 @@ async fn back_during_inflight_nav_restores_previous() {
             mask_aliases: HashMap::new(),
             frame_ctxs: Vec::new(),
             style_dirty: Vec::new(),
+            lazy_imgs: Vec::new(),
         });
     }
 
@@ -1582,6 +1584,7 @@ fn etape206_drain_anim_births_does_not_reenter_poll_net() {
             link: None,
             dyn_module: None,
             import: None,
+            lazy: None,
         })
         .expect("send");
     s.drain_anim_births(tab);
@@ -4471,6 +4474,7 @@ fn poll_net_budget_defere_les_livraisons_excedentaires() {
         link: None,
         dyn_module: None,
         import: None,
+        lazy: None,
     };
     // Passe déjà hors budget → tout est reporté, ordre intact.
     s.drain_net_done(
@@ -4571,6 +4575,7 @@ fn drain_net_done_mutualise_le_tour_post_script() {
         link: None,
         dyn_module: None,
         import: None,
+        lazy: None,
     };
     s.drain_net_done(vec![mk(0), mk(1), mk(2)], Instant::now());
     assert_eq!(
@@ -4671,6 +4676,7 @@ fn drain_net_done_priorise_les_fetch() {
         link: None,
         dyn_module: None,
         import: None,
+        lazy: None,
     };
     let fetch = NetDone {
         tab,
@@ -4696,6 +4702,7 @@ fn drain_net_done_priorise_les_fetch() {
         link: None,
         dyn_module: None,
         import: None,
+        lazy: None,
     };
     // L'img arrive EN PREMIER dans le vec — le fetch la
     // déborde quand même (priorité données > sous-ressource).
@@ -4784,6 +4791,7 @@ fn drain_net_done_plancher_rest_anti_famine() {
         link: None,
         dyn_module: None,
         import: None,
+        lazy: None,
     };
     let n_imgs = super::net::MIN_REST_DELIVERIES + 3;
     let mut batch: Vec<NetDone> = (0..3).map(mk).collect();
@@ -4900,6 +4908,7 @@ async fn poll_net_libere_le_slot_a_l_arrivee() {
             link: None,
             dyn_module: None,
             import: None,
+            lazy: None,
         })
         .expect("send");
     s.poll_net();
@@ -5191,6 +5200,7 @@ async fn fetch_backoff_retient_les_retries_dune_url_en_echec() {
         link: None,
         dyn_module: None,
         import: None,
+        lazy: None,
     };
     for h in 0..4 {
         s.drain_net_done(vec![fail(h)], Instant::now());
@@ -5321,6 +5331,7 @@ async fn fetch_quota_pompe_au_slot_libere() {
             link: None,
             dyn_module: None,
             import: None,
+            lazy: None,
         }],
         Instant::now(),
     );
@@ -5440,6 +5451,7 @@ fn fetch_backoff_succes_referme_le_streak() {
         link: None,
         dyn_module: None,
         import: None,
+        lazy: None,
     };
     s.drain_net_done(vec![ok], Instant::now());
     assert!(

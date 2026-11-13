@@ -59,6 +59,25 @@ pub(crate) struct SubPlan {
     /// `fetch_module_sources` pour les chunks que le
     /// graphe statique n'expose pas encore (Nuxt).
     pub(crate) mod_preloads: Vec<Url>,
+    /// `<img loading="lazy">` différées (étape 229) —
+    /// résolues et filtrées (CSP/mixed-content/dédup) comme
+    /// les candidates eager mais **non fetchées** au plan :
+    /// la promotion n'émet la requête qu'une fois la boîte
+    /// posée proche du viewport.
+    pub(crate) lazy_imgs: Vec<LazyImgReq>,
+}
+
+/// `<img loading="lazy">` différée (étape 229) — `node` sert
+/// la vérification de position posée (`find_box`) et
+/// l'insertion `images.replaced` à la livraison ; `src_key`
+/// est la chaîne choisie telle que `collect_images` la
+/// relira (`img_decoded`), `url` la cible résolue (déjà
+/// upgradée CSP, mixed-content et dédupliquée au plan).
+#[derive(Clone)]
+pub(crate) struct LazyImgReq {
+    pub(crate) node: explorer_dom::NodeId,
+    pub(crate) src_key: String,
+    pub(crate) url: Url,
 }
 
 /// Routage d'une complétion de sous-ressource (étape 50).
@@ -831,6 +850,12 @@ pub(crate) struct SubJob {
     pub(crate) sheet_urls: Vec<SheetFetch>,
     pub(crate) scripts: Vec<ScriptItem>,
     pub(crate) img_urls: Vec<Url>,
+    /// `<img loading="lazy">` différées (étape 229) —
+    /// non fetchées pendant la vague ; rangées sur
+    /// `Tab::lazy_imgs` au commit, promues par
+    /// `Session::promote_lazy` quand leur boîte posée
+    /// approche du viewport.
+    pub(crate) lazy_imgs: Vec<LazyImgReq>,
     /// `<iframe src>` résolus à `nav_apply` (étape 128 —
     /// déjà dédupliqués/mixed-content-filtrés/bornés) ;
     /// la `referrerpolicy` de l'élément voyage avec l'URL
@@ -1741,6 +1766,31 @@ pub(crate) struct NetDone {
     /// (instancier+évaluer+résoudre la promesse pending) ;
     /// `handle` porte le `seq` moteur.
     pub(crate) import: Option<DynImportMeta>,
+    /// `<img loading="lazy">` promue (étape 229) — `Some` =
+    /// le corps est rangé dans `img_decoded`/`img_bodies` et
+    /// inséré dans `images.replaced` par
+    /// [`Session::commit_lazy_img`], jamais une
+    /// `NetResponse`. `handle` porte le `seq` lazy
+    /// (`dyn_tasks` — espace décroissant depuis `u64::MAX`,
+    /// sans collision avec les `seq` moteur).
+    pub(crate) lazy: Option<LazyImgMeta>,
+}
+
+/// Métadonnées de livraison d'une `<img loading="lazy">`
+/// promue (étape 229) — même rangement que `DynImgMeta`
+/// (`img_decoded` par `src_key`, `img_bodies` par URL
+/// résolue) mais sans contexte moteur : l'élément statique
+/// n'a pas de `seq` — pas de `load`/`error` miroir, comme
+/// les `<img>` de la vague.
+pub(crate) struct LazyImgMeta {
+    /// Clé `dyn_tasks` de la tâche (`lazy_seq` décroissant).
+    pub(crate) seq: u64,
+    /// Chaîne source choisie — clé de `img_decoded`.
+    pub(crate) src_key: String,
+    /// URL résolue du fetch (déjà filtrée au plan).
+    pub(crate) url: Url,
+    /// Document émetteur — ancre `nosniff`/CORP/`img-src`.
+    pub(crate) page: Url,
 }
 
 /// Livraison d'un `import()` dynamique fetché (JS-C100) —
