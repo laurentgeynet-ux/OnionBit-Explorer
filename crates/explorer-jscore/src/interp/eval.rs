@@ -1421,11 +1421,15 @@ impl Engine {
             Add, And, BitAnd, BitOr, BitXor, Div, Eq, Ge, Gt, In, Instanceof, Le, Lt, Mod, Mul, Ne,
             Or, Pow, Shl, Shr, ShrU, StrictEq, StrictNe, Sub,
         };
+        // JS-C505 — histogramme des ops (calibre le quickening
+        // cran 3) ; désarmé = un `load`+branche.
+        crate::j17_tick(&crate::J17_BINOP[op as usize]);
         Ok(match op {
             Add => {
                 let lp = self.to_primitive(l, PrimHint::Default)?;
                 let rp = self.to_primitive(r, PrimHint::Default)?;
                 if matches!(lp, Value::Str(_)) || matches!(rp, Value::Str(_)) {
+                    crate::j17_tick(&crate::J17_BIN_ADD_STR);
                     // §B-110 : `x + ""`/`"" + x` en boucle
                     // churnait une chaîne par op — une concat
                     // avec "" est l'identité : la boîte `Str`
@@ -1492,12 +1496,14 @@ impl Engine {
                     self.alloc_guard(ls.len().saturating_add(rs.len()))?;
                     self.str_val(format!("{ls}{rs}"))
                 } else if matches!(lp, Value::Big(_)) || matches!(rp, Value::Big(_)) {
+                    crate::j17_tick(&crate::J17_BIN_ADD_OTH);
                     // `1n + 2n` → `3n` ; mixte Num/Big → `TypeError`
                     // via `to_bigint`.
                     let a = self.to_bigint(lp)?;
                     let b = self.to_bigint(rp)?;
                     self.big_val(a + b)
                 } else {
+                    crate::j17_tick(&crate::J17_BIN_ADD_NUM);
                     Value::Num(self.to_number(lp)? + self.to_number(rp)?)
                 }
             }

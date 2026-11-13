@@ -3548,3 +3548,15 @@ shadow n'atteint ni cascade ni boxification ») etait
   893 k — si `prop_ns` s'effondre, revoir `RES_WALK_MAX` et les
   3 % de `slot_miss`.
 - Verrous : `lang` 315 ×3 (défaut/`IC_VERIFY`/`NO_IC`), `c500_ic` 18.
+
+### 2026-11-13 — sondes N5.6 : `slot_miss` par cause + `binop` (JS-C505)
+
+- `sm_oob`/`sm_key`/`sm_cell`/`sm_map`/`sm_kind` — décomposition
+  de `slot_miss` (lecture+écriture). `sm_key` = divergence
+  canonique (attendu ≈ 0) ; `sm_map`/`sm_oob` = structurel/coverage.
+- `binop:<nom>=<n>` + `badd_num`/`badd_str`/`badd_oth` — calibre
+  la cible du premier quickening (cran 3).
+- Anomalie déjà capturée par la sonde : `let` lu avant déclaration
+  en scope fn → `sm_oob` (env non pré-déclaré au moment du read —
+  fallback correct, coverage à creuser si `sm_oob` est significatif
+  en vol).

@@ -5918,25 +5918,29 @@ impl Engine {
         // `Alias`/`LazyArgs` ou env non pré-déclaré retombe sur
         // `env_get` — jamais de valeur fausse.
         let v = if slot != u16::MAX && !self.slots_off {
-            let hit = {
+            // JS-C505 — `cause` alimente `sm_*` : `0`=oob,
+            // `1`=key (divergence canonique), `2`=cell non-Bind,
+            // `3`=Map promue, `4`=kind non câblé.
+            let (hit, cause) = {
                 let b = cur.borrow();
                 match &b.kind {
                     EnvKind::Local(m) | EnvKind::Block(m) | EnvKind::Global(m) => match m {
-                        crate::heap::BindingMap::Small(v) => {
-                            v.get(slot as usize).and_then(|(k, c)| {
+                        crate::heap::BindingMap::Small(v) => match v.get(slot as usize) {
+                            Some((k, c)) => {
                                 if std::ptr::eq(&raw const **k, name) || &**k == name {
                                     match c {
-                                        EnvCell::Bind(bnd) => Some(bnd.value.clone()),
-                                        _ => None,
+                                        EnvCell::Bind(bnd) => (Some(bnd.value.clone()), 0u8),
+                                        _ => (None, 2),
                                     }
                                 } else {
-                                    None
+                                    (None, 1)
                                 }
-                            })
-                        }
-                        crate::heap::BindingMap::Map(_) => None,
+                            }
+                            None => (None, 0),
+                        },
+                        crate::heap::BindingMap::Map(_) => (None, 3),
                     },
-                    EnvKind::With(_) => None,
+                    EnvKind::With(_) => (None, 4),
                 }
             };
             if let Some(v) = hit {
@@ -5944,6 +5948,13 @@ impl Engine {
                 Some(v)
             } else {
                 crate::j17_tick(&crate::J17_SLOT_MISS);
+                crate::j17_tick(match cause {
+                    0 => &crate::J17_SM_OOB,
+                    1 => &crate::J17_SM_KEY,
+                    2 => &crate::J17_SM_CELL,
+                    3 => &crate::J17_SM_MAP,
+                    _ => &crate::J17_SM_KIND,
+                });
                 self.env_get(&cur, name)
             }
         } else {
@@ -5996,28 +6007,30 @@ impl Engine {
             return self.env_set(env, name, v);
         };
         if slot != u16::MAX && !self.slots_off {
-            let hit = {
+            // JS-C505 — même convention de causes qu'en lecture.
+            let (hit, cause) = {
                 let mut b = cur.borrow_mut();
                 match &mut b.kind {
                     EnvKind::Local(m) | EnvKind::Block(m) | EnvKind::Global(m) => match m {
-                        crate::heap::BindingMap::Small(vec) => {
-                            vec.get_mut(slot as usize).is_some_and(|(k, c)| {
+                        crate::heap::BindingMap::Small(vec) => match vec.get_mut(slot as usize) {
+                            Some((k, c)) => {
                                 if std::ptr::eq(&raw const **k, name) || &**k == name {
                                     match c {
                                         EnvCell::Bind(bnd) if bnd.mutable => {
                                             bnd.value = v.clone();
-                                            true
+                                            (true, 0u8)
                                         }
-                                        _ => false,
+                                        _ => (false, 2),
                                     }
                                 } else {
-                                    false
+                                    (false, 1)
                                 }
-                            })
-                        }
-                        crate::heap::BindingMap::Map(_) => false,
+                            }
+                            None => (false, 0),
+                        },
+                        crate::heap::BindingMap::Map(_) => (false, 3),
                     },
-                    EnvKind::With(_) => false,
+                    EnvKind::With(_) => (false, 4),
                 }
             };
             if hit {
@@ -6025,6 +6038,13 @@ impl Engine {
                 return Ok(());
             }
             crate::j17_tick(&crate::J17_SLOT_MISS);
+            crate::j17_tick(match cause {
+                0 => &crate::J17_SM_OOB,
+                1 => &crate::J17_SM_KEY,
+                2 => &crate::J17_SM_CELL,
+                3 => &crate::J17_SM_MAP,
+                _ => &crate::J17_SM_KIND,
+            });
         }
         self.env_set(&cur, name, v)
     }

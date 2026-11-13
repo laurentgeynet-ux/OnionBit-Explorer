@@ -308,3 +308,33 @@ fn c504_absent_null_proto() {
         "100"
     );
 }
+
+// ── JS-C505 — sondes N5.6 ────────────────────────────────────────
+
+/// Les compteurs `sm_*` et `binop:*` émettent : `sm_oob` (lecture
+/// `let` avant déclaration — slot résolu, cellule absente →
+/// fallback correct), `badd_num`/`badd_str`, histogramme `binop:`.
+#[test]
+fn c505_probes_emit() {
+    let _g = IC_LOCK
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    explorer_jscore::j17_enable();
+    let mut e = Engine::new();
+    let r = e
+        .eval(
+            "function f(){let x=1;return x+1};var n=0,s='';\
+             for(var i=0;i<50;i++){n+=f();s+='a'}\
+             var z;for(var i=0;i<10;i++){z===undefined?'u':'?'}\
+             var q=7;function g(){return q;let q=5}g();\
+             n+'/'+s.length"
+        )
+        .expect("eval");
+    assert_eq!(e.describe(r), "100/50");
+    let snap = explorer_jscore::j17_snapshot();
+    assert!(snap.contains("sm_oob="), "sm_oob attendu : {snap}");
+    assert!(snap.contains("badd_num="), "badd_num attendu : {snap}");
+    assert!(snap.contains("badd_str="), "badd_str attendu : {snap}");
+    assert!(snap.contains("binop:"), "histogramme attendu : {snap}");
+    assert!(snap.contains("add="), "op add attendu : {snap}");
+}

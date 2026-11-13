@@ -306,6 +306,41 @@ pub static J17_IC_BAIL: std::sync::atomic::AtomicU64 = std::sync::atomic::Atomic
 pub static J17_SLOT_HIT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 /// Voir [`J17_SLOT_HIT`].
 pub static J17_SLOT_MISS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+/// JS-C505 — `slot_miss` par cause : `sm_oob` = slot hors bornes
+/// (env non pré-déclaré / coverage), `sm_key` = nom au slot ≠
+/// clé (divergence d'ordre canonique — le signal de bug),
+/// `sm_cell` = cellule non-`Bind` (`Uninit`/alias/`LazyArgs`/
+/// immuable en écriture), `sm_map` = `BindingMap::Map` promue,
+/// `sm_kind` = kind d'env non câblé (`With`).
+pub static J17_SM_OOB: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+/// Voir [`J17_SM_OOB`].
+pub static J17_SM_KEY: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+/// Voir [`J17_SM_OOB`].
+pub static J17_SM_CELL: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+/// Voir [`J17_SM_OOB`].
+pub static J17_SM_MAP: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+/// Voir [`J17_SM_OOB`].
+pub static J17_SM_KIND: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+/// JS-C505 — histogramme des opérateurs binaires passant par
+/// `binary_op`, indexé par `BinOp as usize` (ordre de déclaration
+/// `ast.rs`) — calibre la cible du premier quickening (cran 3).
+pub static J17_BINOP: [std::sync::atomic::AtomicU64; 25] =
+    [const { std::sync::atomic::AtomicU64::new(0) }; 25];
+/// JS-C505 — sous-classification de `Add` post-`to_primitive` :
+/// `badd_num` = les deux opérandes numériques (cible `AddNum`),
+/// `badd_str` = un `Str` (cible `AddStr`), `badd_oth` = autre
+/// (`Big`, coercitions résiduelles).
+pub static J17_BIN_ADD_NUM: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+/// Voir [`J17_BIN_ADD_NUM`].
+pub static J17_BIN_ADD_STR: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+/// Voir [`J17_BIN_ADD_NUM`].
+pub static J17_BIN_ADD_OTH: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+/// JS-C505 — noms de [`J17_BINOP`], ordre = déclaration `BinOp`
+/// (`ast.rs`) — maintenus ensemble par le commentaire réciproque.
+const J17_BINOP_NAMES: [&str; 25] = [
+    "or", "and", "bitor", "bitxor", "bitand", "eq", "ne", "seq", "sne", "lt", "le", "gt", "ge",
+    "instof", "in", "shl", "shr", "shru", "add", "sub", "mul", "div", "mod", "pow", "nullish",
+];
 /// `array_index(key)` tenté — multiplicité par `find_own`
 /// (× niveau, ×2 par niveau Array) — cible V-3b (hoist).
 pub static J17_ARRIDX_TRY: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
@@ -426,7 +461,7 @@ pub fn j17_enable() {
 #[must_use]
 pub fn j17_snapshot() -> String {
     let r = std::sync::atomic::Ordering::Relaxed;
-    let pairs: [(&str, &std::sync::atomic::AtomicU64); 41] = [
+    let pairs: [(&str, &std::sync::atomic::AtomicU64); 49] = [
         ("prop_lookup", &J17_PROP_LOOKUP),
         ("proto_lvl", &J17_PROTO_LVL),
         ("prop_scan", &J17_PROP_SCAN),
@@ -444,6 +479,14 @@ pub fn j17_snapshot() -> String {
         ("ic_bail", &J17_IC_BAIL),
         ("slot_hit", &J17_SLOT_HIT),
         ("slot_miss", &J17_SLOT_MISS),
+        ("sm_oob", &J17_SM_OOB),
+        ("sm_key", &J17_SM_KEY),
+        ("sm_cell", &J17_SM_CELL),
+        ("sm_map", &J17_SM_MAP),
+        ("sm_kind", &J17_SM_KIND),
+        ("badd_num", &J17_BIN_ADD_NUM),
+        ("badd_str", &J17_BIN_ADD_STR),
+        ("badd_oth", &J17_BIN_ADD_OTH),
         ("arridx_try", &J17_ARRIDX_TRY),
         ("call", &J17_CALL),
         ("call_nat", &J17_CALL_NAT),
@@ -478,6 +521,24 @@ pub fn j17_snapshot() -> String {
             }
             out.push_str(&format!("{k}={v}"));
         }
+    }
+    // JS-C505 — histogramme `binary_op` en un seul champ
+    // `binop:<nom>=<n>,…` (noms = ordre de déclaration `BinOp`).
+    let mut bins = String::new();
+    for (i, c) in J17_BINOP.iter().enumerate() {
+        let v = c.load(r);
+        if v > 0 {
+            if !bins.is_empty() {
+                bins.push(',');
+            }
+            bins.push_str(&format!("{}={v}", J17_BINOP_NAMES[i]));
+        }
+    }
+    if !bins.is_empty() {
+        if !out.is_empty() {
+            out.push(' ');
+        }
+        out.push_str(&format!("binop:{bins}"));
     }
     out
 }
