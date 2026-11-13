@@ -12552,42 +12552,23 @@ croître la surface navigateur mesurée (`api` 1510/8099, 18,6 %).
 
 ### Sprint N5 — archétypes perf : mesure → attribution → PIPE (assigné 2026-11-13)
 
-File prioritaire courante — ordonnée sur les mesures
-`sync_profile` des deux archétypes (dev.to ~149-161 s,
-YouTube ~212,6 s, JS ~50 % du wall). Assignation consolidée
-dans `interface-equipes.md` (entrée 2026-11-13) ; file PIPE
-miroir = « Plan perf archétypes » de
-`roadmap-equipe-pipeline.md` — **mode piste unique** : l'ordre
-séquentiel canonique y vit, les items N5.x s'y exécutent aux
-positions marquées.
+> **Document de pilotage unique** :
+> `docs/plan-perf-archetypes.md` — ordre séquentiel canonique,
+> fichiers, verrous et DoD y vivent (**mode piste unique** :
+> un opérateur, deux chapeaux). Cette section ne garde que
+> les cases de suivi (§4.5).
 
-- [ ] **N5.0 — merge `performance` → `main`** : précondition à
-  N5.4 et aux re-vols « sur main » (Étapes 232-235 livrées sur
-  la branche, `main` = 231 ; gate `verify_all` en cours).
-- [ ] **N5.1 — vol YouTube `--release`** : tranche si les
-  jambes JS (~110-150 s mesurées : `net.commit_scripts`
-  57-66 s, `pump.js_run_sync` appels ≤ 30 s,
-  `event.mirror_sync` ≤ 26 s) sont réelles ou gonflées debug
-  ×10-20. Harnais : `cargo test -p explorer-core --lib
-  --release lobste_pipeline_errors` (`LOBSTE_PROBE_URL`) ou
-  daemon release + vol canonique — un seul binaire de test,
-  pas le piège des ~50 jscore.
-- [ ] **N5.2 — attribution interne JS** : méthode
-  `raster.parts` sur `pump.js_run_sync`/`net.commit_scripts`/
-  `event.mirror_sync` + heap GC (~570-690 k cells).
-  Référencer Sprint N3 (`prop_scan` 72 M → N4.1 déjà nommé,
-  `body_ns` ~426 s §B-114) — ne pas ré-instrumenter.
-- [ ] **N5.3 — correctif** sur le poste nommé par N5.2
-  (VM BotGuard / batching mirror DOM / pression GC).
-- [ ] **N5.4 — câblage `compute_scoped_frontier`** : frontier
-  dérivée de `journal_style_scopes` (`apply.rs`) dès que la
-  frontière PIPE lande — dépend de N5.0 + de la frontière.
+- [ ] **N5.0 — merge `performance` → `main`** (§2.1 —
+  précondition à N5.4 et aux re-vols « sur main »).
+- [ ] **N5.1-N5.3 — vol YouTube `--release` + attribution
+  interne JS + correctif** (§2.6) — référencer Sprint N3,
+  ne pas ré-instrumenter.
+- [ ] **N5.4 — câblage `compute_scoped_frontier`** (§2.3) —
+  dépend de N5.0 + de la frontière PIPE.
 - [ ] **N5.5 — re-vols dev.to + YouTube** après chaque
-  livraison (PIPE ou NAV) — jamais l'un sans l'autre.
-- [ ] **N5.6 — adoption `entities`** : miroir jscore délègue
-  à `explorer_html::entities` (`dom.rs` `decode_entities` +
-  `map_numeric` dupliqués — résidu de la demande 2026-10-21,
-  exposition livrée R-98/99) — quasi gratuit.
+  livraison — jamais l'un sans l'autre (discipline §3).
+- [ ] **N5.6 — adoption `entities` jscore** (§2.7) — quasi
+  gratuit.
 
 Convergence visée : **Étape 239** — plan global consolidé,
 chaque gain rapporté contre les **deux** archétypes.
