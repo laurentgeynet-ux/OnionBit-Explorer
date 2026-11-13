@@ -12328,6 +12328,46 @@ un crate PIPELINE.- [x] **JS-C422. Deadline honnête — canal session ↔ budge
   JS non-goulot confirmé jambes
   mesurées (`net.commit_scripts`
   1,35 s, `net.dl_*` ≤ 115 ms).
+- [x] **Étape 233. Cull des clips
+  hors-pixmap — `incr.raster` 33,5 s
+  → ~26 ms** (audit perf chantier 11 —
+  intervention NAV dans le périmètre
+  PIPELINE, journalisée
+  `interface-equipes.md`, GO
+  opérateur) : sondes internes
+  `raster.bounds`/`raster.replay`/
+  `raster.parts` posées d'abord —
+  `resolved_bounds` ~2 ms innocent,
+  les 33,5 s = **31,5 s de
+  `Mask::new`+`fill_path` plein
+  frame** (4 109 `PushClip*` × ~7,7
+  ms debug) alloués avant tout test
+  de fenêtre. Pile `clips` typée
+  `ClipEntry` : `Empty` (hors pixmap
+  → sentinelle bloquante unique),
+  `Full` (rect strict couvrant →
+  `None`), `Real` (partiel — seul à
+  payer ; arrondi/polygon : `Full`
+  jamais, `Empty` sur rayon nul
+  uniquement/bbox). Collatéral :
+  `Mask::new` en échec poussait rien
+  → `PopClip` déséquilibrait la pile
+  (`Empty` poussé = appariement
+  garanti). Re-vol dev.to surveillé
+  (149 s vs ~413 s) : `incr.raster`
+  33,5 s → 1,6-2,1 s fenêtre
+  typique (×16-21, `clips_real`
+  ~292-347/4 106, `clip_us`
+  0,57-1,0 s, `draw_us` ~1,0 s
+  co-poste) ; borne honnête :
+  fenêtre lourde ~46 % de clips
+  réels → 13,4 s (×2,5 — le
+  `Mask` réel ~6 ms sur grand
+  pixmap reste le coût de
+  couverture). `incr.cascade`
+  8,5-10,4 s = premier poste.
+  Golden fenêtré + clips +
+  masks verts.
 
 ## Plan NAVIGATEUR — vitrine YouTube + surface navigateur (2026-11-12)
 

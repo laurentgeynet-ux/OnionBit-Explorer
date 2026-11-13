@@ -566,8 +566,22 @@ pub fn rasterize_window_cached(
         width: list.width,
         height: h_px / scale,
     };
+    // Sondes internes `sync_profile` (audit perf, chantier
+    // 10-suite) : `incr.raster` domine le cycle — le split
+    // bounds/replay ordonne le chantier (target partagée,
+    // tab=0 : PIPE ne connaît pas l'onglet).
+    let t = std::time::Instant::now();
     let bounds = crate::display::resolved_bounds(&list.items);
+    tracing::info!(
+        target: "sync_profile",
+        tab = 0u64,
+        phase = "raster.bounds",
+        us = u64::try_from(t.elapsed().as_micros()).unwrap_or(u64::MAX),
+        items = list.items.len(),
+        "phase sync"
+    );
     gc.sync(fonts);
+    let t = std::time::Instant::now();
     replay_items(
         &mut pixmap,
         &list.items,
@@ -576,6 +590,13 @@ pub fn rasterize_window_cached(
         gc,
         0,
         Some((&bounds, win_css)),
+    );
+    tracing::info!(
+        target: "sync_profile",
+        tab = 0u64,
+        phase = "raster.replay",
+        us = u64::try_from(t.elapsed().as_micros()).unwrap_or(u64::MAX),
+        "phase sync"
     );
     Some(Frame {
         width: w,
@@ -819,6 +840,83 @@ pub fn rasterize_dirty_cached(
     Some(prev)
 }
 
+/// Entrée de la pile `clips` de [`replay_items`] — le
+/// `Mask` plein frame (alloc + `fill_path`, ~ms par clip
+/// en debug) n'est payé que pour les clips **partiels** :
+/// `Empty` = le rect transformé n'intersecte pas le pixmap
+/// (le contenu est borné hors écran de toute façon →
+/// masque bloquant partagé), `Full` = il le couvre entier
+/// (masque identité → `None`, aucun alloc). Mesuré vol
+/// dev.to : 4 109 clips/replay dont ~90 % hors fenêtre —
+/// le coût dominant du raster fenêtré.
+enum ClipEntry {
+    /// Hors pixmap — sentinelle `empty_mask` (bloque tout).
+    Empty,
+    /// Couvre tout le pixmap — aucun masquage.
+    Full,
+    /// Clip partiel — vrai masque rasterisé.
+    Real(Mask),
+}
+
+/// Masque actif au sommet de pile : `Real` → son masque,
+/// `Empty` → le bloquant partagé, `Full` → aucun.
+fn top_clip<'m>(clips: &'m [ClipEntry], empty: Option<&'m Mask>) -> Option<&'m Mask> {
+    match clips.last() {
+        Some(ClipEntry::Real(m)) => Some(m),
+        Some(ClipEntry::Empty) => empty,
+        Some(ClipEntry::Full) | None => None,
+    }
+}
+
+/// Classe un clip rectangulaire (déjà transformé dans le
+/// repère pixmap) : hors-pixmap → `Empty`, couvrant →
+/// `Full`, partiel → `Real` avec le masque rempli.
+/// `None` sur `phys` (rect dégénéré/NaN) → `Empty`, même
+/// sémantique qu'avant (masque resté vide = bloque tout).
+/// `can_full=false` (clip arrondi : les coins rognent) →
+/// un rect couvrant reste `Real`.
+#[allow(clippy::cast_precision_loss)]
+fn push_rect_clip(
+    clips: &mut Vec<ClipEntry>,
+    phys: Option<tiny_skia::Rect>,
+    can_full: bool,
+    w: u32,
+    h: u32,
+    fill: impl FnOnce(&mut Mask),
+) {
+    let Some(phys) = phys else {
+        clips.push(ClipEntry::Empty);
+        return;
+    };
+    let Some(pix) = tiny_skia::Rect::from_ltrb(0.0, 0.0, w as f32, h as f32) else {
+        clips.push(ClipEntry::Empty);
+        return;
+    };
+    if phys.intersect(&pix).is_none() {
+        clips.push(ClipEntry::Empty);
+        return;
+    }
+    if can_full
+        && phys.left() <= 0.0
+        && phys.top() <= 0.0
+        && phys.right() >= w as f32
+        && phys.bottom() >= h as f32
+    {
+        clips.push(ClipEntry::Full);
+        return;
+    }
+    // Une entrée est TOUJOURS poussée — sinon le `PopClip`
+    // désempile le clip englobant (cas `Mask::new` en échec
+    // : dégradation bloquante, pile équilibrée).
+    match Mask::new(w, h) {
+        Some(mut mask) => {
+            fill(&mut mask);
+            clips.push(ClipEntry::Real(mask));
+        }
+        None => clips.push(ClipEntry::Empty),
+    }
+}
+
 /// Nature d'un groupe hors-écran sur la pile `filtered` de
 /// [`replay_items`] — le kind fait foi au pop (R-252) :
 /// `PopFilter`/`PopBlend`/`PopMask` sont interchangeables,
@@ -849,7 +947,8 @@ enum GroupKind {
 #[allow(
     clippy::too_many_lines,
     clippy::cast_possible_truncation,
-    clippy::cast_sign_loss
+    clippy::cast_sign_loss,
+    clippy::cast_precision_loss
 )]
 fn replay_items(
     pixmap: &mut Pixmap,
@@ -860,7 +959,11 @@ fn replay_items(
     draw_from: usize,
     filter: Option<(&[Option<explorer_layout::Rect>], explorer_layout::Rect)>,
 ) {
-    let mut clips: Vec<Mask> = Vec::new();
+    let mut clips: Vec<ClipEntry> = Vec::new();
+    // Sentinelle bloquante des clips `Empty` — allouée une
+    // fois par replay au lieu d'un `Mask` plein frame par
+    // clip hors-fenêtre (audit : ~7,7 ms × 4 109 = 31 s).
+    let empty_mask = Mask::new(pixmap.width(), pixmap.height());
     // R-M5 — groupes hors-écran : `PushFilter`/`PushBlend`/
     // `PushMask` poussent un tampon ; les items suivants s'y
     // peignent (`filtered.last_mut()` = cible courante) et le
@@ -871,52 +974,86 @@ fn replay_items(
     // niveaux en pratique).
     let mut tfs: Vec<Transform> = Vec::new();
     let mut cur = dpi;
+    // Attribution interne (audit perf) : temps par famille —
+    // clips (Mask::new + fill_path), composites de groupes
+    // (ops/blend/mask-coverage au Pop), dessin effectif ;
+    // compteurs par catégorie. Une seule émission en fin.
+    let mut us_clip = 0u128;
+    let mut us_group = 0u128;
+    let mut us_draw = 0u128;
+    let (mut n_clip, mut n_group, mut n_draw, mut n_skip) = (0u32, 0u32, 0u32, 0u32);
+    // `clips_real` = clips ayant payé un `Mask` plein frame —
+    // le ratio vs `clips` mesure le taux de culle hors-fenêtre.
+    let mut n_clip_real = 0u32;
     for (idx, item) in items.iter().enumerate() {
         match item {
             DisplayItem::PushClip(r) => {
-                if let Some(mut mask) = Mask::new(pixmap.width(), pixmap.height()) {
-                    if let Some(phys) = Rect::from_xywh(r.x, r.y, r.width, r.height)
-                        .and_then(|rr| rr.transform(cur))
-                    {
-                        // Sous transform axis-aligned, le clip
-                        // rectangulaire est arrêté sur la grille de
-                        // pixels device — cohérent avec les `fill`
-                        // et blits qui arrêtent leurs bords : un
-                        // `overflow` fractionnaire ne produit pas
-                        // de liseré AA que ses voisins n'ont pas.
-                        let phys = if cur.kx == 0.0 && cur.ky == 0.0 {
-                            Rect::from_ltrb(
-                                phys.left().round(),
-                                phys.top().round(),
-                                phys.right().round(),
-                                phys.bottom().round(),
-                            )
-                            .unwrap_or(phys)
-                        } else {
-                            phys
-                        };
-                        // Clippe au domaine fixed-point : un clip
-                        // couvrant tout reste plein, un clip
-                        // lointain reste vide — même sémantique.
-                        let dom = Rect::from_ltrb(-SAFE_COORD, -SAFE_COORD, SAFE_COORD, SAFE_COORD);
-                        if let Some(clamped) = dom.and_then(|d| phys.intersect(&d)) {
+                let t = std::time::Instant::now();
+                n_clip += 1;
+                let phys =
+                    Rect::from_xywh(r.x, r.y, r.width, r.height).and_then(|rr| rr.transform(cur));
+                // Sous transform axis-aligned, le clip
+                // rectangulaire est arrêté sur la grille de
+                // pixels device — cohérent avec les `fill`
+                // et blits qui arrêtent leurs bords : un
+                // `overflow` fractionnaire ne produit pas
+                // de liseré AA que ses voisins n'ont pas.
+                let phys = phys.map(|p| {
+                    if cur.kx == 0.0 && cur.ky == 0.0 {
+                        Rect::from_ltrb(
+                            p.left().round(),
+                            p.top().round(),
+                            p.right().round(),
+                            p.bottom().round(),
+                        )
+                        .unwrap_or(p)
+                    } else {
+                        p
+                    }
+                });
+                // Clippe au domaine fixed-point : un clip
+                // couvrant tout reste plein, un clip
+                // lointain reste vide — même sémantique.
+                let dom = Rect::from_ltrb(-SAFE_COORD, -SAFE_COORD, SAFE_COORD, SAFE_COORD);
+                let clamped = phys.and_then(|p| dom.and_then(|d| p.intersect(&d)));
+                push_rect_clip(
+                    &mut clips,
+                    phys,
+                    true,
+                    pixmap.width(),
+                    pixmap.height(),
+                    |mask| {
+                        if let Some(clamped) = clamped {
                             let path = PathBuilder::from_rect(clamped);
                             mask.fill_path(&path, FillRule::Winding, true, Transform::default());
                         }
-                    }
-                    clips.push(mask);
-                }
+                    },
+                );
+                n_clip_real += u32::from(matches!(clips.last(), Some(ClipEntry::Real(_))));
+                us_clip += t.elapsed().as_micros();
             }
             // R-M9 — clip arrondi (`overflow` + `border-radius`) :
             // même grille de pixels que `PushClip`, le chemin de
             // masque suit les rayons (`rounded_rect_path`).
             DisplayItem::PushClipRounded { rect: r, radii } => {
-                if let Some(mut mask) = Mask::new(pixmap.width(), pixmap.height()) {
-                    if let Some(phys) = Rect::from_xywh(r.x, r.y, r.width, r.height)
-                        .and_then(|rr| rr.transform(cur))
-                    {
-                        let dom = Rect::from_ltrb(-SAFE_COORD, -SAFE_COORD, SAFE_COORD, SAFE_COORD);
-                        if let Some(clamped) = dom.and_then(|d| phys.intersect(&d)) {
+                let t = std::time::Instant::now();
+                n_clip += 1;
+                let phys =
+                    Rect::from_xywh(r.x, r.y, r.width, r.height).and_then(|rr| rr.transform(cur));
+                let dom = Rect::from_ltrb(-SAFE_COORD, -SAFE_COORD, SAFE_COORD, SAFE_COORD);
+                let clamped = phys.and_then(|p| dom.and_then(|d| p.intersect(&d)));
+                // `radii` tous nuls ⇒ clip rect strict → `Full`
+                // possible ; sinon les coins AA interdisent
+                // le sentinelle « couvrant ».
+                let rect_only = radii.iter().all(|r| *r == 0.0);
+                push_rect_clip(
+                    &mut clips,
+                    phys,
+                    rect_only,
+                    pixmap.width(),
+                    pixmap.height(),
+                    |mask| {
+                        if let Some(clamped) = clamped {
                             if let Some(path) = rounded_rect_path(
                                 clamped.left(),
                                 clamped.top(),
@@ -933,35 +1070,58 @@ fn replay_items(
                                 );
                             }
                         }
-                    }
-                    clips.push(mask);
-                }
+                    },
+                );
+                n_clip_real += u32::from(matches!(clips.last(), Some(ClipEntry::Real(_))));
+                us_clip += t.elapsed().as_micros();
             }
             // R-187 — `clip-path:polygon` : mask rempli par
             // `fill_path` sur le chemin du polygone — même
             // pile `clips` que `PushClip`/`PushClipRounded`.
             DisplayItem::PushClipPath { points } => {
-                if let Some(mut mask) = Mask::new(pixmap.width(), pixmap.height()) {
-                    let mut pb = tiny_skia::PathBuilder::new();
-                    let map = |x: f32, y: f32| -> (f32, f32) {
-                        let mut pt = tiny_skia::Point::from_xy(x, y);
-                        cur.map_point(&mut pt);
-                        (pt.x, pt.y)
-                    };
-                    if let Some((x, y)) = points.first() {
-                        let (x0, y0) = map(*x, *y);
-                        pb.move_to(x0, y0);
-                        for (x, y) in &points[1..] {
-                            let (tx, ty) = map(*x, *y);
-                            pb.line_to(tx, ty);
-                        }
-                        pb.close();
+                let t = std::time::Instant::now();
+                n_clip += 1;
+                // Boîte englobante des points transformés : hors
+                // pixmap → `Empty`. Jamais `Full` (le polygone
+                // peut laisser des trous même à bbox couvrante).
+                let (mut x0, mut y0, mut x1, mut y1) = (f32::MAX, f32::MAX, f32::MIN, f32::MIN);
+                let mut pb = tiny_skia::PathBuilder::new();
+                let map = |x: f32, y: f32| -> (f32, f32) {
+                    let mut pt = tiny_skia::Point::from_xy(x, y);
+                    cur.map_point(&mut pt);
+                    (pt.x, pt.y)
+                };
+                if let Some((x, y)) = points.first() {
+                    let (mx, my) = map(*x, *y);
+                    pb.move_to(mx, my);
+                    (x0, y0, x1, y1) = (mx, my, mx, my);
+                    for (x, y) in &points[1..] {
+                        let (tx, ty) = map(*x, *y);
+                        pb.line_to(tx, ty);
+                        x0 = x0.min(tx);
+                        y0 = y0.min(ty);
+                        x1 = x1.max(tx);
+                        y1 = y1.max(ty);
                     }
+                    pb.close();
+                }
+                let off_pixmap = points.is_empty()
+                    || x1 <= 0.0
+                    || y1 <= 0.0
+                    || x0 >= pixmap.width() as f32
+                    || y0 >= pixmap.height() as f32;
+                if off_pixmap {
+                    clips.push(ClipEntry::Empty);
+                } else if let Some(mut mask) = Mask::new(pixmap.width(), pixmap.height()) {
                     if let Some(path) = pb.finish() {
                         mask.fill_path(&path, FillRule::Winding, true, Transform::default());
                     }
-                    clips.push(mask);
+                    clips.push(ClipEntry::Real(mask));
+                } else {
+                    clips.push(ClipEntry::Empty);
                 }
+                n_clip_real += u32::from(matches!(clips.last(), Some(ClipEntry::Real(_))));
+                us_clip += t.elapsed().as_micros();
             }
             DisplayItem::PopClip => {
                 clips.pop();
@@ -1008,6 +1168,7 @@ fn replay_items(
             // l'appariement ; un interleave fautif dégrade en
             // composite du kind réel, jamais un panic).
             DisplayItem::PopFilter | DisplayItem::PopBlend | DisplayItem::PopMask => {
+                let t = std::time::Instant::now();
                 if let Some((mut buf, kind)) = filtered.pop() {
                     match kind {
                         GroupKind::Ops(ops) => {
@@ -1019,7 +1180,7 @@ fn replay_items(
                                 buf.as_ref(),
                                 &tiny_skia::PixmapPaint::default(),
                                 Transform::default(),
-                                clips.last(),
+                                top_clip(&clips, empty_mask.as_ref()),
                             );
                         }
                         // `blend_channel` par canal quand le
@@ -1035,7 +1196,7 @@ fn replay_items(
                                 &rect,
                                 &layers,
                                 cur,
-                                clips.last(),
+                                top_clip(&clips, empty_mask.as_ref()),
                             );
                             let dst = filtered.last_mut().map_or(&mut *pixmap, |(b, _)| b);
                             dst.draw_pixmap(
@@ -1049,6 +1210,8 @@ fn replay_items(
                         }
                     }
                 }
+                us_group += t.elapsed().as_micros();
+                n_group += 1;
             }
             // R-M9b — `backdrop-filter` : la région déjà
             // peinte sous `rect` reçoit les ops, le contenu
@@ -1075,7 +1238,7 @@ fn replay_items(
                             buf.as_ref(),
                             &tiny_skia::PixmapPaint::default(),
                             Transform::default(),
-                            clips.last(),
+                            top_clip(&clips, empty_mask.as_ref()),
                         );
                     }
                 }
@@ -1096,12 +1259,39 @@ fn replay_items(
                             .is_none_or(|b| rects_overlap(b, win))
                     });
                 if draw {
+                    n_draw += 1;
+                    let t = std::time::Instant::now();
                     let dst = filtered.last_mut().map_or(&mut *pixmap, |(b, _)| b);
-                    paint_item(dst, item, cur, fonts, gc, clips.last());
+                    paint_item(
+                        dst,
+                        item,
+                        cur,
+                        fonts,
+                        gc,
+                        top_clip(&clips, empty_mask.as_ref()),
+                    );
+                    us_draw += t.elapsed().as_micros();
+                } else {
+                    n_skip += 1;
                 }
             }
         }
     }
+    tracing::info!(
+        target: "sync_profile",
+        tab = 0u64,
+        phase = "raster.parts",
+        items = items.len(),
+        clips = n_clip,
+        clips_real = n_clip_real,
+        groups = n_group,
+        draws = n_draw,
+        skips = n_skip,
+        clip_us = u64::try_from(us_clip).unwrap_or(u64::MAX),
+        group_us = u64::try_from(us_group).unwrap_or(u64::MAX),
+        draw_us = u64::try_from(us_draw).unwrap_or(u64::MAX),
+        "phase sync"
+    );
 }
 
 /// Intersection non vide de deux rects px CSS — filtre
