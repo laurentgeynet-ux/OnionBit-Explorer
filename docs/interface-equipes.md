@@ -3371,3 +3371,23 @@ shadow n'atteint ni cascade ni boxification ») etait
   (`x-goog-eom-visitor-id`), réponse 200 consommée.
   `/youtubei/v1/browse` rejeté (corpus sans entrée) ;
   `/upgrade_visitor_cookie` rejeté (absent corpus).
+
+### 2026-11-13 — Searchbox : absente du markup, stamping jamais produit
+
+- `ytd-searchbox` n'existe dans le HTML corpus (1,03 Mo)
+  **qu'en `<style class="searchbox">`** — l'élément n'est
+  pas dans le markup : il naît du template du masthead
+  (slot `#center` de `#container`, dom-if/binding) au
+  runtime.
+- Chez nous : `ytd-masthead #container` a ses 3 slots,
+  `_flushClients`/`__enableOrFlushClients` ont tiré sur
+  `ytd-masthead` ET `ytd-topbar-logo-renderer` — mais
+  **zéro `ytd-searchbox` stampé** → barre de recherche
+  jamais créée.
+- Même famille que `yt-icon` : lifecycle Polymer
+  invoqué, descendants jamais matérialisés → la chaîne
+  `k9`/iconset + stamping est le mur commun (sondes
+  `iconsetName`/`iconType`/`attached` ajoutées).
+- Note : recherche `?search_query=` = feed **server-side**
+  non personnalisé — la piste vitrine peuplée passe
+  par un corpus enregistrant une page `/results`.
