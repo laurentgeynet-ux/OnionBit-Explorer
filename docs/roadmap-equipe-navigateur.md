@@ -12561,9 +12561,13 @@ croître la surface navigateur mesurée (`api` 1510/8099, 18,6 %).
 - [ ] **N5.0 — merge `performance` → `main` en fin d'arc**
   (§2.1 — l'arc vit sur la branche ; `main` réintégré
   périodiquement pour borner la dérive).
-- [ ] **N5.1-N5.3 — vol YouTube `--release` + attribution
-  interne JS + correctif** (§2.6) — référencer Sprint N3,
-  ne pas ré-instrumenter.
+- [x] **N5.1-N5.3 — vol YouTube `--release` + attribution
+  interne JS + correctif** (§2.6) — vol tranché : jambes
+  JS réelles ~23-30 s YT (48 % du wall) ; attribution J17
+  (`frame_ns` 967 ms > `prop_ns` 561 ms > `env_ns` 298 ms >
+  parse ~1 s) ; correctif = **JS-C497** (`lit_flags` :
+  `arguments`/`new.target`/`hoist` élidés sur preuve
+  d'absence par littéral) — mesure au vol `r301`.
 - [x] **N5.4 — câblage `compute_scoped_frontier`** (§2.3) —
   livré sur `performance` : `style_touched` (nœud réel
   `SetAttr`, parent `Remove`/`Insert`/`SetText`) →

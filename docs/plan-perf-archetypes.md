@@ -261,7 +261,7 @@ résidu listé.
 
 | Tâche | Fichiers | DoD |
 |---|---|---|
-| (a) Vol `--release` : tranche si les jambes JS (~110-150 s) sont réelles ou gonflées debug ×10-20 — `cargo test -p explorer-core --lib --release lobste_pipeline_errors` (`LOBSTE_PROBE_URL`) ou daemon release + vol canonique (un seul binaire de test, pas le piège des ~50 jscore) ; (b) attribution interne méthode `raster.parts` sur `pump.js_run_sync`/`net.commit_scripts`/`event.mirror_sync` + heap GC (~570-690 k cells) — **référencer Sprint N3** (`prop_scan` 72 M → N4.1, `body_ns` ~426 s §B-114 — ne pas ré-instrumenter) ; (c) correctif sur le poste nommé | `crates/explorer-core/src/session/` (`js_glue.rs`, `net.rs`, `apply.rs`), `crates/explorer-jscore/` | verdict tranché consigné au journal ; si poste réel nommé → correctif + re-vol |
+| ~~(a) Vol `--release`~~ **fait** : jambes JS réelles ~23-30 s YT (48 % du wall), pas artefact debug ; ~~(b) attribution~~ **fait** : J17 au vol `r299a`/`r300` — `frame_ns` ~967 ms (750 k appels), `prop_ns` ~561 ms (3,6 M lookups), `env_ns` ~298 ms, parse ~1 s ; ~~(c) correctif~~ **fait → JS-C497** : `lit_flags` élit `arguments`/`new.target`/`hoist` sur preuve d'absence par littéral | `crates/explorer-jscore/src/interp/mod.rs` | verdict tranché consigné ; correctif livré — mesure au vol `r301` |
 
 Le build release peut tourner en tâche de fond pendant
 §2.2 — le verdict se lit quand il est prêt.

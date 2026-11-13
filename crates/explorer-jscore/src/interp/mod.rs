@@ -830,6 +830,18 @@ pub struct Engine {
     /// par `lit` → adresses stables + chaque appel résout.
     /// La valeur épingle `lit` → `ptr(lit)` (clé) non réutilisé.
     pub(crate) lowered_suspend_cache: std::collections::HashMap<usize, Rc<LoweredSuspend>>,
+    /// JS-C497 — flags de prologue par littéral (`Rc::as_ptr`),
+    /// calculés une fois : bit [`LIT_USES_ARGS`] (`LazyArgs`
+    /// utile), [`LIT_MAY_HOIST`] (decls `var`/`function`/`export`
+    /// plausibles → `hoist` utile), [`LIT_USES_NT`] (`new.target`
+    /// plausibly lu → liaison utile). **Conservateurs** : un flag
+    /// n'est abaissé que sur preuve — corps différé = test
+    /// d'appartenance exact dans les tokens (+ remontée à la `(`
+    /// des paramètres, hors plage `{…}`) ; corps parsé =
+    /// recherche bornée par mot dans `src_text[span]` ; sans
+    /// preuve → tout armé. La valeur épingle le `Rc<FnLit>` →
+    /// `ptr` non réutilisé (motif `lowered_suspend_cache`).
+    pub(crate) lit_flags: std::collections::HashMap<usize, (u8, std::rc::Rc<crate::ast::FnLit>)>,
     /// JS-C490c — kill-switch A/B : `EXPLORER_NO_RESOLVE=1`
     /// désarme la résolution statique (A/B en vol sans rebuild).
     pub(crate) resolve_off: bool,
@@ -1365,6 +1377,7 @@ impl Engine {
             resolved_guard: Vec::new(),
             resolved_envs: std::collections::HashMap::new(),
             lowered_suspend_cache: std::collections::HashMap::new(),
+            lit_flags: std::collections::HashMap::new(),
             resolve_off: std::env::var("EXPLORER_NO_RESOLVE").is_ok_and(|v| v == "1"),
             resolve_verify: std::env::var("EXPLORER_RESOLVE_VERIFY").is_ok_and(|v| v == "1"),
             dom_ctors: std::collections::HashMap::new(),
@@ -9800,6 +9813,17 @@ impl Engine {
         r
     }
 
+    /// Flags de prologue du littéral — cache `lit_flags` (Étape
+    /// 240) : une entrée par littéral appelé, le `Rc` retenu
+    /// épingle l'adresse (clé `ptr` stable — même invariant que
+    /// `lowered_suspend_cache`).
+    fn lit_flags_of(&mut self, lit: &std::rc::Rc<crate::ast::FnLit>) -> u8 {
+        self.lit_flags
+            .entry(std::rc::Rc::as_ptr(lit) as usize)
+            .or_insert_with(|| (compute_lit_flags(lit), lit.clone()))
+            .0
+    }
+
     /// Corps de `lit` matérialisé pour exécution (V-5a) — un
     /// corps différé est sous-parsé ici, au premier appel
     /// (ensuite `OnceCell`). Erreur de syntaxe tardive → throw
@@ -9944,6 +9968,11 @@ impl Engine {
         self.strict = lit.strict;
         let local = Env::local(env);
         crate::j17_tick(&crate::J17_ENV_NEW);
+        // JS-C497 — flags de prologue par littéral (cache
+        // `lit_flags`) : `LazyArgs`, `new.target` et `hoist`
+        // ne sont posés que si le corps les référence
+        // plausiblement — jamais sauté sur un doute.
+        let lfl = self.lit_flags_of(lit);
         // V-5a : un corps différé se sous-parse ici, au premier
         // appel — erreur de syntaxe tardive → throw (jamais de
         // panic). `FnLit.strict` a déjà été fixé au parse par le
@@ -10024,7 +10053,7 @@ impl Engine {
         // Le code de construction a migré dans
         // `materialize_arguments` — sémantique identique au
         // premier accès.
-        if !lit.is_arrow {
+        if !lit.is_arrow && lfl & LIT_USES_ARGS != 0 {
             let la = std::rc::Rc::new(crate::heap::LazyArgs {
                 lit: lit.clone(),
                 f: f.clone(),
@@ -10039,7 +10068,7 @@ impl Engine {
         // la lecture remonte lexicalement au ctor englobant
         // (spec : `new.target` est une MetaProperty du
         // contexte d'exécution englobant, pas de l'arrow).
-        if !lit.is_arrow {
+        if !lit.is_arrow && lfl & LIT_USES_NT != 0 {
             Self::env_put(&local, NEW_TARGET, nt, false);
         }
         if let Ok(mut g) = crate::LAST_PHASE.lock() {
@@ -10049,10 +10078,15 @@ impl Engine {
         // JS-C490 — annotations de profondeur sur le corps qui
         // tournera (le corps baissé des gen/async).
         self.ensure_lit_resolved(lit, lowered_body.as_ref().unwrap_or(&body_rc));
-        self.hoist(
-            lowered_body.as_deref().map_or(&body_rc[..], |b| &b[..]),
-            &local,
-        );
+        // JS-C497 — corps sans `var`/`function`/`export`
+        // plausible : `hoist` n'a rien à installer — la marche
+        // complète du corps à chaque appel était pure perte.
+        if lfl & LIT_MAY_HOIST != 0 {
+            self.hoist(
+                lowered_body.as_deref().map_or(&body_rc[..], |b| &b[..]),
+                &local,
+            );
+        }
         // Générateur lazy (JS-C34) : le corps ne tourne
         // qu'à `next()` — un `GExec` suspendable porte la
         // pile de contrôle ; `yield` suspend/reprend.
@@ -10440,6 +10474,139 @@ impl Drop for Engine {
             },
         );
     }
+}
+
+/// JS-C497 — flag `lit_flags` : `arguments`/`eval` plausibles
+/// → `LazyArgs` armé au prologue d'appel. `eval` couvre la
+/// lecture dynamique `eval("arguments")` (la liaison doit
+/// exister dès l'entrée — la lecture échappe au scan).
+const LIT_USES_ARGS: u8 = 1;
+/// JS-C497 — `var`/`function`/`export` plausibles → `hoist`
+/// utile. Un corps sans ces mots-clés n'a rien à hoister
+/// (`let`/`const`/`class` ne hoistent pas — exclus à bon droit).
+const LIT_MAY_HOIST: u8 = 2;
+/// JS-C497 — `new.target` plausibly lu → liaison env armée.
+const LIT_USES_NT: u8 = 4;
+/// Tous flags armés — repli quand aucune preuve d'absence
+/// n'existe (corps synthétisé sans source).
+const LIT_ALL: u8 = LIT_USES_ARGS | LIT_MAY_HOIST | LIT_USES_NT;
+
+/// Flags de prologue du littéral — **jamais un faux négatif** :
+/// l'absence n'est posée que sur preuve matérielle.
+///
+/// Corps différé : les tokens du corps `{…}` sont conservés —
+/// test d'appartenance **exact** (`arguments`/`eval`/`target` =
+/// `Tok::Ident`, `var`/`function`/`export` = `Tok::Kw`) ; les
+/// tokens des corps imbriqués sont inclus dans la plage —
+/// conservateur par construction (`x.arguments` arme aussi —
+/// sans gravité). Les **défauts de paramètres** vivent avant
+/// le `{` : remontée à la `(` ouvrante par comptage de
+/// profondeur pour couvrir `f(a=arguments)`/`f(a=new.target)`.
+///
+/// Corps parsé : `src_text`+`span` donnent la source verbatim
+/// du littéral — recherche bornée par mot (chaîne, commentaire
+/// ou propriété homonyme → flag armé, jamais l'inverse).
+fn compute_lit_flags(lit: &crate::ast::FnLit) -> u8 {
+    if let crate::ast::FnBody::Deferred(d) = &lit.body {
+        if d.toks.get(d.start..=d.end).is_none() {
+            return LIT_ALL;
+        }
+        // `(` des paramètres : premier LParen dont la
+        // fermante précède `d.start`. Introuvable (flèche
+        // sans parenthèses `x=>{…}` — pas de défauts
+        // possibles) → plage vide (`open = start`).
+        let mut depth: i32 = 0;
+        let mut open = d.start;
+        for i in (0..d.start).rev() {
+            match d.toks[i].tok {
+                crate::lexer::Tok::P(crate::lexer::P::RParen) => depth += 1,
+                crate::lexer::Tok::P(crate::lexer::P::LParen) => {
+                    depth -= 1;
+                    if depth <= 0 {
+                        open = i;
+                        break;
+                    }
+                }
+                _ => {}
+            }
+        }
+        let mut f = 0u8;
+        for (i, t) in d.toks[open..=d.end].iter().enumerate() {
+            let gi = open + i;
+            match &t.tok {
+                crate::lexer::Tok::Ident(n) => {
+                    if &**n == "arguments" || &**n == "eval" {
+                        f |= LIT_USES_ARGS;
+                    }
+                    if &**n == "target"
+                        && gi >= 2
+                        && matches!(
+                            d.toks[gi - 2].tok,
+                            crate::lexer::Tok::Kw(crate::lexer::Kw::New)
+                        )
+                        && matches!(
+                            d.toks[gi - 1].tok,
+                            crate::lexer::Tok::P(crate::lexer::P::Dot)
+                        )
+                    {
+                        f |= LIT_USES_NT;
+                    }
+                }
+                crate::lexer::Tok::Kw(
+                    crate::lexer::Kw::Var | crate::lexer::Kw::Function | crate::lexer::Kw::Export,
+                ) => f |= LIT_MAY_HOIST,
+                _ => {}
+            }
+        }
+        return f;
+    }
+    let Some(text) = lit.src_text.as_deref() else {
+        return LIT_ALL;
+    };
+    let (s, e) = lit.span;
+    if e <= s {
+        return LIT_ALL;
+    }
+    let src: String = text.chars().skip(s).take(e - s).collect();
+    let mut f = 0u8;
+    if src_has_word(&src, "arguments") || src_has_word(&src, "eval") {
+        f |= LIT_USES_ARGS;
+    }
+    // Le mot-clé `function` du littéral vit dans `span` —
+    // la recherche de decls part de la première `{` (corps)
+    // quand elle existe ; `() => expr` n'en a pas → plage
+    // entière (conservateur : les défauts y vivent aussi).
+    let decl_src = src.find('{').map_or(&src[..], |b| &src[b..]);
+    if src_has_word(decl_src, "var")
+        || src_has_word(decl_src, "function")
+        || src_has_word(decl_src, "export")
+    {
+        f |= LIT_MAY_HOIST;
+    }
+    if src_has_word(&src, "new.target") {
+        f |= LIT_USES_NT;
+    }
+    f
+}
+
+/// `word` présent dans `src` avec frontières de mot JS
+/// (ni précédé ni suivi d'un char ident `[a-zA-Z0-9_$]`).
+/// `word` est ASCII — les offsets de `find` restent sur des
+/// frontières de caractères.
+fn src_has_word(src: &str, word: &str) -> bool {
+    let ident = |c: char| c.is_ascii_alphanumeric() || c == '_' || c == '$';
+    let mut from = 0usize;
+    while let Some(p) = src[from..].find(word) {
+        let i = from + p;
+        let before = i == 0 || src[..i].chars().next_back().is_none_or(|c| !ident(c));
+        let after = i + word.len();
+        let after_ok = after >= src.len() || src[after..].chars().next().is_none_or(|c| !ident(c));
+        if before && after_ok {
+            return true;
+        }
+        from = i + 1;
+    }
+    false
 }
 
 /// Snapshot des compteurs natifs `stats_alloc` (`octets
