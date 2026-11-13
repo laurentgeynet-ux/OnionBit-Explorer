@@ -2,8 +2,8 @@
 
 # 🧅 OnionBit Explorer
 
-**A web browser engine written from scratch in Rust — no imported engine, every browser-specific layer implemented here.**
-*Un navigateur web écrit de zéro en Rust — aucun moteur importé, chaque couche métier est implémentée ici.*
+**A web browser engine written from scratch in Rust — HTTP/TLS, HTML/CSS, layout, raster, JavaScript — with a Flutter desktop client. No imported engine: every layer is implemented here.**
+*Un navigateur web écrit de zéro en Rust — HTTP/TLS, HTML/CSS, layout, raster, JavaScript — avec un client desktop Flutter. Aucun moteur importé : chaque couche est implémentée ici.*
 
 [![CI](https://github.com/laurentgeynet-ux/OnionBit-Explorer/actions/workflows/ci.yml/badge.svg)](https://github.com/laurentgeynet-ux/OnionBit-Explorer/actions/workflows/ci.yml)
 [![Nightly terrain](https://github.com/laurentgeynet-ux/OnionBit-Explorer/actions/workflows/nightly-terrain.yml/badge.svg)](https://github.com/laurentgeynet-ux/OnionBit-Explorer/actions/workflows/nightly-terrain.yml)
@@ -50,6 +50,19 @@ codecs) — the full, declared list is in `Cargo.toml` and ADR-0001:
   Rust except two exceptions declared and justified in the
   manifests (`ring` for TLS crypto, `stacker`/`psm` for stack
   growth; both carry asm, both documented).
+- **`#![forbid(unsafe_code)]` engine-wide** — every `explorer-*`
+  crate forbids unsafe code, and so does the codec/demux/decode
+  path of the sister media stack. `unsafe` survives only at
+  three named, ADR-documented seams: `explorer-ffi` (C ABI,
+  ADR-0018), `onioncodec-simd` (AVX2 kernels — safe API, scalar
+  fallback) and `onioncodec-hw-d3d11` (DXVA submission, media
+  ADR-0004). None of it touches engine logic.
+- **Portable to a USB key** — `scripts/build_dist.ps1` assembles
+  `dist/Explorer/` as a PortableApps-style bundle: the
+  `Explorer.portable` marker makes `state/` live next to the
+  executable, and the portable invariant — *nothing absolute is
+  persisted* — survives drive-letter changes. One folder to
+  copy, nothing to install.
 - **Security plumbing as a feature** — `Sec-Fetch-*` metadata,
   real **CORS enforcement** (preflight `OPTIONS` + `ACAO`/`ACAC`),
   **CHIPS** `Partitioned` cookies, `SameSite`/`__Host-`/`__Secure-`,
@@ -116,8 +129,10 @@ real shadow roots, **reddit.com** serves its Lit-based feed
 end-to-end, **x.com** renders its logged-out landing and
 survives `await fetch()` over real I/O (suspension/resume of
 the interpreter, not a shim). **youtube.com** boots its real
-10.8 MB kevlar bundle (evaluated `ok` by our own interpreter)
-and paints its SSR shell — hydration is the named open arm.
+10.8 MB kevlar bundle (evaluated `ok` by our own interpreter),
+paints its SSR shell and runs Google's own **BotGuard** VM
+inside our engine — hydration and the residual `pNM`/`bb` wall
+are the open arms, instrumented under campaign `N1.x`.
 **Video plays end-to-end**: progressive MP4 → decoded frames +
 audio 1:1 to EOS, and a real **hls.js** player over MSE multi-rail
 (11 fragments, section boundaries, ABR) — powered by the sister
@@ -171,7 +186,12 @@ mesurée par paliers sur corpus publics et terrain réel — les écarts et
 limites sont documentés honnêtement, jamais maquillés. La **vidéo joue**
 en bout-en-bout (MSE multi-rail, hls.js réel) via la pile sœur
 OnionCodec/OnionMedia — codecs **pur Rust byte-exact** vs FFmpeg/dav1d
-(H.264, HEVC, AV1, VP9, VP8). DRM/EME hors périmètre assumé.
+(H.264, HEVC, AV1, VP9, VP8). **`#![forbid(unsafe_code)]` sur tout le
+moteur** — l'`unsafe` résiduel est confiné à trois coutures nommées et
+documentées par ADR (frontière C FFI, kernels AVX2, soumission DXVA).
+**Bundle portable** : `dist/Explorer/` s'exécute depuis une clé USB —
+état relatif au marqueur `Explorer.portable`, rien à installer.
+DRM/EME hors périmètre assumé.
 
 ## License
 
