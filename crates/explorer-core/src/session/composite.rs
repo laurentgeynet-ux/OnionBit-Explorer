@@ -44,7 +44,8 @@ use explorer_layout::{build_box_tree_sized, layout_tree};
 use explorer_render::collect_data_images;
 
 use super::apply::{
-    layout_ctx, restitute_font_cache, styles_payload, ApplyCtx, PaintPayload, SharedFonts,
+    layout_ctx, restitute_font_cache, styles_payload, ApplyCtx, PaintPayload, PhaseKind,
+    SharedFonts,
 };
 use super::*;
 
@@ -178,7 +179,7 @@ fn iframe_boxes(bx: &LayoutBox, dom: &Dom, out: &mut Vec<(NodeId, Rect)>) {
 /// réutilisation ne peut croiser deux sous-contextes —
 /// contrairement à un cache par `NodeId`, instable au
 /// re-parse.
-pub(crate) fn composite_frames(p: &mut PaintPayload, ctx: &ApplyCtx, dom: &Dom) {
+pub(crate) fn composite_frames(p: &mut PaintPayload, ctx: &ApplyCtx, dom: &Dom, tab: TabId) {
     let Some(tree) = p.tree.as_ref() else { return };
     let mut boxes = Vec::new();
     iframe_boxes(tree, dom, &mut boxes);
@@ -235,6 +236,7 @@ pub(crate) fn composite_frames(p: &mut PaintPayload, ctx: &ApplyCtx, dom: &Dom) 
                     base.as_ref(),
                     &p.csp,
                     &mut p.sheet_cache,
+                    tab,
                 )
                 .map_or_else(|| Arc::new(blank(wp, hp)), Arc::new)
             })
@@ -281,6 +283,7 @@ fn blank(w: u32, h: u32) -> DecodedImage {
 /// n'a pas d'en-têtes propres) ; un cadre fetché vit sous
 /// ses propres méta CSP (ses en-têtes de réponse ne sont
 /// pas conservés — borne assumée CAP-145).
+#[allow(clippy::too_many_arguments)] // tab = attribution sync_profile (étape 232).
 fn render_subframe(
     f: &SubFrame,
     w: f32,
@@ -289,6 +292,7 @@ fn render_subframe(
     parent_base: Option<&Url>,
     parent_csp: &[explorer_net::csp::CspPolicy],
     sheet_cache: &mut HashMap<String, explorer_css::Stylesheet>,
+    tab: TabId,
 ) -> Option<DecodedImage> {
     let mut cp = PaintPayload {
         base_url: Some(match &f.srcdoc {
@@ -331,6 +335,8 @@ fn render_subframe(
         child_ctx.scripting,
         ctx.scale,
         None,
+        PhaseKind::Sub,
+        tab,
     );
     *sheet_cache = std::mem::take(&mut cp.sheet_cache);
     let data_imgs = collect_data_images(&f.dom, &styles, ctx.image_max_px);

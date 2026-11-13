@@ -231,7 +231,7 @@ impl Session {
             entry.put_paint(p);
             return Err(CoreError::EmptyDocument);
         };
-        let r = apply::relayout_dom_payload(&mut p, &ctx, &dom, &canvas_ops);
+        let r = apply::relayout_dom_payload(&mut p, &ctx, tab, &dom, &canvas_ops);
         p.dom = Some(dom);
         if let Some(entry) = self.tabs.get_mut(&tab) {
             entry.put_paint(p);
@@ -290,6 +290,8 @@ impl Session {
             entry.js.is_some(),
             self.scale,
             None,
+            apply::PhaseKind::Flow,
+            tab,
         );
         entry.put_paint(p);
         styles
@@ -310,7 +312,7 @@ impl Session {
             explorer_js::JsEngine::canvas_ops,
         );
         let mut p = entry.take_paint();
-        let r = apply::relayout_dom_payload(&mut p, &ctx, dom, &canvas_ops);
+        let r = apply::relayout_dom_payload(&mut p, &ctx, tab, dom, &canvas_ops);
         entry.put_paint(p);
         r
     }
@@ -325,7 +327,7 @@ impl Session {
             return Err(CoreError::UnknownTab(tab));
         };
         let mut p = entry.take_paint();
-        let r = apply::repaint_payload(&mut p, &ctx, None);
+        let r = apply::repaint_payload(&mut p, &ctx, None, apply::PhaseKind::Paint, tab);
         entry.put_paint(p);
         r
     }
@@ -371,12 +373,12 @@ pub(crate) fn anim_tick_payload(
         // tick saute cascade + relayout et ne ré-émet que la
         // display list (étape 4).
         t = sync_phase(tab, "anim.patch", t);
-        apply::repaint_payload(p, ctx, Some(&dom))
+        apply::repaint_payload(p, ctx, Some(&dom), apply::PhaseKind::Anim, tab)
     } else {
         let nodes: Vec<explorer_dom::NodeId> = touched.iter().map(|&(_, n)| n).collect();
         match apply::journal_cover(&dom, &nodes) {
             Some(cover) => apply::relayout_subtree_payload(p, ctx, tab, &dom, cover, ops),
-            None => apply::relayout_dom_payload(p, ctx, &dom, ops),
+            None => apply::relayout_dom_payload(p, ctx, tab, &dom, ops),
         }
     };
     sync_phase(tab, "anim.relayout", t);

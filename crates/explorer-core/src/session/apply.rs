@@ -726,6 +726,9 @@ pub(crate) fn apply_payload(
     old_title: Option<&str>,
 ) -> ApplyOutcome {
     let t0 = Instant::now();
+    // Horloge de phases `sync_profile` (étape 232) —
+    // distincte de `t0` (durée totale de l'apply, ms info).
+    let mut tp = Instant::now();
     let mut out = ApplyOutcome::default();
     let mut new_dom = TreeBuilder::parse_scripting(&job.html, ctx.scripting);
     // JS-C291 — resplice les nœuds transportés en marqueurs
@@ -743,6 +746,7 @@ pub(crate) fn apply_payload(
         ms = u64::try_from(t0.elapsed().as_millis()).unwrap_or(u64::MAX),
         "apply: parse"
     );
+    tp = sync_phase(job.tab, "flow.parse", tp);
     // Registre `customElements` (`:defined`) — transporté
     // par la payload, le Dom frais repart nu à chaque
     // re-parse.
@@ -769,6 +773,7 @@ pub(crate) fn apply_payload(
     let mut extra = attrs_dirty_paths(p.dom.as_ref(), &old_keymap, &new_dom, &p.keymap);
     extra.append(&mut p.style_dirty);
     let eff_dirty = merged_dirty(job.dirty.clone(), &extra);
+    tp = sync_phase(job.tab, "flow.keymap", tp);
     // Relayout incrémental (étape 55f) avant tout
     // remplacement — il a besoin de l'ancien DOM et de
     // l'ancien arbre, tous deux dans la payload.
@@ -836,10 +841,11 @@ pub(crate) fn apply_payload(
     if old_title != new_title.as_deref() {
         out.title = Some(new_title);
     }
+    sync_phase(job.tab, "flow.swap", tp);
     if job.relayout {
         if !incremental {
             if let Some(dom) = p.dom.take() {
-                if relayout_dom_payload(p, ctx, &dom, &job.canvas_ops).is_err() {
+                if relayout_dom_payload(p, ctx, job.tab, &dom, &job.canvas_ops).is_err() {
                     p.dom = Some(dom);
                     // Rien n'a été stylé : la dette repart
                     // entière (diff de ce tour inclus).
@@ -1837,7 +1843,7 @@ pub(crate) fn relayout_subtree_payload(
     if try_incr_payload(p, ctx, tab, Some(dom), dom, target, target, canvas_ops) {
         Ok(())
     } else {
-        relayout_dom_payload(p, ctx, dom, canvas_ops)
+        relayout_dom_payload(p, ctx, tab, dom, canvas_ops)
     }
 }
 
@@ -1872,7 +1878,7 @@ fn journal_relayout(
     let incremental = journal_cover(&dom, touched).is_some_and(|t| {
         try_incr_payload(p, ctx, job.tab, Some(&dom), &dom, t, t, &job.canvas_ops)
     });
-    if !incremental && relayout_dom_payload(p, ctx, &dom, &job.canvas_ops).is_err() {
+    if !incremental && relayout_dom_payload(p, ctx, job.tab, &dom, &job.canvas_ops).is_err() {
         p.dom = Some(dom);
         p.style_dirty = debt;
         return Err(JournalReject::Dom);
@@ -1987,6 +1993,8 @@ fn try_incr_payload(
         ctx.scripting,
         ctx.scale,
         scope_root,
+        PhaseKind::Incr,
+        tab,
     );
     p.style_eng = Some(eng);
     t = sync_phase(tab, "incr.style", t);
@@ -2080,10 +2088,12 @@ fn try_incr_payload(
     // re-blittés sur les boîtes du nouvel arbre — les
     // surfaces `frame_bitmaps` clées `(url,w,h)` rendent
     // la passe gratuite si les cadres n'ont pas bougé.
-    composite::composite_frames(p, ctx, new_dom);
-    let ok = repaint_payload(p, ctx, None).is_ok();
-    sync_phase(tab, "incr.repaint", t);
-    ok
+    composite::composite_frames(p, ctx, new_dom, tab);
+    sync_phase(tab, "incr.frames", t);
+    // `incr.emit`/`incr.raster` émis à l'intérieur (étape
+    // 232 — l'ancien `incr.repaint` = frames + emit +
+    // raster, désormais attribué finement).
+    repaint_payload(p, ctx, None, PhaseKind::Incr, tab).is_ok()
 }
 
 /// `StyleEnv` dérivé du viewport session (f32 → px entiers,
@@ -2232,6 +2242,28 @@ fn sheets_sig(
     h.finish()
 }
 
+/// Voie d'attribution `sync_profile` d'une passe peinture
+/// (étape 232 — trous de couverture du profil post-verrou) :
+/// les jambes internes (`sheets`, `cascade`, `emit`…) sont
+/// préfixées par la voie — `Incr` = journal incrémental,
+/// `Flow` = pipeline complet (apply cléé, repli incrémental,
+/// nav initiale, repli anim), `Anim` = repaint du tick anim,
+/// `Paint` = repaint seul (scroll/invalidation), `Sub` =
+/// sous-contexte `<iframe>` (passe bornée du composite).
+#[derive(Clone, Copy)]
+pub(crate) enum PhaseKind {
+    /// Voie journal incrémentale (`incr.*`).
+    Incr,
+    /// Pipeline complet (`flow.*`) — voie cléée, replis.
+    Flow,
+    /// Repaint du tick animé (`anim.*`).
+    Anim,
+    /// Repaint seul — scroll / invalidation (`paint.*`).
+    Paint,
+    /// Sous-contexte `<iframe>` (`sub.*`).
+    Sub,
+}
+
 /// Cascade + transitions/animations sur payload — la passe
 /// de styles partagée par reflow complet et relayout
 /// incrémental. Écrit `prev_styles`/`transitions`/
@@ -2246,6 +2278,7 @@ fn sheets_sig(
 /// portée les entrées survivent. Replis cascade complète :
 /// map/env absents ou changés, `:has(` dans les feuilles,
 /// racine morte.
+#[allow(clippy::too_many_arguments)] // viewport/schéma/scripting/dpr = l'env ; prof+tab = attribution sync_profile (étape 232).
 pub(crate) fn styles_payload(
     p: &mut PaintPayload,
     dom: &Dom,
@@ -2254,7 +2287,22 @@ pub(crate) fn styles_payload(
     scripting: bool,
     dpr: f32,
     scope: Option<explorer_dom::NodeId>,
+    prof: PhaseKind,
+    tab: TabId,
 ) -> (StyleMap, StyleEngine) {
+    // Sous-phases `sync_profile` (étape 232) : `sheets` =
+    // collecte + signature + moteur, `cascade` = le
+    // `compute_*` seul (le repli `:has` y vit), `stylpost`
+    // = ordinals + diff transitions/animations + clone
+    // `prev_styles` — les post-passes O(document) qui
+    // survivraient à tout restyle scopé. `Anim`/`Paint` ne
+    // passent jamais ici — repli `flow` par sécurité.
+    let (ph_sheets, ph_cascade, ph_post) = match prof {
+        PhaseKind::Incr => ("incr.sheets", "incr.cascade", "incr.stylpost"),
+        PhaseKind::Sub => ("sub.sheets", "sub.cascade", "sub.stylpost"),
+        _ => ("flow.sheets", "flow.cascade", "flow.stylpost"),
+    };
+    let mut t = Instant::now();
     // Collecte + substitution `inline_css_expanded` en une
     // passe (étape 218 — le DOM a pu muter depuis la
     // collecte ; substitution par contenu, robuste aux
@@ -2298,6 +2346,7 @@ pub(crate) fn styles_payload(
     // vrai à 800px, pas lue sur le 1024×768 par défaut) et
     // le schéma de couleurs réglé (étape 97).
     let env = viewport_env(viewport, color_scheme, scripting, dpr);
+    t = sync_phase(tab, ph_sheets, t);
     // Restyle scopé (étape 228) : la map persistée est la
     // base ; `compute_scoped` ne réécrit que le sous-arbre
     // de `scope` (parent de la cible journal — couvre les
@@ -2319,6 +2368,7 @@ pub(crate) fn styles_payload(
         }
         _ => eng.compute_tree(dom, dom.document(), &env),
     };
+    t = sync_phase(tab, ph_cascade, t);
     let ord_of = element_ordinals(dom);
     let raw: HashMap<usize, ComputedStyle> = styles
         .iter()
@@ -2334,6 +2384,7 @@ pub(crate) fn styles_payload(
     apply_anim_overrides(&p.transitions, &mut p.animations, &mut styles, &ord_of, now);
     p.prev_styles = raw;
     p.styles_env = Some(env);
+    sync_phase(tab, ph_post, t);
     (styles, eng)
 }
 
@@ -2344,6 +2395,7 @@ pub(crate) fn styles_payload(
 pub(crate) fn relayout_dom_payload(
     p: &mut PaintPayload,
     ctx: &ApplyCtx,
+    tab: TabId,
     dom: &Dom,
     canvas_ops: &CanvasOpsTable,
 ) -> Result<(), CoreError> {
@@ -2357,7 +2409,7 @@ pub(crate) fn relayout_dom_payload(
     dlv_info!("apply: relayout");
     // `scope = None` : passe complète — la map produite
     // devient la base persistée des restyles scopés de la
-    // voie journal (étape 228).
+    // voie journal (étape 228). Phases `flow.*` à l'intérieur.
     let (mut styles, eng) = styles_payload(
         p,
         dom,
@@ -2366,6 +2418,8 @@ pub(crate) fn relayout_dom_payload(
         ctx.scripting,
         ctx.scale,
         None,
+        PhaseKind::Flow,
+        tab,
     );
     tracing::info!(
         ms = u64::try_from(t0.elapsed().as_millis()).unwrap_or(u64::MAX),
@@ -2374,6 +2428,7 @@ pub(crate) fn relayout_dom_payload(
     let Some(root_el) = dom.document_element() else {
         return Err(CoreError::EmptyDocument);
     };
+    let mut t = Instant::now();
     let data_imgs = collect_data_images(dom, &styles, ctx.image_max_px);
     p.images.replaced.extend(data_imgs.replaced);
     p.images.backgrounds.extend(data_imgs.backgrounds);
@@ -2407,6 +2462,7 @@ pub(crate) fn relayout_dom_payload(
     // taille utilisée dans `paint_replaced` (§B-32/§B-36).
     let (mut svgs, mut svg_sources) =
         explorer_render::svg::collect_svg_styled(dom, root_el, &styles, ctx.image_max_px);
+    t = sync_phase(tab, "flow.assets", t);
     let Some(mut bx) = build_box_tree_sized(dom, root_el, &styles, &sizes) else {
         return Err(CoreError::NothingToPaint);
     };
@@ -2414,6 +2470,7 @@ pub(crate) fn relayout_dom_payload(
         ms = u64::try_from(t0.elapsed().as_millis()).unwrap_or(u64::MAX),
         "apply: boxtree"
     );
+    t = sync_phase(tab, "flow.box", t);
     let vw = ctx.viewport.0;
     let block = layout_ctx(ctx, p);
     layout_tree(&mut bx, vw, &block);
@@ -2421,6 +2478,7 @@ pub(crate) fn relayout_dom_payload(
         ms = u64::try_from(t0.elapsed().as_millis()).unwrap_or(u64::MAX),
         "apply: layout"
     );
+    t = sync_phase(tab, "flow.layout", t);
     // R-190 — passe 2 `@container` (demande PIPE journalisée,
     // branchement NAV) : les règles taguées `container:` sont
     // inertes en passe 1 ; le layout vient de poser les
@@ -2494,6 +2552,7 @@ pub(crate) fn relayout_dom_payload(
             }
         }
     }
+    t = sync_phase(tab, "flow.p2", t);
     // Étape 228 — map + moteur persistés : base du restyle
     // scopé de la prochaine voie journal (mêmes feuilles →
     // `style_eng` réutilisé, parse ET collecte sautés).
@@ -2518,9 +2577,10 @@ pub(crate) fn relayout_dom_payload(
     // `images.replaced` — `paint_replaced` émet l'`Image`
     // à la peinture qui suit.
     tracing::info!("apply: composite_frames");
-    composite::composite_frames(p, ctx, dom);
+    composite::composite_frames(p, ctx, dom, tab);
+    sync_phase(tab, "flow.frames", t);
     tracing::info!("apply: repaint_payload");
-    repaint_payload(p, ctx, Some(dom))?;
+    repaint_payload(p, ctx, Some(dom), PhaseKind::Flow, tab)?;
     tracing::info!(
         ms = u64::try_from(t0.elapsed().as_millis()).unwrap_or(u64::MAX),
         "apply: repaint"
@@ -2540,10 +2600,25 @@ pub(crate) fn repaint_payload(
     p: &mut PaintPayload,
     ctx: &ApplyCtx,
     dom_hint: Option<&Dom>,
+    prof: PhaseKind,
+    tab: TabId,
 ) -> Result<(), CoreError> {
     let Some(bx) = p.tree.as_ref() else {
         return Err(CoreError::EmptyDocument);
     };
+    // Sous-phases `sync_profile` (étape 232) : `emit` =
+    // build display list + overlays (la traversée complète
+    // de l'arbre que la copie incrémentale n'élide pas),
+    // `raster` = `resolved_bounds` + `replay_items` (le
+    // fenêtrage borne les pixels, pas les items).
+    let (ph_emit, ph_raster) = match prof {
+        PhaseKind::Incr => ("incr.emit", "incr.raster"),
+        PhaseKind::Flow => ("flow.emit", "flow.raster"),
+        PhaseKind::Anim => ("anim.emit", "anim.raster"),
+        PhaseKind::Paint => ("paint.emit", "paint.raster"),
+        PhaseKind::Sub => ("sub.emit", "sub.raster"),
+    };
+    let mut t = Instant::now();
     let (vw, vh) = ctx.viewport;
     // R-37 : build incrémental — les sous-arbres inchangés
     // (même signature `box_sig`, même taille, Δ uniforme)
@@ -2646,6 +2721,7 @@ pub(crate) fn repaint_payload(
             corners: [1.0; 4],
         });
     }
+    t = sync_phase(tab, ph_emit, t);
     // Étape 180 (P4) — le framebuffer ne couvre plus que la
     // tranche viewport : tout document plus haut que
     // `vh.max(MIN_FULL_DOC_CSS)` (px CSS) passe en raster
@@ -2655,7 +2731,9 @@ pub(crate) fn repaint_payload(
     // inencodable). Sous le cap le chemin plein-doc + diff
     // dirty reste (petites pages, mutations localisées).
     if list.height > vh.max(MIN_FULL_DOC_CSS) {
-        return raster_window(p, ctx, list, vw, vh);
+        let r = raster_window(p, ctx, list, vw, vh);
+        sync_phase(tab, ph_raster, t);
+        return r;
     }
     // Le diff se calcule sur les listes **non cullées** :
     // la cullée stockée perdait ses `spans` (indices
@@ -2744,6 +2822,7 @@ pub(crate) fn repaint_payload(
     p.png = None;
     p.spec_paint = false;
     p.windowed = false;
+    sync_phase(tab, ph_raster, t);
     Ok(())
 }
 

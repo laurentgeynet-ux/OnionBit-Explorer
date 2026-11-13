@@ -5857,6 +5857,8 @@ fn style_sheet_cache_reuses_and_tracks_edits() {
         false,
         1.0,
         None,
+        apply::PhaseKind::Flow,
+        0,
     );
     let n1 = p.sheet_cache.len();
     // UA + feuille auteur au minimum.
@@ -5870,6 +5872,8 @@ fn style_sheet_cache_reuses_and_tracks_edits() {
         false,
         1.0,
         None,
+        apply::PhaseKind::Flow,
+        0,
     );
     assert_eq!(p.sheet_cache.len(), n1, "même texte = même clé");
     // Édition : nouveau texte → nouvelle clé, nouvelle cascade.
@@ -5882,6 +5886,8 @@ fn style_sheet_cache_reuses_and_tracks_edits() {
         false,
         1.0,
         None,
+        apply::PhaseKind::Flow,
+        0,
     );
     assert_eq!(
         p.sheet_cache.len(),
@@ -5919,6 +5925,8 @@ fn style_sheet_cache_bounded() {
         false,
         1.0,
         None,
+        apply::PhaseKind::Flow,
+        0,
     );
     assert_eq!(
         p.sheet_cache.len(),
@@ -5948,6 +5956,8 @@ fn styles_scoped_merges_dirty_subtree() {
         false,
         1.0,
         None,
+        apply::PhaseKind::Flow,
+        0,
     );
     // Le frère #s matche `.a + span` en état initial.
     let s = dom.by_id("s").unwrap();
@@ -5973,6 +5983,8 @@ fn styles_scoped_merges_dirty_subtree() {
         false,
         1.0,
         Some(par),
+        apply::PhaseKind::Flow,
+        0,
     );
     let color_of = |m: &StyleMap, n: explorer_dom::NodeId| {
         m.get(n)
@@ -6020,6 +6032,8 @@ fn styles_scoped_falls_back_on_has() {
         false,
         1.0,
         None,
+        apply::PhaseKind::Flow,
+        0,
     );
     assert!(p.eng_has_relational, "le drapeau :has doit être posé");
     let o = dom.by_id("o").unwrap();
@@ -6047,6 +6061,8 @@ fn styles_scoped_falls_back_on_has() {
         false,
         1.0,
         Some(w),
+        apply::PhaseKind::Flow,
+        0,
     );
     let color = styles2
         .get(o)
@@ -6075,6 +6091,8 @@ fn styles_scoped_needs_persisted_base() {
         false,
         1.0,
         None,
+        apply::PhaseKind::Flow,
+        0,
     );
     p.styles = Some(styles);
     p.style_eng = Some(eng);
@@ -6089,6 +6107,8 @@ fn styles_scoped_needs_persisted_base() {
         false,
         1.0,
         Some(some_el),
+        apply::PhaseKind::Flow,
+        0,
     );
     assert!(
         styles2.get(some_el).is_some(),

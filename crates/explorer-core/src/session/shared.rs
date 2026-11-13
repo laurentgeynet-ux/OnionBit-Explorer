@@ -277,7 +277,7 @@ async fn nav_commit_shared(
         let Some(dom) = p.dom.take() else {
             return (g, Err(CoreError::EmptyDocument));
         };
-        let r = apply::relayout_dom_payload(p, &ctx, &dom, &canvas_ops);
+        let r = apply::relayout_dom_payload(p, &ctx, tab, &dom, &canvas_ops);
         p.dom = Some(dom);
         (g, r)
     });

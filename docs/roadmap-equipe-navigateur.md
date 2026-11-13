@@ -12276,6 +12276,45 @@ un crate PIPELINE.- [x] **JS-C422. Deadline honnête — canal session ↔ budge
   d'un `:has` (PIPELINE) ; (b) coût
   raster/émission de la display list
   sur gros documents (PIPELINE).
+- [x] **Étape 232. `sync_profile`
+  complet — trous de couverture
+  comblés** (audit perf chantier 10 —
+  instrumentation, suite du constat
+  Étape 231) : la fenêtre `incr.*`
+  laissait trois angles morts —
+  (a) `incr.repaint`/`incr.style`
+  agrégaient plusieurs coûts
+  (émission vs raster vs overlays,
+  cascade vs collecte vs post-passes
+  O(N)) ; (b) les jambes de livrée
+  `net.rs` (éval + `run_pending` +
+  `sync_for_apply` + `queue_apply_sync`
+  + `after_script`) n'émettaient rien
+  — `run_commit_scripts`,
+  `deliver_dyn_{module,script,link,img,
+  frame}`, `deliver_ws`/`crypto`/`es`,
+  `enqueue_net_response`/`finish_net_turn`
+  invisibles, voie synchrone **et**
+  livrées daemon hors détachement ;
+  (c) la voie re-parse (`apply_payload`
+  → `relayout_dom_payload`) et la
+  queue des replis incr/anim étaient
+  muettes. Nouvelles phases :
+  `incr.frames`/`incr.emit`/`incr.raster`
+  + `incr.sheets`/`incr.cascade`/
+  `incr.stylpost` (sélecteur `PhaseKind`
+  — mêmes jambes nommées `flow.*`/
+  `anim.*`/`paint.*`/`sub.*` selon la
+  voie), `flow.parse`/`flow.keymap`/
+  `flow.swap`/`flow.assets`/`flow.box`/
+  `flow.layout`/`flow.p2`/`flow.frames`,
+  `net.commit_scripts` + `net.dl_{resp,
+  turn,crypto,es,ws,mod,dyn,link,img,
+  frame}`. Zéro changement fonctionnel —
+  attribution au service du re-vol
+  `incr.emit` vs `incr.raster` et
+  `incr.cascade` vs `incr.stylpost` qui
+  ordonne les chantiers PIPELINE (a)/(b).
 
 ## Plan NAVIGATEUR — vitrine YouTube + surface navigateur (2026-11-12)
 

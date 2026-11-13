@@ -349,6 +349,10 @@ impl Session {
         post_evals: Vec<ModEval>,
         import_maps: &[String],
     ) {
+        // Étape 232 — sonde `net.commit_scripts` : la jambe
+        // entière (évals + DCL + `run_pending` + resynchro +
+        // `apply_dom_sync`) vivait hors `sync_profile`.
+        let t_dl = std::time::Instant::now();
         // Étape CMP-4 : scripts réarmés depuis les marqueurs
         // « bloqués par consentement » — compteur exposé au
         // diagnostic §B-4 : un boot muet avec `cmp_rearmed`
@@ -540,6 +544,7 @@ impl Session {
                 e.boot_mute_warned = true;
             }
         }
+        sync_phase(tab, "net.commit_scripts", t_dl);
     }
 
     /// Queue du commit — après le rendu (inline ou détaché) :
@@ -2000,6 +2005,7 @@ impl Session {
             let Some(eng) = entry.js.take() else { return };
             eng
         };
+        let t_dl = std::time::Instant::now();
         let ok = graph.is_some();
         if let Some(graph) = graph {
             self.eval_module_graph(tab, eng.as_mut(), &ModEval { name, graph });
@@ -2026,6 +2032,7 @@ impl Session {
         // Étape 207-bis : un module `src` ordonné vient d'être
         // évalué — la balise parse suivante du ctx part.
         self.pump_ordered_dyn_tail(tab, ctx);
+        sync_phase(tab, "net.dl_mod", t_dl);
     }
 
     /// Livraison d'un `<script>` dynamique (CAP-169) — même
@@ -2055,6 +2062,9 @@ impl Session {
             }
             return;
         }
+        // Étape 232 — jambe de livrée mesurée (tour moteur +
+        // resynchro + drains `after_script`).
+        let t_dl = std::time::Instant::now();
         let (mutated, eval_ms) = {
             let Some(entry) = self.tabs.get_mut(&tab) else {
                 return;
@@ -2079,6 +2089,7 @@ impl Session {
             self.queue_apply_sync(tab, s);
         }
         self.after_script(tab);
+        sync_phase(tab, "net.dl_dyn", t_dl);
     }
 
     /// Un `<iframe>` inséré dynamiquement ou re-navigué par
@@ -2786,6 +2797,7 @@ impl Session {
     /// resynchro (la livraison peut muter le DOM du ctx et
     /// la feuille rangée doit restyler).
     fn deliver_dyn_link_el(&mut self, tab: TabId, ctx: explorer_js::JsCtxId, seq: u64, ok: bool) {
+        let t_dl = std::time::Instant::now();
         let mutated = {
             let Some(entry) = self.tabs.get_mut(&tab) else {
                 return;
@@ -2803,12 +2815,14 @@ impl Session {
             self.queue_apply_sync(tab, s);
         }
         self.after_script(tab);
+        sync_phase(tab, "net.dl_link", t_dl);
     }
 
     /// `load`/`error` sur l'élément `<img>` miroir (CAP-172) —
     /// relais mince de `deliver_dyn_img` avec resynchro (la
     /// livraison peut muter le DOM du ctx).
     fn deliver_dyn_img_el(&mut self, tab: TabId, ctx: explorer_js::JsCtxId, seq: u64, ok: bool) {
+        let t_dl = std::time::Instant::now();
         let mutated = {
             let Some(entry) = self.tabs.get_mut(&tab) else {
                 return;
@@ -2826,6 +2840,7 @@ impl Session {
             self.queue_apply_sync(tab, s);
         }
         self.after_script(tab);
+        sync_phase(tab, "net.dl_img", t_dl);
     }
 
     /// Réception d'un `<iframe>` dynamique fetché (CAP-171) —
@@ -3008,6 +3023,7 @@ impl Session {
         seq: u64,
         ok: bool,
     ) {
+        let t_dl = std::time::Instant::now();
         let mutated = {
             let Some(entry) = self.tabs.get_mut(&tab) else {
                 return;
@@ -3025,6 +3041,7 @@ impl Session {
             self.queue_apply_sync(tab, s);
         }
         self.after_script(tab);
+        sync_phase(tab, "net.dl_frame", t_dl);
     }
 
     /// Résolution de l'origine réseau d'un contexte (étape
@@ -3429,6 +3446,7 @@ impl Session {
         ev: explorer_net::ws::WsEvent,
     ) {
         use explorer_js::WsEventKind as K;
+        let t_dl = std::time::Instant::now();
         let kinds: Vec<K> = match ev {
             explorer_net::ws::WsEvent::Open { protocol } => {
                 vec![K::Open(protocol)]
@@ -3485,6 +3503,7 @@ impl Session {
             self.queue_apply_sync(tab, s);
         }
         self.after_script(tab);
+        sync_phase(tab, "net.dl_ws", t_dl);
     }
 
     /// `ctx_net_origin` porte le document **émetteur** (base
@@ -3834,6 +3853,7 @@ impl Session {
     /// données de la page (`/api/initial` explore.org)
     /// mouraient de timeout SPA ~38 s plus tard.
     fn enqueue_net_response(&mut self, tab: TabId, resp: NetResponse) -> bool {
+        let t_dl = std::time::Instant::now();
         let mut emit_err = None;
         let delivered = {
             let Some(entry) = self.tabs.get_mut(&tab) else {
@@ -3864,6 +3884,7 @@ impl Session {
             // passent par la porte partagée.
             self.emit_pipeline_error(tab, m);
         }
+        sync_phase(tab, "net.dl_resp", t_dl);
         delivered
     }
 
@@ -3872,6 +3893,7 @@ impl Session {
     /// handlers enfilés depuis la rafale), resynchro miroir,
     /// `after_script` — le triplet qu'on payait par livraison.
     fn finish_net_turn(&mut self, tab: TabId) {
+        let t_dl = std::time::Instant::now();
         let mutated = {
             let Some(entry) = self.tabs.get_mut(&tab) else {
                 return;
@@ -3887,6 +3909,7 @@ impl Session {
             self.queue_apply_sync(tab, s);
         }
         self.after_script(tab);
+        sync_phase(tab, "net.dl_turn", t_dl);
     }
 
     /// Livre un résultat `crypto.subtle` au moteur (JS-C79) —
@@ -3896,6 +3919,7 @@ impl Session {
     /// drains — le handler `then` peut émettre de nouvelles
     /// requêtes, crypto ou réseau).
     fn deliver_crypto_response(&mut self, tab: TabId, resp: explorer_js::CryptoResponse) {
+        let t_dl = std::time::Instant::now();
         let mutated = {
             let Some(entry) = self.tabs.get_mut(&tab) else {
                 return;
@@ -3925,6 +3949,7 @@ impl Session {
             self.queue_apply_sync(tab, s);
         }
         self.after_script(tab);
+        sync_phase(tab, "net.dl_crypto", t_dl);
     }
 
     /// Livre un `EsEvent` au flux `handle` du contexte `ctx`
@@ -3940,6 +3965,7 @@ impl Session {
         handle: u64,
         ev: explorer_js::EsEvent,
     ) {
+        let t_dl = std::time::Instant::now();
         let mutated = {
             let Some(entry) = self.tabs.get_mut(&tab) else {
                 return;
@@ -3969,6 +3995,7 @@ impl Session {
             self.queue_apply_sync(tab, s);
         }
         self.after_script(tab);
+        sync_phase(tab, "net.dl_es", t_dl);
     }
 
     /// Points de synchro post-script (étape 51) : draine les
