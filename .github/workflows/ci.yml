@@ -58,7 +58,9 @@ jobs:
         run: flutter pub get
       - name: analyze
         working-directory: app
-        run: flutter analyze
+        # --no-fatal-infos : stable 3.50 déprécie material.dart
+        # (migration material_ui = chantier, pas une erreur)
+        run: flutter analyze --no-fatal-infos
       - name: test
         working-directory: app
         run: flutter test

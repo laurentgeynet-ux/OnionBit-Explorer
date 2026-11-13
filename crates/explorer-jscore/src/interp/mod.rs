@@ -10527,21 +10527,23 @@ mod tests {
     fn gc_debt_arms_sweep_below_soft_limit() {
         let mut e = Engine::new();
         // lim 1 Mio → dette 256 Kio, cap dur 1,25 Mio : chaque
-        // eval jette ~450 Kio de Str mortes — sous `lim`, la
+        // eval jette ~340 Kio de Str mortes — sous `lim`, la
         // voie `mem_over` ne s'arme pas, seule la dette peut
-        // faire balayer.
+        // faire balayer. (Recalibré 4000→3000 : l'état
+        // `console.*` de l'étape 219 a relevé la baseline
+        // ~580 Kio — la marge d'origine ne tenait plus.)
         e.heap.set_mem_limit(1024 * 1024);
         e.collect();
         let base = e.heap.bytes();
         for _ in 0..8 {
             let r = e.eval(
-                "(function(){var a=[];for(var i=0;i<4000;i++)a.push('s'+i+'-'+i);return a.length})()",
+                "(function(){var a=[];for(var i=0;i<3000;i++)a.push('s'+i+'-'+i);return a.length})()",
             );
             assert!(r.is_ok(), "churn sous-limite ne doit pas tuer : {r:?}");
             // Frontière de job — la dette armée au tick fait
             // balayer ici (no-op si le drain l'a déjà fait) :
-            // l'estimé n'a pas cumulé les ~450 Kio de morts du
-            // tour — sans l'arme, le 3ᵉ round croisait le cap.
+            // l'estimé n'a pas cumulé les ~340 Kio de morts du
+            // tour — sans l'arme, le 2ᵉ round croisait le cap.
             e.maybe_collect();
             assert!(
                 e.heap.bytes() < base + Engine::gc_debt(1024 * 1024),

@@ -3746,9 +3746,11 @@ async fn select_popup_opens_and_chooses_option() {
         .unwrap();
     assert_eq!(out, InputOutcome::Edited);
     assert_ne!(s.frame_png(id), closed);
-    // 2e ligne du popup (sous le contrôle, ~y 36-54).
+    // 2e ligne du popup : `doc_h` mesuré (~43 px) < espace
+    // requis sous le contrôle → le popup bascule au-DESSUS
+    // (comportement Chrome) — o2 occupe la rangée ~y 20-40.
     let out = s
-        .handle_input(id, InputEvent::Click { x: 10.0, y: 45.0 })
+        .handle_input(id, InputEvent::Click { x: 10.0, y: 30.0 })
         .await
         .unwrap();
     assert_eq!(out, InputOutcome::Edited);
@@ -8238,7 +8240,10 @@ async fn lifecycle_domcontentloaded_and_load_dispatch() {
         changed.iter().any(|t| t == "dcl+loaded"),
         "le titre chaîné prouve DCL puis load : {changed:?}"
     );
-    assert_eq!(nav_title.as_deref(), Some("orig"));
+    // JS-C471 — DCL court dans le bras JS AVANT l'émission
+    // `Navigated` (point de synchro) : le titre annoncé au
+    // commit est déjà post-DCL, plus le titre du parse.
+    assert_eq!(nav_title.as_deref(), Some("dcl"));
     assert_eq!(
         s.tab_info(a).and_then(|i| i.title).as_deref(),
         Some("dcl+loaded")
@@ -8247,9 +8252,10 @@ async fn lifecycle_domcontentloaded_and_load_dispatch() {
 
 /// ADR-0025 (issue #3) — une mutation **post-baseline** doit
 /// être rejouée par le journal, pas repliée en re-parse :
-/// le DCL produit le premier journal (repli `NoBaseline`
-/// attendu → baseline cléée), puis un timer tardif mute —
-/// `journal_applies` passe à 1, les compteurs le prouvent.
+/// la baseline cléée étant désormais armée dès l'apply
+/// initial (famille JS-C293/314/316/317), le premier journal
+/// rejoue **directement** — `journal_fallbacks` reste à 0
+/// (aucun repli `NoBaseline`), `journal_applies` passe à 1.
 /// Le délai du timer doit excéder la durée de `navigate`
 /// (sinon la mutation fond dans le journal DCL — mesuré au
 /// diagnostic de la sonde d'origine).
@@ -8279,8 +8285,8 @@ async fn journal_post_baseline_rejoue_en_place() {
     }
     assert_eq!(
         s.journal_fallbacks(),
-        1,
-        "un seul repli attendu — le premier journal (NoBaseline)"
+        0,
+        "baseline cléée dès l'apply initial — aucun repli (NoBootstrap)"
     );
     assert_eq!(
         s.journal_applies(),
