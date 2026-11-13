@@ -26,7 +26,12 @@ fn walk_x(
     sm: &explorer_css::StyleMap,
     out: &mut Option<explorer_css::ComputedStyle>,
 ) {
-    if dom.attribute_str(n, "class").ok().flatten().is_some_and(|c| c == "x") {
+    if dom
+        .attribute_str(n, "class")
+        .ok()
+        .flatten()
+        .is_some_and(|c| c == "x")
+    {
         *out = sm.get(n).cloned();
     }
     if let Ok(ch) = dom.children(n) {

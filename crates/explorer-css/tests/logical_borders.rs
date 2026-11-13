@@ -16,7 +16,12 @@ fn walk_x(
     sm: &explorer_css::StyleMap,
     out: &mut Option<explorer_css::ComputedStyle>,
 ) {
-    if dom.attribute_str(n, "class").ok().flatten().is_some_and(|c| c == "x") {
+    if dom
+        .attribute_str(n, "class")
+        .ok()
+        .flatten()
+        .is_some_and(|c| c == "x")
+    {
         *out = sm.get(n).cloned();
     }
     if let Ok(ch) = dom.children(n) {
@@ -44,9 +49,7 @@ fn inline_start_route_gauche_ltr() {
 
 #[test]
 fn inline_start_route_droite_rtl() {
-    let st = style_of(
-        "body { direction: rtl } p { border-inline-start-width: 4px }",
-    );
+    let st = style_of("body { direction: rtl } p { border-inline-start-width: 4px }");
     assert_eq!(st.get("border-right-width"), Some("4px"));
 }
 
@@ -67,4 +70,3 @@ fn bare_border_logical_shorthand_route_physique() {
     let st = style_of("p { border-inline-end: 2px solid blue }");
     assert_eq!(st.get("border-right"), Some("2px solid blue"));
 }
-

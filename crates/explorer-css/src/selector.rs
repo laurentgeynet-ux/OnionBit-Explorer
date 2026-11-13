@@ -1165,7 +1165,9 @@ impl AncestorFilter {
     fn compound_possible(&self, c: &CompoundSelector) -> bool {
         c.simples.iter().all(|s| {
             let h = match s {
-                SimpleSelector::Type(t) => hash_key(t.rsplit('|').next().unwrap_or(t), true, SEED_TAG),
+                SimpleSelector::Type(t) => {
+                    hash_key(t.rsplit('|').next().unwrap_or(t), true, SEED_TAG)
+                }
                 SimpleSelector::Class(cl) => hash_key(cl, false, SEED_CLASS),
                 SimpleSelector::Id(i) => hash_key(i, false, SEED_ID),
                 SimpleSelector::Attribute { name, .. } => hash_key(name, false, SEED_ATTR),
@@ -1598,7 +1600,9 @@ fn simple_matches(
                 // `ns|tag` — R-237 : l'URI du préfixe règle
                 // le namespace attendu (`*` = tout, `` = aucun).
                 let tag_ok = tag == "*"
-                    || dom.tag_name(node).is_ok_and(|t| t.eq_ignore_ascii_case(tag));
+                    || dom
+                        .tag_name(node)
+                        .is_ok_and(|t| t.eq_ignore_ascii_case(tag));
                 if !tag_ok {
                     return false;
                 }
@@ -1613,9 +1617,7 @@ fn simple_matches(
                 return match dom.namespace(node).ok() {
                     Some(explorer_dom::Namespace::Svg) => uri.contains("svg"),
                     Some(explorer_dom::Namespace::MathMl) => uri.contains("math"),
-                    Some(explorer_dom::Namespace::Html) => {
-                        uri.contains("xhtml") || ns.is_empty()
-                    }
+                    Some(explorer_dom::Namespace::Html) => uri.contains("xhtml") || ns.is_empty(),
                     _ => false,
                 };
             }

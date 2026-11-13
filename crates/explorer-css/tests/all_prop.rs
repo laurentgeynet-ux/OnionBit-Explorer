@@ -20,11 +20,25 @@ fn style_of(css: &str) -> explorer_css::ComputedStyle {
     out.expect("élément")
 }
 
-fn walk_x(dom: &Dom, n: explorer_dom::NodeId, sm: &explorer_css::StyleMap, out: &mut Option<explorer_css::ComputedStyle>) {
-    if dom.attribute_str(n, "class").ok().flatten().is_some_and(|c| c == "x") {
+fn walk_x(
+    dom: &Dom,
+    n: explorer_dom::NodeId,
+    sm: &explorer_css::StyleMap,
+    out: &mut Option<explorer_css::ComputedStyle>,
+) {
+    if dom
+        .attribute_str(n, "class")
+        .ok()
+        .flatten()
+        .is_some_and(|c| c == "x")
+    {
         *out = sm.get(n).cloned();
     }
-    if let Ok(ch) = dom.children(n) { for c in ch { walk_x(dom, c, sm, out); } }
+    if let Ok(ch) = dom.children(n) {
+        for c in ch {
+            walk_x(dom, c, sm, out);
+        }
+    }
 }
 
 #[test]

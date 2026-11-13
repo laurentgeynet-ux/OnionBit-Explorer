@@ -524,14 +524,18 @@ impl<'t> Parser<'t> {
                         scope_wrap_rules(&mut rules, &root, bound.as_deref());
                         AtKind::Scope { rules }
                     }
-                    "font-face" | "page" | "viewport" | "counter-style" | "property"
-                    | "font-palette-values" | "position-try" | "view-transition"
-                    | "function" => {
-                        AtKind::Declarations {
-                            prelude,
-                            declarations: self.declaration_block(),
-                        }
-                    }
+                    "font-face"
+                    | "page"
+                    | "viewport"
+                    | "counter-style"
+                    | "property"
+                    | "font-palette-values"
+                    | "position-try"
+                    | "view-transition"
+                    | "function" => AtKind::Declarations {
+                        prelude,
+                        declarations: self.declaration_block(),
+                    },
                     // R-244 — `@starting-style` : container
                     // de règles dormant (consommateur futur —
                     // animations d'entrée).

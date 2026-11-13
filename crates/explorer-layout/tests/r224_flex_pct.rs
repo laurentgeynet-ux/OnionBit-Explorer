@@ -32,7 +32,10 @@ fn laid(html: &str, css: &str) -> (Dom, LayoutBox) {
 }
 
 fn by_id<'a>(b: &'a LayoutBox, id: &str, dom: &Dom) -> Option<&'a LayoutBox> {
-    if b.node.and_then(|n| dom.attribute_str(n, "id").ok().flatten()) == Some(id) {
+    if b.node
+        .and_then(|n| dom.attribute_str(n, "id").ok().flatten())
+        == Some(id)
+    {
         return Some(b);
     }
     b.children.iter().find_map(|c| by_id(c, id, dom))

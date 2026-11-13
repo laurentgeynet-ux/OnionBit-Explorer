@@ -8,10 +8,10 @@
 //! règle ne meurt plus pour un nom inconnu de l'autre
 //! moteur (mesuré Pareto : centaines de règles Wikipedia).
 
+use explorer_css::matches_any;
 use explorer_css::parse_selector_list;
 use explorer_dom::Dom;
 use explorer_html::TreeBuilder;
-use explorer_css::matches_any;
 
 fn dom_of(html: &str) -> Dom {
     TreeBuilder::parse(html)
@@ -24,17 +24,28 @@ fn lang_matche_attribut_et_prefixe() {
         let mut q = vec![dom.document()];
         let mut out = None;
         while let Some(n) = q.pop() {
-            if dom.tag_name(n).is_ok_and(|t| t == "h1") { out = Some(n); break; }
-            if let Ok(c) = dom.children(n) { q.extend(c.iter().rev()); }
+            if dom.tag_name(n).is_ok_and(|t| t == "h1") {
+                out = Some(n);
+                break;
+            }
+            if let Ok(c) = dom.children(n) {
+                q.extend(c.iter().rev());
+            }
         }
         out.unwrap()
     };
     let sels = parse_selector_list("h1:lang(fr)").unwrap();
-    assert!(matches_any(&dom, h1, &sels), "h1:lang(fr) doit matcher fr-CA");
+    assert!(
+        matches_any(&dom, h1, &sels),
+        "h1:lang(fr) doit matcher fr-CA"
+    );
     let sels = parse_selector_list("h1:lang(fr-CA)").unwrap();
     assert!(matches_any(&dom, h1, &sels));
     let sels = parse_selector_list("h1:lang(en)").unwrap();
-    assert!(!matches_any(&dom, h1, &sels), "en ne doit pas matcher fr-CA");
+    assert!(
+        !matches_any(&dom, h1, &sels),
+        "en ne doit pas matcher fr-CA"
+    );
 }
 
 #[test]
@@ -44,8 +55,13 @@ fn lang_herite_de_l_ancetre() {
         let mut q = vec![dom.document()];
         let mut out = None;
         while let Some(n) = q.pop() {
-            if dom.tag_name(n).is_ok_and(|t| t == "li") { out = Some(n); break; }
-            if let Ok(c) = dom.children(n) { q.extend(c.iter().rev()); }
+            if dom.tag_name(n).is_ok_and(|t| t == "li") {
+                out = Some(n);
+                break;
+            }
+            if let Ok(c) = dom.children(n) {
+                q.extend(c.iter().rev());
+            }
         }
         out.unwrap()
     };
@@ -65,7 +81,10 @@ fn lang_liste_et_joker() {
 fn vendor_pseudo_ne_tue_plus_la_liste() {
     // `::-moz-focus-inner` est hors whitelist — toléré dormant.
     let sels = parse_selector_list("button::-moz-focus-inner, a");
-    assert!(sels.is_some(), "vendor pseudo ne doit pas invalider la liste");
+    assert!(
+        sels.is_some(),
+        "vendor pseudo ne doit pas invalider la liste"
+    );
     // Un nom vraiment inconnu reste invalide (spec).
     assert!(parse_selector_list("a::totalement-inconnu").is_none());
 }
@@ -74,9 +93,7 @@ fn vendor_pseudo_ne_tue_plus_la_liste() {
 
 #[test]
 fn has_fils_direct() {
-    let dom = dom_of(
-        "<html><body><div id=a><span><b>x</b></span></div><div id=b><b>y</b></div>",
-    );
+    let dom = dom_of("<html><body><div id=a><span><b>x</b></span></div><div id=b><b>y</b></div>");
     let divs = {
         let mut out = Vec::new();
         let mut q = vec![dom.document()];
@@ -91,8 +108,14 @@ fn has_fils_direct() {
         out
     };
     let sels = parse_selector_list("div:has(> b)").unwrap();
-    assert!(!matches_any(&dom, divs[0], &sels), "b n'est pas fils direct de a");
-    assert!(matches_any(&dom, divs[1], &sels), "b est fils direct de la 2e div");
+    assert!(
+        !matches_any(&dom, divs[0], &sels),
+        "b n'est pas fils direct de a"
+    );
+    assert!(
+        matches_any(&dom, divs[1], &sels),
+        "b est fils direct de la 2e div"
+    );
 }
 
 #[test]
@@ -102,8 +125,12 @@ fn has_frere_suivant() {
         let mut out = Vec::new();
         let mut q = vec![dom.document()];
         while let Some(n) = q.pop() {
-            if dom.tag_name(n).is_ok_and(|t| t == "li") { out.push(n); }
-            if let Ok(c) = dom.children(n) { q.extend(c.iter().rev()); }
+            if dom.tag_name(n).is_ok_and(|t| t == "li") {
+                out.push(n);
+            }
+            if let Ok(c) = dom.children(n) {
+                q.extend(c.iter().rev());
+            }
         }
         out
     };

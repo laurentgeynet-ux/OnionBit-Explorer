@@ -135,7 +135,10 @@ pub fn geometry_dump(root: &LayoutBox) -> GeometryDump {
 /// Si la font-size n'est pas résolue en px ou dépasse la
 /// hauteur, le rect brut est conservé (jamais agrandi).
 fn inline_content_rect(b: &LayoutBox) -> Rect {
-    if matches!(b.kind, crate::boxtree::BoxKind::Inline | crate::boxtree::BoxKind::Text) {
+    if matches!(
+        b.kind,
+        crate::boxtree::BoxKind::Inline | crate::boxtree::BoxKind::Text
+    ) {
         inline_content_rect_st(b.rect, &b.style)
     } else {
         b.rect
@@ -165,8 +168,12 @@ fn inline_content_rect_st(rect: Rect, style: &explorer_css::ComputedStyle) -> Re
 /// Bounding box des points transformés (`gBCR` = bbox du
 /// quadrilatère transformé, R-223).
 fn rect_of_points(pts: &[(f32, f32)]) -> Rect {
-    let (mut x0, mut y0, mut x1, mut y1) =
-        (f32::INFINITY, f32::INFINITY, f32::NEG_INFINITY, f32::NEG_INFINITY);
+    let (mut x0, mut y0, mut x1, mut y1) = (
+        f32::INFINITY,
+        f32::INFINITY,
+        f32::NEG_INFINITY,
+        f32::NEG_INFINITY,
+    );
     for &(x, y) in pts {
         x0 = x0.min(x);
         y0 = y0.min(y);

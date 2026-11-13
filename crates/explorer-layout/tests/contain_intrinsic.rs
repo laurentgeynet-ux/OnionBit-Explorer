@@ -9,9 +9,20 @@
 use explorer_css::{Origin, StyleEngine, StyleEnv};
 use explorer_html::TreeBuilder;
 
-fn find(bx: &explorer_layout::LayoutBox, dom: &explorer_dom::Dom, class: &str) -> Option<(f32, f32)> {
-    if bx.node.and_then(|n| dom.attribute_str(n, "class").ok().flatten()).is_some_and(|c| c == class) {
-        return Some((bx.intrinsic.map_or(-1.0, |i| i.0), bx.intrinsic.map_or(-1.0, |i| i.1)));
+fn find(
+    bx: &explorer_layout::LayoutBox,
+    dom: &explorer_dom::Dom,
+    class: &str,
+) -> Option<(f32, f32)> {
+    if bx
+        .node
+        .and_then(|n| dom.attribute_str(n, "class").ok().flatten())
+        .is_some_and(|c| c == class)
+    {
+        return Some((
+            bx.intrinsic.map_or(-1.0, |i| i.0),
+            bx.intrinsic.map_or(-1.0, |i| i.1),
+        ));
     }
     for c in &bx.children {
         if let Some(r) = find(c, dom, class) {

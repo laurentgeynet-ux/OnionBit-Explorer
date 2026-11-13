@@ -38,9 +38,9 @@ pub mod transition;
 pub mod value;
 
 pub use cascade::{
-    initial_value, is_inherited, media_matches, prop_routed, prop_supported,
-    CollectedContainer, ColorScheme, ComputedStyle, ContainerMeasure, CounterStyle, Origin,
-    StyleEngine, StyleEnv, StyleMap,
+    initial_value, is_inherited, media_matches, prop_routed, prop_supported, CollectedContainer,
+    ColorScheme, ComputedStyle, ContainerMeasure, CounterStyle, Origin, StyleEngine, StyleEnv,
+    StyleMap,
 };
 pub use fontface::{FontFace, FontSrc};
 pub use parser::{

@@ -98,36 +98,29 @@ static DI_PROBE: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
 /// `ObjId` ; `.a` posé dessus → capture de la fonction d'entrée
 /// `K5`. `call_value_inner` compare ensuite le callee à
 /// `BG_ENTRY` — `bg.a` atteste que `_.aq` a bien lancé la VM.
-static BG_TRAYRIDE: std::sync::atomic::AtomicU32 =
-    std::sync::atomic::AtomicU32::new(u32::MAX);
-static BG_ENTRY: std::sync::atomic::AtomicU32 =
-    std::sync::atomic::AtomicU32::new(u32::MAX);
+static BG_TRAYRIDE: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(u32::MAX);
+static BG_ENTRY: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(u32::MAX);
 /// N1.5 — `ObjId` du handler de requêtes `sPQ` (yield du
 /// programme `Q`, stocké `this.sPQ`) — `bg.spq` logue les
 /// appels page→VM : la page a-t-elle invoqué, la VM a-t-elle
 /// répondu.
-static BG_SPQ: std::sync::atomic::AtomicU32 =
-    std::sync::atomic::AtomicU32::new(u32::MAX);
+static BG_SPQ: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(u32::MAX);
 /// N1.5 — chaîne readiness `BotGuard` : `ObjId` des callables et
 /// objets-clés capturés à l'écriture (`wpc` thunk `NdQ`, méthodes
 /// `wPd`/`jOM`/`hDo`/`a4`, interface `{f,c,m,mws}` — indexée sur
 /// l'écriture de `mws`, dernier membre du littéral).
 /// `bg.io` nomme le maillon invoqué entre `eO` et `sPQ`.
-static BG_IO: std::sync::Mutex<Vec<(u32, &'static str)>> =
-    std::sync::Mutex::new(Vec::new());
-static BG_IO_ARMED: std::sync::atomic::AtomicBool =
-    std::sync::atomic::AtomicBool::new(false);
+static BG_IO: std::sync::Mutex<Vec<(u32, &'static str)>> = std::sync::Mutex::new(Vec::new());
+static BG_IO_ARMED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 /// N1.5 — `ObjId` du callback de complétion `V` passé en arg 1
 /// de `Q` (`trayride.a`) : il résout `hix` avec
 /// `{bWm,nXe,auT,nXm}`. `bg.v` atteste que la VM a achevé son
 /// init — son absence = halt interne avant complétion.
-static BG_V: std::sync::atomic::AtomicU32 =
-    std::sync::atomic::AtomicU32::new(u32::MAX);
+static BG_V: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(u32::MAX);
 /// N1.5 — `ObjId` du logger `w` passé en arg 4 de `Q` : la VM y
 /// pousse des codes d'événements — `bg.wcb` révèle où le
 /// programme s'arrête dans sa machine à états.
-static BG_WCB: std::sync::atomic::AtomicU32 =
-    std::sync::atomic::AtomicU32::new(u32::MAX);
+static BG_WCB: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(u32::MAX);
 /// N1.5 — enregistre un callable de la chaîne readiness dans
 /// `BG_IO` (borné à 48 — `wpc` est aussi un champ `this.wpc`
 /// des instances `vvI`, plusieurs écritures attendues).
@@ -141,7 +134,8 @@ fn bg_io_register(id: u32, lbl: &'static str) {
 }
 /// N1.5 — label `BG_IO` d'un callee `ObjId`, s'il est capturé.
 fn bg_io_label(id: u32) -> Option<&'static str> {
-    BG_IO.lock()
+    BG_IO
+        .lock()
         .ok()?
         .iter()
         .find(|(i, _)| *i == id)
@@ -4426,7 +4420,7 @@ impl Engine {
             if key == "trayride" || key == "t" || key == "ntpevasrs" {
                 eprintln!(
                     "[ctxp] set_own_attrs key={} obj={:?} ctx={} global={:?}",
-                key, obj, self.cur_ctx, self.global
+                    key, obj, self.cur_ctx, self.global
                 );
             }
         }
@@ -9519,20 +9513,14 @@ impl Engine {
         // eval'd n'a pas de `src`, l'identité le remplace).
         if let Value::Obj(cid) = cur {
             if cid == BG_ENTRY.load(std::sync::atomic::Ordering::Relaxed) {
-                static BG_A_N: std::sync::atomic::AtomicU32 =
-                    std::sync::atomic::AtomicU32::new(0);
+                static BG_A_N: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
                 let n = BG_A_N.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                 if n < 32 {
                     let (from, _, _) = self.stack_nearest_fn_src(120);
-                    let last = BG_LAST_HOST
-                        .lock()
-                        .map(|g| g.clone())
-                        .unwrap_or_default();
+                    let last = BG_LAST_HOST.lock().map(|g| g.clone()).unwrap_or_default();
                     let ring = BG_LAST_RING
                         .lock()
-                        .map(|r| {
-                            r.iter().cloned().collect::<Vec<_>>().join("→")
-                        })
+                        .map(|r| r.iter().cloned().collect::<Vec<_>>().join("→"))
                         .unwrap_or_default();
                     tracing::info!(target: "dom_probe", site = "bg.a",
                         n = n, id = cid, from = %from, last = %last, tail = %ring);
@@ -9560,8 +9548,7 @@ impl Engine {
                 // N1.5 — `bg.v` : la VM appelle la complétion —
                 // `hix` va résoudre (dans un microtask). argc=4
                 // attendu ({bWm,nXe,auT,nXm}).
-                static BG_V_N: std::sync::atomic::AtomicU32 =
-                    std::sync::atomic::AtomicU32::new(0);
+                static BG_V_N: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
                 let n = BG_V_N.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                 if n < 16 {
                     let (from, _, _) = self.stack_nearest_fn_src(120);
@@ -9736,8 +9723,7 @@ impl Engine {
         // BotGuard (`eval:google.com/js/th`). Chaque appel met à
         // jour `BG_LAST_HOST` — le reliquat au prochain `bg.a`
         // = dernier op hôte avant l'arrêt du programme.
-        static BG_HOST_N: std::sync::atomic::AtomicU32 =
-            std::sync::atomic::AtomicU32::new(0);
+        static BG_HOST_N: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
         static CTXP: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
         if *CTXP.get_or_init(|| std::env::var_os("EXPLORER_CTX_PROBE").is_some())
             && tracing::enabled!(target: "dom_probe", tracing::Level::INFO)
@@ -9758,11 +9744,30 @@ impl Engine {
             if n < 512
                 && !matches!(
                     name,
-                    "fromCharCode" | "charCodeAt" | "push" | "toString" | "call"
-                        | "valueOf" | "substring" | "split" | "pop" | "join" | "splice"
-                        | "concat" | "bind" | "freeze" | "setPrototypeOf"
-                        | "hasOwnProperty" | "defineProperty" | "Array" | "random"
-                        | "create" | "indexOf" | "slice" | "atob" | "apply"
+                    "fromCharCode"
+                        | "charCodeAt"
+                        | "push"
+                        | "toString"
+                        | "call"
+                        | "valueOf"
+                        | "substring"
+                        | "split"
+                        | "pop"
+                        | "join"
+                        | "splice"
+                        | "concat"
+                        | "bind"
+                        | "freeze"
+                        | "setPrototypeOf"
+                        | "hasOwnProperty"
+                        | "defineProperty"
+                        | "Array"
+                        | "random"
+                        | "create"
+                        | "indexOf"
+                        | "slice"
+                        | "atob"
+                        | "apply"
                 )
             {
                 let (from, _, _) = self.stack_nearest_fn_src(80);

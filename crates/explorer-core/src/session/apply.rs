@@ -2241,12 +2241,8 @@ pub(crate) fn relayout_dom_payload(
                     .entry(n)
                     .or_insert_with(|| composite::iframe_intrinsic(dom, n));
             }
-            let (svgs2, svg_sources2) = explorer_render::svg::collect_svg_styled(
-                dom,
-                root_el,
-                &styles2,
-                ctx.image_max_px,
-            );
+            let (svgs2, svg_sources2) =
+                explorer_render::svg::collect_svg_styled(dom, root_el, &styles2, ctx.image_max_px);
             if let Some(mut bx2) = build_box_tree_sized(dom, root_el, &styles2, &sizes) {
                 layout_tree(&mut bx2, vw, &block);
                 tracing::info!(

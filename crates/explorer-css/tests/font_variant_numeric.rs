@@ -16,7 +16,12 @@ fn walk_x(
     sm: &explorer_css::StyleMap,
     out: &mut Option<explorer_css::ComputedStyle>,
 ) {
-    if dom.attribute_str(n, "class").ok().flatten().is_some_and(|c| c == "x") {
+    if dom
+        .attribute_str(n, "class")
+        .ok()
+        .flatten()
+        .is_some_and(|c| c == "x")
+    {
         *out = sm.get(n).cloned();
     }
     if let Ok(ch) = dom.children(n) {
@@ -39,7 +44,9 @@ fn style_of(css: &str) -> explorer_css::ComputedStyle {
 #[test]
 fn tabular_nums_produit_tnum() {
     let st = style_of("p { font-variant-numeric: tabular-nums }");
-    assert!(st.get("font-feature-settings").is_some_and(|v| v.contains("\"tnum\" 1")));
+    assert!(st
+        .get("font-feature-settings")
+        .is_some_and(|v| v.contains("\"tnum\" 1")));
 }
 
 #[test]

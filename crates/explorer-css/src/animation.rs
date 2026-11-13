@@ -456,8 +456,13 @@ fn parse_composite(v: &str) -> Composite {
 /// `add` spec (css-animations-2) ne s'applique qu'aux
 /// valeurs à répétition ; hors liste il retombe sur
 /// `accumulate`, puis `replace` si non combinable.
-const ADDITIVE_LIST_PROPS: &[&str] =
-    &["transform", "filter", "backdrop-filter", "box-shadow", "mask-image"];
+const ADDITIVE_LIST_PROPS: &[&str] = &[
+    "transform",
+    "filter",
+    "backdrop-filter",
+    "box-shadow",
+    "mask-image",
+];
 
 /// Valeur produite selon `animation-composition` (R-257) :
 /// `base` = valeur sous-jacente calculée, `anim` = sortie
@@ -470,7 +475,9 @@ pub fn composite_value(prop: &str, base: &str, anim: &str, comp: Composite) -> S
     match comp {
         Composite::Replace => anim.to_string(),
         Composite::Add if ADDITIVE_LIST_PROPS.contains(&prop) => {
-            format!("{} {}", base.trim(), anim.trim()).trim().to_string()
+            format!("{} {}", base.trim(), anim.trim())
+                .trim()
+                .to_string()
         }
         Composite::Add | Composite::Accumulate => {
             accumulate_values(base, anim).unwrap_or_else(|| anim.to_string())

@@ -16,7 +16,12 @@ fn walk_x(
     sm: &explorer_css::StyleMap,
     out: &mut Option<explorer_css::ComputedStyle>,
 ) {
-    if dom.attribute_str(n, "class").ok().flatten().is_some_and(|c| c == "x") {
+    if dom
+        .attribute_str(n, "class")
+        .ok()
+        .flatten()
+        .is_some_and(|c| c == "x")
+    {
         *out = sm.get(n).cloned();
     }
     if let Ok(ch) = dom.children(n) {
@@ -56,10 +61,16 @@ fn batch_dormant_props_reconnues() {
         "input { contain-intrinsic-size: 100px }",
     ] {
         let st = style_of(css);
-        let has = ["overflow-anchor","overscroll-behavior",
-                   "print-color-adjust","forced-color-adjust","field-sizing",
-                   "contain-intrinsic-size"]
-            .iter().any(|p| st.get(p).is_some());
+        let has = [
+            "overflow-anchor",
+            "overscroll-behavior",
+            "print-color-adjust",
+            "forced-color-adjust",
+            "field-sizing",
+            "contain-intrinsic-size",
+        ]
+        .iter()
+        .any(|p| st.get(p).is_some());
         assert!(has, "aucune prop reconnue pour {css:?}");
     }
 }

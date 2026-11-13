@@ -41,7 +41,11 @@ fn or_semantique_ou() {
     // `(min-width:5000px) or (max-width:2000px)` : seul le
     // second groupe est vrai à 1366 → la query doit matcher.
     let qs = queries_of("(min-width:5000px) or (max-width:2000px)");
-    let env = StyleEnv { width_px: 1366, height_px: 900, ..StyleEnv::default() };
+    let env = StyleEnv {
+        width_px: 1366,
+        height_px: 900,
+        ..StyleEnv::default()
+    };
     assert!(media_matches(&env, &qs), "or : aucun groupe reconnu");
     // Aucun groupe vrai → faux.
     let qs = queries_of("(min-width:5000px) or (max-width:200px)");
@@ -53,15 +57,29 @@ fn or_semantique_ou() {
 #[test]
 fn calc_dans_feature_mq() {
     let qs = queries_of("screen and (min-width:calc(640px - 1px))");
-    let env = StyleEnv { width_px: 1366, height_px: 900, ..StyleEnv::default() };
-    assert!(media_matches(&env, &qs), "calc(640px-1px)=639 < 1366 doit matcher");
-    let env = StyleEnv { width_px: 500, height_px: 900, ..StyleEnv::default() };
+    let env = StyleEnv {
+        width_px: 1366,
+        height_px: 900,
+        ..StyleEnv::default()
+    };
+    assert!(
+        media_matches(&env, &qs),
+        "calc(640px-1px)=639 < 1366 doit matcher"
+    );
+    let env = StyleEnv {
+        width_px: 500,
+        height_px: 900,
+        ..StyleEnv::default()
+    };
     assert!(!media_matches(&env, &qs), "500 < 639 ne doit pas matcher");
     let qs = queries_of("(max-width:calc(2 * 300px + (40px / 2)))");
-    let env = StyleEnv { width_px: 600, height_px: 900, ..StyleEnv::default() };
+    let env = StyleEnv {
+        width_px: 600,
+        height_px: 900,
+        ..StyleEnv::default()
+    };
     assert!(media_matches(&env, &qs), "620 = 2*300+20 doit matcher");
 }
-
 
 #[test]
 fn calc_max_width_faux_desktop() {
@@ -70,8 +88,16 @@ fn calc_max_width_faux_desktop() {
     // max-width:none}` s'appliqueraient à tort (logo
     // wikipedia 261 vs 140).
     let qs = queries_of("(max-width:calc(640px - 1px))");
-    let env = StyleEnv { width_px: 1366, height_px: 900, ..StyleEnv::default() };
+    let env = StyleEnv {
+        width_px: 1366,
+        height_px: 900,
+        ..StyleEnv::default()
+    };
     assert!(!media_matches(&env, &qs), "1366 > 639 → doit être faux");
-    let env = StyleEnv { width_px: 500, height_px: 900, ..StyleEnv::default() };
+    let env = StyleEnv {
+        width_px: 500,
+        height_px: 900,
+        ..StyleEnv::default()
+    };
     assert!(media_matches(&env, &qs));
 }

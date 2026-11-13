@@ -53,7 +53,11 @@ fn html_a_not_matched_by_svg_ns() {
     let css = "@namespace svg \"http://www.w3.org/2000/svg\";\
          svg|a { color: blue }";
     let st = style_of_tag(html, css, "a");
-    assert!(st.get("color").is_none() || st.get("color") == Some("black") || st.get("color") != Some("blue"));
+    assert!(
+        st.get("color").is_none()
+            || st.get("color") == Some("black")
+            || st.get("color") != Some("blue")
+    );
 }
 
 #[test]
@@ -63,4 +67,3 @@ fn star_ns_matches_any() {
     let st = style_of_tag(html, css, "a");
     assert_eq!(st.get("color"), Some("blue"));
 }
-

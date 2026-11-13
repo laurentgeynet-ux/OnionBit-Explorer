@@ -85,4 +85,3 @@ fn sans_alternates_rien_nest_touche() {
     );
     assert!(st.get("font-feature-settings").is_none());
 }
-

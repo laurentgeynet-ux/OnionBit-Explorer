@@ -45,7 +45,10 @@ fn background_light_dark_survit_et_resout() {
         "body",
     );
     let bg = st.get("background-color").unwrap_or_default();
-    assert!(bg.contains("#eee"), "light-dark doit résoudre vers #eee, obtenu {bg}");
+    assert!(
+        bg.contains("#eee"),
+        "light-dark doit résoudre vers #eee, obtenu {bg}"
+    );
 }
 
 #[test]

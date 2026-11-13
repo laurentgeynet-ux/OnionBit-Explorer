@@ -11,7 +11,12 @@ use explorer_dom::Dom;
 use explorer_html::TreeBuilder;
 
 fn walk_x(dom: &Dom, n: explorer_dom::NodeId, sm: &explorer_css::StyleMap, out: &mut String) {
-    if dom.attribute_str(n, "class").ok().flatten().is_some_and(|c| c == "x") {
+    if dom
+        .attribute_str(n, "class")
+        .ok()
+        .flatten()
+        .is_some_and(|c| c == "x")
+    {
         *out = sm
             .get(n)
             .and_then(|s| s.get("display").map(str::to_owned))
@@ -41,13 +46,24 @@ fn custom_media_alias_resolu() {
     let st = display_of(
         "<body><p class=x>ok</p></body>",
         css,
-        &StyleEnv { width_px: 1366, height_px: 900, ..StyleEnv::default() },
+        &StyleEnv {
+            width_px: 1366,
+            height_px: 900,
+            ..StyleEnv::default()
+        },
     );
-    assert!(st != "none", "viewport 1366 > 640 → la règle ne doit pas masquer (st={st:?})");
+    assert!(
+        st != "none",
+        "viewport 1366 > 640 → la règle ne doit pas masquer (st={st:?})"
+    );
     let st = display_of(
         "<body><p class=x>ok</p></body>",
         css,
-        &StyleEnv { width_px: 500, height_px: 900, ..StyleEnv::default() },
+        &StyleEnv {
+            width_px: 500,
+            height_px: 900,
+            ..StyleEnv::default()
+        },
     );
     assert_eq!(st, "none", "viewport 500 < 640 → masqué via l'alias");
 }

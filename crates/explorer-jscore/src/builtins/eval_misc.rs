@@ -77,13 +77,13 @@ fn function_ctor_kind(e: &mut Engine, _t: Value, args: &[Value], kw: &str) -> Js
         "<Function>"
     };
     let prog = crate::parser::parse_in(&src, false, e.nest_limit, Some(std::rc::Rc::from(src_tag)))
-    .map_err(|err| {
-        crate::heap::Thrown(e.error_value(
-            e.protos.syntax_error,
-            "SyntaxError",
-            &format!("Function: {err}"),
-        ))
-    })?;
+        .map_err(|err| {
+            crate::heap::Thrown(e.error_value(
+                e.protos.syntax_error,
+                "SyntaxError",
+                &format!("Function: {err}"),
+            ))
+        })?;
     match prog.body.first() {
         Some(crate::ast::Stmt::FunctionDecl(lit)) => {
             let env = e.global_env.clone();
