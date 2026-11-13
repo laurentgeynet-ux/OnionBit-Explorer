@@ -12690,3 +12690,9 @@ chaque gain rapporté contre les **deux** archétypes.
   `--gate scripts/bcd_baseline.json` en régression.
 - Journal : crans numérotés dans `interface-equipes.md` —
   toute mesure en vol y est tracée (daemon, profil, métriques).
+- [x] **JS-C507 — IC pour `'k' in o` (`has_prop_at`)** :
+  existence servie par le cache — `Hit(Data)`→`true`,
+  `Absent`→`false` seulement si tête sans hôte (`h.get`
+  peut résoudre hors `props[]`). `Spine::Bin` porte le
+  site AST ; `has_prop` interne `#[track_caller]`.
+  Verrous : lang 315 ×3, c500 23.

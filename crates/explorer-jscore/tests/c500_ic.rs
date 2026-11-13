@@ -381,3 +381,35 @@ fn c506_internal_polymorphic_correct() {
         "300/1755"
     );
 }
+
+// ── JS-C507 — IC pour `'k' in o` (has_prop_at) ──────────────────
+
+/// `in` au site AST : `Hit(Data)`→true, `Absent`→false — les deux
+/// verdicts sont cachés et l'invalidation par croissance tient
+/// (prop ajoutée après learn `Absent` → shape salie → miss →
+/// relearn, jamais un `false` périmé).
+#[test]
+fn c507_in_site_ic() {
+    assert_eq!(
+        eval(
+            "var o={a:1};var s=0;for(var i=0;i<300;i++){if('a' in o)s++;}\
+             var t=0;for(var i=0;i<300;i++){if(!('z' in o))t++;}\
+             o.z=9;var u=0;for(var i=0;i<300;i++){if('z' in o)u++;}s+'/'+t+'/'+u"
+        ),
+        "300/300/300"
+    );
+}
+
+/// `in` via un proto : `Chain` prouvé → `true` ; et un objet hôte
+/// n'est jamais tranché par `Absent` (l'hôte peut résoudre hors
+/// `props[]`).
+#[test]
+fn c507_in_proto_chain() {
+    assert_eq!(
+        eval(
+            "var p={m:4};var o=Object.create(p);o.n=2;\
+             var s=0;for(var i=0;i<300;i++){if('m' in o)s++;if('n' in o)s+=10;}s"
+        ),
+        "3300"
+    );
+}

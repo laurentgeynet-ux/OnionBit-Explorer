@@ -134,7 +134,8 @@ impl Engine {
     /// `maybe_grow`.
     fn eval_spine(&mut self, env: &EnvRef, this: Value, e: &Expr) -> JsResult<Value> {
         enum Spine<'a> {
-            Bin(BinOp, &'a Expr),
+            /// `usize` = site AST (`ptr(Expr)`, IC JS-C507 — `in`).
+            Bin(BinOp, &'a Expr, usize),
             /// `o.n` — `usize` = site AST (`ptr(Expr)`, IC JS-C500).
             Member(&'a str, usize),
             /// `o[k]` — idem.
@@ -146,7 +147,7 @@ impl Engine {
         loop {
             cur = match cur {
                 Expr::Binary(op, l, r) => {
-                    spine.push(Spine::Bin(*op, r));
+                    spine.push(Spine::Bin(*op, r, std::ptr::from_ref::<Expr>(cur) as usize));
                     l
                 }
                 Expr::Member(b, name) => {
@@ -177,12 +178,16 @@ impl Engine {
         let mut acc = self.eval_expr(env, this.clone(), cur)?;
         for node in spine.into_iter().rev() {
             acc = match node {
-                Spine::Bin(op, r) => match op {
+                Spine::Bin(op, r, site) => match op {
                     BinOp::And if !self.to_boolean(acc.clone()) => acc,
                     BinOp::Or if self.to_boolean(acc.clone()) => acc,
                     BinOp::Nullish if !matches!(acc, Value::Null | Value::Undefined) => acc,
                     BinOp::And | BinOp::Or | BinOp::Nullish => {
                         self.eval_expr(env, this.clone(), r)?
+                    }
+                    BinOp::In => {
+                        let rv = self.eval_expr(env, this.clone(), r)?;
+                        self.binary_in_at(acc, rv, site)?
                     }
                     _ => {
                         let rv = self.eval_expr(env, this.clone(), r)?;
@@ -1151,9 +1156,25 @@ impl Engine {
                 }
                 let lv = self.eval_expr(env, this.clone(), l)?;
                 let rv = self.eval_expr(env, this, r)?;
+                if *op == BinOp::In {
+                    return self.binary_in_at(lv, rv, std::ptr::from_ref::<Expr>(e) as usize);
+                }
                 self.binary_op(*op, lv, rv)
             }
         }
+    }
+
+    /// `"k" in o` câblé au site AST (JS-C507) — la vérification
+    /// d'existence peut être servie par l'IC : `Hit(Data)` prouve
+    /// la prop → `true`, `Absent` prouve l'absence → `false` (les
+    /// accessors ne sont jamais cachés — un `Acc` trouvé ne peut
+    /// pas apprendre, le walk décide).
+    fn binary_in_at(&mut self, l: Value, r: Value, site: usize) -> JsResult<Value> {
+        let Value::Obj(id) = r else {
+            return Err(self.type_error("`in` requires an object"));
+        };
+        let k = self.prop_key(l)?;
+        Ok(Value::Bool(self.has_prop_at(id, &k, site)?))
     }
 
     pub(crate) fn read_lvalue(&mut self, env: &EnvRef, this: Value, e: &Expr) -> JsResult<Value> {

@@ -9094,7 +9094,43 @@ impl Engine {
         }
     }
 
+    /// JS-C507 — `#[track_caller]` : callsite Rust = site IC,
+    /// mêmes vérifs que `get_prop` (les sites AST `in` passent
+    /// par [`Engine::has_prop_at`]).
+    #[track_caller]
     pub(crate) fn has_prop(&mut self, id: ObjId, key: &str) -> JsResult<bool> {
+        let site = std::ptr::from_ref(std::panic::Location::caller()) as usize;
+        self.has_prop_at(id, key, site)
+    }
+
+    /// `[[HasProperty]]` câblé IC : `Hit` (prop `Data` prouvée
+    /// sur la chaîne) → `true` ; `Absent` (chaîne complète vérifiée
+    /// sans rien) → `false` **seulement si la tête n'a pas
+    /// d'hôte** — `h.get` peut répondre `true` hors de `props[]`,
+    /// l'absence structurelle ne le prouve pas. `Fall` → marche
+    /// complète puis learn (`Data` trouvé → Own/Chain ; rien et
+    /// pas d'hôte → `Absent`).
+    pub(crate) fn has_prop_at(&mut self, id: ObjId, key: &str, site: usize) -> JsResult<bool> {
+        match self.ic_hit(site, id, key) {
+            IcOut::Hit(_) => return Ok(true),
+            IcOut::Absent if self.host_of(id).is_none() => return Ok(false),
+            _ => {}
+        }
+        let r = self.has_prop_walk(id, key)?;
+        if !self.ic_off {
+            let mut links = Vec::new();
+            match self.find_prop_owner_links(id, key, Some(&mut links)) {
+                Some((_, Prop::Data { .. })) => self.ic_learn(site, key, &links, true),
+                None if !r && self.host_of(id).is_none() => {
+                    self.ic_learn(site, key, &links, false);
+                }
+                _ => {}
+            }
+        }
+        Ok(r)
+    }
+
+    fn has_prop_walk(&mut self, id: ObjId, key: &str) -> JsResult<bool> {
         // Chaîne [[HasProperty]] complète en UNE boucle —
         // délégation proxy et marche proto partagent les bornes.
         // L'ancienne marche re-entrait dans `has_prop` à chaque
