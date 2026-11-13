@@ -785,6 +785,14 @@ void main() {
       // Clic-molette : l'onglet neuf charge l'URL mais l'onglet
       // d'origine garde le premier plan (sémantique Chrome).
       await ctrl.openInNewTab('http://lien.test/');
+      // Attente conditionnelle bornée : la liste d'onglets
+      // atterrit via le provider un tour de boucle après le
+      // retour de `openInNewTab` (flake CI mesurée).
+      for (var i = 0;
+          i < 50 && c.read(browserProvider).tabs.length < 2;
+          i++) {
+        await pumpEventQueue();
+      }
       expect(c.read(browserProvider).tabs, hasLength(2));
       expect(repo.navigations, ['2:http://lien.test/']);
       expect(c.read(browserProvider).activeId, '1');
@@ -819,8 +827,15 @@ void main() {
     await settle(c);
     final ctrl = c.read(browserProvider.notifier);
 
-    // Clic sur un champ → focused → flag posé.
+    // Clic sur un champ → focused → flag posé (attente
+    // conditionnelle bornée — la synchro provider arrive un
+    // tour de boucle après `click` sous charge CI).
     await ctrl.click(10, 10);
+    for (var i = 0;
+        i < 50 && !c.read(browserProvider).fieldFocused;
+        i++) {
+      await pumpEventQueue();
+    }
     expect(c.read(browserProvider).fieldFocused, isTrue);
 
     // Le moteur a perdu le focus (Enter/Escape, nœud mort) :
@@ -1118,8 +1133,15 @@ void main() {
         'url': 'http://h/v.mp4',
       }),
     );
-    for (var i = 0; i < 6; i++) {
+    // Attente conditionnelle bornée : sous charge CI, 6 pompes
+    // fixes ne suffisaient pas à la chaîne claim→création→apply
+    // (le player naissait mais `muted` n'était pas encore posé).
+    for (var i = 0; i < 50; i++) {
       await pumpEventQueue();
+      if (FakePlayer.instances.isNotEmpty &&
+          FakePlayer.instances.single.muted) {
+        break;
+      }
     }
     final p = FakePlayer.instances.single;
     expect(p.muted, isTrue);

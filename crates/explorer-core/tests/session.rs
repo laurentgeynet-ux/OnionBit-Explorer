@@ -14291,17 +14291,18 @@ async fn subtle_hmac_import_sign_verify() {
     let id = s.open_tab();
     s.navigate(id, "http://h.test/").await.unwrap();
     // 5 promesses chaînées résolues par le thread crypto —
-    // sans `sleep`, 128 itérations synchrones filent en
-    // microsecondes avant que l'OS ne schedule le worker
-    // (mesuré : échec CI reproductible, succès local). La
-    // pause donne du temps réel au backend ; sortie anticipée
-    // dès la résolution (même motif que `worker_loads…`).
+    // sous charge parallèle `navigate` rend la main mi-chaîne
+    // et les pompes finissent le travail. La sortie anticipée
+    // matche le textContent **produit** (guillemets du dump),
+    // pas la source du script — un `contains("err:")` nu
+    // cassait à la première itération sur le littéral
+    // `'err:'` du `.catch` sérialisé (flake CI mesurée).
     let mut dump = String::new();
     for _ in 0..128 {
         s.pump_net().await;
         s.pump_timers(id);
         dump = s.dom_dump(id).unwrap_or_default();
-        if dump.contains("k:secret/HMAC") || dump.contains("err:") {
+        if dump.contains("\"k:secret/HMAC") || dump.contains("\"err:") {
             break;
         }
         tokio::time::sleep(std::time::Duration::from_millis(10)).await;
