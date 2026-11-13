@@ -4466,3 +4466,68 @@ sous-features, `font-stretch`/`font-width` (fontes variables),
 
 **Plafond théorique** : Sprints 1-4 + P2 ≈ **~1400-1500/2273
 (~65 %)** ; le reste = SVG + sous-features non sondables.
+
+## Plan perf archétypes — file prioritaire (assigné NAV 2026-11-13)
+
+File ordonnée sur les mesures `sync_profile` des deux archétypes
+réels (dev.to ~149-161 s wall, YouTube ~212,6 s — audits NAV
+chantiers 8-12ter, entrée d'assignation `interface-equipes.md`
+2026-11-13). **Prioritaire sur la file `css.values`** ; chaque
+étape prend le numéro R- suivant, les extensions de contrat
+restent journalisées.
+
+- [ ] **Cascade frontière** (`explorer-css`) — `incr.cascade`
+  8,5-10,4 s = poste n°1 dev.to. Extension **additive** de
+  `compute_scoped`/`apply_scoped` :
+  `compute_scoped_frontier(root, frontier: &[NodeId])` évalue en
+  sus du sous-arbre les **ancêtres + frères précédents** des
+  nœuds touchés (le sujet de `E:has(arg)` vit au-dessus/à gauche
+  du match), borné par l'héritage (restyle du parent propage aux
+  descendants — la frontière ne peut pas réduire sous la ligne
+  de parenté). Spec = proposition NAV chantier 12ter (journal
+  2026-11-13) — **design à valider PIPE avant code**.
+  Consommateur NAV : `journal_style_scopes` (`apply.rs`).
+- [ ] **Émission cullée à la descente** (`explorer-layout` +
+  `explorer-render`) — `incr.emit` ~1,5 s dev.to. Champ
+  **`may_escape: bool`** sur `LayoutBox`, calculé post-ordre au
+  build ET aux `relayout_subtree` (vrai si la boîte ou un
+  descendant est `position ≠ static` — `pos_defer`/`fixed_defer`
+  ré-parentés racine inclus —, transformé, flottant, ou
+  `overflow:visible` à débord possible ; conservateur = `true`).
+  Culle O(1) dans `paint_box` (`display.rs`) : sauter le
+  sous-arbre quand `rect ⊕ marge-ombres ∩ bande = ∅ &&
+  !may_escape` ; voie incrémentale seule (`rasterize` plein
+  cadre inchangé).
+- [ ] **Ops de groupe — résidu zone = cadre**
+  (`explorer-render`) — `group_us` ~9,9 s mesuré post-235 au
+  vol YouTube (4 groupes filter/blend couvrant le cadre).
+  `composite_blend`/`apply_filter_ops` déjà bornés par 235 ;
+  reliquat : (a) ops **bandées** quand `zone_out` = cadre
+  entier ; (b) `group_mask_coverage` — `Mask::new(pw,ph)` aux
+  dims du parent + merge clip plein extent → borner à
+  `zone_out` ; (c) chemin `filter=None` → `Unbounded` (tampon
+  taille parent, raster plein cadre non fenêtré).
+- [ ] **Sonde `draw` par kind d'item** (`explorer-render`,
+  instrumentation) — `draw_us` ~1,0 s dev.to mesuré **avec**
+  l'atlas R-85 actif (`rendered` → `blit_glyph`). `raster.parts`
+  compte `draws=N` sans décomposition : attribuer par type
+  (glyphes/images/fills) avant tout chantier — le résidu peut
+  être le plancher du blit, pas la rasterisation.
+- [ ] **`content-visibility: auto` viewport-aware**
+  (`explorer-layout` + couture `explorer-core` à journaliser) —
+  reliquant Étape 230 : le skip `auto` n'existe que tant que
+  l'élément est « non pertinent » ; le scroll ne re-layout pas
+  → la pertinence doit être alimentée par le viewport
+  (émission ou invalidation au scroll — design à arrêter,
+  sortie documentée `boxtree.rs`).
+- **File propre continue** : `css.values` résiduel
+  (`font-stretch`/`font-width`, `scroll-snap-*`, `overlay`,
+  `math-*`…), display-list delta (prochaine jauge Axe 3), R-206
+  (cliquet 41/58).
+
+**Trou nommé hors plan** : fenêtre lourde dev.to — `clips_real`
+~1 898 (~46 %) → `incr.raster` 13,4 s ; `Mask::fill_path` ~6 ms
+sur grand pixmap = coût de couverture **réel** (clips vraiment
+partiels, non cullables ; `Mask` aux dims du dst exigé par
+tiny-skia). Poste n°2 dev.to après la cascade frontière —
+mesurer avant de promettre un levier.
