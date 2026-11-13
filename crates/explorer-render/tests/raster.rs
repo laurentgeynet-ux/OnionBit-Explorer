@@ -6,13 +6,15 @@
 //! pixels sondés pour fonds/bordures/clips/DPI, glyphes
 //! dessinés depuis les contours TTF de la fixture.
 
-use explorer_css::{Origin, StyleEngine, StyleEnv};
+use explorer_css::{value::Color, Origin, StyleEngine, StyleEnv};
 use explorer_dom::Dom;
 use explorer_html::TreeBuilder;
 use explorer_layout::font::{FontRequest, FontSource};
-use explorer_layout::{build_box_tree, layout_tree, BlockCtx};
+use explorer_layout::{build_box_tree, layout_tree, BlockCtx, Rect};
+use explorer_render::display::FilterOp;
 use explorer_render::{
-    build_display_list, build_display_list_full, collect_data_images, rasterize, Frame,
+    build_display_list, build_display_list_full, collect_data_images, rasterize, rasterize_window,
+    DisplayItem, DisplayList, Frame,
 };
 
 const VIEW: f32 = 200.0;
@@ -1301,4 +1303,167 @@ fn corner_shape_change_la_geometrie_peinte() {
     // Concaves.
     assert!(probe("notch", 14, 14) > 200, "notch coupe au centre");
     assert!(probe("scoop", 10, 10) > 200, "scoop creuse vs round");
+}
+
+// Étape 235 — tampons de groupe bornés à leur zone
+// d'influence (audit `group_us` YouTube : 4 groupes =
+// 7,1 s en `Pixmap::new(w,h)` plein cadre + composite
+// plein cadre). Listes synthétiques : `rasterize`
+// (filtre fenêtré absent → zone `Unbounded` = chemin
+// historique) vs `rasterize_window` (zone bornée) en
+// différentiel pixel à pixel.
+
+fn dlist(items: Vec<DisplayItem>) -> DisplayList {
+    DisplayList {
+        items,
+        width: 200.0,
+        height: 140.0,
+        spans: explorer_render::SpanMap::default(),
+        tree_epoch: 0,
+        dropped_emits: 0,
+        first_cycle_path: None,
+    }
+}
+
+fn fill(x: f32, y: f32, w: f32, h: f32, color: Color) -> DisplayItem {
+    DisplayItem::FillRect {
+        rect: Rect {
+            x,
+            y,
+            width: w,
+            height: h,
+        },
+        color,
+        radii: [0.0; 4],
+        corners: [1.0; 4],
+    }
+}
+
+/// Fenêtré vs plein cadre : les `h` premières lignes
+/// doivent être identiques octet à octet.
+fn assert_top_rows(win: &Frame, full: &Frame, rows: u32) {
+    let n = (rows * win.width) as usize * 4;
+    for (i, (a, b)) in win.pixels[..n].iter().zip(&full.pixels[..n]).enumerate() {
+        assert_eq!(
+            a,
+            b,
+            "divergence à l'octet {i} (x={},y={},c={})",
+            (i / 4) % win.width as usize,
+            i / 4 / win.width as usize,
+            i % 4
+        );
+    }
+}
+
+#[test]
+fn groupe_filtre_hors_fenetre_ne_composite_rien() {
+    let red = Color {
+        r: 200,
+        g: 0,
+        b: 0,
+        a: 255,
+    };
+    let green = Color {
+        r: 0,
+        g: 150,
+        b: 0,
+        a: 255,
+    };
+    // Groupe blur dont le seul item peint est très au-
+    // dessus de la fenêtre → zone `Void`, puits 1×1,
+    // composite sauté au `PopFilter`.
+    let list = dlist(vec![
+        DisplayItem::PushFilter(vec![FilterOp::Blur(3.0)]),
+        fill(0.0, -900.0, 200.0, 100.0, red),
+        DisplayItem::PopFilter,
+        fill(0.0, 10.0, 200.0, 20.0, green),
+    ]);
+    let f = rasterize_window(&list, font_src(), 1.0, 0.0, 100.0).expect("fenêtre");
+    assert_eq!(px(&f, 100, 15), [0, 150, 0, 255], "rect visuel présent");
+    for y in [40, 60, 90] {
+        assert_eq!(
+            px(&f, 100, y),
+            [255, 255, 255, 255],
+            "y={y} doit rester blanc"
+        );
+    }
+    let full = rasterize(&list, font_src(), 1.0).expect("plein cadre");
+    assert_top_rows(&f, &full, 100);
+}
+
+#[test]
+fn groupe_filtre_borne_equivaut_au_plein_cadre() {
+    let red = Color {
+        r: 200,
+        g: 0,
+        b: 0,
+        a: 255,
+    };
+    let green = Color {
+        r: 0,
+        g: 150,
+        b: 0,
+        a: 255,
+    };
+    let shadow = Color {
+        r: 0,
+        g: 0,
+        b: 0,
+        a: 200,
+    };
+    // Rect rouge enjambant le bord bas de la fenêtre
+    // (y 80..120, fenêtre 0..100) sous blur + drop-shadow
+    // : la zone bornée doit couvrir l'encre d'entrée à
+    // portée des ops et sa sortie dans le parent —
+    // verrouille offsets, reach et composite partiel.
+    let list = dlist(vec![
+        fill(0.0, 0.0, 200.0, 20.0, green),
+        DisplayItem::PushFilter(vec![
+            FilterOp::Blur(2.0),
+            FilterOp::DropShadow {
+                dx: 4.0,
+                dy: 3.0,
+                blur: 1.0,
+                color: shadow,
+            },
+        ]),
+        fill(20.0, 80.0, 100.0, 40.0, red),
+        DisplayItem::PopFilter,
+    ]);
+    let win = rasterize_window(&list, font_src(), 1.0, 0.0, 100.0).expect("fenêtre");
+    let full = rasterize(&list, font_src(), 1.0).expect("plein cadre");
+    assert_top_rows(&win, &full, 100);
+}
+
+#[test]
+fn groupe_void_imbrique_propage_au_parent() {
+    let red = Color {
+        r: 200,
+        g: 0,
+        b: 0,
+        a: 255,
+    };
+    let green = Color {
+        r: 0,
+        g: 150,
+        b: 0,
+        a: 255,
+    };
+    // Blend > Filter > contenu hors fenêtre : le `void`
+    // se propage du parent au sous-groupe — rien ne
+    // composite, le rect visible reste seul peint.
+    let list = dlist(vec![
+        DisplayItem::PushBlend(0),
+        DisplayItem::PushFilter(vec![FilterOp::Blur(1.0)]),
+        fill(0.0, -500.0, 200.0, 60.0, red),
+        fill(0.0, 240.0, 200.0, 60.0, red),
+        DisplayItem::PopFilter,
+        DisplayItem::PopBlend,
+        fill(0.0, 40.0, 200.0, 20.0, green),
+    ]);
+    let f = rasterize_window(&list, font_src(), 1.0, 0.0, 100.0).expect("fenêtre");
+    assert_eq!(px(&f, 100, 45), [0, 150, 0, 255]);
+    assert_eq!(px(&f, 100, 80), [255, 255, 255, 255]);
+    let full = rasterize(&list, font_src(), 1.0).expect("plein cadre");
+    assert_top_rows(&f, &full, 100);
 }

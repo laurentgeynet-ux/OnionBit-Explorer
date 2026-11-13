@@ -12427,6 +12427,52 @@ un crate PIPELINE.- [x] **JS-C422. Deadline honnête — canal session ↔ budge
   chantier PIPE, journalisé).
   148 lib verts, verrous
   extraction/ops/survie/repli.
+- [x] **Étape 235. Tampons de
+  groupe bornés + pool de `Mask`
+  de clips — `group_us`
+  plein-frame** (audit perf
+  chantier 12bis — intervention
+  NAV périmètre PIPE, journalisée
+  `interface-equipes.md`) : même
+  maladie qu'Étape 233 sur le
+  chemin groupe — vol YouTube :
+  **4 groupes = 7,1 s** en
+  `Pixmap::new` plein cadre +
+  composite plein cadre.
+  `GroupBuf` borné à la zone
+  d'influence (`resolved_bounds`
+  de la portée ∩ parent ⊕
+  `ops_reach`, **+ marge reach
+  autour de la sortie** — le
+  diviseur `n` du `box_blur`
+  exige le voisinage plein cadre,
+  échantillons transparents
+  compris : bug de lisière
+  attrapé par le différentiel
+  avant livraison) ; `grp_tf`
+  compose les translates en
+  espace dst ; `void` → puits
+  1×1 propagé aux sous-groupes ;
+  repli `Unbounded` = ancien
+  comportement. Pool LIFO
+  `take_mask` pour les `Mask` de
+  `ClipEntry::Real` (le
+  dimensionnement `clip∩pixmap`
+  est impossible via tiny-skia :
+  masque plein-canvas). Verrous :
+  3 tests différentiels
+  fenêtré-vs-plein-cadre
+  (listes synthétiques, blur +
+  drop-shadow enjambant le bord
+  de fenêtre) — 44 raster verts.
+  **Mesuré** : dev.to 156 s
+  (`incr.raster` 1,65 s stable,
+  `clip_us` ~0,53-0,95 s) ;
+  YouTube 212,6 s vert — pic à
+  4 groupes non reproduit
+  (timing-dépendant), gain
+  `group_us` structurel à
+  re-mesurer.
 
 ## Plan NAVIGATEUR — vitrine YouTube + surface navigateur (2026-11-12)
 

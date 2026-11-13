@@ -148,6 +148,12 @@ fn skia_color(c: Color) -> tiny_skia::Color {
 /// non-axis-aligned).
 const SAFE_COORD: f32 = 30_000.0;
 
+/// Cap du pool de `Mask` de [`replay_items`] — les clips
+/// `Real` s'empilent/dépilent en LIFO strict ; au-delà de
+/// cette profondeur les buffers sont libérés plutôt que
+/// conservés (borné : chaque entrée ≈ w·h octets).
+const MASK_POOL_CAP: usize = 8;
+
 /// `tf` est-il axis-aligned (translate/scale/mirror sans
 /// rotation ni skew) ?
 fn axis_aligned(tf: Transform) -> bool {
@@ -875,9 +881,23 @@ fn top_clip<'m>(clips: &'m [ClipEntry], empty: Option<&'m Mask>) -> Option<&'m M
 /// sémantique qu'avant (masque resté vide = bloque tout).
 /// `can_full=false` (clip arrondi : les coins rognent) →
 /// un rect couvrant reste `Real`.
+/// Réutilise un `Mask` du pool aux dims demandées (sinon
+/// alloue) — le buffer repris est remis à zéro, sémantique
+/// d'un `Mask::new` frais. `data_mut` n'expose que les
+/// octets ; le `fill` reste entier, pas de fuite d'état.
+fn take_mask(pool: &mut Vec<Mask>, w: u32, h: u32) -> Option<Mask> {
+    let mut m = match pool.iter().position(|p| p.width() == w && p.height() == h) {
+        Some(i) => pool.remove(i),
+        None => Mask::new(w, h)?,
+    };
+    m.data_mut().fill(0);
+    Some(m)
+}
+
 #[allow(clippy::cast_precision_loss)]
 fn push_rect_clip(
     clips: &mut Vec<ClipEntry>,
+    pool: &mut Vec<Mask>,
     phys: Option<tiny_skia::Rect>,
     can_full: bool,
     w: u32,
@@ -906,9 +926,9 @@ fn push_rect_clip(
         return;
     }
     // Une entrée est TOUJOURS poussée — sinon le `PopClip`
-    // désempile le clip englobant (cas `Mask::new` en échec
+    // désempile le clip englobant (cas `take_mask` en échec
     // : dégradation bloquante, pile équilibrée).
-    match Mask::new(w, h) {
+    match take_mask(pool, w, h) {
         Some(mut mask) => {
             fill(&mut mask);
             clips.push(ClipEntry::Real(mask));
@@ -934,6 +954,318 @@ enum GroupKind {
         /// Tuiles des couches — union `add` des couvertures.
         layers: Vec<crate::display::MaskTile>,
     },
+}
+
+/// Tampon d'un groupe hors-écran (R-M5), dimensionné à sa
+/// **zone d'influence** quand la fenêtre fournit les
+/// bounds — audit : `Pixmap::new(w,h)` plein cadre à
+/// chaque push + composite plein cadre à chaque pop
+/// (4 groupes = 7,1 s de `group_us` sur `YouTube` — même
+/// maladie plein-frame que les clips de l'étape 233).
+/// La zone = union des bounds peintes restreinte à
+/// `parent` ⊕ `portée des ops` (l'encre d'entrée dont un
+/// flou/une ombre saigne dans le parent) ∪ sa propre
+/// portée en sortie. `void` = aucune influence possible :
+/// le composite saute et les contenus peignent dans un
+/// puits 1×1 (exact — ops sur transparent = transparent).
+struct GroupBuf {
+    /// Tampon — taille de la zone, du parent si la zone
+    /// n'est pas bornable, ou 1×1 puits quand `void`.
+    buf: Pixmap,
+    /// Le kind fait foi au pop (R-252).
+    kind: GroupKind,
+    /// Position du tampon dans l'espace du dst parent —
+    /// origine du composite au pop.
+    ox: i32,
+    oy: i32,
+    /// Origine du tampon en coords racine — les items qui
+    /// adressent le dst en coords absolues
+    /// (`BackdropFilter`) la soustraient.
+    ox_root: i32,
+    oy_root: i32,
+    /// Rien de visible n'en sort — composite sauté au pop.
+    void: bool,
+    /// `grp_tf` avant le push — le translate
+    /// `(-ox,-oy)` qui a fait passer `cur` en espace
+    /// tampon est restauré au pop.
+    grp_tf_prev: Transform,
+}
+
+/// Zone d'influence d'un groupe en coords racine.
+enum GroupZone {
+    /// Bounds absentes (raster plein cadre sans filtre
+    /// fenêtré) ou contenu non bornable — tampon taille
+    /// parent, comportement historique.
+    Unbounded,
+    /// Aucune influence possible sur le dst parent.
+    Void,
+    /// Rect du tampon (peut déborder du parent côté
+    /// entrée : l'encre à portée des ops est conservée).
+    Zone { x: i32, y: i32, w: u32, h: u32 },
+}
+
+/// Portée spatiale des ops `filter` d'un groupe — les
+/// ops de couleur sont à portée nulle ; `blur` étale
+/// de `⌈r⌉` px par axe (2 passes `box_blur` rayon r) ;
+/// `drop-shadow` décale l'alpha de `(dx,dy)` puis
+/// floute — borne `max(|dx|,|dy|) + ⌈blur⌉` conservatrice.
+#[allow(
+    clippy::cast_possible_truncation,
+    clippy::cast_sign_loss,
+    clippy::cast_precision_loss
+)]
+fn ops_reach(ops: &[FilterOp]) -> i32 {
+    ops.iter()
+        .map(|op| match op {
+            FilterOp::Blur(r) => r.max(0.0).ceil() as i32,
+            FilterOp::DropShadow { dx, dy, blur, .. } => {
+                dx.abs().max(dy.abs()).ceil() as i32 + blur.max(0.0).ceil() as i32
+            }
+            _ => 0,
+        })
+        .sum()
+}
+
+/// Intersection de deux rects `(x,y,w,h)` flottants.
+fn tup_intersect(a: (f32, f32, f32, f32), b: (f32, f32, f32, f32)) -> Option<(f32, f32, f32, f32)> {
+    let (x0, y0) = (a.0.max(b.0), a.1.max(b.1));
+    let (x1, y1) = ((a.0 + a.2).min(b.0 + b.2), (a.1 + a.3).min(b.1 + b.3));
+    (x1 > x0 && y1 > y0).then_some((x0, y0, x1 - x0, y1 - y0))
+}
+
+/// Boîte englobante de deux rects `(x,y,w,h)` flottants.
+fn tup_union(a: (f32, f32, f32, f32), b: (f32, f32, f32, f32)) -> (f32, f32, f32, f32) {
+    let (x0, y0) = (a.0.min(b.0), a.1.min(b.1));
+    let (x1, y1) = ((a.0 + a.2).max(b.0 + b.2), (a.1 + a.3).max(b.1 + b.3));
+    (x0, y0, x1 - x0, y1 - y0)
+}
+
+/// Union des bounds peintes de la portée du groupe qui
+/// débute à `start` — lue dans `bounds` (espace
+/// `resolved_bounds`, base identité) et ramenée en
+/// coords racine par `dpi`. Seuls les items qui
+/// peindront comptent (`j >= draw_from` et bounds ∩
+/// fenêtre — le même test que la boucle de dessin ;
+/// le contenu des sous-groupes imbriqués est couvert
+/// par le parcours de portée entier). `parent` = rect
+/// du dst en coords racine ; `reach` = [`ops_reach`].
+/// `Unbounded` si un item de dessin manque de bounds ou
+/// si la portée est déséquilibrée — jamais de zone
+/// optimiste.
+#[allow(
+    clippy::too_many_arguments,
+    clippy::cast_possible_truncation,
+    clippy::cast_sign_loss,
+    clippy::cast_precision_loss
+)]
+fn group_paint_zone(
+    items: &[DisplayItem],
+    start: usize,
+    draw_from: usize,
+    bounds: &[Option<explorer_layout::Rect>],
+    win: explorer_layout::Rect,
+    dpi: Transform,
+    parent: (f32, f32, f32, f32),
+    reach: i32,
+) -> GroupZone {
+    let mut depth = 1i32;
+    let mut closed = false;
+    let mut painted: Option<(f32, f32, f32, f32)> = None;
+    for (j, item) in items.iter().enumerate().skip(start + 1) {
+        match item {
+            DisplayItem::PushFilter(_)
+            | DisplayItem::PushBlend(_)
+            | DisplayItem::PushMask { .. } => depth += 1,
+            DisplayItem::PopFilter | DisplayItem::PopBlend | DisplayItem::PopMask => {
+                depth -= 1;
+                if depth == 0 {
+                    closed = true;
+                    break;
+                }
+            }
+            DisplayItem::PushClip(_)
+            | DisplayItem::PushClipRounded { .. }
+            | DisplayItem::PushClipPath { .. }
+            | DisplayItem::PopClip
+            | DisplayItem::PushTransform(_)
+            | DisplayItem::PopTransform => {}
+            _ => {
+                if j >= draw_from {
+                    match bounds.get(j).copied().flatten() {
+                        // Même test que la boucle de dessin :
+                        // un item culé par la fenêtre n'encre
+                        // pas le tampon.
+                        Some(b) if rects_overlap(b, win) => {
+                            let Some(rb) = tiny_skia::Rect::from_xywh(b.x, b.y, b.width, b.height)
+                                .and_then(|r| r.transform(dpi))
+                            else {
+                                return GroupZone::Unbounded;
+                            };
+                            let rb = (rb.x(), rb.y(), rb.width(), rb.height());
+                            painted = Some(painted.map_or(rb, |p| tup_union(p, rb)));
+                        }
+                        Some(_) => {}
+                        None => return GroupZone::Unbounded,
+                    }
+                }
+            }
+        }
+    }
+    if !closed {
+        return GroupZone::Unbounded;
+    }
+    let Some(p) = painted else {
+        return GroupZone::Void;
+    };
+    let r = reach.max(0) as f32;
+    let grown = (
+        parent.0 - r,
+        parent.1 - r,
+        parent.2 + 2.0 * r,
+        parent.3 + 2.0 * r,
+    );
+    let out_p = (p.0 - r, p.1 - r, p.2 + 2.0 * r, p.3 + 2.0 * r);
+    // Encre d'entrée à portée du parent ∪ pixels de
+    // sortie qui retombent dans le parent.
+    let z_in = tup_intersect(p, grown);
+    let z_out = tup_intersect(out_p, parent);
+    let base = match (z_in, z_out) {
+        (Some(a), Some(b)) => tup_union(a, b),
+        (Some(a), None) | (None, Some(a)) => a,
+        (None, None) => return GroupZone::Void,
+    };
+    // Marge `reach` autour de la SORTIE : les kernels
+    // (`box_blur`, ombre) doivent lire le même voisinage
+    // qu'en plein cadre — y compris les échantillons
+    // transparents au-delà de l'encre, qui comptent dans
+    // le diviseur `n` du blur (bord du tampon ≠ bord du
+    // frame → sinon divergence d'arrondi aux lisières).
+    let zone = match z_out {
+        Some(o) => tup_union(base, (o.0 - r, o.1 - r, o.2 + 2.0 * r, o.3 + 2.0 * r)),
+        None => base,
+    };
+    let x = zone.0.floor() as i32;
+    let y = zone.1.floor() as i32;
+    let x1 = (zone.0 + zone.2).ceil() as i32;
+    let y1 = (zone.1 + zone.3).ceil() as i32;
+    GroupZone::Zone {
+        x,
+        y,
+        w: (x1 - x).max(1) as u32,
+        h: (y1 - y).max(1) as u32,
+    }
+}
+
+/// Pousse un tampon de groupe dimensionné à sa zone
+/// d'influence — factorise les trois `Push*` de
+/// [`replay_items`]. Le dst parent = dernier tampon
+/// englobant ou la racine ; `void` se propage (un enfant
+/// de tampon-vide est vide d'office). `grp_tf`/`cur`
+/// basculent en espace tampon quand la zone impose un
+/// translate `(-ox,-oy)` ; `grp_tf_prev` restaure au pop.
+/// Repli `Unbounded` = tampon taille parent (comportement
+/// historique) ; échec d'alloc de la zone → taille parent,
+/// puis puits 1×1 — la pile reste appariée.
+#[allow(clippy::too_many_arguments, clippy::cast_precision_loss)]
+fn push_group(
+    filtered: &mut Vec<GroupBuf>,
+    kind: GroupKind,
+    reach: i32,
+    items: &[DisplayItem],
+    start: usize,
+    draw_from: usize,
+    filter: Option<(&[Option<explorer_layout::Rect>], explorer_layout::Rect)>,
+    dpi: Transform,
+    pw: u32,
+    ph: u32,
+    grp_tf: &mut Transform,
+    tfs: &[Transform],
+    cur: &mut Transform,
+    n_void: &mut u32,
+) {
+    let (pox, poy, pdw, pdh) = filtered.last().map_or((0, 0, pw, ph), |p| {
+        (p.ox_root, p.oy_root, p.buf.width(), p.buf.height())
+    });
+    let zone = if filtered.last().is_some_and(|p| p.void) {
+        GroupZone::Void
+    } else {
+        match filter {
+            Some((bounds, win)) => group_paint_zone(
+                items,
+                start,
+                draw_from,
+                bounds,
+                win,
+                dpi,
+                (pox as f32, poy as f32, pdw as f32, pdh as f32),
+                reach,
+            ),
+            None => GroupZone::Unbounded,
+        }
+    };
+    match zone {
+        GroupZone::Void => {
+            *n_void += 1;
+            if let Some(buf) = Pixmap::new(1, 1) {
+                filtered.push(GroupBuf {
+                    buf,
+                    kind,
+                    ox: 0,
+                    oy: 0,
+                    ox_root: pox,
+                    oy_root: poy,
+                    void: true,
+                    grp_tf_prev: *grp_tf,
+                });
+            }
+        }
+        GroupZone::Unbounded => {
+            if let Some(buf) = Pixmap::new(pdw, pdh) {
+                filtered.push(GroupBuf {
+                    buf,
+                    kind,
+                    ox: 0,
+                    oy: 0,
+                    ox_root: pox,
+                    oy_root: poy,
+                    void: false,
+                    grp_tf_prev: *grp_tf,
+                });
+            }
+        }
+        GroupZone::Zone { x, y, w, h } => {
+            if let Some(buf) = Pixmap::new(w, h) {
+                let prev = *grp_tf;
+                let (ox, oy) = (x - pox, y - poy);
+                *grp_tf = grp_tf.post_concat(Transform::from_translate(-ox as f32, -oy as f32));
+                *cur = tfs
+                    .iter()
+                    .fold(dpi, |acc, t| acc.pre_concat(*t))
+                    .post_concat(*grp_tf);
+                filtered.push(GroupBuf {
+                    buf,
+                    kind,
+                    ox,
+                    oy,
+                    ox_root: x,
+                    oy_root: y,
+                    void: false,
+                    grp_tf_prev: prev,
+                });
+            } else if let Some(buf) = Pixmap::new(pdw, pdh) {
+                filtered.push(GroupBuf {
+                    buf,
+                    kind,
+                    ox: 0,
+                    oy: 0,
+                    ox_root: pox,
+                    oy_root: poy,
+                    void: false,
+                    grp_tf_prev: *grp_tf,
+                });
+            }
+        }
+    }
 }
 
 /// Rejoue les items dans `pixmap` — boucle de peinture
@@ -964,11 +1296,22 @@ fn replay_items(
     // fois par replay au lieu d'un `Mask` plein frame par
     // clip hors-fenêtre (audit : ~7,7 ms × 4 109 = 31 s).
     let empty_mask = Mask::new(pixmap.width(), pixmap.height());
+    // Pool LIFO des `Mask` `Real` dépiloés — `Mask::new`
+    // = alloc + memset `w·h` par clip partiel (~ms en
+    // debug ; clip_us résiduel ~1 s/fenêtre typique).
+    let mut mask_pool: Vec<Mask> = Vec::new();
     // R-M5 — groupes hors-écran : `PushFilter`/`PushBlend`/
     // `PushMask` poussent un tampon ; les items suivants s'y
     // peignent (`filtered.last_mut()` = cible courante) et le
     // `Pop*` correspondant le composite selon `GroupKind`.
-    let mut filtered: Vec<(Pixmap, GroupKind)> = Vec::new();
+    // Tampons dimensionnés à leur zone d'influence (audit
+    // group_us) — `grp_tf` = produit des translates
+    // `(-ox,-oy)` de chaque groupe englobant, composé EN
+    // TÊTE de `cur` (espace dst, pas doc : `cur =
+    // grp_tf · dpi · tfs`) ; restauré à chaque pop via
+    // `grp_tf_prev`.
+    let mut filtered: Vec<GroupBuf> = Vec::new();
+    let mut grp_tf = Transform::default();
     // Pile des `transform` CSS : `cur` = dpi · produit des
     // matrices actives — recomposé à chaque push/pop (peu de
     // niveaux en pratique).
@@ -982,6 +1325,9 @@ fn replay_items(
     let mut us_group = 0u128;
     let mut us_draw = 0u128;
     let (mut n_clip, mut n_group, mut n_draw, mut n_skip) = (0u32, 0u32, 0u32, 0u32);
+    // Groupes `void` — aucune influence sur le parent
+    // (mesure du taux de skip au re-vol).
+    let mut n_group_void = 0u32;
     // `clips_real` = clips ayant payé un `Mask` plein frame —
     // le ratio vs `clips` mesure le taux de culle hors-fenêtre.
     let mut n_clip_real = 0u32;
@@ -1016,19 +1362,19 @@ fn replay_items(
                 // lointain reste vide — même sémantique.
                 let dom = Rect::from_ltrb(-SAFE_COORD, -SAFE_COORD, SAFE_COORD, SAFE_COORD);
                 let clamped = phys.and_then(|p| dom.and_then(|d| p.intersect(&d)));
-                push_rect_clip(
-                    &mut clips,
-                    phys,
-                    true,
-                    pixmap.width(),
-                    pixmap.height(),
-                    |mask| {
-                        if let Some(clamped) = clamped {
-                            let path = PathBuilder::from_rect(clamped);
-                            mask.fill_path(&path, FillRule::Winding, true, Transform::default());
-                        }
-                    },
-                );
+                // Dims du dst courant — un tampon de groupe
+                // borné borne aussi ses clips internes.
+                let (cw, ch) = filtered
+                    .last()
+                    .map_or((pixmap.width(), pixmap.height()), |g| {
+                        (g.buf.width(), g.buf.height())
+                    });
+                push_rect_clip(&mut clips, &mut mask_pool, phys, true, cw, ch, |mask| {
+                    if let Some(clamped) = clamped {
+                        let path = PathBuilder::from_rect(clamped);
+                        mask.fill_path(&path, FillRule::Winding, true, Transform::default());
+                    }
+                });
                 n_clip_real += u32::from(matches!(clips.last(), Some(ClipEntry::Real(_))));
                 us_clip += t.elapsed().as_micros();
             }
@@ -1046,12 +1392,18 @@ fn replay_items(
                 // possible ; sinon les coins AA interdisent
                 // le sentinelle « couvrant ».
                 let rect_only = radii.iter().all(|r| *r == 0.0);
+                let (cw, ch) = filtered
+                    .last()
+                    .map_or((pixmap.width(), pixmap.height()), |g| {
+                        (g.buf.width(), g.buf.height())
+                    });
                 push_rect_clip(
                     &mut clips,
+                    &mut mask_pool,
                     phys,
                     rect_only,
-                    pixmap.width(),
-                    pixmap.height(),
+                    cw,
+                    ch,
                     |mask| {
                         if let Some(clamped) = clamped {
                             if let Some(path) = rounded_rect_path(
@@ -1105,14 +1457,19 @@ fn replay_items(
                     }
                     pb.close();
                 }
+                let (cw, ch) = filtered
+                    .last()
+                    .map_or((pixmap.width(), pixmap.height()), |g| {
+                        (g.buf.width(), g.buf.height())
+                    });
                 let off_pixmap = points.is_empty()
                     || x1 <= 0.0
                     || y1 <= 0.0
-                    || x0 >= pixmap.width() as f32
-                    || y0 >= pixmap.height() as f32;
+                    || x0 >= cw as f32
+                    || y0 >= ch as f32;
                 if off_pixmap {
                     clips.push(ClipEntry::Empty);
-                } else if let Some(mut mask) = Mask::new(pixmap.width(), pixmap.height()) {
+                } else if let Some(mut mask) = take_mask(&mut mask_pool, cw, ch) {
                     if let Some(path) = pb.finish() {
                         mask.fill_path(&path, FillRule::Winding, true, Transform::default());
                     }
@@ -1124,43 +1481,97 @@ fn replay_items(
                 us_clip += t.elapsed().as_micros();
             }
             DisplayItem::PopClip => {
-                clips.pop();
+                // `Real` recyclé dans le pool (LIFO strict) ;
+                // `Empty`/`Full`/`None` — rien à recycler.
+                if let Some(ClipEntry::Real(m)) = clips.pop() {
+                    if mask_pool.len() < MASK_POOL_CAP {
+                        mask_pool.push(m);
+                    }
+                }
             }
             DisplayItem::PushTransform(m) => {
                 tfs.push(*m);
-                cur = tfs.iter().fold(dpi, |acc, t| acc.pre_concat(*t));
+                cur = tfs
+                    .iter()
+                    .fold(dpi, |acc, t| acc.pre_concat(*t))
+                    .post_concat(grp_tf);
             }
             DisplayItem::PopTransform => {
                 tfs.pop();
-                cur = tfs.iter().fold(dpi, |acc, t| acc.pre_concat(*t));
+                cur = tfs
+                    .iter()
+                    .fold(dpi, |acc, t| acc.pre_concat(*t))
+                    .post_concat(grp_tf);
             }
             DisplayItem::PushFilter(ops) => {
-                if let Some(buf) = Pixmap::new(pixmap.width(), pixmap.height()) {
-                    filtered.push((buf, GroupKind::Ops(ops.clone())));
-                }
+                let t = std::time::Instant::now();
+                push_group(
+                    &mut filtered,
+                    GroupKind::Ops(ops.clone()),
+                    ops_reach(ops),
+                    items,
+                    idx,
+                    draw_from,
+                    filter,
+                    dpi,
+                    pixmap.width(),
+                    pixmap.height(),
+                    &mut grp_tf,
+                    &tfs,
+                    &mut cur,
+                    &mut n_group_void,
+                );
+                us_group += t.elapsed().as_micros();
             }
             // R-185 — `mix-blend-mode`/`isolation` : groupe
             // hors-écran fondu au pop (tag `BLEND_MODES`,
             // 0 = `isolation` isolant).
             DisplayItem::PushBlend(tag) => {
-                if let Some(buf) = Pixmap::new(pixmap.width(), pixmap.height()) {
-                    filtered.push((buf, GroupKind::Blend(*tag)));
-                }
+                let t = std::time::Instant::now();
+                push_group(
+                    &mut filtered,
+                    GroupKind::Blend(*tag),
+                    0,
+                    items,
+                    idx,
+                    draw_from,
+                    filter,
+                    dpi,
+                    pixmap.width(),
+                    pixmap.height(),
+                    &mut grp_tf,
+                    &tfs,
+                    &mut cur,
+                    &mut n_group_void,
+                );
+                us_group += t.elapsed().as_micros();
             }
             // R-252 — `mask-image` de groupe : le tampon se
             // composite au pop modulé par l'alpha du bitmap
             // (tuile `dst`/`repeat` résolus à l'émission,
             // aire `rect` = border box).
             DisplayItem::PushMask { rect, layers } => {
-                if let Some(buf) = Pixmap::new(pixmap.width(), pixmap.height()) {
-                    filtered.push((
-                        buf,
-                        GroupKind::Mask {
-                            rect: *rect,
-                            layers: layers.clone(),
-                        },
-                    ));
-                }
+                let t = std::time::Instant::now();
+                push_group(
+                    &mut filtered,
+                    GroupKind::Mask {
+                        rect: *rect,
+                        layers: layers.clone(),
+                    },
+                    0,
+                    items,
+                    idx,
+                    draw_from,
+                    filter,
+                    dpi,
+                    pixmap.width(),
+                    pixmap.height(),
+                    &mut grp_tf,
+                    &tfs,
+                    &mut cur,
+                    &mut n_group_void,
+                );
+                us_group += t.elapsed().as_micros();
             }
             // Pop générique : le kind porté par le groupe fait
             // foi — `PopFilter`/`PopBlend`/`PopMask` sont
@@ -1169,44 +1580,61 @@ fn replay_items(
             // composite du kind réel, jamais un panic).
             DisplayItem::PopFilter | DisplayItem::PopBlend | DisplayItem::PopMask => {
                 let t = std::time::Instant::now();
-                if let Some((mut buf, kind)) = filtered.pop() {
-                    match kind {
-                        GroupKind::Ops(ops) => {
-                            apply_filter_ops(&mut buf, &ops);
-                            let dst = filtered.last_mut().map_or(&mut *pixmap, |(b, _)| b);
-                            dst.draw_pixmap(
-                                0,
-                                0,
-                                buf.as_ref(),
-                                &tiny_skia::PixmapPaint::default(),
-                                Transform::default(),
-                                top_clip(&clips, empty_mask.as_ref()),
-                            );
-                        }
-                        // `blend_channel` par canal quand le
-                        // tag > 0, source-over sinon.
-                        GroupKind::Blend(tag) => {
-                            let dst = filtered.last_mut().map_or(&mut *pixmap, |(b, _)| b);
-                            composite_blend(dst, &buf, tag);
-                        }
-                        GroupKind::Mask { rect, layers } => {
-                            let cov = group_mask_coverage(
-                                pixmap.width(),
-                                pixmap.height(),
-                                &rect,
-                                &layers,
-                                cur,
-                                top_clip(&clips, empty_mask.as_ref()),
-                            );
-                            let dst = filtered.last_mut().map_or(&mut *pixmap, |(b, _)| b);
-                            dst.draw_pixmap(
-                                0,
-                                0,
-                                buf.as_ref(),
-                                &tiny_skia::PixmapPaint::default(),
-                                Transform::default(),
-                                cov.as_ref(),
-                            );
+                if let Some(mut g) = filtered.pop() {
+                    // Restaure l'espace du dst parent avant le
+                    // composite — `cur` redevient doc→parent.
+                    grp_tf = g.grp_tf_prev;
+                    cur = tfs
+                        .iter()
+                        .fold(dpi, |acc, tf| acc.pre_concat(*tf))
+                        .post_concat(grp_tf);
+                    if !g.void {
+                        match g.kind {
+                            GroupKind::Ops(ops) => {
+                                apply_filter_ops(&mut g.buf, &ops);
+                                let dst = filtered.last_mut().map_or(&mut *pixmap, |p| &mut p.buf);
+                                dst.draw_pixmap(
+                                    g.ox,
+                                    g.oy,
+                                    g.buf.as_ref(),
+                                    &tiny_skia::PixmapPaint::default(),
+                                    Transform::default(),
+                                    top_clip(&clips, empty_mask.as_ref()),
+                                );
+                            }
+                            // `blend_channel` par canal quand le
+                            // tag > 0, source-over sinon.
+                            GroupKind::Blend(tag) => {
+                                let dst = filtered.last_mut().map_or(&mut *pixmap, |p| &mut p.buf);
+                                composite_blend(dst, &g.buf, tag, g.ox, g.oy);
+                            }
+                            GroupKind::Mask { rect, layers } => {
+                                // Couverture calculée dans
+                                // l'espace du dst parent (`cur`
+                                // restauré) à ses dimensions.
+                                let (dw, dh) = filtered
+                                    .last()
+                                    .map_or((pixmap.width(), pixmap.height()), |p| {
+                                        (p.buf.width(), p.buf.height())
+                                    });
+                                let cov = group_mask_coverage(
+                                    dw,
+                                    dh,
+                                    &rect,
+                                    &layers,
+                                    cur,
+                                    top_clip(&clips, empty_mask.as_ref()),
+                                );
+                                let dst = filtered.last_mut().map_or(&mut *pixmap, |p| &mut p.buf);
+                                dst.draw_pixmap(
+                                    g.ox,
+                                    g.oy,
+                                    g.buf.as_ref(),
+                                    &tiny_skia::PixmapPaint::default(),
+                                    Transform::default(),
+                                    cov.as_ref(),
+                                );
+                            }
                         }
                     }
                 }
@@ -1221,20 +1649,27 @@ fn replay_items(
                 let (bw, bh) = (r.width.ceil() as u32, r.height.ceil() as u32);
                 if bw > 0 && bh > 0 {
                     if let Some(mut buf) = Pixmap::new(bw, bh) {
-                        let src = filtered.last().map_or(pixmap.as_ref(), |(b, _)| b.as_ref());
+                        // `r` est en coords racine — le dst
+                        // englobant peut être un tampon de
+                        // groupe décalé : on lit/écrit à
+                        // `r - origine_racine` dans son espace.
+                        let (gox, goy) = filtered
+                            .last()
+                            .map_or((0.0, 0.0), |g| (g.ox_root as f32, g.oy_root as f32));
+                        let src = filtered.last().map_or(pixmap.as_ref(), |g| g.buf.as_ref());
                         buf.draw_pixmap(
                             0,
                             0,
                             src,
                             &tiny_skia::PixmapPaint::default(),
-                            Transform::from_translate(-r.x, -r.y),
+                            Transform::from_translate(-(r.x - gox), -(r.y - goy)),
                             None,
                         );
                         apply_filter_ops(&mut buf, ops);
-                        let dst = filtered.last_mut().map_or(&mut *pixmap, |(b, _)| b);
+                        let dst = filtered.last_mut().map_or(&mut *pixmap, |g| &mut g.buf);
                         dst.draw_pixmap(
-                            r.x.round() as i32,
-                            r.y.round() as i32,
+                            (r.x - gox).round() as i32,
+                            (r.y - goy).round() as i32,
                             buf.as_ref(),
                             &tiny_skia::PixmapPaint::default(),
                             Transform::default(),
@@ -1261,7 +1696,7 @@ fn replay_items(
                 if draw {
                     n_draw += 1;
                     let t = std::time::Instant::now();
-                    let dst = filtered.last_mut().map_or(&mut *pixmap, |(b, _)| b);
+                    let dst = filtered.last_mut().map_or(&mut *pixmap, |g| &mut g.buf);
                     paint_item(
                         dst,
                         item,
@@ -1285,6 +1720,7 @@ fn replay_items(
         clips = n_clip,
         clips_real = n_clip_real,
         groups = n_group,
+        groups_void = n_group_void,
         draws = n_draw,
         skips = n_skip,
         clip_us = u64::try_from(us_clip).unwrap_or(u64::MAX),
@@ -2461,18 +2897,31 @@ fn paint_image_axis(
 /// R-185 — composite un tampon de groupe (`mix-blend-mode`
 /// / `isolation`) sur la destination : `blend_channel` par
 /// canal pour tag > 0, copie source-over sinon — pixels
-/// prémultipliés démultipliés au passage.
+/// prémultipliés démultipliés au passage. Le fondu se fait
+/// à la position `(ox,oy)` — le tampon de groupe est
+/// dimensionné à sa zone, sa position dans le dst n'est
+/// plus `(0,0)` (audit `group_us` : l'itération est bornée
+/// à `src`, plus au cadre entier).
 #[allow(
     clippy::cast_possible_truncation,
     clippy::cast_sign_loss,
-    clippy::cast_precision_loss
+    clippy::cast_precision_loss,
+    clippy::cast_possible_wrap
 )]
-fn composite_blend(dst: &mut Pixmap, src: &Pixmap, tag: u8) {
-    let (w, h) = (src.width().min(dst.width()), src.height().min(dst.height()));
-    for y in 0..h as usize {
-        for x in 0..w as usize {
-            let i = y * dst.width() as usize + x;
-            let Some(sp) = src.pixel(x as u32, y as u32) else {
+fn composite_blend(dst: &mut Pixmap, src: &Pixmap, tag: u8, ox: i32, oy: i32) {
+    let (dw, dh) = (dst.width() as i32, dst.height() as i32);
+    for sy in 0..src.height() as i32 {
+        let y = sy + oy;
+        if y < 0 || y >= dh {
+            continue;
+        }
+        for sx in 0..src.width() as i32 {
+            let x = sx + ox;
+            if x < 0 || x >= dw {
+                continue;
+            }
+            let i = y as usize * dw as usize + x as usize;
+            let Some(sp) = src.pixel(sx as u32, sy as u32) else {
                 continue;
             };
             let su = sp.demultiply();
