@@ -12240,6 +12240,43 @@ un crate PIPELINE.- [x] **JS-C422. Deadline honnête — canal session ↔ budge
   hidden_never_paints_contents`
   (session).
 
+- [x] **Étape 231. Profil post-verrou —
+  l'interpréteur n'est pas le goulot**
+  (audit perf chantier 9 — mesure, pas
+  de code) : vol instrumenté
+  `RUST_LOG=sync_profile=info` sur
+  dev.to réel (build debug, sonde
+  `lobste_pipeline_errors`) — cycle
+  `incr.*` complet mesuré deux fois
+  (~46 s chacun) :
+  `incr.repaint` ≈ **36 s** (raster de
+  la display list — dominant),
+  `incr.style` ≈ **9,4 s** (cascade
+  complète — `minimal.css` du site
+  porte une règle `:has(` → repli
+  full-cascade du chantier 6 par
+  design), `incr.relayout` ≈ 0,85 s,
+  `incr.assets` ≈ 0,16 s,
+  `incr.rekey` ≈ 2 ms ;
+  `pump.js_run_sync` ≈ **0,58 s**
+  (~1 % du cycle), `event.*` ≤ 16 ms.
+  Attribution : raster ≫ cascade ≫
+  relayout ≫ interpréteur — en
+  release les ordres se reserrent mais
+  la hiérarchie tient (raster et
+  cascade accélèrent ~10-20×, JS
+  aussi). **Verdict : aucun travail
+  interpréteur justifié par le profil**
+  — chantier clos sans changement
+  moteur. Nouvelles pistes nommées
+  (hors audit, chantiers futurs si
+  voulus) : (a) cascade scopée
+  `:has`-aware — borner le repli aux
+  mutations pouvant affecter l'argument
+  d'un `:has` (PIPELINE) ; (b) coût
+  raster/émission de la display list
+  sur gros documents (PIPELINE).
+
 ## Plan NAVIGATEUR — vitrine YouTube + surface navigateur (2026-11-12)
 
 Plan parallèle à la file `css.values` PIPE (§ roadmap équipe
