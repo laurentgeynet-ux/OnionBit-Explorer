@@ -239,6 +239,19 @@ pub static J17_BND_CANON: std::sync::atomic::AtomicU64 = std::sync::atomic::Atom
 /// JS-C533 — `Bindings::get` servi par `extra` (liaisons
 /// dynamiques hors canon — eval-injection, non modélisé).
 pub static J17_BND_EXTRA: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+/// JS-C534 — `extra` servi sur env **canon câblé** : le nom est
+/// génuinément dynamique (eval-injection, scope non modélisé) —
+/// structurel, non raccordable.
+pub static J17_XT_DYN: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+/// JS-C534 — `extra` servi sur env **non câblé** (`canon` vide) :
+/// un site `predeclare_slots` manquant — couverture raccordable.
+pub static J17_XT_UNW: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+/// JS-C534 — `predeclare_slots` a trouvé son entrée `names_table`
+/// (env câblé).
+pub static J17_WIRE_HIT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+/// JS-C534 — `predeclare_slots` sans entrée `names_table`
+/// (env non câblé — site manquant).
+pub static J17_WIRE_MISS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 /// `Env` créé (`local`/`block`/`with`/`global`) — 1 alloc `Rc`.
 pub static J17_ENV: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 /// `Vec<Value>` d'args matérialisé (`eval_args`, non vide) —
@@ -603,7 +616,7 @@ pub fn j17_enable() {
 #[must_use]
 pub fn j17_snapshot() -> String {
     let r = std::sync::atomic::Ordering::Relaxed;
-    let pairs: [(&str, &std::sync::atomic::AtomicU64); 67] = [
+    let pairs: [(&str, &std::sync::atomic::AtomicU64); 71] = [
         ("prop_lookup", &J17_PROP_LOOKUP),
         ("proto_lvl", &J17_PROTO_LVL),
         ("prop_scan", &J17_PROP_SCAN),
@@ -613,6 +626,10 @@ pub fn j17_snapshot() -> String {
         ("env_lvl", &J17_ENV_LVL),
         ("bnd_canon", &J17_BND_CANON),
         ("bnd_extra", &J17_BND_EXTRA),
+        ("xt_dyn", &J17_XT_DYN),
+        ("xt_unw", &J17_XT_UNW),
+        ("wire_hit", &J17_WIRE_HIT),
+        ("wire_miss", &J17_WIRE_MISS),
         ("env_gets", &J17_ENV_GETS),
         ("res_hit", &J17_RES_HIT),
         ("res_miss", &J17_RES_MISS),

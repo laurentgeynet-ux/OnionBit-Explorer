@@ -2276,15 +2276,24 @@ impl Bindings {
 
     /// Lookup partagé — canon d'abord (les liaisons dynamiques
     /// d'un nom canonique vivent dans `cells`, jamais `extra`),
-    /// `extra` ensuite.
+    /// `extra` ensuite. Attribution : `xt_unw` = env non câblé
+    /// (site `predeclare` manquant — couverture C534),
+    /// `xt_dyn` = nom génuinément dynamique (eval-injection,
+    /// scope non modélisé — structurel).
     pub fn get(&self, name: &str) -> Option<&EnvCell> {
         if let Some(i) = self.pos(name) {
             crate::j17_tick(&crate::J17_BND_CANON);
             return self.cells.get(i);
         }
+        let unwired = self.canon.is_empty();
         let c = self.extra.get(name);
         if c.is_some() {
             crate::j17_tick(&crate::J17_BND_EXTRA);
+            crate::j17_tick(if unwired {
+                &crate::J17_XT_UNW
+            } else {
+                &crate::J17_XT_DYN
+            });
         }
         c
     }

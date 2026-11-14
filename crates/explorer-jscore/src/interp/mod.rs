@@ -6221,8 +6221,13 @@ impl Engine {
             return;
         }
         let Some(names) = self.names_table.get(&site).cloned() else {
+            // JS-C534 — couverture du câblage : un `env` créé
+            // sans entrée `names_table` laisse toutes ses
+            // liaisons dans `extra` (le `xt_unw` du lookup).
+            crate::j17_tick(&crate::J17_WIRE_MISS);
             return;
         };
+        crate::j17_tick(&crate::J17_WIRE_HIT);
         let mut b = env.borrow_mut();
         match &mut b.kind {
             // JS-C533 — `wire_canon` partage la `Rc<[Rc<str>]>`

@@ -12902,6 +12902,19 @@ chaque gain rapporté contre les **deux** archétypes.
   (`ic_hit`/`ic_miss`/`ic_disarm` au snapshot) pour
   borner la couverture du seul court-circuit existant.
   Dependency-groups = infra lourde, dernier recours.
+- [x] **JS-C534 — attribution `extra` + couverture
+  `wire_*`** : vol N5.38 — `bnd_extra` 563 k (38 %
+  des lookups) = réservoir surprise. `Bindings::get`
+  split le hit `extra` : `xt_unw` (canon vide — env
+  non câblé, ex. frames `GExec` de `lazy.rs` sans
+  `predeclare_slots` → **raccordable**) vs `xt_dyn`
+  (canon câblé, nom hors canon — eval-injection,
+  **structurel**). `wire_hit`/`wire_miss` = taux de
+  trouvaille `names_table` aux sites appelés.
+  Décision N5.39 : `xt_unw` dominant → câbler les
+  frames (`predeclare_slots` quand corps =
+  `Stmt::Block`) ; `xt_dyn` dominant → chemin extra
+  structurel, pivot vers `binary`/`unary` (16 %).
 - [x] **JS-C533 — `Bindings` slot-indexé** : vol N5.37
   — `ident` = 34 % des nœuds évalués, `env_lvl`
   2,63 M ; chaque niveau scannait des paires
