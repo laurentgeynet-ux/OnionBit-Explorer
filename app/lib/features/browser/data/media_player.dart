@@ -387,6 +387,16 @@ abstract class MediaPlayer {
   /// `onionmedia_set_loop(-1|0)`, repli no-op DLL < ABI 5.
   Future<void> setLoop(bool on);
 
+  /// Boîte d'affichage en **pixels physiques** (Étape 241) —
+  /// le backend tire la trame réduite au contenu de la boîte
+  /// (ratio conservé) au lieu du cadre natif : copie,
+  /// transfert et upload `decodeImageFromPixels` divisés
+  /// d'autant sur les sources sur-résolues (4K dans un
+  /// overlay 480p). `0/0` = pleine résolution (défaut).
+  /// Métadonnée de qualité, jamais de perte : la trame
+  /// décodée reste plein cadre côté moteur.
+  void setPullBox(int w, int h);
+
   /// Sélection de la piste audio par stream_index
   /// (`≥ 0`), `-1` = désactivée, `-2` = auto — contrat
   /// dépôt : **effet au prochain play** (pas de commutation

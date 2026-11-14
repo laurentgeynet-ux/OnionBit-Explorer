@@ -6934,6 +6934,15 @@ incrément.
   `…/media/{id}/audio` → jscore `AnalyserNode` (destination
   muet documenté). Phases 1-3 spécifiées, non implémentées.
 
+- [x] **Étape 241. Pull à la boîte d'affichage**
+  (`app/` — `frame_acquire_ex` dépôt) : seam `setPullBox`
+  (px physiques, `0/0` = full), `MediaSurfaceView` pousse
+  `constraints × dpr` (zoom/redimensionnement suivis),
+  `_pullOnce` préfère `acquire_ex` quand exporté — 4K →
+  ~6,2 Mo au lieu de 24,7 par frame tirée, render fps
+  ~24 tenu (mesure banc). Repli `acquire` plein cadre
+  sur DLL antérieure.
+
 - [x] **Étape 240. Knobs `skip_loop_filter`/`skip_idct`**
   (`app/` — surface dormante, chantier Discard dépôt) :
   `onionmedia_set_skip_loop_filter`/`set_skip_idct` liés dans

@@ -71,6 +71,12 @@ class _MediaSurfaceViewState extends State<MediaSurfaceView> {
   MediaPlayer? _listened;
   MediaSnapshot? _snap;
 
+  /// Dernière boîte physique poussée au lecteur (Étape 241) —
+  /// gardée pour ne pas reposer `setPullBox` à chaque build
+  /// (la valeur est mémorisée côté lecteur, le pull réduit
+  /// découple du coût `decodeImageFromPixels` plein cadre).
+  int _boxW = -1, _boxH = -1;
+
   /// Champs UI du dernier snapshot lu — le rebuild ne part
   /// que si l'un change (position quantifiée à ~100 ms, le
   /// lecteur notifie à chaque frame décodée).
@@ -83,6 +89,10 @@ class _MediaSurfaceViewState extends State<MediaSurfaceView> {
     _listened?.removeListener(_onNotify);
     _listened = p;
     p?.addListener(_onNotify);
+    // Player neuf (reclaim) → sa boîte est à zéro : forcer
+    // une repose au prochain layout même si la taille n'a
+    // pas bougé (le cache compare au dernier envoi).
+    _boxW = _boxH = -1;
   }
 
   void _onNotify() {
@@ -220,7 +230,27 @@ class _MediaSurfaceViewState extends State<MediaSurfaceView> {
                 // la surface `controls`, pas au widget interne.
                 behavior: HitTestBehavior.opaque,
                 onTapUp: o.controls ? _onVideoTap : null,
-                child: ready ? p!.view : const SizedBox.shrink(),
+                child: ready
+                    ? LayoutBuilder(
+                        builder: (ctx, cts) {
+                          // Boîte physique = constraints × dpr
+                          // (Étape 241) — la surface suit le
+                          // zoom (`cssPerLogical`) et les
+                          // redimensionnements sans état
+                          // dupliqué : la contrainte est la
+                          // vérité terrain.
+                          final dpr = MediaQuery.devicePixelRatioOf(ctx);
+                          final w = (cts.maxWidth * dpr).round();
+                          final h = (cts.maxHeight * dpr).round();
+                          if (w != _boxW || h != _boxH) {
+                            _boxW = w;
+                            _boxH = h;
+                            p!.setPullBox(w, h);
+                          }
+                          return p!.view;
+                        },
+                      )
+                    : const SizedBox.shrink(),
               ),
             ),
           // Init / buffering — indicateur discret centré.

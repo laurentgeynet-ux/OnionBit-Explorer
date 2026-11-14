@@ -400,6 +400,10 @@ class FakePlayer implements MediaPlayer {
   /// Étape 199 — `loop` getter (`null` = export absent).
   int? loopState;
 
+  /// Étape 241 — dernière boîte d'affichage posée
+  /// (`setPullBox`), pixels physiques.
+  int pullBoxW = 0, pullBoxH = 0;
+
   void notify() {
     for (final l in List.of(_listeners)) {
       l();
@@ -488,6 +492,14 @@ class FakePlayer implements MediaPlayer {
   int loopSets = 0;
   @override
   Future<void> setLoop(bool on) async => loopSets += on ? 1 : 0;
+
+  /// Étape 241 — la boîte est mémorisée : un test peut
+  /// vérifier que la surface pousse ses dims physiques.
+  @override
+  void setPullBox(int w, int h) {
+    pullBoxW = w;
+    pullBoxH = h;
+  }
   @override
   Future<void> selectAudioStream(int index) async {
     selectedAudio = index;

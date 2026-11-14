@@ -230,6 +230,26 @@ class OnionMediaPlayer implements MediaPlayer {
   int Function(ffi.Pointer, ffi.Pointer<_OnionMediaFrame>)? _acquire;
   void Function(int)? _frameRelease;
 
+  /// `onionmedia_frame_acquire_ex` (Étape 241) — variante
+  /// « boîte » : la trame est réduite au contenu de
+  /// (`max_w`, `max_h`) pixels **avec ratio conservé** avant
+  /// la vue `data` (`0/0` ou boîte ≥ source = pleine
+  /// résolution, dims livrées rapportées). Pull à la
+  /// résolution d'affichage : moins d'octets à matérialiser
+  /// dans `decodeImageFromPixels`, conversion RGBA paresseuse
+  /// inchangée côté moteur.
+  int Function(
+    ffi.Pointer,
+    ffi.Pointer<_OnionMediaFrame>,
+    int,
+    int,
+  )?
+  _acquireEx;
+
+  /// Boîte d'affichage en **pixels physiques** posée par
+  /// `setPullBox` — `0/0` = pas de borne (défaut).
+  int _pullBoxW = 0, _pullBoxH = 0;
+
   /// `onionmedia_frame_wait` (P-59) — attente bloquante
   /// `seq > min_seq` ou timeout ; jamais sur le thread UI.
   int Function(ffi.Pointer, int, int)? _frameWait;
@@ -401,6 +421,25 @@ class OnionMediaPlayer implements MediaPlayer {
     } on Object {
       _acquire = null;
       _frameRelease = null;
+    }
+    try {
+      _acquireEx = _lib
+          .lookupFunction<
+            ffi.Int32 Function(
+              ffi.Pointer,
+              ffi.Pointer<_OnionMediaFrame>,
+              ffi.Uint32,
+              ffi.Uint32,
+            ),
+            int Function(
+              ffi.Pointer,
+              ffi.Pointer<_OnionMediaFrame>,
+              int,
+              int,
+            )
+          >('onionmedia_frame_acquire_ex');
+    } on Object {
+      _acquireEx = null;
     }
     try {
       _frameWait = _lib
@@ -1680,11 +1719,18 @@ class OnionMediaPlayer implements MediaPlayer {
 
   Future<void> _pullOnce() async {
     final acquire = _acquire;
+    final acquireEx = _acquireEx;
     final release = _frameRelease;
-    if (acquire != null && release != null) {
+    if ((acquire != null || acquireEx != null) && release != null) {
       final fv = calloc<_OnionMediaFrame>(1);
       try {
-        if (acquire(_h, fv) != 1) return;
+        // `acquire_ex` porte la boîte d'affichage (0/0 =
+        // pleine résolution) — préféré dès que la DLL
+        // l'expose ; `acquire` reste le repli.
+        final got = acquireEx != null
+            ? acquireEx(_h, fv, _pullBoxW, _pullBoxH)
+            : acquire!(_h, fv);
+        if (got != 1) return;
         try {
           if (fv.ref.seq == _lastSeq ||
               fv.ref.width == 0 ||
@@ -2011,6 +2057,15 @@ class OnionMediaPlayer implements MediaPlayer {
 
   @override
   Future<void> setLoop(bool on) async => _setLoop?.call(_h, on ? -1 : 0);
+
+  /// Boîte d'affichage physique consommée par `_pullOnce` via
+  /// `frame_acquire_ex` (Étape 241). Valeurs négatives bornées
+  /// à `0` ; `0/0` restaure la pleine résolution.
+  @override
+  void setPullBox(int w, int h) {
+    _pullBoxW = w < 0 ? 0 : w;
+    _pullBoxH = h < 0 ? 0 : h;
+  }
 
   @override
   Future<void> dispose() async {
