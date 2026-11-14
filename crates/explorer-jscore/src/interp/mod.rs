@@ -356,19 +356,50 @@ const ROUTE_MEMO_CAP: usize = 16384;
 /// `RouteEnt::Absent` — sentinelle `pos` (jamais un index réel).
 const ROUTE_ABSENT: u32 = u32::MAX;
 
-/// JS-C526 — issue mémorisée d'une marche depuis un maillon.
-/// `epoch` = [`crate::heap::SHAPE_EPOCH`] au moment de la pose —
-/// toute mutation structurelle ultérieure rend l'entrée caduque
-/// (lue → ignorée puis purgée).
+/// JS-C526b — un maillon validant d'une route : l'entrée est
+/// valide tant que le maillon vit avec la même `shape`
+/// (empreinte des props — `push_prop`/`remove_own` la changent,
+/// même leçon que `rabs_memo`) et le même lien `proto` (reliant
+/// détecté). Les écritures de valeur à position constante ne
+/// changent ni l'une ni l'autre — `props[pos]` est relu frais.
+/// La réutilisation d'`ObjId` par la free-list est couverte par
+/// `heap.obj` vivant + `shape` + `proto` + clé au `pos` holder.
+#[derive(Clone)]
+struct RouteLink {
+    id: ObjId,
+    shape: u64,
+    proto: Value,
+}
+
+/// JS-C526b — issue mémorisée d'une marche : `links[off..]` sont
+/// les maillons à revalider (suffixe de la marche posée — chaque
+/// maillon reçoit une entrée validant **sa** sous-route, pas
+/// celle des receveurs amont). Pas d'epoch globale : la N5.29 a
+/// mesuré qu'elle invalide tout le cache à la première mutation
+/// structurelle du tas (`rt_st` > `rt_hit`) — la revalidation
+/// par maillon n'invalide que sur mutation réelle d'un maillon
+/// de la route.
 #[derive(Clone)]
 pub(crate) struct RouteEnt {
-    epoch: u64,
+    links: std::rc::Rc<Vec<RouteLink>>,
+    off: usize,
     holder: ObjId,
-    holder_shape: u64,
     pos: u32,
-    /// Clé internée attendue à `props[pos]` — verrou de la
-    /// réutilisation GC (shape égale + clé au pos = identité).
+    /// Clé internée — verrou anti-collision `kid` et clé
+    /// attendue à `props[pos]` de l'holder.
     key: std::rc::Rc<str>,
+}
+
+/// Égalité des liens proto pour la revalidation de route —
+/// `Value` n'a pas `PartialEq` ; seuls `Obj`/`Null`/`Undefined`
+/// sont des protos sains, le reste est traité « différent »
+/// (sur-invalidation sûre → remarche).
+fn route_proto_eq(a: &Value, b: &Value) -> bool {
+    match (a, b) {
+        (Value::Obj(x), Value::Obj(y)) => x == y,
+        (Value::Null, Value::Null) | (Value::Undefined, Value::Undefined) => true,
+        _ => false,
+    }
 }
 
 /// JS-C526 — verdict d'une consultation de la mémo de routes :
@@ -999,15 +1030,18 @@ pub struct Engine {
     pub(crate) rabs_memo: std::collections::HashSet<(u64, u64)>,
     /// JS-C526 — mémo de **routes** `(maillon, kid) → issue de la
     /// chaîne depuis ce maillon` : `Found{holder,pos}` ou
-    /// `Absent`, validée par [`crate::heap::SHAPE_EPOCH`]
-    /// (bumpé à chaque mutation structurelle — push/remove prop,
-    /// `set_proto`, sweep GC) + `holder_shape` + clé au `pos`
-    /// (réutilisation d'`ObjId` couverte par les trois). Un hit
-    /// saute la marche entière — le `prop_ns` des chaînes proto
-    /// répétées (979 k `proto_lvl`, vol N5.28) devient O(1).
+    /// `Absent`, revalidée **par maillon stocké** (vivant +
+    /// `shape` + `proto` — JS-C526b). Un hit paie un déréférence
+    /// léger par maillon au lieu de la marche complète
+    /// (`find_own_ai`/`rabs_memo`/éligibilité sautés) ; les
+    /// mutations hors route n'invalident rien — N5.29 a mesuré
+    /// l'epoch globale mortelle sur terrain réel (`rt_st` 139 k
+    /// contre `rt_hit` 111 k : chaque `push_prop` du tas tuait
+    /// les 16 384 entrées). Réutilisation d'`ObjId` couverte par
+    /// `heap.obj` vivant + `shape` + clé au `pos` holder.
     /// Entrées posées uniquement quand **tous** les maillons
     /// marchés étaient `ic_eligible` (hors proxy/`args_map`/
-    /// vues/ctor `RegExp` — réponses volatiles hors epoch).
+    /// vues/ctor `RegExp` — réponses volatiles).
     pub(crate) route_memo: std::collections::HashMap<(ObjId, u64), RouteEnt>,
     /// Kill-switch IC (`EXPLORER_NO_IC=1`) — A/B en vol sans
     /// rebuild, précédent `resolve_off` (JS-C490c).
@@ -7754,8 +7788,9 @@ impl Engine {
         let mut cur = Some(id);
         let mut depth = 0;
         // Maillons éligibles marchés — une entrée n'est posée que
-        // si la chaîne entière l'était (`memoable`).
-        let mut walked: Vec<ObjId> = Vec::new();
+        // si la chaîne entière l'était (`memoable`). Chaque maillon
+        // embarque `(shape, proto)` pour la revalidation des routes.
+        let mut walked: Vec<RouteLink> = Vec::new();
         let mut memoable = memo;
         while let Some(cid) = cur {
             crate::j17_tick(&crate::J17_PROTO_LVL);
@@ -7775,12 +7810,17 @@ impl Engine {
                     _ => None,
                 };
                 if Self::ic_eligible(o, key, ai) {
+                    let sh = o.shape();
                     if memoable && !matches!(self.re_ctor, Value::Obj(rc) if rc == cid) {
-                        walked.push(cid);
+                        walked.push(RouteLink {
+                            id: cid,
+                            shape: sh,
+                            proto: o.proto.clone(),
+                        });
                     } else {
                         memoable = false;
                     }
-                    let mk = (o.shape(), kid);
+                    let mk = (sh, kid);
                     mkey = Some(mk);
                     if !self.rabs_memo.contains(&mk) {
                         slow = true;
@@ -7826,90 +7866,114 @@ impl Engine {
     /// JS-C526 — consultation de la mémo de routes :
     /// `Some(..)` = verdict mémo (`Found`/`Absent`) ;
     /// `None` = pas d'entrée ou caduque → marche normale.
-    /// Une entrée d'epoch passée est purgée au passage.
+    /// JS-C526b — revalidation par maillon stocké (vivant +
+    /// `shape` + `proto`) : seule une mutation réelle d'un
+    /// maillon de la route invalide — pas d'epoch globale
+    /// (N5.29 : `rt_st` > `rt_hit`, tout le cache mourait à
+    /// chaque `push_prop` du tas).
     fn route_lookup(&mut self, id: ObjId, kid: u64, key: &str) -> Option<RouteOut> {
-        // Tête morte (id balayé non réutilisé) → la marche
-        // rend `None` naturellement ; la mémo ne doit pas
-        // diverger.
-        self.heap.obj(id)?;
         let e = self.route_memo.get(&(id, kid))?.clone();
-        if e.epoch != crate::heap::SHAPE_EPOCH.load(std::sync::atomic::Ordering::Relaxed) {
-            crate::j17_tick(&crate::J17_RT_ST);
-            self.route_memo.remove(&(id, kid));
-            return None;
-        }
         // Collision `kid` (réutilisation de ptr interné) → la
         // clé stockée tranche ; entrée étrangère purgée.
         if !std::rc::Rc::ptr_eq(&e.key, &crate::intern(key)) && &*e.key != key {
             self.route_memo.remove(&(id, kid));
             return None;
         }
+        for l in &e.links[e.off..] {
+            let Some(o) = self.heap.obj(l.id) else {
+                return self.route_stale(id, kid);
+            };
+            if o.shape() != l.shape || !route_proto_eq(&o.proto, &l.proto) {
+                return self.route_stale(id, kid);
+            }
+        }
         if e.pos == ROUTE_ABSENT {
             crate::j17_tick(&crate::J17_RT_ABS);
             return Some(RouteOut::Absent);
         }
-        let h = self.heap.obj(e.holder)?;
-        if h.shape() != e.holder_shape {
-            self.route_memo.remove(&(id, kid));
-            return None;
-        }
+        // L'holder est le dernier maillon validé — son `pos` est
+        // relu frais (les écritures de valeur à position
+        // constante ne changent ni `shape` ni `proto`).
+        let Some(h) = self.heap.obj(e.holder) else {
+            return self.route_stale(id, kid);
+        };
         match h.props.get(e.pos as usize) {
             Some((k, p)) if std::rc::Rc::ptr_eq(k, &e.key) || &**k == key => {
                 crate::j17_tick(&crate::J17_RT_HIT);
                 let p = p.clone();
                 Some(RouteOut::Found(e.holder, p))
             }
-            _ => {
-                self.route_memo.remove(&(id, kid));
-                None
-            }
+            _ => self.route_stale(id, kid),
         }
     }
 
+    /// Purge + compteur d'une entrée caduque — un mismatch ne
+    /// supprime que l'entrée consultée : les entrées posées
+    /// sous les autres maillons de la même marche se
+    /// revalideront (ou mourront) à leur tour.
+    fn route_stale<T>(&mut self, id: ObjId, kid: u64) -> Option<T> {
+        self.route_memo.remove(&(id, kid));
+        crate::j17_tick(&crate::J17_RT_ST);
+        None
+    }
+
     /// JS-C526 — pose des entrées `Found` pour chaque maillon
-    /// éligible marché (la route du receveur **et** celle de
-    /// chaque proto partagé couverte). `None` silencieux si la
-    /// prop trouvée n'est pas une entrée `props` réelle
-    /// (synthèse `fn.name`/statiques `RegExp` — non adressable
-    /// par position).
-    fn route_insert(&mut self, walked: &[ObjId], holder: ObjId, kid: u64, key: &str) {
-        let Some((holder_shape, pos)) = self.heap.obj(holder).and_then(|o| {
-            o.prop_pos(key)
-                .and_then(|p| u32::try_from(p).ok().map(|p| (o.shape(), p)))
-        }) else {
+    /// éligible marché : l'entrée du maillon `i` valide la
+    /// sous-route `walked[i..]` (la route du receveur **et**
+    /// celle de chaque proto partagé couvertes). `None`
+    /// silencieux si la prop trouvée n'est pas une entrée
+    /// `props` réelle (synthèse `fn.name`/statiques `RegExp` —
+    /// non adressable par position).
+    fn route_insert(&mut self, walked: &[RouteLink], holder: ObjId, kid: u64, key: &str) {
+        let Some(pos) = self
+            .heap
+            .obj(holder)
+            .and_then(|o| o.prop_pos(key))
+            .and_then(|p| u32::try_from(p).ok())
+        else {
             return;
         };
-        if self.route_memo.len() >= ROUTE_MEMO_CAP {
+        if walked.is_empty() || self.route_memo.len() >= ROUTE_MEMO_CAP {
             return;
         }
-        let e = RouteEnt {
-            epoch: crate::heap::SHAPE_EPOCH.load(std::sync::atomic::Ordering::Relaxed),
-            holder,
-            holder_shape,
-            pos,
-            key: crate::intern(key),
-        };
-        for &lid in walked {
-            self.route_memo.insert((lid, kid), e.clone());
+        debug_assert!(walked.last().is_some_and(|l| l.id == holder));
+        let links = std::rc::Rc::new(walked.to_vec());
+        let k = crate::intern(key);
+        for (i, l) in walked.iter().enumerate() {
+            self.route_memo.insert(
+                (l.id, kid),
+                RouteEnt {
+                    links: links.clone(),
+                    off: i,
+                    holder,
+                    pos,
+                    key: k.clone(),
+                },
+            );
         }
         crate::j17_add(&crate::J17_RT_INS, walked.len() as u64);
     }
 
     /// JS-C526 — chaîne épuisée sans la clé → `Absent` pour
-    /// chaque maillon éligible marché.
-    fn route_insert_absent(&mut self, walked: &[ObjId], kid: u64, key: &str) {
+    /// chaque maillon éligible marché (même découpage suffixé
+    /// que `route_insert`).
+    fn route_insert_absent(&mut self, walked: &[RouteLink], kid: u64, key: &str) {
         if walked.is_empty() || self.route_memo.len() >= ROUTE_MEMO_CAP {
             return;
         }
-        let e = RouteEnt {
-            epoch: crate::heap::SHAPE_EPOCH.load(std::sync::atomic::Ordering::Relaxed),
-            holder: 0,
-            holder_shape: 0,
-            pos: ROUTE_ABSENT,
-            key: crate::intern(key),
-        };
-        for &lid in walked {
-            self.route_memo.insert((lid, kid), e.clone());
+        let links = std::rc::Rc::new(walked.to_vec());
+        let k = crate::intern(key);
+        for (i, l) in walked.iter().enumerate() {
+            self.route_memo.insert(
+                (l.id, kid),
+                RouteEnt {
+                    links: links.clone(),
+                    off: i,
+                    holder: 0,
+                    pos: ROUTE_ABSENT,
+                    key: k.clone(),
+                },
+            );
         }
         crate::j17_add(&crate::J17_RT_INS, walked.len() as u64);
     }

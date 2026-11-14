@@ -12865,4 +12865,19 @@ chaque gain rapporté contre les **deux** archétypes.
   `j17_counters` 9/9, clippy/doc propres. **Mesure
   `prop_ns` attendue au prochain vol** — verdict à
   `rt_hit`/`rt_st`/`rt_ins`.
+- [x] **JS-C526b — revalidation par maillon, epoch
+  globale retirée** : N5.29 a mesuré l'epoch mortelle
+  (`rt_st` 139 k contre `rt_hit` 111 k — chaque
+  `push_prop` du tas tuait les 16 384 entrées,
+  `prop_ns` +17 %). `RouteEnt` embarque désormais
+  `links[off..]` = `(id, shape, proto)` par maillon ;
+  un hit re-déréfère chaque maillon (~moitié du coût
+  de marche) et n'invalide que sur mutation **réelle**
+  d'un maillon de la route — les mutations hors route
+  ne tuent plus rien. `SHAPE_EPOCH` retiré ;
+  `set_proto` reste le funnel (relink détecté via le
+  `proto` stocké). Entrée suffixée par maillon (`off`)
+  — la route d'un proto partagé ne dépend pas des
+  receveurs amont. `c526_route` 6/6 dont
+  `unrelated_mutation_keeps_route` ; verrous verts.
 

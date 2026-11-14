@@ -3,9 +3,12 @@
 // SPDX-License-Identifier: MIT OR Apache-2.0
 
 //! JS-C526 — mémo de routes `(maillon,kid) → issue de chaîne`
-//! validée par `SHAPE_EPOCH`. La mémo doit relire juste après
-//! chaque mutation structurelle (prop ajoutée/retirée sur un
-//! maillon, proto réécrit, sweep) — et relire la **valeur**
+//! revalidée **par maillon stocké** (`shape` + `proto` — C526b,
+//! après que l'epoch globale s'est mesurée mortelle au vol
+//! N5.29 : chaque `push_prop` du tas tuait tout le cache).
+//! La mémo doit relire juste après chaque mutation structurelle
+//! d'un maillon de la route (prop ajoutée/retirée, proto réécrit),
+//! ignorer les mutations hors route — et relire la **valeur**
 //! fraîche à position constante (écriture non-structurelle).
 
 use explorer_jscore::{j17_enable, j17_snapshot, Engine};
@@ -26,7 +29,7 @@ fn shadowing_on_middle_link_invalidates() {
     let r = ev(
         "var P = {x: 'proto'}; var M = Object.create(P); var o = Object.create(M);\
          var a = o.x; var b = o.x;          /* marche + mémo */\
-         M.x = 'mid';                       /* push_prop → epoch++ */\
+         M.x = 'mid';                       /* push_prop → shape M change */\
          var c = o.x; var d = o.x;          /* re-marche + mémo */\
          [a, b, c, d].join('|')",
     );
@@ -67,6 +70,35 @@ fn setprototypeof_invalidates() {
          [a, b, c, d].join('|')",
     );
     assert_eq!(r, "Str(\"proto|proto|q|q\")");
+}
+
+/// JS-C526b — une mutation structurelle **hors route** ne doit
+/// PAS invalider : l'epoch globale tuait les 16 384 entrées à
+/// chaque `push_prop` du tas (N5.29, `rt_st` > `rt_hit`).
+#[test]
+fn unrelated_mutation_keeps_route() {
+    let mut e = Engine::new();
+    j17_enable();
+    e.eval(
+        "var P = {m: function(){return 1}}; var o = Object.create(P);\
+         var u = {}; var s = 0;\
+         for (var i = 0; i < 50; i++) { s += o.m(); u['k'+i] = i; } s",
+    )
+    .expect("eval");
+    let snap = j17_snapshot();
+    let get = |n: &str| {
+        snap.split_whitespace()
+            .find_map(|p| p.strip_prefix(&format!("{n}=")))
+            .and_then(|v| v.parse::<u64>().ok())
+            .unwrap_or(0)
+    };
+    // ~50 hits attendus (1er lookup = miss + pose) : les
+    // mutations de `u` ne sont pas dans la route o→P.
+    assert!(get("rt_hit") >= 40, "rt_hit doit dominer — {snap}");
+    assert!(
+        get("rt_st") < get("rt_hit"),
+        "hors route ne doit pas staler — {snap}"
+    );
 }
 
 /// Le compteur `rt_hit` prouve que le 2e accès saute la marche
