@@ -406,6 +406,9 @@ impl Engine {
         // (`u64::MAX` — tout ce que le frame tient est raciné) et
         // la re-stampent à la reprise pour leurs propres temps.
         let yslot = self.young_stack.len() - 1;
+        // JS-C532 — attribution par variante `Stmt` (le tissu
+        // non-scopé de `body_ns` devient mesurable par kind).
+        crate::j17_tick(&crate::J17_STMT[stmt_idx(s)]);
         match s {
             // `import …` — liaisons câblées à l'instanciation ;
             // l'exécution n'a rien à faire (idem `;`).
@@ -1318,5 +1321,38 @@ fn stmt_tag(s: &Stmt) -> &'static str {
         Stmt::Switch { .. } => "Switch",
         Stmt::Import { .. } => "Import",
         Stmt::Export(_) => "Export",
+    }
+}
+
+/// Index du variant `Stmt` — ordre de déclaration dans
+/// `ast.rs`, miroir de [`stmt_tag`] (JS-C532 — sert
+/// [`crate::J17_STMT`]). Ajout de variante → ce match devient
+/// non exhaustif en même temps que `stmt_tag`.
+fn stmt_idx(s: &Stmt) -> usize {
+    match s {
+        Stmt::Empty => 0,
+        Stmt::Expr(_) => 1,
+        Stmt::Var(_) => 2,
+        Stmt::Lexical { .. } => 3,
+        Stmt::FunctionDecl(_) => 4,
+        Stmt::ClassDecl(_) => 5,
+        Stmt::Block(_) => 6,
+        Stmt::If { .. } => 7,
+        Stmt::While { .. } => 8,
+        Stmt::DoWhile { .. } => 9,
+        Stmt::For { .. } => 10,
+        Stmt::ForIn { .. } => 11,
+        Stmt::ForOf { .. } => 12,
+        Stmt::Using { .. } => 13,
+        Stmt::With { .. } => 14,
+        Stmt::Labeled { .. } => 15,
+        Stmt::Break(_) => 16,
+        Stmt::Continue(_) => 17,
+        Stmt::Return(_) => 18,
+        Stmt::Throw(_) => 19,
+        Stmt::Try { .. } => 20,
+        Stmt::Switch { .. } => 21,
+        Stmt::Import { .. } => 22,
+        Stmt::Export(_) => 23,
     }
 }

@@ -390,6 +390,81 @@ const J17_BINOP_NAMES: [&str; 25] = [
 /// `array_index(key)` tenté — multiplicité par `find_own`
 /// (× niveau, ×2 par niveau Array) — cible V-3b (hoist).
 pub static J17_ARRIDX_TRY: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+/// JS-C532 — histogramme d'évaluation par variante `Expr` :
+/// compté à l'entrée d'`eval_inner` **et** au dépile de l'épine
+/// gauche (les maillons `Binary`/`Member`/`Index`/`Call`-chaîne
+/// sont consommés par `eval_spine` sans passer `eval_inner`) —
+/// chaque nœud AST évalué compte exactement une fois. Ordre =
+/// déclaration `Expr` (`ast.rs`) — noms ci-dessous au même ordre.
+pub static J17_EVAL: [std::sync::atomic::AtomicU64; 33] =
+    [const { std::sync::atomic::AtomicU64::new(0) }; 33];
+/// JS-C532 — noms de [`J17_EVAL`], ordre = déclaration `Expr`.
+const J17_EVAL_NAMES: [&str; 33] = [
+    "num",
+    "bigint",
+    "str",
+    "bool",
+    "null",
+    "ident",
+    "this",
+    "array",
+    "object",
+    "function",
+    "class",
+    "unary",
+    "binary",
+    "assign",
+    "cond",
+    "member",
+    "index",
+    "call",
+    "new",
+    "seq",
+    "template",
+    "tagged",
+    "regex",
+    "chain",
+    "spread",
+    "supercall",
+    "supermember",
+    "superindex",
+    "await",
+    "yield",
+    "importcall",
+    "importmeta",
+    "newtarget",
+];
+/// JS-C532 — idem par variante `Stmt` (entrée `exec_stmt_inner`,
+/// ordre = déclaration `Stmt`).
+pub static J17_STMT: [std::sync::atomic::AtomicU64; 24] =
+    [const { std::sync::atomic::AtomicU64::new(0) }; 24];
+/// JS-C532 — noms de [`J17_STMT`], ordre = déclaration `Stmt`.
+const J17_STMT_NAMES: [&str; 24] = [
+    "empty",
+    "expr",
+    "var",
+    "lexical",
+    "fndecl",
+    "classdecl",
+    "block",
+    "if",
+    "while",
+    "dowhile",
+    "for",
+    "forin",
+    "forof",
+    "using",
+    "with",
+    "labeled",
+    "break",
+    "continue",
+    "return",
+    "throw",
+    "try",
+    "switch",
+    "import",
+    "export",
+];
 /// `call_value_impl` entré — version gatée de `CALL_N`
 /// (celui-ci, non gaté, sert les sondes de vol §B-59).
 pub static J17_CALL: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
@@ -616,6 +691,42 @@ pub fn j17_snapshot() -> String {
             out.push(' ');
         }
         out.push_str(&format!("binop:{bins}"));
+    }
+    // JS-C532 — histogrammes d'évaluation `eval:<variante>=<n>,…`
+    // et `stmt:<variante>=<n>,…` (noms = ordre de déclaration
+    // `Expr`/`Stmt` — le tissu non-scopé de `body_ns` devient
+    // attribuable par variante).
+    let mut evs = String::new();
+    for (i, c) in J17_EVAL.iter().enumerate() {
+        let v = c.load(r);
+        if v > 0 {
+            if !evs.is_empty() {
+                evs.push(',');
+            }
+            evs.push_str(&format!("{}={v}", J17_EVAL_NAMES[i]));
+        }
+    }
+    if !evs.is_empty() {
+        if !out.is_empty() {
+            out.push(' ');
+        }
+        out.push_str(&format!("eval:{evs}"));
+    }
+    let mut sts = String::new();
+    for (i, c) in J17_STMT.iter().enumerate() {
+        let v = c.load(r);
+        if v > 0 {
+            if !sts.is_empty() {
+                sts.push(',');
+            }
+            sts.push_str(&format!("{}={v}", J17_STMT_NAMES[i]));
+        }
+    }
+    if !sts.is_empty() {
+        if !out.is_empty() {
+            out.push(' ');
+        }
+        out.push_str(&format!("stmt:{sts}"));
     }
     // JS-C513 — top-12 callsites `find_own_ai` (`foai:f:l=n,…`).
     let mut foai: Vec<(u64, String)> =

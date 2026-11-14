@@ -440,3 +440,41 @@ fn env_ghit_serves_global_own_props() {
         .expect("eval");
     assert_eq!(e2.describe(r2), "41,41,2,undefined");
 }
+
+/// JS-C532 — histogrammes `eval:`/`stmt:` par variante : chaque
+/// nœud évalué/exécuté compte une fois (maillons d'épine
+/// inclus). Le tissu non-scopé devient attribuable.
+#[test]
+fn j17_eval_stmt_histograms() {
+    let _g = TEST_LOCK
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    j17_enable();
+    let mut e = Engine::new();
+    let r = e
+        .eval("var o={x:3};var s=0;for(var i=0;i<50;i++){s+=o.x*2+i} s")
+        .expect("eval");
+    assert_eq!(e.describe(r), "1525");
+    let snap = j17_snapshot();
+    // `o.x` membre ×50 + littéraux/idents — les variantes chaudes
+    // doivent être comptées.
+    for want in ["eval:", "stmt:"] {
+        assert!(
+            snap.contains(want),
+            "section {want} attendue dans le snapshot — {snap}"
+        );
+    }
+    let ev = snap
+        .split(' ')
+        .find(|p| p.starts_with("eval:"))
+        .unwrap_or("");
+    assert!(
+        ev.contains("member=") && ev.contains("ident=") && ev.contains("binary="),
+        "variantes eval attendues — {ev}"
+    );
+    let st = snap
+        .split(' ')
+        .find(|p| p.starts_with("stmt:"))
+        .unwrap_or("");
+    assert!(st.contains("for="), "variante stmt attendue — {st}");
+}

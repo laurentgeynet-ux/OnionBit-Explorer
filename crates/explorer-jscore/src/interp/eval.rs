@@ -147,10 +147,17 @@ impl Engine {
         loop {
             cur = match cur {
                 Expr::Binary(op, l, r) => {
+                    // JS-C532 — chaque maillon dépilé est un
+                    // nœud évalué qui n'atteint pas `eval_inner`
+                    // (compté ici ; le nœud de tête en `break`
+                    // passe par `eval_inner`/`eval_expr` et n'y
+                    // compte qu'une fois).
+                    crate::j17_tick(&crate::J17_EVAL[expr_idx(cur)]);
                     spine.push(Spine::Bin(*op, r, std::ptr::from_ref::<Expr>(cur) as usize));
                     l
                 }
                 Expr::Member(b, name) => {
+                    crate::j17_tick(&crate::J17_EVAL[expr_idx(cur)]);
                     spine.push(Spine::Member(
                         name,
                         std::ptr::from_ref::<Expr>(cur) as usize,
@@ -158,6 +165,7 @@ impl Engine {
                     b
                 }
                 Expr::Index(b, k) => {
+                    crate::j17_tick(&crate::J17_EVAL[expr_idx(cur)]);
                     spine.push(Spine::Index(k, std::ptr::from_ref::<Expr>(cur) as usize));
                     b
                 }
@@ -166,6 +174,7 @@ impl Engine {
                 // bras `Expr::Call` complet (référence
                 // receveur/`this`).
                 Expr::Call(f, args, _) if matches!(&**f, Expr::Call(..)) => {
+                    crate::j17_tick(&crate::J17_EVAL[expr_idx(cur)]);
                     spine.push(Spine::Call(args));
                     f
                 }
@@ -218,6 +227,9 @@ impl Engine {
         if std::env::var("DBG_EXPR").is_ok() {
             eprintln!("[expr] {:?}", std::mem::discriminant(e));
         }
+        // JS-C532 — attribution par variante (les maillons
+        // d'épine déjà comptés n'arrivent pas ici).
+        crate::j17_tick(&crate::J17_EVAL[expr_idx(e)]);
         match e {
             Expr::Num(n) => Ok(Value::Num(*n)),
             Expr::BigInt(s) => {
@@ -1908,5 +1920,47 @@ fn expr_tag(e: &Expr) -> &'static str {
         Expr::ImportCall(_) => "ImportCall",
         Expr::ImportMeta => "ImportMeta",
         Expr::NewTarget => "NewTarget",
+    }
+}
+
+/// Index du variant `Expr` — ordre de déclaration dans
+/// `ast.rs`, miroir de [`expr_tag`] (JS-C532 — sert
+/// [`crate::J17_EVAL`]). Ajout de variante → ce match devient
+/// non exhaustif en même temps que `expr_tag`.
+fn expr_idx(e: &Expr) -> usize {
+    match e {
+        Expr::Num(_) => 0,
+        Expr::BigInt(_) => 1,
+        Expr::Str(_) => 2,
+        Expr::Bool(_) => 3,
+        Expr::Null => 4,
+        Expr::Ident(_) => 5,
+        Expr::This => 6,
+        Expr::Array(_) => 7,
+        Expr::Object(_) => 8,
+        Expr::Function(_) => 9,
+        Expr::Class(_) => 10,
+        Expr::Unary(..) => 11,
+        Expr::Binary(..) => 12,
+        Expr::Assign(..) => 13,
+        Expr::Cond(..) => 14,
+        Expr::Member(..) => 15,
+        Expr::Index(..) => 16,
+        Expr::Call(..) => 17,
+        Expr::New(..) => 18,
+        Expr::Seq(_) => 19,
+        Expr::Template { .. } => 20,
+        Expr::TaggedTemplate { .. } => 21,
+        Expr::Regex { .. } => 22,
+        Expr::Chain { .. } => 23,
+        Expr::Spread(_) => 24,
+        Expr::SuperCall(_) => 25,
+        Expr::SuperMember(_) => 26,
+        Expr::SuperIndex(_) => 27,
+        Expr::Await(_) => 28,
+        Expr::Yield { .. } => 29,
+        Expr::ImportCall(_) => 30,
+        Expr::ImportMeta => 31,
+        Expr::NewTarget => 32,
     }
 }

@@ -12902,6 +12902,18 @@ chaque gain rapporté contre les **deux** archétypes.
   (`ic_hit`/`ic_miss`/`ic_disarm` au snapshot) pour
   borner la couverture du seul court-circuit existant.
   Dependency-groups = infra lourde, dernier recours.
+- [x] **JS-C532 — histogrammes `eval:`/`stmt:` par
+  variante** : les sous-systèmes nommés ~5 % de
+  `body_ns` — le mur est le tissu interpréteur
+  non-scopé (~95 %). `J17_EVAL`[33]/`J17_STMT`[24]
+  indexés par ordre de déclaration (`expr_idx`/
+  `stmt_idx` exhaustifs) ; ticks `eval_inner` +
+  bras de dépile `eval_spine` (maillons consommés
+  sans `eval_inner`, zéro double comptage) +
+  `exec_stmt_inner`. Émission `eval:`/`stmt:`
+  compacte au snapshot. Nomme les variantes
+  dominantes → décide C533 (envs slot-indexés)
+  vs autre cran de représentation.
 - [x] **JS-C531 — entrées IC accesseur (`IcKind::Acc`)** :
   vol N5.35 — ~290 k write-walk accesseur-dominés
   (Polymer `behaviors`), inapprenables (`ic_learn` =
