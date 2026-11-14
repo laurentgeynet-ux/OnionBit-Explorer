@@ -12902,6 +12902,16 @@ chaque gain rapporté contre les **deux** archétypes.
   (`ic_hit`/`ic_miss`/`ic_disarm` au snapshot) pour
   borner la couverture du seul court-circuit existant.
   Dependency-groups = infra lourde, dernier recours.
+- [x] **JS-C531 — entrées IC accesseur (`IcKind::Acc`)** :
+  vol N5.35 — ~290 k write-walk accesseur-dominés
+  (Polymer `behaviors`), inapprenables (`ic_learn` =
+  `Data`-only → `nlearn` → mort → marche à vie).
+  `Acc{chain,pos}` = shapes + position du `Prop::Acc`
+  chez le holder, même vérif légère que `Chain`, get/set
+  relus frais à chaque hit (swap callee servi à jour,
+  `Data↔Acc` → miss → relearn). Learn aux sorties `Acc`
+  (read/write/`in`/`get_prop`), `ic_store` factorisé
+  mono/poly. Compteur `ic_acc`.
 - [x] **JS-C530 — own-first de l'écriture** : pendant de
   C529 pour le write-walk (~33 % `prop_ns`) — tête
   éligible + own `Data` → skip boucle `[[Set]]` (learn

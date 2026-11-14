@@ -336,6 +336,15 @@ pub(crate) enum IcKind {
     /// tête désarmait `proto_accessor_shadows` à vie. La question
     /// « un Acc auteur sur le proto ? » ne dépend que des protos.
     AbsentProto { chain: Box<[u64]>, key: Rc<str> },
+    /// JS-C531 — **accesseur** trouvé à `pos` sur le dernier
+    /// maillon de `chain` : les sites à setters/getters hérités
+    /// (Polymer `behaviors`, `Object.defineProperty` proto) ne
+    /// pouvaient jamais apprendre — `ic_learn` n'acceptait que
+    /// `Data` → `nlearn` → désarmement → marche à vie (vol
+    /// N5.35 : ~290 k write-walk accesseur-dominés). Même vérif
+    /// légère que `Chain` ; `props[pos]` relu frais → le callee
+    /// courant est invoqué, `Data↔Acc` in-place → miss → relearn.
+    Acc { chain: Box<[u64]>, pos: u32 },
     /// JS-C508 — pierre tombale : le site a échoué à apprendre
     /// (lien mort, maillon inéligible, `Acc`, chaîne > cap). Sans
     /// elle, chaque accès repayait `Vec`+walk+tentative de learn à
@@ -362,7 +371,9 @@ impl IcKind {
     fn head_key(&self) -> Option<u64> {
         match self {
             Self::Own { shape, .. } => Some(*shape),
-            Self::Chain { chain, .. } | Self::Absent { chain, .. } => chain.first().copied(),
+            Self::Chain { chain, .. } | Self::Absent { chain, .. } | Self::Acc { chain, .. } => {
+                chain.first().copied()
+            }
             Self::AbsentProto { .. } | Self::Dead | Self::Poly(_) => None,
         }
     }
@@ -411,6 +422,10 @@ const RABS_MEMO_CAP: usize = 8192;
 /// receveurs du site).
 enum IcVerdict {
     Hit(Value),
+    /// JS-C531 — accesseur prouvé à `pos` sur le holder
+    /// (entrée `Acc` vérifiée) : le `Prop::Acc` frais est
+    /// transporté — l'appelant invoque `get`/`set` courant.
+    Acc(Prop),
     /// Absence prouvée (entrée `Absent` vérifiée) — distinct de
     /// `Hit(Undefined)` : `get_prop` rend `None` pour l'absent.
     Absent,
@@ -434,6 +449,10 @@ pub(crate) enum IcOut {
     /// donnée héritée writable autorise le shadowing — le
     /// fast-path write ne peut pas trancher sans les attrs.
     HitChain(Value),
+    /// JS-C531 — accesseur prouvé sur la chaîne : l'appelant
+    /// invoque le `get`/`set` transporté (fraîchement relu à
+    /// `pos`, jamais un callee périmé).
+    HitAcc(Prop),
     Absent,
     Fall,
     Bail,
@@ -4475,6 +4494,10 @@ impl Engine {
         let site = std::ptr::from_ref(std::panic::Location::caller()) as usize;
         let collect = match self.ic_hit(site, bid, name) {
             IcOut::Absent => return false,
+            // JS-C531 — accesseur own/proto : masque dans les
+            // deux cas (own-prop quelconque → true ; `Acc` en
+            // proto → true au match de la marche).
+            IcOut::HitAcc(_) => return true,
             IcOut::Hit(_) | IcOut::HitChain(_) | IcOut::Fall => true,
             IcOut::Bail => false,
         };
@@ -7940,6 +7963,43 @@ impl Engine {
                     v
                 }
             }
+            // JS-C531 — accesseur : même marche légère des shapes,
+            // holder = dernier maillon — `props[pos]` doit rester
+            // `Prop::Acc` à la même clé (le callee est relu frais à
+            // chaque hit : swap in-place du setter servi, swap de
+            // kind `Data↔Acc` → miss → relearn).
+            IcKind::Acc { chain, pos } => {
+                let mut cur = id;
+                let mut v = IcVerdict::Miss;
+                for (i, &sh) in chain.iter().enumerate() {
+                    match link(cur, sh) {
+                        Err(()) => {
+                            v = IcVerdict::Pass;
+                            break;
+                        }
+                        Ok(None) => break,
+                        Ok(Some(o)) => {
+                            if i + 1 == chain.len() {
+                                v = match o.props.get(*pos as usize) {
+                                    Some((k, p @ crate::heap::Prop::Acc { .. }))
+                                        if std::ptr::eq(&raw const **k, key) || &**k == key =>
+                                    {
+                                        IcVerdict::Acc(p.clone())
+                                    }
+                                    _ => IcVerdict::Miss,
+                                };
+                                break;
+                            }
+                            cur = if let Value::Obj(p) = o.proto {
+                                p
+                            } else {
+                                break;
+                            };
+                        }
+                    }
+                }
+                v
+            }
             // `Poly` ne se niche pas (membres = kinds mono) et
             // `Dead` est court-circuité avant la vérif.
             IcKind::Poly(_) | IcKind::Dead => IcVerdict::Miss,
@@ -8032,6 +8092,14 @@ impl Engine {
                         IcOut::Hit(val)
                     }
                 }
+                IcVerdict::Acc(p) => {
+                    ent.miss = 0;
+                    crate::j17_tick(&crate::J17_IC_ACC);
+                    if poly {
+                        crate::j17_tick(&crate::J17_IC_POLY);
+                    }
+                    IcOut::HitAcc(p)
+                }
                 IcVerdict::Absent => {
                     ent.miss = 0;
                     if poly {
@@ -8058,6 +8126,16 @@ impl Engine {
                 (Some(Prop::Data { value: c, .. }), IcOut::Hit(v) | IcOut::HitChain(v)) => {
                     self.strict_eq(c, v)
                 }
+                // JS-C531 — accesseur : get+set servis doivent
+                // égaler les callees fraîchement marchés.
+                (
+                    Some(Prop::Acc {
+                        get: g1, set: s1, ..
+                    }),
+                    IcOut::HitAcc(Prop::Acc {
+                        get: g2, set: s2, ..
+                    }),
+                ) => self.strict_eq(g1, g2) && self.strict_eq(s1, s2),
                 (None, IcOut::Absent) => true,
                 _ => false,
             };
@@ -8218,33 +8296,98 @@ impl Engine {
         match kind {
             Some(kind) => {
                 crate::j17_tick(&crate::J17_IC_LEARN);
-                match self.ic_map.get_mut(&site) {
-                    Some(e) => {
-                        // JS-C528 — site `Poly` : le verdict
-                        // s'insère par shape de tête (remplace le
-                        // membre de même tête, évince le plus
-                        // ancien au cap). Un verdict non
-                        // indexable (`AbsentProto`) repasse
-                        // l'entrée en mono.
-                        if let IcKind::Poly(v) = &mut e.kind {
-                            if let Some(hk) = kind.head_key() {
-                                if let Some(m) = v.iter_mut().find(|m| m.head_key() == Some(hk)) {
-                                    *m = kind;
-                                } else {
-                                    if v.len() >= IC_POLY_CAP {
-                                        v.remove(0);
-                                    }
-                                    v.push(kind);
-                                }
-                                return;
+                self.ic_store(site, kind);
+            }
+            None => self.ic_note_nlearn(site),
+        }
+    }
+
+    /// JS-C528/C531 — insertion d'un verdict appris. Site
+    /// `Poly` : le membre s'insère par shape de tête (remplace
+    /// le membre de même tête, évince le plus ancien au cap) ;
+    /// un verdict non indexable (`AbsentProto`) repasse
+    /// l'entrée en mono. `miss` de l'entrée est préservé
+    /// (JS-C508 — il survit au relearn).
+    fn ic_store(&mut self, site: usize, kind: IcKind) {
+        match self.ic_map.get_mut(&site) {
+            Some(e) => {
+                if let IcKind::Poly(v) = &mut e.kind {
+                    if let Some(hk) = kind.head_key() {
+                        if let Some(m) = v.iter_mut().find(|m| m.head_key() == Some(hk)) {
+                            *m = kind;
+                        } else {
+                            if v.len() >= IC_POLY_CAP {
+                                v.remove(0);
                             }
+                            v.push(kind);
                         }
-                        e.kind = kind;
-                    }
-                    None => {
-                        self.ic_map.insert(site, IcEnt { kind, miss: 0 });
+                        return;
                     }
                 }
+                e.kind = kind;
+            }
+            None => {
+                self.ic_map.insert(site, IcEnt { kind, miss: 0 });
+            }
+        }
+    }
+
+    /// JS-C531 — apprentissage d'une entrée `Acc` : `links` =
+    /// maillons visités `[receveur, …, holder]` où le dernier
+    /// porte l'accesseur trouvé par la marche. Mêmes gardes que
+    /// `ic_learn` (site, cap de chaîne, maillons éligibles,
+    /// purges) — le `pos` de l'`Acc` est cherché une fois chez
+    /// le holder, amorti sur la vie de l'entrée ; les setters/
+    /// getters restent relus frais à chaque hit vérifié.
+    /// Échec → `ic_note_nlearn` (compte vers le désarmement).
+    fn ic_learn_acc(&mut self, site: usize, key: &str, links: &[ObjId]) {
+        if site == 0 || self.ic_off {
+            return;
+        }
+        if self.ic_map.get(&site).is_some_and(|e| e.miss == u8::MAX) {
+            return;
+        }
+        if links.is_empty() || links.len() > IC_CHAIN_CAP {
+            self.ic_note_nlearn(site);
+            return;
+        }
+        if self.ic_map.len() >= IC_MAP_CAP {
+            self.ic_purge();
+        }
+        let ai = array_index(key);
+        let mut shapes = Vec::with_capacity(links.len());
+        for &lid in links {
+            let Some(o) = self.heap.obj(lid) else {
+                self.ic_note_nlearn(site);
+                return;
+            };
+            if !Self::ic_eligible(o, key, ai) {
+                self.ic_note_nlearn(site);
+                return;
+            }
+            shapes.push(o.shape());
+        }
+        let Some(&hid) = links.last() else {
+            self.ic_note_nlearn(site);
+            return;
+        };
+        let kind = self.heap.obj(hid).and_then(|o| {
+            let i = o.prop_pos(key)?;
+            match o.props.get(i) {
+                Some((_, Prop::Acc { .. })) => u32::try_from(i).ok(),
+                _ => None,
+            }
+        });
+        match kind {
+            Some(pos) => {
+                crate::j17_tick(&crate::J17_IC_LEARN);
+                self.ic_store(
+                    site,
+                    IcKind::Acc {
+                        chain: shapes.into_boxed_slice(),
+                        pos,
+                    },
+                );
             }
             None => self.ic_note_nlearn(site),
         }
@@ -8294,8 +8437,10 @@ impl Engine {
             IcOut::Hit(v) | IcOut::HitChain(v) => return Some(v),
             // Absence prouvée → `None`, pas `Some(Undefined)` —
             // les appelants distinguent prop absente de prop
-            // présente valant `undefined`.
-            IcOut::Absent => return None,
+            // présente valant `undefined`. JS-C531 — accesseur
+            // prouvé : contrat data-only → `None`, identique au
+            // `data_value()` de la marche sur `Prop::Acc`.
+            IcOut::Absent | IcOut::HitAcc(_) => return None,
             // JS-C509 — bail : marche nue, zéro machinerie learn.
             IcOut::Bail => {
                 crate::j17_tick(&crate::J17_PL_GET);
@@ -8315,8 +8460,11 @@ impl Engine {
         Self::j17_scan_add(&crate::J17_PS_GET, s0);
         match &found {
             Some((_, Prop::Data { .. })) => self.ic_learn(site, key, &links, true, false),
+            // JS-C531 — `Acc` : contrat data-only → `None`,
+            // mais le site apprend l'accesseur pour les
+            // appelants qui le servent (read/write/in).
+            Some((_, Prop::Acc { .. })) => self.ic_learn_acc(site, key, &links),
             None => self.ic_learn(site, key, &links, false, false),
-            _ => {}
         }
         let v = found.and_then(|(_, p)| p.data_value());
         self.probe_lookup(id, key, v.clone());
@@ -8767,9 +8915,20 @@ impl Engine {
         let bail = match self.ic_hit(site, id, key) {
             IcOut::Hit(v) | IcOut::HitChain(v) => return Ok(v),
             IcOut::Absent => return Ok(Value::Undefined),
+            // JS-C531 — accesseur prouvé : invocation directe du
+            // getter frais (même sort qu'au bout de la marche).
+            IcOut::HitAcc(Prop::Acc { get, .. }) => {
+                return if self.is_callable(get.clone()) {
+                    self.call_value(get, recv, &[])
+                } else {
+                    Ok(Value::Undefined)
+                };
+            }
+            // `HitAcc` défensif (non-`Acc` — impossible en
+            // pratique) : marche complète comme `Fall`.
             // JS-C509 — bail : marche nue, ni collecte ni learn.
             IcOut::Bail => true,
-            IcOut::Fall => false,
+            IcOut::HitAcc(_) | IcOut::Fall => false,
         };
         // JS-C504 — les maillons traversés nourrissent
         // l'apprentissage (`Chain`/`Absent` en plus de `Own`) —
@@ -8793,6 +8952,12 @@ impl Engine {
                 Ok(value)
             }
             Some((_, Prop::Acc { get, .. })) => {
+                // JS-C531 — les sites à getter hérité apprennent
+                // `Acc` (les reads suivants vérifient la chaîne
+                // légère au lieu de marcher).
+                if !bail {
+                    self.ic_learn_acc(site, key, &links);
+                }
                 if self.is_callable(get.clone()) {
                     self.call_value(get, recv, &[])
                 } else {
@@ -8866,8 +9031,17 @@ impl Engine {
                         self.write_refused(key)
                     };
                 }
+                // JS-C531 — setter prouvé sur la chaîne :
+                // invocation directe du callee frais.
+                IcOut::HitAcc(Prop::Acc { set, .. }) => {
+                    return if self.is_callable(set.clone()) {
+                        self.call_value(set, recv, &[v]).map(|_| ())
+                    } else {
+                        self.write_refused(key)
+                    };
+                }
                 IcOut::Bail => {}
-                IcOut::HitChain(_) | IcOut::Fall => armed = true,
+                IcOut::HitAcc(_) | IcOut::HitChain(_) | IcOut::Fall => armed = true,
             }
         }
         let mut own = id;
@@ -8931,6 +9105,13 @@ impl Engine {
             }
             match self.find_own_ai(cid, key, ai) {
                 Some(Prop::Acc { set, .. }) => {
+                    // JS-C531 — les sites à setter hérité
+                    // apprennent `Acc` : la chaîne légère est
+                    // vérifiée à la prochaine écriture au lieu
+                    // de marcher (`links` porte déjà le holder).
+                    if armed && complete {
+                        self.ic_learn_acc(site, key, &links);
+                    }
                     if self.is_callable(set.clone()) {
                         self.call_value(set, recv, &[v])?;
                         return Ok(());
@@ -9684,7 +9865,9 @@ impl Engine {
     /// pas d'hôte → `Absent`).
     pub(crate) fn has_prop_at(&mut self, id: ObjId, key: &str, site: usize) -> JsResult<bool> {
         match self.ic_hit(site, id, key) {
-            IcOut::Hit(_) | IcOut::HitChain(_) => return Ok(true),
+            // JS-C531 — `HitAcc` prouve l'existence comme un
+            // hit Data : accesseur own/proto → `in` rend true.
+            IcOut::Hit(_) | IcOut::HitChain(_) | IcOut::HitAcc(_) => return Ok(true),
             IcOut::Absent if self.host_of(id).is_none() => return Ok(false),
             // JS-C509 — bail : marche nue (délégation proxy,
             // hôte de tête), aucune machinerie learn.
@@ -9707,6 +9890,7 @@ impl Engine {
             let mut links = Vec::new();
             match self.find_prop_owner_links(id, key, Some(&mut links)) {
                 Some((_, Prop::Data { .. })) => self.ic_learn(site, key, &links, true, false),
+                Some((_, Prop::Acc { .. })) => self.ic_learn_acc(site, key, &links),
                 None if !r && self.host_of(id).is_none() => {
                     self.ic_learn(site, key, &links, false, false);
                 }
