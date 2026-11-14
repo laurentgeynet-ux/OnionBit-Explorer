@@ -628,4 +628,9 @@ fn c516_class_ctor_flag() {
         eval("var o=function(){};o[String.fromCharCode(0xF131)+'ctor']=true;try{o();'n'}catch(e){'T'}"),
         "T"
     );
+    // `delete` lève la marque → l'objet redevient appelable.
+    assert_eq!(
+        eval("var k=String.fromCharCode(0xF131)+'ctor';var o=function(){return 7};o[k]=true;delete o[k];o()"),
+        "7"
+    );
 }

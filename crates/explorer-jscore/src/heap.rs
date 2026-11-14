@@ -1589,6 +1589,13 @@ impl Object {
     pub(crate) fn push_prop(&mut self, key: &str, prop: Prop) {
         crate::j17_tick(&crate::J17_PROP_NEW);
         let key = crate::intern(key);
+        // JS-C516 — le funnel unique d'insertion arme le bit :
+        // marque posée par le moteur OU forgée via
+        // `fromCharCode` → `OBJF_CLASS_CTOR` est autoritaire,
+        // la garde `call_value` n'a plus de repli `find_own`.
+        if &*key == crate::interp::CLASS_CTOR {
+            self.flags.set(self.flags.get() | OBJF_CLASS_CTOR);
+        }
         if let Some(m) = self.idx.get_mut() {
             if let Ok(pos) = u32::try_from(self.props.len()) {
                 m.insert(key.clone(), pos);
@@ -1835,7 +1842,13 @@ impl Object {
         match self.prop_pos(key) {
             Some(i) if self.props.get(i).is_some_and(|(_, p)| !p.configurable()) => false,
             Some(i) => {
-                self.props.remove(i);
+                let removed = self.props.remove(i);
+                // JS-C516 — la marque retirée lève le bit
+                // (`delete o["\u{f131}ctor"]` rend l'objet
+                // de nouveau appelable).
+                if &*removed.0 == crate::interp::CLASS_CTOR {
+                    self.flags.set(self.flags.get() & !OBJF_CLASS_CTOR);
+                }
                 // `remove` décale toutes les positions > i :
                 // index invalidé, reconstruit au prochain lookup.
                 self.idx.take();

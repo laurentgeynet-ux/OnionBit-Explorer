@@ -12745,3 +12745,7 @@ chaque gain rapporté contre les **deux** archétypes.
   (735 k `find_own` yt = 29 %) lit un bit `Object::flags` posé à
   la création de classe ; `find_own` en repli (clé forgeable).
   Verrous : lang 315 ×3, c500 33, clippy propre.
+- [x] **JS-C516b — flag autoritaire via les funnels** :
+  `push_prop` arme le bit pour toute insertion de la clé
+  (forge `fromCharCode` comprise), `remove_own` le lève —
+  repli `find_own` supprimé du chemin d'appel. Verrous : lang 315 ×3.

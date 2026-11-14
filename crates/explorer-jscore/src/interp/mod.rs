@@ -7285,10 +7285,8 @@ impl Engine {
             self.set_own(ctor_id, marker, arr, false);
         }
         // `C()` without `new` -> TypeError (class constructor).
+        // Le funnel `push_prop` arme `OBJF_CLASS_CTOR` (JS-C516b).
         self.set_own(ctor_id, CLASS_CTOR, Value::Bool(true), false);
-        if let Some(o) = self.heap.obj(ctor_id) {
-            o.flags.set(o.flags.get() | crate::heap::OBJF_CLASS_CTOR);
-        }
         Ok(ctor)
     }
 
@@ -10289,15 +10287,15 @@ impl Engine {
     /// par [`call_value_ctor`].
     pub(crate) fn call_value(&mut self, f: Value, this: Value, args: &[Value]) -> JsResult<Value> {
         if let Value::Obj(fid) = f {
-            // JS-C516 — le bit `OBJF_CLASS_CTOR` sert la garde en
-            // O(1) ; `find_own` reste en repli — un script peut
-            // forger la clé privée `ctor` via
-            // `String.fromCharCode(0xF131)`.
+            // JS-C516b — le bit est autoritaire : `push_prop`
+            // l'arme pour toute insertion de la clé privée
+            // (moteur ou forge `fromCharCode`), `remove_own`
+            // le lève — plus de `find_own` par appel.
             let flagged = self
                 .heap
                 .obj(fid)
                 .is_some_and(|o| o.flags.get() & crate::heap::OBJF_CLASS_CTOR != 0);
-            if flagged || self.find_own(fid, CLASS_CTOR).is_some() {
+            if flagged {
                 return Err(self.type_error("class constructor cannot be invoked without `new`"));
             }
         }
