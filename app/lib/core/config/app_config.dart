@@ -133,6 +133,8 @@ class AppConfig {
         'AppleWebKit/537.36 (KHTML, like Gecko) '
         'Explorer/0.2 Safari/537.36',
     this.mediaFramedrop = const MediaFramedropConfig(),
+    this.mediaSkipLoopFilter,
+    this.mediaSkipIdct,
     this.drmDelegateHosts = const [
       // Chaque entrée = un arbitrage (ADR-0027 §2 : périmètre
       // de confiance + exception d'égress ADR-0022 — le trafic
@@ -321,6 +323,21 @@ class AppConfig {
   /// Politique `set_framedrop_auto` appliquée à chaque
   /// lecteur natif — `null` = pas d'escalade auto.
   final MediaFramedropConfig mediaFramedrop;
+
+  /// `onionmedia_set_skip_loop_filter` (knob coût/qualité
+  /// `au_no_lf` FFmpeg, **pas** un saut de trame) — même
+  /// encodage que `framedrop` (0-6) : les filtres de boucle
+  /// (deblock/SAO HEVC, deblock H.264…) sont sautés sur les
+  /// images que le niveau dropperait. `1` (`NonRef`) rend
+  /// ~10 % de CPU en 4K10 logiciel ; `null` = pas appelé
+  /// (comportement antérieur, filtres complets).
+  final int? mediaSkipLoopFilter;
+
+  /// `onionmedia_set_skip_idct` — même encodage ; accepté par
+  /// les décodeurs, no-op là où rien ne l'honore (H.264
+  /// l'ignore ; HEVC saute dequant/itx sur les images du
+  /// niveau). `null` = pas appelé.
+  final int? mediaSkipIdct;
 
   /// Domaines délégués à la WebView2 (étape 136b, ADR-0027) —
   /// allowlist explicite et minimale ; matching host exact +

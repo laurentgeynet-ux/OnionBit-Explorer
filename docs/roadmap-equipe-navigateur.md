@@ -6934,6 +6934,16 @@ incrément.
   `…/media/{id}/audio` → jscore `AnalyserNode` (destination
   muet documenté). Phases 1-3 spécifiées, non implémentées.
 
+- [x] **Étape 240. Knobs `skip_loop_filter`/`skip_idct`**
+  (`app/` — surface dormante, chantier Discard dépôt) :
+  `onionmedia_set_skip_loop_filter`/`set_skip_idct` liés dans
+  le bloc ABI ≥5 (lookup gardé), config
+  `mediaSkipLoopFilter`/`mediaSkipIdct` (`null` = non
+  appelé), appliqués à `create`/`createMse`. Knob
+  coût/qualité `au_no_lf` (pas un saut de trames) :
+  `NonRef`=1 ≈ 10 % CPU en 4K10 logiciel — réserve perf
+  pour machines justes, défaut intact.
+
 ### Risques nommés
 
 - 196 : deux sémantiques filaires

@@ -183,6 +183,8 @@ final mediaPlayerFactoryProvider = Provider<MediaPlayerFactory>((ref) {
           apiBase: apiBase,
           hwAccel: hw,
           framedrop: cfg.mediaFramedrop,
+          skipLoopFilter: cfg.mediaSkipLoopFilter,
+          skipIdct: cfg.mediaSkipIdct,
           pauseAtEof: cfg.mediaPauseAtEof,
         )
       : OnionMediaPlayer.create(
@@ -194,6 +196,8 @@ final mediaPlayerFactoryProvider = Provider<MediaPlayerFactory>((ref) {
           preload: offer.preload,
           displayPixels: OnionMediaPlayer.displayPixelsFor(offer.rect),
           framedrop: cfg.mediaFramedrop,
+          skipLoopFilter: cfg.mediaSkipLoopFilter,
+          skipIdct: cfg.mediaSkipIdct,
           pauseAtEof: cfg.mediaPauseAtEof,
         );
 });

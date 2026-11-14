@@ -373,6 +373,16 @@ class OnionMediaPlayer implements MediaPlayer {
   /// de saut de trames (`window_ms == 0` désarme).
   int Function(ffi.Pointer, int, int, int, int, int)? _framedropAuto;
 
+  /// `onionmedia_set_skip_loop_filter` — knob coût/qualité
+  /// `au_no_lf` FFmpeg (pas un saut de trame) : encodage
+  /// `framedrop` 0-6, les filtres de boucle sont sautés sur
+  /// les images que le niveau dropperait.
+  int Function(ffi.Pointer, int)? _skipLoopFilter;
+
+  /// `onionmedia_set_skip_idct` — même encodage ; accepté
+  /// par les décodeurs, no-op là où rien ne l'honore.
+  int Function(ffi.Pointer, int)? _skipIdct;
+
   /// `onionmedia_set_preload` (P-71) — politique 0/1/2
   /// (`auto`/`metadata`/`none`) aux `open_*` suivants.
   int Function(ffi.Pointer, int)? _setPreload;
@@ -767,6 +777,24 @@ class OnionMediaPlayer implements MediaPlayer {
       } on Object {
         _setPreload = null;
       }
+      try {
+        _skipLoopFilter = _lib
+            .lookupFunction<
+              ffi.Int32 Function(ffi.Pointer, ffi.Uint32),
+              int Function(ffi.Pointer, int)
+            >('onionmedia_set_skip_loop_filter');
+      } on Object {
+        _skipLoopFilter = null;
+      }
+      try {
+        _skipIdct = _lib
+            .lookupFunction<
+              ffi.Int32 Function(ffi.Pointer, ffi.Uint32),
+              int Function(ffi.Pointer, int)
+            >('onionmedia_set_skip_idct');
+      } on Object {
+        _skipIdct = null;
+      }
     }
   }
 
@@ -1147,6 +1175,16 @@ class OnionMediaPlayer implements MediaPlayer {
     );
   }
 
+  /// `set_skip_loop_filter`/`set_skip_idct` — knobs
+  /// coût/qualité FFmpeg appliqués à l'open ; `null` = pas
+  /// appelé (exports découverts, `int` FFI 0-6 comme
+  /// `framedrop`, rc `-1` sur niveau hors borne ignoré —
+  /// config bornée en amont).
+  void _applySkipFilters(int? loopFilter, int? idct) {
+    if (loopFilter != null) _skipLoopFilter?.call(_h, loopFilter);
+    if (idct != null) _skipIdct?.call(_h, idct);
+  }
+
   /// Dernière erreur du handle (`player_error` par handle si
   /// la DLL l'expose, sinon TLS) — `null` quand vide.
   String? _playerError() {
@@ -1248,6 +1286,8 @@ class OnionMediaPlayer implements MediaPlayer {
     String preload = 'auto',
     int displayPixels = 0,
     MediaFramedropConfig? framedrop,
+    int? skipLoopFilter,
+    int? skipIdct,
     bool pauseAtEof = false,
   }) async {
     final lib = _load();
@@ -1284,6 +1324,7 @@ class OnionMediaPlayer implements MediaPlayer {
       p._setMaxPixels?.call(h, geo);
     }
     p._applyFramedrop(framedrop);
+    p._applySkipFilters(skipLoopFilter, skipIdct);
     // `set_preload` (P-71) — attribut énuméré `auto`|
     // `metadata`|`none` → 0/1/2, consommé aux `open_*`
     // suivants. Progressif seulement : hors `open_mse*`
@@ -1359,6 +1400,8 @@ class OnionMediaPlayer implements MediaPlayer {
     String apiBase = '',
     bool hwAccel = false,
     MediaFramedropConfig? framedrop,
+    int? skipLoopFilter,
+    int? skipIdct,
     bool pauseAtEof = false,
   }) async {
     final lib = _load();
@@ -1396,6 +1439,7 @@ class OnionMediaPlayer implements MediaPlayer {
       // `open_mse*` ne prend pas d'`IoConfig` — le pull passe
       // par le REST local, le cap n'atteint aucune rep.
       p._applyFramedrop(framedrop);
+      p._applySkipFilters(skipLoopFilter, skipIdct);
       final tab = int.tryParse(tabId) ?? 0;
       if (offer.mseBuffers.length > 1 && openMulti != null) {
         _openMseMulti(
