@@ -12902,6 +12902,14 @@ chaque gain rapporté contre les **deux** archétypes.
   (`ic_hit`/`ic_miss`/`ic_disarm` au snapshot) pour
   borner la couverture du seul court-circuit existant.
   Dependency-groups = infra lourde, dernier recours.
+- [x] **JS-C529 — own-first du fallback global
+  `env_get`/`env_set`** : audit `keys:` N5.33 — ~524 k
+  marches non attribuées ≈ lectures/écritures de bindings
+  globaux (`Reflect`, cteurs builtins ≈ 192 k top-20) :
+  callsite à clés tournantes, in-IC-able par nature, mais
+  props propres sur objet indexé. `o.find` sert les hits
+  own (`ic_eligible` ⇒ `≡ find_own_ai` maillon 1) ; absent/
+  Acc/proto → walk complet inchangé. Compteur `env_ghit`.
 - [x] **JS-C528 — fallback `Poly` des sites IC désarmés** :
   audit N5.31 — 2 395 désarmés ≈ 342 k `ic_bail` ≈ 27 %
   des lookups en marche complète à vie (IC strictement

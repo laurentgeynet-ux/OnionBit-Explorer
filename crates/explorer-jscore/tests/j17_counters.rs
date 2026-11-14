@@ -388,3 +388,55 @@ fn keys_histogram_names_walked_keys() {
         "la clé marchée doit être nommée — {snap}"
     );
 }
+
+/// JS-C529 — le fallback `env_get`/`env_set` sur l'objet global
+/// sert les props propres par own-scan indexé (`env_ghit`) sans
+/// le walk complet : la clé marchée disparaît de `keys:` pendant
+/// que `env_ghit` croît — et la sémantique tient (getter global
+/// invoqué, écriture via props, absent → `undefined`).
+#[test]
+fn env_ghit_serves_global_own_props() {
+    let _g = TEST_LOCK
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    j17_enable();
+    j17_keys_enable();
+    let before = j17_snapshot();
+    let g0 = before
+        .split(' ')
+        .find_map(|p| {
+            p.strip_prefix("env_ghit=")
+                .and_then(|v| v.parse::<u64>().ok())
+        })
+        .unwrap_or(0);
+    let mut e = Engine::new();
+    let r = e
+        .eval(
+            "var s=0;for(var i=0;i<60;i++){s+=Reflect===undefined?0:1;s+=Math===undefined?0:1}\
+             var w=0;for(var i=0;i<60;i++){zzbind=i;w+=zzbind} s+'/'+w",
+        )
+        .expect("eval");
+    assert_eq!(e.describe(r), "120/1770");
+    let after = j17_snapshot();
+    let g1 = after
+        .split(' ')
+        .find_map(|p| {
+            p.strip_prefix("env_ghit=")
+                .and_then(|v| v.parse::<u64>().ok())
+        })
+        .unwrap_or(0);
+    assert!(
+        g1 >= g0 + 100,
+        "les lectures globales doivent passer par l'own-scan — {before} → {after}"
+    );
+    // Getter global invoqué, absent → undefined — sémantique
+    // intacte sous le raccourci.
+    let mut e2 = Engine::new();
+    let r2 = e2
+        .eval(
+            "var n=0;Object.defineProperty(this,'gval',{get:function(){n++;return 41}});\
+             gval+','+gval+','+n+','+(typeof zzabsent)",
+        )
+        .expect("eval");
+    assert_eq!(e2.describe(r2), "41,41,2,undefined");
+}

@@ -6301,7 +6301,7 @@ impl Engine {
                             // sont des getters posés sur le global —
                             // un identifiant libre doit les invoquer).
                             let g = self.global;
-                            match self.find_prop(g, name) {
+                            match self.global_prop_own_first(g, name) {
                                 Some(Prop::Data { value, .. }) => return Some(value),
                                 Some(Prop::Acc {
                                     get: Value::Obj(gf),
@@ -6585,7 +6585,7 @@ impl Engine {
                     // `ReferenceError` strict sinon, écriture
                     // ordinaire si résolu.
                     let g = self.global;
-                    if self.find_prop(g, name).is_none() {
+                    if self.global_prop_own_first(g, name).is_none() {
                         if self.strict {
                             return Err(self.ref_error(format!("{name} is not defined")));
                         }
@@ -8247,6 +8247,33 @@ impl Engine {
                 }
             }
             None => self.ic_note_nlearn(site),
+        }
+    }
+
+    /// JS-C529 — fallback `env_get`/`env_set` sur l'objet global :
+    /// own-first. Les bindings du global (builtins `Reflect`…,
+    /// `var` script) sont des props **propres** sur un objet dont
+    /// `prop_pos` est indexé O(1) — le walk complet
+    /// (`find_prop`) ne sert qu'aux absents own (proto-hérités,
+    /// synthétisés), aux kinds inéligibles et aux accesseurs.
+    /// `ic_eligible` garantit `o.find ≡ find_own_ai` au premier
+    /// maillon — sémantique strictement identique, le hit saute
+    /// simplement la mécanique de traversée (vol N5.33 : ~524 k
+    /// marches non attribuées — les lectures/écritures globales —
+    /// ≈ la moitié du mur `prop_ns`). Compteur `env_ghit`.
+    fn global_prop_own_first(&mut self, g: ObjId, name: &str) -> Option<Prop> {
+        let ai = array_index(name);
+        let own = self.heap.obj(g).and_then(|o| {
+            Self::ic_eligible(o, name, ai)
+                .then(|| o.find(name))
+                .flatten()
+        });
+        match own {
+            Some(p) => {
+                crate::j17_tick(&crate::J17_ENV_GHIT);
+                Some(p)
+            }
+            None => self.find_prop(g, name),
         }
     }
 
