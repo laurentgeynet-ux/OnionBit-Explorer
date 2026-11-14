@@ -12826,6 +12826,23 @@ chaque gain rapporté contre les **deux** archétypes.
   matérialisation nommée, knob `set_defer_min`. Verrous :
   `c525_rewind` (régression), `lang` 315, `dom` 265,
   session `click_runs_inline_onclick_attribute` re-vert.
-  **Claim C525c toujours gelé** — vol N5.27 requis
-  (workload comparable, zéro uncaught nouveau).
+  **Vol N5.27** : correction restaurée (0 uncaught,
+  call=750 k) mais net-négatif — `lex_ns` +224 %,
+  `lex_tok` +43 % (probe skip-lexe + re-lex des corps
+  appelés = double-scan), `body_ns` +58 %.
+- [x] **JS-C525e — révert du lexer pull** : la probe
+  tokenless matche caractère par caractère (~coût du lex)
+  puis chaque corps appelé re-lexe — à 12,3 % de
+  matérialisation, mathématiquement perdant. Un vrai skip
+  sans scan est impossible (la borne exige le scan) ;
+  seule la déferral de *parse* est rentable → retour à
+  `BodySrc::Toks` + `close_of` O(1) (sémantique N5.25).
+  Machinerie pull retirée (`Stream`, `probe_body`,
+  `toks_skip`, `Lexer::at`, `Token.boff`) ; conservés :
+  `Debug` compacts, différentiel `deferred_ast_matches_eager`
+  (FNV, corpus + vrai `m=base` yt), `nullread`→`uncaught:`,
+  `def_err`, erreurs de matérialisation nommées,
+  `set_defer_min`, `c525_rewind`. Verrous : différentiel
+  vert, `c525_rewind` 2/2. **C525 clos** — le mur reste
+  `prop_ns` ~772-930 ms (traversée proto).
 

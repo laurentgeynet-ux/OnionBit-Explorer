@@ -276,11 +276,6 @@ pub struct Token {
     /// Index (en caractères) juste après le dernier caractère du
     /// jeton — borne droite du span (`end == off` pour `Eof`).
     pub end: usize,
-    /// Index **en octets** du premier octet du jeton — le skip
-    /// tokenless (JS-C525b) repère les plages de corps différés
-    /// en octets pour éviter une conversion char→octet O(n) par
-    /// corps (O(n²) sur les gros bundles).
-    pub boff: usize,
     /// Literal carries a legacy octal form (`010`, `08`, `\1`) —
     /// tolerated in sloppy mode, `SyntaxError` in strict mode
     /// (checked by the parser, which owns the directive prologue).
@@ -288,17 +283,14 @@ pub struct Token {
 }
 
 /// Lex `src` into a token vector terminated by a `Tok::Eof` token.
-/// Conservée comme point d'entrée direct des tests — le parseur
-/// passe par `Lexer`/`Stream` (pull, JS-C525c).
-#[allow(dead_code)]
 pub fn lex(src: &str) -> Result<Vec<Token>> {
-    lex_in(std::rc::Rc::from(src), 0)
+    lex_in(src, 0)
 }
 
 /// `lex` avec profondeur de substitution héritée (JS-C41) —
 /// les templates `` `${…}` `` ré-entrent le lexer pour leur
 /// contenu : la profondeur se cumule à travers les re-entrées.
-fn lex_in(src: std::rc::Rc<str>, tpl_nest: u32) -> Result<Vec<Token>> {
+fn lex_in(src: &str, tpl_nest: u32) -> Result<Vec<Token>> {
     Lexer {
         src,
         pos: 0,
@@ -311,7 +303,6 @@ fn lex_in(src: std::rc::Rc<str>, tpl_nest: u32) -> Result<Vec<Token>> {
         clause_parens: Vec::new(),
         brace_kinds: Vec::new(),
         prev: Prev::None,
-        toks_skip: false,
     }
     .run()
 }
@@ -322,99 +313,22 @@ fn lex_in(src: std::rc::Rc<str>, tpl_nest: u32) -> Result<Vec<Token>> {
 /// que l'hostile (JS-C41).
 const MAX_TPL_NEST: u32 = 512;
 
-/// Résultat d'une marche [`probe_body`] réussie — positions du
-/// `}` fermant le corps (JS-C525b).
-pub(crate) struct BodyEnd {
-    /// Index char / octet du `}` fermant (borne droite incluse de
-    /// la plage de corps retenue par `DeferredBody`).
-    pub close_off: usize,
-    pub close_boff: usize,
-    /// Ligne/col/`newline_before` du jeton `}` — le buffer parent
-    /// le réinsère synthétiquement après un defer (JS-C525c).
-    pub close_line: usize,
-    pub close_col: usize,
-    pub close_nl: bool,
-    /// Position char/octet juste **après** le `}` — reprise du
-    /// flux parent quand le corps n'a jamais été lexé.
-    pub end_off: usize,
-    pub end_boff: usize,
-    /// Ligne/colonne juste après le `}`.
-    pub end_line: usize,
-    pub end_col: usize,
-    /// Tokens traversés (hors `}`) — alimente `DEFER_MIN_TOKS`.
-    pub toks: usize,
-}
-
-/// Marche *tokenless* d'un corps `{`…`}` (JS-C525b) : probe
-/// `Lexer` frais positionné juste après le `{` d'ouverture
-/// (`open` = son jeton), machine `/` auto-contenue —
-/// `expect_operand=true` et `brace_kinds=[true]` reproduisent
-/// exactement l'état post-`{` du flux réel (un corps de fonction
-/// est toujours un bloc), `prev=Brace` pour l'héritage des `{`
-/// imbriqués. `toks_skip` : tokens classés mais valeurs jetées —
-/// zéro alloc par jeton traversé.
-///
-/// `brace_kinds` **est** la profondeur d'accolades : les `{}` des
-/// chaînes/regex/templates/commentaires sont absorbés par leurs
-/// scanners, `(`/`[` n'y figurent pas — le premier `}` qui vide
-/// la pile est le fermant du corps, miroir exact de `close_table`.
-///
-/// `None` = EOF ou erreur lex avant la fermeture → le caller
-/// retombe au parse éager, qui rapporte l'erreur normale — miroir
-/// de `close_of == usize::MAX` (sémantique préservée).
-pub(crate) fn probe_body(src: &std::rc::Rc<str>, open: &Token) -> Option<BodyEnd> {
-    let mut p = Lexer::at(
-        src.clone(),
-        open.off + 1,
-        open.boff + 1,
-        open.line,
-        open.col + 1,
-    );
-    p.toks_skip = true;
-    let mut toks = 0usize;
-    loop {
-        match p.next_token() {
-            Err(_) => return None,
-            Ok(t) => {
-                if t.tok == Tok::P(P::RBrace) && p.brace_kinds.is_empty() {
-                    return Some(BodyEnd {
-                        close_off: t.off,
-                        close_boff: t.boff,
-                        close_line: t.line,
-                        close_col: t.col,
-                        close_nl: t.newline_before,
-                        end_off: p.pos,
-                        end_boff: p.byte_pos,
-                        end_line: p.line,
-                        end_col: p.col,
-                        toks,
-                    });
-                }
-                if t.tok == Tok::Eof {
-                    return None;
-                }
-                toks += 1;
-            }
-        }
-    }
-}
-
-pub(crate) struct Lexer {
+struct Lexer<'a> {
     /// Source — itérée directement en `&str` (V-6d) : `peek` se
     /// décode à la volée sur `src[byte_pos..]`, les tranches de
     /// littéraux sont des slices `&str` zéro-alloc (fast-path
     /// C311 généralisé). Le `Vec<char>` de ~4 o/char a quitté
     /// le chemin — 5.8 Mo évités sur un bundle d'1.4 Mo.
-    pub(crate) src: std::rc::Rc<str>,
+    src: &'a str,
     /// Position en *chars* (compte pour `Token::off`/`end` —
     /// les spans de `FnLit::toString` restent indexés en
     /// caractères).
-    pub(crate) pos: usize,
+    pos: usize,
     /// Position en *octets* dans `src` — avancée avec `bump()`
     /// (`c.len_utf8()` ; CRLF = 2).
-    pub(crate) byte_pos: usize,
-    pub(crate) line: usize,
-    pub(crate) col: usize,
+    byte_pos: usize,
+    line: usize,
+    col: usize,
     /// Set while producing the current token (see `Token::legacy_octal`).
     legacy_octal: bool,
     /// Emboîtement courant des substitutions de template (JS-C41).
@@ -422,91 +336,18 @@ pub(crate) struct Lexer {
     /// `/` en position division ? `true` = le prochain `/` ouvre
     /// une regex (JS-C525a — promu de locale `run` à champ pour
     /// que `skip_body` rejoue la même machine sans tokens).
-    pub(crate) expect_operand: bool,
+    expect_operand: bool,
     /// `(` ouverte par un mot-clé de clause (`if|while|for|…`) :
     /// son `)` ré-arme `expect_operand` (regex, pas division).
-    /// `pub(crate)` : le parseur pull (JS-C525c) snapshotte et
-    /// restaure les profondeurs au rewind d'un corps différé.
-    pub(crate) clause_parens: Vec<bool>,
+    clause_parens: Vec<bool>,
     /// `{` ouvrant un bloc (statement) : son `}` ré-arme
     /// `expect_operand` ; un `{` operande (objet/pattern) non.
-    pub(crate) brace_kinds: Vec<bool>,
+    brace_kinds: Vec<bool>,
     /// Résumé du token précédent — pilote `(`/`{` ci-dessus.
-    pub(crate) prev: Prev,
-    /// Mode skip (JS-C525b — `probe_body`) : les valeurs lexées
-    /// (idents, chaînes, templates, regex) sont remplacées par des
-    /// placeholders partagés — zéro alloc par token traversé.
-    /// La *classification* reste exacte (`Kw`, `of`, `Tpl`…) : la
-    /// machine `/` et l'équilibrage des accolades sont inchangés.
-    toks_skip: bool,
+    prev: Prev,
 }
 
-/// `Rc<str>` vide partagée — placeholder des valeurs sautées en
-/// mode `toks_skip` (JS-C525b) : bump de refcount, zéro alloc.
-fn empty_rc() -> std::rc::Rc<str> {
-    thread_local! {
-        static EMPTY: std::rc::Rc<str> = std::rc::Rc::from("");
-    }
-    EMPTY.with(std::clone::Clone::clone)
-}
-
-/// `Rc<[TplPart]>` vide partagée — placeholder `Tpl` du mode
-/// `toks_skip` (un `Rc<[T]>` alloue son en-tête même vide).
-fn empty_tpl() -> std::rc::Rc<[TplPart]> {
-    thread_local! {
-        static EMPTY: std::rc::Rc<[TplPart]> = std::rc::Rc::from(Vec::new());
-    }
-    EMPTY.with(std::clone::Clone::clone)
-}
-
-impl Lexer {
-    /// Lexer en tête de flux (positions 1:1) — JS-C525c.
-    pub(crate) fn new(src: std::rc::Rc<str>) -> Self {
-        Lexer {
-            src,
-            pos: 0,
-            byte_pos: 0,
-            line: 1,
-            col: 1,
-            legacy_octal: false,
-            tpl_nest: 0,
-            expect_operand: true,
-            clause_parens: Vec::new(),
-            brace_kinds: Vec::new(),
-            prev: Prev::None,
-            toks_skip: false,
-        }
-    }
-
-    /// Lexer positionné **après un `{`** (positions absolues du
-    /// jeton) — état post-`{` du flux réel : `expect_operand`
-    /// réarmé, `brace_kinds=[true]` (un `{` de corps est un
-    /// bloc), `prev=Brace`. Sert `probe_body` (skip) et
-    /// `materialize_body` (re-lex du corps au premier appel —
-    /// JS-C525c).
-    pub(crate) fn at(
-        src: std::rc::Rc<str>,
-        pos: usize,
-        byte_pos: usize,
-        line: usize,
-        col: usize,
-    ) -> Self {
-        Lexer {
-            src,
-            pos,
-            byte_pos,
-            line,
-            col,
-            legacy_octal: false,
-            tpl_nest: 0,
-            expect_operand: true,
-            clause_parens: Vec::new(),
-            brace_kinds: vec![true],
-            prev: Prev::Brace,
-            toks_skip: false,
-        }
-    }
-
+impl Lexer<'_> {
     fn peek(&self) -> Option<char> {
         // Fast-path ASCII : le JS réel est ASCII-dominant —
         // 1 octet lu vs 4 dans l'ancien `Vec<char>` (cache
@@ -614,11 +455,10 @@ impl Lexer {
     /// Token suivant + mise à jour de la machine `/` (JS-C525a —
     /// corps historique de la boucle `run`, `out.last()` lu via
     /// `self.prev`).
-    pub(crate) fn next_token(&mut self) -> Result<Token> {
+    fn next_token(&mut self) -> Result<Token> {
         let newline_before = self.skip_trivia()?;
         let (line, col) = (self.line, self.col);
         let off = self.pos;
-        let boff = self.byte_pos;
         self.legacy_octal = false;
         let tok = match self.peek() {
             None => Tok::Eof,
@@ -628,13 +468,6 @@ impl Lexer {
             Some('.') if self.peek_at(1).is_some_and(|c| c.is_ascii_digit()) => self.number()?,
             Some('#') => self.private_name()?,
             Some('"' | '\'') => Tok::Str(self.string()?),
-            // Mode skip (JS-C525b) : le template entier est
-            // consommé par la marche dédiée (`${}` imbriqués
-            // gérés) — placeholder partagé, zéro alloc.
-            Some('`') if self.toks_skip => {
-                self.skip_nested_template()?;
-                Tok::Tpl(empty_tpl())
-            }
             Some('`') => self.template()?,
             Some('/') if self.expect_operand => self.regex_lit()?,
             Some(_) => Tok::P(self.punct()?),
@@ -673,7 +506,6 @@ impl Lexer {
             newline_before,
             off,
             end: self.pos,
-            boff,
             legacy_octal: self.legacy_octal,
         })
     }
@@ -717,16 +549,8 @@ impl Lexer {
             flags.push(self.bump().unwrap_or_default());
         }
         Ok(Tok::Regex {
-            body: if self.toks_skip {
-                empty_rc()
-            } else {
-                body.into()
-            },
-            flags: if self.toks_skip {
-                empty_rc()
-            } else {
-                flags.into()
-            },
+            body: body.into(),
+            flags: flags.into(),
         })
     }
 
@@ -861,8 +685,7 @@ impl Lexer {
                 // UTF-8 + maj line/col par caractère). Le non-ASCII
                 // retombe sur le chemin char ; `\\` casse la boucle
                 // vers le chemin échappé.
-                let src = self.src.clone();
-                let bs = src.as_bytes();
+                let bs = self.src.as_bytes();
                 while let Some(&b) = bs.get(self.byte_pos) {
                     if b < 0x80 {
                         if matches!(b, b'a'..=b'z' | b'A'..=b'Z' | b'0'..=b'9' | b'_' | b'$') {
@@ -884,15 +707,7 @@ impl Lexer {
                         Ok(Tok::Kw(kw))
                     } else {
                         crate::j17_tick(&crate::J17_TOK_IDENT);
-                        // Mode skip : placeholder partagé — sauf
-                        // `of`, dont la valeur pilote le check
-                        // contextuel de `next_token` (interné :
-                        // bump de refcount après le premier).
-                        Ok(Tok::Ident(if self.toks_skip && s != "of" {
-                            empty_rc()
-                        } else {
-                            crate::intern(s)
-                        }))
+                        Ok(Tok::Ident(crate::intern(s)))
                     };
                 }
             }
@@ -1189,13 +1004,12 @@ impl Lexer {
                                  // ou EOF → chemin général amorcé du run ASCII consumé.
         let start_b = self.byte_pos;
         let q = quote.map_or(0, |c| if (c as u32) < 0x80 { c as u8 } else { 0 });
-        let ssrc = self.src.clone();
-        let bs = ssrc.as_bytes();
+        let bs = self.src.as_bytes();
         while let Some(&b) = bs.get(self.byte_pos) {
             if b == q {
-                let s = &ssrc[start_b..self.byte_pos];
+                let s = &self.src[start_b..self.byte_pos];
                 self.bump(); // quote fermante — compteurs via bump
-                return Ok(if self.toks_skip { empty_rc() } else { s.into() });
+                return Ok(s.into());
             }
             if matches!(b, b'\\' | b'\n' | b'\r') || b >= 0x80 {
                 break;
@@ -1210,13 +1024,7 @@ impl Lexer {
                 None => return Err(self.err("unterminated string literal")),
                 // ES2019 : LS/PS bruts sont permis ; LF/CR non.
                 Some('\n' | '\r') => return Err(self.err("newline in string literal")),
-                Some(c) if Some(c) == quote => {
-                    return Ok(if self.toks_skip {
-                        empty_rc()
-                    } else {
-                        out.into()
-                    });
-                }
+                Some(c) if Some(c) == quote => return Ok(out.into()),
                 Some('\\') => match self.bump() {
                     None => return Err(self.err("unterminated string escape")),
                     // `\` + `<CR><LF>` = UNE LineTerminatorSequence —
@@ -1309,7 +1117,7 @@ impl Lexer {
                     let toks = stacker::maybe_grow(
                         crate::parser::STACK_RED_ZONE,
                         crate::parser::STACK_GROW,
-                        || lex_in(std::rc::Rc::from(src), nest),
+                        || lex_in(&src, nest),
                     )?;
                     parts.push(TplPart::Expr(toks));
                     seg_start_b = self.byte_pos;
@@ -1646,7 +1454,7 @@ impl Lexer {
 /// que `skip_body` rejoue la même heuristique sans stocker
 /// les tokens du corps sauté.
 #[derive(Clone, Copy, Default)]
-pub(crate) enum Prev {
+enum Prev {
     /// Début de flux — un `{` en tête ouvre un bloc.
     #[default]
     None,
@@ -1798,209 +1606,4 @@ fn keyword(s: &str) -> Option<Kw> {
         "export" => Export,
         _ => return None,
     })
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    /// Corpus varié couvrant les cas durs du skip : regex en
-    /// positions ambiguës, templates + `${}` imbriqués, chaînes
-    /// avec accolades/échappes, commentaires contenant des braces,
-    /// `of` contextuel, accolades déséquilibrées en string.
-    const CORPUS: &[&str] = &[
-        "function f() { let x = 1; return x + 1; } f();",
-        r"function g(){ if (o<128) /re/.test(s); return /a{2}\//.source; }",
-        "const t = `a ${ {x:1}.x } b ${ `in ${ {y:2} }` } z`;",
-        r#"function h(){ let s = 'don\'t { }'; return "a}b\"c"; }"#,
-        "function k(){ /* { } } */ let r = 1; // }}\n return r; }",
-        "for (x of /re/) { break; } function m(){ return 1/2; }",
-        "class A { m(){ super.x(); } static { let z=0; } }",
-        "function n(){ `tpl ${f(/g{1,2}/)} ${'q}'}`; }",
-        "function o(){ let d = a ? {b:1} : {c:2}; }",
-        "x = () => ({a:1}); function p(){ if (x) { y(); } else { z(); } }",
-        "function q(){ label: for(;;) { if (a) break label; } }",
-        "function r(){ try { f(); } catch(e) { g(/}/); } finally {} }",
-        r"function u(){ return 'a\u{62}c'; } let v = 0x1F;",
-        "async function w(){ await /x/.test(''); for await (const a of b) {} }",
-        "function y(){ const r = /[/}{]/; let i = 0; i++; --i; }",
-    ];
-
-    /// `probe_body` doit rendre le même `}` fermant que
-    /// `close_table` pour **chaque** `{` du flux — corpus
-    /// statique **et** bundles réels capturés (`tests/data/`).
-    #[test]
-    fn probe_matches_close_table() {
-        let real: Vec<String> = [
-            "vol34_bbc_app.js",
-            "vol16_dsfr_core.js",
-            "bitmovin_transmuxer.js",
-            "vol12_spotify_gen_slice.js",
-            "vol526_yt_base.js",
-        ]
-        .iter()
-        .filter_map(|f| {
-            std::fs::read_to_string(format!("{}/tests/data/{f}", env!("CARGO_MANIFEST_DIR"))).ok()
-        })
-        .collect();
-        for src_rc in real.iter().map(|s| std::rc::Rc::from(s.as_str())) {
-            let toks = lex(&src_rc).unwrap_or_else(|e| panic!("lex fixture: {e}"));
-            let close = crate::parser::close_table(&toks);
-            for (i, t) in toks.iter().enumerate() {
-                if t.tok != Tok::P(P::LBrace) || close[i] == usize::MAX {
-                    continue;
-                }
-                let Some(end) = probe_body(&src_rc, t) else {
-                    panic!("probe_body fixture @{i} (off {})", t.off);
-                };
-                assert_eq!(
-                    end.close_off, toks[close[i]].off,
-                    "fixture @{i} close_off divergent"
-                );
-            }
-        }
-        for src in CORPUS {
-            let src_rc: std::rc::Rc<str> = std::rc::Rc::from(*src);
-            let toks = lex(src).unwrap_or_else(|e| panic!("lex {src:?}: {e}"));
-            let close = crate::parser::close_table(&toks);
-            for (i, t) in toks.iter().enumerate() {
-                if t.tok != Tok::P(P::LBrace) || close[i] == usize::MAX {
-                    continue;
-                }
-                let Some(end) = probe_body(&src_rc, t) else {
-                    panic!("probe_body {src:?} @{i}");
-                };
-                assert_eq!(end.close_off, toks[close[i]].off, "{src:?} @{i} close_off");
-                assert_eq!(
-                    end.close_boff, toks[close[i]].boff,
-                    "{src:?} @{i} close_boff"
-                );
-                assert_eq!(end.end_line, toks[close[i]].line, "{src:?} @{i} line");
-                assert_eq!(end.end_off, toks[close[i]].end, "{src:?} @{i} end_off");
-                assert_eq!(end.toks, close[i] - i - 1, "{src:?} @{i} toks");
-            }
-        }
-    }
-
-    /// Hash FNV d'un `Debug` incrémental — comparaison d'AST
-    /// sans chaîne géante (un bundle 1,4 Mo → des centaines de
-    /// Mo de `Debug` sinon).
-    struct Fnv(u64);
-    impl std::fmt::Write for Fnv {
-        fn write_str(&mut self, s: &str) -> std::fmt::Result {
-            for &b in s.as_bytes() {
-                self.0 ^= b as u64;
-                self.0 = self.0.wrapping_mul(0x0100_0000_01b3);
-            }
-            Ok(())
-        }
-    }
-    fn prog_hash(p: &crate::ast::Program) -> u64 {
-        use std::fmt::Write;
-        let mut h = Fnv(0xcbf2_9ce4_8422_2325);
-        let _ = write!(h, "{p:?}");
-        h.0
-    }
-
-    /// **Différentiel C525c** : le `Program` produit par le flux
-    /// pull+defer doit être **identique** à celui du chemin éager
-    /// (defer désarmé par `DEFER_MIN_TOKS = usize::MAX`) — tout
-    /// écart = divergence de borne de corps, de `/` ou de
-    /// positions. Corpus statique + bundles réels capturés.
-    #[test]
-    fn streaming_ast_matches_eager() {
-        let min = &crate::parser::DEFER_MIN_TOKS;
-        let ord = std::sync::atomic::Ordering::Relaxed;
-        let mut all: Vec<String> = CORPUS.iter().map(ToString::to_string).collect();
-        for f in [
-            "vol34_bbc_app.js",
-            "vol16_dsfr_core.js",
-            "bitmovin_transmuxer.js",
-            "vol12_spotify_gen_slice.js",
-            "vol526_yt_base.js",
-        ] {
-            if let Ok(s) =
-                std::fs::read_to_string(format!("{}/tests/data/{f}", env!("CARGO_MANIFEST_DIR")))
-            {
-                all.push(s);
-            }
-        }
-        for (n, src) in all.iter().enumerate() {
-            min.store(usize::MAX, ord);
-            let eager = crate::parser::parse_in(src, false, 4096, None);
-            min.store(24, ord);
-            let pull = crate::parser::parse_in(src, false, 4096, None);
-            min.store(24, ord);
-            match (eager, pull) {
-                (Err(e1), Err(e2)) => assert_eq!(
-                    format!("{e1:?}"),
-                    format!("{e2:?}"),
-                    "src#{n}: erreurs divergentes"
-                ),
-                (Ok(a), Ok(b)) => {
-                    let (ha, hb) = (prog_hash(&a), prog_hash(&b));
-                    if ha != hb {
-                        // Localise : premier statement divergent.
-                        let mut loc = String::new();
-                        for i in 0..a.body.len().max(b.body.len()) {
-                            let (sa, sb) = (a.body.get(i), b.body.get(i));
-                            let (x, y) =
-                                (sa.map(|s| format!("{s:?}")), sb.map(|s| format!("{s:?}")));
-                            if x != y {
-                                let trunc = |o: &Option<String>| {
-                                    o.as_deref().map_or_else(
-                                        || "<absent>".into(),
-                                        |d| d.chars().take(300).collect::<String>(),
-                                    )
-                                };
-                                loc = format!(
-                                    "stmt#{i}
-  eager: {}
-  pull : {}",
-                                    trunc(&x),
-                                    trunc(&y)
-                                );
-                                break;
-                            }
-                        }
-                        panic!(
-                            "src#{n}: AST divergent
-{loc}"
-                        );
-                    }
-                }
-                (a, b) => panic!(
-                    "src#{n}: eager={} vs pull={}",
-                    a.map_or("Err", |_| "Ok"),
-                    b.map_or("Err", |_| "Ok")
-                ),
-            }
-        }
-    }
-
-    /// Corps jamais fermé → `None` (repli éager, erreur normale).
-    #[test]
-    fn probe_unterminated_returns_none() {
-        let src = "function f() { let x = 1;";
-        let src_rc: std::rc::Rc<str> = std::rc::Rc::from(src);
-        let toks = lex(src).unwrap_or_else(|e| panic!("lex: {e}"));
-        let Some(lbrace) = toks.iter().find(|t| t.tok == Tok::P(P::LBrace)) else {
-            panic!("no lbrace");
-        };
-        assert!(probe_body(&src_rc, lbrace).is_none());
-    }
-
-    /// Erreur lex dans le corps (chaîne non terminée) → `None`
-    /// → le chemin éager re-lèvera l'erreur normale.
-    #[test]
-    fn probe_lex_error_returns_none() {
-        let src = "function f() { 'abc";
-        let src_rc: std::rc::Rc<str> = std::rc::Rc::from(src);
-        let Ok(toks) = lex(src) else {
-            return; // l'erreur peut aussi frapper le lex eager
-        };
-        if let Some(l) = toks.iter().find(|t| t.tok == Tok::P(P::LBrace)) {
-            assert!(probe_body(&src_rc, l).is_none());
-        }
-    }
 }

@@ -281,41 +281,6 @@ impl Stmt {
     }
 }
 
-/// `Debug` d'un littéral : identique aux champs dérivés sauf
-/// `body` — un corps différé est **matérialisé** (avec le vrai
-/// `is_gen` du littéral) puis imprimé comme `Parsed`, pour que
-/// les comparaisons de programmes eager-vs-pull (JS-C525c)
-/// voient la même valeur. Erreur de matérialisation → marqueur.
-impl std::fmt::Debug for FnLit {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let mut d = f.debug_struct("FnLit");
-        d.field("name", &self.name)
-            .field("params", &self.params)
-            .field("is_arrow", &self.is_arrow)
-            .field("is_async", &self.is_async)
-            .field("is_gen", &self.is_gen)
-            .field("strict", &self.strict)
-            .field("pos", &self.pos)
-            .field("src", &self.src)
-            .field("span", &self.span)
-            .field("src_text", &self.src_text.as_deref().map(str::len));
-        match &self.body {
-            FnBody::Parsed(b) => {
-                d.field("body", b);
-            }
-            FnBody::Deferred(d0) => match d0.get_or_parse(self.is_gen) {
-                Ok(b) => {
-                    d.field("body", &b);
-                }
-                Err(e) => {
-                    d.field("body", &format!("DeferredErr({e:?})"));
-                }
-            },
-        }
-        d.finish()
-    }
-}
-
 /// One binding introduced by an `import` clause.
 #[derive(Debug, Clone)]
 pub enum ImportBind {
@@ -477,24 +442,38 @@ pub struct SwitchCase {
     pub body: Vec<Stmt>,
 }
 
-/// `Debug` léger : positions de la plage retenue — **jamais** la
-/// `src` partagée (un derive imprimait le script entier par corps
-/// différé : ~1,4 Mo × ~17 k corps sur un bundle réel = OOM
-/// constaté en comparaison d'AST).
-impl std::fmt::Debug for DeferredBody {
+/// `Debug` d'un littéral : identique aux champs dérivés sauf
+/// `body` — un corps différé est **matérialisé** (avec le vrai
+/// `is_gen` du littéral) puis imprimé comme `Parsed`, pour que
+/// les comparaisons de programmes defer-on/defer-off voient la
+/// même valeur. Erreur de matérialisation → marqueur.
+impl std::fmt::Debug for FnLit {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match &self.src {
-            BodySrc::Toks { start, end, .. } => {
-                write!(f, "DeferredBody(Toks {start}..={end})")
+        let mut d = f.debug_struct("FnLit");
+        d.field("name", &self.name)
+            .field("params", &self.params)
+            .field("is_arrow", &self.is_arrow)
+            .field("is_async", &self.is_async)
+            .field("is_gen", &self.is_gen)
+            .field("strict", &self.strict)
+            .field("pos", &self.pos)
+            .field("src", &self.src)
+            .field("span", &self.span)
+            .field("src_text", &self.src_text.as_deref().map(str::len));
+        match &self.body {
+            FnBody::Parsed(b) => {
+                d.field("body", b);
             }
-            BodySrc::Range {
-                open_off,
-                open_boff,
-                ..
-            } => {
-                write!(f, "DeferredBody(Range @{open_off}/b{open_boff})")
-            }
+            FnBody::Deferred(d0) => match d0.get_or_parse(self.is_gen) {
+                Ok(b) => {
+                    d.field("body", &b);
+                }
+                Err(e) => {
+                    d.field("body", &format!("DeferredErr({e:?})"));
+                }
+            },
         }
+        d.finish()
     }
 }
 
@@ -570,31 +549,14 @@ pub enum FnBody {
     Deferred(Rc<DeferredBody>),
 }
 
-/// Plage d'un corps différé (JS-C525c) — tokens partagés pour
-/// les sous-flux `${…}` (source relative non sondable), plage
-/// octet **jamais lexée** pour le flux principal : le corps n'est
-/// tokenisé qu'à la matérialisation.
-#[derive(Debug, Clone)]
-pub enum BodySrc {
-    /// Tokens du flux parent partagés — `[start..=end]` délimite
-    /// le `{…}` ; `close` = `close_of` du parent (index globaux).
-    Toks {
-        toks: Rc<[Token]>,
-        start: usize,
-        end: usize,
-        close: Rc<Vec<usize>>,
-    },
-    /// Plage du script parent : `{` à `open_off`/`open_boff`,
-    /// `}` à `open`+corps — `Lexer::at` reprend les positions
-    /// absolues (`off`/`line` exacts pour spans et stacks) ; le
-    /// pull paresseux s'arrête de lui-même au `}` du corps.
-    Range {
-        src: Rc<str>,
-        open_off: usize,
-        open_boff: usize,
-        open_line: usize,
-        open_col: usize,
-    },
+/// `Debug` léger : bornes de la plage retenue — **jamais** le
+/// `toks` partagé (un derive imprimait le flux parent entier par
+/// corps différé : ~1,4 Mo de tokens × ~17 k corps sur un bundle
+/// réel = OOM constaté en comparaison d'AST).
+impl std::fmt::Debug for DeferredBody {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "DeferredBody({}..={})", self.start, self.end)
+    }
 }
 
 /// État d'un corps différé — la matérialisation est unique
@@ -602,9 +564,20 @@ pub enum BodySrc {
 /// éager (prologue de directives inclus).
 #[derive(Clone)]
 pub struct DeferredBody {
-    /// Plage du corps — tokens partagés (sous-flux `${…}`) ou
-    /// source jamais lexée (streaming JS-C525c).
-    pub src: BodySrc,
+    /// Flux de tokens du **script parent**, partagé (V-5b) —
+    /// `[start..=end]` délimite le `{…}` du corps. Le defer ne
+    /// copie plus la tranche : un bump de refcount par corps.
+    pub toks: Rc<[Token]>,
+    /// Index global du `{` d'ouverture dans `toks`.
+    pub start: usize,
+    /// Index global du `}` fermant (inclus) dans `toks`.
+    pub end: usize,
+    /// Table des délimiteurs appariés du flux parent, partagée
+    /// (V-5b) — `close_of` n'est plus reconstruite par corps :
+    /// ses entrées sont des index globaux, valides telles
+    /// quelles puisque `toks`/`pos` restent dans le repère
+    /// parent.
+    pub close: Rc<Vec<usize>>,
     /// Mode strict **hérité** au point du defer — le sous-parse
     /// repart de là puis `scan_directives` tranche le strict
     /// effectif (qui a déjà été fixé sur `FnLit.strict` par le

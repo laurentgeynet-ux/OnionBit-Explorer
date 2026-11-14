@@ -2,12 +2,13 @@
 // Copyright (C) 2026 Laurent Geynet
 // SPDX-License-Identifier: MIT OR Apache-2.0
 
-//! Régression JS-C525c : le rewind post-`probe_body` doit réarmer
-//! `stream.eof` — un lookahead (`arrow_guard`, `get(pos+k)`) qui a
-//! tiré jusqu'à `Eof` figeait `pull_to`, le parseur retombait sur
-//! le `}` synthétique clampé → `expected )` au parse suivant.
-//! Signature terrain : handler inline `onclick="…"` (wrapper
-//! `with(document){with(this.form||{}){with(this){…}}}`) muet.
+//! Régression JS-C525d/e : un corps différé doit produire une
+//! sémantique **identique** quels que soient les lookaheads et
+//! délimiteurs voisins — signature terrain N5.26 (chemin pull) :
+//! handler inline `onclick="…"` (wrapper `with(document){with
+//! (this.form||{}){with(this){…}}}`) muet par `expected )` avalé.
+//! Conservé comme verrou du contrat de déferral (vaut pour tout
+//! backend de saut de corps — `close_of` eager actuel compris).
 
 use explorer_jscore::{set_defer_min, Dom, Engine};
 use std::cell::RefCell;

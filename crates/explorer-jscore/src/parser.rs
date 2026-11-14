@@ -11,12 +11,12 @@
 //! init clauses (the `no_in` flag), like the spec's `NoIn` grammar.
 
 use crate::ast::{
-    AssignOp, BinOp, BodySrc, ChainStep, ClassLit, ClassMember, ClassMemberKind, DeferredBody,
-    ExportDecl, Expr, FnBody, FnLit, ForInit, ForTarget, ImportBind, ObjProp, Param, Pat, Program,
-    PropKey, Stmt, SwitchCase, UnOp, VarDecl,
+    AssignOp, BinOp, ChainStep, ClassLit, ClassMember, ClassMemberKind, DeferredBody, ExportDecl,
+    Expr, FnBody, FnLit, ForInit, ForTarget, ImportBind, ObjProp, Param, Pat, Program, PropKey,
+    Stmt, SwitchCase, UnOp, VarDecl,
 };
 use crate::error::{Error, Result};
-use crate::lexer::{probe_body, Kw, Lexer, Prev, Tok, Token, TplPart, P};
+use crate::lexer::{lex, Kw, Tok, Token, TplPart, P};
 use std::cell::OnceCell;
 use std::collections::HashSet;
 use std::rc::Rc;
@@ -43,167 +43,6 @@ pub(crate) fn close_table(toks: &[Token]) -> Vec<usize> {
         }
     }
     close
-}
-
-/// Flux de tokens du parseur (JS-C525c) — pull paresseux sur le
-/// script principal, eager pour les sous-flux `${…}` (leur source
-/// est un segment extrait sans repère — `probe_body` n'y est pas
-/// applicable, `src_text=None` refuse déjà le defer).
-enum Toks {
-    /// Lexer paresseux — `buf` ne contient que les tokens
-    /// consommés (+ lookahead retenu) ; un corps différé n'y
-    /// entre jamais : `{` et `}` seuls y sont résumés.
-    /// `states` : `(brace_len, clause_len, brace_top_post)`
-    /// — profondeurs **avant** chaque production + sommet de
-    /// `brace_kinds` **après** (le kind poussé par un `{`,
-    /// relu seulement aux `{` : c'est ce que son `}` dépile —
-    /// `static {` pousse `false`, corps de fonction `true`).
-    Pull(Vec<Token>, Vec<(u32, u32, bool)>, Lexer),
-    /// Flux complet + `close_of` — sous-flux `${…}` (chemins
-    /// historiques du deferral et de la garde `=>`).
-    Eager(Rc<[Token]>, Rc<Vec<usize>>),
-}
-
-/// Flux + état de remplissage — `at`/`get` tirent du lexer à la
-/// demande (comptés `lex_ns`/`lex_tok` comme le lex eager
-/// historique : la métrique reste « temps de production de
-/// jetons », simplement sans les corps sautés).
-struct Stream {
-    toks: Toks,
-    /// `Eof` produit (pull) — borne de remplissage.
-    eof: bool,
-    /// Erreur de lex mémorisée où elle frappe (le token `Eof`
-    /// empoisonné) — re-surfacée par `Parser::err`/`parse` pour
-    /// garder le message exact (`unterminated string…`).
-    lex_err: Option<Error>,
-    /// Source du flux — `probe_body` (pull uniquement).
-    src: Option<Rc<str>>,
-}
-
-impl Stream {
-    /// Flux pull neuf — `lx` positionné (tête ou `Lexer::at`
-    /// d'une matérialisation), `src` pour `probe_body`.
-    fn pull(lx: Lexer, src: Rc<str>) -> Self {
-        Stream {
-            toks: Toks::Pull(Vec::new(), Vec::new(), lx),
-            eof: false,
-            lex_err: None,
-            src: Some(src),
-        }
-    }
-
-    /// Flux complet — `close_of` construit sur place (petits
-    /// sous-flux `${…}` seulement).
-    fn eager(toks: Rc<[Token]>) -> Self {
-        let close = Rc::new(close_table(&toks));
-        Stream {
-            toks: Toks::Eager(toks, close),
-            eof: true,
-            lex_err: None,
-            src: None,
-        }
-    }
-
-    /// Remplit `buf` jusqu'à l'index `i` (pull — no-op eager).
-    /// Erreur lex → `Eof` empoisonné + `lex_err` mémorisée (le
-    /// parse voit la borne exactement comme l'eager la voyait).
-    fn pull_to(&mut self, i: usize) {
-        let Toks::Pull(buf, states, lx) = &mut self.toks else {
-            return;
-        };
-        while buf.len() <= i && !self.eof {
-            // Snapshot des piles `/` **avant** la production : à
-            // l'index d'un `{`, c'est l'état auquel revenir quand
-            // un defer saute son `}` (le `{` pousse sa propre
-            // entrée à l'intérieur de `next_token` — la borne est
-            // donc l'état *pré*-production).
-            states.push((
-                lx.brace_kinds.len() as u32,
-                lx.clause_parens.len() as u32,
-                false,
-            ));
-            match crate::j17_time(&crate::J17_LEX_NS, || lx.next_token()) {
-                Ok(t) => {
-                    if t.tok == Tok::Eof {
-                        self.eof = true;
-                    }
-                    crate::j17_tick(&crate::J17_LEX_TOK);
-                    // Sommet post-production : kind poussé par `{`.
-                    if let Some(s) = states.last_mut() {
-                        s.2 = lx.brace_kinds.last().copied().unwrap_or(false);
-                    }
-                    buf.push(t);
-                }
-                Err(e) => {
-                    self.eof = true;
-                    self.lex_err = Some(e);
-                    buf.push(Token {
-                        tok: Tok::Eof,
-                        line: lx.line,
-                        col: lx.col,
-                        newline_before: false,
-                        off: lx.pos,
-                        end: lx.pos,
-                        boff: lx.byte_pos,
-                        legacy_octal: false,
-                    });
-                }
-            }
-        }
-    }
-
-    /// Jeton d'index `i` — au-delà de `Eof` : dernier produit
-    /// (les accesseurs historiques `toks[pos]` supposaient un
-    /// `Eof` terminal toujours présent).
-    fn at(&mut self, i: usize) -> &Token {
-        self.pull_to(i);
-        match &self.toks {
-            Toks::Eager(toks, _) => &toks[i.min(toks.len().saturating_sub(1))],
-            Toks::Pull(buf, _, _) => &buf[i.min(buf.len().saturating_sub(1))],
-        }
-    }
-
-    /// Jeton `i` ou `None` au-delà du flux.
-    fn get(&mut self, i: usize) -> Option<&Token> {
-        self.pull_to(i);
-        match &self.toks {
-            Toks::Eager(toks, _) => toks.get(i),
-            Toks::Pull(buf, _, _) => buf.get(i),
-        }
-    }
-}
-
-/// Prologue de directives d'un corps différé en pull (JS-C525c)
-/// — mini-probe de **vrais** tokens juste après le `{` (les
-/// littéraux de directive sont lus), arrêt à la première
-/// non-directive. Même sémantique que [`deferred_use_strict`].
-fn defer_strict_pull(src: &Rc<str>, open: &Token) -> bool {
-    let mut lx = Lexer::at(
-        src.clone(),
-        open.off + 1,
-        open.boff + 1,
-        open.line,
-        open.col + 1,
-    );
-    let mut strict = false;
-    let mut pending: Option<Token> = None;
-    while let Some(t) = pending.take().or_else(|| lx.next_token().ok()) {
-        let Tok::Str(s) = &t.tok else {
-            break;
-        };
-        let Ok(n) = lx.next_token() else { break };
-        let ends = n.newline_before || matches!(n.tok, Tok::Eof | Tok::P(P::Semi | P::RBrace));
-        if !ends {
-            break;
-        }
-        if &**s == "use strict" {
-            strict = true;
-        }
-        if n.tok != Tok::P(P::Semi) {
-            pending = Some(n);
-        }
-    }
-    strict
 }
 
 /// Taille minimale (en tokens) d'un corps de fonction différé
@@ -267,50 +106,13 @@ pub(crate) fn materialize_body(d: &DeferredBody, is_gen: bool) -> Result<(Vec<St
     // — ni clone de slice ni reconstruction de table ; `pos`
     // global pointe juste après le `{` (`d.start`), la borne
     // structurale `}` (`d.end`) arrête `fn_body` naturellement.
-    if let BodySrc::Toks {
-        toks, start, end, ..
-    } = &d.src
-    {
-        debug_assert!(
-            matches!(toks.get(*start).map(|t| &t.tok), Some(Tok::P(P::LBrace)))
-                && matches!(toks.get(*end).map(|t| &t.tok), Some(Tok::P(P::RBrace)))
-        );
-    }
+    debug_assert!(
+        matches!(d.toks.get(d.start).map(|t| &t.tok), Some(Tok::P(P::LBrace)))
+            && matches!(d.toks.get(d.end).map(|t| &t.tok), Some(Tok::P(P::RBrace)))
+    );
     let mut sub = Parser {
-        // JS-C525c — `Toks` : flux parent partagé (sous-flux
-        // `${…}`) ; `Range` : pull-lexer repositionné juste après
-        // le `{` — le corps n'a jamais été lexé, il est produit
-        // ici, paresseusement (les corps imbriqués diffèrent à
-        // leur tour par `probe_body` sur la même `src`).
-        stream: match &d.src {
-            BodySrc::Toks { toks, close, .. } => Stream {
-                toks: Toks::Eager(toks.clone(), close.clone()),
-                eof: true,
-                lex_err: None,
-                src: None,
-            },
-            BodySrc::Range {
-                src,
-                open_off,
-                open_boff,
-                open_line,
-                open_col,
-                ..
-            } => Stream::pull(
-                Lexer::at(
-                    src.clone(),
-                    open_off + 1,
-                    open_boff + 1,
-                    *open_line,
-                    open_col + 1,
-                ),
-                src.clone(),
-            ),
-        },
-        pos: match &d.src {
-            BodySrc::Toks { start, .. } => start + 1,
-            BodySrc::Range { .. } => 0,
-        },
+        toks: d.toks.clone(),
+        pos: d.start + 1,
         nest: d.nest,
         nest_max: d.nest_max,
         strict: d.strict,
@@ -321,6 +123,7 @@ pub(crate) fn materialize_body(d: &DeferredBody, is_gen: bool) -> Result<(Vec<St
         priv_scopes: d.priv_scopes.clone(),
         src_name: d.src_name.clone(),
         src_text: d.src_text.clone(),
+        close_of: d.close.clone(),
     };
     crate::j17_time(&crate::J17_STMT_NS, || sub.fn_body())
 }
@@ -350,12 +153,14 @@ pub(crate) fn parse_in(
     src_name: Option<Rc<str>>,
 ) -> Result<Program> {
     crate::j17_parse_probe(src, false);
-    // JS-C525c — pull-lexer : les tokens sont produits à la
-    // demande ; les corps différés (`probe_body`) ne sont jamais
-    // lexés. `lex_tok`/`lex_ns` agrègent les pulls.
-    let src_rc: Rc<str> = Rc::from(src);
+    let toks = crate::j17_time(&crate::J17_LEX_NS, || lex(src))?;
+    crate::j17_add(
+        &crate::J17_LEX_TOK,
+        u64::try_from(toks.len()).unwrap_or(u64::MAX),
+    );
+    let close_of = crate::j17_time(&crate::J17_CLOSE_NS, || Rc::new(close_table(&toks)));
     let mut p = Parser {
-        stream: Stream::pull(Lexer::new(src_rc.clone()), src_rc.clone()),
+        toks: Rc::from(toks),
         pos: 0,
         nest: 0,
         nest_max,
@@ -366,7 +171,8 @@ pub(crate) fn parse_in(
         priv_scopes: Vec::new(),
         priv_seq: 0,
         src_name,
-        src_text: Some(src_rc),
+        src_text: Some(Rc::from(src)),
+        close_of,
     };
     let body = crate::j17_time(&crate::J17_STMT_NS, || -> Result<Vec<Stmt>> {
         p.scan_directives();
@@ -376,11 +182,6 @@ pub(crate) fn parse_in(
         }
         Ok(body)
     })?;
-    // Erreur de lex mémorisée (pull — `Eof` empoisonné) :
-    // le parse l'a atteinte sans faute propre — message exact.
-    if let Some(e) = p.stream.lex_err.take() {
-        return Err(e);
-    }
     crate::j17_add(
         &crate::J17_AST_STMT,
         u64::try_from(body.len()).unwrap_or(u64::MAX),
@@ -407,9 +208,14 @@ pub(crate) fn parse_module_in(
     src_name: Option<Rc<str>>,
 ) -> Result<Program> {
     crate::j17_parse_probe(src, true);
-    let src_rc: Rc<str> = Rc::from(src);
+    let toks = crate::j17_time(&crate::J17_LEX_NS, || lex(src))?;
+    crate::j17_add(
+        &crate::J17_LEX_TOK,
+        u64::try_from(toks.len()).unwrap_or(u64::MAX),
+    );
+    let close_of = crate::j17_time(&crate::J17_CLOSE_NS, || Rc::new(close_table(&toks)));
     let mut p = Parser {
-        stream: Stream::pull(Lexer::new(src_rc.clone()), src_rc.clone()),
+        toks: Rc::from(toks),
         pos: 0,
         nest: 0,
         nest_max,
@@ -420,7 +226,8 @@ pub(crate) fn parse_module_in(
         priv_seq: 0,
         priv_scopes: Vec::new(),
         src_name,
-        src_text: Some(src_rc),
+        src_text: Some(Rc::from(src)),
+        close_of,
     };
     let body = crate::j17_time(&crate::J17_STMT_NS, || -> Result<Vec<Stmt>> {
         p.scan_directives();
@@ -430,11 +237,6 @@ pub(crate) fn parse_module_in(
         }
         Ok(body)
     })?;
-    // Erreur de lex mémorisée (pull — `Eof` empoisonné) :
-    // le parse l'a atteinte sans faute propre — message exact.
-    if let Some(e) = p.stream.lex_err.take() {
-        return Err(e);
-    }
     crate::j17_add(
         &crate::J17_AST_STMT,
         u64::try_from(body.len()).unwrap_or(u64::MAX),
@@ -464,10 +266,10 @@ pub(crate) const STACK_RED_ZONE: usize = 256 * 1024;
 pub(crate) const STACK_GROW: usize = 2 * 1024 * 1024;
 
 struct Parser {
-    // JS-C525c — flux de tokens paresseux (pull-lexer) ou
-    // eager (sous-flux `${…}`) : les corps différés du flux
-    // principal ne sont jamais lexés.
-    stream: Stream,
+    // V-8a : tranche partagée — le parseur ne mute jamais
+    // `toks` ; `materialize_body` y passe son `Rc<[Token]>`
+    // directement (plus de clone `to_vec` ~165 µs/corps).
+    toks: Rc<[Token]>,
     pos: usize,
     /// Expression nesting guard — `((((…` input must not blow the
     /// native stack through recursive descent.
@@ -509,43 +311,52 @@ struct Parser {
     /// spec (JS-C264). `None` dans les sous-parseurs de template
     /// (`${…}` : offsets relatifs au segment, non tranchables).
     src_text: Option<Rc<str>>,
+    /// `close_of[i]` = index du jeton qui ferme le délimiteur
+    /// ouvrant à l'index `i` (`(`/`[`/`{`) — `usize::MAX` sinon.
+    /// Calculée en une passe O(n) : la spéculation `(params) =>`
+    /// vérifie `=>` après le `)` en O(1) au lieu de re-parser le
+    /// sous-arbre — les chaînes `n=(n=(n=…` (strftime réel,
+    /// base.js de dev.to) faisaient exploser le temps de parse
+    /// exponentiellement, un niveau par parenthèse. `Rc` (V-5b) :
+    /// les sous-parses de corps différés la partagent — repère
+    /// `pos` global, aucune reconstruction ni rebase.
+    close_of: Rc<Vec<usize>>,
 }
 
 impl Parser {
     // -- token plumbing ------------------------------------------------
 
-    fn peek(&mut self) -> &Tok {
-        &self.stream.at(self.pos).tok
+    fn peek(&self) -> &Tok {
+        &self.toks[self.pos].tok
     }
 
-    fn cur(&mut self) -> &Token {
-        self.stream.at(self.pos)
+    fn cur(&self) -> &Token {
+        &self.toks[self.pos]
     }
 
     /// `(ligne, colonne)` 1-based du jeton courant — ouverture
     /// d'un `FnLit` (JS-C47, rendue dans `error.stack`).
-    fn pos_here(&mut self) -> (usize, usize) {
+    fn pos_here(&self) -> (usize, usize) {
         (self.cur().line, self.cur().col)
     }
 
     /// Offset caractère du premier caractère du jeton courant —
     /// borne gauche de `FnLit::span` (toString verbatim, JS-C264).
-    fn off_here(&mut self) -> usize {
+    fn off_here(&self) -> usize {
         self.cur().off
     }
 
     /// Offset caractère juste après le dernier caractère du jeton
     /// **précédemment consommé** — borne droite de `FnLit::span`
     /// (le `}` final d'un corps, la fin d'une expression-flèche…).
-    fn off_prev_end(&mut self) -> usize {
-        self.stream.at(self.pos.saturating_sub(1)).end
+    fn off_prev_end(&self) -> usize {
+        self.toks[self.pos.saturating_sub(1)].end
     }
 
     fn next(&mut self) -> &Token {
         crate::j17_tick(&crate::J17_PAR_NEXT);
-        let has_next = self.stream.get(self.pos + 1).is_some();
-        let t = self.stream.at(self.pos);
-        if has_next {
+        let t = &self.toks[self.pos];
+        if self.pos + 1 < self.toks.len() {
             self.pos += 1;
         }
         t
@@ -554,7 +365,7 @@ impl Parser {
     /// `peek().clone()` compté (V-6) — les variants `String`/
     /// `Vec` de `Tok` paient malloc+memcpy par clone ; la
     /// cascade de précédence multiplie ce coût par token.
-    fn peek_clone(&mut self) -> Tok {
+    fn peek_clone(&self) -> Tok {
         crate::j17_tick(&crate::J17_TOK_CLONE);
         self.peek().clone()
     }
@@ -565,7 +376,7 @@ impl Parser {
         self.next().tok.clone()
     }
 
-    fn at_eof(&mut self) -> bool {
+    fn at_eof(&self) -> bool {
         matches!(self.peek(), Tok::Eof)
     }
 
@@ -587,22 +398,7 @@ impl Parser {
         self.nest -= 1;
     }
 
-    fn err(&mut self, message: impl Into<String>) -> Error {
-        // Erreur de lex mémorisée : si le curseur est sur l'Eof
-        // empoisonné, la vraie cause est le lex — message exact
-        // (`unterminated string literal`), pas « expected … ».
-        if self.stream.lex_err.is_some()
-            && matches!(self.stream.at(self.pos).tok, Tok::Eof)
-            && self.stream.eof
-        {
-            if let Some(Error::Syntax { line, col, message }) = &self.stream.lex_err {
-                return Error::Syntax {
-                    line: *line,
-                    col: *col,
-                    message: message.clone(),
-                };
-            }
-        }
+    fn err(&self, message: impl Into<String>) -> Error {
         let t = self.cur();
         Error::Syntax {
             line: t.line,
@@ -620,7 +416,7 @@ impl Parser {
         }
     }
 
-    fn check_p(&mut self, p: P) -> bool {
+    fn check_p(&self, p: P) -> bool {
         self.peek() == &Tok::P(p)
     }
 
@@ -682,7 +478,7 @@ impl Parser {
     /// portées de classe ouvertes — une classe imbriquée voit
     /// les privés des englobantes ; hors classe → `SyntaxError`
     /// (early error spec).
-    fn resolve_priv(&mut self, name: &str) -> Result<String> {
+    fn resolve_priv(&self, name: &str) -> Result<String> {
         for (seq, names) in self.priv_scopes.iter().rev() {
             if names.contains(name) {
                 return Ok(Self::priv_key(*seq, name));
@@ -696,14 +492,10 @@ impl Parser {
     /// 1 — les corps de méthode sont ignorés mais ne peuvent pas
     /// déclarer de noms privés ; les `#x` qui y figurent sont des
     /// *usages* de l'englobante.
-    fn prescan_privates(&mut self) -> HashSet<String> {
+    fn prescan_privates(&self) -> HashSet<String> {
         let mut out = HashSet::new();
         let mut depth = 1u32;
-        // JS-C525c — boucle indexée : le flux pull remplit `buf`
-        // à la demande (les tokens tirés sont retenus — le coût
-        // est amorti identique à l'itérateur sur slice).
-        let mut i = self.pos;
-        while let Some(t) = self.stream.get(i) {
+        for t in &self.toks[self.pos..] {
             match &t.tok {
                 Tok::P(P::LBrace) => depth += 1,
                 Tok::P(P::RBrace) => {
@@ -717,7 +509,6 @@ impl Parser {
                 }
                 _ => {}
             }
-            i += 1;
         }
         out
     }
@@ -764,14 +555,12 @@ impl Parser {
         };
         let mut i = self.pos + 2;
         let is_loop = loop {
-            match self.stream.get(i).map(|t| &t.tok) {
+            match self.toks.get(i).map(|t| &t.tok) {
                 Some(Tok::Kw(Kw::For | Kw::While | Kw::Do)) => break true,
-                Some(Tok::Ident(_)) => {
-                    if self.stream.get(i + 1).map(|t| &t.tok) == Some(&Tok::P(P::Colon)) {
-                        i += 2;
-                    } else {
-                        break false;
-                    }
+                Some(Tok::Ident(_))
+                    if self.toks.get(i + 1).map(|t| &t.tok) == Some(&Tok::P(P::Colon)) =>
+                {
+                    i += 2;
                 }
                 _ => break false,
             }
@@ -826,7 +615,7 @@ impl Parser {
                 // `let` is contextual: a decl only before ident/`[`/`{`
                 // (destructuring) — otherwise it's a sloppy identifier.
                 let decl = matches!(
-                    self.stream.get(self.pos + 1).map(|t| &t.tok),
+                    self.toks.get(self.pos + 1).map(|t| &t.tok),
                     Some(Tok::Ident(_) | Tok::P(P::LBracket | P::LBrace))
                 );
                 if !decl {
@@ -851,7 +640,7 @@ impl Parser {
             Tok::Ident(s)
                 if &*s == "async"
                     && matches!(
-                        self.stream.get(self.pos + 1),
+                        self.toks.get(self.pos + 1),
                         Some(t) if t.tok == Tok::Kw(Kw::Function) && !t.newline_before
                     ) =>
             {
@@ -865,7 +654,7 @@ impl Parser {
             Tok::Ident(s)
                 if &*s == "using"
                     && matches!(
-                        self.stream.get(self.pos + 1).map(|t| &t.tok),
+                        self.toks.get(self.pos + 1).map(|t| &t.tok),
                         Some(Tok::Ident(_) | Tok::P(P::LBracket | P::LBrace))
                     ) =>
             {
@@ -881,11 +670,11 @@ impl Parser {
             Tok::Ident(s)
                 if &*s == "await"
                     && matches!(
-                        self.stream.get(self.pos + 1).map(|t| &t.tok),
+                        self.toks.get(self.pos + 1).map(|t| &t.tok),
                         Some(Tok::Ident(u)) if &**u == "using"
                     )
                     && matches!(
-                        self.stream.get(self.pos + 2).map(|t| &t.tok),
+                        self.toks.get(self.pos + 2).map(|t| &t.tok),
                         Some(Tok::Ident(_) | Tok::P(P::LBracket | P::LBrace))
                     ) =>
             {
@@ -988,7 +777,7 @@ impl Parser {
             Tok::Kw(Kw::Import)
                 if self.module
                     && !matches!(
-                        self.stream.get(self.pos + 1).map(|t| &t.tok),
+                        self.toks.get(self.pos + 1).map(|t| &t.tok),
                         Some(Tok::P(P::LParen | P::Dot))
                     ) =>
             {
@@ -1006,7 +795,7 @@ impl Parser {
             Tok::Kw(Kw::Unsupported(k)) => Err(self.err(format!("`{k}` is not supported"))),
             // `ident :` — statement étiqueté (`lbl: for …`).
             Tok::Ident(_)
-                if self.stream.get(self.pos + 1).map(|t| &t.tok) == Some(&Tok::P(P::Colon)) =>
+                if self.toks.get(self.pos + 1).map(|t| &t.tok) == Some(&Tok::P(P::Colon)) =>
             {
                 self.labeled_stmt()
             }
@@ -1125,7 +914,7 @@ impl Parser {
                     Tok::Ident(s)
                         if &*s == "async"
                             && matches!(
-                                self.stream.get(self.pos + 1),
+                                self.toks.get(self.pos + 1),
                                 Some(t) if t.tok == Tok::Kw(Kw::Function) && !t.newline_before
                             ) =>
                     {
@@ -1171,7 +960,7 @@ impl Parser {
             Tok::Ident(s)
                 if &*s == "async"
                     && matches!(
-                        self.stream.get(self.pos + 1),
+                        self.toks.get(self.pos + 1),
                         Some(t) if t.tok == Tok::Kw(Kw::Function) && !t.newline_before
                     ) =>
             {
@@ -1278,9 +1067,9 @@ impl Parser {
     /// chaîne terminant un statement (`;`, `}`, EOF ou ASI).
     fn scan_directives(&mut self) {
         let mut i = self.pos;
-        while let Some(Tok::Str(s)) = self.stream.get(i).map(|t| &t.tok) {
-            let s = s.clone();
-            let ends = match self.stream.get(i + 1) {
+        while let Some(t) = self.toks.get(i) {
+            let Tok::Str(s) = &t.tok else { break };
+            let ends = match self.toks.get(i + 1) {
                 None => true,
                 Some(n) => {
                     n.newline_before || matches!(n.tok, Tok::Eof | Tok::P(P::Semi | P::RBrace))
@@ -1289,11 +1078,11 @@ impl Parser {
             if !ends {
                 break;
             }
-            if &*s == "use strict" {
+            if &**s == "use strict" {
                 self.strict = true;
             }
             i += 1;
-            if matches!(self.stream.get(i).map(|t| &t.tok), Some(Tok::P(P::Semi))) {
+            if matches!(self.toks.get(i).map(|t| &t.tok), Some(Tok::P(P::Semi))) {
                 i += 1;
             }
         }
@@ -1301,7 +1090,7 @@ impl Parser {
 
     /// Early errors strict sur un nom de liaison (`var`/`let`/
     /// `const`, param, catch, nom de fonction).
-    fn check_strict_binding(&mut self, name: &str) -> Result<()> {
+    fn check_strict_binding(&self, name: &str) -> Result<()> {
         if self.strict
             && matches!(
                 name,
@@ -1553,7 +1342,7 @@ impl Parser {
         // `for await (…)` — `await` is contextual; the paren follows.
         let is_await = matches!(self.peek(), Tok::Ident(s) if &**s == "await")
             && matches!(
-                self.stream.get(self.pos + 1).map(|t| &t.tok),
+                self.toks.get(self.pos + 1).map(|t| &t.tok),
                 Some(Tok::P(P::LParen))
             );
         if is_await {
@@ -1622,7 +1411,7 @@ impl Parser {
         // `for (using x of y)` (ES2026) — `using` est décl seulement
         // si suivi d'un binding ≠ `of` (`for (using of y)` = ident).
         let is_using = matches!(self.peek(), Tok::Ident(s) if &**s == "using")
-            && match self.stream.get(self.pos + 1).map(|t| &t.tok) {
+            && match self.toks.get(self.pos + 1).map(|t| &t.tok) {
                 Some(Tok::P(P::LBracket | P::LBrace)) => true,
                 Some(Tok::Ident(u)) => &**u != "of",
                 _ => false,
@@ -1790,7 +1579,7 @@ impl Parser {
                         | P::Colon
                         | P::Question
                 ) | Tok::Eof
-            ) || self.stream.at(self.pos).newline_before;
+            ) || self.toks[self.pos].newline_before;
             let arg = if no_arg {
                 None
             } else {
@@ -1841,7 +1630,7 @@ impl Parser {
         // `async` arrow forms — `async x =>`, `async (…) =>`. Only
         // when `=>` actually follows (speculative like `(`).
         if matches!(self.peek(), Tok::Ident(s) if &**s == "async")
-            && !self.stream.at(self.pos + 1).newline_before
+            && !self.toks[self.pos + 1].newline_before
         {
             if let Some(e) = self.try_async_arrow(no_in)? {
                 return Ok(Some(e));
@@ -1850,7 +1639,7 @@ impl Parser {
         // `ident => body`
         if let Tok::Ident(name) = self.peek_clone() {
             if self
-                .stream
+                .toks
                 .get(self.pos + 1)
                 .is_some_and(|t| t.tok == Tok::P(P::Arrow))
             {
@@ -1883,7 +1672,14 @@ impl Parser {
         // `)` apparié — sinon `(` ouvre une expression parenthésée
         // et la spéculation re-parserait tout le sous-arbre (chaîne
         // `n=(n=(n=…)` : croissance exponentielle — base.js dev.to).
-        if self.check_p(P::LParen) && self.arrow_guard() {
+        if self.check_p(P::LParen)
+            && self
+                .close_of
+                .get(self.pos)
+                .and_then(|&c| c.checked_add(1))
+                .and_then(|i| self.toks.get(i))
+                .is_some_and(|t| t.tok == Tok::P(P::Arrow))
+        {
             let save = self.pos;
             let pos = self.pos_here();
             let soff = self.off_here();
@@ -1921,7 +1717,7 @@ impl Parser {
                      // `async x => e`
         if let Tok::Ident(name) = self.peek_clone() {
             if self
-                .stream
+                .toks
                 .get(self.pos + 1)
                 .is_some_and(|t| t.tok == Tok::P(P::Arrow))
             {
@@ -1950,7 +1746,14 @@ impl Parser {
             return Ok(None);
         }
         // `async (…) => e` — même garde O(1) que `try_arrow`.
-        if self.check_p(P::LParen) && self.arrow_guard() {
+        if self.check_p(P::LParen)
+            && self
+                .close_of
+                .get(self.pos)
+                .and_then(|&c| c.checked_add(1))
+                .and_then(|i| self.toks.get(i))
+                .is_some_and(|t| t.tok == Tok::P(P::Arrow))
+        {
             if let Some(params) = self.scan_arrow_params() {
                 if self.check_p(P::Arrow) {
                     self.next();
@@ -2086,13 +1889,13 @@ impl Parser {
         // an expression — `await = x` keeps the identifier meaning.
         if matches!(self.peek(), Tok::Ident(s) if &**s == "await")
             && !matches!(
-                self.stream.get(self.pos + 1).map(|t| &t.tok),
+                self.toks.get(self.pos + 1).map(|t| &t.tok),
                 None | Some(
                     Tok::P(P::Semi | P::RParen | P::RBracket | P::Comma | P::Colon) | Tok::Eof
                 )
             )
             && !matches!(
-                self.stream.get(self.pos + 1).map(|t| &t.tok),
+                self.toks.get(self.pos + 1).map(|t| &t.tok),
                 Some(
                     Tok::P(
                         P::Assign
@@ -2378,7 +2181,7 @@ impl Parser {
                 // `async function [f](){}` — expression form.
                 if &*s == "async"
                     && matches!(
-                        self.stream.get(self.pos + 1),
+                        self.toks.get(self.pos + 1),
                         Some(t) if t.tok == Tok::Kw(Kw::Function) && !t.newline_before
                     )
                 {
@@ -2525,13 +2328,13 @@ impl Parser {
                 // `async m(){}` method.
                 let async_ = matches!(self.peek(), Tok::Ident(s) if &**s == "async")
                     && !matches!(
-                        self.stream.get(self.pos + 1).map(|t| &t.tok),
+                        self.toks.get(self.pos + 1).map(|t| &t.tok),
                         Some(Tok::P(
                             P::LParen | P::Assign | P::Colon | P::Comma | P::RBrace
                         ))
                     )
                     && if self
-                        .stream
+                        .toks
                         .get(self.pos + 1)
                         .is_some_and(|t| !t.newline_before)
                     {
@@ -2545,7 +2348,7 @@ impl Parser {
                 let mut accessor: Option<ClassMemberKind> = None;
                 if matches!(self.peek(), Tok::Ident(s) if &**s == "get" || &**s == "set")
                     && !matches!(
-                        self.stream.get(self.pos + 1).map(|t| &t.tok),
+                        self.toks.get(self.pos + 1).map(|t| &t.tok),
                         Some(Tok::P(
                             P::LParen | P::Assign | P::Colon | P::Comma | P::RBrace
                         ))
@@ -2688,10 +2491,9 @@ impl Parser {
                     raws.push(raw.clone());
                 }
                 TplPart::Expr(toks) => {
+                    let close_of = Rc::new(close_table(toks));
                     let mut sub = Parser {
-                        // Tokens relatifs au segment `${…}` —
-                        // flux eager (source non sondable).
-                        stream: Stream::eager(Rc::from(toks.as_slice())),
+                        toks: Rc::from(toks.as_slice()),
                         pos: 0,
                         // Accumule l'emboîtement : `${`x${`…`}`}`
                         // récursive via des sous-parseurs (JS-C41).
@@ -2707,9 +2509,11 @@ impl Parser {
                         priv_seq: self.priv_seq,
                         priv_scopes: self.priv_scopes.clone(),
                         src_name: self.src_name.clone(),
-                        // Offsets non tranchables dans la source
+                        // Tokens relatifs au segment `${…}` —
+                        // offsets non tranchables dans la source
                         // complète → toString repli `[code]`.
                         src_text: None,
+                        close_of,
                     };
                     let e = sub.expr(no_in)?;
                     self.priv_seq = self.priv_seq.max(sub.priv_seq);
@@ -2735,7 +2539,7 @@ impl Parser {
         // V8 l'inclut dans le source rendu (`async function f(){}`)
         // → le span part du jeton précédent.
         let soff = if async_ {
-            self.stream.at(self.pos.saturating_sub(1)).off
+            self.toks[self.pos.saturating_sub(1)].off
         } else {
             self.off_here()
         };
@@ -2792,64 +2596,24 @@ impl Parser {
     /// qui produit les erreurs normales (délimiteur désapparié,
     /// corps trop court…).
     fn try_defer_body(&mut self, lbrace: usize) -> Option<(FnBody, bool)> {
-        // Sous-flux `${…}` — chemin historique : tokens déjà
-        // matériels, `close_of` disponible, source relative non
-        // sondable (`probe_body` travaille en octets absolus).
-        if let Toks::Eager(toks, close_of) = &self.stream.toks {
-            let close = *close_of.get(lbrace)?;
-            if close == usize::MAX || close.saturating_sub(lbrace) < defer_min_toks() {
-                return None;
-            }
-            let strict = self.strict || deferred_use_strict(&toks[lbrace + 1..close]);
-            let d = DeferredBody {
-                src: BodySrc::Toks {
-                    toks: toks.clone(),
-                    start: lbrace,
-                    end: close,
-                    close: close_of.clone(),
-                },
-                strict: self.strict,
-                module: self.module,
-                nest: self.nest,
-                nest_max: self.nest_max,
-                priv_seq: self.priv_seq,
-                priv_scopes: self.priv_scopes.clone(),
-                src_name: self.src_name.clone(),
-                src_text: self.src_text.clone(),
-                parsed: OnceCell::new(),
-            };
-            crate::j17_tick(&crate::J17_FN_DEFER);
-            crate::j17_add(&crate::J17_FN_DEF_TOK, (close - lbrace + 1) as u64);
-            self.pos = close + 1;
-            return Some((FnBody::Deferred(Rc::new(d)), strict));
-        }
-        // Flux principal — probe tokenless (JS-C525c) : le corps
-        // n'est JAMAIS lexé. `buf` garde `{` + un `}` synthétique
-        // aux positions réelles — `off_prev_end`/ASI/`prev` du
-        // lexer restent exacts, comme si le flux les avait lus.
-        let src = self.stream.src.clone()?;
-        if self.stream.at(lbrace).tok != Tok::P(P::LBrace) {
+        let close = *self.close_of.get(lbrace)?;
+        if close == usize::MAX || close.saturating_sub(lbrace) < defer_min_toks() {
             return None;
         }
-        let end = crate::j17_time(&crate::J17_LEX_NS, || {
-            probe_body(&src, self.stream.at(lbrace))
-        })?;
-        if end.toks + 1 < defer_min_toks() {
-            return None;
-        }
-        // Strict effectif fixé dès le parse — prologue scanné par
-        // un mini-probe de vrais tokens (lecture seule, borné par
-        // la première non-directive).
-        let strict = self.strict || defer_strict_pull(&src, self.stream.at(lbrace));
-        let open = self.stream.at(lbrace);
+        // Strict effectif fixé dès le parse — le prologue de
+        // directives est scanné en lecture seule pour que
+        // `FnLit.strict` soit exact au premier appel.
+        let strict = self.strict || deferred_use_strict(&self.toks[lbrace + 1..close]);
         let d = DeferredBody {
-            src: BodySrc::Range {
-                src,
-                open_off: open.off,
-                open_boff: open.boff,
-                open_line: open.line,
-                open_col: open.col,
-            },
+            // V-5b : flux parent + table `close_of` partagés —
+            // ni copie de slice ni reconstruction : un bump de
+            // refcount par corps différé (au lieu d'un clone de
+            // `Token` par jeton du corps + O(slice) au premier
+            // appel).
+            toks: self.toks.clone(),
+            start: lbrace,
+            end: close,
+            close: self.close_of.clone(),
             strict: self.strict,
             module: self.module,
             nest: self.nest,
@@ -2860,96 +2624,10 @@ impl Parser {
             src_text: self.src_text.clone(),
             parsed: OnceCell::new(),
         };
-        let Toks::Pull(buf, states, lx) = &mut self.stream.toks else {
-            return None;
-        };
-        // Rewind de la machine `/` : les piles
-        // `brace_kinds`/`clause_parens` reviennent à leur profondeur
-        // **avant** le `{` (snapshot `states[lbrace]`) — les entrées
-        // poussées par les tokens tirés en anticipation et par le
-        // `{` lui-même sautent avec les tokens tronqués.
-        // `expect_operand` = kind dépilé par le `}` (`top` du
-        // `{` post-production) : bloc (`function`/`=>`/méthode)
-        // → `true` ; `static {}` (kind `false`) → `false` —
-        // miroir exact du `}` réel (`!ends_operand(RBrace)` +
-        // re-arm du bloc dépilé).
-        if let Some(&(bk, cp, top)) = states.get(lbrace) {
-            lx.brace_kinds.truncate(bk as usize);
-            lx.clause_parens.truncate(cp as usize);
-            lx.expect_operand = top;
-        }
-        lx.prev = Prev::Blockish;
-        buf.truncate(lbrace + 1);
-        states.truncate(lbrace + 1);
-        buf.push(Token {
-            tok: Tok::P(P::RBrace),
-            line: end.close_line,
-            col: end.close_col,
-            newline_before: end.close_nl,
-            off: end.close_off,
-            end: end.end_off,
-            boff: end.close_boff,
-            legacy_octal: false,
-        });
-        states.push((
-            lx.brace_kinds.len() as u32,
-            lx.clause_parens.len() as u32,
-            lx.brace_kinds.last().copied().unwrap_or(false),
-        ));
-        lx.pos = end.end_off;
-        lx.byte_pos = end.end_boff;
-        lx.line = end.end_line;
-        lx.col = end.end_col;
-        // Le rewind réarme le flux : les lookaheads (`arrow_guard`,
-        // `stream.get(pos+k)`) avaient pu tirer jusqu'à `Eof` —
-        // `eof=true` bloquerait `pull_to` (`at` clamperait sur le
-        // `}` synthétique → `expected )` sur le token suivant, bug
-        // réel mesuré sur les handlers inline `with{…}`). `lex_err`
-        // est effacé de même : une erreur dans la région sautée
-        // re-surgira à la matérialisation du corps, si appelé.
-        self.stream.eof = false;
-        self.stream.lex_err = None;
         crate::j17_tick(&crate::J17_FN_DEFER);
-        crate::j17_add(&crate::J17_FN_DEF_TOK, (end.toks + 2) as u64);
-        self.pos = lbrace + 2;
+        crate::j17_add(&crate::J17_FN_DEF_TOK, (close - lbrace + 1) as u64);
+        self.pos = close + 1;
         Some((FnBody::Deferred(Rc::new(d)), strict))
-    }
-
-    /// `(params) =>` — le `)` apparié au `(` courant est-il suivi
-    /// de `=>` ? Garde O(1) historique via `close_of` (eager) ;
-    /// pull : scan du buffer en avant — les tokens tirés sont
-    /// **retenus** (le coût est amorti comme `close_of`, pas
-    /// re-payé à la consommation).
-    fn arrow_guard(&mut self) -> bool {
-        if let Toks::Eager(toks, close_of) = &self.stream.toks {
-            return close_of
-                .get(self.pos)
-                .and_then(|&c| c.checked_add(1))
-                .and_then(|i| toks.get(i))
-                .is_some_and(|t| t.tok == Tok::P(P::Arrow));
-        }
-        let mut depth = 1usize;
-        let mut i = self.pos + 1;
-        loop {
-            let Some(t) = self.stream.get(i) else {
-                return false;
-            };
-            match t.tok {
-                Tok::P(P::LParen | P::LBracket | P::LBrace) => depth += 1,
-                Tok::P(P::RParen | P::RBracket | P::RBrace) => {
-                    depth -= 1;
-                    if depth == 0 {
-                        return matches!(
-                            self.stream.get(i + 1).map(|t| &t.tok),
-                            Some(Tok::P(P::Arrow))
-                        );
-                    }
-                }
-                Tok::Eof => return false,
-                _ => {}
-            }
-            i += 1;
-        }
     }
 
     /// `fn_body` avec deferral : `{` consommé à `pos-1` — corps
@@ -3053,7 +2731,7 @@ impl Parser {
             // `static m()` vs a method literally named `static`.
             if matches!(self.peek(), Tok::Ident(s) if &**s == "static")
                 && !matches!(
-                    self.stream.get(self.pos + 1).map(|t| &t.tok),
+                    self.toks.get(self.pos + 1).map(|t| &t.tok),
                     Some(Tok::P(
                         P::LParen | P::Assign | P::Colon | P::Semi | P::RBrace
                     ))
@@ -3099,13 +2777,13 @@ impl Parser {
             // `async m()` — same lookahead rule.
             let async_ = matches!(self.peek(), Tok::Ident(s) if &**s == "async")
                 && !matches!(
-                    self.stream.get(self.pos + 1).map(|t| &t.tok),
+                    self.toks.get(self.pos + 1).map(|t| &t.tok),
                     Some(Tok::P(
                         P::LParen | P::Assign | P::Colon | P::Semi | P::RBrace
                     ))
                 )
                 && if self
-                    .stream
+                    .toks
                     .get(self.pos + 1)
                     .is_some_and(|t| !t.newline_before)
                 {
@@ -3119,7 +2797,7 @@ impl Parser {
             let mut kind = ClassMemberKind::Method;
             if matches!(self.peek(), Tok::Ident(s) if &**s == "get" || &**s == "set")
                 && !matches!(
-                    self.stream.get(self.pos + 1).map(|t| &t.tok),
+                    self.toks.get(self.pos + 1).map(|t| &t.tok),
                     Some(Tok::P(
                         P::LParen | P::Assign | P::Colon | P::Semi | P::RBrace | P::Comma
                     ))
@@ -3276,5 +2954,124 @@ fn kw_str(kw: Kw) -> &'static str {
         Kw::Import => "import",
         Kw::Export => "export",
         Kw::Unsupported(s) => s,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Corpus différentiel — mêmes classes de sources que les
+    /// verrous historiques du deferral : regex ambiguës, `${}`
+    /// imbriqués, `with`, corps imbriqués, `of` contextuel,
+    /// accolades en strings/commentaires, directives.
+    const CORPUS: &[&str] = &[
+        "function f(){ return 1 } f()",
+        "var re = /a}b{c/; function g(){ return re.test('}') }",
+        "function outer(){ function inner(){ return `x${{a:1}}y` } return inner() }",
+        "(function(){ var a={}; with(a||{}){ x=1; y=2; z=3; w=4; v=5; u=6; t=7 } })",
+        "(function(event){ with(document||{}){ with(this.form||{}){ with(this){ hit=(hit||0)+1 } } } })",
+        "for (const x of [1,2]) { let y = x } const of = 3",
+        "function s(){ 'use strict'; return 1 }",
+        "function c(){ /* } { */ let x = 1; // }\n return x }",
+        "class K { static { let q = 1 } m(){ return `${1+{o:2}.o}` } }",
+        "const f = async () => { await g(); return async function(){ return 1 } }",
+        "function h(){ if (a||{}) { x=1;y=2;z=3;w=4;v=5;u=6;t=7;s=8 } return x }",
+        "x = { a: function(){ return { b: () => { return 1 } } } }",
+        "function tpl(){ return `a${ {k:1}.k }b${ function(){return 2}() }c` }",
+    ];
+
+    /// Hash FNV d'un `Debug` incrémental — comparaison d'AST
+    /// sans chaîne géante (un bundle 1,4 Mo → des centaines de
+    /// Mo de `Debug` sinon — OOM constaté au diagnostic N5.26).
+    struct Fnv(u64);
+    impl std::fmt::Write for Fnv {
+        fn write_str(&mut self, s: &str) -> std::fmt::Result {
+            for &b in s.as_bytes() {
+                self.0 ^= b as u64;
+                self.0 = self.0.wrapping_mul(0x0100_0000_01b3);
+            }
+            Ok(())
+        }
+    }
+    fn prog_hash(p: &crate::ast::Program) -> u64 {
+        use std::fmt::Write;
+        let mut h = Fnv(0xcbf2_9ce4_8422_2325);
+        let _ = write!(h, "{p:?}");
+        h.0
+    }
+
+    /// **Différentiel defer** : le `Program` produit avec corps
+    /// différés doit être **identique** à celui du chemin tout
+    /// éager (`DEFER_MIN_TOKS = usize::MAX`) — le `Debug` de
+    /// `FnLit` matérialise les corps, donc les sous-parses
+    /// tardifs sont couverts. Corpus statique + bundles réels
+    /// capturés (`tests/data/` — dont le vrai `m=base` yt de
+    /// N5.26). Tout écart = borne de corps, position ou
+    /// matérialisation divergente.
+    #[test]
+    fn deferred_ast_matches_eager() {
+        let ord = std::sync::atomic::Ordering::Relaxed;
+        let mut all: Vec<String> = CORPUS.iter().map(ToString::to_string).collect();
+        for f in [
+            "vol34_bbc_app.js",
+            "vol16_dsfr_core.js",
+            "bitmovin_transmuxer.js",
+            "vol12_spotify_gen_slice.js",
+            "vol526_yt_base.js",
+        ] {
+            if let Ok(s) =
+                std::fs::read_to_string(format!("{}/tests/data/{f}", env!("CARGO_MANIFEST_DIR")))
+            {
+                all.push(s);
+            }
+        }
+        for (n, src) in all.iter().enumerate() {
+            DEFER_MIN_TOKS.store(usize::MAX, ord);
+            let eager = parse_in(src, false, 4096, None);
+            DEFER_MIN_TOKS.store(24, ord);
+            let deferred = parse_in(src, false, 4096, None);
+            DEFER_MIN_TOKS.store(24, ord);
+            match (eager, deferred) {
+                (Err(e1), Err(e2)) => assert_eq!(
+                    format!("{e1:?}"),
+                    format!("{e2:?}"),
+                    "src#{n}: erreurs divergentes"
+                ),
+                (Ok(a), Ok(b)) => {
+                    let (ha, hb) = (prog_hash(&a), prog_hash(&b));
+                    if ha != hb {
+                        // Localise : premier statement divergent.
+                        let mut loc = String::new();
+                        for i in 0..a.body.len().max(b.body.len()) {
+                            let (x, y) = (
+                                a.body.get(i).map(|s| format!("{s:?}")),
+                                b.body.get(i).map(|s| format!("{s:?}")),
+                            );
+                            if x != y {
+                                let trunc = |o: &Option<String>| {
+                                    o.as_deref().map_or_else(
+                                        || "<absent>".into(),
+                                        |d| d.chars().take(300).collect::<String>(),
+                                    )
+                                };
+                                loc = format!(
+                                    "stmt#{i}\n  eager   : {}\n  deferred: {}",
+                                    trunc(&x),
+                                    trunc(&y)
+                                );
+                                break;
+                            }
+                        }
+                        panic!("src#{n}: AST divergent\n{loc}");
+                    }
+                }
+                (a, b) => panic!(
+                    "src#{n}: eager={} vs deferred={}",
+                    a.map_or("Err", |_| "Ok"),
+                    b.map_or("Err", |_| "Ok")
+                ),
+            }
+        }
     }
 }
