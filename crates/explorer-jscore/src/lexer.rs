@@ -425,10 +425,12 @@ pub(crate) struct Lexer {
     pub(crate) expect_operand: bool,
     /// `(` ouverte par un mot-clé de clause (`if|while|for|…`) :
     /// son `)` ré-arme `expect_operand` (regex, pas division).
-    clause_parens: Vec<bool>,
+    /// `pub(crate)` : le parseur pull (JS-C525c) snapshotte et
+    /// restaure les profondeurs au rewind d'un corps différé.
+    pub(crate) clause_parens: Vec<bool>,
     /// `{` ouvrant un bloc (statement) : son `}` ré-arme
     /// `expect_operand` ; un `{` operande (objet/pattern) non.
-    brace_kinds: Vec<bool>,
+    pub(crate) brace_kinds: Vec<bool>,
     /// Résumé du token précédent — pilote `(`/`{` ci-dessus.
     pub(crate) prev: Prev,
     /// Mode skip (JS-C525b — `probe_body`) : les valeurs lexées
@@ -1825,9 +1827,38 @@ mod tests {
     ];
 
     /// `probe_body` doit rendre le même `}` fermant que
-    /// `close_table` pour **chaque** `{` du flux.
+    /// `close_table` pour **chaque** `{` du flux — corpus
+    /// statique **et** bundles réels capturés (`tests/data/`).
     #[test]
     fn probe_matches_close_table() {
+        let real: Vec<String> = [
+            "vol34_bbc_app.js",
+            "vol16_dsfr_core.js",
+            "bitmovin_transmuxer.js",
+            "vol12_spotify_gen_slice.js",
+            "vol526_yt_base.js",
+        ]
+        .iter()
+        .filter_map(|f| {
+            std::fs::read_to_string(format!("{}/tests/data/{f}", env!("CARGO_MANIFEST_DIR"))).ok()
+        })
+        .collect();
+        for src_rc in real.iter().map(|s| std::rc::Rc::from(s.as_str())) {
+            let toks = lex(&src_rc).unwrap_or_else(|e| panic!("lex fixture: {e}"));
+            let close = crate::parser::close_table(&toks);
+            for (i, t) in toks.iter().enumerate() {
+                if t.tok != Tok::P(P::LBrace) || close[i] == usize::MAX {
+                    continue;
+                }
+                let Some(end) = probe_body(&src_rc, t) else {
+                    panic!("probe_body fixture @{i} (off {})", t.off);
+                };
+                assert_eq!(
+                    end.close_off, toks[close[i]].off,
+                    "fixture @{i} close_off divergent"
+                );
+            }
+        }
         for src in CORPUS {
             let src_rc: std::rc::Rc<str> = std::rc::Rc::from(*src);
             let toks = lex(src).unwrap_or_else(|e| panic!("lex {src:?}: {e}"));
@@ -1847,6 +1878,102 @@ mod tests {
                 assert_eq!(end.end_line, toks[close[i]].line, "{src:?} @{i} line");
                 assert_eq!(end.end_off, toks[close[i]].end, "{src:?} @{i} end_off");
                 assert_eq!(end.toks, close[i] - i - 1, "{src:?} @{i} toks");
+            }
+        }
+    }
+
+    /// Hash FNV d'un `Debug` incrémental — comparaison d'AST
+    /// sans chaîne géante (un bundle 1,4 Mo → des centaines de
+    /// Mo de `Debug` sinon).
+    struct Fnv(u64);
+    impl std::fmt::Write for Fnv {
+        fn write_str(&mut self, s: &str) -> std::fmt::Result {
+            for &b in s.as_bytes() {
+                self.0 ^= b as u64;
+                self.0 = self.0.wrapping_mul(0x0100_0000_01b3);
+            }
+            Ok(())
+        }
+    }
+    fn prog_hash(p: &crate::ast::Program) -> u64 {
+        use std::fmt::Write;
+        let mut h = Fnv(0xcbf2_9ce4_8422_2325);
+        let _ = write!(h, "{p:?}");
+        h.0
+    }
+
+    /// **Différentiel C525c** : le `Program` produit par le flux
+    /// pull+defer doit être **identique** à celui du chemin éager
+    /// (defer désarmé par `DEFER_MIN_TOKS = usize::MAX`) — tout
+    /// écart = divergence de borne de corps, de `/` ou de
+    /// positions. Corpus statique + bundles réels capturés.
+    #[test]
+    fn streaming_ast_matches_eager() {
+        let min = &crate::parser::DEFER_MIN_TOKS;
+        let ord = std::sync::atomic::Ordering::Relaxed;
+        let mut all: Vec<String> = CORPUS.iter().map(ToString::to_string).collect();
+        for f in [
+            "vol34_bbc_app.js",
+            "vol16_dsfr_core.js",
+            "bitmovin_transmuxer.js",
+            "vol12_spotify_gen_slice.js",
+            "vol526_yt_base.js",
+        ] {
+            if let Ok(s) =
+                std::fs::read_to_string(format!("{}/tests/data/{f}", env!("CARGO_MANIFEST_DIR")))
+            {
+                all.push(s);
+            }
+        }
+        for (n, src) in all.iter().enumerate() {
+            min.store(usize::MAX, ord);
+            let eager = crate::parser::parse_in(src, false, 4096, None);
+            min.store(24, ord);
+            let pull = crate::parser::parse_in(src, false, 4096, None);
+            min.store(24, ord);
+            match (eager, pull) {
+                (Err(e1), Err(e2)) => assert_eq!(
+                    format!("{e1:?}"),
+                    format!("{e2:?}"),
+                    "src#{n}: erreurs divergentes"
+                ),
+                (Ok(a), Ok(b)) => {
+                    let (ha, hb) = (prog_hash(&a), prog_hash(&b));
+                    if ha != hb {
+                        // Localise : premier statement divergent.
+                        let mut loc = String::new();
+                        for i in 0..a.body.len().max(b.body.len()) {
+                            let (sa, sb) = (a.body.get(i), b.body.get(i));
+                            let (x, y) =
+                                (sa.map(|s| format!("{s:?}")), sb.map(|s| format!("{s:?}")));
+                            if x != y {
+                                let trunc = |o: &Option<String>| {
+                                    o.as_deref().map_or_else(
+                                        || "<absent>".into(),
+                                        |d| d.chars().take(300).collect::<String>(),
+                                    )
+                                };
+                                loc = format!(
+                                    "stmt#{i}
+  eager: {}
+  pull : {}",
+                                    trunc(&x),
+                                    trunc(&y)
+                                );
+                                break;
+                            }
+                        }
+                        panic!(
+                            "src#{n}: AST divergent
+{loc}"
+                        );
+                    }
+                }
+                (a, b) => panic!(
+                    "src#{n}: eager={} vs pull={}",
+                    a.map_or("Err", |_| "Ok"),
+                    b.map_or("Err", |_| "Ok")
+                ),
             }
         }
     }

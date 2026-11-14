@@ -434,6 +434,9 @@ pub static J17_FN_DEFER: std::sync::atomic::AtomicU64 = std::sync::atomic::Atomi
 /// réel) : `def_mat`/`fn_defer` = taux d'usage — décide si le
 /// lexer streaming (corps jamais lexés) vaut le refactor.
 pub static J17_DEFER_MAT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+/// Erreurs de matérialisation de corps différés (JS-C525c diag) —
+/// toute valeur >0 = un corps relu a échoué au parse tardif.
+pub static J17_DEF_ERR: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 /// V-5a — tokens couverts par les corps différés (part du
 /// stream soustraite à la descente éager).
 pub static J17_FN_DEF_TOK: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
@@ -486,6 +489,14 @@ pub(crate) fn j17_on() -> bool {
 
 /// Arme les compteurs J17 sans variable d'environnement
 /// (bancs de test J17 — sinon les relevés restent à zéro).
+/// Réglage diagnostic du seuil de deferral (tests) —
+/// `usize::MAX` désarme le defer → parse entièrement éager.
+/// Prod : jamais appelée (défaut 24).
+#[doc(hidden)]
+pub fn set_defer_min(n: usize) {
+    crate::parser::DEFER_MIN_TOKS.store(n, std::sync::atomic::Ordering::Relaxed);
+}
+
 pub fn j17_enable() {
     J17_ENABLED.store(true, std::sync::atomic::Ordering::Relaxed);
 }
@@ -496,7 +507,7 @@ pub fn j17_enable() {
 #[must_use]
 pub fn j17_snapshot() -> String {
     let r = std::sync::atomic::Ordering::Relaxed;
-    let pairs: [(&str, &std::sync::atomic::AtomicU64); 60] = [
+    let pairs: [(&str, &std::sync::atomic::AtomicU64); 61] = [
         ("prop_lookup", &J17_PROP_LOOKUP),
         ("proto_lvl", &J17_PROTO_LVL),
         ("prop_scan", &J17_PROP_SCAN),
@@ -548,6 +559,7 @@ pub fn j17_snapshot() -> String {
         ("par_next", &J17_PAR_NEXT),
         ("fn_defer", &J17_FN_DEFER),
         ("def_mat", &J17_DEFER_MAT),
+        ("def_err", &J17_DEF_ERR),
         ("fn_def_tok", &J17_FN_DEF_TOK),
         ("fn_mat", &J17_FN_MAT),
         ("frame_ns", &J17_FRAME_NS),

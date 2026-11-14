@@ -922,7 +922,18 @@ impl Engine {
                         return Err(Thrown(t));
                     }
                     let desc = self.describe_rejection(t);
-                    self.unhandled_reports.push(format!("uncaught: {desc}"));
+                    // Diag N5.26 — queue du journal `nullread`
+                    // (chaîne `fn(l:c)` des lectures nulles
+                    // récentes) : le rapport `uncaught:` nomme
+                    // alors l'appelant exact du `cannot read`.
+                    let tail = crate::nullread_log_drain();
+                    let extra = if tail.is_empty() {
+                        String::new()
+                    } else {
+                        format!(" [nullread {}]", tail.join(" <- "))
+                    };
+                    self.unhandled_reports
+                        .push(format!("uncaught: {desc}{extra}"));
                     // §B-118 — la même info partait seulement
                     // vers le ring (drain session jamais
                     // branché) : un throw avalé de microtask

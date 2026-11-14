@@ -12801,4 +12801,31 @@ chaque gain rapporté contre les **deux** archétypes.
   imbriqués re-diffèrent). Strict/arrow-guard/erreurs lex
   préservés. Verrous : lang 315, j17_counters 9, c500 32,
   c502 24, lib 53, clippy + doc propres.
+  **Vol N5.26 INVALIDE** — 8 × `cannot read 'key' of
+  Undefined` (`m=base:3733`), workload ÷50, `lex_ns` devto
+  +138 % (probe+re-lex des 27 % matérialisés). Claim gelé
+  jusqu'à correction confirmée.
+- [x] **JS-C525d — cause racine N5.26 : `stream.eof`
+  résiduel au rewind** : un lookahead (`arrow_guard`,
+  `get(pos+k)`) ayant tiré le flux pull jusqu'à `Eof` avant
+  un `{` différé laissait `eof=true` après le rewind —
+  `pull_to` muet → `at()` rendait le `}` synthétique clampé
+  → `expected )` sur le token suivant (handlers inline
+  `with{…}` muets, `click_runs_inline_onclick_attribute`
+  rouge, signature yt `expected )` avalée par
+  `report_exception`). Fix : rewind réarme `eof`, efface
+  `lex_err`, et capture le kind poussé par `{` (`states`
+  `(brace_len, clause_len, brace_top_post)` →
+  `expect_operand` = kind dépilé : `static {}` = `false`,
+  corps = `true`). Diagnostic : différentiel AST en hash FNV
+  incrémental (le `Debug` géant OOMait — `DeferredBody.src`
+  = source entière × ~17 k) : AST **identique** sur corpus
+  + vrai `m=base` yt capturé (`tests/data/vol526_yt_base.js`,
+  1,2 Mo). Instrumentation N5.27 : queue `nullread` suffixée
+  aux `uncaught:`, compteur `def_err`, erreur de
+  matérialisation nommée, knob `set_defer_min`. Verrous :
+  `c525_rewind` (régression), `lang` 315, `dom` 265,
+  session `click_runs_inline_onclick_attribute` re-vert.
+  **Claim C525c toujours gelé** — vol N5.27 requis
+  (workload comparable, zéro uncaught nouveau).
 

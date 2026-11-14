@@ -10889,9 +10889,15 @@ impl Engine {
         let _t = crate::j17_scope(&crate::J17_MAT_NS);
         match &lit.body {
             crate::ast::FnBody::Parsed(b) => Ok(b.clone()),
-            crate::ast::FnBody::Deferred(d) => d
-                .get_or_parse(lit.is_gen)
-                .map_err(|e| self.syntax_error(e.to_string())),
+            crate::ast::FnBody::Deferred(d) => {
+                d.get_or_parse(lit.is_gen).map_err(|e| {
+                    crate::j17_tick(&crate::J17_DEF_ERR);
+                    // Le corps fautif est nommé (lit.pos = position
+                    // réelle dans le bundle) — un throw de parse
+                    // tardif doit identifier sa source (N5.26).
+                    self.syntax_error(format!("deferred {} : {e}", Self::fn_label_of(lit)))
+                })
+            }
         }
     }
 

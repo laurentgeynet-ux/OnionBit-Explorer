@@ -53,7 +53,12 @@ enum Toks {
     /// Lexer paresseux — `buf` ne contient que les tokens
     /// consommés (+ lookahead retenu) ; un corps différé n'y
     /// entre jamais : `{` et `}` seuls y sont résumés.
-    Pull(Vec<Token>, Lexer),
+    /// `states` : `(brace_len, clause_len, brace_top_post)`
+    /// — profondeurs **avant** chaque production + sommet de
+    /// `brace_kinds` **après** (le kind poussé par un `{`,
+    /// relu seulement aux `{` : c'est ce que son `}` dépile —
+    /// `static {` pousse `false`, corps de fonction `true`).
+    Pull(Vec<Token>, Vec<(u32, u32, bool)>, Lexer),
     /// Flux complet + `close_of` — sous-flux `${…}` (chemins
     /// historiques du deferral et de la garde `=>`).
     Eager(Rc<[Token]>, Rc<Vec<usize>>),
@@ -80,7 +85,7 @@ impl Stream {
     /// d'une matérialisation), `src` pour `probe_body`.
     fn pull(lx: Lexer, src: Rc<str>) -> Self {
         Stream {
-            toks: Toks::Pull(Vec::new(), lx),
+            toks: Toks::Pull(Vec::new(), Vec::new(), lx),
             eof: false,
             lex_err: None,
             src: Some(src),
@@ -103,16 +108,30 @@ impl Stream {
     /// Erreur lex → `Eof` empoisonné + `lex_err` mémorisée (le
     /// parse voit la borne exactement comme l'eager la voyait).
     fn pull_to(&mut self, i: usize) {
-        let Toks::Pull(buf, lx) = &mut self.toks else {
+        let Toks::Pull(buf, states, lx) = &mut self.toks else {
             return;
         };
         while buf.len() <= i && !self.eof {
+            // Snapshot des piles `/` **avant** la production : à
+            // l'index d'un `{`, c'est l'état auquel revenir quand
+            // un defer saute son `}` (le `{` pousse sa propre
+            // entrée à l'intérieur de `next_token` — la borne est
+            // donc l'état *pré*-production).
+            states.push((
+                lx.brace_kinds.len() as u32,
+                lx.clause_parens.len() as u32,
+                false,
+            ));
             match crate::j17_time(&crate::J17_LEX_NS, || lx.next_token()) {
                 Ok(t) => {
                     if t.tok == Tok::Eof {
                         self.eof = true;
                     }
                     crate::j17_tick(&crate::J17_LEX_TOK);
+                    // Sommet post-production : kind poussé par `{`.
+                    if let Some(s) = states.last_mut() {
+                        s.2 = lx.brace_kinds.last().copied().unwrap_or(false);
+                    }
                     buf.push(t);
                 }
                 Err(e) => {
@@ -140,7 +159,7 @@ impl Stream {
         self.pull_to(i);
         match &self.toks {
             Toks::Eager(toks, _) => &toks[i.min(toks.len().saturating_sub(1))],
-            Toks::Pull(buf, _) => &buf[i.min(buf.len().saturating_sub(1))],
+            Toks::Pull(buf, _, _) => &buf[i.min(buf.len().saturating_sub(1))],
         }
     }
 
@@ -149,7 +168,7 @@ impl Stream {
         self.pull_to(i);
         match &self.toks {
             Toks::Eager(toks, _) => toks.get(i),
-            Toks::Pull(buf, _) => buf.get(i),
+            Toks::Pull(buf, _, _) => buf.get(i),
         }
     }
 }
@@ -192,7 +211,15 @@ fn defer_strict_pull(src: &Rc<str>, open: &Token) -> bool {
 /// scan) ne se justifie pas (`{ return x }` ≈ 5 tokens reste
 /// éager). Au-delà, le saut `close_of` O(1) évite la descente
 /// récursive — les corps jamais appelés ne sont jamais parsés.
-const DEFER_MIN_TOKS: usize = 24;
+/// Atomique `pub(crate)` — valeur fixe 24 en production ;
+/// les tests différentiels la montent à `usize::MAX` pour
+/// forcer le chemin éager et comparer les AST produits.
+pub(crate) static DEFER_MIN_TOKS: std::sync::atomic::AtomicUsize =
+    std::sync::atomic::AtomicUsize::new(24);
+
+fn defer_min_toks() -> usize {
+    DEFER_MIN_TOKS.load(std::sync::atomic::Ordering::Relaxed)
+}
 
 /// Scan lecture seule du prologue de directives d'un corps
 /// différé — `true` si `"use strict"` en tête. Même règle de
@@ -2770,7 +2797,7 @@ impl Parser {
         // sondable (`probe_body` travaille en octets absolus).
         if let Toks::Eager(toks, close_of) = &self.stream.toks {
             let close = *close_of.get(lbrace)?;
-            if close == usize::MAX || close.saturating_sub(lbrace) < DEFER_MIN_TOKS {
+            if close == usize::MAX || close.saturating_sub(lbrace) < defer_min_toks() {
                 return None;
             }
             let strict = self.strict || deferred_use_strict(&toks[lbrace + 1..close]);
@@ -2807,7 +2834,7 @@ impl Parser {
         let end = crate::j17_time(&crate::J17_LEX_NS, || {
             probe_body(&src, self.stream.at(lbrace))
         })?;
-        if end.toks + 1 < DEFER_MIN_TOKS {
+        if end.toks + 1 < defer_min_toks() {
             return None;
         }
         // Strict effectif fixé dès le parse — prologue scanné par
@@ -2833,10 +2860,27 @@ impl Parser {
             src_text: self.src_text.clone(),
             parsed: OnceCell::new(),
         };
-        let Toks::Pull(buf, lx) = &mut self.stream.toks else {
+        let Toks::Pull(buf, states, lx) = &mut self.stream.toks else {
             return None;
         };
+        // Rewind de la machine `/` : les piles
+        // `brace_kinds`/`clause_parens` reviennent à leur profondeur
+        // **avant** le `{` (snapshot `states[lbrace]`) — les entrées
+        // poussées par les tokens tirés en anticipation et par le
+        // `{` lui-même sautent avec les tokens tronqués.
+        // `expect_operand` = kind dépilé par le `}` (`top` du
+        // `{` post-production) : bloc (`function`/`=>`/méthode)
+        // → `true` ; `static {}` (kind `false`) → `false` —
+        // miroir exact du `}` réel (`!ends_operand(RBrace)` +
+        // re-arm du bloc dépilé).
+        if let Some(&(bk, cp, top)) = states.get(lbrace) {
+            lx.brace_kinds.truncate(bk as usize);
+            lx.clause_parens.truncate(cp as usize);
+            lx.expect_operand = top;
+        }
+        lx.prev = Prev::Blockish;
         buf.truncate(lbrace + 1);
+        states.truncate(lbrace + 1);
         buf.push(Token {
             tok: Tok::P(P::RBrace),
             line: end.close_line,
@@ -2847,16 +2891,24 @@ impl Parser {
             boff: end.close_boff,
             legacy_octal: false,
         });
+        states.push((
+            lx.brace_kinds.len() as u32,
+            lx.clause_parens.len() as u32,
+            lx.brace_kinds.last().copied().unwrap_or(false),
+        ));
         lx.pos = end.end_off;
         lx.byte_pos = end.end_boff;
         lx.line = end.end_line;
         lx.col = end.end_col;
-        // État post-`}` du flux réel : `}` de bloc ré-arme
-        // `expect_operand` (regex possible), `prev` = `}`.
-        // `brace_kinds`/`clause_parens` inchangés — le `{`/`}` du
-        // corps se neutralisent.
-        lx.expect_operand = true;
-        lx.prev = Prev::Blockish;
+        // Le rewind réarme le flux : les lookaheads (`arrow_guard`,
+        // `stream.get(pos+k)`) avaient pu tirer jusqu'à `Eof` —
+        // `eof=true` bloquerait `pull_to` (`at` clamperait sur le
+        // `}` synthétique → `expected )` sur le token suivant, bug
+        // réel mesuré sur les handlers inline `with{…}`). `lex_err`
+        // est effacé de même : une erreur dans la région sautée
+        // re-surgira à la matérialisation du corps, si appelé.
+        self.stream.eof = false;
+        self.stream.lex_err = None;
         crate::j17_tick(&crate::J17_FN_DEFER);
         crate::j17_add(&crate::J17_FN_DEF_TOK, (end.toks + 2) as u64);
         self.pos = lbrace + 2;
