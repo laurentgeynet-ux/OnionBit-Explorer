@@ -630,6 +630,39 @@ pub fn j17_snapshot() -> String {
         }
         out.push_str(&format!("fown:{joined}"));
     }
+    // JS-C527 — top-20 clés marchées (`keys:k=n,…`) ; noms
+    // assainis (hors `[A-Za-z0-9_$@.:-]` → `?`, tronqués à 24)
+    // pour rester sur une seule ligne de paires.
+    let mut keys: Vec<(u64, std::rc::Rc<str>)> =
+        J17_KEY_WALK.with(|m| m.borrow().iter().map(|(k, n)| (*n, k.clone())).collect());
+    keys.sort_unstable_by_key(|a| std::cmp::Reverse(a.0));
+    if !keys.is_empty() {
+        let joined = keys
+            .iter()
+            .take(20)
+            .map(|(n, k)| {
+                let s: String = k
+                    .chars()
+                    .take(24)
+                    .map(|c| {
+                        if c.is_ascii_alphanumeric()
+                            || matches!(c, '_' | '$' | '@' | '.' | ':' | '-')
+                        {
+                            c
+                        } else {
+                            '?'
+                        }
+                    })
+                    .collect();
+                format!("{s}={n}")
+            })
+            .collect::<Vec<_>>()
+            .join(",");
+        if !out.is_empty() {
+            out.push(' ');
+        }
+        out.push_str(&format!("keys:{joined}"));
+    }
     out
 }
 
@@ -661,6 +694,37 @@ thread_local! {
     static J17_FOWN_SITES: std::cell::RefCell<
         std::collections::BTreeMap<usize, (String, u64)>,
     > = const { std::cell::RefCell::new(std::collections::BTreeMap::new()) };
+    /// JS-C527 — histogramme des **clés** marchées par
+    /// `find_prop_owner_links` (`keys:` du snapshot) : nomme les
+    /// lookups dominants (`hasOwnProperty`, `constructor`, …)
+    /// avant toute décision de fast-path. **Opt-in**
+    /// (`EXPLORER_J17_KEYS=1` — voir [`j17_keys_on`]) : un insert
+    /// par lookup coûterait ~le mur qu'il mesure.
+    static J17_KEY_WALK: std::cell::RefCell<
+        std::collections::HashMap<std::rc::Rc<str>, u64>,
+    > = std::cell::RefCell::new(std::collections::HashMap::new());
+}
+
+/// `EXPLORER_J17_KEYS=1` — arme l'histogramme `keys:` en plus
+/// de `j17_on` : à ~1,2 M de marches par vol, un insert
+/// `HashMap` par clé gonflerait `prop_ns` de ~5-10 % — l'audit
+/// tourne en vol dédié, jamais fondu aux mesures de mur.
+static J17_KEYS_ENABLED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+static J17_KEYS_ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+
+/// `true` si l'histogramme `keys:` est armé.
+#[inline]
+fn j17_keys_on() -> bool {
+    J17_KEYS_ENABLED.load(std::sync::atomic::Ordering::Relaxed)
+        || *J17_KEYS_ON.get_or_init(|| {
+            std::env::var("EXPLORER_J17_KEYS").is_ok_and(|v| !v.is_empty() && v != "0")
+        })
+}
+
+/// Arme l'histogramme `keys:` sans variable d'environnement
+/// (bancs de test — sinon le relevé reste vide).
+pub fn j17_keys_enable() {
+    J17_KEYS_ENABLED.store(true, std::sync::atomic::Ordering::Relaxed);
 }
 
 /// JS-C515 — compte une invocation `find_own` attribuée à son
@@ -677,6 +741,17 @@ pub(crate) fn j17_fown_site(loc: &'static std::panic::Location<'static>) {
             .or_insert_with(|| (format!("{}:{}", loc.file(), loc.line()), 0));
         e.1 += 1;
     });
+}
+
+/// JS-C527 — compte une marche de chaîne attribuée à sa clé
+/// (`keys:` du snapshot) — la clé internée est réutilisée telle
+/// quelle (bump de refcount, zéro alloc). Opt-in
+/// `EXPLORER_J17_KEYS` : désarmé, deux `load`+branche ~2 ns.
+pub(crate) fn j17_key_walk(k: &std::rc::Rc<str>) {
+    if !j17_on() || !j17_keys_on() {
+        return;
+    }
+    J17_KEY_WALK.with(|m| *m.borrow_mut().entry(k.clone()).or_default() += 1);
 }
 
 /// JS-C513 — compte une invocation `find_own_ai` attribuée à son

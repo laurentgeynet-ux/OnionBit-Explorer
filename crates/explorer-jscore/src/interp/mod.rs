@@ -7696,7 +7696,11 @@ impl Engine {
                                    // miss = lookup + insert — une seule traversée, jamais
                                    // pire que la marche d'origine (vol N5.21 : le fold de
                                    // chaîne payait deux traversées au miss).
-        let kid = (crate::intern(key).as_ptr() as usize as u64) ^ (key.len() as u64) << 48;
+        let ki = crate::intern(key);
+        let kid = (ki.as_ptr() as usize as u64) ^ (key.len() as u64) << 48;
+        // JS-C527 — attribution par clé de la marche (`keys:`) :
+        // audit des lookups dominants avant tout fast-path.
+        crate::j17_key_walk(&ki);
         let mut cur = Some(id);
         let mut depth = 0;
         while let Some(cid) = cur {

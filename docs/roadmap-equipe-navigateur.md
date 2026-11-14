@@ -12893,4 +12893,13 @@ chaque gain rapporté contre les **deux** archétypes.
   patch. Retirés : `route_memo` + structs + compteurs
   `rt_*` + `c526_route`. Conservés : fusion per-link
   (1 `heap.obj`/maillon) et funnel `set_proto`.
+- [x] **JS-C527 — instrumentation d'audit `prop_ns`** :
+  `keys:` = top-20 des clés passant par
+  `find_prop_owner_links` (opt-in `EXPLORER_J17_KEYS=1`
+  — insert par lookup ~+5-10 % `prop_ns`, vol dédié).
+  Lecture au prochain vol : clés dominantes →
+  fast-paths ciblés ; dispersion → audit IC
+  (`ic_hit`/`ic_miss`/`ic_disarm` au snapshot) pour
+  borner la couverture du seul court-circuit existant.
+  Dependency-groups = infra lourde, dernier recours.
 

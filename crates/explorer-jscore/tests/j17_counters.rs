@@ -8,8 +8,8 @@
 //! avant/après, compteurs monotones partagés).
 
 use explorer_jscore::{
-    j17_enable, j17_snapshot, Engine, J17_ARRIDX_TRY, J17_CALL, J17_CALL_NAT, J17_FN_DEFER,
-    J17_FN_DEF_TOK, J17_FN_MAT, J17_PARSE_CALL, J17_PARSE_DUP, J17_PROP_IDX_BUILD,
+    j17_enable, j17_keys_enable, j17_snapshot, Engine, J17_ARRIDX_TRY, J17_CALL, J17_CALL_NAT,
+    J17_FN_DEFER, J17_FN_DEF_TOK, J17_FN_MAT, J17_PARSE_CALL, J17_PARSE_DUP, J17_PROP_IDX_BUILD,
     J17_PROP_IDX_HIT, J17_PROP_LOOKUP, J17_PROP_SCAN, J17_PROTO_LVL, J17_SLOT_HIT, J17_STR_READ,
 };
 use std::sync::atomic::Ordering::Relaxed;
@@ -364,4 +364,27 @@ fn attribution_bundles_reels_dsfr_bitmovin() {
     attribution_fixture("dsfr_core", "vol16_dsfr_core.js");
     attribution_fixture("bitmovin", "bitmovin_transmuxer.js");
     attribution_fixture("spotify_slice", "vol12_spotify_gen_slice.js");
+}
+
+/// JS-C527 — l'histogramme `keys:` nomme les clés marchées
+/// par `find_prop_owner_links` (audit des lookups dominants
+/// avant tout fast-path). Thread-local → chaque test repart
+/// d'un histogramme frais.
+#[test]
+fn keys_histogram_names_walked_keys() {
+    let _g = TEST_LOCK.lock().expect("lock");
+    j17_enable();
+    j17_keys_enable();
+    let mut e = Engine::new();
+    e.eval(
+        "var P={zzkey:1}; var o=Object.create(P); var s=0;\
+         for(var i=0;i<40;i++){s+=o.zzkey} s",
+    )
+    .expect("eval");
+    let snap = j17_snapshot();
+    assert!(snap.contains("keys:"), "histogramme keys attendu — {snap}");
+    assert!(
+        snap.contains("zzkey="),
+        "la clé marchée doit être nommée — {snap}"
+    );
 }
