@@ -160,6 +160,7 @@ fn mk(e: &mut Engine, name: &str, data: TempData) -> JsResult<Value> {
         kind: crate::heap::ObjKind::Temp(data),
         extensible: true,
         elem_integrity: 0,
+        lookups: std::cell::Cell::new(0),
         args_map: None,
     });
     set_pub_props(e, id, &data);

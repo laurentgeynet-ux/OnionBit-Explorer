@@ -4265,6 +4265,7 @@ impl Engine {
             kind: ObjKind::BigInt(b),
             extensible: true,
             elem_integrity: 0,
+            lookups: std::cell::Cell::new(0),
             args_map: None,
         }))
     }
@@ -4810,6 +4811,7 @@ impl Engine {
             kind: ObjKind::RegExp(Rc::new(re)),
             extensible: true,
             elem_integrity: 0,
+            lookups: std::cell::Cell::new(0),
             args_map: None,
         });
         // `source`/`flags`/flags booléens sont des accesseurs sur
@@ -8746,6 +8748,7 @@ impl Engine {
             kind: ObjKind::Host(host),
             extensible: true,
             elem_integrity: 0,
+            lookups: std::cell::Cell::new(0),
             args_map: None,
         }))
     }
@@ -10142,6 +10145,7 @@ impl Engine {
             },
             extensible: true,
             elem_integrity: 0,
+            lookups: std::cell::Cell::new(0),
             args_map: None,
         });
         self.sym_index.insert(key, id);

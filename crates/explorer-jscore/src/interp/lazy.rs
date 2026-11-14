@@ -2142,6 +2142,7 @@ pub(crate) fn gen_lazy_obj(e: &mut Engine, env: EnvRef, this: Value, body: Rc<Ve
         kind: ObjKind::GenLive { exec },
         extensible: true,
         elem_integrity: 0,
+        lookups: std::cell::Cell::new(0),
         args_map: None,
     });
     let v = Value::Obj(id);
@@ -2174,6 +2175,7 @@ fn bound_resume(e: &mut Engine, gen: Value, outer: Option<ObjId>, ok: bool) -> V
         }),
         extensible: true,
         elem_integrity: 0,
+        lookups: std::cell::Cell::new(0),
         args_map: None,
     });
     Value::Obj(id)

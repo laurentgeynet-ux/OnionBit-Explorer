@@ -330,6 +330,7 @@ impl Engine {
             }),
             extensible: true,
             elem_integrity: 0,
+            lookups: std::cell::Cell::new(0),
             args_map: None,
         });
         let resolve = self.bound_native("resolve", promise_resolve, vec![Value::Obj(id)]);

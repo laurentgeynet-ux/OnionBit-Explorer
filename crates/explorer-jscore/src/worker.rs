@@ -1111,6 +1111,7 @@ impl Engine {
                     kind: ObjKind::ByteBuf(b.clone()),
                     extensible: true,
                     elem_integrity: 0,
+                    lookups: std::cell::Cell::new(0),
                     args_map: None,
                 }))
             }
@@ -1140,6 +1141,7 @@ impl Engine {
                     },
                     extensible: true,
                     elem_integrity: 0,
+                    lookups: std::cell::Cell::new(0),
                     args_map: None,
                 }))
             }
@@ -1160,6 +1162,7 @@ impl Engine {
                     kind: ObjKind::Map(Vec::new()),
                     extensible: true,
                     elem_integrity: 0,
+                    lookups: std::cell::Cell::new(0),
                     args_map: None,
                 }));
                 memo.push(m.clone());
@@ -1185,6 +1188,7 @@ impl Engine {
                     kind: ObjKind::Set(Vec::new()),
                     extensible: true,
                     elem_integrity: 0,
+                    lookups: std::cell::Cell::new(0),
                     args_map: None,
                 }));
                 memo.push(s.clone());

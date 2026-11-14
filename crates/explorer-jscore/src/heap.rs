@@ -959,6 +959,16 @@ pub struct Object {
     /// non-configurables), `2` = frozen (non-writable aussi),
     /// `4` = `length` non-writable. Sans effet hors `ObjKind::Array`.
     pub elem_integrity: u8,
+    /// JS-C510 — compteur d'arming de `idx` : scans linéaires de
+    /// [`Object::prop_pos`] subis par un objet **sous**
+    /// [`PROPS_IDX_MIN`]. À [`PROPS_IDX_ARM`] l'index est
+    /// construit malgré la taille — les objets qui churnent en
+    /// attr-ops (`ps_own` 42 % du `prop_scan`, vol N5.9) cessent
+    /// de rescanner à vie. Saturant : un objet armé reste armé
+    /// même si `idx` est invalidé par `remove` (rebuild au
+    /// prochain lookup). `Cell<u8>` — se loge dans le padding des
+    /// petits champs (0 octet ajouté), non tracé par le GC.
+    pub(crate) lookups: std::cell::Cell<u8>,
     /// Objet `arguments` : `Some((env, map))` où `map[i]` est le nom
     /// du paramètre formel aliasé avec l'élément `i` (spec
     /// `CreateMappedArgumentsObject` — fonctions sloppy à liste de
@@ -1443,6 +1453,10 @@ pub(crate) fn f64_to_f16(v: f64) -> u16 {
 /// gagnent l'index dès le premier lookup ; les littéraux
 /// one-shot (< 12 props, majorité) gardent le scan gratuit.
 const PROPS_IDX_MIN: usize = 12;
+/// JS-C510 — scans linéaires avant arming de `idx` sous
+/// [`PROPS_IDX_MIN`] (vol N5.9 : `ps_own` dominant — les objets
+/// à attr-ops répétés ne doivent pas payer le scan à vie).
+const PROPS_IDX_ARM: u8 = 8;
 
 /// JS-C500 — graine d'empreinte de layout (bit haut posé :
 /// `0` est la sentinelle « sale » de `Object::shape`).
@@ -1489,6 +1503,7 @@ impl Object {
             kind,
             extensible: true,
             elem_integrity: 0,
+            lookups: std::cell::Cell::new(0),
             args_map: None,
         }
     }
@@ -1515,13 +1530,26 @@ impl Object {
     /// (univers inaccessible : ~200 Go de props — dégradation, pas
     /// de panic).
     pub(crate) fn prop_pos(&self, key: &str) -> Option<usize> {
-        if self.props.len() < PROPS_IDX_MIN || self.props.len() >= u32::MAX as usize {
+        if self.props.len() >= u32::MAX as usize {
             return self.props.iter().position(|(k, _)| {
                 crate::j17_tick(&crate::J17_PROP_SCAN);
-                // V-3a : clés internées → même alloc ⇒ même ptr ;
-                // clés dynamiques (non internées) → miss → memcmp.
                 std::ptr::eq(&raw const **k, key) || &**k == key
             });
+        }
+        if self.props.len() < PROPS_IDX_MIN && self.idx.get().is_none() {
+            // JS-C510 — arming au lookup répété : sous le seuil,
+            // `lookups` compte les scans linéaires subis ; un
+            // objet qui atteint [`PROPS_IDX_ARM`] tombe sur le
+            // chemin indexé ci-dessous (et y reste — saturant).
+            self.lookups.set(self.lookups.get().saturating_add(1));
+            if self.lookups.get() < PROPS_IDX_ARM {
+                return self.props.iter().position(|(k, _)| {
+                    crate::j17_tick(&crate::J17_PROP_SCAN);
+                    // V-3a : clés internées → même alloc ⇒ même
+                    // ptr ; clés dynamiques → miss → memcmp.
+                    std::ptr::eq(&raw const **k, key) || &**k == key
+                });
+            }
         }
         let m = self.idx.get_or_init(|| {
             crate::j17_tick(&crate::J17_PROP_IDX_BUILD);
@@ -2490,5 +2518,53 @@ mod tests {
             num_bigint::BigInt::from(u128::MAX),
         ))));
         assert!(bi >= 16, "BigInt digits comptés : {bi}");
+    }
+}
+
+#[cfg(test)]
+mod c510_tests {
+    use super::*;
+
+    fn o9() -> Object {
+        let mut o = Object::blank(Value::Null, ObjKind::Ordinary);
+        for i in 0..9 {
+            o.push_prop(
+                &format!("k{i}"),
+                Prop::Data {
+                    value: Value::Num(i as f64),
+                    attrs: PropAttrs::FULL,
+                },
+            );
+        }
+        o
+    }
+
+    /// JS-C510 — sous `PROPS_IDX_MIN`, `prop_pos` arme l'index au
+    /// [`PROPS_IDX_ARM`]-ième lookup : les scans linéaires
+    /// s'arrêtent, la position reste exacte.
+    #[test]
+    fn prop_pos_arms_idx_on_repeat() {
+        let o = o9();
+        assert_eq!(o.props.len(), 9);
+        for _ in 0..(PROPS_IDX_ARM - 1) {
+            assert!(o.idx.get().is_none());
+            let _ = o.prop_pos("k0");
+        }
+        assert!(o.idx.get().is_none());
+        assert_eq!(o.prop_pos("k5"), Some(5));
+        assert!(o.idx.get().is_some(), "l'index doit être armé");
+        // Miss via l'index : plus de scan linéaire.
+        assert_eq!(o.prop_pos("absent"), None);
+    }
+
+    /// Un objet froid (< [`PROPS_IDX_ARM`] lookups) n'arme pas —
+    /// la place de l'index n'est due que par les objets chauds.
+    #[test]
+    fn prop_pos_cold_no_arm() {
+        let o = o9();
+        for _ in 0..3 {
+            let _ = o.prop_pos("k1");
+        }
+        assert!(o.idx.get().is_none());
     }
 }

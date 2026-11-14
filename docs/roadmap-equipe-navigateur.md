@@ -12710,3 +12710,9 @@ chaque gain rapporté contre les **deux** archétypes.
   tentative à chaque accès, 282 k bails N5.8). Attribution
   `prop_scan` par entrée (`ps_get`/`ps_has`/`ps_own`/`ps_set`,
   delta de sonde — indicatif). Verrous : lang 315 ×3, c500 28.
+- [x] **JS-C510 — index props armé au lookup répété** :
+  `Object::lookups` (Cell<u8> saturant, padding des petits
+  champs — 0 o) compte les scans `prop_pos` sous le seuil
+  12 ; à 8 l'index s'arme durablement (rebuild post-`remove`).
+  Cible `ps_own` 42 % du scan (attr-ops + `o[k]` dynamiques
+  sur objets 5–11 props). Verrous : lang 315 ×3, heap 2 tests.

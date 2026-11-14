@@ -1076,6 +1076,7 @@ fn idb_val_decode(e: &mut Engine, v: Value, depth: u32) -> Value {
                 kind: ObjKind::Ordinary,
                 extensible: true,
                 elem_integrity: 0,
+                lookups: std::cell::Cell::new(0),
                 args_map: None,
             });
             e.set_own(o, "__time", Value::Num(ms), false);
@@ -1108,6 +1109,7 @@ fn idb_val_decode(e: &mut Engine, v: Value, depth: u32) -> Value {
                 kind: ObjKind::Map(pairs),
                 extensible: true,
                 elem_integrity: 0,
+                lookups: std::cell::Cell::new(0),
                 args_map: None,
             });
             Value::Obj(o)
