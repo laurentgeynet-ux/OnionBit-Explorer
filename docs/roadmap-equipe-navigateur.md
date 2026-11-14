@@ -12761,3 +12761,8 @@ chaque gain rapporté contre les **deux** archétypes.
   polymorphe en clé — hors modèle IC ; `shadow_memo` fold-shapes
   × clé internée, cap 8192 ; la marche `find_own` ne paie qu'une
   fois par (chaîne-shape, clé). Verrous : lang 315 ×2, clippy.
+- [x] **JS-C521 — mémo négative `(fold,clé)` du read-walk** :
+  `find_prop_owner_links` phase-1 fold+éligibilité ; hit →
+  absent sans `find_own_ai` (links remplis pour IC-learn) ;
+  learn en chaîne complète ; cap 8192 ; inéligible → marche
+  d'origine. Verrous : lang 315 ×3, clippy propre.

@@ -349,6 +349,8 @@ const IC_MISS_DISARM: u8 = 8;
 /// JS-C504 — profondeur max d'une entrée `Chain`/`Absent` (au-delà,
 /// pas d'apprentissage — le gain ne compense plus la vérif).
 const IC_CHAIN_CAP: usize = 8;
+/// JS-C521 — borne de la mémo négative de lectures absentes.
+const RABS_MEMO_CAP: usize = 8192;
 
 /// JS-C504 — verdict d'une consultation IC : valeur prouvée,
 /// vérification échouée (→ miss compté), ou maillon inéligible
@@ -961,6 +963,11 @@ pub struct Engine {
     /// le modèle IC « 1 site = 1 entrée » ne couvre pas cette
     /// question bi-dimensionnelle (vol N5.19).
     pub(crate) shadow_memo: std::collections::HashMap<(u64, u64), bool>,
+    /// JS-C521 — mémo négative `(fold shapes chaîne, clé)` des
+    /// lectures absentes : le fold couvre la chaîne entière —
+    /// toute mutation d'un maillon la change → correcte par
+    /// construction (même leçon que `shadow_memo`, vol N5.19).
+    pub(crate) rabs_memo: std::collections::HashSet<(u64, u64)>,
     /// Kill-switch IC (`EXPLORER_NO_IC=1`) — A/B en vol sans
     /// rebuild, précédent `resolve_off` (JS-C490c).
     pub(crate) ic_off: bool,
@@ -1522,6 +1529,7 @@ impl Engine {
             resolved_envs: std::collections::HashMap::new(),
             ic_map: std::collections::HashMap::new(),
             shadow_memo: std::collections::HashMap::new(),
+            rabs_memo: std::collections::HashSet::new(),
             ic_off: std::env::var("EXPLORER_NO_IC").is_ok_and(|v| v == "1"),
             ic_verify: std::env::var("EXPLORER_IC_VERIFY").is_ok_and(|v| v == "1"),
             lowered_suspend_cache: std::collections::HashMap::new(),
@@ -7681,6 +7689,70 @@ impl Engine {
             );
         }
         let ai = array_index(key); // V-3b — hoisted hors de la marche
+                                   // JS-C521 — phase 1 : fold des shapes + éligibilité des
+                                   // maillons. La mémo négative `(fold, clé)` sert l'absent
+                                   // dominant sans `find_own_ai` ; un maillon inéligible
+                                   // (proxy, `args_map`, Array…) invalide la phase et le
+                                   // chemin retombe sur la marche d'origine.
+        let mut vlinks: Vec<ObjId> = Vec::new();
+        let mut fold: u64 = 0x9E37_79B9_7F4A_7C15;
+        let mut eligible = true;
+        let mut complete = false;
+        {
+            let mut cur = Some(id);
+            let mut depth = 0;
+            while let Some(cid) = cur {
+                let Some(o) = self.heap.obj(cid) else {
+                    break;
+                };
+                if !Self::ic_eligible(o, key, ai) {
+                    eligible = false;
+                    break;
+                }
+                vlinks.push(cid);
+                fold = fold.wrapping_mul(0x1000_0000_01B3).wrapping_add(o.shape());
+                cur = if let Value::Obj(p) = o.proto {
+                    Some(p)
+                } else {
+                    complete = true;
+                    None
+                };
+                depth += 1;
+                if depth > MAX_PROTO_DEPTH {
+                    break;
+                }
+            }
+        }
+        if eligible {
+            let mkey = (
+                fold,
+                (crate::intern(key).as_ptr() as usize as u64) ^ (key.len() as u64) << 48,
+            );
+            if self.rabs_memo.contains(&mkey) {
+                if let Some(l) = links.as_deref_mut() {
+                    l.extend_from_slice(&vlinks);
+                }
+                return None;
+            }
+            // Phase 2 — marche `find_own_ai` sur les maillons
+            // déjà vus ; l'absent en chaîne complète est mémorisé.
+            for &cid in &vlinks {
+                crate::j17_tick(&crate::J17_PROTO_LVL);
+                if let Some(l) = links.as_deref_mut() {
+                    l.push(cid);
+                }
+                if let Some(p) = self.find_own_ai(cid, key, ai) {
+                    return Some((cid, p));
+                }
+            }
+            if complete {
+                if self.rabs_memo.len() >= RABS_MEMO_CAP {
+                    self.rabs_memo.clear();
+                }
+                self.rabs_memo.insert(mkey);
+            }
+            return None;
+        }
         let mut cur = Some(id);
         let mut depth = 0;
         while let Some(cid) = cur {
