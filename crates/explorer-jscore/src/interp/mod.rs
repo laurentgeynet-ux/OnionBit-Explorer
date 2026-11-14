@@ -8880,9 +8880,27 @@ impl Engine {
         // traversée sans borne (proxy ou `MAX_PROTO_DEPTH`
         // rendraient l'entrée apprise mensongère).
         let mut links: Vec<ObjId> = Vec::new();
-        let mut found = false;
+        // JS-C530 — own-first : tête éligible avec own-prop Data
+        // → la boucle casserait au 1er maillon (`Some(_)` →
+        // `found`) puis `set_prop` — l'own-scan direct évite
+        // `proxy_th` + collecte + `find_own_ai` (vol N5.34 :
+        // write-walk ≈ 33 % du mur). `Acc`/absent/inéligible →
+        // boucle inchangée (setter niveau 1, chaîne, gardes
+        // préservés). Learn identique : `links=[id]`, `found` —
+        // l'entrée `Own` apprise est celle de la boucle.
+        let mut found = self.heap.obj(id).is_some_and(|o| {
+            Self::ic_eligible(o, key, ai)
+                && matches!(
+                    o.prop_pos(key).and_then(|i| o.props.get(i)),
+                    Some((_, crate::heap::Prop::Data { .. }))
+                )
+        });
         let mut complete = true;
-        while let Some(cid) = cur {
+        if found && armed {
+            links.push(id);
+        }
+        while !found {
+            let Some(cid) = cur else { break };
             // Un proxy *au milieu* de la chaîne intercepte aussi
             // — même logique qu'en tête (`Object.setPrototypeOf(
             // Symbol.prototype, spy)` suivi de `Symbol().x = v`
@@ -9451,6 +9469,36 @@ impl Engine {
 
     fn set_prop_walk(&mut self, id: ObjId, key: &str, v: Value) -> JsResult<bool> {
         self.probe_store(id, key, v.clone());
+        // JS-C530 — own-first : tête éligible + own-prop Data
+        // writable → `props[i].value = v` direct. Les gardes TA /
+        // `args_map` / croissance Array / alloc ne peuvent pas
+        // tirer sur une prop propre ordinaire (`ic_eligible` les
+        // exclut par construction : kinds vus, `args_map`, Proxy,
+        // clés `length`/indices d'Array et de `Fun::Script`) —
+        // ~5 déréférences de tas économisées par écriture own
+        // (vol N5.34 : write-walk ≈ 33 % du mur `prop_ns`).
+        // Non-writable/Acc/absent/inéligible → chemin complet
+        // inchangé (même sémantique, gardes préservées).
+        let ai = array_index(key);
+        let fast_pos = self.heap.obj(id).and_then(|o| {
+            if !Self::ic_eligible(o, key, ai) {
+                return None;
+            }
+            let i = o.prop_pos(key)?;
+            match o.props.get(i) {
+                Some((_, crate::heap::Prop::Data { attrs, .. })) if attrs.writable => Some(i),
+                _ => None,
+            }
+        });
+        if let Some(i) = fast_pos {
+            if let Some(o) = self.heap.obj_mut(id) {
+                if let Some((_, crate::heap::Prop::Data { value, .. })) = o.props.get_mut(i) {
+                    *value = v;
+                    crate::j17_tick(&crate::J17_W_OWN);
+                    return Ok(true);
+                }
+            }
+        }
         // Élément indexé d'une vue typée : la cible est le *buffer*
         // partagé, pas la vue ; hors-bornes canonique → ignoré
         // (spec `IntegerIndexedElementSet` retourne `true`).
@@ -9464,7 +9512,7 @@ impl Engine {
                 buffer,
                 offset,
                 len,
-            }) => array_index(key).map(|i| (*ta, buffer.clone(), *offset, i, i < *len)),
+            }) => ai.map(|i| (*ta, buffer.clone(), *offset, i, i < *len)),
             _ => None,
         };
         if let Some((ta, Value::Obj(bid), off, i, in_range)) = ta_t {
@@ -9496,7 +9544,7 @@ impl Engine {
         }
         // `arguments` mappé : l'écriture d'indice va au slot env du
         // paramètre (spec `MappedArgumentsObject` [[Set]]).
-        if let Some(i) = array_index(key) {
+        if let Some(i) = ai {
             let mapped = self.heap.obj(id).and_then(|o| {
                 o.args_map.as_ref().and_then(|(env, map)| {
                     map.get(i).and_then(|n| n.clone().map(|n| (env.clone(), n)))
@@ -9518,7 +9566,7 @@ impl Engine {
                         _ => None,
                     }
                 } else {
-                    array_index(key).map(|i| i + 1)
+                    ai.map(|i| i + 1)
                 };
                 need.filter(|n| *n > elems.len())
             }
@@ -9537,7 +9585,7 @@ impl Engine {
         // reserve+memcpy dans UNE écriture (`b[k]=v` drainée
         // par un itérateur GTM, §B-59 — ~200 M props ≈ 6 Go de
         // commit instantané entre deux ticks).
-        if array_index(key).is_none() && key != "length" {
+        if ai.is_none() && key != "length" {
             let prop_bytes = self.heap.obj(id).map_or(0, |o| {
                 if o.find(key).is_some() {
                     0
@@ -9572,7 +9620,7 @@ impl Engine {
                 elems.resize(n, Value::Hole);
                 return Ok(true);
             }
-            if let Some(i) = array_index(key) {
+            if let Some(i) = ai {
                 // Élément gelé → écriture refusée (spec [[Set]]).
                 if o.elem_integrity & 2 != 0 && i < elems.len() {
                     return Ok(false);

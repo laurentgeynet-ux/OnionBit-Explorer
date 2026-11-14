@@ -313,6 +313,10 @@ pub static J17_IC_POLY: std::sync::atomic::AtomicU64 = std::sync::atomic::Atomic
 /// `o.find` (index `prop_pos`) sans le walk complet
 /// `find_prop` — fallback `env_get`/`env_set` sur l'objet global.
 pub static J17_ENV_GHIT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+/// JS-C530 — écritures servies par l'own-first `set_prop_walk`
+/// (tête éligible + own `Data` writable → `props[i]` direct,
+/// gardes TA / `args_map` / Array / alloc sautées).
+pub static J17_W_OWN: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 /// JS-C509 — attribution de `prop_scan` par classe d'entrée
 /// (delta `PROP_SCAN` autour du walk — les deltas imbriqués
 /// peuvent sur-attribuer, sonde indicative) : `ps_get` lectures
@@ -514,7 +518,7 @@ pub fn j17_enable() {
 #[must_use]
 pub fn j17_snapshot() -> String {
     let r = std::sync::atomic::Ordering::Relaxed;
-    let pairs: [(&str, &std::sync::atomic::AtomicU64); 63] = [
+    let pairs: [(&str, &std::sync::atomic::AtomicU64); 64] = [
         ("prop_lookup", &J17_PROP_LOOKUP),
         ("proto_lvl", &J17_PROTO_LVL),
         ("prop_scan", &J17_PROP_SCAN),
@@ -534,6 +538,7 @@ pub fn j17_snapshot() -> String {
         ("ic_purge", &J17_IC_PURGE),
         ("ic_poly", &J17_IC_POLY),
         ("env_ghit", &J17_ENV_GHIT),
+        ("w_own", &J17_W_OWN),
         ("ps_get", &J17_PS_GET),
         ("ps_has", &J17_PS_HAS),
         ("ps_own", &J17_PS_OWN),

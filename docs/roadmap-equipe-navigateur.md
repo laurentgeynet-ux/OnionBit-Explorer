@@ -12902,6 +12902,12 @@ chaque gain rapporté contre les **deux** archétypes.
   (`ic_hit`/`ic_miss`/`ic_disarm` au snapshot) pour
   borner la couverture du seul court-circuit existant.
   Dependency-groups = infra lourde, dernier recours.
+- [x] **JS-C530 — own-first de l'écriture** : pendant de
+  C529 pour le write-walk (~33 % `prop_ns`) — tête
+  éligible + own `Data` → skip boucle `[[Set]]` (learn
+  `Own` préservé) ; own `Data{writable}` → `props[i]`
+  direct dans `set_prop_walk` (gardes kinds sautées).
+  Compteur `w_own`.
 - [x] **JS-C529 — own-first du fallback global
   `env_get`/`env_set`** : audit `keys:` N5.33 — ~524 k
   marches non attribuées ≈ lectures/écritures de bindings
