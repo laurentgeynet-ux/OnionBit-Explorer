@@ -306,6 +306,9 @@ pub static J17_IC_BAIL: std::sync::atomic::AtomicU64 = std::sync::atomic::Atomic
 pub static J17_IC_NLEARN: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 /// Voir [`J17_IC_NLEARN`].
 pub static J17_IC_PURGE: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+/// JS-C528 — hits servis par un membre `Poly` (site désarmé
+/// repassé en polymorphe borné — verdicts par shape de tête).
+pub static J17_IC_POLY: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 /// JS-C509 — attribution de `prop_scan` par classe d'entrée
 /// (delta `PROP_SCAN` autour du walk — les deltas imbriqués
 /// peuvent sur-attribuer, sonde indicative) : `ps_get` lectures
@@ -507,7 +510,7 @@ pub fn j17_enable() {
 #[must_use]
 pub fn j17_snapshot() -> String {
     let r = std::sync::atomic::Ordering::Relaxed;
-    let pairs: [(&str, &std::sync::atomic::AtomicU64); 61] = [
+    let pairs: [(&str, &std::sync::atomic::AtomicU64); 62] = [
         ("prop_lookup", &J17_PROP_LOOKUP),
         ("proto_lvl", &J17_PROTO_LVL),
         ("prop_scan", &J17_PROP_SCAN),
@@ -525,6 +528,7 @@ pub fn j17_snapshot() -> String {
         ("ic_bail", &J17_IC_BAIL),
         ("ic_nlearn", &J17_IC_NLEARN),
         ("ic_purge", &J17_IC_PURGE),
+        ("ic_poly", &J17_IC_POLY),
         ("ps_get", &J17_PS_GET),
         ("ps_has", &J17_PS_HAS),
         ("ps_own", &J17_PS_OWN),

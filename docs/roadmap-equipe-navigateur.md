@@ -12902,4 +12902,12 @@ chaque gain rapporté contre les **deux** archétypes.
   (`ic_hit`/`ic_miss`/`ic_disarm` au snapshot) pour
   borner la couverture du seul court-circuit existant.
   Dependency-groups = infra lourde, dernier recours.
+- [x] **JS-C528 — fallback `Poly` des sites IC désarmés** :
+  audit N5.31 — 2 395 désarmés ≈ 342 k `ic_bail` ≈ 27 %
+  des lookups en marche complète à vie (IC strictement
+  mono). Le désarmement convertit en `Poly` = 8 derniers
+  verdicts par shape de tête, même vérif légère ; 8 miss
+  consécutifs en poly → `Dead` réel (vrai mégamorphe,
+  thrash borné). Compteur `ic_poly` — verdict au vol :
+  `ic_bail`/`prop_ns` en reflux attendu.
 
