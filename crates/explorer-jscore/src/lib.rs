@@ -597,6 +597,22 @@ pub fn j17_snapshot() -> String {
         }
         out.push_str(&format!("foai:{joined}"));
     }
+    // JS-C515 — top-12 callsites `find_own` (`fown:f:l=n,…`).
+    let mut fown: Vec<(u64, String)> =
+        J17_FOWN_SITES.with(|m| m.borrow().values().map(|(l, n)| (*n, l.clone())).collect());
+    fown.sort_unstable_by_key(|a| std::cmp::Reverse(a.0));
+    if !fown.is_empty() {
+        let joined = fown
+            .iter()
+            .take(12)
+            .map(|(n, l)| format!("{l}={n}"))
+            .collect::<Vec<_>>()
+            .join(",");
+        if !out.is_empty() {
+            out.push(' ');
+        }
+        out.push_str(&format!("fown:{joined}"));
+    }
     out
 }
 
@@ -621,6 +637,29 @@ thread_local! {
     static J17_FOAI_SITES: std::cell::RefCell<
         std::collections::BTreeMap<usize, (String, u64)>,
     > = const { std::cell::RefCell::new(std::collections::BTreeMap::new()) };
+    /// JS-C515 — même attribution un cran plus haut : `find_own`
+    /// (le wrapper `foai:7325` = 46 % du mur) par *son* callsite —
+    /// nomme la builtin/interne dominante avant la fusion
+    /// `hasOwn`+`get` décidée au vol N5.14.
+    static J17_FOWN_SITES: std::cell::RefCell<
+        std::collections::BTreeMap<usize, (String, u64)>,
+    > = const { std::cell::RefCell::new(std::collections::BTreeMap::new()) };
+}
+
+/// JS-C515 — compte une invocation `find_own` attribuée à son
+/// callsite Rust (`fown:` du snapshot).
+pub(crate) fn j17_fown_site(loc: &'static std::panic::Location<'static>) {
+    if !j17_on() {
+        return;
+    }
+    let site = std::ptr::from_ref(loc) as usize;
+    J17_FOWN_SITES.with(|m| {
+        let mut m = m.borrow_mut();
+        let e = m
+            .entry(site)
+            .or_insert_with(|| (format!("{}:{}", loc.file(), loc.line()), 0));
+        e.1 += 1;
+    });
 }
 
 /// JS-C513 — compte une invocation `find_own_ai` attribuée à son

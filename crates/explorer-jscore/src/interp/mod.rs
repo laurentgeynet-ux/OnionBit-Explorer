@@ -7326,7 +7326,12 @@ impl Engine {
 
     /// Own-property lookup with array/`length` semantics — returns
     /// the raw `Prop` so accessor pairs are visible to the caller.
+    /// JS-C515 — `#[track_caller]` : sous `j17_on`, chaque
+    /// appel est attribué à son callsite `file:line` (`fown:`
+    /// du snapshot) — nomme le pilote des 1,17 M attr-ops.
+    #[track_caller]
     pub(crate) fn find_own(&mut self, id: ObjId, key: &str) -> Option<Prop> {
+        crate::j17_fown_site(std::panic::Location::caller());
         crate::j17_tick(&crate::J17_PL_OWN);
         let s0 = Self::j17_scan();
         let r = self.find_own_ai(id, key, array_index(key));

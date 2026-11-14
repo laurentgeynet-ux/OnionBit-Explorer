@@ -12737,3 +12737,7 @@ chaque gain rapporté contre les **deux** archétypes.
   au snapshot (N5.12 : le résiduel 33 % n'est PAS
   host-shadowed — cette sonde le nomme avant le cran suivant).
   Télémétrie désarmée par défaut. Verrous : lang 315 ×3.
+- [x] **JS-C515 — attribution `find_own` par callsite** :
+  `#[track_caller]` → `fown:` top-12 — nomme la builtin qui
+  tire les 1,17 M attr-ops avant la fusion `hasOwn`+`get`.
+  Télémétrie désarmée. Verrous : c500 31, clippy propre.

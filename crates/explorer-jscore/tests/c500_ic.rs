@@ -604,3 +604,14 @@ fn c514_write_ic_semantics() {
         "1"
     );
 }
+
+/// JS-C515 — `fown:` attribue `find_own` par callsite.
+#[test]
+fn c515_fown_attrib_emits() {
+    let _g = IC_LOCK
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    explorer_jscore::j17_enable();
+    eval("var o={a:1};for(var i=0;i<50;i++){o.hasOwnProperty('a');}");
+    assert!(explorer_jscore::j17_snapshot().contains("fown:"));
+}
