@@ -12783,3 +12783,8 @@ chaque gain rapporté contre les **deux** archétypes.
   différés réellement appelés, tranche l'investissement lexer
   streaming (corps jamais lexés). Télémétrie désarmée.
   Verrous : c500 32, clippy + doc propres.
+- [x] **JS-C525a — machine `/` sur `Lexer` + `next_token`**
+  (streaming 1/3) : état regex/division promu de `run` à
+  champs + `Prev` (résumé token précédent) — refactor à
+  comportement nul, prérequis au `skip_body` tokenless.
+  Verrous : lang 315, c500 32, c502 24, clippy + doc propres.

@@ -299,6 +299,10 @@ fn lex_in(src: &str, tpl_nest: u32) -> Result<Vec<Token>> {
         col: 1,
         legacy_octal: false,
         tpl_nest,
+        expect_operand: true,
+        clause_parens: Vec::new(),
+        brace_kinds: Vec::new(),
+        prev: Prev::None,
     }
     .run()
 }
@@ -329,6 +333,18 @@ struct Lexer<'a> {
     legacy_octal: bool,
     /// Emboîtement courant des substitutions de template (JS-C41).
     tpl_nest: u32,
+    /// `/` en position division ? `true` = le prochain `/` ouvre
+    /// une regex (JS-C525a — promu de locale `run` à champ pour
+    /// que `skip_body` rejoue la même machine sans tokens).
+    expect_operand: bool,
+    /// `(` ouverte par un mot-clé de clause (`if|while|for|…`) :
+    /// son `)` ré-arme `expect_operand` (regex, pas division).
+    clause_parens: Vec<bool>,
+    /// `{` ouvrant un bloc (statement) : son `}` ré-arme
+    /// `expect_operand` ; un `{` operande (objet/pattern) non.
+    brace_kinds: Vec<bool>,
+    /// Résumé du token précédent — pilote `(`/`{` ci-dessus.
+    prev: Prev,
 }
 
 impl Lexer<'_> {
@@ -406,13 +422,14 @@ impl Lexer<'_> {
         let est = (self.src.len() / 4).min(2_000_000);
         let mut out: Vec<Token> = Vec::with_capacity(est);
         // `/` is division after an operand, a regex literal start
-        // otherwise — the classic heuristic (no parser feedback).
-        let mut expect_operand = true;
-        // `)` lève l'ambiguïté par le token précédant son `(` :
+        // otherwise — the classic heuristic (no parser feedback) :
+        // `expect_operand`, `clause_parens`, `brace_kinds` vivent
+        // sur `self` (JS-C525a) pour que `skip_body` rejoue la
+        // même machine sans produire de tokens. `)` lève
+        // l'ambiguïté par le token précédant son `(` :
         // `if (…)`/`while (…)`/… clôturent une clause, ce qui suit
         // est un statement — `/` y est toujours regex, jamais
         // division (`if (o<128) /re/.test(…)` réel sur github).
-        let mut clause_parens: Vec<bool> = Vec::new();
         // Même ambiguïté pour `}` (mur réel x-web :
         // `} /(?:^|;\s*)gt=/.test(…)` — corps de fonction fermé
         // puis regex en statement) : un `{` qui ouvre un **bloc**
@@ -425,71 +442,72 @@ impl Lexer<'_> {
         // `case x:`), après ident de `class`/`interface` et après
         // `import`/`export` sont classés operande — un `/` regex
         // derrière leur `}` serait lu division (rare en pratique).
-        let mut brace_kinds: Vec<bool> = Vec::new();
         loop {
-            let newline_before = self.skip_trivia()?;
-            let (line, col) = (self.line, self.col);
-            let off = self.pos;
-            self.legacy_octal = false;
-            let tok = match self.peek() {
-                None => Tok::Eof,
-                Some(c) if is_ident_start(c) => self.ident()?,
-                Some('\\') => self.ident()?,
-                Some(c) if c.is_ascii_digit() => self.number()?,
-                Some('.') if self.peek_at(1).is_some_and(|c| c.is_ascii_digit()) => {
-                    self.number()?
-                }
-                Some('#') => self.private_name()?,
-                Some('"' | '\'') => Tok::Str(self.string()?),
-                Some('`') => self.template()?,
-                Some('/') if expect_operand => self.regex_lit()?,
-                Some(_) => Tok::P(self.punct()?),
-            };
-            expect_operand = !ends_operand(&tok);
-            // `of` contextuel (`for (x of /re/)`, Turbopack
-            // news.at vol 325) : non réservé → lexé `Ident`
-            // → `ends_operand` rendait `true` et le `/` qui
-            // suit se lisait division (`unexpected '\'`).
-            // Après `of` un opérande est toujours attendu ;
-            // la division `of / n` (ident `of` en valeur)
-            // reste légale mais quasi inexistante en pratique.
-            if matches!(&tok, Tok::Ident(s) if &**s == "of") {
-                expect_operand = true;
-            }
-            if tok == Tok::P(P::LParen) {
-                clause_parens
-                    .push(matches!(out.last().map(|t| &t.tok), Some(Tok::Kw(k)) if clause_kw(k)));
-            } else if tok == Tok::P(P::RParen) && clause_parens.pop().unwrap_or(false) {
-                expect_operand = true;
-            } else if tok == Tok::P(P::LBrace) {
-                let block = match out.last().map(|t| &t.tok) {
-                    None
-                    | Some(
-                        Tok::P(P::RParen | P::RBrace | P::Semi | P::Arrow)
-                        | Tok::Kw(Kw::Else | Kw::Do | Kw::Try | Kw::Finally),
-                    ) => true,
-                    Some(Tok::P(P::LBrace)) => brace_kinds.last().copied().unwrap_or(false),
-                    _ => false,
-                };
-                brace_kinds.push(block);
-            } else if tok == Tok::P(P::RBrace) && brace_kinds.pop().unwrap_or(false) {
-                // `}` de bloc : nouveau statement possible → regex.
-                expect_operand = true;
-            }
-            let is_eof = tok == Tok::Eof;
-            out.push(Token {
-                tok,
-                line,
-                col,
-                newline_before,
-                off,
-                end: self.pos,
-                legacy_octal: self.legacy_octal,
-            });
+            let tok = self.next_token()?;
+            let is_eof = tok.tok == Tok::Eof;
+            out.push(tok);
             if is_eof {
                 return Ok(out);
             }
         }
+    }
+
+    /// Token suivant + mise à jour de la machine `/` (JS-C525a —
+    /// corps historique de la boucle `run`, `out.last()` lu via
+    /// `self.prev`).
+    fn next_token(&mut self) -> Result<Token> {
+        let newline_before = self.skip_trivia()?;
+        let (line, col) = (self.line, self.col);
+        let off = self.pos;
+        self.legacy_octal = false;
+        let tok = match self.peek() {
+            None => Tok::Eof,
+            Some(c) if is_ident_start(c) => self.ident()?,
+            Some('\\') => self.ident()?,
+            Some(c) if c.is_ascii_digit() => self.number()?,
+            Some('.') if self.peek_at(1).is_some_and(|c| c.is_ascii_digit()) => self.number()?,
+            Some('#') => self.private_name()?,
+            Some('"' | '\'') => Tok::Str(self.string()?),
+            Some('`') => self.template()?,
+            Some('/') if self.expect_operand => self.regex_lit()?,
+            Some(_) => Tok::P(self.punct()?),
+        };
+        self.expect_operand = !ends_operand(&tok);
+        // `of` contextuel (`for (x of /re/)`, Turbopack
+        // news.at vol 325) : non réservé → lexé `Ident`
+        // → `ends_operand` rendait `true` et le `/` qui
+        // suit se lisait division (`unexpected '\'`).
+        // Après `of` un opérande est toujours attendu ;
+        // la division `of / n` (ident `of` en valeur)
+        // reste légale mais quasi inexistante en pratique.
+        if matches!(&tok, Tok::Ident(s) if &**s == "of") {
+            self.expect_operand = true;
+        }
+        if tok == Tok::P(P::LParen) {
+            self.clause_parens.push(matches!(self.prev, Prev::ClauseKw));
+        } else if tok == Tok::P(P::RParen) && self.clause_parens.pop().unwrap_or(false) {
+            self.expect_operand = true;
+        } else if tok == Tok::P(P::LBrace) {
+            let block = match self.prev {
+                Prev::None | Prev::Blockish => true,
+                Prev::Brace => self.brace_kinds.last().copied().unwrap_or(false),
+                _ => false,
+            };
+            self.brace_kinds.push(block);
+        } else if tok == Tok::P(P::RBrace) && self.brace_kinds.pop().unwrap_or(false) {
+            // `}` de bloc : nouveau statement possible → regex.
+            self.expect_operand = true;
+        }
+        self.prev = prev_of(&tok);
+        Ok(Token {
+            tok,
+            line,
+            col,
+            newline_before,
+            off,
+            end: self.pos,
+            legacy_octal: self.legacy_octal,
+        })
     }
 
     /// `/body/flags` — `in_class` keeps `[/]` inside `[…]` from
@@ -1428,6 +1446,38 @@ impl Lexer<'_> {
             self.bump();
         }
         Ok(p)
+    }
+}
+
+/// Résumé du token précédent — ce que la machine `/` retient
+/// d'un token consommé (JS-C525a). Remplace `out.last()` pour
+/// que `skip_body` rejoue la même heuristique sans stocker
+/// les tokens du corps sauté.
+#[derive(Clone, Copy, Default)]
+enum Prev {
+    /// Début de flux — un `{` en tête ouvre un bloc.
+    #[default]
+    None,
+    /// `)`/`}`/`;`/`=>`/`else|do|try|finally` — `{` qui suit = bloc.
+    Blockish,
+    /// `{` — hérite la classification `brace_kinds` englobante.
+    Brace,
+    /// Mot-clé de clause (`if|while|for|switch|with|catch`) — sa
+    /// `(` ouvre une clause : `)` qui ferme ré-arme `expect_operand`.
+    ClauseKw,
+    /// Tout le reste — `{` qui suit = operande (objet/pattern).
+    Other,
+}
+
+/// Classe `Prev` d'un token (miroir exact du `match` historique
+/// sur `out.last()`).
+fn prev_of(t: &Tok) -> Prev {
+    match t {
+        Tok::P(P::RParen | P::RBrace | P::Semi | P::Arrow)
+        | Tok::Kw(Kw::Else | Kw::Do | Kw::Try | Kw::Finally) => Prev::Blockish,
+        Tok::P(P::LBrace) => Prev::Brace,
+        Tok::Kw(k) if clause_kw(k) => Prev::ClauseKw,
+        _ => Prev::Other,
     }
 }
 
