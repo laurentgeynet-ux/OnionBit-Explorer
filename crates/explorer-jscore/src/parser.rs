@@ -28,7 +28,7 @@ use std::rc::Rc;
 /// Table O(n) des délimiteurs appariés : `close_of[i]` = index
 /// du `)`/`]`/`}` fermant l'ouvrant à `i` (`usize::MAX` si
 /// désapparié) — voir [`Parser::close_of`].
-fn close_table(toks: &[Token]) -> Vec<usize> {
+pub(crate) fn close_table(toks: &[Token]) -> Vec<usize> {
     let mut close = vec![usize::MAX; toks.len()];
     let mut stack: Vec<usize> = Vec::new();
     for (i, t) in toks.iter().enumerate() {

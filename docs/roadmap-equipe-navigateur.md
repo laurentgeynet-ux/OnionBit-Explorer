@@ -12788,3 +12788,8 @@ chaque gain rapporté contre les **deux** archétypes.
   champs + `Prev` (résumé token précédent) — refactor à
   comportement nul, prérequis au `skip_body` tokenless.
   Verrous : lang 315, c500 32, c502 24, clippy + doc propres.
+- [x] **JS-C525b — `probe_body` tokenless + mode `toks_skip`**
+  (streaming 2/3) : probe `Lexer` frais après `{`, machine `/`
+  rejouée sans retenir les tokens (placeholders partagés) ;
+  `Token.boff` ajouté. Équivalence probe ≡ `close_table`
+  vérifiée sur corpus ciblé. Verrous : lang 315, clippy propre.
