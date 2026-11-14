@@ -2316,6 +2316,12 @@ impl Bindings {
     pub fn insert(&mut self, name: impl Into<Rc<str>>, cell: EnvCell) {
         let name = name.into();
         if let Some(i) = self.pos(&name) {
+            // Invariant : un nom canonique n'a qu'un foyer —
+            // `extra` ne peut pas en retenir un duplicata (la
+            // migration `wire_canon` absorbe les insertions
+            // pré-câblage ; sans ça `get` masquerait une liaison
+            // vivante derrière un `Uninit`).
+            debug_assert!(self.extra.get(&name).is_none());
             self.cells[i] = cell;
             return;
         }
