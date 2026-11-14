@@ -612,7 +612,7 @@ fn c515_fown_attrib_emits() {
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner);
     explorer_jscore::j17_enable();
-    eval("var o={a:1};for(var i=0;i<50;i++){o.hasOwnProperty('a');}");
+    eval("var o={a:1};for(var i=0;i<50;i++){Object.defineProperty(o,'k'+i%4,{value:i,writable:true,configurable:true});}");
     assert!(explorer_jscore::j17_snapshot().contains("fown:"));
 }
 

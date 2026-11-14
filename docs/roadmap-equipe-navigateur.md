@@ -12749,3 +12749,7 @@ chaque gain rapporté contre les **deux** archétypes.
   `push_prop` arme le bit pour toute insertion de la clé
   (forge `fromCharCode` comprise), `remove_own` le lève —
   repli `find_own` supprimé du chemin d'appel. Verrous : lang 315 ×3.
+- [x] **JS-C517 — `Absent` pour `proto_accessor_shadows`** :
+  la marche proto DOM anti-ombre (337 k yt = 19 %) servie par
+  `IcOut::Absent` au callsite ; `Hit`/`HitChain` → marche + learn
+  en chaîne complète (borne 32 exclue). Verrous : lang 315 ×3.

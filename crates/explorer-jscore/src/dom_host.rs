@@ -1293,15 +1293,39 @@ fn dom_nav_set(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
 /// la voie hôte sert la même valeur sans appel rebouclant.
 /// `true` → `NodeHost::get`/`set` cèdent à `read_prop`/`write_prop`
 /// qui invoquent le getter/setter scripté.
+/// JS-C517 — `#[track_caller]` : chaque callsite est un site IC.
+/// La réponse dominante (aucune ombre) est servie par
+/// `IcOut::Absent` — chaîne de shapes vérifiée, zéro `find_own`.
+/// `Hit`/`HitChain` ne tranchent pas (une Data ne répond pas à la
+/// question « un Acc auteur existe-t-il plus loin ? ») → `Fall`,
+/// la marche collecte et apprend `Absent` en chaîne complète.
+#[track_caller]
 fn proto_accessor_shadows(e: &mut Engine, id: ObjId, key: &str) -> bool {
+    let site = std::ptr::from_ref(std::panic::Location::caller()) as usize;
+    let mut armed = false;
+    if !e.ic_off {
+        match e.ic_hit(site, id, key) {
+            crate::interp::IcOut::Absent => return false,
+            crate::interp::IcOut::Bail => {}
+            _ => armed = true,
+        }
+    }
     let mut cur = match e.heap.obj(id) {
         Some(o) => o.proto.clone(),
         None => return false,
     };
+    let mut links: Vec<ObjId> = if armed { vec![id] } else { Vec::new() };
+    let mut complete = false;
     // Borne 32 — la chaîne DOM est courte ; un cycle proto
     // hostile ne doit pas boucler (conforme `find_prop`).
     for _ in 0..32 {
-        let Value::Obj(cid) = cur else { break };
+        let Value::Obj(cid) = cur else {
+            complete = true;
+            break;
+        };
+        if armed {
+            links.push(cid);
+        }
         if let Some(crate::heap::Prop::Acc { get, set, .. }) = e.find_own(cid, key) {
             let authored = |v: Value| match v {
                 Value::Obj(fid) => matches!(
@@ -1320,6 +1344,12 @@ fn proto_accessor_shadows(e: &mut Engine, id: ObjId, key: &str) -> bool {
             Some(o) => o.proto.clone(),
             None => break,
         };
+    }
+    // `None` de `heap.obj` = maillon mort → chaîne tronquée, pas
+    // de learn (`complete` resté faux — le `break` ci-dessus
+    // n'a pas posé le drapeau).
+    if armed && complete {
+        e.ic_learn(site, key, &links, false);
     }
     false
 }

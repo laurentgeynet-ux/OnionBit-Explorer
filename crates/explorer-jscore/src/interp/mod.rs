@@ -364,7 +364,7 @@ enum IcVerdict {
 /// désarmé — l'appelant marche SANS aucune machinerie learn
 /// (ni `Vec` de maillons, ni tentative).
 #[derive(Debug)]
-enum IcOut {
+pub(crate) enum IcOut {
     /// Propriété trouvée **sur la tête** (entrée `Own`).
     Hit(Value),
     /// Propriété trouvée **sur un maillon proto** (entrée
@@ -7721,7 +7721,7 @@ impl Engine {
     /// la vérif *est* la sémantique du lookup, tout échec
     /// retombe sur `find_prop` + `ic_learn`. `site == 0` ou
     /// `ic_off` → `None` immédiat (hors chemin quand désarmé).
-    fn ic_hit(&mut self, site: usize, id: ObjId, key: &str) -> IcOut {
+    pub(crate) fn ic_hit(&mut self, site: usize, id: ObjId, key: &str) -> IcOut {
         if site == 0 || self.ic_off {
             return IcOut::Fall;
         }
@@ -7949,7 +7949,7 @@ impl Engine {
         }
     }
 
-    fn ic_learn(&mut self, site: usize, key: &str, links: &[ObjId], found: bool) {
+    pub(crate) fn ic_learn(&mut self, site: usize, key: &str, links: &[ObjId], found: bool) {
         if site == 0 || self.ic_off {
             return;
         }
