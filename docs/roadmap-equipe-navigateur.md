@@ -12721,3 +12721,9 @@ chaque gain rapporté contre les **deux** archétypes.
   pas bougé `prop_ns` (mur = coût fixe × 2,67 M lookups) ;
   la famille dominante décidera write-IC vs `Absent` étendu
   vs quickening. Verrous : lang 315 ×3.
+- [x] **JS-C512 — `Absent` pour `host_method_shadowed`** :
+  la marche anti-masquage de méthode host DOM par `find_own_ai`
+  ×chaîne à chaque dispatch — `Absent` sert `false` direct
+  (dominant : aucune ombre) ; `Hit` non servable (tête/proto
+  indistinguables) → `Fall` ; learn de l'absent seul. Verrous :
+  lang 315 ×3.

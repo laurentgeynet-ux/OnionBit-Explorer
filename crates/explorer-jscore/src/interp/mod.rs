@@ -4381,12 +4381,30 @@ impl Engine {
     /// `Call`. Les valeurs intégrées (`Native`, `BoundNative
     /// hostMethod`, données non-fonction) ne masquent pas :
     /// `location.toString` garde le rail host.
+    /// JS-C512 — `#[track_caller]` : callsite Rust = site IC.
+    /// Le cas dominant (aucune prop d'ombre sur toute la chaîne)
+    /// est servi par `Absent` — chaîne complète vérifiée →
+    /// `false` sans un seul `find_own_ai`. `Hit` non servable :
+    /// l'entrée ne dit pas si le maillon trouvé est la tête
+    /// (→`true` quel que soit le `Prop`) ou un proto (→`Data`
+    /// native ne masque pas, `Acc` masque) → `Fall`.
+    #[track_caller]
     pub(crate) fn host_method_shadowed(&mut self, bid: ObjId, name: &str) -> bool {
+        let site = std::ptr::from_ref(std::panic::Location::caller()) as usize;
+        let collect = match self.ic_hit(site, bid, name) {
+            IcOut::Absent => return false,
+            IcOut::Hit(_) | IcOut::Fall => true,
+            IcOut::Bail => false,
+        };
         let ai = array_index(name); // V-3b — hoisted hors de la marche
+        let mut links = Vec::new();
         let mut cur = Some(bid);
         let mut depth = 0;
         let mut own = true;
         while let Some(cid) = cur {
+            if collect {
+                links.push(cid);
+            }
             if let Some(p) = self.find_own_ai(cid, name, ai) {
                 if own {
                     // Own-prop quelconque — comportement
@@ -4414,6 +4432,11 @@ impl Engine {
             if depth > MAX_PROTO_DEPTH {
                 return false;
             }
+        }
+        // Chaîne complète sans rien → entrée `Absent` (les hits
+        // ne sont pas servables ici — on n'apprend que l'absent).
+        if collect {
+            self.ic_learn(site, name, &links, false);
         }
         false
     }
