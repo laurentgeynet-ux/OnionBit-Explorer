@@ -494,7 +494,7 @@ impl Engine {
         let r = self.new_object();
         if let Some(p) = crate::dom_host::domrect_proto(self, "DOMRectReadOnly") {
             if let Some(o) = self.heap.obj_mut(r) {
-                o.proto = p;
+                o.set_proto(p);
             }
         }
         for (k, v) in [
@@ -522,7 +522,7 @@ impl Engine {
         let r = self.new_object();
         if let Some(p) = crate::dom_host::domrect_proto(self, "DOMRectReadOnly") {
             if let Some(o) = self.heap.obj_mut(r) {
-                o.proto = p;
+                o.set_proto(p);
             }
         }
         let (w, h) = self.hooks.viewport;
@@ -714,7 +714,7 @@ fn new_obs(
     };
     if let Some(pp) = pp {
         if let Some(o) = e.heap.obj_mut(oid) {
-            o.proto = pp;
+            o.set_proto(pp);
         }
     }
     // Options exposées (`observer.thresholds`/`rootMargin` —

@@ -502,6 +502,12 @@ impl Heap {
         // Recal exact post-sweep : les props ajoutées depuis l'alloc
         // entrent dans le compte, l'estimation repart de zéro dérive.
         self.bytes = live_bytes;
+        if swept > 0 {
+            // JS-C526 — ObjId libres rendus à la free-list : les
+            // clés `(cid,kid)` des mémos de routes meurent ici,
+            // l'epoch les invalide avant toute réutilisation.
+            bump_shape_epoch();
+        }
         self.gc_runs += 1;
         let live = self.live_count();
         if live > self.peak_live {
@@ -1473,6 +1479,22 @@ pub(crate) const OBJF_CLASS_CTOR: u8 = 1;
 /// `0` est la sentinelle « sale » de `Object::shape`).
 const SHAPE_SEED: u64 = 0x9E37_79B9_7F4A_7C15;
 
+/// JS-C526 — epoch de mutation **structurelle** : bumpé par tout
+/// changement qui modifie la réponse d'une marche de chaîne —
+/// `push_prop`/`remove_own` (ensemble des clés/positions),
+/// [`Object::set_proto`] (lien), sweep GC (réutilisation
+/// d'`ObjId`). La mémo de routes `(maillon, clé) → issue` se
+/// valide contre elle : une entrée d'un epoch passé est
+/// re-marche, jamais servie. Les écritures de **valeur** à
+/// position constante (`props.get_mut`, `define_*` sur clé
+/// existante) ne bumpent pas : la mémo relit `props[pos]` frais.
+pub(crate) static SHAPE_EPOCH: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+/// Bump l'epoch structurelle — voir [`SHAPE_EPOCH`].
+pub(crate) fn bump_shape_epoch() {
+    SHAPE_EPOCH.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+}
+
 /// JS-C500 — un pas du pli d'empreinte : mixe l'adresse de la
 /// clé internée (stable pour la session — C310) avec ordre.
 /// Le bit haut est re-posé à chaque pas → le résultat n'est
@@ -1502,6 +1524,16 @@ impl Object {
         self.shape.set(h);
         h
     }
+    /// Écriture du lien proto — funnel unique (JS-C526) : bump
+    /// l'epoch structurelle pour invalider les mémos de routes
+    /// dont `self` est un maillon. Toute écriture `o.proto =`
+    /// doit passer ici (86 sites convertis — grep `\.proto =`
+    /// doit rester vide hors construction `Object { proto, … }`).
+    pub fn set_proto(&mut self, v: Value) {
+        self.proto = v;
+        bump_shape_epoch();
+    }
+
     /// New object with the given prototype and kind — propriétés
     /// vides, extensible, intégrité par défaut. Remplace les
     /// littéraux `Object { … }` : `idx` est privé et naît `None`.
@@ -1609,6 +1641,7 @@ impl Object {
         if h != 0 {
             self.shape.set(shape_step(h, &key));
         }
+        bump_shape_epoch();
     }
 
     /// Raw own property lookup (no prototype walk, no array-index
@@ -1855,6 +1888,7 @@ impl Object {
                 // JS-C500 — layout changé : empreinte sale,
                 // recomputée au prochain `shape()`.
                 self.shape.set(0);
+                bump_shape_epoch();
                 true
             }
             None => true,

@@ -626,7 +626,7 @@ fn track_obj(e: &mut Engine, d: &Rc<RefCell<SbData>>, idx: usize, sb: Value) -> 
     }));
     if let Value::Obj(id) = v {
         if let Some(o) = e.heap.obj_mut(id) {
-            o.proto = Value::Obj(proto);
+            o.set_proto(Value::Obj(proto));
         }
         d.borrow_mut().tracks[idx].obj = Some(v.clone());
     }
@@ -645,7 +645,7 @@ fn detached_track_obj(e: &mut Engine, d: &Rc<RefCell<SbData>>, sb: Value, snap: 
     }));
     if let Value::Obj(id) = v {
         if let Some(o) = e.heap.obj_mut(id) {
-            o.proto = Value::Obj(proto);
+            o.set_proto(Value::Obj(proto));
         }
     }
     v
@@ -664,7 +664,7 @@ fn track_list(e: &mut Engine, d: &Rc<RefCell<SbData>>, list: &'static str) -> Va
     let v = e.new_host_object(Rc::new(TrackListHost { d: d.clone(), list }));
     if let Value::Obj(id) = v {
         if let Some(o) = e.heap.obj_mut(id) {
-            o.proto = Value::Obj(lp);
+            o.set_proto(Value::Obj(lp));
         }
         d.borrow_mut().track_lists[i] = Some(v.clone());
     }
@@ -1222,7 +1222,7 @@ pub(crate) fn media_error_obj(e: &mut Engine, msg: &str) -> Value {
     let p = me_proto(e);
     let o = e.new_object();
     if let Some(ob) = e.heap.obj_mut(o) {
-        ob.proto = Value::Obj(p);
+        ob.set_proto(Value::Obj(p));
     }
     e.set_own(
         o,
@@ -1243,7 +1243,7 @@ fn time_ranges(e: &mut Engine, ranges: Vec<(f64, f64)>) -> Value {
     }));
     if let Value::Obj(id) = v {
         if let Some(o) = e.heap.obj_mut(id) {
-            o.proto = Value::Obj(tp);
+            o.set_proto(Value::Obj(tp));
         }
     }
     v
@@ -1258,7 +1258,7 @@ fn buffer_list(e: &mut Engine, d: &Rc<RefCell<MsData>>) -> Value {
     let v = e.new_host_object(Rc::new(SbListHost { d: d.clone() }));
     if let Value::Obj(id) = v {
         if let Some(o) = e.heap.obj_mut(id) {
-            o.proto = Value::Obj(lp);
+            o.set_proto(Value::Obj(lp));
         }
         d.borrow_mut().list = Some(v.clone());
     }
@@ -1284,7 +1284,7 @@ fn ms_ctor(e: &mut Engine, _t: Value, _args: &[Value]) -> JsResult<Value> {
     let v = e.new_host_object(Rc::new(MsHost { d }));
     if let Value::Obj(id) = v {
         if let Some(o) = e.heap.obj_mut(id) {
-            o.proto = Value::Obj(mp);
+            o.set_proto(Value::Obj(mp));
         }
     }
     Ok(v)
@@ -1648,7 +1648,7 @@ fn ms_add_source_buffer(e: &mut Engine, this: Value, args: &[Value]) -> JsResult
     let v = e.new_host_object(Rc::new(SbHost { d: sb }));
     if let Value::Obj(id) = v {
         if let Some(o) = e.heap.obj_mut(id) {
-            o.proto = Value::Obj(sp);
+            o.set_proto(Value::Obj(sp));
         }
         d.borrow_mut().buffers.push(v.clone());
     }

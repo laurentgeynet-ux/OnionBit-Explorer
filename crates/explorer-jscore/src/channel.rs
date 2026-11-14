@@ -293,7 +293,7 @@ impl Engine {
             .and_then(|c| self.get_prop_value(c, "prototype").ok());
         if let Some(pp @ Value::Obj(_)) = pp {
             if let Some(o) = self.heap.obj_mut(pid) {
-                o.proto = pp;
+                o.set_proto(pp);
             }
         }
     }

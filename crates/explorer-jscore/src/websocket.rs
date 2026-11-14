@@ -279,7 +279,7 @@ fn websocket_ctor(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> 
     let p = ws_proto(e);
     if let Value::Obj(id) = v.clone() {
         if let Some(o) = e.heap.obj_mut(id) {
-            o.proto = Value::Obj(p);
+            o.set_proto(Value::Obj(p));
         }
         match &e.ws_transport {
             // Couture installée → ouverture réelle ; les

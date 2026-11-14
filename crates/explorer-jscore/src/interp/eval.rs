@@ -271,7 +271,7 @@ impl Engine {
                             if matches!(k, PropKey::Name(n) if n.as_ref() == "__proto__") {
                                 if matches!(v, Value::Obj(_) | Value::Null) {
                                     if let Some(o) = self.heap.obj_mut(id) {
-                                        o.proto = v;
+                                        o.set_proto(v);
                                     }
                                 }
                             } else {
@@ -543,7 +543,7 @@ impl Engine {
                             .map_or(Value::Undefined, |o| o.proto.clone());
                         self.heap.swap_obj(tid, rid);
                         if let Some(to) = self.heap.obj_mut(tid) {
-                            to.proto = keep_proto;
+                            to.set_proto(keep_proto);
                         }
                     }
                 }

@@ -1313,7 +1313,7 @@ pub(crate) fn worker_ctor_pub(e: &mut Engine, _this: Value, args: &[Value]) -> J
     if let (Some(Value::Obj(wc)), Value::Obj(hid)) = (e.get_prop(g, "Worker"), host.clone()) {
         if let Some(pp @ Value::Obj(_)) = e.get_prop(wc, "prototype") {
             if let Some(o) = e.heap.obj_mut(hid) {
-                o.proto = pp;
+                o.set_proto(pp);
             }
         }
     }

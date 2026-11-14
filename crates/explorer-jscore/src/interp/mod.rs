@@ -351,6 +351,35 @@ const IC_MISS_DISARM: u8 = 8;
 const IC_CHAIN_CAP: usize = 8;
 /// JS-C521 — borne de la mémo négative de lectures absentes.
 const RABS_MEMO_CAP: usize = 8192;
+/// JS-C526 — borne de la mémo de routes (entries par maillon).
+const ROUTE_MEMO_CAP: usize = 16384;
+/// `RouteEnt::Absent` — sentinelle `pos` (jamais un index réel).
+const ROUTE_ABSENT: u32 = u32::MAX;
+
+/// JS-C526 — issue mémorisée d'une marche depuis un maillon.
+/// `epoch` = [`crate::heap::SHAPE_EPOCH`] au moment de la pose —
+/// toute mutation structurelle ultérieure rend l'entrée caduque
+/// (lue → ignorée puis purgée).
+#[derive(Clone)]
+pub(crate) struct RouteEnt {
+    epoch: u64,
+    holder: ObjId,
+    holder_shape: u64,
+    pos: u32,
+    /// Clé internée attendue à `props[pos]` — verrou de la
+    /// réutilisation GC (shape égale + clé au pos = identité).
+    key: std::rc::Rc<str>,
+}
+
+/// JS-C526 — verdict d'une consultation de la mémo de routes :
+/// entrée valide, son issue relue fraîche.
+enum RouteOut {
+    /// `(propriétaire, prop)` — valeur relue à `props[pos]`
+    /// (un remplacement en place reste couvert).
+    Found(ObjId, Prop),
+    /// Chaîne épuisée sans la clé — `None` à rendre.
+    Absent,
+}
 
 /// JS-C504 — verdict d'une consultation IC : valeur prouvée,
 /// vérification échouée (→ miss compté), ou maillon inéligible
@@ -968,6 +997,18 @@ pub struct Engine {
     /// toute mutation d'un maillon la change → correcte par
     /// construction (même leçon que `shadow_memo`, vol N5.19).
     pub(crate) rabs_memo: std::collections::HashSet<(u64, u64)>,
+    /// JS-C526 — mémo de **routes** `(maillon, kid) → issue de la
+    /// chaîne depuis ce maillon` : `Found{holder,pos}` ou
+    /// `Absent`, validée par [`crate::heap::SHAPE_EPOCH`]
+    /// (bumpé à chaque mutation structurelle — push/remove prop,
+    /// `set_proto`, sweep GC) + `holder_shape` + clé au `pos`
+    /// (réutilisation d'`ObjId` couverte par les trois). Un hit
+    /// saute la marche entière — le `prop_ns` des chaînes proto
+    /// répétées (979 k `proto_lvl`, vol N5.28) devient O(1).
+    /// Entrées posées uniquement quand **tous** les maillons
+    /// marchés étaient `ic_eligible` (hors proxy/`args_map`/
+    /// vues/ctor `RegExp` — réponses volatiles hors epoch).
+    pub(crate) route_memo: std::collections::HashMap<(ObjId, u64), RouteEnt>,
     /// Kill-switch IC (`EXPLORER_NO_IC=1`) — A/B en vol sans
     /// rebuild, précédent `resolve_off` (JS-C490c).
     pub(crate) ic_off: bool,
@@ -1530,6 +1571,7 @@ impl Engine {
             ic_map: std::collections::HashMap::new(),
             shadow_memo: std::collections::HashMap::new(),
             rabs_memo: std::collections::HashSet::new(),
+            route_memo: std::collections::HashMap::new(),
             ic_off: std::env::var("EXPLORER_NO_IC").is_ok_and(|v| v == "1"),
             ic_verify: std::env::var("EXPLORER_IC_VERIFY").is_ok_and(|v| v == "1"),
             lowered_suspend_cache: std::collections::HashMap::new(),
@@ -6365,7 +6407,7 @@ impl Engine {
         // le bloc l'y place explicitement).
         let w = self.new_object();
         if let Some(o) = self.heap.obj_mut(w) {
-            o.proto = Value::Obj(proto);
+            o.set_proto(Value::Obj(proto));
         }
         if let Some(n) = own_len {
             self.set_own(w, "length", Value::Num(n as f64), false);
@@ -7244,7 +7286,7 @@ impl Engine {
         // `super.sm()` inside statics resolves through it).
         if let Some(ref p) = parent {
             if let Some(o) = self.heap.obj_mut(ctor_id) {
-                o.proto = p.clone();
+                o.set_proto(p.clone());
             }
         }
 
@@ -7697,41 +7739,179 @@ impl Engine {
                                    // pire que la marche d'origine (vol N5.21 : le fold de
                                    // chaîne payait deux traversées au miss).
         let kid = (crate::intern(key).as_ptr() as usize as u64) ^ (key.len() as u64) << 48;
+        // JS-C526 — route mémo `(maillon, kid) → issue` : un hit
+        // saute la marche entière (O(1) sur chaînes répétées).
+        // Contournée quand `links` est demandé (le caller veut
+        // les maillons réels) ou sous kill-switch IC.
+        let memo = links.is_none() && !self.ic_off;
+        if memo {
+            match self.route_lookup(id, kid, key) {
+                Some(RouteOut::Found(h, p)) => return Some((h, p)),
+                Some(RouteOut::Absent) => return None,
+                None => {}
+            }
+        }
         let mut cur = Some(id);
         let mut depth = 0;
+        // Maillons éligibles marchés — une entrée n'est posée que
+        // si la chaîne entière l'était (`memoable`).
+        let mut walked: Vec<ObjId> = Vec::new();
+        let mut memoable = memo;
         while let Some(cid) = cur {
             crate::j17_tick(&crate::J17_PROTO_LVL);
             if let Some(l) = links.as_deref_mut() {
                 l.push(cid);
             }
-            let found = match self.heap.obj(cid) {
-                Some(o) if Self::ic_eligible(o, key, ai) => {
-                    let mkey = (o.shape(), kid);
-                    if self.rabs_memo.contains(&mkey) {
-                        None
+            // JS-C526 — un seul `heap.obj` par maillon :
+            // éligibilité, mémo own-absent et chase proto
+            // partagent `o` ; `find_own_ai` (qui veut `&mut`)
+            // ne court que sur les chemins `slow`.
+            let mut slow = false;
+            let mut mkey = None;
+            let mut nxt = None;
+            if let Some(o) = self.heap.obj(cid) {
+                nxt = match o.proto {
+                    Value::Obj(p) => Some(p),
+                    _ => None,
+                };
+                if Self::ic_eligible(o, key, ai) {
+                    if memoable && !matches!(self.re_ctor, Value::Obj(rc) if rc == cid) {
+                        walked.push(cid);
                     } else {
-                        let r = self.find_own_ai(cid, key, ai);
-                        if r.is_none() && self.rabs_memo.len() < RABS_MEMO_CAP {
-                            self.rabs_memo.insert(mkey);
+                        memoable = false;
+                    }
+                    let mk = (o.shape(), kid);
+                    mkey = Some(mk);
+                    if !self.rabs_memo.contains(&mk) {
+                        slow = true;
+                    }
+                } else {
+                    memoable = false;
+                    slow = true;
+                }
+            } else {
+                memoable = false;
+            }
+            let found = if slow {
+                let r = self.find_own_ai(cid, key, ai);
+                if r.is_none() {
+                    if let Some(mk) = mkey {
+                        if self.rabs_memo.len() < RABS_MEMO_CAP {
+                            self.rabs_memo.insert(mk);
                         }
-                        r
                     }
                 }
-                _ => self.find_own_ai(cid, key, ai),
+                r
+            } else {
+                None
             };
             if let Some(p) = found {
+                if memoable {
+                    self.route_insert(&walked, cid, kid, key);
+                }
                 return Some((cid, p));
             }
-            cur = match self.heap.obj(cid).map(|o| o.proto.clone()) {
-                Some(Value::Obj(p)) => Some(p),
-                _ => None,
-            };
+            cur = nxt;
             depth += 1;
             if depth > MAX_PROTO_DEPTH {
                 return None;
             }
         }
+        if memoable {
+            self.route_insert_absent(&walked, kid, key);
+        }
         None
+    }
+
+    /// JS-C526 — consultation de la mémo de routes :
+    /// `Some(..)` = verdict mémo (`Found`/`Absent`) ;
+    /// `None` = pas d'entrée ou caduque → marche normale.
+    /// Une entrée d'epoch passée est purgée au passage.
+    fn route_lookup(&mut self, id: ObjId, kid: u64, key: &str) -> Option<RouteOut> {
+        // Tête morte (id balayé non réutilisé) → la marche
+        // rend `None` naturellement ; la mémo ne doit pas
+        // diverger.
+        self.heap.obj(id)?;
+        let e = self.route_memo.get(&(id, kid))?.clone();
+        if e.epoch != crate::heap::SHAPE_EPOCH.load(std::sync::atomic::Ordering::Relaxed) {
+            crate::j17_tick(&crate::J17_RT_ST);
+            self.route_memo.remove(&(id, kid));
+            return None;
+        }
+        // Collision `kid` (réutilisation de ptr interné) → la
+        // clé stockée tranche ; entrée étrangère purgée.
+        if !std::rc::Rc::ptr_eq(&e.key, &crate::intern(key)) && &*e.key != key {
+            self.route_memo.remove(&(id, kid));
+            return None;
+        }
+        if e.pos == ROUTE_ABSENT {
+            crate::j17_tick(&crate::J17_RT_ABS);
+            return Some(RouteOut::Absent);
+        }
+        let h = self.heap.obj(e.holder)?;
+        if h.shape() != e.holder_shape {
+            self.route_memo.remove(&(id, kid));
+            return None;
+        }
+        match h.props.get(e.pos as usize) {
+            Some((k, p)) if std::rc::Rc::ptr_eq(k, &e.key) || &**k == key => {
+                crate::j17_tick(&crate::J17_RT_HIT);
+                let p = p.clone();
+                Some(RouteOut::Found(e.holder, p))
+            }
+            _ => {
+                self.route_memo.remove(&(id, kid));
+                None
+            }
+        }
+    }
+
+    /// JS-C526 — pose des entrées `Found` pour chaque maillon
+    /// éligible marché (la route du receveur **et** celle de
+    /// chaque proto partagé couverte). `None` silencieux si la
+    /// prop trouvée n'est pas une entrée `props` réelle
+    /// (synthèse `fn.name`/statiques `RegExp` — non adressable
+    /// par position).
+    fn route_insert(&mut self, walked: &[ObjId], holder: ObjId, kid: u64, key: &str) {
+        let Some((holder_shape, pos)) = self.heap.obj(holder).and_then(|o| {
+            o.prop_pos(key)
+                .and_then(|p| u32::try_from(p).ok().map(|p| (o.shape(), p)))
+        }) else {
+            return;
+        };
+        if self.route_memo.len() >= ROUTE_MEMO_CAP {
+            return;
+        }
+        let e = RouteEnt {
+            epoch: crate::heap::SHAPE_EPOCH.load(std::sync::atomic::Ordering::Relaxed),
+            holder,
+            holder_shape,
+            pos,
+            key: crate::intern(key),
+        };
+        for &lid in walked {
+            self.route_memo.insert((lid, kid), e.clone());
+        }
+        crate::j17_add(&crate::J17_RT_INS, walked.len() as u64);
+    }
+
+    /// JS-C526 — chaîne épuisée sans la clé → `Absent` pour
+    /// chaque maillon éligible marché.
+    fn route_insert_absent(&mut self, walked: &[ObjId], kid: u64, key: &str) {
+        if walked.is_empty() || self.route_memo.len() >= ROUTE_MEMO_CAP {
+            return;
+        }
+        let e = RouteEnt {
+            epoch: crate::heap::SHAPE_EPOCH.load(std::sync::atomic::Ordering::Relaxed),
+            holder: 0,
+            holder_shape: 0,
+            pos: ROUTE_ABSENT,
+            key: crate::intern(key),
+        };
+        for &lid in walked {
+            self.route_memo.insert((lid, kid), e.clone());
+        }
+        crate::j17_add(&crate::J17_RT_INS, walked.len() as u64);
     }
 
     /// JS-C500 — éligibilité own-prop à l'IC : `find_own_ai`
@@ -11177,7 +11357,7 @@ impl Engine {
             if let (Value::Obj(iid), Value::Obj(fid)) = (it.clone(), f.clone()) {
                 if let Some(proto) = self.get_prop(fid, "prototype") {
                     if let Some(o) = self.heap.obj_mut(iid) {
-                        o.proto = proto;
+                        o.set_proto(proto);
                     }
                 }
             }

@@ -167,7 +167,7 @@ pub(crate) fn date_ctor(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<V
     };
     let id = e.new_object();
     if let Some(o) = e.heap.obj_mut(id) {
-        o.proto = Value::Obj(e.protos.date);
+        o.set_proto(Value::Obj(e.protos.date));
         o.set_own("__time", Value::Num(ms), false);
     }
     Ok(Value::Obj(id))

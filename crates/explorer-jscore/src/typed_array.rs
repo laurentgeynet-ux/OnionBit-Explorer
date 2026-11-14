@@ -1951,7 +1951,7 @@ fn sab_slice(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
         });
     if let (Value::Obj(id), Some(p)) = (out.clone(), proto) {
         if let Some(o) = e.heap.obj_mut(id) {
-            o.proto = p;
+            o.set_proto(p);
         }
     }
     Ok(out)

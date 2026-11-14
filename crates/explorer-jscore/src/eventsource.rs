@@ -156,7 +156,7 @@ fn chain_et(e: &mut Engine, p: ObjId) {
     if let Some(Value::Obj(etc)) = e.get_prop(g, "EventTarget") {
         if let Some(pp @ Value::Obj(_)) = e.get_prop(etc, "prototype") {
             if let Some(o) = e.heap.obj_mut(p) {
-                o.proto = pp;
+                o.set_proto(pp);
             }
         }
     }
@@ -231,7 +231,7 @@ fn eventsource_ctor(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value
         return Ok(v);
     };
     if let Some(o) = e.heap.obj_mut(id) {
-        o.proto = Value::Obj(p);
+        o.set_proto(Value::Obj(p));
     }
     if let Some(t) = e.es_transport.clone() {
         let handle = t.open(EsRequest {

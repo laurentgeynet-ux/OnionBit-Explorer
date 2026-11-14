@@ -592,7 +592,7 @@ fn new_request(e: &mut Engine, op: IdbOp, source: Value, txn: Value) -> Value {
     let v = e.new_host_object(Rc::new(IdbReqHost { d }));
     if let Value::Obj(id) = v {
         if let Some(o) = e.heap.obj_mut(id) {
-            o.proto = Value::Obj(rp);
+            o.set_proto(Value::Obj(rp));
         }
         e.idb.pending.push_back(id);
     }
@@ -804,7 +804,7 @@ fn openreq_proto(e: &mut Engine) -> ObjId {
     // hérite `addEventListener`/`then`/`readyState`…
     let rp = req_proto(e);
     if let Some(o) = e.heap.obj_mut(p) {
-        o.proto = Value::Obj(rp);
+        o.set_proto(Value::Obj(rp));
     }
     e.idb.openreq_proto = Some(p);
     p
@@ -818,7 +818,7 @@ fn cursor_proto(e: &mut Engine) -> ObjId {
     // WebIDL : `IDBCursorWithValue` < `IDBCursor`.
     let cp = cursor_base_proto(e);
     if let Some(o) = e.heap.obj_mut(p) {
-        o.proto = Value::Obj(cp);
+        o.set_proto(Value::Obj(cp));
     }
     e.add_method(p, "continue", cursor_continue);
     e.add_method(p, "advance", cursor_advance);
@@ -1195,7 +1195,7 @@ fn idb_keyrange_ctor(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Valu
     }));
     if let Value::Obj(id) = v {
         if let Some(o) = e.heap.obj_mut(id) {
-            o.proto = Value::Obj(kp);
+            o.set_proto(Value::Obj(kp));
         }
     }
     let _ = args;
@@ -1208,7 +1208,7 @@ fn kr_value(e: &mut Engine, lower: Option<(IdbKey, bool)>, upper: Option<(IdbKey
     let v = e.new_host_object(Rc::new(IdbKrHost { lower, upper }));
     if let Value::Obj(id) = v {
         if let Some(o) = e.heap.obj_mut(id) {
-            o.proto = Value::Obj(kp);
+            o.set_proto(Value::Obj(kp));
         }
     }
     v
@@ -1507,7 +1507,7 @@ fn db_value(e: &mut Engine, reg: &IdbRegistry, name: &str, version: u64) -> Valu
     }));
     if let Value::Obj(id) = v {
         if let Some(o) = e.heap.obj_mut(id) {
-            o.proto = Value::Obj(dp);
+            o.set_proto(Value::Obj(dp));
         }
         let n = e.str_val(name);
         e.set_own(id, "name", n, true);
@@ -1555,7 +1555,7 @@ fn txn_value(
     }));
     if let Value::Obj(id) = v {
         if let Some(o) = e.heap.obj_mut(id) {
-            o.proto = Value::Obj(tp);
+            o.set_proto(Value::Obj(tp));
         }
         d.borrow_mut().wrapper = Some(id);
         let m = e.str_val(mode);
@@ -1583,7 +1583,7 @@ fn store_value(e: &mut Engine, ctx: &StoreCtx, index: Option<&str>) -> Value {
     }));
     if let Value::Obj(id) = v {
         if let Some(o) = e.heap.obj_mut(id) {
-            o.proto = Value::Obj(sp);
+            o.set_proto(Value::Obj(sp));
         }
         // `transaction` rétro-lien — wrapper de la txn.
         let txn_w = ctx
@@ -2478,7 +2478,7 @@ fn cursor_open_op(
     }));
     if let Value::Obj(cid) = cv {
         if let Some(o) = e.heap.obj_mut(cid) {
-            o.proto = Value::Obj(cp);
+            o.set_proto(Value::Obj(cp));
         }
     }
     Ok(cv)
@@ -2957,7 +2957,7 @@ fn cs_open(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
     }));
     if let Value::Obj(id) = v {
         if let Some(o) = e.heap.obj_mut(id) {
-            o.proto = Value::Obj(cp);
+            o.set_proto(Value::Obj(cp));
         }
     }
     let pid = e.new_promise();
@@ -3032,7 +3032,7 @@ fn cache_value(e: &mut Engine, reg: &CacheRegistry, name: &str) -> Value {
     }));
     if let Value::Obj(id) = v {
         if let Some(o) = e.heap.obj_mut(id) {
-            o.proto = Value::Obj(cp);
+            o.set_proto(Value::Obj(cp));
         }
     }
     v
@@ -3286,7 +3286,7 @@ pub(crate) fn install_idb(e: &mut Engine, inject: Option<IdbRegistry>) {
         }
         e.set_own(g, "IDBFactory", c, false);
         if let Some(o) = e.heap.obj_mut(f) {
-            o.proto = Value::Obj(fp);
+            o.set_proto(Value::Obj(fp));
         }
     }
 
@@ -3373,7 +3373,7 @@ pub(crate) fn install_caches(e: &mut Engine, inject: Option<CacheRegistry>) {
     let sp = cachestorage_proto(e);
     let cs = e.new_object();
     if let Some(o) = e.heap.obj_mut(cs) {
-        o.proto = Value::Obj(sp);
+        o.set_proto(Value::Obj(sp));
     }
     e.add_method(cs, "open", cs_open);
     e.add_method(cs, "has", cs_has);

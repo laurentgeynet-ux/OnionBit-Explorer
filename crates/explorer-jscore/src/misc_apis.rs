@@ -193,7 +193,7 @@ fn bc_ctor(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
     let p = bc_proto(e);
     if let Value::Obj(id) = v {
         if let Some(o) = e.heap.obj_mut(id) {
-            o.proto = Value::Obj(p);
+            o.set_proto(Value::Obj(p));
         }
         data.borrow_mut().wrapper = Some(id);
     }
@@ -439,7 +439,7 @@ fn notif_ctor(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
     let p = notif_proto(e);
     if let Value::Obj(id) = v {
         if let Some(o) = e.heap.obj_mut(id) {
-            o.proto = Value::Obj(p);
+            o.set_proto(Value::Obj(p));
         }
         let t = e.str_val(title);
         e.set_own(id, "title", t, true);
@@ -574,7 +574,7 @@ pub(crate) fn get_selection(e: &mut Engine, _t: Value, _a: &[Value]) -> JsResult
     let p = sel_proto(e);
     if let Value::Obj(id) = v {
         if let Some(o) = e.heap.obj_mut(id) {
-            o.proto = Value::Obj(p);
+            o.set_proto(Value::Obj(p));
         }
         e.misc.sel_wrapper = Some(id);
     }
@@ -1137,7 +1137,7 @@ fn range_shared(e: &mut Engine, data: Rc<RefCell<SelRange>>) -> Value {
     let p = range_proto(e);
     if let Value::Obj(id) = v {
         if let Some(o) = e.heap.obj_mut(id) {
-            o.proto = Value::Obj(p);
+            o.set_proto(Value::Obj(p));
         }
     }
     v
@@ -1717,7 +1717,7 @@ pub(crate) fn create_treewalker(e: &mut Engine, _t: Value, args: &[Value]) -> Js
     let p = tw_proto(e);
     if let Value::Obj(id) = v {
         if let Some(o) = e.heap.obj_mut(id) {
-            o.proto = Value::Obj(p);
+            o.set_proto(Value::Obj(p));
         }
     }
     Ok(v)
@@ -1939,7 +1939,7 @@ pub(crate) fn create_nodeiterator(e: &mut Engine, _t: Value, args: &[Value]) -> 
     let p = ni_proto(e);
     if let Value::Obj(id) = v {
         if let Some(o) = e.heap.obj_mut(id) {
-            o.proto = Value::Obj(p);
+            o.set_proto(Value::Obj(p));
         }
     }
     Ok(v)
@@ -2083,7 +2083,7 @@ pub(crate) fn css_sheet_ctor(e: &mut Engine, _t: Value, args: &[Value]) -> JsRes
     if let Ok(Value::Obj(cid)) = e.get_prop_value(Value::Obj(e.global), "CSSStyleSheet") {
         if let Ok(proto @ Value::Obj(_)) = e.get_prop_value(Value::Obj(cid), "prototype") {
             if let Some(obj) = e.heap.obj_mut(o) {
-                obj.proto = proto;
+                obj.set_proto(proto);
             }
         }
     }
@@ -2208,7 +2208,7 @@ pub(crate) fn shared_worker_ctor(e: &mut Engine, _t: Value, args: &[Value]) -> J
     if let Some(Value::Obj(cid)) = e.get_prop(g, "SharedWorker") {
         if let Some(pp @ Value::Obj(_)) = e.get_prop(cid, "prototype") {
             if let Some(ob) = e.heap.obj_mut(o) {
-                ob.proto = pp;
+                ob.set_proto(pp);
             }
         }
     }
@@ -2283,7 +2283,7 @@ fn anim_wrapper(e: &mut Engine, data: &Rc<RefCell<AnimData>>) -> Value {
     let p = anim_proto(e);
     if let Value::Obj(id) = v {
         if let Some(o) = e.heap.obj_mut(id) {
-            o.proto = Value::Obj(p);
+            o.set_proto(Value::Obj(p));
         }
         data.borrow_mut().wrapper = Some(id);
     }
@@ -2389,7 +2389,7 @@ pub(crate) fn keyframe_effect_ctor(e: &mut Engine, _t: Value, args: &[Value]) ->
     if let Value::Obj(id) = v {
         let p = kfe_proto(e);
         if let Some(o) = e.heap.obj_mut(id) {
-            o.proto = Value::Obj(p);
+            o.set_proto(Value::Obj(p));
         }
     }
     Ok(v)
@@ -2769,7 +2769,7 @@ pub(crate) fn start_view_transition(e: &mut Engine, _t: Value, args: &[Value]) -
     e.add_method(o, "skipTransition", vt_skip);
     let p = vt_proto(e);
     if let Some(obj) = e.heap.obj_mut(o) {
-        obj.proto = Value::Obj(p);
+        obj.set_proto(Value::Obj(p));
     }
     if e.is_callable(cb.clone()) {
         e.call_value(cb, Value::Obj(o), &[])?;
@@ -3376,7 +3376,7 @@ pub(crate) fn xpath_evaluate(e: &mut Engine, this: Value, args: &[Value]) -> JsR
     let p = xr_proto(e);
     if let Value::Obj(id) = v {
         if let Some(o) = e.heap.obj_mut(id) {
-            o.proto = Value::Obj(p);
+            o.set_proto(Value::Obj(p));
         }
     }
     Ok(v)

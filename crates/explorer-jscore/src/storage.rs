@@ -56,7 +56,7 @@ impl Engine {
         for v in [lv.clone(), sv.clone()] {
             if let Value::Obj(id) = v {
                 if let Some(o) = self.heap.obj_mut(id) {
-                    o.proto = Value::Obj(p);
+                    o.set_proto(Value::Obj(p));
                 }
             }
         }

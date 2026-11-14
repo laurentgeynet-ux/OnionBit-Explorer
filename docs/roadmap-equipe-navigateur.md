@@ -12845,4 +12845,24 @@ chaque gain rapporté contre les **deux** archétypes.
   `set_defer_min`, `c525_rewind`. Verrous : différentiel
   vert, `c525_rewind` 2/2. **C525 clos** — le mur reste
   `prop_ns` ~772-930 ms (traversée proto).
+- [x] **JS-C526 — mémo de routes proto epoch-validée** :
+  `find_prop_owner_links` mémorise `(maillon, kid) →
+  issue` (`Found{holder,pos}`/`Absent`) sur chaque
+  maillon éligible marché — hit répété = O(1) au lieu
+  de ~2 déréférences de tas + `rabs_memo` par niveau
+  (979 k `proto_lvl`, vol N5.28). Validité : epoch
+  structurelle `SHAPE_EPOCH` (bumpée par `push_prop`/
+  `remove_own`/`set_proto`/sweep — les seules mutations
+  changeant une marche) + `holder` vivant/shape + clé
+  internée au `pos` (verrou réutilisation `ObjId`).
+  `Object::set_proto` = funnel unique du lien (86 sites
+  convertis). Non-éligibles exclus de la pose (proxy/
+  `args_map`/vues/ctor `RegExp`). `RouteOut` enum
+  (verdict 3 états, clippy `option_option`). Tests
+  `c526_route` 5/5 (shadowing, delete, setPrototypeOf,
+  valeur fraîche à pos constante, `rt_hit`). Verrous :
+  `lang` 315/315, `dom` 265/265, `c500` 32, `c502` 24,
+  `j17_counters` 9/9, clippy/doc propres. **Mesure
+  `prop_ns` attendue au prochain vol** — verdict à
+  `rt_hit`/`rt_st`/`rt_ins`.
 

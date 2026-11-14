@@ -341,7 +341,7 @@ pub(crate) fn object_set_proto(e: &mut Engine, _t: Value, args: &[Value]) -> JsR
             stack = %stack.chars().take(400).collect::<String>());
     }
     if let Some(o) = e.heap.obj_mut(id) {
-        o.proto = proto;
+        o.set_proto(proto);
     }
     Ok(target)
 }

@@ -962,7 +962,7 @@ impl Engine {
                     }));
                     if let (Some(p), Value::Obj(id)) = (self.crypto.ck_proto, ck.clone()) {
                         if let Some(o) = self.heap.obj_mut(id) {
-                            o.proto = Value::Obj(p);
+                            o.set_proto(Value::Obj(p));
                         }
                     }
                     self.resolve_promise(pid, ck);

@@ -191,7 +191,7 @@ fn rs_obj(e: &mut Engine, d: &Rc<RefCell<RsData>>, proto: ObjId) -> Value {
     let v = e.new_host_object(Rc::new(RsHost { d: d.clone() }));
     if let Value::Obj(id) = v {
         if let Some(o) = e.heap.obj_mut(id) {
-            o.proto = Value::Obj(proto);
+            o.set_proto(Value::Obj(proto));
         }
     }
     v
@@ -852,7 +852,7 @@ fn ws_obj(e: &mut Engine, d: &Rc<RefCell<WsData>>, proto: ObjId) -> Value {
     let v = e.new_host_object(Rc::new(WsHost { d: d.clone() }));
     if let Value::Obj(id) = v {
         if let Some(o) = e.heap.obj_mut(id) {
-            o.proto = Value::Obj(proto);
+            o.set_proto(Value::Obj(proto));
         }
     }
     v
@@ -1194,7 +1194,7 @@ fn transform_stream_ctor(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<
     let v = e.new_host_object(Rc::new(TsHost { d: d.clone() }));
     if let Value::Obj(id) = v {
         if let Some(o) = e.heap.obj_mut(id) {
-            o.proto = Value::Obj(tp);
+            o.set_proto(Value::Obj(tp));
         }
         e.set_own(id, "readable", readable, true);
         e.set_own(id, "writable", writable, true);
@@ -1215,7 +1215,7 @@ fn ts_ctrl(e: &mut Engine, d: &Rc<RefCell<TsData>>) -> Value {
     let v = e.new_host_object(Rc::new(TsCtrlHost { d: d.clone() }));
     if let Value::Obj(id) = v {
         if let Some(o) = e.heap.obj_mut(id) {
-            o.proto = Value::Obj(cp);
+            o.set_proto(Value::Obj(cp));
         }
     }
     v
@@ -1241,7 +1241,7 @@ fn ts_writable(e: &mut Engine, d: &Rc<RefCell<TsData>>) -> Value {
     let sink = e.new_host_object(Rc::new(TsSinkHost { d: d.clone() }));
     if let Value::Obj(sid) = sink {
         if let Some(o) = e.heap.obj_mut(sid) {
-            o.proto = Value::Obj(op);
+            o.set_proto(Value::Obj(op));
         }
         e.add_method(sid, "write", ts_sink_write);
         e.add_method(sid, "close", ts_sink_close);

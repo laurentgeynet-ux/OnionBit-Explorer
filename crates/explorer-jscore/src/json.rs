@@ -557,7 +557,7 @@ fn json_raw_json(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
     e.set_own(obj, "rawJSON", raw, false);
     // Spec : `Object.freeze(Object.create(null))`.
     if let Some(o) = e.heap.obj_mut(obj) {
-        o.proto = Value::Null;
+        o.set_proto(Value::Null);
         o.extensible = false;
     }
     Ok(Value::Obj(obj))

@@ -192,7 +192,7 @@ fn mutobs_ctor(e: &mut Engine, _this: Value, args: &[Value]) -> JsResult<Value> 
         // la propriété globale).
         if let Some(pp) = e.mutobs.proto.clone() {
             if let Some(o) = e.heap.obj_mut(oid) {
-                o.proto = pp;
+                o.set_proto(pp);
             }
         }
     }

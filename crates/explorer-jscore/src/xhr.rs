@@ -470,7 +470,7 @@ fn xhr_ctor(e: &mut Engine, _this: Value, _args: &[Value]) -> JsResult<Value> {
     // par les instrumentation hooks (spec WebIDL).
     if let (Value::Obj(id), Some(p)) = (v.clone(), e.xhr.xhr_proto) {
         if let Some(o) = e.heap.obj_mut(id) {
-            o.proto = Value::Obj(p);
+            o.set_proto(Value::Obj(p));
         }
     }
     Ok(v)
@@ -2595,7 +2595,7 @@ impl Engine {
             if let Some(Value::Obj(etc)) = self.get_prop(g, "EventTarget") {
                 if let Some(pp @ Value::Obj(_)) = self.get_prop(etc, "prototype") {
                     if let Some(o) = self.heap.obj_mut(p) {
-                        o.proto = pp;
+                        o.set_proto(pp);
                     }
                 }
             }
@@ -2801,7 +2801,7 @@ fn abort_signal_value(e: &mut Engine) -> Value {
         if let Some(Value::Obj(cid)) = e.get_prop(e.global, "AbortSignal") {
             if let Some(pp @ Value::Obj(_)) = e.get_prop(cid, "prototype") {
                 if let Some(o) = e.heap.obj_mut(sid) {
-                    o.proto = pp;
+                    o.set_proto(pp);
                 }
             }
         }

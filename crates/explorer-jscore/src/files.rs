@@ -399,7 +399,7 @@ fn file_reader_ctor(e: &mut Engine, _t: Value, _a: &[Value]) -> JsResult<Value> 
     }));
     if let Value::Obj(id) = v {
         if let Some(o) = e.heap.obj_mut(id) {
-            o.proto = Value::Obj(p);
+            o.set_proto(Value::Obj(p));
         }
     }
     Ok(v)

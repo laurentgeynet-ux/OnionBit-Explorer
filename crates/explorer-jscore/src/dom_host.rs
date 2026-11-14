@@ -2400,7 +2400,7 @@ pub(crate) fn node_value(e: &mut Engine, dom: &DomRef, cache: &NodeCache, node: 
         });
         if let Some(p @ Value::Obj(_)) = proto {
             if let Some(o) = e.heap.obj_mut(id) {
-                o.proto = p;
+                o.set_proto(p);
             }
         }
         cache.borrow_mut().insert(node, id);
@@ -3026,7 +3026,7 @@ impl Engine {
             self.set_own(lfid, "prototype", Value::Obj(lp), false);
             if let Value::Obj(locid) = loc {
                 if let Some(o) = self.heap.obj_mut(locid) {
-                    o.proto = Value::Obj(lp);
+                    o.set_proto(Value::Obj(lp));
                 }
             }
         }
@@ -3046,7 +3046,7 @@ impl Engine {
         }
         if let Value::Obj(hid) = hist {
             if let Some(o) = self.heap.obj_mut(hid) {
-                o.proto = Value::Obj(hp);
+                o.set_proto(Value::Obj(hp));
             }
         }
         self.set_own(g, "History", hf, false);
@@ -3073,7 +3073,7 @@ impl Engine {
             self.set_own(nfid, "prototype", Value::Obj(np), false);
             if let Value::Obj(nav_id) = navapi {
                 if let Some(o) = self.heap.obj_mut(nav_id) {
-                    o.proto = Value::Obj(np);
+                    o.set_proto(Value::Obj(np));
                 }
             }
         }
@@ -3502,7 +3502,7 @@ impl Engine {
                     if let Some(Value::Obj(cid)) = self.get_prop(g, pn) {
                         if let Some(pp @ Value::Obj(_)) = self.get_prop(cid, "prototype") {
                             if let Some(o) = self.heap.obj_mut(p) {
-                                o.proto = pp;
+                                o.set_proto(pp);
                             }
                         }
                     }
@@ -3559,7 +3559,7 @@ impl Engine {
         self.set_own(ro_proto, "toJSON", tj.clone(), false);
         let rw_proto = self.new_object();
         if let Some(o) = self.heap.obj_mut(rw_proto) {
-            o.proto = ro_pv.clone();
+            o.set_proto(ro_pv.clone());
         }
         self.set_own(rw_proto, "toJSON", tj, false);
         for (name, proto, ro) in [
@@ -3614,7 +3614,7 @@ impl Engine {
                 self.get_prop(el_c, "prototype"),
             ) {
                 if let Some(o) = self.heap.obj_mut(he_p) {
-                    o.proto = pp;
+                    o.set_proto(pp);
                 }
             }
         }
@@ -3690,7 +3690,7 @@ impl Engine {
             // sauvegardée (`L(proto,…)` → `defineProperty`).
             if let Some(o) = self.heap.obj_mut(g) {
                 if matches!(o.proto, Value::Obj(p0) if p0 == self.protos.object) {
-                    o.proto = Value::Obj(p);
+                    o.set_proto(Value::Obj(p));
                 }
             }
         }
@@ -3732,7 +3732,7 @@ impl Engine {
                     if let Some(Value::Obj(pcid)) = self.get_prop(g, parent) {
                         if let Some(pp @ Value::Obj(_)) = self.get_prop(pcid, "prototype") {
                             if let Some(o) = self.heap.obj_mut(cp) {
-                                o.proto = pp;
+                                o.set_proto(pp);
                             }
                         }
                     }
@@ -3827,7 +3827,7 @@ impl Engine {
             if let Some(Value::Obj(etc)) = self.get_prop(g, "EventTarget") {
                 if let Some(pp @ Value::Obj(_)) = self.get_prop(etc, "prototype") {
                     if let Some(o) = self.heap.obj_mut(p) {
-                        o.proto = pp;
+                        o.set_proto(pp);
                     }
                 }
             }
@@ -3926,7 +3926,7 @@ impl Engine {
         if let (Value::Obj(did), Some(Value::Obj(cid))) = (doc, self.get_prop(g, "HTMLDocument")) {
             if let Some(proto @ Value::Obj(_)) = self.get_prop(cid, "prototype") {
                 if let Some(o) = self.heap.obj_mut(did) {
-                    o.proto = proto;
+                    o.set_proto(proto);
                 }
             }
         }
@@ -4034,7 +4034,7 @@ impl Engine {
                 let p = Value::Obj(self.new_object());
                 if let Value::Obj(pid) = p {
                     if let Some(o) = self.heap.obj_mut(pid) {
-                        o.proto = event_proto.clone();
+                        o.set_proto(event_proto.clone());
                     }
                 }
                 self.set_own(fid, "prototype", p, false);
@@ -4383,7 +4383,7 @@ impl Engine {
             // `Performance.prototype`.
             if let Some(Value::Obj(gid)) = self.get_prop(self.global, "performance") {
                 if let Some(o) = self.heap.obj_mut(gid) {
-                    o.proto = Value::Obj(pid);
+                    o.set_proto(Value::Obj(pid));
                 }
             }
         }
@@ -4426,7 +4426,7 @@ impl Engine {
                 let p = Value::Obj(self.new_object());
                 if let Value::Obj(pid) = p {
                     if let Some(o) = self.heap.obj_mut(pid) {
-                        o.proto = event_proto.clone();
+                        o.set_proto(event_proto.clone());
                     }
                 }
                 self.set_own(fid, "prototype", p, false);
@@ -4725,7 +4725,7 @@ impl Engine {
                 .or_else(|| event_realm_proto(self));
             if let Some(p) = proto {
                 if let Some(o) = self.heap.obj_mut(id) {
-                    o.proto = p;
+                    o.set_proto(p);
                 }
             }
         }
@@ -11803,7 +11803,7 @@ pub(crate) fn gbrect_shared(e: &mut Engine, dom: &DomRef, node: NodeId) -> Value
     let r = e.new_object();
     if let Some(p) = domrect_proto(e, "DOMRect") {
         if let Some(o) = e.heap.obj_mut(r) {
-            o.proto = p;
+            o.set_proto(p);
         }
     }
     for (k, v) in [
@@ -11866,7 +11866,7 @@ fn vttcue_ctor(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
     if let Some(Value::Obj(cid)) = e.get_prop(g, "VTTCue") {
         if let Some(p @ Value::Obj(_)) = e.get_prop(cid, "prototype") {
             if let Some(ho) = e.heap.obj_mut(o) {
-                ho.proto = p;
+                ho.set_proto(p);
             }
         }
     }
@@ -12126,7 +12126,7 @@ fn docfrag_ctor(e: &mut Engine, this: Value, _a: &[Value]) -> JsResult<Value> {
         if let Some(tp) = e.heap.obj(tid).map(|o| o.proto.clone()) {
             let changed = e.heap.obj(wid).is_some_and(|w| w.proto != tp);
             if let Some(w) = e.heap.obj_mut(wid) {
-                w.proto = tp;
+                w.set_proto(tp);
             }
             if changed {
                 // Sonde cran 43 : le chemin dérivé est-il
@@ -12204,7 +12204,7 @@ fn domrect_from(e: &mut Engine, _this: Value, a: &[Value]) -> JsResult<Value> {
     let id = e.new_object();
     if let Value::Obj(p) = proto {
         if let Some(o) = e.heap.obj_mut(id) {
-            o.proto = Value::Obj(p);
+            o.set_proto(Value::Obj(p));
         }
     }
     domrect_fill(e, id, x, y, w, h, rw);
@@ -13798,7 +13798,7 @@ fn ce_upgrade_node(e: &mut Engine, dom: &DomRef, cache: &NodeCache, node: NodeId
     if let Value::Obj(eid) = el {
         if let Value::Obj(p) = e.get_prop_value(ctor.clone(), "prototype")? {
             if let Some(o) = e.heap.obj_mut(eid) {
-                o.proto = Value::Obj(p);
+                o.set_proto(Value::Obj(p));
             }
         }
     }
@@ -14428,7 +14428,7 @@ impl Host for DomImplementationHost {
                     if let Some(Value::Obj(cid)) = e.get_prop(e.global, "HTMLDocument") {
                         if let Some(proto @ Value::Obj(_)) = e.get_prop(cid, "prototype") {
                             if let Some(o) = e.heap.obj_mut(did) {
-                                o.proto = proto;
+                                o.set_proto(proto);
                             }
                         }
                     }
@@ -16095,7 +16095,7 @@ fn new_signal(e: &mut Engine) -> Value {
     e.set_own(id, "__ls", Value::Obj(ls), false);
     if let Value::Obj(proto) = signal_proto_of(e) {
         if let Some(o) = e.heap.obj_mut(id) {
-            o.proto = Value::Obj(proto);
+            o.set_proto(Value::Obj(proto));
         }
     }
     Value::Obj(id)
@@ -16682,7 +16682,7 @@ pub(crate) fn event_proto(e: &mut Engine, o: ObjId, ctor: &str) {
         _ => Value::Obj(e.protos.object),
     };
     if let Some(ob) = e.heap.obj_mut(o) {
-        ob.proto = p;
+        ob.set_proto(p);
     }
 }
 
