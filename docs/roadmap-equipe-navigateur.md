@@ -12911,7 +12911,11 @@ chaque gain rapporté contre les **deux** archétypes.
   relus frais à chaque hit (swap callee servi à jour,
   `Data↔Acc` → miss → relearn). Learn aux sorties `Acc`
   (read/write/`in`/`get_prop`), `ic_store` factorisé
-  mono/poly. Compteur `ic_acc`.
+  mono/poly. Compteur `ic_acc`. **N5.36 : non-vendable
+  yt — `ic_acc` ≈ 1,4 %** (sites d'helpers partagés,
+  shapes d'instances instables → mort rapide). Conservé :
+  couverture kinds complète, coût borné (morts → `Bail`
+  nu). Série accesseur close.
 - [x] **JS-C530 — own-first de l'écriture** : pendant de
   C529 pour le write-walk (~33 % `prop_ns`) — tête
   éligible + own `Data` → skip boucle `[[Set]]` (learn
