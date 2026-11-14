@@ -12766,3 +12766,7 @@ chaque gain rapporté contre les **deux** archétypes.
   absent sans `find_own_ai` (links remplis pour IC-learn) ;
   learn en chaîne complète ; cap 8192 ; inéligible → marche
   d'origine. Verrous : lang 315 ×3, clippy propre.
+- [x] **JS-C521b — own-absent par maillon** : `(shape,clé)` →
+  hash au lieu de `find_own_ai` par maillon éligible ; une
+  traversée, auto-invalid par shape ; `chain_fold` caché
+  écarté (mutation profonde non propagée). Verrous : lang 315 ×3.

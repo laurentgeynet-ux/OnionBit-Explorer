@@ -7689,70 +7689,14 @@ impl Engine {
             );
         }
         let ai = array_index(key); // V-3b — hoisted hors de la marche
-                                   // JS-C521 — phase 1 : fold des shapes + éligibilité des
-                                   // maillons. La mémo négative `(fold, clé)` sert l'absent
-                                   // dominant sans `find_own_ai` ; un maillon inéligible
-                                   // (proxy, `args_map`, Array…) invalide la phase et le
-                                   // chemin retombe sur la marche d'origine.
-        let mut vlinks: Vec<ObjId> = Vec::new();
-        let mut fold: u64 = 0x9E37_79B9_7F4A_7C15;
-        let mut eligible = true;
-        let mut complete = false;
-        {
-            let mut cur = Some(id);
-            let mut depth = 0;
-            while let Some(cid) = cur {
-                let Some(o) = self.heap.obj(cid) else {
-                    break;
-                };
-                if !Self::ic_eligible(o, key, ai) {
-                    eligible = false;
-                    break;
-                }
-                vlinks.push(cid);
-                fold = fold.wrapping_mul(0x1000_0000_01B3).wrapping_add(o.shape());
-                cur = if let Value::Obj(p) = o.proto {
-                    Some(p)
-                } else {
-                    complete = true;
-                    None
-                };
-                depth += 1;
-                if depth > MAX_PROTO_DEPTH {
-                    break;
-                }
-            }
-        }
-        if eligible {
-            let mkey = (
-                fold,
-                (crate::intern(key).as_ptr() as usize as u64) ^ (key.len() as u64) << 48,
-            );
-            if self.rabs_memo.contains(&mkey) {
-                if let Some(l) = links.as_deref_mut() {
-                    l.extend_from_slice(&vlinks);
-                }
-                return None;
-            }
-            // Phase 2 — marche `find_own_ai` sur les maillons
-            // déjà vus ; l'absent en chaîne complète est mémorisé.
-            for &cid in &vlinks {
-                crate::j17_tick(&crate::J17_PROTO_LVL);
-                if let Some(l) = links.as_deref_mut() {
-                    l.push(cid);
-                }
-                if let Some(p) = self.find_own_ai(cid, key, ai) {
-                    return Some((cid, p));
-                }
-            }
-            if complete {
-                if self.rabs_memo.len() >= RABS_MEMO_CAP {
-                    self.rabs_memo.clear();
-                }
-                self.rabs_memo.insert(mkey);
-            }
-            return None;
-        }
+                                   // JS-C521b — mémo own-absent **par maillon** `(shape, clé)`
+                                   // : la shape prouve l'absence en propre (empreinte de
+                                   // layout — une prop ajoutée la change, réutilisation GC
+                                   // comprise). Hit = un hash au lieu de `find_own_ai` ;
+                                   // miss = lookup + insert — une seule traversée, jamais
+                                   // pire que la marche d'origine (vol N5.21 : le fold de
+                                   // chaîne payait deux traversées au miss).
+        let kid = (crate::intern(key).as_ptr() as usize as u64) ^ (key.len() as u64) << 48;
         let mut cur = Some(id);
         let mut depth = 0;
         while let Some(cid) = cur {
@@ -7760,7 +7704,22 @@ impl Engine {
             if let Some(l) = links.as_deref_mut() {
                 l.push(cid);
             }
-            if let Some(p) = self.find_own_ai(cid, key, ai) {
+            let found = match self.heap.obj(cid) {
+                Some(o) if Self::ic_eligible(o, key, ai) => {
+                    let mkey = (o.shape(), kid);
+                    if self.rabs_memo.contains(&mkey) {
+                        None
+                    } else {
+                        let r = self.find_own_ai(cid, key, ai);
+                        if r.is_none() && self.rabs_memo.len() < RABS_MEMO_CAP {
+                            self.rabs_memo.insert(mkey);
+                        }
+                        r
+                    }
+                }
+                _ => self.find_own_ai(cid, key, ai),
+            };
+            if let Some(p) = found {
                 return Some((cid, p));
             }
             cur = match self.heap.obj(cid).map(|o| o.proto.clone()) {
