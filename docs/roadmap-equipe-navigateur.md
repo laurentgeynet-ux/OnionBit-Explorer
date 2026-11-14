@@ -12778,3 +12778,8 @@ chaque gain rapporté contre les **deux** archétypes.
   sans échappe servies par scan octet → `Rc<str>` direct ; le
   chemin général (échappes/newline) amorce du run ASCII.
   Verrous : lang 315, clippy propre.
+- [x] **JS-C524 — sonde `def_mat`** : tick à chaque
+  `materialize_body` — `def_mat`/`fn_defer` = part des corps
+  différés réellement appelés, tranche l'investissement lexer
+  streaming (corps jamais lexés). Télémétrie désarmée.
+  Verrous : c500 32, clippy + doc propres.

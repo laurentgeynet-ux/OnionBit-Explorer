@@ -92,6 +92,8 @@ fn deferred_use_strict(toks: &[Token]) -> bool {
 /// corps impose aux paramètres (doublons…) sont rapportées à
 /// l'appel plutôt qu'au parse — tolérant, jamais de panic.
 pub(crate) fn materialize_body(d: &DeferredBody, is_gen: bool) -> Result<(Vec<Stmt>, bool)> {
+    // JS-C524 — sonde de taux d'usage des corps différés.
+    crate::j17_tick(&crate::J17_DEFER_MAT);
     // V-8a+V-5b : flux `Rc<[Token]>` et `close_of` **partagés**
     // — ni clone de slice ni reconstruction de table ; `pos`
     // global pointe juste après le `{` (`d.start`), la borne

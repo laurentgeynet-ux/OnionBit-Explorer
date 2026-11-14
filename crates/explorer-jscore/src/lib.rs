@@ -430,6 +430,10 @@ pub static J17_PAR_NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::Atomi
 /// V-5a — corps de fonction différés au parse (slice retenue,
 /// saut `close_of` O(1)).
 pub static J17_FN_DEFER: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+/// JS-C524 — corps différés **matérialisés** (premier appel
+/// réel) : `def_mat`/`fn_defer` = taux d'usage — décide si le
+/// lexer streaming (corps jamais lexés) vaut le refactor.
+pub static J17_DEFER_MAT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 /// V-5a — tokens couverts par les corps différés (part du
 /// stream soustraite à la descente éager).
 pub static J17_FN_DEF_TOK: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
@@ -492,7 +496,7 @@ pub fn j17_enable() {
 #[must_use]
 pub fn j17_snapshot() -> String {
     let r = std::sync::atomic::Ordering::Relaxed;
-    let pairs: [(&str, &std::sync::atomic::AtomicU64); 59] = [
+    let pairs: [(&str, &std::sync::atomic::AtomicU64); 60] = [
         ("prop_lookup", &J17_PROP_LOOKUP),
         ("proto_lvl", &J17_PROTO_LVL),
         ("prop_scan", &J17_PROP_SCAN),
@@ -543,6 +547,7 @@ pub fn j17_snapshot() -> String {
         ("tok_clone", &J17_TOK_CLONE),
         ("par_next", &J17_PAR_NEXT),
         ("fn_defer", &J17_FN_DEFER),
+        ("def_mat", &J17_DEFER_MAT),
         ("fn_def_tok", &J17_FN_DEF_TOK),
         ("fn_mat", &J17_FN_MAT),
         ("frame_ns", &J17_FRAME_NS),
