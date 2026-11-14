@@ -437,17 +437,6 @@ pub static J17_DEFER_MAT: std::sync::atomic::AtomicU64 = std::sync::atomic::Atom
 /// Erreurs de matérialisation de corps différés (JS-C525c diag) —
 /// toute valeur >0 = un corps relu a échoué au parse tardif.
 pub static J17_DEF_ERR: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
-/// JS-C526 — hits de la mémo de routes `(maillon,clé) → issue` :
-/// marche de chaîne sautée entièrement (Found).
-pub static J17_RT_HIT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
-/// JS-C526 — hits `Absent` : chaîne épuisée re-servie en O(1).
-pub static J17_RT_ABS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
-/// JS-C526 — entrées d'epoch passée lues puis purgées
-/// (mesure le churn structurel — si `rt_st` ≈ lookups, la
-/// mémo ne tient pas).
-pub static J17_RT_ST: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
-/// JS-C526 — entrées posées (par maillon marché éligible).
-pub static J17_RT_INS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 /// V-5a — tokens couverts par les corps différés (part du
 /// stream soustraite à la descente éager).
 pub static J17_FN_DEF_TOK: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
@@ -518,7 +507,7 @@ pub fn j17_enable() {
 #[must_use]
 pub fn j17_snapshot() -> String {
     let r = std::sync::atomic::Ordering::Relaxed;
-    let pairs: [(&str, &std::sync::atomic::AtomicU64); 65] = [
+    let pairs: [(&str, &std::sync::atomic::AtomicU64); 61] = [
         ("prop_lookup", &J17_PROP_LOOKUP),
         ("proto_lvl", &J17_PROTO_LVL),
         ("prop_scan", &J17_PROP_SCAN),
@@ -571,10 +560,6 @@ pub fn j17_snapshot() -> String {
         ("fn_defer", &J17_FN_DEFER),
         ("def_mat", &J17_DEFER_MAT),
         ("def_err", &J17_DEF_ERR),
-        ("rt_hit", &J17_RT_HIT),
-        ("rt_abs", &J17_RT_ABS),
-        ("rt_st", &J17_RT_ST),
-        ("rt_ins", &J17_RT_INS),
         ("fn_def_tok", &J17_FN_DEF_TOK),
         ("fn_mat", &J17_FN_MAT),
         ("frame_ns", &J17_FRAME_NS),

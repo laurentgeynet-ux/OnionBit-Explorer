@@ -351,66 +351,6 @@ const IC_MISS_DISARM: u8 = 8;
 const IC_CHAIN_CAP: usize = 8;
 /// JS-C521 — borne de la mémo négative de lectures absentes.
 const RABS_MEMO_CAP: usize = 8192;
-/// JS-C526 — borne de la mémo de routes (entries par maillon).
-const ROUTE_MEMO_CAP: usize = 16384;
-/// `RouteEnt::Absent` — sentinelle `pos` (jamais un index réel).
-const ROUTE_ABSENT: u32 = u32::MAX;
-
-/// JS-C526b — un maillon validant d'une route : l'entrée est
-/// valide tant que le maillon vit avec la même `shape`
-/// (empreinte des props — `push_prop`/`remove_own` la changent,
-/// même leçon que `rabs_memo`) et le même lien `proto` (reliant
-/// détecté). Les écritures de valeur à position constante ne
-/// changent ni l'une ni l'autre — `props[pos]` est relu frais.
-/// La réutilisation d'`ObjId` par la free-list est couverte par
-/// `heap.obj` vivant + `shape` + `proto` + clé au `pos` holder.
-#[derive(Clone)]
-struct RouteLink {
-    id: ObjId,
-    shape: u64,
-    proto: Value,
-}
-
-/// JS-C526b — issue mémorisée d'une marche : `links[off..]` sont
-/// les maillons à revalider (suffixe de la marche posée — chaque
-/// maillon reçoit une entrée validant **sa** sous-route, pas
-/// celle des receveurs amont). Pas d'epoch globale : la N5.29 a
-/// mesuré qu'elle invalide tout le cache à la première mutation
-/// structurelle du tas (`rt_st` > `rt_hit`) — la revalidation
-/// par maillon n'invalide que sur mutation réelle d'un maillon
-/// de la route.
-#[derive(Clone)]
-pub(crate) struct RouteEnt {
-    links: std::rc::Rc<Vec<RouteLink>>,
-    off: usize,
-    holder: ObjId,
-    pos: u32,
-    /// Clé internée — verrou anti-collision `kid` et clé
-    /// attendue à `props[pos]` de l'holder.
-    key: std::rc::Rc<str>,
-}
-
-/// Égalité des liens proto pour la revalidation de route —
-/// `Value` n'a pas `PartialEq` ; seuls `Obj`/`Null`/`Undefined`
-/// sont des protos sains, le reste est traité « différent »
-/// (sur-invalidation sûre → remarche).
-fn route_proto_eq(a: &Value, b: &Value) -> bool {
-    match (a, b) {
-        (Value::Obj(x), Value::Obj(y)) => x == y,
-        (Value::Null, Value::Null) | (Value::Undefined, Value::Undefined) => true,
-        _ => false,
-    }
-}
-
-/// JS-C526 — verdict d'une consultation de la mémo de routes :
-/// entrée valide, son issue relue fraîche.
-enum RouteOut {
-    /// `(propriétaire, prop)` — valeur relue à `props[pos]`
-    /// (un remplacement en place reste couvert).
-    Found(ObjId, Prop),
-    /// Chaîne épuisée sans la clé — `None` à rendre.
-    Absent,
-}
 
 /// JS-C504 — verdict d'une consultation IC : valeur prouvée,
 /// vérification échouée (→ miss compté), ou maillon inéligible
@@ -1028,21 +968,6 @@ pub struct Engine {
     /// toute mutation d'un maillon la change → correcte par
     /// construction (même leçon que `shadow_memo`, vol N5.19).
     pub(crate) rabs_memo: std::collections::HashSet<(u64, u64)>,
-    /// JS-C526 — mémo de **routes** `(maillon, kid) → issue de la
-    /// chaîne depuis ce maillon` : `Found{holder,pos}` ou
-    /// `Absent`, revalidée **par maillon stocké** (vivant +
-    /// `shape` + `proto` — JS-C526b). Un hit paie un déréférence
-    /// léger par maillon au lieu de la marche complète
-    /// (`find_own_ai`/`rabs_memo`/éligibilité sautés) ; les
-    /// mutations hors route n'invalident rien — N5.29 a mesuré
-    /// l'epoch globale mortelle sur terrain réel (`rt_st` 139 k
-    /// contre `rt_hit` 111 k : chaque `push_prop` du tas tuait
-    /// les 16 384 entrées). Réutilisation d'`ObjId` couverte par
-    /// `heap.obj` vivant + `shape` + clé au `pos` holder.
-    /// Entrées posées uniquement quand **tous** les maillons
-    /// marchés étaient `ic_eligible` (hors proxy/`args_map`/
-    /// vues/ctor `RegExp` — réponses volatiles).
-    pub(crate) route_memo: std::collections::HashMap<(ObjId, u64), RouteEnt>,
     /// Kill-switch IC (`EXPLORER_NO_IC=1`) — A/B en vol sans
     /// rebuild, précédent `resolve_off` (JS-C490c).
     pub(crate) ic_off: bool,
@@ -1605,7 +1530,6 @@ impl Engine {
             ic_map: std::collections::HashMap::new(),
             shadow_memo: std::collections::HashMap::new(),
             rabs_memo: std::collections::HashSet::new(),
-            route_memo: std::collections::HashMap::new(),
             ic_off: std::env::var("EXPLORER_NO_IC").is_ok_and(|v| v == "1"),
             ic_verify: std::env::var("EXPLORER_IC_VERIFY").is_ok_and(|v| v == "1"),
             lowered_suspend_cache: std::collections::HashMap::new(),
@@ -7773,35 +7697,22 @@ impl Engine {
                                    // pire que la marche d'origine (vol N5.21 : le fold de
                                    // chaîne payait deux traversées au miss).
         let kid = (crate::intern(key).as_ptr() as usize as u64) ^ (key.len() as u64) << 48;
-        // JS-C526 — route mémo `(maillon, kid) → issue` : un hit
-        // saute la marche entière (O(1) sur chaînes répétées).
-        // Contournée quand `links` est demandé (le caller veut
-        // les maillons réels) ou sous kill-switch IC.
-        let memo = links.is_none() && !self.ic_off;
-        if memo {
-            match self.route_lookup(id, kid, key) {
-                Some(RouteOut::Found(h, p)) => return Some((h, p)),
-                Some(RouteOut::Absent) => return None,
-                None => {}
-            }
-        }
         let mut cur = Some(id);
         let mut depth = 0;
-        // Maillons éligibles marchés — une entrée n'est posée que
-        // si la chaîne entière l'était (`memoable`). Chaque maillon
-        // embarque `(shape, proto)` pour la revalidation des routes.
-        let mut walked: Vec<RouteLink> = Vec::new();
-        let mut memoable = memo;
         while let Some(cid) = cur {
             crate::j17_tick(&crate::J17_PROTO_LVL);
             if let Some(l) = links.as_deref_mut() {
                 l.push(cid);
             }
-            // JS-C526 — un seul `heap.obj` par maillon :
+            // JS-C526c — un seul `heap.obj` par maillon :
             // éligibilité, mémo own-absent et chase proto
             // partagent `o` ; `find_own_ai` (qui veut `&mut`)
-            // ne court que sur les chemins `slow`.
-            let mut slow = false;
+            // ne court que quand la mémo own-absent ne répond pas.
+            // (La mémo de routes elle-même est révertée — vols
+            // N5.29/N5.30 : la traversée *est* le coût, la
+            // revalidation par maillon ~demi-marche reste ≥ la
+            // baseline ; conservée seulement cette fusion.)
+            let mut slow = true;
             let mut mkey = None;
             let mut nxt = None;
             if let Some(o) = self.heap.obj(cid) {
@@ -7810,27 +7721,10 @@ impl Engine {
                     _ => None,
                 };
                 if Self::ic_eligible(o, key, ai) {
-                    let sh = o.shape();
-                    if memoable && !matches!(self.re_ctor, Value::Obj(rc) if rc == cid) {
-                        walked.push(RouteLink {
-                            id: cid,
-                            shape: sh,
-                            proto: o.proto.clone(),
-                        });
-                    } else {
-                        memoable = false;
-                    }
-                    let mk = (sh, kid);
+                    let mk = (o.shape(), kid);
                     mkey = Some(mk);
-                    if !self.rabs_memo.contains(&mk) {
-                        slow = true;
-                    }
-                } else {
-                    memoable = false;
-                    slow = true;
+                    slow = !self.rabs_memo.contains(&mk);
                 }
-            } else {
-                memoable = false;
             }
             let found = if slow {
                 let r = self.find_own_ai(cid, key, ai);
@@ -7846,9 +7740,6 @@ impl Engine {
                 None
             };
             if let Some(p) = found {
-                if memoable {
-                    self.route_insert(&walked, cid, kid, key);
-                }
                 return Some((cid, p));
             }
             cur = nxt;
@@ -7857,125 +7748,7 @@ impl Engine {
                 return None;
             }
         }
-        if memoable {
-            self.route_insert_absent(&walked, kid, key);
-        }
         None
-    }
-
-    /// JS-C526 — consultation de la mémo de routes :
-    /// `Some(..)` = verdict mémo (`Found`/`Absent`) ;
-    /// `None` = pas d'entrée ou caduque → marche normale.
-    /// JS-C526b — revalidation par maillon stocké (vivant +
-    /// `shape` + `proto`) : seule une mutation réelle d'un
-    /// maillon de la route invalide — pas d'epoch globale
-    /// (N5.29 : `rt_st` > `rt_hit`, tout le cache mourait à
-    /// chaque `push_prop` du tas).
-    fn route_lookup(&mut self, id: ObjId, kid: u64, key: &str) -> Option<RouteOut> {
-        let e = self.route_memo.get(&(id, kid))?.clone();
-        // Collision `kid` (réutilisation de ptr interné) → la
-        // clé stockée tranche ; entrée étrangère purgée.
-        if !std::rc::Rc::ptr_eq(&e.key, &crate::intern(key)) && &*e.key != key {
-            self.route_memo.remove(&(id, kid));
-            return None;
-        }
-        for l in &e.links[e.off..] {
-            let Some(o) = self.heap.obj(l.id) else {
-                return self.route_stale(id, kid);
-            };
-            if o.shape() != l.shape || !route_proto_eq(&o.proto, &l.proto) {
-                return self.route_stale(id, kid);
-            }
-        }
-        if e.pos == ROUTE_ABSENT {
-            crate::j17_tick(&crate::J17_RT_ABS);
-            return Some(RouteOut::Absent);
-        }
-        // L'holder est le dernier maillon validé — son `pos` est
-        // relu frais (les écritures de valeur à position
-        // constante ne changent ni `shape` ni `proto`).
-        let Some(h) = self.heap.obj(e.holder) else {
-            return self.route_stale(id, kid);
-        };
-        match h.props.get(e.pos as usize) {
-            Some((k, p)) if std::rc::Rc::ptr_eq(k, &e.key) || &**k == key => {
-                crate::j17_tick(&crate::J17_RT_HIT);
-                let p = p.clone();
-                Some(RouteOut::Found(e.holder, p))
-            }
-            _ => self.route_stale(id, kid),
-        }
-    }
-
-    /// Purge + compteur d'une entrée caduque — un mismatch ne
-    /// supprime que l'entrée consultée : les entrées posées
-    /// sous les autres maillons de la même marche se
-    /// revalideront (ou mourront) à leur tour.
-    fn route_stale<T>(&mut self, id: ObjId, kid: u64) -> Option<T> {
-        self.route_memo.remove(&(id, kid));
-        crate::j17_tick(&crate::J17_RT_ST);
-        None
-    }
-
-    /// JS-C526 — pose des entrées `Found` pour chaque maillon
-    /// éligible marché : l'entrée du maillon `i` valide la
-    /// sous-route `walked[i..]` (la route du receveur **et**
-    /// celle de chaque proto partagé couvertes). `None`
-    /// silencieux si la prop trouvée n'est pas une entrée
-    /// `props` réelle (synthèse `fn.name`/statiques `RegExp` —
-    /// non adressable par position).
-    fn route_insert(&mut self, walked: &[RouteLink], holder: ObjId, kid: u64, key: &str) {
-        let Some(pos) = self
-            .heap
-            .obj(holder)
-            .and_then(|o| o.prop_pos(key))
-            .and_then(|p| u32::try_from(p).ok())
-        else {
-            return;
-        };
-        if walked.is_empty() || self.route_memo.len() >= ROUTE_MEMO_CAP {
-            return;
-        }
-        debug_assert!(walked.last().is_some_and(|l| l.id == holder));
-        let links = std::rc::Rc::new(walked.to_vec());
-        let k = crate::intern(key);
-        for (i, l) in walked.iter().enumerate() {
-            self.route_memo.insert(
-                (l.id, kid),
-                RouteEnt {
-                    links: links.clone(),
-                    off: i,
-                    holder,
-                    pos,
-                    key: k.clone(),
-                },
-            );
-        }
-        crate::j17_add(&crate::J17_RT_INS, walked.len() as u64);
-    }
-
-    /// JS-C526 — chaîne épuisée sans la clé → `Absent` pour
-    /// chaque maillon éligible marché (même découpage suffixé
-    /// que `route_insert`).
-    fn route_insert_absent(&mut self, walked: &[RouteLink], kid: u64, key: &str) {
-        if walked.is_empty() || self.route_memo.len() >= ROUTE_MEMO_CAP {
-            return;
-        }
-        let links = std::rc::Rc::new(walked.to_vec());
-        let k = crate::intern(key);
-        for (i, l) in walked.iter().enumerate() {
-            self.route_memo.insert(
-                (l.id, kid),
-                RouteEnt {
-                    links: links.clone(),
-                    off: i,
-                    holder: 0,
-                    pos: ROUTE_ABSENT,
-                    key: k.clone(),
-                },
-            );
-        }
-        crate::j17_add(&crate::J17_RT_INS, walked.len() as u64);
     }
 
     /// JS-C500 — éligibilité own-prop à l'IC : `find_own_ai`

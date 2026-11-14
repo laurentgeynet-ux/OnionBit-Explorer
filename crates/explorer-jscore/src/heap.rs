@@ -1505,8 +1505,8 @@ impl Object {
     /// Écriture du lien proto — funnel unique (JS-C526) : toute
     /// écriture `o.proto =` doit passer ici (86 sites convertis —
     /// grep `\.proto =` doit rester vide hors construction
-    /// `Object { proto, … }`). Les mémos de routes stockent le
-    /// lien par maillon et détectent le relink à la revalidation.
+    /// `Object { proto, … }`) — la couture reste le point
+    /// d'accroche de tout futur mécanisme proto-watch.
     pub fn set_proto(&mut self, v: Value) {
         self.proto = v;
     }

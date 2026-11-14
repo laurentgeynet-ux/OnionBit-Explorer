@@ -12880,4 +12880,17 @@ chaque gain rapporté contre les **deux** archétypes.
   — la route d'un proto partagé ne dépend pas des
   receveurs amont. `c526_route` 6/6 dont
   `unrelated_mutation_keeps_route` ; verrous verts.
+- [x] **JS-C526c — révert de la mémo de routes : voie
+  non viable (mesuré)** : N5.30 — `rt_st` résorbé
+  (4 569, 98 % hit) mais `prop_ns` 952 ms contre
+  762 ms (+25 %) : le hit revalide chaque maillon
+  (≈demi-marche) et la traversée proto *est* le coût
+  dominant — aucun mémo touchant chaque maillon ne
+  peut gagner (3e confirmation : fold C521, own-absent
+  C521b, routes C526/b). Levier restant :
+  court-circuit complet (shape-chaîne → owner direct)
+  = infrastructure de dependency-groups, pas un
+  patch. Retirés : `route_memo` + structs + compteurs
+  `rt_*` + `c526_route`. Conservés : fusion per-link
+  (1 `heap.obj`/maillon) et funnel `set_proto`.
 
