@@ -1314,7 +1314,10 @@ fn proto_accessor_shadows(e: &mut Engine, id: ObjId, key: &str) -> bool {
         Some(o) => o.proto.clone(),
         None => return false,
     };
-    let mut links: Vec<ObjId> = if armed { vec![id] } else { Vec::new() };
+    // `links` exclut la tête : la question ne dépend que des
+    // protos (JS-C517b — l'inclure désarmait le site à vie,
+    // expandos DOM → shape polymorphe).
+    let mut links: Vec<ObjId> = Vec::new();
     let mut complete = false;
     // Borne 32 — la chaîne DOM est courte ; un cycle proto
     // hostile ne doit pas boucler (conforme `find_prop`).
@@ -1349,7 +1352,7 @@ fn proto_accessor_shadows(e: &mut Engine, id: ObjId, key: &str) -> bool {
     // de learn (`complete` resté faux — le `break` ci-dessus
     // n'a pas posé le drapeau).
     if armed && complete {
-        e.ic_learn(site, key, &links, false);
+        e.ic_learn(site, key, &links, false, true);
     }
     false
 }

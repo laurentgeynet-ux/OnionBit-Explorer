@@ -330,6 +330,12 @@ pub(crate) enum IcKind {
     /// (`o[k]` dynamique, callsite Rust générique) peut exister ;
     /// mismatch → miss → relearn (verrou : `c506`, `c22_temporal`).
     Absent { chain: Box<[u64]>, key: Rc<str> },
+    /// JS-C517b — absent **proto-seul** : `chain` couvre les
+    /// maillons à partir de `id.proto`, la tête (polymorphe par
+    /// expandos DOM) n'est pas vérifiée — vol N5.18 : inclure la
+    /// tête désarmait `proto_accessor_shadows` à vie. La question
+    /// « un Acc auteur sur le proto ? » ne dépend que des protos.
+    AbsentProto { chain: Box<[u64]>, key: Rc<str> },
     /// JS-C508 — pierre tombale : le site a échoué à apprendre
     /// (lien mort, maillon inéligible, `Acc`, chaîne > cap). Sans
     /// elle, chaque accès repayait `Vec`+walk+tentative de learn à
@@ -4444,7 +4450,7 @@ impl Engine {
         // Chaîne complète sans rien → entrée `Absent` (les hits
         // ne sont pas servables ici — on n'apprend que l'absent).
         if collect {
-            self.ic_learn(site, name, &links, false);
+            self.ic_learn(site, name, &links, false, false);
         }
         false
     }
@@ -7787,16 +7793,37 @@ impl Engine {
                     Ok(None) => IcVerdict::Miss,
                     Ok(Some(o)) => own_at(o, *pos),
                 },
-                IcKind::Chain { chain, .. } | IcKind::Absent { chain, .. } => {
-                    // `Absent` n'est valide que pour la clé apprise —
-                    // testée AVANT la marche des maillons. JS-C508 :
-                    // la divergence de clé compte comme un miss — les
-                    // sites à clés tournantes atteignent ainsi le
-                    // désarmement au lieu de thrasher le learn.
-                    if matches!(&ent.kind, IcKind::Absent { key: ek, .. } if &**ek != key) {
+                IcKind::Chain { chain, .. }
+                | IcKind::Absent { chain, .. }
+                | IcKind::AbsentProto { chain, .. } => {
+                    // `Absent`/`AbsentProto` ne sont valides que
+                    // pour la clé apprise — testée AVANT la marche
+                    // des maillons. JS-C508 : la divergence de clé
+                    // compte comme un miss — les sites à clés
+                    // tournantes atteignent ainsi le désarmement
+                    // au lieu de thrasher le learn.
+                    if matches!(&ent.kind, IcKind::Absent { key: ek, .. } | IcKind::AbsentProto { key: ek, .. } if &**ek != key)
+                    {
                         IcVerdict::Miss
                     } else {
-                        let mut cur = id;
+                        // JS-C517b — `AbsentProto` part du proto :
+                        // la tête n'entre pas dans la chaîne.
+                        let mut cur = if matches!(&ent.kind, IcKind::AbsentProto { .. }) {
+                            let next = self.heap.obj(id).and_then(|o| {
+                                if let Value::Obj(p) = o.proto {
+                                    Some(p)
+                                } else {
+                                    None
+                                }
+                            });
+                            let Some(p) = next else {
+                                ent.miss = ent.miss.saturating_add(1);
+                                return IcOut::Fall;
+                            };
+                            p
+                        } else {
+                            id
+                        };
                         let mut v = IcVerdict::Miss;
                         for (i, &sh) in chain.iter().enumerate() {
                             match link(cur, sh) {
@@ -7949,7 +7976,17 @@ impl Engine {
         }
     }
 
-    pub(crate) fn ic_learn(&mut self, site: usize, key: &str, links: &[ObjId], found: bool) {
+    /// `proto_only` (JS-C517b) : `links` couvre les maillons à
+    /// partir du proto — l'entrée absente apprise est
+    /// `AbsentProto` (tête non vérifiée).
+    pub(crate) fn ic_learn(
+        &mut self,
+        site: usize,
+        key: &str,
+        links: &[ObjId],
+        found: bool,
+        proto_only: bool,
+    ) {
         if site == 0 || self.ic_off {
             return;
         }
@@ -8008,9 +8045,14 @@ impl Engine {
             }
         }
         let kind = kind.or_else(|| {
-            (!found).then(|| IcKind::Absent {
-                chain: shapes.into_boxed_slice(),
-                key: crate::intern(key),
+            (!found).then(|| {
+                let chain = shapes.into_boxed_slice();
+                let key = crate::intern(key);
+                if proto_only {
+                    IcKind::AbsentProto { chain, key }
+                } else {
+                    IcKind::Absent { chain, key }
+                }
             })
         });
         match kind {
@@ -8060,8 +8102,8 @@ impl Engine {
         let found = self.find_prop_owner_links(id, key, lp);
         Self::j17_scan_add(&crate::J17_PS_GET, s0);
         match &found {
-            Some((_, Prop::Data { .. })) => self.ic_learn(site, key, &links, true),
-            None => self.ic_learn(site, key, &links, false),
+            Some((_, Prop::Data { .. })) => self.ic_learn(site, key, &links, true, false),
+            None => self.ic_learn(site, key, &links, false, false),
             _ => {}
         }
         let v = found.and_then(|(_, p)| p.data_value());
@@ -8533,7 +8575,7 @@ impl Engine {
         match found {
             Some((_, Prop::Data { value, .. })) => {
                 if !bail {
-                    self.ic_learn(site, key, &links, true);
+                    self.ic_learn(site, key, &links, true, false);
                 }
                 self.probe_lookup(id, key, Some(value.clone()));
                 Ok(value)
@@ -8547,7 +8589,7 @@ impl Engine {
             }
             None => {
                 if !bail {
-                    self.ic_learn(site, key, &links, false);
+                    self.ic_learn(site, key, &links, false, false);
                 }
                 Ok(Value::Undefined)
             }
@@ -8688,7 +8730,7 @@ impl Engine {
             }
         }
         if armed && complete {
-            self.ic_learn(site, key, &links, found);
+            self.ic_learn(site, key, &links, found, false);
         }
         if self.set_prop(own, key, v)? {
             Ok(())
@@ -9404,9 +9446,9 @@ impl Engine {
         if !self.ic_off {
             let mut links = Vec::new();
             match self.find_prop_owner_links(id, key, Some(&mut links)) {
-                Some((_, Prop::Data { .. })) => self.ic_learn(site, key, &links, true),
+                Some((_, Prop::Data { .. })) => self.ic_learn(site, key, &links, true, false),
                 None if !r && self.host_of(id).is_none() => {
-                    self.ic_learn(site, key, &links, false);
+                    self.ic_learn(site, key, &links, false, false);
                 }
                 _ => {}
             }

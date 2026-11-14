@@ -12753,3 +12753,7 @@ chaque gain rapporté contre les **deux** archétypes.
   la marche proto DOM anti-ombre (337 k yt = 19 %) servie par
   `IcOut::Absent` au callsite ; `Hit`/`HitChain` → marche + learn
   en chaîne complète (borne 32 exclue). Verrous : lang 315 ×3.
+- [x] **JS-C517b — `IcKind::AbsentProto`** : chaîne vérifiée à
+  partir de `id.proto` (tête polymorphe exclue — N5.18 :
+  l'inclure désarmait le site à vie) ; `ic_learn` paramétré
+  `proto_only`. Verrous : lang 315 ×3, clippy propre.
