@@ -8,9 +8,9 @@
 //! avant/après, compteurs monotones partagés).
 
 use explorer_jscore::{
-    j17_enable, j17_snapshot, Engine, J17_ARRIDX_TRY, J17_CALL, J17_CALL_NAT, J17_ENV_LVL,
-    J17_FN_DEFER, J17_FN_DEF_TOK, J17_FN_MAT, J17_PARSE_CALL, J17_PARSE_DUP, J17_PROP_IDX_BUILD,
-    J17_PROP_IDX_HIT, J17_PROP_LOOKUP, J17_PROP_SCAN, J17_PROTO_LVL, J17_STR_READ,
+    j17_enable, j17_snapshot, Engine, J17_ARRIDX_TRY, J17_CALL, J17_CALL_NAT, J17_FN_DEFER,
+    J17_FN_DEF_TOK, J17_FN_MAT, J17_PARSE_CALL, J17_PARSE_DUP, J17_PROP_IDX_BUILD,
+    J17_PROP_IDX_HIT, J17_PROP_LOOKUP, J17_PROP_SCAN, J17_PROTO_LVL, J17_SLOT_HIT, J17_STR_READ,
 };
 use std::sync::atomic::Ordering::Relaxed;
 
@@ -34,14 +34,14 @@ fn counters_nomment_les_chemins_payes() {
 
     // Lookups : props propres sur petit objet (scan linéaire),
     // héritées via `Object.create` (niveaux proto), variables
-    // de fermeture (niveaux env), appel script + native
+    // de fermeture (slots env C502), appel script + native
     // (`Array.isArray`), index `arr["0"]` (`array_index`),
     // lecture de chaîne (`string()` clone-read).
     let before = (
         tick(&J17_PROP_LOOKUP),
         tick(&J17_PROP_SCAN),
         tick(&J17_PROTO_LVL),
-        tick(&J17_ENV_LVL),
+        tick(&J17_SLOT_HIT),
         tick(&J17_ARRIDX_TRY),
         tick(&J17_CALL),
         tick(&J17_CALL_NAT),
@@ -59,7 +59,7 @@ fn counters_nomment_les_chemins_payes() {
     assert!(tick(&J17_PROP_LOOKUP) > before.0, "prop_lookup doit ticker");
     assert!(tick(&J17_PROP_SCAN) > before.1, "prop_scan doit ticker");
     assert!(tick(&J17_PROTO_LVL) > before.2, "proto_lvl doit ticker");
-    assert!(tick(&J17_ENV_LVL) > before.3, "env_lvl doit ticker");
+    assert!(tick(&J17_SLOT_HIT) > before.3, "slot_hit doit ticker");
     assert!(tick(&J17_ARRIDX_TRY) > before.4, "arridx_try doit ticker");
     assert!(tick(&J17_CALL) > before.5, "call doit ticker");
     assert!(tick(&J17_CALL_NAT) > before.6, "call_nat doit ticker");
@@ -102,7 +102,7 @@ fn attribution_call_rate_domine() {
     let (c0, cn0, e0, p0) = (
         tick(&J17_CALL),
         tick(&J17_CALL_NAT),
-        tick(&J17_ENV_LVL),
+        tick(&J17_SLOT_HIT),
         tick(&J17_PROP_LOOKUP),
     );
     e.eval(
@@ -112,17 +112,17 @@ fn attribution_call_rate_domine() {
     .expect("eval");
     let calls = tick(&J17_CALL) - c0;
     let nats = tick(&J17_CALL_NAT) - cn0;
-    let env_lvls = tick(&J17_ENV_LVL) - e0;
+    let slot_hits = tick(&J17_SLOT_HIT) - e0;
     let lookups = tick(&J17_PROP_LOOKUP) - p0;
     eprintln!(
         "attribution call_rate: calls={calls} nats={nats} \
-         env_lvls={env_lvls} lookups={lookups} | {}",
+         slot_hits={slot_hits} lookups={lookups} | {}",
         j17_snapshot()
     );
     assert!(calls >= 1000, "1000 appels f attendus, vu {calls}");
     assert!(
-        env_lvls >= calls,
-        "chaque appel paie ≥1 niveau env ({env_lvls} lvls / {calls} calls)"
+        slot_hits >= calls,
+        "chaque appel paie ≥1 résolution slot ({slot_hits} hits / {calls} calls)"
     );
     // Des dispatches natives existent même sur boucle « pure
     // script » (machinerie interne — toPrimitive/itérateurs/…) :
@@ -144,7 +144,7 @@ fn attribution_kevlar_like() {
     // ES5+proto, callbacks, churn). Snapshot + wall time —
     // la projection se fait dans le test, hors assert :
     // les parts sont des mesures, pas des invariants.
-    let (c0, l0, e0) = (tick(&J17_CALL), tick(&J17_PROP_LOOKUP), tick(&J17_ENV_LVL));
+    let (c0, l0, e0) = (tick(&J17_CALL), tick(&J17_PROP_LOOKUP), tick(&J17_SLOT_HIT));
     let t = std::time::Instant::now();
     e.eval(
         "(function(){\
@@ -171,17 +171,17 @@ fn attribution_kevlar_like() {
     let wall = t.elapsed();
     let calls = tick(&J17_CALL) - c0;
     let lookups = tick(&J17_PROP_LOOKUP) - l0;
-    let env_lvls = tick(&J17_ENV_LVL) - e0;
+    let slot_hits = tick(&J17_SLOT_HIT) - e0;
     eprintln!(
         "attribution kevlar_like: wall={wall:?} calls={calls} \
-         lookups={lookups} env_lvls={env_lvls} | {}",
+         lookups={lookups} slot_hits={slot_hits} | {}",
         j17_snapshot()
     );
     // Verrous lâches : le workload doit exercer les trois
     // chemins (un profil à zéro = mesure morte).
     assert!(calls > 500, "calls attendus, vu {calls}");
     assert!(lookups > 500, "lookups attendus, vu {lookups}");
-    assert!(env_lvls > 500, "env_lvls attendus, vu {env_lvls}");
+    assert!(slot_hits > 500, "slot_hits attendus, vu {slot_hits}");
 }
 
 #[test]
