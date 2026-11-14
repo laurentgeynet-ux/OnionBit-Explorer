@@ -560,3 +560,47 @@ fn c513_foai_attrib_emits() {
     let snap = explorer_jscore::j17_snapshot();
     assert!(snap.contains("foai:"), "foai attendu : {snap}");
 }
+
+/// JS-C514 — write-IC : le fast-path `Hit`/`Absent` → `set_prop`
+/// direct préserve la sémantique `[[Set]]` (setter hérité et
+/// non-writable hérité interceptent toujours).
+#[test]
+fn c514_write_ic_semantics() {
+    let _g = IC_LOCK
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    explorer_jscore::j17_enable();
+    // Own-update répété : learn `Own` au 1er, `Hit` au 2nd+ —
+    // la valeur écrite reste exacte.
+    assert_eq!(
+        eval("var s=0;for(var i=0;i<20;i++){var o={x:0};o.x=i;s=o.x;}s"),
+        "19"
+    );
+    // Absent→create répété : learn `Absent`, écritures servies
+    // par `set_prop` direct — la prop est bien créée.
+    assert_eq!(
+        eval("var s=0;for(var i=0;i<20;i++){var o={a:1};o.nw=i;s+=o.nw;}s"),
+        "190"
+    );
+    // Setter hérité : jamais appris (Acc non-IC) → l'interception
+    // survit au write-IC, appelée avec receiver=derive.
+    assert_eq!(
+        eval("var log=0;var p={set x(v){log=v}};for(var i=0;i<20;i++){var o=Object.create(p);o.x=i;}log"),
+        "19"
+    );
+    // Donnée héritée non-writable : refus sloppy silencieux —
+    // aucune prop propre n'est créée et `o.x` reste l'héritée.
+    assert_eq!(
+        eval("var p={};Object.defineProperty(p,'x',{value:1,writable:false});var s=0;for(var i=0;i<10;i++){var o=Object.create(p);o.x=9;s+=o.hasOwnProperty('x')?1:0;}s"),
+        "0"
+    );
+    assert_eq!(
+        eval("var p={};Object.defineProperty(p,'x',{value:1,writable:false});var o=Object.create(p);o.x=9;o.x"),
+        "1"
+    );
+    // Hit propre non-writable : `set_prop` refuse correctement.
+    assert_eq!(
+        eval("var o={};Object.defineProperty(o,'x',{value:1,writable:false});o.x=9;o.x"),
+        "1"
+    );
+}

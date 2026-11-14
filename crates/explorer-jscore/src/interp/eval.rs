@@ -1220,13 +1220,13 @@ impl Engine {
             }
             Expr::Member(base, name) => {
                 let b = self.eval_expr(env, this, base)?;
-                self.set_prop_value(b, name, v)
+                self.set_prop_value_at(b, name, v, std::ptr::from_ref::<Expr>(e) as usize)
             }
             Expr::Index(base, key) => {
                 let b = self.eval_expr(env, this.clone(), base)?;
                 let k = self.eval_expr(env, this, key)?;
                 let k = self.prop_key(k)?;
-                self.set_prop_value(b, &k, v)
+                self.set_prop_value_at(b, &k, v, std::ptr::from_ref::<Expr>(e) as usize)
             }
             // `({a, b} = o)` / `[x, y] = arr` — destructuring.
             Expr::Object(_) | Expr::Array(_) => {
@@ -1306,7 +1306,7 @@ impl Engine {
     pub(crate) fn store_lvalue(&mut self, env: &EnvRef, lv: LValueRef, v: Value) -> JsResult<()> {
         match lv {
             LValueRef::Ident(name, site) => self.env_set_resolved(env, &name, site, v),
-            LValueRef::Prop(b, k, _) => self.set_prop_value(b, &k, v),
+            LValueRef::Prop(b, k, site) => self.set_prop_value_at(b, &k, v, site),
         }
     }
 

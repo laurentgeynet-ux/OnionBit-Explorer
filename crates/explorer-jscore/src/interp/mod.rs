@@ -365,7 +365,14 @@ enum IcVerdict {
 /// (ni `Vec` de maillons, ni tentative).
 #[derive(Debug)]
 enum IcOut {
+    /// Propriété trouvée **sur la tête** (entrée `Own`).
     Hit(Value),
+    /// Propriété trouvée **sur un maillon proto** (entrée
+    /// `Chain`) — distingué de `Hit` pour le write-IC JS-C514 :
+    /// une donnée héritée non-writable refuse l'écriture, une
+    /// donnée héritée writable autorise le shadowing — le
+    /// fast-path write ne peut pas trancher sans les attrs.
+    HitChain(Value),
     Absent,
     Fall,
     Bail,
@@ -4393,7 +4400,7 @@ impl Engine {
         let site = std::ptr::from_ref(std::panic::Location::caller()) as usize;
         let collect = match self.ic_hit(site, bid, name) {
             IcOut::Absent => return false,
-            IcOut::Hit(_) | IcOut::Fall => true,
+            IcOut::Hit(_) | IcOut::HitChain(_) | IcOut::Fall => true,
             IcOut::Bail => false,
         };
         let ai = array_index(name); // V-3b — hoisted hors de la marche
@@ -7823,10 +7830,15 @@ impl Engine {
             // JS-C508 — `miss` = échecs *consécutifs* : un hit servi
             // le remet à zéro (il survit désormais au relearn — le
             // relearn post-miss est lui-même la preuve de l'échec).
+            let chained = matches!(&ent.kind, IcKind::Chain { .. });
             match v {
                 IcVerdict::Hit(val) => {
                     ent.miss = 0;
-                    IcOut::Hit(val)
+                    if chained {
+                        IcOut::HitChain(val)
+                    } else {
+                        IcOut::Hit(val)
+                    }
                 }
                 IcVerdict::Absent => {
                     ent.miss = 0;
@@ -7848,7 +7860,9 @@ impl Engine {
         if self.ic_verify {
             let check = self.find_prop(id, key);
             let same = match (&check, &out) {
-                (Some(Prop::Data { value: c, .. }), IcOut::Hit(v)) => self.strict_eq(c, v),
+                (Some(Prop::Data { value: c, .. }), IcOut::Hit(v) | IcOut::HitChain(v)) => {
+                    self.strict_eq(c, v)
+                }
                 (None, IcOut::Absent) => true,
                 _ => false,
             };
@@ -8015,7 +8029,7 @@ impl Engine {
     pub(crate) fn get_prop(&mut self, id: ObjId, key: &str) -> Option<Value> {
         let site = std::ptr::from_ref(std::panic::Location::caller()) as usize;
         match self.ic_hit(site, id, key) {
-            IcOut::Hit(v) => return Some(v),
+            IcOut::Hit(v) | IcOut::HitChain(v) => return Some(v),
             // Absence prouvée → `None`, pas `Some(Undefined)` —
             // les appelants distinguent prop absente de prop
             // présente valant `undefined`.
@@ -8489,7 +8503,7 @@ impl Engine {
         // clé réelle → réponse immédiate ; tout échec retombe
         // sur la marche complète ci-dessous.
         let bail = match self.ic_hit(site, id, key) {
-            IcOut::Hit(v) => return Ok(v),
+            IcOut::Hit(v) | IcOut::HitChain(v) => return Ok(v),
             IcOut::Absent => return Ok(Value::Undefined),
             // JS-C509 — bail : marche nue, ni collecte ni learn.
             IcOut::Bail => true,
@@ -8542,6 +8556,24 @@ impl Engine {
         key: &str,
         v: Value,
     ) -> JsResult<()> {
+        self.write_prop_at(id, recv, key, v, 0)
+    }
+
+    /// JS-C514 — write-IC : un `[[Set]]` ordinaire (`recv` = base)
+    /// consulte le site AST — own-Data prouvée (`Hit`, le sort
+    /// writable est tranché par `set_prop`) ou chaîne vide prouvée
+    /// (`Absent`, aucun setter/non-writable ne peut exister) →
+    /// `set_prop` direct, sans la marche. `HitChain` (attrs du
+    /// maillon proto inconnus) et `Fall` marchent — `Fall`
+    /// collecte les maillons et apprend en fin de chaîne.
+    fn write_prop_at(
+        &mut self,
+        id: ObjId,
+        recv: Value,
+        key: &str,
+        v: Value,
+        site: usize,
+    ) -> JsResult<()> {
         // Accessors on the chain intercept the write. Le maillon
         // de tête comme les suivants passent par la même boucle
         // bornée — `own` suit le dernier non-proxy (cible réelle
@@ -8558,10 +8590,36 @@ impl Engine {
             }
         }
         let ai = array_index(key); // V-3b — hoisted hors de la marche
+                                   // JS-C514 — consultation write-IC avant la marche :
+                                   // `Hit`/`Absent` prouvent que rien sur la chaîne n'a de
+                                   // setter ni de donnée non-writable pertinente → `set_prop`
+                                   // tranche directement (writable, extensibilité, index…).
+        let mut armed = false;
+        if site != 0 && matches!(recv, Value::Obj(r) if r == id) && !self.ic_off {
+            match self.ic_hit(site, id, key) {
+                IcOut::Hit(_) | IcOut::Absent => {
+                    return if self.set_prop(id, key, v)? {
+                        Ok(())
+                    } else {
+                        self.write_refused(key)
+                    };
+                }
+                IcOut::Bail => {}
+                IcOut::HitChain(_) | IcOut::Fall => armed = true,
+            }
+        }
         let mut own = id;
         let mut cur = Some(id);
         let mut depth = 0;
         let mut phops = 0;
+        // JS-C514 — learn : maillons visités (armé = site connu),
+        // `found` = propriété Data rencontrée (own ou proto
+        // writable — la boucle s'arrête là), `complete` = chaîne
+        // traversée sans borne (proxy ou `MAX_PROTO_DEPTH`
+        // rendraient l'entrée apprise mensongère).
+        let mut links: Vec<ObjId> = Vec::new();
+        let mut found = false;
+        let mut complete = true;
         while let Some(cid) = cur {
             // Un proxy *au milieu* de la chaîne intercepte aussi
             // — même logique qu'en tête (`Object.setPrototypeOf(
@@ -8585,7 +8643,11 @@ impl Engine {
                 if depth > MAX_PROTO_DEPTH {
                     break;
                 }
+                complete = false; // maillons mixtes proxy — pas de learn
                 continue;
+            }
+            if armed {
+                links.push(cid);
             }
             match self.find_own_ai(cid, key, ai) {
                 Some(Prop::Acc { set, .. }) => {
@@ -8601,7 +8663,10 @@ impl Engine {
                 Some(Prop::Data { attrs, .. }) if cid != own && !attrs.writable => {
                     return self.write_refused(key);
                 }
-                Some(_) => break, // data writable → shadow with own write
+                Some(_) => {
+                    found = true;
+                    break;
+                } // data writable → shadow with own write
                 None => {}
             }
             cur = match self.heap.obj(cid).map(|o| o.proto.clone()) {
@@ -8610,8 +8675,12 @@ impl Engine {
             };
             depth += 1;
             if depth > MAX_PROTO_DEPTH {
+                complete = false;
                 break;
             }
+        }
+        if armed && complete {
+            self.ic_learn(site, key, &links, found);
         }
         if self.set_prop(own, key, v)? {
             Ok(())
@@ -8956,6 +9025,18 @@ impl Engine {
 
     /// `base[key] = v`.
     pub(crate) fn set_prop_value(&mut self, base: Value, key: &str, v: Value) -> JsResult<()> {
+        self.set_prop_value_at(base, key, v, 0)
+    }
+
+    /// `set_prop_value` câblé à un site AST (write-IC JS-C514) —
+    /// `site = 0` pour les appels internes non câblés.
+    pub(crate) fn set_prop_value_at(
+        &mut self,
+        base: Value,
+        key: &str,
+        v: Value,
+        site: usize,
+    ) -> JsResult<()> {
         match base {
             Value::Undefined | Value::Null => {
                 Err(self.type_error(format!("cannot set `{key}` of {base:?}")))
@@ -9014,7 +9095,7 @@ impl Engine {
                         return Ok(());
                     }
                 }
-                self.write_prop(id, base, key, v)
+                self.write_prop_at(id, base, key, v, site)
             }
             // `[[Set]]` sur base primitive (spec `PutValue` →
             // `OrdinarySet` du wrapper éphémère) : la chaîne
@@ -9292,7 +9373,7 @@ impl Engine {
     /// pas d'hôte → `Absent`).
     pub(crate) fn has_prop_at(&mut self, id: ObjId, key: &str, site: usize) -> JsResult<bool> {
         match self.ic_hit(site, id, key) {
-            IcOut::Hit(_) => return Ok(true),
+            IcOut::Hit(_) | IcOut::HitChain(_) => return Ok(true),
             IcOut::Absent if self.host_of(id).is_none() => return Ok(false),
             // JS-C509 — bail : marche nue (délégation proxy,
             // hôte de tête), aucune machinerie learn.

@@ -12727,6 +12727,11 @@ chaque gain rapporté contre les **deux** archétypes.
   (dominant : aucune ombre) ; `Hit` non servable (tête/proto
   indistinguables) → `Fall` ; learn de l'absent seul. Verrous :
   lang 315 ×3.
+- [x] **JS-C514 — write-IC `[[Set]]`** : `IcOut::HitChain`
+  (hit proto vs tête) ; `Hit`/`Absent` → `set_prop` direct
+  sans marche setter/non-writable ; `HitChain`/`Fall` marchent,
+  learn en fin de chaîne complète. Sites AST Member/Index +
+  `LValueRef`. Verrous : lang 315 ×3.
 - [x] **JS-C513 — attribution `find_own_ai` par callsite** :
   `#[track_caller]` + `Location` `file:line` → `foai:` top-12
   au snapshot (N5.12 : le résiduel 33 % n'est PAS
