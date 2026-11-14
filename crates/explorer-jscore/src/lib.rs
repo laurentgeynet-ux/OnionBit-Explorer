@@ -318,6 +318,17 @@ pub static J17_PS_HAS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU
 pub static J17_PS_OWN: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 /// Voir [`J17_PS_GET`].
 pub static J17_PS_SET: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+/// JS-C511 — attribution de `prop_lookup` (invocations
+/// `find_own_ai`) par chemin d'entrée : `pl_get` lectures,
+/// `pl_has` `in`/`has_prop`, `pl_own` `find_own` attr-ops,
+/// `pl_set` écritures — résiduel = appels internes directs.
+pub static J17_PL_GET: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+/// Voir [`J17_PL_GET`].
+pub static J17_PL_HAS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+/// Voir [`J17_PL_GET`].
+pub static J17_PL_OWN: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+/// Voir [`J17_PL_GET`].
+pub static J17_PL_SET: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 /// JS-C502 — fast-path slot d'env `(d,slot)` : `slot_hit` =
 /// lecture directe `Small[slot]` vérifiée par nom ; `slot_miss`
 /// = échec de vérification (oob, clé différente, `Map`, cellule
@@ -481,7 +492,7 @@ pub fn j17_enable() {
 #[must_use]
 pub fn j17_snapshot() -> String {
     let r = std::sync::atomic::Ordering::Relaxed;
-    let pairs: [(&str, &std::sync::atomic::AtomicU64); 55] = [
+    let pairs: [(&str, &std::sync::atomic::AtomicU64); 59] = [
         ("prop_lookup", &J17_PROP_LOOKUP),
         ("proto_lvl", &J17_PROTO_LVL),
         ("prop_scan", &J17_PROP_SCAN),
@@ -503,6 +514,10 @@ pub fn j17_snapshot() -> String {
         ("ps_has", &J17_PS_HAS),
         ("ps_own", &J17_PS_OWN),
         ("ps_set", &J17_PS_SET),
+        ("pl_get", &J17_PL_GET),
+        ("pl_has", &J17_PL_HAS),
+        ("pl_own", &J17_PL_OWN),
+        ("pl_set", &J17_PL_SET),
         ("slot_hit", &J17_SLOT_HIT),
         ("slot_miss", &J17_SLOT_MISS),
         ("sm_oob", &J17_SM_OOB),

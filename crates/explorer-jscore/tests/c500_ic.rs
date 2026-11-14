@@ -541,4 +541,6 @@ fn c509_scan_attrib_emits() {
     assert!(snap.contains("ps_has="), "ps_has attendu : {snap}");
     assert!(snap.contains("ps_own="), "ps_own attendu : {snap}");
     assert!(snap.contains("ps_set="), "ps_set attendu : {snap}");
+    assert!(snap.contains("pl_get="), "pl_get attendu : {snap}");
+    assert!(snap.contains("pl_has="), "pl_has attendu : {snap}");
 }

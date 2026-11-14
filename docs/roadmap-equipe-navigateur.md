@@ -12716,3 +12716,8 @@ chaque gain rapporté contre les **deux** archétypes.
   12 ; à 8 l'index s'arme durablement (rebuild post-`remove`).
   Cible `ps_own` 42 % du scan (attr-ops + `o[k]` dynamiques
   sur objets 5–11 props). Verrous : lang 315 ×3, heap 2 tests.
+- [x] **JS-C511 — attribution `prop_lookup` par entrée** :
+  `pl_get`/`pl_has`/`pl_own`/`pl_set` — les scans tués n'ont
+  pas bougé `prop_ns` (mur = coût fixe × 2,67 M lookups) ;
+  la famille dominante décidera write-IC vs `Absent` étendu
+  vs quickening. Verrous : lang 315 ×3.

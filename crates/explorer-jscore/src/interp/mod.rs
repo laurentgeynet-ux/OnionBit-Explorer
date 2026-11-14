@@ -7297,6 +7297,7 @@ impl Engine {
     /// Own-property lookup with array/`length` semantics — returns
     /// the raw `Prop` so accessor pairs are visible to the caller.
     pub(crate) fn find_own(&mut self, id: ObjId, key: &str) -> Option<Prop> {
+        crate::j17_tick(&crate::J17_PL_OWN);
         let s0 = Self::j17_scan();
         let r = self.find_own_ai(id, key, array_index(key));
         Self::j17_scan_add(&crate::J17_PS_OWN, s0);
@@ -7993,6 +7994,7 @@ impl Engine {
             IcOut::Absent => return None,
             // JS-C509 — bail : marche nue, zéro machinerie learn.
             IcOut::Bail => {
+                crate::j17_tick(&crate::J17_PL_GET);
                 let s0 = Self::j17_scan();
                 let v = self.find_prop(id, key).and_then(|p| p.data_value());
                 Self::j17_scan_add(&crate::J17_PS_GET, s0);
@@ -8003,6 +8005,7 @@ impl Engine {
         }
         let mut links = Vec::new();
         let lp = if self.ic_off { None } else { Some(&mut links) };
+        crate::j17_tick(&crate::J17_PL_GET);
         let s0 = Self::j17_scan();
         let found = self.find_prop_owner_links(id, key, lp);
         Self::j17_scan_add(&crate::J17_PS_GET, s0);
@@ -8473,6 +8476,7 @@ impl Engine {
         } else {
             None
         };
+        crate::j17_tick(&crate::J17_PL_GET);
         let s0 = Self::j17_scan();
         let found = self.find_prop_owner_links(id, key, lp);
         Self::j17_scan_add(&crate::J17_PS_GET, s0);
@@ -9066,6 +9070,7 @@ impl Engine {
     /// (non-writable, non-extensible, frozen). Le caller décide
     /// silence sloppy vs `TypeError` strict.
     pub(crate) fn set_prop(&mut self, id: ObjId, key: &str, v: Value) -> JsResult<bool> {
+        crate::j17_tick(&crate::J17_PL_SET);
         let s0 = Self::j17_scan();
         let r = self.set_prop_walk(id, key, v);
         Self::j17_scan_add(&crate::J17_PS_SET, s0);
@@ -9264,6 +9269,7 @@ impl Engine {
             // JS-C509 — bail : marche nue (délégation proxy,
             // hôte de tête), aucune machinerie learn.
             IcOut::Bail => {
+                crate::j17_tick(&crate::J17_PL_HAS);
                 let s0 = Self::j17_scan();
                 let r = self.has_prop_walk(id, key);
                 Self::j17_scan_add(&crate::J17_PS_HAS, s0);
@@ -9273,6 +9279,7 @@ impl Engine {
             // `props[]` → marche complète.
             IcOut::Absent | IcOut::Fall => {}
         }
+        crate::j17_tick(&crate::J17_PL_HAS);
         let s0 = Self::j17_scan();
         let r = self.has_prop_walk(id, key)?;
         Self::j17_scan_add(&crate::J17_PS_HAS, s0);
