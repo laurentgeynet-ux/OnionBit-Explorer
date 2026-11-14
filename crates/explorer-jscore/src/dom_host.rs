@@ -13787,8 +13787,15 @@ fn ce_upgrade_node(e: &mut Engine, dom: &DomRef, cache: &NodeCache, node: NodeId
     // sinon l'élément était marqué `failed`, ses callbacks
     // désarmés (`connectedCallback` jamais tiré → `attached`/`Xcs`
     // jamais posés → mur `playlistHandlerActionMap`, JS-C322).
-    let is_class =
-        matches!(ctor, Value::Obj(id) if e.find_own(id, crate::interp::CLASS_CTOR).is_some());
+    // JS-C516 — bit flag d'abord, `find_own` en repli (clé
+    // privée forgeable via `fromCharCode`).
+    let is_class = matches!(ctor, Value::Obj(id) if {
+        let flagged = e
+            .heap
+            .obj(id)
+            .is_some_and(|o| o.flags.get() & crate::heap::OBJF_CLASS_CTOR != 0);
+        flagged || e.find_own(id, crate::interp::CLASS_CTOR).is_some()
+    });
     let ok = match r {
         Ok(v) => {
             let foreign = v.is_object() && !e.strict_eq(&v, &el);

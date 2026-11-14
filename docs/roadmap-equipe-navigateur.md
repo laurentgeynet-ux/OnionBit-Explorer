@@ -12741,3 +12741,7 @@ chaque gain rapporté contre les **deux** archétypes.
   `#[track_caller]` → `fown:` top-12 — nomme la builtin qui
   tire les 1,17 M attr-ops avant la fusion `hasOwn`+`get`.
   Télémétrie désarmée. Verrous : c500 31, clippy propre.
+- [x] **JS-C516 — flag `OBJF_CLASS_CTOR`** : la garde `call_value`
+  (735 k `find_own` yt = 29 %) lit un bit `Object::flags` posé à
+  la création de classe ; `find_own` en repli (clé forgeable).
+  Verrous : lang 315 ×3, c500 33, clippy propre.

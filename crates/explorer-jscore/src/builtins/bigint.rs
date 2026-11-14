@@ -414,6 +414,7 @@ pub(crate) fn new_proxy(e: &mut Engine, target: Value, handler: Value) -> JsResu
         extensible: true,
         elem_integrity: 0,
         lookups: std::cell::Cell::new(0),
+        flags: std::cell::Cell::new(0),
         args_map: None,
     })))
 }

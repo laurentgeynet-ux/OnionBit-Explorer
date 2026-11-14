@@ -4273,6 +4273,7 @@ impl Engine {
             extensible: true,
             elem_integrity: 0,
             lookups: std::cell::Cell::new(0),
+            flags: std::cell::Cell::new(0),
             args_map: None,
         }))
     }
@@ -4842,6 +4843,7 @@ impl Engine {
             extensible: true,
             elem_integrity: 0,
             lookups: std::cell::Cell::new(0),
+            flags: std::cell::Cell::new(0),
             args_map: None,
         });
         // `source`/`flags`/flags booléens sont des accesseurs sur
@@ -7284,6 +7286,9 @@ impl Engine {
         }
         // `C()` without `new` -> TypeError (class constructor).
         self.set_own(ctor_id, CLASS_CTOR, Value::Bool(true), false);
+        if let Some(o) = self.heap.obj(ctor_id) {
+            o.flags.set(o.flags.get() | crate::heap::OBJF_CLASS_CTOR);
+        }
         Ok(ctor)
     }
 
@@ -8855,6 +8860,7 @@ impl Engine {
             extensible: true,
             elem_integrity: 0,
             lookups: std::cell::Cell::new(0),
+            flags: std::cell::Cell::new(0),
             args_map: None,
         }))
     }
@@ -10267,6 +10273,7 @@ impl Engine {
             extensible: true,
             elem_integrity: 0,
             lookups: std::cell::Cell::new(0),
+            flags: std::cell::Cell::new(0),
             args_map: None,
         });
         self.sym_index.insert(key, id);
@@ -10282,7 +10289,15 @@ impl Engine {
     /// par [`call_value_ctor`].
     pub(crate) fn call_value(&mut self, f: Value, this: Value, args: &[Value]) -> JsResult<Value> {
         if let Value::Obj(fid) = f {
-            if self.find_own(fid, CLASS_CTOR).is_some() {
+            // JS-C516 — le bit `OBJF_CLASS_CTOR` sert la garde en
+            // O(1) ; `find_own` reste en repli — un script peut
+            // forger la clé privée `ctor` via
+            // `String.fromCharCode(0xF131)`.
+            let flagged = self
+                .heap
+                .obj(fid)
+                .is_some_and(|o| o.flags.get() & crate::heap::OBJF_CLASS_CTOR != 0);
+            if flagged || self.find_own(fid, CLASS_CTOR).is_some() {
                 return Err(self.type_error("class constructor cannot be invoked without `new`"));
             }
         }

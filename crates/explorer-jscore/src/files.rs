@@ -149,6 +149,7 @@ fn blob_value_rc(e: &mut Engine, data: &Rc<Vec<u8>>, ty: String, proto: Value) -
         extensible: true,
         elem_integrity: 0,
         lookups: std::cell::Cell::new(0),
+        flags: std::cell::Cell::new(0),
         args_map: None,
     });
     e.set_own(id, "size", Value::Num(data.len() as f64), true);
@@ -283,6 +284,7 @@ fn blob_array_buffer(e: &mut Engine, this: Value, _a: &[Value]) -> JsResult<Valu
         extensible: true,
         elem_integrity: 0,
         lookups: std::cell::Cell::new(0),
+        flags: std::cell::Cell::new(0),
         args_map: None,
     });
     e.resolve_promise(pid, Value::Obj(id));
@@ -466,6 +468,7 @@ impl Engine {
                         extensible: true,
                         elem_integrity: 0,
                         lookups: std::cell::Cell::new(0),
+                        flags: std::cell::Cell::new(0),
                         args_map: None,
                     });
                     Value::Obj(id)

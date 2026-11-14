@@ -1112,6 +1112,7 @@ impl Engine {
                     extensible: true,
                     elem_integrity: 0,
                     lookups: std::cell::Cell::new(0),
+                    flags: std::cell::Cell::new(0),
                     args_map: None,
                 }))
             }
@@ -1142,6 +1143,7 @@ impl Engine {
                     extensible: true,
                     elem_integrity: 0,
                     lookups: std::cell::Cell::new(0),
+                    flags: std::cell::Cell::new(0),
                     args_map: None,
                 }))
             }
@@ -1163,6 +1165,7 @@ impl Engine {
                     extensible: true,
                     elem_integrity: 0,
                     lookups: std::cell::Cell::new(0),
+                    flags: std::cell::Cell::new(0),
                     args_map: None,
                 }));
                 memo.push(m.clone());
@@ -1189,6 +1192,7 @@ impl Engine {
                     extensible: true,
                     elem_integrity: 0,
                     lookups: std::cell::Cell::new(0),
+                    flags: std::cell::Cell::new(0),
                     args_map: None,
                 }));
                 memo.push(s.clone());

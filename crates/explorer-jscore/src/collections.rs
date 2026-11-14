@@ -84,6 +84,7 @@ pub(crate) fn iter_obj(e: &mut Engine, items: Vec<Value>, proto: ObjId) -> Value
         extensible: true,
         elem_integrity: 0,
         lookups: std::cell::Cell::new(0),
+        flags: std::cell::Cell::new(0),
         args_map: None,
     }))
 }
@@ -114,6 +115,7 @@ fn map_new(e: &mut Engine, args: &[Value], proto_id: crate::value::ObjId) -> JsR
         extensible: true,
         elem_integrity: 0,
         lookups: std::cell::Cell::new(0),
+        flags: std::cell::Cell::new(0),
         args_map: None,
     });
     let m = Value::Obj(id);
@@ -154,6 +156,7 @@ fn set_new(e: &mut Engine, args: &[Value], proto_id: crate::value::ObjId) -> JsR
         extensible: true,
         elem_integrity: 0,
         lookups: std::cell::Cell::new(0),
+        flags: std::cell::Cell::new(0),
         args_map: None,
     });
     let s = Value::Obj(id);
@@ -486,6 +489,7 @@ fn new_set_from(e: &mut Engine, items: Vec<Value>) -> JsResult<Value> {
         extensible: true,
         elem_integrity: 0,
         lookups: std::cell::Cell::new(0),
+        flags: std::cell::Cell::new(0),
         args_map: None,
     });
     for v in items {
@@ -796,6 +800,7 @@ fn map_group_by(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
         extensible: true,
         elem_integrity: 0,
         lookups: std::cell::Cell::new(0),
+        flags: std::cell::Cell::new(0),
         args_map: None,
     });
     for (i, v) in items.into_iter().enumerate() {

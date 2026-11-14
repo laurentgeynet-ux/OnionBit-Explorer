@@ -615,3 +615,17 @@ fn c515_fown_attrib_emits() {
     eval("var o={a:1};for(var i=0;i<50;i++){o.hasOwnProperty('a');}");
     assert!(explorer_jscore::j17_snapshot().contains("fown:"));
 }
+
+/// JS-C516 — le flag `OBJF_CLASS_CTOR` garde `C()` sans `new`
+/// sans casser le `TypeError` ni les appels ordinaires.
+#[test]
+fn c516_class_ctor_flag() {
+    assert_eq!(eval("class C{}try{C();'n'}catch(e){'T'}"), "T");
+    assert_eq!(eval("class C{x(){return 1}}new C().x()"), "1");
+    // Clé forgée : `fromCharCode(0xF131)` reconstruit la clé
+    // privée — le repli `find_own` la voit toujours.
+    assert_eq!(
+        eval("var o=function(){};o[String.fromCharCode(0xF131)+'ctor']=true;try{o();'n'}catch(e){'T'}"),
+        "T"
+    );
+}

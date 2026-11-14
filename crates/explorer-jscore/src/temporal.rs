@@ -161,6 +161,7 @@ fn mk(e: &mut Engine, name: &str, data: TempData) -> JsResult<Value> {
         extensible: true,
         elem_integrity: 0,
         lookups: std::cell::Cell::new(0),
+        flags: std::cell::Cell::new(0),
         args_map: None,
     });
     set_pub_props(e, id, &data);

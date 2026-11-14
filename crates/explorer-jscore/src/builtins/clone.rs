@@ -114,6 +114,7 @@ pub(crate) fn clone_deep(
             extensible: true,
             elem_integrity: 0,
             lookups: std::cell::Cell::new(0),
+            flags: std::cell::Cell::new(0),
             args_map: None,
         }))),
         CloneShape::Dv(bid, offset, len) => {
@@ -131,6 +132,7 @@ pub(crate) fn clone_deep(
                 extensible: true,
                 elem_integrity: 0,
                 lookups: std::cell::Cell::new(0),
+                flags: std::cell::Cell::new(0),
                 args_map: None,
             })))
         }
@@ -173,6 +175,7 @@ pub(crate) fn clone_deep(
                 extensible: true,
                 elem_integrity: 0,
                 lookups: std::cell::Cell::new(0),
+                flags: std::cell::Cell::new(0),
                 args_map: None,
             });
             seen.push((id, cid));
@@ -197,6 +200,7 @@ pub(crate) fn clone_deep(
                 extensible: true,
                 elem_integrity: 0,
                 lookups: std::cell::Cell::new(0),
+                flags: std::cell::Cell::new(0),
                 args_map: None,
             });
             seen.push((id, cid));
@@ -223,6 +227,7 @@ pub(crate) fn clone_deep(
                 extensible: true,
                 elem_integrity: 0,
                 lookups: std::cell::Cell::new(0),
+                flags: std::cell::Cell::new(0),
                 args_map: None,
             });
             seen.push((id, cid));
@@ -368,6 +373,7 @@ pub(crate) fn weakref_ctor(e: &mut Engine, _t: Value, args: &[Value]) -> JsResul
         extensible: true,
         elem_integrity: 0,
         lookups: std::cell::Cell::new(0),
+        flags: std::cell::Cell::new(0),
         args_map: None,
     })))
 }
@@ -412,6 +418,7 @@ pub(crate) fn finreg_ctor(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult
         extensible: true,
         elem_integrity: 0,
         lookups: std::cell::Cell::new(0),
+        flags: std::cell::Cell::new(0),
         args_map: None,
     });
     e.finregs.push(id);

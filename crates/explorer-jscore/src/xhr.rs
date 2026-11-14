@@ -574,6 +574,7 @@ impl Host for XhrHost {
                             extensible: true,
                             elem_integrity: 0,
                             lookups: std::cell::Cell::new(0),
+                            flags: std::cell::Cell::new(0),
                             args_map: None,
                         });
                         Value::Obj(id)
@@ -1067,6 +1068,7 @@ impl Engine {
             extensible: true,
             elem_integrity: 0,
             lookups: std::cell::Cell::new(0),
+            flags: std::cell::Cell::new(0),
             args_map: None,
         });
         let hdrs = self.headers_obj(s.headers);
@@ -1486,6 +1488,7 @@ fn body_arraybuf(e: &mut Engine, this: Value, _a: &[Value]) -> JsResult<Value> {
                 extensible: true,
                 elem_integrity: 0,
                 lookups: std::cell::Cell::new(0),
+                flags: std::cell::Cell::new(0),
                 args_map: None,
             });
             e.resolve_promise(pid, Value::Obj(id));
@@ -1560,6 +1563,7 @@ fn fetch_clone(e: &mut Engine, this: Value, _a: &[Value]) -> JsResult<Value> {
         extensible: true,
         elem_integrity: 0,
         lookups: std::cell::Cell::new(0),
+        flags: std::cell::Cell::new(0),
         args_map: None,
     });
     for (k, p) in &props {
@@ -1898,6 +1902,7 @@ fn request_ctor(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
         extensible: true,
         elem_integrity: 0,
         lookups: std::cell::Cell::new(0),
+        flags: std::cell::Cell::new(0),
         args_map: None,
     });
     // `signal` : `init.signal` > signal du Request d'entrée >

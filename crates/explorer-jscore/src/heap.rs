@@ -969,6 +969,11 @@ pub struct Object {
     /// prochain lookup). `Cell<u8>` — se loge dans le padding des
     /// petits champs (0 octet ajouté), non tracé par le GC.
     pub(crate) lookups: std::cell::Cell<u8>,
+    /// JS-C516 — drapeaux bon-marché évitant des lookups répétés :
+    /// [`crate::heap::OBJF_CLASS_CTOR`] = l'objet porte la marque
+    /// `CLASS_CTOR` (constructeur de classe — `C()` sans `new`
+    /// refusé sans `find_own` par appel).
+    pub(crate) flags: std::cell::Cell<u8>,
     /// Objet `arguments` : `Some((env, map))` où `map[i]` est le nom
     /// du paramètre formel aliasé avec l'élément `i` (spec
     /// `CreateMappedArgumentsObject` — fonctions sloppy à liste de
@@ -1458,6 +1463,12 @@ const PROPS_IDX_MIN: usize = 12;
 /// à attr-ops répétés ne doivent pas payer le scan à vie).
 const PROPS_IDX_ARM: u8 = 8;
 
+/// JS-C516 — bit de [`Object::flags`] : l'objet est un
+/// constructeur de classe (marque `CLASS_CTOR` posée). Le bit
+/// sert la garde d'appel sans `find_own` par `call` (vol N5.15 :
+/// ~735 k lookups yt — 29 % du mur).
+pub(crate) const OBJF_CLASS_CTOR: u8 = 1;
+
 /// JS-C500 — graine d'empreinte de layout (bit haut posé :
 /// `0` est la sentinelle « sale » de `Object::shape`).
 const SHAPE_SEED: u64 = 0x9E37_79B9_7F4A_7C15;
@@ -1504,6 +1515,7 @@ impl Object {
             extensible: true,
             elem_integrity: 0,
             lookups: std::cell::Cell::new(0),
+            flags: std::cell::Cell::new(0),
             args_map: None,
         }
     }
