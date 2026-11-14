@@ -12770,3 +12770,7 @@ chaque gain rapporté contre les **deux** archétypes.
   hash au lieu de `find_own_ai` par maillon éligible ; une
   traversée, auto-invalid par shape ; `chain_fold` caché
   écarté (mutation profonde non propagée). Verrous : lang 315 ×3.
+- [x] **JS-C522 — scan byte-level du lexer** (pivot `lex_ns`) :
+  boucle octet pour idents (ASCII exact) + bulk-skip espace/tab
+  — `peek`+`bump` par char supprimé des classes dominantes.
+  Verrous : lang 315 ×2, clippy propre.

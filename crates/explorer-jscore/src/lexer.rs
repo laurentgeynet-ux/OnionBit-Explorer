@@ -544,6 +544,21 @@ impl Lexer<'_> {
         // terminateur (ou le début de source).
         let mut at_bol = self.pos == 0;
         loop {
+            // JS-C522 — bulk-skip espaces/tabs ASCII (la trivia
+            // dominante) : un octet lu + test, `pos`/`col` avancés
+            // en masse — pas de `peek`/`bump` par caractère. `\n`,
+            // `\r`, espaces unicode et commentaires gardent le
+            // chemin char (tracking `line`/`at_bol` inchangé).
+            while self
+                .src
+                .as_bytes()
+                .get(self.byte_pos)
+                .is_some_and(|&b| b == b' ' || b == b'\t')
+            {
+                self.pos += 1;
+                self.byte_pos += 1;
+                self.col += 1;
+            }
             match self.peek() {
                 // WhiteSpace ES = Unicode White_Space + U+FEFF
                 // (ZWNBSP — Cf, hors `is_whitespace` Rust).
@@ -647,8 +662,26 @@ impl Lexer<'_> {
         if let Some(c) = self.peek() {
             if c != '\\' && is_ident_start(c) {
                 self.bump();
-                while matches!(self.peek(), Some(c) if c != '\\' && is_ident_part(c)) {
-                    self.bump();
+                // JS-C522 — scan byte-level : un octet lu + test de
+                // table par char au lieu de `peek`+`bump` (decode
+                // UTF-8 + maj line/col par caractère). Le non-ASCII
+                // retombe sur le chemin char ; `\\` casse la boucle
+                // vers le chemin échappé.
+                let bs = self.src.as_bytes();
+                while let Some(&b) = bs.get(self.byte_pos) {
+                    if b < 0x80 {
+                        if matches!(b, b'a'..=b'z' | b'A'..=b'Z' | b'0'..=b'9' | b'_' | b'$') {
+                            self.pos += 1;
+                            self.byte_pos += 1;
+                            self.col += 1;
+                        } else {
+                            break;
+                        }
+                    } else if matches!(self.peek(), Some(c) if c != '\\' && is_ident_part(c)) {
+                        self.bump();
+                    } else {
+                        break;
+                    }
                 }
                 if self.peek() != Some('\\') {
                     let s = &self.src[b0..self.byte_pos];
