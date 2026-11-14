@@ -6082,8 +6082,8 @@ impl Engine {
             let (hit, cause) = {
                 let b = cur.borrow();
                 match &b.kind {
-                    EnvKind::Local(m) | EnvKind::Block(m) | EnvKind::Global(m) => match m {
-                        crate::heap::BindingMap::Small(v) => match v.get(slot as usize) {
+                    EnvKind::Local(m) | EnvKind::Block(m) | EnvKind::Global(m) => {
+                        match m.slot_entry(slot as usize) {
                             Some((k, c)) => {
                                 if std::ptr::eq(&raw const **k, name) || &**k == name {
                                     match c {
@@ -6094,10 +6094,9 @@ impl Engine {
                                     (None, 1)
                                 }
                             }
-                            None => (None, 0),
-                        },
-                        crate::heap::BindingMap::Map(_) => (None, 3),
-                    },
+                            None => (None, m.slot_miss_cause()),
+                        }
+                    }
                     EnvKind::With(_) => (None, 4),
                 }
             };
@@ -6165,12 +6164,13 @@ impl Engine {
             return self.env_set(env, name, v);
         };
         if slot != u16::MAX && !self.slots_off {
-            // JS-C505 — même convention de causes qu'en lecture.
+            // JS-C505 — même convention de causes qu'en lecture
+            // (=oob inclut l'absence de canon — JS-C533).
             let (hit, cause) = {
                 let mut b = cur.borrow_mut();
                 match &mut b.kind {
-                    EnvKind::Local(m) | EnvKind::Block(m) | EnvKind::Global(m) => match m {
-                        crate::heap::BindingMap::Small(vec) => match vec.get_mut(slot as usize) {
+                    EnvKind::Local(m) | EnvKind::Block(m) | EnvKind::Global(m) => {
+                        match m.slot_entry_mut(slot as usize) {
                             Some((k, c)) => {
                                 if std::ptr::eq(&raw const **k, name) || &**k == name {
                                     match c {
@@ -6184,10 +6184,9 @@ impl Engine {
                                     (false, 1)
                                 }
                             }
-                            None => (false, 0),
-                        },
-                        crate::heap::BindingMap::Map(_) => (false, 3),
-                    },
+                            None => (false, m.slot_miss_cause()),
+                        }
+                    }
                     EnvKind::With(_) => (false, 4),
                 }
             };
@@ -6226,10 +6225,13 @@ impl Engine {
         };
         let mut b = env.borrow_mut();
         match &mut b.kind {
+            // JS-C533 — `wire_canon` partage la `Rc<[Rc<str>]>`
+            // (toutes les instances du scope scannent le MÊME
+            // tableau, cache-chaud) et pré-dimensionne `cells`
+            // en un seul alloc — l'ancienne boucle `insert`
+            // re-scannait la map par nom (O(n²) sur gros scopes).
             EnvKind::Local(m) | EnvKind::Block(m) | EnvKind::Global(m) => {
-                for n in names.iter() {
-                    m.insert(n.clone(), EnvCell::Uninit);
-                }
+                m.wire_canon(names);
             }
             EnvKind::With(_) => {}
         }

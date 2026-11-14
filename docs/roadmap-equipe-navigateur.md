@@ -12902,6 +12902,19 @@ chaque gain rapporté contre les **deux** archétypes.
   (`ic_hit`/`ic_miss`/`ic_disarm` au snapshot) pour
   borner la couverture du seul court-circuit existant.
   Dependency-groups = infra lourde, dernier recours.
+- [x] **JS-C533 — `Bindings` slot-indexé** : vol N5.37
+  — `ident` = 34 % des nœuds évalués, `env_lvl`
+  2,63 M ; chaque niveau scannait des paires
+  `(Rc<str>, EnvCell)` ~48 o **par instance**.
+  `EnvKind::*` porte `Bindings{canon,cells,extra}` :
+  canon `Rc<[Rc<str>]>` partagé inter-instances
+  (tableau chaud, 8 o/entrée), `cells` dense
+  pré-dimensionné `Uninit` en un alloc, `extra` =
+  `BindingMap` pour les liaisons dynamiques.
+  Migration au câblage (extra→cells sur noms
+  canoniques), fast-path `(d,slot)` sert canon OU
+  ordre d'insertion `extra` non câblé (vérif clé
+  inchangée). Compteurs `bnd_canon`/`bnd_extra`.
 - [x] **JS-C532 — histogrammes `eval:`/`stmt:` par
   variante** : les sous-systèmes nommés ~5 % de
   `body_ns` — le mur est le tissu interpréteur

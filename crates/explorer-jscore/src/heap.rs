@@ -2089,14 +2089,14 @@ pub enum EnvKind {
     /// Global scope — `var`/implicit bindings live on the global
     /// object; the map is the declarative global record holding
     /// `let`/`const` names (they do *not* appear on `window`).
-    Global(BindingMap),
+    Global(Bindings),
     /// Function scope (paramètres, corps de fonction/programme).
-    Local(BindingMap),
+    Local(Bindings),
     /// Portée de bloc (`{ … }`, tête de `for`, `switch`, `catch`) —
     /// même stockage que `Local`, mais `var`/déclarations de
     /// fonction la TRAVERSENT jusqu'au scope fonction englobant
     /// (spec `VarDeclaredNames`) ; `let`/`const`/`class` y vivent.
-    Block(BindingMap),
+    Block(Bindings),
     /// `with (obj)` — object-as-scope : la résolution d'un nom
     /// consulte les props de l'objet (sauf `@@unscopables`)
     /// puis remonte au parent.
@@ -2152,16 +2152,44 @@ impl BindingMap {
         }
     }
 
-    /// `name` lié ?
-    pub fn contains_key(&self, name: &str) -> bool {
-        self.get(name).is_some()
+    /// Aucune liaison ?
+    pub fn is_empty(&self) -> bool {
+        match self {
+            BindingMap::Small(v) => v.is_empty(),
+            BindingMap::Map(m) => m.is_empty(),
+        }
     }
 
-    /// `name` lié **vivant** — les cellules [`EnvCell::Uninit`]
-    /// (pré-déclarées JS-C502) comptent comme absentes.
-    pub fn has_live(&self, name: &str) -> bool {
-        self.get(name)
-            .is_some_and(|c| !matches!(c, EnvCell::Uninit))
+    /// Retire `name` — utilisé par [`Bindings::wire_canon`] pour
+    /// migrer vers les cellules canoniques les liaisons posées
+    /// avant le câblage.
+    pub fn remove(&mut self, name: &str) -> Option<EnvCell> {
+        match self {
+            BindingMap::Small(v) => v
+                .iter()
+                .position(|(k, _)| std::ptr::eq(&raw const **k, name) || &**k == name)
+                .map(|i| v.remove(i).1),
+            BindingMap::Map(m) => m.remove(name),
+        }
+    }
+
+    /// Paire `(nom, cellule)` à la position d'insertion `slot` —
+    /// fast-path opportuniste des scopes sans canon (la vérif
+    /// `clé == name` de l'appelant garde la correction ; `Map`
+    /// n'a pas d'ordre de slot → `None`).
+    pub fn pair_at(&self, slot: usize) -> Option<(&Rc<str>, &EnvCell)> {
+        match self {
+            BindingMap::Small(v) => v.get(slot).map(|(k, c)| (k, c)),
+            BindingMap::Map(_) => None,
+        }
+    }
+
+    /// Variante mutable de [`Self::pair_at`].
+    pub fn pair_at_mut(&mut self, slot: usize) -> Option<(&Rc<str>, &mut EnvCell)> {
+        match self {
+            BindingMap::Small(v) => v.get_mut(slot).map(|(k, c)| (&*k, c)),
+            BindingMap::Map(_) => None,
+        }
     }
 
     /// Insert/overwrite — promeut en `Map` au seuil (une seule
@@ -2197,6 +2225,171 @@ impl BindingMap {
         match self {
             BindingMap::Small(v) => BindingMapValues::Small(v.iter()),
             BindingMap::Map(m) => BindingMapValues::Map(m.values()),
+        }
+    }
+}
+
+/// JS-C533 — liaisons d'un scope : les noms **canoniques** du
+/// resolver (`names_table`, ordre = slots) vivent dans un
+/// `Rc<[Rc<str>]>` **partagé par toutes les instances du scope**
+/// — le tableau reste cache-chaud d'un appel à l'autre, et les
+/// scans de noms lisent 8 o/entrée au lieu des ~48 o d'une
+/// paire `(Rc<str>, EnvCell)`. Les cellules sont un `Vec` dense
+/// aligné 1:1 (slot = index canonique) ; toute liaison hors
+/// canon (injection `eval`, scope non modélisé/`GExec`,
+/// double pré-déclaration) tombe dans `extra` — l'ancien
+/// `BindingMap` adaptatif. Sémantique identique à
+/// [`BindingMap`] : même API, `Uninit` = pré-déclaré non vivant,
+/// première liaison d'un nom gagne.
+#[derive(Clone)]
+pub struct Bindings {
+    /// Noms canoniques partagés — vide tant que le scope n'a
+    /// pas été câblé par `predeclare_slots` (non modélisé,
+    /// poisoned, env interne) : `get` tombe alors directement
+    /// sur `extra`, coût identique à l'ancien `BindingMap`.
+    canon: Rc<[Rc<str>]>,
+    /// Cellules 1:1 avec `canon`, pré-dimensionnées
+    /// [`EnvCell::Uninit`] au câblage — `cells.len() ==
+    /// canon.len()` invariant.
+    cells: Vec<EnvCell>,
+    /// Liaisons dynamiques hors canon — adaptatif Small/Map.
+    extra: BindingMap,
+}
+
+impl Bindings {
+    fn new() -> Self {
+        Bindings {
+            canon: Rc::from(&[][..]),
+            cells: Vec::new(),
+            extra: BindingMap::new(),
+        }
+    }
+
+    /// Position canonique de `name` — scan dense des `Rc`
+    /// (`ptr_eq` sur la donnée internée puis `memcmp`, même
+    /// convention que [`BindingMap::get`]).
+    fn pos(&self, name: &str) -> Option<usize> {
+        self.canon
+            .iter()
+            .position(|k| std::ptr::eq(&raw const **k, name) || &**k == name)
+    }
+
+    /// Lookup partagé — canon d'abord (les liaisons dynamiques
+    /// d'un nom canonique vivent dans `cells`, jamais `extra`),
+    /// `extra` ensuite.
+    pub fn get(&self, name: &str) -> Option<&EnvCell> {
+        if let Some(i) = self.pos(name) {
+            crate::j17_tick(&crate::J17_BND_CANON);
+            return self.cells.get(i);
+        }
+        let c = self.extra.get(name);
+        if c.is_some() {
+            crate::j17_tick(&crate::J17_BND_EXTRA);
+        }
+        c
+    }
+
+    /// Variante mutable de [`Self::get`].
+    pub fn get_mut(&mut self, name: &str) -> Option<&mut EnvCell> {
+        if let Some(i) = self.pos(name) {
+            return self.cells.get_mut(i);
+        }
+        self.extra.get_mut(name)
+    }
+
+    /// `name` lié ?
+    pub fn contains_key(&self, name: &str) -> bool {
+        self.get(name).is_some()
+    }
+
+    /// `name` lié **vivant** — les cellules [`EnvCell::Uninit`]
+    /// comptent comme absentes (même convention que
+    /// [`BindingMap::has_live`]).
+    pub fn has_live(&self, name: &str) -> bool {
+        self.get(name)
+            .is_some_and(|c| !matches!(c, EnvCell::Uninit))
+    }
+
+    /// Insert/overwrite — un nom canonique écrit sa cellule
+    /// **in-place** (le slot survit à l'exécution, comme
+    /// l'ancien `Small`), un nom hors canon rejoint `extra`.
+    pub fn insert(&mut self, name: impl Into<Rc<str>>, cell: EnvCell) {
+        let name = name.into();
+        if let Some(i) = self.pos(&name) {
+            self.cells[i] = cell;
+            return;
+        }
+        self.extra.insert(name, cell);
+    }
+
+    /// Itère toutes les cellules (canon puis `extra`) — marquage
+    /// GC (envs = racines), l'ordre importe peu.
+    pub fn values(&self) -> impl Iterator<Item = &EnvCell> + '_ {
+        self.cells.iter().chain(self.extra.values())
+    }
+
+    /// Câble le canon du scope (appelé par `predeclare_slots`) :
+    /// `cells` pré-dimensionné `Uninit`, puis les liaisons déjà
+    /// posées dans `extra` sur un nom canonique migrent vers leur
+    /// cellule — sans ça `get` (canon d'abord) masquerait une
+    /// liaison vivante derrière un `Uninit`. Double câblage →
+    /// même sémantique que l'ancien insert-`Uninit` : chaque nom
+    /// passe par `insert` (canon → cellule, reste → `extra`).
+    pub fn wire_canon(&mut self, names: Rc<[Rc<str>]>) {
+        if !self.canon.is_empty() {
+            for n in names.iter() {
+                self.insert(n.clone(), EnvCell::Uninit);
+            }
+            return;
+        }
+        self.canon = names;
+        self.cells = vec![EnvCell::Uninit; self.canon.len()];
+        if !self.extra.is_empty() {
+            for i in 0..self.canon.len() {
+                // `pos` coûte un rescan par nom — la copie de la
+                // clé évite l'alias `canon`/`extra` sur `self`.
+                let n = self.canon[i].clone();
+                if let Some(c) = self.extra.remove(&n) {
+                    self.cells[i] = c;
+                }
+            }
+        }
+    }
+
+    /// Entrée `(nom, cellule)` au `slot` — le fast-path résolu
+    /// vérifie `clé == name` avant de servir. Canon câblé →
+    /// cellule alignée ; canon vide → ordre d'insertion `extra`
+    /// (opportuniste, même garde — c'est ce que servait l'ancien
+    /// `Small` des scopes non pré-déclarés).
+    pub fn slot_entry(&self, slot: usize) -> Option<(&Rc<str>, &EnvCell)> {
+        if self.canon.is_empty() {
+            return self.extra.pair_at(slot);
+        }
+        match (self.canon.get(slot), self.cells.get(slot)) {
+            (Some(k), Some(c)) => Some((k, c)),
+            _ => None,
+        }
+    }
+
+    /// Variante mutable de [`Self::slot_entry`].
+    pub fn slot_entry_mut(&mut self, slot: usize) -> Option<(&Rc<str>, &mut EnvCell)> {
+        if self.canon.is_empty() {
+            return self.extra.pair_at_mut(slot);
+        }
+        match (self.canon.get(slot), self.cells.get_mut(slot)) {
+            (Some(k), Some(c)) => Some((k, c)),
+            _ => None,
+        }
+    }
+
+    /// Cause `sm_*` quand `slot_entry` a rendu `None` : `3` =
+    /// stockage `Map` promu (pas d'ordre de slot vérifiable),
+    /// `0` = hors bornes ou canon non câblé.
+    pub fn slot_miss_cause(&self) -> u8 {
+        if self.canon.is_empty() && matches!(self.extra, BindingMap::Map(_)) {
+            3
+        } else {
+            0
         }
     }
 }
@@ -2348,7 +2541,14 @@ fn take_env_edges(kind: &mut EnvKind, worklist: &mut Vec<EnvRef>) {
         EnvKind::Global(m) | EnvKind::Local(m) | EnvKind::Block(m) => m,
         EnvKind::With(_) => return,
     };
-    match map {
+    // JS-C533 — canon cells puis `extra` (même vidage qu'avant,
+    // deux réservoirs au lieu d'un).
+    for c in map.cells.drain(..) {
+        if let EnvCell::Alias(target, _) = c {
+            worklist.push(target);
+        }
+    }
+    match &mut map.extra {
         BindingMap::Small(v) => {
             for (_, c) in v.drain(..) {
                 if let EnvCell::Alias(target, _) = c {
@@ -2372,7 +2572,7 @@ impl Env {
         crate::j17_tick(&crate::J17_ENV);
         ENVS_LIVE.with(|c| c.set(c.get() + 1));
         Rc::new(RefCell::new(Env {
-            kind: EnvKind::Local(BindingMap::new()),
+            kind: EnvKind::Local(Bindings::new()),
             parent: Some(parent),
         }))
     }
@@ -2382,7 +2582,7 @@ impl Env {
         crate::j17_tick(&crate::J17_ENV);
         ENVS_LIVE.with(|c| c.set(c.get() + 1));
         Rc::new(RefCell::new(Env {
-            kind: EnvKind::Global(BindingMap::new()),
+            kind: EnvKind::Global(Bindings::new()),
             parent: None,
         }))
     }
@@ -2393,7 +2593,7 @@ impl Env {
         crate::j17_tick(&crate::J17_ENV);
         ENVS_LIVE.with(|c| c.set(c.get() + 1));
         Rc::new(RefCell::new(Env {
-            kind: EnvKind::Block(BindingMap::new()),
+            kind: EnvKind::Block(Bindings::new()),
             parent: Some(parent),
         }))
     }

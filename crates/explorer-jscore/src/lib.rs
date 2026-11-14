@@ -233,6 +233,12 @@ pub static J17_PROP_NEW: std::sync::atomic::AtomicU64 = std::sync::atomic::Atomi
 /// Liaison insérée en scope (`BindingMap::insert`) — la croissance
 /// du `Vec`/`HashMap` de portée suit ce compteur.
 pub static J17_BIND: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+/// JS-C533 — `Bindings::get` servi par le canon slot-indexé
+/// (couverture des lookups par le stockage partagé).
+pub static J17_BND_CANON: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+/// JS-C533 — `Bindings::get` servi par `extra` (liaisons
+/// dynamiques hors canon — eval-injection, non modélisé).
+pub static J17_BND_EXTRA: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 /// `Env` créé (`local`/`block`/`with`/`global`) — 1 alloc `Rc`.
 pub static J17_ENV: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 /// `Vec<Value>` d'args matérialisé (`eval_args`, non vide) —
@@ -356,7 +362,7 @@ pub static J17_SLOT_MISS: std::sync::atomic::AtomicU64 = std::sync::atomic::Atom
 /// (env non pré-déclaré / coverage), `sm_key` = nom au slot ≠
 /// clé (divergence d'ordre canonique — le signal de bug),
 /// `sm_cell` = cellule non-`Bind` (`Uninit`/alias/`LazyArgs`/
-/// immuable en écriture), `sm_map` = `BindingMap::Map` promue,
+/// immuable en écriture), `sm_map` = réservé (JS-C533 : `extra` non câblé compte `oob`),
 /// `sm_kind` = kind d'env non câblé (`With`).
 pub static J17_SM_OOB: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 /// Voir [`J17_SM_OOB`].
@@ -597,7 +603,7 @@ pub fn j17_enable() {
 #[must_use]
 pub fn j17_snapshot() -> String {
     let r = std::sync::atomic::Ordering::Relaxed;
-    let pairs: [(&str, &std::sync::atomic::AtomicU64); 65] = [
+    let pairs: [(&str, &std::sync::atomic::AtomicU64); 67] = [
         ("prop_lookup", &J17_PROP_LOOKUP),
         ("proto_lvl", &J17_PROTO_LVL),
         ("prop_scan", &J17_PROP_SCAN),
@@ -605,6 +611,8 @@ pub fn j17_snapshot() -> String {
         ("prop_idx_miss", &J17_PROP_IDX_MISS),
         ("prop_idx_build", &J17_PROP_IDX_BUILD),
         ("env_lvl", &J17_ENV_LVL),
+        ("bnd_canon", &J17_BND_CANON),
+        ("bnd_extra", &J17_BND_EXTRA),
         ("env_gets", &J17_ENV_GETS),
         ("res_hit", &J17_RES_HIT),
         ("res_miss", &J17_RES_MISS),
