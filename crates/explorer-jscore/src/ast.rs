@@ -514,25 +514,41 @@ pub enum FnBody {
     Deferred(Rc<DeferredBody>),
 }
 
+/// Plage d'un corps différé (JS-C525c) — tokens partagés pour
+/// les sous-flux `${…}` (source relative non sondable), plage
+/// octet **jamais lexée** pour le flux principal : le corps n'est
+/// tokenisé qu'à la matérialisation.
+#[derive(Debug, Clone)]
+pub enum BodySrc {
+    /// Tokens du flux parent partagés — `[start..=end]` délimite
+    /// le `{…}` ; `close` = `close_of` du parent (index globaux).
+    Toks {
+        toks: Rc<[Token]>,
+        start: usize,
+        end: usize,
+        close: Rc<Vec<usize>>,
+    },
+    /// Plage du script parent : `{` à `open_off`/`open_boff`,
+    /// `}` à `open`+corps — `Lexer::at` reprend les positions
+    /// absolues (`off`/`line` exacts pour spans et stacks) ; le
+    /// pull paresseux s'arrête de lui-même au `}` du corps.
+    Range {
+        src: Rc<str>,
+        open_off: usize,
+        open_boff: usize,
+        open_line: usize,
+        open_col: usize,
+    },
+}
+
 /// État d'un corps différé — la matérialisation est unique
 /// (`OnceCell`) et découverte par le même `fn_body` que le chemin
 /// éager (prologue de directives inclus).
 #[derive(Debug, Clone)]
 pub struct DeferredBody {
-    /// Flux de tokens du **script parent**, partagé (V-5b) —
-    /// `[start..=end]` délimite le `{…}` du corps. Le defer ne
-    /// copie plus la tranche : un bump de refcount par corps.
-    pub toks: Rc<[Token]>,
-    /// Index global du `{` d'ouverture dans `toks`.
-    pub start: usize,
-    /// Index global du `}` fermant (inclus) dans `toks`.
-    pub end: usize,
-    /// Table des délimiteurs appariés du flux parent, partagée
-    /// (V-5b) — `close_of` n'est plus reconstruite par corps :
-    /// ses entrées sont des index globaux, valides telles
-    /// quelles puisque `toks`/`pos` restent dans le repère
-    /// parent.
-    pub close: Rc<Vec<usize>>,
+    /// Plage du corps — tokens partagés (sous-flux `${…}`) ou
+    /// source jamais lexée (streaming JS-C525c).
+    pub src: BodySrc,
     /// Mode strict **hérité** au point du defer — le sous-parse
     /// repart de là puis `scan_directives` tranche le strict
     /// effectif (qui a déjà été fixé sur `FnLit.strict` par le

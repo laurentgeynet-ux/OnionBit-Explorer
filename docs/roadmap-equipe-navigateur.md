@@ -12793,3 +12793,12 @@ chaque gain rapporté contre les **deux** archétypes.
   rejouée sans retenir les tokens (placeholders partagés) ;
   `Token.boff` ajouté. Équivalence probe ≡ `close_table`
   vérifiée sur corpus ciblé. Verrous : lang 315, clippy propre.
+- [x] **JS-C525c — lexer pull/streaming (streaming 3/3)** :
+  `Stream` (`Toks::Pull`/`Toks::Eager`) remplace le flux eager ;
+  `probe_body` borne les corps sans les lexer, `DeferredBody`
+  retient `BodySrc::Range` + `}` synthétique aux positions
+  réelles ; re-lexure paresseuse à la matérialisation (corps
+  imbriqués re-diffèrent). Strict/arrow-guard/erreurs lex
+  préservés. Verrous : lang 315, j17_counters 9, c500 32,
+  c502 24, lib 53, clippy + doc propres.
+

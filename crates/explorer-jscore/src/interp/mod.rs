@@ -11581,57 +11581,68 @@ const LIT_ALL: u8 = LIT_USES_ARGS | LIT_MAY_HOIST | LIT_USES_NT;
 /// ou propriété homonyme → flag armé, jamais l'inverse).
 pub(crate) fn compute_lit_flags(lit: &crate::ast::FnLit) -> u8 {
     if let crate::ast::FnBody::Deferred(d) = &lit.body {
-        if d.toks.get(d.start..=d.end).is_none() {
-            return LIT_ALL;
-        }
-        // `(` des paramètres : premier LParen dont la
-        // fermante précède `d.start`. Introuvable (flèche
-        // sans parenthèses `x=>{…}` — pas de défauts
-        // possibles) → plage vide (`open = start`).
-        let mut depth: i32 = 0;
-        let mut open = d.start;
-        for i in (0..d.start).rev() {
-            match d.toks[i].tok {
-                crate::lexer::Tok::P(crate::lexer::P::RParen) => depth += 1,
-                crate::lexer::Tok::P(crate::lexer::P::LParen) => {
-                    depth -= 1;
-                    if depth <= 0 {
-                        open = i;
-                        break;
-                    }
-                }
-                _ => {}
+        // JS-C525c — `BodySrc::Range` : le corps n'a jamais été
+        // lexé → le scan de tokens n'existe pas ; le chemin
+        // `src_text`+span (word-search, identique aux corps
+        // `Parsed`) prend le relais — conservateur et sain.
+        if let crate::ast::BodySrc::Toks {
+            toks, start, end, ..
+        } = &d.src
+        {
+            if toks.get(*start..=*end).is_none() {
+                return LIT_ALL;
             }
-        }
-        let mut f = 0u8;
-        for (i, t) in d.toks[open..=d.end].iter().enumerate() {
-            let gi = open + i;
-            match &t.tok {
-                crate::lexer::Tok::Ident(n) => {
-                    if &**n == "arguments" || &**n == "eval" {
-                        f |= LIT_USES_ARGS;
+            // `(` des paramètres : premier LParen dont la
+            // fermante précède `start`. Introuvable (flèche
+            // sans parenthèses `x=>{…}` — pas de défauts
+            // possibles) → plage vide (`open = start`).
+            let mut depth: i32 = 0;
+            let mut open = *start;
+            for i in (0..*start).rev() {
+                match toks[i].tok {
+                    crate::lexer::Tok::P(crate::lexer::P::RParen) => depth += 1,
+                    crate::lexer::Tok::P(crate::lexer::P::LParen) => {
+                        depth -= 1;
+                        if depth <= 0 {
+                            open = i;
+                            break;
+                        }
                     }
-                    if &**n == "target"
-                        && gi >= 2
-                        && matches!(
-                            d.toks[gi - 2].tok,
-                            crate::lexer::Tok::Kw(crate::lexer::Kw::New)
-                        )
-                        && matches!(
-                            d.toks[gi - 1].tok,
-                            crate::lexer::Tok::P(crate::lexer::P::Dot)
-                        )
-                    {
-                        f |= LIT_USES_NT;
-                    }
+                    _ => {}
                 }
-                crate::lexer::Tok::Kw(
-                    crate::lexer::Kw::Var | crate::lexer::Kw::Function | crate::lexer::Kw::Export,
-                ) => f |= LIT_MAY_HOIST,
-                _ => {}
             }
+            let mut f = 0u8;
+            for (i, t) in toks[open..=*end].iter().enumerate() {
+                let gi = open + i;
+                match &t.tok {
+                    crate::lexer::Tok::Ident(n) => {
+                        if &**n == "arguments" || &**n == "eval" {
+                            f |= LIT_USES_ARGS;
+                        }
+                        if &**n == "target"
+                            && gi >= 2
+                            && matches!(
+                                toks[gi - 2].tok,
+                                crate::lexer::Tok::Kw(crate::lexer::Kw::New)
+                            )
+                            && matches!(
+                                toks[gi - 1].tok,
+                                crate::lexer::Tok::P(crate::lexer::P::Dot)
+                            )
+                        {
+                            f |= LIT_USES_NT;
+                        }
+                    }
+                    crate::lexer::Tok::Kw(
+                        crate::lexer::Kw::Var
+                        | crate::lexer::Kw::Function
+                        | crate::lexer::Kw::Export,
+                    ) => f |= LIT_MAY_HOIST,
+                    _ => {}
+                }
+            }
+            return f;
         }
-        return f;
     }
     let Some(text) = lit.src_text.as_deref() else {
         return LIT_ALL;
