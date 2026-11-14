@@ -1293,42 +1293,40 @@ fn dom_nav_set(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
 /// la voie hôte sert la même valeur sans appel rebouclant.
 /// `true` → `NodeHost::get`/`set` cèdent à `read_prop`/`write_prop`
 /// qui invoquent le getter/setter scripté.
-/// JS-C517 — `#[track_caller]` : chaque callsite est un site IC.
-/// La réponse dominante (aucune ombre) est servie par
-/// `IcOut::Absent` — chaîne de shapes vérifiée, zéro `find_own`.
-/// `Hit`/`HitChain` ne tranchent pas (une Data ne répond pas à la
-/// question « un Acc auteur existe-t-il plus loin ? ») → `Fall`,
-/// la marche collecte et apprend `Absent` en chaîne complète.
-#[track_caller]
+/// JS-C520 — mémo `(fold shapes chaîne, clé)` : le callsite est
+/// polymorphe en clé (toutes les props DOM) — le fold couvre la
+/// chaîne entière, une mutation sur n'importe quel maillon
+/// change la clé du cache. Borné `SHADOW_MEMO_CAP`.
 fn proto_accessor_shadows(e: &mut Engine, id: ObjId, key: &str) -> bool {
-    let site = std::ptr::from_ref(std::panic::Location::caller()) as usize;
-    let mut armed = false;
-    if !e.ic_off {
-        match e.ic_hit(site, id, key) {
-            crate::interp::IcOut::Absent => return false,
-            crate::interp::IcOut::Bail => {}
-            _ => armed = true,
-        }
-    }
+    // Phase 1 — collecte des maillons + fold des shapes (borne 32
+    // — la chaîne DOM est courte, un cycle hostile ne boucle pas).
     let mut cur = match e.heap.obj(id) {
         Some(o) => o.proto.clone(),
         None => return false,
     };
-    // `links` exclut la tête : la question ne dépend que des
-    // protos (JS-C517b — l'inclure désarmait le site à vie,
-    // expandos DOM → shape polymorphe).
     let mut links: Vec<ObjId> = Vec::new();
-    let mut complete = false;
-    // Borne 32 — la chaîne DOM est courte ; un cycle proto
-    // hostile ne doit pas boucler (conforme `find_prop`).
+    let mut fold: u64 = 0x9E37_79B9_7F4A_7C15;
     for _ in 0..32 {
-        let Value::Obj(cid) = cur else {
-            complete = true;
+        let Value::Obj(cid) = cur else { break };
+        links.push(cid);
+        if let Some(o) = e.heap.obj(cid) {
+            fold = fold.wrapping_mul(0x1000_0000_01B3).wrapping_add(o.shape());
+            cur = o.proto.clone();
+        } else {
+            links.pop();
             break;
-        };
-        if armed {
-            links.push(cid);
         }
+    }
+    let memo_key = (
+        fold,
+        (crate::intern(key).as_ptr() as usize as u64) ^ (key.len() as u64) << 48,
+    );
+    if let Some(&b) = e.shadow_memo.get(&memo_key) {
+        return b;
+    }
+    // Phase 2 — marche `find_own` (une seule fois par
+    // (chaîne-shape, clé) distincts).
+    let authored_check = |e: &mut Engine, cid: ObjId| -> bool {
         if let Some(crate::heap::Prop::Acc { get, set, .. }) = e.find_own(cid, key) {
             let authored = |v: Value| match v {
                 Value::Obj(fid) => matches!(
@@ -1339,23 +1337,26 @@ fn proto_accessor_shadows(e: &mut Engine, id: ObjId, key: &str) -> bool {
                 ),
                 _ => false,
             };
-            if authored(get) || authored(set) {
-                return true;
-            }
+            return authored(get) || authored(set);
         }
-        cur = match e.heap.obj(cid) {
-            Some(o) => o.proto.clone(),
-            None => break,
-        };
+        false
+    };
+    let mut answer = false;
+    for &cid in &links {
+        if authored_check(e, cid) {
+            answer = true;
+            break;
+        }
     }
-    // `None` de `heap.obj` = maillon mort → chaîne tronquée, pas
-    // de learn (`complete` resté faux — le `break` ci-dessus
-    // n'a pas posé le drapeau).
-    if armed && complete {
-        e.ic_learn(site, key, &links, false, true);
+    if e.shadow_memo.len() >= SHADOW_MEMO_CAP {
+        e.shadow_memo.clear();
     }
-    false
+    e.shadow_memo.insert(memo_key, answer);
+    answer
 }
+
+/// JS-C520 — borne de la mémo `proto_accessor_shadows`.
+const SHADOW_MEMO_CAP: usize = 8192;
 
 /// Getter d'accesseur de navigation prototype — `bound[0]` = nom
 /// de prop, `this` = le nœud (`desc.get.call(el)`, `ShadyDOM`).

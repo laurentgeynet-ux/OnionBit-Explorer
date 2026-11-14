@@ -12757,3 +12757,7 @@ chaque gain rapporté contre les **deux** archétypes.
   partir de `id.proto` (tête polymorphe exclue — N5.18 :
   l'inclure désarmait le site à vie) ; `ic_learn` paramétré
   `proto_only`. Verrous : lang 315 ×3, clippy propre.
+- [x] **JS-C520 — mémo `(fold,clé)` shadow** : le callsite est
+  polymorphe en clé — hors modèle IC ; `shadow_memo` fold-shapes
+  × clé internée, cap 8192 ; la marche `find_own` ne paie qu'une
+  fois par (chaîne-shape, clé). Verrous : lang 315 ×2, clippy.

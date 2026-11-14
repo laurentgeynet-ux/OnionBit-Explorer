@@ -955,6 +955,12 @@ pub struct Engine {
     /// `EXPLORER_IC_VERIFY=1` revérifie chaque hit par
     /// `find_prop` (diagnostic, ~2× le coût de lookup).
     pub(crate) ic_map: std::collections::HashMap<usize, IcEnt>,
+    /// JS-C520 — mémo `(fold shapes chaîne proto, clé internée)
+    /// → bool` de `proto_accessor_shadows` : le site est poly-
+    /// morphe en clé (toutes les props DOM au même callsite) —
+    /// le modèle IC « 1 site = 1 entrée » ne couvre pas cette
+    /// question bi-dimensionnelle (vol N5.19).
+    pub(crate) shadow_memo: std::collections::HashMap<(u64, u64), bool>,
     /// Kill-switch IC (`EXPLORER_NO_IC=1`) — A/B en vol sans
     /// rebuild, précédent `resolve_off` (JS-C490c).
     pub(crate) ic_off: bool,
@@ -1515,6 +1521,7 @@ impl Engine {
             resolved_guard: Vec::new(),
             resolved_envs: std::collections::HashMap::new(),
             ic_map: std::collections::HashMap::new(),
+            shadow_memo: std::collections::HashMap::new(),
             ic_off: std::env::var("EXPLORER_NO_IC").is_ok_and(|v| v == "1"),
             ic_verify: std::env::var("EXPLORER_IC_VERIFY").is_ok_and(|v| v == "1"),
             lowered_suspend_cache: std::collections::HashMap::new(),
