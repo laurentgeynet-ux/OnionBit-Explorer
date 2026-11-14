@@ -440,7 +440,7 @@ impl Lexer<'_> {
                     self.number()?
                 }
                 Some('#') => self.private_name()?,
-                Some('"' | '\'') => Tok::Str(self.string()?.into()),
+                Some('"' | '\'') => Tok::Str(self.string()?),
                 Some('`') => self.template()?,
                 Some('/') if expect_operand => self.regex_lit()?,
                 Some(_) => Tok::P(self.punct()?),
@@ -977,15 +977,36 @@ impl Lexer<'_> {
             .map_err(|_| self.err(format!("malformed number literal `{s}`")))
     }
 
-    fn string(&mut self) -> Result<String> {
+    fn string(&mut self) -> Result<std::rc::Rc<str>> {
         let quote = self.bump(); // opening quote
-        let mut out = String::new();
+                                 // JS-C523 — fast-path : la majorité des chaînes n'a ni
+                                 // échappe ni terminateur — le scan byte-level jusqu'à la
+                                 // quote fermante sert la slice `src` en une alloc `Rc`
+                                 // (zéro `peek`/`bump` par char). `\`, newline, non-ASCII
+                                 // ou EOF → chemin général amorcé du run ASCII consumé.
+        let start_b = self.byte_pos;
+        let q = quote.map_or(0, |c| if (c as u32) < 0x80 { c as u8 } else { 0 });
+        let bs = self.src.as_bytes();
+        while let Some(&b) = bs.get(self.byte_pos) {
+            if b == q {
+                let s = &self.src[start_b..self.byte_pos];
+                self.bump(); // quote fermante — compteurs via bump
+                return Ok(s.into());
+            }
+            if matches!(b, b'\\' | b'\n' | b'\r') || b >= 0x80 {
+                break;
+            }
+            self.byte_pos += 1;
+            self.pos += 1;
+            self.col += 1;
+        }
+        let mut out = String::from(&self.src[start_b..self.byte_pos]);
         loop {
             match self.bump() {
                 None => return Err(self.err("unterminated string literal")),
                 // ES2019 : LS/PS bruts sont permis ; LF/CR non.
                 Some('\n' | '\r') => return Err(self.err("newline in string literal")),
-                Some(c) if Some(c) == quote => return Ok(out),
+                Some(c) if Some(c) == quote => return Ok(out.into()),
                 Some('\\') => match self.bump() {
                     None => return Err(self.err("unterminated string escape")),
                     // `\` + `<CR><LF>` = UNE LineTerminatorSequence —

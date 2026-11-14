@@ -12774,3 +12774,7 @@ chaque gain rapporté contre les **deux** archétypes.
   boucle octet pour idents (ASCII exact) + bulk-skip espace/tab
   — `peek`+`bump` par char supprimé des classes dominantes.
   Verrous : lang 315 ×2, clippy propre.
+- [x] **JS-C523 — `string()` byte-scan + slice `Rc`** : chaînes
+  sans échappe servies par scan octet → `Rc<str>` direct ; le
+  chemin général (échappes/newline) amorce du run ASCII.
+  Verrous : lang 315, clippy propre.
