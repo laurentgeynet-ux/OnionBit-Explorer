@@ -7332,7 +7332,12 @@ impl Engine {
     /// — la clé ne change pas d'un niveau à l'autre (avant :
     /// 1 parse par `find_own` × niveau + ×2-3 par niveau
     /// Array/`args_map`/`TypedArray`).
+    /// JS-C513 — `#[track_caller]` : sous `j17_on`, chaque
+    /// invocation est attribuée à son callsite `file:line`
+    /// (`foai:` du snapshot) — désarmé = un appel + branche.
+    #[track_caller]
     fn find_own_ai(&mut self, id: ObjId, key: &str, ai: Option<usize>) -> Option<Prop> {
+        crate::j17_foai_site(std::panic::Location::caller());
         crate::j17_tick(&crate::J17_PROP_LOOKUP);
         // `arguments` mappé : l'indice renvoie au slot env du
         // paramètre formel (spec `MappedArgumentsObject` [[Get]]).

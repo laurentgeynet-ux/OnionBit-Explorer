@@ -12727,3 +12727,8 @@ chaque gain rapporté contre les **deux** archétypes.
   (dominant : aucune ombre) ; `Hit` non servable (tête/proto
   indistinguables) → `Fall` ; learn de l'absent seul. Verrous :
   lang 315 ×3.
+- [x] **JS-C513 — attribution `find_own_ai` par callsite** :
+  `#[track_caller]` + `Location` `file:line` → `foai:` top-12
+  au snapshot (N5.12 : le résiduel 33 % n'est PAS
+  host-shadowed — cette sonde le nomme avant le cran suivant).
+  Télémétrie désarmée par défaut. Verrous : lang 315 ×3.

@@ -544,3 +544,19 @@ fn c509_scan_attrib_emits() {
     assert!(snap.contains("pl_get="), "pl_get attendu : {snap}");
     assert!(snap.contains("pl_has="), "pl_has attendu : {snap}");
 }
+
+/// JS-C513 — `foai:` attribue les `find_own_ai` par callsite
+/// `file:line` dans le snapshot.
+#[test]
+fn c513_foai_attrib_emits() {
+    let _g = IC_LOCK
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    explorer_jscore::j17_enable();
+    assert_eq!(
+        eval("var o={a:1};var s=0;for(var i=0;i<50;i++){if(o.hasOwnProperty('a'))s++;}s"),
+        "50"
+    );
+    let snap = explorer_jscore::j17_snapshot();
+    assert!(snap.contains("foai:"), "foai attendu : {snap}");
+}

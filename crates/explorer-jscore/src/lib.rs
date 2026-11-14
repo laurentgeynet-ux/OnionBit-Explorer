@@ -581,6 +581,22 @@ pub fn j17_snapshot() -> String {
         }
         out.push_str(&format!("binop:{bins}"));
     }
+    // JS-C513 — top-12 callsites `find_own_ai` (`foai:f:l=n,…`).
+    let mut foai: Vec<(u64, String)> =
+        J17_FOAI_SITES.with(|m| m.borrow().values().map(|(l, n)| (*n, l.clone())).collect());
+    foai.sort_unstable_by_key(|a| std::cmp::Reverse(a.0));
+    if !foai.is_empty() {
+        let joined = foai
+            .iter()
+            .take(12)
+            .map(|(n, l)| format!("{l}={n}"))
+            .collect::<Vec<_>>()
+            .join(",");
+        if !out.is_empty() {
+            out.push(' ');
+        }
+        out.push_str(&format!("foai:{joined}"));
+    }
     out
 }
 
@@ -597,6 +613,32 @@ thread_local! {
     /// `j17_on()` (sonde V-3c), jamais lu hors de la sonde.
     static J17_PARSE_SEEN: std::cell::RefCell<std::collections::HashSet<u64>> =
         std::cell::RefCell::new(std::collections::HashSet::new());
+    /// JS-C513 — attribution `find_own_ai` par callsite interne :
+    /// `Location::caller()` (`#[track_caller]`) → `file:line`
+    /// lisible + volume. Rempli sous `j17_on()` uniquement —
+    /// les callsites sont des `&'static` bornés (quelques
+    /// centaines max).
+    static J17_FOAI_SITES: std::cell::RefCell<
+        std::collections::BTreeMap<usize, (String, u64)>,
+    > = const { std::cell::RefCell::new(std::collections::BTreeMap::new()) };
+}
+
+/// JS-C513 — compte une invocation `find_own_ai` attribuée à son
+/// callsite Rust (le résiduel `pl_*` 33 % du vol N5.11 est
+/// anonyme : envs globaux, invariants proxy, JSON, host-shadow —
+/// cette sonde le nomme avant tout cran supplémentaire).
+pub(crate) fn j17_foai_site(loc: &'static std::panic::Location<'static>) {
+    if !j17_on() {
+        return;
+    }
+    let site = std::ptr::from_ref(loc) as usize;
+    J17_FOAI_SITES.with(|m| {
+        let mut m = m.borrow_mut();
+        let e = m
+            .entry(site)
+            .or_insert_with(|| (format!("{}:{}", loc.file(), loc.line()), 0));
+        e.1 += 1;
+    });
 }
 
 /// Sonde V-3c à l'entrée de `parse_in`/`parse_module_in` :
