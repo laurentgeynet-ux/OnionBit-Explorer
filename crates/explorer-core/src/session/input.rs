@@ -630,7 +630,7 @@ impl Session {
     ///
     /// # Errors
     /// `UnknownTab`/`EmptyDocument` ou l'erreur de
-    /// [`try_submit`](Self::try_submit) (validation, events).
+    /// `try_submit` (validation, events).
     pub fn submit_ref(
         &mut self,
         tab: TabId,
