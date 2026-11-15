@@ -956,6 +956,9 @@ dependencies = [
 name = "explorer-cli"
 version = "0.2.0"
 dependencies = [
+ "async-trait",
+ "axum",
+ "explorer-agent",
  "explorer-common",
  "explorer-core",
  "explorer-css",
@@ -966,8 +969,11 @@ dependencies = [
  "explorer-layout",
  "explorer-net",
  "explorer-render",
+ "explorer-test-support",
+ "futures-util",
  "serde_json",
  "tokio",
+ "tokio-tungstenite",
  "tracing-subscriber",
 ]
 

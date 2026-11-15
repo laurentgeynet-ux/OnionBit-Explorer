@@ -427,8 +427,10 @@ async fn dom_live(url: &str) -> ExitCode {
     }
 }
 
-/// `mcp [port]` — serveur MCP stdio qui wrappe l'API REST du
-/// daemon (`--port` attendu : 9377 humain, 9385 agent-flight).
+/// `mcp [port]` — adaptateur MCP stdio ↔ EAP : chaque outil
+/// est traduit en verbe EAP sur le WebSocket `/agent` du
+/// daemon (ADR-0035 — `--port` attendu : 9377 humain, 9385
+/// agent-flight).
 fn mcp_main(port: &str) -> ExitCode {
     let Ok(p) = port.parse::<u16>() else {
         eprintln!("mcp : port invalide '{port}'");

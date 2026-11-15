@@ -7681,8 +7681,15 @@ MCP = adaptateur, jamais la base.
   jointure `(index, génération)` — refs stables par
   dédoublonnage des handles, `since` inconnu → snapshot complet.
   13 tests socket réel + unitaire diff.
-- [ ] **Étape 246. EAP-E4 : adaptateur MCP** — `explorer-cli mcp`
-  bascule REST→EAP, vols agents migrés.
+- [x] **Étape 246. EAP-E4 : adaptateur MCP** — `explorer-cli mcp`
+  bascule REST→EAP, vols agents migrés. **Livrée (`nav/eap`)** :
+  pont stdio ↔ WS `/agent` (sous-protocole `eap/1`, clé
+  `EXPLORER_API_KEY` → `?key=`), `session.open` profil
+  input+eval au démarrage, 21 outils mappés sur les verbes
+  (dont `snapshot`/`select`/`click` par ref, `wait_for`,
+  `screenshot` trame binaire → fichier), erreurs typées EAP
+  → `isError`. Test bout en bout : subprocess réel contre le
+  routeur agent.
 
 ## Piste JS (JS-C26+) — spécialiste `explorer-jscore`
 
