@@ -260,6 +260,7 @@ impl Session {
             expanded_inline,
             lazy_imgs,
             mut eng,
+            js_doc_html,
             fonts,
             arrival_classic,
             arrival_evals,
@@ -310,6 +311,10 @@ impl Session {
             );
         }
         if let Some(entry) = self.tabs.get_mut(&tab) {
+            // Page statique (étape 261) : la source reste
+            // pour un `eval` paresseux ; un moteur vivant
+            // la rend inutile.
+            entry.js_doc_html = js_doc_html;
             entry.js = eng;
             // CAP-185 : `load`/`error` des `<link rel=stylesheet>`
             // statiques — livrés **après** les scripts du

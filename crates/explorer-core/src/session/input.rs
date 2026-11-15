@@ -83,8 +83,19 @@ impl Session {
         // dispatch échouerait à `js = None` — l'entrée
         // rejouée à la réinsertion garde sa cible au lieu
         // de mourir silencieusement.
+        // `dom`/`tree` détachés sans `paint_detached` : fenêtre
+        // d'apply (payload reprise, journal rejeté, re-parse en
+        // vol) hors la garde historique — un clic qui tombait
+        // dedans mourait à `EmptyDocument` (« document sans
+        // élément ») alors que le document revient. L'URL
+        // chargée distingue « apply en vol » de « jamais
+        // navigué » — le premier diffère, le second échoue
+        // honnêtement plus bas.
         if self.tabs.get(&tab).is_some_and(|e| {
-            e.paint_detached || e.js_detached.is_some() || !e.deferred_inputs.is_empty()
+            e.paint_detached
+                || e.js_detached.is_some()
+                || !e.deferred_inputs.is_empty()
+                || (e.url.is_some() && (e.dom.is_none() || e.tree.is_none()))
         }) {
             let is_scroll = matches!(ev, InputEvent::Scroll { .. });
             self.defer_input(tab, ev);
@@ -95,12 +106,18 @@ impl Session {
             // est la projection de la file, rejouée telle
             // quelle à la livraison.
             if is_scroll {
+                let proj = self.projected_scroll(tab);
                 return Ok(InputOutcome::Scrolled {
-                    scroll_y: self.projected_scroll(tab),
+                    scroll_y: proj,
+                    // < 0,5 px = aucun mouvement visible.
+                    moved: (proj - self.tabs.get(&tab).map_or(0.0, |e| e.scroll_y)).abs() > 0.5,
                 });
             }
-            tracing::info!(tab, "input différé — paint en vol, rejeté comme ignored");
-            return Ok(InputOutcome::Ignored);
+            // `Deferred`, pas `Ignored` (étape 257, retour
+            // terrain PIPE) : l'entrée est enfilée et sera
+            // rejouée à la livraison — dire `ignored` alors
+            // que le clic va naviguer ment à l'agent.
+            return Ok(InputOutcome::Deferred);
         }
         match ev {
             InputEvent::Key { key, mods } => {
@@ -156,6 +173,7 @@ impl Session {
                 if let Some(entry) = self.tabs.get_mut(&tab) {
                     entry.popup = None;
                 }
+                let before = self.tabs.get(&tab).map_or(0.0, |t| t.scroll_y);
                 if !self.dispatch_wheel(tab) {
                     self.scroll_by(tab, dy)?;
                     // `scroll` niveau document (non annulable).
@@ -163,6 +181,10 @@ impl Session {
                 }
                 Ok(InputOutcome::Scrolled {
                     scroll_y: self.tabs.get(&tab).map_or(0.0, |t| t.scroll_y),
+                    // Page non scrollable / borne atteinte :
+                    // `moved: false` — l'agent lit « clampé »
+                    // au lieu d'un `scrolled` mensonger.
+                    moved: (self.tabs.get(&tab).map_or(0.0, |t| t.scroll_y) - before).abs() > 0.5,
                 })
             }
             InputEvent::MouseMove { x, y } => self.handle_mouse_move(tab, x, y),
@@ -607,6 +629,106 @@ impl Session {
             self.repaint(tab)?;
             Ok((false, Vec::new()))
         }
+    }
+
+    /// `input.submit{ref}` (étape 259) — soumission
+    /// déterministe du `<form>` englobant le nœud
+    /// `(index, generation)` (validation incluse, voie
+    /// `try_submit` complète — pas le détour `key Enter`
+    /// qui peut échouer en `unfocused`). `None` = ref
+    /// obsolète ou pas d'ancêtre `<form>` →
+    /// `not_actionable` côté agent.
+    ///
+    /// # Errors
+    /// `UnknownTab`/`EmptyDocument` ou l'erreur de
+    /// `try_submit` (validation, events).
+    pub fn submit_ref(
+        &mut self,
+        tab: TabId,
+        index: u32,
+        generation: u32,
+    ) -> Result<Option<InputOutcome>, CoreError> {
+        let form = {
+            let entry = self.tabs.get(&tab).ok_or(CoreError::UnknownTab(tab))?;
+            let dom = entry.dom.as_ref().ok_or(CoreError::EmptyDocument)?;
+            let mut cur = Some(NodeId::from_parts(index, generation));
+            let mut form = None;
+            while let Some(n) = cur {
+                if dom.tag_name(n).is_ok_and(|t| t == "form") {
+                    form = Some(n);
+                    break;
+                }
+                cur = dom.parent(n).ok().flatten();
+            }
+            match form {
+                Some(f) => f,
+                None => return Ok(None),
+            }
+        };
+        self.try_submit(tab, form, None, false).map(Some)
+    }
+
+    /// `input.select_option{ref,value|index}` (étape 259) —
+    /// choix déterministe dans un `<select>` sans passer
+    /// par le popup : `choose_option` + miroir JS
+    /// (`option.selected` à jour avant `change`) + events
+    /// `input`/`change` + relayout — même effet de bord que
+    /// `popup_choose`. `None` = pas un `<select>` ou option
+    /// introuvable (ni `index` ni `value` ne matchent).
+    ///
+    /// # Errors
+    /// `UnknownTab`, `EmptyDocument` ou l'erreur du
+    /// relayout déclenché par le choix.
+    pub fn select_option(
+        &mut self,
+        tab: TabId,
+        index: u32,
+        generation: u32,
+        value: Option<&str>,
+        row: Option<usize>,
+    ) -> Result<Option<InputOutcome>, CoreError> {
+        let (path, attrs) = {
+            let entry = self.tabs.get_mut(&tab).ok_or(CoreError::UnknownTab(tab))?;
+            let dom = entry.dom.as_mut().ok_or(CoreError::EmptyDocument)?;
+            let sel = NodeId::from_parts(index, generation);
+            if !dom.tag_name(sel).is_ok_and(|t| t == "select") {
+                return Ok(None);
+            }
+            let options = descendant_elements(dom, sel, "option");
+            let idx = row.or_else(|| {
+                value.and_then(|v| {
+                    options.iter().position(|&o| {
+                        dom.attribute_str(o, "value").ok().flatten().map_or_else(
+                            || dom.text_content(o).is_ok_and(|t| t.trim() == v),
+                            |a| a == v,
+                        )
+                    })
+                })
+            });
+            let Some(idx) = idx.filter(|&i| i < options.len()) else {
+                return Ok(None);
+            };
+            choose_option(dom, sel, idx);
+            let attrs = options
+                .iter()
+                .enumerate()
+                .filter_map(|(i, &o)| {
+                    element_path(dom, o)
+                        .map(|p| (p, "selected".to_string(), (i == idx).then(String::new)))
+                })
+                .collect::<Vec<_>>();
+            (element_path(dom, sel), attrs)
+        };
+        for m in attrs {
+            self.push_mirror_attr(tab, m);
+        }
+        if let Some(path) = &path {
+            self.dispatch_path_event(tab, "input", path);
+            self.dispatch_path_event(tab, "change", path);
+        }
+        self.relayout(tab)?;
+        self.emit_invalidated(tab);
+        Ok(Some(InputOutcome::Edited))
     }
 
     /// Séquence de soumission complète (HTML §4.10.22) —

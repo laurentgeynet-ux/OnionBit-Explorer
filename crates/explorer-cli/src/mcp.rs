@@ -485,14 +485,21 @@ fn daemon_exe() -> Option<std::path::PathBuf> {
 /// Le profil est exigé : dupliquer le profil par défaut
 /// mourrait sur le verrou — autant le dire avant de fork.
 async fn spawn_daemon(args: &Value) -> Result<Value, String> {
-    let profile = args["profile"]
+    // Règle canonique (étape 262) : `profile` est un NOM —
+    // `<nom>` → `Explorer-data/profiles/<nom>`, `vol:<nom>` →
+    // `Explorer-data/vols/<nom>/profile`. Les chemins sont
+    // refusés : rien ne sort du répertoire projet.
+    let arg = args["profile"]
         .as_str()
-        .ok_or("daemon_spawn : `profile` requis (répertoire dédié)")?;
+        .ok_or("daemon_spawn : `profile` requis (nom canonique)")?;
+    let profile = explorer_core::paths::resolve_profile_name(arg).ok_or_else(|| {
+        format!("daemon_spawn : `profile` doit être un nom (`<nom>` ou `vol:<nom>`), pas un chemin — {arg:?}")
+    })?;
     let exe = daemon_exe().ok_or("explorer-daemon introuvable (à côté du cli ni PATH)")?;
     let port = args["port"].as_u64().unwrap_or(0);
     let mut cmd = std::process::Command::new(exe);
     cmd.arg("--profile")
-        .arg(profile)
+        .arg(&profile)
         .arg("--port")
         .arg(port.to_string());
     if let Some(n) = args["name"].as_str() {
@@ -742,10 +749,26 @@ fn act_tools() -> Value {
             )
         ),
         t(
-            "click_at",
-            "Clic coordonnées — dégradé {tab,x,y}",
+            "submit",
+            "Soumet le <form> englobant la ref {tab,ref}",
             obj(
-                json!({"tab":{"type":"integer"},"x":{"type":"number"},"y":{"type":"number"}}),
+                json!({"tab":{"type":"integer"},"ref":{"type":"string"}}),
+                &["tab", "ref"]
+            )
+        ),
+        t(
+            "select_option",
+            "Choisit une option du <select> {tab,ref,value?|index?}",
+            obj(
+                json!({"tab":{"type":"integer"},"ref":{"type":"string"},"value":{"type":"string"},"index":{"type":"integer"}}),
+                &["tab", "ref"]
+            )
+        ),
+        t(
+            "click_at",
+            "Clic coordonnées — dégradé {tab,x,y,space?}",
+            obj(
+                json!({"tab":{"type":"integer"},"x":{"type":"number"},"y":{"type":"number"},"space":{"type":"string"}}),
                 &["tab", "x", "y"]
             )
         ),
@@ -783,9 +806,9 @@ fn act_tools() -> Value {
         ),
         t(
             "wait_for",
-            "Attend {tab,kind:commit|frame|selector|stable,selector?,timeout_ms?}",
+            "Attend {tab,kind:commit|frame|selector|stable|network_idle,selector?,quiet_ms?,timeout_ms?}",
             obj(
-                json!({"tab":{"type":"integer"},"kind":{"type":"string"},"selector":{"type":"string"},"timeout_ms":{"type":"integer"}}),
+                json!({"tab":{"type":"integer"},"kind":{"type":"string"},"selector":{"type":"string"},"quiet_ms":{"type":"integer"},"timeout_ms":{"type":"integer"}}),
                 &["tab", "kind"]
             )
         ),
@@ -799,9 +822,10 @@ fn act_tools() -> Value {
         ),
         t(
             "eval",
-            "JS top-level {tab,expr} → valeur JSON (≤64 Ko)",
+            "JS {tab,expr,ref?,timeout_ms?} → valeur JSON (≤64 Ko)",
             obj(
-                json!({"tab":{"type":"integer"},"expr":{"type":"string"}}),
+                json!({"tab":{"type":"integer"},"expr":{"type":"string"},"ref":{"type":"string"},
+                       "timeout_ms":{"type":"integer"}}),
                 &["tab", "expr"]
             )
         ),
@@ -839,9 +863,19 @@ fn engine_tools() -> Value {
         ),
         t(
             "engine_cascade",
-            "Verdicts de cascade d'un élément {tab,ref}",
+            "Verdicts de cascade d'un élément {tab,ref,props?|declared_only?}",
             obj(
-                json!({"tab":{"type":"integer"},"ref":{"type":"string"}}),
+                json!({"tab":{"type":"integer"},"ref":{"type":"string"},
+                       "props":{"type":"array","items":{"type":"string"}},
+                       "declared_only":{"type":"boolean"}}),
+                &["tab", "ref"]
+            )
+        ),
+        t(
+            "describe",
+            "Tag/attrs/rect/texte/valeur d'une ref sans re-snapshot {tab,ref,max_text?}",
+            obj(
+                json!({"tab":{"type":"integer"},"ref":{"type":"string"},"max_text":{"type":"integer"}}),
                 &["tab", "ref"]
             )
         ),
@@ -960,7 +994,7 @@ fn to_eap(name: &str, args: &Value) -> Option<(&'static str, Value)> {
         ),
         "click_at" => (
             "input.click_at",
-            json!({"tab": tab, "x": args["x"], "y": args["y"]}),
+            json!({"tab": tab, "x": args["x"], "y": args["y"], "space": args["space"]}),
         ),
         "type" => (
             "input.type",
@@ -969,6 +1003,11 @@ fn to_eap(name: &str, args: &Value) -> Option<(&'static str, Value)> {
                    "opts": {"timeout_ms": args["timeout_ms"]}}),
         ),
         "hover" => ("input.hover", json!({"tab": tab, "ref": elem})),
+        "submit" => ("input.submit", json!({"tab": tab, "ref": elem})),
+        "select_option" => (
+            "input.select_option",
+            json!({"tab": tab, "ref": elem, "value": args["value"], "index": args["index"]}),
+        ),
         "scroll" => (
             "input.scroll",
             json!({"tab": tab, "ref": args["ref"].as_str(), "dy": args["dy"]}),
@@ -977,9 +1016,14 @@ fn to_eap(name: &str, args: &Value) -> Option<(&'static str, Value)> {
         "wait_for" => (
             "wait.for",
             json!({"tab": tab, "kind": args["kind"], "selector": args["selector"],
+                   "quiet_ms": args["quiet_ms"],
                    "timeout_ms": args["timeout_ms"].as_u64().unwrap_or(5000)}),
         ),
-        "eval" => ("eval.run", json!({"tab": tab, "expr": args["expr"]})),
+        "eval" => (
+            "eval.run",
+            json!({"tab": tab, "expr": args["expr"], "ref": args["ref"],
+                   "timeout_ms": args["timeout_ms"]}),
+        ),
         "dom" => ("dom.get", json!({"tab": tab})),
         "console" => ("console.get", json!({"tab": tab, "limit": args["limit"]})),
         "engine_layout" => ("engine.layout", json!({"tab": tab})),
@@ -988,7 +1032,15 @@ fn to_eap(name: &str, args: &Value) -> Option<(&'static str, Value)> {
             json!({"tab": tab, "reset": args["reset"]}),
         ),
         "engine_paint_stats" => ("engine.paint_stats", json!({"tab": tab})),
-        "engine_cascade" => ("engine.cascade", json!({"tab": tab, "ref": args["ref"]})),
+        "engine_cascade" => (
+            "engine.cascade",
+            json!({"tab": tab, "ref": args["ref"], "props": args["props"],
+                   "declared_only": args["declared_only"]}),
+        ),
+        "describe" => (
+            "describe",
+            json!({"tab": tab, "ref": args["ref"], "max_text": args["max_text"]}),
+        ),
         "engine_anomalies" => ("engine.anomalies", json!({"tab": tab, "max": args["max"]})),
         "engine_j17" => ("engine.j17", json!({"tab": tab})),
         "net_events" => (

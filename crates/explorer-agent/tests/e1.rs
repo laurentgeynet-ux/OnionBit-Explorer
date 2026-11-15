@@ -375,10 +375,13 @@ async fn engine_introspection() {
     let r = a
         .call("engine.pipeline", json!({"tab": tab, "reset": true}))
         .await;
-    assert_eq!(
-        r["result"]["phases"]["flow.raster"]["n"], n_before,
-        "le take rend l'intervalle clos : {r}"
-    );
+    // `>=` et non `==` : une raster née entre les deux appels
+    // (fonte, image tardive) est incluse dans l'intervalle
+    // clos — le take capture tout ce qui a couru jusqu'à lui.
+    let take_n = r["result"]["phases"]["flow.raster"]["n"]
+        .as_u64()
+        .expect("n du take");
+    assert!(take_n >= n_before, "le take rend l'intervalle clos : {r}");
     let r = a
         .call("engine.pipeline", json!({"tab": tab, "reset": true}))
         .await;
@@ -459,7 +462,17 @@ async fn engine_introspection() {
 #[tokio::test]
 async fn engine_cascade_verdicts() {
     let (mut a, srv) = connect().await;
-    open(&mut a).await;
+    // `handles` exigée par `describe` ; le profil `eval`
+    // autorise `eval.run{ref}`.
+    a.call(
+        "session.open",
+        json!({"protocol": "eap/1", "capabilities": [
+            "snapshot", "wait_commit", "input", "eval", "frames",
+            "console_log", "dom", "tabs", "events", "engine", "net",
+            "handles"
+        ], "profile":{"eval": true}}),
+    )
+    .await;
     let r = a.call("tab.open", json!({})).await;
     let tab = r["result"]["tab"].as_u64().expect("tab");
     let r = a
@@ -492,6 +505,24 @@ async fn engine_cascade_verdicts() {
             || d["verdict"] == "initial"),
         "un verdict posé attendu : {r}"
     );
+    // `declared_only` filtre le bruit — un verdict posé
+    // reste, le tapis de `initial`/`inherited` part.
+    let r = a
+        .call(
+            "engine.cascade",
+            json!({"tab": tab, "ref": elem_ref, "declared_only": true}),
+        )
+        .await;
+    assert!(r["error"].is_null(), "{r}");
+    let decls2 = r["result"]["declarations"]
+        .as_array()
+        .expect("declarations");
+    assert!(
+        decls2
+            .iter()
+            .all(|d| d["verdict"] != "initial" && d["verdict"] != "inherited"),
+        "declared_only : {r}"
+    );
     let r = a
         .call("engine.cascade", json!({"tab": tab, "ref": "el:999999"}))
         .await;
@@ -500,6 +531,34 @@ async fn engine_cascade_verdicts() {
         .call("engine.cascade", json!({"tab": 999, "ref": elem_ref}))
         .await;
     assert_eq!(r["error"]["code"], -32005);
+    // `describe` — même ref : tag/attrs/rect/texte en un
+    // appel, ref pourrie → -32002 (étape 258-bis).
+    let r = a
+        .call("describe", json!({"tab": tab, "ref": elem_ref}))
+        .await;
+    assert!(r["error"].is_null(), "{r}");
+    assert!(
+        r["result"]["tag"].is_string() && r["result"]["node"]["index"].is_u64(),
+        "{r}"
+    );
+    let r = a
+        .call("describe", json!({"tab": tab, "ref": "el:999999"}))
+        .await;
+    assert_eq!(r["error"]["code"], -32002, "{r}");
+    // `eval{ref}` — la couture passe le chemin DOM ;
+    // verdict honnête : erreur de binding (moteur sans
+    // implémenter `eval_element`) ou -32007 si la fixture
+    // n'arme pas de moteur JS — jamais de faux succès.
+    let r = a
+        .call(
+            "eval.run",
+            json!({"tab": tab, "expr": "el => el.tagName", "ref": elem_ref}),
+        )
+        .await;
+    let honest = r["result"]["error"].is_string()
+        || r["result"]["value"].is_string()
+        || r["error"]["code"] == -32007;
+    assert!(honest, "verdict honnête, pas de faux succès : {r}");
     srv.abort();
 }
 
@@ -509,6 +568,79 @@ const ANOMALY_PAGE: &str = r#"<!doctype html><html><body>
     <div style="display:none"><a href="/g">ghost</a>
     <input type="hidden" name="h"></div>
     <a href="/v">visible</a></body></html>"#;
+
+/// Formulaire minimal — `input.submit`/`input.select_option`
+/// (étape 259).
+const FORM_PAGE: &str = r#"<!doctype html><html><body>
+    <a href="/x">hors form</a>
+    <form><input type="text"><select><option value="a">AA</option><option value="b">BB</option></select><button>envoyer</button></form>
+    </body></html>"#;
+
+#[tokio::test]
+async fn c2_submit_select_option() {
+    let (mut a, srv, _session) = connect_with_html(FORM_PAGE).await;
+    // input + handles requis par les actions ref.
+    a.call(
+        "session.open",
+        json!({"protocol":"eap/1","capabilities":["snapshot","handles","actionable","wait_commit","input","tabs","events"],"profile":{"input":true}}),
+    )
+    .await;
+    let r = a.call("tab.open", json!({})).await;
+    let tab = r["result"]["tab"].as_u64().expect("tab");
+    let r = a
+        .call("nav.goto", json!({"tab": tab, "url": "http://t.local/x"}))
+        .await;
+    assert!(r["error"].is_null(), "{r}");
+    let r = a
+        .call("query.select", json!({"tab": tab, "selector": "select"}))
+        .await;
+    let sel_ref = r["result"]["refs"]
+        .as_array()
+        .and_then(|a| a.first())
+        .and_then(|r| r.as_str())
+        .map(str::to_owned)
+        .expect("ref select");
+    let r = a
+        .call("query.select", json!({"tab": tab, "selector": "a"}))
+        .await;
+    let link_ref = r["result"]["refs"]
+        .as_array()
+        .and_then(|a| a.first())
+        .and_then(|r| r.as_str())
+        .map(str::to_owned)
+        .expect("ref a");
+    // value → choix honnête ; sans value/index → -32602 ;
+    // mauvaise value → -32003.
+    let r = a
+        .call(
+            "input.select_option",
+            json!({"tab": tab, "ref": sel_ref, "value": "b"}),
+        )
+        .await;
+    assert!(r["error"].is_null(), "{r}");
+    let r = a
+        .call("input.select_option", json!({"tab": tab, "ref": sel_ref}))
+        .await;
+    assert_eq!(r["error"]["code"], -32602, "{r}");
+    let r = a
+        .call(
+            "input.select_option",
+            json!({"tab": tab, "ref": sel_ref, "value": "zzz"}),
+        )
+        .await;
+    assert_eq!(r["error"]["code"], -32003, "{r}");
+    // submit sur le <select> (descendant du form) → séquence
+    // complète ; sur le <a> hors form → -32003.
+    let r = a
+        .call("input.submit", json!({"tab": tab, "ref": sel_ref}))
+        .await;
+    assert!(r["error"].is_null(), "{r}");
+    let r = a
+        .call("input.submit", json!({"tab": tab, "ref": link_ref}))
+        .await;
+    assert_eq!(r["error"]["code"], -32003, "{r}");
+    srv.abort();
+}
 
 #[tokio::test]
 async fn engine_anomalies_flague_interactif_sans_boite() {
@@ -537,12 +669,59 @@ async fn engine_anomalies_flague_interactif_sans_boite() {
         .expect("suspect no_box attendu");
     assert_eq!(ghost["tag"], "a");
     assert!(ghost["ref"].as_str().is_some_and(|s| s.starts_with("el:")));
+    // La cause nomme le bloqueur — `display:none` sur
+    // l'ancêtre <div> (étape 263 : distinguer « caché par
+    // design » de « anomalie de boxification »).
+    assert_eq!(ghost["cause"]["cause"], "display:none", "{ghost}");
+    assert_eq!(ghost["cause"]["on"], "ancestor", "{ghost}");
+    assert_eq!(ghost["cause"]["tag"], "div", "{ghost}");
     // L'input hidden n'est PAS flagué (non interactif).
     assert!(!suspects.iter().any(|s| s["tag"] == "input"));
     // La page visible reste un témoin sain.
     assert!(r["result"]["scanned"]["nodes"]
         .as_u64()
         .is_some_and(|n| n > 0));
+    srv.abort();
+}
+
+#[tokio::test]
+async fn not_actionable_nomme_checks_echus() {
+    let (mut a, srv, _session) = connect_with_html(ANOMALY_PAGE).await;
+    a.call(
+        "session.open",
+        json!({"protocol":"eap/1","capabilities":["snapshot","handles","actionable","input","tabs"],"profile":{"input":true}}),
+    )
+    .await;
+    let r = a.call("tab.open", json!({})).await;
+    let tab = r["result"]["tab"].as_u64().expect("tab");
+    let r = a
+        .call("nav.goto", json!({"tab": tab, "url": "http://t.local/x"}))
+        .await;
+    assert!(r["error"].is_null(), "{r}");
+    let r = a
+        .call(
+            "query.select",
+            json!({"tab": tab, "selector": "a[href='/g']"}),
+        )
+        .await;
+    let ghost = r["result"]["refs"]
+        .as_array()
+        .and_then(|a| a.first())
+        .and_then(|r| r.as_str())
+        .map(str::to_owned)
+        .expect("ref ghost");
+    // display:none → `visible` jamais satisfait : le -32003
+    // nomme les checks échus dans `data.failed` (étape 263 —
+    // l'agent n'a plus à rejouer chaque check isolément).
+    let r = a
+        .call(
+            "input.click",
+            json!({"tab": tab, "ref": ghost, "opts": {"timeout_ms": 120}}),
+        )
+        .await;
+    assert_eq!(r["error"]["code"], -32003, "{r}");
+    let failed = r["error"]["data"]["failed"].as_array().expect("failed");
+    assert!(failed.contains(&json!("visible")), "{r}");
     srv.abort();
 }
 
@@ -652,6 +831,15 @@ async fn wait_for_frame_borne() {
         )
         .await;
     assert_eq!(r["error"]["code"], -32004);
+    // network_idle sur onglet sans trafic → calme dès
+    // quiet_ms atteint (étape 258).
+    let r = a
+        .call(
+            "wait.for",
+            json!({"tab": tab, "kind": "network_idle", "quiet_ms": 100, "timeout_ms": 2000}),
+        )
+        .await;
+    assert_eq!(r["result"]["ok"], true);
     srv.abort();
 }
 
@@ -925,6 +1113,9 @@ async fn e3_diff_since() {
         .await;
     assert!(r["result"]["nodes"].is_array(), "{r}");
     assert!(r["result"]["base_rev"].is_null(), "{r}");
+    // Étape 257 — la base demandée mais absente est
+    // signalée : `stale_since` évite la désync invisible.
+    assert_eq!(r["result"]["stale_since"], json!(true), "{r}");
 
     // Étape 254 — `snap_seq` nomme l'émission exacte : la
     // réponse la porte toujours, `since_seq` diff dessus

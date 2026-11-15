@@ -85,25 +85,47 @@ pub(crate) async fn run(
     tab: TabId,
     max: usize,
 ) -> Result<Value, RpcError> {
-    let (entries, report, health) = {
+    /// Nombre de causes `no_box` expliquées — les suivantes
+    /// rendent le suspect sans `cause` (borne règle 13).
+    const CAUSE_CAP: usize = 32;
+    let (entries, report, health, boxes, causes) = {
         let mut s = st.session.lock().await;
         s.reclaim_orphaned_paint(tab);
         let entries = s.snapshot_entries(tab).map_err(RpcError::from)?;
         let report = s.geometry_report(tab);
         let health = s.pipeline_report(tab, false);
-        (entries, report, health)
+        let boxes: HashMap<u32, (f32, f32, f32, f32)> =
+            report.as_ref().map_or_else(HashMap::new, |r| {
+                r.boxes
+                    .iter()
+                    .map(|b| (b.node, (b.x, b.y, b.w, b.h)))
+                    .collect()
+            });
+        // Causes des `interactive_no_box` — nommées ici sous
+        // le même verrou (borné aux premiers suspects : un
+        // mur de `display:none` peut en produire des
+        // centaines, l'explication de cascade n'a de valeur
+        // que sur les premiers).
+        let causes: HashMap<u32, Value> = entries
+            .iter()
+            .filter(|e| interactive(e) && !boxes.contains_key(&e.index))
+            .take(CAUSE_CAP)
+            .filter_map(|e| {
+                s.no_box_cause(tab, e.index, e.generation)
+                    .map(|c| (e.index, c))
+            })
+            .collect();
+        (entries, report, health, boxes, causes)
     };
     let rev = st.rev(tab);
-    let boxes: HashMap<u32, (f32, f32, f32, f32)> =
-        report.as_ref().map_or_else(HashMap::new, |r| {
-            r.boxes
-                .iter()
-                .map(|b| (b.node, (b.x, b.y, b.w, b.h)))
-                .collect()
-        });
+    let ctx = SuspectCtx {
+        boxes: &boxes,
+        report: report.as_ref(),
+        causes: &causes,
+    };
     let mut suspects: Vec<(u8, Value)> = Vec::new();
     for e in &entries {
-        entry_suspects(conn, tab, rev, e, &boxes, report.as_ref(), &mut suspects);
+        entry_suspects(conn, tab, rev, e, &ctx, &mut suspects);
     }
 
     // Santé du moteur — les « anomalies » peuvent être des
@@ -189,32 +211,50 @@ fn health_suspects(h: &Value, suspects: &mut Vec<(u8, Value)>) {
 /// pathologique. La `ref` est allouée sur la révision
 /// courante pour que l'agent puisse enchaîner
 /// (`engine.layout`, `query.select`…).
+/// Lectures partagées de la passe — boîtes par index,
+/// rapport géométrique brut, causes `no_box` pré-calculées.
+struct SuspectCtx<'a> {
+    /// Boîtes posées par index arène.
+    boxes: &'a HashMap<u32, (f32, f32, f32, f32)>,
+    /// Rapport géométrique commis (tailles document).
+    report: Option<&'a explorer_core::GeometryReport>,
+    /// Cause `no_box` par index — absente hors [`CAUSE_CAP`]
+    /// ou si la sonde n'a pas tranché.
+    causes: &'a HashMap<u32, Value>,
+}
+
 fn entry_suspects(
     conn: &mut AgentConn,
     tab: TabId,
     rev: u64,
     e: &SnapshotEntry,
-    boxes: &HashMap<u32, (f32, f32, f32, f32)>,
-    report: Option<&explorer_core::GeometryReport>,
+    ctx: &SuspectCtx<'_>,
     suspects: &mut Vec<(u8, Value)>,
 ) {
+    let SuspectCtx {
+        boxes,
+        report,
+        causes,
+    } = ctx;
     let gbox = boxes.get(&e.index);
     if interactive(e) {
         let Some(&(bx, by, bw, bh)) = gbox else {
             // Rang 0 — interactif sans boîte : le suspect
-            // canonique du « 0×0 » (display:none, ancêtre
-            // non boxifié, élément hors arbre).
-            suspects.push((
-                0,
-                json!({
-                    "kind": "interactive_no_box",
-                    "ref": conn.handles.alloc(tab, e.index, rev),
-                    "tag": e.tag,
-                    "node": label(e),
-                    "depth": e.depth,
-                    "detail": "interactif sans boîte posée — display:none, ancêtre non boxifié ou hors arbre",
-                }),
-            ));
+            // canonique du « 0×0 ». `cause` nomme le coupable
+            // quand la cascade le sait (display:none sur
+            // l'ancêtre `.ITMZ`, hidden…) — étape 263.
+            let mut v = json!({
+                "kind": "interactive_no_box",
+                "ref": conn.handles.alloc(tab, e.index, rev),
+                "tag": e.tag,
+                "node": label(e),
+                "depth": e.depth,
+                "detail": "interactif sans boîte posée — display:none, ancêtre non boxifié ou hors arbre",
+            });
+            if let Some(c) = causes.get(&e.index) {
+                v["cause"] = c.clone();
+            }
+            suspects.push((0, v));
             return;
         };
         if bw < TINY_PX || bh < TINY_PX {

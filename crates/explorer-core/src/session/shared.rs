@@ -768,20 +768,44 @@ pub enum EvalReply {
 /// elle-même reste soumise au budget ops du moteur — une
 /// expression hostile est traitée comme un script hostile.
 pub async fn eval_shared(sess: &tokio::sync::Mutex<Session>, tab: TabId, src: String) -> EvalReply {
+    eval_shared_at(sess, tab, src, None).await
+}
+
+/// [`eval_shared`] scopé à un élément (étape 260) :
+/// `path` = `element_path` de la ref — délégué à
+/// [`JsEngine::eval_element`] (binding `$0`/`el` côté
+/// moteur, erreur honnête tant que non posé).
+pub async fn eval_shared_at(
+    sess: &tokio::sync::Mutex<Session>,
+    tab: TabId,
+    src: String,
+    path: Option<Vec<(String, u32)>>,
+) -> EvalReply {
     if let Ok(mut g) = crate::LAST_DRAIN.lock() {
         *g = "eval";
     }
     let taken = {
         let mut s = sess.lock().await;
-        s.take_js_engine(tab)
+        match s.take_js_engine(tab) {
+            t @ Some(_) => t,
+            // Document statique (étape 261) : le moteur est
+            // installé à la demande depuis la source
+            // conservée — `eval` fonctionne sur page sans
+            // `<script>` ; la pompe périodique, elle, ne
+            // doit pas payer un contexte par battement.
+            None if s.ensure_js_engine(tab) => s.take_js_engine(tab),
+            None => None,
+        }
     };
     let Some((mut eng, max, epoch, sync_ok)) = taken else {
         return EvalReply::Unavailable;
     };
     let out = tokio::task::spawn_blocking(move || {
-        let value = eng
-            .eval_ctx(explorer_js::JS_CTX_TOP, &src, Some("api/eval"))
-            .map_err(|e| e.to_string());
+        let value = match &path {
+            Some(p) => eng.eval_element(explorer_js::JS_CTX_TOP, p, &src, Some("api/eval")),
+            None => eng.eval_ctx(explorer_js::JS_CTX_TOP, &src, Some("api/eval")),
+        }
+        .map_err(|e| e.to_string());
         // L'éval a pu armer timers/microtasks (attribution
         // d'hydratation, setTimeout(0)…) — on les draine pour
         // que la valeur rendue reflète l'état stabilisé.
@@ -975,12 +999,15 @@ pub async fn handle_input_shared(
             let is_scroll = matches!(ev, InputEvent::Scroll { .. });
             s.defer_input(tab, ev);
             if is_scroll {
+                let proj = s.projected_scroll(tab);
                 return Ok(InputOutcome::Scrolled {
-                    scroll_y: s.projected_scroll(tab),
+                    scroll_y: proj,
+                    moved: (proj - s.tabs.get(&tab).map_or(0.0, |e| e.scroll_y)).abs() > 0.5,
                 });
             }
-            tracing::info!(tab, "input différé — paint/js en vol, rejeté comme ignored");
-            return Ok(InputOutcome::Ignored);
+            // `Deferred` — l'entrée est enfilée et sera
+            // rejouée (étape 257), pas abandonnée.
+            return Ok(InputOutcome::Deferred);
         }
         s.take_event_engine(tab)
     };
@@ -1078,9 +1105,12 @@ async fn input_shared_body(
             Ok(InputOutcome::Ignored)
         }
         InputEvent::Scroll { dy } => {
-            let wpath = {
+            let (wpath, before) = {
                 let mut s = sess.lock().await;
-                s.scroll_pre(tab)
+                (
+                    s.scroll_pre(tab),
+                    s.tabs.get(&tab).map_or(0.0, |t| t.scroll_y),
+                )
             };
             let prevented = dispatch_events(
                 sess,
@@ -1120,8 +1150,10 @@ async fn input_shared_body(
                 )
                 .await;
             }
+            let sy = sess.lock().await.tabs.get(&tab).map_or(0.0, |t| t.scroll_y);
             Ok(InputOutcome::Scrolled {
-                scroll_y: sess.lock().await.tabs.get(&tab).map_or(0.0, |t| t.scroll_y),
+                scroll_y: sy,
+                moved: (sy - before).abs() > 0.5,
             })
         }
         InputEvent::MouseMove { x, y } => mouse_move_shared(sess, tab, ee, x, y).await,

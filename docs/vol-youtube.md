@@ -20,7 +20,7 @@ Trois différences fondamentales :
 
 1. **Dossier dédié avec synthèse propre** — tous les artefacts
    YouTube, **y compris la synthèse et le journal de campagne**,
-   atterrissent dans `C:\OnionBit-vol\youtube\`, jamais à la
+   atterrissent dans `Explorer-data\vols\youtube\`, jamais à la
    racine du corpus (ni dans le repo). La synthèse racine n'est
    pas polluée par la campagne YouTube ; la synthèse YouTube
    n'est pas polluée par les autres vols.
@@ -31,7 +31,7 @@ Trois différences fondamentales :
    cible la plus lourde du corpus ; un vol sans la batterie
    complète produit des constats faux (murs artificiels §B-80/81).
 
-## 0. Dossier dédié — `C:\OnionBit-vol\youtube\`
+## 0. Dossier dédié — `Explorer-data\vols\youtube\`
 
 | Artefact | Chemin canonique |
 |---|---|
@@ -98,7 +98,8 @@ $env:EXPLORER_MEDIA_CODECS='avc1;hev1;hvc1;vp09;av01;mp4a;mp3;opus;vorbis;flac;a
 $env:EXPLORER_JS_OPS='20000000'       # §B-81 : bundle polymer 12,6 Mo
 $env:EXPLORER_JS_MEM_MIB='384'        # §B-81 : heap borné, dégradation propre
 $env:EXPLORER_MEM_DIAG='1'            # muts/heap/dom_nodes par onglet
-$env:EXPLORER_PROFILE='C:\OnionBit-vol\youtube\prof-vol<N>'   # froid = défaut
+$env:EXPLORER_PROFILE='vol:youtube-vol<N>'   # froid = défaut — NOM canonique
+# → Explorer-data\vols\youtube-vol<N>\profile (jamais de chemin absolu)
 # optionnel — sonde §B-59 (traçage des retraits/remplacements DOM) :
 # $env:EXPLORER_DOM_KILL='1'
 #   ⚠ testée par PRÉSENCE : EXPLORER_DOM_KILL=0 l'arme quand même —
@@ -116,12 +117,12 @@ $env:EXPLORER_DYN_PROBE='1'
 #     le binaire du worktree avant de naviguer.
 pwsh -File scripts/spawn_daemon.ps1 -Port 946<N> `
   -Repo "C:\OnionBit-Explorer-youtube-wt" `
-  -LogDir "C:\OnionBit-vol\youtube\logs"
+  -LogDir "Explorer-data\vols\youtube\logs"
 
 # 1.5 watchdogs OBLIGATOIRES — PID = « daemon PID <n> » du spawn
 pwsh -File scripts/vol_joblimit.ps1 -TargetPid <pid> -LimitMB 5120
 pwsh -File scripts/vol_memwatch.ps1 -DaemonPid <pid> -MaxMB 5120 `
-  -Log "C:\OnionBit-vol\youtube\logs\_vol<N>_watch.log" &
+  -Log "Explorer-data\vols\youtube\logs\_vol<N>_watch.log" &
 
 # 1.6 claim AVANT le premier navigate — ligne dans
 #     youtube\CLAIMS.md (PAS la racine) : vol N, agent N,
@@ -255,7 +256,7 @@ synthèse racine n'est pas touchée ; trou nouveau → proposition
 2. Rapport dans `youtube\rapports\` + entrée
    `youtube\SYNTHESE_JOURNAL.md` + statuts §B synchronisés dans
    `youtube\SYNTHESE.md`.
-3. `git add youtube/ && git commit` dans `C:\OnionBit-vol`
+3. `git add youtube/ && git commit` dans `Explorer-data\vols`
    (staging ciblé — jamais `-A`, le corpus a d'autres agents
    en vol) ; ligne `youtube\CLAIMS.md` libérée.
 4. **STOP — feu vert explicite exigé** : l'équipe de vol kill

@@ -534,6 +534,10 @@ pub enum Method {
     /// Verdicts de cascade d'un élément — étape 253.
     #[serde(rename = "engine.cascade")]
     EngineCascade(CascadeParams),
+    /// Description complète d'un handle sans re-snapshot —
+    /// étape 258-bis.
+    #[serde(rename = "describe")]
+    Describe(DescribeParams),
     /// Suspects heuristiques bornés — triage affichage +
     /// santé moteur (cap `engine`, étape 248).
     #[serde(rename = "engine.anomalies")]
@@ -577,6 +581,13 @@ pub enum Method {
     /// toujours `degraded` (pas de handle, pas de check).
     #[serde(rename = "input.click_at")]
     InputClickAt(ClickAtParams),
+    /// Soumission déterministe du `<form>` englobant —
+    /// étape 259.
+    #[serde(rename = "input.submit")]
+    InputSubmit(RefParams),
+    /// Choix d'option dans un `<select>` — étape 259.
+    #[serde(rename = "input.select_option")]
+    InputSelectOption(SelectOptionParams),
 
     /// Évaluation JS dans le contexte top-level (cap+droit `eval`).
     #[serde(rename = "eval.run")]
@@ -659,6 +670,11 @@ pub enum WaitKind {
     Selector,
     /// Deux commits layout sans delta de rects (`wait.for` seul).
     Stable,
+    /// Aucune tâche réseau en vol pendant `quiet_ms`
+    /// (`wait.for` seul — étape 258). Couvre les tâches
+    /// `net`/`dyn` trackées, la file FIFO et la nav en
+    /// cours ; pas les sockets persistantes (ws/sse).
+    NetworkIdle,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -784,6 +800,9 @@ pub struct ClickParams {
 
 /// `tab` + `ref` pour `engine.cascade` (étape 253 — pas
 /// d'`opts` : la lecture est pure, rien à attendre).
+/// Étape 257 : filtres — le verdict complet rend une
+/// trace par longhand du catalogue (~200 `initial`), ce
+/// qui inonde le contexte de l'agent (retour terrain).
 #[derive(Debug, Clone, Deserialize)]
 pub struct CascadeParams {
     /// Onglet.
@@ -791,6 +810,30 @@ pub struct CascadeParams {
     /// Handle cible — `StaleRef` si la révision a bougé.
     #[serde(rename = "ref")]
     pub elem_ref: ElementRef,
+    /// Ne rendre que ces propriétés (noms CSS déclarés —
+    /// shorthands expandés côté verdict).
+    #[serde(default)]
+    pub props: Option<Vec<String>>,
+    /// `true` = seules les déclarations réellement
+    /// candidates : les verdicts `initial`/`inherited`
+    /// (aucune règle ne pose la propriété) sont omis.
+    #[serde(default)]
+    pub declared_only: Option<bool>,
+}
+
+/// `describe{tab,ref}` — étape 258-bis : tag/attrs/rect/
+/// texte/valeur d'un handle en un appel (pas de re-snapshot
+/// ni d'`eval.run` pour lire l'état d'un élément).
+#[derive(Debug, Clone, Deserialize)]
+pub struct DescribeParams {
+    /// Onglet.
+    pub tab: TabId,
+    /// Handle cible — `StaleRef` si la révision a bougé.
+    #[serde(rename = "ref")]
+    pub elem_ref: ElementRef,
+    /// Plafond du `text_content` rendu (défaut 480).
+    #[serde(default)]
+    pub max_text: Option<u32>,
 }
 
 /// `ref` seul + opts.
@@ -804,6 +847,25 @@ pub struct RefParams {
     /// Auto-wait.
     #[serde(default)]
     pub opts: Option<ActionOpts>,
+}
+
+/// `input.select_option{tab,ref,value?|index?}` — étape 259 :
+/// `index` = rang d'`<option>` (0-based), `value` =
+/// attribut `value` OU `textContent` trimmé ; les deux
+/// absents → `invalid_params`.
+#[derive(Debug, Clone, Deserialize)]
+pub struct SelectOptionParams {
+    /// Onglet.
+    pub tab: TabId,
+    /// Handle du `<select>`.
+    #[serde(rename = "ref")]
+    pub elem_ref: ElementRef,
+    /// Attribut `value` de l'option, ou son texte trimmé.
+    #[serde(default)]
+    pub value: Option<String>,
+    /// Rang 0-based dans les `<option>` du select.
+    #[serde(default)]
+    pub index: Option<u32>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -851,10 +913,15 @@ pub struct ScrollParams {
 pub struct ClickAtParams {
     /// Onglet.
     pub tab: TabId,
-    /// Position viewport (px CSS).
+    /// Position (px CSS) — espace `space`.
     pub x: f32,
-    /// Position viewport.
+    /// Position.
     pub y: f32,
+    /// Espace de coordonnées : `"viewport"` (défaut, contrat
+    /// historique) | `"document"` (aligné sur les rects du
+    /// snapshot/`describe` — étape 259).
+    #[serde(default)]
+    pub space: Option<String>,
     /// Modifieurs.
     #[serde(default)]
     pub mods: Option<KeyMods>,
@@ -867,6 +934,11 @@ pub struct EvalParams {
     /// Source JS — évaluée dans le contexte top-level ; la valeur
     /// retourne sérialisée JSON (bornée 64 Ko, tronquée au-delà).
     pub expr: String,
+    /// Scope optionnel (étape 260) : l'expression est évaluée
+    /// avec l'élément lié — erreur honnête tant que le
+    /// binding moteur n'est pas posé.
+    #[serde(rename = "ref", default)]
+    pub elem_ref: Option<ElementRef>,
     /// Borne d'exécution — défaut config.
     #[serde(default)]
     pub timeout_ms: Option<u32>,
@@ -881,6 +953,10 @@ pub struct WaitForParams {
     /// Sélecteur — requis pour `kind=selector`.
     #[serde(default)]
     pub selector: Option<String>,
+    /// Durée de calme requise — `kind=network_idle`
+    /// seulement (défaut 500 ms).
+    #[serde(default)]
+    pub quiet_ms: Option<u32>,
     /// Borne — [`ErrorCode::Timeout`] au-delà.
     pub timeout_ms: u32,
 }

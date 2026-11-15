@@ -13,7 +13,7 @@
   fail-fast / stack overflow. Ce wrapper garantit qu'une
   mort laisse TOUJOURS quelque chose :
 
-    - stdout/stderr redirigés vers target/probe_watch/*.log
+    - stdout/stderr redirigés vers Explorer-data/vols/probe-watch/*.log
     - budget temps global (-TimeoutSec) : dépassement = kill
       contrôlé et rapporté, pas un processus qui brûle 900 s
     - à la mort ou au timeout : code de sortie, fin de stderr,
@@ -40,7 +40,7 @@ param(
 
 $ErrorActionPreference = 'Continue'
 $root = Split-Path -Parent (Split-Path -Parent $PSCommandPath)
-if ($OutDir -eq '') { $OutDir = Join-Path $root 'target\probe_watch' }
+if ($OutDir -eq '') { $OutDir = Join-Path $root 'Explorer-data\vols\probe-watch' }
 New-Item -ItemType Directory -Force -Path $OutDir | Out-Null
 
 $stamp = Get-Date -Format 'yyyyMMdd-HHmmss'

@@ -4128,6 +4128,59 @@ impl Engine {
         r
     }
 
+    /// Éval **scopée à un élément** (étape 260 EAP —
+    /// `eval.run{ref}`, JS-C549) : `node` est le `NodeId` du
+    /// DOM miroir résolu par l'embedder (`mirror_node` côté
+    /// `explorer-js`) ; l'élément est exposé au code sous les
+    /// globals temporaires `$0` et `el`, non-énumérables.
+    /// Les props précédentes portant ces noms sont
+    /// sauvegardées puis restaurées après l'éval — le scope
+    /// ne fuit jamais dans la page (un `var $0` du site n'est
+    /// pas volé ; si le script évalué s'est re-défini
+    /// `$0`/`el` en non-configurable, sa version reste —
+    /// tolérant, jamais de crash). Miroir absent ou nœud
+    /// libéré → erreur honnête, jamais de scope factice.
+    ///
+    /// # Errors
+    /// `Uncaught` si le moteur n'a pas de DOM miroir ou si le
+    /// nœud est mort ; identique à [`Engine::eval`] sinon.
+    pub fn eval_on_element(
+        &mut self,
+        node: crate::dom::NodeId,
+        src: &str,
+        name: Option<&str>,
+    ) -> Result<Value> {
+        let Some((dom, cache)) = self.dom_ctx.clone() else {
+            return Err(Error::Uncaught("eval scopé élément sans DOM miroir".into()));
+        };
+        let el = crate::dom_host::node_value(self, &dom, &cache, node);
+        if matches!(el, Value::Undefined) {
+            return Err(Error::Uncaught(
+                "eval scopé élément : nœud miroir libéré".into(),
+            ));
+        }
+        let g = self.global;
+        let saved: Vec<(&str, Option<Prop>)> = ["$0", "el"]
+            .into_iter()
+            .map(|k| (k, self.heap.obj(g).and_then(|o| o.find(k))))
+            .collect();
+        self.set_own(g, "$0", el.clone(), false);
+        self.set_own(g, "el", el, false);
+        let r = match name {
+            Some(n) => self.eval_named(src, n),
+            None => self.eval(src),
+        };
+        if let Some(o) = self.heap.obj_mut(g) {
+            for (k, prev) in saved {
+                let _ = o.remove_own(k);
+                if let Some(p) = prev.filter(|_| o.find(k).is_none()) {
+                    o.push_prop(k, p);
+                }
+            }
+        }
+        r
+    }
+
     /// Chronométrage parse/exec de la dernière entrée publique
     /// (`parse_us`, `exec_us`) — accumulé autour de
     /// `parse_in`/`parse_module_in` (par module d'un graphe,

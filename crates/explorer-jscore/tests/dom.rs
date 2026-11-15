@@ -7922,3 +7922,64 @@ fn style_typed_om_maps() {
         "9|TypeError|true"
     );
 }
+
+// -- JS-C549 : eval scopée à un élément ($0 / el) ----------------------
+
+#[test]
+fn eval_on_element_binds_dollar0_and_el() {
+    let mut e = Engine::new();
+    let d = Rc::new(RefCell::new(Dom::from_html(PAGE)));
+    e.install_dom(&d);
+    let main = d.borrow().by_id("main").expect("#main");
+    match e.eval_on_element(
+        main,
+        "$0.id + ':' + el.id + ':' + ($0 === el)",
+        Some("t/scoped"),
+    ) {
+        Ok(v) => assert_eq!(e.describe(v), "main:main:true"),
+        Err(err) => panic!("eval_on_element -> {err}"),
+    }
+}
+
+#[test]
+fn eval_on_element_restores_globals() {
+    let mut e = Engine::new();
+    let d = Rc::new(RefCell::new(Dom::from_html(PAGE)));
+    e.install_dom(&d);
+    let main = d.borrow().by_id("main").expect("#main");
+    // Binding `$0` préexistant : restauré après l'éval, jamais volé.
+    match e.eval("var $0 = 42; 'ok'") {
+        Ok(_) => {}
+        Err(err) => panic!("seed -> {err}"),
+    }
+    match e.eval_on_element(main, "$0.id", None) {
+        Ok(v) => assert_eq!(e.describe(v), "main"),
+        Err(err) => panic!("eval_on_element -> {err}"),
+    }
+    match e.eval("$0 + ':' + typeof el + ':' + typeof $0") {
+        Ok(v) => assert_eq!(e.describe(v), "42:undefined:number"),
+        Err(err) => panic!("check -> {err}"),
+    }
+}
+
+#[test]
+fn eval_on_element_mutation_reaches_mirror() {
+    let mut e = Engine::new();
+    let d = Rc::new(RefCell::new(Dom::from_html(PAGE)));
+    e.install_dom(&d);
+    let inp = d.borrow().by_id("inp").expect("#inp");
+    match e.eval_on_element(inp, "el.value = 'via_eval'; el.value", None) {
+        Ok(v) => assert_eq!(e.describe(v), "via_eval"),
+        Err(err) => panic!("eval_on_element -> {err}"),
+    }
+    assert_eq!(d.borrow().attr(inp, "value"), Some("via_eval"));
+}
+
+#[test]
+fn eval_on_element_without_dom_is_honest_error() {
+    let mut e = Engine::new();
+    match e.eval_on_element(0, "1", None) {
+        Err(explorer_jscore::Error::Uncaught(_)) => {}
+        other => panic!("expected Uncaught, got {other:?}"),
+    }
+}

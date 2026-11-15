@@ -87,14 +87,25 @@ impl JsonFileStore {
         }
     }
 
-    /// Répertoire de profil par défaut selon la plateforme
-    /// (`EXPLORER_PROFILE` prioritaire — déplaçable ; puis bundle
-    /// portable détecté par le marqueur
-    /// [`crate::paths::PORTABLE_MARKER`] → `<racine>/state`).
+    /// Répertoire de profil par défaut (`EXPLORER_PROFILE`
+    /// prioritaire — déplaçable). Ensuite, dans l'ordre :
+    /// `Explorer-data/profiles/default` sous le projet
+    /// ([`crate::paths::data_root`] — règle canonique : rien
+    /// hors du projet), bundle portable détecté par le marqueur
+    /// [`crate::paths::PORTABLE_MARKER`] → `<racine>/state`,
+    /// puis profil plateforme (produit installé hors projet).
     #[must_use]
     pub fn default_dir() -> PathBuf {
         if let Some(d) = std::env::var_os("EXPLORER_PROFILE") {
+            // Nom nu → `profiles/<nom>`/`vols/<nom>/profile`
+            // (règle canonique) ; chemin explicite → honoré.
+            if let Some(r) = d.to_str().and_then(crate::paths::resolve_profile_name) {
+                return r;
+            }
             return PathBuf::from(d);
+        }
+        if let Some(d) = crate::paths::profile_dir("default") {
+            return d;
         }
         if let Some(d) = crate::paths::portable_state_dir() {
             return d;

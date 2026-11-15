@@ -11,7 +11,7 @@
 > sortie. Rédigé à partir de l'état mesuré (journal crans
 > ≤ 86, `css.values` 834/2273, `api` 1510/8099 = 18,6 %).
 > Protocole de vol : `docs/vol-youtube.md` (worktree de vol
-> dédié, artefacts sous `C:\OnionBit-vol\` — `.eval/` reste
+> dédié, artefacts sous `Explorer-data\vols\` — `.eval/` reste
 > du triage local, jamais suivi).
 
 ## 0. Objectif et définition de « fait »
@@ -53,7 +53,7 @@ score BCD global (outil de pilotage, pas un but).
 ### M0 — Reproductibilité d'abord (0,5-1 j)
 | ID | Tâche | Fichiers | Verrou | DoD |
 |---|---|---|---|---|
-| N0.0 | **Hygiène `.eval/` — risque déjà réalisé** : le dossier est partiellement **tracké** (`cookies.json`, `history.json`, `hsts.json`, `dns_cache.json` en `M` dans `git status` — session YouTube commitée) et pèse 1,8 Go. `git rm -r --cached .eval` + ligne `.eval/` dans `.gitignore` (convention vol §8 : corpus `C:\OnionBit-vol\`, rejeux promus `fuzz/`) | `.gitignore` | `git status` propre | plus aucun fichier `.eval/` suivi |
+| N0.0 | **Hygiène `.eval/` — risque déjà réalisé** : le dossier est partiellement **tracké** (`cookies.json`, `history.json`, `hsts.json`, `dns_cache.json` en `M` dans `git status` — session YouTube commitée) et pèse 1,8 Go. `git rm -r --cached .eval` + ligne `.eval/` dans `.gitignore` (convention vol §8 : corpus `Explorer-data\vols\`, rejeux promus `fuzz/`) | `.gitignore` | `git status` propre | plus aucun fichier `.eval/` suivi |
 | N0.1 | Vol YouTube complet enregistré via `EXPLORER_NET_RECORD` ; rejeu `DirTransport` vérifié. **Limite connue** : `key_of` = `(méthode, url)` sans corps POST (`replay.rs:46`) — les `/youtubei` ne se distinguent que par body et l'ordre des requêtes peut varier run-to-run → hasher le body POST dans la clé, ou DoD « même rendu » plutôt que hash strict | vol enregistré, `explorer-net/replay.rs` | test `dir_transport_replays_youtube_flight` | rejeu déterministe, corpus versionné |
 | N0.2 | Snapshot J17 de référence sur le vol rejeué (`prop_scan`, `env_ns`, `call_nat`) | `jscore/lib.rs` compteurs | — | baseline perf archivée dans `.eval/` |
 | N0.3 | **Shot de contrôle sur rejeu** — `explorer-cli shot` + `scripts/geo_diff.mjs` vs capture référence : mesure l'écart visuel résiduel **avant** d'investir M1 (trous `css.values` côté PIPE vs murs JS côté NAV) — réordonne M1/M3 si l'écart dominant est côté PIPE | `explorer-cli`, `geo_diff.mjs` | — | écart documenté au journal, file réordonnée si besoin |

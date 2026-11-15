@@ -849,9 +849,11 @@ async fn input(
     }
     Json(match outcome {
         InputOutcome::Ignored => serde_json::json!({ "result": "ignored" }),
-        InputOutcome::Scrolled { scroll_y } => {
-            serde_json::json!({ "result": "scrolled", "scroll_y": scroll_y })
+        InputOutcome::Scrolled { scroll_y, moved } => {
+            serde_json::json!({ "result": if moved { "scrolled" } else { "noop" },
+                                "scroll_y": scroll_y, "moved": moved })
         }
+        InputOutcome::Deferred => serde_json::json!({ "result": "deferred" }),
         InputOutcome::Navigated => serde_json::json!({ "result": "navigated" }),
         InputOutcome::Focused => serde_json::json!({ "result": "focused" }),
         InputOutcome::Edited => serde_json::json!({ "result": "edited" }),

@@ -28,17 +28,21 @@
 #
 # Usage :
 #   pwsh -File scripts/spawn_daemon.ps1 [-Port 9377]
-#     [-Profile <dir>] [-Exe <chemin>] [-LogDir <dossier>]
+#     [-Profile <nom>] [-Exe <chemin>] [-LogDir <dossier>]
 #   -Exe défaut : <target-dir>[/<triple>]\release\explorer-daemon.exe
 #   (résolution cargo via `cargo metadata` — repli debug) ; -Profile omis =
 #   EXPLORER_PROFILE de l'appelant (hérité via WMI).
+#   -Profile = NOM canonique (étape 262) : `<nom>` →
+#   Explorer-data\profiles\<nom>, `vol:<nom>` →
+#   Explorer-data\vols\<nom>\profile. Jamais de chemin absolu.
 
 param(
   [int]$Port = 9377,
-  # --profile DIR du daemon. '' = non passé : EXPLORER_PROFILE
-  # est propagé via les `set` cuits (voir plus bas — WMI
-  # n'hérite PAS l'env de l'appelant) ; un -Profile explicite
-  # l'emporte (même règle que le binaire : --profile > env).
+  # --profile <nom> du daemon (nom canonique, voir usage).
+  # '' = non passé : EXPLORER_PROFILE est propagé via les
+  # `set` cuits (voir plus bas — WMI n'hérite PAS l'env de
+  # l'appelant) ; un -Profile explicite l'emporte (même règle
+  # que le binaire : --profile > env).
   [string]$Profile = '',
   [string]$Exe = '',
   [string]$LogDir = '',
@@ -119,7 +123,7 @@ if (-not (Test-Path $Exe)) {
   exit 1
 }
 if ($LogDir -eq '') {
-  $LogDir = Join-Path (Split-Path -Parent $PSScriptRoot) 'target\daemon-logs'
+  $LogDir = Join-Path (Split-Path -Parent $PSScriptRoot) 'Explorer-data\logs'
 }
 
 New-Item -ItemType Directory -Force -Path $LogDir | Out-Null

@@ -58,7 +58,9 @@ $ErrorActionPreference = 'Continue'
 $root = Split-Path -Parent (Split-Path -Parent $PSCommandPath)
 $run = Get-Date -Format 'yyyyMMdd-HHmmss'
 if ($OutDir -eq '') {
-    $OutDir = Join-Path $root "target\harvest\$run"
+    # Racine canonique des artefacts (étape 262) — tout
+    # atterrit sous `<repo>/Explorer-data/`, rien dans TEMP.
+    $OutDir = Join-Path $root "Explorer-data\vols\harvest-$run"
 }
 New-Item -ItemType Directory -Force -Path $OutDir | Out-Null
 
@@ -261,12 +263,14 @@ if ($Mode -eq 'daemon') {
         exit 1
     }
     $FuncBase = "http://127.0.0.1:$FuncPort/api"
-    $profDir = Join-Path $env:TEMP "explorer-harvest-$FuncPort"
-    New-Item -ItemType Directory -Force -Path $profDir | Out-Null
+    # Profil de vol jetable — `vol:<nom>` est un NOM canonique
+    # (étape 262) : le daemon le résout sous
+    # `Explorer-data/vols/<nom>/profile`, jamais dans TEMP.
+    $profName = "vol:harvest-$FuncPort"
     $daemonErr = Join-Path $OutDir '_daemon.log'
     $daemonProc = Start-Process -FilePath $daemon -PassThru `
         -WindowStyle Hidden `
-        -ArgumentList '--port', "$FuncPort", '--profile', $profDir `
+        -ArgumentList '--port', "$FuncPort", '--profile', $profName `
         -RedirectStandardError $daemonErr
     $script:http = [System.Net.Http.HttpClient]::new()
     $script:http.Timeout = [System.Threading.Timeout]::InfiniteTimeSpan

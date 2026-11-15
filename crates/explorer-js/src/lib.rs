@@ -874,6 +874,30 @@ pub trait JsEngine: Send {
         }
     }
 
+    /// Éval **scopée à un élément** (étape 260 —
+    /// `eval.run{ref}` EAP) : `path` = chemin DOM de
+    /// l'élément (`element_path`, mêmes segments que
+    /// `dispatch_event`) ; le moteur le résout en nœud
+    /// miroir et expose l'élément au code (global `$0` /
+    /// `el` selon impl). Défaut : erreur honnête — un
+    /// moteur sans binding n'informe pas un faux scope.
+    ///
+    /// # Errors
+    /// `Uncaught` « non implémenté » par défaut ; l'impl
+    /// `explorer-jscore` pose le binding (JS-C549).
+    fn eval_element(
+        &mut self,
+        ctx: JsCtxId,
+        path: &[(String, u32)],
+        source: &str,
+        name: Option<&str>,
+    ) -> Result<String, JsError> {
+        let _ = (ctx, path, source, name);
+        Err(JsError::Uncaught(
+            "eval scopé élément non implémenté — couture JS en cours".into(),
+        ))
+    }
+
     /// Draine les `<script>` insérés dynamiquement
     /// (CAP-169) — `createElement('script')` + `appendChild`
     /// & co : la session résout `src`/`text`, applique la
@@ -2052,6 +2076,19 @@ enum Cmd {
         budget_tx: Sender<u64>,
         tx: Sender<Result<String, JsError>>,
     },
+    /// `eval.run{ref}` EAP (étape 260, JS-C549) — éval scopée
+    /// au nœud miroir résolu de `path` (`mirror_node`,
+    /// mêmes segments que `dispatch_event`) ; les globals
+    /// `$0`/`el` sont posés par `Engine::eval_on_element` le
+    /// temps de l'éval puis déliés.
+    EvalElement {
+        ctx: JsCtxId,
+        path: Vec<(String, u32)>,
+        src: String,
+        name: Option<String>,
+        budget_tx: Sender<u64>,
+        tx: Sender<Result<String, JsError>>,
+    },
     DrainDynImgs {
         tx: Sender<Vec<explorer_jscore::DynImgReq>>,
     },
@@ -2864,6 +2901,50 @@ impl JscoreEngine {
                         eng.context_switch(prev);
                         let _ = tx.send(out);
                     }
+                    Cmd::EvalElement {
+                        ctx,
+                        path,
+                        src,
+                        name,
+                        budget_tx,
+                        tx,
+                    } => {
+                        let prev = eng.current_context();
+                        eng.context_switch(ctx);
+                        let out = if eng.current_context() == ctx {
+                            let _ = budget_tx.send(eng.eval_timeout_boot_ms());
+                            dump_eval_script("eval_el", name.as_deref(), &src);
+                            let _ = explorer_common::alloc_delta();
+                            let t0 = std::time::Instant::now();
+                            // `JS_CTX_TOP` vit dans `jsd`, les
+                            // cadres dans `ctx_doms` — même
+                            // résolution que `ContextNewIn`.
+                            let dref = if ctx == JS_CTX_TOP {
+                                jsd.as_ref()
+                            } else {
+                                ctx_doms.get(&ctx)
+                            };
+                            let node = dref.and_then(|d| mirror_node(&d.borrow(), &path));
+                            let res = match node {
+                                Some(n) => eng.eval_on_element(n, &src, name.as_deref()),
+                                // Ref morte entre le snapshot et
+                                // l'appel (miroir divergé) — erreur
+                                // honnête, jamais de scope factice.
+                                None => Err(explorer_jscore::Error::Uncaught(
+                                    "eval scopé élément : ref introuvable dans le miroir".into(),
+                                )),
+                            };
+                            note_eval(eng, "eval_el", name.as_deref(), src.len(), t0, res.is_ok());
+                            match res {
+                                Ok(v) => Ok(eng.describe(v)),
+                                Err(e) => Err(JsError::from(e)),
+                            }
+                        } else {
+                            Err(JsError::Dead)
+                        };
+                        eng.context_switch(prev);
+                        let _ = tx.send(out);
+                    }
                     Cmd::DrainDynScripts { tx } => {
                         let _ = tx.send(eng.drain_dyn_scripts());
                     }
@@ -3258,6 +3339,32 @@ impl JsEngine for JscoreEngine {
                 src: source.to_string(),
                 name: name.map(str::to_string),
                 ord: script_ord,
+                budget_tx,
+                tx,
+            })
+            .is_err()
+        {
+            return Err(JsError::Dead);
+        }
+        self.recv_eval_job(&rx, Some(&budget_rx))?
+    }
+
+    fn eval_element(
+        &mut self,
+        ctx: JsCtxId,
+        path: &[(String, u32)],
+        source: &str,
+        name: Option<&str>,
+    ) -> Result<String, JsError> {
+        let (tx, rx) = channel();
+        let (budget_tx, budget_rx) = channel();
+        if self
+            .tx
+            .send(Cmd::EvalElement {
+                ctx,
+                path: path.to_vec(),
+                src: source.to_string(),
+                name: name.map(str::to_string),
                 budget_tx,
                 tx,
             })
@@ -3863,9 +3970,29 @@ fn dump_eval_script(kind: &str, name: Option<&str>, src: &str) {
     static DIR: std::sync::OnceLock<Option<std::path::PathBuf>> = std::sync::OnceLock::new();
     let dir = DIR
         .get_or_init(|| {
-            std::env::var_os("EXPLORER_JS_DUMP_DIR")
-                .map(std::path::PathBuf::from)
-                .filter(|d| std::fs::create_dir_all(d).is_ok())
+            // Règle canonique (étape 262) : nom nu →
+            // `<ancêtre projet>/Explorer-data/dumps/<nom>` ;
+            // chemin explicite → honoré. `explorer-js` ne
+            // dépend pas de `explorer-core` — la remontée
+            // d'ancêtre est dupliquée de `paths.rs`.
+            let raw = std::env::var_os("EXPLORER_JS_DUMP_DIR").map(std::path::PathBuf::from)?;
+            let is_bare = raw.to_str().is_some_and(|s| !s.contains(['/', '\\', ':']));
+            let resolved = if is_bare {
+                let base = std::env::current_dir()
+                    .ok()
+                    .into_iter()
+                    .chain(std::env::current_exe().ok())
+                    .flat_map(|s| {
+                        s.ancestors()
+                            .map(std::path::Path::to_path_buf)
+                            .collect::<Vec<_>>()
+                    })
+                    .find(|a| a.join("Explorer-data").is_dir())?;
+                base.join("Explorer-data").join("dumps").join(&raw)
+            } else {
+                raw
+            };
+            std::fs::create_dir_all(&resolved).ok().map(|()| resolved)
         })
         .as_ref();
     let (Some(dir), true) = (dir, src.len() <= 8 * 1024 * 1024) else {

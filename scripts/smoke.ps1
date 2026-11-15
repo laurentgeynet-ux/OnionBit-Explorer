@@ -118,9 +118,13 @@ if (-not $daemon) {
 if (-not $daemon) { throw "explorer-daemon.exe introuvable apres build" }
 
 $env:EXPLORER_PORT = "$ApiPort"
+# Profil de vol dédié (etape 262) — le smoke ne pollue ni le
+# cache ni l'historique du profil par défaut.
+$env:EXPLORER_PROFILE = 'vol:smoke'
 $proc = Start-Process -FilePath (Resolve-Path $daemon) -PassThru `
     -WindowStyle Hidden
 Remove-Item env:EXPLORER_PORT
+Remove-Item env:EXPLORER_PROFILE
 
 # --- helpers ----------------------------------------------------------------
 function Wait-For([scriptblock]$Probe, [string]$What, [int]$Tries = 50) {

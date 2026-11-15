@@ -51,6 +51,7 @@ impl Tab {
                 }
                 self.js.take()
             },
+            js_doc_html: self.js_doc_html.take(),
             images: std::mem::take(&mut self.images),
             linked_sheets: std::mem::take(&mut self.linked_sheets),
             adopted_sheets: self.adopted_sheets.clone(),
@@ -168,6 +169,7 @@ impl Tab {
         self.popup = snap.popup;
         self.find = snap.find;
         self.js = snap.js;
+        self.js_doc_html = snap.js_doc_html;
         self.images = snap.images;
         self.linked_sheets = snap.linked_sheets;
         self.adopted_sheets = snap.adopted_sheets;

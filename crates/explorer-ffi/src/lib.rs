@@ -797,6 +797,7 @@ pub unsafe extern "C" fn explorer_input(
         Ok(O::Focused) => 4,
         Ok(O::Edited) => 5,
         Ok(O::Unfocused) => 6,
+        Ok(O::Deferred) => 7,
         Err(e) => {
             set_err(e);
             -2

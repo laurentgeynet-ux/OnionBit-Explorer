@@ -22,9 +22,26 @@ use std::rc::Rc;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-const WORKER_JS: &str = "C:/OnionBit-vol/logs/b104/transmux_worker.js";
-const SEG_B64: &str = "C:/OnionBit-vol/logs/b104/segment0.b64";
-const SEG_AUDIO_B64: &str = "C:/OnionBit-vol/logs/b104/segment0_audio.b64";
+// Fixtures de vol sous `<repo>/Explorer-data/vols/logs/b104/`
+// (étape 262 — racine canonique ; `CARGO_MANIFEST_DIR` pointe
+// `crates/explorer-jscore/`).
+fn fixture(rel: &str) -> std::path::PathBuf {
+    std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../Explorer-data/vols")
+        .join(rel)
+}
+
+fn worker_js() -> std::path::PathBuf {
+    fixture("logs/b104/transmux_worker.js")
+}
+
+fn seg_b64() -> std::path::PathBuf {
+    fixture("logs/b104/segment0.b64")
+}
+
+fn seg_audio_b64() -> std::path::PathBuf {
+    fixture("logs/b104/segment0_audio.b64")
+}
 
 struct MapLoader {
     map: HashMap<String, String>,
@@ -55,12 +72,12 @@ fn pump_until(e: &mut Engine, cond: &str, secs: u64) -> String {
 
 #[test]
 fn b104_vrai_muxjs_segment_exploitable() {
-    let Ok(src) = std::fs::read_to_string(WORKER_JS) else {
-        eprintln!("skip: {WORKER_JS} absent");
+    let Ok(src) = std::fs::read_to_string(worker_js()) else {
+        eprintln!("skip: {} absent", worker_js().display());
         return;
     };
-    let Ok(b64) = std::fs::read_to_string(SEG_B64) else {
-        eprintln!("skip: {SEG_B64} absent");
+    let Ok(b64) = std::fs::read_to_string(seg_b64()) else {
+        eprintln!("skip: {} absent", seg_b64().display());
         return;
     };
     let mut e = Engine::new();
@@ -127,12 +144,12 @@ fn b104_vrai_muxjs_segment_exploitable() {
 /// absent → `append→null` → `Rz` sur `data.buffer` de `null`).
 #[test]
 fn b104_vrai_muxjs_segment_audio() {
-    let Ok(src) = std::fs::read_to_string(WORKER_JS) else {
-        eprintln!("skip: {WORKER_JS} absent");
+    let Ok(src) = std::fs::read_to_string(worker_js()) else {
+        eprintln!("skip: {} absent", worker_js().display());
         return;
     };
-    let Ok(b64) = std::fs::read_to_string(SEG_AUDIO_B64) else {
-        eprintln!("skip: {SEG_AUDIO_B64} absent");
+    let Ok(b64) = std::fs::read_to_string(seg_audio_b64()) else {
+        eprintln!("skip: {} absent", seg_audio_b64().display());
         return;
     };
     let mut e = Engine::new();

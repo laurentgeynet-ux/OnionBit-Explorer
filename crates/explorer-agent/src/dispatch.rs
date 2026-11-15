@@ -12,9 +12,9 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use explorer_core::{
-    drain_applies_shared, drain_navs_shared, eval_shared, handle_input_shared, history_move_shared,
-    navigate_shared, CoreError, CoreEvent, EvalReply, InputEvent, InputOutcome,
-    KeyMods as CoreKeyMods, Session,
+    drain_applies_shared, drain_navs_shared, eval_shared_at, handle_input_shared,
+    history_move_shared, navigate_shared, CoreError, CoreEvent, EvalReply, InputEvent,
+    InputOutcome, KeyMods as CoreKeyMods, Session,
 };
 use explorer_net::http::{Initiator, Method as NetMethod, Request as NetRequest};
 use explorer_net::url::Url;
@@ -30,6 +30,12 @@ use crate::state::{AgentConn, AgentShared, StoredSnap, SubFilter};
 /// Timeout de navigation par défaut quand `wait` n'en porte
 /// pas (règle 13 — nommé, pas en dur).
 const NAV_WAIT_DEFAULT_MS: u64 = 30_000;
+/// Calme réseau requis pour `wait.for{kind:"network_idle"}`
+/// quand `quiet_ms` est absent (étape 258).
+const QUIET_MS_DEFAULT: u64 = 500;
+/// Plafond `text_content` par défaut de `describe{ref}`
+/// (étape 258-bis) — `max_text` le surclasse.
+pub(crate) const DESCRIBE_TEXT_CAP: usize = 480;
 
 /// Capacités **implémentées** par cette build — l'intersection
 /// avec les demandées fait la liste livrée. Surface v1
@@ -140,9 +146,14 @@ const HELP: &[(&str, Option<Capability>, &str)] = &[
         "query.select",
     ),
     (
+        "décrire un élément (tag/attrs/rect/texte/valeur) ?",
+        Some(Capability::Handles),
+        "describe",
+    ),
+    (
         "cliquer, taper, survoler ?",
         Some(Capability::Input),
-        "input.click|input.type|input.hover",
+        "input.click|input.type|input.hover|input.submit|input.select_option",
     ),
     (
         "touches, scroll, coordonnées ?",
@@ -177,9 +188,12 @@ fn cap_of(m: &Method) -> Option<Capability> {
         | Method::NavViewport(_) => Some(Capability::Tabs),
         Method::SnapshotGet(_) => Some(Capability::Snapshot),
         Method::QuerySelect(_)
+        | Method::Describe(_)
         | Method::InputClick(_)
         | Method::InputType(_)
-        | Method::InputHover(_) => Some(Capability::Handles),
+        | Method::InputHover(_)
+        | Method::InputSubmit(_)
+        | Method::InputSelectOption(_) => Some(Capability::Handles),
         Method::FrameGet(_) => Some(Capability::Frames),
         Method::ConsoleGet(_) => Some(Capability::ConsoleLog),
         Method::DomGet(_) => Some(Capability::Dom),
@@ -375,10 +389,12 @@ async fn settle_wait(
             let dur = Duration::from_millis(timeout_ms.map_or(NAV_WAIT_DEFAULT_MS, u64::from));
             wait_frame(st, tab, dur).await
         }
-        Some(WaitKind::Idle | WaitKind::Selector | WaitKind::Stable) => Err(unsupported(
-            "wait.for hors commit/frame — E2",
-            "wait_commit",
-        )),
+        Some(WaitKind::Idle | WaitKind::Selector | WaitKind::Stable | WaitKind::NetworkIdle) => {
+            Err(unsupported(
+                "wait.for hors commit/frame — E2",
+                "wait_commit",
+            ))
+        }
         _ => Ok(()),
     }
 }
@@ -456,48 +472,59 @@ async fn frame_binary(
                 "frame.get exige un id entier 32 bits — corrélation de la trame binaire",
             )
         })?;
-    let png = {
-        let mut s = st.session.lock().await;
-        // Orphelin garé → réinséré + DOM commis non peint →
-        // produit (même garde que `wait_frame`) : sans ça
-        // `frame.get` répond « pas de frame » sur un état
-        // réparable.
-        s.ensure_frame(params.tab);
-        let _ = s.tick_animations(params.tab);
-        if params.full == Some(true) {
-            s.frame_png_full(params.tab)
-        } else {
-            // Région px CSS → px physiques (`frame_png_region`
-            // attend des px physiques, même contrat que REST).
-            let scale = s.scale().max(f32::EPSILON);
-            if let Some(clip) = params.clip {
-                #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
-                // px CSS ≥ 0 × scale fini → px physiques.
-                let (rx, ry, rw, rh) = (
-                    (clip.x * scale).round().max(0.0) as u32,
-                    (clip.y * scale).round().max(0.0) as u32,
-                    (clip.w * scale).round().max(1.0) as u32,
-                    (clip.h * scale).round().max(1.0) as u32,
-                );
-                s.frame_png_region(params.tab, rx, ry, rw, rh)
+    // Raster en vol → attente bornée (étape 257 : le
+    // « pas de frame » immédiat forçait l'agent à deviner
+    // le retry — même pattern que `snapshot_get`).
+    let mut attempts = 0u8;
+    let png = loop {
+        let png = {
+            let mut s = st.session.lock().await;
+            // Orphelin garé → réinséré + DOM commis non peint →
+            // produit (même garde que `wait_frame`) : sans ça
+            // `frame.get` répond « pas de frame » sur un état
+            // réparable.
+            s.ensure_frame(params.tab);
+            let _ = s.tick_animations(params.tab);
+            if params.full == Some(true) {
+                s.frame_png_full(params.tab)
             } else {
-                let (vw, vh) = s.viewport();
-                #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
-                let (pw, ph) = (
-                    (vw * scale).round().max(0.0) as u32,
-                    (vh * scale).round().max(0.0) as u32,
-                );
-                s.frame_png_region(params.tab, 0, 0, pw.max(1), ph.max(1))
-                    .or_else(|| s.frame_png(params.tab))
+                // Région px CSS → px physiques (`frame_png_region`
+                // attend des px physiques, même contrat que REST).
+                let scale = s.scale().max(f32::EPSILON);
+                if let Some(clip) = params.clip {
+                    #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+                    // px CSS ≥ 0 × scale fini → px physiques.
+                    let (rx, ry, rw, rh) = (
+                        (clip.x * scale).round().max(0.0) as u32,
+                        (clip.y * scale).round().max(0.0) as u32,
+                        (clip.w * scale).round().max(1.0) as u32,
+                        (clip.h * scale).round().max(1.0) as u32,
+                    );
+                    s.frame_png_region(params.tab, rx, ry, rw, rh)
+                } else {
+                    let (vw, vh) = s.viewport();
+                    #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+                    let (pw, ph) = (
+                        (vw * scale).round().max(0.0) as u32,
+                        (vh * scale).round().max(0.0) as u32,
+                    );
+                    s.frame_png_region(params.tab, 0, 0, pw.max(1), ph.max(1))
+                        .or_else(|| s.frame_png(params.tab))
+                }
             }
+        };
+        if let Some(p) = png.filter(|b| !b.is_empty()) {
+            break p;
         }
+        attempts += 1;
+        if attempts >= 40 {
+            return Err(err(
+                ErrorCode::EngineUnavailable,
+                "pas de frame — rasterisation en vol après ~2 s",
+            ));
+        }
+        tokio::time::sleep(Duration::from_millis(POLL_MS)).await;
     };
-    let png = png.filter(|b| !b.is_empty()).ok_or_else(|| {
-        err(
-            ErrorCode::EngineUnavailable,
-            "pas de frame — rasterisation en vol",
-        )
-    })?;
     let mut out = Vec::with_capacity(crate::proto::binary::HEADER + png.len());
     crate::proto::binary::encode(id_num, crate::proto::binary::Kind::PngFrame, &png, &mut out);
     Ok(out)
@@ -538,9 +565,12 @@ async fn run(
         | Method::EngineJ17(_)
         | Method::NetEvents(_)
         | Method::FrameDiff(_) => perceive_verbs(st, conn, method).await,
-        Method::InputClick(_) | Method::InputType(_) | Method::InputHover(_) => {
-            handle_verbs(st, conn, method).await
-        }
+        Method::InputClick(_)
+        | Method::InputType(_)
+        | Method::InputHover(_)
+        | Method::InputSubmit(_)
+        | Method::InputSelectOption(_)
+        | Method::Describe(_) => handle_verbs(st, conn, method).await,
         Method::InputKey(_)
         | Method::InputScroll(_)
         | Method::InputClickAt(_)
@@ -677,7 +707,9 @@ async fn nav_verbs(
             // doit pas produire d'effet de bord.
             if matches!(
                 p.wait,
-                Some(WaitKind::Idle | WaitKind::Selector | WaitKind::Stable)
+                Some(
+                    WaitKind::Idle | WaitKind::Selector | WaitKind::Stable | WaitKind::NetworkIdle,
+                )
             ) {
                 return Err(unsupported("wait hors commit/frame — E2", "wait_commit"));
             }
@@ -693,7 +725,9 @@ async fn nav_verbs(
             scope(conn, p.tab)?;
             if matches!(
                 p.wait,
-                Some(WaitKind::Idle | WaitKind::Selector | WaitKind::Stable)
+                Some(
+                    WaitKind::Idle | WaitKind::Selector | WaitKind::Stable | WaitKind::NetworkIdle,
+                )
             ) {
                 return Err(unsupported("wait hors commit/frame — E2", "wait_commit"));
             }
@@ -820,7 +854,16 @@ async fn snapshot_get(
         })
     } else {
         let nodes: Vec<_> = emitted.iter().map(|e| e.node.clone()).collect();
-        json!({ "rev": rev, "snap_seq": snap_seq, "url": url, "nodes": nodes })
+        // `stale_since` (étape 257, retour terrain PIPE) :
+        // la base demandée est absente — l'agent apprend que
+        // ce plein snapshot n'est PAS un diff, au lieu de
+        // deviner la désynchronisation en silence.
+        let stale = p.since.is_some() || p.since_seq.is_some();
+        let mut v = json!({ "rev": rev, "snap_seq": snap_seq, "url": url, "nodes": nodes });
+        if stale {
+            v["stale_since"] = json!(true);
+        }
+        v
     };
     conn.snap_seq += 1;
     let ring = conn.snaps.entry(p.tab).or_default();
@@ -1017,11 +1060,90 @@ async fn engine_cascade_verb(
     tab_exists(st, p.tab).await?;
     let handle = resolve(conn, st, p.tab, &p.elem_ref)?;
     let s = st.session.lock().await;
-    match s.engine_cascade(p.tab, handle.node) {
+    match s.engine_cascade(
+        p.tab,
+        handle.node,
+        p.props.as_deref(),
+        p.declared_only.unwrap_or(false),
+    ) {
         Some(r) => Ok(r),
         None => Err(err(
             ErrorCode::EngineUnavailable,
             "pas d'état committé — navigation en vol, réessayer",
+        )),
+    }
+}
+
+/// Verbes `ref` utilitaires (étapes 258-bis/259) :
+/// `describe`, `input.submit`, `input.select_option` —
+/// lecture ou action déterministe, sans auto-wait
+/// d'actionabilité (`submit`/`select_option` ne cliquent pas).
+async fn ref_utility_verbs(
+    st: &Arc<AgentShared>,
+    conn: &mut AgentConn,
+    method: Method,
+) -> Result<Value, RpcError> {
+    match method {
+        Method::InputSubmit(p) => {
+            scope(conn, p.tab)?;
+            right_input(conn)?;
+            tab_exists(st, p.tab).await?;
+            let handle = resolve(conn, st, p.tab, &p.elem_ref)?;
+            let mut s = st.session.lock().await;
+            let Some(generation) = s.node_generation(p.tab, handle.node) else {
+                return Err(err(ErrorCode::StaleRef, "nœud mort ou réattribué"));
+            };
+            match s.submit_ref(p.tab, handle.node, generation)? {
+                Some(outcome) => Ok(outcome_json(outcome)),
+                None => Err(err(ErrorCode::NotActionable, "pas d'ancêtre <form>")),
+            }
+        }
+        Method::InputSelectOption(p) => {
+            scope(conn, p.tab)?;
+            right_input(conn)?;
+            tab_exists(st, p.tab).await?;
+            if p.value.is_none() && p.index.is_none() {
+                return Err(err(ErrorCode::InvalidParams, "value ou index requis"));
+            }
+            let handle = resolve(conn, st, p.tab, &p.elem_ref)?;
+            let mut s = st.session.lock().await;
+            let Some(generation) = s.node_generation(p.tab, handle.node) else {
+                return Err(err(ErrorCode::StaleRef, "nœud mort ou réattribué"));
+            };
+            match s.select_option(
+                p.tab,
+                handle.node,
+                generation,
+                p.value.as_deref(),
+                p.index.map(|i| i as usize),
+            )? {
+                Some(outcome) => Ok(outcome_json(outcome)),
+                None => Err(err(
+                    ErrorCode::NotActionable,
+                    "pas un <select> ou option introuvable (value/index sans match)",
+                )),
+            }
+        }
+        Method::Describe(p) => {
+            scope(conn, p.tab)?;
+            tab_exists(st, p.tab).await?;
+            let handle = resolve(conn, st, p.tab, &p.elem_ref)?;
+            let s = st.session.lock().await;
+            let Some(generation) = s.node_generation(p.tab, handle.node) else {
+                return Err(err(ErrorCode::StaleRef, "nœud mort ou réattribué"));
+            };
+            let max = p.max_text.map_or(DESCRIBE_TEXT_CAP, |m| m as usize);
+            match s.element_describe(p.tab, handle.node, generation, max) {
+                Some(mut v) => {
+                    v["node"] = json!({"index": handle.node, "generation": generation});
+                    Ok(v)
+                }
+                None => Err(err(ErrorCode::StaleRef, "nœud mort ou réattribué")),
+            }
+        }
+        _ => Err(err(
+            ErrorCode::EngineUnavailable,
+            "verbe hors groupe — routage interne",
         )),
     }
 }
@@ -1050,9 +1172,10 @@ async fn handle_verbs(
             let (probe, action, degraded) = auto_wait(st, p.tab, handle, &opts).await?;
             let scroll_y = scroll_y(st, p.tab).await;
             let Some((cx, cy)) = probe.center_viewport(scroll_y) else {
-                return Err(not_actionable(
+                return Err(not_actionable_probe(
                     "pas de centre cliquable — élément non posé",
                     action,
+                    &probe,
                 ));
             };
             let outcome = send_input(st, p.tab, InputEvent::Click { x: cx, y: cy }).await?;
@@ -1064,6 +1187,9 @@ async fn handle_verbs(
             tab_exists(st, p.tab).await?;
             type_into_field(st, conn, p).await
         }
+        Method::InputSubmit(_) | Method::InputSelectOption(_) | Method::Describe(_) => {
+            ref_utility_verbs(st, conn, method).await
+        }
         Method::InputHover(p) => {
             scope(conn, p.tab)?;
             right_input(conn)?;
@@ -1073,7 +1199,11 @@ async fn handle_verbs(
             let (probe, action, degraded) = auto_wait(st, p.tab, handle, &opts).await?;
             let scroll_y = scroll_y(st, p.tab).await;
             let Some((cx, cy)) = probe.center_viewport(scroll_y) else {
-                return Err(not_actionable("pas de centre — non posé", action));
+                return Err(not_actionable_probe(
+                    "pas de centre — non posé",
+                    action,
+                    &probe,
+                ));
             };
             let outcome = send_input(st, p.tab, InputEvent::MouseMove { x: cx, y: cy }).await?;
             // `input.hover` rend `{url, editable}` du contrat.
@@ -1112,11 +1242,15 @@ async fn type_into_field(
         || probe.attr("contenteditable") == Some("true")
         || probe.attr("contenteditable") == Some("");
     if !editable {
-        return Err(not_actionable("élément non éditable", action));
+        return Err(not_actionable_probe("élément non éditable", action, &probe));
     }
     let scroll_y = scroll_y(st, p.tab).await;
     let Some((cx, cy)) = probe.center_viewport(scroll_y) else {
-        return Err(not_actionable("pas de centre — non posé", action));
+        return Err(not_actionable_probe(
+            "pas de centre — non posé",
+            action,
+            &probe,
+        ));
     };
     // Focus par le clic natif, puis frappe caractère
     // par caractère (Key+KeyUp — pas d'injection de
@@ -1200,9 +1334,10 @@ async fn act_verbs(
                 let handle = resolve(conn, st, p.tab, r)?;
                 let probe = crate::actionable::probe(st, p.tab, handle.node).await?;
                 let Some(rect) = probe.rect else {
-                    return Err(not_actionable(
+                    return Err(not_actionable_probe(
                         "élément non posé — scroll_into_view impossible",
                         Actionability::default(),
+                        &probe,
                     ));
                 };
                 let (scroll_y, vh) = {
@@ -1231,7 +1366,19 @@ async fn act_verbs(
             scope(conn, p.tab)?;
             right_input(conn)?;
             tab_exists(st, p.tab).await?;
-            let outcome = send_input(st, p.tab, InputEvent::Click { x: p.x, y: p.y }).await?;
+            // `space:"document"` → repli viewport (le moteur
+            // ne scrolle que verticalement — x inchangé).
+            let y = match p.space.as_deref() {
+                None | Some("viewport") => p.y,
+                Some("document") => p.y - scroll_y(st, p.tab).await,
+                Some(other) => {
+                    return Err(err(
+                        ErrorCode::InvalidParams,
+                        format!("space inconnu : {other} — viewport|document"),
+                    ));
+                }
+            };
+            let outcome = send_input(st, p.tab, InputEvent::Click { x: p.x, y }).await?;
             let mut v = outcome_json(outcome);
             // Coordonnées = échappatoire : toujours marqué
             // degraded (pas de handle, pas de checks — contrat).
@@ -1239,35 +1386,7 @@ async fn act_verbs(
             v["degraded"] = json!("click_at — pas de handle ni de checks");
             Ok(v)
         }
-        Method::EvalRun(p) => {
-            scope(conn, p.tab)?;
-            right_eval(conn)?;
-            tab_exists(st, p.tab).await?;
-            match eval_shared(&st.session, p.tab, p.expr).await {
-                EvalReply::Done { value, .. } => {
-                    let (mut val, mut er) = match &value {
-                        Ok(v) => (Some(v.clone()), None),
-                        Err(e) => (None, Some(e.clone())),
-                    };
-                    let mut truncated = false;
-                    if let Some(v) = &val {
-                        if v.len() > 64_000 {
-                            truncated = true;
-                            val = Some(v.chars().take(64_000).collect());
-                        }
-                    }
-                    let _ = &mut er;
-                    Ok(json!({
-                        "ok": value.is_ok(), "value": val, "error": er,
-                        "truncated": truncated,
-                    }))
-                }
-                EvalReply::Unavailable => Err(err(
-                    ErrorCode::EngineUnavailable,
-                    "moteur JS indisponible — pompe en vol",
-                )),
-            }
-        }
+        Method::EvalRun(p) => eval_verb(st, conn, p).await,
 
         // Verbe hors groupe — garde-fou interne (le dispatch
         // en amont route par construction ; si ça arrive, la
@@ -1275,6 +1394,75 @@ async fn act_verbs(
         _ => Err(err(
             ErrorCode::EngineUnavailable,
             "verbe hors groupe — routage interne",
+        )),
+    }
+}
+
+/// `eval.run` — pompe en vol → attente bornée de
+/// réinsertion du moteur (étape 257, retour terrain : le
+/// refus immédiat tombait juste après une action — quand
+/// l'agent veut lire l'état). `timeout_ms` borne
+/// l'attente totale.
+async fn eval_verb(
+    st: &Arc<AgentShared>,
+    conn: &mut AgentConn,
+    p: crate::proto::EvalParams,
+) -> Result<Value, RpcError> {
+    scope(conn, p.tab)?;
+    right_eval(conn)?;
+    tab_exists(st, p.tab).await?;
+    let deadline = tokio::time::Instant::now()
+        + Duration::from_millis(u64::from(p.timeout_ms.unwrap_or(2000)));
+    // `ref` → chemin DOM de l'élément (scope `eval_element`
+    // — étape 260). Résolu une fois, avant la boucle de
+    // réinsertion : une ref fraîche peut mourir pendant
+    // l'attente — l'erreur honnête est `stale_ref`.
+    let path = if let Some(elem_ref) = &p.elem_ref {
+        let handle = resolve(conn, st, p.tab, elem_ref)?;
+        let p2 = {
+            let s = st.session.lock().await;
+            let Some(generation) = s.node_generation(p.tab, handle.node) else {
+                return Err(err(ErrorCode::StaleRef, "nœud mort ou réattribué"));
+            };
+            s.element_path_of(p.tab, handle.node, generation)
+        };
+        let Some(p2) = p2 else {
+            return Err(err(ErrorCode::StaleRef, "nœud mort ou réattribué"));
+        };
+        Some(p2)
+    } else {
+        None
+    };
+    let reply = loop {
+        match eval_shared_at(&st.session, p.tab, p.expr.clone(), path.clone()).await {
+            EvalReply::Unavailable if tokio::time::Instant::now() < deadline => {
+                tokio::time::sleep(Duration::from_millis(POLL_MS)).await;
+            }
+            r => break r,
+        }
+    };
+    match reply {
+        EvalReply::Done { value, .. } => {
+            let (mut val, mut er) = match &value {
+                Ok(v) => (Some(v.clone()), None),
+                Err(e) => (None, Some(e.clone())),
+            };
+            let mut truncated = false;
+            if let Some(v) = &val {
+                if v.len() > 64_000 {
+                    truncated = true;
+                    val = Some(v.chars().take(64_000).collect());
+                }
+            }
+            let _ = &mut er;
+            Ok(json!({
+                "ok": value.is_ok(), "value": val, "error": er,
+                "truncated": truncated,
+            }))
+        }
+        EvalReply::Unavailable => Err(err(
+            ErrorCode::EngineUnavailable,
+            "moteur JS indisponible — pompe au-delà de la borne",
         )),
     }
 }
@@ -1316,6 +1504,9 @@ async fn wait_verbs(
                 }
                 WaitKind::Stable => wait_stable(st, p.tab, dur).await,
                 WaitKind::Idle => Err(unsupported("wait.idle — hooks réseau E4", "wait_commit")),
+                WaitKind::NetworkIdle => {
+                    wait_network_idle(st, p.tab, dur, u64::from(p.quiet_ms.unwrap_or(0))).await
+                }
             }
         }
 
@@ -1369,7 +1560,7 @@ async fn hist(
     tab_exists(st, tab).await?;
     if matches!(
         wait,
-        Some(WaitKind::Idle | WaitKind::Selector | WaitKind::Stable)
+        Some(WaitKind::Idle | WaitKind::Selector | WaitKind::Stable | WaitKind::NetworkIdle,)
     ) {
         return Err(unsupported("wait hors commit/frame — E2", "wait_commit"));
     }
@@ -1443,7 +1634,17 @@ fn mods(m: Option<KeyMods>) -> CoreKeyMods {
 fn outcome_json(o: InputOutcome) -> Value {
     let (result, extra) = match o {
         InputOutcome::Ignored => ("ignored", json!({})),
-        InputOutcome::Scrolled { scroll_y } => ("scrolled", json!({ "scroll_y": scroll_y })),
+        // Enfilé pour rejeu à la réinsertion — l'action aura
+        // lieu, juste plus tard (étape 257 ; ex-`ignored`,
+        // qui faisait croire à un abandon).
+        InputOutcome::Deferred => ("deferred", json!({})),
+        // `moved: false` = clampé/page non scrollable — le
+        // client lit « rien n'a bougé » au lieu d'un
+        // `scrolled` mensonger (retour terrain PIPE).
+        InputOutcome::Scrolled { scroll_y, moved } => (
+            if moved { "scrolled" } else { "noop" },
+            json!({ "scroll_y": scroll_y }),
+        ),
         InputOutcome::Navigated => ("navigated", json!({})),
         InputOutcome::Focused => ("focused", json!({})),
         InputOutcome::Edited => ("edited", json!({})),
@@ -1472,12 +1673,24 @@ async fn scroll_y(st: &Arc<AgentShared>, tab: u64) -> f32 {
         .map_or(0.0, |t| t.scroll_y)
 }
 
-/// `NotActionable` typé avec le constat dans `data`.
-fn not_actionable(message: impl Into<String>, a: Actionability) -> RpcError {
+/// `NotActionable` post-auto-wait — même constat plus la
+/// lecture du probe : `no_box` nomme le cas « interactif
+/// sans boîte posée » et `topmost_winner` ce qui est peint
+/// par-dessus (retour terrain vol field, étape 263).
+fn not_actionable_probe(
+    message: impl Into<String>,
+    a: Actionability,
+    p: &crate::actionable::Probe,
+) -> RpcError {
     err_data(
         ErrorCode::NotActionable,
         message,
-        json!({ "actionability": a }),
+        json!({
+            "actionability": a,
+            "no_box": p.rect.is_none(),
+            "topmost_winner": p.topmost_winner,
+            "tag": p.tag,
+        }),
     )
 }
 
@@ -1576,6 +1789,47 @@ async fn wait_stable(st: &Arc<AgentShared>, tab: u64, dur: Duration) -> Result<V
         }
         if tokio::time::Instant::now() >= deadline {
             return Err(err(ErrorCode::Timeout, "layout jamais stable"));
+        }
+        tokio::time::sleep(Duration::from_millis(POLL_MS)).await;
+    }
+}
+
+/// `wait.for{kind:"network_idle"}` (étape 258) : `ok:true`
+/// quand [`Session::net_inflight`] reste à zéro `quiet_ms`
+/// de suite — un fetch qui démarre pendant le calme le
+/// réinitialise (fenêtre glissante, pas simple sondage).
+/// `quiet_ms = 0` → [`QUIET_MS_DEFAULT`].
+async fn wait_network_idle(
+    st: &Arc<AgentShared>,
+    tab: u64,
+    dur: Duration,
+    quiet_ms: u64,
+) -> Result<Value, RpcError> {
+    let quiet = Duration::from_millis(if quiet_ms == 0 {
+        QUIET_MS_DEFAULT
+    } else {
+        quiet_ms
+    });
+    let deadline = tokio::time::Instant::now() + dur;
+    let mut calm_since = None::<tokio::time::Instant>;
+    loop {
+        let inflight = {
+            let s = st.session.lock().await;
+            s.net_inflight(tab)
+        };
+        let now = tokio::time::Instant::now();
+        match inflight {
+            None => return Err(err(ErrorCode::NoSuchTab, "onglet inconnu")),
+            Some(0) => {
+                let since = calm_since.get_or_insert(now);
+                if now.duration_since(*since) >= quiet {
+                    return Ok(json!({ "ok": true }));
+                }
+            }
+            Some(_) => calm_since = None,
+        }
+        if now >= deadline {
+            return Err(err(ErrorCode::Timeout, "réseau jamais calme"));
         }
         tokio::time::sleep(Duration::from_millis(POLL_MS)).await;
     }

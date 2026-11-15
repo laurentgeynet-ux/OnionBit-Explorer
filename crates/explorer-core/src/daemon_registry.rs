@@ -57,12 +57,14 @@ pub struct Announce {
     pub started_at: u64,
 }
 
-/// Répertoire du registre — `daemons/` sous la racine de
-/// profil par défaut ([`crate::JsonFileStore::default_dir`]).
-/// Créé paresseusement à l'annonce.
+/// Répertoire du registre — `<Explorer-data>/daemons` sous
+/// le projet ([`crate::paths::daemons_dir`] — le registre est
+/// transversal aux profils, il ne vit pas dans l'un d'eux) ;
+/// repli : `daemons/` sous le profil par défaut legacy.
 #[must_use]
 pub fn registry_dir() -> PathBuf {
-    crate::JsonFileStore::default_dir().join(REGISTRY_SUBDIR)
+    crate::paths::daemons_dir()
+        .unwrap_or_else(|| crate::JsonFileStore::default_dir().join(REGISTRY_SUBDIR))
 }
 
 /// Nom de fichier d'une annonce — `<nom>-<pid>.json` : le
@@ -188,7 +190,7 @@ pub fn list() -> Vec<(PathBuf, Announce)> {
 }
 
 /// Retire une annonce périmée — la GC du lecteur, réservée
-/// à la mort **prouvée** (voir [`pid_alive`]) : élaguer sur
+/// à la mort **prouvée** (voir [`announce_stale`]) : élaguer sur
 /// une sonde qui timeout évince définitivement un daemon
 /// vivant (il ne se ré-annonce qu'au démarrage).
 pub fn remove(file: &Path) {

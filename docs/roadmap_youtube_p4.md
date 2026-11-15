@@ -21,7 +21,7 @@
 > - **Protocole de vol** : [`vol-youtube.md`](vol-youtube.md)
 >   intégralement (batterie `EXPLORER_*` obligatoire,
 >   worktree de vol `C:\OnionBit-Explorer-youtube-wt`,
->   artefacts sous `C:\OnionBit-vol\youtube\`).
+>   artefacts sous `Explorer-data\vols\youtube\`).
 
 ---
 

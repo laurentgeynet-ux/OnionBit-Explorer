@@ -21,7 +21,7 @@ param(
   [Parameter(Mandatory=$true)][int]$DaemonPid,
   [int]$MaxMB = 5120,
   [int]$IntervalSec = 15,
-  [string]$Log = "_vol_memwatch.log"
+  [string]$Log = (Join-Path (Split-Path -Parent $PSScriptRoot) 'Explorer-data\logs\_vol_memwatch.log')
 )
 
 "watch start pid=$DaemonPid max=$MaxMB Mo interval=${IntervalSec}s" |

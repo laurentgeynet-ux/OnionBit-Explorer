@@ -40,7 +40,7 @@ param(
 
 $ErrorActionPreference = 'Continue'
 $root = Split-Path -Parent (Split-Path -Parent $PSCommandPath)
-$outDir = Join-Path $root 'target\site_smoke'
+$outDir = Join-Path $root 'Explorer-data\vols\site-smoke'
 New-Item -ItemType Directory -Force -Path $outDir | Out-Null
 
 if ($ListFile -eq '') {
@@ -177,15 +177,18 @@ if (-not $SkipFunctional -and $ok -gt 0) {
     Write-Output "  port smoke choisi : $FuncPort"
     $FuncBase = "http://127.0.0.1:$FuncPort/api"
     # Profil jetable : le smoke ne pollue ni le cache ni
-    # l'historique du profil utilisateur.
-    $profDir = Join-Path $env:TEMP "explorer-site-smoke-$FuncPort"
-    New-Item -ItemType Directory -Force -Path $profDir | Out-Null
+    # l'historique du profil utilisateur. `vol:<nom>` est un
+    # NOM canonique (étape 262) — résolu sous
+    # `Explorer-data/vols/<nom>/profile`, rien dans TEMP.
+    $profName = "vol:site-smoke-$FuncPort"
     # stderr capturé : une mort du daemon en cours de sondage
     # (observée une fois — cause non attribuée) doit laisser
     # une trace, pas disparaître dans le silence.
-    $daemonErr = Join-Path $env:TEMP 'explorer-site-smoke-daemon.log'
+    $logDir = Join-Path $root 'Explorer-data\logs'
+    New-Item -ItemType Directory -Force -Path $logDir | Out-Null
+    $daemonErr = Join-Path $logDir 'site-smoke-daemon.log'
     $proc = Start-Process -FilePath $daemon -PassThru -WindowStyle Hidden `
-        -ArgumentList '--port', "$FuncPort", '--profile', $profDir `
+        -ArgumentList '--port', "$FuncPort", '--profile', $profName `
         -RedirectStandardError $daemonErr
 
     # Client HTTP poolé (keep-alive) : les sondes se comptent en

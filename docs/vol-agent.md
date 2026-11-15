@@ -25,7 +25,7 @@ l'API REST d'input, la télémétrie = `dom`/`layout`/`mem`/SSE.
 ## 0. Checklist de lancement — séquence canonique
 
 Chaque vol ouvre sur cette séquence, dans l'ordre, sans
-exception. Les chemins corpus = `C:\OnionBit-vol\` (structure
+exception. Les chemins corpus = `Explorer-data\vols\` (structure
 canonique : `README.md` du corpus).
 
 ```powershell
@@ -46,11 +46,12 @@ cargo build --release -p explorer-daemon   # attendre « Finished »
 # SW_HIDE : jamais de fenêtre, survit à l'appelant, code de
 # sortie + stdout/stderr capturés (morts silencieuses passées).
 $env:EXPLORER_VIEWPORT='1366x900'
-$env:EXPLORER_PROFILE='C:\OnionBit-vol\prof<N>'   # froid = défaut
+$env:EXPLORER_PROFILE='vol:vol<N>'   # froid = défaut — NOM canonique
+                                     # → Explorer-data\vols\vol<N>\profile
 pwsh -File scripts/spawn_daemon.ps1 -Port 9385 `
-  -LogDir "C:\OnionBit-vol\logs"
+  -LogDir "Explorer-data\vols\vol<N>\logs"
 # (WMI n'hérite PAS l'env de l'appelant — le script cuit les
-# EXPLORER_* en `set` dans la ligne cmd ; -Profile <dir>
+# EXPLORER_* en `set` dans la ligne cmd ; -Profile <nom>
 # surchargerait EXPLORER_PROFILE)
 # -Repo <worktree> si le vol ne part PAS du dépôt du script
 # (sinon l'exe résolu = celui du dépôt principal, possiblement
@@ -65,17 +66,17 @@ pwsh -File scripts/spawn_daemon.ps1 -Port 9385 `
 # le watchdog, pas le moteur).
 pwsh -File scripts/vol_joblimit.ps1 -TargetPid <pid> -LimitMB 5120
 pwsh -File scripts/vol_memwatch.ps1 -DaemonPid <pid> -MaxMB 5120 `
-  -Log "C:\OnionBit-vol\logs\_vol<N>_watch.log" &
+  -Log "Explorer-data\vols\vol<N>\logs\watch.log" &
 
-# 0.5 artefacts au corpus, jamais dans le repo
-#   logs    → C:\OnionBit-vol\logs\_vol<N>_*.log
-#   PNG     → C:\OnionBit-vol\captures\vol<N>_<cible>.png
-#   rapport → C:\OnionBit-vol\RAPPORT_VOL_<date>_AGENT<n>_<TAG>.md
+# 0.5 artefacts au corpus, auto-contenus par vol
+#   logs    → Explorer-data\vols\vol<N>\logs\*.log
+#   PNG     → Explorer-data\vols\vol<N>\captures\<cible>.png
+#   rapport → Explorer-data\vols\vol<N>\RAPPORT_VOL_<date>_AGENT<n>_<TAG>.md
 ```
 
 **Coordination multi-équipes — `CLAIMS.md`** : plusieurs
 équipes volent en parallèle. Avant le premier `navigate`,
-ajouter sa ligne dans `C:\OnionBit-vol\CLAIMS.md` (vol N,
+ajouter sa ligne dans `Explorer-data\vols\CLAIMS.md` (vol N,
 agent N, tag, cibles) — une cible sur une ligne récente
 (< 2 h, sans rapport) est occupée. Le rapport déposé libère
 les cibles ; un claim > 2 h sans rapport = vol mort, cibles
@@ -84,7 +85,7 @@ libres.
 En clôture de vol : daemon tué par **PID** (jamais `taskkill
 /IM` — les voisins appartiennent aux autres équipes), logs
 archivés au corpus, `git add -A && git commit` dans
-`C:\OnionBit-vol`, entrée journal + statuts §B synchronisés.
+`Explorer-data\vols`, entrée journal + statuts §B synchronisés.
 
 ## 1. Lancer le daemon dédié
 
@@ -105,11 +106,12 @@ cargo build -p explorer-daemon          # attendre « Finished »
 `EXPLORER_PROFILE` choisit l'état persistant (cookies, HSTS,
 DNS, IDB, cache) — trois modes, à **déclarer dans le rapport** :
 
-- **Profil froid** (défaut de preuve) : dir dédié au vol
-  (`EXPLORER_PROFILE=_vol<N>_profile`) — verdict sur premier
-  contact réel. Exigé pour tout constat consentement/first-party.
+- **Profil froid** (défaut de preuve) : nom canonique du vol
+  (`EXPLORER_PROFILE=vol:vol<N>` → `Explorer-data\vols\vol<N>\
+  profile`) — verdict sur premier contact réel. Exigé pour
+  tout constat consentement/first-party.
 - **Profil chaud partagé** : le profil utilisateur
-  (`~/.config/explorer`) — historique cumulé : consentements
+  (`Explorer-data\profiles\default`) — historique cumulé : consentements
   déjà acceptés, cookies de session, jar rempli. Utile pour les
   bancs où l'état établi change la forme du challenge (SERP,
   re-vols §B-14 après premier passage). **Limites dures** :
@@ -117,8 +119,9 @@ DNS, IDB, cache) — trois modes, à **déclarer dans le rapport** :
   jamais en flotte parallèle) ; et la chaleur peut **masquer**
   un mur (un consentement accepté au vol N ne se montre plus —
   le rapport écrit « profil chaud » en tête).
-- **Profil gabarit** : copier un seed (`_profile_seed/` : fonts,
-  hsts, dns pré-remplis) vers le dir du vol — warm-start
+- **Profil gabarit** : copier un seed (`Explorer-data\vols\
+  _profile_seed\` : fonts, hsts, dns pré-remplis) vers le
+  `profile\` du vol — warm-start
   reproductible **par agent**, sans collision ni contamination
   croisée (chaque vol garde son propre état à partir du même
   point de départ).
@@ -658,30 +661,33 @@ fautive rejoue à chaque reprise). Observé terrain vol 99.
 
 ## 8. Traçabilité — synchro avec le corpus de vol
 
-Protocole complet : `C:\OnionBit-vol\SYNTHESE.md` §G.
+Protocole complet : `Explorer-data\vols\SYNTHESE.md` §G.
 
-**Le corpus de vol vit hors du repo** : `C:\OnionBit-vol\`
-(dossier dédié, `git init` local SANS remote — versionné
-localement, jamais poussé vers GitHub). Tous les vols lisent et
-écrivent là : `SYNTHESE.md`, `SYNTHESE_JOURNAL.md`,
-`RAPPORT_VOL_*.md`, `logs/`, `captures/` — **peu importe le
-worktree qui fait tourner le daemon**. Un worktree n'a jamais
-de copie locale du corpus : il accède au canon par chemin
-absolu — une copie se diverge, le canon non. L'ancien
+**Le corpus de vol vit sous la racine du repo** :
+`Explorer-data\vols\` — `Explorer-data/` entier est gitignoré
+(`git init` local SANS remote possible pour versionner le
+corpus). Tous les vols lisent et écrivent là : `SYNTHESE.md`,
+`SYNTHESE_JOURNAL.md`, `vol<N>\RAPPORT_VOL_*.md`,
+`vol<N>\logs/`, `vol<N>\captures/` — **peu importe le
+worktree qui fait tourner le daemon** : `paths::data_root()`
+remonte depuis cwd/exe jusqu'à l'ancêtre portant
+`Explorer-data/`, donc un daemon lancé depuis un worktree
+frère retombe sur le même canon. L'ancien
 `docs/Rapport vol/` du repo est supprimé (gitignoré depuis
 `df8888eb` ; la migration préserve l'historique dans le git
 local du corpus).
 
-**Règle artefacts — le repo reste propre** : aucun artefact de
-vol n'atterrit dans l'arbre du projet — dumps `_nav_*.json`,
-scripts `_probe*.py`, logs `vol*-watch.log`/`watch-*.log`,
-fixtures téléchargées (`*.js` de site réel), profils froids,
-captures : tout part dans `C:\OnionBit-vol\` (ou `%TEMP%` pour
-le jetable). `git status` du repo ne doit montrer que du WIP
-code — un `??` non-code = artefact mal garé. Dans le corpus,
-les caches de profils froids (`prof*/cache/`) sont exclus du
-versionning (régénérables, pas de la preuve) — le reste se
-commit régulièrement pour garder l'historique.
+**Règle artefacts — rien ne sort d'`Explorer-data\`** : dumps
+`_nav_*.json`, scripts `_probe*.py`, logs
+`vol*-watch.log`/`watch-*.log`, fixtures téléchargées
+(`*.js` de site réel), profils froids, captures : tout part
+dans `Explorer-data\vols\vol<N>\` — **jamais** `%TEMP%`,
+`%APPDATA%` ou un chemin hors repo. `git status` du repo ne
+doit montrer que du WIP code — un `??` non-code = artefact mal
+garé (hors `Explorer-data/`, ignoré). Dans le corpus,
+les caches de profils froids (`vol*/profile/cache/`) sont
+exclus du versionning (régénérables, pas de la preuve) — le
+reste se commit régulièrement pour garder l'historique.
 
 - Chaque constat du rapport porte `crate` + l'**ID §B** s'il
   correspond à une anomalie catalogue (`→ §B-5`) ; un trou

@@ -7845,6 +7845,82 @@ MCP = adaptateur, jamais la base.
   corrompt le JSON-RPC). `tab_new` rend l'id qualifié.
   `explorer-cli daemons` = œil humain. Vol vérifié : deux
   daemons, deux pages en parallèle, arrêt par verbe.
+- [x] **Étape 257. Retour terrain PIPE : outcomes honnêtes,
+  attentes bornées, filtres cascade** — **Livrée** :
+  `InputOutcome::Deferred` (input enfilé paint/pompe en vol
+  → `result:"deferred"`, plus `ignored` mensonger alors que
+  le clic navigue), `Scrolled.moved` (`"noop"` quand
+  `scroll_y` clampé), `stale_since:true` sur base snapshot
+  absente/élaguée, attente bornée de réinsertion sur
+  `eval.run` (`timeout_ms`) et `frame.get` (~2 s, pattern
+  `snapshot.get`), `engine.cascade{props|declared_only}`
+  contre les ~200 verdicts `initial`/`inherited` de bruit.
+- [x] **Étape 258. `wait.for{kind:"network_idle"}`** —
+  **Livrée** : `net_inflight` (`net_tasks`+`dyn_tasks`+file
+  FIFO `pending_script_net`+nav en cours) nul `quiet_ms`
+  (défaut 500) de suite, fenêtre glissante réinitialisée par
+  tout fetch démarrant. Couvre le cas kayak : remplissage
+  async post-commit sans polling `net.events`. Rejeté des
+  raccourcis `wait` de `nav.go`/`reload`/`history` comme les
+  autres kinds non-commit. Hors-bornes : sockets
+  persistantes ws/sse non comptées.
+- [x] **Étape 258-bis. `describe{ref}`** — **Livrée** :
+  tag/`attrs`/rect document/`textContent` borné
+  (`max_text`)/`value` de champ en un appel — les refs nues
+  de `query.select` deviennent distinguables sans
+  re-snapshot ni `eval`. `stale_ref` via la voie des verbes
+  `ref`.
+- [x] **Étape 259. Formulaires déterministes + coords
+  document** — **Livrée** : `input.submit{ref}` (séquence
+  `try_submit` complète, validation incluse),
+  `input.select_option{ref,value|index}` (popup contourné,
+  miroir JS + `input`/`change` + relayout),
+  `input.click_at{space:"document"}` (aligné snapshot —
+  scroll vertical seul, x inchangé).
+- [x] **Étape 260. `eval.run{ref}` — couture eval scopée**
+  — **Couture livrée** : param `ref` → `element_path` →
+  `JsEngine::eval_element` (trait additif, erreur honnête
+  par défaut). Binding `$0`/`el` posé par **JS-C549**
+  (spécialiste JS) — la couture est complète de bout en
+  bout.
+- [x] **Étape 261. `eval` page sans JS — moteur paresseux**
+  (retour terrain PIPE n°2) — `Tab.js_doc_html` conserve
+  la source quand le document commit sans moteur
+  (`want_js` faux + fabrique présente — bfcache inclus) ;
+  `eval_shared_at` → `ensure_js_engine` installe le
+  contexte à la demande via `spawn_engine` ordinaire,
+  `readyState` « complete ». `false` honnête : pompe en
+  vol, fabrique absente. La pompe périodique ne lazy-spawn
+  pas. **Fix** : MCP `engine_cascade` forward `props`/
+  `declared_only` ; `describe{select}` rend l'option
+  sélectionnée (`field_value`, même règle que
+  `select_option`). Verrou : `eval_lazy_engine_static_doc`.
+- [x] **Étape 262. `Explorer-data/` — racine canonique des
+  artefacts** (demande opérateur : chaque agent écrivait où
+  il voulait — APPDATA, `C:\Temp`, `C:\OnionBit-vol`,
+  `target\`). `paths::data_root()` + helpers
+  (`profiles/`/`vols/`/`daemons/`/`logs/`/`record/`/`crash/`)
+  + `clean_name` anti-sortie ; profils désignés par **nom**
+  (`<nom>`/`vol:<nom>` — `daemon_spawn` refuse les chemins) ;
+  registre, death-log, record/replay, `EXPLORER_LOG`
+  (tee fichier), `default_dir` recâblés ; scripts et règles
+  de vol alignés (corpus `Explorer-data\vols\`, plus de
+  `$env:TEMP` ni de chemin machine). **Non compilé** —
+  pause revue des hardcodages. **Prérequis à** : persistance
+  IDB incrémentale (fichiers canoniques avant nouveau
+  format).
+- [x] **Étape 263. Retour terrain vol field — les erreurs
+  nomment** (demandes NAV du vol kayak, verdict
+  `Explorer-data/vols/fieldjs/VERDICT.md`). `-32003` porte
+  `require`+`failed` (checks échus nommés) ;
+  `topmost_winner`/`no_box`/`tag` sur les erreurs post-
+  auto-wait ; garde `deferred_inputs` étendue aux fenêtres
+  `dom`/`tree` détachés hors `paint_detached` (`Deferred`,
+  fini « document sans élément » pendant l'apply) ; sonde
+  `hit_winner` (couverture + nœud gagnant) ; `no_box_cause`
+  nomme la cascade fautive (`attr:hidden`, `display:none`,
+  `opacity:0`…) fusionnée en `cause` dans
+  `engine.anomalies`.
 
 ## Piste JS (JS-C26+) — spécialiste `explorer-jscore`
 
@@ -12813,7 +12889,7 @@ croître la surface navigateur mesurée (`api` 1510/8099, 18,6 %).
   frontière) ; YouTube 186,6 s — `incr.cascade`
   1,7-2,2 s/passe, `group_us` 1,98 s sur une frame
   (résidu timing-dépendant non reproduit). Artefacts :
-  `C:\OnionBit-vol\vol-236-*.log`.
+  `Explorer-data\vols\vol-236-*.log`.
 - [ ] **N5.6 — adoption `entities` jscore** (§2.7) — quasi
   gratuit.
 - [x] **N5.7 — boutons de coût du vol** (§2.7, mesures) :
@@ -13130,6 +13206,22 @@ chaque gain rapporté contre les **deux** archétypes.
   (`ic_hit`/`ic_miss`/`ic_disarm` au snapshot) pour
   borner la couverture du seul court-circuit existant.
   Dependency-groups = infra lourde, dernier recours.
+- [x] **JS-C549 — `eval_on_element` : binding `$0`/`el`
+  scopé élément** (ferme la couture étape 260 —
+  `eval.run{ref}` EAP). `Engine::eval_on_element(node,
+  src, name)` : nœud miroir → `node_value`, globals
+  `$0`/`el` non-énumérables posés le temps de l'éval puis
+  déliés — props précédentes sauvegardées/restaurées
+  (`Prop` complet, accesseurs compris), scope jamais
+  fuité dans la page ; miroir absent ou nœud libéré →
+  `Uncaught` honnête. Côté `explorer-js` : `Cmd::
+  EvalElement` (ctx + path + budget canal, pattern
+  `EvalCtx`), résolution `mirror_node` sur `jsd`
+  (top) ou `ctx_doms` (cadre) — ref morte → erreur
+  honnête, jamais de scope factice. Verrous :
+  `dom.rs` ×4 (bind/identité `$0===el`, restauration
+  `var $0` préexistant, mutation reflétée au miroir,
+  erreur sans DOM).
 - [x] **JS-C548 — `FastHash` sur tables à clés
   internes** : SipHash ~15 ns/consultation sur des
   clés déjà mélangées (ptr `Location`, ptr AST,

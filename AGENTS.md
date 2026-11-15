@@ -224,6 +224,15 @@ l'attribution par phase.
   « x/y exécutés (z skips) sur sous-ensemble S » — test262 extrait
   ≠ test262, un dossier WPT ≠ WPT. Le cliquet verrouille une
   régression, il ne mesure pas une couverture globale.
+- **Artefacts = `Explorer-data/` canonique** : profils, logs,
+  registre daemons, corpus de vols, captures réseau, dumps —
+  tout atterrit sous `Explorer-data/` à la racine du repo,
+  résolu par `explorer_core::paths::data_root()` (cwd/exe →
+  ancêtre porteur, repli `CARGO_MANIFEST_DIR`, override
+  `EXPLORER_DATA`). **Jamais** `%APPDATA%`, `%TEMP%` ni chemin
+  machine en dur ; les profils se désignent par nom
+  (`<nom>` → `profiles/<nom>`, `vol:<nom>` → `vols/<nom>/profile`),
+  pas par chemin. `Explorer-data/` est gitignoré.
 - **Verdict terrain = binaire frais** : un `cargo build` relu
   avant `Finished` laisse un `.exe` périmé — tout shot/layout
   qui suit « valide » l'ancien code. Attendre `Finished`
