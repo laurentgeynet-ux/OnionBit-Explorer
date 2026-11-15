@@ -11863,13 +11863,42 @@ impl Engine {
             .iter()
             .all(|p| !p.rest && matches!(p.pat, Pat::Ident(_)))
         {
-            for (i, p) in params.iter().enumerate() {
-                let Pat::Ident(name) = &p.pat else {
-                    continue;
-                };
-                if !name.is_empty() {
-                    let v = args.get(i).cloned().unwrap_or(Value::Undefined);
-                    Self::env_put(&local, name, v, true);
+            // JS-C554 — un seul `borrow` + insertion `insert_slot`
+            // au slot canonique `i` (params = positions `0..n`
+            // par construction `fn_scope_ord`) : plus d'`intern`
+            // ni de `pos()` par paramètre. `insert_slot` vérifie
+            // `clé == name` et retombe sur `insert` si le canon
+            // surprend — même sémantique qu'`env_put` (insert
+            // `Bind` mutable sur `Local` frais).
+            let mut b = local.borrow_mut();
+            if let EnvKind::Local(m) = &mut b.kind {
+                for (i, p) in params.iter().enumerate() {
+                    let Pat::Ident(name) = &p.pat else {
+                        continue;
+                    };
+                    if !name.is_empty() {
+                        let v = args.get(i).cloned().unwrap_or(Value::Undefined);
+                        m.insert_slot(
+                            i,
+                            name.clone(),
+                            EnvCell::Bind(Binding {
+                                value: v,
+                                mutable: true,
+                                sloppy_silent: false,
+                            }),
+                        );
+                    }
+                }
+            } else {
+                drop(b);
+                for (i, p) in params.iter().enumerate() {
+                    let Pat::Ident(name) = &p.pat else {
+                        continue;
+                    };
+                    if !name.is_empty() {
+                        let v = args.get(i).cloned().unwrap_or(Value::Undefined);
+                        Self::env_put(&local, name, v, true);
+                    }
                 }
             }
         } else {
