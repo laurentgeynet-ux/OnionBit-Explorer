@@ -13220,6 +13220,11 @@ chaque gain rapporté contre les **deux** archétypes.
   (`ic_hit`/`ic_miss`/`ic_disarm` au snapshot) pour
   borner la couverture du seul court-circuit existant.
   Dependency-groups = infra lourde, dernier recours.
+- [x] **JS-C554 — params au slot canonique** : `insert_slot`
+  écrit `cells[i]` (vérif `ptr_eq||==`, dupes/divergents →
+  `insert`), un `borrow` pour la boucle — fini `intern`+
+  `pos()` par paramètre. Vol : −0,9 % `frame_ns`, sous le
+  bruit — hygiène structurelle.
 - [x] **JS-C553 — `arguments` annoté** : bail C490 levé —
   `fn_scope_*` pousse le nom quand `LIT_USES_ARGS` ; slot
   voit `LazyArgs` → miss → `env_get(&cur)` matérialise au
