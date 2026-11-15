@@ -10,8 +10,8 @@
 use explorer_jscore::{
     j17_enable, j17_keys_enable, j17_snapshot, Engine, J17_ARRIDX_TRY, J17_CALL, J17_CALL_NAT,
     J17_FN_DEFER, J17_FN_DEF_TOK, J17_FN_MAT, J17_PARSE_CALL, J17_PARSE_DUP, J17_PROP_IDX_BUILD,
-    J17_PROP_IDX_HIT, J17_PROP_LOOKUP, J17_PROP_SCAN, J17_PROTO_LVL, J17_RABS_HIT, J17_SLOT_HIT,
-    J17_STR_READ,
+    J17_PROP_IDX_HIT, J17_PROP_LOOKUP, J17_PROP_SCAN, J17_PROTO_LVL, J17_RABS_FULL, J17_RABS_HIT,
+    J17_RABS_INS, J17_SLOT_HIT, J17_STR_READ,
 };
 use std::sync::atomic::Ordering::Relaxed;
 
@@ -646,6 +646,41 @@ fn rabs_memo_sert_la_marche_has() {
     assert_eq!(
         r.ok().map(|v| format!("{v:?}")),
         Some("Bool(true)".to_string())
+    );
+}
+
+/// JS-C545 — `rabs_memo` évince en FIFO au cap au lieu de
+/// geler : > 8 192 paires absentes distinctes → `rabs_full`
+/// (évictions) tick ET `rabs_ins` dépasse le cap — le mémo
+/// n'est plus gelé au bootstrap (N5.52 : 496 k consultations
+/// rejetées, rendement ~13 %).
+#[test]
+fn rabs_memo_evince_au_cap_sans_geler() {
+    let _g = TEST_LOCK.lock().unwrap();
+    std::env::set_var("EXPLORER_NO_IC", "1");
+    let mut e = Engine::new();
+    std::env::remove_var("EXPLORER_NO_IC");
+    j17_enable();
+    let (ins0, full0) = (tick(&J17_RABS_INS), tick(&J17_RABS_FULL));
+    // 9 000 shapes distinctes (prop `p<i>` distincte) → ~9 000
+    // paires absentes own > cap 8 192 : inserts continuent.
+    e.eval("for(var i=0;i<9000;i++){ var o={}; o['p'+i]=1; 'zzz' in o; } 0")
+        .expect("eval");
+    let (ins1, full1) = (tick(&J17_RABS_INS), tick(&J17_RABS_FULL));
+    assert!(
+        ins1 - ins0 >= 9000,
+        "les inserts doivent dépasser le cap (δ {} )",
+        ins1 - ins0
+    );
+    assert!(
+        full1 > full0,
+        "des évictions FIFO doivent ticker (δ {})",
+        full1 - full0
+    );
+    // Réponse encore exacte après évictions.
+    assert_eq!(
+        e.eval("'a' in {a:1}").ok().map(|v| format!("{v:?}")),
+        Some("Bool(true)".into())
     );
 }
 

@@ -295,13 +295,16 @@ pub static J17_PROP_IDX_MISS: std::sync::atomic::AtomicU64 = std::sync::atomic::
 pub static J17_PROP_IDX_BUILD: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 /// JS-C544 — rendement `rabs_memo` (mémo own-absent par
 /// maillon `(shape, kid)`) : hits (maillon sauté sans
-/// `find_own_ai`), apprentissages, refus d'insertion au cap
-/// `RABS_MEMO_CAP` — `rabs_full` > 0 nommerait la
-/// saturation (`HashSet` sans éviction) en un vol.
+/// `find_own_ai`), apprentissages, évictions FIFO au cap
+/// `RABS_MEMO_CAP` (JS-C545 — `rabs_full` compte les
+/// évictions ; N5.52 = refus d'insert, gel mesuré).
 pub static J17_RABS_HIT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 /// Apprentissages `rabs_memo` (insert d'une paire absente).
 pub static J17_RABS_INS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
-/// Refus d'insertion `rabs_memo` — cap `RABS_MEMO_CAP` atteint.
+/// Évictions FIFO `rabs_memo` — cap `RABS_MEMO_CAP` atteint,
+/// la plus ancienne paire est retirée (était « refus
+/// d'insert » avant JS-C545 — le compteur nomme désormais
+/// la pression d'éviction, plus la saturation).
 pub static J17_RABS_FULL: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 /// Niveaux de scope parcourus par `env_get_seen` — profondeur
 /// de fermeture moyenne × `env_get` = coût résolution variable.

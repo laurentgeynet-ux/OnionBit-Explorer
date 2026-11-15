@@ -1049,7 +1049,14 @@ pub struct Engine {
     /// lectures absentes : le fold couvre la chaîne entière —
     /// toute mutation d'un maillon la change → correcte par
     /// construction (même leçon que `shadow_memo`, vol N5.19).
+    /// JS-C545 — bornée par éviction FIFO (`rabs_fifo`), pas
+    /// par gel : N5.52 a mesuré `rabs_ins` figée au cap 8192
+    /// dès le bootstrap puis 496 695 consultations rejetées.
     pub(crate) rabs_memo: std::collections::HashSet<(u64, u64)>,
+    /// Ordre d'insertion `rabs_memo` — `pop_front` = plus
+    /// ancienne paire vivante (chaque clé n'existe qu'une fois
+    /// dans le set et n'est poussée qu'une fois par insert).
+    pub(crate) rabs_fifo: std::collections::VecDeque<(u64, u64)>,
     /// Kill-switch IC (`EXPLORER_NO_IC=1`) — A/B en vol sans
     /// rebuild, précédent `resolve_off` (JS-C490c).
     pub(crate) ic_off: bool,
@@ -1632,6 +1639,7 @@ impl Engine {
             ic_map: std::collections::HashMap::new(),
             shadow_memo: std::collections::HashMap::new(),
             rabs_memo: std::collections::HashSet::new(),
+            rabs_fifo: std::collections::VecDeque::new(),
             ic_off: std::env::var("EXPLORER_NO_IC").is_ok_and(|v| v == "1"),
             ic_verify: std::env::var("EXPLORER_IC_VERIFY").is_ok_and(|v| v == "1"),
             lowered_suspend_cache: std::collections::HashMap::new(),
@@ -7819,6 +7827,26 @@ impl Engine {
     /// visités (`links` = `[receveur, …, propriétaire|dernier]`,
     /// receveur inclus) — JS-C504, apprentissage IC des hits proto
     /// et des absents.
+    /// JS-C545 — apprentissage `rabs_memo` borné par éviction
+    /// FIFO : au cap `RABS_MEMO_CAP`, la plus ancienne paire
+    /// est retirée puis la nouvelle insérée (précédent C537 —
+    /// fini le gel au bootstrap mesuré N5.52 : `rabs_ins`
+    /// figée à 8 192 et 496 695 consultations rejetées). Une
+    /// paire évincée et toujours vivante se ré-apprend au
+    /// prochain miss — coût borné à un `find_own_ai` par
+    /// réinsertion au lieu de la marche à vie.
+    fn rabs_learn(&mut self, mk: (u64, u64)) {
+        if self.rabs_memo.len() >= RABS_MEMO_CAP {
+            if let Some(old) = self.rabs_fifo.pop_front() {
+                self.rabs_memo.remove(&old);
+            }
+            crate::j17_tick(&crate::J17_RABS_FULL);
+        }
+        self.rabs_memo.insert(mk);
+        self.rabs_fifo.push_back(mk);
+        crate::j17_tick(&crate::J17_RABS_INS);
+    }
+
     pub(crate) fn find_prop_owner_links(
         &mut self,
         id: ObjId,
@@ -7882,12 +7910,7 @@ impl Engine {
                 let r = self.find_own_ai(cid, key);
                 if r.is_none() {
                     if let Some(mk) = mkey {
-                        if self.rabs_memo.len() < RABS_MEMO_CAP {
-                            self.rabs_memo.insert(mk);
-                            crate::j17_tick(&crate::J17_RABS_INS);
-                        } else {
-                            crate::j17_tick(&crate::J17_RABS_FULL);
-                        }
+                        self.rabs_learn(mk);
                     }
                 }
                 r
@@ -9211,12 +9234,7 @@ impl Engine {
                 let r = self.find_own_ai(cid, key);
                 if r.is_none() {
                     if let Some(mk) = mkey {
-                        if self.rabs_memo.len() < RABS_MEMO_CAP {
-                            self.rabs_memo.insert(mk);
-                            crate::j17_tick(&crate::J17_RABS_INS);
-                        } else {
-                            crate::j17_tick(&crate::J17_RABS_FULL);
-                        }
+                        self.rabs_learn(mk);
                     }
                 }
                 r
@@ -10121,12 +10139,7 @@ impl Engine {
             }
             if slow {
                 if let Some(mk) = mkey {
-                    if self.rabs_memo.len() < RABS_MEMO_CAP {
-                        self.rabs_memo.insert(mk);
-                        crate::j17_tick(&crate::J17_RABS_INS);
-                    } else {
-                        crate::j17_tick(&crate::J17_RABS_FULL);
-                    }
+                    self.rabs_learn(mk);
                 }
             }
             cur = nxt;

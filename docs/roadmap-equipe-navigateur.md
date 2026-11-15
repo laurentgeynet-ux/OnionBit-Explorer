@@ -12902,6 +12902,15 @@ chaque gain rapporté contre les **deux** archétypes.
   (`ic_hit`/`ic_miss`/`ic_disarm` au snapshot) pour
   borner la couverture du seul court-circuit existant.
   Dependency-groups = infra lourde, dernier recours.
+- [x] **JS-C545 — `rabs_memo` évinçante (FIFO)** :
+  N5.52 mesure le gel — `rabs_ins` = cap 8 192
+  dès bootstrap, 496 695 consultations rejetées,
+  rendement ~13 %. `rabs_learn` factorise aux trois
+  sites : `rabs_fifo` pop le plus ancien au cap
+  (précédent C537), paire vivante ré-apprise au
+  prochain miss. `rabs_full` = évictions désormais.
+  Lock j17 (9 000 shapes > cap : inserts continuent,
+  évictions tickent, réponse correcte).
 - [x] **JS-C544 — `rabs_memo` dans `has_prop_walk` +
   compteurs de rendement** : `pidxm:` N5.51 nomme
   ~29 % des miss = `in`/`hasOwnProperty`, seule
