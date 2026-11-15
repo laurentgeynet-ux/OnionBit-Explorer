@@ -66,11 +66,21 @@ pub(crate) fn sync_phase(tab: TabId, phase: &'static str, start: Instant) -> Ins
     // (`EXPLORER_ALLOC_TRACE` : octets demandés + nombre
     // d'appels depuis la phase précédente de ce fil).
     let (alloc_b, alloc_n) = explorer_common::alloc_delta().unwrap_or((0, 0));
+    let us = u64::try_from(now.duration_since(start).as_micros()).unwrap_or(u64::MAX);
+    // Étapes 250 — livre requêrable `engine.pipeline{phases}` :
+    // enregistrement au passage (coût ~ns, cf. phase_book.rs).
+    phase_book::record(
+        tab,
+        phase,
+        us,
+        u64::try_from(alloc_b).unwrap_or(u64::MAX),
+        u64::try_from(alloc_n).unwrap_or(u64::MAX),
+    );
     tracing::info!(
         target: "sync_profile",
         tab,
         phase,
-        us = u64::try_from(now.duration_since(start).as_micros()).unwrap_or(u64::MAX),
+        us,
         alloc_b,
         alloc_n,
         "phase sync"

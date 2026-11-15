@@ -392,14 +392,18 @@ impl Session {
 
 impl Session {
     /// Rapport d'introspection moteur de l'onglet (EAP
-    /// `engine.pipeline`, étape 247) — état de session +
-    /// compteurs de vie + attribution mémoire. `None` si
-    /// l'onglet n'existe pas. Outil de debug, hors chemin
-    /// chaud : la lecture est synchrone et bornée, sans
-    /// instrumentation ajoutée au pipeline lui-même (les
-    /// timings par phase restent sur la cible `sync_profile`
-    /// — cibles d'un `engine.pipeline` plus riche à venir).
-    pub fn pipeline_report(&mut self, tab: TabId) -> Option<serde_json::Value> {
+    /// `engine.pipeline`, étape 247 — `phases` étape 250) :
+    /// état de session + compteurs de vie + attribution
+    /// mémoire + **livre de phases `sync_profile`** (timings
+    /// cumulés/dernier/max par borne, allocs **process**
+    /// pendant la phase). `reset_phases` = sémantique « take »
+    /// : la réponse porte l'intervalle qui se clore, le livre
+    /// repart à zéro. `None` si l'onglet n'existe pas. Outil
+    /// de debug, hors chemin chaud : la lecture est synchrone
+    /// et bornée, sans instrumentation ajoutée au pipeline
+    /// lui-même (l'enregistrement vit dans `sync_phase`,
+    /// présent à chaque borne quelle que soit la requête).
+    pub fn pipeline_report(&mut self, tab: TabId, reset_phases: bool) -> Option<serde_json::Value> {
         let entry = self.tabs.get(&tab)?;
         let orphan_parked = self
             .orphaned_paints
@@ -437,10 +441,15 @@ impl Session {
             "pending_applies": self.pending_applies.iter().filter(|j| j.tab == tab).count(),
         });
         let mem = self.mem_report(tab);
+        let phases = super::phase_book::snapshot(tab);
+        if reset_phases {
+            super::phase_book::purge(tab);
+        }
         Some(serde_json::json!({
             "state": state,
             "counters": counters,
             "mem": mem,
+            "phases": phases,
         }))
     }
 }

@@ -7716,6 +7716,26 @@ MCP = adaptateur, jamais la base.
   filtré par capacités. Outil MCP `engine_anomalies`.
   Suites : `engine.cascade{ref}` (verdict par déclaration),
   accumulateur `sync_profile`, `net.events`.
+- [ ] **Étape 249. EAP `engine.paint_stats` : compteurs
+  d'émission + raster** — `EmitStats` permanente sur
+  `PaintPayload` (aujourd'hui gated `EXPLORER_EMIT_STATS`) +
+  `ReplayStats` du replay — servis `{emit, raster, frame}`.
+  **En attente** : mini-R `ReplayStats` chez PIPE
+  (interface-equipes 2026-11-15 — 3 variantes
+  `rasterize_*_stats` additives) ; la partie NAV est
+  préparée.
+- [x] **Étape 250. EAP `engine.pipeline{phases}` : livre
+  `sync_profile` requêrable** — livré avant 249 (aucune
+  dépendance PIPE). **Livrée (`main`)** : `phase_book.rs`
+  = registre global `BTreeMap<TabId, PhaseBook>` alimenté
+  par `sync_phase` aux ~60 bornes (les 39/58 hors portée de
+  payload incluses — un livre sur payload n'aurait couvert
+  que l'apply) ; `{n, us_total, us_last, us_max, alloc_b,
+  alloc_n}` par phase servi sous `phases` ; `reset:true` =
+  « take » ; purge `close_tab` ; `alloc_*` = process pendant
+  phase (honnêteté schéma). Help + schéma + golden + MCP
+  `reset`. Verrous : unitaire accumulateur, socket
+  `engine_introspection` (phase `flow.raster`, take).
 
 ## Piste JS (JS-C26+) — spécialiste `explorer-jscore`
 

@@ -1,5 +1,5 @@
 {
-  "doc": "Introspection moteur (étape 247) — engine.layout rend l'arbre de boîtes posé, engine.pipeline l'état/compteurs/mémoire de l'onglet.",
+  "doc": "Introspection moteur (étape 247) — engine.layout rend l'arbre de boîtes posé, engine.pipeline l'état/compteurs/mémoire de l'onglet. Étendu à l'étape 250 : engine.pipeline sert le livre de phases sync_profile et le param reset (sémantique « take »).",
   "exchange": [
     {
       "wire": "client → serveur",
@@ -59,6 +59,11 @@
             "layout_boxes": 8,
             "display_items": 12,
             "total_bytes": 1920000
+          },
+          "phases": {
+            "flow.raster": { "n": 1, "us_total": 4200, "us_last": 4200, "us_max": 4200, "alloc_b": 15360, "alloc_n": 84 },
+            "incr.cascade": { "n": 1, "us_total": 9100, "us_last": 9100, "us_max": 9100, "alloc_b": 40240, "alloc_n": 311 },
+            "incr.raster": { "n": 1, "us_total": 6300, "us_last": 6300, "us_max": 6300, "alloc_b": 2011136, "alloc_n": 12 }
           }
         }
       }
@@ -98,6 +103,32 @@
           },
           "rev": 1,
           "note": "suspects heuristiques — indices bornés, pas verdicts"
+        }
+      }
+    },
+    {
+      "wire": "client → serveur",
+      "message": {
+        "jsonrpc": "2.0",
+        "id": 33,
+        "method": "engine.pipeline",
+        "params": {
+          "tab": 1,
+          "reset": true
+        }
+      }
+    },
+    {
+      "wire": "serveur → client",
+      "message": {
+        "jsonrpc": "2.0",
+        "id": 33,
+        "result": {
+          "state": {},
+          "counters": {},
+          "mem": null,
+          "phases": {},
+          "comment": "reset:true = sémantique « take » — la réponse porte l'intervalle clos puis le livre repart à zéro (state/counters/mem élidés pour la lisibilité)"
         }
       }
     }

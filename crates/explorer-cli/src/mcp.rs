@@ -520,6 +520,18 @@ fn act_tools() -> Value {
         ),
         t("dom", "Dump DOM sérialisé {tab}", tab()),
         t("console", "Erreurs pipeline enregistrées {tab}", tab()),
+    ])
+}
+
+/// Catalogue introspection `engine.*` — troisième section
+/// (borne de lignes clippy, même motif que `act_tools`).
+fn engine_tools() -> Value {
+    let t = |name: &str, desc: &str, schema: Value| json!({"name": name, "description": desc, "inputSchema": schema});
+    let tab =
+        || json!({"type":"object","properties":{"tab":{"type":"integer"}},"required":["tab"]});
+    let obj =
+        |props: Value, req: &[&str]| json!({"type":"object","properties":props,"required":req});
+    json!([
         t(
             "engine_layout",
             "Arbre de boîtes posé (dump layout natif) {tab}",
@@ -527,8 +539,11 @@ fn act_tools() -> Value {
         ),
         t(
             "engine_pipeline",
-            "État moteur + compteurs + mémoire par réservoir {tab}",
-            tab()
+            "État moteur + compteurs + mémoire + phases sync_profile {tab,reset?}",
+            obj(
+                json!({"tab":{"type":"integer"},"reset":{"type":"boolean"}}),
+                &["tab"]
+            )
         ),
         t(
             "engine_anomalies",
@@ -541,10 +556,11 @@ fn act_tools() -> Value {
     ])
 }
 
-/// Les deux moitiés du catalogue, concaténées.
+/// Les sections du catalogue, concaténées.
 fn catalog() -> Value {
     let mut all = tools().as_array().cloned().unwrap_or_default();
     all.extend(act_tools().as_array().cloned().unwrap_or_default());
+    all.extend(engine_tools().as_array().cloned().unwrap_or_default());
     Value::Array(all)
 }
 
@@ -609,7 +625,10 @@ fn to_eap(name: &str, args: &Value) -> Option<(&'static str, Value)> {
         "dom" => ("dom.get", json!({"tab": tab})),
         "console" => ("console.get", json!({"tab": tab, "limit": args["limit"]})),
         "engine_layout" => ("engine.layout", json!({"tab": tab})),
-        "engine_pipeline" => ("engine.pipeline", json!({"tab": tab})),
+        "engine_pipeline" => (
+            "engine.pipeline",
+            json!({"tab": tab, "reset": args["reset"]}),
+        ),
         "engine_anomalies" => ("engine.anomalies", json!({"tab": tab, "max": args["max"]})),
         _ => return None,
     })

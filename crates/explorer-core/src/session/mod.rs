@@ -78,6 +78,7 @@ mod net_items;
 mod paint;
 #[allow(clippy::wildcard_imports)]
 mod paint_helpers;
+mod phase_book;
 #[allow(clippy::wildcard_imports)]
 mod popup;
 
@@ -1812,6 +1813,9 @@ impl Session {
             self.destroy_engine_offlock(eng);
         }
         self.tabs.remove(&tab).ok_or(CoreError::UnknownTab(tab))?;
+        // Livre de phases `engine.pipeline{phases}` — purge
+        // avec l'onglet (registre global, §phase_book).
+        phase_book::purge(tab);
         // Requêtes script-initiées en vol : annulées — leurs
         // réponses éventuelles arriveraient à un onglet mort.
         self.net_tasks.retain(|(t, _), j| {

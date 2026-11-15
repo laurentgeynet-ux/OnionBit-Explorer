@@ -81,6 +81,11 @@ const HELP: &[(&str, Option<Capability>, &str)] = &[
         "engine.pipeline",
     ),
     (
+        "où part le temps par phase ?",
+        Some(Capability::Engine),
+        "engine.pipeline{phases,reset}",
+    ),
+    (
         "erreurs pipeline ?",
         Some(Capability::ConsoleLog),
         "console.get",
@@ -853,7 +858,7 @@ async fn perceive_verbs(
             scope(conn, p.tab)?;
             tab_exists(st, p.tab).await?;
             let mut s = st.session.lock().await;
-            match s.pipeline_report(p.tab) {
+            match s.pipeline_report(p.tab, p.reset.unwrap_or(false)) {
                 Some(r) => Ok(r),
                 None => Err(err(ErrorCode::NoSuchTab, "onglet inconnu")),
             }

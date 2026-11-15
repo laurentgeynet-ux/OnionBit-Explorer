@@ -518,9 +518,11 @@ pub enum Method {
     #[serde(rename = "engine.layout")]
     EngineLayout(TabParams),
     /// Rapport moteur de l'onglet : état de session,
-    /// compteurs de vie, attribution mémoire (cap `engine`).
+    /// compteurs de vie, attribution mémoire, livre de
+    /// phases `sync_profile` (cap `engine`). `reset:true` =
+    /// « take » : l'intervalle se clore dans la réponse.
     #[serde(rename = "engine.pipeline")]
-    EnginePipeline(TabParams),
+    EnginePipeline(PipelineParams),
     /// Suspects heuristiques bornés — triage affichage +
     /// santé moteur (cap `engine`, étape 248).
     #[serde(rename = "engine.anomalies")]
@@ -636,6 +638,17 @@ pub struct AnomalyParams {
     /// Borne de suspects — défaut côté serveur.
     #[serde(default)]
     pub max: Option<u32>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct PipelineParams {
+    /// Onglet cible.
+    pub tab: TabId,
+    /// `true` = sémantique « take » : la réponse porte
+    /// l'intervalle qui se clore, le livre de phases repart
+    /// à zéro (étape 250).
+    #[serde(default)]
+    pub reset: Option<bool>,
 }
 
 #[derive(Debug, Clone, Deserialize)]

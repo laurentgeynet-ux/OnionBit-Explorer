@@ -353,6 +353,38 @@ async fn engine_introspection() {
     let r = a.call("engine.layout", json!({"tab": tab})).await;
     let dump = r["result"]["dump"].as_str().expect("dump");
     assert!(!dump.is_empty(), "{r}");
+    // Étapes 250 — livre de phases : la nav a enregistré des
+    // bornes `flow.*`, chaque accumulateur porte
+    // n/us_total/us_last/us_max/alloc_b/alloc_n.
+    let r = a.call("engine.pipeline", json!({"tab": tab})).await;
+    let phases = r["result"]["phases"].as_object().expect("phases");
+    assert!(
+        phases.contains_key("flow.raster"),
+        "flow.raster attendu après une nav : {phases:?}"
+    );
+    let acc = &phases["flow.raster"];
+    for k in ["n", "us_total", "us_last", "us_max", "alloc_b", "alloc_n"] {
+        assert!(acc[k].is_u64(), "champ {k} : {acc}");
+    }
+    let n_before = acc["n"].as_u64().expect("n");
+    // reset:true = « take » — la réponse porte l'intervalle
+    // clos, puis le livre repart à zéro : un take suivant ne
+    // revoit plus le compteur clos (les phases nées entre les
+    // deux, s'il y en a, repartent d'un n petit).
+    let r = a
+        .call("engine.pipeline", json!({"tab": tab, "reset": true}))
+        .await;
+    assert_eq!(
+        r["result"]["phases"]["flow.raster"]["n"], n_before,
+        "le take rend l'intervalle clos : {r}"
+    );
+    let r = a
+        .call("engine.pipeline", json!({"tab": tab, "reset": true}))
+        .await;
+    let n_after = r["result"]["phases"]["flow.raster"]["n"]
+        .as_u64()
+        .unwrap_or(0);
+    assert!(n_after < n_before, "livre reparti après take : {r}");
     // Onglet inconnu → -32005.
     let r = a.call("engine.pipeline", json!({"tab": 999})).await;
     assert_eq!(r["error"]["code"], -32005);

@@ -90,7 +90,7 @@ pub(crate) async fn run(
         s.reclaim_orphaned_paint(tab);
         let entries = s.snapshot_entries(tab).map_err(RpcError::from)?;
         let report = s.geometry_report(tab);
-        let health = s.pipeline_report(tab);
+        let health = s.pipeline_report(tab, false);
         (entries, report, health)
     };
     let rev = st.rev(tab);
