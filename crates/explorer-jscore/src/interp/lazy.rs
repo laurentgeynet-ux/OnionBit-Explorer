@@ -1379,7 +1379,11 @@ impl GExec {
                     catch: Some((pat, catch_body)),
                     finally,
                 } => {
+                    // JS-C534 — canon resolver du bloc catch
+                    // (`cbody.as_ptr()`, convention `exec.rs`) :
+                    // le param + ses lexicals en `cells` denses.
                     let cenv = Env::local(f.env.clone());
+                    e.predeclare_slots(&cenv, catch_body.as_ptr() as usize);
                     e.bind_pat(
                         &cenv,
                         self.this.clone(),
@@ -1701,6 +1705,20 @@ impl GExec {
         }
     }
 
+    /// JS-C534 — env de frame câblé quand le corps est un bloc :
+    /// `names_table[l.as_ptr()]` porte le canon resolver du bloc
+    /// (même convention `exec.rs`) → liaisons en `cells` denses
+    /// au lieu de `extra`. Corps non-bloc : aucune déclaration
+    /// lexicale possible — l'env reste un pass-through non
+    /// câblé (`extra` vide, lookup remonte direct).
+    fn frame_env(e: &Engine, env: &EnvRef, body: &Stmt) -> EnvRef {
+        let fenv = Env::local(env.clone());
+        if let Stmt::Block(l) = body {
+            e.predeclare_slots(&fenv, l.as_ptr() as usize);
+        }
+        fenv
+    }
+
     /// Exécute un statement du frame courant : positions
     /// suspendues (`let x = yield e`, `yield e;`, `await e;`)
     /// → `pending` ; composés porteurs → frame ; le reste →
@@ -1802,7 +1820,7 @@ impl GExec {
                     self.stack.push(GFrame {
                         list: Rc::new(Self::body_list(b)),
                         pc: 0,
-                        env: Env::local(env.clone()),
+                        env: Self::frame_env(e, env, b),
                         labels: Vec::new(),
                         kind: FKind::Seq,
                     });
@@ -1831,7 +1849,7 @@ impl GExec {
                     self.stack.push(GFrame {
                         list: Rc::new(Self::body_list(body)),
                         pc: 0,
-                        env: Env::local(env.clone()),
+                        env: Self::frame_env(e, env, body),
                         labels: Vec::new(),
                         kind: FKind::While { cond: cond.clone() },
                     });
@@ -1842,7 +1860,7 @@ impl GExec {
                 self.stack.push(GFrame {
                     list: Rc::new(Self::body_list(body)),
                     pc: 0,
-                    env: Env::local(env.clone()),
+                    env: Self::frame_env(e, env, body),
                     labels: Vec::new(),
                     kind: FKind::While { cond: cond.clone() },
                 });
@@ -1876,7 +1894,7 @@ impl GExec {
                     self.stack.push(GFrame {
                         list: Rc::new(Self::body_list(body)),
                         pc: 0,
-                        env: Env::local(env.clone()),
+                        env: Self::frame_env(e, env, body),
                         labels: Vec::new(),
                         kind: FKind::For {
                             test: test.clone(),
@@ -1903,7 +1921,7 @@ impl GExec {
                     self.stack.push(GFrame {
                         pc: list.len(),
                         list: Rc::new(list),
-                        env: Env::local(env.clone()),
+                        env: Self::frame_env(e, env, body),
                         labels: Vec::new(),
                         kind: FKind::ForAwait {
                             iter: it,
@@ -1919,7 +1937,7 @@ impl GExec {
                     return Ok(GFlow::Adv);
                 }
                 self.bind_for_target(e, env, target, items[0].clone())?;
-                let benv = Env::local(env.clone());
+                let benv = Self::frame_env(e, env, body);
                 self.stack.push(GFrame {
                     list: Rc::new(Self::body_list(body)),
                     pc: 0,
@@ -1948,7 +1966,7 @@ impl GExec {
                     return Ok(GFlow::Adv);
                 }
                 self.bind_for_target(e, env, target, items[0].clone())?;
-                let benv = Env::local(env.clone());
+                let benv = Self::frame_env(e, env, body);
                 self.stack.push(GFrame {
                     list: Rc::new(Self::body_list(body)),
                     pc: 0,
@@ -1967,10 +1985,14 @@ impl GExec {
                 catch,
                 finally,
             } => {
+                // JS-C534 — canon resolver du bloc try
+                // (`block.as_ptr()`, convention `exec.rs`).
+                let benv = Env::local(env.clone());
+                e.predeclare_slots(&benv, block.as_ptr() as usize);
                 self.stack.push(GFrame {
                     list: Rc::new(block.clone()),
                     pc: 0,
-                    env: Env::local(env.clone()),
+                    env: benv,
                     labels: Vec::new(),
                     kind: FKind::Try {
                         catch: catch.clone(),
@@ -1983,7 +2005,7 @@ impl GExec {
                 self.stack.push(GFrame {
                     list: Rc::new(Self::body_list(body)),
                     pc: 0,
-                    env: Env::local(env.clone()),
+                    env: Self::frame_env(e, env, body),
                     labels: vec![name.clone()],
                     kind: FKind::Seq,
                 });
@@ -2022,10 +2044,17 @@ impl GExec {
                         flat.extend(c.body.iter().cloned());
                     }
                     if !flat.is_empty() {
+                        // JS-C534 — bloc déclaratif unique du
+                        // switch : canon `cases.as_ptr()`
+                        // (convention `exec.rs` — le `flat` est
+                        // synthétique, la clé reste celle des
+                        // cases source).
+                        let senv = Env::local(env.clone());
+                        e.predeclare_slots(&senv, cases.as_ptr() as usize);
                         self.stack.push(GFrame {
                             list: Rc::new(flat),
                             pc: 0,
-                            env: Env::local(env.clone()),
+                            env: senv,
                             labels: Vec::new(),
                             kind: FKind::Switch,
                         });

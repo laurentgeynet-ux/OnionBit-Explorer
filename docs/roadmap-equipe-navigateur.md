@@ -12902,19 +12902,21 @@ chaque gain rapporté contre les **deux** archétypes.
   (`ic_hit`/`ic_miss`/`ic_disarm` au snapshot) pour
   borner la couverture du seul court-circuit existant.
   Dependency-groups = infra lourde, dernier recours.
-- [x] **JS-C534 — attribution `extra` + couverture
-  `wire_*`** : vol N5.38 — `bnd_extra` 563 k (38 %
-  des lookups) = réservoir surprise. `Bindings::get`
-  split le hit `extra` : `xt_unw` (canon vide — env
-  non câblé, ex. frames `GExec` de `lazy.rs` sans
-  `predeclare_slots` → **raccordable**) vs `xt_dyn`
-  (canon câblé, nom hors canon — eval-injection,
-  **structurel**). `wire_hit`/`wire_miss` = taux de
-  trouvaille `names_table` aux sites appelés.
-  Décision N5.39 : `xt_unw` dominant → câbler les
-  frames (`predeclare_slots` quand corps =
-  `Stmt::Block`) ; `xt_dyn` dominant → chemin extra
-  structurel, pivot vers `binary`/`unary` (16 %).
+- [x] **JS-C534 — câblage envs `GExec` + attribution
+  `extra`** : N5.39 a tranché — `xt_unw` 563 479 /
+  `xt_dyn` 0 : 100 % raccordable. `frame_env` câble
+  les frames `GExec` quand le corps est
+  `Stmt::Block` (if/while/do/for/for-in/of/await/
+  labeled) + `catch`/`try`/`switch` sur leurs clés
+  canon (`cbody`/`block`/`cases` — le `flat` switch
+  synthétique garde la clé source). Non câblés à
+  dessein : `finally` (partage `f.env`), class
+  `cenv`/`menv` (binds privés dynamiques), corps
+  non-bloc (pass-through). Bonus : slots = −42 %
+  `env_lvl` (NO_SLOTS 4,52 M vs 2,61 M).
+  Verrous lang/dom/c502/c533/j17/n538 verts.
+  Lecture vol : `xt_unw` effondré, `env_lvl`/
+  `env_ns` en reflux ; résidu = class envs.
 - [x] **JS-C533 — `Bindings` slot-indexé** : vol N5.37
   — `ident` = 34 % des nœuds évalués, `env_lvl`
   2,63 M ; chaque niveau scannait des paires
