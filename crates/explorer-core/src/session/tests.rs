@@ -6761,3 +6761,35 @@ fn eval_lazy_engine_static_doc() {
     let tab2 = s2.open_tab();
     assert!(!s2.ensure_js_engine(tab2));
 }
+
+/// Étape 264 — throttle des écritures profil : première
+/// écriture immédiate, rafale bornée dans la fenêtre, flush
+/// différé des clés échues, vidange finale exhaustive.
+#[test]
+fn persist_throttle_borne_et_vidange() {
+    let mut t = PersistThrottle::with_interval(std::time::Duration::from_millis(40));
+    assert!(t.ready("idb:o"), "première écriture immédiate");
+    assert!(!t.ready("idb:o"), "rafale bornée dans la fenêtre");
+    assert!(!t.ready("idb:o"), "encore bornée — clé en attente");
+    assert!(t.due().is_empty(), "fenêtre non échue → rien à flusher");
+    std::thread::sleep(std::time::Duration::from_millis(50));
+    assert_eq!(
+        t.due(),
+        vec!["idb:o".to_string()],
+        "fenêtre échue → la clé sort"
+    );
+    // Clés indépendantes : la fenêtre est par clé, pas globale.
+    assert!(t.ready("cookies"));
+    assert!(!t.ready("cookies"), "cookies borné à son tour");
+    assert!(t.ready("storage:o"), "autre clé → autre fenêtre");
+    // Vidange finale : tout ce qui attend sort, échu ou non.
+    let mut all = t.take_all();
+    all.sort();
+    assert_eq!(all, vec!["cookies".to_string()]);
+    assert!(t.take_all().is_empty(), "file vidée");
+    // Après vidange le point de synchro suivant peut réécrire
+    // (marquée écrite à `now` — mais `ready` s'applique à la
+    // fenêtre suivante).
+    std::thread::sleep(std::time::Duration::from_millis(50));
+    assert!(t.ready("cookies"), "fenêtre échue → réécriture");
+}
