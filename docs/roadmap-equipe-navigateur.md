@@ -13220,6 +13220,14 @@ chaque gain rapporté contre les **deux** archétypes.
   (`ic_hit`/`ic_miss`/`ic_disarm` au snapshot) pour
   borner la couverture du seul court-circuit existant.
   Dependency-groups = infra lourde, dernier recours.
+- [x] **JS-C561 — `document.body`/`head` : chemin rapide
+  enfants de `<html>`** — `hns:` nommait `body` = 75,6
+  µs/get (39 % de la masse host top-40) : deux marches
+  O(DOM) `by_tag` par get. Résolution en O(enfants de
+  html), repli `ensure_doc_part`/`by_tag` inchangé quand
+  le squelette manque — parité + précision spec. Masse
+  plate ~0,7-2 µs/get (fixe mécanique), pics nommés
+  `clientWidth` ~70 µs, `content`/`owner` ~5 µs.
 - [x] **JS-C560 — `hns:` : attribution temporelle
   `class:key` autour de `Host::get`** — la traîne est plate
   par construction (≥ 700 noms pour 96 % des gets) ; la

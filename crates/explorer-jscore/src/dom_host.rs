@@ -5681,8 +5681,29 @@ impl Host for DocumentHost {
                 // rendait le nœud Document → `f.contentDocument.
                 // body.appendChild` jettait `(on HTMLDocument)`
                 // (moin/degiro, web-agri — JS-C208).
-                ensure_doc_part(&self.dom, "body");
-                let n = self.dom.borrow().body();
+                // JS-C561 — chemin rapide : `body` = enfant
+                // élément de `<html>` (spec) — O(enfants de
+                // html) au lieu de DEUX marches O(DOM)
+                // (`ensure_doc_part` + `body()` font chacun un
+                // `by_tag` collecteur ; hns: mesurait ~75 µs/get
+                // sur le DOM yt). Le repli rejoue l'ancien
+                // comportement à l'identique quand le squelette
+                // n'est pas là.
+                let n = {
+                    let d = self.dom.borrow();
+                    let fast = d.document_element().and_then(|h| {
+                        d.element_children(h)
+                            .into_iter()
+                            .find(|&c| d.nodes[c as usize].tag == "body")
+                    });
+                    if let Some(n) = fast {
+                        n
+                    } else {
+                        drop(d);
+                        ensure_doc_part(&self.dom, "body");
+                        self.dom.borrow().body()
+                    }
+                };
                 Ok(Some(node_value(e, &self.dom, &self.cache, n)))
             }
             // `document.activeElement` (CAP-162) — l'élément
@@ -5947,12 +5968,25 @@ impl Host for DocumentHost {
                 // `document.head.insertBefore` au mount).
                 let n = {
                     let mut d = self.dom.borrow_mut();
-                    d.by_tag(d.root, "head").first().copied().or_else(|| {
-                        let h = d.create_element("head");
-                        let html_el = d.by_tag(d.root, "html").first().copied().unwrap_or(d.root);
-                        let first = d.child_nodes(html_el).first().copied();
-                        d.insert_before(html_el, h, first);
-                        Some(h)
+                    // JS-C561 — même chemin rapide que `body` :
+                    // `head` = enfant élément de `<html>` avant
+                    // la marche O(DOM) `by_tag` (repli strict
+                    // sur l'ancien comportement — auto-vive et
+                    // documents exotiques inclus).
+                    let fast = d.document_element().and_then(|h| {
+                        d.element_children(h)
+                            .into_iter()
+                            .find(|&c| d.nodes[c as usize].tag == "head")
+                    });
+                    fast.or_else(|| {
+                        d.by_tag(d.root, "head").first().copied().or_else(|| {
+                            let h = d.create_element("head");
+                            let html_el =
+                                d.by_tag(d.root, "html").first().copied().unwrap_or(d.root);
+                            let first = d.child_nodes(html_el).first().copied();
+                            d.insert_before(html_el, h, first);
+                            Some(h)
+                        })
                     })
                 };
                 Ok(Some(match n {
