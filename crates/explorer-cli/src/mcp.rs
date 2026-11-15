@@ -783,9 +783,9 @@ fn act_tools() -> Value {
         ),
         t(
             "wait_for",
-            "Attend {tab,kind:commit|frame|selector|stable,selector?,timeout_ms?}",
+            "Attend {tab,kind:commit|frame|selector|stable|network_idle,selector?,quiet_ms?,timeout_ms?}",
             obj(
-                json!({"tab":{"type":"integer"},"kind":{"type":"string"},"selector":{"type":"string"},"timeout_ms":{"type":"integer"}}),
+                json!({"tab":{"type":"integer"},"kind":{"type":"string"},"selector":{"type":"string"},"quiet_ms":{"type":"integer"},"timeout_ms":{"type":"integer"}}),
                 &["tab", "kind"]
             )
         ),
@@ -980,6 +980,7 @@ fn to_eap(name: &str, args: &Value) -> Option<(&'static str, Value)> {
         "wait_for" => (
             "wait.for",
             json!({"tab": tab, "kind": args["kind"], "selector": args["selector"],
+                   "quiet_ms": args["quiet_ms"],
                    "timeout_ms": args["timeout_ms"].as_u64().unwrap_or(5000)}),
         ),
         "eval" => (

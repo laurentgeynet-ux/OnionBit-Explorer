@@ -7845,6 +7845,25 @@ MCP = adaptateur, jamais la base.
   corrompt le JSON-RPC). `tab_new` rend l'id qualifié.
   `explorer-cli daemons` = œil humain. Vol vérifié : deux
   daemons, deux pages en parallèle, arrêt par verbe.
+- [x] **Étape 257. Retour terrain PIPE : outcomes honnêtes,
+  attentes bornées, filtres cascade** — **Livrée** :
+  `InputOutcome::Deferred` (input enfilé paint/pompe en vol
+  → `result:"deferred"`, plus `ignored` mensonger alors que
+  le clic navigue), `Scrolled.moved` (`"noop"` quand
+  `scroll_y` clampé), `stale_since:true` sur base snapshot
+  absente/élaguée, attente bornée de réinsertion sur
+  `eval.run` (`timeout_ms`) et `frame.get` (~2 s, pattern
+  `snapshot.get`), `engine.cascade{props|declared_only}`
+  contre les ~200 verdicts `initial`/`inherited` de bruit.
+- [x] **Étape 258. `wait.for{kind:"network_idle"}`** —
+  **Livrée** : `net_inflight` (`net_tasks`+`dyn_tasks`+file
+  FIFO `pending_script_net`+nav en cours) nul `quiet_ms`
+  (défaut 500) de suite, fenêtre glissante réinitialisée par
+  tout fetch démarrant. Couvre le cas kayak : remplissage
+  async post-commit sans polling `net.events`. Rejeté des
+  raccourcis `wait` de `nav.go`/`reload`/`history` comme les
+  autres kinds non-commit. Hors-bornes : sockets
+  persistantes ws/sse non comptées.
 
 ## Piste JS (JS-C26+) — spécialiste `explorer-jscore`
 

@@ -537,6 +537,31 @@ impl Session {
         }))
     }
 
+    /// Tâches réseau en vol pour l'onglet (étape 258 —
+    /// `wait.for{kind:"network_idle"}`) : `net_tasks` +
+    /// `dyn_tasks` + file `pending_script_net` (garée au
+    /// quota/FIFO, partira) + nav en cours. La vague
+    /// initiale de sous-ressources vit dans le `NavJob`
+    /// détaché — couverte par [`Session::nav_pending`].
+    /// `None` = onglet inconnu.
+    #[must_use]
+    pub fn net_inflight(&self, tab: TabId) -> Option<usize> {
+        let _entry = self.tabs.get(&tab)?;
+        let tasks = self
+            .net_tasks
+            .keys()
+            .chain(self.dyn_tasks.keys())
+            .filter(|(t, _)| *t == tab)
+            .count();
+        let parked = self
+            .pending_script_net
+            .iter()
+            .filter(|p| p.tab == tab)
+            .count();
+        let nav = usize::from(self.nav_pending(tab));
+        Some(tasks + parked + nav)
+    }
+
     /// Explication de cascade d'un nœud (étape 253 —
     /// `engine.cascade`) : consomme [`StyleEngine::explain`]
     /// (R-301) sur l'état **committé** — `ComputedStyle`

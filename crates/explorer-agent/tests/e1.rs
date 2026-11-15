@@ -670,6 +670,15 @@ async fn wait_for_frame_borne() {
         )
         .await;
     assert_eq!(r["error"]["code"], -32004);
+    // network_idle sur onglet sans trafic → calme dès
+    // quiet_ms atteint (étape 258).
+    let r = a
+        .call(
+            "wait.for",
+            json!({"tab": tab, "kind": "network_idle", "quiet_ms": 100, "timeout_ms": 2000}),
+        )
+        .await;
+    assert_eq!(r["result"]["ok"], true);
     srv.abort();
 }
 

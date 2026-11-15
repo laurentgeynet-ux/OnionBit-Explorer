@@ -659,6 +659,11 @@ pub enum WaitKind {
     Selector,
     /// Deux commits layout sans delta de rects (`wait.for` seul).
     Stable,
+    /// Aucune tâche réseau en vol pendant `quiet_ms`
+    /// (`wait.for` seul — étape 258). Couvre les tâches
+    /// `net`/`dyn` trackées, la file FIFO et la nav en
+    /// cours ; pas les sockets persistantes (ws/sse).
+    NetworkIdle,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -893,6 +898,10 @@ pub struct WaitForParams {
     /// Sélecteur — requis pour `kind=selector`.
     #[serde(default)]
     pub selector: Option<String>,
+    /// Durée de calme requise — `kind=network_idle`
+    /// seulement (défaut [`QUIET_MS_DEFAULT`]).
+    #[serde(default)]
+    pub quiet_ms: Option<u32>,
     /// Borne — [`ErrorCode::Timeout`] au-delà.
     pub timeout_ms: u32,
 }

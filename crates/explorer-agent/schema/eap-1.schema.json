@@ -88,7 +88,7 @@
 
     "waitKind": {
       "type": "string",
-      "enum": ["commit", "idle", "frame", "selector", "stable"]
+      "enum": ["commit", "idle", "frame", "selector", "stable", "network_idle"]
     },
 
     "role": {
@@ -526,13 +526,14 @@
     },
 
     "wait.for": {
-      "x-phase": "E1 (nav/frame) / E2 (selector/stable)",
+      "x-phase": "E1 (nav/frame) / E2 (selector/stable) / 258 (network_idle)",
       "params": {
         "type": "object",
         "properties": {
           "tab": { "$ref": "#/$defs/tabId" },
           "kind": { "$ref": "#/$defs/waitKind" },
           "selector": { "type": "string", "description": "requis pour kind=selector" },
+          "quiet_ms": { "type": "integer", "minimum": 0, "description": "calme réseau requis — kind=network_idle seulement (défaut 500)" },
           "timeout_ms": { "type": "integer", "minimum": 1 }
         },
         "required": ["tab", "kind", "timeout_ms"],

@@ -30,6 +30,9 @@ use crate::state::{AgentConn, AgentShared, StoredSnap, SubFilter};
 /// Timeout de navigation par défaut quand `wait` n'en porte
 /// pas (règle 13 — nommé, pas en dur).
 const NAV_WAIT_DEFAULT_MS: u64 = 30_000;
+/// Calme réseau requis pour `wait.for{kind:"network_idle"}`
+/// quand `quiet_ms` est absent (étape 258).
+const QUIET_MS_DEFAULT: u64 = 500;
 
 /// Capacités **implémentées** par cette build — l'intersection
 /// avec les demandées fait la liste livrée. Surface v1
@@ -375,10 +378,12 @@ async fn settle_wait(
             let dur = Duration::from_millis(timeout_ms.map_or(NAV_WAIT_DEFAULT_MS, u64::from));
             wait_frame(st, tab, dur).await
         }
-        Some(WaitKind::Idle | WaitKind::Selector | WaitKind::Stable) => Err(unsupported(
-            "wait.for hors commit/frame — E2",
-            "wait_commit",
-        )),
+        Some(WaitKind::Idle | WaitKind::Selector | WaitKind::Stable | WaitKind::NetworkIdle) => {
+            Err(unsupported(
+                "wait.for hors commit/frame — E2",
+                "wait_commit",
+            ))
+        }
         _ => Ok(()),
     }
 }
@@ -688,7 +693,9 @@ async fn nav_verbs(
             // doit pas produire d'effet de bord.
             if matches!(
                 p.wait,
-                Some(WaitKind::Idle | WaitKind::Selector | WaitKind::Stable)
+                Some(
+                    WaitKind::Idle | WaitKind::Selector | WaitKind::Stable | WaitKind::NetworkIdle,
+                )
             ) {
                 return Err(unsupported("wait hors commit/frame — E2", "wait_commit"));
             }
@@ -704,7 +711,9 @@ async fn nav_verbs(
             scope(conn, p.tab)?;
             if matches!(
                 p.wait,
-                Some(WaitKind::Idle | WaitKind::Selector | WaitKind::Stable)
+                Some(
+                    WaitKind::Idle | WaitKind::Selector | WaitKind::Stable | WaitKind::NetworkIdle,
+                )
             ) {
                 return Err(unsupported("wait hors commit/frame — E2", "wait_commit"));
             }
@@ -1362,6 +1371,9 @@ async fn wait_verbs(
                 }
                 WaitKind::Stable => wait_stable(st, p.tab, dur).await,
                 WaitKind::Idle => Err(unsupported("wait.idle — hooks réseau E4", "wait_commit")),
+                WaitKind::NetworkIdle => {
+                    wait_network_idle(st, p.tab, dur, u64::from(p.quiet_ms.unwrap_or(0))).await
+                }
             }
         }
 
@@ -1415,7 +1427,7 @@ async fn hist(
     tab_exists(st, tab).await?;
     if matches!(
         wait,
-        Some(WaitKind::Idle | WaitKind::Selector | WaitKind::Stable)
+        Some(WaitKind::Idle | WaitKind::Selector | WaitKind::Stable | WaitKind::NetworkIdle,)
     ) {
         return Err(unsupported("wait hors commit/frame — E2", "wait_commit"));
     }
@@ -1632,6 +1644,47 @@ async fn wait_stable(st: &Arc<AgentShared>, tab: u64, dur: Duration) -> Result<V
         }
         if tokio::time::Instant::now() >= deadline {
             return Err(err(ErrorCode::Timeout, "layout jamais stable"));
+        }
+        tokio::time::sleep(Duration::from_millis(POLL_MS)).await;
+    }
+}
+
+/// `wait.for{kind:"network_idle"}` (étape 258) : `ok:true`
+/// quand [`Session::net_inflight`] reste à zéro `quiet_ms`
+/// de suite — un fetch qui démarre pendant le calme le
+/// réinitialise (fenêtre glissante, pas simple sondage).
+/// `quiet_ms = 0` → [`QUIET_MS_DEFAULT`].
+async fn wait_network_idle(
+    st: &Arc<AgentShared>,
+    tab: u64,
+    dur: Duration,
+    quiet_ms: u64,
+) -> Result<Value, RpcError> {
+    let quiet = Duration::from_millis(if quiet_ms == 0 {
+        QUIET_MS_DEFAULT
+    } else {
+        quiet_ms
+    });
+    let deadline = tokio::time::Instant::now() + dur;
+    let mut calm_since = None::<tokio::time::Instant>;
+    loop {
+        let inflight = {
+            let s = st.session.lock().await;
+            s.net_inflight(tab)
+        };
+        let now = tokio::time::Instant::now();
+        match inflight {
+            None => return Err(err(ErrorCode::NoSuchTab, "onglet inconnu")),
+            Some(0) => {
+                let since = calm_since.get_or_insert(now);
+                if now.duration_since(*since) >= quiet {
+                    return Ok(json!({ "ok": true }));
+                }
+            }
+            Some(_) => calm_since = None,
+        }
+        if now >= deadline {
+            return Err(err(ErrorCode::Timeout, "réseau jamais calme"));
         }
         tokio::time::sleep(Duration::from_millis(POLL_MS)).await;
     }
