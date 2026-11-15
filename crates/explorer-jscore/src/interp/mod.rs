@@ -6278,9 +6278,13 @@ impl Engine {
                     3 => &crate::J17_SM_MAP,
                     _ => &crate::J17_SM_KIND,
                 });
+                crate::j17_idnt_probe(name);
                 self.env_get(&cur, name)
             }
         } else {
+            // JS-C549 — annotation depth-only (`slot` sentinelle)
+            // : la marche part de l'ancêtre, le nom est attribué.
+            crate::j17_idnt_probe(name);
             self.env_get(&cur, name)
         };
         if let v @ Some(_) = v {
