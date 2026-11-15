@@ -7870,6 +7870,13 @@ MCP = adaptateur, jamais la base.
   de `query.select` deviennent distinguables sans
   re-snapshot ni `eval`. `stale_ref` via la voie des verbes
   `ref`.
+- [x] **Étape 259. Formulaires déterministes + coords
+  document** — **Livrée** : `input.submit{ref}` (séquence
+  `try_submit` complète, validation incluse),
+  `input.select_option{ref,value|index}` (popup contourné,
+  miroir JS + `input`/`change` + relayout),
+  `input.click_at{space:"document"}` (aligné snapshot —
+  scroll vertical seul, x inchangé).
 
 ## Piste JS (JS-C26+) — spécialiste `explorer-jscore`
 

@@ -490,15 +490,30 @@
       },
       "result": { "type": "object", "properties": { "scroll_y": { "type": "number" } }, "required": ["scroll_y"] }
     },
+    "input.submit": {
+      "x-phase": "259",
+      "description": "Soumission déterministe du `<form>` englobant la ref (le ref peut être le form ou un descendant) : séquence complète `try_submit` — validation de contraintes + event `submit` + action par défaut. `not_actionable` si pas d'ancêtre `<form>` ; alternative fiable au `key Enter` qui peut échouer `unfocused`.",
+      "params": { "type": "object", "properties": { "tab": { "$ref": "#/$defs/tabId" }, "ref": { "$ref": "#/$defs/elementRef" } }, "required": ["tab", "ref"], "additionalProperties": false },
+      "result": { "type": "object" }
+    },
+
+    "input.select_option": {
+      "x-phase": "259",
+      "description": "Choix déterministe dans un `<select>` (le popup options n'est pas pilotable par `input.type`) : `index` = rang 0-based des `<option>`, sinon `value` = attribut `value` ou `textContent` trimmé. Applique `selected` + miroir JS + events `input`/`change` + relayout. `not_actionable` si ref ≠ select ou option introuvable ; `invalid_params` si ni value ni index.",
+      "params": { "type": "object", "properties": { "tab": { "$ref": "#/$defs/tabId" }, "ref": { "$ref": "#/$defs/elementRef" }, "value": { "type": "string" }, "index": { "type": "integer", "minimum": 0 } }, "required": ["tab", "ref"], "additionalProperties": false },
+      "result": { "type": "object" }
+    },
+
     "input.click_at": {
       "x-phase": "E1",
-      "description": "Échappatoire coordonnées — réponse toujours degraded (pas de handle, pas de check).",
+      "description": "Échappatoire coordonnées — réponse toujours degraded (pas de handle, pas de check). x,y en coords viewport par défaut ; `space:\"document\"` (étape 259) aligne sur les rects du snapshot/`describe` (repli viewport interne, scroll vertical seul).",
       "params": {
         "type": "object",
         "properties": {
           "tab": { "$ref": "#/$defs/tabId" },
           "x": { "type": "number" },
           "y": { "type": "number" },
+          "space": { "type": "string", "enum": ["viewport", "document"], "default": "viewport" },
           "mods": { "$ref": "#/$defs/keyMods" }
         },
         "required": ["tab", "x", "y"],

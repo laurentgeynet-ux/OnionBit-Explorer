@@ -581,6 +581,13 @@ pub enum Method {
     /// toujours `degraded` (pas de handle, pas de check).
     #[serde(rename = "input.click_at")]
     InputClickAt(ClickAtParams),
+    /// Soumission déterministe du `<form>` englobant —
+    /// étape 259.
+    #[serde(rename = "input.submit")]
+    InputSubmit(RefParams),
+    /// Choix d'option dans un `<select>` — étape 259.
+    #[serde(rename = "input.select_option")]
+    InputSelectOption(SelectOptionParams),
 
     /// Évaluation JS dans le contexte top-level (cap+droit `eval`).
     #[serde(rename = "eval.run")]
@@ -842,6 +849,25 @@ pub struct RefParams {
     pub opts: Option<ActionOpts>,
 }
 
+/// `input.select_option{tab,ref,value?|index?}` — étape 259 :
+/// `index` = rang d'`<option>` (0-based), `value` =
+/// attribut `value` OU `textContent` trimmé ; les deux
+/// absents → `invalid_params`.
+#[derive(Debug, Clone, Deserialize)]
+pub struct SelectOptionParams {
+    /// Onglet.
+    pub tab: TabId,
+    /// Handle du `<select>`.
+    #[serde(rename = "ref")]
+    pub elem_ref: ElementRef,
+    /// Attribut `value` de l'option, ou son texte trimmé.
+    #[serde(default)]
+    pub value: Option<String>,
+    /// Rang 0-based dans les `<option>` du select.
+    #[serde(default)]
+    pub index: Option<u32>,
+}
+
 #[derive(Debug, Clone, Deserialize)]
 pub struct TypeParams {
     /// Onglet.
@@ -887,10 +913,15 @@ pub struct ScrollParams {
 pub struct ClickAtParams {
     /// Onglet.
     pub tab: TabId,
-    /// Position viewport (px CSS).
+    /// Position (px CSS) — espace `space`.
     pub x: f32,
-    /// Position viewport.
+    /// Position.
     pub y: f32,
+    /// Espace de coordonnées : `"viewport"` (défaut, contrat
+    /// historique) | `"document"` (aligné sur les rects du
+    /// snapshot/`describe` — étape 259).
+    #[serde(default)]
+    pub space: Option<String>,
     /// Modifieurs.
     #[serde(default)]
     pub mods: Option<KeyMods>,

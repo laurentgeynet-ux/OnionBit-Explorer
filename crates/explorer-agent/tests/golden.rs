@@ -83,6 +83,8 @@ fn golden_methods_known() {
         "input.key",
         "input.scroll",
         "input.click_at",
+        "input.submit",
+        "input.select_option",
         "eval.run",
         "wait.for",
         "events.subscribe",

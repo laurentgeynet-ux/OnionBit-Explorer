@@ -742,10 +742,26 @@ fn act_tools() -> Value {
             )
         ),
         t(
-            "click_at",
-            "Clic coordonnées — dégradé {tab,x,y}",
+            "submit",
+            "Soumet le <form> englobant la ref {tab,ref}",
             obj(
-                json!({"tab":{"type":"integer"},"x":{"type":"number"},"y":{"type":"number"}}),
+                json!({"tab":{"type":"integer"},"ref":{"type":"string"}}),
+                &["tab", "ref"]
+            )
+        ),
+        t(
+            "select_option",
+            "Choisit une option du <select> {tab,ref,value?|index?}",
+            obj(
+                json!({"tab":{"type":"integer"},"ref":{"type":"string"},"value":{"type":"string"},"index":{"type":"integer"}}),
+                &["tab", "ref"]
+            )
+        ),
+        t(
+            "click_at",
+            "Clic coordonnées — dégradé {tab,x,y,space?}",
+            obj(
+                json!({"tab":{"type":"integer"},"x":{"type":"number"},"y":{"type":"number"},"space":{"type":"string"}}),
                 &["tab", "x", "y"]
             )
         ),
@@ -971,7 +987,7 @@ fn to_eap(name: &str, args: &Value) -> Option<(&'static str, Value)> {
         ),
         "click_at" => (
             "input.click_at",
-            json!({"tab": tab, "x": args["x"], "y": args["y"]}),
+            json!({"tab": tab, "x": args["x"], "y": args["y"], "space": args["space"]}),
         ),
         "type" => (
             "input.type",
@@ -980,6 +996,11 @@ fn to_eap(name: &str, args: &Value) -> Option<(&'static str, Value)> {
                    "opts": {"timeout_ms": args["timeout_ms"]}}),
         ),
         "hover" => ("input.hover", json!({"tab": tab, "ref": elem})),
+        "submit" => ("input.submit", json!({"tab": tab, "ref": elem})),
+        "select_option" => (
+            "input.select_option",
+            json!({"tab": tab, "ref": elem, "value": args["value"], "index": args["index"]}),
+        ),
         "scroll" => (
             "input.scroll",
             json!({"tab": tab, "ref": args["ref"].as_str(), "dy": args["dy"]}),

@@ -551,6 +551,79 @@ const ANOMALY_PAGE: &str = r#"<!doctype html><html><body>
     <input type="hidden" name="h"></div>
     <a href="/v">visible</a></body></html>"#;
 
+/// Formulaire minimal — `input.submit`/`input.select_option`
+/// (étape 259).
+const FORM_PAGE: &str = r#"<!doctype html><html><body>
+    <a href="/x">hors form</a>
+    <form><input type="text"><select><option value="a">AA</option><option value="b">BB</option></select><button>envoyer</button></form>
+    </body></html>"#;
+
+#[tokio::test]
+async fn c2_submit_select_option() {
+    let (mut a, srv, _session) = connect_with_html(FORM_PAGE).await;
+    // input + handles requis par les actions ref.
+    a.call(
+        "session.open",
+        json!({"protocol":"eap/1","capabilities":["snapshot","handles","actionable","wait_commit","input","tabs","events"],"profile":{"input":true}}),
+    )
+    .await;
+    let r = a.call("tab.open", json!({})).await;
+    let tab = r["result"]["tab"].as_u64().expect("tab");
+    let r = a
+        .call("nav.goto", json!({"tab": tab, "url": "http://t.local/x"}))
+        .await;
+    assert!(r["error"].is_null(), "{r}");
+    let r = a
+        .call("query.select", json!({"tab": tab, "selector": "select"}))
+        .await;
+    let sel_ref = r["result"]["refs"]
+        .as_array()
+        .and_then(|a| a.first())
+        .and_then(|r| r.as_str())
+        .map(str::to_owned)
+        .expect("ref select");
+    let r = a
+        .call("query.select", json!({"tab": tab, "selector": "a"}))
+        .await;
+    let link_ref = r["result"]["refs"]
+        .as_array()
+        .and_then(|a| a.first())
+        .and_then(|r| r.as_str())
+        .map(str::to_owned)
+        .expect("ref a");
+    // value → choix honnête ; sans value/index → -32602 ;
+    // mauvaise value → -32003.
+    let r = a
+        .call(
+            "input.select_option",
+            json!({"tab": tab, "ref": sel_ref, "value": "b"}),
+        )
+        .await;
+    assert!(r["error"].is_null(), "{r}");
+    let r = a
+        .call("input.select_option", json!({"tab": tab, "ref": sel_ref}))
+        .await;
+    assert_eq!(r["error"]["code"], -32602, "{r}");
+    let r = a
+        .call(
+            "input.select_option",
+            json!({"tab": tab, "ref": sel_ref, "value": "zzz"}),
+        )
+        .await;
+    assert_eq!(r["error"]["code"], -32003, "{r}");
+    // submit sur le <select> (descendant du form) → séquence
+    // complète ; sur le <a> hors form → -32003.
+    let r = a
+        .call("input.submit", json!({"tab": tab, "ref": sel_ref}))
+        .await;
+    assert!(r["error"].is_null(), "{r}");
+    let r = a
+        .call("input.submit", json!({"tab": tab, "ref": link_ref}))
+        .await;
+    assert_eq!(r["error"]["code"], -32003, "{r}");
+    srv.abort();
+}
+
 #[tokio::test]
 async fn engine_anomalies_flague_interactif_sans_boite() {
     let (mut a, srv, _session) = connect_with_html(ANOMALY_PAGE).await;

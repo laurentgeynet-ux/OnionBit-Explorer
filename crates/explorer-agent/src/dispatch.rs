@@ -153,7 +153,7 @@ const HELP: &[(&str, Option<Capability>, &str)] = &[
     (
         "cliquer, taper, survoler ?",
         Some(Capability::Input),
-        "input.click|input.type|input.hover",
+        "input.click|input.type|input.hover|input.submit|input.select_option",
     ),
     (
         "touches, scroll, coordonnées ?",
@@ -191,7 +191,9 @@ fn cap_of(m: &Method) -> Option<Capability> {
         | Method::Describe(_)
         | Method::InputClick(_)
         | Method::InputType(_)
-        | Method::InputHover(_) => Some(Capability::Handles),
+        | Method::InputHover(_)
+        | Method::InputSubmit(_)
+        | Method::InputSelectOption(_) => Some(Capability::Handles),
         Method::FrameGet(_) => Some(Capability::Frames),
         Method::ConsoleGet(_) => Some(Capability::ConsoleLog),
         Method::DomGet(_) => Some(Capability::Dom),
@@ -566,6 +568,8 @@ async fn run(
         Method::InputClick(_)
         | Method::InputType(_)
         | Method::InputHover(_)
+        | Method::InputSubmit(_)
+        | Method::InputSelectOption(_)
         | Method::Describe(_) => handle_verbs(st, conn, method).await,
         Method::InputKey(_)
         | Method::InputScroll(_)
@@ -1070,6 +1074,80 @@ async fn engine_cascade_verb(
     }
 }
 
+/// Verbes `ref` utilitaires (étapes 258-bis/259) :
+/// `describe`, `input.submit`, `input.select_option` —
+/// lecture ou action déterministe, sans auto-wait
+/// d'actionabilité (`submit`/`select_option` ne cliquent pas).
+async fn ref_utility_verbs(
+    st: &Arc<AgentShared>,
+    conn: &mut AgentConn,
+    method: Method,
+) -> Result<Value, RpcError> {
+    match method {
+        Method::InputSubmit(p) => {
+            scope(conn, p.tab)?;
+            right_input(conn)?;
+            tab_exists(st, p.tab).await?;
+            let handle = resolve(conn, st, p.tab, &p.elem_ref)?;
+            let mut s = st.session.lock().await;
+            let Some(generation) = s.node_generation(p.tab, handle.node) else {
+                return Err(err(ErrorCode::StaleRef, "nœud mort ou réattribué"));
+            };
+            match s.submit_ref(p.tab, handle.node, generation)? {
+                Some(outcome) => Ok(outcome_json(outcome)),
+                None => Err(err(ErrorCode::NotActionable, "pas d'ancêtre <form>")),
+            }
+        }
+        Method::InputSelectOption(p) => {
+            scope(conn, p.tab)?;
+            right_input(conn)?;
+            tab_exists(st, p.tab).await?;
+            if p.value.is_none() && p.index.is_none() {
+                return Err(err(ErrorCode::InvalidParams, "value ou index requis"));
+            }
+            let handle = resolve(conn, st, p.tab, &p.elem_ref)?;
+            let mut s = st.session.lock().await;
+            let Some(generation) = s.node_generation(p.tab, handle.node) else {
+                return Err(err(ErrorCode::StaleRef, "nœud mort ou réattribué"));
+            };
+            match s.select_option(
+                p.tab,
+                handle.node,
+                generation,
+                p.value.as_deref(),
+                p.index.map(|i| i as usize),
+            )? {
+                Some(outcome) => Ok(outcome_json(outcome)),
+                None => Err(err(
+                    ErrorCode::NotActionable,
+                    "pas un <select> ou option introuvable (value/index sans match)",
+                )),
+            }
+        }
+        Method::Describe(p) => {
+            scope(conn, p.tab)?;
+            tab_exists(st, p.tab).await?;
+            let handle = resolve(conn, st, p.tab, &p.elem_ref)?;
+            let s = st.session.lock().await;
+            let Some(generation) = s.node_generation(p.tab, handle.node) else {
+                return Err(err(ErrorCode::StaleRef, "nœud mort ou réattribué"));
+            };
+            let max = p.max_text.map_or(DESCRIBE_TEXT_CAP, |m| m as usize);
+            match s.element_describe(p.tab, handle.node, generation, max) {
+                Some(mut v) => {
+                    v["node"] = json!({"index": handle.node, "generation": generation});
+                    Ok(v)
+                }
+                None => Err(err(ErrorCode::StaleRef, "nœud mort ou réattribué")),
+            }
+        }
+        _ => Err(err(
+            ErrorCode::EngineUnavailable,
+            "verbe hors groupe — routage interne",
+        )),
+    }
+}
+
 /// Actions par handle — auto-wait d'actionabilité avant
 /// d'agir (ADR-0035 §6) : les verbes `ref` vivent ici,
 /// séparés des actions directes par souci de taille.
@@ -1108,22 +1186,8 @@ async fn handle_verbs(
             tab_exists(st, p.tab).await?;
             type_into_field(st, conn, p).await
         }
-        Method::Describe(p) => {
-            scope(conn, p.tab)?;
-            tab_exists(st, p.tab).await?;
-            let handle = resolve(conn, st, p.tab, &p.elem_ref)?;
-            let s = st.session.lock().await;
-            let Some(generation) = s.node_generation(p.tab, handle.node) else {
-                return Err(err(ErrorCode::StaleRef, "nœud mort ou réattribué"));
-            };
-            let max = p.max_text.map_or(DESCRIBE_TEXT_CAP, |m| m as usize);
-            match s.element_describe(p.tab, handle.node, generation, max) {
-                Some(mut v) => {
-                    v["node"] = json!({"index": handle.node, "generation": generation});
-                    Ok(v)
-                }
-                None => Err(err(ErrorCode::StaleRef, "nœud mort ou réattribué")),
-            }
+        Method::InputSubmit(_) | Method::InputSelectOption(_) | Method::Describe(_) => {
+            ref_utility_verbs(st, conn, method).await
         }
         Method::InputHover(p) => {
             scope(conn, p.tab)?;
@@ -1292,7 +1356,19 @@ async fn act_verbs(
             scope(conn, p.tab)?;
             right_input(conn)?;
             tab_exists(st, p.tab).await?;
-            let outcome = send_input(st, p.tab, InputEvent::Click { x: p.x, y: p.y }).await?;
+            // `space:"document"` → repli viewport (le moteur
+            // ne scrolle que verticalement — x inchangé).
+            let y = match p.space.as_deref() {
+                None | Some("viewport") => p.y,
+                Some("document") => p.y - scroll_y(st, p.tab).await,
+                Some(other) => {
+                    return Err(err(
+                        ErrorCode::InvalidParams,
+                        format!("space inconnu : {other} — viewport|document"),
+                    ));
+                }
+            };
+            let outcome = send_input(st, p.tab, InputEvent::Click { x: p.x, y }).await?;
             let mut v = outcome_json(outcome);
             // Coordonnées = échappatoire : toujours marqué
             // degraded (pas de handle, pas de checks — contrat).
