@@ -1467,3 +1467,124 @@ fn groupe_void_imbrique_propage_au_parent() {
     let full = rasterize(&list, font_src(), 1.0).expect("plein cadre");
     assert_top_rows(&f, &full, 100);
 }
+
+/// R-300 — `ReplayStats` : les variantes `*_stats`
+/// rapportent en struct les compteurs `raster.parts`
+/// (demande NAV `engine.paint_stats`, journal 2026-11-15).
+#[test]
+fn replay_stats_plein_cadre_compte_items_dessins_clips() {
+    let red = Color {
+        r: 200,
+        g: 0,
+        b: 0,
+        a: 255,
+    };
+    let list = dlist(vec![
+        DisplayItem::PushClip(Rect {
+            x: 0.0,
+            y: 0.0,
+            width: 100.0,
+            height: 100.0,
+        }),
+        fill(10.0, 10.0, 50.0, 50.0, red),
+        fill(500.0, 500.0, 50.0, 50.0, red),
+        DisplayItem::PopClip,
+    ]);
+    let mut gc = explorer_render::GlyphCache::new();
+    let (frame, st) = explorer_render::rasterize_cached_stats(&list, font_src(), 1.0, &mut gc);
+    assert!(frame.is_some(), "frame produite");
+    assert_eq!(st.items, 4);
+    assert_eq!(st.clips, 1, "un PushClip rencontré");
+    assert_eq!(st.clips_real, 1, "clip partiel → Mask réel");
+    assert_eq!(st.draws, 2, "sans filtre les deux fills peignent");
+    assert_eq!(st.skips, 0);
+    assert_eq!(st.kind_n[1], 2, "les deux FillRect en famille « fill »");
+    // La variante ordinaire délègue et jette les stats :
+    // même frame produite.
+    let plain = explorer_render::rasterize_cached(&list, font_src(), 1.0, &mut gc);
+    assert_eq!(plain.map(|f| f.pixels), frame.map(|f| f.pixels));
+}
+
+/// R-300 — fenêtré : les items hors bande tombent en `skips`,
+/// le clip est compté quand même (item d'état).
+#[test]
+fn replay_stats_fenetre_culle_les_items_hors_bande() {
+    let red = Color {
+        r: 200,
+        g: 0,
+        b: 0,
+        a: 255,
+    };
+    let list = dlist(vec![
+        DisplayItem::PushClip(Rect {
+            x: 0.0,
+            y: 0.0,
+            width: 100.0,
+            height: 100.0,
+        }),
+        fill(10.0, 10.0, 50.0, 50.0, red),
+        fill(500.0, 500.0, 50.0, 50.0, red),
+        DisplayItem::PopClip,
+    ]);
+    let mut gc = explorer_render::GlyphCache::new();
+    let (frame, st) =
+        explorer_render::rasterize_window_cached_stats(&list, font_src(), 1.0, 0.0, 60.0, &mut gc);
+    assert!(frame.is_some());
+    assert_eq!(st.items, 4);
+    assert_eq!(st.clips, 1);
+    assert_eq!(st.draws, 1, "seul le fill dans la bande peint");
+    assert_eq!(st.skips, 1, "le fill à y=500 est cullé");
+}
+
+/// R-300 — dirty : les compteurs se **somment** sur les
+/// fenêtres rejouées (`items` = items × fenêtres — chaque
+/// replay re-scanne la liste entière).
+#[test]
+fn replay_stats_dirty_somme_sur_les_fenetres() {
+    let red = Color {
+        r: 200,
+        g: 0,
+        b: 0,
+        a: 255,
+    };
+    let list = dlist(vec![
+        DisplayItem::PushClip(Rect {
+            x: 0.0,
+            y: 0.0,
+            width: 100.0,
+            height: 100.0,
+        }),
+        fill(10.0, 10.0, 50.0, 50.0, red),
+        fill(500.0, 500.0, 50.0, 50.0, red),
+        DisplayItem::PopClip,
+    ]);
+    let mut gc = explorer_render::GlyphCache::new();
+    let (prev, _base) = explorer_render::rasterize_cached_stats(&list, font_src(), 1.0, &mut gc);
+    let damage = [
+        Rect {
+            x: 0.0,
+            y: 0.0,
+            width: 80.0,
+            height: 80.0,
+        },
+        Rect {
+            x: 120.0,
+            y: 60.0,
+            width: 80.0,
+            height: 80.0,
+        },
+    ];
+    let (frame, st) = explorer_render::rasterize_dirty_cached_stats(
+        &list,
+        font_src(),
+        1.0,
+        prev.expect("frame précédente"),
+        &damage,
+        &mut gc,
+    );
+    assert!(frame.is_some());
+    assert_eq!(st.items, 8, "deux fenêtres × 4 items scannés");
+    assert_eq!(st.clips, 2, "un PushClip par fenêtre");
+    assert_eq!(st.draws, 1, "seul le fill de la fenêtre 1 peint");
+    assert_eq!(st.skips, 3);
+}

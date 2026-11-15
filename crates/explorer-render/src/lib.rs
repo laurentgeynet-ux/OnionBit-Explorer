@@ -36,8 +36,10 @@ pub use fonts::{DirFontSource, WebFontSource};
 pub use glyph_cache::GlyphCache;
 pub use image::{decode_image, DecodedImage, ImageTable, PaintImages};
 pub use raster::{
-    rasterize, rasterize_cached, rasterize_dirty, rasterize_dirty_cached, rasterize_slice,
-    rasterize_slice_cached, rasterize_window, rasterize_window_cached, Frame,
+    rasterize, rasterize_cached, rasterize_cached_stats, rasterize_dirty, rasterize_dirty_cached,
+    rasterize_dirty_cached_stats, rasterize_slice, rasterize_slice_cached,
+    rasterize_slice_cached_stats, rasterize_stats, rasterize_window, rasterize_window_cached,
+    rasterize_window_cached_stats, Frame, ReplayStats,
 };
 pub use svg::{collect_svg, collect_svg_with_sources, svg_sizes, SVG_MAX_SOURCE};
 pub use woff::decode_font;

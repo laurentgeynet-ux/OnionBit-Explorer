@@ -133,6 +133,79 @@ impl Frame {
     }
 }
 
+/// Attribution interne d'une passe de `replay_items` (R-300 —
+/// demande NAV `engine.paint_stats`, `interface-equipes.md`
+/// 2026-11-15) : les mêmes compteurs que l'événement tracing
+/// `raster.parts`, sortis en struct. Les variantes `*_stats` des
+/// rasterizers le rapportent ; les variantes ordinaires
+/// délèguent et le jettent — les compteurs sont calculés
+/// inconditionnellement dans le chemin chaud, les exposer ne
+/// coûte rien.
+///
+/// `kind_us`/`kind_n` découpent `draw_us` par famille d'item
+/// (ordre = celui de `draw_kind`) : `[texte, remplissage
+/// (fill/border/deco/masked/border-image), ombre, image/fond,
+/// autre]`. Au chemin [`rasterize_dirty_cached_stats`] les
+/// compteurs sont **sommés sur toutes les fenêtres** rejouées —
+/// `items` vaut alors `items × fenêtres` (le coût réellement
+/// payé : chaque replay re-scanne la liste entière).
+#[derive(Debug, Clone, Default)]
+pub struct ReplayStats {
+    /// Items scannés par la/les passe(s) de replay.
+    pub items: usize,
+    /// `PushClip`/`PushClipRounded`/`PushClipPath` rencontrés.
+    pub clips: u32,
+    /// Clips ayant payé un `Mask` réel (`ClipEntry::Real`) —
+    /// le ratio vs `clips` mesure la culle hors-fenêtre.
+    pub clips_real: u32,
+    /// `PushFilter`/`PushBlend`/`PushMask` rencontrés.
+    pub groups: u32,
+    /// Groupes `void` — aucune influence sur le parent,
+    /// composite sauté.
+    pub groups_void: u32,
+    /// Items effectivement dessinés (`paint_item` invoqué).
+    pub draws: u32,
+    /// Items sautés par le filtre fenêtre / coupe top-slice.
+    pub skips: u32,
+    /// Temps clips (`Mask::new` + `fill_path`), microsecondes.
+    pub clip_us: u64,
+    /// Temps composites de groupes (ops/blend/coverage aux
+    /// `Pop*`), microsecondes.
+    pub group_us: u64,
+    /// Temps de dessin effectif (`paint_item`), microsecondes.
+    pub draw_us: u64,
+    /// `draw_us` par famille d'item — ordre documenté
+    /// ci-dessus.
+    pub kind_us: [u64; DRAW_KINDS],
+    /// Nombre de dessins par famille — même ordre que
+    /// `kind_us`.
+    pub kind_n: [u32; DRAW_KINDS],
+}
+
+impl std::ops::AddAssign for ReplayStats {
+    /// Accumulation fenêtre par fenêtre (chemin dirty) — tous
+    /// les champs se somment, `items` compris : chaque fenêtre
+    /// rejoue la liste entière, la somme est le coût payé.
+    fn add_assign(&mut self, o: Self) {
+        self.items += o.items;
+        self.clips += o.clips;
+        self.clips_real += o.clips_real;
+        self.groups += o.groups;
+        self.groups_void += o.groups_void;
+        self.draws += o.draws;
+        self.skips += o.skips;
+        self.clip_us = self.clip_us.saturating_add(o.clip_us);
+        self.group_us = self.group_us.saturating_add(o.group_us);
+        self.draw_us = self.draw_us.saturating_add(o.draw_us);
+        for (a, b) in self.kind_us.iter_mut().zip(o.kind_us) {
+            *a = a.saturating_add(b);
+        }
+        for (a, b) in self.kind_n.iter_mut().zip(o.kind_n) {
+            *a += b;
+        }
+    }
+}
+
 /// `explorer-css` `Color` → `tiny_skia::Color`.
 fn skia_color(c: Color) -> tiny_skia::Color {
     tiny_skia::Color::from_rgba8(c.r, c.g, c.b, c.a)
@@ -467,6 +540,17 @@ pub fn rasterize(list: &DisplayList, fonts: &dyn FontSource, scale: f32) -> Opti
     rasterize_cached(list, fonts, scale, &mut GlyphCache::new())
 }
 
+/// [`rasterize`] + [`ReplayStats`] de la passe (R-300) —
+/// voir [`rasterize_cached_stats`].
+#[must_use]
+pub fn rasterize_stats(
+    list: &DisplayList,
+    fonts: &dyn FontSource,
+    scale: f32,
+) -> (Option<Frame>, ReplayStats) {
+    rasterize_cached_stats(list, fonts, scale, &mut GlyphCache::new())
+}
+
 /// [`rasterize`] avec un [`GlyphCache`] persistant (R-36) :
 /// faces parsées et contours de glyphes sont réutilisés
 /// d'un repaint à l'autre — sync automatique sur
@@ -479,14 +563,30 @@ pub fn rasterize_cached(
     scale: f32,
     gc: &mut GlyphCache,
 ) -> Option<Frame> {
+    rasterize_cached_stats(list, fonts, scale, gc).0
+}
+
+/// [`rasterize_cached`] + [`ReplayStats`] de la passe (R-300 —
+/// demande NAV `engine.paint_stats`, `interface-equipes.md`
+/// 2026-11-15). `(None, _)` = borne dépassée ou pixmap non
+/// allouable ; les stats sont alors nulles (pas de replay).
+#[must_use]
+pub fn rasterize_cached_stats(
+    list: &DisplayList,
+    fonts: &dyn FontSource,
+    scale: f32,
+    gc: &mut GlyphCache,
+) -> (Option<Frame>, ReplayStats) {
     let w_px = (list.width * scale).round().max(1.0);
     let h_px = (list.height * scale).round().max(1.0);
     if !(w_px.is_finite() && h_px.is_finite()) || w_px > 16384.0 || h_px > 16384.0 {
-        return None; // borne hostile — page géante.
+        return (None, ReplayStats::default()); // borne hostile — page géante.
     }
     #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
     let (w, h) = (w_px as u32, h_px as u32);
-    let mut pixmap = Pixmap::new(w, h)?;
+    let Some(mut pixmap) = Pixmap::new(w, h) else {
+        return (None, ReplayStats::default());
+    };
     // Canvas : opaque blanche — le fond de canvas par défaut
     // de l'UA (CSS2 §14.2 : le document n'y dépose son fond
     // que si html/body en déclarent un). Sans elle, les zones
@@ -495,13 +595,16 @@ pub fn rasterize_cached(
     let dpi = Transform::from_scale(scale, scale);
 
     gc.sync(fonts);
-    replay_items(&mut pixmap, &list.items, dpi, fonts, gc, 0, None);
-    Some(Frame {
-        width: w,
-        height: h,
-        pixels: pixmap.data().to_vec(),
-        scale,
-    })
+    let st = replay_items(&mut pixmap, &list.items, dpi, fonts, gc, 0, None);
+    (
+        Some(Frame {
+            width: w,
+            height: h,
+            pixels: pixmap.data().to_vec(),
+            scale,
+        }),
+        st,
+    )
 }
 
 /// Rasterise la tranche verticale `[y_css, y_css + height_css[`
@@ -544,6 +647,23 @@ pub fn rasterize_window_cached(
     height_css: f32,
     gc: &mut GlyphCache,
 ) -> Option<Frame> {
+    rasterize_window_cached_stats(list, fonts, scale, y_css, height_css, gc).0
+}
+
+/// [`rasterize_window_cached`] + [`ReplayStats`] de la passe
+/// (R-300 — demande NAV `engine.paint_stats`,
+/// `interface-equipes.md` 2026-11-15). `(None, _)` = borne
+/// dépassée ou pixmap non allouable ; les stats sont alors
+/// nulles (pas de replay).
+#[must_use]
+pub fn rasterize_window_cached_stats(
+    list: &DisplayList,
+    fonts: &dyn FontSource,
+    scale: f32,
+    y_css: f32,
+    height_css: f32,
+    gc: &mut GlyphCache,
+) -> (Option<Frame>, ReplayStats) {
     // `y_css` négatif accepté : les items sont ancrés
     // `-scroll_y` au build — peindre le document entier
     // dans un pixmap `doc_h`-haut demande la bande
@@ -557,11 +677,13 @@ pub fn rasterize_window_cached(
         || w_px > 16384.0
         || h_px > 16384.0
     {
-        return None; // borne hostile — fenêtre géante.
+        return (None, ReplayStats::default()); // borne hostile — fenêtre géante.
     }
     #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
     let (w, h) = (w_px as u32, h_px as u32);
-    let mut pixmap = Pixmap::new(w, h)?;
+    let Some(mut pixmap) = Pixmap::new(w, h) else {
+        return (None, ReplayStats::default());
+    };
     pixmap.fill(tiny_skia::Color::WHITE);
     // p_local = p_css·scale − y0px : la tranche se peint dans
     // son propre repère, pile transform/clip inchangée.
@@ -588,7 +710,7 @@ pub fn rasterize_window_cached(
     );
     gc.sync(fonts);
     let t = std::time::Instant::now();
-    replay_items(
+    let st = replay_items(
         &mut pixmap,
         &list.items,
         base,
@@ -604,12 +726,15 @@ pub fn rasterize_window_cached(
         us = u64::try_from(t.elapsed().as_micros()).unwrap_or(u64::MAX),
         "phase sync"
     );
-    Some(Frame {
-        width: w,
-        height: h,
-        pixels: pixmap.data().to_vec(),
-        scale,
-    })
+    (
+        Some(Frame {
+            width: w,
+            height: h,
+            pixels: pixmap.data().to_vec(),
+            scale,
+        }),
+        st,
+    )
 }
 
 /// Rasterise la tranche `win_css` (px CSS, même repère
@@ -662,17 +787,35 @@ pub fn rasterize_slice_cached(
     draw_from: usize,
     gc: &mut GlyphCache,
 ) -> Option<Frame> {
+    rasterize_slice_cached_stats(list, fonts, scale, win_css, draw_from, gc).0
+}
+
+/// [`rasterize_slice_cached`] + [`ReplayStats`] de la passe
+/// (R-300 — couvre le chemin top-slice des surfaces média,
+/// `session/frame.rs`). `(None, _)` = borne dépassée ou
+/// pixmap non allouable ; les stats sont alors nulles.
+#[must_use]
+pub fn rasterize_slice_cached_stats(
+    list: &DisplayList,
+    fonts: &dyn FontSource,
+    scale: f32,
+    win_css: explorer_layout::Rect,
+    draw_from: usize,
+    gc: &mut GlyphCache,
+) -> (Option<Frame>, ReplayStats) {
     let w_px = (win_css.width * scale).round().max(1.0);
     let h_px = (win_css.height * scale).round().max(1.0);
     if !(w_px.is_finite() && h_px.is_finite() && win_css.x.is_finite() && win_css.y.is_finite())
         || w_px > 16384.0
         || h_px > 16384.0
     {
-        return None; // borne hostile — fenêtre géante.
+        return (None, ReplayStats::default()); // borne hostile — fenêtre géante.
     }
     #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
     let (w, h) = (w_px as u32, h_px as u32);
-    let mut pixmap = Pixmap::new(w, h)?;
+    let Some(mut pixmap) = Pixmap::new(w, h) else {
+        return (None, ReplayStats::default());
+    };
     // Pas de fond blanc : le slice se compose en sur-couche
     // alpha au-dessus de base+surfaces — un fond opaque
     // écrirait du blanc par-dessus le média natif.
@@ -686,7 +829,7 @@ pub fn rasterize_slice_cached(
     );
     let bounds = crate::display::resolved_bounds(&list.items);
     gc.sync(fonts);
-    replay_items(
+    let st = replay_items(
         &mut pixmap,
         &list.items,
         base,
@@ -695,12 +838,15 @@ pub fn rasterize_slice_cached(
         draw_from,
         Some((&bounds, win_css)),
     );
-    Some(Frame {
-        width: w,
-        height: h,
-        pixels: pixmap.data().to_vec(),
-        scale,
-    })
+    (
+        Some(Frame {
+            width: w,
+            height: h,
+            pixels: pixmap.data().to_vec(),
+            scale,
+        }),
+        st,
+    )
 }
 
 /// Inflation des fenêtres sales (px CSS) — couvre le débord
@@ -747,25 +893,44 @@ pub fn rasterize_dirty_cached(
     list: &DisplayList,
     fonts: &dyn FontSource,
     scale: f32,
-    mut prev: Frame,
+    prev: Frame,
     damage: &[explorer_layout::Rect],
     gc: &mut GlyphCache,
 ) -> Option<Frame> {
+    rasterize_dirty_cached_stats(list, fonts, scale, prev, damage, gc).0
+}
+
+/// [`rasterize_dirty_cached`] + [`ReplayStats`] **sommé sur
+/// toutes les fenêtres** rejouées (R-300 — chaque fenêtre
+/// paie un replay complet de la liste : `items` du struct =
+/// `items × fenêtres`, coût réellement payé). Repli
+/// `(None, _)` = mêmes conditions que [`rasterize_dirty`],
+/// stats nulles ; une alloc de fenêtre en échec renvoie
+/// `(None, stats accumulées jusque-là)`.
+#[must_use]
+pub fn rasterize_dirty_cached_stats(
+    list: &DisplayList,
+    fonts: &dyn FontSource,
+    scale: f32,
+    mut prev: Frame,
+    damage: &[explorer_layout::Rect],
+    gc: &mut GlyphCache,
+) -> (Option<Frame>, ReplayStats) {
     let w_px = (list.width * scale).round().max(1.0);
     let h_px = (list.height * scale).round().max(1.0);
     if !(w_px.is_finite() && h_px.is_finite()) || w_px > 16384.0 || h_px > 16384.0 {
-        return None;
+        return (None, ReplayStats::default());
     }
     #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
     let (w, h) = (w_px as u32, h_px as u32);
     if prev.width != w || prev.height != h || (prev.scale - scale).abs() > f32::EPSILON {
-        return None; // cible différente → plein cadre.
+        return (None, ReplayStats::default()); // cible différente → plein cadre.
     }
     if damage.is_empty() {
-        return Some(prev);
+        return (Some(prev), ReplayStats::default());
     }
     if damage.len() > DAMAGE_MAX_RECTS {
-        return None;
+        return (None, ReplayStats::default());
     }
 
     // Fenêtres physiques : inflation AA (CSS) → scale →
@@ -807,9 +972,12 @@ pub fn rasterize_dirty_cached(
 
     let bounds = crate::display::resolved_bounds(&list.items);
     gc.sync(fonts);
+    let mut st = ReplayStats::default();
     for (x0, y0, x1, y1) in merged {
         let (rw, rh) = (x1 - x0, y1 - y0);
-        let mut pm = Pixmap::new(rw, rh)?;
+        let Some(mut pm) = Pixmap::new(rw, rh) else {
+            return (None, st);
+        };
         // Même base que `rasterize` : canvas opaque blanche —
         // les trous de la fenêtre retombent sur le fond UA.
         pm.fill(tiny_skia::Color::WHITE);
@@ -825,7 +993,7 @@ pub fn rasterize_dirty_cached(
             width: rw as f32 / scale,
             height: rh as f32 / scale,
         };
-        replay_items(
+        st += replay_items(
             &mut pm,
             &list.items,
             base,
@@ -843,7 +1011,7 @@ pub fn rasterize_dirty_cached(
             prev.pixels[dst_off..dst_off + len].copy_from_slice(&src[src_off..src_off + len]);
         }
     }
-    Some(prev)
+    (Some(prev), st)
 }
 
 /// Entrée de la pile `clips` de [`replay_items`] — le
@@ -1290,7 +1458,7 @@ fn replay_items(
     gc: &mut GlyphCache,
     draw_from: usize,
     filter: Option<(&[Option<explorer_layout::Rect>], explorer_layout::Rect)>,
-) {
+) -> ReplayStats {
     let mut clips: Vec<ClipEntry> = Vec::new();
     // Sentinelle bloquante des clips `Empty` — allouée une
     // fois par replay au lieu d'un `Mask` plein frame par
@@ -1721,28 +1889,43 @@ fn replay_items(
             }
         }
     }
+    let st = ReplayStats {
+        items: items.len(),
+        clips: n_clip,
+        clips_real: n_clip_real,
+        groups: n_group,
+        groups_void: n_group_void,
+        draws: n_draw,
+        skips: n_skip,
+        clip_us: u64::try_from(us_clip).unwrap_or(u64::MAX),
+        group_us: u64::try_from(us_group).unwrap_or(u64::MAX),
+        draw_us: u64::try_from(us_draw).unwrap_or(u64::MAX),
+        kind_us,
+        kind_n,
+    };
     tracing::info!(
         target: "sync_profile",
         tab = 0u64,
         phase = "raster.parts",
-        items = items.len(),
-        clips = n_clip,
-        clips_real = n_clip_real,
-        groups = n_group,
-        groups_void = n_group_void,
-        draws = n_draw,
-        skips = n_skip,
-        clip_us = u64::try_from(us_clip).unwrap_or(u64::MAX),
-        group_us = u64::try_from(us_group).unwrap_or(u64::MAX),
-        draw_us = u64::try_from(us_draw).unwrap_or(u64::MAX),
-        draw_text_us = kind_us[0],
-        draw_fill_us = kind_us[1],
-        draw_shadow_us = kind_us[2],
-        draw_img_us = kind_us[3],
-        draw_other_us = kind_us[4],
-        draw_text_n = kind_n[0],
+        items = st.items,
+        clips = st.clips,
+        clips_real = st.clips_real,
+        groups = st.groups,
+        groups_void = st.groups_void,
+        draws = st.draws,
+        skips = st.skips,
+        clip_us = st.clip_us,
+        group_us = st.group_us,
+        draw_us = st.draw_us,
+        draw_text_us = st.kind_us[0],
+        draw_fill_us = st.kind_us[1],
+        draw_shadow_us = st.kind_us[2],
+        draw_img_us = st.kind_us[3],
+        draw_other_us = st.kind_us[4],
+        draw_text_n = st.kind_n[0],
         "phase sync"
     );
+    st
 }
 
 /// Intersection non vide de deux rects px CSS — filtre

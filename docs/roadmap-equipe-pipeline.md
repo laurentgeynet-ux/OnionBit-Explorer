@@ -3957,6 +3957,7 @@ fixture Chrome-vérifiée → implémentation → tests → clippy
 | `DisplayItem` + dirty rects | transport FFI (NAV-55) | ✅ — livré R-7 (`changed_rects`), raffiné R-37/R-61/R-76 |
 | op-list canvas → `DisplayItem::Image` | `explorer-jscore` canvas (JS-C28) | ✅ — livré R-11, consommé (`CanvasTable`) |
 | `explorer_common::census` + `TreeBuilder::stats`/`TreeStats` (R-207) | `explorer-cli shot --report`, `site_harvest` | ✅ — livré, câblage `--report` côté NAV |
+| `rasterize_*_stats` / `ReplayStats` (R-300) | EAP `engine.paint_stats` (Étape 249) | ✅ — livré, 5 variantes couvrant tous les points d'entrée apply |
 
 Règle : les API publiques des crates PIPELINE sont le contrat —
 extensions additives de préférence ; toute casse de signature
@@ -4547,3 +4548,13 @@ sous-features, `font-stretch`/`font-width` (fontes variables),
   (cliquet 41/58).
 - **Trou nommé hors plan** : fenêtre lourde `incr.raster`
   13,4 s — coût de couverture réel (§4 du plan).
+- [x] **R-300 — `ReplayStats` : compteurs `raster.parts`
+  sortis en struct** (`explorer-render`, demande NAV
+  journalisée 2026-11-15 — EAP `engine.paint_stats`,
+  débloque Étape 249) : variantes additives
+  `rasterize_{,cached_,window_cached,dirty_cached,
+  slice_cached}_stats` → `(Option<Frame>, ReplayStats)` —
+  les compteurs étaient déjà payés dans le chemin chaud,
+  exposer = coût zéro ; dirty sommé par fenêtre
+  (`AddAssign`), tracing conservé. Verrous
+  `replay_stats_*` ×3, 47/47 raster verts.
