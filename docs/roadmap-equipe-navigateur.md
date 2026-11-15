@@ -7763,6 +7763,18 @@ MCP = adaptateur, jamais la base.
   (schéma) : corps, en-têtes, téléchargements bufferisés.
   Help + schéma + golden + MCP `net_events`. Verrou :
   socket `engine_introspection` (doc 200, curseur vide).
+- [x] **Étape 252. EAP `frame.diff` : dommage réel même
+  fenêtré** — **Livrée (`main`)** : `raster_window`
+  court-circuitait le diff → le rapport aurait menti
+  « viewport plein » sur toute page haute.
+  `changed_rects(&prev)` calculé aussi sur le chemin
+  fenêtré, **en rapport seul** (borne `DIRTY_DIFF_MAX_ITEMS`
+  honnête → `full`, jamais pilote raster). `FrameDiffRec`
+  sur `PaintPayload` ; verbe `{windowed, damage:{full|
+  rects px CSS}, items_prev, items_cur}` — `full` = la
+  vraie décision de repli (précision PIPE), cap `engine`.
+  Help + schéma + golden + MCP `frame_diff`. Verrou :
+  socket `engine_introspection` (booléens, `items_cur`).
 
 ## Piste JS (JS-C26+) — spécialiste `explorer-jscore`
 

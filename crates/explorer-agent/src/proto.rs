@@ -542,6 +542,12 @@ pub enum Method {
     /// étape 251).
     #[serde(rename = "net.events")]
     NetEvents(NetEventsParams),
+    /// Dommage du dernier raster commis — `{windowed,
+    /// damage:{full|rects}, items_prev, items_cur}` ; le
+    /// diff de listes est servi **aussi** sur le chemin
+    /// fenêtré (cap `engine`, étape 252).
+    #[serde(rename = "frame.diff")]
+    FrameDiff(TabParams),
 
     /// Clic par handle (cap `handles`+`input`, droit `input`).
     #[serde(rename = "input.click")]

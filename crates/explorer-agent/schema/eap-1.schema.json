@@ -376,6 +376,13 @@
       "result": { "type": "object", "properties": { "events": { "type": "array", "items": { "type": "object", "properties": { "seq": { "type": "integer" }, "kind": { "type": "string" }, "url": { "type": "string" }, "initiator": { "type": "string" }, "status": { "type": "integer" }, "bytes": { "type": "integer" }, "ms": { "type": "integer" }, "from_cache": { "type": "boolean" } }, "required": ["seq", "kind", "url", "initiator", "status", "bytes", "ms", "from_cache"] } }, "next_seq": { "type": "integer" } }, "required": ["events", "next_seq"] }
     },
 
+    "frame.diff": {
+      "x-phase": "E5",
+      "description": "Dommage du **dernier raster commis** (étape 252) : `{windowed, damage, items_prev, items_cur}`. `damage` = `{\"full\": true}` quand le repli plein cadre a été décidé (premier paint, borne d'items `DIRTY_DIFF_MAX_ITEMS` dépassée, ou diff qui couvre déjà toute la page), sinon `{\"full\": false, \"rects\": [...]}` — régions en px CSS document. `windowed: true` = chemin fenêtré (document au-dessus du cap viewport) : les rects rapportés sont le **vrai diff de listes** — la tranche viewport est repeinte entière par décision de raster, pas par manque de diff (un `full` systématique serait mensonger). `items_prev`/`items_cur` = tailles des display lists comparées. `null` avant le premier paint ou pendant une passe détachée.",
+      "params": { "type": "object", "properties": { "tab": { "$ref": "#/$defs/tabId" } }, "required": ["tab"], "additionalProperties": false },
+      "result": { "type": ["object", "null"], "properties": { "windowed": { "type": "boolean" }, "damage": { "type": "object", "properties": { "full": { "type": "boolean" }, "rects": { "type": "array", "items": { "type": "object", "properties": { "x": { "type": "number" }, "y": { "type": "number" }, "width": { "type": "number" }, "height": { "type": "number" } }, "required": ["x", "y", "width", "height"] } } }, "required": ["full"] }, "items_prev": { "type": "integer" }, "items_cur": { "type": "integer" } } }
+    },
+
     "input.click": {
       "x-phase": "E2",
       "params": {

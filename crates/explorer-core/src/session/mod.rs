@@ -603,6 +603,11 @@ pub(crate) struct Tab {
     /// `EXPLORER_EMIT_STATS`). `None` tant qu'aucun paint
     /// n'est commis ; voyage avec la payload détachée.
     emit_stats: Option<explorer_render::EmitStats>,
+    /// Rapport `frame.diff` du dernier raster commis
+    /// (étape 252) — `None` avant le premier paint ou
+    /// pendant une passe détachée (même disponibilité que
+    /// `emit_stats`).
+    frame_diff: Option<types::FrameDiffRec>,
     /// Compteurs de replay raster du même paint (R-300 —
     /// variantes `rasterize_*_stats`) : items scannés,
     /// draws/skips, µs par famille. Mêmes règles de
@@ -1785,6 +1790,7 @@ impl Session {
                 spec_paint: false,
                 windowed: false,
                 emit_stats: None,
+                frame_diff: None,
                 raster_stats: None,
                 net_events: std::collections::VecDeque::new(),
                 net_seq: 0,

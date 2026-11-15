@@ -259,6 +259,36 @@
           "comment": "polling incrémental — rien de nouveau depuis seq 2"
         }
       }
+    },
+    {
+      "wire": "client → serveur",
+      "message": {
+        "jsonrpc": "2.0",
+        "id": 37,
+        "method": "frame.diff",
+        "params": {
+          "tab": 1
+        }
+      }
+    },
+    {
+      "wire": "serveur → client",
+      "message": {
+        "jsonrpc": "2.0",
+        "id": 37,
+        "result": {
+          "windowed": true,
+          "damage": {
+            "full": false,
+            "rects": [
+              { "x": 0.0, "y": 120.0, "width": 800.0, "height": 340.0 }
+            ]
+          },
+          "items_prev": 1240,
+          "items_cur": 1251,
+          "comment": "chemin fenêtré — le raster repeint la tranche viewport par décision, mais le rapport sert le vrai diff de listes (valeurs illustratives)"
+        }
+      }
     }
   ]
 }

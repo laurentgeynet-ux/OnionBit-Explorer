@@ -1021,6 +1021,27 @@ pub(crate) struct NetEventRec {
     pub(crate) from_cache: bool,
 }
 
+/// Rapport `frame.diff` du dernier raster commis (étape
+/// 252) — le dommage de **display list** réel, calculé même
+/// sur le chemin fenêtré (où le raster repeint la tranche
+/// viewport entière par décision, pas par manque de diff).
+#[derive(Debug, Clone)]
+pub(crate) struct FrameDiffRec {
+    /// `true` = chemin `raster_window` (document au-dessus
+    /// du cap `MIN_FULL_DOC_CSS`) — le damage rapporté est
+    /// un diff de listes, indépendant de la fenêtre peinte.
+    pub(crate) windowed: bool,
+    /// Régions de diff en px CSS — `None` = repli plein
+    /// cadre décidé (pas de liste précédente, borne
+    /// `DIRTY_DIFF_MAX_ITEMS` dépassée, ou `full_cover` sur
+    /// le chemin diff).
+    pub(crate) rects: Option<Vec<explorer_layout::Rect>>,
+    /// Items de la liste précédente (`0` au premier paint).
+    pub(crate) items_prev: usize,
+    /// Items de la liste courante.
+    pub(crate) items_cur: usize,
+}
+
 /// `Cookie` filaire → forme persistée (expiration → secs
 /// unix ; les expirés ne sont jamais exportés —
 /// [`CookieJar::export`] purge déjà).

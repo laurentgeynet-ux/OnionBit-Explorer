@@ -97,6 +97,11 @@ const HELP: &[(&str, Option<Capability>, &str)] = &[
         "net.events{since_seq}",
     ),
     (
+        "quoi de repeint à la frame ?",
+        Some(Capability::Engine),
+        "frame.diff",
+    ),
+    (
         "erreurs pipeline ?",
         Some(Capability::ConsoleLog),
         "console.get",
@@ -170,7 +175,8 @@ fn cap_of(m: &Method) -> Option<Capability> {
         Method::EngineLayout(_)
         | Method::EnginePipeline(_)
         | Method::EnginePaintStats(_)
-        | Method::EngineAnomalies(_) => Some(Capability::Engine),
+        | Method::EngineAnomalies(_)
+        | Method::FrameDiff(_) => Some(Capability::Engine),
         Method::NetEvents(_) => Some(Capability::Net),
         Method::InputKey(_) | Method::InputScroll(_) | Method::InputClickAt(_) => {
             Some(Capability::Input)
@@ -515,7 +521,8 @@ async fn run(
         | Method::EnginePipeline(_)
         | Method::EnginePaintStats(_)
         | Method::EngineAnomalies(_)
-        | Method::NetEvents(_) => perceive_verbs(st, conn, method).await,
+        | Method::NetEvents(_)
+        | Method::FrameDiff(_) => perceive_verbs(st, conn, method).await,
         Method::InputClick(_) | Method::InputType(_) | Method::InputHover(_) => {
             handle_verbs(st, conn, method).await
         }
@@ -897,6 +904,28 @@ async fn perceive_verbs(
                 .map_or_else(crate::anomalies::default_max, |m| m as usize);
             crate::anomalies::run(st, conn, p.tab, max).await
         }
+        Method::NetEvents(_) | Method::FrameDiff(_) => {
+            net_frame_verbs(st, conn, method).await
+        }
+        // Verbe hors groupe — garde-fou interne (le dispatch
+        // en amont route par construction ; si ça arrive, la
+        // dégradation honnête est une erreur moteur).
+        _ => Err(err(
+            ErrorCode::EngineUnavailable,
+            "verbe hors groupe — routage interne",
+        )),
+    }
+}
+
+/// `net.events` + `frame.diff` (étapes 251/252) — sortis de
+/// `perceive_verbs` pour la borne de taille ; même discipline
+/// (scope onglet + existence + lecture sous verrou).
+async fn net_frame_verbs(
+    st: &Arc<AgentShared>,
+    conn: &mut AgentConn,
+    method: Method,
+) -> Result<Value, RpcError> {
+    match method {
         Method::NetEvents(p) => {
             scope(conn, p.tab)?;
             tab_exists(st, p.tab).await?;
@@ -906,10 +935,16 @@ async fn perceive_verbs(
                 None => Err(err(ErrorCode::NoSuchTab, "onglet inconnu")),
             }
         }
-
-        // Verbe hors groupe — garde-fou interne (le dispatch
-        // en amont route par construction ; si ça arrive, la
-        // dégradation honnête est une erreur moteur).
+        Method::FrameDiff(p) => {
+            scope(conn, p.tab)?;
+            tab_exists(st, p.tab).await?;
+            let mut s = st.session.lock().await;
+            s.reclaim_orphaned_paint(p.tab);
+            match s.frame_diff(p.tab) {
+                Some(r) => Ok(r),
+                None => Err(err(ErrorCode::NoSuchTab, "onglet inconnu")),
+            }
+        }
         _ => Err(err(
             ErrorCode::EngineUnavailable,
             "verbe hors groupe — routage interne",

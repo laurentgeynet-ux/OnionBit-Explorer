@@ -355,6 +355,10 @@ pub(crate) struct PaintPayload {
     /// `repaint_payload`, reportés sur `Tab` au commit.
     /// Décrit le paint qui a produit `list`/`frame`.
     pub emit_stats: Option<explorer_render::EmitStats>,
+    /// Rapport `frame.diff` (étape 252) — calculé à la fin
+    /// de `repaint_payload`/`raster_window`, voyage comme
+    /// `emit_stats` jusqu'au commit.
+    pub frame_diff: Option<types::FrameDiffRec>,
     /// Compteurs de replay raster de la passe (R-300 —
     /// variantes `rasterize_*_stats`).
     pub raster_stats: Option<explorer_render::ReplayStats>,
@@ -552,6 +556,7 @@ impl Tab {
             spec_paint: std::mem::take(&mut self.spec_paint),
             windowed: self.windowed,
             emit_stats: self.emit_stats.take(),
+            frame_diff: self.frame_diff.take(),
             raster_stats: self.raster_stats.take(),
             dirty: std::mem::take(&mut self.dirty),
             emitted: self.emitted,
@@ -625,6 +630,7 @@ impl Tab {
         self.spec_paint = p.spec_paint;
         self.windowed = p.windowed;
         self.emit_stats = p.emit_stats;
+        self.frame_diff = p.frame_diff;
         self.raster_stats = p.raster_stats;
         self.dirty = p.dirty;
         self.emitted = p.emitted;
@@ -3638,6 +3644,16 @@ pub(crate) fn repaint_payload(
     let full_cover = regions.iter().any(|r| {
         r.x <= 0.0 && r.y <= 0.0 && r.x + r.width >= list.width && r.y + r.height >= list.height
     });
+    // Étape 252 — `frame.diff` : le rapport porte les
+    // régions réelles quand un diff a couru, `full` quand
+    // la décision de repli plein cadre est prise (premier
+    // paint, borne d'items dépassée, `full_cover`).
+    p.frame_diff = Some(types::FrameDiffRec {
+        windowed: false,
+        rects: (!full_cover).then(|| regions.clone()),
+        items_prev: p.list.as_ref().map_or(0, |l| l.items.len()),
+        items_cur: list.items.len(),
+    });
     tracing::info!(regions = regions.len(), "apply: raster");
     // R-300 / étape 249 : les variantes `*_stats` servent
     // les `ReplayStats` du verbe EAP `engine.paint_stats` —
@@ -3719,6 +3735,22 @@ fn raster_window(
     vw: f32,
     vh: f32,
 ) -> Result<(), CoreError> {
+    // Étape 252 — `frame.diff` sur le chemin fenêtré : le
+    // raster peint la tranche pleine par **décision** (le
+    // scroll re-translate tout), mais le rapport de dommage
+    // sert le vrai diff de listes quand il est calculable —
+    // `full` seulement si pas de liste précédente ou borne
+    // `DIRTY_DIFF_MAX_ITEMS` dépassée (borne honnête, pas
+    // un `full` systématique déguisé).
+    p.frame_diff = Some(types::FrameDiffRec {
+        windowed: true,
+        rects: p.list.as_ref().and_then(|prev| {
+            (list.items.len() <= DIRTY_DIFF_MAX_ITEMS && prev.items.len() <= DIRTY_DIFF_MAX_ITEMS)
+                .then(|| list.changed_rects(prev))
+        }),
+        items_prev: p.list.as_ref().map_or(0, |l| l.items.len()),
+        items_cur: list.items.len(),
+    });
     let (frame, rs) = explorer_render::rasterize_window_cached_stats(
         &list,
         &ctx.fonts as &dyn FontSource,

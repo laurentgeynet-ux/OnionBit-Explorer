@@ -453,21 +453,6 @@ impl Session {
         }))
     }
 
-    /// Compteurs de peinture du **dernier paint commis**
-    /// (verbe EAP `engine.paint_stats`, étape 249) : les
-    /// `EmitStats` de la build de display list (collectées à
-    /// chaque passe — le dump détaillé reste sous
-    /// `EXPLORER_EMIT_STATS`) et les `ReplayStats` du replay
-    /// raster (variantes `rasterize_*_stats`, R-300 —
-    /// couvre les trois chemins plein cadre/dirty/fenêtré ;
-    /// chemin dirty raté → repli plein cadre : les stats du
-    /// repli). Les deux structs internes ne sont pas
-    /// `Serialize` — mapping champ par champ, la forme JSON
-    /// est le contrat. `None` si l'onglet n'existe pas ;
-    /// `emit`/`raster` null tant qu'aucun paint n'est commis
-    /// ou pendant qu'une passe détachée est en vol (l'orphelin
-    /// garé est réinséré par l'appelant, comme `engine.layout`).
-    #[must_use]
     /// Complétions réseau de l'onglet (étape 251 —
     /// `net.events`) : ring borné à `types::MAX_NET_EVENTS`
     /// (512) en séquence monotone. `since_seq` filtre aux records
@@ -478,6 +463,42 @@ impl Session {
     /// peut avoir élagué des événements plus anciens que le
     /// premier `seq` renvoyé (`next_seq` = compteur courant,
     /// à repasser en `since_seq` pour la suite).
+    /// Rapport de dommage du dernier raster commis (étape
+    /// 252 — `frame.diff`) : `{windowed, damage, items_prev,
+    /// items_cur}`. `damage` = `{"full": true}` quand le
+    /// repli plein cadre a été décidé (premier paint, borne
+    /// d'items dépassée, `full_cover`), sinon
+    /// `{"full": false, "rects": [...]}` — px CSS du
+    /// document. Sur le chemin fenêtré (`windowed: true`)
+    /// les rects sont le **diff de listes réel** — la
+    /// tranche viewport repeinte entière est une décision
+    /// de raster, pas un manque de diff. `None` avant le
+    /// premier paint ou pendant une passe détachée.
+    #[must_use]
+    pub fn frame_diff(&self, tab: TabId) -> Option<serde_json::Value> {
+        let fd = self.tabs.get(&tab)?.frame_diff.as_ref()?;
+        let damage = match &fd.rects {
+            Some(rects) => serde_json::json!({
+                "full": false,
+                "rects": rects
+                    .iter()
+                    .map(|r| serde_json::json!({
+                        "x": r.x, "y": r.y,
+                        "width": r.width, "height": r.height,
+                    }))
+                    .collect::<Vec<_>>(),
+            }),
+            None => serde_json::json!({ "full": true }),
+        };
+        Some(serde_json::json!({
+            "windowed": fd.windowed,
+            "damage": damage,
+            "items_prev": fd.items_prev,
+            "items_cur": fd.items_cur,
+        }))
+    }
+
+    #[must_use]
     pub fn net_events(&self, tab: TabId, since_seq: Option<u64>) -> Option<serde_json::Value> {
         let entry = self.tabs.get(&tab)?;
         let events: Vec<serde_json::Value> = entry
@@ -503,6 +524,20 @@ impl Session {
         }))
     }
 
+    /// Compteurs de peinture du **dernier paint commis**
+    /// (verbe EAP `engine.paint_stats`, étape 249) : les
+    /// `EmitStats` de la build de display list (collectées à
+    /// chaque passe — le dump détaillé reste sous
+    /// `EXPLORER_EMIT_STATS`) et les `ReplayStats` du replay
+    /// raster (variantes `rasterize_*_stats`, R-300 —
+    /// couvre les trois chemins plein cadre/dirty/fenêtré ;
+    /// chemin dirty raté → repli plein cadre : les stats du
+    /// repli). Les deux structs internes ne sont pas
+    /// `Serialize` — mapping champ par champ, la forme JSON
+    /// est le contrat. `None` si l'onglet n'existe pas ;
+    /// `emit`/`raster` null tant qu'aucun paint n'est commis
+    /// ou pendant qu'une passe détachée est en vol (l'orphelin
+    /// garé est réinséré par l'appelant, comme `engine.layout`).
     #[must_use]
     pub fn paint_stats(&self, tab: TabId) -> Option<serde_json::Value> {
         let entry = self.tabs.get(&tab)?;

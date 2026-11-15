@@ -566,6 +566,11 @@ fn engine_tools() -> Value {
                 &["tab"]
             )
         ),
+        t(
+            "frame_diff",
+            "Dommage du dernier raster commis {tab}",
+            tab()
+        ),
     ])
 }
 
@@ -648,6 +653,7 @@ fn to_eap(name: &str, args: &Value) -> Option<(&'static str, Value)> {
             "net.events",
             json!({"tab": tab, "since_seq": args["since_seq"]}),
         ),
+        "frame_diff" => ("frame.diff", json!({"tab": tab})),
         _ => return None,
     })
 }

@@ -433,6 +433,19 @@ async fn engine_introspection() {
     assert_eq!(r["result"]["events"].as_array().unwrap().len(), 0, "{r}");
     let r = a.call("net.events", json!({"tab": 999})).await;
     assert_eq!(r["error"]["code"], -32005);
+    // frame.diff (étape 252) : le paint commis porte un
+    // rapport de dommage — `damage.full` booléen ou rects
+    // px CSS ; `windowed` reflète le chemin de raster.
+    let r = a.call("frame.diff", json!({"tab": tab})).await;
+    assert!(r["error"].is_null(), "{r}");
+    assert!(r["result"]["windowed"].is_boolean(), "{r}");
+    assert!(r["result"]["damage"]["full"].is_boolean(), "{r}");
+    assert!(
+        r["result"]["items_cur"].as_u64().is_some_and(|n| n > 0),
+        "{r}"
+    );
+    let r = a.call("frame.diff", json!({"tab": 999})).await;
+    assert_eq!(r["error"]["code"], -32005);
     // Onglet inconnu → -32005.
     let r = a.call("engine.pipeline", json!({"tab": 999})).await;
     assert_eq!(r["error"]["code"], -32005);
