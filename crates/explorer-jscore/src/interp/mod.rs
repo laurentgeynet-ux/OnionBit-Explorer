@@ -11486,15 +11486,27 @@ impl Engine {
                 })
                 .clone()
         });
+        let lowered_body = lowered_fn.as_ref().map(|lf| lf.body.clone());
+        // JS-C490 — annotations de profondeur sur le corps qui
+        // tournera (le corps baissé des gen/async).
+        // JS-C534d — le resolver passe AVANT `predeclare_slots` :
+        // le canon `names_table` existe ainsi dès le premier
+        // appel du lit (avant : `wire_miss` systématique au
+        // premier appel — l'env du premier call restait non
+        // câblé). Ne touche que `resolved_map`/`names_table` —
+        // indépendant de `local`.
+        self.ensure_lit_resolved(
+            lit,
+            lowered_body.as_ref().unwrap_or(&body_rc),
+            lowered_fn.as_ref().map(|lf| &lf.params[..]),
+        );
         // JS-C503 — slots du scope `Local` : positions canoniques
         // `[params…, "arguments"?, new.target?, hoist…, lex…]`
         // alignées sur le prologue ci-dessous (params →
         // `LazyArgs` → `new.target` → `hoist` → `let` de corps).
         // JS-C534b — gen/async : la clé est le corps **baissé**
         // (`lf.body.as_ptr()`) — le resolver émet le canon avec
-        // les params baissés. Premier appel du lit : le resolver
-        // n'a pas encore tourné (il passe plus bas) → `wire_miss`
-        // amorti une fois, `wire_hit` ensuite.
+        // les params baissés.
         let wire_site = lowered_fn
             .as_ref()
             .map_or(body_rc.as_ptr(), |lf| lf.body.as_ptr());
@@ -11575,16 +11587,6 @@ impl Engine {
             Self::env_put(&local, NEW_TARGET, nt, false);
         }
         crate::phase_note(crate::last_phase::HOIST);
-        let lowered_body = lowered_fn.as_ref().map(|lf| lf.body.clone());
-        // JS-C490 — annotations de profondeur sur le corps qui
-        // tournera (le corps baissé des gen/async).
-        // JS-C534b — params baissés : le canon du scope fn est
-        // émis sous `lf.body.as_ptr()` (clé du predeclare amont).
-        self.ensure_lit_resolved(
-            lit,
-            lowered_body.as_ref().unwrap_or(&body_rc),
-            lowered_fn.as_ref().map(|lf| &lf.params[..]),
-        );
         // JS-C497 — corps sans `var`/`function`/`export`
         // plausible : `hoist` n'a rien à installer — la marche
         // complète du corps à chaque appel était pure perte.

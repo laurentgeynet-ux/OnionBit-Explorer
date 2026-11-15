@@ -747,16 +747,26 @@ impl Resolver {
         // des fonctions sœurs (régression `for-in`/`for-of` B1 du
         // vol 811).
         let base = self.scopes.len();
-        // JS-C534b — gen/async câblable dès que les params
-        // **baissés** sont connus : le canon `[params…, arguments?,
-        // new.target?, hoist, lex]` est alors exact (le prologue
-        // lie `lf.params`, pas `lit.params`). Clé `body.as_ptr()`
-        // = buffer du corps baissé = ce que le runtime demande.
-        if !poisoned && (!(lit.is_gen || lit.is_async) || lowered_params.is_some()) {
+        // JS-C534d — le canon est émis pour TOUT corps dont on
+        // connaît les vrais params (synchrone, ou gen/async avec
+        // `lowered_params`) — **y compris `poisoned`** : le flag
+        // `poisoned` ne gouverne que la *suppression des
+        // annotations* d'idents le traversant (eval peut injecter
+        // des noms invisibles statiquement) ; côté runtime, un
+        // env câblé + `extra` sert déjà les liaisons injectées
+        // (le routage canon/extra ne peut pas masquer un nom
+        // canonique — l'invariant est asserté). `envu:` a nommé
+        // les 695 k hits `extra` du call env — les scopes
+        // poisoned yt (BotGuard abuse d'`eval`) étaient le
+        // réservoir.
+        // Gen/async **sans** params baissés (walk imbriqué sur
+        // corps source) : canon incertain → pas d'émission (la
+        // clé émise serait morte — le runtime demande la clé du
+        // corps baissé à l'appel du lit).
+        if !(lit.is_gen || lit.is_async) || lowered_params.is_some() {
             // JS-C503 — slots du scope `Local` : liste canonique
             // alignée sur le prologue (params → arguments? →
             // new.target? → hoist → lex), clé `body.as_ptr()`.
-            // Poisoned : depth-only (règle « certifié »).
             let lfl = crate::interp::compute_lit_flags(lit);
             self.push_slots(
                 body.as_ptr() as usize,
@@ -766,7 +776,7 @@ impl Resolver {
                     body,
                     lfl,
                 )),
-                false,
+                poisoned,
             );
         } else {
             self.push(fn_scope_names(lit, body), poisoned);

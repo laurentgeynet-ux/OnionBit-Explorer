@@ -12902,6 +12902,30 @@ chaque gain rapporté contre les **deux** archétypes.
   (`ic_hit`/`ic_miss`/`ic_disarm` au snapshot) pour
   borner la couverture du seul court-circuit existant.
   Dependency-groups = infra lourde, dernier recours.
+- [x] **JS-C534d — canon émis pour les scopes
+  `poisoned` + resolver avant predeclare** : `envu:`
+  a nommé le réservoir (N5.42) — `mod.rs:11445` =
+  l'env `local` de chaque appel (695 765 hits
+  `extra`), non câblé malgré le `predeclare` de
+  C534b. Cause : `body_poisons` (`eval`/`delete
+  ident` → depth-only **à vie**, aucune entrée
+  `names_table`) — yt abuse d'`eval` (BotGuard).
+  Fix : `push_slots(site, canon, poisoned)` émis
+  même pour les corps empoisonnés — le flag ne
+  gouverne que la suppression des annotations,
+  le routage canon/extra sert les liaisons
+  injectées (un nom canonique ne peut pas être
+  masqué — invariant asserté). + `ensure_lit_resolved`
+  déplacé avant `predeclare_slots` : le premier
+  appel d'un lit câble déjà (`wire_miss` amorti
+  supprimé). Verrous : `c533` 15/15 (+2 : scope
+  poisoned câblé sert `bnd_canon` + eval-injection
+  préservée, 1er appel câblé), `lang` 315 sous
+  `RESOLVE_VERIFY`, `dom` 265, `c502` 24, `j17`
+  13, `n538` 1, clippy/doc propres. Lecture au
+  vol : `xt_unw` doit s'effondrer ; résidu =
+  module top-level (`resolve_lit` early-return)
+  + class `cenv`/`menv` + corps non-bloc.
 - [x] **JS-C534c — sonde `envu:`** : N5.40/N5.41 —
   deux localisations `xt_unw` réfutées (frames
   `GExec`, scopes gen/async — flat ×2). `Bindings`

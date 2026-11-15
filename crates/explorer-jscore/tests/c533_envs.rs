@@ -253,3 +253,55 @@ fn c534b_fn_scope_wire_actually_hits() {
         "le câblage du scope fn doit trouver names_table : {snap}"
     );
 }
+
+/// JS-C534d — un corps empoisonné (`eval`/`delete ident`) émet
+/// désormais son canon : le flag `poisoned` ne gouverne que la
+/// suppression des annotations — le câblage + `extra` servent
+/// les liaisons injectées dynamiquement (le routage canon/extra
+/// est total, un nom canonique ne peut pas être masqué par un
+/// doublon `extra`). `envu:` a nommé l'env d'appel
+/// (`mod.rs:11445`) comme réservoir des 695 k `xt_unw` — les
+/// scopes poisoned yt (`BotGuard` abuse d'`eval`) en étaient la
+/// cause.
+#[test]
+fn c534d_poisoned_call_env_still_wires() {
+    let _g = IC_LOCK
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    explorer_jscore::j17_enable();
+    let mut e = Engine::new();
+    // `eval` (ident) → `body_poisons` → canon émis quand même ;
+    // `x` se lie en `cells`, le `var z` injecté rejoint `extra`
+    // — les deux se servent, sémantique eval préservée.
+    let r = e
+        .eval("function f(a){ let x=a+1; eval('var z = x*10'); return x+z; } f(2)")
+        .expect("eval");
+    assert_eq!(e.describe(r), "33", "x=3 + z=30");
+    let snap = explorer_jscore::j17_snapshot();
+    assert!(
+        snap_counter(&snap, "bnd_canon") > 0,
+        "le scope poisoned câblé doit servir en canon : {snap}"
+    );
+}
+
+/// JS-C534d — le resolver passe maintenant AVANT le
+/// `predeclare_slots` du call env : le **premier** appel d'un
+/// lit câble déjà (avant : `wire_miss` amorti au 1er appel,
+/// env servi entièrement en `extra`).
+#[test]
+fn c534d_first_call_already_wires() {
+    let _g = IC_LOCK
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    explorer_jscore::j17_enable();
+    let mut e = Engine::new();
+    // Un seul appel — le canon est présent au `predeclare`.
+    let r = e.eval("function f(a){ let x=a*2; return x; } f(21)");
+    let out = r.map(|v| e.describe(v));
+    assert_eq!(out.as_deref().unwrap_or(""), "42");
+    let snap = explorer_jscore::j17_snapshot();
+    assert!(
+        snap_counter(&snap, "bnd_canon") > 0,
+        "le 1er appel doit déjà servir en canon : {snap}"
+    );
+}
