@@ -414,7 +414,14 @@ const IC_CHAIN_CAP: usize = 8;
 /// et meurt, la borne contient le thrash).
 const IC_POLY_CAP: usize = 8;
 /// JS-C521 — borne de la mémo négative de lectures absentes.
-const RABS_MEMO_CAP: usize = 8192;
+/// JS-C545 — éviction FIFO au cap (N5.52 : le gel refusait
+/// 496 k consultations). JS-C546 — cap ×4 : N5.53 a mesuré
+/// 114 179 inserts contre 8 192 places = paires évincées à
+/// ~7 % de la session puis re-apprises (thrash — chaque
+/// réinsertion a payé un `find_own_ai`) ; 81 % de couverture
+/// prouve que le working set est ≫ cap. 32 768 × 16 o × 2
+/// (set + file) ≈ 1 Mio — borné.
+const RABS_MEMO_CAP: usize = 32768;
 
 /// JS-C504 — verdict d'une consultation IC : valeur prouvée,
 /// vérification échouée (→ miss compté), ou maillon inéligible

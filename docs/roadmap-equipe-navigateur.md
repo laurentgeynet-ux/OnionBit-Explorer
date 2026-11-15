@@ -12902,6 +12902,12 @@ chaque gain rapporté contre les **deux** archétypes.
   (`ic_hit`/`ic_miss`/`ic_disarm` au snapshot) pour
   borner la couverture du seul court-circuit existant.
   Dependency-groups = infra lourde, dernier recours.
+- [x] **JS-C546 — `RABS_MEMO_CAP` ×4 (32 768)** :
+  N5.53 — mécanique prouvée (81 % servi) mais
+  114 k inserts / 8 k places = thrash (paires
+  évincées à ~7 % de session, re-apprises par un
+  `find_own_ai`). Cap ×4 ≈ 1 Mio borné. Lecture :
+  `rabs_full`/`rabs_ins` reflue, `rabs_hit` >90 %.
 - [x] **JS-C545 — `rabs_memo` évinçante (FIFO)** :
   N5.52 mesure le gel — `rabs_ins` = cap 8 192
   dès bootstrap, 496 695 consultations rejetées,

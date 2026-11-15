@@ -650,10 +650,10 @@ fn rabs_memo_sert_la_marche_has() {
 }
 
 /// JS-C545 — `rabs_memo` évince en FIFO au cap au lieu de
-/// geler : > 8 192 paires absentes distinctes → `rabs_full`
-/// (évictions) tick ET `rabs_ins` dépasse le cap — le mémo
-/// n'est plus gelé au bootstrap (N5.52 : 496 k consultations
-/// rejetées, rendement ~13 %).
+/// geler : > `RABS_MEMO_CAP` paires absentes distinctes →
+/// `rabs_full` (évictions) tick ET `rabs_ins` dépasse le cap
+/// — le mémo n'est plus gelé au bootstrap (N5.52 : 496 k
+/// consultations rejetées, rendement ~13 %).
 #[test]
 fn rabs_memo_evince_au_cap_sans_geler() {
     let _g = TEST_LOCK.lock().unwrap();
@@ -662,13 +662,14 @@ fn rabs_memo_evince_au_cap_sans_geler() {
     std::env::remove_var("EXPLORER_NO_IC");
     j17_enable();
     let (ins0, full0) = (tick(&J17_RABS_INS), tick(&J17_RABS_FULL));
-    // 9 000 shapes distinctes (prop `p<i>` distincte) → ~9 000
-    // paires absentes own > cap 8 192 : inserts continuent.
-    e.eval("for(var i=0;i<9000;i++){ var o={}; o['p'+i]=1; 'zzz' in o; } 0")
+    // 40 000 shapes distinctes (prop `p<i>` distincte) → ~40 000
+    // paires absentes own > cap 32 768 (C546) : inserts
+    // continuent, évictions tickent.
+    e.eval("for(var i=0;i<40000;i++){ var o={}; o['p'+i]=1; 'zzz' in o; } 0")
         .expect("eval");
     let (ins1, full1) = (tick(&J17_RABS_INS), tick(&J17_RABS_FULL));
     assert!(
-        ins1 - ins0 >= 9000,
+        ins1 - ins0 >= 40000,
         "les inserts doivent dépasser le cap (δ {} )",
         ins1 - ins0
     );
