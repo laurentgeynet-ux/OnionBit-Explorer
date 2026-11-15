@@ -848,6 +848,23 @@ pub fn j17_snapshot() -> String {
         }
         out.push_str(&format!("arridx:{joined}"));
     }
+    // JS-C542 — top-12 callsites des comparaisons `prop_scan`
+    // (`pscan:f:l=n,…`) — tranche la part écriture du compteur.
+    let mut pscan: Vec<(u64, String)> =
+        J17_PSCAN_SITES.with(|m| m.borrow().values().map(|(l, n)| (*n, l.clone())).collect());
+    pscan.sort_unstable_by_key(|a| std::cmp::Reverse(a.0));
+    if !pscan.is_empty() {
+        let joined = pscan
+            .iter()
+            .take(12)
+            .map(|(n, l)| format!("{l}={n}"))
+            .collect::<Vec<_>>()
+            .join(",");
+        if !out.is_empty() {
+            out.push(' ');
+        }
+        out.push_str(&format!("pscan:{joined}"));
+    }
     // JS-C527 — top-20 clés marchées (`keys:k=n,…`) ; noms
     // assainis (hors `[A-Za-z0-9_$@.:-]` → `?`, tronqués à 24)
     // pour rester sur une seule ligne de paires.
@@ -937,6 +954,14 @@ thread_local! {
     /// nomme le dominant restant (find, string-index, TA,
     /// builtins) en un vol.
     static J17_ARRIDX_SITES: std::cell::RefCell<
+        std::collections::BTreeMap<usize, (String, u64)>,
+    > = const { std::cell::RefCell::new(std::collections::BTreeMap::new()) };
+    /// JS-C542 — `pscan:` — comparaisons `prop_scan` attribuées
+    /// au callsite (`#[track_caller]` sur `prop_pos`). Nomme la
+    /// part lecture (`o.find` via `find_own_ai`) vs écriture
+    /// (`prop_pos` directs : own-first, learn, `set_prop`) du
+    /// compteur au prochain vol lourd.
+    static J17_PSCAN_SITES: std::cell::RefCell<
         std::collections::BTreeMap<usize, (String, u64)>,
     > = const { std::cell::RefCell::new(std::collections::BTreeMap::new()) };
 }
@@ -1034,6 +1059,24 @@ pub(crate) fn j17_arridx_probe(loc: &'static std::panic::Location<'static>) {
     J17_ARRIDX_TRY.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     let site = std::ptr::from_ref(loc) as usize;
     J17_ARRIDX_SITES.with(|m| {
+        let mut m = m.borrow_mut();
+        let e = m
+            .entry(site)
+            .or_insert_with(|| (format!("{}:{}", loc.file(), loc.line()), 0));
+        e.1 += 1;
+    });
+}
+
+/// JS-C542 — sonde `pscan:` : tick `prop_scan` + attribution
+/// du callsite en un seul `j17_on` (miroir [`j17_arridx_probe`]).
+/// Appelée par comparaison dans [`crate::heap::Object::prop_pos`].
+pub(crate) fn j17_pscan_probe(loc: &'static std::panic::Location<'static>) {
+    if !j17_on() {
+        return;
+    }
+    J17_PROP_SCAN.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let site = std::ptr::from_ref(loc) as usize;
+    J17_PSCAN_SITES.with(|m| {
         let mut m = m.borrow_mut();
         let e = m
             .entry(site)

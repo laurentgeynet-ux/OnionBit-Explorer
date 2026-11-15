@@ -558,6 +558,30 @@ fn c541_ic_hit_ne_essaie_plus_array_index() {
     let _ = s;
 }
 
+/// JS-C542 — `pscan:` attribue les comparaisons `prop_scan`
+/// au callsite (`#[track_caller]` sur `prop_pos`). Un lookup
+/// linéaire répété sur petit objet doit faire émettre la
+/// section avec le site `find`.
+#[test]
+fn pscan_attribue_le_callsite() {
+    let _g = TEST_LOCK.lock().unwrap();
+    j17_enable();
+    let mut e = Engine::new();
+    // Petit objet (props < seuil index) → `prop_pos` scanne
+    // linéairement à chaque `o.a` manqué par l'IC learn —
+    // la boucle produit des comparaisons attribuables.
+    e.eval(
+        "var o={a:1,b:2}; var q={x:9}; var s=0;\
+         for(var i=0;i<20;i++){s+=o.a+q.zzz|0;} s",
+    )
+    .expect("eval");
+    let snap = j17_snapshot();
+    assert!(
+        snap.contains("pscan:"),
+        "les comparaisons `prop_scan` doivent émettre `pscan:` : {snap}"
+    );
+}
+
 /// JS-C535 — le peek homo-typé de `binary_op` sert `(Num,Num)`
 /// et `(Str,Str)` sans `to_primitive`/`to_number` ; les
 /// compteurs `bin_nn`/`bin_ss` mesurent la couverture. Le lock

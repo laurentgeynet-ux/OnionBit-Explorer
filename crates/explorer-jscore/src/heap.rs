@@ -1550,10 +1550,14 @@ impl Object {
     /// de `u32::MAX` props l'index est inutilisable → repli linéaire
     /// (univers inaccessible : ~200 Go de props — dégradation, pas
     /// de panic).
+    /// JS-C542 — `#[track_caller]` : chaque comparaison du scan
+    /// linéaire est attribuée à son callsite (`pscan:` du
+    /// snapshot) — nomme la part écriture/lecture du compteur.
+    #[track_caller]
     pub(crate) fn prop_pos(&self, key: &str) -> Option<usize> {
         if self.props.len() >= u32::MAX as usize {
             return self.props.iter().position(|(k, _)| {
-                crate::j17_tick(&crate::J17_PROP_SCAN);
+                crate::j17_pscan_probe(std::panic::Location::caller());
                 std::ptr::eq(&raw const **k, key) || &**k == key
             });
         }
@@ -1565,7 +1569,7 @@ impl Object {
             self.lookups.set(self.lookups.get().saturating_add(1));
             if self.lookups.get() < PROPS_IDX_ARM {
                 return self.props.iter().position(|(k, _)| {
-                    crate::j17_tick(&crate::J17_PROP_SCAN);
+                    crate::j17_pscan_probe(std::panic::Location::caller());
                     // V-3a : clés internées → même alloc ⇒ même
                     // ptr ; clés dynamiques → miss → memcmp.
                     std::ptr::eq(&raw const **k, key) || &**k == key

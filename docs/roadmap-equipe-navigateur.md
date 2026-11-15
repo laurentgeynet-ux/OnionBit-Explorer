@@ -12902,6 +12902,16 @@ chaque gain rapporté contre les **deux** archétypes.
   (`ic_hit`/`ic_miss`/`ic_disarm` au snapshot) pour
   borner la couverture du seul court-circuit existant.
   Dependency-groups = infra lourde, dernier recours.
+- [x] **JS-C542 — sonde `pscan:` (callsite des
+  comparaisons `prop_scan`)** : dernier compteur
+  `prop_*` non attribué (~52 k/session légère).
+  `prop_pos` porte `#[track_caller]`, chaque
+  comparaison tick + attribue en un `j17_on`
+  (miroir `arridx:`). Lectures agrégées sous
+  `heap.rs` (`find`), `prop_pos` directs de
+  `mod.rs` nomment la part écriture (own-first,
+  `ic_learn`, `set_prop_walk`) — le vol lourd
+  tranche si un cran écriture existe encore.
 - [x] **JS-C541 — `array_index` internalisé aux kinds
   consommateurs** : `arridx:` N5.48 nomme le dominant —
   `ic_hit` = 48,8 % des 2,53 M essais, hoists V-3b
