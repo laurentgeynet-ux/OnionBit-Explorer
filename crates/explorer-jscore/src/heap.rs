@@ -2254,14 +2254,20 @@ pub struct Bindings {
     cells: Vec<EnvCell>,
     /// Liaisons dynamiques hors canon — adaptatif Small/Map.
     extra: BindingMap,
+    /// JS-C534c — callsite de construction de l'env porteur
+    /// (`#[track_caller]` des constructeurs `Env`) : attribution
+    /// `envu:` des hits `extra` — nomme la population d'envs
+    /// non câblés que `xt_unw` mesure anonymement.
+    site: &'static std::panic::Location<'static>,
 }
 
 impl Bindings {
-    fn new() -> Self {
+    fn new(site: &'static std::panic::Location<'static>) -> Self {
         Bindings {
             canon: Rc::from(&[][..]),
             cells: Vec::new(),
             extra: BindingMap::new(),
+            site,
         }
     }
 
@@ -2294,6 +2300,9 @@ impl Bindings {
             } else {
                 &crate::J17_XT_DYN
             });
+            // JS-C534c — `envu:` nomme le site de construction
+            // de l'env qui sert en `extra`.
+            crate::j17_envu_site(self.site);
         }
         c
     }
@@ -2583,32 +2592,35 @@ fn take_env_edges(kind: &mut EnvKind, worklist: &mut Vec<EnvRef>) {
 
 impl Env {
     /// New local scope chained to `parent`.
+    #[track_caller]
     pub fn local(parent: EnvRef) -> EnvRef {
         crate::j17_tick(&crate::J17_ENV);
         ENVS_LIVE.with(|c| c.set(c.get() + 1));
         Rc::new(RefCell::new(Env {
-            kind: EnvKind::Local(Bindings::new()),
+            kind: EnvKind::Local(Bindings::new(std::panic::Location::caller())),
             parent: Some(parent),
         }))
     }
 
     /// The global scope.
+    #[track_caller]
     pub fn global() -> EnvRef {
         crate::j17_tick(&crate::J17_ENV);
         ENVS_LIVE.with(|c| c.set(c.get() + 1));
         Rc::new(RefCell::new(Env {
-            kind: EnvKind::Global(Bindings::new()),
+            kind: EnvKind::Global(Bindings::new(std::panic::Location::caller())),
             parent: None,
         }))
     }
 
     /// New block scope chained to `parent` — `let`/`const` y vivent,
     /// `var` la traverse (voir [`EnvKind::Block`]).
+    #[track_caller]
     pub fn block(parent: EnvRef) -> EnvRef {
         crate::j17_tick(&crate::J17_ENV);
         ENVS_LIVE.with(|c| c.set(c.get() + 1));
         Rc::new(RefCell::new(Env {
-            kind: EnvKind::Block(Bindings::new()),
+            kind: EnvKind::Block(Bindings::new(std::panic::Location::caller())),
             parent: Some(parent),
         }))
     }

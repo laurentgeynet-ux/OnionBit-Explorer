@@ -478,3 +478,22 @@ fn j17_eval_stmt_histograms() {
         .unwrap_or("");
     assert!(st.contains("for="), "variante stmt attendue — {st}");
 }
+
+/// JS-C534c — `envu:` émet le callsite de construction des envs
+/// qui servent en `extra` (attribution de `xt_unw`).
+#[test]
+fn envu_nomme_le_site_de_construction() {
+    let _g = TEST_LOCK.lock().unwrap();
+    j17_enable();
+    let mut e = Engine::new();
+    // `eval`-injection : `dyn` n'est pas dans le canon du scope
+    // fn (poisoned → scope depth-only) → la liaison vit en
+    // `extra` → la lecture tick `bnd_extra` + `envu:<site>`.
+    e.eval("(function(){ eval('var dyn=7'); return dyn; })()")
+        .expect("eval dyn");
+    let snap = j17_snapshot();
+    assert!(
+        snap.contains("envu:"),
+        "le hit `extra` doit émettre un site `envu:` : {snap}"
+    );
+}

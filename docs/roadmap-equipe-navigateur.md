@@ -12902,6 +12902,17 @@ chaque gain rapporté contre les **deux** archétypes.
   (`ic_hit`/`ic_miss`/`ic_disarm` au snapshot) pour
   borner la couverture du seul court-circuit existant.
   Dependency-groups = infra lourde, dernier recours.
+- [x] **JS-C534c — sonde `envu:`** : N5.40/N5.41 —
+  deux localisations `xt_unw` réfutées (frames
+  `GExec`, scopes gen/async — flat ×2). `Bindings`
+  porte `site` (`#[track_caller]` ctors `Env`) ;
+  hits `extra` → `envu:<f:l>=<n>` top-12 nomme le
+  site de construction dominant — tranche la
+  population en un vol. Audit C534b : `benv`
+  sous-canon fn vérifié sûr (`Uninit`=absent sur
+  toutes les voies). Alerte N5.41 `usePatchedLifecycles
+  of Undefined` : recommander `RESOLVE_VERIFY`+
+  `IC_VERIFY` au vol pour capture `res.bad`/`ic.bad`.
 - [x] **JS-C534b — canon des scopes gen/async** :
   N5.40 a réfuté lazy.rs — `xt_unw` flat. Vrai
   coupable : envs d'appel gen/async jamais câblés
