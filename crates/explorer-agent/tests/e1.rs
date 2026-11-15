@@ -492,6 +492,24 @@ async fn engine_cascade_verdicts() {
             || d["verdict"] == "initial"),
         "un verdict posé attendu : {r}"
     );
+    // `declared_only` filtre le bruit — un verdict posé
+    // reste, le tapis de `initial`/`inherited` part.
+    let r = a
+        .call(
+            "engine.cascade",
+            json!({"tab": tab, "ref": elem_ref, "declared_only": true}),
+        )
+        .await;
+    assert!(r["error"].is_null(), "{r}");
+    let decls2 = r["result"]["declarations"]
+        .as_array()
+        .expect("declarations");
+    assert!(
+        decls2
+            .iter()
+            .all(|d| d["verdict"] != "initial" && d["verdict"] != "inherited"),
+        "declared_only : {r}"
+    );
     let r = a
         .call("engine.cascade", json!({"tab": tab, "ref": "el:999999"}))
         .await;
@@ -925,6 +943,9 @@ async fn e3_diff_since() {
         .await;
     assert!(r["result"]["nodes"].is_array(), "{r}");
     assert!(r["result"]["base_rev"].is_null(), "{r}");
+    // Étape 257 — la base demandée mais absente est
+    // signalée : `stale_since` évite la désync invisible.
+    assert_eq!(r["result"]["stale_since"], json!(true), "{r}");
 
     // Étape 254 — `snap_seq` nomme l'émission exacte : la
     // réponse la porte toujours, `since_seq` diff dessus

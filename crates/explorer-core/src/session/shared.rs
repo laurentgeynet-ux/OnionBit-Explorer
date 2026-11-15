@@ -975,12 +975,15 @@ pub async fn handle_input_shared(
             let is_scroll = matches!(ev, InputEvent::Scroll { .. });
             s.defer_input(tab, ev);
             if is_scroll {
+                let proj = s.projected_scroll(tab);
                 return Ok(InputOutcome::Scrolled {
-                    scroll_y: s.projected_scroll(tab),
+                    scroll_y: proj,
+                    moved: (proj - s.tabs.get(&tab).map_or(0.0, |e| e.scroll_y)).abs() > 0.5,
                 });
             }
-            tracing::info!(tab, "input différé — paint/js en vol, rejeté comme ignored");
-            return Ok(InputOutcome::Ignored);
+            // `Deferred` — l'entrée est enfilée et sera
+            // rejouée (étape 257), pas abandonnée.
+            return Ok(InputOutcome::Deferred);
         }
         s.take_event_engine(tab)
     };
@@ -1078,9 +1081,12 @@ async fn input_shared_body(
             Ok(InputOutcome::Ignored)
         }
         InputEvent::Scroll { dy } => {
-            let wpath = {
+            let (wpath, before) = {
                 let mut s = sess.lock().await;
-                s.scroll_pre(tab)
+                (
+                    s.scroll_pre(tab),
+                    s.tabs.get(&tab).map_or(0.0, |t| t.scroll_y),
+                )
             };
             let prevented = dispatch_events(
                 sess,
@@ -1120,8 +1126,10 @@ async fn input_shared_body(
                 )
                 .await;
             }
+            let sy = sess.lock().await.tabs.get(&tab).map_or(0.0, |t| t.scroll_y);
             Ok(InputOutcome::Scrolled {
-                scroll_y: sess.lock().await.tabs.get(&tab).map_or(0.0, |t| t.scroll_y),
+                scroll_y: sy,
+                moved: (sy - before).abs() > 0.5,
             })
         }
         InputEvent::MouseMove { x, y } => mouse_move_shared(sess, tab, ee, x, y).await,

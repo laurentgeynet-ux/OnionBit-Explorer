@@ -95,12 +95,18 @@ impl Session {
             // est la projection de la file, rejouée telle
             // quelle à la livraison.
             if is_scroll {
+                let proj = self.projected_scroll(tab);
                 return Ok(InputOutcome::Scrolled {
-                    scroll_y: self.projected_scroll(tab),
+                    scroll_y: proj,
+                    // < 0,5 px = aucun mouvement visible.
+                    moved: (proj - self.tabs.get(&tab).map_or(0.0, |e| e.scroll_y)).abs() > 0.5,
                 });
             }
-            tracing::info!(tab, "input différé — paint en vol, rejeté comme ignored");
-            return Ok(InputOutcome::Ignored);
+            // `Deferred`, pas `Ignored` (étape 257, retour
+            // terrain PIPE) : l'entrée est enfilée et sera
+            // rejouée à la livraison — dire `ignored` alors
+            // que le clic va naviguer ment à l'agent.
+            return Ok(InputOutcome::Deferred);
         }
         match ev {
             InputEvent::Key { key, mods } => {
@@ -156,6 +162,7 @@ impl Session {
                 if let Some(entry) = self.tabs.get_mut(&tab) {
                     entry.popup = None;
                 }
+                let before = self.tabs.get(&tab).map_or(0.0, |t| t.scroll_y);
                 if !self.dispatch_wheel(tab) {
                     self.scroll_by(tab, dy)?;
                     // `scroll` niveau document (non annulable).
@@ -163,6 +170,10 @@ impl Session {
                 }
                 Ok(InputOutcome::Scrolled {
                     scroll_y: self.tabs.get(&tab).map_or(0.0, |t| t.scroll_y),
+                    // Page non scrollable / borne atteinte :
+                    // `moved: false` — l'agent lit « clampé »
+                    // au lieu d'un `scrolled` mensonger.
+                    moved: (self.tabs.get(&tab).map_or(0.0, |t| t.scroll_y) - before).abs() > 0.5,
                 })
             }
             InputEvent::MouseMove { x, y } => self.handle_mouse_move(tab, x, y),

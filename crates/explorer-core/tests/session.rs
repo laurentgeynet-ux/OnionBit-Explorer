@@ -1935,7 +1935,7 @@ async fn scroll_is_clamped_and_invalidates() {
         .await
         .unwrap();
     match out {
-        InputOutcome::Scrolled { scroll_y } => {
+        InputOutcome::Scrolled { scroll_y, .. } => {
             assert!((scroll_y - 300.0).abs() < 0.01);
         }
         o => panic!("inattendu : {o:?}"),
@@ -1947,7 +1947,7 @@ async fn scroll_is_clamped_and_invalidates() {
         .await
         .unwrap();
     let max = match out {
-        InputOutcome::Scrolled { scroll_y } => scroll_y,
+        InputOutcome::Scrolled { scroll_y, .. } => scroll_y,
         o => panic!("inattendu : {o:?}"),
     };
     assert!(max > 300.0 && max <= 2000.0);
@@ -1958,7 +1958,7 @@ async fn scroll_is_clamped_and_invalidates() {
         .await
         .unwrap();
     match out {
-        InputOutcome::Scrolled { scroll_y } => assert!(scroll_y.abs() < 0.01),
+        InputOutcome::Scrolled { scroll_y, .. } => assert!(scroll_y.abs() < 0.01),
         o => panic!("inattendu : {o:?}"),
     }
 
@@ -4061,7 +4061,7 @@ async fn doc_h_covers_overflow_past_fixed_height_body() {
         .await
         .unwrap();
     match out {
-        InputOutcome::Scrolled { scroll_y } => {
+        InputOutcome::Scrolled { scroll_y, .. } => {
             assert!((scroll_y - 300.0).abs() < 0.01, "scroll_y={scroll_y}");
         }
         o => panic!("inattendu : {o:?}"),
@@ -5518,7 +5518,7 @@ async fn scroll_dispatches_wheel_then_scroll() {
         .await
         .unwrap();
     match out {
-        InputOutcome::Scrolled { scroll_y } => {
+        InputOutcome::Scrolled { scroll_y, .. } => {
             assert!((scroll_y - 100.0).abs() < 0.01);
         }
         o => panic!("inattendu : {o:?}"),
@@ -5560,7 +5560,7 @@ async fn wheel_prevented_suppresses_scroll() {
         .unwrap();
     match out {
         // `preventDefault` a bloqué le scroll — y reste à 0.
-        InputOutcome::Scrolled { scroll_y } => assert!(scroll_y.abs() < 0.01),
+        InputOutcome::Scrolled { scroll_y, .. } => assert!(scroll_y.abs() < 0.01),
         o => panic!("inattendu : {o:?}"),
     }
     assert_eq!(sess.frame_png(ta), sess.frame_png(tb));
@@ -7285,7 +7285,7 @@ async fn fragment_nav_scrolls_without_refetch() {
         .await
         .unwrap()
     {
-        InputOutcome::Scrolled { scroll_y } => scroll_y,
+        InputOutcome::Scrolled { scroll_y, .. } => scroll_y,
         o => panic!("inattendu : {o:?}"),
     };
     assert!(
@@ -7300,7 +7300,7 @@ async fn fragment_nav_scrolls_without_refetch() {
         .await
         .unwrap()
     {
-        InputOutcome::Scrolled { scroll_y } => scroll_y,
+        InputOutcome::Scrolled { scroll_y, .. } => scroll_y,
         o => panic!("inattendu : {o:?}"),
     };
     assert!(scroll > 0.0, "`<a name>` est une cible valide (56d)");
@@ -7313,7 +7313,7 @@ async fn fragment_nav_scrolls_without_refetch() {
         .await
         .unwrap()
     {
-        InputOutcome::Scrolled { scroll_y } => scroll_y,
+        InputOutcome::Scrolled { scroll_y, .. } => scroll_y,
         o => panic!("inattendu : {o:?}"),
     };
     assert!(
@@ -7572,7 +7572,7 @@ async fn scroll_pos(s: &mut Session, tab: explorer_core::TabId) -> f32 {
         .await
         .unwrap()
     {
-        InputOutcome::Scrolled { scroll_y } => scroll_y,
+        InputOutcome::Scrolled { scroll_y, .. } => scroll_y,
         o => panic!("inattendu : {o:?}"),
     }
 }
@@ -8005,7 +8005,7 @@ async fn redirect_commits_final_url_and_fragment() {
         .await
         .unwrap()
     {
-        InputOutcome::Scrolled { scroll_y } => scroll_y,
+        InputOutcome::Scrolled { scroll_y, .. } => scroll_y,
         o => panic!("inattendu : {o:?}"),
     };
     assert!(scroll > 0.0, "fragment du Location appliqué");
@@ -15947,7 +15947,7 @@ async fn shared_wheel_prevented_keeps_scroll() {
     let out = explorer_core::handle_input_shared(&sess, id, InputEvent::Scroll { dy: 500.0 })
         .await
         .unwrap();
-    let InputOutcome::Scrolled { scroll_y } = out else {
+    let InputOutcome::Scrolled { scroll_y, .. } = out else {
         panic!("scroll attendu : {out:?}");
     };
     assert_eq!(scroll_y, 0.0, "wheel preventDefault → pas de scroll");

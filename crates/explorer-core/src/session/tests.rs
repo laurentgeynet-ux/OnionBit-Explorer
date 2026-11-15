@@ -1342,7 +1342,9 @@ async fn input_defers_while_engine_detached() {
         .handle_input(tab, InputEvent::Click { x: 1.0, y: 1.0 })
         .await
         .unwrap();
-    assert_eq!(out, InputOutcome::Ignored);
+    // `Deferred`, pas `Ignored` (étape 257) : le clic sera
+    // rejoué à la réinsertion — dire `ignored` mentait.
+    assert_eq!(out, InputOutcome::Deferred);
     assert_eq!(
         s.tabs.get(&tab).unwrap().deferred_inputs.len(),
         1,
@@ -2809,7 +2811,8 @@ fn deferred_inputs_fifo_and_coalesce() {
         if is_scroll {
             assert!(matches!(r, InputOutcome::Scrolled { .. }));
         } else {
-            assert_eq!(r, InputOutcome::Ignored, "détaché ⇒ différé");
+            // Étape 257 : différé ≠ abandonné.
+            assert_eq!(r, InputOutcome::Deferred, "détaché ⇒ différé");
         }
     }
     {
@@ -2836,7 +2839,7 @@ fn deferred_inputs_fifo_and_coalesce() {
             },
         )
         .unwrap();
-    assert_eq!(r, InputOutcome::Ignored, "file non vide ⇒ FIFO strict");
+    assert_eq!(r, InputOutcome::Deferred, "file non vide ⇒ FIFO strict");
     assert_eq!(s.tabs.get(&tab).unwrap().deferred_inputs.len(), 4);
 
     // Drain à la réinsertion : rejoue FIFO dans l'ordre.
@@ -4404,7 +4407,7 @@ async fn deferred_scroll_reports_projected_position() {
         .handle_input(tab, InputEvent::Scroll { dy: 900.0 })
         .await
         .unwrap();
-    let InputOutcome::Scrolled { scroll_y } = out else {
+    let InputOutcome::Scrolled { scroll_y, .. } = out else {
         panic!("scroll différé refusé : {out:?}");
     };
     assert_eq!(scroll_y, 1000.0, "projection = position + file");

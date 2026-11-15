@@ -799,9 +799,10 @@ fn act_tools() -> Value {
         ),
         t(
             "eval",
-            "JS top-level {tab,expr} → valeur JSON (≤64 Ko)",
+            "JS top-level {tab,expr,timeout_ms?} → valeur JSON (≤64 Ko)",
             obj(
-                json!({"tab":{"type":"integer"},"expr":{"type":"string"}}),
+                json!({"tab":{"type":"integer"},"expr":{"type":"string"},
+                       "timeout_ms":{"type":"integer"}}),
                 &["tab", "expr"]
             )
         ),
@@ -839,9 +840,11 @@ fn engine_tools() -> Value {
         ),
         t(
             "engine_cascade",
-            "Verdicts de cascade d'un élément {tab,ref}",
+            "Verdicts de cascade d'un élément {tab,ref,props?|declared_only?}",
             obj(
-                json!({"tab":{"type":"integer"},"ref":{"type":"string"}}),
+                json!({"tab":{"type":"integer"},"ref":{"type":"string"},
+                       "props":{"type":"array","items":{"type":"string"}},
+                       "declared_only":{"type":"boolean"}}),
                 &["tab", "ref"]
             )
         ),
@@ -979,7 +982,10 @@ fn to_eap(name: &str, args: &Value) -> Option<(&'static str, Value)> {
             json!({"tab": tab, "kind": args["kind"], "selector": args["selector"],
                    "timeout_ms": args["timeout_ms"].as_u64().unwrap_or(5000)}),
         ),
-        "eval" => ("eval.run", json!({"tab": tab, "expr": args["expr"]})),
+        "eval" => (
+            "eval.run",
+            json!({"tab": tab, "expr": args["expr"], "timeout_ms": args["timeout_ms"]}),
+        ),
         "dom" => ("dom.get", json!({"tab": tab})),
         "console" => ("console.get", json!({"tab": tab, "limit": args["limit"]})),
         "engine_layout" => ("engine.layout", json!({"tab": tab})),

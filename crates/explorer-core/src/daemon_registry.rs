@@ -188,7 +188,7 @@ pub fn list() -> Vec<(PathBuf, Announce)> {
 }
 
 /// Retire une annonce périmée — la GC du lecteur, réservée
-/// à la mort **prouvée** (voir [`pid_alive`]) : élaguer sur
+/// à la mort **prouvée** (voir [`announce_stale`]) : élaguer sur
 /// une sonde qui timeout évince définitivement un daemon
 /// vivant (il ne se ré-annonce qu'au démarrage).
 pub fn remove(file: &Path) {

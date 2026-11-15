@@ -266,6 +266,7 @@
             "properties": {
               "rev": { "$ref": "#/$defs/rev" },
               "snap_seq": { "type": "integer" },
+              "stale_since": { "type": "boolean", "description": "étape 257 — true quand since/since_seq était fourni mais la base est absente ou élaguée : ce plein snapshot n'est PAS un diff" },
               "url": { "type": "string" },
               "nodes": { "type": "array", "items": { "$ref": "#/$defs/snapshotNode" } }
             },
@@ -310,7 +311,7 @@
 
     "frame.get": {
       "x-phase": "E1",
-      "description": "La réponse est une TRAME BINAIRE [u32 id][u32 kind=1][png] corrélée à id — pas de result JSON.",
+      "description": "La réponse est une TRAME BINAIRE [u32 id][u32 kind=1][png] corrélée à id — pas de result JSON. Étape 257 : un raster en vol n'est plus une erreur immédiate — le verbe attend ~2 s (pattern snapshot), -32007 au-delà.",
       "params": {
         "type": "object",
         "properties": {
@@ -396,7 +397,7 @@
     "engine.cascade": {
       "x-phase": "E5",
       "description": "Verdicts de cascade d'un élément par sa ref (étape 253 — consomme `StyleEngine::explain`, R-301) : `{node, declarations[]}` — une entrée par **déclaration × longhand** : `{prop, value, selector, sheet, origin, inline, rank, scope_rank, layer, specificity, order, verdict, inherited_from}`. `verdict` = `winner` | `{"eliminated_by": origin|scope|layer|specificity|order}` | `{"gated": pseudo|media|container|scope|mode}` | `dropped_validation` | `invalid_at_computed` | `superseded` | `presentational_hint` | `inherited` | `initial`. État **committé** : style parent lu sur la boîte posée, `containers` recalculés depuis l'arbre committé (un verdict `gated(container)` peut différer de la passe réelle si la bascule @container a déplacé le conteneur), pseudo-states tous faux comme au paint — vérité de cascade, pas post-animation. Hors borne : déclarations mortes au parse (`decl.malformed`), mutations en vol, pseudo-éléments. `stale_ref` si la ref a expiré, `engine_unavailable` avant la première navigation committée.",
-      "params": { "type": "object", "properties": { "tab": { "$ref": "#/$defs/tabId" }, "ref": { "$ref": "#/$defs/elementRef" } }, "required": ["tab", "ref"], "additionalProperties": false },
+      "params": { "type": "object", "properties": { "tab": { "$ref": "#/$defs/tabId" }, "ref": { "$ref": "#/$defs/elementRef" }, "props": { "type": "array", "items": { "type": "string" }, "description": "étape 257 — ne rendre que ces propriétés (noms déclarés)" }, "declared_only": { "type": "boolean", "default": false, "description": "étape 257 — true = omettre les verdicts initial/inherited (pas de déclaration candidate — ~200 traces de bruit)" } }, "required": ["tab", "ref"], "additionalProperties": false },
       "result": { "type": "object", "properties": { "node": { "type": "integer" }, "declarations": { "type": "array", "items": { "type": "object" } } }, "required": ["node", "declarations"] }
     },
 
@@ -501,7 +502,7 @@
 
     "eval.run": {
       "x-phase": "E1",
-      "description": "Contexte top-level. Valeur bornée 64 Ko sérialisée, tronquée au-delà (data.truncated=true).",
+      "description": "Contexte top-level. Valeur bornée 64 Ko sérialisée, tronquée au-delà (data.truncated=true). Étape 257 : une pompe JS en vol n'est plus un refus immédiat — le verbe attend la réinsertion du moteur jusqu'à timeout_ms (défaut 2000), -32007 honnête au-delà.",
       "params": {
         "type": "object",
         "properties": {

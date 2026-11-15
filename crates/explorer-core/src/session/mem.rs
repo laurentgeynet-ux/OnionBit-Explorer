@@ -553,8 +553,18 @@ impl Session {
     /// est hors borne). `None` si l'onglet n'existe pas,
     /// avant la première navigation committée, ou si le
     /// nœud est mort (génération divergente).
+    /// `props` restreint aux propriétés nommées ;
+    /// `declared_only` élimine les verdicts `initial` et
+    /// `inherited` (aucune déclaration candidate — ~200
+    /// traces de bruit par appel, retour terrain étape 257).
     #[must_use]
-    pub fn engine_cascade(&self, tab: TabId, index: u32) -> Option<serde_json::Value> {
+    pub fn engine_cascade(
+        &self,
+        tab: TabId,
+        index: u32,
+        props: Option<&[String]>,
+        declared_only: bool,
+    ) -> Option<serde_json::Value> {
         let entry = self.tabs.get(&tab)?;
         let (Some(dom), Some(tree), Some(eng)) = (
             entry.dom.as_ref(),
@@ -578,9 +588,21 @@ impl Session {
         );
         let containers = explorer_layout::measure_containers(tree);
         let decls = eng.explain(dom, node, &env, parent, None, &|_| false, Some(&containers));
+        let decls: Vec<_> = decls
+            .iter()
+            .filter(|t| props.is_none_or(|ps| ps.iter().any(|p| p == &t.prop)))
+            .filter(|t| {
+                !declared_only
+                    || !matches!(
+                        t.verdict,
+                        explorer_css::DeclVerdict::Initial | explorer_css::DeclVerdict::Inherited
+                    )
+            })
+            .map(cascade_decl_json)
+            .collect();
         Some(serde_json::json!({
             "node": index,
-            "declarations": decls.iter().map(cascade_decl_json).collect::<Vec<_>>(),
+            "declarations": decls,
         }))
     }
 

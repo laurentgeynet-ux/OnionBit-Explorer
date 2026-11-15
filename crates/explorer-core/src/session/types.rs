@@ -655,7 +655,15 @@ pub enum InputOutcome {
     Scrolled {
         /// Décalage courant.
         scroll_y: f32,
+        /// `false` = le delta était enfilé ou `scroll_by` a
+        /// clampé sans bouger (page non scrollable) — le
+        /// client distingue « accepté » de « déplacé ».
+        moved: bool,
     },
+    /// Entrée enfilée pour rejeu à la réinsertion du paint
+    /// ou du moteur JS (étape 257 — ex-`Ignored`, qui
+    /// mentait : l'action **aura** lieu, juste plus tard).
+    Deferred,
     /// Un lien a été suivi (navigation déclenchée).
     Navigated,
     /// Survol : URL du lien sous le curseur, s'il y en a un

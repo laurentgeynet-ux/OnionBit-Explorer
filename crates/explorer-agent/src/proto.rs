@@ -784,6 +784,9 @@ pub struct ClickParams {
 
 /// `tab` + `ref` pour `engine.cascade` (étape 253 — pas
 /// d'`opts` : la lecture est pure, rien à attendre).
+/// Étape 257 : filtres — le verdict complet rend une
+/// trace par longhand du catalogue (~200 `initial`), ce
+/// qui inonde le contexte de l'agent (retour terrain).
 #[derive(Debug, Clone, Deserialize)]
 pub struct CascadeParams {
     /// Onglet.
@@ -791,6 +794,15 @@ pub struct CascadeParams {
     /// Handle cible — `StaleRef` si la révision a bougé.
     #[serde(rename = "ref")]
     pub elem_ref: ElementRef,
+    /// Ne rendre que ces propriétés (noms CSS déclarés —
+    /// shorthands expandés côté verdict).
+    #[serde(default)]
+    pub props: Option<Vec<String>>,
+    /// `true` = seules les déclarations réellement
+    /// candidates : les verdicts `initial`/`inherited`
+    /// (aucune règle ne pose la propriété) sont omis.
+    #[serde(default)]
+    pub declared_only: Option<bool>,
 }
 
 /// `ref` seul + opts.
