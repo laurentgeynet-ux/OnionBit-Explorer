@@ -469,14 +469,10 @@ fn daemons_list() -> ExitCode {
         return ExitCode::SUCCESS;
     }
     for (file, a) in &entries {
-        // Sonde TCP synchrone — la vivacité se prouve, les
-        // entrées périmées (crash) sont retirées au passage.
-        let alive = std::net::TcpStream::connect_timeout(
-            &std::net::SocketAddr::from(([127, 0, 0, 1], a.port)),
-            std::time::Duration::from_millis(300),
-        )
-        .is_ok();
-        if !alive {
+        // Mort = pid disparu ou recyclé (même règle que le
+        // broker : une sonde qui timeout n'évince pas —
+        // cf. Étape 256b).
+        if explorer_core::daemon_registry::announce_stale(a) {
             explorer_core::daemon_registry::remove(file);
             continue;
         }

@@ -359,15 +359,18 @@ async fn probe_daemon(port: u16) -> bool {
         .unwrap_or(false)
 }
 
-/// Annonces du registre **vivantes** — sonde chaque entrée,
-/// élimine les périmées (daemon mort : le fichier restait).
-async fn live_announces() -> Vec<explorer_core::daemon_registry::Announce> {
+/// Annonces du registre **vivantes** — la mort se prouve
+/// par PID disparu, jamais par sonde : un daemon saturé qui
+/// timeout sur `/api/status` reste vivant et routable
+/// (correctif Étape 256 — l'éviction sur sonde supprimait
+/// définitivement l'annonce d'un processus pourtant sain).
+fn live_announces() -> Vec<explorer_core::daemon_registry::Announce> {
     let mut out = Vec::new();
     for (file, a) in explorer_core::daemon_registry::list() {
-        if probe_daemon(a.port).await {
-            out.push(a);
-        } else {
+        if explorer_core::daemon_registry::announce_stale(&a) {
             explorer_core::daemon_registry::remove(&file);
+        } else {
+            out.push(a);
         }
     }
     out
@@ -377,12 +380,11 @@ async fn live_announces() -> Vec<explorer_core::daemon_registry::Announce> {
 /// port. Accepte un nom d'annonce ou un port numérique ;
 /// l'ambiguïté (homonymes) est une erreur honnête listant
 /// les candidats.
-async fn select_daemon(sel: &str) -> Result<u16, String> {
+fn select_daemon(sel: &str) -> Result<u16, String> {
     if let Ok(p) = sel.parse::<u16>() {
         return Ok(p);
     }
     let matches: Vec<_> = live_announces()
-        .await
         .into_iter()
         .filter(|a| a.name == sel)
         .collect();
@@ -406,11 +408,11 @@ async fn select_daemon(sel: &str) -> Result<u16, String> {
 /// Cible par défaut : port épinglé, sinon le daemon unique
 /// vivant ; l'absence ou la pluralité est une erreur
 /// guidante, jamais un choix silencieux.
-async fn default_daemon(pool: &Pool) -> Result<u16, String> {
+fn default_daemon(pool: &Pool) -> Result<u16, String> {
     if let Some(p) = pool.default_port {
         return Ok(p);
     }
-    let live = live_announces().await;
+    let live = live_announces();
     match live.len() {
         0 => Err("aucun daemon annoncé — daemon_spawn{profile} en démarre un".to_string()),
         1 => Ok(live[0].port),
@@ -441,15 +443,14 @@ async fn resolve(pool: &Pool, args: &Value) -> Result<(Arc<Eap>, Value, String),
         }
     }
     let port = match &sel {
-        Some(s) => select_daemon(s).await?,
-        None => default_daemon(pool).await?,
+        Some(s) => select_daemon(s)?,
+        None => default_daemon(pool)?,
     };
     // Le nom du daemon sert au retour qualifié (`nom:N`).
     let name = if let Some(s) = sel {
         s
     } else {
         live_announces()
-            .await
             .into_iter()
             .find(|x| x.port == port)
             .map_or_else(|| port.to_string(), |x| x.name)
@@ -525,14 +526,14 @@ async fn spawn_daemon(args: &Value) -> Result<Value, String> {
 /// pas joignable de l'extérieur) ; unix : SIGTERM (arrêt
 /// gracieux géré côté daemon). Jamais de `/IM` — on vise un
 /// pid précis, pas un nom d'image.
-async fn stop_daemon(args: &Value) -> Result<Value, String> {
+fn stop_daemon(args: &Value) -> Result<Value, String> {
     let sel = args["daemon"]
         .as_str()
         .or_else(|| args["name"].as_str())
         .map(str::to_owned)
         .or_else(|| args["port"].as_u64().map(|p| p.to_string()))
         .ok_or("daemon_stop : `daemon` (nom ou port) requis")?;
-    let port = select_daemon(&sel).await?;
+    let port = select_daemon(&sel)?;
     let Some((file, a)) = explorer_core::daemon_registry::list()
         .into_iter()
         .find(|(_, a)| a.port == port)
@@ -563,15 +564,19 @@ async fn stop_daemon(args: &Value) -> Result<Value, String> {
     }
 }
 
-/// `daemon_list` — le registre sondé : vivants + profils
-/// servis. C'est l'œil de l'agent : qui tourne, où, pour qui.
+/// `daemon_list` — le registre sondé : vivants (PID) +
+/// profils servis + `responsive` (la sonde `/api/status`
+/// mesure la réactivité, pas la mort — un daemon saturé
+/// apparaît `false` sans être évincé). L'œil de l'agent.
 async fn list_daemons() -> Value {
-    let live = live_announces().await;
-    json!(live
-        .iter()
-        .map(|a| json!({"name": a.name, "port": a.port, "pid": a.pid,
-                        "profile": a.profile, "version": a.version}))
-        .collect::<Vec<_>>())
+    let live = live_announces();
+    let mut out = Vec::new();
+    for a in &live {
+        out.push(json!({"name": a.name, "port": a.port, "pid": a.pid,
+                        "profile": a.profile, "version": a.version,
+                        "responsive": probe_daemon(a.port).await}));
+    }
+    json!(out)
 }
 
 async fn serve_async(port: Option<u16>) -> std::io::Result<u8> {
@@ -1020,7 +1025,7 @@ async fn call_tool(pool: &Arc<Pool>, id: Option<&Value>, name: &str, args: &Valu
             };
         }
         "daemon_stop" => {
-            return match stop_daemon(args).await {
+            return match stop_daemon(args) {
                 Ok(v) => resp(json!({"content":[{"type":"text","text":v.to_string()}]})),
                 Err(e) => err(e),
             };
