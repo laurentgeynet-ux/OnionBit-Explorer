@@ -13220,6 +13220,15 @@ chaque gain rapporté contre les **deux** archétypes.
   (`ic_hit`/`ic_miss`/`ic_disarm` au snapshot) pour
   borner la couverture du seul court-circuit existant.
   Dependency-groups = infra lourde, dernier recours.
+- [x] **JS-C559 — mémo identité immuable `NodeHost`** :
+  `immut_get` avant `host_mark` — 6 getters immuables
+  (`tagName`/`localName`/`nodeType`/`nodeName`/
+  `namespaceURI`/`prefix`) servis du slot wrapper, zéro
+  invalidation. `immemo_hit`/`immemo_ins` + kill-switch.
+- [x] **JS-C558 — `prop_ns` décomposé + sonde `host:`** :
+  vol n558 host 39 %/acc 20 %/marche 41 % ; `host:`
+  nomme 100 % HTMLElement, dominé immuables + internes
+  Polymer. Ordre `tracing::enabled!`/`matches!` corrigé.
 - [x] **JS-C557 — pilote `MethodCall` : fusion
   pré-existante → B rejeté par borne** : `Expr::Call`
   consomme le callee `Member` sans 2ᵉ dispatch

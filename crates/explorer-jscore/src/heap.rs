@@ -1907,6 +1907,25 @@ pub trait Host: std::any::Any {
         Ok(None)
     }
 
+    /// JS-C559 — lecture **immuable** mémoïsée sur le wrapper,
+    /// servie *avant* `host_mark`/`get` : les hôtes dont
+    /// certaines props sont fixes pour la vie du wrapper (les
+    /// valeurs de `Self::get` ne changent jamais) les servent
+    /// depuis un cache interne — la population contournée
+    /// s'effondre dans `host:`/`host_get` (filet de mesure).
+    /// `Some(v)` court-circuite `get` ; `None` = pas concerné.
+    ///
+    /// # Errors
+    /// Comme [`Self::get`].
+    fn immut_get(
+        &self,
+        _e: &mut crate::Engine,
+        _this: Value,
+        _key: &str,
+    ) -> JsResult<Option<Value>> {
+        Ok(None)
+    }
+
     /// `host[key] = v`. `false` → stored as ordinary own property.
     ///
     /// # Errors

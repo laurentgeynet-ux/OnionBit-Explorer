@@ -168,3 +168,15 @@ nouvelle :
    IC), `frame_ns` (prologue ~2,6-3,7 µs/appel), `mat_ns` —
    continuent la campagne de crans ordinaire ; l'option C
    (recyclage d'env) reste sur la table comme cran borné.
+
+## Addendum 2 — règle d'instrument pour les effets < 1 %
+
+La mesure C556 a calibré l'instrument : la variabilité de
+session inter-vols (±29 % sur `call` à `frame_ns` égal)
+rend toute comparaison A/B **aveugle sous ~1 % d'effet**.
+Règle pour les prochains pilotes : tout effet attendu sous
+ce seuil se mesure par **attribution in-process** (compteurs
+J17 bornés par callsite/population, diff d'intervalle même
+session), jamais par vols comparatifs. Les vols gardent leur
+rôle : vérification sémantique (console, `res.bad`) et mesure
+des effets > ~2 %.

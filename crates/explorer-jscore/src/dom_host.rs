@@ -598,6 +598,32 @@ struct NodeHost {
     /// **nouvel occupant** du slot — alias silencieux (§B-126,
     /// même classe qu'ADR-0008 côté explorer-dom).
     epoch: u32,
+    /// JS-C559 — mémo des getters **immuables** ([`immut_slot`])
+    /// indexé par slot : la valeur calculée au premier `get` est
+    /// immuable pour la vie du nœud → le cache vit et meurt avec
+    /// le wrapper (zéro invalidation, zéro table externe — un
+    /// handle mort [`Self::live`] `false` contourne le mémo et
+    /// dégrade par le chemin ordinaire).
+    memo: std::cell::RefCell<[Option<Value>; 6]>,
+}
+
+/// JS-C559 — whitelist des getters `NodeHost` **immuables** pour
+/// la vie du nœud (tag/kind/namespace/préfixe fixés à la
+/// création) → index du slot `memo`. Tout le reste — internes
+/// framework (`__shady*`/`__data`), états mutables (`className`,
+/// `textContent`…), collections live — passe par le chemin
+/// complet : un getter « immuable » mal classé serait un bug de
+/// fraîcheur invisible.
+fn immut_slot(key: &str) -> Option<usize> {
+    Some(match key {
+        "tagName" => 0,
+        "nodeName" => 1,
+        "localName" => 2,
+        "nodeType" => 3,
+        "namespaceURI" => 4,
+        "prefix" => 5,
+        _ => return None,
+    })
 }
 
 /// Sonde §cran-28 — `EXPLORER_STALE_THROW` : les accès sur
@@ -1274,6 +1300,7 @@ fn dom_nav_set(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
                 cache,
                 node,
                 epoch,
+                memo: std::cell::RefCell::new([None, None, None, None, None, None]),
             };
             host.set_inner_html(node, &s);
         }
@@ -2350,6 +2377,7 @@ pub(crate) fn node_value(e: &mut Engine, dom: &DomRef, cache: &NodeCache, node: 
         cache: cache.clone(),
         node,
         epoch,
+        memo: std::cell::RefCell::new([None, None, None, None, None, None]),
     }));
     if let Value::Obj(id) = v {
         // Sonde §cran-34 — tout wrap d'un tag CE nommé
@@ -8374,6 +8402,37 @@ impl Host for NodeHost {
 
     fn trace(&self, out: &mut Vec<ObjId>) {
         trace_node_cache(&self.cache, out);
+        for v in self.memo.borrow().iter().flatten() {
+            crate::heap::push_value(out, v);
+        }
+    }
+
+    fn immut_get(&self, e: &mut Engine, this: Value, key: &str) -> JsResult<Option<Value>> {
+        let Some(slot) = immut_slot(key) else {
+            return Ok(None);
+        };
+        if crate::no_immemo() {
+            return Ok(None);
+        }
+        // Handle mort (§B-126) → chemin ordinaire (dégradation
+        // `undefined`/refus), jamais de lecture mémoïsée d'un
+        // slot recyclé.
+        if !self.live() {
+            return Ok(None);
+        }
+        if let Some(v) = &self.memo.borrow()[slot] {
+            crate::j17_tick(&crate::J17_IMMEMO_HIT);
+            return Ok(Some(v.clone()));
+        }
+        // Miss : chemin complet, puis mémorisation d'un `Some`
+        // uniquement (`None` = prop inconnue du host — pas une
+        // valeur à figer).
+        let v = self.get(e, this, key)?;
+        if let Some(v) = &v {
+            self.memo.borrow_mut()[slot] = Some(v.clone());
+            crate::j17_tick(&crate::J17_IMMEMO_INS);
+        }
+        Ok(v)
     }
 
     fn get(&self, e: &mut Engine, this: Value, key: &str) -> JsResult<Option<Value>> {
@@ -11537,6 +11596,7 @@ fn adopt_into(e: &mut Engine, v: Value, dst: &DomRef, dst_cache: &NodeCache) -> 
             cache: dst_cache.clone(),
             node: new_id,
             epoch,
+            memo: std::cell::RefCell::new([None, None, None, None, None, None]),
         }));
     }
     dst_cache.borrow_mut().insert(new_id, id);

@@ -9697,9 +9697,16 @@ impl Engine {
                 }
                 let h = self.host_of(id);
                 if let Some(h) = &h {
+                    let _t = crate::j17_scope(&crate::J17_HOST_NS);
+                    // JS-C559 — getters immuables servis depuis
+                    // le mémo du wrapper *avant* `host_mark` :
+                    // la population contournée s'effondre dans
+                    // `host:`/`host_get` (filet de mesure).
+                    if let Some(v) = h.immut_get(self, base.clone(), key)? {
+                        return Ok(v);
+                    }
                     crate::host_mark(h.class_name(), key);
                     crate::j17_tick(&crate::J17_HOST_GET);
-                    let _t = crate::j17_scope(&crate::J17_HOST_NS);
                     if let Some(v) = h.get(self, base.clone(), key)? {
                         return Ok(v);
                     }

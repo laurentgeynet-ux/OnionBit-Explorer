@@ -165,6 +165,7 @@ env_flag!(missing_api, "EXPLORER_MISSING_API");
 env_flag!(js_profile, "EXPLORER_JS_PROFILE");
 env_flag!(nat_trace, "EXPLORER_NAT_TRACE");
 env_flag!(j17_host, "EXPLORER_J17_HOST");
+env_flag!(no_immemo, "EXPLORER_NO_IMMEMO");
 
 /// §B-59 — dernier natif entré dans `call_native`, écrit
 /// inconditionnellement (~20 ns, `&'static str`, zéro alloc).
@@ -666,6 +667,12 @@ pub static J17_ACC_GET: std::sync::atomic::AtomicU64 = std::sync::atomic::Atomic
 pub static J17_HOST_NS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 /// JS-C558 — `Host::get` servis (paire de `J17_HOST_NS`).
 pub static J17_HOST_GET: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+/// JS-C559 — hits du mémo identité immuable `NodeHost`
+/// (lectures servies sans `dom.borrow`/`alloc` ni dispatch).
+pub static J17_IMMEMO_HIT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+/// JS-C559 — insertions `immemo` (première résolution par
+/// couple wrapper×clé — le volume de wrappers concernés).
+pub static J17_IMMEMO_INS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 
 /// Gate J17 : les compteurs ci-dessus ne s'incrémentent que si
 /// `EXPLORER_J17_PROF` est posé (non vide/non "0") au premier
@@ -706,7 +713,7 @@ pub fn j17_enable() {
 #[must_use]
 pub fn j17_snapshot() -> String {
     let r = std::sync::atomic::Ordering::Relaxed;
-    let pairs: [(&str, &std::sync::atomic::AtomicU64); 84] = [
+    let pairs: [(&str, &std::sync::atomic::AtomicU64); 86] = [
         ("prop_lookup", &J17_PROP_LOOKUP),
         ("proto_lvl", &J17_PROTO_LVL),
         ("prop_scan", &J17_PROP_SCAN),
@@ -791,6 +798,8 @@ pub fn j17_snapshot() -> String {
         ("acc_get", &J17_ACC_GET),
         ("host_ns", &J17_HOST_NS),
         ("host_get", &J17_HOST_GET),
+        ("immemo_hit", &J17_IMMEMO_HIT),
+        ("immemo_ins", &J17_IMMEMO_INS),
     ];
     let mut out = String::new();
     for (k, c) in pairs {
