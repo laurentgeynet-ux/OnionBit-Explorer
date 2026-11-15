@@ -3049,6 +3049,90 @@ fn document_style_sheets_iterable() {
     );
 }
 
+/// Étape 273 — `sheet.cssRules` peuplé : `<style>` lit son
+/// `textContent`, `<link>` la table `sheet_texts` de
+/// l'embedder (href résolu sur `page_url`). Groupements
+/// imbriqués (`@media`/`@supports`), types hérités,
+/// `selectorText`/`conditionText`, `insertRule` réflexe.
+#[test]
+fn sheet_css_rules_populated() {
+    let mut e = engine_with(
+        "<html><head>\
+         <link rel=stylesheet href=s.css>\
+         <style>.a{color:red}@media(min-width:10px){.b{x:1}.c{y:2}}</style>\
+         </head><body></body></html>",
+    );
+    e.set_page_url("https://ex.org/dir/page");
+    e.set_sheet_texts(std::sync::Arc::new(std::sync::Mutex::new(
+        std::collections::HashMap::from([(
+            "https://ex.org/dir/s.css".to_string(),
+            ".lnk{display:block}@supports(x:y){.s{p:q}}".to_string(),
+        )]),
+    )));
+    let got = |e: &mut Engine, src: &str| match e.eval(src) {
+        Ok(v) => e.describe(v),
+        Err(err) => panic!("{src} -> {err}"),
+    };
+    // `<link>` : 2 règles top-level, types + selectorText.
+    assert_eq!(got(&mut e, "document.styleSheets[0].cssRules.length"), "2");
+    assert_eq!(
+        got(&mut e, "document.styleSheets[0].cssRules[0].selectorText"),
+        ".lnk"
+    );
+    assert_eq!(got(&mut e, "document.styleSheets[0].cssRules[0].type"), "1");
+    assert_eq!(
+        got(&mut e, "document.styleSheets[0].cssRules[1].type"),
+        "12"
+    );
+    assert_eq!(
+        got(&mut e, "document.styleSheets[0].cssRules[1].conditionText"),
+        "(x:y)"
+    );
+    assert_eq!(
+        got(
+            &mut e,
+            "document.styleSheets[0].cssRules[1].cssRules[0].selectorText"
+        ),
+        ".s"
+    );
+    // `<style>` : textContent lu, `@media` imbriqué (type 4).
+    assert_eq!(got(&mut e, "document.styleSheets[1].cssRules.length"), "2");
+    assert_eq!(got(&mut e, "document.styleSheets[1].cssRules[1].type"), "4");
+    assert_eq!(
+        got(
+            &mut e,
+            "document.styleSheets[1].cssRules[1].cssRules.length"
+        ),
+        "2"
+    );
+    // `el.sheet` même rail + `insertRule` sur la feuille peuplée.
+    assert_eq!(
+        got(
+            &mut e,
+            "document.styleSheets[1].ownerNode.sheet.cssRules.length"
+        ),
+        "2"
+    );
+    assert_eq!(
+        got(
+            &mut e,
+            "(function(){var s=document.styleSheets[0];\
+             s.insertRule('.z{k:v}',1);\
+             return s.cssRules.length+'|'+s.cssRules[1].selectorText})()"
+        ),
+        "3|.z"
+    );
+    // Feuille `<link>` sans texte fetché → `cssRules` vide
+    // honnête (feuille inobservable, pas de fausse règle).
+    let mut e2 =
+        engine_with("<html><head><link rel=stylesheet href=no.css></head><body></body></html>");
+    e2.set_page_url("https://ex.org/");
+    e2.set_sheet_texts(std::sync::Arc::new(std::sync::Mutex::new(
+        std::collections::HashMap::new(),
+    )));
+    assert_eq!(got(&mut e2, "document.styleSheets[0].cssRules.length"), "0");
+}
+
 /// JS-C37/C39 — le coût de resynchronisation `serialize_document`
 /// est instrumenté : appels + octets + micros produits cumulés.
 #[test]

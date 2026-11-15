@@ -265,6 +265,19 @@ pub(crate) struct BrowserHooks {
     /// (CAP-173) — pour `load`/`error` à la livraison. Même
     /// borne que `dyn_script_nodes`.
     pub dyn_link_nodes: std::collections::BTreeMap<u64, NodeId>,
+    /// Textes des feuilles `<link>` fetchées — `url absolue
+    /// → texte CSS`, poussé par l'embedder
+    /// ([`Engine::set_sheet_texts`]). Sert
+    /// `sheet.cssRules` sur les feuilles externes
+    /// (`<style>` lit son propre `textContent`).
+    /// `Arc<Mutex>` engine-global (même dial que le slot de
+    /// géométrie : le worker JS partage la table de la
+    /// session ; `Arc` traverse le canal de commandes, clé
+    /// url unique pour tous les contextes de l'onglet).
+    /// Absent → `cssRules` vide sur les `<link>` (borné :
+    /// feuille non fetchée = règles inobservables).
+    pub sheet_texts:
+        Option<std::sync::Arc<std::sync::Mutex<std::collections::HashMap<String, String>>>>,
     /// Slots `<dialog>` (CAP-176) : `showModal()` pose `open`
     /// et le flag modal ; `close()` efface les deux et tire
     /// `close`. `returnValue` = slot spec (pas un attribut —
@@ -391,6 +404,17 @@ pub(crate) struct BrowserHooks {
 }
 
 impl Engine {
+    /// Pousse la table `url absolue → texte CSS` des feuilles
+    /// `<link>` fetchées (session). Partagée `Arc` — les
+    /// livraisons tardives de `<link>` dynamiques restent
+    /// visibles du moteur sans ré-injection.
+    pub fn set_sheet_texts(
+        &mut self,
+        t: std::sync::Arc<std::sync::Mutex<std::collections::HashMap<String, String>>>,
+    ) {
+        self.hooks.sheet_texts = Some(t);
+    }
+
     /// Point `location`/`document.cookie` at `url`.
     pub fn set_page_url(&mut self, url: &str) {
         self.hooks.page_url = url.to_string();
@@ -2277,6 +2301,50 @@ struct EventHost {
     dom: DomRef,
     cache: NodeCache,
     state: Rc<EventState>,
+}
+
+/// Miroir `CSSStyleSheet` d'un nœud `<style>`/`<link
+/// rel=stylesheet>` (étape 273) — `css_sheet_ctor` +
+/// `ownerNode`/`href` + `cssRules` peuplé depuis le texte de
+/// la feuille : `textContent` pour `<style>`, table
+/// `hooks.sheet_texts` (href résolu sur `page_url`) pour
+/// `<link>`. Texte indisponible → `cssRules` vide (borné :
+/// feuille non fetchée = règles inobservables).
+pub(crate) fn sheet_for_node(
+    e: &mut Engine,
+    dom: &DomRef,
+    cache: &NodeCache,
+    node: NodeId,
+    href: Option<String>,
+) -> JsResult<Value> {
+    let v = crate::misc_apis::css_sheet_ctor(e, Value::Undefined, &[])?;
+    let Value::Obj(o) = v else { return Ok(v) };
+    let own = node_value(e, dom, cache, node);
+    e.set_own(o, "ownerNode", own, true);
+    let (is_style, inline_text) = {
+        let d = dom.borrow();
+        let t = d.nodes[node as usize].tag == "style";
+        (t, t.then(|| d.text_content(node)))
+    };
+    let text = if is_style {
+        inline_text
+    } else {
+        href.and_then(|h| {
+            let hv = e.str_val(&h);
+            e.set_own(o, "href", hv, true);
+            crate::xhr::resolve_url(e, &h)
+        })
+        .and_then(|abs| {
+            e.hooks
+                .sheet_texts
+                .as_ref()
+                .and_then(|t| t.lock().ok().and_then(|m| m.get(&abs).cloned()))
+        })
+    };
+    if let Some(t) = text {
+        crate::cssom::populate_sheet_rules(e, o, &t)?;
+    }
+    Ok(v)
 }
 
 pub(crate) fn node_value(e: &mut Engine, dom: &DomRef, cache: &NodeCache, node: NodeId) -> Value {
@@ -5798,20 +5866,11 @@ impl Host for DocumentHost {
                 };
                 let mut sheets = Vec::with_capacity(elems.len());
                 for n in elems {
-                    let v = crate::misc_apis::css_sheet_ctor(e, Value::Undefined, &[])?;
-                    if let Value::Obj(o) = v {
-                        let own = node_value(e, &self.dom, &self.cache, n);
-                        e.set_own(o, "ownerNode", own, true);
-                        let href = {
-                            let d = self.dom.borrow();
-                            d.attr(n, "href").map(str::to_owned)
-                        };
-                        if let Some(h) = href {
-                            let hv = e.str_val(h);
-                            e.set_own(o, "href", hv, true);
-                        }
-                    }
-                    sheets.push(v);
+                    let href = {
+                        let d = self.dom.borrow();
+                        d.attr(n, "href").map(str::to_owned)
+                    };
+                    sheets.push(sheet_for_node(e, &self.dom, &self.cache, n, href)?);
                 }
                 Ok(Some(e.new_array(sheets)))
             }
@@ -8456,16 +8515,7 @@ impl Host for NodeHost {
                 )
             };
             if tag == "style" || (tag == "link" && rel_ok) {
-                let v = crate::misc_apis::css_sheet_ctor(e, Value::Undefined, &[])?;
-                if let Value::Obj(o) = v {
-                    let own = node_value(e, &self.dom, &self.cache, node);
-                    e.set_own(o, "ownerNode", own, true);
-                    if let Some(h) = href {
-                        let hv = e.str_val(h);
-                        e.set_own(o, "href", hv, true);
-                    }
-                }
-                return Ok(Some(v));
+                return Ok(Some(sheet_for_node(e, &self.dom, &self.cache, node, href)?));
             }
         }
         // `<a>`/`<area>` : décomposition d'URL sur l'attribut

@@ -1152,6 +1152,18 @@ pub trait JsEngine: Send {
     /// (env `Default` : scheme clair, souris fine).
     fn set_media_env(&mut self, _env: explorer_jscore::MediaEnv) {}
 
+    /// Table `url absolue → texte CSS` des feuilles `<link>`
+    /// fetchées (étape 273) — `Arc` partagé poussé au spawn ;
+    /// `sheet.cssRules`/`document.styleSheets` la lisent pour
+    /// peupler les règles des feuilles externes (`<style>`
+    /// lit son propre `textContent`). Défaut : no-op
+    /// (`cssRules` vide sur les `<link>` — borné).
+    fn set_sheet_texts(
+        &mut self,
+        _texts: std::sync::Arc<std::sync::Mutex<std::collections::HashMap<String, String>>>,
+    ) {
+    }
+
     /// Décision de consentement CMP de la session (JS-C259,
     /// ADR-0031 — miroir de `SessionConfig::consent_policy`) —
     /// posée avant `install_dom` ; `__tcfapi` répond alors le
@@ -1894,6 +1906,13 @@ enum Cmd {
         ctx: JsCtxId,
         slot: explorer_jscore::GeometrySlot,
     },
+    /// Table `url absolue → texte CSS` des feuilles `<link>`
+    /// fetchées (étape 273) — `Arc` partagé : les livraisons
+    /// dynamiques tardives restent visibles du moteur ; sert
+    /// `sheet.cssRules` sur les feuilles externes.
+    SetSheetTexts {
+        texts: std::sync::Arc<std::sync::Mutex<std::collections::HashMap<String, String>>>,
+    },
     /// `document.referrer` du document top-level (CAP-156).
     SetPageReferrer {
         referrer: String,
@@ -2593,6 +2612,9 @@ impl JscoreEngine {
                     }
                     Cmd::SetGeometry { ctx, slot } => {
                         eng.set_geometry_ctx(ctx, slot);
+                    }
+                    Cmd::SetSheetTexts { texts } => {
+                        eng.set_sheet_texts(texts);
                     }
                     Cmd::SetPageReferrer { referrer } => {
                         eng.set_page_referrer(&referrer);
@@ -3580,6 +3602,13 @@ impl JsEngine for JscoreEngine {
 
     fn set_geometry_ctx(&mut self, ctx: JsCtxId, slot: explorer_jscore::GeometrySlot) {
         let _ = self.tx.send(Cmd::SetGeometry { ctx, slot });
+    }
+
+    fn set_sheet_texts(
+        &mut self,
+        texts: std::sync::Arc<std::sync::Mutex<std::collections::HashMap<String, String>>>,
+    ) {
+        let _ = self.tx.send(Cmd::SetSheetTexts { texts });
     }
 
     fn set_media_env(&mut self, env: explorer_jscore::MediaEnv) {

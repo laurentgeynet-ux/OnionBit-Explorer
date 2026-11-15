@@ -259,6 +259,7 @@ impl Session {
             mask_aliases,
             expanded_inline,
             lazy_imgs,
+            sheet_urls,
             mut eng,
             js_doc_html,
             fonts,
@@ -274,6 +275,13 @@ impl Session {
         // entrée par feuille (étape 104) : chaque feuille est
         // parsée isolément à la cascade.
         if let Some(entry) = self.tabs.get_mut(&tab) {
+            // Textes par URL absolue pour `sheet.cssRules`
+            // (étape 273) — zip slot×url avant l'aplatissement :
+            // le moteur résout `link.href` contre `page_url` et
+            // lit la même table (bornée comme `linked_sheets`).
+            if let Ok(mut st) = entry.sheet_texts.lock() {
+                Self::record_sheet_texts(&mut st, &sheet_urls, &css_slots);
+            }
             entry.linked_sheets = css_slots.into_iter().flatten().collect();
             // `<style>` inline expansés `@import` (étape 218)
             // — substitution par contenu à `styles_payload`.
@@ -2796,6 +2804,22 @@ impl Session {
     /// décodée rejoint `linked_sheets` (la cascade la reprend
     /// au prochain apply, gated `media`), puis `load` part
     /// sur l'élément — sinon `error`.
+    /// `url absolue → texte` des feuilles reçues (étape 273)
+    /// — bornée comme `linked_sheets` (64/doc).
+    fn record_sheet_texts(
+        st: &mut std::collections::HashMap<String, String>,
+        sheet_urls: &[SheetFetch],
+        css_slots: &[Option<String>],
+    ) {
+        for ((u, ..), text) in sheet_urls.iter().zip(css_slots.iter()) {
+            if let Some(t) = text {
+                if st.len() < 64 {
+                    st.insert(u.to_string(), t.clone());
+                }
+            }
+        }
+    }
+
     fn commit_dyn_link(&mut self, tab: TabId, meta: &DynLinkMeta, out: &NetResult<Response>) {
         let text = match out {
             Ok(resp)
@@ -2829,11 +2853,18 @@ impl Session {
                     self.scale,
                 );
                 let applies = media.as_deref().is_none_or(|m| media_attr_matches(&env, m));
-                if applies {
-                    if let Some(entry) = self.tabs.get_mut(&tab) {
-                        if entry.linked_sheets.len() < 64 {
-                            entry.linked_sheets.push(t);
+                if let Some(entry) = self.tabs.get_mut(&tab) {
+                    // `sheet.cssRules` (étape 273) — le texte est
+                    // rangé même si le media ne matche pas :
+                    // une feuille non appliquée expose quand
+                    // même ses règles (spec cssom).
+                    if let Ok(mut st) = entry.sheet_texts.lock() {
+                        if st.len() < 64 {
+                            st.insert(meta.url.to_string(), t.clone());
                         }
+                    }
+                    if applies && entry.linked_sheets.len() < 64 {
+                        entry.linked_sheets.push(t);
                     }
                 }
                 true

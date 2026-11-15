@@ -80,6 +80,7 @@ impl Tab {
             linked_sheets: std::mem::take(&mut self.linked_sheets),
             adopted_sheets: self.adopted_sheets.clone(),
             inline_css_expanded: self.inline_css_expanded.clone(),
+            sheet_texts: self.sheet_texts.clone(),
             defined_names: self.defined_names.clone(),
             prev_styles: std::mem::take(&mut self.prev_styles),
             dirty: std::mem::take(&mut self.dirty),
@@ -198,6 +199,7 @@ impl Tab {
         self.linked_sheets = snap.linked_sheets;
         self.adopted_sheets = snap.adopted_sheets;
         self.inline_css_expanded = snap.inline_css_expanded;
+        self.sheet_texts = snap.sheet_texts;
         self.defined_names = snap.defined_names;
         self.prev_styles = snap.prev_styles;
         self.dirty = snap.dirty;

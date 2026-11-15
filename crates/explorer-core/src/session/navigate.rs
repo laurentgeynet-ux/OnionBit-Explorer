@@ -1305,6 +1305,9 @@ impl Session {
             entry.linked_sheets.clear();
             entry.adopted_sheets.clear();
             entry.inline_css_expanded.clear();
+            if let Ok(mut st) = entry.sheet_texts.lock() {
+                st.clear();
+            }
             entry.defined_names.clear();
             entry.frames.clear();
             entry.prev_styles = HashMap::new();

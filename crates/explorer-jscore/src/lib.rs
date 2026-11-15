@@ -55,6 +55,7 @@ mod cmp;
 mod collections;
 mod context;
 mod crypto;
+mod cssom;
 mod dom;
 mod dom_host;
 mod error;

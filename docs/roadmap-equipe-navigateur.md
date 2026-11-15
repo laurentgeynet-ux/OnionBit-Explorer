@@ -7943,6 +7943,16 @@ MCP = adaptateur, jamais la base.
   externe (console de pilotage) n'a plus à deviner où
   vivent registre, profils, vols et logs — bloc additif du
   résultat, chemins `/`, clés absentes = indisponibles.
+- [x] **Étape 273. `sheet.cssRules` peuplé — recensement CSS
+  in-page réel** — `document.styleSheets[].cssRules` était
+  toujours `[]` (field272 : recensement par grep du cache au
+  lieu du DOM). Splitteur CSSOM textuel borné (`cssom.rs` :
+  top-level + groupements imbriqués, types hérités, prof. 4 /
+  4096 par liste), table `Arc<Mutex<url→texte>>` poussée par
+  la session (`Tab::sheet_texts` — slots statiques + `<link>`
+  dynamiques, vidée au doc mort, bfcache-safe) ; `<style>` lit
+  son `textContent`. `insertRule` gagne `selectorText`.
+  Borne : feuilles d'iframes non câblées.
 - [x] **Étape 272. `css.values` — passe 2 : oracle-bornées
   reclassées, 63,8 % → 68,8 % honnête** — seconde qualification
   jauge-only : `NO_ORACLE` pour `perspective*`/`interpolate-size`/

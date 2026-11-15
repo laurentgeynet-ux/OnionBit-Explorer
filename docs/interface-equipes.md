@@ -3917,3 +3917,35 @@ de glyphe ou les métriques.
 archétypes devant cette file (`roadmap-equipe-pipeline.md`,
 ops de groupe résidu `group_us` + `content-visibility`
 viewport-aware) — cette entrée trie, elle n'ordonne pas.
+
+### 2026-11-15 — Étape 273 (NAV) : `sheet.cssRules` peuplé — recensement in-page débloqué
+
+**Retour terrain field272** : `document.styleSheets[].cssRules`
+rendait toujours `[]` — le recensement des propriétés CSS
+déployées sur un site volé devait se faire par grep du cache
+réseau au lieu de la surface DOM.
+
+**Livré** (contrat interne NAV `JsEngine`, extension additive) :
+splitteur textuel borné `explorer-jscore/cssom.rs` (top-level
++ groupements imbriqués `@media`/`@supports`/`@layer`/
+`@container`, enfants `@keyframes`, marges `@page` ; constantes
+`type` héritées, `0` honnête pour les at-rules récentes sans
+constante) + table `Arc<Mutex<url→texte>>` remplie par la
+session aux commits de feuilles (`sheet_urls`×`css_slots`,
+`<link>` dynamiques — même non-matchants). `<style>` lit son
+`textContent`. `insertRule` pose `selectorText`.
+
+**Bornes connues** : feuilles des iframes non câblées (leurs
+textes vivent dans les payloads de cadre) → `cssRules` vide
+dessus ; `cssRules` = shape textuelle `{cssText,type,…}` — pas
+de `style` CSSStyleDeclaration miroité ni de lien vivant avec
+la cascade (`insertRule`/`deleteRule` mutent le miroir sans
+restyle — borne préexistante, inchangée). Le split ne
+prétend pas au parseur : `explorer-css` reste la seule
+implémentation spec complète (déclarations, imbrication
+nesting-1 moderne rapportée plate — les règles imbriquées
+`&` dans un bloc style ne remontent pas en top-level).
+
+**Signal pour les vols** : le protocole « anomalies × file
+misses » peut désormais recenser en une eval :
+`[...document.styleSheets].flatMap(s=>[...s.cssRules].map(r=>r.cssText))`.
