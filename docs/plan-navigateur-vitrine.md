@@ -10,9 +10,9 @@
 > tâche cite ses fichiers, son verrou et sa condition de
 > sortie. Rédigé à partir de l'état mesuré (journal crans
 > ≤ 86, `css.values` 834/2273, `api` 1510/8099 = 18,6 %).
-> Protocole de vol : `docs/vol-youtube.md` (worktree de vol
-> dédié, artefacts sous `Explorer-data\vols\` — `.eval/` reste
-> du triage local, jamais suivi).
+> Protocole de vol : `docs/vol-agent.md` (artefacts sous
+> `Explorer-data\vols\` — `.eval/` reste du triage local,
+> jamais suivi).
 
 ## 0. Objectif et définition de « fait »
 

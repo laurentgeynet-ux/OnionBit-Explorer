@@ -60,13 +60,17 @@ pwsh -File scripts/spawn_daemon.ps1 -Port 9385 `
 # contrôle : `daemon-<port>.exe.log` = chemin + âge du binaire
 # lancé, à citer dans le rapport (un vol mesure UN binaire).
 
-# 0.4 watchdog OBLIGATOIRE — les deux lignes, dès le lancement
-# <pid> = la ligne « daemon PID <n> » de spawn_daemon.ps1
-# (JAMAIS le « cmd watchdog PID » — garder celui-là figerait
-# le watchdog, pas le moteur).
+# 0.4 watchdog MÉMOIRE — Job Object obligatoire, memwatch en
+# option. <pid> = la ligne « daemon PID <n> » de
+# spawn_daemon.ps1 (JAMAIS le « cmd watchdog PID »).
 pwsh -File scripts/vol_joblimit.ps1 -TargetPid <pid> -LimitMB 5120
-pwsh -File scripts/vol_memwatch.ps1 -DaemonPid <pid> -MaxMB 5120 `
-  -Log "Explorer-data\vols\vol<N>\logs\watch.log" &
+# joblimit = borne d'alloc par Job Object : l'alloc géante
+# échoue DANS le daemon, la station survit — il ne tue jamais
+# par PID. vol_memwatch.ps1 (kill par PID au seuil) n'est plus
+# requis en routine : sa signature de mort = celle d'un kill
+# externe (field274 — trois morts « vivant résiduel » classées
+# TerminateProcess) ; ne l'armer QUE pour une chasse de fuite
+# documentée, avec watch.log archivé au vol.
 
 # 0.5 artefacts au corpus, auto-contenus par vol
 #   logs    → Explorer-data\vols\vol<N>\logs\*.log
@@ -83,21 +87,26 @@ les cibles ; un claim > 2 h sans rapport = vol mort, cibles
 libres.
 
 En clôture de vol : daemon tué par **PID** (jamais `taskkill
-/IM` — les voisins appartiennent aux autres équipes), logs
-archivés au corpus, `git add -A && git commit` dans
+/IM` — les voisins appartiennent aux autres équipes ; avant de
+tuer un daemon qu'on n'a pas spawné, vérifier sa propriété dans
+le registre `session.open.dirs.daemons` — nom/port/profil —
+field274 : kills croisés par PID entre sessions parallèles),
+logs archivés au corpus **y compris `logs/explorer_daemon_
+flight.log` et `logs/explorer_daemon_death.log`** (étape 276 —
+ils nomment la classe de mort), `git add -A && git commit` dans
 `Explorer-data\vols`, entrée journal + statuts §B synchronisés.
 
 ## 1. Lancer le daemon dédié
 
-```powershell
-cargo build -p explorer-daemon          # attendre « Finished »
-.\target\debug\explorer-daemon.exe --port 9385
-```
+Le lancement canonique est la séquence §0 (`spawn_daemon.ps1`
+— fenêtre cachée, watchdog WMI, `exit.log` + `exe.log`). Rappel
+des points durs :
 
 - **Port ≠ 9377** — celui-ci appartient au vol humain / à l'app.
   Choisir 9385+ pour les vols agents (pas de collision).
-- `--release` recommandé pour les sites lourds (debug ≈ 10× plus
-  lent — une nav github peut dépasser le timeout REST en debug).
+- **`--release` obligatoire** pour les sites lourds (debug ≈ 10×
+  plus lent — une nav github peut dépasser le timeout REST en
+  debug ; la suite jscore `hostile` passe de ~10 min à ~30 s).
 - La variable `EXPLORER_VIEWPORT=1366x900` cale la fenêtre de vol
   (cohérent avec le radar nightly).
 
@@ -173,6 +182,25 @@ Invoke-RestMethod "$BASE/api/tabs/$tab/layout"   # arbre de boîtes
 | `POST …/media/{mid}/release` | détachement hôte |
 | `POST …/media/{mid}/state` | rapport hôte ≤ 4 Hz — `{position_ms,duration_ms,buffered_ms,state,error?}`, `state ∈ playing\|paused\|ended\|error` |
 | `GET  /api/events` | SSE — `navigated`, `frame_invalidated`, `media_offered`/`moved`/`gone`/`command`… |
+| `GET  /api/tabs/{id}/console` | erreurs pipeline **persistées** (ring 512) — premier réflexe, avant le DOM |
+| `GET  /api/tabs/{id}/eval` `POST` `{src}` | eval JS bornée — recensement in-page (ex. `document.styleSheets[].cssRules` peuplé depuis l'étape 273) |
+| `GET  /api/status` | état du daemon (uptime, onglets) — sonde de vie hors verbe |
+
+**Registre des daemons** : chaque daemon annonce `<nom>-<pid>.json`
+(nom, port, profil, sha de build) dans `Explorer-data\daemons\`
+— avant de tuer un daemon qu'on n'a pas spawné, lire son
+annonce : un daemon étranger a un nom/profil qui le trahit
+(field274 : kills croisés par PID entre sessions parallèles —
+la propriété se vérifie, elle ne se devine pas). L'annonce est
+supprimée à l'arrêt propre ; une annonce orpheline = mort dure.
+
+**EAP** (`explorer-agent`, websocket agent) : `session.open`
+rend `dirs.daemons` (le même registre) et `session.ping` est
+répondu **hors verrou** avec `busy`/`in_flight` (méthode +
+durée tenue) — la sonde qui distingue « daemon mort » de
+« daemon wedged sous un verbe » (un wedge se nomme ; une mort
+se constate). Voir `docs/architecture/decisions/0035-
+protocole-agent-eap.md`.
 
 Format `input` : `{"type":"click","x":N,"y":N}` (px viewport),
 `{"type":"scroll","dy":N}` (px CSS, + = vers le bas),
@@ -602,15 +630,27 @@ frame-moteur vs fenêtre-app est un constat en soi (bug UI).
   daemon humain :9377 (les onglets se partageraient).
 - **Arrêt** : fermer les onglets (`DELETE /api/tabs/{id}`) puis
   tuer le process par **son PID** — jamais `taskkill /IM` (risque
-  de toucher le daemon de l'utilisateur).
-- **Watchdog mémoire obligatoire** : un daemon wedged a monté à
-  ~7 Go + swap et crashé la station (vol 106). Lancer en tâche de
-  fond dès le démarrage du daemon :
-  `pwsh -File scripts/vol_memwatch.ps1 -DaemonPid <PID>
-  [-MaxMB 5120] [-IntervalSec 15] [-Log <file>]` — kill **par PID**
-  au-delà du seuil, journal dans `_vol*_watch.log`. Le wedge
-  reste un constat §B à rapporter ; le watchdog protège la
-  machine, pas le diagnostic.
+  de toucher le daemon de l'utilisateur). Avant de tuer un
+  daemon qu'on n'a pas spawné, vérifier son annonce dans
+  `Explorer-data\daemons\` (nom/port/profil) — kills croisés
+  par PID mesurés entre sessions parallèles (field274/823).
+- **Watchdog mémoire = Job Object** : un daemon wedged a monté
+  à ~7 Go + swap et crashé la station (vol 106) —
+  `pwsh -File scripts/vol_joblimit.ps1 -TargetPid <PID>
+  -LimitMB 5120` borne l'alloc **dans** le daemon, jamais de
+  kill par PID. `vol_memwatch.ps1` (kill par PID au seuil,
+  journal `watch.log`) n'est plus requis en routine : sa
+  signature de mort est indiscernable d'un kill externe —
+  réservé aux chasses de fuite documentées. Le wedge reste un
+  constat §B à rapporter ; le watchdog protège la machine,
+  pas le diagnostic.
+- **Instrumentation embarquée** (étapes 276/279/281 — rien à
+  armer, c'est le défaut) : le flight recorder écrit
+  `logs/explorer_daemon_flight.log` à 400 ms (`drain`, `calls`,
+  `gc`, `xrt`, balises `LAST_*`, RSS/commit) et la sentinelle
+  `logs/explorer_daemon_death.log` distingue les classes de
+  mort — voir « Lecture postmortem » §7. Archiver les deux au
+  vol (`logs/daemons/` pour les morts).
 
 ## 6. Différences avec le vol humain
 
@@ -645,6 +685,46 @@ frame-moteur vs fenêtre-app est un constat en soi (bug UI).
   moteur + `diff` contre une référence (Chrome/Playwright).
 - **En file** : sonde `/net` (verdicts sous-ressources
   CSP/SRI/CORS par URL) — entaille session, file NAV.
+
+### Capture de mort — sentinelle, flight recorder, WER
+
+Trois canaux, trois classes : la **sentinelle**
+`logs/explorer_daemon_death.log` (écrite `alive` au boot,
+écrasée par tout crochet interne), le **flight recorder**
+`logs/explorer_daemon_flight.log` (beats ~400 ms, armé par
+défaut — `EXPLORER_FLIGHT_MS/LOG/MAX_KB`, `0` désarme) et
+**WER LocalDumps** (externe OS, fautes natives).
+
+| État retrouvé | Cause |
+|---|---|
+| `panic: …` | panic Rust (message + site) |
+| `rss_guard[…]` | garde RSS armée (`EXPLORER_RSS_GUARD_MB`) |
+| `console:close\|logoff\|shutdown` | kill console/session Windows |
+| `stop` ou fichier absent | arrêt propre (`ctrl_c`, `SIGTERM`) |
+| `alive` + beats sains, arrêt franc | **kill externe** — TerminateProcess/Job/taskkill : vérifier le registre `daemons/` (autre session ?) |
+| `alive` + beat figé sur une balise | stack overflow / spin natif — site nommé par `drain`/`phase`/`stmt`/`fun` |
+| `alive` + `commit` au plafond | alloc-abort / OOM |
+| beats vivants, `drain` fixe, `calls` figé | **wedge** — croiser `session.ping.in_flight` (verbe tenu) ; `gc>0` = famine GC, `gc=0` = spin hôte (`host`/`phase` fiables), `xrt` reads≫decodes = boucle `responseText` (étapes 279/281) |
+
+Calibration mesurée (field274) : `taskkill /PID /F` → `wait`
+rapporte `1`, `alive` résiduel, dernier beat sain — c'est la
+signature de référence du kill externe.
+
+**WER LocalDumps** (capture faute native, externe au
+processus — SEH in-process écarté : `forbid(unsafe_code)` +
+handler sur pile épuisée) : clé HKCU
+`HKCU:\Software\Microsoft\Windows\Windows Error Reporting\
+LocalDumps` armée par l'opérateur (dossier `D:\Temp\dumps`,
+type 2 — vérifier `Get-ChildItem` après une mort suspectée
+native ; un dossier vide + `alive` résiduel élimine la faute).
+Piles durcies : tokio 32 Mio + thread jscore 32 Mio (étape
+138, JS-C41).
+
+**Watchdogs de spawn** : `spawn_daemon.ps1` écrit
+`daemon-<port>.exit.log` (`EXIT:<code>`) +
+`daemon-<port>.exe.log` (chemin+âge du binaire lancé — la
+preuve « quel binaire ») ; `daemon_watch.ps1` = cycles +
+CSV RSS (fuite suspectée).
 
 ### Garde anti-crash — ne jamais `read` un PNG brut
 

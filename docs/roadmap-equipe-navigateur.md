@@ -4893,7 +4893,8 @@ sortie : R-12 (layout incrémental) ou cadencement temporel.
   (`HKLM\SOFTWARE\Microsoft\Windows\
   Windows Error Reporting\LocalDumps\
   explorer-daemon.exe`, admin une
-  fois, note `scripts/vol-agent.md`)
+  fois, note fusionnée `docs/
+  vol-agent.md` §7)
   — tout crash futur écrit un `.dmp`
   complet, survit aux fautes où un
   handler in-process ne tourne plus.

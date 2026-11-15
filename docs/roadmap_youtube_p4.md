@@ -18,7 +18,7 @@
 >   un rapport + entrée `docs/interface-equipes.md` /
 >   `youtube/SYNTHESE.md`, pas de case roadmap sauf si une
 >   sonde est livrée.
-> - **Protocole de vol** : [`vol-youtube.md`](vol-youtube.md)
+> - **Protocole de vol** : [`vol-agent.md`](vol-agent.md)
 >   intégralement (batterie `EXPLORER_*` obligatoire,
 >   worktree de vol `C:\OnionBit-Explorer-youtube-wt`,
 >   artefacts sous `Explorer-data\vols\youtube\`).
@@ -196,7 +196,7 @@ immédiat (grep du dump DOM ou `eval`).
   `net.dfc`/`net.held`/`net.abk` — §B-122 WIP), `EXPLORER_DLV_
   TRACE=1` (breadcrumb `journal: op`), `EmitStats` déjà
   consommé (`EXPLORER_EMIT_STATS=1`), `EXPLORER_MEM_DIAG=1`.
-- **Protocole** : vol `YTHOME` standard `vol-youtube.md`
+- **Protocole** : vol `YTHOME` standard `vol-agent.md`
   (batterie §1.3 complète) + `RUST_LOG=dom_probe=info,
   media_probe=info`. Profil **froid**.
 - **Lecture du log, dans l'ordre** :
@@ -478,6 +478,6 @@ immédiat (grep du dump DOM ou `eval`).
    dans les trous de vol (pas de dépendance au bundle).
 6. **Gate final** : `pwsh -File scripts/verify_all.ps1`
    + vol `YTREVALID` complet (`/`, `/watch`, embed) —
-   critères `vol-youtube.md` §3 : `shadowRoot`/DOM
+   critères §ci-dessus : `shadowRoot`/DOM
    hydraté, `shownItems>0`, zéro régression `/watch`
    (record vol 731 à conserver : chaîne MSE à l'octet).
