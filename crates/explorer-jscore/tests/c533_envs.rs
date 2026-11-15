@@ -254,33 +254,30 @@ fn c534b_fn_scope_wire_actually_hits() {
     );
 }
 
-/// JS-C534d — un corps empoisonné (`eval`/`delete ident`) émet
-/// désormais son canon : le flag `poisoned` ne gouverne que la
-/// suppression des annotations — le câblage + `extra` servent
-/// les liaisons injectées dynamiquement (le routage canon/extra
-/// est total, un nom canonique ne peut pas être masqué par un
-/// doublon `extra`). `envu:` a nommé l'env d'appel
-/// (`mod.rs:11445`) comme réservoir des 695 k `xt_unw` — les
-/// scopes poisoned yt (`BotGuard` abuse d'`eval`) en étaient la
-/// cause.
+/// JS-C534d — **révert mesuré** (N5.43 : `env_ns` 204 ms →
+/// 6,4 s) : un corps empoisonné (`eval`/`delete ident`) reste
+/// **non câblé** — aucune annotation slot n'existe pour lui
+/// (principe du poison), donc le canon ne servirait que par
+/// scan `pos()` = même coût qu'`extra` Small, mais au prix
+/// d'un `cells` + inserts scannés par appel. `extra` Small
+/// **est** le bon stockage sans slots — `xt_unw` y reste le
+/// compteur honnête. Le lock garde la sémantique : `x`
+/// (statique) + `z` (injecté par eval) = 33.
 #[test]
-fn c534d_poisoned_call_env_still_wires() {
+fn c534d_poisoned_stays_unwired_serves_extra() {
     let _g = IC_LOCK
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner);
     explorer_jscore::j17_enable();
     let mut e = Engine::new();
-    // `eval` (ident) → `body_poisons` → canon émis quand même ;
-    // `x` se lie en `cells`, le `var z` injecté rejoint `extra`
-    // — les deux se servent, sémantique eval préservée.
     let r = e
         .eval("function f(a){ let x=a+1; eval('var z = x*10'); return x+z; } f(2)")
         .expect("eval");
-    assert_eq!(e.describe(r), "33", "x=3 + z=30");
+    assert_eq!(e.describe(r), "33", "x=3 + z=30 — eval injection");
     let snap = explorer_jscore::j17_snapshot();
     assert!(
-        snap_counter(&snap, "bnd_canon") > 0,
-        "le scope poisoned câblé doit servir en canon : {snap}"
+        snap_counter(&snap, "xt_unw") > 0,
+        "le scope poisoned non câblé sert en extra : {snap}"
     );
 }
 

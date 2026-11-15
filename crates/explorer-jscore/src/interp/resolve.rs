@@ -747,23 +747,21 @@ impl Resolver {
         // des fonctions sœurs (régression `for-in`/`for-of` B1 du
         // vol 811).
         let base = self.scopes.len();
-        // JS-C534d — le canon est émis pour TOUT corps dont on
-        // connaît les vrais params (synchrone, ou gen/async avec
-        // `lowered_params`) — **y compris `poisoned`** : le flag
-        // `poisoned` ne gouverne que la *suppression des
-        // annotations* d'idents le traversant (eval peut injecter
-        // des noms invisibles statiquement) ; côté runtime, un
-        // env câblé + `extra` sert déjà les liaisons injectées
-        // (le routage canon/extra ne peut pas masquer un nom
-        // canonique — l'invariant est asserté). `envu:` a nommé
-        // les 695 k hits `extra` du call env — les scopes
-        // poisoned yt (BotGuard abuse d'`eval`) étaient le
-        // réservoir.
+        // JS-C534d — **scopes poisoned non câblés, mesuré** : le
+        // vol N5.43 a réfuté le câblage des corps empoisonnés —
+        // `env_ns` 204 ms → 6,4 s (+31×) pour `xt_unw` 563 k →
+        // 160. Un scope poisoned n'a *jamais* d'annotation slot
+        // (c'est le principe du poison) → le canon ne sert que
+        // par `pos()` = même coût qu'`extra` Small → zéro gain,
+        // et le câblage paie `cells` + O(n²) d'inserts scannés
+        // par appel — les corps poisoned yt sont les *gros*
+        // (webpack `eval`-devtool enrobe chaque module factory).
+        // `extra` Small **est** le bon stockage sans slots.
         // Gen/async **sans** params baissés (walk imbriqué sur
         // corps source) : canon incertain → pas d'émission (la
         // clé émise serait morte — le runtime demande la clé du
         // corps baissé à l'appel du lit).
-        if !(lit.is_gen || lit.is_async) || lowered_params.is_some() {
+        if !poisoned && (!(lit.is_gen || lit.is_async) || lowered_params.is_some()) {
             // JS-C503 — slots du scope `Local` : liste canonique
             // alignée sur le prologue (params → arguments? →
             // new.target? → hoist → lex), clé `body.as_ptr()`.
