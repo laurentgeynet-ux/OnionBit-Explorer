@@ -33,7 +33,10 @@ const CALL_TIMEOUT: Duration = Duration::from_secs(300);
 /// Boucle stdio : une trame JSON-RPC par ligne, jusqu'à EOF.
 /// Le runtime tokio est local au pont — stdin bloquant vit
 /// dans un thread lecteur, le socket WS dans le runtime.
-pub fn serve(port: u16) -> std::io::Result<u8> {
+/// `port` = daemon épinglé (défaut de routage) ; `None` =
+/// broker pur : la cible se résout par le registre à chaque
+/// appel (`daemon`/`nom:onglet`, étape 256).
+pub fn serve(port: Option<u16>) -> std::io::Result<u8> {
     let rt = tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()?;
@@ -300,14 +303,291 @@ impl Eap {
     }
 }
 
-async fn serve_async(port: u16) -> std::io::Result<u8> {
-    let eap = Arc::new(Eap {
-        port,
-        live: tokio::sync::Mutex::new(None),
+/// Courtier multi-daemons : une connexion `Eap` paresseuse
+/// par port découvert, + le port épinglé éventuel servant de
+/// cible par défaut (étape 256). Le multiplexage vit ici —
+/// le protocole EAP côté daemon est inchangé : l'adaptateur
+/// déroute le préfixe `nom:` de `tab` et réécrit le param.
+struct Pool {
+    /// Connexions par port — créées au premier appel routé.
+    conns: tokio::sync::Mutex<HashMap<u16, Arc<Eap>>>,
+    /// Port épinglé au lancement (`mcp <port>`) — cible par
+    /// défaut quand l'appel ne nomme pas son daemon.
+    default_port: Option<u16>,
+}
+
+impl Pool {
+    /// Connexion (paresseuse) vers le daemon sur `port` —
+    /// partagée entre appels : un `session.open` par daemon.
+    async fn conn(&self, port: u16) -> Arc<Eap> {
+        let mut g = self.conns.lock().await;
+        if let Some(e) = g.get(&port) {
+            return Arc::clone(e);
+        }
+        let e = Arc::new(Eap {
+            port,
+            live: tokio::sync::Mutex::new(None),
+        });
+        g.insert(port, Arc::clone(&e));
+        e
+    }
+}
+
+/// Sonde de vivacité loopback : `GET /api/status` minimal
+/// sur TCP brut — prouve qu'un *daemon Explorer* écoute
+/// (une connexion TCP seule ne distingue pas un port recyclé
+/// par un service tiers). ~150 ms de borne, jamais de panic.
+async fn probe_daemon(port: u16) -> bool {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    let fut = async {
+        let mut s = tokio::net::TcpStream::connect(("127.0.0.1", port))
+            .await
+            .ok()?;
+        s.write_all(b"GET /api/status HTTP/1.0\r\nHost: 127.0.0.1\r\n\r\n")
+            .await
+            .ok()?;
+        let mut buf = vec![0u8; 512];
+        let n = s.read(&mut buf).await.ok()?;
+        let head = String::from_utf8_lossy(&buf[..n]);
+        // 200 + JSON de statut = notre daemon, pas un port recyclé.
+        Some(head.contains(" 200") || head.contains("\"status\""))
+    };
+    tokio::time::timeout(Duration::from_millis(400), fut)
+        .await
+        .ok()
+        .flatten()
+        .unwrap_or(false)
+}
+
+/// Annonces du registre **vivantes** — sonde chaque entrée,
+/// élimine les périmées (daemon mort : le fichier restait).
+async fn live_announces() -> Vec<explorer_core::daemon_registry::Announce> {
+    let mut out = Vec::new();
+    for (file, a) in explorer_core::daemon_registry::list() {
+        if probe_daemon(a.port).await {
+            out.push(a);
+        } else {
+            explorer_core::daemon_registry::remove(&file);
+        }
+    }
+    out
+}
+
+/// Sélecteur de daemon (`daemon` param ou préfixe `nom:`) →
+/// port. Accepte un nom d'annonce ou un port numérique ;
+/// l'ambiguïté (homonymes) est une erreur honnête listant
+/// les candidats.
+async fn select_daemon(sel: &str) -> Result<u16, String> {
+    if let Ok(p) = sel.parse::<u16>() {
+        return Ok(p);
+    }
+    let matches: Vec<_> = live_announces()
+        .await
+        .into_iter()
+        .filter(|a| a.name == sel)
+        .collect();
+    match matches.len() {
+        0 => Err(format!(
+            "daemon inconnu : {sel} (daemon_list pour les vivants)"
+        )),
+        1 => Ok(matches[0].port),
+        _ => Err(format!(
+            "nom ambigu '{sel}' : {} daemons — vise le port ({})",
+            matches.len(),
+            matches
+                .iter()
+                .map(|a| a.port.to_string())
+                .collect::<Vec<_>>()
+                .join(", ")
+        )),
+    }
+}
+
+/// Cible par défaut : port épinglé, sinon le daemon unique
+/// vivant ; l'absence ou la pluralité est une erreur
+/// guidante, jamais un choix silencieux.
+async fn default_daemon(pool: &Pool) -> Result<u16, String> {
+    if let Some(p) = pool.default_port {
+        return Ok(p);
+    }
+    let live = live_announces().await;
+    match live.len() {
+        0 => Err("aucun daemon annoncé — daemon_spawn{profile} en démarre un".to_string()),
+        1 => Ok(live[0].port),
+        _ => Err(format!(
+            "plusieurs daemons vivants — précise `daemon` ou `nom:onglet` ({})",
+            live.iter()
+                .map(|a| format!("{}:{}", a.name, a.port))
+                .collect::<Vec<_>>()
+                .join(", ")
+        )),
+    }
+}
+
+/// Résout le routage d'un appel → `(connexion, args réécrits,
+/// nom de daemon)`. Trois formes de ciblage, par priorité :
+/// `daemon` explicite, préfixe `nom:` dans `tab`, défaut.
+/// `tab` repart toujours **entier** vers le daemon — EAP
+/// reste inchangé, le préfixe est un détail d'adaptateur.
+async fn resolve(pool: &Pool, args: &Value) -> Result<(Arc<Eap>, Value, String), String> {
+    let mut a = args.clone();
+    let mut sel: Option<String> = args["daemon"].as_str().map(str::to_owned);
+    if let Some(t) = args["tab"].as_str() {
+        if let Some((name, num)) = t.split_once(':') {
+            sel = Some(name.to_string());
+            if let Ok(n) = num.parse::<u64>() {
+                a["tab"] = json!(n);
+            }
+        }
+    }
+    let port = match &sel {
+        Some(s) => select_daemon(s).await?,
+        None => default_daemon(pool).await?,
+    };
+    // Le nom du daemon sert au retour qualifié (`nom:N`).
+    let name = if let Some(s) = sel {
+        s
+    } else {
+        live_announces()
+            .await
+            .into_iter()
+            .find(|x| x.port == port)
+            .map_or_else(|| port.to_string(), |x| x.name)
+    };
+    a.as_object_mut().map(|m| m.remove("daemon"));
+    Ok((pool.conn(port).await, a, name))
+}
+
+/// Localise `explorer-daemon` pour `daemon_spawn` — à côté
+/// de notre exe (même target dir) puis le PATH en repli.
+fn daemon_exe() -> Option<std::path::PathBuf> {
+    let exe_name = if cfg!(windows) {
+        "explorer-daemon.exe"
+    } else {
+        "explorer-daemon"
+    };
+    if let Ok(me) = std::env::current_exe() {
+        let sib = me.parent().map(|d| d.join(exe_name));
+        if let Some(p) = sib.filter(|p| p.is_file()) {
+            return Some(p);
+        }
+    }
+    std::env::var_os("PATH").and_then(|paths| {
+        std::env::split_paths(&paths)
+            .map(|d| d.join(exe_name))
+            .find(|p| p.is_file())
+    })
+}
+
+/// `daemon_spawn{profile,name?,port?}` — démarre un daemon
+/// détaché, attend son annonce (≤6 s), rend `{name,port,pid}`.
+/// Le profil est exigé : dupliquer le profil par défaut
+/// mourrait sur le verrou — autant le dire avant de fork.
+async fn spawn_daemon(args: &Value) -> Result<Value, String> {
+    let profile = args["profile"]
+        .as_str()
+        .ok_or("daemon_spawn : `profile` requis (répertoire dédié)")?;
+    let exe = daemon_exe().ok_or("explorer-daemon introuvable (à côté du cli ni PATH)")?;
+    let port = args["port"].as_u64().unwrap_or(0);
+    let mut cmd = std::process::Command::new(exe);
+    cmd.arg("--profile")
+        .arg(profile)
+        .arg("--port")
+        .arg(port.to_string());
+    if let Some(n) = args["name"].as_str() {
+        cmd.arg("--name").arg(n);
+    }
+    cmd.stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null());
+    let child = cmd.spawn().map_err(|e| format!("spawn : {e}"))?;
+    let pid = child.id();
+    // Attente de l'annonce — le fichier porte le pid :
+    // correspondance exacte, pas de course avec un homonyme.
+    for _ in 0..60 {
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        if let Some((_, a)) = explorer_core::daemon_registry::list()
+            .into_iter()
+            .find(|(_, a)| a.pid == pid)
+        {
+            return Ok(json!({"name": a.name, "port": a.port, "pid": a.pid,
+                             "profile": a.profile}));
+        }
+    }
+    Err(format!(
+        "daemon pid {pid} sans annonce après 6 s — vérifie le profil \
+         (verrou d'instance ?) ou lance explorer-daemon à la main"
+    ))
+}
+
+/// `daemon_stop{name|port}` — arrêt ciblé par pid d'annonce.
+/// Windows : `taskkill /PID /T /F` (le handler Ctrl-C n'est
+/// pas joignable de l'extérieur) ; unix : SIGTERM (arrêt
+/// gracieux géré côté daemon). Jamais de `/IM` — on vise un
+/// pid précis, pas un nom d'image.
+async fn stop_daemon(args: &Value) -> Result<Value, String> {
+    let sel = args["daemon"]
+        .as_str()
+        .or_else(|| args["name"].as_str())
+        .map(str::to_owned)
+        .or_else(|| args["port"].as_u64().map(|p| p.to_string()))
+        .ok_or("daemon_stop : `daemon` (nom ou port) requis")?;
+    let port = select_daemon(&sel).await?;
+    let Some((file, a)) = explorer_core::daemon_registry::list()
+        .into_iter()
+        .find(|(_, a)| a.port == port)
+    else {
+        return Err(format!("aucune annonce pour {sel} — déjà arrêté ?"));
+    };
+    // stdio null : le serveur MCP vit sur stdout — la sortie
+    // d'un enfant hérité y corromprait le protocole JSON-RPC.
+    #[cfg(windows)]
+    let status = std::process::Command::new("taskkill")
+        .args(["/PID", &a.pid.to_string(), "/T", "/F"])
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status();
+    #[cfg(not(windows))]
+    let status = std::process::Command::new("kill")
+        .arg(a.pid.to_string())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status();
+    match status {
+        Ok(s) if s.success() => {
+            explorer_core::daemon_registry::remove(&file);
+            Ok(json!({"stopped": true, "name": a.name, "pid": a.pid}))
+        }
+        Ok(s) => Err(format!("arrêt pid {} : code {}", a.pid, s)),
+        Err(e) => Err(format!("arrêt pid {} : {e}", a.pid)),
+    }
+}
+
+/// `daemon_list` — le registre sondé : vivants + profils
+/// servis. C'est l'œil de l'agent : qui tourne, où, pour qui.
+async fn list_daemons() -> Value {
+    let live = live_announces().await;
+    json!(live
+        .iter()
+        .map(|a| json!({"name": a.name, "port": a.port, "pid": a.pid,
+                        "profile": a.profile, "version": a.version}))
+        .collect::<Vec<_>>())
+}
+
+async fn serve_async(port: Option<u16>) -> std::io::Result<u8> {
+    let pool = Arc::new(Pool {
+        conns: tokio::sync::Mutex::new(HashMap::new()),
+        default_port: port,
     });
-    // Échec franc au démarrage si le daemon est absent ; en
-    // vol, la reconnexion à la demande prend le relais.
-    eap.ensure().await.map_err(std::io::Error::other)?;
+    // Port épinglé : échec franc au démarrage si absent ;
+    // mode broker pur : le premier appel résout sa cible.
+    if let Some(p) = port {
+        pool.conn(p)
+            .await
+            .ensure()
+            .await
+            .map_err(std::io::Error::other)?;
+    }
     // Stdin bloquant → canal tokio.
     let (lines_tx, mut lines) = mpsc::unbounded_channel::<std::io::Result<String>>();
     std::thread::spawn(move || {
@@ -335,20 +615,22 @@ async fn serve_async(port: u16) -> std::io::Result<u8> {
                 continue;
             }
         };
-        if let Some(resp) = handle(&eap, &req).await {
+        if let Some(resp) = handle(&pool, &req).await {
             let mut out = stdout.lock();
             writeln!(out, "{resp}")?;
             out.flush()?;
         }
     }
-    // EOF : close honnête — l'agent part, les onglets
-    // survivent (contrat `session.close`).
-    let _ = eap.call("session.close", json!({})).await;
+    // EOF : close honnête sur CHAQUE daemon touché — l'agent
+    // part, les onglets survivent (contrat `session.close`).
+    for e in pool.conns.lock().await.values() {
+        let _ = e.call("session.close", json!({})).await;
+    }
     Ok(0)
 }
 
 /// Une requête → une réponse ; `None` pour les notifications.
-async fn handle(eap: &Arc<Eap>, req: &Value) -> Option<Value> {
+async fn handle(pool: &Arc<Pool>, req: &Value) -> Option<Value> {
     let method = req["method"].as_str()?;
     let id = req.get("id").cloned();
     let result = |r: Value| {
@@ -379,7 +661,7 @@ async fn handle(eap: &Arc<Eap>, req: &Value) -> Option<Value> {
         "tools/call" => {
             let name = req["params"]["name"].as_str().unwrap_or("");
             let args = req["params"].get("arguments").cloned().unwrap_or(json!({}));
-            Some(call_tool(eap, id.as_ref(), name, &args).await)
+            Some(call_tool(pool, id.as_ref(), name, &args).await)
         }
         _ => error(-32601, format!("méthode inconnue : {method}")),
     }
@@ -587,11 +869,51 @@ fn engine_tools() -> Value {
     ])
 }
 
-/// Les sections du catalogue, concaténées.
+/// Les sections du catalogue, concaténées — puis enrichies
+/// du multi-daemons : `tab` accepte la forme `"nom:N"`
+/// (routage par préfixe) et `daemon` est injecté sur tous
+/// les outils (routage explicite), sans retoucher chaque
+/// définition. Les outils `daemon_*` sont adapter-locaux —
+/// jamais forwardés à EAP (étape 256).
 fn catalog() -> Value {
     let mut all = tools().as_array().cloned().unwrap_or_default();
     all.extend(act_tools().as_array().cloned().unwrap_or_default());
     all.extend(engine_tools().as_array().cloned().unwrap_or_default());
+    let t = |name: &str, desc: &str, schema: Value| json!({"name": name, "description": desc, "inputSchema": schema});
+    all.extend([
+        t(
+            "daemon_list",
+            "Daemons vivants du registre (nom, port, profil, pid)",
+            json!({"type":"object","properties":{}}),
+        ),
+        t(
+            "daemon_spawn",
+            "Démarre un daemon détaché {profile,name?,port?} → {name,port,pid}",
+            json!({"type":"object","properties":{"profile":{"type":"string"},
+                   "name":{"type":"string"},"port":{"type":"integer"}},
+                   "required":["profile"]}),
+        ),
+        t(
+            "daemon_stop",
+            "Arrête un daemon par nom ou port {daemon}",
+            json!({"type":"object","properties":{"daemon":{"type":"string"}},
+                   "required":["daemon"]}),
+        ),
+    ]);
+    // `tab` : integer ou "nom:N" ; `daemon` : sélecteur global.
+    for tool in &mut all {
+        let Some(props) = tool["inputSchema"]["properties"].as_object_mut() else {
+            continue;
+        };
+        if let Some(tab) = props.get_mut("tab") {
+            tab["type"] = json!(["integer", "string"]);
+            tab["description"] = "onglet — N ou \"nom-daemon:N\"".into();
+        }
+        props.insert(
+            "daemon".to_string(),
+            json!({"type":"string","description":"nom ou port du daemon cible — défaut : unique vivant ou épinglé"}),
+        );
+    }
     Value::Array(all)
 }
 
@@ -675,29 +997,68 @@ fn to_eap(name: &str, args: &Value) -> Option<(&'static str, Value)> {
 
 /// `tools/call` → verbe EAP → `{content:[{type,text}]}` ;
 /// l'erreur EAP devient `isError` avec son code typé.
-async fn call_tool(eap: &Arc<Eap>, id: Option<&Value>, name: &str, args: &Value) -> Value {
+/// Le routage multi-daemons précède la table : outils
+/// `daemon_*` traités localement, sinon `resolve` déduit la
+/// connexion et réécrit `tab`/`daemon` avant `to_eap`.
+async fn call_tool(pool: &Arc<Pool>, id: Option<&Value>, name: &str, args: &Value) -> Value {
     let resp = |v: Value| match id {
         Some(i) => json!({"jsonrpc":"2.0","id":i,"result":v}),
         None => v,
     };
+    let err = |m: String| resp(json!({"content":[{"type":"text","text":m}],"isError":true}));
+    // Outils de cycle de vie — adapter-locaux, jamais EAP.
+    match name {
+        "daemon_list" => {
+            return resp(
+                json!({"content":[{"type":"text","text":list_daemons().await.to_string()}]}),
+            );
+        }
+        "daemon_spawn" => {
+            return match spawn_daemon(args).await {
+                Ok(v) => resp(json!({"content":[{"type":"text","text":v.to_string()}]})),
+                Err(e) => err(e),
+            };
+        }
+        "daemon_stop" => {
+            return match stop_daemon(args).await {
+                Ok(v) => resp(json!({"content":[{"type":"text","text":v.to_string()}]})),
+                Err(e) => err(e),
+            };
+        }
+        _ => {}
+    }
+    // Routage : quelle connexion, quels params.
+    let (eap, a, dname) = match resolve(pool, args).await {
+        Ok(r) => r,
+        Err(e) => return err(e),
+    };
     if name == "screenshot" {
         return screenshot_tool(
-            eap,
+            &eap,
             id,
-            args["tab"].as_u64().unwrap_or(0),
-            args["path"].as_str().unwrap_or("frame.png"),
-            args,
+            a["tab"].as_u64().unwrap_or(0),
+            a["path"].as_str().unwrap_or("frame.png"),
+            &a,
         )
         .await;
     }
-    let Some((verb, params)) = to_eap(name, args) else {
-        return resp(
-            json!({"content":[{"type":"text","text":format!("outil inconnu : {name}")}],"isError":true}),
-        );
+    let Some((verb, params)) = to_eap(name, &a) else {
+        return err(format!("outil inconnu : {name}"));
     };
     match eap.call(verb, params).await {
-        Ok(r) => resp(json!({"content":[{"type":"text","text":r.to_string()}]})),
-        Err(e) => resp(json!({"content":[{"type":"text","text":e}],"isError":true})),
+        Ok(mut r) => {
+            // `tab.open` : l'id rendu est qualifié `nom:N`
+            // pour que l'agent route ses appels suivants
+            // sans préciser `daemon` à chaque fois.
+            if name == "tab_new" {
+                if let Some(n) = r["tab"].as_u64() {
+                    r["tab"] = json!(format!("{dname}:{n}"));
+                }
+                r["daemon"] = json!(dname);
+            }
+            resp(json!({"content":[{"type":"text","text":r.to_string()}]}))
+        }
+        Err(e) => err(e),
     }
 }
 
