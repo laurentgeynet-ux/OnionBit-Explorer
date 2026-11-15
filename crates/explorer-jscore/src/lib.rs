@@ -1429,6 +1429,20 @@ pub static GC_PASSES: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU6
 /// « passée lente » se mesure au postmortem.
 pub static GC_LAST_MS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 
+/// Étape 281 — lectures de `xhr.responseText`/`response`
+/// texte : `reads` ≫ `decodes` = boucle de lecture nommée
+/// (le vol field274 montrait un spin ~50 s dont ce compteur
+/// aurait mesuré la forme).
+pub static XHR_TEXT_READS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+/// Décodages `from_utf8_lossy` réels du corps XHR — depuis
+/// 281 le texte est caché : chaque livraison décode au plus
+/// une fois, `decodes` borne le coût résiduel.
+pub static XHR_TEXT_DECODES: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+/// Millisecondes cumulées dans le décodage `responseText`.
+pub static XHR_TEXT_DECODE_MS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
 /// §B-59 — journal de fil d'Ariane **externe au fil JS** : un
 /// thread vidange les statiques `LAST_*` + commit/RSS vers un
 /// fichier toutes les ~400 ms (env `EXPLORER_JS_BREADCRUMB`).

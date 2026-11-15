@@ -2179,3 +2179,34 @@ fn response_urls_are_absolute() {
     respond(&mut e, h2, 200, "#EXTM3U");
     assert_eq!(describe(&mut e, "fu"), "http://127.0.0.1:9377/out_0.m3u8");
 }
+
+#[test]
+fn responsetext_cached_across_reads() {
+    // Étape 281 — le texte décodé est caché : lectures
+    // répétées en O(1), identité figée (`===`), un seul
+    // décodage par livraison (vol field274 : spin ~50 s =
+    // re-décode à chaque accès).
+    let (mut e, t) = engine();
+    describe(
+        &mut e,
+        "var x = new XMLHttpRequest(); x.open('GET', '/d'); x.send();",
+    );
+    let h = t.requests.borrow()[0].0;
+    respond(&mut e, h, 200, "corps-é-€");
+    let d0 = explorer_jscore::XHR_TEXT_DECODES.load(std::sync::atomic::Ordering::Relaxed);
+    assert_eq!(
+        describe(&mut e, "x.responseText === x.responseText"),
+        "true"
+    );
+    assert_eq!(describe(&mut e, "x.response === x.responseText"), "true");
+    assert_eq!(describe(&mut e, "x.responseText"), "corps-é-€");
+    let d1 = explorer_jscore::XHR_TEXT_DECODES.load(std::sync::atomic::Ordering::Relaxed);
+    assert_eq!(d1 - d0, 1);
+    // Nouvelle livraison sur le même objet : le cache suit
+    // le corps (invalidation à l'écriture de
+    // `response_bytes`).
+    describe(&mut e, "x.open('GET', '/d2'); x.send();");
+    let h2 = t.requests.borrow()[1].0;
+    respond(&mut e, h2, 200, "autre");
+    assert_eq!(describe(&mut e, "x.responseText"), "autre");
+}

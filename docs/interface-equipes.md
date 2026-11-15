@@ -4037,3 +4037,35 @@ pas une passe lente.
 cellules), seuil `mem_over` estimé vs réel, cache du
 `responseText` décodé dans `XhrData`. Juge = prochaine
 occurrence.
+
+## Étape 281 — `responseText` caché (NAV, re-vol field274)
+
+**Le juge a parlé** : `calls=372411` figé ≥5 beats sous
+`gc=0/1@139ms` → famine GC éliminée, **vrai spin hôte dans
+`XMLHttpRequest:responseText`** — la balise GC a tranché en
+un vol (l'instrumentation de 279 se paie elle-même).
+
+**Cause** : le getter relançait `from_utf8_lossy` + l'alloc
+complète à **chaque lecture** (~800 Kio) — une boucle de
+lecture JS sans appel de fonction gèle `calls` pareil →
+O(lectures × octets), le ~50 s observé.
+
+**Fix** : `XhrData::cached_text` (`JsStr`, `Rc` O(1)),
+invalidé aux deux écritures du corps (livraison, `take`
+binaire) — parité avec `cached_response` des autres
+`responseType`. Compteurs `XHR_TEXT_READS`/`DECODES`/
+`DECODE_MS` + `xrt=` du recorder : `reads ≫ decodes`
+nommera la boucle si un autre site récidive.
+
+**Classe générale ouverte** : l'autre daemon du run
+(pré-279, survivant) montrait `DOMTokenList:add` figé —
+même signature « host call long ». Les getters/méthodes
+hôtes qui re-matérialisent une structure à chaque accès
+sont le pattern suspect ; `classList.add` par token est
+un candidat O(liste²) — à confirmer par vol.
+
+**Coordination inter-pistes (rappel)** : le flight.log du
+run montre le kill **ciblé par PID** (le daemon pré-279 a
+survécu → pas de `taskkill /IM`) — un cleanup vérifiant
+`session.open.dirs.daemons` avant de tuer évite les
+meurtres croisés.

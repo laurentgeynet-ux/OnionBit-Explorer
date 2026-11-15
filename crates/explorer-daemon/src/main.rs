@@ -657,8 +657,14 @@ fn spawn_flight_recorder(death_log: &Path) {
             let gc = explorer_jscore::GC_ACTIVE.load(std::sync::atomic::Ordering::Relaxed);
             let gcp = explorer_jscore::GC_PASSES.load(std::sync::atomic::Ordering::Relaxed);
             let gcms = explorer_jscore::GC_LAST_MS.load(std::sync::atomic::Ordering::Relaxed);
+            // Étape 281 — lectures/décodages `responseText` :
+            // `xrt` reads ≫ decodes = boucle de lecture nommée.
+            let xrr = explorer_jscore::XHR_TEXT_READS.load(std::sync::atomic::Ordering::Relaxed);
+            let xrd = explorer_jscore::XHR_TEXT_DECODES.load(std::sync::atomic::Ordering::Relaxed);
+            let xrm =
+                explorer_jscore::XHR_TEXT_DECODE_MS.load(std::sync::atomic::Ordering::Relaxed);
             let line = format!(
-                "t={}ms rss={}MiB commit={}MiB | drain={} | calls={} | gc={gc}/{gcp}@{gcms}ms | frame={} | fun={} | stmt={} | expr={} | nat={} | host={} | phase={} | areq={} | stats={}\n",
+                "t={}ms rss={}MiB commit={}MiB | drain={} | calls={} | gc={gc}/{gcp}@{gcms}ms | xrt={xrr}/{xrd}@{xrm}ms | frame={} | fun={} | stmt={} | expr={} | nat={} | host={} | phase={} | areq={} | stats={}\n",
                 t0.elapsed().as_millis(),
                 rss,
                 com,

@@ -7971,6 +7971,16 @@ MCP = adaptateur, jamais la base.
   passe. `famTotals` parallèle à `families` : la
   baseline v2 ne stocke toujours que `ok` (format
   inchangé). Vérifié : sortie = table manuelle.
+- [x] **Étape 281. `xhr.responseText` décodé une fois —
+  fin du spin O(lectures × octets)** (`explorer-jscore`,
+  re-vol field274 : `gc=0` a tranché — vrai spin hôte,
+  ~50 s sur ~800 Kio). Le getter re-décodait tout le
+  corps à chaque lecture ; boucle de lecture JS →
+  quadratique. `XhrData::cached_text` sert `Rc` O(1),
+  invalidé aux deux écritures du corps (livraison,
+  `take` binaire). Compteurs `XHR_TEXT_*` + `xrt=` du
+  flight recorder nomment la boucle au prochain vol.
+  Verrou : `responsetext_cached_across_reads`.
 - [x] **Étape 279. Balise GC en vol — wedge `XHR` nommé**
   (`explorer-jscore`/`explorer-daemon`, résidu du verdict
   field274 : gel ~50 s récurrent sous `calls` figé +
