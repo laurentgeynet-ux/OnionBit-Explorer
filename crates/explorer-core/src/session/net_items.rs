@@ -206,6 +206,12 @@ pub(crate) struct NavDone {
     /// commit (après la navigation, comme la spec : la
     /// page servie tourne déjà sans identifiants).
     pub(crate) clear_cookies: bool,
+    /// Complétion `net.events` du fetch document (étape
+    /// 251) — `None` sur `about:blank` (aucun fetch) et
+    /// le rejeu « document » d'un téléchargement bufferisé
+    /// (le fetch d'origine est hors borne v1, cf.
+    /// [`types::NetEventRec`]).
+    pub(crate) net_ev: Option<types::NetEventRec>,
 }
 
 /// Issue de [`NavJob::run`] (étape 70) : document à commettre
@@ -530,7 +536,7 @@ impl NavJob {
         // comme les navigateurs — avant la classification
         // download qui l'enfermait en offre invisible.
         if image_document_eligible(&resp.headers, &self.req) {
-            return self.buffer_image_document(resp, resolved).await;
+            return self.buffer_image_document(resp, resolved, t_phase).await;
         }
         // Corps non affichable (étape 70) ou `<a download>`
         // (CAP-148) : bufferisé avec borne et progression —
@@ -630,6 +636,15 @@ impl NavJob {
                     .ok()
                     .map(|d| (d, target))
             });
+        // Étape 251 — complétion `net.events` du document :
+        // `resolved`/`html` sont déplacés dans `done`, URL
+        // et octets capturés avant. `fetch_stream` court-
+        // circuite le cache — `from_cache` vaut toujours
+        // `false` sur le chemin document (borne honnête).
+        let ev_url = resolved.to_string();
+        let ev_bytes = html.len();
+        let ev_ms = ms_u64(t_phase);
+        let ev_status = resp.status;
         let done = NavDone {
             url: resolved,
             // `<meta name=referrer>` l'emporte sur
@@ -643,6 +658,16 @@ impl NavJob {
             dom,
             html,
             title,
+            net_ev: Some(types::NetEventRec {
+                seq: 0,
+                kind: "document",
+                url: ev_url,
+                initiator: "navigation",
+                status: ev_status,
+                bytes: ev_bytes,
+                ms: ev_ms,
+                from_cache: false,
+            }),
         };
         let tail = NavTail {
             epoch: self.epoch,
@@ -711,6 +736,7 @@ impl NavJob {
         &mut self,
         mut resp: StreamedResponse,
         resolved: Url,
+        t0: Instant,
     ) -> Result<NavOutcome, CoreError> {
         let mut n = 0usize;
         while let Some(chunk) = resp.body.recv().await {
@@ -738,7 +764,7 @@ impl NavJob {
         let title = extract_title(&dom);
         let csp = collect_response_csp(&resp.headers, &dom);
         let done = NavDone {
-            url: resolved,
+            url: resolved.clone(),
             dom,
             html,
             title,
@@ -748,6 +774,16 @@ impl NavJob {
             refresh: None,
             csp,
             clear_cookies: wants_clear_cookies(&resp.headers),
+            net_ev: Some(types::NetEventRec {
+                seq: 0,
+                kind: "document",
+                url: resolved.to_string(),
+                initiator: "navigation",
+                status: resp.status,
+                bytes: n,
+                ms: ms_u64(t0),
+                from_cache: false,
+            }),
         };
         let tail = NavTail {
             epoch: self.epoch,
@@ -787,6 +823,9 @@ impl NavJob {
                 refresh: None,
                 csp: Vec::new(),
                 clear_cookies: false,
+                // `about:blank` ne se fetch pas — rien à
+                // enregistrer.
+                net_ev: None,
             }),
             Box::new(tail),
         ))
@@ -987,6 +1026,12 @@ pub(crate) struct SubJob {
     /// (étape 98) ; `img_urls` est déjà tronqué à cette
     /// borne au planning.
     pub(crate) max_images: usize,
+    /// Complétions `net.events` accumulées pendant la vague
+    /// (étape 251) — le job est détaché, aucun canal vers la
+    /// session : les enregistrements voyagent dans le job et
+    /// sont drainés au `sub_commit_head` (même pattern que
+    /// `link_events`/`css_slots`).
+    pub(crate) net_events: Vec<types::NetEventRec>,
 }
 
 /// Reliquat du commit de navigation entre la tête (sous
@@ -1061,7 +1106,49 @@ impl SubJob {
         // le compteur tranche « 4 Go téléchargés » vs « alloués
         // ailleurs ».
         let mut resp_b = 0usize;
-        fetch_wave(&self.transport, self.max_inflight, jobs, |tag, res| {
+        fetch_wave(&self.transport, self.max_inflight, jobs, |tag, res, ms| {
+            // Étape 251 — complétion `net.events` par item :
+            // URL lue sur le tag, statut/octets/cache sur la
+            // réponse, 0/0/false sur échec transport. Tampon
+            // drainé au `sub_commit_head` (une ligne par
+            // complétion réelle, déférées ou non).
+            let (status, bytes, from_cache) = match &res {
+                Ok(r) => (r.status, r.body.len(), r.from_cache),
+                Err(_) => (0, 0, false),
+            };
+            let (kind, url) = match &tag {
+                SubTag::Css(i) => (
+                    "stylesheet",
+                    self.sheet_urls
+                        .get(*i)
+                        .map(|(u, ..)| ToString::to_string(u)),
+                ),
+                SubTag::Script(slot) => (
+                    "script",
+                    slot_items
+                        .get(*slot)
+                        .and_then(|i| self.scripts.get(*i))
+                        .and_then(|it| it.src.as_ref())
+                        .map(ToString::to_string),
+                ),
+                SubTag::Img(u) => ("img", Some(u.to_string())),
+                SubTag::Frame(i) => (
+                    "iframe",
+                    self.frame_urls
+                        .get(*i)
+                        .map(|(u, ..)| ToString::to_string(u)),
+                ),
+            };
+            self.net_events.push(types::NetEventRec {
+                seq: 0,
+                kind,
+                url: url.unwrap_or_default(),
+                initiator: "document",
+                status,
+                bytes,
+                ms,
+                from_cache,
+            });
             // CAP-185 : `load`/`error` de fin de feuille —
             // enregistré sur toutes les issues (fetch refusé,
             // non-2xx, sécurité/SRI) ; livré au commit.
@@ -1419,7 +1506,8 @@ impl SubJob {
                 return;
             }
             ctx.left -= 1;
-            let Ok(resp) = self
+            let t0 = Instant::now();
+            let res = self
                 .transport
                 .fetch(&sub_request(
                     &self.url,
@@ -1428,8 +1516,9 @@ impl SubJob {
                     self.page_policy,
                     None,
                 ))
-                .await
-            else {
+                .await;
+            self.push_net("stylesheet", url.to_string(), "stylesheet", &res, t0);
+            let Ok(resp) = res else {
                 explorer_common::census::bump("css.import.skip.net");
                 return;
             };
@@ -1469,6 +1558,33 @@ impl SubJob {
     /// épuisé) → ressource sautée, jamais d'échec propagé.
     /// Fonds avant masques dans la même boucle : un même
     /// corps `bg_bodies` sert les deux rôles.
+    /// Complétion `net.events` d'un fetch satellite de la
+    /// vague (étape 251) — statut/octets/cache lus sur la
+    /// réponse, `0/0/false` sur échec transport.
+    fn push_net(
+        &mut self,
+        kind: &'static str,
+        url: String,
+        initiator: &'static str,
+        res: &NetResult<Response>,
+        t0: Instant,
+    ) {
+        let (status, bytes, from_cache) = match res {
+            Ok(r) => (r.status, r.body.len(), r.from_cache),
+            Err(_) => (0, 0, false),
+        };
+        self.net_events.push(types::NetEventRec {
+            seq: 0,
+            kind,
+            url,
+            initiator,
+            status,
+            bytes,
+            ms: u64::try_from(t0.elapsed().as_millis()).unwrap_or(u64::MAX),
+            from_cache,
+        });
+    }
+
     pub(crate) async fn fetch_backgrounds(&mut self) {
         const BG_PROPS: &[&str] = &["background", "background-image"];
         const MASK_PROPS: &[&str] = &["mask-image", "-webkit-mask-image"];
@@ -1530,7 +1646,8 @@ impl SubJob {
                     continue;
                 }
                 left -= 1;
-                let Ok(resp) = self
+                let t0 = Instant::now();
+                let res = self
                     .transport
                     .fetch(&sub_request(
                         &self.url,
@@ -1539,8 +1656,9 @@ impl SubJob {
                         self.page_policy,
                         None,
                     ))
-                    .await
-                else {
+                    .await;
+                self.push_net("img", url.to_string(), "stylesheet", &res, t0);
+                let Ok(resp) = res else {
                     continue;
                 };
                 if !(200..300).contains(&resp.status) {
@@ -1609,7 +1727,10 @@ impl SubJob {
                     self.page_policy.unwrap_or_default(),
                 ));
                 req.headers.extend(sec_fetch_headers(&req));
-                let Ok(resp) = fetch_maybe_data(&self.transport, &req).await else {
+                let t0 = Instant::now();
+                let res = fetch_maybe_data(&self.transport, &req).await;
+                self.push_net("font", req.url.to_string(), "stylesheet", &res, t0);
+                let Ok(resp) = res else {
                     continue;
                 };
                 if !(200..300).contains(&resp.status) {
@@ -1681,6 +1802,7 @@ impl SubJob {
                 &self.import_specs,
                 &self.mod_preloads,
                 &mut graph,
+                Some(&mut self.net_events),
             )
             .await;
             tracing::debug!(tab = self.tab, name = %name, sources = graph.sources.len(), "module prefetché");
@@ -1730,6 +1852,11 @@ pub(crate) struct NetDone {
     pub(crate) partition: Option<String>,
     /// Sortie brute du transport.
     pub(crate) out: NetResult<Response>,
+    /// Instant d'émission de la requête (spawn de la tâche)
+    /// — le `ms` par requête du verbe EAP `net.events`
+    /// (étape 251) se mesure spawn → livraison, pas sur la
+    /// vague entière.
+    pub(crate) t0: std::time::Instant,
     /// `<script>` dynamique (CAP-169) — `Some` = la réponse
     /// est un corps à évaluer par
     /// [`Session::deliver_dyn_script`] (`load`/`error` sur
@@ -1810,6 +1937,9 @@ pub(crate) struct DynImportMeta {
     /// (JS-C101 : `instantiate` des deps de l'entrée les
     /// trouve — le chargeur ne sert que le préfetch).
     pub(crate) sources: Vec<(String, String)>,
+    /// Complétions `net.events` des dépendances fetchées
+    /// (étape 251) — tampon drainé au `drain_net_done`.
+    pub(crate) net_events: Vec<types::NetEventRec>,
 }
 
 /// Livraison d'un `<script type="module">` dynamique
@@ -1829,6 +1959,9 @@ pub(crate) struct DynModuleDone {
     /// Graphe rempli (`sources` + `alias`) — `None` si le
     /// corps de l'entrée a été refusé en amont.
     pub(crate) graph: Option<ModuleGraph>,
+    /// Complétions `net.events` des dépendances fetchées
+    /// (étape 251) — tampon drainé au `drain_net_done`.
+    pub(crate) net_events: Vec<types::NetEventRec>,
 }
 
 /// Métadonnées de livraison d'un `<script>` dynamique
@@ -2551,7 +2684,7 @@ pub(crate) async fn fetch_wave<T>(
     transport: &Arc<dyn HttpTransport>,
     max_inflight: usize,
     mut jobs: VecDeque<(T, Request)>,
-    mut on_done: impl FnMut(T, NetResult<Response>),
+    mut on_done: impl FnMut(T, NetResult<Response>, u64),
 ) {
     let cap = max_inflight.max(1);
     let mut inflight = FuturesUnordered::new();
@@ -2562,17 +2695,22 @@ pub(crate) async fn fetch_wave<T>(
             };
             let tr = Arc::clone(transport);
             inflight.push(async move {
+                // Étape 251 — `ms` par requête (`net.events`) :
+                // la tâche mesure spawn → complétion, pas la
+                // vague entière (`t_wave` seul mentait).
+                let t0 = Instant::now();
                 let res = fetch_maybe_data(&tr, &req).await;
-                (tag, res)
+                (tag, res, t0)
             });
         }
         if inflight.is_empty() {
             return;
         }
-        let Some((tag, res)) = inflight.next().await else {
+        let Some((tag, res, t0)) = inflight.next().await else {
             return;
         };
-        on_done(tag, res);
+        let ms = u64::try_from(t0.elapsed().as_millis()).unwrap_or(u64::MAX);
+        on_done(tag, res, ms);
     }
 }
 
@@ -2618,6 +2756,7 @@ pub(crate) fn data_url_response(url: &Url) -> NetResult<Response> {
         body,
         reused_connection: false,
         resolved_url: None,
+        from_cache: false,
     })
 }
 

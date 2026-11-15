@@ -143,6 +143,7 @@ fn decode(bytes: &[u8]) -> Option<Response> {
         body: bytes[pos..].to_vec(),
         reused_connection: false,
         resolved_url: resolved,
+        from_cache: false,
     })
 }
 
@@ -354,6 +355,7 @@ mod tests {
             body: body.as_bytes().to_vec(),
             reused_connection: false,
             resolved_url: None,
+            from_cache: false,
         }
     }
 

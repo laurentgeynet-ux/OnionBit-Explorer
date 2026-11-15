@@ -1566,6 +1566,7 @@ fn etape206_drain_anim_births_does_not_reenter_poll_net() {
     // pendant le drain, `poll_net` aura été ré-entré.
     s.net_tx
         .send(NetDone {
+            t0: std::time::Instant::now(),
             tab,
             handle: 77,
             cross: false,
@@ -4468,6 +4469,7 @@ fn poll_net_budget_defere_les_livraisons_excedentaires() {
     );
     let tab = s.open_tab();
     let mk = |handle: u64| NetDone {
+        t0: std::time::Instant::now(),
         tab,
         handle,
         cross: false,
@@ -4564,6 +4566,7 @@ fn drain_net_done_mutualise_le_tour_post_script() {
     }
     let page = Url::parse("https://x.test/").expect("page");
     let mk = |handle: u64| NetDone {
+        t0: std::time::Instant::now(),
         tab,
         handle,
         cross: false,
@@ -4580,6 +4583,7 @@ fn drain_net_done_mutualise_le_tour_post_script() {
             body: Vec::new(),
             reused_connection: false,
             resolved_url: None,
+            from_cache: false,
         }),
         script: None,
         frame: None,
@@ -4659,6 +4663,7 @@ fn drain_net_done_priorise_les_fetch() {
     }
     let page = Url::parse("https://x.test/").expect("page");
     let img = NetDone {
+        t0: std::time::Instant::now(),
         tab,
         handle: 100,
         cross: false,
@@ -4675,6 +4680,7 @@ fn drain_net_done_priorise_les_fetch() {
             body: Vec::new(),
             reused_connection: false,
             resolved_url: None,
+            from_cache: false,
         }),
         script: None,
         frame: None,
@@ -4691,6 +4697,7 @@ fn drain_net_done_priorise_les_fetch() {
         lazy: None,
     };
     let fetch = NetDone {
+        t0: std::time::Instant::now(),
         tab,
         handle: 1,
         cross: false,
@@ -4707,6 +4714,7 @@ fn drain_net_done_priorise_les_fetch() {
             body: Vec::new(),
             reused_connection: false,
             resolved_url: None,
+            from_cache: false,
         }),
         script: None,
         frame: None,
@@ -4785,6 +4793,7 @@ fn drain_net_done_plancher_rest_anti_famine() {
     }
     let page = Url::parse("https://x.test/").expect("page");
     let mk = |handle: u64| NetDone {
+        t0: std::time::Instant::now(),
         tab,
         handle,
         cross: false,
@@ -4897,6 +4906,7 @@ async fn poll_net_libere_le_slot_a_l_arrivee() {
     s.net_tasks.insert((tab, 7), tokio::spawn(async {}));
     s.net_tx
         .send(NetDone {
+            t0: std::time::Instant::now(),
             tab,
             handle: 7,
             cross: false,
@@ -4913,6 +4923,7 @@ async fn poll_net_libere_le_slot_a_l_arrivee() {
                 body: Vec::new(),
                 reused_connection: false,
                 resolved_url: None,
+                from_cache: false,
             }),
             script: None,
             frame: None,
@@ -5194,6 +5205,7 @@ async fn fetch_backoff_retient_les_retries_dune_url_en_echec() {
     let api = Url::parse("https://x.test/api").expect("api");
     // 4 échecs `status: 0` livrés → streak au seuil.
     let fail = |handle: u64| NetDone {
+        t0: std::time::Instant::now(),
         tab,
         handle,
         cross: false,
@@ -5327,6 +5339,7 @@ async fn fetch_quota_pompe_au_slot_libere() {
     // suivant (le `NetDone` 1 libère, `pending` part).
     s.drain_net_done(
         vec![NetDone {
+            t0: std::time::Instant::now(),
             tab,
             handle: 1,
             cross: false,
@@ -5440,6 +5453,7 @@ fn fetch_backoff_succes_referme_le_streak() {
     let api = Url::parse("https://x.test/api").expect("api");
     s.fetch_fail_streak.insert((tab, api.to_string()), 9);
     let ok = NetDone {
+        t0: std::time::Instant::now(),
         tab,
         handle: 1,
         cross: false,
@@ -5456,6 +5470,7 @@ fn fetch_backoff_succes_referme_le_streak() {
             body: Vec::new(),
             reused_connection: false,
             resolved_url: None,
+            from_cache: false,
         }),
         script: None,
         frame: None,

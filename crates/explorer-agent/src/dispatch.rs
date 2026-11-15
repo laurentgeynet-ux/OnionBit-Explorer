@@ -47,6 +47,7 @@ const IMPLEMENTED: &[Capability] = &[
     Capability::Tabs,
     Capability::Events,
     Capability::Engine,
+    Capability::Net,
 ];
 
 /// Index compact servi à `session.open` (étape 248) —
@@ -89,6 +90,11 @@ const HELP: &[(&str, Option<Capability>, &str)] = &[
         "combien d'items émis/dessinés ?",
         Some(Capability::Engine),
         "engine.paint_stats",
+    ),
+    (
+        "quelles requêtes réseau ?",
+        Some(Capability::Net),
+        "net.events{since_seq}",
     ),
     (
         "erreurs pipeline ?",
@@ -165,6 +171,7 @@ fn cap_of(m: &Method) -> Option<Capability> {
         | Method::EnginePipeline(_)
         | Method::EnginePaintStats(_)
         | Method::EngineAnomalies(_) => Some(Capability::Engine),
+        Method::NetEvents(_) => Some(Capability::Net),
         Method::InputKey(_) | Method::InputScroll(_) | Method::InputClickAt(_) => {
             Some(Capability::Input)
         }
@@ -189,6 +196,7 @@ fn cap_name(c: Capability) -> &'static str {
         Capability::ConsoleLog => "console_log",
         Capability::Dom => "dom",
         Capability::Engine => "engine",
+        Capability::Net => "net",
         Capability::Tabs => "tabs",
         Capability::Events => "events",
     }
@@ -506,7 +514,8 @@ async fn run(
         | Method::EngineLayout(_)
         | Method::EnginePipeline(_)
         | Method::EnginePaintStats(_)
-        | Method::EngineAnomalies(_) => perceive_verbs(st, conn, method).await,
+        | Method::EngineAnomalies(_)
+        | Method::NetEvents(_) => perceive_verbs(st, conn, method).await,
         Method::InputClick(_) | Method::InputType(_) | Method::InputHover(_) => {
             handle_verbs(st, conn, method).await
         }
@@ -887,6 +896,15 @@ async fn perceive_verbs(
                 .max
                 .map_or_else(crate::anomalies::default_max, |m| m as usize);
             crate::anomalies::run(st, conn, p.tab, max).await
+        }
+        Method::NetEvents(p) => {
+            scope(conn, p.tab)?;
+            tab_exists(st, p.tab).await?;
+            let s = st.session.lock().await;
+            match s.net_events(p.tab, p.since_seq) {
+                Some(r) => Ok(r),
+                None => Err(err(ErrorCode::NoSuchTab, "onglet inconnu")),
+            }
         }
 
         // Verbe hors groupe — garde-fou interne (le dispatch

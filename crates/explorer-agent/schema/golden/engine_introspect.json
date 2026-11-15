@@ -191,6 +191,74 @@
           "comment": "reset:true = sémantique « take » — la réponse porte l'intervalle clos puis le livre repart à zéro (state/counters/mem élidés pour la lisibilité)"
         }
       }
+    },
+    {
+      "wire": "client → serveur",
+      "message": {
+        "jsonrpc": "2.0",
+        "id": 35,
+        "method": "net.events",
+        "params": {
+          "tab": 1
+        }
+      }
+    },
+    {
+      "wire": "serveur → client",
+      "message": {
+        "jsonrpc": "2.0",
+        "id": 35,
+        "result": {
+          "events": [
+            {
+              "seq": 1,
+              "kind": "document",
+              "url": "https://example.test/",
+              "initiator": "navigation",
+              "status": 200,
+              "bytes": 5120,
+              "ms": 42,
+              "from_cache": false
+            },
+            {
+              "seq": 2,
+              "kind": "stylesheet",
+              "url": "https://example.test/app.css",
+              "initiator": "document",
+              "status": 200,
+              "bytes": 2048,
+              "ms": 18,
+              "from_cache": true
+            }
+          ],
+          "next_seq": 2,
+          "comment": "une ligne par complétion réelle — navigation, sous-ressources de la vague, fetches dynamiques, fetch()/XHR ; since_seq = curseur de polling incrémental (valeurs illustratives)"
+        }
+      }
+    },
+    {
+      "wire": "client → serveur",
+      "message": {
+        "jsonrpc": "2.0",
+        "id": 36,
+        "method": "net.events",
+        "params": {
+          "tab": 1,
+          "since_seq": 2
+        }
+      }
+    },
+    {
+      "wire": "serveur → client",
+      "message": {
+        "jsonrpc": "2.0",
+        "id": 36,
+        "result": {
+          "events": [],
+          "next_seq": 2,
+          "comment": "polling incrémental — rien de nouveau depuis seq 2"
+        }
+      }
     }
   ]
 }

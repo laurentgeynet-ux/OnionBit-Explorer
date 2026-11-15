@@ -558,6 +558,14 @@ fn engine_tools() -> Value {
                 &["tab"]
             )
         ),
+        t(
+            "net_events",
+            "Complétions réseau (seq, kind, url, status, ms, cache) {tab,since_seq?}",
+            obj(
+                json!({"tab":{"type":"integer"},"since_seq":{"type":"integer"}}),
+                &["tab"]
+            )
+        ),
     ])
 }
 
@@ -636,6 +644,10 @@ fn to_eap(name: &str, args: &Value) -> Option<(&'static str, Value)> {
         ),
         "engine_paint_stats" => ("engine.paint_stats", json!({"tab": tab})),
         "engine_anomalies" => ("engine.anomalies", json!({"tab": tab, "max": args["max"]})),
+        "net_events" => (
+            "net.events",
+            json!({"tab": tab, "since_seq": args["since_seq"]}),
+        ),
         _ => return None,
     })
 }

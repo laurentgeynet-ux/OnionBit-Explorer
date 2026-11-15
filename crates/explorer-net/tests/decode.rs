@@ -173,6 +173,7 @@ fn truncated_gzip_yields_partial_body() {
         body: cut.to_vec(),
         reused_connection: false,
         resolved_url: None,
+        from_cache: false,
     };
     decode_response(&mut resp, 1 << 20).unwrap();
     // Le partiel est un préfixe exact du document.
@@ -196,6 +197,7 @@ fn intact_gzip_stays_cacheable() {
         body: gzip(full),
         reused_connection: false,
         resolved_url: None,
+        from_cache: false,
     };
     decode_response(&mut resp, 1 << 20).unwrap();
     assert_eq!(resp.body, full);
@@ -214,6 +216,7 @@ fn truncated_gzip_empty_partial_still_errors() {
         body: gz[..8].to_vec(),
         reused_connection: false,
         resolved_url: None,
+        from_cache: false,
     };
     let err = decode_response(&mut resp, 1 << 20).unwrap_err();
     assert!(matches!(err, NetError::ContentDecode(_)), "{err}");
@@ -232,6 +235,7 @@ fn bodiless_status_skips_decoding() {
             body: vec![],
             reused_connection: false,
             resolved_url: None,
+            from_cache: false,
         };
         decode_response(&mut resp, 1 << 20).unwrap();
         assert_eq!(resp.body, Vec::<u8>::new());
@@ -247,6 +251,7 @@ fn corrupted_gzip_is_typed_error() {
         body: b"not gzip at all".to_vec(),
         reused_connection: false,
         resolved_url: None,
+        from_cache: false,
     };
     let err = decode_response(&mut resp, 1 << 20).unwrap_err();
     assert!(matches!(err, NetError::ContentDecode(_)), "{err}");
@@ -261,6 +266,7 @@ fn unknown_coding_is_typed_error() {
         body: b"x".to_vec(),
         reused_connection: false,
         resolved_url: None,
+        from_cache: false,
     };
     let err = decode_response(&mut resp, 1 << 20).unwrap_err();
     assert!(matches!(err, NetError::ContentDecode(_)), "{err}");
@@ -277,6 +283,7 @@ fn decode_budget_bombs() {
         body,
         reused_connection: false,
         resolved_url: None,
+        from_cache: false,
     };
     let err = decode_response(&mut resp, 100).unwrap_err();
     assert!(matches!(err, NetError::DecodedTooLarge(_)), "{err}");
@@ -294,6 +301,7 @@ fn charset_parsed() {
         body: vec![],
         reused_connection: false,
         resolved_url: None,
+        from_cache: false,
     };
     assert_eq!(resp.charset().as_deref(), Some("iso-8859-1"));
     assert_eq!(resp.content_type(), Some("text/html; charset=ISO-8859-1"));
@@ -308,6 +316,7 @@ fn nosniff_flag() {
         body: vec![],
         reused_connection: false,
         resolved_url: None,
+        from_cache: false,
     };
     assert!(sniff.nosniff());
     let plain = Response {
@@ -317,6 +326,7 @@ fn nosniff_flag() {
         body: vec![],
         reused_connection: false,
         resolved_url: None,
+        from_cache: false,
     };
     assert!(!plain.nosniff());
 }
@@ -334,6 +344,7 @@ fn text_transcodes_windows1252() {
         body: vec![0x63, 0x61, 0x66, 0xE9], // "café"
         reused_connection: false,
         resolved_url: None,
+        from_cache: false,
     };
     assert_eq!(resp.text(), "café");
 }
@@ -347,6 +358,7 @@ fn text_utf8() {
         body: "héllo".as_bytes().to_vec(),
         reused_connection: false,
         resolved_url: None,
+        from_cache: false,
     };
     assert_eq!(resp.text(), "héllo");
 }
@@ -361,6 +373,7 @@ fn text_defaults_to_1252() {
         body: vec![0xE9],
         reused_connection: false,
         resolved_url: None,
+        from_cache: false,
     };
     assert_eq!(resp.text(), "é");
 }

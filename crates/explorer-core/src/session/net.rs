@@ -220,17 +220,28 @@ impl Session {
     pub(crate) async fn sub_commit_head(
         &mut self,
         tab: TabId,
-        job: SubJob,
+        mut job: SubJob,
     ) -> Result<Option<SubCommitTail>, CoreError> {
+        // Étape 251 — complétions de la vague accumulées
+        // détaché : drainées dans le ring de l'onglet **avant**
+        // le check d'epoch — les fetches ont eu lieu, epoch
+        // supplantée ou non.
+        let net_evs = std::mem::take(&mut job.net_events);
         {
             let entry = self.tabs.get(&tab).ok_or(CoreError::UnknownTab(tab))?;
             tracing::info!(target:"dom_probe", tab,
                 epoch = job.epoch, cur = entry.nav_epoch,
                 site = "commit.head", "sub_commit_head entrée");
             if entry.nav_epoch != job.epoch {
+                for ev in net_evs {
+                    self.record_net_event(tab, ev);
+                }
                 self.unspec(tab);
                 return Ok(None);
             }
+        }
+        for ev in net_evs {
+            self.record_net_event(tab, ev);
         }
         let SubJob {
             url,
@@ -1539,10 +1550,12 @@ impl Session {
         let policy = doc_policy;
         let url_g = url.clone();
         tokio::spawn(async move {
+            let t0 = std::time::Instant::now();
             let out = tr.fetch(&req).await;
             // Entrée 2xx → graphe de deps fetché (JS-C101) :
             // le module livré fait `import {x} from 'lit'` —
             // `load_source` aval manquerait le préfetch.
+            let mut net_events_out = Vec::new();
             let (entry, sources) = match &out {
                 Ok(resp) if (200..300).contains(&resp.status) => {
                     let entry_src = String::from_utf8_lossy(&resp.body).into_owned();
@@ -1550,6 +1563,11 @@ impl Session {
                         sources: std::collections::HashMap::new(),
                         alias: std::collections::HashMap::new(),
                     };
+                    // Étape 251 — les deps fetchées du graphe
+                    // sont des complétions `net.events` à part
+                    // entière ; le tampon voyage dans la meta
+                    // (drainé au `drain_net_done`).
+                    let mut net_evs = Vec::new();
                     Self::fetch_module_sources(
                         &tr,
                         max_inflight,
@@ -1562,8 +1580,10 @@ impl Session {
                         &import_specs,
                         &[],
                         &mut graph,
+                        Some(&mut net_evs),
                     )
                     .await;
+                    net_events_out = net_evs;
                     (Some(entry_src), graph.sources.into_iter().collect())
                 }
                 _ => (None, Vec::new()),
@@ -1574,8 +1594,10 @@ impl Session {
                 url: url_g.to_string(),
                 entry,
                 sources,
+                net_events: net_events_out,
             };
             let _ = tx.send(NetDone {
+                t0,
                 tab,
                 handle: seq,
                 cross: is_cross,
@@ -1724,6 +1746,7 @@ impl Session {
                                 seq: d.seq,
                                 name: String::new(),
                                 graph: None,
+                                net_events: Vec::new(),
                             },
                         );
                     }
@@ -1873,8 +1896,10 @@ impl Session {
         let tx = self.net_tx.clone();
         let seq = d.seq;
         let j = tokio::spawn(async move {
+            let t0 = std::time::Instant::now();
             let out = fetch_maybe_data(&tr, &req).await;
             let _ = tx.send(NetDone {
+                t0,
                 tab,
                 handle: seq,
                 cross: is_cross,
@@ -1929,10 +1954,12 @@ impl Session {
         let max_modules = self.max_modules;
         let req_url = entry_base.clone();
         let j = tokio::spawn(async move {
+            let t0 = std::time::Instant::now();
             let mut graph = crate::session::net_items::ModuleGraph {
                 sources: std::collections::HashMap::from([(name.clone(), entry_src.clone())]),
                 alias: std::collections::HashMap::from([(name.clone(), entry_base.to_string())]),
             };
+            let mut net_evs = Vec::new();
             Self::fetch_module_sources(
                 &tr,
                 max_inflight,
@@ -1945,9 +1972,11 @@ impl Session {
                 &[],
                 &[],
                 &mut graph,
+                Some(&mut net_evs),
             )
             .await;
             let _ = tx.send(NetDone {
+                t0,
                 tab,
                 handle: seq,
                 cross: false,
@@ -1957,6 +1986,10 @@ impl Session {
                 cors_unsafe: Vec::new(),
                 req_url,
                 partition: None,
+                // Étape 251 — le `out` placeholder n'est pas
+                // une complétion réelle : le record du drain
+                // prend `dyn_module.net_events` (fetches de
+                // deps) — voir `drain_net_done`.
                 out: Err(explorer_net::error::NetError::InvalidResponse(
                     "dyn-module placeholder".into(),
                 )),
@@ -1969,6 +2002,7 @@ impl Session {
                     seq,
                     name,
                     graph: Some(graph),
+                    net_events: net_evs,
                 }),
                 import: None,
                 lazy: None,
@@ -1991,6 +2025,7 @@ impl Session {
             seq,
             name,
             graph,
+            net_events: _,
         } = dm;
         let mut eng = {
             let Some(entry) = self.tabs.get_mut(&tab) else {
@@ -2232,11 +2267,13 @@ impl Session {
         // entre le spawn et le `NetDone`).
         let dfs_host = req_url.host().clone();
         let j = tokio::spawn(async move {
+            let t0 = std::time::Instant::now();
             tracing::info!(target: "media_probe", site = "net.dfs", phase = "start", seq, host = %dfs_host);
             let out = fetch_maybe_data(&tr, &req).await;
             let st = out.as_ref().map_or(0, |r| r.status);
             tracing::info!(target: "media_probe", site = "net.dfs", phase = "fetched", seq, host = %dfs_host, status = st);
             let _ = tx.send(NetDone {
+                t0,
                 tab,
                 handle: seq,
                 cross: is_cross,
@@ -2349,8 +2386,10 @@ impl Session {
         let tx = self.net_tx.clone();
         let seq = d.seq;
         let j = tokio::spawn(async move {
+            let t0 = std::time::Instant::now();
             let out = fetch_maybe_data(&tr, &req).await;
             let _ = tx.send(NetDone {
+                t0,
                 tab,
                 handle: seq,
                 cross: is_cross,
@@ -2540,8 +2579,10 @@ impl Session {
         let tr = self.transport.clone();
         let tx = self.net_tx.clone();
         let j = tokio::spawn(async move {
+            let t0 = std::time::Instant::now();
             let out = fetch_maybe_data(&tr, &req).await;
             let _ = tx.send(NetDone {
+                t0,
                 tab,
                 handle: seq,
                 cross: is_cross,
@@ -2710,8 +2751,10 @@ impl Session {
         let seq = d.seq;
         tracing::debug!(tab, seq, url = %req_url, "dyn link : fetch émis");
         let j = tokio::spawn(async move {
+            let t0 = std::time::Instant::now();
             let out = fetch_maybe_data(&tr, &req).await;
             let _ = tx.send(NetDone {
+                t0,
                 tab,
                 handle: seq,
                 cross: is_cross,
@@ -3270,8 +3313,10 @@ impl Session {
             }
         }
         let j = tokio::spawn(async move {
+            let t0 = std::time::Instant::now();
             let out = fetch_maybe_data(&tr, &p.req).await;
             let _ = tx.send(NetDone {
+                t0,
                 tab,
                 handle,
                 cross: p.cross,
@@ -3789,6 +3834,32 @@ impl Session {
                 }
             }
         }
+    }
+
+    /// Enregistre une complétion dans le ring `net.events`
+    /// de l'onglet (étape 251) — `seq` monotone par onglet,
+    /// éviction des plus anciennes au-delà de
+    /// [`types::MAX_NET_EVENTS`]. Point de livraison unique
+    /// pour les chemins sous verrou (funnel `drain_net_done`,
+    /// complétions document) ; la vague détachée remonte par
+    /// le tampon `SubJob` drainé au commit.
+    /// `seq` de `rec` est ignorée — assignée ici.
+    pub(crate) fn record_net_event(&mut self, tab: TabId, mut rec: types::NetEventRec) {
+        let Some(entry) = self.tabs.get_mut(&tab) else {
+            return;
+        };
+        entry.net_seq = entry.net_seq.wrapping_add(1);
+        rec.seq = entry.net_seq;
+        entry.net_events.push_back(rec);
+        while entry.net_events.len() > types::MAX_NET_EVENTS {
+            entry.net_events.pop_front();
+        }
+    }
+
+    /// `ms` saturant depuis un `Instant` de spawn — même
+    /// convention que [`net_items::ms_u64`].
+    pub(crate) fn req_ms(t0: std::time::Instant) -> u64 {
+        u64::try_from(t0.elapsed().as_millis()).unwrap_or(u64::MAX)
     }
 
     /// Dedup `(kind, host)` des sondes `net.*` — `true` = le
@@ -4385,6 +4456,7 @@ impl Session {
                         seq: meta.seq,
                         name: String::new(),
                         graph: None,
+                        net_events: Vec::new(),
                     },
                 ),
             }
@@ -4477,6 +4549,59 @@ impl Session {
             if in_rest {
                 rest_served += 1;
             }
+            // Étape 251 — complétion enregistrée **ici**
+            // (post-déféral : un `NetDone` repoussé au
+            // budget est relu à la passe suivante, il ne
+            // s'enregistrerait sinon deux fois) et **avant**
+            // les `take()` de dispatch — la famille se lit
+            // sur le meta `Some`. Fetches script-initiés,
+            // sous-ressources dynamiques et lazy passent
+            // tous par ce funnel.
+            let (kind, initiator) = if d.script.is_some() {
+                ("script", "element")
+            } else if d.frame.is_some() {
+                ("iframe", "element")
+            } else if d.img.is_some() {
+                ("img", "element")
+            } else if d.link.is_some() {
+                ("stylesheet", "element")
+            } else if d.import.is_some() {
+                ("import", "script")
+            } else if d.lazy.is_some() {
+                ("img", "element")
+            } else {
+                ("fetch", "script")
+            };
+            // Le `dyn_module` porte un `out` placeholder
+            // (le fetch d'entrée a déjà été enregistré sous
+            // "script" via son propre `NetDone`) — le record
+            // générique serait un faux `status: 0`. Ses
+            // vraies complétions (deps fetchées) sont dans
+            // `dm.net_events`, drainées dans la branche.
+            if d.dyn_module.is_none() {
+                let (status, bytes, from_cache) = match &d.out {
+                    Ok(r) => (r.status, r.body.len(), r.from_cache),
+                    Err(_) => (0, 0, false),
+                };
+                self.record_net_event(
+                    d.tab,
+                    types::NetEventRec {
+                        seq: 0,
+                        kind,
+                        url: d.req_url.to_string(),
+                        initiator,
+                        status,
+                        bytes,
+                        ms: Self::req_ms(d.t0),
+                        from_cache,
+                    },
+                );
+            }
+            if let Some(meta) = d.import.as_ref() {
+                for ev in &meta.net_events {
+                    self.record_net_event(d.tab, ev.clone());
+                }
+            }
             // `<script>` dynamique (CAP-169) — la tâche vit
             // dans `dyn_tasks` (son `handle` est le `seq`
             // moteur, espace distinct des handles fetch) :
@@ -4494,9 +4619,12 @@ impl Session {
             // `<script type="module">` dynamique (CAP-186) —
             // graphe rempli hors session, `eval_module_graph`
             // puis `load`/`error` sur l'élément.
-            if let Some(dm) = d.dyn_module.take() {
+            if let Some(mut dm) = d.dyn_module.take() {
                 self.dyn_tasks.remove(&(d.tab, dm.seq));
                 self.probe_net_arr(&d);
+                for ev in std::mem::take(&mut dm.net_events) {
+                    self.record_net_event(d.tab, ev);
+                }
                 self.deliver_dyn_module(d.tab, dm);
                 continue;
             }
@@ -4923,6 +5051,7 @@ impl Session {
     /// `Sync`, `&Session` ne peut donc pas traverser un
     /// `.await` dans une future `Send`.
     #[allow(clippy::too_many_arguments)]
+    #[allow(clippy::too_many_arguments)]
     pub(crate) async fn fetch_module_sources(
         transport: &Arc<dyn HttpTransport>,
         max_inflight: usize,
@@ -4935,6 +5064,7 @@ impl Session {
         import_specs: &[(String, String)],
         mod_preloads: &[Url],
         graph: &mut ModuleGraph,
+        net_out: Option<&mut Vec<types::NetEventRec>>,
     ) {
         let mut queued: std::collections::HashSet<String> =
             std::iter::once(entry_base.as_str()).collect();
@@ -4969,6 +5099,7 @@ impl Session {
                 &mut frontier,
             );
         }
+        let mut net_out = net_out;
         while !frontier.is_empty() && graph.sources.len() < max_modules {
             let room = (max_modules - graph.sources.len()).min(frontier.len());
             let mut jobs = VecDeque::new();
@@ -4985,7 +5116,25 @@ impl Session {
                 ));
             }
             let mut fetched = Vec::new();
-            fetch_wave(transport, max_inflight, jobs, |tag, res| {
+            fetch_wave(transport, max_inflight, jobs, |tag, res, ms| {
+                // Étape 251 — chaque module fetché est une
+                // complétion `net.events` (tag `(spec, url)`).
+                if let Some(out) = net_out.as_deref_mut() {
+                    let (status, bytes, from_cache) = match &res {
+                        Ok(r) => (r.status, r.body.len(), r.from_cache),
+                        Err(_) => (0, 0, false),
+                    };
+                    out.push(types::NetEventRec {
+                        seq: 0,
+                        kind: "module",
+                        url: tag.1.to_string(),
+                        initiator: "script",
+                        status,
+                        bytes,
+                        ms,
+                        from_cache,
+                    });
+                }
                 fetched.push((tag, res));
             })
             .await;

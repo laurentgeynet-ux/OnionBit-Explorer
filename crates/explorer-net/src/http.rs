@@ -329,6 +329,14 @@ pub struct Response {
     /// `308` — `RedirectTransport`), fragment `Location`
     /// inclus ; `None` = URL de la requête (étape 67).
     pub resolved_url: Option<crate::url::Url>,
+    /// `true` si le corps a été servi depuis le cache HTTP
+    /// (`CachingTransport` — hit frais ou entrée revalidée
+    /// par `304`) — provenance exposée pour les flux
+    /// d'événements réseau (étape 251, verbe EAP
+    /// `net.events`). Toujours `false` sur le chemin
+    /// transport direct et sur `fetch_stream` (court-circuit
+    /// franc, jamais caché).
+    pub from_cache: bool,
 }
 
 impl Response {

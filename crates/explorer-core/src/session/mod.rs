@@ -608,6 +608,14 @@ pub(crate) struct Tab {
     /// draws/skips, µs par famille. Mêmes règles de
     /// disponibilité que `emit_stats`.
     raster_stats: Option<explorer_render::ReplayStats>,
+    /// Complétions réseau retenues (étape 251 — verbe EAP
+    /// `net.events`) : ring borné `MAX_NET_EVENTS`, les plus
+    /// anciennes évincées ; survit aux navigations (le
+    /// `since` du verbe porte le diff, pas le reset).
+    net_events: std::collections::VecDeque<types::NetEventRec>,
+    /// Séquence de `net_events` — croissante par onglet,
+    /// jamais réutilisée ; `0` = encore rien enregistré.
+    net_seq: u64,
     /// Epoch de navigation à laquelle le moteur JS détaché
     /// appartient (étape 53f) — `Some` = `js` est sorti pour
     /// un `run_pending`/`sync_dom` **hors verrou**. À la
@@ -1778,6 +1786,8 @@ impl Session {
                 windowed: false,
                 emit_stats: None,
                 raster_stats: None,
+                net_events: std::collections::VecDeque::new(),
+                net_seq: 0,
                 js_detached: None,
                 js_stall_until: None,
                 slow_eval_streak: 0,

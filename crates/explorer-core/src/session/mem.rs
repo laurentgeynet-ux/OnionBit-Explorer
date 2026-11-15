@@ -468,6 +468,42 @@ impl Session {
     /// ou pendant qu'une passe détachée est en vol (l'orphelin
     /// garé est réinséré par l'appelant, comme `engine.layout`).
     #[must_use]
+    /// Complétions réseau de l'onglet (étape 251 —
+    /// `net.events`) : ring borné à `types::MAX_NET_EVENTS`
+    /// (512) en séquence monotone. `since_seq` filtre aux records
+    /// `seq > since_seq` (curseur de polling incrémental).
+    /// Chaque record : `{seq, kind, url, initiator, status,
+    /// bytes, ms, from_cache}` — `status`/`bytes`/`from_cache`
+    /// à `0`/`0`/`false` sur échec transport. La fenêtre
+    /// peut avoir élagué des événements plus anciens que le
+    /// premier `seq` renvoyé (`next_seq` = compteur courant,
+    /// à repasser en `since_seq` pour la suite).
+    pub fn net_events(&self, tab: TabId, since_seq: Option<u64>) -> Option<serde_json::Value> {
+        let entry = self.tabs.get(&tab)?;
+        let events: Vec<serde_json::Value> = entry
+            .net_events
+            .iter()
+            .filter(|e| since_seq.is_none_or(|s| e.seq > s))
+            .map(|e| {
+                serde_json::json!({
+                    "seq": e.seq,
+                    "kind": e.kind,
+                    "url": e.url,
+                    "initiator": e.initiator,
+                    "status": e.status,
+                    "bytes": e.bytes,
+                    "ms": e.ms,
+                    "from_cache": e.from_cache,
+                })
+            })
+            .collect();
+        Some(serde_json::json!({
+            "events": events,
+            "next_seq": entry.net_seq,
+        }))
+    }
+
+    #[must_use]
     pub fn paint_stats(&self, tab: TabId) -> Option<serde_json::Value> {
         let entry = self.tabs.get(&tab)?;
         let emit = entry.emit_stats.as_ref().map(|st| {

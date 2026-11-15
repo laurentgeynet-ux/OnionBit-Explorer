@@ -1843,6 +1843,7 @@ mod tests {
                     body,
                     reused_connection: false,
                     resolved_url: None,
+                    from_cache: false,
                 }),
                 None => Ok(Response {
                     status: 404,
@@ -1851,6 +1852,7 @@ mod tests {
                     body: b"not found".to_vec(),
                     reused_connection: false,
                     resolved_url: None,
+                    from_cache: false,
                 }),
             }
         }

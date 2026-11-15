@@ -44,6 +44,7 @@ impl HttpTransport for FakeTransport {
             body: self.0.as_bytes().to_vec(),
             reused_connection: false,
             resolved_url: None,
+            from_cache: false,
         })
     }
 }
@@ -199,7 +200,7 @@ async fn open(a: &mut Agent) -> Value {
         "session.open",
         json!({"protocol": "eap/1", "capabilities": [
             "snapshot", "wait_commit", "input", "eval", "frames",
-            "console_log", "dom", "tabs", "events", "engine"
+            "console_log", "dom", "tabs", "events", "engine", "net"
         ]}),
     )
     .await
@@ -404,6 +405,33 @@ async fn engine_introspection() {
     assert!(raster["kind_us"].is_object() && raster["kind_n"].is_object());
     assert!(r["result"]["frame"]["list_items"].is_u64(), "{r}");
     let r = a.call("engine.paint_stats", json!({"tab": 999})).await;
+    assert_eq!(r["error"]["code"], -32005);
+    // net.events (étape 251) : la navigation commise a
+    // produit au moins la complétion `document` — ring
+    // monotone, curseur `since_seq` incrémental.
+    let r = a.call("net.events", json!({"tab": tab})).await;
+    assert!(r["error"].is_null(), "{r}");
+    let events = r["result"]["events"].as_array().expect("events");
+    assert!(
+        events
+            .iter()
+            .any(|e| e["kind"] == "document" && e["status"] == 200),
+        "complétion document attendue : {r}"
+    );
+    let next_seq = r["result"]["next_seq"].as_u64().expect("next_seq");
+    assert!(next_seq >= events.len() as u64, "{r}");
+    assert!(
+        events
+            .iter()
+            .all(|e| e["seq"].as_u64().is_some() && e["url"].is_string()),
+        "seq/url structurés : {r}"
+    );
+    let r = a
+        .call("net.events", json!({"tab": tab, "since_seq": next_seq}))
+        .await;
+    assert!(r["error"].is_null(), "{r}");
+    assert_eq!(r["result"]["events"].as_array().unwrap().len(), 0, "{r}");
+    let r = a.call("net.events", json!({"tab": 999})).await;
     assert_eq!(r["error"]["code"], -32005);
     // Onglet inconnu → -32005.
     let r = a.call("engine.pipeline", json!({"tab": 999})).await;

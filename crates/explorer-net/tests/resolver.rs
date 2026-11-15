@@ -42,6 +42,7 @@ impl HttpTransport for StubDns {
             body: self.body.clone(),
             reused_connection: false,
             resolved_url: None,
+            from_cache: false,
         })
     }
 }
@@ -171,6 +172,7 @@ impl HttpTransport for BadContent {
             body: b"<html>nope</html>".to_vec(),
             reused_connection: false,
             resolved_url: None,
+            from_cache: false,
         })
     }
 }

@@ -7741,6 +7741,28 @@ MCP = adaptateur, jamais la base.
   phase (honnêteté schéma). Help + schéma + golden + MCP
   `reset`. Verrous : unitaire accumulateur, socket
   `engine_introspection` (phase `flow.raster`, take).
+- [x] **Étape 251. EAP `net.events` : complétions réseau
+  par onglet, ring borné + curseur** — **Livrée (`main`)** :
+  `NetEventRec {seq, kind, url, initiator, status, bytes,
+  ms, from_cache}` dans un `VecDeque` borné 512 par onglet
+  (`seq` monotone, `net_seq`) — **jamais** de variant
+  `CoreEvent` haute-fréquence. Enregistrement **unique au
+  funnel** `drain_net_done` (post-déféral : un item repoussé
+  au budget ne s'enregistre pas deux fois), `t0` = spawn de
+  tâche sur les 8 bras async ; la vague initiale tamponne
+  dans `SubJob.net_events` (détachée, drainée au
+  `sub_commit_head`, epoch supplantée incluse) ; document
+  porté par `NavDone.net_ev` + échec au caller ; deps
+  modules/import via buffers `DynModuleDone`/`DynImportMeta`
+  ; satellites `@import`/fonds/fontes enregistrés.
+  `Response.from_cache` ajouté (explorer-net) — `true` aux
+  deux services cache. `dyn_module` : `out` placeholder
+  ignoré, seules ses deps réelles comptent. Verbe
+  `net.events{tab,since_seq?}` = `{events, next_seq}` —
+  polling incrémental, cap **`net` dédiée**. Hors borne v1
+  (schéma) : corps, en-têtes, téléchargements bufferisés.
+  Help + schéma + golden + MCP `net_events`. Verrou :
+  socket `engine_introspection` (doc 200, curseur vide).
 
 ## Piste JS (JS-C26+) — spécialiste `explorer-jscore`
 

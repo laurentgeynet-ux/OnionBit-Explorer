@@ -227,6 +227,9 @@ impl HttpTransport for CachingTransport {
                     body: e.body.clone(),
                     reused_connection: false,
                     resolved_url: None,
+                    // Hit frais — aucune requête transport
+                    // n'a été émise.
+                    from_cache: true,
                 });
             }
         }
@@ -273,6 +276,9 @@ impl HttpTransport for CachingTransport {
                         body: e.body,
                         reused_connection: resp.reused_connection,
                         resolved_url: None,
+                        // Corps servi depuis le cache après
+                        // revalidation `304`.
+                        from_cache: true,
                     });
                 }
             }

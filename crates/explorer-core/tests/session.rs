@@ -240,6 +240,7 @@ impl HttpTransport for FakeTransport {
             body,
             reused_connection: false,
             resolved_url: None,
+            from_cache: false,
         })
     }
 
@@ -4736,6 +4737,7 @@ impl HttpTransport for ConcurrencyTransport {
                 body,
                 reused_connection: false,
                 resolved_url: None,
+                from_cache: false,
             }),
             None => Ok(Response {
                 status: 404,
@@ -4744,6 +4746,7 @@ impl HttpTransport for ConcurrencyTransport {
                 body: b"missing".to_vec(),
                 reused_connection: false,
                 resolved_url: None,
+                from_cache: false,
             }),
         }
     }
@@ -6399,6 +6402,7 @@ impl HttpTransport for GatedTransport {
             body: b"missing".to_vec(),
             reused_connection: false,
             resolved_url: None,
+            from_cache: false,
         })
     }
 
@@ -7077,6 +7081,7 @@ impl HttpTransport for SlowThenGate {
             body: b"missing".to_vec(),
             reused_connection: false,
             resolved_url: None,
+            from_cache: false,
         })
     }
 

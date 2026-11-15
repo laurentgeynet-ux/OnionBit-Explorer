@@ -244,6 +244,7 @@ impl AutoClient {
             body,
             reused_connection: true, // multiplexage = toujours partagée.
             resolved_url: None,
+            from_cache: false,
         })
     }
 

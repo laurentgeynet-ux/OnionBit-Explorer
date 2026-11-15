@@ -52,6 +52,7 @@ impl HttpTransport for FakeTransport {
             body,
             reused_connection: false,
             resolved_url: None,
+            from_cache: false,
         })
     }
 }

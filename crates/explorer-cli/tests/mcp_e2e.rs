@@ -45,6 +45,7 @@ impl HttpTransport for FakeTransport {
             body: PAGE.as_bytes().to_vec(),
             reused_connection: false,
             resolved_url: None,
+            from_cache: false,
         })
     }
 }

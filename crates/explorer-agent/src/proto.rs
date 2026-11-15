@@ -229,6 +229,9 @@ pub enum Capability {
     Events,
     /// Introspection moteur `engine.*` (étape 247).
     Engine,
+    /// Complétions réseau `net.events` (étape 251) — flux
+    /// de fetchs document/sous-ressources/dynamiques.
+    Net,
 }
 
 /// Profil de sécurité de session — annoncé à `session.open`,
@@ -532,6 +535,13 @@ pub enum Method {
     /// santé moteur (cap `engine`, étape 248).
     #[serde(rename = "engine.anomalies")]
     EngineAnomalies(AnomalyParams),
+    /// Complétions réseau de l'onglet — ring borné à
+    /// séquence monotone : `{seq, kind, url, initiator,
+    /// status, bytes, ms, from_cache}`, curseur
+    /// `since_seq` pour le polling incrémental (cap `net`,
+    /// étape 251).
+    #[serde(rename = "net.events")]
+    NetEvents(NetEventsParams),
 
     /// Clic par handle (cap `handles`+`input`, droit `input`).
     #[serde(rename = "input.click")]
@@ -654,6 +664,17 @@ pub struct PipelineParams {
     /// à zéro (étape 250).
     #[serde(default)]
     pub reset: Option<bool>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct NetEventsParams {
+    /// Onglet cible.
+    pub tab: TabId,
+    /// Curseur de polling — seuls les records `seq >
+    /// since_seq` sont renvoyés (étape 251) ; la réponse
+    /// porte `next_seq` à repasser ici pour la suite.
+    #[serde(default)]
+    pub since_seq: Option<u64>,
 }
 
 #[derive(Debug, Clone, Deserialize)]

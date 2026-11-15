@@ -185,6 +185,7 @@ mod tests {
                 body: Vec::new(),
                 reused_connection: false,
                 resolved_url: None,
+                from_cache: false,
             })
         }
 

@@ -555,6 +555,10 @@ impl Session {
             dom,
             html,
             title,
+            // Rejeu local d'un corps bufferisé — aucun
+            // fetch n'est émis ici (le fetch d'origine est
+            // hors borne v1 `net.events`).
+            net_ev: None,
         };
         let Some(mut sub) = self.nav_apply(tab, dl.tail, done)? else {
             return Ok(None);

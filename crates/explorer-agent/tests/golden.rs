@@ -73,6 +73,7 @@ fn golden_methods_known() {
         "engine.pipeline",
         "engine.paint_stats",
         "engine.anomalies",
+        "net.events",
         "input.click",
         "input.type",
         "input.hover",

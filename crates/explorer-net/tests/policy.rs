@@ -55,6 +55,7 @@ fn resp(status: u16, headers: &[(&str, &str)], body: &[u8]) -> Response {
         body: body.to_vec(),
         reused_connection: false,
         resolved_url: None,
+        from_cache: false,
     }
 }
 

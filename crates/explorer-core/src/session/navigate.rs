@@ -756,6 +756,25 @@ impl Session {
             }
             Ok(NavOutcome::Document(d, t)) => (d, t),
             Err(e) => {
+                // Étape 251 — l'échec du fetch document est
+                // une complétion `net.events` comme les
+                // autres (statut HTTP ou 0 = transport).
+                self.record_net_event(
+                    tab,
+                    crate::session::types::NetEventRec {
+                        seq: 0,
+                        kind: "document",
+                        url: job.req.url.to_string(),
+                        initiator: "navigation",
+                        status: match &e {
+                            CoreError::HttpStatus(s) => *s,
+                            _ => 0,
+                        },
+                        bytes: 0,
+                        ms: u64::try_from(t_nav.elapsed().as_millis()).unwrap_or(u64::MAX),
+                        from_cache: false,
+                    },
+                );
                 // Le document en vol a pu être peint
                 // progressivement — on réverte avant de
                 // propager (étape 56c), puis la page
@@ -1087,7 +1106,14 @@ impl Session {
             refresh,
             csp,
             clear_cookies,
+            net_ev,
         } = done;
+        // Étape 251 — complétion `net.events` du document
+        // (enregistrée même si l'epoch est supplantée au
+        // commit : le fetch a eu lieu).
+        if let Some(ev) = net_ev {
+            self.record_net_event(tab, ev);
+        }
         if let Some(s) = &self.store {
             s.record_visit(&url.to_string(), title.as_deref());
         }
@@ -1361,6 +1387,7 @@ impl Session {
             font_budget: self.max_fonts,
             max_imports: self.max_imports,
             max_images: self.max_images,
+            net_events: Vec::new(),
         }))
     }
 

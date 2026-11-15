@@ -65,6 +65,7 @@ impl HttpTransport for FakeTransport {
             body: body.as_bytes().to_vec(),
             reused_connection: false,
             resolved_url: None,
+            from_cache: false,
         })
     }
 }
@@ -1007,6 +1008,7 @@ impl HttpTransport for DlTransport {
             body: b"\x01\x02\x03blob".to_vec(),
             reused_connection: false,
             resolved_url: None,
+            from_cache: false,
         })
     }
 }

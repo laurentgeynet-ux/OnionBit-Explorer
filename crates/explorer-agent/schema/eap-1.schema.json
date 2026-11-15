@@ -369,6 +369,13 @@
       "result": { "type": "object", "properties": { "emit": { "type": ["object", "null"] }, "raster": { "type": ["object", "null"] }, "frame": { "type": "object" } }, "required": ["emit", "raster", "frame"] }
     },
 
+    "net.events": {
+      "x-phase": "E5",
+      "description": "Complétions réseau de l'onglet (étape 251) — ring borné de 512 records à séquence **monotone** : `{seq, kind, url, initiator, status, bytes, ms, from_cache}`. `kind` ∈ document|stylesheet|script|img|iframe|font|module|import|fetch ; `initiator` ∈ navigation|document|stylesheet|element|script|module. Couvre navigation, vague de sous-ressources, fetches dynamiques (script/frame/img/link/module/lazy), `fetch()`/XHR et import de modules — une ligne par complétion réelle (échecs inclus : `status`/`bytes`/`from_cache` à 0/0/false sur échec transport, `from_cache` = service cache local). `ms` = spawn→complétion. Passez `since_seq` (dernier `seq` vu) pour un polling incrémental : `next_seq` de la réponse est le curseur suivant ; les events plus anciens que le premier `seq` rendu ont pu être élagués. Hors borne v1 : corps des réponses, en-têtes, timing détaillé, fetch des téléchargements bufferisés.",
+      "params": { "type": "object", "properties": { "tab": { "$ref": "#/$defs/tabId" }, "since_seq": { "type": "integer", "minimum": 0 } }, "required": ["tab"], "additionalProperties": false },
+      "result": { "type": "object", "properties": { "events": { "type": "array", "items": { "type": "object", "properties": { "seq": { "type": "integer" }, "kind": { "type": "string" }, "url": { "type": "string" }, "initiator": { "type": "string" }, "status": { "type": "integer" }, "bytes": { "type": "integer" }, "ms": { "type": "integer" }, "from_cache": { "type": "boolean" } }, "required": ["seq", "kind", "url", "initiator", "status", "bytes", "ms", "from_cache"] } }, "next_seq": { "type": "integer" } }, "required": ["events", "next_seq"] }
+    },
+
     "input.click": {
       "x-phase": "E2",
       "params": {

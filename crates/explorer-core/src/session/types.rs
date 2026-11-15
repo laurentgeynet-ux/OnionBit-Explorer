@@ -975,6 +975,52 @@ pub(crate) const MAX_ANIM_BIRTHS: usize = 256;
 /// génère du `<style>` en boucle ne gonfle pas la map.
 pub(crate) const MAX_SHEET_CACHE: usize = 64;
 
+/// Complétions retenues par onglet pour le verbe EAP
+/// `net.events` (étape 251) — borné, les plus anciennes
+/// sont évincées.
+pub(crate) const MAX_NET_EVENTS: usize = 512;
+
+/// Une complétion réseau de l'onglet — document, vague de
+/// sous-ressources, fetch dynamique ou `fetch()`/XHR.
+/// Alimentée aux points de **livraison** (la réponse a un
+/// sort arrêté : succès, statut, échec transport) — pas de
+/// variant `CoreEvent` (le flux est haute-fréquence : un
+/// subscriber broadcast devrait bufferiser chaque `load`
+/// d'image).
+///
+/// `seq` est monotone par onglet — `since` du verbe filtre
+/// `seq > since`, même contrat que `snapshot{since}`.
+/// `status` = code HTTP, `0` si le transport a échoué avant
+/// réponse. `ms` = temps requête (spawn → complétion), pas
+/// la vague entière. `from_cache` = corps servi par le
+/// cache HTTP (`CachingTransport`).
+#[derive(Debug, Clone)]
+pub(crate) struct NetEventRec {
+    /// Séquence par onglet (croissante, jamais réutilisée).
+    pub(crate) seq: u64,
+    /// Famille : `document`/`stylesheet`/`script`/`img`/
+    /// `iframe`/`import`/`module`/`fetch`.
+    pub(crate) kind: &'static str,
+    /// URL demandée (post-résolution, pré-redirections).
+    pub(crate) url: String,
+    /// Origine de la demande : `navigation` (fetch document),
+    /// `document` (vague issue du parse), `element` (sous-
+    /// ressource créée dynamiquement — script/img/link/
+    /// iframe insérés, lazy promue), `script` (`fetch()`,
+    /// XHR, `import()`).
+    pub(crate) initiator: &'static str,
+    /// Statut HTTP — `0` = échec transport (DNS, TLS,
+    /// timeout, refus de politique).
+    pub(crate) status: u16,
+    /// Octets de corps reçus (décodés).
+    pub(crate) bytes: usize,
+    /// Temps requête en millisecondes (spawn → complétion).
+    pub(crate) ms: u64,
+    /// Corps servi depuis le cache HTTP — hit frais ou
+    /// revalidé `304` (`Response::from_cache`).
+    pub(crate) from_cache: bool,
+}
+
 /// `Cookie` filaire → forme persistée (expiration → secs
 /// unix ; les expirés ne sont jamais exportés —
 /// [`CookieJar::export`] purge déjà).
