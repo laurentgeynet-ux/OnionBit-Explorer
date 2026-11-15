@@ -7864,6 +7864,12 @@ MCP = adaptateur, jamais la base.
   raccourcis `wait` de `nav.go`/`reload`/`history` comme les
   autres kinds non-commit. Hors-bornes : sockets
   persistantes ws/sse non comptées.
+- [x] **Étape 258-bis. `describe{ref}`** — **Livrée** :
+  tag/`attrs`/rect document/`textContent` borné
+  (`max_text`)/`value` de champ en un appel — les refs nues
+  de `query.select` deviennent distinguables sans
+  re-snapshot ni `eval`. `stale_ref` via la voie des verbes
+  `ref`.
 
 ## Piste JS (JS-C26+) — spécialiste `explorer-jscore`
 

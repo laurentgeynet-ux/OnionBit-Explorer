@@ -401,6 +401,13 @@
       "result": { "type": "object", "properties": { "node": { "type": "integer" }, "declarations": { "type": "array", "items": { "type": "object" } } }, "required": ["node", "declarations"] }
     },
 
+    "describe": {
+      "x-phase": "258-bis",
+      "description": "Description complète d'un handle sans re-snapshot ni eval : `{node:{index,generation}, tag, attrs{}, rect, text, value?}`. `rect` = boîte commise en coords **document** (comme les rects du snapshot — soustraire `scroll_y` pour `click_at` viewport). `text` = `textContent` compacté plafonné à `max_text` (défaut 480). `value` présent seulement sur `input`/`textarea`/`select` (valeur courante — `textarea` = son texte, pas l'attribut). `stale_ref` si la ref a expiré ou le nœud a été réattribué.",
+      "params": { "type": "object", "properties": { "tab": { "$ref": "#/$defs/tabId" }, "ref": { "$ref": "#/$defs/elementRef" }, "max_text": { "type": "integer", "minimum": 0 } }, "required": ["tab", "ref"], "additionalProperties": false },
+      "result": { "type": "object", "properties": { "node": { "type": "object" }, "tag": { "type": "string" }, "attrs": { "type": "object" }, "rect": { "type": ["object", "null"] }, "text": { "type": "string" } }, "required": ["node", "tag", "attrs", "text"] }
+    },
+
     "input.click": {
       "x-phase": "E2",
       "params": {

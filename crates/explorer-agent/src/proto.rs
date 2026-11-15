@@ -534,6 +534,10 @@ pub enum Method {
     /// Verdicts de cascade d'un élément — étape 253.
     #[serde(rename = "engine.cascade")]
     EngineCascade(CascadeParams),
+    /// Description complète d'un handle sans re-snapshot —
+    /// étape 258-bis.
+    #[serde(rename = "describe")]
+    Describe(DescribeParams),
     /// Suspects heuristiques bornés — triage affichage +
     /// santé moteur (cap `engine`, étape 248).
     #[serde(rename = "engine.anomalies")]
@@ -808,6 +812,22 @@ pub struct CascadeParams {
     /// (aucune règle ne pose la propriété) sont omis.
     #[serde(default)]
     pub declared_only: Option<bool>,
+}
+
+/// `describe{tab,ref}` — étape 258-bis : tag/attrs/rect/
+/// texte/valeur d'un handle en un appel (pas de re-snapshot
+/// ni d'`eval.run` pour lire l'état d'un élément).
+#[derive(Debug, Clone, Deserialize)]
+pub struct DescribeParams {
+    /// Onglet.
+    pub tab: TabId,
+    /// Handle cible — `StaleRef` si la révision a bougé.
+    #[serde(rename = "ref")]
+    pub elem_ref: ElementRef,
+    /// Plafond du `text_content` rendu (défaut
+    /// [`crate::dispatch::DESCRIBE_TEXT_CAP`]).
+    #[serde(default)]
+    pub max_text: Option<u32>,
 }
 
 /// `ref` seul + opts.

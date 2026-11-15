@@ -459,7 +459,16 @@ async fn engine_introspection() {
 #[tokio::test]
 async fn engine_cascade_verdicts() {
     let (mut a, srv) = connect().await;
-    open(&mut a).await;
+    // `handles` exigée par `describe` (les refs vivent dessus).
+    a.call(
+        "session.open",
+        json!({"protocol": "eap/1", "capabilities": [
+            "snapshot", "wait_commit", "input", "eval", "frames",
+            "console_log", "dom", "tabs", "events", "engine", "net",
+            "handles"
+        ]}),
+    )
+    .await;
     let r = a.call("tab.open", json!({})).await;
     let tab = r["result"]["tab"].as_u64().expect("tab");
     let r = a
@@ -518,6 +527,20 @@ async fn engine_cascade_verdicts() {
         .call("engine.cascade", json!({"tab": 999, "ref": elem_ref}))
         .await;
     assert_eq!(r["error"]["code"], -32005);
+    // `describe` — même ref : tag/attrs/rect/texte en un
+    // appel, ref pourrie → -32002 (étape 258-bis).
+    let r = a
+        .call("describe", json!({"tab": tab, "ref": elem_ref}))
+        .await;
+    assert!(r["error"].is_null(), "{r}");
+    assert!(
+        r["result"]["tag"].is_string() && r["result"]["node"]["index"].is_u64(),
+        "{r}"
+    );
+    let r = a
+        .call("describe", json!({"tab": tab, "ref": "el:999999"}))
+        .await;
+    assert_eq!(r["error"]["code"], -32002, "{r}");
     srv.abort();
 }
 

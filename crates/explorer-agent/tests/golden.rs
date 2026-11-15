@@ -76,6 +76,7 @@ fn golden_methods_known() {
         "engine.anomalies",
         "net.events",
         "frame.diff",
+        "describe",
         "input.click",
         "input.type",
         "input.hover",

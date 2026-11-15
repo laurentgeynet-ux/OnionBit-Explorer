@@ -144,6 +144,67 @@ impl Session {
         })
     }
 
+    /// Description complète d'un élément pour `describe{ref}`
+    /// (étape 258-bis) : tag, attributs, rect de la géométrie
+    /// commise (coords **document**, comme les snapshots),
+    /// `text_content` compacté plafonné à `max_text`
+    /// caractères, `value` courante pour les champs de forme.
+    /// `None` = onglet inconnu, DOM absent ou `(index,
+    /// generation)` obsolète → `stale_ref` côté agent.
+    #[must_use]
+    pub fn element_describe(
+        &self,
+        tab: TabId,
+        index: u32,
+        generation: u32,
+        max_text: usize,
+    ) -> Option<serde_json::Value> {
+        let dom = self.tabs.get(&tab)?.dom.as_ref()?;
+        let node = Self::find_node(dom, index)?;
+        if node.generation() != generation {
+            return None;
+        }
+        let tag = dom.tag_name(node).unwrap_or("#text").to_string();
+        let attrs: Vec<(String, String)> = dom
+            .attributes(node)
+            .map(|attrs: &[Attribute]| {
+                attrs
+                    .iter()
+                    .map(|a| (a.name.to_string(), a.value.clone()))
+                    .collect()
+            })
+            .unwrap_or_default();
+        let text: String = dom
+            .text_content(node)
+            .unwrap_or_default()
+            .split_whitespace()
+            .collect::<Vec<_>>()
+            .join(" ")
+            .chars()
+            .take(max_text)
+            .collect();
+        let rect = self.geometry_report(tab).and_then(|r| {
+            r.boxes
+                .iter()
+                .find(|b| b.node == index)
+                .map(|b| serde_json::json!({"x": b.x, "y": b.y, "w": b.w, "h": b.h}))
+        });
+        let attrs_obj: serde_json::Map<String, serde_json::Value> = attrs
+            .iter()
+            .map(|(k, v)| (k.clone(), serde_json::Value::String(v.clone())))
+            .collect();
+        let mut out = serde_json::json!({
+            "tag": tag,
+            "attrs": attrs_obj,
+            "rect": rect,
+            "text": text,
+        });
+        if matches!(tag.as_str(), "input" | "textarea" | "select") {
+            out["value"] = serde_json::Value::String(super::dom_helpers::field_value(dom, node));
+        }
+        Some(out)
+    }
+
     /// Le point viewport `(x, y)` atteint-il l'élément
     /// `(index, generation)` ou l'un de ses descendants ?
     /// (check `topmost` : un `<span>` dans un `<a>` cliqué au

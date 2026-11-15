@@ -33,6 +33,9 @@ const NAV_WAIT_DEFAULT_MS: u64 = 30_000;
 /// Calme réseau requis pour `wait.for{kind:"network_idle"}`
 /// quand `quiet_ms` est absent (étape 258).
 const QUIET_MS_DEFAULT: u64 = 500;
+/// Plafond `text_content` par défaut de `describe{ref}`
+/// (étape 258-bis) — `max_text` le surclasse.
+pub(crate) const DESCRIBE_TEXT_CAP: usize = 480;
 
 /// Capacités **implémentées** par cette build — l'intersection
 /// avec les demandées fait la liste livrée. Surface v1
@@ -143,6 +146,11 @@ const HELP: &[(&str, Option<Capability>, &str)] = &[
         "query.select",
     ),
     (
+        "décrire un élément (tag/attrs/rect/texte/valeur) ?",
+        Some(Capability::Handles),
+        "describe",
+    ),
+    (
         "cliquer, taper, survoler ?",
         Some(Capability::Input),
         "input.click|input.type|input.hover",
@@ -180,6 +188,7 @@ fn cap_of(m: &Method) -> Option<Capability> {
         | Method::NavViewport(_) => Some(Capability::Tabs),
         Method::SnapshotGet(_) => Some(Capability::Snapshot),
         Method::QuerySelect(_)
+        | Method::Describe(_)
         | Method::InputClick(_)
         | Method::InputType(_)
         | Method::InputHover(_) => Some(Capability::Handles),
@@ -554,9 +563,10 @@ async fn run(
         | Method::EngineJ17(_)
         | Method::NetEvents(_)
         | Method::FrameDiff(_) => perceive_verbs(st, conn, method).await,
-        Method::InputClick(_) | Method::InputType(_) | Method::InputHover(_) => {
-            handle_verbs(st, conn, method).await
-        }
+        Method::InputClick(_)
+        | Method::InputType(_)
+        | Method::InputHover(_)
+        | Method::Describe(_) => handle_verbs(st, conn, method).await,
         Method::InputKey(_)
         | Method::InputScroll(_)
         | Method::InputClickAt(_)
@@ -1097,6 +1107,23 @@ async fn handle_verbs(
             right_input(conn)?;
             tab_exists(st, p.tab).await?;
             type_into_field(st, conn, p).await
+        }
+        Method::Describe(p) => {
+            scope(conn, p.tab)?;
+            tab_exists(st, p.tab).await?;
+            let handle = resolve(conn, st, p.tab, &p.elem_ref)?;
+            let s = st.session.lock().await;
+            let Some(generation) = s.node_generation(p.tab, handle.node) else {
+                return Err(err(ErrorCode::StaleRef, "nœud mort ou réattribué"));
+            };
+            let max = p.max_text.map_or(DESCRIBE_TEXT_CAP, |m| m as usize);
+            match s.element_describe(p.tab, handle.node, generation, max) {
+                Some(mut v) => {
+                    v["node"] = json!({"index": handle.node, "generation": generation});
+                    Ok(v)
+                }
+                None => Err(err(ErrorCode::StaleRef, "nœud mort ou réattribué")),
+            }
         }
         Method::InputHover(p) => {
             scope(conn, p.tab)?;

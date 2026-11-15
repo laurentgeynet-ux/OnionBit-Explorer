@@ -849,6 +849,14 @@ fn engine_tools() -> Value {
             )
         ),
         t(
+            "describe",
+            "Tag/attrs/rect/texte/valeur d'une ref sans re-snapshot {tab,ref,max_text?}",
+            obj(
+                json!({"tab":{"type":"integer"},"ref":{"type":"string"},"max_text":{"type":"integer"}}),
+                &["tab", "ref"]
+            )
+        ),
+        t(
             "engine_j17",
             "Compteurs J17 jscore cumulatifs {tab} → {armed,snapshot}",
             tab()
@@ -996,6 +1004,10 @@ fn to_eap(name: &str, args: &Value) -> Option<(&'static str, Value)> {
         ),
         "engine_paint_stats" => ("engine.paint_stats", json!({"tab": tab})),
         "engine_cascade" => ("engine.cascade", json!({"tab": tab, "ref": args["ref"]})),
+        "describe" => (
+            "describe",
+            json!({"tab": tab, "ref": args["ref"], "max_text": args["max_text"]}),
+        ),
         "engine_anomalies" => ("engine.anomalies", json!({"tab": tab, "max": args["max"]})),
         "engine_j17" => ("engine.j17", json!({"tab": tab})),
         "net_events" => (
