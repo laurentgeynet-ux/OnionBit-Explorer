@@ -16,14 +16,15 @@ Clé armée sous **HKCU** (zéro admin) :
 
 ```
 HKCU\SOFTWARE\Microsoft\Windows\Windows Error Reporting\LocalDumps\explorer-daemon.exe
-  DumpFolder = C:\CrashDumps
+  DumpFolder = <repo>\Explorer-data\crash   (étape 262 — racine
+                                           canonique des artefacts)
   DumpType   = 2  (full dump)
 ```
 
 Vérifier un dump après un vol :
 
 ```powershell
-Get-ChildItem C:\CrashDumps -Filter *.dmp | Sort LastWriteTime -Desc
+Get-ChildItem Explorer-data\crash -Filter *.dmp | Sort LastWriteTime -Desc
 ```
 
 Le `.dmp` s'ouvre dans WinDbg / Visual Studio — pile native

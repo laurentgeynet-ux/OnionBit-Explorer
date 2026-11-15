@@ -181,11 +181,36 @@ impl Engine {
             return;
         };
         let n = N.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-        // Valeur = répertoire de sortie (cwd du daemon WMI =
-        // System32\wbem, non inscriptible — `dir` vide/`1` tombe
-        // sur le cwd historique).
-        let path = if dir.is_empty() || dir == "1" {
-            format!("_evaldump_{n:03}.js")
+        // Règle canonique (étape 262) : `1`/vide/nom nu →
+        // `<ancêtre projet>/Explorer-data/dumps/` — plus de
+        // fuite dans le cwd (le daemon WMI démarre sous
+        // System32\wbem, non inscriptible) ; chemin explicite
+        // → honoré. `explorer-jscore` est autonome (aucune
+        // dépendance interne) — la remontée d'ancêtre est
+        // dupliquée de `paths.rs` à l'identique.
+        let path = if dir.is_empty() || dir == "1" || !dir.contains(['/', '\\', ':']) {
+            let sub = if dir.is_empty() || dir == "1" {
+                String::new()
+            } else {
+                format!("/{dir}")
+            };
+            let base = std::env::current_dir()
+                .ok()
+                .into_iter()
+                .chain(std::env::current_exe().ok())
+                .flat_map(|s| {
+                    s.ancestors()
+                        .map(std::path::Path::to_path_buf)
+                        .collect::<Vec<_>>()
+                })
+                .find(|a| a.join("Explorer-data").is_dir());
+            match base {
+                Some(b) => format!(
+                    "{}/Explorer-data/dumps{sub}/_evaldump_{n:03}.js",
+                    b.display()
+                ),
+                None => format!("_evaldump_{n:03}.js"),
+            }
         } else {
             format!("{dir}/_evaldump_{n:03}.js")
         };

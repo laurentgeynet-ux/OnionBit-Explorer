@@ -14,7 +14,7 @@
 
   Informatif uniquement (le web réel est hors contrôle) : un
   écart ne fait PAS échouer le script — le rapport console
-  est la mesure. Sortie JSON sous `target/geo_smoke/`.
+  est la mesure. Sortie JSON sous `Explorer-data/vols/geo-smoke/`.
 
   Usage : pwsh -File scripts/geo_smoke.ps1 [sites.txt] [-Max N]
 #>
@@ -26,7 +26,7 @@ param(
 
 $ErrorActionPreference = 'Continue'
 $root = Split-Path -Parent (Split-Path -Parent $PSCommandPath)
-$outDir = Join-Path $root 'target\geo_smoke'
+$outDir = Join-Path $root 'Explorer-data\vols\geo-smoke'
 New-Item -ItemType Directory -Force -Path $outDir | Out-Null
 
 if ($ListFile -eq '') {

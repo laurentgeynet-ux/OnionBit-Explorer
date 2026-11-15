@@ -31,7 +31,7 @@ param(
     # explorer_app 3,7→4,5 Go/10 min — la veille couvre les
     # DEUX processus). Vide = daemon seul.
     [int]$AppPid = 0,
-    [string]$LogDir = "$PSScriptRoot\..\target\watch"
+    [string]$LogDir = "$PSScriptRoot\..\Explorer-data\logs\watch"
 )
 
 $ErrorActionPreference = 'Continue'

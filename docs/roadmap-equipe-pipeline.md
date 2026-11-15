@@ -3561,7 +3561,7 @@ déblocage/coût décroissant.
 ## Palier R-O — Trous terrain vols 719 → 768 (alimenté 2026-11-09)
 
 File issue du triage des derniers rapports de vol corpus
-(`C:\OnionBit-vol\SYNTHESE.md`, `youtube/SYNTHESE.md`) —
+(`Explorer-data\vols\SYNTHESE.md`, `youtube/SYNTHESE.md`) —
 chaque item est un mur mesuré terrain attribué PIPE, ou un
 résidu confirmé promu de la « File résiduelle ». Les murs
 jscore/session (§B-114 GC, §B-121 RSC clos vol 750,

@@ -13,7 +13,7 @@ param(
     [Parameter(Mandatory = $true)][string]$Url,
     [string]$Ref = '',
     [string]$Viewport = '1366x900',
-    [string]$OutDir = 'target\compare'
+    [string]$OutDir = 'Explorer-data\vols\compare'
 )
 
 $ErrorActionPreference = 'Stop'

@@ -3970,9 +3970,29 @@ fn dump_eval_script(kind: &str, name: Option<&str>, src: &str) {
     static DIR: std::sync::OnceLock<Option<std::path::PathBuf>> = std::sync::OnceLock::new();
     let dir = DIR
         .get_or_init(|| {
-            std::env::var_os("EXPLORER_JS_DUMP_DIR")
-                .map(std::path::PathBuf::from)
-                .filter(|d| std::fs::create_dir_all(d).is_ok())
+            // Règle canonique (étape 262) : nom nu →
+            // `<ancêtre projet>/Explorer-data/dumps/<nom>` ;
+            // chemin explicite → honoré. `explorer-js` ne
+            // dépend pas de `explorer-core` — la remontée
+            // d'ancêtre est dupliquée de `paths.rs`.
+            let raw = std::env::var_os("EXPLORER_JS_DUMP_DIR").map(std::path::PathBuf::from)?;
+            let is_bare = raw.to_str().is_some_and(|s| !s.contains(['/', '\\', ':']));
+            let resolved = if is_bare {
+                let base = std::env::current_dir()
+                    .ok()
+                    .into_iter()
+                    .chain(std::env::current_exe().ok())
+                    .flat_map(|s| {
+                        s.ancestors()
+                            .map(std::path::Path::to_path_buf)
+                            .collect::<Vec<_>>()
+                    })
+                    .find(|a| a.join("Explorer-data").is_dir())?;
+                base.join("Explorer-data").join("dumps").join(&raw)
+            } else {
+                raw
+            };
+            std::fs::create_dir_all(&resolved).ok().map(|()| resolved)
         })
         .as_ref();
     let (Some(dir), true) = (dir, src.len() <= 8 * 1024 * 1024) else {

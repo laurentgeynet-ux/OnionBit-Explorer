@@ -7895,6 +7895,20 @@ MCP = adaptateur, jamais la base.
   `declared_only` ; `describe{select}` rend l'option
   sélectionnée (`field_value`, même règle que
   `select_option`). Verrou : `eval_lazy_engine_static_doc`.
+- [x] **Étape 262. `Explorer-data/` — racine canonique des
+  artefacts** (demande opérateur : chaque agent écrivait où
+  il voulait — APPDATA, `C:\Temp`, `C:\OnionBit-vol`,
+  `target\`). `paths::data_root()` + helpers
+  (`profiles/`/`vols/`/`daemons/`/`logs/`/`record/`/`crash/`)
+  + `clean_name` anti-sortie ; profils désignés par **nom**
+  (`<nom>`/`vol:<nom>` — `daemon_spawn` refuse les chemins) ;
+  registre, death-log, record/replay, `EXPLORER_LOG`
+  (tee fichier), `default_dir` recâblés ; scripts et règles
+  de vol alignés (corpus `Explorer-data\vols\`, plus de
+  `$env:TEMP` ni de chemin machine). **Non compilé** —
+  pause revue des hardcodages. **Prérequis à** : persistance
+  IDB incrémentale (fichiers canoniques avant nouveau
+  format).
 
 ## Piste JS (JS-C26+) — spécialiste `explorer-jscore`
 
@@ -12863,7 +12877,7 @@ croître la surface navigateur mesurée (`api` 1510/8099, 18,6 %).
   frontière) ; YouTube 186,6 s — `incr.cascade`
   1,7-2,2 s/passe, `group_us` 1,98 s sur une frame
   (résidu timing-dépendant non reproduit). Artefacts :
-  `C:\OnionBit-vol\vol-236-*.log`.
+  `Explorer-data\vols\vol-236-*.log`.
 - [ ] **N5.6 — adoption `entities` jscore** (§2.7) — quasi
   gratuit.
 - [x] **N5.7 — boutons de coût du vol** (§2.7, mesures) :

@@ -22,9 +22,13 @@ fn eng() -> Engine {
 }
 
 fn load() -> Option<String> {
-    std::fs::read_to_string("/c/OnionBit-vol/logs/b105/chart.umd.js")
-        .or_else(|_| std::fs::read_to_string("C:/OnionBit-vol/logs/b105/chart.umd.js"))
-        .ok()
+    // Fixture sous `<repo>/Explorer-data/vols/logs/b105/` (étape
+    // 262 — racine canonique des artefacts de vol).
+    std::fs::read_to_string(
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../Explorer-data/vols/logs/b105/chart.umd.js"),
+    )
+    .ok()
 }
 
 /// Verrou §B-105 — la racine moteur : `__proto__:` littéral règle

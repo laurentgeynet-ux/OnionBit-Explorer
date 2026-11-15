@@ -485,14 +485,21 @@ fn daemon_exe() -> Option<std::path::PathBuf> {
 /// Le profil est exigé : dupliquer le profil par défaut
 /// mourrait sur le verrou — autant le dire avant de fork.
 async fn spawn_daemon(args: &Value) -> Result<Value, String> {
-    let profile = args["profile"]
+    // Règle canonique (étape 262) : `profile` est un NOM —
+    // `<nom>` → `Explorer-data/profiles/<nom>`, `vol:<nom>` →
+    // `Explorer-data/vols/<nom>/profile`. Les chemins sont
+    // refusés : rien ne sort du répertoire projet.
+    let arg = args["profile"]
         .as_str()
-        .ok_or("daemon_spawn : `profile` requis (répertoire dédié)")?;
+        .ok_or("daemon_spawn : `profile` requis (nom canonique)")?;
+    let profile = explorer_core::paths::resolve_profile_name(arg).ok_or_else(|| {
+        format!("daemon_spawn : `profile` doit être un nom (`<nom>` ou `vol:<nom>`), pas un chemin — {arg:?}")
+    })?;
     let exe = daemon_exe().ok_or("explorer-daemon introuvable (à côté du cli ni PATH)")?;
     let port = args["port"].as_u64().unwrap_or(0);
     let mut cmd = std::process::Command::new(exe);
     cmd.arg("--profile")
-        .arg(profile)
+        .arg(&profile)
         .arg("--port")
         .arg(port.to_string());
     if let Some(n) = args["name"].as_str() {

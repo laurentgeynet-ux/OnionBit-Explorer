@@ -328,10 +328,11 @@ fn http_stack(
     // les réponses du dossier (même convention qu'`explorer-cli`).
     if let Ok(dir) = std::env::var("EXPLORER_NET_REPLAY") {
         if !dir.is_empty() {
-            tracing::info!(dir = %dir, "EXPLORER_NET_REPLAY — rejeu offline");
-            return Arc::new(explorer_net::replay::DirTransport::new(
-                std::path::Path::new(&dir),
-            ));
+            // Nom nu → `<Explorer-data>/record/<nom>` (étape
+            // 262) ; chemin explicite → honoré.
+            let dir = explorer_core::paths::resolve_record_arg(&dir);
+            tracing::info!(dir = %dir.display(), "EXPLORER_NET_REPLAY — rejeu offline");
+            return Arc::new(explorer_net::replay::DirTransport::new(&dir));
         }
     }
     // Résolution injectable (étape 72) : `system` (défaut)
@@ -380,11 +381,11 @@ fn http_stack(
     // qu'`explorer-cli`, rejeu cohérent entre les deux binaires).
     match std::env::var("EXPLORER_NET_RECORD") {
         Ok(dir) if !dir.is_empty() => {
-            tracing::info!(dir = %dir, "EXPLORER_NET_RECORD — capture des réponses");
-            Arc::new(explorer_net::replay::RecordingTransport::wrap(
-                stack,
-                std::path::Path::new(&dir),
-            ))
+            // Nom nu → `<Explorer-data>/record/<nom>` (étape
+            // 262 — la capture reste sous le projet).
+            let dir = explorer_core::paths::resolve_record_arg(&dir);
+            tracing::info!(dir = %dir.display(), "EXPLORER_NET_RECORD — capture des réponses");
+            Arc::new(explorer_net::replay::RecordingTransport::wrap(stack, &dir))
         }
         _ => stack,
     }
@@ -467,8 +468,19 @@ fn main() {
     // crochet Rust) ; une entrée `panic:` = crochet exécuté
     // → le panic est nommé. `EXPLORER_DEATH_LOG` surchage le
     // chemin (défaut `$TEMP/explorer_daemon_death.log`).
+    // `EXPLORER_DEATH_LOG` surchage le chemin ; défaut
+    // `<Explorer-data>/logs/` (étape 262 — rien hors du
+    // projet), `$TEMP` seulement hors contexte projet.
     let death_log = std::env::var("EXPLORER_DEATH_LOG").map_or_else(
-        |_| std::env::temp_dir().join("explorer_daemon_death.log"),
+        |_| {
+            explorer_core::paths::logs_dir().map_or_else(
+                || std::env::temp_dir().join("explorer_daemon_death.log"),
+                |d| {
+                    let _ = std::fs::create_dir_all(&d);
+                    d.join("explorer_daemon_death.log")
+                },
+            )
+        },
         PathBuf::from,
     );
     let _ = std::fs::write(&death_log, "alive\n");
@@ -570,6 +582,38 @@ fn main() {
     let _ = std::fs::remove_file(&death_log);
 }
 
+/// Writer stderr + fichier optionnel (`EXPLORER_LOG` →
+/// `<Explorer-data>/logs/daemon-<pid>.log`, étape 262 —
+/// les journaux de vol restent sous le projet).
+/// `MakeWriter` attend une fabrique par appel.
+struct TeeFile {
+    f: Option<Arc<std::sync::Mutex<std::fs::File>>>,
+}
+
+impl<'a> tracing_subscriber::fmt::writer::MakeWriter<'a> for TeeFile {
+    type Writer = TeeWriter;
+    fn make_writer(&'a self) -> Self::Writer {
+        TeeWriter(self.f.clone())
+    }
+}
+
+struct TeeWriter(Option<Arc<std::sync::Mutex<std::fs::File>>>);
+
+impl std::io::Write for TeeWriter {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        let n = std::io::stderr().write(buf)?;
+        if let Some(f) = &self.0 {
+            if let Ok(mut g) = f.lock() {
+                let _ = g.write_all(buf);
+            }
+        }
+        Ok(n)
+    }
+    fn flush(&mut self) -> std::io::Result<()> {
+        std::io::stderr().flush()
+    }
+}
+
 #[allow(clippy::too_many_lines)] // setup séquentiel — chaque bloc est documenté in situ
 async fn amain() {
     // Défaut `info` sans `RUST_LOG` (vol 18 : les `warn`
@@ -580,9 +624,23 @@ async fn amain() {
     // stderr non bufferisé (comme explorer-cli) : stdout sous
     // redirection Windows est block-bufferisé — les journaux de
     // vol restaient à 0 octet jusqu'à la mort du daemon.
+    // `EXPLORER_LOG` (présence) → tee stderr + fichier sous
+    // `<Explorer-data>/logs/` (étape 262).
+    let log_file = std::env::var_os("EXPLORER_LOG")
+        .is_some()
+        .then(|| {
+            explorer_core::paths::logs_dir().map(|d| {
+                let _ = std::fs::create_dir_all(&d);
+                d.join(format!("daemon-{}.log", std::process::id()))
+            })
+        })
+        .flatten()
+        .and_then(|p| std::fs::File::create(p).ok());
     tracing_subscriber::fmt()
         .with_env_filter(filter)
-        .with_writer(std::io::stderr)
+        .with_writer(TeeFile {
+            f: log_file.map(|f| Arc::new(std::sync::Mutex::new(f))),
+        })
         .init();
     let mut cfg = DaemonConfig::from_env();
     let cli = parse_args();
@@ -594,6 +652,15 @@ async fn amain() {
 
     let profile_dir = cli
         .profile
+        // Nom nu (`--profile drive`, `vol:<nom>`) →
+        // `profiles/<nom>`/`vols/<nom>/profile` sous
+        // `Explorer-data` (étape 262) ; chemin explicite →
+        // honoré (override volontaire, pas du hardcodage).
+        .map(|p| {
+            p.to_str()
+                .and_then(explorer_core::paths::resolve_profile_name)
+                .unwrap_or(p)
+        })
         .unwrap_or_else(store::JsonFileStore::default_dir);
     // Verrou d'instance unique sur le profil — partagé avec le
     // mode FFI (`acquire_profile_lock`, même sémantique :

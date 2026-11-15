@@ -79,14 +79,16 @@ $dll = Get-CanonDll
 # doit contenir explorer_ffi.dll ADJACENTE a l'exe qu'il
 # heberge. Ajouter ici toute nouvelle cible (jamais de copie
 # ad-hoc).
+# Destinations derivees de $repo — jamais de chemin machine
+# en dur (etape 262) ; le Bureau reste resolu par l'OS.
 $destinations = @(
-    'C:\OnionBit-Explorer\app\build\windows\x64\runner\Debug',
-    'C:\OnionBit-Explorer\app\build\windows\x64\runner\Release',
-    'C:\OnionBit-Explorer\dist\Explorer\windows',
-    'C:\OnionBit-Explorer\dist\Explorer-0.2.0-windows-x64\windows',
-    'C:\OnionBit-Explorer\terrain-bin\app',
-    'C:\OnionBit-Explorer\terrain-bin',
-    'C:\Users\Lou\Desktop\Onion explorer\windows'
+    (Join-Path $repo 'app\build\windows\x64\runner\Debug'),
+    (Join-Path $repo 'app\build\windows\x64\runner\Release'),
+    (Join-Path $repo 'dist\Explorer\windows'),
+    (Join-Path $repo 'dist\Explorer-0.2.0-windows-x64\windows'),
+    (Join-Path $repo 'terrain-bin\app'),
+    (Join-Path $repo 'terrain-bin'),
+    (Join-Path ([Environment]::GetFolderPath('Desktop')) 'Onion explorer\windows')
 ) + $ExtraDestinations | Select-Object -Unique
 
 # Sites audites mais JAMAIS ecrits — reliques de l'ancienne

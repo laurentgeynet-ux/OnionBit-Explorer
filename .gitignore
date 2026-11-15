@@ -95,4 +95,8 @@ wt-*/
 # convention `_vol*` ne les couvrait pas).
 vol[0-9]*/
 vol[0-9]*.log
+# Racine canonique des artefacts runtime (étape 262) :
+# profils, daemons, vols, logs, captures, téléchargements —
+# donnée utilisateur, jamais commitée.
+Explorer-data/
 node_modules/
