@@ -1045,7 +1045,7 @@ pub fn j17_snapshot() -> String {
     if !host.is_empty() {
         let joined = host
             .iter()
-            .take(12)
+            .take(40)
             .map(|(n, l)| format!("{l}={n}"))
             .collect::<Vec<_>>()
             .join(",");
