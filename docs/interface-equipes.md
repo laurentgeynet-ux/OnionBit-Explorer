@@ -3671,3 +3671,21 @@ décider). À ouvrir ici quand quelqu'un reprendra la
 persistance IDB proprement ; le contrat `JsEngine`
 (`drain_idb` → ops au lieu de snapshot) est interne NAV,
 aucune frontière d'équipe ne bloque.
+
+### 2026-11-16 — Étape 267 (NAV) : `session.ping` hors verrou + `busy`/`in_flight`
+
+**Livré** (`explorer-agent`, trou opérationnel n°1 du verdict
+field263 — airfrance : EAP entier muet > 7 min derrière un
+verbe wedged). La boucle WS `await`ait chaque dispatch en
+ligne : un verbe tenant la session retenait **même la
+lecture** des trames suivantes — `ping` n'avait jamais besoin
+du verrou mais n'arrivait jamais à dispatch. Désormais :
+dispatcher FIFO par connexion (file `mpsc` bornée 64, refus
+honnête au-delà), `ping`/`close`/erreurs de parse servis **en
+ligne**, `ping` → `ts_ms` + `busy` (verbe en vol ici OU
+session tenue par ailleurs via `try_lock`) +
+`in_flight{method, held_ms}`. `close` saute la file et laisse
+le verbe en vol finir sa course — **pas d'annulation** :
+couper un `nav` wedged proprement exige des jetons
+coopératifs dans les chemins nav/pompe, chantier séparé à
+ouvrir si le besoin revient.

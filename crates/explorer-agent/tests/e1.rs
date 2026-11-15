@@ -855,6 +855,63 @@ async fn wait_for_frame_borne() {
     srv.abort();
 }
 
+/// Étape 267 — `session.ping` est servi **hors file** pendant
+/// qu'un verbe métier est en vol : la réponse nomme le verbe
+/// (`in_flight.method`) et `busy` est vrai — l'agent distingue
+/// « vivant mais occupé » de « mort » (cas airfrance : EAP
+/// entier muet derrière un verbe wedged).
+#[tokio::test]
+async fn ping_hors_verrou_pendant_verbe_en_vol() {
+    let (mut a, srv) = connect().await;
+    open(&mut a).await;
+    let r = a.call("tab.open", json!({})).await;
+    let tab = r["result"]["tab"].as_u64().expect("tab");
+    // Verbe long envoyé brut — `call` attendrait sa fin et le
+    // ping n'aurait rien à mesurer. `wait.for frame` sans
+    // activité tient ~1500 ms.
+    a.sock
+        .send(Message::Text(
+            json!({
+                "jsonrpc": "2.0", "id": 90, "method": "wait.for",
+                "params": {"tab": tab, "kind": "frame", "timeout_ms": 1500}
+            })
+            .to_string()
+            .into(),
+        ))
+        .await
+        .expect("send wait");
+    // Le dispatcher a le temps de prendre le verbe — le ping
+    // doit alors voir `in_flight` nommé.
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    let ping = a.call("session.ping", json!({})).await;
+    assert_eq!(ping["result"]["busy"], true, "ping pendant wait : {ping}");
+    assert_eq!(
+        ping["result"]["in_flight"]["method"], "wait.for",
+        "le verbe en vol est nommé : {ping}"
+    );
+    // Le wait finit sa course — sa réponse arrive après le
+    // ping (ordre des réponses, pas des requêtes).
+    let fut = async {
+        loop {
+            if let Some(Ok(Message::Text(t))) = a.sock.next().await {
+                let v: Value = serde_json::from_str(&t).expect("json");
+                if v.get("id").and_then(Value::as_u64) == Some(90) {
+                    return v;
+                }
+            }
+        }
+    };
+    let wait = tokio::time::timeout(Duration::from_secs(5), fut)
+        .await
+        .expect("réponse wait.for");
+    assert_eq!(wait["error"]["code"], -32004, "wait borne : {wait}");
+    // Session libérée → ping rend busy:false.
+    let ping = a.call("session.ping", json!({})).await;
+    assert_eq!(ping["result"]["busy"], false, "{ping}");
+    assert!(ping["result"]["in_flight"].is_null(), "{ping}");
+    srv.abort();
+}
+
 #[tokio::test]
 async fn e2_select_click_type() {
     let (mut a, srv) = connect().await;

@@ -8,6 +8,7 @@
 //! les charges (PNG), notifications `event.*` poussées par un
 //! forwarder dédié filtré par `events.subscribe`.
 
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, RwLock};
 
 use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
@@ -19,17 +20,45 @@ use axum::Router;
 use explorer_core::{CoreEvent, Session};
 use futures_util::{SinkExt, StreamExt};
 use serde::Deserialize;
-use serde_json::Value;
+use serde_json::{json, Value};
 use tokio::sync::mpsc;
 
 use crate::dispatch::{dispatch, Dispatch};
-use crate::proto::{ErrorCode, Event, EventKind, Incoming, Notification, Response as RpcResponse};
+use crate::proto::{
+    ErrorCode, Event, EventKind, Incoming, Method, Notification, Response as RpcResponse,
+};
 use crate::state::{AgentConn, AgentShared, SubFilter};
 
 /// Capacité de la file d'émission par connexion — au-delà le
 /// socket est considéré mort (un client lent ne doit pas faire
 /// grossir la mémoire du daemon sans borne).
 const OUT_QUEUE: usize = 64;
+
+/// Capacité de la file d'entrée par connexion (étape 267) —
+/// verbes métier en attente du dispatcher ; au-delà, refus
+/// honnête plutôt que mémoire sans borne.
+const IN_QUEUE: usize = 64;
+
+/// Verbe métier en attente — exécuté FIFO par le dispatcher.
+struct Pending {
+    /// Id JSON-RPC de la requête (`Null` pour notification).
+    id: Value,
+    /// Verbe parsé.
+    method: Method,
+    /// `false` = notification — aucune réponse attendue.
+    is_request: bool,
+    /// Nom filaire (`"nav.goto"`…) — reporté dans
+    /// `session.ping.in_flight` pour diagnostiquer le verbe
+    /// qui tient la connexion.
+    name: String,
+}
+
+/// Verbe en vol côté dispatcher — `(nom, départ)`.
+/// `session.ping` le lit **sans** le verrou session : c'est
+/// ce qui permet de distinguer « vivant mais occupé » de
+/// « mort » quand un verbe tient la session en continu
+/// (étape 267 — cas airfrance : EAP muet pendant 7 min).
+type InFlight = Arc<RwLock<Option<(String, std::time::Instant)>>>;
 
 /// Clé API en query (`?key=`) — même convention que l'API REST.
 #[derive(Debug, Deserialize)]
@@ -95,33 +124,88 @@ async fn ws_upgrade(
         .on_upgrade(move |sock| serve(sock, st))
 }
 
-/// Boucle d'une connexion : réception → dispatch → émission ;
-/// le forwarder tourne en tâche sœur sur le bus `CoreEvent`.
+/// Boucle d'une connexion : réception → routage ; le
+/// **dispatcher** (tâche sœur) exécute les verbes métier en
+/// FIFO pendant que le forwarder pousse le bus `CoreEvent`.
+///
+/// Étape 267 — ping hors verrou : avant, la boucle attendait
+/// chaque `dispatch` en ligne — un verbe qui tient la session
+/// en continu (nav wedged, ~100 % CPU) rendait la connexion
+/// entière muette, `session.ping` compris, alors qu'il n'a
+/// pas besoin du verrou. Désormais `ping`/`close` et les
+/// erreurs de parse sont servis **en ligne** (jamais mis en
+/// file) pendant que le dispatcher avale la file — le ping
+/// répond `busy` + `in_flight{method, held_ms}` et l'agent
+/// distingue « vivant mais occupé » de « mort ».
 async fn serve(sock: WebSocket, st: Arc<AgentShared>) {
     let (sink, mut stream) = sock.split();
     let (tx, rx) = mpsc::channel::<Message>(OUT_QUEUE);
+    let (qtx, qrx) = mpsc::channel::<Pending>(IN_QUEUE);
     let writer = tokio::spawn(write_loop(sink, rx));
     let subs = Arc::new(RwLock::new(SubFilter::default()));
     let fwd = tokio::spawn(forwarder(Arc::clone(&st), Arc::clone(&subs), tx.clone()));
+    let in_flight: InFlight = Arc::new(RwLock::new(None));
+    // Armé par `session.close` servi en ligne — le dispatcher
+    // saute les verbes encore en file (le client s'en va) mais
+    // laisse le verbe en vol finir sa course : fermer la
+    // connexion n'annule pas le travail (annulation
+    // coopérative = chantier séparé).
+    let closing = Arc::new(AtomicBool::new(false));
 
-    let mut conn = AgentConn {
+    let conn = AgentConn {
         subs: Arc::clone(&subs),
         ..AgentConn::default()
     };
+    let disp = tokio::spawn(dispatch_loop(
+        Arc::clone(&st),
+        conn,
+        qrx,
+        tx.clone(),
+        Arc::clone(&in_flight),
+        Arc::clone(&closing),
+    ));
 
     while let Some(msg) = stream.next().await {
         match msg {
-            Ok(Message::Text(t)) => {
-                handle(&st, &mut conn, t.as_str(), &tx).await;
-            }
+            Ok(Message::Text(t)) => match route_text(t.as_str()) {
+                Route::Reply(r) => send_json(&tx, &r),
+                Route::Ping(id, want_reply) => {
+                    if want_reply {
+                        send_json(&tx, &RpcResponse::ok(id, ping_result(&st, &in_flight)));
+                    }
+                }
+                Route::Close(id, want_reply) => {
+                    if want_reply {
+                        send_json(&tx, &RpcResponse::ok(id, json!({})));
+                    }
+                    closing.store(true, Ordering::Relaxed);
+                    break;
+                }
+                Route::Queued(p) => {
+                    let id = p.id.clone();
+                    if qtx.try_send(p).is_err() {
+                        send_json(
+                            &tx,
+                            &RpcResponse::err(
+                                id,
+                                ErrorCode::EngineUnavailable,
+                                "file d'attente pleine".to_string(),
+                                None,
+                            ),
+                        );
+                    }
+                }
+            },
             Ok(Message::Close(_)) | Err(_) => break,
             Ok(_) => {} // ping/pong gérés par tungstenite ; binaire entrant non utilisé en v1
         }
-        if conn.closing {
-            break;
-        }
     }
     fwd.abort();
+    // `qtx` lâché → le dispatcher vide le verbe en vol puis
+    // sort ; son `JoinHandle` droppé le détache (un verbe
+    // wedged ne tient pas la tâche de connexion).
+    drop(qtx);
+    drop(disp);
     // `session.close` doit livrer sa réponse : plus de
     // producteur (`fwd` mort), on lâche `tx` — le writer
     // draine la file (réponse close incluse) puis termine
@@ -129,6 +213,133 @@ async fn serve(sock: WebSocket, st: Arc<AgentShared>) {
     // perdrait la réponse et pendrait le client.
     drop(tx);
     let _ = writer.await;
+}
+
+/// Réponse `session.ping` — **hors verrou session**.
+/// `busy` : un verbe est en vol sur cette connexion OU la
+/// session est tenue par une autre tâche (verbe d'une autre
+/// connexion, REST, pompe — `try_lock` échoue). `in_flight`
+/// nomme le verbe en vol de cette connexion et sa durée —
+/// l'agent peut poser un seuil (« 7 min = wedged ») au lieu
+/// de tuer à l'aveugle.
+fn ping_result(st: &AgentShared, in_flight: &InFlight) -> Value {
+    let held = in_flight
+        .read()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .clone();
+    let session_busy = st.session.try_lock().is_err();
+    json!({
+        "ts_ms": std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_or(0, |d| u64::try_from(d.as_millis()).unwrap_or(u64::MAX)),
+        "busy": held.is_some() || session_busy,
+        "in_flight": held.map(|(method, at)| json!({
+            "method": method,
+            "held_ms": u64::try_from(at.elapsed().as_millis()).unwrap_or(u64::MAX),
+        })),
+    })
+}
+
+/// Dispatcher d'une connexion — propriétaire unique de
+/// [`AgentConn`], exécute les verbes métier en FIFO.
+/// `in_flight` est publié avant chaque dispatch (lu par
+/// `session.ping`) ; `closing` saute les verbes encore en
+/// file quand `session.close` a été servi en ligne.
+async fn dispatch_loop(
+    st: Arc<AgentShared>,
+    mut conn: AgentConn,
+    mut rx: mpsc::Receiver<Pending>,
+    tx: mpsc::Sender<Message>,
+    in_flight: InFlight,
+    closing: Arc<AtomicBool>,
+) {
+    while let Some(p) = rx.recv().await {
+        if closing.load(Ordering::Relaxed) {
+            break;
+        }
+        *in_flight
+            .write()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) =
+            Some((p.name.clone(), std::time::Instant::now()));
+        let out = dispatch(&st, &mut conn, &p.id, p.method).await;
+        *in_flight
+            .write()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = None;
+        match out {
+            Dispatch::Reply(Ok(result)) if p.is_request => {
+                send_json(&tx, &RpcResponse::ok(p.id, result));
+            }
+            Dispatch::Reply(Err(e)) if p.is_request => {
+                let code = ErrorCode::try_from(e.code).unwrap_or(ErrorCode::EngineUnavailable);
+                send_json(&tx, &RpcResponse::err(p.id, code, e.message, e.data));
+            }
+            Dispatch::Binary(bytes) => {
+                let _ = tx.try_send(Message::Binary(bytes.into()));
+            }
+            Dispatch::Reply(_) => {} // notification : rien à répondre
+        }
+        if conn.closing {
+            break;
+        }
+    }
+}
+
+/// Routage d'un message texte — décide qui répond : la boucle
+/// (ping, close, erreurs de parse) ou le dispatcher (verbes
+/// métier, FIFO).
+enum Route {
+    /// Réponse immédiate — erreur de parse (-32700/-32601/-32602).
+    Reply(RpcResponse),
+    /// `session.ping` `(id, réponse attendue)` — inline,
+    /// jamais en file : c'est la sonde du cas wedged.
+    Ping(Value, bool),
+    /// `session.close` `(id, réponse attendue)` — inline puis
+    /// sortie de boucle : l'agent abandonne la connexion même
+    /// quand un verbe tient la session.
+    Close(Value, bool),
+    /// Verbe métier — file FIFO du dispatcher.
+    Queued(Pending),
+}
+
+/// Parse + routage d'une trame texte. `ping`/`close` sont
+/// extraits **avant** la file : un verbe wedged ne peut plus
+/// les retenir (étape 267).
+fn route_text(text: &str) -> Route {
+    let incoming = match serde_json::from_str::<Incoming>(text) {
+        Ok(v) => v,
+        Err(e) => {
+            // Méthode connue mais params invalides → -32602 ;
+            // nom inconnu → -32601 ; JSON illisible → -32700.
+            let code = classify_parse_error(text);
+            // L'id est recopié quand il est lisible — un client
+            // n'attend jamais `null` sauf JSON vraiment illisible.
+            let id = serde_json::from_str::<Value>(text)
+                .ok()
+                .and_then(|v| v.get("id").cloned())
+                .unwrap_or(Value::Null);
+            return Route::Reply(RpcResponse::err(id, code, format!("{e}"), None));
+        }
+    };
+    // Nom filaire brut pour `in_flight` — le `Method` parsé
+    // ne le porte pas (variantes untagged).
+    let name = serde_json::from_str::<Value>(text)
+        .ok()
+        .and_then(|v| v.get("method").and_then(Value::as_str).map(str::to_string))
+        .unwrap_or_default();
+    let (id, method, is_request) = match incoming {
+        Incoming::Request { id, method } => (id, method, true),
+        Incoming::Notification { method } => (Value::Null, method, false),
+    };
+    match method {
+        Method::SessionPing(_) => Route::Ping(id, is_request),
+        Method::SessionClose(_) => Route::Close(id, is_request),
+        _ => Route::Queued(Pending {
+            id,
+            method,
+            is_request,
+            name,
+        }),
+    }
 }
 
 /// Écrit tout ce que la file reçoit — une seule tâche touche
@@ -142,51 +353,6 @@ async fn write_loop(
         if sink.send(m).await.is_err() {
             return;
         }
-    }
-}
-
-/// Traite un message texte : parse JSON-RPC → dispatch →
-/// émission de la réponse (JSON ou trame binaire). Les
-/// notifications (`id` absent) sont dispatchées sans réponse —
-/// feu et oubli du protocole.
-async fn handle(
-    st: &Arc<AgentShared>,
-    conn: &mut AgentConn,
-    text: &str,
-    tx: &mpsc::Sender<Message>,
-) {
-    let incoming = match serde_json::from_str::<Incoming>(text) {
-        Ok(v) => v,
-        Err(e) => {
-            // Méthode connue mais params invalides → -32602 ;
-            // nom inconnu → -32601 ; JSON illisible → -32700.
-            let code = classify_parse_error(text);
-            // L'id est recopié quand il est lisible — un client
-            // n'attend jamais `null` sauf JSON vraiment illisible.
-            let id = serde_json::from_str::<Value>(text)
-                .ok()
-                .and_then(|v| v.get("id").cloned())
-                .unwrap_or(Value::Null);
-            send_json(tx, &RpcResponse::err(id, code, format!("{e}"), None));
-            return;
-        }
-    };
-    let (id, method, is_request) = match incoming {
-        Incoming::Request { id, method } => (id, method, true),
-        Incoming::Notification { method } => (Value::Null, method, false),
-    };
-    match dispatch(st, conn, &id, method).await {
-        Dispatch::Reply(Ok(result)) if is_request => {
-            send_json(tx, &RpcResponse::ok(id, result));
-        }
-        Dispatch::Reply(Err(e)) if is_request => {
-            let code = ErrorCode::try_from(e.code).unwrap_or(ErrorCode::EngineUnavailable);
-            send_json(tx, &RpcResponse::err(id, code, e.message, e.data));
-        }
-        Dispatch::Binary(bytes) => {
-            let _ = tx.try_send(Message::Binary(bytes.into()));
-        }
-        Dispatch::Reply(_) => {} // notification : rien à répondre
     }
 }
 

@@ -7943,6 +7943,13 @@ MCP = adaptateur, jamais la base.
   externe (console de pilotage) n'a plus à deviner où
   vivent registre, profils, vols et logs — bloc additif du
   résultat, chemins `/`, clés absentes = indisponibles.
+- [x] **Étape 267. `session.ping` hors verrou** — trou
+  opérationnel n°1 (airfrance : EAP muet > 7 min derrière un
+  verbe wedged). Dispatcher FIFO par connexion + `ping`/`close`
+  servis en ligne sans verrou session ; `ping` → `busy` +
+  `in_flight{method, held_ms}` (le verbe coincé nommé) —
+  « vivant mais occupé » distingué de « mort » sans tuer le
+  daemon.
 - [x] **Étape 266. Parité `Deferred` sur la voie shared** —
   trou field263 : `handle_input_shared` (voie EAP) n'avait
   pas la clause `dom`/`tree` détachés de l'étape 263 →

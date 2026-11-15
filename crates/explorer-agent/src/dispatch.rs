@@ -171,6 +171,11 @@ const HELP: &[(&str, Option<Capability>, &str)] = &[
         Some(Capability::Events),
         "events.subscribe|events.unsubscribe",
     ),
+    (
+        "daemon vivant ou wedged ?",
+        None,
+        "session.ping (busy/in_flight — répondu hors verrou)",
+    ),
 ];
 
 /// Capacité requise par méthode — `None` = toujours servie

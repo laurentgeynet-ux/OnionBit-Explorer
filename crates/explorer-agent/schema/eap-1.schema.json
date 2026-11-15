@@ -166,7 +166,7 @@
     },
 
     "session.close": { "x-phase": "E1", "params": { "type": "object" }, "result": { "type": "object" } },
-    "session.ping": { "x-phase": "E1", "params": { "type": "object" }, "result": { "type": "object", "properties": { "ts_ms": { "type": "integer" } } } },
+    "session.ping": { "x-phase": "E1", "params": { "type": "object" }, "result": { "type": "object", "description": "répondu hors verrou session (étape 267) — sert à distinguer « vivant mais occupé » de « mort » : busy = verbe en vol sur la connexion ou session tenue par ailleurs ; in_flight nomme le verbe coincé de cette connexion + sa durée", "properties": { "ts_ms": { "type": "integer" }, "busy": { "type": "boolean" }, "in_flight": { "type": ["object", "null"], "properties": { "method": { "type": "string" }, "held_ms": { "type": "integer" } } } } } },
 
     "tab.open": {
       "x-phase": "E1",
