@@ -7959,6 +7959,22 @@ MCP = adaptateur, jamais la base.
   — un `alive` résiduel après cette étape exclut le kill
   console et resserre sur stack overflow, alloc-abort ou
   kill par PID. `EXPLORER_FLIGHT_MS/LOG/MAX_KB` (règle 13).
+- [x] **Étape 278. Baseline v2 — cliquet par famille +
+  historique jsonl** — le cliquet agrégé laissait passer
+  une famille qui régresse absorbée par la progression
+  d'une autre (trou mesuré). `bcd_baseline.json` porte
+  désormais `families.css.values.<prop> → ok` (345 props)
+  en sus des totaux ; `--gate` et `--save-if-better`
+  vérifient les deux niveaux — démonstré : `mask` à 999
+  artificiel → `RÉGRESSION famille css.values/mask :
+  0 < 999` alors que le total 1139 tenait. `--history
+  <f.jsonl>` ajoute `{ts, sha, scores, families}` à un
+  journal append-only (`bcd_history.jsonl`) — la dérive
+  devient attribuable à un commit. `--save-if-better` :
+  cliquet + sauvegarde en un flag, refuse toute
+  régression, fusionne les clés (`--only` préserve les
+  autres surfaces), n'écrit que sur progression.
+  Fichiers v1 `{scores}` acceptés en lecture.
 - [x] **Étape 277. `bcd_audit.mjs` + `check decl`/`check
   tables` — les erreurs de qualification passées deviennent
   des lints mécaniques** — la discipline « score honnête »
