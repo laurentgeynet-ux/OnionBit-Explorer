@@ -824,8 +824,7 @@ pub struct DescribeParams {
     /// Handle cible — `StaleRef` si la révision a bougé.
     #[serde(rename = "ref")]
     pub elem_ref: ElementRef,
-    /// Plafond du `text_content` rendu (défaut
-    /// [`crate::dispatch::DESCRIBE_TEXT_CAP`]).
+    /// Plafond du `text_content` rendu (défaut 480).
     #[serde(default)]
     pub max_text: Option<u32>,
 }
@@ -919,7 +918,7 @@ pub struct WaitForParams {
     #[serde(default)]
     pub selector: Option<String>,
     /// Durée de calme requise — `kind=network_idle`
-    /// seulement (défaut [`QUIET_MS_DEFAULT`]).
+    /// seulement (défaut 500 ms).
     #[serde(default)]
     pub quiet_ms: Option<u32>,
     /// Borne — [`ErrorCode::Timeout`] au-delà.
