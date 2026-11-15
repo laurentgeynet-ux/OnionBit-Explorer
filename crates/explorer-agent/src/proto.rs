@@ -935,8 +935,8 @@ pub struct EvalParams {
     /// retourne sérialisée JSON (bornée 64 Ko, tronquée au-delà).
     pub expr: String,
     /// Scope optionnel (étape 260) : l'expression est évaluée
-    /// avec l'élément lié — erreur honnête tant que le
-    /// binding moteur n'est pas posé.
+    /// avec l'élément lié aux globals `$0`/`el` (binding
+    /// moteur posé — JS-C549).
     #[serde(rename = "ref", default)]
     pub elem_ref: Option<ElementRef>,
     /// Borne d'exécution — défaut config.
