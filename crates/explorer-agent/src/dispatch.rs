@@ -46,6 +46,7 @@ const IMPLEMENTED: &[Capability] = &[
     Capability::Dom,
     Capability::Tabs,
     Capability::Events,
+    Capability::Engine,
 ];
 
 /// Capacité requise par méthode — `None` = toujours servie
@@ -69,6 +70,7 @@ fn cap_of(m: &Method) -> Option<Capability> {
         Method::FrameGet(_) => Some(Capability::Frames),
         Method::ConsoleGet(_) => Some(Capability::ConsoleLog),
         Method::DomGet(_) => Some(Capability::Dom),
+        Method::EngineLayout(_) | Method::EnginePipeline(_) => Some(Capability::Engine),
         Method::InputKey(_) | Method::InputScroll(_) | Method::InputClickAt(_) => {
             Some(Capability::Input)
         }
@@ -92,6 +94,7 @@ fn cap_name(c: Capability) -> &'static str {
         Capability::Frames => "frames",
         Capability::ConsoleLog => "console_log",
         Capability::Dom => "dom",
+        Capability::Engine => "engine",
         Capability::Tabs => "tabs",
         Capability::Events => "events",
     }
@@ -405,7 +408,9 @@ async fn run(
         | Method::QuerySelect(_)
         | Method::FrameGet(_)
         | Method::ConsoleGet(_)
-        | Method::DomGet(_) => perceive_verbs(st, conn, method).await,
+        | Method::DomGet(_)
+        | Method::EngineLayout(_)
+        | Method::EnginePipeline(_) => perceive_verbs(st, conn, method).await,
         Method::InputClick(_) | Method::InputType(_) | Method::InputHover(_) => {
             handle_verbs(st, conn, method).await
         }
@@ -736,6 +741,28 @@ async fn perceive_verbs(
                     ErrorCode::EngineUnavailable,
                     "pas de DOM — apply en vol, réessayer",
                 )),
+            }
+        }
+        Method::EngineLayout(p) => {
+            scope(conn, p.tab)?;
+            tab_exists(st, p.tab).await?;
+            let mut s = st.session.lock().await;
+            s.reclaim_orphaned_paint(p.tab);
+            match s.layout_dump(p.tab) {
+                Some(d) => Ok(json!({ "dump": d })),
+                None => Err(err(
+                    ErrorCode::EngineUnavailable,
+                    "pas d'arbre de layout — apply en vol, réessayer",
+                )),
+            }
+        }
+        Method::EnginePipeline(p) => {
+            scope(conn, p.tab)?;
+            tab_exists(st, p.tab).await?;
+            let mut s = st.session.lock().await;
+            match s.pipeline_report(p.tab) {
+                Some(r) => Ok(r),
+                None => Err(err(ErrorCode::NoSuchTab, "onglet inconnu")),
             }
         }
 

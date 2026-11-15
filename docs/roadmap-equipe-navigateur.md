@@ -7691,6 +7691,21 @@ MCP = adaptateur, jamais la base.
   → `isError`. Test bout en bout : subprocess réel contre le
   routeur agent.
 
+- [x] **Étape 247. EAP `engine.*` : introspection moteur (P1)** —
+  l'agent interroge le moteur lui-même. **Livrée (`nav/eap`)** :
+  capacité `engine` négociable ; `engine.layout{tab}` = arbre de
+  boîtes posé (dump layout natif, orphelin garé réinséré avant
+  lecture) ; `engine.pipeline{tab}` = `{state, counters, mem}` —
+  époques, présence DOM/layout/list/frame, `orphan_parked`,
+  géométrie, compteurs de vie (journal, applies, paint en vol)
+  et `MemReport` complet par réservoir. Outils MCP
+  `engine_layout`/`engine_pipeline` 1:1. Verrous : golden
+  `engine_introspect.json`, socket `engine_introspection`, vol
+  réel `example.com`. Suites nommées : accumulateur de timings
+  `sync_profile` requêrable, `engine.cascade{ref}` (trace des
+  candidats/verdicts par déclaration), `engine.paint_stats`,
+  `net.events`, `frame.diff`, snapshot `{rev}` (rétention bornée).
+
 ## Piste JS (JS-C26+) — spécialiste `explorer-jscore`
 
 Ordre dicté par les besoins de la piste produit d'abord, puis

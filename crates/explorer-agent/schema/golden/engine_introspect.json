@@ -1,0 +1,28 @@
+{
+  "doc": "Introspection moteur (étape 247) — engine.layout rend l'arbre de boîtes posé, engine.pipeline l'état/compteurs/mémoire de l'onglet.",
+  "exchange": [
+    {
+      "wire": "client → serveur",
+      "message": { "jsonrpc": "2.0", "id": 30, "method": "engine.layout", "params": { "tab": 1 } }
+    },
+    {
+      "wire": "serveur → client",
+      "message": { "jsonrpc": "2.0", "id": 30, "result": { "dump": "block 0,0 800×600 <html>\n  block 8,8 784×21 <body>" } }
+    },
+    {
+      "wire": "client → serveur",
+      "message": { "jsonrpc": "2.0", "id": 31, "method": "engine.pipeline", "params": { "tab": 1 } }
+    },
+    {
+      "wire": "serveur → client",
+      "message": {
+        "jsonrpc": "2.0", "id": 31,
+        "result": {
+          "state": { "has_dom": true, "has_layout": true, "has_frame": true, "nav_epoch": 1, "frame_epoch": 1, "doc_h": 632.0, "orphan_parked": false },
+          "counters": { "journal_applies": 0, "journal_fallbacks": 0, "apply_started_without_fin": 0, "pending_applies": 0 },
+          "mem": { "dom_nodes": 22, "layout_boxes": 8, "display_items": 12, "total_bytes": 1920000 }
+        }
+      }
+    }
+  ]
+}

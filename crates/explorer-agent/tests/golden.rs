@@ -69,6 +69,8 @@ fn golden_methods_known() {
         "frame.get",
         "console.get",
         "dom.get",
+        "engine.layout",
+        "engine.pipeline",
         "input.click",
         "input.type",
         "input.hover",

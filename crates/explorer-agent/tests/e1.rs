@@ -186,7 +186,7 @@ async fn open(a: &mut Agent) -> Value {
         "session.open",
         json!({"protocol": "eap/1", "capabilities": [
             "snapshot", "wait_commit", "input", "eval", "frames",
-            "console_log", "dom", "tabs", "events"
+            "console_log", "dom", "tabs", "events", "engine"
         ]}),
     )
     .await
@@ -313,6 +313,36 @@ async fn nav_snapshot_handles() {
         .call("snapshot.get", json!({"tab": tab, "since": 0}))
         .await;
     assert_eq!(r["error"]["code"], -32001);
+    srv.abort();
+}
+
+#[tokio::test]
+async fn engine_introspection() {
+    let (mut a, srv) = connect().await;
+    open(&mut a).await;
+    let r = a.call("tab.open", json!({})).await;
+    let tab = r["result"]["tab"].as_u64().expect("tab");
+    let r = a
+        .call("nav.goto", json!({"tab": tab, "url": "http://t.local/x"}))
+        .await;
+    assert!(r["error"].is_null(), "{r}");
+    // engine.pipeline — état + compteurs + mémoire.
+    let r = a.call("engine.pipeline", json!({"tab": tab})).await;
+    let st = &r["result"]["state"];
+    assert_eq!(st["has_dom"], true, "{r}");
+    assert_eq!(st["has_frame"], true, "{r}");
+    assert_eq!(st["orphan_parked"], false);
+    assert!(r["result"]["counters"].is_object());
+    assert!(r["result"]["mem"]["dom_nodes"]
+        .as_u64()
+        .is_some_and(|n| n > 0));
+    // engine.layout — dump de l'arbre posé.
+    let r = a.call("engine.layout", json!({"tab": tab})).await;
+    let dump = r["result"]["dump"].as_str().expect("dump");
+    assert!(!dump.is_empty(), "{r}");
+    // Onglet inconnu → -32005.
+    let r = a.call("engine.pipeline", json!({"tab": 999})).await;
+    assert_eq!(r["error"]["code"], -32005);
     srv.abort();
 }
 

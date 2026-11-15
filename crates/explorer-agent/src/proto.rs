@@ -227,6 +227,8 @@ pub enum Capability {
     Tabs,
     /// Notifications `events.*`.
     Events,
+    /// Introspection moteur `engine.*` (étape 247).
+    Engine,
 }
 
 /// Profil de sécurité de session — annoncé à `session.open`,
@@ -511,6 +513,14 @@ pub enum Method {
     /// DOM sérialisé — échappatoire debug (cap `dom`).
     #[serde(rename = "dom.get")]
     DomGet(TabParams),
+    /// Arbre de boîtes posé — dump diagnostic natif du
+    /// layout (cap `engine`, étape 247).
+    #[serde(rename = "engine.layout")]
+    EngineLayout(TabParams),
+    /// Rapport moteur de l'onglet : état de session,
+    /// compteurs de vie, attribution mémoire (cap `engine`).
+    #[serde(rename = "engine.pipeline")]
+    EnginePipeline(TabParams),
 
     /// Clic par handle (cap `handles`+`input`, droit `input`).
     #[serde(rename = "input.click")]

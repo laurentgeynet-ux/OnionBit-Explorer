@@ -37,7 +37,7 @@
       "enum": [
         "snapshot", "snapshot_diff", "handles", "actionable",
         "wait_commit", "input", "eval", "frames",
-        "console_log", "dom", "tabs", "events"
+        "console_log", "dom", "tabs", "events", "engine"
       ]
     },
 
@@ -342,6 +342,18 @@
       "description": "DOM sérialisé vivant — échappatoire debug, coûteux en tokens.",
       "params": { "type": "object", "properties": { "tab": { "$ref": "#/$defs/tabId" } }, "required": ["tab"], "additionalProperties": false },
       "result": { "type": "object", "properties": { "html": { "type": "string" } }, "required": ["html"] }
+    },
+    "engine.layout": {
+      "x-phase": "E5",
+      "description": "Arbre de boîtes posé (dump diagnostic natif du layout) — introspection moteur.",
+      "params": { "type": "object", "properties": { "tab": { "$ref": "#/$defs/tabId" } }, "required": ["tab"], "additionalProperties": false },
+      "result": { "type": "object", "properties": { "dump": { "type": "string" } }, "required": ["dump"] }
+    },
+    "engine.pipeline": {
+      "x-phase": "E5",
+      "description": "Rapport moteur de l'onglet : état de session (époques, presence DOM/layout/frame), compteurs de vie (journal, applies, paint en vol), attribution mémoire par réservoir.",
+      "params": { "type": "object", "properties": { "tab": { "$ref": "#/$defs/tabId" } }, "required": ["tab"], "additionalProperties": false },
+      "result": { "type": "object", "properties": { "state": { "type": "object" }, "counters": { "type": "object" }, "mem": { "type": ["object", "null"] } }, "required": ["state", "counters"] }
     },
 
     "input.click": {

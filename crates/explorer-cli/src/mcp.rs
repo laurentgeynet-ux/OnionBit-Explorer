@@ -520,6 +520,16 @@ fn act_tools() -> Value {
         ),
         t("dom", "Dump DOM sérialisé {tab}", tab()),
         t("console", "Erreurs pipeline enregistrées {tab}", tab()),
+        t(
+            "engine_layout",
+            "Arbre de boîtes posé (dump layout natif) {tab}",
+            tab()
+        ),
+        t(
+            "engine_pipeline",
+            "État moteur + compteurs + mémoire par réservoir {tab}",
+            tab()
+        ),
     ])
 }
 
@@ -590,6 +600,8 @@ fn to_eap(name: &str, args: &Value) -> Option<(&'static str, Value)> {
         "eval" => ("eval.run", json!({"tab": tab, "expr": args["expr"]})),
         "dom" => ("dom.get", json!({"tab": tab})),
         "console" => ("console.get", json!({"tab": tab, "limit": args["limit"]})),
+        "engine_layout" => ("engine.layout", json!({"tab": tab})),
+        "engine_pipeline" => ("engine.pipeline", json!({"tab": tab})),
         _ => return None,
     })
 }

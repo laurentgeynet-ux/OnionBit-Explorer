@@ -389,3 +389,58 @@ impl Session {
         Some(r)
     }
 }
+
+impl Session {
+    /// Rapport d'introspection moteur de l'onglet (EAP
+    /// `engine.pipeline`, étape 247) — état de session +
+    /// compteurs de vie + attribution mémoire. `None` si
+    /// l'onglet n'existe pas. Outil de debug, hors chemin
+    /// chaud : la lecture est synchrone et bornée, sans
+    /// instrumentation ajoutée au pipeline lui-même (les
+    /// timings par phase restent sur la cible `sync_profile`
+    /// — cibles d'un `engine.pipeline` plus riche à venir).
+    pub fn pipeline_report(&mut self, tab: TabId) -> Option<serde_json::Value> {
+        let entry = self.tabs.get(&tab)?;
+        let orphan_parked = self
+            .orphaned_paints
+            .lock()
+            .is_ok_and(|o| o.contains_key(&tab));
+        let state = serde_json::json!({
+            "url": entry.url.as_ref().map(std::string::ToString::to_string),
+            "nav_epoch": entry.nav_epoch,
+            "doc_dcl_epoch": entry.doc_dcl_epoch,
+            "doc_load_epoch": entry.doc_load_epoch,
+            "frame_epoch": entry.frame_epoch,
+            "doc_h": entry.doc_h,
+            "scroll_y": entry.scroll_y,
+            "painted_scroll_y": entry.painted_scroll_y,
+            "has_dom": entry.dom.is_some(),
+            "has_layout": entry.tree.is_some(),
+            "has_display_list": entry.list.is_some(),
+            "has_frame": entry.frame.is_some(),
+            "paint_detached": entry.paint_detached,
+            "orphan_parked": orphan_parked,
+            "spec_paint": entry.spec_paint,
+            "windowed": entry.windowed,
+            "hist_pending": entry.hist_pending,
+            "hist_idx": entry.hist_idx,
+            "hist_entries": entry.hist.len(),
+            "pending_nav": entry.pending_nav.len(),
+            "bfcache_pages": entry.bfcache.len(),
+        });
+        let counters = serde_json::json!({
+            "incremental_syncs": self.incremental_syncs,
+            "journal_applies": self.journal_applies,
+            "journal_fallbacks": self.journal_fallbacks,
+            "apply_started_without_fin": self.apply_started_without_fin(),
+            "paint_in_flight_age_ms": self.paint_in_flight_age_ms(tab),
+            "pending_applies": self.pending_applies.iter().filter(|j| j.tab == tab).count(),
+        });
+        let mem = self.mem_report(tab);
+        Some(serde_json::json!({
+            "state": state,
+            "counters": counters,
+            "mem": mem,
+        }))
+    }
+}
