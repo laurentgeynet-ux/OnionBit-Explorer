@@ -390,6 +390,19 @@ impl Session {
         }
     }
 
+    /// Prépare une frame pour un attenteur (`wait:frame`
+    /// EAP, pull Étape 222) : réinsère d'abord une payload
+    /// orpheline garée (détenteur mort — issue #23 ; dans ce
+    /// cas `dom` **et** `frame` vivent dans la payload et le
+    /// test d'`ensure_painted` reste faux à vie), puis peint
+    /// paresseusement un DOM commis sans produit. No-op si
+    /// la frame existe déjà ou si rien n'est commis — un
+    /// attenteur arme le pull, il ne sonde pas à l'aveugle.
+    pub fn ensure_frame(&mut self, tab: TabId) {
+        self.reclaim_orphaned_paint(tab);
+        self.ensure_painted(tab);
+    }
+
     /// Frame brute courante `(largeur, hauteur, RGBA)` —
     /// `None` si jamais navigué. Canal FFI/texture (étape
     /// 47, ADR-0018) : les pixels restent empruntés, la

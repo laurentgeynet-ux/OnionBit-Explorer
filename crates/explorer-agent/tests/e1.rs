@@ -140,11 +140,23 @@ impl Agent {
 /// Spawn le routeur sur un listener éphémère, connecte un
 /// client WS — la boucle de test.
 async fn connect() -> (Agent, tokio::task::JoinHandle<()>) {
+    let (a, srv, _) = connect_with_session().await;
+    (a, srv)
+}
+
+/// Variante qui rend aussi la `Session` partagée — les
+/// tests d'état moteur (orphelin garé, détachement) en ont
+/// besoin pour préparer le terrain hors protocole.
+async fn connect_with_session() -> (
+    Agent,
+    tokio::task::JoinHandle<()>,
+    Arc<tokio::sync::Mutex<Session>>,
+) {
     let session = Arc::new(tokio::sync::Mutex::new(Session::new(
         Arc::new(FakeTransport),
         Arc::new(FixtureFont),
     )));
-    let app = explorer_agent::agent_router(session, None);
+    let app = explorer_agent::agent_router(Arc::clone(&session), None);
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
         .await
         .expect("bind");
@@ -163,6 +175,7 @@ async fn connect() -> (Agent, tokio::task::JoinHandle<()>) {
             stash: Vec::new(),
         },
         server,
+        session,
     )
 }
 
@@ -682,5 +695,45 @@ async fn e3_diff_since() {
         .await;
     assert!(r["result"]["nodes"].is_array(), "{r}");
     assert!(r["result"]["base_rev"].is_null(), "{r}");
+    srv.abort();
+}
+
+#[tokio::test]
+async fn wait_frame_reclame_orphelin_gare() {
+    // Régression `navigate{wait:frame}` → -32004 intermittent :
+    // une payload orpheline garée (détenteur de rendu mort en
+    // vol — issue #23) laisse `dom`/`frame` hors de l'onglet ;
+    // la sonde nue lisait `None` à vie. Le wait doit armer le
+    // pull (`ensure_frame` : reclaim + peinture paresseuse).
+    let (mut a, srv, session) = connect_with_session().await;
+    open(&mut a).await;
+    let r = a.call("tab.open", json!({})).await;
+    let tab = r["result"]["tab"].as_u64().expect("tab");
+    let r = a
+        .call("nav.goto", json!({"tab": tab, "url": "http://t.local/x"}))
+        .await;
+    assert!(r["error"].is_null(), "{r}");
+
+    // Simule la mort d'un détenteur : payload parquée,
+    // `dom`/`frame` absents de l'onglet.
+    session.lock().await.debug_drop_detached_paint(tab);
+    let r = a
+        .call(
+            "wait.for",
+            json!({"tab": tab, "kind": "frame", "timeout_ms": 2000}),
+        )
+        .await;
+    assert_eq!(r["result"]["ok"], true, "{r}");
+
+    // Même garde côté selector : l'orphelin re-garé rendait
+    // `EmptyDocument` jusqu'au timeout.
+    session.lock().await.debug_drop_detached_paint(tab);
+    let r = a
+        .call(
+            "wait.for",
+            json!({"tab": tab, "kind": "selector", "selector": "button#b", "timeout_ms": 2000}),
+        )
+        .await;
+    assert_eq!(r["result"]["ok"], true, "{r}");
     srv.abort();
 }

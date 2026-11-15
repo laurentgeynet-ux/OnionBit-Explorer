@@ -201,8 +201,45 @@ async fn await_event(
         .map_err(|_| err(ErrorCode::Timeout, "attente échue".to_string()))?
 }
 
-/// `wait=frame` après commit : la prochaine
-/// `frame.invalidated` de l'onglet dans le budget restant.
+/// `wait:frame` — le moteur peint en **pull** (Étape 222) :
+/// headless, personne ne consomme les frames, et les
+/// `FrameInvalidated` de la nav (peinture spéculative +
+/// repeinture de commit) partent *pendant* `navigate_shared`
+/// — attendre un événement futur serait un timeout garanti.
+/// Sémantique honnête : « le document commis a une frame
+/// peinte » — sonde `frame_pixels` bornée, puis
+/// `tick_animations` pour armer le pull consommateur (la
+/// pompe anim se dégate pour les clients qui lisent).
+async fn wait_frame(st: &Arc<AgentShared>, tab: u64, dur: Duration) -> Result<(), RpcError> {
+    let deadline = std::time::Instant::now() + dur;
+    loop {
+        let ready = {
+            let mut s = st.session.lock().await;
+            // Le wait arme le pull au lieu de sonder à
+            // l'aveugle : orphelin garé → réinséré ; DOM
+            // commis non peint → produit paresseusement.
+            // Sans ça `frame_pixels` reste `None` à vie sur
+            // des états réparables (timeout garanti).
+            s.ensure_frame(tab);
+            if s.frame_pixels(tab).is_some() {
+                let _ = s.tick_animations(tab);
+                true
+            } else {
+                false
+            }
+        };
+        if ready {
+            return Ok(());
+        }
+        if std::time::Instant::now() >= deadline {
+            return Err(err(ErrorCode::Timeout, "attente échue".to_string()));
+        }
+        tokio::time::sleep(Duration::from_millis(POLL_MS)).await;
+    }
+}
+
+/// `wait=frame` après commit : la prochaine frame peinte du
+/// document, dans le budget restant.
 async fn settle_wait(
     st: &Arc<AgentShared>,
     tab: u64,
@@ -212,13 +249,7 @@ async fn settle_wait(
     match wait {
         Some(WaitKind::Frame) => {
             let dur = Duration::from_millis(timeout_ms.map_or(NAV_WAIT_DEFAULT_MS, u64::from));
-            await_event(
-                &st.session,
-                dur,
-                |ev| matches!(ev, CoreEvent::FrameInvalidated { tab: t, .. } if *t == tab),
-            )
-            .await
-            .map(|_| ())
+            wait_frame(st, tab, dur).await
         }
         Some(WaitKind::Idle | WaitKind::Selector | WaitKind::Stable) => Err(unsupported(
             "wait.for hors commit/frame — E2",
@@ -303,6 +334,11 @@ async fn frame_binary(
         })?;
     let png = {
         let mut s = st.session.lock().await;
+        // Orphelin garé → réinséré + DOM commis non peint →
+        // produit (même garde que `wait_frame`) : sans ça
+        // `frame.get` répond « pas de frame » sur un état
+        // réparable.
+        s.ensure_frame(params.tab);
         let _ = s.tick_animations(params.tab);
         if params.full == Some(true) {
             s.frame_png_full(params.tab)
@@ -581,7 +617,11 @@ async fn snapshot_get(
     // `-32007` transitoire à l'agent — au-delà, erreur honnête.
     let mut attempts = 0u8;
     let (entries, report, url) = loop {
-        let s = st.session.lock().await;
+        let mut s = st.session.lock().await;
+        // Orphelin garé → réinséré avant la sonde : sinon
+        // `EmptyDocument` persiste et le retry ne sert à
+        // rien (même garde que les waiters).
+        s.reclaim_orphaned_paint(p.tab);
         match s.snapshot_entries(p.tab) {
             Ok(entries) => {
                 let report = s.geometry_report(p.tab);
@@ -981,13 +1021,13 @@ async fn wait_verbs(
                 )
                 .await
                 .map(|_| json!({ "ok": true })),
-                WaitKind::Frame => await_event(
-                    &st.session,
-                    dur,
-                    |ev| matches!(ev, CoreEvent::FrameInvalidated { tab: t, .. } if *t == p.tab),
-                )
-                .await
-                .map(|_| json!({ "ok": true })),
+                // Pull-model : `wait_frame`, pas un event —
+                // le repaint post-action est synchrone sous
+                // le verrou, son `FrameInvalidated` est déjà
+                // parti quand l'appel arrive.
+                WaitKind::Frame => wait_frame(st, p.tab, dur)
+                    .await
+                    .map(|()| json!({ "ok": true })),
                 WaitKind::Selector => {
                     let Some(sel) = p.selector.as_deref() else {
                         return Err(err(
@@ -1185,20 +1225,31 @@ async fn wait_selector(
     dur: Duration,
 ) -> Result<Value, RpcError> {
     // Le sélecteur est validé une fois — un `BadSelector` est
-    // une erreur d'appel, pas une condition d'attente.
+    // une erreur d'appel, pas une condition d'attente. Un
+    // document en vol/détaché n'est pas une erreur d'appel
+    // non plus : le poll attendra sa pose (orphelin garé
+    // réclamé d'abord — même garde que la boucle).
     {
-        let s = st.session.lock().await;
+        let mut s = st.session.lock().await;
+        s.reclaim_orphaned_paint(tab);
         if let Err(e) = s.select_nodes(tab, selector) {
-            return match e {
-                CoreError::Selector(_) => Err(err(ErrorCode::BadSelector, e.to_string())),
-                other => Err(RpcError::from(other)),
-            };
+            match e {
+                CoreError::Selector(_) => {
+                    return Err(err(ErrorCode::BadSelector, e.to_string()));
+                }
+                CoreError::EmptyDocument | CoreError::UnknownTab(_) => {}
+                other => return Err(RpcError::from(other)),
+            }
         }
     }
     let deadline = tokio::time::Instant::now() + dur;
     loop {
         {
-            let s = st.session.lock().await;
+            let mut s = st.session.lock().await;
+            // Orphelin garé → réinséré avant la sonde : sans
+            // ça `select_nodes` rend `EmptyDocument` à vie et
+            // l'attente timeout sur un état réparable.
+            s.reclaim_orphaned_paint(tab);
             if let Ok(indices) = s.select_nodes(tab, selector) {
                 if !indices.is_empty() {
                     return Ok(json!({ "ok": true }));
@@ -1219,7 +1270,10 @@ async fn wait_stable(st: &Arc<AgentShared>, tab: u64, dur: Duration) -> Result<V
     let mut prev = None::<u64>;
     loop {
         let sig = {
-            let s = st.session.lock().await;
+            let mut s = st.session.lock().await;
+            // Même garde que `wait_selector` — orphelin garé
+            // réinséré avant de lire la géométrie.
+            s.reclaim_orphaned_paint(tab);
             s.geometry_report(tab).map(|r| {
                 // FNV-1a sur les boîtes — signature compacte,
                 // pas de clone du rapport.

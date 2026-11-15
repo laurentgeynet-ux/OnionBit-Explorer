@@ -14,7 +14,7 @@
 
 use std::collections::HashMap;
 use std::io::{BufRead, Write};
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -50,12 +50,81 @@ enum Reply {
     Binary(Vec<u8>),
 }
 
-/// Client EAP minimal : un socket, une file d'émission, une
-/// table `oneshot` par requête en vol, une tâche lectrice.
-struct Eap {
+/// Une connexion EAP vivante : un socket, une file
+/// d'émission, une table `oneshot` par requête en vol, des
+/// tâches lectrice/émettrice. `alive` passe à `false` dès
+/// qu'une tâche sort (daemon mort, socket coupée) — le
+/// prochain appel reconnecte au lieu de pendre.
+struct Live {
     out: mpsc::UnboundedSender<Message>,
     pending: Arc<Mutex<HashMap<u64, oneshot::Sender<Reply>>>>,
     next: AtomicU64,
+    /// Partagé avec les tâches lectrice/émettrice — `false`
+    /// dès que l'une sort (socket morte, daemon relancé).
+    alive: Arc<AtomicBool>,
+}
+
+/// Erreur d'un appel — `dead` = socket prouvée morte
+/// (réessayable après reconnexion) ; un timeout n'est **pas**
+/// `dead` (un verbe lent n'autorise pas à le rejouer — il
+/// aurait pu agir).
+struct ReqErr {
+    msg: String,
+    dead: bool,
+}
+
+impl Live {
+    /// Envoie une requête et attend sa réponse — JSON ou
+    /// binaire selon ce qui arrive pour l'`id`.
+    async fn request(&self, method: &str, params: Value) -> Result<Reply, ReqErr> {
+        if !self.alive.load(Ordering::Relaxed) {
+            return Err(ReqErr {
+                msg: "socket agent morte".to_string(),
+                dead: true,
+            });
+        }
+        let id = self.next.fetch_add(1, Ordering::Relaxed);
+        let (tx, rx) = oneshot::channel();
+        self.pending
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .insert(id, tx);
+        let req = json!({"jsonrpc": "2.0", "id": id, "method": method, "params": params});
+        if self
+            .out
+            .send(Message::Text(req.to_string().into()))
+            .is_err()
+        {
+            self.pending
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .remove(&id);
+            return Err(ReqErr {
+                msg: "socket agent fermé".to_string(),
+                dead: true,
+            });
+        }
+        match tokio::time::timeout(CALL_TIMEOUT, rx).await {
+            Ok(Ok(r)) => Ok(r),
+            Ok(Err(_)) => Err(ReqErr {
+                msg: "lecteur socket mort".to_string(),
+                dead: true,
+            }),
+            Err(_) => Err(ReqErr {
+                msg: format!("{method} — timeout adaptateur"),
+                dead: false,
+            }),
+        }
+    }
+}
+
+/// Client EAP minimal : paresseusement connecté, reconnecte
+/// à la demande quand le socket est prouvé mort (daemon
+/// relancé — les onglets et leurs ids survivent côté
+/// daemon ; les `el:N` sont perdus, `stale_ref` honnête).
+struct Eap {
+    port: u16,
+    live: tokio::sync::Mutex<Option<Arc<Live>>>,
 }
 
 impl Eap {
@@ -63,7 +132,7 @@ impl Eap {
     /// le serveur) puis `session.open` : toutes les capacités
     /// v1, profil input+eval — l'adaptateur pilote le
     /// navigateur pour un agent, pas pour observer.
-    async fn connect(port: u16) -> Result<Self, String> {
+    async fn connect(port: u16) -> Result<Arc<Live>, String> {
         let mut url = format!("ws://127.0.0.1:{port}/agent");
         if let Ok(key) = std::env::var("EXPLORER_API_KEY") {
             url = format!("{url}?key={key}");
@@ -84,92 +153,120 @@ impl Eap {
         let (out, mut out_rx) = mpsc::unbounded_channel::<Message>();
         let pending: Arc<Mutex<HashMap<u64, oneshot::Sender<Reply>>>> =
             Arc::new(Mutex::new(HashMap::new()));
+        let alive = Arc::new(AtomicBool::new(true));
         // Writer — un seul émetteur sur le sink.
-        tokio::spawn(async move {
-            while let Some(m) = out_rx.recv().await {
-                if sink.send(m).await.is_err() {
-                    return;
+        {
+            let alive = Arc::clone(&alive);
+            tokio::spawn(async move {
+                while let Some(m) = out_rx.recv().await {
+                    if sink.send(m).await.is_err() {
+                        break;
+                    }
                 }
-            }
-        });
+                alive.store(false, Ordering::Relaxed);
+            });
+        }
         // Reader — route texte (id) et binaire (request_id)
         // vers la oneshot de l'appelant ; les notifications
         // `event.*` sont ignorées (l'adaptateur n'y souscrit
-        // pas — tools/call est du request/response).
-        let pend = Arc::clone(&pending);
-        tokio::spawn(async move {
-            while let Some(msg) = stream.next().await {
-                match msg {
-                    Ok(Message::Text(t)) => {
-                        let Ok(v) = serde_json::from_str::<Value>(&t) else {
-                            continue;
-                        };
-                        let Some(id) = v.get("id").and_then(Value::as_u64) else {
-                            continue;
-                        };
-                        let tx = pend
-                            .lock()
-                            .unwrap_or_else(std::sync::PoisonError::into_inner)
-                            .remove(&id);
-                        if let Some(tx) = tx {
-                            let _ = tx.send(Reply::Json(v));
-                        }
-                    }
-                    Ok(Message::Binary(b)) => {
-                        if let Some((id, _, payload)) = explorer_agent::proto::binary::decode(&b) {
+        // pas — tools/call est du request/response). À la
+        // sortie : vide les requêtes en vol (elles échouent
+        // vite au lieu de pendre) et marque la socket morte.
+        {
+            let pend = Arc::clone(&pending);
+            let alive = Arc::clone(&alive);
+            tokio::spawn(async move {
+                while let Some(msg) = stream.next().await {
+                    match msg {
+                        Ok(Message::Text(t)) => {
+                            let Ok(v) = serde_json::from_str::<Value>(&t) else {
+                                continue;
+                            };
+                            let Some(id) = v.get("id").and_then(Value::as_u64) else {
+                                continue;
+                            };
                             let tx = pend
                                 .lock()
                                 .unwrap_or_else(std::sync::PoisonError::into_inner)
-                                .remove(&u64::from(id));
+                                .remove(&id);
                             if let Some(tx) = tx {
-                                let _ = tx.send(Reply::Binary(payload.to_vec()));
+                                let _ = tx.send(Reply::Json(v));
                             }
                         }
+                        Ok(Message::Binary(b)) => {
+                            if let Some((id, _, payload)) =
+                                explorer_agent::proto::binary::decode(&b)
+                            {
+                                let tx = pend
+                                    .lock()
+                                    .unwrap_or_else(std::sync::PoisonError::into_inner)
+                                    .remove(&u64::from(id));
+                                if let Some(tx) = tx {
+                                    let _ = tx.send(Reply::Binary(payload.to_vec()));
+                                }
+                            }
+                        }
+                        Ok(Message::Close(_)) | Err(_) => break,
+                        Ok(_) => {}
                     }
-                    Ok(Message::Close(_)) | Err(_) => return,
-                    Ok(_) => {}
                 }
-            }
-        });
-        let eap = Self {
+                pend.lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner)
+                    .clear();
+                alive.store(false, Ordering::Relaxed);
+            });
+        }
+        let live = Arc::new(Live {
             out,
             pending,
             next: AtomicU64::new(1),
-        };
-        eap.call(
-            "session.open",
-            json!({
-                "protocol": explorer_agent::PROTOCOL,
-                "profile": {"input": true, "eval": true},
-            }),
-        )
-        .await
-        .map_err(|e| format!("session.open refusé : {e}"))?;
-        Ok(eap)
+            alive,
+        });
+        // `session.open` avant de servir — profil pilote.
+        let hello = json!({
+            "protocol": explorer_agent::PROTOCOL,
+            "profile": {"input": true, "eval": true},
+        });
+        match live.request("session.open", hello).await {
+            Ok(Reply::Json(v)) if v.get("error").is_none() => Ok(live),
+            Ok(Reply::Json(v)) => Err(format!("session.open refusé : {v}")),
+            Ok(Reply::Binary(_)) => Err("trame binaire inattendue à open".to_string()),
+            Err(e) => Err(format!("session.open refusé : {}", e.msg)),
+        }
     }
 
-    /// Envoie une requête et attend sa réponse — JSON ou
-    /// binaire selon ce qui arrive pour l'`id`.
+    /// La connexion vivante, établie si besoin — le verrou
+    /// sérialise les reconnections (un seul handshake par
+    /// renaissance, les appels concurrents partagent).
+    async fn ensure(&self) -> Result<Arc<Live>, String> {
+        let mut g = self.live.lock().await;
+        if let Some(l) = &*g {
+            if l.alive.load(Ordering::Relaxed) {
+                return Ok(Arc::clone(l));
+            }
+        }
+        let l = Self::connect(self.port).await?;
+        *g = Some(Arc::clone(&l));
+        Ok(l)
+    }
+
+    /// Envoie une requête — une reconnexion + un rejeu si la
+    /// socket était morte (le verbe n'a jamais atteint le
+    /// daemon, rejouer est sûr) ; jamais de rejeu sur timeout.
     async fn request(&self, method: &str, params: Value) -> Result<Reply, String> {
-        let id = self.next.fetch_add(1, Ordering::Relaxed);
-        let (tx, rx) = oneshot::channel();
-        self.pending
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .insert(id, tx);
-        let req = json!({"jsonrpc": "2.0", "id": id, "method": method, "params": params});
-        if self
-            .out
-            .send(Message::Text(req.to_string().into()))
-            .is_err()
-        {
-            return Err("socket agent fermé".to_string());
+        let mut last = "socket agent morte".to_string();
+        for _ in 0..2 {
+            let live = self.ensure().await?;
+            match live.request(method, params.clone()).await {
+                Ok(r) => return Ok(r),
+                Err(e) if e.dead => {
+                    live.alive.store(false, Ordering::Relaxed);
+                    last = e.msg;
+                }
+                Err(e) => return Err(e.msg),
+            }
         }
-        match tokio::time::timeout(CALL_TIMEOUT, rx).await {
-            Ok(Ok(r)) => Ok(r),
-            Ok(Err(_)) => Err("lecteur socket mort".to_string()),
-            Err(_) => Err(format!("{method} — timeout adaptateur")),
-        }
+        Err(last)
     }
 
     /// Appel dont la réponse attendue est JSON — l'erreur EAP
@@ -204,8 +301,13 @@ impl Eap {
 }
 
 async fn serve_async(port: u16) -> std::io::Result<u8> {
-    let eap = Eap::connect(port).await.map_err(std::io::Error::other)?;
-    let eap = Arc::new(eap);
+    let eap = Arc::new(Eap {
+        port,
+        live: tokio::sync::Mutex::new(None),
+    });
+    // Échec franc au démarrage si le daemon est absent ; en
+    // vol, la reconnexion à la demande prend le relais.
+    eap.ensure().await.map_err(std::io::Error::other)?;
     // Stdin bloquant → canal tokio.
     let (lines_tx, mut lines) = mpsc::unbounded_channel::<std::io::Result<String>>();
     std::thread::spawn(move || {
