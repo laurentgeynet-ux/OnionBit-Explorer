@@ -1017,6 +1017,12 @@ pub struct Session {
     /// persisté, pour n'écrire `idb-*.json` qu'au changement
     /// réel (PR-10).
     idb_snapshots: HashMap<String, String>,
+    /// Throttle des écritures profil (étape 264) — une clé
+    /// (`storage:<orig>`, `idb:<orig>`, `cookies`) réécrit au
+    /// plus toutes les `interval` ; la valeur servie au flush
+    /// est la **courante** des maps ci-dessus, jamais un
+    /// instantané figé au moment du salissage.
+    persist_throttle: PersistThrottle,
     /// Canal des réponses de requêtes script-initiées
     /// (tâches tokio → points de synchro — ADR-0019 exige
     /// des intentions drainées, jamais de callback
@@ -1394,6 +1400,7 @@ impl Session {
             cookies: Arc::new(CookieJar::new()),
             local_storage: HashMap::new(),
             idb_snapshots: HashMap::new(),
+            persist_throttle: PersistThrottle::default(),
             net_tx,
             net_rx,
             pending_net_done: std::collections::VecDeque::new(),
@@ -1625,6 +1632,45 @@ impl Session {
         }
     }
 
+    /// Écrit les clés de persistance dont la fenêtre de
+    /// throttle est échue (étape 264) — appelé à la fin des
+    /// drains et des points de synchro réseau. La valeur
+    /// écrite est la **courante** des maps : une origine qui
+    /// mute encore sera re-salie au drain suivant, jamais
+    /// servie d'un instantané figé.
+    pub(crate) fn flush_state_due(&mut self) {
+        for key in self.persist_throttle.due() {
+            self.flush_state_key(&key);
+        }
+    }
+
+    /// Vidange finale des clés salies — fermeture d'onglet :
+    /// la dernière valeur doit toucher le disque, même si sa
+    /// fenêtre n'est pas échue.
+    pub(crate) fn flush_state_all(&mut self) {
+        for key in self.persist_throttle.take_all() {
+            self.flush_state_key(&key);
+        }
+    }
+
+    /// Flush d'une clé du throttle — `storage:`/`idb:` lisent
+    /// la valeur courante des maps, `cookies` ré-exporte le
+    /// jar. No-op quand la clé n'a plus de donnée vivante
+    /// (origine purgée entre le salissage et le flush).
+    fn flush_state_key(&self, key: &str) {
+        if key == "cookies" {
+            self.persist_cookies();
+        } else if let Some(origin) = key.strip_prefix("storage:") {
+            if let (Some(s), Some(map)) = (&self.store, self.local_storage.get(origin)) {
+                s.save_storage(origin, map);
+            }
+        } else if let Some(origin) = key.strip_prefix("idb:") {
+            if let (Some(s), Some(snap)) = (&self.store, self.idb_snapshots.get(origin)) {
+                s.save_idb(origin, snap);
+            }
+        }
+    }
+
     /// Abonnement au bus d'événements (SSE côté API).
     #[must_use]
     pub fn subscribe(&self) -> broadcast::Receiver<CoreEvent> {
@@ -1845,6 +1891,10 @@ impl Session {
         // Surfaces média : `MediaGone` avant `TabClosed`
         // pour que l'hôte relâche ses pipelines (étape 71b).
         self.close_media(tab);
+        // Throttle persistance (étape 264) : les clés salies
+        // en attente de fenêtre sortent maintenant — l'état
+        // de l'onglet sortant doit toucher le disque.
+        self.flush_state_all();
         if let Some(e) = self.tabs.get_mut(&tab) {
             e.nav_alive
                 .store(false, std::sync::atomic::Ordering::Relaxed);
@@ -2090,6 +2140,101 @@ impl Session {
             height: dump.height,
             boxes,
         })
+    }
+}
+
+/// Fenêtre minimale entre deux écritures disque d'une même
+/// clé de persistance (étape 264, règle 13) — pansement au
+/// martelage `idb-*`/`storage-*`/`cookies.json` mesuré en
+/// vol : un site qui mute son état en continu réécrivait le
+/// fichier entier à chaque drain (~10 Mo/s sur gros IDB).
+/// Fenêtre de perte bornée : ≤ intervalle en cas de crash
+/// (même classe que les navigateurs — flush périodique, la
+/// dernière valeur est enfilée et finit toujours par sortir
+/// au prochain point de synchro).
+pub(crate) const STATE_FLUSH_INTERVAL: std::time::Duration = std::time::Duration::from_millis(2000);
+
+/// Throttle borné des écritures profil (étape 264). Clés :
+/// `storage:<orig>`, `idb:<orig>`, `cookies`. Aucune copie
+/// de payload ici — le flush lit la valeur **courante** des
+/// maps session (`local_storage`/`idb_snapshots`/jar).
+#[derive(Debug)]
+pub(crate) struct PersistThrottle {
+    /// Fenêtre minimale entre deux écritures d'une clé.
+    interval: std::time::Duration,
+    /// Dernière écriture effectuée par clé.
+    last: HashMap<String, Instant>,
+    /// Clés salies en attente de fenêtre.
+    pending: std::collections::HashSet<String>,
+}
+
+impl Default for PersistThrottle {
+    fn default() -> Self {
+        Self::with_interval(STATE_FLUSH_INTERVAL)
+    }
+}
+
+impl PersistThrottle {
+    /// Constructeur à fenêtre explicite (tests, `Default`
+    /// prod → [`STATE_FLUSH_INTERVAL`]).
+    pub(crate) fn with_interval(interval: std::time::Duration) -> Self {
+        Self {
+            interval,
+            last: HashMap::new(),
+            pending: std::collections::HashSet::new(),
+        }
+    }
+
+    /// `true` → l'écriture peut partir (clé marquée écrite à
+    /// `now`) ; `false` → clé salie en attente, sortie par
+    /// [`Self::due`]/[`Self::take_all`].
+    pub(crate) fn ready(&mut self, key: &str) -> bool {
+        let now = Instant::now();
+        if self
+            .last
+            .get(key)
+            .is_none_or(|t| now.duration_since(*t) >= self.interval)
+        {
+            self.last.insert(key.to_string(), now);
+            self.pending.remove(key);
+            true
+        } else {
+            self.pending.insert(key.to_string());
+            false
+        }
+    }
+
+    /// Clés en attente dont la fenêtre est échue — marquées
+    /// écrites à `now` (le flush réel suit immédiatement).
+    pub(crate) fn due(&mut self) -> Vec<String> {
+        let now = Instant::now();
+        let due: Vec<String> = self
+            .pending
+            .iter()
+            .filter(|k| {
+                self.last
+                    .get(*k)
+                    .is_none_or(|t| now.duration_since(*t) >= self.interval)
+            })
+            .cloned()
+            .collect();
+        for k in &due {
+            self.last.insert(k.clone(), now);
+            self.pending.remove(k);
+        }
+        due
+    }
+
+    /// Vide la file — vidange finale (fermeture d'onglet) :
+    /// la dernière valeur doit toucher le disque même si sa
+    /// fenêtre n'est pas échue.
+    pub(crate) fn take_all(&mut self) -> Vec<String> {
+        let now = Instant::now();
+        let all: Vec<String> = self.pending.drain().collect();
+        for k in &all {
+            self.last.insert(k.clone(), now);
+        }
+        all
     }
 }
 

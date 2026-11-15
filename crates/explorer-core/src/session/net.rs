@@ -727,6 +727,10 @@ impl Session {
         // hors de la vue session) — checkpoint de
         // persistance (étape 56).
         self.persist_cookies();
+        // États salis du document **sortant** : vidange du
+        // throttle (étape 264) — une origine dont la fenêtre
+        // n'est pas échue touche quand même le disque ici.
+        self.flush_state_all();
         // Fragment cross-document (étape 56d) : la page est
         // posée — scrolle vers `id`/`name` si l'URL en porte.
         if let Some(frag) = url.fragment() {
@@ -4152,22 +4156,27 @@ impl Session {
                 self.cookies
                     .set_from_header_ctx(&page, &strip_http_only(w), partition.clone());
             }
-            if !writes.is_empty() {
+            if !writes.is_empty() && self.persist_throttle.ready("cookies") {
                 self.persist_cookies();
             }
             let key = page.origin().to_string();
             // Persisté seulement sur changement réel : une
             // map vidée par script est sauvée (effacement),
             // un contexte qui n'a jamais touché storage ne
-            // produit aucune écriture.
+            // produit aucune écriture. Étape 264 : écriture
+            // bornée par fenêtre — le fichier entier ne se
+            // réécrit plus à chaque drain quand le site mute
+            // en continu.
             let changed = match self.local_storage.get(&key) {
                 Some(prev) => *prev != map,
                 None => !map.is_empty(),
             };
             if changed {
                 self.local_storage.insert(key.clone(), map.clone());
-                if let Some(s) = &self.store {
-                    s.save_storage(&key, &map);
+                if self.persist_throttle.ready(&format!("storage:{key}")) {
+                    if let Some(s) = &self.store {
+                        s.save_storage(&key, &map);
+                    }
                 }
             }
             // PR-10 : snapshot IndexedDB persisté — même règle
@@ -4178,8 +4187,10 @@ impl Session {
                 let changed = self.idb_snapshots.get(&key).is_none_or(|prev| *prev != idb);
                 if changed {
                     self.idb_snapshots.insert(key.clone(), idb.clone());
-                    if let Some(s) = &self.store {
-                        s.save_idb(&key, &idb);
+                    if self.persist_throttle.ready(&format!("idb:{key}")) {
+                        if let Some(s) = &self.store {
+                            s.save_idb(&key, &idb);
+                        }
                     }
                 }
             }
@@ -4232,7 +4243,7 @@ impl Session {
                     self.cookies
                         .set_from_header_ctx(&furl, &strip_http_only(w), partition.clone());
                 }
-                if !writes.is_empty() {
+                if !writes.is_empty() && self.persist_throttle.ready("cookies") {
                     self.persist_cookies();
                 }
                 let key = furl.origin().to_string();
@@ -4242,8 +4253,10 @@ impl Session {
                 };
                 if changed {
                     self.local_storage.insert(key.clone(), map.clone());
-                    if let Some(s) = &self.store {
-                        s.save_storage(&key, &map);
+                    if self.persist_throttle.ready(&format!("storage:{key}")) {
+                        if let Some(s) = &self.store {
+                            s.save_storage(&key, &map);
+                        }
                     }
                 }
                 // PR-10d : IndexedDB de l'enfant persisté sous
@@ -4253,8 +4266,10 @@ impl Session {
                     let changed = self.idb_snapshots.get(&key).is_none_or(|prev| *prev != idb);
                     if changed {
                         self.idb_snapshots.insert(key.clone(), idb.clone());
-                        if let Some(s) = &self.store {
-                            s.save_idb(&key, &idb);
+                        if self.persist_throttle.ready(&format!("idb:{key}")) {
+                            if let Some(s) = &self.store {
+                                s.save_idb(&key, &idb);
+                            }
                         }
                     }
                 }
@@ -4269,6 +4284,11 @@ impl Session {
         self.sync_frame_mirrors(tab);
         dlv_info!("net: media");
         self.drain_media_commands(tab);
+        // Étape 264 : les clés de persistance dont la fenêtre
+        // est échue sortent ici — la valeur écrite est la
+        // **courante** des maps (une origine qui mute encore
+        // sera re-salie au drain suivant).
+        self.flush_state_due();
         dlv_info!("net: afs done");
     }
 
@@ -4400,9 +4420,13 @@ impl Session {
         // partent (FIFO par onglet).
         self.pump_pending_script_net();
         // Des `Set-Cookie` XHR ont pu enrichir le jar —
-        // persistance au même point de synchro.
+        // persistance au même point de synchro (bornée par
+        // le throttle, étape 264).
         if n > 0 {
-            self.persist_cookies();
+            if self.persist_throttle.ready("cookies") {
+                self.persist_cookies();
+            }
+            self.flush_state_due();
         }
         n
     }

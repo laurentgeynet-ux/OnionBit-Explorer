@@ -391,12 +391,22 @@ impl RawDownload {
 /// transport. `is_secure` couvre l'hôte exact et les domaines
 /// parents `includeSubDomains` non expirés ; les entrées
 /// périmées sont purgées à la lecture et ignorées partout.
+/// Fenêtre minimale entre deux réécritures de `hsts.json`
+/// (étape 264 — même pansement que le throttle session : une
+/// rafale de réponses STS réécrivait le fichier entier à
+/// chaque réponse). Fenêtre de perte bornée : épingles des
+/// ≤2 dernières secondes perdues sur crash — re-posées à la
+/// visite suivante.
+const HSTS_FLUSH_INTERVAL: std::time::Duration = std::time::Duration::from_millis(2000);
+
 pub struct JsonHstsStore {
     dir: PathBuf,
     /// `host → (expires_unix, include_subdomains)`.
     map: Mutex<std::collections::HashMap<String, RawHsts>>,
     /// Sérialise les écritures.
     io: Mutex<()>,
+    /// Dernière écriture disque — throttle de [`HSTS_FLUSH_INTERVAL`].
+    last_write: Mutex<Option<std::time::Instant>>,
 }
 
 impl JsonHstsStore {
@@ -416,6 +426,7 @@ impl JsonHstsStore {
             dir: dir.to_path_buf(),
             map: Mutex::new(map),
             io: Mutex::new(()),
+            last_write: Mutex::new(None),
         }
     }
 
@@ -460,6 +471,18 @@ impl explorer_net::hsts::HstsStore for JsonHstsStore {
             }
             let snapshot: std::collections::HashMap<String, RawHsts> = m.clone();
             drop(m);
+            // Throttle (étape 264) : dans la fenêtre on saute
+            // — le prochain `record` échu écrit le snapshot
+            // courant (qui inclut cette mutation).
+            let Ok(mut lw) = self.last_write.lock() else {
+                return;
+            };
+            let now = std::time::Instant::now();
+            if lw.is_some_and(|t| now.duration_since(t) < HSTS_FLUSH_INTERVAL) {
+                return;
+            }
+            *lw = Some(now);
+            drop(lw);
             let _guard = self.io.lock().ok();
             let Some(s) = serde_json::to_string(&snapshot).ok() else {
                 return;

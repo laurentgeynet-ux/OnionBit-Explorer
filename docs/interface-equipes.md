@@ -3646,3 +3646,28 @@ pour diagnostiquer un daemon wedged (airfrance — file
 session figée), `getBoundingClientRect`/`elementFromPoint`
 divergents de l'arbre engagé (piste moteur JS↔layout),
 `getComputedStyle` chaînes vides (gap jscore).
+
+### 2026-11-16 — Étape 264 (NAV) : throttle des écritures profil — pansement au martelage disque
+
+**Livré** (`explorer-core` seul, zéro contrat touché —
+persistance = zone NAV de bout en bout) : `PersistThrottle`
+borne `storage-<orig>`/`idb-<orig>`/`cookies.json` à une
+écriture / clé / 2 s — valeur servie = la **courante** des
+maps session, jamais un instantané figé ; vidanges garanties
+(fin de drain, nav, `close_tab`) ; `JsonHstsStore` borné
+pareil (`hsts.json` ×9/vol Wikipedia → ≤ 1/2 s). Fenêtre de
+perte ≤ 2 s sur crash — même classe que les navigateurs.
+
+**Toujours ouvert — format incrémental (vrai fix)** : le
+fichier IDB reste réécrit **en entier** à chaque flush, le
+throttle ne borne que la fréquence — un site qui mute un
+gros IDB continuera d'écrire ~`taille/2 s`. Solution dite
+« option 2 » : journal append-only par-clé (`put/delete/
+clear`), écriture proportionnelle au delta, compaction
+périodique quand le journal dépasse ×N le live set — nouveau
+format persistant (lecture, écriture, migration des
+`idb-*.json` existants, corruption partielle, fsync à
+décider). À ouvrir ici quand quelqu'un reprendra la
+persistance IDB proprement ; le contrat `JsEngine`
+(`drain_idb` → ops au lieu de snapshot) est interne NAV,
+aucune frontière d'équipe ne bloque.

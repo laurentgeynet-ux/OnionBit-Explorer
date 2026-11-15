@@ -7921,6 +7921,20 @@ MCP = adaptateur, jamais la base.
   nomme la cascade fautive (`attr:hidden`, `display:none`,
   `opacity:0`…) fusionnée en `cause` dans
   `engine.anomalies`.
+- [x] **Étape 264. Throttle des écritures profil (pansement
+  martelage disque)** — un site qui mute `localStorage`/IDB/
+  cookies en continu réécrivait chaque fichier entier à
+  chaque drain (~10 Mo/s mesurés sur gros IDB, `hsts.json`
+  ×9/vol Wikipedia). `PersistThrottle` (session) borne à une
+  écriture / clé / 2 s (`storage:<orig>`, `idb:<orig>`,
+  `cookies`) — valeur servie = la **courante** des maps,
+  jamais un instantané figé ; `JsonHstsStore` borné pareil.
+  Vidanges garanties aux points de synchro (fin de drain,
+  navigation, `close_tab`) — fenêtre de perte ≤ 2 s sur
+  crash, même classe que les navigateurs. Le format
+  incrémental (journal par-clé + compaction) reste au
+  journal interface pour plus tard — c'est le vrai fix,
+  ceci éteint le débit.
 
 ## Piste JS (JS-C26+) — spécialiste `explorer-jscore`
 
