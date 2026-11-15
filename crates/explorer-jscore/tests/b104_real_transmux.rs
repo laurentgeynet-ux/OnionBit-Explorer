@@ -213,16 +213,16 @@ fn b104_vrai_muxjs_segment_audio() {
 /// Ce test pousse 2 segments dans UN worker pour vérifier.
 #[test]
 fn b104_deux_pushes_meme_worker() {
-    let Ok(src) = std::fs::read_to_string(WORKER_JS) else {
-        eprintln!("skip: {WORKER_JS} absent");
+    let Ok(src) = std::fs::read_to_string(worker_js()) else {
+        eprintln!("skip: {} absent", worker_js().display());
         return;
     };
-    let Ok(seg_vid) = std::fs::read_to_string(SEG_B64) else {
-        eprintln!("skip: {SEG_B64} absent");
+    let Ok(seg_vid) = std::fs::read_to_string(seg_b64()) else {
+        eprintln!("skip: {} absent", seg_b64().display());
         return;
     };
-    let Ok(seg_audio) = std::fs::read_to_string(SEG_AUDIO_B64) else {
-        eprintln!("skip: {SEG_AUDIO_B64} absent");
+    let Ok(seg_audio) = std::fs::read_to_string(seg_audio_b64()) else {
+        eprintln!("skip: {} absent", seg_audio_b64().display());
         return;
     };
     let mut e = Engine::new();

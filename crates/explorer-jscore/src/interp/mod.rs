@@ -6344,10 +6344,18 @@ impl Engine {
             crate::j17_tick(&crate::J17_RES_HIT);
             if self.resolve_verify {
                 let check = self.env_get(env, name);
-                // `strict_eq`, pas `PartialEq` — `NaN != NaN`
-                // signalait 181 faux positifs/vol.
+                // `strict_eq` + acception `NaN==NaN` — la spec
+                // `===` jette les deux NaN pour distincts alors
+                // que fast/walk lisent la MÊME cellule (faux
+                // positif ×102 au vol yt JS-C553).
                 let same = match (&check, &v) {
-                    (Some(c), Some(f)) => self.strict_eq(c, f),
+                    (Some(c), Some(f)) => {
+                        self.strict_eq(c, f)
+                            || matches!(
+                                (c, f),
+                                (Value::Num(a), Value::Num(b)) if a.is_nan() && b.is_nan()
+                            )
+                    }
                     _ => check == v,
                 };
                 if !same {
