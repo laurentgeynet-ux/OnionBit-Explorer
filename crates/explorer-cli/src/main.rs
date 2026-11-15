@@ -56,8 +56,9 @@ fn main() -> ExitCode {
         [_, cmd] if cmd == "props" => check_names("prop"),
         [_, cmd, kind] if cmd == "check" => check_names(kind),
         [_, cmd, url, out] if cmd == "download" => download(url, out),
-        [_, cmd] if cmd == "mcp" => mcp_main("9377"),
-        [_, cmd, port] if cmd == "mcp" => mcp_main(port),
+        [_, cmd] if cmd == "mcp" => mcp_main(None),
+        [_, cmd, port] if cmd == "mcp" => mcp_main(Some(port)),
+        [_, cmd] if cmd == "daemons" => daemons_list(),
         [_, cmd, a, b] if cmd == "diff" => diff_pngs(a, b),
         _ => {
             eprintln!("usage : explorer-cli dump <fichier|url>");
@@ -80,7 +81,11 @@ fn main() -> ExitCode {
             eprintln!("        explorer-cli check prop|sel|at|routed|affects|affectsv|html");
             eprintln!("        explorer-cli download <url> <sortie>");
             eprintln!("        explorer-cli diff <a.png> <b.png>");
-            eprintln!("        explorer-cli mcp [port]  (serveur MCP stdio → daemon)");
+            eprintln!(
+                "        explorer-cli mcp [port]  (broker MCP stdio → daemons du registre ;\n\
+                       \x20                           port = daemon épinglé par défaut)"
+            );
+            eprintln!("        explorer-cli daemons   (registre des daemons vivants)");
             ExitCode::FAILURE
         }
     }
@@ -427,15 +432,21 @@ async fn dom_live(url: &str) -> ExitCode {
     }
 }
 
-/// `mcp [port]` — adaptateur MCP stdio ↔ EAP : chaque outil
-/// est traduit en verbe EAP sur le WebSocket `/agent` du
-/// daemon (ADR-0035 — `--port` attendu : 9377 humain, 9385
-/// agent-flight).
-fn mcp_main(port: &str) -> ExitCode {
-    let Ok(p) = port.parse::<u16>() else {
-        eprintln!("mcp : port invalide '{port}'");
-        return ExitCode::FAILURE;
-    };
+/// `mcp [port]` — broker MCP stdio ↔ EAP : chaque outil est
+/// routé vers un daemon du registre (étape 256) puis traduit
+/// en verbe EAP sur `/agent`. `port` épingle le daemon par
+/// défaut ; absent = broker pur (`daemon`/`nom:onglet` à
+/// chaque appel, ou daemon unique).
+fn mcp_main(port: Option<&str>) -> ExitCode {
+    let mut p = None;
+    if let Some(s) = port {
+        if let Ok(v) = s.parse::<u16>() {
+            p = Some(v);
+        } else {
+            eprintln!("mcp : port invalide '{s}'");
+            return ExitCode::FAILURE;
+        }
+    }
     match mcp::serve(p) {
         Ok(_) => ExitCode::SUCCESS,
         Err(e) => {
@@ -443,6 +454,43 @@ fn mcp_main(port: &str) -> ExitCode {
             ExitCode::FAILURE
         }
     }
+}
+
+/// `daemons` — liste le registre des daemons vivants
+/// (étape 256) : l'œil humain du broker, même source.
+fn daemons_list() -> ExitCode {
+    use std::io::Write;
+    let entries = explorer_core::daemon_registry::list();
+    if entries.is_empty() {
+        println!(
+            "aucun daemon annoncé ({})",
+            explorer_core::daemon_registry::registry_dir().display()
+        );
+        return ExitCode::SUCCESS;
+    }
+    for (file, a) in &entries {
+        // Sonde TCP synchrone — la vivacité se prouve, les
+        // entrées périmées (crash) sont retirées au passage.
+        let alive = std::net::TcpStream::connect_timeout(
+            &std::net::SocketAddr::from(([127, 0, 0, 1], a.port)),
+            std::time::Duration::from_millis(300),
+        )
+        .is_ok();
+        if !alive {
+            explorer_core::daemon_registry::remove(file);
+            continue;
+        }
+        let _ = writeln!(
+            std::io::stdout(),
+            "{:<16} port={:<6} pid={:<7} v{}  {}",
+            a.name,
+            a.port,
+            a.pid,
+            a.version,
+            a.profile.display()
+        );
+    }
+    ExitCode::SUCCESS
 }
 
 /// `diff <a.png> <b.png>` — diff pixel entre deux rendus :

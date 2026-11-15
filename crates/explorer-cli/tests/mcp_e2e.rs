@@ -153,7 +153,7 @@ async fn mcp_pilote_eap() {
         let tab = r["result"]["content"][0]["text"]
             .as_str()
             .and_then(|t| serde_json::from_str::<Value>(t).ok())
-            .and_then(|v| v["tab"].as_u64())
+            .and_then(|v| v["tab"].as_str().map(str::to_owned).or_else(|| v["tab"].as_u64().map(|n| n.to_string())))
             .expect("tab id");
         let r = mcp.tool("navigate", &json!({"tab": tab, "url": "http://t.local/x"}));
         assert!(r["result"]["isError"].is_null(), "{r}");

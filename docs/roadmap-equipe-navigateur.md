@@ -7830,6 +7830,22 @@ MCP = adaptateur, jamais la base.
   erreurs sur **une** connexion. Schéma + help +
   `KNOWN_METHODS` + MCP `engine_j17` + verrou socket.
 
+- [x] **Étape 256. Broker multi-daemons : registre + routage
+  `nom:onglet` + cycle de vie** — **Livrée** : un daemon
+  s'annonce (`<profil-défaut>/daemons/<nom>-<pid>.json` au
+  bind ; `--port 0` publie le port éphémère réel), le
+  registre se sonde à la lecture (`/api/status`, GC des
+  périmées). `explorer-cli mcp` devient broker : pool de
+  connexions EAP paresseuses par port, cible = `daemon`
+  param | préfixe `tab:"nom:N"` | unique/épinglé — **EAP
+  inchangé côté daemon**, l'adaptateur déroute le préfixe.
+  Outils locaux `daemon_list`/`daemon_spawn`/`daemon_stop`
+  (`profile` exigé au spawn, attente d'annonce, taskkill
+  `/PID` ciblé — stdio null, un enfant héritant stdout
+  corrompt le JSON-RPC). `tab_new` rend l'id qualifié.
+  `explorer-cli daemons` = œil humain. Vol vérifié : deux
+  daemons, deux pages en parallèle, arrêt par verbe.
+
 ## Piste JS (JS-C26+) — spécialiste `explorer-jscore`
 
 Ordre dicté par les besoins de la piste produit d'abord, puis

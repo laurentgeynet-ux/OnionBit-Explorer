@@ -210,6 +210,9 @@ struct CliArgs {
     /// endpoint DNS-over-HTTPS (`https://…/dns-query`) ;
     /// absent = résolution système.
     doh: Option<String>,
+    /// `--name NOM` — nom publié dans le registre de daemons
+    /// (étape 256 ; défaut : base du répertoire de profil).
+    name: Option<String>,
 }
 
 /// Usage affiché sur `--help` ou argument invalide.
@@ -217,7 +220,9 @@ fn print_usage() {
     eprintln!(
         "explorer-daemon — hôte moteur + API REST/SSE loopback (ADR-0003)\n\
          usage : explorer-daemon [--port N] [--profile DIR] [--download-dir DIR] [--help]\n\
-         \x20 --port N            port d'écoute (surcharge EXPLORER_PORT)\n\
+         \x20 --port N            port d'écoute (surcharge EXPLORER_PORT ;\n\
+         \x20                     0 = port éphémère, publié au registre)\n\
+         \x20 --name NOM          nom d'annonce au registre de daemons\n\
          \x20 --profile DIR       répertoire de profil persistant\n\
          \x20                     (surcharge EXPLORER_PROFILE)\n\
          \x20 --download-dir DIR  répertoire des téléchargements acceptés\n\
@@ -253,6 +258,7 @@ fn parse_args() -> CliArgs {
         profile: None,
         download_dir: std::env::var_os("EXPLORER_DOWNLOAD_DIR").map(PathBuf::from),
         doh: std::env::var("EXPLORER_DOH").ok().filter(|v| !v.is_empty()),
+        name: None,
     };
     let mut it = std::env::args().skip(1);
     while let Some(a) = it.next() {
@@ -282,6 +288,7 @@ fn parse_args() -> CliArgs {
                 out.download_dir = Some(PathBuf::from(value("--download-dir")));
             }
             "--doh" => out.doh = Some(value("--doh")),
+            "--name" => out.name = Some(value("--name")),
             _ => arg_fail(&format!("argument inconnu : {a}")),
         }
     }
@@ -756,6 +763,32 @@ async fn amain() {
             tracing::error!(addr = %cfg.bind, error = %e, "bind impossible");
             eprintln!("explorer-daemon : bind {} impossible : {e}", cfg.bind);
             std::process::exit(1);
+        }
+    };
+    // Registre de daemons (étape 256) : l'annonce publie le
+    // port RÉEL (`local_addr` — `--port 0` devient ainsi
+    // découvrable). La garde retire le fichier à l'arrêt
+    // propre ; un crash laisse une entrée périmée que les
+    // lecteurs éliminent par sonde.
+    let bound_port = listener
+        .local_addr()
+        .map_or_else(|_| cfg.bind.port(), |a| a.port());
+    let daemon_name =
+        explorer_core::daemon_registry::default_name(cli.name.as_deref(), &profile_dir);
+    let _announce_guard = match explorer_core::daemon_registry::announce(
+        &daemon_name,
+        bound_port,
+        &profile_dir,
+    ) {
+        Ok(g) => {
+            tracing::info!(name = %daemon_name, port = bound_port, "daemon annoncé au registre");
+            Some(g)
+        }
+        Err(e) => {
+            // Non fatal : le daemon sert sans annonce — la
+            // découverte échoue, pas la navigation.
+            tracing::warn!(error = %e, "annonce registre impossible");
+            None
         }
     };
     tracing::info!(addr = %cfg.bind, "explorer-daemon prêt");
