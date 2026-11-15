@@ -77,6 +77,41 @@ impl Scope {
 /// slots sur ce niveau).
 const NO_SLOT: u16 = u16::MAX;
 
+/// JS-C552 — résout les identifiants d'un corps de **programme**
+/// (script top-level, jamais `eval` — sa chaîne appelante est
+/// hors modèle). Pousse un scope unique = noms top-level
+/// déclarés : les lectures de `var`/fn/`let`/`class` top-level
+/// dans les fonctions imbriquées deviennent annotées
+/// (depth-only) — la marche part directement de l'ancêtre.
+/// Les misses restent non annotés (chaîne `eval`/`with`
+/// dynamique possible — sentinelle global retirée, vol yt).
+pub(crate) fn resolve_program(body: &[Stmt]) -> ResTables {
+    let mut r = Resolver {
+        map: HashMap::new(),
+        names: HashMap::new(),
+        scopes: Vec::new(),
+        suppress: 0,
+    };
+    // Modules : liaisons installées à l'instanciation dans un
+    // env module (pas l'env global) — aucune annotation, même
+    // garde que `resolve_lit`.
+    if body
+        .iter()
+        .any(|s| matches!(s, Stmt::Import { .. } | Stmt::Export(_)))
+    {
+        return ResTables {
+            map: r.map,
+            names: r.names,
+        };
+    }
+    r.push(collect_names_owned(body), body_poisons(body));
+    r.walk_stmts(body);
+    ResTables {
+        map: r.map,
+        names: r.names,
+    }
+}
+
 /// Tables produites par [`resolve_lit`].
 pub(crate) struct ResTables {
     /// `ptr(Expr::Ident) → (profondeur << 16) | slot`.
@@ -421,6 +456,14 @@ fn pat_names_inner(p: &Pat, out: &mut HashSet<Rc<str>>) {
 /// toute la profondeur de blocs (commentaire `hoist_vars_only`
 /// d'`exec.rs`), `let`/`const`/`class`/`using` seulement au
 /// niveau supérieur du corps (ils vivent dans l'env `Local`).
+/// Noms déclarés au top-level d'un corps (var/fn/let/const/
+/// class/using) — scope unique du programme.
+fn collect_names_owned(body: &[Stmt]) -> HashSet<Rc<str>> {
+    let mut out = HashSet::new();
+    collect_names(body, &mut out, true);
+    out
+}
+
 fn fn_scope_names(lit: &FnLit, body: &[Stmt]) -> HashSet<Rc<str>> {
     let mut out = HashSet::new();
     for p in &lit.params {
@@ -714,7 +757,11 @@ impl Resolver {
             }
         }
         // Non trouvé : global ou capture inter-fonction — marche
-        // dynamique inchangée.
+        // dynamique inchangée. (JS-C552 : la sentinelle « global-
+        // only » initialement tentée ici a été retirée — 15
+        // `cannot read` en vol yt : des envs hors modèle
+        // statique peuvent lier le nom, l'économie mesurée
+        // ~77 lectures ne justifiait pas le risque.)
     }
 
     fn push(&mut self, names: HashSet<Rc<str>>, poisoned: bool) {
@@ -1065,9 +1112,17 @@ impl Resolver {
         if let Some(s) = &cl.super_ {
             self.walk_expr(s);
         }
-        // `cenv` = `Env::local` (binds privés `super`/`home`) —
-        // un niveau entre les membres et le scope englobant.
-        self.push(HashSet::new(), false);
+        // `cenv` = `Env::local` (binds privés `super`/`home` +
+        // **nom de classe** `class e` — liaison immuable lue et
+        // écrite par les membres ; JS-C552 : le nom doit figurer
+        // dans le scope pour rester un hit annoté — sinon un
+        // miss sauterait l'env et l'écriture `e = …` gagnerait
+        // un global au lieu du `TypeError` spec).
+        let mut cenv_names = HashSet::new();
+        if let Some(n) = &cl.name {
+            cenv_names.insert(n.clone());
+        }
+        self.push(cenv_names, false);
         for m in &cl.members {
             if let PropKey::Computed(e) = &m.key {
                 self.walk_expr(e);
