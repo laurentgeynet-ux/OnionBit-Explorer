@@ -42,8 +42,8 @@ use std::rc::Rc;
 
 use super::{LIT_MAY_HOIST, LIT_USES_ARGS, LIT_USES_NT, NEW_TARGET};
 use crate::ast::{
-    ChainStep, ClassLit, Expr, FnBody, FnLit, ForInit, ForTarget, ObjProp, Pat, PropKey, Stmt,
-    UnOp, VarDecl,
+    ChainStep, ClassLit, Expr, FnBody, FnLit, ForInit, ForTarget, ObjProp, Param, Pat, PropKey,
+    Stmt, UnOp, VarDecl,
 };
 
 /// Portée statique — une entrée = un niveau d'env au runtime.
@@ -105,7 +105,17 @@ pub(crate) struct Resolver {
 /// Résout les identifiants du corps d'un `FnLit` — scope propre
 /// (paramètres + hoisting) puis descente dans les sous-portées et
 /// les fonctions imbriquées déjà `Parsed`.
-pub(crate) fn resolve_lit(lit: &FnLit, body: &[Stmt]) -> ResTables {
+/// `lowered_params` — params **baissés** pour un lit gen/async
+/// (le corps passé est déjà le corps baissé ; les défauts
+/// contenant un suspend ont été réécrits `__paramN`). Le canon
+/// du scope fn est alors émis sous `body.as_ptr()` — la clé que
+/// le runtime demande (`lf.body.as_ptr()`). Sans params baissés,
+/// gen/async reste `depth-only` (walk imbriqué sur corps source).
+pub(crate) fn resolve_lit(
+    lit: &FnLit,
+    body: &[Stmt],
+    lowered_params: Option<&[Param]>,
+) -> ResTables {
     let mut r = Resolver {
         map: HashMap::new(),
         names: HashMap::new(),
@@ -123,7 +133,7 @@ pub(crate) fn resolve_lit(lit: &FnLit, body: &[Stmt]) -> ResTables {
             names: r.names,
         };
     }
-    r.walk_fn(lit, body);
+    r.walk_fn(lit, body, lowered_params);
     ResTables {
         map: r.map,
         names: r.names,
@@ -421,18 +431,17 @@ fn fn_scope_names(lit: &FnLit, body: &[Stmt]) -> HashSet<Rc<str>> {
 
 /// JS-C503 — liste canonique ordonnée du scope `Local`
 /// **synchrone** : réplique exacte de l'ordre d'insertion du
-/// prologue `call_script_body` — params (ordre de motifs),
+/// prologue `call_script_body` — `params` (ordre de motifs —
+/// **baissés** pour gen/async, `lit.params` sinon),
 /// `"arguments"` si `!arrow && LIT_USES_ARGS`, `new.target`
 /// (nom privé [`NEW_TARGET`]) si `!arrow && LIT_USES_NT`,
 /// noms hoistés dans l'ordre de `hoist`, puis `let`/`const`/
 /// `class`/`using` du niveau corps (ordre source). Première
 /// occurrence dedupée (`env_declare`/`insert` sautent un nom
 /// déjà présent — le slot de la première liaison gagne).
-/// Gen/async : params du corps **baissé** ≠ `lit.params` →
-/// non modélisé (`depth-only`).
-fn fn_scope_ord(lit: &FnLit, body: &[Stmt], lfl: u8) -> Vec<Rc<str>> {
+fn fn_scope_ord(lit: &FnLit, params: &[Param], body: &[Stmt], lfl: u8) -> Vec<Rc<str>> {
     let mut out: Vec<Rc<str>> = Vec::new();
-    for p in &lit.params {
+    for p in params {
         pat_names_ord(&p.pat, &mut out);
     }
     if !lit.is_arrow && lfl & LIT_USES_ARGS != 0 {
@@ -728,23 +737,35 @@ impl Resolver {
     /// Corps d'une fonction : scope `Local` (params + hoisting +
     /// lexicaux de niveau corps) puis descente des statements.
     /// `poisoned` si le corps contient `eval`/`delete`.
-    fn walk_fn(&mut self, lit: &FnLit, body: &[Stmt]) {
+    /// `lowered_params` — params baissés quand `body` est le corps
+    /// baissé d'un gen/async (sinon `None` : canon incertain →
+    /// depth-only, émis à l'appel du lit sur son propre corps).
+    fn walk_fn(&mut self, lit: &FnLit, body: &[Stmt], lowered_params: Option<&[Param]>) {
         let poisoned = body_poisons(body);
         // Filet défensif : une portée poussée et oubliée dans un
         // bras de statement ne doit jamais décaler les profondeurs
         // des fonctions sœurs (régression `for-in`/`for-of` B1 du
         // vol 811).
         let base = self.scopes.len();
-        if !poisoned && !lit.is_gen && !lit.is_async {
+        // JS-C534b — gen/async câblable dès que les params
+        // **baissés** sont connus : le canon `[params…, arguments?,
+        // new.target?, hoist, lex]` est alors exact (le prologue
+        // lie `lf.params`, pas `lit.params`). Clé `body.as_ptr()`
+        // = buffer du corps baissé = ce que le runtime demande.
+        if !poisoned && (!(lit.is_gen || lit.is_async) || lowered_params.is_some()) {
             // JS-C503 — slots du scope `Local` : liste canonique
             // alignée sur le prologue (params → arguments? →
             // new.target? → hoist → lex), clé `body.as_ptr()`.
-            // Gen/async : le corps baissé réécrit les params —
-            // depth-only. Poisoned : idem (règle « certifié »).
+            // Poisoned : depth-only (règle « certifié »).
             let lfl = crate::interp::compute_lit_flags(lit);
             self.push_slots(
                 body.as_ptr() as usize,
-                Rc::from(fn_scope_ord(lit, body, lfl)),
+                Rc::from(fn_scope_ord(
+                    lit,
+                    lowered_params.unwrap_or(&lit.params),
+                    body,
+                    lfl,
+                )),
                 false,
             );
         } else {
@@ -763,7 +784,10 @@ impl Resolver {
     /// corps est matérialisé).
     fn enter_lit(&mut self, lit: &FnLit) {
         if let FnBody::Parsed(b) = &lit.body {
-            self.walk_fn(lit, b);
+            // Lit imbriqué : le walk est sur son corps **source**
+            // — jamais de params baissés (son canon gen/async
+            // sera émis quand le lit sera résolu à son appel).
+            self.walk_fn(lit, b, None);
         }
     }
 

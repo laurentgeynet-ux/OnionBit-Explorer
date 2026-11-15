@@ -183,3 +183,73 @@ fn c533_for_head_per_iteration_cells() {
         "12"
     );
 }
+
+/// JS-C534 — hypothèse N5.40 : l'env d'appel d'un générateur
+/// (ou async) n'est JAMAIS câblé (`predeclare_slots` skippé —
+/// le corps baissé réécrit les params, `names_table` n'émet
+/// pas pour lui) → ses liaisons vivent en `extra` → `xt_unw`.
+#[test]
+fn c534_gen_call_env_feeds_xt_unw() {
+    let _g = IC_LOCK.lock().unwrap();
+    explorer_jscore::j17_enable();
+    let mut e = Engine::new();
+    let r = e.eval(
+        "function* g(a){ let x=a; for(let i=0;i<4;i++){ x+=i; yield x; } return x; }\
+         var it=g(10); var s=0,r; while(!(r=it.next()).done) s+=r.value; s",
+    );
+    assert!(r.is_ok(), "gen: {r:?}");
+    let snap = explorer_jscore::j17_snapshot();
+    assert!(
+        snap_counter(&snap, "xt_unw") > 0,
+        "l'env d'appel gen doit alimenter xt_unw : {snap}"
+    );
+}
+
+/// JS-C534b — le canon du scope gen/async est émis sur la clé
+/// `lf.body.as_ptr()` avec les params baissés : après le premier
+/// appel (amorti `wire_miss` — le resolver passe après le
+/// predeclare), les suivants câblent l'env → `wire_hit` +
+/// liaisons servies en `bnd_canon`.
+#[test]
+fn c534b_gen_call_env_wires_after_first_call() {
+    let _g = IC_LOCK.lock().unwrap();
+    explorer_jscore::j17_enable();
+    let mut e = Engine::new();
+    // Deux appels : le 1er résout (miss amorti), le 2e câble.
+    let r = e.eval(
+        "function* g(a){ let x=a; let y=x*2; yield x; yield y; return y; }\
+         var s=0,r; for(var it of [g(3),g(5)]){ while(!(r=it.next()).done) s+=r.value; } s",
+    );
+    let out = r.map(|v| e.describe(v));
+    assert_eq!(out.as_deref().unwrap_or(""), "24", "gen sums");
+    let snap = explorer_jscore::j17_snapshot();
+    assert!(
+        snap_counter(&snap, "wire_hit") > 0,
+        "le 2e appel gen doit trouver names_table : {snap}"
+    );
+    assert!(
+        snap_counter(&snap, "bnd_canon") > 0,
+        "les liaisons gen câblées doivent servir en canon : {snap}"
+    );
+}
+
+/// JS-C534b — mismatch de clé suspecté : le resolver émet
+/// `names[&[Stmt]::as_ptr]` (buffer) ; le runtime demande
+/// `names[Rc<Vec>::as_ptr]` (`RcBox`) → le câblage du scope fn
+/// raterait toujours. `wire_hit` doit être > 0.
+/// (Réfuté : `Rc::as_ptr` est fonction associée — `.as_ptr()`
+/// sur `Rc<Vec>` tombe sur `Vec::as_ptr` = buffer. Les clés
+/// matchent ; le vrai trou = les envs d'appel gen/async.)
+#[test]
+fn c534b_fn_scope_wire_actually_hits() {
+    let _g = IC_LOCK.lock().unwrap();
+    explorer_jscore::j17_enable();
+    let mut e = Engine::new();
+    let r = e.eval("function f(a,b){ let x=a+b; return x; } f(1,2)+f(3,4)");
+    assert!(r.is_ok(), "call: {r:?}");
+    let snap = explorer_jscore::j17_snapshot();
+    assert!(
+        snap_counter(&snap, "wire_hit") > 0,
+        "le câblage du scope fn doit trouver names_table : {snap}"
+    );
+}

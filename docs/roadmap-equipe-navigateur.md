@@ -12902,6 +12902,17 @@ chaque gain rapporté contre les **deux** archétypes.
   (`ic_hit`/`ic_miss`/`ic_disarm` au snapshot) pour
   borner la couverture du seul court-circuit existant.
   Dependency-groups = infra lourde, dernier recours.
+- [x] **JS-C534b — canon des scopes gen/async** :
+  N5.40 a réfuté lazy.rs — `xt_unw` flat. Vrai
+  coupable : envs d'appel gen/async jamais câblés
+  (corps baissé → `predeclare` skippé, resolver
+  depth-only) — yt transpile l'async → régénérator
+  partout. `resolve_lit`/`ensure_lit_resolved`
+  acceptent `lowered_params` : `fn_scope_ord`
+  émis avec params baissés, clé `lf.body.as_ptr()`
+  — `predeclare` déverrouillé pour gen/async.
+  Verrous : lang 315 RESOLVE_VERIFY, dom 265,
+  c502 24, c533 13 (+3), j17 12, n538 1.
 - [x] **JS-C534 — câblage envs `GExec` + attribution
   `extra`** : N5.39 a tranché — `xt_unw` 563 479 /
   `xt_dyn` 0 : 100 % raccordable. `frame_env` câble
@@ -12915,8 +12926,10 @@ chaque gain rapporté contre les **deux** archétypes.
   non-bloc (pass-through). Bonus : slots = −42 %
   `env_lvl` (NO_SLOTS 4,52 M vs 2,61 M).
   Verrous lang/dom/c502/c533/j17/n538 verts.
-  Lecture vol : `xt_unw` effondré, `env_lvl`/
-  `env_ns` en reflux ; résidu = class envs.
+  Lecture vol N5.40 : `xt_unw` flat — l'hypothèse
+  de localisation était fausse (les frames ne sont
+  pas la population) — cf. JS-C534b pour le vrai
+  coupable (envs d'appel gen/async).
 - [x] **JS-C533 — `Bindings` slot-indexé** : vol N5.37
   — `ident` = 34 % des nœuds évalués, `env_lvl`
   2,63 M ; chaque niveau scannait des paires

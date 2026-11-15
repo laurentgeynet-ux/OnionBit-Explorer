@@ -5948,10 +5948,15 @@ impl Engine {
     /// nouvellement matérialisé (dédup par `Rc::as_ptr`). La
     /// table est bornée : pleine → purge complète (les entrées
     /// obsolètes partent avec leurs gardiens).
+    /// `lowered_params` — params baissés quand `body` est le corps
+    /// baissé d'un gen/async : le canon du scope fn est alors
+    /// émis (clé `body.as_ptr()` = `lf.body.as_ptr()` côté
+    /// `predeclare_slots`).
     fn ensure_lit_resolved(
         &mut self,
         lit: &Rc<crate::ast::FnLit>,
         body: &Rc<Vec<crate::ast::Stmt>>,
+        lowered_params: Option<&[crate::ast::Param]>,
     ) {
         const RESOLVED_LITS_CAP: usize = 512;
         if self.resolve_off {
@@ -5978,7 +5983,7 @@ impl Engine {
         }
         self.resolved_lits.insert(key);
         self.resolved_guard.push(lit.clone());
-        let t = resolve::resolve_lit(lit, body);
+        let t = resolve::resolve_lit(lit, body, lowered_params);
         self.resolved_map.extend(t.map);
         self.names_table.extend(t.names);
     }
@@ -11485,11 +11490,15 @@ impl Engine {
         // `[params…, "arguments"?, new.target?, hoist…, lex…]`
         // alignées sur le prologue ci-dessous (params →
         // `LazyArgs` → `new.target` → `hoist` → `let` de corps).
-        // Gen/async : le corps baissé réécrit les params —
-        // le resolver ne l'a pas émis (depth-only, clé absente).
-        if !(lit.is_gen || lit.is_async) {
-            self.predeclare_slots(&local, body_rc.as_ptr() as usize);
-        }
+        // JS-C534b — gen/async : la clé est le corps **baissé**
+        // (`lf.body.as_ptr()`) — le resolver émet le canon avec
+        // les params baissés. Premier appel du lit : le resolver
+        // n'a pas encore tourné (il passe plus bas) → `wire_miss`
+        // amorti une fois, `wire_hit` ensuite.
+        let wire_site = lowered_fn
+            .as_ref()
+            .map_or(body_rc.as_ptr(), |lf| lf.body.as_ptr());
+        self.predeclare_slots(&local, wire_site as usize);
         // §B-59 : sous-phase « bind » — `last_phase` figé à
         // « bind » = mort dans le liage de paramètres
         // (`bind_pat` × N params, `...rest`, défauts).
@@ -11569,7 +11578,13 @@ impl Engine {
         let lowered_body = lowered_fn.as_ref().map(|lf| lf.body.clone());
         // JS-C490 — annotations de profondeur sur le corps qui
         // tournera (le corps baissé des gen/async).
-        self.ensure_lit_resolved(lit, lowered_body.as_ref().unwrap_or(&body_rc));
+        // JS-C534b — params baissés : le canon du scope fn est
+        // émis sous `lf.body.as_ptr()` (clé du predeclare amont).
+        self.ensure_lit_resolved(
+            lit,
+            lowered_body.as_ref().unwrap_or(&body_rc),
+            lowered_fn.as_ref().map(|lf| &lf.params[..]),
+        );
         // JS-C497 — corps sans `var`/`function`/`export`
         // plausible : `hoist` n'a rien à installer — la marche
         // complète du corps à chaque appel était pure perte.
