@@ -24,19 +24,18 @@ use crate::actionable::{auto_wait, resolve, POLL_MS};
 use crate::proto::{
     Actionability, Capability, ErrorCode, FrameParams, KeyMods, Method, RpcError, WaitKind,
 };
-use crate::snapshot::nodes_from_geometry;
-use crate::state::{AgentConn, AgentShared, SubFilter};
+use crate::state::{AgentConn, AgentShared, StoredSnap, SubFilter};
 
 /// Timeout de navigation par défaut quand `wait` n'en porte
 /// pas (règle 13 — nommé, pas en dur).
 const NAV_WAIT_DEFAULT_MS: u64 = 30_000;
 
 /// Capacités **implémentées** par cette build — l'intersection
-/// avec les demandées fait la liste livrée. Les absents sont
-/// les phases futures (E2 `handles`/`actionable`, E3
-/// `snapshot_diff`).
+/// avec les demandées fait la liste livrée. Surface v1
+/// E1–E3 servie ; les futures extensions s'ajoutent ici.
 const IMPLEMENTED: &[Capability] = &[
     Capability::Snapshot,
+    Capability::SnapshotDiff,
     Capability::Handles,
     Capability::Actionable,
     Capability::WaitCommit,
@@ -457,6 +456,7 @@ async fn tab_verbs(
             let mut s = st.session.lock().await;
             s.close_tab(p.tab).map_err(RpcError::from)?;
             conn.handles.purge_tab(p.tab);
+            conn.snaps.remove(&p.tab);
             Ok(json!({}))
         }
         Method::TabList(_) => {
@@ -559,6 +559,82 @@ async fn nav_verbs(
     }
 }
 
+/// `snapshot.get` — arbre sémantique E3 (rôle/nom/états/
+/// depth réels) ou diff `{since}` contre la dernière
+/// émission à cette `rev`. Base absente ou périmée →
+/// snapshot complet honnête, jamais d'erreur.
+async fn snapshot_get(
+    st: &Arc<AgentShared>,
+    conn: &mut AgentConn,
+    p: crate::proto::SnapshotParams,
+) -> Result<Value, RpcError> {
+    scope(conn, p.tab)?;
+    // Le diff exige la capacité dédiée — négociée au
+    // `session.open`, sinon `-32001` honnête.
+    if p.since.is_some() && !conn.caps.contains(&Capability::SnapshotDiff) {
+        return Err(unsupported("snapshot diff", "snapshot_diff"));
+    }
+    tab_exists(st, p.tab).await?;
+    // Une prise de verrou : marche sémantique + géométrie +
+    // url — l'arbre ne peut pas bouger entre les deux
+    // lectures.
+    let (entries, report, url) = {
+        let s = st.session.lock().await;
+        let entries = s.snapshot_entries(p.tab).map_err(|e| match e {
+            CoreError::UnknownTab(_) => err(ErrorCode::NoSuchTab, e.to_string()),
+            other => err(ErrorCode::EngineUnavailable, other.to_string()),
+        })?;
+        let report = s.geometry_report(p.tab);
+        let url = s.tab_info(p.tab).and_then(|t| t.url).unwrap_or_default();
+        (entries, report, url)
+    };
+    let rev = st.rev(p.tab);
+    let emitted = crate::snapshot::emit(
+        &entries,
+        report.as_ref(),
+        &mut conn.handles,
+        p.tab,
+        rev,
+        p.interactive_only.unwrap_or(true),
+        p.max_nodes.unwrap_or(4096) as usize,
+    );
+    let base = p.since.and_then(|since| {
+        conn.snaps
+            .get(&p.tab)
+            .filter(|s| s.rev == since)
+            .map(|s| (since, s))
+    });
+    // Diff servi — toute autre `since` (jamais snapshotée,
+    // nav entre-temps) dégrade en snapshot complet.
+    let result = if let Some((since, snap)) = base {
+        let (added, removed, changed) = crate::snapshot::diff(&snap.entries, &emitted);
+        json!({
+            "rev": rev, "base_rev": since, "url": url,
+            "added": added, "removed": removed,
+            "changed": changed,
+        })
+    } else {
+        let nodes: Vec<_> = emitted.iter().map(|e| e.node.clone()).collect();
+        json!({ "rev": rev, "url": url, "nodes": nodes })
+    };
+    conn.snaps.insert(
+        p.tab,
+        StoredSnap {
+            rev,
+            entries: emitted
+                .into_iter()
+                .map(|e| crate::snapshot::SnapEntry {
+                    index: e.index,
+                    generation: e.generation,
+                    elem_ref: e.node.elem_ref,
+                    sig: e.sig,
+                })
+                .collect(),
+        },
+    );
+    Ok(result)
+}
+
 /// Perception — snapshot, DOM, console, frame.
 async fn perceive_verbs(
     st: &Arc<AgentShared>,
@@ -566,37 +642,7 @@ async fn perceive_verbs(
     method: Method,
 ) -> Result<Value, RpcError> {
     match method {
-        Method::SnapshotGet(p) => {
-            scope(conn, p.tab)?;
-            if p.since.is_some() {
-                return Err(unsupported("snapshot diff — E3", "snapshot_diff"));
-            }
-            tab_exists(st, p.tab).await?;
-            let report = {
-                let s = st.session.lock().await;
-                s.geometry_report(p.tab)
-            };
-            let Some(report) = report else {
-                return Err(err(
-                    ErrorCode::EngineUnavailable,
-                    "pas de géométrie — arbre détaché ou onglet vierge",
-                ));
-            };
-            let rev = st.rev(p.tab);
-            let url = {
-                let s = st.session.lock().await;
-                s.tab_info(p.tab).and_then(|t| t.url).unwrap_or_default()
-            };
-            let nodes = nodes_from_geometry(
-                &report,
-                &mut conn.handles,
-                p.tab,
-                rev,
-                p.interactive_only.unwrap_or(true),
-                p.max_nodes.unwrap_or(4096) as usize,
-            );
-            Ok(json!({ "rev": rev, "url": url, "nodes": nodes }))
-        }
+        Method::SnapshotGet(p) => snapshot_get(st, conn, p).await,
         Method::QuerySelect(p) => {
             scope(conn, p.tab)?;
             tab_exists(st, p.tab).await?;

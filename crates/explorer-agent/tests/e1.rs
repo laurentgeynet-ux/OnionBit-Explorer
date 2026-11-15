@@ -227,7 +227,8 @@ async fn unsupported_type_pour_phases_futures() {
         .await;
     assert_eq!(r["error"]["code"], -32001);
     assert_eq!(r["error"]["data"]["capability"], "handles");
-    // snapshot{since} → -32001 (diff = E3).
+    // snapshot{since} → -32001 : la cap `snapshot_diff` n'est
+    // pas négociée par open() (le diff E3 existe, il est gate).
     let r = a
         .call("snapshot.get", json!({"tab": tab, "since": 0}))
         .await;
@@ -529,5 +530,133 @@ async fn e2_wait_selector_stable() {
         )
         .await;
     assert_eq!(r["result"]["ok"], true, "{r}");
+    srv.abort();
+}
+
+#[tokio::test]
+async fn e3_snapshot_semantique() {
+    let (mut a, srv) = connect().await;
+    let r = a
+        .call(
+            "session.open",
+            json!({"protocol":"eap/1","capabilities":["snapshot","snapshot_diff","tabs","events"]}),
+        )
+        .await;
+    assert!(r["result"]["capabilities"]
+        .as_array()
+        .expect("caps")
+        .contains(&json!("snapshot_diff")));
+    let r = a.call("tab.open", json!({})).await;
+    let tab = r["result"]["tab"].as_u64().expect("tab");
+    let r = a
+        .call("nav.goto", json!({"tab": tab, "url": "http://t.local/x"}))
+        .await;
+    assert!(r["error"].is_null(), "{r}");
+
+    let r = a
+        .call(
+            "snapshot.get",
+            json!({"tab": tab, "interactive_only": false}),
+        )
+        .await;
+    let nodes = r["result"]["nodes"].as_array().expect("nodes");
+    // Noms accessibles = texte visible, plus id/cls/tag.
+    let a_node = nodes.iter().find(|n| n["role"] == "link").expect("un lien");
+    assert_eq!(a_node["name"], "go", "{a_node}");
+    let b_node = nodes
+        .iter()
+        .find(|n| n["role"] == "button")
+        .expect("un bouton");
+    assert_eq!(b_node["name"], "ok", "{b_node}");
+    let f_node = nodes
+        .iter()
+        .find(|n| n["role"] == "textbox")
+        .expect("un champ");
+    assert_eq!(f_node["name"], "f", "{f_node}");
+    // Profondeur réelle — le plat E1 (0 partout) est fini.
+    assert!(a_node["depth"].as_u64().expect("depth") > 0);
+    // États natifs.
+    assert!(a_node["states"]
+        .as_array()
+        .expect("states")
+        .contains(&json!("link")));
+    assert!(f_node["states"]
+        .as_array()
+        .expect("states")
+        .contains(&json!("editable")));
+    srv.abort();
+}
+
+#[tokio::test]
+async fn e3_diff_since() {
+    let (mut a, srv) = connect().await;
+    let r = a
+        .call(
+            "session.open",
+            json!({"protocol":"eap/1","capabilities":["snapshot","snapshot_diff","handles","actionable","input","tabs"],"profile":{"input":true}}),
+        )
+        .await;
+    assert!(r["error"].is_null(), "{r}");
+    let r = a.call("tab.open", json!({})).await;
+    let tab = r["result"]["tab"].as_u64().expect("tab");
+    let r = a
+        .call("nav.goto", json!({"tab": tab, "url": "http://t.local/x"}))
+        .await;
+    assert!(r["error"].is_null(), "{r}");
+
+    // Snapshot de base — la ref du champ est mémorisée.
+    let r = a.call("snapshot.get", json!({"tab": tab})).await;
+    let base_rev = r["result"]["rev"].as_u64().expect("rev");
+    let f_ref = r["result"]["nodes"]
+        .as_array()
+        .expect("nodes")
+        .iter()
+        .find(|n| n["role"] == "textbox")
+        .and_then(|n| n["ref"].as_str())
+        .expect("ref champ")
+        .to_string();
+
+    // Diff sans mutation : tout identique → trois vides.
+    let r = a
+        .call("snapshot.get", json!({"tab": tab, "since": base_rev}))
+        .await;
+    assert_eq!(r["result"]["base_rev"], json!(base_rev), "{r}");
+    assert_eq!(r["result"]["added"], json!([]));
+    assert_eq!(r["result"]["removed"], json!([]));
+    assert_eq!(r["result"]["changed"], json!([]));
+
+    // Mutation dans le même rev : la frappe écrit `value` et
+    // pose le focus → `changed` porte la ref STABLE du champ.
+    let r = a
+        .call("input.type", json!({"tab": tab, "ref": f_ref, "text": "x"}))
+        .await;
+    assert_eq!(r["result"]["result"], "edited", "{r}");
+    let r = a
+        .call("snapshot.get", json!({"tab": tab, "since": base_rev}))
+        .await;
+    assert_eq!(r["result"]["base_rev"], json!(base_rev), "{r}");
+    assert_eq!(r["result"]["added"], json!([]), "{r}");
+    assert_eq!(r["result"]["removed"], json!([]), "{r}");
+    let changed = r["result"]["changed"].as_array().expect("changed");
+    let hit = changed
+        .iter()
+        .find(|n| n["ref"].as_str() == Some(f_ref.as_str()))
+        .unwrap_or_else(|| panic!("champ absent du diff: {r}"));
+    // Focus posé par la frappe → état visible dans le diff.
+    assert!(
+        hit["states"]
+            .as_array()
+            .expect("states")
+            .contains(&json!("focus")),
+        "{hit}"
+    );
+
+    // `since` jamais servi (ou rev périmée) → dégradation
+    // honnête : snapshot complet, pas d'erreur.
+    let r = a
+        .call("snapshot.get", json!({"tab": tab, "since": 999}))
+        .await;
+    assert!(r["result"]["nodes"].is_array(), "{r}");
+    assert!(r["result"]["base_rev"].is_null(), "{r}");
     srv.abort();
 }

@@ -158,26 +158,43 @@ pub struct Handle {
 }
 
 /// Table de handles de la connexion — FIFO bornée
-/// ((borne `HANDLES_CAP`)), purge totale à la fermeture d'onglet.
+/// (borne `HANDLES_CAP`), purge totale à la fermeture d'onglet.
+/// **Dédoublonnée** : réémettre `(tab, node, rev)` rend la ref
+/// déjà allouée — un élément garde son identité entre snapshots
+/// d'une même révision (le diff `changed` cite la ref stable).
 #[derive(Debug, Default)]
 pub struct HandleTable {
     map: HashMap<ElementRef, Handle>,
+    /// Index inverse — dédoublonnage par identité DOM.
+    by_node: HashMap<(TabId, u32, u64), ElementRef>,
     order: VecDeque<ElementRef>,
     next: u64,
 }
 
 impl HandleTable {
-    /// Alloue une ref — évince la plus ancienne au cap.
+    /// Alloue une ref — réémission dédupliquée, évince la plus
+    /// ancienne au cap.
     pub fn alloc(&mut self, tab: TabId, node: u32, rev: u64) -> ElementRef {
+        let key = (tab, node, rev);
+        if let Some(r) = self.by_node.get(&key) {
+            // Ne réapplique que si la ref est toujours vivante
+            // (évincée entre-temps → fraîche).
+            if self.map.contains_key(r) {
+                return r.clone();
+            }
+        }
         self.next += 1;
         let r = format!("el:{}", self.next);
         if self.map.len() >= HANDLES_CAP {
             if let Some(old) = self.order.pop_front() {
-                self.map.remove(&old);
+                if let Some(h) = self.map.remove(&old) {
+                    self.by_node.remove(&(h.tab, h.node, h.rev));
+                }
             }
         }
         self.order.push_back(r.clone());
         self.map.insert(r.clone(), Handle { tab, node, rev });
+        self.by_node.insert(key, r.clone());
         r
     }
 
@@ -203,8 +220,21 @@ impl HandleTable {
     /// Purge les refs d'un onglet fermé.
     pub fn purge_tab(&mut self, tab: TabId) {
         self.map.retain(|_, h| h.tab != tab);
+        self.by_node.retain(|(t, _, _), _| *t != tab);
         self.order.retain(|r| self.map.contains_key(r));
     }
+}
+
+/// Émission snapshot mémorisée — base du diff `{since}` (E3).
+/// Une par onglet et par connexion ; réécrasée à chaque
+/// `snapshot.get` (la base d'un diff est le dernier snapshot
+/// servi, jamais un instantané arbitraire).
+pub struct StoredSnap {
+    /// `rev` servie — `since == rev` déclenche le diff,
+    /// toute autre valeur dégrade en snapshot complet.
+    pub rev: u64,
+    /// Entrées émises (index+génération+ref+signature).
+    pub entries: Vec<crate::snapshot::SnapEntry>,
 }
 
 /// État d'une connexion agent — né à l'upgrade, meurt au close.
@@ -220,6 +250,9 @@ pub struct AgentConn {
     pub subs: Arc<std::sync::RwLock<SubFilter>>,
     /// Table de handles.
     pub handles: HandleTable,
+    /// Dernières émissions snapshot par onglet — base des
+    /// diffs `{since}` (E3), purgée avec les handles.
+    pub snaps: HashMap<TabId, StoredSnap>,
     /// Fin demandée (`session.close`) — la boucle sort après la
     /// réponse.
     pub closing: bool,

@@ -36,6 +36,38 @@ impl ElementInfo {
     }
 }
 
+/// Ligne sémantique d'un élément — une entrée de la marche
+/// [`Session::snapshot_entries`], jointe à la géométrie par
+/// `index` côté agent.
+#[derive(Debug, Clone)]
+pub struct SnapshotEntry {
+    /// Index arène du nœud (clé de jointure `GeometryReport`).
+    pub index: u32,
+    /// Génération à l'émission — figée dans les handles.
+    pub generation: u32,
+    /// Nom de balise minuscule.
+    pub tag: String,
+    /// Attributs source (rôle ARIA, `type`, `disabled`…).
+    pub attrs: Vec<(String, String)>,
+    /// Profondeur réelle dans le DOM (0 = racine document).
+    pub depth: u16,
+    /// Texte visible compacté, plafonné (nom accessible).
+    pub text: String,
+    /// `document.activeElement` === ce nœud.
+    pub focused: bool,
+}
+
+impl SnapshotEntry {
+    /// Valeur d'un attribut (`None` si absent).
+    #[must_use]
+    pub fn attr(&self, name: &str) -> Option<&str> {
+        self.attrs
+            .iter()
+            .find(|(n, _)| n.eq_ignore_ascii_case(name))
+            .map(|(_, v)| v.as_str())
+    }
+}
+
 impl Session {
     /// Sélection CSS **native** sur le DOM commis de l'onglet :
     /// le prélude est parsé par le moteur `explorer-css` (toute
@@ -145,6 +177,86 @@ impl Session {
             cur = dom.parent(n).ok().flatten();
         }
         Some(false)
+    }
+
+    /// Marche sémantique du document commis — une passe
+    /// pré-ordre qui collecte, pour chaque **élément**, la
+    /// génération, le tag, les attributs, la profondeur réelle
+    /// et le texte visible compacté. Sert au snapshot E3
+    /// (rôle/nom/états côté agent) : la géométrie est jointe
+    /// par index arène au `geometry_report` — cette sonde ne
+    /// touche pas au box tree.
+    ///
+    /// Bornes (contenu hostile) : `SNAP_CAP` éléments maximum,
+    /// texte compacté plafonné à `TEXT_CAP` caractères par
+    /// nœud, profondeur mémoïsée en une passe (les parents
+    /// précèdent toujours en pré-ordre).
+    ///
+    /// # Errors
+    ///
+    /// [`CoreError::UnknownTab`], [`CoreError::EmptyDocument`].
+    pub fn snapshot_entries(&self, tab: TabId) -> Result<Vec<SnapshotEntry>, CoreError> {
+        const SNAP_CAP: usize = 8192;
+        const TEXT_CAP: usize = 160;
+        let entry = self.tabs.get(&tab).ok_or(CoreError::UnknownTab(tab))?;
+        let dom = entry.dom.as_ref().ok_or(CoreError::EmptyDocument)?;
+        // Focus résolu en lecture seule — même vérification
+        // d'ancre `id`/`name` que `focused_node` (étape 92),
+        // mais sans ré-ancrage : une sonde ne mute jamais.
+        let focused = entry.focused.as_deref().and_then(|path| {
+            let n = super::dom_helpers::dom_path_node(dom, path)?;
+            let ok = entry
+                .focused_key
+                .as_ref()
+                .is_none_or(|(a, v)| dom.attribute_str(n, a).ok().flatten() == Some(v.as_str()));
+            ok.then_some(n)
+        });
+        let mut depths: std::collections::HashMap<NodeId, u16> = std::collections::HashMap::new();
+        let mut out = Vec::new();
+        for node in dom
+            .descendants(dom.document())
+            .map_err(|_| CoreError::EmptyDocument)?
+        {
+            if out.len() >= SNAP_CAP {
+                break;
+            }
+            if dom.element(node).is_err() {
+                continue;
+            }
+            let depth = match dom.parent(node).ok().flatten() {
+                Some(p) => depths.get(&p).copied().unwrap_or(0).saturating_add(1),
+                None => 0,
+            };
+            depths.insert(node, depth);
+            let attrs: Vec<(String, String)> = dom
+                .attributes(node)
+                .map(|attrs: &[Attribute]| {
+                    attrs
+                        .iter()
+                        .map(|a| (a.name.to_string(), a.value.clone()))
+                        .collect()
+                })
+                .unwrap_or_default();
+            // Texte propre borné : whitespace compacté + cap —
+            // le nom accessible n'a besoin que du début.
+            let text = dom
+                .text_content(node)
+                .map(|t| {
+                    let collapsed: String = t.split_whitespace().collect::<Vec<_>>().join(" ");
+                    collapsed.chars().take(TEXT_CAP).collect()
+                })
+                .unwrap_or_default();
+            out.push(SnapshotEntry {
+                index: node.index(),
+                generation: node.generation(),
+                tag: dom.tag_name(node).unwrap_or("?").to_string(),
+                attrs,
+                depth,
+                text,
+                focused: focused == Some(node),
+            });
+        }
+        Ok(out)
     }
 
     /// Résout un index d'arène en `NodeId` vivant — scan des

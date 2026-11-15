@@ -7671,8 +7671,16 @@ MCP = adaptateur, jamais la base.
   `query.select`, `input.click/type/hover` + `input.scroll{ref}`
   par handle, `wait.for` selector/stable, `click_at` marqué
   `degraded` — 11 tests socket réel.
-- [ ] **Étape 245. EAP-E3 : snapshot sémantique + diff `{since}`**
+- [x] **Étape 245. EAP-E3 : snapshot sémantique + diff `{since}`**
   (mapping rôle/nom borné, purge des handles au sweep de doc).
+  **Livrée (`nav/eap`)** : sonde `snapshot_entries` (marche DOM
+  une passe — tag/attrs/depth/texte borné/focus résolu lecture
+  seule), rôle ARIA `role=` puis tag affiné `type`, nom
+  accessible accName-lite, états natifs (focus/disabled/checked/
+  expanded/editable/link/selected/required), diff `{since}`
+  jointure `(index, génération)` — refs stables par
+  dédoublonnage des handles, `since` inconnu → snapshot complet.
+  13 tests socket réel + unitaire diff.
 - [ ] **Étape 246. EAP-E4 : adaptateur MCP** — `explorer-cli mcp`
   bascule REST→EAP, vols agents migrés.
 

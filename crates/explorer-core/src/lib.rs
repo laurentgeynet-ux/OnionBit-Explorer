@@ -36,5 +36,5 @@ pub use session::{
     DownloadRecord, DownloadState, EvalReply, FrameRegion, FrameTop, GeomBox, GeometryReport,
     HitTargets, InputEvent, InputOutcome, KeyMods, MediaAudioSpec, MediaCmd, MediaError,
     MediaHostState, MediaKind, MediaOfferInfo, MediaRect, MediaReport, MsePull, ProfileStore,
-    Session, SessionConfig, StoredCookie, TabId, TabInfo, Visit,
+    Session, SessionConfig, SnapshotEntry, StoredCookie, TabId, TabInfo, Visit,
 };
