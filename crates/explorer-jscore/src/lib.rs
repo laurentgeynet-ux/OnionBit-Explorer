@@ -1411,6 +1411,24 @@ pub fn last_phase_str() -> &'static str {
 /// `last_nat` ne couvrent pas.
 pub static LAST_FUN: std::sync::Mutex<String> = std::sync::Mutex::new(String::new());
 
+/// Étape 279 — balise GC en vol (wedge `XHR:responseText`
+/// ~50 s, vol field274 : les balises `host`/`phase` sont
+/// **périmées** pendant un mark/sweep — elles nomment le
+/// dernier écrivain, pas le site). `calls` figé +
+/// `gc_active=1` = passe GC en cours nommée ; `calls` figé +
+/// `gc_active=0` = vrai spin dans le site nommé par
+/// `host`/`phase`. ~2 ns, inconditionnelle.
+pub static GC_ACTIVE: std::sync::atomic::AtomicU8 = std::sync::atomic::AtomicU8::new(0);
+
+/// Compteur de passes GC menées (mark `mark_live` ou sweep
+/// `collect_bounded`) — s'il avance pendant un gel de
+/// `calls`, l'interprète meurt de faim en GC.
+pub static GC_PASSES: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+/// Durée de la dernière passe GC en ms — la borne
+/// « passée lente » se mesure au postmortem.
+pub static GC_LAST_MS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
 /// §B-59 — journal de fil d'Ariane **externe au fil JS** : un
 /// thread vidange les statiques `LAST_*` + commit/RSS vers un
 /// fichier toutes les ~400 ms (env `EXPLORER_JS_BREADCRUMB`).

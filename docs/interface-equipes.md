@@ -4000,3 +4000,40 @@ le site nommé par `drain`/`phase`/`stmt` suffira pour ouvrir
 le JS-C/R- suivant ; si WER est désarmé sur la machine de vol,
 l'armer (LocalDumps HKCU, étape 801) complète le canal faute.
 Juge = prochaine occurrence KAYAK.
+
+## Étape 279 — balise GC en vol (NAV → journal, résidu field274)
+
+**Verdict field274 (terrain)** : les morts KAYAK sont classées
+**kill externe** — `wait` rapporte `1`, `taskkill /PID /F`
+calibré rapporte `1` identique, WER LocalDumps armé vide sur 3
+morts, zéro panic/abort/console. Suspect sobre : sweep
+`taskkill /IM` d'une session agent parallèle (plusieurs pistes
+sur la machine) — KAYAK n'était que le décor. **Recommandation
+inter-pistes** : un cleanup doit vérifier nom/port/profil du
+registre daemons avant de tuer — jamais `taskkill /IM
+explorer-daemon.exe`.
+
+**Résidu moteur nommé** : gel ~50 s récurrent sous
+`calls` figé + `host=XMLHttpRequest:responseText` +
+`drain=applies`. Le getter décode ≤ ~800 Kio — O(n) trivial,
+le gel ne vit pas dedans : les balises `host`/`phase` sont
+**périmées** pendant tout travail sans écrivain balisé. Le
+suspect n°1 est le GC (`mark_live` mid-eval sous `mem_over`,
+sweep `collect_bounded` à frontière de job) — aucun des deux
+n'écrivait de balise.
+
+**Livré** : `GC_ACTIVE` (0/1 mark/2 sweep), `GC_PASSES`,
+`GC_LAST_MS` — atomiques ~2 ns aux frontières des deux
+fonctions ; ligne de vol += `gc=<a>/<p>@<ms>ms`.
+
+**Discrimination post-279** : `calls` figé + `gc>0` = famine
+GC (passe longue, site mark/sweep nommé) ; `calls` figé +
+`gc=0` = vrai spin hôte (`host`/`phase` alors fiables) ;
+`gc>0` persistant + `passes` qui avance = starvation répétée,
+pas une passe lente.
+
+**Reste** : si `gc` confirme la famine GC, bornes candidates
+— time-slice du sweep (`collect_bounded` déjà borné en
+cellules), seuil `mem_over` estimé vs réel, cache du
+`responseText` décodé dans `XhrData`. Juge = prochaine
+occurrence.

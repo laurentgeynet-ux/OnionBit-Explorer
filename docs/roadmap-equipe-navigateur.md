@@ -7959,6 +7959,21 @@ MCP = adaptateur, jamais la base.
   — un `alive` résiduel après cette étape exclut le kill
   console et resserre sur stack overflow, alloc-abort ou
   kill par PID. `EXPLORER_FLIGHT_MS/LOG/MAX_KB` (règle 13).
+- [x] **Étape 279. Balise GC en vol — wedge `XHR` nommé**
+  (`explorer-jscore`/`explorer-daemon`, résidu du verdict
+  field274 : gel ~50 s récurrent sous `calls` figé +
+  `host=XMLHttpRequest:responseText` + `drain=applies` —
+  mais les balises `host`/`phase` nomment le **dernier
+  écrivain**, pas le site en cours : pendant un mark/sweep
+  GC rien ne les touche et elles incriminent à tort le
+  dernier hôte). `GC_ACTIVE` (1 mark / 2 sweep, atomique
+  ~2 ns), `GC_PASSES`, `GC_LAST_MS` armés dans
+  `mark_live`/`collect_bounded` ; le flight recorder émet
+  `gc=<active>/<passes>@<ms>ms` par beat. Discrimination
+  postmortem : `calls` figé + `gc>0` = famine GC nommée
+  (passe longue sur heap hydraté) ; `calls` figé +
+  `gc=0` = vrai spin dans le site `host`/`phase` — les
+  deux classes de wedge se séparent enfin.
 - [x] **Étape 278. Baseline v2 — cliquet par famille +
   historique jsonl** — le cliquet agrégé laissait passer
   une famille qui régresse absorbée par la progression

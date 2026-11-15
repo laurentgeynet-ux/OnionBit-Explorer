@@ -651,8 +651,14 @@ fn spawn_flight_recorder(death_log: &Path) {
             let drain = explorer_core::LAST_DRAIN.lock().map_or("?", |g| *g);
             let areq = explorer_jscore::LAST_ALLOC_REQ.load(std::sync::atomic::Ordering::Relaxed);
             let calls = explorer_jscore::CALL_N.load(std::sync::atomic::Ordering::Relaxed);
+            // Étape 279 — balise GC en vol : `calls` figé +
+            // `gc` > 0 = wedge mark/sweep nommé ; `gc`=0 + `calls`
+            // figé = vrai spin dans le site `host`/`phase`.
+            let gc = explorer_jscore::GC_ACTIVE.load(std::sync::atomic::Ordering::Relaxed);
+            let gcp = explorer_jscore::GC_PASSES.load(std::sync::atomic::Ordering::Relaxed);
+            let gcms = explorer_jscore::GC_LAST_MS.load(std::sync::atomic::Ordering::Relaxed);
             let line = format!(
-                "t={}ms rss={}MiB commit={}MiB | drain={} | calls={} | frame={} | fun={} | stmt={} | expr={} | nat={} | host={} | phase={} | areq={} | stats={}\n",
+                "t={}ms rss={}MiB commit={}MiB | drain={} | calls={} | gc={gc}/{gcp}@{gcms}ms | frame={} | fun={} | stmt={} | expr={} | nat={} | host={} | phase={} | areq={} | stats={}\n",
                 t0.elapsed().as_millis(),
                 rss,
                 com,

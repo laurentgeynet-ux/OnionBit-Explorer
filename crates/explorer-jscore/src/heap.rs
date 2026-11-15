@@ -404,6 +404,11 @@ impl Heap {
         // marques chaudes au census `Str` des kills ; chaque
         // phase mark se ré-initialise elle-même au lieu de
         // présupposer la nettoyage du passant précédent).
+        // Étape 279 — balise GC en vol : un `calls` figé sous
+        // `gc_active` = l'interprète attend une passe, pas un
+        // hôte (wedge `XHR:responseText` ≈50 s, vol field274).
+        let t0 = std::time::Instant::now();
+        crate::GC_ACTIVE.store(1, std::sync::atomic::Ordering::Relaxed);
         self.marks.fill(false);
         let mut worklist: Vec<ObjId> = Vec::new();
         let mut envs: HashSet<usize> = HashSet::new();
@@ -468,6 +473,7 @@ impl Heap {
             tracing::info!("job: gc.sweep dead={dead} {kinds}");
         }
         // -- Sweep --
+        crate::GC_ACTIVE.store(2, std::sync::atomic::Ordering::Relaxed);
         let mut swept = 0usize;
         let mut live_bytes = 0usize;
         for (i, slot) in self.cells.iter_mut().enumerate() {
@@ -510,6 +516,12 @@ impl Heap {
         if self.bytes > self.peak_bytes {
             self.peak_bytes = self.bytes;
         }
+        crate::GC_ACTIVE.store(0, std::sync::atomic::Ordering::Relaxed);
+        crate::GC_PASSES.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        crate::GC_LAST_MS.store(
+            t0.elapsed().as_millis() as u64,
+            std::sync::atomic::Ordering::Relaxed,
+        );
         swept
     }
 
@@ -528,6 +540,8 @@ impl Heap {
     where
         F: FnMut(&mut dyn FnMut(ObjId)),
     {
+        let t0 = std::time::Instant::now();
+        crate::GC_ACTIVE.store(1, std::sync::atomic::Ordering::Relaxed);
         self.marks.fill(false);
         let mut worklist: Vec<ObjId> = Vec::new();
         let mut envs: HashSet<usize> = HashSet::new();
@@ -573,6 +587,12 @@ impl Heap {
         // hors arène, leur vivant exact est `str_acct`.) La passe
         // suivante (`collect`/`mark_live`) se ré-initialise en
         // tête — invariant explicite, pas d'état partagé.
+        crate::GC_ACTIVE.store(0, std::sync::atomic::Ordering::Relaxed);
+        crate::GC_PASSES.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        crate::GC_LAST_MS.store(
+            t0.elapsed().as_millis() as u64,
+            std::sync::atomic::Ordering::Relaxed,
+        );
         (live, bytes)
     }
 
