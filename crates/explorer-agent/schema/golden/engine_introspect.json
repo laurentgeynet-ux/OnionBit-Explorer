@@ -289,6 +289,79 @@
           "comment": "chemin fenêtré — le raster repeint la tranche viewport par décision, mais le rapport sert le vrai diff de listes (valeurs illustratives)"
         }
       }
+    },
+    {
+      "wire": "client → serveur",
+      "message": {
+        "jsonrpc": "2.0",
+        "id": 38,
+        "method": "engine.cascade",
+        "params": {
+          "tab": 1,
+          "ref": "el:3"
+        }
+      }
+    },
+    {
+      "wire": "serveur → client",
+      "message": {
+        "jsonrpc": "2.0",
+        "id": 38,
+        "result": {
+          "node": 3,
+          "declarations": [
+            {
+              "prop": "color",
+              "value": "navy",
+              "selector": "a.nav",
+              "sheet": 1,
+              "origin": "author",
+              "inline": false,
+              "rank": 0,
+              "scope_rank": 0,
+              "layer": [1],
+              "specificity": [0, 1, 1],
+              "order": 42,
+              "verdict": "winner",
+              "inherited_from": null,
+              "comment": "retenue — sa valeur écrite dans le ComputedStyle"
+            },
+            {
+              "prop": "color",
+              "value": "red",
+              "selector": "a",
+              "sheet": 1,
+              "origin": "author",
+              "inline": false,
+              "rank": 0,
+              "scope_rank": 0,
+              "layer": [1],
+              "specificity": [0, 0, 1],
+              "order": 17,
+              "verdict": { "eliminated_by": "specificity" },
+              "inherited_from": null,
+              "comment": "perdante au tri — nomme la première composante divergente"
+            },
+            {
+              "prop": "display",
+              "value": "block",
+              "selector": "",
+              "sheet": 4294967295,
+              "origin": null,
+              "inline": false,
+              "rank": 0,
+              "scope_rank": 0,
+              "layer": [],
+              "specificity": [0, 0, 0],
+              "order": 0,
+              "verdict": "initial",
+              "inherited_from": null,
+              "comment": "aucune candidate — valeur initiale"
+            }
+          ],
+          "comment": "une entrée par déclaration × longhand — état committé, vérité de cascade (pas post-animation)"
+        }
+      }
     }
   ]
 }

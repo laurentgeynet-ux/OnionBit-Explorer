@@ -531,6 +531,9 @@ pub enum Method {
     /// du replay raster (cap `engine`, étape 249).
     #[serde(rename = "engine.paint_stats")]
     EnginePaintStats(TabParams),
+    /// Verdicts de cascade d'un élément — étape 253.
+    #[serde(rename = "engine.cascade")]
+    EngineCascade(CascadeParams),
     /// Suspects heuristiques bornés — triage affichage +
     /// santé moteur (cap `engine`, étape 248).
     #[serde(rename = "engine.anomalies")]
@@ -764,6 +767,17 @@ pub struct ClickParams {
     /// Auto-wait d'actionabilité.
     #[serde(default)]
     pub opts: Option<ActionOpts>,
+}
+
+/// `tab` + `ref` pour `engine.cascade` (étape 253 — pas
+/// d'`opts` : la lecture est pure, rien à attendre).
+#[derive(Debug, Clone, Deserialize)]
+pub struct CascadeParams {
+    /// Onglet.
+    pub tab: TabId,
+    /// Handle cible — `StaleRef` si la révision a bougé.
+    #[serde(rename = "ref")]
+    pub elem_ref: ElementRef,
 }
 
 /// `ref` seul + opts.

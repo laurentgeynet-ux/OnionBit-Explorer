@@ -383,6 +383,13 @@
       "result": { "type": ["object", "null"], "properties": { "windowed": { "type": "boolean" }, "damage": { "type": "object", "properties": { "full": { "type": "boolean" }, "rects": { "type": "array", "items": { "type": "object", "properties": { "x": { "type": "number" }, "y": { "type": "number" }, "width": { "type": "number" }, "height": { "type": "number" } }, "required": ["x", "y", "width", "height"] } } }, "required": ["full"] }, "items_prev": { "type": "integer" }, "items_cur": { "type": "integer" } } }
     },
 
+    "engine.cascade": {
+      "x-phase": "E5",
+      "description": "Verdicts de cascade d'un élément par sa ref (étape 253 — consomme `StyleEngine::explain`, R-301) : `{node, declarations[]}` — une entrée par **déclaration × longhand** : `{prop, value, selector, sheet, origin, inline, rank, scope_rank, layer, specificity, order, verdict, inherited_from}`. `verdict` = `winner` | `{"eliminated_by": origin|scope|layer|specificity|order}` | `{"gated": pseudo|media|container|scope|mode}` | `dropped_validation` | `invalid_at_computed` | `superseded` | `presentational_hint` | `inherited` | `initial`. État **committé** : style parent lu sur la boîte posée, `containers` recalculés depuis l'arbre committé (un verdict `gated(container)` peut différer de la passe réelle si la bascule @container a déplacé le conteneur), pseudo-states tous faux comme au paint — vérité de cascade, pas post-animation. Hors borne : déclarations mortes au parse (`decl.malformed`), mutations en vol, pseudo-éléments. `stale_ref` si la ref a expiré, `engine_unavailable` avant la première navigation committée.",
+      "params": { "type": "object", "properties": { "tab": { "$ref": "#/$defs/tabId" }, "ref": { "$ref": "#/$defs/elementRef" } }, "required": ["tab", "ref"], "additionalProperties": false },
+      "result": { "type": "object", "properties": { "node": { "type": "integer" }, "declarations": { "type": "array", "items": { "type": "object" } } }, "required": ["node", "declarations"] }
+    },
+
     "input.click": {
       "x-phase": "E2",
       "params": {

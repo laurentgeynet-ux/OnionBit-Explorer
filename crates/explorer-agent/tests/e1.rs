@@ -452,6 +452,57 @@ async fn engine_introspection() {
     srv.abort();
 }
 
+/// `engine.cascade` — verdicts par déclaration × longhand
+/// sur l'état committé (étape 253) : une ref fraîche de
+/// snapshot sert au moins un verdict posé ; ref pourrie →
+/// `StaleRef`.
+#[tokio::test]
+async fn engine_cascade_verdicts() {
+    let (mut a, srv) = connect().await;
+    open(&mut a).await;
+    let r = a.call("tab.open", json!({})).await;
+    let tab = r["result"]["tab"].as_u64().expect("tab");
+    let r = a
+        .call("nav.goto", json!({"tab": tab, "url": "http://t.local/x"}))
+        .await;
+    assert!(r["error"].is_null(), "{r}");
+    let r = a.call("snapshot.get", json!({"tab": tab})).await;
+    let elem_ref = r["result"]["nodes"]
+        .as_array()
+        .and_then(|n| n.first())
+        .and_then(|n| n["ref"].as_str())
+        .expect("une ref dans le snapshot");
+    let r = a
+        .call("engine.cascade", json!({"tab": tab, "ref": elem_ref}))
+        .await;
+    assert!(r["error"].is_null(), "{r}");
+    let decls = r["result"]["declarations"]
+        .as_array()
+        .expect("declarations");
+    assert!(!decls.is_empty(), "{r}");
+    assert!(
+        decls.iter().all(
+            |d| d["prop"].is_string() && (d["verdict"].is_string() || d["verdict"].is_object())
+        ),
+        "verdict structuré : {r}"
+    );
+    assert!(
+        decls.iter().any(|d| d["verdict"] == "winner"
+            || d["verdict"] == "inherited"
+            || d["verdict"] == "initial"),
+        "un verdict posé attendu : {r}"
+    );
+    let r = a
+        .call("engine.cascade", json!({"tab": tab, "ref": "el:999999"}))
+        .await;
+    assert_eq!(r["error"]["code"], -32002, "{r}");
+    let r = a
+        .call("engine.cascade", json!({"tab": 999, "ref": elem_ref}))
+        .await;
+    assert_eq!(r["error"]["code"], -32005);
+    srv.abort();
+}
+
 /// Page avec un interactif caché — `display:none` laisse
 /// l'élément dans le DOM mais hors de l'arbre de boîtes.
 const ANOMALY_PAGE: &str = r#"<!doctype html><html><body>

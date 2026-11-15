@@ -551,6 +551,14 @@ fn engine_tools() -> Value {
             tab()
         ),
         t(
+            "engine_cascade",
+            "Verdicts de cascade d'un élément {tab,ref}",
+            obj(
+                json!({"tab":{"type":"integer"},"ref":{"type":"string"}}),
+                &["tab", "ref"]
+            )
+        ),
+        t(
             "engine_anomalies",
             "Suspects d'affichage/santé bornés — indices, pas verdicts {tab,max?}",
             obj(
@@ -648,6 +656,7 @@ fn to_eap(name: &str, args: &Value) -> Option<(&'static str, Value)> {
             json!({"tab": tab, "reset": args["reset"]}),
         ),
         "engine_paint_stats" => ("engine.paint_stats", json!({"tab": tab})),
+        "engine_cascade" => ("engine.cascade", json!({"tab": tab, "ref": args["ref"]})),
         "engine_anomalies" => ("engine.anomalies", json!({"tab": tab, "max": args["max"]})),
         "net_events" => (
             "net.events",

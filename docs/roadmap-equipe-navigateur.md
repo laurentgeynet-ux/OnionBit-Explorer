@@ -7775,6 +7775,32 @@ MCP = adaptateur, jamais la base.
   vraie décision de repli (précision PIPE), cap `engine`.
   Help + schéma + golden + MCP `frame_diff`. Verrou :
   socket `engine_introspection` (booléens, `items_cur`).
+- [x] **Étape 253. EAP `engine.cascade{ref}` : verdicts par
+  déclaration × longhand** — **Livrée (`main`)** : consomme
+  `StyleEngine::explain` (R-301 PIPE) sur l'état
+  **committé**. `Session::engine_cascade(tab, index)` :
+  ref → `node_generation` (stale honnête) → `NodeId` ;
+  `ComputedStyle` parent lu sur la **boîte committée** du
+  parent (`cascade_find_box`) ; `containers` recalculées
+  par `measure_containers(&tree)` — jetées après le
+  paint, borne « géométrie committée » du contrat (un
+  verdict `gated(container)` peut différer de la passe
+  réelle si la bascule a déplacé le conteneur) ;
+  pseudo-states tous faux comme au paint — vérité de
+  cascade, pas post-animation. Mapping JSON champ par
+  champ (`DeclTrace` non `Serialize`) : verdict `winner` |
+  `{eliminated_by: origin|scope|layer|specificity|order}` |
+  `{gated: pseudo|media|container|scope|mode}` |
+  `dropped_validation` | `invalid_at_computed` |
+  `superseded` | `presentational_hint` | `inherited` +
+  `inherited_from` | `initial` ; provenance sélecteur
+  texte/feuille/origine/inline + clé de tri complète.
+  Hors borne (schéma) : mortes au parse, DOM en vol,
+  pseudo-éléments. `StaleRef` comme les autres verbes ref,
+  `engine_unavailable` avant le premier commit. Help +
+  schéma + golden + MCP `engine_cascade`. Verrou : socket
+  `engine_introspection` (declarations non vides, verdict
+  posé, ref pourrie → -32002).
 
 ## Piste JS (JS-C26+) — spécialiste `explorer-jscore`
 

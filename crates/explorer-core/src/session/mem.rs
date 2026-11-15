@@ -46,6 +46,7 @@
 
 use std::collections::HashMap as StdHashMap;
 
+use explorer_dom::NodeId;
 use explorer_render::DisplayItem;
 
 use super::*;
@@ -524,6 +525,53 @@ impl Session {
         }))
     }
 
+    /// Explication de cascade d'un nœud (étape 253 —
+    /// `engine.cascade`) : consomme [`StyleEngine::explain`]
+    /// (R-301) sur l'état **committé** — `ComputedStyle`
+    /// parent lu sur la boîte committée du parent,
+    /// `ContainerMeasure` recalculées par
+    /// `measure_containers` sur l'arbre de boîtes committé
+    /// (elles sont jetées après le paint — borne
+    /// « géométrie committée » du contrat : un verdict
+    /// `gated(container)` peut différer de la passe
+    /// réelle si la bascule `@container` a déplacé le
+    /// conteneur lui-même). Pseudo-states tous faux, comme
+    /// au paint — la méthode sert la vérité de cascade,
+    /// pas la vérité post-animation (`apply_anim_overrides`
+    /// est hors borne). `None` si l'onglet n'existe pas,
+    /// avant la première navigation committée, ou si le
+    /// nœud est mort (génération divergente).
+    #[must_use]
+    pub fn engine_cascade(&self, tab: TabId, index: u32) -> Option<serde_json::Value> {
+        let entry = self.tabs.get(&tab)?;
+        let (Some(dom), Some(tree), Some(eng)) = (
+            entry.dom.as_ref(),
+            entry.tree.as_ref(),
+            entry.style_eng.as_ref(),
+        ) else {
+            return None;
+        };
+        let node = NodeId::from_parts(index, self.node_generation(tab, index)?);
+        let parent = dom
+            .parent(node)
+            .ok()
+            .flatten()
+            .and_then(|p| cascade_find_box(tree, p))
+            .map(|bx| &bx.style);
+        let env = super::apply::viewport_env(
+            self.viewport,
+            self.color_scheme,
+            self.js_factory.is_some(),
+            self.scale,
+        );
+        let containers = explorer_layout::measure_containers(tree);
+        let decls = eng.explain(dom, node, &env, parent, None, &|_| false, Some(&containers));
+        Some(serde_json::json!({
+            "node": index,
+            "declarations": decls.iter().map(cascade_decl_json).collect::<Vec<_>>(),
+        }))
+    }
+
     /// Compteurs de peinture du **dernier paint commis**
     /// (verbe EAP `engine.paint_stats`, étape 249) : les
     /// `EmitStats` de la build de display list (collectées à
@@ -603,4 +651,74 @@ impl Session {
             },
         }))
     }
+}
+
+/// Première boîte committée portant `node` — source du
+/// `ComputedStyle` parent pour [`Session::engine_cascade`]
+/// (le style committé est la vérité servie ; il peut
+/// différer du style recomputé si le DOM a muté depuis —
+/// la génération du nœud cible est validée en amont).
+fn cascade_find_box(
+    bx: &explorer_layout::LayoutBox,
+    node: NodeId,
+) -> Option<&explorer_layout::LayoutBox> {
+    if bx.node == Some(node) {
+        return Some(bx);
+    }
+    bx.children.iter().find_map(|c| cascade_find_box(c, node))
+}
+
+/// Mapping JSON d'un `DeclTrace` (R-301) — le type PIPE
+/// n'est pas `Serialize` : la forme émise est le contrat
+/// (même politique que `EmitStats`/`ReplayStats`).
+/// `verdict` = chaîne simple ou `{clé: valeur}` pour les
+/// variantes qui portent une cause (`eliminated_by`,
+/// `gated`).
+fn cascade_decl_json(t: &explorer_css::DeclTrace) -> serde_json::Value {
+    use explorer_css::{DeclVerdict, ElimKey, GateKind, Origin};
+    let verdict = match t.verdict {
+        DeclVerdict::Winner => serde_json::json!("winner"),
+        DeclVerdict::EliminatedBy(k) => serde_json::json!({
+            "eliminated_by": match k {
+                ElimKey::Origin => "origin",
+                ElimKey::Scope => "scope",
+                ElimKey::Layer => "layer",
+                ElimKey::Specificity => "specificity",
+                ElimKey::Order => "order",
+            }
+        }),
+        DeclVerdict::Gated(g) => serde_json::json!({
+            "gated": match g {
+                GateKind::Pseudo => "pseudo",
+                GateKind::Media => "media",
+                GateKind::Container => "container",
+                GateKind::Scope => "scope",
+                GateKind::Mode => "mode",
+            }
+        }),
+        DeclVerdict::DroppedValidation => serde_json::json!("dropped_validation"),
+        DeclVerdict::InvalidAtComputed => serde_json::json!("invalid_at_computed"),
+        DeclVerdict::Superseded => serde_json::json!("superseded"),
+        DeclVerdict::PresentationalHint => serde_json::json!("presentational_hint"),
+        DeclVerdict::Inherited => serde_json::json!("inherited"),
+        DeclVerdict::Initial => serde_json::json!("initial"),
+    };
+    serde_json::json!({
+        "prop": t.prop,
+        "value": t.value,
+        "selector": t.selector,
+        "sheet": t.sheet,
+        "origin": t.origin.map(|o| match o {
+            Origin::UserAgent => "ua",
+            Origin::Author => "author",
+        }),
+        "inline": t.inline,
+        "rank": t.rank,
+        "scope_rank": t.scope_rank,
+        "layer": t.layer,
+        "specificity": t.specificity,
+        "order": t.order,
+        "verdict": verdict,
+        "inherited_from": t.inherited_from.map(NodeId::index),
+    })
 }

@@ -92,6 +92,11 @@ const HELP: &[(&str, Option<Capability>, &str)] = &[
         "engine.paint_stats",
     ),
     (
+        "d'où vient ce style ?",
+        Some(Capability::Engine),
+        "engine.cascade",
+    ),
+    (
         "quelles requêtes réseau ?",
         Some(Capability::Net),
         "net.events{since_seq}",
@@ -175,6 +180,7 @@ fn cap_of(m: &Method) -> Option<Capability> {
         Method::EngineLayout(_)
         | Method::EnginePipeline(_)
         | Method::EnginePaintStats(_)
+        | Method::EngineCascade(_)
         | Method::EngineAnomalies(_)
         | Method::FrameDiff(_) => Some(Capability::Engine),
         Method::NetEvents(_) => Some(Capability::Net),
@@ -520,6 +526,7 @@ async fn run(
         | Method::EngineLayout(_)
         | Method::EnginePipeline(_)
         | Method::EnginePaintStats(_)
+        | Method::EngineCascade(_)
         | Method::EngineAnomalies(_)
         | Method::NetEvents(_)
         | Method::FrameDiff(_) => perceive_verbs(st, conn, method).await,
@@ -904,9 +911,8 @@ async fn perceive_verbs(
                 .map_or_else(crate::anomalies::default_max, |m| m as usize);
             crate::anomalies::run(st, conn, p.tab, max).await
         }
-        Method::NetEvents(_) | Method::FrameDiff(_) => {
-            net_frame_verbs(st, conn, method).await
-        }
+        Method::EngineCascade(p) => engine_cascade_verb(st, conn, p).await,
+        Method::NetEvents(_) | Method::FrameDiff(_) => net_frame_verbs(st, conn, method).await,
         // Verbe hors groupe — garde-fou interne (le dispatch
         // en amont route par construction ; si ça arrive, la
         // dégradation honnête est une erreur moteur).
@@ -948,6 +954,30 @@ async fn net_frame_verbs(
         _ => Err(err(
             ErrorCode::EngineUnavailable,
             "verbe hors groupe — routage interne",
+        )),
+    }
+}
+
+/// `engine.cascade` — verdicts de cascade d'un élément par
+/// sa ref (étape 253). `StaleRef` comme les autres verbes
+/// `ref` ; `EngineUnavailable` si l'état n'est pas encore
+/// committé (première nav en vol ou nœud mort entre la
+/// résolution de la ref et la lecture — la génération est
+/// re-validée côté session).
+async fn engine_cascade_verb(
+    st: &Arc<AgentShared>,
+    conn: &mut AgentConn,
+    p: crate::proto::CascadeParams,
+) -> Result<Value, RpcError> {
+    scope(conn, p.tab)?;
+    tab_exists(st, p.tab).await?;
+    let handle = resolve(conn, st, p.tab, &p.elem_ref)?;
+    let s = st.session.lock().await;
+    match s.engine_cascade(p.tab, handle.node) {
+        Some(r) => Ok(r),
+        None => Err(err(
+            ErrorCode::EngineUnavailable,
+            "pas d'état committé — navigation en vol, réessayer",
         )),
     }
 }

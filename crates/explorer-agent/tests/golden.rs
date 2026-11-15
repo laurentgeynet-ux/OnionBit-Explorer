@@ -72,6 +72,7 @@ fn golden_methods_known() {
         "engine.layout",
         "engine.pipeline",
         "engine.paint_stats",
+        "engine.cascade",
         "engine.anomalies",
         "net.events",
         "frame.diff",
