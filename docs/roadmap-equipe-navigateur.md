@@ -12902,6 +12902,23 @@ chaque gain rapporté contre les **deux** archétypes.
   (`ic_hit`/`ic_miss`/`ic_disarm` au snapshot) pour
   borner la couverture du seul court-circuit existant.
   Dependency-groups = infra lourde, dernier recours.
+- [x] **JS-C540 — `rabs_memo` étendue à la marche d'écriture** :
+  la boucle `write_prop_at` payait `find_own_ai`
+  par maillon hors IC (sites poly/désarmés).
+  Le memo own-absent par maillon `(shape,kid)`
+  de la lecture (C521b) répond à la *même*
+  question → consulté dans la boucle : hit =
+  hash, miss = lookup+insert (leçon N5.21 —
+  pas de fold chaîne). Apprentissages partagés
+  lecture↔écriture ; chase proto fusionné dans
+  le même `heap.obj` (2→1 accès/maillon) ;
+  `kid` paresseux (own-first n'interne pas).
+  Shape-invalidation : prop apparue après coup
+  → shape change → entrée caduque → marche.
+  Verrous : c530 9 (+lock setter profond sous
+  mémo-hit, refus non-writable interposé,
+  partage lecture→écriture), lang 315, dom 265.
+  Lecture : `prop_scan`/`prop_ns` part écriture.
 - [x] **JS-C539 — sonde `arridx:` (callsite des essais
   `array_index`)** : `arridx_try` = 2,53 M —
   intrinsèque depuis les hoists V-3b (1 essai

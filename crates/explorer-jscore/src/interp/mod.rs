@@ -9133,6 +9133,12 @@ impl Engine {
         if found && armed {
             links.push(id);
         }
+        // JS-C540 — `kid` (clé internée de la mémo own-absent
+        // `rabs_memo`, même hachage que la lecture — les
+        // apprentissages sont partagés écriture ↔ lecture) est
+        // paresseux : l'own-first `found` court-circuite la
+        // boucle sans payer l'`intern`.
+        let mut kid: Option<u64> = None;
         while !found {
             let Some(cid) = cur else { break };
             // Un proxy *au milieu* de la chaîne intercepte aussi
@@ -9163,7 +9169,46 @@ impl Engine {
             if armed {
                 links.push(cid);
             }
-            match self.find_own_ai(cid, key, ai) {
+            // JS-C540 — mémo own-absent **par maillon** partagée
+            // avec la lecture (`rabs_memo`, même question à
+            // `find_own_ai`) : hit = un hash au lieu du lookup,
+            // miss = lookup + insert — jamais pire que la
+            // marche d'origine (leçon N5.21 : pas de fold de
+            // chaîne — chaque maillon se revalide par sa shape).
+            // Le chase proto est fusionné dans le même
+            // `heap.obj` (avant : 2 accès par maillon).
+            let mut slow = true;
+            let mut mkey = None;
+            let mut nxt = None;
+            if let Some(o) = self.heap.obj(cid) {
+                nxt = match &o.proto {
+                    Value::Obj(p) => Some(*p),
+                    _ => None,
+                };
+                if Self::ic_eligible(o, key, ai) {
+                    let k = *kid.get_or_insert_with(|| {
+                        let ki = crate::intern(key);
+                        (ki.as_ptr() as usize as u64) ^ (key.len() as u64) << 48
+                    });
+                    let mk = (o.shape(), k);
+                    mkey = Some(mk);
+                    slow = !self.rabs_memo.contains(&mk);
+                }
+            }
+            let ownp = if slow {
+                let r = self.find_own_ai(cid, key, ai);
+                if r.is_none() {
+                    if let Some(mk) = mkey {
+                        if self.rabs_memo.len() < RABS_MEMO_CAP {
+                            self.rabs_memo.insert(mk);
+                        }
+                    }
+                }
+                r
+            } else {
+                None
+            };
+            match ownp {
                 Some(Prop::Acc { set, .. }) => {
                     // JS-C531 — les sites à setter hérité
                     // apprennent `Acc` : la chaîne légère est
@@ -9190,10 +9235,7 @@ impl Engine {
                 } // data writable → shadow with own write
                 None => {}
             }
-            cur = match self.heap.obj(cid).map(|o| o.proto.clone()) {
-                Some(Value::Obj(p)) => Some(p),
-                _ => None,
-            };
+            cur = nxt;
             depth += 1;
             if depth > MAX_PROTO_DEPTH {
                 complete = false;

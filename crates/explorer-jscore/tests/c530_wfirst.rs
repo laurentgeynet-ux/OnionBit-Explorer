@@ -127,3 +127,32 @@ fn c530_reflect_set_and_proto_change() {
         "4/6"
     );
 }
+
+/// JS-C540 — mémo own-absent par maillon **partagée** avec la
+/// lecture (`rabs_memo`) dans la marche d'écriture : les
+/// maillons prouvés vides sautent `find_own_ai` — un setter en
+/// profondeur reste intercepté sous mémo-hit, une prop
+/// apparue après coup (changement de shape du maillon)
+/// invalide l'entrée → la donnée héritée non-writable refuse
+/// toujours, et une lecture qui a peuplé la mémo sert la
+/// marche d'écriture suivante.
+#[test]
+fn c540_wabs_memo_walks_and_invalidates() {
+    assert_eq!(
+        eval(
+            "var log=0;var p={set z(v){log+=v}};var m=Object.create(p);var l=Object.create(m);\
+             l.z=1;l.z=2;\
+             Object.defineProperty(m,'z',{value:9,writable:false});\
+             l.z=5;\
+             var log2=0;var p2={set q(v){log2+=v}};var m2=Object.create(p2);var l2=Object.create(m2);\
+             l2.q;l2.q=10;l2.q=20;\
+             log+'/'+(l.hasOwnProperty('z')?'own':'absent')+'/'+l.z+'/'+log2"
+        ),
+        // l.z=1,2 → setter ×2 (memo-hit aux 2e marche n'a pas
+        // masqué p) ; après defineProperty sur m → refus
+        // (log figé, pas d'own z, lecture hérite 9) ;
+        // l2.q lit d'abord (mémo peuplée par la lecture) puis
+        // setter ×2 → log2=30.
+        "3/absent/9/30"
+    );
+}
