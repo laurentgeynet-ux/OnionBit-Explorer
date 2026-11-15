@@ -74,8 +74,10 @@ pwsh -File scripts/vol_joblimit.ps1 -TargetPid <pid> -LimitMB 5120
 
 # 0.5 artefacts au corpus, auto-contenus par vol
 #   logs    → Explorer-data\vols\vol<N>\logs\*.log
+#             (daemon + explorer_daemon_flight/death + watch)
 #   PNG     → Explorer-data\vols\vol<N>\captures\<cible>.png
-#   rapport → Explorer-data\vols\vol<N>\RAPPORT_VOL_<date>_AGENT<n>_<TAG>.md
+#   rapport → Explorer-data\vols\rapports\RAPPORT_VOL_<date>_
+#             AGENT<n>_<TAG>.md (gabarit rapports\_TEMPLATE.md)
 ```
 
 **Coordination multi-équipes — `CLAIMS.md`** : plusieurs
@@ -747,8 +749,9 @@ Protocole complet : `Explorer-data\vols\SYNTHESE.md` §G.
 `Explorer-data\vols\` — `Explorer-data/` entier est gitignoré
 (`git init` local SANS remote possible pour versionner le
 corpus). Tous les vols lisent et écrivent là : `SYNTHESE.md`,
-`SYNTHESE_JOURNAL.md`, `vol<N>\RAPPORT_VOL_*.md`,
-`vol<N>\logs/`, `vol<N>\captures/` — **peu importe le
+`SYNTHESE_JOURNAL.md`, `rapports\RAPPORT_VOL_*.md` (gabarit
+`rapports\_TEMPLATE.md`), `vol<N>\{logs,captures,profile\}`,
+`field<N>\{VERDICT.md,logs\}` — **peu importe le
 worktree qui fait tourner le daemon** : `paths::data_root()`
 remonte depuis cwd/exe jusqu'à l'ancêtre portant
 `Explorer-data/`, donc un daemon lancé depuis un worktree
