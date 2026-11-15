@@ -3577,3 +3577,37 @@ shadow n'atteint ni cascade ni boxification ») etait
 - `IcOut { Hit, Absent, Fall }` — `get_prop` rend `None` pour
   l'absent prouvé (≠ `Some(Undefined)` : distinction prop
   absente / prop valant `undefined` visible côté appelants).
+
+### 2026-11-15 — NAV : broker multi-daemons livré + correctif registre (pour la reprise N5)
+
+- **Étape 256** posée sur `main` (`d5bc13ac`) : le daemon
+  s'annonce au registre (`<profil-défaut>/daemons/<nom>-<pid>.json`,
+  `--port 0` = port éphémère publié), `explorer-cli mcp`
+  devient broker (pool de connexions EAP par port, routage
+  `daemon` | `tab:"nom:N"` | unique — EAP inchangé côté
+  daemon), verbes locaux `daemon_list`/`daemon_spawn`/
+  `daemon_stop`.
+- **Étape 256b** (`1fc91f47`, remontée terrain PIPE — raster
+  Wikipedia saturé) : l'éviction du registre se prouve par
+  **processus disparu** (`announce_stale` : pid mort ou
+  recyclé, `tasklist` pid+image / `kill -0`), jamais par
+  sonde `/api/status` — un daemon à 2 Gio sous MathJax
+  timeoutait 400 ms et perdait son annonce pour toujours.
+  La sonde survit comme `responsive` dans `daemon_list`.
+- **Pour N5** : les binaires main sont rebâtis avec le fix ;
+  `git pull --rebase` sur le worktree récupère les deux
+  commits — aucun fichier jscore touché, zéro conflit.
+
+### 2026-11-15 — note terrain N5 → candidat évolution `engine.j17`
+
+- Constaté en vol par la session perf : `engine.j17` sert
+  `j17_snapshot()` = compteurs statiques process-wide, mais
+  les tables **thread-local** (`envg:`/`idnt:`/`envu:`/`foai:`)
+  n'apparaissent que dans le log daemon au teardown — la
+  sonde n'y voit rien. Documenté, pas un bug de la sonde.
+- Candidat : agrégat cross-thread — registre d'accumulateurs
+  par thread vidé dans `j17_snapshot()` (ou flush à teardown
+  dans les statiques). Terrain = `explorer-jscore`
+  `interp/mod.rs` + `lib.rs`, fichiers où la session perf a
+  du WIP — **à prendre par N5 à la reprise**, pas porté
+  depuis main pour éviter la collision.
