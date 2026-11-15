@@ -7816,6 +7816,20 @@ MCP = adaptateur, jamais la base.
   MCP. Verrou : `e3_diff_since` étendu (snap_seq,
   diff exact, éviction >8 → dégradation honnête).
 
+- [x] **Étape 255. EAP `engine.j17` : compteurs jscore
+  requêtables en vol** — **Livrée** : verbe
+  `engine.j17{tab}` (cap `engine`) → `{armed, snapshot}`
+  servant `j17_snapshot()` complet
+  (`prop_ns`/`rabs_*`/`eval:`/`stmt:`…) ; cumulatif
+  **process-wide** (statiques globales — `tab` = scope
+  contractuel, zéro verrou session), `armed:false`
+  honnête si désarmé. Couture : `j17_on` `pub`,
+  `explorer_js::j17_snapshot()` → `Option`,
+  `Session::j17_report()`. Boucle campagne perf
+  JS-C541→C548 fermée : conduire + mesurer + watcher
+  erreurs sur **une** connexion. Schéma + help +
+  `KNOWN_METHODS` + MCP `engine_j17` + verrou socket.
+
 ## Piste JS (JS-C26+) — spécialiste `explorer-jscore`
 
 Ordre dicté par les besoins de la piste produit d'abord, puis

@@ -226,6 +226,7 @@ const KNOWN_METHODS: &[&str] = &[
     "wait.for",
     "events.subscribe",
     "events.unsubscribe",
+    "engine.j17",
 ];
 
 /// Émet une réponse JSON — file bornée, `try_send` : un client

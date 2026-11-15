@@ -538,6 +538,12 @@ pub enum Method {
     /// santé moteur (cap `engine`, étape 248).
     #[serde(rename = "engine.anomalies")]
     EngineAnomalies(AnomalyParams),
+    /// Snapshot cumulatif des compteurs J17 d'`explorer-jscore`
+    /// — **process-wide** (statiques globales), le `tab` ne sert
+    /// que le contrat de scope (cap `engine`, étape 255).
+    /// `armed:false` = `EXPLORER_J17_PROF` désarmé.
+    #[serde(rename = "engine.j17")]
+    EngineJ17(TabParams),
     /// Complétions réseau de l'onglet — ring borné à
     /// séquence monotone : `{seq, kind, url, initiator,
     /// status, bytes, ms, from_cache}`, curseur

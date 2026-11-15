@@ -454,6 +454,18 @@ impl Session {
         }))
     }
 
+    /// Snapshot cumulatif des compteurs J17 du processus
+    /// (étape 255 — verbe `engine.j17` de la surface agent).
+    /// Lecture sans état d'onglet : les compteurs vivent en
+    /// statiques globales `explorer-jscore` — la réponse est
+    /// **process-wide**, le paramètre `tab` du verbe ne sert
+    /// que le contrat de scope. `None` = instrumentation
+    /// désarmée. Hors chemin chaud, lecture synchrone bornée.
+    #[must_use]
+    pub fn j17_report() -> Option<String> {
+        explorer_js::j17_snapshot()
+    }
+
     /// Complétions réseau de l'onglet (étape 251 —
     /// `net.events`) : ring borné à `types::MAX_NET_EVENTS`
     /// (512) en séquence monotone. `since_seq` filtre aux records

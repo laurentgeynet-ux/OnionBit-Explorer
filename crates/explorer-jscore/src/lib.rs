@@ -626,8 +626,10 @@ static J17_ENABLED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBoo
 static J17_ENV_ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
 
 /// `true` si les compteurs J17 sont armés (env ou enable).
+/// `pub` depuis l'étape 255 : la surface agent (`engine.j17`)
+/// doit distinguer « désarmé » d'un snapshot à zéros.
 #[inline]
-pub(crate) fn j17_on() -> bool {
+pub fn j17_on() -> bool {
     J17_ENABLED.load(std::sync::atomic::Ordering::Relaxed)
         || *J17_ENV_ON.get_or_init(|| {
             std::env::var("EXPLORER_J17_PROF").is_ok_and(|v| !v.is_empty() && v != "0")

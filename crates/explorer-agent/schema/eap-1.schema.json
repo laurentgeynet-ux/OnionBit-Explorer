@@ -360,6 +360,12 @@
       "params": { "type": "object", "properties": { "tab": { "$ref": "#/$defs/tabId" }, "max": { "type": "integer", "default": 20 } }, "required": ["tab"], "additionalProperties": false },
       "result": { "type": "object", "properties": { "suspects": { "type": "array", "items": { "type": "object" } }, "scanned": { "type": "object" }, "rev": { "type": "integer" } }, "required": ["suspects", "scanned"] }
     },
+    "engine.j17": {
+      "x-phase": "E5",
+      "description": "Snapshot cumulatif des compteurs J17 d'explorer-jscore (étape 255) — prop_ns/env_ns/rabs_*/eval:*/stmt:* etc. **process-wide** : les compteurs sont des statiques globales du moteur JS, le paramètre `tab` ne sert que le contrat de scope. `armed:false` = EXPLORER_J17_PROF/j17_enable désarmé (snapshot vide, jamais de valeur factice). Cumulatif : la différence de deux snapshots attribue l'intervalle (convention js_alloc), pas de reset.",
+      "params": { "type": "object", "properties": { "tab": { "$ref": "#/$defs/tabId" } }, "required": ["tab"], "additionalProperties": false },
+      "result": { "type": "object", "properties": { "armed": { "type": "boolean" }, "snapshot": { "type": "string" }, "note": { "type": "string" } }, "required": ["armed", "snapshot"] }
+    },
     "engine.pipeline": {
       "x-phase": "E5",
       "description": "Rapport moteur de l'onglet : état de session (époques, presence DOM/layout/frame), compteurs de vie (journal, applies, paint en vol), attribution mémoire par réservoir, livre de phases sync_profile {n,us_total,us_last,us_max,alloc_b,alloc_n} — allocs process pendant la phase. reset:true = sémantique « take » (l'intervalle se clore dans la réponse, le livre repart à zéro).",

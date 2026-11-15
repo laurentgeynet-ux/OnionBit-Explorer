@@ -22,7 +22,8 @@ use serde_json::{json, Value};
 
 use crate::actionable::{auto_wait, resolve, POLL_MS};
 use crate::proto::{
-    Actionability, Capability, ErrorCode, FrameParams, KeyMods, Method, RpcError, WaitKind,
+    Actionability, Capability, ErrorCode, FrameParams, KeyMods, Method, RpcError, TabParams,
+    WaitKind,
 };
 use crate::state::{AgentConn, AgentShared, StoredSnap, SubFilter};
 
@@ -95,6 +96,11 @@ const HELP: &[(&str, Option<Capability>, &str)] = &[
         "d'où vient ce style ?",
         Some(Capability::Engine),
         "engine.cascade",
+    ),
+    (
+        "compteurs jscore (prop/env/eval…) ?",
+        Some(Capability::Engine),
+        "engine.j17",
     ),
     (
         "quelles requêtes réseau ?",
@@ -182,6 +188,7 @@ fn cap_of(m: &Method) -> Option<Capability> {
         | Method::EnginePaintStats(_)
         | Method::EngineCascade(_)
         | Method::EngineAnomalies(_)
+        | Method::EngineJ17(_)
         | Method::FrameDiff(_) => Some(Capability::Engine),
         Method::NetEvents(_) => Some(Capability::Net),
         Method::InputKey(_) | Method::InputScroll(_) | Method::InputClickAt(_) => {
@@ -528,6 +535,7 @@ async fn run(
         | Method::EnginePaintStats(_)
         | Method::EngineCascade(_)
         | Method::EngineAnomalies(_)
+        | Method::EngineJ17(_)
         | Method::NetEvents(_)
         | Method::FrameDiff(_) => perceive_verbs(st, conn, method).await,
         Method::InputClick(_) | Method::InputType(_) | Method::InputHover(_) => {
@@ -925,6 +933,7 @@ async fn perceive_verbs(
                 .map_or_else(crate::anomalies::default_max, |m| m as usize);
             crate::anomalies::run(st, conn, p.tab, max).await
         }
+        Method::EngineJ17(p) => engine_j17_verb(st, conn, p).await,
         Method::EngineCascade(p) => engine_cascade_verb(st, conn, p).await,
         Method::NetEvents(_) | Method::FrameDiff(_) => net_frame_verbs(st, conn, method).await,
         // Verbe hors groupe — garde-fou interne (le dispatch
@@ -970,6 +979,27 @@ async fn net_frame_verbs(
             "verbe hors groupe — routage interne",
         )),
     }
+}
+
+/// `engine.j17` (étape 255) — snapshot cumulatif des
+/// compteurs `explorer-jscore`. Process-wide par nature
+/// (statiques globales) : le `tab` ne sert que le contrat
+/// de scope, pas de verrou session — lecture hors chemin
+/// chaud, jamais de valeur factice (`armed:false` si
+/// l'instrumentation est désarmée).
+async fn engine_j17_verb(
+    st: &Arc<AgentShared>,
+    conn: &mut AgentConn,
+    p: TabParams,
+) -> Result<Value, RpcError> {
+    scope(conn, p.tab)?;
+    tab_exists(st, p.tab).await?;
+    let snap = explorer_core::Session::j17_report();
+    Ok(json!({
+        "armed": snap.is_some(),
+        "snapshot": snap.unwrap_or_default(),
+        "note": "compteurs cumulatifs process-wide — diff de deux snapshots = intervalle",
+    }))
 }
 
 /// `engine.cascade` — verdicts de cascade d'un élément par

@@ -995,3 +995,29 @@ async fn wait_frame_reclame_orphelin_gare() {
     assert_eq!(r["result"]["ok"], true, "{r}");
     srv.abort();
 }
+
+/// `engine.j17` (étape 255) — le verbe répond `{armed, snapshot}`
+/// honnêtement : `armed` reflète `EXPLORER_J17_PROF`/enable,
+/// `snapshot` est une chaîne (vide si désarmé, jamais d'erreur).
+/// Onglet inconnu → -32005 comme les autres verbes engine.
+#[tokio::test]
+async fn engine_j17_rend_le_snapshot_arme_ou_non() {
+    let (mut a, srv) = connect().await;
+    let r = open(&mut a).await;
+    let help = r["result"]["help"].as_object().expect("help");
+    assert_eq!(
+        help.get("compteurs jscore (prop/env/eval…) ?")
+            .and_then(Value::as_str),
+        Some("engine.j17"),
+        "{help:?}"
+    );
+    let r = a.call("tab.open", json!({})).await;
+    let tab = r["result"]["tab"].as_u64().expect("tab");
+    let r = a.call("engine.j17", json!({"tab": tab})).await;
+    assert!(r["error"].is_null(), "{r}");
+    assert!(r["result"]["armed"].is_boolean(), "{r}");
+    assert!(r["result"]["snapshot"].is_string(), "{r}");
+    let r = a.call("engine.j17", json!({"tab": 999})).await;
+    assert_eq!(r["error"]["code"], -32005, "{r}");
+    srv.abort();
+}

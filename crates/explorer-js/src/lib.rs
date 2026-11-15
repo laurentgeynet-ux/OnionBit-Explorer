@@ -3889,6 +3889,22 @@ fn dump_eval_script(kind: &str, name: Option<&str>, src: &str) {
     let _ = std::fs::write(p, src);
 }
 
+/// Snapshot cumulatif des compteurs J17 du processus
+/// (étape 255 — verbe `engine.j17` EAP). Les compteurs
+/// vivent dans `explorer-jscore` en statiques globales :
+/// la lecture est indépendante de toute instance
+/// `JsEngine` (qui peut être prise en vol par
+/// `take_js_engine`). `None` = instrumentation désarmée
+/// (`EXPLORER_J17_PROF` absent et `j17_enable` jamais
+/// appelé) — honnête, jamais de chaîne vide factice.
+/// Cumulatif par construction : la différence de deux
+/// snapshots attribue l'intervalle (convention
+/// `note_eval`, pas de reset).
+#[must_use]
+pub fn j17_snapshot() -> Option<String> {
+    explorer_jscore::j17_on().then(explorer_jscore::j17_snapshot)
+}
+
 fn note_eval(
     eng: &explorer_jscore::Engine,
     kind: &'static str,
