@@ -7943,6 +7943,12 @@ MCP = adaptateur, jamais la base.
   externe (console de pilotage) n'a plus à deviner où
   vivent registre, profils, vols et logs — bloc additif du
   résultat, chemins `/`, clés absentes = indisponibles.
+- [x] **Étape 266. Parité `Deferred` sur la voie shared** —
+  trou field263 : `handle_input_shared` (voie EAP) n'avait
+  pas la clause `dom`/`tree` détachés de l'étape 263 →
+  `-32602` au lieu de `Deferred` pendant l'apply. Prédicat
+  partagé `Tab::input_defer_window` aux deux gardes —
+  divergence de parité impossible désormais.
 
 ## Piste JS (JS-C26+) — spécialiste `explorer-jscore`
 

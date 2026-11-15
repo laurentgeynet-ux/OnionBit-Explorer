@@ -7,6 +7,30 @@
 use super::*;
 
 impl Tab {
+    /// `true` si une entrée doit être différée plutôt que
+    /// dispatchée — garde **unique** des deux voies input
+    /// (synchrone `handle_input_now` et partagée
+    /// `handle_input_shared`, étape 266 : la clause `url` +
+    /// `dom`/`tree` détachés n'avait été ajoutée qu'à la
+    /// voie synchrone → `-32602` au lieu de `Deferred` sur
+    /// l'EAP, verdict field263).
+    ///
+    /// Couvre : peinture détachée (apply en tâche),
+    /// moteur sorti (`js_detached` — pompe ou input shared
+    /// en vol), file non vide (ordre des entrées préservé —
+    /// passer en direct devant une entrée en attente
+    /// intervertirait frappes/clics), et `dom`/`tree`
+    /// détachés **sans** `paint_detached` (fenêtre d'apply :
+    /// payload reprise, journal rejeté, re-parse en vol —
+    /// l'URL chargée distingue « apply en vol » de « jamais
+    /// navigué »).
+    pub(crate) fn input_defer_window(&self) -> bool {
+        self.paint_detached
+            || self.js_detached.is_some()
+            || !self.deferred_inputs.is_empty()
+            || (self.url.is_some() && (self.dom.is_none() || self.tree.is_none()))
+    }
+
     /// Gèle la page courante dans le bfcache à sa position
     /// `hist_idx` (étape 56) — appelé à chaque navigation
     /// confirmée ([`Session::nav_apply`]). Sans page réelle
