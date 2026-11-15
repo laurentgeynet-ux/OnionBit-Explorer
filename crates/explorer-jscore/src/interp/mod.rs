@@ -87,11 +87,6 @@ const STACK_TRACE_LIMIT: usize = 10;
 /// `items_after_statements` interdit un `static` dans le corps.
 static DYN_PROBE: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
 
-/// Sonde DI N1.5 — nomme les clés `deferredKey`/`provide`
-/// lues par le rail kevlar (`resolve(VhV)`/`addProvider`)
-/// sous `EXPLORER_CTX_PROBE`.
-static DI_PROBE: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
-
 /// N1.5 — identité de la VM `BotGuard` par `ObjId` : le code de
 /// l'interpréteur est eval'd (`lit.src = None`, invisible à
 /// `bg.call`). `trayride` écrit sur le global → capture de son
@@ -5188,7 +5183,7 @@ impl Engine {
     /// périodique nomme la fonction en boucle, avec son bundle
     /// et sa position — complément call-site de `nat-trace`.
     fn profile_tick(&mut self) {
-        if std::env::var_os("EXPLORER_JS_PROFILE").is_none() {
+        if !crate::js_profile() {
             return;
         }
         let label = self.cur_fn_label();
@@ -5212,7 +5207,7 @@ impl Engine {
     /// occurrence et dump le top périodiquement (le nom le plus
     /// probé est le gate le plus probable).
     fn missing_api_tick(&mut self, key: &str) {
-        if std::env::var_os("EXPLORER_MISSING_API").is_none() {
+        if !crate::missing_api() {
             return;
         }
         self.missing_api_total += 1;
@@ -5235,11 +5230,11 @@ impl Engine {
 
     fn nat_trace_tick(&mut self, name: &'static str) {
         self.profile_tick();
-        if std::env::var_os("DBG_NAT").is_some() {
+        if crate::dbg_nat() {
             eprintln!("[nat] {name}");
             return;
         }
-        if std::env::var_os("EXPLORER_NAT_TRACE").is_none() {
+        if !crate::nat_trace() {
             return;
         }
         self.nat_trace_total += 1;
@@ -9712,7 +9707,7 @@ impl Engine {
                 // lent ». Sous `EXPLORER_CTX_PROBE`.
                 if (key == "deferredKey" || key == "provide")
                     && tracing::enabled!(target: "dom_probe", tracing::Level::INFO)
-                    && *DI_PROBE.get_or_init(|| std::env::var_os("EXPLORER_CTX_PROBE").is_some())
+                    && crate::ctx_probe()
                 {
                     let kv = match &v {
                         Value::Str(_) | Value::Num(_) | Value::Bool(_) => {

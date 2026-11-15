@@ -921,7 +921,7 @@ pub(crate) fn lower_suspend_body(body: &[Stmt]) -> Rc<Vec<Stmt>> {
     let mut cx = LowerCx { n: 0 };
     let out = Rc::new(lower_list(body, &mut cx));
     #[cfg(debug_assertions)]
-    if std::env::var("DBG_LOWER").is_ok() {
+    if crate::dbg_lower() {
         eprintln!("LOWERED {out:?}");
     }
     out
@@ -1180,7 +1180,7 @@ impl GExec {
                 (f.list.clone(), f.env.clone(), f.pc)
             };
             let stmt = list[pc].clone();
-            if std::env::var("DBG_DRIVE").is_ok() {
+            if crate::dbg_drive() {
                 eprintln!(
                     "[exec] pc={pc} env {:p} stmt={:?}",
                     Rc::as_ptr(&env),
@@ -1251,7 +1251,7 @@ impl GExec {
 
     /// `next(v)` livré au site suspendu.
     fn liver(&mut self, _e: &mut Engine, v: Value) -> JsResult<()> {
-        if std::env::var("DBG_DRIVE").is_ok() {
+        if crate::dbg_drive() {
             eprintln!(
                 "[liver] pending={} stack={}",
                 self.pending.is_some(),
@@ -1261,7 +1261,7 @@ impl GExec {
         match self.pending.take() {
             Some(Pending::Yield { into: Some(n) } | Pending::Await { into: Some(n), .. }) => {
                 if let Some(env) = self.stack.last().map(|f| f.env.clone()) {
-                    if std::env::var("DBG_DRIVE").is_ok() {
+                    if crate::dbg_drive() {
                         eprintln!("[bind] {n} -> env {:p}", Rc::as_ptr(&env));
                     }
                     Engine::env_put(&env, &n, v, true);
@@ -1333,7 +1333,7 @@ impl GExec {
     /// Settlement de la promesse de l'async fn (`outer`)
     /// à la fin du corps — fulfill `ret` / reject la throw.
     fn settle_outer(&self, e: &mut Engine, r: std::result::Result<Value, Value>) {
-        if std::env::var("DBG_DRIVE").is_ok() {
+        if crate::dbg_drive() {
             eprintln!(
                 "[settle] outer={:?} done={} r_ok={}",
                 self.outer.is_some(),
@@ -1356,7 +1356,7 @@ impl GExec {
         // sans ça la boucle réémettrait l'ancienne valeur.
         self.pending = None;
         loop {
-            if std::env::var("DBG_DRIVE").is_ok() {
+            if crate::dbg_drive() {
                 eprintln!(
                     "[throw_into] stack={} kinds={:?}",
                     self.stack.len(),
@@ -1368,7 +1368,7 @@ impl GExec {
             }
             let Some(f) = self.stack.pop() else {
                 self.done = true;
-                if std::env::var("DBG_DRIVE").is_ok() {
+                if crate::dbg_drive() {
                     eprintln!("[uncaught] v={:?}", e.describe(v.clone()));
                 }
                 self.settle_outer(e, Err(v.clone()));
@@ -2225,7 +2225,7 @@ fn async_resume_err(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value
 /// `args` = `[gen_obj, outer, v]` (bound préposés).
 fn resume_common(e: &mut Engine, args: &[Value], ok: bool) -> JsResult<Value> {
     let (gen, v) = (arg(args, 0), arg(args, 2));
-    if std::env::var("DBG_DRIVE").is_ok() {
+    if crate::dbg_drive() {
         eprintln!("[resume] ok={ok} gen={gen:?}");
     }
     if let Value::Obj(gid) = gen {

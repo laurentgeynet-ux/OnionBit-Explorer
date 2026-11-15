@@ -13220,6 +13220,18 @@ chaque gain rapporté contre les **deux** archétypes.
   (`ic_hit`/`ic_miss`/`ic_disarm` au snapshot) pour
   borner la couverture du seul court-circuit existant.
   Dependency-groups = infra lourde, dernier recours.
+- [x] **JS-C556 — flags DBG env sondés une fois** :
+  `env::var` rescannait le bloc env par appel —
+  `DBG_EXPR` par nœud AST dans `eval_inner`,
+  `DBG_DRIVE` par corps+stmt, 3 sondes par tic
+  natif. `env_flag!` → `OnceLock<bool>` (pattern
+  `CTXP`, sites unifiés). Instrument de mesure
+  du confondu `body_ns` avant le pilote fusion.
+- [x] **JS-C555 — `ic_bail` : `bail_dead` vs
+  `bail_kind`** : vol yt 62/38 % — sites morts
+  mégamorphes vs têtes structurellement non-
+  ICables. Résidu ~1 ms sous bruit → avenue IC
+  **fermée par la mesure**.
 - [x] **JS-C554 — params au slot canonique** : `insert_slot`
   écrit `cells[i]` (vérif `ptr_eq||==`, dupes/divergents →
   `insert`), un `borrow` pour la boucle — fini `intern`+

@@ -6391,8 +6391,8 @@ mod tests {
             d.nodes[kids[0] as usize].text
         );
         // Aucun élément ne doit exister sous noscript.
-        assert_eq!(d.by_tag(ns[0], "style"), []);
-        assert_eq!(d.by_tag(ns[0], "div"), []);
+        assert_eq!(d.by_tag(ns[0], "style"), Vec::<crate::dom::NodeId>::new());
+        assert_eq!(d.by_tag(ns[0], "div"), Vec::<crate::dom::NodeId>::new());
     }
 
     /// Round-trip : la sérialisation émet le contenu noscript
@@ -6416,6 +6416,6 @@ mod tests {
         let ns2 = d2.by_tag(d2.root, "noscript");
         let kids2 = d2.child_nodes(ns2[0]);
         assert_eq!(kids2.len(), 1);
-        assert_eq!(d2.by_tag(ns2[0], "style"), []);
+        assert_eq!(d2.by_tag(ns2[0], "style"), Vec::<crate::dom::NodeId>::new());
     }
 }

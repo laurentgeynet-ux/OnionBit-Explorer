@@ -136,6 +136,31 @@ pub(crate) fn intern(name: &str) -> std::rc::Rc<str> {
     })
 }
 
+/// JS-C556 — flags `DBG_*`/`EXPLORER_*` sondés **une fois** :
+/// `std::env::var` rescannait le bloc environnement à chaque
+/// appel — ~40 M lookups/vol rien que dans `eval_inner`
+/// (`DBG_EXPR`), ~7 M dans `exec_body`+stmts (`DBG_DRIVE`),
+/// ~2 M par sonde native. Pattern `OnceLock` (précédent
+/// `CTXP` de `set_own`). Chaque flag = un `AtomicBool`-like
+/// read après init.
+macro_rules! env_flag {
+    ($name:ident, $var:literal) => {
+        /// Voir [`env_flag`] — flag d'environnement caché.
+        pub(crate) fn $name() -> bool {
+            static F: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+            *F.get_or_init(|| std::env::var_os($var).is_some())
+        }
+    };
+}
+env_flag!(dbg_expr, "DBG_EXPR");
+env_flag!(dbg_drive, "DBG_DRIVE");
+env_flag!(dbg_lower, "DBG_LOWER");
+env_flag!(dbg_nat, "DBG_NAT");
+env_flag!(ctx_probe, "EXPLORER_CTX_PROBE");
+env_flag!(missing_api, "EXPLORER_MISSING_API");
+env_flag!(js_profile, "EXPLORER_JS_PROFILE");
+env_flag!(nat_trace, "EXPLORER_NAT_TRACE");
+
 /// §B-59 — dernier natif entré dans `call_native`, écrit
 /// inconditionnellement (~20 ns, `&'static str`, zéro alloc).
 /// Le `rss_guard` du daemon le lit à l'abort : une mort dans
