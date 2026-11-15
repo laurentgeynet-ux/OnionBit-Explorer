@@ -765,3 +765,31 @@ fn c538_strict_eq_direct_serve() {
         "`bin_se` doit émettre : {snap}"
     );
 }
+
+/// JS-C549 — `idnt:` nomme les lectures d'identifiant dont le
+/// site n'est pas annoté (`resolved_map` miss → marche
+/// `env_get`). `with` rend la portée dynamique : la lecture
+/// `x` ne peut pas être résolue statiquement → `idnt:x`.
+#[test]
+fn idnt_attribue_le_nom_de_la_lecture_non_resolue() {
+    let _g = TEST_LOCK.lock().unwrap();
+    j17_enable();
+    let mut e = Engine::new();
+    let r = e
+        .eval("var o={x:42}; var s; with(o){ s=x; } s")
+        .expect("eval");
+    assert_eq!(e.describe(r), "42");
+    let snap = j17_snapshot();
+    assert!(
+        snap.contains("idnt:"),
+        "une lecture non annotée doit émettre `idnt:` : {snap}"
+    );
+    let idnt = snap.split("idnt:").nth(1).unwrap_or("");
+    // `with` rend tout le bloc dynamique : `o`/`s`/`x` sont non
+    // annotés — à comptes égaux l'ordre est libre, on verrouille
+    // la présence de `x=1` dans la section.
+    assert!(
+        idnt.contains("x=1"),
+        "le nom `x` doit être attribué : {snap}"
+    );
+}

@@ -6229,7 +6229,13 @@ impl Engine {
         name: &str,
         site: usize,
     ) -> Option<Value> {
-        let (cur, d, slot) = self.resolved_ancestor(env, site)?;
+        let Some((cur, d, slot)) = self.resolved_ancestor(env, site) else {
+            // JS-C549 — site non annoté : la lecture paiera la
+            // marche `env_get` du repli — la sonde nomme la
+            // population (par nom, pas par callsite).
+            crate::j17_idnt_probe(name);
+            return None;
+        };
         // JS-C502 — fast-path slot : la vérif est sémantique
         // (`Small[slot].0 == name` puis `Bind`), toute divergence
         // d'ordre canonique, promotion `Map`, cellule `Uninit`/
