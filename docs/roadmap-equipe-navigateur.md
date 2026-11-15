@@ -7662,9 +7662,15 @@ MCP = adaptateur, jamais la base.
   déclarées, verrous de trames golden. **Livrée (`nav/eap`)** :
   schéma v1 gelé + serveur WS `GET /agent` + dispatch E1 complet
   (9 tests socket réel) — handles/actionabilité = E2.
-- [ ] **Étape 244. EAP-E2 : handles + actionabilité + auto-wait**
+- [x] **Étape 244. EAP-E2 : handles + actionabilité + auto-wait**
   sur commits internes (`stale_ref`, timeout borné, mode `force`
-  → `degraded`).
+  → `degraded`). **Livrée (`nav/eap`)** : sondes natives
+  `session/probe.rs` (sélecteur CSS via `explorer-css`,
+  `element_info`, `hit_covers`), actionabilité
+  visible/stable/enabled/topmost avec auto-wait borné,
+  `query.select`, `input.click/type/hover` + `input.scroll{ref}`
+  par handle, `wait.for` selector/stable, `click_at` marqué
+  `degraded` — 11 tests socket réel.
 - [ ] **Étape 245. EAP-E3 : snapshot sémantique + diff `{since}`**
   (mapping rôle/nom borné, purge des handles au sweep de doc).
 - [ ] **Étape 246. EAP-E4 : adaptateur MCP** — `explorer-cli mcp`

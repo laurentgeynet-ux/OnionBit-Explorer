@@ -1119,6 +1119,10 @@ pub enum CoreError {
     /// attente d'un détenteur mort en vol).
     #[error("attente expirée : {0}")]
     Timeout(String),
+    /// Sélecteur CSS invalide (sonde agent EAP, étape 244 —
+    /// le prélude n'est pas dans la grammaire du moteur).
+    #[error("sélecteur : {0}")]
+    Selector(String),
     /// Session saturée (Étape 209 — épisode `rss_shed` actif :
     /// la dégradation a déjà abandonné les fetchs basse
     /// priorité ; la requête attend un souffle plutôt qu'une

@@ -20,7 +20,10 @@ use explorer_net::http::{Initiator, Method as NetMethod, Request as NetRequest};
 use explorer_net::url::Url;
 use serde_json::{json, Value};
 
-use crate::proto::{Capability, ErrorCode, FrameParams, KeyMods, Method, RpcError, WaitKind};
+use crate::actionable::{auto_wait, resolve, POLL_MS};
+use crate::proto::{
+    Actionability, Capability, ErrorCode, FrameParams, KeyMods, Method, RpcError, WaitKind,
+};
 use crate::snapshot::nodes_from_geometry;
 use crate::state::{AgentConn, AgentShared, SubFilter};
 
@@ -34,6 +37,8 @@ const NAV_WAIT_DEFAULT_MS: u64 = 30_000;
 /// `snapshot_diff`).
 const IMPLEMENTED: &[Capability] = &[
     Capability::Snapshot,
+    Capability::Handles,
+    Capability::Actionable,
     Capability::WaitCommit,
     Capability::Input,
     Capability::Eval,
@@ -366,10 +371,10 @@ async fn run(
         | Method::FrameGet(_)
         | Method::ConsoleGet(_)
         | Method::DomGet(_) => perceive_verbs(st, conn, method).await,
-        Method::InputClick(_)
-        | Method::InputType(_)
-        | Method::InputHover(_)
-        | Method::InputKey(_)
+        Method::InputClick(_) | Method::InputType(_) | Method::InputHover(_) => {
+            handle_verbs(st, conn, method).await
+        }
+        Method::InputKey(_)
         | Method::InputScroll(_)
         | Method::InputClickAt(_)
         | Method::EvalRun(_) => act_verbs(st, conn, method).await,
@@ -592,7 +597,24 @@ async fn perceive_verbs(
             );
             Ok(json!({ "rev": rev, "url": url, "nodes": nodes }))
         }
-        Method::QuerySelect(_) => Err(unsupported("query.select — handles E2", "handles")),
+        Method::QuerySelect(p) => {
+            scope(conn, p.tab)?;
+            tab_exists(st, p.tab).await?;
+            let indices = {
+                let s = st.session.lock().await;
+                s.select_nodes(p.tab, &p.selector).map_err(|e| match e {
+                    CoreError::Selector(_) => err(ErrorCode::BadSelector, e.to_string()),
+                    other => RpcError::from(other),
+                })?
+            };
+            let rev = st.rev(p.tab);
+            let refs: Vec<_> = indices
+                .iter()
+                .take(p.max.unwrap_or(64) as usize)
+                .map(|&i| conn.handles.alloc(p.tab, i, rev))
+                .collect();
+            Ok(json!({ "refs": refs }))
+        }
         Method::FrameGet(_) => Err(err(
             ErrorCode::EngineUnavailable,
             "frame.get devait être court-circuité avant run",
@@ -628,16 +650,157 @@ async fn perceive_verbs(
     }
 }
 
-/// Actions — input et eval sous droits du profil.
+/// Actions par handle — auto-wait d'actionabilité avant
+/// d'agir (ADR-0035 §6) : les verbes `ref` vivent ici,
+/// séparés des actions directes par souci de taille.
+async fn handle_verbs(
+    st: &Arc<AgentShared>,
+    conn: &mut AgentConn,
+    method: Method,
+) -> Result<Value, RpcError> {
+    match method {
+        Method::InputClick(p) => {
+            scope(conn, p.tab)?;
+            right_input(conn)?;
+            tab_exists(st, p.tab).await?;
+            if p.button.as_deref().is_some_and(|b| b != "left") {
+                return Err(unsupported("bouton non-left — E3", "handles"));
+            }
+            // `mods` non transmis : `InputEvent::Click` n'en
+            // porte pas (v1 — le modifieur clavier vit dans
+            // input.key, pas dans le click atomique).
+            let handle = resolve(conn, st, p.tab, &p.elem_ref)?;
+            let opts = p.opts.unwrap_or_default();
+            let (probe, action, degraded) = auto_wait(st, p.tab, handle, &opts).await?;
+            let scroll_y = scroll_y(st, p.tab).await;
+            let Some((cx, cy)) = probe.center_viewport(scroll_y) else {
+                return Err(not_actionable(
+                    "pas de centre cliquable — élément non posé",
+                    action,
+                ));
+            };
+            let outcome = send_input(st, p.tab, InputEvent::Click { x: cx, y: cy }).await?;
+            Ok(action_json(outcome, action, degraded))
+        }
+        Method::InputType(p) => {
+            scope(conn, p.tab)?;
+            right_input(conn)?;
+            tab_exists(st, p.tab).await?;
+            type_into_field(st, conn, p).await
+        }
+        Method::InputHover(p) => {
+            scope(conn, p.tab)?;
+            right_input(conn)?;
+            tab_exists(st, p.tab).await?;
+            let handle = resolve(conn, st, p.tab, &p.elem_ref)?;
+            let opts = p.opts.unwrap_or_default();
+            let (probe, action, degraded) = auto_wait(st, p.tab, handle, &opts).await?;
+            let scroll_y = scroll_y(st, p.tab).await;
+            let Some((cx, cy)) = probe.center_viewport(scroll_y) else {
+                return Err(not_actionable("pas de centre — non posé", action));
+            };
+            let outcome = send_input(st, p.tab, InputEvent::MouseMove { x: cx, y: cy }).await?;
+            // `input.hover` rend `{url, editable}` du contrat.
+            let (url, editable) = match &outcome {
+                InputOutcome::Hover { url, editable } => (url.clone(), *editable),
+                _ => (None, false),
+            };
+            let mut v = action_json(outcome, action, degraded);
+            v["url"] = json!(url);
+            v["editable"] = json!(editable);
+            Ok(v)
+        }
+        // Garde-fou interne — le routage en amont est exhaustif.
+        _ => Err(err(
+            ErrorCode::EngineUnavailable,
+            "verbe hors groupe — routage interne",
+        )),
+    }
+}
+
+/// `input.type` — focus par clic natif puis frappe
+/// caractère par caractère (les handlers JS voient une
+/// vraie frappe, pas une injection de valeur).
+async fn type_into_field(
+    st: &Arc<AgentShared>,
+    conn: &mut AgentConn,
+    p: crate::proto::TypeParams,
+) -> Result<Value, RpcError> {
+    let handle = resolve(conn, st, p.tab, &p.elem_ref)?;
+    let opts = p.opts.unwrap_or_default();
+    let (probe, action, degraded) = auto_wait(st, p.tab, handle, &opts).await?;
+    // `Editable` : input/textarea, ou `contenteditable`
+    // explicite — le check `enabled` est déjà dans
+    // l'auto-wait.
+    let editable = matches!(probe.tag.as_str(), "input" | "textarea")
+        || probe.attr("contenteditable") == Some("true")
+        || probe.attr("contenteditable") == Some("");
+    if !editable {
+        return Err(not_actionable("élément non éditable", action));
+    }
+    let scroll_y = scroll_y(st, p.tab).await;
+    let Some((cx, cy)) = probe.center_viewport(scroll_y) else {
+        return Err(not_actionable("pas de centre — non posé", action));
+    };
+    // Focus par le clic natif, puis frappe caractère
+    // par caractère (Key+KeyUp — pas d'injection de
+    // valeur, les handlers JS voient une vraie frappe).
+    send_input(st, p.tab, InputEvent::Click { x: cx, y: cy }).await?;
+    if p.clear {
+        send_input(
+            st,
+            p.tab,
+            InputEvent::Key {
+                key: "a".into(),
+                mods: CoreKeyMods {
+                    ctrl: true,
+                    ..CoreKeyMods::NONE
+                },
+            },
+        )
+        .await?;
+        send_input(
+            st,
+            p.tab,
+            InputEvent::Key {
+                key: "Delete".into(),
+                mods: CoreKeyMods::NONE,
+            },
+        )
+        .await?;
+    }
+    for ch in p.text.chars() {
+        let key = ch.to_string();
+        send_input(
+            st,
+            p.tab,
+            InputEvent::Key {
+                key: key.clone(),
+                mods: CoreKeyMods::NONE,
+            },
+        )
+        .await?;
+        send_input(
+            st,
+            p.tab,
+            InputEvent::KeyUp {
+                key,
+                mods: CoreKeyMods::NONE,
+            },
+        )
+        .await?;
+    }
+    Ok(action_json(InputOutcome::Edited, action, degraded))
+}
+
+/// Actions directes — input par coordonnées/focus et eval
+/// sous droits du profil.
 async fn act_verbs(
     st: &Arc<AgentShared>,
     conn: &mut AgentConn,
     method: Method,
 ) -> Result<Value, RpcError> {
     match method {
-        Method::InputClick(_) | Method::InputType(_) | Method::InputHover(_) => {
-            Err(unsupported("action par handle — E2", "handles"))
-        }
         Method::InputKey(p) => {
             scope(conn, p.tab)?;
             right_input(conn)?;
@@ -656,10 +819,28 @@ async fn act_verbs(
         Method::InputScroll(p) => {
             scope(conn, p.tab)?;
             right_input(conn)?;
-            if p.elem_ref.is_some() {
-                return Err(unsupported("scroll_into_view — handles E2", "handles"));
-            }
             tab_exists(st, p.tab).await?;
+            if let Some(r) = &p.elem_ref {
+                let handle = resolve(conn, st, p.tab, r)?;
+                let probe = crate::actionable::probe(st, p.tab, handle.node).await?;
+                let Some(rect) = probe.rect else {
+                    return Err(not_actionable(
+                        "élément non posé — scroll_into_view impossible",
+                        Actionability::default(),
+                    ));
+                };
+                let (scroll_y, vh) = {
+                    let s = st.session.lock().await;
+                    (
+                        s.tab_info(p.tab).map_or(0.0, |t| t.scroll_y),
+                        s.viewport().1,
+                    )
+                };
+                // Centrer la boîte dans le viewport.
+                let dy = (rect.y + rect.h / 2.0) - scroll_y - vh / 2.0;
+                let outcome = send_input(st, p.tab, InputEvent::Scroll { dy }).await?;
+                return Ok(outcome_json(outcome));
+            }
             let outcome = send_input(
                 st,
                 p.tab,
@@ -682,7 +863,6 @@ async fn act_verbs(
             v["degraded"] = json!("click_at — pas de handle ni de checks");
             Ok(v)
         }
-
         Method::EvalRun(p) => {
             scope(conn, p.tab)?;
             right_eval(conn)?;
@@ -749,10 +929,17 @@ async fn wait_verbs(
                 )
                 .await
                 .map(|_| json!({ "ok": true })),
-                WaitKind::Idle | WaitKind::Selector | WaitKind::Stable => Err(unsupported(
-                    "wait.for hors commit/frame — E2",
-                    "wait_commit",
-                )),
+                WaitKind::Selector => {
+                    let Some(sel) = p.selector.as_deref() else {
+                        return Err(err(
+                            ErrorCode::InvalidParams,
+                            "kind=selector exige params.selector",
+                        ));
+                    };
+                    wait_selector(st, p.tab, sel, dur).await
+                }
+                WaitKind::Stable => wait_stable(st, p.tab, dur).await,
+                WaitKind::Idle => Err(unsupported("wait.idle — hooks réseau E4", "wait_commit")),
             }
         }
 
@@ -897,4 +1084,109 @@ fn outcome_json(o: InputOutcome) -> Value {
         }
     }
     v
+}
+
+/// Scroll courant de l'onglet (0.0 hors info — l'action
+/// dégrade en coordonnées document, jamais de panic).
+async fn scroll_y(st: &Arc<AgentShared>, tab: u64) -> f32 {
+    st.session
+        .lock()
+        .await
+        .tab_info(tab)
+        .map_or(0.0, |t| t.scroll_y)
+}
+
+/// `NotActionable` typé avec le constat dans `data`.
+fn not_actionable(message: impl Into<String>, a: Actionability) -> RpcError {
+    err_data(
+        ErrorCode::NotActionable,
+        message,
+        json!({ "actionability": a }),
+    )
+}
+
+/// `actionResult` complet — outcome brut + actionabilité
+/// constatée + marqueur `degraded` le cas échéant.
+fn action_json(o: InputOutcome, a: Actionability, degraded: bool) -> Value {
+    let mut v = outcome_json(o);
+    v["actionability"] = json!(a);
+    if degraded {
+        v["degraded"] = json!("force — checks jamais atteints, action au dernier rect");
+    }
+    v
+}
+
+/// `wait.for{kind:selector}` — polling borné sur la sélection
+/// native : non-vide → ok ; `EmptyDocument`/`UnknownTab`
+/// comptent comme « pas encore » (la page peut être en vol).
+async fn wait_selector(
+    st: &Arc<AgentShared>,
+    tab: u64,
+    selector: &str,
+    dur: Duration,
+) -> Result<Value, RpcError> {
+    // Le sélecteur est validé une fois — un `BadSelector` est
+    // une erreur d'appel, pas une condition d'attente.
+    {
+        let s = st.session.lock().await;
+        if let Err(e) = s.select_nodes(tab, selector) {
+            return match e {
+                CoreError::Selector(_) => Err(err(ErrorCode::BadSelector, e.to_string())),
+                other => Err(RpcError::from(other)),
+            };
+        }
+    }
+    let deadline = tokio::time::Instant::now() + dur;
+    loop {
+        {
+            let s = st.session.lock().await;
+            if let Ok(indices) = s.select_nodes(tab, selector) {
+                if !indices.is_empty() {
+                    return Ok(json!({ "ok": true }));
+                }
+            }
+        }
+        if tokio::time::Instant::now() >= deadline {
+            return Err(err(ErrorCode::Timeout, "selector jamais satisfait"));
+        }
+        tokio::time::sleep(Duration::from_millis(POLL_MS)).await;
+    }
+}
+
+/// `wait.for{kind:stable}` — deux lectures de géométrie
+/// consécutives identiques (signature `(node,x,y,w,h)`).
+async fn wait_stable(st: &Arc<AgentShared>, tab: u64, dur: Duration) -> Result<Value, RpcError> {
+    let deadline = tokio::time::Instant::now() + dur;
+    let mut prev = None::<u64>;
+    loop {
+        let sig = {
+            let s = st.session.lock().await;
+            s.geometry_report(tab).map(|r| {
+                // FNV-1a sur les boîtes — signature compacte,
+                // pas de clone du rapport.
+                let mut h = 0xcbf2_9ce4_8422_2325u64;
+                for b in &r.boxes {
+                    for f in [b.x, b.y, b.w, b.h] {
+                        for byte in f.to_le_bytes() {
+                            h = (h ^ u64::from(byte)).wrapping_mul(0x0000_0100_0000_01b3);
+                        }
+                    }
+                    h = (h ^ u64::from(b.node)).wrapping_mul(0x0000_0100_0000_01b3);
+                }
+                h
+            })
+        };
+        if let (Some(a), Some(b)) = (prev, sig) {
+            if a == b {
+                return Ok(json!({ "ok": true }));
+            }
+        }
+        if sig.is_some() {
+            prev = sig;
+        }
+        if tokio::time::Instant::now() >= deadline {
+            return Err(err(ErrorCode::Timeout, "layout jamais stable"));
+        }
+        tokio::time::sleep(Duration::from_millis(POLL_MS)).await;
+    }
 }

@@ -219,23 +219,24 @@ async fn unsupported_type_pour_phases_futures() {
     open(&mut a).await;
     let r = a.call("tab.open", json!({})).await;
     let tab = r["result"]["tab"].as_u64().expect("tab");
-    // Handles : pas négociés dans la caps list → -32001 AVANT
-    // le droit (cap gate).
+    // input.click : la cap `handles` n'est pas dans la liste
+    // négociée par open() → -32001 capability (non négociée,
+    // sémantique du contrat — le droit input viendrait après).
     let r = a
         .call("input.click", json!({"tab": tab, "ref": "el:1"}))
         .await;
     assert_eq!(r["error"]["code"], -32001);
     assert_eq!(r["error"]["data"]["capability"], "handles");
-    // query.select → -32001.
+    // snapshot{since} → -32001 (diff = E3).
     let r = a
-        .call("query.select", json!({"tab": tab, "selector": "a"}))
+        .call("snapshot.get", json!({"tab": tab, "since": 0}))
         .await;
     assert_eq!(r["error"]["code"], -32001);
-    // wait.for selector → -32001 (commit/frame servis).
+    // wait.for idle → -32001 (hooks réseau E4).
     let r = a
         .call(
             "wait.for",
-            json!({"tab": tab, "kind": "selector", "selector": "a", "timeout_ms": 10}),
+            json!({"tab": tab, "kind": "idle", "timeout_ms": 10}),
         )
         .await;
     assert_eq!(r["error"]["code"], -32001);
@@ -407,5 +408,126 @@ async fn wait_for_frame_borne() {
         )
         .await;
     assert_eq!(r["error"]["code"], -32004);
+    srv.abort();
+}
+
+#[tokio::test]
+async fn e2_select_click_type() {
+    let (mut a, srv) = connect().await;
+    // Profil input requis pour les actions.
+    let r = a
+        .call(
+            "session.open",
+            json!({"protocol":"eap/1","capabilities":["snapshot","handles","actionable","wait_commit","input","frames","tabs","events"],"profile":{"input":true}}),
+        )
+        .await;
+    assert!(r["result"]["capabilities"]
+        .as_array()
+        .expect("caps")
+        .contains(&json!("handles")));
+    let r = a.call("tab.open", json!({})).await;
+    let tab = r["result"]["tab"].as_u64().expect("tab");
+    let r = a
+        .call("nav.goto", json!({"tab": tab, "url": "http://t.local/x"}))
+        .await;
+    assert!(r["error"].is_null(), "{r}");
+
+    // query.select — moteur CSS natif.
+    let r = a
+        .call("query.select", json!({"tab": tab, "selector": "a, input"}))
+        .await;
+    let refs = r["result"]["refs"].as_array().expect("refs");
+    assert_eq!(refs.len(), 2, "{r}");
+    assert!(refs[0].as_str().is_some_and(|s| s.starts_with("el:")));
+    // Sélecteur invalide → -32006.
+    let r = a
+        .call("query.select", json!({"tab": tab, "selector": ">>"}))
+        .await;
+    assert_eq!(r["error"]["code"], -32006);
+
+    // input.click sur le lien → navigated (auto-wait complet).
+    let r = a
+        .call("query.select", json!({"tab": tab, "selector": "a"}))
+        .await;
+    let link = r["result"]["refs"][0].as_str().expect("ref");
+    let r = a
+        .call(
+            "input.click",
+            json!({"tab": tab, "ref": link, "opts": {"timeout_ms": 3000}}),
+        )
+        .await;
+    assert_eq!(r["result"]["result"], "navigated", "{r}");
+    let act = &r["result"]["actionability"];
+    assert_eq!(act["visible"], true);
+    assert_eq!(act["topmost"], true);
+
+    // Le click a déclenché une nav — attendre le commit avant
+    // de re-sélectionner (le DOM est détaché en vol).
+    let r = a
+        .call(
+            "wait.for",
+            json!({"tab": tab, "kind": "commit", "timeout_ms": 5000}),
+        )
+        .await;
+    assert_eq!(r["result"]["ok"], true, "{r}");
+    // Re-navigation = même page → nouvelles refs pour l'input.
+    let r = a
+        .call("query.select", json!({"tab": tab, "selector": "#f"}))
+        .await;
+    let field = r["result"]["refs"][0].as_str().expect("ref");
+    let r = a
+        .call(
+            "input.type",
+            json!({"tab": tab, "ref": field, "text": "onion"}),
+        )
+        .await;
+    assert_eq!(r["result"]["result"], "edited", "{r}");
+
+    // Ref expirée après navigation → -32002.
+    let r = a
+        .call("nav.goto", json!({"tab": tab, "url": "http://t.local/y"}))
+        .await;
+    assert!(r["error"].is_null(), "{r}");
+    let r = a
+        .call("input.click", json!({"tab": tab, "ref": field}))
+        .await;
+    assert_eq!(r["error"]["code"], -32002);
+    srv.abort();
+}
+
+#[tokio::test]
+async fn e2_wait_selector_stable() {
+    let (mut a, srv) = connect().await;
+    open(&mut a).await;
+    let r = a.call("tab.open", json!({})).await;
+    let tab = r["result"]["tab"].as_u64().expect("tab");
+    let r = a
+        .call("nav.goto", json!({"tab": tab, "url": "http://t.local/x"}))
+        .await;
+    assert!(r["error"].is_null(), "{r}");
+    // selector présent → ok rapide.
+    let r = a
+        .call(
+            "wait.for",
+            json!({"tab": tab, "kind": "selector", "selector": "button#b", "timeout_ms": 2000}),
+        )
+        .await;
+    assert_eq!(r["result"]["ok"], true, "{r}");
+    // selector absent → -32004.
+    let r = a
+        .call(
+            "wait.for",
+            json!({"tab": tab, "kind": "selector", "selector": ".absent", "timeout_ms": 120}),
+        )
+        .await;
+    assert_eq!(r["error"]["code"], -32004);
+    // stable → ok (page statique).
+    let r = a
+        .call(
+            "wait.for",
+            json!({"tab": tab, "kind": "stable", "timeout_ms": 2000}),
+        )
+        .await;
+    assert_eq!(r["result"]["ok"], true, "{r}");
     srv.abort();
 }

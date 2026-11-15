@@ -80,6 +80,10 @@ mod paint;
 mod paint_helpers;
 #[allow(clippy::wildcard_imports)]
 mod popup;
+
+/// Sondes de lecture pour la surface agent (ADR-0035, Étape
+/// 244) — sélection CSS native, hit-test par cible, attributs.
+mod probe;
 #[allow(clippy::wildcard_imports)]
 mod scripts;
 #[allow(clippy::wildcard_imports)]
@@ -120,10 +124,11 @@ pub(crate) use paint_helpers::*;
 #[allow(clippy::wildcard_imports)]
 pub(crate) use popup::*;
 #[allow(clippy::wildcard_imports)]
+pub use probe::ElementInfo;
+#[allow(clippy::wildcard_imports)]
 pub(crate) use scripts::*;
 #[allow(clippy::wildcard_imports)]
 pub use shared::*;
-#[allow(clippy::wildcard_imports)]
 pub use types::*;
 
 /// Sondes §B-111 — `EXPLORER_DLV_TRACE=1` arme les marqueurs
