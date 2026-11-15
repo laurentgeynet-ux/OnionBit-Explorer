@@ -7959,6 +7959,37 @@ MCP = adaptateur, jamais la base.
   — un `alive` résiduel après cette étape exclut le kill
   console et resserre sur stack overflow, alloc-abort ou
   kill par PID. `EXPLORER_FLIGHT_MS/LOG/MAX_KB` (règle 13).
+- [x] **Étape 277. `bcd_audit.mjs` + `check decl`/`check
+  tables` — les erreurs de qualification passées deviennent
+  des lints mécaniques** — la discipline « score honnête »
+  était maintenue à la main à chaque bump BCD ; chaque bug
+  rencontré devient un lint re-jouable. **`check tables`**
+  (CLI) dump les vraies tables du binaire (`initial_extra`,
+  `no_oracle`, `paint_na` en TSV — `subfeature_probe` est
+  un `match` non énumérable, sa correction se sonde
+  comportementalement). **`check decl`** rend le verdict
+  de la porte `decl_gate` (chemin union) par `p:v` :
+  `na` / `known:false` / `probe:<lit>` / `decl:<lit>` /
+  `invalid:<lit>` — `invalid` = le littéral résolu échoue
+  à `prop_supported`+`parse_declarations`+
+  `value_is_valid_for`. **Lints** : `tables-mortes` (prop
+  absente du catalogue BCD — variante du bug camelCase
+  272), `meta-littéraux` (valeur `_` servie `decl:`), 
+  `littéraux-invalides`, `fixtures-inertes` (prop `check
+  prop` ok + ≥3 valeurs mesurées + 0 ok sous l'union —
+  trou moteur ou fixture aveugle, tri affiché),
+  `na-creep` (part `na` par prop vs `--na-base`, cliché
+  via `--save-na` → `scripts/bcd_na.json` committé).
+  **Mesure inaugurale (binaire frais)** : `tables-mortes`
+  1 (`mask-border-mode`), `meta-littéraux` 0,
+  `littéraux-invalides` 20 (`expand_background` refuse
+  `currentColor`/`round`/`space`/`text`/`x-*`/`y-*`,
+  `fit-content()` hors périphérie `value_is_valid_for`,
+  `anchor-size`/`mask:x-*` = méta-noms sans sonde — file
+  PIPE documentée), `fixtures-inertes` 49 (famille
+  `mask-*` dominante, sizing intrinsèque, `flex-wrap` —
+  tri PIPE/jauge). `--fast` saute la passe oracles
+  (~34 s → ~4 s). Verrou : `decl_gate_verdicts_audit`.
 - [x] **Étape 275. `css.values` — cache des signatures de
   base : la passe ne rejoue plus le bâtiment sans
   déclaration** — `prop_affects_decl` et

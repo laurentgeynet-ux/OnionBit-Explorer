@@ -1,0 +1,2074 @@
+{
+  "accent-color": [
+    3,
+    3
+  ],
+  "align-content": [
+    8,
+    19
+  ],
+  "align-items": [
+    6,
+    19
+  ],
+  "align-self": [
+    8,
+    21
+  ],
+  "alignment-baseline": [
+    11,
+    11
+  ],
+  "anchor-name": [
+    2,
+    2
+  ],
+  "anchor-scope": [
+    2,
+    2
+  ],
+  "animation": [
+    19,
+    19
+  ],
+  "animation-composition": [
+    3,
+    3
+  ],
+  "animation-direction": [
+    4,
+    4
+  ],
+  "animation-duration": [
+    1,
+    1
+  ],
+  "animation-fill-mode": [
+    4,
+    4
+  ],
+  "animation-iteration-count": [
+    1,
+    1
+  ],
+  "animation-name": [
+    1,
+    1
+  ],
+  "animation-play-state": [
+    2,
+    2
+  ],
+  "animation-range": [
+    1,
+    1
+  ],
+  "animation-range-end": [
+    1,
+    1
+  ],
+  "animation-range-start": [
+    1,
+    1
+  ],
+  "animation-timeline": [
+    4,
+    4
+  ],
+  "animation-timing-function": [
+    8,
+    8
+  ],
+  "animation-trigger": [
+    1,
+    1
+  ],
+  "appearance": [
+    14,
+    14
+  ],
+  "aspect-ratio": [
+    1,
+    1
+  ],
+  "backdrop-filter": [
+    1,
+    1
+  ],
+  "backface-visibility": [
+    1,
+    2
+  ],
+  "background": [
+    2,
+    31
+  ],
+  "background-attachment": [
+    2,
+    4
+  ],
+  "background-blend-mode": [
+    1,
+    17
+  ],
+  "background-clip": [
+    1,
+    5
+  ],
+  "background-color": [
+    2,
+    2
+  ],
+  "background-image": [
+    3,
+    6
+  ],
+  "background-origin": [
+    1,
+    3
+  ],
+  "background-position": [
+    0,
+    11
+  ],
+  "background-position-x": [
+    1,
+    6
+  ],
+  "background-position-y": [
+    1,
+    6
+  ],
+  "background-repeat": [
+    1,
+    8
+  ],
+  "background-size": [
+    3,
+    3
+  ],
+  "baseline-shift": [
+    5,
+    5
+  ],
+  "baseline-source": [
+    1,
+    3
+  ],
+  "block-ellipsis": [
+    1,
+    2
+  ],
+  "block-size": [
+    1,
+    7
+  ],
+  "border": [
+    1,
+    15
+  ],
+  "border-block": [
+    0,
+    15
+  ],
+  "border-block-color": [
+    1,
+    2
+  ],
+  "border-block-end": [
+    0,
+    15
+  ],
+  "border-block-end-color": [
+    1,
+    2
+  ],
+  "border-block-end-style": [
+    0,
+    10
+  ],
+  "border-block-end-width": [
+    0,
+    3
+  ],
+  "border-block-start": [
+    0,
+    15
+  ],
+  "border-block-start-color": [
+    1,
+    2
+  ],
+  "border-block-start-style": [
+    0,
+    10
+  ],
+  "border-block-start-width": [
+    0,
+    3
+  ],
+  "border-block-style": [
+    0,
+    10
+  ],
+  "border-block-width": [
+    0,
+    3
+  ],
+  "border-bottom": [
+    0,
+    15
+  ],
+  "border-bottom-color": [
+    1,
+    2
+  ],
+  "border-bottom-left-radius": [
+    0,
+    2
+  ],
+  "border-bottom-right-radius": [
+    0,
+    2
+  ],
+  "border-bottom-style": [
+    2,
+    10
+  ],
+  "border-bottom-width": [
+    1,
+    3
+  ],
+  "border-collapse": [
+    1,
+    2
+  ],
+  "border-color": [
+    1,
+    2
+  ],
+  "border-image": [
+    0,
+    8
+  ],
+  "border-image-repeat": [
+    0,
+    4
+  ],
+  "border-image-source": [
+    1,
+    1
+  ],
+  "border-image-width": [
+    1,
+    1
+  ],
+  "border-inline": [
+    0,
+    15
+  ],
+  "border-inline-color": [
+    1,
+    2
+  ],
+  "border-inline-end": [
+    0,
+    15
+  ],
+  "border-inline-end-color": [
+    1,
+    2
+  ],
+  "border-inline-end-style": [
+    0,
+    10
+  ],
+  "border-inline-end-width": [
+    0,
+    3
+  ],
+  "border-inline-start": [
+    0,
+    15
+  ],
+  "border-inline-start-color": [
+    1,
+    2
+  ],
+  "border-inline-start-style": [
+    0,
+    10
+  ],
+  "border-inline-start-width": [
+    0,
+    3
+  ],
+  "border-inline-style": [
+    0,
+    10
+  ],
+  "border-inline-width": [
+    0,
+    3
+  ],
+  "border-left": [
+    0,
+    15
+  ],
+  "border-left-color": [
+    1,
+    2
+  ],
+  "border-left-style": [
+    2,
+    10
+  ],
+  "border-left-width": [
+    1,
+    3
+  ],
+  "border-radius": [
+    0,
+    3
+  ],
+  "border-right": [
+    0,
+    15
+  ],
+  "border-right-color": [
+    1,
+    2
+  ],
+  "border-right-style": [
+    2,
+    10
+  ],
+  "border-right-width": [
+    1,
+    3
+  ],
+  "border-shape": [
+    1,
+    1
+  ],
+  "border-style": [
+    2,
+    10
+  ],
+  "border-top": [
+    0,
+    15
+  ],
+  "border-top-color": [
+    1,
+    2
+  ],
+  "border-top-left-radius": [
+    0,
+    2
+  ],
+  "border-top-right-radius": [
+    0,
+    2
+  ],
+  "border-top-style": [
+    2,
+    10
+  ],
+  "border-top-width": [
+    1,
+    3
+  ],
+  "border-width": [
+    1,
+    3
+  ],
+  "bottom": [
+    1,
+    3
+  ],
+  "box-decoration-break": [
+    1,
+    2
+  ],
+  "box-shadow": [
+    0,
+    4
+  ],
+  "box-sizing": [
+    0,
+    2
+  ],
+  "break-after": [
+    6,
+    13
+  ],
+  "break-before": [
+    6,
+    13
+  ],
+  "break-inside": [
+    5,
+    6
+  ],
+  "caption-side": [
+    1,
+    2
+  ],
+  "caret-animation": [
+    2,
+    2
+  ],
+  "caret-color": [
+    3,
+    3
+  ],
+  "caret-shape": [
+    4,
+    4
+  ],
+  "clear": [
+    1,
+    6
+  ],
+  "clip-path": [
+    9,
+    13
+  ],
+  "clip-rule": [
+    2,
+    2
+  ],
+  "color": [
+    1,
+    2
+  ],
+  "color-interpolation": [
+    1,
+    3
+  ],
+  "color-interpolation-filters": [
+    1,
+    3
+  ],
+  "color-scheme": [
+    1,
+    4
+  ],
+  "column-count": [
+    0,
+    1
+  ],
+  "column-fill": [
+    1,
+    2
+  ],
+  "column-gap": [
+    3,
+    4
+  ],
+  "column-height": [
+    1,
+    1
+  ],
+  "column-rule": [
+    0,
+    15
+  ],
+  "column-rule-break": [
+    1,
+    3
+  ],
+  "column-rule-color": [
+    1,
+    4
+  ],
+  "column-rule-inset": [
+    0,
+    1
+  ],
+  "column-rule-inset-cap": [
+    0,
+    1
+  ],
+  "column-rule-inset-cap-end": [
+    0,
+    1
+  ],
+  "column-rule-inset-cap-start": [
+    0,
+    1
+  ],
+  "column-rule-inset-end": [
+    0,
+    1
+  ],
+  "column-rule-inset-junction": [
+    0,
+    1
+  ],
+  "column-rule-inset-junction-end": [
+    0,
+    1
+  ],
+  "column-rule-inset-junction-start": [
+    0,
+    1
+  ],
+  "column-rule-inset-start": [
+    0,
+    1
+  ],
+  "column-rule-style": [
+    1,
+    10
+  ],
+  "column-rule-visibility-items": [
+    0,
+    4
+  ],
+  "column-rule-width": [
+    0,
+    3
+  ],
+  "column-span": [
+    0,
+    2
+  ],
+  "column-width": [
+    1,
+    1
+  ],
+  "column-wrap": [
+    0,
+    3
+  ],
+  "columns": [
+    0,
+    2
+  ],
+  "contain": [
+    1,
+    8
+  ],
+  "contain-intrinsic-block-size": [
+    1,
+    1
+  ],
+  "contain-intrinsic-height": [
+    1,
+    1
+  ],
+  "contain-intrinsic-inline-size": [
+    1,
+    1
+  ],
+  "contain-intrinsic-size": [
+    1,
+    2
+  ],
+  "contain-intrinsic-width": [
+    1,
+    1
+  ],
+  "container": [
+    6,
+    6
+  ],
+  "container-name": [
+    2,
+    2
+  ],
+  "container-type": [
+    4,
+    7
+  ],
+  "content": [
+    2,
+    11
+  ],
+  "content-visibility": [
+    2,
+    4
+  ],
+  "continue": [
+    2,
+    3
+  ],
+  "corner-block-end-shape": [
+    1,
+    6
+  ],
+  "corner-block-start-shape": [
+    1,
+    6
+  ],
+  "corner-bottom-left-shape": [
+    1,
+    6
+  ],
+  "corner-bottom-right-shape": [
+    1,
+    6
+  ],
+  "corner-bottom-shape": [
+    1,
+    6
+  ],
+  "corner-end-end-shape": [
+    1,
+    6
+  ],
+  "corner-end-start-shape": [
+    1,
+    6
+  ],
+  "corner-inline-end-shape": [
+    1,
+    6
+  ],
+  "corner-inline-start-shape": [
+    1,
+    6
+  ],
+  "corner-left-shape": [
+    1,
+    6
+  ],
+  "corner-right-shape": [
+    1,
+    6
+  ],
+  "corner-shape": [
+    1,
+    6
+  ],
+  "corner-start-end-shape": [
+    1,
+    6
+  ],
+  "corner-start-start-shape": [
+    1,
+    6
+  ],
+  "corner-top-left-shape": [
+    1,
+    6
+  ],
+  "corner-top-right-shape": [
+    1,
+    6
+  ],
+  "corner-top-shape": [
+    1,
+    6
+  ],
+  "counter-increment": [
+    1,
+    2
+  ],
+  "counter-reset": [
+    2,
+    4
+  ],
+  "counter-set": [
+    1,
+    2
+  ],
+  "cursor": [
+    37,
+    37
+  ],
+  "d": [
+    0,
+    1
+  ],
+  "direction": [
+    1,
+    2
+  ],
+  "display": [
+    2,
+    31
+  ],
+  "dominant-baseline": [
+    9,
+    9
+  ],
+  "dynamic-range-limit": [
+    4,
+    4
+  ],
+  "empty-cells": [
+    1,
+    2
+  ],
+  "field-sizing": [
+    1,
+    2
+  ],
+  "fill": [
+    0,
+    1
+  ],
+  "fill-rule": [
+    0,
+    2
+  ],
+  "filter": [
+    2,
+    12
+  ],
+  "fit-tolerance": [
+    0,
+    2
+  ],
+  "flex": [
+    0,
+    7
+  ],
+  "flex-basis": [
+    1,
+    6
+  ],
+  "flex-direction": [
+    1,
+    4
+  ],
+  "flex-flow": [
+    2,
+    8
+  ],
+  "flex-wrap": [
+    1,
+    4
+  ],
+  "float": [
+    1,
+    5
+  ],
+  "flood-color": [
+    2,
+    2
+  ],
+  "font": [
+    6,
+    7
+  ],
+  "font-family": [
+    1,
+    11
+  ],
+  "font-feature-settings": [
+    1,
+    1
+  ],
+  "font-kerning": [
+    3,
+    3
+  ],
+  "font-language-override": [
+    1,
+    1
+  ],
+  "font-optical-sizing": [
+    2,
+    2
+  ],
+  "font-palette": [
+    5,
+    5
+  ],
+  "font-size": [
+    1,
+    12
+  ],
+  "font-size-adjust": [
+    2,
+    3
+  ],
+  "font-stretch": [
+    10,
+    10
+  ],
+  "font-style": [
+    1,
+    4
+  ],
+  "font-synthesis": [
+    5,
+    5
+  ],
+  "font-synthesis-position": [
+    2,
+    2
+  ],
+  "font-synthesis-small-caps": [
+    2,
+    2
+  ],
+  "font-synthesis-style": [
+    3,
+    3
+  ],
+  "font-synthesis-weight": [
+    2,
+    2
+  ],
+  "font-variant": [
+    1,
+    40
+  ],
+  "font-variant-alternates": [
+    8,
+    8
+  ],
+  "font-variant-caps": [
+    1,
+    7
+  ],
+  "font-variant-east-asian": [
+    1,
+    10
+  ],
+  "font-variant-emoji": [
+    4,
+    4
+  ],
+  "font-variant-ligatures": [
+    1,
+    10
+  ],
+  "font-variant-numeric": [
+    1,
+    9
+  ],
+  "font-variant-position": [
+    1,
+    3
+  ],
+  "font-variation-settings": [
+    1,
+    1
+  ],
+  "font-weight": [
+    2,
+    5
+  ],
+  "font-width": [
+    10,
+    10
+  ],
+  "forced-color-adjust": [
+    3,
+    3
+  ],
+  "frame-sizing": [
+    0,
+    5
+  ],
+  "gap": [
+    3,
+    4
+  ],
+  "grid": [
+    1,
+    1
+  ],
+  "grid-area": [
+    1,
+    1
+  ],
+  "grid-auto-columns": [
+    1,
+    3
+  ],
+  "grid-auto-flow": [
+    1,
+    3
+  ],
+  "grid-auto-rows": [
+    1,
+    3
+  ],
+  "grid-column": [
+    1,
+    1
+  ],
+  "grid-column-end": [
+    1,
+    1
+  ],
+  "grid-column-start": [
+    1,
+    1
+  ],
+  "grid-row": [
+    1,
+    1
+  ],
+  "grid-row-end": [
+    1,
+    1
+  ],
+  "grid-row-start": [
+    1,
+    1
+  ],
+  "grid-template": [
+    1,
+    1
+  ],
+  "grid-template-areas": [
+    1,
+    1
+  ],
+  "grid-template-columns": [
+    3,
+    9
+  ],
+  "grid-template-rows": [
+    3,
+    9
+  ],
+  "hanging-punctuation": [
+    1,
+    5
+  ],
+  "height": [
+    1,
+    7
+  ],
+  "hyphenate-character": [
+    1,
+    1
+  ],
+  "hyphenate-limit-chars": [
+    1,
+    1
+  ],
+  "hyphenate-limit-lines": [
+    1,
+    1
+  ],
+  "hyphens": [
+    1,
+    3
+  ],
+  "image-orientation": [
+    2,
+    2
+  ],
+  "image-rendering": [
+    1,
+    4
+  ],
+  "initial-letter": [
+    1,
+    1
+  ],
+  "inline-size": [
+    1,
+    7
+  ],
+  "inset": [
+    1,
+    3
+  ],
+  "inset-block": [
+    1,
+    3
+  ],
+  "inset-block-end": [
+    1,
+    3
+  ],
+  "inset-block-start": [
+    1,
+    3
+  ],
+  "inset-inline": [
+    1,
+    3
+  ],
+  "inset-inline-end": [
+    1,
+    3
+  ],
+  "inset-inline-start": [
+    1,
+    3
+  ],
+  "interactivity": [
+    2,
+    2
+  ],
+  "interest-delay": [
+    1,
+    1
+  ],
+  "interest-delay-end": [
+    1,
+    1
+  ],
+  "interest-delay-start": [
+    1,
+    1
+  ],
+  "interpolate-size": [
+    2,
+    2
+  ],
+  "isolation": [
+    1,
+    2
+  ],
+  "justify-content": [
+    8,
+    16
+  ],
+  "justify-items": [
+    5,
+    19
+  ],
+  "justify-self": [
+    6,
+    19
+  ],
+  "left": [
+    1,
+    3
+  ],
+  "letter-spacing": [
+    2,
+    3
+  ],
+  "lighting-color": [
+    2,
+    2
+  ],
+  "line-break": [
+    1,
+    5
+  ],
+  "line-clamp": [
+    1,
+    4
+  ],
+  "line-height": [
+    1,
+    1
+  ],
+  "link-parameters": [
+    1,
+    1
+  ],
+  "list-style": [
+    1,
+    4
+  ],
+  "list-style-image": [
+    1,
+    1
+  ],
+  "list-style-position": [
+    1,
+    2
+  ],
+  "list-style-type": [
+    1,
+    58
+  ],
+  "margin": [
+    0,
+    2
+  ],
+  "margin-block": [
+    0,
+    2
+  ],
+  "margin-block-end": [
+    0,
+    2
+  ],
+  "margin-block-start": [
+    0,
+    2
+  ],
+  "margin-bottom": [
+    0,
+    2
+  ],
+  "margin-inline": [
+    0,
+    2
+  ],
+  "margin-inline-end": [
+    0,
+    2
+  ],
+  "margin-inline-start": [
+    0,
+    2
+  ],
+  "margin-left": [
+    0,
+    2
+  ],
+  "margin-right": [
+    0,
+    2
+  ],
+  "margin-top": [
+    0,
+    2
+  ],
+  "margin-trim": [
+    1,
+    4
+  ],
+  "marker": [
+    1,
+    1
+  ],
+  "marker-end": [
+    1,
+    1
+  ],
+  "marker-mid": [
+    1,
+    1
+  ],
+  "marker-start": [
+    1,
+    1
+  ],
+  "mask": [
+    0,
+    30
+  ],
+  "mask-border": [
+    0,
+    5
+  ],
+  "mask-border-repeat": [
+    0,
+    4
+  ],
+  "mask-border-source": [
+    0,
+    1
+  ],
+  "mask-border-width": [
+    0,
+    1
+  ],
+  "mask-clip": [
+    0,
+    7
+  ],
+  "mask-composite": [
+    0,
+    4
+  ],
+  "mask-image": [
+    2,
+    3
+  ],
+  "mask-mode": [
+    0,
+    3
+  ],
+  "mask-origin": [
+    0,
+    6
+  ],
+  "mask-position": [
+    0,
+    9
+  ],
+  "mask-repeat": [
+    0,
+    6
+  ],
+  "mask-size": [
+    0,
+    3
+  ],
+  "mask-type": [
+    0,
+    2
+  ],
+  "math-depth": [
+    1,
+    1
+  ],
+  "math-shift": [
+    1,
+    2
+  ],
+  "math-style": [
+    1,
+    2
+  ],
+  "max-block-size": [
+    0,
+    7
+  ],
+  "max-height": [
+    0,
+    7
+  ],
+  "max-inline-size": [
+    0,
+    7
+  ],
+  "max-lines": [
+    0,
+    1
+  ],
+  "max-size": [
+    0,
+    5
+  ],
+  "max-width": [
+    0,
+    7
+  ],
+  "min-block-size": [
+    1,
+    7
+  ],
+  "min-height": [
+    1,
+    7
+  ],
+  "min-inline-size": [
+    1,
+    7
+  ],
+  "min-size": [
+    0,
+    5
+  ],
+  "min-width": [
+    1,
+    7
+  ],
+  "mix-blend-mode": [
+    2,
+    19
+  ],
+  "object-fit": [
+    1,
+    5
+  ],
+  "object-position": [
+    0,
+    9
+  ],
+  "object-view-box": [
+    1,
+    1
+  ],
+  "offset": [
+    19,
+    19
+  ],
+  "offset-anchor": [
+    2,
+    10
+  ],
+  "offset-path": [
+    8,
+    12
+  ],
+  "offset-position": [
+    2,
+    11
+  ],
+  "offset-rotate": [
+    1,
+    2
+  ],
+  "opacity": [
+    0,
+    1
+  ],
+  "outline": [
+    0,
+    15
+  ],
+  "outline-color": [
+    1,
+    2
+  ],
+  "outline-style": [
+    1,
+    10
+  ],
+  "outline-width": [
+    0,
+    3
+  ],
+  "overflow": [
+    2,
+    7
+  ],
+  "overflow-anchor": [
+    2,
+    2
+  ],
+  "overflow-block": [
+    0,
+    6
+  ],
+  "overflow-clip-margin": [
+    0,
+    3
+  ],
+  "overflow-inline": [
+    0,
+    6
+  ],
+  "overflow-wrap": [
+    1,
+    3
+  ],
+  "overflow-x": [
+    2,
+    6
+  ],
+  "overflow-y": [
+    2,
+    6
+  ],
+  "overlay": [
+    2,
+    2
+  ],
+  "overscroll-behavior": [
+    4,
+    4
+  ],
+  "overscroll-behavior-block": [
+    4,
+    4
+  ],
+  "overscroll-behavior-inline": [
+    4,
+    4
+  ],
+  "overscroll-behavior-x": [
+    4,
+    4
+  ],
+  "overscroll-behavior-y": [
+    4,
+    4
+  ],
+  "page": [
+    1,
+    1
+  ],
+  "paint-order": [
+    0,
+    4
+  ],
+  "path-length": [
+    1,
+    1
+  ],
+  "perspective": [
+    1,
+    1
+  ],
+  "perspective-origin": [
+    0,
+    9
+  ],
+  "place-content": [
+    3,
+    13
+  ],
+  "place-items": [
+    3,
+    15
+  ],
+  "place-self": [
+    4,
+    17
+  ],
+  "pointer-events": [
+    12,
+    12
+  ],
+  "position": [
+    5,
+    7
+  ],
+  "position-anchor": [
+    3,
+    3
+  ],
+  "position-area": [
+    2,
+    52
+  ],
+  "position-try": [
+    11,
+    56
+  ],
+  "position-try-fallbacks": [
+    11,
+    57
+  ],
+  "position-try-order": [
+    1,
+    5
+  ],
+  "position-visibility": [
+    2,
+    4
+  ],
+  "print-color-adjust": [
+    2,
+    2
+  ],
+  "quotes": [
+    1,
+    2
+  ],
+  "reading-flow": [
+    0,
+    7
+  ],
+  "resize": [
+    7,
+    7
+  ],
+  "right": [
+    1,
+    3
+  ],
+  "rotate": [
+    1,
+    2
+  ],
+  "row-gap": [
+    2,
+    3
+  ],
+  "row-rule": [
+    4,
+    15
+  ],
+  "row-rule-break": [
+    3,
+    3
+  ],
+  "row-rule-color": [
+    2,
+    2
+  ],
+  "row-rule-inset": [
+    0,
+    1
+  ],
+  "row-rule-inset-cap": [
+    0,
+    1
+  ],
+  "row-rule-inset-cap-end": [
+    0,
+    1
+  ],
+  "row-rule-inset-cap-start": [
+    0,
+    1
+  ],
+  "row-rule-inset-end": [
+    0,
+    1
+  ],
+  "row-rule-inset-junction": [
+    0,
+    1
+  ],
+  "row-rule-inset-junction-end": [
+    0,
+    1
+  ],
+  "row-rule-inset-junction-start": [
+    0,
+    1
+  ],
+  "row-rule-inset-start": [
+    0,
+    1
+  ],
+  "row-rule-style": [
+    2,
+    10
+  ],
+  "row-rule-visibility-items": [
+    0,
+    4
+  ],
+  "row-rule-width": [
+    1,
+    3
+  ],
+  "ruby-align": [
+    0,
+    4
+  ],
+  "ruby-overhang": [
+    1,
+    3
+  ],
+  "ruby-position": [
+    0,
+    4
+  ],
+  "rule": [
+    3,
+    15
+  ],
+  "rule-break": [
+    3,
+    3
+  ],
+  "rule-color": [
+    2,
+    2
+  ],
+  "rule-inset": [
+    0,
+    1
+  ],
+  "rule-inset-cap": [
+    0,
+    1
+  ],
+  "rule-inset-end": [
+    0,
+    1
+  ],
+  "rule-inset-junction": [
+    0,
+    1
+  ],
+  "rule-inset-start": [
+    0,
+    1
+  ],
+  "rule-overlap": [
+    0,
+    2
+  ],
+  "rule-style": [
+    1,
+    10
+  ],
+  "rule-visibility-items": [
+    0,
+    4
+  ],
+  "rule-width": [
+    0,
+    3
+  ],
+  "rx": [
+    0,
+    1
+  ],
+  "ry": [
+    0,
+    1
+  ],
+  "scale": [
+    1,
+    1
+  ],
+  "scroll-axis-lock": [
+    2,
+    2
+  ],
+  "scroll-behavior": [
+    2,
+    2
+  ],
+  "scroll-initial-target": [
+    2,
+    2
+  ],
+  "scroll-marker-group": [
+    3,
+    3
+  ],
+  "scroll-padding": [
+    1,
+    1
+  ],
+  "scroll-padding-block": [
+    1,
+    1
+  ],
+  "scroll-padding-block-end": [
+    1,
+    1
+  ],
+  "scroll-padding-block-start": [
+    1,
+    1
+  ],
+  "scroll-padding-bottom": [
+    1,
+    1
+  ],
+  "scroll-padding-inline": [
+    1,
+    1
+  ],
+  "scroll-padding-inline-end": [
+    1,
+    1
+  ],
+  "scroll-padding-inline-start": [
+    1,
+    1
+  ],
+  "scroll-padding-left": [
+    1,
+    1
+  ],
+  "scroll-padding-right": [
+    1,
+    1
+  ],
+  "scroll-padding-top": [
+    1,
+    1
+  ],
+  "scroll-snap-align": [
+    4,
+    4
+  ],
+  "scroll-snap-stop": [
+    2,
+    2
+  ],
+  "scroll-snap-type": [
+    7,
+    7
+  ],
+  "scroll-target-group": [
+    2,
+    2
+  ],
+  "scroll-timeline": [
+    1,
+    1
+  ],
+  "scroll-timeline-axis": [
+    4,
+    4
+  ],
+  "scroll-timeline-name": [
+    1,
+    1
+  ],
+  "scrollbar-color": [
+    1,
+    1
+  ],
+  "scrollbar-gutter": [
+    2,
+    2
+  ],
+  "scrollbar-width": [
+    3,
+    3
+  ],
+  "shape-image-threshold": [
+    0,
+    1
+  ],
+  "shape-outside": [
+    3,
+    13
+  ],
+  "shape-rendering": [
+    0,
+    4
+  ],
+  "size": [
+    5,
+    5
+  ],
+  "speak-as": [
+    5,
+    5
+  ],
+  "stop-color": [
+    0,
+    2
+  ],
+  "stroke": [
+    0,
+    1
+  ],
+  "stroke-color": [
+    2,
+    2
+  ],
+  "stroke-dasharray": [
+    0,
+    1
+  ],
+  "stroke-linecap": [
+    0,
+    3
+  ],
+  "stroke-linejoin": [
+    0,
+    3
+  ],
+  "tab-size": [
+    1,
+    2
+  ],
+  "table-layout": [
+    1,
+    2
+  ],
+  "text-align": [
+    2,
+    7
+  ],
+  "text-align-last": [
+    1,
+    8
+  ],
+  "text-anchor": [
+    3,
+    3
+  ],
+  "text-autospace": [
+    3,
+    6
+  ],
+  "text-box": [
+    10,
+    13
+  ],
+  "text-box-edge": [
+    2,
+    7
+  ],
+  "text-box-trim": [
+    2,
+    5
+  ],
+  "text-combine-upright": [
+    1,
+    2
+  ],
+  "text-decoration": [
+    3,
+    17
+  ],
+  "text-decoration-color": [
+    1,
+    2
+  ],
+  "text-decoration-inset": [
+    1,
+    1
+  ],
+  "text-decoration-line": [
+    1,
+    6
+  ],
+  "text-decoration-skip-ink": [
+    2,
+    3
+  ],
+  "text-decoration-skip-spaces": [
+    1,
+    4
+  ],
+  "text-decoration-style": [
+    1,
+    5
+  ],
+  "text-decoration-thickness": [
+    2,
+    3
+  ],
+  "text-emphasis": [
+    1,
+    10
+  ],
+  "text-emphasis-color": [
+    2,
+    2
+  ],
+  "text-emphasis-position": [
+    0,
+    4
+  ],
+  "text-emphasis-style": [
+    1,
+    8
+  ],
+  "text-fit": [
+    0,
+    7
+  ],
+  "text-indent": [
+    0,
+    2
+  ],
+  "text-justify": [
+    3,
+    4
+  ],
+  "text-orientation": [
+    1,
+    3
+  ],
+  "text-overflow": [
+    0,
+    4
+  ],
+  "text-rendering": [
+    4,
+    4
+  ],
+  "text-shadow": [
+    1,
+    1
+  ],
+  "text-size-adjust": [
+    3,
+    3
+  ],
+  "text-spacing-trim": [
+    1,
+    4
+  ],
+  "text-transform": [
+    1,
+    7
+  ],
+  "text-underline-offset": [
+    1,
+    2
+  ],
+  "text-underline-position": [
+    2,
+    5
+  ],
+  "text-wrap": [
+    3,
+    6
+  ],
+  "text-wrap-mode": [
+    1,
+    2
+  ],
+  "text-wrap-style": [
+    2,
+    4
+  ],
+  "timeline-scope": [
+    2,
+    2
+  ],
+  "timeline-trigger": [
+    3,
+    3
+  ],
+  "timeline-trigger-activation-range": [
+    1,
+    1
+  ],
+  "timeline-trigger-activation-range-end": [
+    1,
+    1
+  ],
+  "timeline-trigger-activation-range-start": [
+    1,
+    1
+  ],
+  "timeline-trigger-active-range": [
+    2,
+    2
+  ],
+  "timeline-trigger-active-range-end": [
+    2,
+    2
+  ],
+  "timeline-trigger-active-range-start": [
+    2,
+    2
+  ],
+  "timeline-trigger-name": [
+    1,
+    1
+  ],
+  "timeline-trigger-source": [
+    2,
+    2
+  ],
+  "top": [
+    1,
+    3
+  ],
+  "touch-action": [
+    9,
+    9
+  ],
+  "transform": [
+    2,
+    2
+  ],
+  "transform-box": [
+    4,
+    5
+  ],
+  "transform-origin": [
+    2,
+    7
+  ],
+  "transform-style": [
+    1,
+    2
+  ],
+  "transition": [
+    13,
+    13
+  ],
+  "transition-behavior": [
+    4,
+    4
+  ],
+  "transition-property": [
+    3,
+    3
+  ],
+  "transition-timing-function": [
+    8,
+    8
+  ],
+  "translate": [
+    1,
+    1
+  ],
+  "trigger-scope": [
+    2,
+    2
+  ],
+  "unicode-bidi": [
+    1,
+    6
+  ],
+  "user-select": [
+    4,
+    4
+  ],
+  "vector-effect": [
+    0,
+    2
+  ],
+  "vertical-align": [
+    14,
+    16
+  ],
+  "view-timeline": [
+    1,
+    1
+  ],
+  "view-timeline-axis": [
+    4,
+    4
+  ],
+  "view-timeline-inset": [
+    1,
+    1
+  ],
+  "view-timeline-name": [
+    1,
+    1
+  ],
+  "view-transition-class": [
+    1,
+    1
+  ],
+  "view-transition-group": [
+    3,
+    3
+  ],
+  "view-transition-name": [
+    2,
+    2
+  ],
+  "view-transition-scope": [
+    2,
+    2
+  ],
+  "visibility": [
+    1,
+    3
+  ],
+  "white-space": [
+    5,
+    18
+  ],
+  "white-space-collapse": [
+    1,
+    5
+  ],
+  "white-space-trim": [
+    1,
+    4
+  ],
+  "width": [
+    2,
+    8
+  ],
+  "will-change": [
+    3,
+    3
+  ],
+  "window-drag": [
+    2,
+    2
+  ],
+  "word-break": [
+    1,
+    4
+  ],
+  "word-spacing": [
+    2,
+    3
+  ],
+  "wrap-inside": [
+    0,
+    2
+  ],
+  "writing-mode": [
+    1,
+    5
+  ],
+  "z-index": [
+    1,
+    2
+  ],
+  "zoom": [
+    1,
+    1
+  ]
+}

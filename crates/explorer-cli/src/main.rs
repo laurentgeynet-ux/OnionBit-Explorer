@@ -78,7 +78,7 @@ fn main() -> ExitCode {
             eprintln!(
                 "        explorer-cli props            (noms de props sur stdin → `nom\\tok|miss`)"
             );
-            eprintln!("        explorer-cli check prop|sel|at|routed|affects|affectsv|html");
+            eprintln!("        explorer-cli check prop|sel|at|routed|affects|affectsv|paintv|html|decl|tables");
             eprintln!("        explorer-cli download <url> <sortie>");
             eprintln!("        explorer-cli diff <a.png> <b.png>");
             eprintln!(
@@ -3232,6 +3232,84 @@ fn paint_decl_verdict(decl: &str) -> Option<bool> {
     }
 }
 
+/// `check tables` (étape 277) — dump TSV des tables de
+/// qualification de la jauge pour `bcd_audit.mjs` :
+/// lignes `initial_extra\t<prop>\t<valeur>`,
+/// `no_oracle\t<prop>`, `paint_na\t<prop>`.
+/// [`subfeature_probe`]/[`paint_subfeature`] sont des
+/// `match` non énumérables — leur correction se sonde
+/// comportementalement via `check decl` (méta-nom →
+/// `na`/`probe:`).
+fn check_tables() -> ExitCode {
+    for (n, v) in INITIAL_EXTRA {
+        println!("initial_extra\t{n}\t{v}");
+    }
+    for n in NO_ORACLE {
+        println!("no_oracle\t{n}");
+    }
+    for n in PAINT_NA {
+        println!("paint_na\t{n}");
+    }
+    ExitCode::SUCCESS
+}
+
+/// `check decl` (étape 277) — verdict de la **porte** de la
+/// jauge sur `p:v`, sans oracle : `na`, `known:false`
+/// (capacité tranchée absente — `hyphens` hors latin),
+/// `probe:<lit>` (sous-feature BCD substituée par un
+/// littéral), `decl:<lit>` (mesuré tel quel) ou
+/// `invalid:<lit>` (le littéral résolu échoue à la
+/// validation explorer-css — suspect « valeur BCD non
+/// littérale » ou sonde interne cassée). Chemin de
+/// l'union : [`PAINT_NA`] + [`paint_subfeature`] — `na`
+/// ici = neutre sous les deux oracles (paint-na ⊆
+/// geo-na par construction).
+fn check_decls() -> ExitCode {
+    use std::io::BufRead;
+    let stdin = std::io::stdin();
+    for line in stdin.lock().lines() {
+        let Ok(decl) = line else { break };
+        let decl = decl.trim();
+        if decl.is_empty() {
+            continue;
+        }
+        let out = match decl_gate(decl, PAINT_NA, true) {
+            DeclGate::Na => "na".to_string(),
+            DeclGate::Known(b) => format!("known:{b}"),
+            DeclGate::Probe(d) => {
+                let kind = if d == decl { "decl" } else { "probe" };
+                if decl_valid(&d) {
+                    format!("{kind}:{d}")
+                } else {
+                    format!("invalid:{d}")
+                }
+            }
+        };
+        println!("{decl}\t{out}");
+    }
+    ExitCode::SUCCESS
+}
+
+/// Validation syntaxique du littéral résolu (étape 277) :
+/// prop reconnue, déclaration qui survit au parse et
+/// valeur dans la grammaire (périmètre
+/// [`explorer_css::value::value_is_valid_for`]). Un
+/// `invalid` sur
+/// une sonde interne = ligne de table cassée (ex. prop
+/// retirée de `SUPPORTED_PROPS`) ; sur une valeur BCD
+/// littérale = non-littéral passé à l'oracle.
+fn decl_valid(d: &str) -> bool {
+    let Some((n, v)) = d.split_once(':') else {
+        return false;
+    };
+    let (n, v) = (n.trim(), v.trim());
+    explorer_css::prop_supported(n)
+        && explorer_css::parse_declarations(d)
+            .iter()
+            .any(|dd| dd.name.eq_ignore_ascii_case(n))
+        && explorer_css::value::value_is_valid_for(n, v)
+}
+
 /// `check html` — oracle de comportement par élément
 /// (`bcd.html.elements`, étape 219). « Le tag parse » est
 /// trivial (toute balise produit un élément) : la jauge
@@ -3542,6 +3620,15 @@ fn walk_any(
 
 fn check_names(kind: &str) -> ExitCode {
     use std::io::BufRead;
+    // Modes audit (étape 277) — `tables`/`decl` exposent les
+    // structures internes de la jauge à `bcd_audit.mjs`
+    // (lints de qualification : lignes mortes, méta-noms,
+    // littéraux invalides) — pas des sondes ok/miss.
+    match kind {
+        "tables" => return check_tables(),
+        "decl" => return check_decls(),
+        _ => {}
+    }
     let routed_dom;
     let test: Box<dyn Fn(&str) -> bool> = match kind {
         "prop" => Box::new(explorer_css::prop_supported),
@@ -3579,7 +3666,7 @@ fn check_names(kind: &str) -> ExitCode {
         }
         _ => {
             eprintln!(
-                "check : kind inconnu {kind:?} — attendu prop|sel|at|routed|affects|affectsv|html"
+                "check : kind inconnu {kind:?} — attendu prop|sel|at|routed|affects|affectsv|paintv|html|decl|tables"
             );
             return ExitCode::FAILURE;
         }
@@ -3949,4 +4036,35 @@ mod tests {
         }
     }
 
+    /// `check decl` (étape 277) : la porte de la jauge sert
+    /// les lints de `bcd_audit.mjs` — verrous sur
+    /// `decl_gate` (chemin union) et `decl_valid`.
+    #[test]
+    fn decl_gate_verdicts_audit() {
+        use super::{decl_gate, decl_valid, DeclGate, PAINT_NA};
+        // `na` : initiales spec, CSS-wide, méta non sondé.
+        for d in ["color:initial", "color:inherit", "display:bogus_meta_name"] {
+            assert!(matches!(decl_gate(d, PAINT_NA, true), DeclGate::Na), "{d}");
+        }
+        // `probe` : sous-feature BCD substituée — latin
+        // couvert → `hyphens:auto`, hors latin → miss tranché.
+        match decl_gate("hyphens:language_french", PAINT_NA, true) {
+            DeclGate::Probe(d) => assert_eq!(d, "hyphens:auto"),
+            _ => panic!("hyphens:language_french doit sonder auto"),
+        }
+        match decl_gate("hyphens:language_arabic", PAINT_NA, true) {
+            DeclGate::Known(false) => {}
+            _ => panic!("hyphens hors latin = miss tranché"),
+        }
+        // `decl` : le brut passe tel quel.
+        match decl_gate("color:red", PAINT_NA, true) {
+            DeclGate::Probe(d) => assert_eq!(d, "color:red"),
+            _ => panic!("color:red doit mesurer le brut"),
+        }
+        // `invalid` : le littéral échoue à la validation —
+        // `200` sans unité est hors grammaire `width`.
+        assert!(!decl_valid("width:200"));
+        assert!(decl_valid("width:200px"));
+        assert!(decl_valid("color:red"));
+    }
 }
