@@ -829,12 +829,14 @@ pub enum EventKind {
 // Notifications serveur — `{"method":"event.<kind>", "params":{…}}`
 // ------------------------------------------------------------------
 
-/// Notification poussée — sérialisée en `method:"event.<name>"`.
+/// Notification poussée — sérialisée `{"method":"event.<name>",
+/// "params":{…}}` : le tag interne produit exactement la forme
+/// golden (`method` + `params` plats).
 #[derive(Debug, Clone, Serialize)]
-#[serde(tag = "event", content = "data")]
+#[serde(tag = "method", content = "params")]
 pub enum Event {
     /// Fetch engagé.
-    #[serde(rename = "nav.started")]
+    #[serde(rename = "event.nav.started")]
     NavStarted {
         /// Onglet.
         tab: TabId,
@@ -842,7 +844,7 @@ pub enum Event {
         url: String,
     },
     /// Navigation commise — le document est posé.
-    #[serde(rename = "nav.committed")]
+    #[serde(rename = "event.nav.committed")]
     NavCommitted {
         /// Onglet.
         tab: TabId,
@@ -855,7 +857,7 @@ pub enum Event {
     },
     /// Frame périmée — l'agent retirera `frame.get` s'il en a
     /// besoin (pull, jamais de pixels poussés).
-    #[serde(rename = "frame.invalidated")]
+    #[serde(rename = "event.frame.invalidated")]
     FrameInvalidated {
         /// Onglet.
         tab: TabId,
@@ -865,7 +867,7 @@ pub enum Event {
         scroll_y: f32,
     },
     /// Entrée de console (ring).
-    #[serde(rename = "console.entry")]
+    #[serde(rename = "event.console.entry")]
     ConsoleEntry {
         /// Onglet.
         tab: TabId,
@@ -873,7 +875,7 @@ pub enum Event {
         message: String,
     },
     /// Révision de snapshot incrémentée.
-    #[serde(rename = "snapshot.changed")]
+    #[serde(rename = "event.snapshot.changed")]
     SnapshotChanged {
         /// Onglet.
         tab: TabId,
@@ -881,28 +883,39 @@ pub enum Event {
         rev: u64,
     },
     /// Onglet ouvert.
-    #[serde(rename = "tab.opened")]
+    #[serde(rename = "event.tab.opened")]
     TabOpened {
         /// Onglet.
         tab: TabId,
     },
     /// Onglet fermé — refs purgées, `StaleRef` dorénavant.
-    #[serde(rename = "tab.closed")]
+    #[serde(rename = "event.tab.closed")]
     TabClosed {
         /// Onglet.
         tab: TabId,
     },
 }
 
-/// Forme de la notification sur le fil.
+/// Forme de la notification sur le fil :
+/// `{"jsonrpc":"2.0","method":"event.…","params":{…}}`.
 #[derive(Debug, Serialize)]
-pub struct Notification<'a> {
-    /// Toujours `"2.0"`.
-    pub jsonrpc: &'a str,
-    /// Nom de méthode (`event.<kind>`).
-    pub method: &'a str,
-    /// Charge.
-    pub params: &'a Event,
+pub struct Notification {
+    /// `"2.0"`.
+    pub jsonrpc: Jsonrpc,
+    /// Tag `method` + `params` de l'événement (plat).
+    #[serde(flatten)]
+    pub event: Event,
+}
+
+impl Notification {
+    /// Construit la notification sérialisable d'un événement.
+    #[must_use]
+    pub fn new(event: Event) -> Self {
+        Self {
+            jsonrpc: Jsonrpc,
+            event,
+        }
+    }
 }
 
 // ------------------------------------------------------------------

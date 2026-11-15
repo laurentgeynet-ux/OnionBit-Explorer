@@ -737,7 +737,12 @@ async fn amain() {
             }
         });
     }
-    let app = explorer_api::router_with_egress(session, cfg.api_key.clone(), egress);
+    // Surface agent EAP (ADR-0035) — `/agent` WS sur le même
+    // listener : deuxième client de `Session`, même verrou,
+    // même clé. Routeur disjoint du REST pour garder la
+    // couture UI intacte.
+    let app = explorer_api::router_with_egress(session.clone(), cfg.api_key.clone(), egress)
+        .merge(explorer_agent::agent_router(session, cfg.api_key.clone()));
     if cfg.api_key.is_some() {
         tracing::info!("clé d'API requise (x-api-key / ?key=)");
     }

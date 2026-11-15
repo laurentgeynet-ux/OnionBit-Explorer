@@ -43,6 +43,7 @@ explorer-layout = { path = "crates/explorer-layout" }
 explorer-render = { path = "crates/explorer-render" }
 explorer-core = { path = "crates/explorer-core" }
 explorer-api = { path = "crates/explorer-api" }
+explorer-agent = { path = "crates/explorer-agent" }
 explorer-ffi = { path = "crates/explorer-ffi" }
 explorer-test-support = { path = "crates/explorer-test-support" }
 explorer-jscore = { path = "crates/explorer-jscore" }
@@ -112,13 +113,16 @@ stacker = "0.1.25"
 # httparse wire-format HTTP/1.1, async-trait pour les transports
 # injectables (HttpTransport/Connector dyn-compatibles).
 tokio = { version = "1", features = ["net", "io-util", "fs", "time", "rt", "rt-multi-thread", "macros", "signal", "sync"] }
-axum = { version = "0.8", features = ["json", "tokio"] }
+axum = { version = "0.8", features = ["json", "tokio", "ws"] }
 serde_json = "1"
 serde = { version = "1", features = ["derive"] }
 futures-util = { version = "0.3", default-features = false }
 tower = { version = "0.5", features = ["util"] }
 httparse = "1.9"
 async-trait = "0.1"
+# Client WS pour les tests EAP (serveur = axum feature ws
+# → tungstenite interne ; la version suit la même ligne).
+tokio-tungstenite = "0.29"
 # TLS explorer-net (ADR-0002, étape 5) — rustls + webpki-roots.
 # Provider crypto `ring` : exception *-sys* consignée dans l'ADR —
 # aucune pile TLS viable n'est 100 % Rust ; `ring` se build sur

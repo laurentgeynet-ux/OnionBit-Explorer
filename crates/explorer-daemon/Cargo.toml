@@ -12,6 +12,7 @@ workspace = true
 [dependencies]
 axum.workspace = true
 memory-stats.workspace = true
+explorer-agent.workspace = true
 explorer-api.workspace = true
 explorer-core.workspace = true
 explorer-js.workspace = true

@@ -7657,11 +7657,11 @@ MCP = adaptateur, jamais la base.
   sur commits du single-writer (point d'extension additif core à
   journaliser), adaptateurs stdio/MCP minces. Hors v1 déclaré :
   interception réseau, file chooser, dialogues, PDF, vidéo.
-- [ ] **Étape 243. EAP-E1 : crate `explorer-agent` + serveur WS +
+- [x] **Étape 243. EAP-E1 : crate `explorer-agent` + serveur WS +
   subset** (tabs/nav/snapshot-DOM/input/frame/wait-nav) — capacités
-  déclarées, verrous de trames golden. **En cours (branche
-  `nav/eap`)** : schéma v1 gelé + squelette crate + verrous golden
-  livrés — reste le serveur WS et le subset session.
+  déclarées, verrous de trames golden. **Livrée (`nav/eap`)** :
+  schéma v1 gelé + serveur WS `GET /agent` + dispatch E1 complet
+  (9 tests socket réel) — handles/actionabilité = E2.
 - [ ] **Étape 244. EAP-E2 : handles + actionabilité + auto-wait**
   sur commits internes (`stale_ref`, timeout borné, mode `force`
   → `degraded`).

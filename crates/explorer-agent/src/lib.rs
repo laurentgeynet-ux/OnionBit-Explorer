@@ -22,7 +22,14 @@
 
 #![forbid(unsafe_code)]
 
+pub mod dispatch;
 pub mod proto;
+pub mod snapshot;
+pub mod state;
+pub mod ws;
+
+pub use state::{AgentConn, AgentShared};
+pub use ws::agent_router;
 
 /// Version de sous-protocole négociée au handshake WS
 /// (`Sec-WebSocket-Protocol`).

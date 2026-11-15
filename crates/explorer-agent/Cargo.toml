@@ -10,6 +10,20 @@ description = "Surface agent EAP (ADR-0035) — protocole WS a handles, schema, 
 workspace = true
 
 [dependencies]
+axum.workspace = true
+explorer-core.workspace = true
+explorer-net.workspace = true
+futures-util.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+
+[dev-dependencies]
+async-trait.workspace = true
+explorer-layout.workspace = true
+explorer-net.workspace = true
+explorer-test-support.workspace = true
+tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
+tokio-tungstenite.workspace = true
