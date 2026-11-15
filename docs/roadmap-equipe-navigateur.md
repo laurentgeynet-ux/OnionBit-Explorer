@@ -7959,6 +7959,18 @@ MCP = adaptateur, jamais la base.
   — un `alive` résiduel après cette étape exclut le kill
   console et resserre sur stack overflow, alloc-abort ou
   kill par PID. `EXPLORER_FLIGHT_MS/LOG/MAX_KB` (règle 13).
+- [x] **Étape 280. `--families` — la file v2 sort en
+  tableau ok/total par prop** — le cliquet familial
+  (étape 278) verrouillait les compteurs sans les
+  montrer : lire la file exigeait baseline + grep des
+  misses. `--families` imprime les 345 familles
+  `css.values` triées par miss décroissant
+  (`ok/total (%)  miss=n`, `pleines`/`0 ok` en tête) —
+  `check tables` + census `cssRules` (étape 273) +
+  `--families` = le tri réel/inerte/jauge en une
+  passe. `famTotals` parallèle à `families` : la
+  baseline v2 ne stocke toujours que `ok` (format
+  inchangé). Vérifié : sortie = table manuelle.
 - [x] **Étape 279. Balise GC en vol — wedge `XHR` nommé**
   (`explorer-jscore`/`explorer-daemon`, résidu du verdict
   field274 : gel ~50 s récurrent sous `calls` figé +

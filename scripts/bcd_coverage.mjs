@@ -33,6 +33,8 @@
 //   --missing  nb de manques listés par section (défaut 12,
 //              0 = aucun)
 //   --only     une seule surface (props|routed|sel|at|js|api|values|html)
+//   --families tableau ok/total par prop de css.values,
+//              trié par miss — la file v2 en une passe
 //   --gate f   cliquet : exit 1 si un score < baseline f.json
 //   --save f   écrit la baseline (attention : écrase tel quel)
 //   --save-if-better f  cliquet + sauvegarde sûre : refuse
@@ -135,6 +137,9 @@ const scores = {};
 // cliquet fin, une régression intra-surface ne peut plus
 // être absorbée par la progression d'une autre famille.
 const families = {};
+// Totaux mesurés par famille (hors `na`) — affichage
+// `--families` seulement ; la baseline ne stocke que `ok`.
+const famTotals = {};
 function report(label, entries, okSet, note) {
   const ok = entries.filter(e => okSet.has(e.name)).length;
   scores[label] = ok;
@@ -510,11 +515,14 @@ for (const sec of sections) {
     // progresse reste invisible du total agrégé ; la
     // baseline v2 les verrouille une à une.
     const perProp = {};
+    const perPropTotal = {};
     for (const e of measured) {
       const p = e.name.slice(0, e.name.indexOf(':'));
+      perPropTotal[p] = (perPropTotal[p] ?? 0) + 1;
       perProp[p] = (perProp[p] ?? 0) + (okSet.has(e.name) ? 1 : 0);
     }
     families['css.values'] = perProp;
+    famTotals['css.values'] = perPropTotal;
   } else if (sec === 'html') {
     // bcd.html.elements.<tag> — oracle de comportement par
     // élément (`check html`, étape 219) : « le tag parse »
@@ -528,6 +536,25 @@ for (const sec of sections) {
     const entries = relevantEntries(bcd.html.elements ?? {});
     report('html.elem', entries, checkBatch('html', entries.map(e => e.name)),
       `sur ${Object.keys(bcd.html.elements ?? {}).length} clés BCD — interface + IDL + géométrie UA`);
+  }
+}
+
+// `--families` — tableau ok/total par famille (css.values),
+// trié par miss décroissant : la file terrain lisible sans
+// ré-interroger la baseline ni grep les misses.
+if (args.includes('--families')) {
+  for (const [label, perProp] of Object.entries(families)) {
+    const tot = famTotals[label] ?? {};
+    const rows = Object.keys(perProp)
+      .map(p => ({ p, ok: perProp[p], t: tot[p] ?? perProp[p] }))
+      .sort((a, b) => (b.t - b.ok) - (a.t - a.ok) || a.p.localeCompare(b.p));
+    const zero = rows.filter(r => r.ok === 0).length;
+    const full = rows.filter(r => r.ok === r.t).length;
+    console.log(`familles ${label} : ${rows.length} — ${full} pleines, ${zero} à 0 ok`);
+    for (const r of rows) {
+      const pct = (100 * r.ok / r.t).toFixed(1);
+      console.log(`    ${r.p.padEnd(34)} ${String(r.ok).padStart(3)}/${r.t} (${pct.padStart(5)} %)${r.t - r.ok ? `  miss=${r.t - r.ok}` : ''}`);
+    }
   }
 }
 
