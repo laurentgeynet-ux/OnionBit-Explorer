@@ -470,6 +470,20 @@ fn class_name_and_class_list() {
             el.className"),
         "a b"
     );
+    // JS-C563 — spec : le getter `classList` rend le **même**
+    // DOMTokenList à chaque accès (identité stable, réflexion
+    // live de l'attribut conservée).
+    assert_eq!(
+        ev("var el = document.getElementById('main');\
+            el.classList === el.classList"),
+        "true"
+    );
+    assert_eq!(
+        ev("var el = document.getElementById('main');\
+            var l = el.classList; l.add('z');\
+            el.classList === l && el.classList.contains('z')"),
+        "true"
+    );
 }
 
 #[test]

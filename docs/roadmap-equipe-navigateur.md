@@ -13220,6 +13220,15 @@ chaque gain rapporté contre les **deux** archétypes.
   (`ic_hit`/`ic_miss`/`ic_disarm` au snapshot) pour
   borner la couverture du seul court-circuit existant.
   Dependency-groups = infra lourde, dernier recours.
+- [x] **JS-C563 — `classList`/`relList`/`part` : identité
+  `DOMTokenList` stable (spec) + wrapper mémorisé** — chaque
+  `el.classList` allouait un `Rc`+objet heap neufs :
+  `el.classList === el.classList` rendait `false` (violation
+  d'identité, spec : même `DOMTokenList` à chaque accès) ;
+  ~2,3 k gets/vol yt. `NodeHost.tlists[3]` mémorise le wrapper
+  (live-reflection conservée, zéro invalidation, tracé GC,
+  kill-switch `EXPLORER_NO_IMMEMO`). Verrous : identité +
+  mutation via wrapper, `dom` 269 verts.
 - [x] **JS-C562 — `DOMTokenList` : `toggle(force)` corrigé,
   `set_attr` seulement si la liste change** — `toggle(x,true)`
   dupliquait le jeton présent (bug spec), et les opérations

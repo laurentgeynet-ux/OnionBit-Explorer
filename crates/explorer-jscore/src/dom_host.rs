@@ -605,6 +605,15 @@ struct NodeHost {
     /// handle mort [`Self::live`] `false` contourne le mémo et
     /// dégrade par le chemin ordinaire).
     memo: std::cell::RefCell<[Option<Value>; 6]>,
+    /// JS-C563 — wrappers `DOMTokenList` de l'élément
+    /// (`classList`/`relList`/`part`), indexés par slot : la spec
+    /// exige que le getter rende **le même objet** à chaque
+    /// accès — un wrapper neuf par lecture cassait
+    /// `el.classList === el.classList` et payait
+    /// `Rc`+objet heap par get. Vit et meurt avec le wrapper
+    /// (zéro invalidation : le `ClassListHost` reflète l'attr
+    /// **live** — même valeur, mêmes effets, une seule identité).
+    tlists: std::cell::RefCell<[Option<Value>; 3]>,
 }
 
 /// JS-C559 — whitelist des getters `NodeHost` **immuables** pour
@@ -624,6 +633,32 @@ fn immut_slot(key: &str) -> Option<usize> {
         "prefix" => 5,
         _ => return None,
     })
+}
+
+impl NodeHost {
+    /// JS-C563 — `classList`/`relList`/`part` : le getter spec
+    /// rend **le même** `DOMTokenList` à chaque accès. Le wrapper
+    /// est mémorisé sur le `NodeHost` (zéro invalidation —
+    /// `ClassListHost` lit l'attribut live ; un handle mort ne
+    /// passe jamais ici : `get` court-circuite `!live()`). Sous
+    /// `EXPLORER_NO_IMMEMO` le chemin historique (wrapper neuf
+    /// par lecture) est conservé pour l'A/B.
+    fn token_list(&self, e: &mut Engine, attr: &'static str, slot: usize) -> Value {
+        if !crate::no_immemo() {
+            if let Some(v) = self.tlists.borrow()[slot].clone() {
+                return v;
+            }
+        }
+        let v = e.new_iterable_host(Rc::new(ClassListHost {
+            dom: self.dom.clone(),
+            node: self.node,
+            attr,
+        }));
+        if !crate::no_immemo() {
+            self.tlists.borrow_mut()[slot] = Some(v.clone());
+        }
+        v
+    }
 }
 
 /// Sonde §cran-28 — `EXPLORER_STALE_THROW` : les accès sur
@@ -1301,6 +1336,7 @@ fn dom_nav_set(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
                 node,
                 epoch,
                 memo: std::cell::RefCell::new([None, None, None, None, None, None]),
+                tlists: std::cell::RefCell::new([None, None, None]),
             };
             host.set_inner_html(node, &s);
         }
@@ -2378,6 +2414,7 @@ pub(crate) fn node_value(e: &mut Engine, dom: &DomRef, cache: &NodeCache, node: 
         node,
         epoch,
         memo: std::cell::RefCell::new([None, None, None, None, None, None]),
+        tlists: std::cell::RefCell::new([None, None, None]),
     }));
     if let Value::Obj(id) = v {
         // Sonde §cran-34 — tout wrap d'un tag CE nommé
@@ -8439,6 +8476,9 @@ impl Host for NodeHost {
         for v in self.memo.borrow().iter().flatten() {
             crate::heap::push_value(out, v);
         }
+        for v in self.tlists.borrow().iter().flatten() {
+            crate::heap::push_value(out, v);
+        }
     }
 
     fn immut_get(&self, e: &mut Engine, this: Value, key: &str) -> JsResult<Option<Value>> {
@@ -8753,12 +8793,11 @@ impl Host for NodeHost {
                     computed: false,
                 }))));
             }
+            // JS-C563 — spec : même `DOMTokenList` à chaque
+            // accès (`el.classList === el.classList`) → wrapper
+            // mémorisé sur le `NodeHost`.
             "classList" => {
-                return Ok(Some(e.new_iterable_host(Rc::new(ClassListHost {
-                    dom: self.dom.clone(),
-                    node,
-                    attr: "class",
-                }))));
+                return Ok(Some(self.token_list(e, "class", 0)));
             }
             // `relList` (§B-14 vol 141/216 philharmonie —
             // addtoany `link.relList.supports('modulepreload')`)
@@ -8771,11 +8810,7 @@ impl Host for NodeHost {
                     _ => "",
                 };
                 return Ok(Some(match tag {
-                    "link" | "a" | "area" | "form" => e.new_iterable_host(Rc::new(ClassListHost {
-                        dom: self.dom.clone(),
-                        node,
-                        attr: "rel",
-                    })),
+                    "link" | "a" | "area" | "form" => self.token_list(e, "rel", 1),
                     _ => Value::Undefined,
                 }));
             }
@@ -8788,11 +8823,7 @@ impl Host for NodeHost {
                     NodeKind::Element
                 );
                 return Ok(Some(if is_el {
-                    e.new_iterable_host(Rc::new(ClassListHost {
-                        dom: self.dom.clone(),
-                        node,
-                        attr: "part",
-                    }))
+                    self.token_list(e, "part", 2)
                 } else {
                     Value::Undefined
                 }));
@@ -11631,6 +11662,7 @@ fn adopt_into(e: &mut Engine, v: Value, dst: &DomRef, dst_cache: &NodeCache) -> 
             node: new_id,
             epoch,
             memo: std::cell::RefCell::new([None, None, None, None, None, None]),
+            tlists: std::cell::RefCell::new([None, None, None]),
         }));
     }
     dst_cache.borrow_mut().insert(new_id, id);
