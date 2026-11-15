@@ -143,8 +143,11 @@ pub(crate) fn parse_js_number(s: &str) -> f64 {
 }
 
 /// Is `key` a canonical array index (`"0"`, `"1"`, … no leading zeros)?
+/// JS-C539 — `#[track_caller]` : `j17_arridx_probe` attribue
+/// l'essai au callsite (`arridx:` du snapshot).
+#[track_caller]
 pub(crate) fn array_index(key: &str) -> Option<usize> {
-    crate::j17_tick(&crate::J17_ARRIDX_TRY);
+    crate::j17_arridx_probe(std::panic::Location::caller());
     if key.is_empty() || !key.bytes().all(|b| b.is_ascii_digit()) {
         return None;
     }

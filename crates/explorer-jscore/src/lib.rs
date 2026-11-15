@@ -831,6 +831,23 @@ pub fn j17_snapshot() -> String {
         }
         out.push_str(&format!("envu:{joined}"));
     }
+    // JS-C539 — top-12 callsites des essais `array_index`
+    // (`arridx:f:l=n,…`).
+    let mut arridx: Vec<(u64, String)> =
+        J17_ARRIDX_SITES.with(|m| m.borrow().values().map(|(l, n)| (*n, l.clone())).collect());
+    arridx.sort_unstable_by_key(|a| std::cmp::Reverse(a.0));
+    if !arridx.is_empty() {
+        let joined = arridx
+            .iter()
+            .take(12)
+            .map(|(n, l)| format!("{l}={n}"))
+            .collect::<Vec<_>>()
+            .join(",");
+        if !out.is_empty() {
+            out.push(' ');
+        }
+        out.push_str(&format!("arridx:{joined}"));
+    }
     // JS-C527 — top-20 clés marchées (`keys:k=n,…`) ; noms
     // assainis (hors `[A-Za-z0-9_$@.:-]` → `?`, tronqués à 24)
     // pour rester sur une seule ligne de paires.
@@ -913,6 +930,15 @@ thread_local! {
     static J17_ENVU_SITES: std::cell::RefCell<
         std::collections::BTreeMap<usize, (String, u64)>,
     > = const { std::cell::RefCell::new(std::collections::BTreeMap::new()) };
+    /// JS-C539 — `arridx:` — essais `array_index` attribués au
+    /// callsite (`#[track_caller]` sur `array_index`). Le
+    /// compteur est intrinsèque depuis les hoists V-3b (un
+    /// essai par `find_own` + kinds indexés) — cette sonde
+    /// nomme le dominant restant (find, string-index, TA,
+    /// builtins) en un vol.
+    static J17_ARRIDX_SITES: std::cell::RefCell<
+        std::collections::BTreeMap<usize, (String, u64)>,
+    > = const { std::cell::RefCell::new(std::collections::BTreeMap::new()) };
 }
 
 /// `EXPLORER_J17_KEYS=1` — arme l'histogramme `keys:` en plus
@@ -991,6 +1017,23 @@ pub(crate) fn j17_envu_site(loc: &'static std::panic::Location<'static>) {
     }
     let site = std::ptr::from_ref(loc) as usize;
     J17_ENVU_SITES.with(|m| {
+        let mut m = m.borrow_mut();
+        let e = m
+            .entry(site)
+            .or_insert_with(|| (format!("{}:{}", loc.file(), loc.line()), 0));
+        e.1 += 1;
+    });
+}
+
+/// JS-C539 — sonde `arridx:` : tick `arridx_try` + attribution
+/// du callsite en un seul `j17_on` (miroir [`j17_envu_site`]).
+pub(crate) fn j17_arridx_probe(loc: &'static std::panic::Location<'static>) {
+    if !j17_on() {
+        return;
+    }
+    J17_ARRIDX_TRY.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let site = std::ptr::from_ref(loc) as usize;
+    J17_ARRIDX_SITES.with(|m| {
         let mut m = m.borrow_mut();
         let e = m
             .entry(site)

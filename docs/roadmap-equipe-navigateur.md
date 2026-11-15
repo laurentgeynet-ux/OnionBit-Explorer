@@ -12902,6 +12902,17 @@ chaque gain rapporté contre les **deux** archétypes.
   (`ic_hit`/`ic_miss`/`ic_disarm` au snapshot) pour
   borner la couverture du seul court-circuit existant.
   Dependency-groups = infra lourde, dernier recours.
+- [x] **JS-C539 — sonde `arridx:` (callsite des essais
+  `array_index`)** : `arridx_try` = 2,53 M —
+  intrinsèque depuis les hoists V-3b (1 essai
+  par `find_own`, passé en arg) ; restants =
+  kinds indexés (String/TA/delete/builtins)
+  sans multiplication lisible. `#[track_caller]`
+  sur `array_index` + `j17_arridx_probe` (tick
+  + site en un check, miroir `envu:`) →
+  `arridx:<f:l>=<n>` top-12 : un vol nomme le
+  dominant et tranche cran-vs-bruit-honnête.
+  Verrou : j17 16 (+1, `arridx:` émet).
 - [x] **JS-C538 — `===`/`!==` direct-serve dans `binary_op`** :
   `seq` = `BinOp::StrictEq` (pas l'opérateur
   virgule) — 202 k ops = 43 % de Σbinop au

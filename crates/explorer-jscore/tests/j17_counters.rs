@@ -498,6 +498,23 @@ fn envu_nomme_le_site_de_construction() {
     );
 }
 
+/// JS-C539 — `arridx:` attribue les essais `array_index` au
+/// callsite (`#[track_caller]`). Un accès indexé `a["0"]` doit
+/// faire émettre la section.
+#[test]
+fn arridx_attribue_le_callsite() {
+    let _g = TEST_LOCK.lock().unwrap();
+    j17_enable();
+    let mut e = Engine::new();
+    e.eval("var a=[10,20,30]; var s=0; for(var i=0;i<3;i++){s+=a[i];} s")
+        .expect("eval indexed");
+    let snap = j17_snapshot();
+    assert!(
+        snap.contains("arridx:"),
+        "les essais `array_index` doivent émettre `arridx:` : {snap}"
+    );
+}
+
 /// JS-C535 — le peek homo-typé de `binary_op` sert `(Num,Num)`
 /// et `(Str,Str)` sans `to_primitive`/`to_number` ; les
 /// compteurs `bin_nn`/`bin_ss` mesurent la couverture. Le lock
