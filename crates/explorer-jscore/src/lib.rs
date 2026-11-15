@@ -1054,19 +1054,25 @@ pub fn j17_snapshot() -> String {
         }
         out.push_str(&format!("host:{joined}"));
     }
-    // JS-C560 — `hns:class:key=ns` — paire temporelle de
-    // `host:` (top-40 par ns cumulés — le µs/get se lit en
-    // croisant avec le compte `host:` du même vol).
+    // JS-C560 — `hns:class:key=ns@n` — paire temporelle de
+    // `host:` (top-40 par ns cumulés, jointure directe avec
+    // le compte `host:` de la même table TLS → ns/get lisible
+    // par entrée, sans dépendre des deux cutoffs top-40).
     let mut hns: Vec<(u64, String)> =
         J17_HOST_NS_ATTR.with(|m| m.borrow().iter().map(|(k, n)| (*n, k.clone())).collect());
     hns.sort_unstable_by_key(|a| std::cmp::Reverse(a.0));
     if !hns.is_empty() {
-        let joined = hns
-            .iter()
-            .take(40)
-            .map(|(n, l)| format!("{l}={n}"))
-            .collect::<Vec<_>>()
-            .join(",");
+        let joined = J17_HOST_ATTR.with(|m| {
+            let counts = m.borrow();
+            hns.iter()
+                .take(40)
+                .map(|(n, l)| {
+                    let c = counts.get(l).copied().unwrap_or(0);
+                    format!("{l}={n}@{c}")
+                })
+                .collect::<Vec<_>>()
+                .join(",")
+        });
         if !out.is_empty() {
             out.push(' ');
         }
