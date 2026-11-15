@@ -647,6 +647,20 @@ pub static J17_ENV_NEW: std::sync::atomic::AtomicU64 = std::sync::atomic::Atomic
 /// V-7 — ns cumulés dans `exec_body` (dispatch du corps —
 /// inclusif : les appels imbriqués comptent dedans).
 pub static J17_BODY_NS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+/// JS-C558 — ns cumulés dans l'invocation d'un **getter
+/// scripté** (`call_value` des deux bras `Prop::Acc` de
+/// `read_prop_at`, inclusifs dans `prop_ns` — le corps du
+/// getter compte dedans). Sépare « la lecture déclenche un
+/// appel » de « la lecture marche ».
+pub static J17_ACC_NS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+/// JS-C558 — invocations de getter scripté (paire de
+/// `J17_ACC_NS` : coût moyen par invocation).
+pub static J17_ACC_GET: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+/// JS-C558 — ns cumulés dans `Host::get` (getters DOM —
+/// inclusifs dans `prop_ns` idem).
+pub static J17_HOST_NS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+/// JS-C558 — `Host::get` servis (paire de `J17_HOST_NS`).
+pub static J17_HOST_GET: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 
 /// Gate J17 : les compteurs ci-dessus ne s'incrémentent que si
 /// `EXPLORER_J17_PROF` est posé (non vide/non "0") au premier
@@ -687,7 +701,7 @@ pub fn j17_enable() {
 #[must_use]
 pub fn j17_snapshot() -> String {
     let r = std::sync::atomic::Ordering::Relaxed;
-    let pairs: [(&str, &std::sync::atomic::AtomicU64); 80] = [
+    let pairs: [(&str, &std::sync::atomic::AtomicU64); 84] = [
         ("prop_lookup", &J17_PROP_LOOKUP),
         ("proto_lvl", &J17_PROTO_LVL),
         ("prop_scan", &J17_PROP_SCAN),
@@ -768,6 +782,10 @@ pub fn j17_snapshot() -> String {
         ("gc_ns", &J17_GC_NS),
         ("env_new", &J17_ENV_NEW),
         ("body_ns", &J17_BODY_NS),
+        ("acc_ns", &J17_ACC_NS),
+        ("acc_get", &J17_ACC_GET),
+        ("host_ns", &J17_HOST_NS),
+        ("host_get", &J17_HOST_GET),
     ];
     let mut out = String::new();
     for (k, c) in pairs {

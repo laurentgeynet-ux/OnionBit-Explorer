@@ -9098,25 +9098,26 @@ impl Engine {
         // _flushClients → _readyClients` (ou un appel direct) pour le
         // second flush ; si aucune clé amont ne tire sur le receveur,
         // le callee est une valeur capturée (closure/job natif).
-        if matches!(
-            key,
-            "polySiParams"
-                | "_readyClients"
-                | "_attachDom"
-                | "_flushClients"
-                | "performDataUpdate"
-                | "updatePageData"
-                | "attachPage"
-                | "setActivePage"
-                | "enqueueClient"
-                | "connectedCallback"
-                | "ready"
-                | "_enableProperties"
-                | "_flushProperties"
-                | "_propertiesChanged"
-                | "__enableOrFlushClients"
-                | "_enqueueClient"
-        ) && tracing::enabled!(target: "dom_probe", tracing::Level::INFO)
+        if tracing::enabled!(target: "dom_probe", tracing::Level::INFO)
+            && matches!(
+                key,
+                "polySiParams"
+                    | "_readyClients"
+                    | "_attachDom"
+                    | "_flushClients"
+                    | "performDataUpdate"
+                    | "updatePageData"
+                    | "attachPage"
+                    | "setActivePage"
+                    | "enqueueClient"
+                    | "connectedCallback"
+                    | "ready"
+                    | "_enableProperties"
+                    | "_flushProperties"
+                    | "_propertiesChanged"
+                    | "__enableOrFlushClients"
+                    | "_enqueueClient"
+            )
             && self
                 .find_prop(id, key)
                 .and_then(|p| p.data_value())
@@ -9184,6 +9185,8 @@ impl Engine {
             // getter frais (même sort qu'au bout de la marche).
             IcOut::HitAcc(Prop::Acc { get, .. }) => {
                 return if self.is_callable(get.clone()) {
+                    crate::j17_tick(&crate::J17_ACC_GET);
+                    let _t = crate::j17_scope(&crate::J17_ACC_NS);
                     self.call_value(get, recv, &[])
                 } else {
                     Ok(Value::Undefined)
@@ -9224,6 +9227,8 @@ impl Engine {
                     self.ic_learn_acc(site, key, &links);
                 }
                 if self.is_callable(get.clone()) {
+                    crate::j17_tick(&crate::J17_ACC_GET);
+                    let _t = crate::j17_scope(&crate::J17_ACC_NS);
                     self.call_value(get, recv, &[])
                 } else {
                     Ok(Value::Undefined)
@@ -9693,6 +9698,8 @@ impl Engine {
                 let h = self.host_of(id);
                 if let Some(h) = &h {
                     crate::host_mark(h.class_name(), key);
+                    crate::j17_tick(&crate::J17_HOST_GET);
+                    let _t = crate::j17_scope(&crate::J17_HOST_NS);
                     if let Some(v) = h.get(self, base.clone(), key)? {
                         return Ok(v);
                     }
@@ -9705,9 +9712,9 @@ impl Engine {
                 // providers attendus vs enregistrés tranchent
                 // « rail mort » (clé jamais fournie) vs « rail
                 // lent ». Sous `EXPLORER_CTX_PROBE`.
-                if (key == "deferredKey" || key == "provide")
+                if crate::ctx_probe()
                     && tracing::enabled!(target: "dom_probe", tracing::Level::INFO)
-                    && crate::ctx_probe()
+                    && (key == "deferredKey" || key == "provide")
                 {
                     let kv = match &v {
                         Value::Str(_) | Value::Num(_) | Value::Bool(_) => {
