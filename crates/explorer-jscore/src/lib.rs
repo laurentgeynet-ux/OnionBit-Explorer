@@ -409,6 +409,14 @@ pub static J17_BIN_ADD_OTH: std::sync::atomic::AtomicU64 = std::sync::atomic::At
 pub static J17_BIN_NN: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 /// Voir [`J17_BIN_NN`].
 pub static J17_BIN_SS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+/// JS-C538 — `===`/`!==` servis directement dans `binary_op`
+/// (hors peek `(Num,Num)` déjà couvert) : `strict_eq` ne
+/// coerces pas et ne lance aucun code utilisateur — le
+/// `binary_op_slow` n'apportait qu'un appel + un match
+/// d'op. `bin_se` vs `binop:seq`+`binop:sne` mesure la part
+/// du direct-serve (`typeof x==='f'`, `x===undefined`,
+/// `obj===obj`, paires mixtes).
+pub static J17_BIN_SE: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 /// JS-C536/JS-C537 — évictions de lits résolus au cap
 /// `RESOLVED_LITS_CAP` (avant C537 : clears **globaux** —
 /// `resolved_map`/`names_table`/`lowered_suspend_cache`/`ic_map`
@@ -633,7 +641,7 @@ pub fn j17_enable() {
 #[must_use]
 pub fn j17_snapshot() -> String {
     let r = std::sync::atomic::Ordering::Relaxed;
-    let pairs: [(&str, &std::sync::atomic::AtomicU64); 74] = [
+    let pairs: [(&str, &std::sync::atomic::AtomicU64); 75] = [
         ("prop_lookup", &J17_PROP_LOOKUP),
         ("proto_lvl", &J17_PROTO_LVL),
         ("prop_scan", &J17_PROP_SCAN),
@@ -681,6 +689,7 @@ pub fn j17_snapshot() -> String {
         ("badd_oth", &J17_BIN_ADD_OTH),
         ("bin_nn", &J17_BIN_NN),
         ("bin_ss", &J17_BIN_SS),
+        ("bin_se", &J17_BIN_SE),
         ("res_clear", &J17_RES_CLEAR),
         ("arridx_try", &J17_ARRIDX_TRY),
         ("call", &J17_CALL),

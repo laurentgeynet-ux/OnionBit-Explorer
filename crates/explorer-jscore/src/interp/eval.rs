@@ -1538,7 +1538,23 @@ impl Engine {
                         | (std::cmp::Ordering::Greater, Gt | Ge)
                 )))
             }
-            (l, r) => self.binary_op_slow(op, l, r),
+            (l, r) => {
+                // JS-C538 — `===`/`!==` : `strict_eq` ne
+                // coerces pas et ne lance aucun code
+                // utilisateur (« no user code runs ») —
+                // servir toutes les paires restantes ici
+                // saute le `binary_op_slow` (appel + match
+                // 25-variantes) pour `seq`, op dominant du vol
+                // N5.44 : `x===undefined`, `obj===obj`,
+                // `typeof x==='f'` (le peek `(Str,Str)`
+                // ci-dessus ne couvre qu'`Add`/comparaisons).
+                if matches!(op, StrictEq | StrictNe) {
+                    crate::j17_tick(&crate::J17_BIN_SE);
+                    let eq = strict_eq(&l, &r, &self.heap);
+                    return Ok(Value::Bool(eq == (op == StrictEq)));
+                }
+                self.binary_op_slow(op, l, r)
+            }
         }
     }
 

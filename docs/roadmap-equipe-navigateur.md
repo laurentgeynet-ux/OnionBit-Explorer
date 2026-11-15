@@ -12902,6 +12902,22 @@ chaque gain rapporté contre les **deux** archétypes.
   (`ic_hit`/`ic_miss`/`ic_disarm` au snapshot) pour
   borner la couverture du seul court-circuit existant.
   Dependency-groups = infra lourde, dernier recours.
+- [x] **JS-C538 — `===`/`!==` direct-serve dans `binary_op`** :
+  `seq` = `BinOp::StrictEq` (pas l'opérateur
+  virgule) — 202 k ops = 43 % de Σbinop au
+  N5.44. Le slow-path dispatchait déjà sur `op`
+  avant `to_primitive`, mais chaque `===` hors
+  peek payait l'appel `binary_op_slow` + match
+  25-variantes pour atteindre `strict_eq`
+  (jamais de coercition ni code utilisateur).
+  Le bras d'échappe sert `StrictEq`/`StrictNe`
+  pour toutes les paires : `x===undefined`,
+  `obj===obj`, `typeof x==='f'` (Str×Str
+  n'était peeké que pour `Add`/compar.).
+  `==`/`!=` restent génériques (coercion +
+  `valueOf` possible). `bin_se` = attribution.
+  Verrous : j17 15 (+lock classes non-num +
+  IEEE), lang 315, dom 265, c533 17.
 - [x] **JS-C537 — éviction par lit au cap resolver** :
   `res_clear`=20 au N5.45 — chaque dépassement
   du cap 512 purgeait **globalement** tables +

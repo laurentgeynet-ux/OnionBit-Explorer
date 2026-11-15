@@ -530,3 +530,33 @@ fn c535_binop_peek_sert_et_preserve() {
         );
     }
 }
+
+/// JS-C538 — `===`/`!==` servis dans `binary_op` pour toutes
+/// les paires hors peek `(Num,Num)` : `strict_eq` ne coerces
+/// pas — `bin_se` tique et la sémantique est préservée sur
+/// les classes non numériques (Str×Str hors `Add`/compar.,
+/// undefined/null/obj/mixte) et les cas IEEE du peek.
+#[test]
+fn c538_strict_eq_direct_serve() {
+    let _g = TEST_LOCK.lock().unwrap();
+    j17_enable();
+    let mut e = Engine::new();
+    let r = e
+        .eval(
+            "var o={a:1};\
+             ['a'==='a', 'a'!=='a', undefined===undefined, null===undefined,\
+             o===o, {a:1}==={a:1}, 1==='1', true===1, 'x'===('x'+''),\
+             typeof o==='object', typeof o.a==='number', null!==o]",
+        )
+        .expect("eval");
+    let out = e.describe(r);
+    assert_eq!(
+        out, "true,false,true,false,true,false,false,false,true,true,true,true",
+        "semantique strict-eq direct : {out}"
+    );
+    let snap = j17_snapshot();
+    assert!(
+        snap.split(' ').any(|p| p.starts_with("bin_se=")),
+        "`bin_se` doit émettre : {snap}"
+    );
+}
