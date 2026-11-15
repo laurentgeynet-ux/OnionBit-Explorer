@@ -25,7 +25,7 @@ use tokio::sync::mpsc;
 
 use crate::dispatch::{dispatch, Dispatch};
 use crate::proto::{
-    ErrorCode, Event, EventKind, Incoming, Method, Notification, Response as RpcResponse,
+    ErrorCode, Event, EventKind, Incoming, Method, Notification, Response as RpcResponse, RpcError,
 };
 use crate::state::{AgentConn, AgentShared, SubFilter};
 
@@ -53,12 +53,29 @@ struct Pending {
     name: String,
 }
 
-/// Verbe en vol côté dispatcher — `(nom, départ)`.
-/// `session.ping` le lit **sans** le verrou session : c'est
-/// ce qui permet de distinguer « vivant mais occupé » de
-/// « mort » quand un verbe tient la session en continu
-/// (étape 267 — cas airfrance : EAP muet pendant 7 min).
-type InFlight = Arc<RwLock<Option<(String, std::time::Instant)>>>;
+/// Verbe en vol côté dispatcher. `session.ping` le lit
+/// **sans** le verrou session : c'est ce qui permet de
+/// distinguer « vivant mais occupé » de « mort » quand un
+/// verbe tient la session en continu (étape 267 — cas
+/// airfrance : EAP muet pendant 7 min). `cancel` est armé
+/// par `session.cancel` (étape 268) — le dispatcher
+/// abandonne le verbe à sa prochaine frontière d'await.
+struct InFlightVerb {
+    /// Nom filaire (`"nav.goto"`…) — reporté dans
+    /// `session.ping.in_flight`.
+    name: String,
+    /// Départ du verbe — `held_ms` du ping.
+    at: std::time::Instant,
+    /// Flag d'annulation coopératif — armé par
+    /// `session.cancel` servi en ligne, lu par le
+    /// dispatcher en `select!` contre le dispatch.
+    cancel: Arc<AtomicBool>,
+}
+
+/// Verbe en vol de la connexion — partagé entre la boucle de
+/// lecture (`ping`/`cancel`, jamais le verrou session) et le
+/// dispatcher.
+type InFlight = Arc<RwLock<Option<InFlightVerb>>>;
 
 /// Clé API en query (`?key=`) — même convention que l'API REST.
 #[derive(Debug, Deserialize)]
@@ -181,6 +198,16 @@ async fn serve(sock: WebSocket, st: Arc<AgentShared>) {
                     closing.store(true, Ordering::Relaxed);
                     break;
                 }
+                Route::Cancel(id, want_reply) => {
+                    if want_reply {
+                        send_json(&tx, &RpcResponse::ok(id, cancel_result(&in_flight)));
+                    } else {
+                        // Notification : le flag est armé quand
+                        // même — l'agent fire-and-forget un
+                        // abandon sans attendre d'accusé.
+                        arm_cancel(&in_flight);
+                    }
+                }
                 Route::Queued(p) => {
                     let id = p.id.clone();
                     if qtx.try_send(p).is_err() {
@@ -223,21 +250,64 @@ async fn serve(sock: WebSocket, st: Arc<AgentShared>) {
 /// l'agent peut poser un seuil (« 7 min = wedged ») au lieu
 /// de tuer à l'aveugle.
 fn ping_result(st: &AgentShared, in_flight: &InFlight) -> Value {
-    let held = in_flight
+    let slot = in_flight
         .read()
-        .unwrap_or_else(std::sync::PoisonError::into_inner)
-        .clone();
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
     let session_busy = st.session.try_lock().is_err();
     json!({
         "ts_ms": std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .map_or(0, |d| u64::try_from(d.as_millis()).unwrap_or(u64::MAX)),
-        "busy": held.is_some() || session_busy,
-        "in_flight": held.map(|(method, at)| json!({
-            "method": method,
-            "held_ms": u64::try_from(at.elapsed().as_millis()).unwrap_or(u64::MAX),
+        "busy": slot.is_some() || session_busy,
+        "in_flight": slot.as_ref().map(|v| json!({
+            "method": v.name,
+            "held_ms": u64::try_from(v.at.elapsed().as_millis()).unwrap_or(u64::MAX),
         })),
     })
+}
+
+/// Arme le flag d'annulation du verbe en vol — `true` s'il y
+/// avait un verbe à annuler. Coopératif : le dispatcher le
+/// lit en `select!` contre le dispatch — l'abandon tombe à
+/// la prochaine frontière d'await du verbe (un verbe dans
+/// une section CPU synchrone est relâché à son prochain
+/// yield, comme un client tombé — mécanique drop-safe
+/// déjà garantie par le core).
+fn arm_cancel(in_flight: &InFlight) -> bool {
+    let slot = in_flight
+        .read()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    match slot.as_ref() {
+        Some(v) => {
+            v.cancel.store(true, Ordering::Relaxed);
+            true
+        }
+        None => false,
+    }
+}
+
+/// Réponse `session.cancel` — nomme le verbe abandonné ou
+/// dit honnêtement qu'il n'y avait rien en vol.
+fn cancel_result(in_flight: &InFlight) -> Value {
+    let slot = in_flight
+        .read()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    match slot.as_ref() {
+        Some(v) => {
+            v.cancel.store(true, Ordering::Relaxed);
+            json!({ "cancelled": true, "method": v.name })
+        }
+        None => json!({ "cancelled": false, "reason": "no_in_flight" }),
+    }
+}
+
+/// Attente du flag `cancel` — même cadence que
+/// `wait_tab_dead` (100 ms) : latence d'annulation bornée,
+/// pas de spin.
+async fn cancel_wait(cancel: &AtomicBool) {
+    while !cancel.load(Ordering::Relaxed) {
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+    }
 }
 
 /// Dispatcher d'une connexion — propriétaire unique de
@@ -257,11 +327,28 @@ async fn dispatch_loop(
         if closing.load(Ordering::Relaxed) {
             break;
         }
+        let cancel = Arc::new(AtomicBool::new(false));
         *in_flight
             .write()
-            .unwrap_or_else(std::sync::PoisonError::into_inner) =
-            Some((p.name.clone(), std::time::Instant::now()));
-        let out = dispatch(&st, &mut conn, &p.id, p.method).await;
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(InFlightVerb {
+            name: p.name.clone(),
+            at: std::time::Instant::now(),
+            cancel: Arc::clone(&cancel),
+        });
+        // Annulation coopérative (étape 268) : `session.cancel`
+        // arme le flag → le verbe est abandonné à sa prochaine
+        // frontière d'await et le client reçoit `-32009`. Le
+        // futur dispatch droppé se nettoie à la garde — même
+        // cas qu'un client tombé en vol, déjà garanti par le
+        // core (`paint_detached` parqué, verrous relâchés).
+        let out = tokio::select! {
+            out = dispatch(&st, &mut conn, &p.id, p.method) => out,
+            () = cancel_wait(&cancel) => Dispatch::Reply(Err(RpcError {
+                code: ErrorCode::Cancelled.into(),
+                message: "verbe annulé par session.cancel".to_string(),
+                data: None,
+            })),
+        };
         *in_flight
             .write()
             .unwrap_or_else(std::sync::PoisonError::into_inner) = None;
@@ -297,6 +384,11 @@ enum Route {
     /// sortie de boucle : l'agent abandonne la connexion même
     /// quand un verbe tient la session.
     Close(Value, bool),
+    /// `session.cancel` `(id, réponse attendue)` — inline :
+    /// arme l'annulation du verbe en vol de cette connexion.
+    /// Complète le triptyque wedge de l'étape 267 : détecter
+    /// (`busy`) → nommer (`in_flight`) → libérer (`cancel`).
+    Cancel(Value, bool),
     /// Verbe métier — file FIFO du dispatcher.
     Queued(Pending),
 }
@@ -333,6 +425,7 @@ fn route_text(text: &str) -> Route {
     match method {
         Method::SessionPing(_) => Route::Ping(id, is_request),
         Method::SessionClose(_) => Route::Close(id, is_request),
+        Method::SessionCancel(_) => Route::Cancel(id, is_request),
         _ => Route::Queued(Pending {
             id,
             method,
@@ -381,6 +474,7 @@ const KNOWN_METHODS: &[&str] = &[
     "session.open",
     "session.close",
     "session.ping",
+    "session.cancel",
     "tab.open",
     "tab.close",
     "tab.list",

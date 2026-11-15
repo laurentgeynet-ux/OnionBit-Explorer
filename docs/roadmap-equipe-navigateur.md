@@ -7943,6 +7943,12 @@ MCP = adaptateur, jamais la base.
   externe (console de pilotage) n'a plus à deviner où
   vivent registre, profils, vols et logs — bloc additif du
   résultat, chemins `/`, clés absentes = indisponibles.
+- [x] **Étape 268. `session.cancel` — annulation coopérative** —
+  le triptyque wedge est complet : détecter (`busy`) → nommer
+  (`in_flight`) → **libérer** (`cancel`). Servi en ligne hors
+  file ; le dispatcher `select!` le dispatch contre le flag →
+  abandon à la prochaine frontière d'await (drop-safe, même
+  mécanique qu'un client tombé), réponse `-32009` `Cancelled`.
 - [x] **Étape 267. `session.ping` hors verrou** — trou
   opérationnel n°1 (airfrance : EAP muet > 7 min derrière un
   verbe wedged). Dispatcher FIFO par connexion + `ping`/`close`

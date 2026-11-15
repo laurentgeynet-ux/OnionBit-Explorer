@@ -128,8 +128,8 @@
       "properties": {
         "code": {
           "type": "integer",
-          "enum": [-32700, -32601, -32602, -32001, -32002, -32003, -32004, -32005, -32006, -32007, -32008],
-          "description": "-32700 parse · -32601 method_not_found · -32602 invalid_params · -32001 unsupported · -32002 stale_ref · -32003 not_actionable · -32004 timeout · -32005 no_such_tab · -32006 bad_selector · -32007 engine_unavailable · -32008 unauthorized"
+          "enum": [-32700, -32601, -32602, -32001, -32002, -32003, -32004, -32005, -32006, -32007, -32008, -32009],
+          "description": "-32700 parse · -32601 method_not_found · -32602 invalid_params · -32001 unsupported · -32002 stale_ref · -32003 not_actionable · -32004 timeout · -32005 no_such_tab · -32006 bad_selector · -32007 engine_unavailable · -32008 unauthorized · -32009 cancelled (session.cancel)"
         },
         "message": { "type": "string" },
         "data": { "description": "détail typé — sous -32003 : actionability + require + failed (checks échus nommés), et no_box/topmost_winner/tag sur les erreurs post-auto-wait" }
@@ -167,6 +167,7 @@
 
     "session.close": { "x-phase": "E1", "params": { "type": "object" }, "result": { "type": "object" } },
     "session.ping": { "x-phase": "E1", "params": { "type": "object" }, "result": { "type": "object", "description": "répondu hors verrou session (étape 267) — sert à distinguer « vivant mais occupé » de « mort » : busy = verbe en vol sur la connexion ou session tenue par ailleurs ; in_flight nomme le verbe coincé de cette connexion + sa durée", "properties": { "ts_ms": { "type": "integer" }, "busy": { "type": "boolean" }, "in_flight": { "type": ["object", "null"], "properties": { "method": { "type": "string" }, "held_ms": { "type": "integer" } } } } } },
+    "session.cancel": { "x-phase": "E1", "params": { "type": "object" }, "result": { "type": "object", "description": "annulation coopérative du verbe en vol de cette connexion — servi en ligne comme ping/close (étape 268) : détecter (busy) → nommer (in_flight) → libérer (cancel). Le verbe abandonné s'arrête à sa prochaine frontière d'await et répond -32009 ; les effets déjà commis restent (bouton Stop : la nav partielle reste visible)", "properties": { "cancelled": { "type": "boolean" }, "method": { "type": "string" }, "reason": { "type": "string" } } } },
 
     "tab.open": {
       "x-phase": "E1",

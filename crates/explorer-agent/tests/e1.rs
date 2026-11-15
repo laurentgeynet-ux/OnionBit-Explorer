@@ -912,6 +912,60 @@ async fn ping_hors_verrou_pendant_verbe_en_vol() {
     srv.abort();
 }
 
+/// Étape 268 — `session.cancel` arme l'annulation du verbe en
+/// vol **hors file** : le `wait.for` wedged est abandonné et
+/// répond `-32009`, pendant que le cancel répond
+/// `{cancelled:true, method}` immédiatement — le triptyque
+/// est complet : détecter (`busy`) → nommer (`in_flight`) →
+/// libérer (cancel).
+#[tokio::test]
+async fn session_cancel_libere_verbe_en_vol() {
+    let (mut a, srv) = connect().await;
+    open(&mut a).await;
+    let r = a.call("tab.open", json!({})).await;
+    let tab = r["result"]["tab"].as_u64().expect("tab");
+    // Cancel sans verbe en vol → réponse honnête.
+    let r = a.call("session.cancel", json!({})).await;
+    assert_eq!(r["result"]["cancelled"], false, "{r}");
+    // Verbe long en vol (wait.for frame ~30 s sans activité).
+    a.sock
+        .send(Message::Text(
+            json!({
+                "jsonrpc": "2.0", "id": 91, "method": "wait.for",
+                "params": {"tab": tab, "kind": "frame", "timeout_ms": 30000}
+            })
+            .to_string()
+            .into(),
+        ))
+        .await
+        .expect("send wait");
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    // Le cancel répond en ligne — jamais derrière le verbe.
+    let r = a.call("session.cancel", json!({})).await;
+    assert_eq!(r["result"]["cancelled"], true, "{r}");
+    assert_eq!(r["result"]["method"], "wait.for", "{r}");
+    // Le verbe abandonné rend -32009 (pas -32004 : ce n'est
+    // pas un timeout, c'est une annulation demandée).
+    let fut = async {
+        loop {
+            if let Some(Ok(Message::Text(t))) = a.sock.next().await {
+                let v: Value = serde_json::from_str(&t).expect("json");
+                if v.get("id").and_then(Value::as_u64) == Some(91) {
+                    return v;
+                }
+            }
+        }
+    };
+    let wait = tokio::time::timeout(Duration::from_secs(5), fut)
+        .await
+        .expect("réponse wait.for annulé");
+    assert_eq!(wait["error"]["code"], -32009, "wait annulé : {wait}");
+    // Session libérée — ping rend busy:false.
+    let ping = a.call("session.ping", json!({})).await;
+    assert_eq!(ping["result"]["busy"], false, "{ping}");
+    srv.abort();
+}
+
 #[tokio::test]
 async fn e2_select_click_type() {
     let (mut a, srv) = connect().await;

@@ -3689,3 +3689,28 @@ le verbe en vol finir sa course — **pas d'annulation** :
 couper un `nav` wedged proprement exige des jetons
 coopératifs dans les chemins nav/pompe, chantier séparé à
 ouvrir si le besoin revient.
+
+### 2026-11-16 — Étape 268 (NAV) : `session.cancel` — annulation coopérative du verbe en vol
+
+**Livré** (`explorer-agent`, demande NAV n°1 du retour terrain
+PIPE — solde le chantier annoncé à l'entrée 267 : le triptyque
+wedge était incomplet — détecter `busy` → nommer `in_flight` →
+**libérer**). `session.cancel` est servi **en ligne** au même
+titre que `ping`/`close` — jamais mis en file : sans verbe en
+vol → `{cancelled:false, reason:"no_in_flight"}` ; avec →
+`{cancelled:true, method:"…"}` et le flag est armé. Le
+dispatcher `select!` le dispatch contre l'attente du flag :
+le futur droppé abandonne le verbe à sa prochaine frontière
+d'await — sémantique bouton Stop, les effets déjà commis
+restent visibles — et le client reçoit **`-32009` `Cancelled`**
+(nouveau code distinct de `-32004` : « abandonné sur demande »,
+pas « échu »). La mécanique de drop est celle déjà garantie
+par le core pour un client tombé en vol (`paint_detached`
+parqué, verrous relâchés — issue #23). **Limites honnêtes** :
+coopératif pas préemptif — un verbe dans une section CPU
+synchrone est relâché à son prochain yield ; par-connexion —
+un `cancel` ne touche que le verbe de sa propre connexion
+(celle qui a lancé le wedged) ; les verbes en file d'attente
+derrière ne sont pas annulés (le `close` reste la porte pour
+vider la file). Contrat additif : verbe + code au schéma.
+Verrou : `session_cancel_libere_verbe_en_vol`.

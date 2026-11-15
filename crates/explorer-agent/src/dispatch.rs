@@ -176,13 +176,21 @@ const HELP: &[(&str, Option<Capability>, &str)] = &[
         None,
         "session.ping (busy/in_flight — répondu hors verrou)",
     ),
+    (
+        "arrêter le verbe coincé ?",
+        None,
+        "session.cancel (annulation coopérative, hors verrou)",
+    ),
 ];
 
 /// Capacité requise par méthode — `None` = toujours servie
 /// (cycle de vie `session.*`).
 fn cap_of(m: &Method) -> Option<Capability> {
     match m {
-        Method::SessionOpen(_) | Method::SessionClose(_) | Method::SessionPing(_) => None,
+        Method::SessionOpen(_)
+        | Method::SessionClose(_)
+        | Method::SessionPing(_)
+        | Method::SessionCancel(_) => None,
         Method::TabOpen(_)
         | Method::TabClose(_)
         | Method::TabList(_)
@@ -546,9 +554,10 @@ async fn run(
     method: Method,
 ) -> Result<Value, RpcError> {
     match method {
-        Method::SessionOpen(_) | Method::SessionPing(_) | Method::SessionClose(_) => {
-            session_verbs(st, conn, method)
-        }
+        Method::SessionOpen(_)
+        | Method::SessionPing(_)
+        | Method::SessionClose(_)
+        | Method::SessionCancel(_) => session_verbs(st, conn, method),
         Method::TabOpen(_) | Method::TabClose(_) | Method::TabList(_) => {
             tab_verbs(st, conn, method).await
         }
@@ -670,6 +679,13 @@ fn session_verbs(
             conn.closing = true;
             Ok(json!({}))
         }
+        // Servi en ligne côté ws (jamais en file) — ce bras ne
+        // sert que si un harnais appelle `dispatch` directement
+        // : honnête, un cancel en file n'a rien à annuler.
+        Method::SessionCancel(_) => Ok(json!({
+            "cancelled": false,
+            "reason": "in_queue",
+        })),
 
         // Verbe hors groupe — garde-fou interne (le dispatch
         // en amont route par construction ; si ça arrive, la
