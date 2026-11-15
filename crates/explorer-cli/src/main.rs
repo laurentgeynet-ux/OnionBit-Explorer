@@ -906,7 +906,7 @@ fn fixture_for(name: &str) -> &'static str {
         () if matches!(
             n,
             "overflow-wrap" | "line-break" | "tab-size"
-                | "overflow" | "overflow-x" | "overflow-y" | "text-wrap"
+                | "overflow" | "overflow-x" | "overflow-y"
         ) =>
         {
             "<body><div class=x style=\"width:40px\"><p>averyveryveryverylongword\tb</p></div></body>"
@@ -922,10 +922,12 @@ fn fixture_for(name: &str) -> &'static str {
         () if n == "text-autospace" => {
             "<body><div style=\"width:200px\"><p class=x>中文abc 中文def</p></div></body>"
         }
-        // `text-justify`/`text-wrap-style` (R-282) — plusieurs
-        // lignes de longueurs inégales : `justify` redistribue
-        // l'espace, `balance`/`pretty` rééquilibrent la fin.
-        () if n == "text-justify" || n == "text-wrap-style" => {
+        // `text-justify`/`text-wrap-style`/`text-wrap` (R-282,
+        // étape 272) — plusieurs lignes de longueurs inégales :
+        // `justify` redistribue l'espace, `balance`/`pretty`
+        // rééquilibrent la fin (la fixture mot-unique laissait
+        // le shorthand `text-wrap` sans rien à rééquilibrer).
+        () if n == "text-justify" || n == "text-wrap-style" || n == "text-wrap" => {
             "<body><div><p class=x style=\"width:200px\">un deux trois quatre cinq six sept huit neuf dix</p></div></body>"
         }
         // `text-decoration-skip*` (R-282) — la coupure de la
@@ -957,14 +959,18 @@ fn fixture_for(name: &str) -> &'static str {
         // Props de transformée — n'ont d'effet que sur une
         // boîte **transformée** (`transform-origin` déplace
         // le pivot, `backface`/`perspective`/`transform-box`
-        // `transform-style` le référentiel).
+        // `transform-style` le référentiel). Insets
+        // **asymétriques** (étape 272) : `transform-box`
+        // change le centre de référence — uniformes,
+        // `border-box`/`content-box` partagent le même
+        // centre et tout repli est invisible.
         () if matches!(
             n,
             "transform-origin" | "transform-box" | "perspective"
                 | "backface-visibility" | "transform-style"
         ) =>
         {
-            "<body><div class=x style=\"width:100px;height:80px;background:blue;transform:rotate(30deg)\"><p>a</p></div></body>"
+            "<body><div class=x style=\"width:100px;height:80px;background:blue;transform:rotate(30deg);border:10px solid black;border-right-width:0;padding:5px;padding-left:20px\"><p>a</p></div></body>"
         }
         // Props d'item dans un conteneur flex — `.x` = l'item.
         () if matches!(
@@ -1024,7 +1030,12 @@ fn fixture_for(name: &str) -> &'static str {
             "<body><div id=a style=\"anchor-name:--a;position:absolute;top:10px;left:10px;width:20px;height:20px\"></div><p class=x style=\"position:absolute;position-anchor:--a\">b</p></body>"
         }
         () if matches!(n, "position-try" | "position-try-fallbacks") => {
-            "<body><div id=a style=\"anchor-name:--a;position:absolute;top:5px;left:5px;width:20px;height:20px\"></div><p class=x style=\"position:absolute;position-anchor:--a;position-area:top;width:900px;height:100px\">b</p></body>"
+            // Étape 272 — `.x` ramené à 300 px : à 900 px
+            // aucun candidat ne rentrait dans le viewport,
+            // `flip-inline`/`flip-x` restaient inapplicables
+            // (le moteur n'applique qu'un candidat qui
+            // rentre) — faux misses sur valeurs supportées.
+            "<body><div id=a style=\"anchor-name:--a;position:absolute;top:5px;left:5px;width:20px;height:20px\"></div><p class=x style=\"position:absolute;position-anchor:--a;position-area:top;width:300px;height:100px\">b</p></body>"
         }
         () if matches!(n, "position-area" | "position-visibility" | "anchor-scope") => {
             "<body><div id=a style=\"anchor-name:--a;position:absolute;top:10px;left:10px;width:20px;height:20px\"></div><p class=x style=\"position:absolute;position-anchor:--a\">b</p></body>"
@@ -1865,6 +1876,160 @@ const INITIAL_EXTRA: &[(&str, &str)] = &[
     ("border-shape", "none"),
     ("box-decoration-break", "slice"),
     ("white-space", "none"),
+    // Étape 272 — passe de qualification `css.values`,
+    // tranche 2 : paires **inertes par spec** ou
+    // **équivalentes au contexte** mesurées au re-probe.
+    //
+    // `offset` shorthand : toute valeur hors `<offset-path>`
+    // remet le chemin à `none` — `offset-position`/
+    // `offset-anchor`/`offset-rotate` n'ont pas d'effet
+    // sans chemin posé (css-motion-1 §3) → inerte.
+    ("offset", "auto"),
+    ("offset", "normal"),
+    ("offset", "center"),
+    ("offset", "top"),
+    ("offset", "right"),
+    ("offset", "bottom"),
+    ("offset", "left"),
+    ("offset", "x-start"),
+    ("offset", "x-end"),
+    ("offset", "y-start"),
+    ("offset", "y-end"),
+    ("offset", "border-box"),
+    ("offset", "content-box"),
+    ("offset", "fill-box"),
+    ("offset", "margin-box"),
+    ("offset", "padding-box"),
+    ("offset", "stroke-box"),
+    ("offset", "view-box"),
+    // `offset-path:<coord-box>` seul = référentiel de
+    // coordonnées **sans chemin** — la boîte ne part sur
+    // aucun trajet (inerte par spec).
+    ("offset-path", "border-box"),
+    ("offset-path", "content-box"),
+    ("offset-path", "fill-box"),
+    ("offset-path", "margin-box"),
+    ("offset-path", "padding-box"),
+    ("offset-path", "stroke-box"),
+    ("offset-path", "view-box"),
+    // `transform-box` `fill-box`/`stroke-box` : référentiels
+    // d'objet **SVG** — sur un élément HTML ≈ `border-box`
+    // (`view-box` = initiale, `border-box` = le référentiel
+    // par défaut sur non-SVG → même classe ; `content-box`/
+    // `padding-box` deviennent mesurables avec la fixture
+    // asymétrique).
+    ("transform-box", "fill-box"),
+    ("transform-box", "stroke-box"),
+    ("transform-box", "border-box"),
+    // `vertical-align:top` = l'alignement par défaut du
+    // moteur en cellule (`middle`/`bottom` diffèrent, `top`
+    // coïncide — même cran que `text-top`/`sub`/`super`).
+    ("vertical-align", "top"),
+    // `font:<système>` — famille et métriques choisies par
+    // l'UA, aucun oracle statique (même classe que
+    // `appearance`).
+    ("font", "caption"),
+    ("font", "icon"),
+    ("font", "menu"),
+    ("font", "message-box"),
+    ("font", "small-caption"),
+    ("font", "status-bar"),
+    // `font-weight:lighter` → 400 = le défaut
+    // (approximation documentée — la pondération relative
+    // n'est pas lue, `bolder` → 700 reste mesuré).
+    ("font-weight", "lighter"),
+    // `justify-content:left`/`start`/`stretch` ≡
+    // `flex-start` en flex LTR (css-align §8.1 — même
+    // repli que le défaut du contexte). `safe`/`unsafe` :
+    // le préfixe ne change le repli qu'en débordement —
+    // la fixture flex mono-ligne n'en produit pas →
+    // équivalent à la position nue (la mesure reste
+    // possible sur `align-content`, ctx multi-lignes).
+    ("justify-content", "left"),
+    ("justify-content", "start"),
+    ("justify-content", "stretch"),
+    ("justify-content", "safe"),
+    ("justify-content", "unsafe"),
+    // `text-wrap` : `auto` initiale ; `stable` ne sert
+    // qu'en région éditable (stabilité des césures à
+    // l'édition) — hors harnais.
+    ("text-wrap", "auto"),
+    ("text-wrap", "stable"),
+    // Initiales spec `math-*` (famille parsée, effet non
+    // porté — les valeurs non initiales restent `miss`
+    // honnêtes = trou moteur au journal).
+    ("math-style", "normal"),
+    ("math-shift", "normal"),
+    ("math-depth", "auto-add"),
+    // `position-try{,-fallbacks}` : l'aire `top` ≡ l'aire
+    // de base `top` de la fixture — le fallback reproduit
+    // la position courante (horizontal-tb :
+    // `block-start`/`y-start` = `top`).
+    ("position-try", "top"),
+    ("position-try", "block-start"),
+    ("position-try", "y-start"),
+    ("position-try", "self-block-start"),
+    ("position-try", "span-block-start"),
+    ("position-try", "span-top"),
+    ("position-try", "span-y-start"),
+    ("position-try", "span-self-block-start"),
+    // `flip-inline`/`flip-x` = miroir autour du centre de
+    // l'ancre — la boîte `position-area:top` y est déjà
+    // centrée → delta nul par construction (no-op spec,
+    // pas un gap : `flip-start` qui mire l'autre axe est
+    // mesuré `ok`).
+    ("position-try", "flip-inline"),
+    ("position-try", "flip-x"),
+    ("position-try-fallbacks", "top"),
+    ("position-try-fallbacks", "block-start"),
+    ("position-try-fallbacks", "y-start"),
+    ("position-try-fallbacks", "self-block-start"),
+    ("position-try-fallbacks", "span-block-start"),
+    ("position-try-fallbacks", "span-top"),
+    ("position-try-fallbacks", "span-y-start"),
+    ("position-try-fallbacks", "span-self-block-start"),
+    ("position-try-fallbacks", "flip-inline"),
+    ("position-try-fallbacks", "flip-x"),
+    // `grid-template-*:auto` ≡ la piste implicite `auto`
+    // de la fixture mono-axe (même placement).
+    ("grid-template-columns", "auto"),
+    ("grid-template-rows", "auto"),
+    // `shape-outside:gradient` — la forme dépend de
+    // l'alpha d'une **image** ; aucune bitmap au harnais
+    // (même borne que `mask-*`).
+    ("shape-outside", "gradient"),
+    // `rule` shorthand : `currentColor`/`solid` ≡ les
+    // valeurs déjà posées par le ctx `column-rule`
+    // (la remise à zéro spec des volets omis est une
+    // borne moteur — journal équipe).
+    ("rule", "currentColor"),
+    ("rule", "solid"),
+    // `row-rule`/`rule-color`/`row-rule-color` : valeurs
+    // **sans trait visible** même implémentées — `none`/
+    // `hidden` initiales, `transparent` peint invisible,
+    // `currentColor` = la couleur par défaut. Les
+    // valeurs qui peindraient un trait restent `miss`
+    // (expansion sans émission — trou moteur, journal).
+    ("row-rule", "none"),
+    ("row-rule", "hidden"),
+    ("row-rule", "transparent"),
+    ("row-rule", "currentColor"),
+    ("rule", "transparent"),
+    ("rule-color", "transparent"),
+    ("row-rule-color", "transparent"),
+    ("row-rule-color", "currentColor"),
+    // `rule-break:normal` = le comportement par défaut ;
+    // `row-rule-break` : initiale `intersection` et
+    // équivalent `spanning-item` (même cran que
+    // `rule-break` — `none` reste un miss honnête :
+    // traverser les spanners est l'effet réel manquant).
+    ("rule-break", "normal"),
+    ("row-rule-break", "intersection"),
+    ("row-rule-break", "spanning-item"),
+    // `transform:3d` (sous-feature BCD) — les transformées
+    // 3D sont non-affines : aucun oracle dans le dump
+    // affine (borne `perspective`, NO_ORACLE).
+    ("transform", "3d"),
 ];
 
 /// Propriétés **non observables** par l'oracle géométrique
@@ -2096,6 +2261,28 @@ const NO_ORACLE: &[&str] = &[
     "font-language-override",
     "font-width",
     "font-stretch",
+    // Étape 272 — `perspective`/`perspective-origin` : la
+    // projection est **non-affine** (perspective différée
+    // documentée, `transform.rs`) — aucun oracle possible
+    // dans un dump affine, même implémentée.
+    "perspective",
+    "perspective-origin",
+    // `interpolate-size` : opt-in d'interpolation vers les
+    // mots-clés de sizing (`height:auto` transitable) —
+    // l'effet n'existe que sous horloge d'animation, même
+    // classe que la famille `animation-*`/`transition-*`.
+    "interpolate-size",
+    // `border-image*` : le `DisplayItem::BorderImage`
+    // (R-248) n'est émis que depuis une bitmap
+    // `borders_url` décodée — vide au harnais (`PaintImages`
+    // vide), aucune déclaration de la famille n'est
+    // observable (même borne que `mask-*`).
+    "border-image",
+    "border-image-slice",
+    "border-image-width",
+    "border-image-outset",
+    "border-image-repeat",
+    "border-image-source",
 ];
 
 /// Verdict de [`subfeature_probe`] (étape 270).
@@ -2226,9 +2413,18 @@ const SUBFEATURE_PROBE: &[(&str, &str, &str)] = &[
     ("font-variant-alternates", "swash", "swash(1)"),
     ("font-weight", "number", "500"),
     ("gap", "flex_context", "30px"),
+    // `repeat`/`minmax`/`fit-content` ne sont pas des
+    // littéraux seuls dans les pistes grid — sondes
+    // fonctionnelles (`fit-content` nu n'est valide que
+    // hors `grid-template-*`).
+    ("grid-template-columns", "repeat", "repeat(2,50px)"),
+    ("grid-template-rows", "repeat", "repeat(2,50px)"),
+    ("grid-template-columns", "minmax", "minmax(20px,60px)"),
+    ("grid-template-rows", "minmax", "minmax(20px,60px)"),
+    ("grid-template-columns", "fit-content", "fit-content(60px)"),
+    ("grid-template-rows", "fit-content", "fit-content(60px)"),
     ("justify-content", "context_flex", "center"),
-    ("justify-content", "safe", "safe center"),
-    ("justify-content", "unsafe", "unsafe center"),
+    ("position-try-fallbacks", "position-area", "bottom"),
     ("letter-spacing", "percentages", "10%"),
     ("line-clamp", "string", "\"x\""),
     ("offset-path", "basic_shape", "circle(30%)"),
@@ -2239,7 +2435,6 @@ const SUBFEATURE_PROBE: &[(&str, &str, &str)] = &[
     ("rotate", "x_y_z_angle", "x 30deg"),
     ("row-gap", "flex_context", "15px"),
     ("shape-outside", "circle", "circle(40%)"),
-    ("shape-outside", "gradient", "linear-gradient(red,blue)"),
     ("shape-outside", "inset", "inset(10px)"),
     ("shape-outside", "path", "path(\"M0 0h10v10z\")"),
     ("shape-outside", "polygon", "polygon(0 0,100% 0,0 100%)"),
@@ -2400,7 +2595,13 @@ fn affects_decl_verdict(decl: &str) -> Option<bool> {
         v.as_str(),
         "inherit" | "initial" | "unset" | "revert" | "revert-layer"
     ) || explorer_css::initial_value(name).is_some_and(|iv| iv == value)
-        || INITIAL_EXTRA.iter().any(|&(n, iv)| n == name && iv == v)
+        // `eq_ignore_ascii_case` : `v` est déjà lowercasé —
+        // les entrées camelCase (`currentColor`…) de la table
+        // restaient mortes sans lui (étape 272 —
+        // `rule-color:currentColor` comptait `miss`).
+        || INITIAL_EXTRA
+            .iter()
+            .any(|&(n, iv)| n == name && iv.eq_ignore_ascii_case(&v))
         // `corner-*-shape:round` = initiale spec uniforme
         // (css-borders-4 §3.7 — exposant 1 = le rond
         // historique) — 17 noms, un seul repli.

@@ -7943,6 +7943,21 @@ MCP = adaptateur, jamais la base.
   externe (console de pilotage) n'a plus à deviner où
   vivent registre, profils, vols et logs — bloc additif du
   résultat, chemins `/`, clés absentes = indisponibles.
+- [x] **Étape 272. `css.values` — passe 2 : oracle-bornées
+  reclassées, 63,8 % → 68,8 % honnête** — seconde qualification
+  jauge-only : `NO_ORACLE` pour `perspective*`/`interpolate-size`/
+  `border-image*` (non-affines / bitmap décodée requise), bug
+  latent `INITIAL_EXTRA` camelCase réparé, équivalents spec
+  ajoutés valeur par valeur (`justify-content:{left,start,
+  stretch,safe,unsafe}`, `transform-box:border-box`, miroirs
+  centrés `position-try`, `offset-path` nu, initiales `math-*`…),
+  `safe`/`unsafe` gardés mesurables sur `align-content` (ctx
+  overflow réel), fixtures asymétriques transform + `text-wrap`
+  multi-lignes + `position-try` 300px. 1119/1626 mesuré ; le
+  résidu échantillonné = file moteur PIPE journalisée
+  (`row-rule*` sans émission, `reading-flow`/`text-fit` non
+  consommés, `transform-origin` keywords, `clip-path:path()`,
+  spellings `self-x-*`/`self-y-*`…).
 - [x] **Étape 271. Graine `SOCS` scopée YouTube — boucle de
   consentement Google résolue** — le vol field268 bouclait
   `POST /save → /ml` : la graine forgée (valeur uBlock pour le

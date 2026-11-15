@@ -3857,3 +3857,63 @@ apparaît sur un `google.*` où le bump était client-side, la
 perte du seed `SOCS` pourrait le réactiver — re-vol YouTube
 recommandé pour vérifier que le bump bypass tient (le seed
 `youtube*` est intact).
+
+### 2026-11-15 — Étape 272 (NAV) : `css.values` passe 2 — file moteur affinée
+
+**Suite de la passe 270** : la seconde qualification jauge-only a
+sorti du dénominateur les familles réellement inobservables par
+l'oracle statique (`perspective*`/`interpolate-size`/`border-image*`
+bitmap-requise) et les équivalents spec exacts — 1119/1626
+(68,8 %) mesuré. Le résidu échantillonné est désormais
+intégralement des trous moteur — **file PIPE mise à jour**,
+triée par famille :
+
+- **`row-rule*` / `rule-overlap` / `rule` résidus (~35)** — les
+  shorthands expandissent côté cascade (`expand_rule_parts`) mais
+  `explorer-render` n'émet que `emit_column_rules` : aucune
+  émission row-rule n'existe. À noter : `expand_rule_parts` ne
+  reset pas les parties omises à l'initiale (écart spec subtil).
+- **`reading-flow` (7) / `text-fit` (7)** — parsés et cascadés,
+  jamais consommés par layout/render (aucune lecture du
+  ComputedStyle hors cascade).
+- **`transform-origin` mots-clés `top|left|right|bottom` (4)** —
+  `tf_len_px` (`layout/transform.rs`) ne résout que `%` et
+  longueurs : les keywords retombent sur le défaut 50 %.
+- **`position-try*` spellings physiques `self-x-*`/`self-y-*`/
+  `span-self-*` (16)** — `area_token` connaît l'ordre
+  `x-self-*`/`y-self-*` mais pas les formes physiques de la spec.
+- **`clip-path:path()` + boîtes `content-box`/`padding-box` (3)** —
+  bornes documentées dans `display.rs` (`path()`, références URL
+  et reference-box explicites non implémentés).
+- **`grid-template-*` résidus (9)** — `fit-content`/`max|min-
+  content`/`subgrid` (cols), `minmax`/`subgrid`/`fit-*` (rows) :
+  `minmax`/`repeat` passent `ok` en colonnes via sondes — le
+  reste est à qualifier côté parseurs/resolveurs de pistes.
+- **`background-position-x/y` logiques `x-start`/`y-start` +
+  `side-relative_values` (4)** — valeurs logiques non résolues.
+- **Divers** — `display:ruby*` (3), `math-style|math-shift:
+  compact` (2), `font-style:oblique-angle` / `font` sous-valeurs
+  `font-width` / `font-size-adjust:two-values` / `font-size:math`
+  (4), `content:gradient`, `position-visibility:{anchor-visible,
+  no-overflow}` (2), `shape-outside` boîtes/`path` (4),
+  `offset-path:path()`, `rule-inset`/`row-rule-inset:
+  overlap-join` (2).
+
+**Non-trous confirmés (ne pas chasser)** : `transform-box:
+content-box` était un artefact de fixture symétrique (`ok` après
+asymétrisation border/padding) ; `flip-inline`/`flip-x`/`top` et
+`self-block-start`/`span-*` centrés sont des no-ops spec sur aire
+`top` centrée → `na` ; `align-content:safe|unsafe` produit un
+delta réel en overflow multi-lignes → reste `ok` ;
+`justify-content:{left,start,stretch,safe,unsafe}` ≡ `flex-start`
+sans overflow → `na` ; fontes métriques/OT (`font-variant-
+alternates`, `font-palette`, `font-synthesis*`, `font-kerning`,
+`font-optical-sizing`, `font-size-adjust` une-valeur…) classées
+`NO_ORACLE` — la fixture Ahem ne porte pas les tables de
+sélection et la plupart de ces valeurs ne changent que le choix
+de glyphe ou les métriques.
+
+**Priorité inchangée** : la roadmap PIPE garde le plan perf
+archétypes devant cette file (`roadmap-equipe-pipeline.md`,
+ops de groupe résidu `group_us` + `content-visibility`
+viewport-aware) — cette entrée trie, elle n'ordonne pas.
