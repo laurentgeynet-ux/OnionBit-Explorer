@@ -3731,3 +3731,88 @@ gardes (synchrone + shared — parité préservée). Surfaces
 REST idem, FFI code `8`. Le client réessaie après un
 commit au lieu d'attendre. Contrat : enum `actionResult`
 du schéma complétée (`deferred`/`dropped`/`noop`).
+
+### 2026-11-17 — Étape 270 (NAV) : `css.values` qualifié — résidu moteur documenté
+
+**Contexte** : la liste lestée terrain (1 077 misses,
+50,1 %) mélangeait trous moteur et artefacts de jauge.
+Passe bornée côté `explorer-cli` uniquement — **aucun
+crate PIPE touché**. Score honnête : **1 116/1 748
+(63,8 %)**, 950 neutres exclus du dénominateur (vs
+539 avant) ; +34 `ok` de fixtures réparées ou de
+sondes méta qui ont trouvé des implémentations
+existantes.
+
+**Artefacts éliminés (jauge NAV)** : initiales spec →
+`na` (`INITIAL_EXTRA` étendue) ; effets hors oracle
+statique (curseur, caret, scroll dynamique,
+pagination, raster sans bitmap, portée SVG) →
+`NO_ORACLE` ; noms de *features* BCD sondés comme
+littéraux invalides → `subfeature_probe` traduit en
+déclaration mesurable (~120 cas) ou `na` quand aucun
+littéral n'existe (`is_animatable`, `svg_elements`,
+`*_context`, `image-set`…) ; fixtures réparées (flex
+mono-ligne, grid multi-pistes, `.x::before`+`quotes`,
+background non-répétée réduite, z-index superposé,
+texte enrichi, conteneur à rangées pour `row-rule*`).
+
+**Résidu = file moteur PIPE** (~632 misses, familles
+par poids mesuré — liste exhaustive dans le rapport
+`bcd_coverage.mjs --only values --missing 9999`) :
+
+- **`position-try*` (37), `offset*` (26)** — ancrage/
+  motion path : familles partielles, valeurs
+  résiduelles non implémentées.
+- **Sizing intrinsèque sur props logiques (~60)** —
+  `block-size`/`inline-size`/`min-*`/`max-*` avec
+  `fit-content`/`max-content`/`min-content`/`stretch` :
+  `width:fit-content` passe, les logiques ratent.
+- **Shorthands à token unique (~55)** — `border-block`,
+  `border-inline*`, `text-decoration`, `outline`,
+  `column-rule`, `background` post-image : le token
+  seul doit réinitialiser les autres longhands.
+- **Ancrage CSS (~35)** — `anchor(--a)`/`anchor-size()`
+  non implémentés (toute la famille inset/margin
+  concernée).
+- **Texte (~100)** — `white-space` css-text-4,
+  `unicode-bidi` (moteur bidi absent), `text-fit`,
+  `reading-flow`, `text-align-last`, `hanging-
+  punctuation`, `text-emphasis-position`, `line-*`,
+  `ruby-*`, `text-transform`/`text-overflow` résiduels.
+- **Règles css-gaps (~80)** — `row-rule*`, `rule-*`
+  (`inset`/`cap`/`junction`/`visibility`/`break`/`overlap`)
+  : les décorations de rangée ne sont pas implémentées
+  (fixture grid à rangées posée côté jauge).
+- **Bordures logiques/shorthands (~55)** — `border-block*`,
+  `border-inline*` valeurs résiduelles (tokens `none`,
+  `medium`, couleurs).
+- **Flex/grid résiduels (~50)** — `justify-content`
+  `safe`/`unsafe`/`left`/`start`/`stretch`, `flex-basis`
+  mots-clés, `grid` (`subgrid`, `masonry`, variantes
+  `repeat`), `column-*`/`break-*` résiduels.
+- **Transform (~18)** — `transform-origin` mot-clé nu
+  (`left` seul : forme 1 mot-clé non parsée, `left 20px`
+  passe), `perspective-origin`, `transform-box`.
+- **Fontes (~15)** — `font` shorthand sous-valeurs,
+  `font-variant`, `font-width`/métriques OT probés
+  (`styleset(1)`…), `font-size-adjust` deux valeurs.
+- **Fond/masque (~29)** — `background` post-image
+  (`round`/`space`/`text`/positions logiques), listes
+  multi-couches `background-repeat`/`attachment`,
+  `border-image` famille.
+- **Divers** — `shape-outside` boîtes+gradient,
+  `overflow-inline`/`block` logiques, `clear` logiques,
+  `content` remplacé (`gradient`), `math-*`,
+  `frame-sizing`, `display` exotiques, `contain`,
+  `float`/`position` résiduels, `mix-blend-mode`,
+  `color-scheme`, `clip-path`/`filter` résiduels,
+  `counter-*`, `max-lines`, `box-*`.
+
+**Signal utile déjà remonté par la jauge** : plusieurs
+familles ont un socle implémenté — `filter`/`clip-path`
+(`PushFilter`/`PushClipPath` au dump), `shape-outside`
+formes, `offset-path`/`position-try-fallbacks`
+partiels, `background-position` logiques, sizing
+intrinsèque physique. Les misses résiduels y sont des
+**trous partiels de syntaxe**, pas des familles
+absentes — bons candidats de micro-fixes.

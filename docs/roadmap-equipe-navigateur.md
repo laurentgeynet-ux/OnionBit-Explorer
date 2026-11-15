@@ -7943,6 +7943,16 @@ MCP = adaptateur, jamais la base.
   externe (console de pilotage) n'a plus à deviner où
   vivent registre, profils, vols et logs — bloc additif du
   résultat, chemins `/`, clés absentes = indisponibles.
+- [x] **Étape 270. `css.values` — qualification de la jauge
+  (passe bornée)** — le rapport BCD n'était pas une liste de
+  trous : initiales spec et valeurs non-littérales gonflaient
+  le dénominateur. `INITIAL_EXTRA`/`NO_ORACLE` étendues,
+  sondes `subfeature_probe` pour les noms de features BCD,
+  fixtures réparées (flex nowrap, grid multi-pistes,
+  `::before`+`quotes`, background non-répétée, ancre inset/
+  margin, texte enrichi). 1082/2159 (50,1 %) → **1116/1748
+  (63,8 %)** honnête ; le résidu 632 misses = file moteur
+  documentée pour PIPE dans `interface-equipes.md`.
 - [x] **Étape 269. `deferred_inputs` : borne honnête `dropped`** —
   la file était bornée à 32 mais l'abandon au-delà répondait
   `Deferred` (rejeu impossible promis). `defer_input` rend si

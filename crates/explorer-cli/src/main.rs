@@ -744,20 +744,84 @@ fn prop_affects(name: &str) -> bool {
 fn fixture_for(name: &str) -> &'static str {
     let n = name.trim_start_matches('-').trim_start_matches("webkit-");
     match () {
+        // Props de conteneur flex **mono-ligne** (étape 270) —
+        // `justify-content`/`column-gap`/`flex-direction`/
+        // `flex-wrap`/`flex-flow` n'ont d'oracle qu'avec des
+        // items sur une même ligne : le wrap et `width:100%`
+        // de l'arme multi-lignes les rendaient inertes.
+        () if matches!(
+            n,
+            "justify-content" | "column-gap" | "flex-direction" | "flex-wrap" | "flex-flow"
+        ) =>
+        {
+            "<body><div class=x style=\"display:flex;width:400px\"><p>a</p><p>b</p><p>c</p></div></body>"
+        }
         // Props de conteneur flex/grid — `.x` = le conteneur.
         () if matches!(
             n,
-            "align-content" | "align-items" | "justify-content"
-                | "place-content" | "place-items" | "gap" | "row-gap" | "column-gap"
-                | "flex-direction" | "flex-wrap" | "flex-flow" | "grid-template-columns"
-                | "grid-template-rows" | "grid-auto-flow" | "grid-auto-columns"
-                | "grid-auto-rows"
+            "align-content" | "align-items" | "place-content" | "place-items"
+                | "gap" | "row-gap"
         ) =>
         {
             // Multi-lignes + hauteur fixe : `align-content` a
             // de l'espace libre à distribuer (conteneur auto
             // → effet nul par construction).
             "<body><div class=x style=\"display:flex;flex-wrap:wrap;height:200px\"><p style=\"width:100%\">a</p><p>b</p></div></body>"
+        }
+        // Conteneur **grid** (étape 270) — les props
+        // `grid-template-*`/`grid-auto-*` étaient sondées
+        // sous `display:flex` → inertes par construction.
+        // `.x` = le conteneur grid + items pour le placement.
+        () if matches!(
+            n,
+            "grid-template-columns" | "grid-template-rows" | "grid-auto-flow"
+                | "grid-auto-columns" | "grid-auto-rows" | "grid-template"
+                | "grid-template-areas" | "grid"
+        ) =>
+        {
+            "<body><div class=x style=\"display:grid;width:200px\"><p>a</p><p>b</p><p>c</p><p>d</p></div></body>"
+        }
+        // Items **grid** — `grid-column*`/`grid-row*`/`grid-area`
+        // étaient sondés sous `display:flex` → inertes.
+        () if matches!(
+            n,
+            "grid-column" | "grid-column-start" | "grid-column-end" | "grid-row"
+                | "grid-row-start" | "grid-row-end" | "grid-area"
+        ) =>
+        {
+            "<body><div style=\"display:grid;grid-template-columns:60px 60px 60px;grid-template-rows:40px 40px;width:200px\"><p class=x>a</p><p>b</p><p>c</p></div></body>"
+        }
+        // `display` (étape 270) — `.x` inline (`<span>`) :
+        // `block`/`grid`/`flow-root`/`table-*` convertissent
+        // → delta de boîte ; sur un élément déjà `block`
+        // ils étaient inertes.
+        () if n == "display" => {
+            "<body><div><span class=x>ok</span><span>fin</span></div></body>"
+        }
+        // `z-index` (étape 270) — l'ordre d'empilement n'a
+        // d'oracle que sur des boîtes **positionnées**
+        // superposées : `.x` chevauche le voisin rouge.
+        () if n == "z-index" => {
+            "<body><div style=\"position:relative;width:100px;height:60px;background:red\"></div><div class=x style=\"position:relative;margin-top:-30px;width:60px;height:60px;background:blue\"></div></body>"
+        }
+        // `column-span` (étape 270) — s'applique à l'enfant
+        // du conteneur multicol, pas au conteneur : `.x` =
+        // le spanner candidat.
+        () if n == "column-span" => {
+            "<body><div style=\"columns:2;column-gap:10px;width:300px\"><p>a<br>a<br>a</p><h2 class=x style=\"margin:0\">s</h2><p>b<br>b<br>b</p></div></body>"
+        }
+        // `row-rule*`/`rule-overlap` (étape 270) — les
+        // décorations de **rangée** (css-gaps-1) n'existent
+        // que sur un conteneur à rangées : grid deux rangées
+        // + `row-gap` (multicol n'a que des gaps de colonne).
+        () if n.starts_with("row-rule") || n == "rule-overlap" => {
+            "<body><div class=x style=\"display:grid;grid-template-rows:50px 50px;row-gap:20px;width:100px\"><p>a</p><p>b</p></div></body>"
+        }
+        // `unicode-bidi`/`direction` (étape 270) — la
+        // réordonnance n'a d'oracle qu'avec du texte
+        // bidirectionnel (hébreu incrusté dans du latin).
+        () if n == "unicode-bidi" || n == "direction" => {
+            "<body><div class=x><p>abc \u{05d0}\u{05d1}\u{05d2} def</p></div></body>"
         }
         // `justify-self` est **ignoré** dans un conteneur
         // flex (css-align §8.3) — conteneur grid requis pour
@@ -937,6 +1001,28 @@ fn fixture_for(name: &str) -> &'static str {
         () if n == "position-try-order" => {
             "<body><div id=a style=\"anchor-name:--a;position:absolute;top:5px;left:750px;width:20px;height:20px\"></div><p class=x style=\"position:absolute;position-anchor:--a;position-area:top;width:200px;height:100px\">b</p></body>"
         }
+        // `anchor()`/`anchor-size()` en inset/margin/size
+        // (étape 270) — les sous-features `anchor`/
+        // `anchor-size` sondent ces fonctions : `.x` est
+        // positionné contre l'ancre `#a`. Les valeurs
+        // ordinaires (`top:10px`, `width:200px`…) restent
+        // discriminables dans ce contexte.
+        // (inset/margin uniquement : sur les props de sizing,
+        // le contexte positionné rendrait `width:auto`
+        // shrink-to-fit et tuerait l'oracle intrinsèque —
+        // mesuré étape 270.)
+        () if matches!(
+            n,
+            "top" | "right" | "bottom" | "left" | "inset" | "inset-block"
+                | "inset-block-end" | "inset-block-start" | "inset-inline"
+                | "inset-inline-end" | "inset-inline-start" | "margin-top"
+                | "margin-right" | "margin-bottom" | "margin-left" | "margin-block"
+                | "margin-block-start" | "margin-block-end" | "margin-inline"
+                | "margin-inline-start" | "margin-inline-end"
+        ) =>
+        {
+            "<body><div id=a style=\"anchor-name:--a;position:absolute;top:10px;left:10px;width:20px;height:20px\"></div><p class=x style=\"position:absolute;position-anchor:--a\">b</p></body>"
+        }
         () if matches!(n, "position-try" | "position-try-fallbacks") => {
             "<body><div id=a style=\"anchor-name:--a;position:absolute;top:5px;left:5px;width:20px;height:20px\"></div><p class=x style=\"position:absolute;position-anchor:--a;position-area:top;width:900px;height:100px\">b</p></body>"
         }
@@ -967,11 +1053,10 @@ fn fixture_for(name: &str) -> &'static str {
             "<body><div class=x><p>a</p></div></body>"
         }
         // `clear` — n'a d'effet qu'avec un flottant amont :
-        // `.x` se cale sous le `<div float:left>` (le
-        // flottant porte `style=` — prop différente, pas de
-        // conflit de spécificité).
+        // `.x` se cale sous les flottants (gauche ET droit
+        // pour que `clear:right` discrimine, étape 270).
         () if n == "clear" => {
-            "<body><div style=\"float:left;width:50px;height:50px\">a</div><p class=x>x</p><p>tail</p></body>"
+            "<body><div style=\"float:left;width:50px;height:50px\">a</div><div style=\"float:right;width:50px;height:60px\">b</div><p class=x>x</p><p>tail</p></body>"
         }
         // `float` — le flottant `.x` doit avoir du contenu
         // qui le contourne pour que `left`/`right`/
@@ -1118,7 +1203,11 @@ fn fixture_for(name: &str) -> &'static str {
                     | "hyphens" | "text-transform" | "font" | "quotes" | "text-indent"
             ) =>
         {
-            "<body><div><p class=x style=\"width:80px\">un deux trois quatre cinq</p></div></body>"
+            // Texte riche (étape 270) : majuscule pour
+            // `lowercase`, double-espace + saut de ligne
+            // pour `pre-wrap`/`pre-line`/préservation, mot
+            // long suffisant pour le wrap à 80 px.
+            "<body><div><p class=x style=\"width:80px\">un Deux  trois\nquatre cinq six</p></div></body>"
         }
         // Défaut — `<p>` dans `<div>` (texte, box, décorations).
         () => "<body><div><p class=x>ok</p></div></body>",
@@ -1179,6 +1268,17 @@ fn context_css(name: &str) -> &'static str {
         // Les longhands `mask-*` n'ont d'effet que sur une
         // source `mask-image` (même astuce gradient).
         "mask-image:linear-gradient(red,blue);width:100px;height:80px"
+    } else if n.starts_with("background-position") {
+        // Les positions ne sont discriminables que si
+        // l'image ne remplit pas la zone : gradient réduit
+        // à 40 % sans répétition (étape 270 — l'image
+        // calibrée à la zone rendait tout offset nul).
+        "background-image:linear-gradient(red,blue);background-repeat:no-repeat;background-size:40% 40%;border:10px solid black;padding:10px;width:100px;height:80px"
+    } else if n.starts_with("border-image") || n == "border-image" {
+        // `border-image-*` n'ont d'effet qu'avec une source
+        // et un découpage posés — le gradient sert de
+        // bitmap sans ressource externe.
+        "border-image-source:linear-gradient(red,blue);border-image-slice:30;border:10px solid black;width:100px;height:80px"
     } else if n.starts_with("background") {
         // `position`/`repeat`/`size`/`attachment`/`blend` n'ont
         // d'effet que sur une image de fond — gradient
@@ -1225,6 +1325,30 @@ fn context_css(name: &str) -> &'static str {
         } else {
             "offset-path:ray(90deg);offset-distance:20px"
         }
+    } else if n == "box-sizing" {
+        // border-box vs content-box ne diffèrent qu'avec
+        // padding ET bordure (étape 270).
+        "padding:10px;border:5px solid black;width:100px;height:80px"
+    } else if n == "text-overflow" {
+        // L'ellipse/le clip n'existent que sur une ligne
+        // qui déborde ET est coupée (étape 270).
+        "white-space:nowrap;overflow:hidden;width:60px"
+    } else if n == "text-indent" || n == "text-align" || n == "text-align-last" {
+        // `each-line`/`hanging`/`justify` ne se voient que
+        // sur plusieurs lignes — largeur bornée (étape 270).
+        "width:60px"
+    } else if n == "text-orientation" {
+        // `sideways`/`upright` n'ont d'oracle qu'en écriture
+        // verticale (étape 270).
+        "writing-mode:vertical-rl"
+    } else if n == "overflow-clip-margin" {
+        // La marge de clip n'a d'effet qu'avec un
+        // `overflow` non-`visible` (étape 270).
+        "overflow:hidden;width:80px;height:60px"
+    } else if n == "content" {
+        // Les paires de guillemets pour `open-quote`/
+        // `close-quote` (la sonde cible `.x::before`).
+        "quotes:\"«\" \"»\""
     } else if n == "text-justify" {
         // `text-justify` ne règle que la méthode de la
         // justification — inerte sans `text-align:justify`.
@@ -1289,10 +1413,15 @@ fn prop_affects_decl(decl: &str) -> bool {
     // (css-inline-3 §4 — non hérité, inerte ailleurs) : la
     // déclaration sondée porte sur le pseudo, le ctx reste
     // sur `.x`.
-    let sel = if name == "initial-letter" {
-        ".x::first-letter"
-    } else {
-        ".x"
+    let sel = match name {
+        // `initial-letter` n'existe que sur `::first-letter`
+        // (css-inline-3 §4 — non hérité, inerte ailleurs).
+        "initial-letter" => ".x::first-letter",
+        // `content` n'a d'effet que sur un pseudo-élément
+        // généré (étape 270 — sur l'élément normal seuls
+        // les remplacés compteraient, hors harnais).
+        "content" => ".x::before",
+        _ => ".x",
     };
     let (a, b) = (
         sig(&format!("{sel} {{ {cctx}; {}: {} }}", name, value.trim())),
@@ -1482,20 +1611,21 @@ const INITIAL_EXTRA: &[(&str, &str)] = &[
     ("background-image", "none"),
     ("background-origin", "padding-box"),
     ("background-position", "0% 0%"),
-    ("background-position", "center"),
     ("background-repeat", "repeat"),
     ("background-size", "auto"),
     ("background-size", "cover"),
-    // `background-position-x`/`-y` : neutres sur un dégradé
-    // calibré à la zone (même borne que `cover`/`center` —
-    // l'image a la dimension de la zone, l'offset est nul
-    // quelle que soit la valeur).
+    // `background-position-x`/`-y` : `left`/`top` = 0 % =
+    // la position par défaut — neutre même avec une image
+    // réduite ; `center`/`right`/`bottom` deviennent
+    // discriminables dès que le ctx réduit l'image
+    // (`no-repeat`+`size:40%`, étape 270) → retirés de `na`.
     ("background-position-x", "left"),
-    ("background-position-x", "center"),
-    ("background-position-x", "right"),
     ("background-position-y", "top"),
-    ("background-position-y", "center"),
-    ("background-position-y", "bottom"),
+    // `flex-basis:auto` = initiale spec ; `justify-content:
+    // flex-start` ≡ `normal` dans le contexte flex du
+    // harnais (aucun espace à redistribuer différemment).
+    ("flex-basis", "auto"),
+    ("justify-content", "flex-start"),
     // Cellule : `text-top`/`text-bottom`/`sub`/`super`/
     // `<length>` retombent spec sur `baseline` (R-266
     // §17.5.3.1) = le défaut de la fixture cellule → neutre.
@@ -1529,6 +1659,212 @@ const INITIAL_EXTRA: &[(&str, &str)] = &[
     // css-contain-3 : `normal`/`none` = initiales.
     ("container-type", "normal"),
     ("container-name", "none"),
+    // Étape 270 — passe de qualification `css.values` :
+    // `currentColor` résout à la couleur du texte, soit le
+    // noir du texte ET des bordures/règles du ctx → inerte
+    // par construction ici (même borne que `transparent`
+    // sur une règle sans rangée).
+    ("border-color", "currentColor"),
+    ("border-top-color", "currentColor"),
+    ("border-right-color", "currentColor"),
+    ("border-bottom-color", "currentColor"),
+    ("border-left-color", "currentColor"),
+    ("border-block-color", "currentColor"),
+    ("border-block-end-color", "currentColor"),
+    ("border-block-start-color", "currentColor"),
+    ("border-inline-color", "currentColor"),
+    ("border-inline-end-color", "currentColor"),
+    ("border-inline-start-color", "currentColor"),
+    ("column-rule-color", "currentColor"),
+    ("rule-color", "currentColor"),
+    ("outline-color", "currentColor"),
+    ("text-decoration-color", "currentColor"),
+    ("text-emphasis-color", "currentColor"),
+    ("text-emphasis-color", "transparent"),
+    ("color", "currentColor"),
+    // Styles `solid`/`underline` déjà posés par le ctx de
+    // leur famille → la déclaration ne change rien.
+    ("border-style", "solid"),
+    ("border-top-style", "solid"),
+    ("border-right-style", "solid"),
+    ("border-bottom-style", "solid"),
+    ("border-left-style", "solid"),
+    ("outline-style", "solid"),
+    ("column-rule-style", "solid"),
+    ("rule-style", "solid"),
+    ("text-decoration-style", "solid"),
+    ("text-decoration-line", "underline"),
+    // Initiales spec absentes de `initial_value` (couvre
+    // une partie du catalogue seulement) — chaque ligne
+    // vérifiée à la spec de sa propriété.
+    ("baseline-source", "auto"),
+    ("block-size", "auto"),
+    ("caption-side", "top"),
+    ("color-interpolation", "auto"),
+    ("color-interpolation-filters", "auto"),
+    ("color-scheme", "normal"),
+    ("column-height", "auto"),
+    ("column-width", "auto"),
+    ("column-gap", "normal"),
+    ("row-gap", "normal"),
+    ("gap", "normal"),
+    ("content", "none"),
+    ("counter-increment", "none"),
+    ("counter-reset", "none"),
+    ("counter-set", "none"),
+    ("contain-intrinsic-size", "none"),
+    ("contain-intrinsic-width", "none"),
+    ("contain-intrinsic-height", "none"),
+    ("contain-intrinsic-block-size", "none"),
+    ("contain-intrinsic-inline-size", "none"),
+    ("continue", "normal"),
+    ("filter", "none"),
+    ("flex-direction", "row"),
+    ("flex-flow", "row"),
+    ("flex-flow", "nowrap"),
+    ("flex-wrap", "nowrap"),
+    ("font-feature-settings", "normal"),
+    ("font-kerning", "auto"),
+    ("font-language-override", "normal"),
+    ("font-optical-sizing", "auto"),
+    ("font-palette", "normal"),
+    ("font-size-adjust", "none"),
+    ("font-stretch", "normal"),
+    ("font-width", "normal"),
+    ("font-synthesis", "none"),
+    ("font-synthesis-position", "auto"),
+    ("font-synthesis-small-caps", "auto"),
+    ("font-synthesis-style", "auto"),
+    ("font-synthesis-weight", "auto"),
+    ("font-variant-alternates", "normal"),
+    ("font-variant-caps", "normal"),
+    ("font-variant-east-asian", "normal"),
+    ("font-variant-emoji", "normal"),
+    ("font-variant-ligatures", "normal"),
+    ("font-variant-numeric", "normal"),
+    ("font-variant-position", "normal"),
+    ("font-variation-settings", "normal"),
+    ("grid", "none"),
+    ("grid-area", "auto"),
+    ("grid-auto-columns", "auto"),
+    ("grid-auto-flow", "row"),
+    ("grid-auto-rows", "auto"),
+    ("grid-column", "auto"),
+    ("grid-column-end", "auto"),
+    ("grid-column-start", "auto"),
+    ("grid-row", "auto"),
+    ("grid-row-end", "auto"),
+    ("grid-row-start", "auto"),
+    ("grid-template", "none"),
+    ("grid-template-areas", "none"),
+    ("grid-template-columns", "none"),
+    ("grid-template-rows", "none"),
+    ("hanging-punctuation", "none"),
+    ("inline-size", "auto"),
+    ("inset", "auto"),
+    ("inset-block", "auto"),
+    ("inset-block-end", "auto"),
+    ("inset-block-start", "auto"),
+    ("inset-inline", "auto"),
+    ("inset-inline-end", "auto"),
+    ("inset-inline-start", "auto"),
+    ("line-clamp", "none"),
+    ("list-style", "outside"),
+    ("margin-trim", "none"),
+    ("min-block-size", "auto"),
+    ("min-inline-size", "auto"),
+    ("object-view-box", "none"),
+    // `offset-anchor:center` — `auto` (initiale) se
+    // comporte comme `center` pour un chemin (css-motion-1
+    // §6.3) : même résolution, inerte.
+    ("offset-anchor", "center"),
+    ("perspective", "none"),
+    ("place-content", "normal"),
+    ("place-items", "normal"),
+    ("place-self", "normal"),
+    ("position-anchor", "auto"),
+    ("position-area", "normal"),
+    ("rotate", "none"),
+    ("scale", "none"),
+    ("translate", "none"),
+    ("rule-break", "none"),
+    ("column-rule-break", "none"),
+    ("scroll-padding", "auto"),
+    ("scroll-snap-align", "none"),
+    ("scroll-snap-stop", "normal"),
+    ("scroll-snap-type", "none"),
+    ("scrollbar-color", "auto"),
+    ("scrollbar-gutter", "auto"),
+    ("scrollbar-width", "auto"),
+    ("text-align", "left"),
+    ("text-align-last", "auto"),
+    ("text-box", "auto"),
+    ("text-decoration", "none"),
+    ("text-emphasis", "none"),
+    ("text-emphasis-style", "none"),
+    ("text-shadow", "none"),
+    ("text-wrap-mode", "wrap"),
+    ("transform-box", "view-box"),
+    ("transform-origin", "center"),
+    ("white-space-collapse", "collapse"),
+    ("white-space-trim", "none"),
+    ("window-drag", "none"),
+    // Inertes par construction (pas par initiale) :
+    // `background-size:contain` sur un dégradé sans taille
+    // intrinsèque ≡ `auto` ; `clip-path:<box>` seul est un
+    // clip à la boîte — `border-box`/`view-box`/`margin-box`
+    // ⊇ la boîte de bordure → aucun clip ; `fill-box`/
+    // `stroke-box` = référentiels SVG ; `position:relative`/
+    // `sticky` sans offsets ni scroll = géométrie identique ;
+    // `position-anchor:none` = pas d'ancre implicite ;
+    // `text-decoration:<style|color>` seul ne pose aucune
+    // ligne → rien ne peint.
+    ("background-size", "contain"),
+    ("clip-path", "none"),
+    ("clip-path", "border-box"),
+    ("clip-path", "view-box"),
+    ("clip-path", "margin-box"),
+    ("clip-path", "fill-box"),
+    ("clip-path", "stroke-box"),
+    ("position", "relative"),
+    ("position", "sticky"),
+    ("position-anchor", "none"),
+    ("position-anchor", "normal"),
+    ("position-area", "none"),
+    ("position-visibility", "always"),
+    ("interpolate-size", "numeric-only"),
+    ("text-decoration", "auto"),
+    // `vertical-align` à portée SVG (lignes de base de la
+    // spec SVG `central`/`hanging`/`mathematical`/
+    // `ideographic`/`alphabetic`, et noms BCD non lexèmes
+    // `first`/`last`/`center`) — inertes sur inline HTML,
+    // même classe que `dominant-baseline`.
+    ("vertical-align", "alphabetic"),
+    ("vertical-align", "central"),
+    ("vertical-align", "hanging"),
+    ("vertical-align", "ideographic"),
+    ("vertical-align", "mathematical"),
+    ("vertical-align", "center"),
+    ("vertical-align", "first"),
+    ("vertical-align", "last"),
+    // `row-rule-style:hidden`/`none` — css-gaps : `hidden`
+    // peint comme `none` (rien de visible), `none` est
+    // l'initiale — inertes même avec des rangées.
+    ("row-rule-style", "hidden"),
+    ("row-rule-style", "none"),
+    ("row-rule-width", "medium"),
+    ("row-rule-break", "none"),
+    ("row-rule-break", "normal"),
+    // Initiales spec diverses du reliquat mesuré.
+    ("max-lines", "none"),
+    ("block-ellipsis", "no-ellipsis"),
+    ("text-combine-upright", "none"),
+    ("text-spacing-trim", "normal"),
+    ("border-image-source", "none"),
+    ("border-image-width", "auto"),
+    ("border-shape", "none"),
+    ("box-decoration-break", "slice"),
+    ("white-space", "none"),
 ];
 
 /// Propriétés **non observables** par l'oracle géométrique
@@ -1645,7 +1981,416 @@ const NO_ORACLE: &[&str] = &[
     // aucun effet géométrique ni display-list, même classe
     // que `pointer-events` (NO_ORACLE).
     "interactivity",
+    // Étape 270 — familles mesurées **hors oracle** par la
+    // passe de qualification `css.values` :
+    // Contenu remplacé sans bitmap — `PaintImages` vide au
+    // harnais, aucune image intrinsèque ne peut être servie
+    // (`object-*` dimensionnent/positionnent le bitmap
+    // remplacé ; même borne que `mask-*`).
+    "object-fit",
+    "object-position",
+    "object-view-box",
+    // `size` — boîte de page `@page` (css-page) : la
+    // pagination n'entre pas dans le dump.
+    "size",
+    // Props de texte à portée SVG — même classe que
+    // `dominant-baseline` (îlot `<svg>` rasterisé à part).
+    "alignment-baseline",
+    "baseline-shift",
+    "clip-rule",
+    "stroke-color",
+    "text-anchor",
+    "path-length",
+    // Curseur/saisie — présentation interactive, aucun
+    // effet de layout statique.
+    "caret-animation",
+    "caret-shape",
+    "window-drag",
+    // Délai d'intérêt (`interest-target`) — temporisation
+    // d'interaction, hors géométrie.
+    "interest-delay",
+    "interest-delay-start",
+    "interest-delay-end",
+    // Méta de navigation — aucun effet de rendu.
+    "link-parameters",
+    // Snap/scroll dynamiques — l'effet ne se joue qu'en
+    // défilement, jamais dans un dump statique.
+    "scroll-snap-align",
+    "scroll-snap-stop",
+    "scroll-snap-type",
+    "scroll-padding",
+    "scroll-padding-top",
+    "scroll-padding-right",
+    "scroll-padding-bottom",
+    "scroll-padding-left",
+    "scroll-padding-block",
+    "scroll-padding-block-start",
+    "scroll-padding-block-end",
+    "scroll-padding-inline",
+    "scroll-padding-inline-start",
+    "scroll-padding-inline-end",
+    "scroll-axis-lock",
+    "scroll-initial-target",
+    "scroll-marker-group",
+    "scroll-target-group",
+    // Barres de défilement — chrome UA, jamais peintes
+    // dans le framebuffer.
+    "scrollbar-color",
+    "scrollbar-gutter",
+    "scrollbar-width",
+    // Timelines/déclencheurs/transitions de vue —
+    // famille temporelle (horloge + état animé requis).
+    "scroll-timeline",
+    "scroll-timeline-axis",
+    "scroll-timeline-name",
+    "timeline-scope",
+    "timeline-trigger",
+    "timeline-trigger-activation-range",
+    "timeline-trigger-activation-range-end",
+    "timeline-trigger-activation-range-start",
+    "timeline-trigger-active-range",
+    "timeline-trigger-active-range-end",
+    "timeline-trigger-active-range-start",
+    "timeline-trigger-name",
+    "timeline-trigger-source",
+    "trigger-scope",
+    "view-timeline",
+    "view-timeline-axis",
+    "view-timeline-inset",
+    "view-timeline-name",
+    "view-transition-class",
+    "view-transition-group",
+    "view-transition-name",
+    "view-transition-scope",
+    // `overlay` — top-layer popover, hors arbre de boîtes
+    // statique.
+    "overlay",
+    // `text-size-adjust` — le moteur n'a pas de passe
+    // d'ajustement automatique (mobile text autosize) :
+    // toute valeur est inerte ici.
+    "text-size-adjust",
+    // `image-orientation` — redressement EXIF : sans
+    // bitmap décodé aucune orientation n'est observable.
+    "image-orientation",
+    // `dynamic-range-limit` — gamme HDR, hors colorimétrie
+    // du dump.
+    "dynamic-range-limit",
+    // Famille **sélection/métriques de glyphes** : la fonte
+    // du harnais (Ahem unique) n'a ni variantes, ni tables
+    // OpenType, ni palettes — même une implémentation
+    // complète de ces props ne changerait aucune mesure
+    // ici (borne de fixture, pas verdict moteur — la
+    // conformité se mesure sur les verrous texte).
+    "font-kerning",
+    "font-optical-sizing",
+    "font-palette",
+    "font-synthesis",
+    "font-synthesis-position",
+    "font-synthesis-small-caps",
+    "font-synthesis-style",
+    "font-synthesis-weight",
+    "font-variant-alternates",
+    "font-variant-emoji",
+    "font-feature-settings",
+    "font-variation-settings",
+    "font-language-override",
+    "font-width",
+    "font-stretch",
 ];
+
+/// Verdict de [`subfeature_probe`] (étape 270).
+enum Subfeature {
+    /// Sonder `name:lit` à la place de la valeur brute.
+    Probe(&'static str),
+    /// `na` honnête : aucun littéral mesurable au harnais
+    /// (portée SVG, horloge, ressource externe ou variante
+    /// d'élément).
+    Na,
+}
+
+/// `(prop, valeur BCD) → partie valeur de la déclaration
+/// sonde` — trié par prop pour la lecture.
+const SUBFEATURE_PROBE: &[(&str, &str, &str)] = &[
+    (
+        "background",
+        "background-clip",
+        "linear-gradient(red,blue) padding-box",
+    ),
+    (
+        "background",
+        "background-origin",
+        "linear-gradient(red,blue) content-box",
+    ),
+    (
+        "background",
+        "background-size",
+        "linear-gradient(red,blue) 0 0/40%",
+    ),
+    (
+        "background",
+        "border-area",
+        "linear-gradient(red,blue) border-area",
+    ),
+    (
+        "background",
+        "multiple_backgrounds",
+        "linear-gradient(red,blue),linear-gradient(green,yellow)",
+    ),
+    ("background", "round", "linear-gradient(red,blue) round"),
+    ("background", "space", "linear-gradient(red,blue) space"),
+    ("background", "text", "linear-gradient(red,blue) text"),
+    ("background", "x-end", "linear-gradient(red,blue) x-end"),
+    ("background", "x-start", "linear-gradient(red,blue) x-start"),
+    ("background", "y-end", "linear-gradient(red,blue) y-end"),
+    ("background", "y-start", "linear-gradient(red,blue) y-start"),
+    (
+        "background-attachment",
+        "multiple_backgrounds",
+        "scroll,fixed",
+    ),
+    ("background-position", "multiple_backgrounds", "top,bottom"),
+    (
+        "background-position",
+        "side-relative_values",
+        "left 10px top",
+    ),
+    ("background-position-x", "side-relative_values", "x-start"),
+    ("background-position-y", "side-relative_values", "y-start"),
+    ("background-repeat", "2-value", "repeat space"),
+    (
+        "background-repeat",
+        "multiple_backgrounds",
+        "repeat,no-repeat",
+    ),
+    (
+        "border-bottom-left-radius",
+        "elliptical_corners",
+        "10px 20px",
+    ),
+    (
+        "border-bottom-right-radius",
+        "elliptical_corners",
+        "10px 20px",
+    ),
+    ("border-image", "gradient", "linear-gradient(red,blue) 30"),
+    (
+        "border-image",
+        "optional_border_image_slice",
+        "linear-gradient(red,blue) 30 fill",
+    ),
+    ("border-image", "fill", "linear-gradient(red,blue) 30 fill"),
+    ("border-radius", "4_values_for_4_corners", "1px 2px 3px 4px"),
+    ("border-radius", "elliptical_borders", "10px 20px"),
+    ("border-top-left-radius", "elliptical_corners", "10px 20px"),
+    ("border-top-right-radius", "elliptical_corners", "10px 20px"),
+    ("box-shadow", "inset", "inset 2px 2px red"),
+    ("box-shadow", "multiple_shadows", "2px 2px red,4px 4px blue"),
+    ("box-shadow", "spread_radius", "2px 2px 2px 6px red"),
+    ("break-inside", "multicol_context", "avoid"),
+    ("clip-path", "basic_shape", "circle(30%)"),
+    ("clip-path", "path", "path(\"M0 0h20v20z\")"),
+    ("column-gap", "flex_context", "20px"),
+    ("column-rule-color", "multiple_colors", "red blue"),
+    ("column-rule-color", "repeat", "repeat(2,red)"),
+    ("contain-intrinsic-size", "auto_none", "auto 40px"),
+    ("content", "alt_text", "\"x\" / \"alt\""),
+    ("content", "gradient", "linear-gradient(red,blue)"),
+    ("counter-increment", "list-item", "list-item 1"),
+    ("counter-reset", "list-item", "list-item 1"),
+    ("counter-set", "list-item", "list-item 1"),
+    ("display", "multi-keyword_values", "inline flow-root"),
+    ("filter", "blur", "blur(2px)"),
+    ("filter", "brightness", "brightness(1.5)"),
+    ("filter", "contrast", "contrast(1.5)"),
+    ("filter", "drop-shadow", "drop-shadow(2px 2px red)"),
+    ("filter", "grayscale", "grayscale(1)"),
+    ("filter", "hue-rotate", "hue-rotate(90deg)"),
+    ("filter", "invert", "invert(1)"),
+    ("filter", "opacity", "opacity(0.5)"),
+    ("filter", "saturate", "saturate(2)"),
+    ("filter", "sepia", "sepia(1)"),
+    ("font", "font-width_keyword_values", "condensed 16px serif"),
+    ("font-size", "rem_values", "2rem"),
+    ("font-size-adjust", "two-values", "0.5 0.4"),
+    ("font-style", "oblique-angle", "oblique 20deg"),
+    ("font-variant", "css_fonts_shorthand", "small-caps"),
+    ("font-variant-alternates", "annotation", "annotation(x)"),
+    (
+        "font-variant-alternates",
+        "character_variant",
+        "character-variant(x)",
+    ),
+    ("font-variant-alternates", "ornaments", "ornaments(1)"),
+    ("font-variant-alternates", "styleset", "styleset(1)"),
+    ("font-variant-alternates", "stylistic", "stylistic(1)"),
+    ("font-variant-alternates", "swash", "swash(1)"),
+    ("font-weight", "number", "500"),
+    ("gap", "flex_context", "30px"),
+    ("justify-content", "context_flex", "center"),
+    ("justify-content", "safe", "safe center"),
+    ("justify-content", "unsafe", "unsafe center"),
+    ("letter-spacing", "percentages", "10%"),
+    ("line-clamp", "string", "\"x\""),
+    ("offset-path", "basic_shape", "circle(30%)"),
+    ("offset-path", "path", "path(\"M0 0h10v10z\")"),
+    ("offset-path", "ray", "ray(45deg)"),
+    ("opacity", "percentages", "50%"),
+    ("overflow", "multiple_keywords", "hidden scroll"),
+    ("rotate", "x_y_z_angle", "x 30deg"),
+    ("row-gap", "flex_context", "15px"),
+    ("shape-outside", "circle", "circle(40%)"),
+    ("shape-outside", "gradient", "linear-gradient(red,blue)"),
+    ("shape-outside", "inset", "inset(10px)"),
+    ("shape-outside", "path", "path(\"M0 0h10v10z\")"),
+    ("shape-outside", "polygon", "polygon(0 0,100% 0,0 100%)"),
+    ("shape-outside", "rect", "rect(0 10px 10px 0)"),
+    ("shape-outside", "xywh", "xywh(0 0 50% 50%)"),
+    ("tab-size", "length", "12px"),
+    (
+        "text-decoration",
+        "includes_color-and-style",
+        "underline red dashed",
+    ),
+    ("text-decoration", "includes_thickness", "underline 2px"),
+    ("text-overflow", "string", "\"…\""),
+    ("text-overflow", "two_value_syntax", "clip ellipsis"),
+    ("transform", "3d", "rotateX(30deg)"),
+    ("transform-origin", "three_value_syntax", "10px 20px 5px"),
+    ("word-spacing", "percentages", "20%"),
+    ("z-index", "negative_values", "-1"),
+];
+
+/// Noms génériques → `na` honnête : portée SVG/élément,
+/// horloge, ressource externe, ou variante de fixture —
+/// aucun littéral mesurable n'existe ici.
+const SUBFEATURE_NA: &[&str] = &[
+    "-webkit-legacy",
+    "absolutely_positioned_flex_children",
+    "anchor-valid",
+    "animation",
+    "animation_computed",
+    "dynamic-range-limit-mix_values",
+    "from-font",
+    "from-image",
+    "html_elements",
+    "image",
+    "image-set",
+    "inline_elements",
+    "is_animatable",
+    "name-only_queries",
+    "palette-mix_function",
+    "position_after_layout",
+    "position_sticky_table_elements",
+    "replaced_elements",
+    "reset_does_not_affect_siblings",
+    "scroll-state",
+    "SVG_image_as_background",
+    "svg_elements",
+    "textarea_support",
+    "url",
+    "weak_containment",
+];
+
+/// Sous-feature BCD **nommée** → littéral de sonde ou `na`
+/// (étape 270). Les noms BCD comme `basic_shape`,
+/// `multiple_backgrounds` ou `is_animatable` désignent un
+/// *cas de support*, pas un lexème CSS : sondés en brut ils
+/// mesurent une déclaration invalide — faux miss.
+/// `None` = pas une sous-feature connue — le brut est sondé
+/// normalement.
+fn subfeature_probe(name: &str, v: &str) -> Option<Subfeature> {
+    if let Some(&(_, _, lit)) = SUBFEATURE_PROBE
+        .iter()
+        .find(|&&(p, vv, _)| p == name && vv == v)
+    {
+        return Some(Subfeature::Probe(lit));
+    }
+    // `anchor()`/`anchor-size()` — même sous-feature sur
+    // toute la famille inset/margin/size : la fixture
+    // ancre est posée pour ces props (voir `fixture_for`).
+    if matches!(
+        name,
+        "top"
+            | "right"
+            | "bottom"
+            | "left"
+            | "inset"
+            | "inset-block"
+            | "inset-block-end"
+            | "inset-block-start"
+            | "inset-inline"
+            | "inset-inline-end"
+            | "inset-inline-start"
+            | "margin-top"
+            | "margin-right"
+            | "margin-bottom"
+            | "margin-left"
+            | "margin-block"
+            | "margin-block-start"
+            | "margin-block-end"
+            | "margin-inline"
+            | "margin-inline-start"
+            | "margin-inline-end"
+            | "width"
+            | "height"
+            | "block-size"
+            | "inline-size"
+            | "min-width"
+            | "min-height"
+            | "min-block-size"
+            | "min-inline-size"
+            | "max-width"
+            | "max-height"
+            | "max-block-size"
+            | "max-inline-size"
+    ) {
+        if v == "anchor" {
+            return Some(Subfeature::Probe("anchor(--a)"));
+        }
+        if v == "anchor-size" {
+            return Some(Subfeature::Probe("anchor-size(--a)"));
+        }
+    }
+    // `fit-content(<len>)` — même sous-feature sur toute la
+    // famille de sizing.
+    if v == "fit-content_function"
+        && matches!(
+            name,
+            "width"
+                | "height"
+                | "block-size"
+                | "inline-size"
+                | "min-width"
+                | "min-height"
+                | "min-block-size"
+                | "min-inline-size"
+                | "max-width"
+                | "max-height"
+                | "max-block-size"
+                | "max-inline-size"
+                | "min-size"
+                | "max-size"
+                | "size"
+                | "column-width"
+        )
+    {
+        return Some(Subfeature::Probe("fit-content(60px)"));
+    }
+    if SUBFEATURE_NA.contains(&v) {
+        return Some(Subfeature::Na);
+    }
+    // `*_context` : la fixture de la prop doit porter le
+    // bon conteneur — `flex_context`/`multicol_context`
+    // n'ont de sonde honnête que si la fixture matche ;
+    // les contextes absents (grid pour `column-gap`…) ne
+    // sont pas sondables → `na`.
+    if v.ends_with("_context") || v.starts_with("context_") {
+        return Some(Subfeature::Na);
+    }
+    // Toute autre clé avec `_` non listée : `na` au niveau
+    // de l'appelant (le brut n'est pas un littéral).
+    None
+}
 
 fn affects_decl_verdict(decl: &str) -> Option<bool> {
     let (name, value) = decl.split_once(':')?;
@@ -1714,7 +2459,7 @@ fn affects_decl_verdict(decl: &str) -> Option<bool> {
     // sont supportées » — pas une déclaration en soi : sonder
     // avec `40%` mesure la capacité réelle (10% retomberait
     // pile sur le repli `auto` ~10%em de l'offset).
-    if v == "percentage" {
+    if v == "percentage" || v == "percentages" {
         return Some(prop_affects_decl(&format!("{name}:40%")));
     }
     if name == "hyphens" && v.starts_with("language_") {
@@ -1765,6 +2510,23 @@ fn affects_decl_verdict(decl: &str) -> Option<bool> {
         } else {
             Some(false)
         };
+    }
+    // Sous-features BCD nommées (étape 270) — la valeur
+    // n'est pas un littéral, elle désigne un cas de
+    // support : `subfeature_probe` fournit la déclaration
+    // qui le mesure réellement, ou `na`. Une valeur
+    // contenant `_` non listée n'est jamais un lexème CSS
+    // (aucun mot-clé de spec n'en porte) — `na` honnête
+    // plutôt qu'un miss mesuré sur déclaration invalide.
+    match subfeature_probe(name, &v) {
+        Some(Subfeature::Probe(lit)) => {
+            return Some(prop_affects_decl(&format!("{name}:{lit}")));
+        }
+        Some(Subfeature::Na) => return None,
+        None => {}
+    }
+    if v.contains('_') {
+        return None;
     }
     Some(prop_affects_decl(decl))
 }
