@@ -1,0 +1,44 @@
+{
+  "doc": "Onglet + navigation — la réponse à nav.goto arrive au commit ; la notification nav.committed peut la précéder (même commit, deux formes).",
+  "exchange": [
+    {
+      "wire": "client → serveur",
+      "message": { "jsonrpc": "2.0", "id": 2, "method": "tab.open", "params": {} }
+    },
+    {
+      "wire": "serveur → client",
+      "message": { "jsonrpc": "2.0", "id": 2, "result": { "tab": 3 } }
+    },
+    {
+      "wire": "client → serveur",
+      "message": {
+        "jsonrpc": "2.0", "id": 3,
+        "method": "nav.goto",
+        "params": { "tab": 3, "url": "https://example.com", "wait": "commit", "timeout_ms": 30000 }
+      }
+    },
+    {
+      "wire": "serveur → client (notification, si souscrit)",
+      "message": {
+        "jsonrpc": "2.0",
+        "method": "event.nav.started",
+        "params": { "tab": 3, "url": "https://example.com" }
+      }
+    },
+    {
+      "wire": "serveur → client (notification)",
+      "message": {
+        "jsonrpc": "2.0",
+        "method": "event.nav.committed",
+        "params": { "tab": 3, "url": "https://example.com/", "title": "Example Domain", "rev": 1 }
+      }
+    },
+    {
+      "wire": "serveur → client",
+      "message": {
+        "jsonrpc": "2.0", "id": 3,
+        "result": { "url": "https://example.com/", "title": "Example Domain", "rev": 1 }
+      }
+    }
+  ]
+}

@@ -1,0 +1,546 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://explorer.local/schema/eap-1.schema.json",
+  "title": "EAP v1 — Explorer Agent Protocol",
+  "description": "Contrat de la surface agent (ADR-0035). Transport : WebSocket GET /agent, sous-protocole eap/1. Trames texte = JSON-RPC 2.0 (id présent = requête, absent = notification). Trames binaires = réponses à charge lourde : [u32 LE id][u32 LE kind][payload] — kind 1 = image/png. Chaque méthode porte x-phase : la phase de livraison (E1..E4) — une méthode non encore implémentée répond légalement error.code -32001 (unsupported).",
+
+  "$defs": {
+    "jsonrpc": { "const": "2.0" },
+    "id": { "type": ["integer", "string"] },
+    "tabId": { "type": "integer", "minimum": 0 },
+    "elementRef": { "type": "string", "pattern": "^el:[0-9]+$", "description": "Handle opaque alloué par la table serveur — expire en stale_ref" },
+    "rev": { "type": "integer", "minimum": 0, "description": "Compteur monotone de document commis, par onglet" },
+
+    "rect": {
+      "type": "object",
+      "properties": {
+        "x": { "type": "number" }, "y": { "type": "number" },
+        "w": { "type": "number" }, "h": { "type": "number" }
+      },
+      "required": ["x", "y", "w", "h"],
+      "additionalProperties": false
+    },
+
+    "keyMods": {
+      "type": "object",
+      "properties": {
+        "ctrl": { "type": "boolean", "default": false },
+        "shift": { "type": "boolean", "default": false },
+        "alt": { "type": "boolean", "default": false },
+        "meta": { "type": "boolean", "default": false }
+      },
+      "additionalProperties": false
+    },
+
+    "capability": {
+      "type": "string",
+      "enum": [
+        "snapshot", "snapshot_diff", "handles", "actionable",
+        "wait_commit", "input", "eval", "frames",
+        "console_log", "dom", "tabs", "events"
+      ]
+    },
+
+    "tabScope": {
+      "description": "all (chaîne) ou liste d'onglets",
+      "oneOf": [
+        { "const": "all" },
+        { "type": "array", "items": { "$ref": "#/$defs/tabId" } }
+      ]
+    },
+
+    "profile": {
+      "type": "object",
+      "description": "Droits de session demandés — le serveur accorde au plus ce qui est demandé",
+      "properties": {
+        "input": { "type": "boolean", "default": false, "description": "droit aux actions input.* — défaut lecture seule" },
+        "eval": { "type": "boolean", "default": false, "description": "droit à eval.run — exécution arbitraire" },
+        "tabs": { "$ref": "#/$defs/tabScope", "default": "all" }
+      },
+      "additionalProperties": false
+    },
+
+    "check": {
+      "type": "string",
+      "enum": ["visible", "stable", "enabled", "topmost"],
+      "description": "visible = style calculé + boîte posée non vide ; stable = rect identique sur deux commits layout ; enabled = ni disabled ni inert hérité ; topmost = hit-test au centre retombe sur l'élément"
+    },
+
+    "actionOpts": {
+      "type": "object",
+      "properties": {
+        "require": { "type": "array", "items": { "$ref": "#/$defs/check" }, "default": ["visible", "stable", "enabled", "topmost"] },
+        "timeout_ms": { "type": "integer", "minimum": 0 },
+        "force": { "type": "boolean", "default": false, "description": "agir au dernier rect connu — résultat marqué degraded" }
+      },
+      "additionalProperties": false
+    },
+
+    "actionability": {
+      "type": "object",
+      "properties": {
+        "visible": { "type": "boolean" }, "stable": { "type": "boolean" },
+        "enabled": { "type": "boolean" }, "topmost": { "type": "boolean" }
+      },
+      "required": ["visible", "stable", "enabled", "topmost"],
+      "additionalProperties": false
+    },
+
+    "waitKind": {
+      "type": "string",
+      "enum": ["commit", "idle", "frame", "selector", "stable"]
+    },
+
+    "role": {
+      "description": "Sous-ensemble énuméré ou chaîne libre (rôles hors mapping v1)",
+      "oneOf": [
+        { "type": "string", "enum": ["link", "button", "textbox", "checkbox", "radio", "heading", "img", "navigation", "form", "combobox", "list_item", "table", "main", "generic"] },
+        { "type": "string" }
+      ]
+    },
+
+    "nodeState": {
+      "type": "string",
+      "enum": ["focus", "disabled", "checked", "expanded", "editable", "link", "selected", "required"]
+    },
+
+    "snapshotNode": {
+      "type": "object",
+      "properties": {
+        "ref": { "$ref": "#/$defs/elementRef" },
+        "role": { "$ref": "#/$defs/role" },
+        "name": { "type": "string", "description": "nom accessible, borné 120 chars" },
+        "states": { "type": "array", "items": { "$ref": "#/$defs/nodeState" } },
+        "rect": { "$ref": "#/$defs/rect", "description": "px CSS viewport — absent si non posé" },
+        "depth": { "type": "integer", "minimum": 0, "description": "profondeur pré-ordre document" }
+      },
+      "required": ["ref", "role", "name", "depth"],
+      "additionalProperties": false
+    },
+
+    "eventKind": {
+      "type": "string",
+      "enum": ["nav", "frame", "console_log", "snapshot", "tabs", "download"]
+    },
+
+    "rpcError": {
+      "type": "object",
+      "properties": {
+        "code": {
+          "type": "integer",
+          "enum": [-32700, -32601, -32602, -32001, -32002, -32003, -32004, -32005, -32006, -32007, -32008],
+          "description": "-32700 parse · -32601 method_not_found · -32602 invalid_params · -32001 unsupported · -32002 stale_ref · -32003 not_actionable · -32004 timeout · -32005 no_such_tab · -32006 bad_selector · -32007 engine_unavailable · -32008 unauthorized"
+        },
+        "message": { "type": "string" },
+        "data": { "description": "détail typé — ex. actionability sous -32003" }
+      },
+      "required": ["code", "message"],
+      "additionalProperties": false
+    }
+  },
+
+  "x-methods": {
+    "session.open": {
+      "x-phase": "E1",
+      "description": "Première requête obligatoire — négocie protocole, capacités et droits.",
+      "params": {
+        "type": "object",
+        "properties": {
+          "protocol": { "const": "eap/1" },
+          "capabilities": { "type": "array", "items": { "$ref": "#/$defs/capability" }, "description": "absent = toutes les capacités livrées" },
+          "profile": { "$ref": "#/$defs/profile" }
+        },
+        "additionalProperties": false
+      },
+      "result": {
+        "type": "object",
+        "properties": {
+          "protocol": { "const": "eap/1" },
+          "capabilities": { "type": "array", "items": { "$ref": "#/$defs/capability" }, "description": "capacités livrées = demandées ∩ implémentées" },
+          "profile": { "$ref": "#/$defs/profile", "description": "droits accordés" }
+        },
+        "required": ["protocol", "capabilities", "profile"]
+      }
+    },
+
+    "session.close": { "x-phase": "E1", "params": { "type": "object" }, "result": { "type": "object" } },
+    "session.ping": { "x-phase": "E1", "params": { "type": "object" }, "result": { "type": "object", "properties": { "ts_ms": { "type": "integer" } } } },
+
+    "tab.open": {
+      "x-phase": "E1",
+      "params": { "type": "object" },
+      "result": { "type": "object", "properties": { "tab": { "$ref": "#/$defs/tabId" } }, "required": ["tab"] }
+    },
+    "tab.close": {
+      "x-phase": "E1",
+      "params": { "type": "object", "properties": { "tab": { "$ref": "#/$defs/tabId" } }, "required": ["tab"], "additionalProperties": false },
+      "result": { "type": "object" }
+    },
+    "tab.list": {
+      "x-phase": "E1",
+      "params": { "type": "object" },
+      "result": {
+        "type": "object",
+        "properties": {
+          "tabs": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "tab": { "$ref": "#/$defs/tabId" },
+                "url": { "type": ["string", "null"] },
+                "title": { "type": ["string", "null"] },
+                "scroll_y": { "type": "number" }
+              },
+              "required": ["tab", "url", "title", "scroll_y"]
+            }
+          }
+        },
+        "required": ["tabs"]
+      }
+    },
+
+    "nav.goto": {
+      "x-phase": "E1",
+      "description": "Répond au commit nav.committed (ou wait plus lâche / Timeout).",
+      "params": {
+        "type": "object",
+        "properties": {
+          "tab": { "$ref": "#/$defs/tabId" },
+          "url": { "type": "string" },
+          "wait": { "$ref": "#/$defs/waitKind", "default": "commit" },
+          "timeout_ms": { "type": "integer", "minimum": 0 }
+        },
+        "required": ["tab", "url"],
+        "additionalProperties": false
+      },
+      "result": {
+        "type": "object",
+        "properties": {
+          "url": { "type": "string", "description": "URL finale post-redirections" },
+          "title": { "type": ["string", "null"] },
+          "rev": { "$ref": "#/$defs/rev" }
+        },
+        "required": ["url", "title", "rev"]
+      }
+    },
+    "nav.reload": { "x-phase": "E1", "params": { "$ref": "#/$defs/waitParams" }, "result": { "$ref": "#/$defs/navResult" } },
+    "nav.back": { "x-phase": "E1", "params": { "$ref": "#/$defs/waitParams" }, "result": { "$ref": "#/$defs/navResult" } },
+    "nav.forward": { "x-phase": "E1", "params": { "$ref": "#/$defs/waitParams" }, "result": { "$ref": "#/$defs/navResult" } },
+    "nav.viewport": {
+      "x-phase": "E1",
+      "params": {
+        "type": "object",
+        "properties": {
+          "tab": { "$ref": "#/$defs/tabId" },
+          "w": { "type": "integer", "minimum": 1 },
+          "h": { "type": "integer", "minimum": 1 },
+          "scale": { "type": "number" }
+        },
+        "required": ["tab", "w", "h"],
+        "additionalProperties": false
+      },
+      "result": { "type": "object" }
+    },
+
+    "snapshot.get": {
+      "x-phase": "E1 (arbre sérialisé) / E3 (sémantique + diff)",
+      "description": "sans since : snapshot complet ; avec since : diff contre la révision de base.",
+      "params": {
+        "type": "object",
+        "properties": {
+          "tab": { "$ref": "#/$defs/tabId" },
+          "since": { "$ref": "#/$defs/rev" },
+          "interactive_only": { "type": "boolean", "default": true },
+          "max_nodes": { "type": "integer", "minimum": 1 }
+        },
+        "required": ["tab"],
+        "additionalProperties": false
+      },
+      "result": {
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "rev": { "$ref": "#/$defs/rev" },
+              "url": { "type": "string" },
+              "nodes": { "type": "array", "items": { "$ref": "#/$defs/snapshotNode" } }
+            },
+            "required": ["rev", "url", "nodes"]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "rev": { "$ref": "#/$defs/rev" },
+              "base_rev": { "$ref": "#/$defs/rev" },
+              "added": { "type": "array", "items": { "$ref": "#/$defs/snapshotNode" } },
+              "removed": { "type": "array", "items": { "$ref": "#/$defs/elementRef" } },
+              "changed": { "type": "array", "items": { "$ref": "#/$defs/snapshotNode" } }
+            },
+            "required": ["rev", "base_rev", "added", "removed", "changed"]
+          }
+        ]
+      }
+    },
+
+    "query.select": {
+      "x-phase": "E2",
+      "description": "Sous-ensemble CSS v1 : type, .cls, #id, [attr], [attr=v], combinateurs descendant/enfant. Hors grammaire → -32006.",
+      "params": {
+        "type": "object",
+        "properties": {
+          "tab": { "$ref": "#/$defs/tabId" },
+          "selector": { "type": "string" },
+          "max": { "type": "integer", "minimum": 1 }
+        },
+        "required": ["tab", "selector"],
+        "additionalProperties": false
+      },
+      "result": {
+        "type": "object",
+        "properties": { "refs": { "type": "array", "items": { "$ref": "#/$defs/elementRef" } } },
+        "required": ["refs"]
+      }
+    },
+
+    "frame.get": {
+      "x-phase": "E1",
+      "description": "La réponse est une TRAME BINAIRE [u32 id][u32 kind=1][png] corrélée à id — pas de result JSON.",
+      "params": {
+        "type": "object",
+        "properties": {
+          "tab": { "$ref": "#/$defs/tabId" },
+          "clip": { "$ref": "#/$defs/rect" },
+          "full": { "type": "boolean", "default": false }
+        },
+        "required": ["tab"],
+        "additionalProperties": false
+      },
+      "result": { "description": "trame binaire, hors JSON-RPC" }
+    },
+
+    "console.get": {
+      "x-phase": "E1",
+      "params": {
+        "type": "object",
+        "properties": {
+          "tab": { "$ref": "#/$defs/tabId" },
+          "limit": { "type": "integer", "minimum": 1, "default": 512 }
+        },
+        "required": ["tab"],
+        "additionalProperties": false
+      },
+      "result": {
+        "type": "object",
+        "properties": { "entries": { "type": "array", "items": { "type": "string" } } },
+        "required": ["entries"]
+      }
+    },
+
+    "dom.get": {
+      "x-phase": "E1",
+      "description": "DOM sérialisé vivant — échappatoire debug, coûteux en tokens.",
+      "params": { "type": "object", "properties": { "tab": { "$ref": "#/$defs/tabId" } }, "required": ["tab"], "additionalProperties": false },
+      "result": { "type": "object", "properties": { "html": { "type": "string" } }, "required": ["html"] }
+    },
+
+    "input.click": {
+      "x-phase": "E2",
+      "params": {
+        "type": "object",
+        "properties": {
+          "tab": { "$ref": "#/$defs/tabId" },
+          "ref": { "$ref": "#/$defs/elementRef" },
+          "button": { "type": "string", "enum": ["left"], "default": "left" },
+          "mods": { "$ref": "#/$defs/keyMods" },
+          "opts": { "$ref": "#/$defs/actionOpts" }
+        },
+        "required": ["tab", "ref"],
+        "additionalProperties": false
+      },
+      "result": { "$ref": "#/$defs/actionResult" }
+    },
+    "input.type": {
+      "x-phase": "E2",
+      "params": {
+        "type": "object",
+        "properties": {
+          "tab": { "$ref": "#/$defs/tabId" },
+          "ref": { "$ref": "#/$defs/elementRef" },
+          "text": { "type": "string" },
+          "clear": { "type": "boolean", "default": false },
+          "opts": { "$ref": "#/$defs/actionOpts" }
+        },
+        "required": ["tab", "ref", "text"],
+        "additionalProperties": false
+      },
+      "result": { "$ref": "#/$defs/actionResult" }
+    },
+    "input.hover": {
+      "x-phase": "E2",
+      "params": {
+        "type": "object",
+        "properties": {
+          "tab": { "$ref": "#/$defs/tabId" },
+          "ref": { "$ref": "#/$defs/elementRef" },
+          "opts": { "$ref": "#/$defs/actionOpts" }
+        },
+        "required": ["tab", "ref"],
+        "additionalProperties": false
+      },
+      "result": {
+        "type": "object",
+        "properties": {
+          "url": { "type": ["string", "null"] },
+          "editable": { "type": "boolean" }
+        },
+        "required": ["url", "editable"]
+      }
+    },
+    "input.key": {
+      "x-phase": "E1",
+      "params": {
+        "type": "object",
+        "properties": {
+          "tab": { "$ref": "#/$defs/tabId" },
+          "key": { "type": "string" },
+          "mods": { "$ref": "#/$defs/keyMods" }
+        },
+        "required": ["tab", "key"],
+        "additionalProperties": false
+      },
+      "result": { "$ref": "#/$defs/actionResult" }
+    },
+    "input.scroll": {
+      "x-phase": "E1",
+      "description": "ref présent = scroll_into_view ; sinon delta.",
+      "params": {
+        "type": "object",
+        "properties": {
+          "tab": { "$ref": "#/$defs/tabId" },
+          "ref": { "$ref": "#/$defs/elementRef" },
+          "dy": { "type": "number" }
+        },
+        "required": ["tab"],
+        "additionalProperties": false
+      },
+      "result": { "type": "object", "properties": { "scroll_y": { "type": "number" } }, "required": ["scroll_y"] }
+    },
+    "input.click_at": {
+      "x-phase": "E1",
+      "description": "Échappatoire coordonnées — réponse toujours degraded (pas de handle, pas de check).",
+      "params": {
+        "type": "object",
+        "properties": {
+          "tab": { "$ref": "#/$defs/tabId" },
+          "x": { "type": "number" },
+          "y": { "type": "number" },
+          "mods": { "$ref": "#/$defs/keyMods" }
+        },
+        "required": ["tab", "x", "y"],
+        "additionalProperties": false
+      },
+      "result": { "$ref": "#/$defs/actionResult" }
+    },
+
+    "eval.run": {
+      "x-phase": "E1",
+      "description": "Contexte top-level. Valeur bornée 64 Ko sérialisée, tronquée au-delà (data.truncated=true).",
+      "params": {
+        "type": "object",
+        "properties": {
+          "tab": { "$ref": "#/$defs/tabId" },
+          "expr": { "type": "string" },
+          "timeout_ms": { "type": "integer", "minimum": 0 }
+        },
+        "required": ["tab", "expr"],
+        "additionalProperties": false
+      },
+      "result": {
+        "type": "object",
+        "properties": {
+          "ok": { "type": "boolean" },
+          "value": { "type": ["string", "null"] },
+          "error": { "type": ["string", "null"] },
+          "truncated": { "type": "boolean", "default": false }
+        },
+        "required": ["ok", "value", "error"]
+      }
+    },
+
+    "wait.for": {
+      "x-phase": "E1 (nav/frame) / E2 (selector/stable)",
+      "params": {
+        "type": "object",
+        "properties": {
+          "tab": { "$ref": "#/$defs/tabId" },
+          "kind": { "$ref": "#/$defs/waitKind" },
+          "selector": { "type": "string", "description": "requis pour kind=selector" },
+          "timeout_ms": { "type": "integer", "minimum": 1 }
+        },
+        "required": ["tab", "kind", "timeout_ms"],
+        "additionalProperties": false
+      },
+      "result": { "type": "object", "properties": { "ok": { "const": true } }, "required": ["ok"] }
+    },
+
+    "events.subscribe": {
+      "x-phase": "E1",
+      "params": {
+        "type": "object",
+        "properties": {
+          "tab": { "$ref": "#/$defs/tabId", "description": "absent = session entière" },
+          "kinds": { "type": "array", "items": { "$ref": "#/$defs/eventKind" }, "minItems": 1 }
+        },
+        "required": ["kinds"],
+        "additionalProperties": false
+      },
+      "result": { "type": "object", "properties": { "subscribed": { "type": "array", "items": { "$ref": "#/$defs/eventKind" } } }, "required": ["subscribed"] }
+    },
+    "events.unsubscribe": {
+      "x-phase": "E1",
+      "params": { "type": "object", "properties": { "tab": { "$ref": "#/$defs/tabId" } } },
+      "result": { "type": "object" }
+    }
+  },
+
+  "x-notifications": {
+    "nav.started": { "tab": "tabId", "url": "string" },
+    "nav.committed": { "tab": "tabId", "url": "string", "title": "string|null", "rev": "rev" },
+    "frame.invalidated": { "tab": "tabId", "rects": "rect[]", "scroll_y": "number" },
+    "console.entry": { "tab": "tabId", "message": "string" },
+    "snapshot.changed": { "tab": "tabId", "rev": "rev" },
+    "tab.opened": { "tab": "tabId" },
+    "tab.closed": { "tab": "tabId", "note": "refs purgées — stale_ref dorénavant" }
+  },
+
+  "waitParams": {
+    "type": "object",
+    "properties": {
+      "tab": { "$ref": "#/$defs/tabId" },
+      "wait": { "$ref": "#/$defs/waitKind" },
+      "timeout_ms": { "type": "integer", "minimum": 0 }
+    },
+    "required": ["tab"],
+    "additionalProperties": false
+  },
+  "navResult": {
+    "type": "object",
+    "properties": {
+      "url": { "type": ["string", "null"] },
+      "title": { "type": ["string", "null"] },
+      "rev": { "$ref": "#/$defs/rev" }
+    },
+    "required": ["url", "title", "rev"]
+  },
+  "actionResult": {
+    "type": "object",
+    "properties": {
+      "result": { "type": "string", "enum": ["done", "navigated", "focused", "edited", "scrolled", "ignored", "degraded"] },
+      "actionability": { "$ref": "#/$defs/actionability" },
+      "degraded": { "type": "string", "description": "raison du mode dégradé (force, click_at, stable jamais atteint)" }
+    },
+    "required": ["result"],
+    "additionalProperties": false
+  }
+}

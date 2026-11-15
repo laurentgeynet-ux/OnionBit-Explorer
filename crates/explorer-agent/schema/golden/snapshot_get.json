@@ -1,0 +1,53 @@
+{
+  "doc": "Snapshot interactif — forme plate, depth porte l'arborécence ; les refs sont les seuls handles d'action. Forme E3 sémantique montrée (rôle/nom/états) : en E1 l'arbre est un DOM sérialisé et role=generic.",
+  "exchange": [
+    {
+      "wire": "client → serveur",
+      "message": {
+        "jsonrpc": "2.0", "id": 4,
+        "method": "snapshot.get",
+        "params": { "tab": 3, "interactive_only": true, "max_nodes": 200 }
+      }
+    },
+    {
+      "wire": "serveur → client",
+      "message": {
+        "jsonrpc": "2.0", "id": 4,
+        "result": {
+          "rev": 1,
+          "url": "https://example.com/",
+          "nodes": [
+            { "ref": "el:1", "role": "link", "name": "More information...", "states": ["link"], "rect": { "x": 42.0, "y": 201.5, "w": 128.0, "h": 18.0 }, "depth": 4 },
+            { "ref": "el:2", "role": "textbox", "name": "Search", "states": ["editable"], "rect": { "x": 42.0, "y": 240.0, "w": 300.0, "h": 22.0 }, "depth": 4 },
+            { "ref": "el:3", "role": "checkbox", "name": "Remember me", "states": [], "rect": { "x": 42.0, "y": 270.0, "w": 14.0, "h": 14.0 }, "depth": 5 }
+          ]
+        }
+      }
+    },
+    {
+      "wire": "client → serveur (diff — E3)",
+      "message": {
+        "jsonrpc": "2.0", "id": 5,
+        "method": "snapshot.get",
+        "params": { "tab": 3, "since": 1 }
+      }
+    },
+    {
+      "wire": "serveur → client",
+      "message": {
+        "jsonrpc": "2.0", "id": 5,
+        "result": {
+          "rev": 2,
+          "base_rev": 1,
+          "added": [
+            { "ref": "el:4", "role": "link", "name": "New result", "states": ["link"], "rect": { "x": 42.0, "y": 320.0, "w": 96.0, "h": 18.0 }, "depth": 4 }
+          ],
+          "removed": ["el:3"],
+          "changed": [
+            { "ref": "el:1", "role": "link", "name": "More information...", "states": ["link", "focus"], "rect": { "x": 42.0, "y": 201.5, "w": 128.0, "h": 18.0 }, "depth": 4 }
+          ]
+        }
+      }
+    }
+  ]
+}

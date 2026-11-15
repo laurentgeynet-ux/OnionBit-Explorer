@@ -1,0 +1,51 @@
+{
+  "doc": "frame.get → trame binaire corrélée ; events.subscribe → notifications texte.",
+  "exchange": [
+    {
+      "wire": "client → serveur",
+      "message": {
+        "jsonrpc": "2.0", "id": 14,
+        "method": "frame.get",
+        "params": { "tab": 3, "clip": { "x": 0, "y": 0, "w": 900, "h": 600 } }
+      }
+    },
+    {
+      "wire": "serveur → client",
+      "binary": {
+        "header": "u32 LE id=14 | u32 LE kind=1 (image/png)",
+        "payload": "<octets PNG — viewport recadré>"
+      }
+    },
+    {
+      "wire": "client → serveur",
+      "message": {
+        "jsonrpc": "2.0", "id": 15,
+        "method": "events.subscribe",
+        "params": { "tab": 3, "kinds": ["nav", "snapshot", "console_log"] }
+      }
+    },
+    {
+      "wire": "serveur → client",
+      "message": {
+        "jsonrpc": "2.0", "id": 15,
+        "result": { "subscribed": ["nav", "snapshot", "console_log"] }
+      }
+    },
+    {
+      "wire": "serveur → client (notification poussée)",
+      "message": {
+        "jsonrpc": "2.0",
+        "method": "event.snapshot.changed",
+        "params": { "tab": 3, "rev": 4 }
+      }
+    },
+    {
+      "wire": "serveur → client (notification poussée)",
+      "message": {
+        "jsonrpc": "2.0",
+        "method": "event.console.entry",
+        "params": { "tab": 3, "message": "JS: TypeError — cta is not a function" }
+      }
+    }
+  ]
+}

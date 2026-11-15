@@ -19,6 +19,9 @@ members = [
     # Moteur JavaScript de l'équipe dédiée (ADR-0007) — nom de produit
     # propre, adapté derrière `explorer-js::JsEngine` en phase 8.
     "crates/explorer-jscore",
+    # Surface agent EAP (ADR-0035) — protocole WS à handles,
+    # deuxième client de Session.
+    "crates/explorer-agent",
 ]
 
 [workspace.package]

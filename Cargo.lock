@@ -869,6 +869,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "explorer-agent"
+version = "0.2.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "thiserror",
+]
+
+[[package]]
 name = "explorer-api"
 version = "0.2.0"
 dependencies = [

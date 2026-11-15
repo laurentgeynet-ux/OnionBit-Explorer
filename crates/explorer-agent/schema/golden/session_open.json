@@ -1,0 +1,32 @@
+{
+  "doc": "Handshake — négociation protocole, capacités, droits. Le profil demandé est complet ; le serveur accorde demandé ∩ implémenté ∩ autorisé.",
+  "exchange": [
+    {
+      "wire": "client → serveur",
+      "message": {
+        "jsonrpc": "2.0",
+        "id": 1,
+        "method": "session.open",
+        "params": {
+          "protocol": "eap/1",
+          "profile": { "input": true, "eval": true, "tabs": "all" }
+        }
+      }
+    },
+    {
+      "wire": "serveur → client",
+      "message": {
+        "jsonrpc": "2.0",
+        "id": 1,
+        "result": {
+          "protocol": "eap/1",
+          "capabilities": [
+            "snapshot", "handles", "input", "eval", "frames",
+            "console_log", "dom", "tabs", "events", "wait_commit"
+          ],
+          "profile": { "input": true, "eval": true, "tabs": "all" }
+        }
+      }
+    }
+  ]
+}

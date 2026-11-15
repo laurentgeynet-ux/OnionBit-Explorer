@@ -1,0 +1,56 @@
+{
+  "doc": "Action par handle — auto-wait par défaut (visible+stable+enabled+topmost), le résultat rapporte l'actionabilité constatée.",
+  "exchange": [
+    {
+      "wire": "client → serveur",
+      "message": {
+        "jsonrpc": "2.0", "id": 6,
+        "method": "input.click",
+        "params": { "tab": 3, "ref": "el:1", "opts": { "timeout_ms": 5000 } }
+      }
+    },
+    {
+      "wire": "serveur → client",
+      "message": {
+        "jsonrpc": "2.0", "id": 6,
+        "result": {
+          "result": "navigated",
+          "actionability": { "visible": true, "stable": true, "enabled": true, "topmost": true }
+        }
+      }
+    },
+    {
+      "wire": "client → serveur (frappe dans un champ)",
+      "message": {
+        "jsonrpc": "2.0", "id": 7,
+        "method": "input.type",
+        "params": { "tab": 3, "ref": "el:2", "text": "onion", "clear": true }
+      }
+    },
+    {
+      "wire": "serveur → client",
+      "message": {
+        "jsonrpc": "2.0", "id": 7,
+        "result": {
+          "result": "edited",
+          "actionability": { "visible": true, "stable": true, "enabled": true, "topmost": true }
+        }
+      }
+    },
+    {
+      "wire": "client → serveur (échappatoire coordonnées — E1, toujours degraded)",
+      "message": {
+        "jsonrpc": "2.0", "id": 8,
+        "method": "input.click_at",
+        "params": { "tab": 3, "x": 512.0, "y": 300.0 }
+      }
+    },
+    {
+      "wire": "serveur → client",
+      "message": {
+        "jsonrpc": "2.0", "id": 8,
+        "result": { "result": "degraded", "degraded": "click_at — pas de handle ni de checks" }
+      }
+    }
+  ]
+}

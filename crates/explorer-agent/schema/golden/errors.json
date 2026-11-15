@@ -1,0 +1,84 @@
+{
+  "doc": "Erreurs typées — codes EAP réservés -32001..-32008 ; data porte le détail structuré (actionability sous -32003).",
+  "exchange": [
+    {
+      "wire": "client → serveur (verbe pas encore implémenté)",
+      "message": {
+        "jsonrpc": "2.0", "id": 9,
+        "method": "input.click",
+        "params": { "tab": 3, "ref": "el:1" }
+      }
+    },
+    {
+      "wire": "serveur → client (E1 : handles non livrés → réponse légale)",
+      "message": {
+        "jsonrpc": "2.0", "id": 9,
+        "error": { "code": -32001, "message": "handles non négociés — input.click indisponible", "data": { "capability": "handles" } }
+      }
+    },
+    {
+      "wire": "client → serveur (ref expirée — nav entre-temps)",
+      "message": {
+        "jsonrpc": "2.0", "id": 10,
+        "method": "input.hover",
+        "params": { "tab": 3, "ref": "el:1" }
+      }
+    },
+    {
+      "wire": "serveur → client",
+      "message": {
+        "jsonrpc": "2.0", "id": 10,
+        "error": { "code": -32002, "message": "el:1 expiré — document re-commit (rev 1 → 2)", "data": { "ref": "el:1", "rev": 2 } }
+      }
+    },
+    {
+      "wire": "client → serveur (élément recouvert)",
+      "message": {
+        "jsonrpc": "2.0", "id": 11,
+        "method": "input.click",
+        "params": { "tab": 3, "ref": "el:2", "opts": { "timeout_ms": 2000 } }
+      }
+    },
+    {
+      "wire": "serveur → client",
+      "message": {
+        "jsonrpc": "2.0", "id": 11,
+        "error": {
+          "code": -32003,
+          "message": "el:2 non actionnable — topmost échoue (mur de consentement au-dessus)",
+          "data": { "ref": "el:2", "actionability": { "visible": true, "stable": true, "enabled": true, "topmost": false } }
+        }
+      }
+    },
+    {
+      "wire": "client → serveur (wait échu)",
+      "message": {
+        "jsonrpc": "2.0", "id": 12,
+        "method": "wait.for",
+        "params": { "tab": 3, "kind": "selector", "selector": ".checkout", "timeout_ms": 3000 }
+      }
+    },
+    {
+      "wire": "serveur → client",
+      "message": {
+        "jsonrpc": "2.0", "id": 12,
+        "error": { "code": -32004, "message": "wait.for selector .checkout — 3000 ms écoulés", "data": { "kind": "selector" } }
+      }
+    },
+    {
+      "wire": "client → serveur (droit absent)",
+      "message": {
+        "jsonrpc": "2.0", "id": 13,
+        "method": "eval.run",
+        "params": { "tab": 3, "expr": "document.title" }
+      }
+    },
+    {
+      "wire": "serveur → client (profil eval:false)",
+      "message": {
+        "jsonrpc": "2.0", "id": 13,
+        "error": { "code": -32008, "message": "profil sans droit eval", "data": { "required": "eval" } }
+      }
+    }
+  ]
+}
