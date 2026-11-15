@@ -225,13 +225,23 @@ impl HandleTable {
     }
 }
 
-/// Émission snapshot mémorisée — base du diff `{since}` (E3).
-/// Une par onglet et par connexion ; réécrasée à chaque
-/// `snapshot.get` (la base d'un diff est le dernier snapshot
-/// servi, jamais un instantané arbitraire).
+/// Émissions snapshot retenues par onglet — historique
+/// borné (étape 254). Une `rev` n'identifie pas
+/// l'émission : deux `snapshot.get` à `rev` égale peuvent
+/// différer par leurs params (`interactive_only`,
+/// `max_nodes`). `snap_seq` (monotone par connexion) la
+/// nomme sans ambiguïté — `since_seq` vise l'émission
+/// exacte, `since` conserve sa sémantique « dernière
+/// émission à cette rev ».
+pub const SNAP_HISTORY: usize = 8;
+
+/// Émission snapshot mémorisée — base d'un diff `{since}`
+/// ou `{since_seq}` (E3/étape 254).
 pub struct StoredSnap {
-    /// `rev` servie — `since == rev` déclenche le diff,
-    /// toute autre valeur dégrade en snapshot complet.
+    /// Séquence d'émission — monotone par connexion.
+    pub snap_seq: u64,
+    /// `rev` servie — `since == rev` déclenche le diff sur
+    /// la dernière émission retenue à cette rev.
     pub rev: u64,
     /// Entrées émises (index+génération+ref+signature).
     pub entries: Vec<crate::snapshot::SnapEntry>,
@@ -250,9 +260,13 @@ pub struct AgentConn {
     pub subs: Arc<std::sync::RwLock<SubFilter>>,
     /// Table de handles.
     pub handles: HandleTable,
-    /// Dernières émissions snapshot par onglet — base des
-    /// diffs `{since}` (E3), purgée avec les handles.
-    pub snaps: HashMap<TabId, StoredSnap>,
+    /// Émissions snapshot retenues par onglet — ring borné
+    /// [`SNAP_HISTORY`], bases des diffs `{since}`/`{since_seq}`
+    /// (E3/étape 254), purgé avec les handles.
+    pub snaps: HashMap<TabId, VecDeque<StoredSnap>>,
+    /// Compteur d'émissions snapshot — clé exacte d'un diff
+    /// `{since_seq}` (étape 254).
+    pub snap_seq: u64,
     /// Fin demandée (`session.close`) — la boucle sort après la
     /// réponse.
     pub closing: bool,

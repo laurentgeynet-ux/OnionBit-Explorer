@@ -7801,6 +7801,20 @@ MCP = adaptateur, jamais la base.
   schéma + golden + MCP `engine_cascade`. Verrou : socket
   `engine_introspection` (declarations non vides, verdict
   posé, ref pourrie → -32002).
+- [x] **Étape 254. `snapshot.get{since_seq}` : historique
+  borné d'émissions** — **Livrée (`main`)** : une `rev`
+  n'identifie pas une émission (deux `snapshot.get` à
+  `rev` égale diffèrent par `interactive_only`/
+  `max_nodes`) → `since` seul rendait le diff ambigu.
+  `snap_seq` monotone par connexion servi dans chaque
+  réponse ; `conn.snaps` = ring borné de **8 émissions**
+  par onglet (vs base unique) ; `since_seq` (prime sur
+  `since`) vise l'émission exacte — `since` garde sa
+  sémantique pour compat. Diff répond `base_seq` +
+  `base_rev`. Tolérance inchangée : base absente ou
+  élaguée → snapshot complet. Schéma + help + golden +
+  MCP. Verrou : `e3_diff_since` étendu (snap_seq,
+  diff exact, éviction >8 → dégradation honnête).
 
 ## Piste JS (JS-C26+) — spécialiste `explorer-jscore`
 

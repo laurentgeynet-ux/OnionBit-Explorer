@@ -925,6 +925,34 @@ async fn e3_diff_since() {
         .await;
     assert!(r["result"]["nodes"].is_array(), "{r}");
     assert!(r["result"]["base_rev"].is_null(), "{r}");
+
+    // Étape 254 — `snap_seq` nomme l'émission exacte : la
+    // réponse la porte toujours, `since_seq` diff dessus
+    // sans ambiguïté de rev (deux émissions à même rev,
+    // params différents).
+    let r = a.call("snapshot.get", json!({"tab": tab})).await;
+    let seq_a = r["result"]["snap_seq"].as_u64().expect("snap_seq");
+    // Émission suivante à params différents, même rev —
+    // `since` seul viserait la plus récente ; `since_seq`
+    // vise `seq_a` exactement.
+    let r = a
+        .call(
+            "snapshot.get",
+            json!({"tab": tab, "interactive_only": false, "since_seq": seq_a}),
+        )
+        .await;
+    assert_eq!(r["result"]["base_seq"], json!(seq_a), "{r}");
+    assert!(r["result"]["snap_seq"].as_u64().expect("seq") > seq_a);
+    // Historique borné à 8 : après 9+ émissions l'entrée
+    // `seq_a` est évincée → dégradation complète honnête.
+    for _ in 0..9 {
+        a.call("snapshot.get", json!({"tab": tab})).await;
+    }
+    let r = a
+        .call("snapshot.get", json!({"tab": tab, "since_seq": seq_a}))
+        .await;
+    assert!(r["result"]["nodes"].is_array(), "{r}");
+    assert!(r["result"]["base_seq"].is_null(), "{r}");
     srv.abort();
 }
 

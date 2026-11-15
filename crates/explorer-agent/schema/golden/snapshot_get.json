@@ -1,5 +1,5 @@
 {
-  "doc": "Snapshot interactif — forme plate, depth porte l'arborécence ; les refs sont les seuls handles d'action. Forme E3 sémantique montrée (rôle/nom/états) : en E1 l'arbre est un DOM sérialisé et role=generic.",
+  "doc": "Snapshot interactif — forme plate, depth porte l'arborécence ; les refs sont les seuls handles d'action. Forme E3 sémantique montrée (rôle/nom/états) : en E1 l'arbre est un DOM sérialisé et role=generic. Étape 254 : chaque réponse porte `snap_seq` — la clé exacte de l'émission à repasser en `since_seq` (une `rev` partagée par deux émissions à params différents est ambiguë ; historique retenu = 8 émissions par onglet et connexion, base élaguée → snapshot complet).",
   "exchange": [
     {
       "wire": "client → serveur",
@@ -15,6 +15,7 @@
         "jsonrpc": "2.0", "id": 4,
         "result": {
           "rev": 1,
+          "snap_seq": 0,
           "url": "https://example.com/",
           "nodes": [
             { "ref": "el:1", "role": "link", "name": "More information...", "states": ["link"], "rect": { "x": 42.0, "y": 201.5, "w": 128.0, "h": 18.0 }, "depth": 4 },
@@ -39,6 +40,8 @@
         "result": {
           "rev": 2,
           "base_rev": 1,
+          "base_seq": 0,
+          "snap_seq": 1,
           "added": [
             { "ref": "el:4", "role": "link", "name": "New result", "states": ["link"], "rect": { "x": 42.0, "y": 320.0, "w": 96.0, "h": 18.0 }, "depth": 4 }
           ],
@@ -46,6 +49,30 @@
           "changed": [
             { "ref": "el:1", "role": "link", "name": "More information...", "states": ["link", "focus"], "rect": { "x": 42.0, "y": 201.5, "w": 128.0, "h": 18.0 }, "depth": 4 }
           ]
+        }
+      }
+    },
+    {
+      "wire": "client → serveur (diff exact — étape 254)",
+      "message": {
+        "jsonrpc": "2.0", "id": 6,
+        "method": "snapshot.get",
+        "params": { "tab": 3, "since_seq": 1 }
+      }
+    },
+    {
+      "wire": "serveur → client",
+      "message": {
+        "jsonrpc": "2.0", "id": 6,
+        "result": {
+          "rev": 2,
+          "base_rev": 2,
+          "base_seq": 1,
+          "snap_seq": 2,
+          "added": [],
+          "removed": [],
+          "changed": [],
+          "comment": "since_seq vise l'émission exacte dans l'historique retenu — ici le diff de l'émission snap_seq=1 elle-même"
         }
       }
     }

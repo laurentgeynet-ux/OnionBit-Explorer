@@ -245,13 +245,14 @@
     },
 
     "snapshot.get": {
-      "x-phase": "E1 (arbre sérialisé) / E3 (sémantique + diff)",
-      "description": "sans since : snapshot complet ; avec since : diff contre la révision de base.",
+      "x-phase": "E1 (arbre sérialisé) / E3 (sémantique + diff) / E5 (historique borné, étape 254)",
+      "description": "sans since/since_seq : snapshot complet ; avec since : diff contre la dernière émission à cette révision ; avec since_seq (prime sur since) : diff contre l'émission exacte — nécessaire quand deux émissions partagent la même rev (params différents). Chaque réponse porte `snap_seq` (séquence d'émission monotone par connexion) — c'est la valeur à repasser en since_seq. Historique retenu : 8 dernières émissions par onglet et par connexion ; base élaguée → dégradation en snapshot complet honnête, jamais d'erreur.",
       "params": {
         "type": "object",
         "properties": {
           "tab": { "$ref": "#/$defs/tabId" },
           "since": { "$ref": "#/$defs/rev" },
+          "since_seq": { "type": "integer", "minimum": 0 },
           "interactive_only": { "type": "boolean", "default": true },
           "max_nodes": { "type": "integer", "minimum": 1 }
         },
@@ -264,21 +265,24 @@
             "type": "object",
             "properties": {
               "rev": { "$ref": "#/$defs/rev" },
+              "snap_seq": { "type": "integer" },
               "url": { "type": "string" },
               "nodes": { "type": "array", "items": { "$ref": "#/$defs/snapshotNode" } }
             },
-            "required": ["rev", "url", "nodes"]
+            "required": ["rev", "snap_seq", "url", "nodes"]
           },
           {
             "type": "object",
             "properties": {
               "rev": { "$ref": "#/$defs/rev" },
               "base_rev": { "$ref": "#/$defs/rev" },
+              "base_seq": { "type": "integer" },
+              "snap_seq": { "type": "integer" },
               "added": { "type": "array", "items": { "$ref": "#/$defs/snapshotNode" } },
               "removed": { "type": "array", "items": { "$ref": "#/$defs/elementRef" } },
               "changed": { "type": "array", "items": { "$ref": "#/$defs/snapshotNode" } }
             },
-            "required": ["rev", "base_rev", "added", "removed", "changed"]
+            "required": ["rev", "base_rev", "base_seq", "snap_seq", "added", "removed", "changed"]
           }
         ]
       }

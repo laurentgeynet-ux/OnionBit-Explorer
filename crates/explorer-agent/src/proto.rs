@@ -707,6 +707,13 @@ pub struct SnapshotParams {
     /// snapshot complet.
     #[serde(default)]
     pub since: Option<u64>,
+    /// Séquence d'émission de base (étape 254) — plus
+    /// précise que `since` : nomme l'émission exacte dans
+    /// l'historique retenu, utile quand deux émissions
+    /// partagent la même `rev` (params différents). Si les
+    /// deux sont fournis, `since_seq` prime.
+    #[serde(default)]
+    pub since_seq: Option<u64>,
     /// `true` = nœuds interactifs seulement (liens, contrôles,
     /// éditables) — le mode par défaut des agents LLM.
     #[serde(default)]

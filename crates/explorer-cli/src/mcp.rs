@@ -419,9 +419,9 @@ fn tools() -> Value {
         ),
         t(
             "snapshot",
-            "Arbre sémantique → {nodes|diff} {tab,since?}",
+            "Arbre sémantique → {nodes|diff} {tab,since?|since_seq?}",
             obj(
-                json!({"tab":{"type":"integer"},"since":{"type":"integer"},"interactive_only":{"type":"boolean"},"max_nodes":{"type":"integer"}}),
+                json!({"tab":{"type":"integer"},"since":{"type":"integer"},"since_seq":{"type":"integer"},"interactive_only":{"type":"boolean"},"max_nodes":{"type":"integer"}}),
                 &["tab"]
             )
         ),
@@ -614,7 +614,7 @@ fn to_eap(name: &str, args: &Value) -> Option<(&'static str, Value)> {
         ),
         "snapshot" => (
             "snapshot.get",
-            json!({"tab": tab, "since": args["since"],
+            json!({"tab": tab, "since": args["since"], "since_seq": args["since_seq"],
                    "interactive_only": args["interactive_only"],
                    "max_nodes": args["max_nodes"]}),
         ),

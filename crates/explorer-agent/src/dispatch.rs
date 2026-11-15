@@ -64,7 +64,7 @@ const HELP: &[(&str, Option<Capability>, &str)] = &[
     (
         "diff depuis le dernier snapshot ?",
         Some(Capability::SnapshotDiff),
-        "snapshot.get{since}",
+        "snapshot.get{since|since_seq}",
     ),
     (
         "suspects d'affichage / santé ?",
@@ -740,7 +740,9 @@ async fn snapshot_get(
     scope(conn, p.tab)?;
     // Le diff exige la capacité dédiée — négociée au
     // `session.open`, sinon `-32001` honnête.
-    if p.since.is_some() && !conn.caps.contains(&Capability::SnapshotDiff) {
+    if (p.since.is_some() || p.since_seq.is_some())
+        && !conn.caps.contains(&Capability::SnapshotDiff)
+    {
         return Err(unsupported("snapshot diff", "snapshot_diff"));
     }
     tab_exists(st, p.tab).await?;
@@ -784,40 +786,52 @@ async fn snapshot_get(
         p.interactive_only.unwrap_or(true),
         p.max_nodes.unwrap_or(4096) as usize,
     );
-    let base = p.since.and_then(|since| {
-        conn.snaps
-            .get(&p.tab)
-            .filter(|s| s.rev == since)
-            .map(|s| (since, s))
-    });
-    // Diff servi — toute autre `since` (jamais snapshotée,
-    // nav entre-temps) dégrade en snapshot complet.
-    let result = if let Some((since, snap)) = base {
+    // Base du diff (étape 254 — ring borné d'émissions) :
+    // `since_seq` vise l'émission exacte ; `since` garde sa
+    // sémantique « dernière émission à cette rev » — on
+    // cherche de la plus récente à la plus ancienne.
+    let ring = conn.snaps.get(&p.tab);
+    let base = p
+        .since_seq
+        .and_then(|seq| ring.and_then(|r| r.iter().find(|s| s.snap_seq == seq)))
+        .or_else(|| {
+            p.since
+                .and_then(|since| ring.and_then(|r| r.iter().rev().find(|s| s.rev == since)))
+        });
+    // Diff servi — base absente ou élaguée (jamais snapshotée,
+    // nav entre-temps, historique plein) dégrade en snapshot
+    // complet, jamais d'erreur.
+    let snap_seq = conn.snap_seq;
+    let result = if let Some(snap) = base {
         let (added, removed, changed) = crate::snapshot::diff(&snap.entries, &emitted);
         json!({
-            "rev": rev, "base_rev": since, "url": url,
+            "rev": rev, "base_rev": snap.rev, "base_seq": snap.snap_seq,
+            "snap_seq": snap_seq, "url": url,
             "added": added, "removed": removed,
             "changed": changed,
         })
     } else {
         let nodes: Vec<_> = emitted.iter().map(|e| e.node.clone()).collect();
-        json!({ "rev": rev, "url": url, "nodes": nodes })
+        json!({ "rev": rev, "snap_seq": snap_seq, "url": url, "nodes": nodes })
     };
-    conn.snaps.insert(
-        p.tab,
-        StoredSnap {
-            rev,
-            entries: emitted
-                .into_iter()
-                .map(|e| crate::snapshot::SnapEntry {
-                    index: e.index,
-                    generation: e.generation,
-                    elem_ref: e.node.elem_ref,
-                    sig: e.sig,
-                })
-                .collect(),
-        },
-    );
+    conn.snap_seq += 1;
+    let ring = conn.snaps.entry(p.tab).or_default();
+    ring.push_back(StoredSnap {
+        snap_seq,
+        rev,
+        entries: emitted
+            .into_iter()
+            .map(|e| crate::snapshot::SnapEntry {
+                index: e.index,
+                generation: e.generation,
+                elem_ref: e.node.elem_ref,
+                sig: e.sig,
+            })
+            .collect(),
+    });
+    while ring.len() > crate::state::SNAP_HISTORY {
+        ring.pop_front();
+    }
     Ok(result)
 }
 
