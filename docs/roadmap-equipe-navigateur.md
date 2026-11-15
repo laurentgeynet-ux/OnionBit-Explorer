@@ -7637,6 +7637,37 @@ Déplacée dans **`docs/roadmap-profil.md`** (désignation `PR-N`,
 distincte des `Étape NN` de cette piste — pas de collision de
 numérotation).
 
+### Palier — Surface agent (ADR-0035)
+
+Objectif : un modèle IA pilote le navigateur au niveau d'un humain —
+perception (carte sémantique + pixels), action par référence
+d'élément, attente fiable. Protocole dédié **EAP** (WebSocket,
+JSON-RPC + binaire, capacités négociées, handles serveur) —
+deuxième client de `Session`, la couture UI REST+SSE inchangée.
+MCP = adaptateur, jamais la base.
+
+- [x] **Étape 242. Surface agent — ADR-0035** (design) : protocole
+  EAP v1 posé — WS `GET /agent` sur le listener existant (feature
+  `ws` axum, tungstenite pur Rust), handshake `session.open` à
+  capacités (implémentation partielle légale, `unsupported` typé,
+  profils sécurité au handshake), handles `ref → (TabId, NodeId,
+  génération, doc_epoch)` avec expiration `stale_ref`, perception
+  duale `snapshot` sémantique + `frame` binaire + diff `{since}`,
+  actionabilité native (visible/stable/enabled/topmost) + `wait_for`
+  sur commits du single-writer (point d'extension additif core à
+  journaliser), adaptateurs stdio/MCP minces. Hors v1 déclaré :
+  interception réseau, file chooser, dialogues, PDF, vidéo.
+- [ ] **Étape 243. EAP-E1 : crate `explorer-agent` + serveur WS +
+  subset** (tabs/nav/snapshot-DOM/input/frame/wait-nav) — capacités
+  déclarées, verrous de trames golden.
+- [ ] **Étape 244. EAP-E2 : handles + actionabilité + auto-wait**
+  sur commits internes (`stale_ref`, timeout borné, mode `force`
+  → `degraded`).
+- [ ] **Étape 245. EAP-E3 : snapshot sémantique + diff `{since}`**
+  (mapping rôle/nom borné, purge des handles au sweep de doc).
+- [ ] **Étape 246. EAP-E4 : adaptateur MCP** — `explorer-cli mcp`
+  bascule REST→EAP, vols agents migrés.
+
 ## Piste JS (JS-C26+) — spécialiste `explorer-jscore`
 
 Ordre dicté par les besoins de la piste produit d'abord, puis
