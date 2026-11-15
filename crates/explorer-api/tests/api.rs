@@ -834,7 +834,9 @@ async fn input_click_link_navigates() {
     let v: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
     assert_eq!(v["result"], "navigated");
 
-    // Scroll → scrolled + scroll_y.
+    // Scroll sur page non scrollable → `noop` + `moved:false`
+    // (étape 257 : un `scrolled` sur `scroll_y` clampé
+    // mentait à l'agent).
     let r = app
         .oneshot(json_post(
             &format!("/api/tabs/{id}/input"),
@@ -845,7 +847,8 @@ async fn input_click_link_navigates() {
     assert_eq!(r.status(), StatusCode::OK);
     let bytes = axum::body::to_bytes(r.into_body(), 4096).await.unwrap();
     let v: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
-    assert_eq!(v["result"], "scrolled");
+    assert_eq!(v["result"], "noop");
+    assert_eq!(v["moved"], false);
     assert!(v["scroll_y"].is_number());
 }
 
