@@ -16,6 +16,7 @@
 //! paires `(Rc<str>, EnvCell)` non partagées par instance.
 
 use explorer_jscore::Engine;
+use std::fmt::Write as _;
 
 /// Sérialise les tests sensibles aux compteurs J17 partagés.
 static IC_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
@@ -323,4 +324,45 @@ fn c536_large_canon_serves_and_closes() {
     let out = r.map(|v| e.describe(v));
     // a=b → a=2 ; somme 2+2+3+…+19 = 191, + u=20 → 211.
     assert_eq!(out.as_deref().unwrap_or(""), "211", "gros canon : {out:?}");
+}
+
+/// JS-C537 — cap `RESOLVED_LITS_CAP` (512) : l'éviction est
+/// **par lit** — seules les clés du plus ancien lit partent
+/// (avant : purge globale des tables + caches). 600 lits
+/// distincts forcent ~88 évictions : `res_clear` tique, les
+/// liaisons restent correctes pendant le churn, le re-call
+/// d'un lit évincé re-résout transparently et le câblage
+/// continue de servir `bnd_canon`.
+#[test]
+fn c537_per_lit_eviction_preserves() {
+    let _g = IC_LOCK
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    explorer_jscore::j17_enable();
+    let mut e = Engine::new();
+    let before = snap_counter(&explorer_jscore::j17_snapshot(), "res_clear");
+    // 600 `FnLit` distincts > cap 512 → ~88 évictions FIFO.
+    let mut src = String::from("var G=1000;var s=0;");
+    for i in 0..600 {
+        let _ = write!(src, "function f{i}(){{let x={i};return x+G;}}s+=f{i}();");
+    }
+    src.push('s');
+    let r = e.eval(&src);
+    let out = r.map(|v| e.describe(v));
+    // Σ(0..600) + 600*1000 = 179700 + 600000.
+    assert_eq!(out.as_deref().unwrap_or(""), "779700", "churn : {out:?}");
+    // Re-call du plus ancien lit (évincé) → re-résolution.
+    let r2 = e.eval("f0()");
+    let out2 = r2.map(|v| e.describe(v));
+    assert_eq!(out2.as_deref().unwrap_or(""), "1000", "re-call : {out2:?}");
+    let snap = explorer_jscore::j17_snapshot();
+    let after = snap_counter(&snap, "res_clear");
+    assert!(
+        after > before,
+        "les évictions par lit doivent tiquer : {snap}"
+    );
+    assert!(
+        snap_counter(&snap, "bnd_canon") > 0,
+        "le canon doit servir après éviction : {snap}"
+    );
 }

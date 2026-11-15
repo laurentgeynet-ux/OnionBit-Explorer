@@ -12902,6 +12902,25 @@ chaque gain rapporté contre les **deux** archétypes.
   (`ic_hit`/`ic_miss`/`ic_disarm` au snapshot) pour
   borner la couverture du seul court-circuit existant.
   Dependency-groups = infra lourde, dernier recours.
+- [x] **JS-C537 — éviction par lit au cap resolver** :
+  `res_clear`=20 au N5.45 — chaque dépassement
+  du cap 512 purgeait **globalement** tables +
+  caches (`resolved_map`/`names_table`/lowered/
+  `ic_map`) → vagues de re-résolution et
+  re-câblage en cascade. `resolved_guard` =
+  `Map<ptr(lit), LitRes>` (pin AST + clés
+  contribuées `map_keys`/`name_keys` —
+  `ensure_lit_resolved` = unique écrivain) +
+  `resolved_fifo` ordonne : au cap, les clés du
+  plus ancien lit seul partent (+ son lowered
+  épinglé, précédent C492) ; re-résolution au
+  prochain appel — coût borné à un lit. `ic_map`
+  découplée (auto-bornée `ic_purge`, vérif
+  sémantique déjà sûre). `res_clear` = lits
+  évincés désormais. Verrous : c533 17 (+lock
+  600 lits → ~88 évictions réelles, re-call
+  évincé re-résout), lang 315 VERIFY, dom 265.
+  Lecture : exec_us mesure l'amortissement.
 - [x] **JS-C536 — `CanonNames` partagé (`pos()` hashé >16)** :
   `env_ns` ~6,5 s persistait au N5.44 malgré le
   révert poisoned — vrai coupable : `Bindings::

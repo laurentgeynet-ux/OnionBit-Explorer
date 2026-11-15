@@ -990,12 +990,19 @@ pub struct Engine {
     /// `EXPLORER_NO_SLOTS=1` — coupe pré-déclare + fast-path
     /// slot (A/B en vol, précédent `resolve_off`).
     pub(crate) slots_off: bool,
-    /// `FnLit` déjà résolus (`Rc::as_ptr`) — dédup par corps.
-    pub(crate) resolved_lits: std::collections::HashSet<usize>,
-    /// Gardiens : maintient les `Rc<FnLit>` résolus en vie pour
-    /// que les adresses AST indexées dans `resolved_map` restent
-    /// uniques (un lit libéré → adresses réutilisables).
-    pub(crate) resolved_guard: Vec<Rc<crate::ast::FnLit>>,
+    /// `FnLit` déjà résolus, indexés par `Rc::as_ptr` — dédup
+    /// par corps + gardien AST + clés contribuées. JS-C537 :
+    /// éviction **par lit** (FIFO `resolved_fifo`) au cap au
+    /// lieu de la purge globale — chaque dépassement vidait
+    /// `resolved_map`/`names_table`/`lowered_suspend_cache`/
+    /// `ic_map` → vagues de re-résolution, re-câblage et
+    /// ré-apprentissage IC (20 clears mesurés au vol N5.45).
+    pub(crate) resolved_guard: std::collections::HashMap<usize, LitRes>,
+    /// JS-C537 — ordre d'insertion des lits résolus : la tête
+    /// est le plus ancien → candidat d'éviction FIFO. Un lit
+    /// encore chaud évincé se re-résout au prochain appel
+    /// (coût borné à un lit, pas à la table entière).
+    pub(crate) resolved_fifo: std::collections::VecDeque<usize>,
     /// JS-C490b — cache `(ptr(env), profondeur) → env ancêtre` :
     /// `Env.parent` est immuable post-création → l'ancêtre à
     /// profondeur `d` est déterministe. La **clé épingle son
@@ -1023,8 +1030,11 @@ pub struct Engine {
     /// key` + `Prop::Data` + éligibilité du kind) — une entrée
     /// périmée (adresse de site réutilisée, layout muté) ne peut
     /// produire qu'un miss suivi d'un relearn, jamais une valeur
-    /// fausse. Purge atomique avec `resolved_map`/`resolved_guard`
-    /// (même classe de pointeurs AST — précédent JS-C492).
+    /// fausse. JS-C537 — auto-bornée par `ic_purge` (`IC_MAP_CAP`,
+    /// partielle : garde sains+désarmés) ; les entrées sur des AST
+    /// de lits évincés ne peuvent que manquer à la vérif (shape+clé)
+    /// puis se désarmer — la purge atomique avec `resolved_map`
+    /// n'était plus nécessaire.
     /// `EXPLORER_NO_IC=1` désarme tout (kill-switch A/B) ;
     /// `EXPLORER_IC_VERIFY=1` revérifie chaque hit par
     /// `find_prop` (diagnostic, ~2× le coût de lookup).
@@ -1184,6 +1194,26 @@ pub struct Engine {
 /// `lit`** : `_lit` épingle le `FnLit` (son adresse = clé du
 /// cache ne peut pas être réutilisée) et `body` épingle les
 /// adresses `Expr` indexées par `resolved_map`.
+/// JS-C537 — entrée d'un littéral résolu : pin AST + clés
+/// contribuées à `resolved_map`/`names_table`, pour éviction
+/// **ciblée** au cap (`RESOLVED_LITS_CAP`). Avant : purge
+/// globale à chaque dépassement — tables + caches IC/lowered
+/// vidés d'un coup (20 vagues/session yt mesurées au vol
+/// N5.45). L'éviction retire les clés du plus ancien lit
+/// seulement ; un lit encore chaud se re-résout au prochain
+/// appel — coût borné à un lit, pas à la table entière.
+pub(crate) struct LitRes {
+    /// Gardien — maintient `lit` vivant : les adresses
+    /// `ptr(Expr)`/`as_ptr` indexées par `map_keys`/`name_keys`
+    /// restent uniques tant que l'entrée existe (motif
+    /// `LoweredSuspend::_lit` — pin seul, jamais relu).
+    _lit: Rc<crate::ast::FnLit>,
+    /// Clés `resolved_map` insérées par la résolution du lit.
+    pub(crate) map_keys: Vec<usize>,
+    /// Clés `names_table` insérées par la résolution du lit.
+    pub(crate) name_keys: Vec<usize>,
+}
+
 pub(crate) struct LoweredSuspend {
     /// Gardien — maintient `lit` vivant (clé `Rc::as_ptr` stable).
     _lit: Rc<crate::ast::FnLit>,
@@ -1596,8 +1626,8 @@ impl Engine {
             resolved_map: std::collections::HashMap::new(),
             names_table: std::collections::HashMap::new(),
             slots_off: std::env::var("EXPLORER_NO_SLOTS").is_ok_and(|v| v == "1"),
-            resolved_lits: std::collections::HashSet::new(),
-            resolved_guard: Vec::new(),
+            resolved_guard: std::collections::HashMap::new(),
+            resolved_fifo: std::collections::VecDeque::new(),
             resolved_envs: std::collections::HashMap::new(),
             ic_map: std::collections::HashMap::new(),
             shadow_memo: std::collections::HashMap::new(),
@@ -5946,8 +5976,9 @@ impl Engine {
     /// (`export {a} from 'b'` ↔ `export {b} from 'a'`).
     /// JS-C490 — résout les identifiants du corps d'un lit
     /// nouvellement matérialisé (dédup par `Rc::as_ptr`). La
-    /// table est bornée : pleine → purge complète (les entrées
-    /// obsolètes partent avec leurs gardiens).
+    /// table est bornée : pleine → éviction **par lit** FIFO
+    /// (JS-C537 — les clés du plus ancien lit partent avec leur
+    /// gardien ; avant : purge globale, cf. [`LitRes`]).
     /// `lowered_params` — params baissés quand `body` est le corps
     /// baissé d'un gen/async : le canon du scope fn est alors
     /// émis (clé `body.as_ptr()` = `lf.body.as_ptr()` côté
@@ -5963,33 +5994,44 @@ impl Engine {
             return;
         }
         let key = Rc::as_ptr(lit) as usize;
-        if self.resolved_lits.contains(&key) {
+        if self.resolved_guard.contains_key(&key) {
             return;
         }
-        if self.resolved_lits.len() >= RESOLVED_LITS_CAP {
-            // JS-C536 — compteur du churn : un cap qui défile
-            // en vol explique les vagues d'envs non câblés
-            // (`names_table` vidée → `wire_miss` jusqu'à
-            // re-résolution) ET les re-résolutions/re-lowering/
-            // ré-apprentissage IC en cascade.
+        while self.resolved_guard.len() >= RESOLVED_LITS_CAP {
+            // JS-C537 — éviction **par lit** (FIFO) : chaque
+            // dépassement ne retire que les clés du plus ancien
+            // lit — avant, la purge globale vidait les tables,
+            // les corps baissés épinglés ET `ic_map` d'un coup
+            // (20 vagues/session yt au vol N5.45 ; la vérif IC
+            // sémantique rendait déjà l'entrée survivante sûre).
+            // `res_clear` compte désormais les lits évincés.
             crate::j17_tick(&crate::J17_RES_CLEAR);
-            self.resolved_map.clear();
-            self.names_table.clear();
-            self.resolved_lits.clear();
-            self.resolved_guard.clear();
-            // JS-C492 — purge atomique avec `resolved_map` :
-            // les corps baissés épinglés doivent libérer en même
-            // temps que les `ptr(Expr)` qu'ils indexaient, sinon
-            // réutilisation d'adresses → profondeurs fantômes.
-            self.lowered_suspend_cache.clear();
-            // JS-C500 — mêmes clés `ptr(Expr)` : purgées en même
-            // temps (une entrée survivante ne ferait que thrasher
-            // — la vérif est sémantique — mais le cap les écope).
-            self.ic_map.clear();
+            let Some(old) = self.resolved_fifo.pop_front() else {
+                break;
+            };
+            let Some(ent) = self.resolved_guard.remove(&old) else {
+                continue;
+            };
+            for k in &ent.map_keys {
+                self.resolved_map.remove(k);
+            }
+            for k in &ent.name_keys {
+                self.names_table.remove(k);
+            }
+            // Le corps baissé épinglé libère en même temps que
+            // les `ptr(Expr)` qu'il indexait (précédent JS-C492).
+            self.lowered_suspend_cache.remove(&old);
         }
-        self.resolved_lits.insert(key);
-        self.resolved_guard.push(lit.clone());
         let t = resolve::resolve_lit(lit, body, lowered_params);
+        self.resolved_guard.insert(
+            key,
+            LitRes {
+                _lit: lit.clone(),
+                map_keys: t.map.keys().copied().collect(),
+                name_keys: t.names.keys().copied().collect(),
+            },
+        );
+        self.resolved_fifo.push_back(key);
         self.resolved_map.extend(t.map);
         self.names_table.extend(t.names);
     }

@@ -409,11 +409,13 @@ pub static J17_BIN_ADD_OTH: std::sync::atomic::AtomicU64 = std::sync::atomic::At
 pub static J17_BIN_NN: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 /// Voir [`J17_BIN_NN`].
 pub static J17_BIN_SS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
-/// JS-C536 — clears complets de l'état resolver
-/// (`RESOLVED_LITS_CAP` atteint → `resolved_map`/`names_table`/
-/// `lowered_suspend_cache`/`ic_map` vidés). Un défilement en
-/// vol nomme le churn cap comme cause racine des vagues
-/// d'envs non câblés et des re-résolutions en cascade.
+/// JS-C536/JS-C537 — évictions de lits résolus au cap
+/// `RESOLVED_LITS_CAP` (avant C537 : clears **globaux** —
+/// `resolved_map`/`names_table`/`lowered_suspend_cache`/`ic_map`
+/// vidés, 20/session yt au vol N5.45 ; désormais : retrait
+/// ciblé des clés du plus ancien lit, `ic_map` auto-bornée).
+/// `res_clear` élevé = pression sur le cap (envisager cap
+/// adaptatif ou LRU).
 pub static J17_RES_CLEAR: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 /// JS-C505 — noms de [`J17_BINOP`], ordre = déclaration `BinOp`
 /// (`ast.rs`) — maintenus ensemble par le commentaire réciproque.
