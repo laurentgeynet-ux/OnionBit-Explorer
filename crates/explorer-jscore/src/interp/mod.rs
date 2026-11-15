@@ -8297,6 +8297,7 @@ impl Engine {
         if let Some(o) = self.heap.obj(id) {
             if !Self::ic_eligible(o, key) {
                 crate::j17_tick(&crate::J17_IC_BAIL);
+                crate::j17_tick(&crate::J17_IC_BAIL_KIND);
                 return IcOut::Bail;
             }
         }
@@ -8317,6 +8318,7 @@ impl Engine {
             };
             if ent.miss == u8::MAX {
                 crate::j17_tick(&crate::J17_IC_BAIL);
+                crate::j17_tick(&crate::J17_IC_BAIL_DEAD);
                 return IcOut::Bail;
             }
             // JS-C508 — pierre tombale : site prouvé inapprenable,

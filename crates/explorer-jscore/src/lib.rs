@@ -330,6 +330,12 @@ pub static J17_IC_LEARN: std::sync::atomic::AtomicU64 = std::sync::atomic::Atomi
 pub static J17_IC_DISARM: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 /// Voir [`J17_IC_HIT`].
 pub static J17_IC_BAIL: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+/// JS-C555 — part des bails `ic_bail` par cause : `bail_dead` =
+/// site désarmé (`miss == MAX`), `bail_kind` = tête inéligible
+/// par construction (la part `ic_bail` restante).
+pub static J17_IC_BAIL_KIND: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+/// Voir [`J17_IC_BAIL_KIND`].
+pub static J17_IC_BAIL_DEAD: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 /// JS-C508 — `ic_nlearn` = tentatives de learn échouées (lien
 /// mort, maillon inéligible, `Acc`, chaîne > cap) — elles posent
 /// une pierre tombale `Dead` ou incrémentent `miss` ;
@@ -656,7 +662,7 @@ pub fn j17_enable() {
 #[must_use]
 pub fn j17_snapshot() -> String {
     let r = std::sync::atomic::Ordering::Relaxed;
-    let pairs: [(&str, &std::sync::atomic::AtomicU64); 78] = [
+    let pairs: [(&str, &std::sync::atomic::AtomicU64); 80] = [
         ("prop_lookup", &J17_PROP_LOOKUP),
         ("proto_lvl", &J17_PROTO_LVL),
         ("prop_scan", &J17_PROP_SCAN),
@@ -681,6 +687,8 @@ pub fn j17_snapshot() -> String {
         ("ic_learn", &J17_IC_LEARN),
         ("ic_disarm", &J17_IC_DISARM),
         ("ic_bail", &J17_IC_BAIL),
+        ("bail_kind", &J17_IC_BAIL_KIND),
+        ("bail_dead", &J17_IC_BAIL_DEAD),
         ("ic_nlearn", &J17_IC_NLEARN),
         ("ic_purge", &J17_IC_PURGE),
         ("ic_poly", &J17_IC_POLY),
