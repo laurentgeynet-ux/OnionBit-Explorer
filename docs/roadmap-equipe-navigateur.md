@@ -7943,6 +7943,75 @@ MCP = adaptateur, jamais la base.
   externe (console de pilotage) n'a plus à deviner où
   vivent registre, profils, vols et logs — bloc additif du
   résultat, chemins `/`, clés absentes = indisponibles.
+- [x] **Étape 276. Enregistreur de vol + témoins de mort
+  externe** (`explorer-daemon`, demande terrain : 3× mort
+  KAYAK signature identique — `alive` résiduel dans la
+  sentinelle, zéro panic, zéro WER, processus disparu).
+  **Flight recorder** toujours armé : thread vidangeant
+  les balises §B-59 (`LAST_*` jscore, `CALL_N`, phase) +
+  `LAST_DRAIN` core + RSS/commit toutes les 400 ms vers
+  `logs/explorer_daemon_flight.log` — dernier beat figé =
+  spin nommé, `drain` fixe = wedge, montée `commit` = OOM,
+  arrêt franc avec `alive` = kill externe. Rotation
+  `.prev` bornée (4 Mo). **Témoins console Windows** :
+  `ctrl_close`/`ctrl_logoff`/`ctrl_shutdown` interceptés
+  → `console:<kind>` écrit dans la sentinelle (conservée)
+  — un `alive` résiduel après cette étape exclut le kill
+  console et resserre sur stack overflow, alloc-abort ou
+  kill par PID. `EXPLORER_FLIGHT_MS/LOG/MAX_KB` (règle 13).
+- [x] **Étape 275. `css.values` — cache des signatures de
+  base : la passe ne rejoue plus le bâtiment sans
+  déclaration** — `prop_affects_decl` et
+  `prop_paints_decl` recalculaient `.x { ctx }` (parse DOM
+  + cascade + layout + dump, et raster pour le second)
+  **pour chaque valeur** d'une même prop alors que la base
+  n'en dépend pas : les sondes sont des fonctions pures de
+  `name` (fixture, ctx, sélecteur). `thread_local` bornés
+  `BASE_GEO`/`BASE_PIX` indexés par prop : une signature
+  de base calculée par prop au lieu d'une par ligne
+  (~10-15 valeurs par prop en moyenne → moitié du coût de
+  la passe éliminé côté géométrie, et le raster 800×600
+  de base n'est payé qu'une fois par prop en pixels).
+  Mesure complète après cache : **1139/1779 identique à
+  l'avant-cache** — pure optimisation, zéro divergence
+  observable (le `EXPLORER_BCD_DEBUG_SIG` continue de
+  servir les deux signatures à l'audit manuel). Cliquet
+  durci au passage : `--only <nom>` inconnu → exit 2 au
+  lieu d'un gate vert à vide, `--save`/`--gate` refusés
+  sur scores vides (la baseline n'est plus écrasable par
+  une passe creuse).
+- [x] **Étape 274. `check paintv` — oracle pixel + harnais
+  bitmap : `css.values` passe au double référentiel** — les
+  ~1 072 `na` de la jauge n'étaient pas tous hors-oracle :
+  les effets **peints** (hors dump boîtes+display-list)
+  deviennent mesurables par diff de framebuffers.
+  `prop_paints_decl` rejoue le pipeline réel —
+  `collect_data_images` + `collect_svg_styled` +
+  `build_display_list_full` + `rasterize`, comparaison exacte
+  des pixels (moteur+fonte déterministes). **Harnais bitmap** :
+  `data:` URI SVG 8×8 en 4 quadrants (couleur+alpha propres —
+  une bitmap verticalement uniforme rendait `object-fit`/
+  `mask-position` invisibles, mesuré en vol) servie en ctx aux
+  familles `url()` (`mask-*`, `border-image-*`, `background*`,
+  `object-*` sur `<img>`), borne `PaintImages` vide levée sans
+  réseau. **`PAINT_NA`** = sous-ensemble de `NO_ORACLE` encore
+  aveugle en pixels (interaction/OS, scroll dynamique,
+  horloges, pagination, métriques de fontes Ahem) ; sondes
+  `paint_subfeature` prioritaires pour les méta `url`/`image`/
+  `image-set` ; gardes partagées refactorisées en `decl_gate`
+  (initiales/CSS-wide/temporel/sous-features identiques entre
+  oracles). `bcd_coverage.mjs` : `css.values` = `affectsv` ∪
+  `paintv` sur les non-ok — un `na` n'est retenu que neutre
+  sous les DEUX oracles. Mesure : **1139/1779 (64,0 %)**
+  — `na` 1072→919 (153 paires passées en mesuré), ok
+  1119→1139, misses honnêtes exposées (`mask-*` longhands,
+  `border-image-repeat`/`width`, `image-rendering`,
+  `vector-effect`, `filter:url`, 3D `backface`/`perspective`,
+  `object-view-box`, `shape-image-threshold`) — le % baisse
+  sur dénominateur élargi : couverture réelle accrue. Baseline
+  cliquet 1119→1139. Extension additive PIPE journalisée :
+  ré-export `collect_svg_styled` (déjà `pub`, absent de
+  `lib.rs`).
 - [x] **Étape 273. `sheet.cssRules` peuplé — recensement CSS
   in-page réel** — `document.styleSheets[].cssRules` était
   toujours `[]` (field272 : recensement par grep du cache au

@@ -262,6 +262,7 @@ ni l'un ni l'autre. Variante arrêtée (pull, cohérente avec
 
 | Date | Contrat | Changement | Commit |
 |---|---|---|---|
+| 2026-11-15 | `explorer-render` `svg::collect_svg_styled` — **ré-export racine, extension additive** (étape 274) | La fonction était `pub` dans `svg.rs` (R-283) mais absente du `pub use` de `lib.rs` — le harnais `paintv` d'`explorer-cli` (NAV) en a besoin pour rasteriser les îlots `<svg>` style-aware (props `fill`/`stroke`/`d`/`cx`… projetées depuis la `StyleMap`). Ajout au `pub use svg::{…}` — zéro casse, signature inchangée. Consommée par `prop_paints_decl` avec `collect_data_images` + `build_display_list_full` + `rasterize` (tous déjà publics). **Résidu moteur nouvellement mesurable** (exposé par l'oracle pixel, file PIPE) : `mask-*` longhands (`size`/`position`/`repeat`/`clip`/`origin`/`composite`/`mode`/`type`, `mask-border*`), `border-image-{repeat,width,outset}`, `image-rendering`, `vector-effect`, `filter`/`clip-path`/`offset-path` en `url(#ref)`, `object-view-box`, `shape-image-threshold`, `fill`/`stroke` en `url(#serveur)` — avant : `na` hors dénominateur ; désormais `miss` mesurés honnêtes. | Étape 274 |
 | 2026-11-15 | `explorer-render` `replay_items` — **`ReplayStats` : demande NAV, extension additive** | **Demande — EAP `engine.paint_stats` (étape 249), revue croisée NAV+lead+PIPE actée**. Les compteurs `raster.parts` (items, `clips`/`clips_real`, `groups`/`groups_void`, `draws`/`skips`, `clip_us`/`group_us`/`draw_us` + `kind_us`/`kind_n` ×5 familles) sont **déjà calculés inconditionnellement** dans le chemin chaud de `replay_items` (privée) — ils ne sortent qu'en `tracing` (`tab = 0u64` codé en dur dans l'event). Contrat demandé, précédent `EmitStats` exact : `pub struct ReplayStats` + variantes additives `rasterize_stats` / `rasterize_dirty_cached_stats` / `rasterize_window_cached_stats` → `(Option<Frame>, ReplayStats)` — **les trois points d'entrée utilisés par apply** (`apply.rs:3645/3663/3710`), sinon angles morts selon le chemin de paint. Zéro casse de signature ; la ligne `tracing` `raster.parts` reste émise (l'outillage terrain la greppe). ~30 lignes PIPE — mini-étape R demandée **en premier** : elle débloque 249 complet au lieu d'un `raster: null`. | livré → **R-300** (amendement livraison : +`rasterize_cached_stats` — le journal nommait `rasterize_stats`, or apply appelle `rasterize_cached` — et +`rasterize_slice_cached_stats` pour le chemin top-slice média `frame.rs:284` ; 5 variantes = couverture complète des points de paint) |
 | 2026-11-15 | `explorer-css` cascade — **`DeclTrace`/`explain` : demande NAV, contrat figé champ par champ** | **Demande — EAP `engine.cascade{ref}` (étape 253), revue croisée NAV+lead+PIPE actée**. Forme : **puits `Option<&mut DeclTrace>` threadé dans `compute_with_parent`** (pattern `EmitStats` — les verdicts s'enregistrent là où ils se produisent réellement ; un fork de la boucle collecte→tri→résolution divergerait : `all:`, shorthands, rangs R-215, `resolve_logical`, `-webkit-text-fill-color` évoluent encore). `explain` = le vrai chemin de calcul pour un nœud, puits armé. **Signature** : `explain(&self, dom, node, env, parent: Option<&ComputedStyle>, pseudo: Option<PseudoElement>, state: &dyn Fn(&str)->bool, containers: Option<&HashMap<NodeId, ContainerMeasure>>) -> Vec<DeclTrace>` — `mcache`/`anc` internes ; NAV passe `parent` depuis la `StyleMap` vivante et `state`/`env` de la passe réelle (`:hover`/`:valid` sinon divergents) ; `containers` **recalculé par NAV** via `explorer_layout::measure_containers` sur le boxtree committé — borne honnête : le paint évaluait sur les mesures pass-1 (une passe, pas d'itération — R-190), `explain` évalue sur la géométrie committée, un `gated(container)` peut différer si la bascule a déplacé le conteneur. **Unité = déclaration × longhand** (shorthands/`all:` expandés). **`DeclTrace`** : `prop` (longhand), `value`, `selector` **texte source** (pièce additive : retenir le texte brut dans `CollectedRule` à la collecte — `ComplexSelector` n'a ni `Display` ni texte conservé ; exact et moins cher qu'une re-sérialisation), `sheet` (rang + origine de feuille), `inline` (`style=` — fusionné au même tri), clé de tri `(rank, scope_rank, layer, spec, order)`, `verdict`. **Verdicts** : `winner` ; `eliminated_by(origin ∧ scope ∧ layer ∧ specificity ∧ order)` — position relative dans le tri, `important` plié dans `rank`/inversion layers, pas clé autonome ; `gated(media ∧ container ∧ scope ∧ mode)` — les `return` silencieux de `consider` (`selector_reaches`→scope, `@media`, `@container`) enregistrés au lieu de filtrer, + index quirks en mode standards (`mode`) ; `dropped(validation)` (`value_is_valid_for` post-tri) ; `invalid_at_computed` (`var()` irrésoluble) ; `presentational_hint` (rang 0 des attributs HTML — pas une origine CSS) ; `inherited` / `initial` (aucune déclaration candidate — distingués pour ne pas tromper l'agent) + bonus `inherited_from(node)` à 5 lignes. **Hors-borne déclarés** : déclarations mortes au parse (`decl.malformed` n'atteint jamais `CollectedRule` — invisibles) ; vérité de **cascade, pas post-anim** (`apply_anim_overrides` vit côté core) ; état committé (mutations en vol invisibles — le `parent` vient du style stocké). **Implémentation : PIPE** (étape R dédiée, taille M — la taxonomie exige les entrailles de `compute_with_parent`), en file après la mini-R `ReplayStats`. | livré → **R-301** (amendements livraison : `GateKind::Pseudo` — le filtre `e.pseudo != pseudo` est la première porte de `consider`, il faut un verdict pour `::before`/`::marker` expliqués côté élément ; `DeclVerdict::Superseded` — une écriture gagnante peut être écrasée par les résolutions post-cascade nommées (logique→physique R-215, `-webkit-text-fill-color`→`color` R-235) : un `winner` persistant aurait menti ; `initial` borné aux propriétés supportées non posées — valeur initiale incluse ; `spec_by_rule` retient le sélecteur dominant pour la provenance, premier matché à spécificité égale) |
 | 2026-11-13 | `explorer-layout` `content-visibility`/`contain: size` (R-251) | **Intervention NAV dans le périmètre PIPELINE — correctness, audit perf chantier 8** : le leaf-skip de `build_box_tree_env` traitait `content-visibility: auto` comme un skip inconditionnel dès que `contain-intrinsic-*` était déclaré — un contenu `auto` sous le pli restait **définitivement invisible** au scroll (le skip auto n'existe que tant que l'élément n'est « pas pertinent », indécidable à la boxification). Désormais : seul `hidden` saute les enfants (feuille à taille `contain-intrinsic-*`, (0,0) sinon) ; `contain: size|strict` force la taille via `bx.intrinsic` tout en **gardant les enfants boxifiés** ; `auto` n'entre dans aucun bras. Aucune casse de signature — comportement de `LayoutBox.intrinsic` étendu aux boîtes non-feuilles. Verrous : `contain_intrinsic` ×3 (layout), `content_visibility_auto_paints_after_scroll`, `content_visibility_hidden_never_paints_contents` (session). La promotion viewport-aware d'`auto` (perf) reste un chantier PIPELINE si voulu. | Étape 230 |
@@ -3949,3 +3950,53 @@ nesting-1 moderne rapportée plate — les règles imbriquées
 **Signal pour les vols** : le protocole « anomalies × file
 misses » peut désormais recenser en une eval :
 `[...document.styleSheets].flatMap(s=>[...s.cssRules].map(r=>r.cssText))`.
+
+### 2026-11-15 — Étape 276 (NAV) : enregistreur de vol + témoins de mort externe
+
+**Contexte** : 3 morts daemon signature identique sous churn
+KAYAK (field266/272/273) — processus disparu ~90 s post-commit,
+`explorer_daemon_death.log` resté `alive`, zéro panic, zéro
+événement WER. La sentinelle prouvait « aucun crochet Rust n'a
+couru » (kill externe, stack overflow SEH ou alloc-abort —
+morgue C405 cite `0xC00000FD`) sans pouvoir nommer le site.
+« On ne peut pas nommer ce qui n'est pas capturé. »
+
+**Livré** (`explorer-daemon`, pur safe — `forbid(unsafe_code)`
+inchangé ; SEH/minidump in-process reste écarté, WER armé
+couvre la faute native) :
+
+- **Flight recorder** toujours armé : un thread vidange les
+  balises §B-59 du fil JS (`LAST_FRAME`/`LAST_FUN`/`LAST_STMT`/
+  `LAST_EXPR`/`LAST_NAT`/`LAST_HOST`/`LAST_PHASE`/
+  `LAST_ALLOC_REQ`/`LAST_STATS`/`CALL_N`) + `LAST_DRAIN`
+  (drain core en cours) + RSS/commit vers
+  `logs/explorer_daemon_flight.log` toutes les
+  `EXPLORER_FLIGHT_MS` ms (défaut 400). Lecture postmortem :
+  dernier beat figé sur une balise = spin à ce site ;
+  beats vivants mais `drain` fixe = wedge (le `in_flight`
+  du ping nomme déjà le verbe) ; montée `commit` avant
+  l'arrêt = OOM/alloc-abort ; arrêt franc sain + `alive` =
+  kill externe par exclusion. Rotation `.prev` bornée.
+- **Témoins console Windows** : `ctrl_close`/`ctrl_logoff`/
+  `ctrl_shutdown` interceptés (`tokio::signal::windows`) —
+  une fermeture de console, de session ou un arrêt système
+  laissait `alive` indistinguable d'une mort mystère ;
+  désormais `console:<kind>` est écrit dans la sentinelle
+  (conservée, plus effacée à l'arrêt). Ctrl-C/arrêt propre
+  : sémantique inchangée (sentinelle effacée).
+
+**Discrimination post-276** : `console:*` = kill console ;
+`panic:` = panic Rust ; `rss_guard:*` = garde armée ;
+`alive` + beats sains = TerminateProcess/Job-kill ;
+`alive` + beat figé = stack overflow (site nommé) ;
+`alive` + `commit` au plafond = alloc-abort.
+
+**Vérifié** : daemon debug → beats `drain=net_done` vivants,
+`taskkill /PID /F` → `alive` + dernier beat sain cohérent.
+
+**Reste** : la stack exacte d'un SO n'est pas capturable en
+safe (cross-thread = FFI) — si `alive` revient sur beat figé
+le site nommé par `drain`/`phase`/`stmt` suffira pour ouvrir
+le JS-C/R- suivant ; si WER est désarmé sur la machine de vol,
+l'armer (LocalDumps HKCU, étape 801) complète le canal faute.
+Juge = prochaine occurrence KAYAK.
