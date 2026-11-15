@@ -7873,6 +7873,9 @@ impl Engine {
                     let mk = (o.shape(), kid);
                     mkey = Some(mk);
                     slow = !self.rabs_memo.contains(&mk);
+                    if !slow {
+                        crate::j17_tick(&crate::J17_RABS_HIT);
+                    }
                 }
             }
             let found = if slow {
@@ -7881,6 +7884,9 @@ impl Engine {
                     if let Some(mk) = mkey {
                         if self.rabs_memo.len() < RABS_MEMO_CAP {
                             self.rabs_memo.insert(mk);
+                            crate::j17_tick(&crate::J17_RABS_INS);
+                        } else {
+                            crate::j17_tick(&crate::J17_RABS_FULL);
                         }
                     }
                 }
@@ -9196,6 +9202,9 @@ impl Engine {
                     let mk = (o.shape(), k);
                     mkey = Some(mk);
                     slow = !self.rabs_memo.contains(&mk);
+                    if !slow {
+                        crate::j17_tick(&crate::J17_RABS_HIT);
+                    }
                 }
             }
             let ownp = if slow {
@@ -9204,6 +9213,9 @@ impl Engine {
                     if let Some(mk) = mkey {
                         if self.rabs_memo.len() < RABS_MEMO_CAP {
                             self.rabs_memo.insert(mk);
+                            crate::j17_tick(&crate::J17_RABS_INS);
+                        } else {
+                            crate::j17_tick(&crate::J17_RABS_FULL);
                         }
                     }
                 }
@@ -10028,6 +10040,10 @@ impl Engine {
         let mut cur = Some(id);
         let mut phops = 0;
         let mut pdepth = 0;
+        // JS-C544 — clé internée paresseuse pour `rabs_memo`
+        // (calculée au premier maillon éligible, comme la
+        // marche d'écriture C540).
+        let mut kid = None;
         // L'hôte n'est consulté que sur la tête de chaîne et sur
         // la cible de chaque délégation proxy (sémantique de la
         // re-entrée historique), pas sur les maillons proto.
@@ -10073,13 +10089,47 @@ impl Engine {
                     }
                 }
             }
-            if self.find_own_ai(cid, key).is_some() {
+            // JS-C544 — mémo own-absent par maillon (`rabs_memo`,
+            // même hachage que la lecture/écriture) : `in` et
+            // `hasOwnProperty` payaient `find_own_ai` par maillon
+            // alors que le mémo répond « absent » en un hash
+            // (pidxm N5.51 : ~29 % des miss). Chase proto
+            // fusionné dans le même `heap.obj`.
+            let mut slow = true;
+            let mut mkey = None;
+            let mut nxt = None;
+            if let Some(o) = self.heap.obj(cid) {
+                nxt = match &o.proto {
+                    Value::Obj(p) => Some(*p),
+                    _ => None,
+                };
+                if Self::ic_eligible(o, key) {
+                    let k = *kid.get_or_insert_with(|| {
+                        let ki = crate::intern(key);
+                        (ki.as_ptr() as usize as u64) ^ (key.len() as u64) << 48
+                    });
+                    let mk = (o.shape(), k);
+                    mkey = Some(mk);
+                    slow = !self.rabs_memo.contains(&mk);
+                    if !slow {
+                        crate::j17_tick(&crate::J17_RABS_HIT);
+                    }
+                }
+            }
+            if slow && self.find_own_ai(cid, key).is_some() {
                 return Ok(true);
             }
-            cur = match self.heap.obj(cid).map(|o| o.proto.clone()) {
-                Some(Value::Obj(p)) => Some(p),
-                _ => None,
-            };
+            if slow {
+                if let Some(mk) = mkey {
+                    if self.rabs_memo.len() < RABS_MEMO_CAP {
+                        self.rabs_memo.insert(mk);
+                        crate::j17_tick(&crate::J17_RABS_INS);
+                    } else {
+                        crate::j17_tick(&crate::J17_RABS_FULL);
+                    }
+                }
+            }
+            cur = nxt;
             pdepth += 1;
             if pdepth > MAX_PROTO_DEPTH {
                 return Ok(false);

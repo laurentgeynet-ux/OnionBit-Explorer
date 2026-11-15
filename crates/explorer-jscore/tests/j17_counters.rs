@@ -10,7 +10,8 @@
 use explorer_jscore::{
     j17_enable, j17_keys_enable, j17_snapshot, Engine, J17_ARRIDX_TRY, J17_CALL, J17_CALL_NAT,
     J17_FN_DEFER, J17_FN_DEF_TOK, J17_FN_MAT, J17_PARSE_CALL, J17_PARSE_DUP, J17_PROP_IDX_BUILD,
-    J17_PROP_IDX_HIT, J17_PROP_LOOKUP, J17_PROP_SCAN, J17_PROTO_LVL, J17_SLOT_HIT, J17_STR_READ,
+    J17_PROP_IDX_HIT, J17_PROP_LOOKUP, J17_PROP_SCAN, J17_PROTO_LVL, J17_RABS_HIT, J17_SLOT_HIT,
+    J17_STR_READ,
 };
 use std::sync::atomic::Ordering::Relaxed;
 
@@ -612,6 +613,39 @@ fn pidxm_attribue_le_callsite_du_miss_index() {
     assert!(
         !pidxm.split(',').next().unwrap_or("").contains("position"),
         "le site attribué ne doit pas être la closure interne : {snap}"
+    );
+}
+
+/// JS-C544 — `has_prop_walk` consulte `rabs_memo` : un `in`
+/// absent répété sur le même shape doit resservir « absent »
+/// par le mémo (`rabs_hit` tick) au lieu de `find_own_ai`
+/// par maillon. `EXPLORER_NO_IC=1` force la marche (sinon
+/// l'IC `Absent` sert sans marcher).
+#[test]
+fn rabs_memo_sert_la_marche_has() {
+    let _g = TEST_LOCK.lock().unwrap();
+    // SAFETY-test : env lu une fois dans `Engine::new` — posé
+    // avant, retiré après, le tout sous TEST_LOCK.
+    std::env::set_var("EXPLORER_NO_IC", "1");
+    let mut e = Engine::new();
+    std::env::remove_var("EXPLORER_NO_IC");
+    j17_enable();
+    let before = J17_RABS_HIT.load(std::sync::atomic::Ordering::Relaxed);
+    e.eval(
+        "var o={a:1,b:2}; var n=0;\
+            for(var i=0;i<30;i++){ if('zzz' in o) n++; } n",
+    )
+    .expect("eval");
+    let after = J17_RABS_HIT.load(std::sync::atomic::Ordering::Relaxed);
+    assert!(
+        after > before,
+        "la 2e+ marche `in` doit être servie par rabs_memo (hit {before}→{after})"
+    );
+    // Correction : le résultat reste sémantiquement exact.
+    let r = e.eval("var p={q:9}; var o2={a:1}; o2.__proto__=p; 'q' in o2 && !('zzz' in o2)");
+    assert_eq!(
+        r.ok().map(|v| format!("{v:?}")),
+        Some("Bool(true)".to_string())
     );
 }
 

@@ -12902,6 +12902,16 @@ chaque gain rapporté contre les **deux** archétypes.
   (`ic_hit`/`ic_miss`/`ic_disarm` au snapshot) pour
   borner la couverture du seul court-circuit existant.
   Dependency-groups = infra lourde, dernier recours.
+- [x] **JS-C544 — `rabs_memo` dans `has_prop_walk` +
+  compteurs de rendement** : `pidxm:` N5.51 nomme
+  ~29 % des miss = `in`/`hasOwnProperty`, seule
+  boucle sans mémo own-absent. Même bloc
+  `(shape, kid)` que lecture/écriture — hit = skip
+  `find_own_ai`, chase proto fusionné. Compteurs
+  `rabs_hit`/`rabs_ins`/`rabs_full` aux trois sites —
+  `rabs_full` nommerait la saturation du cap 8192
+  au prochain vol. Lock `j17` (NO_IC + `in` absent
+  répété → hit), lang/dom/c5xx verts.
 - [x] **JS-C543 — sonde `pidxm:` + `pscan:` perce
   enfin** : N5.50 — `pscan:heap.rs:1572` = 100 %
   était la ligne `position` interne (le `Location`

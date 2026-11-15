@@ -293,6 +293,16 @@ pub static J17_PROP_IDX_HIT: std::sync::atomic::AtomicU64 = std::sync::atomic::A
 pub static J17_PROP_IDX_MISS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 /// Constructions de l'index paresseux `props` (`get_or_init`).
 pub static J17_PROP_IDX_BUILD: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+/// JS-C544 — rendement `rabs_memo` (mémo own-absent par
+/// maillon `(shape, kid)`) : hits (maillon sauté sans
+/// `find_own_ai`), apprentissages, refus d'insertion au cap
+/// `RABS_MEMO_CAP` — `rabs_full` > 0 nommerait la
+/// saturation (`HashSet` sans éviction) en un vol.
+pub static J17_RABS_HIT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+/// Apprentissages `rabs_memo` (insert d'une paire absente).
+pub static J17_RABS_INS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+/// Refus d'insertion `rabs_memo` — cap `RABS_MEMO_CAP` atteint.
+pub static J17_RABS_FULL: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 /// Niveaux de scope parcourus par `env_get_seen` — profondeur
 /// de fermeture moyenne × `env_get` = coût résolution variable.
 pub static J17_ENV_LVL: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
@@ -641,13 +651,16 @@ pub fn j17_enable() {
 #[must_use]
 pub fn j17_snapshot() -> String {
     let r = std::sync::atomic::Ordering::Relaxed;
-    let pairs: [(&str, &std::sync::atomic::AtomicU64); 75] = [
+    let pairs: [(&str, &std::sync::atomic::AtomicU64); 78] = [
         ("prop_lookup", &J17_PROP_LOOKUP),
         ("proto_lvl", &J17_PROTO_LVL),
         ("prop_scan", &J17_PROP_SCAN),
         ("prop_idx_hit", &J17_PROP_IDX_HIT),
         ("prop_idx_miss", &J17_PROP_IDX_MISS),
         ("prop_idx_build", &J17_PROP_IDX_BUILD),
+        ("rabs_hit", &J17_RABS_HIT),
+        ("rabs_ins", &J17_RABS_INS),
+        ("rabs_full", &J17_RABS_FULL),
         ("env_lvl", &J17_ENV_LVL),
         ("bnd_canon", &J17_BND_CANON),
         ("bnd_extra", &J17_BND_EXTRA),
