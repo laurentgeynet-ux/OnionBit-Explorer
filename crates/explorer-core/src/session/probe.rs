@@ -237,15 +237,37 @@ impl Session {
                         .collect()
                 })
                 .unwrap_or_default();
-            // Texte propre borné : whitespace compacté + cap —
-            // le nom accessible n'a besoin que du début.
-            let text = dom
-                .text_content(node)
-                .map(|t| {
-                    let collapsed: String = t.split_whitespace().collect::<Vec<_>>().join(" ");
-                    collapsed.chars().take(TEXT_CAP).collect()
-                })
-                .unwrap_or_default();
+            // Texte propre = enfants `Text` DIRECTS uniquement
+            // — accName-lite : le nom d'un <a>/<button> est son
+            // texte immédiat, pas la concaténation du
+            // sous-arbre (sinon <html> hérite de tout le
+            // document, bruit pour un agent).
+            // Éléments raw-text : leur texte est du code, pas
+            // un nom — ignoré (sinon <style> se nomme sa CSS).
+            let raw_text = matches!(
+                dom.tag_name(node),
+                Ok("style" | "script" | "noscript" | "template")
+            );
+            let text = {
+                let mut parts: Vec<String> = Vec::new();
+                if !raw_text {
+                    let mut cur = dom.first_child(node).ok().flatten();
+                    while let Some(c) = cur {
+                        if let Ok(explorer_dom::NodeData::Text(_)) = dom.data(c) {
+                            if let Ok(t) = dom.text(c) {
+                                parts.push(t.to_string());
+                            }
+                        }
+                        cur = dom.next_sibling(c).ok().flatten();
+                    }
+                }
+                let collapsed: String = parts
+                    .join(" ")
+                    .split_whitespace()
+                    .collect::<Vec<_>>()
+                    .join(" ");
+                collapsed.chars().take(TEXT_CAP).collect()
+            };
             out.push(SnapshotEntry {
                 index: node.index(),
                 generation: node.generation(),

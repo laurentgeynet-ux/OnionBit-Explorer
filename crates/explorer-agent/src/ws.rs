@@ -110,7 +110,13 @@ async fn serve(sock: WebSocket, st: Arc<AgentShared>) {
         }
     }
     fwd.abort();
-    writer.abort();
+    // `session.close` doit livrer sa réponse : plus de
+    // producteur (`fwd` mort), on lâche `tx` — le writer
+    // draine la file (réponse close incluse) puis termine
+    // et le socket se ferme proprement. Un `abort` ici
+    // perdrait la réponse et pendrait le client.
+    drop(tx);
+    let _ = writer.await;
 }
 
 /// Écrit tout ce que la file reçoit — une seule tâche touche

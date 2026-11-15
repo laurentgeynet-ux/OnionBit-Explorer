@@ -588,6 +588,30 @@ async fn e3_snapshot_semantique() {
 }
 
 #[tokio::test]
+async fn session_close_repond_et_clot() {
+    let (mut a, srv) = connect().await;
+    open(&mut a).await;
+    // La réponse à session.close doit être livrée — le
+    // socket se ferme APRÈS le flush (verrou du bug :
+    // writer.abort() perdait la réponse en file).
+    let r = a.call("session.close", json!({})).await;
+    assert_eq!(r["result"], json!({}), "{r}");
+    // Le socket se ferme proprement juste après.
+    let closed = tokio::time::timeout(Duration::from_secs(2), async {
+        loop {
+            match a.sock.next().await {
+                Some(Ok(Message::Close(_)) | Err(_)) | None => return true,
+                Some(Ok(_)) => {}
+            }
+        }
+    })
+    .await
+    .unwrap_or(false);
+    assert!(closed, "le socket n'a pas fermé après session.close");
+    srv.abort();
+}
+
+#[tokio::test]
 async fn e3_diff_since() {
     let (mut a, srv) = connect().await;
     let r = a

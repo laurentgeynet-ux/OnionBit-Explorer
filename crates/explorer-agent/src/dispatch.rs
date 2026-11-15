@@ -575,18 +575,31 @@ async fn snapshot_get(
         return Err(unsupported("snapshot diff", "snapshot_diff"));
     }
     tab_exists(st, p.tab).await?;
-    // Une prise de verrou : marche sémantique + géométrie +
-    // url — l'arbre ne peut pas bouger entre les deux
-    // lectures.
-    let (entries, report, url) = {
+    // Un commit nav n'implique pas un DOM attaché : l'apply
+    // qui suit détache l'arbre un instant. On attend la
+    // re-attach bornée (~500 ms) plutôt que de rendre un
+    // `-32007` transitoire à l'agent — au-delà, erreur honnête.
+    let mut attempts = 0u8;
+    let (entries, report, url) = loop {
         let s = st.session.lock().await;
-        let entries = s.snapshot_entries(p.tab).map_err(|e| match e {
-            CoreError::UnknownTab(_) => err(ErrorCode::NoSuchTab, e.to_string()),
-            other => err(ErrorCode::EngineUnavailable, other.to_string()),
-        })?;
-        let report = s.geometry_report(p.tab);
-        let url = s.tab_info(p.tab).and_then(|t| t.url).unwrap_or_default();
-        (entries, report, url)
+        match s.snapshot_entries(p.tab) {
+            Ok(entries) => {
+                let report = s.geometry_report(p.tab);
+                let url = s.tab_info(p.tab).and_then(|t| t.url).unwrap_or_default();
+                break (entries, report, url);
+            }
+            Err(CoreError::UnknownTab(_)) => {
+                return Err(err(ErrorCode::NoSuchTab, "onglet inconnu"));
+            }
+            Err(e) => {
+                drop(s);
+                attempts += 1;
+                if attempts >= 10 {
+                    return Err(err(ErrorCode::EngineUnavailable, e.to_string()));
+                }
+                tokio::time::sleep(Duration::from_millis(50)).await;
+            }
+        }
     };
     let rev = st.rev(p.tab);
     let emitted = crate::snapshot::emit(
