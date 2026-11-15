@@ -450,12 +450,21 @@ fn vendor_section(r: &mut BitReader<'_>) -> Option<Vec<bool>> {
 /// `host` filtre les graines **spécifiques à un domaine** :
 /// `SOCS` (le proto sérialisé du bump Google, lu par
 /// `ytd-consent-bump*` — `CONSENT` n'est plus relu par
-/// `YouTube`) n'est émis que sur `is_google_consent_host`,
+/// `YouTube`) n'est émis que sur `is_youtube_consent_host`,
 /// jamais sur un hôte tiers où il serait un cookie fantôme.
 /// `Honest` → vecteur vide (statu quo).
+///
+/// `consent.google.com` ne reçoit **aucune** graine : c'est
+/// l'hôte d'enregistrement — son `/save` et le `continue`
+/// subséquent relisent les cookies **côté serveur**, où un état
+/// « déjà décidé » court-circuite le vrai choix (boucle mesurée
+/// field268/270 : `POST /save` portant la graine `SOCS` → `/ml`
+/// re-sert le mur au lieu de `continue=`). La valeur forgée est
+/// calibrée pour le bump **client** `YouTube`, pas pour une
+/// validation serveur.
 #[must_use]
 pub fn seed_headers(policy: ConsentPolicy, now: SystemTime, host: &str) -> Vec<String> {
-    if matches!(policy, ConsentPolicy::Honest) {
+    if matches!(policy, ConsentPolicy::Honest) || is_consent_recording_host(host) {
         return Vec::new();
     }
     let agreed = matches!(policy, ConsentPolicy::AcceptAll);
@@ -477,7 +486,7 @@ pub fn seed_headers(policy: ConsentPolicy, now: SystemTime, host: &str) -> Vec<S
         format!("cookieconsent_status={}{attrs}", if agreed { "allow" } else { "deny" }),
         format!("usprivacy={}{attrs}", if agreed { "1YNN" } else { "1YYY" }),
     ];
-    if is_google_consent_host(host) {
+    if is_youtube_consent_host(host) {
         let socs = if agreed {
             SOCS_ACCEPT_ALL
         } else {
@@ -486,6 +495,13 @@ pub fn seed_headers(policy: ConsentPolicy, now: SystemTime, host: &str) -> Vec<S
         out.push(format!("SOCS={socs}{attrs}"));
     }
     out
+}
+
+/// Hôte d'enregistrement du consentement Google — `POST /save`
+/// et les cibles `continue=` y relisent les cookies côté
+/// serveur : aucune graine n'y est posée (voir `seed_headers`).
+fn is_consent_recording_host(host: &str) -> bool {
+    host.trim_end_matches('.') == "consent.google.com"
 }
 
 /// `SOCS` posé par « Tout refuser » sur le bump Google —
@@ -498,18 +514,20 @@ const SOCS_REJECT_ALL: &str =
 /// forme minimale reconnue par le serveur).
 const SOCS_ACCEPT_ALL: &str = "CAESEwgDEgk0ODE3Nzk3MjQaAmVuIAEaBgiA_LyaBg";
 
-/// Hôtes dont la CMP est celle de Google — `SOCS` n'y a de
-/// sens que là (`youtube.com`/`youtube-nocookie.com` et
-/// `google.<tld>` : le bump `ytd-consent-bump*` et le
-/// frontal `consent.google.com`).
-fn is_google_consent_host(host: &str) -> bool {
+/// Hôtes dont le bump de consentement est **client-side** —
+/// `ytd-consent-bump*` lit `SOCS` via `document.cookie`
+/// (`youtube.com`/`youtube-nocookie.com`). Les frontaux
+/// `google.*` valident `SOCS` **côté serveur** : la graine
+/// forgée (valeur mesurée uBlock, non signée pour la session)
+/// y échoue la validation et renvoie au mur — démontré par
+/// la boucle `field268` et le passage franc du même vol en
+/// politique `Honest`.
+fn is_youtube_consent_host(host: &str) -> bool {
     let h = host.trim_end_matches('.');
     h == "youtube.com"
         || h.ends_with(".youtube.com")
         || h == "youtube-nocookie.com"
         || h.ends_with(".youtube-nocookie.com")
-        || h.starts_with("google.")
-        || h.contains(".google.")
 }
 
 /// `SystemTime` → `YYYY-MM-DDTHH:MM:SSZ` (format ISO des
@@ -711,25 +729,48 @@ mod tests {
     }
 
     #[test]
-    fn socs_scope_google_uniquement() {
+    fn socs_scope_youtube_uniquement() {
         let yt = seed_headers(ConsentPolicy::RejectAll, NOW, "www.youtube.com").join("\n");
         assert!(yt.contains("SOCS=CAISNQ"), "reject : variante refus");
         let yt_accept = seed_headers(ConsentPolicy::AcceptAll, NOW, "m.youtube.com").join("\n");
         assert!(yt_accept.contains("SOCS=CAES"), "accept : variante accord");
         assert!(yt_accept.contains("Max-Age="));
-        for h in [
-            "consent.youtube.com",
-            "www.youtube-nocookie.com",
-            "www.google.fr",
-            "google.com",
-        ] {
+        for h in ["consent.youtube.com", "www.youtube-nocookie.com"] {
             let s = seed_headers(ConsentPolicy::RejectAll, NOW, h).join("\n");
             assert!(s.contains("SOCS="), "{h} doit recevoir SOCS");
         }
-        for h in ["example.org", "myyoutube.com", "notgoogle.com.evil"] {
+        // `google.*` valide SOCS côté serveur — la graine
+        // forgée y renvoie au mur (boucle field268) ; les
+        // frontaux ne reçoivent plus SOCS (field268/270).
+        for h in [
+            "www.google.fr",
+            "google.com",
+            "www.google.com",
+            "example.org",
+            "myyoutube.com",
+            "notgoogle.com.evil",
+        ] {
             let s = seed_headers(ConsentPolicy::RejectAll, NOW, h).join("\n");
             assert!(!s.contains("SOCS="), "{h} ne doit pas recevoir SOCS");
         }
+    }
+
+    #[test]
+    fn consent_google_recording_host_sans_graine() {
+        // `consent.google.com` enregistre la décision côté
+        // serveur — aucune graine n'y est posée, quelle que
+        // soit la politique (boucle field268/270).
+        for p in [ConsentPolicy::RejectAll, ConsentPolicy::AcceptAll] {
+            assert!(
+                seed_headers(p, NOW, "consent.google.com").is_empty(),
+                "{p:?} : consent.google.com ne reçoit aucune graine"
+            );
+        }
+        // L'enregistrement n'exclut pas les autres hôtes.
+        assert_eq!(
+            seed_headers(ConsentPolicy::RejectAll, NOW, "consent.youtube.com").len(),
+            7
+        );
     }
 
     #[test]

@@ -7943,6 +7943,16 @@ MCP = adaptateur, jamais la base.
   externe (console de pilotage) n'a plus à deviner où
   vivent registre, profils, vols et logs — bloc additif du
   résultat, chemins `/`, clés absentes = indisponibles.
+- [x] **Étape 271. Graine `SOCS` scopée YouTube — boucle de
+  consentement Google résolue** — le vol field268 bouclait
+  `POST /save → /ml` : la graine forgée (valeur uBlock pour le
+  bump client `ytd-*`) était relue **côté serveur** par
+  `consent.google.com` et `google.*` — transport innocenté par
+  verrous de rejeu `Redirect(Cookie)`, coupable prouvé par
+  passage franc en `honest` + re-vol post-fix (`/save` honoré
+  → `continue → Flights`). `seed_headers` vide sur
+  `consent.google.com` (hôte d'enregistrement), `SOCS` scopé
+  `youtube*` ; `is_google_consent_host` → `is_youtube_consent_host`.
 - [x] **Étape 270. `css.values` — qualification de la jauge
   (passe bornée)** — le rapport BCD n'était pas une liste de
   trous : initiales spec et valeurs non-littérales gonflaient

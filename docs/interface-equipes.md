@@ -3816,3 +3816,44 @@ partiels, `background-position` logiques, sizing
 intrinsèque physique. Les misses résiduels y sont des
 **trous partiels de syntaxe**, pas des familles
 absentes — bons candidats de micro-fixes.
+
+### 2026-11-17 — Étape 271 (NAV) : graine `SOCS` scopée YouTube — boucle de consentement Google
+
+**Bug remonté par le vol field268** : la chaîne agent bouclait
+`POST consent.google.com/save → /ml` (mur re-servi) au lieu de
+rejoindre `continue=`. Le verdict terrain supposait un commit
+`Set-Cookie` tardif dans la redirection — **le transport est
+innocenté** : verrous de rejeu `Redirect(Cookie)` (hop 2 porte
+le cookie du 302, buffered + initiator cross-site), jar
+partagé confirmé, form-submit complet (`submitter`,
+`formaction`, `Origin`/`Sec-Fetch-*`).
+
+**Vrai coupable** : la graine `SOCS` forgée de l'étape 171
+(valeur mesurée uBlock pour le bump client `ytd-*`) était semée
+sur `consent.google.com` **et** `google.*` — or `SOCS` y est
+relu **côté serveur** : le `POST /save` portait un état « déjà
+décidé » (enregistrement sauté) et/ou le hop `continue` était
+re-validé sur la valeur forgée → retour au mur. Le jar gardait
+la graine byte-for-byte : le serveur n'émet jamais de `SOCS`
+dans ce flux (le consentement voyage via `escs`/session).
+**Preuve live** : même vol en `EXPLORER_CONSENT_POLICY=honest`
+→ `POST /save` honoré → `302 → continue → Google Flights` ;
+re-vol post-fix en `RejectAll` (défaut) → passage franc
+identique.
+
+**Livré** (`explorer-net/consent.rs` — contrat interne NAV,
+comportement de seeding changé) : `consent.google.com` est un
+hôte d'enregistrement — `seed_headers` n'y émet **aucune**
+graine ; `SOCS` restreint aux hôtes `youtube*` (seul
+consommateur prouvé = bump `ytd-consent-bump*` lisant
+`document.cookie`). `is_google_consent_host` →
+`is_youtube_consent_host`. Les graines génériques
+(`euconsent-v2`, `Optanon*`, `notice_behavior`,
+`cookieconsent_status`, `usprivacy`) restent servies sur les
+autres hôtes.
+
+**Régression potentielle à surveiller** : si un mur Google
+apparaît sur un `google.*` où le bump était client-side, la
+perte du seed `SOCS` pourrait le réactiver — re-vol YouTube
+recommandé pour vérifier que le bump bypass tient (le seed
+`youtube*` est intact).
