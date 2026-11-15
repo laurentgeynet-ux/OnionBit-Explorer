@@ -154,12 +154,17 @@ macro_rules! env_flag {
 }
 env_flag!(dbg_expr, "DBG_EXPR");
 env_flag!(dbg_drive, "DBG_DRIVE");
+// Flag d'environnement caché — son unique callsite est sous
+// `debug_assertions` (`lower_suspend_body`) : l'item est
+// compilé en debug seulement.
+#[cfg(debug_assertions)]
 env_flag!(dbg_lower, "DBG_LOWER");
 env_flag!(dbg_nat, "DBG_NAT");
 env_flag!(ctx_probe, "EXPLORER_CTX_PROBE");
 env_flag!(missing_api, "EXPLORER_MISSING_API");
 env_flag!(js_profile, "EXPLORER_JS_PROFILE");
 env_flag!(nat_trace, "EXPLORER_NAT_TRACE");
+env_flag!(j17_host, "EXPLORER_J17_HOST");
 
 /// §B-59 — dernier natif entré dans `call_native`, écrit
 /// inconditionnellement (~20 ns, `&'static str`, zéro alloc).
@@ -1022,6 +1027,24 @@ pub fn j17_snapshot() -> String {
         }
         out.push_str(&format!("keys:{joined}"));
     }
+    // JS-C558 — top-12 dispatches `Host` (`host:class:key=n,…`)
+    // sous `EXPLORER_J17_HOST=1` — nomme les getters/invokes
+    // DOM dominants de `host_ns`.
+    let mut host: Vec<(u64, String)> =
+        J17_HOST_ATTR.with(|m| m.borrow().iter().map(|(k, n)| (*n, k.clone())).collect());
+    host.sort_unstable_by_key(|a| std::cmp::Reverse(a.0));
+    if !host.is_empty() {
+        let joined = host
+            .iter()
+            .take(12)
+            .map(|(n, l)| format!("{l}={n}"))
+            .collect::<Vec<_>>()
+            .join(",");
+        if !out.is_empty() {
+            out.push(' ');
+        }
+        out.push_str(&format!("host:{joined}"));
+    }
     out
 }
 
@@ -1113,6 +1136,14 @@ thread_local! {
     /// for-in, machinerie de frames) en un vol.
     static J17_ENVG_SITES: std::cell::RefCell<
         std::collections::BTreeMap<usize, (String, u64)>,
+    > = const { std::cell::RefCell::new(std::collections::BTreeMap::new()) };
+    /// JS-C558 — `host:` — dispatches `Host` attribués par
+    /// `class:key` (gets + invokes + méthodes feature-detect
+    /// passant par `host_mark`). Opt-in `EXPLORER_J17_HOST=1`,
+    /// dump top-12 au teardown — nomme le dominant de
+    /// `host_ns`.
+    static J17_HOST_ATTR: std::cell::RefCell<
+        std::collections::BTreeMap<String, u64>,
     > = const { std::cell::RefCell::new(std::collections::BTreeMap::new()) };
 }
 
@@ -1382,6 +1413,15 @@ pub fn host_mark(class: &str, name: &str) {
         g.push_str(class);
         g.push(':');
         g.push_str(name);
+    }
+    // JS-C558 — attribution `host:class:name=n` sous
+    // `EXPLORER_J17_HOST=1` (dump `host:` au teardown) :
+    // nomme les getters/invocations DOM dominants dans
+    // `host_ns` (vol n558 : ~39 % de `prop_ns`).
+    if j17_host() {
+        J17_HOST_ATTR.with(|m| {
+            *m.borrow_mut().entry(format!("{class}:{name}")).or_insert(0) += 1;
+        });
     }
 }
 
