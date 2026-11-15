@@ -145,6 +145,26 @@ pub(crate) fn editable_field(dom: &Dom, mut node: NodeId) -> Option<NodeId> {
 pub(crate) fn field_value(dom: &Dom, field: NodeId) -> String {
     if dom.tag_name(field).is_ok_and(|t| t == "textarea") {
         dom.text_content(field).unwrap_or_default()
+    } else if dom.tag_name(field).is_ok_and(|t| t == "select") {
+        // Valeur de formulaire HTML : la première `<option>`
+        // `selected` (ou la première option si rien n'est
+        // marqué), son `value` sinon son texte — jamais
+        // l'attribut `value` du `<select>` lui-même.
+        let options = descendant_elements(dom, field, "option");
+        let chosen = options
+            .iter()
+            .find(|&&o| dom.attribute_str(o, "selected").ok().flatten().is_some())
+            .or_else(|| options.first());
+        chosen.map_or_else(String::new, |&o| {
+            dom.attribute_str(o, "value").ok().flatten().map_or_else(
+                || {
+                    dom.text_content(o)
+                        .map(|t| t.trim().to_owned())
+                        .unwrap_or_default()
+                },
+                str::to_owned,
+            )
+        })
     } else {
         dom.attribute_str(field, "value")
             .ok()

@@ -364,6 +364,16 @@ pub(crate) struct Tab {
     /// `<script>` et qu'une fabrique est injectée ; meurt à
     /// la navigation (un contexte par document).
     js: Option<Box<dyn JsEngine>>,
+    /// Source HTML du document commis — conservée
+    /// **uniquement** quand la page n'a pas de moteur
+    /// (`want_js` faux : aucun `<script>`, handler inline,
+    /// URL `javascript:` ni cadre) : `eval` EAP peut alors
+    /// installer un contexte paresseux via
+    /// [`Self::ensure_js_engine`] (étape 261 — l'agent a
+    /// besoin d'eval sur les pages statiques). `None` dès
+    /// qu'un moteur vit — coût mémoire limité au cas
+    /// strictement nécessaire. Gelée/restaurée bfcache.
+    js_doc_html: Option<String>,
     /// Bitmaps de peinture indexés par `NodeId` — `<img>`
     /// décodés (`replaced`) + `<svg>` inline rasterisés
     /// (`svgs`, étape 55b). Vidée à chaque re-parse (les ids
@@ -825,6 +835,10 @@ pub(crate) struct PageSnapshot {
     /// Moteur JS figé — le contexte survit, reprend tel
     /// quel à la restauration (modèle bfcache).
     js: Option<Box<dyn JsEngine>>,
+    /// Source conservée pour le moteur paresseux (étape
+    /// 261) — gelée avec la page, l'eval d'un document
+    /// statique restauré reste possible.
+    js_doc_html: Option<String>,
     /// Bitmaps de peinture (`<img>` + `<svg>` inline).
     images: PaintImages,
     /// Feuilles `<link>` — une entrée par feuille (104).
@@ -1716,6 +1730,7 @@ impl Session {
                 title: None,
                 hist: Vec::new(),
                 last_req: None,
+                js_doc_html: None,
                 referrer_policy: None,
                 base_url: None,
                 base_target: None,

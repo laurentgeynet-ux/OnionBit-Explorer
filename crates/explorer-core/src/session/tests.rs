@@ -181,6 +181,7 @@ fn paintless_snapshot_repairs_on_restore() {
             popup: None,
             find: None,
             js: None,
+            js_doc_html: None,
             images: PaintImages::default(),
             linked_sheets: Vec::new(),
             adopted_sheets: Vec::new(),
@@ -281,6 +282,7 @@ async fn back_during_inflight_nav_restores_previous() {
             popup: None,
             find: None,
             js: None,
+            js_doc_html: None,
             images: PaintImages::default(),
             linked_sheets: Vec::new(),
             adopted_sheets: Vec::new(),
@@ -6669,4 +6671,64 @@ fn styles_scoped_needs_persisted_base() {
         styles2.get(some_el).is_some(),
         "repli complet : la map couvre tout le document"
     );
+}
+
+/// Étape 261 — `eval` sur un document commis sans script :
+/// le moteur paresseux s'installe depuis la source
+/// conservée (`js_doc_html`), `readyState` honnête
+/// « complete » (le document est déjà commis), et le
+/// miroir voit le DOM réel. `ensure_js_engine` rend
+/// `false` quand rien n'est installable (pas de source,
+/// pas de fabrique) — l'appelant garde `-32007`.
+#[test]
+fn eval_lazy_engine_static_doc() {
+    let mut s = Session::new(Arc::new(FailTransport), Arc::new(TestFont));
+    s.set_js_factory(explorer_js::JscoreEngine::factory());
+    let tab = s.open_tab();
+    let html = "<!doctype html><html><head><title>STAT</title></head>\
+                <body><div id=\"z\">OK</div></body></html>";
+    {
+        let e = s.tabs.get_mut(&tab).unwrap();
+        let mut tb = TreeBuilder::new();
+        tb.push(html);
+        tb.finish();
+        e.dom = Some(tb.into_dom());
+        e.url = Some(Url::parse("http://h.test/static").unwrap());
+        // Commit d'une page sans script : moteur sauté,
+        // source conservée.
+        e.js_doc_html = Some(html.to_string());
+    }
+    // Avant l'eval : pas de moteur, take honnête.
+    assert!(s.tabs.get(&tab).unwrap().js.is_none());
+    assert!(s.ensure_js_engine(tab));
+    // La source est consommée : un second ensure est no-op
+    // « déjà présent ».
+    assert!(s.tabs.get(&tab).unwrap().js_doc_html.is_none());
+    assert!(s.ensure_js_engine(tab));
+    let Some((mut eng, _max, epoch, sync_ok)) = s.take_js_engine(tab) else {
+        panic!("moteur paresseux absent après ensure");
+    };
+    let text = eng
+        .eval_ctx(
+            explorer_js::JS_CTX_TOP,
+            "document.getElementById('z').textContent",
+            Some("t/lazy"),
+        )
+        .unwrap();
+    assert_eq!(text, "OK");
+    let ready = eng
+        .eval_ctx(
+            explorer_js::JS_CTX_TOP,
+            "document.readyState",
+            Some("t/lazy"),
+        )
+        .unwrap();
+    assert_eq!(ready, "complete");
+    // Réinsertion pour l'epoch — le take suivant revit.
+    s.commit_js_pump(tab, epoch, Some((0, None, eng)), sync_ok);
+    assert!(s.tabs.get(&tab).unwrap().js.is_some());
+    // Sans source ni fabrique : refus honnête.
+    let mut s2 = Session::new(Arc::new(FailTransport), Arc::new(TestFont));
+    let tab2 = s2.open_tab();
+    assert!(!s2.ensure_js_engine(tab2));
 }

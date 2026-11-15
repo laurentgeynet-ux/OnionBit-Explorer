@@ -950,6 +950,11 @@ pub(crate) struct SubJob {
     /// alors que l'env des feuilles (`@media (scripting)`)
     /// doit rester lisible jusqu'aux imports/fontes.
     pub(crate) scripting: bool,
+    /// Source du document quand `eng` est `None` (page
+    /// statique, `want_js` faux) — permet à `eval` EAP
+    /// d'installer un moteur paresseux post-commit
+    /// (étape 261). `None` quand un moteur est embarqué.
+    pub(crate) js_doc_html: Option<String>,
     /// Réceptions de la vague — indexées par ordre document.
     pub(crate) css_slots: Vec<Option<String>>,
     /// `(el_ord, ok)` des `<link rel=stylesheet>` statiques

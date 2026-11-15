@@ -7883,6 +7883,18 @@ MCP = adaptateur, jamais la base.
   par défaut). Binding `$0`/`el` posé par **JS-C549**
   (spécialiste JS) — la couture est complète de bout en
   bout.
+- [x] **Étape 261. `eval` page sans JS — moteur paresseux**
+  (retour terrain PIPE n°2) — `Tab.js_doc_html` conserve
+  la source quand le document commit sans moteur
+  (`want_js` faux + fabrique présente — bfcache inclus) ;
+  `eval_shared_at` → `ensure_js_engine` installe le
+  contexte à la demande via `spawn_engine` ordinaire,
+  `readyState` « complete ». `false` honnête : pompe en
+  vol, fabrique absente. La pompe périodique ne lazy-spawn
+  pas. **Fix** : MCP `engine_cascade` forward `props`/
+  `declared_only` ; `describe{select}` rend l'option
+  sélectionnée (`field_value`, même règle que
+  `select_option`). Verrou : `eval_lazy_engine_static_doc`.
 
 ## Piste JS (JS-C26+) — spécialiste `explorer-jscore`
 

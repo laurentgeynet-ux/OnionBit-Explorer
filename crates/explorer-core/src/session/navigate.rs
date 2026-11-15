@@ -1366,6 +1366,11 @@ impl Session {
             expanded_inline: HashMap::new(),
             eng,
             scripting,
+            // Page statique (étape 261) : la source reste
+            // disponible pour un `eval` EAP paresseux —
+            // inutile quand un moteur vit déjà ou qu'aucune
+            // fabrique ne pourra jamais l'installer.
+            js_doc_html: (self.js_factory.is_some() && !want_js).then_some(html),
             css_slots: Vec::new(),
             link_events: Vec::new(),
             script_srcs: Vec::new(),

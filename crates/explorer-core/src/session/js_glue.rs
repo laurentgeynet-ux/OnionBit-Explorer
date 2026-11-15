@@ -1434,6 +1434,63 @@ impl Session {
         })
     }
 
+    /// Moteur paresseux pour `eval` (étape 261) — un
+    /// document commis sans script (`want_js` faux à la
+    /// nav) n'a pas de contexte : on l'installe ici à la
+    /// demande depuis la source conservée (`js_doc_html`),
+    /// par le même [`Self::spawn_engine`] qu'une nav
+    /// ordinaire (miroir complet, viewport, storage,
+    /// géométrie). `true` = moteur utilisable après retour
+    /// (déjà présent ou installé). `false` honnête :
+    /// pompe en vol (`js_detached` — l'attente bornée de
+    /// l'appelant gère), fabrique absente, ou document
+    /// sans source conservée.
+    pub(crate) fn ensure_js_engine(&mut self, tab: TabId) -> bool {
+        let (html, referrer) = {
+            let Some(entry) = self.tabs.get(&tab) else {
+                return false;
+            };
+            if entry.js.is_some() {
+                return true;
+            }
+            // Pompe en vol : le contexte revient par la
+            // réinsertion — un second moteur se heurterait
+            // à `take_js_engine`/epoch de toute façon.
+            if entry.js_detached.is_some() {
+                return false;
+            }
+            let Some(html) = entry.js_doc_html.clone() else {
+                return false;
+            };
+            // `document.referrer` = `Referer` émis par la
+            // navigation — même dérivation que `nav_tail`.
+            let referrer = entry
+                .last_req
+                .as_ref()
+                .and_then(|r| {
+                    r.headers
+                        .iter()
+                        .find(|(n, _)| n.eq_ignore_ascii_case("referer"))
+                        .map(|(_, v)| v.clone())
+                })
+                .unwrap_or_default();
+            (html, referrer)
+        };
+        let Some(mut eng) = self.spawn_engine(tab, &html, true, &referrer) else {
+            return false;
+        };
+        // Le document est déjà commis : `readyState`
+        // honnête — les events `readystatechange`/DCL ne
+        // sont pas re-tirés (aucun listener n'existait).
+        eng.set_ready_state(explorer_js::JS_CTX_TOP, "complete");
+        let Some(entry) = self.tabs.get_mut(&tab) else {
+            return false;
+        };
+        entry.js = Some(eng);
+        entry.js_doc_html = None;
+        true
+    }
+
     /// Décision CMP poussée au moteur (JS-C259, ADR-0031) —
     /// miroir de `SessionConfig::consent_policy` sur le type
     /// autonome d'`explorer-jscore` (jscore reste sans

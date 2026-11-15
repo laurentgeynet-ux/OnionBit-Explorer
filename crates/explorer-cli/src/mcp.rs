@@ -1025,7 +1025,11 @@ fn to_eap(name: &str, args: &Value) -> Option<(&'static str, Value)> {
             json!({"tab": tab, "reset": args["reset"]}),
         ),
         "engine_paint_stats" => ("engine.paint_stats", json!({"tab": tab})),
-        "engine_cascade" => ("engine.cascade", json!({"tab": tab, "ref": args["ref"]})),
+        "engine_cascade" => (
+            "engine.cascade",
+            json!({"tab": tab, "ref": args["ref"], "props": args["props"],
+                   "declared_only": args["declared_only"]}),
+        ),
         "describe" => (
             "describe",
             json!({"tab": tab, "ref": args["ref"], "max_text": args["max_text"]}),

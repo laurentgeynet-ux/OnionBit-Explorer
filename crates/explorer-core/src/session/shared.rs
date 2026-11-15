@@ -786,7 +786,16 @@ pub async fn eval_shared_at(
     }
     let taken = {
         let mut s = sess.lock().await;
-        s.take_js_engine(tab)
+        match s.take_js_engine(tab) {
+            t @ Some(_) => t,
+            // Document statique (étape 261) : le moteur est
+            // installé à la demande depuis la source
+            // conservée — `eval` fonctionne sur page sans
+            // `<script>` ; la pompe périodique, elle, ne
+            // doit pas payer un contexte par battement.
+            None if s.ensure_js_engine(tab) => s.take_js_engine(tab),
+            None => None,
+        }
     };
     let Some((mut eng, max, epoch, sync_ok)) = taken else {
         return EvalReply::Unavailable;
