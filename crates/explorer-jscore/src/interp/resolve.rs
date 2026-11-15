@@ -86,7 +86,8 @@ pub(crate) struct ResTables {
     /// (`EnvCell::Uninit`) dans cet ordre. Clés : `as_ptr()` du
     /// `Vec<Stmt>`/`Vec<VarDecl>` enveloppé, `ptr(ForTarget)`,
     /// `ptr(Stmt)` switch, `Rc::as_ptr(FnLit)` d'expression nommée.
-    pub names: HashMap<usize, Rc<[Rc<str>]>>,
+    /// JS-C536 — `CanonNames` partagé : noms + index `pos` O(1).
+    pub names: HashMap<usize, Rc<crate::heap::CanonNames>>,
 }
 
 /// Marcheur : accumule les annotations `ptr(Expr) → profondeur`.
@@ -94,7 +95,7 @@ pub(crate) struct Resolver {
     /// Sortie — `ptr(Expr::Ident) → niveaux à sauter (+ slot)`.
     pub map: HashMap<usize, u32>,
     /// Sortie — listes canoniques par site de création d'env.
-    pub names: HashMap<usize, Rc<[Rc<str>]>>,
+    pub names: HashMap<usize, Rc<crate::heap::CanonNames>>,
     /// Pile de portées — `last()` = env courant (index 0 de
     /// profondeur). Parallèle : `poisoned` par entrée.
     scopes: Vec<Scope>,
@@ -726,7 +727,11 @@ impl Resolver {
     /// reconstruit pour la recherche de nom.
     fn push_slots(&mut self, site: usize, order: Rc<[Rc<str>]>, poisoned: bool) {
         let names: HashSet<Rc<str>> = order.iter().cloned().collect();
-        self.names.insert(site, order.clone());
+        // JS-C536 — l'index `pos` (hash pour les gros canons) se
+        // construit une fois ici et se partage par `Rc` à tous
+        // les envs câblés de ce scope.
+        self.names
+            .insert(site, Rc::new(crate::heap::CanonNames::new(order.clone())));
         self.scopes.push(Scope::new(names, Some(order), poisoned));
     }
 

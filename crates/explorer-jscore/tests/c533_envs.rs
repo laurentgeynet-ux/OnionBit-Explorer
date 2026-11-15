@@ -302,3 +302,25 @@ fn c534d_first_call_already_wires() {
         "le 1er appel doit déjà servir en canon : {snap}"
     );
 }
+
+/// JS-C536 — canon >16 noms : `pos_of` bascule sur l'index
+/// hash partagé (`CanonNames.pos`). Le scope se câble, les
+/// liaisons se servent en `cells`, les écritures restent
+/// in-place — le lock fixe l'arithmétique sur 20 liaisons +
+/// une fermeture capturant la 20e.
+#[test]
+fn c536_large_canon_serves_and_closes() {
+    let _g = IC_LOCK
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    let mut e = Engine::new();
+    // 20 lexicaux > BINDING_MAP_SMALL(16) → index hash actif.
+    let r = e.eval(
+        "function f(){let a=1,b=2,c=3,d=4,e2=5,g=6,h=7,i=8,j=9,k=10,\
+         l=11,m=12,n=13,o=14,p=15,q=16,r=17,s=18,t=19,u=20;\
+         let cl=()=>u; a=b; return (a+b+c+d+e2+g+h+i+j+k+l+m+n+o+p+q+r+s+t)+cl();} f()",
+    );
+    let out = r.map(|v| e.describe(v));
+    // a=b → a=2 ; somme 2+2+3+…+19 = 191, + u=20 → 211.
+    assert_eq!(out.as_deref().unwrap_or(""), "211", "gros canon : {out:?}");
+}

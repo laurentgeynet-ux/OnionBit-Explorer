@@ -409,6 +409,12 @@ pub static J17_BIN_ADD_OTH: std::sync::atomic::AtomicU64 = std::sync::atomic::At
 pub static J17_BIN_NN: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 /// Voir [`J17_BIN_NN`].
 pub static J17_BIN_SS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+/// JS-C536 — clears complets de l'état resolver
+/// (`RESOLVED_LITS_CAP` atteint → `resolved_map`/`names_table`/
+/// `lowered_suspend_cache`/`ic_map` vidés). Un défilement en
+/// vol nomme le churn cap comme cause racine des vagues
+/// d'envs non câblés et des re-résolutions en cascade.
+pub static J17_RES_CLEAR: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 /// JS-C505 — noms de [`J17_BINOP`], ordre = déclaration `BinOp`
 /// (`ast.rs`) — maintenus ensemble par le commentaire réciproque.
 const J17_BINOP_NAMES: [&str; 25] = [
@@ -625,7 +631,7 @@ pub fn j17_enable() {
 #[must_use]
 pub fn j17_snapshot() -> String {
     let r = std::sync::atomic::Ordering::Relaxed;
-    let pairs: [(&str, &std::sync::atomic::AtomicU64); 73] = [
+    let pairs: [(&str, &std::sync::atomic::AtomicU64); 74] = [
         ("prop_lookup", &J17_PROP_LOOKUP),
         ("proto_lvl", &J17_PROTO_LVL),
         ("prop_scan", &J17_PROP_SCAN),
@@ -673,6 +679,7 @@ pub fn j17_snapshot() -> String {
         ("badd_oth", &J17_BIN_ADD_OTH),
         ("bin_nn", &J17_BIN_NN),
         ("bin_ss", &J17_BIN_SS),
+        ("res_clear", &J17_RES_CLEAR),
         ("arridx_try", &J17_ARRIDX_TRY),
         ("call", &J17_CALL),
         ("call_nat", &J17_CALL_NAT),

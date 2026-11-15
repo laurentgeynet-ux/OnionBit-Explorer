@@ -12902,6 +12902,28 @@ chaque gain rapporté contre les **deux** archétypes.
   (`ic_hit`/`ic_miss`/`ic_disarm` au snapshot) pour
   borner la couverture du seul court-circuit existant.
   Dependency-groups = infra lourde, dernier recours.
+- [x] **JS-C536 — `CanonNames` partagé (`pos()` hashé >16)** :
+  `env_ns` ~6,5 s persistait au N5.44 malgré le
+  révert poisoned — vrai coupable : `Bindings::
+  pos()` scannait le canon **linéairement par
+  lookup par niveau** (webpack factories =
+  centaines de noms ; `extra` non câblé hachait
+  déjà au-delà de `Small` → courbe inversée).
+  `names_table` porte désormais `Rc<CanonNames>`
+  = noms ordre-slots + index `pos` construit
+  une fois à la résolution : scan `ptr_eq` ≤16,
+  hash O(1) au-delà — partagé par tous les envs
+  câblés du scope. Théorie BotGuard réfutée au
+  passage : `xt_unw`=160 prouve que la pop.
+  `envu:11445` était des envs non câblés
+  (miss `names_table`), pas des poisoned.
+  `res_clear` ajouté : nommera le churn du cap
+  512 (`clear` global → re-résolutions +
+  re-câblages en cascade) s'il défile en vol.
+  Verrous : c533 16 (+lock gros canon), lang
+  315 sous `RESOLVE_VERIFY`, dom 265, j17 14.
+  Lecture : `env_ns` → ~204 ms attendu ;
+  `res_clear` décide du cran cap suivant.
 - [x] **JS-C535 — peek homo-typé `binary_op`** :
   binops = 16 % des nœuds (C532) ; chaque op payait
   `to_primitive`×2 + `to_number`×2 (identité sur

@@ -2231,10 +2231,11 @@ impl BindingMap {
 
 /// JS-C533 — liaisons d'un scope : les noms **canoniques** du
 /// resolver (`names_table`, ordre = slots) vivent dans un
-/// `Rc<[Rc<str>]>` **partagé par toutes les instances du scope**
+/// [`CanonNames`] **partagé par toutes les instances du scope**
 /// — le tableau reste cache-chaud d'un appel à l'autre, et les
 /// scans de noms lisent 8 o/entrée au lieu des ~48 o d'une
-/// paire `(Rc<str>, EnvCell)`. Les cellules sont un `Vec` dense
+/// paire `(Rc<str>, EnvCell)` (ou hash O(1) au-delà du seuil
+/// `Small`, JS-C536). Les cellules sont un `Vec` dense
 /// aligné 1:1 (slot = index canonique) ; toute liaison hors
 /// canon (injection `eval`, scope non modélisé/`GExec`,
 /// double pré-déclaration) tombe dans `extra` — l'ancien
@@ -2247,7 +2248,7 @@ pub struct Bindings {
     /// pas été câblé par `predeclare_slots` (non modélisé,
     /// poisoned, env interne) : `get` tombe alors directement
     /// sur `extra`, coût identique à l'ancien `BindingMap`.
-    canon: Rc<[Rc<str>]>,
+    canon: Rc<CanonNames>,
     /// Cellules 1:1 avec `canon`, pré-dimensionnées
     /// [`EnvCell::Uninit`] au câblage — `cells.len() ==
     /// canon.len()` invariant.
@@ -2261,23 +2262,72 @@ pub struct Bindings {
     site: &'static std::panic::Location<'static>,
 }
 
+/// Liste canonique de noms d'un scope + index de position
+/// partagé (JS-C536) : la `Rc` vit dans `names_table` et est
+/// clonée par env câblé. `pos_of` = scan `ptr_eq` pour les
+/// petites listes (≤ [`BINDING_MAP_SMALL`] — une petite liste
+/// se scanne plus vite qu'un hash), hash O(1) au-delà. Sans
+/// l'index, `Bindings::get` payait un scan linéaire du canon
+/// **par lookup par niveau d'env** — sur un scope de centaines
+/// de noms (module factories webpack) chaque ident global
+/// traversant la chaîne scannait tout — `env_ns` ×31 mesuré
+/// au vol N5.44.
+pub struct CanonNames {
+    /// Noms dans l'ordre des slots canoniques — l'index `i`
+    /// est le slot de `cells[i]` dans l'env câblé.
+    pub names: Rc<[Rc<str>]>,
+    /// `nom → slot` — construit seulement au-delà du seuil
+    /// `Small` (coût fixe au-dessous, O(1) au-dessus).
+    pos: std::collections::HashMap<Rc<str>, u16>,
+}
+
+impl CanonNames {
+    /// Enrobe la liste canonique ; l'index `pos` n'est peuplé
+    /// que si la liste dépasse [`BINDING_MAP_SMALL`].
+    pub fn new(names: Rc<[Rc<str>]>) -> Self {
+        let pos = if names.len() > BINDING_MAP_SMALL {
+            names
+                .iter()
+                .enumerate()
+                .map(|(i, n)| (n.clone(), i as u16))
+                .collect()
+        } else {
+            std::collections::HashMap::new()
+        };
+        CanonNames { names, pos }
+    }
+
+    /// Position canonique de `name`, ou `None` (hors canon).
+    pub fn pos_of(&self, name: &str) -> Option<usize> {
+        if self.pos.is_empty() {
+            self.names
+                .iter()
+                .position(|k| std::ptr::eq(&raw const **k, name) || &**k == name)
+        } else {
+            self.pos.get(name).map(|&i| i as usize)
+        }
+    }
+
+    /// `true` si aucune entrée canonique (env non câblé).
+    pub fn is_empty(&self) -> bool {
+        self.names.is_empty()
+    }
+}
+
 impl Bindings {
     fn new(site: &'static std::panic::Location<'static>) -> Self {
         Bindings {
-            canon: Rc::from(&[][..]),
+            canon: Rc::new(CanonNames::new(Rc::from(&[][..]))),
             cells: Vec::new(),
             extra: BindingMap::new(),
             site,
         }
     }
 
-    /// Position canonique de `name` — scan dense des `Rc`
-    /// (`ptr_eq` sur la donnée internée puis `memcmp`, même
-    /// convention que [`BindingMap::get`]).
+    /// Position canonique de `name` — [`CanonNames::pos_of`]
+    /// (scan `ptr_eq` ≤ `Small`, hash O(1) au-delà, JS-C536).
     fn pos(&self, name: &str) -> Option<usize> {
-        self.canon
-            .iter()
-            .position(|k| std::ptr::eq(&raw const **k, name) || &**k == name)
+        self.canon.pos_of(name)
     }
 
     /// Lookup partagé — canon d'abord (les liaisons dynamiques
@@ -2359,20 +2409,20 @@ impl Bindings {
     /// liaison vivante derrière un `Uninit`. Double câblage →
     /// même sémantique que l'ancien insert-`Uninit` : chaque nom
     /// passe par `insert` (canon → cellule, reste → `extra`).
-    pub fn wire_canon(&mut self, names: Rc<[Rc<str>]>) {
+    pub fn wire_canon(&mut self, names: Rc<CanonNames>) {
         if !self.canon.is_empty() {
-            for n in names.iter() {
+            for n in names.names.iter() {
                 self.insert(n.clone(), EnvCell::Uninit);
             }
             return;
         }
         self.canon = names;
-        self.cells = vec![EnvCell::Uninit; self.canon.len()];
+        self.cells = vec![EnvCell::Uninit; self.canon.names.len()];
         if !self.extra.is_empty() {
-            for i in 0..self.canon.len() {
+            for i in 0..self.canon.names.len() {
                 // `pos` coûte un rescan par nom — la copie de la
                 // clé évite l'alias `canon`/`extra` sur `self`.
-                let n = self.canon[i].clone();
+                let n = self.canon.names[i].clone();
                 if let Some(c) = self.extra.remove(&n) {
                     self.cells[i] = c;
                 }
@@ -2389,7 +2439,7 @@ impl Bindings {
         if self.canon.is_empty() {
             return self.extra.pair_at(slot);
         }
-        match (self.canon.get(slot), self.cells.get(slot)) {
+        match (self.canon.names.get(slot), self.cells.get(slot)) {
             (Some(k), Some(c)) => Some((k, c)),
             _ => None,
         }
@@ -2400,7 +2450,7 @@ impl Bindings {
         if self.canon.is_empty() {
             return self.extra.pair_at_mut(slot);
         }
-        match (self.canon.get(slot), self.cells.get_mut(slot)) {
+        match (self.canon.names.get(slot), self.cells.get_mut(slot)) {
             (Some(k), Some(c)) => Some((k, c)),
             _ => None,
         }

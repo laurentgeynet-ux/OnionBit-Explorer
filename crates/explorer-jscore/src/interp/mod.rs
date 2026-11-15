@@ -986,7 +986,7 @@ pub struct Engine {
     /// pré-déclarés `EnvCell::Uninit` dans cet ordre — positions
     /// de slots déterministes même si l'exécution saute des
     /// déclarateurs.
-    pub(crate) names_table: std::collections::HashMap<usize, std::rc::Rc<[Rc<str>]>>,
+    pub(crate) names_table: std::collections::HashMap<usize, std::rc::Rc<crate::heap::CanonNames>>,
     /// `EXPLORER_NO_SLOTS=1` — coupe pré-déclare + fast-path
     /// slot (A/B en vol, précédent `resolve_off`).
     pub(crate) slots_off: bool,
@@ -5967,6 +5967,12 @@ impl Engine {
             return;
         }
         if self.resolved_lits.len() >= RESOLVED_LITS_CAP {
+            // JS-C536 — compteur du churn : un cap qui défile
+            // en vol explique les vagues d'envs non câblés
+            // (`names_table` vidée → `wire_miss` jusqu'à
+            // re-résolution) ET les re-résolutions/re-lowering/
+            // ré-apprentissage IC en cascade.
+            crate::j17_tick(&crate::J17_RES_CLEAR);
             self.resolved_map.clear();
             self.names_table.clear();
             self.resolved_lits.clear();
