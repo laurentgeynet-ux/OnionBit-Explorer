@@ -792,4 +792,11 @@ fn idnt_attribue_le_nom_de_la_lecture_non_resolue() {
         idnt.contains("x=1"),
         "le nom `x` doit être attribué : {snap}"
     );
+    // JS-C550 — les mêmes marches passent par `env_get` :
+    // `envg:` attribue leurs callsites (`f:l=n`).
+    let envg = snap.split("envg:").nth(1).unwrap_or("");
+    assert!(
+        envg.split(',').next().unwrap_or("").contains('='),
+        "`envg:` doit nommer les appelants : {snap}"
+    );
 }

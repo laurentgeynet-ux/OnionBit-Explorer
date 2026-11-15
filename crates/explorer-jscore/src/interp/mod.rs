@@ -6312,7 +6312,11 @@ impl Engine {
         }
     }
 
+    /// JS-C550 — `#[track_caller]` : chaque appelant paie la
+    /// sonde `envg:` (attribution `Location`, nulle hors profil).
+    #[track_caller]
     pub(crate) fn env_get(&mut self, env: &EnvRef, name: &str) -> Option<Value> {
+        crate::j17_envg_probe(std::panic::Location::caller());
         self.env_get_seen(env, name, &mut HashSet::new())
     }
 
