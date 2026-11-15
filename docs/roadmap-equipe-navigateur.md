@@ -12902,6 +12902,14 @@ chaque gain rapporté contre les **deux** archétypes.
   (`ic_hit`/`ic_miss`/`ic_disarm` au snapshot) pour
   borner la couverture du seul court-circuit existant.
   Dependency-groups = infra lourde, dernier recours.
+- [x] **JS-C547 — `LinkList` inline (maillons sans
+  alloc)** : un `Vec` par lookup marché = 1-2
+  allocs × ~500-670 k alors que la chaîne ≈ 1
+  niveau. `[ObjId; 8]` + débord `Vec`, `Deref`
+  vers `[ObjId]` — `ic_learn`/`ic_learn_acc` et
+  les 4 callsites collecteurs inchangés.
+  `IC_CHAIN_CAP`=8 coïncide. Lock j17 (chaîne 10
+  liens → débord correct).
 - [x] **JS-C546 — `RABS_MEMO_CAP` ×4 (32 768)** :
   N5.53 — mécanique prouvée (81 % servi) mais
   114 k inserts / 8 k places = thrash (paires

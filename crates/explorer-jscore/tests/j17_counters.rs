@@ -685,6 +685,24 @@ fn rabs_memo_evince_au_cap_sans_geler() {
     );
 }
 
+/// JS-C547 — `LinkList` déborde en `Vec` au-delà de 8
+/// maillons : une chaîne proto de 10 liens doit rester
+/// correcte en lecture et en `in` (le collecte débordée
+/// alimente `ic_learn` comme avant).
+#[test]
+fn linklist_deborde_au_dela_de_huit() {
+    let _g = TEST_LOCK.lock().unwrap();
+    let mut e = Engine::new();
+    let r = e.eval(
+        "var a={},b={},c={},d={},e2={},f={},g={},h={},i={},j={x:42};\
+         a.__proto__=b; b.__proto__=c; c.__proto__=d; d.__proto__=e2;\
+         e2.__proto__=f; f.__proto__=g; g.__proto__=h; h.__proto__=i;\
+         i.__proto__=j;\
+         (a.x===42) && ('x' in a) && !('zzz' in a)",
+    );
+    assert_eq!(r.ok().map(|v| format!("{v:?}")), Some("Bool(true)".into()));
+}
+
 /// JS-C535 — le peek homo-typé de `binary_op` sert `(Num,Num)`
 /// et `(Str,Str)` sans `to_primitive`/`to_number` ; les
 /// compteurs `bin_nn`/`bin_ss` mesurent la couverture. Le lock

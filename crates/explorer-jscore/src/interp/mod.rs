@@ -413,6 +413,53 @@ const IC_CHAIN_CAP: usize = 8;
 /// ancien est évincé — un site réellement mégamorphe re-misse
 /// et meurt, la borne contient le thrash).
 const IC_POLY_CAP: usize = 8;
+/// JS-C547 — capacité inline de [`LinkList`] : la
+/// quasi-totalité des chaînes proto JS tient en 8 maillons
+/// (`proto_lvl`/`prop_lookup` ≈ 1 niveau par marche).
+/// Au-delà, débord dans un `Vec` unique.
+const LINKS_INLINE: usize = 8;
+
+/// JS-C547 — collecte des maillons traversés par une marche
+/// proto **sans alloc** : avant, un `Vec::new()` par lookup
+/// marché payait 1-2 allocs (~500-670 k/vol yt). `Deref`
+/// vers `[ObjId]` : `ic_learn`/`ic_learn_acc` (`&[ObjId]`)
+/// et les lectures (`iter`/`len`/`last`) sont inchangés.
+#[derive(Default)]
+pub(crate) struct LinkList {
+    inline: [ObjId; LINKS_INLINE],
+    len: usize,
+    spill: Vec<ObjId>,
+}
+
+impl LinkList {
+    pub(crate) fn new() -> Self {
+        Self::default()
+    }
+
+    fn push(&mut self, id: ObjId) {
+        if self.len < LINKS_INLINE {
+            self.inline[self.len] = id;
+        } else {
+            if self.len == LINKS_INLINE {
+                self.spill.extend_from_slice(&self.inline);
+            }
+            self.spill.push(id);
+        }
+        self.len += 1;
+    }
+}
+
+impl std::ops::Deref for LinkList {
+    type Target = [ObjId];
+    fn deref(&self) -> &[ObjId] {
+        if self.len <= LINKS_INLINE {
+            &self.inline[..self.len]
+        } else {
+            &self.spill
+        }
+    }
+}
+
 /// JS-C521 — borne de la mémo négative de lectures absentes.
 /// JS-C545 — éviction FIFO au cap (N5.52 : le gel refusait
 /// 496 k consultations). JS-C546 — cap ×4 : N5.53 a mesuré
@@ -4546,7 +4593,7 @@ impl Engine {
             IcOut::Hit(_) | IcOut::HitChain(_) | IcOut::Fall => true,
             IcOut::Bail => false,
         };
-        let mut links = Vec::new();
+        let mut links = LinkList::new();
         let mut cur = Some(bid);
         let mut depth = 0;
         let mut own = true;
@@ -7858,7 +7905,7 @@ impl Engine {
         &mut self,
         id: ObjId,
         key: &str,
-        mut links: Option<&mut Vec<ObjId>>,
+        mut links: Option<&mut LinkList>,
     ) -> Option<(ObjId, Prop)> {
         static CTXP: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
         if *CTXP.get_or_init(|| std::env::var_os("EXPLORER_CTX_PROBE").is_some())
@@ -8552,7 +8599,7 @@ impl Engine {
             }
             IcOut::Fall => {}
         }
-        let mut links = Vec::new();
+        let mut links = LinkList::new();
         let lp = if self.ic_off { None } else { Some(&mut links) };
         crate::j17_tick(&crate::J17_PL_GET);
         let s0 = Self::j17_scan();
@@ -9033,7 +9080,7 @@ impl Engine {
         // JS-C504 — les maillons traversés nourrissent
         // l'apprentissage (`Chain`/`Absent` en plus de `Own`) —
         // collecte seulement si le site peut apprendre.
-        let mut links = Vec::new();
+        let mut links = LinkList::new();
         let lp = if !bail && site != 0 && !self.ic_off {
             Some(&mut links)
         } else {
@@ -10034,7 +10081,7 @@ impl Engine {
         let r = self.has_prop_walk(id, key)?;
         Self::j17_scan_add(&crate::J17_PS_HAS, s0);
         if !self.ic_off {
-            let mut links = Vec::new();
+            let mut links = LinkList::new();
             match self.find_prop_owner_links(id, key, Some(&mut links)) {
                 Some((_, Prop::Data { .. })) => self.ic_learn(site, key, &links, true, false),
                 Some((_, Prop::Acc { .. })) => self.ic_learn_acc(site, key, &links),
