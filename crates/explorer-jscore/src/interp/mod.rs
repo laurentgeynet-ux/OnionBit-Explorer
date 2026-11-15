@@ -4531,7 +4531,6 @@ impl Engine {
             IcOut::Hit(_) | IcOut::HitChain(_) | IcOut::Fall => true,
             IcOut::Bail => false,
         };
-        let ai = array_index(name); // V-3b — hoisted hors de la marche
         let mut links = Vec::new();
         let mut cur = Some(bid);
         let mut depth = 0;
@@ -4540,7 +4539,7 @@ impl Engine {
             if collect {
                 links.push(cid);
             }
-            if let Some(p) = self.find_own_ai(cid, name, ai) {
+            if let Some(p) = self.find_own_ai(cid, name) {
                 if own {
                     // Own-prop quelconque — comportement
                     // historique (patch direct ou méthode own).
@@ -7494,7 +7493,7 @@ impl Engine {
         crate::j17_fown_site(std::panic::Location::caller());
         crate::j17_tick(&crate::J17_PL_OWN);
         let s0 = Self::j17_scan();
-        let r = self.find_own_ai(id, key, array_index(key));
+        let r = self.find_own_ai(id, key);
         Self::j17_scan_add(&crate::J17_PS_OWN, s0);
         r
     }
@@ -7508,9 +7507,20 @@ impl Engine {
     /// invocation est attribuée à son callsite `file:line`
     /// (`foai:` du snapshot) — désarmé = un appel + branche.
     #[track_caller]
-    fn find_own_ai(&mut self, id: ObjId, key: &str, ai: Option<usize>) -> Option<Prop> {
+    fn find_own_ai(&mut self, id: ObjId, key: &str) -> Option<Prop> {
         crate::j17_foai_site(std::panic::Location::caller());
         crate::j17_tick(&crate::J17_PROP_LOOKUP);
+        // JS-C541 — l'essai `array_index` est internalisé (les
+        // hoists V-3b calculaient `ai` par marche pour des kinds
+        // qui ne l'indexent jamais — ~43 % des `arridx_try` au
+        // vol N5.48) et gaté au premier octet : clé alpha →
+        // `None` sans l'appel. Consommateurs : `args_map`,
+        // `Array`, `TypedArray` ci-dessous.
+        let ai = if key.as_bytes().first().is_some_and(u8::is_ascii_digit) {
+            array_index(key)
+        } else {
+            None
+        };
         // `arguments` mappé : l'indice renvoie au slot env du
         // paramètre formel (spec `MappedArgumentsObject` [[Get]]).
         if let Some(i) = ai {
@@ -7824,14 +7834,13 @@ impl Engine {
                 key, id, self.cur_ctx, self.global
             );
         }
-        let ai = array_index(key); // V-3b — hoisted hors de la marche
-                                   // JS-C521b — mémo own-absent **par maillon** `(shape, clé)`
-                                   // : la shape prouve l'absence en propre (empreinte de
-                                   // layout — une prop ajoutée la change, réutilisation GC
-                                   // comprise). Hit = un hash au lieu de `find_own_ai` ;
-                                   // miss = lookup + insert — une seule traversée, jamais
-                                   // pire que la marche d'origine (vol N5.21 : le fold de
-                                   // chaîne payait deux traversées au miss).
+        // JS-C521b — mémo own-absent **par maillon** `(shape, clé)`
+        // : la shape prouve l'absence en propre (empreinte de
+        // layout — une prop ajoutée la change, réutilisation GC
+        // comprise). Hit = un hash au lieu de `find_own_ai` ;
+        // miss = lookup + insert — une seule traversée, jamais
+        // pire que la marche d'origine (vol N5.21 : le fold de
+        // chaîne payait deux traversées au miss).
         let ki = crate::intern(key);
         let kid = (ki.as_ptr() as usize as u64) ^ (key.len() as u64) << 48;
         // JS-C527 — attribution par clé de la marche (`keys:`) :
@@ -7860,14 +7869,14 @@ impl Engine {
                     Value::Obj(p) => Some(p),
                     _ => None,
                 };
-                if Self::ic_eligible(o, key, ai) {
+                if Self::ic_eligible(o, key) {
                     let mk = (o.shape(), kid);
                     mkey = Some(mk);
                     slow = !self.rabs_memo.contains(&mk);
                 }
             }
             let found = if slow {
-                let r = self.find_own_ai(cid, key, ai);
+                let r = self.find_own_ai(cid, key);
                 if r.is_none() {
                     if let Some(mk) = mkey {
                         if self.rabs_memo.len() < RABS_MEMO_CAP {
@@ -7901,7 +7910,13 @@ impl Engine {
     /// Les synthèses *post*-`o.find` (`fn.name`, `@@toStringTag`,
     /// statiques `RegExp` du ctor) restent éligibles : une own
     /// prop réelle les prime toujours dans l'ordre de lookup.
-    fn ic_eligible(o: &crate::heap::Object, key: &str, ai: Option<usize>) -> bool {
+    /// JS-C541 — l'essai `array_index` n'est requis que par le
+    /// bras `Array` : il est internalisé ici au lieu d'être
+    /// calculé par chaque appelant pour tous les kinds (vol
+    /// N5.48 — `ic_hit`/`ic_learn`/`global_own_first`/`set_prop`
+    /// payaient l'essai pour des kinds qui l'ignorent : ~72 %
+    /// des `arridx_try`).
+    fn ic_eligible(o: &crate::heap::Object, key: &str) -> bool {
         if o.args_map.is_some() {
             return false;
         }
@@ -7910,7 +7925,7 @@ impl Engine {
             | ObjKind::ByteBuf(_)
             | ObjKind::DataView { .. }
             | ObjKind::TypedArray { .. } => false,
-            ObjKind::Array(_) => ai.is_none() && key != "length",
+            ObjKind::Array(_) => array_index(key).is_none() && key != "length",
             ObjKind::Fun(Fun::Script { .. }) => key != "length",
             _ => true,
         }
@@ -7925,13 +7940,7 @@ impl Engine {
     /// clé/`pos`/`Prop::Data` chez l'owner), `Miss` = écart
     /// constaté, `Pass` = maillon inéligible — l'entrée reste
     /// valable pour les autres receveurs.
-    fn ic_kind_verdict(
-        heap: &Heap,
-        kind: &IcKind,
-        id: ObjId,
-        key: &str,
-        ai: Option<usize>,
-    ) -> IcVerdict {
+    fn ic_kind_verdict(heap: &Heap, kind: &IcKind, id: ObjId, key: &str) -> IcVerdict {
         // Maillon attendu : `Ok(Some(o))` = vivant + éligible
         // (les props synthétisées qui devancent `o.find` ne
         // peuvent pas être cachées) + `shape` égale ;
@@ -7939,7 +7948,7 @@ impl Engine {
         // `Err(())` = inéligible → `Pass` sans compter,
         // l'entrée reste valable pour les autres receveurs.
         let link = |cid: ObjId, sh: u64| match heap.obj(cid) {
-            Some(o) if !Self::ic_eligible(o, key, ai) => Err(()),
+            Some(o) if !Self::ic_eligible(o, key) => Err(()),
             Some(o) => Ok((o.shape() == sh).then_some(o)),
             None => Ok(None),
         };
@@ -8076,14 +8085,13 @@ impl Engine {
         if site == 0 || self.ic_off {
             return IcOut::Fall;
         }
-        let ai = array_index(key);
         // JS-C509 — bail à coût ~0 : une tête inéligible par
         // construction (indices/`length` d'Array, `args_map`,
         // `Fun::Script.length`, vues binaires, Proxy) ne peut
         // rien apprendre — ni lookup de la map, ni collecte de
         // maillons côté appelant (28 % des décisions au vol N5.8).
         if let Some(o) = self.heap.obj(id) {
-            if !Self::ic_eligible(o, key, ai) {
+            if !Self::ic_eligible(o, key) {
                 crate::j17_tick(&crate::J17_IC_BAIL);
                 return IcOut::Bail;
             }
@@ -8124,7 +8132,7 @@ impl Engine {
                     None => (IcVerdict::Miss, false, true),
                     Some(o) => match entries.iter().find(|k| k.head_key() == Some(o.shape())) {
                         Some(k) => (
-                            Self::ic_kind_verdict(&self.heap, k, id, key, ai),
+                            Self::ic_kind_verdict(&self.heap, k, id, key),
                             matches!(k, IcKind::Chain { .. }),
                             true,
                         ),
@@ -8132,7 +8140,7 @@ impl Engine {
                     },
                 },
                 kind => (
-                    Self::ic_kind_verdict(&self.heap, kind, id, key, ai),
+                    Self::ic_kind_verdict(&self.heap, kind, id, key),
                     matches!(kind, IcKind::Chain { .. }),
                     false,
                 ),
@@ -8303,7 +8311,6 @@ impl Engine {
         if self.ic_map.len() >= IC_MAP_CAP {
             self.ic_purge();
         }
-        let ai = array_index(key);
         let mut shapes = Vec::with_capacity(links.len());
         let mut kind = None;
         for (i, &lid) in links.iter().enumerate() {
@@ -8311,7 +8318,7 @@ impl Engine {
                 self.ic_note_nlearn(site);
                 return;
             };
-            if !Self::ic_eligible(o, key, ai) {
+            if !Self::ic_eligible(o, key) {
                 self.ic_note_nlearn(site);
                 return;
             }
@@ -8414,14 +8421,13 @@ impl Engine {
         if self.ic_map.len() >= IC_MAP_CAP {
             self.ic_purge();
         }
-        let ai = array_index(key);
         let mut shapes = Vec::with_capacity(links.len());
         for &lid in links {
             let Some(o) = self.heap.obj(lid) else {
                 self.ic_note_nlearn(site);
                 return;
             };
-            if !Self::ic_eligible(o, key, ai) {
+            if !Self::ic_eligible(o, key) {
                 self.ic_note_nlearn(site);
                 return;
             }
@@ -8465,12 +8471,10 @@ impl Engine {
     /// marches non attribuées — les lectures/écritures globales —
     /// ≈ la moitié du mur `prop_ns`). Compteur `env_ghit`.
     fn global_prop_own_first(&mut self, g: ObjId, name: &str) -> Option<Prop> {
-        let ai = array_index(name);
-        let own = self.heap.obj(g).and_then(|o| {
-            Self::ic_eligible(o, name, ai)
-                .then(|| o.find(name))
-                .flatten()
-        });
+        let own = self
+            .heap
+            .obj(g)
+            .and_then(|o| Self::ic_eligible(o, name).then(|| o.find(name)).flatten());
         match own {
             Some(p) => {
                 crate::j17_tick(&crate::J17_ENV_GHIT);
@@ -9076,11 +9080,10 @@ impl Engine {
                 );
             }
         }
-        let ai = array_index(key); // V-3b — hoisted hors de la marche
-                                   // JS-C514 — consultation write-IC avant la marche :
-                                   // `Hit`/`Absent` prouvent que rien sur la chaîne n'a de
-                                   // setter ni de donnée non-writable pertinente → `set_prop`
-                                   // tranche directement (writable, extensibilité, index…).
+        // JS-C514 — consultation write-IC avant la marche :
+        // `Hit`/`Absent` prouvent que rien sur la chaîne n'a de
+        // setter ni de donnée non-writable pertinente → `set_prop`
+        // tranche directement (writable, extensibilité, index…).
         let mut armed = false;
         if site != 0 && matches!(recv, Value::Obj(r) if r == id) && !self.ic_off {
             match self.ic_hit(site, id, key) {
@@ -9123,7 +9126,7 @@ impl Engine {
         // préservés). Learn identique : `links=[id]`, `found` —
         // l'entrée `Own` apprise est celle de la boucle.
         let mut found = self.heap.obj(id).is_some_and(|o| {
-            Self::ic_eligible(o, key, ai)
+            Self::ic_eligible(o, key)
                 && matches!(
                     o.prop_pos(key).and_then(|i| o.props.get(i)),
                     Some((_, crate::heap::Prop::Data { .. }))
@@ -9185,7 +9188,7 @@ impl Engine {
                     Value::Obj(p) => Some(*p),
                     _ => None,
                 };
-                if Self::ic_eligible(o, key, ai) {
+                if Self::ic_eligible(o, key) {
                     let k = *kid.get_or_insert_with(|| {
                         let ki = crate::intern(key);
                         (ki.as_ptr() as usize as u64) ^ (key.len() as u64) << 48
@@ -9196,7 +9199,7 @@ impl Engine {
                 }
             }
             let ownp = if slow {
-                let r = self.find_own_ai(cid, key, ai);
+                let r = self.find_own_ai(cid, key);
                 if r.is_none() {
                     if let Some(mk) = mkey {
                         if self.rabs_memo.len() < RABS_MEMO_CAP {
@@ -9700,7 +9703,6 @@ impl Engine {
         key: &str,
         v: Value,
     ) -> JsResult<bool> {
-        let ai = array_index(key); // V-3b — hoisted hors de la marche
         let mut depth = 0;
         loop {
             if let Some((tid, target, handler)) = self.proxy_th(cur)? {
@@ -9714,7 +9716,7 @@ impl Engine {
                 // (ses props propres puis sa chaîne).
                 cur = tid;
             } else {
-                match self.find_own_ai(cur, key, ai) {
+                match self.find_own_ai(cur, key) {
                     Some(Prop::Acc { set, .. }) => {
                         if self.is_callable(set.clone()) {
                             self.call_value(set, recv, &[v])?;
@@ -9762,9 +9764,15 @@ impl Engine {
         // (vol N5.34 : write-walk ≈ 33 % du mur `prop_ns`).
         // Non-writable/Acc/absent/inéligible → chemin complet
         // inchangé (même sémantique, gardes préservées).
-        let ai = array_index(key);
+        // JS-C541 — `ai` gaté au premier octet : une clé alpha
+        // (écrasante majorité des écritures) ne paie plus l'essai.
+        let ai = if key.as_bytes().first().is_some_and(u8::is_ascii_digit) {
+            array_index(key)
+        } else {
+            None
+        };
         let fast_pos = self.heap.obj(id).and_then(|o| {
-            if !Self::ic_eligible(o, key, ai) {
+            if !Self::ic_eligible(o, key) {
                 return None;
             }
             let i = o.prop_pos(key)?;
@@ -10017,7 +10025,6 @@ impl Engine {
         // `"m" in o` est vrai quand un proto de la chaîne est un
         // proxy (mesuré en vol YouTube — `ZuN`/`jYd` kevlar
         // s'appuie sur `F in w` à travers des protos proxyfiés).
-        let ai = array_index(key);
         let mut cur = Some(id);
         let mut phops = 0;
         let mut pdepth = 0;
@@ -10066,7 +10073,7 @@ impl Engine {
                     }
                 }
             }
-            if self.find_own_ai(cid, key, ai).is_some() {
+            if self.find_own_ai(cid, key).is_some() {
                 return Ok(true);
             }
             cur = match self.heap.obj(cid).map(|o| o.proto.clone()) {

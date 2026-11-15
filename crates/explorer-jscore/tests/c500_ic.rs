@@ -311,9 +311,10 @@ fn c504_absent_null_proto() {
 
 // ── JS-C505 — sondes N5.6 ────────────────────────────────────────
 
-/// Les compteurs `sm_*` et `binop:*` émettent : `sm_oob` (lecture
-/// `let` avant déclaration — slot résolu, cellule absente →
-/// fallback correct), `badd_num`/`badd_str`, histogramme `binop:`.
+/// Les compteurs `sm_*` et `binop:*` émettent : `sm_cell` (lecture
+/// `let` avant déclaration — slot résolu, cellule `Uninit` depuis
+/// JS-C533 → fallback correct ; pré-C533 la cellule absente était
+/// classée `sm_oob`), `badd_num`/`badd_str`, histogramme `binop:`.
 #[test]
 fn c505_probes_emit() {
     let _g = IC_LOCK
@@ -332,7 +333,7 @@ fn c505_probes_emit() {
         .expect("eval");
     assert_eq!(e.describe(r), "100/50");
     let snap = explorer_jscore::j17_snapshot();
-    assert!(snap.contains("sm_oob="), "sm_oob attendu : {snap}");
+    assert!(snap.contains("sm_cell="), "sm_cell attendu : {snap}");
     assert!(snap.contains("badd_num="), "badd_num attendu : {snap}");
     assert!(snap.contains("badd_str="), "badd_str attendu : {snap}");
     assert!(snap.contains("binop:"), "histogramme attendu : {snap}");

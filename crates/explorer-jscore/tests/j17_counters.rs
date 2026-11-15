@@ -499,20 +499,63 @@ fn envu_nomme_le_site_de_construction() {
 }
 
 /// JS-C539 — `arridx:` attribue les essais `array_index` au
-/// callsite (`#[track_caller]`). Un accès indexé `a["0"]` doit
-/// faire émettre la section.
+/// callsite (`#[track_caller]`). Un accès par clé chaîne digit
+/// (`a[''+i]` → `find_own_ai` → `array_index`) doit faire
+/// émettre la section — JS-C541 : les clés alpha ne paient
+/// plus l'essai, il faut une clé numérique pour le voir.
 #[test]
 fn arridx_attribue_le_callsite() {
     let _g = TEST_LOCK.lock().unwrap();
     j17_enable();
     let mut e = Engine::new();
-    e.eval("var a=[10,20,30]; var s=0; for(var i=0;i<3;i++){s+=a[i];} s")
+    e.eval("var a=[10,20,30]; var s=0; for(var i=0;i<3;i++){s+=a[''+i];} s")
         .expect("eval indexed");
     let snap = j17_snapshot();
     assert!(
         snap.contains("arridx:"),
         "les essais `array_index` doivent émettre `arridx:` : {snap}"
     );
+}
+
+/// JS-C541 — `ic_eligible` internalise l'essai `array_index` :
+/// il ne vit plus que dans le bras `Array`. Un hit IC sur
+/// objet ordinaire ne doit plus ticker `arridx_try` (vol N5.48
+/// : `ic_hit` seul = 48,8 % des essais, kinds qui ignoraient
+/// `ai`) — tandis qu'un accès indexé sur Array continue de
+/// l'essayer (sémantique `a[i]` préservée).
+#[test]
+fn c541_ic_hit_ne_essaie_plus_array_index() {
+    let _g = TEST_LOCK.lock().unwrap();
+    j17_enable();
+    let mut e = Engine::new();
+    // Warm-up + baseline : épuise les essais intrinsèques de la
+    // mise en place (prologue, builtins), puis mesure le delta
+    // d'une boucle de hits IC purs sur objet ordinaire.
+    e.eval("var o={a:1,b:2}; for(var i=0;i<4;i++){o.a+o.b;}")
+        .expect("warmup");
+    let before = tick(&J17_ARRIDX_TRY);
+    e.eval("for(var i=0;i<50;i++){o.a+o.b;}").expect("ic hits");
+    let after = tick(&J17_ARRIDX_TRY);
+    if after != before {
+        eprintln!("arridx residus: {}", j17_snapshot());
+    }
+    assert_eq!(
+        after, before,
+        "les hits IC sur objet ordinaire ne doivent plus essayer \
+         `array_index` — l'essai est internalisé au bras Array"
+    );
+    // Garde-fou inverse : une clé chaîne `"0"` — chemin
+    // `find_own_ai` — continue d'essayer `array_index` (la gate
+    // premier-octet laisse passer les clés digit-first) et la
+    // sémantique élément est servie.
+    let s = e
+        .eval("var a=[10,20,30]; var t=0; for(var i=0;i<3;i++){t+=a[''+i];} t")
+        .expect("array index");
+    assert!(
+        tick(&J17_ARRIDX_TRY) > before,
+        "une clé digit-first doit encore essayer `array_index`"
+    );
+    let _ = s;
 }
 
 /// JS-C535 — le peek homo-typé de `binary_op` sert `(Num,Num)`

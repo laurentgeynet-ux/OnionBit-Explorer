@@ -12902,6 +12902,22 @@ chaque gain rapporté contre les **deux** archétypes.
   (`ic_hit`/`ic_miss`/`ic_disarm` au snapshot) pour
   borner la couverture du seul court-circuit existant.
   Dependency-groups = infra lourde, dernier recours.
+- [x] **JS-C541 — `array_index` internalisé aux kinds
+  consommateurs** : `arridx:` N5.48 nomme le dominant —
+  `ic_hit` = 48,8 % des 2,53 M essais, hoists V-3b
+  ≈ 43 %, tous pour des kinds qui ignorent `ai`.
+  `ic_eligible` internalise l'essai dans son bras
+  `Array` (paramètre `ai` supprimé, 8 callsites
+  libérés) ; `find_own_ai` l'internalise gaté au
+  premier octet (clé alpha → `None` sans appel) —
+  les six hoists V-3b des marches meurent ;
+  `set_prop_walk` gate identique. Sémantique
+  identique (`None` ≡ essai-None). `c505` corrigé
+  (`sm_oob` → `sm_cell`, périmé depuis C533).
+  Verrous : j17 17 (+lock zéro-essai sur hit IC
+  ordinaire + digit-first préservé), lang 315,
+  dom 265, c500 32, c530 9, c533 17. Lecture :
+  `arridx:` reflue ~70-90 %, `prop_ns`/`exec_us`.
 - [x] **JS-C540 — `rabs_memo` étendue à la marche d'écriture** :
   la boucle `write_prop_at` payait `find_own_ai`
   par maillon hors IC (sites poly/désarmés).
