@@ -436,6 +436,40 @@ fn class_name_and_class_list() {
             el.className"),
         ""
     );
+    // JS-C562 — `toggle(x, true)` sur jeton présent : no-op
+    // retour `true`, pas de doublon ; `add` idempotent ne
+    // ré-écrit pas l'attribut.
+    assert_eq!(
+        ev("var el = document.getElementById('main');\
+            el.className = 'a b';\
+            el.classList.toggle('a', true) + ':' + el.className"),
+        "true:a b"
+    );
+    assert_eq!(
+        ev("var el = document.getElementById('main');\
+            el.className = 'a b';\
+            el.classList.toggle('c', true) + ':' + el.className"),
+        "true:a b c"
+    );
+    assert_eq!(
+        ev("var el = document.getElementById('main');\
+            el.className = 'a b';\
+            el.classList.toggle('a', false) + ':' + el.className"),
+        "false:b"
+    );
+    assert_eq!(
+        ev("var el = document.getElementById('main');\
+            el.className = 'a b';\
+            el.classList.toggle('c', false) + ':' + el.className"),
+        "false:a b"
+    );
+    assert_eq!(
+        ev("var el = document.getElementById('main');\
+            el.className = 'a b';\
+            el.classList.add('a');\
+            el.className"),
+        "a b"
+    );
 }
 
 #[test]

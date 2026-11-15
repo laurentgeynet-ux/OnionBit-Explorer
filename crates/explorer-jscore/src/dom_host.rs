@@ -13448,13 +13448,26 @@ impl Host for ClassListHost {
             .map(|c| c.split_whitespace().map(str::to_string).collect())
             .unwrap_or_default();
         let contains = tokens.iter().any(|t| t == &cls);
+        // JS-C562 — n'écrire `set_attr` (observers +
+        // `attributeChanged` + invalidations) que quand la
+        // liste change : `add`/`toggle(x,true)` sur un jeton
+        // présent ré-écrivaient l'attribut pour rien — et
+        // `toggle(x, true)` **dupliquait** le jeton (spec :
+        // force=true sur présent = no-op retour `true`).
+        let (mut changed, mut ret) = (false, Value::Undefined);
         match name {
             "add" => {
                 if !contains {
                     tokens.push(cls.clone());
+                    changed = true;
                 }
             }
-            "remove" => tokens.retain(|t| t != &cls),
+            "remove" => {
+                if contains {
+                    tokens.retain(|t| t != &cls);
+                    changed = true;
+                }
+            }
             "toggle" => {
                 // `toggle(t, force)` — le second arg force l'état
                 // cible (spec DOMTokenList, JS-C76).
@@ -13463,20 +13476,23 @@ impl Host for ClassListHost {
                     f => Some(e.to_boolean(f)),
                 };
                 let want = force.unwrap_or(!contains);
-                if want {
-                    tokens.push(cls.clone());
-                } else {
-                    tokens.retain(|t| t != &cls);
+                if want != contains {
+                    if want {
+                        tokens.push(cls.clone());
+                    } else {
+                        tokens.retain(|t| t != &cls);
+                    }
+                    changed = true;
                 }
+                ret = Value::Bool(want);
             }
             "contains" => return Ok(Some(Value::Bool(contains))),
             _ => return Ok(None),
         }
-        d.set_attr(self.node, self.attr, &tokens.join(" "));
-        Ok(Some(match name {
-            "toggle" => Value::Bool(tokens.iter().any(|t| t == &cls)),
-            _ => Value::Undefined,
-        }))
+        if changed {
+            d.set_attr(self.node, self.attr, &tokens.join(" "));
+        }
+        Ok(Some(ret))
     }
 }
 

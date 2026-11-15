@@ -13220,6 +13220,11 @@ chaque gain rapporté contre les **deux** archétypes.
   (`ic_hit`/`ic_miss`/`ic_disarm` au snapshot) pour
   borner la couverture du seul court-circuit existant.
   Dependency-groups = infra lourde, dernier recours.
+- [x] **JS-C562 — `DOMTokenList` : `toggle(force)` corrigé,
+  `set_attr` seulement si la liste change** — `toggle(x,true)`
+  dupliquait le jeton présent (bug spec), et les opérations
+  idempotentes payaient attributeChanged+observers pour rien.
+  Verrous : 5 assertions force/idempotence, `dom` verts.
 - [x] **JS-C561 — `document.body`/`head` : chemin rapide
   enfants de `<html>`** — `hns:` nommait `body` = 75,6
   µs/get (39 % de la masse host top-40) : deux marches
