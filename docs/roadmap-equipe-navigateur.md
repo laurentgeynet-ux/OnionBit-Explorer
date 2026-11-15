@@ -12902,6 +12902,14 @@ chaque gain rapporté contre les **deux** archétypes.
   (`ic_hit`/`ic_miss`/`ic_disarm` au snapshot) pour
   borner la couverture du seul court-circuit existant.
   Dependency-groups = infra lourde, dernier recours.
+- [x] **JS-C548 — `FastHash` sur tables à clés
+  internes** : SipHash ~15 ns/consultation sur des
+  clés déjà mélangées (ptr `Location`, ptr AST,
+  `(shape,kid)`, `ObjId`) — 12 tables converties
+  (`ic_map` ~1 M+, `names_table` ~1,4 M,
+  `resolved_*`, `rabs`/`shadow_memo`…). `&str`
+  attaquables = `RandomState` conservé. Lecture :
+  ~15-30 ms cumulés si non bruit.
 - [x] **JS-C547 — `LinkList` inline (maillons sans
   alloc)** : un `Vec` par lookup marché = 1-2
   allocs × ~500-670 k alors que la chaîne ≈ 1

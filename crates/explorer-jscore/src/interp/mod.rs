@@ -413,6 +413,52 @@ const IC_CHAIN_CAP: usize = 8;
 /// ancien est évincé — un site réellement mégamorphe re-misse
 /// et meurt, la borne contient le thrash).
 const IC_POLY_CAP: usize = 8;
+/// JS-C548 — hasher ~coût nul pour les tables à clés
+/// **internes** : ptr `Location`/`ObjId`/lit-ptr déjà
+/// mélangés par construction, `(shape,kid)` déjà hachés —
+/// la distribution d'entrée est garantie, `SipHash` est du
+/// surcoût pur (~15 ns/consultation × ~2-3 M/vol sur
+/// `ic_map`/`names_table`/`rabs_memo`/`resolved_*`).
+/// **Jamais** sur clés attaquables : `&str`/`String` de
+/// props, URLs (`props idx`, `intern`, modules) gardent le
+/// `RandomState` anti-DoS.
+#[derive(Default)]
+pub(crate) struct FastHash(u64);
+
+impl std::hash::Hasher for FastHash {
+    fn finish(&self) -> u64 {
+        self.0
+    }
+
+    fn write(&mut self, bytes: &[u8]) {
+        for &b in bytes {
+            self.0 = (self.0 ^ u64::from(b)).wrapping_mul(0x9E37_79B9_7F4A_7C15);
+        }
+    }
+
+    fn write_u64(&mut self, i: u64) {
+        self.0 = (self.0 ^ i).wrapping_mul(0x9E37_79B9_7F4A_7C15);
+    }
+
+    fn write_u32(&mut self, i: u32) {
+        self.write_u64(u64::from(i));
+    }
+
+    fn write_u16(&mut self, i: u16) {
+        self.write_u64(u64::from(i));
+    }
+
+    fn write_usize(&mut self, i: usize) {
+        self.write_u64(i as u64);
+    }
+}
+
+/// `HashMap` à [`FastHash`] — clés internes uniquement.
+pub(crate) type FastMap<K, V> =
+    std::collections::HashMap<K, V, std::hash::BuildHasherDefault<FastHash>>;
+/// `HashSet` à [`FastHash`] — clés internes uniquement.
+pub(crate) type FastSet<T> = std::collections::HashSet<T, std::hash::BuildHasherDefault<FastHash>>;
+
 /// JS-C547 — capacité inline de [`LinkList`] : la
 /// quasi-totalité des chaînes proto JS tient en 8 maillons
 /// (`proto_lvl`/`prop_lookup` ≈ 1 niveau par marche).
@@ -771,7 +817,7 @@ pub struct Engine {
     /// Entrées élaguées à chaque passe (les mortes/swept ne
     /// s'accumulent pas) + borne globale [`crate::promise::
     /// PROM_SITES_MAX`].
-    pub(crate) prom_sites: std::collections::HashMap<ObjId, crate::promise::PromProbe>,
+    pub(crate) prom_sites: FastMap<ObjId, crate::promise::PromProbe>,
     /// `MutationObserver` bookkeeping (JS-C26) — callbacks par
     /// id d'observer ; les records vivent dans la file du `Dom`.
     pub(crate) mutobs: crate::mutation::MutObsState,
@@ -857,7 +903,7 @@ pub struct Engine {
     /// `import()` dont le chargeur a fait miss — la promesse
     /// reste pending et la session fetch l'URL résolue
     /// (JS-C100). Clé = `seq` répercutée à `deliver_import`.
-    pub(crate) pending_imports: std::collections::HashMap<u64, crate::module::PendingImport>,
+    pub(crate) pending_imports: FastMap<u64, crate::module::PendingImport>,
     /// Requêtes de fetch `import()` drainées par la session.
     pub(crate) dyn_import_reqs: Vec<crate::module::DynImportReq>,
     /// `true` quand la session s'est branchée (`set_import_
@@ -1014,7 +1060,7 @@ pub struct Engine {
     pub(crate) pending_msgs: crate::context::PendingMsgs,
     /// Dédup de la sonde `msg.*` (§B-122(g)) — une ligne par
     /// paire (src,target,issue) ; borné par le carré des ctx.
-    pub(crate) msg_probe_seen: std::collections::HashSet<u64>,
+    pub(crate) msg_probe_seen: FastSet<u64>,
     /// Messages `MessageChannel` en file (JS-C81) — drainés à
     /// la même frontière de job que `pending_msgs`.
     pub(crate) port_msgs: std::collections::VecDeque<crate::channel::PortMsg>,
@@ -1032,7 +1078,7 @@ pub struct Engine {
     /// AST — stables tant que le `FnLit` gardien est vivant.
     /// JS-C490/JS-C502 — `ptr(Expr::Ident) → (profondeur << 16) |
     /// slot` ; `slot = u16::MAX` = depth-only.
-    pub(crate) resolved_map: std::collections::HashMap<usize, u32>,
+    pub(crate) resolved_map: FastMap<usize, u32>,
     /// JS-C502 — listes canoniques ordonnées des noms par site de
     /// création d'env (clé = pointeur AST stable : `as_ptr()` du
     /// Vec de statements/déclarateurs enveloppé, `ptr(ForTarget)`,
@@ -1040,7 +1086,7 @@ pub struct Engine {
     /// pré-déclarés `EnvCell::Uninit` dans cet ordre — positions
     /// de slots déterministes même si l'exécution saute des
     /// déclarateurs.
-    pub(crate) names_table: std::collections::HashMap<usize, std::rc::Rc<crate::heap::CanonNames>>,
+    pub(crate) names_table: FastMap<usize, std::rc::Rc<crate::heap::CanonNames>>,
     /// `EXPLORER_NO_SLOTS=1` — coupe pré-déclare + fast-path
     /// slot (A/B en vol, précédent `resolve_off`).
     pub(crate) slots_off: bool,
@@ -1051,7 +1097,7 @@ pub struct Engine {
     /// `resolved_map`/`names_table`/`lowered_suspend_cache`/
     /// `ic_map` → vagues de re-résolution, re-câblage et
     /// ré-apprentissage IC (20 clears mesurés au vol N5.45).
-    pub(crate) resolved_guard: std::collections::HashMap<usize, LitRes>,
+    pub(crate) resolved_guard: FastMap<usize, LitRes>,
     /// JS-C537 — ordre d'insertion des lits résolus : la tête
     /// est le plus ancien → candidat d'éviction FIFO. Un lit
     /// encore chaud évincé se re-résout au prochain appel
@@ -1066,7 +1112,7 @@ pub struct Engine {
     /// une clé composite aplatie `ptr+d<<20` peut collisionner
     /// entre envs proches → ancêtre faux → liaison erronée
     /// silencieuse (régression constatée vol 9773 `/results`).
-    pub(crate) resolved_envs: std::collections::HashMap<(usize, u16), (EnvRef, EnvRef)>,
+    pub(crate) resolved_envs: FastMap<(usize, u16), (EnvRef, EnvRef)>,
     /// JS-C492 — corps baissé (générateur/async) **partagé par
     /// `lit`** : `lower_suspend_fn` alloue un `Rc<Vec<Stmt>>`
     /// neuf à chaque appel ; sans cache, le `resolved_map`
@@ -1077,7 +1123,7 @@ pub struct Engine {
     /// `Error: bb`/`yt-navigate-finish`). Un seul corps baissé
     /// par `lit` → adresses stables + chaque appel résout.
     /// La valeur épingle `lit` → `ptr(lit)` (clé) non réutilisé.
-    pub(crate) lowered_suspend_cache: std::collections::HashMap<usize, Rc<LoweredSuspend>>,
+    pub(crate) lowered_suspend_cache: FastMap<usize, Rc<LoweredSuspend>>,
     /// JS-C500 — inline cache own-prop : `ptr(Expr|ChainStep)
     /// → (shape, pos)` appris au premier hit own-data et revérifié
     /// **sémantiquement** à chaque consultation (`props[pos].0 ==
@@ -1092,13 +1138,13 @@ pub struct Engine {
     /// `EXPLORER_NO_IC=1` désarme tout (kill-switch A/B) ;
     /// `EXPLORER_IC_VERIFY=1` revérifie chaque hit par
     /// `find_prop` (diagnostic, ~2× le coût de lookup).
-    pub(crate) ic_map: std::collections::HashMap<usize, IcEnt>,
+    pub(crate) ic_map: FastMap<usize, IcEnt>,
     /// JS-C520 — mémo `(fold shapes chaîne proto, clé internée)
     /// → bool` de `proto_accessor_shadows` : le site est poly-
     /// morphe en clé (toutes les props DOM au même callsite) —
     /// le modèle IC « 1 site = 1 entrée » ne couvre pas cette
     /// question bi-dimensionnelle (vol N5.19).
-    pub(crate) shadow_memo: std::collections::HashMap<(u64, u64), bool>,
+    pub(crate) shadow_memo: FastMap<(u64, u64), bool>,
     /// JS-C521 — mémo négative `(fold shapes chaîne, clé)` des
     /// lectures absentes : le fold couvre la chaîne entière —
     /// toute mutation d'un maillon la change → correcte par
@@ -1106,7 +1152,7 @@ pub struct Engine {
     /// JS-C545 — bornée par éviction FIFO (`rabs_fifo`), pas
     /// par gel : N5.52 a mesuré `rabs_ins` figée au cap 8192
     /// dès le bootstrap puis 496 695 consultations rejetées.
-    pub(crate) rabs_memo: std::collections::HashSet<(u64, u64)>,
+    pub(crate) rabs_memo: FastSet<(u64, u64)>,
     /// Ordre d'insertion `rabs_memo` — `pop_front` = plus
     /// ancienne paire vivante (chaque clé n'existe qu'une fois
     /// dans le set et n'est poussée qu'une fois par insert).
@@ -1128,7 +1174,7 @@ pub struct Engine {
     /// recherche bornée par mot dans `src_text[span]` ; sans
     /// preuve → tout armé. La valeur épingle le `Rc<FnLit>` →
     /// `ptr` non réutilisé (motif `lowered_suspend_cache`).
-    pub(crate) lit_flags: std::collections::HashMap<usize, (u8, std::rc::Rc<crate::ast::FnLit>)>,
+    pub(crate) lit_flags: FastMap<usize, (u8, std::rc::Rc<crate::ast::FnLit>)>,
     /// JS-C490c — kill-switch A/B : `EXPLORER_NO_RESOLVE=1`
     /// désarme la résolution statique (A/B en vol sans rebuild).
     pub(crate) resolve_off: bool,
@@ -1613,7 +1659,7 @@ impl Engine {
             promises_created: 0,
             promises_settled: 0,
             sched_tally: std::collections::BTreeMap::new(),
-            prom_sites: std::collections::HashMap::new(),
+            prom_sites: FastMap::default(),
             mutobs: crate::mutation::MutObsState::default(),
             obs: crate::observers::ObsState::default(),
             files: crate::files::FilesState::default(),
@@ -1637,7 +1683,7 @@ impl Engine {
             module_urls: std::collections::HashMap::new(),
             module_envs: Vec::new(),
             module_loader: None,
-            pending_imports: std::collections::HashMap::new(),
+            pending_imports: FastMap::default(),
             dyn_import_reqs: Vec::new(),
             import_drain_wired: false,
             pending_unhandled: Vec::new(),
@@ -1680,24 +1726,24 @@ impl Engine {
             }],
             parked: std::collections::HashMap::new(),
             pending_msgs: std::collections::VecDeque::new(),
-            msg_probe_seen: std::collections::HashSet::new(),
+            msg_probe_seen: FastSet::default(),
             port_msgs: std::collections::VecDeque::new(),
             cjs_registry: Vec::new(),
             cjs_eval_name: None,
-            resolved_map: std::collections::HashMap::new(),
-            names_table: std::collections::HashMap::new(),
+            resolved_map: FastMap::default(),
+            names_table: FastMap::default(),
             slots_off: std::env::var("EXPLORER_NO_SLOTS").is_ok_and(|v| v == "1"),
-            resolved_guard: std::collections::HashMap::new(),
+            resolved_guard: FastMap::default(),
             resolved_fifo: std::collections::VecDeque::new(),
-            resolved_envs: std::collections::HashMap::new(),
-            ic_map: std::collections::HashMap::new(),
-            shadow_memo: std::collections::HashMap::new(),
-            rabs_memo: std::collections::HashSet::new(),
+            resolved_envs: FastMap::default(),
+            ic_map: FastMap::default(),
+            shadow_memo: FastMap::default(),
+            rabs_memo: FastSet::default(),
             rabs_fifo: std::collections::VecDeque::new(),
             ic_off: std::env::var("EXPLORER_NO_IC").is_ok_and(|v| v == "1"),
             ic_verify: std::env::var("EXPLORER_IC_VERIFY").is_ok_and(|v| v == "1"),
-            lowered_suspend_cache: std::collections::HashMap::new(),
-            lit_flags: std::collections::HashMap::new(),
+            lowered_suspend_cache: FastMap::default(),
+            lit_flags: FastMap::default(),
             resolve_off: std::env::var("EXPLORER_NO_RESOLVE").is_ok_and(|v| v == "1"),
             resolve_verify: std::env::var("EXPLORER_RESOLVE_VERIFY").is_ok_and(|v| v == "1"),
             res_walk: std::env::var("EXPLORER_RES_WALK").is_ok_and(|v| v == "1"),
