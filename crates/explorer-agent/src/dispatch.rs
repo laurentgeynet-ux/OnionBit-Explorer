@@ -542,7 +542,7 @@ async fn run(
 ) -> Result<Value, RpcError> {
     match method {
         Method::SessionOpen(_) | Method::SessionPing(_) | Method::SessionClose(_) => {
-            session_verbs(conn, method)
+            session_verbs(st, conn, method)
         }
         Method::TabOpen(_) | Method::TabClose(_) | Method::TabList(_) => {
             tab_verbs(st, conn, method).await
@@ -581,8 +581,46 @@ async fn run(
     }
 }
 
+/// Bloc `dirs` de `session.open` (étape 265) — le serveur
+/// annonce ses dossiers applicatifs : la racine `Explorer-data`
+/// canonique + ses sous-arbres (étape 262), `profile` = profil
+/// réellement servi injecté par l'hôte. Chemins normalisés
+/// `/` ; une clé indisponible (hors contexte projet, profil
+/// non injecté) est omise — jamais de chemin faux.
+fn dirs_block(st: &AgentShared) -> Value {
+    let mut m = serde_json::Map::new();
+    let mut put = |k: &str, p: Option<std::path::PathBuf>| {
+        if let Some(p) = p {
+            m.insert(
+                k.to_string(),
+                Value::from(p.to_string_lossy().replace('\\', "/")),
+            );
+        }
+    };
+    put("data_root", explorer_core::paths::data_root());
+    put("daemons", explorer_core::paths::daemons_dir());
+    put("profiles", explorer_core::paths::profiles_dir());
+    put("vols", explorer_core::paths::vols_dir());
+    put("logs", explorer_core::paths::logs_dir());
+    put(
+        "record",
+        explorer_core::paths::data_root().map(|r| r.join("record")),
+    );
+    put("crash", explorer_core::paths::crash_dir());
+    put(
+        "dumps",
+        explorer_core::paths::data_root().map(|r| r.join("dumps")),
+    );
+    put("profile", st.served_profile.clone());
+    Value::Object(m)
+}
+
 /// Cycle de vie — handshake, liveness, close.
-fn session_verbs(conn: &mut AgentConn, method: Method) -> Result<Value, RpcError> {
+fn session_verbs(
+    st: &Arc<AgentShared>,
+    conn: &mut AgentConn,
+    method: Method,
+) -> Result<Value, RpcError> {
     match method {
         Method::SessionOpen(p) => {
             if let Some(proto) = p.protocol.as_deref() {
@@ -613,6 +651,7 @@ fn session_verbs(conn: &mut AgentConn, method: Method) -> Result<Value, RpcError
                 "capabilities": caps,
                 "profile": conn.profile,
                 "help": help,
+                "dirs": dirs_block(st),
             }))
         }
         Method::SessionPing(_) => Ok(json!({

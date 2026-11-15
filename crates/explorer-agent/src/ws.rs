@@ -44,7 +44,19 @@ struct AgentQuery {
 /// contrat JSON pour introspection (même contenu que
 /// [`crate::SCHEMA`]).
 pub fn agent_router(session: Arc<tokio::sync::Mutex<Session>>, key: Option<String>) -> Router {
-    let st = AgentShared::new(session, key);
+    agent_router_with_profile(session, key, None)
+}
+
+/// [`agent_router`] + profil servi injecté (`--profile`/env/
+/// défaut résolu par l'hôte) — annoncé dans le bloc `dirs` de
+/// `session.open` pour que le client connaisse les dossiers
+/// applicatifs du daemon (étape 265).
+pub fn agent_router_with_profile(
+    session: Arc<tokio::sync::Mutex<Session>>,
+    key: Option<String>,
+    served_profile: Option<std::path::PathBuf>,
+) -> Router {
+    let st = AgentShared::with_profile(session, key, served_profile);
     Router::new()
         .route("/agent", get(ws_upgrade))
         .route("/agent/schema", get(schema))

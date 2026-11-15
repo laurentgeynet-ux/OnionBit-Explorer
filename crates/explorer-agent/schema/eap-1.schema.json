@@ -158,7 +158,8 @@
           "protocol": { "const": "eap/1" },
           "capabilities": { "type": "array", "items": { "$ref": "#/$defs/capability" }, "description": "capacités livrées = demandées ∩ implémentées" },
           "profile": { "$ref": "#/$defs/profile", "description": "droits accordés" },
-          "help": { "type": "object", "description": "index compact question→verbe(s), filtré par les capacités livrées (étape 248)", "additionalProperties": { "type": "string" } }
+          "help": { "type": "object", "description": "index compact question→verbe(s), filtré par les capacités livrées (étape 248)", "additionalProperties": { "type": "string" } },
+          "dirs": { "type": "object", "description": "dossiers applicatifs annoncés par le daemon (étape 265) : `data_root` canonique + sous-arbres (daemons/profiles/vols/logs/record/crash/dumps), `profile` = profil réellement servi ; chemins absolus normalisés `/`, clés absentes = indisponibles", "additionalProperties": { "type": "string" } }
         },
         "required": ["protocol", "capabilities", "profile"]
       }

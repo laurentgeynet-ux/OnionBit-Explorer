@@ -7935,6 +7935,14 @@ MCP = adaptateur, jamais la base.
   incrémental (journal par-clé + compaction) reste au
   journal interface pour plus tard — c'est le vrai fix,
   ceci éteint le débit.
+- [x] **Étape 265. `session.open` annonce `dirs`** — le serveur
+  sert ses dossiers applicatifs au handshake : `data_root`
+  + sous-arbres canoniques de l'étape 262 et `profile`
+  réellement servi (injecté par `agent_router_with_profile`,
+  le daemon passe son `profile_dir` résolu). Un client
+  externe (console de pilotage) n'a plus à deviner où
+  vivent registre, profils, vols et logs — bloc additif du
+  résultat, chemins `/`, clés absentes = indisponibles.
 
 ## Piste JS (JS-C26+) — spécialiste `explorer-jscore`
 

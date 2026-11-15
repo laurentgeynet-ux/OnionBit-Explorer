@@ -656,12 +656,11 @@ async fn amain() {
         // `profiles/<nom>`/`vols/<nom>/profile` sous
         // `Explorer-data` (étape 262) ; chemin explicite →
         // honoré (override volontaire, pas du hardcodage).
-        .map(|p| {
+        .map_or_else(store::JsonFileStore::default_dir, |p| {
             p.to_str()
                 .and_then(explorer_core::paths::resolve_profile_name)
                 .unwrap_or(p)
-        })
-        .unwrap_or_else(store::JsonFileStore::default_dir);
+        });
     // Verrou d'instance unique sur le profil — partagé avec le
     // mode FFI (`acquire_profile_lock`, même sémantique :
     // deux processus sur le même state/ = deux writers JSON).
@@ -815,8 +814,13 @@ async fn amain() {
     // listener : deuxième client de `Session`, même verrou,
     // même clé. Routeur disjoint du REST pour garder la
     // couture UI intacte.
-    let app = explorer_api::router_with_egress(session.clone(), cfg.api_key.clone(), egress)
-        .merge(explorer_agent::agent_router(session, cfg.api_key.clone()));
+    let app = explorer_api::router_with_egress(session.clone(), cfg.api_key.clone(), egress).merge(
+        explorer_agent::agent_router_with_profile(
+            session,
+            cfg.api_key.clone(),
+            Some(profile_dir.clone()),
+        ),
+    );
     if cfg.api_key.is_some() {
         tracing::info!("clé d'API requise (x-api-key / ?key=)");
     }

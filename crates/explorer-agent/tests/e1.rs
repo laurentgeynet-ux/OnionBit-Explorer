@@ -217,6 +217,18 @@ async fn handshake_et_porte_session_open() {
     assert!(r["result"]["capabilities"].as_array().expect("caps").len() >= 8);
     assert_eq!(r["result"]["profile"]["input"], false);
     assert_eq!(r["result"]["profile"]["eval"], false);
+    // Bloc dirs (étape 265) — annoncé dès l'open : data_root
+    // canonique résolu (contexte workspace), `profile` absent
+    // quand l'hôte ne l'injecte pas (routeur de test).
+    let dirs = &r["result"]["dirs"];
+    assert!(dirs.is_object(), "dirs annoncé");
+    assert!(
+        dirs["data_root"]
+            .as_str()
+            .is_some_and(|s| s.ends_with("Explorer-data")),
+        "data_root canonique : {dirs}"
+    );
+    assert!(dirs["profile"].is_null(), "profil non injecté");
     // Après open : tab.list passe.
     let r = a.call("tab.list", json!({})).await;
     assert!(r["result"].is_object());
