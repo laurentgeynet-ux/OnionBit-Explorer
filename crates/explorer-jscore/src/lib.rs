@@ -865,6 +865,23 @@ pub fn j17_snapshot() -> String {
         }
         out.push_str(&format!("pscan:{joined}"));
     }
+    // JS-C543 — top-12 callsites des miss `prop_idx_miss`
+    // (`pidxm:f:l=n,…`).
+    let mut pidxm: Vec<(u64, String)> =
+        J17_PIDXM_SITES.with(|m| m.borrow().values().map(|(l, n)| (*n, l.clone())).collect());
+    pidxm.sort_unstable_by_key(|a| std::cmp::Reverse(a.0));
+    if !pidxm.is_empty() {
+        let joined = pidxm
+            .iter()
+            .take(12)
+            .map(|(n, l)| format!("{l}={n}"))
+            .collect::<Vec<_>>()
+            .join(",");
+        if !out.is_empty() {
+            out.push(' ');
+        }
+        out.push_str(&format!("pidxm:{joined}"));
+    }
     // JS-C527 — top-20 clés marchées (`keys:k=n,…`) ; noms
     // assainis (hors `[A-Za-z0-9_$@.:-]` → `?`, tronqués à 24)
     // pour rester sur une seule ligne de paires.
@@ -962,6 +979,13 @@ thread_local! {
     /// (`prop_pos` directs : own-first, learn, `set_prop`) du
     /// compteur au prochain vol lourd.
     static J17_PSCAN_SITES: std::cell::RefCell<
+        std::collections::BTreeMap<usize, (String, u64)>,
+    > = const { std::cell::RefCell::new(std::collections::BTreeMap::new()) };
+    /// JS-C543 — `pidxm:` — miss `prop_idx_miss` attribués au
+    /// callsite (même `Location` capturée à l'entrée de
+    /// `prop_pos`). 927 k miss/session yt N5.50 : le vol lourd
+    /// nomme le driver des lookups absents sur objets indexés.
+    static J17_PIDXM_SITES: std::cell::RefCell<
         std::collections::BTreeMap<usize, (String, u64)>,
     > = const { std::cell::RefCell::new(std::collections::BTreeMap::new()) };
 }
@@ -1077,6 +1101,25 @@ pub(crate) fn j17_pscan_probe(loc: &'static std::panic::Location<'static>) {
     J17_PROP_SCAN.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     let site = std::ptr::from_ref(loc) as usize;
     J17_PSCAN_SITES.with(|m| {
+        let mut m = m.borrow_mut();
+        let e = m
+            .entry(site)
+            .or_insert_with(|| (format!("{}:{}", loc.file(), loc.line()), 0));
+        e.1 += 1;
+    });
+}
+
+/// JS-C543 — sonde `pidxm:` : tick `prop_idx_miss` +
+/// attribution du callsite en un seul `j17_on` (miroir
+/// [`j17_pscan_probe`]). Appelée par miss d'index dans
+/// [`crate::heap::Object::prop_pos`].
+pub(crate) fn j17_pidxm_probe(loc: &'static std::panic::Location<'static>) {
+    if !j17_on() {
+        return;
+    }
+    J17_PROP_IDX_MISS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let site = std::ptr::from_ref(loc) as usize;
+    J17_PIDXM_SITES.with(|m| {
         let mut m = m.borrow_mut();
         let e = m
             .entry(site)

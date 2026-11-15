@@ -582,6 +582,39 @@ fn pscan_attribue_le_callsite() {
     );
 }
 
+/// JS-C543 — `pidxm:` attribue les miss `prop_idx_miss` au
+/// callsite (`Location` capturée à l'entrée de `prop_pos` —
+/// dans une closure elle ne perçait pas `track_caller`, N5.50
+/// attribuait la ligne `position` interne). Un lookup absent
+/// sur objet indexé (≥ `PROPS_IDX_MIN` props) doit émettre la
+/// section ; les sites nomment le driver, pas `prop_pos`.
+#[test]
+fn pidxm_attribue_le_callsite_du_miss_index() {
+    let _g = TEST_LOCK.lock().unwrap();
+    j17_enable();
+    let mut e = Engine::new();
+    // 12 props ≥ `PROPS_IDX_MIN` → chemin indexé : `o.zzz`
+    // absent → miss d'index attribué au callsite `o.find`.
+    e.eval(
+        "var o={a:1,b:2,c:3,d:4,e:5,f:6,g:7,h:8,i:9,j:10,k:11,l:12};\
+         var s=0; for(var n=0;n<10;n++){s+=o.zzz|0; s+=o.qq|0;} s",
+    )
+    .expect("eval");
+    let snap = j17_snapshot();
+    assert!(
+        snap.contains("pidxm:"),
+        "un miss d'index doit émettre `pidxm:` : {snap}"
+    );
+    // Le callsite doit être hors `prop_pos` (le vrai driver —
+    // `find_own_ai`/`get_prop`/`find`), pas la ligne interne :
+    // preuve que le `Location` capturé à l'entrée perce.
+    let pidxm = snap.split("pidxm:").nth(1).unwrap_or("");
+    assert!(
+        !pidxm.split(',').next().unwrap_or("").contains("position"),
+        "le site attribué ne doit pas être la closure interne : {snap}"
+    );
+}
+
 /// JS-C535 — le peek homo-typé de `binary_op` sert `(Num,Num)`
 /// et `(Str,Str)` sans `to_primitive`/`to_number` ; les
 /// compteurs `bin_nn`/`bin_ss` mesurent la couverture. Le lock

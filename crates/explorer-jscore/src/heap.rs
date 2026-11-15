@@ -1550,14 +1550,20 @@ impl Object {
     /// de `u32::MAX` props l'index est inutilisable → repli linéaire
     /// (univers inaccessible : ~200 Go de props — dégradation, pas
     /// de panic).
-    /// JS-C542 — `#[track_caller]` : chaque comparaison du scan
-    /// linéaire est attribuée à son callsite (`pscan:` du
-    /// snapshot) — nomme la part écriture/lecture du compteur.
+    /// JS-C542 — `#[track_caller]` : comparaisons et miss
+    /// d'index attribués au callsite (`pscan:`/`pidxm:` du
+    /// snapshot). JS-C543 — le `Location` est capturé **à
+    /// l'entrée** : dans une closure il ne perce pas
+    /// `track_caller` (N5.50 attribuait la ligne `position`
+    /// interne, pas le driver) — et `find`/`get_own` sont
+    /// `track_caller` aussi : la chaîne remonte aux callsites
+    /// `mod.rs` (via `find_own_ai`, déjà `track_caller` C513).
     #[track_caller]
     pub(crate) fn prop_pos(&self, key: &str) -> Option<usize> {
+        let site = std::panic::Location::caller();
         if self.props.len() >= u32::MAX as usize {
             return self.props.iter().position(|(k, _)| {
-                crate::j17_pscan_probe(std::panic::Location::caller());
+                crate::j17_pscan_probe(site);
                 std::ptr::eq(&raw const **k, key) || &**k == key
             });
         }
@@ -1569,7 +1575,7 @@ impl Object {
             self.lookups.set(self.lookups.get().saturating_add(1));
             if self.lookups.get() < PROPS_IDX_ARM {
                 return self.props.iter().position(|(k, _)| {
-                    crate::j17_pscan_probe(std::panic::Location::caller());
+                    crate::j17_pscan_probe(site);
                     // V-3a : clés internées → même alloc ⇒ même
                     // ptr ; clés dynamiques → miss → memcmp.
                     std::ptr::eq(&raw const **k, key) || &**k == key
@@ -1587,11 +1593,11 @@ impl Object {
             Box::new(m)
         });
         let pos = m.get(key);
-        crate::j17_tick(if pos.is_some() {
-            &crate::J17_PROP_IDX_HIT
+        if pos.is_some() {
+            crate::j17_tick(&crate::J17_PROP_IDX_HIT);
         } else {
-            &crate::J17_PROP_IDX_MISS
-        });
+            crate::j17_pidxm_probe(site);
+        }
         pos.map(|i| usize::try_from(*i).unwrap_or(usize::MAX))
     }
 
@@ -1626,12 +1632,18 @@ impl Object {
 
     /// Raw own property lookup (no prototype walk, no array-index
     /// magic) — accessors come back as `Prop::Acc`.
+    /// JS-C543 — `#[track_caller]` : propage le callsite à
+    /// `prop_pos` — `pscan:`/`pidxm:` nomment le driver (`mod.rs`
+    /// via `find_own_ai`, déjà `track_caller` C513), pas la ligne
+    /// interne de `find`.
+    #[track_caller]
     pub fn find(&self, key: &str) -> Option<Prop> {
         self.prop_pos(key)
             .and_then(|i| self.props.get(i).map(|(_, p)| p.clone()))
     }
 
     /// Own property lookup — data value only (`None` for accessors).
+    #[track_caller]
     pub fn get_own(&self, key: &str) -> Option<Value> {
         self.find(key).and_then(|p| p.data_value())
     }

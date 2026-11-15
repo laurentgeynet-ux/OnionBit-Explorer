@@ -12902,6 +12902,16 @@ chaque gain rapporté contre les **deux** archétypes.
   (`ic_hit`/`ic_miss`/`ic_disarm` au snapshot) pour
   borner la couverture du seul court-circuit existant.
   Dependency-groups = infra lourde, dernier recours.
+- [x] **JS-C543 — sonde `pidxm:` + `pscan:` perce
+  enfin** : N5.50 — `pscan:heap.rs:1572` = 100 %
+  était la ligne `position` interne (le `Location`
+  dans une closure ne perce pas `track_caller`).
+  Capturé à l'entrée de `prop_pos` (1 appel/lookup,
+  moins cher) + `find`/`get_own` `track_caller` →
+  la chaîne remonte à `find_own_ai` puis aux
+  drivers `mod.rs`. `prop_idx_miss` = 927 k/session
+  lourde — `pidxm:` nomme le driver des lookups
+  absents au prochain vol.
 - [x] **JS-C542 — sonde `pscan:` (callsite des
   comparaisons `prop_scan`)** : dernier compteur
   `prop_*` non attribué (~52 k/session légère).
