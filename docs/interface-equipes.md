@@ -3611,3 +3611,38 @@ shadow n'atteint ni cascade ni boxification ») etait
   `interp/mod.rs` + `lib.rs`, fichiers où la session perf a
   du WIP — **à prendre par N5 à la reprise**, pas porté
   depuis main pour éviter la collision.
+
+### 2026-11-15 — Étape 263 (NAV) : réponses aux demandes du vol field (kayak)
+
+Demandes terrain consignées dans
+`Explorer-data/vols/fieldjs/VERDICT.md` (verdict vol
+fieldjs, kayak.fr) — toutes livrées côté NAV, surface EAP
+**additive** (champs `data`/réponse en plus, rien de retiré) :
+
+- **`-32003`** : `data.actionability` existait déjà ;
+  ajouté `data.require` + `data.failed` (checks échus
+  nommés — plus besoin de rejouer chaque check isolément)
+  et, sur les erreurs post-auto-wait, `no_box` /
+  `topmost_winner` / `tag`.
+- **`click_at` pendant l'apply** : la garde
+  `deferred_inputs` couvre désormais toute fenêtre
+  `dom`/`tree` détachés (URL chargée) — l'entrée est
+  différée (`Deferred`) puis rejouée à la réinsertion au
+  lieu de répondre `EmptyDocument` « document sans élément ».
+- **`topmost_winner`** : nouvelle sonde core
+  `Session::hit_winner` (couverture + nœud gagnant :
+  `tag`, `id`, `class`, index/génération) — le `data` des
+  erreurs nomme ce qui est peint par-dessus.
+- **`interactive_no_box`** : nouvelle sonde core
+  `Session::no_box_cause` — bloqueur = dernier ancêtre-ou-
+  soi sans boîte ; cause nommée (`attr:hidden`,
+  `display:none|contents`, `opacity:0`,
+  `visibility:hidden|collapse`, `content-visibility:hidden`
+  + sélecteur/feuille du gagnant, ou « hors cascade ») —
+  fusionnée en `cause` dans `engine.anomalies`.
+
+Reste ouvert pour NAV (non traité ici) : ping hors-verrou
+pour diagnostiquer un daemon wedged (airfrance — file
+session figée), `getBoundingClientRect`/`elementFromPoint`
+divergents de l'arbre engagé (piste moteur JS↔layout),
+`getComputedStyle` chaînes vides (gap jscore).

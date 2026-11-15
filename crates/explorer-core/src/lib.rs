@@ -35,7 +35,7 @@ pub use session::{
     media_event_json, media_host_state_str, media_offer_json, media_report_from_json,
     navigate_shared, pump_timers_shared, Bookmark, CoreError, CoreEvent, DownloadInfo,
     DownloadRecord, DownloadState, EvalReply, FrameRegion, FrameTop, GeomBox, GeometryReport,
-    HitTargets, InputEvent, InputOutcome, KeyMods, MediaAudioSpec, MediaCmd, MediaError,
+    HitTargets, HitWinner, InputEvent, InputOutcome, KeyMods, MediaAudioSpec, MediaCmd, MediaError,
     MediaHostState, MediaKind, MediaOfferInfo, MediaRect, MediaReport, MsePull, ProfileStore,
     Session, SessionConfig, SnapshotEntry, StoredCookie, TabId, TabInfo, Visit,
 };

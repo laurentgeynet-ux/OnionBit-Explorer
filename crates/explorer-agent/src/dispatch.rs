@@ -1172,9 +1172,10 @@ async fn handle_verbs(
             let (probe, action, degraded) = auto_wait(st, p.tab, handle, &opts).await?;
             let scroll_y = scroll_y(st, p.tab).await;
             let Some((cx, cy)) = probe.center_viewport(scroll_y) else {
-                return Err(not_actionable(
+                return Err(not_actionable_probe(
                     "pas de centre cliquable — élément non posé",
                     action,
+                    &probe,
                 ));
             };
             let outcome = send_input(st, p.tab, InputEvent::Click { x: cx, y: cy }).await?;
@@ -1198,7 +1199,11 @@ async fn handle_verbs(
             let (probe, action, degraded) = auto_wait(st, p.tab, handle, &opts).await?;
             let scroll_y = scroll_y(st, p.tab).await;
             let Some((cx, cy)) = probe.center_viewport(scroll_y) else {
-                return Err(not_actionable("pas de centre — non posé", action));
+                return Err(not_actionable_probe(
+                    "pas de centre — non posé",
+                    action,
+                    &probe,
+                ));
             };
             let outcome = send_input(st, p.tab, InputEvent::MouseMove { x: cx, y: cy }).await?;
             // `input.hover` rend `{url, editable}` du contrat.
@@ -1237,11 +1242,15 @@ async fn type_into_field(
         || probe.attr("contenteditable") == Some("true")
         || probe.attr("contenteditable") == Some("");
     if !editable {
-        return Err(not_actionable("élément non éditable", action));
+        return Err(not_actionable_probe("élément non éditable", action, &probe));
     }
     let scroll_y = scroll_y(st, p.tab).await;
     let Some((cx, cy)) = probe.center_viewport(scroll_y) else {
-        return Err(not_actionable("pas de centre — non posé", action));
+        return Err(not_actionable_probe(
+            "pas de centre — non posé",
+            action,
+            &probe,
+        ));
     };
     // Focus par le clic natif, puis frappe caractère
     // par caractère (Key+KeyUp — pas d'injection de
@@ -1325,9 +1334,10 @@ async fn act_verbs(
                 let handle = resolve(conn, st, p.tab, r)?;
                 let probe = crate::actionable::probe(st, p.tab, handle.node).await?;
                 let Some(rect) = probe.rect else {
-                    return Err(not_actionable(
+                    return Err(not_actionable_probe(
                         "élément non posé — scroll_into_view impossible",
                         Actionability::default(),
+                        &probe,
                     ));
                 };
                 let (scroll_y, vh) = {
@@ -1663,12 +1673,24 @@ async fn scroll_y(st: &Arc<AgentShared>, tab: u64) -> f32 {
         .map_or(0.0, |t| t.scroll_y)
 }
 
-/// `NotActionable` typé avec le constat dans `data`.
-fn not_actionable(message: impl Into<String>, a: Actionability) -> RpcError {
+/// `NotActionable` post-auto-wait — même constat plus la
+/// lecture du probe : `no_box` nomme le cas « interactif
+/// sans boîte posée » et `topmost_winner` ce qui est peint
+/// par-dessus (retour terrain vol field, étape 263).
+fn not_actionable_probe(
+    message: impl Into<String>,
+    a: Actionability,
+    p: &crate::actionable::Probe,
+) -> RpcError {
     err_data(
         ErrorCode::NotActionable,
         message,
-        json!({ "actionability": a }),
+        json!({
+            "actionability": a,
+            "no_box": p.rect.is_none(),
+            "topmost_winner": p.topmost_winner,
+            "tag": p.tag,
+        }),
     )
 }
 

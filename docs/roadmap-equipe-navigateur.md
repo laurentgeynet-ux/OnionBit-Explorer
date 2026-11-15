@@ -7909,6 +7909,18 @@ MCP = adaptateur, jamais la base.
   pause revue des hardcodages. **Prérequis à** : persistance
   IDB incrémentale (fichiers canoniques avant nouveau
   format).
+- [x] **Étape 263. Retour terrain vol field — les erreurs
+  nomment** (demandes NAV du vol kayak, verdict
+  `Explorer-data/vols/fieldjs/VERDICT.md`). `-32003` porte
+  `require`+`failed` (checks échus nommés) ;
+  `topmost_winner`/`no_box`/`tag` sur les erreurs post-
+  auto-wait ; garde `deferred_inputs` étendue aux fenêtres
+  `dom`/`tree` détachés hors `paint_detached` (`Deferred`,
+  fini « document sans élément » pendant l'apply) ; sonde
+  `hit_winner` (couverture + nœud gagnant) ; `no_box_cause`
+  nomme la cascade fautive (`attr:hidden`, `display:none`,
+  `opacity:0`…) fusionnée en `cause` dans
+  `engine.anomalies`.
 
 ## Piste JS (JS-C26+) — spécialiste `explorer-jscore`
 

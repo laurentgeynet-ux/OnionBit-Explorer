@@ -83,8 +83,19 @@ impl Session {
         // dispatch échouerait à `js = None` — l'entrée
         // rejouée à la réinsertion garde sa cible au lieu
         // de mourir silencieusement.
+        // `dom`/`tree` détachés sans `paint_detached` : fenêtre
+        // d'apply (payload reprise, journal rejeté, re-parse en
+        // vol) hors la garde historique — un clic qui tombait
+        // dedans mourait à `EmptyDocument` (« document sans
+        // élément ») alors que le document revient. L'URL
+        // chargée distingue « apply en vol » de « jamais
+        // navigué » — le premier diffère, le second échoue
+        // honnêtement plus bas.
         if self.tabs.get(&tab).is_some_and(|e| {
-            e.paint_detached || e.js_detached.is_some() || !e.deferred_inputs.is_empty()
+            e.paint_detached
+                || e.js_detached.is_some()
+                || !e.deferred_inputs.is_empty()
+                || (e.url.is_some() && (e.dom.is_none() || e.tree.is_none()))
         }) {
             let is_scroll = matches!(ev, InputEvent::Scroll { .. });
             self.defer_input(tab, ev);

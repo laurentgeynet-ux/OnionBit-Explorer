@@ -631,6 +631,138 @@ impl Session {
         }))
     }
 
+    /// Cause d'un « interactif sans boîte » (étape 263 —
+    /// `engine.anomalies`) : remonte la chaîne d'ancêtres du
+    /// nœud, trouve l'élément **bloqueur** (le plus haut
+    /// ancêtre-ou-soi absent de l'arbre de boîtes commis) puis
+    /// nomme la cause — attribut (`hidden`, `inert`) ou déclar-
+    /// ation gagnante qui retire la boîte (`display:none`,
+    /// `display:contents`, `opacity:0`, `visibility`,
+    /// `content-visibility`). Retour terrain vol field : sans
+    /// cette cause l'agent ne distingue pas « caché par design
+    /// du site » de « anomalie de boxification ».
+    /// `None` si l'onglet/DOM/arbre/moteur de style est
+    /// indisponible (apply en vol — la sonde est retentable).
+    #[must_use]
+    pub fn no_box_cause(
+        &self,
+        tab: TabId,
+        index: u32,
+        generation: u32,
+    ) -> Option<serde_json::Value> {
+        // Chaîne soi → racine, bornée — un DOM hostile ne fait
+        // pas marcher la sonde sans fin.
+        const MAX_CHAIN: usize = 24;
+        let entry = self.tabs.get(&tab)?;
+        let (dom, tree, eng) = (
+            entry.dom.as_ref()?,
+            entry.tree.as_ref()?,
+            entry.style_eng.as_ref()?,
+        );
+        let node = NodeId::from_parts(index, generation);
+        let mut chain = vec![node];
+        let mut cur = dom.parent(node).ok().flatten();
+        while let Some(p) = cur {
+            if chain.len() >= MAX_CHAIN {
+                break;
+            }
+            chain.push(p);
+            cur = dom.parent(p).ok().flatten();
+        }
+        // Boîtes commises par index arène — `display:none`
+        // retire la boîte du sous-arbre : le bloqueur est le
+        // **dernier** élément sans boîte avant le premier
+        // ancêtre posé (sa propre cascade porte la cause).
+        let boxed: std::collections::HashSet<u32> = self
+            .geometry_report(tab)
+            .map(|r| r.boxes.iter().map(|b| b.node).collect())
+            .unwrap_or_default();
+        let mut blocker = node;
+        for &n in &chain {
+            if boxed.contains(&n.index()) {
+                break;
+            }
+            blocker = n;
+        }
+        let on = if blocker == node { "self" } else { "ancestor" };
+        let tag = dom.tag_name(blocker).ok().unwrap_or("?");
+        // `hidden` retire la boîte (UA `display:none`) — le
+        // nommer est plus parlant que la règle UA. `inert`
+        // n'est pas une cause ici : il garde sa boîte et
+        // neutralise le hit-test — surface `hit_winner`.
+        if dom
+            .attribute_str(blocker, "hidden")
+            .ok()
+            .flatten()
+            .is_some()
+        {
+            return Some(serde_json::json!({
+                "cause": "attr:hidden",
+                "on": on,
+                "node": blocker.index(),
+                "tag": tag,
+            }));
+        }
+        // Cascade du bloqueur — une seule explication, filtrée
+        // aux propriétés qui retirent ou vident une boîte.
+        let env = super::apply::viewport_env(
+            self.viewport,
+            self.color_scheme,
+            self.js_factory.is_some(),
+            self.scale,
+        );
+        let containers = explorer_layout::measure_containers(tree);
+        let parent = dom
+            .parent(blocker)
+            .ok()
+            .flatten()
+            .and_then(|p| cascade_find_box(tree, p))
+            .map(|bx| &bx.style);
+        let decls = eng.explain(
+            dom,
+            blocker,
+            &env,
+            parent,
+            None,
+            &|_| false,
+            Some(&containers),
+        );
+        let hides = |prop: &str, value: &str| -> bool {
+            let v = value.trim();
+            match prop {
+                "display" => v == "none" || v == "contents",
+                "visibility" => v == "hidden" || v == "collapse",
+                "opacity" => v.parse::<f32>().is_ok_and(|o| o <= 0.0),
+                "content-visibility" => v == "hidden",
+                _ => false,
+            }
+        };
+        let win = decls.iter().find(|t| {
+            matches!(t.verdict, explorer_css::DeclVerdict::Winner) && hides(&t.prop, &t.value)
+        });
+        Some(match win {
+            Some(t) => serde_json::json!({
+                "cause": format!("{}:{}", t.prop, t.value.trim()),
+                "on": on,
+                "node": blocker.index(),
+                "tag": tag,
+                "selector": t.selector,
+                "sheet": t.sheet,
+                "inline": t.inline,
+            }),
+            // Aucune déclaration gagnante ne retire la boîte :
+            // remplacé sans contenu, pseudo, ou anomalie de
+            // boxification — le bloqueur nommé reste la piste.
+            None => serde_json::json!({
+                "cause": "hors cascade",
+                "on": on,
+                "node": blocker.index(),
+                "tag": tag,
+                "detail": "boîte absente sans déclaration retirante — piste moteur",
+            }),
+        })
+    }
+
     /// Compteurs de peinture du **dernier paint commis**
     /// (verbe EAP `engine.paint_stats`, étape 249) : les
     /// `EmitStats` de la build de display list (collectées à

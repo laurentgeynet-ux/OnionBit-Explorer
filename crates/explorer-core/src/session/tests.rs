@@ -1363,6 +1363,35 @@ async fn input_defers_while_engine_detached() {
     );
 }
 
+/// Étape 263 — un clic tombant dans une fenêtre `dom`/`tree`
+/// détachés **hors** `paint_detached` (payload reprise,
+/// re-parse en vol — retour terrain vol field : « document
+/// sans élément » répété sur page à mutation continue) est
+/// différé : le document revient, l'entrée rejouée à la
+/// réinsertion. Un onglet jamais navigué (`url` absente)
+/// garde le refus honnête.
+#[tokio::test]
+async fn input_defers_when_dom_detached_in_flight() {
+    let mut s = Session::new(Arc::new(FailTransport), Arc::new(TestFont));
+    let tab = s.open_tab();
+    {
+        let e = s.tabs.get_mut(&tab).unwrap();
+        e.url = Some(Url::parse("http://t.local/x").unwrap());
+        // `dom`/`tree` : `None` ; `paint_detached` : faux —
+        // fenêtre d'apply hors la garde historique.
+    }
+    let out = s
+        .handle_input(tab, InputEvent::Click { x: 1.0, y: 1.0 })
+        .await
+        .unwrap();
+    assert_eq!(out, InputOutcome::Deferred);
+    assert_eq!(
+        s.tabs.get(&tab).unwrap().deferred_inputs.len(),
+        1,
+        "clic enfilé pendant la fenêtre dom/tree détachés"
+    );
+}
+
 /// Trou de liveness dyn-subresources : `<link rel=stylesheet>`
 /// inséré par JS ne devait son fetch qu'à `after_script`
 /// (gate `jobs>0` de la pompe) — une page qui marque le lien

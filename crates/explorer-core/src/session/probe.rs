@@ -68,6 +68,24 @@ impl SnapshotEntry {
     }
 }
 
+/// Résultat du hit-test [`Session::hit_winner`] — la cible
+/// est-elle couverte, et quel nœud gagne le point.
+#[derive(Debug, Clone)]
+pub struct HitWinner {
+    /// Le point atteint la cible ou un descendant.
+    pub covers: bool,
+    /// Index arène du nœud topmost au point.
+    pub node: u32,
+    /// Génération du nœud topmost (fraîche — pas figée).
+    pub generation: u32,
+    /// Tag minuscule du nœud topmost.
+    pub tag: Option<String>,
+    /// `id` du nœud topmost, s'il en porte un.
+    pub id: Option<String>,
+    /// Première classe du nœud topmost, s'il en porte.
+    pub class: Option<String>,
+}
+
 impl Session {
     /// Sélection CSS **native** sur le DOM commis de l'onglet :
     /// le prélude est parsé par le moteur `explorer-css` (toute
@@ -241,6 +259,24 @@ impl Session {
         index: u32,
         generation: u32,
     ) -> Option<bool> {
+        self.hit_winner(tab, x, y, index, generation)
+            .map(|w| w.covers)
+    }
+
+    /// Hit-test au point `(x, y)` viewport — un seul test rend
+    /// la couverture de la cible **et** l'identité du nœud qui
+    /// gagne le point (retour terrain vol field : « topmost
+    /// échoue sans savoir ce qui est peint par-dessus »).
+    /// `None` dans les mêmes cas que [`Self::hit_covers`].
+    #[must_use]
+    pub fn hit_winner(
+        &self,
+        tab: TabId,
+        x: f32,
+        y: f32,
+        index: u32,
+        generation: u32,
+    ) -> Option<HitWinner> {
         let entry = self.tabs.get(&tab)?;
         let (tree, dom) = (entry.tree.as_ref()?, entry.dom.as_ref()?);
         let target = Self::find_node(dom, index)?;
@@ -250,14 +286,31 @@ impl Session {
         let hit = hit_test(tree, x, y, entry.scroll_y, self.viewport)?;
         // Le nœud touché couvre la cible s'il en descend —
         // remonter les ancêtres jusqu'à la racine document.
+        let mut covers = false;
         let mut cur = Some(hit);
         while let Some(n) = cur {
             if n == target {
-                return Some(true);
+                covers = true;
+                break;
             }
             cur = dom.parent(n).ok().flatten();
         }
-        Some(false)
+        Some(HitWinner {
+            covers,
+            node: hit.index(),
+            generation: hit.generation(),
+            tag: dom.tag_name(hit).ok().map(str::to_owned),
+            id: dom
+                .attribute_str(hit, "id")
+                .ok()
+                .flatten()
+                .map(str::to_owned),
+            class: dom
+                .attribute_str(hit, "class")
+                .ok()
+                .flatten()
+                .and_then(|c| c.split_whitespace().next().map(str::to_owned)),
+        })
     }
 
     /// Marche sémantique du document commis — une passe

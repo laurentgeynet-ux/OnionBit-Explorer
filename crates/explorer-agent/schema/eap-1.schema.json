@@ -132,7 +132,7 @@
           "description": "-32700 parse · -32601 method_not_found · -32602 invalid_params · -32001 unsupported · -32002 stale_ref · -32003 not_actionable · -32004 timeout · -32005 no_such_tab · -32006 bad_selector · -32007 engine_unavailable · -32008 unauthorized"
         },
         "message": { "type": "string" },
-        "data": { "description": "détail typé — ex. actionability sous -32003" }
+        "data": { "description": "détail typé — sous -32003 : actionability + require + failed (checks échus nommés), et no_box/topmost_winner/tag sur les erreurs post-auto-wait" }
       },
       "required": ["code", "message"],
       "additionalProperties": false

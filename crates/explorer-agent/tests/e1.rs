@@ -375,10 +375,13 @@ async fn engine_introspection() {
     let r = a
         .call("engine.pipeline", json!({"tab": tab, "reset": true}))
         .await;
-    assert_eq!(
-        r["result"]["phases"]["flow.raster"]["n"], n_before,
-        "le take rend l'intervalle clos : {r}"
-    );
+    // `>=` et non `==` : une raster née entre les deux appels
+    // (fonte, image tardive) est incluse dans l'intervalle
+    // clos — le take capture tout ce qui a couru jusqu'à lui.
+    let take_n = r["result"]["phases"]["flow.raster"]["n"]
+        .as_u64()
+        .expect("n du take");
+    assert!(take_n >= n_before, "le take rend l'intervalle clos : {r}");
     let r = a
         .call("engine.pipeline", json!({"tab": tab, "reset": true}))
         .await;
@@ -666,12 +669,59 @@ async fn engine_anomalies_flague_interactif_sans_boite() {
         .expect("suspect no_box attendu");
     assert_eq!(ghost["tag"], "a");
     assert!(ghost["ref"].as_str().is_some_and(|s| s.starts_with("el:")));
+    // La cause nomme le bloqueur — `display:none` sur
+    // l'ancêtre <div> (étape 263 : distinguer « caché par
+    // design » de « anomalie de boxification »).
+    assert_eq!(ghost["cause"]["cause"], "display:none", "{ghost}");
+    assert_eq!(ghost["cause"]["on"], "ancestor", "{ghost}");
+    assert_eq!(ghost["cause"]["tag"], "div", "{ghost}");
     // L'input hidden n'est PAS flagué (non interactif).
     assert!(!suspects.iter().any(|s| s["tag"] == "input"));
     // La page visible reste un témoin sain.
     assert!(r["result"]["scanned"]["nodes"]
         .as_u64()
         .is_some_and(|n| n > 0));
+    srv.abort();
+}
+
+#[tokio::test]
+async fn not_actionable_nomme_checks_echus() {
+    let (mut a, srv, _session) = connect_with_html(ANOMALY_PAGE).await;
+    a.call(
+        "session.open",
+        json!({"protocol":"eap/1","capabilities":["snapshot","handles","actionable","input","tabs"],"profile":{"input":true}}),
+    )
+    .await;
+    let r = a.call("tab.open", json!({})).await;
+    let tab = r["result"]["tab"].as_u64().expect("tab");
+    let r = a
+        .call("nav.goto", json!({"tab": tab, "url": "http://t.local/x"}))
+        .await;
+    assert!(r["error"].is_null(), "{r}");
+    let r = a
+        .call(
+            "query.select",
+            json!({"tab": tab, "selector": "a[href='/g']"}),
+        )
+        .await;
+    let ghost = r["result"]["refs"]
+        .as_array()
+        .and_then(|a| a.first())
+        .and_then(|r| r.as_str())
+        .map(str::to_owned)
+        .expect("ref ghost");
+    // display:none → `visible` jamais satisfait : le -32003
+    // nomme les checks échus dans `data.failed` (étape 263 —
+    // l'agent n'a plus à rejouer chaque check isolément).
+    let r = a
+        .call(
+            "input.click",
+            json!({"tab": tab, "ref": ghost, "opts": {"timeout_ms": 120}}),
+        )
+        .await;
+    assert_eq!(r["error"]["code"], -32003, "{r}");
+    let failed = r["error"]["data"]["failed"].as_array().expect("failed");
+    assert!(failed.contains(&json!("visible")), "{r}");
     srv.abort();
 }
 

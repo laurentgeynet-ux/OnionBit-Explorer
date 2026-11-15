@@ -125,7 +125,7 @@ pub(crate) use paint_helpers::*;
 #[allow(clippy::wildcard_imports)]
 pub(crate) use popup::*;
 #[allow(clippy::wildcard_imports)]
-pub use probe::{ElementInfo, SnapshotEntry};
+pub use probe::{ElementInfo, HitWinner, SnapshotEntry};
 #[allow(clippy::wildcard_imports)]
 pub(crate) use scripts::*;
 #[allow(clippy::wildcard_imports)]

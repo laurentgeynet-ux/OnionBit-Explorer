@@ -38,6 +38,11 @@ pub struct Probe {
     /// Le point central de la boîte atteint l'élément ou un
     /// descendant (`hit_covers` natif) — `None` = indéterminable.
     pub topmost: Option<bool>,
+    /// Étiquette du nœud gagnant le hit-test au centre quand
+    /// `topmost` est `false` — `"tag#id"`, `"tag.classe"` ou
+    /// `"tag[node]"` (retour terrain vol field : nommer ce qui
+    /// est peint par-dessus, étape 263).
+    pub topmost_winner: Option<String>,
     /// Tag minuscule (`button`, `input`…).
     pub tag: String,
     /// Attributs source — `type`, `href`, `aria-label`…
@@ -122,17 +127,35 @@ pub async fn probe(st: &Arc<AgentShared>, tab: u64, index: u32) -> Result<Probe,
         ),
         None => (String::new(), Vec::new(), false),
     };
-    let topmost = rect.and_then(|r| {
-        let (cx, cy) = (r.x + r.w / 2.0, r.y - scroll_y + r.h / 2.0);
-        s.hit_covers(tab, cx, cy, index, generation)
-    });
+    let (topmost, topmost_winner) = rect
+        .and_then(|r| {
+            let (cx, cy) = (r.x + r.w / 2.0, r.y - scroll_y + r.h / 2.0);
+            s.hit_winner(tab, cx, cy, index, generation)
+        })
+        .map_or((None, None), |w| {
+            (Some(w.covers), (!w.covers).then(|| winner_label(&w)))
+        });
     Ok(Probe {
         rect,
         disabled,
         topmost,
+        topmost_winner,
         tag,
         attrs,
     })
+}
+
+/// Étiquette courte du gagnant hit-test — `#id` le plus
+/// parlant, première classe sinon, index arène en dernier.
+fn winner_label(w: &explorer_core::HitWinner) -> String {
+    let tag = w.tag.clone().unwrap_or_else(|| "?".into());
+    if let Some(id) = &w.id {
+        return format!("{tag}#{id}");
+    }
+    if let Some(c) = &w.class {
+        return format!("{tag}.{c}");
+    }
+    format!("{tag}[{}]", w.node)
 }
 
 /// Les checks requis évalués sur un probe — `stable` est pris
@@ -152,12 +175,28 @@ fn evaluate(p: &Probe, stable: bool, vh: f32, scroll_y: f32) -> Actionability {
 
 /// `true` si tous les checks `require` sont vrais dans `a`.
 fn passes(a: Actionability, require: &[Check]) -> bool {
-    require.iter().all(|c| match c {
+    require.iter().all(|c| check_passed(*c, a))
+}
+
+fn check_passed(c: Check, a: Actionability) -> bool {
+    match c {
         Check::Visible => a.visible,
         Check::Stable => a.stable,
         Check::Enabled => a.enabled,
         Check::Topmost => a.topmost,
-    })
+    }
+}
+
+/// Les checks `require` échus — nommés pour `data.failed`
+/// (retour terrain : `actionability` seul obligeait l'agent
+/// à rejouer chaque check isolément pour savoir lequel
+/// tombait).
+fn failed_checks(a: Actionability, require: &[Check]) -> Vec<Check> {
+    require
+        .iter()
+        .copied()
+        .filter(|c| !check_passed(*c, a))
+        .collect()
 }
 
 /// Auto-wait borné : sonde → évalue → retour dès que `require`
@@ -214,7 +253,12 @@ pub async fn auto_wait(
             return Err(RpcError {
                 code: ErrorCode::NotActionable.into(),
                 message: "checks d'actionabilité échus".into(),
-                data: Some(json!({ "actionability": action })),
+                data: Some(json!({
+                    "actionability": action,
+                    "require": require,
+                    "failed": failed_checks(action, &require),
+                    "topmost_winner": p.topmost_winner,
+                })),
             });
         }
         tokio::time::sleep(Duration::from_millis(POLL_MS)).await;
