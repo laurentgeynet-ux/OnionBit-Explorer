@@ -23,6 +23,7 @@
 #![forbid(unsafe_code)]
 
 pub mod actionable;
+pub mod anomalies;
 pub mod dispatch;
 pub mod proto;
 pub mod snapshot;

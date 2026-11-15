@@ -3,24 +3,101 @@
   "exchange": [
     {
       "wire": "client → serveur",
-      "message": { "jsonrpc": "2.0", "id": 30, "method": "engine.layout", "params": { "tab": 1 } }
-    },
-    {
-      "wire": "serveur → client",
-      "message": { "jsonrpc": "2.0", "id": 30, "result": { "dump": "block 0,0 800×600 <html>\n  block 8,8 784×21 <body>" } }
-    },
-    {
-      "wire": "client → serveur",
-      "message": { "jsonrpc": "2.0", "id": 31, "method": "engine.pipeline", "params": { "tab": 1 } }
+      "message": {
+        "jsonrpc": "2.0",
+        "id": 30,
+        "method": "engine.layout",
+        "params": {
+          "tab": 1
+        }
+      }
     },
     {
       "wire": "serveur → client",
       "message": {
-        "jsonrpc": "2.0", "id": 31,
+        "jsonrpc": "2.0",
+        "id": 30,
         "result": {
-          "state": { "has_dom": true, "has_layout": true, "has_frame": true, "nav_epoch": 1, "frame_epoch": 1, "doc_h": 632.0, "orphan_parked": false },
-          "counters": { "journal_applies": 0, "journal_fallbacks": 0, "apply_started_without_fin": 0, "pending_applies": 0 },
-          "mem": { "dom_nodes": 22, "layout_boxes": 8, "display_items": 12, "total_bytes": 1920000 }
+          "dump": "block 0,0 800×600 <html>\n  block 8,8 784×21 <body>"
+        }
+      }
+    },
+    {
+      "wire": "client → serveur",
+      "message": {
+        "jsonrpc": "2.0",
+        "id": 31,
+        "method": "engine.pipeline",
+        "params": {
+          "tab": 1
+        }
+      }
+    },
+    {
+      "wire": "serveur → client",
+      "message": {
+        "jsonrpc": "2.0",
+        "id": 31,
+        "result": {
+          "state": {
+            "has_dom": true,
+            "has_layout": true,
+            "has_frame": true,
+            "nav_epoch": 1,
+            "frame_epoch": 1,
+            "doc_h": 632.0,
+            "orphan_parked": false
+          },
+          "counters": {
+            "journal_applies": 0,
+            "journal_fallbacks": 0,
+            "apply_started_without_fin": 0,
+            "pending_applies": 0
+          },
+          "mem": {
+            "dom_nodes": 22,
+            "layout_boxes": 8,
+            "display_items": 12,
+            "total_bytes": 1920000
+          }
+        }
+      }
+    },
+    {
+      "wire": "client → serveur",
+      "message": {
+        "jsonrpc": "2.0",
+        "id": 32,
+        "method": "engine.anomalies",
+        "params": {
+          "tab": 1,
+          "max": 10
+        }
+      }
+    },
+    {
+      "wire": "serveur → client",
+      "message": {
+        "jsonrpc": "2.0",
+        "id": 32,
+        "result": {
+          "suspects": [
+            {
+              "kind": "interactive_no_box",
+              "ref": "el:7",
+              "tag": "a",
+              "node": "#ghost",
+              "depth": 3,
+              "detail": "interactif sans boîte posée — display:none, ancêtre non boxifié ou hors arbre"
+            }
+          ],
+          "scanned": {
+            "nodes": 34,
+            "boxes": 24,
+            "console_errors": 0
+          },
+          "rev": 1,
+          "note": "suspects heuristiques — indices bornés, pas verdicts"
         }
       }
     }

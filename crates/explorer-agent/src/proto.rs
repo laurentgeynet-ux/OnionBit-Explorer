@@ -521,6 +521,10 @@ pub enum Method {
     /// compteurs de vie, attribution mémoire (cap `engine`).
     #[serde(rename = "engine.pipeline")]
     EnginePipeline(TabParams),
+    /// Suspects heuristiques bornés — triage affichage +
+    /// santé moteur (cap `engine`, étape 248).
+    #[serde(rename = "engine.anomalies")]
+    EngineAnomalies(AnomalyParams),
 
     /// Clic par handle (cap `handles`+`input`, droit `input`).
     #[serde(rename = "input.click")]
@@ -623,6 +627,15 @@ pub enum WaitKind {
     Selector,
     /// Deux commits layout sans delta de rects (`wait.for` seul).
     Stable,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct AnomalyParams {
+    /// Onglet cible.
+    pub tab: TabId,
+    /// Borne de suspects — défaut côté serveur.
+    #[serde(default)]
+    pub max: Option<u32>,
 }
 
 #[derive(Debug, Clone, Deserialize)]

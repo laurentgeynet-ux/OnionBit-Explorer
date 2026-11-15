@@ -33,7 +33,7 @@ const PAGE: &str = "<!doctype html><html><head><title>t</title></head><body>\
     <a href=\"/next\">go</a><button id=\"b\">ok</button>\
     <input type=\"text\" id=\"f\"></body></html>";
 
-struct FakeTransport;
+struct FakeTransport(&'static str);
 #[async_trait]
 impl HttpTransport for FakeTransport {
     async fn fetch(&self, _req: &Request) -> NetResult<Response> {
@@ -41,7 +41,7 @@ impl HttpTransport for FakeTransport {
             status: 200,
             reason: "fake".to_string(),
             headers: vec![],
-            body: PAGE.as_bytes().to_vec(),
+            body: self.0.as_bytes().to_vec(),
             reused_connection: false,
             resolved_url: None,
         })
@@ -152,8 +152,21 @@ async fn connect_with_session() -> (
     tokio::task::JoinHandle<()>,
     Arc<tokio::sync::Mutex<Session>>,
 ) {
+    connect_with_html(PAGE).await
+}
+
+/// Variante à HTML libre — les fixtures anormales ne
+/// partagent pas `PAGE` (les tests existants comptent ses
+/// éléments).
+async fn connect_with_html(
+    html: &'static str,
+) -> (
+    Agent,
+    tokio::task::JoinHandle<()>,
+    Arc<tokio::sync::Mutex<Session>>,
+) {
     let session = Arc::new(tokio::sync::Mutex::new(Session::new(
-        Arc::new(FakeTransport),
+        Arc::new(FakeTransport(html)),
         Arc::new(FixtureFont),
     )));
     let app = explorer_agent::agent_router(Arc::clone(&session), None);
@@ -343,6 +356,49 @@ async fn engine_introspection() {
     // Onglet inconnu → -32005.
     let r = a.call("engine.pipeline", json!({"tab": 999})).await;
     assert_eq!(r["error"]["code"], -32005);
+    srv.abort();
+}
+
+/// Page avec un interactif caché — `display:none` laisse
+/// l'élément dans le DOM mais hors de l'arbre de boîtes.
+const ANOMALY_PAGE: &str = r#"<!doctype html><html><body>
+    <div style="display:none"><a href="/g">ghost</a>
+    <input type="hidden" name="h"></div>
+    <a href="/v">visible</a></body></html>"#;
+
+#[tokio::test]
+async fn engine_anomalies_flague_interactif_sans_boite() {
+    let (mut a, srv, _session) = connect_with_html(ANOMALY_PAGE).await;
+    let r = open(&mut a).await;
+    // L'index compact est servi au handshake.
+    let help = r["result"]["help"].as_object().expect("help");
+    assert_eq!(
+        help.get("suspects d'affichage / santé ?")
+            .and_then(Value::as_str),
+        Some("engine.anomalies"),
+        "{help:?}"
+    );
+    let r = a.call("tab.open", json!({})).await;
+    let tab = r["result"]["tab"].as_u64().expect("tab");
+    let r = a
+        .call("nav.goto", json!({"tab": tab, "url": "http://t.local/x"}))
+        .await;
+    assert!(r["error"].is_null(), "{r}");
+    let r = a.call("engine.anomalies", json!({"tab": tab})).await;
+    let suspects = r["result"]["suspects"].as_array().expect("suspects");
+    // Le lien ghost display:none est flagué no_box, avec ref.
+    let ghost = suspects
+        .iter()
+        .find(|s| s["kind"] == "interactive_no_box")
+        .expect("suspect no_box attendu");
+    assert_eq!(ghost["tag"], "a");
+    assert!(ghost["ref"].as_str().is_some_and(|s| s.starts_with("el:")));
+    // L'input hidden n'est PAS flagué (non interactif).
+    assert!(!suspects.iter().any(|s| s["tag"] == "input"));
+    // La page visible reste un témoin sain.
+    assert!(r["result"]["scanned"]["nodes"]
+        .as_u64()
+        .is_some_and(|n| n > 0));
     srv.abort();
 }
 

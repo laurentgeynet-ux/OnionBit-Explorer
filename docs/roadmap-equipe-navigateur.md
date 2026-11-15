@@ -7706,6 +7706,17 @@ MCP = adaptateur, jamais la base.
   candidats/verdicts par déclaration), `engine.paint_stats`,
   `net.events`, `frame.diff`, snapshot `{rev}` (rétention bornée).
 
+- [x] **Étape 248. EAP `engine.anomalies` + index `help`** —
+  le triage qui réduit l'espace de recherche. **Livrée
+  (`nav/eap`)** : `engine.anomalies{tab,max?}` = suspects
+  heuristiques classés et référencés (interactif sans boîte,
+  quasi-invisible, hors document, imbrication profonde,
+  erreurs pipeline, santé moteur) — indices, pas verdicts ;
+  `session.open` sert `help`, index question→verbe(s)
+  filtré par capacités. Outil MCP `engine_anomalies`.
+  Suites : `engine.cascade{ref}` (verdict par déclaration),
+  accumulateur `sync_profile`, `net.events`.
+
 ## Piste JS (JS-C26+) — spécialiste `explorer-jscore`
 
 Ordre dicté par les besoins de la piste produit d'abord, puis

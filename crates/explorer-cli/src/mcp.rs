@@ -530,6 +530,14 @@ fn act_tools() -> Value {
             "État moteur + compteurs + mémoire par réservoir {tab}",
             tab()
         ),
+        t(
+            "engine_anomalies",
+            "Suspects d'affichage/santé bornés — indices, pas verdicts {tab,max?}",
+            obj(
+                json!({"tab":{"type":"integer"},"max":{"type":"integer"}}),
+                &["tab"]
+            )
+        ),
     ])
 }
 
@@ -602,6 +610,7 @@ fn to_eap(name: &str, args: &Value) -> Option<(&'static str, Value)> {
         "console" => ("console.get", json!({"tab": tab, "limit": args["limit"]})),
         "engine_layout" => ("engine.layout", json!({"tab": tab})),
         "engine_pipeline" => ("engine.pipeline", json!({"tab": tab})),
+        "engine_anomalies" => ("engine.anomalies", json!({"tab": tab, "max": args["max"]})),
         _ => return None,
     })
 }

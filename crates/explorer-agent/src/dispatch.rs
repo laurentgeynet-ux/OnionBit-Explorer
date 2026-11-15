@@ -49,6 +49,87 @@ const IMPLEMENTED: &[Capability] = &[
     Capability::Engine,
 ];
 
+/// Index compact servi à `session.open` (étape 248) —
+/// question d'agent → verbe(s), filtré par les capacités
+/// livrées. Un contexte LLM tient ~15 lignes de plan au
+/// lieu d'explorer le catalogue ; la réponse « où est le
+/// bug » reste aux verbes, l'index ne fait que guider.
+const HELP: &[(&str, Option<Capability>, &str)] = &[
+    (
+        "que voit l'agent ?",
+        Some(Capability::Snapshot),
+        "snapshot.get",
+    ),
+    (
+        "diff depuis le dernier snapshot ?",
+        Some(Capability::SnapshotDiff),
+        "snapshot.get{since}",
+    ),
+    (
+        "suspects d'affichage / santé ?",
+        Some(Capability::Engine),
+        "engine.anomalies",
+    ),
+    (
+        "boîte posée, absente ou 0x0 ?",
+        Some(Capability::Engine),
+        "engine.layout",
+    ),
+    (
+        "où partent octets et état ?",
+        Some(Capability::Engine),
+        "engine.pipeline",
+    ),
+    (
+        "erreurs pipeline ?",
+        Some(Capability::ConsoleLog),
+        "console.get",
+    ),
+    ("DOM brut ?", Some(Capability::Dom), "dom.get"),
+    ("image peinte ?", Some(Capability::Frames), "frame.get"),
+    (
+        "onglets ?",
+        Some(Capability::Tabs),
+        "tab.list|tab.open|tab.close",
+    ),
+    (
+        "naviguer ?",
+        Some(Capability::Tabs),
+        "nav.goto|nav.back|nav.forward|nav.reload",
+    ),
+    (
+        "taille du viewport ?",
+        Some(Capability::Tabs),
+        "nav.viewport",
+    ),
+    (
+        "trouver un élément ?",
+        Some(Capability::Handles),
+        "query.select",
+    ),
+    (
+        "cliquer, taper, survoler ?",
+        Some(Capability::Input),
+        "input.click|input.type|input.hover",
+    ),
+    (
+        "touches, scroll, coordonnées ?",
+        Some(Capability::Input),
+        "input.key|input.scroll|input.click_at",
+    ),
+    ("évaluer du JS ?", Some(Capability::Eval), "eval.run"),
+    (
+        "attendre un état ?",
+        Some(Capability::WaitCommit),
+        "wait.for",
+    ),
+    (
+        "s'abonner aux événements ?",
+        Some(Capability::Events),
+        "events.subscribe|events.unsubscribe",
+    ),
+];
+
 /// Capacité requise par méthode — `None` = toujours servie
 /// (cycle de vie `session.*`).
 fn cap_of(m: &Method) -> Option<Capability> {
@@ -70,7 +151,9 @@ fn cap_of(m: &Method) -> Option<Capability> {
         Method::FrameGet(_) => Some(Capability::Frames),
         Method::ConsoleGet(_) => Some(Capability::ConsoleLog),
         Method::DomGet(_) => Some(Capability::Dom),
-        Method::EngineLayout(_) | Method::EnginePipeline(_) => Some(Capability::Engine),
+        Method::EngineLayout(_) | Method::EnginePipeline(_) | Method::EngineAnomalies(_) => {
+            Some(Capability::Engine)
+        }
         Method::InputKey(_) | Method::InputScroll(_) | Method::InputClickAt(_) => {
             Some(Capability::Input)
         }
@@ -410,7 +493,8 @@ async fn run(
         | Method::ConsoleGet(_)
         | Method::DomGet(_)
         | Method::EngineLayout(_)
-        | Method::EnginePipeline(_) => perceive_verbs(st, conn, method).await,
+        | Method::EnginePipeline(_)
+        | Method::EngineAnomalies(_) => perceive_verbs(st, conn, method).await,
         Method::InputClick(_) | Method::InputType(_) | Method::InputHover(_) => {
             handle_verbs(st, conn, method).await
         }
@@ -443,10 +527,19 @@ fn session_verbs(conn: &mut AgentConn, method: Method) -> Result<Value, RpcError
             conn.caps = caps.iter().copied().collect();
             conn.profile = p.profile.unwrap_or_default();
             conn.opened = true;
+            // Index compact (étape 248) — question→verbes,
+            // filtré par les capacités livrées : un agent
+            // tient ~15 lignes en contexte au lieu d'explorer.
+            let help: serde_json::Map<String, Value> = HELP
+                .iter()
+                .filter(|(_, cap, _)| cap.is_none_or(|c| caps.contains(&c)))
+                .map(|(q, _, v)| ((*q).to_string(), json!(v)))
+                .collect();
             Ok(json!({
                 "protocol": crate::PROTOCOL,
                 "capabilities": caps,
                 "profile": conn.profile,
+                "help": help,
             }))
         }
         Method::SessionPing(_) => Ok(json!({
@@ -764,6 +857,14 @@ async fn perceive_verbs(
                 Some(r) => Ok(r),
                 None => Err(err(ErrorCode::NoSuchTab, "onglet inconnu")),
             }
+        }
+        Method::EngineAnomalies(p) => {
+            scope(conn, p.tab)?;
+            tab_exists(st, p.tab).await?;
+            let max = p
+                .max
+                .map_or_else(crate::anomalies::default_max, |m| m as usize);
+            crate::anomalies::run(st, conn, p.tab, max).await
         }
 
         // Verbe hors groupe — garde-fou interne (le dispatch
