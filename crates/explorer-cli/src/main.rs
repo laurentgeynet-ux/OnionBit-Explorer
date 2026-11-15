@@ -1241,6 +1241,34 @@ impl explorer_layout::font::FontSource for BcdAhem {
     }
 }
 
+/// Bitmap du harnais `paintv` (étape 274) : SVG 8×8 servi en
+/// `data:` URI — décodé par `collect_data_images`, **aucune
+/// I/O** (la borne « `PaintImages` vide » des familles
+/// `mask-*`/`border-image*`/`object-*`/`background-image`
+/// disparaît). Quatre **quadrants** 2D — une bitmap
+/// verticalement uniforme rend `object-fit:cover`,
+/// `object-position` et `mask-position` invisibles par
+/// construction (mesuré au harnais) ; chaque quadrant a
+/// couleur **et** alpha propres : les deux interprétations
+/// de masque (alpha/luminance), les positions, les
+/// répétitions et les découpes `border-image-slice` sont
+/// discriminables sur la même image.
+const HARNESS_IMG: &str = concat!(
+    "data:image/svg+xml,",
+    "%3Csvg xmlns='http://www.w3.org/2000/svg' width='8' height='8'%3E",
+    "%3Crect width='4' height='4' fill='%230040c8'/%3E",
+    "%3Crect x='4' width='4' height='4' fill='%23c84000' fill-opacity='0.5'/%3E",
+    "%3Crect y='4' width='4' height='4' fill='%2300a040'/%3E",
+    "%3Crect x='4' y='4' width='4' height='4' fill='%23e0c000' fill-opacity='0.6'/%3E",
+    "%3C/svg%3E"
+);
+
+/// Borne pixels passée à `collect_data_images`/
+/// `collect_svg_styled` au harnais `paintv` (même ordre que
+/// la session : une fixture hostile ne doit pas rasteriser
+/// des giga-pixels).
+const HARNESS_MAX_PX: u32 = 1 << 22;
+
 /// Déclarations de **contexte** injectées dans la signature
 /// `.x` (`affectsv`) : la prop testée n'a d'effet observable
 /// que sur une boîte préparée — `border-color` sans style ne
@@ -1434,14 +1462,265 @@ fn prop_affects_decl(decl: &str) -> bool {
         "content" => ".x::before",
         _ => ".x",
     };
-    let (a, b) = (
-        sig(&format!("{sel} {{ {cctx}; {}: {} }}", name, value.trim())),
-        sig(&format!("{sel} {{ {cctx} }}")),
-    );
+    // La signature de base `.x { ctx }` ne dépend que de la
+    // prop (fixture + ctx + sel sont des fonctions pures de
+    // `name`) — une entrée par prop suffit (étape 274 : la
+    // re-computait pour chaque valeur → moitié du temps de
+    // passe gaspillée sur ~10-15 lignes par prop).
+    let a = sig(&format!("{sel} {{ {cctx}; {}: {} }}", name, value.trim()));
+    let b = BASE_GEO.with(|c| {
+        c.borrow_mut()
+            .entry(name.to_string())
+            .or_insert_with(|| sig(&format!("{sel} {{ {cctx} }}")))
+            .clone()
+    });
     if std::env::var_os("EXPLORER_BCD_DEBUG_SIG").is_some() {
         eprintln!("=== {name}:{value}\n--- with\n{a}\n--- base\n{b}");
     }
     a != b
+}
+
+thread_local! {
+    /// Signatures de **base** mises en cache par prop
+    /// (étape 274) — `prop_affects_decl` (dump) et
+    /// `prop_paints_decl` (framebuffer). La signature
+    /// `.x { ctx }` sans déclaration est invariante pour
+    /// toutes les valeurs d'une même prop : le cache divise
+    /// par ~2 le coût de la passe `check` (parse DOM +
+    /// cascade + layout + dump/raster refaits à chaque ligne
+    /// sinon). `Vec<u8>` cloné par appel — ~1,9 Mio,
+    /// amorti par le raster évité.
+    static BASE_GEO: std::cell::RefCell<std::collections::HashMap<String, String>> =
+        std::cell::RefCell::new(std::collections::HashMap::new());
+    static BASE_PIX: std::cell::RefCell<
+        std::collections::HashMap<String, Option<Vec<u8>>>,
+    > = std::cell::RefCell::new(std::collections::HashMap::new());
+}
+
+/// Contexte **additionnel** de l'oracle pixel (étape 274) —
+/// concaténé après [`context_css`] (l'ordre fait gagner le
+/// ctx pixel en cas de doublon). Un seul objet : poser la
+/// bitmap du harnais ([`HARNESS_IMG`]) en source `url()`
+/// pour les familles dont l'effet n'existe que sur une
+/// image décodée — `PaintImages` était vide au harnais
+/// `affectsv` (borne `mask-*`/`border-image*`/`object-*`
+/// documentée dans [`NO_ORACLE`]), ici `collect_data_images`
+/// la sert réellement.
+fn paint_ctx_extra(name: &str) -> String {
+    let n = name.trim_start_matches('-').trim_start_matches("webkit-");
+    if n == "mask-image" || n == "mask" {
+        // La prop **est** la source : pas de mask en ctx —
+        // la déclaration la pose (base = boîte non masquée).
+        ";background-color:#c04000;width:100px;height:80px".into()
+    } else if n.starts_with("mask") {
+        // Longhands `mask-*` : sans source la valeur est
+        // inerte — bitmap réelle posée + remplissage à
+        // masquer (la moitié semi-transparente rend le
+        // masquage visible dans les pixels).
+        format!(
+            ";mask-image:url(\"{HARNESS_IMG}\");background-color:#c04000;width:100px;height:80px"
+        )
+    } else if n == "border-image-slice" {
+        // Source `url()` réelle (`borders_url` l'exige,
+        // R-248) + slice ctx `40%` : les pixels de coupe
+        // saturent sur une bitmap 8 px (`30` > 8 = image
+        // entière = `100%` → miss par identité, mesuré) —
+        // `40%` discrimine nombres et pourcentages.
+        format!(";border-image-source:url(\"{HARNESS_IMG}\");border-image-slice:40%")
+    } else if n == "object-position" {
+        // La position n'existe que si le bitmap ne remplit
+        // pas la boîte — `fill` (défaut) l'étire et rend
+        // tout offset invisible.
+        ";object-fit:none".into()
+    } else if n.starts_with("border-image-") && n != "border-image-source" {
+        // Longhands `border-image-*` : `borders_url` exige
+        // une source `url()` — le gradient du ctx
+        // géométrique n'y vit pas (R-248). `border-image` et
+        // `-source` exclus : leur déclaration **est** la
+        // source — un ctx bitmap ferait compter `ok` une
+        // valeur qui produit moins de peinture que la base
+        // (ex : gradient non servi), faux positif.
+        format!(";border-image-source:url(\"{HARNESS_IMG}\")")
+    } else if n == "shape-image-threshold" {
+        // Le seuil n'existe que contre une forme **image**
+        // (le ctx géométrique pose `circle()` — la url le
+        // remplace ; borne alpha analysée ou non côté moteur,
+        // `miss` honnête si absente).
+        format!(";shape-outside:url(\"{HARNESS_IMG}\")")
+    } else if n == "offset" || n.starts_with("offset-") {
+        // Le `.x` de la fixture motion-path est une boîte
+        // vide (10×10 transparente) : déplacée sur le chemin
+        // elle reste invisible — fond posé pour que
+        // distance/rotate/ancre produisent des pixels.
+        ";background:#c04000".into()
+    } else if n == "image-rendering" {
+        // Lissage/net ne se voient qu'en bitmap mis à
+        // l'échelle (8×8 → 80 px).
+        format!(
+            ";background-image:url(\"{HARNESS_IMG}\");background-size:80px 80px;background-repeat:no-repeat;width:100px;height:80px"
+        )
+    } else if n.starts_with("background") && n != "background-image" {
+        // `position`/`size`/`repeat`/`clip`/`origin`/`blend`
+        // discriminent sur une vraie bitmap (le gradient ctx
+        // est remplacé — dernier mot gagne).
+        format!(";background-image:url(\"{HARNESS_IMG}\")")
+    } else {
+        String::new()
+    }
+}
+
+/// Fixture `paintv` (étape 274) : [`fixture_for`] par défaut ;
+/// les familles qui exigent un porteur précis reçoivent la
+/// leur — remplacé `<img>` pour `object-*`, sous-arbre `<svg>`
+/// pour les props à portée SVG2 (le `collect_svg_styled` du
+/// harnais projette la déclaration calculée dans l'îlot
+/// rasterisé — `fill`/`stroke`/`cx`… restent inertes sur un
+/// élément HTML par spec, pas par trou moteur).
+fn paint_fixture_for(name: &str) -> String {
+    let n = name.trim_start_matches('-').trim_start_matches("webkit-");
+    // `object-*` dimensionne/positionne la bitmap d'un
+    // remplacé — `.x` = `<img>` servie par la data-URI.
+    if matches!(n, "object-fit" | "object-position" | "object-view-box") {
+        return format!(
+            "<body><img class=x width=\"80\" height=\"40\" src=\"{HARNESS_IMG}\"></body>"
+        );
+    }
+    match () {
+        () if matches!(n, "cx" | "cy" | "r") => concat!(
+            "<body><svg width=\"160\" height=\"120\" viewBox=\"0 0 160 120\">",
+            "<circle class=x cx=\"80\" cy=\"60\" r=\"20\" fill=\"#c04000\"/></svg></body>"
+        ),
+        () if matches!(n, "x" | "y" | "rx" | "ry") => concat!(
+            "<body><svg width=\"160\" height=\"120\" viewBox=\"0 0 160 120\">",
+            "<rect class=x x=\"20\" y=\"20\" width=\"80\" height=\"60\" fill=\"#c04000\"/></svg></body>"
+        ),
+        () if n == "d" => concat!(
+            "<body><svg width=\"160\" height=\"120\" viewBox=\"0 0 160 120\">",
+            "<path class=x d=\"M20 20h100v60h-100z\" fill=\"#c04000\"/></svg></body>"
+        ),
+        () if n == "fill-rule" => concat!(
+            "<body><svg width=\"160\" height=\"120\" viewBox=\"0 0 160 120\">",
+            "<path class=x d=\"M10 10h140v100h-140zM40 40h80v40h-80z\"",
+            " fill=\"#c04000\" fill-rule=\"nonzero\"/></svg></body>"
+        ),
+        // `fill`/`stroke`/`-opacity`/`-width` + refs
+        // `url(#g)` : le dégradé est défini dans la fixture,
+        // la sonde `url` le vise.
+        () if matches!(
+            n,
+            "fill" | "fill-opacity" | "stroke" | "stroke-opacity" | "stroke-width"
+        ) => concat!(
+            "<body><svg width=\"160\" height=\"120\" viewBox=\"0 0 160 120\">",
+            "<defs><linearGradient id=\"g\">",
+            "<stop offset=\"0\" stop-color=\"#c04000\"/><stop offset=\"1\" stop-color=\"#0040c8\"/>",
+            "</linearGradient></defs>",
+            "<rect class=x x=\"20\" y=\"20\" width=\"100\" height=\"70\"",
+            " fill=\"#c04000\" stroke=\"#0040c8\" stroke-width=\"8\"/></svg></body>"
+        ),
+        () if n.starts_with("stroke-") || n == "paint-order" => concat!(
+            "<body><svg width=\"160\" height=\"120\" viewBox=\"0 0 160 120\">",
+            "<rect class=x x=\"20\" y=\"20\" width=\"100\" height=\"70\"",
+            " fill=\"#c04000\" stroke=\"#0040c8\" stroke-width=\"8\"/></svg></body>"
+        ),
+        // `vector-effect:non-scaling-stroke` n'existe que
+        // sous viewport mis à l'échelle (viewBox 4× plus
+        // petit que la surface → le tracé est agrandi ×4).
+        () if n == "vector-effect" => concat!(
+            "<body><svg width=\"160\" height=\"120\" viewBox=\"0 0 40 30\">",
+            "<rect class=x x=\"5\" y=\"5\" width=\"25\" height=\"18\"",
+            " fill=\"#c04000\" stroke=\"#0040c8\" stroke-width=\"2\"/></svg></body>"
+        ),
+        () if matches!(n, "stop-color" | "stop-opacity") => concat!(
+            "<body><svg width=\"160\" height=\"120\" viewBox=\"0 0 160 120\">",
+            "<defs><linearGradient id=\"g\">",
+            "<stop class=x offset=\"0\" stop-color=\"#c04000\"/><stop offset=\"1\" stop-color=\"#0040c8\"/>",
+            "</linearGradient></defs>",
+            "<rect width=\"160\" height=\"120\" fill=\"url(#g)\"/></svg></body>"
+        ),
+        () => fixture_for(name),
+    }
+    .into()
+}
+
+/// Oracle **`paintv`** (étape 274) — la déclaration
+/// `.x { ctx; name:value }` change-t-elle le **framebuffer** ?
+/// Complément d'`affectsv` : les effets de peinture ne vivent
+/// ni dans le box tree ni dans le dump display-list
+/// (`filter`, `clip-path`, `transform-origin`, `outline`,
+/// `mask-*`…) — ils vivent dans les pixels. Pipeline réel :
+/// `collect_data_images` (la bitmap `data:` du harnais est
+/// décodée pour de vrai) + `collect_svg_styled` (îlots
+/// `<svg>` style-aware) + `build_display_list_full` +
+/// `rasterize`. Comparaison **exacte** — moteur et fonte
+/// Ahem sont déterministes : un pixel différent = la valeur
+/// a un effet visible, zéro = inerte ici (`miss` honnête si
+/// la valeur devait bouger).
+///
+/// Même biais assumé qu'`affectsv`, documenté : on mesure
+/// « la déclaration change quelque chose », pas « le rendu
+/// est conforme » — un rendu faux mais différent compte `ok`
+/// (la conformité visuelle reste l'affaire des goldens WPT).
+fn prop_paints_decl(decl: &str) -> bool {
+    static SRC: BcdAhem = BcdAhem;
+    let Some((name, value)) = decl.split_once(':') else {
+        return false;
+    };
+    let name = name.trim();
+    let ctx = explorer_layout::BlockCtx {
+        fonts: Some(&SRC),
+        ..explorer_layout::BlockCtx::default()
+    };
+    let fixture = paint_fixture_for(name);
+    let dom = explorer_html::TreeBuilder::parse(&fixture);
+    let root = {
+        let mut r = None;
+        walk_any(dom.document(), &dom, &mut r);
+        r.unwrap_or(dom.document())
+    };
+    let has_svg = fixture.contains("<svg");
+    let sig = |css: &str| -> Option<Vec<u8>> {
+        let mut eng = explorer_css::StyleEngine::new();
+        eng.add_css(css, explorer_css::Origin::Author);
+        let sm = eng.compute_tree(&dom, root, &explorer_css::StyleEnv::default());
+        let mut bx = explorer_layout::build_box_tree(&dom, root, &sm)?;
+        explorer_layout::layout_tree(&mut bx, 800.0, &ctx);
+        let mut images = explorer_render::collect_data_images(&dom, &sm, HARNESS_MAX_PX);
+        if has_svg {
+            let (svgs, srcs) = explorer_render::collect_svg_styled(&dom, root, &sm, HARNESS_MAX_PX);
+            images.svgs = svgs;
+            images.svg_sources = srcs;
+        }
+        let dl = explorer_render::build_display_list_full(&bx, 800.0, 600.0, 0.0, &images);
+        explorer_render::rasterize(&dl, &SRC, 1.0).map(|f| f.pixels)
+    };
+    let cctx = format!("{}{}", context_css(name), paint_ctx_extra(name));
+    // Mêmes pseudo-cibles qu'`affectsv` (`initial-letter`,
+    // `content`) — le pseudo élément généré est peignable.
+    let sel = match name {
+        "initial-letter" => ".x::first-letter",
+        "content" => ".x::before",
+        _ => ".x",
+    };
+    // Même cache de base que `affectsv` ([`BASE_PIX`]) —
+    // la frame `.x { ctx }` est invariante par prop.
+    let a = sig(&format!("{sel} {{ {cctx}; {}: {} }}", name, value.trim()));
+    let b = BASE_PIX.with(|c| {
+        c.borrow_mut()
+            .entry(name.to_string())
+            .or_insert_with(|| sig(&format!("{sel} {{ {cctx} }}")))
+            .clone()
+    });
+    // Les deux frames font 800×600×4 (rasterize dimensionne
+    // à la display list = viewport) : `!=` sur `Option` gère
+    // l'échec de raster d'un côté comme un signal de diff.
+    if std::env::var_os("EXPLORER_BCD_DEBUG_SIG").is_some() {
+        let diff = match (&a, &b) {
+            (Some(x), Some(y)) => format!("{} o != {} o", x.len(), y.len()),
+            _ => "raster échoué d'un côté".into(),
+        };
+        eprintln!("=== paintv {name}:{value} — base {diff}");
+    }
+    a.is_some() && b.is_some() && a != b
 }
 
 /// `affectsv` tri-état (étape 219) : `None` = **neutre par
@@ -2285,6 +2564,152 @@ const NO_ORACLE: &[&str] = &[
     "border-image-source",
 ];
 
+/// Sous-ensemble de [`NO_ORACLE`] encore **inobservable en
+/// pixels** (étape 274) : l'oracle `paintv` voit ce que le
+/// dump ne voyait pas — les familles ci-dessous y restent
+/// aveugles par construction (interaction/OS, défilement
+/// dynamique, horloge, pagination, métadonnées, métriques de
+/// fontes avec Ahem unique) ou faute de fixture dédiée
+/// (texte SVG, markers, primitives de filtre — requalifiable
+/// au fil des fixtures).
+const PAINT_NA: &[&str] = &[
+    // Chrome OS / interaction — jamais dans le framebuffer.
+    "cursor",
+    "caret-color",
+    "caret-animation",
+    "caret-shape",
+    "accent-color",
+    "appearance",
+    "pointer-events",
+    "resize",
+    "touch-action",
+    "user-select",
+    "touch-callout",
+    "tap-highlight-color",
+    "window-drag",
+    "interactivity",
+    "interest-delay",
+    "interest-delay-start",
+    "interest-delay-end",
+    "link-parameters",
+    // Défilement dynamique — l'effet n'existe qu'en scroll.
+    "scroll-behavior",
+    "overscroll-behavior",
+    "overscroll-behavior-x",
+    "overscroll-behavior-y",
+    "overscroll-behavior-block",
+    "overscroll-behavior-inline",
+    "overflow-anchor",
+    "scroll-snap-align",
+    "scroll-snap-stop",
+    "scroll-snap-type",
+    "scroll-padding",
+    "scroll-padding-top",
+    "scroll-padding-right",
+    "scroll-padding-bottom",
+    "scroll-padding-left",
+    "scroll-padding-block",
+    "scroll-padding-block-start",
+    "scroll-padding-block-end",
+    "scroll-padding-inline",
+    "scroll-padding-inline-start",
+    "scroll-padding-inline-end",
+    "scroll-axis-lock",
+    "scroll-initial-target",
+    "scroll-marker-group",
+    "scroll-target-group",
+    // Barres de défilement — chrome UA.
+    "scrollbar-color",
+    "scrollbar-gutter",
+    "scrollbar-width",
+    // Timelines/déclencheurs/transitions de vue —
+    // famille temporelle (horloge requise).
+    "scroll-timeline",
+    "scroll-timeline-axis",
+    "scroll-timeline-name",
+    "timeline-scope",
+    "timeline-trigger",
+    "timeline-trigger-activation-range",
+    "timeline-trigger-activation-range-end",
+    "timeline-trigger-activation-range-start",
+    "timeline-trigger-active-range",
+    "timeline-trigger-active-range-end",
+    "timeline-trigger-active-range-start",
+    "timeline-trigger-name",
+    "timeline-trigger-source",
+    "trigger-scope",
+    "view-timeline",
+    "view-timeline-axis",
+    "view-timeline-inset",
+    "view-timeline-name",
+    "view-transition-class",
+    "view-transition-group",
+    "view-transition-name",
+    "view-transition-scope",
+    "interpolate-size",
+    "overlay",
+    // Pagination / modes forcés / métadonnées / hints.
+    "size",
+    "orphans",
+    "widows",
+    "page",
+    "speak-as",
+    "forced-color-adjust",
+    "print-color-adjust",
+    "color-adjust",
+    "will-change",
+    "dynamic-range-limit",
+    "text-size-adjust",
+    "image-orientation",
+    "container-name",
+    "anchor-scope",
+    // Raster hints sans discriminant au harnais — le lissage
+    // ne distingue pas les modes sur nos formes de test
+    // (`text-rendering` exige des tables OT absentes d'Ahem,
+    // `color-rendering` un chemin ICC).
+    "text-rendering",
+    "color-rendering",
+    // Famille **sélection/métriques de glyphes** — Ahem
+    // unique n'a ni variantes, ni tables OpenType, ni
+    // palettes : même implémentée, aucune valeur ne change
+    // le framebuffer ici (borne de fixture — verrous texte).
+    "font-kerning",
+    "font-optical-sizing",
+    "font-palette",
+    "font-synthesis",
+    "font-synthesis-position",
+    "font-synthesis-small-caps",
+    "font-synthesis-style",
+    "font-synthesis-weight",
+    "font-variant-alternates",
+    "font-variant-emoji",
+    "font-feature-settings",
+    "font-variation-settings",
+    "font-language-override",
+    "font-width",
+    "font-stretch",
+    // Portée SVG sans fixture dédiée en v1 — texte SVG
+    // (baselines/ancre = métriques usvg), markers et
+    // primitives de filtre (`flood`/`lighting` vivent dans
+    // des nœuds de filtre), `clip-rule` exige un
+    // `<clipPath>` contextuel. `na` honnête — pas un trou
+    // mesuré (requalifiable quand la fixture arrive).
+    "dominant-baseline",
+    "alignment-baseline",
+    "baseline-shift",
+    "clip-rule",
+    "text-anchor",
+    "path-length",
+    "stroke-color",
+    "marker",
+    "marker-start",
+    "marker-mid",
+    "marker-end",
+    "flood-color",
+    "flood-opacity",
+    "lighting-color",
+];
+
 /// Verdict de [`subfeature_probe`] (étape 270).
 enum Subfeature {
     /// Sonder `name:lit` à la place de la valeur brute.
@@ -2587,8 +3012,57 @@ fn subfeature_probe(name: &str, v: &str) -> Option<Subfeature> {
     None
 }
 
-fn affects_decl_verdict(decl: &str) -> Option<bool> {
-    let (name, value) = decl.split_once(':')?;
+/// Verdict des gardes partagées `affectsv`/`paintv`
+/// (étape 274) — tout ce qui tranche **avant** l'oracle.
+enum DeclGate {
+    /// Hors dénominateur (`na` — initial spec, CSS-wide,
+    /// temporel, hors-oracle, méta non littéral).
+    Na,
+    /// Verdict tranché sans oracle (`miss` garanti :
+    /// capacité absente mesurée — `hyphens` hors latin).
+    Known(bool),
+    /// Déclaration à passer à l'oracle (le brut, ou le
+    /// littéral qu'une sonde de sous-feature substitue).
+    Probe(String),
+}
+
+/// Sondes de sous-features **propres à `paintv`** (étape
+/// 274) — consultées AVANT [`SUBFEATURE_PROBE`] : les
+/// valeurs `url`/`image`/`image-set` sont `na` en oracle
+/// géométrique (`PaintImages` vide), ici [`HARNESS_IMG`]
+/// sert la ressource réelle via `collect_data_images`.
+/// `url(#x)`/`url(#g)` = refs d'îlot — la valeur part en
+/// `miss` honnête si le moteur ne résout pas (capacité
+/// mesurée, pas borne de jauge).
+fn paint_subfeature(name: &str, v: &str) -> Option<String> {
+    let url = || format!("url(\"{HARNESS_IMG}\")");
+    let lit = match (name, v) {
+        ("background" | "border-image-source" | "list-style" | "list-style-image", "url")
+        | ("background-image" | "mask" | "mask-image" | "shape-outside", "url" | "image")
+        | ("content", "url" | "image" | "content_replacement") => url(),
+        ("background-image" | "content" | "shape-outside", "image-set") => {
+            format!("image-set({} 1x)", url())
+        }
+        ("border-image", "url") => format!("{} 30", url()),
+        ("clip-path" | "filter" | "offset-path", "url") => "url(#x)".into(),
+        ("d", "path") => "path(\"M20 90h100v-50h-100z\")".into(),
+        ("fill" | "stroke", "url" | "gradient" | "paint-server") => "url(#g)".into(),
+        _ => return None,
+    };
+    Some(lit)
+}
+
+/// Gardes communes aux oracles `affectsv`/`paintv`
+/// (étape 274) : mêmes règles — initiales spec, CSS-wide,
+/// familles temporelles, table hors-oracle, sous-features
+/// méta BCD. `na_props` = la table hors-oracle de l'oracle
+/// courant ([`NO_ORACLE`] pour le dump géométrique,
+/// [`PAINT_NA`] pour le framebuffer) ; `paint` active les
+/// sondes [`paint_subfeature`] prioritaires.
+fn decl_gate(decl: &str, na_props: &[&str], paint: bool) -> DeclGate {
+    let Some((name, value)) = decl.split_once(':') else {
+        return DeclGate::Na;
+    };
     let (name, value) = (name.trim(), value.trim());
     let v = value.to_ascii_lowercase();
     if matches!(
@@ -2613,36 +3087,42 @@ fn affects_decl_verdict(decl: &str) -> Option<bool> {
         // `container-name` (NO_ORACLE).
         || (name == "container" && !v.contains('/'))
     {
-        return None;
+        return DeclGate::Na;
     }
     // Familles **temporelles** : `animation-*`/`transition-*`
     // ne produisent de valeur calculée qu'avec une horloge +
-    // `@keyframes` — aucun oracle géométrique statique
-    // n'existe par construction (même classe que les
-    // initiales spec : hors dénominateur). La conformité se
-    // mesure sur les verrous session (R-255/256/257), pas ici.
+    // `@keyframes` — aucun oracle statique n'existe par
+    // construction (même classe que les initiales spec : hors
+    // dénominateur). La conformité se mesure sur les verrous
+    // session (R-255/256/257), pas ici.
     if name.starts_with("animation-")
         || name.starts_with("transition-")
         || matches!(name, "animation" | "transition")
     {
-        return None;
+        return DeclGate::Na;
     }
-    // Familles **sans oracle statique** : l'effet de la prop
-    // vit hors du dump — curseur (rendu OS), caret/couleur
-    // de caret, hit-testing (`pointer-events`), comportement
-    // de scroll (`scroll-behavior`, `overscroll-behavior`,
-    // snap), interaction (`resize`, `touch-action`,
-    // `user-select`, `-webkit-touch-callout`), widget UA
-    // (`appearance`, `accent-color`), hints raster
-    // (`image/shape/text/color-rendering`, `will-change`),
-    // modes forcés/impression (`forced-color-adjust`,
-    // `*-print-color-adjust`), ancrage dynamique
-    // (`overflow-anchor`), pagination (`orphans`/`widows`/
-    // `page*`, `speak`). Un miss serait un artefact de
-    // jauge, pas un trou moteur — hors dénominateur.
+    // Familles **sans oracle** : l'effet de la prop vit hors
+    // du référentiel mesuré — curseur (rendu OS), caret,
+    // hit-testing (`pointer-events`), scroll dynamique
+    // (`scroll-behavior`, snap), interaction (`resize`,
+    // `touch-action`, `user-select`), widget UA (`appearance`,
+    // `accent-color`), modes forcés/impression, ancrage
+    // dynamique (`overflow-anchor`), pagination (`orphans`/
+    // `widows`/`page*`, `speak`), horloges (timelines).
+    // `NO_ORACLE` = borne du dump géométrique ; `PAINT_NA` =
+    // son sous-ensemble encore aveugle en pixels. Un miss
+    // serait un artefact de jauge, pas un trou moteur.
     let nn = name.trim_start_matches('-').trim_start_matches("webkit-");
-    if std::env::var_os("EXPLORER_BCD_NO_NOORACLE").is_none() && NO_ORACLE.contains(&nn) {
-        return None;
+    if std::env::var_os("EXPLORER_BCD_NO_NOORACLE").is_none() && na_props.contains(&nn) {
+        return DeclGate::Na;
+    }
+    // Sous-features BCD `percentage` = « les valeurs
+    // `<percent>` sont supportées » — pas une déclaration en
+    // soi : sonder avec `40%` mesure la capacité réelle
+    // (10% retomberait pile sur le repli `auto` ~10%em de
+    // l'offset).
+    if v == "percentage" || v == "percentages" {
+        return DeclGate::Probe(format!("{name}:40%"));
     }
     // `hyphens:language_<X>` (sous-features BCD, ~60 clés) =
     // « la césure fonctionne pour la langue X » — pas une
@@ -2653,16 +3133,6 @@ fn affects_decl_verdict(decl: &str) -> Option<bool> {
     // arabe, indic…) le moteur ne césure réellement pas →
     // `miss` mesuré, pas `na` (la capacité manque, ce n'est
     // pas une borne d'oracle).
-    // Sous-features BCD `percentage` = « les valeurs `<percent>`
-    // sont supportées » — pas une déclaration en soi : sonder
-    // avec `10%` mesure la capacité réelle (honnie).
-    // Sous-features BCD `percentage` = « les valeurs `<percent>`
-    // sont supportées » — pas une déclaration en soi : sonder
-    // avec `40%` mesure la capacité réelle (10% retomberait
-    // pile sur le repli `auto` ~10%em de l'offset).
-    if v == "percentage" || v == "percentages" {
-        return Some(prop_affects_decl(&format!("{name}:40%")));
-    }
     if name == "hyphens" && v.starts_with("language_") {
         const LATIN: &[&str] = &[
             "afrikaans",
@@ -2707,10 +3177,18 @@ fn affects_decl_verdict(decl: &str) -> Option<bool> {
         ];
         let lang = &v["language_".len()..];
         return if LATIN.contains(&lang) {
-            Some(prop_affects_decl("hyphens:auto"))
+            DeclGate::Probe("hyphens:auto".into())
         } else {
-            Some(false)
+            DeclGate::Known(false)
         };
+    }
+    // Sondes `paintv` prioritaires : `url`/`image`/`image-set`
+    // sont `na` en géométrie (table générique) — la bitmap
+    // du harnais les rend mesurables en pixels.
+    if paint {
+        if let Some(lit) = paint_subfeature(name, &v) {
+            return DeclGate::Probe(format!("{name}:{lit}"));
+        }
     }
     // Sous-features BCD nommées (étape 270) — la valeur
     // n'est pas un littéral, elle désigne un cas de
@@ -2721,15 +3199,37 @@ fn affects_decl_verdict(decl: &str) -> Option<bool> {
     // plutôt qu'un miss mesuré sur déclaration invalide.
     match subfeature_probe(name, &v) {
         Some(Subfeature::Probe(lit)) => {
-            return Some(prop_affects_decl(&format!("{name}:{lit}")));
+            return DeclGate::Probe(format!("{name}:{lit}"));
         }
-        Some(Subfeature::Na) => return None,
+        Some(Subfeature::Na) => return DeclGate::Na,
         None => {}
     }
     if v.contains('_') {
-        return None;
+        return DeclGate::Na;
     }
-    Some(prop_affects_decl(decl))
+    DeclGate::Probe(decl.trim().into())
+}
+
+/// `check affectsv` — verdict tri-état sur le dump
+/// géométrique + display-list (oracle historique).
+fn affects_decl_verdict(decl: &str) -> Option<bool> {
+    match decl_gate(decl, NO_ORACLE, false) {
+        DeclGate::Na => None,
+        DeclGate::Known(b) => Some(b),
+        DeclGate::Probe(d) => Some(prop_affects_decl(&d)),
+    }
+}
+
+/// `check paintv` — même verdict tri-état sur le
+/// **framebuffer** ([`prop_paints_decl`], étape 274) :
+/// [`PAINT_NA`] remplace [`NO_ORACLE`], les sondes
+/// [`paint_subfeature`] servent les `url()`.
+fn paint_decl_verdict(decl: &str) -> Option<bool> {
+    match decl_gate(decl, PAINT_NA, true) {
+        DeclGate::Na => None,
+        DeclGate::Known(b) => Some(b),
+        DeclGate::Probe(d) => Some(prop_paints_decl(&d)),
+    }
 }
 
 /// `check html` — oracle de comportement par élément
@@ -3061,10 +3561,13 @@ fn check_names(kind: &str) -> ExitCode {
             Box::new(move |name| explorer_css::prop_routed(&routed_dom, name))
         }
         "affects" => Box::new(prop_affects),
-        // `affectsv` est tri-état (`na` = valeur initiale spec
-        // ou CSS-wide — neutre par construction, hors
-        // dénominateur) : boucle dédiée plus bas.
+        // `affectsv`/`paintv` sont tri-état (`na` = valeur
+        // initiale spec, CSS-wide ou famille hors-oracle —
+        // neutre par construction, hors dénominateur) :
+        // boucle dédiée plus bas. `paintv` = oracle pixel
+        // (étape 274).
         "affectsv" => Box::new(prop_affects_decl),
+        "paintv" => Box::new(prop_paints_decl),
         // Étape 219 — `html` : oracle de comportement par
         // élément (`bcd.html.elements`) — binding JS
         // (interface + membres IDL) ET géométrie UA (box
@@ -3088,9 +3591,13 @@ fn check_names(kind: &str) -> ExitCode {
         if name.is_empty() {
             continue;
         }
-        if kind == "affectsv" {
-            let verdict =
-                affects_decl_verdict(name).map_or("na", |ok| if ok { "ok" } else { "miss" });
+        if kind == "affectsv" || kind == "paintv" {
+            let verdict = if kind == "affectsv" {
+                affects_decl_verdict(name)
+            } else {
+                paint_decl_verdict(name)
+            };
+            let verdict = verdict.map_or("na", |ok| if ok { "ok" } else { "miss" });
             println!("{name}\t{verdict}");
         } else {
             println!("{name}\t{}", if test(name) { "ok" } else { "miss" });
@@ -3416,4 +3923,30 @@ mod tests {
         // Garde-fou : une prop géométrique reste mesurée.
         assert!(super::affects_decl_verdict("display:grid").is_some());
     }
+
+    /// `paintv` : verrous de l'oracle pixel (étape 274) —
+    /// les effets peints hors du dump géométrique deviennent
+    /// `ok`, les familles hors-framebuffer restent `na`, les
+    /// valeurs initiales spec/CSS-wide restent hors
+    /// dénominateur.
+    #[test]
+    fn paintv_oracle_pixel() {
+        for (d, want) in [
+            // Effets peints réels — `miss` en dump, `ok` en pixels.
+            ("filter:blur(2px)", Some(true)),
+            ("clip-path:circle(30%)", Some(true)),
+            ("background-color:#00ff00", Some(true)),
+            // Familles hors framebuffer.
+            ("cursor:pointer", None),
+            ("scroll-snap-type:x mandatory", None),
+            ("will-change:transform", None),
+            ("font-kerning:normal", None),
+            // Neutres par construction.
+            ("color:initial", None),
+            ("color:inherit", None),
+        ] {
+            assert_eq!(super::paint_decl_verdict(d), want, "{d}");
+        }
+    }
+
 }

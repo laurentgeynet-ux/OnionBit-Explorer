@@ -14,7 +14,7 @@
 //   builtins   bcd.javascript.builtins (prof. 2) → `eval` jscore
 //   api        bcd.api (interfaces + membres) → `api` jscore
 //              (moteur avec surface navigateur installée)
-//   values     bcd.css.properties.<p>.<v> → `check affectsv`
+//   values     bcd.css.properties.<p>.<v> → `check affectsv` ∪ `check paintv`
 //              (fixture par famille — la déclaration exacte
 //              doit changer le box tree)
 //   html       bcd.html.elements → `check html`
@@ -129,7 +129,15 @@ function report(label, entries, okSet, note) {
   }
 }
 
-const sections = only ? [only] : ['props', 'routed', 'sel', 'at', 'js', 'api', 'values', 'html'];
+const SURFACES = ['props', 'routed', 'sel', 'at', 'js', 'api', 'values', 'html'];
+// `--only <nom>` inconnu = zéro surface mesurée → gate vert
+// à vide et `--save` écrirait une baseline vide : échec
+// bruyant plutôt que cliquet creux.
+if (only && !SURFACES.includes(only)) {
+  console.error(`--only inconnu : ${only} — surfaces : ${SURFACES.join('|')}`);
+  process.exit(2);
+}
+const sections = only ? [only] : SURFACES;
 
 for (const sec of sections) {
   if (sec === 'props') {
@@ -431,8 +439,16 @@ for (const sec of sections) {
       'surface navigateur installée (install_dom) — présence seule');
   } else if (sec === 'values') {
     // bcd.css.properties.<p>.<v> — la déclaration `p:v` change-
-    // t-elle le box tree (`check affectsv`) ? Conformité par
-    // feature : `display:ruby` ≠ `display:grid`.
+    // t-elle le rendu ? Conformité par feature :
+    // `display:ruby` ≠ `display:grid`. Double oracle
+    // (étape 274) : `affectsv` (box tree + dump display-list)
+    // ∪ `paintv` (diff de framebuffers — les effets peints
+    // hors du dump : filter, clip-path, transform-origin,
+    // mask-*, border-image*… servis par la bitmap data-URI
+    // du harnais). `na` n'est retenu que si les **deux**
+    // oracles classent neutre (initiale spec / CSS-wide /
+    // hors-oracle) — un `na` géométrique peignable part en
+    // mesure pixel.
     const pairs = [];
     for (const [p, node] of Object.entries(bcd.css.properties)) {
       for (const [v, vn] of Object.entries(node)) {
@@ -451,14 +467,36 @@ for (const sec of sections) {
       input: pairs.map(e => e.name).join('\n'),
       encoding: 'utf8', timeout: 600_000, maxBuffer: 64 * 1024 * 1024,
     }).split(/\r?\n/).filter(Boolean);
-    const okSet = new Set(lines.filter(l => l.endsWith('\tok')).map(l => l.split('\t')[0]));
-    // `na` = valeur initiale spec ou CSS-wide — neutre par
-    // construction (aucun oracle géométrique possible) →
-    // hors dénominateur, annoncée dans la note (ADR-0010).
-    const naSet = new Set(lines.filter(l => l.endsWith('\tna')).map(l => l.split('\t')[0]));
+    const geoOk = new Set(lines.filter(l => l.endsWith('\tok')).map(l => l.split('\t')[0]));
+    const geoNa = new Set(lines.filter(l => l.endsWith('\tna')).map(l => l.split('\t')[0]));
+    // Seconde passe pixel sur tout ce qui n'est pas `ok`
+    // géométrique : un `miss` de dump peut être un effet
+    // peint réel (union honnête des deux référentiels).
+    const rest = pairs.map(e => e.name).filter(n2 => !geoOk.has(n2));
+    const plines = rest.length ? execFileSync(cli, ['check', 'paintv'], {
+      input: rest.join('\n'),
+      encoding: 'utf8', timeout: 600_000, maxBuffer: 64 * 1024 * 1024,
+    }).split(/\r?\n/).filter(Boolean) : [];
+    const paintOk = new Set(plines.filter(l => l.endsWith('\tok')).map(l => l.split('\t')[0]));
+    const paintNa = new Set(plines.filter(l => l.endsWith('\tna')).map(l => l.split('\t')[0]));
+    const okSet = new Set([...geoOk, ...paintOk]);
+    // `na` = neutre sous les DEUX oracles (initiale spec /
+    // CSS-wide / famille hors-référentiel) → hors
+    // dénominateur, annoncée dans la note (ADR-0010).
+    const naSet = new Set([...geoNa].filter(n2 => paintNa.has(n2)));
     const measured = pairs.filter(e => !naSet.has(e.name));
     report('css.values', measured, okSet,
-      `déclaration exacte → effet géométrique (jauge non-saturante) ; ${naSet.size} neutres (initiale spec / CSS-wide) hors dénominateur`);
+      `déclaration → effet géométrique ∪ pixel (affectsv + paintv, jauge non-saturante) ; ${naSet.size} neutres hors dénominateur`);
+    // Cliquet par famille (étape 278) : compteurs `ok` par
+    // prop — une famille qui régresse pendant qu'une autre
+    // progresse reste invisible du total agrégé ; la
+    // baseline v2 les verrouille une à une.
+    const perProp = {};
+    for (const e of measured) {
+      const p = e.name.slice(0, e.name.indexOf(':'));
+      perProp[p] = (perProp[p] ?? 0) + (okSet.has(e.name) ? 1 : 0);
+    }
+    families['css.values'] = perProp;
   } else if (sec === 'html') {
     // bcd.html.elements.<tag> — oracle de comportement par
     // élément (`check html`, étape 219) : « le tag parse »
