@@ -13220,6 +13220,15 @@ chaque gain rapporté contre les **deux** archétypes.
   (`ic_hit`/`ic_miss`/`ic_disarm` au snapshot) pour
   borner la couverture du seul court-circuit existant.
   Dependency-groups = infra lourde, dernier recours.
+- [x] **JS-C553 — `arguments` annoté** : bail C490 levé —
+  `fn_scope_*` pousse le nom quand `LIT_USES_ARGS` ; slot
+  voit `LazyArgs` → miss → `env_get(&cur)` matérialise au
+  bon env. Vol yt verify : `idnt:arguments` −44 % (58,9 k
+  → 33,1 k), zéro `res.bad` sur le nom.
+- [x] **JS-C553b — verify accepte `NaN==NaN`** : 102 faux
+  positifs au premier vol sous verify (strict_eq spec vs
+  même cellule) ; + réparation `b104_real_transmux`
+  (constantes→fonctions, cassait `--all-targets`).
 - [x] **JS-C552 — `resolve_program` : top-level annoté**
   (+ fix `walk_class` nom class-expr dans `cenv` —
   `class_expr_self_name` repasse). `exec_program_inner`
