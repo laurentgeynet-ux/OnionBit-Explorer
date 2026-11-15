@@ -1054,6 +1054,24 @@ pub fn j17_snapshot() -> String {
         }
         out.push_str(&format!("host:{joined}"));
     }
+    // JS-C560 — `hns:class:key=ns` — paire temporelle de
+    // `host:` (top-40 par ns cumulés — le µs/get se lit en
+    // croisant avec le compte `host:` du même vol).
+    let mut hns: Vec<(u64, String)> =
+        J17_HOST_NS_ATTR.with(|m| m.borrow().iter().map(|(k, n)| (*n, k.clone())).collect());
+    hns.sort_unstable_by_key(|a| std::cmp::Reverse(a.0));
+    if !hns.is_empty() {
+        let joined = hns
+            .iter()
+            .take(40)
+            .map(|(n, l)| format!("{l}={n}"))
+            .collect::<Vec<_>>()
+            .join(",");
+        if !out.is_empty() {
+            out.push(' ');
+        }
+        out.push_str(&format!("hns:{joined}"));
+    }
     out
 }
 
@@ -1152,6 +1170,13 @@ thread_local! {
     /// dump top-12 au teardown — nomme le dominant de
     /// `host_ns`.
     static J17_HOST_ATTR: std::cell::RefCell<
+        std::collections::BTreeMap<String, u64>,
+    > = const { std::cell::RefCell::new(std::collections::BTreeMap::new()) };
+    /// JS-C560 — `hns:` — ns cumulés par `class:key` autour de
+    /// `Host::get` (paire temporelle de `J17_HOST_ATTR`) :
+    /// tranche « coût fixe par get » vs « corps lourds
+    /// nommés » — `hns:key / host:key` = coût moyen par get.
+    static J17_HOST_NS_ATTR: std::cell::RefCell<
         std::collections::BTreeMap<String, u64>,
     > = const { std::cell::RefCell::new(std::collections::BTreeMap::new()) };
 }
@@ -1432,6 +1457,18 @@ pub fn host_mark(class: &str, name: &str) {
             *m.borrow_mut().entry(format!("{class}:{name}")).or_insert(0) += 1;
         });
     }
+}
+
+/// JS-C560 — cumule `ns` dans `hns:` (`class:name`) autour de
+/// `Host::get` — la paire temporelle de [`host_mark`]. Opt-in
+/// `EXPLORER_J17_HOST=1` ; le chrono lui-même (~20-40 ns/get)
+/// n'est payé que flag armé (effet d'observateur : les totaux
+/// `hns:` incluent ce coût, l'attribution *relative* reste
+/// valide).
+pub(crate) fn host_ns_mark(class: &str, name: &str, ns: u64) {
+    J17_HOST_NS_ATTR.with(|m| {
+        *m.borrow_mut().entry(format!("{class}:{name}")).or_insert(0) += ns;
+    });
 }
 
 /// §B-59 — dernier frame JS du tick (écrit sous

@@ -9707,7 +9707,19 @@ impl Engine {
                     }
                     crate::host_mark(h.class_name(), key);
                     crate::j17_tick(&crate::J17_HOST_GET);
-                    if let Some(v) = h.get(self, base.clone(), key)? {
+                    // JS-C560 — chrono `hns:` opt-in
+                    // (`EXPLORER_J17_HOST`) : l'`Instant` n'est
+                    // payé que sonde armée (~20-40 ns/get).
+                    let t0 = crate::j17_host().then(std::time::Instant::now);
+                    let got = h.get(self, base.clone(), key);
+                    if let Some(t0) = t0 {
+                        crate::host_ns_mark(
+                            h.class_name(),
+                            key,
+                            t0.elapsed().as_nanos().min(u128::from(u64::MAX)) as u64,
+                        );
+                    }
+                    if let Some(v) = got? {
                         return Ok(v);
                     }
                 }

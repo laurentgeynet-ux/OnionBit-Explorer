@@ -13220,6 +13220,12 @@ chaque gain rapporté contre les **deux** archétypes.
   (`ic_hit`/`ic_miss`/`ic_disarm` au snapshot) pour
   borner la couverture du seul court-circuit existant.
   Dependency-groups = infra lourde, dernier recours.
+- [x] **JS-C560 — `hns:` : attribution temporelle
+  `class:key` autour de `Host::get`** — la traîne est plate
+  par construction (≥ 700 noms pour 96 % des gets) ; la
+  seule question restante = coût fixe vs corps lourds.
+  Chrono opt-in `Instant` par get (observateur ~20-40 ns),
+  dump `hns:` top-40 par ns cumulés.
 - [x] **JS-C559 — mémo identité immuable `NodeHost`** :
   `immut_get` avant `host_mark` — 6 getters immuables
   (`tagName`/`localName`/`nodeType`/`nodeName`/
