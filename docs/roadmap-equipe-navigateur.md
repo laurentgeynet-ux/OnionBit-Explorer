@@ -12902,6 +12902,17 @@ chaque gain rapporté contre les **deux** archétypes.
   (`ic_hit`/`ic_miss`/`ic_disarm` au snapshot) pour
   borner la couverture du seul court-circuit existant.
   Dependency-groups = infra lourde, dernier recours.
+- [x] **JS-C535 — peek homo-typé `binary_op`** :
+  binops = 16 % des nœuds (C532) ; chaque op payait
+  `to_primitive`×2 + `to_number`×2 (identité sur
+  primitives). Match par valeur : `(Num,Num)` sert
+  19 ops direct (IEEE bit-exact), `(Str,Str)` sert
+  `Add` (unicité `Rc` préservée → `try_append`)
+  + compar. lexico ; reste → `binary_op_slow`
+  (chemin inchangé). `bin_nn`/`bin_ss` = couverture
+  au vol ; `badd_*` re-tiqués (continuité C505).
+  Verrous : j17 14 (+lock IEEE/mixte/valueOf),
+  lang 315, dom 265, c502 24, c533 15, n538 1.
 - [x] **JS-C534d — scopes `poisoned` non câblés
   (révert mesuré) + resolver avant predeclare** :
   `envu:` a nommé `mod.rs:11445` (env d'appel,

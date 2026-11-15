@@ -400,6 +400,15 @@ pub static J17_BIN_ADD_NUM: std::sync::atomic::AtomicU64 = std::sync::atomic::At
 pub static J17_BIN_ADD_STR: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 /// Voir [`J17_BIN_ADD_NUM`].
 pub static J17_BIN_ADD_OTH: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+/// JS-C535 — couverture du peek homo-typé de `binary_op` :
+/// `bin_nn` = paire `(Num,Num)` servie sans `to_primitive`/
+/// `to_number`, `bin_ss` = paire `(Str,Str)` (concat `Add`,
+/// comparaison lexicographique). Le reste du traffic tombe
+/// sur le chemin générique — la somme mesure la part du
+/// fast-path dans le total `binop:*`.
+pub static J17_BIN_NN: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+/// Voir [`J17_BIN_NN`].
+pub static J17_BIN_SS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 /// JS-C505 — noms de [`J17_BINOP`], ordre = déclaration `BinOp`
 /// (`ast.rs`) — maintenus ensemble par le commentaire réciproque.
 const J17_BINOP_NAMES: [&str; 25] = [
@@ -616,7 +625,7 @@ pub fn j17_enable() {
 #[must_use]
 pub fn j17_snapshot() -> String {
     let r = std::sync::atomic::Ordering::Relaxed;
-    let pairs: [(&str, &std::sync::atomic::AtomicU64); 71] = [
+    let pairs: [(&str, &std::sync::atomic::AtomicU64); 73] = [
         ("prop_lookup", &J17_PROP_LOOKUP),
         ("proto_lvl", &J17_PROTO_LVL),
         ("prop_scan", &J17_PROP_SCAN),
@@ -662,6 +671,8 @@ pub fn j17_snapshot() -> String {
         ("badd_num", &J17_BIN_ADD_NUM),
         ("badd_str", &J17_BIN_ADD_STR),
         ("badd_oth", &J17_BIN_ADD_OTH),
+        ("bin_nn", &J17_BIN_NN),
+        ("bin_ss", &J17_BIN_SS),
         ("arridx_try", &J17_ARRIDX_TRY),
         ("call", &J17_CALL),
         ("call_nat", &J17_CALL_NAT),

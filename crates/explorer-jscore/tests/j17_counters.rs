@@ -497,3 +497,36 @@ fn envu_nomme_le_site_de_construction() {
         "le hit `extra` doit émettre un site `envu:` : {snap}"
     );
 }
+
+/// JS-C535 — le peek homo-typé de `binary_op` sert `(Num,Num)`
+/// et `(Str,Str)` sans `to_primitive`/`to_number` ; les
+/// compteurs `bin_nn`/`bin_ss` mesurent la couverture. Le lock
+/// fixe aussi la sémantique IEEE des cas limites servis par le
+/// fast-path (NaN, ±0, division par zéro, reste tronqué,
+/// `>>>` sur négatif, concat chaînée, mixte → chemin générique,
+/// coercition d'objet préservée).
+#[test]
+fn c535_binop_peek_sert_et_preserve() {
+    let _g = TEST_LOCK.lock().unwrap();
+    j17_enable();
+    let mut e = Engine::new();
+    let r = e
+        .eval(
+            "[NaN===NaN, NaN<1, -0===0, 1/0===Infinity, -1/0===-Infinity, (0/0).toString(),\
+             -5%3, 2**0.5>1.4, (-1)>>>0, 0.1+0.2!==0.3, 'b'<'a', 'x'+'y'+'z',\
+             'a'+1, '5'*2, ({valueOf:()=>5})+1]",
+        )
+        .expect("eval");
+    let out = e.describe(r);
+    assert_eq!(
+        out, "false,false,true,true,true,NaN,-2,true,4294967295,true,false,xyz,a1,10,6",
+        "semantique binop peek : {out}"
+    );
+    let snap = j17_snapshot();
+    for k in ["bin_nn", "bin_ss"] {
+        assert!(
+            snap.split(' ').any(|p| p.starts_with(&format!("{k}="))),
+            "`{k}` doit émettre : {snap}"
+        );
+    }
+}

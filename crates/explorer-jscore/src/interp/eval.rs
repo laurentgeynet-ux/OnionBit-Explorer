@@ -1449,14 +1449,107 @@ impl Engine {
         }
     }
 
+    #[allow(clippy::float_cmp)] // égalité exacte spec `SameValue`/`IsLooselyEqual` — `a == b` IEEE est la sémantique voulue.
     pub(crate) fn binary_op(&mut self, op: BinOp, l: Value, r: Value) -> JsResult<Value> {
         use BinOp::{
-            Add, And, BitAnd, BitOr, BitXor, Div, Eq, Ge, Gt, In, Instanceof, Le, Lt, Mod, Mul, Ne,
-            Or, Pow, Shl, Shr, ShrU, StrictEq, StrictNe, Sub,
+            Add, BitAnd, BitOr, BitXor, Div, Eq, Ge, Gt, Le, Lt, Mod, Mul, Ne, Pow, Shl, Shr, ShrU,
+            StrictEq, StrictNe, Sub,
         };
         // JS-C505 — histogramme des ops (calibre le quickening
         // cran 3) ; désarmé = un `load`+branche.
         crate::j17_tick(&crate::J17_BINOP[op as usize]);
+        // JS-C535 — peek homo-typé : `(Num,Num)` et `(Str,Str)`
+        // dominent les binops réels. `to_primitive`/`to_number`
+        // sont l'identité sur ces primitives (le premier sort
+        // par `let-else`, le second par un match) — le match par
+        // valeur évite 4 dispatches par op et ne paie qu'une
+        // comparaison de discriminants sinon. Sémantique
+        // bit-exacte : `Num`/`Str` sont déjà primitives, les
+        // conversions sautées sont l'identité ; le match **par
+        // valeur** préserve l'unicité `Rc` du `JsStr` —
+        // `try_append` en place reste disponible (un clone
+        // `&l`/`&r` bumpe le compteur et le désarmerait).
+        match (l, r) {
+            (Value::Num(a), Value::Num(b)) => {
+                if op == Add {
+                    // Continuité de la série `badd_*` (C505) —
+                    // le peek court-circuite le tick du chemin
+                    // générique.
+                    crate::j17_tick(&crate::J17_BIN_ADD_NUM);
+                }
+                let fast = match op {
+                    Add => Some(Value::Num(a + b)),
+                    Sub => Some(Value::Num(a - b)),
+                    Mul => Some(Value::Num(a * b)),
+                    Div => Some(Value::Num(a / b)),
+                    Mod => Some(Value::Num(a % b)),
+                    Pow => Some(Value::Num(a.powf(b))),
+                    Shl => Some(Value::Num(f64::from(to_int32(a) << (to_uint32(b) & 31)))),
+                    Shr => Some(Value::Num(f64::from(to_int32(a) >> (to_uint32(b) & 31)))),
+                    ShrU => Some(Value::Num(f64::from(to_uint32(a) >> (to_uint32(b) & 31)))),
+                    BitAnd => Some(Value::Num(f64::from(to_int32(a) & to_int32(b)))),
+                    BitOr => Some(Value::Num(f64::from(to_int32(a) | to_int32(b)))),
+                    BitXor => Some(Value::Num(f64::from(to_int32(a) ^ to_int32(b)))),
+                    Lt | Le | Gt | Ge => {
+                        let ord = a.partial_cmp(&b);
+                        Some(Value::Bool(matches!(
+                            (ord, op),
+                            (Some(std::cmp::Ordering::Less), Lt | Le)
+                                | (Some(std::cmp::Ordering::Equal), Le | Ge)
+                                | (Some(std::cmp::Ordering::Greater), Gt | Ge)
+                        )))
+                    }
+                    // `loose_eq`/`strict_eq` sur `(Num,Num)` se
+                    // réduisent à `a == b` (IEEE : NaN≠NaN,
+                    // ±0 égaux).
+                    Eq | StrictEq => Some(Value::Bool(a == b)),
+                    Ne | StrictNe => Some(Value::Bool(a != b)),
+                    _ => None,
+                };
+                match fast {
+                    Some(v) => {
+                        crate::j17_tick(&crate::J17_BIN_NN);
+                        Ok(v)
+                    }
+                    // `In`/`Instanceof`/`And`/`Or`/`Nullish` —
+                    // pas de fast-path numérique.
+                    None => self.binary_op_slow(op, Value::Num(a), Value::Num(b)),
+                }
+            }
+            (Value::Str(mut a), Value::Str(b)) if op == Add => {
+                // Même chemin que le bras générique :
+                // `alloc_guard` + `try_append` en place si la
+                // boîte `Rc` est détenue seule, concat sinon.
+                crate::j17_tick(&crate::J17_BIN_SS);
+                crate::j17_tick(&crate::J17_BIN_ADD_STR);
+                self.alloc_guard(a.len().saturating_add(b.len()))?;
+                if a.try_append(&b) {
+                    return Ok(Value::Str(a));
+                }
+                Ok(self.str_val(format!("{}{}", a.as_str(), b.as_str())))
+            }
+            (Value::Str(a), Value::Str(b)) if matches!(op, Lt | Le | Gt | Ge) => {
+                crate::j17_tick(&crate::J17_BIN_SS);
+                let ord = a.as_str().cmp(b.as_str());
+                Ok(Value::Bool(matches!(
+                    (ord, op),
+                    (std::cmp::Ordering::Less, Lt | Le)
+                        | (std::cmp::Ordering::Equal, Le | Ge)
+                        | (std::cmp::Ordering::Greater, Gt | Ge)
+                )))
+            }
+            (l, r) => self.binary_op_slow(op, l, r),
+        }
+    }
+
+    /// Chemin générique de [`Self::binary_op`] — coercitions
+    /// `to_primitive` puis dispatch par op. Atteint hors peek
+    /// `(Num,Num)`/`(Str,Str)` (JS-C535).
+    fn binary_op_slow(&mut self, op: BinOp, l: Value, r: Value) -> JsResult<Value> {
+        use BinOp::{
+            Add, And, BitAnd, BitOr, BitXor, Div, Eq, Ge, Gt, In, Instanceof, Le, Lt, Mod, Mul, Ne,
+            Or, Pow, Shl, Shr, ShrU, StrictEq, StrictNe, Sub,
+        };
         Ok(match op {
             Add => {
                 let lp = self.to_primitive(l, PrimHint::Default)?;
