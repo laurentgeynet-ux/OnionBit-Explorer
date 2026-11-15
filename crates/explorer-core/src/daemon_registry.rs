@@ -187,10 +187,83 @@ pub fn list() -> Vec<(PathBuf, Announce)> {
     list_in(&registry_dir())
 }
 
-/// Retire une annonce périmée (sonde de vivacité négative) —
-/// la GC du lecteur, sans laquelle les crashs s'accumulent.
+/// Retire une annonce périmée — la GC du lecteur, réservée
+/// à la mort **prouvée** (voir [`pid_alive`]) : élaguer sur
+/// une sonde qui timeout évince définitivement un daemon
+/// vivant (il ne se ré-annonce qu'au démarrage).
 pub fn remove(file: &Path) {
     let _ = std::fs::remove_file(file);
+}
+
+/// Le pid existe-t-il encore (n'importe quel processus) ?
+/// Première moitié de l'arbitre de mort : un processus
+/// disparu est une mort prouvée — contrairement à une sonde
+/// HTTP qui timeout sur un daemon saturé (2 Gio, raster
+/// lourd), ce qui n'est **pas** une preuve. Indécidable
+/// (`tasklist` absent…) → `true` : on n'évince jamais sans
+/// preuve.
+#[must_use]
+pub fn pid_exists(pid: u32) -> bool {
+    pid_exists_impl(pid)
+}
+
+#[cfg(windows)]
+fn pid_exists_impl(pid: u32) -> bool {
+    match std::process::Command::new("tasklist")
+        .args(["/FI", &format!("PID eq {pid}"), "/FO", "CSV", "/NH"])
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::null())
+        .output()
+    {
+        Ok(o) => String::from_utf8_lossy(&o.stdout).contains(&format!(",\"{pid}\",")),
+        Err(_) => true,
+    }
+}
+
+#[cfg(not(windows))]
+fn pid_exists_impl(pid: u32) -> bool {
+    match std::process::Command::new("kill")
+        .arg("-0")
+        .arg(pid.to_string())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status()
+    {
+        Ok(s) => s.success(),
+        Err(_) => true,
+    }
+}
+
+/// Annonce périmée : pid mort **ou** recyclé par un processus
+/// qui n'est pas `explorer-daemon` — l'image est vérifiée
+/// sous Windows (`tasklist` rend le nom ; unix n'a pas de
+/// source portable → `pid_exists` seul, recyclage résiduel
+/// documenté). C'est l'arbitre d'éviction du registre :
+/// jamais un timeout HTTP, toujours une mort processus.
+#[must_use]
+pub fn announce_stale(a: &Announce) -> bool {
+    announce_stale_impl(a)
+}
+
+#[cfg(windows)]
+fn announce_stale_impl(a: &Announce) -> bool {
+    match std::process::Command::new("tasklist")
+        .args(["/FI", &format!("PID eq {}", a.pid), "/FO", "CSV", "/NH"])
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::null())
+        .output()
+    {
+        Ok(o) => {
+            let s = String::from_utf8_lossy(&o.stdout).to_lowercase();
+            !(s.contains(&format!(",\"{}\",", a.pid)) && s.contains("explorer-daemon"))
+        }
+        Err(_) => false, // indécidable → conserver
+    }
+}
+
+#[cfg(not(windows))]
+fn announce_stale_impl(a: &Announce) -> bool {
+    !pid_exists_impl(a.pid)
 }
 
 #[cfg(test)]
@@ -220,6 +293,44 @@ mod tests {
         drop(g); // la garde retire
         assert!(list_in(&dir).is_empty());
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// `pid_exists`/`announce_stale` : notre pid est vivant ;
+    /// un enfant tué est une mort prouvée ; un processus
+    /// vivant d'une autre image est une annonce périmée
+    /// (recyclage) — la mort se prouve par processus, jamais
+    /// par sonde HTTP (Étape 256b).
+    #[test]
+    fn pid_et_stale_vivant_et_mort() {
+        assert!(pid_exists(std::process::id()));
+        // Enfant vivant d'une AUTRE image : pid existe mais
+        // l'annonce qui le nommerait serait périmée.
+        let mut child = std::process::Command::new(if cfg!(windows) { "cmd" } else { "sleep" })
+            .args(if cfg!(windows) {
+                vec!["/c", "ping", "-n", "30", "127.0.0.1"]
+            } else {
+                vec!["30"]
+            })
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .spawn()
+            .expect("spawn");
+        let a = Announce {
+            name: "ghost".into(),
+            pid: child.id(),
+            port: 1,
+            profile: PathBuf::from("p"),
+            version: "t".into(),
+            started_at: 0,
+        };
+        #[cfg(windows)]
+        assert!(announce_stale(&a)); // ping n'est pas explorer-daemon
+        #[cfg(not(windows))]
+        assert!(!announce_stale(&a)); // unix : pid seul, vivant
+        child.kill().expect("kill");
+        let _ = child.wait();
+        assert!(!pid_exists(child.id()));
+        assert!(announce_stale(&a));
     }
 
     /// Deux homonymes ne s'écrasent pas — le pid suffixé
