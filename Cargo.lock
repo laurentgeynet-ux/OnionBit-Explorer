@@ -917,7 +917,7 @@ dependencies = [
 
 [[package]]
 name = "explorer-agent"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "async-trait",
  "axum",
@@ -936,7 +936,7 @@ dependencies = [
 
 [[package]]
 name = "explorer-api"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "async-trait",
  "axum",
@@ -954,7 +954,7 @@ dependencies = [
 
 [[package]]
 name = "explorer-cli"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "async-trait",
  "axum",
@@ -979,7 +979,7 @@ dependencies = [
 
 [[package]]
 name = "explorer-common"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "stacker",
  "stats_alloc",
@@ -987,7 +987,7 @@ dependencies = [
 
 [[package]]
 name = "explorer-core"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "async-trait",
  "criterion",
@@ -1016,7 +1016,7 @@ dependencies = [
 
 [[package]]
 name = "explorer-css"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "explorer-common",
  "explorer-dom",
@@ -1026,7 +1026,7 @@ dependencies = [
 
 [[package]]
 name = "explorer-daemon"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "axum",
  "explorer-agent",
@@ -1046,7 +1046,7 @@ dependencies = [
 
 [[package]]
 name = "explorer-dom"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "criterion",
  "explorer-common",
@@ -1055,7 +1055,7 @@ dependencies = [
 
 [[package]]
 name = "explorer-ffi"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "async-trait",
  "axum",
@@ -1076,7 +1076,7 @@ dependencies = [
 
 [[package]]
 name = "explorer-html"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "encoding_rs",
  "explorer-common",
@@ -1085,7 +1085,7 @@ dependencies = [
 
 [[package]]
 name = "explorer-js"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "explorer-common",
  "explorer-dom",
@@ -1097,7 +1097,7 @@ dependencies = [
 
 [[package]]
 name = "explorer-jscore"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "criterion",
  "fancy-regex",
@@ -1116,14 +1116,14 @@ dependencies = [
 
 [[package]]
 name = "explorer-launcher"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "rfd",
 ]
 
 [[package]]
 name = "explorer-layout"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "criterion",
  "explorer-common",
@@ -1139,7 +1139,7 @@ dependencies = [
 
 [[package]]
 name = "explorer-net"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "async-trait",
  "axum",
@@ -1167,7 +1167,7 @@ dependencies = [
 
 [[package]]
 name = "explorer-render"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "brotli",
  "explorer-common",
@@ -1189,7 +1189,7 @@ dependencies = [
 
 [[package]]
 name = "explorer-test-support"
-version = "0.2.0"
+version = "0.3.0"
 
 [[package]]
 name = "fancy-regex"
