@@ -729,7 +729,13 @@ impl Resolver {
     /// la liste canonique du niveau (`NO_SLOT` si la portée
     /// n'est pas pré-déclarée). Valeur packée `(d<<16)|slot`.
     fn annotate(&mut self, e: &Expr, name: &Rc<str>) {
-        if self.suppress > 0 || &**name == "arguments" {
+        // `arguments` est annoté comme tout nom : sa cellule
+        // `LazyArgs` vit dans l'env de la fonction non-flèche la
+        // plus proche — scope modélisé (`fn_scope_ord` le pousse
+        // si `LIT_USES_ARGS`) ; le fast-path voit `LazyArgs` →
+        // miss `sm_cell` → `env_get(&cur)` matérialise dans le
+        // bon env. Le bail conservateur C490 est levé (JS-C553).
+        if self.suppress > 0 {
             return;
         }
         let n = self.scopes.len();
