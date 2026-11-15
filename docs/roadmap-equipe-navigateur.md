@@ -7943,6 +7943,11 @@ MCP = adaptateur, jamais la base.
   externe (console de pilotage) n'a plus à deviner où
   vivent registre, profils, vols et logs — bloc additif du
   résultat, chemins `/`, clés absentes = indisponibles.
+- [x] **Étape 269. `deferred_inputs` : borne honnête `dropped`** —
+  la file était bornée à 32 mais l'abandon au-delà répondait
+  `Deferred` (rejeu impossible promis). `defer_input` rend si
+  l'entrée est prise ; `InputOutcome::Dropped` nouveau —
+  EAP `dropped`+`queue_full`, REST idem, FFI `8`.
 - [x] **Étape 268. `session.cancel` — annulation coopérative** —
   le triptyque wedge est complet : détecter (`busy`) → nommer
   (`in_flight`) → **libérer** (`cancel`). Servi en ligne hors

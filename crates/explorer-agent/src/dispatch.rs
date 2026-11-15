@@ -1698,6 +1698,10 @@ fn outcome_json(o: InputOutcome) -> Value {
         // lieu, juste plus tard (étape 257 ; ex-`ignored`,
         // qui faisait croire à un abandon).
         InputOutcome::Deferred => ("deferred", json!({})),
+        // File pleine (étape 269) — l'entrée n'a pas été
+        // prise : `dropped` + raison, l'agent réessaie après
+        // un commit au lieu d'attendre un rejeu impossible.
+        InputOutcome::Dropped => ("dropped", json!({ "reason": "queue_full" })),
         // `moved: false` = clampé/page non scrollable — le
         // client lit « rien n'a bougé » au lieu d'un
         // `scrolled` mensonger (retour terrain PIPE).

@@ -3714,3 +3714,20 @@ un `cancel` ne touche que le verbe de sa propre connexion
 derrière ne sont pas annulés (le `close` reste la porte pour
 vider la file). Contrat additif : verbe + code au schéma.
 Verrou : `session_cancel_libere_verbe_en_vol`.
+
+### 2026-11-16 — Étape 269 (NAV) : `deferred_inputs` — borne honnête, outcome `dropped`
+
+**Livré** (`explorer-core`, demande NAV n°2 du retour terrain
+PIPE — field266 : 25/25 `input.key` enfilés sous churn
+quasi-permanent). La file `deferred_inputs` était déjà
+bornée (`MAX_DEFERRED_INPUTS = 32`) mais l'abandon au-delà
+était **silencieux** : l'appelant répondait `Deferred`
+alors que l'entrée n'avait pas été prise — l'agent
+attendait un rejeu impossible. `defer_input` rend
+désormais si l'entrée a été prise (enfilée ou coalescée) ;
+nouveau `InputOutcome::Dropped` propagé par les deux
+gardes (synchrone + shared — parité préservée). Surfaces
+(additif) : EAP `result:"dropped"` + `reason:"queue_full"`,
+REST idem, FFI code `8`. Le client réessaie après un
+commit au lieu d'attendre. Contrat : enum `actionResult`
+du schéma complétée (`deferred`/`dropped`/`noop`).

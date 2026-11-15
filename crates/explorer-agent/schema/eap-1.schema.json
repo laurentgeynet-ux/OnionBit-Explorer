@@ -619,7 +619,7 @@
   "actionResult": {
     "type": "object",
     "properties": {
-      "result": { "type": "string", "enum": ["done", "navigated", "focused", "edited", "scrolled", "ignored", "degraded"] },
+      "result": { "type": "string", "enum": ["done", "navigated", "focused", "edited", "scrolled", "noop", "ignored", "degraded", "deferred", "dropped"], "description": "deferred = enfilé pour rejeu après l'apply en vol · dropped = file différée pleine, entrée non prise (réessayer après un commit, étape 269) · noop = scroll clampé sans mouvement" },
       "actionability": { "$ref": "#/$defs/actionability" },
       "degraded": { "type": "string", "description": "raison du mode dégradé (force, click_at, stable jamais atteint)" }
     },

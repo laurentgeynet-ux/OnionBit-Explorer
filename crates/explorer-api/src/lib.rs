@@ -854,6 +854,9 @@ async fn input(
                                 "scroll_y": scroll_y, "moved": moved })
         }
         InputOutcome::Deferred => serde_json::json!({ "result": "deferred" }),
+        InputOutcome::Dropped => {
+            serde_json::json!({ "result": "dropped", "reason": "queue_full" })
+        }
         InputOutcome::Navigated => serde_json::json!({ "result": "navigated" }),
         InputOutcome::Focused => serde_json::json!({ "result": "focused" }),
         InputOutcome::Edited => serde_json::json!({ "result": "edited" }),

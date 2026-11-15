@@ -1000,7 +1000,12 @@ pub async fn handle_input_shared(
         // une fenêtre d'apply, verdict field263).
         if s.tabs.get(&tab).is_some_and(Tab::input_defer_window) {
             let is_scroll = matches!(ev, InputEvent::Scroll { .. });
-            s.defer_input(tab, ev);
+            if !s.defer_input(tab, ev) {
+                // File pleine (étape 269) — `Dropped`, pas
+                // `Deferred` : le rejeu promis n'aurait
+                // jamais lieu.
+                return Ok(InputOutcome::Dropped);
+            }
             if is_scroll {
                 let proj = s.projected_scroll(tab);
                 return Ok(InputOutcome::Scrolled {
