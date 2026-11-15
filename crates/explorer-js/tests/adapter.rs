@@ -196,6 +196,48 @@ fn dispatch_without_mirror_is_noop() {
     assert!(!eng.dispatch_event("click", &path_to_div()).unwrap());
 }
 
+/// JS-C549 — `eval_element` de bout en bout : path →
+/// `mirror_node` → globals `$0`/`el` posés le temps de
+/// l'éval (étape 260, `eval.run{ref}`).
+#[test]
+fn eval_element_binds_dollar0_and_el() {
+    let mut eng = JscoreEngine::new();
+    eng.install_dom(
+        "<html><body><div id=\"b\">x</div></body></html>",
+        "http://h.test/p",
+        1,
+    );
+    let v = eng
+        .eval_element(
+            explorer_js::JS_CTX_TOP,
+            &path_to_div(),
+            "$0.id + ':' + ($0 === el) + ':' + ($0 === document.getElementById('b'))",
+            None,
+        )
+        .unwrap();
+    assert_eq!(v, "b:true:true");
+    // Le scope ne fuit pas : les globals sont déliés après l'éval.
+    assert_eq!(
+        eng.eval("typeof $0 + ':' + typeof el").unwrap(),
+        "undefined:undefined"
+    );
+}
+
+#[test]
+fn eval_element_dead_ref_is_honest_error() {
+    let mut eng = JscoreEngine::new();
+    eng.install_dom(
+        "<html><body><div id=\"b\">x</div></body></html>",
+        "http://h.test/p",
+        1,
+    );
+    let bogus = vec![("html".into(), 0), ("body".into(), 0), ("table".into(), 0)];
+    match eng.eval_element(explorer_js::JS_CTX_TOP, &bogus, "1", None) {
+        Err(JsError::Uncaught(_)) => {}
+        other => panic!("attendu Uncaught, obtenu {other:?}"),
+    }
+}
+
 #[test]
 fn nav_requests_drained() {
     let mut eng = JscoreEngine::new();

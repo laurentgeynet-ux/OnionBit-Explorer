@@ -7880,9 +7880,9 @@ MCP = adaptateur, jamais la base.
 - [x] **Étape 260. `eval.run{ref}` — couture eval scopée**
   — **Couture livrée** : param `ref` → `element_path` →
   `JsEngine::eval_element` (trait additif, erreur honnête
-  par défaut). **Reste côté spécialiste JS** : l'impl
-  jscore pose le binding `$0`/`el` sur le nœud miroir
-  (`mirror_node` existe déjà pour les events).
+  par défaut). Binding `$0`/`el` posé par **JS-C549**
+  (spécialiste JS) — la couture est complète de bout en
+  bout.
 
 ## Piste JS (JS-C26+) — spécialiste `explorer-jscore`
 
@@ -13168,6 +13168,22 @@ chaque gain rapporté contre les **deux** archétypes.
   (`ic_hit`/`ic_miss`/`ic_disarm` au snapshot) pour
   borner la couverture du seul court-circuit existant.
   Dependency-groups = infra lourde, dernier recours.
+- [x] **JS-C549 — `eval_on_element` : binding `$0`/`el`
+  scopé élément** (ferme la couture étape 260 —
+  `eval.run{ref}` EAP). `Engine::eval_on_element(node,
+  src, name)` : nœud miroir → `node_value`, globals
+  `$0`/`el` non-énumérables posés le temps de l'éval puis
+  déliés — props précédentes sauvegardées/restaurées
+  (`Prop` complet, accesseurs compris), scope jamais
+  fuité dans la page ; miroir absent ou nœud libéré →
+  `Uncaught` honnête. Côté `explorer-js` : `Cmd::
+  EvalElement` (ctx + path + budget canal, pattern
+  `EvalCtx`), résolution `mirror_node` sur `jsd`
+  (top) ou `ctx_doms` (cadre) — ref morte → erreur
+  honnête, jamais de scope factice. Verrous :
+  `dom.rs` ×4 (bind/identité `$0===el`, restauration
+  `var $0` préexistant, mutation reflétée au miroir,
+  erreur sans DOM).
 - [x] **JS-C548 — `FastHash` sur tables à clés
   internes** : SipHash ~15 ns/consultation sur des
   clés déjà mélangées (ptr `Location`, ptr AST,

@@ -884,7 +884,7 @@ pub trait JsEngine: Send {
     ///
     /// # Errors
     /// `Uncaught` « non implémenté » par défaut ; l'impl
-    /// `explorer-jscore` pose le binding (`JS-Cxxx`).
+    /// `explorer-jscore` pose le binding (JS-C549).
     fn eval_element(
         &mut self,
         ctx: JsCtxId,
@@ -2076,6 +2076,19 @@ enum Cmd {
         budget_tx: Sender<u64>,
         tx: Sender<Result<String, JsError>>,
     },
+    /// `eval.run{ref}` EAP (étape 260, JS-C549) — éval scopée
+    /// au nœud miroir résolu de `path` (`mirror_node`,
+    /// mêmes segments que `dispatch_event`) ; les globals
+    /// `$0`/`el` sont posés par `Engine::eval_on_element` le
+    /// temps de l'éval puis déliés.
+    EvalElement {
+        ctx: JsCtxId,
+        path: Vec<(String, u32)>,
+        src: String,
+        name: Option<String>,
+        budget_tx: Sender<u64>,
+        tx: Sender<Result<String, JsError>>,
+    },
     DrainDynImgs {
         tx: Sender<Vec<explorer_jscore::DynImgReq>>,
     },
@@ -2888,6 +2901,50 @@ impl JscoreEngine {
                         eng.context_switch(prev);
                         let _ = tx.send(out);
                     }
+                    Cmd::EvalElement {
+                        ctx,
+                        path,
+                        src,
+                        name,
+                        budget_tx,
+                        tx,
+                    } => {
+                        let prev = eng.current_context();
+                        eng.context_switch(ctx);
+                        let out = if eng.current_context() == ctx {
+                            let _ = budget_tx.send(eng.eval_timeout_boot_ms());
+                            dump_eval_script("eval_el", name.as_deref(), &src);
+                            let _ = explorer_common::alloc_delta();
+                            let t0 = std::time::Instant::now();
+                            // `JS_CTX_TOP` vit dans `jsd`, les
+                            // cadres dans `ctx_doms` — même
+                            // résolution que `ContextNewIn`.
+                            let dref = if ctx == JS_CTX_TOP {
+                                jsd.as_ref()
+                            } else {
+                                ctx_doms.get(&ctx)
+                            };
+                            let node = dref.and_then(|d| mirror_node(&d.borrow(), &path));
+                            let res = match node {
+                                Some(n) => eng.eval_on_element(n, &src, name.as_deref()),
+                                // Ref morte entre le snapshot et
+                                // l'appel (miroir divergé) — erreur
+                                // honnête, jamais de scope factice.
+                                None => Err(explorer_jscore::Error::Uncaught(
+                                    "eval scopé élément : ref introuvable dans le miroir".into(),
+                                )),
+                            };
+                            note_eval(eng, "eval_el", name.as_deref(), src.len(), t0, res.is_ok());
+                            match res {
+                                Ok(v) => Ok(eng.describe(v)),
+                                Err(e) => Err(JsError::from(e)),
+                            }
+                        } else {
+                            Err(JsError::Dead)
+                        };
+                        eng.context_switch(prev);
+                        let _ = tx.send(out);
+                    }
                     Cmd::DrainDynScripts { tx } => {
                         let _ = tx.send(eng.drain_dyn_scripts());
                     }
@@ -3282,6 +3339,32 @@ impl JsEngine for JscoreEngine {
                 src: source.to_string(),
                 name: name.map(str::to_string),
                 ord: script_ord,
+                budget_tx,
+                tx,
+            })
+            .is_err()
+        {
+            return Err(JsError::Dead);
+        }
+        self.recv_eval_job(&rx, Some(&budget_rx))?
+    }
+
+    fn eval_element(
+        &mut self,
+        ctx: JsCtxId,
+        path: &[(String, u32)],
+        source: &str,
+        name: Option<&str>,
+    ) -> Result<String, JsError> {
+        let (tx, rx) = channel();
+        let (budget_tx, budget_rx) = channel();
+        if self
+            .tx
+            .send(Cmd::EvalElement {
+                ctx,
+                path: path.to_vec(),
+                src: source.to_string(),
+                name: name.map(str::to_string),
                 budget_tx,
                 tx,
             })
