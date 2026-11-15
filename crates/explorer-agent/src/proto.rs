@@ -523,6 +523,11 @@ pub enum Method {
     /// « take » : l'intervalle se clore dans la réponse.
     #[serde(rename = "engine.pipeline")]
     EnginePipeline(PipelineParams),
+    /// Compteurs de peinture du dernier paint commis :
+    /// `EmitStats` de la build de display list + `ReplayStats`
+    /// du replay raster (cap `engine`, étape 249).
+    #[serde(rename = "engine.paint_stats")]
+    EnginePaintStats(TabParams),
     /// Suspects heuristiques bornés — triage affichage +
     /// santé moteur (cap `engine`, étape 248).
     #[serde(rename = "engine.anomalies")]

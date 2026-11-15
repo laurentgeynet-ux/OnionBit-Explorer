@@ -597,6 +597,17 @@ pub(crate) struct Tab {
     /// `put_paint`, relue par `tab_info`/`frame_png_full`.
     /// `false` quand la frame est plein-doc ou absente.
     windowed: bool,
+    /// Compteurs d'émission du dernier paint commis (étape
+    /// 249 — verbe EAP `engine.paint_stats`) : collectés à
+    /// chaque `repaint_payload` (le dump détaillé reste sous
+    /// `EXPLORER_EMIT_STATS`). `None` tant qu'aucun paint
+    /// n'est commis ; voyage avec la payload détachée.
+    emit_stats: Option<explorer_render::EmitStats>,
+    /// Compteurs de replay raster du même paint (R-300 —
+    /// variantes `rasterize_*_stats`) : items scannés,
+    /// draws/skips, µs par famille. Mêmes règles de
+    /// disponibilité que `emit_stats`.
+    raster_stats: Option<explorer_render::ReplayStats>,
     /// Epoch de navigation à laquelle le moteur JS détaché
     /// appartient (étape 53f) — `Some` = `js` est sorti pour
     /// un `run_pending`/`sync_dom` **hors verrou**. À la
@@ -1765,6 +1776,8 @@ impl Session {
                 bfcache: VecDeque::new(),
                 spec_paint: false,
                 windowed: false,
+                emit_stats: None,
+                raster_stats: None,
                 js_detached: None,
                 js_stall_until: None,
                 slow_eval_streak: 0,

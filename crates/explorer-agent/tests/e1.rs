@@ -385,6 +385,26 @@ async fn engine_introspection() {
         .as_u64()
         .unwrap_or(0);
     assert!(n_after < n_before, "livre reparti après take : {r}");
+    // Étape 249 — compteurs du dernier paint commis : `emit`
+    // (boîte→item) et `raster` (replay) non nuls après nav,
+    // `frame` décrit la liste peinte.
+    let r = a.call("engine.paint_stats", json!({"tab": tab})).await;
+    assert!(r["error"].is_null(), "{r}");
+    let emit = &r["result"]["emit"];
+    assert!(
+        emit["items"].as_u64().is_some_and(|n| n > 0),
+        "items émis attendus : {r}"
+    );
+    assert!(emit["by_kind"].is_object(), "by_kind : {r}");
+    let raster = &r["result"]["raster"];
+    assert!(
+        raster["draws"].as_u64().is_some_and(|n| n > 0),
+        "draws raster attendus : {r}"
+    );
+    assert!(raster["kind_us"].is_object() && raster["kind_n"].is_object());
+    assert!(r["result"]["frame"]["list_items"].is_u64(), "{r}");
+    let r = a.call("engine.paint_stats", json!({"tab": 999})).await;
+    assert_eq!(r["error"]["code"], -32005);
     // Onglet inconnu → -32005.
     let r = a.call("engine.pipeline", json!({"tab": 999})).await;
     assert_eq!(r["error"]["code"], -32005);

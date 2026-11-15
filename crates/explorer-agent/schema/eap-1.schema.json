@@ -362,6 +362,12 @@
       "params": { "type": "object", "properties": { "tab": { "$ref": "#/$defs/tabId" }, "reset": { "type": "boolean", "default": false } }, "required": ["tab"], "additionalProperties": false },
       "result": { "type": "object", "properties": { "state": { "type": "object" }, "counters": { "type": "object" }, "mem": { "type": ["object", "null"] }, "phases": { "type": "object" } }, "required": ["state", "counters"] }
     },
+    "engine.paint_stats": {
+      "x-phase": "E5",
+      "description": "Compteurs du **dernier paint commis** : `emit` = compteurs d'émission boîte→item (EmitStats — boîtes visitées, items par variante, tueurs opacity/backface/visibility, reports, glyphes) ; `raster` = compteurs de replay (ReplayStats R-300 — items scannés, draws/skips, µs par famille text/fill/shadow/img/other) ; `frame` = items de la liste, reports droppés, mode fenêtré. `emit`/`raster` null avant le premier paint ou pendant une passe détachée.",
+      "params": { "type": "object", "properties": { "tab": { "$ref": "#/$defs/tabId" } }, "required": ["tab"], "additionalProperties": false },
+      "result": { "type": "object", "properties": { "emit": { "type": ["object", "null"] }, "raster": { "type": ["object", "null"] }, "frame": { "type": "object" } }, "required": ["emit", "raster", "frame"] }
+    },
 
     "input.click": {
       "x-phase": "E2",

@@ -350,6 +350,14 @@ pub(crate) struct PaintPayload {
     /// `doc_h_clamped`) lisent ce flag — jamais dérivé d'une
     /// constante, la borne qui arme le mode est dynamique.
     pub windowed: bool,
+    /// Compteurs d'émission de la passe (étape 249 —
+    /// verbe EAP `engine.paint_stats`) : remplis à chaque
+    /// `repaint_payload`, reportés sur `Tab` au commit.
+    /// Décrit le paint qui a produit `list`/`frame`.
+    pub emit_stats: Option<explorer_render::EmitStats>,
+    /// Compteurs de replay raster de la passe (R-300 —
+    /// variantes `rasterize_*_stats`).
+    pub raster_stats: Option<explorer_render::ReplayStats>,
     /// Régions invalides accumulées (diff dirty).
     pub dirty: Vec<Rect>,
     /// Watermark des régions déjà rapportées.
@@ -543,6 +551,8 @@ impl Tab {
             scroll_y: self.scroll_y,
             spec_paint: std::mem::take(&mut self.spec_paint),
             windowed: self.windowed,
+            emit_stats: self.emit_stats.take(),
+            raster_stats: self.raster_stats.take(),
             dirty: std::mem::take(&mut self.dirty),
             emitted: self.emitted,
             bg_aliases: std::mem::take(&mut self.bg_aliases),
@@ -614,6 +624,8 @@ impl Tab {
         self.doc_h = p.doc_h;
         self.spec_paint = p.spec_paint;
         self.windowed = p.windowed;
+        self.emit_stats = p.emit_stats;
+        self.raster_stats = p.raster_stats;
         self.dirty = p.dirty;
         self.emitted = p.emitted;
         // Tampon étape 98 non consommé (relayout sauté) :
@@ -3487,36 +3499,22 @@ pub(crate) fn repaint_payload(
     // (même signature `box_sig`, même taille, Δ uniforme)
     // sont copiés depuis la liste précédente au lieu d'être
     // ré-émis ; `prev=None` ou largeur changée → plein.
-    // §B-118 / R-199 — sonde `EXPLORER_EMIT_STATS=1` : variante
-    // stats (compteurs boîte→item + chemins des ancêtres
-    // fautifs) — la classe fautive se nomme en une lecture.
+    // §B-118 / R-199 + étape 249 : les `EmitStats` sont
+    // collectées à **chaque** passe (verbe EAP
+    // `engine.paint_stats`) — compteurs cheap, le dump
+    // détaillé de la liste reste sous `EXPLORER_EMIT_STATS`.
     let stats_on = std::env::var_os("EXPLORER_EMIT_STATS").is_some();
-    let (mut list, emit_stats) = if stats_on {
-        let (l, st) = explorer_render::build_display_list_incremental_stats(
-            bx,
-            vw,
-            vh,
-            (0.0, p.scroll_y),
-            &p.images,
-            p.list.as_ref(),
-            p.tree_epoch,
-        );
-        (l, Some(st))
-    } else {
-        (
-            explorer_render::build_display_list_incremental(
-                bx,
-                vw,
-                vh,
-                (0.0, p.scroll_y),
-                &p.images,
-                p.list.as_ref(),
-                p.tree_epoch,
-            ),
-            None,
-        )
-    };
-    if let Some(st) = &emit_stats {
+    let (mut list, emit_stats) = explorer_render::build_display_list_incremental_stats(
+        bx,
+        vw,
+        vh,
+        (0.0, p.scroll_y),
+        &p.images,
+        p.list.as_ref(),
+        p.tree_epoch,
+    );
+    if stats_on {
+        let st = &emit_stats;
         tracing::info!(
             target: "paint_stats",
             boxes = st.boxes,
@@ -3543,6 +3541,10 @@ pub(crate) fn repaint_payload(
         // clip de chaque item (145 items ≈ autant de lignes).
         tracing::info!(target: "paint_stats", "apply: display_dump\n{}", list.dump());
     }
+    // Étape 249 — stats du paint commis (verbe EAP
+    // `engine.paint_stats`) : le struct voyage avec la
+    // payload jusqu'au `put_paint`.
+    p.emit_stats = Some(emit_stats);
     tracing::info!(items = list.items.len(), "apply: display_list");
     if list.dropped_emits > 0 {
         // WARN une fois par chemin fautif (la borne absorbe à
@@ -3637,19 +3639,26 @@ pub(crate) fn repaint_payload(
         r.x <= 0.0 && r.y <= 0.0 && r.x + r.width >= list.width && r.y + r.height >= list.height
     });
     tracing::info!(regions = regions.len(), "apply: raster");
+    // R-300 / étape 249 : les variantes `*_stats` servent
+    // les `ReplayStats` du verbe EAP `engine.paint_stats` —
+    // celles du dernier appel exécuté (chemin dirty raté →
+    // repli plein cadre : les stats du repli, seul peint).
+    let mut raster_stats = explorer_render::ReplayStats::default();
     let frame = p
         .frame
         .take()
         .filter(|_| !full_cover)
         .and_then(|prev| {
-            explorer_render::rasterize_dirty_cached(
+            let (f, st) = explorer_render::rasterize_dirty_cached_stats(
                 &list,
                 &ctx.fonts as &dyn FontSource,
                 ctx.scale,
                 prev,
                 &regions,
                 &mut p.font_cache,
-            )
+            );
+            raster_stats = st;
+            f
         })
         .map_or_else(
             || {
@@ -3660,16 +3669,19 @@ pub(crate) fn repaint_payload(
                 // garde ses `spans` pour le prochain build.
                 let mut culled = list.clone();
                 cull_display_list(&mut culled);
-                explorer_render::rasterize_cached(
+                let (f, st) = explorer_render::rasterize_cached_stats(
                     &culled,
                     &ctx.fonts as &dyn FontSource,
                     ctx.scale,
                     &mut p.font_cache,
-                )
+                );
+                raster_stats = st;
+                f
             },
             Some,
         )
         .ok_or(CoreError::FrameTooBig)?;
+    p.raster_stats = Some(raster_stats);
     p.dirty.extend(regions);
     if p.dirty.len() > MAX_DIRTY_RECTS {
         p.emitted = 0;
@@ -3707,15 +3719,16 @@ fn raster_window(
     vw: f32,
     vh: f32,
 ) -> Result<(), CoreError> {
-    let frame = explorer_render::rasterize_window_cached(
+    let (frame, rs) = explorer_render::rasterize_window_cached_stats(
         &list,
         &ctx.fonts as &dyn FontSource,
         ctx.scale,
         0.0,
         vh,
         &mut p.font_cache,
-    )
-    .ok_or(CoreError::FrameTooBig)?;
+    );
+    p.raster_stats = Some(rs);
+    let frame = frame.ok_or(CoreError::FrameTooBig)?;
     p.emitted = 0;
     p.dirty = vec![Rect {
         x: 0.0,

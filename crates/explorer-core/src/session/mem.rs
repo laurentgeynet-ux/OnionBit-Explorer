@@ -452,4 +452,84 @@ impl Session {
             "phases": phases,
         }))
     }
+
+    /// Compteurs de peinture du **dernier paint commis**
+    /// (verbe EAP `engine.paint_stats`, étape 249) : les
+    /// `EmitStats` de la build de display list (collectées à
+    /// chaque passe — le dump détaillé reste sous
+    /// `EXPLORER_EMIT_STATS`) et les `ReplayStats` du replay
+    /// raster (variantes `rasterize_*_stats`, R-300 —
+    /// couvre les trois chemins plein cadre/dirty/fenêtré ;
+    /// chemin dirty raté → repli plein cadre : les stats du
+    /// repli). Les deux structs internes ne sont pas
+    /// `Serialize` — mapping champ par champ, la forme JSON
+    /// est le contrat. `None` si l'onglet n'existe pas ;
+    /// `emit`/`raster` null tant qu'aucun paint n'est commis
+    /// ou pendant qu'une passe détachée est en vol (l'orphelin
+    /// garé est réinséré par l'appelant, comme `engine.layout`).
+    #[must_use]
+    pub fn paint_stats(&self, tab: TabId) -> Option<serde_json::Value> {
+        let entry = self.tabs.get(&tab)?;
+        let emit = entry.emit_stats.as_ref().map(|st| {
+            serde_json::json!({
+                "boxes": st.boxes,
+                "items": st.items,
+                "by_kind": st.by_kind,
+                "off_canvas": st.off_canvas,
+                "drop_opacity0": st.drop_opacity0,
+                "drop_backface": st.drop_backface,
+                "skip_visibility": st.skip_visibility,
+                "deferred_emitted": st.deferred_emitted,
+                "drop_cap": st.drop_cap,
+                "spans_copied": st.spans_copied,
+                "opacity0_path": st.opacity0_path,
+                "backface_path": st.backface_path,
+                "visibility_path": st.visibility_path,
+                "tf_offsets": st.tf_offsets,
+                "off_canvas_first": st.off_canvas_first,
+                "off_canvas_tf": st.off_canvas_tf,
+                "glyphs": st.glyphs,
+                "invisible_glyphs": st.invisible_glyphs,
+            })
+        });
+        // Familles d'items — même ordre que la ligne de trace
+        // `raster.parts` (`draw_text_us`…`draw_other_us`).
+        let raster = entry.raster_stats.as_ref().map(|st| {
+            serde_json::json!({
+                "items": st.items,
+                "clips": st.clips,
+                "clips_real": st.clips_real,
+                "groups": st.groups,
+                "groups_void": st.groups_void,
+                "draws": st.draws,
+                "skips": st.skips,
+                "clip_us": st.clip_us,
+                "group_us": st.group_us,
+                "draw_us": st.draw_us,
+                "kind_us": {
+                    "text": st.kind_us[0],
+                    "fill": st.kind_us[1],
+                    "shadow": st.kind_us[2],
+                    "img": st.kind_us[3],
+                    "other": st.kind_us[4],
+                },
+                "kind_n": {
+                    "text": st.kind_n[0],
+                    "fill": st.kind_n[1],
+                    "shadow": st.kind_n[2],
+                    "img": st.kind_n[3],
+                    "other": st.kind_n[4],
+                },
+            })
+        });
+        Some(serde_json::json!({
+            "emit": emit,
+            "raster": raster,
+            "frame": {
+                "list_items": entry.list.as_ref().map_or(0, |l| l.items.len()),
+                "dropped_emits": entry.list.as_ref().map_or(0, |l| l.dropped_emits),
+                "windowed": entry.windowed,
+            },
+        }))
+    }
 }

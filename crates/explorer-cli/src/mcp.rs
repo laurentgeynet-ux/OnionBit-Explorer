@@ -546,6 +546,11 @@ fn engine_tools() -> Value {
             )
         ),
         t(
+            "engine_paint_stats",
+            "Compteurs émission + raster du dernier paint {tab}",
+            tab()
+        ),
+        t(
             "engine_anomalies",
             "Suspects d'affichage/santé bornés — indices, pas verdicts {tab,max?}",
             obj(
@@ -629,6 +634,7 @@ fn to_eap(name: &str, args: &Value) -> Option<(&'static str, Value)> {
             "engine.pipeline",
             json!({"tab": tab, "reset": args["reset"]}),
         ),
+        "engine_paint_stats" => ("engine.paint_stats", json!({"tab": tab})),
         "engine_anomalies" => ("engine.anomalies", json!({"tab": tab, "max": args["max"]})),
         _ => return None,
     })

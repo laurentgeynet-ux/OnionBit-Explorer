@@ -86,6 +86,11 @@ const HELP: &[(&str, Option<Capability>, &str)] = &[
         "engine.pipeline{phases,reset}",
     ),
     (
+        "combien d'items émis/dessinés ?",
+        Some(Capability::Engine),
+        "engine.paint_stats",
+    ),
+    (
         "erreurs pipeline ?",
         Some(Capability::ConsoleLog),
         "console.get",
@@ -156,9 +161,10 @@ fn cap_of(m: &Method) -> Option<Capability> {
         Method::FrameGet(_) => Some(Capability::Frames),
         Method::ConsoleGet(_) => Some(Capability::ConsoleLog),
         Method::DomGet(_) => Some(Capability::Dom),
-        Method::EngineLayout(_) | Method::EnginePipeline(_) | Method::EngineAnomalies(_) => {
-            Some(Capability::Engine)
-        }
+        Method::EngineLayout(_)
+        | Method::EnginePipeline(_)
+        | Method::EnginePaintStats(_)
+        | Method::EngineAnomalies(_) => Some(Capability::Engine),
         Method::InputKey(_) | Method::InputScroll(_) | Method::InputClickAt(_) => {
             Some(Capability::Input)
         }
@@ -499,6 +505,7 @@ async fn run(
         | Method::DomGet(_)
         | Method::EngineLayout(_)
         | Method::EnginePipeline(_)
+        | Method::EnginePaintStats(_)
         | Method::EngineAnomalies(_) => perceive_verbs(st, conn, method).await,
         Method::InputClick(_) | Method::InputType(_) | Method::InputHover(_) => {
             handle_verbs(st, conn, method).await
@@ -859,6 +866,16 @@ async fn perceive_verbs(
             tab_exists(st, p.tab).await?;
             let mut s = st.session.lock().await;
             match s.pipeline_report(p.tab, p.reset.unwrap_or(false)) {
+                Some(r) => Ok(r),
+                None => Err(err(ErrorCode::NoSuchTab, "onglet inconnu")),
+            }
+        }
+        Method::EnginePaintStats(p) => {
+            scope(conn, p.tab)?;
+            tab_exists(st, p.tab).await?;
+            let mut s = st.session.lock().await;
+            s.reclaim_orphaned_paint(p.tab);
+            match s.paint_stats(p.tab) {
                 Some(r) => Ok(r),
                 None => Err(err(ErrorCode::NoSuchTab, "onglet inconnu")),
             }

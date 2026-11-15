@@ -71,6 +71,7 @@ fn golden_methods_known() {
         "dom.get",
         "engine.layout",
         "engine.pipeline",
+        "engine.paint_stats",
         "engine.anomalies",
         "input.click",
         "input.type",

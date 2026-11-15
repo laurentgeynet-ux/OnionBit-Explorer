@@ -1,5 +1,5 @@
 {
-  "doc": "Introspection moteur (étape 247) — engine.layout rend l'arbre de boîtes posé, engine.pipeline l'état/compteurs/mémoire de l'onglet. Étendu à l'étape 250 : engine.pipeline sert le livre de phases sync_profile et le param reset (sémantique « take »).",
+  "doc": "Introspection moteur (étape 247) — engine.layout rend l'arbre de boîtes posé, engine.pipeline l'état/compteurs/mémoire de l'onglet. Étendu à l'étape 250 : engine.pipeline sert le livre de phases sync_profile et le param reset (sémantique « take »). À l'étape 249 : engine.paint_stats sert les compteurs d'émission et de raster du dernier paint commis.",
   "exchange": [
     {
       "wire": "client → serveur",
@@ -111,6 +111,66 @@
       "message": {
         "jsonrpc": "2.0",
         "id": 33,
+        "method": "engine.paint_stats",
+        "params": {
+          "tab": 1
+        }
+      }
+    },
+    {
+      "wire": "serveur → client",
+      "message": {
+        "jsonrpc": "2.0",
+        "id": 33,
+        "result": {
+          "emit": {
+            "boxes": 24,
+            "items": 12,
+            "by_kind": { "Rect": 6, "Text": 4, "Image": 1, "PushClip": 1 },
+            "off_canvas": 0,
+            "drop_opacity0": 0,
+            "drop_backface": 0,
+            "skip_visibility": 1,
+            "deferred_emitted": 0,
+            "drop_cap": 0,
+            "spans_copied": 0,
+            "opacity0_path": null,
+            "backface_path": null,
+            "visibility_path": [0, 2],
+            "tf_offsets": [],
+            "off_canvas_first": null,
+            "off_canvas_tf": null,
+            "glyphs": 57,
+            "invisible_glyphs": 0
+          },
+          "raster": {
+            "items": 12,
+            "clips": 1,
+            "clips_real": 1,
+            "groups": 0,
+            "groups_void": 0,
+            "draws": 11,
+            "skips": 1,
+            "clip_us": 8,
+            "group_us": 0,
+            "draw_us": 240,
+            "kind_us": { "text": 150, "fill": 60, "shadow": 0, "img": 30, "other": 0 },
+            "kind_n": { "text": 4, "fill": 5, "shadow": 0, "img": 1, "other": 1 }
+          },
+          "frame": {
+            "list_items": 12,
+            "dropped_emits": 0,
+            "windowed": false
+          },
+          "comment": "dernier paint commis — emit/raster null avant le premier paint ou pendant une passe détachée"
+        }
+      }
+    },
+    {
+      "wire": "client → serveur",
+      "message": {
+        "jsonrpc": "2.0",
+        "id": 34,
         "method": "engine.pipeline",
         "params": {
           "tab": 1,
@@ -122,7 +182,7 @@
       "wire": "serveur → client",
       "message": {
         "jsonrpc": "2.0",
-        "id": 33,
+        "id": 34,
         "result": {
           "state": {},
           "counters": {},

@@ -7716,14 +7716,19 @@ MCP = adaptateur, jamais la base.
   filtré par capacités. Outil MCP `engine_anomalies`.
   Suites : `engine.cascade{ref}` (verdict par déclaration),
   accumulateur `sync_profile`, `net.events`.
-- [ ] **Étape 249. EAP `engine.paint_stats` : compteurs
-  d'émission + raster** — `EmitStats` permanente sur
-  `PaintPayload` (aujourd'hui gated `EXPLORER_EMIT_STATS`) +
-  `ReplayStats` du replay — servis `{emit, raster, frame}`.
-  **En attente** : mini-R `ReplayStats` chez PIPE
-  (interface-equipes 2026-11-15 — 3 variantes
-  `rasterize_*_stats` additives) ; la partie NAV est
-  préparée.
+- [x] **Étape 249. EAP `engine.paint_stats` : compteurs
+  d'émission + raster** — **Livrée (`main`)**, débloquée
+  par le `ReplayStats` R-300 de PIPE. `EmitStats` collectée
+  à chaque passe (dump sous `EXPLORER_EMIT_STATS` seul),
+  les trois rasters de l'apply servent leurs stats
+  (`rasterize_{,dirty_,window_}_cached_stats`), les structs
+  voyagent sur `PaintPayload` jusqu'au commit. Verbe
+  `{emit, raster, frame}` = **dernier paint commis**,
+  `emit`/`raster` null avant le premier paint ; mapping
+  JSON champ-par-champ côté NAV (structs non `Serialize`) ;
+  `kind_*` nommé text/fill/shadow/img/other. Help + schéma
+  + golden + MCP `engine_paint_stats`. Verrou : socket
+  `engine_introspection` (items/draws > 0, `-32005`).
 - [x] **Étape 250. EAP `engine.pipeline{phases}` : livre
   `sync_profile` requêrable** — livré avant 249 (aucune
   dépendance PIPE). **Livrée (`main`)** : `phase_book.rs`
