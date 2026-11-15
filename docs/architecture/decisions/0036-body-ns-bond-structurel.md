@@ -125,3 +125,46 @@ console yt à signatures connues, jamais de régression
   (~2,5 M/vol), `arguments` résiduel `eval()`'d,
   `env_lvl` des marches requises — la campagne
   d'annotation continue en parallèle d'A.
+
+## Addendum — verdict du pilote `MethodCall` (JS-C556, vol n557)
+
+Le pilote prévu par l'option A a livré sa mesure **par
+inspection de structure**, avant toute ligne de fusion
+nouvelle :
+
+1. **La fusion `Call(Member)` pré-existe** : le bras
+   `Expr::Call` de `eval_inner` consomme le nœud callee
+   `Member` sans second dispatch — base évaluée
+   directement, `Callee::Member` emballe receiver+site+nom
+   (`eval.rs`). L'épine `eval_spine` exclut volontairement
+   `Call`-avec-callee-`Member` pour préserver cette fusion.
+   Un variant `Expr::MethodCall` ne retirerait qu'un
+   `matches!` de callee — rien de mesurable.
+2. **Borne du dispatch générique résiduel** — ce qu'une
+   fusion *parfaite* sur tous les nœuds retirerait :
+   `dbg_expr()` OnceLock ~1 ns + `j17_tick` atomic load
+   ~1 ns (fetch_add ~5-10 ns armé) + saut de match ~2-5 ns
+   ≈ **5-16 ns/nœud × ~33 M evals/vol ≈ 160-530 ms < 1 %**
+   du travail de session (réf. : `prop_ns` ~6,8 s,
+   `frame_ns` ~7,9 s au même intervalle).
+3. **Verdict** : le motif fusible le plus lourd (19 % du
+   mix `call`) étant déjà fusionné et le résidu borné sous
+   1 %, aucun pilote A ne peut approcher le juge >10 %
+   `body_ns`. **L'option B (bytecode/VM) est rejetée par la
+   mesure structurelle** — la thèse « dispatch dominant »
+   ne tient pas : le coût vit *dans* les nœuds (recherches
+   de propriétés, marches d'env, prologues), pas *entre*
+   eux. Rejet acquis à 0 ligne de VM au lieu de ~20 k.
+4. **Ce qui a permis la mesure** : JS-C556 a retiré le
+   confondu `std::env::var` par nœud (`DBG_EXPR` rescanné à
+   chaque eval — ~dizaines de M lookups/vol → `OnceLock`).
+   Le vol n557 (même protocole que n552/n554) : variabilité
+   de session dominante (`call` −29 % à `frame_ns` égal) —
+   le fix est conservé comme hygiène strictement-moins-de-
+   travail, l'A/B inter-vols ne résout pas cet ordre de
+   grandeur.
+5. **Reste ouvert** (hors option B) : les coûts internes de
+   nœud — `prop_ns` (marche `find_prop` sur population non-
+   IC), `frame_ns` (prologue ~2,6-3,7 µs/appel), `mat_ns` —
+   continuent la campagne de crans ordinaire ; l'option C
+   (recyclage d'env) reste sur la table comme cran borné.

@@ -13220,6 +13220,13 @@ chaque gain rapporté contre les **deux** archétypes.
   (`ic_hit`/`ic_miss`/`ic_disarm` au snapshot) pour
   borner la couverture du seul court-circuit existant.
   Dependency-groups = infra lourde, dernier recours.
+- [x] **JS-C557 — pilote `MethodCall` : fusion
+  pré-existante → B rejeté par borne** : `Expr::Call`
+  consomme le callee `Member` sans 2ᵉ dispatch
+  (`Callee::Member`, épine l'exclut volontairement).
+  Résidu générique ~5-16 ns/nœud × 33 M ≈ < 1 % —
+  juge >10 % `body_ns` inatteignable → VM/bytecode
+  morte par mesure structurelle. Addendum ADR-0036.
 - [x] **JS-C556 — flags DBG env sondés une fois** :
   `env::var` rescannait le bloc env par appel —
   `DBG_EXPR` par nœud AST dans `eval_inner`,
