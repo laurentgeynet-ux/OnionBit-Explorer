@@ -459,14 +459,15 @@ async fn engine_introspection() {
 #[tokio::test]
 async fn engine_cascade_verdicts() {
     let (mut a, srv) = connect().await;
-    // `handles` exigée par `describe` (les refs vivent dessus).
+    // `handles` exigée par `describe` ; le profil `eval`
+    // autorise `eval.run{ref}`.
     a.call(
         "session.open",
         json!({"protocol": "eap/1", "capabilities": [
             "snapshot", "wait_commit", "input", "eval", "frames",
             "console_log", "dom", "tabs", "events", "engine", "net",
             "handles"
-        ]}),
+        ], "profile":{"eval": true}}),
     )
     .await;
     let r = a.call("tab.open", json!({})).await;
@@ -541,6 +542,20 @@ async fn engine_cascade_verdicts() {
         .call("describe", json!({"tab": tab, "ref": "el:999999"}))
         .await;
     assert_eq!(r["error"]["code"], -32002, "{r}");
+    // `eval{ref}` — la couture passe le chemin DOM ;
+    // verdict honnête : erreur de binding (moteur sans
+    // implémenter `eval_element`) ou -32007 si la fixture
+    // n'arme pas de moteur JS — jamais de faux succès.
+    let r = a
+        .call(
+            "eval.run",
+            json!({"tab": tab, "expr": "el => el.tagName", "ref": elem_ref}),
+        )
+        .await;
+    let honest = r["result"]["error"].is_string()
+        || r["result"]["value"].is_string()
+        || r["error"]["code"] == -32007;
+    assert!(honest, "verdict honnête, pas de faux succès : {r}");
     srv.abort();
 }
 

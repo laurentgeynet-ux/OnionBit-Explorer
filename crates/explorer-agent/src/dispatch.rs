@@ -12,9 +12,9 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use explorer_core::{
-    drain_applies_shared, drain_navs_shared, eval_shared, handle_input_shared, history_move_shared,
-    navigate_shared, CoreError, CoreEvent, EvalReply, InputEvent, InputOutcome,
-    KeyMods as CoreKeyMods, Session,
+    drain_applies_shared, drain_navs_shared, eval_shared_at, handle_input_shared,
+    history_move_shared, navigate_shared, CoreError, CoreEvent, EvalReply, InputEvent,
+    InputOutcome, KeyMods as CoreKeyMods, Session,
 };
 use explorer_net::http::{Initiator, Method as NetMethod, Request as NetRequest};
 use explorer_net::url::Url;
@@ -1403,8 +1403,28 @@ async fn eval_verb(
     tab_exists(st, p.tab).await?;
     let deadline = tokio::time::Instant::now()
         + Duration::from_millis(u64::from(p.timeout_ms.unwrap_or(2000)));
+    // `ref` → chemin DOM de l'élément (scope `eval_element`
+    // — étape 260). Résolu une fois, avant la boucle de
+    // réinsertion : une ref fraîche peut mourir pendant
+    // l'attente — l'erreur honnête est `stale_ref`.
+    let path = if let Some(elem_ref) = &p.elem_ref {
+        let handle = resolve(conn, st, p.tab, elem_ref)?;
+        let p2 = {
+            let s = st.session.lock().await;
+            let Some(generation) = s.node_generation(p.tab, handle.node) else {
+                return Err(err(ErrorCode::StaleRef, "nœud mort ou réattribué"));
+            };
+            s.element_path_of(p.tab, handle.node, generation)
+        };
+        let Some(p2) = p2 else {
+            return Err(err(ErrorCode::StaleRef, "nœud mort ou réattribué"));
+        };
+        Some(p2)
+    } else {
+        None
+    };
     let reply = loop {
-        match eval_shared(&st.session, p.tab, p.expr.clone()).await {
+        match eval_shared_at(&st.session, p.tab, p.expr.clone(), path.clone()).await {
             EvalReply::Unavailable if tokio::time::Instant::now() < deadline => {
                 tokio::time::sleep(Duration::from_millis(POLL_MS)).await;
             }

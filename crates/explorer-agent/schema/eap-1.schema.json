@@ -530,6 +530,7 @@
         "properties": {
           "tab": { "$ref": "#/$defs/tabId" },
           "expr": { "type": "string" },
+          "ref": { "$ref": "#/$defs/elementRef", "description": "étape 260 — évalue expr scopée à l'élément (JsEngine::eval_element, binding élément). Erreur honnête tant que le binding jscore n'est pas posé." },
           "timeout_ms": { "type": "integer", "minimum": 0 }
         },
         "required": ["tab", "expr"],

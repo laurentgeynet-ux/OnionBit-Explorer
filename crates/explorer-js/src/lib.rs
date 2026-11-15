@@ -874,6 +874,30 @@ pub trait JsEngine: Send {
         }
     }
 
+    /// Éval **scopée à un élément** (étape 260 —
+    /// `eval.run{ref}` EAP) : `path` = chemin DOM de
+    /// l'élément (`element_path`, mêmes segments que
+    /// `dispatch_event`) ; le moteur le résout en nœud
+    /// miroir et expose l'élément au code (global `$0` /
+    /// `el` selon impl). Défaut : erreur honnête — un
+    /// moteur sans binding n'informe pas un faux scope.
+    ///
+    /// # Errors
+    /// `Uncaught` « non implémenté » par défaut ; l'impl
+    /// `explorer-jscore` pose le binding (`JS-Cxxx`).
+    fn eval_element(
+        &mut self,
+        ctx: JsCtxId,
+        path: &[(String, u32)],
+        source: &str,
+        name: Option<&str>,
+    ) -> Result<String, JsError> {
+        let _ = (ctx, path, source, name);
+        Err(JsError::Uncaught(
+            "eval scopé élément non implémenté — couture JS en cours".into(),
+        ))
+    }
+
     /// Draine les `<script>` insérés dynamiquement
     /// (CAP-169) — `createElement('script')` + `appendChild`
     /// & co : la session résout `src`/`text`, applique la

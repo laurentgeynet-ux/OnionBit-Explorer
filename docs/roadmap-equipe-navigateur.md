@@ -7877,6 +7877,12 @@ MCP = adaptateur, jamais la base.
   miroir JS + `input`/`change` + relayout),
   `input.click_at{space:"document"}` (aligné snapshot —
   scroll vertical seul, x inchangé).
+- [x] **Étape 260. `eval.run{ref}` — couture eval scopée**
+  — **Couture livrée** : param `ref` → `element_path` →
+  `JsEngine::eval_element` (trait additif, erreur honnête
+  par défaut). **Reste côté spécialiste JS** : l'impl
+  jscore pose le binding `$0`/`el` sur le nœud miroir
+  (`mirror_node` existe déjà pour les events).
 
 ## Piste JS (JS-C26+) — spécialiste `explorer-jscore`
 

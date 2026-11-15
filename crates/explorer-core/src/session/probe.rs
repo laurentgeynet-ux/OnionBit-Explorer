@@ -205,6 +205,26 @@ impl Session {
         Some(out)
     }
 
+    /// Chemin DOM d'un élément pour `eval.run{ref}` (étape
+    /// 260) — même format `element_path` que
+    /// `dispatch_event` : le moteur résout le nœud miroir
+    /// par ces segments. `None` = onglet/DOM absent ou ref
+    /// obsolète.
+    #[must_use]
+    pub fn element_path_of(
+        &self,
+        tab: TabId,
+        index: u32,
+        generation: u32,
+    ) -> Option<Vec<(String, u32)>> {
+        let dom = self.tabs.get(&tab)?.dom.as_ref()?;
+        let node = Self::find_node(dom, index)?;
+        if node.generation() != generation {
+            return None;
+        }
+        super::dom_helpers::element_path(dom, node)
+    }
+
     /// Le point viewport `(x, y)` atteint-il l'élément
     /// `(index, generation)` ou l'un de ses descendants ?
     /// (check `topmost` : un `<span>` dans un `<a>` cliqué au

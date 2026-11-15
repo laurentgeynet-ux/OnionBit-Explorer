@@ -934,6 +934,11 @@ pub struct EvalParams {
     /// Source JS — évaluée dans le contexte top-level ; la valeur
     /// retourne sérialisée JSON (bornée 64 Ko, tronquée au-delà).
     pub expr: String,
+    /// Scope optionnel (étape 260) : l'expression est évaluée
+    /// avec l'élément lié — erreur honnête tant que le
+    /// binding moteur n'est pas posé.
+    #[serde(rename = "ref", default)]
+    pub elem_ref: Option<ElementRef>,
     /// Borne d'exécution — défaut config.
     #[serde(default)]
     pub timeout_ms: Option<u32>,

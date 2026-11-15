@@ -815,9 +815,9 @@ fn act_tools() -> Value {
         ),
         t(
             "eval",
-            "JS top-level {tab,expr,timeout_ms?} → valeur JSON (≤64 Ko)",
+            "JS {tab,expr,ref?,timeout_ms?} → valeur JSON (≤64 Ko)",
             obj(
-                json!({"tab":{"type":"integer"},"expr":{"type":"string"},
+                json!({"tab":{"type":"integer"},"expr":{"type":"string"},"ref":{"type":"string"},
                        "timeout_ms":{"type":"integer"}}),
                 &["tab", "expr"]
             )
@@ -1014,7 +1014,8 @@ fn to_eap(name: &str, args: &Value) -> Option<(&'static str, Value)> {
         ),
         "eval" => (
             "eval.run",
-            json!({"tab": tab, "expr": args["expr"], "timeout_ms": args["timeout_ms"]}),
+            json!({"tab": tab, "expr": args["expr"], "ref": args["ref"],
+                   "timeout_ms": args["timeout_ms"]}),
         ),
         "dom" => ("dom.get", json!({"tab": tab})),
         "console" => ("console.get", json!({"tab": tab, "limit": args["limit"]})),

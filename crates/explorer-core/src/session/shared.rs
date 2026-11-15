@@ -768,6 +768,19 @@ pub enum EvalReply {
 /// elle-même reste soumise au budget ops du moteur — une
 /// expression hostile est traitée comme un script hostile.
 pub async fn eval_shared(sess: &tokio::sync::Mutex<Session>, tab: TabId, src: String) -> EvalReply {
+    eval_shared_at(sess, tab, src, None).await
+}
+
+/// [`eval_shared`] scopé à un élément (étape 260) :
+/// `path` = `element_path` de la ref — délégué à
+/// [`JsEngine::eval_element`] (binding `$0`/`el` côté
+/// moteur, erreur honnête tant que non posé).
+pub async fn eval_shared_at(
+    sess: &tokio::sync::Mutex<Session>,
+    tab: TabId,
+    src: String,
+    path: Option<Vec<(String, u32)>>,
+) -> EvalReply {
     if let Ok(mut g) = crate::LAST_DRAIN.lock() {
         *g = "eval";
     }
@@ -779,9 +792,11 @@ pub async fn eval_shared(sess: &tokio::sync::Mutex<Session>, tab: TabId, src: St
         return EvalReply::Unavailable;
     };
     let out = tokio::task::spawn_blocking(move || {
-        let value = eng
-            .eval_ctx(explorer_js::JS_CTX_TOP, &src, Some("api/eval"))
-            .map_err(|e| e.to_string());
+        let value = match &path {
+            Some(p) => eng.eval_element(explorer_js::JS_CTX_TOP, p, &src, Some("api/eval")),
+            None => eng.eval_ctx(explorer_js::JS_CTX_TOP, &src, Some("api/eval")),
+        }
+        .map_err(|e| e.to_string());
         // L'éval a pu armer timers/microtasks (attribution
         // d'hydratation, setTimeout(0)…) — on les draine pour
         // que la valeur rendue reflète l'état stabilisé.
