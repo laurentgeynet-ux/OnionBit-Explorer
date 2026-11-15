@@ -1346,9 +1346,18 @@ pub enum Origin {
 /// Une règle de style collectée (sélecteurs pré-parsés).
 struct CollectedRule {
     selectors: Vec<ComplexSelector>,
+    /// Texte source de chaque sélecteur, aligné sur
+    /// `selectors` (R-301 — `explain` nomme le sélecteur
+    /// ayant déclaré une valeur : le `ComplexSelector` parsé
+    /// ne retient pas sa source ; retenue du prélude à la
+    /// collecte, découpé sur les virgules de tête).
+    selector_text: Vec<String>,
     declarations: Vec<Declaration>,
     /// Ordre source global — départage à spécificité égale.
     order: u32,
+    /// Rang d'ajout de la feuille porteuse (ordre des
+    /// `add_*` — provenance `explain`, R-301).
+    sheet: u32,
     origin: Origin,
     /// Arbre d'appartenance (R-96) : `None` = document ;
     /// `Some(racine shadow)` = feuille confinée à cet arbre
@@ -1413,6 +1422,170 @@ pub struct ContainerMeasure {
     pub h: f32,
     /// Noms `container-name` de la boîte (vide = anonyme).
     pub names: Vec<String>,
+}
+
+/// Composante de la clé de tri à laquelle une déclaration a
+/// été éliminée — cf. [`DeclVerdict::EliminatedBy`] (R-301).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ElimKey {
+    /// `rank` — origine × `!important` (UA < auteur <
+    /// auteur!important < UA!important).
+    Origin,
+    /// `scope_rank` — franchissement de frontière shadow
+    /// (R-111, css-scoping §6).
+    Scope,
+    /// Rang `@layer` — ordre renversé sous `!important`.
+    Layer,
+    /// Spécificité du sélecteur matché.
+    Specificity,
+    /// Ordre source — y compris « écrit après à clé
+    /// identique » (deux déclarations de même clé sur la
+    /// même longhand).
+    Order,
+}
+
+/// Porte ayant empêché une règle d'atteindre le tri —
+/// cf. [`DeclVerdict::Gated`] (R-301).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GateKind {
+    /// Le sélecteur cible un autre pseudo-élément.
+    Pseudo,
+    /// Une query `@media` englobante n'est pas vérifiée.
+    Media,
+    /// Le prédicat `@container` englobant n'est pas vérifié
+    /// pour ce nœud (pas de conteneur ancêtre mesuré, nom
+    /// absent, ou condition fausse — R-190).
+    Container,
+    /// Confinement d'arbre (R-96) : la règle n'atteint pas
+    /// la racine shadow du nœud.
+    Scope,
+    /// Table quirks UA — document en mode standards.
+    Mode,
+}
+
+/// Verdict d'une déclaration pour une longhand — produit de
+/// [`StyleEngine::explain`] (R-301, contrat journalisé
+/// 2026-11-15).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DeclVerdict {
+    /// Retenue : sa valeur est celle écrite dans le
+    /// `ComputedStyle` (sauf post-traitements nommés —
+    /// `Superseded`/`InvalidAtComputed` — et vérité
+    /// post-animation, hors borne).
+    Winner,
+    /// Perdante au tri — nomme la première composante de la
+    /// clé `(rank, scope_rank, layer, spec, order)` où elle
+    /// diffère du gagnant.
+    EliminatedBy(ElimKey),
+    /// La règle porteuse n'a jamais atteint le tri —
+    /// refusée aux portes de `collect_candidates`.
+    Gated(GateKind),
+    /// Nom inconnu ou valeur invalide — rien n'a été écrit
+    /// (`value_is_valid_for` après expansion shorthand).
+    DroppedValidation,
+    /// Gagnante au tri puis `var()` irrésoluble — la
+    /// propriété est retirée (« invalid at computed-value
+    /// time », css-variables-1 §3.2).
+    InvalidAtComputed,
+    /// Gagnante au tri puis écrasée par une résolution
+    /// post-cascade : logique→physique (R-215) ou
+    /// `-webkit-text-fill-color` → `color` (R-235).
+    Superseded,
+    /// Attribut de présentation HTML — rang 0, n'écrit que
+    /// si aucune déclaration n'a posé la propriété.
+    PresentationalHint,
+    /// Aucune déclaration candidate — valeur héritée du
+    /// parent (`inherited_from` porte le nœud).
+    Inherited,
+    /// Aucune déclaration candidate ni héritage — valeur
+    /// initiale.
+    Initial,
+}
+
+/// Explication d'une déclaration candidate pour une
+/// longhand — [`StyleEngine::explain`] (R-301). Unité =
+/// déclaration × longhand : `all:` et les shorthands
+/// expandent (leurs longhands peuvent avoir des verdicts
+/// différents) ; `Gated`/`DroppedValidation` portent le nom
+/// déclaré tel quel (jamais expandu).
+#[derive(Debug, Clone)]
+pub struct DeclTrace {
+    /// Longhand concernée (nom déclaré pour `Gated`/
+    /// `DroppedValidation`).
+    pub prop: String,
+    /// Valeur déclarée brute — pré-`var()`/calculs.
+    pub value: String,
+    /// Texte source du sélecteur matché — vide pour
+    /// `inline`, `PresentationalHint`, `Inherited`,
+    /// `Initial`.
+    pub selector: String,
+    /// Rang d'ajout de la feuille porteuse (`u32::MAX` =
+    /// inline/hors-règle).
+    pub sheet: u32,
+    /// Origine de la règle — `None` hors déclarations de
+    /// règles (hints, inherited, initial).
+    pub origin: Option<Origin>,
+    /// `true` = déclaration `style=` (fusionnée au même
+    /// tri, hors-layer, ordre `u32::MAX`).
+    pub inline: bool,
+    /// `rank` — origine × `!important`.
+    pub rank: u8,
+    /// `scope_rank` — frontière shadow (R-111).
+    pub scope_rank: u8,
+    /// Clé `@layer` déjà inversée sous `!important`
+    /// (`layer_sort_key` — comparable lexicographiquement).
+    pub layer: Vec<u32>,
+    /// Spécificité du sélecteur matché.
+    pub specificity: crate::selector::Specificity,
+    /// Ordre source global de la règle (`u32::MAX` =
+    /// inline).
+    pub order: u32,
+    /// Verdict de la déclaration pour `prop`.
+    pub verdict: DeclVerdict,
+    /// `Inherited` : nœud ayant fourni la valeur (parent
+    /// DOM, ou l'élément pour un pseudo).
+    pub inherited_from: Option<NodeId>,
+}
+
+/// Provenance d'un candidat du tri — alignée sur le
+/// `cand` de `compute_with_parent` (R-301).
+#[derive(Debug, Clone, Copy)]
+enum CandSrc {
+    /// Déclaration de règle : `(quirks, règle, sélecteur)`.
+    Rule { quirks: bool, ri: u32, sel: u32 },
+    /// `style=` inline.
+    Inline,
+}
+
+/// Puits de traçage de [`StyleEngine::explain`] (R-301) —
+/// threadé `Option` dans `compute_with_parent` : le chemin
+/// chaud ne paie que le test d'`Option`, les verdicts sont
+/// enregistrés à l'endroit réel où la décision est prise
+/// (pattern `EmitStats` — divergence impossible par
+/// construction).
+#[derive(Debug, Default)]
+struct ExplainSink {
+    /// Traces produites, en ordre de décision : règles
+    /// gatées (collecte) → écritures/`dropped` du tri
+    /// (ordre candidat) → hints → héritage → initiales.
+    out: Vec<DeclTrace>,
+    /// Dernier index dans `out` des écritures par longhand —
+    /// la dernière écriture gagne (last-writer-wins), les
+    /// précédentes sont `EliminatedBy`.
+    last_by_prop: HashMap<String, usize>,
+    /// Provenance par candidat poussé — permutée dans
+    /// l'ordre du tri pour rester alignée sur `cand`.
+    meta: Vec<CandSrc>,
+}
+
+impl ExplainSink {
+    /// Enregistre une écriture de longhand du tri — la
+    /// DERNIÈRE écriture par longhand gagne (arbitré après
+    /// la boucle des candidats, `last_by_prop`).
+    fn write(&mut self, t: DeclTrace) {
+        self.last_by_prop.insert(t.prop.clone(), self.out.len());
+        self.out.push(t);
+    }
 }
 
 /// Position d'un sélecteur dans la table des règles + son
@@ -2174,6 +2347,10 @@ pub struct StyleEngine {
     /// table quirks est figée après la feuille UA).
     quirks_index: SelectorIndex,
     next_order: u32,
+    /// Rang de la prochaine feuille ajoutée (`add_*`) —
+    /// provenance `explain` (R-301) : `0` = feuille UA
+    /// intégrée.
+    next_sheet: u32,
     /// Rangs des layers `@layer` : chemin de noms complet
     /// (`a.b` sous `a` → `[a, b]`) → rang de première
     /// déclaration, toutes feuilles confondues (R-91). Le rang
@@ -2599,6 +2776,7 @@ impl StyleEngine {
             true,
             None,
             None,
+            0,
         );
         e.quirks_index = SelectorIndex::build(&e.quirks_rules);
         e
@@ -2606,7 +2784,9 @@ impl StyleEngine {
 
     /// Ajoute une feuille parsée (auteur ou UA).
     pub fn add_stylesheet(&mut self, sheet: &Stylesheet, origin: Origin) {
-        self.collect_rules(&sheet.rules, origin, &[]);
+        let sheet_idx = self.next_sheet;
+        self.next_sheet = self.next_sheet.saturating_add(1);
+        self.collect_rules(&sheet.rules, origin, &[], sheet_idx);
     }
 
     /// Ajoute une feuille depuis son texte CSS.
@@ -2622,7 +2802,9 @@ impl StyleEngine {
     /// en shadow se branche ici (collecte par arbre dans
     /// `explorer-core`), pas dans `add_stylesheet`.
     pub fn add_scoped_stylesheet(&mut self, sheet: &Stylesheet, origin: Origin, scope: NodeId) {
-        self.collect_rules_scoped(&sheet.rules, origin, &[], scope);
+        let sheet_idx = self.next_sheet;
+        self.next_sheet = self.next_sheet.saturating_add(1);
+        self.collect_rules_scoped(&sheet.rules, origin, &[], scope, sheet_idx);
     }
 
     /// Variante texte de [`StyleEngine::add_scoped_stylesheet`].
@@ -2634,8 +2816,14 @@ impl StyleEngine {
     /// Aplati récursif : règles qualifiées + corps `@media`.
     /// `media` = pile des listes englobantes (AND entre listes,
     /// OR entre les queries d'une même liste).
-    fn collect_rules(&mut self, rules: &[Rule], origin: Origin, media: &[Vec<MediaQuery>]) {
-        self.collect_rules_into(rules, origin, media, &[], false, None, None);
+    fn collect_rules(
+        &mut self,
+        rules: &[Rule],
+        origin: Origin,
+        media: &[Vec<MediaQuery>],
+        sheet: u32,
+    ) {
+        self.collect_rules_into(rules, origin, media, &[], false, None, None, sheet);
         // L'index reflète toujours la table complète — une
         // feuille ajoutée entre deux calculs doit être vue.
         self.index = SelectorIndex::build(&self.rules);
@@ -2650,8 +2838,9 @@ impl StyleEngine {
         origin: Origin,
         media: &[Vec<MediaQuery>],
         scope: NodeId,
+        sheet: u32,
     ) {
-        self.collect_rules_into(rules, origin, media, &[], false, Some(scope), None);
+        self.collect_rules_into(rules, origin, media, &[], false, Some(scope), None, sheet);
         self.index = SelectorIndex::build(&self.rules);
     }
 
@@ -2686,6 +2875,7 @@ impl StyleEngine {
         quirks: bool,
         scope: Option<NodeId>,
         container: Option<u32>,
+        sheet: u32,
     ) {
         for rule in rules {
             match rule {
@@ -2699,10 +2889,25 @@ impl StyleEngine {
                         } else {
                             &mut self.rules
                         };
+                        // R-301 — texte source par sélecteur
+                        // (provenance `explain`) : le prélude
+                        // brut découpé sur les virgules de
+                        // tête ; si le compte ne recoupe pas
+                        // les sélecteurs parsés (prélude
+                        // biscornu), la source complète sur
+                        // chacun vaut mieux qu'un vide.
+                        let parts = split_top_commas_css(&q.prelude);
+                        let selector_text: Vec<String> = if parts.len() == selectors.len() {
+                            parts.iter().map(|s| s.trim().to_string()).collect()
+                        } else {
+                            vec![q.prelude.trim().to_string(); selectors.len()]
+                        };
                         dest.push(CollectedRule {
                             selectors,
+                            selector_text,
                             declarations: q.declarations.clone(),
                             order: self.next_order,
+                            sheet,
                             origin,
                             scope,
                             layer: layer_ranks,
@@ -2741,7 +2946,7 @@ impl StyleEngine {
                         let mut nested = media.to_vec();
                         nested.push(queries);
                         self.collect_rules_into(
-                            rules, origin, &nested, layer, quirks, scope, container,
+                            rules, origin, &nested, layer, quirks, scope, container, sheet,
                         );
                     } else if let AtKind::Layer { name, rules } = &at.kind {
                         // `@layer nom {…}` : les règles entrent
@@ -2767,7 +2972,7 @@ impl StyleEngine {
                             self.layer_slot(&path[..i]);
                         }
                         self.collect_rules_into(
-                            rules, origin, media, &path, quirks, scope, container,
+                            rules, origin, media, &path, quirks, scope, container, sheet,
                         );
                     } else if let AtKind::Statement { prelude } = &at.kind {
                         // `@layer a, b;` : déclare l'ordre sans
@@ -2954,12 +3159,13 @@ impl StyleEngine {
                             quirks,
                             scope,
                             Some(idx),
+                            sheet,
                         );
                     } else if let AtKind::Scope { rules } = &at.kind {
                         // `@scope` (R-194) : préludes déjà
                         // désucrés au parse — groupe ordinaire.
                         self.collect_rules_into(
-                            rules, origin, media, layer, quirks, scope, container,
+                            rules, origin, media, layer, quirks, scope, container, sheet,
                         );
                     } else if let AtKind::Keyframes { name, frames } = &at.kind {
                         // `@media` englobant appliqué ? La table
@@ -3053,7 +3259,74 @@ impl StyleEngine {
             &AncestorFilter::of_ancestors(dom, node),
             root_fs,
             containers,
+            None,
         )
+    }
+
+    /// Explique la cascade d'un nœud — un [`DeclTrace`] par
+    /// déclaration candidate × longhand (R-301, contrat
+    /// journalisé 2026-11-15). Le calcul passe par le VRAI
+    /// chemin `compute_with_parent` avec puits armé —
+    /// verdicts enregistrés à l'endroit où la décision est
+    /// prise : aucune seconde implémentation à faire
+    /// diverger (pattern `EmitStats`).
+    ///
+    /// **Sémantique** : vérité de *cascade* sur le DOM/`env`
+    /// fournis — pas la vérité post-animation
+    /// (`apply_anim_overrides` vit côté `explorer-core`), ni
+    /// les mutations DOM non committées. `parent` = le
+    /// `ComputedStyle` du parent tel que stocké
+    /// (`StyleMap`) ; `state` = les mêmes états dynamiques
+    /// que la passe réelle (`:hover`, `:valid`…), sinon les
+    /// verdicts divergent du paint.
+    ///
+    /// `containers` = mesures `@container` à jour —
+    /// recalculer `explorer_layout::measure_containers` sur
+    /// le boxtree **committé** (la passe paint évalue sur
+    /// des mesures pass-1 : une bascule `@container` ayant
+    /// redimensionné le conteneur peut donner un verdict
+    /// `gated(container)` différent de ce que le paint a
+    /// vu — explain décrit l'état committé courant).
+    /// `None` → toute règle `@container` sort en
+    /// `gated(container)`.
+    ///
+    /// **Hors borne** : les déclarations rejetées au parse
+    /// (jamais collectées), les sélecteurs proposés par
+    /// l'index mais ne matchant pas le nœud, et le DOM en
+    /// vol.
+    ///
+    /// Coût : un `compute` pour le nœud + la rétention des
+    /// traces — O(candidats × déclarations), borné par la
+    /// feuille ; rien n'est stocké entre deux appels.
+    #[allow(clippy::too_many_arguments)]
+    pub fn explain(
+        &self,
+        dom: &Dom,
+        node: NodeId,
+        env: &StyleEnv,
+        parent: Option<&ComputedStyle>,
+        pseudo: Option<crate::PseudoElement>,
+        state: &dyn Fn(&str) -> bool,
+        containers: Option<&HashMap<NodeId, ContainerMeasure>>,
+    ) -> Vec<DeclTrace> {
+        let mut mcache = MatchCache::default();
+        mcache.namespaces.clone_from(&self.namespaces);
+        let root_fs = self.root_font_size(dom, env, state);
+        let mut sink = ExplainSink::default();
+        let _ = self.compute_with_parent(
+            dom,
+            node,
+            env,
+            parent,
+            pseudo,
+            state,
+            &mut mcache,
+            &AncestorFilter::of_ancestors(dom, node),
+            root_fs,
+            containers,
+            Some(&mut sink),
+        );
+        sink.out
     }
 
     /// Font-size calculée de `documentElement` — base `rem`
@@ -3083,6 +3356,7 @@ impl StyleEngine {
             // Pas de ctx ici : la base `rem` sert à l'évaluation
             // même des règles taguées — un `@container` sur
             // `:root` n'a de toute façon pas d'ancêtre mesuré.
+            None,
             None,
         )
         .get("font-size")
@@ -3761,7 +4035,7 @@ impl StyleEngine {
     ) {
         fr_probe(|p| p.visited += 1);
         let style = self.compute_with_parent(
-            dom, node, env, parent, None, state, mcache, anc, *root_fs, containers,
+            dom, node, env, parent, None, state, mcache, anc, *root_fs, containers, None,
         );
         if dom.document_element() == Some(node) {
             *root_fs = style
@@ -3788,6 +4062,7 @@ impl StyleEngine {
                         anc,
                         *root_fs,
                         containers,
+                        None,
                     );
                     let keep = if need_content {
                         s.get("content").is_some()
@@ -4182,7 +4457,7 @@ impl StyleEngine {
         containers: Option<&HashMap<NodeId, ContainerMeasure>>,
     ) {
         let style = self.compute_with_parent(
-            dom, node, env, parent, None, state, mcache, anc, *root_fs, containers,
+            dom, node, env, parent, None, state, mcache, anc, *root_fs, containers, None,
         );
         // L'élément racine vient d'être calculé : sa font-size
         // devient la base `rem` de tout le document (la marche
@@ -4219,6 +4494,7 @@ impl StyleEngine {
                         anc,
                         *root_fs,
                         containers,
+                        None,
                     );
                     let keep = if need_content {
                         s.get("content").is_some()
@@ -4336,6 +4612,9 @@ impl StyleEngine {
     /// calculée — la racine n'a pas de racine au-dessus).
     #[allow(clippy::too_many_lines)]
     #[allow(clippy::too_many_arguments)]
+    #[allow(clippy::too_many_arguments)]
+    #[allow(clippy::needless_option_as_deref)]
+    #[allow(clippy::too_many_lines)]
     fn compute_with_parent(
         &self,
         dom: &Dom,
@@ -4348,7 +4627,9 @@ impl StyleEngine {
         anc: &AncestorFilter,
         root_fs: f32,
         containers: Option<&HashMap<NodeId, ContainerMeasure>>,
+        trace: Option<&mut ExplainSink>,
     ) -> ComputedStyle {
+        let mut trace = trace;
         let mut props: HashMap<String, String> = HashMap::new();
         if dom.element(node).is_err() {
             return ComputedStyle::default();
@@ -4395,8 +4676,17 @@ impl StyleEngine {
                 }
             }
         }
-        let mut cand =
-            self.collect_candidates(dom, node, env, pseudo, state, mcache, anc, containers);
+        let mut cand = self.collect_candidates(
+            dom,
+            node,
+            env,
+            pseudo,
+            state,
+            mcache,
+            anc,
+            containers,
+            trace.as_deref_mut(),
+        );
         if pseudo.is_none() {
             // R-207 — le style inline est aussi de la déclaration
             // auteur : même census que les règles.
@@ -4419,8 +4709,21 @@ impl StyleEngine {
                     u32::MAX,
                     d,
                 ));
+                if let Some(sink) = trace.as_deref_mut() {
+                    sink.meta.push(CandSrc::Inline);
+                }
             }
-            // Le rang inline s'intercale dans l'ordre global.
+            // Le rang inline s'intercale dans l'ordre global —
+            // même permutation sur les provenances (R-301).
+            if let Some(sink) = trace.as_deref_mut() {
+                let mut perm: Vec<usize> = (0..cand.len()).collect();
+                perm.sort_by_key(|&i| {
+                    let c = &cand[i];
+                    (c.0, c.1, c.2.clone(), c.3, c.4)
+                });
+                let old = std::mem::take(&mut sink.meta);
+                sink.meta = perm.into_iter().map(|i| old[i]).collect();
+            }
             cand.sort_by_key(|(rank, scope_rank, layer, spec, order, _)| {
                 (*rank, *scope_rank, layer.clone(), *spec, *order)
             });
@@ -4432,7 +4735,12 @@ impl StyleEngine {
         // `dw +24` wikipedia). Absent de `ranks` = hint/
         // héritage = rang 0 (toujours le plus faible).
         let mut ranks: HashMap<String, u8> = HashMap::new();
-        for (rank, _, _, _, _, d) in &cand {
+        // R-301 — provenance du candidat courant, pour le
+        // trace (`CandSrc::Inline` si la méta manque — ne
+        // devrait pas arriver, alignement 1:1).
+        let trace_src =
+            |sink: &ExplainSink, ci: usize| sink.meta.get(ci).copied().unwrap_or(CandSrc::Inline);
+        for (ci, (rank, scope_rank, tlayer, spec, order, d)) in cand.iter().enumerate() {
             // Les noms de propriétés ordinaires sont
             // ASCII-insensibles → minuscules canoniques ; les
             // propriétés custom `--*` sont SENSIBLES À LA CASSE
@@ -4461,6 +4769,20 @@ impl StyleEngine {
                 for p in SUPPORTED_PROPS {
                     ranks.insert((*p).to_string(), *rank);
                     props.insert((*p).to_string(), d.value.clone());
+                    if let Some(sink) = trace.as_deref_mut() {
+                        let t = self.trace_decl(
+                            trace_src(sink, ci),
+                            (*p).to_string(),
+                            d.value.clone(),
+                            *rank,
+                            *scope_rank,
+                            tlayer,
+                            *spec,
+                            *order,
+                            DeclVerdict::Winner,
+                        );
+                        sink.write(t);
+                    }
                 }
                 continue;
             }
@@ -4470,7 +4792,21 @@ impl StyleEngine {
                 Some(expanded) => {
                     for (long_name, v) in expanded {
                         ranks.insert(long_name.clone(), *rank);
-                        props.insert(long_name, v);
+                        props.insert(long_name.clone(), v.clone());
+                        if let Some(sink) = trace.as_deref_mut() {
+                            let t = self.trace_decl(
+                                trace_src(sink, ci),
+                                long_name,
+                                v,
+                                *rank,
+                                *scope_rank,
+                                tlayer,
+                                *spec,
+                                *order,
+                                DeclVerdict::Winner,
+                            );
+                            sink.write(t);
+                        }
                     }
                 }
                 None => {
@@ -4479,7 +4815,21 @@ impl StyleEngine {
                     // raccourci invalide → déclaration ignorée).
                     if value_is_valid_for(&lname, &d.value) {
                         ranks.insert(lname.clone(), *rank);
-                        props.insert(lname, d.value.clone());
+                        props.insert(lname.clone(), d.value.clone());
+                        if let Some(sink) = trace.as_deref_mut() {
+                            let t = self.trace_decl(
+                                trace_src(sink, ci),
+                                lname,
+                                d.value.clone(),
+                                *rank,
+                                *scope_rank,
+                                tlayer,
+                                *spec,
+                                *order,
+                                DeclVerdict::Winner,
+                            );
+                            sink.write(t);
+                        }
                     } else if matches!(dom.document_mode(), explorer_dom::DocumentMode::Quirks)
                         && QUIRKY_LENGTH_PROPS.contains(&lname.as_str())
                         && d.value.trim().parse::<f32>().is_ok()
@@ -4488,7 +4838,22 @@ impl StyleEngine {
                         // `N` nu devient `Npx` (HTML Standard
                         // §quirks — les props numériques déjà
                         // valides ne passent jamais ici).
-                        props.insert(lname, format!("{}px", d.value.trim()));
+                        let v = format!("{}px", d.value.trim());
+                        props.insert(lname.clone(), v.clone());
+                        if let Some(sink) = trace.as_deref_mut() {
+                            let t = self.trace_decl(
+                                trace_src(sink, ci),
+                                lname,
+                                v,
+                                *rank,
+                                *scope_rank,
+                                tlayer,
+                                *spec,
+                                *order,
+                                DeclVerdict::Winner,
+                            );
+                            sink.write(t);
+                        }
                     } else {
                         // R-207 — déclaration ignorée sur la
                         // validation par propriété (`width:
@@ -4513,8 +4878,74 @@ impl StyleEngine {
                             })
                             .collect();
                         explorer_common::census::bump(&format!("css.value.dropped.{lname}.{key}"));
+                        if let Some(sink) = trace.as_deref_mut() {
+                            let t = self.trace_decl(
+                                trace_src(sink, ci),
+                                lname,
+                                d.value.clone(),
+                                *rank,
+                                *scope_rank,
+                                tlayer,
+                                *spec,
+                                *order,
+                                DeclVerdict::DroppedValidation,
+                            );
+                            sink.out.push(t);
+                        }
                     }
                 }
+            }
+        }
+        // R-301 — verdicts du tri : dernière écriture par
+        // longhand = `Winner` ; chaque précédente est
+        // `EliminatedBy` de la première composante de clé où
+        // elle diffère du gagnant (ordre de tri = origine →
+        // frontière shadow → layer → spécificité → ordre).
+        if let Some(sink) = trace.as_deref_mut() {
+            let win_key: HashMap<String, (u8, u8, Vec<u32>, Specificity, u32)> = sink
+                .last_by_prop
+                .iter()
+                .map(|(p, &i)| {
+                    let t = &sink.out[i];
+                    (
+                        p.clone(),
+                        (
+                            t.rank,
+                            t.scope_rank,
+                            t.layer.clone(),
+                            t.specificity,
+                            t.order,
+                        ),
+                    )
+                })
+                .collect();
+            for (i, t) in sink.out.iter_mut().enumerate() {
+                if !matches!(t.verdict, DeclVerdict::Winner)
+                    || sink.last_by_prop.get(&t.prop) == Some(&i)
+                {
+                    continue;
+                }
+                let Some(w) = win_key.get(&t.prop) else {
+                    continue;
+                };
+                let l = (
+                    t.rank,
+                    t.scope_rank,
+                    t.layer.clone(),
+                    t.specificity,
+                    t.order,
+                );
+                t.verdict = DeclVerdict::EliminatedBy(if l.0 != w.0 {
+                    ElimKey::Origin
+                } else if l.1 != w.1 {
+                    ElimKey::Scope
+                } else if l.2 != w.2 {
+                    ElimKey::Layer
+                } else if l.3 != w.3 {
+                    ElimKey::Specificity
+                } else {
+                    ElimKey::Order
+                });
             }
         }
         // 2b. Attributs de présentation HTML (§ rendering :
@@ -4523,7 +4954,36 @@ impl StyleEngine {
         // appliqués seulement si la propriété n'est pas déjà
         // fixée par une vraie règle ou l'attribut `style`).
         if pseudo.is_none() {
+            let before: Option<Vec<String>> =
+                trace.is_some().then(|| props.keys().cloned().collect());
             apply_presentational_hints(dom, node, parent, env, &mut props);
+            if let (Some(sink), Some(before)) = (trace.as_deref_mut(), before) {
+                // Les hints n'écrivent que des propriétés
+                // absentes — les nouvelles clés sont eux.
+                let mut added: Vec<String> = props
+                    .keys()
+                    .filter(|k| !before.contains(k))
+                    .cloned()
+                    .collect();
+                added.sort();
+                for k in added {
+                    sink.out.push(DeclTrace {
+                        prop: k.clone(),
+                        value: props.get(&k).cloned().unwrap_or_default(),
+                        selector: String::new(),
+                        sheet: u32::MAX,
+                        origin: None,
+                        inline: false,
+                        rank: 0,
+                        scope_rank: 0,
+                        layer: Vec::new(),
+                        specificity: (0, 0, 0),
+                        order: 0,
+                        verdict: DeclVerdict::PresentationalHint,
+                        inherited_from: None,
+                    });
+                }
+            }
         }
         // 3. Héritage : propriétés héritées non déclarées.
         if let Some(p) = parent {
@@ -4531,6 +4991,30 @@ impl StyleEngine {
                 if !props.contains_key(*name) {
                     if let Some(v) = p.get(name) {
                         props.insert((*name).to_string(), v.to_string());
+                        if let Some(sink) = trace.as_deref_mut() {
+                            // Un pseudo hérite de son élément
+                            // — sinon le parent DOM du nœud.
+                            let from = if pseudo.is_some() {
+                                Some(node)
+                            } else {
+                                dom.parent(node).ok().flatten()
+                            };
+                            sink.out.push(DeclTrace {
+                                prop: (*name).to_string(),
+                                value: v.to_string(),
+                                selector: String::new(),
+                                sheet: u32::MAX,
+                                origin: None,
+                                inline: false,
+                                rank: 0,
+                                scope_rank: 0,
+                                layer: Vec::new(),
+                                specificity: (0, 0, 0),
+                                order: 0,
+                                verdict: DeclVerdict::Inherited,
+                                inherited_from: from,
+                            });
+                        }
                     }
                 }
             }
@@ -4541,13 +5025,36 @@ impl StyleEngine {
         // alors connus. Le physique déclaré l'emporte
         // (l'ordre fin n'est pas préservable en `HashMap` —
         // approximation documentée).
+        let pre_logical: Option<HashMap<String, String>> = trace.is_some().then(|| props.clone());
         resolve_logical_props(&mut props, parent, &ranks);
+        if let (Some(sink), Some(before)) = (trace.as_deref_mut(), pre_logical) {
+            // R-301 — un physique écrasé par la résolution
+            // logique→flux voit son écriture gagnante passer
+            // `Superseded` (le déclarant logique garde son
+            // `Winner` sur son propre nom).
+            for (k, v) in &props {
+                if before.get(k).is_some_and(|b| b != v) {
+                    if let Some(&wi) = sink.last_by_prop.get(k) {
+                        if matches!(sink.out[wi].verdict, DeclVerdict::Winner) {
+                            sink.out[wi].verdict = DeclVerdict::Superseded;
+                        }
+                    }
+                }
+            }
+        }
         // R-235 — `-webkit-text-fill-color` remplace `color`
         // pour le remplissage du texte (spec compat : le fill
         // l'emporte quand présent, sauf `transparent`).
         if let Some(v) = props.get("-webkit-text-fill-color").cloned() {
             if v.trim() != "transparent" {
                 props.insert("color".to_string(), v);
+                if let Some(sink) = trace.as_deref_mut() {
+                    if let Some(&wi) = sink.last_by_prop.get("color") {
+                        if matches!(sink.out[wi].verdict, DeclVerdict::Winner) {
+                            sink.out[wi].verdict = DeclVerdict::Superseded;
+                        }
+                    }
+                }
             }
         }
         // Propriétés custom `--*` : héritées par défaut (spec)
@@ -4667,6 +5174,16 @@ impl StyleEngine {
                 if let Some(res) = r {
                     props.insert(k, res);
                 } else {
+                    // R-301 — « invalid at computed-value
+                    // time » : l'écriture gagnante est
+                    // retirée, le verdict la reflète.
+                    if let Some(sink) = trace.as_deref_mut() {
+                        if let Some(&wi) = sink.last_by_prop.get(&k) {
+                            if matches!(sink.out[wi].verdict, DeclVerdict::Winner) {
+                                sink.out[wi].verdict = DeclVerdict::InvalidAtComputed;
+                            }
+                        }
+                    }
                     if is_inherited(&k) {
                         if let Some(pv) = parent.and_then(|p| p.get(&k)) {
                             props.insert(k, pv.to_string());
@@ -4786,6 +5303,33 @@ impl StyleEngine {
                             .join(";");
                         props.insert(format!("position-try-{}", name.trim()), body);
                     }
+                }
+            }
+        }
+        // R-301 — assise `initial` : toute propriété
+        // supportée sans déclaration candidate ni héritage.
+        // Après tous les post-traitements pour refléter
+        // l'état final (`scheme_defaults` a pu poser des
+        // valeurs — elles restent des écritures, pas des
+        // initiales).
+        if let Some(sink) = trace.as_deref_mut() {
+            for name in SUPPORTED_PROPS {
+                if !props.contains_key(*name) {
+                    sink.out.push(DeclTrace {
+                        prop: (*name).to_string(),
+                        value: initial_value(name).unwrap_or("").to_string(),
+                        selector: String::new(),
+                        sheet: u32::MAX,
+                        origin: None,
+                        inline: false,
+                        rank: 0,
+                        scope_rank: 0,
+                        layer: Vec::new(),
+                        specificity: (0, 0, 0),
+                        order: 0,
+                        verdict: DeclVerdict::Initial,
+                        inherited_from: None,
+                    });
                 }
             }
         }
@@ -4954,6 +5498,119 @@ impl StyleEngine {
     /// départage déterministe après le tri — l'ordre de
     /// collecte par seaux n'a donc pas d'effet observable.
     #[allow(clippy::too_many_arguments, clippy::type_complexity)]
+    /// R-301 — construit la trace d'une déclaration
+    /// candidate à partir de sa provenance (`CandSrc`) et
+    /// de sa clé de tri — les champs sont ceux du tuple
+    /// `cand`, la provenance résout sélecteur/feuille/
+    /// origine.
+    #[allow(clippy::too_many_arguments)]
+    fn trace_decl(
+        &self,
+        src: CandSrc,
+        prop: String,
+        value: String,
+        rank: u8,
+        scope_rank: u8,
+        layer: &[u32],
+        spec: Specificity,
+        order: u32,
+        verdict: DeclVerdict,
+    ) -> DeclTrace {
+        let (selector, sheet, origin) = match src {
+            CandSrc::Inline => (String::new(), u32::MAX, Some(Origin::Author)),
+            CandSrc::Rule { quirks, ri, sel } => {
+                let rules = if quirks {
+                    &self.quirks_rules
+                } else {
+                    &self.rules
+                };
+                rules.get(ri as usize).map_or_else(
+                    || (String::new(), u32::MAX, None),
+                    |r| {
+                        (
+                            r.selector_text
+                                .get(sel as usize)
+                                .cloned()
+                                .unwrap_or_default(),
+                            r.sheet,
+                            Some(r.origin),
+                        )
+                    },
+                )
+            }
+        };
+        DeclTrace {
+            prop,
+            value,
+            selector,
+            sheet,
+            origin,
+            inline: matches!(src, CandSrc::Inline),
+            rank,
+            scope_rank,
+            layer: layer.to_vec(),
+            specificity: spec,
+            order,
+            verdict,
+            inherited_from: None,
+        }
+    }
+
+    /// R-301 — trace une règle retenue par l'index puis
+    /// refusée à une porte de `collect_candidates` : une
+    /// entrée `gated` par déclaration (la règle n'atteint
+    /// jamais le tri — sa clé reste calculable pour que
+    /// l'agent puisse comparer sans refaire le tri).
+    #[allow(clippy::needless_option_as_deref)]
+    fn trace_gated(
+        &self,
+        rec: &mut Option<&mut ExplainSink>,
+        quirks: bool,
+        e: &SelEntry,
+        gate: GateKind,
+    ) {
+        let Some(sink) = rec.as_deref_mut() else {
+            return;
+        };
+        let rules = if quirks {
+            &self.quirks_rules
+        } else {
+            &self.rules
+        };
+        let Some(rule) = rules.get(e.rule as usize) else {
+            return;
+        };
+        let spec = rule
+            .selectors
+            .get(e.selector as usize)
+            .map_or((0, 0, 0), ComplexSelector::specificity);
+        for d in &rule.declarations {
+            sink.out.push(DeclTrace {
+                prop: d.name.clone(),
+                value: d.value.clone(),
+                selector: rule
+                    .selector_text
+                    .get(e.selector as usize)
+                    .cloned()
+                    .unwrap_or_default(),
+                sheet: rule.sheet,
+                origin: Some(rule.origin),
+                inline: false,
+                rank: decl_rank(rule.origin, d.important),
+                scope_rank: u8::from(d.important == rule.scope.is_none()),
+                layer: layer_sort_key(&rule.layer, d.important),
+                specificity: spec,
+                order: rule.order,
+                verdict: DeclVerdict::Gated(gate),
+                inherited_from: None,
+            });
+        }
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    #[allow(clippy::type_complexity)]
+    #[allow(clippy::too_many_lines)]
+    #[allow(clippy::needless_option_as_deref)]
     fn collect_candidates<'a>(
         &'a self,
         dom: &Dom,
@@ -4964,16 +5621,33 @@ impl StyleEngine {
         mcache: &mut MatchCache,
         anc: &AncestorFilter,
         containers: Option<&HashMap<NodeId, ContainerMeasure>>,
+        rec: Option<&mut ExplainSink>,
     ) -> Vec<(u8, u8, Vec<u32>, Specificity, u32, &'a Declaration)> {
         // Arbre d'appartenance du nœud (R-96) : `None` =
         // document. Arbitre le confinement des feuilles.
         let node_scope = dom.containing_shadow_root(node);
+        let quirks_mode = dom.document_mode() == explorer_dom::DocumentMode::Quirks;
+        let mut rec = rec;
+        // Lu avant la fermeture `consider` qui emprunte
+        // `rec` : itérer la table quirks en standards ne sert
+        // qu'au trace.
+        let trace_on = rec.is_some();
         // Spécificité max des sélecteurs qui matchent, par
-        // règle (`true` = table quirks — mêmes rang UA et
-        // ordre source que la table principale).
-        let mut spec_by_rule: HashMap<(bool, u32), Specificity> = HashMap::new();
+        // règle, + l'index du sélecteur dominant (R-301 —
+        // provenance du verdict ; `true` = table quirks —
+        // mêmes rang UA et ordre source que la table
+        // principale).
+        let mut spec_by_rule: HashMap<(bool, u32), (Specificity, u32)> = HashMap::new();
         let mut consider = |quirks: bool, e: &SelEntry| {
+            // R-301 — en mode standards la table quirks n'est
+            // itérée que pour le trace : chaque entrée sort
+            // en `gated(mode)` au lieu d'être collectée.
+            if quirks && !quirks_mode {
+                self.trace_gated(&mut rec, quirks, e, GateKind::Mode);
+                return;
+            }
             if e.pseudo != pseudo {
+                self.trace_gated(&mut rec, quirks, e, GateKind::Pseudo);
                 return;
             }
             let rules = if quirks {
@@ -4988,10 +5662,12 @@ impl StyleEngine {
             // son propre arbre (franchissements `:host*`/
             // `::part` arbitrés par `selector_reaches`).
             if !Self::selector_reaches(dom, rule, node, node_scope, e.selector as usize) {
+                self.trace_gated(&mut rec, quirks, e, GateKind::Scope);
                 return;
             }
             // Chaque groupe `@media` englobant doit matcher.
             if !rule.media.is_empty() && !rule.media.iter().all(|qs| media_matches(env, qs)) {
+                self.trace_gated(&mut rec, quirks, e, GateKind::Media);
                 return;
             }
             // R-190 — règle issue d'un `@container` : inerte
@@ -5004,6 +5680,7 @@ impl StyleEngine {
                         .is_some_and(|pred| container_pred_matches(dom, node, pred, map))
                 });
                 if !ok {
+                    self.trace_gated(&mut rec, quirks, e, GateKind::Container);
                     return;
                 }
             }
@@ -5016,7 +5693,7 @@ impl StyleEngine {
             // changer (R-83).
             if spec_by_rule
                 .get(&(quirks, e.rule))
-                .is_some_and(|m| spec <= *m)
+                .is_some_and(|m| spec <= m.0)
             {
                 return;
             }
@@ -5024,20 +5701,29 @@ impl StyleEngine {
             if hit {
                 spec_by_rule
                     .entry((quirks, e.rule))
-                    .and_modify(|s| *s = (*s).max(spec))
-                    .or_insert(spec);
+                    .and_modify(|m| {
+                        // À spécificité égale, le PREMIER
+                        // sélecteur matché garde la
+                        // provenance (déterministe).
+                        if spec > m.0 {
+                            *m = (spec, e.selector);
+                        }
+                    })
+                    .or_insert((spec, e.selector));
             }
         };
         self.index
             .candidates(dom, node, &mut |e| consider(false, e));
         // Règles UA quirks : la spec HTML Rendering ne les
-        // applique qu'aux documents en mode quirks.
-        if dom.document_mode() == explorer_dom::DocumentMode::Quirks {
+        // applique qu'aux documents en mode quirks. En
+        // standards, l'itération ne sert qu'au trace
+        // (`gated(mode)`).
+        if quirks_mode || trace_on {
             self.quirks_index
                 .candidates(dom, node, &mut |e| consider(true, e));
         }
         let mut rules_cand: Vec<(u8, u8, Vec<u32>, Specificity, u32, &Declaration)> = Vec::new();
-        for ((quirks, ri), spec) in spec_by_rule {
+        for ((quirks, ri), (spec, sel_idx)) in spec_by_rule {
             let rules = if quirks {
                 &self.quirks_rules
             } else {
@@ -5047,12 +5733,7 @@ impl StyleEngine {
                 continue;
             };
             for d in &rule.declarations {
-                let rank = match (rule.origin, d.important) {
-                    (Origin::UserAgent, false) => 0,
-                    (Origin::Author, false) => 1,
-                    (Origin::Author, true) => 2,
-                    (Origin::UserAgent, true) => 3,
-                };
+                let rank = decl_rank(rule.origin, d.important);
                 // R-111 — frontière shadow (css-scoping §6) :
                 // pour les règles **normales** la déclaration
                 // interne (scopée à la racine du nœud) bat la
@@ -5069,11 +5750,29 @@ impl StyleEngine {
                     rule.order,
                     d,
                 ));
+                if let Some(sink) = rec.as_deref_mut() {
+                    sink.meta.push(CandSrc::Rule {
+                        quirks,
+                        ri,
+                        sel: sel_idx,
+                    });
+                }
             }
         }
         // Rang (origine/important) → frontière shadow (§6,
         // R-111) → layer (§6.4, inversion `!important`
         // comprise) → spécificité → ordre source.
+        // Tri stable : permuter les provenances par les
+        // mêmes clés les réaligne sur `rules_cand`.
+        if let Some(sink) = rec.as_deref_mut() {
+            let mut perm: Vec<usize> = (0..rules_cand.len()).collect();
+            perm.sort_by_key(|&i| {
+                let c = &rules_cand[i];
+                (c.0, c.1, c.2.clone(), c.3, c.4)
+            });
+            let old = std::mem::take(&mut sink.meta);
+            sink.meta = perm.into_iter().map(|i| old[i]).collect();
+        }
         rules_cand.sort_by_key(|(rank, scope_rank, layer, spec, order, _)| {
             (*rank, *scope_rank, layer.clone(), *spec, *order)
         });
@@ -5204,6 +5903,20 @@ fn layer_sort_key(layer: &[u32], important: bool) -> Vec<u32> {
         key
     } else {
         layer.to_vec()
+    }
+}
+
+/// Rang origine × `!important` d'une déclaration — clé de
+/// tri primaire de la cascade (css-cascade-5 §6.4.1) :
+/// UA < auteur < auteur!important < UA!important
+/// (R-301 — extrait pour être partagé entre le tri et
+/// `explain`).
+fn decl_rank(origin: Origin, important: bool) -> u8 {
+    match (origin, important) {
+        (Origin::UserAgent, false) => 0,
+        (Origin::Author, false) => 1,
+        (Origin::Author, true) => 2,
+        (Origin::UserAgent, true) => 3,
     }
 }
 
@@ -6194,6 +6907,7 @@ fn parent_computed(
         &AncestorFilter::of_ancestors(dom, parent),
         root_fs,
         containers,
+        None,
     );
     memo.insert(parent, s.clone());
     Some(s)

@@ -39,8 +39,9 @@ pub mod value;
 
 pub use cascade::{
     initial_value, is_inherited, media_matches, prop_routed, prop_supported, take_frontier_probe,
-    CollectedContainer, ColorScheme, ComputedStyle, ContainerMeasure, CounterStyle, FrontierProbe,
-    Origin, StyleEngine, StyleEnv, StyleMap, TouchedDeps,
+    CollectedContainer, ColorScheme, ComputedStyle, ContainerMeasure, CounterStyle, DeclTrace,
+    DeclVerdict, ElimKey, FrontierProbe, GateKind, Origin, StyleEngine, StyleEnv, StyleMap,
+    TouchedDeps,
 };
 pub use fontface::{FontFace, FontSrc};
 pub use parser::{

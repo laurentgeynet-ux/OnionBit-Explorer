@@ -4558,3 +4558,20 @@ sous-features, `font-stretch`/`font-width` (fontes variables),
   exposer = coût zéro ; dirty sommé par fenêtre
   (`AddAssign`), tracing conservé. Verrous
   `replay_stats_*` ×3, 47/47 raster verts.
+- [x] **R-301 — `DeclTrace`/`StyleEngine::explain` : la
+  cascade s'explique** (`explorer-css`, demande NAV
+  journalisée 2026-11-15 — EAP `engine.cascade{ref}`,
+  débloque Étape 253) : puits `ExplainSink` threadé en
+  `Option` dans le vrai `compute_with_parent` — verdicts
+  enregistrés à la décision, zéro fork. Unité =
+  déclaration × longhand ; provenance complète (texte du
+  sélecteur via `CollectedRule::selector_text`, `sheet`,
+  `inline`) + clé de tri `(rank, scope_rank, layer, spec,
+  order)`. Verdicts : `winner`, `eliminated_by(×5)`,
+  `gated(pseudo|media|container|scope|mode)`,
+  `dropped(validation)`, `invalid_at_computed`,
+  `superseded`, `presentational_hint`, `inherited` +
+  `inherited_from`, `initial`. Amendements livraison
+  notés au journal : `GateKind::Pseudo`, `Superseded`
+  (overrides post-cascade nommés), `initial` borné aux
+  props supportées. Verrous `tests/explain.rs` ×19.
