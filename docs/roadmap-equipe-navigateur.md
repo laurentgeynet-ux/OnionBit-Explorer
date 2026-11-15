@@ -13252,6 +13252,49 @@ chaque gain rapporté contre les **deux** archétypes.
   (`ic_hit`/`ic_miss`/`ic_disarm` au snapshot) pour
   borner la couverture du seul court-circuit existant.
   Dependency-groups = infra lourde, dernier recours.
+- [x] **JS-C554 — params au slot canonique** : `insert_slot`
+  écrit `cells[i]` (vérif `ptr_eq||==`, dupes/divergents →
+  `insert`), un `borrow` pour la boucle — fini `intern`+
+  `pos()` par paramètre. Vol : −0,9 % `frame_ns`, sous le
+  bruit — hygiène structurelle.
+- [x] **JS-C553 — `arguments` annoté** : bail C490 levé —
+  `fn_scope_*` pousse le nom quand `LIT_USES_ARGS` ; slot
+  voit `LazyArgs` → miss → `env_get(&cur)` matérialise au
+  bon env. Vol yt verify : `idnt:arguments` −44 % (58,9 k
+  → 33,1 k), zéro `res.bad` sur le nom.
+- [x] **JS-C553b — verify accepte `NaN==NaN`** : 102 faux
+  positifs au premier vol sous verify (strict_eq spec vs
+  même cellule) ; + réparation `b104_real_transmux`
+  (constantes→fonctions, cassait `--all-targets`).
+- [x] **JS-C552 — `resolve_program` : top-level annoté**
+  (+ fix `walk_class` nom class-expr dans `cenv` —
+  `class_expr_self_name` repasse). `exec_program_inner`
+  pose/retire les tables resolver sur le corps `Program`
+  (ptr AST emprunté → zéro clé morte) ; `eval` et
+  modules exclus (chaîne hors modèle). Sentinelle
+  « global-only » tentée puis retirée en vol yt :
+  15 × `cannot read` (envs dynamiques hors modèle)
+  pour ~77 lectures — misses sur la marche générique.
+  Verrous : lang 315, dom 269, j17 23.
+- [x] **JS-C551 — `typeof x` sur `env_get_resolved`** :
+  le site `Ident` de `typeof` est annoté comme toute
+  lecture mais payait la marche ; routé résolu →
+  `or_else` marche → `"undefined"`. Vol yt :
+  `envg:eval.rs:1374` 87,5 k → 29,2 k (−67 %).
+- [x] **JS-C550 — sonde `envg:` (callsite des `env_get`)** :
+  `env_get` `#[track_caller]` + table `Location` →
+  `envg:<f:l>=<n>`. Premier vol : `eval.rs:245` = 89 %
+  des marches yt (fallback ident), `typeof` 11 %.
+  Thread-local → lisible au teardown (log), pas via
+  `engine.j17` — tracé journal coutures.
+- [x] **JS-C549b — sonde `idnt:` (nom des lectures non
+  résolues)** : les 3 replis ident (miss map, depth-only,
+  slot invalide) attribuent le `Rc<str>` — `idnt:<n>=<c>`.
+  Verrou `with(o){x}`. Population yt : `arguments`,
+  globaux (`Reflect`/`String`/`Array`/`Object`/`Symbol`),
+  minifiés `eval()`'d — avenue « nom chaud » close par
+  la mesure. (`b` : JS-C549 nu = `eval_on_element`, côté
+  main `dcb95aab`.)
 - [x] **JS-C549 — `eval_on_element` : binding `$0`/`el`
   scopé élément** (ferme la couture étape 260 —
   `eval.run{ref}` EAP). `Engine::eval_on_element(node,

@@ -96,7 +96,24 @@ impl Engine {
     pub(crate) fn exec_program_inner(&mut self, prog: &Program) -> JsResult<Value> {
         let env = self.global_env.clone();
         let this = Value::Obj(self.global);
+        // JS-C552 — résolution du corps programme : chaîne
+        // statique complète jusqu'au global → les identifiants
+        // top-level ET les misses propres (globaux) s'annotent.
+        // `prog` est emprunté : les clés `ptr` sont retirées à
+        // la sortie, quel que soit le chemin (pas de ptr mort
+        // dans `resolved_map` — précédent JS-C492).
+        let t = resolve::resolve_program(&prog.body);
+        let keys: Vec<usize> = t.map.keys().copied().collect();
+        let nkeys: Vec<usize> = t.names.keys().copied().collect();
+        self.resolved_map.extend(t.map);
+        self.names_table.extend(t.names);
         let r = self.exec_program_in(&env, this.clone(), prog);
+        for k in keys {
+            self.resolved_map.remove(&k);
+        }
+        for k in nkeys {
+            self.names_table.remove(&k);
+        }
         let Err(t) = r else {
             return r;
         };

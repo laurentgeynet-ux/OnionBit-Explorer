@@ -6282,7 +6282,13 @@ impl Engine {
         name: &str,
         site: usize,
     ) -> Option<Value> {
-        let (cur, d, slot) = self.resolved_ancestor(env, site)?;
+        let Some((cur, d, slot)) = self.resolved_ancestor(env, site) else {
+            // JS-C549 — site non annoté : la lecture paiera la
+            // marche `env_get` du repli — la sonde nomme la
+            // population (par nom, pas par callsite).
+            crate::j17_idnt_probe(name);
+            return None;
+        };
         // JS-C502 — fast-path slot : la vérif est sémantique
         // (`Small[slot].0 == name` puis `Bind`), toute divergence
         // d'ordre canonique, promotion `Map`, cellule `Uninit`/
@@ -6325,19 +6331,31 @@ impl Engine {
                     3 => &crate::J17_SM_MAP,
                     _ => &crate::J17_SM_KIND,
                 });
+                crate::j17_idnt_probe(name);
                 self.env_get(&cur, name)
             }
         } else {
+            // JS-C549 — annotation depth-only (`slot` sentinelle)
+            // : la marche part de l'ancêtre, le nom est attribué.
+            crate::j17_idnt_probe(name);
             self.env_get(&cur, name)
         };
         if let v @ Some(_) = v {
             crate::j17_tick(&crate::J17_RES_HIT);
             if self.resolve_verify {
                 let check = self.env_get(env, name);
-                // `strict_eq`, pas `PartialEq` — `NaN != NaN`
-                // signalait 181 faux positifs/vol.
+                // `strict_eq` + acception `NaN==NaN` — la spec
+                // `===` jette les deux NaN pour distincts alors
+                // que fast/walk lisent la MÊME cellule (faux
+                // positif ×102 au vol yt JS-C553).
                 let same = match (&check, &v) {
-                    (Some(c), Some(f)) => self.strict_eq(c, f),
+                    (Some(c), Some(f)) => {
+                        self.strict_eq(c, f)
+                            || matches!(
+                                (c, f),
+                                (Value::Num(a), Value::Num(b)) if a.is_nan() && b.is_nan()
+                            )
+                    }
                     _ => check == v,
                 };
                 if !same {
@@ -6355,7 +6373,11 @@ impl Engine {
         }
     }
 
+    /// JS-C550 — `#[track_caller]` : chaque appelant paie la
+    /// sonde `envg:` (attribution `Location`, nulle hors profil).
+    #[track_caller]
     pub(crate) fn env_get(&mut self, env: &EnvRef, name: &str) -> Option<Value> {
+        crate::j17_envg_probe(std::panic::Location::caller());
         self.env_get_seen(env, name, &mut HashSet::new())
     }
 
@@ -11841,13 +11863,42 @@ impl Engine {
             .iter()
             .all(|p| !p.rest && matches!(p.pat, Pat::Ident(_)))
         {
-            for (i, p) in params.iter().enumerate() {
-                let Pat::Ident(name) = &p.pat else {
-                    continue;
-                };
-                if !name.is_empty() {
-                    let v = args.get(i).cloned().unwrap_or(Value::Undefined);
-                    Self::env_put(&local, name, v, true);
+            // JS-C554 — un seul `borrow` + insertion `insert_slot`
+            // au slot canonique `i` (params = positions `0..n`
+            // par construction `fn_scope_ord`) : plus d'`intern`
+            // ni de `pos()` par paramètre. `insert_slot` vérifie
+            // `clé == name` et retombe sur `insert` si le canon
+            // surprend — même sémantique qu'`env_put` (insert
+            // `Bind` mutable sur `Local` frais).
+            let mut b = local.borrow_mut();
+            if let EnvKind::Local(m) = &mut b.kind {
+                for (i, p) in params.iter().enumerate() {
+                    let Pat::Ident(name) = &p.pat else {
+                        continue;
+                    };
+                    if !name.is_empty() {
+                        let v = args.get(i).cloned().unwrap_or(Value::Undefined);
+                        m.insert_slot(
+                            i,
+                            name.clone(),
+                            EnvCell::Bind(Binding {
+                                value: v,
+                                mutable: true,
+                                sloppy_silent: false,
+                            }),
+                        );
+                    }
+                }
+            } else {
+                drop(b);
+                for (i, p) in params.iter().enumerate() {
+                    let Pat::Ident(name) = &p.pat else {
+                        continue;
+                    };
+                    if !name.is_empty() {
+                        let v = args.get(i).cloned().unwrap_or(Value::Undefined);
+                        Self::env_put(&local, name, v, true);
+                    }
                 }
             }
         } else {

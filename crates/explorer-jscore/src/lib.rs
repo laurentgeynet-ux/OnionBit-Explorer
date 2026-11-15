@@ -900,6 +900,44 @@ pub fn j17_snapshot() -> String {
         }
         out.push_str(&format!("pidxm:{joined}"));
     }
+    // JS-C549 — top-12 noms des lectures d'identifiant non
+    // annotées (`idnt:nom=n,…`) — nomme la population qui
+    // paie la marche `env_get`.
+    let mut idnt: Vec<(u64, String)> = J17_IDNT_NAMES.with(|m| {
+        m.borrow()
+            .iter()
+            .map(|(k, n)| (*n, k.to_string()))
+            .collect()
+    });
+    idnt.sort_unstable_by_key(|a| std::cmp::Reverse(a.0));
+    if !idnt.is_empty() {
+        let joined = idnt
+            .iter()
+            .take(12)
+            .map(|(n, l)| format!("{l}={n}"))
+            .collect::<Vec<_>>()
+            .join(",");
+        if !out.is_empty() {
+            out.push(' ');
+        }
+        out.push_str(&format!("idnt:{joined}"));
+    }
+    // JS-C550 — top-12 callsites `env_get` (`envg:f:l=n,…`).
+    let mut envg: Vec<(u64, String)> =
+        J17_ENVG_SITES.with(|m| m.borrow().values().map(|(l, n)| (*n, l.clone())).collect());
+    envg.sort_unstable_by_key(|a| std::cmp::Reverse(a.0));
+    if !envg.is_empty() {
+        let joined = envg
+            .iter()
+            .take(12)
+            .map(|(n, l)| format!("{l}={n}"))
+            .collect::<Vec<_>>()
+            .join(",");
+        if !out.is_empty() {
+            out.push(' ');
+        }
+        out.push_str(&format!("envg:{joined}"));
+    }
     // JS-C527 — top-20 clés marchées (`keys:k=n,…`) ; noms
     // assainis (hors `[A-Za-z0-9_$@.:-]` → `?`, tronqués à 24)
     // pour rester sur une seule ligne de paires.
@@ -1004,6 +1042,25 @@ thread_local! {
     /// `prop_pos`). 927 k miss/session yt N5.50 : le vol lourd
     /// nomme le driver des lookups absents sur objets indexés.
     static J17_PIDXM_SITES: std::cell::RefCell<
+        std::collections::BTreeMap<usize, (String, u64)>,
+    > = const { std::cell::RefCell::new(std::collections::BTreeMap::new()) };
+    /// JS-C549 — `idnt:` — lectures d'identifiant **non
+    /// annotées** (miss `resolved_map` → marche `env_get`),
+    /// attribuées par **nom** (clé `Rc<str>` internée —
+    /// hit = probe de chaîne, intern au premier vu seulement).
+    /// ~5 M marches/vol yt : quelques noms dominants
+    /// (globals, props hôte) → cran ciblé ; dispersion →
+    /// plancher structurel.
+    static J17_IDNT_NAMES: std::cell::RefCell<
+        std::collections::BTreeMap<std::rc::Rc<str>, u64>,
+    > = const { std::cell::RefCell::new(std::collections::BTreeMap::new()) };
+    /// JS-C550 — `envg:` — appels `env_get` attribués au
+    /// callsite (`#[track_caller]`). `idnt:` vide sur yt a
+    /// réfuté la piste des lectures d'identifiant : les ~3 M
+    /// marches restantes viennent d'autres appelants — la
+    /// sonde nomme le dominant (callee, typeof, assign,
+    /// for-in, machinerie de frames) en un vol.
+    static J17_ENVG_SITES: std::cell::RefCell<
         std::collections::BTreeMap<usize, (String, u64)>,
     > = const { std::cell::RefCell::new(std::collections::BTreeMap::new()) };
 }
@@ -1124,6 +1181,43 @@ pub(crate) fn j17_pscan_probe(loc: &'static std::panic::Location<'static>) {
             .entry(site)
             .or_insert_with(|| (format!("{}:{}", loc.file(), loc.line()), 0));
         e.1 += 1;
+    });
+}
+
+/// JS-C549 — sonde `idnt:` : lecture d'identifiant dont le
+/// site n'est **pas annoté** (`resolved_map` miss — repli
+/// `env_get` dans `env_get_resolved_at`). Clé = le nom
+/// (interné au premier vu — pas de `Location`, le `&str`
+/// seul ne survit pas à l'AST). Armée seulement : ~10-20 ns
+/// par lecture non résolue, compteurs seuls restent exacts.
+/// JS-C550 — sonde `envg:` : attribution du callsite de chaque
+/// `env_get` (miroir [`j17_envu_site`]) — nomme l'appelant
+/// dominant des marches d'environnement.
+pub(crate) fn j17_envg_probe(loc: &'static std::panic::Location<'static>) {
+    if !j17_on() {
+        return;
+    }
+    let site = std::ptr::from_ref(loc) as usize;
+    J17_ENVG_SITES.with(|m| {
+        let mut m = m.borrow_mut();
+        let e = m
+            .entry(site)
+            .or_insert_with(|| (format!("{}:{}", loc.file(), loc.line()), 0));
+        e.1 += 1;
+    });
+}
+
+pub(crate) fn j17_idnt_probe(name: &str) {
+    if !j17_on() {
+        return;
+    }
+    J17_IDNT_NAMES.with(|m| {
+        let mut m = m.borrow_mut();
+        if let Some(c) = m.get_mut(name) {
+            *c += 1;
+        } else {
+            m.insert(crate::intern(name), 1);
+        }
     });
 }
 

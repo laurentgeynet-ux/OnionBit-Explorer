@@ -2412,6 +2412,24 @@ impl Bindings {
         self.extra.insert(name, cell);
     }
 
+    /// Insertion à `slot` connu (liaison de paramètre — JS-C554) :
+    /// le canon place les params aux positions `0..n` par
+    /// construction (`fn_scope_ord`) — la vérif `clé == name`
+    /// garde l'honnêteté si un canon divergent arrive ici ;
+    /// toute surprise retombe sur `insert` (même sémantique).
+    /// Évite `intern` + `pos()` par paramètre sur le chemin
+    /// d'appel chaud (~30-50 ns × params × calls).
+    pub fn insert_slot(&mut self, slot: usize, name: Rc<str>, cell: EnvCell) {
+        if !self.canon.is_empty()
+            && slot < self.cells.len()
+            && (Rc::ptr_eq(&self.canon.names[slot], &name) || self.canon.names[slot] == name)
+        {
+            self.cells[slot] = cell;
+            return;
+        }
+        self.insert(name, cell);
+    }
+
     /// Itère toutes les cellules (canon puis `extra`) — marquage
     /// GC (envs = racines), l'ordre importe peu.
     pub fn values(&self) -> impl Iterator<Item = &EnvCell> + '_ {

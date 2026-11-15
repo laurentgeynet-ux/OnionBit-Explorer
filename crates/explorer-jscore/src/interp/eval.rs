@@ -1366,7 +1366,13 @@ impl Engine {
             UnOp::Typeof => {
                 // `typeof x` must not throw on undeclared x.
                 if let Expr::Ident(name) = operand {
-                    if let Some(v) = self.env_get(env, name) {
+                    // JS-C551 — fast-path résolu d'abord (son
+                    // site `Ident` est annoté comme les autres) ;
+                    // la marche reste le repli non annoté.
+                    if let Some(v) = self
+                        .env_get_resolved(env, name, operand)
+                        .or_else(|| self.env_get(env, name))
+                    {
                         return Ok(self.str_val(typeof_str(v, &self.heap)));
                     }
                     return Ok(self.str_val("undefined"));
