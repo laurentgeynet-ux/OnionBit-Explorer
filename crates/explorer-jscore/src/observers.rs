@@ -31,7 +31,9 @@ use std::collections::HashMap;
 use std::rc::Rc;
 
 use crate::dom::NodeId;
-use crate::dom_host::{element_geom_rect, node_for_in, node_value, DomRef, NodeCache};
+use crate::dom_host::{
+    element_geom_rect, node_for_in, node_value, stale_node_in, DomRef, NodeCache,
+};
 use crate::heap::{Host, JsResult};
 use crate::value::{ObjId, Value};
 use crate::Engine;
@@ -758,8 +760,16 @@ impl Host for ObsHost {
         let Some(reg) = e.obs.regs.get(&self.id) else {
             return Ok(None);
         };
+        // Miroir **vivant** — `self.dom`/`self.cache` sont
+        // figés à la construction alors qu'`install_dom`
+        // resynchronise `dom_ctx` (§B-136) : on lit toujours
+        // dans le miroir courant, repli `self.*` sans ctx.
+        let (dom, cache) = e
+            .dom_ctx
+            .clone()
+            .unwrap_or_else(|| (self.dom.clone(), self.cache.clone()));
         Ok(Some(match reg.root {
-            Some(n) => node_value(e, &self.dom, &self.cache, n),
+            Some(n) => node_value(e, &dom, &cache, n),
             None => Value::Null,
         }))
     }
@@ -771,16 +781,38 @@ impl Host for ObsHost {
         name: &str,
         args: &[Value],
     ) -> JsResult<Option<Value>> {
+        // Miroir **vivant** (§B-136, verbatim airbnb
+        // `observe: Element requis` ×5) : `self.dom`/`cache`
+        // figés à la construction devenaient « étrangers »
+        // pour tout élément obtenu après un resync
+        // `install_dom` — le rejet `Rc::ptr_eq` de
+        // `node_for_in` tuait chaque `observe`. La cible se
+        // résout contre `dom_ctx` (le miroir que le site
+        // consulte via `document`) — un élément DOMParser/
+        // iframe (`n.dom` ≠ ctx courant) garde son rejet
+        // borné (verrou `cross_document_node_args_are_adopted`).
+        let (live_dom, live_cache) = e
+            .dom_ctx
+            .clone()
+            .unwrap_or_else(|| (self.dom.clone(), self.cache.clone()));
         match name {
             "observe" => {
                 let target = args.first().cloned().unwrap_or(Value::Undefined);
-                let Some(node) = node_for_in(e, target, &self.dom) else {
+                let Some(node) = node_for_in(e, target.clone(), &live_dom) else {
+                    // Slot périmé **même miroir** (id hors-bornes
+                    // ou époque recyclée) : Chrome ne jette pas
+                    // sur un `Element` valide — accepté sans
+                    // enregistrement (jamais notifié). Args
+                    // non-nœud → TypeError spec conservé.
+                    if stale_node_in(e, target, &live_dom) {
+                        return Ok(Some(Value::Undefined));
+                    }
                     return Err(e.type_error("observe: Element requis"));
                 };
                 // Taille initiale rapportée (Resize) — référence
                 // du diff checkpoint ; calculée avant l'emprunt
                 // mutable de `regs`.
-                let init_size = e.target_box_size(&self.dom, node);
+                let init_size = e.target_box_size(&live_dom, node);
                 let Some(reg) = e.obs.regs.get_mut(&self.id) else {
                     return Ok(Some(Value::Undefined));
                 };
@@ -794,7 +826,13 @@ impl Host for ObsHost {
             }
             "unobserve" => {
                 let target = args.first().cloned().unwrap_or(Value::Undefined);
-                let Some(node) = node_for_in(e, target, &self.dom) else {
+                let Some(node) = node_for_in(e, target.clone(), &live_dom) else {
+                    // §B-136 — même tolérance que `observe` :
+                    // élément périmé même-arène → accepté,
+                    // rien à retirer.
+                    if stale_node_in(e, target, &live_dom) {
+                        return Ok(Some(Value::Undefined));
+                    }
                     return Err(e.type_error("unobserve: Element requis"));
                 };
                 if let Some(reg) = e.obs.regs.get_mut(&self.id) {
@@ -834,18 +872,18 @@ impl Host for ObsHost {
                         // le callback revoyait la cible déjà
                         // vidée (régression du rail invoke).
                         if kind == ObsKind::Intersection {
-                            let cur = e.is_intersecting(&self.dom, root, None, n);
+                            let cur = e.is_intersecting(&live_dom, root, None, n);
                             if let Some(reg) = e.obs.regs.get_mut(&self.id) {
                                 reg.last.insert(n, cur);
                             }
                         }
                         if kind == ObsKind::Resize {
-                            let cur = e.target_box_size(&self.dom, n);
+                            let cur = e.target_box_size(&live_dom, n);
                             if let Some(reg) = e.obs.regs.get_mut(&self.id) {
                                 reg.last_size.insert(n, cur);
                             }
                         }
-                        e.observer_entry(kind, &self.dom, &self.cache, root, n)
+                        e.observer_entry(kind, &live_dom, &live_cache, root, n)
                     })
                     .collect();
                 Ok(Some(e.new_array(entries)))

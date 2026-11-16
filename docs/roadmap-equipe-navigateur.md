@@ -14438,3 +14438,21 @@ chaque gain rapporté contre les **deux** archétypes.
   `c573_module_ns_call` ×4 ; c100 ×9, c457 vertes. Re-vol
   notion `DBG_DRIVE=1` → le binding fautif nommé, le fix
   devient mécanique.
+- [x] **JS-C574 — §B-136 receveurs observer/`matches` +
+  §B-137 `HTMLSelectElement.add`** (verbatims airbnb ×5 /
+  lefigaro ×8 / ebay — second mur désigné). §B-136,
+  mécanisme réel : `ObsHost.dom` figé à la construction vs
+  `install_dom` qui resync `dom_ctx` → tout élément
+  post-resync rejeté `Element requis` ; `observe`/
+  `unobserve`/`root`/`takeRecords` résolvent contre le
+  miroir **vivant** (comme `deliver_observers`) — cible
+  enregistrée, pas juste tolérée. Déballage `.node` borné
+  ×2 étendu aux objets non-Host (wrapper `ShadyDOM` nu) ;
+  `stale_node_in` = tolérance slot périmé même-arène ;
+  rejet DOMParser/iframe conservé (verrou cross-doc vert).
+  `matches`/`closest` : receveur `.node` déballé, nodeish
+  non résolu → `false`/`null`. §B-137 : `add` tagué
+  `<select>` — option/optgroup, append défaut, `before`
+  index ou élément descendant (`TypeError`/hiérarchie
+  sinon). `NodeHost`/`DocumentHost` `pub(crate)`. Verrous
+  `c574_b136_b137` ×12 ; `dom` 277/277 verts.

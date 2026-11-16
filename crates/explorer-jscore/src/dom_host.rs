@@ -589,7 +589,7 @@ pub(crate) fn trace_node_cache(cache: &NodeCache, out: &mut Vec<ObjId>) {
 }
 
 /// `document` object.
-struct DocumentHost {
+pub(crate) struct DocumentHost {
     dom: DomRef,
     cache: NodeCache,
     /// `document.implementation` — objet unique par document
@@ -616,7 +616,7 @@ struct DocumentHost {
 }
 
 /// Element/text node object (`this` carries the node id).
-struct NodeHost {
+pub(crate) struct NodeHost {
     dom: DomRef,
     cache: NodeCache,
     node: NodeId,
@@ -10503,6 +10503,9 @@ const TAGGED_METHODS: &[(&str, &[&str])] = &[
             "button", "fieldset", "form", "input", "output", "select", "textarea",
         ],
     ),
+    // `HTMLSelectElement` (§B-137 — ebay `add is not a
+    // function on HTMLSelectElement`, verbatim vol 855).
+    ("add", &["select"]),
     // `HTMLInputElement`/`HTMLTextAreaElement` (`is_field`).
     ("select", &["input", "textarea"]),
     ("setSelectionRange", &["input", "textarea"]),
@@ -14010,6 +14013,54 @@ impl Host for NodeHost {
             "checkValidity" | "reportValidity" => {
                 Ok(Some(Value::Bool(self.check_validity_of(e, node)?)))
             }
+            // §B-137 — `select.add(item[, before])` (ebay
+            // verbatim `add is not a function on
+            // HTMLSelectElement` — les combos dynamiques la
+            // peuplent par là). Spec : `before` nombre =
+            // `options[n]` (hors plage → append), élément =
+            // insérer devant (non descendant →
+            // `HierarchyRequestError`), absent/`null` = append
+            // en fin de select. `item` est restreint à
+            // `option`/`optgroup` (union IDL — `TypeError`
+            // honnête sinon).
+            "add" if self.dom.borrow().nodes[node as usize].tag == "select" => {
+                let Some(item) = node_for_in(e, arg(args, 0), &self.dom).filter(|&it| {
+                    matches!(
+                        self.dom.borrow().nodes[it as usize].tag.as_str(),
+                        "option" | "optgroup"
+                    )
+                }) else {
+                    return Err(e.type_error("add: option/optgroup requis"));
+                };
+                let (parent, ref_n) = {
+                    let d = self.dom.borrow();
+                    match arg(args, 1) {
+                        Value::Num(i) => {
+                            let opts = d.by_tag(node, "option");
+                            match opts.get(i.max(0.0) as usize) {
+                                Some(&b) => (d.parent(b), Some(b)),
+                                None => (Some(node), None),
+                            }
+                        }
+                        Value::Obj(_) => match node_for_in(e, arg(args, 1), &self.dom) {
+                            Some(b) => {
+                                if !d.is_ancestor_or_self(b, node) {
+                                    return Err(e.type_error(
+                                        "HierarchyRequestError: add: before non descendant",
+                                    ));
+                                }
+                                (d.parent(b), Some(b))
+                            }
+                            None => (Some(node), None),
+                        },
+                        _ => (Some(node), None),
+                    }
+                };
+                if let Some(p) = parent {
+                    self.dom.borrow_mut().insert_before(p, item, ref_n);
+                }
+                Ok(Some(Value::Undefined))
+            }
             // -- JS-7g structural ops ------------------------------------
             // `moveBefore(node, child)` (dom-parts spec) —
             // déplacement **sans** clone ni re-exécution :
@@ -15130,13 +15181,55 @@ pub(crate) fn node_for(e: &mut Engine, v: Value) -> Option<NodeId> {
 /// La spec adopterait le nœud cross-document — les arènes ne
 /// fusionnant pas, on dégrade en « pas un nœud » (`TypeError`
 /// amont), jamais en corruption.
+/// §B-136 — `v` désigne-t-il un nœud de **ce** miroir dont le
+/// slot est périmé (`NodeId` hors-bornes ou époque recyclée
+/// par un resync) ? Le nœud reste un `Element` pour le site —
+/// Chrome ne jette pas sur lui : `observe`/`unobserve`
+/// l'acceptent sans enregistrer (jamais notifié, même résultat
+/// qu'une cible qui n'intersecte jamais). Restreint à
+/// **l'arène du receveur** : le rejet cross-document borné
+/// (verrou `cross_document_node_args_are_adopted`) est
+/// conservé — un `NodeHost` d'une autre arène garde son
+/// `TypeError`. Wrapper `.node` déballé borné à 2 niveaux.
+pub(crate) fn stale_node_in(e: &mut Engine, v: Value, dom: &DomRef) -> bool {
+    stale_node_at(e, v, dom, 0)
+}
+
+fn stale_node_at(e: &mut Engine, v: Value, dom: &DomRef, depth: u8) -> bool {
+    let Value::Obj(id) = v else {
+        return false;
+    };
+    if let Some(ObjKind::Host(h)) = e.heap.obj(id).map(|o| &o.kind) {
+        let Some(n) = h.as_any().downcast_ref::<NodeHost>() else {
+            return false;
+        };
+        return Rc::ptr_eq(&n.dom, dom)
+            && (!n.dom.borrow().node_valid(n.node)
+                || n.dom.borrow().nodes[n.node as usize].epoch != n.epoch);
+    }
+    if depth >= 2 {
+        return false;
+    }
+    match e.get_prop_value(v, "node") {
+        Ok(inner @ Value::Obj(_)) => stale_node_at(e, inner, dom, depth + 1),
+        _ => false,
+    }
+}
+
 pub(crate) fn node_for_in(e: &mut Engine, v: Value, dom: &DomRef) -> Option<NodeId> {
+    node_for_in_at(e, v, dom, 0)
+}
+
+fn node_for_in_at(e: &mut Engine, v: Value, dom: &DomRef, depth: u8) -> Option<NodeId> {
     let Value::Obj(id) = v else {
         return None;
     };
     let h = match e.heap.obj(id).map(|o| &o.kind) {
         Some(ObjKind::Host(h)) => h.clone(),
-        _ => return None,
+        // §B-136 — wrapper nu `{node: el}` (objet plain,
+        // pas `Host` : le retour de `ShadyDOM.wrap()` du
+        // polyfill) : même déballage borné que le cas Host.
+        _ => return shady_unwrap_in(e, v, dom, depth),
     };
     if let Some(n) = h.as_any().downcast_ref::<NodeHost>() {
         if !Rc::ptr_eq(&n.dom, dom)
@@ -15153,7 +15246,7 @@ pub(crate) fn node_for_in(e: &mut Engine, v: Value, dom: &DomRef) -> Option<Node
         }
         return Some(dh.dom.borrow().root);
     }
-    shady_unwrap_in(e, v.clone(), dom)
+    shady_unwrap_in(e, v, dom, depth)
 }
 
 /// Wrapper `ShadyDOM` (`webcomponents-sd`, youtube) :
@@ -15163,12 +15256,17 @@ pub(crate) fn node_for_in(e: &mut Engine, v: Value, dom: &DomRef) -> Option<Node
 /// (polymer `dom.flush`/`_attachDom`) et la garde « not a
 /// node » tuait la passe d'hydratation (`[[X]]` non liés).
 /// On déballe `.node` quand il désigne un nœud valide.
-fn shady_unwrap_in(e: &mut Engine, v: Value, dom: &DomRef) -> Option<NodeId> {
+/// Borné à 2 niveaux — `{node:{node:…}}` chaîné ou
+/// auto-référencé (`o.node = o`) ne s'enroule pas.
+fn shady_unwrap_in(e: &mut Engine, v: Value, dom: &DomRef, depth: u8) -> Option<NodeId> {
+    if depth >= 2 {
+        return None;
+    }
     let inner = e.get_prop_value(v, "node").ok()?;
     if !matches!(inner, Value::Obj(_)) {
         return None;
     }
-    node_for_in(e, inner, dom)
+    node_for_in_at(e, inner, dom, depth + 1)
 }
 
 /// `(node, dom)` d'un `NodeHost` d'un **autre** miroir que
@@ -15324,18 +15422,48 @@ fn adopt_into(e: &mut Engine, v: Value, dst: &DomRef, dst_cache: &NodeCache) -> 
 /// `DocumentHost` ne compte pas, spec : receveur non-Element →
 /// `TypeError`).
 fn element_receiver(e: &mut Engine, v: Value) -> Option<(NodeId, DomRef, NodeCache)> {
+    element_receiver_at(e, v, 0)
+}
+
+/// §B-136 — le receveur peut être un wrapper `{node: el}`
+/// (ShadyDOM/proxy-like) passé via `.call(this,…)` : `.node`
+/// est déballé borné à 2 niveaux (précédent
+/// `shady_unwrap_in`), la chaîne ne s'enroule pas.
+fn element_receiver_at(e: &mut Engine, v: Value, depth: u8) -> Option<(NodeId, DomRef, NodeCache)> {
     let Value::Obj(id) = v else {
         return None;
     };
-    let h = match e.heap.obj(id).map(|o| &o.kind) {
-        Some(ObjKind::Host(h)) => h.clone(),
-        _ => return None,
-    };
-    let n = h.as_any().downcast_ref::<NodeHost>()?;
-    if !n.dom.borrow().node_valid(n.node) {
+    if let Some(ObjKind::Host(h)) = e.heap.obj(id).map(|o| &o.kind) {
+        let h = h.clone();
+        let n = h.as_any().downcast_ref::<NodeHost>()?;
+        if !n.dom.borrow().node_valid(n.node) {
+            return None;
+        }
+        return Some((n.node, n.dom.clone(), n.cache.clone()));
+    }
+    if depth >= 2 {
         return None;
     }
-    Some((n.node, n.dom.clone(), n.cache.clone()))
+    match e.get_prop_value(v, "node") {
+        Ok(inner @ Value::Obj(_)) => element_receiver_at(e, inner, depth + 1),
+        _ => None,
+    }
+}
+
+/// `v` est-il un élément **réel** (`NodeHost`, toute
+/// arène/époque — périmée comprise) ? §B-136 : un receveur
+/// `matches`/`closest` dont le slot a été recyclé par un
+/// resync du miroir dégrade en `false`/`null` — un élément
+/// détaché reste un `Element` en Chrome, jamais un
+/// non-élément.
+fn nodeish_receiver(e: &Engine, v: &Value) -> bool {
+    let Value::Obj(id) = v else {
+        return false;
+    };
+    matches!(
+        e.heap.obj(*id).map(|o| &o.kind),
+        Some(ObjKind::Host(h)) if h.as_any().downcast_ref::<NodeHost>().is_some()
+    )
 }
 
 /// Géométrie publiée de `node` (issue #19, JS-8) — lookup
@@ -20231,7 +20359,16 @@ fn event_composed_path(e: &mut Engine, t: Value, _a: &[Value]) -> JsResult<Value
 /// les méthodes host invoke-only sont invisibles à la lecture.
 fn element_matches(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
     let sel = e.to_js_string(arg(args, 0))?;
-    let Some((node, dom, _)) = element_receiver(e, this) else {
+    let Some((node, dom, _)) = element_receiver(e, this.clone()) else {
+        // §B-136 (lefigaro `matches: receiver is not an
+        // Element` ×8, vol 849) : receveur `NodeHost` périmé
+        // — le slot a été recyclé par un resync du miroir,
+        // l'élément reste un `Element` pour le site (Chrome
+        // ne jette pas sur un détaché). `false` honnête ;
+        // les receveurs non-nœud gardent le TypeError spec.
+        if nodeish_receiver(e, &this) {
+            return Ok(Value::Bool(false));
+        }
         return Err(e.type_error("matches: receiver is not an Element"));
     };
     let r = dom.borrow().matches(node, &sel);
@@ -20242,7 +20379,13 @@ fn element_matches(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Valu
 /// motif que [`element_matches`]).
 fn element_closest(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
     let sel = e.to_js_string(arg(args, 0))?;
-    let Some((node, dom, cache)) = element_receiver(e, this) else {
+    let Some((node, dom, cache)) = element_receiver(e, this.clone()) else {
+        // §B-136 — même classe que `matches` : receveur
+        // `NodeHost` périmé → `null` (pas d'ancêtre à
+        // mesurer), jamais de TypeError sur un vrai Element.
+        if nodeish_receiver(e, &this) {
+            return Ok(Value::Null);
+        }
         return Err(e.type_error("closest: receiver is not an Element"));
     };
     let hit = dom.borrow().closest(node, &sel);
