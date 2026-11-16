@@ -59,6 +59,11 @@ pwsh -File scripts/spawn_daemon.ps1 -Port 9385 `
 # le plus récent parmi target_dir/build_dir/CARGO_TARGET_DIR ;
 # contrôle : `daemon-<port>.exe.log` = chemin + âge du binaire
 # lancé, à citer dans le rapport (un vol mesure UN binaire).
+# PIÈGE : jamais d'exe « deviné » dans un autre worktree —
+# un daemon spawné depuis l'exe d'un autre arbre s'annonce
+# dans le registre de CET arbre (default-17232 dans le
+# registre perf = daemon de mesure lancé depuis le mauvais
+# binaire → invisible au `daemons` du main).
 
 # 0.4 watchdog MÉMOIRE — Job Object obligatoire, memwatch en
 # option. <pid> = la ligne « daemon PID <n> » de
