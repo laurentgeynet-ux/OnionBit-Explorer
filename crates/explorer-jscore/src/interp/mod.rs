@@ -1140,6 +1140,26 @@ pub struct Engine {
     /// le modèle IC « 1 site = 1 entrée » ne couvre pas cette
     /// question bi-dimensionnelle (vol N5.19).
     pub(crate) shadow_memo: FastMap<(u64, u64), bool>,
+    /// JS-C567 — mémo des accesseurs **sibling** uniquement
+    /// `(len clé, node, struct_gen)` → `Option<NodeId>` : le scan
+    /// `position()` du `Vec` enfants est le seul coût O(n) des
+    /// accesseurs de navigation — parent/enfant de bord sont des
+    /// champs O(1) servis directement (le mémo n'y cachait que
+    /// du gratuit, filet n567 négatif). `SCRIPT_ACC_GEN` hors de
+    /// la clé : un accesseur script posé post-fill est intercepté
+    /// par `proto_accessor_shadows` en amont (invalidé, lui, par
+    /// `SCRIPT_ACC_GEN`) — `dom_nav_value` n'est consulté que
+    /// quand aucune ombre n'existe. Pur `NodeId` — rien à tracer.
+    pub(crate) nav_memo: FastMap<(u64, u64, u64), Option<u32>>,
+    /// JS-C567 — mémo `(fold shapes chaîne, clé internée)` →
+    /// `(propriétaire, valeur)` des méthodes universelles
+    /// `Object.prototype` lues sur wrappers host
+    /// (`hasOwnProperty`…) : chaîne marchée une fois par
+    /// (chaîne-shape, clé) — le fold capture les mutations
+    /// structurelles de maillon ; au hit, `find_own(owner)`
+    /// re-valide la valeur (un `o.x = f` sur clé existante ne
+    /// change pas la shape — couvre les swaps in-place).
+    pub(crate) univ_fn_memo: FastMap<(u64, u64), Option<(u32, Value)>>,
     /// JS-C521 — mémo négative `(fold shapes chaîne, clé)` des
     /// lectures absentes : le fold couvre la chaîne entière —
     /// toute mutation d'un maillon la change → correcte par
@@ -1733,6 +1753,8 @@ impl Engine {
             resolved_envs: FastMap::default(),
             ic_map: FastMap::default(),
             shadow_memo: FastMap::default(),
+            nav_memo: FastMap::default(),
+            univ_fn_memo: FastMap::default(),
             rabs_memo: FastSet::default(),
             rabs_fifo: std::collections::VecDeque::new(),
             ic_off: std::env::var("EXPLORER_NO_IC").is_ok_and(|v| v == "1"),

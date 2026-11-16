@@ -626,6 +626,13 @@ pub struct Dom {
     pub nodes: Vec<Node>,
     /// The `#document` node.
     pub root: NodeId,
+    /// JS-C567 — génération structurelle : bumpée par tout
+    /// mutateurs parent/enfants/slot (`append`, `insert_before`,
+    /// `detach`, `replace_children`, `replace_child`,
+    /// `splice_fragment`, `fold_children_of`, `template_content`,
+    /// `collect_garbage`). Clé du mémo `nav_memo` — une mutation
+    /// invalide TOUT le mémo, conservateur par construction.
+    pub struct_gen: u64,
     /// Contextes 2D attachés aux `<canvas>` (JS-C28) — un état
     /// par surface ayant obtenu `getContext("2d")`. Pub comme
     /// `nodes` (lecture host objects) ; les mutations passent
@@ -935,6 +942,7 @@ impl Dom {
         let mut d = Dom {
             nodes: Vec::new(),
             root: 0,
+            struct_gen: 0,
             dirty: Cell::new(false),
             dirty_node: Cell::new(None),
             observers: HashMap::new(),
@@ -1143,6 +1151,7 @@ impl Dom {
     }
 
     pub(crate) fn collect_garbage(&mut self, seeds: &std::collections::HashSet<NodeId>) -> usize {
+        self.struct_gen += 1; // JS-C567
         let mut keep = self.extra_kept_nodes();
         keep.extend(seeds.iter().copied());
         let mut stack: Vec<NodeId> = keep.iter().copied().collect();
@@ -2821,6 +2830,7 @@ impl Dom {
     /// Détache les enfants de `child` (à replier dans le parent
     /// — voir [`Self::structure_illegal`]) et les retourne.
     fn fold_children_of(&mut self, child: NodeId) -> Vec<NodeId> {
+        self.struct_gen += 1; // JS-C567
         let kids = std::mem::take(&mut self.nodes[child as usize].children);
         for &k in &kids {
             self.nodes[k as usize].parent = None;
@@ -2858,9 +2868,10 @@ impl Dom {
     }
 
     pub fn append(&mut self, parent: NodeId, child: NodeId) {
-        // Id obsolète (arène reconstruite — spectrum
-        // `groupChildren`, `nodes[607]` sur 507) → no-op,
-        // jamais panic.
+        self.struct_gen += 1; // JS-C567
+                              // Id obsolète (arène reconstruite — spectrum
+                              // `groupChildren`, `nodes[607]` sur 507) → no-op,
+                              // jamais panic.
         if !self.node_valid(parent) || !self.node_valid(child) {
             return;
         }
@@ -2947,6 +2958,7 @@ impl Dom {
 
     /// Detach `node` from its parent (keeps the node alive).
     pub fn detach(&mut self, node: NodeId) {
+        self.struct_gen += 1; // JS-C567
         if !self.node_valid(node) {
             return;
         }
@@ -2995,6 +3007,7 @@ impl Dom {
     /// « replace all » — les `append` internes n'en émettent pas
     /// (on mute directement, sans passer par [`Dom::append`]).
     pub fn replace_children(&mut self, node: NodeId, kids: &[NodeId]) {
+        self.struct_gen += 1; // JS-C567
         if !self.node_valid(node) {
             return;
         }
@@ -3090,6 +3103,7 @@ impl Dom {
     /// fragment est détaché, comme chez un navigateur réel.
     /// `None` pour un non-`<template>`.
     pub fn template_content(&mut self, n: NodeId) -> Option<NodeId> {
+        self.struct_gen += 1; // JS-C567
         let node = self.nodes.get(n as usize)?;
         if node.kind != NodeKind::Element || node.tag != "template" {
             return None;
@@ -3166,6 +3180,7 @@ impl Dom {
     /// isn't a child of `parent` the insert degrades to append
     /// (tolerant — Dillo never throws on malformed trees either).
     pub fn insert_before(&mut self, parent: NodeId, child: NodeId, ref_node: Option<NodeId>) {
+        self.struct_gen += 1; // JS-C567
         if !self.node_valid(parent) || !self.node_valid(child) {
             return;
         }
@@ -3274,6 +3289,7 @@ impl Dom {
     /// le fragment reste vide — spec `insert` des fragments.
     /// Un seul record `childList` pour le groupe.
     fn splice_fragment(&mut self, parent: NodeId, frag: NodeId, ref_node: Option<NodeId>) {
+        self.struct_gen += 1; // JS-C567
         if !self.node_valid(parent) || !self.node_valid(frag) {
             return;
         }
@@ -3364,6 +3380,7 @@ impl Dom {
     /// `replaceChild(new, old)` — `old` is detached, `new` takes
     /// its slot. Returns `old` (spec) — caller wraps it.
     pub fn replace_child(&mut self, parent: NodeId, new: NodeId, old: NodeId) {
+        self.struct_gen += 1; // JS-C567
         if !self.node_valid(parent) || !self.node_valid(new) || !self.node_valid(old) {
             return;
         }

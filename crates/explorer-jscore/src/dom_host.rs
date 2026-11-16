@@ -910,6 +910,29 @@ fn dom_acc_set(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
     Ok(Value::Undefined)
 }
 
+/// JS-C567 — borne du mémo `nav_memo` (même discipline que
+/// [`SHADOW_MEMO_CAP`] : clear au cap, jamais de gel).
+const NAV_MEMO_CAP: usize = 8192;
+
+/// JS-C567 — réponse DOM brute (`Option<NodeId>`) des
+/// accesseurs **sibling** mémoïsés : le scan `position()` du
+/// `Vec` enfants est le seul vrai travail O(n) de la table —
+/// parent/enfant de bord sont des champs O(1) lus directement
+/// (le mémo n'y cachait que du gratuit, filet n567). `key` ∈
+/// les 4 littéraux du bras mémoïsé de [`dom_nav_value`].
+fn nav_sibling_node(dom: &DomRef, node: NodeId, key: &str) -> Option<NodeId> {
+    let d = dom.borrow();
+    let forward = matches!(key, "nextSibling" | "nextElementSibling");
+    let mut sib = d.sibling(node, forward);
+    while let Some(s) = sib {
+        if !key.ends_with("ElementSibling") || d.nodes[s as usize].kind == NodeKind::Element {
+            break;
+        }
+        sib = d.sibling(s, forward);
+    }
+    sib
+}
+
 /// Valeur **brute** d'une prop de navigation `Node`/`Element`
 /// (JS-C340) — source unique partagée entre `NodeHost::get` et
 /// les accesseurs de prototype (`dom_nav_get` : `desc.get.call(
@@ -928,23 +951,7 @@ fn dom_nav_value(
         None => Value::Null,
     };
     Ok(Some(match key {
-        "parentNode" => {
-            let p = dom.borrow().nodes[node as usize].parent;
-            node_or_null(e, p)
-        }
         "isConnected" => Value::Bool(dom.borrow().is_attached(node)),
-        // `parentElement` : spec — `null` quand le parent n'est
-        // pas un élément (la racine `#document` n'est pas un
-        // Element DOM : `html.parentElement` = null).
-        "parentElement" => {
-            let p = {
-                let d = dom.borrow();
-                d.nodes[node as usize]
-                    .parent
-                    .filter(|&p| p != d.root && d.nodes[p as usize].kind == NodeKind::Element)
-            };
-            node_or_null(e, p)
-        }
         "children" => {
             let kids = dom.borrow().element_children(node);
             return Ok(Some(dom_collection(
@@ -965,6 +972,22 @@ fn dom_nav_value(
         "childElementCount" => {
             let n = dom.borrow().element_children(node).len();
             Value::Num(n as f64)
+        }
+        "parentNode" => {
+            let p = dom.borrow().nodes[node as usize].parent;
+            node_or_null(e, p)
+        }
+        // `parentElement` : spec — `null` quand le parent n'est
+        // pas un élément (la racine `#document` n'est pas un
+        // Element DOM : `html.parentElement` = null).
+        "parentElement" => {
+            let p = {
+                let d = dom.borrow();
+                d.nodes[node as usize]
+                    .parent
+                    .filter(|&p| p != d.root && d.nodes[p as usize].kind == NodeKind::Element)
+            };
+            node_or_null(e, p)
         }
         "firstChild" | "lastChild" | "firstElementChild" | "lastElementChild" => {
             let c = {
@@ -987,20 +1010,37 @@ fn dom_nav_value(
             };
             node_or_null(e, c)
         }
+        // JS-C567 — mémo `(clé, nœud, struct_gen)` des accesseurs
+        // **sibling** : le scan `position()` est le seul coût O(n)
+        // de la table. `SCRIPT_ACC_GEN` est volontairement HORS
+        // de la clé — un accesseur script posé post-fill est
+        // intercepté par le gate `proto_accessor_shadows` en amont
+        // (lui-même invalidé par `SCRIPT_ACC_GEN`) : `dom_nav_value`
+        // n'est jamais consulté quand une ombre existe.
         "previousSibling" | "previousElementSibling" | "nextSibling" | "nextElementSibling" => {
-            let forward = matches!(key, "nextSibling" | "nextElementSibling");
-            let c = {
-                let d = dom.borrow();
-                let mut sib = d.sibling(node, forward);
-                while let Some(s) = sib {
-                    if !key.ends_with("ElementSibling")
-                        || d.nodes[s as usize].kind == NodeKind::Element
-                    {
-                        break;
+            // Les 4 clés sibling ont des longueurs distinctes
+            // (11/15/18/22) — `len` est le discriminant gratuit.
+            // `EXPLORER_NO_NAVMEMO=1` désarme (A/B de filet).
+            static NAV_ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+            let c = if *NAV_ON
+                .get_or_init(|| std::env::var("EXPLORER_NO_NAVMEMO").ok().as_deref() != Some("1"))
+            {
+                // Les 4 clés sibling ont des longueurs
+                // distinctes (11/15/18/22) — `len` est le
+                // discriminant gratuit.
+                let mk = (key.len() as u64, node as u64, dom.borrow().struct_gen);
+                if let Some(&hit) = e.nav_memo.get(&mk) {
+                    hit
+                } else {
+                    let c = nav_sibling_node(dom, node, key);
+                    if e.nav_memo.len() >= NAV_MEMO_CAP {
+                        e.nav_memo.clear();
                     }
-                    sib = d.sibling(s, forward);
+                    e.nav_memo.insert(mk, c);
+                    c
                 }
-                sib
+            } else {
+                nav_sibling_node(dom, node, key)
             };
             node_or_null(e, c)
         }
@@ -1404,8 +1444,16 @@ fn proto_accessor_shadows(e: &mut Engine, id: ObjId, key: &str) -> bool {
             break;
         }
     }
+    // JS-C567 — le fold est une empreinte de CLÉS : remplacer
+    // les côtés d'un accesseur existant en place ne le change
+    // pas (`defineProperty` sur l'acc natif `parentNode` =
+    // même shape → stale `false` mesuré). `SCRIPT_ACC_GEN`
+    // dans la clé invalide les entrées à chaque install/
+    // retrait/mise à jour d'accesseur — conservateur.
     let memo_key = (
-        fold,
+        fold ^ crate::SCRIPT_ACC_GEN
+            .load(std::sync::atomic::Ordering::Relaxed)
+            .wrapping_mul(0xA24B_AED4_963E_E407),
         (crate::intern(key).as_ptr() as usize as u64) ^ (key.len() as u64) << 48,
     );
     if let Some(&b) = e.shadow_memo.get(&memo_key) {
@@ -1444,6 +1492,98 @@ fn proto_accessor_shadows(e: &mut Engine, id: ObjId, key: &str) -> bool {
 
 /// JS-C520 — borne de la mémo `proto_accessor_shadows`.
 const SHADOW_MEMO_CAP: usize = 8192;
+
+/// JS-C567 — méthodes universelles `Object.prototype` lues sur
+/// un wrapper host : la lookup marchait toute la chaîne à
+/// chaque appel (~800 ns) alors que la réponse est stable par
+/// `(fold shapes chaîne, clé)` — même patron mémoïsé que
+/// [`proto_accessor_shadows`], le fold capture tout maillon
+/// muté → correct par construction. `None` = pas une clé
+/// universelle, pas de `Prop::Data` en premier propriétaire,
+/// ou valeur non-objet — le chemin normal continue.
+fn proto_universal_fn(e: &mut Engine, id: ObjId, key: &str) -> Option<Value> {
+    // `constructor` exclu : `NodeHost::get` le sert lui-même.
+    if !matches!(
+        key,
+        "hasOwnProperty"
+            | "isPrototypeOf"
+            | "propertyIsEnumerable"
+            | "toLocaleString"
+            | "toString"
+            | "valueOf"
+    ) {
+        return None;
+    }
+    // Une prop propre (data ou accesseur) prime le host — le
+    // chemin ordinaire la sert, ne pas pré-empter.
+    if e.find_own(id, key).is_some() {
+        return None;
+    }
+    let mut cur = e.heap.obj(id)?.proto.clone();
+    let mut links: Vec<ObjId> = Vec::new();
+    let mut fold: u64 = 0x9E37_79B9_7F4A_7C15;
+    for _ in 0..32 {
+        let Value::Obj(cid) = cur else { break };
+        links.push(cid);
+        if let Some(o) = e.heap.obj(cid) {
+            fold = fold.wrapping_mul(0x1000_0000_01B3).wrapping_add(o.shape());
+            cur = o.proto.clone();
+        } else {
+            links.pop();
+            break;
+        }
+    }
+    // `SCRIPT_ACC_GEN` est volontairement HORS de la clé : un
+    // accesseur posé en place sur la chaîne est intercepté par
+    // le gate `proto_accessor_shadows` en amont (lui-même
+    // invalidé par `SCRIPT_ACC_GEN`) ; les swaps data→data et
+    // data→acc sur le propriétaire sont couverts par la
+    // re-validation `find_own(owner)` au hit.
+    let mk = (
+        fold,
+        (crate::intern(key).as_ptr() as usize as u64) ^ (key.len() as u64) << 48,
+    );
+    if let Some(cached) = e.univ_fn_memo.get(&mk).cloned() {
+        // Re-validation `find_own(owner)` : un `o.k = v` sur
+        // clé existante laisse la shape identique — la valeur
+        // peut avoir été swappée sous le fold. Le contrôle
+        // coûte un lookup (~80 ns) au lieu de la chaîne
+        // (~800 ns). GC : un `ObjId` balayé → `find_own`
+        // retourne `None` → miss → refill (discipline
+        // `node_value`).
+        match cached {
+            Some((owner, v @ Value::Obj(_))) => {
+                if matches!(
+                    e.find_own(owner, key),
+                    Some(crate::heap::Prop::Data { value, .. }) if value == v
+                ) {
+                    return Some(v);
+                }
+            }
+            None => return None,
+            _ => {}
+        }
+    }
+    // Premier propriétaire en ordre de chaîne ; un accesseur
+    // en tête → `None` (le chemin normal l'invoquera — un
+    // accesseur script aurait déjà déféré au gate amont).
+    let mut ans = None;
+    for &cid in &links {
+        match e.find_own(cid, key) {
+            Some(crate::heap::Prop::Data { value, .. }) => {
+                ans = Some((cid, value));
+                break;
+            }
+            Some(_) => break,
+            None => {}
+        }
+    }
+    if e.univ_fn_memo.len() >= SHADOW_MEMO_CAP {
+        e.univ_fn_memo.clear();
+    }
+    e.univ_fn_memo.insert(mk, ans.clone());
+    ans.map(|(_, v)| v)
+}
 
 /// Getter d'accesseur de navigation prototype — `bound[0]` = nom
 /// de prop, `this` = le nœud (`desc.get.call(el)`, `ShadyDOM`).
@@ -8688,6 +8828,13 @@ impl Host for NodeHost {
                 || proto_accessor_shadows(e, id, key)
             {
                 return Ok(None);
+            }
+            // JS-C567 — méthodes universelles `Object.prototype`
+            // non servies par le match host (`hasOwnProperty`…)
+            // : mémo `(fold, clé)` au lieu de la marche à chaque
+            // appel (~16 ms/vol n566).
+            if let Some(v) = proto_universal_fn(e, id, key) {
+                return Ok(Some(v));
             }
         }
         // `<style>`/`<link rel=stylesheet>` — `el.sheet` :

@@ -3654,6 +3654,62 @@ fn c565_host_key_prefilter() {
     );
 }
 
+/// JS-C567 — mémo `(clé, nœud, struct_gen ^ acc_gen)` des
+/// accesseurs de navigation : réponses fraîches après chaque
+/// mutation structurelle, déférence au proto si un accesseur
+/// script est posé **après** les lectures mémoïsées.
+#[test]
+fn c567_nav_memo() {
+    const P: &str = r#"<html><body>
+<div id="a"><span id="s1">x</span><b id="s2">y</b></div>
+<div id="b"></div>
+</body></html>"#;
+    // Lectures (fills du mémo) puis résultats directs.
+    assert_eq!(
+        ev_in(
+            P,
+            "var a=document.getElementById('a'),s1=document.getElementById('s1'),s2=document.getElementById('s2');[s1.parentNode.id,a.firstChild.id,s1.nextSibling.id,s2.previousSibling.id,a.lastChild.id].join('|')"
+        ),
+        "a|s1|s2|s1|s2"
+    );
+    // Mutation structurelle post-fill : le mémo doit refléter
+    // le nouvel état (struct_gen bumpé → miss → refill).
+    assert_eq!(
+        ev_in(
+            P,
+            "var a=document.getElementById('a'),s1=document.getElementById('s1');a.firstChild.id;s1.nextSibling.id;var c=document.createElement('i');c.id='i';a.insertBefore(c,s1);var d=document.getElementById('b');d.appendChild(s1);[a.firstChild.id,s1.nextSibling===null,s1.parentNode.id,a.lastChild.id].join('|')"
+        ),
+        "i|true|b|s2"
+    );
+    // Ombre tardive : un accesseur script posé APRÈS des
+    // lectures mémoïsées doit reprendre la main
+    // (`SCRIPT_ACC_GEN` bump → la clé mémo change → gate
+    // `proto_accessor_shadows` re-défère au proto).
+    assert_eq!(
+        ev_in(
+            P,
+            "var s1=document.getElementById('s1');var before=s1.parentNode.id;Object.defineProperty(Node.prototype,'parentNode',{get:function(){return 'SH'},configurable:true});var after=s1.parentNode;before+'|'+after"
+        ),
+        "a|SH"
+    );
+    // `hasOwnProperty` : fn appelable via la voie mémo ; un
+    // expando propre prime la voie universelle.
+    assert_eq!(
+        ev_in(
+            P,
+            "var s1=document.getElementById('s1');s1.zz=1;[typeof s1.hasOwnProperty,s1.hasOwnProperty('zz'),s1.hasOwnProperty('nope')].join('|')"
+        ),
+        "function|true|false"
+    );
+    assert_eq!(
+        ev_in(
+            P,
+            "var s1=document.getElementById('s1');s1.hasOwnProperty=function(k){return 'own-'+k};s1.hasOwnProperty('x')"
+        ),
+        "own-x"
+    );
+}
+
 /// `for-of`/`Symbol.iterator` sur les collections host —
 /// `makeIterator` de Google s'appuie dessus (`Error: b` sinon).
 #[test]

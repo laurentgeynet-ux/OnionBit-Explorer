@@ -144,9 +144,8 @@ pub(crate) fn intern(name: &str) -> std::rc::Rc<str> {
     }
     // `EXPLORER_NO_PTRHIT=1` désarme le cache (A/B de filet).
     static PTRHIT_ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
-    let on = *PTRHIT_ON.get_or_init(|| {
-        std::env::var("EXPLORER_NO_PTRHIT").ok().as_deref() != Some("1")
-    });
+    let on =
+        *PTRHIT_ON.get_or_init(|| std::env::var("EXPLORER_NO_PTRHIT").ok().as_deref() != Some("1"));
     if on {
         if let Some(rc) = PTR_HIT.with(|m| m.borrow().get(&name.as_ptr()).cloned()) {
             if rc.len() == name.len() {
@@ -1486,6 +1485,14 @@ pub static LAST_HOST: std::sync::Mutex<String> = std::sync::Mutex::new(String::n
 /// lock+format sur tout `Host::get`/`invoke` — le marqueur
 /// sert aux post-mortem, pas au chemin chaud.
 static HOST_MARK_ENABLED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// JS-C567 — epoch des installations d'accesseurs : bumpée par
+/// `define_accessor`/`define_accessor_strict`/`set_accessor`
+/// (heap). Clé du mémo `nav_memo` — un accesseur script posé
+/// APRÈS un fill doit re-déférer la lecture au proto
+/// (`proto_accessor_shadows` reprend la main au miss suivant).
+pub(crate) static SCRIPT_ACC_GEN: std::sync::atomic::AtomicU64 =
+    std::sync::atomic::AtomicU64::new(0);
 
 /// Arme l'écriture du breadcrumb `host=` (daemon : à appeler
 /// au démarrage du flight recorder — process-wide).

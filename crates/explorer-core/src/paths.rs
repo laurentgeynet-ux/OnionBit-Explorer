@@ -149,7 +149,7 @@ pub fn profiles_dir() -> Option<PathBuf> {
 }
 
 /// `<data>/profiles/<nom>` — `None` si le nom n'est pas un
-/// nom propre (voir [`clean_name`]) ou hors contexte projet.
+/// nom propre (voir `clean_name`) ou hors contexte projet.
 #[must_use]
 pub fn profile_dir(name: &str) -> Option<PathBuf> {
     profiles_dir().and_then(|d| clean_name(name).map(|n| d.join(n)))

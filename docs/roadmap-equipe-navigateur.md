@@ -13580,6 +13580,24 @@ chaque gain rapporté contre les **deux** archétypes.
   (`ic_hit`/`ic_miss`/`ic_disarm` au snapshot) pour
   borner la couverture du seul court-circuit existant.
   Dependency-groups = infra lourde, dernier recours.
+- [x] **JS-C567 — mémo sibling + `hasOwnProperty` universel,
+  staleness `shadow_memo` réparée** — filet n566 : `parentNode`
+  962 ns@36,9 k, `nextSibling` 1,67 µs@9,9 k (scan `position()`
+  O(n)), `hasOwnProperty` 833 ns@19,5 k. **v1 filet n567
+  négatif** : mémo sur les 10 clés nav — parent/enfant = champs
+  O(1) (coût réel = `node_value`+dispatch, pas la lecture) et
+  `SCRIPT_ACC_GEN` en clé tuait le hit-rate. Révision :
+  `nav_memo` restreint aux 4 sibling `(len, NodeId, struct_gen)`,
+  `struct_gen` bumpée en tête des 9 mutateurs structurels ;
+  `SCRIPT_ACC_GEN` hors de `nav_memo`/`univ_fn_memo` (ombre
+  post-fill interceptée par `proto_accessor_shadows` en amont).
+  `proto_universal_fn` : `(fold shapes, clé) → (owner, Value)`,
+  hit re-validé `find_own(owner)`. **Staleness pré-existante**
+  : accesseur remplacé en place = shape identique → `shadow_memo`
+  périmé ; `SCRIPT_ACC_GEN` plié dans sa clé (seule endroit où
+  il est requis). Verrou `c567_nav_memo`, `dom` 273.
+  `davinci_bundle_raw_evals_clean` deadline (722 s vs 60 s) :
+  **pré-existant** à `5ddea8de`, lenteur station, pas C567.
 - [x] **JS-C566 — `intern()` : cache pointeur canonique
   + `host_mark` paresseux** — `prop_lookup` ré-internait
   ~2,5 M clés/vol alors que `Expr::Member` porte le `Rc`

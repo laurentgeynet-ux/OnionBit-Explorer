@@ -1705,6 +1705,9 @@ impl Object {
                     if !a.configurable {
                         return false;
                     }
+                    // JS-C567 — l'accesseur disparaît → ombres
+                    // mémoïsées invalides.
+                    crate::SCRIPT_ACC_GEN.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                     *p = Prop::Data { value, attrs };
                     true
                 }
@@ -1720,6 +1723,7 @@ impl Object {
     /// `[[DefineOwnProperty]]` for an accessor — same rules. `get`
     /// or `set` may be `Undefined` (absent side).
     pub fn define_accessor(&mut self, key: &str, get: Value, set: Value, attrs: PropAttrs) -> bool {
+        crate::SCRIPT_ACC_GEN.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         if let Some(i) = self.prop_pos(key) {
             let Some((_, p)) = self.props.get_mut(i) else {
                 return false;
@@ -1783,6 +1787,7 @@ impl Object {
         set: Value,
         attrs: PropAttrs,
     ) -> bool {
+        crate::SCRIPT_ACC_GEN.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         if let Some(i) = self.prop_pos(key) {
             let Some((_, p)) = self.props.get_mut(i) else {
                 return false;
@@ -1841,6 +1846,11 @@ impl Object {
         // protection — on outrepasse configurable.
         if let Some(i) = self.prop_pos(key) {
             if let Some((_, p)) = self.props.get_mut(i) {
+                // JS-C567 — remplacement d'un accesseur →
+                // ombres mémoïsées invalides.
+                if matches!(p, Prop::Acc { .. }) {
+                    crate::SCRIPT_ACC_GEN.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                }
                 *p = Prop::Data { value, attrs };
             }
             return;
@@ -1852,6 +1862,7 @@ impl Object {
     /// accessor sides are preserved, à la `Object.defineProperty`).
     /// Install path — attributes forced configurable.
     pub fn set_accessor(&mut self, key: &str, get: Value, set: Value, enumerable: bool) {
+        crate::SCRIPT_ACC_GEN.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         let attrs = PropAttrs {
             writable: false,
             enumerable,
@@ -1887,6 +1898,11 @@ impl Object {
         match self.prop_pos(key) {
             Some(i) if self.props.get(i).is_some_and(|(_, p)| !p.configurable()) => false,
             Some(i) => {
+                // JS-C567 — suppression d'un accesseur →
+                // ombres mémoïsées invalides.
+                if matches!(self.props.get(i).map(|(_, p)| p), Some(Prop::Acc { .. })) {
+                    crate::SCRIPT_ACC_GEN.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                }
                 let removed = self.props.remove(i);
                 // JS-C516 — la marque retirée lève le bit
                 // (`delete o["\u{f131}ctor"]` rend l'objet
