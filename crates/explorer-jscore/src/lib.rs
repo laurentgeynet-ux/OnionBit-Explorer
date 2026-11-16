@@ -142,9 +142,16 @@ pub(crate) fn intern(name: &str) -> std::rc::Rc<str> {
             std::collections::HashMap<*const u8, std::rc::Rc<str>>,
         > = std::cell::RefCell::new(std::collections::HashMap::new());
     }
-    if let Some(rc) = PTR_HIT.with(|m| m.borrow().get(&name.as_ptr()).cloned()) {
-        if rc.len() == name.len() {
-            return rc;
+    // `EXPLORER_NO_PTRHIT=1` désarme le cache (A/B de filet).
+    static PTRHIT_ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    let on = *PTRHIT_ON.get_or_init(|| {
+        std::env::var("EXPLORER_NO_PTRHIT").ok().as_deref() != Some("1")
+    });
+    if on {
+        if let Some(rc) = PTR_HIT.with(|m| m.borrow().get(&name.as_ptr()).cloned()) {
+            if rc.len() == name.len() {
+                return rc;
+            }
         }
     }
     let rc = INTERNED.with(|set| {
@@ -156,7 +163,7 @@ pub(crate) fn intern(name: &str) -> std::rc::Rc<str> {
         set.insert(s.clone());
         s
     });
-    if rc.as_ptr() == name.as_ptr() {
+    if on && rc.as_ptr() == name.as_ptr() {
         PTR_HIT.with(|m| m.borrow_mut().insert(name.as_ptr(), rc.clone()));
     }
     rc

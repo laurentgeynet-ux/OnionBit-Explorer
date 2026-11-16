@@ -13588,7 +13588,9 @@ chaque gain rapporté contre les **deux** archétypes.
   lookup, zéro signature. `host_mark` : `Mutex<String>`
   du breadcrumb `host=` écrit seulement si le flight
   recorder s'abonne (`host_mark_enable()`) — `load`
-  atomique sinon (~254 k/vol). `dom` 272.
+  atomique sinon (~254 k/vol). `dom` 272. Filet A/B
+  (`EXPLORER_NO_PTRHIT`) : même sens, non probant à cette
+  variance de vol — borne basse ~25 ns/miss.
 - [x] **JS-C565 — `NodeHost::get` : préfiltre négatif,
   keyset auto-dérivé** — misses non-`_` nommées n563b
   (~118 ms : `loggingStatus`/`polymerController`/
@@ -13596,7 +13598,8 @@ chaque gain rapporté contre les **deux** archétypes.
   littéraux de `include_str!("dom_host.rs")` — sur-ensemble
   du keyspace, **zéro dérive par construction**. Porte
   `<form>` (named-getter non borné). Verrou
-  `c565_host_key_prefilter`, `dom` 272.
+  `c565_host_key_prefilter`, `dom` 272. **Filet n566** :
+  misses nommées ~9-14× (103-129 ns/get), ~87 ms évités.
 - [x] **JS-C564 — `NodeHost::get` : early-exit `_`-prefix**
   — vol n563 (`keys:`+`hns:`) : `__shady`/`__data*`/
   `_signal*`/`polymerController`/`loggingStatus` ~75 k calls
