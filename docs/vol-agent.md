@@ -200,6 +200,12 @@ dure. **Vivacité** : les lecteurs (`daemon_list`, `daemons`,
 + port annoncé lié sous ce pid)` — un fichier réclamant un
 PID réattribué à un autre daemon est périmé (étape 284) ;
 ne jamais cibler un PID depuis un fichier sans cette preuve.
+**Un registre par worktree** : `data_root()` résout
+`Explorer-data/` sous l'arbre du daemon — un daemon lancé
+depuis le worktree `performance` s'annonce dans
+`<perf>/Explorer-data/daemons/`, invisible au `daemons` du
+main (et réciproquement). Avant tout kill, vérifier les
+**deux** registres.
 
 **EAP** (`explorer-agent`, websocket agent) : `session.open`
 rend `dirs.daemons` (le même registre) et `session.ping` est
@@ -716,6 +722,34 @@ défaut — `EXPLORER_FLIGHT_MS/LOG/MAX_KB`, `0` désarme) et
 Calibration mesurée (field274) : `taskkill /PID /F` → `wait`
 rapporte `1`, `alive` résiduel, dernier beat sain — c'est la
 signature de référence du kill externe.
+
+**Discriminant job-close vs kill sélectif** (§B-135, mesuré
+2026-11-16) : un kill sélectif sur le daemon seul laisse le
+`cmd` watchdog écrire `exit.log` (`EXIT:1`) — un kill par
+**fermeture de Job Object** emporte l'arbre entier dans le
+même instant (daemon + watchdog + `nohup` frères) →
+`exit.log` **absent** + frères morts ensemble. Singleton +
+`exit.log` = killer sélectif ; arbre + `exit.log` absent =
+job-close — vérifier alors `IsProcessInJob` avant le décès
+et la session lanceuse (le job appartient à l'environnement
+qui a créé le processus, il se propage aux enfants par
+défaut). État mesuré sur cette station :
+
+| chemin de spawn | `IsProcessInJob` | sort si la session meurt |
+|---|---|---|
+| `spawn_daemon.ps1` (WMI) | `False` — le canal canonique est **sans job** | survit (orphelin à récolter via registre) |
+| `nohup`/shell depuis une session outillée | `True` — hérite du job de la session | mort atomique du groupe (job-close) |
+| shell Devin/exec direct | `False` | survit |
+
+`vol_joblimit.ps1` est innocenté comme tueur : il ne pose
+que `JOB_OBJECT_LIMIT_JOB_MEMORY` (`LimitFlags 0x200`),
+jamais `KILL_ON_JOB_CLOSE` (`0x2000`) — la dissolution du
+job ne tue pas les membres sans ce flag. Le job du provider
+`wmiprvse` (suspect historique des « spawns WMI tués avant
+exécution ») est **exonéré par mesure** : le daemon spawné
+WMI rend `IsProcessInJob=False` sur cette station — si un
+spawn WMI meurt sans log, chercher un killer sélectif
+très précoce (AV, politique station), pas le provider.
 
 **WER LocalDumps** (capture faute native, externe au
 processus — SEH in-process écarté : `forbid(unsafe_code)` +
