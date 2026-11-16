@@ -8003,7 +8003,12 @@ MCP = adaptateur, jamais la base.
   → `<site>.err.log` conservé + dernière ligne dans
   le verdict. Vérifié end-to-end : site mort =
   `FAIL (geometry moteur)` + `1 échec(s)` au
-  récapitulatif, `err.log` présent.
+  récapitulatif, `err.log` présent. Corpus geo
+  5→10 sites — une famille par site (flottants
+  slashdot, flex/mq w3.org, formes validator,
+  design csszengarden, images debian) ;
+  craigslist rejeté (redirect géo), ddg-lite
+  trop maigre. Run complet 10/10 mesurés.
 - [x] **Étape 281. `xhr.responseText` décodé une fois —
   fin du spin O(lectures × octets)** (`explorer-jscore`,
   re-vol field274 : `gc=0` a tranché — vrai spin hôte,

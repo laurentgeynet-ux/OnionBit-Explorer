@@ -32,12 +32,24 @@ New-Item -ItemType Directory -Force -Path $outDir | Out-Null
 
 if ($ListFile -eq '') {
     # Corpus court — géométrie mesurable en CI (temps borné).
+    # Une famille de layout par site autant que possible —
+    # filet de régression : la stabilité prime (pas de login,
+    # pas de mur, pas de redirect géographique — craigslist
+    # écarté pour geo.craigslist.org).
     $sites = @(
-        'https://example.com/',
-        'https://info.cern.ch/',
-        'https://lobste.rs/',
-        'https://news.ycombinator.com/',
-        'https://text.npr.org/'
+        'https://example.com/',          # bloc minimal — baseline
+        'https://info.cern.ch/',         # pré-doctype / quirks
+        'https://lobste.rs/',            # CSS réel + JS mutateur
+        'https://news.ycombinator.com/', # tables imbriquées
+        'https://text.npr.org/',         # contenu texte simple
+        # Extensions étape 295 — familles absentes du filet
+        # initial : flottants, flex/responsive, formulaires,
+        # positionnement/design, contenu illustré standard.
+        'https://slashdot.org/',         # flottants + contenu réel
+        'https://www.w3.org/',           # flex/grid + media queries
+        'https://validator.w3.org/',     # formulaires
+        'https://www.csszengarden.com/', # positionnement/design
+        'https://www.debian.org/'        # images + nav standard
     )
 } else {
     $sites = Get-Content $ListFile |
