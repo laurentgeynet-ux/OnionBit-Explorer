@@ -8615,6 +8615,18 @@ impl Host for NodeHost {
             }
             return Ok(None);
         }
+        // JS-C564 — les clés `_`-préfixées (`__shady`, `__data`,
+        // `_signalProps` — internes ShadyDOM/Polymer, ~75 k
+        // lectures en top-40 `hns:` du vol n563) ne peuvent
+        // jamais être servies par le match host : aucune prop
+        // IDL ne commence par `_` (vérifié — le seul littéral
+        // `"_…"` du fichier est `target="_self"`). Sortie avant
+        // le check shadows + le match ; `Ok(None)` laisse le
+        // moteur résoudre expandos/accesseurs par la voie
+        // ordinaire, exactement comme après miss.
+        if key.starts_with('_') {
+            return Ok(None);
+        }
         // Accesseur propre `defineProperty` (JS-C82) : il shadowe
         // la voie host — `read_prop` l'invoquera (spec : own
         // prop > IDL). Sans ça le tracker React posé par

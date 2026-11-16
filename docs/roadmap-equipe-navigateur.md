@@ -13580,6 +13580,13 @@ chaque gain rapporté contre les **deux** archétypes.
   (`ic_hit`/`ic_miss`/`ic_disarm` au snapshot) pour
   borner la couverture du seul court-circuit existant.
   Dependency-groups = infra lourde, dernier recours.
+- [x] **JS-C564 — `NodeHost::get` : early-exit `_`-prefix**
+  — vol n563 (`keys:`+`hns:`) : `__shady`/`__data*`/
+  `_signal*`/`polymerController`/`loggingStatus` ~75 k calls
+  top-40, jamais servis par le match host (aucune prop IDL
+  `_`-préfixée). Sortie `Ok(None)` après le garde `!live()` :
+  skip shadows+match, expandos/accesseurs résolus par la voie
+  ordinaire comme après miss. ~60-100 ms/vol. `dom` 271.
 - [x] **JS-C563 — `classList`/`relList`/`part` : identité
   `DOMTokenList` stable (spec) + wrapper mémorisé** — chaque
   `el.classList` allouait un `Rc`+objet heap neufs :
