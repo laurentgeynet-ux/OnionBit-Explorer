@@ -35,7 +35,28 @@ git status --short                    # WIP ? → worktree
                                     # éphémère à HEAD sinon
 
 # 0.2 binaire frais (jamais un .exe qui traîne)
+# L'arbre principal porte souvent du WIP d'autres pistes :
+# un build dedans cuirait le mi-chantier, et un exe déjà
+# présent a une provenance intranchable (pré- ou post-WIP?).
+# Contrat inchangé : le binaire sort d'un worktree épinglé
+# au sha du vol — mais le worktree est PERSISTANT, pas
+# jetable : `build-dir` est hashé par chemin, un chemin
+# frais par vol = ~9 min de build froid à chaque fois.
+# Convention : UN worktree de vol par session, chemin
+# stable, JAMAIS édité à la main — checkout seul ; le sha
+# prouvé vient du `git rev-parse HEAD` du worktree +
+# exe.log, pas de la fraîcheur du dossier.
+git worktree add --detach C:\OnionBit-Explorer-vol HEAD   # 1 fois
+git -C C:\OnionBit-Explorer-vol checkout <sha-du-vol>     # par vol
+Push-Location C:\OnionBit-Explorer-vol
 cargo build --release -p explorer-daemon   # attendre « Finished »
+Pop-Location
+# (chemin déjà pris par un vol concurrent → suffixer
+#  -vol-b/-vol-c ; `git worktree list` montre les pris.
+#  Attention : chaque worktree a SON Explorer-data et son
+#  registre daemons — même règle « deux registres » qu'avec
+#  l'arbre performance : l'annonce du daemon vit dans
+#  l'Explorer-data DU WORKTREE de build, pas celui du main.)
 
 # 0.3 daemon dédié — port 9385+, profil déclaré, SPAWN CACHÉ
 # explorer-daemon.exe est sous-système console : lancé en
