@@ -4588,6 +4588,13 @@ impl Engine {
     /// après JS-C420 ; équivalent : `heap.bytes()` ne croît
     /// qu'entre sweeps, `str_acct` est exact au refcount.
     pub(crate) fn mem_over(&self) -> bool {
+        // `saturated`/`poisoned` : l'arène a refusé une
+        // croissance ou rendu une sentinelle tronquée — vrai
+        // aussi `mem_limit` désarmé, puisqu'un `try_reserve` en
+        // échec est un signal allocateur, pas de borne (JS-C575).
+        if self.heap.saturated() || self.heap.poisoned() {
+            return true;
+        }
         let lim = self.heap.mem_limit();
         lim > 0 && self.total_bytes() > lim
     }
@@ -5148,6 +5155,14 @@ impl Engine {
     /// New `Error`-family object value (`{name, message}` on `proto`).
     pub(crate) fn error_value(&mut self, proto: ObjId, name: &str, msg: &str) -> Value {
         let id = self.heap.alloc_obj(Object::ordinary(Value::Obj(proto)));
+        if id == crate::heap::Heap::POISONED {
+            // Arène saturée : l'objet d'erreur ne peut pas naître
+            // — `throw` d'une chaîne (alloc hors arène, bornée)
+            // garde la cause nommée au lieu d'un `<exception>`
+            // muet (JS-C575 ; spec : toute valeur est
+            // lançable).
+            return self.str_val(format!("{name}: {msg}"));
+        }
         let n = self.str_val(name);
         let m = self.str_val(msg);
         self.set_own(id, "name", n, false);
@@ -5662,6 +5677,25 @@ impl Engine {
             if let Some(msg) = &self.heap_dead {
                 return Err(self.range_error(msg.clone()));
             }
+            // JS-C575 — une sentinelle arène a été rendue : un
+            // objet tronqué peut avoir nourri le résultat — kill
+            // honnête nommé, indépendant du vivant mesuré
+            // (§B-114 : la corruption silencieuse est pire que
+            // la mort nommée). L'histogramme nomme la matière
+            // comme le cap dur le fait.
+            if self.heap.poisoned() {
+                let mut hist = self.heap.kind_histogram();
+                hist.truncate(4);
+                let mut top = String::new();
+                for (k, n, kb) in &hist {
+                    top.push_str(&format!(" {k}:{n}/{}MiB", kb / 1_048_576));
+                }
+                let msg = format!(
+                    "heap arena saturated — sentinelle rendue, résultat compromis |{top} |"
+                );
+                self.heap_dead = Some(msg.clone());
+                return Err(self.range_error(msg));
+            }
             let lim = self.heap.mem_limit();
             if self.gc_due && self.total_bytes() <= self.gc_cap {
                 // Déjà mesuré sous la borne, cap non atteint —
@@ -6017,8 +6051,12 @@ impl Engine {
         // verrou tuait l'hydratation sur un pic transitoire.
         // Si le vivant reste au-dessus après sweep (fuite
         // réelle), le verrou tient et chaque job re-mesure.
-        if self.heap_dead.is_some() {
+        if self.heap_dead.is_some() || self.heap.poisoned() {
             self.collect();
+            // L'eval fautive est close — le verrou `poisoned`
+            // tombe avec elle : le prochain job repart sain si
+            // le sweep a rendu la mesure serviable (JS-C575).
+            self.heap.clear_poisoned();
             if !self.mem_over() {
                 self.heap_dead = None;
             }

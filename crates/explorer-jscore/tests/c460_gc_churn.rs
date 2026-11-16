@@ -122,9 +122,16 @@ fn c460_compound_expr_call_stays_bounded() {
          x",
     );
     let msg = format!("{r:?}");
+    // JS-C575 — deux kills honnêtes possibles : le cap dur
+    // d'estimé (« deferred GC unreachable ») ou la borne slab
+    // (« sentinelle rendue » — l'arène refuse la croissance
+    // avant que l'estimé n'atteigne le cap dur, à borne serrée
+    // le slab `2×mem_limit` est la première barrière). Les deux
+    // nomment leur cause ; l'invariant verrouillé = pas de
+    // corruption silencieuse.
     assert!(
-        r.is_err() && msg.contains("deferred GC unreachable"),
-        "churn épinglé sous expression composée → cap dur nommé, \
+        r.is_err() && (msg.contains("deferred GC unreachable") || msg.contains("sentinelle")),
+        "churn épinglé sous expression composée → cap nommé, \
          jamais de corruption : {msg}"
     );
     assert!(

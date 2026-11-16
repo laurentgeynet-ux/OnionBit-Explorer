@@ -100,7 +100,8 @@ pub struct Heap {
     /// mesuré : challenge google + budget relevé = OOM station).
     /// Le dépassement est lu au `tick` suivant par
     /// `Engine::mem_over` (arène **+** `str_acct`, JS-C420) —
-    /// l'alloc elle-même ne peut pas échouer.
+    /// l'alloc ne retourne pas d'erreur : la croissance refusée
+    /// rend [`Self::POISONED`] + verrou `saturated` (JS-C575).
     mem_limit: usize,
     /// Passes GC effectuées — métrique `heap_stats`.
     gc_runs: u64,
@@ -111,9 +112,37 @@ pub struct Heap {
     /// Compteur monotone d'allocs — source des `Cell::seq`
     /// (JS-C421).
     alloc_seq: u64,
+    /// Arène saturée : une croissance a été refusée (borne de
+    /// palier atteinte ou `try_reserve` en échec). Chaque `alloc`
+    /// suivant retourne [`Self::POISONED`] tant qu'aucun sweep
+    /// n'a rempli `free` — verrou levé au post-sweep.
+    saturated: bool,
+    /// Une sentinelle [`Self::POISONED`] a été rendue : un objet
+    /// potentiellement tronqué circule dans le graphe — le
+    /// résultat de l'eval courante n'est plus digne de foi. Ne
+    /// se relève **pas** au sweep (la corruption supposée ne se
+    /// défait pas en libérant des slots) — uniquement à la
+    /// frontière de job, avec `heap_dead` (JS-C575).
+    poisoned: bool,
 }
 
 impl Heap {
+    /// Marche native du doublement `Vec` au-delà de laquelle on
+    /// passe en croissance par paliers : sous cette taille le
+    /// `push` amorti classique est sain ; au-dessus, un
+    /// doublement demanderait une alloc géante en un seul appel
+    /// (§B-114 lego : capacité 2²¹ slots × 384 B → le `push`
+    /// suivant demandait 1 610 612 736 B → `abort` allocateur).
+    const GROW_SWITCH_B: usize = 128 << 20;
+    /// Palier de croissance au régime borné — ~64 Mio de slots
+    /// par palier : assez grand pour rester amorti, assez petit
+    /// pour qu'un refus reste un événement borné.
+    const GROW_STEP_B: usize = 64 << 20;
+    /// `ObjId` jamais valide : `cells.get(MAX)` → `None` à tous
+    /// les déréfs — le script voit des lookups manqués (déjà
+    /// tolérés pour les tombstones), jamais un abort.
+    pub(crate) const POISONED: ObjId = ObjId::MAX;
+
     /// Empty heap.
     pub fn new() -> Self {
         Heap {
@@ -128,34 +157,131 @@ impl Heap {
             peak_live: 0,
             peak_bytes: 0,
             alloc_seq: 0,
+            saturated: false,
+            poisoned: false,
+        }
+    }
+
+    /// `true` si l'arène a refusé une croissance — lu par
+    /// `Engine::mem_over` pour verrouiller l'eval même quand
+    /// `mem_limit` est désarmé (`0`).
+    pub(crate) fn saturated(&self) -> bool {
+        self.saturated
+    }
+
+    /// `true` si une sentinelle [`Self::POISONED`] a été rendue
+    /// — lu par `Engine` pour tuer l'eval au `tick` suivant
+    /// (résultat potentiellement corrompu).
+    pub(crate) fn poisoned(&self) -> bool {
+        self.poisoned
+    }
+
+    /// Relève le verrou `poisoned` — appelé uniquement à la
+    /// frontière de job, quand l'eval fautive est terminée et le
+    /// sweep a mesuré que l'arène revit (JS-C575).
+    pub(crate) fn clear_poisoned(&mut self) {
+        self.poisoned = false;
+    }
+
+    /// Arme le verrou de saturation (tests) — le vrai
+    /// déclencheur est [`Heap::grow`] refusé, impossible à
+    /// provoquer sans remplir ~[`Self::GROW_SWITCH_B`] d'arène.
+    #[cfg(test)]
+    pub(crate) fn set_saturated_for_test(&mut self) {
+        self.saturated = true;
+    }
+
+    /// Marge fixe de churn du slab : l'arène porte les cellules
+    /// vivantes **plus** les morts en vol entre deux sweeps.
+    /// Sous `young_floor`, une rafale intra-eval ne peut pas
+    /// être libérée avant son safepoint — la part de morts est
+    /// additive, pas proportionnelle (c496 : ~27 Mio de slots
+    /// pour `mem_limit` 4 Mio).
+    const SLAB_CHURN_B: usize = 64 << 20;
+
+    /// Budget natif de l'arène en octets : `2 × mem_limit +
+    /// SLAB_CHURN_B` — l'estimé `bytes` compte ~`size_of::<Cell>()`
+    /// +`Object`+props par cellule (~2× la taille d'un slot), le
+    /// slab porte en plus les tombstones entre deux sweeps, plus
+    /// la marge fixe de churn. `mem_limit == 0` = illimité
+    /// (la garde `try_reserve` seule décide alors).
+    fn slab_budget(&self) -> usize {
+        if self.mem_limit == 0 {
+            return 0;
+        }
+        self.mem_limit
+            .saturating_mul(2)
+            .saturating_add(Self::SLAB_CHURN_B)
+    }
+
+    /// Croissance de l'arène : amortie sous [`Self::GROW_SWITCH_B`]
+    /// (`try_reserve` rend l'échec non fatal), par paliers
+    /// [`Self::GROW_STEP_B`] au-delà — `try_reserve_exact` car
+    /// `try_reserve` conserve le doublement amorti interne et
+    /// redemanderait `len×2` (~1,5 Gio) malgré le palier
+    /// demandé (§B-114 lego). `false` = refusé : borne logique
+    /// atteinte ou allocateur en échec.
+    fn grow(&mut self) -> bool {
+        let cap_b = self.cells.capacity() * std::mem::size_of::<Slot>();
+        let budget = self.slab_budget();
+        if budget > 0 && cap_b >= budget {
+            return false;
+        }
+        if cap_b >= Self::GROW_SWITCH_B {
+            let step = (Self::GROW_STEP_B / std::mem::size_of::<Slot>()).max(1);
+            // `marks` d'abord : un échec de `cells` après
+            // succès de `marks` ne laisse qu'une petite
+            // réserve dormante, pas l'inverse (revue JS-C575).
+            self.marks.try_reserve_exact(step).is_ok() && self.cells.try_reserve_exact(step).is_ok()
+        } else {
+            self.marks.try_reserve(1).is_ok() && self.cells.try_reserve(1).is_ok()
         }
     }
 
     fn alloc(&mut self, data: CellData) -> ObjId {
-        self.bytes += cell_bytes(&data);
-        let live = self.cells.len() - self.free.len() + 1;
+        let cost = cell_bytes(&data);
+        let seq = self.alloc_seq;
+        let idx = if let Some(idx) = self.free.pop() {
+            // Réutilisation de tombstone — serviable même
+            // arène saturée (recyclage à capacité constante).
+            self.cells[idx as usize] = Some(Cell { data, seq });
+            idx
+        } else {
+            // Croissance — jamais `Vec::push` direct : un push
+            // en capacité pleine aborte le processus entier
+            // sur refus de l'allocateur (§B-114). Arène déjà
+            // saturée ou croissance refusée → sentinelle non
+            // déréférençable, comptage inchangé : un refus ne
+            // gonfle pas l'estimé (revue JS-C575).
+            if self.saturated || (self.cells.len() == self.cells.capacity() && !self.grow()) {
+                self.saturated = true;
+                self.poisoned = true;
+                return Self::POISONED;
+            }
+            self.cells.push(Some(Cell { data, seq }));
+            self.marks.push(false);
+            (self.cells.len() - 1) as ObjId
+        };
+        self.alloc_seq += 1;
+        self.bytes += cost;
+        let live = self.cells.len() - self.free.len();
         if live > self.peak_live {
             self.peak_live = live;
         }
         if self.bytes > self.peak_bytes {
             self.peak_bytes = self.bytes;
         }
-        let seq = self.alloc_seq;
-        self.alloc_seq += 1;
-        if let Some(idx) = self.free.pop() {
-            self.cells[idx as usize] = Some(Cell { data, seq });
-            return idx;
-        }
-        self.cells.push(Some(Cell { data, seq }));
-        self.marks.push(false);
-        (self.cells.len() - 1) as ObjId
+        idx
     }
 
     /// Allocate an object.
     pub fn alloc_obj(&mut self, o: Object) -> ObjId {
         crate::j17_tick(&crate::J17_OBJ_CELL);
-        self.allocated += 1;
-        self.alloc(CellData::Obj(o))
+        let id = self.alloc(CellData::Obj(o));
+        if id != Self::POISONED {
+            self.allocated += 1;
+        }
+        id
     }
 
     /// Borrow an object.
@@ -440,7 +566,11 @@ impl Heap {
         while let Some(id) = worklist.pop() {
             self.trace_cell(id, &mut discovered, &mut envs);
             for d in discovered.drain(..) {
-                if !self.marks[d as usize] {
+                // Borne comme aux racines : `POISONED`
+                // (ObjId::MAX, JS-C575) et tout id hors arène
+                // doivent sauter — `marks[d]` sans garde =
+                // panic natif.
+                if (d as usize) < self.marks.len() && !self.marks[d as usize] {
                     self.marks[d as usize] = true;
                     worklist.push(d);
                 }
@@ -508,6 +638,12 @@ impl Heap {
         // Recal exact post-sweep : les props ajoutées depuis l'alloc
         // entrent dans le compte, l'estimation repart de zéro dérive.
         self.bytes = live_bytes;
+        // Verrou de saturation : des tombstones réutilisables
+        // existent → l'arène redevient serviable à capacité
+        // constante (JS-C575).
+        if !self.free.is_empty() {
+            self.saturated = false;
+        }
         self.gc_runs += 1;
         let live = self.live_count();
         if live > self.peak_live {
@@ -562,7 +698,10 @@ impl Heap {
         while let Some(id) = worklist.pop() {
             self.trace_cell(id, &mut discovered, &mut envs);
             for d in discovered.drain(..) {
-                if !self.marks[d as usize] {
+                // Même garde qu'au drain du collect : `POISONED`
+                // et tout id hors arène doivent sauter
+                // (JS-C575).
+                if (d as usize) < self.marks.len() && !self.marks[d as usize] {
                     self.marks[d as usize] = true;
                     worklist.push(d);
                 }
@@ -649,9 +788,14 @@ impl Heap {
     /// Borne mémoire par contexte (ADR-0019) — `0` = illimité.
     /// Le dépassement n'empêche pas l'alloc (signature non
     /// faillible) : il est lu au `tick` par `Engine::mem_over`
-    /// pour un kill doux borné.
+    /// pour un kill doux borné. Borne changée → verrous de
+    /// saturation retombés : une limite relevée peut rendre la
+    /// croissance serviable (symétrique au `heap_dead` de
+    /// `Engine::set_mem_limit`, JS-C575).
     pub fn set_mem_limit(&mut self, bytes: usize) {
         self.mem_limit = bytes;
+        self.saturated = false;
+        self.poisoned = false;
     }
 
     /// Borne mémoire configurée (`0` = illimité) — relue par la
@@ -2818,6 +2962,52 @@ mod tests {
         assert_eq!(h.mem_limit(), 0);
         h.set_mem_limit(64);
         assert_eq!(h.mem_limit(), 64);
+    }
+
+    /// JS-C575 — §B-114 lego : `alloc` ne doit jamais laisser un
+    /// `Vec::push` aborter le processus sur refus de
+    /// l'allocateur (capacité 2²¹×384 B → demande unique de
+    /// 1 610 612 736 B mesurée terrain → `0xC0000409`). Arène
+    /// saturée → [`Heap::POISONED`] (jamais déréférençable : tous
+    /// les lookups tombent en `None` comme une tombstone) ; le
+    /// verrou se relève au premier sweep qui remplit `free`.
+    #[test]
+    fn saturated_alloc_returns_poisoned_and_recovers() {
+        let mut h = Heap::new();
+        // Une cellule non racinée = future tombstone du sweep.
+        let dead = h.alloc_obj(Object::ordinary(Value::Null));
+        h.set_saturated_for_test();
+
+        // Arène saturée, `free` vide → sentinelle : aucune
+        // croissance, aucune comptabilité fantôme (revue
+        // JS-C575 — le refus ne gonfle pas l'estimé).
+        let (len0, cap0, bytes0, alloc0) =
+            (h.cells.len(), h.cells.capacity(), h.bytes, h.allocated);
+        let id = h.alloc_obj(Object::ordinary(Value::Null));
+        assert_eq!(id, Heap::POISONED);
+        assert!(h.obj(id).is_none());
+        assert!(!h.is_alive(id));
+        assert_eq!(h.cells.len(), len0);
+        assert_eq!(h.cells.capacity(), cap0);
+        assert_eq!(h.bytes, bytes0);
+        assert_eq!(h.allocated, alloc0);
+        // La sentinelle rendue verrouille l'eval : un objet
+        // potentiellement tronqué circule — `poisoned` survit
+        // au sweep (le slot libéré ne décontamine pas).
+        assert!(h.poisoned());
+
+        // Sweep : `dead` non racinée → tombstone → `saturated`
+        // levé, `poisoned` tenus jusqu'à la frontière de job.
+        let swept = h.collect_bounded(|_| {}, u64::MAX);
+        assert!(swept >= 1, "la cellule non racinée doit être balayée");
+        assert!(!h.saturated());
+        assert!(h.poisoned());
+        h.clear_poisoned();
+
+        let idx = h.alloc_obj(Object::ordinary(Value::Null));
+        assert_ne!(idx, Heap::POISONED);
+        assert!(h.is_alive(idx));
+        assert_eq!(idx, dead, "le slot de la tombstone est réutilisé");
     }
 
     /// §B-111 — le drop d'une chaîne d'envs ne récurse jamais

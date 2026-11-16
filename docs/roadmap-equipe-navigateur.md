@@ -14499,3 +14499,46 @@ chaque gain rapporté contre les **deux** archétypes.
   index ou élément descendant (`TypeError`/hiérarchie
   sinon). `NodeHost`/`DocumentHost` `pub(crate)`. Verrous
   `c574_b136_b137` ×12 ; `dom` 277/277 verts.
+- [x] **JS-C575 — §B-114 : l'arène `cells` ne peut plus
+  aborter le processus sur sa croissance** (signature
+  terrain vol 865 `death-lego` : `alloc 1 610 612 736 B`
+  = `2²² slots × size_of::<Slot>()` — le doublement
+  `Vec::push` demandé d'un coup à capacité 2²¹=805 Mio
+  pleine, 15 s après un `heap_dead` attrapé par
+  l'error boundary du site). `Heap::alloc` :
+  `try_reserve`/`try_reserve_exact` remplacent le
+  `push` nu (refus contrôlé, jamais `abort`) ;
+  croissance amortie sous `GROW_SWITCH_B` (128 Mio),
+  **paliers `GROW_STEP_B` (64 Mio)** au-delà via
+  `try_reserve_exact` (`try_reserve` garderait le
+  doublement interne → la même demande d'1,5 Gio) ;
+  borne logique `slab_budget = 2×mem_limit +
+  SLAB_CHURN_B` (64 Mio — marge fixe : le slab porte
+  vivantes + morts en vol entre sweeps ; sous
+  `young_floor` une rafale intra-eval n'est pas
+  libérable avant son safepoint, la part de morts
+  est additive pas proportionnelle — c496 a besoin
+  de ~27 Mio de slots pour `mem_limit` 4 Mio).
+  Comptage (`bytes`/`peak`/`allocated`) uniquement
+  sur succès — un refus ne gonfle pas l'estimé ;
+  `marks` réservé avant `cells` dans `grow()` (un
+  échec ne laisse qu'une petite réserve dormante).
+  Refus →
+  sentinelle `POISONED = ObjId::MAX` non
+  déréférençable + verrous `saturated`/`poisoned` :
+  kill nommé au `tick` (`heap arena saturated` +
+  histogramme kinds), `poisoned` tenus jusqu'à la
+  frontière de job (corruption supposée — un slot
+  libéré ne décontamine pas), `saturated` relevé
+  post-sweep dès `free` rempli (recyclage à capacité
+  constante). `error_value` repli chaîne sur tas
+  saturé (la cause reste nommée, pas `<exception>`).
+  `mem_over` lit les deux verrous — vrai même
+  `mem_limit=0`. Les drains `discovered` du GC
+  bornent `marks[d]` (la sentinelle peut entrer
+  dans le graphe avant le kill — index `u32::MAX`
+  sans garde = panic c496). Verrou
+  `saturated_alloc_returns_poisoned_and_recovers` ;
+  c460 mis à jour (deux kills honnêtes admis). Lib
+  54/54, gc 13/13, c460 7/7, dom 277/277 release,
+  clippy propre.
