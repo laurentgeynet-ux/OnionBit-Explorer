@@ -4069,3 +4069,49 @@ run montre le kill **ciblé par PID** (le daemon pré-279 a
 survécu → pas de `taskkill /IM`) — un cleanup vérifiant
 `session.open.dirs.daemons` avant de tuer évite les
 meurtres croisés.
+
+## Entrée terrain — lobste.rs story-meta (PIPE, fixture statique)
+
+**Origine** : première exploitation du `geo_diff` v2
+(étape 293 — classe `moved`). Sur le corpus smoke,
+lobste.rs mesure 98,2 % divergents dont 455/642
+`moved` — un seul défaut structurel produit tout le
+lot.
+
+**Signature** (`Explorer-data/vols/geo-smoke/lobste.rs.
+{geom,geodiff}.json`, ref `refs/lobste.rs.ref.json`) :
+
+- header/nav : **correct** (y=20 h=23 identique des
+  deux côtés) — la cascade globale fonctionne ;
+- `ul.tags` : **h=0 w=0** côté moteur (conteneur
+  effondré) vs h=24 côté ref — pendant que ses
+  `a.tag` enfants peignent ailleurs, empilés
+  verticalement ;
+- méta-story (`a.domain`, `a.u-author`, liens
+  commentaires) : rendues **hors de leur `li`**
+  (`li.story` h=38 se ferme à y≈105, les enfants
+  continuent jusqu'à y≈164) au lieu d'une seule
+  ligne ~y=70-90 ;
+- pas entre `li.story` : ~110-135 px vs ~59 px →
+  `doc_h 3689 vs 1757` — chaque story double de
+  hauteur, `dy` cumulatif ~+1200 px en bas de page.
+
+**Hypothèse de classe** : classement inline non
+honoré dans les méta-story — `display:inline`/
+`inline-block`/`flex` sur `.tags`/`.details`
+descendants (conteneur 0×0 + enfants hors-flux
+empilés). À corréler à la file `--families` —
+`display` 26/29 a 3 valeurs miss, les spellings
+`inline-*` sont dans le résidu.
+
+**Pourquoi c'est un bon cas** : site **statique**,
+fixture reproductible en 5 min (`geo_smoke` seul
+régénère geom+ref+diff), pas de JS, pas de gate —
+le type exact de bug que la géométrie doit remonter
+à PIPE. Un test minimal : `li > div.details >
+{ul.tags, a.domain, a.u-author}` avec
+`display:inline` attendu.
+
+**Coordination** : aucune action NAV en attente —
+l'entrée documente le constat, la file de
+décision est côté PIPE.
