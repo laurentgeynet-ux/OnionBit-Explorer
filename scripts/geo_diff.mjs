@@ -10,16 +10,25 @@
 //            {width,height,boxes:[{node,tag,id,cls,x,y,w,h}]}
 //   réf.   : ref_capture {boxes:[{tag,id,cls,x,y,w,h}]}
 //
-// Jointure : clé `tag|id|cls`, appariement par occurrence
-// ordinale (les deux listes sont en ordre document — le
-// pré-ordre de pose suit l'ordre DOM). Divergence si un axe
-// dépasse --tol px (défaut 2). Score = divergents / appariés
-// + manques signalés séparément (un nœud absent d'un côté
-// est un signal distinct : display:none, drop, shadow…).
+// Jointure : clé `tag|id|cls`, appariement SPATIAL en deux
+// passes par clé (étape 287 — l'occurrence ordinale faisait
+// cascader une absence en faux divergents : +567 orphelins
+// lobste.rs dont 565 fantômes `#text`) :
+//   1. pour chaque boîte moteur, la réf non appariée la plus
+//      proche sous --tol sur les 4 axes → ok ;
+//   2. les restants s'apparient au plus proche → divergent
+//      (delta enregistré) ; sans pendant → orphelin.
+// `tag === '#text'` ignoré par défaut : le dump moteur couvre
+// éléments + texte, la ref n'énumère que `body *` (éléments)
+// — sans filtre chaque texte est un orphelin garanti.
+// `--text` les conserve. `matched < --min-matched` → verdict
+// `hors-mesure` (SPA vidée, mur), hors % agrégé ;
+// `ref.boxes ≥ 4000` → `ref_truncated` (cap ref_capture).
 //
 // Usage :
 //   node scripts/geo_diff.mjs site.geom.json site.ref.json
 //     [--tol 2] [--out site.geodiff.json] [--top 12]
+//     [--text] [--min-matched 20]
 
 import { readFileSync, writeFileSync } from 'node:fs';
 
@@ -38,10 +47,19 @@ if (!engFile || !refFile) {
 const tol = Number(opt('tol', 2));
 const topN = Number(opt('top', 12));
 const out = opt('out', '');
+const minMatched = Number(opt('min-matched', 20));
+const keepText = args.includes('--text');
 
 const eng = JSON.parse(readFileSync(engFile, 'utf8'));
 const ref = JSON.parse(readFileSync(refFile, 'utf8'));
 const key = (b) => `${b.tag}|${b.id || ''}|${b.cls || ''}`;
+
+// `#text` : le dump couvre éléments + nœuds texte, la ref
+// n'énumère que des éléments — orphelins garantis sinon.
+const engBoxes = (eng.boxes || [])
+  .filter(b => keepText || b.tag !== '#text');
+const textDropped = (eng.boxes || []).length - engBoxes.length;
+const refTruncated = (ref.boxes || []).length >= 4000;
 
 // Groupes par clé → files d'occurrences (ordre document).
 const byKey = (boxes) => {
@@ -53,36 +71,57 @@ const byKey = (boxes) => {
   }
   return m;
 };
-const em = byKey(eng.boxes || []);
+const em = byKey(engBoxes);
 const rm = byKey(ref.boxes || []);
 
+// Distance Chebyshev sur les 4 axes — cohérente avec tol.
+const dist = (e, r) => Math.max(
+  Math.abs(e.x - r.x), Math.abs(e.y - r.y),
+  Math.abs(e.w - r.w), Math.abs(e.h - r.h));
+
 const divergent = [];
-let matched = 0, engOnly = 0, refOnly = 0;
+let ok = 0, engOnly = 0, refOnly = 0;
 const allKeys = new Set([...em.keys(), ...rm.keys()]);
 for (const k of allKeys) {
   const eb = em.get(k) || [], rb = rm.get(k) || [];
-  const n = Math.max(eb.length, rb.length);
-  engOnly += Math.max(0, eb.length - rb.length);
-  refOnly += Math.max(0, rb.length - eb.length);
-  for (let i = 0; i < n; i++) {
-    const e = eb[i], r = rb[i];
-    if (!e || !r) continue;
-    matched++;
-    const d = {
-      dx: e.x - r.x, dy: e.y - r.y, dw: e.w - r.w, dh: e.h - r.h,
-    };
-    const bad = Math.abs(d.dx) > tol || Math.abs(d.dy) > tol ||
-      Math.abs(d.dw) > tol || Math.abs(d.dh) > tol;
-    if (bad) {
-      divergent.push({
-        key: k, i,
-        eng: { x: e.x, y: e.y, w: e.w, h: e.h },
-        ref: { x: r.x, y: r.y, w: r.w, h: r.h },
-        d: { dx: +d.dx.toFixed(1), dy: +d.dy.toFixed(1), dw: +d.dw.toFixed(1), dh: +d.dh.toFixed(1) },
-      });
+  const used = new Set();
+  // Passe 1 — sous tolérance : la réf libre la plus proche.
+  const rest = [];
+  for (const e of eb) {
+    let best = -1, bestD = Infinity;
+    for (let j = 0; j < rb.length; j++) {
+      if (used.has(j)) continue;
+      const d = dist(e, rb[j]);
+      if (d <= tol && d < bestD) { bestD = d; best = j; }
     }
+    if (best >= 0) { used.add(best); ok++; } else rest.push(e);
   }
+  // Passe 2 — appariement au plus proche : une absence ne
+  // décale plus les occurrences suivantes (fin de la
+  // cascade ordinale) ; sans pendant → orphelin.
+  for (const e of rest) {
+    let best = -1, bestD = Infinity;
+    for (let j = 0; j < rb.length; j++) {
+      if (used.has(j)) continue;
+      const d = dist(e, rb[j]);
+      if (d < bestD) { bestD = d; best = j; }
+    }
+    if (best < 0) { engOnly++; continue; }
+    used.add(best);
+    const r = rb[best];
+    divergent.push({
+      key: k,
+      eng: { x: e.x, y: e.y, w: e.w, h: e.h },
+      ref: { x: r.x, y: r.y, w: r.w, h: r.h },
+      d: {
+        dx: +(e.x - r.x).toFixed(1), dy: +(e.y - r.y).toFixed(1),
+        dw: +(e.w - r.w).toFixed(1), dh: +(e.h - r.h).toFixed(1),
+      },
+    });
+  }
+  refOnly += rb.length - used.size;
 }
+const matched = ok + divergent.length;
 
 // Pareto des tags divergents — trie le lot de techno à fixer.
 const tagAgg = {};
@@ -91,10 +130,23 @@ for (const dv of divergent) {
   tagAgg[t] = (tagAgg[t] || 0) + 1;
 }
 const pareto = Object.entries(tagAgg).sort((a, b) => b[1] - a[1]).slice(0, topN);
-const score = matched ? +(divergent.length * 100 / matched).toFixed(1) : null;
+// Mesurabilité relative : une petite page entièrement
+// appariée reste mesurée (example.com : 8 paires / 12 boîtes
+// ref = 66 % couvert) ; seul un faible taux de couverture
+// absolue + paires rares sort le verdict `hors-mesure`
+// (SPA vidée, mur — la ref est la vérité terrain).
+const refN = (ref.boxes || []).length;
+const threshold = refN === 0
+  ? 1 : Math.min(minMatched, Math.ceil(0.5 * refN));
+const measurable = matched >= threshold;
+const score = measurable
+  ? +(divergent.length * 100 / matched).toFixed(1) : null;
 const result = {
-  score_pct: score, matched, divergent_n: divergent.length,
+  score_pct: score,
+  verdict: measurable ? 'mesuré' : 'hors-mesure',
+  matched, ok_n: ok, divergent_n: divergent.length,
   eng_only: engOnly, ref_only: refOnly,
+  text_dropped: textDropped, ref_truncated: refTruncated,
   eng_doc: { w: eng.width, h: eng.height },
   ref_doc: { w: ref.doc_w, h: ref.doc_h },
   pareto: pareto.map(([tag, n]) => ({ tag, n })),
@@ -102,8 +154,16 @@ const result = {
 };
 
 if (out) writeFileSync(out, JSON.stringify(result, null, 1));
-console.log(
-  `geo : ${score ?? '—'}% divergents (${divergent.length}/${matched} appariés, ` +
-  `+${engOnly} moteur-seuls, +${refOnly} réf-seuls)`);
+if (!measurable) {
+  console.log(`geo : hors-mesure — ${matched} appariés < ${threshold} ` +
+    `(+${engOnly} moteur-seuls, +${refOnly} réf-seuls)`);
+} else {
+  console.log(
+    `geo : ${score}% divergents (${divergent.length}/${matched} appariés, ` +
+    `${ok} ok, +${engOnly} moteur-seuls, +${refOnly} réf-seuls)` +
+    `${refTruncated ? ' — ref tronquée (4000)' : ''}` +
+    `${textDropped ? ` — ${textDropped} #text ignorés` : ''}`);
+}
 for (const [tag, n] of pareto.slice(0, 6)) console.log(`      ${tag} ×${n}`);
-process.exitCode = divergent.length ? 2 : 0;
+// 2 = divergents · 4 = paire non mesurable · 0 = convergent.
+process.exitCode = divergent.length ? 2 : (measurable ? 0 : 4);
