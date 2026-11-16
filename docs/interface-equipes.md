@@ -72,6 +72,7 @@ Règles :
 | 2026-11-13 | `explorer-css` cascade scopée + `explorer-render` display list/raster | **Audit perf — deux chantiers PIPE mesurés, suite Étape 231** (vol `sync_profile` dev.to réel, debug, cycle `incr.*` ~46 s : repaint 36 s, style 9,4 s, relayout 0,85 s — interpréteur ~1 %). (a) **Cascade scopée `:has`-aware** : `eng_has_relational` (scan `contains(":has(")` au build) replie toute la voie journal en `compute_tree` complet — dev.to sert 2 règles `:has` dans `minimal-*.css` dont les args sont des sélecteurs d'attributs purs (`[data-display-unit]`, `[data-placement-hidden]`). Demande : un index structuré par feuille (sujet + dépendances des args `:has` — noms d'attributs/classes/tags + marqueur « positionnel interne ») exposé à l'appelant, pour que NAV replie **seulement** quand une op du journal touche une dépendance sur un sujet potentiellement vivant (garde par dépendances) — ou, plus juste, une extension `compute_scoped` acceptant un ensemble « frontière » (ancêtres + frères précédents des touchés — le sujet de `E:has(arg)` vit toujours au-dessus ou à gauche du match) évaluée en sus du sous-arbre. Résorbe au passage les faux positifs du substring-check (attributs contenant `:has(`). Verrous existants : `styles_scoped_falls_back_on_has`. (b) **Émission + raster bornés à la bande viewport** : le fenêtrage (R-62) borne les *pixels*, pas les *items* — `resolved_bounds` est O(items × profondeur transform) et `replay_items` itère toute la liste à chaque apply (`PushClip*` allouent leur `Mask` avant le test de cull), et l'émission `build_display_list_incremental` traverse l'arbre entier (la copie R-37 évite la ré-émission des sous-arbres, pas la traversée ni `record_span` — `reuse_delta` re-sonde même les descendants pour prouver le Δ). Pistes nommées : cull **à la descente** dans `paint_box` (sauter les sous-arbres `rect ∩ bande = ∅` hors porteurs d'échappement — `fixed`, positionnés reportés, inlines `defer`, breakout de clip — un flag « contient un échappant » à spécifier), `resolved_bounds` incrémental/cache (même durée de vie que `spans`), `Mask` de clip retardé au test fenêtre, `SpanMap`/`emit_per_path` sans `Box<[u16]>` par boîte. Ordonnancement tranché par le re-vol Étape 232 (dev.to réel, debug — 3 cycles `incr` ~44 s mesurés vs ~46 s wall, couverture ~96 %) : **`incr.raster` 33,5 s (~76 %) ≫ `incr.emit` 1,1 s** → le poste est `resolved_bounds`+`replay_items`, pas l'émission ; **`incr.cascade` 8,5 s (~19 %) ≫ `incr.stylpost` 64 ms** → le repli `:has` est ~99 % du poste style, les post-passes O(N) sont négligeables (Étape E caduque). JS confirmé non-goulot jambes mesurées : `net.commit_scripts` 1,35 s, `net.dl_*` ≤ 115 ms. Aucun commit NAV dans ces crates sans retour PIPE. | NAV (audit perf, étapes 231/232) | demande NAV — mesuré au re-vol 2026-11-13 : raster ≫ emit, cascade ≫ stylpost. **(b) partiellement livré NAV-side → Étape 233** (cull clips hors-pixmap, voir Journal) ; **(a) soldé NAV-side → Étape 234** (garde par dépendances sur AST public + multi-scope — zéro modif PIPE ; mécanique prouvée `scope 68 → cascade 0,19 s`, dev.to borné par un parent ~5k nœuds — reliquat PIPE : compute frontière ancêtres+frères, `Mask` à `clip ∩ pixmap`, émission cullée descente, `resolved_bounds` incrémental) |
 | 2026-11-16 | `explorer-layout` — whitespace adjacent à un bloc = line box fantôme | **Constat post-Étape 294 (geo_diff lobste.rs, `moved` résidu ~30 px/story, `doc_h` 2534 vs ref 1757)** : les nœuds texte whitespace seuls adjacents à une frontière de bloc émettent des line boxes ~16-17 px là où Chrome les collapse. Repro minimal servi (`ol>li.story>div.details` + `li .link{display:inline-block;margin:0}`) : `div.details` y=38, `h2.link` y=55 → **+17 px avant le h2** (margin:0 prouvé actif — h2 w=527 shrink-to-fit, pas pleine largeur) ; idem whitespace avant `div.byline` → +~16 px. Chrome : whitespace en tête de contexte inline et whitespace seul entre contenu inline et enfant bloc = collapsé (CSS 2.1 §9.2.2.1 + §16.6.1 — pas de boîte). Impact corpus : lobste.rs = +30 px/story → `dy` cumulatif ~500 px en pied, probablement dominant dans les `moved` restants des autres sites du smoke. **Demande** : whitespace-only runs adjacentes à une frontière de bloc (début/fin de contexte inline, ou précédant un enfant `display:block` dans un conteneur mixte) doivent s'effondrer — vérifier `boxtree` anonymous-inline/whitespace-drop avant la mise en ligne. | NAV (étape 295, constat geo_diff) | demande PIPE |
 | 2026-11-16 | `explorer-css` grammaires shorthand + `explorer-layout` props logiques | **File PIPE issue du triage jauge (étape 297, audit `littéraux-invalides` + sondes directes)** — tout est reproduit par `check decl`/`check affectsv` sur binaire courant : **(a) `expand_background`** refuse des composants shorthand valides : `currentColor`, `round`/`space` (repeat), `text` (bg-clip), `border-area`, positions logiques `x-start`/`x-end`/`y-start`/`y-end` (9 paires `littéraux-invalides`) ; **(b) `expand_mask`** idem pour `x-*`/`y-*` (4 paires) ; **(c) sizing `fit-content(<len>)`** — forme fonction refusée sur `width`/`height`/`min-*`/`max-*` (6 paires, le mot-clé nu marche) ; **`stretch`** accepté par `value_is_valid_for` mais `miss` en affectsv = parsé-inerte ou droppé ; **(d) `overflow-block`/`overflow-inline`** routés mais inertes — `overflow-y:hidden` ok vs `overflow-block:hidden` miss sur même fixture débordante (6+6 paires) ; **(e) `anchor()` en insets** — `top:anchor(--a)` miss avec fixture ancre posée alors que `anchor-size(--a)` en `margin`/`margin-*` **résout** (ok mesuré) — la résolution existe mais pas partout. Non-gaps : `flex-wrap` (fixture jauge corrigée), `margin:anchor-size` (sonde posée), sizing `anchor*` (`na` — immesurable sans ancre). | NAV (étape 297, triage audit BCD) | demande PIPE |
+| 2026-11-16 | `explorer-render` raster + `explorer-css` grammaires | **Compléments au triage fixtures-inertes (sondes `check paintv`/`decl` sur binaire 297, avant `computedv`)** — ce que la file 297/298 ne couvrait pas : **(a) `opacity`** — `opacity:0` ok (skip total) mais `opacity:0.5` miss → l'alpha partiel serait non composité au raster (0 court-circuité, tout le reste opaque) ; **(b) `fit-content(<len>)`** — complément au point (c) de la ligne 297 : la forme fonction est **acceptée sur les sizing logiques** (`block-size`/`min-block-size`/`max-block-size`/`min-inline-size` → sonde valide puis miss rendu) mais refusée sur les physiques (`width`/`height`/`min-*`/`max-*` → `invalid`) — asymétrie de grammaire, pas absence ; **(c) `text-decoration`** — `line-through`/`overline`/`grammar-error`/`spelling-error` miss alors que le trait peint (`text-decoration-thickness:5px` ok sur ctx `underline`) ; `text-decoration-color:red`/`text-decoration-style:wavy` miss → seuls `underline`+épaisseur semblent consommés ; anomalie : `text-decoration:underline` (shorthand sondée) miss alors que le même shorthand en ctx peint — chemin déclaration vs ctx à vérifier (`computedv` tranchera expansion vs pose) ; **(d) attributs de rendu SVG** — `stroke-linecap`/`shape-rendering` miss sous fixture `<svg>` strokée dédiée alors que `fill`/`stroke`/`stroke-width` mesurent ok → linecap/rendering non consommés au painter ; **(e) `image-rendering`** — bitmap harnais 8→80 px posée en ctx, `crisp-edges`/`pixelated`/`smooth` miss → le raster ignore la prop (ou l'upscale est uniforme) ; **(f) `text-align-last`** — ctx multi-lignes posé (`width:60px`), `right`/`center`/`justify` miss → prop stockée mais non consommée au layout inline. | NAV (triage audit BCD post-297) | demande PIPE |
 
 ## Seam `MediaSurface` (étape 71 — ADR-0024)
 
@@ -4233,3 +4234,65 @@ prop elle-même. Constats utiles au triage de la file
 Aucune demande nouvelle : ces constats **nourrissent**
 la file 2026-11-16 (points d et suivants), pas ne la
 remplacent.
+
+## Triage fixtures-inertes — reliquat post-298 (NAV, sondes directes)
+
+Passe manuelle sur les 48 props « fixtures-inertes » de
+l'audit (268 paires mesurées, verdicts `check decl` +
+`check paintv` sur binaire 297 — avant l'atterrissage de
+`computedv`). Familles et verdicts uniformes ; le tableau
+« Extensions demandées » (2026-11-16) porte les points
+moteur. Ici : classification + constats **côté jauge**
+(NAV — pas PIPE).
+
+**Confirmés trou moteur (au tableau ci-dessus)** :
+`mask`+`mask-*` (~87 paires, miss paint même avec bitmap
+ctx — rejoint « trou purement paint » de la section 298),
+`border-image-repeat` et longhands (non-peints, expansion
+shorthand déjà nommée gap cascade en 298), `stroke-linecap`/
+`shape-rendering` (miss sous fixture SVG strokée),
+`image-rendering`, `opacity` alpha partiel, variantes
+`text-decoration`, `text-align-last`.
+
+**Fixture aveugle — ctx manquant, corrigeable NAV** :
+- `overflow-clip-margin` : ctx `overflow:hidden` posé
+  mais **rien ne déborde** — il faut un enfant sortant
+  de la boîte pour que la marge de clip soit visible.
+- `line-clamp` : pas de ctx de clamp (hauteur bornée +
+  overflow + multi-lignes) — toute valeur est inerte
+  par construction.
+- `margin-trim` : pas de conteneur+enfant marginé —
+  le trim n'a rien à couper.
+- `unicode-bidi` : fixture latine — `embed`/`plaintext`
+  ne diffèrent qu'avec un run RTL ; `bidi-override`
+  inverse même le latin (observable → garder mesurée).
+- `hanging-punctuation`/`text-emphasis-position`/
+  `white-space-trim`/`text-spacing-trim` : la fixture
+  ne pose ni ponctuation en bord de ligne, ni marques
+  d'emphase (`text-emphasis` en ctx), ni espace à
+  trimer — à armer avant de conclure moteur.
+
+**Constats jauge (NAV — pas PIPE)** :
+- `initial_extra` porte `("text-decoration-line",
+  "underline")` — l'initiale spec est `none` : la valeur
+  la plus courante du web partait en `na`, jamais
+  mesurée ; `none` (vraie initiale) est mesurée en
+  vain. Correctif = permuter la ligne.
+- `perspective`/`perspective-origin` : `NO_ORACLE` les
+  borne « non-affines, aucun oracle même implémentée »
+  — mais le `na` ne couvre que la géométrie : paintv
+  les mesure et 10 paires missent systématiquement.
+  Candidat `PAINT_NA` (même logique que
+  `("transform","3d")` en initial_extra).
+- `reading-flow` : par design aucun effet géométrie/
+  peinture (ordre de lecture/tabulation seulement) —
+  `na` honnête, pas un trou ; `frame-sizing`
+  (fencedframe) et `text-fit` dans la même classe
+  « hors surface de cette jauge ».
+- `color-scheme` : n'agit que sur les défauts UA
+  (contrôles, `Canvas` système) — mesurable seulement
+  si le ctx pose un contrôle ; sinon `na` honnête.
+
+Aucune casse de contrat — lecture et propositions de
+qualification ; le reclass `na` éventuel se décide au
+prochain passage fixtures (avec `bcd_na.json` re-sauvé).
