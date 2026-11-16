@@ -37,10 +37,12 @@ pub(crate) struct FilesState {
     /// garde le contenu en vie (spec : l'URL référence le
     /// blob). `revokeObjectURL` la supprime.
     blob_urls: HashMap<String, (Rc<Vec<u8>>, String)>,
-    /// Prototypes paresseux `Blob`/`File`/`FileReader`.
+    /// Prototypes paresseux `Blob`/`File`/`FileReader`/
+    /// `FileReaderSync`.
     blob_proto: Option<ObjId>,
     file_proto: Option<ObjId>,
     reader_proto: Option<ObjId>,
+    rsync_proto: Option<ObjId>,
     /// Wrappers `FileReader` avec une lecture en file
     /// (`readyState == LOADING`) — drainés au checkpoint et
     /// racines GC tant que la lecture est en cours.
@@ -52,9 +54,14 @@ impl FilesState {
     /// `Host::trace` du wrapper couvre ensuite listeners et
     /// `result`).
     pub(crate) fn root_ids(&self, ids: &mut Vec<ObjId>) {
-        for p in [self.blob_proto, self.file_proto, self.reader_proto]
-            .into_iter()
-            .flatten()
+        for p in [
+            self.blob_proto,
+            self.file_proto,
+            self.reader_proto,
+            self.rsync_proto,
+        ]
+        .into_iter()
+        .flatten()
         {
             ids.push(p);
         }
@@ -405,8 +412,11 @@ fn file_reader_ctor(e: &mut Engine, _t: Value, _a: &[Value]) -> JsResult<Value> 
     Ok(v)
 }
 
-/// `FileReader.prototype` paresseux — constantes spec +
-/// toStringTag (les méthodes passent par `invoke` du host).
+/// `FileReader.prototype` paresseux — constantes spec,
+/// toStringTag + surface IDL (JS-C561) : méthodes via le
+/// trampoline `this`→`Host::invoke`, attributs via
+/// `Host::get`, handlers `on*` en data `null` (l'instance
+/// host garde la valeur réelle — `Host::get` prime).
 fn reader_proto(e: &mut Engine) -> ObjId {
     if let Some(p) = e.files.reader_proto {
         return p;
@@ -415,10 +425,151 @@ fn reader_proto(e: &mut Engine) -> ObjId {
     for (k, n) in [("EMPTY", 0.0), ("LOADING", 1.0), ("DONE", 2.0)] {
         e.set_own(p, k, Value::Num(n), true);
     }
+    crate::dom_host::install_host_proto_members(
+        e,
+        p,
+        &[
+            "readAsText",
+            "readAsDataURL",
+            "readAsArrayBuffer",
+            "readAsBinaryString",
+            "abort",
+            "addEventListener",
+            "removeEventListener",
+        ],
+        &["readyState", "result", "error"],
+    );
+    for h in [
+        "onload",
+        "onloadstart",
+        "onloadend",
+        "onabort",
+        "onerror",
+        "onprogress",
+    ] {
+        e.set_own(p, h, Value::Null, true);
+    }
     let tag = e.str_val("FileReader");
     e.set_own(p, crate::interp::SYM_TO_STRING_TAG, tag, false);
     e.files.reader_proto = Some(p);
     p
+}
+
+/// `FileReaderSync.prototype` paresseux (JS-C561) — même
+/// discipline que `reader_proto`, sans `on*` (l'API sync ne
+/// dispatche pas d'événements).
+fn rsync_proto(e: &mut Engine) -> ObjId {
+    if let Some(p) = e.files.rsync_proto {
+        return p;
+    }
+    let p = e.new_object();
+    crate::dom_host::install_host_proto_members(
+        e,
+        p,
+        &[
+            "readAsText",
+            "readAsDataURL",
+            "readAsArrayBuffer",
+            "readAsBinaryString",
+        ],
+        &[],
+    );
+    let tag = e.str_val("FileReaderSync");
+    e.set_own(p, crate::interp::SYM_TO_STRING_TAG, tag, false);
+    e.files.rsync_proto = Some(p);
+    p
+}
+
+/// Résultat d'une lecture `readAs*` (JS-C561 — partagé
+/// `FileReader` async / `FileReaderSync`) : `Text` = UTF-8
+/// lossy, `DataUrl` = `data:<type>;base64,…`,
+/// `ArrayBuffer` = `ByteBuf` chaîné, `BinaryString` = latin-1.
+fn read_result(e: &mut Engine, bytes: &[u8], ty: &str, how: ReadAs) -> Value {
+    match how {
+        ReadAs::Text => e.str_val(String::from_utf8_lossy(bytes).into_owned()),
+        ReadAs::DataUrl => {
+            let med = if ty.is_empty() {
+                "application/octet-stream"
+            } else {
+                ty
+            };
+            e.str_val(format!(
+                "data:{med};base64,{}",
+                crate::typed_array::b64_encode(bytes)
+            ))
+        }
+        ReadAs::ArrayBuffer => {
+            let id = e.heap.alloc_obj(crate::heap::Object {
+                proto: Value::Obj(e.protos.array_buffer),
+                props: Vec::new(),
+                idx: std::cell::OnceCell::new(),
+                shape: std::cell::Cell::new(0),
+                kind: ObjKind::ByteBuf(bytes.to_vec()),
+                extensible: true,
+                elem_integrity: 0,
+                lookups: std::cell::Cell::new(0),
+                flags: std::cell::Cell::new(0),
+                args_map: None,
+            });
+            Value::Obj(id)
+        }
+        ReadAs::BinaryString => e.str_val(bytes.iter().map(|&b| b as char).collect::<String>()),
+    }
+}
+
+/// Host `FileReaderSync` (JS-C561) — lectures synchrones
+/// spec (contexte worker, mais ctor légal partout en
+/// pratique) : même décodage que `deliver_file_reads`,
+/// retour immédiat au lieu d'événements.
+struct FileReaderSyncHost;
+
+impl Host for FileReaderSyncHost {
+    fn class_name(&self) -> &'static str {
+        "FileReaderSync"
+    }
+
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
+
+    fn has_method(&self, name: &str) -> bool {
+        matches!(
+            name,
+            "readAsText" | "readAsDataURL" | "readAsArrayBuffer" | "readAsBinaryString"
+        )
+    }
+
+    fn invoke(
+        &self,
+        e: &mut Engine,
+        _this: Value,
+        name: &str,
+        args: &[Value],
+    ) -> JsResult<Option<Value>> {
+        let Some((data, ty)) = blob_parts(e, arg(args, 0)) else {
+            return Err(e.type_error("FileReaderSync: argument is not a Blob"));
+        };
+        let how = match name {
+            "readAsText" => ReadAs::Text,
+            "readAsDataURL" => ReadAs::DataUrl,
+            "readAsArrayBuffer" => ReadAs::ArrayBuffer,
+            _ => ReadAs::BinaryString,
+        };
+        Ok(Some(read_result(e, &data, &ty, how)))
+    }
+}
+
+/// `new FileReaderSync()` — wrapper hôte chaîné sur le proto
+/// paresseux.
+fn file_reader_sync_ctor(e: &mut Engine, _t: Value, _a: &[Value]) -> JsResult<Value> {
+    let v = e.new_host_object(Rc::new(FileReaderSyncHost));
+    if let Value::Obj(id) = v {
+        let p = rsync_proto(e);
+        if let Some(o) = e.heap.obj_mut(id) {
+            o.set_proto(Value::Obj(p));
+        }
+    }
+    Ok(v)
 }
 
 impl Engine {
@@ -445,38 +596,7 @@ impl Engine {
             n += 1;
             let total = bytes.len() as f64;
             self.fire_reader_event(wid, &data, "loadstart", 0.0, total)?;
-            let result = match how {
-                ReadAs::Text => self.str_val(String::from_utf8_lossy(&bytes).into_owned()),
-                ReadAs::DataUrl => {
-                    let med = if ty.is_empty() {
-                        "application/octet-stream"
-                    } else {
-                        ty.as_str()
-                    };
-                    self.str_val(format!(
-                        "data:{med};base64,{}",
-                        crate::typed_array::b64_encode(&bytes)
-                    ))
-                }
-                ReadAs::ArrayBuffer => {
-                    let id = self.heap.alloc_obj(crate::heap::Object {
-                        proto: Value::Obj(self.protos.array_buffer),
-                        props: Vec::new(),
-                        idx: std::cell::OnceCell::new(),
-                        shape: std::cell::Cell::new(0),
-                        kind: ObjKind::ByteBuf((*bytes).clone()),
-                        extensible: true,
-                        elem_integrity: 0,
-                        lookups: std::cell::Cell::new(0),
-                        flags: std::cell::Cell::new(0),
-                        args_map: None,
-                    });
-                    Value::Obj(id)
-                }
-                ReadAs::BinaryString => {
-                    self.str_val(bytes.iter().map(|&b| b as char).collect::<String>())
-                }
-            };
+            let result = read_result(self, &bytes, &ty, how);
             {
                 let mut d = data.borrow_mut();
                 d.result = result;
@@ -754,12 +874,14 @@ pub(crate) fn install_files(e: &mut Engine) {
         ("Blob", blob_ctor as crate::heap::NativeFn),
         ("File", file_ctor),
         ("FileReader", file_reader_ctor),
+        ("FileReaderSync", file_reader_sync_ctor),
     ] {
         let fv = e.native_fn(name, f);
         if let Value::Obj(fid) = fv {
             let p = match name {
                 "Blob" => Value::Obj(blob_proto(e)),
                 "File" => Value::Obj(file_proto(e)),
+                "FileReaderSync" => Value::Obj(rsync_proto(e)),
                 _ => Value::Obj(reader_proto(e)),
             };
             e.set_own(fid, "prototype", p, false);

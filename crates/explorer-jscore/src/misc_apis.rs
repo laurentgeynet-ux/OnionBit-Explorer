@@ -4005,3 +4005,1084 @@ fn anim_method_trampoline(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult
     Ok(h.invoke(e, Value::Obj(id), &name, &rest[1..])?
         .unwrap_or(Value::Undefined))
 }
+
+// ---- Observable (JS-C560) --------------------------------------------------
+//
+// `Observable` (proposal TC39, Chrome >=135) — primitive
+// reactive reelle, pas un stub : `new Observable(subscribe)`
+// memorise la fonction de production dans `__sub` ;
+// `subscribe` materialise un `SubscriptionObserver`
+// `{next,error,complete,closed}` et un `Subscription`
+// `{unsubscribe,closed}` partageant l'etat `sub` ; les
+// operateurs retournent des observables derives dont la
+// production souscrit la source avec un observer wrappe ;
+// les terminateurs (`forEach`/`reduce`/`first`...) rendent
+// une promesse. Bornes documentees : `switchMap`/`concatMap`
+// se comportent comme `flatMap` (pas d'annulation des
+// inners en vol — un seul flux synchrone en pratique), et
+// `takeUntil` complete au premier signal du notifieur.
+
+/// Observable neuf, proto `Observable.prototype` global.
+fn obs_new(e: &mut Engine) -> ObjId {
+    let o = e.new_object();
+    if let Some(Value::Obj(cid)) = e.get_prop(e.global, "Observable") {
+        if let Some(pp @ Value::Obj(_)) = e.get_prop(cid, "prototype") {
+            if let Some(ob) = e.heap.obj_mut(o) {
+                ob.set_proto(pp);
+            }
+        }
+    }
+    o
+}
+
+/// Lit `src.__sub` et l'appelle avec `observer` — la valeur
+/// de retour (teardown callable, optionnel) est propagee.
+fn obs_run_src(e: &mut Engine, src: Value, observer: Value) -> JsResult<Value> {
+    let Value::Obj(sid) = src else {
+        return Ok(Value::Undefined);
+    };
+    let Some(sub) = e.get_prop(sid, "__sub") else {
+        return Ok(Value::Undefined);
+    };
+    if !e.is_callable(sub.clone()) {
+        return Ok(Value::Undefined);
+    }
+    e.call_value(sub, Value::Obj(sid), std::slice::from_ref(&observer))
+}
+
+/// `observer.<m>(v)` si callable — point unique d'emission
+/// vers un observer (natifs `next`/`error`/`complete` ou
+/// wrappers d'operateurs).
+fn obs_emit(e: &mut Engine, ob: Value, m: &'static str, v: Value) -> JsResult<Value> {
+    let Value::Obj(oid) = ob.clone() else {
+        return Ok(Value::Undefined);
+    };
+    if let Some(f) = e.get_prop(oid, m) {
+        if e.is_callable(f.clone()) {
+            e.call_value(f, ob, std::slice::from_ref(&v))?;
+        }
+    }
+    Ok(Value::Undefined)
+}
+
+/// `obj.<k>` bool — marqueurs `done`/`closed` des etats lies.
+fn obs_flag(e: &mut Engine, st: &Value, k: &str) -> bool {
+    e.get_prop_value(st.clone(), k)
+        .is_ok_and(|v| e.to_boolean(v))
+}
+
+/// `new Observable(subscribe)` — `subscribe` callable exige
+/// (spec : `TypeError` sinon) ; stocke en `__sub` interne.
+fn observable_ctor(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
+    let sub = arg(args, 0);
+    if !e.is_callable(sub.clone()) {
+        return Err(e.type_error("Observable: subscribe callback is not a function"));
+    }
+    let Value::Obj(id) = this else {
+        return Err(e.type_error("illegal constructor"));
+    };
+    e.set_own(id, "__sub", sub, false);
+    Ok(Value::Undefined)
+}
+
+/// `Observable.from(input)` — Observable : identique ;
+/// iterable : emission synchrone de chaque element puis
+/// `complete` ; Promise : `next`/`error` a resolution ;
+/// autre : `TypeError` (spec).
+fn observable_from(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
+    let v = arg(args, 0);
+    let out = Value::Obj(obs_new(e));
+    if let Value::Obj(id) = v {
+        if e.get_prop(id, "__sub").is_some() {
+            return Ok(v);
+        }
+    }
+    if let Ok(f) = e.get_prop_value(v.clone(), "then") {
+        if e.is_callable(f.clone()) {
+            let on_ok = e.bound_native("next", obs_from_resolve, vec![out.clone()]);
+            let on_err = e.bound_native("error", obs_from_reject, vec![out.clone()]);
+            let _ = e.call_value(f, v.clone(), &[on_ok, on_err]);
+            return Ok(out);
+        }
+    }
+    let items = e.iter_values(v)?;
+    let arr = e.new_array(items);
+    let s = e.bound_native("__sub", obs_from_iter_sub, vec![arr]);
+    if let Value::Obj(oid) = out {
+        e.set_own(oid, "__sub", s, false);
+    }
+    Ok(out)
+}
+
+/// `__sub` de `Observable.from(iterable)` — emission
+/// synchrone des elements puis `complete`.
+fn obs_from_iter_sub(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
+    let items = arg(args, 0);
+    let ob = arg(args, 1);
+    let len = match e.get_prop_value(items.clone(), "length") {
+        Ok(Value::Num(n)) => n as usize,
+        _ => 0,
+    };
+    for i in 0..len {
+        if obs_flag(e, &ob, "closed") {
+            return Ok(Value::Undefined);
+        }
+        let v = e
+            .get_prop_value(items.clone(), &i.to_string())
+            .unwrap_or(Value::Undefined);
+        obs_emit(e, ob.clone(), "next", v)?;
+    }
+    obs_emit(e, ob, "complete", Value::Undefined)
+}
+
+/// `promise.then` de `Observable.from(promise)` — `next`
+/// puis `complete` a resolution.
+fn obs_from_resolve(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
+    let out = arg(args, 0);
+    let v = arg(args, 1);
+    obs_emit(e, out.clone(), "next", v)?;
+    obs_emit(e, out, "complete", Value::Undefined)
+}
+
+/// `promise.catch` de `Observable.from(promise)` — `error`.
+fn obs_from_reject(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
+    let out = arg(args, 0);
+    obs_emit(e, out, "error", arg(args, 1))
+}
+
+/// `obs.subscribe(observer | next?, error?, complete?)` —
+/// construit le `SubscriptionObserver`, invoque `__sub`,
+/// rend le `Subscription` `{unsubscribe, closed}`.
+fn obs_subscribe(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
+    let (next, error, complete) = match arg(args, 0) {
+        f if e.is_callable(f.clone()) => (f, arg(args, 1), arg(args, 2)),
+        Value::Obj(oid) => (
+            e.get_prop(oid, "next").unwrap_or(Value::Undefined),
+            e.get_prop(oid, "error").unwrap_or(Value::Undefined),
+            e.get_prop(oid, "complete").unwrap_or(Value::Undefined),
+        ),
+        _ => (Value::Undefined, arg(args, 1), arg(args, 2)),
+    };
+    // `sub` = etat partage observer/subscription.
+    let sub = e.new_object();
+    e.set_own(sub, "closed", Value::Bool(false), true);
+    e.set_own(sub, "__td", Value::Undefined, false);
+    let so = e.new_object();
+    let tag = e.str_val("SubscriptionObserver");
+    e.set_own(so, crate::interp::SYM_TO_STRING_TAG, tag, false);
+    for (m, f, user) in [
+        ("next", obs_delegate as crate::heap::NativeFn, next),
+        ("error", obs_delegate_err, error),
+        ("complete", obs_delegate_complete, complete),
+    ] {
+        let bf = e.bound_native(m, f, vec![Value::Obj(sub), user]);
+        e.set_own(so, m, bf, true);
+    }
+    let cg = e.bound_native("closed", obs_closed_get, vec![Value::Obj(sub)]);
+    if let Some(o) = e.heap.obj_mut(so) {
+        o.set_accessor("closed", cg.clone(), Value::Undefined, true);
+    }
+    let teardown = obs_run_src(e, this, Value::Obj(so))?;
+    e.set_own(sub, "__td", teardown, true);
+    let subscription = e.new_object();
+    let tag = e.str_val("Subscription");
+    e.set_own(subscription, crate::interp::SYM_TO_STRING_TAG, tag, false);
+    let uf = e.bound_native("unsubscribe", obs_unsub, vec![Value::Obj(sub)]);
+    e.set_own(subscription, "unsubscribe", uf, true);
+    if let Some(o) = e.heap.obj_mut(subscription) {
+        o.set_accessor("closed", cg, Value::Undefined, true);
+    }
+    Ok(Value::Obj(subscription))
+}
+
+/// `observer.next` reel — no-op si `closed` (spec).
+fn obs_delegate(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
+    let sub = arg(args, 0);
+    if obs_flag(e, &sub, "closed") {
+        return Ok(Value::Undefined);
+    }
+    let f = arg(args, 1);
+    if e.is_callable(f.clone()) {
+        e.call_value(f, Value::Undefined, std::slice::from_ref(&arg(args, 2)))?;
+    }
+    Ok(Value::Undefined)
+}
+
+/// `observer.error` — ferme puis delegue (handler absent :
+/// l'erreur est absorbee — pas de hostReportErrors ici).
+fn obs_delegate_err(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
+    let sub = arg(args, 0);
+    if obs_flag(e, &sub, "closed") {
+        return Ok(Value::Undefined);
+    }
+    e.set_prop_value(sub, "closed", Value::Bool(true))?;
+    let f = arg(args, 1);
+    if e.is_callable(f.clone()) {
+        e.call_value(f, Value::Undefined, std::slice::from_ref(&arg(args, 2)))?;
+    }
+    Ok(Value::Undefined)
+}
+
+/// `observer.complete` — idem `error` sans valeur.
+fn obs_delegate_complete(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
+    let sub = arg(args, 0);
+    if obs_flag(e, &sub, "closed") {
+        return Ok(Value::Undefined);
+    }
+    e.set_prop_value(sub, "closed", Value::Bool(true))?;
+    let f = arg(args, 1);
+    if e.is_callable(f.clone()) {
+        e.call_value(f, Value::Undefined, &[])?;
+    }
+    Ok(Value::Undefined)
+}
+
+/// `subscription.unsubscribe()` — `closed` + teardown.
+fn obs_unsub(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
+    let sub = arg(args, 0);
+    if obs_flag(e, &sub, "closed") {
+        return Ok(Value::Undefined);
+    }
+    e.set_prop_value(sub.clone(), "closed", Value::Bool(true))?;
+    let td = e.get_prop_value(sub, "__td").unwrap_or(Value::Undefined);
+    if let Value::Obj(oid) = td {
+        if let Some(f) = e.get_prop(oid, "unsubscribe") {
+            if e.is_callable(f.clone()) {
+                e.call_value(f, td, &[])?;
+            }
+        }
+    } else if e.is_callable(td.clone()) {
+        e.call_value(td, Value::Undefined, &[])?;
+    }
+    Ok(Value::Undefined)
+}
+
+/// Accesseur `closed` partage observer/subscription.
+fn obs_closed_get(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
+    Ok(Value::Bool(obs_flag(e, &arg(args, 0), "closed")))
+}
+
+/// Fabrique un observable derive : `__sub` = natif lie
+/// `[source, extras...]`.
+fn obs_derive(
+    e: &mut Engine,
+    this: Value,
+    mut bound_tail: Vec<Value>,
+    sub_fn: crate::heap::NativeFn,
+) -> Value {
+    let o = obs_new(e);
+    let mut bound = vec![this];
+    bound.append(&mut bound_tail);
+    let s = e.bound_native("__sub", sub_fn, bound);
+    e.set_own(o, "__sub", s, false);
+    Value::Obj(o)
+}
+
+/// Observer wrap standard `{next: nf, error/complete:
+/// passthrough}` vers `ob`.
+fn obs_wrap(e: &mut Engine, ob: Value, next: Value) -> Value {
+    let w = e.new_object();
+    e.set_own(w, "next", next, true);
+    let ef = e.bound_native("error", obs_err_passthru, vec![ob.clone()]);
+    e.set_own(w, "error", ef, true);
+    let cf = e.bound_native("complete", obs_complete_passthru, vec![ob]);
+    e.set_own(w, "complete", cf, true);
+    Value::Obj(w)
+}
+
+/// Passthrough `error` vers l'observer aval.
+fn obs_err_passthru(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
+    obs_emit(e, arg(args, 0), "error", arg(args, 1))
+}
+
+/// Passthrough `complete` vers l'observer aval.
+fn obs_complete_passthru(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
+    obs_emit(e, arg(args, 0), "complete", Value::Undefined)
+}
+
+/// `obs.map(f)` — `next` = `f(v,i)`.
+fn obs_map(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
+    let f = arg(args, 0);
+    if !e.is_callable(f.clone()) {
+        return Err(e.type_error("Observable.map: callback is not a function"));
+    }
+    Ok(obs_derive(e, this, vec![f], obs_map_sub))
+}
+
+fn obs_map_sub(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
+    let src = arg(args, 0);
+    let f = arg(args, 1);
+    let ob = arg(args, 2);
+    let st = e.new_object();
+    e.set_own(st, "i", Value::Num(0.0), true);
+    let nf = e.bound_native("next", obs_map_next, vec![ob, f, Value::Obj(st)]);
+    let w = obs_wrap(e, arg(args, 2), nf);
+    obs_run_src(e, src, w)
+}
+
+fn obs_map_next(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
+    let ob = arg(args, 0);
+    let f = arg(args, 1);
+    let st = arg(args, 2);
+    let v = arg(args, 3);
+    let i = e
+        .get_prop_value(st.clone(), "i")
+        .ok()
+        .and_then(|x| e.to_number(x).ok())
+        .unwrap_or(0.0);
+    e.set_prop_value(st, "i", Value::Num(i + 1.0))?;
+    let r = e.call_value(f, Value::Undefined, &[v, Value::Num(i)])?;
+    obs_emit(e, ob, "next", r)
+}
+
+/// `obs.filter(f)` — `next` si `f(v,i)` truthy.
+fn obs_filter(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
+    let f = arg(args, 0);
+    if !e.is_callable(f.clone()) {
+        return Err(e.type_error("Observable.filter: callback is not a function"));
+    }
+    Ok(obs_derive(e, this, vec![f], obs_filter_sub))
+}
+
+fn obs_filter_sub(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
+    let src = arg(args, 0);
+    let f = arg(args, 1);
+    let ob = arg(args, 2);
+    let st = e.new_object();
+    e.set_own(st, "i", Value::Num(0.0), true);
+    let nf = e.bound_native("next", obs_filter_next, vec![ob, f, Value::Obj(st)]);
+    let w = obs_wrap(e, arg(args, 2), nf);
+    obs_run_src(e, src, w)
+}
+
+fn obs_filter_next(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
+    let ob = arg(args, 0);
+    let f = arg(args, 1);
+    let st = arg(args, 2);
+    let v = arg(args, 3);
+    let i = e
+        .get_prop_value(st.clone(), "i")
+        .ok()
+        .and_then(|x| e.to_number(x).ok())
+        .unwrap_or(0.0);
+    e.set_prop_value(st, "i", Value::Num(i + 1.0))?;
+    let r = e.call_value(f, Value::Undefined, &[v.clone(), Value::Num(i)])?;
+    if e.to_boolean(r) {
+        obs_emit(e, ob, "next", v)?;
+    }
+    Ok(Value::Undefined)
+}
+
+/// `obs.take(n)` — `n` emissions puis `complete` aval.
+fn obs_take(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
+    let n = e.to_number(arg(args, 0))?.max(0.0);
+    Ok(obs_derive(e, this, vec![Value::Num(n)], obs_take_sub))
+}
+
+fn obs_take_sub(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
+    let src = arg(args, 0);
+    let st = e.new_object();
+    e.set_own(st, "n", arg(args, 1), true);
+    e.set_own(st, "i", Value::Num(0.0), true);
+    let nf = e.bound_native("next", obs_take_next, vec![arg(args, 2), Value::Obj(st)]);
+    let w = obs_wrap(e, arg(args, 2), nf);
+    obs_run_src(e, src, w)
+}
+
+fn obs_take_next(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
+    let ob = arg(args, 0);
+    let st = arg(args, 1);
+    let v = arg(args, 2);
+    let i = e
+        .get_prop_value(st.clone(), "i")
+        .ok()
+        .and_then(|x| e.to_number(x).ok())
+        .unwrap_or(0.0);
+    let n = e
+        .get_prop_value(st.clone(), "n")
+        .ok()
+        .and_then(|x| e.to_number(x).ok())
+        .unwrap_or(0.0);
+    if i >= n {
+        return Ok(Value::Undefined);
+    }
+    e.set_prop_value(st, "i", Value::Num(i + 1.0))?;
+    obs_emit(e, ob.clone(), "next", v)?;
+    if i + 1.0 >= n {
+        obs_emit(e, ob, "complete", Value::Undefined)?;
+    }
+    Ok(Value::Undefined)
+}
+
+/// `obs.drop(n)` — saute les `n` premieres emissions.
+fn obs_drop(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
+    let n = e.to_number(arg(args, 0))?.max(0.0);
+    Ok(obs_derive(e, this, vec![Value::Num(n)], obs_drop_sub))
+}
+
+fn obs_drop_sub(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
+    let src = arg(args, 0);
+    let st = e.new_object();
+    e.set_own(st, "n", arg(args, 1), true);
+    let nf = e.bound_native("next", obs_drop_next, vec![arg(args, 2), Value::Obj(st)]);
+    let w = obs_wrap(e, arg(args, 2), nf);
+    obs_run_src(e, src, w)
+}
+
+fn obs_drop_next(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
+    let ob = arg(args, 0);
+    let st = arg(args, 1);
+    let v = arg(args, 2);
+    let n = e
+        .get_prop_value(st.clone(), "n")
+        .ok()
+        .and_then(|x| e.to_number(x).ok())
+        .unwrap_or(0.0);
+    if n > 0.0 {
+        e.set_prop_value(st, "n", Value::Num(n - 1.0))?;
+        return Ok(Value::Undefined);
+    }
+    obs_emit(e, ob, "next", v)
+}
+
+/// `obs.scan(f, seed?)` — accumulateur emis a chaque pas.
+fn obs_scan(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
+    let f = arg(args, 0);
+    if !e.is_callable(f.clone()) {
+        return Err(e.type_error("Observable.scan: callback is not a function"));
+    }
+    let seed = arg(args, 1);
+    Ok(obs_derive(e, this, vec![f, seed], obs_scan_sub))
+}
+
+fn obs_scan_sub(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
+    let src = arg(args, 0);
+    let st = e.new_object();
+    e.set_own(st, "acc", arg(args, 2), true);
+    e.set_own(st, "i", Value::Num(0.0), true);
+    let nf = e.bound_native(
+        "next",
+        obs_scan_next,
+        vec![arg(args, 3), arg(args, 1), Value::Obj(st)],
+    );
+    let w = obs_wrap(e, arg(args, 3), nf);
+    obs_run_src(e, src, w)
+}
+
+fn obs_scan_next(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
+    let ob = arg(args, 0);
+    let f = arg(args, 1);
+    let st = arg(args, 2);
+    let v = arg(args, 3);
+    let i = e
+        .get_prop_value(st.clone(), "i")
+        .ok()
+        .and_then(|x| e.to_number(x).ok())
+        .unwrap_or(0.0);
+    e.set_prop_value(st.clone(), "i", Value::Num(i + 1.0))?;
+    let acc = e
+        .get_prop_value(st.clone(), "acc")
+        .unwrap_or(Value::Undefined);
+    let r = e.call_value(f, Value::Undefined, &[acc, v, Value::Num(i)])?;
+    e.set_prop_value(st, "acc", r.clone())?;
+    obs_emit(e, ob, "next", r)
+}
+
+/// `obs.flatMap(f)`/`concatMap`/`switchMap` — souscrit chaque
+/// observable inner produit par `f(v,i)` et reemet ses
+/// `next` (borne : sans annulation des inners en vol —
+/// `switchMap`/`concatMap` = `flatMap` sur un flux
+/// synchrone).
+fn obs_flatmap(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
+    let f = arg(args, 0);
+    if !e.is_callable(f.clone()) {
+        return Err(e.type_error("flatMap: callback is not a function"));
+    }
+    Ok(obs_derive(e, this, vec![f], obs_flatmap_sub))
+}
+
+fn obs_flatmap_sub(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
+    let src = arg(args, 0);
+    let st = e.new_object();
+    e.set_own(st, "i", Value::Num(0.0), true);
+    let nf = e.bound_native(
+        "next",
+        obs_flatmap_next,
+        vec![arg(args, 2), arg(args, 1), Value::Obj(st)],
+    );
+    let w = obs_wrap(e, arg(args, 2), nf);
+    obs_run_src(e, src, w)
+}
+
+fn obs_flatmap_next(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
+    let ob = arg(args, 0);
+    let f = arg(args, 1);
+    let st = arg(args, 2);
+    let v = arg(args, 3);
+    let i = e
+        .get_prop_value(st.clone(), "i")
+        .ok()
+        .and_then(|x| e.to_number(x).ok())
+        .unwrap_or(0.0);
+    e.set_prop_value(st, "i", Value::Num(i + 1.0))?;
+    let inner = e.call_value(f, Value::Undefined, &[v, Value::Num(i)])?;
+    // Observer inner : `next`/`error` reemis, `complete`
+    // ignore (la fin globale vient de la source).
+    let w = e.new_object();
+    let nf = e.bound_native("next", obs_inner_next, vec![ob.clone()]);
+    e.set_own(w, "next", nf, true);
+    let ef = e.bound_native("error", obs_err_passthru, vec![ob]);
+    e.set_own(w, "error", ef, true);
+    obs_run_src(e, inner, Value::Obj(w))?;
+    Ok(Value::Undefined)
+}
+
+fn obs_inner_next(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
+    obs_emit(e, arg(args, 0), "next", arg(args, 1))
+}
+
+/// `obs.catch(f)` — `error` : souscrit `f(err)` et reemet.
+fn obs_catch(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
+    let f = arg(args, 0);
+    if !e.is_callable(f.clone()) {
+        return Err(e.type_error("Observable.catch: callback is not a function"));
+    }
+    Ok(obs_derive(e, this, vec![f], obs_catch_sub))
+}
+
+fn obs_catch_sub(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
+    let src = arg(args, 0);
+    let ob = arg(args, 2);
+    let w = e.new_object();
+    let nf = e.bound_native("next", obs_inner_next, vec![ob.clone()]);
+    e.set_own(w, "next", nf, true);
+    let ef = e.bound_native("error", obs_catch_err, vec![ob.clone(), arg(args, 1)]);
+    e.set_own(w, "error", ef, true);
+    let cf = e.bound_native("complete", obs_complete_passthru, vec![ob]);
+    e.set_own(w, "complete", cf, true);
+    obs_run_src(e, src, Value::Obj(w))
+}
+
+fn obs_catch_err(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
+    let ob = arg(args, 0);
+    let f = arg(args, 1);
+    let err = arg(args, 2);
+    let inner = e.call_value(f, Value::Undefined, &[err])?;
+    let w = e.new_object();
+    let nf = e.bound_native("next", obs_inner_next, vec![ob.clone()]);
+    e.set_own(w, "next", nf, true);
+    let ef = e.bound_native("error", obs_err_passthru, vec![ob.clone()]);
+    e.set_own(w, "error", ef, true);
+    let cf = e.bound_native("complete", obs_complete_passthru, vec![ob]);
+    e.set_own(w, "complete", cf, true);
+    obs_run_src(e, inner, Value::Obj(w))?;
+    Ok(Value::Undefined)
+}
+
+/// `obs.finally(f)` — `f()` au `complete`/`error` aval.
+fn obs_finally(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
+    let f = arg(args, 0);
+    if !e.is_callable(f.clone()) {
+        return Err(e.type_error("Observable.finally: callback is not a function"));
+    }
+    Ok(obs_derive(e, this, vec![f], obs_finally_sub))
+}
+
+fn obs_finally_sub(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
+    let src = arg(args, 0);
+    let ob = arg(args, 2);
+    let f = arg(args, 1);
+    let w = e.new_object();
+    let nf = e.bound_native("next", obs_inner_next, vec![ob.clone()]);
+    e.set_own(w, "next", nf, true);
+    let ef = e.bound_native("error", obs_finally_err, vec![ob.clone(), f.clone()]);
+    e.set_own(w, "error", ef, true);
+    let cf = e.bound_native("complete", obs_finally_complete, vec![ob, f]);
+    e.set_own(w, "complete", cf, true);
+    obs_run_src(e, src, Value::Obj(w))
+}
+
+fn obs_finally_err(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
+    let ob = arg(args, 0);
+    let f = arg(args, 1);
+    let err = arg(args, 2);
+    e.call_value(f, Value::Undefined, &[])?;
+    obs_emit(e, ob, "error", err)
+}
+
+fn obs_finally_complete(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
+    let ob = arg(args, 0);
+    let f = arg(args, 1);
+    e.call_value(f, Value::Undefined, &[])?;
+    obs_emit(e, ob, "complete", Value::Undefined)
+}
+
+/// `obs.inspect({next?,error?,complete?,subscribe?,unsubscribe?})`
+/// — tap : chaque callback invoque avant le passthrough.
+fn obs_inspect(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
+    Ok(obs_derive(e, this, vec![arg(args, 0)], obs_inspect_sub))
+}
+
+fn obs_inspect_sub(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
+    let src = arg(args, 0);
+    let ob = arg(args, 2);
+    let opts = arg(args, 1);
+    let w = e.new_object();
+    let nf = e.bound_native("next", obs_inspect_next, vec![ob.clone(), opts.clone()]);
+    e.set_own(w, "next", nf, true);
+    let ef = e.bound_native("error", obs_inspect_err, vec![ob.clone(), opts.clone()]);
+    e.set_own(w, "error", ef, true);
+    let cf = e.bound_native("complete", obs_inspect_complete, vec![ob, opts]);
+    e.set_own(w, "complete", cf, true);
+    obs_run_src(e, src, Value::Obj(w))
+}
+
+fn obs_inspect_next(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
+    let ob = arg(args, 0);
+    let v = arg(args, 2);
+    if let Ok(f) = e.get_prop_value(arg(args, 1), "next") {
+        if e.is_callable(f.clone()) {
+            e.call_value(f, Value::Undefined, std::slice::from_ref(&v))?;
+        }
+    }
+    obs_emit(e, ob, "next", v)
+}
+
+fn obs_inspect_err(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
+    let ob = arg(args, 0);
+    let err = arg(args, 2);
+    if let Ok(f) = e.get_prop_value(arg(args, 1), "error") {
+        if e.is_callable(f.clone()) {
+            e.call_value(f, Value::Undefined, std::slice::from_ref(&err))?;
+        }
+    }
+    obs_emit(e, ob, "error", err)
+}
+
+fn obs_inspect_complete(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
+    let ob = arg(args, 0);
+    if let Ok(f) = e.get_prop_value(arg(args, 1), "complete") {
+        if e.is_callable(f.clone()) {
+            e.call_value(f, Value::Undefined, &[])?;
+        }
+    }
+    obs_emit(e, ob, "complete", Value::Undefined)
+}
+
+/// `obs.takeUntil(notifier)` — `complete` aval au premier
+/// `next`/`error`/`complete` du notifieur.
+fn obs_take_until(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
+    Ok(obs_derive(e, this, vec![arg(args, 0)], obs_takeuntil_sub))
+}
+
+fn obs_takeuntil_sub(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
+    let src = arg(args, 0);
+    let notifier = arg(args, 1);
+    let ob = arg(args, 2);
+    // Notifieur : premier signal → `complete` aval.
+    let w = e.new_object();
+    let nf = e.bound_native("next", obs_takeuntil_hit, vec![ob.clone()]);
+    e.set_own(w, "next", nf, true);
+    let ef = e.bound_native("error", obs_err_passthru, vec![ob.clone()]);
+    e.set_own(w, "error", ef, true);
+    let cf = e.bound_native("complete", obs_takeuntil_hit, vec![ob.clone()]);
+    e.set_own(w, "complete", cf, true);
+    obs_run_src(e, notifier, Value::Obj(w))?;
+    // Source : passthrough complet.
+    let nf = e.bound_native("next", obs_inner_next, vec![ob.clone()]);
+    let w2 = obs_wrap(e, ob, nf);
+    obs_run_src(e, src, w2)
+}
+
+fn obs_takeuntil_hit(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
+    obs_emit(e, arg(args, 0), "complete", Value::Undefined)
+}
+
+/// Montage d'un terminateur : `st` partage `{done, acc...}`,
+/// observer `{next: nf, error→rejet, complete: cf}`,
+/// retour = la promesse `pid`.
+fn obs_term_mount(
+    e: &mut Engine,
+    this: Value,
+    bound_extra: Vec<Value>,
+    next_fn: crate::heap::NativeFn,
+    complete_fn: crate::heap::NativeFn,
+) -> JsResult<Value> {
+    let pid = e.new_promise();
+    let st = e.new_object();
+    e.set_own(st, "done", Value::Bool(false), true);
+    let mut bound = vec![Value::Obj(pid), Value::Obj(st)];
+    bound.extend(bound_extra.clone());
+    let mut bound_c = vec![Value::Obj(pid), Value::Obj(st)];
+    bound_c.extend(bound_extra);
+    let w = e.new_object();
+    let nf = e.bound_native("next", next_fn, bound);
+    e.set_own(w, "next", nf, true);
+    let ef = e.bound_native("error", obs_term_reject, vec![Value::Obj(pid)]);
+    e.set_own(w, "error", ef, true);
+    let cf = e.bound_native("complete", complete_fn, bound_c);
+    e.set_own(w, "complete", cf, true);
+    let td = obs_run_src(e, this, Value::Obj(w))?;
+    e.set_own(st, "__td", td, false);
+    Ok(Value::Obj(pid))
+}
+
+/// `error` d'un terminateur → rejet de la promesse.
+fn obs_term_reject(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
+    let Value::Obj(pid) = arg(args, 0) else {
+        return Ok(Value::Undefined);
+    };
+    e.reject_promise(pid, arg(args, 1));
+    Ok(Value::Undefined)
+}
+
+/// `obs.forEach(f)` → `Promise<undefined>` (f(v,i) par
+/// emission).
+fn obs_for_each(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
+    let f = arg(args, 0);
+    if !e.is_callable(f.clone()) {
+        return Err(e.type_error("Observable.forEach: callback is not a function"));
+    }
+    obs_term_mount(
+        e,
+        this,
+        vec![f],
+        obs_foreach_next,
+        obs_term_resolve_undefined,
+    )
+}
+
+fn obs_foreach_next(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
+    let st = arg(args, 1);
+    if obs_flag(e, &st, "done") {
+        return Ok(Value::Undefined);
+    }
+    let f = arg(args, 2);
+    let v = arg(args, 3);
+    let i = e
+        .get_prop_value(st.clone(), "i")
+        .ok()
+        .and_then(|x| e.to_number(x).ok())
+        .unwrap_or(0.0);
+    e.set_prop_value(st, "i", Value::Num(i + 1.0))?;
+    e.call_value(f, Value::Undefined, &[v, Value::Num(i)])?;
+    Ok(Value::Undefined)
+}
+
+fn obs_term_resolve_undefined(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
+    if let Value::Obj(pid) = arg(args, 0) {
+        e.resolve_promise(pid, Value::Undefined);
+    }
+    Ok(Value::Undefined)
+}
+
+/// `obs.reduce(f, seed?)` → `Promise<acc>` — sans seed, la
+/// premiere emission amorce (spec Array#reduce).
+fn obs_reduce(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
+    let f = arg(args, 0);
+    if !e.is_callable(f.clone()) {
+        return Err(e.type_error("Observable.reduce: callback is not a function"));
+    }
+    obs_term_mount(
+        e,
+        this,
+        vec![f, arg(args, 1), Value::Bool(args.len() > 1)],
+        obs_reduce_next,
+        obs_reduce_complete,
+    )
+}
+
+fn obs_reduce_next(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
+    let st = arg(args, 1);
+    if obs_flag(e, &st, "done") {
+        return Ok(Value::Undefined);
+    }
+    let f = arg(args, 2);
+    let v = arg(args, 5);
+    let i = e
+        .get_prop_value(st.clone(), "i")
+        .ok()
+        .and_then(|x| e.to_number(x).ok())
+        .unwrap_or(0.0);
+    e.set_prop_value(st.clone(), "i", Value::Num(i + 1.0))?;
+    let has = obs_flag(e, &st, "has") || matches!(arg(args, 4), Value::Bool(true));
+    if !has {
+        e.set_prop_value(st.clone(), "acc", v)?;
+        e.set_prop_value(st, "has", Value::Bool(true))?;
+        return Ok(Value::Undefined);
+    }
+    let acc = e
+        .get_prop_value(st.clone(), "acc")
+        .unwrap_or(Value::Undefined);
+    let r = e.call_value(f, Value::Undefined, &[acc, v, Value::Num(i)])?;
+    e.set_prop_value(st, "acc", r)?;
+    Ok(Value::Undefined)
+}
+
+fn obs_reduce_complete(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
+    let Value::Obj(pid) = arg(args, 0) else {
+        return Ok(Value::Undefined);
+    };
+    let st = arg(args, 1);
+    if !obs_flag(e, &st, "has") && !matches!(arg(args, 4), Value::Bool(true)) {
+        let t = e.error_value(e.protos.error, "TypeError", "reduce of empty observable");
+        e.reject_promise(pid, t);
+        return Ok(Value::Undefined);
+    }
+    let acc = e.get_prop_value(st, "acc").unwrap_or_else(|_| arg(args, 3));
+    e.resolve_promise(pid, acc);
+    Ok(Value::Undefined)
+}
+
+/// `obs.toArray()` → `Promise<Array>` des emissions.
+fn obs_to_array(e: &mut Engine, this: Value, _a: &[Value]) -> JsResult<Value> {
+    obs_term_mount(e, this, Vec::new(), obs_toarray_next, obs_toarray_complete)
+}
+
+fn obs_toarray_next(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
+    let st = arg(args, 1);
+    if obs_flag(e, &st, "done") {
+        return Ok(Value::Undefined);
+    }
+    let len = e
+        .get_prop_value(st.clone(), "len")
+        .ok()
+        .and_then(|x| e.to_number(x).ok())
+        .unwrap_or(0.0);
+    e.set_prop_value(st.clone(), &format!("{}", len as u64), arg(args, 2))?;
+    e.set_prop_value(st, "len", Value::Num(len + 1.0))?;
+    Ok(Value::Undefined)
+}
+
+fn obs_toarray_complete(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
+    let Value::Obj(pid) = arg(args, 0) else {
+        return Ok(Value::Undefined);
+    };
+    let st = arg(args, 1);
+    let len = e
+        .get_prop_value(st.clone(), "len")
+        .ok()
+        .and_then(|x| e.to_number(x).ok())
+        .unwrap_or(0.0) as usize;
+    let mut items = Vec::with_capacity(len);
+    for i in 0..len {
+        items.push(
+            e.get_prop_value(st.clone(), &i.to_string())
+                .unwrap_or(Value::Undefined),
+        );
+    }
+    let a = e.new_array(items);
+    e.resolve_promise(pid, a);
+    Ok(Value::Undefined)
+}
+
+/// `obs.first()` → `Promise<v|undefined>` — premiere
+/// emission (borne : pas d'unsubscribe amont, marqueur
+/// `done` seul — le flux synchrone est court-circuite par
+/// le `closed` aval).
+fn obs_first(e: &mut Engine, this: Value, _a: &[Value]) -> JsResult<Value> {
+    obs_term_mount(
+        e,
+        this,
+        Vec::new(),
+        obs_first_next,
+        obs_term_resolve_undefined,
+    )
+}
+
+fn obs_first_next(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
+    let st = arg(args, 1);
+    if obs_flag(e, &st, "done") {
+        return Ok(Value::Undefined);
+    }
+    e.set_prop_value(st, "done", Value::Bool(true))?;
+    if let Value::Obj(pid) = arg(args, 0) {
+        e.resolve_promise(pid, arg(args, 2));
+    }
+    Ok(Value::Undefined)
+}
+
+/// `obs.last()` → `Promise<v|undefined>` — derniere
+/// emission avant `complete`.
+fn obs_last(e: &mut Engine, this: Value, _a: &[Value]) -> JsResult<Value> {
+    obs_term_mount(e, this, Vec::new(), obs_last_next, obs_last_complete)
+}
+
+fn obs_last_next(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
+    let st = arg(args, 1);
+    if obs_flag(e, &st, "done") {
+        return Ok(Value::Undefined);
+    }
+    e.set_prop_value(st.clone(), "v", arg(args, 2))?;
+    e.set_prop_value(st, "has", Value::Bool(true))?;
+    Ok(Value::Undefined)
+}
+
+fn obs_last_complete(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
+    if let Value::Obj(pid) = arg(args, 0) {
+        let st = arg(args, 1);
+        let v = e.get_prop_value(st, "v").unwrap_or(Value::Undefined);
+        e.resolve_promise(pid, v);
+    }
+    Ok(Value::Undefined)
+}
+
+/// `obs.every(f)` → `Promise<bool>` — court-circuite au
+/// premier falsy.
+fn obs_every(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
+    let f = arg(args, 0);
+    if !e.is_callable(f.clone()) {
+        return Err(e.type_error("Observable.every: callback is not a function"));
+    }
+    obs_term_mount(e, this, vec![f], obs_every_next, obs_bool_complete_true)
+}
+
+fn obs_every_next(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
+    let st = arg(args, 1);
+    if obs_flag(e, &st, "done") {
+        return Ok(Value::Undefined);
+    }
+    let f = arg(args, 2);
+    let v = arg(args, 3);
+    let i = e
+        .get_prop_value(st.clone(), "i")
+        .ok()
+        .and_then(|x| e.to_number(x).ok())
+        .unwrap_or(0.0);
+    e.set_prop_value(st.clone(), "i", Value::Num(i + 1.0))?;
+    let r = e.call_value(f, Value::Undefined, &[v, Value::Num(i)])?;
+    if !e.to_boolean(r) {
+        e.set_prop_value(st, "done", Value::Bool(true))?;
+        if let Value::Obj(pid) = arg(args, 0) {
+            e.resolve_promise(pid, Value::Bool(false));
+        }
+    }
+    Ok(Value::Undefined)
+}
+
+fn obs_bool_complete_true(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
+    if let Value::Obj(pid) = arg(args, 0) {
+        let st = arg(args, 1);
+        if !obs_flag(e, &st, "done") {
+            e.resolve_promise(pid, Value::Bool(true));
+        }
+    }
+    Ok(Value::Undefined)
+}
+
+/// `obs.some(f)` → `Promise<bool>` — court-circuite au
+/// premier truthy.
+fn obs_some(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
+    let f = arg(args, 0);
+    if !e.is_callable(f.clone()) {
+        return Err(e.type_error("Observable.some: callback is not a function"));
+    }
+    obs_term_mount(e, this, vec![f], obs_some_next, obs_bool_complete_false)
+}
+
+fn obs_some_next(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
+    let st = arg(args, 1);
+    if obs_flag(e, &st, "done") {
+        return Ok(Value::Undefined);
+    }
+    let f = arg(args, 2);
+    let v = arg(args, 3);
+    let i = e
+        .get_prop_value(st.clone(), "i")
+        .ok()
+        .and_then(|x| e.to_number(x).ok())
+        .unwrap_or(0.0);
+    e.set_prop_value(st.clone(), "i", Value::Num(i + 1.0))?;
+    let r = e.call_value(f, Value::Undefined, &[v, Value::Num(i)])?;
+    if e.to_boolean(r) {
+        e.set_prop_value(st, "done", Value::Bool(true))?;
+        if let Value::Obj(pid) = arg(args, 0) {
+            e.resolve_promise(pid, Value::Bool(true));
+        }
+    }
+    Ok(Value::Undefined)
+}
+
+fn obs_bool_complete_false(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
+    if let Value::Obj(pid) = arg(args, 0) {
+        let st = arg(args, 1);
+        if !obs_flag(e, &st, "done") {
+            e.resolve_promise(pid, Value::Bool(false));
+        }
+    }
+    Ok(Value::Undefined)
+}
+
+/// `obs.find(f)` → `Promise<v|undefined>` — premier match.
+fn obs_find(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
+    let f = arg(args, 0);
+    if !e.is_callable(f.clone()) {
+        return Err(e.type_error("Observable.find: callback is not a function"));
+    }
+    obs_term_mount(e, this, vec![f], obs_find_next, obs_term_resolve_undefined)
+}
+
+fn obs_find_next(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
+    let st = arg(args, 1);
+    if obs_flag(e, &st, "done") {
+        return Ok(Value::Undefined);
+    }
+    let f = arg(args, 2);
+    let v = arg(args, 3);
+    let i = e
+        .get_prop_value(st.clone(), "i")
+        .ok()
+        .and_then(|x| e.to_number(x).ok())
+        .unwrap_or(0.0);
+    e.set_prop_value(st.clone(), "i", Value::Num(i + 1.0))?;
+    let r = e.call_value(f, Value::Undefined, &[v.clone(), Value::Num(i)])?;
+    if e.to_boolean(r) {
+        e.set_prop_value(st, "done", Value::Bool(true))?;
+        if let Value::Obj(pid) = arg(args, 0) {
+            e.resolve_promise(pid, v);
+        }
+    }
+    Ok(Value::Undefined)
+}
+
+/// Installe `Observable` + `Observable.prototype` (operateurs
+/// et terminateurs reels — JS-C560).
+pub(crate) fn install_observable(e: &mut Engine) {
+    let p = e.new_object();
+    let tag = e.str_val("Observable");
+    e.set_own(p, crate::interp::SYM_TO_STRING_TAG, tag, false);
+    for (m, f) in [
+        ("subscribe", obs_subscribe as crate::heap::NativeFn),
+        ("map", obs_map),
+        ("filter", obs_filter),
+        ("take", obs_take),
+        ("drop", obs_drop),
+        ("scan", obs_scan),
+        ("flatMap", obs_flatmap),
+        ("concatMap", obs_flatmap),
+        ("switchMap", obs_flatmap),
+        ("catch", obs_catch),
+        ("finally", obs_finally),
+        ("inspect", obs_inspect),
+        ("takeUntil", obs_take_until),
+        ("forEach", obs_for_each),
+        ("reduce", obs_reduce),
+        ("toArray", obs_to_array),
+        ("first", obs_first),
+        ("last", obs_last),
+        ("every", obs_every),
+        ("some", obs_some),
+        ("find", obs_find),
+    ] {
+        e.add_method(p, m, f);
+    }
+    let f = e.native_fn("Observable", observable_ctor);
+    if let Value::Obj(cid) = f {
+        e.set_own(cid, "prototype", Value::Obj(p), false);
+        e.set_own(p, "constructor", f.clone(), false);
+        let from = e.native_fn("from", observable_from);
+        e.set_own(cid, "from", from, false);
+    }
+    let g = e.global;
+    e.set_own(g, "Observable", f, false);
+}

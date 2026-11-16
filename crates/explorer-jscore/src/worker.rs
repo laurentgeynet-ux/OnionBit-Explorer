@@ -699,6 +699,12 @@ impl Engine {
             let f = self.bound_native("hostMethod", Self::host_method, vec![namev]);
             self.set_own(p, name, f, true);
         }
+        // Handlers IDL présents sur le proto (JS-C560 :
+        // `'onmessage' in Worker.prototype` — feature-detect
+        // spec ; l'instance les hérite, `null` par défaut).
+        for h in ["onmessage", "onerror", "onmessageerror"] {
+            self.set_own(p, h, Value::Null, true);
+        }
         if let Value::Obj(cid) = v {
             self.set_own(cid, "prototype", Value::Obj(p), false);
             self.set_own(p, "constructor", v.clone(), false);

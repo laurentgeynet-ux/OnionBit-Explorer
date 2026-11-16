@@ -1441,6 +1441,28 @@ pub(crate) fn body_stream(e: &mut Engine, bytes: &[u8]) -> Value {
     rs_obj(e, &d, p)
 }
 
+/// `ReadableStream` fermée livrant le texte en un chunk
+/// `string` — `body.textStream()` (JS-C560 ; mêmes rails
+/// que [`body_stream`], chunk string plutôt qu'octets).
+pub(crate) fn body_text_stream(e: &mut Engine, text: &str) -> Value {
+    let d = Rc::new(RefCell::new(RsData {
+        queue: VecDeque::new(),
+        closed: true,
+        errored: None,
+        pull: None,
+        cancel: None,
+        source: Value::Undefined,
+        locked: false,
+        pending_reads: Vec::new(),
+    }));
+    if !text.is_empty() {
+        let chunk = e.str_val(text);
+        d.borrow_mut().queue.push_back(chunk);
+    }
+    let p = rs_proto(e);
+    rs_obj(e, &d, p)
+}
+
 /// `new TextEncoderStream()` — Encoding API : `TransformStream`
 /// dont le transformer encode chaque chunk en UTF-8
 /// (`Uint8Array` enqueued — spec).

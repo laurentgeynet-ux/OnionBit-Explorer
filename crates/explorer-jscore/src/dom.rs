@@ -390,6 +390,12 @@ pub struct CanvasState {
     pub alpha: f32,
     /// `lineWidth` courant.
     pub line_w: f32,
+    /// Sac clé/valeur des autres props d'état IDL (`font`,
+    /// `textAlign`, `shadowColor`, `globalCompositeOperation`,
+    /// `miterLimit`…) — seules les assignations script y
+    /// entrent ; la lecture sert le défaut spec quand la clé
+    /// est absente (JS-C560).
+    pub extra: std::collections::BTreeMap<String, Value>,
 }
 
 impl Default for CanvasState {
@@ -401,6 +407,7 @@ impl Default for CanvasState {
             stroke: (0, 0, 0, 255),
             alpha: 1.0,
             line_w: 1.0,
+            extra: std::collections::BTreeMap::new(),
         }
     }
 }
@@ -620,6 +627,7 @@ impl MediaElState {
 }
 
 /// A standalone DOM tree: node arena + document root.
+#[allow(clippy::struct_excessive_bools)] // flags are flags.
 #[derive(Debug)]
 pub struct Dom {
     /// Node arena (index = `NodeId`).
@@ -707,6 +715,10 @@ pub struct Dom {
     /// par `document.write`, chemin non tracé) — le prochain
     /// drain déclare « re-parse » plutôt que rejouer à faux.
     journal_poisoned: bool,
+    /// Un `<!doctype …>` a été rencontré au parse — sert
+    /// `document.doctype` (objet synthétique `nodeType` 10 ;
+    /// pas de nœud arène, JS-C560).
+    pub had_doctype: bool,
     /// Slots libres recyclables par [`Dom::alloc`] — remplis
     /// par [`Dom::collect_garbage`] (§B-59 : borne l'arène
     /// sous churn continu ; un id n'entre que si le journal
@@ -944,6 +956,7 @@ impl Dom {
             dead_blocked: Vec::new(),
             pinned: HashSet::new(),
             journal_poisoned: false,
+            had_doctype: false,
             journal_dropped: 0,
             canvases: HashMap::new(),
             media: HashMap::new(),
@@ -4829,6 +4842,18 @@ impl Dom {
                 continue;
             }
             if matches!(cs.get(i + 1), Some('!' | '?')) {
+                // `<!doctype` — pas de nœud (parseur minimal),
+                // mais sa présence est retenue pour
+                // `document.doctype` (JS-C560).
+                if cs[i + 1] == '!' {
+                    let probe: String = cs[i + 2..(i + 9).min(cs.len())]
+                        .iter()
+                        .collect::<String>()
+                        .to_ascii_lowercase();
+                    if probe.starts_with("doctype") {
+                        self.had_doctype = true;
+                    }
+                }
                 while i < cs.len() && cs[i] != '>' {
                     i += 1;
                 }

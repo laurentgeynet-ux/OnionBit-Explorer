@@ -14191,6 +14191,44 @@ chaque gain rapporté contre les **deux** archétypes.
   ancres + `host`/`origin` sans userinfo (partagé avec
   `location`). Famille `SVGFE*Element` installée
   (~194 clés). Verrou `c559_dom_idl` ×6.
+- [x] **JS-C560 — surface « session réelle » (`api` +885 →
+  3259/8099, 40,2 %)** : six lots Pareto. `cli api` pose
+  désormais `install_timers`/`storage`/`xhr(NullTransport)`
+  — rAF/storage/fetch/XHR mesurables. `CanvasRenderingContext2D`
+  : proto peuplé + état `CanvasState.extra` + `getTransform`
+  CTM repliée. `Navigator`/`window`/`Document` membres
+  fréquents (`lastModified`, `designMode`, `parseHTML`,
+  handlers `on*`, `compatMode`, `permissionsPolicy`),
+  `HTMLMediaElement` surface restante, `ElementInternals`
+  global (ARIA + `CustomStateSet` + `ValidityState` chaîné),
+  `TextTrackCue` réel + `VTTCue` chaîné, `PointerEvent`,
+  `TrackEvent`, `SVGSVGElement` méthodes, XHR `timeout`/`on*`/
+  `upload`, `AbortSignal.any`, `Worker` proto `on*`,
+  `Request`/`Response` `bytes`/`textStream`, `Navigation`
+  + satellites (`NavigationHistoryEntry`…), `Observable`
+  complet, `SubtleCrypto`/`PermissionStatus`/`ShadowRoot`/
+  `TextMetrics`/`NavigateEvent`/`SecurityPolicyViolationEvent`/
+  `Touch`/`URLPattern`, interfaces `[Exposed=Worker]` côté
+  worker. Posture honnête partout : rejets `NotSupportedError`,
+  collections vides, `false` — jamais de fausse capacité.
+- [x] **JS-C561 — protos d'interfaces + `FileReaderSync` +
+  `DataTransfer` réel (`api` +239 → 3498/8099, 43,2 %)** :
+  les protos vides se peuplent (membres `in`/`instanceof`
+  exacts) : `Screen*`/`VisualViewport`/`BatteryManager`/
+  `StorageBucket*`/`MutationRecord`/`KeyboardEvent`/`Touch`/
+  `Highlight`+`HighlightRegistry` (setlike/maplike Set/Map
+  réels)/`EventCounts`/`PermissionsPolicy`/`VTTRegion`/
+  `DOMPointReadOnly`/`DOMQuad` (`getBounds` réel)/`FontFace`/
+  `FileReader`. `FileReaderSync` synchrone via `blob_parts`
+  partagé. `DataTransfer` = store formats réel
+  (`setData`/`getData`/`clearData` resynchronisent `types`/
+  `items`). `Element` : `getBoxQuads`/`requestPointerLock`/
+  `pseudo` ; `<input>` `stepUp`/`stepDown`/`showPicker` ;
+  `<table>` sections/lignes spec. **2 bugs réels** :
+  `arr_push`/`length` par `set_own` n'atteignaient pas
+  `ObjKind::Array` (→ `set_prop`) ; `sheet` proto faisait
+  retomber `<link>` nu sur le reflet `""` (→ `Some(Undefined)`
+  explicite). Verrou `c561_bcd_surface` ×6.
 - [x] **JS-C562 — `crypto.subtle` §B-117 : `SHA-1`,
   `AES-CBC`, `generateKey`, `derive*` (PBKDF2/HKDF),
   `exportKey`, `supports()`** : mur vol 852 (odysee,

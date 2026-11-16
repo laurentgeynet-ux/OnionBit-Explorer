@@ -206,6 +206,33 @@ fn ws_proto(e: &mut Engine) -> ObjId {
     }
     let tag = e.str_val("WebSocket");
     e.set_own(p, crate::interp::SYM_TO_STRING_TAG, tag, false);
+    // Membres IDL sur le proto (JS-C560 : `'send' in
+    // WebSocket.prototype` — feature-detect spec) ;
+    // trampolines `this`→`Host::invoke`/`get`/`set`, handlers
+    // `on*` en data props `null` (écriture en propre
+    // d'instance via `Host::set`).
+    crate::dom_host::install_host_proto_members(
+        e,
+        p,
+        &[
+            "send",
+            "close",
+            "addEventListener",
+            "removeEventListener",
+            "dispatchEvent",
+        ],
+        &[
+            "url",
+            "readyState",
+            "bufferedAmount",
+            "extensions",
+            "protocol",
+            "binaryType",
+        ],
+    );
+    for h in ["onopen", "onmessage", "onerror", "onclose"] {
+        e.set_own(p, h, Value::Null, true);
+    }
     e.ws.ws_proto = Some(p);
     p
 }

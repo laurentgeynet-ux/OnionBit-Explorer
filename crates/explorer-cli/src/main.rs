@@ -629,6 +629,16 @@ fn eval_js(path: &str, with_dom: bool) -> ExitCode {
             "<!doctype html><body></body>",
         )));
         e.install_dom(&dom);
+        // Surface « session réelle » (JS-C560) — les globals
+        // que les embedders posent hors `install_dom` :
+        // timers (`setTimeout`/`requestAnimationFrame`…),
+        // `localStorage`/`sessionStorage` (backing neuf
+        // page-locale) et `XMLHttpRequest`/`fetch`/`Headers`/
+        // `Request`/`Response` sur transport mort — requêtes
+        // pendantes, jamais de réponse synthétisée.
+        e.install_timers();
+        e.install_storage(&explorer_jscore::Storage::default());
+        e.install_xhr(std::rc::Rc::new(explorer_jscore::NullTransport));
     }
     if let Some(ops) = std::env::var("EXPLORER_JS_OPS")
         .ok()

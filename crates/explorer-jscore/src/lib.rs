@@ -1515,4 +1515,4 @@ pub use storage::Storage;
 pub use value::{ObjId, Value};
 pub use websocket::{WsEventKind, WsOut, WsRequest, WsTransport};
 pub use worker::{WorkerConfig, WorkerFactory, WorkerLoader, WorkerNetRequest, WorkerNetResponse};
-pub use xhr::{FetchCredentials, FetchMode, XhrRequest, XhrResponse, XhrTransport};
+pub use xhr::{FetchCredentials, FetchMode, NullTransport, XhrRequest, XhrResponse, XhrTransport};
