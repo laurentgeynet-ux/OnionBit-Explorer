@@ -14085,3 +14085,16 @@ chaque gain rapporté contre les **deux** archétypes.
   (meurt avec elle — signature lisible depuis 285). `wmi`
   opt-in = détaché, survit à la session. Vérifié : daemon
   9477 enfant de `cmd` ← session, `shutdown:api` → `EXIT:0`.
+- [x] **JS-C555 — `in` voit les méthodes `Host` (`api`
+  +82)** : `has_prop_walk` ne sondait que `Host::get` —
+  les méthodes `invoke`-only (exposées par `read_prop` en
+  `bound_native`, JS-C341) étaient invisibles à `'m' in
+  host` alors que `typeof` les voyait `'function'`. Bras
+  `h.has_method(key)` ajouté (prédicat pur, avant `get`) ;
+  `SelectionHost::has_method` déclaré (13 noms `invoke`
+  orphelins). Mesuré : `api` 1510 → **1592/8099 (19,7 %)**,
+  sert les jalons N3.1/N3.2 du plan vitrine. Verrou
+  `c555_in_host_methods` ×3 ; `lang` 315 + `dom` 272 verts.
+  Suite file : `invoke` sans `has_method` des autres hôtes,
+  `AbstractRange`, `Range.compare*`/`surroundContents`,
+  `Selection.deleteFromDocument`.

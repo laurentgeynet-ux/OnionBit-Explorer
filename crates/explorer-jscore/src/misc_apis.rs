@@ -656,6 +656,29 @@ impl Host for SelectionHost {
         }))
     }
 
+    fn has_method(&self, name: &str) -> bool {
+        // Contrat : déclare exactement les noms dispatchés par
+        // `invoke` ci-dessous — sans ça `'addRange' in sel` et
+        // `typeof sel.addRange` mentaient (invoke-only invisible,
+        // JS-C555).
+        matches!(
+            name,
+            "toString"
+                | "getRangeAt"
+                | "selectAllChildren"
+                | "collapse"
+                | "collapseToStart"
+                | "collapseToEnd"
+                | "extend"
+                | "addRange"
+                | "removeRange"
+                | "removeAllRanges"
+                | "empty"
+                | "setBaseAndExtent"
+                | "containsNode"
+        )
+    }
+
     fn invoke(
         &self,
         e: &mut Engine,

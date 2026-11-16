@@ -10308,7 +10308,14 @@ impl Engine {
                 check_host = false;
                 if let Some(h) = self.host_of(cid) {
                     crate::host_mark(h.class_name(), key);
-                    if h.get(self, Value::Obj(cid), key)?.is_some() {
+                    // `'m' in host` doit voir les méthodes du
+                    // contrat : `read_prop` les expose déjà en
+                    // fonctions liées (`has_method` →
+                    // `bound_native`) — sans ce bras l'opérateur
+                    // `in` les rendait invisibles (Range,
+                    // Selection, canvas…). Prédicat pur testé
+                    // avant `get` (pas de `Value` allouée).
+                    if h.has_method(key) || h.get(self, Value::Obj(cid), key)?.is_some() {
                         return Ok(true);
                     }
                 }
