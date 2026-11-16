@@ -97,6 +97,16 @@ curl -s http://127.0.0.1:9385/api/tabs/1/console
   (`consent_wall:soft|hard` — vol-agent §8).
 - **Un constat = mesure** (`doc_h`, console, frame jointe) —
   jamais « ça a l'air ».
+- **Capture blanche ≠ verdict** — un `/frame` pris pendant la
+  fenêtre detach §B-134 ou avant l'hydratation montre blanc
+  alors que la page peint 2 s plus tard. Verdict « blanc /
+  non rendu / §B-141 » **exige la frame de fin de dwell** :
+  re-pull après settle (si `calls`/`sched.tally` bougent
+  encore, attendre la quiescence), et idéalement deux pulls
+  byte-identiques espacés (~3-5 s) comme convention
+  « stabilisé ». L'archive `<cible>.png` = la **dernière**
+  frame ; une capture précoce peut être jointe mais nommée
+  avec son offset (`<cible>.t+12s.png`).
 - **Vision (console EAP) = observateur actif** — chaque pull
   `/frame` arme la pompe de rendu (~4/s) : un daemon observé
   en continu fait des passes `paint.raster` qu'un daemon sondé
