@@ -365,10 +365,15 @@ async fn probe_daemon(port: u16) -> bool {
 /// (correctif Étape 256 — l'éviction sur sonde supprimait
 /// définitivement l'annonce d'un processus pourtant sain).
 fn live_announces() -> Vec<explorer_core::daemon_registry::Announce> {
+    use explorer_core::daemon_registry as reg;
+    // Une seule passe `netstat` pour toute la liste — la
+    // vivacité est (pid, image, port lié) : un pid réattribué
+    // n'emporte pas l'annonce du mort.
+    let ports = reg::listening_ports();
     let mut out = Vec::new();
-    for (file, a) in explorer_core::daemon_registry::list() {
-        if explorer_core::daemon_registry::announce_stale(&a) {
-            explorer_core::daemon_registry::remove(&file);
+    for (file, a) in reg::list() {
+        if reg::announce_stale_with(&a, ports.as_ref()) {
+            reg::remove(&file);
         } else {
             out.push(a);
         }
@@ -541,11 +546,19 @@ fn stop_daemon(args: &Value) -> Result<Value, String> {
         .or_else(|| args["port"].as_u64().map(|p| p.to_string()))
         .ok_or("daemon_stop : `daemon` (nom ou port) requis")?;
     let port = select_daemon(&sel)?;
+    // Un pid réattribué peut laisser une annonce périmée sur
+    // ce port : cibler uniquement l'annonce **vivante** —
+    // taskkill sur le pid du fichier mort tuerait un processus
+    // innocent (pid recyclé).
+    let ports = explorer_core::daemon_registry::listening_ports();
     let Some((file, a)) = explorer_core::daemon_registry::list()
         .into_iter()
-        .find(|(_, a)| a.port == port)
+        .find(|(_, a)| {
+            a.port == port
+                && !explorer_core::daemon_registry::announce_stale_with(a, ports.as_ref())
+        })
     else {
-        return Err(format!("aucune annonce pour {sel} — déjà arrêté ?"));
+        return Err(format!("aucune annonce vivante pour {sel} — déjà arrêté ?"));
     };
     // stdio null : le serveur MCP vit sur stdout — la sortie
     // d'un enfant hérité y corromprait le protocole JSON-RPC.

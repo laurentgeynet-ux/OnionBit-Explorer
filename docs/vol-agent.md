@@ -194,7 +194,12 @@ Invoke-RestMethod "$BASE/api/tabs/$tab/layout"   # arbre de boîtes
 annonce : un daemon étranger a un nom/profil qui le trahit
 (field274 : kills croisés par PID entre sessions parallèles —
 la propriété se vérifie, elle ne se devine pas). L'annonce est
-supprimée à l'arrêt propre ; une annonce orpheline = mort dure.
+supprimée à l'arrêt propre ; une annonce orpheline = mort
+dure. **Vivacité** : les lecteurs (`daemon_list`, `daemons`,
+`daemon_stop`) prouvent `(pid vivant + image explorer-daemon
++ port annoncé lié sous ce pid)` — un fichier réclamant un
+PID réattribué à un autre daemon est périmé (étape 284) ;
+ne jamais cibler un PID depuis un fichier sans cette preuve.
 
 **EAP** (`explorer-agent`, websocket agent) : `session.open`
 rend `dirs.daemons` (le même registre) et `session.ping` est

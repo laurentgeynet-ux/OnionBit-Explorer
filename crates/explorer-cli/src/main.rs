@@ -468,11 +468,13 @@ fn daemons_list() -> ExitCode {
         );
         return ExitCode::SUCCESS;
     }
+    // Une seule passe `netstat` : la vivacité est
+    // (pid, image, port lié) — un pid réattribué n'emporte
+    // pas l'annonce du mort (même règle que le broker :
+    // jamais d'éviction sur sonde — cf. Étape 256b).
+    let ports = explorer_core::daemon_registry::listening_ports();
     for (file, a) in &entries {
-        // Mort = pid disparu ou recyclé (même règle que le
-        // broker : une sonde qui timeout n'évince pas —
-        // cf. Étape 256b).
-        if explorer_core::daemon_registry::announce_stale(a) {
+        if explorer_core::daemon_registry::announce_stale_with(a, ports.as_ref()) {
             explorer_core::daemon_registry::remove(file);
             continue;
         }
