@@ -13580,6 +13580,14 @@ chaque gain rapporté contre les **deux** archétypes.
   (`ic_hit`/`ic_miss`/`ic_disarm` au snapshot) pour
   borner la couverture du seul court-circuit existant.
   Dependency-groups = infra lourde, dernier recours.
+- [x] **JS-C565 — `NodeHost::get` : préfiltre négatif,
+  keyset auto-dérivé** — misses non-`_` nommées n563b
+  (~118 ms : `loggingStatus`/`polymerController`/
+  `hasOwnProperty`…). `node_get_keyset()` scanne les
+  littéraux de `include_str!("dom_host.rs")` — sur-ensemble
+  du keyspace, **zéro dérive par construction**. Porte
+  `<form>` (named-getter non borné). Verrou
+  `c565_host_key_prefilter`, `dom` 272.
 - [x] **JS-C564 — `NodeHost::get` : early-exit `_`-prefix**
   — vol n563 (`keys:`+`hns:`) : `__shady`/`__data*`/
   `_signal*`/`polymerController`/`loggingStatus` ~75 k calls

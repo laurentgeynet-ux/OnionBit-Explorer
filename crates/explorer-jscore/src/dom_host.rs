@@ -7111,6 +7111,50 @@ const TAGGED_BOOL_ATTRS: &[(&str, &[&str])] = &[
     ("autoplay", &["audio", "video"]),
 ];
 
+/// JS-C565 — keyset négatif de `NodeHost::get` : sur-ensemble
+/// mécanique de toutes les clés que la voie host peut servir.
+/// Construit en scannant les littéraux `"…"` identifier/kebab
+/// du propre fichier (`include_str!`) : tout bras de match,
+/// table `const` ou comparaison ajoutée au keyspace entre
+/// d'office — **aucune dérive possible**, l'ensemble *est* la
+/// mécanique du match, pas une liste maintenue à la main.
+/// Sur-inclusion inoffensive (le match décide ensuite) ;
+/// seules clés hors littéraux : le named-getter de `<form>`
+/// — le rejet est levé sur ce tag (voir `get`).
+fn node_get_keyset() -> &'static std::collections::HashSet<&'static str> {
+    static SET: std::sync::OnceLock<std::collections::HashSet<&'static str>> =
+        std::sync::OnceLock::new();
+    SET.get_or_init(|| {
+        const SRC: &str = include_str!("dom_host.rs");
+        let b = SRC.as_bytes();
+        let mut set = std::collections::HashSet::new();
+        let mut i = 0;
+        while i + 1 < b.len() {
+            if b[i] == b'"' {
+                let s = i + 1;
+                let mut j = s;
+                while j < b.len() && b[j] != b'"' {
+                    j += 1;
+                }
+                let lit = &SRC[s..j];
+                if !lit.is_empty()
+                    && lit.len() <= 64
+                    && lit
+                        .bytes()
+                        .all(|c| c.is_ascii_alphanumeric() || c == b'_' || c == b'$' || c == b'-')
+                    && !lit.starts_with('-')
+                {
+                    set.insert(lit);
+                }
+                i = j + 1;
+            } else {
+                i += 1;
+            }
+        }
+        set
+    })
+}
+
 /// Prop IDL → nom d'attribut — traduction camelCase.
 fn prop_attr_name(key: &str) -> &str {
     match key {
@@ -8615,17 +8659,21 @@ impl Host for NodeHost {
             }
             return Ok(None);
         }
-        // JS-C564 — les clés `_`-préfixées (`__shady`, `__data`,
-        // `_signalProps` — internes ShadyDOM/Polymer, ~75 k
-        // lectures en top-40 `hns:` du vol n563) ne peuvent
-        // jamais être servies par le match host : aucune prop
-        // IDL ne commence par `_` (vérifié — le seul littéral
-        // `"_…"` du fichier est `target="_self"`). Sortie avant
-        // le check shadows + le match ; `Ok(None)` laisse le
-        // moteur résoudre expandos/accesseurs par la voie
-        // ordinaire, exactement comme après miss.
-        if key.starts_with('_') {
-            return Ok(None);
+        // JS-C564/JS-C565 — préfiltre négatif : une clé qui ne
+        // peut jamais être servie par la voie host (`_`-préfixée
+        // — internes ShadyDOM, ~26× mesuré n563b — ou hors du
+        // keyset mécanique — `loggingStatus`, `polymerController`
+        // ~118 ms de misses nommés) sort avant shadows + match +
+        // fallthroughs. Levée sur `<form>` : son named-getter
+        // sert toute clé `id`/`name` d'un contrôle (keyspace non
+        // borné — `form.__x` compris). Expandos et accesseurs
+        // script se résolvent par la voie ordinaire, comme après
+        // miss.
+        if key.starts_with('_') || !node_get_keyset().contains(key) {
+            let is_form = self.dom.borrow().nodes[node as usize].tag == "form";
+            if !is_form {
+                return Ok(None);
+            }
         }
         // Accesseur propre `defineProperty` (JS-C82) : il shadowe
         // la voie host — `read_prop` l'invoquera (spec : own

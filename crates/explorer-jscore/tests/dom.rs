@@ -3614,6 +3614,46 @@ const PAGE_COLL: &str = r#"<html><body>
 <input id="fi" type="file"><input id="tf" type="text">
 </body></html>"#;
 
+/// JS-C565 — préfiltre négatif `NodeHost::get` : clé hors du
+/// keyset mécanique → `Ok(None)` immédiat (skip match), sauf
+/// sur `<form>` dont le named-getter a un keyspace non borné
+/// (`id`/`name` de contrôle — `__x` y compris : la porte
+/// `form` couvre aussi le rejet `_` de JS-C564).
+#[test]
+fn c565_host_key_prefilter() {
+    const P: &str = r#"<html><body>
+<div id="d" class="x" title="t"></div>
+<form id="f"><input name="__x" value="v"><input name="ctl" value="c"></form>
+</body></html>"#;
+    // Hors keyset → undefined, comme après miss (expandos/proto
+    // continuent de primer — même voie qu'avant).
+    assert_eq!(
+        ev_in(
+            P,
+            "var d=document.getElementById('d');(d.polymerController===undefined)+'|'+(d.loggingStatus===undefined)+'|'+(d.__shady===undefined)+'|'+(d.zzNotAProp===undefined)"
+        ),
+        "true|true|true|true"
+    );
+    // Clés servies : reflet IDL + méthode (bound_native via la
+    // voie post-miss) + expando scriptée (propre lookup).
+    assert_eq!(
+        ev_in(
+            P,
+            "var d=document.getElementById('d');d.custom=7;d.title+'|'+d.className+'|'+(typeof d.hasAttribute)+'|'+d.hasAttribute('title')+'|'+d.custom"
+        ),
+        "t|x|function|true|7"
+    );
+    // Porte `<form>` : named-getter intact, y compris pour un
+    // contrôle nommé `__x` (rejet `_` levé là aussi).
+    assert_eq!(
+        ev_in(
+            P,
+            "var f=document.getElementById('f');f.ctl.value+'|'+f.__x.value+'|'+(f.notAControl===undefined)"
+        ),
+        "c|v|true"
+    );
+}
+
 /// `for-of`/`Symbol.iterator` sur les collections host —
 /// `makeIterator` de Google s'appuie dessus (`Error: b` sinon).
 #[test]
