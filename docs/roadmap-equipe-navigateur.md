@@ -13776,6 +13776,141 @@ chaque gain rapporté contre les **deux** archétypes.
   (`ic_hit`/`ic_miss`/`ic_disarm` au snapshot) pour
   borner la couverture du seul court-circuit existant.
   Dependency-groups = infra lourde, dernier recours.
+- [x] **JS-C572 — `nav_direct` partagé par shape receveur** — n571 : 37,8 % de couverture, plafonnée par le fold per-instance (`ObjId` receveur). Fold désormais `(shape receveur, chaîne)` → entrées partagées entre tous les éléments d'une classe ; learn conditionné à `find_own(..)==None` (un dk = « aucune prop own pour la clé » — la shape ne distinguant pas Data/Acc, un receveur porteur ne frappe jamais) ; `nav_pending_dk` réutilise le fold check→learn (un seul fold par miss). `dom` 276 verts.
+- [x] **JS-C571 — bit « accesseur nav direct »** —
+  `nav_direct` `(fold (id,shape) receveur+chaîne ^
+  SCRIPT_ACC_GEN, clé)` : n570 a mesuré `nva` = 65 % du
+  coût nav (gate, pas donnée) — un hit saute le gate
+  complet, `dom_nav_value` sert direct (~150 ns de fold
+  contre ~1 µs de marche `find_own`). Le fold à chaud couvre
+  tout sans époque : ombre own (shape+id receveur), re-proto
+  receveur/milieu (lien suivant diffère), swaps acc
+  (`SCRIPT_ACC_GEN`). Pur `u64` — rien à tracer. Compteurs
+  `nvd_hit`/`nvd_miss`/`nvd_ns`. Verrou
+  `c571_nav_direct_bit` (ombres proto/own/re-liée/retrait),
+  `dom` 276.
+- [x] **JS-C570 — sonde `nva`/`nvb`/`nvc`/`nv_n`** —
+  décomposition du coût `NodeHost::get` sur clés nav :
+  entrée→gate / cascade+match / `dom_nav_value`. Le bit
+  « accesseur nav direct » se pose sur le segment dominant
+  mesuré, pas à l'aveugle.
+- [x] **JS-C569 — `shm` learn-on-second-miss** — porte
+  `shm_gate` : fold payé seulement après le 1er miss d'une
+  clé ; 8 misses sous folds neufs consécutifs →
+  empoisonnement, bypass = marche simple à vie. Fold brut =
+  discriminant polymorphisme vs churn `acc_gen` (warmup
+  wrappers). `shadow_memo` jamais pire que la baseline
+  (n568 : 44 % hits). Compteur `shm_walk`. Verrou
+  `c569_shm_learn_on_second_miss`, `dom` 275.
+- [x] **JS-C568 — compteurs hit/miss des mémos J17** —
+  `navm_hit`/`navm_miss`/`ufn_hit`/`ufn_miss`/`shm_hit`/
+  `shm_miss` au snapshot : le hit-rate se lit au lieu d'être
+  déduit du ratio ns/get (n567 : absolu muet sous variance
+  machine). Verrou `c568_memo_counters_reach_snapshot`,
+  `dom` 274.
+- [x] **JS-C567 — mémo sibling + `hasOwnProperty` universel,
+  staleness `shadow_memo` réparée** — filet n566 : `parentNode`
+  962 ns@36,9 k, `nextSibling` 1,67 µs@9,9 k (scan `position()`
+  O(n)), `hasOwnProperty` 833 ns@19,5 k. **v1 filet n567
+  négatif** : mémo sur les 10 clés nav — parent/enfant = champs
+  O(1) (coût réel = `node_value`+dispatch, pas la lecture) et
+  `SCRIPT_ACC_GEN` en clé tuait le hit-rate. Révision :
+  `nav_memo` restreint aux 4 sibling `(len, NodeId, struct_gen)`,
+  `struct_gen` bumpée en tête des 9 mutateurs structurels ;
+  `SCRIPT_ACC_GEN` hors de `nav_memo`/`univ_fn_memo` (ombre
+  post-fill interceptée par `proto_accessor_shadows` en amont).
+  `proto_universal_fn` : `(fold shapes, clé) → (owner, Value)`,
+  hit re-validé `find_own(owner)`. **Staleness pré-existante**
+  : accesseur remplacé en place = shape identique → `shadow_memo`
+  périmé ; `SCRIPT_ACC_GEN` plié dans sa clé (seule endroit où
+  il est requis). Verrou `c567_nav_memo`, `dom` 273.
+  `davinci_bundle_raw_evals_clean` deadline (722 s vs 60 s) :
+  **pré-existant** à `5ddea8de`, lenteur station, pas C567.
+- [x] **JS-C566 — `intern()` : cache pointeur canonique
+  + `host_mark` paresseux** — `prop_lookup` ré-internait
+  ~2,5 M clés/vol alors que `Expr::Member` porte le `Rc`
+  interné : `PTR_HIT` (ptr+len → `Rc`, adresses canoniques
+  immortelles uniquement) = ~10-20 ns vs ~80-150 ns par
+  lookup, zéro signature. `host_mark` : `Mutex<String>`
+  du breadcrumb `host=` écrit seulement si le flight
+  recorder s'abonne (`host_mark_enable()`) — `load`
+  atomique sinon (~254 k/vol). `dom` 272. Filet A/B
+  (`EXPLORER_NO_PTRHIT`) : même sens, non probant à cette
+  variance de vol — borne basse ~25 ns/miss.
+- [x] **JS-C565 — `NodeHost::get` : préfiltre négatif,
+  keyset auto-dérivé** — misses non-`_` nommées n563b
+  (~118 ms : `loggingStatus`/`polymerController`/
+  `hasOwnProperty`…). `node_get_keyset()` scanne les
+  littéraux de `include_str!("dom_host.rs")` — sur-ensemble
+  du keyspace, **zéro dérive par construction**. Porte
+  `<form>` (named-getter non borné). Verrou
+  `c565_host_key_prefilter`, `dom` 272. **Filet n566** :
+  misses nommées ~9-14× (103-129 ns/get), ~87 ms évités.
+- [x] **JS-C564 — `NodeHost::get` : early-exit `_`-prefix**
+  — vol n563 (`keys:`+`hns:`) : `__shady`/`__data*`/
+  `_signal*`/`polymerController`/`loggingStatus` ~75 k calls
+  top-40, jamais servis par le match host (aucune prop IDL
+  `_`-préfixée). Sortie `Ok(None)` après le garde `!live()` :
+  skip shadows+match, expandos/accesseurs résolus par la voie
+  ordinaire comme après miss. **Filet n563b** : `__shady`
+  1,21 µs → 0,047 µs/get (~26×), clan `_` hors top-40,
+  ~120 ms évités. `dom` 271.
+- [x] **JS-C563 — `classList`/`relList`/`part` : identité
+  `DOMTokenList` stable (spec) + wrapper mémorisé** — chaque
+  `el.classList` allouait un `Rc`+objet heap neufs :
+  `el.classList === el.classList` rendait `false` (violation
+  d'identité, spec : même `DOMTokenList` à chaque accès) ;
+  ~2,3 k gets/vol yt. `NodeHost.tlists[3]` mémorise le wrapper
+  (live-reflection conservée, zéro invalidation, tracé GC,
+  kill-switch `EXPLORER_NO_IMMEMO`). Verrous : identité +
+  mutation via wrapper, `dom` 269 verts.
+- [x] **JS-C562 — `DOMTokenList` : `toggle(force)` corrigé,
+  `set_attr` seulement si la liste change** — `toggle(x,true)`
+  dupliquait le jeton présent (bug spec), et les opérations
+  idempotentes payaient attributeChanged+observers pour rien.
+  Verrous : 5 assertions force/idempotence, `dom` verts.
+- [x] **JS-C561 — `document.body`/`head` : chemin rapide
+  enfants de `<html>`** — `hns:` nommait `body` = 75,6
+  µs/get (39 % de la masse host top-40) : deux marches
+  O(DOM) `by_tag` par get. Résolution en O(enfants de
+  html), repli `ensure_doc_part`/`by_tag` inchangé quand
+  le squelette manque — parité + précision spec. Masse
+  plate ~0,7-2 µs/get (fixe mécanique), pics nommés
+  `clientWidth` ~70 µs, `content`/`owner` ~5 µs.
+- [x] **JS-C560 — `hns:` : attribution temporelle
+  `class:key` autour de `Host::get`** — la traîne est plate
+  par construction (≥ 700 noms pour 96 % des gets) ; la
+  seule question restante = coût fixe vs corps lourds.
+  Chrono opt-in `Instant` par get (observateur ~20-40 ns),
+  dump `hns:` top-40 par ns cumulés.
+- [x] **JS-C559 — mémo identité immuable `NodeHost`** :
+  `immut_get` avant `host_mark` — 6 getters immuables
+  (`tagName`/`localName`/`nodeType`/`nodeName`/
+  `namespaceURI`/`prefix`) servis du slot wrapper, zéro
+  invalidation. `immemo_hit`/`immemo_ins` + kill-switch.
+- [x] **JS-C558 — `prop_ns` décomposé + sonde `host:`** :
+  vol n558 host 39 %/acc 20 %/marche 41 % ; `host:`
+  nomme 100 % HTMLElement, dominé immuables + internes
+  Polymer. Ordre `tracing::enabled!`/`matches!` corrigé.
+- [x] **JS-C557 — pilote `MethodCall` : fusion
+  pré-existante → B rejeté par borne** : `Expr::Call`
+  consomme le callee `Member` sans 2ᵉ dispatch
+  (`Callee::Member`, épine l'exclut volontairement).
+  Résidu générique ~5-16 ns/nœud × 33 M ≈ < 1 % —
+  juge >10 % `body_ns` inatteignable → VM/bytecode
+  morte par mesure structurelle. Addendum ADR-0036.
+- [x] **JS-C556 — flags DBG env sondés une fois** :
+  `env::var` rescannait le bloc env par appel —
+  `DBG_EXPR` par nœud AST dans `eval_inner`,
+  `DBG_DRIVE` par corps+stmt, 3 sondes par tic
+  natif. `env_flag!` → `OnceLock<bool>` (pattern
+  `CTXP`, sites unifiés). Instrument de mesure
+  du confondu `body_ns` avant le pilote fusion.
+- [x] **JS-C555 — `ic_bail` : `bail_dead` vs
+  `bail_kind`** : vol yt 62/38 % — sites morts
+  mégamorphes vs têtes structurellement non-
+  ICables. Résidu ~1 ms sous bruit → avenue IC
+  **fermée par la mesure**.
 - [x] **JS-C554 — params au slot canonique** : `insert_slot`
   écrit `cells[i]` (vérif `ptr_eq||==`, dupes/divergents →
   `insert`), un `borrow` pour la boucle — fini `intern`+

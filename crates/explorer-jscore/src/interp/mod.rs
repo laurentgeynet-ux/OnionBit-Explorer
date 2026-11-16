@@ -120,11 +120,6 @@ pub(crate) fn prom_probe_enable() {
     PROM_PROF.store(true, std::sync::atomic::Ordering::Relaxed);
 }
 
-/// Sonde DI N1.5 — nomme les clés `deferredKey`/`provide`
-/// lues par le rail kevlar (`resolve(VhV)`/`addProvider`)
-/// sous `EXPLORER_CTX_PROBE`.
-static DI_PROBE: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
-
 /// N1.5 — identité de la VM `BotGuard` par `ObjId` : le code de
 /// l'interpréteur est eval'd (`lit.src = None`, invisible à
 /// `bg.call`). `trayride` écrit sur le global → capture de son
@@ -1178,6 +1173,52 @@ pub struct Engine {
     /// le modèle IC « 1 site = 1 entrée » ne couvre pas cette
     /// question bi-dimensionnelle (vol N5.19).
     pub(crate) shadow_memo: FastMap<(u64, u64), bool>,
+    /// JS-C569 — porte learn-on-second-miss de `shadow_memo`
+    /// (`clé internée → (dernier fold brut miss, streak)`,
+    /// `SHM_POISON` = clé empoisonnée polymorphe) : le fold de
+    /// chaîne n'est payé qu'après le premier miss d'une clé, et
+    /// une clé qui manque `SHM_POISON_AFTER` consultations sous
+    /// folds neufs d'affilée reçoit un bypass définitif =
+    /// marche simple — `shadow_memo` ne peut plus être *pire*
+    /// que la baseline sur clés polymorphes (vol n568 : 44 %
+    /// de hits, chaque miss payait fold + write). Le fold brut
+    /// mémorisé discrimine churn (`acc_gen`, clear) et
+    /// polymorphisme.
+    pub(crate) shm_gate: FastMap<u64, (u64, u8)>,
+    /// JS-C567 — mémo des accesseurs **sibling** uniquement
+    /// `(len clé, node, struct_gen)` → `Option<NodeId>` : le scan
+    /// `position()` du `Vec` enfants est le seul coût O(n) des
+    /// accesseurs de navigation — parent/enfant de bord sont des
+    /// champs O(1) servis directement (le mémo n'y cachait que
+    /// du gratuit, filet n567 négatif). `SCRIPT_ACC_GEN` hors de
+    /// la clé : un accesseur script posé post-fill est intercepté
+    /// par `proto_accessor_shadows` en amont (invalidé, lui, par
+    /// `SCRIPT_ACC_GEN`) — `dom_nav_value` n'est consulté que
+    /// quand aucune ombre n'existe. Pur `NodeId` — rien à tracer.
+    pub(crate) nav_memo: FastMap<(u64, u64, u64), Option<u32>>,
+    /// JS-C567 — mémo `(fold shapes chaîne, clé internée)` →
+    /// `(propriétaire, valeur)` des méthodes universelles
+    /// `Object.prototype` lues sur wrappers host
+    /// (`hasOwnProperty`…) : chaîne marchée une fois par
+    /// (chaîne-shape, clé) — le fold capture les mutations
+    /// structurelles de maillon ; au hit, `find_own(owner)`
+    /// re-valide la valeur (un `o.x = f` sur clé existante ne
+    /// change pas la shape — couvre les swaps in-place).
+    pub(crate) univ_fn_memo: FastMap<(u64, u64), Option<(u32, Value)>>,
+    /// JS-C571 — set `(fold (id, shape) receveur+chaîne ^
+    /// SCRIPT_ACC_GEN, clé internée)` des lectures nav
+    /// prouvées « sans ombre » : un hit saute le gate complet
+    /// de `NodeHost::get` (`find_own` + `proto_accessor_shadows`
+    /// + `univ` + cascade) et `dom_nav_value` sert directement.
+    ///
+    /// n570 : `nva` ≈ 1,6 µs/get = 65 % du coût nav alors que
+    /// la donnée est O(1). Le fold couvre la chaîne résolue —
+    /// re-liaisons, upgrades CE et paysage own sans époque
+    /// dédiée ; `SCRIPT_ACC_GEN` couvre les swaps d'accesseurs
+    /// en place (même leçon `shadow_memo`). Pur `u64` — rien à
+    /// tracer GC, pas d'`ObjId` stocké. Borné par
+    /// `NAV_DIRECT_CAP`.
+    pub(crate) nav_direct: FastSet<(u64, u64)>,
     /// JS-C521 — mémo négative `(fold shapes chaîne, clé)` des
     /// lectures absentes : le fold couvre la chaîne entière —
     /// toute mutation d'un maillon la change → correcte par
@@ -1771,6 +1812,10 @@ impl Engine {
             resolved_envs: FastMap::default(),
             ic_map: FastMap::default(),
             shadow_memo: FastMap::default(),
+            shm_gate: FastMap::default(),
+            nav_memo: FastMap::default(),
+            univ_fn_memo: FastMap::default(),
+            nav_direct: FastSet::default(),
             rabs_memo: FastSet::default(),
             rabs_fifo: std::collections::VecDeque::new(),
             ic_off: std::env::var("EXPLORER_NO_IC").is_ok_and(|v| v == "1"),
@@ -5219,7 +5264,7 @@ impl Engine {
     /// périodique nomme la fonction en boucle, avec son bundle
     /// et sa position — complément call-site de `nat-trace`.
     fn profile_tick(&mut self) {
-        if std::env::var_os("EXPLORER_JS_PROFILE").is_none() {
+        if !crate::js_profile() {
             return;
         }
         let label = self.cur_fn_label();
@@ -5243,7 +5288,7 @@ impl Engine {
     /// occurrence et dump le top périodiquement (le nom le plus
     /// probé est le gate le plus probable).
     fn missing_api_tick(&mut self, key: &str) {
-        if std::env::var_os("EXPLORER_MISSING_API").is_none() {
+        if !crate::missing_api() {
             return;
         }
         self.missing_api_total += 1;
@@ -5266,11 +5311,11 @@ impl Engine {
 
     fn nat_trace_tick(&mut self, name: &'static str) {
         self.profile_tick();
-        if std::env::var_os("DBG_NAT").is_some() {
+        if crate::dbg_nat() {
             eprintln!("[nat] {name}");
             return;
         }
-        if std::env::var_os("EXPLORER_NAT_TRACE").is_none() {
+        if !crate::nat_trace() {
             return;
         }
         self.nat_trace_total += 1;
@@ -8328,6 +8373,7 @@ impl Engine {
         if let Some(o) = self.heap.obj(id) {
             if !Self::ic_eligible(o, key) {
                 crate::j17_tick(&crate::J17_IC_BAIL);
+                crate::j17_tick(&crate::J17_IC_BAIL_KIND);
                 return IcOut::Bail;
             }
         }
@@ -8348,6 +8394,7 @@ impl Engine {
             };
             if ent.miss == u8::MAX {
                 crate::j17_tick(&crate::J17_IC_BAIL);
+                crate::j17_tick(&crate::J17_IC_BAIL_DEAD);
                 return IcOut::Bail;
             }
             // JS-C508 — pierre tombale : site prouvé inapprenable,
@@ -9132,25 +9179,26 @@ impl Engine {
         // _flushClients → _readyClients` (ou un appel direct) pour le
         // second flush ; si aucune clé amont ne tire sur le receveur,
         // le callee est une valeur capturée (closure/job natif).
-        if matches!(
-            key,
-            "polySiParams"
-                | "_readyClients"
-                | "_attachDom"
-                | "_flushClients"
-                | "performDataUpdate"
-                | "updatePageData"
-                | "attachPage"
-                | "setActivePage"
-                | "enqueueClient"
-                | "connectedCallback"
-                | "ready"
-                | "_enableProperties"
-                | "_flushProperties"
-                | "_propertiesChanged"
-                | "__enableOrFlushClients"
-                | "_enqueueClient"
-        ) && tracing::enabled!(target: "dom_probe", tracing::Level::INFO)
+        if tracing::enabled!(target: "dom_probe", tracing::Level::INFO)
+            && matches!(
+                key,
+                "polySiParams"
+                    | "_readyClients"
+                    | "_attachDom"
+                    | "_flushClients"
+                    | "performDataUpdate"
+                    | "updatePageData"
+                    | "attachPage"
+                    | "setActivePage"
+                    | "enqueueClient"
+                    | "connectedCallback"
+                    | "ready"
+                    | "_enableProperties"
+                    | "_flushProperties"
+                    | "_propertiesChanged"
+                    | "__enableOrFlushClients"
+                    | "_enqueueClient"
+            )
             && self
                 .find_prop(id, key)
                 .and_then(|p| p.data_value())
@@ -9218,6 +9266,8 @@ impl Engine {
             // getter frais (même sort qu'au bout de la marche).
             IcOut::HitAcc(Prop::Acc { get, .. }) => {
                 return if self.is_callable(get.clone()) {
+                    crate::j17_tick(&crate::J17_ACC_GET);
+                    let _t = crate::j17_scope(&crate::J17_ACC_NS);
                     self.call_value(get, recv, &[])
                 } else {
                     Ok(Value::Undefined)
@@ -9258,6 +9308,8 @@ impl Engine {
                     self.ic_learn_acc(site, key, &links);
                 }
                 if self.is_callable(get.clone()) {
+                    crate::j17_tick(&crate::J17_ACC_GET);
+                    let _t = crate::j17_scope(&crate::J17_ACC_NS);
                     self.call_value(get, recv, &[])
                 } else {
                     Ok(Value::Undefined)
@@ -9726,8 +9778,29 @@ impl Engine {
                 }
                 let h = self.host_of(id);
                 if let Some(h) = &h {
+                    let _t = crate::j17_scope(&crate::J17_HOST_NS);
+                    // JS-C559 — getters immuables servis depuis
+                    // le mémo du wrapper *avant* `host_mark` :
+                    // la population contournée s'effondre dans
+                    // `host:`/`host_get` (filet de mesure).
+                    if let Some(v) = h.immut_get(self, base.clone(), key)? {
+                        return Ok(v);
+                    }
                     crate::host_mark(h.class_name(), key);
-                    if let Some(v) = h.get(self, base.clone(), key)? {
+                    crate::j17_tick(&crate::J17_HOST_GET);
+                    // JS-C560 — chrono `hns:` opt-in
+                    // (`EXPLORER_J17_HOST`) : l'`Instant` n'est
+                    // payé que sonde armée (~20-40 ns/get).
+                    let t0 = crate::j17_host().then(std::time::Instant::now);
+                    let got = h.get(self, base.clone(), key);
+                    if let Some(t0) = t0 {
+                        crate::host_ns_mark(
+                            h.class_name(),
+                            key,
+                            t0.elapsed().as_nanos().min(u128::from(u64::MAX)) as u64,
+                        );
+                    }
+                    if let Some(v) = got? {
                         return Ok(v);
                     }
                 }
@@ -9739,9 +9812,9 @@ impl Engine {
                 // providers attendus vs enregistrés tranchent
                 // « rail mort » (clé jamais fournie) vs « rail
                 // lent ». Sous `EXPLORER_CTX_PROBE`.
-                if (key == "deferredKey" || key == "provide")
+                if crate::ctx_probe()
                     && tracing::enabled!(target: "dom_probe", tracing::Level::INFO)
-                    && *DI_PROBE.get_or_init(|| std::env::var_os("EXPLORER_CTX_PROBE").is_some())
+                    && (key == "deferredKey" || key == "provide")
                 {
                     let kv = match &v {
                         Value::Str(_) | Value::Num(_) | Value::Bool(_) => {

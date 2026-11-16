@@ -436,6 +436,54 @@ fn class_name_and_class_list() {
             el.className"),
         ""
     );
+    // JS-C562 — `toggle(x, true)` sur jeton présent : no-op
+    // retour `true`, pas de doublon ; `add` idempotent ne
+    // ré-écrit pas l'attribut.
+    assert_eq!(
+        ev("var el = document.getElementById('main');\
+            el.className = 'a b';\
+            el.classList.toggle('a', true) + ':' + el.className"),
+        "true:a b"
+    );
+    assert_eq!(
+        ev("var el = document.getElementById('main');\
+            el.className = 'a b';\
+            el.classList.toggle('c', true) + ':' + el.className"),
+        "true:a b c"
+    );
+    assert_eq!(
+        ev("var el = document.getElementById('main');\
+            el.className = 'a b';\
+            el.classList.toggle('a', false) + ':' + el.className"),
+        "false:b"
+    );
+    assert_eq!(
+        ev("var el = document.getElementById('main');\
+            el.className = 'a b';\
+            el.classList.toggle('c', false) + ':' + el.className"),
+        "false:a b"
+    );
+    assert_eq!(
+        ev("var el = document.getElementById('main');\
+            el.className = 'a b';\
+            el.classList.add('a');\
+            el.className"),
+        "a b"
+    );
+    // JS-C563 — spec : le getter `classList` rend le **même**
+    // DOMTokenList à chaque accès (identité stable, réflexion
+    // live de l'attribut conservée).
+    assert_eq!(
+        ev("var el = document.getElementById('main');\
+            el.classList === el.classList"),
+        "true"
+    );
+    assert_eq!(
+        ev("var el = document.getElementById('main');\
+            var l = el.classList; l.add('z');\
+            el.classList === l && el.classList.contains('z')"),
+        "true"
+    );
 }
 
 #[test]
@@ -3590,6 +3638,241 @@ const PAGE_COLL: &str = r#"<html><body>
 <div id="c" class="aa bb" data-x="1" lang="fr"></div>
 <input id="fi" type="file"><input id="tf" type="text">
 </body></html>"#;
+
+/// JS-C565 — préfiltre négatif `NodeHost::get` : clé hors du
+/// keyset mécanique → `Ok(None)` immédiat (skip match), sauf
+/// sur `<form>` dont le named-getter a un keyspace non borné
+/// (`id`/`name` de contrôle — `__x` y compris : la porte
+/// `form` couvre aussi le rejet `_` de JS-C564).
+#[test]
+fn c565_host_key_prefilter() {
+    const P: &str = r#"<html><body>
+<div id="d" class="x" title="t"></div>
+<form id="f"><input name="__x" value="v"><input name="ctl" value="c"></form>
+</body></html>"#;
+    // Hors keyset → undefined, comme après miss (expandos/proto
+    // continuent de primer — même voie qu'avant).
+    assert_eq!(
+        ev_in(
+            P,
+            "var d=document.getElementById('d');(d.polymerController===undefined)+'|'+(d.loggingStatus===undefined)+'|'+(d.__shady===undefined)+'|'+(d.zzNotAProp===undefined)"
+        ),
+        "true|true|true|true"
+    );
+    // Clés servies : reflet IDL + méthode (bound_native via la
+    // voie post-miss) + expando scriptée (propre lookup).
+    assert_eq!(
+        ev_in(
+            P,
+            "var d=document.getElementById('d');d.custom=7;d.title+'|'+d.className+'|'+(typeof d.hasAttribute)+'|'+d.hasAttribute('title')+'|'+d.custom"
+        ),
+        "t|x|function|true|7"
+    );
+    // Porte `<form>` : named-getter intact, y compris pour un
+    // contrôle nommé `__x` (rejet `_` levé là aussi).
+    assert_eq!(
+        ev_in(
+            P,
+            "var f=document.getElementById('f');f.ctl.value+'|'+f.__x.value+'|'+(f.notAControl===undefined)"
+        ),
+        "c|v|true"
+    );
+}
+
+/// JS-C567 — mémo `(len clé, nœud, struct_gen)` des accesseurs
+/// **sibling** : réponses fraîches après chaque mutation
+/// structurelle, déférence au proto si un accesseur script est
+/// posé **après** les lectures mémoïsées.
+#[test]
+fn c567_nav_memo() {
+    const P: &str = r#"<html><body>
+<div id="a"><span id="s1">x</span><b id="s2">y</b></div>
+<div id="b"></div>
+</body></html>"#;
+    // Lectures (fills du mémo) puis résultats directs.
+    assert_eq!(
+        ev_in(
+            P,
+            "var a=document.getElementById('a'),s1=document.getElementById('s1'),s2=document.getElementById('s2');[s1.parentNode.id,a.firstChild.id,s1.nextSibling.id,s2.previousSibling.id,a.lastChild.id].join('|')"
+        ),
+        "a|s1|s2|s1|s2"
+    );
+    // Mutation structurelle post-fill : le mémo doit refléter
+    // le nouvel état (struct_gen bumpé → miss → refill).
+    assert_eq!(
+        ev_in(
+            P,
+            "var a=document.getElementById('a'),s1=document.getElementById('s1');a.firstChild.id;s1.nextSibling.id;var c=document.createElement('i');c.id='i';a.insertBefore(c,s1);var d=document.getElementById('b');d.appendChild(s1);[a.firstChild.id,s1.nextSibling===null,s1.parentNode.id,a.lastChild.id].join('|')"
+        ),
+        "i|true|b|s2"
+    );
+    // Ombre tardive : un accesseur script posé APRÈS des
+    // lectures mémoïsées doit reprendre la main
+    // (`SCRIPT_ACC_GEN` bump → la clé mémo change → gate
+    // `proto_accessor_shadows` re-défère au proto).
+    assert_eq!(
+        ev_in(
+            P,
+            "var s1=document.getElementById('s1');var before=s1.parentNode.id;Object.defineProperty(Node.prototype,'parentNode',{get:function(){return 'SH'},configurable:true});var after=s1.parentNode;before+'|'+after"
+        ),
+        "a|SH"
+    );
+    // `hasOwnProperty` : fn appelable via la voie mémo ; un
+    // expando propre prime la voie universelle.
+    assert_eq!(
+        ev_in(
+            P,
+            "var s1=document.getElementById('s1');s1.zz=1;[typeof s1.hasOwnProperty,s1.hasOwnProperty('zz'),s1.hasOwnProperty('nope')].join('|')"
+        ),
+        "function|true|false"
+    );
+    assert_eq!(
+        ev_in(
+            P,
+            "var s1=document.getElementById('s1');s1.hasOwnProperty=function(k){return 'own-'+k};s1.hasOwnProperty('x')"
+        ),
+        "own-x"
+    );
+}
+
+/// JS-C568 — les compteurs hit/miss des trois mémos
+/// (`nav_memo`, `univ_fn_memo`, `shadow_memo`) atteignent le
+/// snapshot J17 : le filet doit lire le hit-rate, pas le
+/// déduire du ratio ns/get.
+#[test]
+fn c568_memo_counters_reach_snapshot() {
+    const P: &str = r#"<html><body>
+<div id="a"><span id="s1">x</span><b id="s2">y</b></div>
+</body></html>"#;
+    explorer_jscore::j17_enable();
+    // Répétitions : nav (sibling), universel (hasOwnProperty),
+    // ombres (chaque get) — hits + misses des deux côtés.
+    ev_in(
+        P,
+        "var s1=document.getElementById('s1'),s2=document.getElementById('s2');\
+         for(var i=0;i<50;i++){s1.nextSibling;s2.previousSibling;s1.hasOwnProperty('z');s1.parentNode}",
+    );
+    let snap = explorer_jscore::j17_snapshot();
+    for k in ["navm_hit", "ufn_hit", "shm_hit"] {
+        assert!(snap.contains(k), "compteur {k} absent de {snap}");
+    }
+}
+
+/// JS-C569 — learn-on-second-miss de `proto_accessor_shadows` :
+/// le fold n'est payé qu'après le premier miss d'une clé ; une
+/// clé à misses consultés consécutifs est empoisonnée → bypass
+/// définitif (marche simple, coût = baseline) sans casser la
+/// détection d'ombre.
+#[test]
+fn c569_shm_learn_on_second_miss() {
+    const P: &str = r#"<html><body><div id="a"><span id="s1">x</span></div></body></html>"#;
+    explorer_jscore::j17_enable();
+    // Ombre scriptée détectée dès le premier contact (marche
+    // simple — le mémo n'est pas nécessaire pour voir).
+    assert_eq!(
+        ev_in(
+            P,
+            "var s1=document.getElementById('s1');Object.defineProperty(Node.prototype,'parentNode',{get:function(){return 'SH'},configurable:true});s1.parentNode"
+        ),
+        "SH"
+    );
+    // Polymorphisme forcé : la shape de `Node.prototype` change
+    // entre les lectures → fold distinct → misses consultés →
+    // la clé s'empoisonne ; les appels suivants repassent à la
+    // marche simple (shm_walk) et le résultat reste correct.
+    let w0 = explorer_jscore::J17_SHM_WALK.load(std::sync::atomic::Ordering::Relaxed);
+    assert_eq!(
+        ev_in(
+            P,
+            "var s1=document.getElementById('s1'),r='';for(var i=0;i<16;i++){Node.prototype['zz'+i]=i;r+=s1.isConnected+','};r"
+        ),
+        "true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,"
+    );
+    let w1 = explorer_jscore::J17_SHM_WALK.load(std::sync::atomic::Ordering::Relaxed);
+    // ≥ 7 marches simples sur les 10 lectures : 1er contact +
+    // post-empoisonnement (sans la porte, seul le 1er contact
+    // marcherait — les autres paieraient fold+miss).
+    assert!(
+        w1.saturating_sub(w0) >= 7,
+        "bypass empoisonné absent : shm_walk {w0} -> {w1}"
+    );
+}
+
+/// JS-C571 — bit « accesseur nav direct » : la 2e lecture d'une
+/// clé nav sur une chaîne propre passe par `nav_direct` (hit
+/// compté) ; une ombre tardive (accesseur `defineProperty` sur
+/// le proto, ou accesseur own) invalide par époque/shape et le
+/// gate reprend la main — jamais de valeur host périmée.
+#[test]
+fn c571_nav_direct_bit() {
+    const P: &str = r#"<html><body>
+<div id="a"><span id="s1">x</span><b id="b1">y</b><i id="b2">z</i></div>
+</body></html>"#;
+    explorer_jscore::j17_enable();
+    // Mécanique learn→consult exercée ; le hit-rate n'est PAS
+    // assertable ici : `SCRIPT_ACC_GEN` est process-wide et les
+    // tests parallèles la bumpent — sous churn, 0 hit est le
+    // comportement *conservateur attendu* (mesuré par les vols,
+    // pas par la suite — même discipline que c568 : présence
+    // au snapshot).
+    assert_eq!(
+        ev_in(
+            P,
+            "var s=document.getElementById('s1'),b=document.getElementById('b1'),r='';\
+             for(var i=0;i<40;i++){r+=(s.parentNode===document.getElementById('a'))+','+\
+             (b.nextSibling===document.getElementById('b2'))+','};r.length>0"
+        ),
+        "true"
+    );
+    let snap = explorer_jscore::j17_snapshot();
+    assert!(
+        snap.contains("nvd_miss") || snap.contains("nvd_hit"),
+        "compteurs nvd absents de {snap}"
+    );
+    // Ombre tardive de PROTO : `SCRIPT_ACC_GEN` bump → entrée
+    // périmée → gate → `Ok(None)` → accesseur script servi.
+    assert_eq!(
+        ev_in(
+            P,
+            "var s=document.getElementById('s1');s.parentNode;Object.defineProperty(Node.prototype,'parentNode',{get:function(){return 'SH'},configurable:true});s.parentNode"
+        ),
+        "SH"
+    );
+    // Ombre OWN : `Object.defineProperty` sur le wrapper →
+    // shape bump → entrée périmée → `find_own` reprend.
+    assert_eq!(
+        ev_in(
+            P,
+            "var s=document.getElementById('s1');s.parentNode;Object.defineProperty(s,'parentNode',{get:function(){return 'OWN'},configurable:true});s.parentNode"
+        ),
+        "OWN"
+    );
+    // Re-proto d'un maillon de chaîne (le fold suit le lien
+    // suivant — capture sans époque dédiée) : `p` inséré AVANT
+    // `Node.prototype` (via `Element.prototype`) — son ombre
+    // l'emporte sur l'acc natif de `Node.prototype`. (Re-proto
+    // de `Node.prototype` lui-même = `p` après l'acc natif →
+    // valeur host servie dans les deux mondes, spec.)
+    assert_eq!(
+        ev_in(
+            P,
+            "var s=document.getElementById('s1');s.parentNode;var p={};Object.defineProperty(p,'parentNode',{get:function(){return 'RL'},configurable:true});Object.setPrototypeOf(Element.prototype,p);s.parentNode"
+        ),
+        "RL"
+    );
+    // Retrait de l'ombre (acc_gen bump) : la valeur host est
+    // de nouveau servie — entrée périmée re-apprise.
+    assert_eq!(
+        ev_in(
+            P,
+            "var s=document.getElementById('s1');s.parentNode;\
+             Object.defineProperty(Node.prototype,'parentNode',{get:function(){return 'SH'},configurable:true});\
+             var a=s.parentNode;delete Node.prototype.parentNode;\
+             a+','+(s.parentNode===document.getElementById('a'))"
+        ),
+        "SH,true"
+    );
+}
 
 /// `for-of`/`Symbol.iterator` sur les collections host —
 /// `makeIterator` de Google s'appuie dessus (`Error: b` sinon).

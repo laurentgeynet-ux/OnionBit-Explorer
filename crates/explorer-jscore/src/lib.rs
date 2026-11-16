@@ -126,8 +126,35 @@ pub(crate) fn intern(name: &str) -> std::rc::Rc<str> {
         static INTERNED: std::cell::RefCell<
             std::collections::HashSet<std::rc::Rc<str>>,
         > = std::cell::RefCell::new(std::collections::HashSet::new());
+        // JS-C566 — cache par pointeur canonique : les clés
+        // déjà internées (noms de membres `Rc<str>` de l'AST —
+        // le parseur interne — passés `&*rc`) arrivent avec le
+        // pointeur de l'alloc internée. Cette alloc est
+        // **immortelle** (la table ne retire jamais) → son
+        // adresse ne peut pas être réemployée : `ptr + len`
+        // identiques = mêmes octets (la garde `len` rejette
+        // les tranches `&interned[..n]` qui partagent le ptr).
+        // Hit = hash de pointeur ~10 ns au lieu du hash de
+        // contenu. Les `&str` transitoires n'entrent jamais
+        // (enregistré seulement quand `rc.as_ptr() ==
+        // name.as_ptr()` — adresse canonique) → aucun faux hit
+        // sur buffer recyclé.
+        static PTR_HIT: std::cell::RefCell<
+            std::collections::HashMap<*const u8, std::rc::Rc<str>>,
+        > = std::cell::RefCell::new(std::collections::HashMap::new());
     }
-    INTERNED.with(|set| {
+    // `EXPLORER_NO_PTRHIT=1` désarme le cache (A/B de filet).
+    static PTRHIT_ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    let on =
+        *PTRHIT_ON.get_or_init(|| std::env::var("EXPLORER_NO_PTRHIT").ok().as_deref() != Some("1"));
+    if on {
+        if let Some(rc) = PTR_HIT.with(|m| m.borrow().get(&name.as_ptr()).cloned()) {
+            if rc.len() == name.len() {
+                return rc;
+            }
+        }
+    }
+    let rc = INTERNED.with(|set| {
         let mut set = set.borrow_mut();
         if let Some(s) = set.get(name) {
             return s.clone();
@@ -135,8 +162,43 @@ pub(crate) fn intern(name: &str) -> std::rc::Rc<str> {
         let s: std::rc::Rc<str> = std::rc::Rc::from(name);
         set.insert(s.clone());
         s
-    })
+    });
+    if on && rc.as_ptr() == name.as_ptr() {
+        PTR_HIT.with(|m| m.borrow_mut().insert(name.as_ptr(), rc.clone()));
+    }
+    rc
 }
+
+/// JS-C556 — flags `DBG_*`/`EXPLORER_*` sondés **une fois** :
+/// `std::env::var` rescannait le bloc environnement à chaque
+/// appel — ~40 M lookups/vol rien que dans `eval_inner`
+/// (`DBG_EXPR`), ~7 M dans `exec_body`+stmts (`DBG_DRIVE`),
+/// ~2 M par sonde native. Pattern `OnceLock` (précédent
+/// `CTXP` de `set_own`). Chaque flag = un `AtomicBool`-like
+/// read après init.
+macro_rules! env_flag {
+    ($name:ident, $var:literal) => {
+        /// Voir [`env_flag`] — flag d'environnement caché.
+        pub(crate) fn $name() -> bool {
+            static F: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+            *F.get_or_init(|| std::env::var_os($var).is_some())
+        }
+    };
+}
+env_flag!(dbg_expr, "DBG_EXPR");
+env_flag!(dbg_drive, "DBG_DRIVE");
+// Flag d'environnement caché — son unique callsite est sous
+// `debug_assertions` (`lower_suspend_body`) : l'item est
+// compilé en debug seulement.
+#[cfg(debug_assertions)]
+env_flag!(dbg_lower, "DBG_LOWER");
+env_flag!(dbg_nat, "DBG_NAT");
+env_flag!(ctx_probe, "EXPLORER_CTX_PROBE");
+env_flag!(missing_api, "EXPLORER_MISSING_API");
+env_flag!(js_profile, "EXPLORER_JS_PROFILE");
+env_flag!(nat_trace, "EXPLORER_NAT_TRACE");
+env_flag!(j17_host, "EXPLORER_J17_HOST");
+env_flag!(no_immemo, "EXPLORER_NO_IMMEMO");
 
 /// §B-59 — dernier natif entré dans `call_native`, écrit
 /// inconditionnellement (~20 ns, `&'static str`, zéro alloc).
@@ -332,6 +394,12 @@ pub static J17_IC_LEARN: std::sync::atomic::AtomicU64 = std::sync::atomic::Atomi
 pub static J17_IC_DISARM: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 /// Voir [`J17_IC_HIT`].
 pub static J17_IC_BAIL: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+/// JS-C555 — part des bails `ic_bail` par cause : `bail_dead` =
+/// site désarmé (`miss == MAX`), `bail_kind` = tête inéligible
+/// par construction (la part `ic_bail` restante).
+pub static J17_IC_BAIL_KIND: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+/// Voir [`J17_IC_BAIL_KIND`].
+pub static J17_IC_BAIL_DEAD: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 /// JS-C508 — `ic_nlearn` = tentatives de learn échouées (lien
 /// mort, maillon inéligible, `Acc`, chaîne > cap) — elles posent
 /// une pierre tombale `Dead` ou incrémentent `miss` ;
@@ -618,6 +686,71 @@ pub static J17_ENV_NEW: std::sync::atomic::AtomicU64 = std::sync::atomic::Atomic
 /// V-7 — ns cumulés dans `exec_body` (dispatch du corps —
 /// inclusif : les appels imbriqués comptent dedans).
 pub static J17_BODY_NS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+/// JS-C558 — ns cumulés dans l'invocation d'un **getter
+/// scripté** (`call_value` des deux bras `Prop::Acc` de
+/// `read_prop_at`, inclusifs dans `prop_ns` — le corps du
+/// getter compte dedans). Sépare « la lecture déclenche un
+/// appel » de « la lecture marche ».
+pub static J17_ACC_NS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+/// JS-C558 — invocations de getter scripté (paire de
+/// `J17_ACC_NS` : coût moyen par invocation).
+pub static J17_ACC_GET: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+/// JS-C558 — ns cumulés dans `Host::get` (getters DOM —
+/// inclusifs dans `prop_ns` idem).
+pub static J17_HOST_NS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+/// JS-C558 — `Host::get` servis (paire de `J17_HOST_NS`).
+pub static J17_HOST_GET: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+/// JS-C559 — hits du mémo identité immuable `NodeHost`
+/// (lectures servies sans `dom.borrow`/`alloc` ni dispatch).
+pub static J17_IMMEMO_HIT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+/// JS-C559 — insertions `immemo` (première résolution par
+/// couple wrapper×clé — le volume de wrappers concernés).
+pub static J17_IMMEMO_INS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+/// JS-C568 — hits du mémo sibling `nav_memo` (JS-C567) :
+/// le filet prouve le hit-rate au lieu de le déduire du ratio
+/// ns/get (n567 : l'inflation machine rendait l'absolu muet).
+pub static J17_NAVM_HIT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+/// JS-C568 — misses `nav_memo` (entry absente — `struct_gen`
+/// bumpé ou nœud jamais lu).
+pub static J17_NAVM_MISS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+/// JS-C568 — hits `univ_fn_memo` (entrée utilisée — positive
+/// re-validée ou négative mémoïsée).
+pub static J17_UFN_HIT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+/// JS-C568 — misses `univ_fn_memo` (absente ou positive
+/// périmée → re-marche complète).
+pub static J17_UFN_MISS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+/// JS-C568 — hits `shadow_memo` (`proto_accessor_shadows`).
+pub static J17_SHM_HIT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+/// JS-C568 — misses `shadow_memo`.
+pub static J17_SHM_MISS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+/// JS-C569 — appels `proto_accessor_shadows` servis par la
+/// marche simple sans fold (premier contact ou clé
+/// empoisonnée polymorphe — learn-on-second-miss).
+pub static J17_SHM_WALK: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+/// JS-C570 — décomposition du coût `NodeHost::get` sur les
+/// clés de navigation (armé J17 uniquement) : `nva` =
+/// entrée → fin du gate (live + keyset + `find_own` +
+/// shadows + univ), `nvb` = cascade de cas spéciaux +
+/// match, `nvc` = `dom_nav_value` (+`node_value`).
+/// `nv_n` = appels instrumentés.
+pub static J17_NV_A_NS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+/// Segment `nvb` — voir [`J17_NV_A_NS`].
+pub static J17_NV_B_NS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+/// Segment `nvc` — voir [`J17_NV_A_NS`].
+pub static J17_NV_C_NS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+/// Appels instrumentés — voir [`J17_NV_A_NS`].
+pub static J17_NV_N: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+/// JS-C571 — mémo « accesseur nav direct » (`nav_direct`) :
+/// hits de consultation = lectures servies par le chemin
+/// direct (`dom_nav_value` sans gate).
+pub static J17_NVD_HIT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+/// Consultations `nav_direct` tombées à côté — voir
+/// [`J17_NVD_HIT`].
+pub static J17_NVD_MISS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+/// Temps du segment direct (entrée → hit) — comparable à
+/// `nva` pré-bit. Voir [`J17_NVD_HIT`].
+pub static J17_NVD_NS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 
 /// Gate J17 : les compteurs ci-dessus ne s'incrémentent que si
 /// `EXPLORER_J17_PROF` est posé (non vide/non "0") au premier
@@ -658,7 +791,7 @@ pub fn j17_enable() {
 #[must_use]
 pub fn j17_snapshot() -> String {
     let r = std::sync::atomic::Ordering::Relaxed;
-    let pairs: [(&str, &std::sync::atomic::AtomicU64); 78] = [
+    let pairs: [(&str, &std::sync::atomic::AtomicU64); 100] = [
         ("prop_lookup", &J17_PROP_LOOKUP),
         ("proto_lvl", &J17_PROTO_LVL),
         ("prop_scan", &J17_PROP_SCAN),
@@ -683,6 +816,8 @@ pub fn j17_snapshot() -> String {
         ("ic_learn", &J17_IC_LEARN),
         ("ic_disarm", &J17_IC_DISARM),
         ("ic_bail", &J17_IC_BAIL),
+        ("bail_kind", &J17_IC_BAIL_KIND),
+        ("bail_dead", &J17_IC_BAIL_DEAD),
         ("ic_nlearn", &J17_IC_NLEARN),
         ("ic_purge", &J17_IC_PURGE),
         ("ic_poly", &J17_IC_POLY),
@@ -737,6 +872,26 @@ pub fn j17_snapshot() -> String {
         ("gc_ns", &J17_GC_NS),
         ("env_new", &J17_ENV_NEW),
         ("body_ns", &J17_BODY_NS),
+        ("acc_ns", &J17_ACC_NS),
+        ("acc_get", &J17_ACC_GET),
+        ("host_ns", &J17_HOST_NS),
+        ("host_get", &J17_HOST_GET),
+        ("immemo_hit", &J17_IMMEMO_HIT),
+        ("immemo_ins", &J17_IMMEMO_INS),
+        ("navm_hit", &J17_NAVM_HIT),
+        ("navm_miss", &J17_NAVM_MISS),
+        ("ufn_hit", &J17_UFN_HIT),
+        ("ufn_miss", &J17_UFN_MISS),
+        ("shm_hit", &J17_SHM_HIT),
+        ("shm_miss", &J17_SHM_MISS),
+        ("shm_walk", &J17_SHM_WALK),
+        ("nva_ns", &J17_NV_A_NS),
+        ("nvb_ns", &J17_NV_B_NS),
+        ("nvc_ns", &J17_NV_C_NS),
+        ("nv_n", &J17_NV_N),
+        ("nvd_hit", &J17_NVD_HIT),
+        ("nvd_miss", &J17_NVD_MISS),
+        ("nvd_ns", &J17_NVD_NS),
     ];
     let mut out = String::new();
     for (k, c) in pairs {
@@ -973,6 +1128,48 @@ pub fn j17_snapshot() -> String {
         }
         out.push_str(&format!("keys:{joined}"));
     }
+    // JS-C558 — top-12 dispatches `Host` (`host:class:key=n,…`)
+    // sous `EXPLORER_J17_HOST=1` — nomme les getters/invokes
+    // DOM dominants de `host_ns`.
+    let mut host: Vec<(u64, String)> =
+        J17_HOST_ATTR.with(|m| m.borrow().iter().map(|(k, n)| (*n, k.clone())).collect());
+    host.sort_unstable_by_key(|a| std::cmp::Reverse(a.0));
+    if !host.is_empty() {
+        let joined = host
+            .iter()
+            .take(40)
+            .map(|(n, l)| format!("{l}={n}"))
+            .collect::<Vec<_>>()
+            .join(",");
+        if !out.is_empty() {
+            out.push(' ');
+        }
+        out.push_str(&format!("host:{joined}"));
+    }
+    // JS-C560 — `hns:class:key=ns@n` — paire temporelle de
+    // `host:` (top-40 par ns cumulés, jointure directe avec
+    // le compte `host:` de la même table TLS → ns/get lisible
+    // par entrée, sans dépendre des deux cutoffs top-40).
+    let mut hns: Vec<(u64, String)> =
+        J17_HOST_NS_ATTR.with(|m| m.borrow().iter().map(|(k, n)| (*n, k.clone())).collect());
+    hns.sort_unstable_by_key(|a| std::cmp::Reverse(a.0));
+    if !hns.is_empty() {
+        let joined = J17_HOST_ATTR.with(|m| {
+            let counts = m.borrow();
+            hns.iter()
+                .take(40)
+                .map(|(n, l)| {
+                    let c = counts.get(l).copied().unwrap_or(0);
+                    format!("{l}={n}@{c}")
+                })
+                .collect::<Vec<_>>()
+                .join(",")
+        });
+        if !out.is_empty() {
+            out.push(' ');
+        }
+        out.push_str(&format!("hns:{joined}"));
+    }
     out
 }
 
@@ -1064,6 +1261,21 @@ thread_local! {
     /// for-in, machinerie de frames) en un vol.
     static J17_ENVG_SITES: std::cell::RefCell<
         std::collections::BTreeMap<usize, (String, u64)>,
+    > = const { std::cell::RefCell::new(std::collections::BTreeMap::new()) };
+    /// JS-C558 — `host:` — dispatches `Host` attribués par
+    /// `class:key` (gets + invokes + méthodes feature-detect
+    /// passant par `host_mark`). Opt-in `EXPLORER_J17_HOST=1`,
+    /// dump top-12 au teardown — nomme le dominant de
+    /// `host_ns`.
+    static J17_HOST_ATTR: std::cell::RefCell<
+        std::collections::BTreeMap<String, u64>,
+    > = const { std::cell::RefCell::new(std::collections::BTreeMap::new()) };
+    /// JS-C560 — `hns:` — ns cumulés par `class:key` autour de
+    /// `Host::get` (paire temporelle de `J17_HOST_ATTR`) :
+    /// tranche « coût fixe par get » vs « corps lourds
+    /// nommés » — `hns:key / host:key` = coût moyen par get.
+    static J17_HOST_NS_ATTR: std::cell::RefCell<
+        std::collections::BTreeMap<String, u64>,
     > = const { std::cell::RefCell::new(std::collections::BTreeMap::new()) };
 }
 
@@ -1326,14 +1538,59 @@ impl Drop for J17Scope {
 /// le span natif hôte est nommé ici.
 pub static LAST_HOST: std::sync::Mutex<String> = std::sync::Mutex::new(String::new());
 
+/// JS-C566 — breadcrumb `host=` paresseux : l'écriture
+/// `Mutex<String>` ne court que si un lecteur est abonné
+/// (flight recorder du daemon, armé via [`host_mark_enable`]).
+/// Désarmé : un `load` atomique par appel au lieu du
+/// lock+format sur tout `Host::get`/`invoke` — le marqueur
+/// sert aux post-mortem, pas au chemin chaud.
+static HOST_MARK_ENABLED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// JS-C567 — epoch des installations d'accesseurs : bumpée par
+/// `define_accessor`/`define_accessor_strict`/`set_accessor`
+/// (heap). Clé du mémo `nav_memo` — un accesseur script posé
+/// APRÈS un fill doit re-déférer la lecture au proto
+/// (`proto_accessor_shadows` reprend la main au miss suivant).
+pub(crate) static SCRIPT_ACC_GEN: std::sync::atomic::AtomicU64 =
+    std::sync::atomic::AtomicU64::new(0);
+
+/// Arme l'écriture du breadcrumb `host=` (daemon : à appeler
+/// au démarrage du flight recorder — process-wide).
+pub fn host_mark_enable() {
+    HOST_MARK_ENABLED.store(true, std::sync::atomic::Ordering::Relaxed);
+}
+
 /// Écrit `class:name` dans [`LAST_HOST`] (diagnostic §B-59).
 pub fn host_mark(class: &str, name: &str) {
-    if let Ok(mut g) = LAST_HOST.lock() {
-        g.clear();
-        g.push_str(class);
-        g.push(':');
-        g.push_str(name);
+    if HOST_MARK_ENABLED.load(std::sync::atomic::Ordering::Relaxed) {
+        if let Ok(mut g) = LAST_HOST.lock() {
+            g.clear();
+            g.push_str(class);
+            g.push(':');
+            g.push_str(name);
+        }
     }
+    // JS-C558 — attribution `host:class:name=n` sous
+    // `EXPLORER_J17_HOST=1` (dump `host:` au teardown) :
+    // nomme les getters/invocations DOM dominants dans
+    // `host_ns` (vol n558 : ~39 % de `prop_ns`).
+    if j17_host() {
+        J17_HOST_ATTR.with(|m| {
+            *m.borrow_mut().entry(format!("{class}:{name}")).or_insert(0) += 1;
+        });
+    }
+}
+
+/// JS-C560 — cumule `ns` dans `hns:` (`class:name`) autour de
+/// `Host::get` — la paire temporelle de [`host_mark`]. Opt-in
+/// `EXPLORER_J17_HOST=1` ; le chrono lui-même (~20-40 ns/get)
+/// n'est payé que flag armé (effet d'observateur : les totaux
+/// `hns:` incluent ce coût, l'attribution *relative* reste
+/// valide).
+pub(crate) fn host_ns_mark(class: &str, name: &str, ns: u64) {
+    J17_HOST_NS_ATTR.with(|m| {
+        *m.borrow_mut().entry(format!("{class}:{name}")).or_insert(0) += ns;
+    });
 }
 
 /// §B-59 — dernier frame JS du tick (écrit sous

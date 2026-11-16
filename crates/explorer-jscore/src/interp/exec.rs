@@ -55,7 +55,7 @@ impl Engine {
     pub(crate) fn eval_source(&mut self, src: &str) -> JsResult<Value> {
         // `eval` direct : le texte hérite du strict appelant —
         // early errors (`01`, `delete x`) et effets runtime.
-        if std::env::var_os("EXPLORER_CTX_PROBE").is_some() {
+        if crate::ctx_probe() {
             let wid = match self.get_prop(self.global, "window") {
                 Some(Value::Obj(o)) => format!("{o:?}"),
                 _ => "-".to_string(),
@@ -279,7 +279,7 @@ impl Engine {
         // V-7 : temps cumulé de dispatch de corps (inclusif —
         // les appels imbriqués cumulent dedans).
         let _t = crate::j17_scope(&crate::J17_BODY_NS);
-        if std::env::var("DBG_DRIVE").is_ok() {
+        if crate::dbg_drive() {
             eprintln!(
                 "[exec_body] call body={} stmts depth={} cur_mod={}",
                 body.len(),
@@ -303,10 +303,10 @@ impl Engine {
             // JS-C421 : frontière de statements — balayage GC
             // licite sous pression (env/this/racines semés).
             self.safepoint_gc(env, &this);
-            if std::env::var("DBG_DRIVE").is_ok() {
+            if crate::dbg_drive() {
                 eprintln!("[exec_body] stmt={:?}", std::mem::discriminant(s));
             }
-            if self.ops_total % 256 == 0 && std::env::var("DBG_DRIVE").is_ok() {
+            if self.ops_total % 256 == 0 && crate::dbg_drive() {
                 let st = self.heap.stats();
                 let txt = format!("{s:?}");
                 let short: String = txt.chars().take(200).collect();

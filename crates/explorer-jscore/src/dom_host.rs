@@ -626,6 +626,67 @@ struct NodeHost {
     /// **nouvel occupant** du slot — alias silencieux (§B-126,
     /// même classe qu'ADR-0008 côté explorer-dom).
     epoch: u32,
+    /// JS-C559 — mémo des getters **immuables** ([`immut_slot`])
+    /// indexé par slot : la valeur calculée au premier `get` est
+    /// immuable pour la vie du nœud → le cache vit et meurt avec
+    /// le wrapper (zéro invalidation, zéro table externe — un
+    /// handle mort [`Self::live`] `false` contourne le mémo et
+    /// dégrade par le chemin ordinaire).
+    memo: std::cell::RefCell<[Option<Value>; 6]>,
+    /// JS-C563 — wrappers `DOMTokenList` de l'élément
+    /// (`classList`/`relList`/`part`), indexés par slot : la spec
+    /// exige que le getter rende **le même objet** à chaque
+    /// accès — un wrapper neuf par lecture cassait
+    /// `el.classList === el.classList` et payait
+    /// `Rc`+objet heap par get. Vit et meurt avec le wrapper
+    /// (zéro invalidation : le `ClassListHost` reflète l'attr
+    /// **live** — même valeur, mêmes effets, une seule identité).
+    tlists: std::cell::RefCell<[Option<Value>; 3]>,
+}
+
+/// JS-C559 — whitelist des getters `NodeHost` **immuables** pour
+/// la vie du nœud (tag/kind/namespace/préfixe fixés à la
+/// création) → index du slot `memo`. Tout le reste — internes
+/// framework (`__shady*`/`__data`), états mutables (`className`,
+/// `textContent`…), collections live — passe par le chemin
+/// complet : un getter « immuable » mal classé serait un bug de
+/// fraîcheur invisible.
+fn immut_slot(key: &str) -> Option<usize> {
+    Some(match key {
+        "tagName" => 0,
+        "nodeName" => 1,
+        "localName" => 2,
+        "nodeType" => 3,
+        "namespaceURI" => 4,
+        "prefix" => 5,
+        _ => return None,
+    })
+}
+
+impl NodeHost {
+    /// JS-C563 — `classList`/`relList`/`part` : le getter spec
+    /// rend **le même** `DOMTokenList` à chaque accès. Le wrapper
+    /// est mémorisé sur le `NodeHost` (zéro invalidation —
+    /// `ClassListHost` lit l'attribut live ; un handle mort ne
+    /// passe jamais ici : `get` court-circuite `!live()`). Sous
+    /// `EXPLORER_NO_IMMEMO` le chemin historique (wrapper neuf
+    /// par lecture) est conservé pour l'A/B.
+    fn token_list(&self, e: &mut Engine, attr: &'static str, slot: usize) -> Value {
+        if !crate::no_immemo() {
+            if let Some(v) = self.tlists.borrow()[slot].clone() {
+                return v;
+            }
+        }
+        let v = e.new_iterable_host(Rc::new(ClassListHost {
+            dom: self.dom.clone(),
+            node: self.node,
+            attr,
+        }));
+        if !crate::no_immemo() {
+            self.tlists.borrow_mut()[slot] = Some(v.clone());
+        }
+        v
+    }
 }
 
 /// Sonde §cran-28 — `EXPLORER_STALE_THROW` : les accès sur
@@ -1670,6 +1731,29 @@ fn dom_acc_set(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
     Ok(Value::Undefined)
 }
 
+/// JS-C567 — borne du mémo `nav_memo` (même discipline que
+/// [`SHADOW_MEMO_CAP`] : clear au cap, jamais de gel).
+const NAV_MEMO_CAP: usize = 8192;
+
+/// JS-C567 — réponse DOM brute (`Option<NodeId>`) des
+/// accesseurs **sibling** mémoïsés : le scan `position()` du
+/// `Vec` enfants est le seul vrai travail O(n) de la table —
+/// parent/enfant de bord sont des champs O(1) lus directement
+/// (le mémo n'y cachait que du gratuit, filet n567). `key` ∈
+/// les 4 littéraux du bras mémoïsé de [`dom_nav_value`].
+fn nav_sibling_node(dom: &DomRef, node: NodeId, key: &str) -> Option<NodeId> {
+    let d = dom.borrow();
+    let forward = matches!(key, "nextSibling" | "nextElementSibling");
+    let mut sib = d.sibling(node, forward);
+    while let Some(s) = sib {
+        if !key.ends_with("ElementSibling") || d.nodes[s as usize].kind == NodeKind::Element {
+            break;
+        }
+        sib = d.sibling(s, forward);
+    }
+    sib
+}
+
 /// Accesseur prototype générique « host-first » (JS-C560) —
 /// pour les protos des hôtes non-`NodeHost` (`Ctx2d`, …) dont
 /// le state vit dans le `Host` : `desc.get.call(ctx)` délègue
@@ -1739,6 +1823,99 @@ pub(crate) fn install_host_proto_members(
 /// el)` ne repasse pas par `Host::get`, même discipline JS-C82
 /// que `dom_acc_get` — un accesseur propre `defineProperty` ne
 /// reboucle pas). `None` = prop hors table.
+/// JS-C570 — sous-ensemble « navigation arbre » de l'arm
+/// `dom_nav_value` instrumentée par `nva`/`nvb`/`nvc` (le
+/// front désigné par les filets n568/n569 — la donnée est
+/// O(1), le coût est le dispatch).
+fn nav_dbg_key(key: &str) -> bool {
+    matches!(
+        key,
+        "parentNode"
+            | "parentElement"
+            | "isConnected"
+            | "children"
+            | "childNodes"
+            | "childElementCount"
+            | "firstChild"
+            | "lastChild"
+            | "firstElementChild"
+            | "lastElementChild"
+            | "previousSibling"
+            | "previousElementSibling"
+            | "nextSibling"
+            | "nextElementSibling"
+            | "ownerDocument"
+            | "nodeType"
+    )
+}
+
+/// JS-C571 — borne du mémo « accesseur nav direct »
+/// (`nav_direct` — même discipline que [`NAV_MEMO_CAP`] :
+/// clear au cap, jamais de gel).
+const NAV_DIRECT_CAP: usize = 8192;
+
+/// JS-C571 — clé O(1) du mémo « accesseur nav direct » :
+/// `(fold (shape receveur, chaîne (id, shape)) ^ SCRIPT_ACC_GEN,
+/// clé internée)`. Le fold est recomputé sur les objets *vivants*
+/// à chaque appel — il capture tout ce qui peut invalider le
+/// verdict « aucune ombre d'accesseur » :
+/// - `shape` du receveur (JS-C572 — **pas** l'`ObjId` : le
+///   learn n'a lieu que si `find_own(id, key).is_none()`, donc
+///   une entrée signifie « cette shape n'a *aucune* prop own
+///   pour la clé » — un receveur porteur (Data ou Acc, la
+///   shape ne distingue pas les kinds) a une shape différente
+///   et ne frappe jamais ; partage entre tous les receveurs de
+///   même classe — n571 : per-instance plafonnait à 38 %) ;
+/// - ids des maillons : re-proto du receveur ou d'un maillon
+///   de milieu — le lien *suivant* de la marche diffère →
+///   fold différent (pas besoin d'époque ni de bump
+///   `set_proto` : la marche lit la chaîne résolue, pas un
+///   cache d'elle) ;
+/// - `SCRIPT_ACC_GEN` : install/retrait/mise-à-jour
+///   d'accesseur *en place* (même leçon que `shadow_memo` —
+///   un swap de côtés ne change ni ids ni shapes).
+///
+/// Aucun `ObjId` stocké : l'empreinte seule vit dans le set —
+/// un id recyclé par le GC ne se matérialise que comme une
+/// nouvelle chaîne lors du fold suivant (collision ~2^-64,
+/// même niveau de garantie que `shadow_memo`/`rabs_memo`).
+/// `None` = objet introuvable (ne devrait pas arriver —
+/// `this` est vivant), chemin complet.
+fn nav_direct_key(e: &Engine, id: ObjId, key: &str) -> Option<(u64, u64)> {
+    use std::sync::atomic::Ordering::Relaxed;
+    let mut fold = 0x9E37_79B9_7F4A_7C15u64;
+    let mix_link = |fold: &mut u64, cid: u64, shape: u64| {
+        *fold = fold
+            .wrapping_mul(0x1000_0000_01B3)
+            .wrapping_add(cid)
+            .wrapping_mul(0x1000_0000_01B3)
+            .wrapping_add(shape);
+    };
+    let mut cur = {
+        let o = e.heap.obj(id)?;
+        // JS-C572 — pas d'`ObjId` receveur : le verdict ne
+        // dépend que de la *shape* (paysage de props own — le
+        // learn exige l'absence de la clé) + de la chaîne.
+        // Tous les éléments d'une même classe partagent alors
+        // la clé (n571 : per-instance → couverture plafonnée à
+        // 38 %) ; `u64::MAX` garde un marqueur de position.
+        mix_link(&mut fold, u64::MAX, o.shape());
+        o.proto.clone()
+    };
+    for _ in 0..32 {
+        let Value::Obj(cid) = cur else { break };
+        let Some(o) = e.heap.obj(cid) else { break };
+        mix_link(&mut fold, cid as u64, o.shape());
+        cur = o.proto.clone();
+    }
+    let mix = fold
+        ^ crate::SCRIPT_ACC_GEN
+            .load(Relaxed)
+            .wrapping_mul(0xA24B_AED4_963E_E407);
+    let khash = (crate::intern(key).as_ptr() as usize as u64) ^ (key.len() as u64) << 48;
+    Some((mix, khash))
+}
+
 fn dom_nav_value(
     e: &mut Engine,
     dom: &DomRef,
@@ -1751,23 +1928,7 @@ fn dom_nav_value(
         None => Value::Null,
     };
     Ok(Some(match key {
-        "parentNode" => {
-            let p = dom.borrow().nodes[node as usize].parent;
-            node_or_null(e, p)
-        }
         "isConnected" => Value::Bool(dom.borrow().is_attached(node)),
-        // `parentElement` : spec — `null` quand le parent n'est
-        // pas un élément (la racine `#document` n'est pas un
-        // Element DOM : `html.parentElement` = null).
-        "parentElement" => {
-            let p = {
-                let d = dom.borrow();
-                d.nodes[node as usize]
-                    .parent
-                    .filter(|&p| p != d.root && d.nodes[p as usize].kind == NodeKind::Element)
-            };
-            node_or_null(e, p)
-        }
         "children" => {
             let kids = dom.borrow().element_children(node);
             return Ok(Some(dom_collection(
@@ -1788,6 +1949,22 @@ fn dom_nav_value(
         "childElementCount" => {
             let n = dom.borrow().element_children(node).len();
             Value::Num(n as f64)
+        }
+        "parentNode" => {
+            let p = dom.borrow().nodes[node as usize].parent;
+            node_or_null(e, p)
+        }
+        // `parentElement` : spec — `null` quand le parent n'est
+        // pas un élément (la racine `#document` n'est pas un
+        // Element DOM : `html.parentElement` = null).
+        "parentElement" => {
+            let p = {
+                let d = dom.borrow();
+                d.nodes[node as usize]
+                    .parent
+                    .filter(|&p| p != d.root && d.nodes[p as usize].kind == NodeKind::Element)
+            };
+            node_or_null(e, p)
         }
         "firstChild" | "lastChild" | "firstElementChild" | "lastElementChild" => {
             let c = {
@@ -1810,20 +1987,39 @@ fn dom_nav_value(
             };
             node_or_null(e, c)
         }
+        // JS-C567 — mémo `(clé, nœud, struct_gen)` des accesseurs
+        // **sibling** : le scan `position()` est le seul coût O(n)
+        // de la table. `SCRIPT_ACC_GEN` est volontairement HORS
+        // de la clé — un accesseur script posé post-fill est
+        // intercepté par le gate `proto_accessor_shadows` en amont
+        // (lui-même invalidé par `SCRIPT_ACC_GEN`) : `dom_nav_value`
+        // n'est jamais consulté quand une ombre existe.
         "previousSibling" | "previousElementSibling" | "nextSibling" | "nextElementSibling" => {
-            let forward = matches!(key, "nextSibling" | "nextElementSibling");
-            let c = {
-                let d = dom.borrow();
-                let mut sib = d.sibling(node, forward);
-                while let Some(s) = sib {
-                    if !key.ends_with("ElementSibling")
-                        || d.nodes[s as usize].kind == NodeKind::Element
-                    {
-                        break;
+            // Les 4 clés sibling ont des longueurs distinctes
+            // (11/15/18/22) — `len` est le discriminant gratuit.
+            // `EXPLORER_NO_NAVMEMO=1` désarme (A/B de filet).
+            static NAV_ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+            let c = if *NAV_ON
+                .get_or_init(|| std::env::var("EXPLORER_NO_NAVMEMO").ok().as_deref() != Some("1"))
+            {
+                // Les 4 clés sibling ont des longueurs
+                // distinctes (11/15/18/22) — `len` est le
+                // discriminant gratuit.
+                let mk = (key.len() as u64, node as u64, dom.borrow().struct_gen);
+                if let Some(&hit) = e.nav_memo.get(&mk) {
+                    crate::j17_tick(&crate::J17_NAVM_HIT);
+                    hit
+                } else {
+                    crate::j17_tick(&crate::J17_NAVM_MISS);
+                    let c = nav_sibling_node(dom, node, key);
+                    if e.nav_memo.len() >= NAV_MEMO_CAP {
+                        e.nav_memo.clear();
                     }
-                    sib = d.sibling(s, forward);
+                    e.nav_memo.insert(mk, c);
+                    c
                 }
-                sib
+            } else {
+                nav_sibling_node(dom, node, key)
             };
             node_or_null(e, c)
         }
@@ -2182,6 +2378,8 @@ fn dom_nav_set(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
                 cache,
                 node,
                 epoch,
+                memo: std::cell::RefCell::new([None, None, None, None, None, None]),
+                tlists: std::cell::RefCell::new([None, None, None]),
             };
             host.set_inner_html(node, &s);
         }
@@ -2205,11 +2403,43 @@ fn dom_nav_set(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
 /// polymorphe en clé (toutes les props DOM) — le fold couvre la
 /// chaîne entière, une mutation sur n'importe quel maillon
 /// change la clé du cache. Borné `SHADOW_MEMO_CAP`.
+/// JS-C569 — learn-on-second-miss : le fold n'est construit
+/// qu'après le premier miss d'une clé (`shm_gate`), et
+/// `SHM_POISON_AFTER` misses consultés sous folds **neufs**
+/// d'affilée empoisonnent la clé → marche simple définitive,
+/// jamais pire que la baseline sur clés polymorphes (vol
+/// n568 : 44 % de hits, chaque miss payait fold + insert +
+/// churn d'éviction). Un miss à fold brut *identique* =
+/// churn d'invalidation (`SCRIPT_ACC_GEN` bumpé par les
+/// créations de wrappers en warmup, clear du mémo) — pas une
+/// preuve de polymorphisme, il n'avance pas le streak.
 fn proto_accessor_shadows(e: &mut Engine, id: ObjId, key: &str) -> bool {
-    // Phase 1 — fold des shapes (borne 32 — la chaîne DOM est
-    // courte, un cycle hostile ne boucle pas). §B-114 : les
-    // maillons ne sont collectés qu'au raté de mémo — le Vec
-    // quittait le chemin chaud (un alloc par accès de prop DOM).
+    let khash = (crate::intern(key).as_ptr() as usize as u64) ^ (key.len() as u64) << 48;
+    match e.shm_gate.get(&khash).copied() {
+        // Premier contact — marche simple, clé marquée : le
+        // prochain passage paiera le chemin mémo complet.
+        None => {
+            crate::j17_tick(&crate::J17_SHM_WALK);
+            let answer = shadow_walk(e, id, key);
+            if e.shm_gate.len() >= SHM_GATE_CAP {
+                e.shm_gate.clear();
+            }
+            e.shm_gate.insert(khash, (0, 0));
+            return answer;
+        }
+        // Clé empoisonnée (misses polymorphes répétés) —
+        // bypass définitif : coût = la marche simple, à vie.
+        Some((_, SHM_POISON)) => {
+            crate::j17_tick(&crate::J17_SHM_WALK);
+            return shadow_walk(e, id, key);
+        }
+        Some(_) => {}
+    }
+    // Phase 1 — fold des shapes sans collecte (borne 32 — la
+    // chaîne DOM est courte, un cycle hostile ne boucle pas).
+    // §B-114 : les maillons ne sont re-marchés qu'au raté de
+    // mémo — le Vec quittait le chemin chaud (un alloc par
+    // accès de prop DOM).
     let mut cur = match e.heap.obj(id) {
         Some(o) => o.proto.clone(),
         None => return false,
@@ -2221,13 +2451,30 @@ fn proto_accessor_shadows(e: &mut Engine, id: ObjId, key: &str) -> bool {
         fold = fold.wrapping_mul(0x1000_0000_01B3).wrapping_add(o.shape());
         cur = o.proto.clone();
     }
+    // JS-C567 — le fold est une empreinte de CLÉS : remplacer
+    // les côtés d'un accesseur existant en place ne le change
+    // pas (`defineProperty` sur l'acc natif `parentNode` =
+    // même shape → stale `false` mesuré). `SCRIPT_ACC_GEN`
+    // dans la clé invalide les entrées à chaque install/
+    // retrait/mise à jour d'accesseur — conservateur.
     let memo_key = (
-        fold,
-        (crate::intern(key).as_ptr() as usize as u64) ^ (key.len() as u64) << 48,
+        fold ^ crate::SCRIPT_ACC_GEN
+            .load(std::sync::atomic::Ordering::Relaxed)
+            .wrapping_mul(0xA24B_AED4_963E_E407),
+        khash,
     );
     if let Some(&b) = e.shadow_memo.get(&memo_key) {
+        // Hit — streak remis à zéro (écriture sautée quand la
+        // porte est déjà à 0, cas dominant des clés stables).
+        if let Some((lf, streak)) = e.shm_gate.get(&khash).copied() {
+            if streak != 0 {
+                e.shm_gate.insert(khash, (lf, 0));
+            }
+        }
+        crate::j17_tick(&crate::J17_SHM_HIT);
         return b;
     }
+    crate::j17_tick(&crate::J17_SHM_MISS);
     // Phase 2 — re-marche `find_own` en collectant (une seule
     // fois par (chaîne-shape, clé) distincts ; la chaîne est
     // courte, la re-marche coûte moins que le Vec à chaud).
@@ -2242,24 +2489,9 @@ fn proto_accessor_shadows(e: &mut Engine, id: ObjId, key: &str) -> bool {
         links.push(cid);
         cur = o.proto.clone();
     }
-    let authored_check = |e: &mut Engine, cid: ObjId| -> bool {
-        if let Some(crate::heap::Prop::Acc { get, set, .. }) = e.find_own(cid, key) {
-            let authored = |v: Value| match v {
-                Value::Obj(fid) => matches!(
-                    e.heap.obj(fid).map(|o| &o.kind),
-                    Some(ObjKind::Fun(
-                        crate::heap::Fun::Script { .. } | crate::heap::Fun::Bound { .. }
-                    ))
-                ),
-                _ => false,
-            };
-            return authored(get) || authored(set);
-        }
-        false
-    };
     let mut answer = false;
     for &cid in &links {
-        if authored_check(e, cid) {
+        if authored_acc(e, cid, key) {
             answer = true;
             break;
         }
@@ -2268,11 +2500,180 @@ fn proto_accessor_shadows(e: &mut Engine, id: ObjId, key: &str) -> bool {
         e.shadow_memo.clear();
     }
     e.shadow_memo.insert(memo_key, answer);
+    // Streak : seuls les misses sous fold brut neuf comptent —
+    // un miss à fold identique = churn d'invalidation
+    // (`acc_gen`, clear du cap), pas du polymorphisme.
+    let (lf, streak) = e.shm_gate.get(&khash).copied().unwrap_or((0, 0));
+    let ns = if lf == fold {
+        streak
+    } else {
+        streak.saturating_add(1)
+    };
+    e.shm_gate.insert(
+        khash,
+        (
+            fold,
+            if ns >= SHM_POISON_AFTER {
+                SHM_POISON
+            } else {
+                ns
+            },
+        ),
+    );
     answer
+}
+
+/// JS-C569 — marche simple de [`proto_accessor_shadows`] :
+/// chaîne proto parcourue sans fold ni mémo (premier contact
+/// et clés empoisonnées) — le coût de la baseline pré-mémo,
+/// borne 32 maillons identique au chemin mémoïsé.
+fn shadow_walk(e: &mut Engine, id: ObjId, key: &str) -> bool {
+    let mut cur = match e.heap.obj(id) {
+        Some(o) => o.proto.clone(),
+        None => return false,
+    };
+    for _ in 0..32 {
+        let Value::Obj(cid) = cur else { break };
+        if authored_acc(e, cid, key) {
+            return true;
+        }
+        cur = match e.heap.obj(cid) {
+            Some(o) => o.proto.clone(),
+            None => break,
+        };
+    }
+    false
+}
+
+/// Un `Prop::Acc` n'est une ombre que si un de ses côtés est
+/// une fonction scriptée (`Fun::Script`/`Bound`) — les
+/// accesseurs natifs (`BoundNative`, IDL) ne shadowent pas.
+fn authored_acc(e: &mut Engine, cid: ObjId, key: &str) -> bool {
+    if let Some(crate::heap::Prop::Acc { get, set, .. }) = e.find_own(cid, key) {
+        let authored = |v: Value| match v {
+            Value::Obj(fid) => matches!(
+                e.heap.obj(fid).map(|o| &o.kind),
+                Some(ObjKind::Fun(
+                    crate::heap::Fun::Script { .. } | crate::heap::Fun::Bound { .. }
+                ))
+            ),
+            _ => false,
+        };
+        return authored(get) || authored(set);
+    }
+    false
 }
 
 /// JS-C520 — borne de la mémo `proto_accessor_shadows`.
 const SHADOW_MEMO_CAP: usize = 8192;
+
+/// JS-C569 — misses consultés sous folds neufs consécutifs
+/// avant empoisonnement d'une clé (mémo bypassé à vie =
+/// marche simple). Assez haut pour laisser les clés
+/// multi-états (scan multi-tags) le temps de payer.
+const SHM_POISON_AFTER: u8 = 8;
+/// Marqueur d'empoisonnement dans `shm_gate`.
+const SHM_POISON: u8 = u8::MAX;
+/// Borne de la porte `shm_gate` — clés au-delà redeviennent
+/// « premier contact » (une marche simple chacune, conservateur).
+const SHM_GATE_CAP: usize = 4096;
+
+/// JS-C567 — méthodes universelles `Object.prototype` lues sur
+/// un wrapper host : la lookup marchait toute la chaîne à
+/// chaque appel (~800 ns) alors que la réponse est stable par
+/// `(fold shapes chaîne, clé)` — même patron mémoïsé que
+/// [`proto_accessor_shadows`], le fold capture tout maillon
+/// muté → correct par construction. `None` = pas une clé
+/// universelle, pas de `Prop::Data` en premier propriétaire,
+/// ou valeur non-objet — le chemin normal continue.
+fn proto_universal_fn(e: &mut Engine, id: ObjId, key: &str) -> Option<Value> {
+    // `constructor` exclu : `NodeHost::get` le sert lui-même.
+    if !matches!(
+        key,
+        "hasOwnProperty"
+            | "isPrototypeOf"
+            | "propertyIsEnumerable"
+            | "toLocaleString"
+            | "toString"
+            | "valueOf"
+    ) {
+        return None;
+    }
+    // Une prop propre (data ou accesseur) prime le host — le
+    // chemin ordinaire la sert, ne pas pré-empter.
+    if e.find_own(id, key).is_some() {
+        return None;
+    }
+    let mut cur = e.heap.obj(id)?.proto.clone();
+    let mut links: Vec<ObjId> = Vec::new();
+    let mut fold: u64 = 0x9E37_79B9_7F4A_7C15;
+    for _ in 0..32 {
+        let Value::Obj(cid) = cur else { break };
+        links.push(cid);
+        if let Some(o) = e.heap.obj(cid) {
+            fold = fold.wrapping_mul(0x1000_0000_01B3).wrapping_add(o.shape());
+            cur = o.proto.clone();
+        } else {
+            links.pop();
+            break;
+        }
+    }
+    // `SCRIPT_ACC_GEN` est volontairement HORS de la clé : un
+    // accesseur posé en place sur la chaîne est intercepté par
+    // le gate `proto_accessor_shadows` en amont (lui-même
+    // invalidé par `SCRIPT_ACC_GEN`) ; les swaps data→data et
+    // data→acc sur le propriétaire sont couverts par la
+    // re-validation `find_own(owner)` au hit.
+    let mk = (
+        fold,
+        (crate::intern(key).as_ptr() as usize as u64) ^ (key.len() as u64) << 48,
+    );
+    if let Some(cached) = e.univ_fn_memo.get(&mk).cloned() {
+        // Re-validation `find_own(owner)` : un `o.k = v` sur
+        // clé existante laisse la shape identique — la valeur
+        // peut avoir été swappée sous le fold. Le contrôle
+        // coûte un lookup (~80 ns) au lieu de la chaîne
+        // (~800 ns). GC : un `ObjId` balayé → `find_own`
+        // retourne `None` → miss → refill (discipline
+        // `node_value`).
+        match cached {
+            Some((owner, v @ Value::Obj(_))) => {
+                if matches!(
+                    e.find_own(owner, key),
+                    Some(crate::heap::Prop::Data { value, .. }) if value == v
+                ) {
+                    crate::j17_tick(&crate::J17_UFN_HIT);
+                    return Some(v);
+                }
+            }
+            None => {
+                crate::j17_tick(&crate::J17_UFN_HIT);
+                return None;
+            }
+            _ => {}
+        }
+    }
+    crate::j17_tick(&crate::J17_UFN_MISS);
+    // Premier propriétaire en ordre de chaîne ; un accesseur
+    // en tête → `None` (le chemin normal l'invoquera — un
+    // accesseur script aurait déjà déféré au gate amont).
+    let mut ans = None;
+    for &cid in &links {
+        match e.find_own(cid, key) {
+            Some(crate::heap::Prop::Data { value, .. }) => {
+                ans = Some((cid, value));
+                break;
+            }
+            Some(_) => break,
+            None => {}
+        }
+    }
+    if e.univ_fn_memo.len() >= SHADOW_MEMO_CAP {
+        e.univ_fn_memo.clear();
+    }
+    e.univ_fn_memo.insert(mk, ans.clone());
+    ans.map(|(_, v)| v)
+}
 
 /// Getter d'accesseur de navigation prototype — `bound[0]` = nom
 /// de prop, `this` = le nœud (`desc.get.call(el)`, `ShadyDOM`).
@@ -3314,6 +3715,8 @@ pub(crate) fn node_value(e: &mut Engine, dom: &DomRef, cache: &NodeCache, node: 
         cache: cache.clone(),
         node,
         epoch,
+        memo: std::cell::RefCell::new([None, None, None, None, None, None]),
+        tlists: std::cell::RefCell::new([None, None, None]),
     }));
     if let Value::Obj(id) = v {
         // Sonde §cran-34 — tout wrap d'un tag CE nommé
@@ -7584,8 +7987,29 @@ impl Host for DocumentHost {
                 // rendait le nœud Document → `f.contentDocument.
                 // body.appendChild` jettait `(on HTMLDocument)`
                 // (moin/degiro, web-agri — JS-C208).
-                ensure_doc_part(&self.dom, "body");
-                let n = self.dom.borrow().body();
+                // JS-C561 — chemin rapide : `body` = enfant
+                // élément de `<html>` (spec) — O(enfants de
+                // html) au lieu de DEUX marches O(DOM)
+                // (`ensure_doc_part` + `body()` font chacun un
+                // `by_tag` collecteur ; hns: mesurait ~75 µs/get
+                // sur le DOM yt). Le repli rejoue l'ancien
+                // comportement à l'identique quand le squelette
+                // n'est pas là.
+                let n = {
+                    let d = self.dom.borrow();
+                    let fast = d.document_element().and_then(|h| {
+                        d.element_children(h)
+                            .into_iter()
+                            .find(|&c| d.nodes[c as usize].tag == "body")
+                    });
+                    if let Some(n) = fast {
+                        n
+                    } else {
+                        drop(d);
+                        ensure_doc_part(&self.dom, "body");
+                        self.dom.borrow().body()
+                    }
+                };
                 Ok(Some(node_value(e, &self.dom, &self.cache, n)))
             }
             // `document.activeElement` (CAP-162) — l'élément
@@ -7909,12 +8333,25 @@ impl Host for DocumentHost {
                 // `document.head.insertBefore` au mount).
                 let n = {
                     let mut d = self.dom.borrow_mut();
-                    d.by_tag(d.root, "head").first().copied().or_else(|| {
-                        let h = d.create_element("head");
-                        let html_el = d.by_tag(d.root, "html").first().copied().unwrap_or(d.root);
-                        let first = d.child_nodes(html_el).first().copied();
-                        d.insert_before(html_el, h, first);
-                        Some(h)
+                    // JS-C561 — même chemin rapide que `body` :
+                    // `head` = enfant élément de `<html>` avant
+                    // la marche O(DOM) `by_tag` (repli strict
+                    // sur l'ancien comportement — auto-vive et
+                    // documents exotiques inclus).
+                    let fast = d.document_element().and_then(|h| {
+                        d.element_children(h)
+                            .into_iter()
+                            .find(|&c| d.nodes[c as usize].tag == "head")
+                    });
+                    fast.or_else(|| {
+                        d.by_tag(d.root, "head").first().copied().or_else(|| {
+                            let h = d.create_element("head");
+                            let html_el =
+                                d.by_tag(d.root, "html").first().copied().unwrap_or(d.root);
+                            let first = d.child_nodes(html_el).first().copied();
+                            d.insert_before(html_el, h, first);
+                            Some(h)
+                        })
                     })
                 };
                 Ok(Some(match n {
@@ -9389,6 +9826,50 @@ const TAGGED_BOOL_ATTRS: &[(&str, &[&str])] = &[
     ("playsinline", &["video"]),
     ("disablepictureinpicture", &["video"]),
 ];
+
+/// JS-C565 — keyset négatif de `NodeHost::get` : sur-ensemble
+/// mécanique de toutes les clés que la voie host peut servir.
+/// Construit en scannant les littéraux `"…"` identifier/kebab
+/// du propre fichier (`include_str!`) : tout bras de match,
+/// table `const` ou comparaison ajoutée au keyspace entre
+/// d'office — **aucune dérive possible**, l'ensemble *est* la
+/// mécanique du match, pas une liste maintenue à la main.
+/// Sur-inclusion inoffensive (le match décide ensuite) ;
+/// seules clés hors littéraux : le named-getter de `<form>`
+/// — le rejet est levé sur ce tag (voir `get`).
+fn node_get_keyset() -> &'static std::collections::HashSet<&'static str> {
+    static SET: std::sync::OnceLock<std::collections::HashSet<&'static str>> =
+        std::sync::OnceLock::new();
+    SET.get_or_init(|| {
+        const SRC: &str = include_str!("dom_host.rs");
+        let b = SRC.as_bytes();
+        let mut set = std::collections::HashSet::new();
+        let mut i = 0;
+        while i + 1 < b.len() {
+            if b[i] == b'"' {
+                let s = i + 1;
+                let mut j = s;
+                while j < b.len() && b[j] != b'"' {
+                    j += 1;
+                }
+                let lit = &SRC[s..j];
+                if !lit.is_empty()
+                    && lit.len() <= 64
+                    && lit
+                        .bytes()
+                        .all(|c| c.is_ascii_alphanumeric() || c == b'_' || c == b'$' || c == b'-')
+                    && !lit.starts_with('-')
+                {
+                    set.insert(lit);
+                }
+                i = j + 1;
+            } else {
+                i += 1;
+            }
+        }
+        set
+    })
+}
 
 /// Prop IDL → nom d'attribut — traduction camelCase.
 fn prop_attr_name(key: &str) -> &str {
@@ -10906,10 +11387,49 @@ impl Host for NodeHost {
 
     fn trace(&self, out: &mut Vec<ObjId>) {
         trace_node_cache(&self.cache, out);
+        for v in self.memo.borrow().iter().flatten() {
+            crate::heap::push_value(out, v);
+        }
+        for v in self.tlists.borrow().iter().flatten() {
+            crate::heap::push_value(out, v);
+        }
+    }
+
+    fn immut_get(&self, e: &mut Engine, this: Value, key: &str) -> JsResult<Option<Value>> {
+        let Some(slot) = immut_slot(key) else {
+            return Ok(None);
+        };
+        if crate::no_immemo() {
+            return Ok(None);
+        }
+        // Handle mort (§B-126) → chemin ordinaire (dégradation
+        // `undefined`/refus), jamais de lecture mémoïsée d'un
+        // slot recyclé.
+        if !self.live() {
+            return Ok(None);
+        }
+        if let Some(v) = &self.memo.borrow()[slot] {
+            crate::j17_tick(&crate::J17_IMMEMO_HIT);
+            return Ok(Some(v.clone()));
+        }
+        // Miss : chemin complet, puis mémorisation d'un `Some`
+        // uniquement (`None` = prop inconnue du host — pas une
+        // valeur à figer).
+        let v = self.get(e, this, key)?;
+        if let Some(v) = &v {
+            self.memo.borrow_mut()[slot] = Some(v.clone());
+            crate::j17_tick(&crate::J17_IMMEMO_INS);
+        }
+        Ok(v)
     }
 
     fn get(&self, e: &mut Engine, this: Value, key: &str) -> JsResult<Option<Value>> {
         let node = self.node;
+        // JS-C570 — instrumentation de décomposition du coût
+        // nav : `nva` = entrée → gate, `nvb` = cascade+match,
+        // `nvc` = `dom_nav_value` (+`node_value`). Désarmé hors
+        // J17 (~1 `load` + match).
+        let mut nv_t = (crate::j17_on() && nav_dbg_key(key)).then(std::time::Instant::now);
         // Id obsolète (arène resynchronisée — spectrum
         // `groupChildren`, `nodes[614]` sur 507 — ou slot
         // recyclé, époque divergée, §B-126) → prop absente,
@@ -10955,6 +11475,53 @@ impl Host for NodeHost {
             }
             return Ok(None);
         }
+        // JS-C564/JS-C565 — préfiltre négatif : une clé qui ne
+        // peut jamais être servie par la voie host (`_`-préfixée
+        // — internes ShadyDOM, ~26× mesuré n563b — ou hors du
+        // keyset mécanique — `loggingStatus`, `polymerController`
+        // ~118 ms de misses nommés) sort avant shadows + match +
+        // fallthroughs. Levée sur `<form>` : son named-getter
+        // sert toute clé `id`/`name` d'un contrôle (keyspace non
+        // borné — `form.__x` compris). Expandos et accesseurs
+        // script se résolvent par la voie ordinaire, comme après
+        // miss.
+        if key.starts_with('_') || !node_get_keyset().contains(key) {
+            let is_form = self.dom.borrow().nodes[node as usize].tag == "form";
+            if !is_form {
+                return Ok(None);
+            }
+        }
+        // JS-C571 — bit « accesseur nav direct » : n570 a mesuré
+        // le gate complet (`find_own` + shadows + univ +
+        // cascade) à ~1,6 µs/get (`nva` = 65 % du coût nav)
+        // alors que la donnée est O(1). Un fold
+        // `(shape receveur, chaîne)` déjà marqué « sans
+        // ombre » sert `dom_nav_value` directement — même
+        // valeur, zéro `find_own` par maillon (~150 ns de fold
+        // contre ~1 µs de marche authentifiée). Miss → chemin
+        // complet ci-dessous, qui apprend (insert au bras nav).
+        let mut nav_pending_dk = None;
+        if let Value::Obj(id) = this {
+            if nav_dbg_key(key) {
+                if let Some(dk) = nav_direct_key(e, id, key) {
+                    if e.nav_direct.contains(&dk) {
+                        if let Some(t0) = nv_t {
+                            crate::J17_NVD_NS.fetch_add(
+                                u64::try_from(t0.elapsed().as_nanos()).unwrap_or(u64::MAX),
+                                std::sync::atomic::Ordering::Relaxed,
+                            );
+                        }
+                        crate::j17_tick(&crate::J17_NVD_HIT);
+                        return dom_nav_value(e, &self.dom, &self.cache, node, key);
+                    }
+                    crate::j17_tick(&crate::J17_NVD_MISS);
+                    // Le fold est déjà payé — le learn au bras
+                    // nav le réutilise au lieu de re-marcher
+                    // la chaîne (JS-C572).
+                    nav_pending_dk = Some(dk);
+                }
+            }
+        }
         // Accesseur propre `defineProperty` (JS-C82) : il shadowe
         // la voie host — `read_prop` l'invoquera (spec : own
         // prop > IDL). Sans ça le tracker React posé par
@@ -10969,6 +11536,20 @@ impl Host for NodeHost {
             {
                 return Ok(None);
             }
+            // JS-C567 — méthodes universelles `Object.prototype`
+            // non servies par le match host (`hasOwnProperty`…)
+            // : mémo `(fold, clé)` au lieu de la marche à chaque
+            // appel (~16 ms/vol n566).
+            if let Some(v) = proto_universal_fn(e, id, key) {
+                return Ok(Some(v));
+            }
+        }
+        if let Some(t0) = nv_t {
+            crate::J17_NV_A_NS.fetch_add(
+                u64::try_from(t0.elapsed().as_nanos()).unwrap_or(u64::MAX),
+                std::sync::atomic::Ordering::Relaxed,
+            );
+            nv_t = Some(std::time::Instant::now());
         }
         // `<style>`/`<link rel=stylesheet>` — `el.sheet` :
         // la `CSSStyleSheet` de l'élément (spec — le patron
@@ -11208,12 +11789,11 @@ impl Host for NodeHost {
                     computed: false,
                 }))));
             }
+            // JS-C563 — spec : même `DOMTokenList` à chaque
+            // accès (`el.classList === el.classList`) → wrapper
+            // mémorisé sur le `NodeHost`.
             "classList" => {
-                return Ok(Some(e.new_iterable_host(Rc::new(ClassListHost {
-                    dom: self.dom.clone(),
-                    node,
-                    attr: "class",
-                }))));
+                return Ok(Some(self.token_list(e, "class", 0)));
             }
             // `relList` (§B-14 vol 141/216 philharmonie —
             // addtoany `link.relList.supports('modulepreload')`)
@@ -11226,11 +11806,7 @@ impl Host for NodeHost {
                     _ => "",
                 };
                 return Ok(Some(match tag {
-                    "link" | "a" | "area" | "form" => e.new_iterable_host(Rc::new(ClassListHost {
-                        dom: self.dom.clone(),
-                        node,
-                        attr: "rel",
-                    })),
+                    "link" | "a" | "area" | "form" => self.token_list(e, "rel", 1),
                     _ => Value::Undefined,
                 }));
             }
@@ -11243,11 +11819,7 @@ impl Host for NodeHost {
                     NodeKind::Element
                 );
                 return Ok(Some(if is_el {
-                    e.new_iterable_host(Rc::new(ClassListHost {
-                        dom: self.dom.clone(),
-                        node,
-                        attr: "part",
-                    }))
+                    self.token_list(e, "part", 2)
                 } else {
                     Value::Undefined
                 }));
@@ -11282,6 +11854,37 @@ impl Host for NodeHost {
             | "textContent"
             | "innerText"
             | "nodeType" => {
+                // JS-C571 — learn : ce bras n'est atteint que
+                // si le gate complet a passé (pas d'accesseur
+                // own, pas d'ombre chaîne, pas d'univ) — le
+                // verdict « direct » est stable sous le fold
+                // `(id, shape)` de la chaîne + `SCRIPT_ACC_GEN`
+                // — voir [`nav_direct_key`].
+                if let Value::Obj(id) = this {
+                    // JS-C572 — learn seulement si la clé n'a
+                    // AUCUNE prop own : la shape ne distingue
+                    // pas Data/Acc, un dk « sans own » ne peut
+                    // pas être frappé par un receveur porteur.
+                    if nav_dbg_key(key) && e.find_own(id, key).is_none() {
+                        let dk = nav_pending_dk.or_else(|| nav_direct_key(e, id, key));
+                        if let Some(dk) = dk {
+                            if e.nav_direct.len() >= NAV_DIRECT_CAP {
+                                e.nav_direct.clear();
+                            }
+                            e.nav_direct.insert(dk);
+                        }
+                    }
+                }
+                if let Some(t1) = nv_t {
+                    crate::J17_NV_B_NS.fetch_add(
+                        u64::try_from(t1.elapsed().as_nanos()).unwrap_or(u64::MAX),
+                        std::sync::atomic::Ordering::Relaxed,
+                    );
+                    crate::j17_tick(&crate::J17_NV_N);
+                    return crate::j17_time(&crate::J17_NV_C_NS, || {
+                        dom_nav_value(e, &self.dom, &self.cache, node, key)
+                    });
+                }
                 return dom_nav_value(e, &self.dom, &self.cache, node, key);
             }
             // `data` = `CharacterData` seulement (JS-C342, §B-97
@@ -14708,6 +15311,8 @@ fn adopt_into(e: &mut Engine, v: Value, dst: &DomRef, dst_cache: &NodeCache) -> 
             cache: dst_cache.clone(),
             node: new_id,
             epoch,
+            memo: std::cell::RefCell::new([None, None, None, None, None, None]),
+            tlists: std::cell::RefCell::new([None, None, None]),
         }));
     }
     dst_cache.borrow_mut().insert(new_id, id);
@@ -16917,6 +17522,12 @@ impl Host for ClassListHost {
             .map(|c| c.split_whitespace().map(str::to_string).collect())
             .unwrap_or_default();
         let contains = tokens.iter().any(|t| t == &cls);
+        // JS-C562 — n'écrire `set_attr` (observers +
+        // `attributeChanged` + invalidations) que quand la
+        // liste change : `add`/`toggle(x,true)` sur un jeton
+        // présent ré-écrivaient l'attribut pour rien — et
+        // `toggle(x, true)` **dupliquait** le jeton (spec :
+        // force=true sur présent = no-op retour `true`).
         match name {
             "add" => {
                 if !contains {

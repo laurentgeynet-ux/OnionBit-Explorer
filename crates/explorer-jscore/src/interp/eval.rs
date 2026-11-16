@@ -224,7 +224,7 @@ impl Engine {
 
     #[allow(clippy::too_many_lines)]
     pub(crate) fn eval_inner(&mut self, env: &EnvRef, this: Value, e: &Expr) -> JsResult<Value> {
-        if std::env::var("DBG_EXPR").is_ok() {
+        if crate::dbg_expr() {
             eprintln!("[expr] {:?}", std::mem::discriminant(e));
         }
         // JS-C532 — attribution par variante (les maillons
