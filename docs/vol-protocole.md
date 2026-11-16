@@ -130,7 +130,17 @@ curl -s http://127.0.0.1:9385/api/tabs/1/console
 1. `git rev-parse main` relu (sha binaire vs commits post).
 2. Géométrie : `ref_capture --list` + `geo_diff` par paire
    `*.geom.json` → ligne « x % divergents » au rapport
-   (`hors-mesure` = non jugé, pas une casse).
+   **obligatoire**, même quand elle dit `hors-mesure` ou
+   `non capté (mort §B-xxx)` — une géométrie absente non
+   notée = chaîne non jouée. Conventions du corpus :
+   - refs sous `captures/refs/<url>.ref.json` (produites
+     par `ref_capture.mjs`) — jamais `*.ref.geom.json`
+     à plat : invisible pour `--list`, non mutualisable ;
+   - archiver le diff : `geo_diff --out <site>.geodiff.json` ;
+   - un `.geom.json` vide/échoué s'écrit
+     `{"error":"pas de géométrie","captured":false}` —
+     jamais de texte brut dans un `.json` (casse tout
+     parse en masse).
 3. Rapport gabarit `rapports\_TEMPLATE.md` — en-tête
    (binaire/PID/port/profil), constats avec ID §B ou
    proposition nouvelle entrée, statuts `OUVERT→FIX LIVRÉ
