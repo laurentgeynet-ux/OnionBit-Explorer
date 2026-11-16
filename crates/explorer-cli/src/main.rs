@@ -1233,6 +1233,54 @@ fn fixture_for(name: &str) -> &'static str {
             // long suffisant pour le wrap à 80 px.
             "<body><div><p class=x style=\"width:80px\">un Deux  trois\nquatre cinq six</p></div></body>"
         }
+        // `overflow-clip-margin` (étape 302) — la marge de
+        // clip n'existe que si un enfant DÉBORDE de la
+        // boîte `.x` : le ctx pose `overflow:hidden` + la
+        // taille bornée, l'enfant 200 px dépasse à droite.
+        () if n == "overflow-clip-margin" => {
+            "<body><div class=x><div style=\"width:200px;height:40px;background:red\"></div></div></body>"
+        }
+        // `line-clamp` (étape 302) — le clamp n'a d'oracle
+        // que sur un texte qui DÉPASSE le nombre de lignes
+        // (ctx borne la largeur → multi-lignes) ; un texte
+        // court rend toute valeur inerte par construction.
+        () if n == "line-clamp" => {
+            "<body><div><p class=x>un deux trois quatre cinq six sept huit neuf dix onze</p></div></body>"
+        }
+        // `margin-trim` (étape 302) — s'applique au
+        // conteneur et coupe les marges de l'enfant aux
+        // bords : `.x` = le conteneur, l'enfant porte les
+        // marges à trimer (sans ça, rien à couper).
+        () if n == "margin-trim" => {
+            "<body><div class=x><p style=\"margin-top:30px;margin-bottom:30px\">a</p></div></body>"
+        }
+        // `hanging-punctuation` (étape 302) — `first` ne
+        // pend que si un guillemet ouvre la première ligne
+        // (ctx borne la largeur → wrap déterministe).
+        () if n == "hanging-punctuation" => {
+            "<body><div><p class=x>\"abcdefgh ijklmno pqrst uvw</p></div></body>"
+        }
+        // `text-emphasis-position` (étape 302) — la
+        // position n'a d'effet que sur des marques posées
+        // (ctx `text-emphasis:dot`) — texte CJK pour
+        // `over`/`under`.
+        () if n == "text-emphasis-position" => {
+            "<body><div><p class=x>かなかな</p></div></body>"
+        }
+        // `white-space-trim` (étape 302) — `discard-*` ne
+        // trime que de l'espace PRÉSERVÉ : ctx `pre-wrap` +
+        // espaces en bord de boîte — sous `normal` ils
+        // sont déjà collapsés, rien n'est observable.
+        () if n == "white-space-trim" => {
+            "<body><div><p class=x>  abc def  </p></div></body>"
+        }
+        // `text-spacing-trim` (étape 302) — la compression
+        // CJK n'existe que sur une ponctuation pleine-
+        // chasse en bord de ligne : ctx borne la largeur
+        // pour placer `、` en tête de seconde ligne.
+        () if n == "text-spacing-trim" => {
+            "<body><div><p class=x>abcde、かなかな</p></div></body>"
+        }
         // Défaut — `<p>` dans `<div>` (texte, box, décorations).
         () => "<body><div><p class=x>ok</p></div></body>",
     }
@@ -1420,6 +1468,29 @@ fn context_css(name: &str) -> &'static str {
         "shape-outside:circle(40%)"
     } else if n.starts_with("column-") || n == "columns" {
         "columns:2;column-rule:2px solid black;height:200px"
+    } else if n == "line-clamp" {
+        // Le clamp n'a d'oracle que si le texte wrappe sur
+        // plus de lignes que la valeur — largeur bornée
+        // (étape 302, fixture texte long).
+        "width:80px"
+    } else if n == "hanging-punctuation" {
+        // Le pendage en bord de ligne exige des lignes
+        // bornées (étape 302).
+        "width:80px"
+    } else if n == "text-emphasis-position" {
+        // La position n'est observable que sur des marques
+        // réellement posées (étape 302).
+        "text-emphasis:dot"
+    } else if n == "white-space-trim" {
+        // `discard-*` ne trime que l'espace **préservé** —
+        // sans `pre-wrap` les espaces de bord sont déjà
+        // collapsés par `white-space:normal` (étape 302).
+        "white-space:pre-wrap"
+    } else if n == "text-spacing-trim" {
+        // La compression CJK n'est visible que si la
+        // ponctuation tombe en bord de ligne — largeur
+        // bornée (étape 302).
+        "width:80px"
     } else {
         ""
     }
@@ -2141,7 +2212,11 @@ const INITIAL_EXTRA: &[(&str, &str)] = &[
     ("column-rule-style", "solid"),
     ("rule-style", "solid"),
     ("text-decoration-style", "solid"),
-    ("text-decoration-line", "underline"),
+    // `text-decoration-line` : initiale spec = `none`
+    // (étape 302 — `underline` y était par erreur : la
+    // valeur la plus courante du web partait en `na`,
+    // jamais mesurée, et `none` était mesurée en vain).
+    ("text-decoration-line", "none"),
     // Initiales spec absentes de `initial_value` (couvre
     // une partie du catalogue seulement) — chaque ligne
     // vérifiée à la spec de sa propriété.
@@ -2865,6 +2940,16 @@ const PAINT_NA: &[&str] = &[
     "flood-color",
     "flood-opacity",
     "lighting-color",
+    // Étape 302 — `perspective`/`perspective-origin` : la
+    // borne « non-affine » du dump vaut aussi en pixels
+    // (étape 272), et la perspective n'existe que sur des
+    // enfants en transformée **3D** — eux-mêmes hors-
+    // oracle (`transform:3d`, INITIAL_EXTRA) : aucune
+    // fixture sondable ne peut la rendre visible. Les 10
+    // paires mesuraient la borne, pas un trou (triage
+    // fixtures-inertes 2026-11-16).
+    "perspective",
+    "perspective-origin",
 ];
 
 /// Verdict de [`subfeature_probe`] (étape 270).
@@ -3008,6 +3093,11 @@ const SUBFEATURE_PROBE: &[(&str, &str, &str)] = &[
     ("justify-content", "context_flex", "center"),
     ("position-try-fallbacks", "position-area", "bottom"),
     ("letter-spacing", "percentages", "10%"),
+    // `line-clamp:ellipsis` (sous-feature BCD) = « le
+    // clamp produit une ellipse » — la sonde honnête est
+    // le clamp entier, dont l'effet est la troncature
+    // ellipsée mesurée ok (étape 302).
+    ("line-clamp", "ellipsis", "2"),
     ("line-clamp", "string", "\"x\""),
     ("offset-path", "basic_shape", "circle(30%)"),
     ("offset-path", "path", "path(\"M0 0h10v10z\")"),

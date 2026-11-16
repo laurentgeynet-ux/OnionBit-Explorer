@@ -8136,6 +8136,24 @@ MCP = adaptateur, jamais la base.
   Résidu : quadratique attribut-chaîne (10k tokens
   uniques = 3,8 s) — repr token-set à ordonner. Verrou :
   `classlist_noop_ne_mute_pas` — suite `dom` 272/272.
+- [x] **Étape 302. Triage jauge post-298 —
+  `initial_extra` permuté, sept fixtures armées,
+  `perspective*` → `PAINT_NA`** (`explorer-cli`,
+  constats NAV du journal 2026-11-16 exécutés).
+  `("text-decoration-line","underline")` était
+  faux : initiale spec `none` → `underline`
+  mesurée (0/5 miss = trou exposé, file PIPE).
+  `perspective*` paintv-na : borne non-affine +
+  fixtures 3D hors-oracle — 10 misses
+  mesuraient la borne. Fixtures armées :
+  `overflow-clip-margin` (enfant débordant),
+  `line-clamp` (texte long, sonde
+  `ellipsis`→`2` → 1/3 ok), `margin-trim`,
+  `hanging-punctuation`, `text-emphasis-position`
+  (1/4 ok), `white-space-trim`, `text-spacing-trim`
+  — miss désormais attribuables moteur. `css.values`
+  1144/1767 → **1146/1758 (65,2 %)**, cliquet
+  et cliché `na` re-sauvés.
 - [x] **Étape 300. `values_pareto.mjs` — misses
   × corpus de vols** — la priorisation terrain de la
   file famille : chaque famille avec misses reçoit

@@ -4296,3 +4296,19 @@ shorthand déjà nommée gap cascade en 298), `stroke-linecap`/
 Aucune casse de contrat — lecture et propositions de
 qualification ; le reclass `na` éventuel se décide au
 prochain passage fixtures (avec `bcd_na.json` re-sauvé).
+
+**Soldé à l'étape 302** : permute `initial_extra`
+(`text-decoration-line:underline` → `none` — la valeur
+la plus courante du web est désormais mesurée, miss
+honnête 0/5 = trou moteur exposé), `perspective*` rejoint
+`PAINT_NA` (non-affine + fixtures 3D hors-oracle), sept
+fixtures armées (`overflow-clip-margin`, `line-clamp`,
+`margin-trim`, `hanging-punctuation`,
+`text-emphasis-position`, `white-space-trim`,
+`text-spacing-trim`) — armées, elles mesurent les vrais
+trous moteur au lieu de rester aveugles (`line-clamp`
+1/3 ok, `text-emphasis-position` 1/4 ok ; les autres =
+miss attribuables). `css.values` 1144/1767 → 1146/1758
+(65,2 %), `bcd_na.json` re-sauvé, baseline cliquet
+re-sauvée. `color-scheme` laissé mesuré (pas de ctx
+contrôle posable).
