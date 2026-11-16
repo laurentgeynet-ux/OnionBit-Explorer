@@ -1282,6 +1282,27 @@ sortie : R-12 (layout incrémental) ou cadencement temporel.
   exception, absence = kill d'arbre).
   La prochaine disparition laissera
   une signature — ou n'arrivera plus.
+  **État 2026-11-16** : supplantée —
+  la disparition a laissé sa signature
+  (field274 : `wait` exit `1` =
+  calibration `taskkill /PID /F`,
+  TerminateProcess externe nommé par
+  élimination) ; l'instrumentation
+  demandée est livrée et dépassée :
+  sentinelle `death.log` + flight
+  recorder (étape 276), témoins
+  console, `exit.log`, registre
+  `daemons/` (284), discriminant
+  job-close/killer sélectif (285),
+  `shutdown:api` (296). La famille
+  résiduelle (spawn WMI tué avant
+  exécution — suspect AV/politique)
+  est trackée par **§B-135** de la
+  synthèse corpus ; suspicion fuite
+  `RADAR_PRE_LEAK_64` → probablement
+  le churn natif nommé en §B-114
+  (`pump.offlock` ~3 Go/s). Critère
+  de clôture inchangé.
 
 - [x] **Étape 86. Resync `fieldFocused` —
   outcome `unfocused`** (core + api + ffi
@@ -7972,6 +7993,66 @@ MCP = adaptateur, jamais la base.
   passe. `famTotals` parallèle à `families` : la
   baseline v2 ne stocke toujours que `ok` (format
   inchangé). Vérifié : sortie = table manuelle.
+- [x] **Étape 284. Registre daemons : vivacité `(pid,
+  image, port lié)`** — un PID recyclé n'emporte plus
+  l'annonce du mort (`field274-13520.json` réclamait un PID
+  réattribué à un autre daemon). `listening_ports()` (une
+  passe `netstat`, parse indifférent à la locale) exige le
+  port annoncé réellement lié sous le pid ; indécidable →
+  conserver. Verrous : socket lié réel, pid sain + port
+  absent = périmé.
+- [x] **Étape 285. Protocole de vol : discriminant
+  job-close / killer sélectif** — spawns mesurés :
+  `spawn_daemon.ps1` (WMI) produit `IsProcessInJob=False`
+  (survit session ET provider — canal canonique le plus
+  sûr) ; les daemons `nohup` héritent le job du lanceur.
+  `vol_joblimit.ps1` innocenté (`JOB_MEMORY` seul). Signature
+  : arbre entier mort + `exit.log` absent → job-close ;
+  singleton + `exit.log` → killer sélectif. **Deux registres
+  par worktree** : tout check `daemons/` avant kill regarde
+  les deux arbres.
+- [x] **Étape 286. `geo_smoke` : FAIL fantômes réparés** —
+  le `/` terminal des URLs rejoignait le nom de fichier
+  (`example.com_` vs `example.com` côté `ref_capture`) —
+  alignement sur la règle canonique `-replace '/+$',''`.
+- [x] **Étape 287. `geo_diff` v2 — le score devient
+  honnête** : `#text` filtré par défaut (orphelins
+  garantis : 565/567 lobste.rs = fantômes), appariement
+  spatial en 2 passes par clé `tag|id|cls` (une absence ne
+  décale plus la file), `verdict`/`hors-mesure` (`matched`
+  < seuil → sortie distincte, exit 4), `ref_truncated`
+  signalé.
+- [x] **Étape 288. Protocole de vol : la géométrie
+  normalisée devient artefact standard** — `GET
+  /api/tabs/{id}/geometry` → `captures/<cible>.geom.json`
+  par cible + `ref_capture --list` + `geo_diff` en clôture
+  (documenté vol-agent §3/§7 + gabarit rapport).
+- [x] **Étape 289. `site_harvest` porte d'entrée
+  géométrique autonome** : `-RefCookie` propagé (murs de
+  consentement), `-History` jsonl (dérive attribuable à un
+  commit), `-Record`/`-Replay` (`EXPLORER_NET_RECORD` —
+  circuit déterministe prouvé), `-GeoBaseline`/`-GeoGate`
+  (cliquet de régression layout, exit 3).
+- [x] **Étape 290. `nightly-terrain` réparé — chemins
+  `target/` morts depuis l'étape 262** : 26 runs « success »
+  et zéro diff produit, radar muet depuis le 23/10 (tee +
+  artifacts lisaient `target/site_smoke`). Repointé
+  `Explorer-data/vols/` — un run vert exige ses artefacts.
+- [x] **Étape 291. Smokes : convention release + nommage
+  canonique** — `-Profile debug|release` (défaut release,
+  même convention `site_harvest`) pour cli+daemon ; BOM
+  UTF-8 `geo_smoke.ps1` ; doc `Explorer-data/vols/site-smoke/`.
+- [x] **Étape 292. `geo_diff` : `--min-matched`
+  positionnel ne crashe plus** — la valeur était lue
+  comme fichier moteur ; `Set` nommé `VALUE_OPTS` (convention
+  `ref_capture`) pour toute option à valeur future.
+- [x] **Étape 293. `geo_diff` : classe `moved` +
+  `score_partial` honnête** — distance Chebyshev >
+  `--moved-tol` (50 px défaut) → `moved:true` compté dans
+  le divergent (le gate n'est pas affaibli) ; `ref_truncated`
+  → `score_partial:true` (« sain sur l'échantillon » ≠ « sain »).
+  Lobste.rs : 98,2 % divergents dont 455/642 déplacés —
+  la file lit « casse structurelle ».
 - [x] **Étape 294. Parseur miroir : borne « special » sur
   la marche `li`/`dd`/`dt`/`p` — fin du `li` ré-enraciné
   sous `ol`** (`explorer-jscore`, lobste.rs : `ul.tags`
