@@ -360,9 +360,10 @@ foreach ($site in $sites) {
             $rec.error = "timeout ${NavTimeoutSec}s"
         } elseif ($p.ExitCode -ne 0) {
             if ($reportOk) {
-                # Le flag détecté à l'usage est peut-être d'une
-                # autre forme — repli sans --report, une fois.
-                $reportOk = $false
+                # Repli par site : un exit != 0 est presque
+                # toujours un échec de navigation, pas un rejet
+                # du flag (déjà validé sur le texte d'usage) — on
+                # ne désactive donc PAS $reportOk globalement.
                 $argList = @('shot', $site, $png, $Viewport)
                 $p = Start-Process -FilePath $cli `
                     -ArgumentList $argList -NoNewWindow -PassThru `

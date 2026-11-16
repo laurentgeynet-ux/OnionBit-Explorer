@@ -13410,9 +13410,14 @@ croître la surface navigateur mesurée (`api` 1510/8099, 18,6 %).
 
 ### Sprint N4 — terrain (`site_harvest` = le signal qui ordonne)
 
-- [ ] **Census corpus réel** : `css.value.dropped.*`/`html.err.*`
+- [x] **Census corpus réel** : `css.value.dropped.*`/`html.err.*`
   par fréquence — ordonne la file PIPE (sprint 1 candidats déjà
-  posés) et les priorités api N2.
+  posés) et les priorités api N2. Mesuré 2026-11-16 sur 46/49
+  sites réels (vols 849–854) : `html.err` quasi-muet
+  (`ignored_token` ×13), `value.dropped` dominé par les mots-clés
+  vendor de sizing intrinsèque (`fit-content`/`min/max-content`
+  `-moz`/`-webkit` ≈ 47 % des drops) — verdict complet
+  `vols/harvest-n4/CENSUS.md`, triage PIPE journalisé.
 - [ ] **`geo_diff`/captures YouTube** : différentiel rendu vs
   Chrome — outil du shot de contrôle N0.3.
 - [ ] **Replays versionnés** : fixtures `DirTransport` des vols
