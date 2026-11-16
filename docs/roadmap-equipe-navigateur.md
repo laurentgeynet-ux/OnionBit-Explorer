@@ -8103,6 +8103,14 @@ MCP = adaptateur, jamais la base.
   Résidu : quadratique attribut-chaîne (10k tokens
   uniques = 3,8 s) — repr token-set à ordonner. Verrou :
   `classlist_noop_ne_mute_pas` — suite `dom` 272/272.
+- [x] **Étape 300. `values_pareto.mjs` — misses
+  × corpus de vols** — la priorisation terrain de la
+  file famille : chaque famille avec misses reçoit
+  `sites`/`décls` vus dans les census de vols +
+  verdict `computedv` (rendu/cascade/mixte). 375
+  misses sur props vues en vol (60 %), `mask-image`
+  chaud (644 décls/4 sites), `row-rule`/`text-fit`/
+  `mask-border-*` jamais vus = volume jauge.
 - [x] **Étape 298. `check computedv` — classifieur
   « cascade applique » sur les misses** — troisième
   oracle de la jauge, niveau style calculé : la
