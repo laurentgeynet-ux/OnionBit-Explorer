@@ -13586,7 +13586,9 @@ chaque gain rapporté contre les **deux** archétypes.
   top-40, jamais servis par le match host (aucune prop IDL
   `_`-préfixée). Sortie `Ok(None)` après le garde `!live()` :
   skip shadows+match, expandos/accesseurs résolus par la voie
-  ordinaire comme après miss. ~60-100 ms/vol. `dom` 271.
+  ordinaire comme après miss. **Filet n563b** : `__shady`
+  1,21 µs → 0,047 µs/get (~26×), clan `_` hors top-40,
+  ~120 ms évités. `dom` 271.
 - [x] **JS-C563 — `classList`/`relList`/`part` : identité
   `DOMTokenList` stable (spec) + wrapper mémorisé** — chaque
   `el.classList` allouait un `Rc`+objet heap neufs :
