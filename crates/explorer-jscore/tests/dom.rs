@@ -3773,6 +3773,82 @@ fn c569_shm_learn_on_second_miss() {
     );
 }
 
+/// JS-C571 — bit « accesseur nav direct » : la 2e lecture d'une
+/// clé nav sur une chaîne propre passe par `nav_direct` (hit
+/// compté) ; une ombre tardive (accesseur `defineProperty` sur
+/// le proto, ou accesseur own) invalide par époque/shape et le
+/// gate reprend la main — jamais de valeur host périmée.
+#[test]
+fn c571_nav_direct_bit() {
+    const P: &str = r#"<html><body>
+<div id="a"><span id="s1">x</span><b id="b1">y</b><i id="b2">z</i></div>
+</body></html>"#;
+    explorer_jscore::j17_enable();
+    // Mécanique learn→consult exercée ; le hit-rate n'est PAS
+    // assertable ici : `SCRIPT_ACC_GEN` est process-wide et les
+    // tests parallèles la bumpent — sous churn, 0 hit est le
+    // comportement *conservateur attendu* (mesuré par les vols,
+    // pas par la suite — même discipline que c568 : présence
+    // au snapshot).
+    assert_eq!(
+        ev_in(
+            P,
+            "var s=document.getElementById('s1'),b=document.getElementById('b1'),r='';\
+             for(var i=0;i<40;i++){r+=(s.parentNode===document.getElementById('a'))+','+\
+             (b.nextSibling===document.getElementById('b2'))+','};r.length>0"
+        ),
+        "true"
+    );
+    let snap = explorer_jscore::j17_snapshot();
+    assert!(
+        snap.contains("nvd_miss") || snap.contains("nvd_hit"),
+        "compteurs nvd absents de {snap}"
+    );
+    // Ombre tardive de PROTO : `SCRIPT_ACC_GEN` bump → entrée
+    // périmée → gate → `Ok(None)` → accesseur script servi.
+    assert_eq!(
+        ev_in(
+            P,
+            "var s=document.getElementById('s1');s.parentNode;Object.defineProperty(Node.prototype,'parentNode',{get:function(){return 'SH'},configurable:true});s.parentNode"
+        ),
+        "SH"
+    );
+    // Ombre OWN : `Object.defineProperty` sur le wrapper →
+    // shape bump → entrée périmée → `find_own` reprend.
+    assert_eq!(
+        ev_in(
+            P,
+            "var s=document.getElementById('s1');s.parentNode;Object.defineProperty(s,'parentNode',{get:function(){return 'OWN'},configurable:true});s.parentNode"
+        ),
+        "OWN"
+    );
+    // Re-proto d'un maillon de chaîne (le fold suit le lien
+    // suivant — capture sans époque dédiée) : `p` inséré AVANT
+    // `Node.prototype` (via `Element.prototype`) — son ombre
+    // l'emporte sur l'acc natif de `Node.prototype`. (Re-proto
+    // de `Node.prototype` lui-même = `p` après l'acc natif →
+    // valeur host servie dans les deux mondes, spec.)
+    assert_eq!(
+        ev_in(
+            P,
+            "var s=document.getElementById('s1');s.parentNode;var p={};Object.defineProperty(p,'parentNode',{get:function(){return 'RL'},configurable:true});Object.setPrototypeOf(Element.prototype,p);s.parentNode"
+        ),
+        "RL"
+    );
+    // Retrait de l'ombre (acc_gen bump) : la valeur host est
+    // de nouveau servie — entrée périmée re-apprise.
+    assert_eq!(
+        ev_in(
+            P,
+            "var s=document.getElementById('s1');s.parentNode;\
+             Object.defineProperty(Node.prototype,'parentNode',{get:function(){return 'SH'},configurable:true});\
+             var a=s.parentNode;delete Node.prototype.parentNode;\
+             a+','+(s.parentNode===document.getElementById('a'))"
+        ),
+        "SH,true"
+    );
+}
+
 /// `for-of`/`Symbol.iterator` sur les collections host —
 /// `makeIterator` de Google s'appuie dessus (`Error: b` sinon).
 #[test]

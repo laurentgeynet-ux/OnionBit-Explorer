@@ -965,6 +965,65 @@ fn nav_dbg_key(key: &str) -> bool {
     )
 }
 
+/// JS-C571 — borne du mémo « accesseur nav direct »
+/// (`nav_direct` — même discipline que [`NAV_MEMO_CAP`] :
+/// clear au cap, jamais de gel).
+const NAV_DIRECT_CAP: usize = 8192;
+
+/// JS-C571 — clé O(1) du mémo « accesseur nav direct » :
+/// `(fold (id, shape) receveur+chaîne ^ SCRIPT_ACC_GEN, clé
+/// internée)`. Le fold est recomputé sur les objets *vivants*
+/// à chaque appel — il capture tout ce qui peut invalider le
+/// verdict « aucune ombre d'accesseur » :
+/// - `(id, shape)` du receveur : accesseur own `defineProperty`
+///   (le fold inclut la shape — `find_own` sauté) et identité
+///   du receveur (entrées par wrapper — pas de partage entre
+///   receveurs de keys-fingerprint identique, sinon une ombre
+///   own de l'un fuirait sur l'autre) ;
+/// - ids des maillons : re-proto du receveur ou d'un maillon
+///   de milieu — le lien *suivant* de la marche diffère →
+///   fold différent (pas besoin d'époque ni de bump
+///   `set_proto` : la marche lit la chaîne résolue, pas un
+///   cache d'elle) ;
+/// - `SCRIPT_ACC_GEN` : install/retrait/mise-à-jour
+///   d'accesseur *en place* (même leçon que `shadow_memo` —
+///   un swap de côtés ne change ni ids ni shapes).
+///
+/// Aucun `ObjId` stocké : l'empreinte seule vit dans le set —
+/// un id recyclé par le GC ne se matérialise que comme une
+/// nouvelle chaîne lors du fold suivant (collision ~2^-64,
+/// même niveau de garantie que `shadow_memo`/`rabs_memo`).
+/// `None` = objet introuvable (ne devrait pas arriver —
+/// `this` est vivant), chemin complet.
+fn nav_direct_key(e: &Engine, id: ObjId, key: &str) -> Option<(u64, u64)> {
+    use std::sync::atomic::Ordering::Relaxed;
+    let mut fold = 0x9E37_79B9_7F4A_7C15u64;
+    let mix_link = |fold: &mut u64, cid: u64, shape: u64| {
+        *fold = fold
+            .wrapping_mul(0x1000_0000_01B3)
+            .wrapping_add(cid)
+            .wrapping_mul(0x1000_0000_01B3)
+            .wrapping_add(shape);
+    };
+    let mut cur = {
+        let o = e.heap.obj(id)?;
+        mix_link(&mut fold, id as u64, o.shape());
+        o.proto.clone()
+    };
+    for _ in 0..32 {
+        let Value::Obj(cid) = cur else { break };
+        let Some(o) = e.heap.obj(cid) else { break };
+        mix_link(&mut fold, cid as u64, o.shape());
+        cur = o.proto.clone();
+    }
+    let mix = fold
+        ^ crate::SCRIPT_ACC_GEN
+            .load(Relaxed)
+            .wrapping_mul(0xA24B_AED4_963E_E407);
+    let khash = (crate::intern(key).as_ptr() as usize as u64) ^ (key.len() as u64) << 48;
+    Some((mix, khash))
+}
+
 fn dom_nav_value(
     e: &mut Engine,
     dom: &DomRef,
@@ -8950,6 +9009,32 @@ impl Host for NodeHost {
                 return Ok(None);
             }
         }
+        // JS-C571 — bit « accesseur nav direct » : n570 a mesuré
+        // le gate complet (`find_own` + shadows + univ +
+        // cascade) à ~1,6 µs/get (`nva` = 65 % du coût nav)
+        // alors que la donnée est O(1). Un fold
+        // `(id, shape) receveur+chaîne` déjà marqué « sans
+        // ombre » sert `dom_nav_value` directement — même
+        // valeur, zéro `find_own` par maillon (~150 ns de fold
+        // contre ~1 µs de marche authentifiée). Miss → chemin
+        // complet ci-dessous, qui apprend (insert au bras nav).
+        if let Value::Obj(id) = this {
+            if nav_dbg_key(key) {
+                if let Some(dk) = nav_direct_key(e, id, key) {
+                    if e.nav_direct.contains(&dk) {
+                        if let Some(t0) = nv_t {
+                            crate::J17_NVD_NS.fetch_add(
+                                u64::try_from(t0.elapsed().as_nanos()).unwrap_or(u64::MAX),
+                                std::sync::atomic::Ordering::Relaxed,
+                            );
+                        }
+                        crate::j17_tick(&crate::J17_NVD_HIT);
+                        return dom_nav_value(e, &self.dom, &self.cache, node, key);
+                    }
+                    crate::j17_tick(&crate::J17_NVD_MISS);
+                }
+            }
+        }
         // Accesseur propre `defineProperty` (JS-C82) : il shadowe
         // la voie host — `read_prop` l'invoquera (spec : own
         // prop > IDL). Sans ça le tracker React posé par
@@ -9257,6 +9342,22 @@ impl Host for NodeHost {
             | "textContent"
             | "innerText"
             | "nodeType" => {
+                // JS-C571 — learn : ce bras n'est atteint que
+                // si le gate complet a passé (pas d'accesseur
+                // own, pas d'ombre chaîne, pas d'univ) — le
+                // verdict « direct » est stable sous le fold
+                // `(id, shape)` de la chaîne + `SCRIPT_ACC_GEN`
+                // — voir [`nav_direct_key`].
+                if let Value::Obj(id) = this {
+                    if nav_dbg_key(key) {
+                        if let Some(dk) = nav_direct_key(e, id, key) {
+                            if e.nav_direct.len() >= NAV_DIRECT_CAP {
+                                e.nav_direct.clear();
+                            }
+                            e.nav_direct.insert(dk);
+                        }
+                    }
+                }
                 if let Some(t1) = nv_t {
                     crate::J17_NV_B_NS.fetch_add(
                         u64::try_from(t1.elapsed().as_nanos()).unwrap_or(u64::MAX),

@@ -1172,6 +1172,20 @@ pub struct Engine {
     /// re-valide la valeur (un `o.x = f` sur clé existante ne
     /// change pas la shape — couvre les swaps in-place).
     pub(crate) univ_fn_memo: FastMap<(u64, u64), Option<(u32, Value)>>,
+    /// JS-C571 — set `(fold (id, shape) receveur+chaîne ^
+    /// SCRIPT_ACC_GEN, clé internée)` des lectures nav
+    /// prouvées « sans ombre » : un hit saute le gate complet
+    /// de `NodeHost::get` (`find_own` + `proto_accessor_shadows`
+    /// + `univ` + cascade) et `dom_nav_value` sert directement.
+    ///
+    /// n570 : `nva` ≈ 1,6 µs/get = 65 % du coût nav alors que
+    /// la donnée est O(1). Le fold couvre la chaîne résolue —
+    /// re-liaisons, upgrades CE et paysage own sans époque
+    /// dédiée ; `SCRIPT_ACC_GEN` couvre les swaps d'accesseurs
+    /// en place (même leçon `shadow_memo`). Pur `u64` — rien à
+    /// tracer GC, pas d'`ObjId` stocké. Borné par
+    /// `NAV_DIRECT_CAP`.
+    pub(crate) nav_direct: FastSet<(u64, u64)>,
     /// JS-C521 — mémo négative `(fold shapes chaîne, clé)` des
     /// lectures absentes : le fold couvre la chaîne entière —
     /// toute mutation d'un maillon la change → correcte par
@@ -1768,6 +1782,7 @@ impl Engine {
             shm_gate: FastMap::default(),
             nav_memo: FastMap::default(),
             univ_fn_memo: FastMap::default(),
+            nav_direct: FastSet::default(),
             rabs_memo: FastSet::default(),
             rabs_fifo: std::collections::VecDeque::new(),
             ic_off: std::env::var("EXPLORER_NO_IC").is_ok_and(|v| v == "1"),

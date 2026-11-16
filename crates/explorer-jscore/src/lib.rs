@@ -740,6 +740,17 @@ pub static J17_NV_C_NS: std::sync::atomic::AtomicU64 = std::sync::atomic::Atomic
 /// Appels instrumentés — voir [`J17_NV_A_NS`].
 pub static J17_NV_N: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 
+/// JS-C571 — mémo « accesseur nav direct » (`nav_direct`) :
+/// hits de consultation = lectures servies par le chemin
+/// direct (`dom_nav_value` sans gate).
+pub static J17_NVD_HIT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+/// Consultations `nav_direct` tombées à côté — voir
+/// [`J17_NVD_HIT`].
+pub static J17_NVD_MISS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+/// Temps du segment direct (entrée → hit) — comparable à
+/// `nva` pré-bit. Voir [`J17_NVD_HIT`].
+pub static J17_NVD_NS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
 /// Gate J17 : les compteurs ci-dessus ne s'incrémentent que si
 /// `EXPLORER_J17_PROF` est posé (non vide/non "0") au premier
 /// appel, ou si [`j17_enable`] a été appelé (tests/benchs). Un
@@ -779,7 +790,7 @@ pub fn j17_enable() {
 #[must_use]
 pub fn j17_snapshot() -> String {
     let r = std::sync::atomic::Ordering::Relaxed;
-    let pairs: [(&str, &std::sync::atomic::AtomicU64); 97] = [
+    let pairs: [(&str, &std::sync::atomic::AtomicU64); 100] = [
         ("prop_lookup", &J17_PROP_LOOKUP),
         ("proto_lvl", &J17_PROTO_LVL),
         ("prop_scan", &J17_PROP_SCAN),
@@ -877,6 +888,9 @@ pub fn j17_snapshot() -> String {
         ("nvb_ns", &J17_NV_B_NS),
         ("nvc_ns", &J17_NV_C_NS),
         ("nv_n", &J17_NV_N),
+        ("nvd_hit", &J17_NVD_HIT),
+        ("nvd_miss", &J17_NVD_MISS),
+        ("nvd_ns", &J17_NVD_NS),
     ];
     let mut out = String::new();
     for (k, c) in pairs {

@@ -13580,6 +13580,18 @@ chaque gain rapporté contre les **deux** archétypes.
   (`ic_hit`/`ic_miss`/`ic_disarm` au snapshot) pour
   borner la couverture du seul court-circuit existant.
   Dependency-groups = infra lourde, dernier recours.
+- [x] **JS-C571 — bit « accesseur nav direct »** —
+  `nav_direct` `(fold (id,shape) receveur+chaîne ^
+  SCRIPT_ACC_GEN, clé)` : n570 a mesuré `nva` = 65 % du
+  coût nav (gate, pas donnée) — un hit saute le gate
+  complet, `dom_nav_value` sert direct (~150 ns de fold
+  contre ~1 µs de marche `find_own`). Le fold à chaud couvre
+  tout sans époque : ombre own (shape+id receveur), re-proto
+  receveur/milieu (lien suivant diffère), swaps acc
+  (`SCRIPT_ACC_GEN`). Pur `u64` — rien à tracer. Compteurs
+  `nvd_hit`/`nvd_miss`/`nvd_ns`. Verrou
+  `c571_nav_direct_bit` (ombres proto/own/re-liée/retrait),
+  `dom` 276.
 - [x] **JS-C570 — sonde `nva`/`nvb`/`nvc`/`nv_n`** —
   décomposition du coût `NodeHost::get` sur clés nav :
   entrée→gate / cascade+match / `dom_nav_value`. Le bit
