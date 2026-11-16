@@ -160,7 +160,7 @@
     2
   ],
   "block-size": [
-    1,
+    2,
     7
   ],
   "border": [
@@ -936,7 +936,7 @@
     5
   ],
   "height": [
-    1,
+    2,
     7
   ],
   "hyphenate-character": [
@@ -968,7 +968,7 @@
     1
   ],
   "inline-size": [
-    1,
+    2,
     7
   ],
   "inset": [
@@ -1212,15 +1212,15 @@
     2
   ],
   "max-block-size": [
-    0,
+    1,
     7
   ],
   "max-height": [
-    0,
+    1,
     7
   ],
   "max-inline-size": [
-    0,
+    1,
     7
   ],
   "max-lines": [
@@ -1232,19 +1232,19 @@
     5
   ],
   "max-width": [
-    0,
+    1,
     7
   ],
   "min-block-size": [
-    1,
+    2,
     7
   ],
   "min-height": [
-    1,
+    2,
     7
   ],
   "min-inline-size": [
-    1,
+    2,
     7
   ],
   "min-size": [
@@ -1252,7 +1252,7 @@
     5
   ],
   "min-width": [
-    1,
+    2,
     7
   ],
   "mix-blend-mode": [
@@ -2036,7 +2036,7 @@
     4
   ],
   "width": [
-    2,
+    3,
     8
   ],
   "will-change": [
