@@ -125,8 +125,29 @@ pub(crate) fn intern(name: &str) -> std::rc::Rc<str> {
         static INTERNED: std::cell::RefCell<
             std::collections::HashSet<std::rc::Rc<str>>,
         > = std::cell::RefCell::new(std::collections::HashSet::new());
+        // JS-C566 — cache par pointeur canonique : les clés
+        // déjà internées (noms de membres `Rc<str>` de l'AST —
+        // le parseur interne — passés `&*rc`) arrivent avec le
+        // pointeur de l'alloc internée. Cette alloc est
+        // **immortelle** (la table ne retire jamais) → son
+        // adresse ne peut pas être réemployée : `ptr + len`
+        // identiques = mêmes octets (la garde `len` rejette
+        // les tranches `&interned[..n]` qui partagent le ptr).
+        // Hit = hash de pointeur ~10 ns au lieu du hash de
+        // contenu. Les `&str` transitoires n'entrent jamais
+        // (enregistré seulement quand `rc.as_ptr() ==
+        // name.as_ptr()` — adresse canonique) → aucun faux hit
+        // sur buffer recyclé.
+        static PTR_HIT: std::cell::RefCell<
+            std::collections::HashMap<*const u8, std::rc::Rc<str>>,
+        > = std::cell::RefCell::new(std::collections::HashMap::new());
     }
-    INTERNED.with(|set| {
+    if let Some(rc) = PTR_HIT.with(|m| m.borrow().get(&name.as_ptr()).cloned()) {
+        if rc.len() == name.len() {
+            return rc;
+        }
+    }
+    let rc = INTERNED.with(|set| {
         let mut set = set.borrow_mut();
         if let Some(s) = set.get(name) {
             return s.clone();
@@ -134,7 +155,11 @@ pub(crate) fn intern(name: &str) -> std::rc::Rc<str> {
         let s: std::rc::Rc<str> = std::rc::Rc::from(name);
         set.insert(s.clone());
         s
-    })
+    });
+    if rc.as_ptr() == name.as_ptr() {
+        PTR_HIT.with(|m| m.borrow_mut().insert(name.as_ptr(), rc.clone()));
+    }
+    rc
 }
 
 /// JS-C556 — flags `DBG_*`/`EXPLORER_*` sondés **une fois** :
@@ -1447,13 +1472,29 @@ impl Drop for J17Scope {
 /// le span natif hôte est nommé ici.
 pub static LAST_HOST: std::sync::Mutex<String> = std::sync::Mutex::new(String::new());
 
+/// JS-C566 — breadcrumb `host=` paresseux : l'écriture
+/// `Mutex<String>` ne court que si un lecteur est abonné
+/// (flight recorder du daemon, armé via [`host_mark_enable`]).
+/// Désarmé : un `load` atomique par appel au lieu du
+/// lock+format sur tout `Host::get`/`invoke` — le marqueur
+/// sert aux post-mortem, pas au chemin chaud.
+static HOST_MARK_ENABLED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// Arme l'écriture du breadcrumb `host=` (daemon : à appeler
+/// au démarrage du flight recorder — process-wide).
+pub fn host_mark_enable() {
+    HOST_MARK_ENABLED.store(true, std::sync::atomic::Ordering::Relaxed);
+}
+
 /// Écrit `class:name` dans [`LAST_HOST`] (diagnostic §B-59).
 pub fn host_mark(class: &str, name: &str) {
-    if let Ok(mut g) = LAST_HOST.lock() {
-        g.clear();
-        g.push_str(class);
-        g.push(':');
-        g.push_str(name);
+    if HOST_MARK_ENABLED.load(std::sync::atomic::Ordering::Relaxed) {
+        if let Ok(mut g) = LAST_HOST.lock() {
+            g.clear();
+            g.push_str(class);
+            g.push(':');
+            g.push_str(name);
+        }
     }
     // JS-C558 — attribution `host:class:name=n` sous
     // `EXPLORER_J17_HOST=1` (dump `host:` au teardown) :

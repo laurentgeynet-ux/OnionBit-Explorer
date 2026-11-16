@@ -13580,6 +13580,15 @@ chaque gain rapporté contre les **deux** archétypes.
   (`ic_hit`/`ic_miss`/`ic_disarm` au snapshot) pour
   borner la couverture du seul court-circuit existant.
   Dependency-groups = infra lourde, dernier recours.
+- [x] **JS-C566 — `intern()` : cache pointeur canonique
+  + `host_mark` paresseux** — `prop_lookup` ré-internait
+  ~2,5 M clés/vol alors que `Expr::Member` porte le `Rc`
+  interné : `PTR_HIT` (ptr+len → `Rc`, adresses canoniques
+  immortelles uniquement) = ~10-20 ns vs ~80-150 ns par
+  lookup, zéro signature. `host_mark` : `Mutex<String>`
+  du breadcrumb `host=` écrit seulement si le flight
+  recorder s'abonne (`host_mark_enable()`) — `load`
+  atomique sinon (~254 k/vol). `dom` 272.
 - [x] **JS-C565 — `NodeHost::get` : préfiltre négatif,
   keyset auto-dérivé** — misses non-`_` nommées n563b
   (~118 ms : `loggingStatus`/`polymerController`/

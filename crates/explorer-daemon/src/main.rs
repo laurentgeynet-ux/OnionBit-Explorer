@@ -632,6 +632,10 @@ fn spawn_flight_recorder(death_log: &Path) {
     if flight_ms == 0 {
         return;
     }
+    // JS-C566 — arme le breadcrumb `host=` : l'écriture
+    // `Mutex<String>` côté `host_mark` ne court que si un
+    // lecteur est abonné (ce recorder).
+    explorer_jscore::host_mark_enable();
     let get = |m: &std::sync::Mutex<&'static str>| m.lock().map_or("?", |g| *g);
     let gets =
         |m: &std::sync::Mutex<String>| m.lock().map(|g| g.replace('\n', "\\n")).unwrap_or_default();
