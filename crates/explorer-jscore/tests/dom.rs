@@ -8067,3 +8067,47 @@ fn eval_on_element_without_dom_is_honest_error() {
         other => panic!("expected Uncaught, got {other:?}"),
     }
 }
+
+/// Régression — `<li>` sous `ul` imbriqué dans un `li`
+/// ancêtre ne doit PAS fermer l'ancêtre (borne « special »
+/// de la marche in-body). Mesuré lobste.rs : `ul.tags>li`
+/// se ré-enracinait sous `ol` et emportait tout le bloc
+/// meta hors de `li.story` (rendu ~2× hauteur).
+#[test]
+fn li_dans_ul_imbrique_ne_ferme_pas_li_ancetre() {
+    let html = concat!(
+        "<html><body><ol id=\"o\"><li id=\"s\"><div><div class=\"d\">",
+        "<h2><a href=\"#\">t</a></h2>",
+        "<ul id=\"t\"><li><a href=\"#\">rust</a></li></ul>",
+        "<a id=\"dom\" href=\"#\">x</a><div class=\"b\">m</div>",
+        "</div></div></li></ol></body></html>"
+    );
+    // Le parse initial conserve li/tag dans ul, et meta dans li.story.
+    assert_eq!(
+        ev_in(html, "document.querySelectorAll('ul > li').length"),
+        "1"
+    );
+    assert_eq!(
+        ev_in(html, "document.querySelectorAll('ol > li').length"),
+        "1"
+    );
+    assert_eq!(
+        ev_in(html, "document.getElementById('s').children.length"),
+        "1"
+    );
+    // `innerHTML=` (parse de fragment) conserve la même structure.
+    assert_eq!(
+        ev(
+            "document.body.innerHTML = '<ol><li><div><ul><li><a>r</a></li></ul><div>b</div></div></li></ol>';\
+             document.querySelectorAll('ul > li').length"
+        ),
+        "1"
+    );
+    assert_eq!(
+        ev(
+            "document.body.innerHTML = '<ol><li><div><ul><li><a>r</a></li></ul><div>b</div></div></li></ol>';\
+             document.querySelector('ol').children.length"
+        ),
+        "1"
+    );
+}

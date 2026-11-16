@@ -4115,3 +4115,40 @@ le type exact de bug que la géométrie doit remonter
 **Coordination** : aucune action NAV en attente —
 l'entrée documente le constat, la file de
 décision est côté PIPE.
+
+## Correctif — lobste.rs : pas un trou PIPE, un bug de
+## parseur miroir jscore (étape 294)
+
+**L'entrée « lobste.rs story-meta » est résolue, et
+l'hypothèse de classe était fausse** : ce n'était ni
+`display` ni `inline-block` — le DOM **miroir jscore**
+était corrompu avant tout layout.
+
+**Cause réelle** : `PAIRED_CLOSE` du mini-parseur DOM de
+jscore dépilait jusqu'à la cible sans la borne spec
+« special sauf address/div/p » — `<li>` sous
+`ol>li>div>ul.tags` traversait `ul`+`div`s et fermait
+`li.story` ; l'item + le bloc meta se ré-enracinaient
+sous `ol`. Le trigger terrain : `t.innerText`
+d'`application.js` re-sérialisant le miroir corrompu
+(l'apply re-parse le fidélisait — `ul.tags` 0×0 +
+enfants empilés = conteneur vide, pas cascade en
+échec).
+
+**Pourquoi la fixture statique passait** : parsée par
+`explorer-html` (correct), jamais par le mini-parseur
+jscore — la corruption n'entrait que par mutation JS
+(`innerHTML=` / re-sérialisation post-mutation).
+
+**Fix** : flag par paire — marche in-body arrêtée aux
+spéciaux (`li`/`dd`/`dt`/`p`), traversée libre gardée
+pour `tr`/`td`/`option`. Verrou
+`li_dans_ul_imbrique_ne_ferme_pas_li_ancetre`, suite
+`dom` 271/271, `doc_h` lobste.rs 3550→2534.
+
+**Retombée pour PIPE** : la file `--families` n'a
+**pas** un cas lobste.rs réel à son actif — le
+divergent résiduel est `div.voters` h=51 (vs ~30 ref),
+probablement une autre classe (float/inline-block du
+compteur de votes). À ré-auditer au prochain
+`geo_diff` post-294.

@@ -7972,6 +7972,19 @@ MCP = adaptateur, jamais la base.
   passe. `famTotals` parallèle à `families` : la
   baseline v2 ne stocke toujours que `ok` (format
   inchangé). Vérifié : sortie = table manuelle.
+- [x] **Étape 294. Parseur miroir : borne « special » sur
+  la marche `li`/`dd`/`dt`/`p` — fin du `li` ré-enraciné
+  sous `ol`** (`explorer-jscore`, lobste.rs : `ul.tags`
+  0×0 + meta hors `li.story`, 98 % divergents). Le
+  `PAIRED_CLOSE` traversait `ul`+`div`s pour fermer l'`li`
+  ancêtre ; flag par paire : marche in-body arrêtée aux
+  spéciaux (`SCOPE_STOP_SPECIAL`, spec « sauf
+  address/div/p »), traversée libre gardée pour
+  `tr`/`td`/`option`. Corruption entrait par `innerHTML=`/
+  re-sérialisation du miroir (`t.innerText`
+  d'application.js). Verrou :
+  `li_dans_ul_imbrique_ne_ferme_pas_li_ancetre` — suite
+  `dom` 271/271. Résidu : `div.voters` h=51.
 - [x] **Étape 281. `xhr.responseText` décodé une fois —
   fin du spin O(lectures × octets)** (`explorer-jscore`,
   re-vol field274 : `gc=0` a tranché — vrai spin hôte,
