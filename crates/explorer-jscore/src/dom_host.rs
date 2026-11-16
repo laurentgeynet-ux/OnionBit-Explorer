@@ -971,15 +971,17 @@ fn nav_dbg_key(key: &str) -> bool {
 const NAV_DIRECT_CAP: usize = 8192;
 
 /// JS-C571 — clé O(1) du mémo « accesseur nav direct » :
-/// `(fold (id, shape) receveur+chaîne ^ SCRIPT_ACC_GEN, clé
-/// internée)`. Le fold est recomputé sur les objets *vivants*
+/// `(fold (shape receveur, chaîne (id, shape)) ^ SCRIPT_ACC_GEN,
+/// clé internée)`. Le fold est recomputé sur les objets *vivants*
 /// à chaque appel — il capture tout ce qui peut invalider le
 /// verdict « aucune ombre d'accesseur » :
-/// - `(id, shape)` du receveur : accesseur own `defineProperty`
-///   (le fold inclut la shape — `find_own` sauté) et identité
-///   du receveur (entrées par wrapper — pas de partage entre
-///   receveurs de keys-fingerprint identique, sinon une ombre
-///   own de l'un fuirait sur l'autre) ;
+/// - `shape` du receveur (JS-C572 — **pas** l'`ObjId` : le
+///   learn n'a lieu que si `find_own(id, key).is_none()`, donc
+///   une entrée signifie « cette shape n'a *aucune* prop own
+///   pour la clé » — un receveur porteur (Data ou Acc, la
+///   shape ne distingue pas les kinds) a une shape différente
+///   et ne frappe jamais ; partage entre tous les receveurs de
+///   même classe — n571 : per-instance plafonnait à 38 %) ;
 /// - ids des maillons : re-proto du receveur ou d'un maillon
 ///   de milieu — le lien *suivant* de la marche diffère →
 ///   fold différent (pas besoin d'époque ni de bump
@@ -1007,7 +1009,13 @@ fn nav_direct_key(e: &Engine, id: ObjId, key: &str) -> Option<(u64, u64)> {
     };
     let mut cur = {
         let o = e.heap.obj(id)?;
-        mix_link(&mut fold, id as u64, o.shape());
+        // JS-C572 — pas d'`ObjId` receveur : le verdict ne
+        // dépend que de la *shape* (paysage de props own — le
+        // learn exige l'absence de la clé) + de la chaîne.
+        // Tous les éléments d'une même classe partagent alors
+        // la clé (n571 : per-instance → couverture plafonnée à
+        // 38 %) ; `u64::MAX` garde un marqueur de position.
+        mix_link(&mut fold, u64::MAX, o.shape());
         o.proto.clone()
     };
     for _ in 0..32 {
@@ -9013,11 +9021,12 @@ impl Host for NodeHost {
         // le gate complet (`find_own` + shadows + univ +
         // cascade) à ~1,6 µs/get (`nva` = 65 % du coût nav)
         // alors que la donnée est O(1). Un fold
-        // `(id, shape) receveur+chaîne` déjà marqué « sans
+        // `(shape receveur, chaîne)` déjà marqué « sans
         // ombre » sert `dom_nav_value` directement — même
         // valeur, zéro `find_own` par maillon (~150 ns de fold
         // contre ~1 µs de marche authentifiée). Miss → chemin
         // complet ci-dessous, qui apprend (insert au bras nav).
+        let mut nav_pending_dk = None;
         if let Value::Obj(id) = this {
             if nav_dbg_key(key) {
                 if let Some(dk) = nav_direct_key(e, id, key) {
@@ -9032,6 +9041,10 @@ impl Host for NodeHost {
                         return dom_nav_value(e, &self.dom, &self.cache, node, key);
                     }
                     crate::j17_tick(&crate::J17_NVD_MISS);
+                    // Le fold est déjà payé — le learn au bras
+                    // nav le réutilise au lieu de re-marcher
+                    // la chaîne (JS-C572).
+                    nav_pending_dk = Some(dk);
                 }
             }
         }
@@ -9349,8 +9362,13 @@ impl Host for NodeHost {
                 // `(id, shape)` de la chaîne + `SCRIPT_ACC_GEN`
                 // — voir [`nav_direct_key`].
                 if let Value::Obj(id) = this {
-                    if nav_dbg_key(key) {
-                        if let Some(dk) = nav_direct_key(e, id, key) {
+                    // JS-C572 — learn seulement si la clé n'a
+                    // AUCUNE prop own : la shape ne distingue
+                    // pas Data/Acc, un dk « sans own » ne peut
+                    // pas être frappé par un receveur porteur.
+                    if nav_dbg_key(key) && e.find_own(id, key).is_none() {
+                        let dk = nav_pending_dk.or_else(|| nav_direct_key(e, id, key));
+                        if let Some(dk) = dk {
                             if e.nav_direct.len() >= NAV_DIRECT_CAP {
                                 e.nav_direct.clear();
                             }

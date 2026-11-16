@@ -13580,6 +13580,7 @@ chaque gain rapporté contre les **deux** archétypes.
   (`ic_hit`/`ic_miss`/`ic_disarm` au snapshot) pour
   borner la couverture du seul court-circuit existant.
   Dependency-groups = infra lourde, dernier recours.
+- [x] **JS-C572 — `nav_direct` partagé par shape receveur** — n571 : 37,8 % de couverture, plafonnée par le fold per-instance (`ObjId` receveur). Fold désormais `(shape receveur, chaîne)` → entrées partagées entre tous les éléments d'une classe ; learn conditionné à `find_own(..)==None` (un dk = « aucune prop own pour la clé » — la shape ne distinguant pas Data/Acc, un receveur porteur ne frappe jamais) ; `nav_pending_dk` réutilise le fold check→learn (un seul fold par miss). `dom` 276 verts.
 - [x] **JS-C571 — bit « accesseur nav direct »** —
   `nav_direct` `(fold (id,shape) receveur+chaîne ^
   SCRIPT_ACC_GEN, clé)` : n570 a mesuré `nva` = 65 % du
