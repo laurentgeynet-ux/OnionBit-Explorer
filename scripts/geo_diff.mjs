@@ -18,17 +18,23 @@
 //      proche sous --tol sur les 4 axes → ok ;
 //   2. les restants s'apparient au plus proche → divergent
 //      (delta enregistré) ; sans pendant → orphelin.
+//      Un divergent dont la distance excède --moved-tol est
+//      classé `moved` (déplacement massif — boîte absente
+//      d'un conteneur) : il reste compté divergent pour le
+//      score et l'exit code, le compteur s'ajoute sans
+//      rebranche (étape 293).
 // `tag === '#text'` ignoré par défaut : le dump moteur couvre
 // éléments + texte, la ref n'énumère que `body *` (éléments)
 // — sans filtre chaque texte est un orphelin garanti.
 // `--text` les conserve. `matched < --min-matched` → verdict
 // `hors-mesure` (SPA vidée, mur), hors % agrégé ;
-// `ref.boxes ≥ 4000` → `ref_truncated` (cap ref_capture).
+// `ref.boxes ≥ 4000` → `ref_truncated` + `score_partial`
+// (le score ne couvre que l'échantillon sous le cap).
 //
 // Usage :
 //   node scripts/geo_diff.mjs site.geom.json site.ref.json
 //     [--tol 2] [--out site.geodiff.json] [--top 12]
-//     [--text] [--min-matched 20]
+//     [--text] [--min-matched 20] [--moved-tol 50]
 
 import { readFileSync, writeFileSync } from 'node:fs';
 
@@ -36,7 +42,7 @@ const args = process.argv.slice(2);
 // Options qui consomment la valeur suivante — toute nouvelle
 // option à valeur DOIT être ajoutée ici, sinon sa valeur
 // devient un positionnel (crash ENOENT sur engFile).
-const VALUE_OPTS = new Set(['--tol', '--out', '--top', '--min-matched']);
+const VALUE_OPTS = new Set(['--tol', '--out', '--top', '--min-matched', '--moved-tol']);
 const positional = args.filter((a, i) => !a.startsWith('--') &&
   !VALUE_OPTS.has(args[i - 1]));
 const opt = (n, d) => {
@@ -52,6 +58,7 @@ const tol = Number(opt('tol', 2));
 const topN = Number(opt('top', 12));
 const out = opt('out', '');
 const minMatched = Number(opt('min-matched', 20));
+const movedTol = Number(opt('moved-tol', 50));
 const keepText = args.includes('--text');
 
 const eng = JSON.parse(readFileSync(engFile, 'utf8'));
@@ -84,7 +91,7 @@ const dist = (e, r) => Math.max(
   Math.abs(e.w - r.w), Math.abs(e.h - r.h));
 
 const divergent = [];
-let ok = 0, engOnly = 0, refOnly = 0;
+let ok = 0, engOnly = 0, refOnly = 0, moved = 0;
 const allKeys = new Set([...em.keys(), ...rm.keys()]);
 for (const k of allKeys) {
   const eb = em.get(k) || [], rb = rm.get(k) || [];
@@ -113,7 +120,9 @@ for (const k of allKeys) {
     if (best < 0) { engOnly++; continue; }
     used.add(best);
     const r = rb[best];
-    divergent.push({
+    // Au-delà de --moved-tol ce n'est plus un nudge mais un
+    // déplacement massif — flag `moved`, compté divergent.
+    const dv = {
       key: k,
       eng: { x: e.x, y: e.y, w: e.w, h: e.h },
       ref: { x: r.x, y: r.y, w: r.w, h: r.h },
@@ -121,7 +130,9 @@ for (const k of allKeys) {
         dx: +(e.x - r.x).toFixed(1), dy: +(e.y - r.y).toFixed(1),
         dw: +(e.w - r.w).toFixed(1), dh: +(e.h - r.h).toFixed(1),
       },
-    });
+    };
+    if (bestD > movedTol) { dv.moved = true; moved++; }
+    divergent.push(dv);
   }
   refOnly += rb.length - used.size;
 }
@@ -149,8 +160,10 @@ const result = {
   score_pct: score,
   verdict: measurable ? 'mesuré' : 'hors-mesure',
   matched, ok_n: ok, divergent_n: divergent.length,
+  moved_n: moved,
   eng_only: engOnly, ref_only: refOnly,
   text_dropped: textDropped, ref_truncated: refTruncated,
+  score_partial: refTruncated,
   eng_doc: { w: eng.width, h: eng.height },
   ref_doc: { w: ref.doc_w, h: ref.doc_h },
   pareto: pareto.map(([tag, n]) => ({ tag, n })),
@@ -165,7 +178,8 @@ if (!measurable) {
   console.log(
     `geo : ${score}% divergents (${divergent.length}/${matched} appariés, ` +
     `${ok} ok, +${engOnly} moteur-seuls, +${refOnly} réf-seuls)` +
-    `${refTruncated ? ' — ref tronquée (4000)' : ''}` +
+    `${moved ? ` — dont ${moved} déplacés (>${movedTol} px)` : ''}` +
+    `${refTruncated ? ' — ref tronquée (4000), score partiel' : ''}` +
     `${textDropped ? ` — ${textDropped} #text ignorés` : ''}`);
 }
 for (const [tag, n] of pareto.slice(0, 6)) console.log(`      ${tag} ×${n}`);
