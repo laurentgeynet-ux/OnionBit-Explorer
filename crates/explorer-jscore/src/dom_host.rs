@@ -3837,15 +3837,60 @@ impl Engine {
             self.set_own(fid, "prototype", Value::Obj(p), false);
         }
         self.set_own(g, "DOMParser", f, false);
+        // `AbstractRange` (JS-C556) — interface de base non
+        // constructible (« Illegal constructor ») dont le
+        // prototype partagé porte les accesseurs bornes et
+        // coiffe `Range.prototype`/`StaticRange.prototype`.
+        let af = self.illegal_ctor_bound("AbstractRange");
+        if let Value::Obj(fid) = af {
+            let p = crate::misc_apis::abstract_range_proto(self);
+            self.set_own(fid, "prototype", Value::Obj(p), false);
+            self.set_own(p, "constructor", af.clone(), false);
+        }
+        self.set_own(g, "AbstractRange", af, false);
         // `Range` — constructible spec (CAP-182, arc édition) :
         // `new Range()` → frontières `(document,0)` mutables,
-        // `Selection.addRange` le consomme directement.
+        // `Selection.addRange` le consomme directement. Le
+        // `prototype` du ctor est le proto **partagé** des
+        // instances (JS-C556 : `r instanceof Range` exige
+        // l'identité — un `new_object()` dédié la cassait).
         let f = self.native_fn("Range", crate::misc_apis::range_ctor);
         if let Value::Obj(fid) = f {
-            let p = self.new_object();
+            let p = crate::misc_apis::range_proto(self);
             self.set_own(fid, "prototype", Value::Obj(p), false);
+            self.set_own(p, "constructor", f.clone(), false);
+            // Constantes spec `compareBoundaryPoints` — posées
+            // sur le ctor ET le prototype (héritage own+proto).
+            for (k, n) in [
+                ("START_TO_START", 0.0),
+                ("START_TO_END", 1.0),
+                ("END_TO_END", 2.0),
+                ("END_TO_START", 3.0),
+            ] {
+                self.set_own_attrs(
+                    fid,
+                    k,
+                    Value::Num(n),
+                    crate::heap::PropAttrs::FIXED,
+                );
+                self.set_own_attrs(
+                    p,
+                    k,
+                    Value::Num(n),
+                    crate::heap::PropAttrs::FIXED,
+                );
+            }
         }
         self.set_own(g, "Range", f, false);
+        // `StaticRange` (JS-C556) — constructible spec depuis un
+        // dict `StaticRangeInit` ; bornes gelées à vie.
+        let sf = self.native_fn("StaticRange", crate::misc_apis::static_range_ctor);
+        if let Value::Obj(fid) = sf {
+            let p = crate::misc_apis::static_range_proto(self);
+            self.set_own(fid, "prototype", Value::Obj(p), false);
+            self.set_own(p, "constructor", sf.clone(), false);
+        }
+        self.set_own(g, "StaticRange", sf, false);
         // `CSSStyleSheet` — constructible spec (CAP-183) :
         // feuille stockée côté miroir (`insertRule`/`deleteRule`/
         // `replace`/`replaceSync` — cascade = chantier session,

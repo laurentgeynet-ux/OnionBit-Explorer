@@ -14129,3 +14129,19 @@ chaque gain rapporté contre les **deux** archétypes.
   Suite file : `invoke` sans `has_method` des autres hôtes,
   `AbstractRange`, `Range.compare*`/`surroundContents`,
   `Selection.deleteFromDocument`.
+- [x] **JS-C556 — `AbstractRange`/`StaticRange` IDL +
+  comparaisons `Range` (`api` +23 → 1615)** : jalon N3.1
+  livré — chaîne proto spec (`Range`/`StaticRange` →
+  `AbstractRange`), accesseurs bornes get-only avec marque,
+  ctor `StaticRange` dict-validé, `Range.compare*`/
+  `isPointInRange`/`intersectsNode`/`surroundContents` via
+  `cmp_point` (ordre document boundary points),
+  `Selection.direction`/`setPosition`/`getComposedRanges`/
+  `modify` borné caractère. **Deux bugs réels trouvés** :
+  `Range.prototype` du ctor ≠ proto des instances
+  (`instanceof` cassé) ; `setPosition` recopiait la borne
+  `end` du range courant au lieu des args. Verrou
+  `c556_ranges` ×5 ; gates verts. Reste file N3.3 :
+  `invoke` sans `has_method` résiduels, membres IDL par
+  fréquence (`CSS.<unit>`, `HTMLInputElement`, ancres URL,
+  formulaires, événements `Keyboard`/`Pointer`).

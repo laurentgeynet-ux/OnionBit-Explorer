@@ -65,6 +65,11 @@ pub(crate) struct MiscState {
     range_proto: Option<ObjId>,
     tw_proto: Option<ObjId>,
     ni_proto: Option<ObjId>,
+    /// `AbstractRange.prototype` / `StaticRange.prototype`
+    /// paresseux (JS-C556) — ancêtres proto de `Range`/
+    /// `StaticRange` (chaîne `instanceof` spec).
+    abstract_range_proto: Option<ObjId>,
+    static_range_proto: Option<ObjId>,
     /// `Animation.prototype` paresseux + registre des
     /// animations vivantes (CAP-187) — document-local.
     /// `pub(crate)` : le proto du **ctor** est adopté à
@@ -101,6 +106,8 @@ impl MiscState {
             self.range_proto,
             self.tw_proto,
             self.ni_proto,
+            self.abstract_range_proto,
+            self.static_range_proto,
             self.anim_proto,
             self.kfe_proto,
             self.doc_timeline,
@@ -652,6 +659,28 @@ impl Host for SelectionHost {
             "focusOffset" => Value::Num(f64::from(
                 d.ranges.first().map_or(0, |r| r.borrow().end_off),
             )),
+            "direction" => {
+                // Spec : `'none'` quand collapsée, sinon le sens
+                // ancre→focus — le miroir modélise le range seul :
+                // début avant fin = `'forward'`, inversé
+                // (`setBaseAndExtent` arrière) = `'backward'`.
+                let dir = d.ranges.first().map_or("none", |r| {
+                    let r = r.borrow();
+                    if r.start_node == r.end_node && r.start_off == r.end_off {
+                        "none"
+                    } else {
+                        match cmp_point(
+                            &self.dom,
+                            (r.start_node, r.start_off),
+                            (r.end_node, r.end_off),
+                        ) {
+                            x if x < 0 => "forward",
+                            _ => "backward",
+                        }
+                    }
+                });
+                return Ok(Some(e.str_val(dir)));
+            }
             _ => return Ok(None),
         }))
     }
@@ -669,6 +698,7 @@ impl Host for SelectionHost {
                 | "collapse"
                 | "collapseToStart"
                 | "collapseToEnd"
+                | "setPosition"
                 | "extend"
                 | "addRange"
                 | "removeRange"
@@ -676,6 +706,9 @@ impl Host for SelectionHost {
                 | "empty"
                 | "setBaseAndExtent"
                 | "containsNode"
+                | "deleteFromDocument"
+                | "getComposedRanges"
+                | "modify"
         )
     }
 
@@ -719,9 +752,13 @@ impl Host for SelectionHost {
                 }))];
                 Ok(Some(Value::Undefined))
             }
-            "collapse" | "collapseToStart" | "collapseToEnd" | "extend" => {
+            "collapse" | "collapseToStart" | "collapseToEnd" | "setPosition" | "extend" => {
                 let d = self.data.borrow();
-                let node = if matches!(name, "collapse" | "extend") {
+                // `setPosition(node, off)` = alias webkit de
+                // `collapse` — lit les args comme elle, pas le
+                // range courant (bug JS-C556 : sinon il recopiait
+                // la borne `end` du premier range).
+                let node = if matches!(name, "collapse" | "extend" | "setPosition") {
                     node_for_in(e, arg(args, 0), &self.dom)
                 } else {
                     d.ranges.first().map(|r| {
@@ -733,7 +770,7 @@ impl Host for SelectionHost {
                         }
                     })
                 };
-                let off = if matches!(name, "collapse" | "extend") {
+                let off = if matches!(name, "collapse" | "extend" | "setPosition") {
                     e.to_number(arg(args, 1)).unwrap_or(0.0) as u32
                 } else {
                     d.ranges.first().map_or(0, |r| {
@@ -878,7 +915,57 @@ impl Host for SelectionHost {
                 self.data.borrow_mut().ranges.clear();
                 Ok(Some(Value::Undefined))
             }
-            "modify" => Ok(Some(Value::Undefined)),
+            "getComposedRanges" => {
+                // Spec shadow-aware non portée — approximation
+                // honnête documentée : les ranges de la sélection
+                // (le miroir n'ouvre qu'un seul arbre composé).
+                let ranges = self.data.borrow().ranges.clone();
+                let vals = ranges
+                    .into_iter()
+                    .map(|r| range_shared(e, r))
+                    .collect::<Vec<_>>();
+                Ok(Some(e.new_array(vals)))
+            }
+            "modify" => {
+                // Borné (JS-C556) : granularité `'character'`
+                // seule — `alter='move'` pose un caret, `'extend'`
+                // ne bouge que le focus ; `direction` forward/
+                // backward/left/right (ltr : right≡forward). Les
+                // autres granularités (word/line/…) sont no-op
+                // documentées, et la traversée inter-nœuds reste
+                // clampée aux bornes du conteneur texte courant.
+                let alter = e.to_js_string(arg(args, 0))?;
+                let dir = e.to_js_string(arg(args, 1))?;
+                let gran = e.to_js_string(arg(args, 2))?;
+                if gran != "character" {
+                    return Ok(Some(Value::Undefined));
+                }
+                let step: i64 = match dir.as_str() {
+                    "backward" | "left" => -1,
+                    _ => 1,
+                };
+                let rc = self.data.borrow().ranges.first().cloned();
+                if let Some(rc) = rc {
+                    let mut r = rc.borrow_mut();
+                    let len = {
+                        let d = self.dom.borrow();
+                        match d.nodes.get(r.end_node as usize) {
+                            Some(n) if matches!(n.kind, crate::dom::NodeKind::Text) => {
+                                d.text_content(r.end_node).chars().count() as i64
+                            }
+                            Some(_) => d.child_nodes(r.end_node).len() as i64,
+                            None => 0,
+                        }
+                    };
+                    let no = (i64::from(r.end_off) + step).clamp(0, len) as u32;
+                    r.end_off = no;
+                    if alter == "move" {
+                        r.start_node = r.end_node;
+                        r.start_off = no;
+                    }
+                }
+                Ok(Some(Value::Undefined))
+            }
             _ => Ok(None),
         }
     }
@@ -1063,6 +1150,72 @@ fn common_ancestor(dom: &crate::dom_host::DomRef, a: NodeId, b: NodeId) -> NodeI
     }
 }
 
+/// Ordre document de deux boundary points `(node, off)` —
+/// `-1`/`0`/`+1` (spec DOM *compare boundary points*).
+/// L'offset d'un conteneur-ancêtre se compare à l'index de la
+/// branche couvrant l'autre point ; à défaut d'ancêtre direct,
+/// les index des deux branches sous l'ancêtre commun tranchent.
+fn cmp_point(dom: &crate::dom_host::DomRef, a: (NodeId, u32), b: (NodeId, u32)) -> i32 {
+    let (an, ao) = a;
+    let (bn, bo) = b;
+    if an == bn {
+        return match ao.cmp(&bo) {
+            std::cmp::Ordering::Less => -1,
+            std::cmp::Ordering::Equal => 0,
+            std::cmp::Ordering::Greater => 1,
+        };
+    }
+    let d = dom.borrow();
+    // Enfant de `anc` porteur de la branche qui contient `n`
+    // (remontée bornée : la racine termine toujours la boucle).
+    let branch_of = |anc: NodeId, mut n: NodeId| -> NodeId {
+        while let Some(p) = d.parent(n) {
+            if p == anc {
+                return n;
+            }
+            n = p;
+        }
+        n
+    };
+    if d.contains(an, bn) {
+        let c = branch_of(an, bn);
+        let i = d
+            .child_nodes(an)
+            .iter()
+            .position(|&k| k == c)
+            .unwrap_or(0) as u32;
+        // `(an,ao)` précède `b` ssi l'offset n'atteint pas la
+        // branche qui contient `b`.
+        return if ao <= i { -1 } else { 1 };
+    }
+    if d.contains(bn, an) {
+        let c = branch_of(bn, an);
+        let i = d
+            .child_nodes(bn)
+            .iter()
+            .position(|&k| k == c)
+            .unwrap_or(0) as u32;
+        // `a` vit dans l'enfant `i` de `bn` : avant `(bn,bo)`
+        // ssi `i < bo`.
+        return if i < bo { -1 } else { 1 };
+    }
+    let anc = common_ancestor(dom, an, bn);
+    let kids = d.child_nodes(anc);
+    let ia = kids
+        .iter()
+        .position(|&k| k == branch_of(anc, an))
+        .unwrap_or(0);
+    let ib = kids
+        .iter()
+        .position(|&k| k == branch_of(anc, bn))
+        .unwrap_or(0);
+    match ia.cmp(&ib) {
+        std::cmp::Ordering::Less => -1,
+        std::cmp::Ordering::Equal => 0,
+        std::cmp::Ordering::Greater => 1,
+    }
+}
+
 /// Enfants top-level de l'ancêtre commun couverts par le range
 /// (borné : même-conteneur = tranche `[start_off..end_off)` ;
 /// multi-niveaux = enfants de l'ancêtre entre la branche de
@@ -1131,14 +1284,88 @@ fn delete_range_contents(dom: &crate::dom_host::DomRef, r: &SelRange) {
     }
 }
 
+/// `AbstractRange.prototype` paresseux — ancêtre proto de
+/// `Range.prototype`/`StaticRange.prototype` (spec DOM : les
+/// accesseurs bornes y vivent en get-only). `pub(crate)` :
+/// adopté par le ctor à l'install (identité `instanceof`).
+pub(crate) fn abstract_range_proto(e: &mut Engine) -> ObjId {
+    if let Some(p) = e.misc.abstract_range_proto {
+        return p;
+    }
+    let p = e.new_object();
+    let tag = e.str_val("AbstractRange");
+    e.set_own(p, crate::interp::SYM_TO_STRING_TAG, tag, false);
+    for key in [
+        "startContainer",
+        "startOffset",
+        "endContainer",
+        "endOffset",
+        "collapsed",
+    ] {
+        let kv = e.str_val(key);
+        let g = e.bound_native("get", abstract_range_get, vec![kv]);
+        if let Some(o) = e.heap.obj_mut(p) {
+            o.define_accessor(key, g, Value::Undefined, crate::heap::PropAttrs::BUILTIN);
+        }
+    }
+    e.misc.abstract_range_proto = Some(p);
+    p
+}
+
+/// Getter `AbstractRange.prototype.<borne>` — `this` doit être
+/// un range host (`RangeHost`/`StaticRangeHost`), sinon
+/// `TypeError` « Illegal invocation » (spec : l'accesseur
+/// vérifie la marque interne, pas la forme). La clé est liée
+/// dans `bound` (`bound_native` préfixe les args).
+fn abstract_range_get(e: &mut Engine, t: Value, args: &[Value]) -> JsResult<Value> {
+    let key = e.to_js_string(arg(args, 0))?;
+    let Value::Obj(id) = t else {
+        return Err(e.type_error("Illegal invocation"));
+    };
+    let Some((r, dom, cache)) = ({
+        let o = e.heap.obj(id);
+        o.and_then(|o| match &o.kind {
+            crate::heap::ObjKind::Host(h) => {
+                if let Some(rh) = h.as_any().downcast_ref::<RangeHost>() {
+                    Some((*rh.data.borrow(), rh.dom.clone(), rh.cache.clone()))
+                } else {
+                    h.as_any()
+                        .downcast_ref::<StaticRangeHost>()
+                        .map(|sh| (sh.r, sh.dom.clone(), sh.cache.clone()))
+                }
+            }
+            _ => None,
+        })
+    }) else {
+        return Err(e.type_error("Illegal invocation"));
+    };
+    Ok(match key.as_str() {
+        "startContainer" => node_value(e, &dom, &cache, r.start_node),
+        "endContainer" => node_value(e, &dom, &cache, r.end_node),
+        "startOffset" => Value::Num(f64::from(r.start_off)),
+        "endOffset" => Value::Num(f64::from(r.end_off)),
+        "collapsed" => Value::Bool(r.start_node == r.end_node && r.start_off == r.end_off),
+        _ => Value::Undefined,
+    })
+}
+
 /// `Range.prototype` paresseux (une fois par engine).
-fn range_proto(e: &mut Engine) -> ObjId {
+/// `pub(crate)` : adopté par `Range.prototype` du ctor à
+/// l'install — `r instanceof Range` exige l'identité
+/// (JS-C556 : le `new_object()` dédié la cassait).
+pub(crate) fn range_proto(e: &mut Engine) -> ObjId {
     if let Some(p) = e.misc.range_proto {
         return p;
     }
     let p = e.new_object();
     let tag = e.str_val("Range");
     e.set_own(p, crate::interp::SYM_TO_STRING_TAG, tag, false);
+    // Chaîne spec : `Range.prototype.__proto__ ===
+    // AbstractRange.prototype` → `r instanceof AbstractRange`.
+    let ar = Value::Obj(abstract_range_proto(e));
+    if let Some(o) = e.heap.obj_mut(p) {
+        o.set_proto(ar);
+    }
     e.misc.range_proto = Some(p);
     p
 }
@@ -1219,6 +1446,11 @@ impl Host for RangeHost {
                 | "toString"
                 | "getBoundingClientRect"
                 | "getClientRects"
+                | "compareBoundaryPoints"
+                | "comparePoint"
+                | "isPointInRange"
+                | "intersectsNode"
+                | "surroundContents"
         )
     }
 
@@ -1406,6 +1638,165 @@ impl Host for RangeHost {
                 d.insert_before(r.start_node, n, ref_n);
                 Ok(Some(Value::Undefined))
             }
+            // — Comparaisons de boundary points (JS-C556) :
+            // `cmp_point` donne l'ordre document — approximation
+            // `(node,off)` bornée, documentée avec le modèle.
+            "compareBoundaryPoints" => {
+                // `how` : 0 START_TO_START, 1 START_TO_END,
+                // 2 END_TO_END, 3 END_TO_START — la borne
+                // correspondante de `this` est comparée à celle
+                // du range source (`-1` avant / `0` égal / `+1`
+                // après). Constantes posées sur ctor + proto à
+                // l'install (spec).
+                let how = e.to_number(arg(args, 0)).unwrap_or(f64::NAN);
+                if !(0.0..=3.0).contains(&how) {
+                    return Err(crate::heap::Thrown(crate::dom_host::dom_ex_pub(
+                        e,
+                        "NotSupportedError",
+                        "compareBoundaryPoints: how",
+                    )));
+                }
+                let (Some(sh), Some(se)) = ({
+                    let mut found = (None, None);
+                    if let Value::Obj(id) = arg(args, 1) {
+                        if let Some(h) = e.host_of(id) {
+                            if let Some(rh) = h.as_any().downcast_ref::<RangeHost>() {
+                                let r = *rh.data.borrow();
+                                found = (
+                                    Some((r.start_node, r.start_off)),
+                                    Some((r.end_node, r.end_off)),
+                                );
+                            } else if let Some(sh) = h.as_any().downcast_ref::<StaticRangeHost>() {
+                                found = (
+                                    Some((sh.r.start_node, sh.r.start_off)),
+                                    Some((sh.r.end_node, sh.r.end_off)),
+                                );
+                            }
+                        }
+                    }
+                    found
+                }) else {
+                    return Err(crate::heap::Thrown(crate::dom_host::dom_ex_pub(
+                        e,
+                        "NotSupportedError",
+                        "compareBoundaryPoints: not a Range",
+                    )));
+                };
+                let r = *self.data.borrow();
+                let (mine, theirs) = match how as u32 {
+                    0 => ((r.start_node, r.start_off), sh),
+                    1 => ((r.end_node, r.end_off), sh),
+                    2 => ((r.end_node, r.end_off), se),
+                    _ => ((r.start_node, r.start_off), se),
+                };
+                Ok(Some(Value::Num(f64::from(cmp_point(
+                    &self.dom, mine, theirs,
+                )))))
+            }
+            "comparePoint" => {
+                let Some(n) = node_for_in(e, arg(args, 0), &self.dom) else {
+                    return Err(e.type_error("Range.comparePoint: not a Node"));
+                };
+                let off = e.to_number(arg(args, 1)).unwrap_or(0.0).max(0.0) as u32;
+                let r = *self.data.borrow();
+                let s = cmp_point(&self.dom, (n, off), (r.start_node, r.start_off));
+                let en = cmp_point(&self.dom, (n, off), (r.end_node, r.end_off));
+                Ok(Some(Value::Num(if s < 0 {
+                    -1.0
+                } else if en > 0 {
+                    1.0
+                } else {
+                    0.0
+                })))
+            }
+            "isPointInRange" => {
+                let Some(n) = node_for_in(e, arg(args, 0), &self.dom) else {
+                    return Err(e.type_error("Range.isPointInRange: not a Node"));
+                };
+                let off = e.to_number(arg(args, 1)).unwrap_or(0.0).max(0.0) as u32;
+                let r = *self.data.borrow();
+                let s = cmp_point(&self.dom, (n, off), (r.start_node, r.start_off));
+                let en = cmp_point(&self.dom, (n, off), (r.end_node, r.end_off));
+                Ok(Some(Value::Bool(s >= 0 && en <= 0)))
+            }
+            "intersectsNode" => {
+                // Spec : parent absent → `false` ; sinon le nœud
+                // intersecte ssi `(parent, i+1)` est après le début
+                // ET `(parent, i)` est avant la fin.
+                let Some(n) = node_for_in(e, arg(args, 0), &self.dom) else {
+                    return Err(e.type_error("Range.intersectsNode: not a Node"));
+                };
+                let hit = match node_index(&self.dom, n) {
+                    None => false,
+                    Some((p, i)) => {
+                        let r = *self.data.borrow();
+                        cmp_point(&self.dom, (p, i + 1), (r.start_node, r.start_off)) > 0
+                            && cmp_point(&self.dom, (p, i), (r.end_node, r.end_off)) < 0
+                    }
+                };
+                Ok(Some(Value::Bool(hit)))
+            }
+            "surroundContents" => {
+                // Spec bornée : `newParent` élément/fragment
+                // (InvalidNodeTypeError sinon) ; le contenu couvert
+                // est déplacé dedans (clone+delete — approximation
+                // d'`extractContents`, identités perdues), ses
+                // enfants remplacés, le parent inséré à la borne de
+                // début puis sélectionné. La détection « nœud non
+                // texte partiellement contenu » (BadStateError)
+                // n'est pas portée — même tolérance documentée que
+                // `extractContents`.
+                let Some(np) = node_for_in(e, arg(args, 0), &self.dom) else {
+                    return Err(e.type_error("Range.surroundContents: not a Node"));
+                };
+                {
+                    let d = self.dom.borrow();
+                    if !matches!(
+                        d.nodes.get(np as usize).map(|n| &n.kind),
+                        Some(crate::dom::NodeKind::Element | crate::dom::NodeKind::Fragment)
+                    ) {
+                        return Err(crate::heap::Thrown(crate::dom_host::dom_ex_pub(
+                            e,
+                            "InvalidNodeTypeError",
+                            "surroundContents: newParent",
+                        )));
+                    }
+                }
+                let r = *self.data.borrow();
+                // 1. Contenu couvert → fragment (clone) ; 2.
+                //    suppression des originaux (≡ extractContents).
+                let covered = range_covered_top(&self.dom, &r);
+                let frag = {
+                    let mut d = self.dom.borrow_mut();
+                    let frag = d.create_fragment();
+                    for &n in &covered {
+                        let c = d.clone_node(n, true);
+                        d.insert_before(frag, c, None);
+                    }
+                    frag
+                };
+                delete_range_contents(&self.dom, &r);
+                {
+                    let mut d = self.dom.borrow_mut();
+                    // Remplace les enfants du nouveau parent, puis
+                    // insère le parent au point de début.
+                    for c in d.child_nodes(np) {
+                        d.detach(c);
+                    }
+                    d.insert_before(np, frag, None);
+                    let ref_n = d.child_nodes(r.start_node).get(r.start_off as usize).copied();
+                    d.insert_before(r.start_node, np, ref_n);
+                }
+                // selectNode(np) — le range épouse le parent posé.
+                if let Some((p, i)) = node_index(&self.dom, np) {
+                    let mut d = self.data.borrow_mut();
+                    d.start_node = p;
+                    d.start_off = i;
+                    d.end_node = p;
+                    d.end_off = i + 1;
+                }
+                Ok(Some(Value::Undefined))
+            }
             "cloneRange" => Ok(Some(range_value(e, *self.data.borrow()))),
             "detach" => Ok(Some(Value::Undefined)),
             "toString" => {
@@ -1429,6 +1820,112 @@ impl Host for RangeHost {
             }
             _ => Ok(None),
         }
+    }
+}
+
+// ===== JS-C556 — `StaticRange` : `AbstractRange` gelé (bornes
+// lues à la construction, jamais mutées — spec DOM).
+
+/// Host `StaticRange` — bornes figées dans `r` (pas de `RefCell`
+/// : aucun setter n'existe).
+struct StaticRangeHost {
+    r: SelRange,
+    dom: crate::dom_host::DomRef,
+    cache: crate::dom_host::NodeCache,
+}
+
+/// `StaticRange.prototype` paresseux — chaîne `__proto__` vers
+/// `AbstractRange.prototype` (spec : `s instanceof AbstractRange`).
+/// `pub(crate)` : adopté par le ctor à l'install (`instanceof`).
+pub(crate) fn static_range_proto(e: &mut Engine) -> ObjId {
+    if let Some(p) = e.misc.static_range_proto {
+        return p;
+    }
+    let p = e.new_object();
+    let tag = e.str_val("StaticRange");
+    e.set_own(p, crate::interp::SYM_TO_STRING_TAG, tag, false);
+    let ar = Value::Obj(abstract_range_proto(e));
+    if let Some(o) = e.heap.obj_mut(p) {
+        o.set_proto(ar);
+    }
+    e.misc.static_range_proto = Some(p);
+    p
+}
+
+/// `new StaticRange({startContainer, startOffset?, endContainer,
+/// endOffset?})` — spec : `init` absent ou bornes non-Node →
+/// `TypeError` (« required member »). Le range est gelé : les
+/// mutateurs sont absents de la surface (déviation documentée :
+/// la spec les expose en *throwing* `InvalidStateError` — ici
+/// `s.setStart` est `undefined`, jamais une mutation silencieuse).
+pub(crate) fn static_range_ctor(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
+    let init = arg(args, 0);
+    let Value::Obj(id) = init else {
+        return Err(e.type_error("StaticRange: required member startContainer is undefined"));
+    };
+    let Some((dom, cache)) = e.dom_ctx.clone() else {
+        return Err(e.type_error("StaticRange: no document"));
+    };
+    let sc = e.get_prop(id, "startContainer");
+    let ec = e.get_prop(id, "endContainer");
+    let so_v = e.get_prop(id, "startOffset");
+    let eo_v = e.get_prop(id, "endOffset");
+    let (Some(sn), Some(en)) = (
+        sc.and_then(|v| node_for_in(e, v, &dom)),
+        ec.and_then(|v| node_for_in(e, v, &dom)),
+    ) else {
+        return Err(e.type_error("StaticRange: startContainer/endContainer must be Nodes"));
+    };
+    let so = so_v
+        .and_then(|v| e.to_number(v).ok())
+        .unwrap_or(0.0)
+        .max(0.0) as u32;
+    let eo = eo_v
+        .and_then(|v| e.to_number(v).ok())
+        .unwrap_or(0.0)
+        .max(0.0) as u32;
+    let v = e.new_host_object(Rc::new(StaticRangeHost {
+        r: SelRange {
+            start_node: sn,
+            start_off: so,
+            end_node: en,
+            end_off: eo,
+        },
+        dom,
+        cache,
+    }));
+    let p = static_range_proto(e);
+    if let Value::Obj(oid) = v {
+        if let Some(o) = e.heap.obj_mut(oid) {
+            o.set_proto(Value::Obj(p));
+        }
+    }
+    Ok(v)
+}
+
+impl Host for StaticRangeHost {
+    fn class_name(&self) -> &'static str {
+        "StaticRange"
+    }
+
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
+
+    fn trace(&self, out: &mut Vec<ObjId>) {
+        crate::dom_host::trace_node_cache(&self.cache, out);
+    }
+
+    fn get(&self, e: &mut Engine, _t: Value, key: &str) -> JsResult<Option<Value>> {
+        let r = &self.r;
+        Ok(Some(match key {
+            "startContainer" => node_value(e, &self.dom, &self.cache, r.start_node),
+            "endContainer" => node_value(e, &self.dom, &self.cache, r.end_node),
+            "startOffset" => Value::Num(f64::from(r.start_off)),
+            "endOffset" => Value::Num(f64::from(r.end_off)),
+            "collapsed" => Value::Bool(r.start_node == r.end_node && r.start_off == r.end_off),
+            _ => return Ok(None),
+        }))
     }
 }
 
