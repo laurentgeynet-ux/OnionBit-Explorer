@@ -14427,3 +14427,14 @@ chaque gain rapporté contre les **deux** archétypes.
   `pipeThrough` = même `pipe_start`, `readable` rendu de suite.
   Verrous `c563_streams_pipe` ×7 ; régressions b122 ×4,
   b4 ×16, c338 ×9, xhr ×81 vertes.
+- [x] **JS-C573 — sonde §B-158 `[object Module]` (notion)** :
+  verbatim vol 856 bissecté — appel *par variable* d'un export
+  de namespace `import()` dont le binding contient un namespace
+  (`export * as`/`import *` re-exporté : `[[Call]]` absent,
+  spec-légitime). La divergence à nommer = *quelle* liaison est
+  servie. Sondes `DBG_DRIVE` : `ns_get` logge
+  `spec::name → Module` (spec en 3e bound-arg), `[ns]` liste
+  les exports, `[import]` trace spec→url/fetch. Verrous
+  `c573_module_ns_call` ×4 ; c100 ×9, c457 vertes. Re-vol
+  notion `DBG_DRIVE=1` → le binding fautif nommé, le fix
+  devient mécanique.

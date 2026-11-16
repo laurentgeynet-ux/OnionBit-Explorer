@@ -365,6 +365,9 @@ impl Engine {
     /// une `DynImportReq` part dans `drain_dyn_imports`.
     pub(crate) fn dynamic_import(&mut self, spec: &str, referrer: &str) -> JsResult<Value> {
         tracing::debug!(spec, referrer, "import() dynamique");
+        if std::env::var("DBG_DRIVE").is_ok() {
+            eprintln!("[import] spec={spec} ref={referrer}");
+        }
         // JS-C457 — module déjà instancié sous cette URL :
         // `import('inline:N')` (vimeo — réimport par l'URL
         // opaque du `<script type=module>` évalué) ne part
@@ -420,6 +423,9 @@ impl Engine {
         let pid = self.new_promise();
         let seq = self.dyn_import_seq;
         self.dyn_import_seq += 1;
+        if std::env::var("DBG_DRIVE").is_ok() {
+            eprintln!("[import] fetch seq={seq} {resolved} → {url}");
+        }
         self.pending_imports.insert(
             seq,
             PendingImport {
@@ -852,11 +858,21 @@ impl Engine {
                 },
             );
         }
+        let spec = self.modules[idx].spec.clone();
         let exports = self.modules[idx].exports.clone();
+        if std::env::var("DBG_DRIVE").is_ok() {
+            let names: Vec<String> = exports.iter().map(|(n, _, _)| n.to_string()).collect();
+            eprintln!("[ns] {spec} exports={names:?}");
+        }
+        let spec_v = self.str_val(&spec);
         for (exported, denv, bnd) in exports {
             let eidx = self.env_index(&denv);
             let bname = self.str_val(&*bnd);
-            let get = self.bound_native("nsget", ns_get, vec![Value::Num(eidx as f64), bname]);
+            let get = self.bound_native(
+                "nsget",
+                ns_get,
+                vec![Value::Num(eidx as f64), bname, spec_v.clone()],
+            );
             if let Some(o) = self.heap.obj_mut(obj) {
                 o.define_accessor(
                     &exported,
@@ -1022,7 +1038,8 @@ fn env_alias(env: &EnvRef, local: &str, dep_env: &EnvRef, binding: &str) {
     }
 }
 
-/// Namespace getter — bound args: `[env_index, binding_name]`.
+/// Namespace getter — bound args: `[env_index, binding_name,
+/// module_spec]` (le spec ne sert qu'à la sonde §B-158).
 fn ns_get(e: &mut Engine, _this: Value, args: &[Value]) -> JsResult<Value> {
     let Some(Value::Num(n)) = args.first() else {
         return Ok(Value::Undefined);
@@ -1036,7 +1053,36 @@ fn ns_get(e: &mut Engine, _this: Value, args: &[Value]) -> JsResult<Value> {
     let Some(env) = e.module_envs.get(*n as usize).cloned() else {
         return Ok(Value::Undefined);
     };
-    Ok(e.env_get(&env, &name).unwrap_or(Value::Undefined))
+    let v = e.env_get(&env, &name).unwrap_or(Value::Undefined);
+    // §B-158 — verbatim notion « object is not a function:
+    // [object Module] » : le site appelle un export dont le
+    // binding contient un namespace (`export * as`, re-export
+    // d'un `import *`, ou `import()` d'un chunk inattendu).
+    // La sonde nomme spec + binding pour que le vol identifie
+    // la liaison fautive au lieu de deviner dans le minifié.
+    if std::env::var("DBG_DRIVE").is_ok() && is_module_ns(e, &v) {
+        let spec = match args.get(2) {
+            Some(Value::Str(s)) => s.to_string(),
+            _ => "?".to_string(),
+        };
+        eprintln!("[ns_get] {spec}::{name} → Module (env #{n})");
+    }
+    Ok(v)
+}
+
+/// `v` porte-t-il le `Symbol.toStringTag = "Module"` propre —
+/// signature de `module_ns_object` (sonde §B-158, gate
+/// `DBG_DRIVE` uniquement).
+fn is_module_ns(e: &Engine, v: &Value) -> bool {
+    let Value::Obj(oid) = v else {
+        return false;
+    };
+    e.heap.obj(*oid).is_some_and(|o| {
+        matches!(
+            o.get_own(crate::interp::SYM_TO_STRING_TAG),
+            Some(Value::Str(s)) if &*s == "Module"
+        )
+    })
 }
 
 /// Names declared by a top-level statement for lexical
