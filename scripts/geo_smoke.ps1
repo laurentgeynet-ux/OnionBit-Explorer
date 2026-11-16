@@ -85,7 +85,7 @@ foreach ($site in $sites) {
     # 3. Diff élément par élément.
     $diff = Join-Path $outDir "$name.geodiff.json"
     $out = & node (Join-Path $root 'scripts\geo_diff.mjs') $geom $ref --out $diff --top 5 2>&1
-    $line = ($out | Select-String -Pattern 'divergents|matched' | Select-Object -First 1)
+    $line = ($out | Select-String -Pattern 'divergents|matched|hors-mesure' | Select-Object -First 1)
     Write-Output ("  DIFF {0}  {1}" -f $site, $(if ($line) { $line.Line.Trim() } else { 'n/a' }))
 
     if (Test-Path $diff) {
