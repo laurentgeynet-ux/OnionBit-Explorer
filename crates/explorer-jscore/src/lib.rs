@@ -705,6 +705,23 @@ pub static J17_IMMEMO_HIT: std::sync::atomic::AtomicU64 = std::sync::atomic::Ato
 /// JS-C559 — insertions `immemo` (première résolution par
 /// couple wrapper×clé — le volume de wrappers concernés).
 pub static J17_IMMEMO_INS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+/// JS-C568 — hits du mémo sibling `nav_memo` (JS-C567) :
+/// le filet prouve le hit-rate au lieu de le déduire du ratio
+/// ns/get (n567 : l'inflation machine rendait l'absolu muet).
+pub static J17_NAVM_HIT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+/// JS-C568 — misses `nav_memo` (entry absente — `struct_gen`
+/// bumpé ou nœud jamais lu).
+pub static J17_NAVM_MISS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+/// JS-C568 — hits `univ_fn_memo` (entrée utilisée — positive
+/// re-validée ou négative mémoïsée).
+pub static J17_UFN_HIT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+/// JS-C568 — misses `univ_fn_memo` (absente ou positive
+/// périmée → re-marche complète).
+pub static J17_UFN_MISS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+/// JS-C568 — hits `shadow_memo` (`proto_accessor_shadows`).
+pub static J17_SHM_HIT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+/// JS-C568 — misses `shadow_memo`.
+pub static J17_SHM_MISS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 
 /// Gate J17 : les compteurs ci-dessus ne s'incrémentent que si
 /// `EXPLORER_J17_PROF` est posé (non vide/non "0") au premier
@@ -745,7 +762,7 @@ pub fn j17_enable() {
 #[must_use]
 pub fn j17_snapshot() -> String {
     let r = std::sync::atomic::Ordering::Relaxed;
-    let pairs: [(&str, &std::sync::atomic::AtomicU64); 86] = [
+    let pairs: [(&str, &std::sync::atomic::AtomicU64); 92] = [
         ("prop_lookup", &J17_PROP_LOOKUP),
         ("proto_lvl", &J17_PROTO_LVL),
         ("prop_scan", &J17_PROP_SCAN),
@@ -832,6 +849,12 @@ pub fn j17_snapshot() -> String {
         ("host_get", &J17_HOST_GET),
         ("immemo_hit", &J17_IMMEMO_HIT),
         ("immemo_ins", &J17_IMMEMO_INS),
+        ("navm_hit", &J17_NAVM_HIT),
+        ("navm_miss", &J17_NAVM_MISS),
+        ("ufn_hit", &J17_UFN_HIT),
+        ("ufn_miss", &J17_UFN_MISS),
+        ("shm_hit", &J17_SHM_HIT),
+        ("shm_miss", &J17_SHM_MISS),
     ];
     let mut out = String::new();
     for (k, c) in pairs {

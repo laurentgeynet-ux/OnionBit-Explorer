@@ -3654,10 +3654,10 @@ fn c565_host_key_prefilter() {
     );
 }
 
-/// JS-C567 — mémo `(clé, nœud, struct_gen ^ acc_gen)` des
-/// accesseurs de navigation : réponses fraîches après chaque
-/// mutation structurelle, déférence au proto si un accesseur
-/// script est posé **après** les lectures mémoïsées.
+/// JS-C567 — mémo `(len clé, nœud, struct_gen)` des accesseurs
+/// **sibling** : réponses fraîches après chaque mutation
+/// structurelle, déférence au proto si un accesseur script est
+/// posé **après** les lectures mémoïsées.
 #[test]
 fn c567_nav_memo() {
     const P: &str = r#"<html><body>
@@ -3708,6 +3708,29 @@ fn c567_nav_memo() {
         ),
         "own-x"
     );
+}
+
+/// JS-C568 — les compteurs hit/miss des trois mémos
+/// (`nav_memo`, `univ_fn_memo`, `shadow_memo`) atteignent le
+/// snapshot J17 : le filet doit lire le hit-rate, pas le
+/// déduire du ratio ns/get.
+#[test]
+fn c568_memo_counters_reach_snapshot() {
+    const P: &str = r#"<html><body>
+<div id="a"><span id="s1">x</span><b id="s2">y</b></div>
+</body></html>"#;
+    explorer_jscore::j17_enable();
+    // Répétitions : nav (sibling), universel (hasOwnProperty),
+    // ombres (chaque get) — hits + misses des deux côtés.
+    ev_in(
+        P,
+        "var s1=document.getElementById('s1'),s2=document.getElementById('s2');\
+         for(var i=0;i<50;i++){s1.nextSibling;s2.previousSibling;s1.hasOwnProperty('z');s1.parentNode}",
+    );
+    let snap = explorer_jscore::j17_snapshot();
+    for k in ["navm_hit", "ufn_hit", "shm_hit"] {
+        assert!(snap.contains(k), "compteur {k} absent de {snap}");
+    }
 }
 
 /// `for-of`/`Symbol.iterator` sur les collections host —

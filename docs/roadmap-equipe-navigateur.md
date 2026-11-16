@@ -13580,6 +13580,12 @@ chaque gain rapporté contre les **deux** archétypes.
   (`ic_hit`/`ic_miss`/`ic_disarm` au snapshot) pour
   borner la couverture du seul court-circuit existant.
   Dependency-groups = infra lourde, dernier recours.
+- [x] **JS-C568 — compteurs hit/miss des mémos J17** —
+  `navm_hit`/`navm_miss`/`ufn_hit`/`ufn_miss`/`shm_hit`/
+  `shm_miss` au snapshot : le hit-rate se lit au lieu d'être
+  déduit du ratio ns/get (n567 : absolu muet sous variance
+  machine). Verrou `c568_memo_counters_reach_snapshot`,
+  `dom` 274.
 - [x] **JS-C567 — mémo sibling + `hasOwnProperty` universel,
   staleness `shadow_memo` réparée** — filet n566 : `parentNode`
   962 ns@36,9 k, `nextSibling` 1,67 µs@9,9 k (scan `position()`

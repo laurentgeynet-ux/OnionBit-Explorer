@@ -1030,8 +1030,10 @@ fn dom_nav_value(
                 // discriminant gratuit.
                 let mk = (key.len() as u64, node as u64, dom.borrow().struct_gen);
                 if let Some(&hit) = e.nav_memo.get(&mk) {
+                    crate::j17_tick(&crate::J17_NAVM_HIT);
                     hit
                 } else {
+                    crate::j17_tick(&crate::J17_NAVM_MISS);
                     let c = nav_sibling_node(dom, node, key);
                     if e.nav_memo.len() >= NAV_MEMO_CAP {
                         e.nav_memo.clear();
@@ -1457,8 +1459,10 @@ fn proto_accessor_shadows(e: &mut Engine, id: ObjId, key: &str) -> bool {
         (crate::intern(key).as_ptr() as usize as u64) ^ (key.len() as u64) << 48,
     );
     if let Some(&b) = e.shadow_memo.get(&memo_key) {
+        crate::j17_tick(&crate::J17_SHM_HIT);
         return b;
     }
+    crate::j17_tick(&crate::J17_SHM_MISS);
     // Phase 2 — marche `find_own` (une seule fois par
     // (chaîne-shape, clé) distincts).
     let authored_check = |e: &mut Engine, cid: ObjId| -> bool {
@@ -1557,13 +1561,18 @@ fn proto_universal_fn(e: &mut Engine, id: ObjId, key: &str) -> Option<Value> {
                     e.find_own(owner, key),
                     Some(crate::heap::Prop::Data { value, .. }) if value == v
                 ) {
+                    crate::j17_tick(&crate::J17_UFN_HIT);
                     return Some(v);
                 }
             }
-            None => return None,
+            None => {
+                crate::j17_tick(&crate::J17_UFN_HIT);
+                return None;
+            }
             _ => {}
         }
     }
+    crate::j17_tick(&crate::J17_UFN_MISS);
     // Premier propriétaire en ordre de chaîne ; un accesseur
     // en tête → `None` (le chemin normal l'invoquera — un
     // accesseur script aurait déjà déféré au gate amont).
