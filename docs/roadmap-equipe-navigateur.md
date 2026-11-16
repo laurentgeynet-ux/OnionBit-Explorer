@@ -8090,6 +8090,25 @@ MCP = adaptateur, jamais la base.
   design csszengarden, images debian) ;
   craigslist rejeté (redirect géo), ddg-lite
   trop maigre. Run complet 10/10 mesurés.
+- [x] **Étape 297. Triage `bcd_audit` — fixtures
+  corrigées, méta-noms sondés, file PIPE nommée** —
+  les constats de l'étape 277 passent en revue.
+  `flex-wrap`/`flex-flow` : fixture mono-ligne sans
+  débordement (wrap inobservable, 0/3) → multi-lignes
+  dédiée, `wrap`/`wrap-reverse` ok. `margin:anchor-size`
+  : méta-nom → sonde `anchor-size(--a)` + fixture ancre,
+  ok mesuré ; bras `margin` de `value_is_valid_for`
+  ouvert à `anchor(`/`anchor-size(` (additif PIPE,
+  journalisé). Sizing `anchor*` → `na` (12 paires —
+  immesurable sans ancre, fixture positionnée
+  incompatible avec l'oracle intrinsèque).
+  `mask-border-mode` hors `NO_ORACLE` → tables-mortes 0.
+  File PIPE (Extensions demandées) : `expand_background`
+  `currentColor`/`round`/`space`/`text`/`border-area`/
+  `x-*`/`y-*`, `expand_mask` positions logiques,
+  `fit-content(<len>)`, `stretch`, `overflow-block`/
+  `overflow-inline` routés-inertes, `anchor()` insets.
+  `css.values` 1139/1779 → 1144/1767 (64,7 %).
 - [x] **Étape 296. `POST /api/shutdown` — l'arrêt graceful
   à distance** (`explorer-api`/`explorer-daemon`/
   `explorer-cli`, besoin console : le kill n'avait que

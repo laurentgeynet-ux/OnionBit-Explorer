@@ -6,7 +6,7 @@
     "css.at": 20,
     "js.builtins": 648,
     "api": 1510,
-    "css.values": 1139,
+    "css.values": 1144,
     "html.elem": 119
   },
   "families": {
@@ -153,8 +153,8 @@
       "flex": 6,
       "flex-basis": 1,
       "flex-direction": 3,
-      "flex-flow": 3,
-      "flex-wrap": 0,
+      "flex-flow": 5,
+      "flex-wrap": 3,
       "float": 2,
       "font": 0,
       "font-family": 10,

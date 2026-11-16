@@ -753,10 +753,21 @@ fn fixture_for(name: &str) -> &'static str {
         // de l'arme multi-lignes les rendaient inertes.
         () if matches!(
             n,
-            "justify-content" | "column-gap" | "flex-direction" | "flex-wrap" | "flex-flow"
+            "justify-content" | "column-gap" | "flex-direction"
         ) =>
         {
             "<body><div class=x style=\"display:flex;width:400px\"><p>a</p><p>b</p><p>c</p></div></body>"
+        }
+        // `flex-wrap`/`flex-flow` — le wrap n'a d'oracle
+        // qu'avec un item qui DÉBORDE : `a` à 100 % force
+        // `b` sur la ligne 2 (étape 297 — la fixture
+        // mono-ligne ci-dessus rendait toute la famille
+        // inerte, 0/3). Pas de `flex-wrap` en `style=` ni
+        // en ctx : la base `nowrap` est l'initiale — `wrap`
+        // et `wrap-reverse` divergent, `nowrap` est `na`
+        // par `INITIAL_EXTRA`.
+        () if n == "flex-wrap" || n == "flex-flow" => {
+            "<body><div class=x style=\"display:flex;height:200px\"><p style=\"width:100%\">a</p><p>b</p></div></body>"
         }
         // Props de conteneur flex/grid — `.x` = le conteneur.
         () if matches!(
@@ -1023,10 +1034,10 @@ fn fixture_for(name: &str) -> &'static str {
             n,
             "top" | "right" | "bottom" | "left" | "inset" | "inset-block"
                 | "inset-block-end" | "inset-block-start" | "inset-inline"
-                | "inset-inline-end" | "inset-inline-start" | "margin-top"
-                | "margin-right" | "margin-bottom" | "margin-left" | "margin-block"
-                | "margin-block-start" | "margin-block-end" | "margin-inline"
-                | "margin-inline-start" | "margin-inline-end"
+                | "inset-inline-end" | "inset-inline-start" | "margin"
+                | "margin-top" | "margin-right" | "margin-bottom" | "margin-left"
+                | "margin-block" | "margin-block-start" | "margin-block-end"
+                | "margin-inline" | "margin-inline-start" | "margin-inline-end"
         ) =>
         {
             "<body><div id=a style=\"anchor-name:--a;position:absolute;top:10px;left:10px;width:20px;height:20px\"></div><p class=x style=\"position:absolute;position-anchor:--a\">b</p></body>"
@@ -2371,7 +2382,6 @@ const NO_ORACLE: &[&str] = &[
     "mask-origin",
     "mask-composite",
     "mask-border",
-    "mask-border-mode",
     "mask-border-repeat",
     "mask-border-slice",
     "mask-border-source",
@@ -2928,8 +2938,11 @@ fn subfeature_probe(name: &str, v: &str) -> Option<Subfeature> {
         return Some(Subfeature::Probe(lit));
     }
     // `anchor()`/`anchor-size()` — même sous-feature sur
-    // toute la famille inset/margin/size : la fixture
-    // ancre est posée pour ces props (voir `fixture_for`).
+    // toute la famille inset/margin : la fixture ancre
+    // est posée pour ces props (voir `fixture_for`).
+    // `margin` (shorthand) complète ses longhands
+    // (étape 297 — la paire BCD `margin:anchor-size`
+    // tombait en `decl:` et mesurait le mot-clé nu).
     if matches!(
         name,
         "top"
@@ -2943,6 +2956,7 @@ fn subfeature_probe(name: &str, v: &str) -> Option<Subfeature> {
             | "inset-inline"
             | "inset-inline-end"
             | "inset-inline-start"
+            | "margin"
             | "margin-top"
             | "margin-right"
             | "margin-bottom"
@@ -2953,7 +2967,25 @@ fn subfeature_probe(name: &str, v: &str) -> Option<Subfeature> {
             | "margin-inline"
             | "margin-inline-start"
             | "margin-inline-end"
-            | "width"
+    ) {
+        if v == "anchor" {
+            return Some(Subfeature::Probe("anchor(--a)"));
+        }
+        if v == "anchor-size" {
+            return Some(Subfeature::Probe("anchor-size(--a)"));
+        }
+    }
+    // … et sur la famille sizing : `anchor()`/`anchor-size()`
+    // sans ancre résout en repli/invalidité par spec — la
+    // fixture positionnée qui poserait l'ancre tue
+    // l'oracle de sizing intrinsèque (`width:auto`
+    // shrink-to-fit, mesuré étape 270). Impropre à la
+    // mesure sous ce harnais → `na`, pas `miss`
+    // (étape 297 : la paire ne mesurait rien de la
+    // fonction — seulement « pas d'ancre → rien »).
+    if matches!(
+        name,
+        "width"
             | "height"
             | "block-size"
             | "inline-size"
@@ -2965,13 +2997,9 @@ fn subfeature_probe(name: &str, v: &str) -> Option<Subfeature> {
             | "max-height"
             | "max-block-size"
             | "max-inline-size"
-    ) {
-        if v == "anchor" {
-            return Some(Subfeature::Probe("anchor(--a)"));
-        }
-        if v == "anchor-size" {
-            return Some(Subfeature::Probe("anchor-size(--a)"));
-        }
+    ) && matches!(v, "anchor" | "anchor-size")
+    {
+        return Some(Subfeature::Na);
     }
     // `fit-content(<len>)` — même sous-feature sur toute la
     // famille de sizing.

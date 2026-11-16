@@ -71,6 +71,7 @@ Règles :
 | 2026-11-10 | `explorer-cli shot --report` + dump géométrique normalisé | **Plan « recensement des features » PIPE — contrat de consommation NAV posé** (acceptation de la demande PIPE, sprints 2/3 livrés côté NAV : `site_harvest.ps1` étape 212 + `ref_capture.mjs` étape 213). Ce que la récolte attend du `--report out.json` annoncé : le JSON est fusionné **verbatim** sous `site.report` ; le Pareto du `report.html` agrège `report.census` — toute map `{clé: count}` à profondeur quelconque (`css.dropped.*`, `html.errors.*`, `layout.anomalies.*`, `js.not_implemented.*`…) ; `doc_h` lu si présent. Aucun autre champ exigé — forme libre, le dashboard suit. Côté oracle : `GET /api/tabs/{id}/layout` **existe déjà** (dump wireframe texte, étape 17 — `site_harvest -Mode daemon` le collecte par site) ; le dump géométrique **normalisé** du sprint 3 (JSON `NodeId→rect` pour le diff boîte-à-boîte vs `getBoundingClientRect`) reste à forme arrêter côté PIPE — la référence Chrome produite est `<nom>.ref.json` = `{doc_w, doc_h, boxes:[{tag,id,cls,x,y,w,h}]}`. | NAV (étapes 212/213) | **sprint 1 livré → R-207** (API `explorer_common::census` + `TreeStats` — les clés `css.*`/`html.*` entrent verbatim dans `report.census`) — reste : câblage `--report` NAV + dump géométrique |
 | 2026-11-13 | `explorer-css` cascade scopée + `explorer-render` display list/raster | **Audit perf — deux chantiers PIPE mesurés, suite Étape 231** (vol `sync_profile` dev.to réel, debug, cycle `incr.*` ~46 s : repaint 36 s, style 9,4 s, relayout 0,85 s — interpréteur ~1 %). (a) **Cascade scopée `:has`-aware** : `eng_has_relational` (scan `contains(":has(")` au build) replie toute la voie journal en `compute_tree` complet — dev.to sert 2 règles `:has` dans `minimal-*.css` dont les args sont des sélecteurs d'attributs purs (`[data-display-unit]`, `[data-placement-hidden]`). Demande : un index structuré par feuille (sujet + dépendances des args `:has` — noms d'attributs/classes/tags + marqueur « positionnel interne ») exposé à l'appelant, pour que NAV replie **seulement** quand une op du journal touche une dépendance sur un sujet potentiellement vivant (garde par dépendances) — ou, plus juste, une extension `compute_scoped` acceptant un ensemble « frontière » (ancêtres + frères précédents des touchés — le sujet de `E:has(arg)` vit toujours au-dessus ou à gauche du match) évaluée en sus du sous-arbre. Résorbe au passage les faux positifs du substring-check (attributs contenant `:has(`). Verrous existants : `styles_scoped_falls_back_on_has`. (b) **Émission + raster bornés à la bande viewport** : le fenêtrage (R-62) borne les *pixels*, pas les *items* — `resolved_bounds` est O(items × profondeur transform) et `replay_items` itère toute la liste à chaque apply (`PushClip*` allouent leur `Mask` avant le test de cull), et l'émission `build_display_list_incremental` traverse l'arbre entier (la copie R-37 évite la ré-émission des sous-arbres, pas la traversée ni `record_span` — `reuse_delta` re-sonde même les descendants pour prouver le Δ). Pistes nommées : cull **à la descente** dans `paint_box` (sauter les sous-arbres `rect ∩ bande = ∅` hors porteurs d'échappement — `fixed`, positionnés reportés, inlines `defer`, breakout de clip — un flag « contient un échappant » à spécifier), `resolved_bounds` incrémental/cache (même durée de vie que `spans`), `Mask` de clip retardé au test fenêtre, `SpanMap`/`emit_per_path` sans `Box<[u16]>` par boîte. Ordonnancement tranché par le re-vol Étape 232 (dev.to réel, debug — 3 cycles `incr` ~44 s mesurés vs ~46 s wall, couverture ~96 %) : **`incr.raster` 33,5 s (~76 %) ≫ `incr.emit` 1,1 s** → le poste est `resolved_bounds`+`replay_items`, pas l'émission ; **`incr.cascade` 8,5 s (~19 %) ≫ `incr.stylpost` 64 ms** → le repli `:has` est ~99 % du poste style, les post-passes O(N) sont négligeables (Étape E caduque). JS confirmé non-goulot jambes mesurées : `net.commit_scripts` 1,35 s, `net.dl_*` ≤ 115 ms. Aucun commit NAV dans ces crates sans retour PIPE. | NAV (audit perf, étapes 231/232) | demande NAV — mesuré au re-vol 2026-11-13 : raster ≫ emit, cascade ≫ stylpost. **(b) partiellement livré NAV-side → Étape 233** (cull clips hors-pixmap, voir Journal) ; **(a) soldé NAV-side → Étape 234** (garde par dépendances sur AST public + multi-scope — zéro modif PIPE ; mécanique prouvée `scope 68 → cascade 0,19 s`, dev.to borné par un parent ~5k nœuds — reliquat PIPE : compute frontière ancêtres+frères, `Mask` à `clip ∩ pixmap`, émission cullée descente, `resolved_bounds` incrémental) |
 | 2026-11-16 | `explorer-layout` — whitespace adjacent à un bloc = line box fantôme | **Constat post-Étape 294 (geo_diff lobste.rs, `moved` résidu ~30 px/story, `doc_h` 2534 vs ref 1757)** : les nœuds texte whitespace seuls adjacents à une frontière de bloc émettent des line boxes ~16-17 px là où Chrome les collapse. Repro minimal servi (`ol>li.story>div.details` + `li .link{display:inline-block;margin:0}`) : `div.details` y=38, `h2.link` y=55 → **+17 px avant le h2** (margin:0 prouvé actif — h2 w=527 shrink-to-fit, pas pleine largeur) ; idem whitespace avant `div.byline` → +~16 px. Chrome : whitespace en tête de contexte inline et whitespace seul entre contenu inline et enfant bloc = collapsé (CSS 2.1 §9.2.2.1 + §16.6.1 — pas de boîte). Impact corpus : lobste.rs = +30 px/story → `dy` cumulatif ~500 px en pied, probablement dominant dans les `moved` restants des autres sites du smoke. **Demande** : whitespace-only runs adjacentes à une frontière de bloc (début/fin de contexte inline, ou précédant un enfant `display:block` dans un conteneur mixte) doivent s'effondrer — vérifier `boxtree` anonymous-inline/whitespace-drop avant la mise en ligne. | NAV (étape 295, constat geo_diff) | demande PIPE |
+| 2026-11-16 | `explorer-css` grammaires shorthand + `explorer-layout` props logiques | **File PIPE issue du triage jauge (étape 297, audit `littéraux-invalides` + sondes directes)** — tout est reproduit par `check decl`/`check affectsv` sur binaire courant : **(a) `expand_background`** refuse des composants shorthand valides : `currentColor`, `round`/`space` (repeat), `text` (bg-clip), `border-area`, positions logiques `x-start`/`x-end`/`y-start`/`y-end` (9 paires `littéraux-invalides`) ; **(b) `expand_mask`** idem pour `x-*`/`y-*` (4 paires) ; **(c) sizing `fit-content(<len>)`** — forme fonction refusée sur `width`/`height`/`min-*`/`max-*` (6 paires, le mot-clé nu marche) ; **`stretch`** accepté par `value_is_valid_for` mais `miss` en affectsv = parsé-inerte ou droppé ; **(d) `overflow-block`/`overflow-inline`** routés mais inertes — `overflow-y:hidden` ok vs `overflow-block:hidden` miss sur même fixture débordante (6+6 paires) ; **(e) `anchor()` en insets** — `top:anchor(--a)` miss avec fixture ancre posée alors que `anchor-size(--a)` en `margin`/`margin-*` **résout** (ok mesuré) — la résolution existe mais pas partout. Non-gaps : `flex-wrap` (fixture jauge corrigée), `margin:anchor-size` (sonde posée), sizing `anchor*` (`na` — immesurable sans ancre). | NAV (étape 297, triage audit BCD) | demande PIPE |
 
 ## Seam `MediaSurface` (étape 71 — ADR-0024)
 
@@ -4155,3 +4156,45 @@ des whitespace adjacents à un bloc** (+~30 px/story
 → `doc_h` 2534 vs 1757) — demande PIPE consignée
 au tableau « Extensions demandées » (2026-11-16).
 `div.voters` h=51 vs 46 = écart mineur (+5 px).
+
+## Étape 297 — triage audit BCD (NAV, extension additive `value_is_valid_for`)
+
+**Contrat PIPE touché (additif, pas de casse)** : le bras
+`"margin"` de `value_is_valid_for` (`explorer-css`) accepte
+désormais `anchor(`/`anchor-size(` par composant — aligné
+sur les longhands `margin-*` (R-254) et sur la cascade,
+qui appliquait déjà `margin:anchor-size(--a)` (ok mesuré
+en `affectsv`). Validateur seul concerné, grammaire
+élargie.
+
+**Triage des constats audit (étape 277)** :
+
+- `tables-mortes` : `mask-border-mode` retiré de
+  `NO_ORACLE` (absent du catalogue BCD — la ligne ne
+  pouvait matcher aucune paire) → 0 constat.
+- `littéraux-invalides` 20→19 : `margin:anchor-size` était
+  un méta-nom servi `decl:` — `margin` (shorthand) rejoint
+  la sonde `anchor-size(--a)` + la fixture ancre → mesuré
+  **ok** (la fonction résout réellement en marge). Les 19
+  restants sont des gaps de grammaire moteur nommés —
+  voir file PIPE « Extensions demandées » (2026-11-16).
+- `fixtures-inertes` : `flex-wrap`/`flex-flow` avaient la
+  fixture **mono-ligne** (aucun débordement → wrap
+  inobservable, 0/3) — fixture multi-lignes dédiée avec
+  item à `width:100%` → `wrap`/`wrap-reverse` ok,
+  `nowrap` `na` par `INITIAL_EXTRA`.
+- Sizing `anchor`/`anchor-size` → `na` (12 paires hors
+  dénominateur) : sans ancre la fonction résout en
+  repli/invalidité par spec, et la fixture positionnée
+  qui poserait l'ancre tue l'oracle de sizing
+  intrinsèque (mesuré étape 270) — `miss` n'indiquait
+  que « pas d'ancre → rien », pas la feature.
+
+**Verdicts confirmés en direct** : `overflow-block:hidden`
+miss vs `overflow-y:hidden` ok (props logiques routées,
+inertes) ; `top:anchor(--a)` miss (résolution insets
+absente là où `anchor-size` en margin résout).
+
+**Mesure** : `css.values` 1139/1779 → **1144/1767
+(64,7 %)**, 931 neutres — cliquet vert, baseline v2
+re-sauvée.
