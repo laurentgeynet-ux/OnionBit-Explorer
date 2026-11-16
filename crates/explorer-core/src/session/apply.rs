@@ -3894,6 +3894,10 @@ impl Session {
             ids: keyed.ids,
             tags: keyed.tags,
         });
+        // §B-114 — le snapshot est conservé (c'est lui qui
+        // résorbe) mais sa venue peut faire franchir la
+        // borne aux journaux des autres onglets.
+        self.cap_apply_queue();
     }
 
     /// Enfile un **journal** de mutations (ADR-0025) — le
@@ -3901,7 +3905,7 @@ impl Session {
     /// stables), le re-parse n'intervient qu'au rejet.
     /// `html` reste vide : le repli est re-alimenté par
     /// `freshen_apply`/`sync_dom_keyed`.
-    pub(crate) fn queue_apply_journal(&mut self, tab: TabId, journal: explorer_js::DomJournal) {
+    pub(crate) fn queue_apply_journal(&mut self, tab: TabId, mut journal: explorer_js::DomJournal) {
         let Some(entry) = self.tabs.get_mut(&tab) else {
             return;
         };
@@ -3922,26 +3926,68 @@ impl Session {
         // la plus récente fait foi — même règle que
         // `freshen_apply`). Un keyed en file avant subsume le
         // passé : le journal s'ajoute après, ordre respecté.
+        let mut spliced = false;
         if let Some(back) = self.pending_applies.back_mut() {
             if back.tab == tab {
                 if let Some(j) = &mut back.journal {
-                    j.ops.extend(journal.ops);
+                    j.ops.extend(std::mem::take(&mut journal.ops));
                     j.fingerprint = journal.fingerprint;
-                    return;
+                    spliced = true;
                 }
             }
         }
-        self.pending_applies.push_back(PendingApply {
-            tab,
-            epoch,
-            html: String::new(),
-            dirty: None,
-            canvas_ops,
-            relayout: true,
-            journal: Some(journal),
-            ids: Vec::new(),
-            tags: Vec::new(),
-        });
+        if !spliced {
+            self.pending_applies.push_back(PendingApply {
+                tab,
+                epoch,
+                html: String::new(),
+                dirty: None,
+                canvas_ops,
+                relayout: true,
+                journal: Some(journal),
+                ids: Vec::new(),
+                tags: Vec::new(),
+            });
+        }
+        // §B-114 — la soudure est sans borne par construction :
+        // la file se borne au passage (journaux → resync).
+        self.cap_apply_queue();
+    }
+
+    /// §B-114 (étape 312) — borne `apply_queue_max_bytes` de
+    /// la file d'applies : au-delà, les jobs journal sont
+    /// convertis en marqueur resync (payload `journal`/
+    /// `html`/`ids`/`tags` libérée ; la convergence passe
+    /// par la baseline cléée `resync_dom_keyed` au drain —
+    /// même chemin que le repli de rejet de journal). Les
+    /// jobs cléés — snapshots — sont conservés : ce sont eux
+    /// qui résorbent la divergence.
+    fn cap_apply_queue(&mut self) {
+        let cap = self.apply_queue_max_bytes;
+        if cap == 0 {
+            return;
+        }
+        let mut bytes = apply_queue_bytes(&self.pending_applies);
+        if bytes <= cap {
+            return;
+        }
+        let mut converted = 0usize;
+        for p in &mut self.pending_applies {
+            if bytes <= cap {
+                break;
+            }
+            if p.journal.is_none() {
+                continue;
+            }
+            bytes = bytes.saturating_sub(journal_to_resync(p));
+            converted += 1;
+        }
+        tracing::warn!(
+            bytes,
+            cap,
+            converted,
+            "file d'applies bornée : journaux convertis en resync"
+        );
     }
 
     /// Commit d'un apply abouti : titre (`TitleChanged`),
@@ -3998,6 +4044,17 @@ impl Session {
             job.ids.clear();
             job.tags.clear();
         }
+        let cap = self.apply_queue_max_bytes;
+        // §B-114 — un journal en file déjà au-delà de la
+        // borne n'est pas soudé : marqueur resync (payload
+        // libérée, baseline cléée au bras `else`).
+        if job
+            .journal
+            .as_ref()
+            .is_some_and(|j| cap > 0 && j.ops.iter().map(apply_op_bytes).sum::<usize>() > cap)
+        {
+            journal_to_resync(job);
+        }
         let Some(entry) = self.tabs.get_mut(&tab) else {
             return;
         };
@@ -4045,6 +4102,13 @@ impl Session {
     pub(crate) fn take_next_apply(
         &mut self,
     ) -> Option<(PendingApply, DetachedPaint, ApplyCtx, Option<String>)> {
+        // §B-114 — épisode shed : le drain détaché est
+        // suspendu (le rejeu d'applies est le site du churn
+        // natif mesuré aux morts 857/860/861). La file
+        // persiste — reprise à la levée de l'épisode.
+        if self.shed_active {
+            return None;
+        }
         loop {
             let mut job = self.pending_applies.pop_front()?;
             // §B-111 — `pump:` pré-apply (morgue C406) — même
@@ -4422,6 +4486,18 @@ impl Session {
         tracing::info!(tab, journal = job.journal.is_some(), "apply: début");
         dlv_info!("pump: freshen tab={tab}");
         self.freshen_apply(tab, job);
+        // B-25 (caf) — même garde que `take_next_apply` : un
+        // job baseline sans `html` (resync à sec — moteur
+        // mort, stall) commettrait un document vide qui
+        // détruit la payload vivante. On jette le job plutôt
+        // que la page.
+        if job.journal.is_none() && job.html.is_empty() {
+            tracing::warn!(
+                tab,
+                "baseline apply sans html livré — job jeté (resync vide)"
+            );
+            return;
+        }
         let Some(entry) = self.tabs.get_mut(&tab) else {
             return;
         };
@@ -4465,8 +4541,17 @@ impl Session {
     /// compat pour les hôtes synchrones (même sémantique que
     /// l'apply immédiat d'avant 55h, à coalescence près).
     pub fn drain_applies(&mut self) {
-        while let Some(mut job) = self.pending_applies.pop_front() {
+        // §B-114 — sous épisode shed le drain est suspendu
+        // (rejeu = site du churn natif) ; `maybe_rss_shed`
+        // entre deux jobs laisse la garde franchir le seuil
+        // en pleine boucle — les battements `poll_net` ne
+        // courent pas pendant un drain synchrone.
+        while !self.shed_active {
+            let Some(mut job) = self.pending_applies.pop_front() else {
+                break;
+            };
             self.run_apply(&mut job);
+            self.maybe_rss_shed();
         }
         // `<img loading="lazy">` (étape 229) — les applies
         // viennent de poser/déplacer des boîtes : promouvoir
@@ -4514,6 +4599,30 @@ pub(crate) fn apply_queue_bytes(queue: &ApplyQueue) -> usize {
             p.html.len() + journal_b + p.ids.len() * 8 + tags_b
         })
         .sum()
+}
+
+/// §B-114 (étape 312) — convertit un job journal en
+/// marqueur resync : les payloads `journal`/`html`/`ids`/
+/// `tags` sont jetées et `freshen_apply` tirera
+/// `resync_dom_keyed` au drain — même convergence que le
+/// repli de rejet de journal (le rejeu d'un journal géant
+/// est le site du churn natif mesuré). Le `dirty` est
+/// conservé — le relayout suivant le fusionne à sa cible.
+/// Retourne les octets utiles libérés (convention
+/// [`apply_queue_bytes`]).
+pub(crate) fn journal_to_resync(job: &mut PendingApply) -> usize {
+    let freed = job
+        .journal
+        .as_ref()
+        .map_or(0, |j| j.ops.iter().map(apply_op_bytes).sum::<usize>())
+        + job.html.len()
+        + job.ids.len() * 8
+        + job.tags.iter().map(String::len).sum::<usize>();
+    job.journal = None;
+    job.html.clear();
+    job.ids.clear();
+    job.tags.clear();
+    freed
 }
 
 /// Octets utiles d'une op de journal (payloads seuls — le

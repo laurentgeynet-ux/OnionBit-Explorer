@@ -8211,6 +8211,27 @@ MCP = adaptateur, jamais la base.
   le fil appelant — la mesure borne le churn à la
   fenêtre. Verrous : `dom_sync` 11/11 (2 nouveaux),
   lib jscore 51/51 ; demande PIPE `flow.*` consignée.
+- [x] **Étape 312. §B-114 — le shed suspend le drain
+  d'applies et borne la file** (`explorer-core`, garde
+  ressource — trou des vols 857/860/861 : `rss_shed`
+  franchi avant réaction car `drain_applies` bouclait sans
+  re-sonder le RSS et `queue_apply_journal` prolongeait le
+  job de queue sans borne). `SessionConfig::
+  apply_queue_max_bytes` (64 Mio, `0` = désarmé) : au-delà,
+  les jobs journal deviennent des **marqueurs resync**
+  (payloads libérées, convergence par `resync_dom_keyed` au
+  drain — même chemin que le repli de rejet) ; les keyed —
+  snapshots — sont conservés. `take_next_apply` +
+  `drain_applies` suspendus sous `shed_active`, file
+  persistante, reprise à la levée ; `maybe_rss_shed` sondé
+  entre les jobs (drain synchrone) et à chaque itération
+  (drain partagé). `shed_apply` libère les journaux en
+  file en gradin (gradins fetch/GC/bitmaps inchangés).
+  `freshen_apply` borne la soudure en vol ; `run_apply`
+  reçoit la garde « baseline sans html » (B-25) de la voie
+  détachée. Verrous : `shed_suspends_apply_drain_and_
+  frees_journal_payloads`, `apply_queue_cap_converts_
+  journals_to_resync` ; 167/167 lib, clippy propre.
 - [x] **Étape 311. §B-114 — la rétention native hors tas
   cellules a des noms** (`explorer-jscore`/`explorer-core`,
   instrumentation seule — aucun changement de comportement).

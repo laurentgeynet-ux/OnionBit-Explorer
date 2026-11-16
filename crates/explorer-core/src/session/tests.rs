@@ -5849,6 +5849,97 @@ async fn etape209_rss_shed_degrades_without_death() {
     assert!(!s2.shed_active());
 }
 
+/// Étape 312 (§B-114) — pendant un épisode shed le drain
+/// d'applies est **suspendu** : le rejeu de journaux est le
+/// site du churn natif mesuré aux morts 857/860/861. La
+/// file persiste (reprise à la levée) et `shed_apply`
+/// libère aussitôt les payloads journal retenues — marqueur
+/// resync, convergence par baseline cléée au drain.
+#[test]
+fn shed_suspends_apply_drain_and_frees_journal_payloads() {
+    let cfg = SessionConfig {
+        rss_shed_mb: 4_096,
+        ..SessionConfig::default()
+    };
+    let mut s = Session::with_config(Arc::new(FailTransport), Arc::new(TestFont), cfg);
+    let tab = s.open_tab();
+    let big = explorer_js::DomMutation::SetText {
+        key: 1,
+        text: "x".repeat(8 * 1024),
+    };
+    s.queue_apply_journal(
+        tab,
+        explorer_js::DomJournal {
+            ops: vec![big],
+            fingerprint: 1,
+        },
+    );
+    assert_eq!(s.pending_apply_count(), 1);
+    // Épisode armé : gradins + drain suspendu.
+    s.shed_evaluate(4_200);
+    assert!(s.shed_active());
+    // Le journal en file a été converti en marqueur resync
+    // — payload libérée, plus rien à rejouer en place.
+    let job = s.pending_applies.front().expect("apply en file");
+    assert!(job.journal.is_none(), "journal jeté par shed_apply");
+    assert!(job.html.is_empty(), "marqueur resync (html vide)");
+    // Le drain ne consomme rien pendant l'épisode.
+    s.drain_applies();
+    assert_eq!(
+        s.pending_apply_count(),
+        1,
+        "drain suspendu sous shed — la file persiste"
+    );
+    // Levée → le drain reprend (le job resync est consommé
+    // ou rejeté, la file se vide).
+    s.shed_evaluate(1_000);
+    s.drain_applies();
+    assert_eq!(s.pending_apply_count(), 0, "drain repris à la levée");
+}
+
+/// Étape 312 (§B-114) — `apply_queue_max_bytes` borne la
+/// file : au-delà, les jobs journal deviennent des marqueurs
+/// resync (payload libérée) ; les jobs cléés (snapshots)
+/// sont conservés — ce sont eux qui résorbent la divergence.
+#[test]
+fn apply_queue_cap_converts_journals_to_resync() {
+    let cfg = SessionConfig {
+        apply_queue_max_bytes: 256,
+        ..SessionConfig::default()
+    };
+    let mut s = Session::with_config(Arc::new(FailTransport), Arc::new(TestFont), cfg);
+    let tab = s.open_tab();
+    // Un journal dont les ops dépassent la borne à
+    // l'enfilement.
+    s.queue_apply_journal(
+        tab,
+        explorer_js::DomJournal {
+            ops: vec![explorer_js::DomMutation::SetText {
+                key: 1,
+                text: "x".repeat(4 * 1024),
+            }],
+            fingerprint: 1,
+        },
+    );
+    let job = s.pending_applies.front().expect("job en file");
+    assert!(
+        job.journal.is_none() && job.html.is_empty(),
+        "journal converti en marqueur resync au cap"
+    );
+    // Un keyed (snapshot) n'est jamais converti même sous cap.
+    s.queue_apply_keyed(
+        tab,
+        explorer_js::DomSyncKeyed {
+            html: "<p>base</p>".into(),
+            dirty: None,
+            ids: vec![1],
+            tags: vec!["p".into()],
+        },
+    );
+    let back = s.pending_applies.back().expect("keyed en file");
+    assert_eq!(back.html, "<p>base</p>", "snapshot conservé sous cap");
+}
+
 /// §B-117 (vol 731) — la liste « forbidden header names » est
 /// WHATWG-complète : `cookie2`/`dnt` (spec) + `set-cookie`/
 /// `set-cookie2` (Chrome strippe en requête). Un nom ni

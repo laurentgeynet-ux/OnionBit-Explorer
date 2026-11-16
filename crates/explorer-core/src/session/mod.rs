@@ -1187,6 +1187,12 @@ pub struct Session {
     /// `Retry-After` (s) porté par `CoreError::Overloaded`
     /// pendant l'épisode (`SessionConfig::shed_retry_after_s`).
     shed_retry_after_s: u32,
+    /// Borne octets de la file `pending_applies`
+    /// (`SessionConfig::apply_queue_max_bytes`, étape 312 /
+    /// §B-114 — `0` = désarmé). Au-delà, les jobs journal
+    /// sont convertis en marqueur resync : payload libérée,
+    /// convergence par baseline cléée au drain.
+    apply_queue_max_bytes: usize,
     /// Quota de callbacks de timers déclenchés par tick
     /// (`max_timer_jobs` de config, étape 52 — borne
     /// ADR-0019).
@@ -1441,6 +1447,7 @@ impl Session {
             events_offlock: false,
             rss_shed_at: std::time::Instant::now(),
             shed_retry_after_s: cfg.shed_retry_after_s,
+            apply_queue_max_bytes: cfg.apply_queue_max_bytes,
             net_probe_seen: std::collections::HashSet::new(),
             max_script_net: cfg.max_script_net,
             max_timer_jobs: cfg.max_timer_jobs,

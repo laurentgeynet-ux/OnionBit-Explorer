@@ -1442,6 +1442,20 @@ pub struct SessionConfig {
     /// indice client : le shed se lève sur la marge RSS
     /// réelle, pas sur cette durée.
     pub shed_retry_after_s: u32,
+    /// Borne en octets de la file d'applies en attente
+    /// (`pending_apply_bytes` — payloads `html`/`journal`/
+    /// `ids`/`tags`, utiles seuls). §B-114 :
+    /// `queue_apply_journal` prolonge le job en queue sans
+    /// borne — sous producteur > consommateur la file
+    /// retient des Mio hors tas JS (vols 836/860 : RSS
+    /// ~4,5 Gio avec heap JS 34 Mio). Au-delà de la borne,
+    /// les jobs journal sont convertis en marqueur de
+    /// resync (`journal`/`html`/`ids`/`tags` jetés — la
+    /// convergence passe par la baseline cléée
+    /// `resync_dom_keyed` au drain, même chemin que le rejet
+    /// de journal) : la payload est libérée, jamais le DOM
+    /// divergent. `0` = désarmé. Défaut 64 Mio.
+    pub apply_queue_max_bytes: usize,
     /// Durée d'une lecture `scroll-behavior:smooth`
     /// (millisecondes, interpolation linéaire MVP — Chrome
     /// ~300-500 ms, easing non sondable). `0` = smooth
@@ -1517,6 +1531,10 @@ impl Default for SessionConfig {
             // était précisément « rien d'armé »).
             rss_shed_mb: 4_096,
             shed_retry_after_s: 5,
+            // La payload d'un journal de mutations légitime
+            // reste de l'ordre du Mio ; 64 Mio de file = une
+            // tempête producteur, pas une page.
+            apply_queue_max_bytes: 64 * 1024 * 1024,
             smooth_scroll_ms: 350,
             anim_pull_idle_ms: 2_000,
         }

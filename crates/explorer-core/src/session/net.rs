@@ -3824,9 +3824,23 @@ impl Session {
             e.img_decoded.clear();
             e.bg_decoded.clear();
         }
+        // §B-114 — le drain d'applies est suspendu tant que
+        // l'épisode dure (`drain_applies`/`take_next_apply`)
+        // ; les payloads journal retenues en file sont
+        // libérées tout de suite — marqueur resync, la
+        // convergence passe par la baseline cléée à la
+        // levée (même chemin que le rejet de journal).
+        let mut shed_apply_jobs = 0usize;
+        for p in &mut self.pending_applies {
+            if p.journal.is_some() {
+                apply::journal_to_resync(p);
+                shed_apply_jobs += 1;
+            }
+        }
         tracing::warn!(
             dropped,
-            "rss_shed : fetchs basse priorité abandonnés (status:0), GC demandé, bitmaps évincés"
+            shed_apply_jobs,
+            "rss_shed : fetchs basse priorité abandonnés (status:0), GC demandé, bitmaps évincés, journaux applies → resync"
         );
     }
 

@@ -905,6 +905,11 @@ pub async fn drain_applies_shared(sess: &tokio::sync::Mutex<Session>, tab: TabId
     loop {
         let job = {
             let mut s = sess.lock().await;
+            // §B-114 — le seuil RSS doit pouvoir basculer
+            // pendant le drain détaché (le rejeu en vol
+            // brûle encore ; `take_next_apply` suspend
+            // dès que `shed_active`).
+            s.maybe_rss_shed();
             s.take_next_apply()
         };
         let Some((job, mut g, ctx, old_title)) = job else {
