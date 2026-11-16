@@ -33,8 +33,12 @@
 import { readFileSync, writeFileSync } from 'node:fs';
 
 const args = process.argv.slice(2);
+// Options qui consomment la valeur suivante — toute nouvelle
+// option à valeur DOIT être ajoutée ici, sinon sa valeur
+// devient un positionnel (crash ENOENT sur engFile).
+const VALUE_OPTS = new Set(['--tol', '--out', '--top', '--min-matched']);
 const positional = args.filter((a, i) => !a.startsWith('--') &&
-  !['--tol', '--out', '--top'].includes(args[i - 1]));
+  !VALUE_OPTS.has(args[i - 1]));
 const opt = (n, d) => {
   const i = args.indexOf(`--${n}`);
   return i >= 0 && i + 1 < args.length ? args[i + 1] : d;
