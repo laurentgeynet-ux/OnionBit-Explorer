@@ -1280,6 +1280,15 @@ pub struct SessionConfig {
     /// (règle budgets — les faces sont par document, le
     /// registre est purgé à chaque navigation).
     pub max_fonts: usize,
+    /// Budget wall-clock de la phase fontes de la vague, en
+    /// millisecondes (étape 306). Les `src:` d'une face se
+    /// tentent séquentiellement — sans borne, un site
+    /// servant des dizaines de srcs lents tient le commit
+    /// des feuilles en otage (§B-152, field278 : 240 s de
+    /// fenêtre non stylée sur caisse-epargne). La fonte
+    /// reste facultative : au-delà, les faces restantes
+    /// sont sautées, la vague commit sans elles.
+    pub font_phase_ms: u64,
     /// Nombre max de `<script src>` fetchés par document
     /// (étape 50 — une page peut en déclarer des centaines).
     /// Défaut 256 : twitch en déclare ~108 dont l'entrée
@@ -1473,6 +1482,12 @@ impl Default for SessionConfig {
             max_sheets: 32,
             max_imports: 16,
             max_fonts: 16,
+            // ~16 faces × 1 src utile à débit terrain
+            // courant ; les sites legacy (eot/svg/ttf par
+            // face) retombent sur le tri décodable en
+            // premier — la borne ne coupe que la queue
+            // hostile.
+            font_phase_ms: 20_000,
             max_scripts: 256,
             max_frames: 8,
             // Graphe statique réel : mastodon `application-*.js`

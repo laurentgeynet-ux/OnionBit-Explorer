@@ -1397,6 +1397,7 @@ impl Session {
             max_inflight: self.max_inflight,
             max_modules: self.max_modules,
             font_budget: self.max_fonts,
+            font_phase_ms: self.font_phase_ms,
             max_imports: self.max_imports,
             max_images: self.max_images,
             net_events: Vec::new(),

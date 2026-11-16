@@ -9,7 +9,7 @@ use std::collections::{HashMap, HashSet, VecDeque};
 use std::future::Future;
 use std::pin::Pin;
 use std::sync::Arc;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use explorer_css::{
     media_matches, parse_stylesheet, AtKind, AtRule, FontSrc, ImportRule, Origin, Rule,
@@ -1026,6 +1026,9 @@ pub(crate) struct SubJob {
     pub(crate) max_inflight: usize,
     pub(crate) max_modules: usize,
     pub(crate) font_budget: usize,
+    /// Deadline wall-clock de [`Self::fetch_fonts`] en ms
+    /// (étape 306 — `SessionConfig::font_phase_ms`).
+    pub(crate) font_phase_ms: u64,
     pub(crate) max_imports: usize,
     /// Budget fetchs d'images — partagé `<img>`/fonds CSS
     /// (étape 98) ; `img_urls` est déjà tronqué à cette
@@ -1688,6 +1691,7 @@ impl SubJob {
     /// source `url()` essayée dans l'ordre (première qui
     /// décode gagne) ; `register` au commit borne le
     /// registre. Séquentiel — `font_budget` vus.
+    #[allow(clippy::too_many_lines)] // boucle faces/srcs linéaire — tri, deadline, fetch documentés in situ
     pub(crate) async fn fetch_fonts(&mut self) {
         let mut eng = StyleEngine::new();
         // Une passe par feuille (étape 104) — même ordre
@@ -1704,11 +1708,53 @@ impl SubJob {
             self.scripting,
             self.scale,
         );
-        'faces: for face in eng.font_faces(&env) {
-            if self.fonts.len() >= self.font_budget {
+        // Deadline de phase (étape 306) : les srcs se tentent
+        // séquentiellement et un fetch lent borne à ~45 s —
+        // sans borne, la queue des faces tient le commit des
+        // feuilles en otage (§B-152, field278 : 240 s de
+        // fenêtre non stylée). Au-delà, la vague commit sans
+        // les faces restantes (fonte facultative).
+        let deadline = Instant::now() + Duration::from_millis(self.font_phase_ms);
+        let mut timed_out = false;
+        // Dédup des cibles — la même URL sert souvent
+        // plusieurs faces (graisses) ou réapparaît dans
+        // plusieurs `src:` ; un échec ne se repaie pas.
+        let mut tried: std::collections::HashSet<String> = std::collections::HashSet::new();
+        'faces: for mut face in eng.font_faces(&env) {
+            if self.fonts.len() >= self.font_budget || timed_out {
                 break;
             }
+            // Ordre « premier décodable d'abord » : les
+            // feuilles legacy écrivent eot/svg/ttf/woff/woff2
+            // et chaque src se paie en fetch — eot/svg ne
+            // décodent jamais (`ttf-parser` les rejette), les
+            // tenter en premier coûtait ~2 srcs morts par
+            // face. `format()` n'est pas parsé (signature
+            // magique au décodage, fontface.rs) ; l'extension
+            // est le proxy honnête — à extension absente ou
+            // inconnue, l'ordre document est conservé.
+            face.srcs.sort_by_key(|s| match s {
+                FontSrc::Url(h) => {
+                    let ext = h
+                        .split(['?', '#'])
+                        .next()
+                        .and_then(|p| p.rsplit('.').next())
+                        .map(str::to_ascii_lowercase);
+                    match ext.as_deref() {
+                        Some("woff2") => 0,
+                        Some("woff") => 1,
+                        Some("ttf" | "otf" | "ttc") => 2,
+                        Some("eot" | "svg") => 4,
+                        _ => 3,
+                    }
+                }
+                FontSrc::Local(_) => 0,
+            });
             for src in &face.srcs {
+                if Instant::now() >= deadline {
+                    timed_out = true;
+                    continue 'faces;
+                }
                 let FontSrc::Url(href) = src else {
                     continue;
                 };
@@ -1717,6 +1763,9 @@ impl SubJob {
                 else {
                     continue;
                 };
+                if !tried.insert(url.to_string()) {
+                    continue;
+                }
                 // CSP `font-src` (CAP-145).
                 if !explorer_net::csp::csp_allows(&self.csp, &self.url, FetchDest::Font, &url) {
                     continue;
@@ -1733,7 +1782,19 @@ impl SubJob {
                 ));
                 req.headers.extend(sec_fetch_headers(&req));
                 let t0 = Instant::now();
-                let res = fetch_maybe_data(&self.transport, &req).await;
+                // `timeout_at` borne aussi le fetch **en vol**
+                // — sans lui, la deadline ne s'applique
+                // qu'entre les srcs et un fetch lent ajoute
+                // jusqu'à `request_timeout` à la phase.
+                let res = tokio::time::timeout_at(
+                    tokio::time::Instant::from_std(deadline),
+                    fetch_maybe_data(&self.transport, &req),
+                )
+                .await;
+                let Ok(res) = res else {
+                    timed_out = true;
+                    continue 'faces;
+                };
                 self.push_net("font", req.url.to_string(), "stylesheet", &res, t0);
                 let Ok(resp) = res else {
                     continue;
@@ -1751,6 +1812,13 @@ impl SubJob {
                     .push((face.family.clone(), face.weight, face.italic, data));
                 continue 'faces;
             }
+        }
+        if timed_out {
+            tracing::info!(
+                tab = self.tab,
+                fonts = self.fonts.len(),
+                "sub: phase fontes bornée (deadline)"
+            );
         }
     }
 
