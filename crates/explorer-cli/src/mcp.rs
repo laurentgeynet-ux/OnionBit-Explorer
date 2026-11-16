@@ -534,10 +534,12 @@ async fn spawn_daemon(args: &Value) -> Result<Value, String> {
 }
 
 /// `daemon_stop{name|port}` — arrêt ciblé par pid d'annonce.
-/// Windows : `taskkill /PID /T /F` (le handler Ctrl-C n'est
-/// pas joignable de l'extérieur) ; unix : SIGTERM (arrêt
-/// gracieux géré côté daemon). Jamais de `/IM` — on vise un
-/// pid précis, pas un nom d'image.
+/// **Graceful d'abord** (étape 296) : `POST /api/shutdown`
+/// nomme `shutdown:api` à la sentinelle et laisse la garde
+/// retirer l'annonce — le kill est le recours : `taskkill
+/// /PID /T /F` (le handler Ctrl-C n'est pas joignable de
+/// l'extérieur) ou SIGTERM unix si le port n'est pas libéré.
+/// Jamais de `/IM` — on vise un pid précis, pas une image.
 fn stop_daemon(args: &Value) -> Result<Value, String> {
     let sel = args["daemon"]
         .as_str()
@@ -560,6 +562,15 @@ fn stop_daemon(args: &Value) -> Result<Value, String> {
     else {
         return Err(format!("aucune annonce vivante pour {sel} — déjà arrêté ?"));
     };
+    // Graceful d'abord (étape 296) : `POST /api/shutdown` →
+    // arrêt nommé `shutdown:api` à la sentinelle, garde
+    // d'annonce droppée, drains TLS flushés — taskkill en
+    // dernier recours si le port ne se libère pas.
+    if graceful_shutdown(a.port) {
+        explorer_core::daemon_registry::remove(&file);
+        return Ok(json!({"stopped": true, "graceful": true,
+                         "name": a.name, "pid": a.pid}));
+    }
     // stdio null : le serveur MCP vit sur stdout — la sortie
     // d'un enfant hérité y corromprait le protocole JSON-RPC.
     #[cfg(windows)]
@@ -582,6 +593,30 @@ fn stop_daemon(args: &Value) -> Result<Value, String> {
         Ok(s) => Err(format!("arrêt pid {} : code {}", a.pid, s)),
         Err(e) => Err(format!("arrêt pid {} : {e}", a.pid)),
     }
+}
+
+/// `POST /api/shutdown` loopback minimal (étape 296) —
+/// HTTP/1.0 ~80 octets, pas de client : la seule preuve qui
+/// compte est le **port libéré** sous la fenêtre de grâce
+/// (~4 s), la réponse elle-même pouvant être coupée par la
+/// sortie du processus. `true` = le daemon a rendu la main
+/// proprement (sentinelle `shutdown:api`, annonce droppée
+/// par sa garde) ; `false` = wedged ou absent → le caller
+/// retombe sur le kill processus.
+fn graceful_shutdown(port: u16) -> bool {
+    use std::io::Write;
+    let req = format!(
+        "POST /api/shutdown HTTP/1.0\r\nHost: 127.0.0.1:{port}\r\nContent-Length: 0\r\n\r\n"
+    );
+    let _ = std::net::TcpStream::connect(("127.0.0.1", port))
+        .and_then(|mut s| s.write_all(req.as_bytes()));
+    for _ in 0..40 {
+        std::thread::sleep(std::time::Duration::from_millis(100));
+        if std::net::TcpStream::connect(("127.0.0.1", port)).is_err() {
+            return true;
+        }
+    }
+    false
 }
 
 /// `daemon_list` — le registre sondé : vivants (PID) +

@@ -587,7 +587,11 @@ fn main() {
     // « aucun crochet n'a couru » (mort externe). Étape 276 :
     // un marqueur `console:<kind>` (fermeture console/session
     // Windows — kill externe nommé) est conservé, pas effacé.
-    let keep = std::fs::read_to_string(&death_log).is_ok_and(|s| s.starts_with("console:"));
+    // `console:*` (kill console) et `shutdown:*` (arrêt
+    // demandé) sont des fins nommées — on les garde pour la
+    // post-mortem ; `alive` résiduel = arrêt ordinaire, nettoyé.
+    let keep = std::fs::read_to_string(&death_log)
+        .is_ok_and(|s| s.starts_with("console:") || s.starts_with("shutdown:"));
     if !keep {
         let _ = std::fs::remove_file(&death_log);
     }
@@ -941,13 +945,21 @@ async fn amain(death_log: PathBuf) {
     // listener : deuxième client de `Session`, même verrou,
     // même clé. Routeur disjoint du REST pour garder la
     // couture UI intacte.
-    let app = explorer_api::router_with_egress(session.clone(), cfg.api_key.clone(), egress).merge(
-        explorer_agent::agent_router_with_profile(
-            session,
-            cfg.api_key.clone(),
-            Some(profile_dir.clone()),
-        ),
-    );
+    // Canal d'arrêt graceful (étape 296) : le handler
+    // `POST /api/shutdown` pousse `true` — `shutdown_signal`
+    // sélectionne dessus au même titre que Ctrl-C/console.
+    let (shutdown_tx, shutdown_rx) = tokio::sync::watch::channel(false);
+    let app = explorer_api::router_with_shutdown(
+        session.clone(),
+        cfg.api_key.clone(),
+        egress,
+        shutdown_tx,
+    )
+    .merge(explorer_agent::agent_router_with_profile(
+        session,
+        cfg.api_key.clone(),
+        Some(profile_dir.clone()),
+    ));
     if cfg.api_key.is_some() {
         tracing::info!("clé d'API requise (x-api-key / ?key=)");
     }
@@ -991,7 +1003,7 @@ async fn amain(death_log: PathBuf) {
     };
     tracing::info!(addr = %cfg.bind, "explorer-daemon prêt");
     let r = axum::serve(listener, app)
-        .with_graceful_shutdown(shutdown_signal(death_log))
+        .with_graceful_shutdown(shutdown_signal(death_log, shutdown_rx))
         .await;
     if let Err(e) = r {
         tracing::error!(error = %e, "serveur arrêté");
@@ -1015,8 +1027,9 @@ async fn amain(death_log: PathBuf) {
 /// conservée à l'arrêt) : un `alive` résiduel après cette
 /// étape exclut le kill console et resserre le diagnostic
 /// sur stack overflow, alloc-abort ou kill par PID.
-async fn shutdown_signal(death_log: PathBuf) {
+async fn shutdown_signal(death_log: PathBuf, api: tokio::sync::watch::Receiver<bool>) {
     let ctrl_c = tokio::signal::ctrl_c();
+    let api_stop = api_stop(api);
     #[cfg(unix)]
     {
         use tokio::signal::unix::{signal, SignalKind};
@@ -1024,21 +1037,48 @@ async fn shutdown_signal(death_log: PathBuf) {
             tokio::select! {
                 () = async { let _ = ctrl_c.await; } => {}
                 () = async { let _ = term.recv().await; } => {}
+                () = api_stop => write_api_stop(&death_log),
             }
             return;
         }
     }
     #[cfg(windows)]
     {
-        if let Some(k) = windows_console_kind(ctrl_c).await {
-            // ~5 s avant le kill forcé après CTRL_CLOSE —
-            // suffisant pour nommer la mort.
-            let _ = std::fs::write(&death_log, format!("console:{k}\n"));
-            eprintln!("explorer-daemon : événement console {k} — arrêt nommé");
+        tokio::select! {
+            k = windows_console_kind(ctrl_c) => {
+                if let Some(k) = k {
+                    // ~5 s avant le kill forcé après CTRL_CLOSE —
+                    // suffisant pour nommer la mort.
+                    let _ = std::fs::write(&death_log, format!("console:{k}\n"));
+                    eprintln!("explorer-daemon : événement console {k} — arrêt nommé");
+                }
+            }
+            () = api_stop => write_api_stop(&death_log),
         }
     }
     #[cfg(not(windows))]
     let _ = ctrl_c.await;
+}
+
+/// Le récepteur devient prêt quand `POST /api/shutdown` a
+/// poussé `true` (étape 296) — canal `watch` : l'armement
+/// survit à un ordre d'évaluation défavorable, pas de course
+/// handler/sélecteur.
+async fn api_stop(mut api: tokio::sync::watch::Receiver<bool>) {
+    while api.changed().await.is_ok() {
+        if *api.borrow() {
+            return;
+        }
+    }
+}
+
+/// Arrêt propre demandé via l'API : nommé `shutdown:api` à
+/// la sentinelle — la post-mortem distingue « demandé par le
+/// canal de contrôle » d'un kill externe et des événements
+/// console (`console:*`, étape 276).
+fn write_api_stop(death_log: &Path) {
+    let _ = std::fs::write(death_log, "shutdown:api\n");
+    eprintln!("explorer-daemon : arrêt demandé via /api/shutdown");
 }
 
 /// Attente des événements console Windows (étape 276) :

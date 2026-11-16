@@ -44,12 +44,21 @@ use explorer_net::http::{Initiator, Method, Request};
 use explorer_net::url::Url;
 use futures_util::Stream;
 
+/// Émetteur du canal d'arrêt graceful — `POST /api/shutdown`
+/// y pousse `true` ; le daemon (`with_graceful_shutdown`)
+/// sélectionne sur le récepteur apparié (étape 296).
+pub type ShutdownTx = tokio::sync::watch::Sender<bool>;
+
 /// État partagé : la session moteur, sérialisée.
 #[derive(Clone)]
 pub struct ApiState {
     /// Session — `tokio::Mutex` : la garde survit aux `.await`
     /// de `navigate` (future `Send`, single-writer strict).
     pub session: Arc<tokio::sync::Mutex<Session>>,
+    /// Canal d'arrêt graceful — `None` sur les routeurs sans
+    /// boucle de vie (tests, `media_router`) : l'endpoint rend
+    /// alors `409` honnête, jamais un `200` qui ment.
+    pub shutdown: Option<ShutdownTx>,
     /// Descripteur du résolveur en sortie (`system`,
     /// `doh:<endpoint>` — étape 72) — observabilité
     /// `GET /api/egress`, jamais de basculement silencieux.
@@ -203,6 +212,7 @@ fn media_routes() -> Router<ApiState> {
 pub fn media_router(session: Arc<tokio::sync::Mutex<Session>>) -> Router {
     media_routes().with_state(ApiState {
         session,
+        shutdown: None,
         egress: "embedded".to_string(),
         console: ConsoleRing::default(),
     })
@@ -223,10 +233,34 @@ pub fn router_with_egress(
     key: Option<String>,
     egress: String,
 ) -> Router {
+    router_impl(session, key, egress, None)
+}
+
+/// Routeur complet + canal d'arrêt graceful (étape 296) :
+/// le daemon injecte l'émetteur apparié au récepteur de
+/// `with_graceful_shutdown` — `POST /api/shutdown` devient
+/// l'arrêt propre à distance, nommé `shutdown:api` à la
+/// sentinelle.
+pub fn router_with_shutdown(
+    session: Arc<tokio::sync::Mutex<Session>>,
+    key: Option<String>,
+    egress: String,
+    shutdown: ShutdownTx,
+) -> Router {
+    router_impl(session, key, egress, Some(shutdown))
+}
+
+fn router_impl(
+    session: Arc<tokio::sync::Mutex<Session>>,
+    key: Option<String>,
+    egress: String,
+    shutdown: Option<ShutdownTx>,
+) -> Router {
     let console = ConsoleRing::default();
     let _recorder = spawn_console_recorder(&session, &console);
     let r = Router::new()
         .route("/api/status", get(status))
+        .route("/api/shutdown", post(api_shutdown))
         .route("/api/egress", get(egress_info))
         .route("/api/accept-language", post(accept_language))
         .route("/api/tabs", get(list_tabs).post(open_tab))
@@ -270,6 +304,7 @@ pub fn router_with_egress(
         .route("/api/tabs/{id}/console", get(console_log))
         .with_state(ApiState {
             session,
+            shutdown,
             egress,
             console,
         })
@@ -360,6 +395,33 @@ fn err_status(e: &CoreError) -> StatusCode {
 }
 
 /// `GET /api/status` → état du moteur.
+/// `POST /api/shutdown` — arrêt graceful à distance
+/// (étape 296) : arme le canal que `with_graceful_shutdown`
+/// sélectionne côté daemon ; la réponse part avant la
+/// coupure (axum laisse la requête en vol se terminer, puis
+/// ferme l'accept loop). Sans canal câblé — routeur de test
+/// ou réduit — `409` honnête plutôt qu'un `200` menteur.
+async fn api_shutdown(State(st): State<ApiState>) -> Response {
+    match &st.shutdown {
+        Some(tx) => {
+            let _ = tx.send(true);
+            (
+                StatusCode::OK,
+                Json(serde_json::json!({"ok": true, "shutdown": "requested"})),
+            )
+                .into_response()
+        }
+        None => (
+            StatusCode::CONFLICT,
+            Json(serde_json::json!({
+                "ok": false,
+                "error": "arrêt non câblé sur ce routeur",
+            })),
+        )
+            .into_response(),
+    }
+}
+
 async fn status(State(st): State<ApiState>) -> impl IntoResponse {
     let session = st.session.lock().await;
     Json(serde_json::json!({

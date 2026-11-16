@@ -209,6 +209,11 @@ dure. **Vivacité** : les lecteurs (`daemon_list`, `daemons`,
 + port annoncé lié sous ce pid)` — un fichier réclamant un
 PID réattribué à un autre daemon est périmé (étape 284) ;
 ne jamais cibler un PID depuis un fichier sans cette preuve.
+**Arrêt** : graceful d'abord — `POST /api/shutdown` (étape
+296, ou `daemon_stop` qui le fait déjà) → sentinelle
+`shutdown:api` nommée, annonce retirée par sa garde ;
+`taskkill /F` en dernier recours seulement (le kill perd
+les dumps TLS et laisse la mort classée « externe »).
 **Un registre par worktree** : `data_root()` résout
 `Explorer-data/` sous l'arbre du daemon — un daemon lancé
 depuis le worktree `performance` s'annonce dans

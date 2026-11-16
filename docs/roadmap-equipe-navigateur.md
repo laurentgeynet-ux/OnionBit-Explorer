@@ -8009,6 +8009,17 @@ MCP = adaptateur, jamais la base.
   design csszengarden, images debian) ;
   craigslist rejeté (redirect géo), ddg-lite
   trop maigre. Run complet 10/10 mesurés.
+- [x] **Étape 296. `POST /api/shutdown` — l'arrêt graceful
+  à distance** (`explorer-api`/`explorer-daemon`/
+  `explorer-cli`, besoin console : le kill n'avait que
+  `taskkill /F`). `ApiState.shutdown` (`watch::Sender`) +
+  route — la réponse part avant la coupure ; routeur sans
+  canal → `409` honnête. `shutdown_signal` sélectionne le
+  récepteur au même titre que Ctrl-C/console → sentinelle
+  **`shutdown:api`** (conservée), garde d'annonce droppée,
+  drains TLS flushés. `daemon_stop` EAP graceful-first :
+  POST loopback puis `taskkill` en dernier recours.
+  Vérifié : port libéré <1 s, annonce retirée, mort nommée.
 - [x] **Étape 281. `xhr.responseText` décodé une fois —
   fin du spin O(lectures × octets)** (`explorer-jscore`,
   re-vol field274 : `gc=0` a tranché — vrai spin hôte,
