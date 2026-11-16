@@ -14253,3 +14253,21 @@ chaque gain rapporté contre les **deux** archétypes.
   réelle, ordre inversé toléré. Verrous `c562_webcrypto`
   ×8, `c79_crypto` ×15, `crypto::tests` net ×11 (FIPS
   SHA-1, NIST CBC, RFC 6070 PBKDF2, RFC 5869 HKDF).
+- [x] **JS-C563 — `pipeTo` asynchrone §B-153** : mur #1 du
+  corpus (6 sites / 2 stacks) — verbatim vol 851/853 n26 +
+  shopify : `TypeError: pipeTo: source stalled without pull`
+  dans le bootstrap `__reactRouterContext` React Router
+  (chunks `enqueue`d après l'appel, pas de `pull`). Le drain
+  synchrone exigeait tout immédiatement → `PipeState` porté
+  par `RsData` (`stream`/`writer`/`pid`/`prevent_*`, tracé
+  GC) : `pipeTo` verrouille la source (spec), draine le
+  tampon puis laisse la promesse pendante — `enqueue`/
+  `close`/`error`/`cancel`/checkpoint pilotent `drive_pipe`.
+  `close` → `writer.close`+résolution, `error` → `abort`+
+  rejet, `pull` muet → rendre la main (re-tenté checkpoint).
+  `write` qui jette ou dont la promesse rejette fait échouer
+  le pipe (`pipe_write_err` lié). `preventClose`/`preventAbort`
+  honorés ; `preventCancel`/`signal` approximations doc.
+  `pipeThrough` = même `pipe_start`, `readable` rendu de suite.
+  Verrous `c563_streams_pipe` ×7 ; régressions b122 ×4,
+  b4 ×16, c338 ×9, xhr ×81 vertes.

@@ -23,9 +23,13 @@
 //!   appelle `transformer.transform(chunk, controller)` dont
 //!   `enqueue` pousse dans le readable ; `writable.close`
 //!   appelle `flush(controller)?` puis ferme le readable.
-//! - `pipeTo`/`pipeThrough` : drain synchrone des chunks (pas
-//!   de backpressure — approximation documentée, contenu en
-//!   mémoire) ; `tee()` clone la queue restante dans deux
+//! - `pipeTo`/`pipeThrough` : pipe **asynchrone** (§B-153,
+//!   JS-C563) — le tampon est drainé à l'appel puis le pipe
+//!   vit dans `RsData.pipe` ; chaque `enqueue`/`close`/`error`
+//!   ultérieur le pilote, la promesse se résout à la fin de la
+//!   source (erreur → `abort` + rejet ; `preventClose`/
+//!   `preventAbort` honorés, `preventCancel`/`signal` non
+//!   modélisés). `tee()` clone la queue restante dans deux
 //!   branches (le stream source devient `locked`).
 
 use std::cell::RefCell;
@@ -115,6 +119,29 @@ struct RsData {
     /// résolues par `enqueue`/`close`/`error` ou re-tentées au
     /// checkpoint.
     pending_reads: Vec<ObjId>,
+    /// `pipeTo` en vol (§B-153 — JS-C563) — un seul pipe par
+    /// stream (`locked` l'interdit déjà). `None` hors pipe.
+    pipe: Option<PipeState>,
+}
+
+/// État d'un `pipeTo` en vol — la promesse rendue reste pendante
+/// tant que la source n'a pas `close`/`error` : les chunks qui
+/// arrivent **après** l'appel (bootstrap SSR React Router —
+/// `enqueue` depuis un autre job) continuent d'être écrits.
+#[derive(Clone)]
+struct PipeState {
+    /// Wrapper du stream source — lié dans `pipe_write_err`
+    /// pour clôturer le pipe sans réallouer un wrapper.
+    stream: Value,
+    /// `dest.getWriter()` ou le sink nu (`TransformStream.writable`).
+    writer: Value,
+    /// Promesse rendue par `pipeTo` — résolue à la fermeture de
+    /// la source, rejetée sur `error` ou échec `writer.write`.
+    pid: ObjId,
+    /// Options spec — `preventClose`/`preventAbort` honorés.
+    prevent_close: bool,
+    /// Voir `prevent_close`.
+    prevent_abort: bool,
 }
 
 /// Host `ReadableStream` + `ReadableStreamDefaultReader` +
@@ -217,6 +244,7 @@ fn readable_stream_ctor(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<V
         source: source.clone(),
         locked: false,
         pending_reads: Vec::new(),
+        pipe: None,
     }));
     let rp = rs_proto(e);
     let v = rs_obj(e, &d, rp);
@@ -343,6 +371,7 @@ fn ctrl_enqueue(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> 
     }
     d.borrow_mut().queue.push_back(chunk);
     drain_pending(e, &d);
+    drive_pipe(e, &d)?;
     Ok(Value::Undefined)
 }
 
@@ -366,6 +395,7 @@ fn ctrl_close(e: &mut Engine, this: Value, _a: &[Value]) -> JsResult<Value> {
     }
     d.borrow_mut().closed = true;
     drain_pending(e, &d);
+    drive_pipe(e, &d)?;
     Ok(Value::Undefined)
 }
 
@@ -391,6 +421,7 @@ fn ctrl_error(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
             site = "stream.error", rs = ?std::rc::Rc::as_ptr(&d), msg = %msg);
     }
     drain_pending(e, &d);
+    drive_pipe(e, &d)?;
     Ok(Value::Undefined)
 }
 
@@ -441,6 +472,7 @@ fn cancel_stream(e: &mut Engine, d: &Rc<RefCell<RsData>>, reason: Value) -> JsRe
         None => Ok(Value::Undefined),
     };
     drain_pending(e, d);
+    drive_pipe(e, d)?;
     r
 }
 
@@ -510,6 +542,7 @@ fn reader_read(e: &mut Engine, this: Value, _a: &[Value]) -> JsResult<Value> {
         }
     }
     drain_pending(e, &d);
+    drive_pipe(e, &d)?;
     // Toujours pendante → re-`pull` au checkpoint microtask.
     if d.borrow().pending_reads.contains(&pid) {
         if let Value::Obj(wid) = this {
@@ -551,9 +584,14 @@ fn pump_pending_reads(e: &mut Engine) -> JsResult<usize> {
         let Some(d) = rs_data(e, Value::Obj(wid)) else {
             continue;
         };
-        // Rien en attente → retirer.
-        if d.borrow().pending_reads.is_empty() {
-            continue;
+        // Rien en attente → retirer. Un `pipeTo` en vol sans
+        // `pending_reads` reste enregistré : ses chunks à venir
+        // sont poussés par `enqueue` et le re-`pull` le sert.
+        {
+            let dd = d.borrow();
+            if dd.pending_reads.is_empty() && dd.pipe.is_none() {
+                continue;
+            }
         }
         let (pull, source) = {
             let dd = d.borrow();
@@ -567,8 +605,11 @@ fn pump_pending_reads(e: &mut Engine) -> JsResult<usize> {
                 d.borrow_mut().errored = Some(v);
             }
         }
-        if drain_pending(e, &d) {
-            // Toujours des lectures pendantes.
+        let reads_left = drain_pending(e, &d);
+        drive_pipe(e, &d)?;
+        if reads_left || d.borrow().pipe.is_some() {
+            // Lectures pendantes ou pipe en vol → re-tenté au
+            // prochain checkpoint.
             e.streams.pending_streams.push(wid);
             still += 1;
         }
@@ -576,99 +617,212 @@ fn pump_pending_reads(e: &mut Engine) -> JsResult<usize> {
     Ok(still)
 }
 
-/// `rs.pipeTo(dest)` — drain synchrone : chunks → `writer.write`,
-/// fin → `writer.close()` ; erreur source → `writer.abort`.
-/// Approximation documentée : pas de backpressure asynchrone.
+/// `rs.pipeTo(dest, options?)` — installe un pipe **asynchrone**
+/// (§B-153 — JS-C563) : le tampon présent est drainé de suite,
+/// puis le pipe reste en vol — chaque `enqueue`/`close`/`error`
+/// ultérieur le pilote via [`drive_pipe`] (bootstrap SSR React
+/// Router : `__reactRouterContext` enqueuait après l'appel → le
+/// drain synchrone mourait « source stalled without pull »).
+/// Spec : le source est `locked`, la promesse se résout à la
+/// fermeture (erreur → `abort` + rejet). Approximation doc. :
+/// `preventCancel`/`signal` non modélisés, `write` non awaitée
+/// (un rejet tardif de la promesse sink rejette le pipe —
+/// `pipe_write_err`).
 fn rs_pipe_to(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
-    let Some(d) = rs_data(e, this) else {
+    let Some(d) = rs_data(e, this.clone()) else {
         return Err(e.type_error("pipeTo on incompatible receiver"));
     };
-    let pid = e.new_promise();
-    match pipe_drain(e, &d, arg(args, 0)) {
-        Ok(()) => e.resolve_promise(pid, Value::Undefined),
-        Err(crate::heap::Thrown(v)) => e.reject_promise(pid, v),
-    }
+    let pid = pipe_start(e, this, &d, arg(args, 0), arg(args, 1))?;
     Ok(Value::Obj(pid))
 }
 
-/// Drain partagé `pipeTo`/`pipeThrough` : writer via
-/// `getWriter()` si possible, appels `write`/`close`/`abort`.
-fn pipe_drain(e: &mut Engine, d: &Rc<RefCell<RsData>>, dest: Value) -> JsResult<()> {
+/// Installe le pipe partagé `pipeTo`/`pipeThrough` : writer via
+/// `getWriter()` si possible (sink nu sinon), source verrouillée,
+/// `PipeState` posé, tampon drainé, stream enregistré pour le
+/// re-`pull` de checkpoint tant que le pipe vit. Retourne la
+/// promesse du pipe.
+fn pipe_start(
+    e: &mut Engine,
+    stream: Value,
+    d: &Rc<RefCell<RsData>>,
+    dest: Value,
+    opts: Value,
+) -> JsResult<ObjId> {
     let Value::Obj(did) = dest else {
         return Err(e.type_error("pipeTo: destination is not a WritableStream"));
     };
     let writer = match e.get_prop(did, "getWriter") {
         Some(g) if e.is_callable(g.clone()) => e.call_value(g, dest.clone(), &[])?,
-        _ => dest, // sink nu (TransformStream.writable interne)
+        _ => dest.clone(), // sink nu (TransformStream.writable interne)
     };
+    let flag = |e: &mut Engine, name: &str| -> bool {
+        if let Value::Obj(oid) = opts {
+            matches!(e.get_prop(oid, name), Some(Value::Bool(true)))
+        } else {
+            false
+        }
+    };
+    let pipe = PipeState {
+        stream: stream.clone(),
+        writer,
+        pid: e.new_promise(),
+        prevent_close: flag(e, "preventClose"),
+        prevent_abort: flag(e, "preventAbort"),
+    };
+    {
+        let mut dd = d.borrow_mut();
+        dd.locked = true;
+        dd.pipe = Some(pipe.clone());
+    }
+    drive_pipe(e, &d.clone())?;
+    // Pipe encore ouvert → le checkpoint `pump_pending_reads`
+    // re-`pull` les sources à `pull` (chunks à venir asynchrones).
+    if d.borrow().pipe.is_some() {
+        if let Value::Obj(wid) = stream {
+            register_pending_stream(e, wid);
+        }
+    }
+    Ok(pipe.pid)
+}
+
+/// Pilote le pipe en vol : chunks → `writer.write`, `close` →
+/// `writer.close` + promesse résolue, `error` → `writer.abort` +
+/// rejet. Queue vide et source ouverte → `pull` (un `pull` muet
+/// rend la main — re-tenté au checkpoint). Appelé depuis
+/// `pipe_start` et après chaque `drain_pending` (`enqueue`,
+/// `close`, `error`, `cancel`, pump).
+fn drive_pipe(e: &mut Engine, d: &Rc<RefCell<RsData>>) -> JsResult<()> {
+    enum Act {
+        Write(Value),
+        Close,
+        Abort(Value),
+        Pull(Value, Value),
+        Wait,
+    }
     loop {
-        let next = {
+        let (act, pipe) = {
             let mut dd = d.borrow_mut();
+            let Some(p) = dd.pipe.clone() else {
+                return Ok(());
+            };
             if let Some(err) = dd.errored.clone() {
-                Some(Err(err))
+                dd.pipe = None;
+                (Act::Abort(err), p)
             } else if let Some(v) = dd.queue.pop_front() {
-                Some(Ok(Some(v)))
+                (Act::Write(v), p)
             } else if dd.closed {
-                Some(Ok(None))
+                dd.pipe = None;
+                (Act::Close, p)
+            } else if let Some(f) = dd.pull.clone() {
+                (Act::Pull(f, dd.source.clone()), p)
             } else {
-                None
+                (Act::Wait, p)
             }
         };
-        match next {
-            Some(Ok(Some(v))) => {
-                if let Ok(w) = e.get_prop_value(writer.clone(), "write") {
-                    if e.is_callable(w.clone()) {
-                        let r = e.call_value(w, writer.clone(), &[v])?;
-                        let _ = e.await_value(r)?; // promesse sink
-                    }
-                }
-            }
-            Some(Ok(None)) => {
-                if let Ok(c) = e.get_prop_value(writer.clone(), "close") {
-                    if e.is_callable(c.clone()) {
-                        let r = e.call_value(c, writer.clone(), &[])?;
-                        let _ = e.await_value(r)?;
-                    }
-                }
-                return Ok(());
-            }
-            Some(Err(err)) => {
-                if let Ok(a) = e.get_prop_value(writer.clone(), "abort") {
-                    if e.is_callable(a.clone()) {
-                        let r = e.call_value(a, writer.clone(), std::slice::from_ref(&err))?;
-                        let _ = e.await_value(r)?;
-                    }
-                }
-                return Ok(());
-            }
-            None => {
-                // Queue vide, pas fermé : `pull` jusqu'à
-                // terminaison (borné par le budget ops).
-                let cp = rs_ctrl_proto(e);
-                let (pull, source, ctrl) = {
-                    let dd = d.borrow();
-                    (dd.pull.clone(), dd.source.clone(), rs_obj(e, d, cp))
+        match act {
+            Act::Wait => return Ok(()),
+            Act::Write(v) => {
+                let Ok(w) = e.get_prop_value(pipe.writer.clone(), "write") else {
+                    continue;
                 };
-                match pull {
-                    Some(f) => {
-                        e.call_value(f, source, &[ctrl])?;
-                        e.tick()?;
+                if !e.is_callable(w.clone()) {
+                    continue;
+                }
+                match e.call_value(w, pipe.writer.clone(), &[v]) {
+                    Ok(r) => {
+                        // Promesse sink : un rejet tardif fait
+                        // échouer le pipe (spec `pipeTo` failure)
+                        // — `then(undefined, pipe_write_err)`.
+                        if let Ok(then_f) = e.get_prop_value(r.clone(), "then") {
+                            if e.is_callable(then_f.clone()) {
+                                let rej = e.bound_native(
+                                    "pipeWriteErr",
+                                    pipe_write_err,
+                                    vec![
+                                        pipe.stream.clone(),
+                                        pipe.writer.clone(),
+                                        Value::Obj(pipe.pid),
+                                    ],
+                                );
+                                let _ = e.call_value(then_f, r, &[Value::Undefined, rej]);
+                            }
+                        }
                     }
-                    None => {
-                        // Ni chunk ni pull : la promesse pipe
-                        // resterait pendante — erreur honnête.
-                        return Err(e.type_error("pipeTo: source stalled without pull"));
+                    Err(crate::heap::Thrown(tv)) => {
+                        // `write` jette en synchrone → échec du
+                        // pipe (la source reste ; approximation :
+                        // `preventCancel` non modélisé).
+                        d.borrow_mut().pipe = None;
+                        e.reject_promise(pipe.pid, tv);
+                        return Ok(());
                     }
+                }
+            }
+            Act::Close => {
+                if !pipe.prevent_close {
+                    if let Ok(c) = e.get_prop_value(pipe.writer.clone(), "close") {
+                        if e.is_callable(c.clone()) {
+                            let _ = e.call_value(c, pipe.writer.clone(), &[]);
+                        }
+                    }
+                }
+                e.resolve_promise(pipe.pid, Value::Undefined);
+                return Ok(());
+            }
+            Act::Abort(err) => {
+                if !pipe.prevent_abort {
+                    if let Ok(a) = e.get_prop_value(pipe.writer.clone(), "abort") {
+                        if e.is_callable(a.clone()) {
+                            let _ =
+                                e.call_value(a, pipe.writer.clone(), std::slice::from_ref(&err));
+                        }
+                    }
+                }
+                e.reject_promise(pipe.pid, err);
+                return Ok(());
+            }
+            Act::Pull(f, source) => {
+                let cp = rs_ctrl_proto(e);
+                let ctrl = rs_obj(e, d, cp);
+                if let Err(err) = e.call_value(f, source, &[ctrl]) {
+                    let crate::heap::Thrown(v) = err;
+                    d.borrow_mut().errored = Some(v);
+                    continue; // → bras `Abort` au tour suivant.
+                }
+                // `pull` muet (rien enqueued en synchrone) →
+                // rendre la main ; le checkpoint re-tentera.
+                // Sinon la boucle draine ce qu'il a produit.
+                let progressed = {
+                    let dd = d.borrow();
+                    !dd.queue.is_empty() || dd.closed || dd.errored.is_some()
+                };
+                if !progressed {
+                    return Ok(());
                 }
             }
         }
     }
 }
 
+/// Rejet tardif d'une promesse `writer.write` — bound
+/// `[stream, writer, pid]` : clôture le pipe (plus d'écriture
+/// vers le sink mort) puis rejette la promesse du pipe avec la
+/// raison. `this` inutilisé.
+fn pipe_write_err(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
+    if let Some(d) = rs_data(e, arg(args, 0)) {
+        d.borrow_mut().pipe = None;
+    }
+    if let Value::Obj(pid) = arg(args, 2) {
+        e.reject_promise(pid, arg(args, 3));
+    }
+    Ok(Value::Undefined)
+}
+
 /// `rs.pipeThrough({readable, writable})` = `pipeTo(writable)`
-/// puis `readable` retourné (spec).
+/// en vol puis `readable` retourné (spec — la promesse du pipe
+/// continue sa vie en tâche de fond).
 fn rs_pipe_through(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
-    let Some(d) = rs_data(e, this) else {
+    let Some(d) = rs_data(e, this.clone()) else {
         return Err(e.type_error("pipeThrough on incompatible receiver"));
     };
     let t = arg(args, 0);
@@ -676,7 +830,7 @@ fn rs_pipe_through(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Valu
         return Err(e.type_error("pipeThrough: not a transform"));
     };
     let w = e.get_prop(tid, "writable").unwrap_or(Value::Undefined);
-    pipe_drain(e, &d, w)?;
+    let _pid = pipe_start(e, this, &d, w, arg(args, 1))?;
     Ok(e.get_prop(tid, "readable").unwrap_or(Value::Undefined))
 }
 
@@ -708,6 +862,7 @@ fn rs_tee(e: &mut Engine, this: Value, _a: &[Value]) -> JsResult<Value> {
             source: Value::Undefined,
             locked: false,
             pending_reads: Vec::new(),
+            pipe: None,
         }));
         let p = rs_proto(e);
         rs_obj(e, &nd, p)
@@ -765,6 +920,11 @@ impl Host for RsHost {
         }
         crate::heap::push_value(out, &d.source);
         out.extend(d.pending_reads.iter().copied());
+        if let Some(p) = &d.pipe {
+            crate::heap::push_value(out, &p.stream);
+            crate::heap::push_value(out, &p.writer);
+            out.push(p.pid);
+        }
     }
 }
 
@@ -1182,6 +1342,7 @@ fn transform_stream_ctor(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<
             source: Value::Undefined,
             locked: false,
             pending_reads: Vec::new(),
+            pipe: None,
         })),
     }));
     // Côtés : readable = ReadableStream sur `d.rs` ; writable =
@@ -1432,6 +1593,7 @@ pub(crate) fn body_stream(e: &mut Engine, bytes: &[u8]) -> Value {
         source: Value::Undefined,
         locked: false,
         pending_reads: Vec::new(),
+        pipe: None,
     }));
     if !bytes.is_empty() {
         let chunk = crate::typed_array::new_u8_array(e, bytes.to_vec());
@@ -1454,6 +1616,7 @@ pub(crate) fn body_text_stream(e: &mut Engine, text: &str) -> Value {
         source: Value::Undefined,
         locked: false,
         pending_reads: Vec::new(),
+        pipe: None,
     }));
     if !text.is_empty() {
         let chunk = e.str_val(text);
