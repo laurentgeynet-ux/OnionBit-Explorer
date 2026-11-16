@@ -17,7 +17,7 @@ jobs:
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       RADAR_ISSUE: '2'
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: Swatinem/rust-cache@v2
       # Les sorties vivent sous Explorer-data/ depuis l'étape
       # 262 (racine canonique) — `target/` ne contient plus
