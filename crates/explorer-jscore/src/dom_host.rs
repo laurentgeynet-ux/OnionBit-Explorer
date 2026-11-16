@@ -13250,6 +13250,22 @@ impl ClassListHost {
             .map(|c| c.split_whitespace().map(str::to_string).collect())
             .unwrap_or_default()
     }
+
+    /// Réécrit l'attribut seulement si l'ensemble de jetons a
+    /// réellement changé — spec `DOMTokenList` : `add`/`remove`
+    /// sur un ensemble inchangé sont des no-ops, pas des
+    /// mutations. Avant : `set_attr` inconditionnel → record +
+    /// op journal `SetAttr` + `mark_dirty` + réaction CE
+    /// **fantômes** à chaque appel (une boucle `add('x')`
+    /// inondait le journal d'ops bidons — signature du wedge
+    /// `host=DOMTokenList:add` au vol).
+    fn set_tokens_if_changed(&self, tokens: &[String]) {
+        let new_val = tokens.join(" ");
+        let mut d = self.dom.borrow_mut();
+        if d.attr(self.node, self.attr).unwrap_or("") != new_val {
+            d.set_attr(self.node, self.attr, &new_val);
+        }
+    }
 }
 
 impl Host for ClassListHost {
@@ -13390,9 +13406,7 @@ impl Host for ClassListHost {
                         t.clone_from(&b);
                     }
                 }
-                self.dom
-                    .borrow_mut()
-                    .set_attr(self.node, self.attr, &tokens.join(" "));
+                self.set_tokens_if_changed(&tokens);
                 return Ok(Some(Value::Bool(true)));
             }
             _ => {}
@@ -13420,7 +13434,9 @@ impl Host for ClassListHost {
                 };
                 let want = force.unwrap_or(!contains);
                 if want {
-                    tokens.push(cls.clone());
+                    if !contains {
+                        tokens.push(cls.clone());
+                    }
                 } else {
                     tokens.retain(|t| t != &cls);
                 }
@@ -13428,7 +13444,10 @@ impl Host for ClassListHost {
             "contains" => return Ok(Some(Value::Bool(contains))),
             _ => return Ok(None),
         }
-        d.set_attr(self.node, self.attr, &tokens.join(" "));
+        let new_val = tokens.join(" ");
+        if d.attr(self.node, self.attr).unwrap_or("") != new_val {
+            d.set_attr(self.node, self.attr, &new_val);
+        }
         Ok(Some(match name {
             "toggle" => Value::Bool(tokens.iter().any(|t| t == &cls)),
             _ => Value::Undefined,

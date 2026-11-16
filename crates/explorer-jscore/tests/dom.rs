@@ -2025,6 +2025,31 @@ fn mutation_observer_attributes_and_old_value() {
     );
 }
 
+/// `classList.add`/`remove`/`toggle` sur un ensemble inchangé
+/// = no-op spec : aucun record (avant : `set_attr` inconditionnel
+/// → record + op journal + dirty fantômes à chaque appel —
+/// signature du wedge `host=DOMTokenList:add` au vol).
+#[test]
+fn classlist_noop_ne_mute_pas() {
+    assert_eq!(
+        ev2(
+            PAGE,
+            "var n=0;\
+             var mo=new MutationObserver(function(){n++});\
+             var el=document.getElementById('main');\
+             mo.observe(el,{attributes:true});\
+             el.classList.add('box');\
+             el.classList.add('box');\
+             el.classList.remove('nope');\
+             el.classList.toggle('box',true);\
+             el.classList.replace('box','box');\
+             el.classList.add('fresh');",
+            "n+'|'+el.className"
+        ),
+        "1|box fresh"
+    );
+}
+
 #[test]
 fn mutation_observer_attribute_filter() {
     assert_eq!(
