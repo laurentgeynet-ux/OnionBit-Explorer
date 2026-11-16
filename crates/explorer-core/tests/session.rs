@@ -3193,6 +3193,130 @@ async fn input_image_without_src_keeps_alt_fallback() {
     );
 }
 
+/// Étape 307 — image map : un clic dans une `<area rect>`
+/// d'un `<img usemap>` suit le `href` de l'aire (tranche
+/// legacy journal 2026-11-15, point b).
+#[tokio::test]
+async fn image_map_area_click_navigates() {
+    let (mut s, t) = test_session();
+    // Image 20×10 à l'origine (marge body annulée par
+    // `route`) : la zone rect couvre (2,2)-(18,8) en coords
+    // naturelles = coords rendues (échelle 1).
+    t.route(
+        "/m",
+        200,
+        "<html><body><img src=\"/i.png\" usemap=\"#m\" width=\"20\" height=\"10\">\
+         <map name=\"m\"><area shape=\"rect\" coords=\"2,2,18,8\" href=\"/t\" alt=\"z\"></map>\
+         </body></html>",
+    );
+    t.route_bin("/i.png", 200, solid_png(20, 10, [0, 200, 0, 255]));
+    t.route("/t", 200, "<html><body>cible</body></html>");
+    let id = s.open_tab();
+    s.navigate(id, "http://h.test/m").await.unwrap();
+    // (10,5) tombe dans la zone (2,2)-(18,8) rel. image.
+    let out = s
+        .handle_input(id, InputEvent::Click { x: 10.0, y: 5.0 })
+        .await
+        .unwrap();
+    assert_eq!(out, InputOutcome::Navigated, "clic dans l'aire");
+    assert_eq!(s.tab_url(id).as_deref(), Some("http://h.test/t"));
+}
+
+/// Hors de toute `<area>` (et sans `default`) : le clic sur
+/// l'image ne navigue pas — comportement hors-zone honnête.
+#[tokio::test]
+async fn image_map_outside_area_ignored() {
+    let (mut s, t) = test_session();
+    t.route(
+        "/m",
+        200,
+        "<html><body><img src=\"/i.png\" usemap=\"#m\" width=\"20\" height=\"10\">\
+         <map name=\"m\"><area shape=\"rect\" coords=\"2,2,8,8\" href=\"/t\"></map>\
+         </body></html>",
+    );
+    t.route_bin("/i.png", 200, solid_png(20, 10, [0, 200, 0, 255]));
+    let id = s.open_tab();
+    s.navigate(id, "http://h.test/m").await.unwrap();
+    // (19,9) est dans l'image mais hors rect (2,2)-(18,8).
+    let out = s
+        .handle_input(id, InputEvent::Click { x: 19.0, y: 9.0 })
+        .await
+        .unwrap();
+    assert_ne!(out, InputOutcome::Navigated, "hors zone : pas de nav");
+    assert_eq!(s.tab_url(id).as_deref(), Some("http://h.test/m"));
+}
+
+/// `shape="default"` ne gagne qu'en dernier recours : un
+/// point couvert par une vraie aire suit **son** href, pas
+/// celui du default.
+#[tokio::test]
+async fn image_map_default_only_as_fallback() {
+    let (mut s, t) = test_session();
+    t.route(
+        "/m",
+        200,
+        "<html><body><img src=\"/i.png\" usemap=\"#m\" width=\"20\" height=\"10\">\
+         <map name=\"m\">\
+         <area shape=\"rect\" coords=\"0,0,20,10\" href=\"/t\">\
+         <area shape=\"default\" href=\"/d\">\
+         </map></body></html>",
+    );
+    t.route_bin("/i.png", 200, solid_png(20, 10, [0, 200, 0, 255]));
+    t.route("/t", 200, "<html><body>t</body></html>");
+    t.route("/d", 200, "<html><body>d</body></html>");
+    let id = s.open_tab();
+    s.navigate(id, "http://h.test/m").await.unwrap();
+    // Le rect couvre toute l'image → le default est ignoré.
+    let out = s
+        .handle_input(id, InputEvent::Click { x: 10.0, y: 5.0 })
+        .await
+        .unwrap();
+    assert_eq!(out, InputOutcome::Navigated);
+    assert_eq!(s.tab_url(id).as_deref(), Some("http://h.test/t"));
+}
+
+/// `shape="circle"` : le centre couvert, le coin exclu.
+#[tokio::test]
+async fn image_map_circle_shape() {
+    let (mut s, t) = test_session();
+    t.route(
+        "/m",
+        200,
+        "<html><body><img src=\"/i.png\" usemap=\"#m\" width=\"20\" height=\"10\">\
+         <map name=\"m\"><area shape=\"circle\" coords=\"10,5,4\" href=\"/t\"></map>\
+         </body></html>",
+    );
+    t.route_bin("/i.png", 200, solid_png(20, 10, [0, 0, 0, 255]));
+    t.route("/t", 200, "<html><body>t</body></html>");
+    let id = s.open_tab();
+    s.navigate(id, "http://h.test/m").await.unwrap();
+    // Centre (10,5) dans le rayon 4.
+    let out = s
+        .handle_input(id, InputEvent::Click { x: 10.0, y: 5.0 })
+        .await
+        .unwrap();
+    assert_eq!(out, InputOutcome::Navigated);
+    assert_eq!(s.tab_url(id).as_deref(), Some("http://h.test/t"));
+
+    // Coin (1,9) : distance ~9 du centre → hors cercle.
+    let (mut s2, t2) = test_session();
+    t2.route(
+        "/m",
+        200,
+        "<html><body><img src=\"/i.png\" usemap=\"#m\" width=\"20\" height=\"10\">\
+         <map name=\"m\"><area shape=\"circle\" coords=\"10,5,4\" href=\"/t\"></map>\
+         </body></html>",
+    );
+    t2.route_bin("/i.png", 200, solid_png(20, 10, [0, 0, 0, 255]));
+    let id2 = s2.open_tab();
+    s2.navigate(id2, "http://h.test/m").await.unwrap();
+    let out2 = s2
+        .handle_input(id2, InputEvent::Click { x: 1.0, y: 9.0 })
+        .await
+        .unwrap();
+    assert_ne!(out2, InputOutcome::Navigated, "coin hors cercle");
+}
+
 /// Étape 108 — un apply de synchro JS re-parse le document :
 /// les `<img>` fetchés doivent survivre (le cache persistant
 /// `img_decoded` re-matche par `src` — avant, la table

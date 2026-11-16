@@ -8136,6 +8136,37 @@ MCP = adaptateur, jamais la base.
   — miss désormais attribuables moteur. `css.values`
   1144/1767 → **1146/1758 (65,2 %)**, cliquet
   et cliché `na` re-sauvés.
+- [x] **Étape 308. §B-152 — la phase fontes de la vague
+  est bornée wall-clock** (`explorer-core`, field278 :
+  caisse-epargne tenait le commit des feuilles ~240 s —
+  `sheets_bytes=0` toute la durée, page non stylée ;
+  mécanisme = `fetch_fonts` séquentiel sur des srcs
+  legacy `eot/svg/ttf` ~2 s pièce). `SessionConfig::
+  font_phase_ms` (défaut 20 s) borne la phase ; les
+  `src:` sont triés **premier décodable d'abord**
+  (`woff2` > `woff` > `ttf/otf/ttc` > inconnu >
+  `eot/svg`) — les formats indécodables ne se paient plus
+  en premier ; dédup d'URL entre faces. Deadline
+  atteinte → la vague commit sans les faces restantes
+  (fonte facultative, feuille non), marqueur
+  `sub: phase fontes bornée`. Reste au journal : le fix
+  complet est un commit étagé (sheets à `fonds fetchés`,
+  fontes en FOUT différé).
+- [x] **Étape 307. Image maps `<map>`/`<area>`** —
+  tranche legacy journal 2026-11-15 point (b)
+  (`explorer-core`, zéro contrat PIPE : `shape`/`coords`
+  vivent dans les attributs, géométrie via `box_rect`).
+  `imagemap::area_hit` : premier `<img>` ancêtre porteur
+  de `usemap` (spec : `img` seul — `input[type=image]`
+  HTML4 soumet son formulaire), `<map>` par `name`/`id`,
+  aires sondées en ordre arbre — `rect`/`circle`/`poly`
+  (rayon), `default` dernier recours, `href`/`nohref`
+  absents = sautés, `coords` tronqués = ignorés. Coords
+  espace naturel → mises à l'échelle du rendu quand
+  l'intrinsèque est connu. `link_node_at`/`hit_targets_at`
+  sondent l'aire avant le lien ancêtre — `target`/`rel`/
+  `download`/`referrerpolicy` lus sur l'aire par le chemin
+  `link_activate` existant. Verrous : `image_map_*` ×4.
 - [x] **Étape 306. `input[type=image][src]` dans la
   collecte image** (`explorer-core`, demande PIPE
   2026-11-15) : `own_image_pick` factorise la chaîne

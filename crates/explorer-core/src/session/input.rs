@@ -1198,7 +1198,11 @@ impl Session {
         if let (Some(tree), Some(dom)) = (entry.tree.as_ref(), entry.dom.as_ref()) {
             if let Some(node) = hit_test(tree, x, y, entry.scroll_y, self.viewport) {
                 if let Some(base) = entry.nav_base() {
-                    if let Some(a) = ancestor_link(dom, node) {
+                    // Aire d'image map d'abord (même priorité
+                    // que `link_node_at`), sinon lien ancêtre.
+                    if let Some((_, url)) = self.area_link_at(tab, node, x, y) {
+                        out.link = Some(url);
+                    } else if let Some(a) = ancestor_link(dom, node) {
                         if let Ok(Some(href)) = dom.attribute_str(a, "href") {
                             out.link = Url::resolve(base, href).ok().map(|u| u.to_string());
                         }
@@ -1233,12 +1237,45 @@ impl Session {
         let tree = entry.tree.as_ref()?;
         let dom = entry.dom.as_ref()?;
         let node = hit_test(tree, x, y, entry.scroll_y, self.viewport)?;
+        // Image map : une `<area>` couvrant le point est une
+        // cible complète avant le lien ancêtre (palier
+        // legacy — `target`/`rel`/`download`/`referrerpolicy`
+        // sont lus sur l'aire par le même chemin).
+        if let Some(hit) = self.area_link_at(tab, node, x, y) {
+            return Some(hit);
+        }
         let a = ancestor_link(dom, node)?;
         let href = dom.attribute_str(a, "href").ok().flatten()?;
         // `href` résout contre la base document (`<base
         // href>` ou l'URL de la page, étape 135).
         let base = entry.nav_base()?;
         Some((a, Url::resolve(base, href).ok()?.to_string()))
+    }
+
+    /// `(area, url)` de l'image map sous le point — `x`/`y`
+    /// viewport convertis en coords document pour la
+    /// hit-map `usemap` (étape 307). `None` hors zone ou
+    /// href irrésoluble.
+    pub(crate) fn area_link_at(
+        &self,
+        tab: TabId,
+        node: NodeId,
+        x: f32,
+        y: f32,
+    ) -> Option<(NodeId, String)> {
+        let entry = self.tabs.get(&tab)?;
+        let (tree, dom) = (entry.tree.as_ref()?, entry.dom.as_ref()?);
+        let area = imagemap::area_hit(
+            dom,
+            tree,
+            &entry.images.replaced,
+            node,
+            x,
+            y + entry.scroll_y,
+        )?;
+        let href = dom.attribute_str(area, "href").ok().flatten()?;
+        let base = entry.nav_base()?;
+        Some((area, Url::resolve(base, href).ok()?.to_string()))
     }
 
     /// Scroll borné `[0, doc_h - viewport_h]` puis repaint +
