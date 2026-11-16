@@ -4198,3 +4198,38 @@ absente là où `anchor-size` en margin résout).
 **Mesure** : `css.values` 1139/1779 → **1144/1767
 (64,7 %)**, 931 neutres — cliquet vert, baseline v2
 re-sauvée.
+
+## Étape 298 — `check computedv` : constats cascade (lecture PIPE, aucun changement de contrat)
+
+Troisième oracle de la jauge BCD (NAV) : delta de
+`StyleMap` du sous-arbre `.x`, prop sondée exclue —
+mesure ce que la cascade fait **autre** que stocker la
+prop elle-même. Constats utiles au triage de la file
+« Extensions demandées » (2026-11-16) :
+
+- `overflow-block`/`overflow-inline` : stockés **verbatim**
+  (hors `resolve_logical_props`, qui couvre margin/
+  padding/inset/border/corner/inline-block-size) → gap
+  confirmé à **deux étages** : nom non résolu au style
+  ET consommateur absent en boxtree.
+- `mask` shorthand : expansé (`mask:*` → `mask-*` = delta
+  calculé, c=26/30) → la grammaire existe ; le trou est
+  purement **paint** (`mask-*` longhands stockés
+  verbatim, indécidables à ce niveau — leur émission
+  reste à vérifier côté render).
+- `border-image` : **aucune expansion observée** (c=0/8)
+  — le shorthand ne passe pas par `expand_shorthand` ou
+  ses valeurs sont rejetées : gap cascade, plus profond
+  que `mask` — à confirmer côté PIPE avant de l'inscrire
+  « paint seul ».
+- `row-rule`/`rule-inset-*` : deltas calculés partout
+  (c=11/11, c=1 partout) → cascade OK, consommateur
+  layout absent.
+- `overflow-x:hidden` ne force pas `overflow-y:auto` au
+  style — le pairing spec « non-visible ⇒ auto » n'est
+  pas implémenté en cascade (effet visible seulement si
+  la valeur s'écrit ailleurs — rien ici).
+
+Aucune demande nouvelle : ces constats **nourrissent**
+la file 2026-11-16 (points d et suivants), pas ne la
+remplacent.

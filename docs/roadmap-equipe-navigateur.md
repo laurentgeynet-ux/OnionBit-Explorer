@@ -8090,6 +8090,34 @@ MCP = adaptateur, jamais la base.
   design csszengarden, images debian) ;
   craigslist rejeté (redirect géo), ddg-lite
   trop maigre. Run complet 10/10 mesurés.
+- [x] **Étape 299. `classList` : no-op neutre +
+  `toggle(force)` sans doublon** (`explorer-jscore`,
+  wedge vol `host=DOMTokenList:add`). (a) `set_attr`
+  inconditionnel → record + op journal `SetAttr` +
+  `mark_dirty` + CE fantômes par appel — l'amplification
+  vivait en aval (journal rejoué en invalidations style
+  réelles) ; garde `attr != join` (spec : un no-op
+  `DOMTokenList` n'est pas une mutation). (b)
+  `toggle(t, force=true)` poussait sans tester
+  `contains` → `"box box"` (exposé par le verrou).
+  Résidu : quadratique attribut-chaîne (10k tokens
+  uniques = 3,8 s) — repr token-set à ordonner. Verrou :
+  `classlist_noop_ne_mute_pas` — suite `dom` 272/272.
+- [x] **Étape 298. `check computedv` — classifieur
+  « cascade applique » sur les misses** — troisième
+  oracle de la jauge, niveau style calculé : la
+  `StyleMap` du sous-arbre `.x` sérialisée (props ∪
+  vars, pseudos), prop sondée exclue — sinon
+  saturation `routed`-like. Delta honnête =
+  expansion shorthand + résolution logique
+  (`resolve_logical_props`) + effets croisés.
+  Hors union ok (« cascade applique » ≠ « rendu ») ;
+  `bcd_coverage` l'exploite en colonne `c=N` du
+  `--families`. Mesure : 170/623 misses calculées —
+  `mask` c=26/30, `row-rule` c=11/11 (trous purement
+  rendu) ; `border-image` c=0 (gap cascade, plus
+  profond) ; `overflow-x` ne force pas
+  `overflow-y:auto` au style.
 - [x] **Étape 297. Triage `bcd_audit` — fixtures
   corrigées, méta-noms sondés, file PIPE nommée** —
   les constats de l'étape 277 passent en revue.

@@ -1508,6 +1508,11 @@ thread_local! {
     static BASE_PIX: std::cell::RefCell<
         std::collections::HashMap<String, Option<Vec<u8>>>,
     > = std::cell::RefCell::new(std::collections::HashMap::new());
+    /// Idem pour `check computedv` (étape 298) — la
+    /// `StyleMap` `.x { ctx }` sérialisée est invariante
+    /// par prop.
+    static BASE_CMP: std::cell::RefCell<std::collections::HashMap<String, String>> =
+        std::cell::RefCell::new(std::collections::HashMap::new());
 }
 
 /// Contexte **additionnel** de l'oracle pixel (étape 274) —
@@ -1734,6 +1739,146 @@ fn prop_paints_decl(decl: &str) -> bool {
         eprintln!("=== paintv {name}:{value} — base {diff}");
     }
     a.is_some() && b.is_some() && a != b
+}
+
+/// `check computedv` (étape 298) — troisième oracle de la
+/// jauge, niveau **style calculé** : la `StyleMap` du
+/// sous-arbre `.x` sérialisée (props ∪ vars, ordre DOM,
+/// pseudos inclus), avec et sans la déclaration — la prop
+/// sondée **exclue** de la signature (la cascade stocke les
+/// déclarations vainqueurs verbatim : inclure la prop
+/// saturerait l'oracle comme `routed`). Ce qui produit un
+/// delta honnête : expansion shorthand (`inset` → 4
+/// longhands, `border` → ~12), résolution logique
+/// (`block-size` → `height`, `margin-inline` → côtés
+/// physiques — `resolve_logical_props`), effets croisés
+/// (paire `overflow` qui force l'autre axe, héritage sur
+/// les descendants).
+///
+/// Borne assumée — **diagnostic, hors union ok** :
+/// « cascade applique » ≠ « moteur pose/peint »
+/// (`overflow-block` s'y stocke verbatim sans effet aval
+/// → miss des deux côtés ; `border-image` expanserait
+/// tout en restant non-peint — `computed` seul ne
+/// retourne pas une paire en `ok`).
+fn prop_computes_decl(decl: &str) -> bool {
+    let Some((name, value)) = decl.split_once(':') else {
+        return false;
+    };
+    let name = name.trim();
+    let dom = explorer_html::TreeBuilder::parse(fixture_for(name));
+    let root = {
+        let mut r = None;
+        walk_any(dom.document(), &dom, &mut r);
+        r.unwrap_or(dom.document())
+    };
+    // Cible `.x` — la signature couvre son sous-arbre :
+    // l'effet d'un héritage sur les descendants fait partie
+    // du delta calculé.
+    let xnode = {
+        let mut x = None;
+        find_class_x(dom.document(), &dom, &mut x);
+        x
+    };
+    let sig = |css: &str| -> String {
+        let mut eng = explorer_css::StyleEngine::new();
+        eng.add_css(css, explorer_css::Origin::Author);
+        let sm = eng.compute_tree(&dom, root, &explorer_css::StyleEnv::default());
+        let mut out = String::new();
+        if let Some(x) = xnode {
+            dump_computed_subtree(x, &dom, &sm, name, &mut out);
+        }
+        out
+    };
+    let cctx = context_css(name);
+    // Mêmes pseudo-cibles que les oracles rendus.
+    let sel = match name {
+        "initial-letter" => ".x::first-letter",
+        "content" => ".x::before",
+        _ => ".x",
+    };
+    // Même cache de base que `affectsv`/`paintv` — la
+    // `StyleMap` `.x { ctx }` est invariante par prop.
+    let a = sig(&format!("{sel} {{ {cctx}; {}: {} }}", name, value.trim()));
+    let b = BASE_CMP.with(|c| {
+        c.borrow_mut()
+            .entry(name.to_string())
+            .or_insert_with(|| sig(&format!("{sel} {{ {cctx} }}")))
+            .clone()
+    });
+    if std::env::var_os("EXPLORER_BCD_DEBUG_SIG").is_some() {
+        eprintln!("=== computedv {name}:{value}\n--- with\n{a}\n--- base\n{b}");
+    }
+    a != b
+}
+
+/// Premier élément porteur d'un token `x` dans `class` —
+/// cible des fixtures de la jauge.
+fn find_class_x(
+    n: explorer_dom::NodeId,
+    dom: &explorer_dom::Dom,
+    out: &mut Option<explorer_dom::NodeId>,
+) {
+    if out.is_none()
+        && dom
+            .attribute_str(n, "class")
+            .ok()
+            .flatten()
+            .is_some_and(|c| c.split_whitespace().any(|w| w == "x"))
+    {
+        *out = Some(n);
+    }
+    if let Ok(ch) = dom.children(n) {
+        for c in ch {
+            find_class_x(c, dom, out);
+        }
+    }
+}
+
+/// Sérialise le style calculé de `n` (+ pseudos routés +
+/// descendants, ordre DOM) dans `out` — `skip` = prop
+/// sondée, ignorée partout (anti-saturation).
+fn dump_computed_subtree(
+    n: explorer_dom::NodeId,
+    dom: &explorer_dom::Dom,
+    sm: &explorer_css::StyleMap,
+    skip: &str,
+    out: &mut String,
+) {
+    use std::fmt::Write;
+    if let Some(st) = sm.get(n) {
+        ser_computed(st, skip, out);
+    }
+    for which in [
+        explorer_css::PseudoElement::Before,
+        explorer_css::PseudoElement::After,
+        explorer_css::PseudoElement::FirstLine,
+        explorer_css::PseudoElement::FirstLetter,
+        explorer_css::PseudoElement::Marker,
+    ] {
+        if let Some(ps) = sm.pseudo(n, which) {
+            let _ = write!(out, "|@{which:?}");
+            ser_computed(ps, skip, out);
+        }
+    }
+    if let Ok(ch) = dom.children(n) {
+        for c in ch {
+            dump_computed_subtree(c, dom, sm, skip, out);
+        }
+    }
+}
+
+/// `k=v` triés d'un `ComputedStyle`, `skip` exclu —
+/// `iter()` livre props ∪ vars (les vars restent : une
+/// déclaration qui résout à travers elles doit se voir).
+fn ser_computed(st: &explorer_css::ComputedStyle, skip: &str, out: &mut String) {
+    use std::fmt::Write;
+    let mut kv: Vec<(&str, &str)> = st.iter().filter(|(k, _)| *k != skip).collect();
+    kv.sort_unstable();
+    let _ = write!(out, "|{}", kv.len());
+    for (k, v) in kv {
+        let _ = write!(out, ";{k}={v}");
+    }
 }
 
 /// `affectsv` tri-état (étape 219) : `None` = **neutre par
@@ -3262,6 +3407,23 @@ fn paint_decl_verdict(decl: &str) -> Option<bool> {
     }
 }
 
+/// `check computedv` (étape 298) — verdict tri-état sur le
+/// style calculé : mêmes `na` de valeur (initiales spec,
+/// CSS-wide, méta non sondé) que le chemin union, mais
+/// **aucune** table prop-level — `NO_ORACLE`/`PAINT_NA`
+/// bornent le *rendu* de familles, pas la cascade (un
+/// shorthand `mask` expansé reste un delta calculé
+/// mesurable même si aucun oracle rendu ne le voit).
+/// `ok` = « la cascade applique », verdict de triage
+/// hors union.
+fn computed_decl_verdict(decl: &str) -> Option<bool> {
+    match decl_gate(decl, &[], true) {
+        DeclGate::Na => None,
+        DeclGate::Known(b) => Some(b),
+        DeclGate::Probe(d) => Some(prop_computes_decl(&d)),
+    }
+}
+
 /// `check tables` (étape 277) — dump TSV des tables de
 /// qualification de la jauge pour `bcd_audit.mjs` :
 /// lignes `initial_extra\t<prop>\t<valeur>`,
@@ -3685,6 +3847,7 @@ fn check_names(kind: &str) -> ExitCode {
         // (étape 274).
         "affectsv" => Box::new(prop_affects_decl),
         "paintv" => Box::new(prop_paints_decl),
+        "computedv" => Box::new(prop_computes_decl),
         // Étape 219 — `html` : oracle de comportement par
         // élément (`bcd.html.elements`) — binding JS
         // (interface + membres IDL) ET géométrie UA (box
@@ -3696,7 +3859,7 @@ fn check_names(kind: &str) -> ExitCode {
         }
         _ => {
             eprintln!(
-                "check : kind inconnu {kind:?} — attendu prop|sel|at|routed|affects|affectsv|paintv|html|decl|tables"
+                "check : kind inconnu {kind:?} — attendu prop|sel|at|routed|affects|affectsv|paintv|computedv|html|decl|tables"
             );
             return ExitCode::FAILURE;
         }
@@ -3708,11 +3871,11 @@ fn check_names(kind: &str) -> ExitCode {
         if name.is_empty() {
             continue;
         }
-        if kind == "affectsv" || kind == "paintv" {
-            let verdict = if kind == "affectsv" {
-                affects_decl_verdict(name)
-            } else {
-                paint_decl_verdict(name)
+        if kind == "affectsv" || kind == "paintv" || kind == "computedv" {
+            let verdict = match kind {
+                "affectsv" => affects_decl_verdict(name),
+                "paintv" => paint_decl_verdict(name),
+                _ => computed_decl_verdict(name),
             };
             let verdict = verdict.map_or("na", |ok| if ok { "ok" } else { "miss" });
             println!("{name}\t{verdict}");
@@ -4096,5 +4259,29 @@ mod tests {
         assert!(!decl_valid("width:200"));
         assert!(decl_valid("width:200px"));
         assert!(decl_valid("color:red"));
+    }
+
+    #[test]
+    fn computedv_expansion_vs_inertie_verbatim() {
+        use super::computed_decl_verdict;
+        // Expansion shorthand : `inset` → 4 longhands
+        // physiques → delta calculé hors prop sondée.
+        assert_eq!(computed_decl_verdict("inset:10px"), Some(true));
+        // Résolution logique : `block-size` → `height`
+        // (`resolve_logical_props`, writing-mode horizontal).
+        assert_eq!(computed_decl_verdict("block-size:44px"), Some(true));
+        // Expansion + résolution composées : `margin-inline`
+        // → `margin-left`/`margin-right`.
+        assert_eq!(computed_decl_verdict("margin-inline:5px"), Some(true));
+        // Longhand nu : stockée verbatim, exclue de la
+        // signature → « cascade n'applique rien d'autre »
+        // (le rendu relève des oracles geo/pixel).
+        assert_eq!(computed_decl_verdict("letter-spacing:2px"), Some(false));
+        // Prop logique hors `resolve_logical_props` :
+        // stockée verbatim sans effet aval → miss calculé,
+        // cohérent avec le routé-inerte mesuré en geo.
+        assert_eq!(computed_decl_verdict("overflow-block:hidden"), Some(false));
+        // `na` de valeur conservé (CSS-wide).
+        assert_eq!(computed_decl_verdict("color:inherit"), None);
     }
 }

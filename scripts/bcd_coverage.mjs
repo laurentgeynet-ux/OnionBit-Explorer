@@ -140,6 +140,14 @@ const families = {};
 // Totaux mesurés par famille (hors `na`) — affichage
 // `--families` seulement ; la baseline ne stocke que `ok`.
 const famTotals = {};
+// Compteur « cascade applique » par famille (étape 298 —
+// `check computedv` sur les misses : expansion shorthand /
+// résolution logique / effet croisé visible dans le style
+// calculé mais sans effet géométrique ∪ pixel). Colonne
+// `c=N` du tableau `--families` — diagnostic de triage,
+// JAMAIS dans le score (`mask:url()` expanserait tout en
+// restant non-peint).
+const famComputed = {};
 function report(label, entries, okSet, note) {
   const ok = entries.filter(e => okSet.has(e.name)).length;
   scores[label] = ok;
@@ -510,19 +518,35 @@ for (const sec of sections) {
     const measured = pairs.filter(e => !naSet.has(e.name));
     report('css.values', measured, okSet,
       `déclaration → effet géométrique ∪ pixel (affectsv + paintv, jauge non-saturante) ; ${naSet.size} neutres hors dénominateur`);
+    // Troisième passe (étape 298) — `check computedv` sur
+    // les misses mesurées : classifieur « la cascade
+    // applique » (expansion shorthand, résolution logique,
+    // effet croisé) vs « cascade aveugle ». Hors union ok —
+    // un shorthand expansé mais non-peint (`mask`,
+    // `border-image`) reste un miss de score.
+    const missNames = measured.map(e => e.name).filter(n2 => !okSet.has(n2));
+    const clines = missNames.length ? execFileSync(cli, ['check', 'computedv'], {
+      input: missNames.join('\n'),
+      encoding: 'utf8', timeout: 600_000, maxBuffer: 64 * 1024 * 1024,
+    }).split(/\r?\n/).filter(Boolean) : [];
+    const compSet = new Set(clines.filter(l => l.endsWith('\tok')).map(l => l.split('\t')[0]));
+    console.log(`  dont ${compSet.size}/${missNames.length} misses « cascade applique » (computedv — expansées/résolues au style, non rendues)`);
     // Cliquet par famille (étape 278) : compteurs `ok` par
     // prop — une famille qui régresse pendant qu'une autre
     // progresse reste invisible du total agrégé ; la
     // baseline v2 les verrouille une à une.
     const perProp = {};
     const perPropTotal = {};
+    const perPropComputed = {};
     for (const e of measured) {
       const p = e.name.slice(0, e.name.indexOf(':'));
       perPropTotal[p] = (perPropTotal[p] ?? 0) + 1;
       perProp[p] = (perProp[p] ?? 0) + (okSet.has(e.name) ? 1 : 0);
+      perPropComputed[p] = (perPropComputed[p] ?? 0) + (compSet.has(e.name) ? 1 : 0);
     }
     families['css.values'] = perProp;
     famTotals['css.values'] = perPropTotal;
+    famComputed['css.values'] = perPropComputed;
   } else if (sec === 'html') {
     // bcd.html.elements.<tag> — oracle de comportement par
     // élément (`check html`, étape 219) : « le tag parse »
@@ -545,15 +569,17 @@ for (const sec of sections) {
 if (args.includes('--families')) {
   for (const [label, perProp] of Object.entries(families)) {
     const tot = famTotals[label] ?? {};
+    const comp = famComputed[label] ?? {};
     const rows = Object.keys(perProp)
-      .map(p => ({ p, ok: perProp[p], t: tot[p] ?? perProp[p] }))
+      .map(p => ({ p, ok: perProp[p], t: tot[p] ?? perProp[p], c: comp[p] ?? 0 }))
       .sort((a, b) => (b.t - b.ok) - (a.t - a.ok) || a.p.localeCompare(b.p));
     const zero = rows.filter(r => r.ok === 0).length;
     const full = rows.filter(r => r.ok === r.t).length;
-    console.log(`familles ${label} : ${rows.length} — ${full} pleines, ${zero} à 0 ok`);
+    const compTotal = rows.reduce((s, r) => s + r.c, 0);
+    console.log(`familles ${label} : ${rows.length} — ${full} pleines, ${zero} à 0 ok${compTotal ? ` ; ${compTotal} misses « cascade applique » (c=)` : ''}`);
     for (const r of rows) {
       const pct = (100 * r.ok / r.t).toFixed(1);
-      console.log(`    ${r.p.padEnd(34)} ${String(r.ok).padStart(3)}/${r.t} (${pct.padStart(5)} %)${r.t - r.ok ? `  miss=${r.t - r.ok}` : ''}`);
+      console.log(`    ${r.p.padEnd(34)} ${String(r.ok).padStart(3)}/${r.t} (${pct.padStart(5)} %)${r.t - r.ok ? `  miss=${r.t - r.ok}` : ''}${r.c ? `  c=${r.c}` : ''}`);
     }
   }
 }
