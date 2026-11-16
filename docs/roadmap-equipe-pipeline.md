@@ -4575,3 +4575,15 @@ sous-features, `font-stretch`/`font-width` (fontes variables),
   notés au journal : `GateKind::Pseudo`, `Superseded`
   (overrides post-cascade nommés), `initial` borné aux
   props supportées. Verrous `tests/explain.rs` ×19.
+- [x] **R-302 — §B-114 flipkart : `defer_clips` compressé
+  aux clips effectifs** (`explorer-render` `display.rs`,
+  journal interface 2026-11-16) : les snapshots de clips
+  ancêtres concaténaient à chaque génération de report
+  (~34 → ~892/porteur → display lists 1,4 M items, 99,9 %
+  de brackets → raster `Mask` pleine frame ×niveaux →
+  abort allocateur ~10 Gio). `compact_clip_list` à la
+  capture : no-ops d'intersection droppés (sémantique ∩
+  identique), arrondis conservés sauf doublon exact, cap
+  `MAX_DEFER_CLIPS=128`. Compteur `EmitStats::clips_dedup`.
+  Verrous `r302_clips` ×7, suites render vertes, pixels
+  inchangés.

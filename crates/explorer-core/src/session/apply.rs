@@ -3532,6 +3532,7 @@ pub(crate) fn repaint_payload(
             visibility = st.skip_visibility,
             deferred = st.deferred_emitted,
             cap = st.drop_cap,
+            clips_dedup = st.clips_dedup,
             spans = st.spans_copied,
             opacity0_path = ?st.opacity0_path,
             backface_path = ?st.backface_path,

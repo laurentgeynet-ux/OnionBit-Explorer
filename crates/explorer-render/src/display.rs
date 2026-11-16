@@ -474,6 +474,12 @@ pub struct EmitStats {
     pub deferred_emitted: u32,
     /// Reports sautés par la borne §B-26 (== `dropped_emits`).
     pub drop_cap: u32,
+    /// Clips ancêtres supprimés des snapshots `defer_clips`
+    /// (R-302) : no-ops d'intersection + doublons exacts +
+    /// troncation `MAX_DEFER_CLIPS`. Une valeur positive
+    /// massive = la cascade cumulative s'est déclenchée et a
+    /// été absorbée.
+    pub clips_dedup: u32,
     /// Plages copiées depuis `prev` (build incrémental —
     /// un collapse sous ré-usage se lit ici).
     pub spans_copied: u32,
@@ -5141,6 +5147,77 @@ const MAX_EMIT_PER_PATH: u32 = 4;
 /// pages) : le dépasser = une file qui se régénère.
 const MAX_EMITS_TOTAL: u32 = 100_000;
 
+/// R-302 — borne dure d'un snapshot `defer_clips` après
+/// compression. Une liste compressée ne retient que les
+/// clips *effectifs* (qui resserrent l'intersection) : au-
+/// delà de quelques dizaines, le cas réel n'existe pas —
+/// le dépasser signale une voie de croissance inconnue et
+/// on garde les plus internes (fin de liste = plus
+/// contraints).
+const MAX_DEFER_CLIPS: usize = 128;
+
+/// R-302 — compresse un snapshot de clips ancêtres à son
+/// sous-ensemble effectif. L'intersection des clips est
+/// commutative et associative : un `PushClip` rect dont le
+/// rect contient déjà l'intersection courante ne rogne
+/// rien de plus (no-op → droppé) ; un `PushClipRounded`
+/// n'est droppé qu'en doublon exact (rect + radii) — ses
+/// coins rognent au-delà du rect englobant. La sortie rend
+/// strictement les mêmes pixels, mais borne la longueur
+/// par la géométrie plutôt que par l'historique de report :
+/// les porteurs re-reportés pendant un drain re-capturent
+/// `clip_stack` (snapshot parent restauré + ancêtres), et
+/// concaténer sans dedup fait croître la liste à chaque
+/// génération (vol868 : ~34 → ~892 clips/porteur →
+/// ~684 000 brackets pour ~750 items de contenu → raster
+/// d'une pile de `Mask` pleine frame → abort allocateur).
+/// `dropped` reçoit le nombre de clips supprimés —
+/// il alimente `EmitStats::clips_dedup`.
+fn compact_clip_list(clips: &[(Rect, [f32; 4])], dropped: &mut u32) -> Box<[(Rect, [f32; 4])]> {
+    let mut kept: Vec<(Rect, [f32; 4])> = Vec::with_capacity(clips.len());
+    // Intersection courante des rects conservés — majorant
+    // du clip effectif (les arrondis ne font que resserrer).
+    let mut eff: Option<Rect> = None;
+    for &(r, radii) in clips {
+        let redundant = if radii.iter().any(|v| *v > 0.0) {
+            let rb = radii.map(f32::to_bits);
+            kept.iter()
+                .any(|&(kr, kradii)| kr == r && kradii.map(f32::to_bits) == rb)
+        } else {
+            eff.is_some_and(|e| {
+                r.x <= e.x
+                    && r.y <= e.y
+                    && r.x + r.width >= e.x + e.width
+                    && r.y + r.height >= e.y + e.height
+            })
+        };
+        if redundant {
+            *dropped = dropped.saturating_add(1);
+            continue;
+        }
+        eff = Some(match eff {
+            Some(e) => {
+                let l = e.x.max(r.x);
+                let t = e.y.max(r.y);
+                Rect {
+                    x: l,
+                    y: t,
+                    width: ((e.x + e.width).min(r.x + r.width) - l).max(0.0),
+                    height: ((e.y + e.height).min(r.y + r.height) - t).max(0.0),
+                }
+            }
+            None => r,
+        });
+        kept.push((r, radii));
+    }
+    if kept.len() > MAX_DEFER_CLIPS {
+        *dropped =
+            dropped.saturating_add(u32::try_from(kept.len() - MAX_DEFER_CLIPS).unwrap_or(u32::MAX));
+        kept.drain(..kept.len() - MAX_DEFER_CLIPS);
+    }
+    kept.into_boxed_slice()
+}
+
 fn emit_scoped_at<'a>(
     path: Vec<u16>,
     bx: &'a LayoutBox,
@@ -6526,8 +6603,13 @@ fn paint_box_impl<'a>(
                 p.push(u16::try_from(ci).unwrap_or(u16::MAX));
                 // R-212 — porteur en flux : tous les clips
                 // ancêtres s'appliquent (§11.1.1).
-                cx.defer_clips
-                    .insert(p.clone().into_boxed_slice(), cx.clip_stack.clone().into());
+                // R-302 — snapshot compressé aux effectifs :
+                // sinon la concaténation cumulative fait
+                // ~892 clips/porteur (vol868 → 684 k brackets).
+                let mut dedup = 0u32;
+                let clips = compact_clip_list(&cx.clip_stack, &mut dedup);
+                cx.stat(|s| s.clips_dedup += dedup);
+                cx.defer_clips.insert(p.clone().into_boxed_slice(), clips);
                 d.push((p, child));
             }
         }
@@ -6557,11 +6639,16 @@ fn paint_box_impl<'a>(
                 // R-212 — clips applicables : tout pour un
                 // in-flow positionné ; pour un `absolute`,
                 // borné à son bloc conteneur (§11.1.1).
-                let clips = if child.position == Position::Absolute {
-                    cx.clip_stack[..cx.pos_floor].to_vec().into()
+                // R-302 — compression aux effectifs (idem
+                // porteurs inline ci-dessus).
+                let raw = if child.position == Position::Absolute {
+                    &cx.clip_stack[..cx.pos_floor]
                 } else {
-                    cx.clip_stack.clone().into()
+                    &cx.clip_stack[..]
                 };
+                let mut dedup = 0u32;
+                let clips = compact_clip_list(raw, &mut dedup);
+                cx.stat(|s| s.clips_dedup += dedup);
                 cx.defer_clips.insert(p.clone().into_boxed_slice(), clips);
                 push_z(pd, 0, p, child);
             }
@@ -6722,5 +6809,127 @@ mod tests {
         run2.ink_glyphs[1] = r(10.0, -8.0, 10.0, 5.0);
         let keep2 = deco_keep_ranges("ab", &run2, 20.0, 0, Some((1.0, 2.0)));
         assert_eq!(keep2, vec![(10.0, 20.0)], "encre saine → trou conservé");
+    }
+
+    /// R-302 — la cascade cumulative des snapshots
+    /// `defer_clips` (vol868 : ~892 clips/porteur, ~684 k
+    /// brackets pour ~750 items) est absorbée à la capture :
+    /// seuls les clips qui resserrent l'intersection
+    /// survivent — les pixels rendus sont identiques.
+    mod r302_clips {
+        use super::super::{compact_clip_list, MAX_DEFER_CLIPS};
+        use super::r;
+        use explorer_layout::Rect;
+
+        const Z: [f32; 4] = [0.0; 4];
+
+        #[test]
+        fn clips_englobants_sont_des_noops() {
+            // Chaîne d'ancêtres où seul le plus petit clip
+            // contraint : les englobants sont droppés.
+            let clips = vec![
+                (r(0.0, 0.0, 1000.0, 1000.0), Z),
+                (r(10.0, 10.0, 500.0, 500.0), Z),
+                (r(0.0, 0.0, 2000.0, 2000.0), Z),
+                (r(20.0, 20.0, 100.0, 100.0), Z),
+                (r(0.0, 0.0, 900.0, 900.0), Z),
+            ];
+            let mut dropped = 0u32;
+            let out = compact_clip_list(&clips, &mut dropped);
+            assert_eq!(out.len(), 3, "englobants = no-ops");
+            assert_eq!(dropped, 2);
+            assert_eq!(out[2].0, r(20.0, 20.0, 100.0, 100.0));
+        }
+
+        #[test]
+        fn clips_partiels_qui_resserrent_sont_gardes() {
+            // Deux clips qui se coupent partiellement —
+            // chacun resserre l'intersection → gardés.
+            let clips = vec![
+                (r(0.0, 0.0, 100.0, 100.0), Z),
+                (r(50.0, 0.0, 100.0, 100.0), Z),
+            ];
+            let mut dropped = 0u32;
+            let out = compact_clip_list(&clips, &mut dropped);
+            assert_eq!(out.len(), 2);
+            assert_eq!(dropped, 0);
+        }
+
+        #[test]
+        fn doublon_exact_rect_dropped() {
+            let clips = vec![(r(0.0, 0.0, 10.0, 10.0), Z), (r(0.0, 0.0, 10.0, 10.0), Z)];
+            let mut dropped = 0u32;
+            let out = compact_clip_list(&clips, &mut dropped);
+            assert_eq!(out.len(), 1);
+            assert_eq!(dropped, 1);
+        }
+
+        #[test]
+        fn clip_arrondi_garde_meme_englobant() {
+            // Un clip arrondi englobant n'est PAS un no-op :
+            // ses coins rognent au-delà du rect courant.
+            let rr = [8.0, 8.0, 8.0, 8.0];
+            let clips = vec![
+                (r(10.0, 10.0, 50.0, 50.0), Z),
+                (r(0.0, 0.0, 1000.0, 1000.0), rr),
+            ];
+            let mut dropped = 0u32;
+            let out = compact_clip_list(&clips, &mut dropped);
+            assert_eq!(out.len(), 2, "arrondi englobant conservé");
+            assert_eq!(dropped, 0);
+        }
+
+        #[test]
+        fn doublon_exact_arrondi_dropped() {
+            let rr = [8.0; 4];
+            let clips = vec![(r(0.0, 0.0, 10.0, 10.0), rr), (r(0.0, 0.0, 10.0, 10.0), rr)];
+            let mut dropped = 0u32;
+            let out = compact_clip_list(&clips, &mut dropped);
+            assert_eq!(out.len(), 1);
+            assert_eq!(dropped, 1);
+        }
+
+        #[test]
+        fn cap_garde_les_plus_internes() {
+            // > MAX_DEFER_CLIPS clips qui resserrent tous
+            // (chaînon vraiment contraignant) → la borne
+            // garde les derniers (plus internes).
+            let mut clips = Vec::new();
+            for i in 0..(MAX_DEFER_CLIPS + 20) {
+                #[allow(clippy::cast_precision_loss)]
+                let m = i as f32;
+                clips.push((r(m, m, 2000.0 - 2.0 * m, 2000.0 - 2.0 * m), Z));
+            }
+            let mut dropped = 0u32;
+            let out = compact_clip_list(&clips, &mut dropped);
+            assert_eq!(out.len(), MAX_DEFER_CLIPS);
+            assert_eq!(dropped, 20);
+            assert_eq!(out[0].0, clips[20].0, "les plus internes gardés");
+        }
+
+        #[test]
+        fn cascade_cumulative_ne_regrossit_plus() {
+            // Le motif vol868 : un snapshot re-capturé à
+            // chaque génération de report — sans compression
+            // la liste concatène (×G générations) ; compressée,
+            // elle converge vers l'effectif.
+            let ancetres: Vec<(Rect, [f32; 4])> = (0..30)
+                .map(|i| {
+                    #[allow(clippy::cast_precision_loss)]
+                    let m = i as f32;
+                    (r(m, m, 900.0 - 2.0 * m, 800.0 - 2.0 * m), Z)
+                })
+                .collect();
+            let mut d1 = 0u32;
+            let gen1 = compact_clip_list(&ancetres, &mut d1);
+            // Génération 2 : snapshot parent compressé +
+            // ancêtres du fils (mêmes boîtes, doublons).
+            let mut gen2_raw = gen1.to_vec();
+            gen2_raw.extend_from_slice(&ancetres[..10]);
+            let mut dropped2 = 0u32;
+            let gen2 = compact_clip_list(&gen2_raw, &mut dropped2);
+            assert_eq!(gen2.len(), gen1.len(), "la taille converge");
+            assert_eq!(dropped2, 10);
+        }
     }
 }
