@@ -8090,6 +8090,39 @@ MCP = adaptateur, jamais la base.
   design csszengarden, images debian) ;
   craigslist rejeté (redirect géo), ddg-lite
   trop maigre. Run complet 10/10 mesurés.
+- [x] **Étape 302. Triage jauge post-298 —
+  `initial_extra` permuté, sept fixtures armées,
+  `perspective*` → `PAINT_NA`** (`explorer-cli`,
+  constats NAV du journal 2026-11-16 exécutés).
+  `("text-decoration-line","underline")` était
+  faux : initiale spec `none` → `underline`
+  mesurée (0/5 miss = trou exposé, file PIPE).
+  `perspective*` paintv-na : borne non-affine +
+  fixtures 3D hors-oracle — 10 misses
+  mesuraient la borne. Fixtures armées :
+  `overflow-clip-margin` (enfant débordant),
+  `line-clamp` (texte long, sonde
+  `ellipsis`→`2` → 1/3 ok), `margin-trim`,
+  `hanging-punctuation`, `text-emphasis-position`
+  (1/4 ok), `white-space-trim`, `text-spacing-trim`
+  — miss désormais attribuables moteur. `css.values`
+  1144/1767 → **1146/1758 (65,2 %)**, cliquet
+  et cliché `na` re-sauvés.
+- [x] **Étape 301. Attribution §B-114 — `pump.offlock`
+  fendu, la file d'applies mesurée** (`explorer-core`,
+  instrumentation). `pump.offlock` couvrait
+  `run_pending` + `sync_for_apply` sous un seul
+  chiffre : désormais `pump.jobs`/`pump.sync` dans
+  le bloc `spawn_blocking` (curseur `alloc_delta`
+  amorcé — compteur global process, attribution
+  approchée documentée) + `evalrun.jobs`/
+  `evalrun.sync` sur le chemin eval ; l'agrégat
+  `pump.offlock` est conservé. `mem_diag` émet
+  `applies`/`apply_b` — la file retient les
+  payloads `Insert` (`html`+`ids`+`tags`) que
+  `pend=` ne couvrait pas (RSS 5 Gio au vol 836
+  avec `pend=0`, `heap_b` 94 Mio). Verrou :
+  `b114_apply_queue_bytes_compte_les_payloads`.
 - [x] **Étape 299. `classList` : no-op neutre +
   `toggle(force)` sans doublon** (`explorer-jscore`,
   wedge vol `host=DOMTokenList:add`). (a) `set_attr`

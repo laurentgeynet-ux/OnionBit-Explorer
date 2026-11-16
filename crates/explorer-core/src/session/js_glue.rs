@@ -462,6 +462,7 @@ impl Session {
     /// Queue de `commit_js_pump` — disjoncteur stall, ligne
     /// `mem_diag` (§B-59) puis réinsertion du moteur dans
     /// l'onglet. Extraite pour tenir la borne de lignes.
+    #[allow(clippy::too_many_arguments)]
     fn reinsert_engine(
         tab: TabId,
         entry: &mut Tab,
@@ -470,23 +471,35 @@ impl Session {
         jobs: usize,
         cooldown: Duration,
         shed: bool,
+        applies: usize,
+        apply_b: usize,
     ) {
         if let Some(e) = stall {
             tracing::warn!(tab, error = %e,
                 "livrée moteur en timeout — disjoncteur armé");
             entry.js_stall_until = Some(Instant::now() + cooldown);
         }
-        Self::log_mem_diag(tab, jobs, entry, eng.as_mut(), shed);
+        Self::log_mem_diag(tab, jobs, entry, eng.as_mut(), shed, applies, apply_b);
         entry.js = Some(eng);
     }
 
     /// Émet la ligne `mem_diag` de la passe si
     /// `EXPLORER_MEM_DIAG=1` — réservoirs session (dom, bitmaps
     /// décodées `img/bg_decoded`+`images.*`, corps en attente,
-    /// display list, files `js_pending_*`) + compteurs internes
-    /// du moteur via `diag_line` (§B-59 : le compteur qui suit
-    /// la RSS nomme le fuyard).
-    fn log_mem_diag(tab: TabId, jobs: usize, entry: &mut Tab, eng: &mut dyn JsEngine, shed: bool) {
+    /// display list, files `js_pending_*`, file d'applies
+    /// `applies`/`apply_b`) + compteurs internes du moteur via
+    /// `diag_line` (§B-59 : le compteur qui suit la RSS nomme
+    /// le fuyard).
+    #[allow(clippy::too_many_arguments)]
+    fn log_mem_diag(
+        tab: TabId,
+        jobs: usize,
+        entry: &mut Tab,
+        eng: &mut dyn JsEngine,
+        shed: bool,
+        applies: usize,
+        apply_b: usize,
+    ) {
         if !Self::mem_diag_enabled() {
             return;
         }
@@ -574,6 +587,12 @@ impl Session {
             sheets_b,
             frames_b,
             pend,
+            // §B-114 — la file d'applies retient la charge
+            // sérialisée (html par `Insert`, ids/tags de
+            // baseline) : `pend` ci-dessus ne la couvre pas —
+            // RSS 402→5 031 Mio au vol 836 avec `pend=0`.
+            applies,
+            apply_b,
             media_n = entry.media.len(),
             hist = entry.hist.len(),
             styles = entry.prev_styles.len(),
@@ -923,7 +942,22 @@ impl Session {
             }
             if let Some(eng) = eng {
                 let cooldown = self.js_stall_cooldown;
-                Self::reinsert_engine(tab, entry, eng, stall, jobs, cooldown, self.shed_active);
+                // Borrows disjoints : `entry` tient déjà
+                // `&mut self.tabs` — passer par les champs,
+                // pas par les méthodes `&self`.
+                let applies = self.pending_applies.len();
+                let apply_b = apply::apply_queue_bytes(&self.pending_applies);
+                Self::reinsert_engine(
+                    tab,
+                    entry,
+                    eng,
+                    stall,
+                    jobs,
+                    cooldown,
+                    self.shed_active,
+                    applies,
+                    apply_b,
+                );
             } else {
                 // Worker mort pendant les livrées — moteur
                 // perdu : les arrivées de la fenêtre sont
@@ -2392,7 +2426,20 @@ impl Session {
         }
         if let Some(eng) = e.eng {
             let cooldown = self.js_stall_cooldown;
-            Self::reinsert_engine(tab, entry, eng, None, 0, cooldown, self.shed_active);
+            // Borrows disjoints — `entry` tient `&mut self.tabs`.
+            let applies = self.pending_applies.len();
+            let apply_b = apply::apply_queue_bytes(&self.pending_applies);
+            Self::reinsert_engine(
+                tab,
+                entry,
+                eng,
+                None,
+                0,
+                cooldown,
+                self.shed_active,
+                applies,
+                apply_b,
+            );
         } else {
             Self::clear_pending_queues(entry);
         }
