@@ -103,7 +103,14 @@ fn abs_style(px: f32, py: f32, pw: f32, ph: f32, extra: &str) -> String {
 
 /// `<iframe>` synthétique d'une `<frame>` — attributs
 /// d'intégration copiés, `frameborder="0"` → `border:0`.
-fn frame_to_iframe(dom: &mut Dom, frame: NodeId, cx: f32, cy: f32, cw: f32, ch: f32) -> Option<NodeId> {
+fn frame_to_iframe(
+    dom: &mut Dom,
+    frame: NodeId,
+    cx: f32,
+    cy: f32,
+    cw: f32,
+    ch: f32,
+) -> Option<NodeId> {
     let ifr = dom.create_element("iframe").ok()?;
     // Attributs copiés en `String` d'abord — l'emprunt
     // `attr_opt` ne peut cohabiter avec `set_attribute`.
