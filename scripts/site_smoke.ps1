@@ -122,7 +122,7 @@ foreach ($site in $sites) {
     # substitution, sinon example.com_ ≠ example.com.ref.json.
     $name = ($site -replace '^https?://', '') -replace '/+$', '' -replace '[^A-Za-z0-9_.-]', '_'
     $png = Join-Path $outDir "$name.png"
-    $null = & $cli shot $site $png 2>&1
+    $shotOut = & $cli shot $site $png 2>&1
     if ($LASTEXITCODE -eq 0 -and (Test-Path $png) -and
         (Get-Item $png).Length -gt 0) {
         $size = [math]::Round((Get-Item $png).Length / 1KB, 1)
@@ -130,7 +130,12 @@ foreach ($site in $sites) {
         $ok++
         $okSites += $site
     } else {
-        Write-Output "  FAIL $site"
+        # Conserver la sortie du shot : « FAIL » sans sa cause est
+        # un verdict muet — l'err.log permet le diagnostic direct.
+        $errLog = Join-Path $outDir "$name.err.log"
+        $shotOut | Out-File -FilePath $errLog -Encoding utf8
+        $tail = "$($shotOut | Select-Object -Last 1)".Trim()
+        Write-Output "  FAIL $site$(if ($tail) { " — $tail" }) (log : $name.err.log)"
         $fail++
     }
 }
@@ -362,7 +367,15 @@ if (-not $SkipFunctional -and $ok -gt 0) {
                         if ($r -and $r.Bytes.Length -gt 0) { $true }
                         else { $false }
                     } 300
-                    if (-not $framed) { Write-Output "  $tag  $verdict"; continue }
+                    if (-not $framed) {
+                        # La nav a répondu (sinon throw plus haut)
+                        # — c'est la frame qui manque, pas la nav :
+                        # nommer le vrai manque évite un faux
+                        # nav:TIMEOUT dans le radar.
+                        $verdict = "$docTag frame:TIMEOUT"
+                        Write-Output "  $tag  $verdict"
+                        continue
+                    }
                     $url0 = Get-TabUrl $id
                     if (-not $url0) { $url0 = $site }
 

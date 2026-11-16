@@ -7985,6 +7985,25 @@ MCP = adaptateur, jamais la base.
   d'application.js). Verrou :
   `li_dans_ul_imbrique_ne_ferme_pas_li_ancetre` — suite
   `dom` 271/271. Résidu : `div.voters` h=51.
+- [x] **Étape 295. Smokes : erreurs nommées, agrégat
+  honnête** (`geo_smoke.ps1`/`site_smoke.ps1`, audit
+  demandé par l'opérateur). **`geo_smoke`** : les sites
+  `hors-mesure` (`verdict` posé même avec `--out`
+  écrit) étaient comptés dans l'agrégat — un mur 15/15
+  divergents gonflait le % récapitulatif ; crash de
+  `geo_diff` = disparition silencieuse du site ;
+  le récapitulatif cachait les échecs derrière
+  « sur N sites ». Désormais : `hors-mesure` exclu
+  du dénominateur (compteur dédié), `FAIL` quand le
+  rapport est absent/illisible, récap = mesurés +
+  `déplacés` + `hors-mesure` + `partiels` + `échecs`.
+  **`site_smoke`** : `frame` non produit rapportait
+  `nav:TIMEOUT` alors que la nav avait répondu →
+  `frame:TIMEOUT` nommé ; `shot` FAIL jetait stderr
+  → `<site>.err.log` conservé + dernière ligne dans
+  le verdict. Vérifié end-to-end : site mort =
+  `FAIL (geometry moteur)` + `1 échec(s)` au
+  récapitulatif, `err.log` présent.
 - [x] **Étape 281. `xhr.responseText` décodé une fois —
   fin du spin O(lectures × octets)** (`explorer-jscore`,
   re-vol field274 : `gc=0` a tranché — vrai spin hôte,
