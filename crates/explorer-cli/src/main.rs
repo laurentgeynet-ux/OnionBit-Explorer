@@ -3497,6 +3497,351 @@ fn paint_decl_verdict(decl: &str) -> Option<bool> {
     }
 }
 
+/// `check atrulev` (étape 300) — oracle des **descripteurs
+/// d'at-rules** (`bcd.css['at-rules'].<r>.<d>`) : une sonde
+/// par descripteur mesurable en-process — (fixture, css de
+/// base, css sondé, env). Le verdict = delta géométrique +
+/// display-list entre la feuille de base et la feuille qui
+/// pose le descripteur — même honnêteté qu'`affectsv` : la
+/// feuille sondée doit changer la sortie, pas seulement
+/// parser.
+///
+/// Tout descripteur sans sonde → `na` (hors dénominateur) :
+/// `@font-face` (comportement de chargement), `@page`
+/// (print), `@keyframes` (temps), `@import` (fetch),
+/// `@container`, `@font-feature-values`/`@font-palette-
+/// values` (shaping/palette), `speak-as` (a11y).
+struct AtProbe {
+    fixture: &'static str,
+    base: &'static str,
+    probe: String,
+    /// Contre-sonde optionnelle : règle qui doit **ne pas**
+    /// s'appliquer. Nécessaire quand la forme directe peut
+    /// être avalée par la tolérance `unknown → vrai` (MQ `or`
+    /// interne, `calc()` MQ, imbrication) — le vrai/littéral
+    /// applique et le faux/littéral ne doit pas : `ok` exige
+    /// `delta(probe) ∧ ¬delta(false_probe)`.
+    false_probe: Option<String>,
+    scripting: bool,
+    reduced_motion: bool,
+}
+
+/// `atrule:descripteur` → sonde, `None` = pas d'oracle
+/// in-process (`na`).
+#[allow(clippy::too_many_lines)]
+fn atrulev_probe(rule: &str, desc: &str) -> Option<AtProbe> {
+    const P: &str = "<body><p class=x>ok</p></body>";
+    const OL: &str = "<body><ol class=x><li>a<li>b<li>c<li>d</ol></body>";
+    const PP: &str = "<body><div class=p><p class=x>ok</p></div></body>";
+    let mk = |fixture: &'static str, base: &'static str, probe: String| AtProbe {
+        fixture,
+        base,
+        probe,
+        false_probe: None,
+        scripting: false,
+        reduced_motion: false,
+    };
+    // Sonde média : `@media <cond>` applique `.x{width:400px}`
+    // vs base 50 — le littéral est choisi **vrai sous
+    // `StyleEnv::default`** (1024×768, screen, dpr 1,
+    // scripting none, reduced-motion off, scheme light) :
+    // une feature inconnue rend la condition fausse
+    // (`_ => false`) → `miss` honnête. Pour les méta-syntaxes
+    // (`range`, `or`, `calc`), la tolérance `unknown → vrai`
+    // saturerait la forme directe : la sonde est niée sur un
+    // littéral faux — `not (faux)` applique ssi le moteur
+    // évalue réellement la syntaxe.
+    let media = |cond: &str| {
+        mk(
+            P,
+            ".x{width:50px}",
+            format!("@media {cond} {{ .x{{width:400px}} }}"),
+        )
+    };
+    // `match_same_arms` : les bras `=> return None`
+    // nommés (`counter-style`, `property`) documentent les
+    // sous-features volontairement non sondées — le
+    // wildcard suffirait mais perdrait l'intention.
+    #[allow(clippy::match_same_arms)]
+    let probe = match (rule, desc) {
+        // ── @counter-style — la signature = le texte des
+        // marqueurs de l'<ol> (display list). La base pose
+        // le même style nommé sans le descripteur sondé.
+        ("counter-style", "system") => mk(
+            OL,
+            "@counter-style t{symbols:\"α\" \"β\" \"γ\" \"δ\"}.x{list-style-type:t;list-style-position:inside}",
+            "@counter-style t{system:numeric;symbols:\"α\" \"β\" \"γ\" \"δ\"}\
+             .x{list-style-type:t;list-style-position:inside}"
+                .into(),
+        ),
+        ("counter-style", "symbols") => mk(
+            OL,
+            "@counter-style t{system:cyclic}.x{list-style-type:t;list-style-position:inside}",
+            "@counter-style t{system:cyclic;symbols:\"◆\" \"■\" \"▲\" \"●\"}\
+             .x{list-style-type:t;list-style-position:inside}"
+                .into(),
+        ),
+        ("counter-style", "additive-symbols") => mk(
+            OL,
+            "@counter-style t{system:additive}.x{list-style-type:t;list-style-position:inside}",
+            "@counter-style t{system:additive;additive-symbols:3 \"C\",2 \"B\",1 \"A\"}\
+             .x{list-style-type:t;list-style-position:inside}"
+                .into(),
+        ),
+        ("counter-style", "fallback") => mk(
+            OL,
+            "@counter-style t{system:fixed;symbols:\"A\"}.x{list-style-type:t;list-style-position:inside}",
+            "@counter-style t{system:fixed;symbols:\"A\";fallback:lower-roman}\
+             .x{list-style-type:t;list-style-position:inside}"
+                .into(),
+        ),
+        ("counter-style", "negative") => mk(
+            OL,
+            "@counter-style t{system:numeric}.x{list-style-type:t;list-style-position:inside}",
+            "@counter-style t{system:numeric;negative:\"!\"}\
+             .x{list-style-type:t;list-style-position:inside}"
+                .into(),
+        ),
+        ("counter-style", "pad") => mk(
+            OL,
+            "@counter-style t{system:numeric}.x{list-style-type:t;list-style-position:inside}",
+            "@counter-style t{system:numeric;pad:2 \"0\"}.x{list-style-type:t;list-style-position:inside}".into(),
+        ),
+        ("counter-style", "prefix") => mk(
+            OL,
+            "@counter-style t{system:numeric}.x{list-style-type:t;list-style-position:inside}",
+            "@counter-style t{system:numeric;prefix:\"§\"}.x{list-style-type:t;list-style-position:inside}".into(),
+        ),
+        ("counter-style", "range") => mk(
+            OL,
+            "@counter-style t{system:numeric}.x{list-style-type:t;list-style-position:inside}",
+            "@counter-style t{system:numeric;range:2 3}.x{list-style-type:t;list-style-position:inside}".into(),
+        ),
+        ("counter-style", "suffix") => mk(
+            OL,
+            "@counter-style t{system:numeric}.x{list-style-type:t;list-style-position:inside}",
+            "@counter-style t{system:numeric;suffix:\"!\"}.x{list-style-type:t;list-style-position:inside}".into(),
+        ),
+        // `speak-as` — aural/a11y, aucun effet géométrique.
+        ("counter-style", _) => return None,
+        // ── @supports — la condition évaluée applique la
+        // déclaration sondée. `selector()`/`font-format()`…
+        // se parsent en prop inconnue → `decl_supported`
+        // faux → `miss` honnête (fonction non évaluée).
+        ("supports", d) => {
+            let cond = match d {
+                // `selector(div)` n'a pas de `:` → condition
+                // ignorée → prélude vide → `unknown` toléré
+                // (applique toujours) — indiscernable d'un
+                // vrai ok. `selector(div:hover)` contient `:` →
+                // parsé en prop `selector(div` → miss tant que
+                // `selector()` n'est pas évaluée, ok dès que la
+                // fonction s'ouvre. `font-format`/`font-tech`/
+                // `at-rule` n'ont aucune forme à `:` → `na`.
+                "selector" => "selector(div:hover)",
+                // `named_feature` BCD = la condition
+                // propriété-custom `(--x: v)` (css-conditional).
+                "named_feature" | "named-feature" => "(--x: 1)",
+                _ => return None,
+            };
+            mk(
+                P,
+                ".x{width:50px}",
+                format!("@supports ({cond}) {{ .x{{width:400px}} }}"),
+            )
+        }
+        // ── @property — la registration est consommée par
+        // `var()` : chaque descripteur a une sonde
+        // discriminante (fallback `50px` si la règle est
+        // ignorée/invalide).
+        ("property", "initial-value") => mk(
+            PP,
+            ".x{width:var(--w,50px)}",
+            "@property --w{syntax:\"<length>\";initial-value:400px;inherits:false}\
+             .x{width:var(--w,50px)}"
+                .into(),
+        ),
+        ("property", "syntax") => mk(
+            PP,
+            "@property --w{initial-value:400px;inherits:false}\
+             .x{width:var(--w,50px)}",
+            // `initial-value` non conforme à `syntax` → la
+            // registration est invalide par spec : si le
+            // moteur valide, `var(--w)` retombe sur 50.
+            "@property --w{syntax:\"<color>\";initial-value:400px;inherits:false}\
+             .x{width:var(--w,50px)}"
+                .into(),
+        ),
+        ("property", "inherits") => mk(
+            PP,
+            ".p{--w:200px}.x{width:var(--w,50px)}",
+            // `inherits:false` honoré → `.x` voit l'initial
+            // (9 px) et non le `--w` parental (200 px).
+            "@property --w{inherits:false;initial-value:9px}\
+             .p{--w:200px}.x{width:var(--w,50px)}"
+                .into(),
+        ),
+        ("property", _) => return None,
+        // ── @media — littéral vrai sous l'env par défaut.
+        ("media", d) => {
+            match d {
+                "any-hover" => media("(any-hover:hover)"),
+                "any-pointer" => media("(any-pointer:fine)"),
+                "aspect-ratio" => media("(aspect-ratio:4/3)"),
+                "calc" => {
+                    let mut m2 = media("(min-width:calc(500px + 1px))");
+                    // `calc()` MQ irrésoluble → `condition_matches`
+                    // faux, indiscernable d'un vrai calcul sur la
+                    // forme niée — paire vrai/faux requise.
+                    m2.false_probe = Some(
+                        "@media (min-width:calc(9000px + 9000px)){.x{height:777px}}".into(),
+                    );
+                    m2
+                }
+                "color" => media("(color)"),
+                "color-gamut" => media("(color-gamut:srgb)"),
+                "color-index" => media("(color-index)"),
+                "device-aspect-ratio" => media("(device-aspect-ratio:4/3)"),
+                "device-height" => media("(device-height:768px)"),
+                "device-posture" => media("(device-posture)"),
+                "device-width" => media("(device-width:1024px)"),
+                "display-mode" => media("(display-mode:browser)"),
+                "display-state" => media("(display-state)"),
+                "dynamic-range" => media("(dynamic-range)"),
+                "forced-colors" => media("(forced-colors:none)"),
+                "grid" => media("(grid:0)"),
+                "height" => media("(min-height:100px)"),
+                "horizontal-viewport-segments" => media("(horizontal-viewport-segments:1)"),
+                "hover" => media("(hover:hover)"),
+                "inverted-colors" => media("(inverted-colors:none)"),
+                // Méta-noms BCD : la forme feature /
+                // les valeurs fractionnaires.
+                "media_features" => media("(min-width:1px)"),
+                "media_query_values" => media("(min-width:100.5px)"),
+                "monochrome" => media("(monochrome:0)"),
+                "nested-queries" => {
+                    let mut m2 = mk(
+                        P,
+                        ".x{width:50px}",
+                        "@media screen{@media (min-width:1px){.x{width:400px}}}".into(),
+                    );
+                    // `@media` imbriqué non évalué → tolérance
+                    // → applique : indiscernable du vrai — la
+                    // contre-sonde (inner faux) ne doit pas
+                    // appliquer.
+                    m2.false_probe = Some(
+                        "@media screen{@media (min-width:9999px){.x{height:777px}}}".into(),
+                    );
+                    m2
+                }
+                "or_syntax" => {
+                    let mut m2 = media("(min-width:9000px) or (min-width:100px)");
+                    // `(a) or (b)` non parsé → `unknown` toléré →
+                    // applique : indiscernable d'un vrai `or`
+                    // évalué. La contre-sonde (deux membres faux)
+                    // ne doit PAS appliquer.
+                    m2.false_probe = Some(
+                        "@media (min-width:9000px) or (min-height:9000px){.x{height:777px}}"
+                            .into(),
+                    );
+                    m2
+                }
+                "orientation" => media("(orientation:landscape)"),
+                "overflow-block" => media("(overflow-block:scroll)"),
+                "overflow-inline" => media("(overflow-inline:scroll)"),
+                "pointer" => media("(pointer:fine)"),
+                "prefers-color-scheme" => media("(prefers-color-scheme:light)"),
+                "prefers-contrast" => media("(prefers-contrast:no-preference)"),
+                "prefers-reduced-data" => media("(prefers-reduced-data:no-preference)"),
+                "prefers-reduced-motion" => {
+                    let mut m2 = media("(prefers-reduced-motion:reduce)");
+                    m2.reduced_motion = true;
+                    m2
+                }
+                "prefers-reduced-transparency" => {
+                    media("(prefers-reduced-transparency:no-preference)")
+                }
+                "range_syntax" => media("not (width > 5000px)"),
+                "resizable" => media("(resizable)"),
+                "resolution" => media("(resolution:1dppx)"),
+                "scan" => media("(scan:progressive)"),
+                "scripting" => media("(scripting:none)"),
+                "update" => media("(update:fast)"),
+                "vertical-viewport-segments" => media("(vertical-viewport-segments:1)"),
+                "video-dynamic-range" => media("(video-dynamic-range)"),
+                "width" => media("(min-width:500px)"),
+                "-moz-device-pixel-ratio" => media("(-moz-device-pixel-ratio:1)"),
+                "-webkit-animation" => media("(-webkit-animation)"),
+                "-webkit-device-pixel-ratio" => media("(-webkit-device-pixel-ratio:1)"),
+                "-webkit-max-device-pixel-ratio" => media("(-webkit-max-device-pixel-ratio:1)"),
+                "-webkit-min-device-pixel-ratio" => media("(-webkit-min-device-pixel-ratio:1)"),
+                "-webkit-transform-2d" => media("(-webkit-transform-2d)"),
+                "-webkit-transform-3d" => media("(-webkit-transform-3d)"),
+                "-webkit-transition" => media("(-webkit-transition)"),
+                _ => return None,
+            }
+        }
+        // Tout le reste : pas d'oracle in-process — `na`.
+        _ => return None,
+    };
+    Some(probe)
+}
+
+/// Verdict `check atrulev` — `na` si aucun oracle pour le
+/// couple (règle, descripteur).
+fn atrulev_verdict(line: &str) -> Option<bool> {
+    let (rule, desc) = line.split_once(':')?;
+    let p = atrulev_probe(rule.trim(), desc.trim())?;
+    Some(atrule_delta(&p))
+}
+
+/// Mesure la sonde : feuille base + sondée vs base seule,
+/// même signature qu'`affectsv` (box tree + display list).
+fn atrule_delta(p: &AtProbe) -> bool {
+    static SRC: BcdAhem = BcdAhem;
+    let ctx = explorer_layout::BlockCtx {
+        fonts: Some(&SRC),
+        ..explorer_layout::BlockCtx::default()
+    };
+    let dom = explorer_html::TreeBuilder::parse(p.fixture);
+    let root = {
+        let mut r = None;
+        walk_any(dom.document(), &dom, &mut r);
+        r.unwrap_or(dom.document())
+    };
+    let env = explorer_css::StyleEnv {
+        scripting: p.scripting,
+        reduced_motion: p.reduced_motion,
+        ..explorer_css::StyleEnv::default()
+    };
+    let sig = |css: &str| -> String {
+        let mut eng = explorer_css::StyleEngine::new();
+        eng.add_css(css, explorer_css::Origin::Author);
+        let sm = eng.compute_tree(&dom, root, &env);
+        match explorer_layout::build_box_tree(&dom, root, &sm) {
+            Some(mut bx) => {
+                explorer_layout::layout_tree(&mut bx, 800.0, &ctx);
+                let dl = explorer_render::build_display_list(&bx, 800.0, 600.0, 0.0);
+                format!("{}\n{}", bx.dump(&dom), dl.dump())
+            }
+            None => String::new(),
+        }
+    };
+    let b = sig(p.base);
+    let a = sig(&format!("{}\n{}", p.base, p.probe));
+    // Contre-sonde : le littéral **faux** ne doit produire
+    // aucun delta — sinon la forme directe était avalée par
+    // la tolérance `unknown → vrai` et l'« ok » serait faux.
+    let neg_ok = p
+        .false_probe
+        .as_ref()
+        .is_none_or(|fp| sig(&format!("{}\n{}", p.base, fp)) == b);
+    if std::env::var_os("EXPLORER_BCD_DEBUG_SIG").is_some() {
+        eprintln!("=== atrulev\n--- with\n{a}\n--- base\n{b}\n--- neg_ok={neg_ok}");
+    }
+    a != b && neg_ok
+}
+
 /// `check computedv` (étape 298) — verdict tri-état sur le
 /// style calculé : mêmes `na` de valeur (initiales spec,
 /// CSS-wide, méta non sondé) que le chemin union, mais
@@ -3938,6 +4283,7 @@ fn check_names(kind: &str) -> ExitCode {
         "affectsv" => Box::new(prop_affects_decl),
         "paintv" => Box::new(prop_paints_decl),
         "computedv" => Box::new(prop_computes_decl),
+        "atrulev" => Box::new(|_s| false),
         // Étape 219 — `html` : oracle de comportement par
         // élément (`bcd.html.elements`) — binding JS
         // (interface + membres IDL) ET géométrie UA (box
@@ -3949,7 +4295,7 @@ fn check_names(kind: &str) -> ExitCode {
         }
         _ => {
             eprintln!(
-                "check : kind inconnu {kind:?} — attendu prop|sel|at|routed|affects|affectsv|paintv|computedv|html|decl|tables"
+                "check : kind inconnu {kind:?} — attendu prop|sel|at|routed|affects|affectsv|paintv|computedv|atrulev|html|decl|tables"
             );
             return ExitCode::FAILURE;
         }
@@ -3961,10 +4307,11 @@ fn check_names(kind: &str) -> ExitCode {
         if name.is_empty() {
             continue;
         }
-        if kind == "affectsv" || kind == "paintv" || kind == "computedv" {
+        if kind == "affectsv" || kind == "paintv" || kind == "computedv" || kind == "atrulev" {
             let verdict = match kind {
                 "affectsv" => affects_decl_verdict(name),
                 "paintv" => paint_decl_verdict(name),
+                "atrulev" => atrulev_verdict(name),
                 _ => computed_decl_verdict(name),
             };
             let verdict = verdict.map_or("na", |ok| if ok { "ok" } else { "miss" });
@@ -4373,5 +4720,30 @@ mod tests {
         assert_eq!(computed_decl_verdict("overflow-block:hidden"), Some(false));
         // `na` de valeur conservé (CSS-wide).
         assert_eq!(computed_decl_verdict("color:inherit"), None);
+    }
+
+    #[test]
+    fn atrulev_descripteurs_verdicts() {
+        use super::atrulev_verdict;
+        // Descripteurs `CounterStyle` câblés dans `label()`
+        // (chemin `inside`, R-221) → delta marqueurs réel.
+        assert_eq!(atrulev_verdict("counter-style:symbols"), Some(true));
+        assert_eq!(atrulev_verdict("counter-style:prefix"), Some(true));
+        // `fallback` enregistré mais jamais lu → miss honnête.
+        assert_eq!(atrulev_verdict("counter-style:fallback"), Some(false));
+        // Feature MQ évaluée sous `StyleEnv::default`.
+        assert_eq!(atrulev_verdict("media:width"), Some(true));
+        // `(faux) or (faux)` : la contre-sonde écarte la
+        // tolérance `unknown` — l'`ok` exige l'évaluation.
+        assert_eq!(atrulev_verdict("media:or_syntax"), Some(true));
+        // `@supports` hors `(prop:val)` : `selector()` sans `:`
+        // serait toléré-`unknown` → sonde à `:` → miss honnête.
+        assert_eq!(atrulev_verdict("supports:selector"), Some(false));
+        // `@property --w{inherits:false}` honoré → `.x` voit
+        // l'initial (9 px) et non le `--w` parental.
+        assert_eq!(atrulev_verdict("property:inherits"), Some(true));
+        // Hors portée in-process → `na`.
+        assert_eq!(atrulev_verdict("font-face:font-display"), None);
+        assert_eq!(atrulev_verdict("counter-style:speak-as"), None);
     }
 }

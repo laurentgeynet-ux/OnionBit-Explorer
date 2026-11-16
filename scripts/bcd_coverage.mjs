@@ -11,6 +11,9 @@
 //   routed     bcd.css.properties   → `explorer-cli check routed`
 //   selectors  bcd.css.selectors    → `explorer-cli check sel`
 //   at-rules   bcd.css['at-rules']  → `explorer-cli check at`
+//   atd        bcd.css['at-rules'].<r>.<d> (descripteurs/
+//              features) → `check atrulev` — sondes
+//              comportementales par descripteur (étape 301)
 //   builtins   bcd.javascript.builtins (prof. 2) → `eval` jscore
 //   api        bcd.api (interfaces + membres) → `api` jscore
 //              (moteur avec surface navigateur installée)
@@ -27,12 +30,12 @@
 // obsolètes/non-standard exclues (jamais un % sans dénominateur).
 //
 // Usage : node scripts/bcd_coverage.mjs [--cli <binaire>]
-//           [--missing N] [--only props|routed|sel|at|js|api|values|html]
+//           [--missing N] [--only props|routed|sel|at|atd|js|api|values|html]
 //   --cli      explorer-cli (défaut : $EXPLORER_CLI puis
 //              target/debug/explorer-cli — cargo build -p explorer-cli)
 //   --missing  nb de manques listés par section (défaut 12,
 //              0 = aucun)
-//   --only     une seule surface (props|routed|sel|at|js|api|values|html)
+//   --only     une seule surface (props|routed|sel|at|atd|js|api|values|html)
 //   --families tableau ok/total par prop de css.values,
 //              trié par miss — la file v2 en une passe
 //   --gate f   cliquet : exit 1 si un score < baseline f.json
@@ -160,7 +163,7 @@ function report(label, entries, okSet, note) {
   }
 }
 
-const SURFACES = ['props', 'routed', 'sel', 'at', 'js', 'api', 'values', 'html'];
+const SURFACES = ['props', 'routed', 'sel', 'at', 'atd', 'js', 'api', 'values', 'html'];
 // `--only <nom>` inconnu = zéro surface mesurée → gate vert
 // à vide et `--save` écrirait une baseline vide : échec
 // bruyant plutôt que cliquet creux.
@@ -187,6 +190,47 @@ for (const sec of sections) {
     const entries = relevantEntries(bcd.css['at-rules'] ?? {});
     report('css.at', entries, checkBatch('at', entries.map(e => e.name)),
       `sur ${Object.keys(bcd.css['at-rules'] ?? {}).length} clés BCD`);
+  } else if (sec === 'atd') {
+    // bcd.css['at-rules'].<r>.<d> — **descripteurs**/features
+    // sondés comportementalement (`check atrulev`, étape 301) :
+    // une sonde par descripteur mesurable in-process (marqueurs
+    // `@counter-style`, conditionnels `@media`/`@supports`,
+    // registration `@property`) ; `na` = hors portée oracle
+    // (font-face/page/keyframes/import… — chargement, temps,
+    // print) → hors dénominateur, annoncés dans la note.
+    const pairs = [];
+    for (const [r, node] of Object.entries(bcd.css['at-rules'] ?? {})) {
+      for (const [d, dn] of Object.entries(node)) {
+        if (d === '__compat' || !dn?.__compat) continue;
+        const c = dn.__compat;
+        const n = browsers.filter(br => {
+          const s = c.support?.[br];
+          const one = Array.isArray(s) ? s[0] : s;
+          return one && one.version_added !== false && !one.version_removed;
+        }).length;
+        if (c.status?.deprecated || c.status?.standard_track === false || n === 0) continue;
+        pairs.push({ name: `${r}:${d}`, engines: n });
+      }
+    }
+    const lines = execFileSync(cli, ['check', 'atrulev'], {
+      input: pairs.map(e => e.name).join('\n'),
+      encoding: 'utf8', timeout: 600_000, maxBuffer: 64 * 1024 * 1024,
+    }).split(/\r?\n/).filter(Boolean);
+    const okSet = new Set(lines.filter(l => l.endsWith('\tok')).map(l => l.split('\t')[0]));
+    const naSet = new Set(lines.filter(l => l.endsWith('\tna')).map(l => l.split('\t')[0]));
+    const measured = pairs.filter(e => !naSet.has(e.name));
+    report('css.atd', measured, okSet,
+      `descripteur → effet mesuré (fixture + env déterministe) ; ${naSet.size} hors portée oracle`);
+    // Cliquet par at-rule — même discipline que css.values.
+    const perRule = {};
+    const perRuleTotal = {};
+    for (const e of measured) {
+      const r = e.name.slice(0, e.name.indexOf(':'));
+      perRuleTotal[r] = (perRuleTotal[r] ?? 0) + 1;
+      perRule[r] = (perRule[r] ?? 0) + (okSet.has(e.name) ? 1 : 0);
+    }
+    families['css.atd'] = perRule;
+    famTotals['css.atd'] = perRuleTotal;
   } else if (sec === 'js') {
     // Profondeur 2 de javascript.builtins — les feuilles
     // `A.b` avec __compat (Array.from, JSON.stringify,

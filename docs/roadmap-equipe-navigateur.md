@@ -8090,6 +8090,34 @@ MCP = adaptateur, jamais la base.
   design csszengarden, images debian) ;
   craigslist rejeté (redirect géo), ddg-lite
   trop maigre. Run complet 10/10 mesurés.
+- [x] **Étape 303. `check atrulev` — surface BCD
+  des descripteurs `@`-rules** (`explorer-cli`,
+  `bcd_coverage.mjs`). Nouvelle surface `atd` :
+  `bcd.css['at-rules'].<r>.<d>` sondé
+  comportementalement — `@counter-style` via les
+  marqueurs `inside` (seul chemin consultant
+  `CounterStyle` — trou journalisé : le marqueur
+  `outside` l'ignore), `@media` sous
+  `StyleEnv::default` (features + méta-syntaxes
+  `range`/`or`/`calc`/`nested` avec **contre-sonde
+  faux-littéral** écartant la tolérance
+  `unknown → vrai`), `@supports` (`selector()`
+  via la forme à `:` — discriminante ; les
+  fonctions sans `:` → `na`), `@property`
+  (registration × `var()`). Verdict tri-état
+  `ok`/`miss`/`na` ; 63 descripteurs hors portée
+  in-process (`@font-face`/`@page`/`@keyframes`/
+  `@import`/`@container`…) annoncés hors
+  dénominateur. Mesure inaugurale : **`css.atd`
+  34/58 (58,6 %)** — misses honnêtes :
+  `counter-style` additive/negative/pad/range/
+  fallback non portés, 17 features MQ
+  (`grid`, `scan`, `overflow-*`, `prefers-*`
+  récents, `-webkit-transform-3d`),
+  `property:syntax` non enforcé,
+  `supports:selector` non évalué. Cliquet
+  `css.atd` par at-rule + baseline sauvée.
+  Verrou : `atrulev_descripteurs_verdicts`.
 - [x] **Étape 302. Triage jauge post-298 —
   `initial_extra` permuté, sept fixtures armées,
   `perspective*` → `PAINT_NA`** (`explorer-cli`,
@@ -8136,24 +8164,6 @@ MCP = adaptateur, jamais la base.
   Résidu : quadratique attribut-chaîne (10k tokens
   uniques = 3,8 s) — repr token-set à ordonner. Verrou :
   `classlist_noop_ne_mute_pas` — suite `dom` 272/272.
-- [x] **Étape 302. Triage jauge post-298 —
-  `initial_extra` permuté, sept fixtures armées,
-  `perspective*` → `PAINT_NA`** (`explorer-cli`,
-  constats NAV du journal 2026-11-16 exécutés).
-  `("text-decoration-line","underline")` était
-  faux : initiale spec `none` → `underline`
-  mesurée (0/5 miss = trou exposé, file PIPE).
-  `perspective*` paintv-na : borne non-affine +
-  fixtures 3D hors-oracle — 10 misses
-  mesuraient la borne. Fixtures armées :
-  `overflow-clip-margin` (enfant débordant),
-  `line-clamp` (texte long, sonde
-  `ellipsis`→`2` → 1/3 ok), `margin-trim`,
-  `hanging-punctuation`, `text-emphasis-position`
-  (1/4 ok), `white-space-trim`, `text-spacing-trim`
-  — miss désormais attribuables moteur. `css.values`
-  1144/1767 → **1146/1758 (65,2 %)**, cliquet
-  et cliché `na` re-sauvés.
 - [x] **Étape 300. `values_pareto.mjs` — misses
   × corpus de vols** — la priorisation terrain de la
   file famille : chaque famille avec misses reçoit
