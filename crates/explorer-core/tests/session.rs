@@ -3102,6 +3102,97 @@ async fn img_renders_decoded_bitmap() {
     assert_eq!(s.frame_png(a), s.frame_png(b));
 }
 
+/// Demande PIPE 2026-11-15 (étape 306) — `input[type=image]
+/// [src]` entre dans la collecte image : le `src` est
+/// fetché, décodé et peint dans la boîte remplacée R-163
+/// (avant : repli `alt`, jamais de requête).
+#[tokio::test]
+async fn input_image_fetches_and_paints_bitmap() {
+    let (mut s, t) = test_session();
+    t.route(
+        "/i",
+        200,
+        "<html><body><form>\
+         <input type=\"image\" src=\"/i.png\" alt=\"go\">\
+         </form></body></html>",
+    );
+    t.route_bin("/i.png", 200, red_png());
+
+    let id = s.open_tab();
+    s.navigate(id, "http://h.test/i").await.unwrap();
+    assert!(
+        t.paths().iter().any(|p| p == "/i.png"),
+        "input[type=image] src doit être fetchée — {:?}",
+        t.paths()
+    );
+    // La bordure UA `input` entoure le bitmap : on sonde la
+    // présence de rouge, pas l'égalité de frame.
+    let (w, _h, px) = s.frame_pixels(id).unwrap();
+    let reds = (0..px.len() / 4)
+        .filter(|&i| px[i * 4..i * 4 + 4] == [255, 0, 0, 255])
+        .count();
+    assert!(
+        reds >= 4,
+        "bitmap 2x2 rouge peint — {reds} px rouges (w={w})"
+    );
+}
+
+/// `input[type=image][src="data:…"]` : le collecteur inline
+/// PIPE ne lit pas `input` — la source auto-porteuse est
+/// décodée côté NAV, même table `replaced`.
+#[tokio::test]
+async fn input_image_data_url_paints_inline() {
+    use std::fmt::Write;
+    let (mut s, t) = test_session();
+    let enc = red_png().iter().fold(String::new(), |mut out, byte| {
+        let _ = write!(out, "%{byte:02X}");
+        out
+    });
+    t.route(
+        "/i",
+        200,
+        Box::leak(
+            format!(
+                "<html><body><form>\
+                 <input type=\"image\" src=\"data:image/png,{enc}\" alt=\"go\">\
+                 </form></body></html>"
+            )
+            .into_boxed_str(),
+        ),
+    );
+
+    let id = s.open_tab();
+    s.navigate(id, "http://h.test/i").await.unwrap();
+    assert_eq!(t.paths().len(), 1, "data: auto-porteur — zéro requête");
+    let (w, _h, px) = s.frame_pixels(id).unwrap();
+    let reds = (0..px.len() / 4)
+        .filter(|&i| px[i * 4..i * 4 + 4] == [255, 0, 0, 255])
+        .count();
+    assert!(reds >= 4, "bitmap data: peint — {reds} px rouges (w={w})");
+}
+
+/// Sans `src` : aucun fetch, repli `alt` honnête — le bouton
+/// peint son libellé (comportement antérieur conservé).
+#[tokio::test]
+async fn input_image_without_src_keeps_alt_fallback() {
+    let (mut s, t) = test_session();
+    t.route(
+        "/i",
+        200,
+        "<html><body><form>\
+         <input type=\"image\" alt=\"go\">\
+         </form></body></html>",
+    );
+    let id = s.open_tab();
+    s.navigate(id, "http://h.test/i").await.unwrap();
+    assert_eq!(
+        t.paths().len(),
+        1,
+        "input[type=image] sans src ne fetch rien — {:?}",
+        t.paths()
+    );
+}
+
 /// Étape 108 — un apply de synchro JS re-parse le document :
 /// les `<img>` fetchés doivent survivre (le cache persistant
 /// `img_decoded` re-matche par `src` — avant, la table

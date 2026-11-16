@@ -1023,6 +1023,57 @@ fn picture_pick(dom: &Dom, img: NodeId, env: &StyleEnv) -> Option<String> {
     None
 }
 
+/// Chaîne de choix propre à l'élément image : `srcset` →
+/// `src` → variantes lazy `data-*`. Partagée `<img>` (après
+/// l'élection `<picture>`) et `input[type=image]` (spec
+/// image-button : même sélection de candidat `srcset`/
+/// `sizes`, sans le picture-contexte).
+fn own_image_pick(dom: &Dom, n: NodeId, env: &StyleEnv) -> Option<String> {
+    // `srcset` ET sa variante lazy `data-srcset`
+    // (§B-20 — la valeur `url 1x, url2 2x` résolue
+    // comme URL brute ne produisait rien : elle
+    // passe par `pick_srcset` comme `srcset`, et
+    // prime `src`/`data-src` de même préséance).
+    let srcset_of = |attr: &str| {
+        dom.attribute_str(n, attr)
+            .ok()
+            .flatten()
+            .filter(|s| !s.is_empty())
+            .and_then(|ss| {
+                let eff_w = resolve_sizes(dom.attribute_str(n, "sizes").ok().flatten(), env);
+                pick_srcset(ss, eff_w, env.dpr)
+            })
+    };
+    srcset_of("srcset")
+        .or_else(|| {
+            dom.attribute_str(n, "src")
+                .ok()
+                .flatten()
+                .filter(|s| !s.is_empty())
+                .map(str::to_owned)
+        })
+        // Lazy-load (vol 13 lemonde/bbc : ~200
+        // `<img>` à `data-src`, ~0 % peints) : le
+        // deferred `loading="lazy"` est déjà
+        // fetché d'emblée — reste la variante
+        // « src déplacé en data-* » dont le JS
+        // bootstrap est souvent mort. Repli
+        // produit : les attributs lazy usuels
+        // servent de source, dans cet ordre —
+        // mieux que jamais peint.
+        .or_else(|| srcset_of("data-srcset"))
+        .or_else(|| {
+            const LAZY_SRCS: &[&str] = &["data-src", "data-lazy-src", "data-original", "data-url"];
+            LAZY_SRCS.iter().find_map(|a| {
+                dom.attribute_str(n, a)
+                    .ok()
+                    .flatten()
+                    .filter(|s| !s.is_empty())
+                    .map(str::to_owned)
+            })
+        })
+}
+
 /// `(NodeId, url)` des `<img>` et des affiches `<video
 /// poster>` du document dans l'ordre — `src`/`poster`
 /// absent ou vide est sauté (étape 58 : l'affiche suit le
@@ -1060,53 +1111,7 @@ pub(crate) fn collect_images(dom: &Dom, env: &StyleEnv) -> Vec<(NodeId, String)>
             Ok("source") => source += 1,
             Ok("img") => {
                 seen += 1;
-                // `srcset` ET sa variante lazy `data-srcset`
-                // (§B-20 — la valeur `url 1x, url2 2x` résolue
-                // comme URL brute ne produisait rien : elle
-                // passe par `pick_srcset` comme `srcset`, et
-                // prime `src`/`data-src` de même préséance).
-                let srcset_of = |attr: &str| {
-                    dom.attribute_str(n, attr)
-                        .ok()
-                        .flatten()
-                        .filter(|s| !s.is_empty())
-                        .and_then(|ss| {
-                            let eff_w =
-                                resolve_sizes(dom.attribute_str(n, "sizes").ok().flatten(), env);
-                            pick_srcset(ss, eff_w, env.dpr)
-                        })
-                };
-                let src = picture_pick(dom, n, env).or_else(|| {
-                    srcset_of("srcset")
-                        .or_else(|| {
-                            dom.attribute_str(n, "src")
-                                .ok()
-                                .flatten()
-                                .filter(|s| !s.is_empty())
-                                .map(str::to_owned)
-                        })
-                        // Lazy-load (vol 13 lemonde/bbc : ~200
-                        // `<img>` à `data-src`, ~0 % peints) : le
-                        // deferred `loading="lazy"` est déjà
-                        // fetché d'emblée — reste la variante
-                        // « src déplacé en data-* » dont le JS
-                        // bootstrap est souvent mort. Repli
-                        // produit : les attributs lazy usuels
-                        // servent de source, dans cet ordre —
-                        // mieux que jamais peint.
-                        .or_else(|| srcset_of("data-srcset"))
-                        .or_else(|| {
-                            const LAZY_SRCS: &[&str] =
-                                &["data-src", "data-lazy-src", "data-original", "data-url"];
-                            LAZY_SRCS.iter().find_map(|a| {
-                                dom.attribute_str(n, a)
-                                    .ok()
-                                    .flatten()
-                                    .filter(|s| !s.is_empty())
-                                    .map(str::to_owned)
-                            })
-                        })
-                });
+                let src = picture_pick(dom, n, env).or_else(|| own_image_pick(dom, n, env));
                 if let Some(src) = src {
                     out.push((n, src.clone()));
                 } else if probe {
@@ -1125,6 +1130,19 @@ pub(crate) fn collect_images(dom: &Dom, env: &StyleEnv) -> Vec<(NodeId, String)>
                             }
                         }
                     }
+                }
+            }
+            // `input[type=image]` (journal 2026-11-15,
+            // demande PIPE) : même collecte que `<img>` —
+            // `PaintImages`/`sizes` sont clés `NodeId`, le
+            // routing `img_box` (R-163) s'active dès que le
+            // nœud est dans `sizes`. Spec image-button :
+            // `src`/`srcset`/`sizes` portés, pas d'élection
+            // `<picture>` (réservée aux `img`). Sans source
+            // connue : repli `alt` honnête, rien à noter.
+            Ok("input") if attr_lower(dom, n, "type") == "image" => {
+                if let Some(src) = own_image_pick(dom, n, env) {
+                    out.push((n, src));
                 }
             }
             Ok("video") => {

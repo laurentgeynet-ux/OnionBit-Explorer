@@ -5288,9 +5288,10 @@ impl Session {
         base: &Url,
         bodies: &HashMap<String, Vec<u8>>,
     ) {
-        if bodies.is_empty() {
-            return;
-        }
+        // Pas de garde `bodies.is_empty()` ici : une page
+        // dont la seule image est `input[type=image]
+        // [src="data:"]` n'a aucun corps fetché mais a du
+        // travail — le tri se fait dans `insert_images_into`.
         let max_px = self.image_max_px;
         let scripting = self.tabs.get(&tab).is_some_and(|e| e.js.is_some());
         let env =
@@ -5559,6 +5560,13 @@ fn insert_images_into(
     env: &StyleEnv,
 ) {
     let items = collect_images(dom, env);
+    // Court-circuit : rien à insérer sans candidate, et les
+    // sources distantes sont inertes sans corps fetché —
+    // seule une source `data:` travaille à `bodies` vide.
+    if items.is_empty() || (bodies.is_empty() && !items.iter().any(|(_, s)| s.starts_with("data:")))
+    {
+        return;
+    }
     let mut decoded: HashMap<String, Option<Arc<DecodedImage>>> = HashMap::new();
     // Budget octets global sur les bitmaps retenus (§B-59) :
     // `image_max_px` borne chaque image mais pas leur somme —
@@ -5569,6 +5577,29 @@ fn insert_images_into(
     // document de `collect_images` garde le haut de page.
     let mut running = bg_bytes + decoded_cache.values().map(|i| i.rgba.len()).sum::<usize>();
     for (node, src) in items {
+        // `input[type=image][src="data:…"]` — le collecteur
+        // inline (`collect_data_images`, PIPE) ne lit que
+        // `img`/`object`/`video` : la source auto-porteuse
+        // est décodée ici, même table `replaced`. `<img>` à
+        // `data:` saute (déjà couvert en aval, zéro double
+        // décodage).
+        if let Some(bytes) = data_url_bytes(&src) {
+            if dom.tag_name(node).is_ok_and(|t| t == "input") {
+                if let Some(img) = decode_image(&bytes, max_px).map(Arc::new).filter(|i| {
+                    let b = i.rgba.len();
+                    if running.saturating_add(b) > max_bytes {
+                        false
+                    } else {
+                        running += b;
+                        true
+                    }
+                }) {
+                    images.replaced.insert(node, img.clone());
+                    decoded_cache.insert(src, img);
+                }
+            }
+            continue;
+        }
         let Ok(u) = Url::resolve(base, &src) else {
             continue;
         };
@@ -5628,9 +5659,6 @@ pub(crate) fn insert_images_payload(
     max_bytes: usize,
     env: &StyleEnv,
 ) {
-    if bodies.is_empty() {
-        return;
-    }
     let PaintPayload {
         dom,
         images,

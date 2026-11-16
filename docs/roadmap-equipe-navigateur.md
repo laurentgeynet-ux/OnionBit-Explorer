@@ -159,7 +159,7 @@ sortie : R-12 (layout incrémental) ou cadencement temporel.
   `@charset`/transport → UTF-8 ; jamais le sniffer HTML hors
   document. Borné — régression vérifiée sur example.com.
 
-- [~] **Étape 52b. Défauts event-loop vus en vrai** (QA daemon
+- [x] **Étape 52b. Défauts event-loop vus en vrai** (QA daemon
   @ `cfa0514`, repros `D:\explorer-fieldwork\repros\`) :
   1. **timers ne tirent qu'à l'input** — `setTimeout(8s)` n'a
      couru qu'au scroll suivant : la pompe de fond du daemon
@@ -7035,7 +7035,7 @@ incrément.
   filaire `frame_step_wire_contract`
   + `--step`/`--back-step` vol
   probe + doc ABI. 76/76 app.
-- [~] **Étape 204. `AUDIO_MODE_TAP=2`**
+- [x] **Étape 204. `AUDIO_MODE_TAP=2`**
   (dépôt → NAV → jscore) — ADR-0032
   en trois sous-étapes :
   - [x] **204a** (dépôt, `master
@@ -8136,6 +8136,19 @@ MCP = adaptateur, jamais la base.
   — miss désormais attribuables moteur. `css.values`
   1144/1767 → **1146/1758 (65,2 %)**, cliquet
   et cliché `na` re-sauvés.
+- [x] **Étape 306. `input[type=image][src]` dans la
+  collecte image** (`explorer-core`, demande PIPE
+  2026-11-15) : `own_image_pick` factorise la chaîne
+  `srcset`/`src`/lazy `data-*` — partagée `<img>` (post-
+  `picture_pick`) et `input[type=image]` (spec
+  image-button, sans picture-contexte). Fetch via le plan
+  sous-ressources existant, `img_box` R-163 s'active dès
+  `sizes` peuplé ; `src="data:"` décodé côté NAV dans
+  `insert_images_into` (le collecteur inline PIPE ne lit
+  pas `input` — `<img>` à `data:` saute, zéro double
+  décodage), garde « `bodies` vide » montée dans la
+  boucle. Sans `src` : repli `alt` conservé. Verrous :
+  `input_image_*` ×3, 481/481 session.
 - [x] **Étape 305. §B-114 — coupes de churn nommées au
   field276** (`explorer-jscore`/`explorer-js`/
   `explorer-core`). Sondes promesses (`prom_sites` +
@@ -8633,7 +8646,7 @@ ci-dessous (fréquence observée sur le corpus réel).
   `console` embedder `Uncaught:`) ; `scrollIntoView` no-op
   honnête sur `Element.prototype` ; `sendBeacon` existait
   déjà. Régressions `c74_*` (6 tests).
-- [~] **JS-C75. `attachShadow`/Shadow DOM** — le trou le
+- [x] **JS-C75. `attachShadow`/Shadow DOM** — le trou le
   plus structurel (scoped CSS + slots) : old.reddit et MDN
   l'utilisent. **Découpé en tranches T1→T6** (vol 2026-10-25,
   répartition actée dans `docs/interface-equipes.md`) :
