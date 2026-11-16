@@ -76,6 +76,8 @@ pwsh -File scripts/vol_joblimit.ps1 -TargetPid <pid> -LimitMB 5120
 #   logs    → Explorer-data\vols\vol<N>\logs\*.log
 #             (daemon + explorer_daemon_flight/death + watch)
 #   PNG     → Explorer-data\vols\vol<N>\captures\<cible>.png
+#   geom    → Explorer-data\vols\vol<N>\captures\<cible>.geom.json
+#             (oracle géométrique geo_diff, étape 288)
 #   rapport → Explorer-data\vols\rapports\RAPPORT_VOL_<date>_
 #             AGENT<n>_<TAG>.md (gabarit rapports\_TEMPLATE.md)
 ```
@@ -163,6 +165,12 @@ Invoke-RestMethod "$BASE/api/tabs/$tab/input" -Method Post `
 Invoke-RestMethod "$BASE/api/tabs/$tab/mem"      # empreinte par réservoir
 Invoke-RestMethod "$BASE/api/tabs/$tab/dom"      # dump DOM (texte)
 Invoke-RestMethod "$BASE/api/tabs/$tab/layout"   # arbre de boîtes
+
+# — géométrie normalisée (étape 288) — même forme que les
+# boxes[] de ref_capture Chrome : alimente geo_diff — le
+# PNG dit « ça diverge », ce JSON dit QUEL élément.
+Invoke-WebRequest "$BASE/api/tabs/$tab/geometry" `
+  -OutFile "captures\<cible>.geom.json"
 ```
 
 ## 3. Carte des endpoints utiles
@@ -176,6 +184,7 @@ Invoke-RestMethod "$BASE/api/tabs/$tab/layout"   # arbre de boîtes
 | `POST /api/tabs/{id}/input` | **mains** — `click`/`mousemove`/`scroll`/`key`/`keyup` |
 | `POST /api/tabs/{id}/viewport` `{w,h}` | fenêtre de vol |
 | `GET  /api/tabs/{id}/dom` `/layout` `/mem` | télémétrie — **404 transitoire possible sur page à JS continu** (DOM détaché pendant les apply jobs : alternance 200/404 mesurée sur github) — retenter, ne pas diagnostiquer un « DOM absent » |
+| `GET  /api/tabs/{id}/geometry` | boîtes posées `NodeId→rect` jointes `(tag,id,cls)` — oracle géométrique `geo_diff` vs `ref_capture` (étape 288 : collecter `captures/<cible>.geom.json` par cible) |
 | `POST /api/tabs/{id}/back` `/forward` `/reload` | historique |
 | `GET  /api/tabs/{id}/media` | offres média vivantes (`<video>`/`<audio>`/MSE) |
 | `GET  /api/tabs/{id}/media/{mid}` | fiche d'une surface (diagnostics, `410` id mort) |
@@ -696,6 +705,14 @@ frame-moteur vs fenêtre-app est un constat en soi (bug UI).
   (leçon R-75 — jamais de verdict sur un binaire périmé).
 - **`scripts/compare_render.ps1 <url> [-Ref ref.png]`** — shot
   moteur + `diff` contre une référence (Chrome/Playwright).
+- **Verdict géométrique de clôture (étape 288)** — quand des
+  `*.geom.json` ont été collectés : `node scripts/ref_capture.mjs
+  --list <cibles.txt> --out <vol>/refs` (une session Chrome pour
+  tout le lot), puis `geo_diff.mjs <cible>.geom.json
+  refs\<cible>.ref.json --out <cible>.geodiff.json` par paire —
+  ligne « géométrie : x % divergents (pareto `tag×n`) » au
+  rapport par cible mesurée. `hors-mesure` (étape 287) = la
+  paire ne se juge pas, pas un constat de casse.
 - **En file** : sonde `/net` (verdicts sous-ressources
   CSP/SRI/CORS par URL) — entaille session, file NAV.
 
