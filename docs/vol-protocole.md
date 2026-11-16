@@ -97,6 +97,12 @@ curl -s http://127.0.0.1:9385/api/tabs/1/console
   (`consent_wall:soft|hard` — vol-agent §8).
 - **Un constat = mesure** (`doc_h`, console, frame jointe) —
   jamais « ça a l'air ».
+- **Vision (console EAP) = observateur actif** — chaque pull
+  `/frame` arme la pompe de rendu (~4/s) : un daemon observé
+  en continu fait des passes `paint.raster` qu'un daemon sondé
+  ne fait pas. Si la vision est attachée pendant une fenêtre
+  de mesure (§B-114 surtout — raster ~2 Gio/passe vu au 844),
+  noter « vision attachée t=… » au rapport.
 
 ## 4. Signatures de mort (détail : vol-agent §7)
 
