@@ -58,6 +58,7 @@ mod find;
 mod forms;
 #[allow(clippy::wildcard_imports)]
 mod frame;
+mod frameset;
 mod imagemap;
 #[allow(clippy::wildcard_imports)]
 mod input;

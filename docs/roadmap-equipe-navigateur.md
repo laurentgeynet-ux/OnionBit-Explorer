@@ -8152,6 +8152,19 @@ MCP = adaptateur, jamais la base.
   `sub: phase fontes bornée`. Reste au journal : le fix
   complet est un commit étagé (sheets à `fonds fetchés`,
   fontes en FOUT différé).
+- [x] **Étape 309. `<frameset>`/`<frame>` → grille
+  d'iframes** — tranche legacy journal 2026-11-15 point
+  (a) (`explorer-core`, zéro contrat PIPE : réécriture
+  DOM post-parse à `nav_apply`). `frameset::expand_-
+  framesets` : chaque `<frame>` → `<iframe>` positionné
+  absolument dans un `<div>` grille ; `rows`/`cols`
+  `px`/`%`/`*` résolus sur le viewport (défaut `100%`,
+  invalide = `1*`), produit lignes×colonnes, `<frameset>`
+  imbriqué récursif, `<noframes>` sauté. Attributs
+  copiés : `src`/`name`/`scrolling`/`margin*`/`noresize`/
+  `longdesc`, `frameborder=0` → `border:0`. Machine
+  iframe réutilisée telle quelle (fetch, sous-contextes,
+  composite, bfcache). Verrous : `frameset_*` ×2.
 - [x] **Étape 307. Image maps `<map>`/`<area>`** —
   tranche legacy journal 2026-11-15 point (b)
   (`explorer-core`, zéro contrat PIPE : `shape`/`coords`

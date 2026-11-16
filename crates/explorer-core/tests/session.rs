@@ -3275,6 +3275,51 @@ async fn image_map_default_only_as_fallback() {
     assert_eq!(s.tab_url(id).as_deref(), Some("http://h.test/t"));
 }
 
+/// Étape 309 — document `<frameset>` : chaque `<frame>`
+/// devient un `<iframe>` de la grille synthétique et sa
+/// `src` est fetchée comme un sous-contexte classique
+/// (tranche legacy journal 2026-11-15, point a).
+#[tokio::test]
+async fn frameset_frames_fetch_subcontexts() {
+    let (mut s, t) = test_session();
+    t.route(
+        "/m",
+        200,
+        "<html><frameset rows=\"50%,*\"><frame src=\"/a\">\
+         <frameset cols=\"30%,*\"><frame src=\"/b\"><frame src=\"/c\"></frameset>\
+         </frameset></html>",
+    );
+    t.route("/a", 200, "<html><body><title>A</title>a</body></html>");
+    t.route("/b", 200, "<html><body>b</body></html>");
+    t.route("/c", 200, "<html><body>c</body></html>");
+    let id = s.open_tab();
+    s.navigate(id, "http://h.test/m").await.unwrap();
+    let paths = t.paths();
+    for f in ["/a", "/b", "/c"] {
+        assert!(paths.contains(&f.to_string()), "frame {f} fetchée");
+    }
+    let frames = s.tab_frames(id);
+    assert_eq!(frames.len(), 3, "3 sous-contextes");
+    assert_eq!(frames[0].0, "http://h.test/a");
+    assert_eq!(frames[0].1.as_deref(), Some("A"));
+}
+
+/// Sans `<frame>` (ou `<noframes>` seul) : la grille n'est
+/// pas synthétisée, le document reste inerte mais sain.
+#[tokio::test]
+async fn frameset_empty_is_tolerated() {
+    let (mut s, t) = test_session();
+    t.route(
+        "/m",
+        200,
+        "<html><frameset rows=\"*,*\"><noframes><body>alt</body></noframes></frameset></html>",
+    );
+    let id = s.open_tab();
+    s.navigate(id, "http://h.test/m").await.unwrap();
+    assert_eq!(s.tab_url(id).as_deref(), Some("http://h.test/m"));
+    assert!(s.tab_frames(id).is_empty());
+}
+
 /// `shape="circle"` : le centre couvert, le coin exclu.
 #[tokio::test]
 async fn image_map_circle_shape() {
