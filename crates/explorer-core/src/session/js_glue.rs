@@ -1408,6 +1408,11 @@ impl Session {
             // direct sur le worker (pas d'appel synchrone).
             if let Some(t) = self.tabs.get(&tab) {
                 e.set_geometry_ctx(explorer_js::JS_CTX_TOP, t.geom.clone());
+                // `sheet.cssRules` (étape 273) — table
+                // url→texte des `<link>` de l'onglet, `Arc`
+                // partagé : les feuilles dynamiques livrées
+                // après le spawn restent visibles du moteur.
+                e.set_sheet_texts(t.sheet_texts.clone());
             }
             // Étape 51 : état d'origine injecté au contexte —
             // `localStorage` (map session > profil persisté)

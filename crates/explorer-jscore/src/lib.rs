@@ -55,6 +55,7 @@ mod cmp;
 mod collections;
 mod context;
 mod crypto;
+mod cssom;
 mod dom;
 mod dom_host;
 mod error;
@@ -1552,6 +1553,38 @@ pub fn last_phase_str() -> &'static str {
 /// `arguments`, switch de realm) — zones que `last_stmt`/
 /// `last_nat` ne couvrent pas.
 pub static LAST_FUN: std::sync::Mutex<String> = std::sync::Mutex::new(String::new());
+
+/// Étape 279 — balise GC en vol (wedge `XHR:responseText`
+/// ~50 s, vol field274 : les balises `host`/`phase` sont
+/// **périmées** pendant un mark/sweep — elles nomment le
+/// dernier écrivain, pas le site). `calls` figé +
+/// `gc_active=1` = passe GC en cours nommée ; `calls` figé +
+/// `gc_active=0` = vrai spin dans le site nommé par
+/// `host`/`phase`. ~2 ns, inconditionnelle.
+pub static GC_ACTIVE: std::sync::atomic::AtomicU8 = std::sync::atomic::AtomicU8::new(0);
+
+/// Compteur de passes GC menées (mark `mark_live` ou sweep
+/// `collect_bounded`) — s'il avance pendant un gel de
+/// `calls`, l'interprète meurt de faim en GC.
+pub static GC_PASSES: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+/// Durée de la dernière passe GC en ms — la borne
+/// « passée lente » se mesure au postmortem.
+pub static GC_LAST_MS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+/// Étape 281 — lectures de `xhr.responseText`/`response`
+/// texte : `reads` ≫ `decodes` = boucle de lecture nommée
+/// (le vol field274 montrait un spin ~50 s dont ce compteur
+/// aurait mesuré la forme).
+pub static XHR_TEXT_READS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+/// Décodages `from_utf8_lossy` réels du corps XHR — depuis
+/// 281 le texte est caché : chaque livraison décode au plus
+/// une fois, `decodes` borne le coût résiduel.
+pub static XHR_TEXT_DECODES: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+/// Millisecondes cumulées dans le décodage `responseText`.
+pub static XHR_TEXT_DECODE_MS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 
 /// §B-59 — journal de fil d'Ariane **externe au fil JS** : un
 /// thread vidange les statiques `LAST_*` + commit/RSS vers un

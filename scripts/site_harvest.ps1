@@ -36,6 +36,16 @@
             [-ListFile sites-legacy.txt] [-TrancoCsv top.csv]
             [-TrancoTop 500] [-Mode daemon] [-WithRef] [-Diff]
             [-Max 20] [-OutDir target\harvest\run]
+            [-RefCookie "SOCS=CAI@.youtube.com"]  (répétable)
+            [-History geo.jsonl] [-Record nom | -Replay nom]
+            [-GeoBaseline geo_base.json] [-GeoGate geo_base.json]
+
+  Rejeu déterministe (étape 289) : 1) `-Record <nom> -WithRef`
+  enregistre le trafic moteur + fige les refs Chrome ;
+  2) `-Replay <nom> -RefDir <même dossier>` rejoue les deux
+  côtés hors-ligne — `-GeoGate` devient un vrai cliquet de
+  régression layout (le web live reste informatif, jamais
+  un gate).
 #>
 
 param(
@@ -51,7 +61,13 @@ param(
     [switch]$WithRef,
     [switch]$Diff,
     [string]$RefDir = '',
-    [int]$NavTimeoutSec = 240
+    [int]$NavTimeoutSec = 240,
+    [string[]]$RefCookie = @(),
+    [string]$History = '',
+    [string]$Record = '',
+    [string]$Replay = '',
+    [string]$GeoBaseline = '',
+    [string]$GeoGate = ''
 )
 
 $ErrorActionPreference = 'Continue'
@@ -199,11 +215,36 @@ if ($WithRef) {
         $listTmp = Join-Path $OutDir '_corpus.txt'
         $sites | Set-Content -Path $listTmp -Encoding utf8
         Write-Output '  refs : capture Chrome (ref_capture.mjs)…'
-        & node (Join-Path $root 'scripts\ref_capture.mjs') `
-            --list $listTmp --out $refOut --viewport $Viewport
+        $rcArgs = @('--list', $listTmp, '--out', $refOut,
+            '--viewport', $Viewport)
+        foreach ($ck in $RefCookie) { $rcArgs += @('--cookie', $ck) }
+        & node (Join-Path $root 'scripts\ref_capture.mjs') @rcArgs
     }
 }
 $diffOk = $Diff -or $WithRef
+
+# Rejeu déterministe (étape 289) : EXPLORER_NET_RECORD/REPLAY
+# honorés par explorer-cli ET hérités par le daemon spawné —
+# posés avant tout lancement.
+if ($Record -ne '' -and $Replay -ne '') {
+    Write-Error '-Record et -Replay sont exclusifs'
+    exit 1
+}
+# Noms nus → Explorer-data\record\<nom> (convention canonique
+# des artefacts) ; un chemin explicite est honoré tel quel.
+function Resolve-RecordDir([string]$arg) {
+    if ([IO.Path]::IsPathRooted($arg) -or $arg -match '[\\/]') {
+        return $arg }
+    return Join-Path $root "Explorer-data\record\$arg"
+}
+if ($Record -ne '') {
+    $env:EXPLORER_NET_RECORD = Resolve-RecordDir $Record
+    Write-Output "record  : $env:EXPLORER_NET_RECORD"
+}
+if ($Replay -ne '') {
+    $env:EXPLORER_NET_REPLAY = Resolve-RecordDir $Replay
+    Write-Output "replay  : $env:EXPLORER_NET_REPLAY"
+}
 
 # --- Mode daemon : spawn + client HTTP poolé ------------------------------
 $daemonProc = $null
@@ -559,8 +600,74 @@ $html = $html.Replace('__RUN__', $run).Replace('__OK__', "$ok").
 $htmlPath = Join-Path $OutDir 'report.html'
 Set-Content -Path $htmlPath -Value $html -Encoding utf8
 
+# --- History / baseline / gate géométrique (étape 289) ----
+# Verdict par site : geo_pct du geodiff (null = paire non
+# mesurée — ref absente, hors-mesure, moteur sans géométrie).
+$geoMeasured = @{}
+foreach ($r in $records) {
+    if ($null -ne $r.geo_pct) { $geoMeasured[$r.name] = $r.geo_pct }
+}
+if ($History -ne '') {
+    $hpath = if ([IO.Path]::IsPathRooted($History)) { $History } else {
+        Join-Path $root $History }
+    $sha = (& git -C $root rev-parse --short HEAD 2>$null)
+    $hrec = [ordered]@{
+        ts = (Get-Date).ToString('o'); sha = $sha; run = $run
+        mode = $Mode; viewport = $Viewport
+        ok = $ok; fail = $fail; geo = $geoMeasured
+    }
+    ($hrec | ConvertTo-Json -Depth 6 -Compress) |
+        Add-Content -Path $hpath -Encoding utf8
+    Write-Output "history : $hpath"
+}
+# Baseline {sites:{name:geo_pct}} : fusion — le meilleur (le
+# plus bas) gagne, les clés absentes du run sont préservées.
+$geoFails = @()
+if ($GeoBaseline -ne '' -or $GeoGate -ne '') {
+    $basePath = if ($GeoBaseline -ne '') { $GeoBaseline } else { $GeoGate }
+    if (-not [IO.Path]::IsPathRooted($basePath)) {
+        $basePath = Join-Path $root $basePath }
+    $base = @{ sites = @{} }
+    if (Test-Path $basePath) {
+        try {
+            $bj = Get-Content $basePath -Raw | ConvertFrom-Json
+            if ($bj.sites) {
+                foreach ($p in $bj.sites.PSObject.Properties) {
+                    $base.sites[$p.Name] = [double]$p.Value }
+            }
+        } catch { Write-Output "baseline illisible : $basePath" }
+    }
+    if ($GeoGate -ne '') {
+        foreach ($n in $geoMeasured.Keys) {
+            if ($base.sites.ContainsKey($n) -and
+                $geoMeasured[$n] -gt $base.sites[$n] + 0.05) {
+                $geoFails += "$n : $($geoMeasured[$n]) % > $($base.sites[$n]) %"
+            }
+        }
+        if ($geoFails.Count -gt 0) {
+            Write-Output 'GATE géométrique : régressions détectées'
+            $geoFails | ForEach-Object { Write-Output "  RÉGRESSION $_" }
+        } else {
+            Write-Output 'GATE géométrique : vert'
+        }
+    }
+    if ($GeoBaseline -ne '' -and $geoFails.Count -eq 0) {
+        foreach ($n in $geoMeasured.Keys) {
+            if (-not $base.sites.ContainsKey($n) -or
+                $geoMeasured[$n] -lt $base.sites[$n]) {
+                $base.sites[$n] = $geoMeasured[$n]
+            }
+        }
+        [ordered]@{ sites = $base.sites } |
+            ConvertTo-Json -Depth 4 |
+            Set-Content -Path $basePath -Encoding utf8
+        Write-Output "baseline  : $basePath ($($base.sites.Count) sites)"
+    }
+}
+
 Write-Output ''
 Write-Output "Récolte : $ok OK / $fail FAIL — $($sites.Count) sites"
 Write-Output "index   : $indexPath"
 Write-Output "rapport : $htmlPath"
+if ($geoFails.Count -gt 0) { exit 3 }
 if ($fail -gt 0) { exit 2 }

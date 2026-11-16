@@ -993,11 +993,19 @@ pub async fn handle_input_shared(
             return Err(CoreError::UnknownTab(tab));
         }
         s.ensure_painted(tab);
-        if s.tabs.get(&tab).is_some_and(|e| {
-            e.paint_detached || e.js_detached.is_some() || !e.deferred_inputs.is_empty()
-        }) {
+        // Même garde que la voie synchrone — prédicat partagé
+        // `Tab::input_defer_window` (étape 266 : la clause
+        // `dom`/`tree` détachés manquait ici → `-32602`
+        // « document sans élément » sur la voie agent pendant
+        // une fenêtre d'apply, verdict field263).
+        if s.tabs.get(&tab).is_some_and(Tab::input_defer_window) {
             let is_scroll = matches!(ev, InputEvent::Scroll { .. });
-            s.defer_input(tab, ev);
+            if !s.defer_input(tab, ev) {
+                // File pleine (étape 269) — `Dropped`, pas
+                // `Deferred` : le rejeu promis n'aurait
+                // jamais lieu.
+                return Ok(InputOutcome::Dropped);
+            }
             if is_scroll {
                 let proj = s.projected_scroll(tab);
                 return Ok(InputOutcome::Scrolled {

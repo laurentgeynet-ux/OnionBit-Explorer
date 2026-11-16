@@ -25,7 +25,7 @@
 //! callback props cover the old-school scripts we target.
 
 use crate::heap::{Host, JsResult, ObjKind};
-use crate::value::{ObjId, Value};
+use crate::value::{JsStr, ObjId, Value};
 use crate::Engine;
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -160,6 +160,16 @@ pub(crate) struct XhrData {
     /// (`x.response === x.response`). Racine GC via
     /// [`XhrData::listener_values`].
     cached_response: Option<Value>,
+    /// `responseText`/`response` texte décodé **une fois**
+    /// (étape 281 — vol field274 : gel ~50 s, `calls` figé,
+    /// `gc=0` → vrai spin hôte : chaque lecture re-décodait
+    /// tout le corps en `from_utf8_lossy` + réallocation —
+    /// O(lectures × octets), quadratique sous polling/
+    /// streaming). Le corps n'est écrit qu'à la livraison et
+    /// au `take` des types binaires — la chaîne sert toutes
+    /// les lectures suivantes en `Rc` O(1). Hors arène GC :
+    /// les `JsStr` vivent sous `Rc`, pas de racine requise.
+    cached_text: Option<JsStr>,
     response_headers: Vec<(String, String)>,
     method: String,
     url: String,
@@ -399,6 +409,9 @@ impl Engine {
             d.status_text = resp.status_text;
             d.response_headers = resp.headers;
             d.response_bytes = resp.body;
+            // Étape 281 — le corps change : le texte décodé
+            // précédent ne représente plus la source.
+            d.cached_text = None;
             d.ready_state = 4;
             d.handle = None;
         }
@@ -488,6 +501,34 @@ fn document_response(e: &mut Engine, bytes: &[u8]) -> Value {
     crate::dom_host::document_value(e, &domref)
 }
 
+impl XhrHost {
+    /// `responseText`/`response` texte : le corps brut est
+    /// décodé **une fois** puis servi en `Rc` — avant
+    /// l'étape 281 chaque lecture relançait
+    /// `from_utf8_lossy` + l'allocation complète (O(lectures
+    /// × octets) : vol field274, gel ~50 s sur ~800 Kio lus
+    /// en boucle). Compteurs atomiques pour le recorder —
+    /// `reads` ≫ `decodes` = boucle de lecture nommée.
+    fn xhr_text(&self, e: &mut Engine) -> Value {
+        crate::XHR_TEXT_READS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        if let Some(t) = self.data.borrow().cached_text.clone() {
+            return Value::Str(t);
+        }
+        let t0 = std::time::Instant::now();
+        let mut d = self.data.borrow_mut();
+        let v = e.str_val(String::from_utf8_lossy(&d.response_bytes).into_owned());
+        crate::XHR_TEXT_DECODES.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        crate::XHR_TEXT_DECODE_MS.fetch_add(
+            t0.elapsed().as_millis() as u64,
+            std::sync::atomic::Ordering::Relaxed,
+        );
+        if let Value::Str(s) = v.clone() {
+            d.cached_text = Some(s);
+        }
+        v
+    }
+}
+
 impl Host for XhrHost {
     fn class_name(&self) -> &'static str {
         "XMLHttpRequest"
@@ -519,7 +560,8 @@ impl Host for XhrHost {
                     );
                     return Err(crate::heap::Thrown(v));
                 }
-                e.str_val(String::from_utf8_lossy(&d.response_bytes).into_owned())
+                drop(d);
+                return Ok(Some(self.xhr_text(e)));
             }
             // Spec : `response` honorant `responseType` — texte
             // décodé à la lecture, octets bruts pour
@@ -532,9 +574,8 @@ impl Host for XhrHost {
             "response" => {
                 let ty = d.response_type.as_str();
                 if matches!(ty, "" | "text") {
-                    return Ok(Some(
-                        e.str_val(String::from_utf8_lossy(&d.response_bytes).into_owned()),
-                    ));
+                    drop(d);
+                    return Ok(Some(self.xhr_text(e)));
                 }
                 if d.ready_state < 4 || d.status == 0 {
                     return Ok(Some(Value::Null));
@@ -557,6 +598,7 @@ impl Host for XhrHost {
                     let mut dm = self.data.borrow_mut();
                     let take = !matches!(dm.response_type.as_str(), "document");
                     let b = if take {
+                        dm.cached_text = None;
                         std::mem::take(&mut dm.response_bytes)
                     } else {
                         dm.response_bytes.clone()

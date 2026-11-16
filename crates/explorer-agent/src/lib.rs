@@ -31,7 +31,7 @@ pub mod state;
 pub mod ws;
 
 pub use state::{AgentConn, AgentShared};
-pub use ws::agent_router;
+pub use ws::{agent_router, agent_router_with_profile};
 
 /// Version de sous-protocole négociée au handshake WS
 /// (`Sec-WebSocket-Protocol`).

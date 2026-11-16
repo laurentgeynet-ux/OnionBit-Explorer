@@ -395,6 +395,14 @@ pub(crate) struct Tab {
     /// (étape 218) : texte d'origine → texte expansé —
     /// substitué par contenu dans `styles_payload`.
     inline_css_expanded: HashMap<String, String>,
+    /// Textes des feuilles `<link>` fetchées par URL absolue
+    /// (étape 273) — `Arc` partagé poussé au moteur JS :
+    /// `sheet.cssRules`/`document.styleSheets` peuplent les
+    /// règles des feuilles externes. Cellule stable par onglet
+    /// (les livraisons dynamiques tardives restent visibles du
+    /// moteur) — vidée au commit du document mort, remplie au
+    /// commit des `css_slots` et à chaque `<link>` dynamique.
+    sheet_texts: std::sync::Arc<std::sync::Mutex<HashMap<String, String>>>,
     /// Feuilles déjà **parsées**, clé = texte CSS exact
     /// (étape 227) : `styles_payload` re-parsait UA + chaque
     /// `<style>`/`linked`/`adopted` à chaque passe de styles
@@ -851,6 +859,10 @@ pub(crate) struct PageSnapshot {
     /// `<style>` inline expansés `@import` (étape 218) —
     /// gel/restauration comme `linked_sheets`.
     inline_css_expanded: HashMap<String, String>,
+    /// Textes `<link>` fetchés par URL (étape 273) — gel/
+    /// restauration comme `linked_sheets` (l'`Arc` est cloné :
+    /// moteur restauré et session partagent la même cellule).
+    sheet_texts: std::sync::Arc<std::sync::Mutex<HashMap<String, String>>>,
     /// Noms des custom elements définis (`customElements.
     /// define`) — snapshot miroir rafraîchi au même drain ;
     /// poussé dans `Dom::set_defined_names` pour `:defined`
@@ -1813,6 +1825,7 @@ impl Session {
                 linked_sheets: Vec::new(),
                 adopted_sheets: Vec::new(),
                 inline_css_expanded: HashMap::new(),
+                sheet_texts: std::sync::Arc::new(std::sync::Mutex::new(HashMap::new())),
                 sheet_cache: HashMap::new(),
                 styles: None,
                 style_eng: None,

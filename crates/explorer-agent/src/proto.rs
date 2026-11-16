@@ -164,6 +164,10 @@ pub enum ErrorCode {
     /// Profil de session sans le droit requis (`input`, `eval`,
     /// `tabs` hors scope).
     Unauthorized = -32008,
+    /// Verbe abandonné par `session.cancel` — annulation
+    /// coopérative : le verbe s'est arrêté à sa prochaine
+    /// frontière d'await, les effets déjà commis restent.
+    Cancelled = -32009,
 }
 
 impl From<ErrorCode> for i64 {
@@ -188,6 +192,7 @@ impl TryFrom<i64> for ErrorCode {
             -32006 => Self::BadSelector,
             -32007 => Self::EngineUnavailable,
             -32008 => Self::Unauthorized,
+            -32009 => Self::Cancelled,
             _ => return Err(v),
         })
     }
@@ -471,6 +476,12 @@ pub enum Method {
     /// Liveness.
     #[serde(rename = "session.ping")]
     SessionPing(EmptyParams),
+    /// Annulation coopérative du verbe en vol de cette
+    /// connexion — servi en ligne (jamais en file) comme
+    /// `ping`/`close` : c'est la porte de sortie d'un verbe
+    /// wedged (étape 268).
+    #[serde(rename = "session.cancel")]
+    SessionCancel(EmptyParams),
 
     /// Ouvre un onglet → `{"tab": n}`.
     #[serde(rename = "tab.open")]
@@ -935,8 +946,8 @@ pub struct EvalParams {
     /// retourne sérialisée JSON (bornée 64 Ko, tronquée au-delà).
     pub expr: String,
     /// Scope optionnel (étape 260) : l'expression est évaluée
-    /// avec l'élément lié — erreur honnête tant que le
-    /// binding moteur n'est pas posé.
+    /// avec l'élément lié aux globals `$0`/`el` (binding
+    /// moteur posé — JS-C549).
     #[serde(rename = "ref", default)]
     pub elem_ref: Option<ElementRef>,
     /// Borne d'exécution — défaut config.

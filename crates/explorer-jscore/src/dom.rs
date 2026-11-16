@@ -4981,16 +4981,31 @@ impl Dom {
             } else {
                 PAIRED_CLOSE
                     .iter()
-                    .find(|(t, _)| *t == tag)
-                    .map(|(_, targets)| targets)
+                    .find(|(t, _, _)| *t == tag)
+                    .map(|(_, targets, in_body)| (targets, *in_body))
             };
-            if let Some(targets) = paired_close {
+            if let Some((targets, in_body)) = paired_close {
                 if targets
                     .iter()
                     .any(|t| open_tags.get(*t).copied().unwrap_or(0) > 0)
                 {
                     while let Some(&top) = stack.last() {
-                        let done = targets.contains(&self.nodes[top as usize].tag.as_str());
+                        let (done, stop) = {
+                            let t = self.nodes[top as usize].tag.as_str();
+                            (
+                                targets.contains(&t),
+                                in_body && SCOPE_STOP_SPECIAL.contains(&t),
+                            )
+                        };
+                        // Marche « in body » : un élément
+                        // « special » non cible borne le
+                        // dépile **sans** être poppé
+                        // (`<li>` sous `ul` ne ferme pas
+                        // l'`li` ancêtre — spec « have an
+                        // li element in list item scope »).
+                        if !done && stop {
+                            break;
+                        }
                         unpush!(std::slice::from_ref(&top));
                         stack.pop();
                         if done {
@@ -5303,24 +5318,127 @@ fn contains_ci(hay: &str, needle: &str) -> bool {
 }
 
 /// Implicit-close par paires (borné, spec « implied end
-/// tags ») : start-tag → **cibles** — le dépile traverse
-/// les intermédiaires et s'arrête dès qu'une cible a été
-/// poppée. `dd`/`dt` se ferment mutuellement ; `tr` ferme
-/// `td`/`th` en chemin **puis** `tr` ; `optgroup` traverse
-/// `option`. N'agit que si une cible est ancêtre ouverte.
-const PAIRED_CLOSE: &[(&str, &[&str])] = &[
-    ("li", &["dd", "dt", "li"]),
-    ("dd", &["dd", "dt"]),
-    ("dt", &["dd", "dt"]),
-    ("p", &["p"]),
-    ("tr", &["tr"]),
-    ("td", &["td", "th"]),
-    ("th", &["td", "th"]),
-    ("thead", &["thead", "tbody", "tfoot"]),
-    ("tbody", &["thead", "tbody", "tfoot"]),
-    ("tfoot", &["thead", "tbody", "tfoot"]),
-    ("option", &["option"]),
-    ("optgroup", &["optgroup"]),
+/// tags ») : start-tag → **cibles** + indicateur de marche
+/// — le dépile traverse les intermédiaires et s'arrête dès
+/// qu'une cible a été poppée. `dd`/`dt` se ferment
+/// mutuellement ; `tr` ferme `td`/`th` en chemin **puis**
+/// `tr` ; `optgroup` traverse `option`. N'agit que si une
+/// cible est ancêtre ouverte.
+///
+/// Le troisième champ distingue deux sémantiques spec :
+/// `true` = marche « in body » (`li`, `dd`, `dt`, `p`) —
+/// la boucle **s'arrête sans dépiler** dès qu'un élément de
+/// la catégorie « special » est rencontré (sauf
+/// `address`/`div`/`p`, qui laissent passer) : sans cette
+/// borne, `<li>` sous `ol>li>div>ul` traversait `ul` et les
+/// `div` pour fermer l'`li` ancêtre — l'item se
+/// ré-enracinait sous `ol` et tout le bloc meta sortait de
+/// sa story (mesuré lobste.rs : `ul.tags` 0×0, contenu
+/// empilé hors du `li.story`, `doc_h` doublée).
+/// `false` = marche de table/select (`tr`, `td`…) —
+/// traversée libre jusqu'à la cible (`tr>td` mesuré
+/// w3.org).
+const PAIRED_CLOSE: &[(&str, &[&str], bool)] = &[
+    ("li", &["dd", "dt", "li"], true),
+    ("dd", &["dd", "dt"], true),
+    ("dt", &["dd", "dt"], true),
+    ("p", &["p"], true),
+    ("tr", &["tr"], false),
+    ("td", &["td", "th"], false),
+    ("th", &["td", "th"], false),
+    ("thead", &["thead", "tbody", "tfoot"], false),
+    ("tbody", &["thead", "tbody", "tfoot"], false),
+    ("tfoot", &["thead", "tbody", "tfoot"], false),
+    ("option", &["option"], false),
+    ("optgroup", &["optgroup"], false),
+];
+
+/// Borne de la marche « in body » : éléments de la
+/// catégorie **special** qui interrompent le dépile
+/// `li`/`dd`/`dt`/`p` — spec : « if node is in the special
+/// category, but is not an address, div, or p element,
+/// then break ». `address`/`div`/`p` sont donc absents ;
+/// `dd`/`dt`/`li`/`p` sont absents aussi — ce sont les
+/// **cibles** (vérifiées avant la borne).
+const SCOPE_STOP_SPECIAL: &[&str] = &[
+    "applet",
+    "area",
+    "article",
+    "aside",
+    "base",
+    "basefont",
+    "bgsound",
+    "blockquote",
+    "body",
+    "br",
+    "button",
+    "caption",
+    "center",
+    "col",
+    "colgroup",
+    "details",
+    "dialog",
+    "dir",
+    "dl",
+    "embed",
+    "fieldset",
+    "figcaption",
+    "figure",
+    "footer",
+    "form",
+    "frame",
+    "frameset",
+    "h1",
+    "h2",
+    "h3",
+    "h4",
+    "h5",
+    "h6",
+    "head",
+    "header",
+    "hgroup",
+    "hr",
+    "html",
+    "iframe",
+    "img",
+    "input",
+    "keygen",
+    "link",
+    "listing",
+    "main",
+    "marquee",
+    "menu",
+    "meta",
+    "nav",
+    "noembed",
+    "noframes",
+    "noscript",
+    "object",
+    "ol",
+    "param",
+    "plaintext",
+    "pre",
+    "script",
+    "section",
+    "select",
+    "source",
+    "style",
+    "summary",
+    "table",
+    "tbody",
+    "td",
+    "template",
+    "textarea",
+    "tfoot",
+    "th",
+    "thead",
+    "title",
+    "tr",
+    "track",
+    "ul",
+    "video",
+    "wbr",
+    "xmp",
 ];
 
 /// Contenu admis en `<head>` — mode d'insertion HTML5

@@ -237,7 +237,12 @@ fn print_usage() {
          \x20            EXPLORER_DOH, EXPLORER_DOH_TIMEOUT_MS,\n\
          \x20            EXPLORER_COLOR_SCHEME (dark|light),\n\
          \x20            EXPLORER_JS_MEM_MIB (borne heap JS ; 0=illimité),\n\
-         \x20            EXPLORER_JS_OPS (budget ops JS ; 0=illimité)"
+         \x20            EXPLORER_JS_OPS (budget ops JS ; 0=illimité),\n\
+         \x20            EXPLORER_DEATH_LOG (sentinelle de mort),\n\
+         \x20            EXPLORER_FLIGHT_LOG/EXPLORER_FLIGHT_MS/\n\
+         \x20            EXPLORER_FLIGHT_MAX_KB (enregistreur de vol),\n\
+         \x20            EXPLORER_RSS_LIMIT_MB/EXPLORER_COMMIT_LIMIT_MB\n\
+         \x20            (garde mémoire §B-59 ; 0/absent=désarmé)"
     );
 }
 
@@ -562,6 +567,7 @@ fn main() {
             std::thread::sleep(std::time::Duration::from_millis(50));
         });
     }
+    spawn_flight_recorder(&death_log);
     // Pile large pour **tous** les threads du runtime (workers
     // + pool `spawn_blocking`) : le thread moteur jscore porte
     // déjà 32 Mio (JS-C41) ; un overflow sur un worker —
@@ -575,11 +581,136 @@ fn main() {
         .enable_all()
         .build()
         .expect("runtime tokio")
-        .block_on(amain());
+        .block_on(amain(death_log.clone()));
     // Arrêt propre (CTRL-C / shutdown) : la sentinelle est
     // effacée — un `alive` résiduel après une mort signifie
-    // « aucun crochet n'a couru » (mort externe).
-    let _ = std::fs::remove_file(&death_log);
+    // « aucun crochet n'a couru » (mort externe). Étape 276 :
+    // un marqueur `console:<kind>` (fermeture console/session
+    // Windows — kill externe nommé) est conservé, pas effacé.
+    // `console:*` (kill console) et `shutdown:*` (arrêt
+    // demandé) sont des fins nommées — on les garde pour la
+    // post-mortem ; `alive` résiduel = arrêt ordinaire, nettoyé.
+    let keep = std::fs::read_to_string(&death_log)
+        .is_ok_and(|s| s.starts_with("console:") || s.starts_with("shutdown:"));
+    if !keep {
+        let _ = std::fs::remove_file(&death_log);
+    }
+}
+
+/// Enregistreur de vol unifié (étape 276 — morts externes
+/// KAYAK ×3 : `alive` résiduel, zéro panic, zéro WER). La
+/// sentinelle distingue déjà « crochet couru » de « mort
+/// externe » mais ne nomme pas le site — ce thread
+/// vidange les balises §B-59 du fil JS (`LAST_*`) +
+/// `LAST_DRAIN` (drains core) + RSS/commit vers
+/// `logs/explorer_daemon_flight.log` toutes les
+/// `EXPLORER_FLIGHT_MS` ms (défaut 400, 0 = désarmé).
+/// Lecture postmortem : dernier beat figé sur une balise
+/// = spin à ce site ; beats vivants mais `drain` fixe =
+/// wedge ; montée `commit` avant l'arrêt = OOM ; arrêt
+/// franc avec `alive` = kill externe. Rotation `.prev`
+/// bornée par `EXPLORER_FLIGHT_MAX_KB` (défaut 4096) ;
+/// `EXPLORER_FLIGHT_LOG` surcharge le chemin.
+fn spawn_flight_recorder(death_log: &Path) {
+    let flight_log = std::env::var("EXPLORER_FLIGHT_LOG").map_or_else(
+        |_| {
+            death_log
+                .parent()
+                .map(|d| d.join("explorer_daemon_flight.log"))
+        },
+        |v| Some(PathBuf::from(v)),
+    );
+    let flight_ms = std::env::var("EXPLORER_FLIGHT_MS")
+        .ok()
+        .and_then(|v| v.parse::<u64>().ok())
+        .unwrap_or(400);
+    let flight_max_kb = std::env::var("EXPLORER_FLIGHT_MAX_KB")
+        .ok()
+        .and_then(|v| v.parse::<u64>().ok())
+        .unwrap_or(4096);
+    let Some(flog) = flight_log else { return };
+    if flight_ms == 0 {
+        return;
+    }
+    let get = |m: &std::sync::Mutex<&'static str>| m.lock().map_or("?", |g| *g);
+    let gets =
+        |m: &std::sync::Mutex<String>| m.lock().map(|g| g.replace('\n', "\\n")).unwrap_or_default();
+    std::thread::spawn(move || {
+        let t0 = std::time::Instant::now();
+        let mut header_done = false;
+        loop {
+            if !header_done {
+                append_flight(
+                    &flog,
+                    flight_max_kb,
+                    &format!("=== daemon start pid={} ===\n", std::process::id()),
+                );
+                header_done = true;
+            }
+            let (mut rss, mut com) = (0usize, 0usize);
+            if let Some(m) = memory_stats::memory_stats() {
+                rss = m.physical_mem / (1024 * 1024);
+                com = m.virtual_mem / (1024 * 1024);
+            }
+            let drain = explorer_core::LAST_DRAIN.lock().map_or("?", |g| *g);
+            let areq = explorer_jscore::LAST_ALLOC_REQ.load(std::sync::atomic::Ordering::Relaxed);
+            let calls = explorer_jscore::CALL_N.load(std::sync::atomic::Ordering::Relaxed);
+            // Étape 279 — balise GC en vol : `calls` figé +
+            // `gc` > 0 = wedge mark/sweep nommé ; `gc`=0 + `calls`
+            // figé = vrai spin dans le site `host`/`phase`.
+            let gc = explorer_jscore::GC_ACTIVE.load(std::sync::atomic::Ordering::Relaxed);
+            let gcp = explorer_jscore::GC_PASSES.load(std::sync::atomic::Ordering::Relaxed);
+            let gcms = explorer_jscore::GC_LAST_MS.load(std::sync::atomic::Ordering::Relaxed);
+            // Étape 281 — lectures/décodages `responseText` :
+            // `xrt` reads ≫ decodes = boucle de lecture nommée.
+            let xrr = explorer_jscore::XHR_TEXT_READS.load(std::sync::atomic::Ordering::Relaxed);
+            let xrd = explorer_jscore::XHR_TEXT_DECODES.load(std::sync::atomic::Ordering::Relaxed);
+            let xrm =
+                explorer_jscore::XHR_TEXT_DECODE_MS.load(std::sync::atomic::Ordering::Relaxed);
+            let line = format!(
+                "t={}ms rss={}MiB commit={}MiB | drain={} | calls={} | gc={gc}/{gcp}@{gcms}ms | xrt={xrr}/{xrd}@{xrm}ms | frame={} | fun={} | stmt={} | expr={} | nat={} | host={} | phase={} | areq={} | stats={}\n",
+                t0.elapsed().as_millis(),
+                rss,
+                com,
+                drain,
+                calls,
+                gets(&explorer_jscore::LAST_FRAME),
+                gets(&explorer_jscore::LAST_FUN),
+                get(&explorer_jscore::LAST_STMT),
+                get(&explorer_jscore::LAST_EXPR),
+                get(&explorer_jscore::LAST_NAT),
+                gets(&explorer_jscore::LAST_HOST),
+                explorer_jscore::last_phase_str(),
+                areq,
+                gets(&explorer_jscore::LAST_STATS),
+            );
+            append_flight(&flog, flight_max_kb, &line);
+            std::thread::sleep(std::time::Duration::from_millis(flight_ms));
+        }
+    });
+}
+
+/// Append borné du flight log (étape 276) : rotation
+/// `.prev` quand le fichier dépasse `max_kb` — deux
+/// générations conservées, taille totale ≤ ~2×max. Les
+/// beats sont mono-lignes (chaîne de la morgue §B-59) —
+/// postmortem : dernier beat = site vivant.
+fn append_flight(path: &Path, max_kb: u64, line: &str) {
+    use std::io::Write as _;
+    if let Ok(meta) = std::fs::metadata(path) {
+        if meta.len() > max_kb.saturating_mul(1024) {
+            let prev = path.with_extension("prev");
+            let _ = std::fs::remove_file(&prev);
+            let _ = std::fs::rename(path, &prev);
+        }
+    }
+    if let Ok(mut f) = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(path)
+    {
+        let _ = f.write_all(line.as_bytes());
+    }
 }
 
 /// Writer stderr + fichier optionnel (`EXPLORER_LOG` →
@@ -615,7 +746,7 @@ impl std::io::Write for TeeWriter {
 }
 
 #[allow(clippy::too_many_lines)] // setup séquentiel — chaque bloc est documenté in situ
-async fn amain() {
+async fn amain(death_log: PathBuf) {
     // Défaut `info` sans `RUST_LOG` (vol 18 : les `warn`
     // iframe étaient perdus — le filtre vide ne passe que
     // `error` ; le daemon est un hôte de diagnostic, les
@@ -656,12 +787,11 @@ async fn amain() {
         // `profiles/<nom>`/`vols/<nom>/profile` sous
         // `Explorer-data` (étape 262) ; chemin explicite →
         // honoré (override volontaire, pas du hardcodage).
-        .map(|p| {
+        .map_or_else(store::JsonFileStore::default_dir, |p| {
             p.to_str()
                 .and_then(explorer_core::paths::resolve_profile_name)
                 .unwrap_or(p)
-        })
-        .unwrap_or_else(store::JsonFileStore::default_dir);
+        });
     // Verrou d'instance unique sur le profil — partagé avec le
     // mode FFI (`acquire_profile_lock`, même sémantique :
     // deux processus sur le même state/ = deux writers JSON).
@@ -815,8 +945,21 @@ async fn amain() {
     // listener : deuxième client de `Session`, même verrou,
     // même clé. Routeur disjoint du REST pour garder la
     // couture UI intacte.
-    let app = explorer_api::router_with_egress(session.clone(), cfg.api_key.clone(), egress)
-        .merge(explorer_agent::agent_router(session, cfg.api_key.clone()));
+    // Canal d'arrêt graceful (étape 296) : le handler
+    // `POST /api/shutdown` pousse `true` — `shutdown_signal`
+    // sélectionne dessus au même titre que Ctrl-C/console.
+    let (shutdown_tx, shutdown_rx) = tokio::sync::watch::channel(false);
+    let app = explorer_api::router_with_shutdown(
+        session.clone(),
+        cfg.api_key.clone(),
+        egress,
+        shutdown_tx,
+    )
+    .merge(explorer_agent::agent_router_with_profile(
+        session,
+        cfg.api_key.clone(),
+        Some(profile_dir.clone()),
+    ));
     if cfg.api_key.is_some() {
         tracing::info!("clé d'API requise (x-api-key / ?key=)");
     }
@@ -860,7 +1003,7 @@ async fn amain() {
     };
     tracing::info!(addr = %cfg.bind, "explorer-daemon prêt");
     let r = axum::serve(listener, app)
-        .with_graceful_shutdown(shutdown_signal())
+        .with_graceful_shutdown(shutdown_signal(death_log, shutdown_rx))
         .await;
     if let Err(e) = r {
         tracing::error!(error = %e, "serveur arrêté");
@@ -870,10 +1013,23 @@ async fn amain() {
     tracing::info!("arrêt propre");
 }
 
-/// Ctrl-C (SIGINT) ou SIGTERM unix → fin du `serve` sans
-/// couper les requêtes en vol.
-async fn shutdown_signal() {
+/// Ctrl-C (SIGINT), SIGTERM unix ou **événement console
+/// Windows** (`close`/`logoff`/`shutdown`) → fin du `serve`
+/// sans couper les requêtes en vol.
+///
+/// Étape 276 : les événements console sont des kills externes
+/// — une fermeture de console, de session ou un arrêt système
+/// terminait le processus sans qu'aucun crochet ne coure
+/// (`alive` résiduel, zéro panic, zéro WER — signature des
+/// morts KAYAK field266/272/273). Ils sont désormais
+/// interceptés et **nommés** dans la sentinelle
+/// (`console:close`/`console:logoff`/`console:shutdown`,
+/// conservée à l'arrêt) : un `alive` résiduel après cette
+/// étape exclut le kill console et resserre le diagnostic
+/// sur stack overflow, alloc-abort ou kill par PID.
+async fn shutdown_signal(death_log: PathBuf, api: tokio::sync::watch::Receiver<bool>) {
     let ctrl_c = tokio::signal::ctrl_c();
+    let api_stop = api_stop(api);
     #[cfg(unix)]
     {
         use tokio::signal::unix::{signal, SignalKind};
@@ -881,9 +1037,89 @@ async fn shutdown_signal() {
             tokio::select! {
                 () = async { let _ = ctrl_c.await; } => {}
                 () = async { let _ = term.recv().await; } => {}
+                () = api_stop => write_api_stop(&death_log),
             }
             return;
         }
     }
+    #[cfg(windows)]
+    {
+        tokio::select! {
+            k = windows_console_kind(ctrl_c) => {
+                if let Some(k) = k {
+                    // ~5 s avant le kill forcé après CTRL_CLOSE —
+                    // suffisant pour nommer la mort.
+                    let _ = std::fs::write(&death_log, format!("console:{k}\n"));
+                    eprintln!("explorer-daemon : événement console {k} — arrêt nommé");
+                }
+            }
+            () = api_stop => write_api_stop(&death_log),
+        }
+    }
+    #[cfg(not(windows))]
     let _ = ctrl_c.await;
+}
+
+/// Le récepteur devient prêt quand `POST /api/shutdown` a
+/// poussé `true` (étape 296) — canal `watch` : l'armement
+/// survit à un ordre d'évaluation défavorable, pas de course
+/// handler/sélecteur.
+async fn api_stop(mut api: tokio::sync::watch::Receiver<bool>) {
+    while api.changed().await.is_ok() {
+        if *api.borrow() {
+            return;
+        }
+    }
+}
+
+/// Arrêt propre demandé via l'API : nommé `shutdown:api` à
+/// la sentinelle — la post-mortem distingue « demandé par le
+/// canal de contrôle » d'un kill externe et des événements
+/// console (`console:*`, étape 276).
+fn write_api_stop(death_log: &Path) {
+    let _ = std::fs::write(death_log, "shutdown:api\n");
+    eprintln!("explorer-daemon : arrêt demandé via /api/shutdown");
+}
+
+/// Attente des événements console Windows (étape 276) :
+/// `Some("close"|"logoff"|"shutdown")` à l'événement,
+/// `None` sur Ctrl-C/Ctrl-Break. Chaque `CtrlX` est un flux
+/// borné : `recv()` rend à l'événement ; l'enregistrement
+/// échoué (`None`) retombe sur un `pending` — la branche ne
+/// se déclenche jamais.
+#[cfg(windows)]
+async fn windows_console_kind(
+    ctrl_c: impl std::future::Future<Output = std::io::Result<()>>,
+) -> Option<&'static str> {
+    use tokio::signal::windows::{ctrl_close, ctrl_logoff, ctrl_shutdown};
+    let mut close = ctrl_close().ok();
+    let mut logoff = ctrl_logoff().ok();
+    let mut shutdown = ctrl_shutdown().ok();
+    tokio::select! {
+        _ = ctrl_c => None,
+        () = async {
+            match close.as_mut() {
+                Some(s) => {
+                    let _ = s.recv().await;
+                }
+                None => std::future::pending::<()>().await,
+            }
+        } => Some("close"),
+        () = async {
+            match logoff.as_mut() {
+                Some(s) => {
+                    let _ = s.recv().await;
+                }
+                None => std::future::pending::<()>().await,
+            }
+        } => Some("logoff"),
+        () = async {
+            match shutdown.as_mut() {
+                Some(s) => {
+                    let _ = s.recv().await;
+                }
+                None => std::future::pending::<()>().await,
+            }
+        } => Some("shutdown"),
+    }
 }

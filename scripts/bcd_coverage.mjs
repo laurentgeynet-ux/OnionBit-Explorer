@@ -14,7 +14,7 @@
 //   builtins   bcd.javascript.builtins (prof. 2) → `eval` jscore
 //   api        bcd.api (interfaces + membres) → `api` jscore
 //              (moteur avec surface navigateur installée)
-//   values     bcd.css.properties.<p>.<v> → `check affectsv`
+//   values     bcd.css.properties.<p>.<v> → `check affectsv` ∪ `check paintv`
 //              (fixture par famille — la déclaration exacte
 //              doit changer le box tree)
 //   html       bcd.html.elements → `check html`
@@ -33,6 +33,21 @@
 //   --missing  nb de manques listés par section (défaut 12,
 //              0 = aucun)
 //   --only     une seule surface (props|routed|sel|at|js|api|values|html)
+//   --families tableau ok/total par prop de css.values,
+//              trié par miss — la file v2 en une passe
+//   --gate f   cliquet : exit 1 si un score < baseline f.json
+//   --save f   écrit la baseline (attention : écrase tel quel)
+//   --save-if-better f  cliquet + sauvegarde sûre : refuse
+//              toute régression (scores + familles),
+//              fusionne les clés, n'écrit que sur
+//              progression (étape 278)
+//   --history f.jsonl   ajoute {ts, sha, scores, families}
+//              à un journal append-only — dérive
+//              attribuable à un commit (étape 278)
+//
+// Baseline v2 : `{scores, families}` — `families` porte les
+// compteurs ok par prop de css.values (cliquet intra-
+// surface ; les fichiers v1 `{scores}` restent acceptés).
 //
 // Critères (biais documentés) :
 // - props/sel/at : nom *reconnu* (prop_supported /
@@ -51,7 +66,7 @@
 //   dénominateur.
 
 import { execFileSync } from 'node:child_process';
-import { existsSync, writeFileSync, rmSync, readFileSync } from 'node:fs';
+import { appendFileSync, existsSync, writeFileSync, rmSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
@@ -117,6 +132,14 @@ function checkBatch(kind, names) {
 }
 
 const scores = {};
+// Baseline v2 (étape 278) — compteurs `ok` par prop pour
+// les surfaces à granularité familiale (css.values) :
+// cliquet fin, une régression intra-surface ne peut plus
+// être absorbée par la progression d'une autre famille.
+const families = {};
+// Totaux mesurés par famille (hors `na`) — affichage
+// `--families` seulement ; la baseline ne stocke que `ok`.
+const famTotals = {};
 function report(label, entries, okSet, note) {
   const ok = entries.filter(e => okSet.has(e.name)).length;
   scores[label] = ok;
@@ -129,7 +152,15 @@ function report(label, entries, okSet, note) {
   }
 }
 
-const sections = only ? [only] : ['props', 'routed', 'sel', 'at', 'js', 'api', 'values', 'html'];
+const SURFACES = ['props', 'routed', 'sel', 'at', 'js', 'api', 'values', 'html'];
+// `--only <nom>` inconnu = zéro surface mesurée → gate vert
+// à vide et `--save` écrirait une baseline vide : échec
+// bruyant plutôt que cliquet creux.
+if (only && !SURFACES.includes(only)) {
+  console.error(`--only inconnu : ${only} — surfaces : ${SURFACES.join('|')}`);
+  process.exit(2);
+}
+const sections = only ? [only] : SURFACES;
 
 for (const sec of sections) {
   if (sec === 'props') {
@@ -431,8 +462,16 @@ for (const sec of sections) {
       'surface navigateur installée (install_dom) — présence seule');
   } else if (sec === 'values') {
     // bcd.css.properties.<p>.<v> — la déclaration `p:v` change-
-    // t-elle le box tree (`check affectsv`) ? Conformité par
-    // feature : `display:ruby` ≠ `display:grid`.
+    // t-elle le rendu ? Conformité par feature :
+    // `display:ruby` ≠ `display:grid`. Double oracle
+    // (étape 274) : `affectsv` (box tree + dump display-list)
+    // ∪ `paintv` (diff de framebuffers — les effets peints
+    // hors du dump : filter, clip-path, transform-origin,
+    // mask-*, border-image*… servis par la bitmap data-URI
+    // du harnais). `na` n'est retenu que si les **deux**
+    // oracles classent neutre (initiale spec / CSS-wide /
+    // hors-oracle) — un `na` géométrique peignable part en
+    // mesure pixel.
     const pairs = [];
     for (const [p, node] of Object.entries(bcd.css.properties)) {
       for (const [v, vn] of Object.entries(node)) {
@@ -451,14 +490,39 @@ for (const sec of sections) {
       input: pairs.map(e => e.name).join('\n'),
       encoding: 'utf8', timeout: 600_000, maxBuffer: 64 * 1024 * 1024,
     }).split(/\r?\n/).filter(Boolean);
-    const okSet = new Set(lines.filter(l => l.endsWith('\tok')).map(l => l.split('\t')[0]));
-    // `na` = valeur initiale spec ou CSS-wide — neutre par
-    // construction (aucun oracle géométrique possible) →
-    // hors dénominateur, annoncée dans la note (ADR-0010).
-    const naSet = new Set(lines.filter(l => l.endsWith('\tna')).map(l => l.split('\t')[0]));
+    const geoOk = new Set(lines.filter(l => l.endsWith('\tok')).map(l => l.split('\t')[0]));
+    const geoNa = new Set(lines.filter(l => l.endsWith('\tna')).map(l => l.split('\t')[0]));
+    // Seconde passe pixel sur tout ce qui n'est pas `ok`
+    // géométrique : un `miss` de dump peut être un effet
+    // peint réel (union honnête des deux référentiels).
+    const rest = pairs.map(e => e.name).filter(n2 => !geoOk.has(n2));
+    const plines = rest.length ? execFileSync(cli, ['check', 'paintv'], {
+      input: rest.join('\n'),
+      encoding: 'utf8', timeout: 600_000, maxBuffer: 64 * 1024 * 1024,
+    }).split(/\r?\n/).filter(Boolean) : [];
+    const paintOk = new Set(plines.filter(l => l.endsWith('\tok')).map(l => l.split('\t')[0]));
+    const paintNa = new Set(plines.filter(l => l.endsWith('\tna')).map(l => l.split('\t')[0]));
+    const okSet = new Set([...geoOk, ...paintOk]);
+    // `na` = neutre sous les DEUX oracles (initiale spec /
+    // CSS-wide / famille hors-référentiel) → hors
+    // dénominateur, annoncée dans la note (ADR-0010).
+    const naSet = new Set([...geoNa].filter(n2 => paintNa.has(n2)));
     const measured = pairs.filter(e => !naSet.has(e.name));
     report('css.values', measured, okSet,
-      `déclaration exacte → effet géométrique (jauge non-saturante) ; ${naSet.size} neutres (initiale spec / CSS-wide) hors dénominateur`);
+      `déclaration → effet géométrique ∪ pixel (affectsv + paintv, jauge non-saturante) ; ${naSet.size} neutres hors dénominateur`);
+    // Cliquet par famille (étape 278) : compteurs `ok` par
+    // prop — une famille qui régresse pendant qu'une autre
+    // progresse reste invisible du total agrégé ; la
+    // baseline v2 les verrouille une à une.
+    const perProp = {};
+    const perPropTotal = {};
+    for (const e of measured) {
+      const p = e.name.slice(0, e.name.indexOf(':'));
+      perPropTotal[p] = (perPropTotal[p] ?? 0) + 1;
+      perProp[p] = (perProp[p] ?? 0) + (okSet.has(e.name) ? 1 : 0);
+    }
+    families['css.values'] = perProp;
+    famTotals['css.values'] = perPropTotal;
   } else if (sec === 'html') {
     // bcd.html.elements.<tag> — oracle de comportement par
     // élément (`check html`, étape 219) : « le tag parse »
@@ -475,6 +539,25 @@ for (const sec of sections) {
   }
 }
 
+// `--families` — tableau ok/total par famille (css.values),
+// trié par miss décroissant : la file terrain lisible sans
+// ré-interroger la baseline ni grep les misses.
+if (args.includes('--families')) {
+  for (const [label, perProp] of Object.entries(families)) {
+    const tot = famTotals[label] ?? {};
+    const rows = Object.keys(perProp)
+      .map(p => ({ p, ok: perProp[p], t: tot[p] ?? perProp[p] }))
+      .sort((a, b) => (b.t - b.ok) - (a.t - a.ok) || a.p.localeCompare(b.p));
+    const zero = rows.filter(r => r.ok === 0).length;
+    const full = rows.filter(r => r.ok === r.t).length;
+    console.log(`familles ${label} : ${rows.length} — ${full} pleines, ${zero} à 0 ok`);
+    for (const r of rows) {
+      const pct = (100 * r.ok / r.t).toFixed(1);
+      console.log(`    ${r.p.padEnd(34)} ${String(r.ok).padStart(3)}/${r.t} (${pct.padStart(5)} %)${r.t - r.ok ? `  miss=${r.t - r.ok}` : ''}`);
+    }
+  }
+}
+
 // ── Cliquet baseline (ADR-0010) ─────────────────────────────
 // `--save <f.json>` écrit les scores de cette passe ;
 // `--gate <f.json>` échoue (exit 1) si un score descend sous
@@ -482,19 +565,104 @@ for (const sec of sections) {
 // cliquet les verrouille.
 const saveIdx = args.indexOf('--save');
 const gateIdx = args.indexOf('--gate');
+// Cliquet creux : refuser save/gate sur scores vides —
+// `--save` écrirait une baseline vide (tout le cliquet
+// perdu) et `--gate` passerait vert sur rien.
+if ((saveIdx >= 0 || gateIdx >= 0 || args.includes('--save-if-better'))
+  && Object.keys(scores).length === 0) {
+  console.error(`cliquet refusé : aucune surface mesurée (--only inconnu ?)`);
+  process.exit(2);
+}
+// Charge une baseline v1 (`{scores}`) ou v2 (`{scores,
+// families}`) — v1 = cliquet agrégé seul.
+const loadBase = path => {
+  const j = JSON.parse(readFileSync(path, 'utf8'));
+  return { scores: j.scores ?? {}, families: j.families ?? {} };
+};
+const writeBase = (path, sc, fam) => writeFileSync(path,
+  JSON.stringify({ scores: sc, families: fam }, null, 2) + '\n');
+
+// Régressions par famille : une prop dont le compteur `ok`
+// descend sous la baseline = régression même si le total
+// tient. Les props absentes de la baseline (nouvelles en
+// BCD ou prop nouvellement mesurée) ne bloquent pas.
+const familyRegressions = base => {
+  const out = [];
+  for (const [label, perProp] of Object.entries(families)) {
+    for (const [p, v] of Object.entries(perProp)) {
+      const b = base.families?.[label]?.[p];
+      if (b != null && v < b) out.push(`${label}/${p} : ${v} < ${b}`);
+    }
+  }
+  return out;
+};
+
 if (saveIdx >= 0) {
-  writeFileSync(args[saveIdx + 1], JSON.stringify({ scores }, null, 2) + '\n');
+  writeBase(args[saveIdx + 1], scores, families);
   console.log(`baseline écrite → ${args[saveIdx + 1]}`);
 }
+// `--save-if-better <f.json>` (étape 278) : cliquet +
+// sauvegarde en un seul flag — la baseline n'est réécrite
+// que si aucun score mesuré ne régresse ; fusion des clés
+// (un `--only values` préserve les autres surfaces) ;
+// égalité stricte = pas d'écriture (zéro churn git).
+const betterIdx = args.indexOf('--save-if-better');
+if (betterIdx >= 0) {
+  const path = args[betterIdx + 1];
+  const base = existsSync(path) ? loadBase(path) : { scores: {}, families: {} };
+  const regress = Object.entries(scores)
+    .filter(([k, v]) => base.scores[k] != null && v < base.scores[k]);
+  const famRegress = familyRegressions(base);
+  if (regress.length || famRegress.length) {
+    for (const [k, v] of regress) {
+      console.log(`RÉGRESSION ${k} : ${v} < ${base.scores[k]} — baseline non sauvée`);
+    }
+    for (const r of famRegress) console.log(`RÉGRESSION famille ${r} — baseline non sauvée`);
+    process.exit(1);
+  }
+  const gained = Object.keys(scores).filter(k => scores[k] !== base.scores[k]);
+  const famGained = Object.keys(families).length > 0;
+  if (gained.length === 0 && !famGained) {
+    console.log(`aucune progression — baseline inchangée (${path})`);
+  } else {
+    // Fusion : les surfaces non mesurées (`--only`) gardent
+    // leurs compteurs, familles rafraîchies si mesurées.
+    writeBase(path, { ...base.scores, ...scores },
+      { ...base.families, ...families });
+    console.log(`baseline re-sauvée (${gained.join(', ') || 'familles'}) → ${path}`);
+  }
+}
 if (gateIdx >= 0) {
-  const base = JSON.parse(readFileSync(args[gateIdx + 1], 'utf8')).scores;
+  const base = loadBase(args[gateIdx + 1]);
   let regressions = 0;
   for (const [k, v] of Object.entries(scores)) {
-    if (base[k] != null && v < base[k]) {
-      console.log(`RÉGRESSION ${k} : ${v} < ${base[k]}`);
+    if (base.scores[k] != null && v < base.scores[k]) {
+      console.log(`RÉGRESSION ${k} : ${v} < ${base.scores[k]}`);
       regressions++;
     }
   }
+  for (const r of familyRegressions(base)) {
+    console.log(`RÉGRESSION famille ${r}`);
+    regressions++;
+  }
   if (regressions > 0) process.exit(1);
   console.log(`cliquet vert — aucune régression vs baseline`);
+}
+
+// `--history <f.jsonl>` (étape 278) : une ligne JSON par
+// passe mesurée — la dérive devient attribuable à un
+// commit. Append-only, jamais réécrit.
+const histIdx = args.indexOf('--history');
+if (histIdx >= 0) {
+  let sha = null;
+  try {
+    sha = execFileSync('git', ['rev-parse', '--short', 'HEAD'],
+      { encoding: 'utf8' }).trim();
+  } catch { /* hors dépôt — sha null toléré */ }
+  const line = JSON.stringify({
+    ts: new Date().toISOString(), sha, scores,
+    families: Object.keys(families).length ? families : undefined,
+  });
+  appendFileSync(args[histIdx + 1], line + '\n');
+  console.log(`historique ← ${args[histIdx + 1]}`);
 }

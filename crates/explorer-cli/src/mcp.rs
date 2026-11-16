@@ -365,10 +365,15 @@ async fn probe_daemon(port: u16) -> bool {
 /// (correctif Étape 256 — l'éviction sur sonde supprimait
 /// définitivement l'annonce d'un processus pourtant sain).
 fn live_announces() -> Vec<explorer_core::daemon_registry::Announce> {
+    use explorer_core::daemon_registry as reg;
+    // Une seule passe `netstat` pour toute la liste — la
+    // vivacité est (pid, image, port lié) : un pid réattribué
+    // n'emporte pas l'annonce du mort.
+    let ports = reg::listening_ports();
     let mut out = Vec::new();
-    for (file, a) in explorer_core::daemon_registry::list() {
-        if explorer_core::daemon_registry::announce_stale(&a) {
-            explorer_core::daemon_registry::remove(&file);
+    for (file, a) in reg::list() {
+        if reg::announce_stale_with(&a, ports.as_ref()) {
+            reg::remove(&file);
         } else {
             out.push(a);
         }
@@ -529,10 +534,12 @@ async fn spawn_daemon(args: &Value) -> Result<Value, String> {
 }
 
 /// `daemon_stop{name|port}` — arrêt ciblé par pid d'annonce.
-/// Windows : `taskkill /PID /T /F` (le handler Ctrl-C n'est
-/// pas joignable de l'extérieur) ; unix : SIGTERM (arrêt
-/// gracieux géré côté daemon). Jamais de `/IM` — on vise un
-/// pid précis, pas un nom d'image.
+/// **Graceful d'abord** (étape 296) : `POST /api/shutdown`
+/// nomme `shutdown:api` à la sentinelle et laisse la garde
+/// retirer l'annonce — le kill est le recours : `taskkill
+/// /PID /T /F` (le handler Ctrl-C n'est pas joignable de
+/// l'extérieur) ou SIGTERM unix si le port n'est pas libéré.
+/// Jamais de `/IM` — on vise un pid précis, pas une image.
 fn stop_daemon(args: &Value) -> Result<Value, String> {
     let sel = args["daemon"]
         .as_str()
@@ -541,12 +548,29 @@ fn stop_daemon(args: &Value) -> Result<Value, String> {
         .or_else(|| args["port"].as_u64().map(|p| p.to_string()))
         .ok_or("daemon_stop : `daemon` (nom ou port) requis")?;
     let port = select_daemon(&sel)?;
+    // Un pid réattribué peut laisser une annonce périmée sur
+    // ce port : cibler uniquement l'annonce **vivante** —
+    // taskkill sur le pid du fichier mort tuerait un processus
+    // innocent (pid recyclé).
+    let ports = explorer_core::daemon_registry::listening_ports();
     let Some((file, a)) = explorer_core::daemon_registry::list()
         .into_iter()
-        .find(|(_, a)| a.port == port)
+        .find(|(_, a)| {
+            a.port == port
+                && !explorer_core::daemon_registry::announce_stale_with(a, ports.as_ref())
+        })
     else {
-        return Err(format!("aucune annonce pour {sel} — déjà arrêté ?"));
+        return Err(format!("aucune annonce vivante pour {sel} — déjà arrêté ?"));
     };
+    // Graceful d'abord (étape 296) : `POST /api/shutdown` →
+    // arrêt nommé `shutdown:api` à la sentinelle, garde
+    // d'annonce droppée, drains TLS flushés — taskkill en
+    // dernier recours si le port ne se libère pas.
+    if graceful_shutdown(a.port) {
+        explorer_core::daemon_registry::remove(&file);
+        return Ok(json!({"stopped": true, "graceful": true,
+                         "name": a.name, "pid": a.pid}));
+    }
     // stdio null : le serveur MCP vit sur stdout — la sortie
     // d'un enfant hérité y corromprait le protocole JSON-RPC.
     #[cfg(windows)]
@@ -569,6 +593,30 @@ fn stop_daemon(args: &Value) -> Result<Value, String> {
         Ok(s) => Err(format!("arrêt pid {} : code {}", a.pid, s)),
         Err(e) => Err(format!("arrêt pid {} : {e}", a.pid)),
     }
+}
+
+/// `POST /api/shutdown` loopback minimal (étape 296) —
+/// HTTP/1.0 ~80 octets, pas de client : la seule preuve qui
+/// compte est le **port libéré** sous la fenêtre de grâce
+/// (~4 s), la réponse elle-même pouvant être coupée par la
+/// sortie du processus. `true` = le daemon a rendu la main
+/// proprement (sentinelle `shutdown:api`, annonce droppée
+/// par sa garde) ; `false` = wedged ou absent → le caller
+/// retombe sur le kill processus.
+fn graceful_shutdown(port: u16) -> bool {
+    use std::io::Write;
+    let req = format!(
+        "POST /api/shutdown HTTP/1.0\r\nHost: 127.0.0.1:{port}\r\nContent-Length: 0\r\n\r\n"
+    );
+    let _ = std::net::TcpStream::connect(("127.0.0.1", port))
+        .and_then(|mut s| s.write_all(req.as_bytes()));
+    for _ in 0..40 {
+        std::thread::sleep(std::time::Duration::from_millis(100));
+        if std::net::TcpStream::connect(("127.0.0.1", port)).is_err() {
+            return true;
+        }
+    }
+    false
 }
 
 /// `daemon_list` — le registre sondé : vivants (PID) +

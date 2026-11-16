@@ -70,6 +70,7 @@ Règles :
 | 2026-11-09 | `explorer-core` — `relayout_dom_payload` (`session/apply.rs`) | **R-190 `@container` — demande de branchement de la 2ᵉ passe style→layout** (plan amendé après revue croisée : boucle en core — `styles_payload` porte anims/images/state qu'une boucle en `explorer-layout` perdrait). PIPE livre côté domaine, **additif — passe 1 strictement identique quand le ctx est vide** (coût zéro sans `@container`/`container-type`) : (1) `explorer-css` — règles `@container` inlinées dans la table (`CollectedRule.container: Option<u32>` → index dans `container_queries` devenue table de prédicats `name`+`query` ; `order`/`scope`/`layer`/`media` réutilisés — même récursion `collect_rules_into` que `@media`, donc `@media` imbriqué dans `@container` composé gratis) + `compute_tree_with_ctx(dom, root, env, state, ctx)` — le `ctx` résout pour chaque nœud son conteneur ancêtre (chaîne `dom.parent`, `container-name` filtré, le plus proche gagnant) et évalue `matches_container_query` sur la border-box mesurée ; (2) `explorer-layout` — `measure_containers(&LayoutBox) -> HashMap<NodeId, Rect>` (border-box posée des boîtes `container-type != normal` — `display:inline`/`contents` exclus). **Branchement NAV** dans `relayout_dom_payload` après `layout_tree` : `eng.container_queries` non vide → `measure_containers` → `compute_tree_with_ctx` → si un style change : re-`build_box_tree_sized` + `layout_tree`. **Borne : une seule passe 2, pas d'itération** — queries `(min\|max)-width` stables ; oscillation height documentée. Deux points à trancher côté NAV : la passe 2 doit **ré-appliquer `apply_anim_overrides`** (les styles bruts saute(nt) transitions/animations sur les nœuds retagués) ; et la **re-collecte d'images** (`collect_data_images`/`insert_fetched_images`/`image_sizes`/`svg_sizes` consomment `styles` — une règle `@container` qui change `background-image`/`content` ne charge rien en passe 2 sans re-collecte, limitation MVP documentable). Verrou d'intégration proposé (`session/tests.rs`) : conteneur `inline-size` large vs étroit → même règle `@container`, verdicts différents sur taille **mesurée** ; + hostiles (query plage `(width >= 400px)` et `not(…)` — `matches_container_query` les traite aujourd'hui ouverts, faux positifs à verrouiller côté css). **Séquencement dégelé** — R-195 livré (`b52a1399` + `a471a9bb` : `viewport_env` porte `dpr`, toute la chaîne `collect_images`/`resolve_sizes` est passée à `&StyleEnv` — l'env session est filée, le ctx `@container` en hérite sans friction). | PIPE (R-190) | **livré des deux côtés** — domaine PIPE (`3c5d8ad6`) + boucle NAV (`4d9d7873`, voir entrée NAV) |
 | 2026-11-10 | `explorer-cli shot --report` + dump géométrique normalisé | **Plan « recensement des features » PIPE — contrat de consommation NAV posé** (acceptation de la demande PIPE, sprints 2/3 livrés côté NAV : `site_harvest.ps1` étape 212 + `ref_capture.mjs` étape 213). Ce que la récolte attend du `--report out.json` annoncé : le JSON est fusionné **verbatim** sous `site.report` ; le Pareto du `report.html` agrège `report.census` — toute map `{clé: count}` à profondeur quelconque (`css.dropped.*`, `html.errors.*`, `layout.anomalies.*`, `js.not_implemented.*`…) ; `doc_h` lu si présent. Aucun autre champ exigé — forme libre, le dashboard suit. Côté oracle : `GET /api/tabs/{id}/layout` **existe déjà** (dump wireframe texte, étape 17 — `site_harvest -Mode daemon` le collecte par site) ; le dump géométrique **normalisé** du sprint 3 (JSON `NodeId→rect` pour le diff boîte-à-boîte vs `getBoundingClientRect`) reste à forme arrêter côté PIPE — la référence Chrome produite est `<nom>.ref.json` = `{doc_w, doc_h, boxes:[{tag,id,cls,x,y,w,h}]}`. | NAV (étapes 212/213) | **sprint 1 livré → R-207** (API `explorer_common::census` + `TreeStats` — les clés `css.*`/`html.*` entrent verbatim dans `report.census`) — reste : câblage `--report` NAV + dump géométrique |
 | 2026-11-13 | `explorer-css` cascade scopée + `explorer-render` display list/raster | **Audit perf — deux chantiers PIPE mesurés, suite Étape 231** (vol `sync_profile` dev.to réel, debug, cycle `incr.*` ~46 s : repaint 36 s, style 9,4 s, relayout 0,85 s — interpréteur ~1 %). (a) **Cascade scopée `:has`-aware** : `eng_has_relational` (scan `contains(":has(")` au build) replie toute la voie journal en `compute_tree` complet — dev.to sert 2 règles `:has` dans `minimal-*.css` dont les args sont des sélecteurs d'attributs purs (`[data-display-unit]`, `[data-placement-hidden]`). Demande : un index structuré par feuille (sujet + dépendances des args `:has` — noms d'attributs/classes/tags + marqueur « positionnel interne ») exposé à l'appelant, pour que NAV replie **seulement** quand une op du journal touche une dépendance sur un sujet potentiellement vivant (garde par dépendances) — ou, plus juste, une extension `compute_scoped` acceptant un ensemble « frontière » (ancêtres + frères précédents des touchés — le sujet de `E:has(arg)` vit toujours au-dessus ou à gauche du match) évaluée en sus du sous-arbre. Résorbe au passage les faux positifs du substring-check (attributs contenant `:has(`). Verrous existants : `styles_scoped_falls_back_on_has`. (b) **Émission + raster bornés à la bande viewport** : le fenêtrage (R-62) borne les *pixels*, pas les *items* — `resolved_bounds` est O(items × profondeur transform) et `replay_items` itère toute la liste à chaque apply (`PushClip*` allouent leur `Mask` avant le test de cull), et l'émission `build_display_list_incremental` traverse l'arbre entier (la copie R-37 évite la ré-émission des sous-arbres, pas la traversée ni `record_span` — `reuse_delta` re-sonde même les descendants pour prouver le Δ). Pistes nommées : cull **à la descente** dans `paint_box` (sauter les sous-arbres `rect ∩ bande = ∅` hors porteurs d'échappement — `fixed`, positionnés reportés, inlines `defer`, breakout de clip — un flag « contient un échappant » à spécifier), `resolved_bounds` incrémental/cache (même durée de vie que `spans`), `Mask` de clip retardé au test fenêtre, `SpanMap`/`emit_per_path` sans `Box<[u16]>` par boîte. Ordonnancement tranché par le re-vol Étape 232 (dev.to réel, debug — 3 cycles `incr` ~44 s mesurés vs ~46 s wall, couverture ~96 %) : **`incr.raster` 33,5 s (~76 %) ≫ `incr.emit` 1,1 s** → le poste est `resolved_bounds`+`replay_items`, pas l'émission ; **`incr.cascade` 8,5 s (~19 %) ≫ `incr.stylpost` 64 ms** → le repli `:has` est ~99 % du poste style, les post-passes O(N) sont négligeables (Étape E caduque). JS confirmé non-goulot jambes mesurées : `net.commit_scripts` 1,35 s, `net.dl_*` ≤ 115 ms. Aucun commit NAV dans ces crates sans retour PIPE. | NAV (audit perf, étapes 231/232) | demande NAV — mesuré au re-vol 2026-11-13 : raster ≫ emit, cascade ≫ stylpost. **(b) partiellement livré NAV-side → Étape 233** (cull clips hors-pixmap, voir Journal) ; **(a) soldé NAV-side → Étape 234** (garde par dépendances sur AST public + multi-scope — zéro modif PIPE ; mécanique prouvée `scope 68 → cascade 0,19 s`, dev.to borné par un parent ~5k nœuds — reliquat PIPE : compute frontière ancêtres+frères, `Mask` à `clip ∩ pixmap`, émission cullée descente, `resolved_bounds` incrémental) |
+| 2026-11-16 | `explorer-layout` — whitespace adjacent à un bloc = line box fantôme | **Constat post-Étape 294 (geo_diff lobste.rs, `moved` résidu ~30 px/story, `doc_h` 2534 vs ref 1757)** : les nœuds texte whitespace seuls adjacents à une frontière de bloc émettent des line boxes ~16-17 px là où Chrome les collapse. Repro minimal servi (`ol>li.story>div.details` + `li .link{display:inline-block;margin:0}`) : `div.details` y=38, `h2.link` y=55 → **+17 px avant le h2** (margin:0 prouvé actif — h2 w=527 shrink-to-fit, pas pleine largeur) ; idem whitespace avant `div.byline` → +~16 px. Chrome : whitespace en tête de contexte inline et whitespace seul entre contenu inline et enfant bloc = collapsé (CSS 2.1 §9.2.2.1 + §16.6.1 — pas de boîte). Impact corpus : lobste.rs = +30 px/story → `dy` cumulatif ~500 px en pied, probablement dominant dans les `moved` restants des autres sites du smoke. **Demande** : whitespace-only runs adjacentes à une frontière de bloc (début/fin de contexte inline, ou précédant un enfant `display:block` dans un conteneur mixte) doivent s'effondrer — vérifier `boxtree` anonymous-inline/whitespace-drop avant la mise en ligne. | NAV (étape 295, constat geo_diff) | demande PIPE |
 
 ## Seam `MediaSurface` (étape 71 — ADR-0024)
 
@@ -262,6 +263,7 @@ ni l'un ni l'autre. Variante arrêtée (pull, cohérente avec
 
 | Date | Contrat | Changement | Commit |
 |---|---|---|---|
+| 2026-11-15 | `explorer-render` `svg::collect_svg_styled` — **ré-export racine, extension additive** (étape 274) | La fonction était `pub` dans `svg.rs` (R-283) mais absente du `pub use` de `lib.rs` — le harnais `paintv` d'`explorer-cli` (NAV) en a besoin pour rasteriser les îlots `<svg>` style-aware (props `fill`/`stroke`/`d`/`cx`… projetées depuis la `StyleMap`). Ajout au `pub use svg::{…}` — zéro casse, signature inchangée. Consommée par `prop_paints_decl` avec `collect_data_images` + `build_display_list_full` + `rasterize` (tous déjà publics). **Résidu moteur nouvellement mesurable** (exposé par l'oracle pixel, file PIPE) : `mask-*` longhands (`size`/`position`/`repeat`/`clip`/`origin`/`composite`/`mode`/`type`, `mask-border*`), `border-image-{repeat,width,outset}`, `image-rendering`, `vector-effect`, `filter`/`clip-path`/`offset-path` en `url(#ref)`, `object-view-box`, `shape-image-threshold`, `fill`/`stroke` en `url(#serveur)` — avant : `na` hors dénominateur ; désormais `miss` mesurés honnêtes. | Étape 274 |
 | 2026-11-15 | `explorer-render` `replay_items` — **`ReplayStats` : demande NAV, extension additive** | **Demande — EAP `engine.paint_stats` (étape 249), revue croisée NAV+lead+PIPE actée**. Les compteurs `raster.parts` (items, `clips`/`clips_real`, `groups`/`groups_void`, `draws`/`skips`, `clip_us`/`group_us`/`draw_us` + `kind_us`/`kind_n` ×5 familles) sont **déjà calculés inconditionnellement** dans le chemin chaud de `replay_items` (privée) — ils ne sortent qu'en `tracing` (`tab = 0u64` codé en dur dans l'event). Contrat demandé, précédent `EmitStats` exact : `pub struct ReplayStats` + variantes additives `rasterize_stats` / `rasterize_dirty_cached_stats` / `rasterize_window_cached_stats` → `(Option<Frame>, ReplayStats)` — **les trois points d'entrée utilisés par apply** (`apply.rs:3645/3663/3710`), sinon angles morts selon le chemin de paint. Zéro casse de signature ; la ligne `tracing` `raster.parts` reste émise (l'outillage terrain la greppe). ~30 lignes PIPE — mini-étape R demandée **en premier** : elle débloque 249 complet au lieu d'un `raster: null`. | livré → **R-300** (amendement livraison : +`rasterize_cached_stats` — le journal nommait `rasterize_stats`, or apply appelle `rasterize_cached` — et +`rasterize_slice_cached_stats` pour le chemin top-slice média `frame.rs:284` ; 5 variantes = couverture complète des points de paint) |
 | 2026-11-15 | `explorer-css` cascade — **`DeclTrace`/`explain` : demande NAV, contrat figé champ par champ** | **Demande — EAP `engine.cascade{ref}` (étape 253), revue croisée NAV+lead+PIPE actée**. Forme : **puits `Option<&mut DeclTrace>` threadé dans `compute_with_parent`** (pattern `EmitStats` — les verdicts s'enregistrent là où ils se produisent réellement ; un fork de la boucle collecte→tri→résolution divergerait : `all:`, shorthands, rangs R-215, `resolve_logical`, `-webkit-text-fill-color` évoluent encore). `explain` = le vrai chemin de calcul pour un nœud, puits armé. **Signature** : `explain(&self, dom, node, env, parent: Option<&ComputedStyle>, pseudo: Option<PseudoElement>, state: &dyn Fn(&str)->bool, containers: Option<&HashMap<NodeId, ContainerMeasure>>) -> Vec<DeclTrace>` — `mcache`/`anc` internes ; NAV passe `parent` depuis la `StyleMap` vivante et `state`/`env` de la passe réelle (`:hover`/`:valid` sinon divergents) ; `containers` **recalculé par NAV** via `explorer_layout::measure_containers` sur le boxtree committé — borne honnête : le paint évaluait sur les mesures pass-1 (une passe, pas d'itération — R-190), `explain` évalue sur la géométrie committée, un `gated(container)` peut différer si la bascule a déplacé le conteneur. **Unité = déclaration × longhand** (shorthands/`all:` expandés). **`DeclTrace`** : `prop` (longhand), `value`, `selector` **texte source** (pièce additive : retenir le texte brut dans `CollectedRule` à la collecte — `ComplexSelector` n'a ni `Display` ni texte conservé ; exact et moins cher qu'une re-sérialisation), `sheet` (rang + origine de feuille), `inline` (`style=` — fusionné au même tri), clé de tri `(rank, scope_rank, layer, spec, order)`, `verdict`. **Verdicts** : `winner` ; `eliminated_by(origin ∧ scope ∧ layer ∧ specificity ∧ order)` — position relative dans le tri, `important` plié dans `rank`/inversion layers, pas clé autonome ; `gated(media ∧ container ∧ scope ∧ mode)` — les `return` silencieux de `consider` (`selector_reaches`→scope, `@media`, `@container`) enregistrés au lieu de filtrer, + index quirks en mode standards (`mode`) ; `dropped(validation)` (`value_is_valid_for` post-tri) ; `invalid_at_computed` (`var()` irrésoluble) ; `presentational_hint` (rang 0 des attributs HTML — pas une origine CSS) ; `inherited` / `initial` (aucune déclaration candidate — distingués pour ne pas tromper l'agent) + bonus `inherited_from(node)` à 5 lignes. **Hors-borne déclarés** : déclarations mortes au parse (`decl.malformed` n'atteint jamais `CollectedRule` — invisibles) ; vérité de **cascade, pas post-anim** (`apply_anim_overrides` vit côté core) ; état committé (mutations en vol invisibles — le `parent` vient du style stocké). **Implémentation : PIPE** (étape R dédiée, taille M — la taxonomie exige les entrailles de `compute_with_parent`), en file après la mini-R `ReplayStats`. | livré → **R-301** (amendements livraison : `GateKind::Pseudo` — le filtre `e.pseudo != pseudo` est la première porte de `consider`, il faut un verdict pour `::before`/`::marker` expliqués côté élément ; `DeclVerdict::Superseded` — une écriture gagnante peut être écrasée par les résolutions post-cascade nommées (logique→physique R-215, `-webkit-text-fill-color`→`color` R-235) : un `winner` persistant aurait menti ; `initial` borné aux propriétés supportées non posées — valeur initiale incluse ; `spec_by_rule` retient le sélecteur dominant pour la provenance, premier matché à spécificité égale) |
 | 2026-11-13 | `explorer-layout` `content-visibility`/`contain: size` (R-251) | **Intervention NAV dans le périmètre PIPELINE — correctness, audit perf chantier 8** : le leaf-skip de `build_box_tree_env` traitait `content-visibility: auto` comme un skip inconditionnel dès que `contain-intrinsic-*` était déclaré — un contenu `auto` sous le pli restait **définitivement invisible** au scroll (le skip auto n'existe que tant que l'élément n'est « pas pertinent », indécidable à la boxification). Désormais : seul `hidden` saute les enfants (feuille à taille `contain-intrinsic-*`, (0,0) sinon) ; `contain: size|strict` force la taille via `bx.intrinsic` tout en **gardant les enfants boxifiés** ; `auto` n'entre dans aucun bras. Aucune casse de signature — comportement de `LayoutBox.intrinsic` étendu aux boîtes non-feuilles. Verrous : `contain_intrinsic` ×3 (layout), `content_visibility_auto_paints_after_scroll`, `content_visibility_hidden_never_paints_contents` (session). La promotion viewport-aware d'`auto` (perf) reste un chantier PIPELINE si voulu. | Étape 230 |
@@ -3671,3 +3673,485 @@ décider). À ouvrir ici quand quelqu'un reprendra la
 persistance IDB proprement ; le contrat `JsEngine`
 (`drain_idb` → ops au lieu de snapshot) est interne NAV,
 aucune frontière d'équipe ne bloque.
+
+### 2026-11-16 — Étape 267 (NAV) : `session.ping` hors verrou + `busy`/`in_flight`
+
+**Livré** (`explorer-agent`, trou opérationnel n°1 du verdict
+field263 — airfrance : EAP entier muet > 7 min derrière un
+verbe wedged). La boucle WS `await`ait chaque dispatch en
+ligne : un verbe tenant la session retenait **même la
+lecture** des trames suivantes — `ping` n'avait jamais besoin
+du verrou mais n'arrivait jamais à dispatch. Désormais :
+dispatcher FIFO par connexion (file `mpsc` bornée 64, refus
+honnête au-delà), `ping`/`close`/erreurs de parse servis **en
+ligne**, `ping` → `ts_ms` + `busy` (verbe en vol ici OU
+session tenue par ailleurs via `try_lock`) +
+`in_flight{method, held_ms}`. `close` saute la file et laisse
+le verbe en vol finir sa course — **pas d'annulation** :
+couper un `nav` wedged proprement exige des jetons
+coopératifs dans les chemins nav/pompe, chantier séparé à
+ouvrir si le besoin revient.
+
+### 2026-11-16 — Étape 268 (NAV) : `session.cancel` — annulation coopérative du verbe en vol
+
+**Livré** (`explorer-agent`, demande NAV n°1 du retour terrain
+PIPE — solde le chantier annoncé à l'entrée 267 : le triptyque
+wedge était incomplet — détecter `busy` → nommer `in_flight` →
+**libérer**). `session.cancel` est servi **en ligne** au même
+titre que `ping`/`close` — jamais mis en file : sans verbe en
+vol → `{cancelled:false, reason:"no_in_flight"}` ; avec →
+`{cancelled:true, method:"…"}` et le flag est armé. Le
+dispatcher `select!` le dispatch contre l'attente du flag :
+le futur droppé abandonne le verbe à sa prochaine frontière
+d'await — sémantique bouton Stop, les effets déjà commis
+restent visibles — et le client reçoit **`-32009` `Cancelled`**
+(nouveau code distinct de `-32004` : « abandonné sur demande »,
+pas « échu »). La mécanique de drop est celle déjà garantie
+par le core pour un client tombé en vol (`paint_detached`
+parqué, verrous relâchés — issue #23). **Limites honnêtes** :
+coopératif pas préemptif — un verbe dans une section CPU
+synchrone est relâché à son prochain yield ; par-connexion —
+un `cancel` ne touche que le verbe de sa propre connexion
+(celle qui a lancé le wedged) ; les verbes en file d'attente
+derrière ne sont pas annulés (le `close` reste la porte pour
+vider la file). Contrat additif : verbe + code au schéma.
+Verrou : `session_cancel_libere_verbe_en_vol`.
+
+### 2026-11-16 — Étape 269 (NAV) : `deferred_inputs` — borne honnête, outcome `dropped`
+
+**Livré** (`explorer-core`, demande NAV n°2 du retour terrain
+PIPE — field266 : 25/25 `input.key` enfilés sous churn
+quasi-permanent). La file `deferred_inputs` était déjà
+bornée (`MAX_DEFERRED_INPUTS = 32`) mais l'abandon au-delà
+était **silencieux** : l'appelant répondait `Deferred`
+alors que l'entrée n'avait pas été prise — l'agent
+attendait un rejeu impossible. `defer_input` rend
+désormais si l'entrée a été prise (enfilée ou coalescée) ;
+nouveau `InputOutcome::Dropped` propagé par les deux
+gardes (synchrone + shared — parité préservée). Surfaces
+(additif) : EAP `result:"dropped"` + `reason:"queue_full"`,
+REST idem, FFI code `8`. Le client réessaie après un
+commit au lieu d'attendre. Contrat : enum `actionResult`
+du schéma complétée (`deferred`/`dropped`/`noop`).
+
+### 2026-11-17 — Étape 270 (NAV) : `css.values` qualifié — résidu moteur documenté
+
+**Contexte** : la liste lestée terrain (1 077 misses,
+50,1 %) mélangeait trous moteur et artefacts de jauge.
+Passe bornée côté `explorer-cli` uniquement — **aucun
+crate PIPE touché**. Score honnête : **1 116/1 748
+(63,8 %)**, 950 neutres exclus du dénominateur (vs
+539 avant) ; +34 `ok` de fixtures réparées ou de
+sondes méta qui ont trouvé des implémentations
+existantes.
+
+**Artefacts éliminés (jauge NAV)** : initiales spec →
+`na` (`INITIAL_EXTRA` étendue) ; effets hors oracle
+statique (curseur, caret, scroll dynamique,
+pagination, raster sans bitmap, portée SVG) →
+`NO_ORACLE` ; noms de *features* BCD sondés comme
+littéraux invalides → `subfeature_probe` traduit en
+déclaration mesurable (~120 cas) ou `na` quand aucun
+littéral n'existe (`is_animatable`, `svg_elements`,
+`*_context`, `image-set`…) ; fixtures réparées (flex
+mono-ligne, grid multi-pistes, `.x::before`+`quotes`,
+background non-répétée réduite, z-index superposé,
+texte enrichi, conteneur à rangées pour `row-rule*`).
+
+**Résidu = file moteur PIPE** (~632 misses, familles
+par poids mesuré — liste exhaustive dans le rapport
+`bcd_coverage.mjs --only values --missing 9999`) :
+
+- **`position-try*` (37), `offset*` (26)** — ancrage/
+  motion path : familles partielles, valeurs
+  résiduelles non implémentées.
+- **Sizing intrinsèque sur props logiques (~60)** —
+  `block-size`/`inline-size`/`min-*`/`max-*` avec
+  `fit-content`/`max-content`/`min-content`/`stretch` :
+  `width:fit-content` passe, les logiques ratent.
+- **Shorthands à token unique (~55)** — `border-block`,
+  `border-inline*`, `text-decoration`, `outline`,
+  `column-rule`, `background` post-image : le token
+  seul doit réinitialiser les autres longhands.
+- **Ancrage CSS (~35)** — `anchor(--a)`/`anchor-size()`
+  non implémentés (toute la famille inset/margin
+  concernée).
+- **Texte (~100)** — `white-space` css-text-4,
+  `unicode-bidi` (moteur bidi absent), `text-fit`,
+  `reading-flow`, `text-align-last`, `hanging-
+  punctuation`, `text-emphasis-position`, `line-*`,
+  `ruby-*`, `text-transform`/`text-overflow` résiduels.
+- **Règles css-gaps (~80)** — `row-rule*`, `rule-*`
+  (`inset`/`cap`/`junction`/`visibility`/`break`/`overlap`)
+  : les décorations de rangée ne sont pas implémentées
+  (fixture grid à rangées posée côté jauge).
+- **Bordures logiques/shorthands (~55)** — `border-block*`,
+  `border-inline*` valeurs résiduelles (tokens `none`,
+  `medium`, couleurs).
+- **Flex/grid résiduels (~50)** — `justify-content`
+  `safe`/`unsafe`/`left`/`start`/`stretch`, `flex-basis`
+  mots-clés, `grid` (`subgrid`, `masonry`, variantes
+  `repeat`), `column-*`/`break-*` résiduels.
+- **Transform (~18)** — `transform-origin` mot-clé nu
+  (`left` seul : forme 1 mot-clé non parsée, `left 20px`
+  passe), `perspective-origin`, `transform-box`.
+- **Fontes (~15)** — `font` shorthand sous-valeurs,
+  `font-variant`, `font-width`/métriques OT probés
+  (`styleset(1)`…), `font-size-adjust` deux valeurs.
+- **Fond/masque (~29)** — `background` post-image
+  (`round`/`space`/`text`/positions logiques), listes
+  multi-couches `background-repeat`/`attachment`,
+  `border-image` famille.
+- **Divers** — `shape-outside` boîtes+gradient,
+  `overflow-inline`/`block` logiques, `clear` logiques,
+  `content` remplacé (`gradient`), `math-*`,
+  `frame-sizing`, `display` exotiques, `contain`,
+  `float`/`position` résiduels, `mix-blend-mode`,
+  `color-scheme`, `clip-path`/`filter` résiduels,
+  `counter-*`, `max-lines`, `box-*`.
+
+**Signal utile déjà remonté par la jauge** : plusieurs
+familles ont un socle implémenté — `filter`/`clip-path`
+(`PushFilter`/`PushClipPath` au dump), `shape-outside`
+formes, `offset-path`/`position-try-fallbacks`
+partiels, `background-position` logiques, sizing
+intrinsèque physique. Les misses résiduels y sont des
+**trous partiels de syntaxe**, pas des familles
+absentes — bons candidats de micro-fixes.
+
+### 2026-11-17 — Étape 271 (NAV) : graine `SOCS` scopée YouTube — boucle de consentement Google
+
+**Bug remonté par le vol field268** : la chaîne agent bouclait
+`POST consent.google.com/save → /ml` (mur re-servi) au lieu de
+rejoindre `continue=`. Le verdict terrain supposait un commit
+`Set-Cookie` tardif dans la redirection — **le transport est
+innocenté** : verrous de rejeu `Redirect(Cookie)` (hop 2 porte
+le cookie du 302, buffered + initiator cross-site), jar
+partagé confirmé, form-submit complet (`submitter`,
+`formaction`, `Origin`/`Sec-Fetch-*`).
+
+**Vrai coupable** : la graine `SOCS` forgée de l'étape 171
+(valeur mesurée uBlock pour le bump client `ytd-*`) était semée
+sur `consent.google.com` **et** `google.*` — or `SOCS` y est
+relu **côté serveur** : le `POST /save` portait un état « déjà
+décidé » (enregistrement sauté) et/ou le hop `continue` était
+re-validé sur la valeur forgée → retour au mur. Le jar gardait
+la graine byte-for-byte : le serveur n'émet jamais de `SOCS`
+dans ce flux (le consentement voyage via `escs`/session).
+**Preuve live** : même vol en `EXPLORER_CONSENT_POLICY=honest`
+→ `POST /save` honoré → `302 → continue → Google Flights` ;
+re-vol post-fix en `RejectAll` (défaut) → passage franc
+identique.
+
+**Livré** (`explorer-net/consent.rs` — contrat interne NAV,
+comportement de seeding changé) : `consent.google.com` est un
+hôte d'enregistrement — `seed_headers` n'y émet **aucune**
+graine ; `SOCS` restreint aux hôtes `youtube*` (seul
+consommateur prouvé = bump `ytd-consent-bump*` lisant
+`document.cookie`). `is_google_consent_host` →
+`is_youtube_consent_host`. Les graines génériques
+(`euconsent-v2`, `Optanon*`, `notice_behavior`,
+`cookieconsent_status`, `usprivacy`) restent servies sur les
+autres hôtes.
+
+**Régression potentielle à surveiller** : si un mur Google
+apparaît sur un `google.*` où le bump était client-side, la
+perte du seed `SOCS` pourrait le réactiver — re-vol YouTube
+recommandé pour vérifier que le bump bypass tient (le seed
+`youtube*` est intact).
+
+### 2026-11-15 — Étape 272 (NAV) : `css.values` passe 2 — file moteur affinée
+
+**Suite de la passe 270** : la seconde qualification jauge-only a
+sorti du dénominateur les familles réellement inobservables par
+l'oracle statique (`perspective*`/`interpolate-size`/`border-image*`
+bitmap-requise) et les équivalents spec exacts — 1119/1626
+(68,8 %) mesuré. Le résidu échantillonné est désormais
+intégralement des trous moteur — **file PIPE mise à jour**,
+triée par famille :
+
+- **`row-rule*` / `rule-overlap` / `rule` résidus (~35)** — les
+  shorthands expandissent côté cascade (`expand_rule_parts`) mais
+  `explorer-render` n'émet que `emit_column_rules` : aucune
+  émission row-rule n'existe. À noter : `expand_rule_parts` ne
+  reset pas les parties omises à l'initiale (écart spec subtil).
+- **`reading-flow` (7) / `text-fit` (7)** — parsés et cascadés,
+  jamais consommés par layout/render (aucune lecture du
+  ComputedStyle hors cascade).
+- **`transform-origin` mots-clés `top|left|right|bottom` (4)** —
+  `tf_len_px` (`layout/transform.rs`) ne résout que `%` et
+  longueurs : les keywords retombent sur le défaut 50 %.
+- **`position-try*` spellings physiques `self-x-*`/`self-y-*`/
+  `span-self-*` (16)** — `area_token` connaît l'ordre
+  `x-self-*`/`y-self-*` mais pas les formes physiques de la spec.
+- **`clip-path:path()` + boîtes `content-box`/`padding-box` (3)** —
+  bornes documentées dans `display.rs` (`path()`, références URL
+  et reference-box explicites non implémentés).
+- **`grid-template-*` résidus (9)** — `fit-content`/`max|min-
+  content`/`subgrid` (cols), `minmax`/`subgrid`/`fit-*` (rows) :
+  `minmax`/`repeat` passent `ok` en colonnes via sondes — le
+  reste est à qualifier côté parseurs/resolveurs de pistes.
+- **`background-position-x/y` logiques `x-start`/`y-start` +
+  `side-relative_values` (4)** — valeurs logiques non résolues.
+- **Divers** — `display:ruby*` (3), `math-style|math-shift:
+  compact` (2), `font-style:oblique-angle` / `font` sous-valeurs
+  `font-width` / `font-size-adjust:two-values` / `font-size:math`
+  (4), `content:gradient`, `position-visibility:{anchor-visible,
+  no-overflow}` (2), `shape-outside` boîtes/`path` (4),
+  `offset-path:path()`, `rule-inset`/`row-rule-inset:
+  overlap-join` (2).
+
+**Non-trous confirmés (ne pas chasser)** : `transform-box:
+content-box` était un artefact de fixture symétrique (`ok` après
+asymétrisation border/padding) ; `flip-inline`/`flip-x`/`top` et
+`self-block-start`/`span-*` centrés sont des no-ops spec sur aire
+`top` centrée → `na` ; `align-content:safe|unsafe` produit un
+delta réel en overflow multi-lignes → reste `ok` ;
+`justify-content:{left,start,stretch,safe,unsafe}` ≡ `flex-start`
+sans overflow → `na` ; fontes métriques/OT (`font-variant-
+alternates`, `font-palette`, `font-synthesis*`, `font-kerning`,
+`font-optical-sizing`, `font-size-adjust` une-valeur…) classées
+`NO_ORACLE` — la fixture Ahem ne porte pas les tables de
+sélection et la plupart de ces valeurs ne changent que le choix
+de glyphe ou les métriques.
+
+**Priorité inchangée** : la roadmap PIPE garde le plan perf
+archétypes devant cette file (`roadmap-equipe-pipeline.md`,
+ops de groupe résidu `group_us` + `content-visibility`
+viewport-aware) — cette entrée trie, elle n'ordonne pas.
+
+### 2026-11-15 — Étape 273 (NAV) : `sheet.cssRules` peuplé — recensement in-page débloqué
+
+**Retour terrain field272** : `document.styleSheets[].cssRules`
+rendait toujours `[]` — le recensement des propriétés CSS
+déployées sur un site volé devait se faire par grep du cache
+réseau au lieu de la surface DOM.
+
+**Livré** (contrat interne NAV `JsEngine`, extension additive) :
+splitteur textuel borné `explorer-jscore/cssom.rs` (top-level
++ groupements imbriqués `@media`/`@supports`/`@layer`/
+`@container`, enfants `@keyframes`, marges `@page` ; constantes
+`type` héritées, `0` honnête pour les at-rules récentes sans
+constante) + table `Arc<Mutex<url→texte>>` remplie par la
+session aux commits de feuilles (`sheet_urls`×`css_slots`,
+`<link>` dynamiques — même non-matchants). `<style>` lit son
+`textContent`. `insertRule` pose `selectorText`.
+
+**Bornes connues** : feuilles des iframes non câblées (leurs
+textes vivent dans les payloads de cadre) → `cssRules` vide
+dessus ; `cssRules` = shape textuelle `{cssText,type,…}` — pas
+de `style` CSSStyleDeclaration miroité ni de lien vivant avec
+la cascade (`insertRule`/`deleteRule` mutent le miroir sans
+restyle — borne préexistante, inchangée). Le split ne
+prétend pas au parseur : `explorer-css` reste la seule
+implémentation spec complète (déclarations, imbrication
+nesting-1 moderne rapportée plate — les règles imbriquées
+`&` dans un bloc style ne remontent pas en top-level).
+
+**Signal pour les vols** : le protocole « anomalies × file
+misses » peut désormais recenser en une eval :
+`[...document.styleSheets].flatMap(s=>[...s.cssRules].map(r=>r.cssText))`.
+
+### 2026-11-15 — Étape 276 (NAV) : enregistreur de vol + témoins de mort externe
+
+**Contexte** : 3 morts daemon signature identique sous churn
+KAYAK (field266/272/273) — processus disparu ~90 s post-commit,
+`explorer_daemon_death.log` resté `alive`, zéro panic, zéro
+événement WER. La sentinelle prouvait « aucun crochet Rust n'a
+couru » (kill externe, stack overflow SEH ou alloc-abort —
+morgue C405 cite `0xC00000FD`) sans pouvoir nommer le site.
+« On ne peut pas nommer ce qui n'est pas capturé. »
+
+**Livré** (`explorer-daemon`, pur safe — `forbid(unsafe_code)`
+inchangé ; SEH/minidump in-process reste écarté, WER armé
+couvre la faute native) :
+
+- **Flight recorder** toujours armé : un thread vidange les
+  balises §B-59 du fil JS (`LAST_FRAME`/`LAST_FUN`/`LAST_STMT`/
+  `LAST_EXPR`/`LAST_NAT`/`LAST_HOST`/`LAST_PHASE`/
+  `LAST_ALLOC_REQ`/`LAST_STATS`/`CALL_N`) + `LAST_DRAIN`
+  (drain core en cours) + RSS/commit vers
+  `logs/explorer_daemon_flight.log` toutes les
+  `EXPLORER_FLIGHT_MS` ms (défaut 400). Lecture postmortem :
+  dernier beat figé sur une balise = spin à ce site ;
+  beats vivants mais `drain` fixe = wedge (le `in_flight`
+  du ping nomme déjà le verbe) ; montée `commit` avant
+  l'arrêt = OOM/alloc-abort ; arrêt franc sain + `alive` =
+  kill externe par exclusion. Rotation `.prev` bornée.
+- **Témoins console Windows** : `ctrl_close`/`ctrl_logoff`/
+  `ctrl_shutdown` interceptés (`tokio::signal::windows`) —
+  une fermeture de console, de session ou un arrêt système
+  laissait `alive` indistinguable d'une mort mystère ;
+  désormais `console:<kind>` est écrit dans la sentinelle
+  (conservée, plus effacée à l'arrêt). Ctrl-C/arrêt propre
+  : sémantique inchangée (sentinelle effacée).
+
+**Discrimination post-276** : `console:*` = kill console ;
+`panic:` = panic Rust ; `rss_guard:*` = garde armée ;
+`alive` + beats sains = TerminateProcess/Job-kill ;
+`alive` + beat figé = stack overflow (site nommé) ;
+`alive` + `commit` au plafond = alloc-abort.
+
+**Vérifié** : daemon debug → beats `drain=net_done` vivants,
+`taskkill /PID /F` → `alive` + dernier beat sain cohérent.
+
+**Reste** : la stack exacte d'un SO n'est pas capturable en
+safe (cross-thread = FFI) — si `alive` revient sur beat figé
+le site nommé par `drain`/`phase`/`stmt` suffira pour ouvrir
+le JS-C/R- suivant ; si WER est désarmé sur la machine de vol,
+l'armer (LocalDumps HKCU, étape 801) complète le canal faute.
+Juge = prochaine occurrence KAYAK.
+
+## Étape 279 — balise GC en vol (NAV → journal, résidu field274)
+
+**Verdict field274 (terrain)** : les morts KAYAK sont classées
+**kill externe** — `wait` rapporte `1`, `taskkill /PID /F`
+calibré rapporte `1` identique, WER LocalDumps armé vide sur 3
+morts, zéro panic/abort/console. Suspect sobre : sweep
+`taskkill /IM` d'une session agent parallèle (plusieurs pistes
+sur la machine) — KAYAK n'était que le décor. **Recommandation
+inter-pistes** : un cleanup doit vérifier nom/port/profil du
+registre daemons avant de tuer — jamais `taskkill /IM
+explorer-daemon.exe`.
+
+**Résidu moteur nommé** : gel ~50 s récurrent sous
+`calls` figé + `host=XMLHttpRequest:responseText` +
+`drain=applies`. Le getter décode ≤ ~800 Kio — O(n) trivial,
+le gel ne vit pas dedans : les balises `host`/`phase` sont
+**périmées** pendant tout travail sans écrivain balisé. Le
+suspect n°1 est le GC (`mark_live` mid-eval sous `mem_over`,
+sweep `collect_bounded` à frontière de job) — aucun des deux
+n'écrivait de balise.
+
+**Livré** : `GC_ACTIVE` (0/1 mark/2 sweep), `GC_PASSES`,
+`GC_LAST_MS` — atomiques ~2 ns aux frontières des deux
+fonctions ; ligne de vol += `gc=<a>/<p>@<ms>ms`.
+
+**Discrimination post-279** : `calls` figé + `gc>0` = famine
+GC (passe longue, site mark/sweep nommé) ; `calls` figé +
+`gc=0` = vrai spin hôte (`host`/`phase` alors fiables) ;
+`gc>0` persistant + `passes` qui avance = starvation répétée,
+pas une passe lente.
+
+**Reste** : si `gc` confirme la famine GC, bornes candidates
+— time-slice du sweep (`collect_bounded` déjà borné en
+cellules), seuil `mem_over` estimé vs réel, cache du
+`responseText` décodé dans `XhrData`. Juge = prochaine
+occurrence.
+
+## Étape 281 — `responseText` caché (NAV, re-vol field274)
+
+**Le juge a parlé** : `calls=372411` figé ≥5 beats sous
+`gc=0/1@139ms` → famine GC éliminée, **vrai spin hôte dans
+`XMLHttpRequest:responseText`** — la balise GC a tranché en
+un vol (l'instrumentation de 279 se paie elle-même).
+
+**Cause** : le getter relançait `from_utf8_lossy` + l'alloc
+complète à **chaque lecture** (~800 Kio) — une boucle de
+lecture JS sans appel de fonction gèle `calls` pareil →
+O(lectures × octets), le ~50 s observé.
+
+**Fix** : `XhrData::cached_text` (`JsStr`, `Rc` O(1)),
+invalidé aux deux écritures du corps (livraison, `take`
+binaire) — parité avec `cached_response` des autres
+`responseType`. Compteurs `XHR_TEXT_READS`/`DECODES`/
+`DECODE_MS` + `xrt=` du recorder : `reads ≫ decodes`
+nommera la boucle si un autre site récidive.
+
+**Classe générale ouverte** : l'autre daemon du run
+(pré-279, survivant) montrait `DOMTokenList:add` figé —
+même signature « host call long ». Les getters/méthodes
+hôtes qui re-matérialisent une structure à chaque accès
+sont le pattern suspect ; `classList.add` par token est
+un candidat O(liste²) — à confirmer par vol.
+
+**Coordination inter-pistes (rappel)** : le flight.log du
+run montre le kill **ciblé par PID** (le daemon pré-279 a
+survécu → pas de `taskkill /IM`) — un cleanup vérifiant
+`session.open.dirs.daemons` avant de tuer évite les
+meurtres croisés.
+
+## Entrée terrain — lobste.rs story-meta (PIPE, fixture statique)
+
+**Origine** : première exploitation du `geo_diff` v2
+(étape 293 — classe `moved`). Sur le corpus smoke,
+lobste.rs mesure 98,2 % divergents dont 455/642
+`moved` — un seul défaut structurel produit tout le
+lot.
+
+**Signature** (`Explorer-data/vols/geo-smoke/lobste.rs.
+{geom,geodiff}.json`, ref `refs/lobste.rs.ref.json`) :
+
+- header/nav : **correct** (y=20 h=23 identique des
+  deux côtés) — la cascade globale fonctionne ;
+- `ul.tags` : **h=0 w=0** côté moteur (conteneur
+  effondré) vs h=24 côté ref — pendant que ses
+  `a.tag` enfants peignent ailleurs, empilés
+  verticalement ;
+- méta-story (`a.domain`, `a.u-author`, liens
+  commentaires) : rendues **hors de leur `li`**
+  (`li.story` h=38 se ferme à y≈105, les enfants
+  continuent jusqu'à y≈164) au lieu d'une seule
+  ligne ~y=70-90 ;
+- pas entre `li.story` : ~110-135 px vs ~59 px →
+  `doc_h 3689 vs 1757` — chaque story double de
+  hauteur, `dy` cumulatif ~+1200 px en bas de page.
+
+**Hypothèse de classe** : classement inline non
+honoré dans les méta-story — `display:inline`/
+`inline-block`/`flex` sur `.tags`/`.details`
+descendants (conteneur 0×0 + enfants hors-flux
+empilés). À corréler à la file `--families` —
+`display` 26/29 a 3 valeurs miss, les spellings
+`inline-*` sont dans le résidu.
+
+**Pourquoi c'est un bon cas** : site **statique**,
+fixture reproductible en 5 min (`geo_smoke` seul
+régénère geom+ref+diff), pas de JS, pas de gate —
+le type exact de bug que la géométrie doit remonter
+à PIPE. Un test minimal : `li > div.details >
+{ul.tags, a.domain, a.u-author}` avec
+`display:inline` attendu.
+
+**Coordination** : aucune action NAV en attente —
+l'entrée documente le constat, la file de
+décision est côté PIPE.
+
+## Correctif — lobste.rs : pas un trou PIPE, un bug de
+## parseur miroir jscore (étape 294)
+
+**L'entrée « lobste.rs story-meta » est résolue, et
+l'hypothèse de classe était fausse** : ce n'était ni
+`display` ni `inline-block` — le DOM **miroir jscore**
+était corrompu avant tout layout.
+
+**Cause réelle** : `PAIRED_CLOSE` du mini-parseur DOM de
+jscore dépilait jusqu'à la cible sans la borne spec
+« special sauf address/div/p » — `<li>` sous
+`ol>li>div>ul.tags` traversait `ul`+`div`s et fermait
+`li.story` ; l'item + le bloc meta se ré-enracinaient
+sous `ol`. Le trigger terrain : `t.innerText`
+d'`application.js` re-sérialisant le miroir corrompu
+(l'apply re-parse le fidélisait — `ul.tags` 0×0 +
+enfants empilés = conteneur vide, pas cascade en
+échec).
+
+**Pourquoi la fixture statique passait** : parsée par
+`explorer-html` (correct), jamais par le mini-parseur
+jscore — la corruption n'entrait que par mutation JS
+(`innerHTML=` / re-sérialisation post-mutation).
+
+**Fix** : flag par paire — marche in-body arrêtée aux
+spéciaux (`li`/`dd`/`dt`/`p`), traversée libre gardée
+pour `tr`/`td`/`option`. Verrou
+`li_dans_ul_imbrique_ne_ferme_pas_li_ancetre`, suite
+`dom` 271/271, `doc_h` lobste.rs 3550→2534.
+
+**Retombée pour PIPE** : la file `--families` n'a
+**pas** un cas lobste.rs réel à son actif — l'audit
+post-294 (geo_diff rejoué, fixtures minimales)
+nomme le résidu dominant : **line boxes fantômes
+des whitespace adjacents à un bloc** (+~30 px/story
+→ `doc_h` 2534 vs 1757) — demande PIPE consignée
+au tableau « Extensions demandées » (2026-11-16).
+`div.voters` h=51 vs 46 = écart mineur (+5 px).

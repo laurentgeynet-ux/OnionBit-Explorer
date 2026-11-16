@@ -128,8 +128,8 @@
       "properties": {
         "code": {
           "type": "integer",
-          "enum": [-32700, -32601, -32602, -32001, -32002, -32003, -32004, -32005, -32006, -32007, -32008],
-          "description": "-32700 parse · -32601 method_not_found · -32602 invalid_params · -32001 unsupported · -32002 stale_ref · -32003 not_actionable · -32004 timeout · -32005 no_such_tab · -32006 bad_selector · -32007 engine_unavailable · -32008 unauthorized"
+          "enum": [-32700, -32601, -32602, -32001, -32002, -32003, -32004, -32005, -32006, -32007, -32008, -32009],
+          "description": "-32700 parse · -32601 method_not_found · -32602 invalid_params · -32001 unsupported · -32002 stale_ref · -32003 not_actionable · -32004 timeout · -32005 no_such_tab · -32006 bad_selector · -32007 engine_unavailable · -32008 unauthorized · -32009 cancelled (session.cancel)"
         },
         "message": { "type": "string" },
         "data": { "description": "détail typé — sous -32003 : actionability + require + failed (checks échus nommés), et no_box/topmost_winner/tag sur les erreurs post-auto-wait" }
@@ -158,14 +158,16 @@
           "protocol": { "const": "eap/1" },
           "capabilities": { "type": "array", "items": { "$ref": "#/$defs/capability" }, "description": "capacités livrées = demandées ∩ implémentées" },
           "profile": { "$ref": "#/$defs/profile", "description": "droits accordés" },
-          "help": { "type": "object", "description": "index compact question→verbe(s), filtré par les capacités livrées (étape 248)", "additionalProperties": { "type": "string" } }
+          "help": { "type": "object", "description": "index compact question→verbe(s), filtré par les capacités livrées (étape 248)", "additionalProperties": { "type": "string" } },
+          "dirs": { "type": "object", "description": "dossiers applicatifs annoncés par le daemon (étape 265) : `data_root` canonique + sous-arbres (daemons/profiles/vols/logs/record/crash/dumps), `profile` = profil réellement servi ; chemins absolus normalisés `/`, clés absentes = indisponibles", "additionalProperties": { "type": "string" } }
         },
         "required": ["protocol", "capabilities", "profile"]
       }
     },
 
     "session.close": { "x-phase": "E1", "params": { "type": "object" }, "result": { "type": "object" } },
-    "session.ping": { "x-phase": "E1", "params": { "type": "object" }, "result": { "type": "object", "properties": { "ts_ms": { "type": "integer" } } } },
+    "session.ping": { "x-phase": "E1", "params": { "type": "object" }, "result": { "type": "object", "description": "répondu hors verrou session (étape 267) — sert à distinguer « vivant mais occupé » de « mort » : busy = verbe en vol sur la connexion ou session tenue par ailleurs ; in_flight nomme le verbe coincé de cette connexion + sa durée", "properties": { "ts_ms": { "type": "integer" }, "busy": { "type": "boolean" }, "in_flight": { "type": ["object", "null"], "properties": { "method": { "type": "string" }, "held_ms": { "type": "integer" } } } } } },
+    "session.cancel": { "x-phase": "E1", "params": { "type": "object" }, "result": { "type": "object", "description": "annulation coopérative du verbe en vol de cette connexion — servi en ligne comme ping/close (étape 268) : détecter (busy) → nommer (in_flight) → libérer (cancel). Le verbe abandonné s'arrête à sa prochaine frontière d'await et répond -32009 ; les effets déjà commis restent (bouton Stop : la nav partielle reste visible)", "properties": { "cancelled": { "type": "boolean" }, "method": { "type": "string" }, "reason": { "type": "string" } } } },
 
     "tab.open": {
       "x-phase": "E1",
@@ -530,7 +532,7 @@
         "properties": {
           "tab": { "$ref": "#/$defs/tabId" },
           "expr": { "type": "string" },
-          "ref": { "$ref": "#/$defs/elementRef", "description": "étape 260 — évalue expr scopée à l'élément (JsEngine::eval_element, binding élément). Erreur honnête tant que le binding jscore n'est pas posé." },
+          "ref": { "$ref": "#/$defs/elementRef", "description": "étape 260 — évalue expr scopée à l'élément (JsEngine::eval_element, globals $0/el posés — binding jscore livré JS-C549)." },
           "timeout_ms": { "type": "integer", "minimum": 0 }
         },
         "required": ["tab", "expr"],
@@ -617,7 +619,7 @@
   "actionResult": {
     "type": "object",
     "properties": {
-      "result": { "type": "string", "enum": ["done", "navigated", "focused", "edited", "scrolled", "ignored", "degraded"] },
+      "result": { "type": "string", "enum": ["done", "navigated", "focused", "edited", "scrolled", "noop", "ignored", "degraded", "deferred", "dropped"], "description": "deferred = enfilé pour rejeu après l'apply en vol · dropped = file différée pleine, entrée non prise (réessayer après un commit, étape 269) · noop = scroll clampé sans mouvement" },
       "actionability": { "$ref": "#/$defs/actionability" },
       "degraded": { "type": "string", "description": "raison du mode dégradé (force, click_at, stable jamais atteint)" }
     },

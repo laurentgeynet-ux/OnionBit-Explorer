@@ -2099,6 +2099,12 @@ fn sheet_rules(e: &mut Engine, this: Value) -> Option<ObjId> {
     }
 }
 
+/// [`sheet_rules`] exposée au module `cssom` (peuplement
+/// d'une feuille miroir depuis son texte).
+pub(crate) fn sheet_rules_obj(e: &mut Engine, this: Value) -> Option<ObjId> {
+    sheet_rules(e, this)
+}
+
 /// `insertRule(rule, index?)` → index spec (borné : la règle
 /// est stockée `{cssText,type:1}`, pas cascadée).
 pub(crate) fn sheet_insert_rule(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
@@ -2118,6 +2124,17 @@ pub(crate) fn sheet_insert_rule(e: &mut Engine, this: Value, args: &[Value]) -> 
     let c = e.str_val(&text);
     e.set_own(rule, "cssText", c, true);
     e.set_own(rule, "type", Value::Num(1.0), true);
+    // `selectorText` = prélude avant `{` — même shape que les
+    // règles peuplées par `cssom::populate_sheet_rules`.
+    if let Some(pre) = text
+        .split('{')
+        .next()
+        .map(str::trim)
+        .filter(|p| !p.is_empty())
+    {
+        let sp = e.str_val(pre);
+        e.set_own(rule, "selectorText", sp, true);
+    }
     let Some(o) = e.heap.obj_mut(rid) else {
         return Err(e.type_error("insertRule: detached"));
     };

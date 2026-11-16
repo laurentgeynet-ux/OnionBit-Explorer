@@ -24,7 +24,18 @@
             "snapshot", "handles", "input", "eval", "frames",
             "console_log", "dom", "tabs", "events", "wait_commit"
           ],
-          "profile": { "input": true, "eval": true, "tabs": "all" }
+          "profile": { "input": true, "eval": true, "tabs": "all" },
+          "dirs": {
+            "data_root": "D:/Projet/Explorer-data",
+            "daemons": "D:/Projet/Explorer-data/daemons",
+            "profiles": "D:/Projet/Explorer-data/profiles",
+            "vols": "D:/Projet/Explorer-data/vols",
+            "logs": "D:/Projet/Explorer-data/logs",
+            "record": "D:/Projet/Explorer-data/record",
+            "crash": "D:/Projet/Explorer-data/crash",
+            "dumps": "D:/Projet/Explorer-data/dumps",
+            "profile": "D:/Projet/Explorer-data/profiles/default"
+          }
         }
       }
     }

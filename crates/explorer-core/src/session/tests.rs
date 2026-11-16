@@ -186,6 +186,7 @@ fn paintless_snapshot_repairs_on_restore() {
             linked_sheets: Vec::new(),
             adopted_sheets: Vec::new(),
             inline_css_expanded: HashMap::new(),
+            sheet_texts: std::sync::Arc::new(std::sync::Mutex::new(HashMap::new())),
             defined_names: Vec::new(),
             prev_styles: HashMap::new(),
             dirty: Vec::new(),
@@ -287,6 +288,7 @@ async fn back_during_inflight_nav_restores_previous() {
             linked_sheets: Vec::new(),
             adopted_sheets: Vec::new(),
             inline_css_expanded: HashMap::new(),
+            sheet_texts: std::sync::Arc::new(std::sync::Mutex::new(HashMap::new())),
             defined_names: Vec::new(),
             prev_styles: HashMap::new(),
             dirty: Vec::new(),
@@ -2884,6 +2886,44 @@ fn deferred_inputs_fifo_and_coalesce() {
         .attribute_str(input, "value")
         .unwrap();
     assert_eq!(v, Some("abc"));
+}
+
+/// Étape 269 — borne honnête de la file différée : au-delà de
+/// la capacité, `handle_input_now` rend `Dropped` (l'agent
+/// réessaie après un commit) au lieu de `Deferred`, qui
+/// promettait un rejeu impossible — trou mesuré au vol
+/// field266 (25 entrées enfilées sous churn permanent).
+#[test]
+fn deferred_inputs_borne_dropped_honnete() {
+    let mut s = Session::new(Arc::new(FailTransport), Arc::new(TestFont));
+    let tab = s.open_tab();
+    {
+        let e = s.tabs.get_mut(&tab).unwrap();
+        e.dom = Some(test_dom("<input id=\"q\" name=\"q\">"));
+        e.paint_detached = true;
+    }
+    let key = |c: &str| InputEvent::Key {
+        key: c.into(),
+        mods: KeyMods::NONE,
+    };
+    // Remplissage jusqu'à la borne — chaque entrée distincte
+    // (les Key ne coalescent pas).
+    for i in 0..32 {
+        let r = s.handle_input_now(tab, key("x")).unwrap();
+        assert_eq!(r, InputOutcome::Deferred, "entrée {i} enfilée");
+    }
+    assert_eq!(s.tabs.get(&tab).unwrap().deferred_inputs.len(), 32);
+    // 33e : la file est pleine → `Dropped`, pas `Deferred`.
+    let r = s.handle_input_now(tab, key("y")).unwrap();
+    assert_eq!(r, InputOutcome::Dropped, "file pleine ⇒ dropped");
+    // Et la file n'a pas bougé.
+    assert_eq!(s.tabs.get(&tab).unwrap().deferred_inputs.len(), 32);
+    // Scroll aussi : la queue back n'est pas un Scroll → pas
+    // de coalescence possible → `Dropped` honnête pareil.
+    let r = s
+        .handle_input_now(tab, InputEvent::Scroll { dy: 5.0 })
+        .unwrap();
+    assert_eq!(r, InputOutcome::Dropped, "scroll file pleine ⇒ dropped");
 }
 
 /// Étape 3c — cycle du tick anim détaché (take/spawn/commit

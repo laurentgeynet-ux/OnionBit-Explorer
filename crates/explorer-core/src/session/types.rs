@@ -664,6 +664,15 @@ pub enum InputOutcome {
     /// ou du moteur JS (étape 257 — ex-`Ignored`, qui
     /// mentait : l'action **aura** lieu, juste plus tard).
     Deferred,
+    /// File différée pleine — l'entrée **n'a pas** été
+    /// enfilée (étape 269, retour terrain PIPE : sous churn
+    /// quasi-permanent, `Deferred` mentait au-delà de la
+    /// borne — l'agent attendait un rejeu qui ne viendrait
+    /// jamais). Le client peut réessayer après un commit.
+    /// Distinct d'`Ignored` (« rien à signaler », l'action
+    /// n'a pas de sens ici) et de `Deferred` (« accepté,
+    /// rejoué plus tard »).
+    Dropped,
     /// Un lien a été suivi (navigation déclenchée).
     Navigated,
     /// Survol : URL du lien sous le curseur, s'il y en a un

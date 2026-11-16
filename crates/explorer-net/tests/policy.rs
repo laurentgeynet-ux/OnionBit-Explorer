@@ -260,6 +260,89 @@ async fn redirect_loop_bounded() {
     assert!(matches!(err, NetError::TooManyRedirects(3)), "{err}");
 }
 
+// -- Redirect + Cookie (chaîne consentement, field268) --------------------
+// Le stack daemon est `Redirect(HSTS(Cache(Cookie(…))))` :
+// `CookieTransport` est SOUS le redirect — chaque hop doit
+// poser le jar et repartir avec. Le vol google-flights a
+// mesuré `SOCS` posé mais absent du hop suivant : le test
+// rejoue la chaîne verbatim.
+
+#[tokio::test]
+async fn redirect_hop_commits_cookie_before_next_request() {
+    let jar = Arc::new(explorer_net::cookies::CookieJar::new());
+    let inner = FakeTransport::new(vec![
+        resp(
+            302,
+            &[
+                ("Location", "/ml"),
+                ("Set-Cookie", "SOCS=abc; SameSite=Lax; Secure"),
+            ],
+            &[],
+        ),
+        resp(200, &[], b"ok"),
+    ]);
+    let t = RedirectTransport::wrap(
+        Arc::new(explorer_net::cookies::CookieTransport::wrap(
+            inner.clone(),
+            jar,
+        )),
+        8,
+    );
+    let mut req = Request::get(u("https://consent.example/save"));
+    req.method = Method::Post;
+    req.initiator = Some(explorer_net::http::Initiator::NavFrom(u(
+        "https://consent.example/",
+    )));
+    t.fetch(&req).await.unwrap();
+    // Le hop 2 (GET /ml, même site) doit porter le cookie
+    // posé par le 302 du hop 1.
+    let second = &inner.seen()[1];
+    let cookie = second
+        .headers
+        .iter()
+        .find(|(n, _)| n.eq_ignore_ascii_case("cookie"))
+        .map(|(_, v)| v.as_str());
+    assert_eq!(cookie, Some("SOCS=abc"), "hop 2 : {second:?}");
+}
+
+#[tokio::test]
+async fn redirect_hop_cookie_cross_site_navfrom() {
+    let jar = Arc::new(explorer_net::cookies::CookieJar::new());
+    let inner = FakeTransport::new(vec![
+        resp(
+            302,
+            &[
+                ("Location", "/ml"),
+                ("Set-Cookie", "SOCS=abc; SameSite=Lax; Secure"),
+            ],
+            &[],
+        ),
+        resp(200, &[], b"ok"),
+    ]);
+    let t = RedirectTransport::wrap(
+        Arc::new(explorer_net::cookies::CookieTransport::wrap(
+            inner.clone(),
+            jar,
+        )),
+        8,
+    );
+    let mut req = Request::get(u("https://consent.example/save"));
+    req.method = Method::Post;
+    // Initiateur cross-site : le POST n'envoie pas le Lax,
+    // mais le GET suivant doit (exception nav sûre).
+    req.initiator = Some(explorer_net::http::Initiator::NavFrom(u(
+        "https://origin.example/",
+    )));
+    t.fetch(&req).await.unwrap();
+    let second = &inner.seen()[1];
+    let cookie = second
+        .headers
+        .iter()
+        .find(|(n, _)| n.eq_ignore_ascii_case("cookie"))
+        .map(|(_, v)| v.as_str());
+    assert_eq!(cookie, Some("SOCS=abc"), "hop 2 GET : {second:?}");
+}
+
 #[tokio::test]
 async fn three_xx_without_location_passthrough() {
     let inner = FakeTransport::new(vec![resp(304, &[], &[])]);

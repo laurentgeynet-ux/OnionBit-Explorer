@@ -337,7 +337,7 @@ flowchart TD
    $env:CARGO_TARGET_DIR = "C:/cargo-target/OninionBit-Explorer-YoutubeFix"
    cargo build --release --bin explorer-daemon
    ```
-2. **Vol de vérification instrumenté sur YouTube** (avec `spawn_daemon.ps1` + `vol_joblimit.ps1` + `vol_memwatch.ps1` conformément à `docs/vol-agent.md` **et `docs/vol-youtube.md`** — protocole dédié : artefacts → `Explorer-data\vols\youtube\`) :
+2. **Vol de vérification instrumenté sur YouTube** (avec `spawn_daemon.ps1` + `vol_joblimit.ps1` conformément à `docs/vol-agent.md` — artefacts → `Explorer-data\vols\youtube\`) :
    - **Test 1 (`https://www.youtube.com`)** :
      - Vérifier `ytd-app.shadowRoot !== null` (0 `NotFoundError`, 0 `HierarchyRequestError`).
      - Vérifier que `<ytd-rich-grid-renderer>` reçoit sa géométrie (`containerWidth > 0`) et peuple ses `<ytd-rich-item-renderer>` avec titres et miniatures.

@@ -41,5 +41,7 @@ pub use raster::{
     rasterize_slice_cached_stats, rasterize_stats, rasterize_window, rasterize_window_cached,
     rasterize_window_cached_stats, Frame, ReplayStats,
 };
-pub use svg::{collect_svg, collect_svg_with_sources, svg_sizes, SVG_MAX_SOURCE};
+pub use svg::{
+    collect_svg, collect_svg_styled, collect_svg_with_sources, svg_sizes, SVG_MAX_SOURCE,
+};
 pub use woff::decode_font;

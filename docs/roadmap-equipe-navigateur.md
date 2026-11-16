@@ -1282,6 +1282,27 @@ sortie : R-12 (layout incrémental) ou cadencement temporel.
   exception, absence = kill d'arbre).
   La prochaine disparition laissera
   une signature — ou n'arrivera plus.
+  **État 2026-11-16** : supplantée —
+  la disparition a laissé sa signature
+  (field274 : `wait` exit `1` =
+  calibration `taskkill /PID /F`,
+  TerminateProcess externe nommé par
+  élimination) ; l'instrumentation
+  demandée est livrée et dépassée :
+  sentinelle `death.log` + flight
+  recorder (étape 276), témoins
+  console, `exit.log`, registre
+  `daemons/` (284), discriminant
+  job-close/killer sélectif (285),
+  `shutdown:api` (296). La famille
+  résiduelle (spawn WMI tué avant
+  exécution — suspect AV/politique)
+  est trackée par **§B-135** de la
+  synthèse corpus ; suspicion fuite
+  `RADAR_PRE_LEAK_64` → probablement
+  le churn natif nommé en §B-114
+  (`pump.offlock` ~3 Go/s). Critère
+  de clôture inchangé.
 
 - [x] **Étape 86. Resync `fieldFocused` —
   outcome `unfocused`** (core + api + ffi
@@ -4893,7 +4914,8 @@ sortie : R-12 (layout incrémental) ou cadencement temporel.
   (`HKLM\SOFTWARE\Microsoft\Windows\
   Windows Error Reporting\LocalDumps\
   explorer-daemon.exe`, admin une
-  fois, note `scripts/vol-agent.md`)
+  fois, note fusionnée `docs/
+  vol-agent.md` §7)
   — tout crash futur écrit un `.dmp`
   complet, survit aux fautes où un
   handler in-process ne tourne plus.
@@ -7935,6 +7957,344 @@ MCP = adaptateur, jamais la base.
   incrémental (journal par-clé + compaction) reste au
   journal interface pour plus tard — c'est le vrai fix,
   ceci éteint le débit.
+- [x] **Étape 265. `session.open` annonce `dirs`** — le serveur
+  sert ses dossiers applicatifs au handshake : `data_root`
+  + sous-arbres canoniques de l'étape 262 et `profile`
+  réellement servi (injecté par `agent_router_with_profile`,
+  le daemon passe son `profile_dir` résolu). Un client
+  externe (console de pilotage) n'a plus à deviner où
+  vivent registre, profils, vols et logs — bloc additif du
+  résultat, chemins `/`, clés absentes = indisponibles.
+- [x] **Étape 276. Enregistreur de vol + témoins de mort
+  externe** (`explorer-daemon`, demande terrain : 3× mort
+  KAYAK signature identique — `alive` résiduel dans la
+  sentinelle, zéro panic, zéro WER, processus disparu).
+  **Flight recorder** toujours armé : thread vidangeant
+  les balises §B-59 (`LAST_*` jscore, `CALL_N`, phase) +
+  `LAST_DRAIN` core + RSS/commit toutes les 400 ms vers
+  `logs/explorer_daemon_flight.log` — dernier beat figé =
+  spin nommé, `drain` fixe = wedge, montée `commit` = OOM,
+  arrêt franc avec `alive` = kill externe. Rotation
+  `.prev` bornée (4 Mo). **Témoins console Windows** :
+  `ctrl_close`/`ctrl_logoff`/`ctrl_shutdown` interceptés
+  → `console:<kind>` écrit dans la sentinelle (conservée)
+  — un `alive` résiduel après cette étape exclut le kill
+  console et resserre sur stack overflow, alloc-abort ou
+  kill par PID. `EXPLORER_FLIGHT_MS/LOG/MAX_KB` (règle 13).
+- [x] **Étape 280. `--families` — la file v2 sort en
+  tableau ok/total par prop** — le cliquet familial
+  (étape 278) verrouillait les compteurs sans les
+  montrer : lire la file exigeait baseline + grep des
+  misses. `--families` imprime les 345 familles
+  `css.values` triées par miss décroissant
+  (`ok/total (%)  miss=n`, `pleines`/`0 ok` en tête) —
+  `check tables` + census `cssRules` (étape 273) +
+  `--families` = le tri réel/inerte/jauge en une
+  passe. `famTotals` parallèle à `families` : la
+  baseline v2 ne stocke toujours que `ok` (format
+  inchangé). Vérifié : sortie = table manuelle.
+- [x] **Étape 284. Registre daemons : vivacité `(pid,
+  image, port lié)`** — un PID recyclé n'emporte plus
+  l'annonce du mort (`field274-13520.json` réclamait un PID
+  réattribué à un autre daemon). `listening_ports()` (une
+  passe `netstat`, parse indifférent à la locale) exige le
+  port annoncé réellement lié sous le pid ; indécidable →
+  conserver. Verrous : socket lié réel, pid sain + port
+  absent = périmé.
+- [x] **Étape 285. Protocole de vol : discriminant
+  job-close / killer sélectif** — spawns mesurés :
+  `spawn_daemon.ps1` (WMI) produit `IsProcessInJob=False`
+  (survit session ET provider — canal canonique le plus
+  sûr) ; les daemons `nohup` héritent le job du lanceur.
+  `vol_joblimit.ps1` innocenté (`JOB_MEMORY` seul). Signature
+  : arbre entier mort + `exit.log` absent → job-close ;
+  singleton + `exit.log` → killer sélectif. **Deux registres
+  par worktree** : tout check `daemons/` avant kill regarde
+  les deux arbres.
+- [x] **Étape 286. `geo_smoke` : FAIL fantômes réparés** —
+  le `/` terminal des URLs rejoignait le nom de fichier
+  (`example.com_` vs `example.com` côté `ref_capture`) —
+  alignement sur la règle canonique `-replace '/+$',''`.
+- [x] **Étape 287. `geo_diff` v2 — le score devient
+  honnête** : `#text` filtré par défaut (orphelins
+  garantis : 565/567 lobste.rs = fantômes), appariement
+  spatial en 2 passes par clé `tag|id|cls` (une absence ne
+  décale plus la file), `verdict`/`hors-mesure` (`matched`
+  < seuil → sortie distincte, exit 4), `ref_truncated`
+  signalé.
+- [x] **Étape 288. Protocole de vol : la géométrie
+  normalisée devient artefact standard** — `GET
+  /api/tabs/{id}/geometry` → `captures/<cible>.geom.json`
+  par cible + `ref_capture --list` + `geo_diff` en clôture
+  (documenté vol-agent §3/§7 + gabarit rapport).
+- [x] **Étape 289. `site_harvest` porte d'entrée
+  géométrique autonome** : `-RefCookie` propagé (murs de
+  consentement), `-History` jsonl (dérive attribuable à un
+  commit), `-Record`/`-Replay` (`EXPLORER_NET_RECORD` —
+  circuit déterministe prouvé), `-GeoBaseline`/`-GeoGate`
+  (cliquet de régression layout, exit 3).
+- [x] **Étape 290. `nightly-terrain` réparé — chemins
+  `target/` morts depuis l'étape 262** : 26 runs « success »
+  et zéro diff produit, radar muet depuis le 23/10 (tee +
+  artifacts lisaient `target/site_smoke`). Repointé
+  `Explorer-data/vols/` — un run vert exige ses artefacts.
+- [x] **Étape 291. Smokes : convention release + nommage
+  canonique** — `-Profile debug|release` (défaut release,
+  même convention `site_harvest`) pour cli+daemon ; BOM
+  UTF-8 `geo_smoke.ps1` ; doc `Explorer-data/vols/site-smoke/`.
+- [x] **Étape 292. `geo_diff` : `--min-matched`
+  positionnel ne crashe plus** — la valeur était lue
+  comme fichier moteur ; `Set` nommé `VALUE_OPTS` (convention
+  `ref_capture`) pour toute option à valeur future.
+- [x] **Étape 293. `geo_diff` : classe `moved` +
+  `score_partial` honnête** — distance Chebyshev >
+  `--moved-tol` (50 px défaut) → `moved:true` compté dans
+  le divergent (le gate n'est pas affaibli) ; `ref_truncated`
+  → `score_partial:true` (« sain sur l'échantillon » ≠ « sain »).
+  Lobste.rs : 98,2 % divergents dont 455/642 déplacés —
+  la file lit « casse structurelle ».
+- [x] **Étape 294. Parseur miroir : borne « special » sur
+  la marche `li`/`dd`/`dt`/`p` — fin du `li` ré-enraciné
+  sous `ol`** (`explorer-jscore`, lobste.rs : `ul.tags`
+  0×0 + meta hors `li.story`, 98 % divergents). Le
+  `PAIRED_CLOSE` traversait `ul`+`div`s pour fermer l'`li`
+  ancêtre ; flag par paire : marche in-body arrêtée aux
+  spéciaux (`SCOPE_STOP_SPECIAL`, spec « sauf
+  address/div/p »), traversée libre gardée pour
+  `tr`/`td`/`option`. Corruption entrait par `innerHTML=`/
+  re-sérialisation du miroir (`t.innerText`
+  d'application.js). Verrou :
+  `li_dans_ul_imbrique_ne_ferme_pas_li_ancetre` — suite
+  `dom` 271/271. Résidu : `div.voters` h=51.
+- [x] **Étape 295. Smokes : erreurs nommées, agrégat
+  honnête** (`geo_smoke.ps1`/`site_smoke.ps1`, audit
+  demandé par l'opérateur). **`geo_smoke`** : les sites
+  `hors-mesure` (`verdict` posé même avec `--out`
+  écrit) étaient comptés dans l'agrégat — un mur 15/15
+  divergents gonflait le % récapitulatif ; crash de
+  `geo_diff` = disparition silencieuse du site ;
+  le récapitulatif cachait les échecs derrière
+  « sur N sites ». Désormais : `hors-mesure` exclu
+  du dénominateur (compteur dédié), `FAIL` quand le
+  rapport est absent/illisible, récap = mesurés +
+  `déplacés` + `hors-mesure` + `partiels` + `échecs`.
+  **`site_smoke`** : `frame` non produit rapportait
+  `nav:TIMEOUT` alors que la nav avait répondu →
+  `frame:TIMEOUT` nommé ; `shot` FAIL jetait stderr
+  → `<site>.err.log` conservé + dernière ligne dans
+  le verdict. Vérifié end-to-end : site mort =
+  `FAIL (geometry moteur)` + `1 échec(s)` au
+  récapitulatif, `err.log` présent. Corpus geo
+  5→10 sites — une famille par site (flottants
+  slashdot, flex/mq w3.org, formes validator,
+  design csszengarden, images debian) ;
+  craigslist rejeté (redirect géo), ddg-lite
+  trop maigre. Run complet 10/10 mesurés.
+- [x] **Étape 296. `POST /api/shutdown` — l'arrêt graceful
+  à distance** (`explorer-api`/`explorer-daemon`/
+  `explorer-cli`, besoin console : le kill n'avait que
+  `taskkill /F`). `ApiState.shutdown` (`watch::Sender`) +
+  route — la réponse part avant la coupure ; routeur sans
+  canal → `409` honnête. `shutdown_signal` sélectionne le
+  récepteur au même titre que Ctrl-C/console → sentinelle
+  **`shutdown:api`** (conservée), garde d'annonce droppée,
+  drains TLS flushés. `daemon_stop` EAP graceful-first :
+  POST loopback puis `taskkill` en dernier recours.
+  Vérifié : port libéré <1 s, annonce retirée, mort nommée.
+- [x] **Étape 281. `xhr.responseText` décodé une fois —
+  fin du spin O(lectures × octets)** (`explorer-jscore`,
+  re-vol field274 : `gc=0` a tranché — vrai spin hôte,
+  ~50 s sur ~800 Kio). Le getter re-décodait tout le
+  corps à chaque lecture ; boucle de lecture JS →
+  quadratique. `XhrData::cached_text` sert `Rc` O(1),
+  invalidé aux deux écritures du corps (livraison,
+  `take` binaire). Compteurs `XHR_TEXT_*` + `xrt=` du
+  flight recorder nomment la boucle au prochain vol.
+  Verrou : `responsetext_cached_across_reads`.
+- [x] **Étape 279. Balise GC en vol — wedge `XHR` nommé**
+  (`explorer-jscore`/`explorer-daemon`, résidu du verdict
+  field274 : gel ~50 s récurrent sous `calls` figé +
+  `host=XMLHttpRequest:responseText` + `drain=applies` —
+  mais les balises `host`/`phase` nomment le **dernier
+  écrivain**, pas le site en cours : pendant un mark/sweep
+  GC rien ne les touche et elles incriminent à tort le
+  dernier hôte). `GC_ACTIVE` (1 mark / 2 sweep, atomique
+  ~2 ns), `GC_PASSES`, `GC_LAST_MS` armés dans
+  `mark_live`/`collect_bounded` ; le flight recorder émet
+  `gc=<active>/<passes>@<ms>ms` par beat. Discrimination
+  postmortem : `calls` figé + `gc>0` = famine GC nommée
+  (passe longue sur heap hydraté) ; `calls` figé +
+  `gc=0` = vrai spin dans le site `host`/`phase` — les
+  deux classes de wedge se séparent enfin.
+- [x] **Étape 278. Baseline v2 — cliquet par famille +
+  historique jsonl** — le cliquet agrégé laissait passer
+  une famille qui régresse absorbée par la progression
+  d'une autre (trou mesuré). `bcd_baseline.json` porte
+  désormais `families.css.values.<prop> → ok` (345 props)
+  en sus des totaux ; `--gate` et `--save-if-better`
+  vérifient les deux niveaux — démonstré : `mask` à 999
+  artificiel → `RÉGRESSION famille css.values/mask :
+  0 < 999` alors que le total 1139 tenait. `--history
+  <f.jsonl>` ajoute `{ts, sha, scores, families}` à un
+  journal append-only (`bcd_history.jsonl`) — la dérive
+  devient attribuable à un commit. `--save-if-better` :
+  cliquet + sauvegarde en un flag, refuse toute
+  régression, fusionne les clés (`--only` préserve les
+  autres surfaces), n'écrit que sur progression.
+  Fichiers v1 `{scores}` acceptés en lecture.
+- [x] **Étape 277. `bcd_audit.mjs` + `check decl`/`check
+  tables` — les erreurs de qualification passées deviennent
+  des lints mécaniques** — la discipline « score honnête »
+  était maintenue à la main à chaque bump BCD ; chaque bug
+  rencontré devient un lint re-jouable. **`check tables`**
+  (CLI) dump les vraies tables du binaire (`initial_extra`,
+  `no_oracle`, `paint_na` en TSV — `subfeature_probe` est
+  un `match` non énumérable, sa correction se sonde
+  comportementalement). **`check decl`** rend le verdict
+  de la porte `decl_gate` (chemin union) par `p:v` :
+  `na` / `known:false` / `probe:<lit>` / `decl:<lit>` /
+  `invalid:<lit>` — `invalid` = le littéral résolu échoue
+  à `prop_supported`+`parse_declarations`+
+  `value_is_valid_for`. **Lints** : `tables-mortes` (prop
+  absente du catalogue BCD — variante du bug camelCase
+  272), `meta-littéraux` (valeur `_` servie `decl:`), 
+  `littéraux-invalides`, `fixtures-inertes` (prop `check
+  prop` ok + ≥3 valeurs mesurées + 0 ok sous l'union —
+  trou moteur ou fixture aveugle, tri affiché),
+  `na-creep` (part `na` par prop vs `--na-base`, cliché
+  via `--save-na` → `scripts/bcd_na.json` committé).
+  **Mesure inaugurale (binaire frais)** : `tables-mortes`
+  1 (`mask-border-mode`), `meta-littéraux` 0,
+  `littéraux-invalides` 20 (`expand_background` refuse
+  `currentColor`/`round`/`space`/`text`/`x-*`/`y-*`,
+  `fit-content()` hors périphérie `value_is_valid_for`,
+  `anchor-size`/`mask:x-*` = méta-noms sans sonde — file
+  PIPE documentée), `fixtures-inertes` 49 (famille
+  `mask-*` dominante, sizing intrinsèque, `flex-wrap` —
+  tri PIPE/jauge). `--fast` saute la passe oracles
+  (~34 s → ~4 s). Verrou : `decl_gate_verdicts_audit`.
+- [x] **Étape 275. `css.values` — cache des signatures de
+  base : la passe ne rejoue plus le bâtiment sans
+  déclaration** — `prop_affects_decl` et
+  `prop_paints_decl` recalculaient `.x { ctx }` (parse DOM
+  + cascade + layout + dump, et raster pour le second)
+  **pour chaque valeur** d'une même prop alors que la base
+  n'en dépend pas : les sondes sont des fonctions pures de
+  `name` (fixture, ctx, sélecteur). `thread_local` bornés
+  `BASE_GEO`/`BASE_PIX` indexés par prop : une signature
+  de base calculée par prop au lieu d'une par ligne
+  (~10-15 valeurs par prop en moyenne → moitié du coût de
+  la passe éliminé côté géométrie, et le raster 800×600
+  de base n'est payé qu'une fois par prop en pixels).
+  Mesure complète après cache : **1139/1779 identique à
+  l'avant-cache** — pure optimisation, zéro divergence
+  observable (le `EXPLORER_BCD_DEBUG_SIG` continue de
+  servir les deux signatures à l'audit manuel). Cliquet
+  durci au passage : `--only <nom>` inconnu → exit 2 au
+  lieu d'un gate vert à vide, `--save`/`--gate` refusés
+  sur scores vides (la baseline n'est plus écrasable par
+  une passe creuse).
+- [x] **Étape 274. `check paintv` — oracle pixel + harnais
+  bitmap : `css.values` passe au double référentiel** — les
+  ~1 072 `na` de la jauge n'étaient pas tous hors-oracle :
+  les effets **peints** (hors dump boîtes+display-list)
+  deviennent mesurables par diff de framebuffers.
+  `prop_paints_decl` rejoue le pipeline réel —
+  `collect_data_images` + `collect_svg_styled` +
+  `build_display_list_full` + `rasterize`, comparaison exacte
+  des pixels (moteur+fonte déterministes). **Harnais bitmap** :
+  `data:` URI SVG 8×8 en 4 quadrants (couleur+alpha propres —
+  une bitmap verticalement uniforme rendait `object-fit`/
+  `mask-position` invisibles, mesuré en vol) servie en ctx aux
+  familles `url()` (`mask-*`, `border-image-*`, `background*`,
+  `object-*` sur `<img>`), borne `PaintImages` vide levée sans
+  réseau. **`PAINT_NA`** = sous-ensemble de `NO_ORACLE` encore
+  aveugle en pixels (interaction/OS, scroll dynamique,
+  horloges, pagination, métriques de fontes Ahem) ; sondes
+  `paint_subfeature` prioritaires pour les méta `url`/`image`/
+  `image-set` ; gardes partagées refactorisées en `decl_gate`
+  (initiales/CSS-wide/temporel/sous-features identiques entre
+  oracles). `bcd_coverage.mjs` : `css.values` = `affectsv` ∪
+  `paintv` sur les non-ok — un `na` n'est retenu que neutre
+  sous les DEUX oracles. Mesure : **1139/1779 (64,0 %)**
+  — `na` 1072→919 (153 paires passées en mesuré), ok
+  1119→1139, misses honnêtes exposées (`mask-*` longhands,
+  `border-image-repeat`/`width`, `image-rendering`,
+  `vector-effect`, `filter:url`, 3D `backface`/`perspective`,
+  `object-view-box`, `shape-image-threshold`) — le % baisse
+  sur dénominateur élargi : couverture réelle accrue. Baseline
+  cliquet 1119→1139. Extension additive PIPE journalisée :
+  ré-export `collect_svg_styled` (déjà `pub`, absent de
+  `lib.rs`).
+- [x] **Étape 273. `sheet.cssRules` peuplé — recensement CSS
+  in-page réel** — `document.styleSheets[].cssRules` était
+  toujours `[]` (field272 : recensement par grep du cache au
+  lieu du DOM). Splitteur CSSOM textuel borné (`cssom.rs` :
+  top-level + groupements imbriqués, types hérités, prof. 4 /
+  4096 par liste), table `Arc<Mutex<url→texte>>` poussée par
+  la session (`Tab::sheet_texts` — slots statiques + `<link>`
+  dynamiques, vidée au doc mort, bfcache-safe) ; `<style>` lit
+  son `textContent`. `insertRule` gagne `selectorText`.
+  Borne : feuilles d'iframes non câblées.
+- [x] **Étape 272. `css.values` — passe 2 : oracle-bornées
+  reclassées, 63,8 % → 68,8 % honnête** — seconde qualification
+  jauge-only : `NO_ORACLE` pour `perspective*`/`interpolate-size`/
+  `border-image*` (non-affines / bitmap décodée requise), bug
+  latent `INITIAL_EXTRA` camelCase réparé, équivalents spec
+  ajoutés valeur par valeur (`justify-content:{left,start,
+  stretch,safe,unsafe}`, `transform-box:border-box`, miroirs
+  centrés `position-try`, `offset-path` nu, initiales `math-*`…),
+  `safe`/`unsafe` gardés mesurables sur `align-content` (ctx
+  overflow réel), fixtures asymétriques transform + `text-wrap`
+  multi-lignes + `position-try` 300px. 1119/1626 mesuré ; le
+  résidu échantillonné = file moteur PIPE journalisée
+  (`row-rule*` sans émission, `reading-flow`/`text-fit` non
+  consommés, `transform-origin` keywords, `clip-path:path()`,
+  spellings `self-x-*`/`self-y-*`…).
+- [x] **Étape 271. Graine `SOCS` scopée YouTube — boucle de
+  consentement Google résolue** — le vol field268 bouclait
+  `POST /save → /ml` : la graine forgée (valeur uBlock pour le
+  bump client `ytd-*`) était relue **côté serveur** par
+  `consent.google.com` et `google.*` — transport innocenté par
+  verrous de rejeu `Redirect(Cookie)`, coupable prouvé par
+  passage franc en `honest` + re-vol post-fix (`/save` honoré
+  → `continue → Flights`). `seed_headers` vide sur
+  `consent.google.com` (hôte d'enregistrement), `SOCS` scopé
+  `youtube*` ; `is_google_consent_host` → `is_youtube_consent_host`.
+- [x] **Étape 270. `css.values` — qualification de la jauge
+  (passe bornée)** — le rapport BCD n'était pas une liste de
+  trous : initiales spec et valeurs non-littérales gonflaient
+  le dénominateur. `INITIAL_EXTRA`/`NO_ORACLE` étendues,
+  sondes `subfeature_probe` pour les noms de features BCD,
+  fixtures réparées (flex nowrap, grid multi-pistes,
+  `::before`+`quotes`, background non-répétée, ancre inset/
+  margin, texte enrichi). 1082/2159 (50,1 %) → **1116/1748
+  (63,8 %)** honnête ; le résidu 632 misses = file moteur
+  documentée pour PIPE dans `interface-equipes.md`.
+- [x] **Étape 269. `deferred_inputs` : borne honnête `dropped`** —
+  la file était bornée à 32 mais l'abandon au-delà répondait
+  `Deferred` (rejeu impossible promis). `defer_input` rend si
+  l'entrée est prise ; `InputOutcome::Dropped` nouveau —
+  EAP `dropped`+`queue_full`, REST idem, FFI `8`.
+- [x] **Étape 268. `session.cancel` — annulation coopérative** —
+  le triptyque wedge est complet : détecter (`busy`) → nommer
+  (`in_flight`) → **libérer** (`cancel`). Servi en ligne hors
+  file ; le dispatcher `select!` le dispatch contre le flag →
+  abandon à la prochaine frontière d'await (drop-safe, même
+  mécanique qu'un client tombé), réponse `-32009` `Cancelled`.
+- [x] **Étape 267. `session.ping` hors verrou** — trou
+  opérationnel n°1 (airfrance : EAP muet > 7 min derrière un
+  verbe wedged). Dispatcher FIFO par connexion + `ping`/`close`
+  servis en ligne sans verrou session ; `ping` → `busy` +
+  `in_flight{method, held_ms}` (le verbe coincé nommé) —
+  « vivant mais occupé » distingué de « mort » sans tuer le
+  daemon.
+- [x] **Étape 266. Parité `Deferred` sur la voie shared** —
+  trou field263 : `handle_input_shared` (voie EAP) n'avait
+  pas la clause `dom`/`tree` détachés de l'étape 263 →
+  `-32602` au lieu de `Deferred` pendant l'apply. Prédicat
+  partagé `Tab::input_defer_window` aux deux gardes —
+  divergence de parité impossible désormais.
 
 ## Piste JS (JS-C26+) — spécialiste `explorer-jscore`
 

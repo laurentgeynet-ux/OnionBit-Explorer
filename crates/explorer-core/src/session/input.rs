@@ -91,14 +91,13 @@ impl Session {
         // chargée distingue « apply en vol » de « jamais
         // navigué » — le premier diffère, le second échoue
         // honnêtement plus bas.
-        if self.tabs.get(&tab).is_some_and(|e| {
-            e.paint_detached
-                || e.js_detached.is_some()
-                || !e.deferred_inputs.is_empty()
-                || (e.url.is_some() && (e.dom.is_none() || e.tree.is_none()))
-        }) {
+        if self.tabs.get(&tab).is_some_and(Tab::input_defer_window) {
             let is_scroll = matches!(ev, InputEvent::Scroll { .. });
-            self.defer_input(tab, ev);
+            if !self.defer_input(tab, ev) {
+                // File pleine (étape 269) — honnête :
+                // `Deferred` promettrait un rejeu impossible.
+                return Ok(InputOutcome::Dropped);
+            }
             // Un scroll différé est **accepté**, pas ignoré
             // (vol 13 franceinfo : `ignored` ×2 pendant une
             // longue apply — le client abandonnait alors que
@@ -1017,18 +1016,34 @@ impl Session {
     /// ADR-0003) ; au-delà de [`MAX_DEFERRED_INPUTS`]
     /// l'entrée est abandonnée — jamais de mémoire sans
     /// borne sur du contenu hostile.
-    pub(crate) fn defer_input(&mut self, tab: TabId, ev: InputEvent) {
+    ///
+    /// Renvoie `true` si l'entrée a été prise (enfilée ou
+    /// coalescée), `false` si elle a été abandonnée — le
+    /// résultat de l'appelant distingue `Deferred` (« l'action
+    /// aura lieu plus tard ») de `Dropped` (« réessayez après
+    /// un commit ») au lieu de promettre un rejeu impossible
+    /// (étape 269).
+    pub(crate) fn defer_input(&mut self, tab: TabId, ev: InputEvent) -> bool {
         const MAX_DEFERRED_INPUTS: usize = 32;
         let Some(entry) = self.tabs.get_mut(&tab) else {
-            return;
+            return false;
         };
         let q = &mut entry.deferred_inputs;
         match (&ev, q.back_mut()) {
-            (InputEvent::Scroll { dy }, Some(InputEvent::Scroll { dy: acc })) => *acc += dy,
-            (InputEvent::MouseMove { .. }, Some(back @ InputEvent::MouseMove { .. })) => *back = ev,
+            (InputEvent::Scroll { dy }, Some(InputEvent::Scroll { dy: acc })) => {
+                *acc += dy;
+                true
+            }
+            (InputEvent::MouseMove { .. }, Some(back @ InputEvent::MouseMove { .. })) => {
+                *back = ev;
+                true
+            }
             _ => {
                 if q.len() < MAX_DEFERRED_INPUTS {
                     q.push_back(ev);
+                    true
+                } else {
+                    false
                 }
             }
         }

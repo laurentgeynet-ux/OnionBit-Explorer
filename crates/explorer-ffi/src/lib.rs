@@ -798,6 +798,10 @@ pub unsafe extern "C" fn explorer_input(
         Ok(O::Edited) => 5,
         Ok(O::Unfocused) => 6,
         Ok(O::Deferred) => 7,
+        // File pleine (étape 269) — l'entrée n'a pas été
+        // prise : code distinct, l'hôte réessaie après un
+        // commit au lieu d'attendre un rejeu impossible.
+        Ok(O::Dropped) => 8,
         Err(e) => {
             set_err(e);
             -2

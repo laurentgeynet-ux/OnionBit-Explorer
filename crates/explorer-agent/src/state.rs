@@ -36,17 +36,33 @@ pub struct AgentShared {
     revs: std::sync::Mutex<HashMap<TabId, u64>>,
     /// Ring des erreurs pipeline par onglet (recorder unique).
     console: std::sync::Mutex<HashMap<TabId, VecDeque<String>>>,
+    /// Profil réellement servi par ce daemon (`--profile`/env/
+    /// défaut), injecté par l'hôte — annoncé comme clé `profile`
+    /// du bloc `dirs` de `session.open` (étape 265) ; `None`
+    /// = non injecté (adaptateurs, tests).
+    pub served_profile: Option<std::path::PathBuf>,
 }
 
 impl AgentShared {
-    /// Construit l'état et arme le recorder : `Navigating` purge
-    /// le ring de l'onglet (les erreurs de boot appartiennent à
-    /// la nouvelle page), `PipelineError` l'alimente (cap),
-    /// `Navigated` incrémente la révision.
+    /// Construit l'état sans profil injecté et arme le recorder :
+    /// `Navigating` purge le ring de l'onglet (les erreurs de
+    /// boot appartiennent à la nouvelle page), `PipelineError`
+    /// l'alimente (cap), `Navigated` incrémente la révision.
     pub fn new(session: Arc<tokio::sync::Mutex<Session>>, key: Option<String>) -> Arc<Self> {
+        Self::with_profile(session, key, None)
+    }
+
+    /// [`Self::new`] + profil servi injecté — voir
+    /// [`AgentShared::served_profile`].
+    pub fn with_profile(
+        session: Arc<tokio::sync::Mutex<Session>>,
+        key: Option<String>,
+        served_profile: Option<std::path::PathBuf>,
+    ) -> Arc<Self> {
         let st = Arc::new(Self {
             session,
             key,
+            served_profile,
             revs: std::sync::Mutex::new(HashMap::new()),
             console: std::sync::Mutex::new(HashMap::new()),
         });

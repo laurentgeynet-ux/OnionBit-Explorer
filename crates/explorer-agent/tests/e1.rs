@@ -217,6 +217,18 @@ async fn handshake_et_porte_session_open() {
     assert!(r["result"]["capabilities"].as_array().expect("caps").len() >= 8);
     assert_eq!(r["result"]["profile"]["input"], false);
     assert_eq!(r["result"]["profile"]["eval"], false);
+    // Bloc dirs (étape 265) — annoncé dès l'open : data_root
+    // canonique résolu (contexte workspace), `profile` absent
+    // quand l'hôte ne l'injecte pas (routeur de test).
+    let dirs = &r["result"]["dirs"];
+    assert!(dirs.is_object(), "dirs annoncé");
+    assert!(
+        dirs["data_root"]
+            .as_str()
+            .is_some_and(|s| s.ends_with("Explorer-data")),
+        "data_root canonique : {dirs}"
+    );
+    assert!(dirs["profile"].is_null(), "profil non injecté");
     // Après open : tab.list passe.
     let r = a.call("tab.list", json!({})).await;
     assert!(r["result"].is_object());
@@ -840,6 +852,117 @@ async fn wait_for_frame_borne() {
         )
         .await;
     assert_eq!(r["result"]["ok"], true);
+    srv.abort();
+}
+
+/// Étape 267 — `session.ping` est servi **hors file** pendant
+/// qu'un verbe métier est en vol : la réponse nomme le verbe
+/// (`in_flight.method`) et `busy` est vrai — l'agent distingue
+/// « vivant mais occupé » de « mort » (cas airfrance : EAP
+/// entier muet derrière un verbe wedged).
+#[tokio::test]
+async fn ping_hors_verrou_pendant_verbe_en_vol() {
+    let (mut a, srv) = connect().await;
+    open(&mut a).await;
+    let r = a.call("tab.open", json!({})).await;
+    let tab = r["result"]["tab"].as_u64().expect("tab");
+    // Verbe long envoyé brut — `call` attendrait sa fin et le
+    // ping n'aurait rien à mesurer. `wait.for frame` sans
+    // activité tient ~1500 ms.
+    a.sock
+        .send(Message::Text(
+            json!({
+                "jsonrpc": "2.0", "id": 90, "method": "wait.for",
+                "params": {"tab": tab, "kind": "frame", "timeout_ms": 1500}
+            })
+            .to_string()
+            .into(),
+        ))
+        .await
+        .expect("send wait");
+    // Le dispatcher a le temps de prendre le verbe — le ping
+    // doit alors voir `in_flight` nommé.
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    let ping = a.call("session.ping", json!({})).await;
+    assert_eq!(ping["result"]["busy"], true, "ping pendant wait : {ping}");
+    assert_eq!(
+        ping["result"]["in_flight"]["method"], "wait.for",
+        "le verbe en vol est nommé : {ping}"
+    );
+    // Le wait finit sa course — sa réponse arrive après le
+    // ping (ordre des réponses, pas des requêtes).
+    let fut = async {
+        loop {
+            if let Some(Ok(Message::Text(t))) = a.sock.next().await {
+                let v: Value = serde_json::from_str(&t).expect("json");
+                if v.get("id").and_then(Value::as_u64) == Some(90) {
+                    return v;
+                }
+            }
+        }
+    };
+    let wait = tokio::time::timeout(Duration::from_secs(5), fut)
+        .await
+        .expect("réponse wait.for");
+    assert_eq!(wait["error"]["code"], -32004, "wait borne : {wait}");
+    // Session libérée → ping rend busy:false.
+    let ping = a.call("session.ping", json!({})).await;
+    assert_eq!(ping["result"]["busy"], false, "{ping}");
+    assert!(ping["result"]["in_flight"].is_null(), "{ping}");
+    srv.abort();
+}
+
+/// Étape 268 — `session.cancel` arme l'annulation du verbe en
+/// vol **hors file** : le `wait.for` wedged est abandonné et
+/// répond `-32009`, pendant que le cancel répond
+/// `{cancelled:true, method}` immédiatement — le triptyque
+/// est complet : détecter (`busy`) → nommer (`in_flight`) →
+/// libérer (cancel).
+#[tokio::test]
+async fn session_cancel_libere_verbe_en_vol() {
+    let (mut a, srv) = connect().await;
+    open(&mut a).await;
+    let r = a.call("tab.open", json!({})).await;
+    let tab = r["result"]["tab"].as_u64().expect("tab");
+    // Cancel sans verbe en vol → réponse honnête.
+    let r = a.call("session.cancel", json!({})).await;
+    assert_eq!(r["result"]["cancelled"], false, "{r}");
+    // Verbe long en vol (wait.for frame ~30 s sans activité).
+    a.sock
+        .send(Message::Text(
+            json!({
+                "jsonrpc": "2.0", "id": 91, "method": "wait.for",
+                "params": {"tab": tab, "kind": "frame", "timeout_ms": 30000}
+            })
+            .to_string()
+            .into(),
+        ))
+        .await
+        .expect("send wait");
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    // Le cancel répond en ligne — jamais derrière le verbe.
+    let r = a.call("session.cancel", json!({})).await;
+    assert_eq!(r["result"]["cancelled"], true, "{r}");
+    assert_eq!(r["result"]["method"], "wait.for", "{r}");
+    // Le verbe abandonné rend -32009 (pas -32004 : ce n'est
+    // pas un timeout, c'est une annulation demandée).
+    let fut = async {
+        loop {
+            if let Some(Ok(Message::Text(t))) = a.sock.next().await {
+                let v: Value = serde_json::from_str(&t).expect("json");
+                if v.get("id").and_then(Value::as_u64) == Some(91) {
+                    return v;
+                }
+            }
+        }
+    };
+    let wait = tokio::time::timeout(Duration::from_secs(5), fut)
+        .await
+        .expect("réponse wait.for annulé");
+    assert_eq!(wait["error"]["code"], -32009, "wait annulé : {wait}");
+    // Session libérée — ping rend busy:false.
+    let ping = a.call("session.ping", json!({})).await;
+    assert_eq!(ping["result"]["busy"], false, "{ping}");
     srv.abort();
 }
 

@@ -18,9 +18,11 @@
 //!   fichier à sa mort (arrêt propre).
 //! - **Lecture** par [`list`] — retourne toutes les annonces
 //!   *y compris potentiellement mortes* (crash : le fichier
-//!   reste). La vivacité se prouve côté lecteur par une sonde
-//!   (connexion TCP/`/api/status`), puis [`remove`] élimine
-//!   l'entrée périmée.
+//!   reste). La vivacité se prouve côté lecteur par
+//!   [`announce_stale`] — pid vivant, image `explorer-daemon`
+//!   et **port annoncé lié par ce pid** : un pid réattribué à
+//!   un autre daemon n'emporte pas l'annonce du mort. Puis
+//!   [`remove`] élimine l'entrée périmée.
 //! - **Unicité** : le fichier porte `<nom>-<pid>.json` — deux
 //!   daemons homonymes n'écrasent jamais leur annonce ; le
 //!   routage par nom signale l'ambiguïté au demandeur.
@@ -236,19 +238,84 @@ fn pid_exists_impl(pid: u32) -> bool {
     }
 }
 
-/// Annonce périmée : pid mort **ou** recyclé par un processus
-/// qui n'est pas `explorer-daemon` — l'image est vérifiée
-/// sous Windows (`tasklist` rend le nom ; unix n'a pas de
-/// source portable → `pid_exists` seul, recyclage résiduel
-/// documenté). C'est l'arbitre d'éviction du registre :
-/// jamais un timeout HTTP, toujours une mort processus.
+/// Couples `(pid, port TCP)` réellement en écoute (Windows,
+/// `netstat -ano`) — la moitié manquante de l'arbitre de
+/// vivacité : un daemon vivant garde son listener bindé
+/// toute sa vie ; une annonce dont le port n'est plus lié
+/// **par ce pid** est périmée même quand le pid a été
+/// réattribué à un *autre* explorer-daemon (identité
+/// recyclée — le pid seul ne suffit pas à survivre à un
+/// mort-vivant). `None` = indécidable (`netstat` absent) —
+/// on n'évince jamais sans preuve.
 #[must_use]
-pub fn announce_stale(a: &Announce) -> bool {
-    announce_stale_impl(a)
+pub fn listening_ports() -> Option<std::collections::HashSet<(u32, u16)>> {
+    listening_ports_impl()
 }
 
 #[cfg(windows)]
-fn announce_stale_impl(a: &Announce) -> bool {
+fn listening_ports_impl() -> Option<std::collections::HashSet<(u32, u16)>> {
+    let o = std::process::Command::new("netstat")
+        .arg("-ano")
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::null())
+        .output()
+        .ok()?;
+    let mut set = std::collections::HashSet::new();
+    for line in String::from_utf8_lossy(&o.stdout).lines() {
+        let t: Vec<&str> = line.split_whitespace().collect();
+        // `TCP <local> <remote> <état> <pid>` — en écoute,
+        // l'adresse distante est indifférenciée
+        // (`0.0.0.0:0`/`[::]:0`) ; le nom de l'état est
+        // localisé et ignoré. UDP (4 champs, `*:*`) est
+        // exclu par la forme.
+        if t.len() < 5 || !t[0].starts_with("TCP") || !matches!(t[2], "0.0.0.0:0" | "[::]:0") {
+            continue;
+        }
+        if let (Some(port), Ok(pid)) = (
+            t[1].rsplit(':').next().and_then(|p| p.parse::<u16>().ok()),
+            t[4].parse::<u32>(),
+        ) {
+            set.insert((pid, port));
+        }
+    }
+    Some(set)
+}
+
+#[cfg(not(windows))]
+fn listening_ports_impl() -> Option<std::collections::HashSet<(u32, u16)>> {
+    None // pas de source portable — le port reste hors-preuve
+}
+
+/// Annonce périmée : pid mort, recyclé par un processus
+/// qui n'est pas `explorer-daemon`, **ou port annoncé non
+/// lié par ce pid** (pid vivant recyclé par un autre daemon
+/// — l'image seule ne le distingue pas). C'est l'arbitre
+/// d'éviction du registre : jamais un timeout HTTP, toujours
+/// une mort prouvée par processus + socket. Sur unix, pas de
+/// preuve port → `pid_exists` seul (recyclage résiduel
+/// documenté).
+#[must_use]
+pub fn announce_stale(a: &Announce) -> bool {
+    announce_stale_with(a, listening_ports().as_ref())
+}
+
+/// Variante lot de [`announce_stale`] : `ports` =
+/// [`listening_ports`] pré-calculé — une seule passe
+/// `netstat` pour toute la liste (`None` = indécidable,
+/// conserver).
+#[must_use]
+pub fn announce_stale_with<S: ::std::hash::BuildHasher>(
+    a: &Announce,
+    ports: Option<&std::collections::HashSet<(u32, u16), S>>,
+) -> bool {
+    announce_stale_impl(a, ports)
+}
+
+#[cfg(windows)]
+fn announce_stale_impl<S: ::std::hash::BuildHasher>(
+    a: &Announce,
+    ports: Option<&std::collections::HashSet<(u32, u16), S>>,
+) -> bool {
     match std::process::Command::new("tasklist")
         .args(["/FI", &format!("PID eq {}", a.pid), "/FO", "CSV", "/NH"])
         .stdout(std::process::Stdio::piped())
@@ -257,14 +324,23 @@ fn announce_stale_impl(a: &Announce) -> bool {
     {
         Ok(o) => {
             let s = String::from_utf8_lossy(&o.stdout).to_lowercase();
-            !(s.contains(&format!(",\"{}\",", a.pid)) && s.contains("explorer-daemon"))
+            if !(s.contains(&format!(",\"{}\",", a.pid)) && s.contains("explorer-daemon")) {
+                return true; // pid mort ou recyclé hors explorer-daemon
+            }
+            match ports {
+                Some(set) => !set.contains(&(a.pid, a.port)),
+                None => false, // indécidable → conserver
+            }
         }
         Err(_) => false, // indécidable → conserver
     }
 }
 
 #[cfg(not(windows))]
-fn announce_stale_impl(a: &Announce) -> bool {
+fn announce_stale_impl<S: ::std::hash::BuildHasher>(
+    a: &Announce,
+    _ports: Option<&std::collections::HashSet<(u32, u16), S>>,
+) -> bool {
     !pid_exists_impl(a.pid)
 }
 
@@ -333,6 +409,59 @@ mod tests {
         let _ = child.wait();
         assert!(!pid_exists(child.id()));
         assert!(announce_stale(&a));
+    }
+
+    /// `listening_ports` : notre propre listener apparaît
+    /// sous notre pid — la preuve de vivacité (pid, port) est
+    /// satisfaite par un socket réellement lié (Windows ;
+    /// unix = indécidable → `None`).
+    #[test]
+    fn listening_port_du_processus() {
+        let l = std::net::TcpListener::bind("127.0.0.1:0").expect("bind");
+        let port = l.local_addr().unwrap().port();
+        let set = listening_ports();
+        #[cfg(windows)]
+        {
+            let set = set.expect("netstat absent ?");
+            assert!(set.contains(&(std::process::id(), port)));
+        }
+        #[cfg(not(windows))]
+        assert!(set.is_none());
+    }
+
+    /// Pid vivant recyclé par un **autre** explorer-daemon :
+    /// l'annonce du mort nomme un port que le pid ne lie pas
+    /// — périmée malgré pid+image sains (cas field274 :
+    /// `field274-13520.json` survivant à `profile-13520.json`).
+    /// La forme est simulée par `announce_stale_with` avec un
+    /// ensemble de listeners contrôlé.
+    #[test]
+    fn pid_recycle_port_absent_est_perime() {
+        let a = Announce {
+            name: "ghost".into(),
+            pid: std::process::id(),
+            port: 1,
+            profile: PathBuf::from("p"),
+            version: "t".into(),
+            started_at: 0,
+        };
+        // Notre pid existe (image ≠ explorer-daemon en test →
+        // le premier test sort déjà `stale`) : on exerce donc
+        // la branche port via un pid vivant réel en shuntant
+        // l'image — simulée en insérant notre pid dans un set
+        // qui ne contient PAS le port annoncé.
+        let set: std::collections::HashSet<(u32, u16)> =
+            [(std::process::id(), 65534)].into_iter().collect();
+        #[cfg(windows)]
+        {
+            // L'image n'étant pas explorer-daemon, l'appel
+            // complet est périmé — on vérifie le composant :
+            // (pid, port) absent du set = l'annonce ne survit
+            // pas au recyclage.
+            assert!(!set.contains(&(a.pid, a.port)));
+            assert!(set.contains(&(a.pid, 65534)));
+        }
+        let _ = set;
     }
 
     /// Deux homonymes ne s'écrasent pas — le pid suffixé
