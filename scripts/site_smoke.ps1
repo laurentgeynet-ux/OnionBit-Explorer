@@ -18,7 +18,7 @@
   Informatif uniquement : un échec de site ne fait PAS
   échouer le script (le web réel est hors contrôle) — le
   rapport console est la mesure. Sortie PNG sous
-  `target/site_smoke/` pour inspection visuelle.
+  `Explorer-data/vols/site-smoke/` pour inspection visuelle.
 
   Phase 2 (sauf -SkipFunctional) : le critère « fonctionnel »
   du palier N-A se mesure par sondes sur le daemon — pour
@@ -35,7 +35,8 @@
 
 param(
     [string]$ListFile = '',
-    [switch]$SkipFunctional
+    [switch]$SkipFunctional,
+    [ValidateSet('debug', 'release')][string]$Profile = 'release'
 )
 
 $ErrorActionPreference = 'Continue'
@@ -68,8 +69,13 @@ if ($ListFile -eq '') {
         ForEach-Object { $_.Trim() }
 }
 
-Write-Output "Construction d'explorer-cli…"
-cargo build -p explorer-cli 2>&1 | Out-Null
+# Même convention que site_harvest : release par défaut —
+# les shots/sondes mesurent le moteur dans ses conditions
+# réelles, et le profil debug est 10-20× plus lent.
+Write-Output "Construction d'explorer-cli ($Profile)…"
+$relArgs = @()
+if ($Profile -eq 'release') { $relArgs = @('--release') }
+cargo build -p explorer-cli @relArgs 2>&1 | Out-Null
 if ($LASTEXITCODE -ne 0) {
     Write-Error 'cargo build -p explorer-cli a échoué'
     exit 1
@@ -87,6 +93,8 @@ $triple = ''
 $v = & rustc -vV 2>$null | Select-String -Pattern '^host: (\S+)'
 if ($v) { $triple = $v.Matches[0].Groups[1].Value }
 $cli = @(
+    $(if ($triple) { Join-Path $meta.target_directory "$triple\$Profile\explorer-cli.exe" }),
+    (Join-Path $meta.target_directory "$Profile\explorer-cli.exe"),
     $(if ($triple) { Join-Path $meta.target_directory "$triple\debug\explorer-cli.exe" }),
     (Join-Path $meta.target_directory 'debug\explorer-cli.exe')
 ) | Where-Object { $_ -and (Test-Path $_) } | Select-Object -First 1
@@ -109,7 +117,10 @@ $ok = 0
 $fail = 0
 $okSites = @()
 foreach ($site in $sites) {
-    $name = ($site -replace '^https?://', '') -replace '[^A-Za-z0-9_.-]', '_'
+    # Même règle de nommage que geo_smoke / site_harvest /
+    # ref_capture : le `/` terminal est absorbé AVANT la
+    # substitution, sinon example.com_ ≠ example.com.ref.json.
+    $name = ($site -replace '^https?://', '') -replace '/+$', '' -replace '[^A-Za-z0-9_.-]', '_'
     $png = Join-Path $outDir "$name.png"
     $null = & $cli shot $site $png 2>&1
     if ($LASTEXITCODE -eq 0 -and (Test-Path $png) -and
@@ -133,13 +144,15 @@ foreach ($site in $sites) {
 $funcOk = 0
 if (-not $SkipFunctional -and $ok -gt 0) {
     Write-Output ''
-    Write-Output "Construction d'explorer-daemon…"
-    cargo build -p explorer-daemon 2>&1 | Out-Null
+    Write-Output "Construction d'explorer-daemon ($Profile)…"
+    cargo build -p explorer-daemon @relArgs 2>&1 | Out-Null
     if ($LASTEXITCODE -ne 0) {
         Write-Error 'cargo build -p explorer-daemon a échoué'
         exit 1
     }
     $daemon = @(
+        $(if ($triple) { Join-Path $meta.target_directory "$triple\$Profile\explorer-daemon.exe" }),
+        (Join-Path $meta.target_directory "$Profile\explorer-daemon.exe"),
         $(if ($triple) { Join-Path $meta.target_directory "$triple\debug\explorer-daemon.exe" }),
         (Join-Path $meta.target_directory 'debug\explorer-daemon.exe')
     ) | Where-Object { $_ -and (Test-Path $_) } | Select-Object -First 1

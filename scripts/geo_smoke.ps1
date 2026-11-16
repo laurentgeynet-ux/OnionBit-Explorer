@@ -1,4 +1,4 @@
-# This file is part of Explorer.
+﻿# This file is part of Explorer.
 # Copyright (C) 2026 Laurent Geynet
 # SPDX-License-Identifier: MIT OR Apache-2.0
 
@@ -21,7 +21,8 @@
 
 param(
     [string]$ListFile = '',
-    [int]$Max = 0
+    [int]$Max = 0,
+    [ValidateSet('debug', 'release')][string]$Profile = 'release'
 )
 
 $ErrorActionPreference = 'Continue'
@@ -45,8 +46,13 @@ if ($ListFile -eq '') {
 }
 if ($Max -gt 0) { $sites = $sites | Select-Object -First $Max }
 
-Write-Output "Construction d'explorer-cli…"
-cargo build -p explorer-cli 2>&1 | Out-Null
+# Release par défaut (convention site_harvest) : le debug
+# est 10-20× plus lent, les shots mesurent les conditions
+# réelles du moteur.
+Write-Output "Construction d'explorer-cli ($Profile)…"
+$relArgs = @()
+if ($Profile -eq 'release') { $relArgs = @('--release') }
+cargo build -p explorer-cli @relArgs 2>&1 | Out-Null
 if ($LASTEXITCODE -ne 0) { Write-Error 'cargo build -p explorer-cli a échoué'; exit 1 }
 
 $meta = cargo metadata --no-deps --format-version 1 | ConvertFrom-Json
@@ -54,6 +60,8 @@ $triple = ''
 $v = & rustc -vV 2>$null | Select-String -Pattern '^host: (\S+)'
 if ($v) { $triple = $v.Matches[0].Groups[1].Value }
 $cli = @(
+    $(if ($triple) { Join-Path $meta.target_directory "$triple\$Profile\explorer-cli.exe" }),
+    (Join-Path $meta.target_directory "$Profile\explorer-cli.exe"),
     $(if ($triple) { Join-Path $meta.target_directory "$triple\debug\explorer-cli.exe" }),
     (Join-Path $meta.target_directory 'debug\explorer-cli.exe')
 ) | Where-Object { $_ -and (Test-Path $_) } | Select-Object -First 1
