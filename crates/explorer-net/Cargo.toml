@@ -35,6 +35,11 @@ ring.workspace = true
 # `sha2` pour le padding OAEP : `ring` ne chiffre pas RSA.
 rsa.workspace = true
 sha2.workspace = true
+# `AES-CBC` (JS-C562, §B-117) — `ring` ne fait pas CBC ;
+# `sha1` sert `RSA-OAEP` SHA-1 (digest/HMAC = `ring`).
+aes.workspace = true
+cbc.workspace = true
+sha1.workspace = true
 
 [dev-dependencies]
 # Certificats de test TLS auto-signés (étape 5) — pur Rust,

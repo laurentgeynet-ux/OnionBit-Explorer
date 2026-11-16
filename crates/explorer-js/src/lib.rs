@@ -1653,7 +1653,7 @@ pub const JS_CTX_TOP: JsCtxId = 0;
 // JS-C79 — opération `crypto.subtle` transportée par
 // `NetRequest::Crypto` (ré-export : le type reste unique).
 // JS-C93 — `KeyAlgo`/`ImportFormat` pour les ops à clé.
-pub use explorer_jscore::{CryptoOp, DigestAlgo, ImportFormat, KeyAlgo};
+pub use explorer_jscore::{CryptoOp, DeriveAlgo, DeriveParams, DigestAlgo, ImportFormat, KeyAlgo};
 // JS-C94 — requêtes/événements `WebSocket` transportés par
 // `NetRequest::WsOpen`/`WsSend`/`WsClose` (types uniques).
 pub use explorer_jscore::{WorkerNetRequest, WorkerNetResponse};

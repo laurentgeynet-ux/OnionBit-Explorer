@@ -96,7 +96,8 @@ mod xhr;
 pub use cmp::{CmpConsent, CmpPolicy};
 pub use context::CtxId;
 pub use crypto::{
-    CryptoOp, CryptoRequest, CryptoResponse, CryptoTransport, DigestAlgo, ImportFormat, KeyAlgo,
+    CryptoOp, CryptoRequest, CryptoResponse, CryptoTransport, DeriveAlgo, DeriveParams, DigestAlgo,
+    ImportFormat, KeyAlgo,
 };
 pub use dom::{
     CanvasOpRecord, CanvasState, Dom, JournalOp, MediaCmd, MediaElState, MediaErrorCode,

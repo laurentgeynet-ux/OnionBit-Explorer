@@ -1104,6 +1104,7 @@ impl Session {
                         use explorer_net::crypto as nc;
                         fn digest_of(a: explorer_js::DigestAlgo) -> nc::CryptoAlgo {
                             match a {
+                                explorer_js::DigestAlgo::Sha1 => nc::CryptoAlgo::Sha1,
                                 explorer_js::DigestAlgo::Sha256 => nc::CryptoAlgo::Sha256,
                                 explorer_js::DigestAlgo::Sha384 => nc::CryptoAlgo::Sha384,
                                 explorer_js::DigestAlgo::Sha512 => nc::CryptoAlgo::Sha512,
@@ -1117,12 +1118,30 @@ impl Session {
                                 explorer_js::KeyAlgo::EcdsaP256 => nc::KeyAlgo::EcdsaP256,
                                 explorer_js::KeyAlgo::Ed25519 => nc::KeyAlgo::Ed25519,
                                 explorer_js::KeyAlgo::AesGcm => nc::KeyAlgo::AesGcm,
+                                explorer_js::KeyAlgo::AesCbc => nc::KeyAlgo::AesCbc,
+                                explorer_js::KeyAlgo::Pbkdf2 => nc::KeyAlgo::Pbkdf2,
+                                explorer_js::KeyAlgo::Hkdf => nc::KeyAlgo::Hkdf,
                                 explorer_js::KeyAlgo::RsaPkcs1 { hash } => {
                                     nc::KeyAlgo::RsaPkcs1(digest_of(hash))
                                 }
                                 explorer_js::KeyAlgo::RsaOaep { hash } => {
                                     nc::KeyAlgo::RsaOaep(digest_of(hash))
                                 }
+                            }
+                        }
+                        fn derive_of(p: explorer_js::DeriveParams) -> nc::DeriveParams {
+                            nc::DeriveParams {
+                                algo: match p.algo {
+                                    explorer_js::DeriveAlgo::Pbkdf2 { hash } => {
+                                        nc::DeriveAlgo::Pbkdf2(digest_of(hash))
+                                    }
+                                    explorer_js::DeriveAlgo::Hkdf { hash } => {
+                                        nc::DeriveAlgo::Hkdf(digest_of(hash))
+                                    }
+                                },
+                                salt: p.salt,
+                                info: p.info,
+                                iterations: p.iterations,
                             }
                         }
                         let result = match op {
@@ -1152,14 +1171,32 @@ impl Session {
                                 explorer_js::KeyAlgo::RsaOaep { hash } => {
                                     nc::rsa_oaep_seal(digest_of(hash), &key, &aad, &data)
                                 }
+                                explorer_js::KeyAlgo::AesCbc => nc::cbc_seal(&key, &iv, &data),
                                 _ => nc::aead_seal(key_of(algo), &key, &iv, &aad, &data),
                             },
                             explorer_js::CryptoOp::Decrypt { algo, iv, aad } => match algo {
                                 explorer_js::KeyAlgo::RsaOaep { hash } => {
                                     nc::rsa_oaep_open(digest_of(hash), &key, &aad, &data)
                                 }
+                                explorer_js::KeyAlgo::AesCbc => nc::cbc_open(&key, &iv, &data),
                                 _ => nc::aead_open(key_of(algo), &key, &iv, &aad, &data),
                             },
+                            // JS-C562 — §B-117 : `generateKey`
+                            // symétrique (aléa plateforme),
+                            // `deriveBits`/`deriveKey`
+                            // PBKDF2/HKDF sur la clé de base
+                            // portée par `key`.
+                            explorer_js::CryptoOp::GenerateKey { algo, bits } => {
+                                nc::generate_key(key_of(algo), bits)
+                            }
+                            explorer_js::CryptoOp::DeriveBits { params, bits } => {
+                                nc::derive_bits(&derive_of(params), &key, bits)
+                            }
+                            explorer_js::CryptoOp::DeriveKey {
+                                params,
+                                target,
+                                bits,
+                            } => nc::derive_key(&derive_of(params), &key, key_of(target), bits),
                         };
                         let _ = tx.send(CryptoDone {
                             tab,

@@ -14191,3 +14191,27 @@ chaque gain rapporté contre les **deux** archétypes.
   ancres + `host`/`origin` sans userinfo (partagé avec
   `location`). Famille `SVGFE*Element` installée
   (~194 clés). Verrou `c559_dom_idl` ×6.
+- [x] **JS-C562 — `crypto.subtle` §B-117 : `SHA-1`,
+  `AES-CBC`, `generateKey`, `derive*` (PBKDF2/HKDF),
+  `exportKey`, `supports()`** : mur vol 852 (odysee,
+  aliexpress, cdiscount ×9, deliveroo) — la pipeline
+  `CryptoOp` → `NetRequest::Crypto` → `explorer_net::crypto`
+  était vivante mais la table s'arrêtait à SHA-2/AES-GCM/
+  RSA/HMAC/EC. `SHA-1` digest bout-en-bout (repli natif
+  `sha2.rs` sans transport + `SHA1_FOR_LEGACY_USE_ONLY`
+  plateforme, HMAC/RSA-PKCS1 verify). `AES-CBC` :
+  `importKey raw` 128/192/256, `iv` 128 bits exacts,
+  PKCS#7 — **deps `aes`+`cbc` (RustCrypto) justifiées par
+  `ring` ne faisant pas CBC** ; `sha1` pour `RSA-OAEP`.
+  `generateKey` symétrique (AES `length` ∈ {128,192,256},
+  HMAC = bloc du hash) tiré `ring::rand` — jamais le PRNG
+  moteur. `deriveBits`/`deriveKey` PBKDF2 (boucle RFC 2898
+  `ring::hmac` pour SHA-1) + HKDF (`ring::hkdf`, borne
+  255×`hashLen`) ; `deriveKey` = bits validés `raw` cible.
+  `exportKey` moteur-seul `raw`/`pkcs8`/`spki`/`jwk` ;
+  `wrapKey`/`unwrapKey`/`encapsulate*` honnêtement
+  `NotSupportedError`. `SubtleCrypto` ctor+proto
+  installés ; `supports(operation, algorithm)` matrice
+  réelle, ordre inversé toléré. Verrous `c562_webcrypto`
+  ×8, `c79_crypto` ×15, `crypto::tests` net ×11 (FIPS
+  SHA-1, NIST CBC, RFC 6070 PBKDF2, RFC 5869 HKDF).

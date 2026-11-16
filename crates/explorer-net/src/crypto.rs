@@ -19,6 +19,10 @@
 /// sens de dépendance respecté).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CryptoAlgo {
+    /// `SHA-1` — héritage web (§B-117, JS-C562) :
+    /// `SHA1_FOR_LEGACY_USE_ONLY` côté `ring` — exposé pour
+    /// `digest`/HMAC/KDF, pas pour de nouvelles signatures.
+    Sha1,
     /// `SHA-256` — PKCE `S256`, SRI.
     Sha256,
     /// `SHA-384`.
@@ -34,6 +38,7 @@ pub enum CryptoAlgo {
 #[must_use]
 pub fn digest(algo: CryptoAlgo, data: &[u8]) -> Vec<u8> {
     let a = match algo {
+        CryptoAlgo::Sha1 => &ring::digest::SHA1_FOR_LEGACY_USE_ONLY,
         CryptoAlgo::Sha256 => &ring::digest::SHA256,
         CryptoAlgo::Sha384 => &ring::digest::SHA384,
         CryptoAlgo::Sha512 => &ring::digest::SHA512,
@@ -167,6 +172,15 @@ pub enum KeyAlgo {
     /// RSA — dépendance justifiée par l'absence d'équivalent
     /// pur-Rust dans le lockfile).
     RsaOaep(CryptoAlgo),
+    /// `AES-CBC` (JS-C562, aliexpress §B-117) — clé `raw`
+    /// de 128/192/256 bits ; `encrypt`/`decrypt` PKCS#7 via
+    /// les crates `aes`+`cbc` (`ring` ne fait pas CBC).
+    AesCbc,
+    /// `PBKDF2` — clé de base `raw` pour `deriveBits`/
+    /// `deriveKey` (JS-C562) ; aucune autre op.
+    Pbkdf2,
+    /// `HKDF` — idem (clé de base `raw` = IKM).
+    Hkdf,
 }
 
 /// Format d'`importKey` — `jwk` couvre `kty:"RSA"` public
@@ -210,14 +224,30 @@ pub fn import_key(algo: KeyAlgo, format: KeyFormat, bytes: &[u8]) -> Result<Vec<
         // les usages WebCrypto).
         // `spki` ECDSA/Ed25519 : passthrough — la matière est
         // validée à l'usage (`verify`), pas de parse ASN.1 ici.
-        (KeyAlgo::Hmac(_), KeyFormat::Raw)
+        // (JS-C562 : restreint aux publiques EC — le catch-all
+        // `(_, Spki)` admettait AES/KDF en `spki`, forme
+        // sans sens pour une clé `secret`.)
+        // KDF — la clé de base est opaque (mot de passe/IKM) :
+        // `raw` passthrough, toute longueur (JS-C562).
+        (KeyAlgo::Hmac(_) | KeyAlgo::Pbkdf2 | KeyAlgo::Hkdf, KeyFormat::Raw)
         | (KeyAlgo::RsaPkcs1(_) | KeyAlgo::RsaOaep(_), KeyFormat::Pkcs8)
-        | (_, KeyFormat::Spki) => Ok(bytes.to_vec()),
+        | (KeyAlgo::EcdsaP256 | KeyAlgo::Ed25519, KeyFormat::Spki) => Ok(bytes.to_vec()),
         (KeyAlgo::AesGcm, KeyFormat::Raw) => match bytes.len() {
             16 | 32 => Ok(bytes.to_vec()),
             _ => Err("importKey: invalid raw key (AES-GCM veut 128/256 bits)".to_string()),
         },
         (KeyAlgo::AesGcm, _) => Err("importKey: AES-GCM n'accepte que le format raw".to_string()),
+        // `AES-CBC` (JS-C562) — 192 bits admis contrairement
+        // à GCM (ring n'offre pas AES-192-GCM ; `aes` couvre
+        // les trois tailles pour CBC).
+        (KeyAlgo::AesCbc, KeyFormat::Raw) => match bytes.len() {
+            16 | 24 | 32 => Ok(bytes.to_vec()),
+            _ => Err("importKey: invalid raw key (AES-CBC veut 128/192/256 bits)".to_string()),
+        },
+        (KeyAlgo::AesCbc, _) => Err("importKey: AES-CBC n'accepte que le format raw".to_string()),
+        (KeyAlgo::Pbkdf2 | KeyAlgo::Hkdf, _) => {
+            Err("importKey: PBKDF2/HKDF n'acceptent que le format raw".to_string())
+        }
         // Privées : `pkcs8` validé par construction ring.
         (KeyAlgo::EcdsaP256, KeyFormat::Pkcs8) => ring::signature::EcdsaKeyPair::from_pkcs8(
             &ring::signature::ECDSA_P256_SHA256_ASN1_SIGNING,
@@ -447,6 +477,7 @@ pub fn rsa_oaep_seal(
         .map_err(|_| "encrypt: invalid public key (RSA-OAEP)".to_string())?;
     let mut rng = RingRng;
     match hash {
+        CryptoAlgo::Sha1 => rsa_oaep_seal_at::<sha1::Sha1>(&pk, &mut rng, label, plaintext),
         CryptoAlgo::Sha256 => rsa_oaep_seal_at::<sha2::Sha256>(&pk, &mut rng, label, plaintext),
         CryptoAlgo::Sha384 => rsa_oaep_seal_at::<sha2::Sha384>(&pk, &mut rng, label, plaintext),
         CryptoAlgo::Sha512 => rsa_oaep_seal_at::<sha2::Sha512>(&pk, &mut rng, label, plaintext),
@@ -471,6 +502,7 @@ pub fn rsa_oaep_open(
         .map_err(|_| "decrypt: invalid private key (RSA-OAEP pkcs8)".to_string())?;
     let mut rng = RingRng;
     match hash {
+        CryptoAlgo::Sha1 => rsa_oaep_open_at::<sha1::Sha1>(&sk, &mut rng, label, ciphertext),
         CryptoAlgo::Sha256 => rsa_oaep_open_at::<sha2::Sha256>(&sk, &mut rng, label, ciphertext),
         CryptoAlgo::Sha384 => rsa_oaep_open_at::<sha2::Sha384>(&sk, &mut rng, label, ciphertext),
         CryptoAlgo::Sha512 => rsa_oaep_open_at::<sha2::Sha512>(&sk, &mut rng, label, ciphertext),
@@ -562,6 +594,247 @@ fn aead_unbound(algo: KeyAlgo, key: &[u8]) -> Result<ring::aead::UnboundKey, Str
     ring::aead::UnboundKey::new(a, key).map_err(|_| "AES-GCM : clé invalide".to_string())
 }
 
+// -- AES-CBC PKCS#7 + generateKey + derive* (JS-C562, §B-117) --------------
+//
+// `ring` ne fait pas CBC : crates `aes`+`cbc` (RustCrypto,
+// pur Rust — justification règle 2 : pas d'équivalent dans
+// le lockfile, `aes` est le crate de référence NIST).
+
+/// `subtle.encrypt` AES-CBC — `iv` exactement 128 bits,
+/// padding PKCS#7 (spec `AesCbcParams` + « encrypt » :
+/// un bloc plein est ajouté quand le clair est aligné).
+///
+/// # Errors
+/// `Err` (`OperationError`) si clé ≠ 128/192/256 bits ou
+/// `iv` ≠ 16 octets.
+pub fn cbc_seal(key: &[u8], iv: &[u8], plaintext: &[u8]) -> Result<Vec<u8>, String> {
+    use cbc::cipher::block_padding::Pkcs7;
+    use cbc::cipher::{BlockModeEncrypt, KeyIvInit};
+    if iv.len() != 16 {
+        return Err("encrypt: AES-CBC veut un iv de 128 bits".to_string());
+    }
+    macro_rules! seal {
+        ($c:ty) => {
+            cbc::Encryptor::<$c>::new_from_slices(key, iv)
+                .map(|enc| enc.encrypt_padded_vec::<Pkcs7>(plaintext))
+                .map_err(|_| "encrypt: AES-CBC clé invalide".to_string())
+        };
+    }
+    match key.len() {
+        16 => seal!(aes::Aes128),
+        24 => seal!(aes::Aes192),
+        32 => seal!(aes::Aes256),
+        _ => Err("encrypt: AES-CBC veut une clé de 128/192/256 bits".to_string()),
+    }
+}
+
+/// `subtle.decrypt` AES-CBC — enlève et valide le padding
+/// PKCS#7 ; padding invalide → `OperationError` (spec :
+/// jamais de clair tronqué silencieux).
+///
+/// # Errors
+/// `Err` (`OperationError`) si clé/iv invalides ou padding faux.
+pub fn cbc_open(key: &[u8], iv: &[u8], ciphertext: &[u8]) -> Result<Vec<u8>, String> {
+    use cbc::cipher::block_padding::Pkcs7;
+    use cbc::cipher::{BlockModeDecrypt, KeyIvInit};
+    if iv.len() != 16 {
+        return Err("decrypt: AES-CBC veut un iv de 128 bits".to_string());
+    }
+    macro_rules! open {
+        ($c:ty) => {
+            cbc::Decryptor::<$c>::new_from_slices(key, iv)
+                .map_err(|_| "decrypt: AES-CBC clé invalide".to_string())
+                .and_then(|dec| {
+                    dec.decrypt_padded_vec::<Pkcs7>(ciphertext)
+                        .map_err(|_| "decrypt: AES-CBC open failed (padding invalide)".to_string())
+                })
+        };
+    }
+    match key.len() {
+        16 => open!(aes::Aes128),
+        24 => open!(aes::Aes192),
+        32 => open!(aes::Aes256),
+        _ => Err("decrypt: AES-CBC veut une clé de 128/192/256 bits".to_string()),
+    }
+}
+
+/// Taille par défaut d'une clé `HMAC` générée/dérivée sans
+/// `length` explicite : le **bloc** du hash (spec
+/// `HmacKeyGenParams` — `length` absent = block size).
+#[must_use]
+fn hmac_block_bytes(algo: CryptoAlgo) -> usize {
+    match algo {
+        CryptoAlgo::Sha1 | CryptoAlgo::Sha256 => 64,
+        CryptoAlgo::Sha384 | CryptoAlgo::Sha512 => 128,
+    }
+}
+
+/// `subtle.generateKey` — tranche symétrique (JS-C562) :
+/// `bits` aléatoires `ring::rand` validés comme matière
+/// canonique (mêmes octets qu'un `importKey raw`).
+/// `bits` = 0 → défaut de l'algo (HMAC = bloc du hash).
+///
+/// # Errors
+/// `Err` (`OperationError`) si l'algo n'est pas symétrique
+/// (paires RSA/EC/KDF hors tranche) ou `bits` invalide.
+pub fn generate_key(algo: KeyAlgo, bits: u32) -> Result<Vec<u8>, String> {
+    let len = match algo {
+        KeyAlgo::AesGcm | KeyAlgo::AesCbc => match bits {
+            128 | 192 | 256 => usize::try_from(bits / 8).unwrap_or(0),
+            _ => {
+                return Err("generateKey: AES requires length ∈ {128,192,256}".to_string());
+            }
+        },
+        KeyAlgo::Hmac(hash) => match bits {
+            0 => hmac_block_bytes(hash),
+            b if b % 8 == 0 => usize::try_from(b / 8).unwrap_or(0),
+            _ => return Err("generateKey: HMAC length doit être multiple de 8".to_string()),
+        },
+        _ => {
+            return Err("generateKey: algorithme non couvert à cette tranche".to_string());
+        }
+    };
+    let mut out = vec![0u8; len];
+    ring::rand::SecureRandom::fill(&ring::rand::SystemRandom::new(), &mut out)
+        .map_err(|_| "generateKey: rng failed".to_string())?;
+    Ok(out)
+}
+
+/// Algorithme KDF normalisé côté moteur — miroir local de
+/// `explorer_jscore::DeriveAlgo` (JS-C562).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DeriveAlgo {
+    /// `PBKDF2` `{salt, iterations, hash}`.
+    Pbkdf2(CryptoAlgo),
+    /// `HKDF` `{salt, info, hash}` — extract+expand.
+    Hkdf(CryptoAlgo),
+}
+
+/// Paramètres `deriveBits`/`deriveKey` — miroir local de
+/// `explorer_jscore::DeriveParams` ; les champs hors de la
+/// KDF choisie sont ignorés (`info` PBKDF2, `iterations`
+/// HKDF).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DeriveParams {
+    /// KDF + hash.
+    pub algo: DeriveAlgo,
+    /// `salt` (PBKDF2/HKDF).
+    pub salt: Vec<u8>,
+    /// `info` (HKDF).
+    pub info: Vec<u8>,
+    /// `iterations` (PBKDF2).
+    pub iterations: u32,
+}
+
+/// Longueur de sortie demandée pour `ring::hkdf` — `ring`
+/// borne à 255×`hashLen` (spec HKDF/WebCrypto) et refuse
+/// au-delà : `Err` → `OperationError`.
+struct OutLen(usize);
+
+impl ring::hkdf::KeyType for OutLen {
+    fn len(&self) -> usize {
+        self.0
+    }
+}
+
+/// `subtle.deriveBits` — `key` = octets de la clé de base
+/// (`raw`), `bits` non nul et multiple de 8. PBKDF2 via
+/// `ring::pbkdf2`, HKDF via `ring::hkdf` (extract `salt` /
+/// expand `info`).
+///
+/// # Errors
+/// `Err` (`OperationError`) si `bits`/`iterations`/`info`
+/// invalides ou `bits` > 255×`hashLen` (borne HKDF spec).
+pub fn derive_bits(params: &DeriveParams, key: &[u8], bits: u32) -> Result<Vec<u8>, String> {
+    if bits == 0 || bits % 8 != 0 {
+        return Err("deriveBits: length doit être non nulle et multiple de 8".to_string());
+    }
+    let len =
+        usize::try_from(bits / 8).map_err(|_| "deriveBits: length hors bornes".to_string())?;
+    match params.algo {
+        DeriveAlgo::Pbkdf2(hash) => {
+            let it = std::num::NonZeroU32::new(params.iterations)
+                .ok_or_else(|| "deriveBits: iterations doit être > 0".to_string())?;
+            let mut out = vec![0u8; len];
+            let algo = match hash {
+                CryptoAlgo::Sha1 => None,
+                CryptoAlgo::Sha256 => Some(ring::pbkdf2::PBKDF2_HMAC_SHA256),
+                CryptoAlgo::Sha384 => Some(ring::pbkdf2::PBKDF2_HMAC_SHA384),
+                CryptoAlgo::Sha512 => Some(ring::pbkdf2::PBKDF2_HMAC_SHA512),
+            };
+            if let Some(a) = algo {
+                ring::pbkdf2::derive(a, it, &params.salt, key, &mut out);
+            } else {
+                // `ring::pbkdf2` n'expose pas SHA-1 — boucle
+                // RFC 2898 sur `ring::hmac` (héritage web :
+                // PBKDF2-HMAC-SHA1 est le défaut historique).
+                let k = ring::hmac::Key::new(ring::hmac::HMAC_SHA1_FOR_LEGACY_USE_ONLY, key);
+                for (i, block) in out.chunks_mut(20).enumerate() {
+                    let mut salt_blk = params.salt.clone();
+                    #[allow(clippy::cast_possible_truncation)]
+                    salt_blk.extend_from_slice(&(i as u32 + 1).to_be_bytes());
+                    let mut u = ring::hmac::sign(&k, &salt_blk);
+                    let mut t = u.as_ref().to_vec();
+                    for _ in 1..it.get() {
+                        u = ring::hmac::sign(&k, u.as_ref());
+                        for (x, y) in t.iter_mut().zip(u.as_ref().iter()) {
+                            *x ^= *y;
+                        }
+                    }
+                    block.copy_from_slice(&t[..block.len()]);
+                }
+            }
+            Ok(out)
+        }
+        DeriveAlgo::Hkdf(hash) => {
+            let a = match hash {
+                CryptoAlgo::Sha1 => ring::hkdf::HKDF_SHA1_FOR_LEGACY_USE_ONLY,
+                CryptoAlgo::Sha256 => ring::hkdf::HKDF_SHA256,
+                CryptoAlgo::Sha384 => ring::hkdf::HKDF_SHA384,
+                CryptoAlgo::Sha512 => ring::hkdf::HKDF_SHA512,
+            };
+            let prk = ring::hkdf::Salt::new(a, &params.salt).extract(key);
+            let mut out = vec![0u8; len];
+            prk.expand(&[&params.info], OutLen(len))
+                .map_err(|_| "deriveBits: HKDF length > 255×hashLen".to_string())?
+                .fill(&mut out)
+                .map_err(|_| "deriveBits: HKDF expand failed".to_string())?;
+            Ok(out)
+        }
+    }
+}
+
+/// `subtle.deriveKey` — dérive `bits` puis les valide comme
+/// clé `target` `raw` (même canonique qu'un `importKey`) :
+/// AES = `bits` ∈ {128,192,256}, HMAC = `bits` ou bloc du
+/// hash quand 0.
+///
+/// # Errors
+/// `Err` (`OperationError`) — idem [`derive_bits`] +
+/// taille cible invalide.
+pub fn derive_key(
+    params: &DeriveParams,
+    key: &[u8],
+    target: KeyAlgo,
+    bits: u32,
+) -> Result<Vec<u8>, String> {
+    let want = match target {
+        KeyAlgo::AesGcm | KeyAlgo::AesCbc => bits,
+        KeyAlgo::Hmac(hash) => {
+            if bits == 0 {
+                u32::try_from(hmac_block_bytes(hash) * 8).unwrap_or(0)
+            } else {
+                bits
+            }
+        }
+        _ => {
+            return Err("deriveKey: cible non couverte à cette tranche".to_string());
+        }
+    };
+    let out = derive_bits(params, key, want)?;
+    import_key(target, KeyFormat::Raw, &out)
+}
+
 /// `subtle.sign` — `key` = octets canoniques retournés par
 /// [`import_key`]. Erreur = `OperationError`.
 ///
@@ -572,6 +845,7 @@ pub fn sign(algo: KeyAlgo, key: &[u8], data: &[u8]) -> Result<Vec<u8>, String> {
     match algo {
         KeyAlgo::Hmac(hash) => {
             let a = match hash {
+                CryptoAlgo::Sha1 => ring::hmac::HMAC_SHA1_FOR_LEGACY_USE_ONLY,
                 CryptoAlgo::Sha256 => ring::hmac::HMAC_SHA256,
                 CryptoAlgo::Sha384 => ring::hmac::HMAC_SHA384,
                 CryptoAlgo::Sha512 => ring::hmac::HMAC_SHA512,
@@ -595,13 +869,21 @@ pub fn sign(algo: KeyAlgo, key: &[u8], data: &[u8]) -> Result<Vec<u8>, String> {
         KeyAlgo::Ed25519 => ring::signature::Ed25519KeyPair::from_pkcs8(key)
             .map(|kp| kp.sign(data).as_ref().to_vec())
             .map_err(|_| "sign: Ed25519 failed".to_string()),
-        KeyAlgo::AesGcm | KeyAlgo::RsaOaep(_) => {
+        KeyAlgo::AesGcm | KeyAlgo::AesCbc | KeyAlgo::RsaOaep(_) => {
             Err("sign: cet algorithme ne signe pas (encrypt/decrypt)".to_string())
+        }
+        KeyAlgo::Pbkdf2 | KeyAlgo::Hkdf => {
+            Err("sign: une clé de base KDF ne signe pas".to_string())
         }
         KeyAlgo::RsaPkcs1(hash) => {
             let kp = ring::signature::RsaKeyPair::from_pkcs8(key)
                 .map_err(|_| "sign: invalid pkcs8 (RSA)".to_string())?;
             let pad = match hash {
+                CryptoAlgo::Sha1 => {
+                    return Err(
+                        "sign: RSASSA-PKCS1 SHA-1 non offert par ring (verify seul)".to_string()
+                    );
+                }
                 CryptoAlgo::Sha256 => &ring::signature::RSA_PKCS1_SHA256,
                 CryptoAlgo::Sha384 => &ring::signature::RSA_PKCS1_SHA384,
                 CryptoAlgo::Sha512 => &ring::signature::RSA_PKCS1_SHA512,
@@ -628,6 +910,7 @@ pub fn verify(algo: KeyAlgo, key: &[u8], sig: &[u8], data: &[u8]) -> Result<Vec<
     let ok = match algo {
         KeyAlgo::Hmac(hash) => {
             let a = match hash {
+                CryptoAlgo::Sha1 => ring::hmac::HMAC_SHA1_FOR_LEGACY_USE_ONLY,
                 CryptoAlgo::Sha256 => ring::hmac::HMAC_SHA256,
                 CryptoAlgo::Sha384 => ring::hmac::HMAC_SHA384,
                 CryptoAlgo::Sha512 => ring::hmac::HMAC_SHA512,
@@ -642,11 +925,15 @@ pub fn verify(algo: KeyAlgo, key: &[u8], sig: &[u8], data: &[u8]) -> Result<Vec<
         KeyAlgo::Ed25519 => ring::signature::UnparsedPublicKey::new(&ring::signature::ED25519, key)
             .verify(data, sig)
             .is_ok(),
-        KeyAlgo::AesGcm | KeyAlgo::RsaOaep(_) => {
+        KeyAlgo::AesGcm | KeyAlgo::AesCbc | KeyAlgo::RsaOaep(_) => {
             return Err("verify: cet algorithme ne signe pas".to_string());
+        }
+        KeyAlgo::Pbkdf2 | KeyAlgo::Hkdf => {
+            return Err("verify: une clé de base KDF ne signe pas".to_string());
         }
         KeyAlgo::RsaPkcs1(hash) => {
             let params = match hash {
+                CryptoAlgo::Sha1 => &ring::signature::RSA_PKCS1_1024_8192_SHA1_FOR_LEGACY_USE_ONLY,
                 CryptoAlgo::Sha256 => &ring::signature::RSA_PKCS1_2048_8192_SHA256,
                 CryptoAlgo::Sha384 => &ring::signature::RSA_PKCS1_2048_8192_SHA384,
                 CryptoAlgo::Sha512 => &ring::signature::RSA_PKCS1_2048_8192_SHA512,
@@ -926,5 +1213,239 @@ mod tests {
         .is_err());
         assert!(import_key(KeyAlgo::RsaPkcs1(CryptoAlgo::Sha256), KeyFormat::Raw, &n).is_err());
         assert!(import_key(KeyAlgo::Hmac(CryptoAlgo::Sha256), KeyFormat::Jwk, &packed).is_err());
+    }
+
+    /// SHA-1 (JS-C562) — vecteurs FIPS 180-4 : « abc »,
+    /// vide, message de 56 octets (2 blocs).
+    #[test]
+    fn sha1_vectors() {
+        use std::fmt::Write;
+        let to_hex = |b: &[u8]| {
+            b.iter().fold(String::new(), |mut s, x| {
+                let _ = write!(s, "{x:02x}");
+                s
+            })
+        };
+        assert_eq!(
+            to_hex(&digest(CryptoAlgo::Sha1, b"abc")),
+            "a9993e364706816aba3e25717850c26c9cd0d89d"
+        );
+        assert_eq!(
+            to_hex(&digest(CryptoAlgo::Sha1, b"")),
+            "da39a3ee5e6b4b0d3255bfef95601890afd80709"
+        );
+        assert_eq!(
+            to_hex(&digest(
+                CryptoAlgo::Sha1,
+                b"abcdbcdecdefdefgefghfghighijhijkijkljklmklmnlmnomnopnopq"
+            )),
+            "84983e441c3bd26ebaae4aa1f95129e5e54670f1"
+        );
+    }
+
+    /// AES-CBC (JS-C562) — vecteurs NIST SP 800-38A F.2 :
+    /// le premier bloc chiffré (avant le bloc de padding
+    /// PKCS#7) doit égaler le vecteur CBC brut ; round-trip
+    /// et rejets (iv/clé/padding).
+    #[test]
+    fn aes_cbc_nist_et_roundtrip() {
+        use std::fmt::Write;
+        let unhex = |s: &str| -> Vec<u8> {
+            (0..s.len())
+                .step_by(2)
+                .map(|i| u8::from_str_radix(&s[i..i + 2], 16).expect("hex"))
+                .collect()
+        };
+        let to_hex = |b: &[u8]| {
+            b.iter().fold(String::new(), |mut s, x| {
+                let _ = write!(s, "{x:02x}");
+                s
+            })
+        };
+        let iv = unhex("000102030405060708090a0b0c0d0e0f");
+        let pt = unhex("6bc1bee22e409f96e93d7e117393172a");
+        // AES-128-CBC — SP 800-38A F.2.1, bloc 1.
+        let k128 = unhex("2b7e151628aed2a6abf7158809cf4f3c");
+        let ct = cbc_seal(&k128, &iv, &pt).expect("seal 128");
+        assert_eq!(ct.len(), 32, "un bloc clair + un bloc PKCS#7");
+        assert_eq!(
+            to_hex(&ct[..16]),
+            "7649abac8119b246cee98e9b12e9197d",
+            "vecteur NIST CBC-AES-128"
+        );
+        assert_eq!(cbc_open(&k128, &iv, &ct).expect("open 128"), pt);
+        // AES-256-CBC — SP 800-38A F.2.5, bloc 1.
+        let k256 = unhex("603deb1015ca71be2b73aef0857d77811f352c073b6108d72d9810a30914dff4");
+        let ct256 = cbc_seal(&k256, &iv, &pt).expect("seal 256");
+        assert_eq!(
+            to_hex(&ct256[..16]),
+            "f58c4c04d6e5f1ba779eabfb5f7bfbd6",
+            "vecteur NIST CBC-AES-256"
+        );
+        assert_eq!(cbc_open(&k256, &iv, &ct256).expect("open 256"), pt);
+        // Clair vide → un bloc de padding plein ; clair
+        // non aligné → arrondi au bloc supérieur.
+        assert_eq!(cbc_seal(&k128, &iv, b"").expect("seal vide").len(), 16);
+        let odd = cbc_seal(&k128, &iv, b"xyz").expect("seal impair");
+        assert_eq!(odd.len(), 16);
+        assert_eq!(cbc_open(&k128, &iv, &odd).expect("open impair"), b"xyz");
+        // Rejets honnêtes : iv ≠ 128 bits, clé ≠ 128/192/256,
+        // padding corrompu → jamais de clair.
+        assert!(cbc_seal(&k128, b"short", &pt).is_err());
+        assert!(cbc_seal(&k128[..12], &iv, &pt).is_err());
+        assert!(cbc_open(&k128, &iv[..8], &ct).is_err());
+        let mut bad = ct.clone();
+        let n = bad.len() - 1;
+        bad[n] ^= 0xff;
+        assert!(cbc_open(&k128, &iv, &bad).is_err());
+        assert!(cbc_open(&k128, &iv, &ct[..15]).is_err());
+        // `raw` import : mêmes tailles qu'AES-GCM.
+        assert!(import_key(KeyAlgo::AesCbc, KeyFormat::Raw, &k128).is_ok());
+        assert!(import_key(KeyAlgo::AesCbc, KeyFormat::Raw, &[0u8; 24]).is_ok());
+        assert!(import_key(KeyAlgo::AesCbc, KeyFormat::Raw, &[0u8; 17]).is_err());
+        assert!(import_key(KeyAlgo::AesCbc, KeyFormat::Spki, &k128).is_err());
+    }
+
+    /// PBKDF2 (JS-C562) — RFC 6070 SHA-1 + vecteur
+    /// SHA-256 ; `derive_key` = `derive_bits` validé `raw`.
+    #[test]
+    fn pbkdf2_vectors() {
+        use std::fmt::Write;
+        let to_hex = |b: &[u8]| {
+            b.iter().fold(String::new(), |mut s, x| {
+                let _ = write!(s, "{x:02x}");
+                s
+            })
+        };
+        let p1 = DeriveParams {
+            algo: DeriveAlgo::Pbkdf2(CryptoAlgo::Sha1),
+            salt: b"salt".to_vec(),
+            info: Vec::new(),
+            iterations: 1,
+        };
+        // RFC 6070 — c=1, dkLen=20.
+        let out = derive_bits(&p1, b"password", 160).expect("pbkdf2 c=1");
+        assert_eq!(to_hex(&out), "0c60c80f961f0e71f3a9b524af6012062fe037a6");
+        // RFC 6070 — c=4096, dkLen=20.
+        let p4096 = DeriveParams {
+            iterations: 4096,
+            ..p1.clone()
+        };
+        let out = derive_bits(&p4096, b"password", 160).expect("pbkdf2 c=4096");
+        assert_eq!(to_hex(&out), "4b007901b765489abead49d926f721d065a429c1");
+        // dkLen non multiple de 20 → troncature du dernier
+        // bloc (RFC 2898 §5.2).
+        let out25 = derive_bits(&p1, b"password", 200).expect("pbkdf2 25o");
+        assert_eq!(out25.len(), 25);
+        // PBKDF2-HMAC-SHA256 — vecteur connu c=1, dkLen=32.
+        let p256 = DeriveParams {
+            algo: DeriveAlgo::Pbkdf2(CryptoAlgo::Sha256),
+            salt: b"salt".to_vec(),
+            info: Vec::new(),
+            iterations: 1,
+        };
+        let out = derive_bits(&p256, b"password", 256).expect("pbkdf2 sha256");
+        assert_eq!(
+            to_hex(&out),
+            "120fb6cffcf8b32c43e7225256c4f837a86548c92ccc35480805987cb70be17b"
+        );
+        // `deriveKey` AES-CBC-128 = les 16 premiers octets
+        // des bits dérivés, validés comme clé `raw`.
+        let dk = derive_key(&p256, b"password", KeyAlgo::AesCbc, 128).expect("deriveKey");
+        assert_eq!(dk, derive_bits(&p256, b"password", 128).expect("bits 128"));
+        // Rejets : iterations=0, bits=0, bits impair, cible RSA.
+        let p0 = DeriveParams {
+            iterations: 0,
+            ..p256.clone()
+        };
+        assert!(derive_bits(&p0, b"password", 128).is_err());
+        assert!(derive_bits(&p256, b"password", 0).is_err());
+        assert!(derive_bits(&p256, b"password", 12).is_err());
+        assert!(derive_key(
+            &p256,
+            b"password",
+            KeyAlgo::RsaPkcs1(CryptoAlgo::Sha256),
+            128
+        )
+        .is_err());
+    }
+
+    /// HKDF (JS-C562) — RFC 5869 test case 1 (SHA-256) et
+    /// borne 255×`hashLen`.
+    #[test]
+    fn hkdf_rfc5869() {
+        use std::fmt::Write;
+        let to_hex = |b: &[u8]| {
+            b.iter().fold(String::new(), |mut s, x| {
+                let _ = write!(s, "{x:02x}");
+                s
+            })
+        };
+        let params = DeriveParams {
+            algo: DeriveAlgo::Hkdf(CryptoAlgo::Sha256),
+            salt: (0u8..13).collect(),
+            info: (0xf0u8..0xfa).collect(),
+            iterations: 0,
+        };
+        let ikm = [0x0bu8; 22];
+        let okm = derive_bits(&params, &ikm, 42 * 8).expect("hkdf");
+        assert_eq!(
+            to_hex(&okm),
+            "3cb25f25faacd57a90434f64d0362f2a\
+             2d2d0a90cf1a5a4c5db02d56ecc4c5bf34007208d5b887185865"
+        );
+        // Au-delà de 255×32 octets → OperationError (borne
+        // HKDF portée par la spec WebCrypto).
+        assert!(derive_bits(&params, &ikm, 255 * 32 * 8 + 8).is_err());
+        // HKDF-SHA-1 hérité — extract/expand tournent.
+        let p1 = DeriveParams {
+            algo: DeriveAlgo::Hkdf(CryptoAlgo::Sha1),
+            ..params.clone()
+        };
+        assert_eq!(derive_bits(&p1, &ikm, 160).expect("hkdf sha1").len(), 20);
+    }
+
+    /// `generate_key` (JS-C562) — tailles AES/HMAC, matière
+    /// distincte à chaque appel, rejets honnêtes.
+    #[test]
+    fn generate_key_sizes() {
+        assert_eq!(
+            generate_key(KeyAlgo::AesCbc, 128).expect("aes128").len(),
+            16
+        );
+        assert_eq!(
+            generate_key(KeyAlgo::AesGcm, 256).expect("aes256").len(),
+            32
+        );
+        // Deux tirages ≠ (RNG plateforme, pas le PRNG moteur).
+        let a = generate_key(KeyAlgo::AesCbc, 128).expect("a");
+        let b = generate_key(KeyAlgo::AesCbc, 128).expect("b");
+        assert_ne!(a, b);
+        // HMAC `length` absent → bloc du hash ; explicite
+        // multiple de 8.
+        assert_eq!(
+            generate_key(KeyAlgo::Hmac(CryptoAlgo::Sha256), 0)
+                .expect("hmac def")
+                .len(),
+            64
+        );
+        assert_eq!(
+            generate_key(KeyAlgo::Hmac(CryptoAlgo::Sha512), 0)
+                .expect("hmac512")
+                .len(),
+            128
+        );
+        assert_eq!(
+            generate_key(KeyAlgo::Hmac(CryptoAlgo::Sha256), 8)
+                .expect("hmac 8")
+                .len(),
+            1
+        );
+        // Rejets : taille AES invalide, HMAC non multiple
+        // de 8, algos hors tranche symétrique.
+        assert!(generate_key(KeyAlgo::AesCbc, 100).is_err());
+        assert!(generate_key(KeyAlgo::Hmac(CryptoAlgo::Sha256), 7).is_err());
+        assert!(generate_key(KeyAlgo::Pbkdf2, 256).is_err());
+        assert!(generate_key(KeyAlgo::RsaOaep(CryptoAlgo::Sha256), 2048).is_err());
     }
 }
