@@ -56,9 +56,12 @@ pwsh -File scripts/spawn_daemon.ps1 -Port 9385 `
 # -Repo <worktree> si le vol ne part PAS du dépôt du script
 # (sinon l'exe résolu = celui du dépôt principal, possiblement
 # périmé — post-mortem vol 814). Le résolveur retient l'exe
-# le plus récent parmi target_dir/build_dir/CARGO_TARGET_DIR ;
-# contrôle : `daemon-<port>.exe.log` = chemin + âge du binaire
-# lancé, à citer dans le rapport (un vol mesure UN binaire).
+# le plus récent parmi target_dir/build_dir/CARGO_TARGET_DIR —
+# SOURCE DE VÉRITÉ UNIQUE de l'emplacement du binaire : ne
+# jamais recopier un chemin résolu (si la config target
+# change, seul ce script suit) ; contrôle :
+# `daemon-<port>.exe.log` = chemin + âge du binaire lancé,
+# à citer dans le rapport (un vol mesure UN binaire).
 # PIÈGE : jamais d'exe « deviné » dans un autre worktree —
 # un daemon spawné depuis l'exe d'un autre arbre s'annonce
 # dans le registre de CET arbre (default-17232 dans le
