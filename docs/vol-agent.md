@@ -42,9 +42,15 @@ cargo build --release -p explorer-daemon   # attendre « Finished »
 # direct depuis un shell sans console (agent/IDE), Windows
 # lui alloue une fenêtre cmd VISIBLE qui possède sa vie —
 # fermée → daemon tué → vol bloqué ; un clic dedans
-# (QuickEdit) → daemon gelé. spawn_daemon.ps1 = watchdog WMI
-# SW_HIDE : jamais de fenêtre, survit à l'appelant, code de
-# sortie + stdout/stderr capturés (morts silencieuses passées).
+# (QuickEdit) → daemon gelé. spawn_daemon.ps1 = watchdog
+# SW_HIDE : jamais de fenêtre, code de sortie + stdout/
+# stderr capturés (morts silencieuses passées). Canal
+# `session` (défaut étape 301) : enfant de la session,
+# inJob=True — meurt avec elle (signature lisible, étape
+# 285). `-Via wmi` = détaché via wmiprvse — survit à la
+# session mais parenté suspecte : tuée à la création par
+# les politiques anti-latéral-movement sur certaines
+# stations (§B-135, captures live 2026-11-16).
 $env:EXPLORER_VIEWPORT='1366x900'
 $env:EXPLORER_PROFILE='vol:vol<N>'   # froid = défaut — NOM canonique
                                      # → Explorer-data\vols\vol<N>\profile

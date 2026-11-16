@@ -14044,3 +14044,13 @@ chaque gain rapporté contre les **deux** archétypes.
   thrash borné). Compteur `ic_poly` — verdict au vol :
   `ic_bail`/`prop_ns` en reflux attendu.
 
+- [x] **Étape 304. `spawn_daemon -Via session|wmi` — le
+  canal session devient canonique** (§B-135 : captures live
+  2026-11-16 — 2 spawns WMI tués à la création, avant la
+  première écriture, Defender muet ; la parenté `wmiprvse`
+  est une signature anti-latéral-movement). `session`
+  (défaut) = `Start-Process -WindowStyle Hidden`, même
+  watchdog/`exit.log`/pidfile, daemon lié au job session
+  (meurt avec elle — signature lisible depuis 285). `wmi`
+  opt-in = détaché, survit à la session. Vérifié : daemon
+  9477 enfant de `cmd` ← session, `shutdown:api` → `EXIT:0`.
