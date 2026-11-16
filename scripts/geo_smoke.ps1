@@ -67,7 +67,8 @@ $totalDiv = 0
 $totalMatch = 0
 $measured = 0
 foreach ($site in $sites) {
-    $name = ($site -replace '^https?://', '') -replace '[^A-Za-z0-9_.-]', '_'
+    $name = (($site -replace '^https?://', '') -replace '/+$', '') `
+        -replace '[^A-Za-z0-9_.-]', '_'
     $png = Join-Path $outDir "$name.png"
     $geom = Join-Path $outDir "$name.geom.json"
     $ref = Join-Path $refDir "$name.ref.json"
