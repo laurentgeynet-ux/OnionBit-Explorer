@@ -3317,7 +3317,7 @@ async fn frameset_empty_is_tolerated() {
     let id = s.open_tab();
     s.navigate(id, "http://h.test/m").await.unwrap();
     assert_eq!(s.tab_url(id).as_deref(), Some("http://h.test/m"));
-    assert!(s.tab_frames(id).is_empty());
+    assert_eq!(s.tab_frames(id), Vec::new());
 }
 
 /// `shape="circle"` : le centre couvert, le coin exclu.

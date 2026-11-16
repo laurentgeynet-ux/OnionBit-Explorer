@@ -3190,6 +3190,25 @@ impl Engine {
         self.add_method(css, "supports", css_supports);
         self.add_method(css, "registerProperty", mql_noop);
         self.add_method(css, "escape", css_escape);
+        // `CSS.<unit>(v)` — factories numériques Typed OM
+        // (css-typed-om §4.3). Pas de `CSSUnitValue` complet :
+        // objet plat `{value, unit}` + `toString()`, surface
+        // lecture honnête — chaque factory porte son unité liée.
+        for unit in CSS_UNIT_NAMES {
+            let uv = self.str_val(*unit);
+            let f = self.bound_native("CSS.unit", css_unit_factory, vec![uv]);
+            self.set_own(css, unit, f, false);
+        }
+        // `CSS.highlights` — `HighlightRegistry` maplike ; un
+        // `Map` honnête suffit (set/get/has/delete/forEach).
+        let gv = Value::Obj(g);
+        if let Ok(map_f) = self.read_prop(gv.clone(), gv, "Map") {
+            if let Ok(m) =
+                self.call_value_ctor(map_f.clone(), Value::Undefined, &[], map_f)
+            {
+                self.set_own(css, "highlights", m, false);
+            }
+        }
         self.set_own(g, "CSS", Value::Obj(css), false);
         // `Node` — constructeur (inconstructible) portant les
         // constantes `*_NODE` / `DOCUMENT_POSITION_*` ; `prototype`
@@ -15535,6 +15554,61 @@ fn mql_noop(_e: &mut Engine, _t: Value, _a: &[Value]) -> JsResult<Value> {
 /// `CSS.supports(…)` — pas de moteur CSS : `false` honnête.
 fn css_supports(_e: &mut Engine, _t: Value, _a: &[Value]) -> JsResult<Value> {
     Ok(Value::Bool(false))
+}
+
+/// Unités des factories numériques `CSS.<unit>(v)`
+/// (css-typed-om §4.3 — `<dimension>` + `number`/`percent`).
+const CSS_UNIT_NAMES: &[&str] = &[
+    "number", "percent", // relatives à la police
+    "cap", "ch", "em", "ex", "ic", "lh", "rcap", "rch", "rem", "rex", "ric", "rlh",
+    // viewport
+    "vb", "vh", "vi", "vmax", "vmin", "vw", "svb", "svh", "svi", "svmax", "svmin", "svw", "lvb",
+    "lvh", "lvi", "lvmax", "lvmin", "lvw", "dvb", "dvh", "dvi", "dvmax", "dvmin", "dvw",
+    // conteneur
+    "cqb", "cqh", "cqi", "cqmax", "cqmin", "cqw", // longueurs absolues
+    "cm", "in", "mm", "pc", "pt", "px", "Q", // angle
+    "deg", "grad", "rad", "turn", // temps
+    "ms", "s", // fréquence
+    "Hz", "kHz", // résolution
+    "dpcm", "dpi", "dppx", "x", // flex
+    "fr",
+];
+
+/// `CSS.<unit>(v)` — fabrique numérique Typed OM : objet plat
+/// `{value, unit}` + `toString()` → `"<v><unit>"` ; l'unité est
+/// l'arg lié (`bound[0]`), la valeur `args[1]`. Pas de
+/// `CSSUnitValue` complet : surface lecture honnête.
+fn css_unit_factory(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
+    let unit = args
+        .first()
+        .and_then(|v| e.to_js_string(v.clone()).ok())
+        .unwrap_or_default();
+    let v = e.to_number(arg(args, 1))?;
+    let o = e.new_object();
+    e.set_own(o, "value", Value::Num(v), true);
+    let uv = e.str_val(unit.clone());
+    e.set_own(o, "unit", uv.clone(), true);
+    let ts = e.bound_native("toString", css_unit_to_string, vec![uv]);
+    e.set_own(o, "toString", ts, false);
+    Ok(Value::Obj(o))
+}
+
+/// `CSSUnitValue.toString()` — `"<value><unit>"` (unité liée,
+/// valeur lue sur `this` pour tolérer le monkey-patch).
+fn css_unit_to_string(e: &mut Engine, t: Value, args: &[Value]) -> JsResult<Value> {
+    let unit = args
+        .first()
+        .and_then(|v| e.to_js_string(v.clone()).ok())
+        .unwrap_or_default();
+    let v = e.read_prop(t.clone(), t, "value")?;
+    let s = e.to_js_string(v)?;
+    // Sérialisation Typed OM : `number` → "" et `percent` → "%".
+    let unit = match unit.as_str() {
+        "number" => "",
+        "percent" => "%",
+        u => u,
+    };
+    Ok(e.str_val(format!("{s}{unit}")))
 }
 
 /// `new Node()` — inconstructible ("illegal constructor" per spec).

@@ -14158,3 +14158,14 @@ chaque gain rapporté contre les **deux** archétypes.
   `invoke` sans `has_method` résiduels, membres IDL par
   fréquence (`CSS.<unit>`, `HTMLInputElement`, ancres URL,
   formulaires, événements `Keyboard`/`Pointer`).
+- [x] **JS-C557 — `CSS.<unit>` Typed OM + `CSS.highlights`
+  (`api` +64 → 1679)** : lot N3.3 — les 64 factories
+  numériques (`CSS.px/em/vw/deg/ms/fr/…`) en une boucle
+  `bound_native` à unité liée, retour `{value, unit}` +
+  `toString()` spec (`percent`→`%`, `number`→``) ;
+  `highlights` = `Map` honnête via `call_value_ctor`.
+  `paintWorklet` seul miss `CSS.*` restant (pas de
+  worklet — absent honnête). Verrou `c557_css_units` ×2.
+  Prochain lot : audit `invoke`-sans-`has_method`
+  (FileReader, canvas 2d, select/table), props
+  `HTMLInputElement`/ancres URL/formulaires.

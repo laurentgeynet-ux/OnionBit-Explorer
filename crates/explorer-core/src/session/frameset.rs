@@ -97,13 +97,13 @@ fn resolve_lens(lens: &[Len], total: f32) -> Vec<f32> {
 
 /// `position:absolute` + boîte — style inline synthétique,
 /// aucune feuille externe à charger.
-fn abs_style(x: f32, y: f32, w: f32, h: f32, extra: &str) -> String {
-    format!("position:absolute;left:{x}px;top:{y}px;width:{w}px;height:{h}px{extra}")
+fn abs_style(px: f32, py: f32, pw: f32, ph: f32, extra: &str) -> String {
+    format!("position:absolute;left:{px}px;top:{py}px;width:{pw}px;height:{ph}px{extra}")
 }
 
 /// `<iframe>` synthétique d'une `<frame>` — attributs
 /// d'intégration copiés, `frameborder="0"` → `border:0`.
-fn frame_to_iframe(dom: &mut Dom, f: NodeId, x: f32, y: f32, w: f32, h: f32) -> Option<NodeId> {
+fn frame_to_iframe(dom: &mut Dom, frame: NodeId, cx: f32, cy: f32, cw: f32, ch: f32) -> Option<NodeId> {
     let ifr = dom.create_element("iframe").ok()?;
     // Attributs copiés en `String` d'abord — l'emprunt
     // `attr_opt` ne peut cohabiter avec `set_attribute`.
@@ -117,17 +117,17 @@ fn frame_to_iframe(dom: &mut Dom, f: NodeId, x: f32, y: f32, w: f32, h: f32) -> 
         "longdesc",
     ]
     .into_iter()
-    .filter_map(|a| attr_opt(dom, f, a).map(|v| (a, v.to_owned())))
+    .filter_map(|a| attr_opt(dom, frame, a).map(|v| (a, v.to_owned())))
     .collect();
     for (a, v) in attrs {
         let _ = dom.set_attribute(ifr, a, &v);
     }
-    let border = if attr_opt(dom, f, "frameborder").is_some_and(|v| v.trim() == "0") {
+    let border = if attr_opt(dom, frame, "frameborder").is_some_and(|v| v.trim() == "0") {
         ";border:0"
     } else {
         ""
     };
-    let _ = dom.set_attribute(ifr, "style", &abs_style(x, y, w, h, border));
+    let _ = dom.set_attribute(ifr, "style", &abs_style(cx, cy, cw, ch, border));
     Some(ifr)
 }
 
@@ -136,11 +136,11 @@ fn frame_to_iframe(dom: &mut Dom, f: NodeId, x: f32, y: f32, w: f32, h: f32) -> 
 /// (→ `<iframe>`) et `<frameset>` imbriqués (→ sous-
 /// grilles récursives). `None` si le `<frameset>` n'a
 /// aucun enfant cadre.
-fn build_grid(dom: &mut Dom, fs: NodeId, x: f32, y: f32, w: f32, h: f32) -> Option<NodeId> {
+fn build_grid(dom: &mut Dom, fs: NodeId, ox: f32, oy: f32, gw: f32, gh: f32) -> Option<NodeId> {
     let rows = attr_opt(dom, fs, "rows").unwrap_or("100%");
     let cols = attr_opt(dom, fs, "cols").unwrap_or("100%");
-    let rh = resolve_lens(&parse_lens(rows), h);
-    let cw = resolve_lens(&parse_lens(cols), w);
+    let rh = resolve_lens(&parse_lens(rows), gh);
+    let cw = resolve_lens(&parse_lens(cols), gw);
     let Ok(kids) = dom.children(fs) else {
         return None;
     };
@@ -156,10 +156,10 @@ fn build_grid(dom: &mut Dom, fs: NodeId, x: f32, y: f32, w: f32, h: f32) -> Opti
     let mut cells = cells.into_iter();
     let mut filled = false;
     let grid = dom.create_element("div").ok()?;
-    let _ = dom.set_attribute(grid, "style", &abs_style(x, y, w, h, ""));
-    let mut cy = y;
+    let _ = dom.set_attribute(grid, "style", &abs_style(ox, oy, gw, gh, ""));
+    let mut cy = oy;
     for ch in &rh {
-        let mut cx = x;
+        let mut cx = ox;
         for cwid in &cw {
             let Some(child) = cells.next() else {
                 return filled.then_some(grid);
