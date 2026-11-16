@@ -1322,24 +1322,20 @@ fn dom_nav_set(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
 /// chaîne entière, une mutation sur n'importe quel maillon
 /// change la clé du cache. Borné `SHADOW_MEMO_CAP`.
 fn proto_accessor_shadows(e: &mut Engine, id: ObjId, key: &str) -> bool {
-    // Phase 1 — collecte des maillons + fold des shapes (borne 32
-    // — la chaîne DOM est courte, un cycle hostile ne boucle pas).
+    // Phase 1 — fold des shapes (borne 32 — la chaîne DOM est
+    // courte, un cycle hostile ne boucle pas). §B-114 : les
+    // maillons ne sont collectés qu'au raté de mémo — le Vec
+    // quittait le chemin chaud (un alloc par accès de prop DOM).
     let mut cur = match e.heap.obj(id) {
         Some(o) => o.proto.clone(),
         None => return false,
     };
-    let mut links: Vec<ObjId> = Vec::new();
     let mut fold: u64 = 0x9E37_79B9_7F4A_7C15;
     for _ in 0..32 {
         let Value::Obj(cid) = cur else { break };
-        links.push(cid);
-        if let Some(o) = e.heap.obj(cid) {
-            fold = fold.wrapping_mul(0x1000_0000_01B3).wrapping_add(o.shape());
-            cur = o.proto.clone();
-        } else {
-            links.pop();
-            break;
-        }
+        let Some(o) = e.heap.obj(cid) else { break };
+        fold = fold.wrapping_mul(0x1000_0000_01B3).wrapping_add(o.shape());
+        cur = o.proto.clone();
     }
     let memo_key = (
         fold,
@@ -1348,8 +1344,20 @@ fn proto_accessor_shadows(e: &mut Engine, id: ObjId, key: &str) -> bool {
     if let Some(&b) = e.shadow_memo.get(&memo_key) {
         return b;
     }
-    // Phase 2 — marche `find_own` (une seule fois par
-    // (chaîne-shape, clé) distincts).
+    // Phase 2 — re-marche `find_own` en collectant (une seule
+    // fois par (chaîne-shape, clé) distincts ; la chaîne est
+    // courte, la re-marche coûte moins que le Vec à chaud).
+    let mut cur = match e.heap.obj(id) {
+        Some(o) => o.proto.clone(),
+        None => return false,
+    };
+    let mut links: Vec<ObjId> = Vec::new();
+    for _ in 0..32 {
+        let Value::Obj(cid) = cur else { break };
+        let Some(o) = e.heap.obj(cid) else { break };
+        links.push(cid);
+        cur = o.proto.clone();
+    }
     let authored_check = |e: &mut Engine, cid: ObjId| -> bool {
         if let Some(crate::heap::Prop::Acc { get, set, .. }) = e.find_own(cid, key) {
             let authored = |v: Value| match v {
@@ -5464,21 +5472,18 @@ impl Engine {
         ev.adjusted.set(adjusted);
         ev.adjusted_related.set(related);
         let ty = ev.ty.borrow().clone();
-        let (fns, node_desc): (Vec<Value>, String) = {
+        let fns: Vec<Value> = {
             let d = dom.borrow();
-            (
-                d.nodes
-                    .get(node as usize)
-                    .map(|n| {
-                        n.listeners
-                            .iter()
-                            .filter(|(t, _, c)| t == &ty && *c == capture)
-                            .map(|(_, f, _)| f.clone())
-                            .collect()
-                    })
-                    .unwrap_or_default(),
-                probe_node_desc(&d, node),
-            )
+            d.nodes
+                .get(node as usize)
+                .map(|n| {
+                    n.listeners
+                        .iter()
+                        .filter(|(t, _, c)| t == &ty && *c == capture)
+                        .map(|(_, f, _)| f.clone())
+                        .collect()
+                })
+                .unwrap_or_default()
         };
         let n_fns = fns.len();
         let this = node_value(self, dom, cache, node);
@@ -5517,7 +5522,10 @@ impl Engine {
         if n_fns > 0 && tracing::enabled!(target: "dom_probe", tracing::Level::INFO) {
             if let Ok(mut d) = dom.try_borrow_mut() {
                 if d.ce.probe_seen.insert(format!("cb:{ty}")) {
-                    tracing::info!(target: "dom_probe", site = "ev.cb", ty = %ty, on = %node_desc, n = n_fns);
+                    // §B-114 — `probe_node_desc` calculé ici
+                    // (premier cb vu par type), plus par nœud.
+                    let on = probe_node_desc(&d, node);
+                    tracing::info!(target: "dom_probe", site = "ev.cb", ty = %ty, on = %on, n = n_fns);
                 }
             }
         }

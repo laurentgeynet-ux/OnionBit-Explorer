@@ -87,6 +87,39 @@ const STACK_TRACE_LIMIT: usize = 10;
 /// `items_after_statements` interdit un `static` dans le corps.
 static DYN_PROBE: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
 
+/// §B-114/field276 — sondes « promesses nommées »
+/// (`prom_sites` + histogrammes `prom.pending`/`prom.src`/
+/// `prom.settle`) : un `Rc<str>` de site + extrait borné par
+/// promesse sous le filtre `info` par défaut, puis scan
+/// complet + `format!` par paire à **chaque passe GC** —
+/// ~500 Kio de churn par safepoint (6 009 paires sur lego).
+/// Désarmée par défaut, armée par `EXPLORER_PROM_PROF=1`
+/// (même gating que `EXPLORER_J17_PROF`) ou
+/// `prom_probe_enable` (tests/benchs) ; les compteurs
+/// `sched.tally` (`prom.created`/`prom.settled`) restent à
+/// `info` — le gap est le signal §B-97 lu par le corpus.
+static PROM_PROF: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+static PROM_ENV: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+
+/// `true` si la sonde promesses est armée (env/enable) **et**
+/// la cible `dom_probe` est effective à INFO — un seul check
+/// couvre enregistrement (`probe_prom_*`) et émission.
+#[inline]
+pub(crate) fn prom_probe_armed() -> bool {
+    (PROM_PROF.load(std::sync::atomic::Ordering::Relaxed)
+        || *PROM_ENV.get_or_init(|| {
+            std::env::var("EXPLORER_PROM_PROF").is_ok_and(|v| !v.is_empty() && v != "0")
+        }))
+        && tracing::enabled!(target: "dom_probe", tracing::Level::INFO)
+}
+
+/// Arme la sonde promesses sans variable d'environnement
+/// (tests/benchs — sinon `prom_sites` reste vide).
+#[cfg(test)]
+pub(crate) fn prom_probe_enable() {
+    PROM_PROF.store(true, std::sync::atomic::Ordering::Relaxed);
+}
+
 /// Sonde DI N1.5 — nomme les clés `deferredKey`/`provide`
 /// lues par le rail kevlar (`resolve(VhV)`/`addProvider`)
 /// sous `EXPLORER_CTX_PROBE`.
@@ -3672,9 +3705,7 @@ impl Engine {
         // histogrammes bornés. La table est élaguée des id
         // balayées/non-promesse à chaque passe (évite la
         // dérive + les faux positifs d'ObjId réutilisées).
-        if tracing::enabled!(target: "dom_probe", tracing::Level::INFO)
-            && !self.prom_sites.is_empty()
-        {
+        if prom_probe_armed() && !self.prom_sites.is_empty() {
             // Top-N par fréquence — le résidu (~30-60 `.then`)
             // se condense en une poignée de sites nommés.
             let top = |h: std::collections::BTreeMap<String, u64>| -> Vec<(String, u64)> {

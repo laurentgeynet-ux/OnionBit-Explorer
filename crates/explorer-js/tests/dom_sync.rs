@@ -246,6 +246,68 @@ fn journal_risky_parent_falls_back_to_keyed() {
     );
 }
 
+/// §B-114 — pré-classification par tags : un sous-arbre inséré
+/// contenant `<script>` (contenu risqué, parent sain) reste
+/// classé non rejouable → repli `sync_dom_keyed` — sans qu'on
+/// ait eu à sérialiser le sous-arbre pour le savoir.
+#[test]
+fn journal_insert_script_falls_back_to_keyed() {
+    let mut eng = JscoreEngine::new();
+    eng.install_dom(
+        "<html><body><div id='h'><p>a</p></div></body></html>",
+        "https://x/",
+        1,
+    );
+    eng.eval(
+        "var h = document.getElementById('h');\
+         var w = document.createElement('div');\
+         var s = document.createElement('script');\
+         s.textContent = 'var a=1;';\
+         w.appendChild(s);\
+         h.appendChild(w);",
+    )
+    .unwrap();
+    assert!(
+        eng.drain_dom_mutations().is_none(),
+        "sous-arbre contenant <script> → repli re-parse"
+    );
+    let k = eng.sync_dom_keyed().expect("baseline après rejet");
+    assert!(k.html.contains("<script"), "mutations livrées : {}", k.html);
+}
+
+/// Face miroir : un tag **custom** partageant un préfixe de
+/// l'ancien scan (`<col-foo` tombait sur `contains("<col")`)
+/// n'est plus classé — la pré-classification compare les tags,
+/// pas des préfixes de balisage sérialisé.
+#[test]
+fn journal_insert_custom_tag_stays_journal() {
+    let mut eng = JscoreEngine::new();
+    eng.install_dom(
+        "<html><body><ul id='l'><li>a</li></ul></body></html>",
+        "https://x/",
+        1,
+    );
+    eng.eval(
+        "var l = document.getElementById('l');\
+         var c = document.createElement('col-foo');\
+         c.textContent = 'y';\
+         l.appendChild(c);",
+    )
+    .unwrap();
+    let j = eng
+        .drain_dom_mutations()
+        .expect("insert custom sain → journal rejouable");
+    let ins = j.ops.iter().find_map(|op| match op {
+        explorer_js::DomMutation::Insert { html, .. } => Some(html),
+        _ => None,
+    });
+    assert!(
+        ins.is_some_and(|h| h.contains("<col-foo")),
+        "Insert attendu : {:?}",
+        j.ops
+    );
+}
+
 /// `<template>.content` déplace les enfants vers un fragment
 /// détaché — chemin non tracé par le journal → poison → repli.
 #[test]

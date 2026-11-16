@@ -8136,6 +8136,24 @@ MCP = adaptateur, jamais la base.
   — miss désormais attribuables moteur. `css.values`
   1144/1767 → **1146/1758 (65,2 %)**, cliquet
   et cliché `na` re-sauvés.
+- [x] **Étape 305. §B-114 — coupes de churn nommées au
+  field276** (`explorer-jscore`/`explorer-js`/
+  `explorer-core`). Sondes promesses (`prom_sites` +
+  histogrammes `prom.*` par passe GC) derrière
+  `EXPLORER_PROM_PROF` — atomique + `enable()`, pattern
+  J17 ; `sched.tally` conservé à `info`. Journal :
+  pré-classification par marche de tags (`RISKY_TAGS`,
+  cycle borné §B-59) avant toute sérialisation — les
+  `serialize_subtree_keyed` jetés au classement
+  disparaissent, les marqueurs `data-obreloc*` (JS-C291)
+  et tags customs à préfixe ne classent plus à tort.
+  `fire_listeners` : `probe_node_desc` paresseux (plus
+  par nœud×phase). `proto_accessor_shadows` : `Vec` de
+  maillons sur raté de mémo seulement. `queue_mutation` :
+  marche parent sans `Vec`. `pump.offlock` amorcé sur
+  le fil appelant — la mesure borne le churn à la
+  fenêtre. Verrous : `dom_sync` 11/11 (2 nouveaux),
+  lib jscore 51/51 ; demande PIPE `flow.*` consignée.
 - [x] **Étape 301. Attribution §B-114 — `pump.offlock`
   fendu, la file d'applies mesurée** (`explorer-core`,
   instrumentation). `pump.offlock` couvrait

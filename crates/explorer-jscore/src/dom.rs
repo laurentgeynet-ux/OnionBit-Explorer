@@ -1783,10 +1783,21 @@ impl Dom {
             .get(&rec.target)
             .map(|regs| regs.iter().filter(|r| r.wants(rec)).collect())
             .unwrap_or_default();
-        for a in self.ancestors(rec.target) {
+        // §B-114 — marche parent directe sans collecte : le Vec
+        // `ancestors()` quittait le chemin chaud (un alloc par
+        // mutation, même sans observer `subtree` sur la chaîne) ;
+        // borne cycle §B-59 conservée (`depth >= nodes.len()`).
+        let mut cur = self.nodes.get(rec.target as usize).and_then(|n| n.parent);
+        let mut depth = 0usize;
+        while let Some(a) = cur {
             if let Some(regs) = self.observers.get(&a) {
                 hits.extend(regs.iter().filter(|r| r.subtree && r.wants(rec)));
             }
+            depth += 1;
+            if depth >= self.nodes.len() {
+                break;
+            }
+            cur = self.nodes.get(a as usize).and_then(|n| n.parent);
         }
         for r in hits {
             let mut rec = rec.clone();

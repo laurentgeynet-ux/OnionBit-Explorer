@@ -588,6 +588,14 @@ pub async fn pump_timers_shared(sess: &tokio::sync::Mutex<Session>, tab: TabId) 
     // étape du chemin de retour est nommée : la dernière
     // ligne vivante brackete le site fautif.
     let tb = Instant::now();
+    // §B-114 — même loquet fil-local côté appelant : sans ce
+    // primer, `pump.offlock` lisait le delta du compteur global
+    // depuis la *phase précédente de ce fil* (toute la tempête
+    // inter-battements — ~21 Gio mesurés au field276 pour un
+    // drain réel de 1,8 Mio). Amorcé ici, il borne le churn
+    // process à la fenêtre de pompe (comparaison historique
+    // conservée, mesure désormais honnête).
+    let _ = explorer_common::alloc_delta();
     let out = tokio::task::spawn_blocking(move || {
         dlv_info!("pump: run");
         // §B-114 — le curseur `alloc_delta` est local au fil :
