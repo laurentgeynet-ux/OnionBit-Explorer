@@ -13580,6 +13580,11 @@ chaque gain rapporté contre les **deux** archétypes.
   (`ic_hit`/`ic_miss`/`ic_disarm` au snapshot) pour
   borner la couverture du seul court-circuit existant.
   Dependency-groups = infra lourde, dernier recours.
+- [x] **JS-C570 — sonde `nva`/`nvb`/`nvc`/`nv_n`** —
+  décomposition du coût `NodeHost::get` sur clés nav :
+  entrée→gate / cascade+match / `dom_nav_value`. Le bit
+  « accesseur nav direct » se pose sur le segment dominant
+  mesuré, pas à l'aveugle.
 - [x] **JS-C569 — `shm` learn-on-second-miss** — porte
   `shm_gate` : fold payé seulement après le 1er miss d'une
   clé ; 8 misses sous folds neufs consécutifs →

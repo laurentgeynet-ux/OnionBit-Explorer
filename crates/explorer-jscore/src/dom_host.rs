@@ -939,6 +939,32 @@ fn nav_sibling_node(dom: &DomRef, node: NodeId, key: &str) -> Option<NodeId> {
 /// el)` ne repasse pas par `Host::get`, même discipline JS-C82
 /// que `dom_acc_get` — un accesseur propre `defineProperty` ne
 /// reboucle pas). `None` = prop hors table.
+/// JS-C570 — sous-ensemble « navigation arbre » de l'arm
+/// `dom_nav_value` instrumentée par `nva`/`nvb`/`nvc` (le
+/// front désigné par les filets n568/n569 — la donnée est
+/// O(1), le coût est le dispatch).
+fn nav_dbg_key(key: &str) -> bool {
+    matches!(
+        key,
+        "parentNode"
+            | "parentElement"
+            | "isConnected"
+            | "children"
+            | "childNodes"
+            | "childElementCount"
+            | "firstChild"
+            | "lastChild"
+            | "firstElementChild"
+            | "lastElementChild"
+            | "previousSibling"
+            | "previousElementSibling"
+            | "nextSibling"
+            | "nextElementSibling"
+            | "ownerDocument"
+            | "nodeType"
+    )
+}
+
 fn dom_nav_value(
     e: &mut Engine,
     dom: &DomRef,
@@ -8858,6 +8884,11 @@ impl Host for NodeHost {
 
     fn get(&self, e: &mut Engine, this: Value, key: &str) -> JsResult<Option<Value>> {
         let node = self.node;
+        // JS-C570 — instrumentation de décomposition du coût
+        // nav : `nva` = entrée → gate, `nvb` = cascade+match,
+        // `nvc` = `dom_nav_value` (+`node_value`). Désarmé hors
+        // J17 (~1 `load` + match).
+        let mut nv_t = (crate::j17_on() && nav_dbg_key(key)).then(std::time::Instant::now);
         // Id obsolète (arène resynchronisée — spectrum
         // `groupChildren`, `nodes[614]` sur 507 — ou slot
         // recyclé, époque divergée, §B-126) → prop absente,
@@ -8940,6 +8971,13 @@ impl Host for NodeHost {
             if let Some(v) = proto_universal_fn(e, id, key) {
                 return Ok(Some(v));
             }
+        }
+        if let Some(t0) = nv_t {
+            crate::J17_NV_A_NS.fetch_add(
+                u64::try_from(t0.elapsed().as_nanos()).unwrap_or(u64::MAX),
+                std::sync::atomic::Ordering::Relaxed,
+            );
+            nv_t = Some(std::time::Instant::now());
         }
         // `<style>`/`<link rel=stylesheet>` — `el.sheet` :
         // la `CSSStyleSheet` de l'élément (spec — le patron
@@ -9219,6 +9257,16 @@ impl Host for NodeHost {
             | "textContent"
             | "innerText"
             | "nodeType" => {
+                if let Some(t1) = nv_t {
+                    crate::J17_NV_B_NS.fetch_add(
+                        u64::try_from(t1.elapsed().as_nanos()).unwrap_or(u64::MAX),
+                        std::sync::atomic::Ordering::Relaxed,
+                    );
+                    crate::j17_tick(&crate::J17_NV_N);
+                    return crate::j17_time(&crate::J17_NV_C_NS, || {
+                        dom_nav_value(e, &self.dom, &self.cache, node, key)
+                    });
+                }
                 return dom_nav_value(e, &self.dom, &self.cache, node, key);
             }
             // `data` = `CharacterData` seulement (JS-C342, §B-97
