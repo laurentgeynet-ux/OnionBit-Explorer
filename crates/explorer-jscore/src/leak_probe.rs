@@ -184,4 +184,21 @@ mod tests {
         let r = e.eval("var a='x'.repeat(700000); var b='y'.repeat(700000); `${a}${b}`");
         assert!(r.is_err(), "template géant doit lever RangeError");
     }
+
+    /// Étape 311 (§B-114) — `interned_stats` rend la table
+    /// d'internement **immortelle** mesurable : interner un nom
+    /// jamais vu doit faire croître entrées et octets (un
+    /// producteur de noms uniques la gonfle hors tas cellules).
+    #[test]
+    fn interned_stats_mesure_table_immortelle() {
+        let (n0, b0) = crate::interned_stats();
+        let _ = crate::intern("etape311_sonde_nom_unique_xqz");
+        let (n1, b1) = crate::interned_stats();
+        assert!(n1 > n0, "entrée ajoutée comptée : {n0} -> {n1}");
+        assert!(b1 > b0, "octets comptés : {b0} -> {b1}");
+        // Ré-interner le même nom ne gonfle pas la table.
+        let _ = crate::intern("etape311_sonde_nom_unique_xqz");
+        let (n2, _) = crate::interned_stats();
+        assert_eq!(n2, n1, "dedup : pas de croissance sur un hit");
+    }
 }

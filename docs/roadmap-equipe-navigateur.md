@@ -8211,6 +8211,22 @@ MCP = adaptateur, jamais la base.
   le fil appelant — la mesure borne le churn à la
   fenêtre. Verrous : `dom_sync` 11/11 (2 nouveaux),
   lib jscore 51/51 ; demande PIPE `flow.*` consignée.
+- [x] **Étape 311. §B-114 — la rétention native hors tas
+  cellules a des noms** (`explorer-jscore`/`explorer-core`,
+  instrumentation seule — aucun changement de comportement).
+  Le vol 860 a prouvé le churn ~4,4 Gio hors heap JS
+  (heap 126→34 Mio post-GC, RSS ~4,5 Gio stable sur
+  flipkart) ; aucun compteur ne le nommait. `Dom::heap_bytes`
+  miroir jscore (arène + chaînes/attributs/listeners +
+  `journal`/`mutations` nommés à part, convention
+  `explorer_dom::heap_bytes`), `interned_stats` (table
+  d'internement immortelle, hors tas — mesurable
+  `(entrées, octets)`), `b59_diag` +
+  `dom_b`/`jrnl_b`/`muts_b`/`intern`, `mem_diag` session +
+  `dom_b`/`boxes`/`bfc`/`bfc_b` (bfcache natif sommé sans
+  round-trip moteur — `snapshot_native_bytes`). Verrous :
+  `heap_bytes_mesure_contenu_et_files`,
+  `interned_stats_mesure_table_immortelle`.
 - [x] **Étape 301. Attribution §B-114 — `pump.offlock`
   fendu, la file d'applies mesurée** (`explorer-core`,
   instrumentation). `pump.offlock` couvrait

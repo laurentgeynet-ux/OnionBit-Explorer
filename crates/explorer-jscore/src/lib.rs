@@ -115,6 +115,31 @@ pub use heap::{HeapStats, Host};
 pub use idb::{CacheEntry, CacheRegistry, IdbDb, IdbIndexDef, IdbRegistry, IdbStore};
 pub use interp::Engine;
 
+thread_local! {
+    /// Table d'internement — voir [`intern`]. Remontée au
+    /// niveau module (étape 311) pour être mesurable par
+    /// [`interned_stats`].
+    static INTERNED: std::cell::RefCell<
+        std::collections::HashSet<std::rc::Rc<str>>,
+    > = std::cell::RefCell::new(std::collections::HashSet::new());
+    // JS-C566 — cache par pointeur canonique : les clés
+    // déjà internées (noms de membres `Rc<str>` de l'AST —
+    // le parseur interne — passés `&*rc`) arrivent avec le
+    // pointeur de l'alloc internée. Cette alloc est
+    // **immortelle** (la table ne retire jamais) → son
+    // adresse ne peut pas être réemployée : `ptr + len`
+    // identiques = mêmes octets (la garde `len` rejette
+    // les tranches `&interned[..n]` qui partagent le ptr).
+    // Hit = hash de pointeur ~10 ns au lieu du hash de
+    // contenu. Les `&str` transitoires n'entrent jamais
+    // (enregistré seulement quand `rc.as_ptr() ==
+    // name.as_ptr()` — adresse canonique) → aucun faux hit
+    // sur buffer recyclé.
+    static PTR_HIT: std::cell::RefCell<
+        std::collections::HashMap<*const u8, std::rc::Rc<str>>,
+    > = std::cell::RefCell::new(std::collections::HashMap::new());
+}
+
 /// Interneur de noms partagé (JS-C307+ / chantier `Rc<str>`) :
 /// hit → `Rc` cloné (zéro alloc), miss → une alloc pour toute
 /// la session. `thread_local` : le moteur est mono-thread par
@@ -122,27 +147,6 @@ pub use interp::Engine;
 /// contextes d'une même page** — noms AST, clés de props et
 /// noms de scope tombent dans la même table.
 pub(crate) fn intern(name: &str) -> std::rc::Rc<str> {
-    thread_local! {
-        static INTERNED: std::cell::RefCell<
-            std::collections::HashSet<std::rc::Rc<str>>,
-        > = std::cell::RefCell::new(std::collections::HashSet::new());
-        // JS-C566 — cache par pointeur canonique : les clés
-        // déjà internées (noms de membres `Rc<str>` de l'AST —
-        // le parseur interne — passés `&*rc`) arrivent avec le
-        // pointeur de l'alloc internée. Cette alloc est
-        // **immortelle** (la table ne retire jamais) → son
-        // adresse ne peut pas être réemployée : `ptr + len`
-        // identiques = mêmes octets (la garde `len` rejette
-        // les tranches `&interned[..n]` qui partagent le ptr).
-        // Hit = hash de pointeur ~10 ns au lieu du hash de
-        // contenu. Les `&str` transitoires n'entrent jamais
-        // (enregistré seulement quand `rc.as_ptr() ==
-        // name.as_ptr()` — adresse canonique) → aucun faux hit
-        // sur buffer recyclé.
-        static PTR_HIT: std::cell::RefCell<
-            std::collections::HashMap<*const u8, std::rc::Rc<str>>,
-        > = std::cell::RefCell::new(std::collections::HashMap::new());
-    }
     // `EXPLORER_NO_PTRHIT=1` désarme le cache (A/B de filet).
     static PTRHIT_ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
     let on =
@@ -167,6 +171,25 @@ pub(crate) fn intern(name: &str) -> std::rc::Rc<str> {
         PTR_HIT.with(|m| m.borrow_mut().insert(name.as_ptr(), rc.clone()));
     }
     rc
+}
+
+/// Mesure de la table d'internement (étape 311, §B-114) —
+/// `(entrées, octets)` : la table est **immortelle** par
+/// design (jamais de retrait) et vit hors du tas cellules
+/// jscore — un producteur de noms uniques la gonfle sans
+/// borne et la ligne `mem_diag` doit pouvoir la désigner.
+/// Estimation : `len` + en-tête `Rc` (~3 usizes) par entrée,
+/// même convention capacité que `explorer_dom::heap_bytes`.
+pub(crate) fn interned_stats() -> (usize, usize) {
+    INTERNED.with(|set| {
+        let set = set.borrow();
+        (
+            set.len(),
+            set.iter()
+                .map(|r| r.len() + 3 * std::mem::size_of::<usize>())
+                .sum(),
+        )
+    })
 }
 
 /// JS-C556 — flags `DBG_*`/`EXPLORER_*` sondés **une fois** :

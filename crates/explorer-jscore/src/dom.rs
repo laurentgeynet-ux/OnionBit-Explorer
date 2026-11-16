@@ -1321,6 +1321,99 @@ impl Dom {
         )
     }
 
+    /// Estimation de la rétention **native** du miroir (étape
+    /// 311, §B-114) — cette arène vit hors du tas cellules :
+    /// sous un drain d'hydratation la RSS peut croître ici
+    /// alors que `heap_b` reste stable (preuve directe vol
+    /// 860 : heap JS 126→34 Mio post-GC, RSS ~4,5 Gio).
+    /// Convention `explorer_dom::Dom::heap_bytes` : capacités
+    /// des conteneurs + charges internes (chaînes, vecteurs)
+    /// — approximation de l'ordre du pour-cent, jamais un
+    /// faux total exact.
+    ///
+    /// Retourne `(total, journal, mutations)` en octets —
+    /// les deux files nommées à part : sous un storm
+    /// `drain=applies`/`relatedTarget`, elles retiennent les
+    /// records entre deux drains.
+    pub(crate) fn heap_bytes(&self) -> (usize, usize, usize) {
+        use std::mem::size_of;
+        let nodes_b = self.nodes.capacity() * size_of::<Node>()
+            + self
+                .nodes
+                .iter()
+                .map(|n| {
+                    n.tag.capacity()
+                        + n.text.capacity()
+                        + n.attrs.capacity() * size_of::<(String, String)>()
+                        + n.attrs
+                            .iter()
+                            .map(|(k, v)| k.capacity() + v.capacity())
+                            .sum::<usize>()
+                        + n.children.capacity() * size_of::<NodeId>()
+                        + n.listeners.capacity() * size_of::<(String, Value, bool)>()
+                        + n.listeners
+                            .iter()
+                            .map(|(t, _, _)| t.capacity())
+                            .sum::<usize>()
+                        + n.inline_handlers.capacity() * size_of::<(String, String, Value)>()
+                        + n.inline_handlers
+                            .iter()
+                            .map(|(a, s, _)| a.capacity() + s.capacity())
+                            .sum::<usize>()
+                })
+                .sum::<usize>();
+        let journal_b = self.journal.capacity() * size_of::<JournalOp>()
+            + self
+                .journal
+                .iter()
+                .map(|op| match op {
+                    JournalOp::Insert { added, .. } => added.capacity() * size_of::<NodeId>(),
+                    JournalOp::SetAttr { name, .. } => name.capacity(),
+                    _ => 0,
+                })
+                .sum::<usize>();
+        let muts_b = self.mutations.capacity() * size_of::<(u64, MutationRecord)>()
+            + self
+                .mutations
+                .iter()
+                .map(|(_, r)| {
+                    (r.added.capacity() + r.removed.capacity()) * size_of::<NodeId>()
+                        + r.attr_name.as_ref().map_or(0, String::capacity)
+                        + r.old_value.as_ref().map_or(0, String::capacity)
+                })
+                .sum::<usize>();
+        let misc_b = self.id_index.capacity() * size_of::<(String, Vec<NodeId>)>()
+            + self
+                .id_index
+                .iter()
+                .map(|(k, v)| k.capacity() + v.capacity() * size_of::<NodeId>())
+                .sum::<usize>()
+            + self.observers.capacity() * size_of::<(NodeId, Vec<MutObsReg>)>()
+            + self
+                .observers
+                .values()
+                .map(|v| v.capacity() * size_of::<MutObsReg>())
+                .sum::<usize>()
+            + self.canvases.capacity() * size_of::<(NodeId, CanvasState)>()
+            + self
+                .canvases
+                .values()
+                .map(|c| {
+                    c.ops.capacity() * size_of::<CanvasOpRecord>()
+                        + c.extra.len() * size_of::<(String, Value)>()
+                })
+                .sum::<usize>()
+            + self.media.capacity() * size_of::<(NodeId, MediaElState)>()
+            + self.media_cmds.capacity() * size_of::<(u64, MediaCmd)>()
+            + self.template_contents.capacity() * size_of::<(NodeId, NodeId)>()
+            + self.shadow_roots.capacity() * size_of::<(NodeId, (NodeId, bool))>()
+            + self.shadow_hosts.capacity() * size_of::<(NodeId, NodeId)>()
+            + (self.free_nodes.capacity() + self.dead_blocked.capacity()) * size_of::<NodeId>()
+            + self.ce_reactions.capacity() * size_of::<CeReaction>()
+            + self.pending_dyn_imgs.capacity() * size_of::<NodeId>();
+        (nodes_b + journal_b + muts_b + misc_b, journal_b, muts_b)
+    }
+
     // -- Journal de synchro (ADR-0025) ---------------------------------
 
     /// Draine le journal de mutations — `None` si empoisonné
@@ -6588,5 +6681,38 @@ mod tests {
         let kids2 = d2.child_nodes(ns2[0]);
         assert_eq!(kids2.len(), 1);
         assert_eq!(d2.by_tag(ns2[0], "style"), Vec::<crate::dom::NodeId>::new());
+    }
+
+    /// Étape 311 (§B-114) — `heap_bytes` mesure la rétention
+    /// native du miroir : il croît avec le contenu réel
+    /// (nœuds + chaînes + files), jamais nul sur un document
+    /// peuplé, et les charges journal/mutations sont nommées
+    /// à part sans dépasser le total.
+    #[test]
+    fn heap_bytes_mesure_contenu_et_files() {
+        let mut d = Dom::from_html("<html><body><div id=feed></div></body></html>");
+        let (base, j0, m0) = d.heap_bytes();
+        assert!(base > 0, "un document peuplé occupe des octets");
+        assert!(j0 <= base && m0 <= base, "files bornées par le total");
+
+        // Charge réelle : nœuds + attributs + texte + une
+        // entrée de journal nommée à part.
+        let feed = d.by_id("feed").expect("feed présent");
+        for _ in 0..64 {
+            let a = d.create_element("article");
+            d.set_attr(a, "class", "card-avec-un-nom-long");
+            let t = d.create_text("contenu de tuile assez long pour compter");
+            d.append(a, t);
+            d.append(feed, a);
+        }
+        d.journal.push(JournalOp::Insert {
+            parent: feed,
+            index: 0,
+            added: (0..32).collect(),
+        });
+        let (grown, j1, m1) = d.heap_bytes();
+        assert!(grown > base, "le contenu fait croître la mesure");
+        assert!(j1 > j0, "le journal ajouté est mesuré");
+        assert!(m1 <= grown, "file mutations incluse dans le total");
     }
 }

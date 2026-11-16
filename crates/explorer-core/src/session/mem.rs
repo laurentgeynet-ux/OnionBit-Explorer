@@ -164,12 +164,32 @@ pub struct MemReport {
 
 /// Compte les boîtes d'un arbre de layout (descente récursive
 /// — les `children` sont `pub`, contrat PIPE).
-fn count_boxes(b: &LayoutBox) -> usize {
+pub(crate) fn count_boxes(b: &LayoutBox) -> usize {
     1 + b
         .children
         .iter()
         .map(|c| explorer_common::deep(|| count_boxes(c)))
         .sum::<usize>()
+}
+
+/// Octets natifs d'une page gelée bfcache **hors tas JS**
+/// (étape 311, §B-114) : DOM + frame + PNG + corps d'images
+/// — la part retenue en dehors du heap cellules déjà compté
+/// ailleurs. Lecture `&` : pas de round-trip moteur — le
+/// `heap_stats` de `snap.js` reste l'apanage de
+/// [`Session::mem_report`], à la demande.
+pub(crate) fn snapshot_native_bytes(snap: &PageSnapshot) -> usize {
+    let mut b = 0usize;
+    if let Some(d) = &snap.dom {
+        b += d.heap_bytes();
+    }
+    if let Some(f) = &snap.frame {
+        b += f.pixels.len();
+    }
+    if let Some(p) = &snap.png {
+        b += p.len();
+    }
+    b + snap.img_bodies.values().map(Vec::len).sum::<usize>()
 }
 
 /// Ensemble de dédup bitmaps : `Arc::as_ptr` → `rgba.len()`

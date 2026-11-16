@@ -489,8 +489,10 @@ impl Session {
     /// display list, files `js_pending_*`, file d'applies
     /// `applies`/`apply_b`) + compteurs internes du moteur via
     /// `diag_line` (§B-59 : le compteur qui suit la RSS nomme
-    /// le fuyard).
+    /// le fuyard). Étape 311 : + `dom_b`/`boxes`/`bfc`/`bfc_b`
+    /// — attribution native hors tas cellules.
     #[allow(clippy::too_many_arguments)]
+    #[allow(clippy::too_many_lines)] // ligne de champs diag : pas de découpe naturelle.
     fn log_mem_diag(
         tab: TabId,
         jobs: usize,
@@ -569,6 +571,18 @@ impl Session {
             + entry.js_pending_mod.len()
             + entry.js_pending_attrs.len()
             + entry.pending_doc_lifecycle.len();
+        // Étape 311 (§B-114) — la rétention vivante au-delà du
+        // tas cellules : DOM session en octets (le compte `dom`
+        // ne désignait pas le réservoir), boîtes de layout, et
+        // le bfcache sommé — sous le storm flipkart ~4,4 Gio
+        // vivaient hors heap JS sans nom propre.
+        let dom_b = entry.dom.as_ref().map_or(0, explorer_dom::Dom::heap_bytes);
+        let boxes = entry.tree.as_ref().map_or(0, super::mem::count_boxes);
+        let bfc_b: usize = entry
+            .bfcache
+            .iter()
+            .map(super::mem::snapshot_native_bytes)
+            .sum();
         tracing::info!(
             target: "mem_diag",
             tab,
@@ -577,6 +591,10 @@ impl Session {
             heap_b,
             gc,
             dom = entry.dom.as_ref().map_or(0, explorer_dom::Dom::live_count),
+            dom_b,
+            boxes,
+            bfc = entry.bfcache.len(),
+            bfc_b,
             dl = entry.list.as_ref().map_or(0, |l| l.items.len()),
             img_b,
             bg_b,

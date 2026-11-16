@@ -1939,6 +1939,13 @@ impl Engine {
             Some((d, _)) => d.borrow().b59_counts(),
             None => (0, 0, 0, 0, 0),
         };
+        // Étape 311 — rétention native du miroir hors tas
+        // cellules (§B-114 : RSS vivante avec heap JS stable).
+        let (dom_b, jrnl_b, muts_b) = match &self.dom_ctx {
+            Some((d, _)) => d.borrow().heap_bytes(),
+            None => (0, 0, 0),
+        };
+        let (intern_n, intern_b) = crate::interned_stats();
         let cache = match &self.dom_ctx {
             Some((_, c)) => c.borrow().len(),
             None => 0,
@@ -1947,6 +1954,7 @@ impl Engine {
         format!(
             "cells={} heap_b={} gc={} gc_us={} sp_us={} | cbs={} regs={} timers={} \
              | nodes={} muts={} oregs={} journal={} pend={} \
+             | dom_b={} jrnl_b={} muts_b={} intern={}n/{}b \
              | cache={} parked={} unhand={} micro={}",
             hs.live_cells,
             hs.estimated_bytes,
@@ -1961,6 +1969,11 @@ impl Engine {
             oregs,
             journal,
             pend,
+            dom_b,
+            jrnl_b,
+            muts_b,
+            intern_n,
+            intern_b,
             cache,
             self.parked.len(),
             self.unhandled_reports.len(),
