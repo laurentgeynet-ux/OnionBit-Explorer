@@ -629,6 +629,16 @@ fn eval_js(path: &str, with_dom: bool) -> ExitCode {
             "<!doctype html><body></body>",
         )));
         e.install_dom(&dom);
+        // Surface « session réelle » (JS-C560) — les globals
+        // que les embedders posent hors `install_dom` :
+        // timers (`setTimeout`/`requestAnimationFrame`…),
+        // `localStorage`/`sessionStorage` (backing neuf
+        // page-locale) et `XMLHttpRequest`/`fetch`/`Headers`/
+        // `Request`/`Response` sur transport mort — requêtes
+        // pendantes, jamais de réponse synthétisée.
+        e.install_timers();
+        e.install_storage(&explorer_jscore::Storage::default());
+        e.install_xhr(std::rc::Rc::new(explorer_jscore::NullTransport));
     }
     if let Some(ops) = std::env::var("EXPLORER_JS_OPS")
         .ok()
@@ -753,10 +763,21 @@ fn fixture_for(name: &str) -> &'static str {
         // de l'arme multi-lignes les rendaient inertes.
         () if matches!(
             n,
-            "justify-content" | "column-gap" | "flex-direction" | "flex-wrap" | "flex-flow"
+            "justify-content" | "column-gap" | "flex-direction"
         ) =>
         {
             "<body><div class=x style=\"display:flex;width:400px\"><p>a</p><p>b</p><p>c</p></div></body>"
+        }
+        // `flex-wrap`/`flex-flow` — le wrap n'a d'oracle
+        // qu'avec un item qui DÉBORDE : `a` à 100 % force
+        // `b` sur la ligne 2 (étape 297 — la fixture
+        // mono-ligne ci-dessus rendait toute la famille
+        // inerte, 0/3). Pas de `flex-wrap` en `style=` ni
+        // en ctx : la base `nowrap` est l'initiale — `wrap`
+        // et `wrap-reverse` divergent, `nowrap` est `na`
+        // par `INITIAL_EXTRA`.
+        () if n == "flex-wrap" || n == "flex-flow" => {
+            "<body><div class=x style=\"display:flex;height:200px\"><p style=\"width:100%\">a</p><p>b</p></div></body>"
         }
         // Props de conteneur flex/grid — `.x` = le conteneur.
         () if matches!(
@@ -1023,10 +1044,10 @@ fn fixture_for(name: &str) -> &'static str {
             n,
             "top" | "right" | "bottom" | "left" | "inset" | "inset-block"
                 | "inset-block-end" | "inset-block-start" | "inset-inline"
-                | "inset-inline-end" | "inset-inline-start" | "margin-top"
-                | "margin-right" | "margin-bottom" | "margin-left" | "margin-block"
-                | "margin-block-start" | "margin-block-end" | "margin-inline"
-                | "margin-inline-start" | "margin-inline-end"
+                | "inset-inline-end" | "inset-inline-start" | "margin"
+                | "margin-top" | "margin-right" | "margin-bottom" | "margin-left"
+                | "margin-block" | "margin-block-start" | "margin-block-end"
+                | "margin-inline" | "margin-inline-start" | "margin-inline-end"
         ) =>
         {
             "<body><div id=a style=\"anchor-name:--a;position:absolute;top:10px;left:10px;width:20px;height:20px\"></div><p class=x style=\"position:absolute;position-anchor:--a\">b</p></body>"
@@ -1222,6 +1243,54 @@ fn fixture_for(name: &str) -> &'static str {
             // long suffisant pour le wrap à 80 px.
             "<body><div><p class=x style=\"width:80px\">un Deux  trois\nquatre cinq six</p></div></body>"
         }
+        // `overflow-clip-margin` (étape 302) — la marge de
+        // clip n'existe que si un enfant DÉBORDE de la
+        // boîte `.x` : le ctx pose `overflow:hidden` + la
+        // taille bornée, l'enfant 200 px dépasse à droite.
+        () if n == "overflow-clip-margin" => {
+            "<body><div class=x><div style=\"width:200px;height:40px;background:red\"></div></div></body>"
+        }
+        // `line-clamp` (étape 302) — le clamp n'a d'oracle
+        // que sur un texte qui DÉPASSE le nombre de lignes
+        // (ctx borne la largeur → multi-lignes) ; un texte
+        // court rend toute valeur inerte par construction.
+        () if n == "line-clamp" => {
+            "<body><div><p class=x>un deux trois quatre cinq six sept huit neuf dix onze</p></div></body>"
+        }
+        // `margin-trim` (étape 302) — s'applique au
+        // conteneur et coupe les marges de l'enfant aux
+        // bords : `.x` = le conteneur, l'enfant porte les
+        // marges à trimer (sans ça, rien à couper).
+        () if n == "margin-trim" => {
+            "<body><div class=x><p style=\"margin-top:30px;margin-bottom:30px\">a</p></div></body>"
+        }
+        // `hanging-punctuation` (étape 302) — `first` ne
+        // pend que si un guillemet ouvre la première ligne
+        // (ctx borne la largeur → wrap déterministe).
+        () if n == "hanging-punctuation" => {
+            "<body><div><p class=x>\"abcdefgh ijklmno pqrst uvw</p></div></body>"
+        }
+        // `text-emphasis-position` (étape 302) — la
+        // position n'a d'effet que sur des marques posées
+        // (ctx `text-emphasis:dot`) — texte CJK pour
+        // `over`/`under`.
+        () if n == "text-emphasis-position" => {
+            "<body><div><p class=x>かなかな</p></div></body>"
+        }
+        // `white-space-trim` (étape 302) — `discard-*` ne
+        // trime que de l'espace PRÉSERVÉ : ctx `pre-wrap` +
+        // espaces en bord de boîte — sous `normal` ils
+        // sont déjà collapsés, rien n'est observable.
+        () if n == "white-space-trim" => {
+            "<body><div><p class=x>  abc def  </p></div></body>"
+        }
+        // `text-spacing-trim` (étape 302) — la compression
+        // CJK n'existe que sur une ponctuation pleine-
+        // chasse en bord de ligne : ctx borne la largeur
+        // pour placer `、` en tête de seconde ligne.
+        () if n == "text-spacing-trim" => {
+            "<body><div><p class=x>abcde、かなかな</p></div></body>"
+        }
         // Défaut — `<p>` dans `<div>` (texte, box, décorations).
         () => "<body><div><p class=x>ok</p></div></body>",
     }
@@ -1409,6 +1478,29 @@ fn context_css(name: &str) -> &'static str {
         "shape-outside:circle(40%)"
     } else if n.starts_with("column-") || n == "columns" {
         "columns:2;column-rule:2px solid black;height:200px"
+    } else if n == "line-clamp" {
+        // Le clamp n'a d'oracle que si le texte wrappe sur
+        // plus de lignes que la valeur — largeur bornée
+        // (étape 302, fixture texte long).
+        "width:80px"
+    } else if n == "hanging-punctuation" {
+        // Le pendage en bord de ligne exige des lignes
+        // bornées (étape 302).
+        "width:80px"
+    } else if n == "text-emphasis-position" {
+        // La position n'est observable que sur des marques
+        // réellement posées (étape 302).
+        "text-emphasis:dot"
+    } else if n == "white-space-trim" {
+        // `discard-*` ne trime que l'espace **préservé** —
+        // sans `pre-wrap` les espaces de bord sont déjà
+        // collapsés par `white-space:normal` (étape 302).
+        "white-space:pre-wrap"
+    } else if n == "text-spacing-trim" {
+        // La compression CJK n'est visible que si la
+        // ponctuation tombe en bord de ligne — largeur
+        // bornée (étape 302).
+        "width:80px"
     } else {
         ""
     }
@@ -1497,6 +1589,11 @@ thread_local! {
     static BASE_PIX: std::cell::RefCell<
         std::collections::HashMap<String, Option<Vec<u8>>>,
     > = std::cell::RefCell::new(std::collections::HashMap::new());
+    /// Idem pour `check computedv` (étape 298) — la
+    /// `StyleMap` `.x { ctx }` sérialisée est invariante
+    /// par prop.
+    static BASE_CMP: std::cell::RefCell<std::collections::HashMap<String, String>> =
+        std::cell::RefCell::new(std::collections::HashMap::new());
 }
 
 /// Contexte **additionnel** de l'oracle pixel (étape 274) —
@@ -1723,6 +1820,146 @@ fn prop_paints_decl(decl: &str) -> bool {
         eprintln!("=== paintv {name}:{value} — base {diff}");
     }
     a.is_some() && b.is_some() && a != b
+}
+
+/// `check computedv` (étape 298) — troisième oracle de la
+/// jauge, niveau **style calculé** : la `StyleMap` du
+/// sous-arbre `.x` sérialisée (props ∪ vars, ordre DOM,
+/// pseudos inclus), avec et sans la déclaration — la prop
+/// sondée **exclue** de la signature (la cascade stocke les
+/// déclarations vainqueurs verbatim : inclure la prop
+/// saturerait l'oracle comme `routed`). Ce qui produit un
+/// delta honnête : expansion shorthand (`inset` → 4
+/// longhands, `border` → ~12), résolution logique
+/// (`block-size` → `height`, `margin-inline` → côtés
+/// physiques — `resolve_logical_props`), effets croisés
+/// (paire `overflow` qui force l'autre axe, héritage sur
+/// les descendants).
+///
+/// Borne assumée — **diagnostic, hors union ok** :
+/// « cascade applique » ≠ « moteur pose/peint »
+/// (`overflow-block` s'y stocke verbatim sans effet aval
+/// → miss des deux côtés ; `border-image` expanserait
+/// tout en restant non-peint — `computed` seul ne
+/// retourne pas une paire en `ok`).
+fn prop_computes_decl(decl: &str) -> bool {
+    let Some((name, value)) = decl.split_once(':') else {
+        return false;
+    };
+    let name = name.trim();
+    let dom = explorer_html::TreeBuilder::parse(fixture_for(name));
+    let root = {
+        let mut r = None;
+        walk_any(dom.document(), &dom, &mut r);
+        r.unwrap_or(dom.document())
+    };
+    // Cible `.x` — la signature couvre son sous-arbre :
+    // l'effet d'un héritage sur les descendants fait partie
+    // du delta calculé.
+    let xnode = {
+        let mut x = None;
+        find_class_x(dom.document(), &dom, &mut x);
+        x
+    };
+    let sig = |css: &str| -> String {
+        let mut eng = explorer_css::StyleEngine::new();
+        eng.add_css(css, explorer_css::Origin::Author);
+        let sm = eng.compute_tree(&dom, root, &explorer_css::StyleEnv::default());
+        let mut out = String::new();
+        if let Some(x) = xnode {
+            dump_computed_subtree(x, &dom, &sm, name, &mut out);
+        }
+        out
+    };
+    let cctx = context_css(name);
+    // Mêmes pseudo-cibles que les oracles rendus.
+    let sel = match name {
+        "initial-letter" => ".x::first-letter",
+        "content" => ".x::before",
+        _ => ".x",
+    };
+    // Même cache de base que `affectsv`/`paintv` — la
+    // `StyleMap` `.x { ctx }` est invariante par prop.
+    let a = sig(&format!("{sel} {{ {cctx}; {}: {} }}", name, value.trim()));
+    let b = BASE_CMP.with(|c| {
+        c.borrow_mut()
+            .entry(name.to_string())
+            .or_insert_with(|| sig(&format!("{sel} {{ {cctx} }}")))
+            .clone()
+    });
+    if std::env::var_os("EXPLORER_BCD_DEBUG_SIG").is_some() {
+        eprintln!("=== computedv {name}:{value}\n--- with\n{a}\n--- base\n{b}");
+    }
+    a != b
+}
+
+/// Premier élément porteur d'un token `x` dans `class` —
+/// cible des fixtures de la jauge.
+fn find_class_x(
+    n: explorer_dom::NodeId,
+    dom: &explorer_dom::Dom,
+    out: &mut Option<explorer_dom::NodeId>,
+) {
+    if out.is_none()
+        && dom
+            .attribute_str(n, "class")
+            .ok()
+            .flatten()
+            .is_some_and(|c| c.split_whitespace().any(|w| w == "x"))
+    {
+        *out = Some(n);
+    }
+    if let Ok(ch) = dom.children(n) {
+        for c in ch {
+            find_class_x(c, dom, out);
+        }
+    }
+}
+
+/// Sérialise le style calculé de `n` (+ pseudos routés +
+/// descendants, ordre DOM) dans `out` — `skip` = prop
+/// sondée, ignorée partout (anti-saturation).
+fn dump_computed_subtree(
+    n: explorer_dom::NodeId,
+    dom: &explorer_dom::Dom,
+    sm: &explorer_css::StyleMap,
+    skip: &str,
+    out: &mut String,
+) {
+    use std::fmt::Write;
+    if let Some(st) = sm.get(n) {
+        ser_computed(st, skip, out);
+    }
+    for which in [
+        explorer_css::PseudoElement::Before,
+        explorer_css::PseudoElement::After,
+        explorer_css::PseudoElement::FirstLine,
+        explorer_css::PseudoElement::FirstLetter,
+        explorer_css::PseudoElement::Marker,
+    ] {
+        if let Some(ps) = sm.pseudo(n, which) {
+            let _ = write!(out, "|@{which:?}");
+            ser_computed(ps, skip, out);
+        }
+    }
+    if let Ok(ch) = dom.children(n) {
+        for c in ch {
+            dump_computed_subtree(c, dom, sm, skip, out);
+        }
+    }
+}
+
+/// `k=v` triés d'un `ComputedStyle`, `skip` exclu —
+/// `iter()` livre props ∪ vars (les vars restent : une
+/// déclaration qui résout à travers elles doit se voir).
+fn ser_computed(st: &explorer_css::ComputedStyle, skip: &str, out: &mut String) {
+    use std::fmt::Write;
+    let mut kv: Vec<(&str, &str)> = st.iter().filter(|(k, _)| *k != skip).collect();
+    kv.sort_unstable();
+    let _ = write!(out, "|{}", kv.len());
+    for (k, v) in kv {
+        let _ = write!(out, ";{k}={v}");
+    }
 }
 
 /// `affectsv` tri-état (étape 219) : `None` = **neutre par
@@ -1985,7 +2222,11 @@ const INITIAL_EXTRA: &[(&str, &str)] = &[
     ("column-rule-style", "solid"),
     ("rule-style", "solid"),
     ("text-decoration-style", "solid"),
-    ("text-decoration-line", "underline"),
+    // `text-decoration-line` : initiale spec = `none`
+    // (étape 302 — `underline` y était par erreur : la
+    // valeur la plus courante du web partait en `na`,
+    // jamais mesurée, et `none` était mesurée en vain).
+    ("text-decoration-line", "none"),
     // Initiales spec absentes de `initial_value` (couvre
     // une partie du catalogue seulement) — chaque ligne
     // vérifiée à la spec de sa propriété.
@@ -2371,7 +2612,6 @@ const NO_ORACLE: &[&str] = &[
     "mask-origin",
     "mask-composite",
     "mask-border",
-    "mask-border-mode",
     "mask-border-repeat",
     "mask-border-slice",
     "mask-border-source",
@@ -2710,6 +2950,16 @@ const PAINT_NA: &[&str] = &[
     "flood-color",
     "flood-opacity",
     "lighting-color",
+    // Étape 302 — `perspective`/`perspective-origin` : la
+    // borne « non-affine » du dump vaut aussi en pixels
+    // (étape 272), et la perspective n'existe que sur des
+    // enfants en transformée **3D** — eux-mêmes hors-
+    // oracle (`transform:3d`, INITIAL_EXTRA) : aucune
+    // fixture sondable ne peut la rendre visible. Les 10
+    // paires mesuraient la borne, pas un trou (triage
+    // fixtures-inertes 2026-11-16).
+    "perspective",
+    "perspective-origin",
 ];
 
 /// Verdict de [`subfeature_probe`] (étape 270).
@@ -2853,6 +3103,11 @@ const SUBFEATURE_PROBE: &[(&str, &str, &str)] = &[
     ("justify-content", "context_flex", "center"),
     ("position-try-fallbacks", "position-area", "bottom"),
     ("letter-spacing", "percentages", "10%"),
+    // `line-clamp:ellipsis` (sous-feature BCD) = « le
+    // clamp produit une ellipse » — la sonde honnête est
+    // le clamp entier, dont l'effet est la troncature
+    // ellipsée mesurée ok (étape 302).
+    ("line-clamp", "ellipsis", "2"),
     ("line-clamp", "string", "\"x\""),
     ("offset-path", "basic_shape", "circle(30%)"),
     ("offset-path", "path", "path(\"M0 0h10v10z\")"),
@@ -2928,8 +3183,11 @@ fn subfeature_probe(name: &str, v: &str) -> Option<Subfeature> {
         return Some(Subfeature::Probe(lit));
     }
     // `anchor()`/`anchor-size()` — même sous-feature sur
-    // toute la famille inset/margin/size : la fixture
-    // ancre est posée pour ces props (voir `fixture_for`).
+    // toute la famille inset/margin : la fixture ancre
+    // est posée pour ces props (voir `fixture_for`).
+    // `margin` (shorthand) complète ses longhands
+    // (étape 297 — la paire BCD `margin:anchor-size`
+    // tombait en `decl:` et mesurait le mot-clé nu).
     if matches!(
         name,
         "top"
@@ -2943,6 +3201,7 @@ fn subfeature_probe(name: &str, v: &str) -> Option<Subfeature> {
             | "inset-inline"
             | "inset-inline-end"
             | "inset-inline-start"
+            | "margin"
             | "margin-top"
             | "margin-right"
             | "margin-bottom"
@@ -2953,7 +3212,25 @@ fn subfeature_probe(name: &str, v: &str) -> Option<Subfeature> {
             | "margin-inline"
             | "margin-inline-start"
             | "margin-inline-end"
-            | "width"
+    ) {
+        if v == "anchor" {
+            return Some(Subfeature::Probe("anchor(--a)"));
+        }
+        if v == "anchor-size" {
+            return Some(Subfeature::Probe("anchor-size(--a)"));
+        }
+    }
+    // … et sur la famille sizing : `anchor()`/`anchor-size()`
+    // sans ancre résout en repli/invalidité par spec — la
+    // fixture positionnée qui poserait l'ancre tue
+    // l'oracle de sizing intrinsèque (`width:auto`
+    // shrink-to-fit, mesuré étape 270). Impropre à la
+    // mesure sous ce harnais → `na`, pas `miss`
+    // (étape 297 : la paire ne mesurait rien de la
+    // fonction — seulement « pas d'ancre → rien »).
+    if matches!(
+        name,
+        "width"
             | "height"
             | "block-size"
             | "inline-size"
@@ -2965,13 +3242,9 @@ fn subfeature_probe(name: &str, v: &str) -> Option<Subfeature> {
             | "max-height"
             | "max-block-size"
             | "max-inline-size"
-    ) {
-        if v == "anchor" {
-            return Some(Subfeature::Probe("anchor(--a)"));
-        }
-        if v == "anchor-size" {
-            return Some(Subfeature::Probe("anchor-size(--a)"));
-        }
+    ) && matches!(v, "anchor" | "anchor-size")
+    {
+        return Some(Subfeature::Na);
     }
     // `fit-content(<len>)` — même sous-feature sur toute la
     // famille de sizing.
@@ -3231,6 +3504,368 @@ fn paint_decl_verdict(decl: &str) -> Option<bool> {
         DeclGate::Na => None,
         DeclGate::Known(b) => Some(b),
         DeclGate::Probe(d) => Some(prop_paints_decl(&d)),
+    }
+}
+
+/// `check atrulev` (étape 300) — oracle des **descripteurs
+/// d'at-rules** (`bcd.css['at-rules'].<r>.<d>`) : une sonde
+/// par descripteur mesurable en-process — (fixture, css de
+/// base, css sondé, env). Le verdict = delta géométrique +
+/// display-list entre la feuille de base et la feuille qui
+/// pose le descripteur — même honnêteté qu'`affectsv` : la
+/// feuille sondée doit changer la sortie, pas seulement
+/// parser.
+///
+/// Tout descripteur sans sonde → `na` (hors dénominateur) :
+/// `@font-face` (comportement de chargement), `@page`
+/// (print), `@keyframes` (temps), `@import` (fetch),
+/// `@container`, `@font-feature-values`/`@font-palette-
+/// values` (shaping/palette), `speak-as` (a11y).
+struct AtProbe {
+    fixture: &'static str,
+    base: &'static str,
+    probe: String,
+    /// Contre-sonde optionnelle : règle qui doit **ne pas**
+    /// s'appliquer. Nécessaire quand la forme directe peut
+    /// être avalée par la tolérance `unknown → vrai` (MQ `or`
+    /// interne, `calc()` MQ, imbrication) — le vrai/littéral
+    /// applique et le faux/littéral ne doit pas : `ok` exige
+    /// `delta(probe) ∧ ¬delta(false_probe)`.
+    false_probe: Option<String>,
+    scripting: bool,
+    reduced_motion: bool,
+}
+
+/// `atrule:descripteur` → sonde, `None` = pas d'oracle
+/// in-process (`na`).
+#[allow(clippy::too_many_lines)]
+fn atrulev_probe(rule: &str, desc: &str) -> Option<AtProbe> {
+    const P: &str = "<body><p class=x>ok</p></body>";
+    const OL: &str = "<body><ol class=x><li>a<li>b<li>c<li>d</ol></body>";
+    const PP: &str = "<body><div class=p><p class=x>ok</p></div></body>";
+    let mk = |fixture: &'static str, base: &'static str, probe: String| AtProbe {
+        fixture,
+        base,
+        probe,
+        false_probe: None,
+        scripting: false,
+        reduced_motion: false,
+    };
+    // Sonde média : `@media <cond>` applique `.x{width:400px}`
+    // vs base 50 — le littéral est choisi **vrai sous
+    // `StyleEnv::default`** (1024×768, screen, dpr 1,
+    // scripting none, reduced-motion off, scheme light) :
+    // une feature inconnue rend la condition fausse
+    // (`_ => false`) → `miss` honnête. Pour les méta-syntaxes
+    // (`range`, `or`, `calc`), la tolérance `unknown → vrai`
+    // saturerait la forme directe : la sonde est niée sur un
+    // littéral faux — `not (faux)` applique ssi le moteur
+    // évalue réellement la syntaxe.
+    let media = |cond: &str| {
+        mk(
+            P,
+            ".x{width:50px}",
+            format!("@media {cond} {{ .x{{width:400px}} }}"),
+        )
+    };
+    // `match_same_arms` : les bras `=> return None`
+    // nommés (`counter-style`, `property`) documentent les
+    // sous-features volontairement non sondées — le
+    // wildcard suffirait mais perdrait l'intention.
+    #[allow(clippy::match_same_arms)]
+    let probe = match (rule, desc) {
+        // ── @counter-style — la signature = le texte des
+        // marqueurs de l'<ol> (display list). La base pose
+        // le même style nommé sans le descripteur sondé.
+        ("counter-style", "system") => mk(
+            OL,
+            "@counter-style t{symbols:\"α\" \"β\" \"γ\" \"δ\"}.x{list-style-type:t;list-style-position:inside}",
+            "@counter-style t{system:numeric;symbols:\"α\" \"β\" \"γ\" \"δ\"}\
+             .x{list-style-type:t;list-style-position:inside}"
+                .into(),
+        ),
+        ("counter-style", "symbols") => mk(
+            OL,
+            "@counter-style t{system:cyclic}.x{list-style-type:t;list-style-position:inside}",
+            "@counter-style t{system:cyclic;symbols:\"◆\" \"■\" \"▲\" \"●\"}\
+             .x{list-style-type:t;list-style-position:inside}"
+                .into(),
+        ),
+        ("counter-style", "additive-symbols") => mk(
+            OL,
+            "@counter-style t{system:additive}.x{list-style-type:t;list-style-position:inside}",
+            "@counter-style t{system:additive;additive-symbols:3 \"C\",2 \"B\",1 \"A\"}\
+             .x{list-style-type:t;list-style-position:inside}"
+                .into(),
+        ),
+        ("counter-style", "fallback") => mk(
+            OL,
+            "@counter-style t{system:fixed;symbols:\"A\"}.x{list-style-type:t;list-style-position:inside}",
+            "@counter-style t{system:fixed;symbols:\"A\";fallback:lower-roman}\
+             .x{list-style-type:t;list-style-position:inside}"
+                .into(),
+        ),
+        ("counter-style", "negative") => mk(
+            OL,
+            "@counter-style t{system:numeric}.x{list-style-type:t;list-style-position:inside}",
+            "@counter-style t{system:numeric;negative:\"!\"}\
+             .x{list-style-type:t;list-style-position:inside}"
+                .into(),
+        ),
+        ("counter-style", "pad") => mk(
+            OL,
+            "@counter-style t{system:numeric}.x{list-style-type:t;list-style-position:inside}",
+            "@counter-style t{system:numeric;pad:2 \"0\"}.x{list-style-type:t;list-style-position:inside}".into(),
+        ),
+        ("counter-style", "prefix") => mk(
+            OL,
+            "@counter-style t{system:numeric}.x{list-style-type:t;list-style-position:inside}",
+            "@counter-style t{system:numeric;prefix:\"§\"}.x{list-style-type:t;list-style-position:inside}".into(),
+        ),
+        ("counter-style", "range") => mk(
+            OL,
+            "@counter-style t{system:numeric}.x{list-style-type:t;list-style-position:inside}",
+            "@counter-style t{system:numeric;range:2 3}.x{list-style-type:t;list-style-position:inside}".into(),
+        ),
+        ("counter-style", "suffix") => mk(
+            OL,
+            "@counter-style t{system:numeric}.x{list-style-type:t;list-style-position:inside}",
+            "@counter-style t{system:numeric;suffix:\"!\"}.x{list-style-type:t;list-style-position:inside}".into(),
+        ),
+        // `speak-as` — aural/a11y, aucun effet géométrique.
+        ("counter-style", _) => return None,
+        // ── @supports — la condition évaluée applique la
+        // déclaration sondée. `selector()`/`font-format()`…
+        // se parsent en prop inconnue → `decl_supported`
+        // faux → `miss` honnête (fonction non évaluée).
+        ("supports", d) => {
+            let cond = match d {
+                // `selector(div)` n'a pas de `:` → condition
+                // ignorée → prélude vide → `unknown` toléré
+                // (applique toujours) — indiscernable d'un
+                // vrai ok. `selector(div:hover)` contient `:` →
+                // parsé en prop `selector(div` → miss tant que
+                // `selector()` n'est pas évaluée, ok dès que la
+                // fonction s'ouvre. `font-format`/`font-tech`/
+                // `at-rule` n'ont aucune forme à `:` → `na`.
+                "selector" => "selector(div:hover)",
+                // `named_feature` BCD = la condition
+                // propriété-custom `(--x: v)` (css-conditional).
+                "named_feature" | "named-feature" => "(--x: 1)",
+                _ => return None,
+            };
+            mk(
+                P,
+                ".x{width:50px}",
+                format!("@supports ({cond}) {{ .x{{width:400px}} }}"),
+            )
+        }
+        // ── @property — la registration est consommée par
+        // `var()` : chaque descripteur a une sonde
+        // discriminante (fallback `50px` si la règle est
+        // ignorée/invalide).
+        ("property", "initial-value") => mk(
+            PP,
+            ".x{width:var(--w,50px)}",
+            "@property --w{syntax:\"<length>\";initial-value:400px;inherits:false}\
+             .x{width:var(--w,50px)}"
+                .into(),
+        ),
+        ("property", "syntax") => mk(
+            PP,
+            "@property --w{initial-value:400px;inherits:false}\
+             .x{width:var(--w,50px)}",
+            // `initial-value` non conforme à `syntax` → la
+            // registration est invalide par spec : si le
+            // moteur valide, `var(--w)` retombe sur 50.
+            "@property --w{syntax:\"<color>\";initial-value:400px;inherits:false}\
+             .x{width:var(--w,50px)}"
+                .into(),
+        ),
+        ("property", "inherits") => mk(
+            PP,
+            ".p{--w:200px}.x{width:var(--w,50px)}",
+            // `inherits:false` honoré → `.x` voit l'initial
+            // (9 px) et non le `--w` parental (200 px).
+            "@property --w{inherits:false;initial-value:9px}\
+             .p{--w:200px}.x{width:var(--w,50px)}"
+                .into(),
+        ),
+        ("property", _) => return None,
+        // ── @media — littéral vrai sous l'env par défaut.
+        ("media", d) => {
+            match d {
+                "any-hover" => media("(any-hover:hover)"),
+                "any-pointer" => media("(any-pointer:fine)"),
+                "aspect-ratio" => media("(aspect-ratio:4/3)"),
+                "calc" => {
+                    let mut m2 = media("(min-width:calc(500px + 1px))");
+                    // `calc()` MQ irrésoluble → `condition_matches`
+                    // faux, indiscernable d'un vrai calcul sur la
+                    // forme niée — paire vrai/faux requise.
+                    m2.false_probe = Some(
+                        "@media (min-width:calc(9000px + 9000px)){.x{height:777px}}".into(),
+                    );
+                    m2
+                }
+                "color" => media("(color)"),
+                "color-gamut" => media("(color-gamut:srgb)"),
+                "color-index" => media("(color-index)"),
+                "device-aspect-ratio" => media("(device-aspect-ratio:4/3)"),
+                "device-height" => media("(device-height:768px)"),
+                "device-posture" => media("(device-posture)"),
+                "device-width" => media("(device-width:1024px)"),
+                "display-mode" => media("(display-mode:browser)"),
+                "display-state" => media("(display-state)"),
+                "dynamic-range" => media("(dynamic-range)"),
+                "forced-colors" => media("(forced-colors:none)"),
+                "grid" => media("(grid:0)"),
+                "height" => media("(min-height:100px)"),
+                "horizontal-viewport-segments" => media("(horizontal-viewport-segments:1)"),
+                "hover" => media("(hover:hover)"),
+                "inverted-colors" => media("(inverted-colors:none)"),
+                // Méta-noms BCD : la forme feature /
+                // les valeurs fractionnaires.
+                "media_features" => media("(min-width:1px)"),
+                "media_query_values" => media("(min-width:100.5px)"),
+                "monochrome" => media("(monochrome:0)"),
+                "nested-queries" => {
+                    let mut m2 = mk(
+                        P,
+                        ".x{width:50px}",
+                        "@media screen{@media (min-width:1px){.x{width:400px}}}".into(),
+                    );
+                    // `@media` imbriqué non évalué → tolérance
+                    // → applique : indiscernable du vrai — la
+                    // contre-sonde (inner faux) ne doit pas
+                    // appliquer.
+                    m2.false_probe = Some(
+                        "@media screen{@media (min-width:9999px){.x{height:777px}}}".into(),
+                    );
+                    m2
+                }
+                "or_syntax" => {
+                    let mut m2 = media("(min-width:9000px) or (min-width:100px)");
+                    // `(a) or (b)` non parsé → `unknown` toléré →
+                    // applique : indiscernable d'un vrai `or`
+                    // évalué. La contre-sonde (deux membres faux)
+                    // ne doit PAS appliquer.
+                    m2.false_probe = Some(
+                        "@media (min-width:9000px) or (min-height:9000px){.x{height:777px}}"
+                            .into(),
+                    );
+                    m2
+                }
+                "orientation" => media("(orientation:landscape)"),
+                "overflow-block" => media("(overflow-block:scroll)"),
+                "overflow-inline" => media("(overflow-inline:scroll)"),
+                "pointer" => media("(pointer:fine)"),
+                "prefers-color-scheme" => media("(prefers-color-scheme:light)"),
+                "prefers-contrast" => media("(prefers-contrast:no-preference)"),
+                "prefers-reduced-data" => media("(prefers-reduced-data:no-preference)"),
+                "prefers-reduced-motion" => {
+                    let mut m2 = media("(prefers-reduced-motion:reduce)");
+                    m2.reduced_motion = true;
+                    m2
+                }
+                "prefers-reduced-transparency" => {
+                    media("(prefers-reduced-transparency:no-preference)")
+                }
+                "range_syntax" => media("not (width > 5000px)"),
+                "resizable" => media("(resizable)"),
+                "resolution" => media("(resolution:1dppx)"),
+                "scan" => media("(scan:progressive)"),
+                "scripting" => media("(scripting:none)"),
+                "update" => media("(update:fast)"),
+                "vertical-viewport-segments" => media("(vertical-viewport-segments:1)"),
+                "video-dynamic-range" => media("(video-dynamic-range)"),
+                "width" => media("(min-width:500px)"),
+                "-moz-device-pixel-ratio" => media("(-moz-device-pixel-ratio:1)"),
+                "-webkit-animation" => media("(-webkit-animation)"),
+                "-webkit-device-pixel-ratio" => media("(-webkit-device-pixel-ratio:1)"),
+                "-webkit-max-device-pixel-ratio" => media("(-webkit-max-device-pixel-ratio:1)"),
+                "-webkit-min-device-pixel-ratio" => media("(-webkit-min-device-pixel-ratio:1)"),
+                "-webkit-transform-2d" => media("(-webkit-transform-2d)"),
+                "-webkit-transform-3d" => media("(-webkit-transform-3d)"),
+                "-webkit-transition" => media("(-webkit-transition)"),
+                _ => return None,
+            }
+        }
+        // Tout le reste : pas d'oracle in-process — `na`.
+        _ => return None,
+    };
+    Some(probe)
+}
+
+/// Verdict `check atrulev` — `na` si aucun oracle pour le
+/// couple (règle, descripteur).
+fn atrulev_verdict(line: &str) -> Option<bool> {
+    let (rule, desc) = line.split_once(':')?;
+    let p = atrulev_probe(rule.trim(), desc.trim())?;
+    Some(atrule_delta(&p))
+}
+
+/// Mesure la sonde : feuille base + sondée vs base seule,
+/// même signature qu'`affectsv` (box tree + display list).
+fn atrule_delta(p: &AtProbe) -> bool {
+    static SRC: BcdAhem = BcdAhem;
+    let ctx = explorer_layout::BlockCtx {
+        fonts: Some(&SRC),
+        ..explorer_layout::BlockCtx::default()
+    };
+    let dom = explorer_html::TreeBuilder::parse(p.fixture);
+    let root = {
+        let mut r = None;
+        walk_any(dom.document(), &dom, &mut r);
+        r.unwrap_or(dom.document())
+    };
+    let env = explorer_css::StyleEnv {
+        scripting: p.scripting,
+        reduced_motion: p.reduced_motion,
+        ..explorer_css::StyleEnv::default()
+    };
+    let sig = |css: &str| -> String {
+        let mut eng = explorer_css::StyleEngine::new();
+        eng.add_css(css, explorer_css::Origin::Author);
+        let sm = eng.compute_tree(&dom, root, &env);
+        match explorer_layout::build_box_tree(&dom, root, &sm) {
+            Some(mut bx) => {
+                explorer_layout::layout_tree(&mut bx, 800.0, &ctx);
+                let dl = explorer_render::build_display_list(&bx, 800.0, 600.0, 0.0);
+                format!("{}\n{}", bx.dump(&dom), dl.dump())
+            }
+            None => String::new(),
+        }
+    };
+    let b = sig(p.base);
+    let a = sig(&format!("{}\n{}", p.base, p.probe));
+    // Contre-sonde : le littéral **faux** ne doit produire
+    // aucun delta — sinon la forme directe était avalée par
+    // la tolérance `unknown → vrai` et l'« ok » serait faux.
+    let neg_ok = p
+        .false_probe
+        .as_ref()
+        .is_none_or(|fp| sig(&format!("{}\n{}", p.base, fp)) == b);
+    if std::env::var_os("EXPLORER_BCD_DEBUG_SIG").is_some() {
+        eprintln!("=== atrulev\n--- with\n{a}\n--- base\n{b}\n--- neg_ok={neg_ok}");
+    }
+    a != b && neg_ok
+}
+
+/// `check computedv` (étape 298) — verdict tri-état sur le
+/// style calculé : mêmes `na` de valeur (initiales spec,
+/// CSS-wide, méta non sondé) que le chemin union, mais
+/// **aucune** table prop-level — `NO_ORACLE`/`PAINT_NA`
+/// bornent le *rendu* de familles, pas la cascade (un
+/// shorthand `mask` expansé reste un delta calculé
+/// mesurable même si aucun oracle rendu ne le voit).
+/// `ok` = « la cascade applique », verdict de triage
+/// hors union.
+fn computed_decl_verdict(decl: &str) -> Option<bool> {
+    match decl_gate(decl, &[], true) {
+        DeclGate::Na => None,
+        DeclGate::Known(b) => Some(b),
+        DeclGate::Probe(d) => Some(prop_computes_decl(&d)),
     }
 }
 
@@ -3657,6 +4292,8 @@ fn check_names(kind: &str) -> ExitCode {
         // (étape 274).
         "affectsv" => Box::new(prop_affects_decl),
         "paintv" => Box::new(prop_paints_decl),
+        "computedv" => Box::new(prop_computes_decl),
+        "atrulev" => Box::new(|_s| false),
         // Étape 219 — `html` : oracle de comportement par
         // élément (`bcd.html.elements`) — binding JS
         // (interface + membres IDL) ET géométrie UA (box
@@ -3668,7 +4305,7 @@ fn check_names(kind: &str) -> ExitCode {
         }
         _ => {
             eprintln!(
-                "check : kind inconnu {kind:?} — attendu prop|sel|at|routed|affects|affectsv|paintv|html|decl|tables"
+                "check : kind inconnu {kind:?} — attendu prop|sel|at|routed|affects|affectsv|paintv|computedv|atrulev|html|decl|tables"
             );
             return ExitCode::FAILURE;
         }
@@ -3680,11 +4317,12 @@ fn check_names(kind: &str) -> ExitCode {
         if name.is_empty() {
             continue;
         }
-        if kind == "affectsv" || kind == "paintv" {
-            let verdict = if kind == "affectsv" {
-                affects_decl_verdict(name)
-            } else {
-                paint_decl_verdict(name)
+        if kind == "affectsv" || kind == "paintv" || kind == "computedv" || kind == "atrulev" {
+            let verdict = match kind {
+                "affectsv" => affects_decl_verdict(name),
+                "paintv" => paint_decl_verdict(name),
+                "atrulev" => atrulev_verdict(name),
+                _ => computed_decl_verdict(name),
             };
             let verdict = verdict.map_or("na", |ok| if ok { "ok" } else { "miss" });
             println!("{name}\t{verdict}");
@@ -4068,5 +4706,54 @@ mod tests {
         assert!(!decl_valid("width:200"));
         assert!(decl_valid("width:200px"));
         assert!(decl_valid("color:red"));
+    }
+
+    #[test]
+    fn computedv_expansion_vs_inertie_verbatim() {
+        use super::computed_decl_verdict;
+        // Expansion shorthand : `inset` → 4 longhands
+        // physiques → delta calculé hors prop sondée.
+        assert_eq!(computed_decl_verdict("inset:10px"), Some(true));
+        // Résolution logique : `block-size` → `height`
+        // (`resolve_logical_props`, writing-mode horizontal).
+        assert_eq!(computed_decl_verdict("block-size:44px"), Some(true));
+        // Expansion + résolution composées : `margin-inline`
+        // → `margin-left`/`margin-right`.
+        assert_eq!(computed_decl_verdict("margin-inline:5px"), Some(true));
+        // Longhand nu : stockée verbatim, exclue de la
+        // signature → « cascade n'applique rien d'autre »
+        // (le rendu relève des oracles geo/pixel).
+        assert_eq!(computed_decl_verdict("letter-spacing:2px"), Some(false));
+        // Prop logique hors `resolve_logical_props` :
+        // stockée verbatim sans effet aval → miss calculé,
+        // cohérent avec le routé-inerte mesuré en geo.
+        assert_eq!(computed_decl_verdict("overflow-block:hidden"), Some(false));
+        // `na` de valeur conservé (CSS-wide).
+        assert_eq!(computed_decl_verdict("color:inherit"), None);
+    }
+
+    #[test]
+    fn atrulev_descripteurs_verdicts() {
+        use super::atrulev_verdict;
+        // Descripteurs `CounterStyle` câblés dans `label()`
+        // (chemin `inside`, R-221) → delta marqueurs réel.
+        assert_eq!(atrulev_verdict("counter-style:symbols"), Some(true));
+        assert_eq!(atrulev_verdict("counter-style:prefix"), Some(true));
+        // `fallback` enregistré mais jamais lu → miss honnête.
+        assert_eq!(atrulev_verdict("counter-style:fallback"), Some(false));
+        // Feature MQ évaluée sous `StyleEnv::default`.
+        assert_eq!(atrulev_verdict("media:width"), Some(true));
+        // `(faux) or (faux)` : la contre-sonde écarte la
+        // tolérance `unknown` — l'`ok` exige l'évaluation.
+        assert_eq!(atrulev_verdict("media:or_syntax"), Some(true));
+        // `@supports` hors `(prop:val)` : `selector()` sans `:`
+        // serait toléré-`unknown` → sonde à `:` → miss honnête.
+        assert_eq!(atrulev_verdict("supports:selector"), Some(false));
+        // `@property --w{inherits:false}` honoré → `.x` voit
+        // l'initial (9 px) et non le `--w` parental.
+        assert_eq!(atrulev_verdict("property:inherits"), Some(true));
+        // Hors portée in-process → `na`.
+        assert_eq!(atrulev_verdict("font-face:font-display"), None);
+        assert_eq!(atrulev_verdict("counter-style:speak-as"), None);
     }
 }

@@ -6,8 +6,9 @@
     "css.at": 20,
     "js.builtins": 648,
     "api": 1510,
-    "css.values": 1139,
-    "html.elem": 119
+    "css.values": 1146,
+    "html.elem": 119,
+    "css.atd": 34
   },
   "families": {
     "css.values": {
@@ -153,8 +154,8 @@
       "flex": 6,
       "flex-basis": 1,
       "flex-direction": 3,
-      "flex-flow": 3,
-      "flex-wrap": 0,
+      "flex-flow": 5,
+      "flex-wrap": 3,
       "float": 2,
       "font": 0,
       "font-family": 10,
@@ -194,7 +195,7 @@
       "left": 0,
       "letter-spacing": 0,
       "line-break": 1,
-      "line-clamp": 0,
+      "line-clamp": 1,
       "list-style": 3,
       "list-style-position": 1,
       "list-style-type": 57,
@@ -257,7 +258,6 @@
       "overflow-x": 4,
       "overflow-y": 4,
       "paint-order": 1,
-      "perspective-origin": 0,
       "place-content": 9,
       "place-items": 11,
       "place-self": 12,
@@ -325,7 +325,7 @@
       "text-decoration-style": 4,
       "text-decoration-thickness": 1,
       "text-emphasis": 9,
-      "text-emphasis-position": 0,
+      "text-emphasis-position": 1,
       "text-emphasis-style": 7,
       "text-fit": 0,
       "text-indent": 0,
@@ -356,6 +356,12 @@
       "wrap-inside": 0,
       "writing-mode": 4,
       "z-index": 1
+    },
+    "css.atd": {
+      "counter-style": 4,
+      "media": 27,
+      "property": 2,
+      "supports": 1
     }
   }
 }

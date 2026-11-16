@@ -139,6 +139,14 @@ ring = "0.17"
 # padding OAEP+MGF1 (OID associé au hash).
 rsa = "0.10"
 sha2 = { version = "0.11", features = ["oid"] }
+# `AES-CBC` pour `crypto.subtle` (JS-C562, §B-117 aliexpress) —
+# `ring` ne fait pas CBC ; `aes`+`cbc` sont les crates de
+# référence pur Rust (RustCrypto, ligne `cipher` 0.5 alignée
+# sur `digest` 0.11). `sha1` complète `RSA-OAEP` SHA-1 (héritage
+# web — digest/HMAC passent déjà par `ring`).
+aes = "0.9"
+cbc = { version = "0.2", features = ["alloc"] }
+sha1 = "0.11"
 # Décodage corps explorer-net (ADR-0002, étape 6) — pur Rust :
 # flate2 sur miniz_oxide (gzip/deflate), brotli, encoding_rs
 # (transcodage charset WHATWG — la référence de Firefox).

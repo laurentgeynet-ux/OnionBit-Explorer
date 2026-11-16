@@ -1097,7 +1097,7 @@ impl Session {
         }
         let NavDone {
             url,
-            dom,
+            mut dom,
             html,
             title,
             referrer_policy,
@@ -1108,6 +1108,10 @@ impl Session {
             clear_cookies,
             net_ev,
         } = done;
+        // `<frameset>` → grille d'`<iframe>` synthétiques
+        // (étape 309 — réécriture DOM session, la machine
+        // iframe prend le relais sans branche dédiée).
+        frameset::expand_framesets(&mut dom, self.viewport);
         // Étape 251 — complétion `net.events` du document
         // (enregistrée même si l'epoch est supplantée au
         // commit : le fetch a eu lieu).
@@ -1393,6 +1397,7 @@ impl Session {
             max_inflight: self.max_inflight,
             max_modules: self.max_modules,
             font_budget: self.max_fonts,
+            font_phase_ms: self.font_phase_ms,
             max_imports: self.max_imports,
             max_images: self.max_images,
             net_events: Vec::new(),

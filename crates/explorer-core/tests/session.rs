@@ -3102,6 +3102,266 @@ async fn img_renders_decoded_bitmap() {
     assert_eq!(s.frame_png(a), s.frame_png(b));
 }
 
+/// Demande PIPE 2026-11-15 (étape 306) — `input[type=image]
+/// [src]` entre dans la collecte image : le `src` est
+/// fetché, décodé et peint dans la boîte remplacée R-163
+/// (avant : repli `alt`, jamais de requête).
+#[tokio::test]
+async fn input_image_fetches_and_paints_bitmap() {
+    let (mut s, t) = test_session();
+    t.route(
+        "/i",
+        200,
+        "<html><body><form>\
+         <input type=\"image\" src=\"/i.png\" alt=\"go\">\
+         </form></body></html>",
+    );
+    t.route_bin("/i.png", 200, red_png());
+
+    let id = s.open_tab();
+    s.navigate(id, "http://h.test/i").await.unwrap();
+    assert!(
+        t.paths().iter().any(|p| p == "/i.png"),
+        "input[type=image] src doit être fetchée — {:?}",
+        t.paths()
+    );
+    // La bordure UA `input` entoure le bitmap : on sonde la
+    // présence de rouge, pas l'égalité de frame.
+    let (w, _h, px) = s.frame_pixels(id).unwrap();
+    let reds = (0..px.len() / 4)
+        .filter(|&i| px[i * 4..i * 4 + 4] == [255, 0, 0, 255])
+        .count();
+    assert!(
+        reds >= 4,
+        "bitmap 2x2 rouge peint — {reds} px rouges (w={w})"
+    );
+}
+
+/// `input[type=image][src="data:…"]` : le collecteur inline
+/// PIPE ne lit pas `input` — la source auto-porteuse est
+/// décodée côté NAV, même table `replaced`.
+#[tokio::test]
+async fn input_image_data_url_paints_inline() {
+    use std::fmt::Write;
+    let (mut s, t) = test_session();
+    let enc = red_png().iter().fold(String::new(), |mut out, byte| {
+        let _ = write!(out, "%{byte:02X}");
+        out
+    });
+    t.route(
+        "/i",
+        200,
+        Box::leak(
+            format!(
+                "<html><body><form>\
+                 <input type=\"image\" src=\"data:image/png,{enc}\" alt=\"go\">\
+                 </form></body></html>"
+            )
+            .into_boxed_str(),
+        ),
+    );
+
+    let id = s.open_tab();
+    s.navigate(id, "http://h.test/i").await.unwrap();
+    assert_eq!(t.paths().len(), 1, "data: auto-porteur — zéro requête");
+    let (w, _h, px) = s.frame_pixels(id).unwrap();
+    let reds = (0..px.len() / 4)
+        .filter(|&i| px[i * 4..i * 4 + 4] == [255, 0, 0, 255])
+        .count();
+    assert!(reds >= 4, "bitmap data: peint — {reds} px rouges (w={w})");
+}
+
+/// Sans `src` : aucun fetch, repli `alt` honnête — le bouton
+/// peint son libellé (comportement antérieur conservé).
+#[tokio::test]
+async fn input_image_without_src_keeps_alt_fallback() {
+    let (mut s, t) = test_session();
+    t.route(
+        "/i",
+        200,
+        "<html><body><form>\
+         <input type=\"image\" alt=\"go\">\
+         </form></body></html>",
+    );
+    let id = s.open_tab();
+    s.navigate(id, "http://h.test/i").await.unwrap();
+    assert_eq!(
+        t.paths().len(),
+        1,
+        "input[type=image] sans src ne fetch rien — {:?}",
+        t.paths()
+    );
+}
+
+/// Étape 307 — image map : un clic dans une `<area rect>`
+/// d'un `<img usemap>` suit le `href` de l'aire (tranche
+/// legacy journal 2026-11-15, point b).
+#[tokio::test]
+async fn image_map_area_click_navigates() {
+    let (mut s, t) = test_session();
+    // Image 20×10 à l'origine (marge body annulée par
+    // `route`) : la zone rect couvre (2,2)-(18,8) en coords
+    // naturelles = coords rendues (échelle 1).
+    t.route(
+        "/m",
+        200,
+        "<html><body><img src=\"/i.png\" usemap=\"#m\" width=\"20\" height=\"10\">\
+         <map name=\"m\"><area shape=\"rect\" coords=\"2,2,18,8\" href=\"/t\" alt=\"z\"></map>\
+         </body></html>",
+    );
+    t.route_bin("/i.png", 200, solid_png(20, 10, [0, 200, 0, 255]));
+    t.route("/t", 200, "<html><body>cible</body></html>");
+    let id = s.open_tab();
+    s.navigate(id, "http://h.test/m").await.unwrap();
+    // (10,5) tombe dans la zone (2,2)-(18,8) rel. image.
+    let out = s
+        .handle_input(id, InputEvent::Click { x: 10.0, y: 5.0 })
+        .await
+        .unwrap();
+    assert_eq!(out, InputOutcome::Navigated, "clic dans l'aire");
+    assert_eq!(s.tab_url(id).as_deref(), Some("http://h.test/t"));
+}
+
+/// Hors de toute `<area>` (et sans `default`) : le clic sur
+/// l'image ne navigue pas — comportement hors-zone honnête.
+#[tokio::test]
+async fn image_map_outside_area_ignored() {
+    let (mut s, t) = test_session();
+    t.route(
+        "/m",
+        200,
+        "<html><body><img src=\"/i.png\" usemap=\"#m\" width=\"20\" height=\"10\">\
+         <map name=\"m\"><area shape=\"rect\" coords=\"2,2,8,8\" href=\"/t\"></map>\
+         </body></html>",
+    );
+    t.route_bin("/i.png", 200, solid_png(20, 10, [0, 200, 0, 255]));
+    let id = s.open_tab();
+    s.navigate(id, "http://h.test/m").await.unwrap();
+    // (19,9) est dans l'image mais hors rect (2,2)-(18,8).
+    let out = s
+        .handle_input(id, InputEvent::Click { x: 19.0, y: 9.0 })
+        .await
+        .unwrap();
+    assert_ne!(out, InputOutcome::Navigated, "hors zone : pas de nav");
+    assert_eq!(s.tab_url(id).as_deref(), Some("http://h.test/m"));
+}
+
+/// `shape="default"` ne gagne qu'en dernier recours : un
+/// point couvert par une vraie aire suit **son** href, pas
+/// celui du default.
+#[tokio::test]
+async fn image_map_default_only_as_fallback() {
+    let (mut s, t) = test_session();
+    t.route(
+        "/m",
+        200,
+        "<html><body><img src=\"/i.png\" usemap=\"#m\" width=\"20\" height=\"10\">\
+         <map name=\"m\">\
+         <area shape=\"rect\" coords=\"0,0,20,10\" href=\"/t\">\
+         <area shape=\"default\" href=\"/d\">\
+         </map></body></html>",
+    );
+    t.route_bin("/i.png", 200, solid_png(20, 10, [0, 200, 0, 255]));
+    t.route("/t", 200, "<html><body>t</body></html>");
+    t.route("/d", 200, "<html><body>d</body></html>");
+    let id = s.open_tab();
+    s.navigate(id, "http://h.test/m").await.unwrap();
+    // Le rect couvre toute l'image → le default est ignoré.
+    let out = s
+        .handle_input(id, InputEvent::Click { x: 10.0, y: 5.0 })
+        .await
+        .unwrap();
+    assert_eq!(out, InputOutcome::Navigated);
+    assert_eq!(s.tab_url(id).as_deref(), Some("http://h.test/t"));
+}
+
+/// Étape 309 — document `<frameset>` : chaque `<frame>`
+/// devient un `<iframe>` de la grille synthétique et sa
+/// `src` est fetchée comme un sous-contexte classique
+/// (tranche legacy journal 2026-11-15, point a).
+#[tokio::test]
+async fn frameset_frames_fetch_subcontexts() {
+    let (mut s, t) = test_session();
+    t.route(
+        "/m",
+        200,
+        "<html><frameset rows=\"50%,*\"><frame src=\"/a\">\
+         <frameset cols=\"30%,*\"><frame src=\"/b\"><frame src=\"/c\"></frameset>\
+         </frameset></html>",
+    );
+    t.route("/a", 200, "<html><body><title>A</title>a</body></html>");
+    t.route("/b", 200, "<html><body>b</body></html>");
+    t.route("/c", 200, "<html><body>c</body></html>");
+    let id = s.open_tab();
+    s.navigate(id, "http://h.test/m").await.unwrap();
+    let paths = t.paths();
+    for f in ["/a", "/b", "/c"] {
+        assert!(paths.contains(&f.to_string()), "frame {f} fetchée");
+    }
+    let frames = s.tab_frames(id);
+    assert_eq!(frames.len(), 3, "3 sous-contextes");
+    assert_eq!(frames[0].0, "http://h.test/a");
+    assert_eq!(frames[0].1.as_deref(), Some("A"));
+}
+
+/// Sans `<frame>` (ou `<noframes>` seul) : la grille n'est
+/// pas synthétisée, le document reste inerte mais sain.
+#[tokio::test]
+async fn frameset_empty_is_tolerated() {
+    let (mut s, t) = test_session();
+    t.route(
+        "/m",
+        200,
+        "<html><frameset rows=\"*,*\"><noframes><body>alt</body></noframes></frameset></html>",
+    );
+    let id = s.open_tab();
+    s.navigate(id, "http://h.test/m").await.unwrap();
+    assert_eq!(s.tab_url(id).as_deref(), Some("http://h.test/m"));
+    assert_eq!(s.tab_frames(id), Vec::new());
+}
+
+/// `shape="circle"` : le centre couvert, le coin exclu.
+#[tokio::test]
+async fn image_map_circle_shape() {
+    let (mut s, t) = test_session();
+    t.route(
+        "/m",
+        200,
+        "<html><body><img src=\"/i.png\" usemap=\"#m\" width=\"20\" height=\"10\">\
+         <map name=\"m\"><area shape=\"circle\" coords=\"10,5,4\" href=\"/t\"></map>\
+         </body></html>",
+    );
+    t.route_bin("/i.png", 200, solid_png(20, 10, [0, 0, 0, 255]));
+    t.route("/t", 200, "<html><body>t</body></html>");
+    let id = s.open_tab();
+    s.navigate(id, "http://h.test/m").await.unwrap();
+    // Centre (10,5) dans le rayon 4.
+    let out = s
+        .handle_input(id, InputEvent::Click { x: 10.0, y: 5.0 })
+        .await
+        .unwrap();
+    assert_eq!(out, InputOutcome::Navigated);
+    assert_eq!(s.tab_url(id).as_deref(), Some("http://h.test/t"));
+
+    // Coin (1,9) : distance ~9 du centre → hors cercle.
+    let (mut s2, t2) = test_session();
+    t2.route(
+        "/m",
+        200,
+        "<html><body><img src=\"/i.png\" usemap=\"#m\" width=\"20\" height=\"10\">\
+         <map name=\"m\"><area shape=\"circle\" coords=\"10,5,4\" href=\"/t\"></map>\
+         </body></html>",
+    );
+    t2.route_bin("/i.png", 200, solid_png(20, 10, [0, 0, 0, 255]));
+    let id2 = s2.open_tab();
+    s2.navigate(id2, "http://h.test/m").await.unwrap();
+    let out2 = s2
+        .handle_input(id2, InputEvent::Click { x: 1.0, y: 9.0 })
+        .await
+        .unwrap();
+    assert_ne!(out2, InputOutcome::Navigated, "coin hors cercle");
+}
+
 /// Étape 108 — un apply de synchro JS re-parse le document :
 /// les `<img>` fetchés doivent survivre (le cache persistant
 /// `img_decoded` re-matche par `src` — avant, la table

@@ -11,6 +11,9 @@
 //   routed     bcd.css.properties   → `explorer-cli check routed`
 //   selectors  bcd.css.selectors    → `explorer-cli check sel`
 //   at-rules   bcd.css['at-rules']  → `explorer-cli check at`
+//   atd        bcd.css['at-rules'].<r>.<d> (descripteurs/
+//              features) → `check atrulev` — sondes
+//              comportementales par descripteur (étape 301)
 //   builtins   bcd.javascript.builtins (prof. 2) → `eval` jscore
 //   api        bcd.api (interfaces + membres) → `api` jscore
 //              (moteur avec surface navigateur installée)
@@ -27,12 +30,12 @@
 // obsolètes/non-standard exclues (jamais un % sans dénominateur).
 //
 // Usage : node scripts/bcd_coverage.mjs [--cli <binaire>]
-//           [--missing N] [--only props|routed|sel|at|js|api|values|html]
+//           [--missing N] [--only props|routed|sel|at|atd|js|api|values|html]
 //   --cli      explorer-cli (défaut : $EXPLORER_CLI puis
 //              target/debug/explorer-cli — cargo build -p explorer-cli)
 //   --missing  nb de manques listés par section (défaut 12,
 //              0 = aucun)
-//   --only     une seule surface (props|routed|sel|at|js|api|values|html)
+//   --only     une seule surface (props|routed|sel|at|atd|js|api|values|html)
 //   --families tableau ok/total par prop de css.values,
 //              trié par miss — la file v2 en une passe
 //   --gate f   cliquet : exit 1 si un score < baseline f.json
@@ -140,6 +143,14 @@ const families = {};
 // Totaux mesurés par famille (hors `na`) — affichage
 // `--families` seulement ; la baseline ne stocke que `ok`.
 const famTotals = {};
+// Compteur « cascade applique » par famille (étape 298 —
+// `check computedv` sur les misses : expansion shorthand /
+// résolution logique / effet croisé visible dans le style
+// calculé mais sans effet géométrique ∪ pixel). Colonne
+// `c=N` du tableau `--families` — diagnostic de triage,
+// JAMAIS dans le score (`mask:url()` expanserait tout en
+// restant non-peint).
+const famComputed = {};
 function report(label, entries, okSet, note) {
   const ok = entries.filter(e => okSet.has(e.name)).length;
   scores[label] = ok;
@@ -152,7 +163,7 @@ function report(label, entries, okSet, note) {
   }
 }
 
-const SURFACES = ['props', 'routed', 'sel', 'at', 'js', 'api', 'values', 'html'];
+const SURFACES = ['props', 'routed', 'sel', 'at', 'atd', 'js', 'api', 'values', 'html'];
 // `--only <nom>` inconnu = zéro surface mesurée → gate vert
 // à vide et `--save` écrirait une baseline vide : échec
 // bruyant plutôt que cliquet creux.
@@ -179,6 +190,47 @@ for (const sec of sections) {
     const entries = relevantEntries(bcd.css['at-rules'] ?? {});
     report('css.at', entries, checkBatch('at', entries.map(e => e.name)),
       `sur ${Object.keys(bcd.css['at-rules'] ?? {}).length} clés BCD`);
+  } else if (sec === 'atd') {
+    // bcd.css['at-rules'].<r>.<d> — **descripteurs**/features
+    // sondés comportementalement (`check atrulev`, étape 301) :
+    // une sonde par descripteur mesurable in-process (marqueurs
+    // `@counter-style`, conditionnels `@media`/`@supports`,
+    // registration `@property`) ; `na` = hors portée oracle
+    // (font-face/page/keyframes/import… — chargement, temps,
+    // print) → hors dénominateur, annoncés dans la note.
+    const pairs = [];
+    for (const [r, node] of Object.entries(bcd.css['at-rules'] ?? {})) {
+      for (const [d, dn] of Object.entries(node)) {
+        if (d === '__compat' || !dn?.__compat) continue;
+        const c = dn.__compat;
+        const n = browsers.filter(br => {
+          const s = c.support?.[br];
+          const one = Array.isArray(s) ? s[0] : s;
+          return one && one.version_added !== false && !one.version_removed;
+        }).length;
+        if (c.status?.deprecated || c.status?.standard_track === false || n === 0) continue;
+        pairs.push({ name: `${r}:${d}`, engines: n });
+      }
+    }
+    const lines = execFileSync(cli, ['check', 'atrulev'], {
+      input: pairs.map(e => e.name).join('\n'),
+      encoding: 'utf8', timeout: 600_000, maxBuffer: 64 * 1024 * 1024,
+    }).split(/\r?\n/).filter(Boolean);
+    const okSet = new Set(lines.filter(l => l.endsWith('\tok')).map(l => l.split('\t')[0]));
+    const naSet = new Set(lines.filter(l => l.endsWith('\tna')).map(l => l.split('\t')[0]));
+    const measured = pairs.filter(e => !naSet.has(e.name));
+    report('css.atd', measured, okSet,
+      `descripteur → effet mesuré (fixture + env déterministe) ; ${naSet.size} hors portée oracle`);
+    // Cliquet par at-rule — même discipline que css.values.
+    const perRule = {};
+    const perRuleTotal = {};
+    for (const e of measured) {
+      const r = e.name.slice(0, e.name.indexOf(':'));
+      perRuleTotal[r] = (perRuleTotal[r] ?? 0) + 1;
+      perRule[r] = (perRule[r] ?? 0) + (okSet.has(e.name) ? 1 : 0);
+    }
+    families['css.atd'] = perRule;
+    famTotals['css.atd'] = perRuleTotal;
   } else if (sec === 'js') {
     // Profondeur 2 de javascript.builtins — les feuilles
     // `A.b` avec __compat (Array.from, JSON.stringify,
@@ -510,19 +562,35 @@ for (const sec of sections) {
     const measured = pairs.filter(e => !naSet.has(e.name));
     report('css.values', measured, okSet,
       `déclaration → effet géométrique ∪ pixel (affectsv + paintv, jauge non-saturante) ; ${naSet.size} neutres hors dénominateur`);
+    // Troisième passe (étape 298) — `check computedv` sur
+    // les misses mesurées : classifieur « la cascade
+    // applique » (expansion shorthand, résolution logique,
+    // effet croisé) vs « cascade aveugle ». Hors union ok —
+    // un shorthand expansé mais non-peint (`mask`,
+    // `border-image`) reste un miss de score.
+    const missNames = measured.map(e => e.name).filter(n2 => !okSet.has(n2));
+    const clines = missNames.length ? execFileSync(cli, ['check', 'computedv'], {
+      input: missNames.join('\n'),
+      encoding: 'utf8', timeout: 600_000, maxBuffer: 64 * 1024 * 1024,
+    }).split(/\r?\n/).filter(Boolean) : [];
+    const compSet = new Set(clines.filter(l => l.endsWith('\tok')).map(l => l.split('\t')[0]));
+    console.log(`  dont ${compSet.size}/${missNames.length} misses « cascade applique » (computedv — expansées/résolues au style, non rendues)`);
     // Cliquet par famille (étape 278) : compteurs `ok` par
     // prop — une famille qui régresse pendant qu'une autre
     // progresse reste invisible du total agrégé ; la
     // baseline v2 les verrouille une à une.
     const perProp = {};
     const perPropTotal = {};
+    const perPropComputed = {};
     for (const e of measured) {
       const p = e.name.slice(0, e.name.indexOf(':'));
       perPropTotal[p] = (perPropTotal[p] ?? 0) + 1;
       perProp[p] = (perProp[p] ?? 0) + (okSet.has(e.name) ? 1 : 0);
+      perPropComputed[p] = (perPropComputed[p] ?? 0) + (compSet.has(e.name) ? 1 : 0);
     }
     families['css.values'] = perProp;
     famTotals['css.values'] = perPropTotal;
+    famComputed['css.values'] = perPropComputed;
   } else if (sec === 'html') {
     // bcd.html.elements.<tag> — oracle de comportement par
     // élément (`check html`, étape 219) : « le tag parse »
@@ -545,15 +613,17 @@ for (const sec of sections) {
 if (args.includes('--families')) {
   for (const [label, perProp] of Object.entries(families)) {
     const tot = famTotals[label] ?? {};
+    const comp = famComputed[label] ?? {};
     const rows = Object.keys(perProp)
-      .map(p => ({ p, ok: perProp[p], t: tot[p] ?? perProp[p] }))
+      .map(p => ({ p, ok: perProp[p], t: tot[p] ?? perProp[p], c: comp[p] ?? 0 }))
       .sort((a, b) => (b.t - b.ok) - (a.t - a.ok) || a.p.localeCompare(b.p));
     const zero = rows.filter(r => r.ok === 0).length;
     const full = rows.filter(r => r.ok === r.t).length;
-    console.log(`familles ${label} : ${rows.length} — ${full} pleines, ${zero} à 0 ok`);
+    const compTotal = rows.reduce((s, r) => s + r.c, 0);
+    console.log(`familles ${label} : ${rows.length} — ${full} pleines, ${zero} à 0 ok${compTotal ? ` ; ${compTotal} misses « cascade applique » (c=)` : ''}`);
     for (const r of rows) {
       const pct = (100 * r.ok / r.t).toFixed(1);
-      console.log(`    ${r.p.padEnd(34)} ${String(r.ok).padStart(3)}/${r.t} (${pct.padStart(5)} %)${r.t - r.ok ? `  miss=${r.t - r.ok}` : ''}`);
+      console.log(`    ${r.p.padEnd(34)} ${String(r.ok).padStart(3)}/${r.t} (${pct.padStart(5)} %)${r.t - r.ok ? `  miss=${r.t - r.ok}` : ''}${r.c ? `  c=${r.c}` : ''}`);
     }
   }
 }

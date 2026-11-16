@@ -1007,7 +1007,16 @@ pub fn value_is_valid_for(name: &str, value: &str) -> bool {
             ) || len_or_pct(v)
         }
         "line-height" => v == "normal" || v.parse::<f64>().is_ok() || len_or_pct(v),
-        "margin" => v.split_whitespace().all(|p| p == "auto" || len_or_pct(p)),
+        // `anchor()`/`anchor-size()` admis comme sur les
+        // longhands `margin-*` (css-anchor-position-1,
+        // R-254) — le bras shorthand refusait une forme que
+        // la cascade accepte (étape 297, triage jauge).
+        "margin" => v.split_whitespace().all(|p| {
+            p == "auto"
+                || len_or_pct(p)
+                || p.starts_with("anchor-size(")
+                || p.starts_with("anchor(")
+        }),
         "padding" => v.split_whitespace().all(len_or_pct),
         "border-width" => v
             .split_whitespace()

@@ -522,6 +522,26 @@ pub async fn drain_navs_shared(sess: &tokio::sync::Mutex<Session>, tab: TabId) -
     committed
 }
 
+/// Drain borné des jobs pendus d'un moteur détaché
+/// (pompe + chemin eval, §B-114) — §B-104 : l'exception
+/// d'un handler (worker `onmessage`, timer, thenable) est
+/// nommée, jamais avalée ; un timeout n'est pas un warn.
+fn run_pump_jobs(eng: &mut dyn JsEngine, max: usize, tab: TabId, why: &str) -> usize {
+    match eng.run_pending_bounded(max) {
+        Ok(n) => n,
+        Err(e) => {
+            if !matches!(e, explorer_js::JsError::Timeout) {
+                tracing::warn!(
+                    tab,
+                    error = %e,
+                    "pump: exception dans un handler JS ({why})"
+                );
+            }
+            0
+        }
+    }
+}
+
 /// Pompe JS partagée (étape 53f) — même contrat qu'un tour de
 /// [`Session::pump_timers`] + `advance_animations` (55e)
 /// mais le travail long (`run_pending` + sérialisation du
@@ -540,6 +560,7 @@ pub async fn drain_navs_shared(sess: &tokio::sync::Mutex<Session>, tab: TabId) -
 ///
 /// Retourne le nombre de jobs JS exécutés (0 = pas de moteur,
 /// pompe déjà en vol, ou epoch supplantée).
+#[allow(clippy::too_many_lines)] // pompe ordonnée lock/drain/restore — pas de sous-fonction nette
 pub async fn pump_timers_shared(sess: &tokio::sync::Mutex<Session>, tab: TabId) -> usize {
     let taken = {
         let mut s = sess.lock().await;
@@ -567,24 +588,33 @@ pub async fn pump_timers_shared(sess: &tokio::sync::Mutex<Session>, tab: TabId) 
     // étape du chemin de retour est nommée : la dernière
     // ligne vivante brackete le site fautif.
     let tb = Instant::now();
+    // §B-114 — même loquet fil-local côté appelant : sans ce
+    // primer, `pump.offlock` lisait le delta du compteur global
+    // depuis la *phase précédente de ce fil* (toute la tempête
+    // inter-battements — ~21 Gio mesurés au field276 pour un
+    // drain réel de 1,8 Mio). Amorcé ici, il borne le churn
+    // process à la fenêtre de pompe (comparaison historique
+    // conservée, mesure désormais honnête).
+    let _ = explorer_common::alloc_delta();
     let out = tokio::task::spawn_blocking(move || {
         dlv_info!("pump: run");
-        // §B-104 — l'exception d'un handler (worker `onmessage`,
-        // timer, thenable) remontait jusqu'ici et mourait dans
-        // `unwrap_or(0)` : promesse pendante sans témoin. Nommée.
-        let jobs = match eng.run_pending_bounded(max) {
-            Ok(n) => n,
-            Err(e) => {
-                if !matches!(e, explorer_js::JsError::Timeout) {
-                    tracing::warn!(
-                        tab,
-                        error = %e,
-                        "pump: exception dans un handler JS (avant : avalée)"
-                    );
-                }
-                0
-            }
-        };
+        // §B-114 — le curseur `alloc_delta` est local au fil :
+        // le primer en tête de fermeture pour que `pump.jobs`
+        // mesure sa propre fenêtre (et non tout le churn du
+        // process depuis le dernier échantillon de ce worker
+        // bloquant mutualisé). Reste une attribution
+        // **approchée** — le compteur est global process,
+        // les allocs concurrentes d'autres onglets/y compris
+        // du drain réseau s'y confondent.
+        let _ = explorer_common::alloc_delta();
+        let tj = Instant::now();
+        let jobs = run_pump_jobs(eng.as_mut(), max, tab, "avant : avalée");
+        // §B-114 — `pump.offlock` restait opaque : il bracketait
+        // `run_pending` (timers/microtasks/dispatch) ET
+        // `sync_for_apply` (sérialisation des inserts ou du doc
+        // entier au repli classé). Deux sous-phases nomment le
+        // brûleur en un vol.
+        let ts = sync_phase(tab, "pump.jobs", tj);
         dlv_info!("pump: js jobs={jobs}");
         let mutated = if sync_ok {
             let m = Session::sync_for_apply(&mut *eng);
@@ -593,9 +623,15 @@ pub async fn pump_timers_shared(sess: &tokio::sync::Mutex<Session>, tab: TabId) 
         } else {
             None
         };
+        if sync_ok {
+            sync_phase(tab, "pump.sync", ts);
+        }
         (jobs, mutated, eng)
     })
     .await;
+    // Agrégat `pump.offlock` conservé (comparabilité des vols
+    // antérieurs) : il mesure la fenêtre entière — `pump.jobs` +
+    // `pump.sync` en sont le détail par fil bloquant.
     sync_phase(tab, "pump.offlock", tb);
     // Étape 3a : commit = swap des tampons sous verrou court
     // → livrées sur le moteur détaché **hors verrou** →
@@ -810,27 +846,24 @@ pub async fn eval_shared_at(
         // d'hydratation, setTimeout(0)…) — on les draine pour
         // que la valeur rendue reflète l'état stabilisé.
         dlv_info!("pump: evalrun");
-        // Même honnêteté que la pompe périodique : l'exception
-        // d'un handler drainé ici était avalée (`unwrap_or(0)`).
-        let jobs = match eng.run_pending_bounded(max) {
-            Ok(n) => n,
-            Err(e) => {
-                if !matches!(e, explorer_js::JsError::Timeout) {
-                    tracing::warn!(
-                        tab,
-                        error = %e,
-                        "pump: exception dans un handler JS après eval (avant : avalée)"
-                    );
-                }
-                0
-            }
-        };
+        // §B-114 — même découpage que la pompe périodique :
+        // amorçage du curseur d'alloc de ce fil bloquant puis
+        // phases `evalrun.jobs`/`evalrun.sync` (noms distincts
+        // de `pump.*` — l'attribution eval ne se mélange pas
+        // aux battements dans le livre de phases).
+        let _ = explorer_common::alloc_delta();
+        let tj = Instant::now();
+        let jobs = run_pump_jobs(eng.as_mut(), max, tab, "après eval (avant : avalée)");
+        let ts = sync_phase(tab, "evalrun.jobs", tj);
         dlv_info!("pump: evalret jobs={jobs}");
         let mutated = if sync_ok {
             Session::sync_for_apply(&mut *eng)
         } else {
             None
         };
+        if sync_ok {
+            sync_phase(tab, "evalrun.sync", ts);
+        }
         (value, jobs, mutated, eng)
     })
     .await;

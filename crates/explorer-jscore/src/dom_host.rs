@@ -609,6 +609,10 @@ struct DocumentHost {
     /// cascade (scoping = tranche 2) — la surface suffit aux
     /// polyfills qui étalent la liste (`[C, ...e.adopted…]`).
     adopted_sheets: RefCell<Option<Value>>,
+    /// `document.designMode` (JS-C560) — flag stocké
+    /// (`"on"`/`"off"`) ; l'édition réelle du miroir est hors
+    /// périmètre, la surface IDL est honnête.
+    design_mode: RefCell<bool>,
 }
 
 /// Element/text node object (`this` carries the node id).
@@ -726,6 +730,27 @@ impl NodeHost {
 /// le `inputValueTracking` de React s'arme.
 fn dom_acc_props(class: &str) -> &'static [&'static str] {
     match class {
+        // `ShadowRoot` (JS-C560) — accesseurs host-first :
+        // `host`/`innerHTML` rendent les vraies valeurs
+        // (`NodeHost::get`), le reste reste `undefined` tant
+        // que la fonctionnalité n'existe pas (honnêteté :
+        // membre présent, valeur absente).
+        "ShadowRoot" => &[
+            "activeElement",
+            "adoptedStyleSheets",
+            "clonable",
+            "customElementRegistry",
+            "delegatesFocus",
+            "fullscreenElement",
+            "host",
+            "innerHTML",
+            "mode",
+            "pictureInPictureElement",
+            "pointerLockElement",
+            "serializable",
+            "slotAssignment",
+            "styleSheets",
+        ],
         "HTMLInputElement" => &[
             "value",
             "checked",
@@ -736,6 +761,55 @@ fn dom_acc_props(class: &str) -> &'static [&'static str] {
             "disabled",
             "name",
             "placeholder",
+            "accept",
+            "alt",
+            "autocomplete",
+            "dirName",
+            "files",
+            "form",
+            "formAction",
+            "formEnctype",
+            "formMethod",
+            "formNoValidate",
+            "formTarget",
+            "height",
+            "indeterminate",
+            "labels",
+            "list",
+            "max",
+            "maxLength",
+            "min",
+            "minLength",
+            "multiple",
+            "pattern",
+            "popoverTargetAction",
+            "popoverTargetElement",
+            "required",
+            "selectionDirection",
+            "selectionEnd",
+            "selectionStart",
+            "size",
+            "src",
+            "step",
+            "validationMessage",
+            "validity",
+            "valueAsDate",
+            "valueAsNumber",
+            "webkitdirectory",
+            "width",
+            "willValidate",
+            // JS-C561 — `<input type=color>` (`alpha` bool /
+            // `colorSpace` enum reflétés) + `webkitEntries`
+            // (dnd filesystem — `[]` honnête) + handlers
+            // `cancel`/`invalid`/`select`/`selectionchange`
+            // (accesseurs → rails `on_handler_*` existants).
+            "alpha",
+            "colorSpace",
+            "webkitEntries",
+            "oncancel",
+            "oninvalid",
+            "onselect",
+            "onselectionchange",
         ],
         "HTMLTextAreaElement" => &[
             "value",
@@ -745,15 +819,395 @@ fn dom_acc_props(class: &str) -> &'static [&'static str] {
             "disabled",
             "name",
             "placeholder",
+            "autocomplete",
+            "cols",
+            "dirName",
+            "form",
+            "labels",
+            "maxLength",
+            "minLength",
+            "required",
+            "rows",
+            "selectionDirection",
+            "selectionEnd",
+            "selectionStart",
+            "textLength",
+            "type",
+            "validationMessage",
+            "validity",
+            "willValidate",
         ],
-        "HTMLSelectElement" => &["value", "disabled", "multiple", "name"],
-        "HTMLOptionElement" => &["value", "selected", "disabled"],
-        "HTMLButtonElement" => &["value", "type", "disabled", "name"],
-        "HTMLFormElement" => &["method", "action", "enctype", "target", "name"],
-        "HTMLImageElement" => &["src", "alt", "width", "height", "decoding", "loading"],
-        "HTMLAnchorElement" => &["href", "target", "rel"],
-        "HTMLIFrameElement" => &["src", "srcdoc", "sandbox", "loading"],
-        "HTMLScriptElement" | "HTMLLinkElement" => &["src", "href", "type", "rel"],
+        "HTMLSelectElement" => &[
+            "value",
+            "disabled",
+            "multiple",
+            "name",
+            "autocomplete",
+            "form",
+            "labels",
+            "length",
+            "options",
+            "required",
+            "selectedIndex",
+            "selectedOptions",
+            "size",
+            "type",
+            "validationMessage",
+            "validity",
+            "willValidate",
+        ],
+        "HTMLOptionElement" => &[
+            "value",
+            "selected",
+            "disabled",
+            "defaultSelected",
+            "form",
+            "index",
+            "label",
+            "text",
+        ],
+        "HTMLOptGroupElement" => &["disabled", "label"],
+        "HTMLButtonElement" => &[
+            "value",
+            "type",
+            "disabled",
+            "name",
+            "command",
+            "commandForElement",
+            "form",
+            "formAction",
+            "formEnctype",
+            "formMethod",
+            "formNoValidate",
+            "formTarget",
+            "labels",
+            "popoverTargetAction",
+            "popoverTargetElement",
+            "validationMessage",
+            "validity",
+            "willValidate",
+        ],
+        "HTMLFieldSetElement" => &[
+            "disabled",
+            "elements",
+            "form",
+            "name",
+            "type",
+            "validationMessage",
+            "validity",
+            "willValidate",
+        ],
+        "HTMLOutputElement" => &[
+            "value",
+            "defaultValue",
+            "form",
+            "htmlFor",
+            "labels",
+            "name",
+            "type",
+            "validationMessage",
+            "validity",
+            "willValidate",
+        ],
+        "HTMLFormElement" => &[
+            "method",
+            "action",
+            "enctype",
+            "encoding",
+            "target",
+            "name",
+            "acceptCharset",
+            "autocomplete",
+            "elements",
+            "length",
+            "noValidate",
+            "rel",
+            "relList",
+        ],
+        "HTMLImageElement" => &[
+            "src",
+            "alt",
+            "width",
+            "height",
+            "decoding",
+            "loading",
+            "complete",
+            "crossOrigin",
+            "currentSrc",
+            "fetchPriority",
+            "isMap",
+            "longDesc",
+            "lowsrc",
+            "naturalHeight",
+            "naturalWidth",
+            "referrerPolicy",
+            "sizes",
+            "srcset",
+            "useMap",
+            "x",
+            "y",
+        ],
+        "HTMLAnchorElement" => &[
+            "href",
+            "target",
+            "rel",
+            "attributionSourceId",
+            "download",
+            "hash",
+            "host",
+            "hostname",
+            "hreflang",
+            "origin",
+            "password",
+            "pathname",
+            "ping",
+            "port",
+            "protocol",
+            "referrerPolicy",
+            "relList",
+            "search",
+            "text",
+            "type",
+            "username",
+        ],
+        "HTMLAreaElement" => &[
+            "href",
+            "target",
+            "rel",
+            "alt",
+            "coords",
+            "download",
+            "hash",
+            "host",
+            "hostname",
+            "hreflang",
+            "origin",
+            "password",
+            "pathname",
+            "ping",
+            "port",
+            "protocol",
+            "referrerPolicy",
+            "relList",
+            "search",
+            "shape",
+            "type",
+            "username",
+        ],
+        "SVGAElement" => &[
+            "href",
+            "target",
+            "rel",
+            "download",
+            "hash",
+            "host",
+            "hostname",
+            "hreflang",
+            "origin",
+            "password",
+            "pathname",
+            "ping",
+            "port",
+            "protocol",
+            "referrerPolicy",
+            "relList",
+            "search",
+            "type",
+            "username",
+        ],
+        "HTMLBaseElement" => &["href", "target"],
+        "HTMLIFrameElement" => &[
+            "src",
+            "srcdoc",
+            "sandbox",
+            "loading",
+            "allow",
+            "allowFullscreen",
+            "contentDocument",
+            "contentWindow",
+            "credentialless",
+            "csp",
+            "height",
+            "referrerPolicy",
+            "width",
+        ],
+        "HTMLScriptElement" => &[
+            "src",
+            "href",
+            "type",
+            "rel",
+            "async",
+            "blocking",
+            "crossOrigin",
+            "defer",
+            "fetchPriority",
+            "innerText",
+            "integrity",
+            "noModule",
+            "referrerPolicy",
+            "text",
+        ],
+        "HTMLLinkElement" => &[
+            "src",
+            "href",
+            "type",
+            "rel",
+            "as",
+            "blocking",
+            "crossOrigin",
+            "disabled",
+            "fetchPriority",
+            "hreflang",
+            "imageSizes",
+            "imageSrcset",
+            "integrity",
+            "media",
+            "referrerPolicy",
+            "relList",
+            "sheet",
+            "sizes",
+        ],
+        "HTMLCanvasElement" => &["width", "height"],
+        "HTMLDataElement" | "HTMLLIElement" => &["value"],
+        "HTMLDataListElement" => &["options"],
+        "HTMLDetailsElement" => &["open"],
+        "HTMLDialogElement" => &["open", "closedBy", "returnValue"],
+        "HTMLEmbedElement" => &["height", "src", "type", "width"],
+        "HTMLLabelElement" => &["control", "form", "htmlFor"],
+        "HTMLLegendElement" => &["form"],
+        "HTMLMapElement" => &["areas"],
+        "HTMLMetaElement" => &["content", "httpEquiv", "media"],
+        "HTMLMeterElement" => &["high", "labels", "low", "max", "min", "optimum", "value"],
+        "HTMLModElement" => &["cite", "dateTime"],
+        "HTMLObjectElement" => &[
+            "contentDocument",
+            "contentWindow",
+            "data",
+            "form",
+            "height",
+            "type",
+            "validationMessage",
+            "validity",
+            "width",
+            "willValidate",
+        ],
+        "HTMLOListElement" => &["reversed", "start", "type"],
+        "HTMLProgressElement" => &["labels", "max", "position", "value"],
+        "HTMLQuoteElement" => &["cite"],
+        "HTMLSourceElement" => &["height", "media", "sizes", "src", "srcset", "type", "width"],
+        "HTMLStyleElement" => &["blocking", "disabled", "media", "sheet"],
+        "HTMLTableCellElement" => &[
+            "abbr",
+            "cellIndex",
+            "colSpan",
+            "headers",
+            "rowSpan",
+            "scope",
+        ],
+        "HTMLTableColElement" => &["span"],
+        "HTMLTableElement" => &["caption", "rows", "tBodies", "tFoot", "tHead"],
+        // `Element` (JS-C561) — membres BCD restants :
+        // `elementTiming` reflété (`elementtiming` attr),
+        // `currentCSSZoom`/`customElementRegistry`/
+        // `activeViewTransition`/`ariaErrorMessageElements`
+        // calculés dans `NodeHost::get`.
+        "Element" => &[
+            "elementTiming",
+            "currentCSSZoom",
+            "customElementRegistry",
+            "activeViewTransition",
+            "ariaErrorMessageElements",
+        ],
+        // `SVGAnimationElement` (JS-C561) — attributs SMIL
+        // + handlers `beginEvent`/`endEvent`/`repeatEvent`.
+        "SVGAnimationElement" => &[
+            "targetElement",
+            "systemLanguage",
+            "requiredExtensions",
+            "onbeginEvent",
+            "onendEvent",
+            "onrepeatEvent",
+        ],
+        "HTMLTableRowElement" => &["cells", "rowIndex", "sectionRowIndex"],
+        "HTMLTableSectionElement" => &["rows"],
+        "HTMLTitleElement" => &["text"],
+        "HTMLTrackElement" => &["default", "kind", "label", "src", "srclang"],
+        "HTMLMediaElement" => &[
+            "autoplay",
+            "buffered",
+            "controls",
+            "controlsList",
+            "crossOrigin",
+            "currentSrc",
+            "currentTime",
+            "defaultMuted",
+            "defaultPlaybackRate",
+            "duration",
+            "ended",
+            "loop",
+            "muted",
+            "networkState",
+            "paused",
+            "playbackRate",
+            "played",
+            "preload",
+            "preservesPitch",
+            "readyState",
+            "seekable",
+            "seeking",
+            "src",
+            "srcObject",
+            "volume",
+            // JS-C560 — surface média restante : états d'erreur/
+            // pistes (vides — pas de décodage), remote playback,
+            // `loading`/`disableRemotePlayback` reflets, EME.
+            "error",
+            "audioTracks",
+            "videoTracks",
+            "textTracks",
+            "remote",
+            "mediaKeys",
+            "sinkId",
+            "loading",
+            "disableRemotePlayback",
+            // Handlers `on*` média — la lecture IDL passe par
+            // `on_handler_get` (propre scriptée → attribut →
+            // `null`), présents sur le proto pour `'x' in proto`.
+            "onabort",
+            "oncanplay",
+            "oncanplaythrough",
+            "oncuechange",
+            "ondurationchange",
+            "onemptied",
+            "onencrypted",
+            "onended",
+            "onerror",
+            "onloadeddata",
+            "onloadedmetadata",
+            "onloadstart",
+            "onpause",
+            "onplay",
+            "onplaying",
+            "onprogress",
+            "onratechange",
+            "onseeked",
+            "onseeking",
+            "onstalled",
+            "onsuspend",
+            "ontimeupdate",
+            "onvolumechange",
+            "onwaiting",
+            "onwaitingforkey",
+        ],
+        "HTMLVideoElement" => &[
+            "disablePictureInPicture",
+            "height",
+            "playsInline",
+            "poster",
+            "videoHeight",
+            "videoWidth",
+            "width",
+        ],
         // Attributs globaux de `HTMLElement` (étape 219 /
         // `api` BCD) — réflexions d'attributs globaux ;
         // `accessKeyLabel` ≈ `accesskey` (label calculé =
@@ -785,11 +1239,351 @@ fn dom_acc_props(class: &str) -> &'static [&'static str] {
             "autocorrect",
             "popover",
         ],
+        // Famille SVG (Pareto `api` — JS-C559) : géométrie
+        // et feuilles = reflets d'attributs via `TAGGED_ATTRS`
+        // (tags arène camelCase pour `fe*`/`clipPath`…).
+        "SVGCircleElement" => &["cx", "cy", "r"],
+        "SVGEllipseElement" => &["cx", "cy", "rx", "ry"],
+        "SVGRectElement" => &["x", "y", "width", "height", "rx", "ry"],
+        "SVGLineElement" | "SVGLinearGradientElement" => &["x1", "x2", "y1", "y2"],
+        "SVGPolygonElement" | "SVGPolylineElement" => &["points"],
+        "SVGStopElement" => &["offset"],
+        "SVGSVGElement" => &[
+            "x",
+            "y",
+            "width",
+            "height",
+            "viewBox",
+            "preserveAspectRatio",
+            "currentScale",
+            "currentTranslate",
+            "animationsPaused",
+        ],
+        "SVGViewElement" | "SVGSymbolElement" => &["preserveAspectRatio", "viewBox"],
+        "SVGImageElement" => &[
+            "x",
+            "y",
+            "width",
+            "height",
+            "href",
+            "crossOrigin",
+            "decoding",
+            "preserveAspectRatio",
+        ],
+        "SVGUseElement" => &["x", "y", "width", "height", "href"],
+        "SVGForeignObjectElement" => &["x", "y", "width", "height"],
+        "SVGMaskElement" => &["x", "y", "width", "height", "maskContentUnits", "maskUnits"],
+        "SVGFilterElement" => &[
+            "x",
+            "y",
+            "width",
+            "height",
+            "href",
+            "filterUnits",
+            "primitiveUnits",
+        ],
+        "SVGPatternElement" => &[
+            "x",
+            "y",
+            "width",
+            "height",
+            "href",
+            "patternContentUnits",
+            "patternTransform",
+            "patternUnits",
+            "preserveAspectRatio",
+            "viewBox",
+        ],
+        "SVGMarkerElement" => &[
+            "markerHeight",
+            "markerUnits",
+            "markerWidth",
+            "orient",
+            "orientAngle",
+            "orientType",
+            "preserveAspectRatio",
+            "refX",
+            "refY",
+            "viewBox",
+        ],
+        "SVGGradientElement" => &["gradientTransform", "gradientUnits", "href", "spreadMethod"],
+        "SVGRadialGradientElement" => &["cx", "cy", "fr", "fx", "fy", "r"],
+        "SVGTextPositioningElement" => &["dx", "dy", "rotate", "x", "y"],
+        "SVGTextContentElement" => &["lengthAdjust", "textLength"],
+        "SVGTextPathElement" => &["href", "method", "spacing", "startOffset"],
+        "SVGScriptElement" => &["async", "crossOrigin", "defer", "href", "type"],
+        "SVGMPathElement" => &["href"],
+        "SVGClipPathElement" => &["clipPathUnits", "transform"],
+        // Primitives `fe*` — l'arène stocke le tag camelCase
+        // (`feGaussianBlur`) ; reflets d'attributs IDL.
+        "SVGFEBlendElement" => &["height", "in1", "in2", "mode", "result", "width", "x", "y"],
+        "SVGFEColorMatrixElement" => &[
+            "height", "in1", "result", "type", "values", "width", "x", "y",
+        ],
+        "SVGFEComponentTransferElement" | "SVGFETileElement" => {
+            &["height", "in1", "result", "width", "x", "y"]
+        }
+        "SVGFECompositeElement" => &[
+            "height", "in1", "in2", "k1", "k2", "k3", "k4", "operator", "result", "width", "x", "y",
+        ],
+        "SVGFEConvolveMatrixElement" => &[
+            "bias",
+            "divisor",
+            "edgeMode",
+            "height",
+            "in1",
+            "kernelMatrix",
+            "kernelUnitLengthX",
+            "kernelUnitLengthY",
+            "orderX",
+            "orderY",
+            "preserveAlpha",
+            "result",
+            "targetX",
+            "targetY",
+            "width",
+            "x",
+            "y",
+        ],
+        "SVGFEDiffuseLightingElement" => &[
+            "diffuseConstant",
+            "height",
+            "in1",
+            "kernelUnitLengthX",
+            "kernelUnitLengthY",
+            "result",
+            "surfaceScale",
+            "width",
+            "x",
+            "y",
+        ],
+        "SVGFEDisplacementMapElement" => &[
+            "height",
+            "in1",
+            "in2",
+            "result",
+            "scale",
+            "width",
+            "x",
+            "xChannelSelector",
+            "y",
+            "yChannelSelector",
+        ],
+        "SVGFEDistantLightElement" => &["azimuth", "elevation"],
+        "SVGFEDropShadowElement" => &[
+            "dx",
+            "dy",
+            "height",
+            "in1",
+            "result",
+            "stdDeviationX",
+            "stdDeviationY",
+            "width",
+            "x",
+            "y",
+        ],
+        "SVGFEFloodElement" | "SVGFEMergeElement" => &["height", "result", "width", "x", "y"],
+        "SVGFEFuncAElement" | "SVGFEFuncBElement" | "SVGFEFuncGElement" | "SVGFEFuncRElement" => &[
+            "amplitude",
+            "exponent",
+            "intercept",
+            "offset",
+            "slope",
+            "tableValues",
+            "type",
+        ],
+        "SVGFEGaussianBlurElement" => &[
+            "height",
+            "in1",
+            "result",
+            "stdDeviationX",
+            "stdDeviationY",
+            "width",
+            "x",
+            "y",
+        ],
+        "SVGFEImageElement" => &[
+            "crossOrigin",
+            "height",
+            "href",
+            "preserveAspectRatio",
+            "result",
+            "width",
+            "x",
+            "y",
+        ],
+        "SVGFEMergeNodeElement" => &["in1"],
+        "SVGFEMorphologyElement" => &[
+            "height", "in1", "operator", "radius", "result", "width", "x", "y",
+        ],
+        "SVGFEOffsetElement" => &["dx", "dy", "height", "in1", "result", "width", "x", "y"],
+        "SVGFEPointLightElement" => &["x", "y", "z"],
+        "SVGFESpecularLightingElement" => &[
+            "height",
+            "in1",
+            "kernelUnitLengthX",
+            "kernelUnitLengthY",
+            "result",
+            "specularConstant",
+            "specularExponent",
+            "surfaceScale",
+            "width",
+            "x",
+            "y",
+        ],
+        "SVGFESpotLightElement" => &[
+            "limitingConeAngle",
+            "pointsAtX",
+            "pointsAtY",
+            "pointsAtZ",
+            "specularExponent",
+            "x",
+            "y",
+            "z",
+        ],
+        "SVGFETurbulenceElement" => &[
+            "baseFrequency",
+            "baseFrequencyX",
+            "baseFrequencyY",
+            "height",
+            "numOctaves",
+            "result",
+            "seed",
+            "stitchTiles",
+            "type",
+            "width",
+            "x",
+            "y",
+        ],
         // `time.dateTime` = réflexion de l'attribut
         // `datetime` (html.elem BCD — le seul membre IDL
         // spécifique de `HTMLTimeElement`).
         "HTMLTimeElement" => &["dateTime"],
         _ => &["id", "className", "title"],
+    }
+}
+
+/// Méthodes IDL propres à une interface — posées sur le
+/// prototype via [`install_dom_proto_methods`] (JS-C559) : le
+/// trampoline redispatche sur le `this` de l'appel →
+/// `Host::invoke`. Les noms doivent aussi figurer dans
+/// [`TAGGED_METHODS`]/[`MEDIA_METHODS`] pour être réellement
+/// servis (présence proto sans dispatch = absence honnête).
+fn dom_methods(class: &str) -> &'static [&'static str] {
+    match class {
+        "HTMLCanvasElement" => &["getContext", "toDataURL", "toBlob", "captureStream"],
+        "HTMLFormElement" => &[
+            "submit",
+            "requestSubmit",
+            "reset",
+            "checkValidity",
+            "reportValidity",
+            "setCustomValidity",
+        ],
+        "HTMLTextAreaElement" => &[
+            "checkValidity",
+            "reportValidity",
+            "setCustomValidity",
+            "select",
+            "setSelectionRange",
+            "setRangeText",
+        ],
+        // JS-C561 — `stepUp`/`stepDown` réels (valeur ±
+        // `step`), `showPicker` → `NotSupportedError` (aucun
+        // picker OS en headless — honnête). `input` seul.
+        "HTMLInputElement" => &[
+            "checkValidity",
+            "reportValidity",
+            "setCustomValidity",
+            "select",
+            "setSelectionRange",
+            "setRangeText",
+            "stepUp",
+            "stepDown",
+            "showPicker",
+        ],
+        // `<table>` (JS-C561) — vraies mutations DOM des
+        // sections/lignes (spec HTMLTableElement).
+        "HTMLTableElement" => &[
+            "createCaption",
+            "deleteCaption",
+            "createTHead",
+            "deleteTHead",
+            "createTFoot",
+            "deleteTFoot",
+            "createTBody",
+            "insertRow",
+            "deleteRow",
+        ],
+        // `Element` (JS-C561) — members BCD restants :
+        // `getBoxQuads`/`pseudo` → réponses honnêtes (`[]`/
+        // `null`, pas de quads ni pseudo-arbre exposés) ;
+        // `requestPointerLock` → no-op (jamais de verrou) ;
+        // `startViewTransition` → transitions bornées (cb
+        // synchrone, promesses résolues).
+        "Element" => &[
+            "requestPointerLock",
+            "getBoxQuads",
+            "pseudo",
+            "startViewTransition",
+        ],
+        // `SVGAnimationElement` (JS-C561) — contrôle SMIL
+        // borné : horloge figée (`getCurrentTime`=0), durée
+        // lue sur `dur`, begin/end enregistrés sans effet.
+        "SVGAnimationElement" => &[
+            "beginElement",
+            "beginElementAt",
+            "endElement",
+            "endElementAt",
+            "getCurrentTime",
+            "getSimpleDuration",
+            "getStartTime",
+        ],
+        "HTMLButtonElement"
+        | "HTMLFieldSetElement"
+        | "HTMLOutputElement"
+        | "HTMLSelectElement"
+        | "HTMLObjectElement" => &["checkValidity", "reportValidity", "setCustomValidity"],
+        "HTMLDialogElement" => &["showModal", "show", "close"],
+        "HTMLImageElement" => &["decode"],
+        "HTMLSlotElement" => &["assignedElements", "assignedNodes"],
+        "HTMLMediaElement" | "HTMLVideoElement" | "HTMLAudioElement" => &[
+            "play",
+            "pause",
+            "load",
+            "fastSeek",
+            "canPlayType",
+            "getVideoPlaybackQuality",
+            "setSinkId",
+            "addTextTrack",
+            "captureStream",
+            "setMediaKeys",
+            "getStartDate",
+        ],
+        "HTMLElement" => &["showPopover", "hidePopover", "togglePopover"],
+        // `SVGSVGElement` (JS-C560) — fabriques `createSVG*`
+        // + contrôle d'animations SMIL (figées headless).
+        "SVGSVGElement" => &[
+            "createSVGPoint",
+            "createSVGMatrix",
+            "createSVGRect",
+            "createSVGLength",
+            "createSVGAngle",
+            "createSVGNumber",
+            "createSVGTransform",
+            "createSVGTransformFromMatrix",
+            "getElementById",
+            "checkIntersection",
+            "checkEnclosure",
+            "getIntersectionList",
+            "getEnclosureList",
+            "pauseAnimations",
+            "unpauseAnimations",
+            "deselectAll",
+            "getCurrentTime",
+            "setCurrentTime",
+        ],
+        _ => &[],
     }
 }
 
@@ -855,9 +1649,21 @@ fn dom_acc_get(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
         return Ok(Value::Undefined);
     };
     let prop = m.to_string();
-    let Value::Obj(id) = this else {
+    let Value::Obj(id) = this.clone() else {
         return Ok(Value::Undefined);
     };
+    // Getter canonique d'abord : `Host::get` sait servir les
+    // props calculées (décomposition URL d'ancre, `validity`,
+    // `labels`, `selectedIndex`, médias…) et les reflets
+    // `prop_to_attr_for` — `None` → reflet d'attribut brut
+    // (`dom_raw_get`, invariant `inputValueTracking` : on
+    // atteint l'attribut sans repasser par les props propres
+    // de l'élément).
+    if let Some(h) = e.host_of(id) {
+        if let Some(v) = h.get(e, this, &prop)? {
+            return Ok(v);
+        }
+    }
     let Some((dom, node)) = e.host_of(id).and_then(|h| {
         h.as_any()
             .downcast_ref::<NodeHost>()
@@ -879,9 +1685,24 @@ fn dom_acc_set(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
     };
     let prop = m.to_string();
     let v = arg(args, 1);
-    let Value::Obj(id) = this else {
+    let Value::Obj(id) = this.clone() else {
         return Ok(Value::Undefined);
     };
+    // Handlers `on*` (JS-C560) — la voie attribut est un
+    // cul-de-sac (`el.onplay = f` écrirait l'attribut `onplay`
+    // sans effet) : le setter IDL spec pose le handler — ici
+    // la propre expando que `on_handler_get` lit en priorité.
+    if prop.starts_with("on") && is_event_handler_prop(&prop) {
+        e.set_own(id, &prop, v, true);
+        return Ok(Value::Undefined);
+    }
+    // `Host::set` d'abord (props vivantes `value`/`checked`/
+    // médias…) ; `false` → reflet d'attribut ci-dessous.
+    if let Some(h) = e.host_of(id) {
+        if h.set(e, this, &prop, v.clone())? {
+            return Ok(Value::Undefined);
+        }
+    }
     let Some((dom, node)) = e.host_of(id).and_then(|h| {
         h.as_any()
             .downcast_ref::<NodeHost>()
@@ -931,6 +1752,69 @@ fn nav_sibling_node(dom: &DomRef, node: NodeId, key: &str) -> Option<NodeId> {
         sib = d.sibling(s, forward);
     }
     sib
+}
+
+/// Accesseur prototype générique « host-first » (JS-C560) —
+/// pour les protos des hôtes non-`NodeHost` (`Ctx2d`, …) dont
+/// le state vit dans le `Host` : `desc.get.call(ctx)` délègue
+/// à `Host::get`, `None` → `Undefined`. `bound[0]` = nom de
+/// prop, receveur = `this` de l'appel.
+fn host_acc_get(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
+    let Some(Value::Str(m)) = args.first() else {
+        return Ok(Value::Undefined);
+    };
+    let prop = m.to_string();
+    let Value::Obj(id) = this.clone() else {
+        return Ok(Value::Undefined);
+    };
+    if let Some(h) = e.host_of(id) {
+        if let Some(v) = h.get(e, this, &prop)? {
+            return Ok(v);
+        }
+    }
+    Ok(Value::Undefined)
+}
+
+/// Setter jumeau de [`host_acc_get`] — `bound[0]` = nom de
+/// prop, `args[1]` = valeur. `Host::set` refuse (`false`) →
+/// l'écriture est absorbée (les expando éventuels passent par
+/// la voie propre, jamais par cet accesseur de proto).
+fn host_acc_set(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
+    let Some(Value::Str(m)) = args.first() else {
+        return Ok(Value::Undefined);
+    };
+    let prop = m.to_string();
+    let v = arg(args, 1);
+    if let Value::Obj(id) = this.clone() {
+        if let Some(h) = e.host_of(id) {
+            h.set(e, this, &prop, v)?;
+        }
+    }
+    Ok(Value::Undefined)
+}
+
+/// Pose méthodes + accesseurs sur le proto `pid` d'une
+/// interface hôte non-DOM (JS-C560) — même mécanique que
+/// `install_dom_proto_methods`/`dom_acc_props` mais sans
+/// `NodeHost` : méthodes via `node_proto_method_trampoline`
+/// (`this` → `Host::invoke`), accesseurs via
+/// [`host_acc_get`]/[`host_acc_set`] (`this` → `Host::get`/
+/// `set`).
+pub(crate) fn install_host_proto_members(
+    e: &mut Engine,
+    pid: ObjId,
+    methods: &[&'static str],
+    props: &[&'static str],
+) {
+    install_dom_proto_methods(e, pid, methods);
+    for &prop in props {
+        let nm = e.str_val(prop);
+        let g = e.bound_native("host.get", host_acc_get, vec![nm.clone()]);
+        let s = e.bound_native("host.set", host_acc_set, vec![nm]);
+        if let Some(o) = e.heap.obj_mut(pid) {
+            o.set_accessor(prop, g, s, false);
+        }
+    }
 }
 
 /// Valeur **brute** d'une prop de navigation `Node`/`Element`
@@ -1551,24 +2435,21 @@ fn proto_accessor_shadows(e: &mut Engine, id: ObjId, key: &str) -> bool {
         }
         Some(_) => {}
     }
-    // Phase 1 — collecte des maillons + fold des shapes (borne 32
-    // — la chaîne DOM est courte, un cycle hostile ne boucle pas).
+    // Phase 1 — fold des shapes sans collecte (borne 32 — la
+    // chaîne DOM est courte, un cycle hostile ne boucle pas).
+    // §B-114 : les maillons ne sont re-marchés qu'au raté de
+    // mémo — le Vec quittait le chemin chaud (un alloc par
+    // accès de prop DOM).
     let mut cur = match e.heap.obj(id) {
         Some(o) => o.proto.clone(),
         None => return false,
     };
-    let mut links: Vec<ObjId> = Vec::new();
     let mut fold: u64 = 0x9E37_79B9_7F4A_7C15;
     for _ in 0..32 {
         let Value::Obj(cid) = cur else { break };
-        links.push(cid);
-        if let Some(o) = e.heap.obj(cid) {
-            fold = fold.wrapping_mul(0x1000_0000_01B3).wrapping_add(o.shape());
-            cur = o.proto.clone();
-        } else {
-            links.pop();
-            break;
-        }
+        let Some(o) = e.heap.obj(cid) else { break };
+        fold = fold.wrapping_mul(0x1000_0000_01B3).wrapping_add(o.shape());
+        cur = o.proto.clone();
     }
     // JS-C567 — le fold est une empreinte de CLÉS : remplacer
     // les côtés d'un accesseur existant en place ne le change
@@ -1594,8 +2475,20 @@ fn proto_accessor_shadows(e: &mut Engine, id: ObjId, key: &str) -> bool {
         return b;
     }
     crate::j17_tick(&crate::J17_SHM_MISS);
-    // Phase 2 — marche `find_own` (une seule fois par
-    // (chaîne-shape, clé) distincts).
+    // Phase 2 — re-marche `find_own` en collectant (une seule
+    // fois par (chaîne-shape, clé) distincts ; la chaîne est
+    // courte, la re-marche coûte moins que le Vec à chaud).
+    let mut cur = match e.heap.obj(id) {
+        Some(o) => o.proto.clone(),
+        None => return false,
+    };
+    let mut links: Vec<ObjId> = Vec::new();
+    for _ in 0..32 {
+        let Value::Obj(cid) = cur else { break };
+        let Some(o) = e.heap.obj(cid) else { break };
+        links.push(cid);
+        cur = o.proto.clone();
+    }
     let mut answer = false;
     for &cid in &links {
         if authored_acc(e, cid, key) {
@@ -1944,6 +2837,10 @@ impl Engine {
                 o.set_accessor(prop, g, s, false);
             }
         }
+        // Méthodes IDL propres de l'interface (JS-C559) —
+        // trampoline `this`→`Host::invoke`, gating identique à
+        // `TAGGED_METHODS`.
+        install_dom_proto_methods(self, pid, dom_methods(class));
     }
 }
 
@@ -3229,6 +4126,31 @@ fn listed_controls(d: &Dom, root: NodeId) -> Vec<NodeId> {
     out
 }
 
+/// `<label>` contrôlant `node` (JS-C559) : `for`≙`id` du
+/// champ **ou** label ancêtre. `None` hors éléments
+/// « labelable » (spec : input/button/meter/output/
+/// progress/select/textarea — `fieldset`/`label` exclus).
+fn control_labels(d: &Dom, node: NodeId) -> Option<Vec<NodeId>> {
+    if !matches!(
+        d.nodes[node as usize].tag.as_str(),
+        "button" | "input" | "meter" | "output" | "progress" | "select" | "textarea"
+    ) {
+        return None;
+    }
+    let id = d.attr(node, "id").map(str::to_string);
+    let mut v: Vec<NodeId> = d
+        .by_tag(d.root, "label")
+        .into_iter()
+        .filter(|&l| {
+            id.as_deref().is_some_and(|i| d.attr(l, "for") == Some(i))
+                || d.is_ancestor_or_self(l, node)
+        })
+        .collect();
+    v.sort_unstable();
+    v.dedup();
+    Some(v)
+}
+
 /// Objet `Attr` honnête (JS-C76 — snapshot nom/valeur + lien
 /// `ownerElement`) : pas un vrai nœud du miroir ; les mutations
 /// transitent par `attributes.setNamedItem`, qui relit `name`/
@@ -3262,6 +4184,7 @@ pub(crate) fn document_value(e: &mut Engine, dom: &DomRef) -> Value {
         fonts: RefCell::new(None),
         domain_override: RefCell::new(None),
         adopted_sheets: RefCell::new(None),
+        design_mode: RefCell::new(false),
     }))
 }
 
@@ -3279,6 +4202,7 @@ impl Engine {
             fonts: RefCell::new(None),
             domain_override: RefCell::new(None),
             adopted_sheets: RefCell::new(None),
+            design_mode: RefCell::new(false),
         }));
         // `#document` == `document` : listeners/`this`/`on*` au
         // sommet de la propagation résolvent sur l'objet document
@@ -3457,6 +4381,212 @@ impl Engine {
         let cw = self.native_fn("clearWatch", |_e, _t, _a| Ok(Value::Undefined));
         self.set_own(geop, "clearWatch", cw, true);
         self.set_own(nav, "geolocation", Value::Obj(geop), true);
+        // JS-C560 — surface `Navigator` fréquente (BCD/corpus
+        // réel) : collections vides honnêtes, états « desktop
+        // branché » low-fingerprint, méthodes à rejet
+        // `NotSupportedError` ou réponse triviale — jamais de
+        // faux succès ni d'objet promettant une feature
+        // absente (device APIs → prop `undefined` présente :
+        // `'x' in navigator` vrai pour la conformité IDL, la
+        // valeur falsy garde les feature-detects honnêtes).
+        let mimes = self.new_object();
+        self.set_own(mimes, "length", Value::Num(0.0), true);
+        self.add_method(mimes, "item", nav_plugin_null);
+        self.add_method(mimes, "namedItem", nav_plugin_null);
+        let tag = self.str_val("MimeTypeArray");
+        self.set_own(mimes, crate::interp::SYM_TO_STRING_TAG, tag, false);
+        self.set_own(nav, "mimeTypes", Value::Obj(mimes), true);
+        // `mediaSession` — état « rien ne joue ».
+        let ms = self.new_object();
+        self.set_own(ms, "metadata", Value::Null, true);
+        let ps = self.str_val("none");
+        self.set_own(ms, "playbackState", ps, true);
+        let noop = self.native_fn("setActionHandler", |_e, _t, _a| Ok(Value::Undefined));
+        self.set_own(ms, "setActionHandler", noop, true);
+        let tag = self.str_val("MediaSession");
+        self.set_own(ms, crate::interp::SYM_TO_STRING_TAG, tag, false);
+        self.set_own(nav, "mediaSession", Value::Obj(ms), true);
+        // `connection` (NetworkInformation) — desktop filaire
+        // plausible (valeurs génériques, low-fingerprint).
+        let con = self.new_object();
+        let et = self.str_val("4g");
+        self.set_own(con, "effectiveType", et, true);
+        let ty = self.str_val("unknown");
+        self.set_own(con, "type", ty, true);
+        self.set_own(con, "downlink", Value::Num(10.0), true);
+        self.set_own(con, "rtt", Value::Num(50.0), true);
+        self.set_own(con, "saveData", Value::Bool(false), true);
+        self.set_own(con, "onchange", Value::Null, true);
+        self.set_own(nav, "connection", Value::Obj(con), true);
+        // `storage` (StorageManager) — quota nul honnête (pas
+        // de persistance mesurable), `persist*` → `false`.
+        let sto = self.new_object();
+        let est = self.native_fn("estimate", |e: &mut Engine, _t, _a| {
+            let o = e.new_object();
+            e.set_own(o, "quota", Value::Num(0.0), true);
+            e.set_own(o, "usage", Value::Num(0.0), true);
+            let pid = e.new_promise();
+            e.resolve_promise(pid, Value::Obj(o));
+            Ok(Value::Obj(pid))
+        });
+        self.set_own(sto, "estimate", est, true);
+        for m in ["persist", "persisted"] {
+            let f = self.native_fn(m, |e: &mut Engine, _t, _a| {
+                let pid = e.new_promise();
+                e.resolve_promise(pid, Value::Bool(false));
+                Ok(Value::Obj(pid))
+            });
+            self.set_own(sto, m, f, true);
+        }
+        let gd = self.native_fn("getDirectory", nav_unsupported_reject);
+        self.set_own(sto, "getDirectory", gd, true);
+        let tag = self.str_val("StorageManager");
+        self.set_own(sto, crate::interp::SYM_TO_STRING_TAG, tag, false);
+        self.set_own(nav, "storage", Value::Obj(sto), true);
+        // `storageBuckets` (JS-C560) — Storage Buckets API :
+        // `open` rejette `NotSupportedError` (pas de buckets
+        // nommés), les requêtes d'état répondent les valeurs
+        // honnêtes de la session.
+        {
+            let sb = self.new_object();
+            for m in ["open", "setExpires"] {
+                let f = self.native_fn(m, nav_unsupported_reject);
+                self.set_own(sb, m, f, true);
+            }
+            let keys = self.native_fn("keys", |e: &mut Engine, _t, _a| {
+                let pid = e.new_promise();
+                let empty = e.new_array(Vec::new());
+                e.resolve_promise(pid, empty);
+                Ok(Value::Obj(pid))
+            });
+            self.set_own(sb, "keys", keys, true);
+            for m in ["delete", "persisted", "persist"] {
+                let f = self.native_fn(m, |e: &mut Engine, _t, _a| {
+                    let pid = e.new_promise();
+                    e.resolve_promise(pid, Value::Bool(false));
+                    Ok(Value::Obj(pid))
+                });
+                self.set_own(sb, m, f, true);
+            }
+            let est = self.native_fn("estimate", |e: &mut Engine, _t, _a| {
+                let pid = e.new_promise();
+                let o = e.new_object();
+                e.set_own(o, "quota", Value::Num(0.0), true);
+                e.set_own(o, "usage", Value::Num(0.0), true);
+                e.resolve_promise(pid, Value::Obj(o));
+                Ok(Value::Obj(pid))
+            });
+            self.set_own(sb, "estimate", est, true);
+            let dur = self.native_fn("durability", |e: &mut Engine, _t, _a| {
+                let pid = e.new_promise();
+                let s = e.str_val("strict");
+                e.resolve_promise(pid, s);
+                Ok(Value::Obj(pid))
+            });
+            self.set_own(sb, "durability", dur, true);
+            let tag = self.str_val("StorageBucketManager");
+            self.set_own(sb, crate::interp::SYM_TO_STRING_TAG, tag, false);
+            self.set_own(nav, "storageBuckets", Value::Obj(sb), true);
+        }
+        // `getAutoplayPolicy` — politique honnête : la
+        // lecture n'est pas restreinte à ce niveau (la gate
+        // est au claim des players).
+        let gap = self.native_fn("getAutoplayPolicy", |e: &mut Engine, _t, _a| {
+            Ok(e.str_val("allowed"))
+        });
+        self.set_own(nav, "getAutoplayPolicy", gap, true);
+        // Méthodes triviales honnêtes.
+        let vib = self.native_fn("vibrate", |_e, _t, _a| Ok(Value::Bool(false)));
+        self.set_own(nav, "vibrate", vib, true);
+        let gp = self.native_fn("getGamepads", |e: &mut Engine, _t, _a| {
+            Ok(e.new_array(Vec::new()))
+        });
+        self.set_own(nav, "getGamepads", gp, true);
+        let cs = self.native_fn("canShare", |_e, _t, _a| Ok(Value::Bool(false)));
+        self.set_own(nav, "canShare", cs, true);
+        let te = self.native_fn("taintEnabled", |_e, _t, _a| Ok(Value::Bool(false)));
+        self.set_own(nav, "taintEnabled", te, true);
+        let bat = self.native_fn("getBattery", |e: &mut Engine, _t, _a| {
+            // « secteur, pleine charge » — réponse honnête pour
+            // un desktop sans batterie visible.
+            let o = e.new_object();
+            e.set_own(o, "charging", Value::Bool(true), true);
+            e.set_own(o, "chargingTime", Value::Num(0.0), true);
+            e.set_own(o, "dischargingTime", Value::Num(f64::INFINITY), true);
+            e.set_own(o, "level", Value::Num(1.0), true);
+            let pid = e.new_promise();
+            e.resolve_promise(pid, Value::Obj(o));
+            Ok(Value::Obj(pid))
+        });
+        self.set_own(nav, "getBattery", bat, true);
+        let glm = self.native_fn("getLayoutMap", |e: &mut Engine, _t, _a| {
+            let gv = Value::Obj(e.global);
+            let map_f = e.read_prop(gv.clone(), gv, "Map")?;
+            let m = e.call_value_ctor(map_f.clone(), Value::Undefined, &[], map_f)?;
+            let pid = e.new_promise();
+            e.resolve_promise(pid, m);
+            Ok(Value::Obj(pid))
+        });
+        let kb = self.new_object();
+        self.set_own(kb, "getLayoutMap", glm, true);
+        let tag = self.str_val("Keyboard");
+        self.set_own(kb, crate::interp::SYM_TO_STRING_TAG, tag, false);
+        self.set_own(nav, "keyboard", Value::Obj(kb), true);
+        // Rejets `NotSupportedError` honnêtes — la promesse
+        // existe (feature-detect `typeof`/`in` vert), la
+        // fonctionnalité non.
+        for m in [
+            "share",
+            "setAppBadge",
+            "clearAppBadge",
+            "requestMediaKeySystemAccess",
+            "requestMIDIAccess",
+            "install",
+        ] {
+            let f = self.native_fn(m, nav_unsupported_reject);
+            self.set_own(nav, m, f, true);
+        }
+        // Enregistrement de protocoles : accepté en silence
+        // (effet hôte, hors moteur — même compromis que
+        // `javaEnabled`/`vibrate`).
+        for m in ["registerProtocolHandler", "unregisterProtocolHandler"] {
+            let f = self.native_fn(m, |_e, _t, _a| Ok(Value::Undefined));
+            self.set_own(nav, m, f, true);
+        }
+        // Namespaces de device-APIs non implémentées : prop
+        // présente (IDL) à `undefined` — conformité `in` sans
+        // promettre l'objet.
+        for k in [
+            "usb",
+            "serial",
+            "hid",
+            "bluetooth",
+            "xr",
+            "gpu",
+            "ml",
+            "ink",
+            "login",
+            "managed",
+            "preferences",
+            "presentation",
+            "scheduling",
+            "virtualKeyboard",
+            "windowControlsOverlay",
+            "wakeLock",
+            "locks",
+            "mediaCapabilities",
+            "audioSession",
+            "devicePosture",
+            "adAuctionComponents",
+            "cpuPerformance",
+            "deprecatedReplaceInURN",
+        ] {
+            self.set_own(nav, k, Value::Undefined, true);
+        }
+        // Valeurs typées des props triviales.
+        let osc = self.str_val("");
+        self.set_own(nav, "oscpu", osc, true);
+        self.set_own(nav, "pdfViewerEnabled", Value::Bool(false), true);
         self.set_own(g, "navigator", Value::Obj(nav), false);
 
         // `Worker` borné (JS-C29) — le constructeur est présent
@@ -3472,6 +4602,157 @@ impl Engine {
         self.set_own(g, "window", gv.clone(), false);
         self.set_own(g, "self", gv.clone(), false);
         self.set_own(g, "globalThis", gv, false);
+        // JS-C560 — surface `Window` fréquente manquante :
+        // handlers `on*` (GlobalEventHandlers + WindowEventHandlers
+        // — `'onload' in window` doit être vrai, valeur initiale
+        // `null` spec), coords écran desktop, barres chrome
+        // (BarProp `visible`), `viewport`, petits namespaces.
+        for h in EVENT_HANDLER_PROPS {
+            if self.heap.obj(g).is_some_and(|o| o.find(h).is_some()) {
+                continue;
+            }
+            self.set_own(g, h, Value::Null, false);
+        }
+        for k in ["screenX", "screenY", "screenLeft", "screenTop"] {
+            if self.heap.obj(g).is_some_and(|o| o.find(k).is_some()) {
+                continue;
+            }
+            self.set_own(g, k, Value::Num(0.0), false);
+        }
+        for b in [
+            "locationbar",
+            "menubar",
+            "personalbar",
+            "scrollbars",
+            "statusbar",
+            "toolbar",
+        ] {
+            if self.heap.obj(g).is_some_and(|o| o.find(b).is_some()) {
+                continue;
+            }
+            let bar = self.new_object();
+            self.set_own(bar, "visible", Value::Bool(true), true);
+            let tag = self.str_val("BarProp");
+            self.set_own(bar, crate::interp::SYM_TO_STRING_TAG, tag, false);
+            self.set_own(g, b, Value::Obj(bar), false);
+        }
+        if self
+            .heap
+            .obj(g)
+            .is_none_or(|o| o.find("viewport").is_none())
+        {
+            let vp = self.new_object();
+            // Dimensions = `innerWidth`/`innerHeight` déjà posées
+            // par l'embedder (avant `install_dom` — js_glue), à
+            // défaut le viewport desktop standard 1024×768.
+            let dim = |v: Option<Value>, fb: f64| match v {
+                Some(Value::Num(n)) if n.is_finite() && n > 0.0 => n,
+                _ => fb,
+            };
+            let w = dim(self.get_prop(g, "innerWidth"), 1024.0);
+            let h = dim(self.get_prop(g, "innerHeight"), 768.0);
+            self.set_own(vp, "width", Value::Num(w), true);
+            self.set_own(vp, "height", Value::Num(h), true);
+            self.set_own(vp, "scale", Value::Num(1.0), true);
+            self.set_own(vp, "offsetLeft", Value::Num(0.0), true);
+            self.set_own(vp, "offsetTop", Value::Num(0.0), true);
+            self.set_own(vp, "pageLeft", Value::Num(0.0), true);
+            self.set_own(vp, "pageTop", Value::Num(0.0), true);
+            for m in ["addEventListener", "removeEventListener", "dispatchEvent"] {
+                self.add_method(vp, m, et_add_listener);
+            }
+            let tag = self.str_val("VisualViewport");
+            self.set_own(vp, crate::interp::SYM_TO_STRING_TAG, tag, false);
+            self.set_own(g, "viewport", Value::Obj(vp), false);
+        }
+        // Petits namespaces window : `originAgentCluster`
+        // (isolé — la session l'est déjà), `credentialless`
+        // `false`, `crashReport` vide, `launchQueue` consommateur
+        // no-op, `documentPictureInPicture`/`queryLocalFonts`/
+        // `getScreenDetails`/`fetchLater` honnêtes par rejet ou
+        // résultat trivial.
+        self.set_own(g, "originAgentCluster", Value::Bool(true), false);
+        self.set_own(g, "credentialless", Value::Bool(false), false);
+        {
+            let cr = self.new_object();
+            let gr = self.native_fn("getReports", |e: &mut Engine, _t, _a| {
+                let pid = e.new_promise();
+                let empty = e.new_array(Vec::new());
+                e.resolve_promise(pid, empty);
+                Ok(Value::Obj(pid))
+            });
+            self.set_own(cr, "getReports", gr, true);
+            self.set_own(g, "crashReport", Value::Obj(cr), false);
+        }
+        {
+            let lq = self.new_object();
+            let sc = self.native_fn("setConsumer", |_e, _t, _a| Ok(Value::Undefined));
+            self.set_own(lq, "setConsumer", sc, true);
+            self.set_own(g, "launchQueue", Value::Obj(lq), false);
+        }
+        {
+            let dp = self.new_object();
+            let rw = self.native_fn("requestWindow", |e: &mut Engine, _t, _a| {
+                let pid = e.new_promise();
+                let msg = e.str_val("NotSupportedError");
+                e.reject_promise(pid, msg);
+                Ok(Value::Obj(pid))
+            });
+            self.set_own(dp, "requestWindow", rw, true);
+            self.set_own(g, "documentPictureInPicture", Value::Obj(dp), false);
+        }
+        {
+            // `PushManager` (JS-C560) — aucun service push :
+            // `subscribe`/`register` rejettent
+            // `NotSupportedError`, état `denied`, subscription
+            // `null` — réponses spec complètes, jamais muettes.
+            let pm = self.new_object();
+            let gs = self.native_fn("getSubscription", |e: &mut Engine, _t, _a| {
+                let pid = e.new_promise();
+                e.resolve_promise(pid, Value::Null);
+                Ok(Value::Obj(pid))
+            });
+            self.set_own(pm, "getSubscription", gs, true);
+            let ps = self.native_fn("permissionState", |e: &mut Engine, _t, _a| {
+                let pid = e.new_promise();
+                let d = e.str_val("denied");
+                e.resolve_promise(pid, d);
+                Ok(Value::Obj(pid))
+            });
+            self.set_own(pm, "permissionState", ps, true);
+            for m in ["subscribe", "register"] {
+                let f = self.native_fn(m, nav_unsupported_reject);
+                self.set_own(pm, m, f, true);
+            }
+            let enc = self.new_array(Vec::new());
+            self.set_own(pm, "supportedContentEncodings", enc, true);
+            let tag = self.str_val("PushManager");
+            self.set_own(pm, crate::interp::SYM_TO_STRING_TAG, tag, false);
+            self.set_own(g, "pushManager", Value::Obj(pm), false);
+        }
+        for (m, f) in [
+            (
+                "queryLocalFonts",
+                nav_unsupported_reject as crate::heap::NativeFn,
+            ),
+            ("getScreenDetails", nav_unsupported_reject),
+        ] {
+            let v = self.native_fn(m, f);
+            self.set_own(g, m, v, false);
+        }
+        // Méthodes de gestion de fenêtre — hôte-only, no-op
+        // tolérant (le moteur ne pilote pas l'OS).
+        for m in [
+            "maximize",
+            "minimize",
+            "restore",
+            "requestResize",
+            "setResizable",
+            "fetchLater",
+        ] {
+            let v = self.native_fn(m, |_e, _t, _a| Ok(Value::Undefined));
+            self.set_own(g, m, v, false);
+        }
         // `top`/`parent`/`frames`/`length`/`closed`/`postMessage` —
         // accessors résolvant leur contexte depuis `this` (JS-C78) ;
         // sans parent, `top`/`parent`/`frames` ≙ la fenêtre
@@ -3537,6 +4818,40 @@ impl Engine {
             let np = self.new_object();
             let tag = self.str_val("Navigation");
             self.set_own(np, crate::interp::SYM_TO_STRING_TAG, tag, false);
+            // Membres IDL sur le proto (JS-C560 : `'navigate' in
+            // Navigation.prototype` — feature-detect spec) ;
+            // le trampoline lit/dispatche via le host de `this`.
+            install_host_proto_members(
+                self,
+                np,
+                &[
+                    "entries",
+                    "navigate",
+                    "back",
+                    "forward",
+                    "reload",
+                    "traverseTo",
+                    "updateCurrentEntry",
+                ],
+                &[
+                    "currentEntry",
+                    "canGoBack",
+                    "canGoForward",
+                    "transition",
+                    "activation",
+                ],
+            );
+            // Handlers `on*` en data props `null` (spec IDL) —
+            // écrire `navigation.onnavigate = f` tombe en propre
+            // d'instance, pas dans un setter absorbant.
+            for h in [
+                "onnavigate",
+                "onnavigateerror",
+                "onnavigatesuccess",
+                "oncurrententrychange",
+            ] {
+                self.set_own(np, h, Value::Null, true);
+            }
             // `Navigation.prototype` → `EventTarget.prototype` :
             // chaînage effectué dans la boucle protos DOM plus bas
             // (`EventTarget` est installé après ce bloc).
@@ -3558,6 +4873,75 @@ impl Engine {
                 configurable: true,
             },
         );
+        // Interfaces satellites de l'API Navigation (JS-C560)
+        // — ctors « illegal constructor » (spec : objets
+        // produits par l'agent, jamais par `new`), protos
+        // porteurs des membres IDL pour le feature-detect.
+        // Les méthodes sans orchestrateur gardent une réponse
+        // honnête : `getState` lit l'état partagé, les
+        // `PreloadManager` résolvent (no-op borné).
+        for (name, props, methods) in [
+            (
+                "NavigationHistoryEntry",
+                &["url", "key", "id", "index", "sameDocument", "ondispose"][..],
+                &["getState"][..],
+            ),
+            (
+                "NavigationDestination",
+                &["url", "key", "id", "index", "sameDocument"][..],
+                &["getState"][..],
+            ),
+            (
+                "NavigationActivation",
+                &["entry", "from", "navigationType"][..],
+                &[][..],
+            ),
+            (
+                "NavigationTransition",
+                &["committed", "finished", "from", "to", "navigationType"][..],
+                &[][..],
+            ),
+            (
+                "NavigationPrecommitController",
+                &[][..],
+                &["addHandler", "redirect"][..],
+            ),
+            (
+                "NavigationPreloadManager",
+                &[][..],
+                &["enable", "disable", "setHeaderValue", "getState"][..],
+            ),
+        ] {
+            let f = self.illegal_ctor_bound(name);
+            if let Value::Obj(fid) = f {
+                let p = self.new_object();
+                let tag = self.str_val(name);
+                self.set_own(p, crate::interp::SYM_TO_STRING_TAG, tag, false);
+                for &k in props {
+                    let v = if k.starts_with("on") {
+                        Value::Null
+                    } else {
+                        Value::Undefined
+                    };
+                    self.set_own(p, k, v, true);
+                }
+                for &m in methods {
+                    let nv: crate::heap::NativeFn = match m {
+                        "getState" if name == "NavigationPreloadManager" => nav_promise_object,
+                        "getState" => nav_entry_get_state,
+                        // `addHandler`/`redirect`/`enable`/
+                        // `disable`/`setHeaderValue` —
+                        // promesses résolues (préchargement
+                        // no-op borné : rien à instrumenter).
+                        _ => nav_promise_undefined,
+                    };
+                    let fv = self.native_fn(m, nv);
+                    self.set_own(p, m, fv, true);
+                }
+                self.set_own(fid, "prototype", Value::Obj(p), false);
+            }
+            self.set_own(g, name, f, false);
+        }
 
         // JS-7f window surface — dialogs, screen geometry.
         // (`console` is installed engine-wide in `builtins::install`
@@ -3584,6 +4968,23 @@ impl Engine {
         self.add_method(css, "supports", css_supports);
         self.add_method(css, "registerProperty", mql_noop);
         self.add_method(css, "escape", css_escape);
+        // `CSS.<unit>(v)` — factories numériques Typed OM
+        // (css-typed-om §4.3). Pas de `CSSUnitValue` complet :
+        // objet plat `{value, unit}` + `toString()`, surface
+        // lecture honnête — chaque factory porte son unité liée.
+        for unit in CSS_UNIT_NAMES {
+            let uv = self.str_val(*unit);
+            let f = self.bound_native("CSS.unit", css_unit_factory, vec![uv]);
+            self.set_own(css, unit, f, false);
+        }
+        // `CSS.highlights` — `HighlightRegistry` maplike ; un
+        // `Map` honnête suffit (set/get/has/delete/forEach).
+        let gv = Value::Obj(g);
+        if let Ok(map_f) = self.read_prop(gv.clone(), gv, "Map") {
+            if let Ok(m) = self.call_value_ctor(map_f.clone(), Value::Undefined, &[], map_f) {
+                self.set_own(css, "highlights", m, false);
+            }
+        }
         self.set_own(g, "CSS", Value::Obj(css), false);
         // `Node` — constructeur (inconstructible) portant les
         // constantes `*_NODE` / `DOCUMENT_POSITION_*` ; `prototype`
@@ -3794,6 +5195,37 @@ impl Engine {
             "SVGAnimateMotionElement",
             "SVGAnimateTransformElement",
             "SVGSetElement",
+            "SVGScriptElement",
+            "SVGMPathElement",
+            // Primitives de filtre `fe*` (JS-C559, Pareto
+            // `api`) — ctors non constructibles (même voie
+            // `illegal_ctor`), proto chaîné `SVGElement` par
+            // le fallback `_ if name.starts_with("SVG")`.
+            "SVGFEBlendElement",
+            "SVGFEColorMatrixElement",
+            "SVGFEComponentTransferElement",
+            "SVGFECompositeElement",
+            "SVGFEConvolveMatrixElement",
+            "SVGFEDiffuseLightingElement",
+            "SVGFEDistantLightElement",
+            "SVGFEDisplacementMapElement",
+            "SVGFEDropShadowElement",
+            "SVGFEFloodElement",
+            "SVGFEFuncAElement",
+            "SVGFEFuncBElement",
+            "SVGFEFuncGElement",
+            "SVGFEFuncRElement",
+            "SVGFEGaussianBlurElement",
+            "SVGFEImageElement",
+            "SVGFEMergeElement",
+            "SVGFEMergeNodeElement",
+            "SVGFEMorphologyElement",
+            "SVGFEOffsetElement",
+            "SVGFEPointLightElement",
+            "SVGFESpecularLightingElement",
+            "SVGFESpotLightElement",
+            "SVGFETileElement",
+            "SVGFETurbulenceElement",
             // Famille `SVGAnimated*` (§B-122) — interfaces
             // non-element, testées par `instanceof` dans les
             // libs (Swiper `r instanceof SVGAnimatedString`
@@ -4072,6 +5504,47 @@ impl Engine {
             self.add_root(proto);
         }
         self.set_own(g, "VTTCue", ctor, false);
+        // `TextTrackCue` (JS-C560) — ctor spec partageant la
+        // grammaire `(start, end, text)` ; proto dédié portant
+        // les membres cue (`track` = la piste d'appartenance,
+        // `null` hors insertion).
+        let ttc = self.native_fn("TextTrackCue", texttrackcue_ctor);
+        if let Value::Obj(fid) = ttc.clone() {
+            let proto = self.new_object();
+            for (k, v) in [
+                ("track", Value::Null),
+                ("id", self.str_val("")),
+                ("startTime", Value::Num(0.0)),
+                ("endTime", Value::Num(0.0)),
+                ("pauseOnExit", Value::Bool(false)),
+                ("onenter", Value::Null),
+                ("onexit", Value::Null),
+            ] {
+                self.set_own(proto, k, v, true);
+            }
+            self.set_own(fid, "prototype", Value::Obj(proto), false);
+            self.set_own(fid, "length", Value::Num(3.0), false);
+            if let Some(o) = self.heap.obj_mut(proto) {
+                o.set_own("constructor", ttc.clone(), false);
+            }
+            self.add_root(fid);
+            self.add_root(proto);
+        }
+        self.set_own(g, "TextTrackCue", ttc, false);
+        // Chaînage spec `VTTCue.prototype → TextTrackCue.prototype`
+        // (`vttcue instanceof TextTrackCue`).
+        if let (Some(Value::Obj(vc)), Some(Value::Obj(tc))) =
+            (self.get_prop(g, "VTTCue"), self.get_prop(g, "TextTrackCue"))
+        {
+            if let (Some(Value::Obj(vp)), Some(tp @ Value::Obj(_))) = (
+                self.get_prop(vc, "prototype"),
+                self.get_prop(tc, "prototype"),
+            ) {
+                if let Some(o) = self.heap.obj_mut(vp) {
+                    o.set_proto(tp);
+                }
+            }
+        }
         // `HTMLElement.prototype` est posé AVANT `Element`
         // (install manuelle ci-dessus) — chaînage WebIDL
         // `HTMLElement.prototype → Element.prototype` ici, une
@@ -4231,15 +5704,50 @@ impl Engine {
             self.set_own(fid, "prototype", Value::Obj(p), false);
         }
         self.set_own(g, "DOMParser", f, false);
+        // `AbstractRange` (JS-C556) — interface de base non
+        // constructible (« Illegal constructor ») dont le
+        // prototype partagé porte les accesseurs bornes et
+        // coiffe `Range.prototype`/`StaticRange.prototype`.
+        let af = self.illegal_ctor_bound("AbstractRange");
+        if let Value::Obj(fid) = af {
+            let p = crate::misc_apis::abstract_range_proto(self);
+            self.set_own(fid, "prototype", Value::Obj(p), false);
+            self.set_own(p, "constructor", af.clone(), false);
+        }
+        self.set_own(g, "AbstractRange", af, false);
         // `Range` — constructible spec (CAP-182, arc édition) :
         // `new Range()` → frontières `(document,0)` mutables,
-        // `Selection.addRange` le consomme directement.
+        // `Selection.addRange` le consomme directement. Le
+        // `prototype` du ctor est le proto **partagé** des
+        // instances (JS-C556 : `r instanceof Range` exige
+        // l'identité — un `new_object()` dédié la cassait).
         let f = self.native_fn("Range", crate::misc_apis::range_ctor);
         if let Value::Obj(fid) = f {
-            let p = self.new_object();
+            let p = crate::misc_apis::range_proto(self);
             self.set_own(fid, "prototype", Value::Obj(p), false);
+            self.set_own(p, "constructor", f.clone(), false);
+            // Constantes spec `compareBoundaryPoints` — posées
+            // sur le ctor ET le prototype (héritage own+proto).
+            for (k, n) in [
+                ("START_TO_START", 0.0),
+                ("START_TO_END", 1.0),
+                ("END_TO_END", 2.0),
+                ("END_TO_START", 3.0),
+            ] {
+                self.set_own_attrs(fid, k, Value::Num(n), crate::heap::PropAttrs::FIXED);
+                self.set_own_attrs(p, k, Value::Num(n), crate::heap::PropAttrs::FIXED);
+            }
         }
         self.set_own(g, "Range", f, false);
+        // `StaticRange` (JS-C556) — constructible spec depuis un
+        // dict `StaticRangeInit` ; bornes gelées à vie.
+        let sf = self.native_fn("StaticRange", crate::misc_apis::static_range_ctor);
+        if let Value::Obj(fid) = sf {
+            let p = crate::misc_apis::static_range_proto(self);
+            self.set_own(fid, "prototype", Value::Obj(p), false);
+            self.set_own(p, "constructor", sf.clone(), false);
+        }
+        self.set_own(g, "StaticRange", sf, false);
         // `CSSStyleSheet` — constructible spec (CAP-183) :
         // feuille stockée côté miroir (`insertRule`/`deleteRule`/
         // `replace`/`replaceSync` — cascade = chantier session,
@@ -4417,6 +5925,12 @@ impl Engine {
             // modernes avant `DOMParser`).
             let f = self.native_fn("parseHTMLUnsafe", document_parse_html_unsafe);
             self.set_own(cid, "parseHTMLUnsafe", f, true);
+            // `Document.parseHTML(html)` (JS-C560) — variante
+            // « assainie » : pas de `Sanitizer` embarqué, la
+            // sanisation revient à ne rien retirer — même rail
+            // que `parseHTMLUnsafe`, documenté.
+            let f = self.native_fn("parseHTML", document_parse_html_unsafe);
+            self.set_own(cid, "parseHTML", f, true);
         }
         // `Event` + famille — constructibles : l'objet produit est
         // dispatchable (`type`/`bubbles` lus par `dispatchEvent`).
@@ -4455,6 +5969,8 @@ impl Engine {
             event_proto = p;
         }
         self.set_own(g, "Event", event_f, false);
+        let mut ui_proto: Option<Value> = None;
+        let mut mouse_proto: Option<Value> = None;
         for name in [
             "CustomEvent",
             "UIEvent",
@@ -4475,6 +5991,10 @@ impl Engine {
             "HashChangeEvent",
             "PopStateEvent",
             "PromiseRejectionEvent",
+            // `TrackEvent` (`addtrack`/`removetrack` des
+            // `*TrackList`) — `event_ctor` générique, membre
+            // `track` posé par l'émetteur.
+            "TrackEvent",
             // CAP-178 — interfaces événement mesurées absentes
             // (sonde `_census_calls`) : init copié par le rail
             // `event_ctor` générique (`message.data`,
@@ -4483,16 +6003,26 @@ impl Engine {
             "MessageEvent",
             "StorageEvent",
             "CloseEvent",
+            // `NavigationCurrentEntryChangeEvent` (JS-C560) —
+            // init `from`/`navigationType` copié par le rail
+            // générique ; les deux membres posés sur le proto.
+            "NavigationCurrentEntryChangeEvent",
+            // `NavigateEvent` — API Navigation : init copié,
+            // membres IDL sur le proto + méthodes
+            // `intercept`/`scroll`/`canIntercept`.
+            "NavigateEvent",
+            // `SecurityPolicyViolationEvent` — rapport CSP :
+            // init copié, champs de rapport sur le proto.
+            "SecurityPolicyViolationEvent",
         ] {
             // `MouseEvent` & sous-classes : défauts
             // `MouseEventInit` spec (`button`/`buttons`/coords
             // = 0) — sans `button` React Router laisse tomber
             // les clics `<Link>` (son garde `event.button ===
             // 0` rate sur `undefined`).
-            let ctor = if matches!(
-                name,
-                "MouseEvent" | "PointerEvent" | "WheelEvent" | "DragEvent"
-            ) {
+            let ctor = if name == "PointerEvent" {
+                pointer_event_ctor as crate::heap::NativeFn
+            } else if matches!(name, "MouseEvent" | "WheelEvent" | "DragEvent") {
                 mouse_event_ctor as crate::heap::NativeFn
             } else if name == "CustomEvent" {
                 custom_event_ctor as crate::heap::NativeFn
@@ -4502,9 +6032,84 @@ impl Engine {
             let f = self.native_fn(name, ctor);
             if let Value::Obj(fid) = f {
                 let p = Value::Obj(self.new_object());
+                // Chaînage WebIDL des interfaces événement :
+                // `PointerEvent`/`WheelEvent`/`DragEvent`
+                // → `MouseEvent`, celui-ci et les `UIEvent`
+                // → `UIEvent.prototype`, le reste → `Event`.
+                let parent = match name {
+                    "MouseEvent" | "KeyboardEvent" | "FocusEvent" | "InputEvent" | "TouchEvent"
+                    | "CompositionEvent" => ui_proto.clone().unwrap_or_else(|| event_proto.clone()),
+                    "PointerEvent" | "WheelEvent" | "DragEvent" => {
+                        mouse_proto.clone().unwrap_or_else(|| event_proto.clone())
+                    }
+                    _ => event_proto.clone(),
+                };
                 if let Value::Obj(pid) = p {
                     if let Some(o) = self.heap.obj_mut(pid) {
-                        o.set_proto(event_proto.clone());
+                        o.set_proto(parent);
+                    }
+                }
+                if name == "UIEvent" {
+                    ui_proto = Some(p.clone());
+                }
+                if name == "MouseEvent" {
+                    mouse_proto = Some(p.clone());
+                }
+                if name == "NavigationCurrentEntryChangeEvent" {
+                    if let Value::Obj(pid) = p {
+                        self.set_own(pid, "from", Value::Null, true);
+                        self.set_own(pid, "navigationType", Value::Undefined, true);
+                    }
+                }
+                if name == "NavigateEvent" {
+                    if let Value::Obj(pid) = p {
+                        for k in [
+                            "destination",
+                            "navigationType",
+                            "signal",
+                            "info",
+                            "downloadRequest",
+                            "formData",
+                            "hashChange",
+                            "hasUAVisualTransition",
+                            "sourceElement",
+                            "userInitiated",
+                        ] {
+                            self.set_own(pid, k, Value::Undefined, true);
+                        }
+                        for m in ["intercept", "scroll"] {
+                            let f = self.native_fn(m, mql_noop);
+                            self.set_own(pid, m, f, true);
+                        }
+                        // `canIntercept()` → `Promise<false>` :
+                        // pas d'interception de navigation
+                        // dans ce moteur (réponse honnête).
+                        let f = self.native_fn("canIntercept", |e: &mut Engine, _t, _a| {
+                            let pid = e.new_promise();
+                            e.resolve_promise(pid, Value::Bool(false));
+                            Ok(Value::Obj(pid))
+                        });
+                        self.set_own(pid, "canIntercept", f, true);
+                    }
+                }
+                if name == "SecurityPolicyViolationEvent" {
+                    if let Value::Obj(pid) = p {
+                        for k in [
+                            "blockedURI",
+                            "columnNumber",
+                            "disposition",
+                            "documentURI",
+                            "effectiveDirective",
+                            "lineNumber",
+                            "originalPolicy",
+                            "referrer",
+                            "sample",
+                            "sourceFile",
+                            "statusCode",
+                            "violatedDirective",
+                        ] {
+                            self.set_own(pid, k, Value::Undefined, true);
+                        }
                     }
                 }
                 self.set_own(fid, "prototype", p, false);
@@ -4593,6 +6198,10 @@ impl Engine {
         // checkpoint microtask (`observers.rs`). Mesuré
         // github.com : `new IntersectionObserver(cb)` (JS-C56).
         self.install_observers();
+        // `Observable` (JS-C560 — proposal TC39, Chrome ≥135) :
+        // primitive réactive réelle (subscribe + opérateurs +
+        // terminateurs promis), pas un stub de détection.
+        crate::misc_apis::install_observable(self);
         // `customElements` — registre adossé au `Dom` :
         // `define`/`get`/`getName`/`whenDefined`/`upgrade` avec
         // upgrade des éléments et callbacks de cycle de vie
@@ -4785,6 +6394,27 @@ impl Engine {
             "PublicKeyCredential",
             "CanvasRenderingContext2D",
             "WebGLRenderingContext",
+            // JS-C560 — interfaces à fabrique : proto IDL
+            // complet (feature-detect `in`), instances
+            // produites ailleurs (attachInternals, states,
+            // addTextTrack, media.error, sheet.media, ctx
+            // offscreen).
+            "OffscreenCanvasRenderingContext2D",
+            "ElementInternals",
+            "CustomStateSet",
+            "TextTrack",
+            "TextTrackList",
+            "MediaError",
+            "MediaList",
+            // JS-C560 — statut résolu par `permissions.query`
+            // (proto IDL `name`/`state`/`onchange`).
+            "PermissionStatus",
+            // `ValidityState` (`internals.validity`,
+            // `el.validity`) et `TextMetrics`
+            // (`ctx.measureText`) — protos IDL des objets
+            // produits ailleurs.
+            "ValidityState",
+            "TextMetrics",
         ] {
             // JS-C461 — `Animation`/`KeyframeEffect` ont un
             // vrai ctor (le stub « illegal constructor »
@@ -4802,6 +6432,151 @@ impl Engine {
                 match name {
                     "Animation" => self.misc.anim_proto = Some(p),
                     "KeyframeEffect" => self.misc.kfe_proto = Some(p),
+                    "CanvasRenderingContext2D" | "OffscreenCanvasRenderingContext2D" => {
+                        // JS-C560 — proto complet de l'interface
+                        // (BCD `api` ~73 membres) : méthodes
+                        // `invoke` redispatchées via le
+                        // trampoline `this`→`Host::invoke` (le
+                        // ctx réel est un `Ctx2dHost`) +
+                        // accesseurs `this`→`Host::get`/`set`
+                        // (props d'état `CanvasState`).
+                        install_host_proto_members(self, p, CTX2D_PROTO_METHODS, CTX2D_PROTO_PROPS);
+                    }
+                    "ElementInternals" => {
+                        install_host_proto_members(self, p, EI_PROTO_METHODS, EI_PROTO_PROPS);
+                    }
+                    "CustomStateSet" => {
+                        install_host_proto_members(self, p, CSS_PROTO_METHODS, CSS_PROTO_PROPS);
+                    }
+                    "TextTrack" => {
+                        install_host_proto_members(self, p, TT_PROTO_METHODS, TT_PROTO_PROPS);
+                    }
+                    "TextTrackList" => {
+                        install_host_proto_members(self, p, TTL_PROTO_METHODS, TTL_PROTO_PROPS);
+                    }
+                    "MediaError" => {
+                        install_host_proto_members(self, p, &[], ME_PROTO_PROPS);
+                        for (k, n) in [
+                            ("MEDIA_ERR_ABORTED", 1.0),
+                            ("MEDIA_ERR_NETWORK", 2.0),
+                            ("MEDIA_ERR_DECODE", 3.0),
+                            ("MEDIA_ERR_SRC_NOT_SUPPORTED", 4.0),
+                        ] {
+                            self.set_own(p, k, Value::Num(n), false);
+                            self.set_own(fid, k, Value::Num(n), false);
+                        }
+                    }
+                    "MediaList" => {
+                        install_host_proto_members(self, p, ML_PROTO_METHODS, ML_PROTO_PROPS);
+                    }
+                    "PerformanceResourceTiming" => {
+                        // Attributs IDL de timing réseau —
+                        // `in`-visibles (feature-detect spec) ;
+                        // `undefined` au proto : les entrées
+                        // portent les timestamps quand le
+                        // réseau les fournit.
+                        for k in [
+                            "connectEnd",
+                            "connectStart",
+                            "contentEncoding",
+                            "contentType",
+                            "decodedBodySize",
+                            "deliveryType",
+                            "domainLookupEnd",
+                            "domainLookupStart",
+                            "encodedBodySize",
+                            "fetchStart",
+                            "finalResponseHeadersStart",
+                            "firstInterimResponseStart",
+                            "initiatorType",
+                            "nextHopProtocol",
+                            "redirectEnd",
+                            "redirectStart",
+                            "renderBlockingStatus",
+                            "requestStart",
+                            "responseEnd",
+                            "responseStart",
+                            "responseStatus",
+                            "secureConnectionStart",
+                            "serverTiming",
+                            "transferSize",
+                            "workerCacheLookupStart",
+                            "workerFinalRouterSource",
+                            "workerMatchedRouterSource",
+                            "workerRouterEvaluationStart",
+                            "workerStart",
+                        ] {
+                            self.set_own(p, k, Value::Undefined, true);
+                        }
+                        let tj = self.native_fn("toJSON", perf_entry_to_json);
+                        self.set_own(p, "toJSON", tj, true);
+                    }
+                    "PermissionStatus" => {
+                        for (k, v) in [
+                            ("name", Value::Undefined),
+                            ("state", Value::Undefined),
+                            ("onchange", Value::Null),
+                        ] {
+                            self.set_own(p, k, v, true);
+                        }
+                    }
+                    "ValidityState" => {
+                        for k in [
+                            "badInput",
+                            "customError",
+                            "patternMismatch",
+                            "rangeOverflow",
+                            "rangeUnderflow",
+                            "stepMismatch",
+                            "tooLong",
+                            "tooShort",
+                            "typeMismatch",
+                            "valid",
+                            "valueMissing",
+                        ] {
+                            self.set_own(p, k, Value::Undefined, true);
+                        }
+                    }
+                    "TextMetrics" => {
+                        for k in [
+                            "actualBoundingBoxAscent",
+                            "actualBoundingBoxDescent",
+                            "actualBoundingBoxLeft",
+                            "actualBoundingBoxRight",
+                            "alphabeticBaseline",
+                            "emHeightAscent",
+                            "emHeightDescent",
+                            "fontBoundingBoxAscent",
+                            "fontBoundingBoxDescent",
+                            "hangingBaseline",
+                            "ideographicBaseline",
+                            "width",
+                        ] {
+                            self.set_own(p, k, Value::Undefined, true);
+                        }
+                    }
+                    "PerformanceNavigationTiming" => {
+                        for k in [
+                            "activationStart",
+                            "confidence",
+                            "criticalCHRestart",
+                            "domComplete",
+                            "domContentLoadedEventEnd",
+                            "domContentLoadedEventStart",
+                            "domInteractive",
+                            "loadEventEnd",
+                            "loadEventStart",
+                            "notRestoredReasons",
+                            "redirectCount",
+                            "type",
+                            "unloadEventEnd",
+                            "unloadEventStart",
+                        ] {
+                            self.set_own(p, k, Value::Undefined, true);
+                        }
+                        let tj = self.native_fn("toJSON", perf_entry_to_json);
+                        self.set_own(p, "toJSON", tj, true);
+                    }
                     _ => {}
                 }
                 self.set_own(fid, "prototype", Value::Obj(p), false);
@@ -4918,6 +6693,11 @@ impl Engine {
         for (name, f2) in [
             ("DOMPoint", dompoint_ctor as crate::heap::NativeFn),
             ("DOMMatrix", dommatrix_ctor),
+            // `DOMMatrixReadOnly` — même fabrique (les objets
+            // plats portent déjà tout le read-only set ; la
+            // distinction spec mutateur/lecture seule n'est
+            // pas modelisée — dégradation documentée).
+            ("DOMMatrixReadOnly", dommatrix_ctor),
         ] {
             let f = self.native_fn(name, f2);
             if let Value::Obj(fid) = f {
@@ -4925,6 +6705,35 @@ impl Engine {
                 self.set_own(fid, "prototype", Value::Obj(p), false);
             }
             self.set_own(g, name, f, false);
+        }
+        // Statiques `DOMMatrix*`/`DOMPoint` (JS-C560 —
+        // `fromMatrix`/`fromFloat*Array`/`fromPoint` lus par
+        // les transforms libs).
+        for (cn, k, sf) in [
+            (
+                "DOMMatrix",
+                "fromMatrix",
+                dommatrix_ctor as crate::heap::NativeFn,
+            ),
+            ("DOMMatrix", "fromFloat32Array", dommatrix_from_float_array),
+            ("DOMMatrix", "fromFloat64Array", dommatrix_from_float_array),
+            ("DOMMatrixReadOnly", "fromMatrix", dommatrix_ctor),
+            (
+                "DOMMatrixReadOnly",
+                "fromFloat32Array",
+                dommatrix_from_float_array,
+            ),
+            (
+                "DOMMatrixReadOnly",
+                "fromFloat64Array",
+                dommatrix_from_float_array,
+            ),
+            ("DOMPoint", "fromPoint", dompoint_from_point),
+        ] {
+            if let Some(Value::Obj(cid)) = self.get_prop(g, cn) {
+                let sv = self.native_fn(k, sf);
+                self.set_own(cid, k, sv, false);
+            }
         }
         // `ImageData` — `{width, height, data:Uint8ClampedArray}`
         // spec (ctor 2 signatures : `(w,h)` / `(u8c,w,h?)`).
@@ -4952,6 +6761,53 @@ impl Engine {
             self.set_own(fid, "prototype", Value::Obj(p), false);
         }
         self.set_own(g, "OffscreenCanvas", oc_f, false);
+        // `Touch`/`TouchList`/`TouchEvent` support (JS-C560)
+        // — `new Touch(init)` copie le `TouchInit` (rails
+        // `touch_ctor`) ; `TouchList` = collection read-only
+        // (`item(i)`/`length`), posée vide par le navigateur
+        // headless — dégradation honnête (aucun pointeur
+        // tactile n'est produit).
+        let t_f = self.native_fn("Touch", touch_ctor);
+        if let Value::Obj(fid) = t_f {
+            let p = self.new_object();
+            self.set_own(fid, "prototype", Value::Obj(p), false);
+        }
+        self.set_own(g, "Touch", t_f, false);
+        let tl_f = self.native_fn("TouchList", |e, _t, _a| {
+            Err(e.type_error("illegal constructor"))
+        });
+        if let Value::Obj(fid) = tl_f {
+            let p = self.new_object();
+            for m in ["item", "identifiedTouch"] {
+                let f = self.native_fn(m, |_e, _t, _a| Ok(Value::Null));
+                self.set_own(p, m, f, true);
+            }
+            self.set_own(p, "length", Value::Num(0.0), true);
+            self.set_own(fid, "prototype", Value::Obj(p), false);
+        }
+        self.set_own(g, "TouchList", tl_f, false);
+        // `URLPattern` (JS-C560) — ctor réel (chaîne résolue
+        // via `resolve_url` + `url_parts`, ou dict de
+        // composants) ; `test`/`exec` segmentiels bornés
+        // (jokers `*`/`:nom`, pas la grammaire path-to-regexp
+        // complète — borne documentée sur `urlpat_match`).
+        let up_f = self.native_fn("URLPattern", urlpattern_ctor);
+        if let Value::Obj(fid) = up_f {
+            let p = self.new_object();
+            let t = self.native_fn("test", urlpattern_test);
+            self.set_own(p, "test", t, true);
+            let x = self.native_fn("exec", urlpattern_exec);
+            self.set_own(p, "exec", x, true);
+            for k in [
+                "protocol", "username", "password", "hostname", "port", "pathname", "search",
+                "hash",
+            ] {
+                self.set_own(p, k, Value::Undefined, true);
+            }
+            self.set_own(p, "hasRegExpGroups", Value::Bool(false), true);
+            self.set_own(fid, "prototype", Value::Obj(p), false);
+        }
+        self.set_own(g, "URLPattern", up_f, false);
         // `PerformanceObserver`/`ReportingObserver` — ctors
         // **légalement constructibles** (régression mesurée :
         // github `environment.js` meurt sur le throw du stub
@@ -5140,9 +6996,17 @@ impl Engine {
             self.set_own(nid, "userActivation", Value::Obj(ua), true);
             let perm = self.new_object();
             self.add_method(perm, "query", perm_query);
+            // `request` (ancêtre de `query`, toujours tracké
+            // BCD) — même statut honnête `denied`.
+            self.add_method(perm, "request", perm_query);
             self.set_own(nid, "permissions", Value::Obj(perm), true);
         }
 
+        // JS-C561 — second lot Pareto BCD : protos
+        // d'interfaces peuplés, globaux satellites et chaînage
+        // des instances déjà installées (`screen`,
+        // `visualViewport`, `CSS.highlights`, `performance`).
+        install_bcd_surface_apis(self);
         // `autofocus` (CAP-162 — spec « autofocus processing »,
         // borné) : le premier élément `[autofocus]` focalisable
         // reçoit le focus à l'install — `document.activeElement`
@@ -5866,21 +7730,18 @@ impl Engine {
         ev.adjusted.set(adjusted);
         ev.adjusted_related.set(related);
         let ty = ev.ty.borrow().clone();
-        let (fns, node_desc): (Vec<Value>, String) = {
+        let fns: Vec<Value> = {
             let d = dom.borrow();
-            (
-                d.nodes
-                    .get(node as usize)
-                    .map(|n| {
-                        n.listeners
-                            .iter()
-                            .filter(|(t, _, c)| t == &ty && *c == capture)
-                            .map(|(_, f, _)| f.clone())
-                            .collect()
-                    })
-                    .unwrap_or_default(),
-                probe_node_desc(&d, node),
-            )
+            d.nodes
+                .get(node as usize)
+                .map(|n| {
+                    n.listeners
+                        .iter()
+                        .filter(|(t, _, c)| t == &ty && *c == capture)
+                        .map(|(_, f, _)| f.clone())
+                        .collect()
+                })
+                .unwrap_or_default()
         };
         let n_fns = fns.len();
         let this = node_value(self, dom, cache, node);
@@ -5919,7 +7780,10 @@ impl Engine {
         if n_fns > 0 && tracing::enabled!(target: "dom_probe", tracing::Level::INFO) {
             if let Ok(mut d) = dom.try_borrow_mut() {
                 if d.ce.probe_seen.insert(format!("cb:{ty}")) {
-                    tracing::info!(target: "dom_probe", site = "ev.cb", ty = %ty, on = %node_desc, n = n_fns);
+                    // §B-114 — `probe_node_desc` calculé ici
+                    // (premier cb vu par type), plus par nœud.
+                    let on = probe_node_desc(&d, node);
+                    tracing::info!(target: "dom_probe", site = "ev.cb", ty = %ty, on = %on, n = n_fns);
                 }
             }
         }
@@ -6169,6 +8033,74 @@ impl Host for DocumentHost {
             })),
             "fullscreen" => Ok(Some(Value::Bool(e.hooks.fullscreen_el.is_some()))),
             "fullscreenEnabled" => Ok(Some(Value::Bool(true))),
+            // JS-C560 — membres `Document` fréquents : reflets
+            // honnêtes (`doctype`/`embeds`/`plugins` vivants,
+            // `dir`/`designMode` stockés), collections
+            // résolues, et constantes « pas de feature »
+            // (pointer-lock/pip/prerendering — jamais de faux
+            // objet promettant).
+            // `document.doctype` — pas de nœud arène (le
+            // parseur saute les déclarations) : objet plat
+            // `nodeType` 10 si la source en portait un
+            // (`had_doctype`), `null` sinon — spec.
+            "doctype" => Ok(Some(if self.dom.borrow().had_doctype {
+                let o = e.new_object();
+                e.set_own(o, "nodeType", Value::Num(10.0), true);
+                let n = e.str_val("html");
+                e.set_own(o, "name", n, true);
+                let p = e.str_val("");
+                e.set_own(o, "publicId", p.clone(), true);
+                e.set_own(o, "systemId", p, true);
+                e.set_own(o, "ownerDocument", this.clone(), true);
+                let tag = e.str_val("DocumentType");
+                e.set_own(o, crate::interp::SYM_TO_STRING_TAG, tag, false);
+                Value::Obj(o)
+            } else {
+                Value::Null
+            })),
+            "lastModified" => Ok(Some(e.str_val(doc_last_modified()))),
+            "dir" => {
+                let v = {
+                    let d = self.dom.borrow();
+                    d.document_element()
+                        .and_then(|n| d.attr(n, "dir"))
+                        .map(str::to_string)
+                        .unwrap_or_default()
+                };
+                Ok(Some(e.str_val(v)))
+            }
+            "designMode" => Ok(Some(e.str_val(if *self.design_mode.borrow() {
+                "on"
+            } else {
+                "off"
+            }))),
+            "embeds" | "plugins" => {
+                let ids = {
+                    let d = self.dom.borrow();
+                    let mut v = d.by_tag(d.root, "embed");
+                    v.extend(d.by_tag(d.root, "object"));
+                    v
+                };
+                Ok(Some(dom_collection(
+                    e,
+                    &self.dom,
+                    &self.cache,
+                    &ids,
+                    false,
+                    "HTMLCollection",
+                )))
+            }
+            "customElementRegistry" => Ok(Some(
+                e.get_prop(e.global, "customElements")
+                    .unwrap_or(Value::Undefined),
+            )),
+            "pointerLockElement"
+            | "pictureInPictureElement"
+            | "activeViewTransition"
+            | "fragmentDirective" => Ok(Some(Value::Null)),
+            "pictureInPictureEnabled" | "wasDiscarded" | "prerendering" => {
+                Ok(Some(Value::Bool(false)))
+            }
             // `document.scrollingElement` (spec : root en
             // standards mode — pas de quirks détecté dans le
             // miroir) ; les loaders lazy lisent
@@ -6592,6 +8524,19 @@ impl Host for DocumentHost {
                 self.dom.borrow_mut().adopted_sheets.clear();
             }
             *self.adopted_sheets.borrow_mut() = Some(v);
+            return Ok(true);
+        }
+        if key == "designMode" {
+            let s = e.to_js_string(v)?;
+            *self.design_mode.borrow_mut() = s.eq_ignore_ascii_case("on");
+            return Ok(true);
+        }
+        if key == "dir" {
+            let s = e.to_js_string(v)?;
+            let mut d = self.dom.borrow_mut();
+            if let Some(n) = d.document_element() {
+                d.set_attr(n, "dir", &s);
+            }
             return Ok(true);
         }
         Ok(false)
@@ -7047,6 +8992,30 @@ impl Host for DocumentHost {
                     state: st,
                 }))))
             }
+            // JS-C560 — membres `Document` fréquents :
+            // pointer-lock/pip jamais acquis (sortie = no-op
+            // honnête, `exitPictureInPicture` rejette spec —
+            // aucune fenêtre pip n'existe), jetons privacy
+            // `false`, `createCDATASection`/`createProcessingInstruction`
+            // = `NotSupportedError` spec sur document HTML,
+            // `ariaNotify` no-op, `getBoxQuads` liste vide
+            // (la géométrie vit hors moteur JS).
+            "exitPointerLock" | "ariaNotify" => Ok(Some(Value::Undefined)),
+            "exitPictureInPicture" => {
+                let pid = e.new_promise();
+                let msg = e.str_val("NotSupportedError");
+                e.reject_promise(pid, msg);
+                Ok(Some(Value::Obj(pid)))
+            }
+            "getBoxQuads" => Ok(Some(e.new_array(Vec::new()))),
+            "hasPrivateToken" | "hasRedemptionRecord" | "hasUnpartitionedCookieAccess" => {
+                let pid = e.new_promise();
+                e.resolve_promise(pid, Value::Bool(false));
+                Ok(Some(Value::Obj(pid)))
+            }
+            "createCDATASection" | "createProcessingInstruction" => {
+                Err(e.type_error("NotSupportedError: HTML document"))
+            }
             // `document.open()` — spec `document open steps` :
             // le contenu est effacé et le document redevient
             // « ouvert » aux `write` suivants. Valeur de retour
@@ -7337,6 +9306,9 @@ const GLOBAL_ATTRS: &[&str] = &[
     "draggable",
     "spellcheck",
     "translate",
+    // `elementtiming` (Element Timing API — JS-C561) :
+    // reflet `el.elementTiming` global spec.
+    "elementtiming",
     "nonce",
     "inputmode",
     "enterkeyhint",
@@ -7426,16 +9398,407 @@ const TAGGED_ATTRS: &[(&str, &[&str])] = &[
     ),
     // `time.dateTime` ↔ `datetime` (html.elem BCD).
     ("datetime", &["time"]),
+    // Pareto `api` (JS-C559) — membres IDL reflétés manquants.
+    ("accept", &["input"]),
+    ("accept-charset", &["form"]),
+    ("autocomplete", &["form", "input", "select", "textarea"]),
+    ("coords", &["area"]),
+    ("shape", &["area"]),
+    ("download", &["a", "area"]),
+    ("ping", &["a", "area"]),
+    ("hreflang", &["a", "area", "link"]),
+    ("attributionsourceid", &["a"]),
+    ("dirname", &["input", "textarea"]),
+    ("formaction", &["button", "input"]),
+    ("formenctype", &["button", "input"]),
+    ("formmethod", &["button", "input"]),
+    ("formtarget", &["button", "input"]),
+    ("list", &["input"]),
+    ("pattern", &["input"]),
+    ("size", &["input", "select"]),
+    ("step", &["input"]),
+    ("max", &["input", "meter", "progress"]),
+    ("min", &["input", "meter"]),
+    ("high", &["meter"]),
+    ("low", &["meter"]),
+    ("optimum", &["meter"]),
+    ("rows", &["textarea"]),
+    ("cols", &["textarea"]),
+    ("cite", &["blockquote", "del", "ins", "q"]),
+    ("data", &["object"]),
+    ("label", &["optgroup", "option", "track"]),
+    ("span", &["col", "colgroup"]),
+    ("abbr", &["td", "th"]),
+    ("headers", &["td", "th"]),
+    ("start", &["ol"]),
+    ("content", &["meta"]),
+    ("http-equiv", &["meta"]),
+    ("kind", &["track"]),
+    ("srclang", &["track"]),
+    ("longdesc", &["img"]),
+    ("usemap", &["img"]),
+    ("lowsrc", &["img"]),
+    ("imagesizes", &["link"]),
+    ("imagesrcset", &["link"]),
+    ("blocking", &["link", "script", "style"]),
+    ("integrity", &["link", "script"]),
+    ("as", &["link"]),
+    ("allow", &["iframe"]),
+    ("csp", &["iframe"]),
+    ("command", &["button"]),
+    ("commandfor", &["button"]),
+    ("closedby", &["dialog"]),
+    ("fetchpriority", &["iframe", "img", "link", "script"]),
+    ("popovertarget", &["button", "input"]),
+    ("popovertargetaction", &["button", "input"]),
+    ("controlslist", &["audio", "video"]),
+    ("sinkid", &["audio", "video"]),
+    ("width", &["embed", "iframe", "object", "source"]),
+    ("height", &["embed", "iframe", "object", "source"]),
+    // SVG — géométrie + primitives `fe*` (tags arène en
+    // camelCase) ; `x`/`y`/`width`/`height` partagent la liste.
+    ("cx", &["circle", "ellipse", "radialgradient"]),
+    ("cy", &["circle", "ellipse", "radialgradient"]),
+    ("r", &["circle", "radialgradient"]),
+    ("rx", &["ellipse", "rect"]),
+    ("ry", &["ellipse", "rect"]),
+    ("x1", &["line", "lineargradient"]),
+    ("x2", &["line", "lineargradient"]),
+    ("y1", &["line", "lineargradient"]),
+    ("y2", &["line", "lineargradient"]),
+    ("fx", &["radialgradient"]),
+    ("fy", &["radialgradient"]),
+    ("fr", &["radialgradient"]),
+    ("points", &["polygon", "polyline"]),
+    ("offset", &["stop"]),
+    ("gradientTransform", &["lineargradient", "radialgradient"]),
+    ("gradientUnits", &["lineargradient", "radialgradient"]),
+    ("spreadMethod", &["lineargradient", "radialgradient"]),
+    ("markerHeight", &["marker"]),
+    ("markerUnits", &["marker"]),
+    ("markerWidth", &["marker"]),
+    ("orient", &["marker"]),
+    ("refX", &["marker"]),
+    ("refY", &["marker"]),
+    ("maskContentUnits", &["mask"]),
+    ("maskUnits", &["mask"]),
+    ("filterUnits", &["filter"]),
+    ("primitiveUnits", &["filter"]),
+    ("patternContentUnits", &["pattern"]),
+    ("patternTransform", &["pattern"]),
+    ("patternUnits", &["pattern"]),
+    ("clipPathUnits", &["clippath"]),
+    ("lengthAdjust", &["text", "textpath", "tspan"]),
+    ("textLength", &["text", "textpath", "tspan"]),
+    ("startOffset", &["textpath"]),
+    ("spacing", &["textpath"]),
+    ("mode", &["feBlend", "feComposite", "feDisplacementMap"]),
+    ("in2", &["feBlend", "feComposite", "feDisplacementMap"]),
+    (
+        "in",
+        &[
+            "feBlend",
+            "feColorMatrix",
+            "feComponentTransfer",
+            "feComposite",
+            "feConvolveMatrix",
+            "feDiffuseLighting",
+            "feDisplacementMap",
+            "feDropShadow",
+            "feFlood",
+            "feGaussianBlur",
+            "feImage",
+            "feMergeNode",
+            "feMorphology",
+            "feOffset",
+            "feSpecularLighting",
+            "feTile",
+            "feTurbulence",
+        ],
+    ),
+    (
+        "result",
+        &[
+            "feBlend",
+            "feColorMatrix",
+            "feComponentTransfer",
+            "feComposite",
+            "feConvolveMatrix",
+            "feDiffuseLighting",
+            "feDisplacementMap",
+            "feDropShadow",
+            "feFlood",
+            "feGaussianBlur",
+            "feImage",
+            "feMerge",
+            "feMorphology",
+            "feOffset",
+            "feSpecularLighting",
+            "feTile",
+            "feTurbulence",
+        ],
+    ),
+    ("values", &["feColorMatrix"]),
+    ("operator", &["feComposite", "feMorphology"]),
+    ("k1", &["feComposite"]),
+    ("k2", &["feComposite"]),
+    ("k3", &["feComposite"]),
+    ("k4", &["feComposite"]),
+    ("kernelMatrix", &["feConvolveMatrix"]),
+    (
+        "kernelUnitLengthX",
+        &[
+            "feConvolveMatrix",
+            "feDiffuseLighting",
+            "feSpecularLighting",
+        ],
+    ),
+    (
+        "kernelUnitLengthY",
+        &[
+            "feConvolveMatrix",
+            "feDiffuseLighting",
+            "feSpecularLighting",
+        ],
+    ),
+    ("orderX", &["feConvolveMatrix"]),
+    ("orderY", &["feConvolveMatrix"]),
+    ("bias", &["feConvolveMatrix"]),
+    ("divisor", &["feConvolveMatrix"]),
+    ("edgeMode", &["feConvolveMatrix"]),
+    ("preserveAlpha", &["feConvolveMatrix"]),
+    ("targetX", &["feConvolveMatrix"]),
+    ("targetY", &["feConvolveMatrix"]),
+    ("diffuseConstant", &["feDiffuseLighting"]),
+    ("surfaceScale", &["feDiffuseLighting", "feSpecularLighting"]),
+    ("scale", &["feDisplacementMap"]),
+    ("xChannelSelector", &["feDisplacementMap"]),
+    ("yChannelSelector", &["feDisplacementMap"]),
+    ("azimuth", &["feDistantLight"]),
+    ("elevation", &["feDistantLight"]),
+    ("dx", &["feDropShadow", "feOffset"]),
+    ("dy", &["feDropShadow", "feOffset"]),
+    ("stdDeviation", &["feDropShadow", "feGaussianBlur"]),
+    ("stdDeviationX", &["feDropShadow", "feGaussianBlur"]),
+    ("stdDeviationY", &["feDropShadow", "feGaussianBlur"]),
+    ("radius", &["feMorphology"]),
+    ("specularConstant", &["feSpecularLighting"]),
+    ("specularExponent", &["feSpecularLighting", "feSpotLight"]),
+    ("limitingConeAngle", &["feSpotLight"]),
+    ("pointsAtX", &["feSpotLight"]),
+    ("pointsAtY", &["feSpotLight"]),
+    ("pointsAtZ", &["feSpotLight"]),
+    ("baseFrequency", &["feTurbulence"]),
+    ("baseFrequencyX", &["feTurbulence"]),
+    ("baseFrequencyY", &["feTurbulence"]),
+    ("numOctaves", &["feTurbulence"]),
+    ("seed", &["feTurbulence"]),
+    ("stitchTiles", &["feTurbulence"]),
+    ("amplitude", &["feFuncA", "feFuncB", "feFuncG", "feFuncR"]),
+    ("exponent", &["feFuncA", "feFuncB", "feFuncG", "feFuncR"]),
+    ("intercept", &["feFuncA", "feFuncB", "feFuncG", "feFuncR"]),
+    ("slope", &["feFuncA", "feFuncB", "feFuncG", "feFuncR"]),
+    ("tableValues", &["feFuncA", "feFuncB", "feFuncG", "feFuncR"]),
+    ("z", &["fePointLight", "feSpotLight"]),
+    // `x`/`y`/`width`/`height` SVG — les classes HTML numériques
+    // (canvas/img/video) sont servies par leurs bras dédiés
+    // avant le reflet générique.
+    (
+        "x",
+        &[
+            "svg",
+            "rect",
+            "image",
+            "text",
+            "tspan",
+            "textpath",
+            "use",
+            "foreignObject",
+            "foreignobject",
+            "mask",
+            "filter",
+            "pattern",
+            "marker",
+            "symbol",
+            "view",
+            "feBlend",
+            "feColorMatrix",
+            "feComponentTransfer",
+            "feComposite",
+            "feConvolveMatrix",
+            "feDiffuseLighting",
+            "feDisplacementMap",
+            "feDropShadow",
+            "feFlood",
+            "feGaussianBlur",
+            "feImage",
+            "feMerge",
+            "feMorphology",
+            "feOffset",
+            "fePointLight",
+            "feSpecularLighting",
+            "feSpotLight",
+            "feTile",
+            "feTurbulence",
+        ],
+    ),
+    (
+        "y",
+        &[
+            "svg",
+            "rect",
+            "image",
+            "text",
+            "tspan",
+            "textpath",
+            "use",
+            "foreignObject",
+            "foreignobject",
+            "mask",
+            "filter",
+            "pattern",
+            "marker",
+            "symbol",
+            "view",
+            "feBlend",
+            "feColorMatrix",
+            "feComponentTransfer",
+            "feComposite",
+            "feConvolveMatrix",
+            "feDiffuseLighting",
+            "feDisplacementMap",
+            "feDropShadow",
+            "feFlood",
+            "feGaussianBlur",
+            "feImage",
+            "feMerge",
+            "feMorphology",
+            "feOffset",
+            "fePointLight",
+            "feSpecularLighting",
+            "feSpotLight",
+            "feTile",
+            "feTurbulence",
+        ],
+    ),
+    (
+        "width",
+        &[
+            "svg",
+            "rect",
+            "image",
+            "use",
+            "foreignObject",
+            "foreignobject",
+            "mask",
+            "filter",
+            "pattern",
+            "marker",
+            "feBlend",
+            "feColorMatrix",
+            "feComponentTransfer",
+            "feComposite",
+            "feConvolveMatrix",
+            "feDiffuseLighting",
+            "feDisplacementMap",
+            "feDropShadow",
+            "feFlood",
+            "feGaussianBlur",
+            "feImage",
+            "feMerge",
+            "feMorphology",
+            "feOffset",
+            "feSpecularLighting",
+            "feTile",
+            "feTurbulence",
+        ],
+    ),
+    (
+        "height",
+        &[
+            "svg",
+            "rect",
+            "image",
+            "use",
+            "foreignObject",
+            "foreignobject",
+            "mask",
+            "filter",
+            "pattern",
+            "marker",
+            "feBlend",
+            "feColorMatrix",
+            "feComponentTransfer",
+            "feComposite",
+            "feConvolveMatrix",
+            "feDiffuseLighting",
+            "feDisplacementMap",
+            "feDropShadow",
+            "feFlood",
+            "feGaussianBlur",
+            "feImage",
+            "feMerge",
+            "feMorphology",
+            "feOffset",
+            "feSpecularLighting",
+            "feTile",
+            "feTurbulence",
+        ],
+    ),
+    (
+        "href",
+        &[
+            "image",
+            "use",
+            "filter",
+            "pattern",
+            "marker",
+            "mpath",
+            "textpath",
+            "lineargradient",
+            "radialgradient",
+            "feImage",
+        ],
+    ),
+    // `input[type=color]` (JS-C561) — `colorSpace` IDL ↔
+    // `colorspace` attr (valeurs `limited-srgb`/`display-p3`,
+    // enum brute documentée).
+    ("colorspace", &["input"]),
+    ("viewBox", &["svg", "symbol", "marker", "pattern", "view"]),
+    (
+        "preserveAspectRatio",
+        &[
+            "svg", "symbol", "marker", "pattern", "view", "image", "feImage",
+        ],
+    ),
+    ("currentScale", &["svg"]),
+    ("currentTranslate", &["svg"]),
+    ("rotate", &["text", "tspan"]),
+    ("dx", &["text", "tspan"]),
+    ("dy", &["text", "tspan"]),
+    ("startOffset", &["textpath"]),
+    ("method", &["textpath"]),
+    (
+        "transform",
+        &["clippath", "g", "image", "svg", "use", "pattern", "marker"],
+    ),
+    ("orientAngle", &["marker"]),
+    ("orientType", &["marker"]),
+    ("decoding", &["image", "img"]),
 ];
 
 /// Attributs booléens réfléchis — même discipline de scoping
 /// (§B-103) : `'controls' in div`/`'checked' in div` → `false`.
 const TAGGED_BOOL_ATTRS: &[(&str, &[&str])] = &[
     ("checked", &["input"]),
+    // `<input type=color alpha>` (JS-C561) — canal alpha du
+    // sélecteur de couleur.
+    ("alpha", &["input"]),
     (
         "disabled",
         &[
-            "button", "fieldset", "input", "optgroup", "option", "select", "textarea",
+            "button", "fieldset", "input", "link", "optgroup", "option", "select", "style",
+            "textarea",
         ],
     ),
     ("selected", &["option"]),
@@ -7446,6 +9809,22 @@ const TAGGED_BOOL_ATTRS: &[(&str, &[&str])] = &[
     ("muted", &["audio", "video"]),
     ("loop", &["audio", "video"]),
     ("autoplay", &["audio", "video"]),
+    // Pareto `api` (JS-C559).
+    ("required", &["input", "select", "textarea"]),
+    ("novalidate", &["form"]),
+    ("formnovalidate", &["button", "input"]),
+    ("ismap", &["img"]),
+    ("allowfullscreen", &["iframe"]),
+    ("credentialless", &["iframe"]),
+    ("open", &["details", "dialog"]),
+    ("nomodule", &["script"]),
+    ("async", &["script"]),
+    ("defer", &["script"]),
+    ("reversed", &["ol"]),
+    ("default", &["track"]),
+    ("webkitdirectory", &["input"]),
+    ("playsinline", &["video"]),
+    ("disablepictureinpicture", &["video"]),
 ];
 
 /// JS-C565 — keyset négatif de `NodeHost::get` : sur-ensemble
@@ -7511,6 +9890,39 @@ fn prop_attr_name(key: &str) -> &str {
         "writingSuggestions" => "writingsuggestions",
         "headingOffset" => "headingoffset",
         "headingReset" => "headingreset",
+        // Pareto `api` (JS-C559) — IDL camelCase → attr HTML
+        // (`formAction`≙`formaction`, `acceptCharset`≙
+        // `accept-charset` avec tiret…). Les SVG fe* gardent
+        // leur casse (`stdDeviation` = vrai nom d'attribut).
+        "acceptCharset" => "accept-charset",
+        "allowFullscreen" => "allowfullscreen",
+        "attributionSourceId" => "attributionsourceid",
+        "colSpan" => "colspan",
+        "commandForElement" => "commandfor",
+        "dirName" => "dirname",
+        "colorSpace" => "colorspace",
+        "disablePictureInPicture" => "disablepictureinpicture",
+        "elementTiming" => "elementtiming",
+        "fetchPriority" => "fetchpriority",
+        "formAction" => "formaction",
+        "formEnctype" => "formenctype",
+        "formMethod" => "formmethod",
+        "formNoValidate" => "formnovalidate",
+        "formTarget" => "formtarget",
+        "httpEquiv" => "http-equiv",
+        "imageSizes" => "imagesizes",
+        "imageSrcset" => "imagesrcset",
+        "in1" => "in",
+        "isMap" => "ismap",
+        "longDesc" => "longdesc",
+        "maxLength" => "maxlength",
+        "minLength" => "minlength",
+        "noModule" => "nomodule",
+        "noValidate" => "novalidate",
+        "popoverTargetAction" => "popovertargetaction",
+        "popoverTargetElement" => "popovertarget",
+        "rowSpan" => "rowspan",
+        "useMap" => "usemap",
         k => k,
     }
 }
@@ -7801,6 +10213,33 @@ const EVENT_HANDLER_PROPS: &[&str] = &[
     "oncontentvisibilityautostatechange",
     "onbeforexrselect",
     "oncommand",
+    // JS-C560 — handlers BCD `*_event` encore absents :
+    // document (DOMContentLoaded/readystatechange/
+    // visibilitychange/selectionchange/pointerlock/
+    // prerendering/freeze/resume) + window (appinstalled/
+    // beforeinstallprompt/device*/pagereveal/pageswap).
+    "ondomcontentloaded",
+    // `onDOMContentLoaded` — casse camel que le sondage BCD
+    // emploie littéralement (le handler spec a les deux
+    // orthographes selon les moteurs).
+    "onDOMContentLoaded",
+    "onreadystatechange",
+    "onvisibilitychange",
+    "onselectionchange",
+    "onpointerlockchange",
+    "onpointerlockerror",
+    "onprerenderingchange",
+    "onfreeze",
+    "onresume",
+    "onencrypted",
+    "onwaitingforkey",
+    "onappinstalled",
+    "onbeforeinstallprompt",
+    "ondevicemotion",
+    "ondeviceorientation",
+    "ondeviceorientationabsolute",
+    "onpagereveal",
+    "onpageswap",
 ];
 
 /// `on` + nom connu ?
@@ -7870,6 +10309,19 @@ const DOC_METHODS: &[&str] = &[
     "replaceChild",
     "replaceChildren",
     "hasChildNodes",
+    // JS-C560 — surface `Document` fréquente : sorties pointer-
+    // lock/pip (no-op/rejet honnête), jetons privacy (réponse
+    // `false`), `create*` hors HTML (erreur spec), `ariaNotify`
+    // no-op, `getBoxQuads` liste vide (pas de layout exposé).
+    "exitPointerLock",
+    "exitPictureInPicture",
+    "getBoxQuads",
+    "hasPrivateToken",
+    "hasRedemptionRecord",
+    "hasUnpartitionedCookieAccess",
+    "ariaNotify",
+    "createCDATASection",
+    "createProcessingInstruction",
 ];
 
 /// Méthodes d'élément universelles (Node + Element — hors
@@ -8009,6 +10461,7 @@ const MEDIA_METHODS: &[&str] = &[
     "addTextTrack",
     "captureStream",
     "setMediaKeys",
+    "getStartDate",
 ];
 
 /// Méthodes **tag-scopées** lisibles (§B-107, JS-C385) —
@@ -8259,7 +10712,9 @@ fn enum_attr_default(d: &Dom, node: NodeId, key: &str) -> Option<String> {
             None => "subtitles".to_string(),
         },
         ("img", "decoding") => known(lower("decoding"), &["auto", "sync", "async"], "auto"),
-        ("img" | "iframe", "loading") => known(lower("loading"), &["eager", "lazy"], "eager"),
+        ("img" | "iframe" | "audio" | "video", "loading") => {
+            known(lower("loading"), &["eager", "lazy"], "eager")
+        }
         ("th", "scope") => known(
             lower("scope"),
             &["row", "col", "rowgroup", "colgroup"],
@@ -8283,7 +10738,7 @@ fn enum_attr_write_name(tag: &str, key: &str) -> Option<&'static str> {
         ("textarea", "wrap") => "wrap",
         ("track", "kind") => "kind",
         ("img", "decoding") => "decoding",
-        ("img" | "iframe", "loading") => "loading",
+        ("img" | "iframe" | "audio" | "video", "loading") => "loading",
         ("th", "scope") => "scope",
         _ => return None,
     })
@@ -8337,6 +10792,16 @@ fn is_svg_geom(dom: &DomRef, node: NodeId) -> bool {
     )
 }
 
+/// `true` si `node` est un élément d'animation SMIL
+/// (`SVGAnimationElement` — JS-C561) : `animate`,
+/// `animateMotion`, `animateTransform`, `set`, `discard`.
+fn is_svg_animation(dom: &DomRef, node: NodeId) -> bool {
+    matches!(
+        dom.borrow().nodes[node as usize].tag.as_str(),
+        "animate" | "animatemotion" | "animatetransform" | "set" | "discard"
+    )
+}
+
 /// DOMException-like `{name, message}` — les erreurs DOM
 /// standard hors idb (`InvalidStateError` de `showModal`…).
 pub(crate) fn dom_ex_pub(e: &mut Engine, name: &str, msg: &str) -> Value {
@@ -8380,6 +10845,9 @@ impl Host for TimeRangesHost {
             "length" => Some(Value::Num(self.spans.len() as f64)),
             _ => None,
         })
+    }
+    fn has_method(&self, name: &str) -> bool {
+        matches!(name, "start" | "end")
     }
     fn invoke(
         &self,
@@ -8823,6 +11291,12 @@ fn media_call_claimed(
             };
             Ok(Some(e.str_val(crate::mse::media_can_play_type(e, &t))))
         }
+        // JS-C560 — `getStartDate()` : pas de timeline
+        // exposée → `Date` invalide (NaN) honnête, jamais
+        // `undefined` (spec : toujours un objet Date).
+        "getStartDate" => {
+            crate::builtins::date::date_ctor(e, Value::Undefined, &[Value::Num(f64::NAN)]).map(Some)
+        }
         // Claimé ≠ EME ni sortie audio alternative — rejets
         // honnêtes maintenus (ADR-0023).
         "setSinkId" | "setMediaKeys" => {
@@ -9082,6 +11556,10 @@ impl Host for NodeHost {
         // `link.sheet.cssRules` des frameworks, §B-14 letterboxd
         // vol 566). Même rail que `document.styleSheets` :
         // `css_sheet_ctor` + `ownerNode` + `href` si présent.
+        // `<link>` sans `rel=stylesheet` → `undefined` honnête
+        // (JS-C561 : `sheet` est désormais accesseur proto —
+        // `dom_acc_get` repliquerait sur l'attribut `""` sans
+        // cette réponse explicite).
         if key == "sheet" {
             let (tag, rel_ok, href) = {
                 let d = self.dom.borrow();
@@ -9094,8 +11572,12 @@ impl Host for NodeHost {
                     d.attr(node, "href").map(str::to_owned),
                 )
             };
-            if tag == "style" || (tag == "link" && rel_ok) {
-                return Ok(Some(sheet_for_node(e, &self.dom, &self.cache, node, href)?));
+            if tag == "style" || tag == "link" {
+                return Ok(Some(if tag == "style" || rel_ok {
+                    sheet_for_node(e, &self.dom, &self.cache, node, href)?
+                } else {
+                    Value::Undefined
+                }));
             }
         }
         // `<a>`/`<area>` : décomposition d'URL sur l'attribut
@@ -9106,7 +11588,16 @@ impl Host for NodeHost {
         // déviation est documentée ; absolu passe intact).
         if matches!(
             key,
-            "protocol" | "host" | "hostname" | "port" | "pathname" | "search" | "hash" | "origin"
+            "protocol"
+                | "host"
+                | "hostname"
+                | "port"
+                | "pathname"
+                | "search"
+                | "hash"
+                | "origin"
+                | "username"
+                | "password"
         ) {
             let d = self.dom.borrow();
             if matches!(d.nodes[node as usize].tag.as_str(), "a" | "area") {
@@ -9134,6 +11625,11 @@ impl Host for NodeHost {
                     "pathname" => path,
                     "search" => search,
                     "hash" => hash,
+                    // `username`/`password` : userinfo du
+                    // `scheme://u:p@host` (JS-C559 — même borne
+                    // « pas de résolution base » que le reste
+                    // de la décomposition).
+                    "username" | "password" => url_userinfo(&raw, key == "username"),
                     // `origin` : scheme+host — "null" sans scheme
                     // (spec : tuple d'origine sérialisé).
                     _ => {
@@ -9194,7 +11690,10 @@ impl Host for NodeHost {
             return Ok(Some(doc.map_or(Value::Null, Value::Obj)));
         }
         if matches!(key, "contentWindow" | "contentDocument")
-            && self.dom.borrow().nodes[node as usize].tag == "iframe"
+            && matches!(
+                self.dom.borrow().nodes[node as usize].tag.as_str(),
+                "iframe" | "object"
+            )
         {
             let viewer = e.cur_ctx;
             let dom_ptr = std::rc::Rc::as_ptr(&self.dom) as usize;
@@ -9492,12 +11991,14 @@ impl Host for NodeHost {
             // `select.options`/`selectedOptions` —
             // `HTMLOptionsCollection` ≙ tableau des `<option>`
             // (JS-C76) ; `selectedOptions` = filtre `selected`.
+            // `datalist.options` — mêmes enfants `<option>`
+            // (JS-C559, IDL `HTMLDataListElement.options`).
             "options" | "selectedOptions" => {
-                let is_select = {
+                let is_listing = {
                     let d = self.dom.borrow();
-                    d.nodes[node as usize].tag == "select"
+                    matches!(d.nodes[node as usize].tag.as_str(), "select" | "datalist")
                 };
-                if is_select {
+                if is_listing {
                     let opts = {
                         let d = self.dom.borrow();
                         let mut opts = d.by_tag(node, "option");
@@ -9525,6 +12026,413 @@ impl Host for NodeHost {
                         .position(|&o| d.has_attr(o, "selected"));
                     return Ok(Some(Value::Num(i.map_or(-1.0, |i| i as f64))));
                 }
+            }
+            // JS-C561 — membres `Element` restants du lot BCD :
+            // zoom CSS (le moteur n'applique pas `zoom` → 1),
+            // registre CE du document, transition de vue en
+            // cours (aucune — `null` honnête) et réflexion
+            // `aria-errormessage` (ids → éléments, spec
+            // `FrozenArray<Element>`).
+            "currentCSSZoom" => {
+                return Ok(Some(Value::Num(1.0)));
+            }
+            "customElementRegistry" => {
+                let v = e
+                    .get_prop(e.global, "customElements")
+                    .unwrap_or(Value::Null);
+                return Ok(Some(v));
+            }
+            "activeViewTransition" => {
+                return Ok(Some(Value::Null));
+            }
+            "ariaErrorMessageElements" => {
+                let ids = {
+                    let d = self.dom.borrow();
+                    d.attr(node, "aria-errormessage")
+                        .map(|s| s.split_whitespace().map(String::from).collect::<Vec<_>>())
+                        .unwrap_or_default()
+                };
+                let els = {
+                    let d = self.dom.borrow();
+                    ids.iter()
+                        .filter_map(|id| d.by_id(id))
+                        .map(|n| node_value(e, &self.dom, &self.cache, n))
+                        .collect()
+                };
+                return Ok(Some(e.new_array(els)));
+            }
+            // `<input>` dnd — `webkitEntries` : toujours `[]`
+            // hors `webkitdirectory` déposé (pas d'entrées OS).
+            "webkitEntries" => {
+                if self.dom.borrow().nodes[node as usize].tag == "input" {
+                    return Ok(Some(e.new_array(Vec::new())));
+                }
+            }
+            // `SVGAnimationElement` (JS-C561) — `targetElement`
+            // = élément parent (borne : le miroir n'instancie
+            // pas `xlink:href`) ; `systemLanguage`/
+            // `requiredExtensions` = listes d'attributs
+            // (SVGStringList bornée → tableau de chaînes).
+            "targetElement" => {
+                if is_svg_animation(&self.dom, node) {
+                    let p = self.dom.borrow().parent(node);
+                    let v = match p {
+                        Some(n) => node_value(e, &self.dom, &self.cache, n),
+                        None => Value::Null,
+                    };
+                    return Ok(Some(v));
+                }
+            }
+            "systemLanguage" | "requiredExtensions" => {
+                if is_svg_animation(&self.dom, node) {
+                    let attr = if key == "systemLanguage" {
+                        "systemLanguage"
+                    } else {
+                        "requiredExtensions"
+                    };
+                    let vals = {
+                        let d = self.dom.borrow();
+                        d.attr(node, attr)
+                            .map(|s| {
+                                s.split_whitespace()
+                                    .map(|w| e.str_val(w.to_string()))
+                                    .collect::<Vec<_>>()
+                            })
+                            .unwrap_or_default()
+                    };
+                    return Ok(Some(e.new_array(vals)));
+                }
+            }
+            // Propriétaire `<form>` d'un contrôle (JS-C559) :
+            // attribut `form` résolu par id, sinon ancêtre.
+            "form" => {
+                let owner = {
+                    let d = self.dom.borrow();
+                    let tag = d.nodes[node as usize].tag.as_str();
+                    if matches!(
+                        tag,
+                        "button"
+                            | "fieldset"
+                            | "input"
+                            | "label"
+                            | "legend"
+                            | "meter"
+                            | "object"
+                            | "option"
+                            | "output"
+                            | "progress"
+                            | "select"
+                            | "textarea"
+                    ) {
+                        d.attr(node, "form").and_then(|id| d.by_id(id)).or_else(|| {
+                            d.ancestors(node)
+                                .into_iter()
+                                .find(|&a| d.nodes[a as usize].tag == "form")
+                        })
+                    } else {
+                        None
+                    }
+                };
+                return Ok(Some(match owner {
+                    Some(f) => node_value(e, &self.dom, &self.cache, f),
+                    None => Value::Null,
+                }));
+            }
+            // `labels` — `NodeList` des `<label>` contrôlant le
+            // champ (`for`≙`id` ou ancêtre) ; `null` hors
+            // éléments « labelable » (spec).
+            "labels" => {
+                let r = {
+                    let d = self.dom.borrow();
+                    control_labels(&d, node)
+                };
+                return Ok(Some(match r {
+                    Some(ids) => dom_collection(e, &self.dom, &self.cache, &ids, false, "NodeList"),
+                    None => Value::Null,
+                }));
+            }
+            // `input.list` → le `<datalist id=list>` lié (null
+            // sans correspondance, spec).
+            "list" if self.dom.borrow().nodes[node as usize].tag == "input" => {
+                let hit = {
+                    let d = self.dom.borrow();
+                    d.attr(node, "list")
+                        .and_then(|id| d.by_id(id))
+                        .filter(|&l| d.nodes[l as usize].tag == "datalist")
+                };
+                return Ok(Some(match hit {
+                    Some(l) => node_value(e, &self.dom, &self.cache, l),
+                    None => Value::Null,
+                }));
+            }
+            // `label.control` — champ pointé par `for` ou
+            // premier descendant contrôlable (spec).
+            "control" if self.dom.borrow().nodes[node as usize].tag == "label" => {
+                let hit = {
+                    let d = self.dom.borrow();
+                    d.attr(node, "for").and_then(|id| d.by_id(id)).or_else(|| {
+                        [
+                            "input", "select", "textarea", "button", "meter", "progress", "output",
+                        ]
+                        .into_iter()
+                        .find_map(|t| d.by_tag(node, t).into_iter().next())
+                    })
+                };
+                return Ok(Some(match hit {
+                    Some(c) => node_value(e, &self.dom, &self.cache, c),
+                    None => Value::Null,
+                }));
+            }
+            // `map.areas` — `HTMLCollection` des `<area>`.
+            "areas" if self.dom.borrow().nodes[node as usize].tag == "map" => {
+                let ids = self.dom.borrow().by_tag(node, "area");
+                return Ok(Some(dom_collection(
+                    e,
+                    &self.dom,
+                    &self.cache,
+                    &ids,
+                    false,
+                    "HTMLCollection",
+                )));
+            }
+            // `option.index` — rang parmi les `<option>`
+            // sœurs du même parent.
+            "index" if self.dom.borrow().nodes[node as usize].tag == "option" => {
+                let i = {
+                    let d = self.dom.borrow();
+                    d.parent(node).map_or(-1i64, |p| {
+                        d.by_tag(p, "option")
+                            .iter()
+                            .position(|&o| o == node)
+                            .map_or(-1, |i| i as i64)
+                    })
+                };
+                return Ok(Some(Value::Num(i as f64)));
+            }
+            // `select.length` (≙ `options.length`) /
+            // `form.length` (≙ `elements.length`) — la garde
+            // laisse filer `length` vers le bras Text/Comment.
+            "length"
+                if matches!(
+                    self.dom.borrow().nodes[node as usize].tag.as_str(),
+                    "select" | "form"
+                ) =>
+            {
+                let n = {
+                    let d = self.dom.borrow();
+                    match d.nodes[node as usize].tag.as_str() {
+                        "select" => d.by_tag(node, "option").len() as f64,
+                        _ => listed_controls(&d, node).len() as f64,
+                    }
+                };
+                return Ok(Some(Value::Num(n)));
+            }
+            // `textarea.textLength` — longueur de la valeur.
+            "textLength" if self.dom.borrow().nodes[node as usize].tag == "textarea" => {
+                let n = {
+                    let d = self.dom.borrow();
+                    control_value(&d, node).chars().count()
+                };
+                return Ok(Some(Value::Num(n as f64)));
+            }
+            // `progress.position` — `value/max` (-1 si
+            // indéterminée, spec).
+            "position" if self.dom.borrow().nodes[node as usize].tag == "progress" => {
+                let d = self.dom.borrow();
+                let v = d.attr(node, "value").and_then(|s| s.parse::<f64>().ok());
+                let m = d
+                    .attr(node, "max")
+                    .and_then(|s| s.parse::<f64>().ok())
+                    .unwrap_or(1.0);
+                let pos = v.map_or(-1.0, |v| if m > 0.0 { v / m } else { -1.0 });
+                return Ok(Some(Value::Num(pos)));
+            }
+            // `input.valueAsNumber` — valeur numérique (`NaN`
+            // si non convertible, spec).
+            "valueAsNumber" if self.dom.borrow().nodes[node as usize].tag == "input" => {
+                let v = {
+                    let d = self.dom.borrow();
+                    d.attr(node, "value")
+                        .and_then(|s| s.trim().parse::<f64>().ok())
+                        .unwrap_or(f64::NAN)
+                };
+                return Ok(Some(Value::Num(v)));
+            }
+            // `input.valueAsDate` — pas de moteur de date de
+            // champ : `null` honnête (borne documentée).
+            "valueAsDate" if self.dom.borrow().nodes[node as usize].tag == "input" => {
+                return Ok(Some(Value::Null));
+            }
+            // `input.indeterminate` — état visuel, pas un
+            // attribut : slot `data-explorer-indeterminate`
+            // (même motif `CUSTOM_VALIDITY_ATTR`).
+            "indeterminate" if self.dom.borrow().nodes[node as usize].tag == "input" => {
+                let on = self.dom.borrow().has_attr(node, INDETERMINATE_ATTR);
+                return Ok(Some(Value::Bool(on)));
+            }
+            // `a/option/title/script.text` — textContent
+            // (spec `a.text` ≙ `textContent` ; `script.text`
+            // ≙ `innerText`, même source).
+            "text"
+                if matches!(
+                    self.dom.borrow().nodes[node as usize].tag.as_str(),
+                    "a" | "option" | "title" | "script"
+                ) =>
+            {
+                let s = self.dom.borrow().text_content(node);
+                return Ok(Some(e.str_val(s)));
+            }
+            // `<img>` — dimensions de la ressource : pas de
+            // décodeur → `naturalWidth/Height` 0, `x`/`y` 0
+            // (pas de layout), `complete` = absence de `src`
+            // (spec : image vide « complete ») ou `true` si
+            // la ressource est marquée chargée par le moteur
+            // (pas de fetch réel — approximation documentée).
+            "naturalWidth" | "naturalHeight" | "x" | "y"
+                if self.dom.borrow().nodes[node as usize].tag == "img" =>
+            {
+                return Ok(Some(Value::Num(0.0)));
+            }
+            "complete" if self.dom.borrow().nodes[node as usize].tag == "img" => {
+                return Ok(Some(Value::Bool(true)));
+            }
+            "currentSrc" if self.dom.borrow().nodes[node as usize].tag == "img" => {
+                let s = {
+                    let d = self.dom.borrow();
+                    d.attr(node, "src").unwrap_or("").to_string()
+                };
+                let resolved = if s.is_empty() {
+                    s
+                } else {
+                    crate::xhr::resolve_url(e, &s).unwrap_or(s)
+                };
+                return Ok(Some(e.str_val(resolved)));
+            }
+            // Tables (JS-C559) — collections lues sur la
+            // hiérarchie miroir.
+            "cellIndex"
+                if matches!(
+                    self.dom.borrow().nodes[node as usize].tag.as_str(),
+                    "td" | "th"
+                ) =>
+            {
+                let i = {
+                    let d = self.dom.borrow();
+                    d.parent(node).map_or(-1i64, |p| {
+                        d.child_nodes(p)
+                            .iter()
+                            .position(|&c| c == node)
+                            .map_or(-1, |i| i as i64)
+                    })
+                };
+                return Ok(Some(Value::Num(i as f64)));
+            }
+            "rowIndex" | "sectionRowIndex"
+                if self.dom.borrow().nodes[node as usize].tag == "tr" =>
+            {
+                let i = {
+                    let d = self.dom.borrow();
+                    if key == "sectionRowIndex" {
+                        d.parent(node).map_or(-1i64, |p| {
+                            d.by_tag(p, "tr")
+                                .iter()
+                                .position(|&r| r == node)
+                                .map_or(-1, |i| i as i64)
+                        })
+                    } else {
+                        // Rang global : parmi les `tr` de la
+                        // table englobante (ancêtre `table`).
+                        d.ancestors(node)
+                            .into_iter()
+                            .find(|&a| d.nodes[a as usize].tag == "table")
+                            .map_or(-1i64, |t| {
+                                d.by_tag(t, "tr")
+                                    .iter()
+                                    .position(|&r| r == node)
+                                    .map_or(-1, |i| i as i64)
+                            })
+                    }
+                };
+                return Ok(Some(Value::Num(i as f64)));
+            }
+            "cells" if self.dom.borrow().nodes[node as usize].tag == "tr" => {
+                let mut ids = self.dom.borrow().by_tag(node, "td");
+                ids.extend(self.dom.borrow().by_tag(node, "th"));
+                return Ok(Some(dom_collection(
+                    e,
+                    &self.dom,
+                    &self.cache,
+                    &ids,
+                    false,
+                    "HTMLCollection",
+                )));
+            }
+            "rows"
+                if matches!(
+                    self.dom.borrow().nodes[node as usize].tag.as_str(),
+                    "table" | "thead" | "tbody" | "tfoot"
+                ) =>
+            {
+                let ids = self.dom.borrow().by_tag(node, "tr");
+                return Ok(Some(dom_collection(
+                    e,
+                    &self.dom,
+                    &self.cache,
+                    &ids,
+                    false,
+                    "HTMLCollection",
+                )));
+            }
+            "tHead" | "tFoot" | "caption"
+                if self.dom.borrow().nodes[node as usize].tag == "table" =>
+            {
+                let want = key.to_ascii_lowercase();
+                let hit = {
+                    let d = self.dom.borrow();
+                    d.child_nodes(node)
+                        .into_iter()
+                        .find(|&c| d.nodes[c as usize].tag == want)
+                };
+                return Ok(Some(match hit {
+                    Some(c) => node_value(e, &self.dom, &self.cache, c),
+                    None => Value::Null,
+                }));
+            }
+            "tBodies" if self.dom.borrow().nodes[node as usize].tag == "table" => {
+                let ids = {
+                    let d = self.dom.borrow();
+                    d.by_tag(node, "tbody")
+                };
+                return Ok(Some(dom_collection(
+                    e,
+                    &self.dom,
+                    &self.cache,
+                    &ids,
+                    false,
+                    "HTMLCollection",
+                )));
+            }
+            // `dialog.returnValue` — slot `dialog_retval`
+            // (écrit par le setter / `close(v)`).
+            "returnValue" if self.dom.borrow().nodes[node as usize].tag == "dialog" => {
+                let s = e
+                    .hooks
+                    .dialog_retval
+                    .get(&node)
+                    .cloned()
+                    .unwrap_or_default();
+                return Ok(Some(e.str_val(s)));
+            }
+            // `fieldset.type`/`output.type` — constantes spec
+            // (pas d'attribut `type` sur ces tags).
+            "type"
+                if matches!(
+                    self.dom.borrow().nodes[node as usize].tag.as_str(),
+                    "fieldset" | "output"
+                ) =>
+            {
+                let t = self.dom.borrow().nodes[node as usize].tag.clone();
+                return Ok(Some(e.str_val(t)));
             }
             // `input.files` — `FileList` honnête vide (`type=file`)
             // ou `null` (autres types) — l'upload réel est JS-C70.
@@ -9693,6 +12601,12 @@ impl Host for NodeHost {
             // neuf par accès perdrait les listeners. `null`
             // hors élément média (spec : la prop n'existe que
             // sur `HTMLMediaElement`).
+            // `svg.animationsPaused` (JS-C560) — SMIL figé
+            // headless : jamais en pause via l'API (horloge
+            // documentaire gelée), `false` honnête.
+            "animationsPaused" if self.dom.borrow().nodes[node as usize].tag == "svg" => {
+                return Ok(Some(Value::Bool(false)));
+            }
             "textTracks" if is_media(&self.dom, node) => {
                 let Value::Obj(this_id) = this else {
                     return Ok(Some(Value::Null));
@@ -9703,6 +12617,56 @@ impl Host for NodeHost {
                 let list = text_track_list(e);
                 e.set_own(this_id, "__tt", Value::Obj(list), false);
                 return Ok(Some(Value::Obj(list)));
+            }
+            // JS-C560 — `audioTracks`/`videoTracks` : listes
+            // vides mais réelles (même gabarit `textTracks`,
+            // cache expando pour la stabilité des listeners).
+            // `remote` = `RemotePlayback` honnête (jamais de
+            // session distante — `watchAvailability`/`prompt`
+            // rejettent), `mediaKeys`/`sinkId` = « pas d'EME ».
+            "audioTracks" | "videoTracks" if is_media(&self.dom, node) => {
+                let Value::Obj(this_id) = this else {
+                    return Ok(Some(Value::Null));
+                };
+                let slot = if key == "audioTracks" { "__at" } else { "__vt" };
+                if let Some(v @ Value::Obj(_)) = e.get_prop(this_id, slot) {
+                    return Ok(Some(v));
+                }
+                let list = text_track_list(e);
+                let tag = e.str_val(if key == "audioTracks" {
+                    "AudioTrackList"
+                } else {
+                    "VideoTrackList"
+                });
+                e.set_own(list, crate::interp::SYM_TO_STRING_TAG, tag, false);
+                e.set_own(this_id, slot, Value::Obj(list), false);
+                return Ok(Some(Value::Obj(list)));
+            }
+            "remote" if is_media(&self.dom, node) => {
+                let o = e.new_object();
+                for k in ["onconnect", "onconnecting", "ondisconnect"] {
+                    e.set_own(o, k, Value::Null, true);
+                }
+                e.set_own(o, "disableRemotePlayback", Value::Bool(false), true);
+                for m in ["watchAvailability", "prompt"] {
+                    let f = e.native_fn(m, |e: &mut Engine, _t, _a| {
+                        let pid = e.new_promise();
+                        let msg = e.str_val("NotSupportedError");
+                        e.reject_promise(pid, msg);
+                        Ok(Value::Obj(pid))
+                    });
+                    e.set_own(o, m, f, true);
+                }
+                let tag = e.str_val("RemotePlayback");
+                e.set_own(o, crate::interp::SYM_TO_STRING_TAG, tag, false);
+                return Ok(Some(Value::Obj(o)));
+            }
+            "mediaKeys" | "sinkId" if is_media(&self.dom, node) => {
+                return Ok(Some(if key == "mediaKeys" {
+                    Value::Null
+                } else {
+                    e.str_val("")
+                }));
             }
             // -- `HTMLMediaElement` (étape 58/71c) ------------------
             // Non claimé : stubs honnêtes ADR-0023. Claimé :
@@ -10377,6 +13341,17 @@ impl Host for NodeHost {
                 }
                 Ok(true)
             }
+            // `input.indeterminate` — état visuel en slot
+            // interne (pas d'attribut IDL, JS-C559).
+            "indeterminate" if self.dom.borrow().nodes[node as usize].tag == "input" => {
+                let mut d = self.dom.borrow_mut();
+                if e.to_boolean(v) {
+                    d.set_attr(node, INDETERMINATE_ATTR, "");
+                } else {
+                    d.remove_attr(node, INDETERMINATE_ATTR);
+                }
+                Ok(true)
+            }
             _ => {
                 let scoped_bool = {
                     let d = self.dom.borrow();
@@ -10540,11 +13515,15 @@ impl Host for NodeHost {
             // le chemin sélecteur `[id]`, jamais le document.
             // Éléments ordinaires : non exposé (spec).
             "getElementById" => {
-                let is_frag = matches!(
-                    self.dom.borrow().nodes[node as usize].kind,
-                    NodeKind::Fragment
-                );
-                if !is_frag {
+                let (is_frag, is_svg_root) = {
+                    let d = self.dom.borrow();
+                    let n = &d.nodes[node as usize];
+                    (
+                        matches!(n.kind, NodeKind::Fragment),
+                        n.tag.as_str() == "svg",
+                    )
+                };
+                if !is_frag && !is_svg_root {
                     return Ok(None);
                 }
                 let id = e.to_js_string(arg(args, 0))?;
@@ -11710,6 +14689,32 @@ impl Host for NodeHost {
             // `HTMLMediaElement` (étape 58/71c, ADR-0023/24) —
             // non claimé : stubs honnêtes, jamais de faux
             // succès. Claimé : délégation hôte (`play()` tenu
+            // `SVGSVGElement` (JS-C560) — fabriques `createSVG*`
+            // (objets métriques réels : point/matrice DOM),
+            // SMIL figé headless, hit-tests sans layout =
+            // `false`/listes vides (résultat exact, jamais
+            // d'inventé).
+            "createSVGPoint"
+            | "createSVGMatrix"
+            | "createSVGRect"
+            | "createSVGLength"
+            | "createSVGAngle"
+            | "createSVGNumber"
+            | "createSVGTransform"
+            | "createSVGTransformFromMatrix"
+            | "checkIntersection"
+            | "checkEnclosure"
+            | "getIntersectionList"
+            | "getEnclosureList"
+            | "pauseAnimations"
+            | "unpauseAnimations"
+            | "deselectAll"
+            | "getCurrentTime"
+            | "setCurrentTime"
+                if self.dom.borrow().nodes[node as usize].tag == "svg" =>
+            {
+                svg_root_invoke(e, &self.dom, &self.cache, node, name, args)
+            }
             // par le premier `playing` rapporté).
             // `SVGGeometryElement` (§B-14 vol 331, GRC) —
             // `getTotalLength`/`getPointAtLength` sur les
@@ -11773,6 +14778,7 @@ impl Host for NodeHost {
             | "captureStream"
             | "setMediaKeys"
             | "getVideoPlaybackQuality"
+            | "getStartDate"
                 if is_media(&self.dom, node) =>
             {
                 if self.dom.borrow().media.contains_key(&node) {
@@ -11835,7 +14841,10 @@ impl Host for NodeHost {
                     // `YouTube` lit `q.droppedVideoFrames` avant
                     // tout offer/claim — `undefined` tuait le
                     // bootstrap player en `TypeError`.
-                    "getVideoPlaybackQuality" => {
+                    // `getStartDate` (JS-C560) — `Date`
+                    // invalide hors timeline exposée, même
+                    // bras que claimé.
+                    "getVideoPlaybackQuality" | "getStartDate" => {
                         media_call_claimed(e, &self.dom, &self.cache, node, name, args)
                     }
                     // JS-C454 — vraie `TextTrack` (même
@@ -11903,6 +14912,119 @@ impl Host for NodeHost {
                 node,
                 computed: true,
             })))),
+            // `<input>` (JS-C561) — `stepUp`/`stepDown` :
+            // `value` ± `step` (défaut 1, `n` arg ou 1) écrite
+            // via `self.set` (route `set_attr` — la propre-prop
+            // serait masquée par le getter host-first) ;
+            // `showPicker` → `NotSupportedError` (aucun
+            // picker OS en headless — rejet honnête).
+            "stepUp" | "stepDown" if self.dom.borrow().nodes[node as usize].tag == "input" => {
+                let (cur, step) = {
+                    let d = self.dom.borrow();
+                    let v = self
+                        .get(e, this.clone(), "value")?
+                        .and_then(|v| e.to_number(v).ok())
+                        .unwrap_or(0.0);
+                    let s = d
+                        .attr(node, "step")
+                        .and_then(|s| s.parse::<f64>().ok())
+                        .filter(|s| *s != 0.0)
+                        .unwrap_or(1.0);
+                    (v, s)
+                };
+                let n = args
+                    .first()
+                    .map(|v| e.to_number(v.clone()))
+                    .transpose()?
+                    .unwrap_or(1.0);
+                let next = if name == "stepUp" {
+                    cur + step * n
+                } else {
+                    cur - step * n
+                };
+                let sv = e.num_str_val(next);
+                self.set(e, this.clone(), "value", sv)?;
+                Ok(Some(Value::Undefined))
+            }
+            "showPicker" if self.dom.borrow().nodes[node as usize].tag == "input" => {
+                Err(crate::heap::Thrown(dom_ex_pub(
+                    e,
+                    "NotSupportedError",
+                    "showPicker: no picker in this engine",
+                )))
+            }
+            // `<table>` (JS-C561) — mutations spec des
+            // sections et lignes, implémentées sur l'arène.
+            "createCaption" | "deleteCaption" | "createTHead" | "deleteTHead" | "createTFoot"
+            | "deleteTFoot" | "createTBody" | "insertRow" | "deleteRow"
+                if self.dom.borrow().nodes[node as usize].tag == "table" =>
+            {
+                table_section_op(e, &self.dom, &self.cache, node, name, args).map(Some)
+            }
+            // `Element` (JS-C561) — membres restants :
+            // `requestPointerLock` → no-op honnête (jamais de
+            // verrou : `document.pointerLockElement` reste
+            // `null`, aucun `pointerlockchange` tiré) ;
+            // `getBoxQuads` → `[]` (le moteur n'expose pas
+            // l'arbre de quads à JS) ; `pseudo` → `null`
+            // (pas de pseudo-éléments exposés) ;
+            // `startViewTransition` → transition bornée :
+            // callback appelé, promesses résolues, aucun
+            // rendu intermédiaire capturé.
+            "requestPointerLock" => Ok(Some(Value::Undefined)),
+            "pseudo" => Ok(Some(Value::Null)),
+            "startViewTransition" => {
+                let cb = arg(args, 0);
+                let upd = e.new_promise();
+                if e.is_callable(cb.clone()) {
+                    match e.call_value(cb, Value::Undefined, &[]) {
+                        Ok(_) => e.resolve_promise(upd, Value::Undefined),
+                        Err(t) => e.reject_promise(upd, t.0),
+                    }
+                } else {
+                    e.resolve_promise(upd, Value::Undefined);
+                }
+                let vt = e.new_object();
+                e.set_own(vt, "updateCallbackDone", Value::Obj(upd), true);
+                for k in ["ready", "finished"] {
+                    let p = e.new_promise();
+                    e.resolve_promise(p, Value::Undefined);
+                    e.set_own(vt, k, Value::Obj(p), true);
+                }
+                let f = e.native_fn("skipTransition", |_e, _t, _a| Ok(Value::Undefined));
+                e.set_own(vt, "skipTransition", f, true);
+                let tag = e.str_val("ViewTransition");
+                e.set_own(vt, crate::interp::SYM_TO_STRING_TAG, tag, false);
+                Ok(Some(Value::Obj(vt)))
+            }
+            // `SVGAnimationElement` (JS-C561) — horloge SMIL
+            // figée headless : temps 0, durée lue sur `dur`
+            // (`3s`/`500ms`), begin/end sans effet (aucune
+            // animation ne tourne — état honnête).
+            "beginElement" | "beginElementAt" | "endElement" | "endElementAt"
+                if is_svg_animation(&self.dom, node) =>
+            {
+                Ok(Some(Value::Undefined))
+            }
+            "getCurrentTime" | "getStartTime" if is_svg_animation(&self.dom, node) => {
+                Ok(Some(Value::Num(0.0)))
+            }
+            "getSimpleDuration" if is_svg_animation(&self.dom, node) => {
+                let dur = {
+                    let d = self.dom.borrow();
+                    d.attr(node, "dur").map(String::from)
+                };
+                let secs = dur
+                    .as_deref()
+                    .and_then(|s| {
+                        s.strip_suffix("ms")
+                            .and_then(|n| n.parse::<f64>().ok())
+                            .map(|n| n / 1000.0)
+                            .or_else(|| s.strip_suffix('s').and_then(|n| n.parse::<f64>().ok()))
+                    })
+                    .unwrap_or(0.0);
+                Ok(Some(Value::Num(secs)))
+            }
             "requestFullscreen" => {
                 let pid = e.new_promise();
                 let attached = {
@@ -12506,6 +15628,18 @@ pub(crate) fn domrect_fill(e: &mut Engine, id: ObjId, x: f64, y: f64, w: f64, h:
 /// `VTTCue.prototype` résolu sur le global. Appel
 /// fonctionnel = `TypeError` (interfaces ctor-only).
 fn vttcue_ctor(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
+    cue_ctor(e, this, args, "VTTCue")
+}
+
+/// `new TextTrackCue(start, end, text)` (JS-C560) — même
+/// grammaire que `VTTCue` ; proto `TextTrackCue.prototype`.
+fn texttrackcue_ctor(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
+    cue_ctor(e, this, args, "TextTrackCue")
+}
+
+/// Corps partagé `VTTCue`/`TextTrackCue` — `global` choisit
+/// le proto adopté (les champs cue sont les mêmes).
+fn cue_ctor(e: &mut Engine, this: Value, args: &[Value], global: &str) -> JsResult<Value> {
     let Value::Obj(id) = this else {
         return Err(e.type_error("illegal constructor"));
     };
@@ -12517,7 +15651,7 @@ fn vttcue_ctor(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
     let text = e.to_js_string(arg(args, 2))?;
     let g = e.global;
     let o = e.new_object();
-    if let Some(Value::Obj(cid)) = e.get_prop(g, "VTTCue") {
+    if let Some(Value::Obj(cid)) = e.get_prop(g, global) {
         if let Some(p @ Value::Obj(_)) = e.get_prop(cid, "prototype") {
             if let Some(ho) = e.heap.obj_mut(o) {
                 ho.set_proto(p);
@@ -12676,6 +15810,99 @@ fn text_track_obj(e: &mut Engine, kind: &str, label: &str, language: &str) -> Ob
 /// `TextTrack` (JS-C454) ajoutée à `media.textTracks` (la
 /// liste `__tt` est celle que le getter `textTracks` met en
 /// cache — `length`/`item` lus dans `__items`).
+/// Membres `SVGSVGElement` (JS-C560) — `createSVG*` =
+/// fabriques d'objets métriques (`DOMPoint`/`DOMMatrix`
+/// réels, `SVGLength`/`SVGAngle`/`SVGNumber`/`SVGRect`/
+/// `SVGTransform` à valeurs spec), SMIL figé headless
+/// (`getCurrentTime` = 0, pause/resume/`deselectAll` no-op),
+/// hit-tests sans moteur de layout = `false`/listes vides —
+/// résultat exact, jamais de géométrie inventée.
+fn svg_root_invoke(
+    e: &mut Engine,
+    dom: &DomRef,
+    cache: &NodeCache,
+    node: NodeId,
+    name: &str,
+    args: &[Value],
+) -> JsResult<Option<Value>> {
+    let _ = node;
+    Ok(Some(match name {
+        "createSVGPoint" => dompoint_obj(e, 0.0, 0.0, 0.0, 1.0),
+        "createSVGMatrix" => matrix_obj(e, [1.0, 0.0, 0.0, 1.0, 0.0, 0.0]),
+        "createSVGRect" => {
+            let o = e.new_object();
+            for k in ["x", "y", "width", "height"] {
+                e.set_own(o, k, Value::Num(0.0), true);
+            }
+            Value::Obj(o)
+        }
+        "createSVGLength" | "createSVGAngle" => {
+            // `unitType` : NUMBER=1 (length), DEG=2 (angle).
+            let (ut, vs) = if name == "createSVGLength" {
+                (1.0, "0")
+            } else {
+                (2.0, "0deg")
+            };
+            let o = e.new_object();
+            e.set_own(o, "unitType", Value::Num(ut), true);
+            e.set_own(o, "value", Value::Num(0.0), true);
+            e.set_own(o, "valueInSpecifiedUnits", Value::Num(0.0), true);
+            let s = e.str_val(vs);
+            e.set_own(o, "valueAsString", s, true);
+            for m in ["newValueSpecifiedUnits", "convertToSpecifiedUnits"] {
+                let f = e.native_fn(m, win_noop);
+                e.set_own(o, m, f, true);
+            }
+            Value::Obj(o)
+        }
+        "createSVGNumber" => {
+            let o = e.new_object();
+            e.set_own(o, "value", Value::Num(0.0), true);
+            Value::Obj(o)
+        }
+        "createSVGTransform" | "createSVGTransformFromMatrix" => {
+            // `type` MATRIX=1 ; `fromMatrix` copie l'argument.
+            let m = if name == "createSVGTransformFromMatrix" {
+                matrix_of(e, arg(args, 0))
+            } else {
+                [1.0, 0.0, 0.0, 1.0, 0.0, 0.0]
+            };
+            let o = e.new_object();
+            let mv = matrix_obj(e, m);
+            e.set_own(o, "type", Value::Num(1.0), true);
+            e.set_own(o, "matrix", mv, true);
+            e.set_own(o, "angle", Value::Num(0.0), true);
+            for mm in [
+                "setMatrix",
+                "setTranslate",
+                "setScale",
+                "setRotate",
+                "setSkewX",
+                "setSkewY",
+            ] {
+                let f = e.native_fn(mm, win_noop);
+                e.set_own(o, mm, f, true);
+            }
+            Value::Obj(o)
+        }
+        "getElementById" => {
+            let id = e.to_js_string(arg(args, 0))?;
+            match dom.borrow().by_id(&id) {
+                Some(n) => node_value(e, dom, cache, n),
+                None => Value::Null,
+            }
+        }
+        "checkIntersection" | "checkEnclosure" => Value::Bool(false),
+        "getIntersectionList" | "getEnclosureList" => {
+            dom_collection(e, dom, cache, &[], false, "NodeList")
+        }
+        "getCurrentTime" => Value::Num(0.0),
+        // `pauseAnimations`/`unpauseAnimations`/`deselectAll`/
+        // `setCurrentTime` — horloge documentaire figée.
+        _ => Value::Undefined,
+    }))
+}
+
 fn media_add_text_track(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
     let Value::Obj(this_id) = this else {
         return Err(e.type_error("addTextTrack: receiver is not a media element"));
@@ -13206,6 +16433,19 @@ impl Host for EventHost {
         }
     }
 
+    fn has_method(&self, name: &str) -> bool {
+        matches!(
+            name,
+            "preventDefault"
+                | "stopPropagation"
+                | "cancel"
+                | "stopImmediatePropagation"
+                | "composedPath"
+                | "initEvent"
+                | "initCustomEvent"
+        )
+    }
+
     fn invoke(
         &self,
         e: &mut Engine,
@@ -13350,7 +16590,7 @@ impl Host for ElementInternalsHost {
         trace_node_cache(&self.cache, out);
     }
 
-    fn get(&self, e: &mut Engine, _t: Value, key: &str) -> JsResult<Option<Value>> {
+    fn get(&self, e: &mut Engine, t: Value, key: &str) -> JsResult<Option<Value>> {
         match key {
             "shadowRoot" => {
                 let r = self.dom.borrow().shadow_root(self.node, true);
@@ -13361,8 +16601,98 @@ impl Host for ElementInternalsHost {
             }
             "willValidate" => Ok(Some(Value::Bool(true))),
             "validationMessage" => Ok(Some(e.str_val(""))),
+            // JS-C560 — membres spec : `role`/`aria*` = vraie
+            // réflexion sur les attributs de l'hôte, `form`/
+            // `labels` = lookups ancêtres réels, `validity`/
+            // `states` = objets ValidityState/CustomStateSet.
+            "role" => Ok(Some(match self.dom.borrow().attr(self.node, "role") {
+                Some(r) => e.str_val(r),
+                None => Value::Null,
+            })),
+            "form" => {
+                let owner = {
+                    let d = self.dom.borrow();
+                    d.attr(self.node, "form")
+                        .and_then(|id| d.by_id(id))
+                        .or_else(|| {
+                            d.ancestors(self.node)
+                                .into_iter()
+                                .find(|&a| d.nodes[a as usize].tag == "form")
+                        })
+                };
+                Ok(Some(match owner {
+                    Some(f) => node_value(e, &self.dom, &self.cache, f),
+                    None => Value::Null,
+                }))
+            }
+            "labels" => {
+                let r = {
+                    let d = self.dom.borrow();
+                    control_labels(&d, self.node)
+                };
+                Ok(Some(match r {
+                    Some(ids) => dom_collection(e, &self.dom, &self.cache, &ids, false, "NodeList"),
+                    None => Value::Null,
+                }))
+            }
+            "validity" => Ok(Some(validity_obj(e))),
+            "states" => {
+                if let Value::Obj(id) = t {
+                    if let Some(v) = e.get_prop(id, "__css") {
+                        return Ok(Some(v));
+                    }
+                    let o = custom_state_set(e);
+                    e.set_own(id, "__css", o.clone(), false);
+                    return Ok(Some(o));
+                }
+                Ok(Some(custom_state_set(e)))
+            }
+            // Réflexion ARIA (ARIAMixin) — `aria<X>` ≙ attribut
+            // `aria-<x>` en minuscules ; les `*Element(s)` sont
+            // des références d'éléments (absentes → `null`/
+            // tableau gelé vide).
+            _ if key.starts_with("aria") && key.len() > 4 => {
+                if key.ends_with("Element") {
+                    Ok(Some(Value::Null))
+                } else if key.ends_with("Elements") {
+                    Ok(Some(e.new_array(Vec::new())))
+                } else {
+                    let attr = format!("aria-{}", key[4..].to_lowercase());
+                    Ok(Some(match self.dom.borrow().attr(self.node, &attr) {
+                        Some(v) => e.str_val(v),
+                        None => Value::Null,
+                    }))
+                }
+            }
             _ => Ok(None),
         }
+    }
+
+    fn set(&self, e: &mut Engine, _t: Value, key: &str, v: Value) -> JsResult<bool> {
+        let attr = if key == "role" {
+            Some("role".to_string())
+        } else if key.starts_with("aria")
+            && key.len() > 4
+            && !key.ends_with("Element")
+            && !key.ends_with("Elements")
+        {
+            Some(format!("aria-{}", key[4..].to_lowercase()))
+        } else {
+            None
+        };
+        let Some(attr) = attr else {
+            return Ok(false);
+        };
+        match v {
+            Value::Null | Value::Undefined => {
+                self.dom.borrow_mut().remove_attr(self.node, &attr);
+            }
+            other => {
+                let s = e.to_js_string(other)?;
+                self.dom.borrow_mut().set_attr(self.node, &attr, &s);
+            }
+        }
+        Ok(true)
     }
 
     fn has_method(&self, name: &str) -> bool {
@@ -13384,6 +16714,176 @@ impl Host for ElementInternalsHost {
             _ => Value::Undefined,
         }))
     }
+}
+
+/// `internals.validity` (JS-C560) — `ValidityState` spec :
+/// un hôte non associé-à-un-form est toujours valide → tous
+/// les flags `false`, `valid` `true`.
+fn validity_obj(e: &mut Engine) -> Value {
+    let o = e.new_object();
+    for k in [
+        "valueMissing",
+        "typeMismatch",
+        "patternMismatch",
+        "tooLong",
+        "tooShort",
+        "rangeUnderflow",
+        "rangeOverflow",
+        "stepMismatch",
+        "badInput",
+        "customError",
+    ] {
+        e.set_own(o, k, Value::Bool(false), true);
+    }
+    e.set_own(o, "valid", Value::Bool(true), true);
+    let tag = e.str_val("ValidityState");
+    e.set_own(o, crate::interp::SYM_TO_STRING_TAG, tag, false);
+    // Chaîne `ValidityState.prototype` (JS-C560 —
+    // `internals.validity instanceof ValidityState`).
+    if let Some(Value::Obj(cid)) = e.get_prop(e.global, "ValidityState") {
+        if let Some(pp @ Value::Obj(_)) = e.get_prop(cid, "prototype") {
+            if let Some(ob) = e.heap.obj_mut(o) {
+                ob.set_proto(pp);
+            }
+        }
+    }
+    Value::Obj(o)
+}
+
+/// Éléments courants de la liste cachée `__v` d'un
+/// `CustomStateSet` (`this` = l'objet set).
+fn css_items(e: &mut Engine, t: &Value) -> Vec<Value> {
+    let Value::Obj(id) = t else {
+        return Vec::new();
+    };
+    let Some(Value::Obj(arr)) = e.get_prop(*id, "__v") else {
+        return Vec::new();
+    };
+    let n = match e.get_prop(arr, "length") {
+        Some(Value::Num(n)) => n.max(0.0) as usize,
+        _ => 0,
+    };
+    (0..n)
+        .filter_map(|i| e.get_prop(arr, &i.to_string()))
+        .collect()
+}
+
+fn css_size(e: &mut Engine, t: Value, _a: &[Value]) -> JsResult<Value> {
+    Ok(Value::Num(css_items(e, &t).len() as f64))
+}
+
+fn css_has(e: &mut Engine, t: Value, args: &[Value]) -> JsResult<Value> {
+    let needle = arg(args, 0);
+    let hit = css_items(e, &t).iter().any(|v| e.strict_eq(v, &needle));
+    Ok(Value::Bool(hit))
+}
+
+/// Réécrit `__v` avec `items` (les sets sont minuscules —
+/// reconstruction O(n) honnête).
+fn css_write_items(e: &mut Engine, t: &Value, items: Vec<Value>) {
+    let Value::Obj(id) = t else {
+        return;
+    };
+    let arr = e.new_array(items);
+    e.set_own(*id, "__v", arr, false);
+}
+
+fn css_add(e: &mut Engine, t: Value, args: &[Value]) -> JsResult<Value> {
+    let s = e.to_js_string(arg(args, 0))?;
+    // Spec : le nom d'un état custom est un ident CSS `--*`
+    // (`:state(--x)`) — toute autre forme → `SyntaxError`.
+    if !s.starts_with("--") {
+        return Err(crate::heap::Thrown(dom_ex_pub(
+            e,
+            "SyntaxError",
+            "custom state names start with '--'",
+        )));
+    }
+    let v = e.str_val(s);
+    let mut items = css_items(e, &t);
+    if !items.iter().any(|x| e.strict_eq(x, &v)) {
+        items.push(v);
+        css_write_items(e, &t, items);
+    }
+    Ok(t)
+}
+
+fn css_del(e: &mut Engine, t: Value, args: &[Value]) -> JsResult<Value> {
+    let needle = arg(args, 0);
+    let items = css_items(e, &t);
+    let had = items.iter().any(|x| e.strict_eq(x, &needle));
+    if had {
+        css_write_items(
+            e,
+            &t,
+            items
+                .into_iter()
+                .filter(|x| !e.strict_eq(x, &needle))
+                .collect(),
+        );
+    }
+    Ok(Value::Bool(had))
+}
+
+fn css_clear(e: &mut Engine, t: Value, _a: &[Value]) -> JsResult<Value> {
+    css_write_items(e, &t, Vec::new());
+    Ok(Value::Undefined)
+}
+
+fn css_for_each(e: &mut Engine, t: Value, args: &[Value]) -> JsResult<Value> {
+    let cb = arg(args, 0);
+    let this_arg = arg(args, 1);
+    if e.is_callable(cb.clone()) {
+        for v in css_items(e, &t) {
+            e.call_value(cb.clone(), this_arg.clone(), &[v.clone(), v, t.clone()])?;
+        }
+    }
+    Ok(Value::Undefined)
+}
+
+/// `keys()`/`values()`/`@@iterator` — l'ordre d'insertion est
+/// celui de `__v` : le tableau lui-même est un itérable spec.
+fn css_values_fn(e: &mut Engine, t: Value, _a: &[Value]) -> JsResult<Value> {
+    let items = css_items(e, &t);
+    Ok(e.new_array(items))
+}
+
+fn css_entries(e: &mut Engine, t: Value, _a: &[Value]) -> JsResult<Value> {
+    let mut pairs = Vec::new();
+    for v in css_items(e, &t) {
+        pairs.push(e.new_array(vec![v.clone(), v]));
+    }
+    Ok(e.new_array(pairs))
+}
+
+/// `internals.states` (JS-C560) — `CustomStateSet` borné
+/// (liste cachée `__v`, méthodes set-like spec, `size` en
+/// accesseur, `add` valide la forme `--*`).
+fn custom_state_set(e: &mut Engine) -> Value {
+    let o = e.new_object();
+    let arr = e.new_array(Vec::new());
+    e.set_own(o, "__v", arr, false);
+    let sz = e.native_fn("get size", css_size);
+    if let Some(ob) = e.heap.obj_mut(o) {
+        ob.set_accessor("size", sz, Value::Undefined, true);
+    }
+    for (m, f) in [
+        ("has", css_has as crate::heap::NativeFn),
+        ("add", css_add),
+        ("delete", css_del),
+        ("clear", css_clear),
+        ("forEach", css_for_each),
+        ("keys", css_values_fn),
+        ("values", css_values_fn),
+        ("entries", css_entries),
+    ] {
+        e.add_method(o, m, f);
+    }
+    let it = e.native_fn("[Symbol.iterator]", css_values_fn);
+    e.set_own(o, crate::interp::SYM_ITERATOR, it, false);
+    let tag = e.str_val("CustomStateSet");
+    e.set_own(o, crate::interp::SYM_TO_STRING_TAG, tag, false);
+    Value::Obj(o)
 }
 
 fn style_set(dom: &mut Dom, node: NodeId, key: &str, value: &str) {
@@ -13854,6 +17354,22 @@ impl ClassListHost {
             .map(|c| c.split_whitespace().map(str::to_string).collect())
             .unwrap_or_default()
     }
+
+    /// Réécrit l'attribut seulement si l'ensemble de jetons a
+    /// réellement changé — spec `DOMTokenList` : `add`/`remove`
+    /// sur un ensemble inchangé sont des no-ops, pas des
+    /// mutations. Avant : `set_attr` inconditionnel → record +
+    /// op journal `SetAttr` + `mark_dirty` + réaction CE
+    /// **fantômes** à chaque appel (une boucle `add('x')`
+    /// inondait le journal d'ops bidons — signature du wedge
+    /// `host=DOMTokenList:add` au vol).
+    fn set_tokens_if_changed(&self, tokens: &[String]) {
+        let new_val = tokens.join(" ");
+        let mut d = self.dom.borrow_mut();
+        if d.attr(self.node, self.attr).unwrap_or("") != new_val {
+            d.set_attr(self.node, self.attr, &new_val);
+        }
+    }
 }
 
 impl Host for ClassListHost {
@@ -13994,9 +17510,7 @@ impl Host for ClassListHost {
                         t.clone_from(&b);
                     }
                 }
-                self.dom
-                    .borrow_mut()
-                    .set_attr(self.node, self.attr, &tokens.join(" "));
+                self.set_tokens_if_changed(&tokens);
                 return Ok(Some(Value::Bool(true)));
             }
             _ => {}
@@ -14014,20 +17528,13 @@ impl Host for ClassListHost {
         // présent ré-écrivaient l'attribut pour rien — et
         // `toggle(x, true)` **dupliquait** le jeton (spec :
         // force=true sur présent = no-op retour `true`).
-        let (mut changed, mut ret) = (false, Value::Undefined);
         match name {
             "add" => {
                 if !contains {
                     tokens.push(cls.clone());
-                    changed = true;
                 }
             }
-            "remove" => {
-                if contains {
-                    tokens.retain(|t| t != &cls);
-                    changed = true;
-                }
-            }
+            "remove" => tokens.retain(|t| t != &cls),
             "toggle" => {
                 // `toggle(t, force)` — le second arg force l'état
                 // cible (spec DOMTokenList, JS-C76).
@@ -14036,23 +17543,25 @@ impl Host for ClassListHost {
                     f => Some(e.to_boolean(f)),
                 };
                 let want = force.unwrap_or(!contains);
-                if want != contains {
-                    if want {
+                if want {
+                    if !contains {
                         tokens.push(cls.clone());
-                    } else {
-                        tokens.retain(|t| t != &cls);
                     }
-                    changed = true;
+                } else {
+                    tokens.retain(|t| t != &cls);
                 }
-                ret = Value::Bool(want);
             }
             "contains" => return Ok(Some(Value::Bool(contains))),
             _ => return Ok(None),
         }
-        if changed {
-            d.set_attr(self.node, self.attr, &tokens.join(" "));
+        let new_val = tokens.join(" ");
+        if d.attr(self.node, self.attr).unwrap_or("") != new_val {
+            d.set_attr(self.node, self.attr, &new_val);
         }
-        Ok(Some(ret))
+        Ok(Some(match name {
+            "toggle" => Value::Bool(tokens.iter().any(|t| t == &cls)),
+            _ => Value::Undefined,
+        }))
     }
 }
 
@@ -14134,6 +17643,19 @@ impl Host for AttributesHost {
 
     fn keys(&self, _e: &mut Engine, _t: Value) -> Vec<String> {
         (0..self.attrs().len()).map(|i| i.to_string()).collect()
+    }
+
+    fn has_method(&self, name: &str) -> bool {
+        matches!(
+            name,
+            "item"
+                | "getNamedItem"
+                | "getNamedItemNS"
+                | "setNamedItem"
+                | "setNamedItemNS"
+                | "removeNamedItem"
+                | "removeNamedItemNS"
+        )
     }
 
     fn invoke(
@@ -15063,6 +18585,10 @@ impl Host for DomImplementationHost {
         self
     }
 
+    fn has_method(&self, name: &str) -> bool {
+        matches!(name, "createHTMLDocument" | "hasFeature")
+    }
+
     fn invoke(
         &self,
         e: &mut Engine,
@@ -15091,6 +18617,7 @@ impl Host for DomImplementationHost {
                     fonts: RefCell::new(None),
                     domain_override: RefCell::new(None),
                     adopted_sheets: RefCell::new(None),
+                    design_mode: RefCell::new(false),
                 }));
                 // Spec : le document produit hérite
                 // `HTMLDocument.prototype` (comme `document`).
@@ -15116,12 +18643,36 @@ impl Host for DomImplementationHost {
 struct LocationHost;
 
 /// `(protocol, host, hostname, port, pathname, search, hash)` of `u`.
+/// Userinfo d'une URL brute (`scheme://u:p@host/…`) —
+/// `which_user` : `true` → username, `false` → password.
+/// Aucun `@` avant le premier `/` → `""` (spec : pas
+/// d'userinfo).
+fn url_userinfo(u: &str, which_user: bool) -> String {
+    let Some(scheme_end) = u.find("://") else {
+        return String::new();
+    };
+    let rest = &u[scheme_end + 3..];
+    let auth = rest.split(['/', '?', '#']).next().unwrap_or("");
+    let Some(at) = auth.rfind('@') else {
+        return String::new();
+    };
+    let info = &auth[..at];
+    if which_user {
+        info.split(':').next().unwrap_or("").to_string()
+    } else {
+        info.split_once(':').map_or("", |(_, p)| p).to_string()
+    }
+}
+
 fn url_parts(u: &str) -> (String, String, String, String, String, String, String) {
     let (scheme, rest) = u.split_once("://").unwrap_or(("", u));
     let (authority, tail) = match rest.find(['/', '?', '#']) {
         Some(i) => (&rest[..i], &rest[i..]),
         None => (rest, "/"),
     };
+    // `host`/`hostname` excluent l'userinfo `u:p@` (spec URL —
+    // `a.host` ≙ `ex.com:8080`, jamais `u:p@ex.com:8080`).
+    let authority = authority.rsplit('@').next().unwrap_or(authority);
     let (hostname, port) = authority.split_once(':').unwrap_or((authority, ""));
     let hash = tail.rfind('#').map_or("", |i| &tail[i..]);
     let tail = &tail[..tail.len() - hash.len()];
@@ -15449,6 +19000,13 @@ impl Host for HistoryHost {
         Ok(false)
     }
 
+    fn has_method(&self, name: &str) -> bool {
+        matches!(
+            name,
+            "back" | "forward" | "go" | "pushState" | "replaceState"
+        )
+    }
+
     fn invoke(
         &self,
         e: &mut Engine,
@@ -15598,10 +19156,41 @@ fn history_replace_state(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<
 /// s'enregistrent et la surface ne jette pas.
 struct NavigationHost;
 
+/// Chaîne `obj` sur le `prototype` du global `interface_name`
+/// (JS-C560 — `entry instanceof NavigationHistoryEntry`).
+fn nav_chain_proto(e: &mut Engine, obj: ObjId, interface_name: &str) {
+    if let Some(Value::Obj(cid)) = e.get_prop(e.global, interface_name) {
+        if let Some(pp @ Value::Obj(_)) = e.get_prop(cid, "prototype") {
+            if let Some(o) = e.heap.obj_mut(obj) {
+                o.set_proto(pp);
+            }
+        }
+    }
+}
+
+/// `Promise<undefined>` résolue — méthodes `PreloadManager`/
+/// `PrecommitController` (no-op borné : pas de préchargement
+/// ni d'orchestrateur à instrumenter).
+fn nav_promise_undefined(e: &mut Engine, _t: Value, _a: &[Value]) -> JsResult<Value> {
+    let pid = e.new_promise();
+    e.resolve_promise(pid, Value::Undefined);
+    Ok(Value::Obj(pid))
+}
+
+/// `PreloadManager.getState()` → `{}` résolu (aucune règle
+/// de préchargement active).
+fn nav_promise_object(e: &mut Engine, _t: Value, _a: &[Value]) -> JsResult<Value> {
+    let pid = e.new_promise();
+    let o = e.new_object();
+    e.resolve_promise(pid, Value::Obj(o));
+    Ok(Value::Obj(pid))
+}
+
 /// `NavigationHistoryEntry` minimal — `key`/`id` opaques stables
 /// par entrée (une seule entrée modélisée : `"0"`).
 fn nav_history_entry(e: &mut Engine) -> Value {
     let entry = e.new_object();
+    nav_chain_proto(e, entry, "NavigationHistoryEntry");
     let u = e.hooks.page_url.clone();
     let v = e.str_val(u);
     e.set_own(entry, "url", v, true);
@@ -15672,6 +19261,7 @@ impl Host for NavigationHost {
             // `navigationType` `"push"` (entrée poussée).
             "activation" => {
                 let a = e.new_object();
+                nav_chain_proto(e, a, "NavigationActivation");
                 let entry = nav_history_entry(e);
                 e.set_own(a, "entry", entry, true);
                 e.set_own(a, "from", Value::Null, true);
@@ -16085,6 +19675,61 @@ fn css_supports(_e: &mut Engine, _t: Value, _a: &[Value]) -> JsResult<Value> {
     Ok(Value::Bool(false))
 }
 
+/// Unités des factories numériques `CSS.<unit>(v)`
+/// (css-typed-om §4.3 — `<dimension>` + `number`/`percent`).
+const CSS_UNIT_NAMES: &[&str] = &[
+    "number", "percent", // relatives à la police
+    "cap", "ch", "em", "ex", "ic", "lh", "rcap", "rch", "rem", "rex", "ric", "rlh",
+    // viewport
+    "vb", "vh", "vi", "vmax", "vmin", "vw", "svb", "svh", "svi", "svmax", "svmin", "svw", "lvb",
+    "lvh", "lvi", "lvmax", "lvmin", "lvw", "dvb", "dvh", "dvi", "dvmax", "dvmin", "dvw",
+    // conteneur
+    "cqb", "cqh", "cqi", "cqmax", "cqmin", "cqw", // longueurs absolues
+    "cm", "in", "mm", "pc", "pt", "px", "Q", // angle
+    "deg", "grad", "rad", "turn", // temps
+    "ms", "s", // fréquence
+    "Hz", "kHz", // résolution
+    "dpcm", "dpi", "dppx", "x", // flex
+    "fr",
+];
+
+/// `CSS.<unit>(v)` — fabrique numérique Typed OM : objet plat
+/// `{value, unit}` + `toString()` → `"<v><unit>"` ; l'unité est
+/// l'arg lié (`bound[0]`), la valeur `args[1]`. Pas de
+/// `CSSUnitValue` complet : surface lecture honnête.
+fn css_unit_factory(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
+    let unit = args
+        .first()
+        .and_then(|v| e.to_js_string(v.clone()).ok())
+        .unwrap_or_default();
+    let v = e.to_number(arg(args, 1))?;
+    let o = e.new_object();
+    e.set_own(o, "value", Value::Num(v), true);
+    let uv = e.str_val(unit.clone());
+    e.set_own(o, "unit", uv.clone(), true);
+    let ts = e.bound_native("toString", css_unit_to_string, vec![uv]);
+    e.set_own(o, "toString", ts, false);
+    Ok(Value::Obj(o))
+}
+
+/// `CSSUnitValue.toString()` — `"<value><unit>"` (unité liée,
+/// valeur lue sur `this` pour tolérer le monkey-patch).
+fn css_unit_to_string(e: &mut Engine, t: Value, args: &[Value]) -> JsResult<Value> {
+    let unit = args
+        .first()
+        .and_then(|v| e.to_js_string(v.clone()).ok())
+        .unwrap_or_default();
+    let v = e.read_prop(t.clone(), t, "value")?;
+    let s = e.to_js_string(v)?;
+    // Sérialisation Typed OM : `number` → "" et `percent` → "%".
+    let unit = match unit.as_str() {
+        "number" => "",
+        "percent" => "%",
+        u => u,
+    };
+    Ok(e.str_val(format!("{s}{unit}")))
+}
+
 /// `new Node()` — inconstructible ("illegal constructor" per spec).
 fn node_ctor(e: &mut Engine, _t: Value, _a: &[Value]) -> JsResult<Value> {
     Err(e.type_error("Node: illegal constructor"))
@@ -16466,6 +20111,72 @@ fn mouse_event_ctor(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Val
     }
     if !matches!(e.get_prop_value(this.clone(), "view"), Ok(v) if !matches!(v, Value::Undefined)) {
         e.set_prop_value(this, "view", Value::Null)?;
+    }
+    Ok(Value::Undefined)
+}
+
+/// `PointerEvent` — `mouse_event_ctor` + défauts
+/// `PointerEventInit` (JS-C560 : `pointerId`/`pressure`/
+/// angles stylus nuls, `width`/`height`/`altitudeAngle` = 1/
+/// π/2, `isPrimary` `false`, `pointerType` `""`) +
+/// `getCoalescedEvents`/`getPredictedEvents` → `[]` (aucun
+/// batch headless).
+fn pointer_event_ctor(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
+    mouse_event_ctor(e, this.clone(), args)?;
+    let init = arg(args, 1);
+    let init_num = |e: &mut Engine, k: &str, dflt: f64| -> JsResult<f64> {
+        let v = if matches!(init, Value::Obj(_)) {
+            e.get_prop_value(init.clone(), k)?
+        } else {
+            Value::Undefined
+        };
+        match v {
+            Value::Undefined | Value::Null => Ok(dflt),
+            Value::Num(n) => Ok(n),
+            other => {
+                let s = e.to_js_string(other)?;
+                Ok(s.trim().parse().unwrap_or(dflt))
+            }
+        }
+    };
+    for (k, d) in [
+        ("pointerId", 0.0),
+        ("width", 1.0),
+        ("height", 1.0),
+        ("pressure", 0.0),
+        ("tangentialPressure", 0.0),
+        ("tiltX", 0.0),
+        ("tiltY", 0.0),
+        ("twist", 0.0),
+        ("altitudeAngle", std::f64::consts::FRAC_PI_2),
+        ("azimuthAngle", 0.0),
+        ("persistentDeviceId", 0.0),
+    ] {
+        let n = init_num(e, k, d)?;
+        e.set_prop_value(this.clone(), k, Value::Num(n))?;
+    }
+    let pt = if matches!(init, Value::Obj(_)) {
+        e.get_prop_value(init.clone(), "pointerType")?
+    } else {
+        Value::Undefined
+    };
+    let pt = match pt {
+        Value::Undefined | Value::Null => e.str_val(""),
+        other => {
+            let s = e.to_js_string(other)?;
+            e.str_val(s)
+        }
+    };
+    e.set_prop_value(this.clone(), "pointerType", pt)?;
+    let prim = if matches!(init, Value::Obj(_)) {
+        e.get_prop_value(init.clone(), "isPrimary")?
+    } else {
+        Value::Undefined
+    };
+    e.set_prop_value(this.clone(), "isPrimary", Value::Bool(e.to_boolean(prim)))?;
+    for m in ["getCoalescedEvents", "getPredictedEvents"] {
+        let f = e.native_fn(m, |e: &mut Engine, _t, _a| Ok(e.new_array(Vec::new())));
+        e.set_prop_value(this.clone(), m, f)?;
     }
     Ok(Value::Undefined)
 }
@@ -17530,6 +21241,37 @@ fn nav_plugin_refresh(_e: &mut Engine, _t: Value, _a: &[Value]) -> JsResult<Valu
     Ok(Value::Undefined)
 }
 
+/// `document.lastModified` (JS-C560) — instant présent au
+/// format spec `MM/DD/YYYY HH:MM:SS`. Pas d'horodatage de
+/// fetch dans le miroir : l'instant courant UTC est servi
+/// (la spec veut l'heure locale — pas de tz embarquée,
+/// approximation documentée).
+fn doc_last_modified() -> String {
+    let ms = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| d.as_millis() as i64);
+    let days = ms.div_euclid(86_400_000);
+    let (y, mo, d) = crate::builtins::date::civil_from_days(days);
+    let sod = ms.rem_euclid(86_400_000);
+    let (hh, mm, ss) = (sod / 3_600_000, (sod / 60_000) % 60, (sod / 1000) % 60);
+    format!("{mo:02}/{d:02}/{y:04} {hh:02}:{mm:02}:{ss:02}")
+}
+
+/// `navigator.<m>` non supportée (JS-C560) — `Promise`
+/// rejetée `NotSupportedError`, même gabarit que
+/// `creds_unsupported` : la méthode existe (feature-detect
+/// `typeof`/`in` vert) mais ne prétend pas réussir.
+fn nav_unsupported_reject(e: &mut Engine, _t: Value, _a: &[Value]) -> JsResult<Value> {
+    let pid = e.new_promise();
+    let o = e.new_object();
+    let n = e.str_val("NotSupportedError");
+    e.set_own(o, "name", n, true);
+    let m = e.str_val("navigator: feature not supported");
+    e.set_own(o, "message", m, true);
+    e.reject_promise(pid, Value::Obj(o));
+    Ok(Value::Obj(pid))
+}
+
 /// `navigator.userAgent` = la chaîne `User-Agent` exacte envoyée
 /// par `explorer-net` (`h1.rs`) — les navigateurs réels gardent
 /// header et prop JS identiques ; un écart est un signal anti-bot
@@ -17647,6 +21389,150 @@ pub(crate) fn install_worker_navigator(e: &mut Engine) {
     let uad = navigator_uad(e);
     e.set_own(nav, "userAgentData", uad, true);
     let g = e.global;
+    // `WorkerNavigator` (JS-C560) — interface exposée
+    // WorkerGlobalScope uniquement (spec `[Exposed=Worker]` :
+    // volontairement absente du global fenêtre). Proto porteur
+    // des membres IDL, `navigator` chaîné dessus.
+    let wnf = e.illegal_ctor_bound("WorkerNavigator");
+    if let Value::Obj(cid) = wnf {
+        let p = e.new_object();
+        let tag = e.str_val("WorkerNavigator");
+        e.set_own(p, crate::interp::SYM_TO_STRING_TAG, tag, false);
+        for k in [
+            "appCodeName",
+            "appName",
+            "appVersion",
+            "connection",
+            "cookieEnabled",
+            "globalPrivacyControl",
+            "gpu",
+            "hardwareConcurrency",
+            "hid",
+            "language",
+            "languages",
+            "locks",
+            "mediaCapabilities",
+            "ml",
+            "onLine",
+            "oscpu",
+            "permissions",
+            "platform",
+            "product",
+            "productSub",
+            "serial",
+            "storage",
+            "usb",
+            "userAgent",
+            "userAgentData",
+            "vendor",
+            "vendorSub",
+            "webdriver",
+        ] {
+            e.set_own(p, k, Value::Undefined, true);
+        }
+        let sb = e.native_fn("sendBeacon", nav_send_beacon);
+        e.set_own(p, "sendBeacon", sb, true);
+        for m in ["clearAppBadge", "setAppBadge"] {
+            let f = e.native_fn(m, nav_promise_undefined);
+            e.set_own(p, m, f, true);
+        }
+        for m in ["taintEnabled", "vibrate"] {
+            let f = e.native_fn(m, |_e: &mut Engine, _t, _a| Ok(Value::Bool(false)));
+            e.set_own(p, m, f, true);
+        }
+        e.set_own(cid, "prototype", Value::Obj(p), false);
+        if let Some(o) = e.heap.obj_mut(nav) {
+            o.set_proto(Value::Obj(p));
+        }
+    }
+    e.set_own(g, "WorkerNavigator", wnf, false);
+    // `WorkerLocation` — même modèle : proto IDL, le `location`
+    // du scope (`WorkerLocationHost`) hérite ses membres.
+    let wlf = e.illegal_ctor_bound("WorkerLocation");
+    if let Value::Obj(cid) = wlf {
+        let p = e.new_object();
+        let tag = e.str_val("WorkerLocation");
+        e.set_own(p, crate::interp::SYM_TO_STRING_TAG, tag, false);
+        for k in [
+            "hash", "host", "hostname", "href", "origin", "pathname", "port", "protocol", "search",
+        ] {
+            e.set_own(p, k, Value::Undefined, true);
+        }
+        let ts = e.native_fn("toString", |e: &mut Engine, t, _a| {
+            Ok(e.get_prop_value(t, "href").unwrap_or(Value::Undefined))
+        });
+        e.set_own(p, "toString", ts, true);
+        e.set_own(cid, "prototype", Value::Obj(p), false);
+        if let Some(Value::Obj(lid)) = e.get_prop(g, "location") {
+            if let Some(o) = e.heap.obj_mut(lid) {
+                o.set_proto(Value::Obj(p));
+            }
+        }
+    }
+    e.set_own(g, "WorkerLocation", wlf, false);
+    // `WorkerGlobalScope`/`DedicatedWorkerGlobalScope` —
+    // protos IDL chaînés (`Dedicated → Worker`), le global
+    // `self` adopte la tête de chaîne (`self instanceof
+    // DedicatedWorkerGlobalScope` vrai dans le worker).
+    let mut wgs_proto = Value::Obj(e.protos.object);
+    let wgf = e.illegal_ctor_bound("WorkerGlobalScope");
+    if let Value::Obj(cid) = wgf {
+        let p = e.new_object();
+        let tag = e.str_val("WorkerGlobalScope");
+        e.set_own(p, crate::interp::SYM_TO_STRING_TAG, tag, false);
+        for k in [
+            "self",
+            "location",
+            "navigator",
+            "fonts",
+            "onerror",
+            "onlanguagechange",
+            "onoffline",
+            "ononline",
+            "onrejectionhandled",
+            "onsecuritypolicyviolation",
+            "onunhandledrejection",
+        ] {
+            let v = if k.starts_with("on") {
+                Value::Null
+            } else {
+                Value::Undefined
+            };
+            e.set_own(p, k, v, true);
+        }
+        let f = e.native_fn("importScripts", mql_noop);
+        e.set_own(p, "importScripts", f, true);
+        e.set_own(cid, "prototype", Value::Obj(p), false);
+        wgs_proto = Value::Obj(p);
+    }
+    e.set_own(g, "WorkerGlobalScope", wgf, false);
+    let dwf = e.illegal_ctor_bound("DedicatedWorkerGlobalScope");
+    if let Value::Obj(cid) = dwf {
+        let p = e.new_object();
+        let tag = e.str_val("DedicatedWorkerGlobalScope");
+        e.set_own(p, crate::interp::SYM_TO_STRING_TAG, tag, false);
+        if let Some(o) = e.heap.obj_mut(p) {
+            o.set_proto(wgs_proto.clone());
+        }
+        e.set_own(p, "name", Value::Undefined, true);
+        for h in ["onmessage", "onmessageerror", "onrtctransform"] {
+            e.set_own(p, h, Value::Null, true);
+        }
+        for m in [
+            "postMessage",
+            "close",
+            "requestAnimationFrame",
+            "cancelAnimationFrame",
+        ] {
+            let f = e.native_fn(m, mql_noop);
+            e.set_own(p, m, f, true);
+        }
+        e.set_own(cid, "prototype", Value::Obj(p), false);
+        if let Some(o) = e.heap.obj_mut(g) {
+            o.set_proto(Value::Obj(p));
+        }
+    }
+    e.set_own(g, "DedicatedWorkerGlobalScope", dwf, false);
     e.set_own(g, "navigator", Value::Obj(nav), false);
 }
 
@@ -17995,6 +21881,11 @@ impl Host for DatasetHost {
 /// (canal miroir→moteur, déviation `outerHTML` documentée).
 const CUSTOM_VALIDITY_ATTR: &str = "data-explorer-cv";
 
+/// Slot `input.indeterminate` (JS-C559) — état visuel sans
+/// attribut IDL : sérialisé avec le miroir (motif
+/// `CUSTOM_VALIDITY_ATTR`, ADR-0014).
+const INDETERMINATE_ATTR: &str = "data-explorer-indeterminate";
+
 /// Slots de sélection de champ (CAP-177) — attributs
 /// internes sérialisés avec le miroir (même motif que
 /// `CUSTOM_VALIDITY_ATTR`, ADR-0014) : `selectionStart`/
@@ -18268,6 +22159,7 @@ fn push_named_field(d: &Dom, n: NodeId, value: String, out: &mut Vec<(String, St
 const NOOP_CTX_METHODS: &[&str] = &[
     "ellipse",
     "roundRect",
+    "arcTo",
     "drawImage",
     "fillText",
     "strokeText",
@@ -18279,12 +22171,316 @@ const NOOP_CTX_METHODS: &[&str] = &[
     "resetTransform",
 ];
 
+/// Membres de `CanvasRenderingContext2D.prototype` (JS-C560)
+/// — méthodes = surface `Ctx2dHost::has_method` complète,
+/// props = `canvas` + champs typés + sac d'état spec.
+const CTX2D_PROTO_METHODS: &[&str] = &[
+    "save",
+    "restore",
+    "beginPath",
+    "closePath",
+    "fill",
+    "stroke",
+    "clip",
+    "translate",
+    "scale",
+    "rotate",
+    "transform",
+    "setTransform",
+    "resetTransform",
+    "reset",
+    "moveTo",
+    "lineTo",
+    "quadraticCurveTo",
+    "bezierCurveTo",
+    "arc",
+    "arcTo",
+    "ellipse",
+    "rect",
+    "roundRect",
+    "fillRect",
+    "strokeRect",
+    "clearRect",
+    "drawImage",
+    "fillText",
+    "strokeText",
+    "measureText",
+    "getLineDash",
+    "setLineDash",
+    "isPointInPath",
+    "isPointInStroke",
+    "drawFocusIfNeeded",
+    "scrollPathIntoView",
+    "createLinearGradient",
+    "createRadialGradient",
+    "createConicGradient",
+    "createPattern",
+    "getImageData",
+    "putImageData",
+    "createImageData",
+    "getTransform",
+    "isContextLost",
+    "getContextAttributes",
+];
+const CTX2D_PROTO_PROPS: &[&str] = &[
+    "canvas",
+    "fillStyle",
+    "strokeStyle",
+    "globalAlpha",
+    "lineWidth",
+    "font",
+    "textAlign",
+    "textBaseline",
+    "direction",
+    "lineCap",
+    "lineJoin",
+    "miterLimit",
+    "lineDashOffset",
+    "shadowColor",
+    "shadowBlur",
+    "shadowOffsetX",
+    "shadowOffsetY",
+    "globalCompositeOperation",
+    "imageSmoothingEnabled",
+    "imageSmoothingQuality",
+    "filter",
+    "fontKerning",
+    "fontStretch",
+    "fontVariantCaps",
+    "letterSpacing",
+    "wordSpacing",
+    "textRendering",
+    "lang",
+];
+
+/// Membres IDL `ElementInternals` (JS-C560) — les accesseurs
+/// délèguent à `Host::get`/`set` (réflexion `role`/`aria-*`
+/// réelle sur l'hôte), les méthodes à `Host::invoke`.
+const EI_PROTO_METHODS: &[&str] = &[
+    "setFormValue",
+    "setValidity",
+    "checkValidity",
+    "reportValidity",
+    "focus",
+];
+
+const EI_PROTO_PROPS: &[&str] = &[
+    "shadowRoot",
+    "form",
+    "labels",
+    "states",
+    "validity",
+    "willValidate",
+    "validationMessage",
+    "role",
+    "ariaActiveDescendantElement",
+    "ariaAtomic",
+    "ariaAutoComplete",
+    "ariaBrailleLabel",
+    "ariaBrailleRoleDescription",
+    "ariaBusy",
+    "ariaChecked",
+    "ariaColCount",
+    "ariaColIndex",
+    "ariaColIndexText",
+    "ariaColSpan",
+    "ariaControlsElements",
+    "ariaCurrent",
+    "ariaDescribedByElements",
+    "ariaDescription",
+    "ariaDetailsElements",
+    "ariaDisabled",
+    "ariaErrorMessageElements",
+    "ariaExpanded",
+    "ariaFlowToElements",
+    "ariaHasPopup",
+    "ariaHidden",
+    "ariaInvalid",
+    "ariaKeyShortcuts",
+    "ariaLabel",
+    "ariaLabelledByElements",
+    "ariaLevel",
+    "ariaLive",
+    "ariaModal",
+    "ariaMultiLine",
+    "ariaMultiSelectable",
+    "ariaOrientation",
+    "ariaOwnsElements",
+    "ariaPlaceholder",
+    "ariaPosInSet",
+    "ariaPressed",
+    "ariaReadOnly",
+    "ariaRequired",
+    "ariaRoleDescription",
+    "ariaRowCount",
+    "ariaRowIndex",
+    "ariaRowIndexText",
+    "ariaRowSpan",
+    "ariaSelected",
+    "ariaSetSize",
+    "ariaSort",
+    "ariaValueMax",
+    "ariaValueMin",
+    "ariaValueNow",
+    "ariaValueText",
+];
+
+/// Membres `CustomStateSet` (set-like spec).
+const CSS_PROTO_METHODS: &[&str] = &[
+    "add", "clear", "delete", "entries", "forEach", "has", "keys", "values",
+];
+
+const CSS_PROTO_PROPS: &[&str] = &["size"];
+
+/// Membres `TextTrack`/`TextTrackList` (les instances réelles
+/// de `addTextTrack` portent déjà leurs props propres — le
+/// proto sert le feature-detect `in`).
+const TT_PROTO_METHODS: &[&str] = &["addCue", "removeCue"];
+
+const TT_PROTO_PROPS: &[&str] = &[
+    "id",
+    "kind",
+    "label",
+    "language",
+    "mode",
+    "cues",
+    "activeCues",
+    "inBandMetadataTrackDispatchType",
+    "sourceBuffer",
+    "oncuechange",
+];
+
+const TTL_PROTO_METHODS: &[&str] = &["getTrackById"];
+
+const TTL_PROTO_PROPS: &[&str] = &["length", "onaddtrack", "onremovetrack", "onchange"];
+
+/// `MediaError` — `code`/`message` (instances propres +
+/// proto), constantes `MEDIA_ERR_*` posées au install.
+const ME_PROTO_PROPS: &[&str] = &["code", "message"];
+
+/// `MediaList` (`styleSheet.media`) — liste de médias CSS.
+const ML_PROTO_METHODS: &[&str] = &["item", "appendMedium", "deleteMedium", "toString"];
+
+const ML_PROTO_PROPS: &[&str] = &["length", "mediaText"];
+
+/// CTM courante d'un `<canvas>` — repli des ops `transform*`
+/// enregistrées (`save`/`restore` empilent, `setTransform`
+/// remplace) : `ctx.getTransform()` rend la matrice affine
+/// [a..f] réellement accumulée (JS-C560).
+fn ctx2d_current_ctm(d: &crate::dom::Dom, node: NodeId) -> [f64; 6] {
+    const IDENT: [f64; 6] = [1.0, 0.0, 0.0, 1.0, 0.0, 0.0];
+    let mut m = IDENT;
+    let mut stack: Vec<[f64; 6]> = Vec::new();
+    let Some(s) = d.canvases.get(&node) else {
+        return IDENT;
+    };
+    for op in &s.ops {
+        m = match op {
+            crate::dom::CanvasOpRecord::Save => {
+                if stack.len() < 512 {
+                    stack.push(m);
+                }
+                m
+            }
+            crate::dom::CanvasOpRecord::Restore => stack.pop().unwrap_or(m),
+            crate::dom::CanvasOpRecord::Translate(x, y) => {
+                matrix_mul(m, [1.0, 0.0, 0.0, 1.0, f64::from(*x), f64::from(*y)])
+            }
+            crate::dom::CanvasOpRecord::Scale(x, y) => {
+                matrix_mul(m, [f64::from(*x), 0.0, 0.0, f64::from(*y), 0.0, 0.0])
+            }
+            crate::dom::CanvasOpRecord::Rotate(r) => {
+                let (s_, c) = f64::from(*r).sin_cos();
+                matrix_mul(m, [c, s_, -s_, c, 0.0, 0.0])
+            }
+            crate::dom::CanvasOpRecord::Transform(a, b, c, dd, ee, f) => matrix_mul(
+                m,
+                [
+                    f64::from(*a),
+                    f64::from(*b),
+                    f64::from(*c),
+                    f64::from(*dd),
+                    f64::from(*ee),
+                    f64::from(*f),
+                ],
+            ),
+            crate::dom::CanvasOpRecord::SetTransform(a, b, c, dd, ee, f) => [
+                f64::from(*a),
+                f64::from(*b),
+                f64::from(*c),
+                f64::from(*dd),
+                f64::from(*ee),
+                f64::from(*f),
+            ],
+            _ => m,
+        };
+    }
+    m
+}
+
 /// `CanvasRenderingContext2D` — enregistreur d'op-list sur le
 /// `<canvas>` `node` (JS-C28).
 struct Ctx2dHost {
     dom: DomRef,
     cache: NodeCache,
     node: NodeId,
+}
+
+/// Props d'état IDL du contexte 2D au-delà des cinq champs
+/// typés (`fill`/`stroke`/`alpha`/`line_w`/`ctx_value`) —
+/// JS-C560 : lecture = `CanvasState.extra` ou défaut spec,
+/// écriture = stockage borné (pas de validation font/composite
+/// — le playback ne les consomme pas encore ; valeur posée =
+/// valeur relue, discipline spec minimale).
+const CTX2D_STR_DEFAULTS: &[(&str, &str)] = &[
+    ("font", "10px sans-serif"),
+    ("textAlign", "start"),
+    ("textBaseline", "alphabetic"),
+    ("direction", "inherit"),
+    ("lineCap", "butt"),
+    ("lineJoin", "miter"),
+    ("shadowColor", "rgba(0, 0, 0, 0)"),
+    ("globalCompositeOperation", "source-over"),
+    ("imageSmoothingQuality", "low"),
+    ("filter", "none"),
+    ("fontKerning", "auto"),
+    ("fontStretch", "normal"),
+    ("fontVariantCaps", "normal"),
+    ("letterSpacing", "0px"),
+    ("wordSpacing", "0px"),
+    ("textRendering", "auto"),
+    ("lang", ""),
+];
+const CTX2D_NUM_DEFAULTS: &[(&str, f64)] = &[
+    ("miterLimit", 10.0),
+    ("lineDashOffset", 0.0),
+    ("shadowBlur", 0.0),
+    ("shadowOffsetX", 0.0),
+    ("shadowOffsetY", 0.0),
+];
+const CTX2D_BOOL_DEFAULTS: &[(&str, bool)] = &[("imageSmoothingEnabled", true)];
+
+/// `key` prop d'état Ctx2d (hors cinq champs typés) ?
+fn ctx2d_state_prop(key: &str) -> bool {
+    CTX2D_STR_DEFAULTS.iter().any(|(k, _)| *k == key)
+        || CTX2D_NUM_DEFAULTS.iter().any(|(k, _)| *k == key)
+        || CTX2D_BOOL_DEFAULTS.iter().any(|(k, _)| *k == key)
+}
+
+/// Défaut spec de la prop d'état `key`.
+fn ctx2d_default(e: &mut Engine, key: &str) -> Value {
+    if let Some((_, d)) = CTX2D_STR_DEFAULTS.iter().find(|(k, _)| *k == key) {
+        e.str_val(*d)
+    } else if let Some((_, d)) = CTX2D_NUM_DEFAULTS.iter().find(|(k, _)| *k == key) {
+        Value::Num(*d)
+    } else {
+        Value::Bool(
+            CTX2D_BOOL_DEFAULTS
+                .iter()
+                .find(|(k, _)| *k == key)
+                .is_some_and(|(_, d)| *d),
+        )
+    }
 }
 
 /// `CanvasGradient`/`CanvasPattern` opaque (hors MVP R-11) :
@@ -18349,6 +22545,19 @@ impl Host for Ctx2dHost {
                     .map_or(1.0, |s| s.line_w);
                 Ok(Some(Value::Num(f64::from(w))))
             }
+            // Props d'état secondaires (JS-C560) — sac
+            // `CanvasState.extra` ou défaut spec.
+            _ if ctx2d_state_prop(key) => {
+                let v = self
+                    .dom
+                    .borrow()
+                    .canvases
+                    .get(&self.node)
+                    .and_then(|s| s.extra.get(key))
+                    .cloned()
+                    .unwrap_or_else(|| ctx2d_default(e, key));
+                Ok(Some(v))
+            }
             _ => Ok(None),
         }
     }
@@ -18404,15 +22613,80 @@ impl Host for Ctx2dHost {
                 }
                 Ok(true)
             }
+            // Props d'état secondaires (JS-C560) — valeur
+            // stockée dans `CanvasState.extra` (coercition
+            // spec : string pour les énumérés, nombre pour les
+            // métriques, bool pour `imageSmoothingEnabled` ;
+            // pas de validation de syntaxe — valeur relue
+            // telle quelle).
+            _ if ctx2d_state_prop(key) => {
+                let sv = if CTX2D_NUM_DEFAULTS.iter().any(|(k, _)| *k == key) {
+                    Value::Num(e.to_number(v)?)
+                } else if CTX2D_BOOL_DEFAULTS.iter().any(|(k, _)| *k == key) {
+                    Value::Bool(e.to_boolean(v))
+                } else {
+                    let s = e.to_js_string(v)?;
+                    e.str_val(s)
+                };
+                let mut d = self.dom.borrow_mut();
+                let st = d.canvas_state(self.node);
+                // Borne « budgets » — le sac n'est pas un
+                // vecteur de croissance (64 entrées ≫ le
+                // nombre de props IDL connues).
+                if st.extra.len() < 64 || st.extra.contains_key(key) {
+                    st.extra.insert(key.to_string(), sv);
+                }
+                Ok(true)
+            }
             _ => Ok(false),
         }
+    }
+
+    fn has_method(&self, name: &str) -> bool {
+        matches!(
+            name,
+            "save"
+                | "restore"
+                | "beginPath"
+                | "closePath"
+                | "fill"
+                | "stroke"
+                | "clip"
+                | "translate"
+                | "scale"
+                | "rotate"
+                | "transform"
+                | "setTransform"
+                | "moveTo"
+                | "lineTo"
+                | "quadraticCurveTo"
+                | "bezierCurveTo"
+                | "arc"
+                | "rect"
+                | "fillRect"
+                | "strokeRect"
+                | "clearRect"
+                | "measureText"
+                | "getLineDash"
+                | "isPointInPath"
+                | "isPointInStroke"
+                | "createLinearGradient"
+                | "createRadialGradient"
+                | "createConicGradient"
+                | "createPattern"
+                | "getImageData"
+                | "createImageData"
+                | "getTransform"
+                | "isContextLost"
+                | "getContextAttributes"
+        ) || NOOP_CTX_METHODS.contains(&name)
     }
 
     #[allow(clippy::cast_possible_truncation, clippy::too_many_lines)]
     fn invoke(
         &self,
         e: &mut Engine,
-        _this: Value,
+        this: Value,
         name: &str,
         args: &[Value],
     ) -> JsResult<Option<Value>> {
@@ -18496,11 +22770,61 @@ impl Host for Ctx2dHost {
             // plausible — absorbées, jamais de TypeError.
             "measureText" => {
                 let o = e.new_object();
-                e.set_own(o, "width", Value::Num(0.0), true);
+                // `TextMetrics.prototype` (JS-C560) — chaîne
+                // spec `instanceof` ; métriques à 0 (pas de
+                // fonte layout — mesure honnête « absente »).
+                if let Some(Value::Obj(cid)) = e.get_prop(e.global, "TextMetrics") {
+                    if let Some(pp @ Value::Obj(_)) = e.get_prop(cid, "prototype") {
+                        if let Some(ob) = e.heap.obj_mut(o) {
+                            ob.set_proto(pp);
+                        }
+                    }
+                }
+                for k in [
+                    "width",
+                    "actualBoundingBoxAscent",
+                    "actualBoundingBoxDescent",
+                    "actualBoundingBoxLeft",
+                    "actualBoundingBoxRight",
+                    "alphabeticBaseline",
+                    "emHeightAscent",
+                    "emHeightDescent",
+                    "fontBoundingBoxAscent",
+                    "fontBoundingBoxDescent",
+                    "hangingBaseline",
+                    "ideographicBaseline",
+                ] {
+                    e.set_own(o, k, Value::Num(0.0), true);
+                }
                 return Ok(Some(Value::Obj(o)));
             }
             "getLineDash" => return Ok(Some(e.new_array(Vec::new()))),
-            "isPointInPath" | "isPointInStroke" => return Ok(Some(Value::Bool(false))),
+            "isPointInPath" | "isPointInStroke" | "isContextLost" => {
+                return Ok(Some(Value::Bool(false)));
+            }
+            // JS-C560 — membres IDL restants : CTM repliée des
+            // ops `transform` enregistrées (vrai calcul affine,
+            // pile `save`/`restore` honorée), attributs de
+            // contexte spec, `createImageData` = même rail que
+            // `new ImageData`, `isContextLost` honnête (le
+            // contexte ne se perd jamais sans GPU).
+            "getTransform" => {
+                let ctm = ctx2d_current_ctm(&self.dom.borrow(), self.node);
+                return Ok(Some(matrix_obj(e, ctm)));
+            }
+            "getContextAttributes" => {
+                let o = e.new_object();
+                e.set_own(o, "alpha", Value::Bool(true), true);
+                e.set_own(o, "desynchronized", Value::Bool(false), true);
+                e.set_own(o, "willReadFrequently", Value::Bool(false), true);
+                let cs = e.str_val("srgb");
+                e.set_own(o, "colorSpace", cs, true);
+                return Ok(Some(Value::Obj(o)));
+            }
+            "createImageData" => {
+                let v = imagedata_ctor(e, this.clone(), args)?;
+                return Ok(Some(v));
+            }
             "createLinearGradient"
             | "createRadialGradient"
             | "createConicGradient"
@@ -18545,6 +22869,10 @@ impl Host for GradientHost {
             return Ok(Some(Value::Undefined));
         }
         Ok(None)
+    }
+
+    fn has_method(&self, name: &str) -> bool {
+        name == "addColorStop"
     }
 }
 
@@ -19221,6 +23549,22 @@ fn matrix_obj(e: &mut Engine, m: [f64; 6]) -> Value {
         ("invertSelf", dommatrix_invert_self),
         ("inverse", dommatrix_inverse),
         ("transformPoint", dommatrix_transform_point),
+        ("flipX", dommatrix_flip_x),
+        ("flipY", dommatrix_flip_y),
+        ("rotateAxisAngle", dommatrix_rotate_axis_angle),
+        ("rotateFromVector", dommatrix_rotate_from_vector),
+        ("scale3d", dommatrix_scale3d),
+        ("skewX", dommatrix_skew_x),
+        ("skewY", dommatrix_skew_y),
+        ("toFloat32Array", dommatrix_to_f32_array),
+        ("toFloat64Array", dommatrix_to_f64_array),
+        ("preMultiplySelf", dommatrix_pre_multiply_self),
+        ("rotateAxisAngleSelf", dommatrix_rotate_axis_angle_self),
+        ("rotateFromVectorSelf", dommatrix_rotate_from_vector_self),
+        ("scale3dSelf", dommatrix_scale3d_self),
+        ("skewXSelf", dommatrix_skew_x_self),
+        ("skewYSelf", dommatrix_skew_y_self),
+        ("setMatrixValue", dommatrix_set_matrix_value),
         ("toString", dommatrix_to_string),
         ("toJSON", dommatrix_to_json),
     ] {
@@ -19373,6 +23717,221 @@ fn dommatrix_transform_point(e: &mut Engine, this: Value, args: &[Value]) -> JsR
         z,
         w,
     ))
+}
+
+// JS-C560 — reste du set `DOMMatrixReadOnly` : `flip*`/`skew*`/
+// `scale3d`/`rotate*` s'expriment en composition affine 2D
+// (la projection 3D hors axe z n'est pas représentable : la
+// matrice est renvoyée inchangée — dégradation documentée,
+// jamais de crash ni de valeurs inventées).
+fn dommatrix_flip_x(e: &mut Engine, this: Value, _a: &[Value]) -> JsResult<Value> {
+    let m = matrix_mul(matrix_of(e, this), [-1.0, 0.0, 0.0, 1.0, 0.0, 0.0]);
+    Ok(matrix_obj(e, m))
+}
+
+fn dommatrix_flip_y(e: &mut Engine, this: Value, _a: &[Value]) -> JsResult<Value> {
+    let m = matrix_mul(matrix_of(e, this), [1.0, 0.0, 0.0, -1.0, 0.0, 0.0]);
+    Ok(matrix_obj(e, m))
+}
+
+/// Rotation en degrés appliquée à `this` (partagé
+/// `rotate`/`rotateAxisAngle`/`rotateFromVector`).
+fn matrix_rotated(m: [f64; 6], deg: f64) -> [f64; 6] {
+    let rad = deg.to_radians();
+    let (c, s) = (rad.cos(), rad.sin());
+    matrix_mul(m, [c, s, -s, c, 0.0, 0.0])
+}
+
+fn dommatrix_rotate_axis_angle(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
+    let (x, y) = (e.to_number(arg(args, 0))?, e.to_number(arg(args, 1))?);
+    let angle = e.to_number(arg(args, 3))?;
+    // Seule la rotation autour de z reste dans le plan — les
+    // autres axes produiraient une matrice non-2D que le modèle
+    // `[a..f]` ne représente pas : copie inchangée (honnête).
+    let m = matrix_of(e, this);
+    Ok(matrix_obj(
+        e,
+        if x.abs() < f64::EPSILON && y.abs() < f64::EPSILON {
+            matrix_rotated(m, angle)
+        } else {
+            m
+        },
+    ))
+}
+
+fn dommatrix_rotate_from_vector(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
+    let (x, y) = (e.to_number(arg(args, 0))?, e.to_number(arg(args, 1))?);
+    let m = matrix_rotated(matrix_of(e, this), y.atan2(x).to_degrees());
+    Ok(matrix_obj(e, m))
+}
+
+fn dommatrix_scale3d(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
+    let s = e.to_number(arg(args, 0))?;
+    let (ox, oy) = (e.to_number(arg(args, 1))?, e.to_number(arg(args, 2))?);
+    // `m · T(o) · S(s) · T(-o)` — homothétie centrée (spec).
+    let eff = matrix_mul(
+        matrix_mul([1.0, 0.0, 0.0, 1.0, ox, oy], [s, 0.0, 0.0, s, 0.0, 0.0]),
+        [1.0, 0.0, 0.0, 1.0, -ox, -oy],
+    );
+    let m = matrix_mul(matrix_of(e, this), eff);
+    Ok(matrix_obj(e, m))
+}
+
+fn dommatrix_skew_x(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
+    let t = e.to_number(arg(args, 0))?.to_radians().tan();
+    let m = matrix_mul(matrix_of(e, this), [1.0, 0.0, t, 1.0, 0.0, 0.0]);
+    Ok(matrix_obj(e, m))
+}
+
+fn dommatrix_skew_y(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
+    let t = e.to_number(arg(args, 0))?.to_radians().tan();
+    let m = matrix_mul(matrix_of(e, this), [1.0, t, 0.0, 1.0, 0.0, 0.0]);
+    Ok(matrix_obj(e, m))
+}
+
+/// Sérialisation spec `m11..m44` (colonne par colonne, 4×4) de
+/// la matrice 2D `m` — rangée 3 = identité, z figés.
+fn matrix_16(m: [f64; 6]) -> [f64; 16] {
+    [
+        m[0], m[1], 0.0, 0.0, m[2], m[3], 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, m[4], m[5], 0.0, 1.0,
+    ]
+}
+
+/// `toFloat*Array` partagé — `F32` tronque à la précision
+/// `f32` via les octets (spec : conversion `ToFloat32`).
+fn matrix_to_ta(e: &mut Engine, this: Value, f32_mode: bool) -> JsResult<Value> {
+    let m16 = matrix_16(matrix_of(e, this));
+    let mut bytes = Vec::with_capacity(if f32_mode { 64 } else { 128 });
+    for v in m16 {
+        if f32_mode {
+            bytes.extend_from_slice(&(v as f32).to_le_bytes());
+        } else {
+            bytes.extend_from_slice(&v.to_le_bytes());
+        }
+    }
+    let buf = crate::typed_array::new_array_buffer(e, bytes);
+    let Value::Obj(bid) = buf else {
+        return Ok(Value::Null);
+    };
+    let ta = if f32_mode {
+        crate::heap::TaKind::F32
+    } else {
+        crate::heap::TaKind::F64
+    };
+    Ok(crate::typed_array::new_ta(e, ta, bid, 0, 16))
+}
+
+fn dommatrix_to_f32_array(e: &mut Engine, this: Value, _a: &[Value]) -> JsResult<Value> {
+    matrix_to_ta(e, this, true)
+}
+
+fn dommatrix_to_f64_array(e: &mut Engine, this: Value, _a: &[Value]) -> JsResult<Value> {
+    matrix_to_ta(e, this, false)
+}
+
+/// `DOMMatrix.fromFloat*Array(a)` — 16 éléments (m11..m44,
+/// projection 2D) ou 6 (a..f direct) ; autre → identité.
+fn dommatrix_from_float_array(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
+    let mut m = [1.0, 0.0, 0.0, 1.0, 0.0, 0.0];
+    if let Some(Value::Obj(id)) = args.first().cloned() {
+        let len = e
+            .get_prop(id, "length")
+            .and_then(|v| e.to_number(v).ok())
+            .unwrap_or(0.0);
+        let at = |e: &mut Engine, i: usize| -> f64 {
+            e.get_prop(id, &i.to_string())
+                .and_then(|v| e.to_number(v).ok())
+                .unwrap_or(f64::NAN)
+        };
+        if len >= 16.0 {
+            m = [at(e, 0), at(e, 1), at(e, 4), at(e, 5), at(e, 12), at(e, 13)];
+        } else if len >= 6.0 {
+            m = [at(e, 0), at(e, 1), at(e, 2), at(e, 3), at(e, 4), at(e, 5)];
+        }
+    }
+    Ok(matrix_obj(e, m))
+}
+
+/// `DOMPoint.fromPoint({x?,y?,z?,w?})` — défauts spec
+/// `0/0/0/1`.
+fn dompoint_from_point(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
+    let mut c = [0.0, 0.0, 0.0, 1.0];
+    if let Some(Value::Obj(id)) = args.first().cloned() {
+        for (i, k) in ["x", "y", "z", "w"].iter().enumerate() {
+            if let Some(p) = e.get_prop(id, k) {
+                c[i] = e.to_number(p)?;
+            }
+        }
+    }
+    Ok(dompoint_obj(e, c[0], c[1], c[2], c[3]))
+}
+
+fn dommatrix_pre_multiply_self(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
+    let m = matrix_mul(matrix_of(e, arg(args, 0)), matrix_of(e, this.clone()));
+    matrix_write_self(e, this.clone(), m);
+    Ok(this)
+}
+
+fn dommatrix_rotate_axis_angle_self(
+    e: &mut Engine,
+    this: Value,
+    args: &[Value],
+) -> JsResult<Value> {
+    let (x, y) = (e.to_number(arg(args, 0))?, e.to_number(arg(args, 1))?);
+    let angle = e.to_number(arg(args, 3))?;
+    if x.abs() < f64::EPSILON && y.abs() < f64::EPSILON {
+        let m = matrix_rotated(matrix_of(e, this.clone()), angle);
+        matrix_write_self(e, this.clone(), m);
+    }
+    Ok(this)
+}
+
+fn dommatrix_rotate_from_vector_self(
+    e: &mut Engine,
+    this: Value,
+    args: &[Value],
+) -> JsResult<Value> {
+    let (x, y) = (e.to_number(arg(args, 0))?, e.to_number(arg(args, 1))?);
+    let m = matrix_rotated(matrix_of(e, this.clone()), y.atan2(x).to_degrees());
+    matrix_write_self(e, this.clone(), m);
+    Ok(this)
+}
+
+fn dommatrix_scale3d_self(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
+    let s = e.to_number(arg(args, 0))?;
+    let (ox, oy) = (e.to_number(arg(args, 1))?, e.to_number(arg(args, 2))?);
+    let eff = matrix_mul(
+        matrix_mul([1.0, 0.0, 0.0, 1.0, ox, oy], [s, 0.0, 0.0, s, 0.0, 0.0]),
+        [1.0, 0.0, 0.0, 1.0, -ox, -oy],
+    );
+    let m = matrix_mul(matrix_of(e, this.clone()), eff);
+    matrix_write_self(e, this.clone(), m);
+    Ok(this)
+}
+
+fn dommatrix_skew_x_self(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
+    let t = e.to_number(arg(args, 0))?.to_radians().tan();
+    let m = matrix_mul(matrix_of(e, this.clone()), [1.0, 0.0, t, 1.0, 0.0, 0.0]);
+    matrix_write_self(e, this.clone(), m);
+    Ok(this)
+}
+
+fn dommatrix_skew_y_self(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
+    let t = e.to_number(arg(args, 0))?.to_radians().tan();
+    let m = matrix_mul(matrix_of(e, this.clone()), [1.0, t, 0.0, 1.0, 0.0, 0.0]);
+    matrix_write_self(e, this.clone(), m);
+    Ok(this)
+}
+
+/// `setMatrixValue(str)` — même grammaire que le ctor
+/// (`matrix(...)`/`none`) ; chaîne invalide → `SyntaxError`
+/// spec serait l'idéal, repli honnête : `this` inchangé.
+fn dommatrix_set_matrix_value(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
+    if let Some(Value::Str(s)) = args.first().cloned() {
+        let m = matrix_parse_str(s.as_str());
+        matrix_write_self(e, this.clone(), m);
+    }
+    Ok(this)
 }
 
 fn dommatrix_to_string(e: &mut Engine, this: Value, _a: &[Value]) -> JsResult<Value> {
@@ -19774,14 +24333,58 @@ fn speech_voices(e: &mut Engine, _t: Value, _a: &[Value]) -> JsResult<Value> {
 
 /// `permissions.query({name})` → `{state:'denied'}` résolu
 /// (rien n'est accordé — les sites basculent sur le repli).
-fn perm_query(e: &mut Engine, _t: Value, _a: &[Value]) -> JsResult<Value> {
+/// `permissions.query({name})`/`request({name})` — statut
+/// `denied` honnête (aucune permission n'est accordée par
+/// défaut en headless) chaîné `PermissionStatus.prototype`
+/// (JS-C560) ; `name` repris du descripteur demandé.
+fn perm_query(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
     let o = e.new_object();
+    if let Some(Value::Obj(cid)) = e.get_prop(e.global, "PermissionStatus") {
+        if let Some(pp @ Value::Obj(_)) = e.get_prop(cid, "prototype") {
+            if let Some(ob) = e.heap.obj_mut(o) {
+                ob.set_proto(pp);
+            }
+        }
+    }
+    let name = e
+        .get_prop_value(arg(args, 0), "name")
+        .unwrap_or(Value::Undefined);
+    e.set_own(o, "name", name, true);
     let st = e.str_val("denied");
     e.set_own(o, "state", st, true);
     e.set_own(o, "onchange", Value::Null, true);
     let id = e.new_promise();
     e.resolve_promise(id, Value::Obj(o));
     Ok(Value::Obj(id))
+}
+
+/// `PerformanceEntry.toJSON()` générique — copie plate des
+/// props propres énumérables (spec `toJSON` des entrées perf).
+fn perf_entry_to_json(e: &mut Engine, this: Value, _a: &[Value]) -> JsResult<Value> {
+    let o = e.new_object();
+    if let Value::Obj(id) = this {
+        let keys: Vec<String> = e
+            .heap
+            .obj(id)
+            .map(|ob| {
+                ob.props
+                    .iter()
+                    .filter_map(|(k, p)| match p {
+                        crate::heap::Prop::Data { attrs, .. } if attrs.enumerable => {
+                            Some(k.to_string())
+                        }
+                        _ => None,
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+        for k in keys {
+            if let Some(v) = e.get_prop(id, &k) {
+                e.set_own(o, &k, v, true);
+            }
+        }
+    }
+    Ok(Value::Obj(o))
 }
 
 /// `scheduler.yield()` — promesse résolue (file microtâche).
@@ -20033,4 +24636,1496 @@ fn xpath_evaluator_ctor(e: &mut Engine, _t: Value, _a: &[Value]) -> JsResult<Val
     let cr = e.native_fn("createNSResolver", crate::misc_apis::create_ns_resolver);
     e.set_own(o, "createNSResolver", cr, true);
     Ok(Value::Obj(o))
+}
+
+/// `new URLPattern(input?, base?, opts?)` (JS-C560) —
+/// implémentation réelle bornée : l'input chaîne est résolu
+/// contre `base`/`page_url` puis découpé par `url_parts`,
+/// l'init dict fournit chaque composant ; composants `*`/
+/// `:nom`/`(…)`/`{…}` = jokers (matching segmentiel, pas la
+/// grammaire path-to-regexp complète — borne documentée).
+fn urlpattern_ctor(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
+    let Value::Obj(id) = this else {
+        return Err(e.type_error("illegal constructor"));
+    };
+    let mut comp: [(String, String); 8] = [
+        ("protocol".into(), "*".into()),
+        ("username".into(), "*".into()),
+        ("password".into(), "*".into()),
+        ("hostname".into(), "*".into()),
+        ("port".into(), "*".into()),
+        ("pathname".into(), "*".into()),
+        ("search".into(), "*".into()),
+        ("hash".into(), "*".into()),
+    ];
+    match arg(args, 0) {
+        Value::Obj(oid) => {
+            for (k, v) in &mut comp {
+                if let Some(pv) = e.get_prop(oid, k.as_str()) {
+                    if !matches!(pv, Value::Undefined | Value::Null) {
+                        *v = e.to_js_string(pv)?;
+                    }
+                }
+            }
+        }
+        // `new URLPattern()` — tous jokers (spec : pattern
+        // maximal, matche toute URL).
+        Value::Undefined => {}
+        other => {
+            let raw = e.to_js_string(other)?;
+            let u = urlpat_resolve_url(e, &raw, &arg(args, 1))
+                .ok_or_else(|| e.type_error("URLPattern: invalid input"))?;
+            let (proto, _host, hostname, port, path, search, hash) = url_parts(&u);
+            comp = [
+                ("protocol".into(), proto),
+                ("username".into(), String::new()),
+                ("password".into(), String::new()),
+                ("hostname".into(), hostname),
+                ("port".into(), port),
+                ("pathname".into(), path),
+                ("search".into(), search),
+                ("hash".into(), hash),
+            ];
+        }
+    }
+    let mut has_re = false;
+    for (k, v) in comp {
+        has_re |= v.contains('(');
+        let sv = e.str_val(v);
+        e.set_own(id, &k, sv, true);
+    }
+    e.set_own(id, "hasRegExpGroups", Value::Bool(has_re), true);
+    Ok(Value::Undefined)
+}
+
+/// Résolution `input` + `base` optionnelle → URL absolue.
+fn urlpat_resolve_url(e: &mut Engine, raw: &str, base: &Value) -> Option<String> {
+    match base {
+        Value::Undefined => crate::xhr::resolve_url(e, raw),
+        b => {
+            let bs = e.to_js_string(b.clone()).ok()?;
+            crate::builtins::url::url_parse_absolute(&bs)
+                .and_then(|bp| crate::builtins::url::url_parse(raw, Some(&bp)))
+                .map(|p| crate::builtins::url::url_href(&p))
+        }
+    }
+}
+
+/// Matching segmentiel borné : `*` ≙ sous-chaîne libre ;
+/// `:nom`/`(…)`/`{a,b}` ≙ segment joker (valeur non vide) ;
+/// sinon égalité littérale.
+fn urlpat_match(pat: &str, val: &str) -> bool {
+    if pat == "*" {
+        return true;
+    }
+    if pat.is_empty() {
+        return val.is_empty();
+    }
+    if pat.contains(':') || pat.contains('(') || pat.contains('{') {
+        return !val.is_empty();
+    }
+    if pat.contains('*') {
+        let parts: Vec<&str> = pat.split('*').collect();
+        let mut rest = val;
+        for (idx, part) in parts.iter().enumerate() {
+            if part.is_empty() {
+                continue;
+            }
+            if idx == 0 {
+                if !rest.starts_with(part) {
+                    return false;
+                }
+                rest = &rest[part.len()..];
+            } else if idx == parts.len() - 1 && !pat.ends_with('*') {
+                if !rest.ends_with(part) {
+                    return false;
+                }
+                rest = "";
+            } else if let Some(i) = rest.find(part) {
+                rest = &rest[i + part.len()..];
+            } else {
+                return false;
+            }
+        }
+        return true;
+    }
+    pat == val
+}
+
+/// Composants pattern lus sur `this` (props propres posées
+/// par le ctor).
+fn urlpat_components(e: &mut Engine, this: &Value) -> Vec<(String, String)> {
+    let Value::Obj(id) = this else {
+        return Vec::new();
+    };
+    [
+        "protocol", "username", "password", "hostname", "port", "pathname", "search", "hash",
+    ]
+    .iter()
+    .map(|k| {
+        let v = e
+            .get_prop(*id, k)
+            .and_then(|v| e.to_js_string(v).ok())
+            .unwrap_or_else(|| "*".into());
+        ((*k).to_string(), v)
+    })
+    .collect()
+}
+
+/// `pattern.test(input?, base?)` → `bool` — chaque
+/// composant pattern contre l'URL résolue (`username`/
+/// `password` non comparables via `url_parts` → `*` ou `""`
+/// seulement, borne documentée).
+fn urlpattern_test(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
+    let input = arg(args, 0);
+    let raw = match input {
+        Value::Undefined => e.hooks.page_url.clone(),
+        Value::Obj(oid) => e
+            .get_prop(oid, "href")
+            .and_then(|v| e.to_js_string(v).ok())
+            .unwrap_or_default(),
+        other => e.to_js_string(other)?,
+    };
+    let Some(u) = urlpat_resolve_url(e, &raw, &arg(args, 1)) else {
+        return Ok(Value::Bool(false));
+    };
+    let (proto, _h, hostname, port, path, search, hash) = url_parts(&u);
+    let vals: Vec<(&str, &str)> = vec![
+        ("protocol", proto.as_str()),
+        ("username", ""),
+        ("password", ""),
+        ("hostname", hostname.as_str()),
+        ("port", port.as_str()),
+        ("pathname", path.as_str()),
+        ("search", search.as_str()),
+        ("hash", hash.as_str()),
+    ];
+    for (k, pat) in urlpat_components(e, &this) {
+        let v = vals.iter().find(|(n, _)| *n == k).map_or("", |(_, v)| *v);
+        if !urlpat_match(&pat, v) {
+            return Ok(Value::Bool(false));
+        }
+    }
+    Ok(Value::Bool(true))
+}
+
+/// `pattern.exec(input?, base?)` → `{inputs, <comp>:
+/// {input, groups}}` ou `null` (spec — `groups` vide : les
+/// groupes nommés ne sont pas extraits, borne documentée).
+fn urlpattern_exec(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
+    let input = arg(args, 0);
+    let raw = match input.clone() {
+        Value::Undefined => e.hooks.page_url.clone(),
+        Value::Obj(oid) => e
+            .get_prop(oid, "href")
+            .and_then(|v| e.to_js_string(v).ok())
+            .unwrap_or_default(),
+        other => e.to_js_string(other)?,
+    };
+    let Some(u) = urlpat_resolve_url(e, &raw, &arg(args, 1)) else {
+        return Ok(Value::Null);
+    };
+    let ok = urlpattern_test(e, this, std::slice::from_ref(&input))?;
+    if !matches!(ok, Value::Bool(true)) {
+        return Ok(Value::Null);
+    }
+    let (proto, _h, hostname, port, path, search, hash) = url_parts(&u);
+    let res = e.new_object();
+    let ins = e.new_array(vec![input]);
+    e.set_own(res, "inputs", ins, true);
+    for (k, v) in [
+        ("protocol", proto),
+        ("username", String::new()),
+        ("password", String::new()),
+        ("hostname", hostname),
+        ("port", port),
+        ("pathname", path),
+        ("search", search),
+        ("hash", hash),
+    ] {
+        let c = e.new_object();
+        let iv = e.str_val(v);
+        e.set_own(c, "input", iv, true);
+        let gr = e.new_object();
+        e.set_own(c, "groups", Value::Obj(gr), true);
+        e.set_own(res, k, Value::Obj(c), true);
+    }
+    Ok(Value::Obj(res))
+}
+
+/// `new Touch(init)` (JS-C560) — `TouchInit` copié avec les
+/// défauts spec (`identifier`/`target` requis → `TypeError`
+/// sans init, comme Chrome).
+fn touch_ctor(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
+    let Value::Obj(id) = this else {
+        return Err(e.type_error("illegal constructor"));
+    };
+    let Value::Obj(init) = arg(args, 0) else {
+        return Err(e.type_error("Touch: init dictionary required"));
+    };
+    let get_num = |e: &mut Engine, k: &str| -> JsResult<f64> {
+        match e.get_prop(init, k) {
+            Some(Value::Num(n)) => Ok(n),
+            Some(Value::Undefined) | None => Ok(0.0),
+            Some(v) => e.to_number(v),
+        }
+    };
+    let identifier = get_num(e, "identifier")?;
+    e.set_own(id, "identifier", Value::Num(identifier), true);
+    let target = e.get_prop(init, "target").unwrap_or(Value::Null);
+    e.set_own(id, "target", target, true);
+    for k in [
+        "clientX",
+        "clientY",
+        "screenX",
+        "screenY",
+        "pageX",
+        "pageY",
+        "radiusX",
+        "radiusY",
+        "rotationAngle",
+        "force",
+        "altitudeAngle",
+        "azimuthAngle",
+    ] {
+        let n = get_num(e, k)?;
+        e.set_own(id, k, Value::Num(n), true);
+    }
+    let tt = match e.get_prop(init, "touchType") {
+        Some(v) if !matches!(v, Value::Undefined | Value::Null) => e.to_js_string(v)?,
+        _ => "direct".to_string(),
+    };
+    let ttv = e.str_val(tt);
+    e.set_own(id, "touchType", ttv, true);
+    Ok(Value::Undefined)
+}
+
+// ------------------------------------------------------------------
+// JS-C561 — second lot Pareto BCD : protos d'interfaces
+// peuplés (`in`/`instanceof` réels) + impls bornées
+// (Highlight, DataTransfer, DOMQuad, VTTRegion, FileReaderSync
+// côté `files.rs`).
+// ------------------------------------------------------------------
+
+/// `X.prototype` → `ObjId` du proto installé (résolution
+/// tardive — l'install dépend de l'ordre des globals).
+fn ctor_proto(e: &mut Engine, name: &str) -> Option<ObjId> {
+    match e.get_prop(e.global, name) {
+        Some(Value::Obj(cid)) => match e.get_prop(cid, "prototype") {
+            Some(Value::Obj(pid)) => Some(pid),
+            _ => None,
+        },
+        _ => None,
+    }
+}
+
+/// Props data d'un proto d'interface (JS-C561) — `on*` →
+/// `null` (handlers vides spec), le reste → `undefined` :
+/// `in`/`getOwnPropertyNames` voient la surface IDL ; les
+/// instances produites ailleurs portent les vraies valeurs.
+fn proto_fill(e: &mut Engine, p: ObjId, tag: &str, props: &[&str]) {
+    for k in props {
+        let v = if k.starts_with("on") {
+            Value::Null
+        } else {
+            Value::Undefined
+        };
+        e.set_own(p, k, v, true);
+    }
+    let t = e.str_val(tag);
+    e.set_own(p, crate::interp::SYM_TO_STRING_TAG, t, false);
+}
+
+/// Chaîne `v` (objet) sur le proto de `ctor` — no-op si
+/// l'un des deux manque.
+fn chain_to_ctor(e: &mut Engine, v: &Value, ctor: &str) {
+    let Value::Obj(id) = v else { return };
+    if let Some(p) = ctor_proto(e, ctor) {
+        if let Some(o) = e.heap.obj_mut(*id) {
+            o.set_proto(Value::Obj(p));
+        }
+    }
+}
+
+/// `Promise` résolue `v` (factoriel des surfaces bornées).
+fn promise_of(e: &mut Engine, v: Value) -> Value {
+    let pid = e.new_promise();
+    e.resolve_promise(pid, v);
+    Value::Obj(pid)
+}
+
+/// `StorageBucketManager.keys()` → `Promise<[]>` (aucun
+/// bucket nommé — honnête headless).
+fn sbm_keys(e: &mut Engine, _t: Value, _a: &[Value]) -> JsResult<Value> {
+    let arr = e.new_array(Vec::new());
+    Ok(promise_of(e, arr))
+}
+
+/// Réponses booléennes `Promise<false>` du lot storage
+/// (`delete`/`persisted`/`persist` — pas de buckets).
+fn sbm_false(e: &mut Engine, _t: Value, _a: &[Value]) -> JsResult<Value> {
+    Ok(promise_of(e, Value::Bool(false)))
+}
+
+/// `estimate()` → `Promise<{quota:0,usage:0}>` (pas de
+/// quota tracké).
+fn sbm_estimate(e: &mut Engine, _t: Value, _a: &[Value]) -> JsResult<Value> {
+    let o = e.new_object();
+    e.set_own(o, "quota", Value::Num(0.0), true);
+    e.set_own(o, "usage", Value::Num(0.0), true);
+    Ok(promise_of(e, Value::Obj(o)))
+}
+
+/// `durability()` → `Promise<"strict">` (politique fixe du
+/// moteur).
+fn sbm_durability(e: &mut Engine, _t: Value, _a: &[Value]) -> JsResult<Value> {
+    let s = e.str_val("strict");
+    Ok(promise_of(e, s))
+}
+
+/// `PermissionsPolicy.features()`/`allowedFeatures()` →
+/// `[]` (aucune politique déclarée — liste vide honnête).
+fn pp_list(e: &mut Engine, _t: Value, _a: &[Value]) -> JsResult<Value> {
+    Ok(e.new_array(Vec::new()))
+}
+
+/// `PermissionsPolicy.allowsFeature(f?, origin?)` → `true`
+/// — pas de politique restrictive chargée (honnête : rien
+/// n'interdit la feature dans ce contexte).
+fn pp_allows(_e: &mut Engine, _t: Value, _a: &[Value]) -> JsResult<Value> {
+    Ok(Value::Bool(true))
+}
+
+/// `PermissionsPolicy.getAllowlistForFeature(f)` → `["*"]`
+/// (allowlist universelle en l'absence de politique).
+fn pp_allowlist(e: &mut Engine, _t: Value, _a: &[Value]) -> JsResult<Value> {
+    let s = e.str_val("*");
+    Ok(e.new_array(vec![s]))
+}
+
+/// `KeyboardEvent.getModifierState(mod)` (JS-C561) — les
+/// mods simples lisent les props `*Key` de l'instance ;
+/// les états spéciaux (`CapsLock`…) lisent la prop
+/// `modifier{Mod}` copiée de l'init dict (spec).
+fn kb_get_modifier_state(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
+    let m = e.to_js_string(arg(args, 0))?;
+    let Value::Obj(id) = this else {
+        return Ok(Value::Bool(false));
+    };
+    let key = match m.as_str() {
+        "Alt" | "AltGraph" => "altKey".to_string(),
+        "Control" => "ctrlKey".to_string(),
+        "Meta" => "metaKey".to_string(),
+        "Shift" => "shiftKey".to_string(),
+        other => format!("modifier{other}"),
+    };
+    let v = e.get_prop(id, &key).is_some_and(|v| e.to_boolean(v));
+    Ok(Value::Bool(v))
+}
+
+/// `point.toJSON()` → `{x,y,z,w}` (spec `DOMPointReadOnly`).
+fn point_to_json(e: &mut Engine, this: Value, _a: &[Value]) -> JsResult<Value> {
+    let o = e.new_object();
+    if let Value::Obj(id) = this {
+        for k in ["x", "y", "z", "w"] {
+            let v = e.get_prop(id, k).unwrap_or(Value::Num(0.0));
+            e.set_own(o, k, v, true);
+        }
+    }
+    Ok(Value::Obj(o))
+}
+
+/// `new DOMPointReadOnly(x?,y?,z?,w?)` (JS-C561) — même
+/// fabrique que `DOMPoint` (objet plat), chaîné sur son
+/// propre proto pour `instanceof` exact.
+fn dompoint_ro_ctor(e: &mut Engine, t: Value, args: &[Value]) -> JsResult<Value> {
+    let v = dompoint_ctor(e, t, args)?;
+    chain_to_ctor(e, &v, "DOMPointReadOnly");
+    Ok(v)
+}
+
+/// Point `{x,y,z,w}` plat (borne partagée `DOMQuad` —
+/// l'objet résultat n'a pas besoin du proto `DOMPoint` pour
+/// être lu par `getBounds`/`matrixTransform`).
+fn quad_point(e: &mut Engine, x: f64, y: f64, z: f64, w: f64) -> Value {
+    let o = e.new_object();
+    for (k, v) in [("x", x), ("y", y), ("z", z), ("w", w)] {
+        e.set_own(o, k, Value::Num(v), true);
+    }
+    if let Some(p) = ctor_proto(e, "DOMPointReadOnly") {
+        if let Some(ob) = e.heap.obj_mut(o) {
+            ob.set_proto(Value::Obj(p));
+        }
+    }
+    Value::Obj(o)
+}
+
+/// `point` lu depuis un arg `DOMPointInit`-like
+/// (`{x?,y?,z?,w?}`) — absent → origine.
+fn point_of_arg(e: &mut Engine, v: &Value) -> JsResult<(f64, f64, f64, f64)> {
+    let mut c = (0.0, 0.0, 0.0, 1.0);
+    if let Value::Obj(id) = v {
+        for (i, k) in ["x", "y", "z", "w"].iter().enumerate() {
+            if let Some(p) = e.get_prop(*id, k) {
+                let n = e.to_number(p)?;
+                match i {
+                    0 => c.0 = n,
+                    1 => c.1 = n,
+                    2 => c.2 = n,
+                    _ => c.3 = n,
+                }
+            }
+        }
+    }
+    Ok(c)
+}
+
+/// `new DOMQuad(p1?,p2?,p3?,p4?)` (JS-C561) — `DOMPointInit`
+/// accepté par sommet (défaut : origine, spec).
+fn domquad_ctor(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
+    let Value::Obj(id) = this else {
+        return Err(e.type_error("illegal constructor"));
+    };
+    for (i, k) in ["p1", "p2", "p3", "p4"].iter().enumerate() {
+        let (x, y, z, w) = point_of_arg(e, &arg(args, i))?;
+        let p = quad_point(e, x, y, z, w);
+        e.set_own(id, k, p, true);
+    }
+    Ok(Value::Undefined)
+}
+
+/// `quad.getBounds()` → `DOMRect`-like `{x,y,width,height,
+/// top,right,bottom,left}` (bounding box spec).
+fn domquad_get_bounds(e: &mut Engine, this: Value, _a: &[Value]) -> JsResult<Value> {
+    let mut xs = [0.0f64; 4];
+    let mut ys = [0.0f64; 4];
+    if let Value::Obj(id) = this {
+        for (i, k) in ["p1", "p2", "p3", "p4"].iter().enumerate() {
+            if let Some(Value::Obj(pid)) = e.get_prop(id, k) {
+                xs[i] = e
+                    .get_prop(pid, "x")
+                    .map(|v| e.to_number(v))
+                    .transpose()?
+                    .unwrap_or(0.0);
+                ys[i] = e
+                    .get_prop(pid, "y")
+                    .map(|v| e.to_number(v))
+                    .transpose()?
+                    .unwrap_or(0.0);
+            }
+        }
+    }
+    let (x0, x1) = (
+        xs.iter().copied().fold(f64::INFINITY, f64::min),
+        xs.iter().copied().fold(f64::NEG_INFINITY, f64::max),
+    );
+    let (y0, y1) = (
+        ys.iter().copied().fold(f64::INFINITY, f64::min),
+        ys.iter().copied().fold(f64::NEG_INFINITY, f64::max),
+    );
+    let o = e.new_object();
+    for (k, v) in [
+        ("x", x0),
+        ("y", y0),
+        ("width", x1 - x0),
+        ("height", y1 - y0),
+        ("top", y0),
+        ("right", x1),
+        ("bottom", y1),
+        ("left", x0),
+    ] {
+        e.set_own(o, k, Value::Num(v), true);
+    }
+    Ok(Value::Obj(o))
+}
+
+/// `quad.toJSON()` → `{p1,p2,p3,p4}` (chacun `{x,y,z,w}`).
+fn domquad_to_json(e: &mut Engine, this: Value, _a: &[Value]) -> JsResult<Value> {
+    let o = e.new_object();
+    if let Value::Obj(id) = this {
+        for k in ["p1", "p2", "p3", "p4"] {
+            let v = e.get_prop(id, k).unwrap_or(Value::Null);
+            e.set_own(o, k, v, true);
+        }
+    }
+    Ok(Value::Obj(o))
+}
+
+/// `DOMQuad.fromQuad(other)` → copie des 4 sommets.
+fn domquad_from_quad(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
+    let o = e.new_object();
+    if let Some(Value::Obj(src)) = args.first().cloned() {
+        for k in ["p1", "p2", "p3", "p4"] {
+            let v = e.get_prop(src, k).unwrap_or(Value::Null);
+            e.set_own(o, k, v, true);
+        }
+    } else {
+        for k in ["p1", "p2", "p3", "p4"] {
+            let p = quad_point(e, 0.0, 0.0, 0.0, 1.0);
+            e.set_own(o, k, p, true);
+        }
+    }
+    chain_to_ctor(e, &Value::Obj(o), "DOMQuad");
+    Ok(Value::Obj(o))
+}
+
+/// `DOMQuad.fromRect(rect?)` → quad des 4 coins
+/// (`{x,y,width,height}`).
+fn domquad_from_rect(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
+    let (mut x, mut y, mut w, mut h) = (0.0, 0.0, 0.0, 0.0);
+    if let Some(Value::Obj(id)) = args.first().cloned() {
+        for (k, slot) in [
+            ("x", &mut x),
+            ("y", &mut y),
+            ("width", &mut w),
+            ("height", &mut h),
+        ] {
+            if let Some(v) = e.get_prop(id, k) {
+                *slot = e.to_number(v)?;
+            }
+        }
+    }
+    let o = e.new_object();
+    for (k, px, py) in [
+        ("p1", x, y),
+        ("p2", x + w, y),
+        ("p3", x + w, y + h),
+        ("p4", x, y + h),
+    ] {
+        let p = quad_point(e, px, py, 0.0, 1.0);
+        e.set_own(o, k, p, true);
+    }
+    chain_to_ctor(e, &Value::Obj(o), "DOMQuad");
+    Ok(Value::Obj(o))
+}
+
+/// `new VTTRegion()` (JS-C561) — défauts spec (`width:100`,
+/// `lines:3`, ancres région 0/100, viewport 0/100).
+fn vttregion_ctor(e: &mut Engine, this: Value, _a: &[Value]) -> JsResult<Value> {
+    let Value::Obj(id) = this else {
+        return Err(e.type_error("illegal constructor"));
+    };
+    let s = e.str_val("");
+    e.set_own(id, "id", s.clone(), true);
+    e.set_own(id, "scroll", s, true);
+    for (k, v) in [
+        ("width", 100.0),
+        ("lines", 3.0),
+        ("regionAnchorX", 0.0),
+        ("regionAnchorY", 100.0),
+        ("viewportAnchorX", 0.0),
+        ("viewportAnchorY", 100.0),
+    ] {
+        e.set_own(id, k, Value::Num(v), true);
+    }
+    Ok(Value::Undefined)
+}
+
+/// `new Highlight(...ranges)` (JS-C561 — Custom Highlight
+/// API) : instance `Set` réelle (setlike `add`/`has`/
+/// `delete`/`forEach`/itérateur hérités par chaînage) +
+/// attributs `priority`/`type` propres.
+fn highlight_ctor(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
+    let Some(set_f) = e.get_prop(e.global, "Set") else {
+        return Err(e.type_error("Highlight requires Set"));
+    };
+    let s = e.call_value_ctor(set_f.clone(), Value::Undefined, &[], set_f)?;
+    if let Value::Obj(sid) = s.clone() {
+        if let Some(add) = e.get_prop(sid, "add") {
+            for a in args {
+                e.call_value(add.clone(), s.clone(), std::slice::from_ref(a))?;
+            }
+        }
+        e.set_own(sid, "priority", Value::Num(0.0), true);
+        let ty = e.str_val("highlight");
+        e.set_own(sid, "type", ty, true);
+        chain_to_ctor(e, &s, "Highlight");
+    }
+    Ok(s)
+}
+
+// ---- `DataTransfer` (dnd, impl bornée réelle) ------
+
+/// Pousse `v` en fin du tableau `id` (index `length`
+/// courant — `set_prop` route vers `ObjKind::Array::elems`
+/// et agrandit `length` ; `set_own` n'écrirait qu'une prop
+/// nommée, invisible aux lectures indexées).
+fn arr_push(e: &mut Engine, id: ObjId, v: Value) {
+    let n = match e.get_prop(id, "length") {
+        Some(Value::Num(n)) => n as u64,
+        _ => 0,
+    };
+    let _ = e.set_prop(id, &n.to_string(), v);
+}
+
+/// Format de store normalisé (spec `DataTransfer` `setData` :
+/// `text`≙`text/plain`, `url`≙`text/uri-list`, casse basse).
+fn dt_format(raw: &str) -> String {
+    match raw {
+        "text" => "text/plain".to_string(),
+        "url" => "text/uri-list".to_string(),
+        other => other.to_lowercase(),
+    }
+}
+
+/// Item `DataTransferItem` — `{kind, type, __data}` + proto
+/// de l'interface (méthodes sur le proto).
+fn dt_item_obj(e: &mut Engine, kind: &str, fmt: &str, data: Value) -> Value {
+    let it = e.new_object();
+    let kv = e.str_val(kind);
+    e.set_own(it, "kind", kv, true);
+    let tv = e.str_val(fmt);
+    e.set_own(it, "type", tv, true);
+    e.set_own(it, "__data", data, false);
+    if let Some(p) = ctor_proto(e, "DataTransferItem") {
+        if let Some(o) = e.heap.obj_mut(it) {
+            o.set_proto(Value::Obj(p));
+        }
+    }
+    Value::Obj(it)
+}
+
+/// Resynchronise `types`/`items` d'un `DataTransfer` depuis
+/// son store `__dt` (les clés hors `__*`).
+fn dt_sync_store(e: &mut Engine, sid: ObjId, types_id: ObjId, items_id: ObjId) {
+    let keys: Vec<String> = e
+        .own_keys(sid)
+        .into_iter()
+        .filter(|k| !k.starts_with("__"))
+        .collect();
+    // `set_prop` (pas `set_own`) : sur un `ObjKind::Array`,
+    // `length = 0` tronque `elems` — `set_own` n'écrirait
+    // qu'une prop nommée sans vider le backing.
+    let _ = e.set_prop(types_id, "length", Value::Num(0.0));
+    let _ = e.set_prop(items_id, "length", Value::Num(0.0));
+    for k in keys {
+        let kv = e.str_val(k.clone());
+        arr_push(e, types_id, kv);
+        let dv = e.get_prop(sid, &k).unwrap_or(Value::Undefined);
+        let it = dt_item_obj(e, "string", &k, dv);
+        arr_push(e, items_id, it);
+    }
+}
+
+/// `dt` → `(store, types, items)` ids — `None` si l'objet
+/// n'est pas un `DataTransfer` produit par `dt_ctor`.
+fn dt_parts(e: &mut Engine, this: &Value) -> Option<(ObjId, ObjId, ObjId)> {
+    let Value::Obj(id) = this else { return None };
+    let (Some(Value::Obj(s)), Some(Value::Obj(t)), Some(Value::Obj(i))) = (
+        e.get_prop(*id, "__dt"),
+        e.get_prop(*id, "types"),
+        e.get_prop(*id, "items"),
+    ) else {
+        return None;
+    };
+    Some((s, t, i))
+}
+
+/// `new DataTransfer()` (JS-C561) — store de formats réel :
+/// `setData`/`getData`/`clearData` mutent `types` et
+/// `items` (spec) ; `files` vide (aucun fichier déposé).
+fn datatransfer_ctor(e: &mut Engine, this: Value, _a: &[Value]) -> JsResult<Value> {
+    let Value::Obj(id) = this else {
+        return Err(e.type_error("illegal constructor"));
+    };
+    let store = e.new_object();
+    e.set_own(id, "__dt", Value::Obj(store), false);
+    let types = e.new_array(Vec::new());
+    let items = e.new_array(Vec::new());
+    if let Value::Obj(iid) = items.clone() {
+        e.set_own(iid, "__dt", Value::Obj(store), false);
+        e.set_own(iid, "__types", types.clone(), false);
+        if let Some(p) = ctor_proto(e, "DataTransferItemList") {
+            if let Some(o) = e.heap.obj_mut(iid) {
+                o.set_proto(Value::Obj(p));
+            }
+        }
+    }
+    e.set_own(id, "types", types, true);
+    e.set_own(id, "items", items, true);
+    let files = e.new_array(Vec::new());
+    e.set_own(id, "files", files, true);
+    let ne = e.str_val("none");
+    e.set_own(id, "dropEffect", ne, true);
+    let ua = e.str_val("uninitialized");
+    e.set_own(id, "effectAllowed", ua, true);
+    Ok(Value::Undefined)
+}
+
+/// `dt.setData(fmt, data)` — écrit le store puis
+/// resynchronise `types`/`items` (spec).
+fn dt_set_data(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
+    let Some((sid, tid, iid)) = dt_parts(e, &this) else {
+        return Ok(Value::Undefined);
+    };
+    let fmt = dt_format(&e.to_js_string(arg(args, 0))?);
+    let data = e.to_js_string(arg(args, 1))?;
+    let sv = e.str_val(data);
+    e.set_own(sid, &fmt, sv, true);
+    dt_sync_store(e, sid, tid, iid);
+    Ok(Value::Undefined)
+}
+
+/// `dt.getData(fmt)` → chaîne du store ou `""` (spec).
+fn dt_get_data(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
+    let fmt = dt_format(&e.to_js_string(arg(args, 0))?);
+    if let Value::Obj(id) = this {
+        if let Some(Value::Obj(sid)) = e.get_prop(id, "__dt") {
+            if let Some(v) = e.get_prop(sid, &fmt) {
+                return Ok(v);
+            }
+        }
+    }
+    Ok(e.str_val(""))
+}
+
+/// `dt.clearData(fmt?)` — `fmt` absent : tout le store.
+fn dt_clear_data(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
+    let Some((sid, tid, iid)) = dt_parts(e, &this) else {
+        return Ok(Value::Undefined);
+    };
+    match arg(args, 0) {
+        Value::Undefined => {
+            if let Some(o) = e.heap.obj_mut(sid) {
+                o.props.retain(|(k, _)| k.starts_with("__"));
+            }
+        }
+        v => {
+            let fmt = dt_format(&e.to_js_string(v)?);
+            if let Some(o) = e.heap.obj_mut(sid) {
+                o.props.retain(|(k, _)| k.as_ref() != fmt);
+            }
+        }
+    }
+    dt_sync_store(e, sid, tid, iid);
+    Ok(Value::Undefined)
+}
+
+/// `dt.setDragImage(el, x, y)` — accepté sans effet : pas de
+/// rendu d'image de drag (no-op honnête).
+fn dt_set_drag_image(_e: &mut Engine, _t: Value, _a: &[Value]) -> JsResult<Value> {
+    Ok(Value::Undefined)
+}
+
+/// `item.getAsString(cb)` — callback avec la donnée stockée
+/// (borne : appel synchrone, spec le diffère d'un tick).
+fn dti_get_as_string(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
+    let cb = arg(args, 0);
+    if !e.is_callable(cb.clone()) {
+        return Ok(Value::Undefined);
+    }
+    let data = match this {
+        Value::Obj(id) => e.get_prop(id, "__data").unwrap_or(Value::Undefined),
+        _ => Value::Undefined,
+    };
+    e.call_value(cb, Value::Undefined, &[data])?;
+    Ok(Value::Undefined)
+}
+
+/// `item.getAsFile()`/`webkitGetAsEntry()` → `null` — nos
+/// items `string` n'ont ni fichier ni entrée FS.
+fn dti_null(_e: &mut Engine, _t: Value, _a: &[Value]) -> JsResult<Value> {
+    Ok(Value::Null)
+}
+
+/// `list.add(data, type?)` — ajoute un item `string`
+/// (donnée texte) ou `file` (Blob/File) et resynchronise
+/// le store pour les chaînes (spec).
+fn dtl_add(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
+    let Value::Obj(lid) = this else {
+        return Ok(Value::Null);
+    };
+    let Some(Value::Obj(sid)) = e.get_prop(lid, "__dt") else {
+        return Ok(Value::Null);
+    };
+    let data = arg(args, 0);
+    if let Some((_bytes, ty)) = crate::files::blob_parts(e, data.clone()) {
+        let it = dt_item_obj(e, "file", &ty, data);
+        arr_push(e, lid, it.clone());
+        return Ok(it);
+    }
+    let fmt = dt_format(&e.to_js_string(arg(args, 1))?);
+    let s = e.to_js_string(data)?;
+    let sv = e.str_val(s);
+    e.set_own(sid, &fmt, sv.clone(), true);
+    let it = dt_item_obj(e, "string", &fmt, sv);
+    arr_push(e, lid, it.clone());
+    if let Some(Value::Obj(tid)) = e.get_prop(lid, "__types") {
+        let kv = e.str_val(fmt);
+        arr_push(e, tid, kv);
+    }
+    Ok(it)
+}
+
+/// `list.remove(i)` — retire l'item d'index `i`
+/// (`IndexSizeError` spec hors plage).
+fn dtl_remove(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
+    let Value::Obj(lid) = this else {
+        return Ok(Value::Undefined);
+    };
+    let idx = e.to_number(arg(args, 0))? as usize;
+    let len = match e.get_prop(lid, "length") {
+        Some(Value::Num(n)) => n as usize,
+        _ => 0,
+    };
+    if idx >= len {
+        return Err(crate::heap::Thrown(dom_ex_pub(
+            e,
+            "IndexSizeError",
+            "DataTransferItemList.remove: index out of range",
+        )));
+    }
+    // Décale les éléments restants (spec splice).
+    for i in idx..len.saturating_sub(1) {
+        let v = e
+            .get_prop(lid, &(i + 1).to_string())
+            .unwrap_or(Value::Undefined);
+        e.set_own(lid, &i.to_string(), v, true);
+    }
+    e.set_own(lid, "length", Value::Num((len - 1) as f64), true);
+    Ok(Value::Undefined)
+}
+
+/// `list.clear()` — vide items + store (spec).
+fn dtl_clear(e: &mut Engine, this: Value, _a: &[Value]) -> JsResult<Value> {
+    let Value::Obj(lid) = this else {
+        return Ok(Value::Undefined);
+    };
+    if let Some(Value::Obj(sid)) = e.get_prop(lid, "__dt") {
+        if let Some(o) = e.heap.obj_mut(sid) {
+            o.props.retain(|(k, _)| k.starts_with("__"));
+        }
+        if let Some(Value::Obj(tid)) = e.get_prop(lid, "__types") {
+            e.set_own(tid, "length", Value::Num(0.0), true);
+        }
+    }
+    e.set_own(lid, "length", Value::Num(0.0), true);
+    Ok(Value::Undefined)
+}
+
+/// `<table>` — `createCaption`/`createTHead`/`createTFoot`/
+/// `createTBody` trouvent ou créent la section ;
+/// `delete*` la retire ; `insertRow`/`deleteRow` opèrent
+/// sur les `tr` (index −1 = dernier, spec).
+fn table_section_op(
+    e: &mut Engine,
+    dom: &DomRef,
+    cache: &NodeCache,
+    node: NodeId,
+    name: &str,
+    args: &[Value],
+) -> JsResult<Value> {
+    let tag = match name {
+        "createCaption" | "deleteCaption" => "caption",
+        "createTHead" | "deleteTHead" => "thead",
+        "createTFoot" | "deleteTFoot" => "tfoot",
+        "createTBody" => "tbody",
+        _ => "",
+    };
+    match name {
+        "insertRow" | "deleteRow" => {
+            if name == "deleteRow" {
+                let idx = match args.first() {
+                    Some(v) => e.to_number(v.clone())? as i64,
+                    None => -1,
+                };
+                let victim = {
+                    let d = dom.borrow();
+                    let rows = d.by_tag(node, "tr");
+                    let pos = if idx < 0 {
+                        rows.len() as i64 + idx
+                    } else {
+                        idx
+                    };
+                    (pos >= 0)
+                        .then(|| rows.get(pos as usize).copied())
+                        .flatten()
+                };
+                if let Some(tr) = victim {
+                    dom.borrow_mut().detach(tr);
+                }
+                return Ok(Value::Undefined);
+            }
+            let tr = dom.borrow_mut().create_element("tr");
+            // Spec : insertion dans la première section si
+            // présente, sinon directement sous la table ;
+            // index relatif aux `tr` de ce conteneur.
+            let container = {
+                let d = dom.borrow();
+                d.element_children(node)
+                    .into_iter()
+                    .find(|&c| {
+                        matches!(
+                            d.nodes[c as usize].tag.as_str(),
+                            "tbody" | "thead" | "tfoot"
+                        )
+                    })
+                    .unwrap_or(node)
+            };
+            let kids = dom.borrow().by_tag(container, "tr");
+            let idx = match args.first() {
+                Some(v) => e.to_number(v.clone())? as i64,
+                None => -1,
+            };
+            let pos = if idx < 0 {
+                kids.len() as i64 + idx + 1
+            } else {
+                idx
+            };
+            let ref_node = (pos >= 0)
+                .then(|| kids.get(pos as usize).copied())
+                .flatten();
+            dom.borrow_mut().insert_before(container, tr, ref_node);
+            Ok(node_value(e, dom, cache, tr))
+        }
+        n if n.starts_with("create") => {
+            let existing = {
+                let d = dom.borrow();
+                d.element_children(node)
+                    .into_iter()
+                    .find(|&c| d.nodes[c as usize].tag == tag)
+            };
+            if let Some(el) = existing {
+                return Ok(node_value(e, dom, cache, el));
+            }
+            let el = dom.borrow_mut().create_element(tag);
+            dom.borrow_mut().append(node, el);
+            Ok(node_value(e, dom, cache, el))
+        }
+        _ => {
+            let victim = {
+                let d = dom.borrow();
+                d.element_children(node)
+                    .into_iter()
+                    .find(|&c| d.nodes[c as usize].tag == tag)
+            };
+            if let Some(v) = victim {
+                dom.borrow_mut().detach(v);
+            }
+            Ok(Value::Undefined)
+        }
+    }
+}
+
+/// Peuple les protos d'interfaces restants du lot Pareto
+/// BCD (JS-C561) + pose les globaux manquants — appelée en
+/// fin d'`install_dom`, après toutes les surfaces (les
+/// instances à chaîner existent déjà : `screen`,
+/// `visualViewport`, `CSS.highlights`, `performance`…).
+pub(crate) fn install_bcd_surface_apis(e: &mut Engine) {
+    let g = e.global;
+    // Globaux « illegal ctor » + proto IDL peuplé —
+    // interfaces à fabrique (instances produites ailleurs)
+    // ou satellites sans constructible légal.
+    for (name, props) in [
+        (
+            "Screen",
+            &[
+                "width",
+                "height",
+                "availWidth",
+                "availHeight",
+                "colorDepth",
+                "pixelDepth",
+                "orientation",
+                "isExtended",
+                "onchange",
+            ][..],
+        ),
+        (
+            "ScreenDetails",
+            &[
+                "currentScreen",
+                "screens",
+                "oncurrentscreenchange",
+                "onscreenschange",
+            ][..],
+        ),
+        (
+            "BatteryManager",
+            &[
+                "charging",
+                "chargingTime",
+                "dischargingTime",
+                "level",
+                "onchargingchange",
+                "onchargingtimechange",
+                "ondischargingtimechange",
+                "onlevelchange",
+            ][..],
+        ),
+        (
+            "DataTransferItem",
+            &[
+                "kind",
+                "type",
+                "getAsString",
+                "getAsFile",
+                "getAsFileSystemHandle",
+                "webkitGetAsEntry",
+            ][..],
+        ),
+        (
+            "DataTransferItemList",
+            &["length", "add", "remove", "clear"][..],
+        ),
+    ] {
+        if e.get_prop(g, name).is_some() {
+            continue;
+        }
+        let f = e.illegal_ctor_bound(name);
+        if let Value::Obj(cid) = f {
+            let p = e.new_object();
+            proto_fill(e, p, name, props);
+            e.set_own(cid, "prototype", Value::Obj(p), false);
+        }
+        e.set_own(g, name, f, false);
+    }
+    // Méthodes réelles des protos liste/item du dnd.
+    if let Some(p) = ctor_proto(e, "DataTransferItem") {
+        for (m, f) in [
+            ("getAsString", dti_get_as_string as crate::heap::NativeFn),
+            ("getAsFile", dti_null),
+            ("getAsFileSystemHandle", nav_unsupported_reject),
+            ("webkitGetAsEntry", dti_null),
+        ] {
+            let fv = e.native_fn(m, f);
+            e.set_own(p, m, fv, true);
+        }
+    }
+    if let Some(p) = ctor_proto(e, "DataTransferItemList") {
+        for (m, f) in [
+            ("add", dtl_add as crate::heap::NativeFn),
+            ("remove", dtl_remove),
+            ("clear", dtl_clear),
+        ] {
+            let fv = e.native_fn(m, f);
+            e.set_own(p, m, fv, true);
+        }
+        // `length` vit sur l'instance tableau — prop data
+        // `0` sur le proto pour la détection `in`.
+        e.set_own(p, "length", Value::Num(0.0), true);
+        if let Some(o) = e.heap.obj_mut(p) {
+            o.set_proto(Value::Obj(e.protos.array));
+        }
+    }
+    // `ScreenOrientation` — proto peuplé + instance
+    // `screen.orientation` chaînée (lock→rejet,
+    // unlock→noop, rails EventTarget déjà sur l'objet).
+    {
+        let f = e.illegal_ctor_bound("ScreenOrientation");
+        if let Value::Obj(cid) = f {
+            let p = e.new_object();
+            proto_fill(e, p, "ScreenOrientation", &["type", "angle", "onchange"]);
+            for (m, nf) in [
+                ("lock", so_lock as crate::heap::NativeFn),
+                ("unlock", mql_noop),
+                ("addEventListener", et_add_listener),
+                ("removeEventListener", et_remove_listener),
+                ("dispatchEvent", et_dispatch_event),
+            ] {
+                let fv = e.native_fn(m, nf);
+                e.set_own(p, m, fv, true);
+            }
+            e.set_own(cid, "prototype", Value::Obj(p), false);
+        }
+        e.set_own(g, "ScreenOrientation", f, false);
+    }
+    // `Screen` proto — l'instance `screen` existe déjà :
+    // props manquantes (`isExtended`/`onchange`) posées sur
+    // l'objet + chaînage.
+    {
+        let f = e.illegal_ctor_bound("Screen");
+        if let Value::Obj(cid) = f {
+            let p = e.new_object();
+            proto_fill(
+                e,
+                p,
+                "Screen",
+                &[
+                    "width",
+                    "height",
+                    "availWidth",
+                    "availHeight",
+                    "colorDepth",
+                    "pixelDepth",
+                    "orientation",
+                    "isExtended",
+                    "onchange",
+                ],
+            );
+            e.set_own(cid, "prototype", Value::Obj(p), false);
+        }
+        e.set_own(g, "Screen", f, false);
+    }
+    // `ScreenDetailed` proto chaîné sur `Screen.prototype`
+    // (hérite les métriques de base).
+    {
+        let f = e.illegal_ctor_bound("ScreenDetailed");
+        if let Value::Obj(cid) = f {
+            let p = e.new_object();
+            if let Some(sp) = ctor_proto(e, "Screen") {
+                if let Some(o) = e.heap.obj_mut(p) {
+                    o.set_proto(Value::Obj(sp));
+                }
+            }
+            proto_fill(
+                e,
+                p,
+                "ScreenDetailed",
+                &[
+                    "availLeft",
+                    "availTop",
+                    "devicePixelRatio",
+                    "isInternal",
+                    "isPrimary",
+                    "label",
+                    "left",
+                    "top",
+                ],
+            );
+            e.set_own(cid, "prototype", Value::Obj(p), false);
+        }
+        e.set_own(g, "ScreenDetailed", f, false);
+    }
+    // `StorageBucket`/`StorageBucketManager` — protos
+    // promesse-bornés (aucun bucket nommé : `open` rejette
+    // `NotSupportedError`, requêtes → valeurs honnêtes) +
+    // instance `navigator.storageBuckets` chaînée.
+    {
+        let f = e.illegal_ctor_bound("StorageBucket");
+        if let Value::Obj(cid) = f {
+            let p = e.new_object();
+            proto_fill(
+                e,
+                p,
+                "StorageBucket",
+                &["name", "expires", "indexedDB", "caches", "durability"],
+            );
+            for (m, nf) in [
+                ("persisted", sbm_false as crate::heap::NativeFn),
+                ("persist", sbm_false),
+                ("estimate", sbm_estimate),
+                ("setExpires", nav_promise_undefined),
+                ("getDirectory", nav_unsupported_reject),
+            ] {
+                let fv = e.native_fn(m, nf);
+                e.set_own(p, m, fv, true);
+            }
+            e.set_own(cid, "prototype", Value::Obj(p), false);
+        }
+        e.set_own(g, "StorageBucket", f, false);
+    }
+    {
+        let f = e.illegal_ctor_bound("StorageBucketManager");
+        if let Value::Obj(cid) = f {
+            let p = e.new_object();
+            for (m, nf) in [
+                ("open", nav_unsupported_reject as crate::heap::NativeFn),
+                ("setExpires", nav_promise_undefined),
+                ("keys", sbm_keys),
+                ("delete", sbm_false),
+                ("persisted", sbm_false),
+                ("persist", sbm_false),
+                ("estimate", sbm_estimate),
+                ("durability", sbm_durability),
+            ] {
+                let fv = e.native_fn(m, nf);
+                e.set_own(p, m, fv, true);
+            }
+            let t = e.str_val("StorageBucketManager");
+            e.set_own(p, crate::interp::SYM_TO_STRING_TAG, t, false);
+            e.set_own(cid, "prototype", Value::Obj(p), false);
+        }
+        e.set_own(g, "StorageBucketManager", f, false);
+        if let Some(Value::Obj(nid)) = e.get_prop(g, "navigator") {
+            if let Some(sv) = e.get_prop(nid, "storageBuckets") {
+                chain_to_ctor(e, &sv, "StorageBucketManager");
+            }
+        }
+    }
+    // `PermissionsPolicy` — proto + instance
+    // `document.permissionsPolicy` (et alias legacy
+    // `featurePolicy`) : aucune politique chargée → listes
+    // vides, `allowsFeature` → `true`.
+    {
+        let f = e.illegal_ctor_bound("PermissionsPolicy");
+        if let Value::Obj(cid) = f {
+            let p = e.new_object();
+            for (m, nf) in [
+                ("features", pp_list as crate::heap::NativeFn),
+                ("allowedFeatures", pp_list),
+                ("allowsFeature", pp_allows),
+                ("getAllowlistForFeature", pp_allowlist),
+            ] {
+                let fv = e.native_fn(m, nf);
+                e.set_own(p, m, fv, true);
+            }
+            let t = e.str_val("PermissionsPolicy");
+            e.set_own(p, crate::interp::SYM_TO_STRING_TAG, t, false);
+            e.set_own(cid, "prototype", Value::Obj(p), false);
+            if let Some(Value::Obj(did)) = e.get_prop(g, "document") {
+                let pp = e.new_object();
+                if let Some(o) = e.heap.obj_mut(pp) {
+                    o.set_proto(Value::Obj(p));
+                }
+                e.set_own(did, "permissionsPolicy", Value::Obj(pp), true);
+                e.set_own(did, "featurePolicy", Value::Obj(pp), true);
+            }
+        }
+        e.set_own(g, "PermissionsPolicy", f, false);
+    }
+    // `EventCounts`/`HighlightRegistry` — protos chaînés sur
+    // `Map.prototype` : les membres maplike (`get`/`set`/
+    // `size`/`@@iterator`…) sont `in`-visibles par la chaîne,
+    // les instances sont de vraies `Map`.
+    for name in ["EventCounts", "HighlightRegistry"] {
+        let f = e.illegal_ctor_bound(name);
+        if let Value::Obj(cid) = f {
+            let p = e.new_object();
+            if let Some(mp) = ctor_proto(e, "Map") {
+                if let Some(o) = e.heap.obj_mut(p) {
+                    o.set_proto(Value::Obj(mp));
+                }
+            }
+            if name == "HighlightRegistry" {
+                let fv = e.native_fn("highlightsFromPoint", |e: &mut Engine, _t, _a| {
+                    Ok(e.new_array(Vec::new()))
+                });
+                e.set_own(p, "highlightsFromPoint", fv, true);
+            }
+            let t = e.str_val(name);
+            e.set_own(p, crate::interp::SYM_TO_STRING_TAG, t, false);
+            e.set_own(cid, "prototype", Value::Obj(p), false);
+            if name == "HighlightRegistry" {
+                // `CSS.highlights` (Map installée JS-C557)
+                // adopte le proto de l'interface — `in`,
+                // `instanceof` et les méthodes maplike
+                // restent exacts par la chaîne.
+                if let Some(Value::Obj(css)) = e.get_prop(g, "CSS") {
+                    if let Some(Value::Obj(hid)) = e.get_prop(css, "highlights") {
+                        if let Some(o) = e.heap.obj_mut(hid) {
+                            o.set_proto(Value::Obj(p));
+                        }
+                    }
+                }
+            }
+        }
+        e.set_own(g, name, f, false);
+    }
+    // `performance.eventCounts` — Map chaînée
+    // `EventCounts.prototype` (comptages par type — le moteur
+    // n'en produit pas : map vide honnête).
+    if let Some(Value::Obj(pid)) = e.get_prop(g, "performance") {
+        if let Some(map_f) = e.get_prop(g, "Map") {
+            if let Ok(m) = e.call_value_ctor(map_f.clone(), Value::Undefined, &[], map_f) {
+                chain_to_ctor(e, &m, "EventCounts");
+                e.set_own(pid, "eventCounts", m, true);
+            }
+        }
+    }
+    // `Highlight` — vrai ctor setlike (instance `Set`).
+    let hf = e.native_fn("Highlight", highlight_ctor);
+    if let Value::Obj(cid) = hf {
+        let p = e.new_object();
+        if let Some(sp) = ctor_proto(e, "Set") {
+            if let Some(o) = e.heap.obj_mut(p) {
+                o.set_proto(Value::Obj(sp));
+            }
+        }
+        proto_fill(e, p, "Highlight", &["priority", "type"]);
+        e.set_own(cid, "prototype", Value::Obj(p), false);
+    }
+    e.set_own(g, "Highlight", hf, false);
+    // `DOMPointReadOnly`/`DOMQuad` — ctors réels (objets
+    // plats) + protos IDL et statiques spec.
+    {
+        let f = e.native_fn("DOMPointReadOnly", dompoint_ro_ctor);
+        if let Value::Obj(cid) = f {
+            let p = e.new_object();
+            proto_fill(e, p, "DOMPointReadOnly", &["x", "y", "z", "w"]);
+            for (m, nf) in [
+                (
+                    "matrixTransform",
+                    dompoint_transform as crate::heap::NativeFn,
+                ),
+                ("toJSON", point_to_json),
+            ] {
+                let fv = e.native_fn(m, nf);
+                e.set_own(p, m, fv, true);
+            }
+            e.set_own(cid, "prototype", Value::Obj(p), false);
+            let sf = e.native_fn("fromPoint", dompoint_from_point);
+            e.set_own(cid, "fromPoint", sf, false);
+        }
+        e.set_own(g, "DOMPointReadOnly", f, false);
+    }
+    {
+        let f = e.native_fn("DOMQuad", domquad_ctor);
+        if let Value::Obj(cid) = f {
+            let p = e.new_object();
+            proto_fill(e, p, "DOMQuad", &["p1", "p2", "p3", "p4"]);
+            for (m, nf) in [
+                ("getBounds", domquad_get_bounds as crate::heap::NativeFn),
+                ("toJSON", domquad_to_json),
+            ] {
+                let fv = e.native_fn(m, nf);
+                e.set_own(p, m, fv, true);
+            }
+            e.set_own(cid, "prototype", Value::Obj(p), false);
+            let fq = e.native_fn("fromQuad", domquad_from_quad);
+            e.set_own(cid, "fromQuad", fq, false);
+            let fr = e.native_fn("fromRect", domquad_from_rect);
+            e.set_own(cid, "fromRect", fr, false);
+        }
+        e.set_own(g, "DOMQuad", f, false);
+    }
+    // `VTTRegion` — ctor légal + proto attributs.
+    {
+        let f = e.native_fn("VTTRegion", vttregion_ctor);
+        if let Value::Obj(cid) = f {
+            let p = e.new_object();
+            proto_fill(
+                e,
+                p,
+                "VTTRegion",
+                &[
+                    "id",
+                    "width",
+                    "lines",
+                    "regionAnchorX",
+                    "regionAnchorY",
+                    "viewportAnchorX",
+                    "viewportAnchorY",
+                    "scroll",
+                ],
+            );
+            e.set_own(cid, "prototype", Value::Obj(p), false);
+        }
+        e.set_own(g, "VTTRegion", f, false);
+    }
+    // `DataTransfer` — ctor réel (store de formats).
+    {
+        let f = e.native_fn("DataTransfer", datatransfer_ctor);
+        if let Value::Obj(cid) = f {
+            let p = e.new_object();
+            proto_fill(
+                e,
+                p,
+                "DataTransfer",
+                &["types", "items", "files", "dropEffect", "effectAllowed"],
+            );
+            for (m, nf) in [
+                ("setData", dt_set_data as crate::heap::NativeFn),
+                ("getData", dt_get_data),
+                ("clearData", dt_clear_data),
+                ("setDragImage", dt_set_drag_image),
+            ] {
+                let fv = e.native_fn(m, nf);
+                e.set_own(p, m, fv, true);
+            }
+            e.set_own(cid, "prototype", Value::Obj(p), false);
+        }
+        e.set_own(g, "DataTransfer", f, false);
+    }
+    // Protos existants à peupler — détection `in` et
+    // `Object.getOwnPropertyNames` (les instances réelles
+    // portent les valeurs).
+    if let Some(p) = ctor_proto(e, "MutationRecord") {
+        proto_fill(
+            e,
+            p,
+            "MutationRecord",
+            &[
+                "type",
+                "target",
+                "addedNodes",
+                "removedNodes",
+                "previousSibling",
+                "nextSibling",
+                "attributeName",
+                "attributeNamespace",
+                "oldValue",
+            ],
+        );
+    }
+    if let Some(p) = ctor_proto(e, "KeyboardEvent") {
+        proto_fill(
+            e,
+            p,
+            "KeyboardEvent",
+            &[
+                "key",
+                "code",
+                "location",
+                "ctrlKey",
+                "shiftKey",
+                "altKey",
+                "metaKey",
+                "repeat",
+                "isComposing",
+            ],
+        );
+        let fv = e.native_fn("getModifierState", kb_get_modifier_state);
+        e.set_own(p, "getModifierState", fv, true);
+    }
+    if let Some(p) = ctor_proto(e, "Touch") {
+        proto_fill(
+            e,
+            p,
+            "Touch",
+            &[
+                "identifier",
+                "target",
+                "clientX",
+                "clientY",
+                "screenX",
+                "screenY",
+                "pageX",
+                "pageY",
+                "radiusX",
+                "radiusY",
+                "rotationAngle",
+                "force",
+                "altitudeAngle",
+                "azimuthAngle",
+                "touchType",
+            ],
+        );
+    }
+    if let Some(p) = ctor_proto(e, "VisualViewport") {
+        proto_fill(
+            e,
+            p,
+            "VisualViewport",
+            &[
+                "width",
+                "height",
+                "scale",
+                "offsetLeft",
+                "offsetTop",
+                "pageLeft",
+                "pageTop",
+                "onresize",
+                "onscroll",
+                "onscrollend",
+            ],
+        );
+        if let Some(vv) = e.get_prop(g, "visualViewport") {
+            if let Value::Obj(vid) = vv.clone() {
+                e.set_own(vid, "onscrollend", Value::Null, true);
+            }
+            chain_to_ctor(e, &vv, "VisualViewport");
+        }
+    }
+    // `screen`/`screen.orientation` — chaînage + props
+    // manquantes sur les objets déjà installés.
+    if let Some(Value::Obj(sid)) = e.get_prop(g, "screen") {
+        e.set_own(sid, "isExtended", Value::Bool(false), true);
+        e.set_own(sid, "onchange", Value::Null, true);
+        if let Some(ov) = e.get_prop(sid, "orientation") {
+            chain_to_ctor(e, &ov, "ScreenOrientation");
+        }
+        chain_to_ctor(e, &Value::Obj(sid), "Screen");
+    }
 }

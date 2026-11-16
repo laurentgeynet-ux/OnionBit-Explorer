@@ -47,15 +47,20 @@ impl StubCrypto {
             .cloned()
             .expect("handle soumis");
         let size = match req.op {
+            CryptoOp::Digest(DigestAlgo::Sha1) => 20,
             CryptoOp::Digest(DigestAlgo::Sha256) => self.sizes.0,
             CryptoOp::Digest(DigestAlgo::Sha384) => self.sizes.1,
             CryptoOp::Digest(DigestAlgo::Sha512) => self.sizes.2,
-            // JS-C93/C160 : ce harnais ne couvre que `digest`.
+            // JS-C93/C160/C562 : ce harnais ne couvre que
+            // `digest`.
             CryptoOp::ImportKey { .. }
             | CryptoOp::Sign { .. }
             | CryptoOp::Verify { .. }
             | CryptoOp::Encrypt { .. }
-            | CryptoOp::Decrypt { .. } => 0,
+            | CryptoOp::Decrypt { .. }
+            | CryptoOp::GenerateKey { .. }
+            | CryptoOp::DeriveBits { .. }
+            | CryptoOp::DeriveKey { .. } => 0,
         };
         let mut out = req.data;
         out.resize(size, 0xAA);
@@ -157,12 +162,13 @@ fn digest_algorithm_identifier_forms() {
 
 /// Algorithme inconnu → `Promise` rejetée `NotSupportedError`
 /// (normalize spec — la plateforme n'est jamais appelée).
+/// `MD5` : `SHA-1` est admis depuis JS-C562 (§B-117).
 #[test]
 fn digest_unknown_algo_rejects_notsupported() {
     let (mut e, t) = engine();
     eval(
         &mut e,
-        "var err=null; crypto.subtle.digest('SHA-1', new Uint8Array(1))\
+        "var err=null; crypto.subtle.digest('MD5', new Uint8Array(1))\
          .catch(ex=>{err=ex.name});",
     );
     // Rejet à l'appel → la réaction `.catch` a tourné au

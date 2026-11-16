@@ -1653,7 +1653,7 @@ pub const JS_CTX_TOP: JsCtxId = 0;
 // JS-C79 — opération `crypto.subtle` transportée par
 // `NetRequest::Crypto` (ré-export : le type reste unique).
 // JS-C93 — `KeyAlgo`/`ImportFormat` pour les ops à clé.
-pub use explorer_jscore::{CryptoOp, DigestAlgo, ImportFormat, KeyAlgo};
+pub use explorer_jscore::{CryptoOp, DeriveAlgo, DeriveParams, DigestAlgo, ImportFormat, KeyAlgo};
 // JS-C94 — requêtes/événements `WebSocket` transportés par
 // `NetRequest::WsOpen`/`WsSend`/`WsClose` (types uniques).
 pub use explorer_jscore::{WorkerNetRequest, WorkerNetResponse};
@@ -1681,23 +1681,24 @@ fn journal_ops_to_seam(
         "table", "thead", "tbody", "tfoot", "tr", "colgroup", "select", "template", "frameset",
         "head", "html",
     ];
-    /// Fragments de balisage dont la re-sérialisation se
-    /// re-parse différemment hors contexte.
-    const RISKY_CONTENT: &[&str] = &[
-        "<table",
-        "<thead",
-        "<tbody",
-        "<tfoot",
-        "<tr",
-        "<td",
-        "<th",
-        "<col",
-        "<select",
-        "<option",
-        "<template",
-        "<script",
-        "<frameset",
-        "<frame",
+    /// Tags de sous-arbre dont le `<tag` émis se re-parse
+    /// différemment hors contexte — §B-114 : l'équivalent de
+    /// l'ancien scan `RISKY_CONTENT` sur le HTML, **avant**
+    /// sérialisation (le scan exigeait `serialize_subtree_keyed`
+    /// de chaque insert puis jetait tout au classement — des
+    /// Mio d'alloc perdus par drain classé sous hydratation,
+    /// dont `<script` : constants lego/Next.js → repli
+    /// `serialize_keyed` du document entier à chaque pompe).
+    /// Marche `children` = sur-ensemble conservateur de
+    /// l'émission (texte/attributs échappés ne peuvent matcher ;
+    /// le rawtext non échappé se re-lit verbatim → même arbre,
+    /// rejouable). Effet de bord voulu : les marqueurs
+    /// `<template data-obreloc*>` (JS-C291) ne classent plus —
+    /// ils existent justement pour être rejoués — et un tag
+    /// custom `<col-foo>` ne tombe plus sur le préfixe `<col`.
+    const RISKY_TAGS: &[&str] = &[
+        "table", "thead", "tbody", "tfoot", "tr", "td", "th", "col", "colgroup", "select",
+        "option", "template", "script", "frameset", "frame",
     ];
     let tag_of = |id: u32| -> &str { d.nodes.get(id as usize).map_or("", |n| n.tag.as_str()) };
     let mut out = Vec::with_capacity(ops.len());
@@ -1711,6 +1712,24 @@ fn journal_ops_to_seam(
                 if RISKY_PARENT.contains(&tag_of(parent)) {
                     return None;
                 }
+                // Pré-classification : un tag risqué n'importe
+                // où dans un sous-arbre inséré → journal classé.
+                for &a in &added {
+                    let mut stack = vec![a];
+                    let mut seen = 0usize;
+                    while let Some(id) = stack.pop() {
+                        let Some(n) = d.nodes.get(id as usize) else {
+                            continue;
+                        };
+                        seen += 1;
+                        if seen > d.nodes.len() || RISKY_TAGS.contains(&n.tag.as_str()) {
+                            // Chaîne enfant cyclique (§B-59) ou
+                            // tag risqué → repli sérialisation.
+                            return None;
+                        }
+                        stack.extend_from_slice(&n.children);
+                    }
+                }
                 let mut html = String::new();
                 let mut ids = Vec::new();
                 let mut tags = Vec::new();
@@ -1719,9 +1738,6 @@ fn journal_ops_to_seam(
                     html.push_str(&h);
                     ids.extend(i);
                     tags.extend(t);
-                }
-                if RISKY_CONTENT.iter().any(|t| html.contains(t)) {
-                    return None;
                 }
                 out.push(DomMutation::Insert {
                     parent: u64::from(parent),

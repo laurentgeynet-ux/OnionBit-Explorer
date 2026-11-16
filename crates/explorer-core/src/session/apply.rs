@@ -4479,6 +4479,59 @@ impl Session {
     pub fn pending_apply_count(&self) -> usize {
         self.pending_applies.len()
     }
+
+    /// Octets de payload retenus par la file d'applies —
+    /// voir `apply_queue_bytes` (la métrique y est
+    /// décrite).
+    #[must_use]
+    pub fn pending_apply_bytes(&self) -> usize {
+        apply_queue_bytes(&self.pending_applies)
+    }
+}
+
+/// Octets de payload retenus par une file d'applies —
+/// `html` des keyed, `html`/`text`/`value` des ops de
+/// journal, `ids`/`tags` des baselines. §B-114 : chaque
+/// `Insert` porte la sérialisation de son sous-arbre et
+/// `queue_apply_journal` prolonge le job en queue sans
+/// borne — sous producteur > consommateur la file peut
+/// retenir des Mio que ni `heap_b` ni `muts` ne montrent
+/// (RSS 402→5 031 Mio au vol 836 avec DOM sain). La
+/// métrique nomme ce réservoir ; elle n'inclut pas le
+/// surcoût de structure des `Vec`/`String` (capacité
+/// arrondie), seulement les octets utiles. Fonction libre :
+/// appelable pendant qu'un `&mut Tab` est tenu (le borrow
+/// de `self.pending_applies` est disjoint de `self.tabs`).
+pub(crate) fn apply_queue_bytes(queue: &ApplyQueue) -> usize {
+    queue
+        .iter()
+        .map(|p| {
+            let journal_b = p
+                .journal
+                .as_ref()
+                .map_or(0, |j| j.ops.iter().map(apply_op_bytes).sum::<usize>());
+            let tags_b: usize = p.tags.iter().map(String::len).sum();
+            p.html.len() + journal_b + p.ids.len() * 8 + tags_b
+        })
+        .sum()
+}
+
+/// Octets utiles d'une op de journal (payloads seuls — le
+/// coût de structure est ignoré, voir
+/// [`Session::pending_apply_bytes`]).
+fn apply_op_bytes(op: &explorer_js::DomMutation) -> usize {
+    match op {
+        explorer_js::DomMutation::Insert {
+            html, ids, tags, ..
+        } => html.len() + ids.len() * 8 + tags.iter().map(String::len).sum::<usize>(),
+        explorer_js::DomMutation::Remove { .. } | explorer_js::DomMutation::AttachShadow { .. } => {
+            0
+        }
+        explorer_js::DomMutation::SetAttr { name, value, .. } => {
+            name.len() + value.as_ref().map_or(0, String::len)
+        }
+        explorer_js::DomMutation::SetText { text, .. } => text.len(),
+    }
 }
 
 /// File des applies en attente — sur `Session` (une entrée
@@ -5610,5 +5663,54 @@ mod reloc_tests {
         assert!(p.images.replaced.is_empty());
         // Marque doublée — les passes suivantes sont amorties.
         assert_eq!(p.dom_gc_mark, dom.live_count() * 2);
+    }
+
+    /// §B-114 — `apply_queue_bytes` compte les octets utiles
+    /// retenus par la file : `html` keyed, payloads des ops
+    /// de journal, `ids` (8 o) et `tags`. File vide = 0.
+    #[test]
+    fn b114_apply_queue_bytes_compte_les_payloads() {
+        use super::{ApplyQueue, PendingApply};
+        let mut q = ApplyQueue::new();
+        assert_eq!(super::apply_queue_bytes(&q), 0);
+        let base = PendingApply::default();
+        // Keyed : html + ids + tags.
+        q.push_back(PendingApply {
+            html: "<p>x</p>".into(),
+            ids: vec![1, 2, 3],
+            tags: vec!["a".into(), "bb".into(), "#text\x00fff".into()],
+            ..base
+        });
+        let keyed_b = "<p>x</p>".len() + 3 * 8 + (1 + 2 + "#text\x00fff".len());
+        assert_eq!(super::apply_queue_bytes(&q), keyed_b);
+        // Journal : Insert (html+ids+tags) + SetAttr + SetText +
+        // Remove (0).
+        q.push_back(PendingApply {
+            journal: Some(explorer_js::DomJournal {
+                ops: vec![
+                    explorer_js::DomMutation::Insert {
+                        parent: 1,
+                        index: 0,
+                        html: "<i>y</i>".into(),
+                        ids: vec![9],
+                        tags: vec!["i".into()],
+                    },
+                    explorer_js::DomMutation::SetAttr {
+                        key: 2,
+                        name: "class".into(),
+                        value: Some("z".into()),
+                    },
+                    explorer_js::DomMutation::SetText {
+                        key: 3,
+                        text: "abc".into(),
+                    },
+                    explorer_js::DomMutation::Remove { key: 4 },
+                ],
+                fingerprint: 0,
+            }),
+            ..PendingApply::default()
+        });
+        let journal_b = "<i>y</i>".len() + 8 + "i".len() + "class".len() + "z".len() + "abc".len();
+        assert_eq!(super::apply_queue_bytes(&q), keyed_b + journal_b);
     }
 }

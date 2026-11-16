@@ -159,7 +159,7 @@ sortie : R-12 (layout incrémental) ou cadencement temporel.
   `@charset`/transport → UTF-8 ; jamais le sniffer HTML hors
   document. Borné — régression vérifiée sur example.com.
 
-- [~] **Étape 52b. Défauts event-loop vus en vrai** (QA daemon
+- [x] **Étape 52b. Défauts event-loop vus en vrai** (QA daemon
   @ `cfa0514`, repros `D:\explorer-fieldwork\repros\`) :
   1. **timers ne tirent qu'à l'input** — `setTimeout(8s)` n'a
      couru qu'au scroll suivant : la pompe de fond du daemon
@@ -7035,7 +7035,7 @@ incrément.
   filaire `frame_step_wire_contract`
   + `--step`/`--back-step` vol
   probe + doc ABI. 76/76 app.
-- [~] **Étape 204. `AUDIO_MODE_TAP=2`**
+- [x] **Étape 204. `AUDIO_MODE_TAP=2`**
   (dépôt → NAV → jscore) — ADR-0032
   en trois sous-étapes :
   - [x] **204a** (dépôt, `master
@@ -8090,6 +8090,197 @@ MCP = adaptateur, jamais la base.
   design csszengarden, images debian) ;
   craigslist rejeté (redirect géo), ddg-lite
   trop maigre. Run complet 10/10 mesurés.
+- [x] **Étape 303. `check atrulev` — surface BCD
+  des descripteurs `@`-rules** (`explorer-cli`,
+  `bcd_coverage.mjs`). Nouvelle surface `atd` :
+  `bcd.css['at-rules'].<r>.<d>` sondé
+  comportementalement — `@counter-style` via les
+  marqueurs `inside` (seul chemin consultant
+  `CounterStyle` — trou journalisé : le marqueur
+  `outside` l'ignore), `@media` sous
+  `StyleEnv::default` (features + méta-syntaxes
+  `range`/`or`/`calc`/`nested` avec **contre-sonde
+  faux-littéral** écartant la tolérance
+  `unknown → vrai`), `@supports` (`selector()`
+  via la forme à `:` — discriminante ; les
+  fonctions sans `:` → `na`), `@property`
+  (registration × `var()`). Verdict tri-état
+  `ok`/`miss`/`na` ; 63 descripteurs hors portée
+  in-process (`@font-face`/`@page`/`@keyframes`/
+  `@import`/`@container`…) annoncés hors
+  dénominateur. Mesure inaugurale : **`css.atd`
+  34/58 (58,6 %)** — misses honnêtes :
+  `counter-style` additive/negative/pad/range/
+  fallback non portés, 17 features MQ
+  (`grid`, `scan`, `overflow-*`, `prefers-*`
+  récents, `-webkit-transform-3d`),
+  `property:syntax` non enforcé,
+  `supports:selector` non évalué. Cliquet
+  `css.atd` par at-rule + baseline sauvée.
+  Verrou : `atrulev_descripteurs_verdicts`.
+- [x] **Étape 302. Triage jauge post-298 —
+  `initial_extra` permuté, sept fixtures armées,
+  `perspective*` → `PAINT_NA`** (`explorer-cli`,
+  constats NAV du journal 2026-11-16 exécutés).
+  `("text-decoration-line","underline")` était
+  faux : initiale spec `none` → `underline`
+  mesurée (0/5 miss = trou exposé, file PIPE).
+  `perspective*` paintv-na : borne non-affine +
+  fixtures 3D hors-oracle — 10 misses
+  mesuraient la borne. Fixtures armées :
+  `overflow-clip-margin` (enfant débordant),
+  `line-clamp` (texte long, sonde
+  `ellipsis`→`2` → 1/3 ok), `margin-trim`,
+  `hanging-punctuation`, `text-emphasis-position`
+  (1/4 ok), `white-space-trim`, `text-spacing-trim`
+  — miss désormais attribuables moteur. `css.values`
+  1144/1767 → **1146/1758 (65,2 %)**, cliquet
+  et cliché `na` re-sauvés.
+- [x] **Étape 308. §B-152 — la phase fontes de la vague
+  est bornée wall-clock** (`explorer-core`, field278 :
+  caisse-epargne tenait le commit des feuilles ~240 s —
+  `sheets_bytes=0` toute la durée, page non stylée ;
+  mécanisme = `fetch_fonts` séquentiel sur des srcs
+  legacy `eot/svg/ttf` ~2 s pièce). `SessionConfig::
+  font_phase_ms` (défaut 20 s) borne la phase ; les
+  `src:` sont triés **premier décodable d'abord**
+  (`woff2` > `woff` > `ttf/otf/ttc` > inconnu >
+  `eot/svg`) — les formats indécodables ne se paient plus
+  en premier ; dédup d'URL entre faces. Deadline
+  atteinte → la vague commit sans les faces restantes
+  (fonte facultative, feuille non), marqueur
+  `sub: phase fontes bornée`. Reste au journal : le fix
+  complet est un commit étagé (sheets à `fonds fetchés`,
+  fontes en FOUT différé).
+- [x] **Étape 309. `<frameset>`/`<frame>` → grille
+  d'iframes** — tranche legacy journal 2026-11-15 point
+  (a) (`explorer-core`, zéro contrat PIPE : réécriture
+  DOM post-parse à `nav_apply`). `frameset::expand_-
+  framesets` : chaque `<frame>` → `<iframe>` positionné
+  absolument dans un `<div>` grille ; `rows`/`cols`
+  `px`/`%`/`*` résolus sur le viewport (défaut `100%`,
+  invalide = `1*`), produit lignes×colonnes, `<frameset>`
+  imbriqué récursif, `<noframes>` sauté. Attributs
+  copiés : `src`/`name`/`scrolling`/`margin*`/`noresize`/
+  `longdesc`, `frameborder=0` → `border:0`. Machine
+  iframe réutilisée telle quelle (fetch, sous-contextes,
+  composite, bfcache). Verrous : `frameset_*` ×2.
+- [x] **Étape 307. Image maps `<map>`/`<area>`** —
+  tranche legacy journal 2026-11-15 point (b)
+  (`explorer-core`, zéro contrat PIPE : `shape`/`coords`
+  vivent dans les attributs, géométrie via `box_rect`).
+  `imagemap::area_hit` : premier `<img>` ancêtre porteur
+  de `usemap` (spec : `img` seul — `input[type=image]`
+  HTML4 soumet son formulaire), `<map>` par `name`/`id`,
+  aires sondées en ordre arbre — `rect`/`circle`/`poly`
+  (rayon), `default` dernier recours, `href`/`nohref`
+  absents = sautés, `coords` tronqués = ignorés. Coords
+  espace naturel → mises à l'échelle du rendu quand
+  l'intrinsèque est connu. `link_node_at`/`hit_targets_at`
+  sondent l'aire avant le lien ancêtre — `target`/`rel`/
+  `download`/`referrerpolicy` lus sur l'aire par le chemin
+  `link_activate` existant. Verrous : `image_map_*` ×4.
+- [x] **Étape 306. `input[type=image][src]` dans la
+  collecte image** (`explorer-core`, demande PIPE
+  2026-11-15) : `own_image_pick` factorise la chaîne
+  `srcset`/`src`/lazy `data-*` — partagée `<img>` (post-
+  `picture_pick`) et `input[type=image]` (spec
+  image-button, sans picture-contexte). Fetch via le plan
+  sous-ressources existant, `img_box` R-163 s'active dès
+  `sizes` peuplé ; `src="data:"` décodé côté NAV dans
+  `insert_images_into` (le collecteur inline PIPE ne lit
+  pas `input` — `<img>` à `data:` saute, zéro double
+  décodage), garde « `bodies` vide » montée dans la
+  boucle. Sans `src` : repli `alt` conservé. Verrous :
+  `input_image_*` ×3, 481/481 session.
+- [x] **Étape 305. §B-114 — coupes de churn nommées au
+  field276** (`explorer-jscore`/`explorer-js`/
+  `explorer-core`). Sondes promesses (`prom_sites` +
+  histogrammes `prom.*` par passe GC) derrière
+  `EXPLORER_PROM_PROF` — atomique + `enable()`, pattern
+  J17 ; `sched.tally` conservé à `info`. Journal :
+  pré-classification par marche de tags (`RISKY_TAGS`,
+  cycle borné §B-59) avant toute sérialisation — les
+  `serialize_subtree_keyed` jetés au classement
+  disparaissent, les marqueurs `data-obreloc*` (JS-C291)
+  et tags customs à préfixe ne classent plus à tort.
+  `fire_listeners` : `probe_node_desc` paresseux (plus
+  par nœud×phase). `proto_accessor_shadows` : `Vec` de
+  maillons sur raté de mémo seulement. `queue_mutation` :
+  marche parent sans `Vec`. `pump.offlock` amorcé sur
+  le fil appelant — la mesure borne le churn à la
+  fenêtre. Verrous : `dom_sync` 11/11 (2 nouveaux),
+  lib jscore 51/51 ; demande PIPE `flow.*` consignée.
+- [x] **Étape 301. Attribution §B-114 — `pump.offlock`
+  fendu, la file d'applies mesurée** (`explorer-core`,
+  instrumentation). `pump.offlock` couvrait
+  `run_pending` + `sync_for_apply` sous un seul
+  chiffre : désormais `pump.jobs`/`pump.sync` dans
+  le bloc `spawn_blocking` (curseur `alloc_delta`
+  amorcé — compteur global process, attribution
+  approchée documentée) + `evalrun.jobs`/
+  `evalrun.sync` sur le chemin eval ; l'agrégat
+  `pump.offlock` est conservé. `mem_diag` émet
+  `applies`/`apply_b` — la file retient les
+  payloads `Insert` (`html`+`ids`+`tags`) que
+  `pend=` ne couvrait pas (RSS 5 Gio au vol 836
+  avec `pend=0`, `heap_b` 94 Mio). Verrou :
+  `b114_apply_queue_bytes_compte_les_payloads`.
+- [x] **Étape 299. `classList` : no-op neutre +
+  `toggle(force)` sans doublon** (`explorer-jscore`,
+  wedge vol `host=DOMTokenList:add`). (a) `set_attr`
+  inconditionnel → record + op journal `SetAttr` +
+  `mark_dirty` + CE fantômes par appel — l'amplification
+  vivait en aval (journal rejoué en invalidations style
+  réelles) ; garde `attr != join` (spec : un no-op
+  `DOMTokenList` n'est pas une mutation). (b)
+  `toggle(t, force=true)` poussait sans tester
+  `contains` → `"box box"` (exposé par le verrou).
+  Résidu : quadratique attribut-chaîne (10k tokens
+  uniques = 3,8 s) — repr token-set à ordonner. Verrou :
+  `classlist_noop_ne_mute_pas` — suite `dom` 272/272.
+- [x] **Étape 300. `values_pareto.mjs` — misses
+  × corpus de vols** — la priorisation terrain de la
+  file famille : chaque famille avec misses reçoit
+  `sites`/`décls` vus dans les census de vols +
+  verdict `computedv` (rendu/cascade/mixte). 375
+  misses sur props vues en vol (60 %), `mask-image`
+  chaud (644 décls/4 sites), `row-rule`/`text-fit`/
+  `mask-border-*` jamais vus = volume jauge.
+- [x] **Étape 298. `check computedv` — classifieur
+  « cascade applique » sur les misses** — troisième
+  oracle de la jauge, niveau style calculé : la
+  `StyleMap` du sous-arbre `.x` sérialisée (props ∪
+  vars, pseudos), prop sondée exclue — sinon
+  saturation `routed`-like. Delta honnête =
+  expansion shorthand + résolution logique
+  (`resolve_logical_props`) + effets croisés.
+  Hors union ok (« cascade applique » ≠ « rendu ») ;
+  `bcd_coverage` l'exploite en colonne `c=N` du
+  `--families`. Mesure : 170/623 misses calculées —
+  `mask` c=26/30, `row-rule` c=11/11 (trous purement
+  rendu) ; `border-image` c=0 (gap cascade, plus
+  profond) ; `overflow-x` ne force pas
+  `overflow-y:auto` au style.
+- [x] **Étape 297. Triage `bcd_audit` — fixtures
+  corrigées, méta-noms sondés, file PIPE nommée** —
+  les constats de l'étape 277 passent en revue.
+  `flex-wrap`/`flex-flow` : fixture mono-ligne sans
+  débordement (wrap inobservable, 0/3) → multi-lignes
+  dédiée, `wrap`/`wrap-reverse` ok. `margin:anchor-size`
+  : méta-nom → sonde `anchor-size(--a)` + fixture ancre,
+  ok mesuré ; bras `margin` de `value_is_valid_for`
+  ouvert à `anchor(`/`anchor-size(` (additif PIPE,
+  journalisé). Sizing `anchor*` → `na` (12 paires —
+  immesurable sans ancre, fixture positionnée
+  incompatible avec l'oracle intrinsèque).
+  `mask-border-mode` hors `NO_ORACLE` → tables-mortes 0.
+  File PIPE (Extensions demandées) : `expand_background`
+  `currentColor`/`round`/`space`/`text`/`border-area`/
+  `x-*`/`y-*`, `expand_mask` positions logiques,
+  `fit-content(<len>)`, `stretch`, `overflow-block`/
+  `overflow-inline` routés-inertes, `anchor()` insets.
+  `css.values` 1139/1779 → 1144/1767 (64,7 %).
 - [x] **Étape 296. `POST /api/shutdown` — l'arrêt graceful
   à distance** (`explorer-api`/`explorer-daemon`/
   `explorer-cli`, besoin console : le kill n'avait que
@@ -8499,7 +8690,7 @@ ci-dessous (fréquence observée sur le corpus réel).
   `console` embedder `Uncaught:`) ; `scrollIntoView` no-op
   honnête sur `Element.prototype` ; `sendBeacon` existait
   déjà. Régressions `c74_*` (6 tests).
-- [~] **JS-C75. `attachShadow`/Shadow DOM** — le trou le
+- [x] **JS-C75. `attachShadow`/Shadow DOM** — le trou le
   plus structurel (scoped CSS + slots) : old.reddit et MDN
   l'utilisent. **Découpé en tranches T1→T6** (vol 2026-10-25,
   répartition actée dans `docs/interface-equipes.md`) :
@@ -14063,3 +14254,155 @@ chaque gain rapporté contre les **deux** archétypes.
   thrash borné). Compteur `ic_poly` — verdict au vol :
   `ic_bail`/`prop_ns` en reflux attendu.
 
+- [x] **Étape 304. `spawn_daemon -Via session|wmi` — le
+  canal session devient canonique** (§B-135 : captures live
+  2026-11-16 — 2 spawns WMI tués à la création, avant la
+  première écriture, Defender muet ; la parenté `wmiprvse`
+  est une signature anti-latéral-movement). `session`
+  (défaut) = `Start-Process -WindowStyle Hidden`, même
+  watchdog/`exit.log`/pidfile, daemon lié au job session
+  (meurt avec elle — signature lisible depuis 285). `wmi`
+  opt-in = détaché, survit à la session. Vérifié : daemon
+  9477 enfant de `cmd` ← session, `shutdown:api` → `EXIT:0`.
+- [x] **JS-C555 — `in` voit les méthodes `Host` (`api`
+  +82)** : `has_prop_walk` ne sondait que `Host::get` —
+  les méthodes `invoke`-only (exposées par `read_prop` en
+  `bound_native`, JS-C341) étaient invisibles à `'m' in
+  host` alors que `typeof` les voyait `'function'`. Bras
+  `h.has_method(key)` ajouté (prédicat pur, avant `get`) ;
+  `SelectionHost::has_method` déclaré (13 noms `invoke`
+  orphelins). Mesuré : `api` 1510 → **1592/8099 (19,7 %)**,
+  sert les jalons N3.1/N3.2 du plan vitrine. Verrou
+  `c555_in_host_methods` ×3 ; `lang` 315 + `dom` 272 verts.
+  Suite file : `invoke` sans `has_method` des autres hôtes,
+  `AbstractRange`, `Range.compare*`/`surroundContents`,
+  `Selection.deleteFromDocument`.
+- [x] **JS-C556 — `AbstractRange`/`StaticRange` IDL +
+  comparaisons `Range` (`api` +23 → 1615)** : jalon N3.1
+  livré — chaîne proto spec (`Range`/`StaticRange` →
+  `AbstractRange`), accesseurs bornes get-only avec marque,
+  ctor `StaticRange` dict-validé, `Range.compare*`/
+  `isPointInRange`/`intersectsNode`/`surroundContents` via
+  `cmp_point` (ordre document boundary points),
+  `Selection.direction`/`setPosition`/`getComposedRanges`/
+  `modify` borné caractère. **Deux bugs réels trouvés** :
+  `Range.prototype` du ctor ≠ proto des instances
+  (`instanceof` cassé) ; `setPosition` recopiait la borne
+  `end` du range courant au lieu des args. Verrou
+  `c556_ranges` ×5 ; gates verts. Reste file N3.3 :
+  `invoke` sans `has_method` résiduels, membres IDL par
+  fréquence (`CSS.<unit>`, `HTMLInputElement`, ancres URL,
+  formulaires, événements `Keyboard`/`Pointer`).
+- [x] **JS-C557 — `CSS.<unit>` Typed OM + `CSS.highlights`
+  (`api` +64 → 1679)** : lot N3.3 — les 64 factories
+  numériques (`CSS.px/em/vw/deg/ms/fr/…`) en une boucle
+  `bound_native` à unité liée, retour `{value, unit}` +
+  `toString()` spec (`percent`→`%`, `number`→``) ;
+  `highlights` = `Map` honnête via `call_value_ctor`.
+  `paintWorklet` seul miss `CSS.*` restant (pas de
+  worklet — absent honnête). Verrou `c557_css_units` ×2.
+  Prochain lot : audit `invoke`-sans-`has_method`
+  (FileReader, canvas 2d, select/table), props
+  `HTMLInputElement`/ancres URL/formulaires.
+- [x] **JS-C558 — audit `invoke` sans `has_method` :
+  7 hôtes réparés (`api` +7 → 1686)** : bug réel —
+  `ctx.fillRect(…)` marchait au call-site mais
+  `typeof`/`in`/`bind` voyaient `undefined`. Déclarations
+  ajoutées à `Ctx2dHost` (tout le canvas 2d),
+  `GradientHost`, `TimeRangesHost`, `EventHost`,
+  `AttributesHost`, `DomImplementationHost`,
+  `HistoryHost`. Verrou `c558_host_methods_in` ×3.
+- [x] **JS-C559 — IDL fréquent : accesseurs prototype
+  host-first + URL/forms/tables/SVG (`api` +688 →
+  2374/8099, 29,3 %)** : `dom_acc_get`/`set` délèguent
+  au getter canonique `NodeHost::get`/`set` avant le
+  repli attribut — toutes les props computées
+  (`form`/`labels`/`control`/`options`/`elements`/
+  `rows`/`cells`/`cellIndex`/`indeterminate`/validité…)
+  deviennent visibles depuis les protos. Tables
+  `dom_acc_props`/`dom_methods`/`prop_attr_name`/
+  `TAGGED_ATTRS`/`TAGGED_BOOL_ATTRS` étendues en masse,
+  **tag-scoping préservé**. URL : `username`/`password`
+  ancres + `host`/`origin` sans userinfo (partagé avec
+  `location`). Famille `SVGFE*Element` installée
+  (~194 clés). Verrou `c559_dom_idl` ×6.
+- [x] **JS-C560 — surface « session réelle » (`api` +885 →
+  3259/8099, 40,2 %)** : six lots Pareto. `cli api` pose
+  désormais `install_timers`/`storage`/`xhr(NullTransport)`
+  — rAF/storage/fetch/XHR mesurables. `CanvasRenderingContext2D`
+  : proto peuplé + état `CanvasState.extra` + `getTransform`
+  CTM repliée. `Navigator`/`window`/`Document` membres
+  fréquents (`lastModified`, `designMode`, `parseHTML`,
+  handlers `on*`, `compatMode`, `permissionsPolicy`),
+  `HTMLMediaElement` surface restante, `ElementInternals`
+  global (ARIA + `CustomStateSet` + `ValidityState` chaîné),
+  `TextTrackCue` réel + `VTTCue` chaîné, `PointerEvent`,
+  `TrackEvent`, `SVGSVGElement` méthodes, XHR `timeout`/`on*`/
+  `upload`, `AbortSignal.any`, `Worker` proto `on*`,
+  `Request`/`Response` `bytes`/`textStream`, `Navigation`
+  + satellites (`NavigationHistoryEntry`…), `Observable`
+  complet, `SubtleCrypto`/`PermissionStatus`/`ShadowRoot`/
+  `TextMetrics`/`NavigateEvent`/`SecurityPolicyViolationEvent`/
+  `Touch`/`URLPattern`, interfaces `[Exposed=Worker]` côté
+  worker. Posture honnête partout : rejets `NotSupportedError`,
+  collections vides, `false` — jamais de fausse capacité.
+- [x] **JS-C561 — protos d'interfaces + `FileReaderSync` +
+  `DataTransfer` réel (`api` +239 → 3498/8099, 43,2 %)** :
+  les protos vides se peuplent (membres `in`/`instanceof`
+  exacts) : `Screen*`/`VisualViewport`/`BatteryManager`/
+  `StorageBucket*`/`MutationRecord`/`KeyboardEvent`/`Touch`/
+  `Highlight`+`HighlightRegistry` (setlike/maplike Set/Map
+  réels)/`EventCounts`/`PermissionsPolicy`/`VTTRegion`/
+  `DOMPointReadOnly`/`DOMQuad` (`getBounds` réel)/`FontFace`/
+  `FileReader`. `FileReaderSync` synchrone via `blob_parts`
+  partagé. `DataTransfer` = store formats réel
+  (`setData`/`getData`/`clearData` resynchronisent `types`/
+  `items`). `Element` : `getBoxQuads`/`requestPointerLock`/
+  `pseudo` ; `<input>` `stepUp`/`stepDown`/`showPicker` ;
+  `<table>` sections/lignes spec. **2 bugs réels** :
+  `arr_push`/`length` par `set_own` n'atteignaient pas
+  `ObjKind::Array` (→ `set_prop`) ; `sheet` proto faisait
+  retomber `<link>` nu sur le reflet `""` (→ `Some(Undefined)`
+  explicite). Verrou `c561_bcd_surface` ×6.
+- [x] **JS-C562 — `crypto.subtle` §B-117 : `SHA-1`,
+  `AES-CBC`, `generateKey`, `derive*` (PBKDF2/HKDF),
+  `exportKey`, `supports()`** : mur vol 852 (odysee,
+  aliexpress, cdiscount ×9, deliveroo) — la pipeline
+  `CryptoOp` → `NetRequest::Crypto` → `explorer_net::crypto`
+  était vivante mais la table s'arrêtait à SHA-2/AES-GCM/
+  RSA/HMAC/EC. `SHA-1` digest bout-en-bout (repli natif
+  `sha2.rs` sans transport + `SHA1_FOR_LEGACY_USE_ONLY`
+  plateforme, HMAC/RSA-PKCS1 verify). `AES-CBC` :
+  `importKey raw` 128/192/256, `iv` 128 bits exacts,
+  PKCS#7 — **deps `aes`+`cbc` (RustCrypto) justifiées par
+  `ring` ne faisant pas CBC** ; `sha1` pour `RSA-OAEP`.
+  `generateKey` symétrique (AES `length` ∈ {128,192,256},
+  HMAC = bloc du hash) tiré `ring::rand` — jamais le PRNG
+  moteur. `deriveBits`/`deriveKey` PBKDF2 (boucle RFC 2898
+  `ring::hmac` pour SHA-1) + HKDF (`ring::hkdf`, borne
+  255×`hashLen`) ; `deriveKey` = bits validés `raw` cible.
+  `exportKey` moteur-seul `raw`/`pkcs8`/`spki`/`jwk` ;
+  `wrapKey`/`unwrapKey`/`encapsulate*` honnêtement
+  `NotSupportedError`. `SubtleCrypto` ctor+proto
+  installés ; `supports(operation, algorithm)` matrice
+  réelle, ordre inversé toléré. Verrous `c562_webcrypto`
+  ×8, `c79_crypto` ×15, `crypto::tests` net ×11 (FIPS
+  SHA-1, NIST CBC, RFC 6070 PBKDF2, RFC 5869 HKDF).
+- [x] **JS-C563 — `pipeTo` asynchrone §B-153** : mur #1 du
+  corpus (6 sites / 2 stacks) — verbatim vol 851/853 n26 +
+  shopify : `TypeError: pipeTo: source stalled without pull`
+  dans le bootstrap `__reactRouterContext` React Router
+  (chunks `enqueue`d après l'appel, pas de `pull`). Le drain
+  synchrone exigeait tout immédiatement → `PipeState` porté
+  par `RsData` (`stream`/`writer`/`pid`/`prevent_*`, tracé
+  GC) : `pipeTo` verrouille la source (spec), draine le
+  tampon puis laisse la promesse pendante — `enqueue`/
+  `close`/`error`/`cancel`/checkpoint pilotent `drive_pipe`.
+  `close` → `writer.close`+résolution, `error` → `abort`+
+  rejet, `pull` muet → rendre la main (re-tenté checkpoint).
+  `write` qui jette ou dont la promesse rejette fait échouer
+  le pipe (`pipe_write_err` lié). `preventClose`/`preventAbort`
+  honorés ; `preventCancel`/`signal` approximations doc.
+  `pipeThrough` = même `pipe_start`, `readable` rendu de suite.
+  Verrous `c563_streams_pipe` ×7 ; régressions b122 ×4,
+  b4 ×16, c338 ×9, xhr ×81 vertes.

@@ -190,7 +190,7 @@ impl Engine {
     /// site de création (`dom_probe` armée uniquement). No-op
     /// désarmée ou table pleine ([`PROM_SITES_MAX`]).
     fn probe_prom_created(&mut self, id: ObjId) {
-        if !tracing::enabled!(target: "dom_probe", tracing::Level::INFO)
+        if !crate::interp::prom_probe_armed()
             || self.prom_sites.len() >= PROM_SITES_MAX
             || self.prom_sites.contains_key(&id)
         {
@@ -213,7 +213,7 @@ impl Engine {
     /// L'entrée peut manquer si la promesse prédate l'armement —
     /// elle est alors créée avec `created = "<?>"`.
     fn probe_prom_then(&mut self, id: ObjId) {
-        if !tracing::enabled!(target: "dom_probe", tracing::Level::INFO) {
+        if !crate::interp::prom_probe_armed() {
             return;
         }
         let site: Rc<str> = self.cur_fn_label().into();
@@ -245,7 +245,7 @@ impl Engine {
     /// après la transition d'état — l'early-return « déjà
     /// settlée » garantit l'unicité.
     fn probe_prom_settled(&mut self, id: ObjId, state: PromiseState) {
-        if !tracing::enabled!(target: "dom_probe", tracing::Level::INFO) {
+        if !crate::interp::prom_probe_armed() {
             return;
         }
         let site: Rc<str> = self.cur_fn_label().into();
@@ -301,7 +301,7 @@ impl Engine {
     /// que `resolve` attend est lue dans le log, pas devinée.
     /// No-op désarmée (un `enabled!`, zéro coût par promesse).
     fn probe_prom_src(&mut self, id: ObjId, executor: Value) {
-        if !tracing::enabled!(target: "dom_probe", tracing::Level::INFO) {
+        if !crate::interp::prom_probe_armed() {
             return;
         }
         let Some(excerpt) = self.fn_source_excerpt(executor) else {
@@ -2104,6 +2104,9 @@ mod tests {
     #[test]
     fn probe_noms_les_promesses_pendantes() {
         let _g = tracing::subscriber::set_default(ArmProbe);
+        // §B-114 — la sonde est désormais opt-in
+        // (`EXPLORER_PROM_PROF`/enable) : l'armer pour le test.
+        crate::interp::prom_probe_enable();
         // Les callsites `enabled!` sont cachés — les tests en
         // parallèle les ont réchauffés désarmés avant
         // `set_default` ; il faut reconstruire le cache
@@ -2163,6 +2166,8 @@ mod tests {
     #[test]
     fn c412_prom_src_dumps_executor_excerpt() {
         let _g = tracing::subscriber::set_default(ArmProbe);
+        // §B-114 — sonde opt-in : l'armer pour le test.
+        crate::interp::prom_probe_enable();
         // Course de scheduling : le cache d'intérêt **global**
         // peut être re-gelé `never` par un test parallèle entre
         // le `rebuild_interest_cache` et l'éval → la sonde reste

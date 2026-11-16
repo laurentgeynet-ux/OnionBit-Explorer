@@ -58,6 +58,8 @@ mod find;
 mod forms;
 #[allow(clippy::wildcard_imports)]
 mod frame;
+mod frameset;
+mod imagemap;
 #[allow(clippy::wildcard_imports)]
 mod input;
 #[allow(clippy::wildcard_imports)]
@@ -990,6 +992,9 @@ pub struct Session {
     /// `cfg.max_fonts` pour les phases détachées (53d, le
     /// registre `WebFontSource` borne aussi à l'inscription).
     max_fonts: usize,
+    /// Deadline wall-clock de la phase fontes (étape 306 —
+    /// `cfg.font_phase_ms`, borne la vague avant commit).
+    font_phase_ms: u64,
     /// Bornes scheduler (étape 50) : `<script src>` par
     /// document, modules transitifs par graphe, fetches
     /// simultanés par onglet.
@@ -1405,6 +1410,7 @@ impl Session {
             max_sheets: cfg.max_sheets,
             max_imports: cfg.max_imports,
             max_fonts: cfg.max_fonts,
+            font_phase_ms: cfg.font_phase_ms,
             max_scripts: cfg.max_scripts,
             max_frames: cfg.max_frames,
             max_modules: cfg.max_modules,

@@ -35,16 +35,43 @@ git status --short                    # WIP ? → worktree
                                     # éphémère à HEAD sinon
 
 # 0.2 binaire frais (jamais un .exe qui traîne)
+# L'arbre principal porte souvent du WIP d'autres pistes :
+# un build dedans cuirait le mi-chantier, et un exe déjà
+# présent a une provenance intranchable (pré- ou post-WIP?).
+# Contrat inchangé : le binaire sort d'un worktree épinglé
+# au sha du vol — mais le worktree est PERSISTANT, pas
+# jetable : `build-dir` est hashé par chemin, un chemin
+# frais par vol = ~9 min de build froid à chaque fois.
+# Convention : UN worktree de vol par session, chemin
+# stable, JAMAIS édité à la main — checkout seul ; le sha
+# prouvé vient du `git rev-parse HEAD` du worktree +
+# exe.log, pas de la fraîcheur du dossier.
+git worktree add --detach C:\OnionBit-Explorer-vol HEAD   # 1 fois
+git -C C:\OnionBit-Explorer-vol checkout <sha-du-vol>     # par vol
+Push-Location C:\OnionBit-Explorer-vol
 cargo build --release -p explorer-daemon   # attendre « Finished »
+Pop-Location
+# (chemin déjà pris par un vol concurrent → suffixer
+#  -vol-b/-vol-c ; `git worktree list` montre les pris.
+#  Attention : chaque worktree a SON Explorer-data et son
+#  registre daemons — même règle « deux registres » qu'avec
+#  l'arbre performance : l'annonce du daemon vit dans
+#  l'Explorer-data DU WORKTREE de build, pas celui du main.)
 
 # 0.3 daemon dédié — port 9385+, profil déclaré, SPAWN CACHÉ
 # explorer-daemon.exe est sous-système console : lancé en
 # direct depuis un shell sans console (agent/IDE), Windows
 # lui alloue une fenêtre cmd VISIBLE qui possède sa vie —
 # fermée → daemon tué → vol bloqué ; un clic dedans
-# (QuickEdit) → daemon gelé. spawn_daemon.ps1 = watchdog WMI
-# SW_HIDE : jamais de fenêtre, survit à l'appelant, code de
-# sortie + stdout/stderr capturés (morts silencieuses passées).
+# (QuickEdit) → daemon gelé. spawn_daemon.ps1 = watchdog
+# SW_HIDE : jamais de fenêtre, code de sortie + stdout/
+# stderr capturés (morts silencieuses passées). Canal
+# `session` (défaut étape 301) : enfant de la session,
+# inJob=True — meurt avec elle (signature lisible, étape
+# 285). `-Via wmi` = détaché via wmiprvse — survit à la
+# session mais parenté suspecte : tuée à la création par
+# les politiques anti-latéral-movement sur certaines
+# stations (§B-135, captures live 2026-11-16).
 $env:EXPLORER_VIEWPORT='1366x900'
 $env:EXPLORER_PROFILE='vol:vol<N>'   # froid = défaut — NOM canonique
                                      # → Explorer-data\vols\vol<N>\profile
@@ -56,9 +83,17 @@ pwsh -File scripts/spawn_daemon.ps1 -Port 9385 `
 # -Repo <worktree> si le vol ne part PAS du dépôt du script
 # (sinon l'exe résolu = celui du dépôt principal, possiblement
 # périmé — post-mortem vol 814). Le résolveur retient l'exe
-# le plus récent parmi target_dir/build_dir/CARGO_TARGET_DIR ;
-# contrôle : `daemon-<port>.exe.log` = chemin + âge du binaire
-# lancé, à citer dans le rapport (un vol mesure UN binaire).
+# le plus récent parmi target_dir/build_dir/CARGO_TARGET_DIR —
+# SOURCE DE VÉRITÉ UNIQUE de l'emplacement du binaire : ne
+# jamais recopier un chemin résolu (si la config target
+# change, seul ce script suit) ; contrôle :
+# `daemon-<port>.exe.log` = chemin + âge du binaire lancé,
+# à citer dans le rapport (un vol mesure UN binaire).
+# PIÈGE : jamais d'exe « deviné » dans un autre worktree —
+# un daemon spawné depuis l'exe d'un autre arbre s'annonce
+# dans le registre de CET arbre (default-17232 dans le
+# registre perf = daemon de mesure lancé depuis le mauvais
+# binaire → invisible au `daemons` du main).
 
 # 0.4 watchdog MÉMOIRE — Job Object obligatoire, memwatch en
 # option. <pid> = la ligne « daemon PID <n> » de

@@ -112,6 +112,20 @@ pub trait XhrTransport {
     fn abort(&self, _handle: u64) {}
 }
 
+/// Transport « mort » : `send` rend un handle jamais livré —
+/// la requête reste pendante (probes et harnais sans réseau :
+/// `explorer-cli api`, tests). L'interface `XMLHttpRequest`/
+/// `fetch`/`Headers`/`Request`/`Response` est installée en
+/// entier ; jamais de réponse synthétisée — honnête « pas de
+/// connecteur » (JS-C560).
+pub struct NullTransport;
+
+impl XhrTransport for NullTransport {
+    fn send(&self, _req: &XhrRequest) -> u64 {
+        u64::MAX
+    }
+}
+
 /// Engine-side XHR bookkeeping: live handle → wrapper + shared data.
 #[derive(Default)]
 pub(crate) struct XhrEngineState {
@@ -185,6 +199,9 @@ pub(crate) struct XhrData {
     /// `xhr.withCredentials` (JS-C77) — `send` émet
     /// `credentials: Include` quand posé (`SameOrigin` sinon).
     with_credentials: bool,
+    /// `xhr.timeout` (ms, JS-C560) — stocké ; l'abandon effectif
+    /// est affaire de transport (l'embedder peut l'honorer).
+    timeout_ms: f64,
     /// `addEventListener` handlers: `(type, fn, capture)`.
     listeners: Vec<(String, Value, bool)>,
     /// `xhr.upload` paresseux — objet `XMLHttpRequestUpload`
@@ -273,10 +290,51 @@ impl Engine {
             // `hostMethod` → `invoke` renvoie `None` → fallback
             // XHR classique).
             "fetch",
+            "setPrivateToken",
         ] {
             let name = self.str_val(m);
             let f = self.bound_native("hostMethod", Self::host_method, vec![name]);
             self.set_own(proto, m, f, false);
+        }
+        // Handlers `on*` IDL (JS-C560) — `null` par défaut sur
+        // le proto : `'onload' in xhr` répond vrai d'emblée,
+        // l'affectation reste une propre expando (lue par
+        // `fire_xhr_event`).
+        for p in [
+            "onreadystatechange",
+            "onloadstart",
+            "onprogress",
+            "onabort",
+            "onerror",
+            "onload",
+            "ontimeout",
+            "onloadend",
+        ] {
+            self.set_own(proto, p, Value::Null, true);
+        }
+        // `XMLHttpRequestEventTarget`/`XMLHttpRequestUpload` —
+        // interfaces héritées spec : ctors « Illegal » + protos
+        // portant les handlers `on*` (XHR n'est pas
+        // constructible non plus — `xhr.upload` reste l'objet
+        // paresseux de `XhrHost::get`).
+        for name in ["XMLHttpRequestEventTarget", "XMLHttpRequestUpload"] {
+            let f = self.illegal_ctor_bound(name);
+            if let Value::Obj(fid) = f {
+                let p = self.new_object();
+                for h in [
+                    "onloadstart",
+                    "onprogress",
+                    "onabort",
+                    "onerror",
+                    "onload",
+                    "ontimeout",
+                    "onloadend",
+                ] {
+                    self.set_own(p, h, Value::Null, true);
+                }
+                self.set_own(fid, "prototype", Value::Obj(p), false);
+            }
+            self.set_own(g, name, f, false);
         }
         self.install_fetch();
         self.install_abort();
@@ -704,6 +762,8 @@ impl Host for XhrHost {
                 }
             }
             "withCredentials" => Value::Bool(d.with_credentials),
+            // `xhr.timeout` (JS-C560) — ms, `0` = pas de borne.
+            "timeout" => Value::Num(d.timeout_ms),
             // `responseType` (JS-C266) — `""`/`text` par défaut.
             "responseType" => {
                 if d.response_type.is_empty() {
@@ -750,6 +810,12 @@ impl Host for XhrHost {
             ) {
                 d.response_type = s;
             }
+            return Ok(true);
+        }
+        if key == "timeout" {
+            // Spec : entier non signé — négatif/NaN → 0.
+            let n = e.to_number(v)?;
+            self.data.borrow_mut().timeout_ms = if n.is_finite() && n > 0.0 { n } else { 0.0 };
             return Ok(true);
         }
         if key != "withCredentials" {
@@ -814,7 +880,9 @@ impl Host for XhrHost {
             // chaque `send`) : spec = réinterprète le CT de
             // réponse — le moteur n'a pas de décodage MIME à
             // surcharger → stub spec : accepté, sans effet.
-            "overrideMimeType" => Ok(Some(Value::Undefined)),
+            // `setPrivateToken` (PAT, JS-C560) — aucun jeton
+            // privé émis : accepté sans effet (même posture).
+            "overrideMimeType" | "setPrivateToken" => Ok(Some(Value::Undefined)),
             "send" => {
                 let mut ct: Option<String> = None;
                 let body = match arg(args, 0) {
@@ -1004,12 +1072,57 @@ impl Engine {
                 self.add_method(p, "arrayBuffer", body_arraybuf);
                 self.add_method(p, "formData", body_formdata);
                 self.add_method(p, "blob", body_blob);
+                // `bytes()`/`textStream()` (JS-C560 — Body
+                // spec : `Uint8Array` promis et stream de
+                // texte décodé).
+                self.add_method(p, "bytes", body_bytes);
+                self.add_method(p, "textStream", body_text_stream_m);
                 self.add_method(p, "clone", fetch_clone);
             }
             let tag = self.str_val("Request");
             self.set_own(qp, crate::interp::SYM_TO_STRING_TAG, tag, false);
             let tag = self.str_val("Response");
             self.set_own(sp, crate::interp::SYM_TO_STRING_TAG, tag, false);
+            // Attributs IDL visibles sur le prototype (`'x' in
+            // Request.prototype` — feature-detect spec) ; les
+            // valeurs vivent en props propres d'instance —
+            // `undefined` ici = « pas de valeur par défaut ».
+            for k in [
+                "url",
+                "method",
+                "headers",
+                "destination",
+                "referrer",
+                "referrerPolicy",
+                "mode",
+                "credentials",
+                "cache",
+                "redirect",
+                "integrity",
+                "keepalive",
+                "signal",
+                "duplex",
+                "body",
+                "bodyUsed",
+                "isHistoryNavigation",
+                "isReloadNavigation",
+                "targetAddressSpace",
+            ] {
+                self.set_own(qp, k, Value::Undefined, true);
+            }
+            for k in [
+                "type",
+                "url",
+                "headers",
+                "redirected",
+                "status",
+                "statusText",
+                "ok",
+                "body",
+                "bodyUsed",
+            ] {
+                self.set_own(sp, k, Value::Undefined, true);
+            }
             self.xhr.headers_proto = Some(hp);
             self.xhr.req_proto = Some(qp);
             self.xhr.res_proto = Some(sp);
@@ -1538,6 +1651,35 @@ fn body_arraybuf(e: &mut Engine, this: Value, _a: &[Value]) -> JsResult<Value> {
         Err(err) => e.reject_promise(pid, err),
     }
     Ok(Value::Obj(pid))
+}
+
+/// `body.bytes()` → `Uint8Array` du corps (spec `Body`,
+/// JS-C560 — même prise que `arrayBuffer`, rendu typé).
+fn body_bytes(e: &mut Engine, this: Value, _a: &[Value]) -> JsResult<Value> {
+    let pid = e.new_promise();
+    match body_take(e, this)? {
+        Ok(b) => {
+            let v = crate::typed_array::new_u8_array(e, b);
+            e.resolve_promise(pid, v);
+        }
+        Err(err) => e.reject_promise(pid, err),
+    }
+    Ok(Value::Obj(pid))
+}
+
+/// `body.textStream()` → `ReadableStream` du texte décodé
+/// (spec `Body`, JS-C560) — chunk `string` unique : le corps
+/// est déjà en mémoire, pas de segmentation artificielle.
+/// `TypeError` synchrone si le corps est consommé (verrou
+/// `bodyUsed` — même rail que `text()`).
+fn body_text_stream_m(e: &mut Engine, this: Value, _a: &[Value]) -> JsResult<Value> {
+    match body_take(e, this)? {
+        Ok(b) => {
+            let text = String::from_utf8_lossy(&b).into_owned();
+            Ok(crate::streams::body_text_stream(e, &text))
+        }
+        Err(err) => Err(crate::heap::Thrown(err)),
+    }
 }
 
 /// `body.formData()` — décodage `application/x-www-form-urlencoded`
@@ -2656,6 +2798,11 @@ impl Engine {
             // la file de timers (maif vol 122).
             let f = self.native_fn("timeout", abort_signal_static_timeout);
             self.set_own(cid, "timeout", f, false);
+            // `AbortSignal.any(iterable)` — signal dépendant
+            // aborté dès qu'une source l'est, raison reprise
+            // (JS-C560 — listeners réels, pas de polling).
+            let f = self.native_fn("any", abort_signal_static_any);
+            self.set_own(cid, "any", f, false);
         }
         self.set_own(g, "AbortSignal", asig, false);
     }
@@ -2670,7 +2817,7 @@ impl Host for AbortSignalHost {
         self
     }
 
-    fn get(&self, _e: &mut Engine, _t: Value, key: &str) -> JsResult<Option<Value>> {
+    fn get(&self, e: &mut Engine, t: Value, key: &str) -> JsResult<Option<Value>> {
         Ok(match key {
             "aborted" => Some(Value::Bool(self.data.borrow().aborted)),
             "reason" => {
@@ -2681,6 +2828,17 @@ impl Host for AbortSignalHost {
                     Some(Value::Undefined)
                 }
             }
+            // `onabort` (JS-C560) — attribut IDL : propre
+            // d'abord (handler posé par le JS), `null` sinon —
+            // visible à `in`/`typeof` comme spec.
+            "onabort" => Some(match t {
+                Value::Obj(id) => e
+                    .heap
+                    .obj(id)
+                    .and_then(|o| o.get_own("onabort"))
+                    .unwrap_or(Value::Null),
+                _ => Value::Null,
+            }),
             _ => None,
         })
     }
@@ -2849,6 +3007,40 @@ fn abort_signal_value(e: &mut Engine) -> Value {
         }
     }
     sig
+}
+
+/// `AbortSignal.any([s1,s2…])` — statique spec : signal
+/// dépendant aborté avec la `reason` de la première source
+/// qui aborte ; un listener `abort` est posé sur chaque
+/// source (déjà aborted → propagation immédiate).
+fn abort_signal_static_any(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
+    let out = abort_signal_value(e);
+    for src in e.iter_values(arg(args, 0))? {
+        let Some(src_data) = abort_data(e, src.clone()) else {
+            return Err(e.type_error("AbortSignal.any: argument is not an AbortSignal"));
+        };
+        if src_data.borrow().aborted {
+            let reason = src_data.borrow().reason.clone();
+            controller_abort(e, Value::Undefined, &[out.clone(), reason])?;
+            break;
+        }
+        let cb = e.bound_native("abort", abort_signal_any_propagate, vec![out.clone(), src]);
+        src_data.borrow_mut().listeners.push((cb, false));
+    }
+    Ok(out)
+}
+
+/// Listener de `AbortSignal.any` : `src` a aborté → `dep`
+/// hérite sa `reason` (spec « dependent signal abort »).
+fn abort_signal_any_propagate(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
+    let dep = arg(args, 0);
+    let reason = abort_data(e, arg(args, 1))
+        .and_then(|d| {
+            let d = d.borrow();
+            d.aborted.then(|| d.reason.clone())
+        })
+        .unwrap_or(Value::Undefined);
+    controller_abort(e, Value::Undefined, &[dep, reason])
 }
 
 /// `new AbortController()` — `{signal, abort()}` : le signal est un

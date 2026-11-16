@@ -96,7 +96,8 @@ mod xhr;
 pub use cmp::{CmpConsent, CmpPolicy};
 pub use context::CtxId;
 pub use crypto::{
-    CryptoOp, CryptoRequest, CryptoResponse, CryptoTransport, DigestAlgo, ImportFormat, KeyAlgo,
+    CryptoOp, CryptoRequest, CryptoResponse, CryptoTransport, DeriveAlgo, DeriveParams, DigestAlgo,
+    ImportFormat, KeyAlgo,
 };
 pub use dom::{
     CanvasOpRecord, CanvasState, Dom, JournalOp, MediaCmd, MediaElState, MediaErrorCode,
@@ -1771,4 +1772,4 @@ pub use storage::Storage;
 pub use value::{ObjId, Value};
 pub use websocket::{WsEventKind, WsOut, WsRequest, WsTransport};
 pub use worker::{WorkerConfig, WorkerFactory, WorkerLoader, WorkerNetRequest, WorkerNetResponse};
-pub use xhr::{FetchCredentials, FetchMode, XhrRequest, XhrResponse, XhrTransport};
+pub use xhr::{FetchCredentials, FetchMode, NullTransport, XhrRequest, XhrResponse, XhrTransport};
