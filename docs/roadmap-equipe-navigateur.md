@@ -14169,3 +14169,25 @@ chaque gain rapporté contre les **deux** archétypes.
   Prochain lot : audit `invoke`-sans-`has_method`
   (FileReader, canvas 2d, select/table), props
   `HTMLInputElement`/ancres URL/formulaires.
+- [x] **JS-C558 — audit `invoke` sans `has_method` :
+  7 hôtes réparés (`api` +7 → 1686)** : bug réel —
+  `ctx.fillRect(…)` marchait au call-site mais
+  `typeof`/`in`/`bind` voyaient `undefined`. Déclarations
+  ajoutées à `Ctx2dHost` (tout le canvas 2d),
+  `GradientHost`, `TimeRangesHost`, `EventHost`,
+  `AttributesHost`, `DomImplementationHost`,
+  `HistoryHost`. Verrou `c558_host_methods_in` ×3.
+- [x] **JS-C559 — IDL fréquent : accesseurs prototype
+  host-first + URL/forms/tables/SVG (`api` +688 →
+  2374/8099, 29,3 %)** : `dom_acc_get`/`set` délèguent
+  au getter canonique `NodeHost::get`/`set` avant le
+  repli attribut — toutes les props computées
+  (`form`/`labels`/`control`/`options`/`elements`/
+  `rows`/`cells`/`cellIndex`/`indeterminate`/validité…)
+  deviennent visibles depuis les protos. Tables
+  `dom_acc_props`/`dom_methods`/`prop_attr_name`/
+  `TAGGED_ATTRS`/`TAGGED_BOOL_ATTRS` étendues en masse,
+  **tag-scoping préservé**. URL : `username`/`password`
+  ancres + `host`/`origin` sans userinfo (partagé avec
+  `location`). Famille `SVGFE*Element` installée
+  (~194 clés). Verrou `c559_dom_idl` ×6.

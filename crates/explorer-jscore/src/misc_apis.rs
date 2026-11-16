@@ -1179,22 +1179,14 @@ fn cmp_point(dom: &crate::dom_host::DomRef, a: (NodeId, u32), b: (NodeId, u32)) 
     };
     if d.contains(an, bn) {
         let c = branch_of(an, bn);
-        let i = d
-            .child_nodes(an)
-            .iter()
-            .position(|&k| k == c)
-            .unwrap_or(0) as u32;
+        let i = d.child_nodes(an).iter().position(|&k| k == c).unwrap_or(0) as u32;
         // `(an,ao)` précède `b` ssi l'offset n'atteint pas la
         // branche qui contient `b`.
         return if ao <= i { -1 } else { 1 };
     }
     if d.contains(bn, an) {
         let c = branch_of(bn, an);
-        let i = d
-            .child_nodes(bn)
-            .iter()
-            .position(|&k| k == c)
-            .unwrap_or(0) as u32;
+        let i = d.child_nodes(bn).iter().position(|&k| k == c).unwrap_or(0) as u32;
         // `a` vit dans l'enfant `i` de `bn` : avant `(bn,bo)`
         // ssi `i < bo`.
         return if i < bo { -1 } else { 1 };
@@ -1784,7 +1776,10 @@ impl Host for RangeHost {
                         d.detach(c);
                     }
                     d.insert_before(np, frag, None);
-                    let ref_n = d.child_nodes(r.start_node).get(r.start_off as usize).copied();
+                    let ref_n = d
+                        .child_nodes(r.start_node)
+                        .get(r.start_off as usize)
+                        .copied();
                     d.insert_before(r.start_node, np, ref_n);
                 }
                 // selectNode(np) — le range épouse le parent posé.

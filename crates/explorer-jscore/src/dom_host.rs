@@ -675,6 +675,43 @@ fn dom_acc_props(class: &str) -> &'static [&'static str] {
             "disabled",
             "name",
             "placeholder",
+            "accept",
+            "alt",
+            "autocomplete",
+            "dirName",
+            "files",
+            "form",
+            "formAction",
+            "formEnctype",
+            "formMethod",
+            "formNoValidate",
+            "formTarget",
+            "height",
+            "indeterminate",
+            "labels",
+            "list",
+            "max",
+            "maxLength",
+            "min",
+            "minLength",
+            "multiple",
+            "pattern",
+            "popoverTargetAction",
+            "popoverTargetElement",
+            "required",
+            "selectionDirection",
+            "selectionEnd",
+            "selectionStart",
+            "size",
+            "src",
+            "step",
+            "validationMessage",
+            "validity",
+            "valueAsDate",
+            "valueAsNumber",
+            "webkitdirectory",
+            "width",
+            "willValidate",
         ],
         "HTMLTextAreaElement" => &[
             "value",
@@ -684,15 +721,333 @@ fn dom_acc_props(class: &str) -> &'static [&'static str] {
             "disabled",
             "name",
             "placeholder",
+            "autocomplete",
+            "cols",
+            "dirName",
+            "form",
+            "labels",
+            "maxLength",
+            "minLength",
+            "required",
+            "rows",
+            "selectionDirection",
+            "selectionEnd",
+            "selectionStart",
+            "textLength",
+            "type",
+            "validationMessage",
+            "validity",
+            "willValidate",
         ],
-        "HTMLSelectElement" => &["value", "disabled", "multiple", "name"],
-        "HTMLOptionElement" => &["value", "selected", "disabled"],
-        "HTMLButtonElement" => &["value", "type", "disabled", "name"],
-        "HTMLFormElement" => &["method", "action", "enctype", "target", "name"],
-        "HTMLImageElement" => &["src", "alt", "width", "height", "decoding", "loading"],
-        "HTMLAnchorElement" => &["href", "target", "rel"],
-        "HTMLIFrameElement" => &["src", "srcdoc", "sandbox", "loading"],
-        "HTMLScriptElement" | "HTMLLinkElement" => &["src", "href", "type", "rel"],
+        "HTMLSelectElement" => &[
+            "value",
+            "disabled",
+            "multiple",
+            "name",
+            "autocomplete",
+            "form",
+            "labels",
+            "length",
+            "options",
+            "required",
+            "selectedIndex",
+            "selectedOptions",
+            "size",
+            "type",
+            "validationMessage",
+            "validity",
+            "willValidate",
+        ],
+        "HTMLOptionElement" => &[
+            "value",
+            "selected",
+            "disabled",
+            "defaultSelected",
+            "form",
+            "index",
+            "label",
+            "text",
+        ],
+        "HTMLOptGroupElement" => &["disabled", "label"],
+        "HTMLButtonElement" => &[
+            "value",
+            "type",
+            "disabled",
+            "name",
+            "command",
+            "commandForElement",
+            "form",
+            "formAction",
+            "formEnctype",
+            "formMethod",
+            "formNoValidate",
+            "formTarget",
+            "labels",
+            "popoverTargetAction",
+            "popoverTargetElement",
+            "validationMessage",
+            "validity",
+            "willValidate",
+        ],
+        "HTMLFieldSetElement" => &[
+            "disabled",
+            "elements",
+            "form",
+            "name",
+            "type",
+            "validationMessage",
+            "validity",
+            "willValidate",
+        ],
+        "HTMLOutputElement" => &[
+            "value",
+            "defaultValue",
+            "form",
+            "htmlFor",
+            "labels",
+            "name",
+            "type",
+            "validationMessage",
+            "validity",
+            "willValidate",
+        ],
+        "HTMLFormElement" => &[
+            "method",
+            "action",
+            "enctype",
+            "encoding",
+            "target",
+            "name",
+            "acceptCharset",
+            "autocomplete",
+            "elements",
+            "length",
+            "noValidate",
+            "rel",
+            "relList",
+        ],
+        "HTMLImageElement" => &[
+            "src",
+            "alt",
+            "width",
+            "height",
+            "decoding",
+            "loading",
+            "complete",
+            "crossOrigin",
+            "currentSrc",
+            "fetchPriority",
+            "isMap",
+            "longDesc",
+            "lowsrc",
+            "naturalHeight",
+            "naturalWidth",
+            "referrerPolicy",
+            "sizes",
+            "srcset",
+            "useMap",
+            "x",
+            "y",
+        ],
+        "HTMLAnchorElement" => &[
+            "href",
+            "target",
+            "rel",
+            "attributionSourceId",
+            "download",
+            "hash",
+            "host",
+            "hostname",
+            "hreflang",
+            "origin",
+            "password",
+            "pathname",
+            "ping",
+            "port",
+            "protocol",
+            "referrerPolicy",
+            "relList",
+            "search",
+            "text",
+            "type",
+            "username",
+        ],
+        "HTMLAreaElement" => &[
+            "href",
+            "target",
+            "rel",
+            "alt",
+            "coords",
+            "download",
+            "hash",
+            "host",
+            "hostname",
+            "hreflang",
+            "origin",
+            "password",
+            "pathname",
+            "ping",
+            "port",
+            "protocol",
+            "referrerPolicy",
+            "relList",
+            "search",
+            "shape",
+            "type",
+            "username",
+        ],
+        "SVGAElement" => &[
+            "href",
+            "target",
+            "rel",
+            "download",
+            "hash",
+            "host",
+            "hostname",
+            "hreflang",
+            "origin",
+            "password",
+            "pathname",
+            "ping",
+            "port",
+            "protocol",
+            "referrerPolicy",
+            "relList",
+            "search",
+            "type",
+            "username",
+        ],
+        "HTMLBaseElement" => &["href", "target"],
+        "HTMLIFrameElement" => &[
+            "src",
+            "srcdoc",
+            "sandbox",
+            "loading",
+            "allow",
+            "allowFullscreen",
+            "contentDocument",
+            "contentWindow",
+            "credentialless",
+            "csp",
+            "height",
+            "referrerPolicy",
+            "width",
+        ],
+        "HTMLScriptElement" => &[
+            "src",
+            "href",
+            "type",
+            "rel",
+            "async",
+            "blocking",
+            "crossOrigin",
+            "defer",
+            "fetchPriority",
+            "innerText",
+            "integrity",
+            "noModule",
+            "referrerPolicy",
+            "text",
+        ],
+        "HTMLLinkElement" => &[
+            "src",
+            "href",
+            "type",
+            "rel",
+            "as",
+            "blocking",
+            "crossOrigin",
+            "disabled",
+            "fetchPriority",
+            "hreflang",
+            "imageSizes",
+            "imageSrcset",
+            "integrity",
+            "media",
+            "referrerPolicy",
+            "relList",
+            "sheet",
+            "sizes",
+        ],
+        "HTMLCanvasElement" => &["width", "height"],
+        "HTMLDataElement" | "HTMLLIElement" => &["value"],
+        "HTMLDataListElement" => &["options"],
+        "HTMLDetailsElement" => &["open"],
+        "HTMLDialogElement" => &["open", "closedBy", "returnValue"],
+        "HTMLEmbedElement" => &["height", "src", "type", "width"],
+        "HTMLLabelElement" => &["control", "form", "htmlFor"],
+        "HTMLLegendElement" => &["form"],
+        "HTMLMapElement" => &["areas"],
+        "HTMLMetaElement" => &["content", "httpEquiv", "media"],
+        "HTMLMeterElement" => &["high", "labels", "low", "max", "min", "optimum", "value"],
+        "HTMLModElement" => &["cite", "dateTime"],
+        "HTMLObjectElement" => &[
+            "contentDocument",
+            "contentWindow",
+            "data",
+            "form",
+            "height",
+            "type",
+            "validationMessage",
+            "validity",
+            "width",
+            "willValidate",
+        ],
+        "HTMLOListElement" => &["reversed", "start", "type"],
+        "HTMLProgressElement" => &["labels", "max", "position", "value"],
+        "HTMLQuoteElement" => &["cite"],
+        "HTMLSourceElement" => &["height", "media", "sizes", "src", "srcset", "type", "width"],
+        "HTMLStyleElement" => &["blocking", "disabled", "media", "sheet"],
+        "HTMLTableCellElement" => &[
+            "abbr",
+            "cellIndex",
+            "colSpan",
+            "headers",
+            "rowSpan",
+            "scope",
+        ],
+        "HTMLTableColElement" => &["span"],
+        "HTMLTableElement" => &["caption", "rows", "tBodies", "tFoot", "tHead"],
+        "HTMLTableRowElement" => &["cells", "rowIndex", "sectionRowIndex"],
+        "HTMLTableSectionElement" => &["rows"],
+        "HTMLTitleElement" => &["text"],
+        "HTMLTrackElement" => &["default", "kind", "label", "src", "srclang"],
+        "HTMLMediaElement" => &[
+            "autoplay",
+            "buffered",
+            "controls",
+            "controlsList",
+            "crossOrigin",
+            "currentSrc",
+            "currentTime",
+            "defaultMuted",
+            "defaultPlaybackRate",
+            "duration",
+            "ended",
+            "loop",
+            "muted",
+            "networkState",
+            "paused",
+            "playbackRate",
+            "played",
+            "preload",
+            "preservesPitch",
+            "readyState",
+            "seekable",
+            "seeking",
+            "src",
+            "srcObject",
+            "volume",
+        ],
+        "HTMLVideoElement" => &[
+            "disablePictureInPicture",
+            "height",
+            "playsInline",
+            "poster",
+            "videoHeight",
+            "videoWidth",
+            "width",
+        ],
         // Attributs globaux de `HTMLElement` (étape 219 /
         // `api` BCD) — réflexions d'attributs globaux ;
         // `accessKeyLabel` ≈ `accesskey` (label calculé =
@@ -724,11 +1079,276 @@ fn dom_acc_props(class: &str) -> &'static [&'static str] {
             "autocorrect",
             "popover",
         ],
+        // Famille SVG (Pareto `api` — JS-C559) : géométrie
+        // et feuilles = reflets d'attributs via `TAGGED_ATTRS`
+        // (tags arène camelCase pour `fe*`/`clipPath`…).
+        "SVGCircleElement" => &["cx", "cy", "r"],
+        "SVGEllipseElement" => &["cx", "cy", "rx", "ry"],
+        "SVGRectElement" => &["x", "y", "width", "height", "rx", "ry"],
+        "SVGLineElement" | "SVGLinearGradientElement" => &["x1", "x2", "y1", "y2"],
+        "SVGPolygonElement" | "SVGPolylineElement" => &["points"],
+        "SVGStopElement" => &["offset"],
+        "SVGSVGElement" => &[
+            "x",
+            "y",
+            "width",
+            "height",
+            "viewBox",
+            "preserveAspectRatio",
+            "currentScale",
+            "currentTranslate",
+        ],
+        "SVGViewElement" | "SVGSymbolElement" => &["preserveAspectRatio", "viewBox"],
+        "SVGImageElement" => &[
+            "x",
+            "y",
+            "width",
+            "height",
+            "href",
+            "crossOrigin",
+            "decoding",
+            "preserveAspectRatio",
+        ],
+        "SVGUseElement" => &["x", "y", "width", "height", "href"],
+        "SVGForeignObjectElement" => &["x", "y", "width", "height"],
+        "SVGMaskElement" => &["x", "y", "width", "height", "maskContentUnits", "maskUnits"],
+        "SVGFilterElement" => &[
+            "x",
+            "y",
+            "width",
+            "height",
+            "href",
+            "filterUnits",
+            "primitiveUnits",
+        ],
+        "SVGPatternElement" => &[
+            "x",
+            "y",
+            "width",
+            "height",
+            "href",
+            "patternContentUnits",
+            "patternTransform",
+            "patternUnits",
+            "preserveAspectRatio",
+            "viewBox",
+        ],
+        "SVGMarkerElement" => &[
+            "markerHeight",
+            "markerUnits",
+            "markerWidth",
+            "orient",
+            "orientAngle",
+            "orientType",
+            "preserveAspectRatio",
+            "refX",
+            "refY",
+            "viewBox",
+        ],
+        "SVGGradientElement" => &["gradientTransform", "gradientUnits", "href", "spreadMethod"],
+        "SVGRadialGradientElement" => &["cx", "cy", "fr", "fx", "fy", "r"],
+        "SVGTextPositioningElement" => &["dx", "dy", "rotate", "x", "y"],
+        "SVGTextContentElement" => &["lengthAdjust", "textLength"],
+        "SVGTextPathElement" => &["href", "method", "spacing", "startOffset"],
+        "SVGScriptElement" => &["async", "crossOrigin", "defer", "href", "type"],
+        "SVGMPathElement" => &["href"],
+        "SVGClipPathElement" => &["clipPathUnits", "transform"],
+        // Primitives `fe*` — l'arène stocke le tag camelCase
+        // (`feGaussianBlur`) ; reflets d'attributs IDL.
+        "SVGFEBlendElement" => &["height", "in1", "in2", "mode", "result", "width", "x", "y"],
+        "SVGFEColorMatrixElement" => &[
+            "height", "in1", "result", "type", "values", "width", "x", "y",
+        ],
+        "SVGFEComponentTransferElement" | "SVGFETileElement" => {
+            &["height", "in1", "result", "width", "x", "y"]
+        }
+        "SVGFECompositeElement" => &[
+            "height", "in1", "in2", "k1", "k2", "k3", "k4", "operator", "result", "width", "x", "y",
+        ],
+        "SVGFEConvolveMatrixElement" => &[
+            "bias",
+            "divisor",
+            "edgeMode",
+            "height",
+            "in1",
+            "kernelMatrix",
+            "kernelUnitLengthX",
+            "kernelUnitLengthY",
+            "orderX",
+            "orderY",
+            "preserveAlpha",
+            "result",
+            "targetX",
+            "targetY",
+            "width",
+            "x",
+            "y",
+        ],
+        "SVGFEDiffuseLightingElement" => &[
+            "diffuseConstant",
+            "height",
+            "in1",
+            "kernelUnitLengthX",
+            "kernelUnitLengthY",
+            "result",
+            "surfaceScale",
+            "width",
+            "x",
+            "y",
+        ],
+        "SVGFEDisplacementMapElement" => &[
+            "height",
+            "in1",
+            "in2",
+            "result",
+            "scale",
+            "width",
+            "x",
+            "xChannelSelector",
+            "y",
+            "yChannelSelector",
+        ],
+        "SVGFEDistantLightElement" => &["azimuth", "elevation"],
+        "SVGFEDropShadowElement" => &[
+            "dx",
+            "dy",
+            "height",
+            "in1",
+            "result",
+            "stdDeviationX",
+            "stdDeviationY",
+            "width",
+            "x",
+            "y",
+        ],
+        "SVGFEFloodElement" | "SVGFEMergeElement" => &["height", "result", "width", "x", "y"],
+        "SVGFEFuncAElement" | "SVGFEFuncBElement" | "SVGFEFuncGElement" | "SVGFEFuncRElement" => &[
+            "amplitude",
+            "exponent",
+            "intercept",
+            "offset",
+            "slope",
+            "tableValues",
+            "type",
+        ],
+        "SVGFEGaussianBlurElement" => &[
+            "height",
+            "in1",
+            "result",
+            "stdDeviationX",
+            "stdDeviationY",
+            "width",
+            "x",
+            "y",
+        ],
+        "SVGFEImageElement" => &[
+            "crossOrigin",
+            "height",
+            "href",
+            "preserveAspectRatio",
+            "result",
+            "width",
+            "x",
+            "y",
+        ],
+        "SVGFEMergeNodeElement" => &["in1"],
+        "SVGFEMorphologyElement" => &[
+            "height", "in1", "operator", "radius", "result", "width", "x", "y",
+        ],
+        "SVGFEOffsetElement" => &["dx", "dy", "height", "in1", "result", "width", "x", "y"],
+        "SVGFEPointLightElement" => &["x", "y", "z"],
+        "SVGFESpecularLightingElement" => &[
+            "height",
+            "in1",
+            "kernelUnitLengthX",
+            "kernelUnitLengthY",
+            "result",
+            "specularConstant",
+            "specularExponent",
+            "surfaceScale",
+            "width",
+            "x",
+            "y",
+        ],
+        "SVGFESpotLightElement" => &[
+            "limitingConeAngle",
+            "pointsAtX",
+            "pointsAtY",
+            "pointsAtZ",
+            "specularExponent",
+            "x",
+            "y",
+            "z",
+        ],
+        "SVGFETurbulenceElement" => &[
+            "baseFrequency",
+            "baseFrequencyX",
+            "baseFrequencyY",
+            "height",
+            "numOctaves",
+            "result",
+            "seed",
+            "stitchTiles",
+            "type",
+            "width",
+            "x",
+            "y",
+        ],
         // `time.dateTime` = réflexion de l'attribut
         // `datetime` (html.elem BCD — le seul membre IDL
         // spécifique de `HTMLTimeElement`).
         "HTMLTimeElement" => &["dateTime"],
         _ => &["id", "className", "title"],
+    }
+}
+
+/// Méthodes IDL propres à une interface — posées sur le
+/// prototype via [`install_dom_proto_methods`] (JS-C559) : le
+/// trampoline redispatche sur le `this` de l'appel →
+/// `Host::invoke`. Les noms doivent aussi figurer dans
+/// [`TAGGED_METHODS`]/[`MEDIA_METHODS`] pour être réellement
+/// servis (présence proto sans dispatch = absence honnête).
+fn dom_methods(class: &str) -> &'static [&'static str] {
+    match class {
+        "HTMLCanvasElement" => &["getContext", "toDataURL", "toBlob", "captureStream"],
+        "HTMLFormElement" => &[
+            "submit",
+            "requestSubmit",
+            "reset",
+            "checkValidity",
+            "reportValidity",
+            "setCustomValidity",
+        ],
+        "HTMLInputElement" | "HTMLTextAreaElement" => &[
+            "checkValidity",
+            "reportValidity",
+            "setCustomValidity",
+            "select",
+            "setSelectionRange",
+            "setRangeText",
+        ],
+        "HTMLButtonElement"
+        | "HTMLFieldSetElement"
+        | "HTMLOutputElement"
+        | "HTMLSelectElement"
+        | "HTMLObjectElement" => &["checkValidity", "reportValidity", "setCustomValidity"],
+        "HTMLDialogElement" => &["showModal", "show", "close"],
+        "HTMLImageElement" => &["decode"],
+        "HTMLSlotElement" => &["assignedElements", "assignedNodes"],
+        "HTMLMediaElement" | "HTMLVideoElement" | "HTMLAudioElement" => &[
+            "play",
+            "pause",
+            "load",
+            "fastSeek",
+            "canPlayType",
+            "getVideoPlaybackQuality",
+            "setSinkId",
+            "addTextTrack",
+            "captureStream",
+            "setMediaKeys",
+        ],
+        "HTMLElement" => &["showPopover", "hidePopover", "togglePopover"],
+        _ => &[],
     }
 }
 
@@ -794,9 +1414,21 @@ fn dom_acc_get(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
         return Ok(Value::Undefined);
     };
     let prop = m.to_string();
-    let Value::Obj(id) = this else {
+    let Value::Obj(id) = this.clone() else {
         return Ok(Value::Undefined);
     };
+    // Getter canonique d'abord : `Host::get` sait servir les
+    // props calculées (décomposition URL d'ancre, `validity`,
+    // `labels`, `selectedIndex`, médias…) et les reflets
+    // `prop_to_attr_for` — `None` → reflet d'attribut brut
+    // (`dom_raw_get`, invariant `inputValueTracking` : on
+    // atteint l'attribut sans repasser par les props propres
+    // de l'élément).
+    if let Some(h) = e.host_of(id) {
+        if let Some(v) = h.get(e, this, &prop)? {
+            return Ok(v);
+        }
+    }
     let Some((dom, node)) = e.host_of(id).and_then(|h| {
         h.as_any()
             .downcast_ref::<NodeHost>()
@@ -818,9 +1450,16 @@ fn dom_acc_set(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
     };
     let prop = m.to_string();
     let v = arg(args, 1);
-    let Value::Obj(id) = this else {
+    let Value::Obj(id) = this.clone() else {
         return Ok(Value::Undefined);
     };
+    // `Host::set` d'abord (props vivantes `value`/`checked`/
+    // médias…) ; `false` → reflet d'attribut ci-dessous.
+    if let Some(h) = e.host_of(id) {
+        if h.set(e, this, &prop, v.clone())? {
+            return Ok(Value::Undefined);
+        }
+    }
     let Some((dom, node)) = e.host_of(id).and_then(|h| {
         h.as_any()
             .downcast_ref::<NodeHost>()
@@ -1552,6 +2191,10 @@ impl Engine {
                 o.set_accessor(prop, g, s, false);
             }
         }
+        // Méthodes IDL propres de l'interface (JS-C559) —
+        // trampoline `this`→`Host::invoke`, gating identique à
+        // `TAGGED_METHODS`.
+        install_dom_proto_methods(self, pid, dom_methods(class));
     }
 }
 
@@ -2835,6 +3478,31 @@ fn listed_controls(d: &Dom, root: NodeId) -> Vec<NodeId> {
     out
 }
 
+/// `<label>` contrôlant `node` (JS-C559) : `for`≙`id` du
+/// champ **ou** label ancêtre. `None` hors éléments
+/// « labelable » (spec : input/button/meter/output/
+/// progress/select/textarea — `fieldset`/`label` exclus).
+fn control_labels(d: &Dom, node: NodeId) -> Option<Vec<NodeId>> {
+    if !matches!(
+        d.nodes[node as usize].tag.as_str(),
+        "button" | "input" | "meter" | "output" | "progress" | "select" | "textarea"
+    ) {
+        return None;
+    }
+    let id = d.attr(node, "id").map(str::to_string);
+    let mut v: Vec<NodeId> = d
+        .by_tag(d.root, "label")
+        .into_iter()
+        .filter(|&l| {
+            id.as_deref().is_some_and(|i| d.attr(l, "for") == Some(i))
+                || d.is_ancestor_or_self(l, node)
+        })
+        .collect();
+    v.sort_unstable();
+    v.dedup();
+    Some(v)
+}
+
 /// Objet `Attr` honnête (JS-C76 — snapshot nom/valeur + lien
 /// `ownerElement`) : pas un vrai nœud du miroir ; les mutations
 /// transitent par `attributes.setNamedItem`, qui relit `name`/
@@ -3203,9 +3871,7 @@ impl Engine {
         // `Map` honnête suffit (set/get/has/delete/forEach).
         let gv = Value::Obj(g);
         if let Ok(map_f) = self.read_prop(gv.clone(), gv, "Map") {
-            if let Ok(m) =
-                self.call_value_ctor(map_f.clone(), Value::Undefined, &[], map_f)
-            {
+            if let Ok(m) = self.call_value_ctor(map_f.clone(), Value::Undefined, &[], map_f) {
                 self.set_own(css, "highlights", m, false);
             }
         }
@@ -3419,6 +4085,37 @@ impl Engine {
             "SVGAnimateMotionElement",
             "SVGAnimateTransformElement",
             "SVGSetElement",
+            "SVGScriptElement",
+            "SVGMPathElement",
+            // Primitives de filtre `fe*` (JS-C559, Pareto
+            // `api`) — ctors non constructibles (même voie
+            // `illegal_ctor`), proto chaîné `SVGElement` par
+            // le fallback `_ if name.starts_with("SVG")`.
+            "SVGFEBlendElement",
+            "SVGFEColorMatrixElement",
+            "SVGFEComponentTransferElement",
+            "SVGFECompositeElement",
+            "SVGFEConvolveMatrixElement",
+            "SVGFEDiffuseLightingElement",
+            "SVGFEDistantLightElement",
+            "SVGFEDisplacementMapElement",
+            "SVGFEDropShadowElement",
+            "SVGFEFloodElement",
+            "SVGFEFuncAElement",
+            "SVGFEFuncBElement",
+            "SVGFEFuncGElement",
+            "SVGFEFuncRElement",
+            "SVGFEGaussianBlurElement",
+            "SVGFEImageElement",
+            "SVGFEMergeElement",
+            "SVGFEMergeNodeElement",
+            "SVGFEMorphologyElement",
+            "SVGFEOffsetElement",
+            "SVGFEPointLightElement",
+            "SVGFESpecularLightingElement",
+            "SVGFESpotLightElement",
+            "SVGFETileElement",
+            "SVGFETurbulenceElement",
             // Famille `SVGAnimated*` (§B-122) — interfaces
             // non-element, testées par `instanceof` dans les
             // libs (Swiper `r instanceof SVGAnimatedString`
@@ -3886,18 +4583,8 @@ impl Engine {
                 ("END_TO_END", 2.0),
                 ("END_TO_START", 3.0),
             ] {
-                self.set_own_attrs(
-                    fid,
-                    k,
-                    Value::Num(n),
-                    crate::heap::PropAttrs::FIXED,
-                );
-                self.set_own_attrs(
-                    p,
-                    k,
-                    Value::Num(n),
-                    crate::heap::PropAttrs::FIXED,
-                );
+                self.set_own_attrs(fid, k, Value::Num(n), crate::heap::PropAttrs::FIXED);
+                self.set_own_attrs(p, k, Value::Num(n), crate::heap::PropAttrs::FIXED);
             }
         }
         self.set_own(g, "Range", f, false);
@@ -7062,6 +7749,389 @@ const TAGGED_ATTRS: &[(&str, &[&str])] = &[
     ),
     // `time.dateTime` ↔ `datetime` (html.elem BCD).
     ("datetime", &["time"]),
+    // Pareto `api` (JS-C559) — membres IDL reflétés manquants.
+    ("accept", &["input"]),
+    ("accept-charset", &["form"]),
+    ("autocomplete", &["form", "input", "select", "textarea"]),
+    ("coords", &["area"]),
+    ("shape", &["area"]),
+    ("download", &["a", "area"]),
+    ("ping", &["a", "area"]),
+    ("hreflang", &["a", "area", "link"]),
+    ("attributionsourceid", &["a"]),
+    ("dirname", &["input", "textarea"]),
+    ("formaction", &["button", "input"]),
+    ("formenctype", &["button", "input"]),
+    ("formmethod", &["button", "input"]),
+    ("formtarget", &["button", "input"]),
+    ("list", &["input"]),
+    ("pattern", &["input"]),
+    ("size", &["input", "select"]),
+    ("step", &["input"]),
+    ("max", &["input", "meter", "progress"]),
+    ("min", &["input", "meter"]),
+    ("high", &["meter"]),
+    ("low", &["meter"]),
+    ("optimum", &["meter"]),
+    ("rows", &["textarea"]),
+    ("cols", &["textarea"]),
+    ("cite", &["blockquote", "del", "ins", "q"]),
+    ("data", &["object"]),
+    ("label", &["optgroup", "option", "track"]),
+    ("span", &["col", "colgroup"]),
+    ("abbr", &["td", "th"]),
+    ("headers", &["td", "th"]),
+    ("start", &["ol"]),
+    ("content", &["meta"]),
+    ("http-equiv", &["meta"]),
+    ("kind", &["track"]),
+    ("srclang", &["track"]),
+    ("longdesc", &["img"]),
+    ("usemap", &["img"]),
+    ("lowsrc", &["img"]),
+    ("imagesizes", &["link"]),
+    ("imagesrcset", &["link"]),
+    ("blocking", &["link", "script", "style"]),
+    ("integrity", &["link", "script"]),
+    ("as", &["link"]),
+    ("allow", &["iframe"]),
+    ("csp", &["iframe"]),
+    ("command", &["button"]),
+    ("commandfor", &["button"]),
+    ("closedby", &["dialog"]),
+    ("fetchpriority", &["iframe", "img", "link", "script"]),
+    ("popovertarget", &["button", "input"]),
+    ("popovertargetaction", &["button", "input"]),
+    ("controlslist", &["audio", "video"]),
+    ("sinkid", &["audio", "video"]),
+    ("width", &["embed", "iframe", "object", "source"]),
+    ("height", &["embed", "iframe", "object", "source"]),
+    // SVG — géométrie + primitives `fe*` (tags arène en
+    // camelCase) ; `x`/`y`/`width`/`height` partagent la liste.
+    ("cx", &["circle", "ellipse", "radialgradient"]),
+    ("cy", &["circle", "ellipse", "radialgradient"]),
+    ("r", &["circle", "radialgradient"]),
+    ("rx", &["ellipse", "rect"]),
+    ("ry", &["ellipse", "rect"]),
+    ("x1", &["line", "lineargradient"]),
+    ("x2", &["line", "lineargradient"]),
+    ("y1", &["line", "lineargradient"]),
+    ("y2", &["line", "lineargradient"]),
+    ("fx", &["radialgradient"]),
+    ("fy", &["radialgradient"]),
+    ("fr", &["radialgradient"]),
+    ("points", &["polygon", "polyline"]),
+    ("offset", &["stop"]),
+    ("gradientTransform", &["lineargradient", "radialgradient"]),
+    ("gradientUnits", &["lineargradient", "radialgradient"]),
+    ("spreadMethod", &["lineargradient", "radialgradient"]),
+    ("markerHeight", &["marker"]),
+    ("markerUnits", &["marker"]),
+    ("markerWidth", &["marker"]),
+    ("orient", &["marker"]),
+    ("refX", &["marker"]),
+    ("refY", &["marker"]),
+    ("maskContentUnits", &["mask"]),
+    ("maskUnits", &["mask"]),
+    ("filterUnits", &["filter"]),
+    ("primitiveUnits", &["filter"]),
+    ("patternContentUnits", &["pattern"]),
+    ("patternTransform", &["pattern"]),
+    ("patternUnits", &["pattern"]),
+    ("clipPathUnits", &["clippath"]),
+    ("lengthAdjust", &["text", "textpath", "tspan"]),
+    ("textLength", &["text", "textpath", "tspan"]),
+    ("startOffset", &["textpath"]),
+    ("spacing", &["textpath"]),
+    ("mode", &["feBlend", "feComposite", "feDisplacementMap"]),
+    ("in2", &["feBlend", "feComposite", "feDisplacementMap"]),
+    (
+        "in",
+        &[
+            "feBlend",
+            "feColorMatrix",
+            "feComponentTransfer",
+            "feComposite",
+            "feConvolveMatrix",
+            "feDiffuseLighting",
+            "feDisplacementMap",
+            "feDropShadow",
+            "feFlood",
+            "feGaussianBlur",
+            "feImage",
+            "feMergeNode",
+            "feMorphology",
+            "feOffset",
+            "feSpecularLighting",
+            "feTile",
+            "feTurbulence",
+        ],
+    ),
+    (
+        "result",
+        &[
+            "feBlend",
+            "feColorMatrix",
+            "feComponentTransfer",
+            "feComposite",
+            "feConvolveMatrix",
+            "feDiffuseLighting",
+            "feDisplacementMap",
+            "feDropShadow",
+            "feFlood",
+            "feGaussianBlur",
+            "feImage",
+            "feMerge",
+            "feMorphology",
+            "feOffset",
+            "feSpecularLighting",
+            "feTile",
+            "feTurbulence",
+        ],
+    ),
+    ("values", &["feColorMatrix"]),
+    ("operator", &["feComposite", "feMorphology"]),
+    ("k1", &["feComposite"]),
+    ("k2", &["feComposite"]),
+    ("k3", &["feComposite"]),
+    ("k4", &["feComposite"]),
+    ("kernelMatrix", &["feConvolveMatrix"]),
+    (
+        "kernelUnitLengthX",
+        &[
+            "feConvolveMatrix",
+            "feDiffuseLighting",
+            "feSpecularLighting",
+        ],
+    ),
+    (
+        "kernelUnitLengthY",
+        &[
+            "feConvolveMatrix",
+            "feDiffuseLighting",
+            "feSpecularLighting",
+        ],
+    ),
+    ("orderX", &["feConvolveMatrix"]),
+    ("orderY", &["feConvolveMatrix"]),
+    ("bias", &["feConvolveMatrix"]),
+    ("divisor", &["feConvolveMatrix"]),
+    ("edgeMode", &["feConvolveMatrix"]),
+    ("preserveAlpha", &["feConvolveMatrix"]),
+    ("targetX", &["feConvolveMatrix"]),
+    ("targetY", &["feConvolveMatrix"]),
+    ("diffuseConstant", &["feDiffuseLighting"]),
+    ("surfaceScale", &["feDiffuseLighting", "feSpecularLighting"]),
+    ("scale", &["feDisplacementMap"]),
+    ("xChannelSelector", &["feDisplacementMap"]),
+    ("yChannelSelector", &["feDisplacementMap"]),
+    ("azimuth", &["feDistantLight"]),
+    ("elevation", &["feDistantLight"]),
+    ("dx", &["feDropShadow", "feOffset"]),
+    ("dy", &["feDropShadow", "feOffset"]),
+    ("stdDeviation", &["feDropShadow", "feGaussianBlur"]),
+    ("stdDeviationX", &["feDropShadow", "feGaussianBlur"]),
+    ("stdDeviationY", &["feDropShadow", "feGaussianBlur"]),
+    ("radius", &["feMorphology"]),
+    ("specularConstant", &["feSpecularLighting"]),
+    ("specularExponent", &["feSpecularLighting", "feSpotLight"]),
+    ("limitingConeAngle", &["feSpotLight"]),
+    ("pointsAtX", &["feSpotLight"]),
+    ("pointsAtY", &["feSpotLight"]),
+    ("pointsAtZ", &["feSpotLight"]),
+    ("baseFrequency", &["feTurbulence"]),
+    ("baseFrequencyX", &["feTurbulence"]),
+    ("baseFrequencyY", &["feTurbulence"]),
+    ("numOctaves", &["feTurbulence"]),
+    ("seed", &["feTurbulence"]),
+    ("stitchTiles", &["feTurbulence"]),
+    ("amplitude", &["feFuncA", "feFuncB", "feFuncG", "feFuncR"]),
+    ("exponent", &["feFuncA", "feFuncB", "feFuncG", "feFuncR"]),
+    ("intercept", &["feFuncA", "feFuncB", "feFuncG", "feFuncR"]),
+    ("slope", &["feFuncA", "feFuncB", "feFuncG", "feFuncR"]),
+    ("tableValues", &["feFuncA", "feFuncB", "feFuncG", "feFuncR"]),
+    ("z", &["fePointLight", "feSpotLight"]),
+    // `x`/`y`/`width`/`height` SVG — les classes HTML numériques
+    // (canvas/img/video) sont servies par leurs bras dédiés
+    // avant le reflet générique.
+    (
+        "x",
+        &[
+            "svg",
+            "rect",
+            "image",
+            "text",
+            "tspan",
+            "textpath",
+            "use",
+            "foreignObject",
+            "foreignobject",
+            "mask",
+            "filter",
+            "pattern",
+            "marker",
+            "symbol",
+            "view",
+            "feBlend",
+            "feColorMatrix",
+            "feComponentTransfer",
+            "feComposite",
+            "feConvolveMatrix",
+            "feDiffuseLighting",
+            "feDisplacementMap",
+            "feDropShadow",
+            "feFlood",
+            "feGaussianBlur",
+            "feImage",
+            "feMerge",
+            "feMorphology",
+            "feOffset",
+            "fePointLight",
+            "feSpecularLighting",
+            "feSpotLight",
+            "feTile",
+            "feTurbulence",
+        ],
+    ),
+    (
+        "y",
+        &[
+            "svg",
+            "rect",
+            "image",
+            "text",
+            "tspan",
+            "textpath",
+            "use",
+            "foreignObject",
+            "foreignobject",
+            "mask",
+            "filter",
+            "pattern",
+            "marker",
+            "symbol",
+            "view",
+            "feBlend",
+            "feColorMatrix",
+            "feComponentTransfer",
+            "feComposite",
+            "feConvolveMatrix",
+            "feDiffuseLighting",
+            "feDisplacementMap",
+            "feDropShadow",
+            "feFlood",
+            "feGaussianBlur",
+            "feImage",
+            "feMerge",
+            "feMorphology",
+            "feOffset",
+            "fePointLight",
+            "feSpecularLighting",
+            "feSpotLight",
+            "feTile",
+            "feTurbulence",
+        ],
+    ),
+    (
+        "width",
+        &[
+            "svg",
+            "rect",
+            "image",
+            "use",
+            "foreignObject",
+            "foreignobject",
+            "mask",
+            "filter",
+            "pattern",
+            "marker",
+            "feBlend",
+            "feColorMatrix",
+            "feComponentTransfer",
+            "feComposite",
+            "feConvolveMatrix",
+            "feDiffuseLighting",
+            "feDisplacementMap",
+            "feDropShadow",
+            "feFlood",
+            "feGaussianBlur",
+            "feImage",
+            "feMerge",
+            "feMorphology",
+            "feOffset",
+            "feSpecularLighting",
+            "feTile",
+            "feTurbulence",
+        ],
+    ),
+    (
+        "height",
+        &[
+            "svg",
+            "rect",
+            "image",
+            "use",
+            "foreignObject",
+            "foreignobject",
+            "mask",
+            "filter",
+            "pattern",
+            "marker",
+            "feBlend",
+            "feColorMatrix",
+            "feComponentTransfer",
+            "feComposite",
+            "feConvolveMatrix",
+            "feDiffuseLighting",
+            "feDisplacementMap",
+            "feDropShadow",
+            "feFlood",
+            "feGaussianBlur",
+            "feImage",
+            "feMerge",
+            "feMorphology",
+            "feOffset",
+            "feSpecularLighting",
+            "feTile",
+            "feTurbulence",
+        ],
+    ),
+    (
+        "href",
+        &[
+            "image",
+            "use",
+            "filter",
+            "pattern",
+            "marker",
+            "mpath",
+            "textpath",
+            "lineargradient",
+            "radialgradient",
+            "feImage",
+        ],
+    ),
+    ("viewBox", &["svg", "symbol", "marker", "pattern", "view"]),
+    (
+        "preserveAspectRatio",
+        &[
+            "svg", "symbol", "marker", "pattern", "view", "image", "feImage",
+        ],
+    ),
+    ("currentScale", &["svg"]),
+    ("currentTranslate", &["svg"]),
+    ("rotate", &["text", "tspan"]),
+    ("dx", &["text", "tspan"]),
+    ("dy", &["text", "tspan"]),
+    ("startOffset", &["textpath"]),
+    ("method", &["textpath"]),
+    (
+        "transform",
+        &["clippath", "g", "image", "svg", "use", "pattern", "marker"],
+    ),
+    ("orientAngle", &["marker"]),
+    ("orientType", &["marker"]),
+    ("decoding", &["image", "img"]),
 ];
 
 /// Attributs booléens réfléchis — même discipline de scoping
@@ -7071,7 +8141,8 @@ const TAGGED_BOOL_ATTRS: &[(&str, &[&str])] = &[
     (
         "disabled",
         &[
-            "button", "fieldset", "input", "optgroup", "option", "select", "textarea",
+            "button", "fieldset", "input", "link", "optgroup", "option", "select", "style",
+            "textarea",
         ],
     ),
     ("selected", &["option"]),
@@ -7082,6 +8153,22 @@ const TAGGED_BOOL_ATTRS: &[(&str, &[&str])] = &[
     ("muted", &["audio", "video"]),
     ("loop", &["audio", "video"]),
     ("autoplay", &["audio", "video"]),
+    // Pareto `api` (JS-C559).
+    ("required", &["input", "select", "textarea"]),
+    ("novalidate", &["form"]),
+    ("formnovalidate", &["button", "input"]),
+    ("ismap", &["img"]),
+    ("allowfullscreen", &["iframe"]),
+    ("credentialless", &["iframe"]),
+    ("open", &["details", "dialog"]),
+    ("nomodule", &["script"]),
+    ("async", &["script"]),
+    ("defer", &["script"]),
+    ("reversed", &["ol"]),
+    ("default", &["track"]),
+    ("webkitdirectory", &["input"]),
+    ("playsinline", &["video"]),
+    ("disablepictureinpicture", &["video"]),
 ];
 
 /// Prop IDL → nom d'attribut — traduction camelCase.
@@ -7103,6 +8190,37 @@ fn prop_attr_name(key: &str) -> &str {
         "writingSuggestions" => "writingsuggestions",
         "headingOffset" => "headingoffset",
         "headingReset" => "headingreset",
+        // Pareto `api` (JS-C559) — IDL camelCase → attr HTML
+        // (`formAction`≙`formaction`, `acceptCharset`≙
+        // `accept-charset` avec tiret…). Les SVG fe* gardent
+        // leur casse (`stdDeviation` = vrai nom d'attribut).
+        "acceptCharset" => "accept-charset",
+        "allowFullscreen" => "allowfullscreen",
+        "attributionSourceId" => "attributionsourceid",
+        "colSpan" => "colspan",
+        "commandForElement" => "commandfor",
+        "dirName" => "dirname",
+        "disablePictureInPicture" => "disablepictureinpicture",
+        "fetchPriority" => "fetchpriority",
+        "formAction" => "formaction",
+        "formEnctype" => "formenctype",
+        "formMethod" => "formmethod",
+        "formNoValidate" => "formnovalidate",
+        "formTarget" => "formtarget",
+        "httpEquiv" => "http-equiv",
+        "imageSizes" => "imagesizes",
+        "imageSrcset" => "imagesrcset",
+        "in1" => "in",
+        "isMap" => "ismap",
+        "longDesc" => "longdesc",
+        "maxLength" => "maxlength",
+        "minLength" => "minlength",
+        "noModule" => "nomodule",
+        "noValidate" => "novalidate",
+        "popoverTargetAction" => "popovertargetaction",
+        "popoverTargetElement" => "popovertarget",
+        "rowSpan" => "rowspan",
+        "useMap" => "usemap",
         k => k,
     }
 }
@@ -7973,6 +9091,9 @@ impl Host for TimeRangesHost {
             _ => None,
         })
     }
+    fn has_method(&self, name: &str) -> bool {
+        matches!(name, "start" | "end")
+    }
     fn invoke(
         &self,
         e: &mut Engine,
@@ -8598,7 +9719,16 @@ impl Host for NodeHost {
         // déviation est documentée ; absolu passe intact).
         if matches!(
             key,
-            "protocol" | "host" | "hostname" | "port" | "pathname" | "search" | "hash" | "origin"
+            "protocol"
+                | "host"
+                | "hostname"
+                | "port"
+                | "pathname"
+                | "search"
+                | "hash"
+                | "origin"
+                | "username"
+                | "password"
         ) {
             let d = self.dom.borrow();
             if matches!(d.nodes[node as usize].tag.as_str(), "a" | "area") {
@@ -8626,6 +9756,11 @@ impl Host for NodeHost {
                     "pathname" => path,
                     "search" => search,
                     "hash" => hash,
+                    // `username`/`password` : userinfo du
+                    // `scheme://u:p@host` (JS-C559 — même borne
+                    // « pas de résolution base » que le reste
+                    // de la décomposition).
+                    "username" | "password" => url_userinfo(&raw, key == "username"),
                     // `origin` : scheme+host — "null" sans scheme
                     // (spec : tuple d'origine sérialisé).
                     _ => {
@@ -8686,7 +9821,10 @@ impl Host for NodeHost {
             return Ok(Some(doc.map_or(Value::Null, Value::Obj)));
         }
         if matches!(key, "contentWindow" | "contentDocument")
-            && self.dom.borrow().nodes[node as usize].tag == "iframe"
+            && matches!(
+                self.dom.borrow().nodes[node as usize].tag.as_str(),
+                "iframe" | "object"
+            )
         {
             let viewer = e.cur_ctx;
             let dom_ptr = std::rc::Rc::as_ptr(&self.dom) as usize;
@@ -8962,12 +10100,14 @@ impl Host for NodeHost {
             // `select.options`/`selectedOptions` —
             // `HTMLOptionsCollection` ≙ tableau des `<option>`
             // (JS-C76) ; `selectedOptions` = filtre `selected`.
+            // `datalist.options` — mêmes enfants `<option>`
+            // (JS-C559, IDL `HTMLDataListElement.options`).
             "options" | "selectedOptions" => {
-                let is_select = {
+                let is_listing = {
                     let d = self.dom.borrow();
-                    d.nodes[node as usize].tag == "select"
+                    matches!(d.nodes[node as usize].tag.as_str(), "select" | "datalist")
                 };
-                if is_select {
+                if is_listing {
                     let opts = {
                         let d = self.dom.borrow();
                         let mut opts = d.by_tag(node, "option");
@@ -8995,6 +10135,337 @@ impl Host for NodeHost {
                         .position(|&o| d.has_attr(o, "selected"));
                     return Ok(Some(Value::Num(i.map_or(-1.0, |i| i as f64))));
                 }
+            }
+            // Propriétaire `<form>` d'un contrôle (JS-C559) :
+            // attribut `form` résolu par id, sinon ancêtre.
+            "form" => {
+                let owner = {
+                    let d = self.dom.borrow();
+                    let tag = d.nodes[node as usize].tag.as_str();
+                    if matches!(
+                        tag,
+                        "button"
+                            | "fieldset"
+                            | "input"
+                            | "label"
+                            | "legend"
+                            | "meter"
+                            | "object"
+                            | "option"
+                            | "output"
+                            | "progress"
+                            | "select"
+                            | "textarea"
+                    ) {
+                        d.attr(node, "form").and_then(|id| d.by_id(id)).or_else(|| {
+                            d.ancestors(node)
+                                .into_iter()
+                                .find(|&a| d.nodes[a as usize].tag == "form")
+                        })
+                    } else {
+                        None
+                    }
+                };
+                return Ok(Some(match owner {
+                    Some(f) => node_value(e, &self.dom, &self.cache, f),
+                    None => Value::Null,
+                }));
+            }
+            // `labels` — `NodeList` des `<label>` contrôlant le
+            // champ (`for`≙`id` ou ancêtre) ; `null` hors
+            // éléments « labelable » (spec).
+            "labels" => {
+                let r = {
+                    let d = self.dom.borrow();
+                    control_labels(&d, node)
+                };
+                return Ok(Some(match r {
+                    Some(ids) => dom_collection(e, &self.dom, &self.cache, &ids, false, "NodeList"),
+                    None => Value::Null,
+                }));
+            }
+            // `input.list` → le `<datalist id=list>` lié (null
+            // sans correspondance, spec).
+            "list" if self.dom.borrow().nodes[node as usize].tag == "input" => {
+                let hit = {
+                    let d = self.dom.borrow();
+                    d.attr(node, "list")
+                        .and_then(|id| d.by_id(id))
+                        .filter(|&l| d.nodes[l as usize].tag == "datalist")
+                };
+                return Ok(Some(match hit {
+                    Some(l) => node_value(e, &self.dom, &self.cache, l),
+                    None => Value::Null,
+                }));
+            }
+            // `label.control` — champ pointé par `for` ou
+            // premier descendant contrôlable (spec).
+            "control" if self.dom.borrow().nodes[node as usize].tag == "label" => {
+                let hit = {
+                    let d = self.dom.borrow();
+                    d.attr(node, "for").and_then(|id| d.by_id(id)).or_else(|| {
+                        [
+                            "input", "select", "textarea", "button", "meter", "progress", "output",
+                        ]
+                        .into_iter()
+                        .find_map(|t| d.by_tag(node, t).into_iter().next())
+                    })
+                };
+                return Ok(Some(match hit {
+                    Some(c) => node_value(e, &self.dom, &self.cache, c),
+                    None => Value::Null,
+                }));
+            }
+            // `map.areas` — `HTMLCollection` des `<area>`.
+            "areas" if self.dom.borrow().nodes[node as usize].tag == "map" => {
+                let ids = self.dom.borrow().by_tag(node, "area");
+                return Ok(Some(dom_collection(
+                    e,
+                    &self.dom,
+                    &self.cache,
+                    &ids,
+                    false,
+                    "HTMLCollection",
+                )));
+            }
+            // `option.index` — rang parmi les `<option>`
+            // sœurs du même parent.
+            "index" if self.dom.borrow().nodes[node as usize].tag == "option" => {
+                let i = {
+                    let d = self.dom.borrow();
+                    d.parent(node).map_or(-1i64, |p| {
+                        d.by_tag(p, "option")
+                            .iter()
+                            .position(|&o| o == node)
+                            .map_or(-1, |i| i as i64)
+                    })
+                };
+                return Ok(Some(Value::Num(i as f64)));
+            }
+            // `select.length` (≙ `options.length`) /
+            // `form.length` (≙ `elements.length`) — la garde
+            // laisse filer `length` vers le bras Text/Comment.
+            "length"
+                if matches!(
+                    self.dom.borrow().nodes[node as usize].tag.as_str(),
+                    "select" | "form"
+                ) =>
+            {
+                let n = {
+                    let d = self.dom.borrow();
+                    match d.nodes[node as usize].tag.as_str() {
+                        "select" => d.by_tag(node, "option").len() as f64,
+                        _ => listed_controls(&d, node).len() as f64,
+                    }
+                };
+                return Ok(Some(Value::Num(n)));
+            }
+            // `textarea.textLength` — longueur de la valeur.
+            "textLength" if self.dom.borrow().nodes[node as usize].tag == "textarea" => {
+                let n = {
+                    let d = self.dom.borrow();
+                    control_value(&d, node).chars().count()
+                };
+                return Ok(Some(Value::Num(n as f64)));
+            }
+            // `progress.position` — `value/max` (-1 si
+            // indéterminée, spec).
+            "position" if self.dom.borrow().nodes[node as usize].tag == "progress" => {
+                let d = self.dom.borrow();
+                let v = d.attr(node, "value").and_then(|s| s.parse::<f64>().ok());
+                let m = d
+                    .attr(node, "max")
+                    .and_then(|s| s.parse::<f64>().ok())
+                    .unwrap_or(1.0);
+                let pos = v.map_or(-1.0, |v| if m > 0.0 { v / m } else { -1.0 });
+                return Ok(Some(Value::Num(pos)));
+            }
+            // `input.valueAsNumber` — valeur numérique (`NaN`
+            // si non convertible, spec).
+            "valueAsNumber" if self.dom.borrow().nodes[node as usize].tag == "input" => {
+                let v = {
+                    let d = self.dom.borrow();
+                    d.attr(node, "value")
+                        .and_then(|s| s.trim().parse::<f64>().ok())
+                        .unwrap_or(f64::NAN)
+                };
+                return Ok(Some(Value::Num(v)));
+            }
+            // `input.valueAsDate` — pas de moteur de date de
+            // champ : `null` honnête (borne documentée).
+            "valueAsDate" if self.dom.borrow().nodes[node as usize].tag == "input" => {
+                return Ok(Some(Value::Null));
+            }
+            // `input.indeterminate` — état visuel, pas un
+            // attribut : slot `data-explorer-indeterminate`
+            // (même motif `CUSTOM_VALIDITY_ATTR`).
+            "indeterminate" if self.dom.borrow().nodes[node as usize].tag == "input" => {
+                let on = self.dom.borrow().has_attr(node, INDETERMINATE_ATTR);
+                return Ok(Some(Value::Bool(on)));
+            }
+            // `a/option/title/script.text` — textContent
+            // (spec `a.text` ≙ `textContent` ; `script.text`
+            // ≙ `innerText`, même source).
+            "text"
+                if matches!(
+                    self.dom.borrow().nodes[node as usize].tag.as_str(),
+                    "a" | "option" | "title" | "script"
+                ) =>
+            {
+                let s = self.dom.borrow().text_content(node);
+                return Ok(Some(e.str_val(s)));
+            }
+            // `<img>` — dimensions de la ressource : pas de
+            // décodeur → `naturalWidth/Height` 0, `x`/`y` 0
+            // (pas de layout), `complete` = absence de `src`
+            // (spec : image vide « complete ») ou `true` si
+            // la ressource est marquée chargée par le moteur
+            // (pas de fetch réel — approximation documentée).
+            "naturalWidth" | "naturalHeight" | "x" | "y"
+                if self.dom.borrow().nodes[node as usize].tag == "img" =>
+            {
+                return Ok(Some(Value::Num(0.0)));
+            }
+            "complete" if self.dom.borrow().nodes[node as usize].tag == "img" => {
+                return Ok(Some(Value::Bool(true)));
+            }
+            "currentSrc" if self.dom.borrow().nodes[node as usize].tag == "img" => {
+                let s = {
+                    let d = self.dom.borrow();
+                    d.attr(node, "src").unwrap_or("").to_string()
+                };
+                let resolved = if s.is_empty() {
+                    s
+                } else {
+                    crate::xhr::resolve_url(e, &s).unwrap_or(s)
+                };
+                return Ok(Some(e.str_val(resolved)));
+            }
+            // Tables (JS-C559) — collections lues sur la
+            // hiérarchie miroir.
+            "cellIndex"
+                if matches!(
+                    self.dom.borrow().nodes[node as usize].tag.as_str(),
+                    "td" | "th"
+                ) =>
+            {
+                let i = {
+                    let d = self.dom.borrow();
+                    d.parent(node).map_or(-1i64, |p| {
+                        d.child_nodes(p)
+                            .iter()
+                            .position(|&c| c == node)
+                            .map_or(-1, |i| i as i64)
+                    })
+                };
+                return Ok(Some(Value::Num(i as f64)));
+            }
+            "rowIndex" | "sectionRowIndex"
+                if self.dom.borrow().nodes[node as usize].tag == "tr" =>
+            {
+                let i = {
+                    let d = self.dom.borrow();
+                    if key == "sectionRowIndex" {
+                        d.parent(node).map_or(-1i64, |p| {
+                            d.by_tag(p, "tr")
+                                .iter()
+                                .position(|&r| r == node)
+                                .map_or(-1, |i| i as i64)
+                        })
+                    } else {
+                        // Rang global : parmi les `tr` de la
+                        // table englobante (ancêtre `table`).
+                        d.ancestors(node)
+                            .into_iter()
+                            .find(|&a| d.nodes[a as usize].tag == "table")
+                            .map_or(-1i64, |t| {
+                                d.by_tag(t, "tr")
+                                    .iter()
+                                    .position(|&r| r == node)
+                                    .map_or(-1, |i| i as i64)
+                            })
+                    }
+                };
+                return Ok(Some(Value::Num(i as f64)));
+            }
+            "cells" if self.dom.borrow().nodes[node as usize].tag == "tr" => {
+                let mut ids = self.dom.borrow().by_tag(node, "td");
+                ids.extend(self.dom.borrow().by_tag(node, "th"));
+                return Ok(Some(dom_collection(
+                    e,
+                    &self.dom,
+                    &self.cache,
+                    &ids,
+                    false,
+                    "HTMLCollection",
+                )));
+            }
+            "rows"
+                if matches!(
+                    self.dom.borrow().nodes[node as usize].tag.as_str(),
+                    "table" | "thead" | "tbody" | "tfoot"
+                ) =>
+            {
+                let ids = self.dom.borrow().by_tag(node, "tr");
+                return Ok(Some(dom_collection(
+                    e,
+                    &self.dom,
+                    &self.cache,
+                    &ids,
+                    false,
+                    "HTMLCollection",
+                )));
+            }
+            "tHead" | "tFoot" | "caption"
+                if self.dom.borrow().nodes[node as usize].tag == "table" =>
+            {
+                let want = key.to_ascii_lowercase();
+                let hit = {
+                    let d = self.dom.borrow();
+                    d.child_nodes(node)
+                        .into_iter()
+                        .find(|&c| d.nodes[c as usize].tag == want)
+                };
+                return Ok(Some(match hit {
+                    Some(c) => node_value(e, &self.dom, &self.cache, c),
+                    None => Value::Null,
+                }));
+            }
+            "tBodies" if self.dom.borrow().nodes[node as usize].tag == "table" => {
+                let ids = {
+                    let d = self.dom.borrow();
+                    d.by_tag(node, "tbody")
+                };
+                return Ok(Some(dom_collection(
+                    e,
+                    &self.dom,
+                    &self.cache,
+                    &ids,
+                    false,
+                    "HTMLCollection",
+                )));
+            }
+            // `dialog.returnValue` — slot `dialog_retval`
+            // (écrit par le setter / `close(v)`).
+            "returnValue" if self.dom.borrow().nodes[node as usize].tag == "dialog" => {
+                let s = e
+                    .hooks
+                    .dialog_retval
+                    .get(&node)
+                    .cloned()
+                    .unwrap_or_default();
+                return Ok(Some(e.str_val(s)));
+            }
+            // `fieldset.type`/`output.type` — constantes spec
+            // (pas d'attribut `type` sur ces tags).
+            "type"
+                if matches!(
+                    self.dom.borrow().nodes[node as usize].tag.as_str(),
+                    "fieldset" | "output"
+                ) =>
+            {
+                let t = self.dom.borrow().nodes[node as usize].tag.clone();
+                return Ok(Some(e.str_val(t)));
             }
             // `input.files` — `FileList` honnête vide (`type=file`)
             // ou `null` (autres types) — l'upload réel est JS-C70.
@@ -9844,6 +11315,17 @@ impl Host for NodeHost {
                         let s = e.to_js_string(v)?;
                         d.set_attr(node, SEL_DIR_ATTR, &s);
                     }
+                }
+                Ok(true)
+            }
+            // `input.indeterminate` — état visuel en slot
+            // interne (pas d'attribut IDL, JS-C559).
+            "indeterminate" if self.dom.borrow().nodes[node as usize].tag == "input" => {
+                let mut d = self.dom.borrow_mut();
+                if e.to_boolean(v) {
+                    d.set_attr(node, INDETERMINATE_ATTR, "");
+                } else {
+                    d.remove_attr(node, INDETERMINATE_ATTR);
                 }
                 Ok(true)
             }
@@ -12674,6 +14156,19 @@ impl Host for EventHost {
         }
     }
 
+    fn has_method(&self, name: &str) -> bool {
+        matches!(
+            name,
+            "preventDefault"
+                | "stopPropagation"
+                | "cancel"
+                | "stopImmediatePropagation"
+                | "composedPath"
+                | "initEvent"
+                | "initCustomEvent"
+        )
+    }
+
     fn invoke(
         &self,
         e: &mut Engine,
@@ -13607,6 +15102,19 @@ impl Host for AttributesHost {
         (0..self.attrs().len()).map(|i| i.to_string()).collect()
     }
 
+    fn has_method(&self, name: &str) -> bool {
+        matches!(
+            name,
+            "item"
+                | "getNamedItem"
+                | "getNamedItemNS"
+                | "setNamedItem"
+                | "setNamedItemNS"
+                | "removeNamedItem"
+                | "removeNamedItemNS"
+        )
+    }
+
     fn invoke(
         &self,
         e: &mut Engine,
@@ -14534,6 +16042,10 @@ impl Host for DomImplementationHost {
         self
     }
 
+    fn has_method(&self, name: &str) -> bool {
+        matches!(name, "createHTMLDocument" | "hasFeature")
+    }
+
     fn invoke(
         &self,
         e: &mut Engine,
@@ -14587,12 +16099,36 @@ impl Host for DomImplementationHost {
 struct LocationHost;
 
 /// `(protocol, host, hostname, port, pathname, search, hash)` of `u`.
+/// Userinfo d'une URL brute (`scheme://u:p@host/…`) —
+/// `which_user` : `true` → username, `false` → password.
+/// Aucun `@` avant le premier `/` → `""` (spec : pas
+/// d'userinfo).
+fn url_userinfo(u: &str, which_user: bool) -> String {
+    let Some(scheme_end) = u.find("://") else {
+        return String::new();
+    };
+    let rest = &u[scheme_end + 3..];
+    let auth = rest.split(['/', '?', '#']).next().unwrap_or("");
+    let Some(at) = auth.rfind('@') else {
+        return String::new();
+    };
+    let info = &auth[..at];
+    if which_user {
+        info.split(':').next().unwrap_or("").to_string()
+    } else {
+        info.split_once(':').map_or("", |(_, p)| p).to_string()
+    }
+}
+
 fn url_parts(u: &str) -> (String, String, String, String, String, String, String) {
     let (scheme, rest) = u.split_once("://").unwrap_or(("", u));
     let (authority, tail) = match rest.find(['/', '?', '#']) {
         Some(i) => (&rest[..i], &rest[i..]),
         None => (rest, "/"),
     };
+    // `host`/`hostname` excluent l'userinfo `u:p@` (spec URL —
+    // `a.host` ≙ `ex.com:8080`, jamais `u:p@ex.com:8080`).
+    let authority = authority.rsplit('@').next().unwrap_or(authority);
     let (hostname, port) = authority.split_once(':').unwrap_or((authority, ""));
     let hash = tail.rfind('#').map_or("", |i| &tail[i..]);
     let tail = &tail[..tail.len() - hash.len()];
@@ -14918,6 +16454,13 @@ impl Host for HistoryHost {
             return Ok(true);
         }
         Ok(false)
+    }
+
+    fn has_method(&self, name: &str) -> bool {
+        matches!(
+            name,
+            "back" | "forward" | "go" | "pushState" | "replaceState"
+        )
     }
 
     fn invoke(
@@ -17521,6 +19064,11 @@ impl Host for DatasetHost {
 /// (canal miroir→moteur, déviation `outerHTML` documentée).
 const CUSTOM_VALIDITY_ATTR: &str = "data-explorer-cv";
 
+/// Slot `input.indeterminate` (JS-C559) — état visuel sans
+/// attribut IDL : sérialisé avec le miroir (motif
+/// `CUSTOM_VALIDITY_ATTR`, ADR-0014).
+const INDETERMINATE_ATTR: &str = "data-explorer-indeterminate";
+
 /// Slots de sélection de champ (CAP-177) — attributs
 /// internes sérialisés avec le miroir (même motif que
 /// `CUSTOM_VALIDITY_ATTR`, ADR-0014) : `selectionStart`/
@@ -17934,6 +19482,42 @@ impl Host for Ctx2dHost {
         }
     }
 
+    fn has_method(&self, name: &str) -> bool {
+        matches!(
+            name,
+            "save"
+                | "restore"
+                | "beginPath"
+                | "closePath"
+                | "fill"
+                | "stroke"
+                | "clip"
+                | "translate"
+                | "scale"
+                | "rotate"
+                | "transform"
+                | "setTransform"
+                | "moveTo"
+                | "lineTo"
+                | "quadraticCurveTo"
+                | "bezierCurveTo"
+                | "arc"
+                | "rect"
+                | "fillRect"
+                | "strokeRect"
+                | "clearRect"
+                | "measureText"
+                | "getLineDash"
+                | "isPointInPath"
+                | "isPointInStroke"
+                | "createLinearGradient"
+                | "createRadialGradient"
+                | "createConicGradient"
+                | "createPattern"
+                | "getImageData"
+        ) || NOOP_CTX_METHODS.contains(&name)
+    }
+
     #[allow(clippy::cast_possible_truncation, clippy::too_many_lines)]
     fn invoke(
         &self,
@@ -18071,6 +19655,10 @@ impl Host for GradientHost {
             return Ok(Some(Value::Undefined));
         }
         Ok(None)
+    }
+
+    fn has_method(&self, name: &str) -> bool {
+        name == "addColorStop"
     }
 }
 
