@@ -722,6 +722,10 @@ pub static J17_UFN_MISS: std::sync::atomic::AtomicU64 = std::sync::atomic::Atomi
 pub static J17_SHM_HIT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 /// JS-C568 — misses `shadow_memo`.
 pub static J17_SHM_MISS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+/// JS-C569 — appels `proto_accessor_shadows` servis par la
+/// marche simple sans fold (premier contact ou clé
+/// empoisonnée polymorphe — learn-on-second-miss).
+pub static J17_SHM_WALK: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 
 /// Gate J17 : les compteurs ci-dessus ne s'incrémentent que si
 /// `EXPLORER_J17_PROF` est posé (non vide/non "0") au premier
@@ -762,7 +766,7 @@ pub fn j17_enable() {
 #[must_use]
 pub fn j17_snapshot() -> String {
     let r = std::sync::atomic::Ordering::Relaxed;
-    let pairs: [(&str, &std::sync::atomic::AtomicU64); 92] = [
+    let pairs: [(&str, &std::sync::atomic::AtomicU64); 93] = [
         ("prop_lookup", &J17_PROP_LOOKUP),
         ("proto_lvl", &J17_PROTO_LVL),
         ("prop_scan", &J17_PROP_SCAN),
@@ -855,6 +859,7 @@ pub fn j17_snapshot() -> String {
         ("ufn_miss", &J17_UFN_MISS),
         ("shm_hit", &J17_SHM_HIT),
         ("shm_miss", &J17_SHM_MISS),
+        ("shm_walk", &J17_SHM_WALK),
     ];
     let mut out = String::new();
     for (k, c) in pairs {

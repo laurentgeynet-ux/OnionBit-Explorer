@@ -13580,6 +13580,14 @@ chaque gain rapporté contre les **deux** archétypes.
   (`ic_hit`/`ic_miss`/`ic_disarm` au snapshot) pour
   borner la couverture du seul court-circuit existant.
   Dependency-groups = infra lourde, dernier recours.
+- [x] **JS-C569 — `shm` learn-on-second-miss** — porte
+  `shm_gate` : fold payé seulement après le 1er miss d'une
+  clé ; 8 misses sous folds neufs consécutifs →
+  empoisonnement, bypass = marche simple à vie. Fold brut =
+  discriminant polymorphisme vs churn `acc_gen` (warmup
+  wrappers). `shadow_memo` jamais pire que la baseline
+  (n568 : 44 % hits). Compteur `shm_walk`. Verrou
+  `c569_shm_learn_on_second_miss`, `dom` 275.
 - [x] **JS-C568 — compteurs hit/miss des mémos J17** —
   `navm_hit`/`navm_miss`/`ufn_hit`/`ufn_miss`/`shm_hit`/
   `shm_miss` au snapshot : le hit-rate se lit au lieu d'être

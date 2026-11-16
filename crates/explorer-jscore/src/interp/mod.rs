@@ -1140,6 +1140,18 @@ pub struct Engine {
     /// le modèle IC « 1 site = 1 entrée » ne couvre pas cette
     /// question bi-dimensionnelle (vol N5.19).
     pub(crate) shadow_memo: FastMap<(u64, u64), bool>,
+    /// JS-C569 — porte learn-on-second-miss de `shadow_memo`
+    /// (`clé internée → (dernier fold brut miss, streak)`,
+    /// `SHM_POISON` = clé empoisonnée polymorphe) : le fold de
+    /// chaîne n'est payé qu'après le premier miss d'une clé, et
+    /// une clé qui manque `SHM_POISON_AFTER` consultations sous
+    /// folds neufs d'affilée reçoit un bypass définitif =
+    /// marche simple — `shadow_memo` ne peut plus être *pire*
+    /// que la baseline sur clés polymorphes (vol n568 : 44 %
+    /// de hits, chaque miss payait fold + write). Le fold brut
+    /// mémorisé discrimine churn (`acc_gen`, clear) et
+    /// polymorphisme.
+    pub(crate) shm_gate: FastMap<u64, (u64, u8)>,
     /// JS-C567 — mémo des accesseurs **sibling** uniquement
     /// `(len clé, node, struct_gen)` → `Option<NodeId>` : le scan
     /// `position()` du `Vec` enfants est le seul coût O(n) des
@@ -1753,6 +1765,7 @@ impl Engine {
             resolved_envs: FastMap::default(),
             ic_map: FastMap::default(),
             shadow_memo: FastMap::default(),
+            shm_gate: FastMap::default(),
             nav_memo: FastMap::default(),
             univ_fn_memo: FastMap::default(),
             rabs_memo: FastSet::default(),

@@ -1426,7 +1426,38 @@ fn dom_nav_set(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
 /// polymorphe en clé (toutes les props DOM) — le fold couvre la
 /// chaîne entière, une mutation sur n'importe quel maillon
 /// change la clé du cache. Borné `SHADOW_MEMO_CAP`.
+/// JS-C569 — learn-on-second-miss : le fold n'est construit
+/// qu'après le premier miss d'une clé (`shm_gate`), et
+/// `SHM_POISON_AFTER` misses consultés sous folds **neufs**
+/// d'affilée empoisonnent la clé → marche simple définitive,
+/// jamais pire que la baseline sur clés polymorphes (vol
+/// n568 : 44 % de hits, chaque miss payait fold + insert +
+/// churn d'éviction). Un miss à fold brut *identique* =
+/// churn d'invalidation (`SCRIPT_ACC_GEN` bumpé par les
+/// créations de wrappers en warmup, clear du mémo) — pas une
+/// preuve de polymorphisme, il n'avance pas le streak.
 fn proto_accessor_shadows(e: &mut Engine, id: ObjId, key: &str) -> bool {
+    let khash = (crate::intern(key).as_ptr() as usize as u64) ^ (key.len() as u64) << 48;
+    match e.shm_gate.get(&khash).copied() {
+        // Premier contact — marche simple, clé marquée : le
+        // prochain passage paiera le chemin mémo complet.
+        None => {
+            crate::j17_tick(&crate::J17_SHM_WALK);
+            let answer = shadow_walk(e, id, key);
+            if e.shm_gate.len() >= SHM_GATE_CAP {
+                e.shm_gate.clear();
+            }
+            e.shm_gate.insert(khash, (0, 0));
+            return answer;
+        }
+        // Clé empoisonnée (misses polymorphes répétés) —
+        // bypass définitif : coût = la marche simple, à vie.
+        Some((_, SHM_POISON)) => {
+            crate::j17_tick(&crate::J17_SHM_WALK);
+            return shadow_walk(e, id, key);
+        }
+        Some(_) => {}
+    }
     // Phase 1 — collecte des maillons + fold des shapes (borne 32
     // — la chaîne DOM est courte, un cycle hostile ne boucle pas).
     let mut cur = match e.heap.obj(id) {
@@ -1456,33 +1487,25 @@ fn proto_accessor_shadows(e: &mut Engine, id: ObjId, key: &str) -> bool {
         fold ^ crate::SCRIPT_ACC_GEN
             .load(std::sync::atomic::Ordering::Relaxed)
             .wrapping_mul(0xA24B_AED4_963E_E407),
-        (crate::intern(key).as_ptr() as usize as u64) ^ (key.len() as u64) << 48,
+        khash,
     );
     if let Some(&b) = e.shadow_memo.get(&memo_key) {
+        // Hit — streak remis à zéro (écriture sautée quand la
+        // porte est déjà à 0, cas dominant des clés stables).
+        if let Some((lf, streak)) = e.shm_gate.get(&khash).copied() {
+            if streak != 0 {
+                e.shm_gate.insert(khash, (lf, 0));
+            }
+        }
         crate::j17_tick(&crate::J17_SHM_HIT);
         return b;
     }
     crate::j17_tick(&crate::J17_SHM_MISS);
     // Phase 2 — marche `find_own` (une seule fois par
     // (chaîne-shape, clé) distincts).
-    let authored_check = |e: &mut Engine, cid: ObjId| -> bool {
-        if let Some(crate::heap::Prop::Acc { get, set, .. }) = e.find_own(cid, key) {
-            let authored = |v: Value| match v {
-                Value::Obj(fid) => matches!(
-                    e.heap.obj(fid).map(|o| &o.kind),
-                    Some(ObjKind::Fun(
-                        crate::heap::Fun::Script { .. } | crate::heap::Fun::Bound { .. }
-                    ))
-                ),
-                _ => false,
-            };
-            return authored(get) || authored(set);
-        }
-        false
-    };
     let mut answer = false;
     for &cid in &links {
-        if authored_check(e, cid) {
+        if authored_acc(e, cid, key) {
             answer = true;
             break;
         }
@@ -1491,11 +1514,83 @@ fn proto_accessor_shadows(e: &mut Engine, id: ObjId, key: &str) -> bool {
         e.shadow_memo.clear();
     }
     e.shadow_memo.insert(memo_key, answer);
+    // Streak : seuls les misses sous fold brut neuf comptent —
+    // un miss à fold identique = churn d'invalidation
+    // (`acc_gen`, clear du cap), pas du polymorphisme.
+    let (lf, streak) = e.shm_gate.get(&khash).copied().unwrap_or((0, 0));
+    let ns = if lf == fold {
+        streak
+    } else {
+        streak.saturating_add(1)
+    };
+    e.shm_gate.insert(
+        khash,
+        (
+            fold,
+            if ns >= SHM_POISON_AFTER {
+                SHM_POISON
+            } else {
+                ns
+            },
+        ),
+    );
     answer
+}
+
+/// JS-C569 — marche simple de [`proto_accessor_shadows`] :
+/// chaîne proto parcourue sans fold ni mémo (premier contact
+/// et clés empoisonnées) — le coût de la baseline pré-mémo,
+/// borne 32 maillons identique au chemin mémoïsé.
+fn shadow_walk(e: &mut Engine, id: ObjId, key: &str) -> bool {
+    let mut cur = match e.heap.obj(id) {
+        Some(o) => o.proto.clone(),
+        None => return false,
+    };
+    for _ in 0..32 {
+        let Value::Obj(cid) = cur else { break };
+        if authored_acc(e, cid, key) {
+            return true;
+        }
+        cur = match e.heap.obj(cid) {
+            Some(o) => o.proto.clone(),
+            None => break,
+        };
+    }
+    false
+}
+
+/// Un `Prop::Acc` n'est une ombre que si un de ses côtés est
+/// une fonction scriptée (`Fun::Script`/`Bound`) — les
+/// accesseurs natifs (`BoundNative`, IDL) ne shadowent pas.
+fn authored_acc(e: &mut Engine, cid: ObjId, key: &str) -> bool {
+    if let Some(crate::heap::Prop::Acc { get, set, .. }) = e.find_own(cid, key) {
+        let authored = |v: Value| match v {
+            Value::Obj(fid) => matches!(
+                e.heap.obj(fid).map(|o| &o.kind),
+                Some(ObjKind::Fun(
+                    crate::heap::Fun::Script { .. } | crate::heap::Fun::Bound { .. }
+                ))
+            ),
+            _ => false,
+        };
+        return authored(get) || authored(set);
+    }
+    false
 }
 
 /// JS-C520 — borne de la mémo `proto_accessor_shadows`.
 const SHADOW_MEMO_CAP: usize = 8192;
+
+/// JS-C569 — misses consultés sous folds neufs consécutifs
+/// avant empoisonnement d'une clé (mémo bypassé à vie =
+/// marche simple). Assez haut pour laisser les clés
+/// multi-états (scan multi-tags) le temps de payer.
+const SHM_POISON_AFTER: u8 = 8;
+/// Marqueur d'empoisonnement dans `shm_gate`.
+const SHM_POISON: u8 = u8::MAX;
+/// Borne de la porte `shm_gate` — clés au-delà redeviennent
+/// « premier contact » (une marche simple chacune, conservateur).
+const SHM_GATE_CAP: usize = 4096;
 
 /// JS-C567 — méthodes universelles `Object.prototype` lues sur
 /// un wrapper host : la lookup marchait toute la chaîne à

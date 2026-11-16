@@ -3733,6 +3733,46 @@ fn c568_memo_counters_reach_snapshot() {
     }
 }
 
+/// JS-C569 — learn-on-second-miss de `proto_accessor_shadows` :
+/// le fold n'est payé qu'après le premier miss d'une clé ; une
+/// clé à misses consultés consécutifs est empoisonnée → bypass
+/// définitif (marche simple, coût = baseline) sans casser la
+/// détection d'ombre.
+#[test]
+fn c569_shm_learn_on_second_miss() {
+    const P: &str = r#"<html><body><div id="a"><span id="s1">x</span></div></body></html>"#;
+    explorer_jscore::j17_enable();
+    // Ombre scriptée détectée dès le premier contact (marche
+    // simple — le mémo n'est pas nécessaire pour voir).
+    assert_eq!(
+        ev_in(
+            P,
+            "var s1=document.getElementById('s1');Object.defineProperty(Node.prototype,'parentNode',{get:function(){return 'SH'},configurable:true});s1.parentNode"
+        ),
+        "SH"
+    );
+    // Polymorphisme forcé : la shape de `Node.prototype` change
+    // entre les lectures → fold distinct → misses consultés →
+    // la clé s'empoisonne ; les appels suivants repassent à la
+    // marche simple (shm_walk) et le résultat reste correct.
+    let w0 = explorer_jscore::J17_SHM_WALK.load(std::sync::atomic::Ordering::Relaxed);
+    assert_eq!(
+        ev_in(
+            P,
+            "var s1=document.getElementById('s1'),r='';for(var i=0;i<16;i++){Node.prototype['zz'+i]=i;r+=s1.isConnected+','};r"
+        ),
+        "true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,"
+    );
+    let w1 = explorer_jscore::J17_SHM_WALK.load(std::sync::atomic::Ordering::Relaxed);
+    // ≥ 7 marches simples sur les 10 lectures : 1er contact +
+    // post-empoisonnement (sans la porte, seul le 1er contact
+    // marcherait — les autres paieraient fold+miss).
+    assert!(
+        w1.saturating_sub(w0) >= 7,
+        "bypass empoisonné absent : shm_walk {w0} -> {w1}"
+    );
+}
+
 /// `for-of`/`Symbol.iterator` sur les collections host —
 /// `makeIterator` de Google s'appuie dessus (`Error: b` sinon).
 #[test]
