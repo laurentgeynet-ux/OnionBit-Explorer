@@ -8211,6 +8211,22 @@ MCP = adaptateur, jamais la base.
   le fil appelant — la mesure borne le churn à la
   fenêtre. Verrous : `dom_sync` 11/11 (2 nouveaux),
   lib jscore 51/51 ; demande PIPE `flow.*` consignée.
+- [x] **Étape 313. Replays versionnés : la fixture YouTube
+  du shot vitrine est trackée et rejouable hors-ligne**
+  (`explorer-net`/`explorer-cli`/`fuzz/replays/` +
+  `scripts/vitrine_shot.ps1` — sprint N4, items
+  « replays versionnés » + « `geo_diff`/captures YouTube »
+  soldés). `EXPLORER_NET_RECORD` enveloppe
+  `EXPLORER_NET_REPLAY` : distillation d'un vol complet en
+  sous-ensemble borné (seules les réponses servies au shot
+  sont ré-écrites). Fixture `fuzz/replays/youtube-vol813/` :
+  37 réponses (17 Mio) distillées du vol 813 + ref Chrome
+  embarquée — déterminisme vérifié : geom **et** PNG
+  byte-identiques vol source ↔ fixture. Shot de contrôle
+  `vitrine_shot.ps1` (N0.3 outillé, 100 % hors-ligne) :
+  mesure inaugurale 83,7 % divergents, artefacts
+  `Explorer-data/vols/vitrine/`. Verrou :
+  `dir_transport_replays_youtube_flight`.
 - [x] **Étape 312. §B-114 — le shed suspend le drain
   d'applies et borne la file** (`explorer-core`, garde
   ressource — trou des vols 857/860/861 : `rss_shed`
@@ -13455,11 +13471,17 @@ croître la surface navigateur mesurée (`api` 1510/8099, 18,6 %).
   vendor de sizing intrinsèque (`fit-content`/`min/max-content`
   `-moz`/`-webkit` ≈ 47 % des drops) — verdict complet
   `vols/harvest-n4/CENSUS.md`, triage PIPE journalisé.
-- [ ] **`geo_diff`/captures YouTube** : différentiel rendu vs
-  Chrome — outil du shot de contrôle N0.3.
-- [ ] **Replays versionnés** : fixtures `DirTransport` des vols
+- [x] **`geo_diff`/captures YouTube** : différentiel rendu vs
+  Chrome — outil du shot de contrôle N0.3. Livré étape 313 :
+  `scripts/vitrine_shot.ps1` (shot sur rejeu + `geo_diff` vs
+  ref archivée, 100 % hors-ligne) — mesure inaugurale
+  83,7 % divergents, artefacts `Explorer-data/vols/vitrine/`.
+- [x] **Replays versionnés** : fixtures `DirTransport` des vols
   YouTube promus en corpus `fuzz/` (le shot vitrine doit être
   rejouable hors-ligne) — `.eval/` reste non suivi (N0.0).
+  Livré étape 313 : `fuzz/replays/youtube-vol813/` (37 réponses
+  distillées du vol 813, déterminisme byte-identique vérifié,
+  verrou `dir_transport_replays_youtube_flight`).
 
 ### Sprint N5 — archétypes perf : mesure → attribution → PIPE (assigné 2026-11-13)
 

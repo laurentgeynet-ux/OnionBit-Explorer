@@ -1,0 +1,20 @@
+401
+
+content-type	text/html; charset=utf-8
+cache-control	no-cache, no-store, max-age=0, must-revalidate
+pragma	no-cache
+expires	Mon, 01 Jan 1990 00:00:00 GMT
+date	Thu, 12 Nov 2026 16:32:37 GMT
+strict-transport-security	max-age=31536000; includeSubDomains
+content-security-policy	script-src 'unsafe-inline' https: http:;object-src 'self';base-uri 'self';report-uri /_/AccountsSigninPassiveLoginHttp/cspreport;worker-src 'self'
+content-security-policy	require-trusted-types-for 'script';report-uri /_/AccountsSigninPassiveLoginHttp/cspreport
+accept-ch	Sec-CH-UA-Arch, Sec-CH-UA-Bitness, Sec-CH-UA-Full-Version, Sec-CH-UA-Full-Version-List, Sec-CH-UA-Model, Sec-CH-UA-WoW64, Sec-CH-UA-Form-Factors, Sec-CH-UA-Platform, Sec-CH-UA-Platform-Version
+cross-origin-resource-policy	cross-origin
+permissions-policy	ch-ua-arch=*, ch-ua-bitness=*, ch-ua-full-version=*, ch-ua-full-version-list=*, ch-ua-model=*, ch-ua-wow64=*, ch-ua-form-factors=*, ch-ua-platform=*, ch-ua-platform-version=*
+server	ESF
+x-xss-protection	0
+x-content-type-options	nosniff
+alt-svc	h3=":443"; ma=2592000,h3-29=":443"; ma=2592000
+Content-Length	1747
+
+<html lang="fr" dir=ltr><meta charset=utf-8><meta name=viewport content="initial-scale=1, minimum-scale=1, width=device-width"><title>Error 401 (Requête incorrecte)!!1</title><style nonce="Im-GLSzP_7_AmBeq5GXWXw">*{margin:0;padding:0}html,code{font:15px/22px arial,sans-serif}html{background:#fff;color:#222;padding:15px}body{color:#222;text-align:unset;margin:7% auto 0;max-width:390px;min-height:180px;padding:30px 0 15px;}* > body{background:url(//www.google.com/images/errors/robot.png) 100% 5px no-repeat;padding-right:205px}p{margin:11px 0 22px;overflow:hidden}pre{white-space:pre-wrap;}ins{color:#777;text-decoration:none}a img{border:0}@media screen and (max-width:772px){body{background:none;margin-top:0;max-width:none;padding-right:0}}#logo{background:url(//www.google.com/images/branding/googlelogo/1x/googlelogo_color_150x54dp.png) no-repeat;margin-left:-5px}@media only screen and (min-resolution:192dpi){#logo{background:url(//www.google.com/images/branding/googlelogo/2x/googlelogo_color_150x54dp.png) no-repeat 0% 0%/100% 100%;-moz-border-image:url(//www.google.com/images/branding/googlelogo/2x/googlelogo_color_150x54dp.png) 0}}@media only screen and (-webkit-min-device-pixel-ratio:2){#logo{background:url(//www.google.com/images/branding/googlelogo/2x/googlelogo_color_150x54dp.png) no-repeat;-webkit-background-size:100% 100%}}#logo{display:inline-block;height:54px;width:150px}</style><main id="af-error-container" role="main"><a href=//www.google.com><span id=logo aria-label=Google role=img></span></a><p><b>401.</b> <ins>Il s'agit d'une erreur.</ins><p>Le serveur ne peut pas traiter la requête, car son format est incorrect. Nous vous recommandons de ne pas réessayer. <ins>C'est tout ce que nous savons.</ins></main>

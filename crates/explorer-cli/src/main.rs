@@ -101,9 +101,23 @@ fn client_stack() -> Arc<dyn HttpTransport> {
     if let Ok(dir) = std::env::var("EXPLORER_NET_REPLAY") {
         if !dir.is_empty() {
             eprintln!("[EXPLORER_NET_REPLAY={dir} — rejeu offline]");
-            return Arc::new(explorer_net::replay::DirTransport::new(
+            let replay: Arc<dyn HttpTransport> = Arc::new(explorer_net::replay::DirTransport::new(
                 std::path::Path::new(&dir),
             ));
+            // Étape 313 — RECORD enveloppant REPLAY : distille
+            // un vol complet en fixture bornée (seules les
+            // réponses réellement servies au shot sont
+            // ré-écrites) — corpus versionné `fuzz/replays/`.
+            return match std::env::var("EXPLORER_NET_RECORD") {
+                Ok(out) if !out.is_empty() => {
+                    eprintln!("[EXPLORER_NET_RECORD={out} — distillation du rejeu]");
+                    Arc::new(explorer_net::replay::RecordingTransport::wrap(
+                        replay,
+                        std::path::Path::new(&out),
+                    ))
+                }
+                _ => replay,
+            };
         }
     }
     let tls = Arc::new(TlsConnector::web_roots());

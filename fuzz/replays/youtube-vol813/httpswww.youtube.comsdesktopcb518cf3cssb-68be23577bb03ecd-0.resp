@@ -1,0 +1,20 @@
+200
+
+accept-ranges	bytes
+cross-origin-resource-policy	cross-origin
+cross-origin-opener-policy-report-only	same-origin; report-to="youtube"
+report-to	{"group":"youtube","max_age":2592000,"endpoints":[{"url":"https://csp.withgoogle.com/csp/report-to/youtube"}]}
+x-content-type-options	nosniff
+server	sffe
+x-xss-protection	0
+date	Wed, 11 Nov 2026 13:31:24 GMT
+expires	Thu, 11 Nov 2027 13:31:24 GMT
+cache-control	public, max-age=31536000
+last-modified	Wed, 11 Nov 2026 12:21:36 GMT
+content-type	text/css
+vary	Accept-Encoding, Origin
+age	97273
+alt-svc	h3=":443"; ma=2592000,h3-29=":443"; ma=2592000
+Content-Length	828
+
+.picker-frame{width:100%;height:100%;border:0;overflow:hidden}.picker.modal-dialog-bg{position:absolute;top:0;left:0;right:auto;bottom:auto;border:none;background-color:#E9EEF6}.picker.modal-dialog{position:absolute;top:0;bottom:auto;left:0;right:auto;background-color:#E9EEF6;border:1px solid #ACACAC;width:auto;padding:0;z-index:1001;overflow:auto;-webkit-box-shadow:0 4px 16px rgba(0,0,0,.2);box-shadow:0 4px 16px rgba(0,0,0,.2);-webkit-transition:top .5s ease-in-out;transition:top .5s ease-in-out}.picker-min{position:absolute;z-index:1002}.picker.modal-dialog-content{background-color:#E9EEF6;font-size:0;padding:0}.picker.modal-dialog-title{height:0;margin:0}.picker.modal-dialog-buttons,.picker.modal-dialog-title-text{display:none}.picker.modal-dialog-bg,.picker.modal-dialog.picker-dialog{z-index:1999999999}sentinel{}

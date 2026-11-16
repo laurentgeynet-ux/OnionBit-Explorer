@@ -1,0 +1,21 @@
+200
+
+accept-ranges	bytes
+content-security-policy	require-trusted-types-for 'script'; report-uri https://csp.withgoogle.com/csp/youtube
+cross-origin-resource-policy	cross-origin
+cross-origin-opener-policy	same-origin; report-to="youtube"
+report-to	{"group":"youtube","max_age":2592000,"endpoints":[{"url":"https://csp.withgoogle.com/csp/report-to/youtube"}]}
+x-content-type-options	nosniff
+server	sffe
+x-xss-protection	0
+date	Thu, 12 Nov 2026 10:57:43 GMT
+expires	Fri, 13 Nov 2026 10:57:43 GMT
+cache-control	public, max-age=86400
+age	19902
+last-modified	Tue, 29 Sep 2026 20:58:00 GMT
+content-type	image/svg+xml
+vary	Accept-Encoding
+alt-svc	h3=":443"; ma=2592000,h3-29=":443"; ma=2592000
+Content-Length	426
+
+<svg width="32" height="32" viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M16 22.5a2 2 0 1 1 0 4 2 2 0 0 1 0-4zm.438-16.813a5.876 5.876 0 0 1 .625 11.716v1.16a1.5 1.5 0 0 1-3 0v-1.75a2.376 2.376 0 0 1 2.374-2.375l.294-.015a2.876 2.876 0 0 0-.294-5.736h-.845a2.796 2.796 0 0 0-2.498 1.544l-.564 1.127a1.5 1.5 0 0 1-2.683-1.341l.563-1.127a5.794 5.794 0 0 1 5.182-3.203h.845z" fill="#717171"/></svg>

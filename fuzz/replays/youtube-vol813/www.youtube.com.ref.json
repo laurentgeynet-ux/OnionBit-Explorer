@@ -1,0 +1,3366 @@
+{
+ "url": "https://www.youtube.com/",
+ "viewport": "1366x900",
+ "doc_w": 1366,
+ "doc_h": 900,
+ "title": "YouTube",
+ "boxes": [
+  {
+   "tag": "ytd-app",
+   "id": "",
+   "cls": "",
+   "x": 0,
+   "y": 0,
+   "w": 1366,
+   "h": 900
+  },
+  {
+   "tag": "div",
+   "id": "content",
+   "cls": "style-scope",
+   "x": 0,
+   "y": 56,
+   "w": 1366,
+   "h": 176
+  },
+  {
+   "tag": "div",
+   "id": "masthead-container",
+   "cls": "style-scope",
+   "x": 0,
+   "y": 0,
+   "w": 1366,
+   "h": 56
+  },
+  {
+   "tag": "ytd-masthead",
+   "id": "masthead",
+   "cls": "masthead-finish",
+   "x": 0,
+   "y": 0,
+   "w": 1366,
+   "h": 56
+  },
+  {
+   "tag": "div",
+   "id": "ticker",
+   "cls": "style-scope",
+   "x": 0,
+   "y": 0,
+   "w": 1366,
+   "h": 0
+  },
+  {
+   "tag": "div",
+   "id": "interstitial",
+   "cls": "style-scope",
+   "x": 0,
+   "y": 0,
+   "w": 1366,
+   "h": 0
+  },
+  {
+   "tag": "div",
+   "id": "background",
+   "cls": "style-scope",
+   "x": 0,
+   "y": 0,
+   "w": 1366,
+   "h": 56
+  },
+  {
+   "tag": "div",
+   "id": "container",
+   "cls": "style-scope",
+   "x": 0,
+   "y": 0,
+   "w": 1366,
+   "h": 56
+  },
+  {
+   "tag": "div",
+   "id": "start",
+   "cls": "style-scope",
+   "x": 16,
+   "y": 0,
+   "w": 169,
+   "h": 56
+  },
+  {
+   "tag": "yt-icon-button",
+   "id": "guide-button",
+   "cls": "style-scope",
+   "x": 16,
+   "y": 8,
+   "w": 40,
+   "h": 40
+  },
+  {
+   "tag": "button",
+   "id": "button",
+   "cls": "style-scope",
+   "x": 24,
+   "y": 16,
+   "w": 24,
+   "h": 24
+  },
+  {
+   "tag": "yt-icon",
+   "id": "guide-icon",
+   "cls": "style-scope",
+   "x": 24,
+   "y": 16,
+   "w": 24,
+   "h": 24
+  },
+  {
+   "tag": "span",
+   "id": "",
+   "cls": "yt-icon-shape",
+   "x": 24,
+   "y": 16,
+   "w": 24,
+   "h": 24
+  },
+  {
+   "tag": "div",
+   "id": "",
+   "cls": "",
+   "x": 24,
+   "y": 16,
+   "w": 24,
+   "h": 24
+  },
+  {
+   "tag": "svg",
+   "id": "",
+   "cls": "",
+   "x": 24,
+   "y": 16,
+   "w": 24,
+   "h": 24
+  },
+  {
+   "tag": "path",
+   "id": "",
+   "cls": "",
+   "x": 27,
+   "y": 21,
+   "w": 18,
+   "h": 14
+  },
+  {
+   "tag": "yt-interaction",
+   "id": "interaction",
+   "cls": "circular",
+   "x": 16,
+   "y": 8,
+   "w": 40,
+   "h": 40
+  },
+  {
+   "tag": "div",
+   "id": "",
+   "cls": "stroke",
+   "x": 16,
+   "y": 8,
+   "w": 40,
+   "h": 40
+  },
+  {
+   "tag": "div",
+   "id": "",
+   "cls": "fill",
+   "x": 16,
+   "y": 8,
+   "w": 40,
+   "h": 40
+  },
+  {
+   "tag": "ytd-topbar-logo-renderer",
+   "id": "logo",
+   "cls": "style-scope",
+   "x": 56,
+   "y": 0,
+   "w": 129,
+   "h": 56
+  },
+  {
+   "tag": "a",
+   "id": "logo",
+   "cls": "yt-simple-endpoint",
+   "x": 56,
+   "y": 0,
+   "w": 123,
+   "h": 56
+  },
+  {
+   "tag": "div",
+   "id": "",
+   "cls": "style-scope",
+   "x": 56,
+   "y": 0,
+   "w": 123,
+   "h": 56
+  },
+  {
+   "tag": "ytd-logo",
+   "id": "",
+   "cls": "style-scope",
+   "x": 56,
+   "y": 20.6,
+   "w": 123,
+   "h": 13
+  },
+  {
+   "tag": "yt-icon",
+   "id": "logo-icon",
+   "cls": "style-scope",
+   "x": 56,
+   "y": 0,
+   "w": 123,
+   "h": 56
+  },
+  {
+   "tag": "span",
+   "id": "",
+   "cls": "yt-icon-shape",
+   "x": 72,
+   "y": 18,
+   "w": 93,
+   "h": 20
+  },
+  {
+   "tag": "div",
+   "id": "",
+   "cls": "",
+   "x": 72,
+   "y": 18,
+   "w": 93,
+   "h": 20
+  },
+  {
+   "tag": "svg",
+   "id": "yt-ringo2-svg_yt8",
+   "cls": "",
+   "x": 72,
+   "y": 18,
+   "w": 93,
+   "h": 20
+  },
+  {
+   "tag": "g",
+   "id": "",
+   "cls": "",
+   "x": 72,
+   "y": 18,
+   "w": 29,
+   "h": 20
+  },
+  {
+   "tag": "path",
+   "id": "",
+   "cls": "",
+   "x": 72,
+   "y": 18,
+   "w": 29,
+   "h": 20
+  },
+  {
+   "tag": "path",
+   "id": "",
+   "cls": "",
+   "x": 83.5,
+   "y": 23.8,
+   "w": 7.5,
+   "h": 8.5
+  },
+  {
+   "tag": "g",
+   "id": "youtube-paths_yt8",
+   "cls": "",
+   "x": 103.1,
+   "y": 19.4,
+   "w": 61.5,
+   "h": 17.7
+  },
+  {
+   "tag": "path",
+   "id": "",
+   "cls": "",
+   "x": 103.1,
+   "y": 20.1,
+   "w": 9.5,
+   "h": 16.8
+  },
+  {
+   "tag": "path",
+   "id": "",
+   "cls": "",
+   "x": 112,
+   "y": 24.3,
+   "w": 8,
+   "h": 12.8
+  },
+  {
+   "tag": "path",
+   "id": "",
+   "cls": "",
+   "x": 121.8,
+   "y": 24.5,
+   "w": 7.8,
+   "h": 12.5
+  },
+  {
+   "tag": "path",
+   "id": "",
+   "cls": "",
+   "x": 129.2,
+   "y": 20.1,
+   "w": 8.7,
+   "h": 16.8
+  },
+  {
+   "tag": "path",
+   "id": "",
+   "cls": "",
+   "x": 137.4,
+   "y": 24.5,
+   "w": 7.8,
+   "h": 12.5
+  },
+  {
+   "tag": "path",
+   "id": "",
+   "cls": "",
+   "x": 147.3,
+   "y": 19.4,
+   "w": 8.1,
+   "h": 17.6
+  },
+  {
+   "tag": "path",
+   "id": "",
+   "cls": "",
+   "x": 157,
+   "y": 24.3,
+   "w": 7.7,
+   "h": 12.8
+  },
+  {
+   "tag": "span",
+   "id": "country-code",
+   "cls": "style-scope",
+   "x": 169,
+   "y": 12,
+   "w": 11.7,
+   "h": 44
+  },
+  {
+   "tag": "div",
+   "id": "skip-navigation",
+   "cls": "style-scope",
+   "x": 16,
+   "y": -1000,
+   "w": 219.3,
+   "h": 40
+  },
+  {
+   "tag": "ytd-button-renderer",
+   "id": "",
+   "cls": "style-scope",
+   "x": 16,
+   "y": -1000,
+   "w": 219.3,
+   "h": 40
+  },
+  {
+   "tag": "yt-button-shape",
+   "id": "",
+   "cls": "",
+   "x": 16,
+   "y": -1000,
+   "w": 219.3,
+   "h": 40
+  },
+  {
+   "tag": "button",
+   "id": "",
+   "cls": "ytSpecButtonShapeNextHost",
+   "x": 16,
+   "y": -1000,
+   "w": 219.3,
+   "h": 40
+  },
+  {
+   "tag": "div",
+   "id": "",
+   "cls": "ytSpecButtonShapeNextButtonTextContent",
+   "x": 32,
+   "y": -1000,
+   "w": 187.3,
+   "h": 40
+  },
+  {
+   "tag": "span",
+   "id": "",
+   "cls": "ytAttributedStringHost",
+   "x": 32,
+   "y": -989,
+   "w": 187.3,
+   "h": 17
+  },
+  {
+   "tag": "yt-touch-feedback-shape",
+   "id": "",
+   "cls": "ytSpecTouchFeedbackShapeHost",
+   "x": 16,
+   "y": -1000,
+   "w": 219.3,
+   "h": 40
+  },
+  {
+   "tag": "div",
+   "id": "",
+   "cls": "ytSpecTouchFeedbackShapeStroke",
+   "x": 16,
+   "y": -1000,
+   "w": 219.3,
+   "h": 40
+  },
+  {
+   "tag": "div",
+   "id": "",
+   "cls": "ytSpecTouchFeedbackShapeFill",
+   "x": 16,
+   "y": -1000,
+   "w": 219.3,
+   "h": 40
+  },
+  {
+   "tag": "yt-light-shape",
+   "id": "",
+   "cls": "contribYtLightShapeHost",
+   "x": 16,
+   "y": -1000,
+   "w": 219.3,
+   "h": 40
+  },
+  {
+   "tag": "div",
+   "id": "",
+   "cls": "contribYtLightShapeStaticWashLight",
+   "x": 16,
+   "y": -1020,
+   "w": 219.3,
+   "h": 40
+  },
+  {
+   "tag": "div",
+   "id": "center",
+   "cls": "style-scope",
+   "x": 289,
+   "y": 8,
+   "w": 732,
+   "h": 40
+  },
+  {
+   "tag": "yt-searchbox",
+   "id": "",
+   "cls": "ytSearchboxComponentHost",
+   "x": 329,
+   "y": 8,
+   "w": 640,
+   "h": 40
+  },
+  {
+   "tag": "div",
+   "id": "",
+   "cls": "ytSearchboxComponentInputWrapper",
+   "x": 333,
+   "y": 8,
+   "w": 632,
+   "h": 40
+  },
+  {
+   "tag": "div",
+   "id": "",
+   "cls": "ytSearchboxComponentInputContainer",
+   "x": 333,
+   "y": 8,
+   "w": 632,
+   "h": 40
+  },
+  {
+   "tag": "div",
+   "id": "",
+   "cls": "ytSearchboxComponentInputBox",
+   "x": 365,
+   "y": 8,
+   "w": 536,
+   "h": 40
+  },
+  {
+   "tag": "form",
+   "id": "",
+   "cls": "ytSearchboxComponentSearchForm",
+   "x": 382,
+   "y": 16,
+   "w": 515,
+   "h": 24
+  },
+  {
+   "tag": "input",
+   "id": "",
+   "cls": "ytSearchboxComponentInput",
+   "x": 382,
+   "y": 16,
+   "w": 515,
+   "h": 24
+  },
+  {
+   "tag": "button",
+   "id": "",
+   "cls": "ytSearchboxComponentSearchButton",
+   "x": 901,
+   "y": 8,
+   "w": 64,
+   "h": 40
+  },
+  {
+   "tag": "span",
+   "id": "",
+   "cls": "ytIconWrapperHost",
+   "x": 921,
+   "y": 16,
+   "w": 24,
+   "h": 24
+  },
+  {
+   "tag": "span",
+   "id": "",
+   "cls": "yt-icon-shape",
+   "x": 921,
+   "y": 16,
+   "w": 24,
+   "h": 24
+  },
+  {
+   "tag": "div",
+   "id": "",
+   "cls": "",
+   "x": 921,
+   "y": 16,
+   "w": 24,
+   "h": 24
+  },
+  {
+   "tag": "svg",
+   "id": "",
+   "cls": "",
+   "x": 921,
+   "y": 16,
+   "w": 24,
+   "h": 24
+  },
+  {
+   "tag": "path",
+   "id": "",
+   "cls": "",
+   "x": 923,
+   "y": 18,
+   "w": 20,
+   "h": 20
+  },
+  {
+   "tag": "div",
+   "id": "voice-search-button",
+   "cls": "style-scope",
+   "x": 981,
+   "y": 8,
+   "w": 40,
+   "h": 40
+  },
+  {
+   "tag": "ytd-button-renderer",
+   "id": "",
+   "cls": "style-scope",
+   "x": 981,
+   "y": 8,
+   "w": 40,
+   "h": 40
+  },
+  {
+   "tag": "yt-button-shape",
+   "id": "",
+   "cls": "",
+   "x": 981,
+   "y": 8,
+   "w": 40,
+   "h": 40
+  },
+  {
+   "tag": "button",
+   "id": "",
+   "cls": "ytSpecButtonShapeNextHost",
+   "x": 981,
+   "y": 8,
+   "w": 40,
+   "h": 40
+  },
+  {
+   "tag": "div",
+   "id": "",
+   "cls": "ytSpecButtonShapeNextIcon",
+   "x": 989,
+   "y": 16,
+   "w": 24,
+   "h": 24
+  },
+  {
+   "tag": "span",
+   "id": "",
+   "cls": "ytIconWrapperHost",
+   "x": 989,
+   "y": 16,
+   "w": 24,
+   "h": 24
+  },
+  {
+   "tag": "span",
+   "id": "",
+   "cls": "yt-icon-shape",
+   "x": 989,
+   "y": 16,
+   "w": 24,
+   "h": 24
+  },
+  {
+   "tag": "div",
+   "id": "",
+   "cls": "",
+   "x": 989,
+   "y": 16,
+   "w": 24,
+   "h": 24
+  },
+  {
+   "tag": "svg",
+   "id": "",
+   "cls": "",
+   "x": 989,
+   "y": 16,
+   "w": 24,
+   "h": 24
+  },
+  {
+   "tag": "path",
+   "id": "",
+   "cls": "",
+   "x": 993.1,
+   "y": 17,
+   "w": 15.9,
+   "h": 22
+  },
+  {
+   "tag": "yt-touch-feedback-shape",
+   "id": "",
+   "cls": "ytSpecTouchFeedbackShapeHost",
+   "x": 981,
+   "y": 8,
+   "w": 40,
+   "h": 40
+  },
+  {
+   "tag": "div",
+   "id": "",
+   "cls": "ytSpecTouchFeedbackShapeStroke",
+   "x": 981,
+   "y": 8,
+   "w": 40,
+   "h": 40
+  },
+  {
+   "tag": "div",
+   "id": "",
+   "cls": "ytSpecTouchFeedbackShapeFill",
+   "x": 981,
+   "y": 8,
+   "w": 40,
+   "h": 40
+  },
+  {
+   "tag": "div",
+   "id": "end",
+   "cls": "style-scope",
+   "x": 1125,
+   "y": 8,
+   "w": 225,
+   "h": 40
+  },
+  {
+   "tag": "div",
+   "id": "buttons",
+   "cls": "style-scope",
+   "x": 1157.8,
+   "y": 8,
+   "w": 192.2,
+   "h": 40
+  },
+  {
+   "tag": "ytd-topbar-menu-button-renderer",
+   "id": "",
+   "cls": "style-scope",
+   "x": 1157.8,
+   "y": 8,
+   "w": 40,
+   "h": 40
+  },
+  {
+   "tag": "div",
+   "id": "button",
+   "cls": "style-scope",
+   "x": 1157.8,
+   "y": 8,
+   "w": 40,
+   "h": 40
+  },
+  {
+   "tag": "a",
+   "id": "",
+   "cls": "yt-simple-endpoint",
+   "x": 1157.8,
+   "y": 8,
+   "w": 40,
+   "h": 40
+  },
+  {
+   "tag": "yt-icon-button",
+   "id": "button",
+   "cls": "style-scope",
+   "x": 1157.8,
+   "y": 8,
+   "w": 40,
+   "h": 40
+  },
+  {
+   "tag": "button",
+   "id": "button",
+   "cls": "style-scope",
+   "x": 1165.8,
+   "y": 16,
+   "w": 24,
+   "h": 24
+  },
+  {
+   "tag": "yt-icon",
+   "id": "",
+   "cls": "style-scope",
+   "x": 1165.8,
+   "y": 16,
+   "w": 24,
+   "h": 24
+  },
+  {
+   "tag": "span",
+   "id": "",
+   "cls": "yt-icon-shape",
+   "x": 1165.8,
+   "y": 16,
+   "w": 24,
+   "h": 24
+  },
+  {
+   "tag": "div",
+   "id": "",
+   "cls": "",
+   "x": 1165.8,
+   "y": 16,
+   "w": 24,
+   "h": 24
+  },
+  {
+   "tag": "svg",
+   "id": "",
+   "cls": "",
+   "x": 1165.8,
+   "y": 16,
+   "w": 24,
+   "h": 24
+  },
+  {
+   "tag": "path",
+   "id": "",
+   "cls": "",
+   "x": 1175.8,
+   "y": 20,
+   "w": 4,
+   "h": 16
+  },
+  {
+   "tag": "yt-interaction",
+   "id": "interaction",
+   "cls": "circular",
+   "x": 1157.8,
+   "y": 8,
+   "w": 40,
+   "h": 40
+  },
+  {
+   "tag": "div",
+   "id": "",
+   "cls": "stroke",
+   "x": 1157.8,
+   "y": 8,
+   "w": 40,
+   "h": 40
+  },
+  {
+   "tag": "div",
+   "id": "",
+   "cls": "fill",
+   "x": 1157.8,
+   "y": 8,
+   "w": 40,
+   "h": 40
+  },
+  {
+   "tag": "ytd-button-renderer",
+   "id": "",
+   "cls": "style-scope",
+   "x": 1205.8,
+   "y": 8,
+   "w": 144.2,
+   "h": 40
+  },
+  {
+   "tag": "yt-button-shape",
+   "id": "",
+   "cls": "",
+   "x": 1205.8,
+   "y": 8,
+   "w": 144.2,
+   "h": 40
+  },
+  {
+   "tag": "a",
+   "id": "",
+   "cls": "ytSpecButtonShapeNextHost",
+   "x": 1205.8,
+   "y": 8,
+   "w": 144.2,
+   "h": 40
+  },
+  {
+   "tag": "div",
+   "id": "",
+   "cls": "ytSpecButtonShapeNextIcon",
+   "x": 1221.8,
+   "y": 16,
+   "w": 24,
+   "h": 24
+  },
+  {
+   "tag": "span",
+   "id": "",
+   "cls": "ytIconWrapperHost",
+   "x": 1221.8,
+   "y": 16,
+   "w": 24,
+   "h": 24
+  },
+  {
+   "tag": "span",
+   "id": "",
+   "cls": "yt-icon-shape",
+   "x": 1221.8,
+   "y": 16,
+   "w": 24,
+   "h": 24
+  },
+  {
+   "tag": "div",
+   "id": "",
+   "cls": "",
+   "x": 1221.8,
+   "y": 16,
+   "w": 24,
+   "h": 24
+  },
+  {
+   "tag": "svg",
+   "id": "",
+   "cls": "",
+   "x": 1221.8,
+   "y": 16,
+   "w": 24,
+   "h": 24
+  },
+  {
+   "tag": "path",
+   "id": "",
+   "cls": "",
+   "x": 1222.8,
+   "y": 17,
+   "w": 22,
+   "h": 22
+  },
+  {
+   "tag": "div",
+   "id": "",
+   "cls": "ytSpecButtonShapeNextButtonTextContent",
+   "x": 1251.8,
+   "y": 8,
+   "w": 82.2,
+   "h": 40
+  },
+  {
+   "tag": "span",
+   "id": "",
+   "cls": "ytAttributedStringHost",
+   "x": 1251.8,
+   "y": 19,
+   "w": 82.2,
+   "h": 17
+  },
+  {
+   "tag": "yt-touch-feedback-shape",
+   "id": "",
+   "cls": "ytSpecTouchFeedbackShapeHost",
+   "x": 1206.8,
+   "y": 9,
+   "w": 142.2,
+   "h": 38
+  },
+  {
+   "tag": "div",
+   "id": "",
+   "cls": "ytSpecTouchFeedbackShapeStroke",
+   "x": 1206.8,
+   "y": 9,
+   "w": 142.2,
+   "h": 38
+  },
+  {
+   "tag": "div",
+   "id": "",
+   "cls": "ytSpecTouchFeedbackShapeFill",
+   "x": 1206.8,
+   "y": 9,
+   "w": 142.2,
+   "h": 38
+  },
+  {
+   "tag": "tp-yt-app-drawer",
+   "id": "guide",
+   "cls": "style-scope",
+   "x": 0,
+   "y": 56,
+   "w": 240,
+   "h": 964
+  },
+  {
+   "tag": "div",
+   "id": "scrim",
+   "cls": "style-scope",
+   "x": 0,
+   "y": 56,
+   "w": 240,
+   "h": 964
+  },
+  {
+   "tag": "div",
+   "id": "contentContainer",
+   "cls": "style-scope",
+   "x": 0,
+   "y": 56,
+   "w": 240,
+   "h": 964
+  },
+  {
+   "tag": "div",
+   "id": "guide-wrapper",
+   "cls": "style-scope",
+   "x": 0,
+   "y": 56,
+   "w": 240,
+   "h": 844
+  },
+  {
+   "tag": "div",
+   "id": "guide-spacer",
+   "cls": "style-scope",
+   "x": 0,
+   "y": 56,
+   "w": 240,
+   "h": 0
+  },
+  {
+   "tag": "div",
+   "id": "guide-content",
+   "cls": "style-scope",
+   "x": 0,
+   "y": 56,
+   "w": 240,
+   "h": 844
+  },
+  {
+   "tag": "div",
+   "id": "guide-inner-content",
+   "cls": "style-scope",
+   "x": 0,
+   "y": 56,
+   "w": 240,
+   "h": 844
+  },
+  {
+   "tag": "ytd-guide-renderer",
+   "id": "guide-renderer",
+   "cls": "style-scope",
+   "x": 0,
+   "y": 56,
+   "w": 240,
+   "h": 1187
+  },
+  {
+   "tag": "div",
+   "id": "sections",
+   "cls": "style-scope",
+   "x": 0,
+   "y": 56,
+   "w": 240,
+   "h": 888
+  },
+  {
+   "tag": "ytd-guide-section-renderer",
+   "id": "",
+   "cls": "style-scope",
+   "x": 0,
+   "y": 56,
+   "w": 240,
+   "h": 225
+  },
+  {
+   "tag": "div",
+   "id": "items",
+   "cls": "style-scope",
+   "x": 12,
+   "y": 68,
+   "w": 216,
+   "h": 200
+  },
+  {
+   "tag": "ytd-guide-entry-renderer",
+   "id": "",
+   "cls": "style-scope",
+   "x": 12,
+   "y": 68,
+   "w": 204,
+   "h": 40
+  },
+  {
+   "tag": "a",
+   "id": "endpoint",
+   "cls": "yt-simple-endpoint",
+   "x": 12,
+   "y": 68,
+   "w": 204,
+   "h": 40
+  },
+  {
+   "tag": "tp-yt-paper-item",
+   "id": "",
+   "cls": "style-scope",
+   "x": 12,
+   "y": 68,
+   "w": 204,
+   "h": 40
+  },
+  {
+   "tag": "yt-icon",
+   "id": "",
+   "cls": "guide-icon",
+   "x": 24,
+   "y": 76,
+   "w": 24,
+   "h": 24
+  },
+  {
+   "tag": "span",
+   "id": "",
+   "cls": "yt-icon-shape",
+   "x": 24,
+   "y": 76,
+   "w": 24,
+   "h": 24
+  },
+  {
+   "tag": "div",
+   "id": "",
+   "cls": "",
+   "x": 24,
+   "y": 76,
+   "w": 24,
+   "h": 24
+  },
+  {
+   "tag": "svg",
+   "id": "",
+   "cls": "",
+   "x": 24,
+   "y": 76,
+   "w": 24,
+   "h": 24
+  },
+  {
+   "tag": "path",
+   "id": "",
+   "cls": "",
+   "x": 25,
+   "y": 78,
+   "w": 22,
+   "h": 20
+  },
+  {
+   "tag": "yt-formatted-string",
+   "id": "",
+   "cls": "title",
+   "x": 72,
+   "y": 78,
+   "w": 132,
+   "h": 20
+  },
+  {
+   "tag": "yt-interaction",
+   "id": "",
+   "cls": "style-scope",
+   "x": 12,
+   "y": 68,
+   "w": 204,
+   "h": 40
+  },
+  {
+   "tag": "div",
+   "id": "",
+   "cls": "stroke",
+   "x": 12,
+   "y": 68,
+   "w": 204,
+   "h": 40
+  },
+  {
+   "tag": "div",
+   "id": "",
+   "cls": "fill",
+   "x": 12,
+   "y": 68,
+   "w": 204,
+   "h": 40
+  },
+  {
+   "tag": "ytd-guide-entry-renderer",
+   "id": "",
+   "cls": "style-scope",
+   "x": 12,
+   "y": 108,
+   "w": 204,
+   "h": 40
+  },
+  {
+   "tag": "a",
+   "id": "endpoint",
+   "cls": "yt-simple-endpoint",
+   "x": 12,
+   "y": 108,
+   "w": 204,
+   "h": 40
+  },
+  {
+   "tag": "tp-yt-paper-item",
+   "id": "",
+   "cls": "style-scope",
+   "x": 12,
+   "y": 108,
+   "w": 204,
+   "h": 40
+  },
+  {
+   "tag": "yt-icon",
+   "id": "",
+   "cls": "guide-icon",
+   "x": 24,
+   "y": 116,
+   "w": 24,
+   "h": 24
+  },
+  {
+   "tag": "span",
+   "id": "",
+   "cls": "yt-icon-shape",
+   "x": 24,
+   "y": 116,
+   "w": 24,
+   "h": 24
+  },
+  {
+   "tag": "div",
+   "id": "",
+   "cls": "",
+   "x": 24,
+   "y": 116,
+   "w": 24,
+   "h": 24
+  },
+  {
+   "tag": "svg",
+   "id": "",
+   "cls": "",
+   "x": 24,
+   "y": 116,
+   "w": 24,
+   "h": 24
+  },
+  {
+   "tag": "path",
+   "id": "",
+   "cls": "",
+   "x": 27,
+   "y": 116.5,
+   "w": 18,
+   "h": 23
+  },
+  {
+   "tag": "yt-formatted-string",
+   "id": "",
+   "cls": "title",
+   "x": 72,
+   "y": 118,
+   "w": 132,
+   "h": 20
+  },
+  {
+   "tag": "yt-interaction",
+   "id": "",
+   "cls": "style-scope",
+   "x": 12,
+   "y": 108,
+   "w": 204,
+   "h": 40
+  },
+  {
+   "tag": "div",
+   "id": "",
+   "cls": "stroke",
+   "x": 12,
+   "y": 108,
+   "w": 204,
+   "h": 40
+  },
+  {
+   "tag": "div",
+   "id": "",
+   "cls": "fill",
+   "x": 12,
+   "y": 108,
+   "w": 204,
+   "h": 40
+  },
+  {
+   "tag": "ytd-guide-entry-renderer",
+   "id": "",
+   "cls": "style-scope",
+   "x": 12,
+   "y": 148,
+   "w": 204,
+   "h": 40
+  },
+  {
+   "tag": "a",
+   "id": "endpoint",
+   "cls": "yt-simple-endpoint",
+   "x": 12,
+   "y": 148,
+   "w": 204,
+   "h": 40
+  },
+  {
+   "tag": "tp-yt-paper-item",
+   "id": "",
+   "cls": "style-scope",
+   "x": 12,
+   "y": 148,
+   "w": 204,
+   "h": 40
+  },
+  {
+   "tag": "yt-icon",
+   "id": "",
+   "cls": "guide-icon",
+   "x": 24,
+   "y": 156,
+   "w": 24,
+   "h": 24
+  },
+  {
+   "tag": "span",
+   "id": "",
+   "cls": "yt-icon-shape",
+   "x": 24,
+   "y": 156,
+   "w": 24,
+   "h": 24
+  },
+  {
+   "tag": "div",
+   "id": "",
+   "cls": "",
+   "x": 24,
+   "y": 156,
+   "w": 24,
+   "h": 24
+  },
+  {
+   "tag": "svg",
+   "id": "",
+   "cls": "",
+   "x": 24,
+   "y": 156,
+   "w": 24,
+   "h": 24
+  },
+  {
+   "tag": "path",
+   "id": "",
+   "cls": "",
+   "x": 25,
+   "y": 157,
+   "w": 22,
+   "h": 21
+  },
+  {
+   "tag": "yt-formatted-string",
+   "id": "",
+   "cls": "title",
+   "x": 72,
+   "y": 158,
+   "w": 132,
+   "h": 20
+  },
+  {
+   "tag": "yt-interaction",
+   "id": "",
+   "cls": "style-scope",
+   "x": 12,
+   "y": 148,
+   "w": 204,
+   "h": 40
+  },
+  {
+   "tag": "div",
+   "id": "",
+   "cls": "stroke",
+   "x": 12,
+   "y": 148,
+   "w": 204,
+   "h": 40
+  },
+  {
+   "tag": "div",
+   "id": "",
+   "cls": "fill",
+   "x": 12,
+   "y": 148,
+   "w": 204,
+   "h": 40
+  },
+  {
+   "tag": "ytd-guide-entry-renderer",
+   "id": "",
+   "cls": "style-scope",
+   "x": 12,
+   "y": 188,
+   "w": 204,
+   "h": 40
+  },
+  {
+   "tag": "a",
+   "id": "endpoint",
+   "cls": "yt-simple-endpoint",
+   "x": 12,
+   "y": 188,
+   "w": 204,
+   "h": 40
+  },
+  {
+   "tag": "tp-yt-paper-item",
+   "id": "",
+   "cls": "style-scope",
+   "x": 12,
+   "y": 188,
+   "w": 204,
+   "h": 40
+  },
+  {
+   "tag": "yt-icon",
+   "id": "",
+   "cls": "guide-icon",
+   "x": 24,
+   "y": 196,
+   "w": 24,
+   "h": 24
+  },
+  {
+   "tag": "span",
+   "id": "",
+   "cls": "yt-icon-shape",
+   "x": 24,
+   "y": 196,
+   "w": 24,
+   "h": 24
+  },
+  {
+   "tag": "div",
+   "id": "",
+   "cls": "",
+   "x": 24,
+   "y": 196,
+   "w": 24,
+   "h": 24
+  },
+  {
+   "tag": "svg",
+   "id": "",
+   "cls": "",
+   "x": 24,
+   "y": 196,
+   "w": 24,
+   "h": 24
+  },
+  {
+   "tag": "path",
+   "id": "",
+   "cls": "",
+   "x": 25,
+   "y": 197,
+   "w": 22,
+   "h": 22
+  },
+  {
+   "tag": "yt-formatted-string",
+   "id": "",
+   "cls": "title",
+   "x": 72,
+   "y": 198,
+   "w": 132,
+   "h": 20
+  },
+  {
+   "tag": "yt-interaction",
+   "id": "",
+   "cls": "style-scope",
+   "x": 12,
+   "y": 188,
+   "w": 204,
+   "h": 40
+  },
+  {
+   "tag": "div",
+   "id": "",
+   "cls": "stroke",
+   "x": 12,
+   "y": 188,
+   "w": 204,
+   "h": 40
+  },
+  {
+   "tag": "div",
+   "id": "",
+   "cls": "fill",
+   "x": 12,
+   "y": 188,
+   "w": 204,
+   "h": 40
+  },
+  {
+   "tag": "ytd-guide-entry-renderer",
+   "id": "",
+   "cls": "style-scope",
+   "x": 12,
+   "y": 228,
+   "w": 204,
+   "h": 40
+  },
+  {
+   "tag": "a",
+   "id": "endpoint",
+   "cls": "yt-simple-endpoint",
+   "x": 12,
+   "y": 228,
+   "w": 204,
+   "h": 40
+  },
+  {
+   "tag": "tp-yt-paper-item",
+   "id": "",
+   "cls": "style-scope",
+   "x": 12,
+   "y": 228,
+   "w": 204,
+   "h": 40
+  },
+  {
+   "tag": "yt-icon",
+   "id": "",
+   "cls": "guide-icon",
+   "x": 24,
+   "y": 236,
+   "w": 24,
+   "h": 24
+  },
+  {
+   "tag": "span",
+   "id": "",
+   "cls": "yt-icon-shape",
+   "x": 24,
+   "y": 236,
+   "w": 24,
+   "h": 24
+  },
+  {
+   "tag": "div",
+   "id": "",
+   "cls": "",
+   "x": 24,
+   "y": 236,
+   "w": 24,
+   "h": 24
+  },
+  {
+   "tag": "svg",
+   "id": "",
+   "cls": "",
+   "x": 24,
+   "y": 236,
+   "w": 24,
+   "h": 24
+  },
+  {
+   "tag": "path",
+   "id": "",
+   "cls": "",
+   "x": 25,
+   "y": 237,
+   "w": 22,
+   "h": 22
+  },
+  {
+   "tag": "yt-formatted-string",
+   "id": "",
+   "cls": "title",
+   "x": 72,
+   "y": 238,
+   "w": 132,
+   "h": 20
+  },
+  {
+   "tag": "yt-interaction",
+   "id": "",
+   "cls": "style-scope",
+   "x": 12,
+   "y": 228,
+   "w": 204,
+   "h": 40
+  },
+  {
+   "tag": "div",
+   "id": "",
+   "cls": "stroke",
+   "x": 12,
+   "y": 228,
+   "w": 204,
+   "h": 40
+  },
+  {
+   "tag": "div",
+   "id": "",
+   "cls": "fill",
+   "x": 12,
+   "y": 228,
+   "w": 204,
+   "h": 40
+  },
+  {
+   "tag": "ytd-guide-signin-promo-renderer",
+   "id": "",
+   "cls": "style-scope",
+   "x": 0,
+   "y": 281,
+   "w": 240,
+   "h": 165
+  },
+  {
+   "tag": "yt-formatted-string",
+   "id": "",
+   "cls": "style-scope",
+   "x": 32,
+   "y": 297,
+   "w": 176,
+   "h": 80
+  },
+  {
+   "tag": "ytd-button-renderer",
+   "id": "sign-in-button",
+   "cls": "style-scope",
+   "x": 32,
+   "y": 389,
+   "w": 144.2,
+   "h": 40
+  },
+  {
+   "tag": "yt-button-shape",
+   "id": "",
+   "cls": "",
+   "x": 32,
+   "y": 389,
+   "w": 144.2,
+   "h": 40
+  },
+  {
+   "tag": "a",
+   "id": "",
+   "cls": "ytSpecButtonShapeNextHost",
+   "x": 32,
+   "y": 389,
+   "w": 144.2,
+   "h": 40
+  },
+  {
+   "tag": "div",
+   "id": "",
+   "cls": "ytSpecButtonShapeNextIcon",
+   "x": 48,
+   "y": 397,
+   "w": 24,
+   "h": 24
+  },
+  {
+   "tag": "span",
+   "id": "",
+   "cls": "ytIconWrapperHost",
+   "x": 48,
+   "y": 397,
+   "w": 24,
+   "h": 24
+  },
+  {
+   "tag": "span",
+   "id": "",
+   "cls": "yt-icon-shape",
+   "x": 48,
+   "y": 397,
+   "w": 24,
+   "h": 24
+  },
+  {
+   "tag": "div",
+   "id": "",
+   "cls": "",
+   "x": 48,
+   "y": 397,
+   "w": 24,
+   "h": 24
+  },
+  {
+   "tag": "svg",
+   "id": "",
+   "cls": "",
+   "x": 48,
+   "y": 397,
+   "w": 24,
+   "h": 24
+  },
+  {
+   "tag": "path",
+   "id": "",
+   "cls": "",
+   "x": 49,
+   "y": 398,
+   "w": 22,
+   "h": 22
+  },
+  {
+   "tag": "div",
+   "id": "",
+   "cls": "ytSpecButtonShapeNextButtonTextContent",
+   "x": 78,
+   "y": 389,
+   "w": 82.2,
+   "h": 40
+  },
+  {
+   "tag": "span",
+   "id": "",
+   "cls": "ytAttributedStringHost",
+   "x": 78,
+   "y": 400,
+   "w": 82.2,
+   "h": 17
+  },
+  {
+   "tag": "yt-touch-feedback-shape",
+   "id": "",
+   "cls": "ytSpecTouchFeedbackShapeHost",
+   "x": 33,
+   "y": 390,
+   "w": 142.2,
+   "h": 38
+  },
+  {
+   "tag": "div",
+   "id": "",
+   "cls": "ytSpecTouchFeedbackShapeStroke",
+   "x": 33,
+   "y": 390,
+   "w": 142.2,
+   "h": 38
+  },
+  {
+   "tag": "div",
+   "id": "",
+   "cls": "ytSpecTouchFeedbackShapeFill",
+   "x": 33,
+   "y": 390,
+   "w": 142.2,
+   "h": 38
+  },
+  {
+   "tag": "ytd-guide-section-renderer",
+   "id": "",
+   "cls": "style-scope",
+   "x": 0,
+   "y": 446,
+   "w": 240,
+   "h": 217
+  },
+  {
+   "tag": "h3",
+   "id": "",
+   "cls": "style-scope",
+   "x": 12,
+   "y": 458,
+   "w": 216,
+   "h": 32
+  },
+  {
+   "tag": "yt-formatted-string",
+   "id": "guide-section-title",
+   "cls": "style-scope",
+   "x": 12,
+   "y": 458,
+   "w": 216,
+   "h": 32
+  },
+  {
+   "tag": "div",
+   "id": "items",
+   "cls": "style-scope",
+   "x": 12,
+   "y": 490,
+   "w": 216,
+   "h": 160
+  },
+  {
+   "tag": "ytd-guide-entry-renderer",
+   "id": "",
+   "cls": "style-scope",
+   "x": 12,
+   "y": 490,
+   "w": 204,
+   "h": 40
+  },
+  {
+   "tag": "a",
+   "id": "endpoint",
+   "cls": "yt-simple-endpoint",
+   "x": 12,
+   "y": 490,
+   "w": 204,
+   "h": 40
+  },
+  {
+   "tag": "tp-yt-paper-item",
+   "id": "",
+   "cls": "style-scope",
+   "x": 12,
+   "y": 490,
+   "w": 204,
+   "h": 40
+  },
+  {
+   "tag": "yt-icon",
+   "id": "",
+   "cls": "guide-icon",
+   "x": 24,
+   "y": 498,
+   "w": 24,
+   "h": 24
+  },
+  {
+   "tag": "span",
+   "id": "",
+   "cls": "yt-icon-shape",
+   "x": 24,
+   "y": 498,
+   "w": 24,
+   "h": 24
+  },
+  {
+   "tag": "div",
+   "id": "",
+   "cls": "",
+   "x": 24,
+   "y": 498,
+   "w": 24,
+   "h": 24
+  },
+  {
+   "tag": "svg",
+   "id": "",
+   "cls": "",
+   "x": 24,
+   "y": 498,
+   "w": 24,
+   "h": 24
+  },
+  {
+   "tag": "path",
+   "id": "",
+   "cls": "",
+   "x": 28,
+   "y": 499.8,
+   "w": 16,
+   "h": 20.2
+  },
+  {
+   "tag": "yt-formatted-string",
+   "id": "",
+   "cls": "title",
+   "x": 72,
+   "y": 500,
+   "w": 132,
+   "h": 20
+  },
+  {
+   "tag": "yt-interaction",
+   "id": "",
+   "cls": "style-scope",
+   "x": 12,
+   "y": 490,
+   "w": 204,
+   "h": 40
+  },
+  {
+   "tag": "div",
+   "id": "",
+   "cls": "stroke",
+   "x": 12,
+   "y": 490,
+   "w": 204,
+   "h": 40
+  },
+  {
+   "tag": "div",
+   "id": "",
+   "cls": "fill",
+   "x": 12,
+   "y": 490,
+   "w": 204,
+   "h": 40
+  },
+  {
+   "tag": "ytd-guide-entry-renderer",
+   "id": "",
+   "cls": "style-scope",
+   "x": 12,
+   "y": 530,
+   "w": 204,
+   "h": 40
+  },
+  {
+   "tag": "a",
+   "id": "endpoint",
+   "cls": "yt-simple-endpoint",
+   "x": 12,
+   "y": 530,
+   "w": 204,
+   "h": 40
+  },
+  {
+   "tag": "tp-yt-paper-item",
+   "id": "",
+   "cls": "style-scope",
+   "x": 12,
+   "y": 530,
+   "w": 204,
+   "h": 40
+  },
+  {
+   "tag": "yt-icon",
+   "id": "",
+   "cls": "guide-icon",
+   "x": 24,
+   "y": 538,
+   "w": 24,
+   "h": 24
+  },
+  {
+   "tag": "span",
+   "id": "",
+   "cls": "yt-icon-shape",
+   "x": 24,
+   "y": 538,
+   "w": 24,
+   "h": 24
+  },
+  {
+   "tag": "div",
+   "id": "",
+   "cls": "",
+   "x": 24,
+   "y": 538,
+   "w": 24,
+   "h": 24
+  },
+  {
+   "tag": "svg",
+   "id": "",
+   "cls": "",
+   "x": 24,
+   "y": 538,
+   "w": 24,
+   "h": 24
+  },
+  {
+   "tag": "path",
+   "id": "",
+   "cls": "",
+   "x": 25,
+   "y": 541,
+   "w": 22,
+   "h": 18
+  },
+  {
+   "tag": "yt-formatted-string",
+   "id": "",
+   "cls": "title",
+   "x": 72,
+   "y": 540,
+   "w": 132,
+   "h": 20
+  },
+  {
+   "tag": "yt-interaction",
+   "id": "",
+   "cls": "style-scope",
+   "x": 12,
+   "y": 530,
+   "w": 204,
+   "h": 40
+  },
+  {
+   "tag": "div",
+   "id": "",
+   "cls": "stroke",
+   "x": 12,
+   "y": 530,
+   "w": 204,
+   "h": 40
+  },
+  {
+   "tag": "div",
+   "id": "",
+   "cls": "fill",
+   "x": 12,
+   "y": 530,
+   "w": 204,
+   "h": 40
+  },
+  {
+   "tag": "ytd-guide-entry-renderer",
+   "id": "",
+   "cls": "style-scope",
+   "x": 12,
+   "y": 570,
+   "w": 204,
+   "h": 40
+  },
+  {
+   "tag": "a",
+   "id": "endpoint",
+   "cls": "yt-simple-endpoint",
+   "x": 12,
+   "y": 570,
+   "w": 204,
+   "h": 40
+  },
+  {
+   "tag": "tp-yt-paper-item",
+   "id": "",
+   "cls": "style-scope",
+   "x": 12,
+   "y": 570,
+   "w": 204,
+   "h": 40
+  },
+  {
+   "tag": "yt-icon",
+   "id": "",
+   "cls": "guide-icon",
+   "x": 24,
+   "y": 578,
+   "w": 24,
+   "h": 24
+  },
+  {
+   "tag": "span",
+   "id": "",
+   "cls": "yt-icon-shape",
+   "x": 24,
+   "y": 578,
+   "w": 24,
+   "h": 24
+  },
+  {
+   "tag": "div",
+   "id": "",
+   "cls": "",
+   "x": 24,
+   "y": 578,
+   "w": 24,
+   "h": 24
+  },
+  {
+   "tag": "svg",
+   "id": "",
+   "cls": "",
+   "x": 24,
+   "y": 578,
+   "w": 24,
+   "h": 24
+  },
+  {
+   "tag": "path",
+   "id": "",
+   "cls": "",
+   "x": 25,
+   "y": 581.9,
+   "w": 22,
+   "h": 16.2
+  },
+  {
+   "tag": "yt-formatted-string",
+   "id": "",
+   "cls": "title",
+   "x": 72,
+   "y": 580,
+   "w": 132,
+   "h": 20
+  },
+  {
+   "tag": "yt-interaction",
+   "id": "",
+   "cls": "style-scope",
+   "x": 12,
+   "y": 570,
+   "w": 204,
+   "h": 40
+  },
+  {
+   "tag": "div",
+   "id": "",
+   "cls": "stroke",
+   "x": 12,
+   "y": 570,
+   "w": 204,
+   "h": 40
+  },
+  {
+   "tag": "div",
+   "id": "",
+   "cls": "fill",
+   "x": 12,
+   "y": 570,
+   "w": 204,
+   "h": 40
+  },
+  {
+   "tag": "ytd-guide-collapsible-entry-renderer",
+   "id": "",
+   "cls": "style-scope",
+   "x": 12,
+   "y": 610,
+   "w": 216,
+   "h": 40
+  },
+  {
+   "tag": "ytd-guide-entry-renderer",
+   "id": "expander-item",
+   "cls": "style-scope",
+   "x": 12,
+   "y": 610,
+   "w": 204,
+   "h": 40
+  },
+  {
+   "tag": "a",
+   "id": "endpoint",
+   "cls": "yt-simple-endpoint",
+   "x": 12,
+   "y": 610,
+   "w": 204,
+   "h": 40
+  },
+  {
+   "tag": "tp-yt-paper-item",
+   "id": "",
+   "cls": "style-scope",
+   "x": 12,
+   "y": 610,
+   "w": 204,
+   "h": 40
+  },
+  {
+   "tag": "yt-icon",
+   "id": "",
+   "cls": "guide-icon",
+   "x": 24,
+   "y": 618,
+   "w": 24,
+   "h": 24
+  },
+  {
+   "tag": "span",
+   "id": "",
+   "cls": "yt-icon-shape",
+   "x": 24,
+   "y": 618,
+   "w": 24,
+   "h": 24
+  },
+  {
+   "tag": "div",
+   "id": "",
+   "cls": "",
+   "x": 24,
+   "y": 618,
+   "w": 24,
+   "h": 24
+  },
+  {
+   "tag": "svg",
+   "id": "",
+   "cls": "",
+   "x": 24,
+   "y": 618,
+   "w": 24,
+   "h": 24
+  },
+  {
+   "tag": "path",
+   "id": "",
+   "cls": "",
+   "x": 29,
+   "y": 626.5,
+   "w": 14,
+   "h": 8.4
+  },
+  {
+   "tag": "yt-formatted-string",
+   "id": "",
+   "cls": "title",
+   "x": 72,
+   "y": 620,
+   "w": 132,
+   "h": 20
+  },
+  {
+   "tag": "yt-interaction",
+   "id": "",
+   "cls": "style-scope",
+   "x": 12,
+   "y": 610,
+   "w": 204,
+   "h": 40
+  },
+  {
+   "tag": "div",
+   "id": "",
+   "cls": "stroke",
+   "x": 12,
+   "y": 610,
+   "w": 204,
+   "h": 40
+  },
+  {
+   "tag": "div",
+   "id": "",
+   "cls": "fill",
+   "x": 12,
+   "y": 610,
+   "w": 204,
+   "h": 40
+  },
+  {
+   "tag": "ytd-guide-section-renderer",
+   "id": "",
+   "cls": "style-scope",
+   "x": 0,
+   "y": 663,
+   "w": 240,
+   "h": 217
+  },
+  {
+   "tag": "h3",
+   "id": "",
+   "cls": "style-scope",
+   "x": 12,
+   "y": 675,
+   "w": 216,
+   "h": 32
+  },
+  {
+   "tag": "yt-formatted-string",
+   "id": "guide-section-title",
+   "cls": "style-scope",
+   "x": 12,
+   "y": 675,
+   "w": 216,
+   "h": 32
+  },
+  {
+   "tag": "div",
+   "id": "items",
+   "cls": "style-scope",
+   "x": 12,
+   "y": 707,
+   "w": 216,
+   "h": 160
+  },
+  {
+   "tag": "ytd-guide-entry-renderer",
+   "id": "",
+   "cls": "style-scope",
+   "x": 12,
+   "y": 707,
+   "w": 204,
+   "h": 40
+  },
+  {
+   "tag": "a",
+   "id": "endpoint",
+   "cls": "yt-simple-endpoint",
+   "x": 12,
+   "y": 707,
+   "w": 204,
+   "h": 40
+  },
+  {
+   "tag": "tp-yt-paper-item",
+   "id": "",
+   "cls": "style-scope",
+   "x": 12,
+   "y": 707,
+   "w": 204,
+   "h": 40
+  },
+  {
+   "tag": "yt-icon",
+   "id": "",
+   "cls": "guide-icon",
+   "x": 24,
+   "y": 715,
+   "w": 24,
+   "h": 24
+  },
+  {
+   "tag": "span",
+   "id": "",
+   "cls": "yt-icon-shape",
+   "x": 24,
+   "y": 715,
+   "w": 24,
+   "h": 24
+  },
+  {
+   "tag": "div",
+   "id": "",
+   "cls": "",
+   "x": 24,
+   "y": 715,
+   "w": 24,
+   "h": 24
+  },
+  {
+   "tag": "svg",
+   "id": "",
+   "cls": "",
+   "x": 24,
+   "y": 715,
+   "w": 24,
+   "h": 24
+  },
+  {
+   "tag": "g",
+   "id": "",
+   "cls": "",
+   "x": 26,
+   "y": 720,
+   "w": 20,
+   "h": 14
+  },
+  {
+   "tag": "path",
+   "id": "",
+   "cls": "",
+   "x": 26,
+   "y": 720,
+   "w": 20,
+   "h": 14
+  },
+  {
+   "tag": "polygon",
+   "id": "",
+   "cls": "",
+   "x": 34,
+   "y": 724,
+   "w": 5,
+   "h": 6
+  },
+  {
+   "tag": "yt-formatted-string",
+   "id": "",
+   "cls": "title",
+   "x": 72,
+   "y": 717,
+   "w": 132,
+   "h": 20
+  },
+  {
+   "tag": "yt-interaction",
+   "id": "",
+   "cls": "style-scope",
+   "x": 12,
+   "y": 707,
+   "w": 204,
+   "h": 40
+  },
+  {
+   "tag": "div",
+   "id": "",
+   "cls": "stroke",
+   "x": 12,
+   "y": 707,
+   "w": 204,
+   "h": 40
+  },
+  {
+   "tag": "div",
+   "id": "",
+   "cls": "fill",
+   "x": 12,
+   "y": 707,
+   "w": 204,
+   "h": 40
+  },
+  {
+   "tag": "ytd-guide-entry-renderer",
+   "id": "",
+   "cls": "style-scope",
+   "x": 12,
+   "y": 747,
+   "w": 204,
+   "h": 40
+  },
+  {
+   "tag": "a",
+   "id": "endpoint",
+   "cls": "yt-simple-endpoint",
+   "x": 12,
+   "y": 747,
+   "w": 204,
+   "h": 40
+  },
+  {
+   "tag": "tp-yt-paper-item",
+   "id": "",
+   "cls": "style-scope",
+   "x": 12,
+   "y": 747,
+   "w": 204,
+   "h": 40
+  },
+  {
+   "tag": "yt-icon",
+   "id": "",
+   "cls": "guide-icon",
+   "x": 24,
+   "y": 755,
+   "w": 24,
+   "h": 24
+  },
+  {
+   "tag": "span",
+   "id": "",
+   "cls": "yt-icon-shape",
+   "x": 24,
+   "y": 755,
+   "w": 24,
+   "h": 24
+  },
+  {
+   "tag": "div",
+   "id": "",
+   "cls": "",
+   "x": 24,
+   "y": 755,
+   "w": 24,
+   "h": 24
+  },
+  {
+   "tag": "svg",
+   "id": "",
+   "cls": "",
+   "x": 24,
+   "y": 755,
+   "w": 24,
+   "h": 24
+  },
+  {
+   "tag": "g",
+   "id": "",
+   "cls": "",
+   "x": 25,
+   "y": 756,
+   "w": 22,
+   "h": 22
+  },
+  {
+   "tag": "circle",
+   "id": "XMLID_4814__yt21",
+   "cls": "",
+   "x": 25,
+   "y": 756,
+   "w": 22,
+   "h": 22
+  },
+  {
+   "tag": "path",
+   "id": "",
+   "cls": "",
+   "x": 29.3,
+   "y": 760.3,
+   "w": 13.5,
+   "h": 13.5
+  },
+  {
+   "tag": "polygon",
+   "id": "",
+   "cls": "",
+   "x": 34,
+   "y": 764,
+   "w": 5,
+   "h": 6
+  },
+  {
+   "tag": "yt-formatted-string",
+   "id": "",
+   "cls": "title",
+   "x": 72,
+   "y": 757,
+   "w": 132,
+   "h": 20
+  },
+  {
+   "tag": "yt-interaction",
+   "id": "",
+   "cls": "style-scope",
+   "x": 12,
+   "y": 747,
+   "w": 204,
+   "h": 40
+  },
+  {
+   "tag": "div",
+   "id": "",
+   "cls": "stroke",
+   "x": 12,
+   "y": 747,
+   "w": 204,
+   "h": 40
+  },
+  {
+   "tag": "div",
+   "id": "",
+   "cls": "fill",
+   "x": 12,
+   "y": 747,
+   "w": 204,
+   "h": 40
+  },
+  {
+   "tag": "ytd-guide-entry-renderer",
+   "id": "",
+   "cls": "style-scope",
+   "x": 12,
+   "y": 787,
+   "w": 204,
+   "h": 40
+  },
+  {
+   "tag": "a",
+   "id": "endpoint",
+   "cls": "yt-simple-endpoint",
+   "x": 12,
+   "y": 787,
+   "w": 204,
+   "h": 40
+  },
+  {
+   "tag": "tp-yt-paper-item",
+   "id": "",
+   "cls": "style-scope",
+   "x": 12,
+   "y": 787,
+   "w": 204,
+   "h": 40
+  },
+  {
+   "tag": "yt-icon",
+   "id": "",
+   "cls": "guide-icon",
+   "x": 24,
+   "y": 795,
+   "w": 24,
+   "h": 24
+  },
+  {
+   "tag": "span",
+   "id": "",
+   "cls": "yt-icon-shape",
+   "x": 24,
+   "y": 795,
+   "w": 24,
+   "h": 24
+  },
+  {
+   "tag": "div",
+   "id": "",
+   "cls": "",
+   "x": 24,
+   "y": 795,
+   "w": 24,
+   "h": 24
+  },
+  {
+   "tag": "svg",
+   "id": "",
+   "cls": "",
+   "x": 24,
+   "y": 795,
+   "w": 24,
+   "h": 24
+  },
+  {
+   "tag": "g",
+   "id": "",
+   "cls": "",
+   "x": 25,
+   "y": 798.2,
+   "w": 22,
+   "h": 17.6
+  },
+  {
+   "tag": "g",
+   "id": "",
+   "cls": "",
+   "x": 25,
+   "y": 798.2,
+   "w": 22,
+   "h": 17.6
+  },
+  {
+   "tag": "path",
+   "id": "",
+   "cls": "",
+   "x": 25.3,
+   "y": 798.7,
+   "w": 21.3,
+   "h": 16.7
+  },
+  {
+   "tag": "path",
+   "id": "",
+   "cls": "",
+   "x": 25,
+   "y": 798.2,
+   "w": 22,
+   "h": 17.6
+  },
+  {
+   "tag": "g",
+   "id": "",
+   "cls": "",
+   "x": 33.1,
+   "y": 803.6,
+   "w": 7.2,
+   "h": 7
+  },
+  {
+   "tag": "path",
+   "id": "",
+   "cls": "",
+   "x": 33.5,
+   "y": 804,
+   "w": 6.1,
+   "h": 5.9
+  },
+  {
+   "tag": "path",
+   "id": "",
+   "cls": "",
+   "x": 33.1,
+   "y": 803.6,
+   "w": 7.2,
+   "h": 7
+  },
+  {
+   "tag": "yt-formatted-string",
+   "id": "",
+   "cls": "title",
+   "x": 72,
+   "y": 797,
+   "w": 132,
+   "h": 20
+  },
+  {
+   "tag": "yt-interaction",
+   "id": "",
+   "cls": "style-scope",
+   "x": 12,
+   "y": 787,
+   "w": 204,
+   "h": 40
+  },
+  {
+   "tag": "div",
+   "id": "",
+   "cls": "stroke",
+   "x": 12,
+   "y": 787,
+   "w": 204,
+   "h": 40
+  },
+  {
+   "tag": "div",
+   "id": "",
+   "cls": "fill",
+   "x": 12,
+   "y": 787,
+   "w": 204,
+   "h": 40
+  },
+  {
+   "tag": "ytd-guide-entry-renderer",
+   "id": "",
+   "cls": "style-scope",
+   "x": 12,
+   "y": 827,
+   "w": 204,
+   "h": 40
+  },
+  {
+   "tag": "a",
+   "id": "endpoint",
+   "cls": "yt-simple-endpoint",
+   "x": 12,
+   "y": 827,
+   "w": 204,
+   "h": 40
+  },
+  {
+   "tag": "tp-yt-paper-item",
+   "id": "",
+   "cls": "style-scope",
+   "x": 12,
+   "y": 827,
+   "w": 204,
+   "h": 40
+  },
+  {
+   "tag": "yt-icon",
+   "id": "",
+   "cls": "guide-icon",
+   "x": 24,
+   "y": 835,
+   "w": 24,
+   "h": 24
+  },
+  {
+   "tag": "span",
+   "id": "",
+   "cls": "yt-icon-shape",
+   "x": 24,
+   "y": 835,
+   "w": 24,
+   "h": 24
+  },
+  {
+   "tag": "div",
+   "id": "",
+   "cls": "",
+   "x": 24,
+   "y": 835,
+   "w": 24,
+   "h": 24
+  },
+  {
+   "tag": "svg",
+   "id": "",
+   "cls": "",
+   "x": 24,
+   "y": 835,
+   "w": 24,
+   "h": 24
+  },
+  {
+   "tag": "path",
+   "id": "",
+   "cls": "",
+   "x": 27.6,
+   "y": 829.7,
+   "w": 16.7,
+   "h": 26.3
+  },
+  {
+   "tag": "path",
+   "id": "",
+   "cls": "",
+   "x": 34.3,
+   "y": 847.9,
+   "w": 4.2,
+   "h": 4.5
+  },
+  {
+   "tag": "yt-formatted-string",
+   "id": "",
+   "cls": "title",
+   "x": 72,
+   "y": 837,
+   "w": 132,
+   "h": 20
+  },
+  {
+   "tag": "yt-interaction",
+   "id": "",
+   "cls": "style-scope",
+   "x": 12,
+   "y": 827,
+   "w": 204,
+   "h": 40
+  },
+  {
+   "tag": "div",
+   "id": "",
+   "cls": "stroke",
+   "x": 12,
+   "y": 827,
+   "w": 204,
+   "h": 40
+  },
+  {
+   "tag": "div",
+   "id": "",
+   "cls": "fill",
+   "x": 12,
+   "y": 827,
+   "w": 204,
+   "h": 40
+  },
+  {
+   "tag": "ytd-guide-section-renderer",
+   "id": "",
+   "cls": "style-scope",
+   "x": 0,
+   "y": 880,
+   "w": 240,
+   "h": 64
+  },
+  {
+   "tag": "div",
+   "id": "items",
+   "cls": "style-scope",
+   "x": 12,
+   "y": 892,
+   "w": 216,
+   "h": 40
+  },
+  {
+   "tag": "ytd-guide-entry-renderer",
+   "id": "",
+   "cls": "style-scope",
+   "x": 12,
+   "y": 892,
+   "w": 204,
+   "h": 40
+  },
+  {
+   "tag": "a",
+   "id": "endpoint",
+   "cls": "yt-simple-endpoint",
+   "x": 12,
+   "y": 892,
+   "w": 204,
+   "h": 40
+  },
+  {
+   "tag": "tp-yt-paper-item",
+   "id": "",
+   "cls": "style-scope",
+   "x": 12,
+   "y": 892,
+   "w": 204,
+   "h": 40
+  },
+  {
+   "tag": "yt-icon",
+   "id": "",
+   "cls": "guide-icon",
+   "x": 24,
+   "y": 900,
+   "w": 24,
+   "h": 24
+  },
+  {
+   "tag": "span",
+   "id": "",
+   "cls": "yt-icon-shape",
+   "x": 24,
+   "y": 900,
+   "w": 24,
+   "h": 24
+  },
+  {
+   "tag": "div",
+   "id": "",
+   "cls": "",
+   "x": 24,
+   "y": 900,
+   "w": 24,
+   "h": 24
+  },
+  {
+   "tag": "svg",
+   "id": "",
+   "cls": "",
+   "x": 24,
+   "y": 900,
+   "w": 24,
+   "h": 24
+  },
+  {
+   "tag": "path",
+   "id": "",
+   "cls": "",
+   "x": 27,
+   "y": 902.1,
+   "w": 18,
+   "h": 19.9
+  },
+  {
+   "tag": "yt-formatted-string",
+   "id": "",
+   "cls": "title",
+   "x": 72,
+   "y": 902,
+   "w": 132,
+   "h": 20
+  },
+  {
+   "tag": "yt-interaction",
+   "id": "",
+   "cls": "style-scope",
+   "x": 12,
+   "y": 892,
+   "w": 204,
+   "h": 40
+  },
+  {
+   "tag": "div",
+   "id": "",
+   "cls": "stroke",
+   "x": 12,
+   "y": 892,
+   "w": 204,
+   "h": 40
+  },
+  {
+   "tag": "div",
+   "id": "",
+   "cls": "fill",
+   "x": 12,
+   "y": 892,
+   "w": 204,
+   "h": 40
+  },
+  {
+   "tag": "div",
+   "id": "footer",
+   "cls": "style-scope",
+   "x": 0,
+   "y": 944,
+   "w": 240,
+   "h": 299
+  },
+  {
+   "tag": "div",
+   "id": "guide-links-primary",
+   "cls": "style-scope",
+   "x": 0,
+   "y": 944,
+   "w": 240,
+   "h": 117
+  },
+  {
+   "tag": "a",
+   "id": "",
+   "cls": "",
+   "x": 24,
+   "y": 961,
+   "w": 79.9,
+   "h": 20
+  },
+  {
+   "tag": "a",
+   "id": "",
+   "cls": "",
+   "x": 111.9,
+   "y": 961,
+   "w": 43.2,
+   "h": 20
+  },
+  {
+   "tag": "a",
+   "id": "",
+   "cls": "",
+   "x": 24,
+   "y": 981,
+   "w": 90.9,
+   "h": 20
+  },
+  {
+   "tag": "a",
+   "id": "",
+   "cls": "",
+   "x": 24,
+   "y": 1001,
+   "w": 96,
+   "h": 20
+  },
+  {
+   "tag": "a",
+   "id": "",
+   "cls": "",
+   "x": 128,
+   "y": 1001,
+   "w": 61.1,
+   "h": 20
+  },
+  {
+   "tag": "a",
+   "id": "",
+   "cls": "",
+   "x": 24,
+   "y": 1021,
+   "w": 54.8,
+   "h": 20
+  },
+  {
+   "tag": "a",
+   "id": "",
+   "cls": "",
+   "x": 86.8,
+   "y": 1021,
+   "w": 85.6,
+   "h": 20
+  },
+  {
+   "tag": "a",
+   "id": "",
+   "cls": "",
+   "x": 24,
+   "y": 1041,
+   "w": 161.4,
+   "h": 20
+  },
+  {
+   "tag": "div",
+   "id": "guide-links-secondary",
+   "cls": "style-scope",
+   "x": 0,
+   "y": 1061,
+   "w": 240,
+   "h": 132
+  },
+  {
+   "tag": "a",
+   "id": "",
+   "cls": "",
+   "x": 24,
+   "y": 1073,
+   "w": 143.1,
+   "h": 20
+  },
+  {
+   "tag": "a",
+   "id": "",
+   "cls": "",
+   "x": 24,
+   "y": 1093,
+   "w": 91.3,
+   "h": 20
+  },
+  {
+   "tag": "a",
+   "id": "",
+   "cls": "",
+   "x": 24,
+   "y": 1113,
+   "w": 112.1,
+   "h": 20
+  },
+  {
+   "tag": "a",
+   "id": "",
+   "cls": "",
+   "x": 24,
+   "y": 1133,
+   "w": 164.6,
+   "h": 20
+  },
+  {
+   "tag": "a",
+   "id": "",
+   "cls": "",
+   "x": 24,
+   "y": 1153,
+   "w": 192,
+   "h": 40
+  },
+  {
+   "tag": "div",
+   "id": "copyright",
+   "cls": "",
+   "x": 0,
+   "y": 1193,
+   "w": 240,
+   "h": 50
+  },
+  {
+   "tag": "div",
+   "id": "",
+   "cls": "",
+   "x": 24,
+   "y": 1211,
+   "w": 103.6,
+   "h": 14
+  },
+  {
+   "tag": "ytd-page-manager",
+   "id": "page-manager",
+   "cls": "style-scope",
+   "x": 240,
+   "y": 56,
+   "w": 1126,
+   "h": 176
+  },
+  {
+   "tag": "ytd-browse",
+   "id": "",
+   "cls": "style-scope",
+   "x": 240,
+   "y": 56,
+   "w": 1126,
+   "h": 176
+  },
+  {
+   "tag": "div",
+   "id": "alert-banner",
+   "cls": "style-scope",
+   "x": 240,
+   "y": 56,
+   "w": 1126,
+   "h": 0
+  },
+  {
+   "tag": "div",
+   "id": "personal-greeting",
+   "cls": "style-scope",
+   "x": 240,
+   "y": 56,
+   "w": 1126,
+   "h": 0
+  },
+  {
+   "tag": "div",
+   "id": "masthead-ad",
+   "cls": "style-scope",
+   "x": 240,
+   "y": 56,
+   "w": 1126,
+   "h": 0
+  },
+  {
+   "tag": "div",
+   "id": "header",
+   "cls": "style-scope",
+   "x": 240,
+   "y": 56,
+   "w": 1126,
+   "h": 0
+  },
+  {
+   "tag": "div",
+   "id": "alerts",
+   "cls": "style-scope",
+   "x": 240,
+   "y": 56,
+   "w": 1126,
+   "h": 0
+  },
+  {
+   "tag": "ytd-two-column-browse-results-renderer",
+   "id": "",
+   "cls": "style-scope",
+   "x": 240,
+   "y": 56,
+   "w": 1126,
+   "h": 160
+  },
+  {
+   "tag": "div",
+   "id": "primary",
+   "cls": "style-scope",
+   "x": 240,
+   "y": 56,
+   "w": 1126,
+   "h": 160
+  },
+  {
+   "tag": "ytd-rich-grid-renderer",
+   "id": "",
+   "cls": "style-scope",
+   "x": 240,
+   "y": 56,
+   "w": 1126,
+   "h": 160
+  },
+  {
+   "tag": "div",
+   "id": "big-yoodle",
+   "cls": "style-scope",
+   "x": 240,
+   "y": 56,
+   "w": 1126,
+   "h": 0
+  },
+  {
+   "tag": "div",
+   "id": "masthead-ad",
+   "cls": "style-scope",
+   "x": 240,
+   "y": 56,
+   "w": 1126,
+   "h": 0
+  },
+  {
+   "tag": "div",
+   "id": "contents",
+   "cls": "style-scope",
+   "x": 256,
+   "y": 56,
+   "w": 1094,
+   "h": 160
+  },
+  {
+   "tag": "ytd-rich-section-renderer",
+   "id": "",
+   "cls": "style-scope",
+   "x": 256,
+   "y": 80,
+   "w": 1094,
+   "h": 136
+  },
+  {
+   "tag": "div",
+   "id": "content",
+   "cls": "style-scope",
+   "x": 264,
+   "y": 80,
+   "w": 1078,
+   "h": 136
+  },
+  {
+   "tag": "ytd-feed-nudge-renderer",
+   "id": "",
+   "cls": "style-scope",
+   "x": 264,
+   "y": 80,
+   "w": 1078,
+   "h": 100
+  },
+  {
+   "tag": "div",
+   "id": "dismissible",
+   "cls": "style-scope",
+   "x": 453,
+   "y": 80,
+   "w": 700,
+   "h": 100
+  },
+  {
+   "tag": "div",
+   "id": "dismiss-button",
+   "cls": "style-scope",
+   "x": 453,
+   "y": 88,
+   "w": 700,
+   "h": 0
+  },
+  {
+   "tag": "div",
+   "id": "content-wrapper",
+   "cls": "style-scope",
+   "x": 453,
+   "y": 80,
+   "w": 700,
+   "h": 100
+  },
+  {
+   "tag": "div",
+   "id": "header-container",
+   "cls": "style-scope",
+   "x": 495,
+   "y": 88,
+   "w": 616,
+   "h": 0
+  },
+  {
+   "tag": "div",
+   "id": "text-container",
+   "cls": "style-scope",
+   "x": 501.6,
+   "y": 104,
+   "w": 602.8,
+   "h": 64
+  },
+  {
+   "tag": "h2",
+   "id": "title-container",
+   "cls": "style-scope",
+   "x": 590.1,
+   "y": 104,
+   "w": 425.9,
+   "h": 32
+  },
+  {
+   "tag": "yt-formatted-string",
+   "id": "title",
+   "cls": "style-scope",
+   "x": 590.1,
+   "y": 105,
+   "w": 425.9,
+   "h": 29
+  },
+  {
+   "tag": "div",
+   "id": "subtitle-container",
+   "cls": "style-scope",
+   "x": 501.6,
+   "y": 148,
+   "w": 602.8,
+   "h": 20
+  },
+  {
+   "tag": "yt-formatted-string",
+   "id": "subtitle",
+   "cls": "style-scope",
+   "x": 501.6,
+   "y": 149,
+   "w": 602.8,
+   "h": 17
+  },
+  {
+   "tag": "div",
+   "id": "secondary",
+   "cls": "style-scope",
+   "x": 1366,
+   "y": 56,
+   "w": 0,
+   "h": 160
+  },
+  {
+   "tag": "ytd-permission-role-bottom-bar-renderer",
+   "id": "",
+   "cls": "style-scope",
+   "x": 240,
+   "y": 900,
+   "w": 1126,
+   "h": 0
+  },
+  {
+   "tag": "ytd-popup-container",
+   "id": "",
+   "cls": "style-scope",
+   "x": 0,
+   "y": 0,
+   "w": 1366,
+   "h": 0
+  },
+  {
+   "tag": "div",
+   "id": "video-preview",
+   "cls": "style-scope",
+   "x": 0,
+   "y": 232,
+   "w": 1366,
+   "h": 0
+  },
+  {
+   "tag": "ytd-video-preview-loader",
+   "id": "",
+   "cls": "ytdVideoPreviewLoaderHost",
+   "x": 0,
+   "y": 232,
+   "w": 1366,
+   "h": 0
+  },
+  {
+   "tag": "yt-ephemeral-actions",
+   "id": "",
+   "cls": "ytEphemeralActionsHost",
+   "x": -9999,
+   "y": -9999,
+   "w": 0,
+   "h": 1
+  },
+  {
+   "tag": "yt-tooltip",
+   "id": "",
+   "cls": "ytTooltipContainerHost",
+   "x": 0,
+   "y": 232,
+   "w": 1366,
+   "h": 0
+  }
+ ]
+}

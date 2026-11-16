@@ -498,4 +498,53 @@ mod tests {
         assert_eq!(r2.body, r1.body, "seq suivants servis dans l'ordre");
         let _ = std::fs::remove_dir_all(&dir);
     }
+
+    /// Étape 313 (N4 « replays versionnés ») — la fixture
+    /// promue `fuzz/replays/youtube-vol813` (distillation du
+    /// vol 813 via `EXPLORER_NET_REPLAY`+`RECORD` sur un shot
+    /// borné) reste **rejouable** : chaque `.resp` décode et
+    /// le transport sert le document `YouTube`. Régénération :
+    /// voir `fuzz/replays/README.md`.
+    #[tokio::test]
+    async fn dir_transport_replays_youtube_flight() {
+        let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../fuzz/replays/youtube-vol813");
+        let entries: Vec<_> = std::fs::read_dir(&dir)
+            .expect(
+                "fixture youtube-vol813 absente — distiller le \
+                 vol 813 (fuzz/replays/README.md)",
+            )
+            .filter_map(std::result::Result::ok)
+            .filter(|e| e.path().extension().is_some_and(|x| x == "resp"))
+            .collect();
+        assert!(
+            entries.len() >= 20,
+            "fixture attendue ≥ 20 réponses distillées, \
+             mesuré {}",
+            entries.len()
+        );
+        let mut html_seen = false;
+        for e in &entries {
+            let bytes =
+                std::fs::read(e.path()).unwrap_or_else(|_| panic!("lecture {:?}", e.file_name()));
+            let r =
+                decode(&bytes).unwrap_or_else(|| panic!(".resp illisible : {:?}", e.file_name()));
+            if r.status == 200
+                && r.headers
+                    .iter()
+                    .any(|(n, v)| n == "content-type" && v.contains("html"))
+            {
+                html_seen = true;
+            }
+        }
+        assert!(html_seen, "aucun document HTML dans la fixture");
+
+        // Le rejeu sert le document YouTube enregistré.
+        let replay = DirTransport::new(&dir);
+        let r = replay
+            .fetch(&req("https://www.youtube.com/"))
+            .await
+            .expect("document YouTube absent de la fixture");
+        assert_eq!(r.status, 200);
+        assert!(r.body.len() > 1_000, "document servi tronqué");
+    }
 }
