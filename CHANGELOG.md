@@ -7,6 +7,8 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+- **Audit-boa — retouches post-mesure + bilan final** (`explorer-jscore`) : liens `Ctor.prototype` `{000}` + `constructor` own sur protos manuels (`Map`/`Set`/`Promise` — WeakMap/WeakSet conformes), `@@toPrimitive` Date/Symbol en `{001}`, `%TypedArray%.prototype[@@toStringTag]` en accesseur get/set spec (get → nom du kind de `this`, `undefined` sur non-vue — `Object.prototype.toString.call(u8)` → `[object Uint8Array]`), `atob`/`btoa`/`queueMicrotask`/`structuredClone` globals `enumerable:true`. **Re-mesure** : boa-only **591 → 176** (~164 host-installs + bruit ; **réels : 2, déviations boa** — `Error.prototype.stack`, `RegExp.prototype.lastIndex` ES5), flagdiff **~200 → 17** (tous spécifiquement corrects côté jscore : URL/USP enum WebIDL, console, tag TA getset). **Zéro divergence sémantique restante** sur chemins communs. Lib 54/54.
+
 - **Audit-boa A8 — divers ECMA + énumérabilité WebIDL des globals** (`explorer-jscore`) :
   - `String.prototype.length` `{000}` et `Array.prototype.length` `{w:true,e:false,c:false}` propres = 0 (protos exotiques spec) ; `Array.prototype[@@unscopables]` `{001}`.
   - `RegExp.prototype.compile` (Annex B.2.4) : réinitialise `this` (pattern+flags recompilés, `lastIndex`→0), `TypeError` sur non-RegExp.

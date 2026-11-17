@@ -2034,11 +2034,11 @@ pub(crate) fn install(e: &mut Engine) {
     e.add_method(rp, "catch", promise_catch);
     e.add_method(rp, "finally", promise_finally);
     let ctor = e.native_fn("Promise", promise_ctor);
-    e.set_own(
+    e.set_own_attrs(
         crate::promise::c_id(ctor.clone()),
         "prototype",
         Value::Obj(rp),
-        false,
+        crate::heap::PropAttrs::FIXED,
     );
     e.set_own(rp, "constructor", ctor.clone(), false);
     if let Value::Obj(cid) = ctor {
@@ -2065,7 +2065,9 @@ pub(crate) fn install(e: &mut Engine) {
         e.add_method(cid, "try", promise_try);
     }
     e.set_own(g, "Promise", ctor, false);
-    e.add_method(g, "queueMicrotask", queue_microtask);
+    // Global web (enumerable:true — audit boa A8).
+    let qmt = e.native_fn("queueMicrotask", queue_microtask);
+    e.set_own(g, "queueMicrotask", qmt, true);
 }
 
 fn c_id(v: Value) -> ObjId {

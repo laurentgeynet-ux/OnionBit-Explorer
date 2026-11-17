@@ -64,7 +64,9 @@ pub(crate) fn install(e: &mut Engine) {
         (e.protos.promise, "Promise"),
         (e.protos.map, "Map"),
         (e.protos.set, "Set"),
-        (e.protos.iterator, "Iterator"),
+        // `Iterator`/`TypedArray` protos absents : leurs
+        // `@@toStringTag` sont des **accesseurs** spec, posés
+        // dans leur install dédié.
         (e.protos.array_iter, "Array Iterator"),
         (e.protos.map_iter, "Map Iterator"),
         (e.protos.set_iter, "Set Iterator"),
@@ -74,7 +76,7 @@ pub(crate) fn install(e: &mut Engine) {
         (e.protos.iter_helper, "Iterator Helper"),
         (e.protos.array_buffer, "ArrayBuffer"),
         (e.protos.data_view, "DataView"),
-        (e.protos.typed_array, "TypedArray"),
+        // (voir commentaire ci-dessus — accesseur, pas data)
     ] {
         let t = e.str_val(tag);
         // `@@toStringTag` spec : `{w:false,e:false,c:true}`
@@ -108,8 +110,15 @@ pub(crate) fn install(e: &mut Engine) {
     e.add_method(g, "unescape", unescape);
     e.add_method(g, "encodeURIComponent", encode_uri_component);
     e.add_method(g, "decodeURIComponent", decode_uri_component);
-    e.add_method(g, "btoa", btoa);
-    e.add_method(g, "atob", atob);
+    // WebIDL/globals navigateur : `enumerable:true` (audit boa A8).
+    for (n, f) in [
+        ("btoa", btoa as crate::heap::NativeFn),
+        ("atob", atob as crate::heap::NativeFn),
+        ("structuredClone", structured_clone as crate::heap::NativeFn),
+    ] {
+        let fv = e.native_fn(n, f);
+        e.set_own(g, n, fv, true);
+    }
     e.add_method(g, "encodeURI", encode_uri);
     e.add_method(g, "decodeURI", decode_uri);
     // `eval(src)` — global scope (indirect-eval semantics; the
@@ -119,7 +128,7 @@ pub(crate) fn install(e: &mut Engine) {
         e.set_own(g, "eval", ev.clone(), false);
         e.eval_fn = ev;
     }
-    e.add_method(g, "structuredClone", structured_clone);
+    // `structuredClone` posé plus haut avec atob/btoa (enum).
 
     let (p_obj, p_arr, p_str, p_num, p_bool, p_err, p_terr, p_rerr, p_serr, p_date, p_fun) = {
         let p = &e.protos;
@@ -702,11 +711,17 @@ pub(crate) fn install(e: &mut Engine) {
         e.add_method(e.protos.symbol, "toString", symbol_to_string);
         e.add_method(e.protos.symbol, "valueOf", symbol_value_of);
         // Spec : `Symbol.prototype[@@toPrimitive]` = `thisSymbol-
-        // Value(this)` — identique à `valueOf`.
-        e.add_method(
+        // Value(this)` — identique à `valueOf`, attrs `{001}`.
+        let tp = e.native_fn("[Symbol.toPrimitive]", symbol_value_of);
+        e.set_own_attrs(
             e.protos.symbol,
             crate::interp::SYM_TO_PRIMITIVE,
-            symbol_value_of,
+            tp,
+            crate::heap::PropAttrs {
+                writable: false,
+                enumerable: false,
+                configurable: true,
+            },
         );
         let desc_fn = e.native_fn("get description", symbol_description);
         if let Some(o) = e.heap.obj_mut(e.protos.symbol) {
@@ -1301,8 +1316,18 @@ pub(crate) fn install(e: &mut Engine) {
     e.add_method(dp, "toLocaleDateString", date_to_locale_date);
     e.add_method(dp, "toLocaleTimeString", date_to_locale_time);
     // Spec 21.4.4.45 — `@@toPrimitive` (exception Date : hint
-    // `default` → chaîne, pas nombre).
-    e.add_method(dp, crate::interp::SYM_TO_PRIMITIVE, date_to_primitive);
+    // `default` → chaîne, pas nombre), attrs `{001}`.
+    let tp = e.native_fn("[Symbol.toPrimitive]", date_to_primitive);
+    e.set_own_attrs(
+        dp,
+        crate::interp::SYM_TO_PRIMITIVE,
+        tp,
+        crate::heap::PropAttrs {
+            writable: false,
+            enumerable: false,
+            configurable: true,
+        },
+    );
     // JS-7g — full-ish UTC Date.
     e.add_method(dp, "getFullYear", date_get_full_year);
     e.add_method(dp, "getUTCFullYear", date_get_full_year);

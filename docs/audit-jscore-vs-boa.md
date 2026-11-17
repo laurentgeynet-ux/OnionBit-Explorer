@@ -24,6 +24,28 @@ Sondes sémantiques : `_scratch/probe.js` (24 cas) exécuté dans
 les deux moteurs — sorties `surf_*.txt`/`only_*.txt`/
 `flagdiff.txt` dans `_scratch/`.
 
+## Re-mesure finale (2026-11-17, après A1–A8 + retouches)
+
+- jscore : **26 540 chemins** (+3 800 — `name` own, `@@species`,
+  descripteurs matérialisés) ; boa inchangé 5 399.
+- **boa-only : 591 → 176** — dont ~164 surfaces host non
+  installées en eval nu (`fetch`, `Headers`, timers…, installées
+  par `install_*` au runtime) + bruit du script (`fd`/`walk`/
+  `out`). **Réels restants : 2 — tous deux des déviations boa** :
+  `Error.prototype.stack` (accesseur V8-style non-spec : `stack`
+  est une data propre d'*instance*, pas d'accesseur de proto) et
+  `RegExp.prototype.lastIndex` (boa modèle le proto RegExp en
+  exotique ES5 — ES6+ le rend ordinaire, sans `lastIndex` propre).
+- **flagdiff : ~200 → 17** — tous spec-favorables à jscore :
+  13× `URL.prototype.*`/`URLSearchParams.size` `011` (WebIDL veut
+  des attributs **énumérables** — boa `001` se trompe) ; 3×
+  `console` `111` (global navigateur énumérable) ; 1×
+  `%TypedArray%.prototype[@@toStringTag]` `getset` (spec : get+set
+  — boa n'a que get).
+- **Bilan : zéro divergence sémantique restante sur les chemins
+  communs** — tout écart mesuré est soit spec-correct côté jscore,
+  soit une surface host volontairement non installée en eval nu.
+
 ---
 
 ## A. Gaps confirmés jscore (à porter)

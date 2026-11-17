@@ -657,6 +657,15 @@ pub(crate) fn install(e: &mut Engine) {
         let it = e.native_fn("values", ta_values);
         e.set_own(tap, SYM_ITERATOR, it, false);
     }
+    // Spec : `%TypedArray%.prototype[@@toStringTag]` est un
+    // **accesseur** get/set (le get rend le nom du kind de `this`).
+    {
+        let tg = e.native_fn("get [Symbol.toStringTag]", ta_tag_get);
+        let ts = e.native_fn("set [Symbol.toStringTag]", ta_tag_set);
+        if let Some(o) = e.heap.obj_mut(tap) {
+            o.set_accessor(crate::interp::SYM_TO_STRING_TAG, tg, ts, false);
+        }
+    }
 
     // -- `%TypedArray%` — ctor abstrait (spec 23.2.1) -------------------
     // Exposé en global ; `new`/`call` direct → `TypeError` (intrin-
@@ -1119,6 +1128,26 @@ fn dv_set(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
                 }
             }
         }
+    }
+    Ok(Value::Undefined)
+}
+
+/// `get %TypedArray%.prototype[@@toStringTag]` (spec) — nom du
+/// kind de `this` (`"Uint8Array"`…) ; `this` non-vue →
+/// `undefined` (pas de `TypeError`, à l'inverse des autres
+/// accesseurs du proto).
+fn ta_tag_get(e: &mut Engine, this: Value, _a: &[Value]) -> JsResult<Value> {
+    match ta_view(e, this) {
+        Ok((ta, _b, _o, _l)) => Ok(e.str_val(ta.name())),
+        Err(_) => Ok(Value::Undefined),
+    }
+}
+
+/// `set %TypedArray%.prototype[@@toStringTag]` (spec) — data
+/// propre `{w:true,e:true,c:true}` masquant l'accesseur.
+fn ta_tag_set(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
+    if let Value::Obj(id) = this {
+        e.set_own(id, crate::interp::SYM_TO_STRING_TAG, arg(args, 0), true);
     }
     Ok(Value::Undefined)
 }

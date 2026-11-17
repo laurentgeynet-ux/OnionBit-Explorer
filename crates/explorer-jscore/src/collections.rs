@@ -697,12 +697,13 @@ pub(crate) fn install(e: &mut Engine) {
         }
     }
     let map_ctor_v = e.native_fn("Map", map_ctor);
-    e.set_own(
+    e.set_own_attrs(
         c_id(map_ctor_v.clone()),
         "prototype",
         Value::Obj(map_proto),
-        false,
+        crate::heap::PropAttrs::FIXED,
     );
+    e.set_own(map_proto, "constructor", map_ctor_v.clone(), false);
     e.add_method(c_id(map_ctor_v.clone()), "groupBy", map_group_by);
     let g = e.global;
     e.set_own(g, "Map", map_ctor_v.clone(), false);
@@ -734,12 +735,13 @@ pub(crate) fn install(e: &mut Engine) {
         }
     }
     let set_ctor_v = e.native_fn("Set", set_ctor);
-    e.set_own(
+    e.set_own_attrs(
         c_id(set_ctor_v.clone()),
         "prototype",
         Value::Obj(set_proto),
-        false,
+        crate::heap::PropAttrs::FIXED,
     );
+    e.set_own(set_proto, "constructor", set_ctor_v.clone(), false);
     let g = e.global;
     e.set_own(g, "Set", set_ctor_v.clone(), false);
     crate::builtins::install_species(e, &set_ctor_v);
