@@ -44,6 +44,25 @@ pub(crate) fn sym_method(
     }
 }
 
+/// `get [Symbol.species]` (spec) — `return this`. Accesseur
+/// `{e:false, c:true}` posé par [`install_species`] sur chaque
+/// ctor species-aware (audit boa A5).
+pub(crate) fn species_get(_e: &mut Engine, this: Value, _args: &[Value]) -> JsResult<Value> {
+    Ok(this)
+}
+
+/// Pose `get [Symbol.species]` sur le ctor `ctor` (Array,
+/// ArrayBuffer, Map, Set, RegExp, SharedArrayBuffer, TypedArray
+/// + ses concrets — spec).
+pub(crate) fn install_species(e: &mut Engine, ctor: &Value) {
+    if let Value::Obj(cid) = ctor {
+        let sg = e.native_fn("get [Symbol.species]", species_get);
+        if let Some(o) = e.heap.obj_mut(*cid) {
+            o.set_accessor(crate::interp::SYM_SPECIES, sg, Value::Undefined, false);
+        }
+    }
+}
+
 /// `ArraySpeciesCreate(src, len)` (spec) : `new src.constructor
 /// [@@species](len)` si la prop existe ; un `undefined`/`null` →
 /// tableau ordinaire, autre chose → `TypeError` via `construct`.

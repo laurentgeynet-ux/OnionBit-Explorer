@@ -705,7 +705,8 @@ pub(crate) fn install(e: &mut Engine) {
     );
     e.add_method(c_id(map_ctor_v.clone()), "groupBy", map_group_by);
     let g = e.global;
-    e.set_own(g, "Map", map_ctor_v, false);
+    e.set_own(g, "Map", map_ctor_v.clone(), false);
+    crate::builtins::install_species(e, &map_ctor_v);
 
     let set_proto = e.protos.set;
     e.add_method(set_proto, "add", set_add_m);
@@ -740,7 +741,8 @@ pub(crate) fn install(e: &mut Engine) {
         false,
     );
     let g = e.global;
-    e.set_own(g, "Set", set_ctor_v, false);
+    e.set_own(g, "Set", set_ctor_v.clone(), false);
+    crate::builtins::install_species(e, &set_ctor_v);
 
     // `WeakMap`/`WeakSet` — ctors + protos dédiés (JS-C19) :
     // `WeakMap !== Map` et `Object.prototype.toString` distingue
@@ -752,7 +754,16 @@ pub(crate) fn install(e: &mut Engine) {
     {
         let wmp = e.protos.weak_map;
         let tag = e.str_val("WeakMap");
-        e.set_own_attrs(wmp, crate::interp::SYM_TO_STRING_TAG, tag, crate::heap::PropAttrs { writable: false, enumerable: false, configurable: true });
+        e.set_own_attrs(
+            wmp,
+            crate::interp::SYM_TO_STRING_TAG,
+            tag,
+            crate::heap::PropAttrs {
+                writable: false,
+                enumerable: false,
+                configurable: true,
+            },
+        );
         e.add_method(wmp, "get", map_get);
         e.add_method(wmp, "set", map_set);
         e.add_method(wmp, "has", map_has);
@@ -773,7 +784,16 @@ pub(crate) fn install(e: &mut Engine) {
     {
         let wsp = e.protos.weak_set;
         let tag = e.str_val("WeakSet");
-        e.set_own_attrs(wsp, crate::interp::SYM_TO_STRING_TAG, tag, crate::heap::PropAttrs { writable: false, enumerable: false, configurable: true });
+        e.set_own_attrs(
+            wsp,
+            crate::interp::SYM_TO_STRING_TAG,
+            tag,
+            crate::heap::PropAttrs {
+                writable: false,
+                enumerable: false,
+                configurable: true,
+            },
+        );
         e.add_method(wsp, "add", set_add_m);
         e.add_method(wsp, "has", set_has);
         e.add_method(wsp, "delete", set_delete);

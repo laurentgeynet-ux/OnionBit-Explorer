@@ -167,7 +167,16 @@ fn rs_data(e: &Engine, v: Value) -> Option<Rc<RefCell<RsData>>> {
 fn new_tagged_proto(e: &mut Engine, tag: &str) -> ObjId {
     let p = e.new_object();
     let t = e.str_val(tag);
-    e.set_own_attrs(p, crate::interp::SYM_TO_STRING_TAG, t, crate::heap::PropAttrs { writable: false, enumerable: false, configurable: true });
+    e.set_own_attrs(
+        p,
+        crate::interp::SYM_TO_STRING_TAG,
+        t,
+        crate::heap::PropAttrs {
+            writable: false,
+            enumerable: false,
+            configurable: true,
+        },
+    );
     p
 }
 

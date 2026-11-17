@@ -2539,7 +2539,16 @@ fn methods(e: &mut Engine, proto: ObjId, list: &[(&'static str, NativeFn)]) {
 
 fn tag(e: &mut Engine, proto: ObjId, name: &str) {
     let t = e.str_val(format!("Temporal.{name}"));
-    e.set_own_attrs(proto, crate::interp::SYM_TO_STRING_TAG, t, crate::heap::PropAttrs { writable: false, enumerable: false, configurable: true });
+    e.set_own_attrs(
+        proto,
+        crate::interp::SYM_TO_STRING_TAG,
+        t,
+        crate::heap::PropAttrs {
+            writable: false,
+            enumerable: false,
+            configurable: true,
+        },
+    );
 }
 
 /// Installe `Temporal` sur l'objet global.
@@ -2680,12 +2689,30 @@ pub(crate) fn install(e: &mut Engine) {
         e.add_method(now, "plainTimeISO", now_ptime);
         e.add_method(now, "timeZoneId", now_tz);
         let tg = e.str_val("Temporal.Now");
-        e.set_own_attrs(now, crate::interp::SYM_TO_STRING_TAG, tg, crate::heap::PropAttrs { writable: false, enumerable: false, configurable: true });
+        e.set_own_attrs(
+            now,
+            crate::interp::SYM_TO_STRING_TAG,
+            tg,
+            crate::heap::PropAttrs {
+                writable: false,
+                enumerable: false,
+                configurable: true,
+            },
+        );
         e.set_own(t, "Now", Value::Obj(now), false);
     }
 
     let tg = e.str_val("Temporal");
-    e.set_own_attrs(t, crate::interp::SYM_TO_STRING_TAG, tg, crate::heap::PropAttrs { writable: false, enumerable: false, configurable: true });
+    e.set_own_attrs(
+        t,
+        crate::interp::SYM_TO_STRING_TAG,
+        tg,
+        crate::heap::PropAttrs {
+            writable: false,
+            enumerable: false,
+            configurable: true,
+        },
+    );
     e.set_own(g, "Temporal", Value::Obj(t), false);
 
     // `c_id` importé par convention (ctor helper) — silence lint.

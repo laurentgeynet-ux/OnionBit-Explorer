@@ -504,7 +504,16 @@ fn perf_entry(e: &mut Engine, ty: &str, name: &str, start: f64, dur: f64) -> Val
     } else {
         "PerformanceMeasure"
     });
-    e.set_own_attrs(o, crate::interp::SYM_TO_STRING_TAG, tag, crate::heap::PropAttrs { writable: false, enumerable: false, configurable: true });
+    e.set_own_attrs(
+        o,
+        crate::interp::SYM_TO_STRING_TAG,
+        tag,
+        crate::heap::PropAttrs {
+            writable: false,
+            enumerable: false,
+            configurable: true,
+        },
+    );
     Value::Obj(o)
 }
 
@@ -583,7 +592,16 @@ fn perf_nav_entry(e: &mut Engine) -> Value {
     let toj = e.bound_native("perfToJson", perf_entry_to_json, Vec::new());
     e.set_own(o, "toJSON", toj, false);
     let tag = e.str_val("PerformanceNavigationTiming");
-    e.set_own_attrs(o, crate::interp::SYM_TO_STRING_TAG, tag, crate::heap::PropAttrs { writable: false, enumerable: false, configurable: true });
+    e.set_own_attrs(
+        o,
+        crate::interp::SYM_TO_STRING_TAG,
+        tag,
+        crate::heap::PropAttrs {
+            writable: false,
+            enumerable: false,
+            configurable: true,
+        },
+    );
     Value::Obj(o)
 }
 

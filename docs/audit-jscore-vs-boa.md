@@ -73,7 +73,7 @@ partagées via le proto. Les détects réels : `Object.getPrototypeOf(new
 Uint8Array().__proto__)`, `x instanceof TypedArray` écrit par les
 libs.
 
-### A5. `@@species` sur les constructeurs — **38 chemins**
+### A5. `@@species` sur les constructeurs — **38 chemins** ✅ *fait (2026-11-17)*
 
 `species.rs` existe et `Promise[Symbol.species]` est posé, mais
 manquent : `Array`, `ArrayBuffer`, `Map`, `Set`, `RegExp`,

@@ -1070,7 +1070,16 @@ impl Engine {
             let it = self.native_fn("[Symbol.iterator]", h_entries);
             self.set_own(hp, crate::interp::SYM_ITERATOR, it, false);
             let tag = self.str_val("Headers");
-            self.set_own_attrs(hp, crate::interp::SYM_TO_STRING_TAG, tag, crate::heap::PropAttrs { writable: false, enumerable: false, configurable: true });
+            self.set_own_attrs(
+                hp,
+                crate::interp::SYM_TO_STRING_TAG,
+                tag,
+                crate::heap::PropAttrs {
+                    writable: false,
+                    enumerable: false,
+                    configurable: true,
+                },
+            );
             let qp = self
                 .heap
                 .alloc_obj(crate::heap::Object::ordinary(objp.clone()));
@@ -1090,9 +1099,27 @@ impl Engine {
                 self.add_method(p, "clone", fetch_clone);
             }
             let tag = self.str_val("Request");
-            self.set_own_attrs(qp, crate::interp::SYM_TO_STRING_TAG, tag, crate::heap::PropAttrs { writable: false, enumerable: false, configurable: true });
+            self.set_own_attrs(
+                qp,
+                crate::interp::SYM_TO_STRING_TAG,
+                tag,
+                crate::heap::PropAttrs {
+                    writable: false,
+                    enumerable: false,
+                    configurable: true,
+                },
+            );
             let tag = self.str_val("Response");
-            self.set_own_attrs(sp, crate::interp::SYM_TO_STRING_TAG, tag, crate::heap::PropAttrs { writable: false, enumerable: false, configurable: true });
+            self.set_own_attrs(
+                sp,
+                crate::interp::SYM_TO_STRING_TAG,
+                tag,
+                crate::heap::PropAttrs {
+                    writable: false,
+                    enumerable: false,
+                    configurable: true,
+                },
+            );
             // Attributs IDL visibles sur le prototype (`'x' in
             // Request.prototype` — feature-detect spec) ; les
             // valeurs vivent en props propres d'instance —

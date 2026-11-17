@@ -415,7 +415,8 @@ pub(crate) fn install(e: &mut Engine) {
         );
         e.set_own(abp, "constructor", ab.clone(), false);
         e.add_method(id, "isView", ab_is_view);
-        e.set_own(g, "ArrayBuffer", ab, false);
+        e.set_own(g, "ArrayBuffer", ab.clone(), false);
+        crate::builtins::install_species(e, &ab);
     }
     // Accesseurs spec sur le proto — les instances portent les
     // flags en props propres (déviation : `hasOwnProperty` visible)
@@ -480,7 +481,16 @@ pub(crate) fn install(e: &mut Engine) {
             }
         }
         let tag = e.str_val("SharedArrayBuffer");
-        e.set_own_attrs(sabp, crate::interp::SYM_TO_STRING_TAG, tag, crate::heap::PropAttrs { writable: false, enumerable: false, configurable: true });
+        e.set_own_attrs(
+            sabp,
+            crate::interp::SYM_TO_STRING_TAG,
+            tag,
+            crate::heap::PropAttrs {
+                writable: false,
+                enumerable: false,
+                configurable: true,
+            },
+        );
         let sab = e.native_fn("SharedArrayBuffer", sab_ctor);
         let sid = c_id(sab.clone());
         e.set_own_attrs(
@@ -490,7 +500,8 @@ pub(crate) fn install(e: &mut Engine) {
             crate::heap::PropAttrs::FIXED,
         );
         e.set_own(sabp, "constructor", sab.clone(), false);
-        e.set_own(g, "SharedArrayBuffer", sab, false);
+        e.set_own(g, "SharedArrayBuffer", sab.clone(), false);
+        crate::builtins::install_species(e, &sab);
     }
 
     {
@@ -510,7 +521,16 @@ pub(crate) fn install(e: &mut Engine) {
         e.add_method(at, "notify", atomics_notify);
         e.add_method(at, "waitAsync", atomics_wait_async);
         let tag = e.str_val("Atomics");
-        e.set_own_attrs(at, crate::interp::SYM_TO_STRING_TAG, tag, crate::heap::PropAttrs { writable: false, enumerable: false, configurable: true });
+        e.set_own_attrs(
+            at,
+            crate::interp::SYM_TO_STRING_TAG,
+            tag,
+            crate::heap::PropAttrs {
+                writable: false,
+                enumerable: false,
+                configurable: true,
+            },
+        );
         e.set_own(g, "Atomics", Value::Obj(at), false);
     }
 
@@ -656,7 +676,8 @@ pub(crate) fn install(e: &mut Engine) {
         e.set_own(cid, "from", from, false);
         let of = e.bound_native("of", ta_of, vec![Value::Num(ta.index() as f64)]);
         e.set_own(cid, "of", of, false);
-        e.set_own(g, ta.name(), ctor, false);
+        e.set_own(g, ta.name(), ctor.clone(), false);
+        crate::builtins::install_species(e, &ctor);
         // ES2025 `Uint8Array` — `fromBase64`/`fromHex` statiques et
         // `toBase64`/`toHex`/`setFromBase64`/`setFromHex` proto.
         if matches!(ta, TaKind::U8) {

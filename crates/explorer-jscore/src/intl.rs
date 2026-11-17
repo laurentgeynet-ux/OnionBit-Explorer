@@ -38,7 +38,16 @@ pub(crate) fn install(e: &mut Engine) {
         e.add_method(crate::builtins::c_id(c), "supportedLocalesOf", canonical);
     }
     let tag = e.str_val("Intl");
-    e.set_own_attrs(intl, crate::interp::SYM_TO_STRING_TAG, tag, crate::heap::PropAttrs { writable: false, enumerable: false, configurable: true });
+    e.set_own_attrs(
+        intl,
+        crate::interp::SYM_TO_STRING_TAG,
+        tag,
+        crate::heap::PropAttrs {
+            writable: false,
+            enumerable: false,
+            configurable: true,
+        },
+    );
     e.set_own(e.global, "Intl", intl_v, false);
     install_locale_accessors(e);
 }

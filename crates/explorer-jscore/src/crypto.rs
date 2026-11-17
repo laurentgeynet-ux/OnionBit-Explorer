@@ -2089,7 +2089,16 @@ pub(crate) fn install_subtle(e: &mut Engine, crypto: ObjId) {
         e.add_method(sp, m, f);
     }
     let tag = e.str_val("SubtleCrypto");
-    e.set_own_attrs(sp, crate::interp::SYM_TO_STRING_TAG, tag, crate::heap::PropAttrs { writable: false, enumerable: false, configurable: true });
+    e.set_own_attrs(
+        sp,
+        crate::interp::SYM_TO_STRING_TAG,
+        tag,
+        crate::heap::PropAttrs {
+            writable: false,
+            enumerable: false,
+            configurable: true,
+        },
+    );
     let sc = e.illegal_ctor_bound("SubtleCrypto");
     if let Value::Obj(cid) = sc {
         e.set_own_attrs(

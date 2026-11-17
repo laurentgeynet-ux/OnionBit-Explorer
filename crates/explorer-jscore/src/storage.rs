@@ -48,7 +48,16 @@ impl Engine {
         let f = self.illegal_ctor_bound("Storage");
         let p = self.new_object();
         let tag = self.str_val("Storage");
-        self.set_own_attrs(p, crate::interp::SYM_TO_STRING_TAG, tag, crate::heap::PropAttrs { writable: false, enumerable: false, configurable: true });
+        self.set_own_attrs(
+            p,
+            crate::interp::SYM_TO_STRING_TAG,
+            tag,
+            crate::heap::PropAttrs {
+                writable: false,
+                enumerable: false,
+                configurable: true,
+            },
+        );
         if let Value::Obj(cid) = f {
             self.set_own_attrs(
                 cid,

@@ -93,7 +93,12 @@ pub(crate) fn install(e: &mut Engine) {
     // `globalThis[@@toStringTag]` — exception spec : `{w:true,
     // e:false,c:true}` (le seul writable du lot).
     let gt = e.str_val("globalThis");
-    e.set_own_attrs(g, crate::interp::SYM_TO_STRING_TAG, gt, crate::heap::PropAttrs::BUILTIN);
+    e.set_own_attrs(
+        g,
+        crate::interp::SYM_TO_STRING_TAG,
+        gt,
+        crate::heap::PropAttrs::BUILTIN,
+    );
 
     e.add_method(g, "parseInt", parse_int);
     e.add_method(g, "parseFloat", parse_float);
@@ -134,6 +139,7 @@ pub(crate) fn install(e: &mut Engine) {
     };
     let object = ctor(e, "Object", object_ctor, p_obj);
     let array = ctor(e, "Array", array_ctor, p_arr);
+    install_species(e, &array);
     let string = ctor(e, "String", string_ctor, p_str);
     let number = ctor(e, "Number", number_ctor, p_num);
     let boolean = ctor(e, "Boolean", boolean_ctor, p_bool);
@@ -222,7 +228,16 @@ pub(crate) fn install(e: &mut Engine) {
         e.add_method(crypto, "randomUUID", crypto_random_uuid);
         crate::crypto::install_subtle(e, crypto);
         let tag = e.str_val("Crypto");
-        e.set_own_attrs(crypto, crate::interp::SYM_TO_STRING_TAG, tag, crate::heap::PropAttrs { writable: false, enumerable: false, configurable: true });
+        e.set_own_attrs(
+            crypto,
+            crate::interp::SYM_TO_STRING_TAG,
+            tag,
+            crate::heap::PropAttrs {
+                writable: false,
+                enumerable: false,
+                configurable: true,
+            },
+        );
         e.set_own(g, "crypto", Value::Obj(crypto), false);
     }
 
@@ -254,7 +269,16 @@ pub(crate) fn install(e: &mut Engine) {
         e.add_method(ds_p, "move", ds_move);
         e.add_method(ds_p, crate::interp::SYM_DISPOSE, ds_dispose);
         let tag = e.str_val("DisposableStack");
-        e.set_own_attrs(ds_p, crate::interp::SYM_TO_STRING_TAG, tag, crate::heap::PropAttrs { writable: false, enumerable: false, configurable: true });
+        e.set_own_attrs(
+            ds_p,
+            crate::interp::SYM_TO_STRING_TAG,
+            tag,
+            crate::heap::PropAttrs {
+                writable: false,
+                enumerable: false,
+                configurable: true,
+            },
+        );
         e.set_own(g, "DisposableStack", ds, false);
     }
 
@@ -279,7 +303,16 @@ pub(crate) fn install(e: &mut Engine) {
         e.add_method(ads_p, "move", ads_move);
         e.add_method(ads_p, crate::interp::SYM_ASYNC_DISPOSE, ads_dispose_async);
         let tag = e.str_val("AsyncDisposableStack");
-        e.set_own_attrs(ads_p, crate::interp::SYM_TO_STRING_TAG, tag, crate::heap::PropAttrs { writable: false, enumerable: false, configurable: true });
+        e.set_own_attrs(
+            ads_p,
+            crate::interp::SYM_TO_STRING_TAG,
+            tag,
+            crate::heap::PropAttrs {
+                writable: false,
+                enumerable: false,
+                configurable: true,
+            },
+        );
         e.set_own(g, "AsyncDisposableStack", ads, false);
     }
 
@@ -395,9 +428,27 @@ pub(crate) fn install(e: &mut Engine) {
             o.set_accessor("size", sz, Value::Undefined, true);
         }
         let tag = e.str_val("URLSearchParams");
-        e.set_own_attrs(pp, crate::interp::SYM_TO_STRING_TAG, tag, crate::heap::PropAttrs { writable: false, enumerable: false, configurable: true });
+        e.set_own_attrs(
+            pp,
+            crate::interp::SYM_TO_STRING_TAG,
+            tag,
+            crate::heap::PropAttrs {
+                writable: false,
+                enumerable: false,
+                configurable: true,
+            },
+        );
         let tag = e.str_val("URL");
-        e.set_own_attrs(up, crate::interp::SYM_TO_STRING_TAG, tag, crate::heap::PropAttrs { writable: false, enumerable: false, configurable: true });
+        e.set_own_attrs(
+            up,
+            crate::interp::SYM_TO_STRING_TAG,
+            tag,
+            crate::heap::PropAttrs {
+                writable: false,
+                enumerable: false,
+                configurable: true,
+            },
+        );
     }
     e.set_own(g, "Object", object.clone(), false);
     e.set_own(g, "Array", array.clone(), false);
@@ -420,14 +471,32 @@ pub(crate) fn install(e: &mut Engine) {
     let wrp = e.new_object();
     e.add_method(wrp, "deref", weakref_deref);
     let tag = e.str_val("WeakRef");
-    e.set_own_attrs(wrp, crate::interp::SYM_TO_STRING_TAG, tag, crate::heap::PropAttrs { writable: false, enumerable: false, configurable: true });
+    e.set_own_attrs(
+        wrp,
+        crate::interp::SYM_TO_STRING_TAG,
+        tag,
+        crate::heap::PropAttrs {
+            writable: false,
+            enumerable: false,
+            configurable: true,
+        },
+    );
     let wr_ctor = ctor(e, "WeakRef", weakref_ctor, wrp);
     e.set_own(g, "WeakRef", wr_ctor, false);
     let frp = e.new_object();
     e.add_method(frp, "register", finreg_register);
     e.add_method(frp, "unregister", finreg_unregister);
     let tag = e.str_val("FinalizationRegistry");
-    e.set_own_attrs(frp, crate::interp::SYM_TO_STRING_TAG, tag, crate::heap::PropAttrs { writable: false, enumerable: false, configurable: true });
+    e.set_own_attrs(
+        frp,
+        crate::interp::SYM_TO_STRING_TAG,
+        tag,
+        crate::heap::PropAttrs {
+            writable: false,
+            enumerable: false,
+            configurable: true,
+        },
+    );
     let fr_ctor = ctor(e, "FinalizationRegistry", finreg_ctor, frp);
     e.set_own(g, "FinalizationRegistry", fr_ctor, false);
 
@@ -499,9 +568,27 @@ pub(crate) fn install(e: &mut Engine) {
             e.set_own_attrs(gfp, "prototype", gp_v.clone(), iface);
             e.set_own_attrs(gp, "constructor", gfp_v.clone(), iface);
             let t = e.str_val(tag);
-            e.set_own_attrs(gp, crate::interp::SYM_TO_STRING_TAG, t, crate::heap::PropAttrs { writable: false, enumerable: false, configurable: true });
+            e.set_own_attrs(
+                gp,
+                crate::interp::SYM_TO_STRING_TAG,
+                t,
+                crate::heap::PropAttrs {
+                    writable: false,
+                    enumerable: false,
+                    configurable: true,
+                },
+            );
             let ft = e.str_val(format!("{tag}Function"));
-            e.set_own_attrs(gfp, crate::interp::SYM_TO_STRING_TAG, ft, crate::heap::PropAttrs { writable: false, enumerable: false, configurable: true });
+            e.set_own_attrs(
+                gfp,
+                crate::interp::SYM_TO_STRING_TAG,
+                ft,
+                crate::heap::PropAttrs {
+                    writable: false,
+                    enumerable: false,
+                    configurable: true,
+                },
+            );
             if let Value::Obj(cid) = ctor_v {
                 e.set_const(cid, "prototype", gfp_v.clone());
             }
@@ -534,7 +621,16 @@ pub(crate) fn install(e: &mut Engine) {
         },
     );
     let at = e.str_val("AsyncFunction");
-    e.set_own_attrs(afp, crate::interp::SYM_TO_STRING_TAG, at, crate::heap::PropAttrs { writable: false, enumerable: false, configurable: true });
+    e.set_own_attrs(
+        afp,
+        crate::interp::SYM_TO_STRING_TAG,
+        at,
+        crate::heap::PropAttrs {
+            writable: false,
+            enumerable: false,
+            configurable: true,
+        },
+    );
     if let Value::Obj(cid) = e.async_ctor {
         e.set_const(cid, "prototype", Value::Obj(afp));
     }
@@ -607,7 +703,16 @@ pub(crate) fn install(e: &mut Engine) {
     e.add_method(reflect, "isExtensible", reflect_is_extensible);
     e.add_method(reflect, "preventExtensions", reflect_prevent_extensions);
     let tag = e.str_val("Reflect");
-    e.set_own_attrs(reflect, crate::interp::SYM_TO_STRING_TAG, tag, crate::heap::PropAttrs { writable: false, enumerable: false, configurable: true });
+    e.set_own_attrs(
+        reflect,
+        crate::interp::SYM_TO_STRING_TAG,
+        tag,
+        crate::heap::PropAttrs {
+            writable: false,
+            enumerable: false,
+            configurable: true,
+        },
+    );
     e.set_own(g, "Reflect", Value::Obj(reflect), false);
     // `Proxy` — construct-only (`Proxy(t,h)` → TypeError) ; la
     // méthode statique `revocable` rend `{proxy, revoke}`.
@@ -1119,6 +1224,7 @@ pub(crate) fn install(e: &mut Engine) {
         }
     }
     let regexp = ctor(e, "RegExp", regexp_ctor, rp);
+    install_species(e, &regexp);
     if let Value::Obj(rid) = regexp {
         e.add_method(rid, "escape", regexp_escape);
     }
@@ -1235,7 +1341,16 @@ pub(crate) fn install(e: &mut Engine) {
     e.add_method(math, "clz32", math_clz32);
     e.add_method(math, "f16round", math_f16round);
     let tag = e.str_val("Math");
-    e.set_own_attrs(math, crate::interp::SYM_TO_STRING_TAG, tag, crate::heap::PropAttrs { writable: false, enumerable: false, configurable: true });
+    e.set_own_attrs(
+        math,
+        crate::interp::SYM_TO_STRING_TAG,
+        tag,
+        crate::heap::PropAttrs {
+            writable: false,
+            enumerable: false,
+            configurable: true,
+        },
+    );
     e.set_own(g, "Math", Value::Obj(math), false);
 }
 

@@ -113,7 +113,16 @@ fn blob_proto(e: &mut Engine) -> ObjId {
     e.add_method(p, "slice", blob_slice);
     e.add_method(p, "stream", blob_stream);
     let tag = e.str_val("Blob");
-    e.set_own_attrs(p, crate::interp::SYM_TO_STRING_TAG, tag, crate::heap::PropAttrs { writable: false, enumerable: false, configurable: true });
+    e.set_own_attrs(
+        p,
+        crate::interp::SYM_TO_STRING_TAG,
+        tag,
+        crate::heap::PropAttrs {
+            writable: false,
+            enumerable: false,
+            configurable: true,
+        },
+    );
     e.files.blob_proto = Some(p);
     p
 }
@@ -129,7 +138,16 @@ fn file_proto(e: &mut Engine) -> ObjId {
         .heap
         .alloc_obj(crate::heap::Object::ordinary(Value::Obj(bp)));
     let tag = e.str_val("File");
-    e.set_own_attrs(p, crate::interp::SYM_TO_STRING_TAG, tag, crate::heap::PropAttrs { writable: false, enumerable: false, configurable: true });
+    e.set_own_attrs(
+        p,
+        crate::interp::SYM_TO_STRING_TAG,
+        tag,
+        crate::heap::PropAttrs {
+            writable: false,
+            enumerable: false,
+            configurable: true,
+        },
+    );
     e.files.file_proto = Some(p);
     p
 }
@@ -450,7 +468,16 @@ fn reader_proto(e: &mut Engine) -> ObjId {
         e.set_own(p, h, Value::Null, true);
     }
     let tag = e.str_val("FileReader");
-    e.set_own_attrs(p, crate::interp::SYM_TO_STRING_TAG, tag, crate::heap::PropAttrs { writable: false, enumerable: false, configurable: true });
+    e.set_own_attrs(
+        p,
+        crate::interp::SYM_TO_STRING_TAG,
+        tag,
+        crate::heap::PropAttrs {
+            writable: false,
+            enumerable: false,
+            configurable: true,
+        },
+    );
     e.files.reader_proto = Some(p);
     p
 }
@@ -475,7 +502,16 @@ fn rsync_proto(e: &mut Engine) -> ObjId {
         &[],
     );
     let tag = e.str_val("FileReaderSync");
-    e.set_own_attrs(p, crate::interp::SYM_TO_STRING_TAG, tag, crate::heap::PropAttrs { writable: false, enumerable: false, configurable: true });
+    e.set_own_attrs(
+        p,
+        crate::interp::SYM_TO_STRING_TAG,
+        tag,
+        crate::heap::PropAttrs {
+            writable: false,
+            enumerable: false,
+            configurable: true,
+        },
+    );
     e.files.rsync_proto = Some(p);
     p
 }
