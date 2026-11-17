@@ -658,12 +658,37 @@ pub(crate) fn install(e: &mut Engine) {
         e.set_own(tap, SYM_ITERATOR, it, false);
     }
 
+    // -- `%TypedArray%` — ctor abstrait (spec 23.2.1) -------------------
+    // Exposé en global ; `new`/`call` direct → `TypeError` (intrin-
+    // sèque abstrait, ne sert que de `[[Prototype]]` aux 9 concrets
+    // et de porteur à `from`/`of`/`@@species` génériques).
+    let ta_abs = e.native_fn("TypedArray", ta_abstract_ctor);
+    let ta_abs_id = c_id(ta_abs.clone());
+    e.set_own_attrs(
+        ta_abs_id,
+        "prototype",
+        Value::Obj(tap),
+        crate::heap::PropAttrs::FIXED,
+    );
+    e.set_own(tap, "constructor", ta_abs.clone(), false);
+    crate::builtins::install_species(e, &ta_abs);
+    let gfrom = e.native_fn("from", ta_from_generic);
+    e.set_own(ta_abs_id, "from", gfrom, false);
+    let gof = e.native_fn("of", ta_of_generic);
+    e.set_own(ta_abs_id, "of", gof, false);
+    e.set_own(g, "TypedArray", ta_abs, false);
+
     // -- les 9 constructeurs typés ------------------------------------
     for ta in TaKind::ALL {
         let proto = e.heap.alloc_obj(Object::ordinary(Value::Obj(tap)));
         e.set_const(proto, "BYTES_PER_ELEMENT", Value::Num(ta.size() as f64));
         let ctor = e.bound_native(ta.name(), ta_ctor, vec![Value::Num(ta.index() as f64)]);
         let cid = c_id(ctor.clone());
+        // `Ctor.[[Prototype]] = %TypedArray%` (spec) — hérite les
+        // génériques ; les props propres bound ci-dessous masquent.
+        if let Some(o) = e.heap.obj_mut(cid) {
+            o.set_proto(Value::Obj(ta_abs_id));
+        }
         e.set_own_attrs(
             cid,
             "prototype",
@@ -1099,6 +1124,54 @@ fn dv_set(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
 }
 
 // -- constructeur %TypedArray% ------------------------------------------
+
+/// `%TypedArray%` — intrinsèque abstrait (spec 23.2.1) : tout
+/// appel ou construction directe lève `TypeError`. Ne sert que de
+/// `[[Prototype]]` aux 9 concrets.
+fn ta_abstract_ctor(e: &mut Engine, _t: Value, _args: &[Value]) -> JsResult<Value> {
+    Err(e.type_error("The TypedArray constructor is abstract"))
+}
+
+/// `%TypedArray%.from(src, mapfn?, thisArg?)` (spec
+/// `TypedArray.from`) — `this` est le ctor cible : `new this(len)`
+/// puis recopie indexée. Non-ctor/abstrait → `TypeError` via
+/// `construct` (le ctor abstrait lève).
+fn ta_from_generic(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
+    let mut vals = src_vals(e, arg(args, 0))?;
+    if !matches!(arg(args, 1), Value::Undefined) {
+        let f = arg(args, 1);
+        if !e.is_callable(f.clone()) {
+            return Err(e.type_error("mapfn is not callable"));
+        }
+        let this_arg = arg(args, 2);
+        for (i, v) in vals.iter_mut().enumerate() {
+            *v = e.call_value(
+                f.clone(),
+                this_arg.clone(),
+                &[v.clone(), Value::Num(i as f64)],
+            )?;
+        }
+    }
+    let out = e.construct(this, &[Value::Num(vals.len() as f64)])?;
+    if let Value::Obj(id) = out.clone() {
+        for (i, v) in vals.iter().enumerate() {
+            e.set_prop(id, &i.to_string(), v.clone())?;
+        }
+    }
+    Ok(out)
+}
+
+/// `%TypedArray%.of(...items)` (spec `TypedArray.of`) — `new
+/// this(items.length)` puis recopie indexée.
+fn ta_of_generic(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
+    let out = e.construct(this, &[Value::Num(args.len() as f64)])?;
+    if let Value::Obj(id) = out.clone() {
+        for (i, v) in args.iter().enumerate() {
+            e.set_prop(id, &i.to_string(), v.clone())?;
+        }
+    }
+    Ok(out)
+}
 
 /// `new XxxArray(len | iterable | buffer, byteOffset?, length?)` —
 /// bound arg = `TaKind::index`.

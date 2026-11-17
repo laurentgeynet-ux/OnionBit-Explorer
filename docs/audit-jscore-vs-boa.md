@@ -63,7 +63,7 @@ renvoie). Touche Map/Set/Promise/ArrayBuffer/BigInt/DataView/
 FinalizationRegistry/Intl/JSON/Math/Reflect/Temporal/Atomics/
 Iterator/Symbol/SharedArrayBuffer/WeakMap…
 
-### A4. `TypedArray` — le global abstrait n'est pas exposé — **49 chemins**
+### A4. `TypedArray` — le global abstrait n'est pas exposé — **49 chemins** ✅ *fait (2026-11-17)*
 
 `%TypedArray%.prototype` existe en interne (`protos.typed_array`,
 proto partagé des 9 protos) mais le **constructeur global
