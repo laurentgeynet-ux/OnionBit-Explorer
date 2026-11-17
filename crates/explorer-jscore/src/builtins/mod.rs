@@ -212,6 +212,76 @@ pub(crate) fn install(e: &mut Engine) {
         let mv = e.str_val("");
         e.set_own(p, "message", mv, false);
     }
+    // `DOMException` (WebIDL) — installé dans le moteur nu : les
+    // erreurs hôte (`DataCloneError` de structuredClone,
+    // `AbortError`…) sont des DOMException spec, détectées via
+    // `e.name`/`instanceof` (triangulation V8 : `TypeError` était
+    // l'approximation documentée, JS-C586). Le proto hérite
+    // `Error.prototype` ; le ctor garde `Function.prototype`
+    // comme [[Prototype]] (mesuré V8).
+    let de = ctor(
+        e,
+        "DOMException",
+        dom_exception_ctor,
+        e.protos.dom_exception,
+    );
+    {
+        let p = e.protos.dom_exception;
+        // `name`/`message`/`code` : attributs WebIDL énumérables
+        // sur le prototype (défauts spec ; les instances portent
+        // leurs valeurs en own props — modèle erreur interne,
+        // cf. `error_value`).
+        let nv = e.str_val("Error");
+        e.set_own(p, "name", nv, true);
+        let mv = e.str_val("");
+        e.set_own(p, "message", mv, true);
+        e.set_own(p, "code", Value::Num(0.0), true);
+        let tag = e.str_val("DOMException");
+        e.set_own_attrs(
+            p,
+            crate::interp::SYM_TO_STRING_TAG,
+            tag,
+            crate::heap::PropAttrs {
+                writable: false,
+                enumerable: false,
+                configurable: true,
+            },
+        );
+        // Constantes legacy — figées spec `{w:false,e:false,
+        // c:false}` sur le ctor ET le prototype (`DOMException.
+        // ABORT_ERR` et `e.ABORT_ERR` lisent la même valeur).
+        for (k, v) in [
+            ("INDEX_SIZE_ERR", 1.0),
+            ("DOMSTRING_SIZE_ERR", 2.0),
+            ("HIERARCHY_REQUEST_ERR", 3.0),
+            ("WRONG_DOCUMENT_ERR", 4.0),
+            ("INVALID_CHARACTER_ERR", 5.0),
+            ("NO_DATA_ALLOWED_ERR", 6.0),
+            ("NO_MODIFICATION_ALLOWED_ERR", 7.0),
+            ("NOT_FOUND_ERR", 8.0),
+            ("NOT_SUPPORTED_ERR", 9.0),
+            ("INUSE_ATTRIBUTE_ERR", 10.0),
+            ("INVALID_STATE_ERR", 11.0),
+            ("SYNTAX_ERR", 12.0),
+            ("INVALID_MODIFICATION_ERR", 13.0),
+            ("NAMESPACE_ERR", 14.0),
+            ("INVALID_ACCESS_ERR", 15.0),
+            ("VALIDATION_ERR", 16.0),
+            ("TYPE_MISMATCH_ERR", 17.0),
+            ("SECURITY_ERR", 18.0),
+            ("NETWORK_ERR", 19.0),
+            ("ABORT_ERR", 20.0),
+            ("URL_MISMATCH_ERR", 21.0),
+            ("QUOTA_EXCEEDED_ERR", 22.0),
+            ("TIMEOUT_ERR", 23.0),
+            ("INVALID_NODE_TYPE_ERR", 24.0),
+            ("DATA_CLONE_ERR", 25.0),
+        ] {
+            e.set_const(p, k, Value::Num(v));
+            e.set_const(c_id(de.clone()), k, Value::Num(v));
+        }
+    }
+    e.set_own(g, "DOMException", de, false);
     let date = ctor(e, "Date", date_ctor, p_date);
 
     // `URL`/`URLSearchParams` (WHATWG subset — JS-C16) : parsing

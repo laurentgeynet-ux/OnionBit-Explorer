@@ -24,18 +24,16 @@ const KNOWN: &[(&str, &str)] = &[
     // SyntaxError chez boa, repasse chez jscore+V8 — bug boa
     // révélé par la triangulation, JS-C586).
     ("re_source_str", "boa"),
+    // `structuredClone(fn)` : jscore jette le `DOMException`
+    // `DataCloneError` spec (JS-C587) comme V8 — le shim JS de
+    // `BOA_PRELUDE` jette `TypeError` (déviation du shim, pas du
+    // moteur boa : sans prelude boa n'a pas `structuredClone`).
+    ("clone_err_throws", "boa"),
 ];
 
 /// Divergences connues jscore↔V8 — arbitrées, documentées dans
 /// `docs/audit-jscore-vs-boa.md` (§ canal V8).
-const KNOWN_V8: &[(&str, &str)] = &[
-    // `structuredClone(fn)` : jscore jette `TypeError` —
-    // approximation assumée (`DataCloneError` est un DOMException
-    // hôte, le ctor vit dans `install_dom` absent de l'eval nu) ;
-    // V8/Node jette le vrai `DOMException`. Fixe différée —
-    // règle de couverture réactive aux sites réels.
-    ("clone_err_throws", "jscore"),
-];
+const KNOWN_V8: &[(&str, &str)] = &[];
 
 #[test]
 fn corpus_ratchet() {

@@ -275,6 +275,75 @@ pub(crate) fn uri_error_ctor(e: &mut Engine, _t: Value, args: &[Value]) -> JsRes
     make_named_error(e, p, "URIError", args)
 }
 
+/// Table legacy `WebIDL` `name → code` (`DOMException`) : les codes
+/// numériques historiques survivent via `e.code`/`DOMException.
+/// DATA_CLONE_ERR` — les noms modernes hors table rendent 0.
+pub(crate) fn dom_exception_code(name: &str) -> u32 {
+    match name {
+        "IndexSizeError" => 1,
+        "DOMStringSizeError" => 2,
+        "HierarchyRequestError" => 3,
+        "WrongDocumentError" => 4,
+        "InvalidCharacterError" => 5,
+        "NoDataAllowedError" => 6,
+        "NoModificationAllowedError" => 7,
+        "NotFoundError" => 8,
+        "NotSupportedError" => 9,
+        "InUseAttributeError" => 10,
+        "InvalidStateError" => 11,
+        "SyntaxError" => 12,
+        "InvalidModificationError" => 13,
+        "NamespaceError" => 14,
+        "InvalidAccessError" => 15,
+        "ValidationError" => 16,
+        "TypeMismatchError" => 17,
+        "SecurityError" => 18,
+        "NetworkError" => 19,
+        "AbortError" => 20,
+        "URLMismatchError" => 21,
+        "QuotaExceededError" => 22,
+        "TimeoutError" => 23,
+        "InvalidNodeTypeError" => 24,
+        "DataCloneError" => 25,
+        _ => 0,
+    }
+}
+
+/// `new DOMException(message?, name?)` — `{name, message, code,
+/// stack}` own (`WebIDL` §`DOMException` ; `name` défaut `"Error"`).
+/// Constructeur-only : appel sans `new` → `TypeError` spec.
+pub(crate) fn dom_exception_ctor(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
+    let id = match this {
+        Value::Obj(id)
+            if e.heap
+                .obj(id)
+                .is_some_and(|o| o.proto == Value::Obj(e.protos.dom_exception)) =>
+        {
+            id
+        }
+        _ => return Err(e.type_error("DOMException constructor requires 'new'")),
+    };
+    let message = match arg(args, 0) {
+        Value::Undefined => String::new(),
+        v => e.to_js_string(v)?,
+    };
+    let name = match arg(args, 1) {
+        Value::Undefined => "Error".to_string(),
+        v => e.to_js_string(v)?,
+    };
+    let m = e.str_val(message.clone());
+    e.set_own(id, "message", m, false);
+    let n = e.str_val(name.clone());
+    e.set_own(id, "name", n, false);
+    let code = dom_exception_code(&name);
+    e.set_own(id, "code", Value::Num(f64::from(code)), false);
+    // `stack` own non-énumérable capturé à la construction —
+    // même convention que `error_value` (JS-C47).
+    let s = e.str_val(e.stack_text(&name, &message));
+    e.set_own(id, "stack", s, false);
+    Ok(Value::Undefined)
+}
+
 pub(crate) fn date_now(_e: &mut Engine, _t: Value, _args: &[Value]) -> JsResult<Value> {
     Ok(Value::Num(now_millis()))
 }

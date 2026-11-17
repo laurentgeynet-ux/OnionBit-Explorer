@@ -14,7 +14,8 @@ use super::*;
 
 /// `structuredClone(v)` — copie profonde spec `StructuredSerialize` :
 /// cycles préservés (table id→clone), `Fun`/`Promise`/`Proxy`/`Host`/
-/// `Symbol`/`Iter` non-clonables → `TypeError` (`DataCloneError`).
+/// `Symbol`/`Iter` non-clonables → `DOMException DataCloneError`
+/// (spec — JS-C587, triangulation V8 ; `TypeError` avant).
 pub(crate) fn structured_clone(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
     let mut seen: Vec<(ObjId, ObjId)> = Vec::new();
     clone_deep(e, arg(args, 0), &mut seen, 0)
@@ -95,14 +96,18 @@ pub(crate) fn clone_deep(
         _ => CloneShape::Ordinary,
     };
     match shape {
-        CloneShape::Err(w) => Err(e.type_error(format!("structuredClone: cannot clone {w}"))),
+        CloneShape::Err(w) => Err(e.dom_exception(
+            "DataCloneError",
+            format!("structuredClone: cannot clone {w}"),
+        )),
         CloneShape::Hst(h) => {
             crate::host_mark(h.class_name(), "serializable_clone");
             match h.serializable_clone(e)? {
                 Some(v) => clone_deep(e, v, seen, depth + 1),
-                None => {
-                    Err(e.type_error(format!("structuredClone: cannot clone {}", h.class_name())))
-                }
+                None => Err(e.dom_exception(
+                    "DataCloneError",
+                    format!("structuredClone: cannot clone {}", h.class_name()),
+                )),
             }
         }
         CloneShape::Buf(b) => Ok(Value::Obj(e.heap.alloc_obj(Object {

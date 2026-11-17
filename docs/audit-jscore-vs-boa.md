@@ -274,11 +274,15 @@ features par défaut sans `intl`.
   `KNOWN`/`KNOWN_V8` par moteur fautif — toute divergence
   nouvelle ou résolue échoue.
 
-### Mesure V8 (JS-C586, Node 26.7.0)
+### Mesure V8 (JS-C587, Node 26.7.0)
 
 **686 concordants / 2 divergences connues / 0 internal** —
-`KNOWN` = `re_source_str` (boa), `KNOWN_V8` = `clone_err_throws`
-(approximation jscore `TypeError` ≙ `DataCloneError`).
+`KNOWN` = `re_source_str` + `clone_err_throws` (**toutes deux
+boa-fautives** ; le shim `structuredClone` du `BOA_PRELUDE`
+jette `TypeError`), `KNOWN_V8` **vide** — `clone_err_throws`
+soldée en JS-C587 (`DOMException` installé dans le moteur nu :
+`DataCloneError` spec, `code` 25, `instanceof Error`/`DOMException`
+— sortie identique à V8).
 
 ### Mesure de référence (JS-C584, boa 0.22-dev + `annex-b`)
 
@@ -367,8 +371,10 @@ tous corrigés (+déviations boa documentées ci-dessus) :
   moteurs) → parité de backslashes (V8-aligné). **1 approximation
   assumée** gravée `KNOWN_V8` : `structuredClone` jette
   `TypeError` là où la spec WHATWG veut `DataCloneError`
-  DOMException (ctor `DOMException` vit dans `install_dom`,
-  absent de l'eval nu — fixe différée, règle réactive).
+  DOMException — **soldée en JS-C587** : `DOMException` installé
+  dans le moteur nu (ctor + proto `Error.prototype` + table
+  legacy `code` + 25 constantes), `structuredClone` non-clonable
+  → `DataCloneError` identique à V8.
   **2 artefacts du runner V8** corrigés : `eval` indirect →
   sémantique eval au lieu de Script (`var q;delete q` → `true`
   au lieu de `false` — `vm.runInThisContext` appliqué) ;

@@ -1487,6 +1487,9 @@ pub(crate) struct Protos {
     pub bigint: ObjId,
     /// `AggregateError.prototype` (proto `Error.prototype`).
     pub aggregate_error: ObjId,
+    /// `DOMException.prototype` (`WebIDL` : proto `Error.prototype`
+    /// — `e instanceof Error` vrai sur les exceptions hôte).
+    pub dom_exception: ObjId,
     /// `URL.prototype` — `toString`/`toJSON`.
     pub url: ObjId,
     /// `URLSearchParams.prototype` — `get`/`set`/`has`/`entries`…
@@ -1499,7 +1502,7 @@ pub(crate) struct Protos {
 
 impl Protos {
     /// Tous les prototypes — racines GC permanentes.
-    pub(crate) fn all(&self) -> [ObjId; 37] {
+    pub(crate) fn all(&self) -> [ObjId; 38] {
         [
             self.object,
             self.function,
@@ -1527,6 +1530,7 @@ impl Protos {
             self.typed_array,
             self.bigint,
             self.aggregate_error,
+            self.dom_exception,
             self.url,
             self.url_params,
             self.weak_map,
@@ -1626,6 +1630,10 @@ impl Engine {
         let typed_array = heap.alloc_obj(Object::ordinary(Value::Obj(object)));
         let bigint = heap.alloc_obj(Object::ordinary(Value::Obj(object)));
         let aggregate_error = heap.alloc_obj(Object::ordinary(Value::Obj(error)));
+        // WebIDL : `DOMException.prototype.[[Prototype]]` =
+        // `Error.prototype` (`instanceof Error` vrai — familles
+        // `AbortError`/`DataCloneError` détectées via Error).
+        let dom_exception = heap.alloc_obj(Object::ordinary(Value::Obj(error)));
         let url = heap.alloc_obj(Object::ordinary(Value::Obj(object)));
         let url_params = heap.alloc_obj(Object::ordinary(Value::Obj(object)));
         // Spec : `WeakMap.prototype`/`WeakSet.prototype` héritent de
@@ -1679,6 +1687,7 @@ impl Engine {
                 typed_array,
                 bigint,
                 aggregate_error,
+                dom_exception,
                 url,
                 url_params,
                 weak_map,
@@ -5262,6 +5271,21 @@ impl Engine {
     pub(crate) fn type_error(&mut self, msg: impl Into<String>) -> Thrown {
         let proto = self.protos.type_error;
         Thrown(self.error_value(proto, "TypeError", &msg.into()))
+    }
+
+    /// `DOMException` nommée (`{name, message, code, stack}` sur
+    /// `DOMException.prototype`) — `WebIDL` : les erreurs hôte
+    /// (`DataCloneError`, `AbortError`, `NotFoundError`…) sont
+    /// des `DOMException`, pas des `TypeError` — `e.name` et
+    /// `e instanceof DOMException` sont les détects réels des
+    /// sites (triangulation V8 JS-C586).
+    pub(crate) fn dom_exception(&mut self, name: &str, msg: impl Into<String>) -> Thrown {
+        let v = self.error_value(self.protos.dom_exception, name, &msg.into());
+        if let Value::Obj(id) = v.clone() {
+            let code = crate::builtins::ctors::dom_exception_code(name);
+            self.set_own(id, "code", Value::Num(f64::from(code)), false);
+        }
+        Thrown(v)
     }
 
     pub(crate) fn ref_error(&mut self, msg: impl Into<String>) -> Thrown {

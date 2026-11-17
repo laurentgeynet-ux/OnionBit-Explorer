@@ -379,6 +379,7 @@ impl BrowsingContext {
         let typed_array = ordinary(heap);
         let bigint = ordinary(heap);
         let aggregate_error = err_of(heap);
+        let dom_exception = err_of(heap);
         let url = ordinary(heap);
         let url_params = ordinary(heap);
         let weak_map = ordinary(heap);
@@ -422,6 +423,7 @@ impl BrowsingContext {
                 typed_array,
                 bigint,
                 aggregate_error,
+                dom_exception,
                 url,
                 url_params,
                 weak_map,
