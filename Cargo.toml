@@ -22,9 +22,9 @@ members = [
     # Surface agent EAP (ADR-0035) — protocole WS à handles,
     # deuxième client de Session.
     "crates/explorer-agent",
-    # Oracle différentiel jscore↔boa (audit/piste de conformité —
-    # outil de test, jamais en production).
-    "crates/explorer-boa-diff",
+    # L'oracle différentiel jscore↔boa (crates/explorer-boa-diff)
+    # a été débranché JS-C589 — historique git ; cliquet golden
+    # dans explorer-jscore/tests/oracle_ratchet.rs.
 ]
 
 [workspace.package]
