@@ -1436,6 +1436,45 @@ pub(crate) fn install(e: &mut Engine) {
     e.set_own(g, "Math", Value::Obj(math), false);
 }
 
+/// Arités spec (`fn.length`) — table générée depuis boa
+/// (`arities::ARITIES`, chemins `globalThis`-relatifs). Une passe
+/// **après tous les installs** (`builtins`/`collections`/`intl`/
+/// `temporal`/`json`/`typed_array`) : résout chaque chemin et
+/// réécrit le `length` own de la fonction (flags spec
+/// `{w:false,e:false,c:true}` posés par `native_fn` — on ne
+/// corrige que la valeur). Un chemin non résolu (hôte non
+/// installé, builtin absent) est ignoré.
+pub(crate) fn install_arities(e: &mut Engine) {
+    for &(path, arity) in arities::ARITIES {
+        let mut cur = Value::Obj(e.global);
+        let mut ok = true;
+        for seg in path.split('.') {
+            let Value::Obj(id) = cur else {
+                ok = false;
+                break;
+            };
+            if let Some(v) = e.get_prop(id, seg) {
+                cur = v;
+            } else {
+                ok = false;
+                break;
+            }
+        }
+        if let (true, Value::Obj(fid)) = (ok, cur) {
+            e.set_own_attrs(
+                fid,
+                "length",
+                Value::Num(f64::from(arity)),
+                crate::heap::PropAttrs {
+                    writable: false,
+                    enumerable: false,
+                    configurable: true,
+                },
+            );
+        }
+    }
+}
+
 // ------------------------------------------------------------------
 // helpers used inside natives
 // ------------------------------------------------------------------
@@ -1751,6 +1790,7 @@ fn now_millis() -> f64 {
 // référence via les re-exports glob — aucune sémantique changée.
 // ------------------------------------------------------------------
 
+pub(crate) mod arities;
 pub(crate) mod array;
 pub(crate) mod bigint;
 pub(crate) mod c17;

@@ -35,6 +35,20 @@ fn parse(s: &str) -> BTreeMap<String, String> {
 }
 
 fn main() {
+    // `--dump jscore|boa` : liste brute d'un moteur (génération
+    // de données — ex. table d'arités).
+    let args: Vec<String> = std::env::args().collect();
+    if let Some(i) = args.iter().position(|a| a == "--dump") {
+        let m = match args.get(i + 1).map(String::as_str) {
+            Some("jscore") => enumerate(explorer_boa_diff::eval_jscore, "jscore"),
+            Some("boa") => enumerate(explorer_boa_diff::eval_boa, "boa"),
+            _ => exit(2),
+        };
+        for (p, f) in &m {
+            println!("{p} {f}");
+        }
+        return;
+    }
     let jscore = enumerate(explorer_boa_diff::eval_jscore, "jscore");
     let boa = enumerate(explorer_boa_diff::eval_boa, "boa");
     let jk: BTreeSet<_> = jscore.keys().collect();

@@ -221,7 +221,7 @@ crypto.subtle étendu, streams async, `DisposableStack`/
 | 8 | A7 lone surrogates (repr JsString) | **L** | JSON/`.charCodeAt` — chantier représentation | ouvert — mesuré par l'oracle |
 | 9 | Oracle différentiel (BOA-01..04 à recréer) | M | mesure continue | ✅ reconstruit (`explorer-boa-diff`) |
 | 10 | Harness test262 | M | corpus élargi | ✅ reconstruit (sans oracle boa) |
-| 11 | Arités `length` des builtins (toutes 0 vs spec) | M | `fn.length === 1` checks | ouvert |
+| 11 | Arités `length` des builtins (toutes 0 vs spec) | M | `fn.length === 1` checks | ✅ fait — table `arities.rs` générée depuis boa (190 chemins), 0 flagdiff |
 | 12 | `Number(undefined)` → 0 au lieu de NaN | XS | conversion | ✅ corrigé (arité, pas valeur) |
 | 13 | `(0.5).toFixed(0)` → 0 au lieu de 1 | XS | demi vers le haut | ✅ corrigé (`floor(v+.5)` + `1e21`) |
 

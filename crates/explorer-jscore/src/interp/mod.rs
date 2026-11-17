@@ -1878,6 +1878,7 @@ impl Engine {
         crate::temporal::install(&mut e);
         crate::json::install(&mut e);
         crate::typed_array::install(&mut e);
+        crate::builtins::install_arities(&mut e);
         // Sondes JS-C313 (§B-4(c)) — `__sonde_defprop()`/
         // `__sonde_nullread()` drainent les journaux bornés en
         // texte : sondables via `/eval` sur le daemon live
@@ -2168,6 +2169,7 @@ impl Engine {
         crate::temporal::install(self);
         crate::json::install(self);
         crate::typed_array::install(self);
+        crate::builtins::install_arities(self);
         self.hooks.page_url = url.to_string();
         crate::context::install_ctx_window_props(self);
         self.parked.insert(parent, fresh);

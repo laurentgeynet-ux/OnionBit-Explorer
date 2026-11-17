@@ -14,7 +14,8 @@ function walk(o, path, depth) {
   for (var i = 0; i < names.length; i++) {
     var n = names[i], d;
     try { d = Object.getOwnPropertyDescriptor(o, n); } catch(e) { continue; }
-    out.push(path + '.' + n + ' ' + fd(d));
+    out.push(path + '.' + n + ' ' + fd(d) +
+      (n === 'length' && d && typeof d.value === 'number' ? ':' + d.value : ''));
     if (depth < 2 && d && d.value !== undefined && n !== 'arguments' && n !== 'caller') {
       walk(d.value, path + '.' + n, depth + 1);
     }
