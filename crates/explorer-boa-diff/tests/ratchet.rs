@@ -18,10 +18,19 @@ include!("../src/probes.rs");
 /// `(sonde, moteur fautif)` — divergences connues admises.
 /// `jscore` = jscore s'écarte de la spec ; `boa` = boa s'écarte.
 const KNOWN: &[(&str, &str)] = &[
-    // Vide — toutes les divergences mesurées ont été soldées
-    // (surrogates isolés préservés via `JsStr::units`, JS-C579).
-    // Une entrée = `(sonde, moteur fautif)` ; documenter le bug
-    // dans `docs/audit-jscore-vs-boa.md` avant d'ajouter.
+    // APIs hôte/navigation installées côté jscore, absentes de
+    // boa 0.22-dev (build path-dep sans `intl`) — déviation
+    // intentionnelle documentée (JS-C581, audit) : boa lève
+    // ReferenceError sur le global manquant, jscore exécute.
+    ("clone_deep", "boa"),
+    ("clone_circular", "boa"),
+    ("clone_map_set", "boa"),
+    ("clone_err_throws", "boa"),
+    ("intl_collator", "boa"),
+    ("intl_numfmt", "boa"),
+    // `Error.captureStackTrace` — extension V8 non-spec gardée
+    // pour la compat web (feature-detect) ; boa ne l'installe pas.
+    ("err_capture", "boa"),
 ];
 
 #[test]

@@ -264,11 +264,19 @@ features par défaut sans `intl`.
   divergences connues listeées par moteur fautif — toute
   nouvelle ou résolue échoue.
 
-### Mesure de référence (JS-C581, boa 0.22-dev)
+### Mesure de référence (JS-C582, boa 0.22-dev)
 
-Corpus : **384 concordants / 0 divergences / 0 internal** —
-`KNOWN` vide. Deux vagues d'élargissement ont chacune mesuré
-**6 divergences réelles**, toutes corrigées :
+Corpus : **498 concordants / 7 divergences connues / 0
+internal** — `KNOWN` initialisé : 7 divergences **intentionnelles**
+marquées `boa` (`structuredClone`×4, `Intl`×2 — APIs hôte absentes
+de boa ; `Error.captureStackTrace` — extension V8 compat). Bug boa
+mesuré hors corpus : `JSON.parse` imbriqué → **stack overflow
+natif dès ~100 niveaux** (jscore → `RangeError` bornée — la sonde
+a été retirée : elle tue le worker boa et le ratchet in-process).
+
+Trois vagues d'élargissement ont mesuré **14 bugs jscore réels**,
+tous corrigés (+7 déviations intentionnelles ci-dessus + 1 crash
+boa documenté) :
 
 - JS-C580 (~65 sondes) : `Number('0b11'/'0o17')` (préfixes
   binaire/octal absents du String→Number), `Math.sign(-0)` →
@@ -288,6 +296,14 @@ Corpus : **384 concordants / 0 divergences / 0 internal** —
   corrigés) ; **`encodeURIComponent(surrogate)`** encodait le
   FFFD au lieu de `URIError` ; **`array_includes` ignorant
   `fromIndex`**.
+- JS-C582 (~100 sondes, async/Atomics/DataView/TA/JSON/dates/
+  Reflect/destructuring) : **`delete a?.b.c` ne supprimait pas**
+  (l'opérande `Expr::Chain` tombait sur le bras `_` → éval +
+  `true` — nouveau `delete_chain` marche jusqu'à la base du
+  dernier pas, court-circuit nullish → `true`) ; **`eval` strict
+  fuyait les `var`** (spec `PerformEval` : env déclaratif enfant
+  quand `prog.strict` — `exec_program`/`eval_source_in`
+  paramétrés).
 
 Surface : **26 441 chemins jscore / 4 203 boa**, `boa-only`
 réduit à 2 déviations boa (`Error.prototype.stack` accesseur

@@ -82,19 +82,31 @@ impl Engine {
         .map_err(|err| {
             Thrown(self.error_value(self.protos.syntax_error, "SyntaxError", &err.to_string()))
         })?;
-        self.exec_program(&prog)
+        // `var`/`fn` d'un eval **strict** : env déclaratif enfant
+        // du global (spec `PerformEval`) — non persistants.
+        let env = if prog.strict {
+            Env::local(self.global_env.clone())
+        } else {
+            self.global_env.clone()
+        };
+        self.exec_program_env(&prog, env)
     }
 
     pub(crate) fn exec_program(&mut self, prog: &Program) -> JsResult<Value> {
+        self.exec_program_env(prog, self.global_env.clone())
+    }
+
+    /// `exec_program` dans un env explicite — l'eval strict y
+    /// passe un env déclaratif enfant (spec `PerformEval`).
+    pub(crate) fn exec_program_env(&mut self, prog: &Program, env: EnvRef) -> JsResult<Value> {
         let outer_strict = self.strict;
         self.strict |= prog.strict;
-        let r = self.exec_program_inner(prog);
+        let r = self.exec_program_inner(prog, env);
         self.strict = outer_strict;
         r
     }
 
-    pub(crate) fn exec_program_inner(&mut self, prog: &Program) -> JsResult<Value> {
-        let env = self.global_env.clone();
+    pub(crate) fn exec_program_inner(&mut self, prog: &Program, env: EnvRef) -> JsResult<Value> {
         let this = Value::Obj(self.global);
         // JS-C552 — résolution du corps programme : chaîne
         // statique complète jusqu'au global → les identifiants
@@ -167,7 +179,11 @@ impl Engine {
         })?;
         let outer_strict = self.strict;
         self.strict |= prog.strict;
-        let r = self.exec_program_in(env, this, &prog);
+        // Un eval **strict** déclare dans un env enfant —
+        // `var x` ne fuit pas chez l'appelant (spec `PerformEval`).
+        let scoped = Env::local(env.clone());
+        let run_env = if prog.strict { &scoped } else { env };
+        let r = self.exec_program_in(run_env, this, &prog);
         self.strict = outer_strict;
         r
     }

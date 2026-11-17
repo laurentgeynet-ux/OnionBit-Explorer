@@ -1432,6 +1432,11 @@ impl Engine {
                         self.delete_result(g, name)
                     }
                 }
+                // `delete a?.b.c` — la chaîne s'évalue jusqu'à la
+                // base du dernier pas membre ; court-circuit
+                // nullish → `true` (spec : delete sur undefined
+                // court-circuité = true).
+                Expr::Chain { head, steps } => self.delete_chain(env, this, head, steps),
                 _ => {
                     self.eval_expr(env, this, operand).ok();
                     Ok(Value::Bool(true))
@@ -1841,6 +1846,81 @@ impl Engine {
             }
         }
         Ok(cur)
+    }
+
+    /// `delete a?.b.c` — marche la chaîne jusqu'à la base du
+    /// dernier pas ; nullish en `Opt*` → `true` (spec). Le
+    /// dernier pas doit être un accès membre — `a?.b()` n'est
+    /// pas une cible de delete (le parser rejette ; ici : éval
+    /// simple puis `true`).
+    fn delete_chain(
+        &mut self,
+        env: &EnvRef,
+        this: Value,
+        head: &Expr,
+        steps: &[ChainStep],
+    ) -> JsResult<Value> {
+        let mut cur = self.eval_expr(env, this.clone(), head)?;
+        let mut recv = Value::Obj(self.global);
+        let last = steps.len().saturating_sub(1);
+        for (i, step) in steps.iter().enumerate() {
+            let site = std::ptr::from_ref::<ChainStep>(step) as usize;
+            // Dernier pas membre → delete sur la base courante.
+            if i == last {
+                let name = match step {
+                    ChainStep::Member(n) | ChainStep::OptMember(n) => Some(n.to_string()),
+                    ChainStep::Index(k) | ChainStep::OptIndex(k) => {
+                        let kv = self.eval_expr(env, this.clone(), k)?;
+                        Some(self.prop_key(kv)?)
+                    }
+                    _ => None,
+                };
+                if let ChainStep::OptMember(_) | ChainStep::OptIndex(_) = step {
+                    if matches!(cur, Value::Null | Value::Undefined) {
+                        return Ok(Value::Bool(true));
+                    }
+                }
+                if let Some(n) = name {
+                    return match cur {
+                        Value::Obj(id) => self.delete_result(id, &n),
+                        _ => Ok(Value::Bool(true)),
+                    };
+                }
+            }
+            match step {
+                ChainStep::Member(name) | ChainStep::OptMember(name) => {
+                    if matches!(step, ChainStep::OptMember(_))
+                        && matches!(cur, Value::Null | Value::Undefined)
+                    {
+                        return Ok(Value::Bool(true));
+                    }
+                    recv = cur.clone();
+                    cur = self.get_prop_value_at(cur, name, site)?;
+                }
+                ChainStep::Index(k) | ChainStep::OptIndex(k) => {
+                    if matches!(step, ChainStep::OptIndex(_))
+                        && matches!(cur, Value::Null | Value::Undefined)
+                    {
+                        return Ok(Value::Bool(true));
+                    }
+                    let kv = self.eval_expr(env, this.clone(), k)?;
+                    let key = self.prop_key(kv)?;
+                    recv = cur.clone();
+                    cur = self.get_prop_value_at(cur, &key, site)?;
+                }
+                ChainStep::Call(arg_exprs) | ChainStep::OptCall(arg_exprs) => {
+                    if matches!(step, ChainStep::OptCall(_))
+                        && matches!(cur, Value::Null | Value::Undefined)
+                    {
+                        return Ok(Value::Bool(true));
+                    }
+                    let args = self.eval_args(env, this.clone(), arg_exprs)?;
+                    cur = self.call_value(cur, recv.clone(), &args)?;
+                    recv = Value::Obj(self.global);
+                }
+            }
+        }
+        Ok(Value::Bool(true))
     }
 
     /// `==` per ES5 §11.9.3.
