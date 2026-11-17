@@ -244,14 +244,22 @@ fn needs_loader(body: &str) -> bool {
         } else if w.starts_with("export") {
             "export"
         } else {
-            rest = &rest[1..];
+            // Avance APRÈS le `i`/`e` trouvé (frontière de char —
+            // les deux sont ASCII) : `rest[1..]` sautait un octet
+            // depuis le début — panic sur char multi-octets en
+            // tête + O(n²) latent.
+            rest = &rest[i + 1..];
             continue;
         };
         let after = rest[i + word.len()..].chars().next();
         let bounded = !after.is_some_and(|c| c == '_' || c == '$' || c.is_alphanumeric());
         if bounded {
             let stmt = &rest[i + word.len()..];
-            let head = stmt[..stmt.len().min(300)]
+            // `..300` par `get` — un index-octet peut tomber en
+            // plein char multi-octets (`é`) → panic de slice.
+            let head = stmt
+                .get(..300)
+                .unwrap_or(stmt)
                 .split(';')
                 .next()
                 .unwrap_or(stmt);
@@ -591,6 +599,11 @@ fn loader_detecte() {
     assert!(needs_loader("let p = import(\"m.js\");"));
     assert!(!needs_loader("import.meta.url;"));
     assert!(!needs_loader("let x = 1; x.imported = 2;"));
+    // Régression JS-C594+ : char multi-octets en tête (`é`) +
+    // `i`/`e` plus loin — `rest[1..]` paniquait sur la frontière
+    // UTF-8 (signature test262.rs interceptée par catch_unwind).
+    assert!(!needs_loader("let café = inné;"));
+    assert!(needs_loader("let é = 1; import \"x.js\";"));
 }
 
 #[test]
