@@ -22,6 +22,9 @@ members = [
     # Surface agent EAP (ADR-0035) — protocole WS à handles,
     # deuxième client de Session.
     "crates/explorer-agent",
+    # Oracle différentiel jscore↔boa (audit/piste de conformité —
+    # outil de test, jamais en production).
+    "crates/explorer-boa-diff",
 ]
 
 [workspace.package]

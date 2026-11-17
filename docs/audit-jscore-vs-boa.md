@@ -218,15 +218,61 @@ crypto.subtle étendu, streams async, `DisposableStack`/
 | 5 | A4 exposer `TypedArray` global + statiques | M | ~49 chemins | ✅ fait |
 | 6 | A6 `message` protos erreurs | XS | 8 chemins | ✅ fait |
 | 7 | A8 divers (Iterator ctor accessor, `Function.prototype` callable, proto `length`, Annex B, WebIDL enum) | S–M | ~15 chemins | ✅ fait |
-| 8 | A7 lone surrogates (repr JsString) | **L** | JSON/`.charCodeAt` — chantier représentation | ouvert |
-| 9 | Oracle différentiel (BOA-01..04 à recréer) | M | mesure continue | ouvert |
+| 8 | A7 lone surrogates (repr JsString) | **L** | JSON/`.charCodeAt` — chantier représentation | ouvert — mesuré par l'oracle |
+| 9 | Oracle différentiel (BOA-01..04 à recréer) | M | mesure continue | ✅ reconstruit (`explorer-boa-diff`) |
 | 10 | Harness test262 | M | corpus élargi | ✅ reconstruit (sans oracle boa) |
 | 11 | Arités `length` des builtins (toutes 0 vs spec) | M | `fn.length === 1` checks | ouvert |
+| 12 | `Number(undefined)` → 0 au lieu de NaN | XS | conversion | ouvert — trouvé par l'oracle |
+| 13 | `(0.5).toFixed(0)` → 0 au lieu de 1 | XS | demi vers le haut | ouvert — trouvé par l'oracle |
 
 Items 1–7 soldés : **~600 chemins de gap descripteur fermés**
-(8 commits, `0e7731e`→`552199d`). Reste l'ouverture de chantier
-sur les items 8–11 — seul le chantier représentation (A7) est
-de nature structurelle. Ordre restant suggéré : 9 (oracle pour
-piloter la mesure continue) → 11 (arités, quick win) → 8 (si
-nécessité site réel — la représentation UTF-16 interne est le
-seul chantier lourd).
+(8 commits, `0e7731e`→`552199d`). Item 9 livré ci-dessous ; la
+mesure de l'oracle a immédiatement produit les items 12–13
+(preuve d'utilité). Reste : 11 (quick win) → 8 (si nécessité
+site réel — seul chantier structurel).
+
+---
+
+## Oracle différentiel `explorer-boa-diff` (reconstruit)
+
+Crate de conformité, **jamais en production** : `boa_engine` en
+path-dep sur le checkout local (`D:/Projet/SourceRust/boa`),
+features par défaut sans `intl`.
+
+- **`eval_jscore` / `eval_boa`** → `Outcome` canonique
+  (`Value(ToString)` / `Throw(Nom: msg)` / `Syntax` / `Internal`) —
+  budgets boa bornés (`loop_iteration = 2M`, piles par défaut).
+- **`concordant`** : même variante ; `Value` exact ; `Throw` même
+  classe (le message n'est pas spec) ; `Syntax` symétrique.
+- **`boa-diff`** : corpus `src/probes.rs` (~120 sondes —
+  littéraux, conversions, UTF-16, tableaux, descripteurs,
+  classes, erreurs, regexp, itérateurs, Map/Set, JSON, Math,
+  Proxy, Symbol, promesses sync, TypedArrays, divers langage).
+  **Isolation par processus** : chaque sonde tourne dans un
+  enfant `--worker` — un crash natif d'un moteur (observé :
+  récursion boa 0.22-dev sur `for-of`+`break`) devient
+  `Internal(crash)` au lieu de tuer le runner.
+- **`boa-surface`** : matrice d'énumération (`surface.js` —
+  `getOwnPropertyNames`/`Symbols`/descripteurs, profondeur 2)
+  comparée chemin par chemin.
+- **Cliquet** `tests/ratchet.rs` : rejoue le corpus en test ;
+  divergences connues listeées par moteur fautif — toute
+  nouvelle ou résolue échoue.
+
+### Mesure de référence (2026-11-17, boa 0.22-dev)
+
+Corpus : **188 concordants / 5 divergences / 0 internal** —
+toutes documentées dans `KNOWN` :
+
+| Sonde | Fautif | Détail |
+|---|---|---|
+| `str_fromcc`, `str_lone_surrogate` | jscore | lone surrogate → U+FFFD (item 8) |
+| `cvt_num_und` | jscore | `Number(undefined)` → 0 (item 12) |
+| `num_tofixed` | jscore | `(0.5).toFixed(0)` → 0 (item 13) |
+| `str_astral_idx` | boa | `'😀'[0] !== '\uD800'` — bug boa, jscore spec-correct |
+
+Surface : **26 441 chemins jscore / 4 203 boa**, `boa-only`
+réduit à 2 déviations boa (`Error.prototype.stack` accesseur
+non-spec, `RegExp.prototype.lastIndex` modèle ES5) + bruit du
+script ; **0 flagdiff** après correction du setter
+`%TypedArray%.prototype[@@toStringTag]` (spec : get seul).
