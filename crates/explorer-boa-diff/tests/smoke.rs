@@ -7,7 +7,10 @@
 
 use explorer_boa_diff::{concordant, eval_boa, eval_jscore, Outcome};
 
-include!("../src/probes.rs");
+include!(concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/../explorer-jscore/tests/oracle_corpus.rs"
+));
 
 #[test]
 fn jscore_value() {

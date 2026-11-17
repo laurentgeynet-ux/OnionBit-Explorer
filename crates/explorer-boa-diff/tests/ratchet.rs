@@ -13,7 +13,10 @@
 
 use explorer_boa_diff::{concordant, eval_boa, eval_jscore, eval_v8, v8_available, Outcome};
 
-include!("../src/probes.rs");
+include!(concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/../explorer-jscore/tests/oracle_corpus.rs"
+));
 
 /// `(sonde, moteur fautif)` — divergences connues admises.
 /// `jscore` = jscore s'écarte de la spec ; `boa` = boa s'écarte ;

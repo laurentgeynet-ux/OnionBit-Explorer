@@ -3,12 +3,16 @@
 // SPDX-License-Identifier: MIT OR Apache-2.0
 
 // Corpus de sondes différentielles — chaque sonde est un script
-// autosuffisant dont la complétion (ou l'erreur) est canonisée et
-// comparée entre jscore et boa. Couverture : littéraux, opérateurs,
-// conversions, chaînes/UTF-16, tableaux, objets/descripteurs,
-// prototypes, erreurs, regexp, itérateurs, Map/Set, promesses
-// (résolution synchrone uniquement), TypedArrays, JSON, tri.
-// Fichier inclus via `include!` dans le binaire et le cliquet.
+// autosuffisant dont la complétion (ou l'erreur) est canonisée.
+// Historiquement comparée jscore↔boa↔V8 (oracle `explorer-
+// boa-diff`, audit `docs/audit-jscore-vs-boa.md`) ; depuis
+// JS-C588 le fichier vit **ici** : le cliquet golden
+// `oracle_ratchet.rs` rejoue jscore seul contre la baseline
+// gravée, l'oracle vivant l'`include!` par `CARGO_MANIFEST_DIR`.
+// Couverture : littéraux, opérateurs, conversions, chaînes/
+// UTF-16, tableaux, objets/descripteurs, prototypes, erreurs,
+// regexp, itérateurs, Map/Set, promesses (résolution synchrone
+// uniquement), TypedArrays, JSON, tri.
 
 /// `(nom, source)` — noms stables, préfixés par famille.
 pub const PROBES: &[(&str, &str)] = &[

@@ -15,7 +15,10 @@ use std::process::{Command, Stdio};
 
 use explorer_boa_diff::{concordant, eval_boa, eval_jscore, eval_v8, v8_available, Outcome};
 
-include!("probes.rs");
+include!(concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/../explorer-jscore/tests/oracle_corpus.rs"
+));
 
 fn main() {
     let args: Vec<String> = env::args().skip(1).collect();
