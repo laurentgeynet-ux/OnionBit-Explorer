@@ -7,6 +7,8 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+- **Audit-boa A6 — `name`/`message` own sur protos NativeError** (`explorer-jscore` — audit boa, ~8 chemins : TypeError/ReferenceError/SyntaxError n'avaient ni `name` ni `message` propres ; RangeError/EvalError/URIError/AggregateError avaient `name` mais pas `message`). Boucle unifiée sur les 7 protos : `name` = nom du ctor + `message` = `""`, `{w:true,e:false,c:true}` spec. Lib 54/54.
+
 - **Audit-boa A4 — `%TypedArray%` global exposé** (`explorer-jscore` — audit boa, ~49 chemins : le proto interne `%TypedArray%.prototype` existait mais le ctor abstrait n'était pas en global). `new TypedArray()`/`TypedArray()` → `TypeError` (intrinsèque abstrait, spec 23.2.1) ; `prototype` verrouillé `{000}` vers le proto partagé ; `from`/`of` génériques (`this` = ctor cible → `new this(len)` + recopie — `TypedArray.from.call(Uint8Array, [1,2,3])` produit un `Uint8Array`) ; `@@species` ; les 9 concrets chaînés `Ctor.[[Prototype]] = %TypedArray%` (héritent les génériques — leurs `from`/`of`/`@@species` propres bound masquent, déviation observable mineure vs héritage spec). Lib 54/54.
 
 - **Audit-boa A5 — `@@species` accesseur sur les ctors species-aware** (`explorer-jscore` — audit boa, ~38 chemins : Array, RegExp, Map, Set, ArrayBuffer, SharedArrayBuffer et les 9 TypedArray concrets n'avaient pas `Symbol.species` ; seul Promise l'avait). Nouveau `builtins::species::install_species` partagé (getter `get [Symbol.species]` → `return this`, accesseur `{e:false,c:true}`, pas de setter — spec). Verrou : 8/8 familles exposent le getter, `Array[Symbol.species] === Array`. Lib 54/54.

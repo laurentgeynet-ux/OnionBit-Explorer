@@ -170,25 +170,30 @@ pub(crate) fn install(e: &mut Engine) {
         aggregate_error_ctor,
         e.protos.aggregate_error,
     );
-    // Spec : `AggregateError.prototype.name` = "AggregateError"
-    // (propre, pas hérité d'`Error.prototype`).
-    {
-        let an = e.str_val("AggregateError");
-        e.set_own(e.protos.aggregate_error, "name", an, false);
-    }
     // `EvalError`/`RangeError`/`URIError` — mêmes gabarits que
     // `TypeError` (dev.to : table d'intrinsèques `%EvalError%`,
     // JS-C56 vague 2).
     let ev_err = ctor(e, "EvalError", eval_error_ctor, e.protos.eval_error);
     let rg_err = ctor(e, "RangeError", range_error_ctor, e.protos.range_error);
     let ur_err = ctor(e, "URIError", uri_error_ctor, e.protos.uri_error);
+    // Spec NativeError : chaque proto porte `name` (nom du ctor)
+    // et `message` ("") en props **propres** `{w:true,e:false,
+    // c:true}` — sans elles l'héritage `Error.prototype` rend
+    // `name="Error"`/`message=""` visibles mais non propres
+    // (audit boa A6).
     for (p, n) in [
+        (p_terr, "TypeError"),
+        (p_rerr, "ReferenceError"),
+        (p_serr, "SyntaxError"),
         (e.protos.eval_error, "EvalError"),
         (e.protos.range_error, "RangeError"),
         (e.protos.uri_error, "URIError"),
+        (e.protos.aggregate_error, "AggregateError"),
     ] {
         let nv = e.str_val(n);
         e.set_own(p, "name", nv, false);
+        let mv = e.str_val("");
+        e.set_own(p, "message", mv, false);
     }
     let date = ctor(e, "Date", date_ctor, p_date);
 

@@ -81,7 +81,7 @@ manquent : `Array`, `ArrayBuffer`, `Map`, `Set`, `RegExp`,
 (`Uint8Array`…). Accesseur `{get}` `{c:true}` — fix ponctuel
 par constructeur.
 
-### A6. Erreurs — `message` propre des protos natifs — **8 chemins**
+### A6. Erreurs — `message` propre des protos natifs — **8 chemins** ✅ *fait (2026-11-17)*
 
 Spec : chaque `XxxError.prototype` porte `message: ""` propre
 (et `name`). jscore ne le pose pas sur `AggregateError`/
