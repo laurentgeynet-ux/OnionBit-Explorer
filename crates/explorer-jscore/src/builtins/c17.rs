@@ -150,6 +150,37 @@ pub(crate) fn iterator_ctor(e: &mut Engine, _t: Value, _a: &[Value]) -> JsResult
     Err(e.type_error("The Iterator constructor is abstract"))
 }
 
+/// `get Iterator.prototype.constructor` (spec ES2025) — bound
+/// arg = le ctor `%Iterator%`. Le setter spec associé
+/// ([`iterator_ctor_set`]) laisse les sous-classes redéfinir.
+pub(crate) fn iterator_ctor_get(_e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
+    Ok(arg(args, 0))
+}
+
+/// `set Iterator.prototype.constructor` (spec) — `CreateData-
+/// PropertyOrThrow(this, "constructor", v)` : data prop propre
+/// `{w:true,e:true,c:true}` qui masque l'accesseur.
+pub(crate) fn iterator_ctor_set(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
+    if let Value::Obj(id) = this {
+        e.set_own(id, "constructor", arg(args, 0), true);
+    }
+    Ok(Value::Undefined)
+}
+
+/// `get Iterator.prototype[@@toStringTag]` (spec) — `"Iterator"`.
+pub(crate) fn iterator_tag_get(e: &mut Engine, _t: Value, _a: &[Value]) -> JsResult<Value> {
+    Ok(e.str_val("Iterator"))
+}
+
+/// `set Iterator.prototype[@@toStringTag]` (spec) — data prop
+/// propre `{w:true,e:true,c:true}` masquant l'accesseur.
+pub(crate) fn iterator_tag_set(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
+    if let Value::Obj(id) = this {
+        e.set_own(id, crate::interp::SYM_TO_STRING_TAG, arg(args, 0), true);
+    }
+    Ok(Value::Undefined)
+}
+
 /// `Iterator.from(v)` — un itérateur passe tel quel (spec :
 /// `GetIteratorFlattenable`), un itérable passe par `@@iterator`.
 pub(crate) fn iterator_from(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {

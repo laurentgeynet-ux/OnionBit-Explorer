@@ -1717,6 +1717,6 @@ pub(crate) fn install_streams(e: &mut Engine) {
             );
             e.set_own(proto, "constructor", fv.clone(), false);
         }
-        e.set_own(g, name, fv, false);
+        e.set_own(g, name, fv, true);
     }
 }

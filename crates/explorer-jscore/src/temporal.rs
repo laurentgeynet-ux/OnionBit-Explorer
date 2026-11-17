@@ -2445,6 +2445,12 @@ fn now_instant(e: &mut Engine, _t: Value, _a: &[Value]) -> JsResult<Value> {
     mk(e, "Instant", TempData::Instant { ns: now_ns() })
 }
 
+/// `Temporal.Now.zonedDateTimeISO()` — fuseau unique UTC (déviation
+/// documentée : pas d'argument `timeZoneLike`).
+fn now_zdt(e: &mut Engine, _t: Value, _a: &[Value]) -> JsResult<Value> {
+    mk(e, "ZonedDateTime", TempData::Zoned { ns: now_ns() })
+}
+
 /// `Temporal.Instant` depuis epoch **ms flottant** — porte de
 /// `Date.prototype.toTemporalInstant`.
 pub(crate) fn instant_from_f64_ms(e: &mut Engine, ms: f64) -> JsResult<Value> {
@@ -2684,6 +2690,7 @@ pub(crate) fn install(e: &mut Engine) {
     {
         let now = e.new_object();
         e.add_method(now, "instant", now_instant);
+        e.add_method(now, "zonedDateTimeISO", now_zdt);
         e.add_method(now, "plainDateTimeISO", now_pdt);
         e.add_method(now, "plainDateISO", now_pdate);
         e.add_method(now, "plainTimeISO", now_ptime);

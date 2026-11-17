@@ -251,7 +251,7 @@ impl Engine {
         self.xhr.transport = Some(transport);
         let v = self.native_fn("XMLHttpRequest", xhr_ctor);
         let g = self.global;
-        self.set_own(g, "XMLHttpRequest", v.clone(), false);
+        self.set_own(g, "XMLHttpRequest", v.clone(), true);
         // `XMLHttpRequest.prototype` réel (constant + méthodes en
         // bound `hostMethod` re-dispatchant `Host::invoke` sur le
         // receveur) : les bundles instrumentent le proto —
@@ -344,7 +344,7 @@ impl Engine {
                     crate::heap::PropAttrs::FIXED,
                 );
             }
-            self.set_own(g, name, f, false);
+            self.set_own(g, name, f, true);
         }
         self.install_fetch();
         self.install_abort();
@@ -1166,13 +1166,13 @@ impl Engine {
         }
         let g = self.global;
         let v = self.native_fn("fetch", fetch_fn);
-        self.set_own(g, "fetch", v, false);
+        self.set_own(g, "fetch", v, true);
         let hc = self.native_fn("Headers", headers_ctor);
         self.link_ctor(hc.clone(), self.xhr.headers_proto);
-        self.set_own(g, "Headers", hc, false);
+        self.set_own(g, "Headers", hc, true);
         let rc = self.native_fn("Request", request_ctor);
         self.link_ctor(rc.clone(), self.xhr.req_proto);
-        self.set_own(g, "Request", rc, false);
+        self.set_own(g, "Request", rc, true);
         let sc = self.native_fn("Response", response_ctor);
         self.link_ctor(sc.clone(), self.xhr.res_proto);
         if let Value::Obj(cid) = sc {
@@ -1180,7 +1180,7 @@ impl Engine {
             self.add_method(cid, "redirect", response_redirect);
             self.add_method(cid, "json", response_json);
         }
-        self.set_own(g, "Response", sc, false);
+        self.set_own(g, "Response", sc, true);
         // `FormData` (JS-C67) — `new FormData()` valide sans DOM ;
         // l'argument `form` exige le miroir (`install_dom`).
         crate::dom_host::install_formdata_global(self);
@@ -2810,7 +2810,7 @@ impl Engine {
     fn install_abort(&mut self) {
         let g = self.global;
         let ac = self.native_fn("AbortController", abort_controller_ctor);
-        self.set_own(g, "AbortController", ac, false);
+        self.set_own(g, "AbortController", ac, true);
         let asig = self.native_fn("AbortSignal", abort_signal_ctor);
         if let Value::Obj(cid) = asig {
             // `AbortSignal.prototype` — `sig instanceof
@@ -2851,7 +2851,7 @@ impl Engine {
             let f = self.native_fn("any", abort_signal_static_any);
             self.set_own(cid, "any", f, false);
         }
-        self.set_own(g, "AbortSignal", asig, false);
+        self.set_own(g, "AbortSignal", asig, true);
     }
 }
 

@@ -104,7 +104,7 @@ UTF-16-corrects (JS-C263). Résoudre = représentation
 `JsString`-style (latin1/UTF-16) — chantier à part entière,
 bénéfice réel plus faible qu'en BOA-02.
 
-### A8. Divers ponctuels
+### A8. Divers ponctuels ✅ *fait (2026-11-17)*
 
 - `Function.prototype` : `typeof` doit être `'function'`
   (objet appelable) — jscore rend `'object'` ; flags `{000}`.

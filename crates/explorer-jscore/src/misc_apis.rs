@@ -1108,7 +1108,7 @@ pub(crate) fn install_misc(e: &mut Engine) {
         );
         e.set_own(p, "constructor", bc.clone(), false);
     }
-    e.set_own(g, "BroadcastChannel", bc, false);
+    e.set_own(g, "BroadcastChannel", bc, true);
     // `Notification` — stub honnête (`permission` 'default',
     // `requestPermission` → 'denied', instances inertes).
     let nf = e.native_fn("Notification", notif_ctor as crate::heap::NativeFn);
@@ -1130,15 +1130,15 @@ pub(crate) fn install_misc(e: &mut Engine) {
         e.add_method(cid, "requestPermission", notif_request_permission);
         e.set_own(cid, "maxActions", Value::Num(0.0), true);
     }
-    e.set_own(g, "Notification", nf, false);
+    e.set_own(g, "Notification", nf, true);
     // `reportError` — réel (dispatch + hook).
     let re = e.native_fn("reportError", report_error as crate::heap::NativeFn);
-    e.set_own(g, "reportError", re, false);
+    e.set_own(g, "reportError", re, true);
     // `getSelection` — DOM requis (Selection = nœuds miroir) ;
     // posé par install_dom directement.
     if e.dom_ctx.is_some() {
         let gs = e.native_fn("getSelection", get_selection as crate::heap::NativeFn);
-        e.set_own(g, "getSelection", gs, false);
+        e.set_own(g, "getSelection", gs, true);
     }
     // `__tcfapi` (+ APIs sœurs sous politique résolue) —
     // délégué à `cmp.rs` (JS-C259) : stub honnête CMP-less
@@ -5270,5 +5270,5 @@ pub(crate) fn install_observable(e: &mut Engine) {
         e.set_own(cid, "from", from, false);
     }
     let g = e.global;
-    e.set_own(g, "Observable", f, false);
+    e.set_own(g, "Observable", f, true);
 }

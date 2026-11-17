@@ -329,7 +329,7 @@ impl Engine {
             self.set_own(p, "constructor", v.clone(), false);
         }
         let g = self.global;
-        self.set_own(g, "MessageChannel", v, false);
+        self.set_own(g, "MessageChannel", v, true);
         // `MessagePort` — interface globale non constructible
         // (spec : `Illegal constructor`) ; les instruments la
         // patchent (`MessagePort.prototype.postMessage`,
@@ -359,7 +359,7 @@ impl Engine {
             );
             self.set_own(mp_proto, "constructor", mp.clone(), false);
         }
-        self.set_own(g, "MessagePort", mp, false);
+        self.set_own(g, "MessagePort", mp, true);
     }
 
     /// `new MessagePort()` — interface abstraite spec :

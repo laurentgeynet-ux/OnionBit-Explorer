@@ -3622,7 +3622,7 @@ pub(crate) fn install_mse(e: &mut Engine) {
         }
         e.add_method(fid, "isTypeSupported", ms_is_type_supported);
     }
-    e.set_own(g, "MediaSource", fv, false);
+    e.set_own(g, "MediaSource", fv, true);
     // Interfaces non constructibles — ctor `Illegal constructor`
     // + vrai prototype (`instanceof`, feature-detect proto).
     for (name, ctor, proto) in [
@@ -3669,7 +3669,7 @@ pub(crate) fn install_mse(e: &mut Engine) {
                 }
             }
         }
-        e.set_own(g, name, fv, false);
+        e.set_own(g, name, fv, true);
     }
 }
 

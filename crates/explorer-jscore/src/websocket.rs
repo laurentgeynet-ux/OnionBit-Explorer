@@ -824,7 +824,7 @@ pub(crate) fn install_websocket(e: &mut Engine) {
             e.set_own(cid, k, Value::Num(n), true);
         }
     }
-    e.set_own(g, "WebSocket", sc, false);
+    e.set_own(g, "WebSocket", sc, true);
 }
 
 /// `args[i]` ou `Undefined` (mirroir du helper files.rs).

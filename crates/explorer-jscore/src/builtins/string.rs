@@ -681,6 +681,52 @@ pub(crate) fn regexp_ctor(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult
     e.make_regexp(&pat, &flags)
 }
 
+/// `RegExp.prototype.compile(pattern, flags)` — Annex B.2.4
+/// (dépréciée, sites legacy) : **réinitialise** `this` avec un
+/// nouveau pattern + flags (`[[RegExpMatcher]]` requis — `this`
+/// non-RegExp → `TypeError`) et `lastIndex` → 0.
+pub(crate) fn regexp_compile(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
+    let Value::Obj(id) = this else {
+        return Err(e.type_error("compile requires a RegExp receiver"));
+    };
+    if !matches!(e.heap.obj(id).map(|o| &o.kind), Some(ObjKind::RegExp(_))) {
+        return Err(e.type_error("compile requires a RegExp receiver"));
+    }
+    // Mêmes règles de résolution source/flags que le ctor.
+    let (pat, flags) = match arg(args, 0) {
+        v @ Value::Obj(_) => {
+            if let Some(r) = re_of(e, v.clone()) {
+                let flags = match arg(args, 1) {
+                    Value::Undefined => r.flag_string(),
+                    f => e.to_js_string(f)?,
+                };
+                (r.source.clone(), flags)
+            } else {
+                (e.to_js_string(v)?, String::new())
+            }
+        }
+        Value::Undefined => (String::new(), String::new()),
+        v => (e.to_js_string(v)?, String::new()),
+    };
+    let flags = if flags.is_empty() {
+        match arg(args, 1) {
+            Value::Undefined => flags,
+            f => e.to_js_string(f)?,
+        }
+    } else {
+        flags
+    };
+    let re = match crate::regexp::JsRegExp::compile(&pat, &flags) {
+        Ok(r) => r,
+        Err(msg) => return Err(e.syntax_error(&msg)),
+    };
+    if let Some(o) = e.heap.obj_mut(id) {
+        o.kind = ObjKind::RegExp(std::rc::Rc::new(re));
+    }
+    let _ = e.set_prop(id, "lastIndex", Value::Num(0.0));
+    Ok(Value::Undefined)
+}
+
 pub(crate) fn regexp_exec(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
     let (re, id) = as_regexp(e, this)?;
     let s = e.to_js_string(arg(args, 0))?;

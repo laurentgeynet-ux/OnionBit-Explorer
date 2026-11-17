@@ -281,6 +281,33 @@ pub(crate) fn date_get_time(e: &mut Engine, this: Value, _args: &[Value]) -> JsR
     }
 }
 
+/// `Date.prototype[@@toPrimitive](hint)` (spec 21.4.4.45) —
+/// **exception Date** : `hint === "default"` est traité comme
+/// `"string"` (→ `toString` puis `valueOf`) à l'inverse de
+/// `OrdinaryToPrimitive` ; `"number"` → `valueOf` puis
+/// `toString`. Autre hint → `TypeError`.
+pub(crate) fn date_to_primitive(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
+    let hint = e.to_js_string(arg(args, 0))?;
+    let order: [&str; 2] = match hint.as_str() {
+        "number" => ["valueOf", "toString"],
+        "string" | "default" => ["toString", "valueOf"],
+        _ => return Err(e.type_error("invalid hint")),
+    };
+    if let Value::Obj(id) = this.clone() {
+        for n in order {
+            if let Some(m) = e.get_prop(id, n) {
+                if e.is_callable(m.clone()) {
+                    let r = e.call_value(m, this.clone(), &[])?;
+                    if !matches!(r, Value::Obj(_)) {
+                        return Ok(r);
+                    }
+                }
+            }
+        }
+    }
+    Err(e.type_error("cannot convert Date to primitive"))
+}
+
 pub(crate) fn date_to_string(e: &mut Engine, this: Value, _a: &[Value]) -> JsResult<Value> {
     let ms = date_ms(e, this)?;
     Ok(e.str_val(if ms.is_finite() {

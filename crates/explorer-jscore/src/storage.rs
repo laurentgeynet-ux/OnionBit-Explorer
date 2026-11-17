@@ -74,9 +74,9 @@ impl Engine {
                 }
             }
         }
-        self.set_own(g, "Storage", f, false);
-        self.set_own(g, "localStorage", lv, false);
-        self.set_own(g, "sessionStorage", sv, false);
+        self.set_own(g, "Storage", f, true);
+        self.set_own(g, "localStorage", lv, true);
+        self.set_own(g, "sessionStorage", sv, true);
     }
 }
 

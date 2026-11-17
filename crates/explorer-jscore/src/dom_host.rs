@@ -538,10 +538,10 @@ impl Engine {
                 self.set_own(sid, k, Value::Num(f64::from(v)), true);
             }
             let g = self.global;
-            self.set_own(g, "innerWidth", Value::Num(f64::from(w)), false);
-            self.set_own(g, "innerHeight", Value::Num(f64::from(h)), false);
-            self.set_own(g, "outerWidth", Value::Num(f64::from(w)), false);
-            self.set_own(g, "outerHeight", Value::Num(f64::from(h)), false);
+            self.set_own(g, "innerWidth", Value::Num(f64::from(w)), true);
+            self.set_own(g, "innerHeight", Value::Num(f64::from(h)), true);
+            self.set_own(g, "outerWidth", Value::Num(f64::from(w)), true);
+            self.set_own(g, "outerHeight", Value::Num(f64::from(h)), true);
         }
     }
 
@@ -4221,7 +4221,7 @@ impl Engine {
         }
         self.dom_ctx = Some((dom.clone(), cache.clone()));
         let g = self.global;
-        self.set_own(g, "document", doc.clone(), false);
+        self.set_own(g, "document", doc.clone(), true);
 
         // Fixed, low-fingerprint navigator — by design.
         // `userAgent` aligné sur l'en-tête HTTP `User-Agent`
@@ -4686,7 +4686,7 @@ impl Engine {
         let osc = self.str_val("");
         self.set_own(nav, "oscpu", osc, true);
         self.set_own(nav, "pdfViewerEnabled", Value::Bool(false), true);
-        self.set_own(g, "navigator", Value::Obj(nav), false);
+        self.set_own(g, "navigator", Value::Obj(nav), true);
 
         // `Worker` borné (JS-C29) — le constructeur est présent
         // pour la détection de feature ; sans `set_worker_factory`
@@ -4698,8 +4698,8 @@ impl Engine {
         self.install_channel_ctor();
         // `window`/`self`/`globalThis` — the global object itself.
         let gv = Value::Obj(g);
-        self.set_own(g, "window", gv.clone(), false);
-        self.set_own(g, "self", gv.clone(), false);
+        self.set_own(g, "window", gv.clone(), true);
+        self.set_own(g, "self", gv.clone(), true);
         self.set_own(g, "globalThis", gv, false);
         // JS-C560 — surface `Window` fréquente manquante :
         // handlers `on*` (GlobalEventHandlers + WindowEventHandlers
@@ -4710,13 +4710,13 @@ impl Engine {
             if self.heap.obj(g).is_some_and(|o| o.find(h).is_some()) {
                 continue;
             }
-            self.set_own(g, h, Value::Null, false);
+            self.set_own(g, h, Value::Null, true);
         }
         for k in ["screenX", "screenY", "screenLeft", "screenTop"] {
             if self.heap.obj(g).is_some_and(|o| o.find(k).is_some()) {
                 continue;
             }
-            self.set_own(g, k, Value::Num(0.0), false);
+            self.set_own(g, k, Value::Num(0.0), true);
         }
         for b in [
             "locationbar",
@@ -4742,7 +4742,7 @@ impl Engine {
                     configurable: true,
                 },
             );
-            self.set_own(g, b, Value::Obj(bar), false);
+            self.set_own(g, b, Value::Obj(bar), true);
         }
         if self
             .heap
@@ -4780,7 +4780,7 @@ impl Engine {
                     configurable: true,
                 },
             );
-            self.set_own(g, "viewport", Value::Obj(vp), false);
+            self.set_own(g, "viewport", Value::Obj(vp), true);
         }
         // Petits namespaces window : `originAgentCluster`
         // (isolé — la session l'est déjà), `credentialless`
@@ -4788,8 +4788,8 @@ impl Engine {
         // no-op, `documentPictureInPicture`/`queryLocalFonts`/
         // `getScreenDetails`/`fetchLater` honnêtes par rejet ou
         // résultat trivial.
-        self.set_own(g, "originAgentCluster", Value::Bool(true), false);
-        self.set_own(g, "credentialless", Value::Bool(false), false);
+        self.set_own(g, "originAgentCluster", Value::Bool(true), true);
+        self.set_own(g, "credentialless", Value::Bool(false), true);
         {
             let cr = self.new_object();
             let gr = self.native_fn("getReports", |e: &mut Engine, _t, _a| {
@@ -4799,13 +4799,13 @@ impl Engine {
                 Ok(Value::Obj(pid))
             });
             self.set_own(cr, "getReports", gr, true);
-            self.set_own(g, "crashReport", Value::Obj(cr), false);
+            self.set_own(g, "crashReport", Value::Obj(cr), true);
         }
         {
             let lq = self.new_object();
             let sc = self.native_fn("setConsumer", |_e, _t, _a| Ok(Value::Undefined));
             self.set_own(lq, "setConsumer", sc, true);
-            self.set_own(g, "launchQueue", Value::Obj(lq), false);
+            self.set_own(g, "launchQueue", Value::Obj(lq), true);
         }
         {
             let dp = self.new_object();
@@ -4816,7 +4816,7 @@ impl Engine {
                 Ok(Value::Obj(pid))
             });
             self.set_own(dp, "requestWindow", rw, true);
-            self.set_own(g, "documentPictureInPicture", Value::Obj(dp), false);
+            self.set_own(g, "documentPictureInPicture", Value::Obj(dp), true);
         }
         {
             // `PushManager` (JS-C560) — aucun service push :
@@ -4854,7 +4854,7 @@ impl Engine {
                     configurable: true,
                 },
             );
-            self.set_own(g, "pushManager", Value::Obj(pm), false);
+            self.set_own(g, "pushManager", Value::Obj(pm), true);
         }
         for (m, f) in [
             (
@@ -4864,7 +4864,7 @@ impl Engine {
             ("getScreenDetails", nav_unsupported_reject),
         ] {
             let v = self.native_fn(m, f);
-            self.set_own(g, m, v, false);
+            self.set_own(g, m, v, true);
         }
         // Méthodes de gestion de fenêtre — hôte-only, no-op
         // tolérant (le moteur ne pilote pas l'OS).
@@ -4877,7 +4877,7 @@ impl Engine {
             "fetchLater",
         ] {
             let v = self.native_fn(m, |_e, _t, _a| Ok(Value::Undefined));
-            self.set_own(g, m, v, false);
+            self.set_own(g, m, v, true);
         }
         // `top`/`parent`/`frames`/`length`/`closed`/`postMessage` —
         // accessors résolvant leur contexte depuis `this` (JS-C78) ;
@@ -4921,7 +4921,7 @@ impl Engine {
                 }
             }
         }
-        self.set_own(g, "Location", lf, false);
+        self.set_own(g, "Location", lf, true);
         let hist = self.new_host_object(Rc::new(HistoryHost));
         // Interface `History` (§B-14 vol 366 chess ×81 —
         // rolldown-runtime `x instanceof History`/`History is
@@ -4954,9 +4954,9 @@ impl Engine {
                 o.set_proto(Value::Obj(hp));
             }
         }
-        self.set_own(g, "History", hf, false);
-        self.set_own(g, "location", loc, false);
-        self.set_own(g, "history", hist, false);
+        self.set_own(g, "History", hf, true);
+        self.set_own(g, "location", loc, true);
+        self.set_own(g, "history", hist, true);
         // `window.navigation` — Navigation API (WHATWG).
         // `Navigation` est un `EventTarget` : cloudflare-insights
         // et les routeurs SPA (Next.js app-router) font
@@ -5030,7 +5030,7 @@ impl Engine {
                 }
             }
         }
-        self.set_own(g, "Navigation", nf, false);
+        self.set_own(g, "Navigation", nf, true);
         self.set_own_attrs(
             g,
             "navigation",
@@ -5122,7 +5122,7 @@ impl Engine {
                     crate::heap::PropAttrs::FIXED,
                 );
             }
-            self.set_own(g, name, f, false);
+            self.set_own(g, name, f, true);
         }
 
         // JS-7f window surface — dialogs, screen geometry.
@@ -5167,7 +5167,7 @@ impl Engine {
                 self.set_own(css, "highlights", m, false);
             }
         }
-        self.set_own(g, "CSS", Value::Obj(css), false);
+        self.set_own(g, "CSS", Value::Obj(css), true);
         // `Node` — constructeur (inconstructible) portant les
         // constantes `*_NODE` / `DOCUMENT_POSITION_*` ; `prototype`
         // existe pour que `instanceof` reste sûr.
@@ -5223,7 +5223,7 @@ impl Engine {
                 self.set_own(nid, k, Value::Num(f64::from(v)), false);
             }
         }
-        self.set_own(g, "Node", node_f, false);
+        self.set_own(g, "Node", node_f, true);
         // Interfaces DOM standard — constructeurs-stubs pour la
         // détection (`typeof Element`, `"x" in Element.prototype`,
         // `instanceof`), inconstructibles comme `Node`. Mesuré sur
@@ -5268,7 +5268,7 @@ impl Engine {
             // d'install ci-dessous (`Element` n'existe pas
             // encore ici).
         }
-        self.set_own(g, "HTMLElement", he, false);
+        self.set_own(g, "HTMLElement", he, true);
         for name in [
             "Element",
             "HTMLImageElement",
@@ -5636,7 +5636,7 @@ impl Engine {
                 // (`el.constructor`, `document.constructor`).
                 self.set_own(p, "constructor", f.clone(), false);
             }
-            self.set_own(g, name, f, false);
+            self.set_own(g, name, f, true);
         }
         // JS-C427 — `DOMRectReadOnly`/`DOMRect` constructibles
         // (WebIDL `[Constructor]` — ima3/shaka `new DOMRect`,
@@ -5686,7 +5686,7 @@ impl Engine {
                     self.add_root(pid);
                 }
             }
-            self.set_own(g, name, f, false);
+            self.set_own(g, name, f, true);
         }
         // JS-C454 — `VTTCue` : ctor réel + prototype porteur
         // de `getCueAsHTML`/`onenter`/`onexit` (vol 722 —
@@ -5710,7 +5710,7 @@ impl Engine {
             self.add_root(fid);
             self.add_root(proto);
         }
-        self.set_own(g, "VTTCue", ctor, false);
+        self.set_own(g, "VTTCue", ctor, true);
         // `TextTrackCue` (JS-C560) — ctor spec partageant la
         // grammaire `(start, end, text)` ; proto dédié portant
         // les membres cue (`track` = la piste d'appartenance,
@@ -5742,7 +5742,7 @@ impl Engine {
             self.add_root(fid);
             self.add_root(proto);
         }
-        self.set_own(g, "TextTrackCue", ttc, false);
+        self.set_own(g, "TextTrackCue", ttc, true);
         // Chaînage spec `VTTCue.prototype → TextTrackCue.prototype`
         // (`vttcue instanceof TextTrackCue`).
         if let (Some(Value::Obj(vc)), Some(Value::Obj(tc))) =
@@ -5834,7 +5834,7 @@ impl Engine {
                 crate::heap::PropAttrs::FIXED,
             );
         }
-        self.set_own(g, "AudioContext", ac_f, false);
+        self.set_own(g, "AudioContext", ac_f, true);
         // `EventTarget` — constructible spec (corpus css-tricks :
         // wp-polyfill/core-js meurt au feature-detect sinon).
         // Listeners = map cachée `__et` type → [cb] (rail `__ls`).
@@ -5877,7 +5877,7 @@ impl Engine {
                 }
             }
         }
-        self.set_own(g, "EventTarget", et_f, false);
+        self.set_own(g, "EventTarget", et_f, true);
         // Liens hors-liste de la chaîne protos DOM (J5) :
         // `Node` < `EventTarget` (spec WebIDL), `Element` <
         // `Node`, `HTMLElement` < `Element` — `instanceof`
@@ -5947,7 +5947,7 @@ impl Engine {
                 crate::heap::PropAttrs::FIXED,
             );
         }
-        self.set_own(g, "DOMException", de_f, false);
+        self.set_own(g, "DOMException", de_f, true);
         // `DOMParser` — constructible (JS-C91) : htmx parse
         // les réponses `hx-swap` via `new DOMParser().
         // parseFromString(html,"text/html")` — même voie que
@@ -5962,7 +5962,7 @@ impl Engine {
                 crate::heap::PropAttrs::FIXED,
             );
         }
-        self.set_own(g, "DOMParser", f, false);
+        self.set_own(g, "DOMParser", f, true);
         // `AbstractRange` (JS-C556) — interface de base non
         // constructible (« Illegal constructor ») dont le
         // prototype partagé porte les accesseurs bornes et
@@ -5978,7 +5978,7 @@ impl Engine {
             );
             self.set_own(p, "constructor", af.clone(), false);
         }
-        self.set_own(g, "AbstractRange", af, false);
+        self.set_own(g, "AbstractRange", af, true);
         // `Range` — constructible spec (CAP-182, arc édition) :
         // `new Range()` → frontières `(document,0)` mutables,
         // `Selection.addRange` le consomme directement. Le
@@ -6007,7 +6007,7 @@ impl Engine {
                 self.set_own_attrs(p, k, Value::Num(n), crate::heap::PropAttrs::FIXED);
             }
         }
-        self.set_own(g, "Range", f, false);
+        self.set_own(g, "Range", f, true);
         // `StaticRange` (JS-C556) — constructible spec depuis un
         // dict `StaticRangeInit` ; bornes gelées à vie.
         let sf = self.native_fn("StaticRange", crate::misc_apis::static_range_ctor);
@@ -6021,7 +6021,7 @@ impl Engine {
             );
             self.set_own(p, "constructor", sf.clone(), false);
         }
-        self.set_own(g, "StaticRange", sf, false);
+        self.set_own(g, "StaticRange", sf, true);
         // `CSSStyleSheet` — constructible spec (CAP-183) :
         // feuille stockée côté miroir (`insertRule`/`deleteRule`/
         // `replace`/`replaceSync` — cascade = chantier session,
@@ -6066,7 +6066,7 @@ impl Engine {
                 crate::heap::PropAttrs::FIXED,
             );
         }
-        self.set_own(g, "CSSStyleSheet", f, false);
+        self.set_own(g, "CSSStyleSheet", f, true);
         // `SharedWorker` (CAP-183) — ctor défini pour le
         // feature-detect ; sans loader → TypeError honnête
         // (comme `Worker`) ; avec → `{port}` déléguant au
@@ -6105,7 +6105,7 @@ impl Engine {
             );
             self.set_own(p, "constructor", f.clone(), false);
         }
-        self.set_own(g, "SharedWorker", f, false);
+        self.set_own(g, "SharedWorker", f, true);
         // `NodeFilter` — constantes `SHOW_*`/`FILTER_*` lues
         // par `createTreeWalker(root, NodeFilter.SHOW_…)`.
         let nf = self.new_object();
@@ -6121,7 +6121,7 @@ impl Engine {
         ] {
             self.set_own(nf, k, Value::Num(v), true);
         }
-        self.set_own(g, "NodeFilter", Value::Obj(nf), false);
+        self.set_own(g, "NodeFilter", Value::Obj(nf), true);
         // `Element.prototype` porte `matches`/`closest` en
         // *valeurs* : les shims lisent la référence de méthode
         // (`o = Element.prototype.matches || i.msMatchesSelector`
@@ -6261,7 +6261,7 @@ impl Engine {
             self.set_own_attrs(fid, "prototype", p.clone(), crate::heap::PropAttrs::FIXED);
             event_proto = p;
         }
-        self.set_own(g, "Event", event_f, false);
+        self.set_own(g, "Event", event_f, true);
         let mut ui_proto: Option<Value> = None;
         let mut mouse_proto: Option<Value> = None;
         for name in [
@@ -6407,7 +6407,7 @@ impl Engine {
                 }
                 self.set_own_attrs(fid, "prototype", p, crate::heap::PropAttrs::FIXED);
             }
-            self.set_own(g, name, f, false);
+            self.set_own(g, name, f, true);
         }
         // `Image` — constructible (alias `createElement('img')` ;
         // `HTMLImageElement` reste le stub de détection au-dessus).
@@ -6422,7 +6422,7 @@ impl Engine {
                 crate::heap::PropAttrs::FIXED,
             );
         }
-        self.set_own(g, "Image", img_f, false);
+        self.set_own(g, "Image", img_f, true);
         // `Audio`/`Video` (CAP-178) — alias `createElement` des
         // constructeurs historiques (`new Audio(url)` charge
         // la source — les jeux/sites l'utilisent encore ;
@@ -6439,7 +6439,7 @@ impl Engine {
                     crate::heap::PropAttrs::FIXED,
                 );
             }
-            self.set_own(g, name, f, false);
+            self.set_own(g, name, f, true);
         }
         // `XMLSerializer` (CAP-178) — `serializeToString(node)`
         // → rail `outer_html` (mesuré `_census_calls` :
@@ -6456,7 +6456,7 @@ impl Engine {
                 crate::heap::PropAttrs::FIXED,
             );
         }
-        self.set_own(g, "XMLSerializer", xs_f, false);
+        self.set_own(g, "XMLSerializer", xs_f, true);
         // `AbortSignal` (CAP-194) — surface spec bornée : le
         // ctor reste `Illegal` (spec — `new AbortSignal()`
         // jette), mais les statics `abort`/`timeout`/`any`
@@ -6504,7 +6504,7 @@ impl Engine {
                 crate::heap::PropAttrs::FIXED,
             );
         }
-        self.set_own(g, "AbortSignal", as_f, false);
+        self.set_own(g, "AbortSignal", as_f, true);
         // `AbortController` minimal : `signal` réel +
         // `abort()` bascule `aborted`/`reason` + listeners.
         let ac_f = self.native_fn("AbortController", abort_controller_ctor);
@@ -6519,7 +6519,7 @@ impl Engine {
                 crate::heap::PropAttrs::FIXED,
             );
         }
-        self.set_own(g, "AbortController", ac_f, false);
+        self.set_own(g, "AbortController", ac_f, true);
         // `IntersectionObserver`/`ResizeObserver` (JS-C69) —
         // notification initiale à l'`observe` livrée au
         // checkpoint microtask (`observers.rs`). Mesuré
@@ -6537,7 +6537,7 @@ impl Engine {
             dom: dom.clone(),
             cache: cache.clone(),
         }));
-        self.set_own(g, "customElements", ce, false);
+        self.set_own(g, "customElements", ce, true);
         // `window.name` (CAP-159) — nom du contexte posé
         // par l'embedder (`set_ctx_name`) ; les écritures
         // JS suivantes vivent sur cette propre-prop.
@@ -6616,12 +6616,12 @@ impl Engine {
             },
         );
         self.set_own(screen, "orientation", Value::Obj(so), true);
-        self.set_own(g, "screen", Value::Obj(screen), false);
-        self.set_own(g, "innerWidth", Value::Num(f64::from(w)), false);
-        self.set_own(g, "innerHeight", Value::Num(f64::from(h)), false);
-        self.set_own(g, "outerWidth", Value::Num(f64::from(w)), false);
-        self.set_own(g, "outerHeight", Value::Num(f64::from(h)), false);
-        self.set_own(g, "devicePixelRatio", Value::Num(1.0), false);
+        self.set_own(g, "screen", Value::Obj(screen), true);
+        self.set_own(g, "innerWidth", Value::Num(f64::from(w)), true);
+        self.set_own(g, "innerHeight", Value::Num(f64::from(h)), true);
+        self.set_own(g, "outerWidth", Value::Num(f64::from(w)), true);
+        self.set_own(g, "outerHeight", Value::Num(f64::from(h)), true);
+        self.set_own(g, "devicePixelRatio", Value::Num(1.0), true);
         // Scroll réel — `scroll*`/`page*Offset` lisent la
         // `GeometryMap` publiée (mise à jour par la session au
         // scroll input, sans rebuild). Vol github : figés à 0,
@@ -6922,7 +6922,7 @@ impl Engine {
                     crate::heap::PropAttrs::FIXED,
                 );
             }
-            self.set_own(g, name, f, false);
+            self.set_own(g, name, f, true);
         }
         // `Performance` (étape 219 / `api` BCD) — les méthodes
         // vivent sur `Performance.prototype` (spec : le
@@ -6999,7 +6999,7 @@ impl Engine {
                 crate::heap::PropAttrs::FIXED,
             );
         }
-        self.set_own(g, "XPathResult", xr_f, false);
+        self.set_own(g, "XPathResult", xr_f, true);
         // Interfaces événement complémentaires — rail
         // `event_ctor` générique (init copié, proto hérité de
         // `Event.prototype` — CAP-178).
@@ -7022,7 +7022,7 @@ impl Engine {
                 }
                 self.set_own_attrs(fid, "prototype", p, crate::heap::PropAttrs::FIXED);
             }
-            self.set_own(g, name, f, false);
+            self.set_own(g, name, f, true);
         }
         // `new Option(text?, value?, defaultSelected?, selected?)`
         // — constructeur historique des `<option>` (form libs :
@@ -7037,7 +7037,7 @@ impl Engine {
                 crate::heap::PropAttrs::FIXED,
             );
         }
-        self.set_own(g, "Option", opt_f, false);
+        self.set_own(g, "Option", opt_f, true);
         // `DOMPoint`/`DOMMatrix` — math 2D réelle bornée
         // (transforms lues par les scripts canvas/layout :
         // `multiply`/`invert`/`transformPoint`/`matrix(...)`).
@@ -7060,7 +7060,7 @@ impl Engine {
                     crate::heap::PropAttrs::FIXED,
                 );
             }
-            self.set_own(g, name, f, false);
+            self.set_own(g, name, f, true);
         }
         // Statiques `DOMMatrix*`/`DOMPoint` (JS-C560 —
         // `fromMatrix`/`fromFloat*Array`/`fromPoint` lus par
@@ -7103,7 +7103,7 @@ impl Engine {
                 crate::heap::PropAttrs::FIXED,
             );
         }
-        self.set_own(g, "ImageData", id_f, false);
+        self.set_own(g, "ImageData", id_f, true);
         // `Path2D` — enregistreur d'ops borné (les ctx `fill`/
         // `stroke` le consommeront quand le raster vivra —
         // aujourd'hui : stockage + détection).
@@ -7117,7 +7117,7 @@ impl Engine {
                 crate::heap::PropAttrs::FIXED,
             );
         }
-        self.set_own(g, "Path2D", p2d_f, false);
+        self.set_own(g, "Path2D", p2d_f, true);
         // `OffscreenCanvas` — `<canvas>` détaché du miroir :
         // `getContext('2d')` enregistre via `Ctx2dHost` (même
         // mécanique que l'élément, JS-C28).
@@ -7131,7 +7131,7 @@ impl Engine {
                 crate::heap::PropAttrs::FIXED,
             );
         }
-        self.set_own(g, "OffscreenCanvas", oc_f, false);
+        self.set_own(g, "OffscreenCanvas", oc_f, true);
         // `Touch`/`TouchList`/`TouchEvent` support (JS-C560)
         // — `new Touch(init)` copie le `TouchInit` (rails
         // `touch_ctor`) ; `TouchList` = collection read-only
@@ -7148,7 +7148,7 @@ impl Engine {
                 crate::heap::PropAttrs::FIXED,
             );
         }
-        self.set_own(g, "Touch", t_f, false);
+        self.set_own(g, "Touch", t_f, true);
         let tl_f = self.native_fn("TouchList", |e, _t, _a| {
             Err(e.type_error("illegal constructor"))
         });
@@ -7166,7 +7166,7 @@ impl Engine {
                 crate::heap::PropAttrs::FIXED,
             );
         }
-        self.set_own(g, "TouchList", tl_f, false);
+        self.set_own(g, "TouchList", tl_f, true);
         // `URLPattern` (JS-C560) — ctor réel (chaîne résolue
         // via `resolve_url` + `url_parts`, ou dict de
         // composants) ; `test`/`exec` segmentiels bornés
@@ -7193,7 +7193,7 @@ impl Engine {
                 crate::heap::PropAttrs::FIXED,
             );
         }
-        self.set_own(g, "URLPattern", up_f, false);
+        self.set_own(g, "URLPattern", up_f, true);
         // `PerformanceObserver`/`ReportingObserver` — ctors
         // **légalement constructibles** (régression mesurée :
         // github `environment.js` meurt sur le throw du stub
@@ -7223,7 +7223,7 @@ impl Engine {
                 let arr = self.new_array(Vec::new());
                 self.set_own(fid, "supportedEntryTypes", arr, false);
             }
-            self.set_own(g, name, f, false);
+            self.set_own(g, name, f, true);
         }
         // `XPathEvaluator` — `new` + `evaluate` (rail
         // `xpath_evaluate` existant — CAP-188).
@@ -7237,7 +7237,7 @@ impl Engine {
                 crate::heap::PropAttrs::FIXED,
             );
         }
-        self.set_own(g, "XPathEvaluator", xe, false);
+        self.set_own(g, "XPathEvaluator", xe, true);
         // `FontFace` — `{family, status:'unloaded', load() →
         // Promise résolue self}` (le chargement de fontes réel
         // est un chantier session — le feature-detect des
@@ -7252,7 +7252,7 @@ impl Engine {
                 crate::heap::PropAttrs::FIXED,
             );
         }
-        self.set_own(g, "FontFace", ff_f, false);
+        self.set_own(g, "FontFace", ff_f, true);
         // `createImageBitmap` → promesse résolue
         // `{width,height,close()}` (ImageBitmap-like).
         self.add_method(g, "createImageBitmap", create_image_bitmap);
@@ -7275,8 +7275,8 @@ impl Engine {
         self.set_own(g, "frameElement", Value::Null, true);
         let ext = self.new_object();
         self.set_own(g, "external", Value::Obj(ext), true);
-        self.set_own(g, "isSecureContext", Value::Bool(true), false);
-        self.set_own(g, "crossOriginIsolated", Value::Bool(false), false);
+        self.set_own(g, "isSecureContext", Value::Bool(true), true);
+        self.set_own(g, "crossOriginIsolated", Value::Bool(false), true);
         // `origin` ≙ `location.origin` — lu à l'install (la nav
         // met `location` à jour côté hooks ; l'embedder peut
         // écraser la prop ensuite).
@@ -7287,7 +7287,7 @@ impl Engine {
                 _ => None,
             })
             .unwrap_or(Value::Null);
-        self.set_own(g, "origin", origin, false);
+        self.set_own(g, "origin", origin, true);
         // `visualViewport` — métrique figée à l'install
         // (mobile-focused libs la lisent).
         let (vw, vh) = self.hooks.viewport;
@@ -7314,7 +7314,7 @@ impl Engine {
         self.add_method(vv, "addEventListener", et_add_listener);
         self.add_method(vv, "removeEventListener", et_remove_listener);
         self.add_method(vv, "dispatchEvent", et_dispatch_event);
-        self.set_own(g, "visualViewport", Value::Obj(vv), false);
+        self.set_own(g, "visualViewport", Value::Obj(vv), true);
         // `scheduler` — `scheduler.yield()` → promesse résolue
         // (file microtâche existante) ; `postTask(cb,{delay,
         // priority,signal})` (dna vol 126) — promesse résolue
@@ -7327,7 +7327,7 @@ impl Engine {
         self.set_own(sch, "yield", y, true);
         let pt = self.native_fn("postTask", scheduler_post_task);
         self.set_own(sch, "postTask", pt, true);
-        self.set_own(g, "scheduler", Value::Obj(sch), false);
+        self.set_own(g, "scheduler", Value::Obj(sch), true);
         // `cookieStore` — jar vide honnête (get→null,
         // getAll→[], set/delete→resolve) : les guards
         // `cookieStore && …` des loaders passent.
@@ -7360,7 +7360,7 @@ impl Engine {
                 configurable: true,
             },
         );
-        self.set_own(g, "cookieStore", Value::Obj(cs), false);
+        self.set_own(g, "cookieStore", Value::Obj(cs), true);
         install_wasm_stub(self);
         // `trustedTypes` — politique « passthrough » honnête
         // (pas d'application TT moteur ; les bundles qui
@@ -7376,7 +7376,7 @@ impl Engine {
         self.add_method(tt, "isHTML", tt_is_str);
         self.add_method(tt, "isScript", tt_is_str);
         self.add_method(tt, "isScriptURL", tt_is_str);
-        self.set_own(g, "trustedTypes", Value::Obj(tt), false);
+        self.set_own(g, "trustedTypes", Value::Obj(tt), true);
         // `speechSynthesis` — global `window` spec (jar vide :
         // `getVoices()` → `[]`, speak/cancel no-op — aucune
         // voix embarquée).
@@ -7389,7 +7389,7 @@ impl Engine {
         for (k, v) in [("paused", false), ("pending", false), ("speaking", false)] {
             self.set_own(sp, k, Value::Bool(v), true);
         }
-        self.set_own(g, "speechSynthesis", Value::Obj(sp), false);
+        self.set_own(g, "speechSynthesis", Value::Obj(sp), true);
         // navigator : `mediaDevices` (rejets `NotFoundError` —
         // aucun périphérique capturable), `userActivation`,
         // `speechSynthesis` (jar vide), `permissions` (query →
@@ -19537,7 +19537,7 @@ impl Host for WorkerLocationHost {
 pub(crate) fn install_worker_location(e: &mut Engine) {
     let loc = e.new_host_object(Rc::new(WorkerLocationHost));
     let g = e.global;
-    e.set_own(g, "location", loc, false);
+    e.set_own(g, "location", loc, true);
 }
 
 /// `history` — `back`/`forward`/`go(n)` through `hooks.history_go`,
@@ -22093,7 +22093,7 @@ pub(crate) fn install_worker_navigator(e: &mut Engine) {
             o.set_proto(Value::Obj(p));
         }
     }
-    e.set_own(g, "WorkerNavigator", wnf, false);
+    e.set_own(g, "WorkerNavigator", wnf, true);
     // `WorkerLocation` — même modèle : proto IDL, le `location`
     // du scope (`WorkerLocationHost`) hérite ses membres.
     let wlf = e.illegal_ctor_bound("WorkerLocation");
@@ -22131,7 +22131,7 @@ pub(crate) fn install_worker_navigator(e: &mut Engine) {
             }
         }
     }
-    e.set_own(g, "WorkerLocation", wlf, false);
+    e.set_own(g, "WorkerLocation", wlf, true);
     // `WorkerGlobalScope`/`DedicatedWorkerGlobalScope` —
     // protos IDL chaînés (`Dedicated → Worker`), le global
     // `self` adopte la tête de chaîne (`self instanceof
@@ -22181,7 +22181,7 @@ pub(crate) fn install_worker_navigator(e: &mut Engine) {
         );
         wgs_proto = Value::Obj(p);
     }
-    e.set_own(g, "WorkerGlobalScope", wgf, false);
+    e.set_own(g, "WorkerGlobalScope", wgf, true);
     let dwf = e.illegal_ctor_bound("DedicatedWorkerGlobalScope");
     if let Value::Obj(cid) = dwf {
         let p = e.new_object();
@@ -22222,8 +22222,8 @@ pub(crate) fn install_worker_navigator(e: &mut Engine) {
             o.set_proto(Value::Obj(p));
         }
     }
-    e.set_own(g, "DedicatedWorkerGlobalScope", dwf, false);
-    e.set_own(g, "navigator", Value::Obj(nav), false);
+    e.set_own(g, "DedicatedWorkerGlobalScope", dwf, true);
+    e.set_own(g, "navigator", Value::Obj(nav), true);
 }
 
 /// `credentials.create`/`get` (JS-C93) — stub honnête : pas
@@ -23857,7 +23857,7 @@ pub(crate) fn install_formdata_global(e: &mut Engine) {
         );
     }
     e.set_own(p, "constructor", f.clone(), false);
-    e.set_own(g, "FormData", f, false);
+    e.set_own(g, "FormData", f, true);
 }
 
 /// `new FormData(form?, submitter?)` — `form` = élément `<form>`
@@ -25238,6 +25238,7 @@ pub(crate) fn install_wasm_stub(e: &mut Engine) {
         }
         e.set_own(wasm, n, f, false);
     }
+    // ECMA (WebAssembly spec JS), pas WebIDL — `enumerable:false`.
     e.set_own(g, "WebAssembly", Value::Obj(wasm), false);
 }
 
@@ -26402,7 +26403,7 @@ pub(crate) fn install_bcd_surface_apis(e: &mut Engine) {
                 crate::heap::PropAttrs::FIXED,
             );
         }
-        e.set_own(g, name, f, false);
+        e.set_own(g, name, f, true);
     }
     // Méthodes réelles des protos liste/item du dnd.
     if let Some(p) = ctor_proto(e, "DataTransferItem") {
@@ -26457,7 +26458,7 @@ pub(crate) fn install_bcd_surface_apis(e: &mut Engine) {
                 crate::heap::PropAttrs::FIXED,
             );
         }
-        e.set_own(g, "ScreenOrientation", f, false);
+        e.set_own(g, "ScreenOrientation", f, true);
     }
     // `Screen` proto — l'instance `screen` existe déjà :
     // props manquantes (`isExtended`/`onchange`) posées sur
@@ -26489,7 +26490,7 @@ pub(crate) fn install_bcd_surface_apis(e: &mut Engine) {
                 crate::heap::PropAttrs::FIXED,
             );
         }
-        e.set_own(g, "Screen", f, false);
+        e.set_own(g, "Screen", f, true);
     }
     // `ScreenDetailed` proto chaîné sur `Screen.prototype`
     // (hérite les métriques de base).
@@ -26524,7 +26525,7 @@ pub(crate) fn install_bcd_surface_apis(e: &mut Engine) {
                 crate::heap::PropAttrs::FIXED,
             );
         }
-        e.set_own(g, "ScreenDetailed", f, false);
+        e.set_own(g, "ScreenDetailed", f, true);
     }
     // `StorageBucket`/`StorageBucketManager` — protos
     // promesse-bornés (aucun bucket nommé : `open` rejette
@@ -26557,7 +26558,7 @@ pub(crate) fn install_bcd_surface_apis(e: &mut Engine) {
                 crate::heap::PropAttrs::FIXED,
             );
         }
-        e.set_own(g, "StorageBucket", f, false);
+        e.set_own(g, "StorageBucket", f, true);
     }
     {
         let f = e.illegal_ctor_bound("StorageBucketManager");
@@ -26594,7 +26595,7 @@ pub(crate) fn install_bcd_surface_apis(e: &mut Engine) {
                 crate::heap::PropAttrs::FIXED,
             );
         }
-        e.set_own(g, "StorageBucketManager", f, false);
+        e.set_own(g, "StorageBucketManager", f, true);
         if let Some(Value::Obj(nid)) = e.get_prop(g, "navigator") {
             if let Some(sv) = e.get_prop(nid, "storageBuckets") {
                 chain_to_ctor(e, &sv, "StorageBucketManager");
@@ -26644,7 +26645,7 @@ pub(crate) fn install_bcd_surface_apis(e: &mut Engine) {
                 e.set_own(did, "featurePolicy", Value::Obj(pp), true);
             }
         }
-        e.set_own(g, "PermissionsPolicy", f, false);
+        e.set_own(g, "PermissionsPolicy", f, true);
     }
     // `EventCounts`/`HighlightRegistry` — protos chaînés sur
     // `Map.prototype` : les membres maplike (`get`/`set`/
@@ -26696,7 +26697,7 @@ pub(crate) fn install_bcd_surface_apis(e: &mut Engine) {
                 }
             }
         }
-        e.set_own(g, name, f, false);
+        e.set_own(g, name, f, true);
     }
     // `performance.eventCounts` — Map chaînée
     // `EventCounts.prototype` (comptages par type — le moteur
@@ -26726,7 +26727,7 @@ pub(crate) fn install_bcd_surface_apis(e: &mut Engine) {
             crate::heap::PropAttrs::FIXED,
         );
     }
-    e.set_own(g, "Highlight", hf, false);
+    e.set_own(g, "Highlight", hf, true);
     // `DOMPointReadOnly`/`DOMQuad` — ctors réels (objets
     // plats) + protos IDL et statiques spec.
     {
@@ -26753,7 +26754,7 @@ pub(crate) fn install_bcd_surface_apis(e: &mut Engine) {
             let sf = e.native_fn("fromPoint", dompoint_from_point);
             e.set_own(cid, "fromPoint", sf, false);
         }
-        e.set_own(g, "DOMPointReadOnly", f, false);
+        e.set_own(g, "DOMPointReadOnly", f, true);
     }
     {
         let f = e.native_fn("DOMQuad", domquad_ctor);
@@ -26778,7 +26779,7 @@ pub(crate) fn install_bcd_surface_apis(e: &mut Engine) {
             let fr = e.native_fn("fromRect", domquad_from_rect);
             e.set_own(cid, "fromRect", fr, false);
         }
-        e.set_own(g, "DOMQuad", f, false);
+        e.set_own(g, "DOMQuad", f, true);
     }
     // `VTTRegion` — ctor légal + proto attributs.
     {
@@ -26807,7 +26808,7 @@ pub(crate) fn install_bcd_surface_apis(e: &mut Engine) {
                 crate::heap::PropAttrs::FIXED,
             );
         }
-        e.set_own(g, "VTTRegion", f, false);
+        e.set_own(g, "VTTRegion", f, true);
     }
     // `DataTransfer` — ctor réel (store de formats).
     {
@@ -26836,7 +26837,7 @@ pub(crate) fn install_bcd_surface_apis(e: &mut Engine) {
                 crate::heap::PropAttrs::FIXED,
             );
         }
-        e.set_own(g, "DataTransfer", f, false);
+        e.set_own(g, "DataTransfer", f, true);
     }
     // Protos existants à peupler — détection `in` et
     // `Object.getOwnPropertyNames` (les instances réelles

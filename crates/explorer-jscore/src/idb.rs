@@ -3291,7 +3291,7 @@ pub(crate) fn install_idb(e: &mut Engine, inject: Option<IdbRegistry>) {
         },
     );
     let g = e.global;
-    e.set_own(g, "indexedDB", Value::Obj(f), false);
+    e.set_own(g, "indexedDB", Value::Obj(f), true);
     // `IDBFactory` — interface WebIDL de `indexedDB`
     // (`indexedDB instanceof IDBFactory`,
     // `indexedDB.constructor.name`).
@@ -3307,7 +3307,7 @@ pub(crate) fn install_idb(e: &mut Engine, inject: Option<IdbRegistry>) {
             );
             e.set_own(fp, "constructor", c.clone(), false);
         }
-        e.set_own(g, "IDBFactory", c, false);
+        e.set_own(g, "IDBFactory", c, true);
         if let Some(o) = e.heap.obj_mut(f) {
             o.set_proto(Value::Obj(fp));
         }
@@ -3323,7 +3323,7 @@ pub(crate) fn install_idb(e: &mut Engine, inject: Option<IdbRegistry>) {
     }
     let kp = keyrange_proto(e);
     e.link_ctor(kc.clone(), Some(kp));
-    e.set_own(g, "IDBKeyRange", kc, false);
+    e.set_own(g, "IDBKeyRange", kc, true);
 
     install_idb_interfaces(e);
 }
@@ -3418,7 +3418,7 @@ pub(crate) fn install_caches(e: &mut Engine, inject: Option<CacheRegistry>) {
     e.add_method(cs, "keys", cs_keys);
     e.add_method(cs, "match", cs_match);
     let g = e.global;
-    e.set_own(g, "caches", Value::Obj(cs), false);
+    e.set_own(g, "caches", Value::Obj(cs), true);
 }
 
 impl Engine {

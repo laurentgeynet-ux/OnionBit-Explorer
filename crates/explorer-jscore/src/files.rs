@@ -922,7 +922,7 @@ pub(crate) fn install_files(e: &mut Engine) {
             };
             e.set_own_attrs(fid, "prototype", p, crate::heap::PropAttrs::FIXED);
         }
-        e.set_own(g, name, fv, false);
+        e.set_own(g, name, fv, true);
     }
     // Constantes statiques `FileReader.EMPTY/LOADING/DONE` (spec
     // — doublon des props du proto et du host).

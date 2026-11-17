@@ -96,7 +96,7 @@ pub(crate) fn install_cmp(e: &mut Engine) {
     if matches!(e.cmp.policy, CmpPolicy::None) {
         // Honnête (statu quo JS-C213) — prop ordinaire, les
         // SDKs réels peuvent la remplacer.
-        e.set_own(g, "__tcfapi", tcf, false);
+        e.set_own(g, "__tcfapi", tcf, true);
         return;
     }
     // Accesseur absorbant (JS-C260) : `get` rend le résolveur,

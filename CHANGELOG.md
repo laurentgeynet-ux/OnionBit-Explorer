@@ -7,6 +7,14 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+- **Audit-boa A8 — divers ECMA + énumérabilité WebIDL des globals** (`explorer-jscore`) :
+  - `String.prototype.length` `{000}` et `Array.prototype.length` `{w:true,e:false,c:false}` propres = 0 (protos exotiques spec) ; `Array.prototype[@@unscopables]` `{001}`.
+  - `RegExp.prototype.compile` (Annex B.2.4) : réinitialise `this` (pattern+flags recompilés, `lastIndex`→0), `TypeError` sur non-RegExp.
+  - `Iterator.prototype.constructor` et `Iterator.prototype[@@toStringTag]` convertis en **accesseurs** get/set spec ES2025 (le setter crée la data propre masquante `{w:true,e:true,c:true}` pour le subclassing).
+  - `Symbol.prototype[@@toPrimitive]` (= `valueOf`) et `Date.prototype[@@toPrimitive]` (exception spec : hint `default` → chaîne).
+  - `Temporal.Now.zonedDateTimeISO` (fuseau UTC unique — déviation documentée).
+  - **~140 globals WebIDL passés `enumerable:true`** (`{w:true,e:true,c:true}` — comportement navigateur réel : interfaces et attributs Window s'énumèrent dans `Object.keys(window)`/`for-in`) dans 15 fichiers `install_*` + `URL`/`URLSearchParams`/`crypto`/`performance`/`TextEncoder`/`TextDecoder`/`console`/`window`/`self` dans `builtins/mod.rs`. **ECMA préservé** `enumerable:false` : `globalThis`, `eval`, `WebAssembly`, `Temporal`, ctors et namespaces ECMA. Lib 54/54.
+
 - **Audit-boa A6 — `name`/`message` own sur protos NativeError** (`explorer-jscore` — audit boa, ~8 chemins : TypeError/ReferenceError/SyntaxError n'avaient ni `name` ni `message` propres ; RangeError/EvalError/URIError/AggregateError avaient `name` mais pas `message`). Boucle unifiée sur les 7 protos : `name` = nom du ctor + `message` = `""`, `{w:true,e:false,c:true}` spec. Lib 54/54.
 
 - **Audit-boa A4 — `%TypedArray%` global exposé** (`explorer-jscore` — audit boa, ~49 chemins : le proto interne `%TypedArray%.prototype` existait mais le ctor abstrait n'était pas en global). `new TypedArray()`/`TypedArray()` → `TypeError` (intrinsèque abstrait, spec 23.2.1) ; `prototype` verrouillé `{000}` vers le proto partagé ; `from`/`of` génériques (`this` = ctor cible → `new this(len)` + recopie — `TypedArray.from.call(Uint8Array, [1,2,3])` produit un `Uint8Array`) ; `@@species` ; les 9 concrets chaînés `Ctor.[[Prototype]] = %TypedArray%` (héritent les génériques — leurs `from`/`of`/`@@species` propres bound masquent, déviation observable mineure vs héritage spec). Lib 54/54.

@@ -44,8 +44,8 @@ pub(crate) fn install(e: &mut Engine) {
     e.set_const(g, "undefined", Value::Undefined);
     e.set_const(g, "NaN", Value::Num(f64::NAN));
     e.set_const(g, "Infinity", Value::Num(f64::INFINITY));
-    e.set_own(g, "window", Value::Obj(g), false);
-    e.set_own(g, "self", Value::Obj(g), false);
+    e.set_own(g, "window", Value::Obj(g), true);
+    e.set_own(g, "self", Value::Obj(g), true);
     e.set_own(g, "globalThis", Value::Obj(g), false);
 
     // `@@toStringTag` (spec) — prototypes concrets, namespaces et
@@ -147,6 +147,14 @@ pub(crate) fn install(e: &mut Engine) {
     // `String.prototype` ≙ `new String("")`, etc.
     let empty = e.str_val("");
     e.set_own(p_str, PRIM, empty, false);
+    // Spec : `String.prototype` est un String exotique — `length`
+    // own `{w:false,e:false,c:false}` = 0 (audit boa A8).
+    e.set_own_attrs(
+        p_str,
+        "length",
+        Value::Num(0.0),
+        crate::heap::PropAttrs::FIXED,
+    );
     e.set_own(p_num, PRIM, Value::Num(0.0), false);
     e.set_own(p_bool, PRIM, Value::Bool(false), false);
     let error = ctor(e, "Error", error_ctor, p_err);
@@ -207,8 +215,8 @@ pub(crate) fn install(e: &mut Engine) {
         e.add_method(uid, "parse", url_parse_static);
     }
     let usp = ctor(e, "URLSearchParams", usp_ctor, e.protos.url_params);
-    e.set_own(g, "URL", url, false);
-    e.set_own(g, "URLSearchParams", usp, false);
+    e.set_own(g, "URL", url, true);
+    e.set_own(g, "URLSearchParams", usp, true);
     // `Iterator` — ctor abstrait (spec : `new Iterator()` lève) ;
     // `Iterator.prototype` = protos.iterator, `Iterator.from`.
     {
@@ -220,7 +228,17 @@ pub(crate) fn install(e: &mut Engine) {
             e.add_method(iid, "zip", crate::collections::iterator_zip);
             e.add_method(iid, "zipKeyed", crate::collections::iterator_zip_keyed);
         }
-        e.set_own(e.protos.iterator, "constructor", iter.clone(), false);
+        // Spec ES2025 : `constructor` et `@@toStringTag` sont des
+        // **accesseurs** get/set sur `Iterator.prototype` — le set
+        // crée une data propre (masquante) pour le subclassing.
+        let cg = e.bound_native("get constructor", iterator_ctor_get, vec![iter.clone()]);
+        let cs = e.native_fn("set constructor", iterator_ctor_set);
+        let tg = e.native_fn("get [Symbol.toStringTag]", iterator_tag_get);
+        let ts = e.native_fn("set [Symbol.toStringTag]", iterator_tag_set);
+        if let Some(o) = e.heap.obj_mut(e.protos.iterator) {
+            o.set_accessor("constructor", cg, cs, false);
+            o.set_accessor(crate::interp::SYM_TO_STRING_TAG, tg, ts, false);
+        }
         e.set_own(g, "Iterator", iter, false);
     }
 
@@ -243,7 +261,7 @@ pub(crate) fn install(e: &mut Engine) {
                 configurable: true,
             },
         );
-        e.set_own(g, "crypto", Value::Obj(crypto), false);
+        e.set_own(g, "crypto", Value::Obj(crypto), true);
     }
 
     // `SuppressedError` (ES2026) — `error`/`suppressed`/`message`.
@@ -683,6 +701,13 @@ pub(crate) fn install(e: &mut Engine) {
         e.add_method(sid, "keyFor", symbol_key_for);
         e.add_method(e.protos.symbol, "toString", symbol_to_string);
         e.add_method(e.protos.symbol, "valueOf", symbol_value_of);
+        // Spec : `Symbol.prototype[@@toPrimitive]` = `thisSymbol-
+        // Value(this)` — identique à `valueOf`.
+        e.add_method(
+            e.protos.symbol,
+            crate::interp::SYM_TO_PRIMITIVE,
+            symbol_value_of,
+        );
         let desc_fn = e.native_fn("get description", symbol_description);
         if let Some(o) = e.heap.obj_mut(e.protos.symbol) {
             o.set_accessor("description", desc_fn, Value::Undefined, false);
@@ -806,7 +831,7 @@ pub(crate) fn install(e: &mut Engine) {
         "dispatchEvent",
         crate::dom_host::et_dispatch_event,
     );
-    e.set_own(g, "performance", Value::Obj(performance), false);
+    e.set_own(g, "performance", Value::Obj(performance), true);
 
     // `TextEncoder`/`TextDecoder` — UTF-8 only. Chacun a SON
     // prototype (héritant `Object.prototype`) — partager `p_obj`
@@ -815,8 +840,8 @@ pub(crate) fn install(e: &mut Engine) {
     let td_proto = e.new_object();
     let te = ctor(e, "TextEncoder", text_encoder_ctor, te_proto);
     let td = ctor(e, "TextDecoder", text_decoder_ctor, td_proto);
-    e.set_own(g, "TextEncoder", te, false);
-    e.set_own(g, "TextDecoder", td, false);
+    e.set_own(g, "TextEncoder", te, true);
+    e.set_own(g, "TextDecoder", td, true);
 
     // `console` — engine-wide (workers have it too); lines go to the
     // embedder's hook or vanish silently (headless).
@@ -854,7 +879,7 @@ pub(crate) fn install(e: &mut Engine) {
     ] {
         e.add_method(console, k, f2);
     }
-    e.set_own(g, "console", Value::Obj(console), false);
+    e.set_own(g, "console", Value::Obj(console), true);
 
     // Object ctor statics + prototype.
     if let Value::Obj(oid) = object {
@@ -986,6 +1011,18 @@ pub(crate) fn install(e: &mut Engine) {
 
     // Array.prototype.
     let ap = e.protos.array;
+    // Spec : `Array.prototype` est un Array — `length` own
+    // `{w:true,e:false,c:false}` = 0 (audit boa A8).
+    e.set_own_attrs(
+        ap,
+        "length",
+        Value::Num(0.0),
+        crate::heap::PropAttrs {
+            writable: true,
+            enumerable: false,
+            configurable: false,
+        },
+    );
     e.add_method(ap, "push", array_push);
     e.add_method(ap, "pop", array_pop);
     e.add_method(ap, "shift", array_shift);
@@ -1053,7 +1090,17 @@ pub(crate) fn install(e: &mut Engine) {
     ] {
         e.set_own(unsc, n, Value::Bool(true), false);
     }
-    e.set_own(ap, crate::interp::SYM_UNSCOPABLES, Value::Obj(unsc), false);
+    // Spec : `@@unscopables` `{w:false,e:false,c:true}` (audit boa).
+    e.set_own_attrs(
+        ap,
+        crate::interp::SYM_UNSCOPABLES,
+        Value::Obj(unsc),
+        crate::heap::PropAttrs {
+            writable: false,
+            enumerable: false,
+            configurable: true,
+        },
+    );
     // `Array.isArray` sur le ctor.
     if let Value::Obj(aid) = array {
         e.add_method(aid, "isArray", array_is_array);
@@ -1166,6 +1213,8 @@ pub(crate) fn install(e: &mut Engine) {
     e.add_method(rp, "exec", regexp_exec);
     e.add_method(rp, "test", regexp_test);
     e.add_method(rp, "toString", regexp_to_string);
+    // Annex B.2.4 — `compile` réinitialise `this` (sites legacy).
+    e.add_method(rp, "compile", regexp_compile);
     // `@@match`/`@@matchAll`/`@@replace`/`@@search`/`@@split`
     // (spec) — les méthodes String dispatchent vers ces hooks.
     e.add_method(rp, crate::interp::SYM_MATCH, re_sym_match);
@@ -1251,6 +1300,9 @@ pub(crate) fn install(e: &mut Engine) {
     e.add_method(dp, "toLocaleString", date_to_locale_string);
     e.add_method(dp, "toLocaleDateString", date_to_locale_date);
     e.add_method(dp, "toLocaleTimeString", date_to_locale_time);
+    // Spec 21.4.4.45 — `@@toPrimitive` (exception Date : hint
+    // `default` → chaîne, pas nombre).
+    e.add_method(dp, crate::interp::SYM_TO_PRIMITIVE, date_to_primitive);
     // JS-7g — full-ish UTC Date.
     e.add_method(dp, "getFullYear", date_get_full_year);
     e.add_method(dp, "getUTCFullYear", date_get_full_year);

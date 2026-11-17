@@ -2111,7 +2111,7 @@ pub(crate) fn install_subtle(e: &mut Engine, crypto: ObjId) {
         e.set_own(cid, "supports", sup, false);
     }
     let g = e.global;
-    e.set_own(g, "SubtleCrypto", sc, false);
+    e.set_own(g, "SubtleCrypto", sc, true);
 
     let subtle = e.new_object();
     // `subtle instanceof SubtleCrypto` + héritage des membres
