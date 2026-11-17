@@ -990,8 +990,22 @@ pub(crate) fn array_includes(e: &mut Engine, this: Value, args: &[Value]) -> JsR
     let id = this_array(e, this)?;
     let needle = arg(args, 0);
     let elems = take_elems(e, id)?;
+    // Spec `fromIndex` : négatif → len + n (clampé à 0), sinon
+    // direct — `[1,2,3].includes(2,-1)` ne scanne que l'index 2.
+    let len = elems.len() as i64;
+    let from = match args.get(1) {
+        Some(Value::Num(n)) => {
+            let n = *n as i64;
+            if n < 0 {
+                (len + n).max(0)
+            } else {
+                n
+            }
+        }
+        _ => 0,
+    };
     // SameValueZero (NaN matches itself here).
-    let found = elems.iter().any(|v| {
+    let found = elems.iter().skip(from.max(0) as usize).any(|v| {
         e.strict_eq(v, &needle)
             || matches!((v, needle.clone()), (Value::Num(a), Value::Num(b)) if a.is_nan() && b.is_nan())
     });

@@ -5270,7 +5270,7 @@ impl Engine {
     }
 
     pub(crate) fn range_error(&mut self, msg: impl Into<String>) -> Thrown {
-        let proto = self.protos.error;
+        let proto = self.protos.range_error;
         Thrown(self.error_value(proto, "RangeError", &msg.into()))
     }
 
@@ -5297,7 +5297,7 @@ impl Engine {
     /// `URIError` — no dedicated proto, hangs off `Error`'s (deviation
     /// documented in ADR-0007; `e.name` still says `URIError`).
     pub(crate) fn uri_error(&mut self, msg: impl Into<String>) -> Thrown {
-        let proto = self.protos.error;
+        let proto = self.protos.uri_error;
         Thrown(self.error_value(proto, "URIError", &msg.into()))
     }
 
@@ -7696,17 +7696,30 @@ impl Engine {
         let (parent, parent_proto) = match &cl.super_ {
             Some(e) => {
                 let p = self.eval_expr(env, this.clone(), e)?;
-                if !self.is_callable(p.clone()) {
-                    return Err(self.type_error("class extends a non-constructor"));
+                match p {
+                    // Spec `ClassDefinitionEvaluation` : `extends
+                    // null` → proto=null, ctorParent=%Function.
+                    // prototype% ; `extends undefined` → proto=
+                    // %Object.prototype%, même ctorParent.
+                    Value::Null => (Some(Value::Obj(self.protos.function)), Value::Null),
+                    Value::Undefined => (
+                        Some(Value::Obj(self.protos.function)),
+                        Value::Obj(self.protos.object),
+                    ),
+                    _ => {
+                        if !self.is_callable(p.clone()) {
+                            return Err(self.type_error("class extends a non-constructor"));
+                        }
+                        let pp = match p {
+                            Value::Obj(pid) => match self.get_prop(pid, "prototype") {
+                                Some(v @ Value::Obj(_)) => v,
+                                _ => Value::Obj(self.protos.object),
+                            },
+                            _ => Value::Obj(self.protos.object),
+                        };
+                        (Some(p), pp)
+                    }
                 }
-                let pp = match p {
-                    Value::Obj(pid) => match self.get_prop(pid, "prototype") {
-                        Some(v @ Value::Obj(_)) => v,
-                        _ => Value::Obj(self.protos.object),
-                    },
-                    _ => Value::Obj(self.protos.object),
-                };
-                (Some(p), pp)
             }
             None => (None, Value::Obj(self.protos.object)),
         };

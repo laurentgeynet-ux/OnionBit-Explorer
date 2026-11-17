@@ -264,17 +264,30 @@ features par défaut sans `intl`.
   divergences connues listeées par moteur fautif — toute
   nouvelle ou résolue échoue.
 
-### Mesure de référence (JS-C580, boa 0.22-dev)
+### Mesure de référence (JS-C581, boa 0.22-dev)
 
-Corpus : **297 concordants / 0 divergences / 0 internal** —
-`KNOWN` vide. L'élargissement JS-C580 (~65 sondes) a mesuré
-**6 divergences réelles**, toutes corrigées dans l'étape :
-`Number('0b11'/'0o17')` (préfixes binaire/octal absents du
-String→Number), `Math.sign(-0)` → `+1` (`f64::signum` perdait
-le signe du zéro), et **4 divergences regex surrogates**
-(moteur `fancy-regex` sur le `s` lossy : `/\uD800/` ne matchait
-pas un surrogate isolé, `/\uFFFD/` le matchait à tort) →
-**domaine sentinelle regex** (§ ci-dessous).
+Corpus : **384 concordants / 0 divergences / 0 internal** —
+`KNOWN` vide. Deux vagues d'élargissement ont chacune mesuré
+**6 divergences réelles**, toutes corrigées :
+
+- JS-C580 (~65 sondes) : `Number('0b11'/'0o17')` (préfixes
+  binaire/octal absents du String→Number), `Math.sign(-0)` →
+  `+1` (`f64::signum` perdait le signe du zéro), **4 divergences
+  regex surrogates** (moteur `fancy-regex` sur le `s` lossy :
+  `/\uD800/` ne matchait pas un surrogate isolé, `/\uFFFD/` le
+  matchait à tort) → **domaine sentinelle regex** (§ ci-dessous).
+- JS-C581 (~45 sondes, Proxy/Reflect/générateurs/URI/
+  destructuring) : **`gen.return(v)` ignorait les `finally`**
+  (`ret_at` forçait `done` — spec `GeneratorResumeAbrupt` :
+  déroulement par flag `ret_unwind`, catch sautée, `yield` en
+  finally ré-émet) ; **`class extends null`/`undefined`
+  rejeté** en TypeError (spec : proto null/Object.proto,
+  ctorParent `%Function.prototype%`) et `super.x` sur base
+  null → `ReferenceError` ; **`range_error`/`uri_error` sur
+  `protos.error`** (`constructor.name` → "Error" — protos
+  corrigés) ; **`encodeURIComponent(surrogate)`** encodait le
+  FFFD au lieu de `URIError` ; **`array_includes` ignorant
+  `fromIndex`**.
 
 Surface : **26 441 chemins jscore / 4 203 boa**, `boa-only`
 réduit à 2 déviations boa (`Error.prototype.stack` accesseur

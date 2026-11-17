@@ -575,12 +575,21 @@ impl Engine {
             Expr::NewTarget => Ok(self.env_get(env, NEW_TARGET).unwrap_or(Value::Undefined)),
             Expr::SuperMember(name) => {
                 let base = self.super_base(env)?;
+                // Base `null`/`undefined` (`extends null`) :
+                // référence non résoluble — `ReferenceError`
+                // (spec `GetValue`, corps de classe strict).
+                if matches!(base, Value::Null | Value::Undefined) {
+                    return Err(self.ref_error("super base is null"));
+                }
                 self.read_prop_at(base, this, name, std::ptr::from_ref::<Expr>(e) as usize)
             }
             Expr::SuperIndex(k) => {
                 let base = self.super_base(env)?;
                 let kv = self.eval_expr(env, this.clone(), k)?;
                 let key = self.prop_key(kv)?;
+                if matches!(base, Value::Null | Value::Undefined) {
+                    return Err(self.ref_error("super base is null"));
+                }
                 self.read_prop_at(base, this, &key, std::ptr::from_ref::<Expr>(e) as usize)
             }
             Expr::Member(base, name) => {
@@ -1207,12 +1216,21 @@ impl Engine {
             }
             Expr::SuperMember(name) => {
                 let base = self.super_base(env)?;
+                // Base `null`/`undefined` (`extends null`) :
+                // référence non résoluble — `ReferenceError`
+                // (spec `GetValue`, corps de classe strict).
+                if matches!(base, Value::Null | Value::Undefined) {
+                    return Err(self.ref_error("super base is null"));
+                }
                 self.read_prop_at(base, this, name, std::ptr::from_ref::<Expr>(e) as usize)
             }
             Expr::SuperIndex(k) => {
                 let base = self.super_base(env)?;
                 let kv = self.eval_expr(env, this.clone(), k)?;
                 let key = self.prop_key(kv)?;
+                if matches!(base, Value::Null | Value::Undefined) {
+                    return Err(self.ref_error("super base is null"));
+                }
                 self.read_prop_at(base, this, &key, std::ptr::from_ref::<Expr>(e) as usize)
             }
             _ => Err(self.type_error("invalid assignment target")),

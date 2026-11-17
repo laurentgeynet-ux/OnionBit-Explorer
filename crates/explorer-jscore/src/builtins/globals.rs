@@ -171,7 +171,13 @@ pub(crate) fn hex_val(cs: &[char]) -> Option<u32> {
 const URI_SAFE: &str = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_.!~*'()";
 
 pub(crate) fn encode_uri_component(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
-    let s = e.to_js_string(arg(args, 0))?;
+    let js = e.to_js_jstr(arg(args, 0))?;
+    // Spec : un surrogate isolé → URIError (la paire valide est
+    // encodée comme un seul point de code).
+    if js.has_units() && uri_lone_surrogate(&js.units_view()) {
+        return Err(e.uri_error("malformed URI"));
+    }
+    let s = js.as_str();
     let mut out = String::new();
     for (i, b) in s.bytes().enumerate() {
         if i % 65536 == 0 {
@@ -185,6 +191,12 @@ pub(crate) fn encode_uri_component(e: &mut Engine, _t: Value, args: &[Value]) ->
         }
     }
     Ok(e.str_val(out))
+}
+
+/// La vue units contient-elle un surrogate **non apparié** —
+/// spec `encodeURI*` : `URIError`.
+fn uri_lone_surrogate(units: &[u16]) -> bool {
+    char::decode_utf16(units.iter().copied()).any(|r| r.is_err())
 }
 
 pub(crate) fn decode_uri_component(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
@@ -217,8 +229,7 @@ pub(crate) fn decode_uri_component(e: &mut Engine, _t: Value, args: &[Value]) ->
     if let Ok(s) = String::from_utf8(out) {
         Ok(e.str_val(s))
     } else {
-        let p = e.protos.error;
-        Err(Thrown(e.error_value(p, "URIError", "malformed URI")))
+        Err(e.uri_error("malformed URI"))
     }
 }
 

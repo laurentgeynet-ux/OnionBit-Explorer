@@ -1021,6 +1021,11 @@ pub(crate) struct GExec {
     emit: Value,
     /// Throw en cours pendant un `finally` sans catch.
     unwinding: Option<Value>,
+    /// Complétion `return(v)` en vol (injectée par `.return()`) :
+    /// les frames se dépilent — catch ignorée, `finally` court,
+    /// `yield` dans un `finally` suspend à nouveau (spec
+    /// `GeneratorResumeAbrupt`). Valeur portée par `ret`.
+    ret_unwind: bool,
     /// Promesse retournée par l'`async fn` — settlée à la
     /// fin du corps (`return` → fulfill, throw → reject).
     /// `None` pour un générateur (`function*`).
@@ -1068,6 +1073,7 @@ impl GExec {
             ret: Value::Undefined,
             emit: Value::Undefined,
             unwinding: None,
+            ret_unwind: false,
             outer: None,
             gen_obj: Value::Undefined,
         }
@@ -1102,12 +1108,18 @@ impl GExec {
         self.drive(e)
     }
 
-    /// `return(v)` — `{value:v,done:true}` (borné : sortie
-    /// forcée, `finally` simplifiée).
+    /// `return(v)` — spec `GeneratorResumeAbrupt` : la complétion
+    /// return dépile la pile (catch ignorée, `finally` courue,
+    /// `yield` en finally → `{value, done:false}`) ; pile vide
+    /// → `{value:v, done:true}`.
     pub(crate) fn ret_at(&mut self, e: &mut Engine, v: Value) -> JsResult<Value> {
-        self.done = true;
-        self.ret = v.clone();
-        Ok(iter_result(e, v, true))
+        if self.done {
+            return Ok(iter_result(e, v, true));
+        }
+        self.ret = v;
+        self.pending = None; // le yield suspendu est consommé
+        self.ret_unwind = true;
+        self.drive(e)
     }
 
     /// Reprise `await` — fulfill `Ok`, reject `Err`.
@@ -1159,6 +1171,47 @@ impl GExec {
             // (op-limit jamais atteint). Chaque pas du driver
             // compte désormais.
             e.tick()?;
+            // `return(v)` en vol : dépiler jusqu'au prochain
+            // `finally` — la catch est sautée (un return n'est
+            // pas une throw), les `yield` du finally suspendront
+            // via le chemin `pending` ordinaire. Le finally est
+            // poussé en frame-marqueur `Try{None,None}` pour ne
+            // pas être re-dépilé par ce même test.
+            if self.ret_unwind {
+                let dominated = matches!(
+                    self.stack.last().map(|f| &f.kind),
+                    Some(FKind::Try {
+                        catch: None,
+                        finally: None
+                    })
+                );
+                if !dominated {
+                    loop {
+                        let Some(f) = self.stack.pop() else {
+                            self.ret_unwind = false;
+                            self.done = true;
+                            self.settle_outer(e, Ok(self.ret.clone()));
+                            return Ok(iter_result(e, self.ret.clone(), true));
+                        };
+                        if let FKind::Try {
+                            finally: Some(fin), ..
+                        } = f.kind
+                        {
+                            self.stack.push(GFrame {
+                                list: Rc::new(fin),
+                                pc: 0,
+                                env: f.env,
+                                labels: Vec::new(),
+                                kind: FKind::Try {
+                                    catch: None,
+                                    finally: None,
+                                },
+                            });
+                            break;
+                        }
+                    }
+                }
+            }
             // `yield*` en vidange : les items restants
             // s'émettent AVANT tout statement — sinon le pc
             // suivant (`Expr(__gN)` lifté) tournerait pendant
@@ -1200,6 +1253,9 @@ impl GExec {
                 }
                 Ok(GFlow::Susp) => {}
                 Ok(GFlow::Ret(v)) => {
+                    // `return` dans un `finally` remplace la
+                    // complétion `return(v)` en vol (spec).
+                    self.ret_unwind = false;
                     self.ret = v.clone();
                     self.stack.clear();
                     self.done = true;
@@ -1355,6 +1411,9 @@ impl GExec {
         // La suspension courante est consommée par la throw —
         // sans ça la boucle réémettrait l'ancienne valeur.
         self.pending = None;
+        // Une throw remplace un `return(v)` en vol (spec — la
+        // nouvelle complétion abrupte l'emporte).
+        self.ret_unwind = false;
         loop {
             if crate::dbg_drive() {
                 eprintln!(
