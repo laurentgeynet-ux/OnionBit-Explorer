@@ -4864,6 +4864,22 @@ impl Engine {
                 configurable: true,
             },
         );
+        // `fn.name` — propre non-writable/non-enum/configurable
+        // (spec SetFunctionName + propriété sur les builtins) :
+        // le nom vivait dans `Fun::Native` et restait invisible
+        // à `getOwnPropertyNames`/`getOwnPropertyDescriptor`
+        // (audit boa A1 — ~330 chemins de surface).
+        let n = self.str_val(name);
+        self.set_own_attrs(
+            id,
+            "name",
+            n,
+            crate::heap::PropAttrs {
+                writable: false,
+                enumerable: false,
+                configurable: true,
+            },
+        );
         Value::Obj(id)
     }
 
@@ -4875,10 +4891,21 @@ impl Engine {
         bound: Vec<Value>,
     ) -> Value {
         let proto = Value::Obj(self.protos.function);
-        Value::Obj(
-            self.heap
-                .alloc_obj(Object::fun(Fun::BoundNative { name, f, bound }, proto)),
-        )
+        let id = self
+            .heap
+            .alloc_obj(Object::fun(Fun::BoundNative { name, f, bound }, proto));
+        // Spec BoundFunctionCreate : `name` = "bound "+cible,
+        // `length` = max(0, cible.length − args liés) — la cible
+        // est toujours native (length 0) → 0.
+        let attrs = crate::heap::PropAttrs {
+            writable: false,
+            enumerable: false,
+            configurable: true,
+        };
+        let n = self.str_val(format!("bound {name}"));
+        self.set_own_attrs(id, "name", n, attrs);
+        self.set_own_attrs(id, "length", Value::Num(0.0), attrs);
+        Value::Obj(id)
     }
 
     /// Attach a non-enumerable native method to `obj`.
