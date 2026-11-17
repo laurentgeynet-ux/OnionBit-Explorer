@@ -1318,11 +1318,11 @@ pub(crate) fn string_trim_start(e: &mut Engine, this: Value, _a: &[Value]) -> Js
         return Ok(if id.has_units() {
             Value::Str(id.trim_js(true, false, &e.str_acct))
         } else {
-            e.str_val(id.as_str().trim_start().to_string())
+            e.str_val(id.as_str().trim_start_matches(js_ws).to_string())
         });
     }
     let s = this_str(e, this)?;
-    Ok(e.str_val(s.trim_start().to_string()))
+    Ok(e.str_val(s.trim_start_matches(js_ws).to_string()))
 }
 
 pub(crate) fn string_trim_end(e: &mut Engine, this: Value, _a: &[Value]) -> JsResult<Value> {
@@ -1330,11 +1330,11 @@ pub(crate) fn string_trim_end(e: &mut Engine, this: Value, _a: &[Value]) -> JsRe
         return Ok(if id.has_units() {
             Value::Str(id.trim_js(false, true, &e.str_acct))
         } else {
-            e.str_val(id.as_str().trim_end().to_string())
+            e.str_val(id.as_str().trim_end_matches(js_ws).to_string())
         });
     }
     let s = this_str(e, this)?;
-    Ok(e.str_val(s.trim_end().to_string()))
+    Ok(e.str_val(s.trim_end_matches(js_ws).to_string()))
 }
 
 // -- Number statics ------------------------------------------------------

@@ -130,6 +130,7 @@ fn map_new(e: &mut Engine, args: &[Value], proto_id: crate::value::ObjId) -> JsR
             }
             let k = e.get_prop_value(pair.clone(), "0")?;
             let v = e.get_prop_value(pair, "1")?;
+            weak_key_check(e, id, &k)?;
             map_set_entry(e, id, k, v)?;
         }
     }
@@ -165,6 +166,7 @@ fn set_new(e: &mut Engine, args: &[Value], proto_id: crate::value::ObjId) -> JsR
             if i % 4096 == 0 {
                 e.tick()?;
             }
+            weak_key_check(e, id, &v)?;
             set_add(e, id, v)?;
         }
     }
@@ -219,11 +221,25 @@ pub(crate) fn set_add(e: &mut Engine, id: ObjId, v: Value) -> JsResult<()> {
 // Map methods
 // ------------------------------------------------------------------
 
+/// `CanBeHeldWeakly` (spec) — les protos `WeakMap`/`WeakSet`
+/// exigent une clé objet ; `Map`/`Set` acceptent tout.
+fn weak_key_check(e: &mut Engine, id: ObjId, k: &Value) -> JsResult<()> {
+    let is_weak = e.heap.obj(id).is_some_and(
+        |o| matches!(&o.proto, Value::Obj(p) if *p == e.protos.weak_map || *p == e.protos.weak_set),
+    );
+    if is_weak && !matches!(k, Value::Obj(_)) {
+        return Err(e.type_error("invalid value used as weak map/set key"));
+    }
+    Ok(())
+}
+
 fn map_set(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
     let Value::Obj(id) = this else {
         return Err(e.type_error("Map.set on non-Map"));
     };
-    map_set_entry(e, id, arg(args, 0), arg(args, 1))?;
+    let k = arg(args, 0);
+    weak_key_check(e, id, &k)?;
+    map_set_entry(e, id, k, arg(args, 1))?;
     Ok(this) // chaining
 }
 
@@ -284,6 +300,7 @@ fn map_get_or_insert(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Va
         return Err(e.type_error("Map.getOrInsert on non-Map"));
     };
     let (k, v) = (arg(args, 0), arg(args, 1));
+    weak_key_check(e, id, &k)?;
     if let Some(ev) = e.heap.obj(id).and_then(|o| match &o.kind {
         ObjKind::Map(m) => m
             .iter()
@@ -304,6 +321,7 @@ fn map_get_or_insert_computed(e: &mut Engine, this: Value, args: &[Value]) -> Js
         return Err(e.type_error("Map.getOrInsertComputed on non-Map"));
     };
     let (k, cb) = (arg(args, 0), arg(args, 1));
+    weak_key_check(e, id, &k)?;
     if !e.is_callable(cb.clone()) {
         return Err(e.type_error("Map.getOrInsertComputed: callback is not callable"));
     }
@@ -406,7 +424,9 @@ fn set_add_m(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
     let Value::Obj(id) = this else {
         return Err(e.type_error("Set.add on non-Set"));
     };
-    set_add(e, id, arg(args, 0))?;
+    let v = arg(args, 0);
+    weak_key_check(e, id, &v)?;
+    set_add(e, id, v)?;
     Ok(this)
 }
 

@@ -264,19 +264,21 @@ features par défaut sans `intl`.
   divergences connues listeées par moteur fautif — toute
   nouvelle ou résolue échoue.
 
-### Mesure de référence (JS-C582, boa 0.22-dev)
+### Mesure de référence (JS-C583, boa 0.22-dev)
 
-Corpus : **498 concordants / 7 divergences connues / 0
-internal** — `KNOWN` initialisé : 7 divergences **intentionnelles**
-marquées `boa` (`structuredClone`×4, `Intl`×2 — APIs hôte absentes
-de boa ; `Error.captureStackTrace` — extension V8 compat). Bug boa
-mesuré hors corpus : `JSON.parse` imbriqué → **stack overflow
-natif dès ~100 niveaux** (jscore → `RangeError` bornée — la sonde
-a été retirée : elle tue le worker boa et le ratchet in-process).
+Corpus : **638 concordants / 9 divergences connues / 0
+internal** — `KNOWN` : 9 divergences **intentionnelles**/déviations
+boa marquées `boa` (`structuredClone`×4, `Intl`×2 — APIs hôte
+absentes de boa ; `Error.captureStackTrace` — extension V8 compat ;
+`re_source_str` — `.source` d'un `/` double-échappé par boa, spec
+`EscapeRegExpPattern` ; `str_substr_sub` — Annex B.2.2 `substr`
+absent de boa, implémenté côté jscore). Bug boa mesuré hors corpus :
+`JSON.parse` imbriqué → **stack overflow natif dès ~100 niveaux**
+(jscore → `RangeError` bornée — la sonde a été retirée : elle tue
+le worker boa et le ratchet in-process).
 
-Trois vagues d'élargissement ont mesuré **14 bugs jscore réels**,
-tous corrigés (+7 déviations intentionnelles ci-dessus + 1 crash
-boa documenté) :
+Quatre vagues d'élargissement ont mesuré **20 bugs jscore réels**,
+tous corrigés (+9 déviations ci-dessus + 1 crash boa documenté) :
 
 - JS-C580 (~65 sondes) : `Number('0b11'/'0o17')` (préfixes
   binaire/octal absents du String→Number), `Math.sign(-0)` →
@@ -304,6 +306,19 @@ boa documenté) :
   fuyait les `var`** (spec `PerformEval` : env déclaratif enfant
   quand `prog.strict` — `exec_program`/`eval_source_in`
   paramétrés).
+- JS-C583 (~160 sondes, for-await/itérateurs ES2025/Set/Temporal/
+  `__proto__`/computed keys/for-in/`arguments`/`Function.toString`/
+  lookbehind/`toExponential`/getters hérités) : **`for-in` sur
+  `String`** ignorait les primitives (index `"0"`,`"1"`… non
+  énumérés) ; **`arguments.callee` strict** retournait la fonction
+  au lieu du `%ThrowTypeError%` empoisonné ; **`trim*` perdait
+  `U+FEFF`** (le fast-path `str::trim` Rust ignore `FEFF` —
+  whitespace JS ≠ `White_Space` Unicode → predicate `js_ws`) ;
+  **`lastIndexOf` ignorait `fromIndex` négatif** ; **`catch(e)
+  {let e}`** échouait en `ReferenceError` runtime au lieu du
+  `SyntaxError` early (param ∩ déclarations du bloc) ; **clés
+  `WeakMap`/`WeakSet` primitives acceptées** (`map_set` partagé
+  sans check `Value::Obj`).
 
 Surface : **26 441 chemins jscore / 4 203 boa**, `boa-only`
 réduit à 2 déviations boa (`Error.prototype.stack` accesseur

@@ -1475,7 +1475,39 @@ impl Parser {
                 let pat = self.pattern()?;
                 self.expect_p(P::RParen, "`)`")?;
                 self.expect_p(P::LBrace, "`{`")?;
-                Some((pat, self.stmt_list()?))
+                let body = self.stmt_list()?;
+                // Spec `Catch` early errors : un nom lié par le
+                // param ne peut pas être redéclaré par un
+                // `let`/`const`/`var`/`function`/`class` au
+                // niveau du bloc (`catch(e){let e}` → SyntaxError).
+                let mut bound = Vec::new();
+                crate::interp::Engine::lex_pat_names(&pat, true, &mut bound);
+                let clash = |s: &Stmt| -> bool {
+                    let mut names = Vec::new();
+                    match s {
+                        Stmt::Lexical { decls, .. } | Stmt::Var(decls) => {
+                            for d in decls {
+                                crate::interp::Engine::lex_pat_names(&d.pat, true, &mut names);
+                            }
+                        }
+                        Stmt::FunctionDecl(f) => {
+                            if let Some(n) = &f.name {
+                                names.push((n.clone(), true));
+                            }
+                        }
+                        Stmt::ClassDecl(c) => {
+                            if let Some(n) = &c.name {
+                                names.push((n.clone(), true));
+                            }
+                        }
+                        _ => {}
+                    }
+                    names.iter().any(|(n, _)| bound.iter().any(|(b, _)| b == n))
+                };
+                if body.iter().any(clash) {
+                    return Err(self.err("catch parameter identifier declared in catch body"));
+                }
+                Some((pat, body))
             }
         } else {
             None

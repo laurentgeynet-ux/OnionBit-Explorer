@@ -6731,7 +6731,16 @@ impl Engine {
             if let Some(o) = self.heap.obj_mut(aid) {
                 o.args_map = Some((env.clone(), std::rc::Rc::new(map)));
             }
-            if !la.lit.strict {
+            if la.lit.strict {
+                // Spec : `arguments.callee` strict = accesseur
+                // empoisonné — get/set → TypeError (même modèle
+                // que les `caller`/`arguments` restreints).
+                let g = self.native_fn("get callee", crate::builtins::restricted_caller);
+                let s = self.native_fn("set callee", crate::builtins::restricted_caller);
+                if let Some(o) = self.heap.obj_mut(aid) {
+                    o.set_accessor("callee", g, s, false);
+                }
+            } else {
                 self.set_own(aid, "callee", la.f.clone(), false);
             }
         }

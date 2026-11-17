@@ -860,17 +860,23 @@ impl Engine {
                     let v = self.eval_expr(env, this.clone(), init)?;
                     self.assign_target(env, this.clone(), target, v)?;
                 }
-                let Value::Obj(id) = ov else {
-                    return Ok(Flow::Normal); // for-in over primitives: skip
+                // `for k in 'ab'` — la primitive est ToObject :
+                // les index de la chaîne sont énumérables (spec —
+                // autres primitives : rien à énumérer).
+                let (root, keys) = match &ov {
+                    Value::Obj(id) => (*id, self.enum_keys(*id)?),
+                    Value::Str(s) => (u32::MAX, (0..s.u16_len()).map(|i| i.to_string()).collect()),
+                    _ => return Ok(Flow::Normal),
                 };
                 // `for (let k in o)` — env fraîche par itération
                 // (bindings block-scope + capture de closure).
                 let per_iter =
                     matches!(target, ForTarget::Lexical { .. } | ForTarget::Using { .. });
-                let keys = self.enum_keys(id)?;
                 // JS-C421 : l'objet énuméré vit à travers tous
                 // les corps d'itération — racine pour la boucle.
-                self.safepoint_roots.push(Value::Obj(id));
+                if root != u32::MAX {
+                    self.safepoint_roots.push(Value::Obj(root));
+                }
                 let mut out = Ok(Flow::Normal);
                 for key in keys {
                     // JS-C460 — re-stamp par itération + env
@@ -906,7 +912,9 @@ impl Engine {
                         }
                     }
                 }
-                self.safepoint_roots.pop();
+                if root != u32::MAX {
+                    self.safepoint_roots.pop();
+                }
                 out
             }
             Stmt::ForOf {

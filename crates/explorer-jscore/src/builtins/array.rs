@@ -217,11 +217,31 @@ pub(crate) fn array_last_index_of(e: &mut Engine, this: Value, args: &[Value]) -
     let id = this_array(e, this)?;
     let needle = arg(args, 0);
     let elems = take_elems(e, id)?;
+    let len = elems.len() as i64;
+    if len == 0 {
+        put_elems(e, id, elems)?;
+        return Ok(Value::Num(-1.0));
+    }
+    // Spec `fromIndex` : absent → len-1 ; négatif → len+n
+    // (clampé : < -len → aucun élément) ; positif → min(n, len-1).
+    let from = match args.get(1) {
+        Some(Value::Num(n)) => {
+            let n = *n as i64;
+            if n >= 0 {
+                n.min(len - 1)
+            } else {
+                len + n
+            }
+        }
+        _ => len - 1,
+    };
     let mut found = -1i64;
-    for (i, v) in elems.iter().enumerate().rev() {
-        if !v.is_hole() && e.strict_eq(v, &needle) {
-            found = i as i64;
-            break;
+    if from >= 0 {
+        for (i, v) in elems.iter().enumerate().take(from as usize + 1).rev() {
+            if !v.is_hole() && e.strict_eq(v, &needle) {
+                found = i as i64;
+                break;
+            }
         }
     }
     put_elems(e, id, elems)?;

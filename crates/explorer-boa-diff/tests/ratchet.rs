@@ -31,6 +31,13 @@ const KNOWN: &[(&str, &str)] = &[
     // `Error.captureStackTrace` — extension V8 non-spec gardée
     // pour la compat web (feature-detect) ; boa ne l'installe pas.
     ("err_capture", "boa"),
+    // `.source` d'un regex à `/` échappé : boa double l'échappement
+    // (`a\\/b` au lieu de `a\/b` — spec `EscapeRegExpPattern`,
+    // jscore verbatim).
+    ("re_source_str", "boa"),
+    // `String.prototype.substr` (Annex B.2.2) absent de boa
+    // 0.22-dev ; jscore l'implémente spec.
+    ("str_substr_sub", "boa"),
 ];
 
 #[test]

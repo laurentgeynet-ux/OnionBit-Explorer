@@ -302,18 +302,25 @@ pub(crate) fn string_to_upper(e: &mut Engine, this: Value, _a: &[Value]) -> JsRe
     Ok(case_map(e, &s, true))
 }
 
+/// Whitespace JS au niveau char — `White_Space` Unicode +
+/// `U+FEFF` (ZWNBSP, Cf hors `is_whitespace` Rust) — pendant
+/// de `unit_is_ws` pour les fast-paths sans `units`.
+pub(crate) fn js_ws(c: char) -> bool {
+    c.is_whitespace() || c == '\u{feff}'
+}
+
 pub(crate) fn string_trim(e: &mut Engine, this: Value, _a: &[Value]) -> JsResult<Value> {
     if let Value::Str(id) = this {
-        // Fast-path : sans `units`, `str::trim` suffit (aucun
-        // surrogate à préserver) — pas de vue matérialisée.
+        // Fast-path : sans `units`, trim par chars (whitespace
+        // JS — FEFF inclus, spec `TrimString`).
         return Ok(if id.has_units() {
             Value::Str(id.trim_js(true, true, &e.str_acct))
         } else {
-            e.str_val(id.as_str().trim().to_string())
+            e.str_val(id.as_str().trim_matches(js_ws).to_string())
         });
     }
     let s = this_str(e, this)?;
-    Ok(e.str_val(s.trim().to_string()))
+    Ok(e.str_val(s.trim_matches(js_ws).to_string()))
 }
 
 pub(crate) fn string_split(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
