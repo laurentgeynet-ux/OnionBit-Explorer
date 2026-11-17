@@ -287,13 +287,50 @@ fn conv_vals(e: &mut Engine, ta: TaKind, vals: &[Value]) -> JsResult<Vec<Conv>> 
     Ok(out)
 }
 
-/// Écrit `conv` dans `bytes` (région de vue déjà extraite).
+/// Écrit `conv` dans `bytes` (région de vue déjà extraite) —
+/// borné à la capacité **vivante** de la région : une vue RAB
+/// rétrécie pendant la coercion (`valueOf` → `resize`, JS-C591)
+/// n'écrit que la partie encore dans les limites (spec
+/// `IsValidIntegerIndex` par élément — les OOB sont ignorés).
 fn write_conv(ta: TaKind, region: &mut [u8], base: usize, conv: &[Conv]) {
+    let cap = region.len() / ta.size();
     for (i, c) in conv.iter().enumerate() {
+        if base + i >= cap {
+            break;
+        }
         match c {
             Conv::N(n) => ta.set(region, base + i, *n),
             Conv::B(b) => ta.set_big(region, base + i, b),
         }
+    }
+}
+
+/// Éléments lus **live** (post-coercion), complétés à la len
+/// **d'entrée** par `pad` : `ta_elements` tronque aux bytes
+/// vivants — les positions hors bornes d'une vue RAB rétrécie
+/// valent `Undefined` en lecture / `0`/`0n` en copie (spec
+/// `IsValidIntegerIndex`, JS-C591).
+fn ta_live_vals(
+    e: &mut Engine,
+    ta: TaKind,
+    bid: ObjId,
+    voff: usize,
+    len: usize,
+    pad: Value,
+) -> Vec<Value> {
+    let mut vals = e.ta_elements(ta, bid, voff, len);
+    vals.resize(len, pad);
+    vals
+}
+
+/// Zéro du kind (`0` / `0n`) — padding des copies (`slice`,
+/// `with`) : les positions hors bornes restent à zéro dans le
+/// résultat (le buffer destination est né zero-initialisé).
+fn ta_zero(e: &mut Engine, ta: TaKind) -> Value {
+    if ta.is_big() {
+        e.big_val(num_bigint::BigInt::from(0))
+    } else {
+        Value::Num(0.0)
     }
 }
 
@@ -1366,10 +1403,13 @@ fn ta_fill(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
 
 /// `ta.slice(begin?, end?)` — nouvelle view du même kind, copie.
 fn ta_slice(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
-    let (ta, vals) = ta_vals(e, this)?;
-    let (s, en) = rel_bounds(e, arg(args, 0), arg(args, 1), vals.len())?;
-    let out = vals[s..en].to_vec();
-    ta_from_vals(e, ta, &out)
+    let (ta, bid, voff, len) = ta_view(e, this)?;
+    // Bornes sur la len d'entrée (coercion utilisateur possible),
+    // lecture live : positions hors bornes → 0 (JS-C591).
+    let (s, en) = rel_bounds(e, arg(args, 0), arg(args, 1), len)?;
+    let zero = ta_zero(e, ta);
+    let vals = ta_live_vals(e, ta, bid, voff, len, zero);
+    ta_from_vals(e, ta, &vals[s..en])
 }
 
 /// `ta.map(fn)` — nouvelle view du même kind.
@@ -1452,17 +1492,21 @@ fn ta_join(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
 /// `ta.indexOf(v, from?)` — `StrictEqual` : pas de conversion de
 /// `needle` (`u8.indexOf(1n)` → -1, `big.indexOf(1)` → -1).
 fn ta_index_of(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
-    let (_, vals) = ta_vals(e, this)?;
+    let (ta, bid, voff, len) = ta_view(e, this)?;
     let needle = arg(args, 0);
     let from = match arg(args, 1) {
         Value::Undefined => 0.0,
         v => e.to_number(v)?,
     };
+    // `fromIndex` sur la len d'entrée ; les positions hors
+    // bornes lisent `undefined` (`indexOf(undefined)` peut les
+    // trouver — spec `IsValidIntegerIndex`, JS-C591).
     let start = if from < 0.0 {
-        (vals.len() as f64 + from).max(0.0) as usize
+        (len as f64 + from).max(0.0) as usize
     } else {
         from as usize
     };
+    let vals = ta_live_vals(e, ta, bid, voff, len, Value::Undefined);
     for (i, v) in vals.iter().enumerate().skip(start) {
         if e.strict_eq(v, &needle) {
             return Ok(Value::Num(i as f64));
@@ -1473,19 +1517,20 @@ fn ta_index_of(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
 
 /// `ta.lastIndexOf(v, from?)`.
 fn ta_last_index_of(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
-    let (_, vals) = ta_vals(e, this)?;
+    let (ta, bid, voff, len) = ta_view(e, this)?;
     let needle = arg(args, 0);
     let from = match arg(args, 1) {
-        Value::Undefined => vals.len() as f64 - 1.0,
+        Value::Undefined => len as f64 - 1.0,
         v => e.to_number(v)?,
     };
     let start = if from < 0.0 {
-        vals.len() as f64 + from
+        len as f64 + from
     } else {
-        from.min(vals.len() as f64 - 1.0)
+        from.min(len as f64 - 1.0)
     };
+    let vals = ta_live_vals(e, ta, bid, voff, len, Value::Undefined);
     if start >= 0.0 {
-        for i in (0..=start as usize).rev() {
+        for i in (0..=start.min(vals.len() as f64 - 1.0) as usize).rev() {
             if e.strict_eq(&vals[i], &needle) {
                 return Ok(Value::Num(i as f64));
             }
@@ -1496,17 +1541,18 @@ fn ta_last_index_of(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Val
 
 /// `ta.includes(v, from?)` — `SameValueZero` : `===` + cas NaN.
 fn ta_includes(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
-    let (_, vals) = ta_vals(e, this)?;
+    let (ta, bid, voff, len) = ta_view(e, this)?;
     let needle = arg(args, 0);
     let from = match arg(args, 1) {
         Value::Undefined => 0.0,
         v => e.to_number(v)?,
     };
     let start = if from < 0.0 {
-        (vals.len() as f64 + from).max(0.0) as usize
+        (len as f64 + from).max(0.0) as usize
     } else {
         from as usize
     };
+    let vals = ta_live_vals(e, ta, bid, voff, len, Value::Undefined);
     for v in vals.iter().skip(start) {
         let nan = matches!((v.clone(), needle.clone()), (Value::Num(a), Value::Num(b)) if a.is_nan() && b.is_nan());
         if nan || e.strict_eq(v, &needle) {
@@ -1602,10 +1648,15 @@ fn ta_find_index(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value>
 
 /// `ta.at(i)` — index négatif depuis la fin.
 fn ta_at(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
-    let (_, vals) = ta_vals(e, this)?;
+    let (ta, bid, voff, len) = ta_view(e, this)?;
     let n = e.to_number(arg(args, 0))?;
-    let i = if n < 0.0 { vals.len() as f64 + n } else { n };
-    if i >= 0.0 && i < vals.len() as f64 {
+    // Math d'index sur la len **d'entrée**, lecture live
+    // post-coercion : un `valueOf` qui rétrécit le RAB rend les
+    // positions hors bornes → `undefined` (spec
+    // `IsValidIntegerIndex`, JS-C591).
+    let vals = ta_live_vals(e, ta, bid, voff, len, Value::Undefined);
+    let i = if n < 0.0 { len as f64 + n } else { n };
+    if i >= 0.0 && i < len as f64 {
         Ok(vals[i as usize].clone())
     } else {
         Ok(Value::Undefined)
@@ -1747,7 +1798,13 @@ fn ta_copy_within(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value
     let count = en.saturating_sub(f).min(len.saturating_sub(t));
     if let Some(b) = e.heap.obj_mut(bid) {
         if let ObjKind::ByteBuf(bytes) = &mut b.kind {
-            if let Some(region) = bytes.get_mut(voff..voff + len * size) {
+            // Capacité **vivante** : un `valueOf` qui a rétréci le
+            // RAB borne la copie aux éléments encore valides
+            // (JS-C591 — `get_mut(voff..)` tronque à bytes.len()).
+            if let Some(region) = bytes.get_mut(voff..) {
+                let cap = region.len() / size;
+                let (t, f) = (t.min(cap), f.min(cap));
+                let count = count.min(cap - t).min(cap - f);
                 region.copy_within(f * size..(f + count) * size, t * size);
             }
         }
@@ -2176,12 +2233,16 @@ fn ta_find_last_index(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<V
 
 /// `ta.with(i, v)` — ES2023 : copie avec `ta[i] = v`.
 fn ta_with(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
-    let (ta, mut vals) = ta_vals(e, this)?;
+    let (ta, bid, voff, len) = ta_view(e, this)?;
     let n = e.to_number(arg(args, 0))?;
-    let i = if n < 0.0 { vals.len() as f64 + n } else { n };
-    if i < 0.0 || i >= vals.len() as f64 {
+    let i = if n < 0.0 { len as f64 + n } else { n };
+    if i < 0.0 || i >= len as f64 {
         return Err(e.range_error("invalid index"));
     }
+    // Positions hors bornes (RAB rétréci pendant `valueOf`) →
+    // zéro dans la copie (JS-C591).
+    let zero = ta_zero(e, ta);
+    let mut vals = ta_live_vals(e, ta, bid, voff, len, zero);
     vals[i as usize] = arg(args, 1);
     ta_from_vals(e, ta, &vals)
 }

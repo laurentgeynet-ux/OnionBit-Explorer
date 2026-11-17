@@ -469,6 +469,13 @@ pub const PROBES: &[(&str, &str)] = &[
     ("ta_findlast", "new Uint8Array([1,2,3]).findLast(x=>x>1)"),
     ("ta_at_neg", "new Uint8Array([1,2,3]).at(-1)"),
     ("ta_with", "new Uint8Array([1,2,3]).with(0,9).join(',')"),
+    // --- JS-C591 : RAB + coercion hostile (valueOf → resize/detach) ---
+    ("ta_rab_at", "let r=new ArrayBuffer(8,{maxByteLength:16}),t=new Int16Array(r);t.at({valueOf(){r.resize(2);return -1}})"),
+    ("ta_rab_set", "let r=new ArrayBuffer(8,{maxByteLength:16}),t=new Int16Array(r);t.set([9,9],{valueOf(){r.resize(2);return 2}});t[0]"),
+    ("ta_rab_fill_detach", "let r=new ArrayBuffer(8),t=new Int16Array(r);t.fill(7,{valueOf(){r.transfer();return 2}});t[0]"),
+    ("ta_rab_slice", "let r=new ArrayBuffer(8,{maxByteLength:16}),t=new Int16Array(r);t.slice({valueOf(){r.resize(2);return 1}}).length"),
+    ("ta_rab_idxw", "let r=new ArrayBuffer(8,{maxByteLength:16}),t=new Int16Array(r);r.resize(2);t[3]=5;t[3]"),
+    ("ta_rab_incl_u", "let r=new ArrayBuffer(8,{maxByteLength:16}),t=new Int16Array(r);t.includes(undefined,{valueOf(){r.resize(2);return 0}})"),
     // --- structuredClone ---
     ("clone_deep", "let o={a:{b:[1,2]}};let c=structuredClone(o);c.a.b[1]+(c.a!==o.a)"),
     ("clone_circular", "let o={};o.self=o;structuredClone(o).self.self===structuredClone({}).self||structuredClone(o).self!==undefined"),

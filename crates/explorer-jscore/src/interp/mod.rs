@@ -8124,9 +8124,12 @@ impl Engine {
                 let Some(ObjKind::ByteBuf(bytes)) = self.heap.obj(bid).map(|b| &b.kind) else {
                     return None;
                 };
-                bytes
-                    .get(offset..offset + len * ta.size())
-                    .map(|region| ta.get_big(region, i))
+                // Borne **par élément** sur les bytes vivants
+                // (vue RAB rétrécie, JS-C591) — pas la région
+                // stockée entière : OOB → `None` → undefined.
+                bytes.get(offset..).and_then(|region| {
+                    ((i + 1) * ta.size() <= region.len()).then(|| ta.get_big(region, i))
+                })
             };
             return b.map(|b| Prop::Data {
                 value: self.big_val(b),
@@ -8238,7 +8241,10 @@ impl Engine {
                     let Some(ObjKind::ByteBuf(bytes)) = self.heap.obj(*bid).map(|b| &b.kind) else {
                         return None;
                     };
-                    let region = bytes.get(*offset..*offset + *len * ta.size())?;
+                    let region = bytes.get(*offset..)?;
+                    if (i + 1) * ta.size() > region.len() {
+                        return None;
+                    }
                     let v = ta.get(region, i);
                     Some(Prop::Data {
                         value: Value::Num(v),
@@ -10342,8 +10348,12 @@ impl Engine {
                 let b = self.to_bigint(v)?;
                 if let Some(bo) = self.heap.obj_mut(bid) {
                     if let ObjKind::ByteBuf(bytes) = &mut bo.kind {
-                        if off <= bytes.len() {
-                            ta.set_big(&mut bytes[off..], i, &b);
+                        // Bornes **vivantes** (RAB rétréci, JS-C591)
+                        // — hors limites : ignoré, pas panic.
+                        if let Some(region) = bytes.get_mut(off..) {
+                            if (i + 1) * ta.size() <= region.len() {
+                                ta.set_big(region, i, &b);
+                            }
                         }
                     }
                 }
@@ -10354,8 +10364,10 @@ impl Engine {
             let n = self.to_number(v)?;
             if let Some(b) = self.heap.obj_mut(bid) {
                 if let ObjKind::ByteBuf(bytes) = &mut b.kind {
-                    if off <= bytes.len() {
-                        ta.set(&mut bytes[off..], i, n);
+                    if let Some(region) = bytes.get_mut(off..) {
+                        if (i + 1) * ta.size() <= region.len() {
+                            ta.set(region, i, n);
+                        }
                     }
                 }
             }

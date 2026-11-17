@@ -380,7 +380,27 @@ fn run_one(path: &Path, body: &str) -> Vec<(Mode, Result<(), String>)> {
     }
     modes(&m)
         .iter()
-        .map(|mode| (*mode, run_pass(path, &m, body, *mode)))
+        .map(|mode| {
+            // Une panic moteur ne doit pas tuer la mesure
+            // (~45 k fichiers à l'extraction JS-C30) : elle
+            // devient un échec `panic:` — la pire catégorie,
+            // visible en tête du résumé.
+            let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                run_pass(path, &m, body, *mode)
+            }));
+            let r = r.unwrap_or_else(|p| {
+                let msg = p
+                    .downcast_ref::<String>()
+                    .cloned()
+                    .or_else(|| {
+                        p.downcast_ref::<&str>()
+                            .map(std::string::ToString::to_string)
+                    })
+                    .unwrap_or_else(|| "?".to_string());
+                Err(format!("panic: {msg}"))
+            });
+            (*mode, r)
+        })
         .collect()
 }
 

@@ -1456,9 +1456,15 @@ impl TaKind {
 
     /// Read element `i` from `bytes` (little-endian, as spec for
     /// platform-independent typed arrays).
+    /// Hors bornes (vue RAB rétrécie après coercion hostile,
+    /// JS-C591) : dégradé `NaN` — jamais de panic sur contenu
+    /// externe ; `debug_assert` pour débusquer le caller fautif.
     pub fn get(self, bytes: &[u8], i: usize) -> f64 {
         let o = i * self.size();
-        let b = &bytes[o..o + self.size()];
+        let Some(b) = bytes.get(o..o + self.size()) else {
+            debug_assert!(false, "TaKind::get hors bornes (RAB ?)");
+            return f64::NAN;
+        };
         match self {
             TaKind::I8 => b[0] as i8 as f64,
             TaKind::U8 | TaKind::U8C => f64::from(b[0]),
@@ -1500,21 +1506,44 @@ impl TaKind {
     /// ré-interprète le signe).
     pub fn set_big(self, bytes: &mut [u8], i: usize, v: &num_bigint::BigInt) {
         use num_traits::ToPrimitive;
-        let o = i * self.size();
+        // Garde OOB identique à `set`/`get` (RAB rétréci —
+        // JS-C591) : écriture hors bornes ignorée, jamais panic.
+        let Some(o) = i.checked_mul(self.size()) else {
+            debug_assert!(false, "TaKind::set_big offset overflow");
+            return;
+        };
         let m = num_bigint::BigInt::from(1) << 64u32;
         let mut r = v % &m;
         if r.sign() == num_bigint::Sign::Minus {
             r += &m;
         }
         let bits = r.to_u64().unwrap_or(0).to_le_bytes();
-        bytes[o..o + 8].copy_from_slice(&bits);
+        let Some(b) = bytes.get_mut(o..o + 8) else {
+            debug_assert!(false, "TaKind::set_big hors bornes (RAB ?)");
+            return;
+        };
+        b.copy_from_slice(&bits);
     }
 
     /// `SetValueInBuffer` — convert `v` through the kind's
     /// conversion (modulo wrap for ints, saturating round for
     /// `Uint8Clamped`, IEEE narrowing for floats) and store it.
     pub fn set(self, bytes: &mut [u8], i: usize, v: f64) {
-        let o = i * self.size();
+        // Vue RAB rétrécie après coercion hostile (JS-C591) :
+        // écriture hors bornes ignorée — jamais de panic sur du
+        // contenu externe ; `debug_assert` débusque le caller.
+        let Some(end) = i
+            .checked_mul(self.size())
+            .and_then(|o| o.checked_add(self.size()))
+        else {
+            debug_assert!(false, "TaKind::set offset overflow");
+            return;
+        };
+        if end > bytes.len() {
+            debug_assert!(false, "TaKind::set hors bornes (RAB ?)");
+            return;
+        }
+        let o = end - self.size();
         match self {
             TaKind::I8 => bytes[o] = (crate::value::to_int32(v) as i8) as u8,
             TaKind::U8 => bytes[o] = crate::value::to_uint32(v) as u8,
