@@ -1,5 +1,13 @@
 # Audit différentiel jscore ↔ Boa — inventaire des gaps
 
+> **Statut (JS-C589)** : l'oracle `explorer-boa-diff` a été
+> **débranché** — ce document reste l'historique des mesures.
+> Le filet anti-régression vit désormais dans
+> `crates/explorer-jscore/tests/oracle_ratchet.rs` (golden 691
+> sondes, in-process) ; l'arbitrage manuel reste possible via
+> `scripts/v8_probe.js` (V8/Node). Le crate est ressuscitable
+> depuis l'historique git.
+
 **Date** : 2026-11-17 — re-mesure après les évolutions du projet
 (jscore ~120 k lignes, JS-C575). Première version de l'audit
 (2026-11-04, baseline BOA-02/03) obsolète : la vague regexp
