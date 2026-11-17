@@ -706,7 +706,12 @@ impl Engine {
             self.set_own(p, h, Value::Null, true);
         }
         if let Value::Obj(cid) = v {
-            self.set_own(cid, "prototype", Value::Obj(p), false);
+            self.set_own_attrs(
+                cid,
+                "prototype",
+                Value::Obj(p),
+                crate::heap::PropAttrs::FIXED,
+            );
             self.set_own(p, "constructor", v.clone(), false);
         }
         self.set_own(g, "Worker", v, false);

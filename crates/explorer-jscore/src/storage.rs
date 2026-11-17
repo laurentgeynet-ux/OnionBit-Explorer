@@ -50,7 +50,12 @@ impl Engine {
         let tag = self.str_val("Storage");
         self.set_own(p, crate::interp::SYM_TO_STRING_TAG, tag, false);
         if let Value::Obj(cid) = f {
-            self.set_own(cid, "prototype", Value::Obj(p), false);
+            self.set_own_attrs(
+                cid,
+                "prototype",
+                Value::Obj(p),
+                crate::heap::PropAttrs::FIXED,
+            );
             self.set_own(p, "constructor", f.clone(), false);
         }
         for v in [lv.clone(), sv.clone()] {

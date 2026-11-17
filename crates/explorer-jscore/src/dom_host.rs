@@ -2806,7 +2806,7 @@ impl Engine {
         self.install_dom_idl_accessors(pid, class);
         let ctor = self.illegal_ctor_bound(class);
         if let Value::Obj(cid) = ctor {
-            self.set_own(cid, "prototype", proto, false);
+            self.set_own_attrs(cid, "prototype", proto, crate::heap::PropAttrs::FIXED);
             self.set_own(pid, "constructor", ctor.clone(), false);
             self.add_root(cid);
             self.add_root(pid);
@@ -4774,7 +4774,12 @@ impl Engine {
             let lp = self.new_object();
             let tag = self.str_val("Location");
             self.set_own(lp, crate::interp::SYM_TO_STRING_TAG, tag, false);
-            self.set_own(lfid, "prototype", Value::Obj(lp), false);
+            self.set_own_attrs(
+                lfid,
+                "prototype",
+                Value::Obj(lp),
+                crate::heap::PropAttrs::FIXED,
+            );
             if let Value::Obj(locid) = loc {
                 if let Some(o) = self.heap.obj_mut(locid) {
                     o.set_proto(Value::Obj(lp));
@@ -4792,7 +4797,12 @@ impl Engine {
         let htag = self.str_val("History");
         self.set_own(hp, crate::interp::SYM_TO_STRING_TAG, htag, false);
         if let Value::Obj(hcid) = hf {
-            self.set_own(hcid, "prototype", Value::Obj(hp), false);
+            self.set_own_attrs(
+                hcid,
+                "prototype",
+                Value::Obj(hp),
+                crate::heap::PropAttrs::FIXED,
+            );
             self.set_own(hp, "constructor", hf.clone(), false);
         }
         if let Value::Obj(hid) = hist {
@@ -4855,7 +4865,12 @@ impl Engine {
             // `Navigation.prototype` → `EventTarget.prototype` :
             // chaînage effectué dans la boucle protos DOM plus bas
             // (`EventTarget` est installé après ce bloc).
-            self.set_own(nfid, "prototype", Value::Obj(np), false);
+            self.set_own_attrs(
+                nfid,
+                "prototype",
+                Value::Obj(np),
+                crate::heap::PropAttrs::FIXED,
+            );
             if let Value::Obj(nav_id) = navapi {
                 if let Some(o) = self.heap.obj_mut(nav_id) {
                     o.set_proto(Value::Obj(np));
@@ -4938,7 +4953,12 @@ impl Engine {
                     let fv = self.native_fn(m, nv);
                     self.set_own(p, m, fv, true);
                 }
-                self.set_own(fid, "prototype", Value::Obj(p), false);
+                self.set_own_attrs(
+                    fid,
+                    "prototype",
+                    Value::Obj(p),
+                    crate::heap::PropAttrs::FIXED,
+                );
             }
             self.set_own(g, name, f, false);
         }
@@ -5012,7 +5032,12 @@ impl Engine {
             // capture rend `undefined` → `.call` jette et le
             // polyfill meurt à l'init).
             install_dom_nav_accessors(self, p, NODE_NAV_GETTERS);
-            self.set_own(nid, "prototype", Value::Obj(p), false);
+            self.set_own_attrs(
+                nid,
+                "prototype",
+                Value::Obj(p),
+                crate::heap::PropAttrs::FIXED,
+            );
             for (k, v) in [
                 ("ELEMENT_NODE", 1),
                 ("ATTRIBUTE_NODE", 2),
@@ -5070,7 +5095,12 @@ impl Engine {
             // accesseurs `dom.nav`/`dom.acc`).
             install_dom_nav_accessors(self, p, &["children", "innerHTML"]);
             self.install_dom_idl_accessors(p, "HTMLElement");
-            self.set_own(fid, "prototype", Value::Obj(p), false);
+            self.set_own_attrs(
+                fid,
+                "prototype",
+                Value::Obj(p),
+                crate::heap::PropAttrs::FIXED,
+            );
             // Chaînage WebIDL `HTMLElement.prototype →
             // Element.prototype` différé juste après la boucle
             // d'install ci-dessous (`Element` n'existe pas
@@ -5409,7 +5439,12 @@ impl Engine {
                         }
                     }
                 }
-                self.set_own(fid, "prototype", Value::Obj(p), false);
+                self.set_own_attrs(
+                    fid,
+                    "prototype",
+                    Value::Obj(p),
+                    crate::heap::PropAttrs::FIXED,
+                );
                 // Accesseurs IDL (`value`/`checked`/…) sur le
                 // proto global — `el.constructor` rend le ctor
                 // global tag-spécifique ; sa surface de
@@ -5472,7 +5507,12 @@ impl Engine {
             let f = self.bound_native(name, domrect_ctor, vec![flag]);
             if let Value::Obj(fid) = f {
                 self.set_own(fid, "length", Value::Num(0.0), false);
-                self.set_own(fid, "prototype", proto.clone(), false);
+                self.set_own_attrs(
+                    fid,
+                    "prototype",
+                    proto.clone(),
+                    crate::heap::PropAttrs::FIXED,
+                );
                 if let Value::Obj(pid) = proto.clone() {
                     self.set_own(pid, "constructor", f.clone(), false);
                 }
@@ -5495,7 +5535,12 @@ impl Engine {
             let proto = self.new_object();
             let gah = self.native_fn("getCueAsHTML", vttcue_as_html);
             self.set_own(proto, "getCueAsHTML", gah, false);
-            self.set_own(fid, "prototype", Value::Obj(proto), false);
+            self.set_own_attrs(
+                fid,
+                "prototype",
+                Value::Obj(proto),
+                crate::heap::PropAttrs::FIXED,
+            );
             self.set_own(fid, "length", Value::Num(3.0), false);
             if let Some(o) = self.heap.obj_mut(proto) {
                 o.set_own("constructor", ctor.clone(), false);
@@ -5522,7 +5567,12 @@ impl Engine {
             ] {
                 self.set_own(proto, k, v, true);
             }
-            self.set_own(fid, "prototype", Value::Obj(proto), false);
+            self.set_own_attrs(
+                fid,
+                "prototype",
+                Value::Obj(proto),
+                crate::heap::PropAttrs::FIXED,
+            );
             self.set_own(fid, "length", Value::Num(3.0), false);
             if let Some(o) = self.heap.obj_mut(proto) {
                 o.set_own("constructor", ttc.clone(), false);
@@ -5606,7 +5656,12 @@ impl Engine {
                 let m = self.native_fn(name, audio_node_stub);
                 self.set_own(p, name, m, true);
             }
-            self.set_own(fid, "prototype", Value::Obj(p), false);
+            self.set_own_attrs(
+                fid,
+                "prototype",
+                Value::Obj(p),
+                crate::heap::PropAttrs::FIXED,
+            );
         }
         self.set_own(g, "AudioContext", ac_f, false);
         // `EventTarget` — constructible spec (corpus css-tricks :
@@ -5624,7 +5679,12 @@ impl Engine {
             let tag = self.str_val("EventTarget");
             self.set_own(p, crate::interp::SYM_TO_STRING_TAG, tag, false);
             if let Value::Obj(fid) = et_f {
-                self.set_own(fid, "prototype", Value::Obj(p), false);
+                self.set_own_attrs(
+                    fid,
+                    "prototype",
+                    Value::Obj(p),
+                    crate::heap::PropAttrs::FIXED,
+                );
             }
             // WebIDL : `window` hérite `EventTarget.prototype` —
             // le polyfill webcomponents (YouTube) lit
@@ -5691,7 +5751,12 @@ impl Engine {
             let p = self.new_object();
             let tag = self.str_val("DOMException");
             self.set_own(p, crate::interp::SYM_TO_STRING_TAG, tag, false);
-            self.set_own(fid, "prototype", Value::Obj(p), false);
+            self.set_own_attrs(
+                fid,
+                "prototype",
+                Value::Obj(p),
+                crate::heap::PropAttrs::FIXED,
+            );
         }
         self.set_own(g, "DOMException", de_f, false);
         // `DOMParser` — constructible (JS-C91) : htmx parse
@@ -5701,7 +5766,12 @@ impl Engine {
         let f = self.native_fn("DOMParser", dom_parser_ctor);
         if let Value::Obj(fid) = f {
             let p = self.new_object();
-            self.set_own(fid, "prototype", Value::Obj(p), false);
+            self.set_own_attrs(
+                fid,
+                "prototype",
+                Value::Obj(p),
+                crate::heap::PropAttrs::FIXED,
+            );
         }
         self.set_own(g, "DOMParser", f, false);
         // `AbstractRange` (JS-C556) — interface de base non
@@ -5711,7 +5781,12 @@ impl Engine {
         let af = self.illegal_ctor_bound("AbstractRange");
         if let Value::Obj(fid) = af {
             let p = crate::misc_apis::abstract_range_proto(self);
-            self.set_own(fid, "prototype", Value::Obj(p), false);
+            self.set_own_attrs(
+                fid,
+                "prototype",
+                Value::Obj(p),
+                crate::heap::PropAttrs::FIXED,
+            );
             self.set_own(p, "constructor", af.clone(), false);
         }
         self.set_own(g, "AbstractRange", af, false);
@@ -5724,7 +5799,12 @@ impl Engine {
         let f = self.native_fn("Range", crate::misc_apis::range_ctor);
         if let Value::Obj(fid) = f {
             let p = crate::misc_apis::range_proto(self);
-            self.set_own(fid, "prototype", Value::Obj(p), false);
+            self.set_own_attrs(
+                fid,
+                "prototype",
+                Value::Obj(p),
+                crate::heap::PropAttrs::FIXED,
+            );
             self.set_own(p, "constructor", f.clone(), false);
             // Constantes spec `compareBoundaryPoints` — posées
             // sur le ctor ET le prototype (héritage own+proto).
@@ -5744,7 +5824,12 @@ impl Engine {
         let sf = self.native_fn("StaticRange", crate::misc_apis::static_range_ctor);
         if let Value::Obj(fid) = sf {
             let p = crate::misc_apis::static_range_proto(self);
-            self.set_own(fid, "prototype", Value::Obj(p), false);
+            self.set_own_attrs(
+                fid,
+                "prototype",
+                Value::Obj(p),
+                crate::heap::PropAttrs::FIXED,
+            );
             self.set_own(p, "constructor", sf.clone(), false);
         }
         self.set_own(g, "StaticRange", sf, false);
@@ -5776,7 +5861,12 @@ impl Engine {
             }
             let tag = self.str_val("CSSStyleSheet");
             self.set_own(p, crate::interp::SYM_TO_STRING_TAG, tag, false);
-            self.set_own(fid, "prototype", Value::Obj(p), false);
+            self.set_own_attrs(
+                fid,
+                "prototype",
+                Value::Obj(p),
+                crate::heap::PropAttrs::FIXED,
+            );
         }
         self.set_own(g, "CSSStyleSheet", f, false);
         // `SharedWorker` (CAP-183) — ctor défini pour le
@@ -5809,7 +5899,12 @@ impl Engine {
                     }
                 }
             }
-            self.set_own(cid, "prototype", Value::Obj(p), false);
+            self.set_own_attrs(
+                cid,
+                "prototype",
+                Value::Obj(p),
+                crate::heap::PropAttrs::FIXED,
+            );
             self.set_own(p, "constructor", f.clone(), false);
         }
         self.set_own(g, "SharedWorker", f, false);
@@ -5965,7 +6060,7 @@ impl Engine {
                     self.set_own(pid, k, Value::Num(f64::from(v)), false);
                 }
             }
-            self.set_own(fid, "prototype", p.clone(), false);
+            self.set_own_attrs(fid, "prototype", p.clone(), crate::heap::PropAttrs::FIXED);
             event_proto = p;
         }
         self.set_own(g, "Event", event_f, false);
@@ -6112,7 +6207,7 @@ impl Engine {
                         }
                     }
                 }
-                self.set_own(fid, "prototype", p, false);
+                self.set_own_attrs(fid, "prototype", p, crate::heap::PropAttrs::FIXED);
             }
             self.set_own(g, name, f, false);
         }
@@ -6122,7 +6217,12 @@ impl Engine {
         let img_f = self.native_fn("Image", image_ctor);
         if let Value::Obj(fid) = img_f {
             let p = self.new_object();
-            self.set_own(fid, "prototype", Value::Obj(p), false);
+            self.set_own_attrs(
+                fid,
+                "prototype",
+                Value::Obj(p),
+                crate::heap::PropAttrs::FIXED,
+            );
         }
         self.set_own(g, "Image", img_f, false);
         // `Audio`/`Video` (CAP-178) — alias `createElement` des
@@ -6134,7 +6234,12 @@ impl Engine {
             let f = self.bound_native(name, media_el_ctor, vec![tagv]);
             if let Value::Obj(fid) = f {
                 let p = self.new_object();
-                self.set_own(fid, "prototype", Value::Obj(p), false);
+                self.set_own_attrs(
+                    fid,
+                    "prototype",
+                    Value::Obj(p),
+                    crate::heap::PropAttrs::FIXED,
+                );
             }
             self.set_own(g, name, f, false);
         }
@@ -6146,7 +6251,12 @@ impl Engine {
         let xs_f = self.native_fn("XMLSerializer", xmlserializer_ctor);
         if let Value::Obj(fid) = xs_f {
             let p = self.new_object();
-            self.set_own(fid, "prototype", Value::Obj(p), false);
+            self.set_own_attrs(
+                fid,
+                "prototype",
+                Value::Obj(p),
+                crate::heap::PropAttrs::FIXED,
+            );
         }
         self.set_own(g, "XMLSerializer", xs_f, false);
         // `AbortSignal` (CAP-194) — surface spec bornée : le
@@ -6180,7 +6290,12 @@ impl Engine {
             // `cannot read 'throwIfAborted' of Undefined`).
             let m = self.native_fn("throwIfAborted", signal_static_throw_if_aborted);
             self.set_own(fid, "throwIfAborted", m, true);
-            self.set_own(fid, "prototype", Value::Obj(sig_proto), false);
+            self.set_own_attrs(
+                fid,
+                "prototype",
+                Value::Obj(sig_proto),
+                crate::heap::PropAttrs::FIXED,
+            );
         }
         self.set_own(g, "AbortSignal", as_f, false);
         // `AbortController` minimal : `signal` réel +
@@ -6190,7 +6305,12 @@ impl Engine {
             let p = self.new_object();
             let m = self.native_fn("abort", abort_signal_abort);
             self.set_own(p, "abort", m, true);
-            self.set_own(fid, "prototype", Value::Obj(p), false);
+            self.set_own_attrs(
+                fid,
+                "prototype",
+                Value::Obj(p),
+                crate::heap::PropAttrs::FIXED,
+            );
         }
         self.set_own(g, "AbortController", ac_f, false);
         // `IntersectionObserver`/`ResizeObserver` (JS-C69) —
@@ -6579,7 +6699,12 @@ impl Engine {
                     }
                     _ => {}
                 }
-                self.set_own(fid, "prototype", Value::Obj(p), false);
+                self.set_own_attrs(
+                    fid,
+                    "prototype",
+                    Value::Obj(p),
+                    crate::heap::PropAttrs::FIXED,
+                );
             }
             self.set_own(g, name, f, false);
         }
@@ -6651,7 +6776,12 @@ impl Engine {
                 self.set_own(fid, k, Value::Num(f64::from(v)), false);
             }
             let p = self.new_object();
-            self.set_own(fid, "prototype", Value::Obj(p), false);
+            self.set_own_attrs(
+                fid,
+                "prototype",
+                Value::Obj(p),
+                crate::heap::PropAttrs::FIXED,
+            );
         }
         self.set_own(g, "XPathResult", xr_f, false);
         // Interfaces événement complémentaires — rail
@@ -6674,7 +6804,7 @@ impl Engine {
                         o.set_proto(event_proto.clone());
                     }
                 }
-                self.set_own(fid, "prototype", p, false);
+                self.set_own_attrs(fid, "prototype", p, crate::heap::PropAttrs::FIXED);
             }
             self.set_own(g, name, f, false);
         }
@@ -6684,7 +6814,12 @@ impl Engine {
         let opt_f = self.native_fn("Option", option_ctor);
         if let Value::Obj(fid) = opt_f {
             let p = self.new_object();
-            self.set_own(fid, "prototype", Value::Obj(p), false);
+            self.set_own_attrs(
+                fid,
+                "prototype",
+                Value::Obj(p),
+                crate::heap::PropAttrs::FIXED,
+            );
         }
         self.set_own(g, "Option", opt_f, false);
         // `DOMPoint`/`DOMMatrix` — math 2D réelle bornée
@@ -6702,7 +6837,12 @@ impl Engine {
             let f = self.native_fn(name, f2);
             if let Value::Obj(fid) = f {
                 let p = self.new_object();
-                self.set_own(fid, "prototype", Value::Obj(p), false);
+                self.set_own_attrs(
+                    fid,
+                    "prototype",
+                    Value::Obj(p),
+                    crate::heap::PropAttrs::FIXED,
+                );
             }
             self.set_own(g, name, f, false);
         }
@@ -6740,7 +6880,12 @@ impl Engine {
         let id_f = self.native_fn("ImageData", imagedata_ctor);
         if let Value::Obj(fid) = id_f {
             let p = self.new_object();
-            self.set_own(fid, "prototype", Value::Obj(p), false);
+            self.set_own_attrs(
+                fid,
+                "prototype",
+                Value::Obj(p),
+                crate::heap::PropAttrs::FIXED,
+            );
         }
         self.set_own(g, "ImageData", id_f, false);
         // `Path2D` — enregistreur d'ops borné (les ctx `fill`/
@@ -6749,7 +6894,12 @@ impl Engine {
         let p2d_f = self.native_fn("Path2D", path2d_ctor);
         if let Value::Obj(fid) = p2d_f {
             let p = self.new_object();
-            self.set_own(fid, "prototype", Value::Obj(p), false);
+            self.set_own_attrs(
+                fid,
+                "prototype",
+                Value::Obj(p),
+                crate::heap::PropAttrs::FIXED,
+            );
         }
         self.set_own(g, "Path2D", p2d_f, false);
         // `OffscreenCanvas` — `<canvas>` détaché du miroir :
@@ -6758,7 +6908,12 @@ impl Engine {
         let oc_f = self.native_fn("OffscreenCanvas", offscreen_canvas_ctor);
         if let Value::Obj(fid) = oc_f {
             let p = self.new_object();
-            self.set_own(fid, "prototype", Value::Obj(p), false);
+            self.set_own_attrs(
+                fid,
+                "prototype",
+                Value::Obj(p),
+                crate::heap::PropAttrs::FIXED,
+            );
         }
         self.set_own(g, "OffscreenCanvas", oc_f, false);
         // `Touch`/`TouchList`/`TouchEvent` support (JS-C560)
@@ -6770,7 +6925,12 @@ impl Engine {
         let t_f = self.native_fn("Touch", touch_ctor);
         if let Value::Obj(fid) = t_f {
             let p = self.new_object();
-            self.set_own(fid, "prototype", Value::Obj(p), false);
+            self.set_own_attrs(
+                fid,
+                "prototype",
+                Value::Obj(p),
+                crate::heap::PropAttrs::FIXED,
+            );
         }
         self.set_own(g, "Touch", t_f, false);
         let tl_f = self.native_fn("TouchList", |e, _t, _a| {
@@ -6783,7 +6943,12 @@ impl Engine {
                 self.set_own(p, m, f, true);
             }
             self.set_own(p, "length", Value::Num(0.0), true);
-            self.set_own(fid, "prototype", Value::Obj(p), false);
+            self.set_own_attrs(
+                fid,
+                "prototype",
+                Value::Obj(p),
+                crate::heap::PropAttrs::FIXED,
+            );
         }
         self.set_own(g, "TouchList", tl_f, false);
         // `URLPattern` (JS-C560) — ctor réel (chaîne résolue
@@ -6805,7 +6970,12 @@ impl Engine {
                 self.set_own(p, k, Value::Undefined, true);
             }
             self.set_own(p, "hasRegExpGroups", Value::Bool(false), true);
-            self.set_own(fid, "prototype", Value::Obj(p), false);
+            self.set_own_attrs(
+                fid,
+                "prototype",
+                Value::Obj(p),
+                crate::heap::PropAttrs::FIXED,
+            );
         }
         self.set_own(g, "URLPattern", up_f, false);
         // `PerformanceObserver`/`ReportingObserver` — ctors
@@ -6825,7 +6995,12 @@ impl Engine {
             let f = self.native_fn(name, f2);
             if let Value::Obj(fid) = f {
                 let p = self.new_object();
-                self.set_own(fid, "prototype", Value::Obj(p), false);
+                self.set_own_attrs(
+                    fid,
+                    "prototype",
+                    Value::Obj(p),
+                    crate::heap::PropAttrs::FIXED,
+                );
                 // `supportedEntryTypes` — `[]` honnête (aucune
                 // entrée produite → aucun type supporté ; les
                 // gardes `.includes('x')` sautent proprement).
@@ -6839,7 +7014,12 @@ impl Engine {
         let xe = self.native_fn("XPathEvaluator", xpath_evaluator_ctor);
         if let Value::Obj(fid) = xe {
             let p = self.new_object();
-            self.set_own(fid, "prototype", Value::Obj(p), false);
+            self.set_own_attrs(
+                fid,
+                "prototype",
+                Value::Obj(p),
+                crate::heap::PropAttrs::FIXED,
+            );
         }
         self.set_own(g, "XPathEvaluator", xe, false);
         // `FontFace` — `{family, status:'unloaded', load() →
@@ -6849,7 +7029,12 @@ impl Engine {
         let ff_f = self.native_fn("FontFace", fontface_ctor);
         if let Value::Obj(fid) = ff_f {
             let p = self.new_object();
-            self.set_own(fid, "prototype", Value::Obj(p), false);
+            self.set_own_attrs(
+                fid,
+                "prototype",
+                Value::Obj(p),
+                crate::heap::PropAttrs::FIXED,
+            );
         }
         self.set_own(g, "FontFace", ff_f, false);
         // `createImageBitmap` → promesse résolue
@@ -21583,7 +21768,12 @@ pub(crate) fn install_worker_navigator(e: &mut Engine) {
             let f = e.native_fn(m, |_e: &mut Engine, _t, _a| Ok(Value::Bool(false)));
             e.set_own(p, m, f, true);
         }
-        e.set_own(cid, "prototype", Value::Obj(p), false);
+        e.set_own_attrs(
+            cid,
+            "prototype",
+            Value::Obj(p),
+            crate::heap::PropAttrs::FIXED,
+        );
         if let Some(o) = e.heap.obj_mut(nav) {
             o.set_proto(Value::Obj(p));
         }
@@ -21605,7 +21795,12 @@ pub(crate) fn install_worker_navigator(e: &mut Engine) {
             Ok(e.get_prop_value(t, "href").unwrap_or(Value::Undefined))
         });
         e.set_own(p, "toString", ts, true);
-        e.set_own(cid, "prototype", Value::Obj(p), false);
+        e.set_own_attrs(
+            cid,
+            "prototype",
+            Value::Obj(p),
+            crate::heap::PropAttrs::FIXED,
+        );
         if let Some(Value::Obj(lid)) = e.get_prop(g, "location") {
             if let Some(o) = e.heap.obj_mut(lid) {
                 o.set_proto(Value::Obj(p));
@@ -21645,7 +21840,12 @@ pub(crate) fn install_worker_navigator(e: &mut Engine) {
         }
         let f = e.native_fn("importScripts", mql_noop);
         e.set_own(p, "importScripts", f, true);
-        e.set_own(cid, "prototype", Value::Obj(p), false);
+        e.set_own_attrs(
+            cid,
+            "prototype",
+            Value::Obj(p),
+            crate::heap::PropAttrs::FIXED,
+        );
         wgs_proto = Value::Obj(p);
     }
     e.set_own(g, "WorkerGlobalScope", wgf, false);
@@ -21670,7 +21870,12 @@ pub(crate) fn install_worker_navigator(e: &mut Engine) {
             let f = e.native_fn(m, mql_noop);
             e.set_own(p, m, f, true);
         }
-        e.set_own(cid, "prototype", Value::Obj(p), false);
+        e.set_own_attrs(
+            cid,
+            "prototype",
+            Value::Obj(p),
+            crate::heap::PropAttrs::FIXED,
+        );
         if let Some(o) = e.heap.obj_mut(g) {
             o.set_proto(Value::Obj(p));
         }
@@ -23293,7 +23498,12 @@ pub(crate) fn install_formdata_global(e: &mut Engine) {
     let p = fd_proto(e);
     let f = e.native_fn("FormData", formdata_ctor);
     if let Value::Obj(fid) = f {
-        e.set_own(fid, "prototype", Value::Obj(p), false);
+        e.set_own_attrs(
+            fid,
+            "prototype",
+            Value::Obj(p),
+            crate::heap::PropAttrs::FIXED,
+        );
     }
     e.set_own(p, "constructor", f.clone(), false);
     e.set_own(g, "FormData", f, false);
@@ -24668,7 +24878,12 @@ pub(crate) fn install_wasm_stub(e: &mut Engine) {
         let f = e.illegal_ctor_bound(n);
         if let Value::Obj(fid) = f {
             let p = e.new_object();
-            e.set_own(fid, "prototype", Value::Obj(p), false);
+            e.set_own_attrs(
+                fid,
+                "prototype",
+                Value::Obj(p),
+                crate::heap::PropAttrs::FIXED,
+            );
         }
         e.set_own(wasm, n, f, false);
     }
@@ -25820,7 +26035,12 @@ pub(crate) fn install_bcd_surface_apis(e: &mut Engine) {
         if let Value::Obj(cid) = f {
             let p = e.new_object();
             proto_fill(e, p, name, props);
-            e.set_own(cid, "prototype", Value::Obj(p), false);
+            e.set_own_attrs(
+                cid,
+                "prototype",
+                Value::Obj(p),
+                crate::heap::PropAttrs::FIXED,
+            );
         }
         e.set_own(g, name, f, false);
     }
@@ -25870,7 +26090,12 @@ pub(crate) fn install_bcd_surface_apis(e: &mut Engine) {
                 let fv = e.native_fn(m, nf);
                 e.set_own(p, m, fv, true);
             }
-            e.set_own(cid, "prototype", Value::Obj(p), false);
+            e.set_own_attrs(
+                cid,
+                "prototype",
+                Value::Obj(p),
+                crate::heap::PropAttrs::FIXED,
+            );
         }
         e.set_own(g, "ScreenOrientation", f, false);
     }
@@ -25897,7 +26122,12 @@ pub(crate) fn install_bcd_surface_apis(e: &mut Engine) {
                     "onchange",
                 ],
             );
-            e.set_own(cid, "prototype", Value::Obj(p), false);
+            e.set_own_attrs(
+                cid,
+                "prototype",
+                Value::Obj(p),
+                crate::heap::PropAttrs::FIXED,
+            );
         }
         e.set_own(g, "Screen", f, false);
     }
@@ -25927,7 +26157,12 @@ pub(crate) fn install_bcd_surface_apis(e: &mut Engine) {
                     "top",
                 ],
             );
-            e.set_own(cid, "prototype", Value::Obj(p), false);
+            e.set_own_attrs(
+                cid,
+                "prototype",
+                Value::Obj(p),
+                crate::heap::PropAttrs::FIXED,
+            );
         }
         e.set_own(g, "ScreenDetailed", f, false);
     }
@@ -25955,7 +26190,12 @@ pub(crate) fn install_bcd_surface_apis(e: &mut Engine) {
                 let fv = e.native_fn(m, nf);
                 e.set_own(p, m, fv, true);
             }
-            e.set_own(cid, "prototype", Value::Obj(p), false);
+            e.set_own_attrs(
+                cid,
+                "prototype",
+                Value::Obj(p),
+                crate::heap::PropAttrs::FIXED,
+            );
         }
         e.set_own(g, "StorageBucket", f, false);
     }
@@ -25978,7 +26218,12 @@ pub(crate) fn install_bcd_surface_apis(e: &mut Engine) {
             }
             let t = e.str_val("StorageBucketManager");
             e.set_own(p, crate::interp::SYM_TO_STRING_TAG, t, false);
-            e.set_own(cid, "prototype", Value::Obj(p), false);
+            e.set_own_attrs(
+                cid,
+                "prototype",
+                Value::Obj(p),
+                crate::heap::PropAttrs::FIXED,
+            );
         }
         e.set_own(g, "StorageBucketManager", f, false);
         if let Some(Value::Obj(nid)) = e.get_prop(g, "navigator") {
@@ -26006,7 +26251,12 @@ pub(crate) fn install_bcd_surface_apis(e: &mut Engine) {
             }
             let t = e.str_val("PermissionsPolicy");
             e.set_own(p, crate::interp::SYM_TO_STRING_TAG, t, false);
-            e.set_own(cid, "prototype", Value::Obj(p), false);
+            e.set_own_attrs(
+                cid,
+                "prototype",
+                Value::Obj(p),
+                crate::heap::PropAttrs::FIXED,
+            );
             if let Some(Value::Obj(did)) = e.get_prop(g, "document") {
                 let pp = e.new_object();
                 if let Some(o) = e.heap.obj_mut(pp) {
@@ -26039,7 +26289,12 @@ pub(crate) fn install_bcd_surface_apis(e: &mut Engine) {
             }
             let t = e.str_val(name);
             e.set_own(p, crate::interp::SYM_TO_STRING_TAG, t, false);
-            e.set_own(cid, "prototype", Value::Obj(p), false);
+            e.set_own_attrs(
+                cid,
+                "prototype",
+                Value::Obj(p),
+                crate::heap::PropAttrs::FIXED,
+            );
             if name == "HighlightRegistry" {
                 // `CSS.highlights` (Map installée JS-C557)
                 // adopte le proto de l'interface — `in`,
@@ -26077,7 +26332,12 @@ pub(crate) fn install_bcd_surface_apis(e: &mut Engine) {
             }
         }
         proto_fill(e, p, "Highlight", &["priority", "type"]);
-        e.set_own(cid, "prototype", Value::Obj(p), false);
+        e.set_own_attrs(
+            cid,
+            "prototype",
+            Value::Obj(p),
+            crate::heap::PropAttrs::FIXED,
+        );
     }
     e.set_own(g, "Highlight", hf, false);
     // `DOMPointReadOnly`/`DOMQuad` — ctors réels (objets
@@ -26097,7 +26357,12 @@ pub(crate) fn install_bcd_surface_apis(e: &mut Engine) {
                 let fv = e.native_fn(m, nf);
                 e.set_own(p, m, fv, true);
             }
-            e.set_own(cid, "prototype", Value::Obj(p), false);
+            e.set_own_attrs(
+                cid,
+                "prototype",
+                Value::Obj(p),
+                crate::heap::PropAttrs::FIXED,
+            );
             let sf = e.native_fn("fromPoint", dompoint_from_point);
             e.set_own(cid, "fromPoint", sf, false);
         }
@@ -26115,7 +26380,12 @@ pub(crate) fn install_bcd_surface_apis(e: &mut Engine) {
                 let fv = e.native_fn(m, nf);
                 e.set_own(p, m, fv, true);
             }
-            e.set_own(cid, "prototype", Value::Obj(p), false);
+            e.set_own_attrs(
+                cid,
+                "prototype",
+                Value::Obj(p),
+                crate::heap::PropAttrs::FIXED,
+            );
             let fq = e.native_fn("fromQuad", domquad_from_quad);
             e.set_own(cid, "fromQuad", fq, false);
             let fr = e.native_fn("fromRect", domquad_from_rect);
@@ -26143,7 +26413,12 @@ pub(crate) fn install_bcd_surface_apis(e: &mut Engine) {
                     "scroll",
                 ],
             );
-            e.set_own(cid, "prototype", Value::Obj(p), false);
+            e.set_own_attrs(
+                cid,
+                "prototype",
+                Value::Obj(p),
+                crate::heap::PropAttrs::FIXED,
+            );
         }
         e.set_own(g, "VTTRegion", f, false);
     }
@@ -26167,7 +26442,12 @@ pub(crate) fn install_bcd_surface_apis(e: &mut Engine) {
                 let fv = e.native_fn(m, nf);
                 e.set_own(p, m, fv, true);
             }
-            e.set_own(cid, "prototype", Value::Obj(p), false);
+            e.set_own_attrs(
+                cid,
+                "prototype",
+                Value::Obj(p),
+                crate::heap::PropAttrs::FIXED,
+            );
         }
         e.set_own(g, "DataTransfer", f, false);
     }

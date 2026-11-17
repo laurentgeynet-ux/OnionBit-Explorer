@@ -884,7 +884,7 @@ pub(crate) fn install_files(e: &mut Engine) {
                 "FileReaderSync" => Value::Obj(rsync_proto(e)),
                 _ => Value::Obj(reader_proto(e)),
             };
-            e.set_own(fid, "prototype", p, false);
+            e.set_own_attrs(fid, "prototype", p, crate::heap::PropAttrs::FIXED);
         }
         e.set_own(g, name, fv, false);
     }

@@ -193,7 +193,12 @@ impl Engine {
                     self.set_own(p, m, f, true);
                 }
                 self.set_own(p, "constructor", fv.clone(), false);
-                self.set_own(fid, "prototype", Value::Obj(p), false);
+                self.set_own_attrs(
+                    fid,
+                    "prototype",
+                    Value::Obj(p),
+                    crate::heap::PropAttrs::FIXED,
+                );
                 match kind {
                     ObsKind::Intersection => self.obs.proto_io = Some(Value::Obj(p)),
                     ObsKind::Resize => self.obs.proto_ro = Some(Value::Obj(p)),

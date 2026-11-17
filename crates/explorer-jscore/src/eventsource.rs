@@ -514,7 +514,12 @@ pub(crate) fn install_eventsource(e: &mut Engine) {
         // d'emblée : les instruments le patchent sans jamais
         // instancier (`X.prototype.addEventListener` lu au boot).
         let p = es_proto(e);
-        e.set_own(cid, "prototype", Value::Obj(p), false);
+        e.set_own_attrs(
+            cid,
+            "prototype",
+            Value::Obj(p),
+            crate::heap::PropAttrs::FIXED,
+        );
         e.set_own(p, "constructor", ctor.clone(), false);
     }
     e.set_own(g, "EventSource", ctor, true);

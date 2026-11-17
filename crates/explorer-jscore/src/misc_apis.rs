@@ -1073,7 +1073,12 @@ pub(crate) fn install_misc(e: &mut Engine) {
     let bc = e.native_fn("BroadcastChannel", bc_ctor as crate::heap::NativeFn);
     if let Value::Obj(cid) = bc {
         let p = bc_proto(e);
-        e.set_own(cid, "prototype", Value::Obj(p), false);
+        e.set_own_attrs(
+            cid,
+            "prototype",
+            Value::Obj(p),
+            crate::heap::PropAttrs::FIXED,
+        );
         e.set_own(p, "constructor", bc.clone(), false);
     }
     e.set_own(g, "BroadcastChannel", bc, false);
@@ -1082,7 +1087,12 @@ pub(crate) fn install_misc(e: &mut Engine) {
     let nf = e.native_fn("Notification", notif_ctor as crate::heap::NativeFn);
     if let Value::Obj(cid) = nf {
         let p = notif_proto(e);
-        e.set_own(cid, "prototype", Value::Obj(p), false);
+        e.set_own_attrs(
+            cid,
+            "prototype",
+            Value::Obj(p),
+            crate::heap::PropAttrs::FIXED,
+        );
         e.set_own(p, "constructor", nf.clone(), false);
         // Statiques : `permission` own-prop figée `'default'`
         // (honnête — le grant n'est pas atteignable sans UI,
@@ -5078,7 +5088,12 @@ pub(crate) fn install_observable(e: &mut Engine) {
     }
     let f = e.native_fn("Observable", observable_ctor);
     if let Value::Obj(cid) = f {
-        e.set_own(cid, "prototype", Value::Obj(p), false);
+        e.set_own_attrs(
+            cid,
+            "prototype",
+            Value::Obj(p),
+            crate::heap::PropAttrs::FIXED,
+        );
         e.set_own(p, "constructor", f.clone(), false);
         let from = e.native_fn("from", observable_from);
         e.set_own(cid, "from", from, false);

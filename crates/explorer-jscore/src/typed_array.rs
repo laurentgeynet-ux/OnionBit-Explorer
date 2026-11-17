@@ -407,7 +407,12 @@ pub(crate) fn install(e: &mut Engine) {
     {
         let ab = e.native_fn("ArrayBuffer", ab_ctor);
         let id = c_id(ab.clone());
-        e.set_own(id, "prototype", Value::Obj(abp), false);
+        e.set_own_attrs(
+            id,
+            "prototype",
+            Value::Obj(abp),
+            crate::heap::PropAttrs::FIXED,
+        );
         e.set_own(abp, "constructor", ab.clone(), false);
         e.add_method(id, "isView", ab_is_view);
         e.set_own(g, "ArrayBuffer", ab, false);
@@ -478,7 +483,12 @@ pub(crate) fn install(e: &mut Engine) {
         e.set_own(sabp, crate::interp::SYM_TO_STRING_TAG, tag, false);
         let sab = e.native_fn("SharedArrayBuffer", sab_ctor);
         let sid = c_id(sab.clone());
-        e.set_own(sid, "prototype", Value::Obj(sabp), false);
+        e.set_own_attrs(
+            sid,
+            "prototype",
+            Value::Obj(sabp),
+            crate::heap::PropAttrs::FIXED,
+        );
         e.set_own(sabp, "constructor", sab.clone(), false);
         e.set_own(g, "SharedArrayBuffer", sab, false);
     }
@@ -549,7 +559,12 @@ pub(crate) fn install(e: &mut Engine) {
     {
         let dv = e.native_fn("DataView", dv_ctor);
         let id = c_id(dv.clone());
-        e.set_own(id, "prototype", Value::Obj(dvp), false);
+        e.set_own_attrs(
+            id,
+            "prototype",
+            Value::Obj(dvp),
+            crate::heap::PropAttrs::FIXED,
+        );
         e.set_own(dvp, "constructor", dv.clone(), false);
         e.set_own(g, "DataView", dv, false);
     }
@@ -629,7 +644,12 @@ pub(crate) fn install(e: &mut Engine) {
         e.set_const(proto, "BYTES_PER_ELEMENT", Value::Num(ta.size() as f64));
         let ctor = e.bound_native(ta.name(), ta_ctor, vec![Value::Num(ta.index() as f64)]);
         let cid = c_id(ctor.clone());
-        e.set_own(cid, "prototype", Value::Obj(proto), false);
+        e.set_own_attrs(
+            cid,
+            "prototype",
+            Value::Obj(proto),
+            crate::heap::PropAttrs::FIXED,
+        );
         e.set_own(proto, "constructor", ctor.clone(), false);
         e.set_const(cid, "BYTES_PER_ELEMENT", Value::Num(ta.size() as f64));
         let from = e.bound_native("from", ta_from, vec![Value::Num(ta.index() as f64)]);

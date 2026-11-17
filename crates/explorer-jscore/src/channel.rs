@@ -320,7 +320,12 @@ impl Engine {
             // (spec : proto ordinaire, pas d'héritage
             // EventTarget).
             let p = self.new_object();
-            self.set_own(cid, "prototype", Value::Obj(p), false);
+            self.set_own_attrs(
+                cid,
+                "prototype",
+                Value::Obj(p),
+                crate::heap::PropAttrs::FIXED,
+            );
             self.set_own(p, "constructor", v.clone(), false);
         }
         let g = self.global;
@@ -346,7 +351,12 @@ impl Engine {
             self.set_own(mp_proto, name, f, true);
         }
         if let Value::Obj(cid) = mp {
-            self.set_own(cid, "prototype", Value::Obj(mp_proto), false);
+            self.set_own_attrs(
+                cid,
+                "prototype",
+                Value::Obj(mp_proto),
+                crate::heap::PropAttrs::FIXED,
+            );
             self.set_own(mp_proto, "constructor", mp.clone(), false);
         }
         self.set_own(g, "MessagePort", mp, false);

@@ -3281,7 +3281,12 @@ pub(crate) fn install_idb(e: &mut Engine, inject: Option<IdbRegistry>) {
         let c = e.native_fn("IDBFactory", idb_illegal_ctor);
         let fp = new_tagged_proto(e, "IDBFactory");
         if let Value::Obj(cid) = c {
-            e.set_own(cid, "prototype", Value::Obj(fp), false);
+            e.set_own_attrs(
+                cid,
+                "prototype",
+                Value::Obj(fp),
+                crate::heap::PropAttrs::FIXED,
+            );
             e.set_own(fp, "constructor", c.clone(), false);
         }
         e.set_own(g, "IDBFactory", c, false);
@@ -3351,7 +3356,12 @@ pub(crate) fn install_idb_interfaces(e: &mut Engine) {
         };
         let c = e.native_fn(name, idb_illegal_ctor);
         if let Value::Obj(cid) = c {
-            e.set_own(cid, "prototype", Value::Obj(proto), false);
+            e.set_own_attrs(
+                cid,
+                "prototype",
+                Value::Obj(proto),
+                crate::heap::PropAttrs::FIXED,
+            );
             e.set_own(proto, "constructor", c.clone(), false);
         }
         e.set_own(e.global, name, c, false);

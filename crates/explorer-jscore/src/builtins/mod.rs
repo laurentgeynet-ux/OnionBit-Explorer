@@ -22,7 +22,11 @@ pub(crate) fn arg(args: &[Value], i: usize) -> Value {
 /// Wire `Ctor.prototype = proto` and `proto.constructor = Ctor`.
 pub(crate) fn ctor(e: &mut Engine, name: &'static str, f: NativeFn, proto: ObjId) -> Value {
     let c = e.native_fn(name, f);
-    e.set_own(c_id(c.clone()), "prototype", Value::Obj(proto), false);
+    // `Ctor.prototype` est **verrouillé** spec (`{w:false,
+    // e:false, c:false}` — `Array.prototype = {}` doit jeter ;
+    // audit boa A2, ~100 chemins divergents). `proto.constructor`
+    // reste `{w:true,e:false,c:true}` (spec ordinaire).
+    e.set_const(c_id(c.clone()), "prototype", Value::Obj(proto));
     e.set_own(proto, "constructor", c.clone(), false);
     c
 }
@@ -185,7 +189,7 @@ pub(crate) fn install(e: &mut Engine) {
     {
         let iter = e.native_fn("Iterator", iterator_ctor);
         if let Value::Obj(iid) = iter {
-            e.set_own(iid, "prototype", Value::Obj(e.protos.iterator), false);
+            e.set_const(iid, "prototype", Value::Obj(e.protos.iterator));
             e.add_method(iid, "from", iterator_from);
             e.add_method(iid, "concat", iterator_concat);
             e.add_method(iid, "zip", crate::collections::iterator_zip);
@@ -468,15 +472,24 @@ pub(crate) fn install(e: &mut Engine) {
                 .alloc_obj(crate::heap::Object::ordinary(it_proto.clone())),
         );
         if let (Value::Obj(gfp), Value::Obj(gp)) = (gfp_v.clone(), gp_v.clone()) {
-            e.set_own(gfp, "constructor", ctor_v.clone(), false);
-            e.set_own(gfp, "prototype", gp_v.clone(), false);
-            e.set_own(gp, "constructor", gfp_v.clone(), false);
+            // Chaîne « interface » spec (`%GeneratorFunction%.prototype`,
+            // `%Generator%`) : tous les liens `constructor`/`prototype`
+            // sont `{w:false,e:false,c:true}` — non-writable mais
+            // configurables (spec 27.3/27.5, audit boa A2).
+            let iface = crate::heap::PropAttrs {
+                writable: false,
+                enumerable: false,
+                configurable: true,
+            };
+            e.set_own_attrs(gfp, "constructor", ctor_v.clone(), iface);
+            e.set_own_attrs(gfp, "prototype", gp_v.clone(), iface);
+            e.set_own_attrs(gp, "constructor", gfp_v.clone(), iface);
             let t = e.str_val(tag);
             e.set_own(gp, crate::interp::SYM_TO_STRING_TAG, t, false);
             let ft = e.str_val(format!("{tag}Function"));
             e.set_own(gfp, crate::interp::SYM_TO_STRING_TAG, ft, false);
             if let Value::Obj(cid) = ctor_v {
-                e.set_own(cid, "prototype", gfp_v.clone(), false);
+                e.set_const(cid, "prototype", gfp_v.clone());
             }
             if tag == "Generator" {
                 e.gen_fn_proto = gfp_v;
@@ -496,11 +509,20 @@ pub(crate) fn install(e: &mut Engine) {
     //   — le nôtre reste posé par `make_function` (déviation
     //   inerte, même classe que les flèches).
     let afp = e.heap.alloc_obj(crate::heap::Object::ordinary(fn_proto));
-    e.set_own(afp, "constructor", e.async_ctor.clone(), false);
+    e.set_own_attrs(
+        afp,
+        "constructor",
+        e.async_ctor.clone(),
+        crate::heap::PropAttrs {
+            writable: false,
+            enumerable: false,
+            configurable: true,
+        },
+    );
     let at = e.str_val("AsyncFunction");
     e.set_own(afp, crate::interp::SYM_TO_STRING_TAG, at, false);
     if let Value::Obj(cid) = e.async_ctor {
-        e.set_own(cid, "prototype", Value::Obj(afp), false);
+        e.set_const(cid, "prototype", Value::Obj(afp));
     }
     e.async_fn_proto = Value::Obj(afp);
     // `Symbol` — son propre prototype (`protos.symbol`) ; passer
@@ -514,7 +536,9 @@ pub(crate) fn install(e: &mut Engine) {
         let ws = |name: &str, e: &mut Engine| {
             let key = format!("\u{f130}Symbol.{name}");
             let v = e.new_symbol_key(Some(format!("Symbol.{name}")), key);
-            e.set_own(sid, name, v, false);
+            // Well-knowns : `{w:false,e:false,c:false}` spec
+            // (audit boa A2 — étaient BUILTIN `{w:true,c:true}`).
+            e.set_const(sid, name, v);
         };
         for name in [
             "iterator",
@@ -817,14 +841,24 @@ pub(crate) fn install(e: &mut Engine) {
             o.set_accessor("arguments", na.clone(), na, false);
         }
     }
-    // `Function.prototype.name === ""` (spec — le proto est
-    // ordinaire, le bras synthétique `Fun` ne le couvre pas).
+    // `%Function.prototype%` est un callable no-op (`Engine::new`)
+    // — `name`/`length` own `{w:false,e:false,c:true}` spec
+    // (`native_fn` n'a pas pu les poser : autoréférence à sa
+    // création). Le bras synthétique `Fun` couvre la lecture,
+    // les props own couvrent l'énumération.
+    let fnproto_attrs = crate::heap::PropAttrs {
+        writable: false,
+        enumerable: false,
+        configurable: true,
+    };
     let empty_name = e.str_val("");
-    e.set_own(fp, "name", empty_name, false);
+    e.set_own_attrs(fp, "name", empty_name, fnproto_attrs);
+    e.set_own_attrs(fp, "length", Value::Num(0.0), fnproto_attrs);
     // `Function.prototype[Symbol.hasInstance]` — `OrdinaryHasInstance`
-    // (hook `instanceof` par défaut, spec).
+    // (hook `instanceof` par défaut, spec) — verrou `{w:false,
+    // e:false,c:false}` (audit boa A2).
     let hi = e.native_fn("[Symbol.hasInstance]", function_has_instance);
-    e.set_own(fp, crate::interp::SYM_HAS_INSTANCE, hi, false);
+    e.set_const(fp, crate::interp::SYM_HAS_INSTANCE, hi);
 
     // Array.prototype.
     let ap = e.protos.array;

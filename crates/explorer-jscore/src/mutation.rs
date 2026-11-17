@@ -113,7 +113,12 @@ impl Engine {
                 let f = self.bound_native("hostMethod", Self::host_method, vec![namev]);
                 self.set_own(p, name, f, true);
             }
-            self.set_own(cid, "prototype", Value::Obj(p), false);
+            self.set_own_attrs(
+                cid,
+                "prototype",
+                Value::Obj(p),
+                crate::heap::PropAttrs::FIXED,
+            );
             self.set_own(p, "constructor", v.clone(), false);
             self.mutobs.proto = Some(Value::Obj(p));
         }

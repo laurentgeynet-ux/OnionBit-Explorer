@@ -797,7 +797,12 @@ pub(crate) fn install_websocket(e: &mut Engine) {
     let sc = e.native_fn("WebSocket", websocket_ctor as crate::heap::NativeFn);
     if let Value::Obj(cid) = sc {
         let p = ws_proto(e);
-        e.set_own(cid, "prototype", Value::Obj(p), false);
+        e.set_own_attrs(
+            cid,
+            "prototype",
+            Value::Obj(p),
+            crate::heap::PropAttrs::FIXED,
+        );
         e.set_own(p, "constructor", sc.clone(), false);
         // Constantes statiques `WebSocket.CONNECTING/…`
         // (spec — doublon des props du proto et du host).

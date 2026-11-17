@@ -761,7 +761,12 @@ pub(crate) fn install(e: &mut Engine) {
         e.add_method(wmp, "getOrInsert", map_get_or_insert);
         e.add_method(wmp, "getOrInsertComputed", map_get_or_insert_computed);
         let wm = e.native_fn("WeakMap", weak_map_ctor);
-        e.set_own(c_id(wm.clone()), "prototype", Value::Obj(wmp), false);
+        e.set_own_attrs(
+            c_id(wm.clone()),
+            "prototype",
+            Value::Obj(wmp),
+            crate::heap::PropAttrs::FIXED,
+        );
         e.set_own(wmp, "constructor", wm.clone(), false);
         e.set_own(g, "WeakMap", wm, false);
     }
@@ -773,7 +778,12 @@ pub(crate) fn install(e: &mut Engine) {
         e.add_method(wsp, "has", set_has);
         e.add_method(wsp, "delete", set_delete);
         let ws = e.native_fn("WeakSet", weak_set_ctor);
-        e.set_own(c_id(ws.clone()), "prototype", Value::Obj(wsp), false);
+        e.set_own_attrs(
+            c_id(ws.clone()),
+            "prototype",
+            Value::Obj(wsp),
+            crate::heap::PropAttrs::FIXED,
+        );
         e.set_own(wsp, "constructor", ws.clone(), false);
         e.set_own(g, "WeakSet", ws, false);
     }

@@ -261,7 +261,12 @@ impl Engine {
         let proto = self.new_object();
         self.xhr.xhr_proto = Some(proto);
         if let Value::Obj(cid) = v {
-            self.set_own(cid, "prototype", Value::Obj(proto), false);
+            self.set_own_attrs(
+                cid,
+                "prototype",
+                Value::Obj(proto),
+                crate::heap::PropAttrs::FIXED,
+            );
             for (k, n) in [
                 ("UNSENT", 0.0),
                 ("OPENED", 1.0),
@@ -332,7 +337,12 @@ impl Engine {
                 ] {
                     self.set_own(p, h, Value::Null, true);
                 }
-                self.set_own(fid, "prototype", Value::Obj(p), false);
+                self.set_own_attrs(
+                    fid,
+                    "prototype",
+                    Value::Obj(p),
+                    crate::heap::PropAttrs::FIXED,
+                );
             }
             self.set_own(g, name, f, false);
         }
@@ -1182,7 +1192,12 @@ impl Engine {
     pub(crate) fn link_ctor(&mut self, ctor: Value, proto: Option<crate::value::ObjId>) {
         let Some(pid) = proto else { return };
         if let Value::Obj(cid) = ctor {
-            self.set_own(cid, "prototype", Value::Obj(pid), false);
+            self.set_own_attrs(
+                cid,
+                "prototype",
+                Value::Obj(pid),
+                crate::heap::PropAttrs::FIXED,
+            );
         }
         self.set_own(pid, "constructor", ctor, false);
     }
@@ -2783,7 +2798,12 @@ impl Engine {
                     }
                 }
             }
-            self.set_own(cid, "prototype", Value::Obj(p), false);
+            self.set_own_attrs(
+                cid,
+                "prototype",
+                Value::Obj(p),
+                crate::heap::PropAttrs::FIXED,
+            );
             self.set_own(p, "constructor", asig.clone(), false);
             // `AbortSignal.abort(reason?)` — signal déjà aborted.
             let f = self.native_fn("abort", abort_signal_static_abort);

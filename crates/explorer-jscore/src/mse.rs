@@ -3602,7 +3602,12 @@ pub(crate) fn install_mse(e: &mut Engine) {
     let mp = ms_proto(e);
     let fv = e.native_fn("MediaSource", ms_ctor);
     if let Value::Obj(fid) = fv {
-        e.set_own(fid, "prototype", Value::Obj(mp), false);
+        e.set_own_attrs(
+            fid,
+            "prototype",
+            Value::Obj(mp),
+            crate::heap::PropAttrs::FIXED,
+        );
         if let Some(o) = e.heap.obj_mut(mp) {
             o.set_own("constructor", fv.clone(), false);
         }
@@ -3641,7 +3646,12 @@ pub(crate) fn install_mse(e: &mut Engine) {
     ] {
         let fv = e.native_fn(name, ctor);
         if let Value::Obj(fid) = fv {
-            e.set_own(fid, "prototype", Value::Obj(proto), false);
+            e.set_own_attrs(
+                fid,
+                "prototype",
+                Value::Obj(proto),
+                crate::heap::PropAttrs::FIXED,
+            );
             // `MediaError` porte ses constantes spec sur le
             // constructeur (`MediaError.MEDIA_ERR_DECODE`).
             if name == "MediaError" {

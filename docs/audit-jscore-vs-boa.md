@@ -43,7 +43,7 @@ l'**arité `length`** : tout est 0 ; la spec fixe des arités
 réelles pour nombre de builtins (ex. `Array.prototype.push.length
 === 1`) — passe d'arité à prévoir par enregistrement.
 
-### A2. `Ctor.prototype` verrouillé — **103 chemins**
+### A2. `Ctor.prototype` verrouillé — **103 chemins** ✅ *fait (2026-11-17)*
 
 Spec : la propriété `prototype` du constructeur est
 `{writable:false, enumerable:false, configurable:false}`.

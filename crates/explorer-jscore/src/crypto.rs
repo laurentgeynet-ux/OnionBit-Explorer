@@ -2092,7 +2092,12 @@ pub(crate) fn install_subtle(e: &mut Engine, crypto: ObjId) {
     e.set_own(sp, crate::interp::SYM_TO_STRING_TAG, tag, false);
     let sc = e.illegal_ctor_bound("SubtleCrypto");
     if let Value::Obj(cid) = sc {
-        e.set_own(cid, "prototype", Value::Obj(sp), false);
+        e.set_own_attrs(
+            cid,
+            "prototype",
+            Value::Obj(sp),
+            crate::heap::PropAttrs::FIXED,
+        );
         let sup = e.native_fn("supports", subtle_supports);
         e.set_own(cid, "supports", sup, false);
     }

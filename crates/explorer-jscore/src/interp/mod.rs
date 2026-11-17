@@ -1563,10 +1563,28 @@ impl Default for Engine {
 impl Engine {
     /// New engine with all builtins installed.
     #[must_use]
+    /// `%Function.prototype%` — callable no-op spec : accepte
+    /// tous les arguments, rend `undefined` (spec
+    /// `Function.prototype` est une fonction).
+    fn function_proto_noop(_e: &mut Engine, _t: Value, _args: &[Value]) -> JsResult<Value> {
+        Ok(Value::Undefined)
+    }
+
     pub fn new() -> Self {
         let mut heap = Heap::new();
         let object = heap.alloc_obj(Object::ordinary(Value::Null));
-        let function = heap.alloc_obj(Object::ordinary(Value::Obj(object)));
+        // `%Function.prototype%` est un **callable** spec :
+        // `typeof Function.prototype === 'function'`, appel →
+        // `undefined` (audit boa A2 — jscore rendait 'object').
+        // `name`/`length` own posés dans `install` (`native_fn`
+        // autoréférencerait `protos.function` ici).
+        let function = heap.alloc_obj(Object::fun(
+            Fun::Native {
+                name: "",
+                f: Self::function_proto_noop,
+            },
+            Value::Obj(object),
+        ));
         // `Array.prototype` est elle-même un tableau exotique
         // (spec : `Array.isArray(Array.prototype)` → `true` —
         // donne `Array.prototype.length` gratuitement via la
@@ -7683,7 +7701,15 @@ impl Engine {
             return Err(self.type_error("internal class error"));
         };
         // `new` path uses `ctor.prototype`; re-point it at ours.
-        self.set_own(ctor_id, "prototype", Value::Obj(proto), false);
+        // Spec : le `prototype` d'une classe est verrouillé
+        // `{w:false,e:false,c:false}` — distinct des fonctions
+        // script (`{w:true,e:false,c:false}`).
+        self.set_own_attrs(
+            ctor_id,
+            "prototype",
+            Value::Obj(proto),
+            crate::heap::PropAttrs::FIXED,
+        );
         self.set_own(proto, "constructor", ctor.clone(), false);
         // `[[HomeObject]]` du ctor = l'objet **prototype** de la
         // classe (spec `ClassDefinitionEvaluation`), pas le ctor
@@ -12374,7 +12400,20 @@ impl Engine {
         ));
         let p = self.heap.alloc_obj(Object::ordinary(p_obj));
         self.set_own(p, "constructor", Value::Obj(id), false);
-        self.set_own(id, "prototype", Value::Obj(p), false);
+        // `f.prototype` d'une fonction script : `{w:true,
+        // e:false, c:false}` — non-configurable (spec
+        // `FunctionInitialize` ; `delete f.prototype` doit
+        // échouer, `f.prototype = {}` réussir).
+        self.set_own_attrs(
+            id,
+            "prototype",
+            Value::Obj(p),
+            crate::heap::PropAttrs {
+                writable: true,
+                enumerable: false,
+                configurable: false,
+            },
+        );
         // Spec `AddRestrictedFunctionProperties` : `caller` et
         // `arguments` sont des accesseurs poison sur les fonctions
         // strictes, les générateurs et l'async (sloppy : absents —
