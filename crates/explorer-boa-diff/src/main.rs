@@ -23,6 +23,12 @@ fn main() {
         worker(name);
         return;
     }
+    if args.first().is_some_and(|a| a == "--src") {
+        let src = args.get(1).map_or("", String::as_str);
+        println!("JSCORE\t{}", wire(&eval_jscore(src)));
+        println!("BOA\t{}", wire(&eval_boa(src)));
+        return;
+    }
     parent();
 }
 

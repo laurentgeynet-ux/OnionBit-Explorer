@@ -53,13 +53,77 @@ pub fn eval_jscore(src: &str) -> Outcome {
     }
 }
 
+/// APIs **hôte** que jscore installe (navigateur) et que boa ne
+/// fournit pas — le prelude donne à boa des implémentations de
+/// référence spec-following pour la surface exercée par les
+/// sondes, afin que ces APIs restent testables en différentiel
+/// (le shim sert d'oracle quand boa n'en est pas un).
+/// Évalué dans chaque contexte boa avant la sonde ; limité au
+/// strict nécessaire — tout élargissement de la surface probe
+/// demande l'extension du shim correspondant.
+/// **Code volontairement plat** : le parseur récursif de boa
+/// 0.22-dev déborde sa pile native sur les `else if` chaînés
+/// imbriqués — `if` séquentiels et déclarations top-level.
+const BOA_PRELUDE: &str = r"
+function __diffClone(x, seen) {
+    if (typeof x === 'function') throw new TypeError('function could not be cloned');
+    if (x === null || typeof x !== 'object') return x;
+    if (seen.has(x)) return seen.get(x);
+    if (x instanceof Map) {
+        const m = new Map(); seen.set(x, m);
+        for (const [k, e] of x) m.set(__diffClone(k, seen), __diffClone(e, seen));
+        return m;
+    }
+    if (x instanceof Set) {
+        const s = new Set(); seen.set(x, s);
+        for (const e of x) s.add(__diffClone(e, seen));
+        return s;
+    }
+    if (Array.isArray(x)) {
+        const a = new Array(x.length); seen.set(x, a);
+        for (let i = 0; i < x.length; i++) a[i] = __diffClone(x[i], seen);
+        return a;
+    }
+    const o = {}; seen.set(x, o);
+    for (const k of Object.keys(x)) o[k] = __diffClone(x[k], seen);
+    return o;
+}
+function structuredClone(v) { return __diffClone(v, new Map()); }
+globalThis.Intl = {
+    Collator: class Collator {
+        constructor(loc, opts) { this.loc = loc; }
+        compare(a, b) { const x = String(a), y = String(b); return x < y ? -1 : x > y ? 1 : 0; }
+    },
+    NumberFormat: class NumberFormat {
+        constructor(loc, opts) { this.loc = loc; }
+        format(n) {
+            const neg = Object.is(n, -0) || n < 0;
+            const s = String(Math.abs(n));
+            const dot = s.indexOf('.');
+            let i = dot < 0 ? s : s.slice(0, dot);
+            const f = dot < 0 ? '' : s.slice(dot);
+            let out = '';
+            while (i.length > 3) { out = ',' + i.slice(-3) + out; i = i.slice(0, -3); }
+            return (neg ? '-' : '') + i + out + f;
+        }
+    },
+};
+Error.captureStackTrace = function captureStackTrace(target) {
+    target.stack = '';
+};
+";
+
 /// `src` dans boa — issue canonisée (budgets bornés comme jscore :
 /// boucles et pile, les valeurs par défaut boa bornent déjà la
-/// récursion à 512 et la pile VM à 10 K).
+/// récursion à 512 et la pile VM à 10 K). Le [`BOA_PRELUDE`] est
+/// évalué d'abord : il installe les APIs hôte de référence.
 #[must_use]
 pub fn eval_boa(src: &str) -> Outcome {
     let mut ctx = Context::default();
     ctx.runtime_limits_mut().set_loop_iteration_limit(2_000_000);
+    if let Err(err) = ctx.eval(Source::from_bytes(BOA_PRELUDE)) {
+        return Outcome::Internal(format!("prelude: {err}"));
+    }
     match ctx.eval(Source::from_bytes(src)) {
         Ok(v) => match v.to_string(&mut ctx) {
             Ok(s) => Outcome::Value(s.to_std_string_escaped()),

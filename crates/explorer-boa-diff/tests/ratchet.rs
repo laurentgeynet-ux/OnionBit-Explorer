@@ -17,28 +17,11 @@ include!("../src/probes.rs");
 
 /// `(sonde, moteur fautif)` — divergences connues admises.
 /// `jscore` = jscore s'écarte de la spec ; `boa` = boa s'écarte.
-const KNOWN: &[(&str, &str)] = &[
-    // APIs hôte/navigation installées côté jscore, absentes de
-    // boa 0.22-dev (build path-dep sans `intl`) — déviation
-    // intentionnelle documentée (JS-C581, audit) : boa lève
-    // ReferenceError sur le global manquant, jscore exécute.
-    ("clone_deep", "boa"),
-    ("clone_circular", "boa"),
-    ("clone_map_set", "boa"),
-    ("clone_err_throws", "boa"),
-    ("intl_collator", "boa"),
-    ("intl_numfmt", "boa"),
-    // `Error.captureStackTrace` — extension V8 non-spec gardée
-    // pour la compat web (feature-detect) ; boa ne l'installe pas.
-    ("err_capture", "boa"),
-    // `.source` d'un regex à `/` échappé : boa double l'échappement
-    // (`a\\/b` au lieu de `a\/b` — spec `EscapeRegExpPattern`,
-    // jscore verbatim).
-    ("re_source_str", "boa"),
-    // `String.prototype.substr` (Annex B.2.2) absent de boa
-    // 0.22-dev ; jscore l'implémente spec.
-    ("str_substr_sub", "boa"),
-];
+/// **Vide (JS-C584)** : les 9 entrées historiques sont soldées —
+/// `structuredClone`/`Intl`/`Error.captureStackTrace` concordent
+/// via le [`BOA_PRELUDE`], `substr` via la feature `annex-b`,
+/// `.source` échappe `/` spec (`EscapeRegExpPattern`).
+const KNOWN: &[(&str, &str)] = &[];
 
 #[test]
 fn corpus_ratchet() {

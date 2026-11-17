@@ -24,7 +24,7 @@ explorer-jscore = { workspace = true }
 # Oracle : checkout local de boa (path absolu — dossier de test ;
 # ne jamais le remplacer par une dep de prod). Features par
 # défaut : pas d'`intl` (poids deps).
-boa_engine = { path = "D:/Projet/SourceRust/boa/core/engine" }
+boa_engine = { path = "D:/Projet/SourceRust/boa/core/engine", features = ["annex-b"] }
 
 [lints]
 workspace = true

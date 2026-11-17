@@ -264,18 +264,26 @@ features par défaut sans `intl`.
   divergences connues listeées par moteur fautif — toute
   nouvelle ou résolue échoue.
 
-### Mesure de référence (JS-C583, boa 0.22-dev)
+### Mesure de référence (JS-C584, boa 0.22-dev + `annex-b`)
 
-Corpus : **638 concordants / 9 divergences connues / 0
-internal** — `KNOWN` : 9 divergences **intentionnelles**/déviations
-boa marquées `boa` (`structuredClone`×4, `Intl`×2 — APIs hôte
-absentes de boa ; `Error.captureStackTrace` — extension V8 compat ;
-`re_source_str` — `.source` d'un `/` double-échappé par boa, spec
-`EscapeRegExpPattern` ; `str_substr_sub` — Annex B.2.2 `substr`
-absent de boa, implémenté côté jscore). Bug boa mesuré hors corpus :
-`JSON.parse` imbriqué → **stack overflow natif dès ~100 niveaux**
-(jscore → `RangeError` bornée — la sonde a été retirée : elle tue
-le worker boa et le ratchet in-process).
+Corpus : **647 concordants / 0 divergences / 0 internal** —
+`KNOWN` **vide**. Les 9 divergences historiques ont été soldées
+plutôt que documentées : (1) `re_source_str` était en fait un
+**bug jscore** — `.source` rendait le pattern verbatim sans
+`EscapeRegExpPattern` (spec : `/` → `\/`, fins de ligne échappées,
+`\` verbatim ; `/a\/b/.source` = `a\\/b`) — corrigé par
+`escaped_source` ; (2) `str_substr_sub` — `substr` (Annex B.2.2)
+existait dans le source boa derrière `#[cfg(feature="annex-b")]` :
+feature activée sur la path-dep, déviation soldée sans toucher
+boa ; (3) les 7 sondes host-API (`structuredClone`×4, `Intl`×2,
+`Error.captureStackTrace`) concordent via **`BOA_PRELUDE`** —
+implémentations de référence spec-following évaluées dans chaque
+contexte boa (clone structuré réel avec table de cycles, Intl
+minimal sur la surface probée) : le shim sert d'oracle quand boa
+n'en est pas un. Bugs boa mesurés hors corpus : `JSON.parse`
+imbriqué → stack overflow natif dès ~100 niveaux ; **parseur
+récursif** qui stack-overflow sur les `else if` chaînés imbriqués
+(prelude écrit en `if` séquentiels plats).
 
 Quatre vagues d'élargissement ont mesuré **20 bugs jscore réels**,
 tous corrigés (+9 déviations ci-dessus + 1 crash boa documenté) :

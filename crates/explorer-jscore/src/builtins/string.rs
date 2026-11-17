@@ -1021,9 +1021,9 @@ pub(crate) fn string_to_well_formed(e: &mut Engine, this: Value, _a: &[Value]) -
 pub(crate) fn regexp_to_string(e: &mut Engine, this: Value, _a: &[Value]) -> JsResult<Value> {
     let (re, _id) = as_regexp(e, this)?;
     let src = if re.source.is_empty() {
-        "(?:)"
+        "(?:)".to_string()
     } else {
-        re.source.as_str()
+        re.escaped_source()
     };
     Ok(e.str_val(format!("/{src}/{}", re.flag_string())))
 }
@@ -1045,7 +1045,7 @@ pub(crate) fn re_source_get(e: &mut Engine, this: Value, _a: &[Value]) -> JsResu
     Ok(e.str_val(if re.source.is_empty() {
         "(?:)".to_string()
     } else {
-        re.source.clone()
+        re.escaped_source()
     }))
 }
 /// `get flags` — ordre canonique `dgimsuvy`.

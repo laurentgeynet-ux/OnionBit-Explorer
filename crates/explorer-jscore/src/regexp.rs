@@ -225,6 +225,13 @@ impl JsRegExp {
 
     /// `/src/flags` rendering (`toString`) — ordre canonique
     /// `dgimsuy` (spec `RegExp.prototype.flags`).
+    /// `EscapeRegExpPattern` spec : le `.source` exposé échappe
+    /// `\` → `\\`, `/` → `\/` et les fins de ligne — le pattern
+    /// reparse à l'identique dans un littéral `//`.
+    pub fn escaped_source(&self) -> String {
+        escape_regexp_source(&self.source)
+    }
+
     pub fn flag_string(&self) -> String {
         let mut f = String::new();
         if self.has_indices {
@@ -402,6 +409,26 @@ impl JsRegExp {
 }
 
 /// `(?<name>…)` → `(?P<name>…)`; everything else passes through
+/// `EscapeRegExpPattern` — échappe `/` (délimiteur de littéral)
+/// et les fins de ligne (`\n`, `\r`, `U+2028`, `U+2029`) ; tout
+/// le reste passe verbatim — `\` n'est **pas** échappé (il est
+/// déjà forme d'échappement dans le pattern ; le doubler ferait
+/// reparse un pattern différent).
+pub(crate) fn escape_regexp_source(src: &str) -> String {
+    let mut out = String::with_capacity(src.len() + 8);
+    for c in src.chars() {
+        match c {
+            '/' => out.push_str("\\/"),
+            '\n' => out.push_str("\\n"),
+            '\r' => out.push_str("\\r"),
+            '\u{2028}' => out.push_str("\\u2028"),
+            '\u{2029}' => out.push_str("\\u2029"),
+            _ => out.push(c),
+        }
+    }
+    out
+}
+
 /// JS source → `fancy-regex` pattern, with JS-side validation the
 /// backtracker doesn't do (it is *more* permissive than ECMA-262):
 ///
