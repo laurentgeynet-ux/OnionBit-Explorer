@@ -187,7 +187,7 @@ fn es_proto(e: &mut Engine) -> ObjId {
     }
     chain_et(e, p);
     let tag = e.str_val("EventSource");
-    e.set_own(p, crate::interp::SYM_TO_STRING_TAG, tag, false);
+    e.set_own_attrs(p, crate::interp::SYM_TO_STRING_TAG, tag, crate::heap::PropAttrs { writable: false, enumerable: false, configurable: true });
     e.es.es_proto = Some(p);
     p
 }

@@ -4086,7 +4086,7 @@ fn dom_collection(
         // rejetaient nos Array nus → `arr.addEventListener` tuait
         // le boot (vol 118).
         let tv = e.str_val(tag);
-        e.set_own(id, crate::interp::SYM_TO_STRING_TAG, tv, false);
+        e.set_own_attrs(id, crate::interp::SYM_TO_STRING_TAG, tv, crate::heap::PropAttrs { writable: false, enumerable: false, configurable: true });
         e.add_method(id, "item", collection_item);
         if named {
             e.add_method(id, "namedItem", collection_named_item);
@@ -4265,7 +4265,7 @@ impl Engine {
         self.add_method(plugins, "namedItem", nav_plugin_null);
         self.add_method(plugins, "refresh", nav_plugin_refresh);
         let tag = self.str_val("PluginArray");
-        self.set_own(plugins, crate::interp::SYM_TO_STRING_TAG, tag, false);
+        self.set_own_attrs(plugins, crate::interp::SYM_TO_STRING_TAG, tag, crate::heap::PropAttrs { writable: false, enumerable: false, configurable: true });
         self.set_own(nav, "plugins", Value::Obj(plugins), true);
         // `navigator.sendBeacon(url, data?)` — POST fire-and-forget
         // via le transport XHR (staple de télémétrie des pages
@@ -4291,7 +4291,7 @@ impl Engine {
         self.add_method(creds, "get", creds_unsupported);
         self.add_method(creds, "preventSilentAccess", creds_psa);
         let tag = self.str_val("CredentialsContainer");
-        self.set_own(creds, crate::interp::SYM_TO_STRING_TAG, tag, false);
+        self.set_own_attrs(creds, crate::interp::SYM_TO_STRING_TAG, tag, crate::heap::PropAttrs { writable: false, enumerable: false, configurable: true });
         self.set_own(nav, "credentials", Value::Obj(creds), true);
         // `navigator.clipboard` (CAP-181) — surface spec
         // `writeText`/`readText` par hook embedder (le presse-
@@ -4303,7 +4303,7 @@ impl Engine {
         self.add_method(clip, "writeText", clip_write_text);
         self.add_method(clip, "readText", clip_read_text);
         let tag = self.str_val("Clipboard");
-        self.set_own(clip, crate::interp::SYM_TO_STRING_TAG, tag, false);
+        self.set_own_attrs(clip, crate::interp::SYM_TO_STRING_TAG, tag, crate::heap::PropAttrs { writable: false, enumerable: false, configurable: true });
         self.set_own(nav, "clipboard", Value::Obj(clip), true);
         // `navigator.serviceWorker` (§B-14 vol 323, bras
         // `register`) — surface spec `ServiceWorkerContainer` :
@@ -4331,7 +4331,7 @@ impl Engine {
             self.set_own(sw, h, Value::Null, true);
         }
         let tag = self.str_val("ServiceWorkerContainer");
-        self.set_own(sw, crate::interp::SYM_TO_STRING_TAG, tag, false);
+        self.set_own_attrs(sw, crate::interp::SYM_TO_STRING_TAG, tag, crate::heap::PropAttrs { writable: false, enumerable: false, configurable: true });
         self.set_own(nav, "serviceWorker", Value::Obj(sw), true);
         // Props triviales honnêtes (JS-C157) — lues par les
         // CMP/feature-detects : `undefined` cassait la lecture
@@ -4359,7 +4359,7 @@ impl Engine {
         let geo = self.new_object();
         let geop = geo;
         let tag = self.str_val("Geolocation");
-        self.set_own(geop, crate::interp::SYM_TO_STRING_TAG, tag, false);
+        self.set_own_attrs(geop, crate::interp::SYM_TO_STRING_TAG, tag, crate::heap::PropAttrs { writable: false, enumerable: false, configurable: true });
         for m in ["getCurrentPosition", "watchPosition"] {
             let f = self.native_fn(m, |e: &mut Engine, _t: Value, args: &[Value]| {
                 // `success` jamais appelée — pas de GPS ;
@@ -4394,7 +4394,7 @@ impl Engine {
         self.add_method(mimes, "item", nav_plugin_null);
         self.add_method(mimes, "namedItem", nav_plugin_null);
         let tag = self.str_val("MimeTypeArray");
-        self.set_own(mimes, crate::interp::SYM_TO_STRING_TAG, tag, false);
+        self.set_own_attrs(mimes, crate::interp::SYM_TO_STRING_TAG, tag, crate::heap::PropAttrs { writable: false, enumerable: false, configurable: true });
         self.set_own(nav, "mimeTypes", Value::Obj(mimes), true);
         // `mediaSession` — état « rien ne joue ».
         let ms = self.new_object();
@@ -4404,7 +4404,7 @@ impl Engine {
         let noop = self.native_fn("setActionHandler", |_e, _t, _a| Ok(Value::Undefined));
         self.set_own(ms, "setActionHandler", noop, true);
         let tag = self.str_val("MediaSession");
-        self.set_own(ms, crate::interp::SYM_TO_STRING_TAG, tag, false);
+        self.set_own_attrs(ms, crate::interp::SYM_TO_STRING_TAG, tag, crate::heap::PropAttrs { writable: false, enumerable: false, configurable: true });
         self.set_own(nav, "mediaSession", Value::Obj(ms), true);
         // `connection` (NetworkInformation) — desktop filaire
         // plausible (valeurs génériques, low-fingerprint).
@@ -4441,7 +4441,7 @@ impl Engine {
         let gd = self.native_fn("getDirectory", nav_unsupported_reject);
         self.set_own(sto, "getDirectory", gd, true);
         let tag = self.str_val("StorageManager");
-        self.set_own(sto, crate::interp::SYM_TO_STRING_TAG, tag, false);
+        self.set_own_attrs(sto, crate::interp::SYM_TO_STRING_TAG, tag, crate::heap::PropAttrs { writable: false, enumerable: false, configurable: true });
         self.set_own(nav, "storage", Value::Obj(sto), true);
         // `storageBuckets` (JS-C560) — Storage Buckets API :
         // `open` rejette `NotSupportedError` (pas de buckets
@@ -4485,7 +4485,7 @@ impl Engine {
             });
             self.set_own(sb, "durability", dur, true);
             let tag = self.str_val("StorageBucketManager");
-            self.set_own(sb, crate::interp::SYM_TO_STRING_TAG, tag, false);
+            self.set_own_attrs(sb, crate::interp::SYM_TO_STRING_TAG, tag, crate::heap::PropAttrs { writable: false, enumerable: false, configurable: true });
             self.set_own(nav, "storageBuckets", Value::Obj(sb), true);
         }
         // `getAutoplayPolicy` — politique honnête : la
@@ -4530,7 +4530,7 @@ impl Engine {
         let kb = self.new_object();
         self.set_own(kb, "getLayoutMap", glm, true);
         let tag = self.str_val("Keyboard");
-        self.set_own(kb, crate::interp::SYM_TO_STRING_TAG, tag, false);
+        self.set_own_attrs(kb, crate::interp::SYM_TO_STRING_TAG, tag, crate::heap::PropAttrs { writable: false, enumerable: false, configurable: true });
         self.set_own(nav, "keyboard", Value::Obj(kb), true);
         // Rejets `NotSupportedError` honnêtes — la promesse
         // existe (feature-detect `typeof`/`in` vert), la
@@ -4633,7 +4633,7 @@ impl Engine {
             let bar = self.new_object();
             self.set_own(bar, "visible", Value::Bool(true), true);
             let tag = self.str_val("BarProp");
-            self.set_own(bar, crate::interp::SYM_TO_STRING_TAG, tag, false);
+            self.set_own_attrs(bar, crate::interp::SYM_TO_STRING_TAG, tag, crate::heap::PropAttrs { writable: false, enumerable: false, configurable: true });
             self.set_own(g, b, Value::Obj(bar), false);
         }
         if self
@@ -4662,7 +4662,7 @@ impl Engine {
                 self.add_method(vp, m, et_add_listener);
             }
             let tag = self.str_val("VisualViewport");
-            self.set_own(vp, crate::interp::SYM_TO_STRING_TAG, tag, false);
+            self.set_own_attrs(vp, crate::interp::SYM_TO_STRING_TAG, tag, crate::heap::PropAttrs { writable: false, enumerable: false, configurable: true });
             self.set_own(g, "viewport", Value::Obj(vp), false);
         }
         // Petits namespaces window : `originAgentCluster`
@@ -4727,7 +4727,7 @@ impl Engine {
             let enc = self.new_array(Vec::new());
             self.set_own(pm, "supportedContentEncodings", enc, true);
             let tag = self.str_val("PushManager");
-            self.set_own(pm, crate::interp::SYM_TO_STRING_TAG, tag, false);
+            self.set_own_attrs(pm, crate::interp::SYM_TO_STRING_TAG, tag, crate::heap::PropAttrs { writable: false, enumerable: false, configurable: true });
             self.set_own(g, "pushManager", Value::Obj(pm), false);
         }
         for (m, f) in [
@@ -4773,7 +4773,7 @@ impl Engine {
         if let Value::Obj(lfid) = lf {
             let lp = self.new_object();
             let tag = self.str_val("Location");
-            self.set_own(lp, crate::interp::SYM_TO_STRING_TAG, tag, false);
+            self.set_own_attrs(lp, crate::interp::SYM_TO_STRING_TAG, tag, crate::heap::PropAttrs { writable: false, enumerable: false, configurable: true });
             self.set_own_attrs(
                 lfid,
                 "prototype",
@@ -4795,7 +4795,7 @@ impl Engine {
         let hf = self.illegal_ctor_bound("History");
         let hp = self.new_object();
         let htag = self.str_val("History");
-        self.set_own(hp, crate::interp::SYM_TO_STRING_TAG, htag, false);
+        self.set_own_attrs(hp, crate::interp::SYM_TO_STRING_TAG, htag, crate::heap::PropAttrs { writable: false, enumerable: false, configurable: true });
         if let Value::Obj(hcid) = hf {
             self.set_own_attrs(
                 hcid,
@@ -4827,7 +4827,7 @@ impl Engine {
         if let Value::Obj(nfid) = nf {
             let np = self.new_object();
             let tag = self.str_val("Navigation");
-            self.set_own(np, crate::interp::SYM_TO_STRING_TAG, tag, false);
+            self.set_own_attrs(np, crate::interp::SYM_TO_STRING_TAG, tag, crate::heap::PropAttrs { writable: false, enumerable: false, configurable: true });
             // Membres IDL sur le proto (JS-C560 : `'navigate' in
             // Navigation.prototype` — feature-detect spec) ;
             // le trampoline lit/dispatche via le host de `this`.
@@ -4931,7 +4931,7 @@ impl Engine {
             if let Value::Obj(fid) = f {
                 let p = self.new_object();
                 let tag = self.str_val(name);
-                self.set_own(p, crate::interp::SYM_TO_STRING_TAG, tag, false);
+                self.set_own_attrs(p, crate::interp::SYM_TO_STRING_TAG, tag, crate::heap::PropAttrs { writable: false, enumerable: false, configurable: true });
                 for &k in props {
                     let v = if k.starts_with("on") {
                         Value::Null
@@ -5618,7 +5618,7 @@ impl Engine {
         if let Value::Obj(fid) = ac_f {
             let p = self.new_object();
             let tag = self.str_val("AudioContext");
-            self.set_own(p, crate::interp::SYM_TO_STRING_TAG, tag, false);
+            self.set_own_attrs(p, crate::interp::SYM_TO_STRING_TAG, tag, crate::heap::PropAttrs { writable: false, enumerable: false, configurable: true });
             self.set_own(p, "constructor", ac_f.clone(), false);
             for name in ["resume", "close", "suspend"] {
                 let f = match name {
@@ -5677,7 +5677,7 @@ impl Engine {
             let m = self.native_fn("dispatchEvent", et_dispatch_event);
             self.set_own(p, "dispatchEvent", m, true);
             let tag = self.str_val("EventTarget");
-            self.set_own(p, crate::interp::SYM_TO_STRING_TAG, tag, false);
+            self.set_own_attrs(p, crate::interp::SYM_TO_STRING_TAG, tag, crate::heap::PropAttrs { writable: false, enumerable: false, configurable: true });
             if let Value::Obj(fid) = et_f {
                 self.set_own_attrs(
                     fid,
@@ -5750,7 +5750,7 @@ impl Engine {
         if let Value::Obj(fid) = de_f {
             let p = self.new_object();
             let tag = self.str_val("DOMException");
-            self.set_own(p, crate::interp::SYM_TO_STRING_TAG, tag, false);
+            self.set_own_attrs(p, crate::interp::SYM_TO_STRING_TAG, tag, crate::heap::PropAttrs { writable: false, enumerable: false, configurable: true });
             self.set_own_attrs(
                 fid,
                 "prototype",
@@ -5860,7 +5860,7 @@ impl Engine {
                 self.set_own(p, k, m, true);
             }
             let tag = self.str_val("CSSStyleSheet");
-            self.set_own(p, crate::interp::SYM_TO_STRING_TAG, tag, false);
+            self.set_own_attrs(p, crate::interp::SYM_TO_STRING_TAG, tag, crate::heap::PropAttrs { writable: false, enumerable: false, configurable: true });
             self.set_own_attrs(
                 fid,
                 "prototype",
@@ -6275,7 +6275,7 @@ impl Engine {
             let m = self.native_fn("removeEventListener", signal_remove_listener);
             self.set_own(sig_proto, "removeEventListener", m, true);
             let tag = self.str_val("AbortSignal");
-            self.set_own(sig_proto, crate::interp::SYM_TO_STRING_TAG, tag, false);
+            self.set_own_attrs(sig_proto, crate::interp::SYM_TO_STRING_TAG, tag, crate::heap::PropAttrs { writable: false, enumerable: false, configurable: true });
         }
         let as_f = self.illegal_ctor_bound("AbortSignal");
         if let Value::Obj(fid) = as_f {
@@ -6398,7 +6398,7 @@ impl Engine {
         self.add_method(so, "removeEventListener", et_remove_listener);
         self.add_method(so, "dispatchEvent", et_dispatch_event);
         let tag = self.str_val("ScreenOrientation");
-        self.set_own(so, crate::interp::SYM_TO_STRING_TAG, tag, false);
+        self.set_own_attrs(so, crate::interp::SYM_TO_STRING_TAG, tag, crate::heap::PropAttrs { writable: false, enumerable: false, configurable: true });
         self.set_own(screen, "orientation", Value::Obj(so), true);
         self.set_own(g, "screen", Value::Obj(screen), false);
         self.set_own(g, "innerWidth", Value::Num(f64::from(w)), false);
@@ -7134,7 +7134,7 @@ impl Engine {
         self.add_method(cs, "removeEventListener", et_remove_listener);
         self.add_method(cs, "dispatchEvent", et_dispatch_event);
         let tag = self.str_val("CookieStore");
-        self.set_own(cs, crate::interp::SYM_TO_STRING_TAG, tag, false);
+        self.set_own_attrs(cs, crate::interp::SYM_TO_STRING_TAG, tag, crate::heap::PropAttrs { writable: false, enumerable: false, configurable: true });
         self.set_own(g, "cookieStore", Value::Obj(cs), false);
         install_wasm_stub(self);
         // `trustedTypes` — politique « passthrough » honnête
@@ -8238,7 +8238,7 @@ impl Host for DocumentHost {
                 e.set_own(o, "systemId", p, true);
                 e.set_own(o, "ownerDocument", this.clone(), true);
                 let tag = e.str_val("DocumentType");
-                e.set_own(o, crate::interp::SYM_TO_STRING_TAG, tag, false);
+                e.set_own_attrs(o, crate::interp::SYM_TO_STRING_TAG, tag, crate::heap::PropAttrs { writable: false, enumerable: false, configurable: true });
                 Value::Obj(o)
             } else {
                 Value::Null
@@ -10953,7 +10953,7 @@ fn is_media(dom: &DomRef, node: NodeId) -> bool {
 fn text_track_list(e: &mut Engine) -> ObjId {
     let o = e.new_object();
     let tag = e.str_val("TextTrackList");
-    e.set_own(o, crate::interp::SYM_TO_STRING_TAG, tag, false);
+    e.set_own_attrs(o, crate::interp::SYM_TO_STRING_TAG, tag, crate::heap::PropAttrs { writable: false, enumerable: false, configurable: true });
     e.add_method(o, "addEventListener", et_add_listener);
     e.add_method(o, "removeEventListener", et_remove_listener);
     e.add_method(o, "dispatchEvent", et_dispatch_event);
@@ -12826,7 +12826,7 @@ impl Host for NodeHost {
                 } else {
                     "VideoTrackList"
                 });
-                e.set_own(list, crate::interp::SYM_TO_STRING_TAG, tag, false);
+                e.set_own_attrs(list, crate::interp::SYM_TO_STRING_TAG, tag, crate::heap::PropAttrs { writable: false, enumerable: false, configurable: true });
                 e.set_own(this_id, slot, Value::Obj(list), false);
                 return Ok(Some(Value::Obj(list)));
             }
@@ -12846,7 +12846,7 @@ impl Host for NodeHost {
                     e.set_own(o, m, f, true);
                 }
                 let tag = e.str_val("RemotePlayback");
-                e.set_own(o, crate::interp::SYM_TO_STRING_TAG, tag, false);
+                e.set_own_attrs(o, crate::interp::SYM_TO_STRING_TAG, tag, crate::heap::PropAttrs { writable: false, enumerable: false, configurable: true });
                 return Ok(Some(Value::Obj(o)));
             }
             "mediaKeys" | "sinkId" if is_media(&self.dom, node) => {
@@ -15230,7 +15230,7 @@ impl Host for NodeHost {
                 let f = e.native_fn("skipTransition", |_e, _t, _a| Ok(Value::Undefined));
                 e.set_own(vt, "skipTransition", f, true);
                 let tag = e.str_val("ViewTransition");
-                e.set_own(vt, crate::interp::SYM_TO_STRING_TAG, tag, false);
+                e.set_own_attrs(vt, crate::interp::SYM_TO_STRING_TAG, tag, crate::heap::PropAttrs { writable: false, enumerable: false, configurable: true });
                 Ok(Some(Value::Obj(vt)))
             }
             // `SVGAnimationElement` (JS-C561) — horloge SMIL
@@ -16096,7 +16096,7 @@ fn text_track_obj(e: &mut Engine, kind: &str, label: &str, language: &str) -> Ob
     let empty_v = e.str_val("");
     let disabled_v = e.str_val("disabled");
     let cues_arr = e.new_array(Vec::new());
-    e.set_own(o, crate::interp::SYM_TO_STRING_TAG, tag, false);
+    e.set_own_attrs(o, crate::interp::SYM_TO_STRING_TAG, tag, crate::heap::PropAttrs { writable: false, enumerable: false, configurable: true });
     e.set_own(o, "kind", kind_v, true);
     e.set_own(o, "label", label_v, true);
     e.set_own(o, "language", lang_v, true);
@@ -17050,7 +17050,7 @@ fn validity_obj(e: &mut Engine) -> Value {
     }
     e.set_own(o, "valid", Value::Bool(true), true);
     let tag = e.str_val("ValidityState");
-    e.set_own(o, crate::interp::SYM_TO_STRING_TAG, tag, false);
+    e.set_own_attrs(o, crate::interp::SYM_TO_STRING_TAG, tag, crate::heap::PropAttrs { writable: false, enumerable: false, configurable: true });
     // Chaîne `ValidityState.prototype` (JS-C560 —
     // `internals.validity instanceof ValidityState`).
     if let Some(Value::Obj(cid)) = e.get_prop(e.global, "ValidityState") {
@@ -17195,7 +17195,7 @@ fn custom_state_set(e: &mut Engine) -> Value {
     let it = e.native_fn("[Symbol.iterator]", css_values_fn);
     e.set_own(o, crate::interp::SYM_ITERATOR, it, false);
     let tag = e.str_val("CustomStateSet");
-    e.set_own(o, crate::interp::SYM_TO_STRING_TAG, tag, false);
+    e.set_own_attrs(o, crate::interp::SYM_TO_STRING_TAG, tag, crate::heap::PropAttrs { writable: false, enumerable: false, configurable: true });
     Value::Obj(o)
 }
 
@@ -21625,7 +21625,7 @@ fn navigator_uad(e: &mut Engine) -> Value {
     let win = e.str_val("Windows");
     e.set_own(uad, "platform", win, true);
     let tag = e.str_val("NavigatorUAData");
-    e.set_own(uad, crate::interp::SYM_TO_STRING_TAG, tag, false);
+    e.set_own_attrs(uad, crate::interp::SYM_TO_STRING_TAG, tag, crate::heap::PropAttrs { writable: false, enumerable: false, configurable: true });
     let ghev = e.native_fn(
         "getHighEntropyValues",
         |e: &mut Engine, _t: Value, args: &[Value]| {
@@ -21725,7 +21725,7 @@ pub(crate) fn install_worker_navigator(e: &mut Engine) {
     if let Value::Obj(cid) = wnf {
         let p = e.new_object();
         let tag = e.str_val("WorkerNavigator");
-        e.set_own(p, crate::interp::SYM_TO_STRING_TAG, tag, false);
+        e.set_own_attrs(p, crate::interp::SYM_TO_STRING_TAG, tag, crate::heap::PropAttrs { writable: false, enumerable: false, configurable: true });
         for k in [
             "appCodeName",
             "appName",
@@ -21785,7 +21785,7 @@ pub(crate) fn install_worker_navigator(e: &mut Engine) {
     if let Value::Obj(cid) = wlf {
         let p = e.new_object();
         let tag = e.str_val("WorkerLocation");
-        e.set_own(p, crate::interp::SYM_TO_STRING_TAG, tag, false);
+        e.set_own_attrs(p, crate::interp::SYM_TO_STRING_TAG, tag, crate::heap::PropAttrs { writable: false, enumerable: false, configurable: true });
         for k in [
             "hash", "host", "hostname", "href", "origin", "pathname", "port", "protocol", "search",
         ] {
@@ -21817,7 +21817,7 @@ pub(crate) fn install_worker_navigator(e: &mut Engine) {
     if let Value::Obj(cid) = wgf {
         let p = e.new_object();
         let tag = e.str_val("WorkerGlobalScope");
-        e.set_own(p, crate::interp::SYM_TO_STRING_TAG, tag, false);
+        e.set_own_attrs(p, crate::interp::SYM_TO_STRING_TAG, tag, crate::heap::PropAttrs { writable: false, enumerable: false, configurable: true });
         for k in [
             "self",
             "location",
@@ -21853,7 +21853,7 @@ pub(crate) fn install_worker_navigator(e: &mut Engine) {
     if let Value::Obj(cid) = dwf {
         let p = e.new_object();
         let tag = e.str_val("DedicatedWorkerGlobalScope");
-        e.set_own(p, crate::interp::SYM_TO_STRING_TAG, tag, false);
+        e.set_own_attrs(p, crate::interp::SYM_TO_STRING_TAG, tag, crate::heap::PropAttrs { writable: false, enumerable: false, configurable: true });
         if let Some(o) = e.heap.obj_mut(p) {
             o.set_proto(wgs_proto.clone());
         }
@@ -23400,7 +23400,7 @@ fn fd_proto(e: &mut Engine) -> ObjId {
     let it = e.native_fn("[Symbol.iterator]", fd_entries);
     e.set_own(p, crate::interp::SYM_ITERATOR, it, false);
     let tag = e.str_val("FormData");
-    e.set_own(p, crate::interp::SYM_TO_STRING_TAG, tag, false);
+    e.set_own_attrs(p, crate::interp::SYM_TO_STRING_TAG, tag, crate::heap::PropAttrs { writable: false, enumerable: false, configurable: true });
     e.xhr.fd_proto = Some(p);
     p
 }
@@ -25291,7 +25291,7 @@ fn proto_fill(e: &mut Engine, p: ObjId, tag: &str, props: &[&str]) {
         e.set_own(p, k, v, true);
     }
     let t = e.str_val(tag);
-    e.set_own(p, crate::interp::SYM_TO_STRING_TAG, t, false);
+    e.set_own_attrs(p, crate::interp::SYM_TO_STRING_TAG, t, crate::heap::PropAttrs { writable: false, enumerable: false, configurable: true });
 }
 
 /// Chaîne `v` (objet) sur le proto de `ctor` — no-op si
@@ -26217,7 +26217,7 @@ pub(crate) fn install_bcd_surface_apis(e: &mut Engine) {
                 e.set_own(p, m, fv, true);
             }
             let t = e.str_val("StorageBucketManager");
-            e.set_own(p, crate::interp::SYM_TO_STRING_TAG, t, false);
+            e.set_own_attrs(p, crate::interp::SYM_TO_STRING_TAG, t, crate::heap::PropAttrs { writable: false, enumerable: false, configurable: true });
             e.set_own_attrs(
                 cid,
                 "prototype",
@@ -26250,7 +26250,7 @@ pub(crate) fn install_bcd_surface_apis(e: &mut Engine) {
                 e.set_own(p, m, fv, true);
             }
             let t = e.str_val("PermissionsPolicy");
-            e.set_own(p, crate::interp::SYM_TO_STRING_TAG, t, false);
+            e.set_own_attrs(p, crate::interp::SYM_TO_STRING_TAG, t, crate::heap::PropAttrs { writable: false, enumerable: false, configurable: true });
             e.set_own_attrs(
                 cid,
                 "prototype",
@@ -26288,7 +26288,7 @@ pub(crate) fn install_bcd_surface_apis(e: &mut Engine) {
                 e.set_own(p, "highlightsFromPoint", fv, true);
             }
             let t = e.str_val(name);
-            e.set_own(p, crate::interp::SYM_TO_STRING_TAG, t, false);
+            e.set_own_attrs(p, crate::interp::SYM_TO_STRING_TAG, t, crate::heap::PropAttrs { writable: false, enumerable: false, configurable: true });
             e.set_own_attrs(
                 cid,
                 "prototype",

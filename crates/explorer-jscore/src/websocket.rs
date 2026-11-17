@@ -205,7 +205,7 @@ fn ws_proto(e: &mut Engine) -> ObjId {
         e.set_own(p, k, Value::Num(n), true);
     }
     let tag = e.str_val("WebSocket");
-    e.set_own(p, crate::interp::SYM_TO_STRING_TAG, tag, false);
+    e.set_own_attrs(p, crate::interp::SYM_TO_STRING_TAG, tag, crate::heap::PropAttrs { writable: false, enumerable: false, configurable: true });
     // Membres IDL sur le proto (JS-C560 : `'send' in
     // WebSocket.prototype` — feature-detect spec) ;
     // trampolines `this`→`Host::invoke`/`get`/`set`, handlers

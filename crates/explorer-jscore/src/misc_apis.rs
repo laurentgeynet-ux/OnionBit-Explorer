@@ -170,7 +170,7 @@ fn bc_proto(e: &mut Engine) -> ObjId {
     }
     let p = e.new_object();
     let tag = e.str_val("BroadcastChannel");
-    e.set_own(p, crate::interp::SYM_TO_STRING_TAG, tag, false);
+    e.set_own_attrs(p, crate::interp::SYM_TO_STRING_TAG, tag, crate::heap::PropAttrs { writable: false, enumerable: false, configurable: true });
     e.misc.bc_proto = Some(p);
     p
 }
@@ -429,7 +429,7 @@ fn notif_proto(e: &mut Engine) -> ObjId {
     }
     let p = e.new_object();
     let tag = e.str_val("Notification");
-    e.set_own(p, crate::interp::SYM_TO_STRING_TAG, tag, false);
+    e.set_own_attrs(p, crate::interp::SYM_TO_STRING_TAG, tag, crate::heap::PropAttrs { writable: false, enumerable: false, configurable: true });
     e.misc.notif_proto = Some(p);
     p
 }
@@ -559,7 +559,7 @@ fn sel_proto(e: &mut Engine) -> ObjId {
     }
     let p = e.new_object();
     let tag = e.str_val("Selection");
-    e.set_own(p, crate::interp::SYM_TO_STRING_TAG, tag, false);
+    e.set_own_attrs(p, crate::interp::SYM_TO_STRING_TAG, tag, crate::heap::PropAttrs { writable: false, enumerable: false, configurable: true });
     e.misc.sel_proto = Some(p);
     p
 }
@@ -1296,7 +1296,7 @@ pub(crate) fn abstract_range_proto(e: &mut Engine) -> ObjId {
     }
     let p = e.new_object();
     let tag = e.str_val("AbstractRange");
-    e.set_own(p, crate::interp::SYM_TO_STRING_TAG, tag, false);
+    e.set_own_attrs(p, crate::interp::SYM_TO_STRING_TAG, tag, crate::heap::PropAttrs { writable: false, enumerable: false, configurable: true });
     for key in [
         "startContainer",
         "startOffset",
@@ -1361,7 +1361,7 @@ pub(crate) fn range_proto(e: &mut Engine) -> ObjId {
     }
     let p = e.new_object();
     let tag = e.str_val("Range");
-    e.set_own(p, crate::interp::SYM_TO_STRING_TAG, tag, false);
+    e.set_own_attrs(p, crate::interp::SYM_TO_STRING_TAG, tag, crate::heap::PropAttrs { writable: false, enumerable: false, configurable: true });
     // Chaîne spec : `Range.prototype.__proto__ ===
     // AbstractRange.prototype` → `r instanceof AbstractRange`.
     let ar = Value::Obj(abstract_range_proto(e));
@@ -1848,7 +1848,7 @@ pub(crate) fn static_range_proto(e: &mut Engine) -> ObjId {
     }
     let p = e.new_object();
     let tag = e.str_val("StaticRange");
-    e.set_own(p, crate::interp::SYM_TO_STRING_TAG, tag, false);
+    e.set_own_attrs(p, crate::interp::SYM_TO_STRING_TAG, tag, crate::heap::PropAttrs { writable: false, enumerable: false, configurable: true });
     let ar = Value::Obj(abstract_range_proto(e));
     if let Some(o) = e.heap.obj_mut(p) {
         o.set_proto(ar);
@@ -2215,7 +2215,7 @@ fn tw_proto(e: &mut Engine) -> ObjId {
     }
     let p = e.new_object();
     let tag = e.str_val("TreeWalker");
-    e.set_own(p, crate::interp::SYM_TO_STRING_TAG, tag, false);
+    e.set_own_attrs(p, crate::interp::SYM_TO_STRING_TAG, tag, crate::heap::PropAttrs { writable: false, enumerable: false, configurable: true });
     e.misc.tw_proto = Some(p);
     p
 }
@@ -2434,7 +2434,7 @@ fn ni_proto(e: &mut Engine) -> ObjId {
     }
     let p = e.new_object();
     let tag = e.str_val("NodeIterator");
-    e.set_own(p, crate::interp::SYM_TO_STRING_TAG, tag, false);
+    e.set_own_attrs(p, crate::interp::SYM_TO_STRING_TAG, tag, crate::heap::PropAttrs { writable: false, enumerable: false, configurable: true });
     e.misc.ni_proto = Some(p);
     p
 }
@@ -2587,7 +2587,7 @@ pub(crate) fn css_sheet_ctor(e: &mut Engine, _t: Value, args: &[Value]) -> JsRes
     e.set_own(media, "mediaText", mt, true);
     e.set_own(o, "media", Value::Obj(media), true);
     let tag = e.str_val("CSSStyleSheet");
-    e.set_own(o, crate::interp::SYM_TO_STRING_TAG, tag, false);
+    e.set_own_attrs(o, crate::interp::SYM_TO_STRING_TAG, tag, crate::heap::PropAttrs { writable: false, enumerable: false, configurable: true });
     // options `{baseURL, media, disabled}` — `disabled` est
     // le seul honnêtement stocké ici (borné).
     if let Value::Obj(opts) = arg(args, 0) {
@@ -2755,7 +2755,7 @@ pub(crate) fn shared_worker_ctor(e: &mut Engine, _t: Value, args: &[Value]) -> J
         }
     }
     let tag = e.str_val("SharedWorker");
-    e.set_own(o, crate::interp::SYM_TO_STRING_TAG, tag, false);
+    e.set_own_attrs(o, crate::interp::SYM_TO_STRING_TAG, tag, crate::heap::PropAttrs { writable: false, enumerable: false, configurable: true });
     Ok(Value::Obj(o))
 }
 
@@ -2807,7 +2807,7 @@ fn anim_proto(e: &mut Engine) -> ObjId {
     }
     let p = e.new_object();
     let tag = e.str_val("Animation");
-    e.set_own(p, crate::interp::SYM_TO_STRING_TAG, tag, false);
+    e.set_own_attrs(p, crate::interp::SYM_TO_STRING_TAG, tag, crate::heap::PropAttrs { writable: false, enumerable: false, configurable: true });
     e.misc.anim_proto = Some(p);
     p
 }
@@ -2839,7 +2839,7 @@ fn kfe_proto(e: &mut Engine) -> ObjId {
     }
     let p = e.new_object();
     let tag = e.str_val("KeyframeEffect");
-    e.set_own(p, crate::interp::SYM_TO_STRING_TAG, tag, false);
+    e.set_own_attrs(p, crate::interp::SYM_TO_STRING_TAG, tag, crate::heap::PropAttrs { writable: false, enumerable: false, configurable: true });
     e.misc.kfe_proto = Some(p);
     p
 }
@@ -2859,7 +2859,7 @@ fn document_timeline(e: &mut Engine) -> ObjId {
     }
     let t = e.new_object();
     let tag = e.str_val("DocumentTimeline");
-    e.set_own(t, crate::interp::SYM_TO_STRING_TAG, tag, false);
+    e.set_own_attrs(t, crate::interp::SYM_TO_STRING_TAG, tag, crate::heap::PropAttrs { writable: false, enumerable: false, configurable: true });
     e.set_own(t, "currentTime", Value::Num(0.0), false);
     e.set_own(t, "originTime", Value::Num(0.0), false);
     e.misc.doc_timeline = Some(t);
@@ -3329,7 +3329,7 @@ fn vt_proto(e: &mut Engine) -> ObjId {
     }
     let p = e.new_object();
     let tag = e.str_val("ViewTransition");
-    e.set_own(p, crate::interp::SYM_TO_STRING_TAG, tag, false);
+    e.set_own_attrs(p, crate::interp::SYM_TO_STRING_TAG, tag, crate::heap::PropAttrs { writable: false, enumerable: false, configurable: true });
     e.misc.vt_proto = Some(p);
     p
 }
@@ -3749,7 +3749,7 @@ pub(crate) fn xpath_create_expression(
     let ev = e.native_fn("evaluate", xpath_expr_evaluate);
     e.set_own(o, "evaluate", ev, true);
     let tag = e.str_val("XPathExpression");
-    e.set_own(o, crate::interp::SYM_TO_STRING_TAG, tag, false);
+    e.set_own_attrs(o, crate::interp::SYM_TO_STRING_TAG, tag, crate::heap::PropAttrs { writable: false, enumerable: false, configurable: true });
     Ok(Value::Obj(o))
 }
 
@@ -3931,7 +3931,7 @@ fn xr_proto(e: &mut Engine) -> ObjId {
     }
     let p = e.new_object();
     let tag = e.str_val("XPathResult");
-    e.set_own(p, crate::interp::SYM_TO_STRING_TAG, tag, false);
+    e.set_own_attrs(p, crate::interp::SYM_TO_STRING_TAG, tag, crate::heap::PropAttrs { writable: false, enumerable: false, configurable: true });
     e.misc.xr_proto = Some(p);
     p
 }
@@ -4179,7 +4179,7 @@ fn obs_subscribe(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value>
     e.set_own(sub, "__td", Value::Undefined, false);
     let so = e.new_object();
     let tag = e.str_val("SubscriptionObserver");
-    e.set_own(so, crate::interp::SYM_TO_STRING_TAG, tag, false);
+    e.set_own_attrs(so, crate::interp::SYM_TO_STRING_TAG, tag, crate::heap::PropAttrs { writable: false, enumerable: false, configurable: true });
     for (m, f, user) in [
         ("next", obs_delegate as crate::heap::NativeFn, next),
         ("error", obs_delegate_err, error),
@@ -4196,7 +4196,7 @@ fn obs_subscribe(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value>
     e.set_own(sub, "__td", teardown, true);
     let subscription = e.new_object();
     let tag = e.str_val("Subscription");
-    e.set_own(subscription, crate::interp::SYM_TO_STRING_TAG, tag, false);
+    e.set_own_attrs(subscription, crate::interp::SYM_TO_STRING_TAG, tag, crate::heap::PropAttrs { writable: false, enumerable: false, configurable: true });
     let uf = e.bound_native("unsubscribe", obs_unsub, vec![Value::Obj(sub)]);
     e.set_own(subscription, "unsubscribe", uf, true);
     if let Some(o) = e.heap.obj_mut(subscription) {
@@ -5060,7 +5060,7 @@ fn obs_find_next(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
 pub(crate) fn install_observable(e: &mut Engine) {
     let p = e.new_object();
     let tag = e.str_val("Observable");
-    e.set_own(p, crate::interp::SYM_TO_STRING_TAG, tag, false);
+    e.set_own_attrs(p, crate::interp::SYM_TO_STRING_TAG, tag, crate::heap::PropAttrs { writable: false, enumerable: false, configurable: true });
     for (m, f) in [
         ("subscribe", obs_subscribe as crate::heap::NativeFn),
         ("map", obs_map),

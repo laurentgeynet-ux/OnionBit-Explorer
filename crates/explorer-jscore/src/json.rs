@@ -667,7 +667,7 @@ pub(crate) fn install(e: &mut Engine) {
     e.add_method(j, "rawJSON", json_raw_json);
     e.add_method(j, "isRawJSON", json_is_raw_json);
     let tag = e.str_val("JSON");
-    e.set_own(j, crate::interp::SYM_TO_STRING_TAG, tag, false);
+    e.set_own_attrs(j, crate::interp::SYM_TO_STRING_TAG, tag, crate::heap::PropAttrs { writable: false, enumerable: false, configurable: true });
     let g = e.global;
     e.set_own(g, "JSON", Value::Obj(j), false);
 }

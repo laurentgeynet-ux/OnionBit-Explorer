@@ -480,7 +480,7 @@ pub(crate) fn install(e: &mut Engine) {
             }
         }
         let tag = e.str_val("SharedArrayBuffer");
-        e.set_own(sabp, crate::interp::SYM_TO_STRING_TAG, tag, false);
+        e.set_own_attrs(sabp, crate::interp::SYM_TO_STRING_TAG, tag, crate::heap::PropAttrs { writable: false, enumerable: false, configurable: true });
         let sab = e.native_fn("SharedArrayBuffer", sab_ctor);
         let sid = c_id(sab.clone());
         e.set_own_attrs(
@@ -510,7 +510,7 @@ pub(crate) fn install(e: &mut Engine) {
         e.add_method(at, "notify", atomics_notify);
         e.add_method(at, "waitAsync", atomics_wait_async);
         let tag = e.str_val("Atomics");
-        e.set_own(at, crate::interp::SYM_TO_STRING_TAG, tag, false);
+        e.set_own_attrs(at, crate::interp::SYM_TO_STRING_TAG, tag, crate::heap::PropAttrs { writable: false, enumerable: false, configurable: true });
         e.set_own(g, "Atomics", Value::Obj(at), false);
     }
 

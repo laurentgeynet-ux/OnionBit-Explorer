@@ -664,7 +664,7 @@ fn fire_idb(e: &mut Engine, wrapper: ObjId, ty: &str, vers: Option<(u64, u64)>) 
 fn new_tagged_proto(e: &mut Engine, tag: &str) -> ObjId {
     let p = e.new_object();
     let t = e.str_val(tag);
-    e.set_own(p, crate::interp::SYM_TO_STRING_TAG, t, false);
+    e.set_own_attrs(p, crate::interp::SYM_TO_STRING_TAG, t, crate::heap::PropAttrs { writable: false, enumerable: false, configurable: true });
     p
 }
 
@@ -3271,7 +3271,7 @@ pub(crate) fn install_idb(e: &mut Engine, inject: Option<IdbRegistry>) {
     e.add_method(f, "databases", idb_databases);
     e.add_method(f, "cmp", idb_cmp);
     let tag = e.str_val("IDBFactory");
-    e.set_own(f, crate::interp::SYM_TO_STRING_TAG, tag, false);
+    e.set_own_attrs(f, crate::interp::SYM_TO_STRING_TAG, tag, crate::heap::PropAttrs { writable: false, enumerable: false, configurable: true });
     let g = e.global;
     e.set_own(g, "indexedDB", Value::Obj(f), false);
     // `IDBFactory` — interface WebIDL de `indexedDB`
@@ -3350,7 +3350,7 @@ pub(crate) fn install_idb_interfaces(e: &mut Engine) {
                 // de proto dédié à cette tranche).
                 let p = e.new_object();
                 let tag = e.str_val(name);
-                e.set_own(p, crate::interp::SYM_TO_STRING_TAG, tag, false);
+                e.set_own_attrs(p, crate::interp::SYM_TO_STRING_TAG, tag, crate::heap::PropAttrs { writable: false, enumerable: false, configurable: true });
                 p
             }
         };

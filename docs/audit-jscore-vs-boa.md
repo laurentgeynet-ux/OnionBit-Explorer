@@ -54,7 +54,7 @@ Même classe pour les `Symbol.*` well-known (**30 chemins** :
 `Symbol.iterator` etc. `{000}` attendu, `{101}` actuel) et
 `Function.prototype.@@hasInstance` (`{000}` attendu, `{101}`).
 
-### A3. `@@toStringTag` non-writable/non-enum — **26 chemins**
+### A3. `@@toStringTag` non-writable/non-enum — **26 chemins** ✅ *fait (2026-11-17)*
 
 Spec `{writable:false, enumerable:false, configurable:true}` ;
 jscore `{writable:true, enumerable:true, configurable:true}` —
