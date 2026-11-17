@@ -51,9 +51,9 @@ pub(crate) fn species_get(_e: &mut Engine, this: Value, _args: &[Value]) -> JsRe
     Ok(this)
 }
 
-/// Pose `get [Symbol.species]` sur le ctor `ctor` (Array,
-/// ArrayBuffer, Map, Set, RegExp, SharedArrayBuffer, TypedArray
-/// + ses concrets — spec).
+/// Pose `get [Symbol.species]` sur le ctor `ctor` (`Array`,
+/// `ArrayBuffer`, `Map`, `Set`, `RegExp`, `SharedArrayBuffer`,
+/// `TypedArray` + ses concrets — spec).
 pub(crate) fn install_species(e: &mut Engine, ctor: &Value) {
     if let Value::Obj(cid) = ctor {
         let sg = e.native_fn("get [Symbol.species]", species_get);

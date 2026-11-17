@@ -1561,8 +1561,6 @@ impl Default for Engine {
 }
 
 impl Engine {
-    /// New engine with all builtins installed.
-    #[must_use]
     /// `%Function.prototype%` — callable no-op spec : accepte
     /// tous les arguments, rend `undefined` (spec
     /// `Function.prototype` est une fonction).
@@ -1570,6 +1568,8 @@ impl Engine {
         Ok(Value::Undefined)
     }
 
+    /// New engine with all builtins installed.
+    #[must_use]
     pub fn new() -> Self {
         let mut heap = Heap::new();
         let object = heap.alloc_obj(Object::ordinary(Value::Null));

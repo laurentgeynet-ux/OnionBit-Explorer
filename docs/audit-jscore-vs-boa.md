@@ -200,27 +200,33 @@ crypto.subtle étendu, streams async, `DisposableStack`/
 - `name`/`length` sur **méthodes** des protos WebAPI
   install-context (XHR, IDB…) — non couverts par le run nu.
 - test262 complet (le corpus extrait reste lexer/scanner :
-  1046/1046, 31 skips).
+  **2045/2045 passes-mode** post-refonte, 31 skips — harness
+  reconstruit 2026-11-17 : frontmatter YAML, double passe
+  strict/sloppy, `async`/`module`, `negative.type` typé,
+  cliquet par répertoire).
 
 ---
 
 ## Synthèse — file de portage restante
 
-| Rang | Gap | Effort | Impact |
-|---|---|---|---|
-| 1 | A1 `name` own-prop (fix `native_fn`) | **XS** | ~330 chemins, test262 `name` checks |
-| 2 | A2 verrous `Ctor.prototype`/`Symbol.*`/`@@hasInstance` | S | ~135 chemins, invariants |
-| 3 | A3 `@@toStringTag` flags | S | ~26 chemins |
-| 4 | A5 `@@species` par ctor | S | ~38 chemins, subclassing |
-| 5 | A4 exposer `TypedArray` global + statiques | M | ~49 chemins, `instanceof` libs |
-| 6 | A6 `message` protos erreurs | XS | 8 chemins |
-| 7 | A8 divers (Iterator ctor accessor, `Function.prototype` callable, proto `length`, Annex B, WebIDL enum) | S–M | ~15 chemins + typeof |
-| 8 | A7 lone surrogates (repr JsString) | **L** | JSON/`.charCodeAt` — chantier représentation |
-| 9 | Oracle différentiel (BOA-01..04 à recréer) | M | mesure continue |
-| 10 | Harness test262 (BOA-10..15 à recréer) | M | corpus élargi |
+| Rang | Gap | Effort | Impact | État |
+|---|---|---|---|---|
+| 1 | A1 `name` own-prop (fix `native_fn`) | **XS** | ~330 chemins | ✅ fait |
+| 2 | A2 verrous `Ctor.prototype`/`Symbol.*`/`@@hasInstance` | S | ~135 chemins | ✅ fait |
+| 3 | A3 `@@toStringTag` flags | S | ~26 chemins | ✅ fait |
+| 4 | A5 `@@species` par ctor | S | ~38 chemins | ✅ fait |
+| 5 | A4 exposer `TypedArray` global + statiques | M | ~49 chemins | ✅ fait |
+| 6 | A6 `message` protos erreurs | XS | 8 chemins | ✅ fait |
+| 7 | A8 divers (Iterator ctor accessor, `Function.prototype` callable, proto `length`, Annex B, WebIDL enum) | S–M | ~15 chemins | ✅ fait |
+| 8 | A7 lone surrogates (repr JsString) | **L** | JSON/`.charCodeAt` — chantier représentation | ouvert |
+| 9 | Oracle différentiel (BOA-01..04 à recréer) | M | mesure continue | ouvert |
+| 10 | Harness test262 | M | corpus élargi | ✅ reconstruit (sans oracle boa) |
+| 11 | Arités `length` des builtins (toutes 0 vs spec) | M | `fn.length === 1` checks | ouvert |
 
-Items 1–7 = **~600 chemins de gap réel**, la plupart par fixes
-systémiques en un point chacun — c'est le « low-hanging fruit »
-avant tout chantier de représentation. L'ordre suggéré : 1→7
-(quick wins mesurables) → 9 (oracle pour piloter) → 8 (si
-nécessité site réel).
+Items 1–7 soldés : **~600 chemins de gap descripteur fermés**
+(8 commits, `0e7731e`→`552199d`). Reste l'ouverture de chantier
+sur les items 8–11 — seul le chantier représentation (A7) est
+de nature structurelle. Ordre restant suggéré : 9 (oracle pour
+piloter la mesure continue) → 11 (arités, quick win) → 8 (si
+nécessité site réel — la représentation UTF-16 interne est le
+seul chantier lourd).
