@@ -218,7 +218,7 @@ crypto.subtle étendu, streams async, `DisposableStack`/
 | 5 | A4 exposer `TypedArray` global + statiques | M | ~49 chemins | ✅ fait |
 | 6 | A6 `message` protos erreurs | XS | 8 chemins | ✅ fait |
 | 7 | A8 divers (Iterator ctor accessor, `Function.prototype` callable, proto `length`, Annex B, WebIDL enum) | S–M | ~15 chemins | ✅ fait |
-| 8 | A7 lone surrogates (repr JsString) | **L** | JSON/`.charCodeAt` — chantier représentation | ouvert — mesuré par l'oracle |
+| 8 | A7 lone surrogates (repr JsString) | **L** | JSON/`.charCodeAt` — chantier représentation | ouvert — design choisi, cf. § ci-dessous |
 | 9 | Oracle différentiel (BOA-01..04 à recréer) | M | mesure continue | ✅ reconstruit (`explorer-boa-diff`) |
 | 10 | Harness test262 | M | corpus élargi | ✅ reconstruit (sans oracle boa) |
 | 11 | Arités `length` des builtins (toutes 0 vs spec) | M | `fn.length === 1` checks | ✅ fait — table `arities.rs` générée depuis boa (190 chemins), 0 flagdiff |
@@ -275,3 +275,44 @@ réduit à 2 déviations boa (`Error.prototype.stack` accesseur
 non-spec, `RegExp.prototype.lastIndex` modèle ES5) + bruit du
 script ; **0 flagdiff** après correction du setter
 `%TypedArray%.prototype[@@toStringTag]` (spec : get seul).
+Arités : table `builtins/arities.rs` de 190 chemins générée par
+`boa-surface --dump boa`, posée par `install_arities` après
+tous les installs.
+
+---
+
+## A7 — lone surrogates : design choisi (avant implémentation)
+
+**Contrainte** : `JsStr` enrobe `StrBox { s: String }` — UTF-8
+Rust valide. Un surrogate isolé ne peut pas être stocké tel
+quel (séquence invalide ; la voie WTF-8/CESU-8 exige `unsafe`,
+interdit par `#![forbid(unsafe_code)]`).
+
+**Voies écartées** :
+- UTF-16 interne (`Vec<u16>`) : casse `as_str()`/`Deref<str>`/
+  `try_append` utilisés dans tout le moteur — refactor majeur.
+- Placeholder PUA (U+E000–U+E7FF ↔ D800–DFFF) : collision
+  réelle avec les icon-fonts qui utilisent la zone private-use.
+
+**Design retenu — double représentation paresseuse** :
+`StrBox { s: String, units: Option<Vec<u16>> }` :
+- `s` garde le rendu lossy (U+FFFD) pour affichage/DOM/`as_str()`.
+- `units` porte la vue UTF-16 **exacte** quand la chaîne vient
+  d'une source à surrogates (fromCharCode, JSON `\uD800`,
+  slice coupant une paire).
+- `u16_len`/`u16_at`/`slice_u16`/`index_of` lisent `units` si
+  présent (sinon `encode_utf16` comme aujourd'hui).
+- `PartialEq` : `s == s` rapide ; si l'un a `units`, comparer
+  les vues u16 (`'a\uD800' !== 'a\uFFFD'`).
+- `try_append` : concatène `s` et fusionne `units` si présents.
+
+**Points d'entrée à rebrancher** : `String.fromCharCode`,
+`charCodeAt`/`codePointAt`/`at`/`[]`, `slice_u16` (produit des
+units → nouvelle JsStr), `JSON.parse` (`\u` escapes — `json.rs:92`),
+`JSON.stringify` (ré-échappe surrogate isolé en `\uXXXX` au lieu
+de FFFD), lexer `\uXXXX` (`lexer.rs:1329`), regex mode `u`,
+`String.prototype.normalize`, `str_val` générique si source u16.
+
+**Corpus de verrous** : `str_fromcc`, `str_lone_surrogate`
+(`probes.rs` — déjà divergents, KNOWN), + `JSON.stringify` de
+surrogate, `.length` de `'a\uD800'` (= 2), égalité vs U+FFFD.
