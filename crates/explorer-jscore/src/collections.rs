@@ -590,7 +590,14 @@ fn iter_next(e: &mut Engine, this: Value, a: &[Value]) -> JsResult<Value> {
         };
         if let ObjKind::GenLive { exec } = &o.kind {
             let exec = exec.clone();
-            return exec.borrow_mut().next(e, arg(a, 0));
+            // Ré-entrance (générateur qui s'appelle lui-même
+            // pendant son exécution) : l'emprunt est déjà pris —
+            // spec `GeneratorResume` → TypeError abrupte, pas
+            // de panic `BorrowMutError` (JS-C593).
+            let Ok(mut exec) = exec.try_borrow_mut() else {
+                return Err(e.type_error("generator is already running"));
+            };
+            return exec.next(e, arg(a, 0));
         }
     }
     let (item, ret) = {
@@ -630,7 +637,10 @@ fn iter_return(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
     if let Some(o) = e.heap.obj(id) {
         if let ObjKind::GenLive { exec } = &o.kind {
             let exec = exec.clone();
-            return exec.borrow_mut().ret_at(e, arg(args, 0));
+            let Ok(mut exec) = exec.try_borrow_mut() else {
+                return Err(e.type_error("generator is already running"));
+            };
+            return exec.ret_at(e, arg(args, 0));
         }
     }
     if let Some(o) = e.heap.obj_mut(id) {
@@ -649,7 +659,10 @@ fn iter_throw(e: &mut Engine, t: Value, args: &[Value]) -> JsResult<Value> {
         if let Some(o) = e.heap.obj(id) {
             if let ObjKind::GenLive { exec } = &o.kind {
                 let exec = exec.clone();
-                return exec.borrow_mut().throw_at(e, arg(args, 0));
+                let Ok(mut exec) = exec.try_borrow_mut() else {
+                    return Err(e.type_error("generator is already running"));
+                };
+                return exec.throw_at(e, arg(args, 0));
             }
         }
     }

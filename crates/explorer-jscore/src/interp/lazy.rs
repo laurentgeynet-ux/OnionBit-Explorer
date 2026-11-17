@@ -2287,13 +2287,22 @@ fn resume_common(e: &mut Engine, args: &[Value], ok: bool) -> JsResult<Value> {
     if crate::dbg_drive() {
         eprintln!("[resume] ok={ok} gen={gen:?}");
     }
-    if let Value::Obj(gid) = gen {
-        if let Some(o) = e.heap.obj(gid) {
-            if let ObjKind::GenLive { exec } = &o.kind {
-                let exec = exec.clone();
-                let r = if ok { Ok(v) } else { Err(v) };
-                let _ = exec.borrow_mut().resume_await(e, r);
-            }
+    let exec = if let Value::Obj(gid) = gen {
+        match e.heap.obj(gid).map(|o| &o.kind) {
+            Some(ObjKind::GenLive { exec }) => Some(exec.clone()),
+            _ => None,
+        }
+    } else {
+        None
+    };
+    if let Some(exec) = exec {
+        let r = if ok { Ok(v) } else { Err(v) };
+        // Ré-entrance défensive (reprise pendant que le
+        // corps tourne — drain de microtâches en vol) :
+        // l'emprunt occupé rend la reprise sans effet
+        // (JS-C593).
+        if let Ok(mut g) = exec.try_borrow_mut() {
+            let _ = g.resume_await(e, r);
         }
     }
     Ok(Value::Undefined)

@@ -479,6 +479,10 @@ pub const PROBES: &[(&str, &str)] = &[
     // --- JS-C591 : coercions Symbol (récursion to_bigint) ---
     ("sym_tobigint", "try{BigInt(Symbol('x'))}catch(e){e.name}"),
     ("sym_waitasync", "try{Atomics.waitAsync(new BigInt64Array(new SharedArrayBuffer(32)),0,Symbol('x'),1)}catch(e){e.name}"),
+    // --- JS-C593 : ré-entrance générateur (RefCell occupé → TypeError) ---
+    ("gen_reent_next", "var it,g=function*(){yield it.next()};it=g();try{it.next()}catch(e){e.name}"),
+    ("gen_reent_ret", "var it2,g2=function*(){yield it2.return(1)};it2=g2();try{it2.next()}catch(e){e.name}"),
+    ("gen_reent_thr", "var it3,g3=function*(){yield it3.throw(1)};it3=g3();try{it3.next()}catch(e){e.name}"),
     // --- structuredClone ---
     ("clone_deep", "let o={a:{b:[1,2]}};let c=structuredClone(o);c.a.b[1]+(c.a!==o.a)"),
     ("clone_circular", "let o={};o.self=o;structuredClone(o).self.self===structuredClone({}).self||structuredClone(o).self!==undefined"),
