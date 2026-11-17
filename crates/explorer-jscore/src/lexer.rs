@@ -1071,16 +1071,16 @@ impl Lexer<'_> {
                         let v = self.hex_digits(2)?;
                         out.push(char::from_u32(v).unwrap_or('\u{fffd}'));
                     }
-                    Some('u') => out.push(self.read_unicode_escape()?),
+                    Some('u') => self.read_unicode_escape(&mut out)?,
                     // `\8`/`\9` : NonOctalDecimalEscapeSequence —
                     // littéraux en sloppy, interdits en strict.
                     Some(d @ ('8' | '9')) => {
                         self.legacy_octal = true;
                         out.push(d);
                     }
-                    Some(c) => out.push(c),
+                    Some(c) => Self::push_lit(&mut out, c),
                 },
-                Some(c) => out.push(c),
+                Some(c) => Self::push_lit(&mut out, c),
             }
         }
     }
@@ -1135,7 +1135,7 @@ impl Lexer<'_> {
                         let v = self.hex_digits(2)?;
                         cur.push(char::from_u32(v).unwrap_or('\u{fffd}'));
                     }
-                    Some('u') => cur.push(self.read_unicode_escape()?),
+                    Some('u') => self.read_unicode_escape(&mut cur)?,
                     Some('`') => cur.push('`'),
                     Some('$') => cur.push('$'),
                     // Line continuation — `\`+`<CR><LF>` = une
@@ -1146,9 +1146,9 @@ impl Lexer<'_> {
                         }
                     }
                     Some(c) if is_line_term(c) => {}
-                    Some(c) => cur.push(c),
+                    Some(c) => Self::push_lit(&mut cur, c),
                 },
-                Some(c) => cur.push(c),
+                Some(c) => Self::push_lit(&mut cur, c),
             }
         }
     }
@@ -1325,11 +1325,12 @@ impl Lexer<'_> {
         Ok(v)
     }
 
-    /// `\u{XXXX…}` ou `\uXXXX` — le `u` est déjà consommé.
-    /// `\uD8xx\uDCxx` fusionne la paire de surrogates en un seul
-    /// code point (les chaînes JS sont UTF-16 ; on stocke du
-    /// `char` — un surrogate seul dégrade en U+FFFD).
-    fn read_unicode_escape(&mut self) -> Result<char> {
+    /// `\u{XXXX…}` ou `\uXXXX` — le `u` est déjà consommé ;
+    /// pousse dans `out` (un surrogate isolé devient une
+    /// sentinelle `U+F0000+`, une paire `\uD8xx\uDCxx` fusionne
+    /// en code point astral — `push_lit` si la cible retombe
+    /// dans la zone sentinelle).
+    fn read_unicode_escape(&mut self, out: &mut String) -> Result<()> {
         if self.peek() == Some('{') {
             self.bump();
             let mut v = 0u32;
@@ -1348,7 +1349,14 @@ impl Lexer<'_> {
             if n == 0 || v > 0x0010_FFFF || self.bump() != Some('}') {
                 return Err(self.err("unicode escape out of range"));
             }
-            return Ok(char::from_u32(v).unwrap_or('\u{fffd}'));
+            // `\u{…}` — surrogate isolé → sentinelle (spec : la
+            // valeur survit jusqu'à l'éval, cf. `str_val_lit`).
+            if (0xd800..0xe000).contains(&v) {
+                out.push(Self::surrogate_mark(v));
+                return Ok(());
+            }
+            Self::push_lit(out, char::from_u32(v).unwrap_or('\u{fffd}'));
+            return Ok(());
         }
         let v = self.hex_digits(4)?;
         if (0xd800..0xdc00).contains(&v)
@@ -1362,13 +1370,44 @@ impl Lexer<'_> {
             let lo = self.hex_digits(4).unwrap_or(u32::MAX);
             if (0xdc00..0xe000).contains(&lo) {
                 let cp = 0x1_0000 + ((v - 0xd800) << 10) + (lo - 0xdc00);
-                return Ok(char::from_u32(cp).unwrap_or('\u{fffd}'));
+                // La paire peut former **un char de la zone
+                // sentinelle** (`ᴈ80ᴈ00` = U+F0000) — `push_lit`.
+                Self::push_lit(out, char::from_u32(cp).unwrap_or('\u{fffd}'));
+                return Ok(());
             }
             self.pos = save;
             self.byte_pos = save_b;
-            return Ok('\u{fffd}');
+            // High surrogate non apparié — sentinelle.
+            out.push(Self::surrogate_mark(v));
+            return Ok(());
         }
-        Ok(char::from_u32(v).unwrap_or('\u{fffd}'))
+        if (0xd800..0xe000).contains(&v) {
+            // Low ou high isolé — sentinelle.
+            out.push(Self::surrogate_mark(v));
+            return Ok(());
+        }
+        Self::push_lit(out, char::from_u32(v).unwrap_or('\u{fffd}'));
+        Ok(())
+    }
+
+    /// Sentinelle d'un surrogate isolé : `U+F0000 + (u - 0xD800)`
+    /// — char PUA du plan 15. Un **vrai** char de la zone
+    /// (`U+F0000..=U+F0800`, y compris l'échappement `F0800`
+    /// lui-même) est préfixé d'un `ESC` par `push_lit` :
+    /// `str_val_lit` le rend littéral — aucune collision entre
+    /// source réelle et encodage interne.
+    fn surrogate_mark(u: u32) -> char {
+        char::from_u32(0xF0000 + (u - 0xd800)).unwrap_or('\u{fffd}')
+    }
+
+    /// Pousse `c` dans `out` ; les chars `U+F0000..=U+F0800`
+    /// (zone sentinelle + l'`ESC` `U+F0800`) sont **doublés**
+    /// d'un `ESC` préfixe pour rester littéraux au décodage.
+    fn push_lit(out: &mut String, c: char) {
+        if (0xF0000..=0xF0800).contains(&(c as u32)) {
+            out.push('\u{F0800}');
+        }
+        out.push(c);
     }
 
     fn punct(&mut self) -> Result<P> {

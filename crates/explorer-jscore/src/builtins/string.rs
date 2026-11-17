@@ -30,7 +30,7 @@ pub(crate) fn string_char_at(e: &mut Engine, this: Value, args: &[Value]) -> JsR
             None
         };
         return Ok(match w {
-            Some(w) => e.str_val(u16_to_string(&[w])),
+            Some(w) => e.str_val_units(vec![w]),
             None => e.str_val(""),
         });
     }
@@ -84,7 +84,7 @@ pub(crate) fn str_index_of(
     if matches!(this, Value::Undefined | Value::Null) {
         return Err(e.type_error("String method called on null/undefined"));
     }
-    let needle = e.to_js_string(arg(args, 0))?;
+    let needle = e.to_js_jstr(arg(args, 0))?;
     let from = match arg(args, 1) {
         // `lastIndexOf` sans position → depuis la fin (spec).
         Value::Undefined if last => usize::MAX,
@@ -95,8 +95,20 @@ pub(crate) fn str_index_of(
     // `this_str` clonait toute la chaîne par appel (décodeur
     // Confiant `indexOf` × N = ratchet de commit géant).
     if let Value::Str(id) = this {
-        return Ok(Value::Num(id.index_of(&needle, from, last) as f64));
+        // Match **exact** en units dès qu'un côté porte des
+        // surrogates — `U+FFFD` n'égale pas un surrogate (spec).
+        if id.has_units() || needle.has_units() {
+            let n = needle.units_view();
+            return Ok(Value::Num(id.index_of_units(&n, from, last) as f64));
+        }
+        return Ok(Value::Num(id.index_of(needle.as_str(), from, last) as f64));
     }
+    if needle.has_units() {
+        // Haystack sans units (déjà ToStringé) : aucun surrogate
+        // réel → un needle à surrogate ne peut pas matcher.
+        return Ok(Value::Num(-1.0));
+    }
+    let needle = needle.as_str();
     let s = this_str(e, this)?;
     let byte_from = JsStr::u16_pos_to_byte(&s, from);
     let pos = if needle.len() > s.len() {
@@ -110,7 +122,7 @@ pub(crate) fn str_index_of(
     } else if byte_from > s.len() - needle.len() {
         None
     } else {
-        s[byte_from..].find(&needle).map(|p| p + byte_from)
+        s[byte_from..].find(needle).map(|p| p + byte_from)
     };
     Ok(Value::Num(
         pos.map_or(-1.0, |b| s[..b].encode_utf16().count() as f64),
@@ -157,7 +169,7 @@ pub(crate) fn string_slice(e: &mut Engine, this: Value, args: &[Value]) -> JsRes
         if a >= b {
             return Ok(e.str_val(""));
         }
-        return Ok(e.str_val(id.slice_u16(a, b)));
+        return Ok(Value::Str(id.slice_js_u16(a, b, &e.str_acct)));
     }
     let s = this_str(e, this)?;
     Ok(str_slice(e, &s, start, end))
@@ -176,7 +188,11 @@ pub(crate) fn string_substring(e: &mut Engine, this: Value, args: &[Value]) -> J
             v => (e.to_number(v)? as i64).clamp(0, len),
         };
         let (lo, hi) = if a <= b { (a, b) } else { (b, a) };
-        return Ok(e.str_val(id.slice_u16(lo as usize, hi as usize)));
+        return Ok(Value::Str(id.slice_js_u16(
+            lo as usize,
+            hi as usize,
+            &e.str_acct,
+        )));
     }
     let s = this_str(e, this)?;
     let len = u16_len(&s) as i64;
@@ -215,7 +231,11 @@ pub(crate) fn string_substr(e: &mut Engine, this: Value, args: &[Value]) -> JsRe
         if start >= end {
             return Ok(e.str_val(""));
         }
-        return Ok(e.str_val(id.slice_u16(start as usize, end as usize)));
+        return Ok(Value::Str(id.slice_js_u16(
+            start as usize,
+            end as usize,
+            &e.str_acct,
+        )));
     }
     let s = this_str(e, this)?;
     let len = u16_len(&s) as i64;
@@ -241,23 +261,70 @@ pub(crate) fn string_substr(e: &mut Engine, this: Value, args: &[Value]) -> JsRe
     Ok(e.str_val(s[ba..bb].to_string()))
 }
 
+/// Mapping de casse **par code point** (spec `toUpper/LowerCase`
+/// = Unicode Default Case Conversion, sans contexte — le mapping
+/// complet `char::to_upper/lower` de Rust, expansions `ß→SS`
+/// incluses). Un surrogate isolé n'est pas un scalaire : il
+/// traverse tel quel (spec — pas de mapping, jamais U+FFFD).
+fn case_map(e: &mut Engine, s: &JsStr, upper: bool) -> Value {
+    let mut out = Vec::with_capacity(s.u16_len());
+    let mut buf = [0u16; 2];
+    for cp in s.iter_code_points() {
+        let mapped = if cp.len() == 1 && (0xD800..0xE000).contains(&cp[0]) {
+            None
+        } else {
+            String::from_utf16(&cp).ok().and_then(|t| t.chars().next())
+        };
+        match mapped {
+            Some(c) => {
+                let m: Vec<char> = if upper {
+                    c.to_uppercase().collect()
+                } else {
+                    c.to_lowercase().collect()
+                };
+                for mc in m {
+                    out.extend_from_slice(mc.encode_utf16(&mut buf));
+                }
+            }
+            None => out.extend_from_slice(&cp),
+        }
+    }
+    e.str_val_units(out)
+}
+
 pub(crate) fn string_to_lower(e: &mut Engine, this: Value, _a: &[Value]) -> JsResult<Value> {
-    let s = this_str(e, this)?;
-    Ok(e.str_val(s.to_lowercase()))
+    let s = this_jstr(e, this)?;
+    Ok(case_map(e, &s, false))
 }
 
 pub(crate) fn string_to_upper(e: &mut Engine, this: Value, _a: &[Value]) -> JsResult<Value> {
-    let s = this_str(e, this)?;
-    Ok(e.str_val(s.to_uppercase()))
+    let s = this_jstr(e, this)?;
+    Ok(case_map(e, &s, true))
 }
 
 pub(crate) fn string_trim(e: &mut Engine, this: Value, _a: &[Value]) -> JsResult<Value> {
+    if let Value::Str(id) = this {
+        // Fast-path : sans `units`, `str::trim` suffit (aucun
+        // surrogate à préserver) — pas de vue matérialisée.
+        return Ok(if id.has_units() {
+            Value::Str(id.trim_js(true, true, &e.str_acct))
+        } else {
+            e.str_val(id.as_str().trim().to_string())
+        });
+    }
     let s = this_str(e, this)?;
     Ok(e.str_val(s.trim().to_string()))
 }
 
 pub(crate) fn string_split(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
     let s = this_str(e, this.clone())?;
+    // `this` est consommé par `sym_method` — `Rc` cloné à bon
+    // marché pour le split `''` en units (surrogates préservés).
+    let this_id = if let Value::Str(id) = &this {
+        Some(id.clone())
+    } else {
+        None
+    };
     // `sep[Symbol.split](this, limit)` (spec `GetMethod`).
     if let Some(v) = sym_method(
         e,
@@ -293,16 +360,22 @@ pub(crate) fn string_split(e: &mut Engine, this: Value, args: &[Value]) -> JsRes
                 let worst = s.len().min(limit);
                 e.alloc_guard(worst.saturating_mul(160))?;
                 if sep.is_empty() {
-                    // `split('')` → code units (spec) ; surrogate
-                    // isolé → U+FFFD (déviation documentée).
-                    u16_view(e, &s)?
+                    // `split('')` → un item par code unit (spec) ;
+                    // la vue `units` préserve les surrogates
+                    // isolés — `Vec<String>` ne pourrait pas les
+                    // porter, on produit les `Value` directement.
+                    let units = match &this_id {
+                        Some(id) => id.units_view(),
+                        _ => u16_view(e, &s)?,
+                    };
+                    let vals: Vec<Value> = units
                         .iter()
                         .take(limit)
-                        .map(|&w| u16_to_string(&[w]))
-                        .collect()
-                } else {
-                    s.split(&sep).take(limit).map(str::to_string).collect()
+                        .map(|&w| e.str_val_units(vec![w]))
+                        .collect();
+                    return Ok(arr_of(e, vals));
                 }
+                s.split(&sep).take(limit).map(str::to_string).collect()
             }
         }
     };
@@ -325,6 +398,12 @@ pub(crate) fn replace_impl(
     args: &[Value],
     all: bool,
 ) -> JsResult<Value> {
+    // `Rc` cloné pour le chemin units (match exact surrogate).
+    let this_id = if let Value::Str(id) = &this {
+        Some(id.clone())
+    } else {
+        None
+    };
     let s = this_str(e, this.clone())?;
     let pat = arg(args, 0);
     let rep = arg(args, 1);
@@ -350,16 +429,65 @@ pub(crate) fn replace_impl(
         return re_replace_impl(e, &re, &s, rep);
     }
     // String pattern — first occurrence (or all for replaceAll).
-    let pat = e.to_js_string(pat)?;
+    let pat = e.to_js_jstr(pat)?;
+    let unchanged = |e: &mut Engine| match &this_id {
+        Some(id) => Value::Str(id.clone()),
+        None => e.str_val(s.clone()),
+    };
     if pat.is_empty() {
-        return Ok(e.str_val(s));
+        return Ok(unchanged(e));
     }
+    // Match **exact** en units dès qu'un côté porte des
+    // surrogates — `U+FFFD` ne remplace pas un surrogate (spec).
+    if this_id.as_ref().is_some_and(JsStr::has_units) || pat.has_units() {
+        let hu = match &this_id {
+            Some(id) => id.units_view(),
+            None => u16_view(e, &s)?,
+        };
+        let pu = pat.units_view();
+        let mut positions = Vec::new();
+        if pu.len() <= hu.len() {
+            let max = hu.len() - pu.len();
+            let mut i = 0;
+            while i <= max {
+                if hu[i..i + pu.len()] == pu[..] {
+                    positions.push(i);
+                    if !all {
+                        break;
+                    }
+                    i += pu.len();
+                } else {
+                    i += 1;
+                }
+            }
+        }
+        if positions.is_empty() {
+            return Ok(unchanged(e));
+        }
+        let mut out = Vec::with_capacity(hu.len());
+        let mut cur = 0usize;
+        for pos in positions {
+            e.alloc_guard(out.len().saturating_mul(2).max(16))?;
+            out.extend_from_slice(&hu[cur..pos]);
+            out.extend_from_slice(&expand_rep_units(
+                e,
+                rep.clone(),
+                &pu,
+                &hu[..pos],
+                &hu[pos + pu.len()..],
+            )?);
+            cur = pos + pu.len();
+        }
+        out.extend_from_slice(&hu[cur..]);
+        return Ok(e.str_val_units(out));
+    }
+    let pat = pat.as_str();
     let positions: Vec<usize> = if all {
         let n = s.matches(&pat).count();
         e.alloc_guard(n.saturating_mul(std::mem::size_of::<usize>()))?;
         s.match_indices(&pat).map(|(i, _)| i).collect()
     } else {
-        s.find(&pat).into_iter().collect()
+        s.find(pat).into_iter().collect()
     };
     if positions.is_empty() {
         return Ok(e.str_val(s));
@@ -379,12 +507,60 @@ pub(crate) fn replace_impl(
             &[],
             &s[..pos],
             &s[pos + pat.len()..],
-            &pat,
+            pat,
         )?);
         cur = pos + pat.len();
     }
     out.push_str(&s[cur..]);
     Ok(e.str_val(out))
+}
+
+/// `expand_rep` en **code units** (chemin pattern String avec
+/// surrogates — pas de groupes `()` : pattern litéral). `$$`,
+/// `$&`, `` $` ``, `$'` reconnus ; le texte de remplacement peut
+/// lui-même porter des surrogates.
+fn expand_rep_units(
+    e: &mut Engine,
+    rep: Value,
+    matched: &[u16],
+    before: &[u16],
+    after: &[u16],
+) -> JsResult<Vec<u16>> {
+    let rep = e.to_js_jstr(rep)?;
+    let ru = rep.units_view();
+    e.alloc_guard(ru.len().saturating_mul(2))?;
+    let mut out = Vec::with_capacity(ru.len() + matched.len());
+    let mut i = 0;
+    while i < ru.len() {
+        if ru[i] == 0x24 && i + 1 < ru.len() {
+            match ru[i + 1] {
+                0x24 => {
+                    out.push(0x24);
+                    i += 2;
+                }
+                0x26 => {
+                    out.extend_from_slice(matched);
+                    i += 2;
+                }
+                0x60 => {
+                    out.extend_from_slice(before);
+                    i += 2;
+                }
+                0x27 => {
+                    out.extend_from_slice(after);
+                    i += 2;
+                }
+                _ => {
+                    out.push(ru[i]);
+                    i += 1;
+                }
+            }
+        } else {
+            out.push(ru[i]);
+            i += 1;
+        }
+    }
+    Ok(out)
 }
 
 /// Coerce a `replace`/`match`/`split`/`search` argument to a
@@ -877,11 +1053,17 @@ pub(crate) fn string_search(e: &mut Engine, this: Value, args: &[Value]) -> JsRe
 }
 
 pub(crate) fn string_concat(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
-    let mut s = this_str(e, this)?;
+    // `JsStr` de bout en bout — les surrogates isolés traversent
+    // `concat` comme `+` (`try_append_js`/`concat_js`, spec).
+    let mut acc = this_jstr(e, this)?;
     for a in args {
-        s.push_str(&e.to_js_string(a.clone())?);
+        let b = e.to_js_jstr(a.clone())?;
+        e.alloc_guard(acc.len().saturating_add(b.len()))?;
+        if !acc.try_append_js(&b) {
+            acc = crate::value::JsStr::concat_js(&acc, &b, &e.str_acct);
+        }
     }
-    Ok(e.str_val(s))
+    Ok(Value::Str(acc))
 }
 
 pub(crate) fn string_from_char_code(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
@@ -896,5 +1078,7 @@ pub(crate) fn string_from_char_code(e: &mut Engine, _t: Value, args: &[Value]) -
     for a in args {
         units.push(e.to_number(a.clone())? as u16);
     }
-    Ok(e.str_val(u16_to_string(&units)))
+    // Spec : code units directs — surrogate isolé préservé
+    // (`str_val_units`), pas de perte en U+FFFD.
+    Ok(e.str_val_units(units))
 }

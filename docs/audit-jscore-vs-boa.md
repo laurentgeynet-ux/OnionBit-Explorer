@@ -110,21 +110,25 @@ Spec : chaque `XxxError.prototype` porte `message: ""` propre
 `EvalError`/`RangeError`/`ReferenceError`/`SyntaxError`/
 `TypeError`/`URIError` (ni `name` sur ces protos — vérifier).
 
-### A7. Lone surrogates — résidu UTF-16 (positions corrigées)
+### A7. Lone surrogates ✅ *fait (JS-C579)*
 
-La représentation interne reste `String` UTF-8 → un surrogate
-isolé devient `U+FFFD` (« déviation documentée » à
-`string_from_char_code`). Manifestations mesurées :
-
-| Sonde | jscore | spec/boa |
-|---|---|---|
-| `String.fromCharCode(0xD800).charCodeAt(0)` | 65533 | **55296** |
-| `JSON.stringify('\uD800')` | `"�"` | `"\ud800"` |
-
-`length`/indexation/`charCodeAt` des astraux sont déjà
-UTF-16-corrects (JS-C263). Résoudre = représentation
-`JsString`-style (latin1/UTF-16) — chantier à part entière,
-bénéfice réel plus faible qu'en BOA-02.
+La représentation interne reste `String` UTF-8, **doublée** :
+`StrBox { s, units: Option<Vec<u16>> }` — `s` = rendu lossy
+(U+FFFD) pour affichage/`as_str`, `units` = vue UTF-16 exacte
+quand la chaîne porte un surrogate isolé. Tous les chemins
+spec lisent les units : `charCodeAt`/`codePointAt`/`at`/`[]`,
+`length`, slices, concat `+`/`concat`, indexation, égalité,
+matching (`indexOf`/`includes`/`starts`/`ends`/`replace`),
+itération (`@@iterator`, spread `[...s]`, `with`),
+`split('')`, `pad*`/`repeat`/`trim*`/`toUpper`/`toLower`/
+`normalize`, `JSON.parse`/`stringify`, comparaison `<` (ordre
+**UTF-16**, pas code point : `'\uFFFF' < '\u{10000}'` = false),
+`fromCharCode`/`fromCodePoint`, `getOwnPropertyDescriptor`.
+Lexer : escape `\uXXXX` isolé → sentinelle `U+F0000+` décodée
+par `str_val_lit` ; chars réels de la zone doublés par `F0800`
+(collision fermée). **Mesure : corpus oracle 233/233
+concordants, 0 divergence.** Design détaillé : § « A7 —
+design choisi » plus bas.
 
 ### A8. Divers ponctuels ✅ *fait (2026-11-17)*
 
@@ -218,7 +222,7 @@ crypto.subtle étendu, streams async, `DisposableStack`/
 | 5 | A4 exposer `TypedArray` global + statiques | M | ~49 chemins | ✅ fait |
 | 6 | A6 `message` protos erreurs | XS | 8 chemins | ✅ fait |
 | 7 | A8 divers (Iterator ctor accessor, `Function.prototype` callable, proto `length`, Annex B, WebIDL enum) | S–M | ~15 chemins | ✅ fait |
-| 8 | A7 lone surrogates (repr JsString) | **L** | JSON/`.charCodeAt` — chantier représentation | ouvert — design choisi, cf. § ci-dessous |
+| 8 | A7 lone surrogates (repr JsString) | **L** | JSON/`.charCodeAt` — chantier représentation | ✅ fait — `units` paresseux + sentinelle lexer (JS-C579) |
 | 9 | Oracle différentiel (BOA-01..04 à recréer) | M | mesure continue | ✅ reconstruit (`explorer-boa-diff`) |
 | 10 | Harness test262 | M | corpus élargi | ✅ reconstruit (sans oracle boa) |
 | 11 | Arités `length` des builtins (toutes 0 vs spec) | M | `fn.length === 1` checks | ✅ fait — table `arities.rs` générée depuis boa (190 chemins), 0 flagdiff |
@@ -259,16 +263,14 @@ features par défaut sans `intl`.
   divergences connues listeées par moteur fautif — toute
   nouvelle ou résolue échoue.
 
-### Mesure de référence (2026-11-17, boa 0.22-dev)
+### Mesure de référence (JS-C579, boa 0.22-dev)
 
-Corpus : **191 concordants / 3 divergences / 0 internal** —
-toutes documentées dans `KNOWN` (items 12–13 corrigés au
-passage — l'oracle a produit ses deux premiers fixes) :
-
-| Sonde | Fautif | Détail |
-|---|---|---|
-| `str_fromcc`, `str_lone_surrogate` | jscore | lone surrogate → U+FFFD (item 8) |
-| `str_astral_idx` | boa | `'😀'[0] !== '\uD800'` — bug boa, jscore spec-correct |
+Corpus : **233 concordants / 0 divergences / 0 internal** —
+`KNOWN` vide : les surrogates isolés (item 8) sont préservés
+via `JsStr::units` et l'indexation astrale s'est révélée
+**correcte des deux côtés** (l'ancien « bug boa » était un
+accident de collision FFFD côté jscore — `'😀'[0]` vaut
+bien `'\uD800'`, pas `'\uD83C' !== '\uD800'`).
 
 Surface : **26 441 chemins jscore / 4 203 boa**, `boa-only`
 réduit à 2 déviations boa (`Error.prototype.stack` accesseur
@@ -281,7 +283,7 @@ tous les installs.
 
 ---
 
-## A7 — lone surrogates : design choisi (avant implémentation)
+## A7 — lone surrogates : design **implémenté** (JS-C579)
 
 **Contrainte** : `JsStr` enrobe `StrBox { s: String }` — UTF-8
 Rust valide. Un surrogate isolé ne peut pas être stocké tel
@@ -306,13 +308,20 @@ interdit par `#![forbid(unsafe_code)]`).
   les vues u16 (`'a\uD800' !== 'a\uFFFD'`).
 - `try_append` : concatène `s` et fusionne `units` si présents.
 
-**Points d'entrée à rebrancher** : `String.fromCharCode`,
-`charCodeAt`/`codePointAt`/`at`/`[]`, `slice_u16` (produit des
-units → nouvelle JsStr), `JSON.parse` (`\u` escapes — `json.rs:92`),
-`JSON.stringify` (ré-échappe surrogate isolé en `\uXXXX` au lieu
-de FFFD), lexer `\uXXXX` (`lexer.rs:1329`), regex mode `u`,
-`String.prototype.normalize`, `str_val` générique si source u16.
+**Points d'entrée rebranchés** : `String.fromCharCode`,
+`charCodeAt`/`codePointAt`/`at`/`[]`/`indexOf`/`includes`/
+`startsWith`/`endsWith`/`replace` (match exact en units —
+`U+FFFD` n'égale pas un surrogate), `slice`/`substring`/`substr`,
+concat `+`/`concat`, itération code point (`@@iterator`, spread,
+`with`), `split('')`, `pad*`/`repeat`/`trim*`/`toUpper`/`toLower`,
+`normalize` (par runs de scalaires, surrogate = borne), comparaison
+`<`/`>` (ordre UTF-16 via `cmp_js`), `getOwnPropertyDescriptor`,
+`JSON.parse`/`stringify` (isolé → `\uXXXX`), lexer `\uXXXX` +
+sentinelle `U+F0000..F07FF` (zone réelle échappée par `F0800`),
+`str_val_lit`/`str_val_units`, `to_js_jstr`/`this_jstr`
+(conservation du `JsStr` au lieu du `String` lossy).
 
-**Corpus de verrous** : `str_fromcc`, `str_lone_surrogate`
-(`probes.rs` — déjà divergents, KNOWN), + `JSON.stringify` de
-surrogate, `.length` de `'a\uD800'` (= 2), égalité vs U+FFFD.
+**Corpus de verrous** : 26 sondes `str_surr_*`/`str_fffd_*`/
+`json_surr_*`/`lit_sentinel_zone`/`str_u16_order` dans
+`probes.rs` — **toutes concordantes** (cliquet `ratchet.rs`,
+`KNOWN` vide).

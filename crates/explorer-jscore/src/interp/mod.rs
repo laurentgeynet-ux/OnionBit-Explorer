@@ -4592,6 +4592,43 @@ impl Engine {
         Value::Str(JsStr::new(s, &self.str_acct))
     }
 
+    /// Chaîne depuis des **code units UTF-16** — préserve les
+    /// surrogates isolés (spec ; la couche texte garde U+FFFD).
+    #[track_caller]
+    pub(crate) fn str_val_units(&mut self, units: Vec<u16>) -> Value {
+        Value::Str(JsStr::from_units(units, &self.str_acct))
+    }
+
+    /// Littéral de source → chaîne : décode les sentinelles du
+    /// lexer — `U+F0000..U+F07FF` = unit surrogate isolé, et
+    /// `U+F0800` (`ESC`) préfixe un char **littéral** de la zone
+    /// (doublé à l'émission : `\u{F0000}` ou char source réel).
+    /// Fast path : aucune sentinelle → `str_val` direct.
+    #[track_caller]
+    pub(crate) fn str_val_lit(&mut self, s: &str) -> Value {
+        if !s.chars().any(|c| (0xF0000..=0xF0800).contains(&(c as u32))) {
+            return self.str_val(s.to_string());
+        }
+        let mut units = Vec::with_capacity(s.len());
+        let mut buf = [0u16; 2];
+        let mut esc = false;
+        for c in s.chars() {
+            let v = c as u32;
+            if esc {
+                // Char post-`ESC` : toujours littéral.
+                units.extend_from_slice(c.encode_utf16(&mut buf));
+                esc = false;
+            } else if v == 0xF0800 {
+                esc = true;
+            } else if (0xF0000..0xF0800).contains(&v) {
+                units.push((v - 0xF0000 + 0xD800) as u16);
+            } else {
+                units.extend_from_slice(c.encode_utf16(&mut buf));
+            }
+        }
+        self.str_val_units(units)
+    }
+
     /// Octets JS estimés **totaux** — cellules du heap **plus**
     /// chaînes vivantes comptées au refcount (JS-C420). C'est
     /// le compteur de toutes les gardes mémoire (`mem_over`
@@ -6835,7 +6872,7 @@ impl Engine {
     /// écritures `with` vont au wrapper, spec `ToObject`).
     /// `null`/`undefined` → `TypeError`.
     pub(crate) fn with_object_of(&mut self, v: Value) -> JsResult<Option<ObjId>> {
-        let (proto, own_len, chars): (ObjId, Option<usize>, Option<Vec<String>>) = match v {
+        let (proto, own_len, chars): (ObjId, Option<usize>, Option<Vec<Value>>) = match v {
             Value::Obj(id) => return Ok(Some(id)),
             Value::Str(sid) => {
                 let s = self.read_str(&sid)?;
@@ -6844,8 +6881,18 @@ impl Engine {
                 // `str_val` + une prop `set_own` (~200 o) —
                 // mesuré : 20 M chars → wedge O(n²) + ~1 Go.
                 self.alloc_guard(s.len().saturating_mul(200))?;
-                let cs: Vec<String> = s.chars().map(|c| c.to_string()).collect();
-                (self.protos.string, Some(cs.len()), Some(cs))
+                // Les props indexées d'un wrapper String sont
+                // **par code unit** (spec `ToObject` +
+                // `StringGetOwnProperty`) — astral = 2 units,
+                // surrogate isolé préservé tel quel.
+                let n = sid.u16_len();
+                let cs: Vec<Value> = (0..n)
+                    .map(|i| match sid.u16_at(i) {
+                        Some(w) => self.str_val_units(vec![w]),
+                        None => self.str_val(""),
+                    })
+                    .collect();
+                (self.protos.string, Some(n), Some(cs))
             }
             Value::Num(_) => (self.protos.number, None, None),
             Value::Bool(_) => (self.protos.boolean, None, None),
@@ -6863,9 +6910,8 @@ impl Engine {
             self.set_own(w, "length", Value::Num(n as f64), false);
         }
         if let Some(cs) = chars {
-            for (i, c) in cs.iter().enumerate() {
-                let cv = self.str_val(c.clone());
-                self.set_own(w, &i.to_string(), cv, true);
+            for (i, cv) in cs.iter().enumerate() {
+                self.set_own(w, &i.to_string(), cv.clone(), true);
             }
         }
         Ok(Some(w))
@@ -7466,7 +7512,13 @@ impl Engine {
                 // box + internement), sans tick dans le
                 // `collect` (§B-59 — spread de chaîne géante).
                 self.alloc_guard(id.len().saturating_mul(160))?;
-                Ok(id.chars().map(|c| self.str_val(c.to_string())).collect())
+                // Par code point : paire → astral, surrogate
+                // isolé préservé (spec `@@iterator`).
+                Ok(id
+                    .iter_code_points()
+                    .into_iter()
+                    .map(|u| self.str_val_units(u))
+                    .collect())
             }
             _ => Err(self.type_error("value is not iterable")),
         }
@@ -9975,11 +10027,10 @@ impl Engine {
                     return Ok(Value::Num(id.u16_len() as f64));
                 }
                 if let Some(i) = array_index(key) {
-                    // Indice en code units — surrogate isolé →
-                    // U+FFFD (déviation documentée : UTF-8 natif).
-                    let c = id.u16_at(i).map(|u| String::from_utf16_lossy(&[u]));
-                    return Ok(match c {
-                        Some(c) => self.str_val(c),
+                    // Indice en code units — surrogate isolé rendu
+                    // tel quel (spec).
+                    return Ok(match id.u16_at(i) {
+                        Some(u) => self.str_val_units(vec![u]),
                         None => Value::Undefined,
                     });
                 }
@@ -11224,6 +11275,27 @@ impl Engine {
     pub(crate) fn read_str(&mut self, s: &JsStr) -> JsResult<String> {
         self.alloc_guard(s.len())?;
         Ok(s.to_string())
+    }
+
+    /// `ToString` qui **conserve le `JsStr`** — les Str à vue
+    /// `units` (surrogates isolés) gardent leur représentation
+    /// exacte ; le reste passe par `to_js_string` (lossy de toute
+    /// façon : le source `String` ne portait rien d'autre).
+    pub(crate) fn to_js_jstr(&mut self, v: Value) -> JsResult<JsStr> {
+        Ok(match v {
+            Value::Str(id) => id,
+            Value::Obj(id) => {
+                if matches!(
+                    self.heap.obj(id).map(|o| &o.kind),
+                    Some(ObjKind::Symbol { .. })
+                ) {
+                    return Err(self.type_error("cannot convert a Symbol to string"));
+                }
+                let p = self.to_primitive(v, PrimHint::String)?;
+                self.to_js_jstr(p)?
+            }
+            _ => JsStr::new(self.to_js_string(v)?, &self.str_acct),
+        })
     }
 
     pub(crate) fn to_js_string(&mut self, v: Value) -> JsResult<String> {

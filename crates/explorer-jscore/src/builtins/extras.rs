@@ -461,7 +461,7 @@ pub(crate) fn string_at(e: &mut Engine, this: Value, args: &[Value]) -> JsResult
         let len = id.u16_len();
         return Ok(match rel_index(e, arg(args, 0), len)? {
             Some(i) => match id.u16_at(i) {
-                Some(w) => e.str_val(u16_to_string(&[w])),
+                Some(w) => e.str_val_units(vec![w]),
                 None => Value::Undefined,
             },
             None => Value::Undefined,
@@ -482,6 +482,17 @@ pub(crate) fn string_at(e: &mut Engine, this: Value, args: &[Value]) -> JsResult
 /// lead surrogate suivi d'un trail → le code point complet ;
 /// sinon le code unit lui-même.
 pub(crate) fn string_code_point_at(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
+    // Str direct : la vue `units` porte les surrogates isolés
+    // (le `String` lossy les aurait déjà en U+FFFD).
+    if let Value::Str(id) = this {
+        let i = e.to_number(arg(args, 0))?.max(0.0) as usize;
+        let u = id.units_view();
+        let Some(&w) = u.get(i) else {
+            return Ok(Value::Undefined);
+        };
+        let cp = code_point(&u, i, w);
+        return Ok(Value::Num(f64::from(cp)));
+    }
     let s = this_str(e, this)?;
     let i = e.to_number(arg(args, 0))?.max(0.0) as usize;
     // `encode_utf16().skip(i)` : O(i) sans matérialiser (§B-59).
@@ -502,12 +513,34 @@ pub(crate) fn string_code_point_at(e: &mut Engine, this: Value, args: &[Value]) 
     Ok(Value::Num(f64::from(cp)))
 }
 
+/// `u[i]` (lead `w` déjà lu) → code point : paire surrogate →
+/// astral, sinon le code unit tel quel (spec `CodePointAt`).
+fn code_point(u: &[u16], i: usize, w: u16) -> u32 {
+    if (0xD800..0xDC00).contains(&w) {
+        if let Some(&t) = u.get(i + 1) {
+            if (0xDC00..0xE000).contains(&t) {
+                return 0x10000 + ((u32::from(w) - 0xD800) << 10) + (u32::from(t) - 0xDC00);
+            }
+        }
+    }
+    u32::from(w)
+}
+
 /// `String.prototype[Symbol.iterator]` — itérateur de code points
 /// (même granularité que `iter_values` : `char` Rust = scalaire).
 /// Trigger réel : dev.to `homePage` invoque `str[Symbol.iterator]()`
 /// directement — le fast-path `iter_values` ne couvre pas l'appel
 /// explicite sur la primitive.
 pub(crate) fn string_iterator(e: &mut Engine, this: Value, _a: &[Value]) -> JsResult<Value> {
+    // Str direct : itérer les **code points** de la vue units —
+    // paire surrogate → un item astral (2 units), surrogate
+    // isolé → un item d'un unit préservé (spec `@@iterator`).
+    if let Value::Str(id) = this {
+        let cps = id.iter_code_points();
+        e.alloc_guard(cps.len().saturating_mul(160))?;
+        let items: Vec<Value> = cps.into_iter().map(|u| e.str_val_units(u)).collect();
+        return Ok(crate::collections::iter_obj(e, items, e.protos.string_iter));
+    }
     let s = this_str(e, this)?;
     // Garde §B-59 : `chars().collect()` matérialise par
     // caractère une `String` + une cellule `str_val` + une
@@ -530,24 +563,30 @@ pub(crate) fn string_match_all(e: &mut Engine, this: Value, args: &[Value]) -> J
     re_match_all_impl(e, &re, &s)
 }
 
-/// `String.fromCodePoint(...)` — scalar values; lone surrogates
-/// degrade to U+FFFD (our strings are UTF-8, not UTF-16).
+/// `String.fromCodePoint(...)` — 0..=0x10FFFF entier (spec :
+/// les valeurs surrogate **passent** le `RangeError` et produisent
+/// le code unit isolé — `fromCodePoint(0xD800)` ===
+/// `fromCharCode(0xD800)`).
 pub(crate) fn string_from_code_point(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
-    // Même trou que `fromCharCode` : sortie ≤ 4 octets/arg en
-    // UTF-8 — refuse avant la boucle (§B-59, apply géant).
+    // Sortie ≤ 2 units/arg — refuse avant la boucle (§B-59,
+    // apply géant).
     e.alloc_guard(args.len().saturating_mul(4))?;
-    let mut s = String::new();
+    let mut units = Vec::with_capacity(args.len());
+    let mut buf = [0u16; 2];
     for a in args {
         let n = e.to_number(a.clone())?;
         if !(0.0..=1_114_111.0).contains(&n) || n.fract() != 0.0 {
             return Err(e.range_error("fromCodePoint: invalid code point"));
         }
         match char::from_u32(n as u32) {
-            Some(c) => s.push(c),
-            None => s.push_str(&u16_to_string(&[n as u16])),
+            Some(c) => units.extend_from_slice(c.encode_utf16(&mut buf)),
+            // Seuls les surrogates échouent `from_u32` (n ≤
+            // 0x10FFFF) — spec : l'unit isolé est produit tel
+            // quel, pas U+FFFD.
+            None => units.push(n as u16),
         }
     }
-    Ok(e.str_val(s))
+    Ok(e.str_val_units(units))
 }
 
 /// `String.raw(strings, …subs)` — join `strings.raw[i]` with the

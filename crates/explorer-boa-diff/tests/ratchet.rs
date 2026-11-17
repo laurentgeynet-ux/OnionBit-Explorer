@@ -18,14 +18,10 @@ include!("../src/probes.rs");
 /// `(sonde, moteur fautif)` — divergences connues admises.
 /// `jscore` = jscore s'écarte de la spec ; `boa` = boa s'écarte.
 const KNOWN: &[(&str, &str)] = &[
-    // Représentation UTF-8 interne : les surrogates isolés se
-    // perdent en U+FFFD (gap structurel documenté — JS-C263 a
-    // corrigé les positions, pas les valeurs).
-    ("str_fromcc", "jscore"),
-    ("str_lone_surrogate", "jscore"),
-    // boa 0.22-dev : indexation astrale hors BMP (`'😀'[0] !==
-    // '\uD800'` côté boa) — bug boa, jscore est spec-correct.
-    ("str_astral_idx", "boa"),
+    // Vide — toutes les divergences mesurées ont été soldées
+    // (surrogates isolés préservés via `JsStr::units`, JS-C579).
+    // Une entrée = `(sonde, moteur fautif)` ; documenter le bug
+    // dans `docs/audit-jscore-vs-boa.md` avant d'ajouter.
 ];
 
 #[test]

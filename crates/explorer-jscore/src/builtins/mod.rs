@@ -1489,6 +1489,18 @@ fn this_str(e: &mut Engine, this: Value) -> JsResult<String> {
     }
 }
 
+/// `this` `ToString`é **en `JsStr`** — garde la vue `units` des
+/// surrogates isolés là où `this_str` rendrait le `String`
+/// lossy (`concat`, toute méthode qui ré-émet des units).
+fn this_jstr(e: &mut Engine, this: Value) -> JsResult<JsStr> {
+    match this {
+        Value::Undefined | Value::Null => {
+            Err(e.type_error("String method called on null/undefined"))
+        }
+        _ => e.to_js_jstr(this),
+    }
+}
+
 /// `this` as a number (accepts primitives; objects via `ToNumber`).
 fn this_num(e: &mut Engine, this: Value) -> JsResult<f64> {
     match this {

@@ -1093,26 +1093,75 @@ pub(crate) fn array_every(e: &mut Engine, this: Value, args: &[Value]) -> JsResu
 // -- String extras -----------------------------------------------------
 
 pub(crate) fn string_includes(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
-    let s = this_str(e, this)?;
-    let needle = e.to_js_string(arg(args, 0))?;
+    // `CheckObjectCoercible` + `ToString(this)` avant l'arg (spec).
+    let sid = match &this {
+        Value::Undefined | Value::Null => {
+            return Err(e.type_error("String method called on null/undefined"));
+        }
+        Value::Str(id) => Some(id.clone()),
+        _ => None,
+    };
+    let s = if sid.is_none() {
+        Some(this_str(e, this)?)
+    } else {
+        None
+    };
+    let needle = e.to_js_jstr(arg(args, 0))?;
     // `from` en code units (spec) → préfixe units puis recherche.
     let from = match arg(args, 1) {
         Value::Undefined => 0usize,
         v => (e.to_number(v)?.max(0.0)) as usize,
     };
-    // `contains` sur la tranche **octets** du `from`-ième unit —
-    // zéro matérialisation de la vue u16 (§B-59).
-    let hay = &s[JsStr::u16_pos_to_byte(&s, from)..];
-    Ok(Value::Bool(hay.contains(&needle)))
+    // Match **exact** en units dès qu'un côté porte des
+    // surrogates — `U+FFFD` n'égale pas un surrogate (spec).
+    if let Some(id) = &sid {
+        if id.has_units() || needle.has_units() {
+            let n = needle.units_view();
+            return Ok(Value::Bool(id.index_of_units(&n, from, false) >= 0));
+        }
+        return Ok(Value::Bool(id.index_of(needle.as_str(), from, false) >= 0));
+    }
+    if needle.has_units() {
+        return Ok(Value::Bool(false));
+    }
+    let s = s.as_deref().unwrap_or("");
+    let hay = &s[JsStr::u16_pos_to_byte(s, from)..];
+    Ok(Value::Bool(hay.contains(needle.as_str())))
 }
 
 pub(crate) fn string_starts_with(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
-    let s = this_str(e, this)?;
-    let needle = e.to_js_string(arg(args, 0))?;
+    let sid = match &this {
+        Value::Undefined | Value::Null => {
+            return Err(e.type_error("String method called on null/undefined"));
+        }
+        Value::Str(id) => Some(id.clone()),
+        _ => None,
+    };
+    let s = if sid.is_none() {
+        Some(this_str(e, this)?)
+    } else {
+        None
+    };
+    let needle = e.to_js_jstr(arg(args, 0))?;
     let start = match arg(args, 1) {
         Value::Undefined => 0usize,
-        v => (e.to_number(v)? as usize).min(u16_len(&s)),
+        v => e.to_number(v)?.max(0.0) as usize,
     };
+    // Comparaison **exacte** en units dès qu'un côté porte des
+    // surrogates (la garde paire-interne est alors implicite :
+    // `nu` n'égale une tranche que unit à unit, spec).
+    if sid.as_ref().is_some_and(JsStr::has_units) || needle.has_units() {
+        let hu: Vec<u16> = match &sid {
+            Some(id) => id.units_view(),
+            None => s.as_deref().unwrap_or("").encode_utf16().collect(),
+        };
+        let nu = needle.units_view();
+        let start = start.min(hu.len());
+        return Ok(Value::Bool(hu[start..].starts_with(&nu[..])));
+    }
+    let s = s.as_deref().unwrap_or("");
+    let start = start.min(u16_len(s));
+    let needle = needle.as_str();
     // Préfixe sur la tranche **octets** du `start`-ième unit —
     // zéro matérialisation (§B-59). Position **interne à une
     // paire surrogate** (l'unité à `start` est une moitié basse
@@ -1127,16 +1176,44 @@ pub(crate) fn string_starts_with(e: &mut Engine, this: Value, args: &[Value]) ->
     {
         return Ok(Value::Bool(false));
     }
-    let hay = &s[JsStr::u16_pos_to_byte(&s, start)..];
-    Ok(Value::Bool(hay.starts_with(&needle)))
+    let hay = &s[JsStr::u16_pos_to_byte(s, start)..];
+    Ok(Value::Bool(hay.starts_with(needle)))
 }
 
 pub(crate) fn string_ends_with(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
-    let s = this_str(e, this)?;
-    let needle = e.to_js_string(arg(args, 0))?;
-    let end = match arg(args, 1) {
-        Value::Undefined => u16_len(&s),
-        v => (e.to_number(v)? as usize).min(u16_len(&s)),
+    let sid = match &this {
+        Value::Undefined | Value::Null => {
+            return Err(e.type_error("String method called on null/undefined"));
+        }
+        Value::Str(id) => Some(id.clone()),
+        _ => None,
+    };
+    let s = if sid.is_none() {
+        Some(this_str(e, this)?)
+    } else {
+        None
+    };
+    let needle = e.to_js_jstr(arg(args, 0))?;
+    let end_arg = arg(args, 1);
+    // Comparaison **exacte** en units dès qu'un côté porte des
+    // surrogates (cf. `startsWith`).
+    if sid.as_ref().is_some_and(JsStr::has_units) || needle.has_units() {
+        let hu: Vec<u16> = match &sid {
+            Some(id) => id.units_view(),
+            None => s.as_deref().unwrap_or("").encode_utf16().collect(),
+        };
+        let nu = needle.units_view();
+        let end = match end_arg {
+            Value::Undefined => hu.len(),
+            v => (e.to_number(v)?.max(0.0) as usize).min(hu.len()),
+        };
+        return Ok(Value::Bool(hu[..end].ends_with(&nu[..])));
+    }
+    let s = s.as_deref().unwrap_or("");
+    let needle = needle.as_str();
+    let end = match end_arg {
+        Value::Undefined => u16_len(s),
+        v => (e.to_number(v)? as usize).min(u16_len(s)),
     };
     // Suffixe sur la tranche **octets** du `end`-ième unit —
     // zéro matérialisation (§B-59). Limite **interne à une
@@ -1152,35 +1229,50 @@ pub(crate) fn string_ends_with(e: &mut Engine, this: Value, args: &[Value]) -> J
     {
         return Ok(Value::Bool(false));
     }
-    let hay = &s[..JsStr::u16_pos_to_byte(&s, end)];
-    Ok(Value::Bool(hay.ends_with(&needle)))
+    let hay = &s[..JsStr::u16_pos_to_byte(s, end)];
+    Ok(Value::Bool(hay.ends_with(needle)))
 }
 
 pub(crate) fn string_repeat(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
-    let s = this_str(e, this)?;
     let n = e.to_number(arg(args, 0))?;
     if n < 0.0 || !n.is_finite() {
         return Err(e.range_error("repeat count out of range"));
     }
-    // Garde d'alloc : `'x'.repeat(1e9)` doit refuser, pas avorter
-    // le processus dans l'allocateur (JS-C55).
-    e.alloc_guard(s.len().saturating_mul(n as usize))?;
-    Ok(e.str_val(s.repeat(n as usize)))
+    let n = n as usize;
+    // Fast-path Str : répéter la vue `units` préserve les
+    // surrogates isolés (le `String` lossy les fige en U+FFFD).
+    if let Value::Str(id) = this {
+        // Garde d'alloc : `'x'.repeat(1e9)` doit refuser, pas
+        // avorter le processus dans l'allocateur (JS-C55).
+        e.alloc_guard(id.len().saturating_mul(n))?;
+        let u = id.units_view();
+        let mut out = Vec::with_capacity(u.len().saturating_mul(n));
+        for _ in 0..n {
+            out.extend_from_slice(&u);
+        }
+        return Ok(e.str_val_units(out));
+    }
+    let s = this_str(e, this)?;
+    e.alloc_guard(s.len().saturating_mul(n))?;
+    Ok(e.str_val(s.repeat(n)))
 }
 
-pub(crate) fn pad(e: &mut Engine, s: &str, args: &[Value], right: bool) -> JsResult<String> {
+/// `padStart`/`padEnd` en **code units** — base et fill gardent
+/// leurs surrogates isolés (spec : concaténation d'units).
+pub(crate) fn pad_js(e: &mut Engine, this: Value, args: &[Value], right: bool) -> JsResult<Value> {
+    let base = this_jstr(e, this)?;
     let target = e.to_number(arg(args, 0))?.max(0.0) as usize;
     let fill = match arg(args, 1) {
-        Value::Undefined => " ".to_string(),
-        v => e.to_js_string(v)?,
+        Value::Undefined => JsStr::new(" ", &e.str_acct),
+        v => e.to_js_jstr(v)?,
     };
     // `target` et le compte courant sont en code units (spec).
-    let cur = u16_len(s);
-    if cur >= target || fill.is_empty() {
-        return Ok(s.to_string());
+    let cur = base.u16_len();
+    if cur >= target || fill.u16_len() == 0 {
+        return Ok(Value::Str(base));
     }
     let need = target - cur;
-    let fill_u = u16_view(e, &fill)?;
+    let fill_u = fill.units_view();
     // Garde d'alloc : `padStart(2**31)` doit refuser proprement
     // (JS-C55) — `need` units u16 = 2 octets pièce.
     e.alloc_guard(need.saturating_mul(2))?;
@@ -1189,32 +1281,44 @@ pub(crate) fn pad(e: &mut Engine, s: &str, args: &[Value], right: bool) -> JsRes
         let take = (need - pad_units.len()).min(fill_u.len());
         pad_units.extend_from_slice(&fill_u[..take]);
     }
-    let p = u16_to_string(&pad_units);
-    Ok(if right {
-        format!("{s}{p}")
+    let mut out = base.units_view();
+    if right {
+        out.extend_from_slice(&pad_units);
     } else {
-        format!("{p}{s}")
-    })
+        pad_units.extend_from_slice(&out);
+        out = pad_units;
+    }
+    Ok(e.str_val_units(out))
 }
 
 pub(crate) fn string_pad_start(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
-    let s = this_str(e, this)?;
-    let out = pad(e, &s, args, false)?;
-    Ok(e.str_val(out))
+    pad_js(e, this, args, false)
 }
 
 pub(crate) fn string_pad_end(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
-    let s = this_str(e, this)?;
-    let out = pad(e, &s, args, true)?;
-    Ok(e.str_val(out))
+    pad_js(e, this, args, true)
 }
 
 pub(crate) fn string_trim_start(e: &mut Engine, this: Value, _a: &[Value]) -> JsResult<Value> {
+    if let Value::Str(id) = this {
+        return Ok(if id.has_units() {
+            Value::Str(id.trim_js(true, false, &e.str_acct))
+        } else {
+            e.str_val(id.as_str().trim_start().to_string())
+        });
+    }
     let s = this_str(e, this)?;
     Ok(e.str_val(s.trim_start().to_string()))
 }
 
 pub(crate) fn string_trim_end(e: &mut Engine, this: Value, _a: &[Value]) -> JsResult<Value> {
+    if let Value::Str(id) = this {
+        return Ok(if id.has_units() {
+            Value::Str(id.trim_js(false, true, &e.str_acct))
+        } else {
+            e.str_val(id.as_str().trim_end().to_string())
+        });
+    }
     let s = this_str(e, this)?;
     Ok(e.str_val(s.trim_end().to_string()))
 }

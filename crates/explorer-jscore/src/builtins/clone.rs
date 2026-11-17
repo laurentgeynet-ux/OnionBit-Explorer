@@ -506,19 +506,44 @@ pub(crate) fn finreg_cleanup(e: &mut Engine, _t: Value, args: &[Value]) -> JsRes
 
 /// `String.prototype.normalize(form?)` — NFC par défaut, NFD/NFKC/
 /// NFKD explicites (unicode-normalization, tables Unicode réelles).
+/// Normalisation **par runs de scalaires** : un surrogate isolé
+/// n'est pas un scalaire — il se normalise en lui-même et borne
+/// toute composition (jamais U+FFFD).
 pub(crate) fn string_normalize(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
     use unicode_normalization::UnicodeNormalization;
-    let s = e.to_js_string(this)?;
+    let j = e.to_js_jstr(this)?;
     let form = match arg(args, 0) {
         Value::Undefined => "NFC".to_string(),
         v => e.to_js_string(v)?,
     };
-    let out: String = match form.as_str() {
-        "NFC" => s.nfc().collect(),
-        "NFD" => s.nfd().collect(),
-        "NFKC" => s.nfkc().collect(),
-        "NFKD" => s.nfkd().collect(),
-        _ => return Err(e.range_error("invalid normalization form")),
+    if !matches!(form.as_str(), "NFC" | "NFD" | "NFKC" | "NFKD") {
+        return Err(e.range_error("invalid normalization form"));
+    }
+    // Expansion compat ≤ ~20 units/code point — borne large.
+    e.alloc_guard(j.u16_len().saturating_mul(80))?;
+    let mut out = Vec::with_capacity(j.u16_len());
+    let mut run = String::new();
+    let mut buf = [0u16; 2];
+    let flush = |run: &mut String, out: &mut Vec<u16>, buf: &mut [u16; 2]| {
+        let norm: String = match form.as_str() {
+            "NFC" => run.nfc().collect(),
+            "NFD" => run.nfd().collect(),
+            "NFKC" => run.nfkc().collect(),
+            _ => run.nfkd().collect(),
+        };
+        for c in norm.chars() {
+            out.extend_from_slice(c.encode_utf16(buf));
+        }
+        run.clear();
     };
-    Ok(e.str_val(out))
+    for cp in j.iter_code_points() {
+        if cp.len() == 1 && (0xD800..0xE000).contains(&cp[0]) {
+            flush(&mut run, &mut out, &mut buf);
+            out.push(cp[0]);
+        } else {
+            run.push_str(&String::from_utf16_lossy(&cp));
+        }
+    }
+    flush(&mut run, &mut out, &mut buf);
+    Ok(e.str_val_units(out))
 }

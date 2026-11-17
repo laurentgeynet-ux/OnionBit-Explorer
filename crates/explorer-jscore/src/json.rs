@@ -57,11 +57,18 @@ impl Reader<'_> {
     }
 }
 
-fn json_string(r: &mut Reader) -> Result<String, &'static str> {
+/// Chaîne JSON → **code units UTF-16** — les escapes `\uXXXX`
+/// sont poussés tels quels : un surrogate isolé survit (spec —
+/// `JSON.parse('"\\ud800"')` rend le surrogate, pas U+FFFD) ;
+/// une paire forme naturellement l'astral dans la vue u16.
+fn json_string(r: &mut Reader) -> Result<Vec<u16>, &'static str> {
     if !r.eat(b'"') {
         return Err("expected string");
     }
-    let mut out = String::new();
+    let mut out: Vec<u16> = Vec::new();
+    let push_char = |out: &mut Vec<u16>, c: char| {
+        out.extend_from_slice(c.encode_utf16(&mut [0; 2]));
+    };
     loop {
         match r.peek() {
             None => return Err("unterminated string"),
@@ -72,14 +79,14 @@ fn json_string(r: &mut Reader) -> Result<String, &'static str> {
             Some(b'\\') => {
                 r.i += 1;
                 match r.peek() {
-                    Some(b'"') => out.push('"'),
-                    Some(b'\\') => out.push('\\'),
-                    Some(b'/') => out.push('/'),
-                    Some(b'b') => out.push('\u{8}'),
-                    Some(b'f') => out.push('\u{c}'),
-                    Some(b'n') => out.push('\n'),
-                    Some(b'r') => out.push('\r'),
-                    Some(b't') => out.push('\t'),
+                    Some(b'"') => push_char(&mut out, '"'),
+                    Some(b'\\') => push_char(&mut out, '\\'),
+                    Some(b'/') => push_char(&mut out, '/'),
+                    Some(b'b') => push_char(&mut out, '\u{8}'),
+                    Some(b'f') => push_char(&mut out, '\u{c}'),
+                    Some(b'n') => push_char(&mut out, '\n'),
+                    Some(b'r') => push_char(&mut out, '\r'),
+                    Some(b't') => push_char(&mut out, '\t'),
                     Some(b'u') => {
                         r.i += 1;
                         let hex = r.s.get(r.i..r.i + 4).ok_or("bad \\u escape")?;
@@ -89,45 +96,7 @@ fn json_string(r: &mut Reader) -> Result<String, &'static str> {
                         )
                         .map_err(|_| "bad \\u escape")?;
                         r.i += 3; // +1 from the shared advance below
-                                  // BMP char; surrogate pairs collapse to the
-                                  // replacement char if unpaired (tolerant).
-                        if (0xD800..0xDC00).contains(&n) {
-                            // High surrogate — try `\uXXXX` low half.
-                            let save = r.i;
-                            r.i += 1;
-                            if r.peek() == Some(b'\\') && r.s.get(r.i + 1) == Some(&b'u') {
-                                if let Some(h2) = r.s.get(r.i + 2..r.i + 6) {
-                                    if let Ok(lo) = u16::from_str_radix(
-                                        std::str::from_utf8(h2).unwrap_or(""),
-                                        16,
-                                    ) {
-                                        if (0xDC00..0xE000).contains(&lo) {
-                                            let c = 0x10000u32
-                                                + (((n as u32) - 0xD800) << 10)
-                                                + (lo as u32 - 0xDC00);
-                                            out.push(char::from_u32(c).unwrap_or('\u{fffd}'));
-                                            r.i += 5;
-                                        } else {
-                                            out.push('\u{fffd}');
-                                            r.i = save;
-                                        }
-                                    } else {
-                                        out.push('\u{fffd}');
-                                        r.i = save;
-                                    }
-                                } else {
-                                    out.push('\u{fffd}');
-                                    r.i = save;
-                                }
-                            } else {
-                                out.push('\u{fffd}');
-                                r.i = save;
-                            }
-                        } else if (0xDC00..0xE000).contains(&n) {
-                            out.push('\u{fffd}');
-                        } else {
-                            out.push(char::from_u32(n as u32).unwrap_or('\u{fffd}'));
-                        }
+                        out.push(n);
                     }
                     _ => return Err("bad escape"),
                 }
@@ -154,7 +123,7 @@ fn json_string(r: &mut Reader) -> Result<String, &'static str> {
                 };
                 match std::str::from_utf8(win) {
                     Ok(s) => {
-                        out.push_str(s);
+                        out.extend(s.encode_utf16());
                         r.i += n;
                     }
                     Err(_) => return Err("invalid utf-8"),
@@ -185,7 +154,7 @@ fn json_value(e: &mut Engine, r: &mut Reader, depth: u32) -> JsResult<Value> {
         }
         Some(b'"') => {
             let s = json_string(r).map_err(|m| e.syntax_error(m))?;
-            e.str_val(s)
+            e.str_val_units(s)
         }
         Some(b'[') => {
             r.i += 1;
@@ -207,7 +176,8 @@ fn json_value(e: &mut Engine, r: &mut Reader, depth: u32) -> JsResult<Value> {
             if !r.eat(b'}') {
                 loop {
                     r.ws();
-                    let k = json_string(r).map_err(|m| e.syntax_error(m))?;
+                    let k =
+                        String::from_utf16_lossy(&json_string(r).map_err(|m| e.syntax_error(m))?);
                     r.expect(b':').map_err(|m| e.syntax_error(m))?;
                     let v = json_value(e, r, depth + 1)?;
                     e.set_own(id, &k, v, true);
@@ -351,9 +321,40 @@ fn internalize_inner(
 // stringify
 // ------------------------------------------------------------------
 
-fn esc_str(out: &mut String, s: &str) {
+/// Échappe une `JsStr` pour la sortie JSON — itère la vue
+/// **UTF-16 exacte** : surrogate isolé → `\uXXXX` (spec), paire
+/// astrale → le char, contrôles → séquences courtes.
+fn esc_str(out: &mut String, s: &crate::value::JsStr) {
+    esc_units(out, &s.units_view());
+}
+
+/// Corps de [`esc_str`] sur units déjà matérialisées (clés
+/// stockées en `String` Rust — UTF-8 lossy admis).
+fn esc_units(out: &mut String, units: &[u16]) {
     out.push('"');
-    for c in s.chars() {
+    let mut i = 0;
+    while i < units.len() {
+        let u = units[i];
+        if (0xD800..0xDC00).contains(&u)
+            && i + 1 < units.len()
+            && (0xDC00..0xE000).contains(&units[i + 1])
+        {
+            let c = 0x10000u32 + (((u as u32) - 0xD800) << 10) + (units[i + 1] as u32 - 0xDC00);
+            if let Some(c) = char::from_u32(c) {
+                out.push(c);
+            }
+            i += 2;
+            continue;
+        }
+        if (0xD800..0xE000).contains(&u) {
+            out.push_str(&format!("\\u{u:04x}"));
+            i += 1;
+            continue;
+        }
+        let Some(c) = char::from_u32(u as u32) else {
+            i += 1;
+            continue;
+        };
         match c {
             '"' => out.push_str("\\\""),
             '\\' => out.push_str("\\\\"),
@@ -363,10 +364,11 @@ fn esc_str(out: &mut String, s: &str) {
             '\u{8}' => out.push_str("\\b"),
             '\u{c}' => out.push_str("\\f"),
             c if (c as u32) < 0x20 => {
-                out.push_str(&format!("\\u{:04x}", c as u32));
+                out.push_str(&format!("\\u{:04x}", u32::from(c)));
             }
             c => out.push(c),
         }
+        i += 1;
     }
     out.push('"');
 }
@@ -514,7 +516,7 @@ fn json_write(
                     first = false;
                     out.push_str(nl);
                     out.push_str(&pad);
-                    esc_str(out, &k);
+                    esc_units(out, &k.encode_utf16().collect::<Vec<u16>>());
                     out.push(':');
                     if !space.is_empty() {
                         out.push(' ');

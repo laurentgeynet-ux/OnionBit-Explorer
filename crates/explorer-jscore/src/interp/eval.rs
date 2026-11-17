@@ -6,7 +6,7 @@
 use super::*;
 use crate::ast::{AssignOp, BinOp, ChainStep, Expr, ObjProp, PropKey, UnOp};
 use crate::heap::{Binding, Env, EnvCell, EnvKind, EnvRef, Fun, JsResult, ObjKind, Thrown};
-use crate::value::{to_int32, to_uint32, Value};
+use crate::value::{to_int32, to_uint32, JsStr, Value};
 
 impl Engine {
     /// Étiquette du callee nu pour le diagnostic « value is
@@ -236,7 +236,7 @@ impl Engine {
                 Ok(self
                     .big_val(num_bigint::BigInt::parse_bytes(s.as_bytes(), 10).unwrap_or_default()))
             }
-            Expr::Str(s) => Ok(self.str_val(s.clone())),
+            Expr::Str(s) => Ok(self.str_val_lit(s)),
             Expr::Bool(b) => Ok(Value::Bool(*b)),
             Expr::Null => Ok(Value::Null),
             Expr::This => Ok(this),
@@ -364,7 +364,7 @@ impl Engine {
                         out.push_str(&sv);
                     }
                 }
-                Ok(self.str_val(out))
+                Ok(self.str_val_lit(&out))
             }
             // `` tag`…` `` — même résolution de callee qu'un appel
             // (`o.m`tpl`` passe `o` en `this`). `strings` porte le
@@ -411,7 +411,7 @@ impl Engine {
                         o.extensible = false;
                     }
                 }
-                let cooked: Vec<Value> = parts.iter().map(|s| self.str_val(s.clone())).collect();
+                let cooked: Vec<Value> = parts.iter().map(|s| self.str_val_lit(s)).collect();
                 let strings = self.new_array(cooked);
                 if let Value::Obj(soid) = strings {
                     self.set_own(soid, "raw", raw, false);
@@ -1529,14 +1529,18 @@ impl Engine {
                 crate::j17_tick(&crate::J17_BIN_SS);
                 crate::j17_tick(&crate::J17_BIN_ADD_STR);
                 self.alloc_guard(a.len().saturating_add(b.len()))?;
-                if a.try_append(&b) {
+                if a.try_append_js(&b) {
                     return Ok(Value::Str(a));
                 }
-                Ok(self.str_val(format!("{}{}", a.as_str(), b.as_str())))
+                Ok(Value::Str(crate::value::JsStr::concat_js(
+                    &a,
+                    &b,
+                    &self.str_acct,
+                )))
             }
             (Value::Str(a), Value::Str(b)) if matches!(op, Lt | Le | Gt | Ge) => {
                 crate::j17_tick(&crate::J17_BIN_SS);
-                let ord = a.as_str().cmp(b.as_str());
+                let ord = JsStr::cmp_js(&a, &b);
                 Ok(Value::Bool(matches!(
                     (ord, op),
                     (std::cmp::Ordering::Less, Lt | Le)
@@ -1621,10 +1625,14 @@ impl Engine {
                                 // refuse si la boîte est
                                 // partagée, ex. `s + s`).
                                 self.alloc_guard(a.len().saturating_add(b.len()))?;
-                                if a.try_append(&b) {
+                                if a.try_append_js(&b) {
                                     return Ok(Value::Str(a));
                                 }
-                                return Ok(self.str_val(format!("{}{}", a.as_str(), b.as_str())));
+                                return Ok(Value::Str(crate::value::JsStr::concat_js(
+                                    &a,
+                                    &b,
+                                    &self.str_acct,
+                                )));
                             }
                             _ => self.to_js_string(rp)?,
                         };

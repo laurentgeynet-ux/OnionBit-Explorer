@@ -872,8 +872,10 @@ pub(crate) fn object_get_own_property_descriptor(
         }
         if let Some(i) = crate::interp::array_index(&key) {
             if i < n {
-                let c = u16_at(&sid, i).unwrap_or_default();
-                let cv = e.str_val(c);
+                let cv = match sid.u16_at(i) {
+                    Some(w) => e.str_val_units(vec![w]),
+                    None => e.str_val(""),
+                };
                 e.set_own(d, "value", cv, true);
                 e.set_own(d, "writable", Value::Bool(false), true);
                 e.set_own(d, "enumerable", Value::Bool(true), true);
