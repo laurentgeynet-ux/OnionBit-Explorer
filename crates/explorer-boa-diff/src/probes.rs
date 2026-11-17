@@ -735,4 +735,61 @@ pub const PROBES: &[(&str, &str)] = &[
     ("weakmap_key_prim", "try{new WeakMap().set(1,'x')}catch(e){e.constructor.name}"),
     ("weakset_has", "let w=new WeakSet();let o={};w.add(o);w.has(o)+'|'+w.has({})"),
     ("weakmap_iter_err", "try{[...new WeakMap()]}catch(e){e.constructor.name}"),
+    // ============================ Annex B ============================
+    // Sondage comportemental de la surface web-legacy : wrappers HTML
+    // (format exact + échappement des valeurs d'attribut), octaux
+    // sloppy, `for(var x=i in o)`, `RegExp.prototype.compile`,
+    // `__lookupGetter__`/`__defineGetter__`, dates legacy.
+    // --- B.2.3 wrappers HTML ---
+    ("html_anchor", "'x'.anchor('n')"),
+    ("html_bold_ital", "'x'.bold()+'|'+ 'x'.italics()"),
+    ("html_sub_sup", "'x'.sub()+'|'+ 'x'.sup()"),
+    ("html_strike_fixed", "'x'.strike()+'|'+ 'x'.fixed()"),
+    ("html_big_blink", "'x'.big()+'|'+ 'x'.blink()"),
+    ("html_fontcolor", "'x'.fontcolor('red')"),
+    ("html_fontsize", "'x'.fontsize(3)"),
+    ("html_link", "'x'.link('http://a/b')"),
+    ("html_attr_quote", "'x'.link('a\"b')"),
+    ("html_anchor_name_quote", "'x'.anchor('a\"b')"),
+    // --- B.2.3 trimLeft/trimRight (alias trimStart/trimEnd) ---
+    ("html_trimleft", "'  x'.trimLeft()+'|'+ 'x  '.trimRight()"),
+    // --- B.2.2 substr complément ---
+    ("str_substr_neg_start", "'abcdef'.substr(-3)"),
+    ("str_substr_neg_len", "'abcdef'.substr(1,-1)+'|'+'abcdef'.substr(0,0)"),
+    ("str_substr_wrap", "'abcdef'.substr(-10)+'|'+'abcdef'.substr(4,10)"),
+    // --- B.2.4 RegExp.prototype.compile ---
+    ("re_compile_src", "let r=/a/g;r.compile('b','i');r.source+'|'+r.flags+'|'+r.lastIndex"),
+    ("re_compile_lastidx", "let r=/x/g;r.lastIndex=3;r.compile(/y/);r.lastIndex+'|'+r.source"),
+    ("re_compile_obj", "let r=/a/g;r.compile({});r.source+'|'+r.flags"),
+    ("re_compile_err", "try{RegExp.prototype.compile.call({})}catch(e){e.constructor.name}"),
+    // --- B.2.1 __proto__ / accessors ---
+    ("proto_literal", "let o={__proto__:{a:1},b:2};o.a+'|'+o.b+'|'+Object.getPrototypeOf(o).hasOwnProperty('a')"),
+    ("proto_literal_nonobj", "let o={__proto__:5,b:2};Object.getPrototypeOf(o)===Object.prototype+'|'+o.b"),
+    ("proto_literal_null", "let o={__proto__:null};typeof o.a+'|'+Object.getPrototypeOf(o)"),
+    ("proto_computed_no", "let o={['__proto__']:{a:1}};o.a===undefined?'undef':'a:'+o.a"),
+    ("proto_accessor_rw", "let o={};o.__proto__={z:9};o.z+'|'+JSON.stringify(o)"),
+    ("proto_accessor_typeof", "typeof Object.getOwnPropertyDescriptor(Object.prototype,'__proto__').get"),
+    ("lookup_getter", "let o={};o.__defineGetter__('g',()=>7);o.g+'|'+typeof o.__lookupGetter__('g')"),
+    ("lookup_setter_call", "let o={};o.__defineSetter__('s',function(v){this.v=v*2});o.s=5;o.v"),
+    ("lookup_undef", "'x'.__lookupGetter__('nope')===undefined"),
+    // --- B.1.2 octaux sloppy dans les chaînes ---
+    ("str_octal_simple", "'\\010'==='\\b'?'bs':('\\010'.charCodeAt(0))"),
+    ("str_octal_three", "'\\101'+'|'+'\\7'"),
+    ("str_octal_0digit", "'\\08'==='\\x008'?'ok':'\\08'"),
+    ("str_octal_nonoctal", "'\\8'+'|'+ '\\9'"),
+    // --- B.3 Annex B syntaxe ---
+    ("forin_var_init", "for(var k='z' in {a:1,b:2}){}k"),
+    ("block_fn_sloppy", "let r='';{function f(){return 1}r=f()}r+'|'+typeof f"),
+    ("label_fn_sloppy", "let r='';L:function g(){return 3};r=typeof g==='function'?g():'nofn';r"),
+    // --- B.2.5/2.6 escape/unescape + dates legacy ---
+    ("escape_global", "typeof escape==='function'?escape('a b'):'noesc'"),
+    ("unescape_rt", "typeof unescape==='function'?unescape('a%20b'):'nounesc'"),
+    ("date_getyear", "new Date(2000,0,1).getYear()"),
+    ("date_setyear", "let d=new Date(0);d.setYear(99);d.getFullYear()"),
+    ("date_gmt_alias", "Date.prototype.toGMTString===Date.prototype.toUTCString"),
+    // --- B.2.1 complément : arguments/caller restricted, delete ---
+    ("delete_unqualified", "var q=7;delete q"),
+    ("delete_nonref", "delete (1,2,3)"),
+    ("fn_restricted_props", "function f(){'use strict'}try{f.arguments}catch(e){e.constructor.name}"),
+    ("fn_restricted_caller", "function f(){'use strict'}try{f.caller}catch(e){e.constructor.name}"),
 ];

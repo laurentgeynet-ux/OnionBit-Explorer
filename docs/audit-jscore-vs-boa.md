@@ -266,8 +266,10 @@ features par défaut sans `intl`.
 
 ### Mesure de référence (JS-C584, boa 0.22-dev + `annex-b`)
 
-Corpus : **647 concordants / 0 divergences / 0 internal** —
-`KNOWN` **vide**. Les 9 divergences historiques ont été soldées
+Corpus : **690 concordants / 0 divergences / 0 internal** —
+`KNOWN` **vide** (JS-C585 : +44 sondes Annex B comportementales,
+1 bug jscore corrigé — `toGMTString` alias identité spec B.2.6).
+Les 9 divergences historiques ont été soldées
 plutôt que documentées : (1) `re_source_str` était en fait un
 **bug jscore** — `.source` rendait le pattern verbatim sans
 `EscapeRegExpPattern` (spec : `/` → `\/`, fins de ligne échappées,
@@ -285,8 +287,8 @@ imbriqué → stack overflow natif dès ~100 niveaux ; **parseur
 récursif** qui stack-overflow sur les `else if` chaînés imbriqués
 (prelude écrit en `if` séquentiels plats).
 
-Quatre vagues d'élargissement ont mesuré **20 bugs jscore réels**,
-tous corrigés (+9 déviations ci-dessus + 1 crash boa documenté) :
+Cinq vagues d'élargissement ont mesuré **21 bugs jscore réels**,
+tous corrigés (+déviations boa documentées ci-dessus) :
 
 - JS-C580 (~65 sondes) : `Number('0b11'/'0o17')` (préfixes
   binaire/octal absents du String→Number), `Math.sign(-0)` →
@@ -314,6 +316,13 @@ tous corrigés (+9 déviations ci-dessus + 1 crash boa documenté) :
   fuyait les `var`** (spec `PerformEval` : env déclaratif enfant
   quand `prog.strict` — `exec_program`/`eval_source_in`
   paramétrés).
+- JS-C585 (~44 sondes Annex B comportementales — wrappers HTML,
+  octaux sloppy, `for(var k=i in o)`, `compile`, `__proto__`,
+  `__lookupGetter__`, dates legacy) : **`toGMTString` n'était pas
+  le même objet fonction que `toUTCString`** (spec B.2.6 alias
+  d'identité — `add_method` créait deux natifs). Déviation boa
+  observée hors corpus : `compile` rend `R` au lieu de
+  `undefined` spec — la sonde mesure l'effet, pas le retour.
 - JS-C583 (~160 sondes, for-await/itérateurs ES2025/Set/Temporal/
   `__proto__`/computed keys/for-in/`arguments`/`Function.toString`/
   lookbehind/`toExponential`/getters hérités) : **`for-in` sur

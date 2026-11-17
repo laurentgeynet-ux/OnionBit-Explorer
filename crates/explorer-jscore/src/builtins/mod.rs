@@ -1368,7 +1368,10 @@ pub(crate) fn install(e: &mut Engine) {
     e.add_method(dp, "toTemporalInstant", date_to_temporal_instant);
     e.add_method(dp, "toISOString", date_to_iso);
     e.add_method(dp, "toUTCString", date_to_utc_string);
-    e.add_method(dp, "toGMTString", date_to_utc_string);
+    // Spec B.2.6 : `toGMTString` est le **même** objet fonction
+    // que `toUTCString` (alias d'identité, pas réimplémentation).
+    let utc = e.get_prop(dp, "toUTCString").unwrap_or(Value::Undefined);
+    e.set_own(dp, "toGMTString", utc, false);
     if let Value::Obj(did) = date {
         e.add_method(did, "now", date_now);
         e.add_method(did, "parse", date_parse);
