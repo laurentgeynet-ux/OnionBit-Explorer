@@ -4767,7 +4767,19 @@ impl Engine {
                     None => Err(self.syntax_error("cannot convert string to BigInt")),
                 }
             }
-            Value::Obj(_) => {
+            Value::Obj(id) => {
+                // `ToBigInt(Symbol)` throws — spec TypeError.
+                // Garde **avant** `to_primitive` : celle-ci rend
+                // la cellule Symbole telle quelle (`Value::Obj`)
+                // — la récursion `to_bigint(Obj)` bouclait à
+                // l'infini → stack overflow (JS-C591, test262
+                // `Atomics/waitAsync/bigint/symbol-for-value-throws`).
+                if matches!(
+                    self.heap.obj(id).map(|o| &o.kind),
+                    Some(ObjKind::Symbol { .. })
+                ) {
+                    return Err(self.type_error("cannot convert a Symbol to BigInt"));
+                }
                 let p = self.to_primitive(v, PrimHint::Number)?;
                 self.to_bigint(p)
             }

@@ -476,6 +476,9 @@ pub const PROBES: &[(&str, &str)] = &[
     ("ta_rab_slice", "let r=new ArrayBuffer(8,{maxByteLength:16}),t=new Int16Array(r);t.slice({valueOf(){r.resize(2);return 1}}).length"),
     ("ta_rab_idxw", "let r=new ArrayBuffer(8,{maxByteLength:16}),t=new Int16Array(r);r.resize(2);t[3]=5;t[3]"),
     ("ta_rab_incl_u", "let r=new ArrayBuffer(8,{maxByteLength:16}),t=new Int16Array(r);t.includes(undefined,{valueOf(){r.resize(2);return 0}})"),
+    // --- JS-C591 : coercions Symbol (récursion to_bigint) ---
+    ("sym_tobigint", "try{BigInt(Symbol('x'))}catch(e){e.name}"),
+    ("sym_waitasync", "try{Atomics.waitAsync(new BigInt64Array(new SharedArrayBuffer(32)),0,Symbol('x'),1)}catch(e){e.name}"),
     // --- structuredClone ---
     ("clone_deep", "let o={a:{b:[1,2]}};let c=structuredClone(o);c.a.b[1]+(c.a!==o.a)"),
     ("clone_circular", "let o={};o.self=o;structuredClone(o).self.self===structuredClone({}).self||structuredClone(o).self!==undefined"),
