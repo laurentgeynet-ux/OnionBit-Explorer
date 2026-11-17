@@ -174,9 +174,14 @@ design choisi » plus bas.
 | Sonde | boa | spec |
 |---|---|---|
 | `JSON.parse('"\\ud800"')` | jette SyntaxError | légal → `"\ud800"` |
-| `'\u{1F600}'[0] === '\uD800'` | `false` | **`true`** |
+| `/a\/b/.source` | `"a\\/b"` — **non reparseable** | `"a\/b"` (reparse équivalent — V8) |
 
 (boa 0.22-dev — à ne pas « porter ».)
+
+> ~~`'\u{1F600}'[0] === '\uD800'` — boa `false`, spec `true`~~ :
+> **ligne retirée (JS-C586)** — erreur de la table, pas de boa :
+> le lead surrogate de `U+1F600` est `U+D83D`, pas `U+D800` —
+> `false` est la réponse spec. V8 confirme (triangulation).
 
 ---
 
@@ -243,16 +248,20 @@ Crate de conformité, **jamais en production** : `boa_engine` en
 path-dep sur le checkout local (`D:/Projet/SourceRust/boa`),
 features par défaut sans `intl`.
 
-- **`eval_jscore` / `eval_boa`** → `Outcome` canonique
+- **`eval_jscore` / `eval_boa` / `eval_v8`** → `Outcome` canonique
   (`Value(ToString)` / `Throw(Nom: msg)` / `Syntax` / `Internal`) —
   budgets boa bornés (`loop_iteration = 2M`, piles par défaut).
+- **Canal V8 (JS-C586)** : `runner.js` sous Node.js en
+  sous-processus — `vm.runInThisContext` (sémantique **Script**,
+  pas eval : `var` non-configurable), `unhandledRejection` avalé,
+  texte JSON-encodé (multi-lignes préservées). `v8_available`
+  sonde une fois (`EXPLORER_NODE` > PATH) — canal désarmé sans
+  node. V8 sert d'**arbitre de référence** : divergence à 3
+  voix tranchée par vote 2-contre-1 avant lecture spec.
 - **`concordant`** : même variante ; `Value` exact ; `Throw` même
   classe (le message n'est pas spec) ; `Syntax` symétrique.
-- **`boa-diff`** : corpus `src/probes.rs` (~185 sondes —
-  littéraux, conversions, UTF-16, tableaux, descripteurs,
-  classes, erreurs, regexp, itérateurs, Map/Set, JSON, Math,
-  Proxy, Symbol, promesses sync, TypedArrays, divers langage,
-  énumération, sort, BigInt, reviver, destructuring).
+- **`boa-diff`** : corpus `src/probes.rs` (688 sondes — noms
+  uniques gardés par `probe_names_unique`).
   **Isolation par processus** : chaque sonde tourne dans un
   enfant `--worker` — un crash natif d'un moteur (observé :
   récursion boa 0.22-dev sur `for-of`+`break`) devient
@@ -260,9 +269,16 @@ features par défaut sans `intl`.
 - **`boa-surface`** : matrice d'énumération (`surface.js` —
   `getOwnPropertyNames`/`Symbols`/descripteurs, profondeur 2)
   comparée chemin par chemin.
-- **Cliquet** `tests/ratchet.rs` : rejoue le corpus en test ;
-  divergences connues listeées par moteur fautif — toute
+- **Cliquets** `tests/ratchet.rs` : `corpus_ratchet` (jscore↔boa)
+  et `corpus_ratchet_v8` (jscore↔V8, désarmé sans node) ; listes
+  `KNOWN`/`KNOWN_V8` par moteur fautif — toute divergence
   nouvelle ou résolue échoue.
+
+### Mesure V8 (JS-C586, Node 26.7.0)
+
+**686 concordants / 2 divergences connues / 0 internal** —
+`KNOWN` = `re_source_str` (boa), `KNOWN_V8` = `clone_err_throws`
+(approximation jscore `TypeError` ≙ `DataCloneError`).
 
 ### Mesure de référence (JS-C584, boa 0.22-dev + `annex-b`)
 
@@ -272,9 +288,15 @@ Corpus : **690 concordants / 0 divergences / 0 internal** —
 Les 9 divergences historiques ont été soldées
 plutôt que documentées : (1) `re_source_str` était en fait un
 **bug jscore** — `.source` rendait le pattern verbatim sans
-`EscapeRegExpPattern` (spec : `/` → `\/`, fins de ligne échappées,
-`\` verbatim ; `/a\/b/.source` = `a\\/b`) — corrigé par
-`escaped_source` ; (2) `str_substr_sub` — `substr` (Annex B.2.2)
+`EscapeRegExpPattern` — corrigé par `escaped_source`.
+**Erratum (JS-C586, triangulation V8)** : le correctif avait
+calé jscore… **sur le bug de boa** — les deux produisaient
+`a\\/b` (ré-échappement de la paire `\/`, chaîne **non
+reparseable** : `eval('/'+src+'/')` jette chez les deux).
+V8 produit `a\/b`, seule sortie qui repasse l'équivalence de
+reparse — jscore aligné sur V8, boa gravé fautif dans `KNOWN`.
+Leçon : une concordance à 2 moteurs peut valider un bug
+partagé ; (2) `str_substr_sub` — `substr` (Annex B.2.2)
 existait dans le source boa derrière `#[cfg(feature="annex-b")]` :
 feature activée sur la path-dep, déviation soldée sans toucher
 boa ; (3) les 7 sondes host-API (`structuredClone`×4, `Intl`×2,
@@ -287,7 +309,7 @@ imbriqué → stack overflow natif dès ~100 niveaux ; **parseur
 récursif** qui stack-overflow sur les `else if` chaînés imbriqués
 (prelude écrit en `if` séquentiels plats).
 
-Cinq vagues d'élargissement ont mesuré **21 bugs jscore réels**,
+Six vagues d'élargissement ont mesuré **22 bugs jscore réels**,
 tous corrigés (+déviations boa documentées ci-dessus) :
 
 - JS-C580 (~65 sondes) : `Number('0b11'/'0o17')` (préfixes
@@ -336,6 +358,27 @@ tous corrigés (+déviations boa documentées ci-dessus) :
   `SyntaxError` early (param ∩ déclarations du bloc) ; **clés
   `WeakMap`/`WeakSet` primitives acceptées** (`map_set` partagé
   sans check `Value::Obj`).
+- JS-C586 (**canal V8** — troisième moteur Node.js sous-processus,
+  `runner.js` + `vm.Script` sémantique `<script>`) : première
+  mesure à 3 voix → 4 divergences, arbitrage immédiat par vote
+  2-contre-1. **1 bug jscore réel** : `escape_regexp_source`
+  ré-échappait les `\/` déjà échappés (`/a\/b/.source` → `a\\/b`
+  non reparseable — bug **partagé avec boa**, invisible à 2
+  moteurs) → parité de backslashes (V8-aligné). **1 approximation
+  assumée** gravée `KNOWN_V8` : `structuredClone` jette
+  `TypeError` là où la spec WHATWG veut `DataCloneError`
+  DOMException (ctor `DOMException` vit dans `install_dom`,
+  absent de l'eval nu — fixe différée, règle réactive).
+  **2 artefacts du runner V8** corrigés : `eval` indirect →
+  sémantique eval au lieu de Script (`var q;delete q` → `true`
+  au lieu de `false` — `vm.runInThisContext` appliqué) ;
+  `unhandledRejection` tuait le process sur les promesses
+  rejetées non rattrapées (handler ajouté). **1 bug du harnais**
+  trouvé : 24 noms de sondes dupliqués — le `find` par nom du
+  worker exécutait toujours la première occurrence (2 doublons
+  littéraux retirés, 22 renommés `*_b`, garde
+  `probe_names_unique` ajoutée). Protocole V8 JSON-encodé : les
+  valeurs multi-lignes survivent (canal le plus précis des trois).
 
 Surface : **26 441 chemins jscore / 4 203 boa**, `boa-only`
 réduit à 2 déviations boa (`Error.prototype.stack` accesseur

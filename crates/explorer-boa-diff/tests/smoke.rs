@@ -7,6 +7,8 @@
 
 use explorer_boa_diff::{concordant, eval_boa, eval_jscore, Outcome};
 
+include!("../src/probes.rs");
+
 #[test]
 fn jscore_value() {
     assert_eq!(eval_jscore("1 + 1"), Outcome::Value("2".into()));
@@ -64,4 +66,16 @@ fn concordance() {
         &Outcome::Syntax("x".into()),
         &Outcome::Value("x".into())
     ));
+}
+
+/// Les noms de sondes sont la clé du lookup `--worker` : un
+/// doublon fait exécuter deux fois la même source et masque la
+/// seconde dans le binaire (observé : `json_indent` ×2 — la
+/// variante multi-lignes n'était jamais exécutée).
+#[test]
+fn probe_names_unique() {
+    let mut seen = std::collections::BTreeSet::new();
+    for (name, _) in PROBES {
+        assert!(seen.insert(name), "sonde en double : {name}");
+    }
 }

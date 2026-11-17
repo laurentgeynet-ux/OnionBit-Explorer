@@ -226,8 +226,8 @@ impl JsRegExp {
     /// `/src/flags` rendering (`toString`) — ordre canonique
     /// `dgimsuy` (spec `RegExp.prototype.flags`).
     /// `EscapeRegExpPattern` spec : le `.source` exposé échappe
-    /// `\` → `\\`, `/` → `\/` et les fins de ligne — le pattern
-    /// reparse à l'identique dans un littéral `//`.
+    /// `/` non déjà échappé → `\/` et les fins de ligne — le
+    /// pattern reparse à l'identique dans un littéral `//`.
     pub fn escaped_source(&self) -> String {
         escape_regexp_source(&self.source)
     }
@@ -409,22 +409,29 @@ impl JsRegExp {
 }
 
 /// `(?<name>…)` → `(?P<name>…)`; everything else passes through
-/// `EscapeRegExpPattern` — échappe `/` (délimiteur de littéral)
-/// et les fins de ligne (`\n`, `\r`, `U+2028`, `U+2029`) ; tout
-/// le reste passe verbatim — `\` n'est **pas** échappé (il est
-/// déjà forme d'échappement dans le pattern ; le doubler ferait
-/// reparse un pattern différent).
+/// `EscapeRegExpPattern` — échappe `/` **non déjà échappé**
+/// (délimiteur de littéral) et les fins de ligne (`\n`, `\r`,
+/// `U+2028`, `U+2029`) ; tout le reste passe verbatim. La parité
+/// de la série de `\` précédents tranche : `/` après un nombre
+/// **impair** de `\` fait déjà partie d'une paire `\/` (reparse
+/// inchangé) ; après une série **paire** (dont zéro) il ferme
+/// le littéral → `\/`. Échapper un `\/` existant produisait
+/// `a\\/b` — non reparseable, la seule exigence normative de
+/// l'opération (mesuré : jscore ET boa jetaient `SyntaxError` sur
+/// `eval('/'+/a\/b/.source+'/')`, V8 repasse — JS-C586).
 pub(crate) fn escape_regexp_source(src: &str) -> String {
     let mut out = String::with_capacity(src.len() + 8);
+    let mut backslashes = 0u32;
     for c in src.chars() {
         match c {
-            '/' => out.push_str("\\/"),
+            '/' if backslashes % 2 == 0 => out.push_str("\\/"),
             '\n' => out.push_str("\\n"),
             '\r' => out.push_str("\\r"),
             '\u{2028}' => out.push_str("\\u2028"),
             '\u{2029}' => out.push_str("\\u2029"),
             _ => out.push(c),
         }
+        backslashes = if c == '\\' { backslashes + 1 } else { 0 };
     }
     out
 }

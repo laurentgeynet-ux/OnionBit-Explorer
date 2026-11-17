@@ -15,6 +15,10 @@
 //! `Internal` — une divergence `Internal` vs `Value` est un signal
 //! fort (crash/budget) pas un faux négatif.
 
+use std::io::Write as _;
+use std::process::{Command, Stdio};
+use std::sync::OnceLock;
+
 use boa_engine::{Context, JsError, JsNativeErrorKind, Source};
 
 /// Issue canonique d'une évaluation.
@@ -159,6 +163,128 @@ fn boa_err(ctx: &mut Context, err: &JsError) -> Outcome {
         // ou panic/limite — l'un et l'autre non natifs.
         Err(t) => Outcome::Internal(t.to_string()),
     }
+}
+
+/// Runner Node.js — script canonisant l'issue (même protocole
+/// `kind\ttexte` que le worker). Chemin figé à la compile.
+const V8_RUNNER: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/runner.js");
+
+/// Binaire node : env `EXPLORER_NODE`, sinon `node` du PATH.
+fn node_bin() -> String {
+    std::env::var("EXPLORER_NODE").unwrap_or_else(|_| "node".to_string())
+}
+
+/// `node` joignable ? Sondé une fois (un `Internal` par sonde sans
+/// node rendrait le corpus inutilisable sur les machines qui n'en
+/// ont pas — le canal est alors simplement désactivé).
+#[must_use]
+pub fn v8_available() -> bool {
+    static AVAIL: OnceLock<bool> = OnceLock::new();
+    *AVAIL.get_or_init(|| {
+        Command::new(node_bin())
+            .arg("--version")
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status()
+            .is_ok_and(|s| s.success())
+    })
+}
+
+/// `src` dans V8 (Node.js) via [`V8_RUNNER`] — issue canonisée.
+/// La sonde passe par stdin : aucune contrainte de quoting.
+/// `Internal` si node manque, meurt, ou répond hors protocole.
+#[must_use]
+pub fn eval_v8(src: &str) -> Outcome {
+    let spawn = Command::new(node_bin())
+        .arg(V8_RUNNER)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn();
+    let Ok(mut child) = spawn else {
+        return Outcome::Internal("v8 spawn".to_string());
+    };
+    if let Some(mut stdin) = child.stdin.take() {
+        let _ = stdin.write_all(src.as_bytes());
+    }
+    match child.wait_with_output() {
+        Ok(out) if out.status.success() => {
+            let text = String::from_utf8_lossy(&out.stdout);
+            line_to_outcome(text.lines().next().unwrap_or(""))
+        }
+        Ok(_) => Outcome::Internal("v8 exit".to_string()),
+        Err(e) => Outcome::Internal(format!("v8 wait: {e}")),
+    }
+}
+
+/// Ligne `kind\t<json>` du runner → `Outcome`. Le texte est
+/// JSON-encodé côté runner : les valeurs multi-lignes survivent
+/// (le protocole brut des autres moteurs les tronque à la
+/// première ligne — le canal V8 est le plus précis des trois).
+fn line_to_outcome(line: &str) -> Outcome {
+    let (kind, rest) = line.split_once('\t').unwrap_or(("", ""));
+    let Some(text) = json_unescape(rest) else {
+        return Outcome::Internal(format!("v8 protocol: {line}"));
+    };
+    match kind {
+        "Value" => Outcome::Value(text),
+        "Throw" => Outcome::Throw(text),
+        "Syntax" => Outcome::Syntax(text),
+        _ => Outcome::Internal(format!("v8 protocol: {line}")),
+    }
+}
+
+/// Décode une chaîne JSON `"…"` (échappements usuels + `\uXXXX`,
+/// paires surrogates fusionnées, surrogate isolé → `U+FFFD` —
+/// même rendu lossy que le `s` de `JsStr` côté jscore).
+fn json_unescape(s: &str) -> Option<String> {
+    let body = s.strip_prefix('"')?.strip_suffix('"')?;
+    let mut out = String::with_capacity(body.len());
+    let mut it = body.chars().peekable();
+    while let Some(c) = it.next() {
+        if c != '\\' {
+            out.push(c);
+            continue;
+        }
+        match it.next()? {
+            'n' => out.push('\n'),
+            'r' => out.push('\r'),
+            't' => out.push('\t'),
+            'b' => out.push('\u{8}'),
+            'f' => out.push('\u{c}'),
+            'u' => {
+                let hi = hex4(&mut it)?;
+                let mut fused = false;
+                if (0xD800..0xDC00).contains(&hi) {
+                    // Paire ? Lookahead `\uXXXX` — cloné, rien n'est
+                    // consommé tant que la paire n'est pas confirmée.
+                    let mut probe = it.clone();
+                    if probe.next() == Some('\\') && probe.next() == Some('u') {
+                        let lo = hex4(&mut probe)?;
+                        if (0xDC00..0xE000).contains(&lo) {
+                            it = probe;
+                            let cp = 0x1_0000
+                                + ((u32::from(hi) - 0xD800) << 10)
+                                + (u32::from(lo) - 0xDC00);
+                            out.push(char::from_u32(cp)?);
+                            fused = true;
+                        }
+                    }
+                }
+                if !fused {
+                    out.push(char::from_u32(u32::from(hi)).unwrap_or('\u{FFFD}'));
+                }
+            }
+            other => out.push(other),
+        }
+    }
+    Some(out)
+}
+
+/// 4 chiffres hex d'un `\uXXXX` JSON.
+fn hex4(it: &mut std::iter::Peekable<std::str::Chars<'_>>) -> Option<u16> {
+    let h: String = it.by_ref().take(4).collect();
+    u16::from_str_radix(&h, 16).ok()
 }
 
 /// Deux issues **concordent** si : même variante, valeurs
