@@ -124,8 +124,15 @@ pub(crate) fn array_fill(e: &mut Engine, this: Value, args: &[Value]) -> JsResul
         if end.min(len) > start && e.heap.obj(id).is_some_and(|o| o.elem_integrity & 2 != 0) {
             return Err(e.type_error("cannot fill a frozen array"));
         }
-        for slot in &mut elems[start..end.min(len)] {
-            *slot = v.clone();
+        // `start > end` (ex. `fill(v, 4, 2)`) : plage vide →
+        // no-op spec ; le slice Rust `start..end` paniquerait
+        // (JS-C594 — panic `extras.rs` interceptée par le
+        // harness test262, corpus JS-C30).
+        let end = end.min(len);
+        if end > start {
+            for slot in &mut elems[start..end] {
+                *slot = v.clone();
+            }
         }
         Ok(this)
     })

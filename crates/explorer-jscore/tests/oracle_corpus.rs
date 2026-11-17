@@ -483,6 +483,9 @@ pub const PROBES: &[(&str, &str)] = &[
     ("gen_reent_next", "var it,g=function*(){yield it.next()};it=g();try{it.next()}catch(e){e.name}"),
     ("gen_reent_ret", "var it2,g2=function*(){yield it2.return(1)};it2=g2();try{it2.next()}catch(e){e.name}"),
     ("gen_reent_thr", "var it3,g3=function*(){yield it3.throw(1)};it3=g3();try{it3.next()}catch(e){e.name}"),
+    // --- JS-C594 : fill à plage inversée → no-op spec ---
+    ("arr_fill_rev", "[1,2,3,4,5].fill(9,4,2)+''"),
+    ("arr_fill_revneg", "[1,2,3,4,5].fill(9,-1,-4)+''"),
     // --- structuredClone ---
     ("clone_deep", "let o={a:{b:[1,2]}};let c=structuredClone(o);c.a.b[1]+(c.a!==o.a)"),
     ("clone_circular", "let o={};o.self=o;structuredClone(o).self.self===structuredClone({}).self||structuredClone(o).self!==undefined"),
