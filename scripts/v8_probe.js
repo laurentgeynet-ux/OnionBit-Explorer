@@ -2,10 +2,12 @@
 // Copyright (C) 2026 Laurent Geynet
 // SPDX-License-Identifier: MIT OR Apache-2.0
 //
-// Canal oracle V8 (Node.js) pour `boa-diff` : lit la sonde sur
-// stdin, l'évalue en sloppy, canonise l'issue et imprime
-// `<kind>\t<texte>` sur stdout — même protocole que le worker.
-// Jamais de code livré : outil de conformité uniquement.
+// Canal oracle V8 standalone (Node.js) — survivant du crate
+// `explorer-boa-diff` (débranché JS-C589, historique git). Lit
+// une sonde sur stdin, l'évalue en sémantique `<script>` et
+// imprime `<kind>\t<json>` sur stdout :
+//   `echo 'src' | node scripts/v8_probe.js`
+// Outil d'arbitrage de conformité — jamais de code livré.
 //
 // Canonisation (miroir d'`Outcome`) :
 //   complétion      -> `Value\tToString(v)`
