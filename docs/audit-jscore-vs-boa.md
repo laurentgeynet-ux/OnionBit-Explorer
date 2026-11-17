@@ -248,10 +248,11 @@ features par défaut sans `intl`.
   budgets boa bornés (`loop_iteration = 2M`, piles par défaut).
 - **`concordant`** : même variante ; `Value` exact ; `Throw` même
   classe (le message n'est pas spec) ; `Syntax` symétrique.
-- **`boa-diff`** : corpus `src/probes.rs` (~120 sondes —
+- **`boa-diff`** : corpus `src/probes.rs` (~185 sondes —
   littéraux, conversions, UTF-16, tableaux, descripteurs,
   classes, erreurs, regexp, itérateurs, Map/Set, JSON, Math,
-  Proxy, Symbol, promesses sync, TypedArrays, divers langage).
+  Proxy, Symbol, promesses sync, TypedArrays, divers langage,
+  énumération, sort, BigInt, reviver, destructuring).
   **Isolation par processus** : chaque sonde tourne dans un
   enfant `--worker` — un crash natif d'un moteur (observé :
   récursion boa 0.22-dev sur `for-of`+`break`) devient
@@ -263,14 +264,17 @@ features par défaut sans `intl`.
   divergences connues listeées par moteur fautif — toute
   nouvelle ou résolue échoue.
 
-### Mesure de référence (JS-C579, boa 0.22-dev)
+### Mesure de référence (JS-C580, boa 0.22-dev)
 
-Corpus : **233 concordants / 0 divergences / 0 internal** —
-`KNOWN` vide : les surrogates isolés (item 8) sont préservés
-via `JsStr::units` et l'indexation astrale s'est révélée
-**correcte des deux côtés** (l'ancien « bug boa » était un
-accident de collision FFFD côté jscore — `'😀'[0]` vaut
-bien `'\uD800'`, pas `'\uD83C' !== '\uD800'`).
+Corpus : **297 concordants / 0 divergences / 0 internal** —
+`KNOWN` vide. L'élargissement JS-C580 (~65 sondes) a mesuré
+**6 divergences réelles**, toutes corrigées dans l'étape :
+`Number('0b11'/'0o17')` (préfixes binaire/octal absents du
+String→Number), `Math.sign(-0)` → `+1` (`f64::signum` perdait
+le signe du zéro), et **4 divergences regex surrogates**
+(moteur `fancy-regex` sur le `s` lossy : `/\uD800/` ne matchait
+pas un surrogate isolé, `/\uFFFD/` le matchait à tort) →
+**domaine sentinelle regex** (§ ci-dessous).
 
 Surface : **26 441 chemins jscore / 4 203 boa**, `boa-only`
 réduit à 2 déviations boa (`Error.prototype.stack` accesseur
@@ -325,3 +329,37 @@ sentinelle `U+F0000..F07FF` (zone réelle échappée par `F0800`),
 `json_surr_*`/`lit_sentinel_zone`/`str_u16_order` dans
 `probes.rs` — **toutes concordantes** (cliquet `ratchet.rs`,
 `KNOWN` vide).
+
+## Regex — domaine sentinelle (JS-C580)
+
+`fancy-regex` opère sur `&str` UTF-8 : un surrogate isolé n'y
+existe pas — le `s` lossy rendait `\uD800` invisible et `\uFFFD`
+collisionnait. Même schéma sentinelle que le lexer, appliqué
+au **pattern et au haystack** quand l'un des deux en porte :
+
+- `re_encode(units)` : paires astrales fusionnées (`decode_utf16`),
+  surrogate isolé → `U+F0000+off`, char réel `F0000..=F0800`
+  doublé par `F0800`. `re_decode` inverse pour les textes
+  produits (match, groupes, pièces de split, splice).
+- `JsRegExp::enc_hay(JsStr)` : encodage si `has_sentinels`
+  (pattern) **ou** `has_units` (sujet) — sinon passthrough,
+  aucun coût sur le chemin commun.
+- `translate_pattern` émet les sentinelles **au lieu** des
+  `(?!)`/clamps historiques : atome isolé → `\x{f00xx}` +
+  (non-`u`) astrals dont le lead est l'atome (`[\x{f003d}
+  \x{1f400}-\x{1f7ff}]` — sémantique units : un lead couvre
+  l'astral qu'il préfixe) ; classe `[\uD800-\uDFFF]` → union
+  `[\x{f0000}-\x{f07ff}\x{10000}-\x{10ffff}]` ; paires fusionnées
+  et idiom `\uD8hi[\uDClo]` inchangés.
+- `builtins` : `s: &str` → `&JsStr` dans `re_match_exec`/
+  `re_match_all_impl`/`re_replace_impl`/`re_sym_*`/`regexp_exec`/
+  `string_match`/`search`/`split`/`replace`/`matchAll` —
+  `to_js_jstr`/`this_jstr` préservent les units ;
+  `new RegExp('\uD800')` encodé via `make_regexp_jstr`.
+- `has_sentinels` = char `F0000..=F0800` dans le pattern traduit.
+
+**Limites résiduelles du modèle char** (déjà celles du moteur :
+un élément ≈ 1 unit) : un **trail** atom (`/\uDCA5/`) ne peut
+pas matcher la moitié basse d'un astral (non-`u` seul affecté),
+les indices `d`/`lastIndex` comptent en chars, `.source` d'un
+regex construit depuis un `JsStr` à units rend la sentinelle.

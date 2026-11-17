@@ -346,37 +346,44 @@ pub(crate) fn string_split(e: &mut Engine, this: Value, args: &[Value]) -> JsRes
                 if limit == 0 {
                     return Ok(arr_of(e, Vec::new()));
                 }
-                re.split(&s)
+                // Domaine sentinelle si le pattern/le sujet porte
+                // des surrogates — pièces décodées en units.
+                let sjs = this_id
+                    .clone()
+                    .unwrap_or_else(|| JsStr::new(s.clone(), &e.str_acct));
+                let (hay, dec) = re.enc_hay(&sjs);
+                let vals: Vec<Value> = re
+                    .split(&hay)
                     .into_iter()
                     .take(limit)
-                    .map(str::to_string)
-                    .collect()
-            } else {
-                let sep = e.to_js_string(v)?;
-                // Garde §B-59 : `split` matérialise ~160 o par
-                // partie (String + cellule `str_val` + intern)
-                // — `''` sur 20 M unités ≈ 3 Go de cellules
-                // sans tick (signature `rss_guard[commit]`).
-                let worst = s.len().min(limit);
-                e.alloc_guard(worst.saturating_mul(160))?;
-                if sep.is_empty() {
-                    // `split('')` → un item par code unit (spec) ;
-                    // la vue `units` préserve les surrogates
-                    // isolés — `Vec<String>` ne pourrait pas les
-                    // porter, on produit les `Value` directement.
-                    let units = match &this_id {
-                        Some(id) => id.units_view(),
-                        _ => u16_view(e, &s)?,
-                    };
-                    let vals: Vec<Value> = units
-                        .iter()
-                        .take(limit)
-                        .map(|&w| e.str_val_units(vec![w]))
-                        .collect();
-                    return Ok(arr_of(e, vals));
-                }
-                s.split(&sep).take(limit).map(str::to_string).collect()
+                    .map(|p| re_str_val(e, p, dec))
+                    .collect();
+                return Ok(arr_of(e, vals));
             }
+            let sep = e.to_js_string(v)?;
+            // Garde §B-59 : `split` matérialise ~160 o par
+            // partie (String + cellule `str_val` + intern)
+            // — `''` sur 20 M unités ≈ 3 Go de cellules
+            // sans tick (signature `rss_guard[commit]`).
+            let worst = s.len().min(limit);
+            e.alloc_guard(worst.saturating_mul(160))?;
+            if sep.is_empty() {
+                // `split('')` → un item par code unit (spec) ;
+                // la vue `units` préserve les surrogates
+                // isolés — `Vec<String>` ne pourrait pas les
+                // porter, on produit les `Value` directement.
+                let units = match &this_id {
+                    Some(id) => id.units_view(),
+                    _ => u16_view(e, &s)?,
+                };
+                let vals: Vec<Value> = units
+                    .iter()
+                    .take(limit)
+                    .map(|&w| e.str_val_units(vec![w]))
+                    .collect();
+                return Ok(arr_of(e, vals));
+            }
+            s.split(&sep).take(limit).map(str::to_string).collect()
         }
     };
     parts.truncate(limit);
@@ -426,7 +433,10 @@ pub(crate) fn replace_impl(
         return Ok(v);
     }
     if let Some(re) = re_of(e, pat.clone()) {
-        return re_replace_impl(e, &re, &s, rep);
+        let sjs = this_id
+            .clone()
+            .unwrap_or_else(|| JsStr::new(s.clone(), &e.str_acct));
+        return re_replace_impl(e, &re, &sjs, rep);
     }
     // String pattern — first occurrence (or all for replaceAll).
     let pat = e.to_js_jstr(pat)?;
@@ -585,8 +595,8 @@ pub(crate) fn as_regexp(
         };
         return Ok((r, id));
     }
-    let pat = e.to_js_string(v)?;
-    let obj = e.make_regexp(&pat, "")?;
+    let pat = e.to_js_jstr(v)?;
+    let obj = e.make_regexp_jstr(&pat, "")?;
     let Value::Obj(id) = obj else {
         return Err(e.type_error("not a RegExp"));
     };
@@ -687,11 +697,29 @@ pub(crate) fn expand_rep(
 }
 
 /// Apply `matches` against `s` with string-or-function replacement.
+/// Valeur string depuis un texte du domaine regex — quand `dec`
+/// le texte est encodé (`JsRegExp::enc_hay`) et les sentinelles
+/// redeviennent des code units exacts (`re_decode`).
+pub(crate) fn re_str_val(e: &mut Engine, s: &str, dec: bool) -> Value {
+    if dec {
+        e.str_val_units(crate::regexp::re_decode(s))
+    } else {
+        e.str_val(s.to_string())
+    }
+}
+
+/// Splice `replace` : `hay` est le haystack **du domaine regex**
+/// (encodé si `dec`) — les offsets `ExecMatch` s'y appliquent ;
+/// `orig` est la chaîne JS d'origine pour l'argument `string`
+/// d'un remplacement par fonction. Le résultat est décodé quand
+/// `dec` (sentinelles → code units exacts).
 pub(crate) fn splice_matches(
     e: &mut Engine,
-    s: &str,
+    hay: &str,
+    orig: &JsStr,
     matches: &[crate::regexp::ExecMatch],
     rep: Value,
+    dec: bool,
 ) -> JsResult<Value> {
     let use_fn = e.is_callable(rep.clone());
     if std::env::var("DBG_DRIVE").is_ok() {
@@ -699,10 +727,10 @@ pub(crate) fn splice_matches(
             "[splice] matches={} use_fn={} s.len={}",
             matches.len(),
             use_fn,
-            s.len()
+            hay.len()
         );
     }
-    let mut out = String::with_capacity(s.len() + matches.len() * 8);
+    let mut out = String::with_capacity(hay.len() + matches.len() * 8);
     let mut cur = 0usize; // byte offset
     for (mi, m) in matches.iter().enumerate() {
         // §B-59 : borne de croissance de la sortie — une regex à
@@ -717,24 +745,24 @@ pub(crate) fn splice_matches(
                 m.end
             );
         }
-        out.push_str(&s[cur..m.start_b]);
+        out.push_str(&hay[cur..m.start_b]);
         if use_fn {
             // f(match, g1…gn, index, string [, groups])
             let mut call_args = Vec::with_capacity(m.groups.len() + 3);
-            call_args.push(e.str_val(m.text.clone()));
+            call_args.push(re_str_val(e, &m.text, dec));
             for g in &m.groups[1..] {
                 call_args.push(match g {
-                    Some(t) => e.str_val(t.clone()),
+                    Some(t) => re_str_val(e, t, dec),
                     None => Value::Undefined,
                 });
             }
             call_args.push(Value::Num(m.index as f64));
-            call_args.push(e.str_val(s.to_string()));
+            call_args.push(Value::Str(orig.clone()));
             if !m.named.is_empty() {
                 let gobj = e.new_object();
                 for (k, v) in &m.named {
                     let vv = match v {
-                        Some(t) => e.str_val(t.clone()),
+                        Some(t) => re_str_val(e, t, dec),
                         None => Value::Undefined,
                     };
                     e.set_own(gobj, k, vv, true);
@@ -749,29 +777,37 @@ pub(crate) fn splice_matches(
                 rep.clone(),
                 &m.groups,
                 &m.named,
-                &s[..m.start_b],
-                &s[m.end_b..],
+                &hay[..m.start_b],
+                &hay[m.end_b..],
                 &m.text,
             )?);
         }
         cur = m.end_b;
     }
-    out.push_str(&s[cur..]);
-    Ok(e.str_val(out))
+    out.push_str(&hay[cur..]);
+    Ok(if dec {
+        e.str_val_units(crate::regexp::re_decode(&out))
+    } else {
+        e.str_val(out)
+    })
 }
 
 /// `exec`/`test` result array: `[m0, m1…].index/.input/.groups`.
+/// `dec` signale que les textes du match sont dans le domaine
+/// regex encodé (`enc_hay`) — décodés via `re_decode` ; `input`
+/// reste le `JsStr` **d'origine** (spec : chaîne matchée).
 pub(crate) fn match_result(
     e: &mut Engine,
     m: &crate::regexp::ExecMatch,
     re: &crate::regexp::JsRegExp,
-    input: &str,
+    input: &JsStr,
+    dec: bool,
 ) -> Value {
     let elems: Vec<Value> = m
         .groups
         .iter()
         .map(|g| match g {
-            Some(t) => e.str_val(t.clone()),
+            Some(t) => re_str_val(e, t, dec),
             None => Value::Undefined,
         })
         .collect();
@@ -779,15 +815,14 @@ pub(crate) fn match_result(
         return Value::Null;
     };
     e.set_own(arr, "index", Value::Num(m.index as f64), false);
-    let input_v = e.str_val(input.to_string());
-    e.set_own(arr, "input", input_v, false);
+    e.set_own(arr, "input", Value::Str(input.clone()), false);
     let groups_v = if m.named.is_empty() {
         Value::Undefined
     } else {
         let gobj = e.new_object();
         for (k, v) in &m.named {
             let vv = match v {
-                Some(t) => e.str_val(t.clone()),
+                Some(t) => re_str_val(e, t, dec),
                 None => Value::Undefined,
             };
             e.set_own(gobj, k, vv, true);
@@ -834,15 +869,15 @@ pub(crate) fn regexp_ctor(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult
                     Value::Undefined => r.flag_string(),
                     f => e.to_js_string(f)?,
                 };
-                (r.source.clone(), flags)
+                (JsStr::new(r.source.clone(), &e.str_acct), flags)
             } else {
-                let p = e.to_js_string(v)?;
+                let p = e.to_js_jstr(v)?;
                 (p, String::new())
             }
         }
-        Value::Undefined => (String::new(), String::new()),
+        Value::Undefined => (JsStr::new("", &e.str_acct), String::new()),
         v => {
-            let p = e.to_js_string(v)?;
+            let p = e.to_js_jstr(v)?;
             (p, String::new())
         }
     };
@@ -854,7 +889,7 @@ pub(crate) fn regexp_ctor(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult
     } else {
         flags
     };
-    e.make_regexp(&pat, &flags)
+    e.make_regexp_jstr(&pat, &flags)
 }
 
 /// `RegExp.prototype.compile(pattern, flags)` — Annex B.2.4
@@ -876,13 +911,13 @@ pub(crate) fn regexp_compile(e: &mut Engine, this: Value, args: &[Value]) -> JsR
                     Value::Undefined => r.flag_string(),
                     f => e.to_js_string(f)?,
                 };
-                (r.source.clone(), flags)
+                (JsStr::new(r.source.clone(), &e.str_acct), flags)
             } else {
-                (e.to_js_string(v)?, String::new())
+                (e.to_js_jstr(v)?, String::new())
             }
         }
-        Value::Undefined => (String::new(), String::new()),
-        v => (e.to_js_string(v)?, String::new()),
+        Value::Undefined => (JsStr::new("", &e.str_acct), String::new()),
+        v => (e.to_js_jstr(v)?, String::new()),
     };
     let flags = if flags.is_empty() {
         match arg(args, 1) {
@@ -892,7 +927,13 @@ pub(crate) fn regexp_compile(e: &mut Engine, this: Value, args: &[Value]) -> JsR
     } else {
         flags
     };
-    let re = match crate::regexp::JsRegExp::compile(&pat, &flags) {
+    // Pattern à `units` (surrogate isolé) → domaine sentinelle.
+    let src = if pat.has_units() {
+        crate::regexp::re_encode(&pat.units_view())
+    } else {
+        pat.as_str().to_string()
+    };
+    let re = match crate::regexp::JsRegExp::compile(&src, &flags) {
         Ok(r) => r,
         Err(msg) => return Err(e.syntax_error(&msg)),
     };
@@ -905,20 +946,21 @@ pub(crate) fn regexp_compile(e: &mut Engine, this: Value, args: &[Value]) -> JsR
 
 pub(crate) fn regexp_exec(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
     let (re, id) = as_regexp(e, this)?;
-    let s = e.to_js_string(arg(args, 0))?;
+    let s = e.to_js_jstr(arg(args, 0))?;
     let use_last = re.global || re.sticky;
     let last = if use_last { re_last_index(e, id)? } else { 0 };
-    if let Some((m, new_last)) = re.exec_from(&s, last) {
+    let (hay, dec) = re.enc_hay(&s);
+    if let Some((m, new_last)) = re.exec_from(&hay, last) {
         if use_last {
             let _ = e.set_prop(id, "lastIndex", Value::Num(new_last as f64));
         }
-        e.note_re(&s, Some(&m));
-        Ok(match_result(e, &m, &re, &s))
+        e.note_re(&hay, Some(&m));
+        Ok(match_result(e, &m, &re, &s, dec))
     } else {
         if use_last {
             let _ = e.set_prop(id, "lastIndex", Value::Num(0.0));
         }
-        e.note_re(&s, None);
+        e.note_re(&hay, None);
         Ok(Value::Null)
     }
 }
@@ -1030,7 +1072,7 @@ pub(crate) fn re_has_indices_get(e: &mut Engine, this: Value, _a: &[Value]) -> J
 }
 
 pub(crate) fn string_match(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
-    let s = this_str(e, this.clone())?;
+    let s = this_jstr(e, this.clone())?;
     // `rx[Symbol.match](this)` (spec `GetMethod`).
     if let Some(v) = sym_method(e, arg(args, 0), crate::interp::SYM_MATCH, &[this])? {
         return Ok(v);
@@ -1040,13 +1082,14 @@ pub(crate) fn string_match(e: &mut Engine, this: Value, args: &[Value]) -> JsRes
 }
 
 pub(crate) fn string_search(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
-    let s = this_str(e, this.clone())?;
+    let s = this_jstr(e, this.clone())?;
     // `rx[Symbol.search](this)` (spec `GetMethod`).
     if let Some(v) = sym_method(e, arg(args, 0), crate::interp::SYM_SEARCH, &[this])? {
         return Ok(v);
     }
     let (re, _id) = as_regexp(e, arg(args, 0))?;
-    match re.exec(&s, 0) {
+    let (hay, _dec) = re.enc_hay(&s);
+    match re.exec(&hay, 0) {
         Some(m) => Ok(Value::Num(m.index as f64)),
         None => Ok(Value::Num(-1.0)),
     }

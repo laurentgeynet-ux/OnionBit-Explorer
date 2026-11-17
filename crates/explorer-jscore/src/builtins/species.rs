@@ -89,16 +89,20 @@ pub(crate) fn re_match_exec(
     e: &mut Engine,
     re: &std::rc::Rc<crate::regexp::JsRegExp>,
     id: crate::value::ObjId,
-    s: &str,
+    s: &crate::value::JsStr,
 ) -> JsResult<Value> {
+    let (hay, dec) = re.enc_hay(s);
     if re.global {
         // Garde §B-59 : `exec_all` matérialise TOUS les matches
         // en eager — un match par char sur géante chaîne →
         // `len` Vec<Match> + cellules sans tick.
-        e.alloc_guard(s.len().saturating_mul(160))?;
-        let matches = re.exec_all(s, 0);
-        e.note_re(s, matches.last());
-        let texts: Vec<Value> = matches.into_iter().map(|m| e.str_val(m.text)).collect();
+        e.alloc_guard(hay.len().saturating_mul(160))?;
+        let matches = re.exec_all(&hay, 0);
+        e.note_re(&hay, matches.last());
+        let texts: Vec<Value> = matches
+            .into_iter()
+            .map(|m| re_str_val(e, &m.text, dec))
+            .collect();
         let _ = e.set_prop(id, "lastIndex", Value::Num(0.0));
         return Ok(if texts.is_empty() {
             Value::Null
@@ -106,10 +110,10 @@ pub(crate) fn re_match_exec(
             arr_of(e, texts)
         });
     }
-    let m = re.exec(s, 0);
-    e.note_re(s, m.as_ref());
+    let m = re.exec(&hay, 0);
+    e.note_re(&hay, m.as_ref());
     match m {
-        Some(m) => Ok(match_result(e, &m, re, s)),
+        Some(m) => Ok(match_result(e, &m, re, s, dec)),
         None => Ok(Value::Null),
     }
 }
@@ -117,16 +121,17 @@ pub(crate) fn re_match_exec(
 pub(crate) fn re_match_all_impl(
     e: &mut Engine,
     re: &std::rc::Rc<crate::regexp::JsRegExp>,
-    s: &str,
+    s: &crate::value::JsStr,
 ) -> JsResult<Value> {
     if !re.global {
         return Err(e.type_error("matchAll needs a global regex"));
     }
-    e.alloc_guard(s.len().saturating_mul(160))?;
+    let (hay, dec) = re.enc_hay(s);
+    e.alloc_guard(hay.len().saturating_mul(160))?;
     let items: Vec<Value> = re
-        .exec_all(s, 0)
+        .exec_all(&hay, 0)
         .iter()
-        .map(|m| match_result(e, m, re, s))
+        .map(|m| match_result(e, m, re, s, dec))
         .collect();
     Ok(crate::collections::iter_obj(e, items, e.protos.regexp_iter))
 }
@@ -136,7 +141,7 @@ pub(crate) fn re_match_all_impl(
 pub(crate) fn re_replace_impl(
     e: &mut Engine,
     re: &std::rc::Rc<crate::regexp::JsRegExp>,
-    s: &str,
+    s: &crate::value::JsStr,
     rep: Value,
 ) -> JsResult<Value> {
     if std::env::var("DBG_DRIVE").is_ok() {
@@ -147,39 +152,40 @@ pub(crate) fn re_replace_impl(
             s.len()
         );
     }
+    let (hay, dec) = re.enc_hay(s);
     let matches = if re.global {
-        e.alloc_guard(s.len().saturating_mul(160))?;
-        re.exec_all(s, 0)
+        e.alloc_guard(hay.len().saturating_mul(160))?;
+        re.exec_all(&hay, 0)
     } else {
-        re.exec(s, 0).into_iter().collect()
+        re.exec(&hay, 0).into_iter().collect()
     };
     if std::env::var("DBG_DRIVE").is_ok() {
-        eprintln!("[re_replace] matches={} s.len={}", matches.len(), s.len());
+        eprintln!("[re_replace] matches={} s.len={}", matches.len(), hay.len());
     }
-    e.note_re(s, matches.last());
+    e.note_re(&hay, matches.last());
     if matches.is_empty() {
-        return Ok(e.str_val(s.to_string()));
+        return Ok(Value::Str(s.clone()));
     }
-    splice_matches(e, s, &matches, rep)
+    splice_matches(e, &hay, s, &matches, rep, dec)
 }
 
 /// `rx[Symbol.match](str)` — `RegExp.prototype[@@match]` (spec).
 pub(crate) fn re_sym_match(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
-    let s = e.to_js_string(arg(args, 0))?;
+    let s = e.to_js_jstr(arg(args, 0))?;
     let (re, id) = as_regexp(e, this)?;
     re_match_exec(e, &re, id, &s)
 }
 
 /// `rx[Symbol.matchAll](str)` — itérateur de résultats, `g` requis.
 pub(crate) fn re_sym_match_all(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
-    let s = e.to_js_string(arg(args, 0))?;
+    let s = e.to_js_jstr(arg(args, 0))?;
     let (re, _id) = as_regexp(e, this)?;
     re_match_all_impl(e, &re, &s)
 }
 
 /// `rx[Symbol.replace](str, rep)` — global ou première occurrence.
 pub(crate) fn re_sym_replace(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
-    let s = e.to_js_string(arg(args, 0))?;
+    let s = e.to_js_jstr(arg(args, 0))?;
     let rep = arg(args, 1);
     let (re, _id) = as_regexp(e, this)?;
     re_replace_impl(e, &re, &s, rep)
@@ -187,10 +193,11 @@ pub(crate) fn re_sym_replace(e: &mut Engine, this: Value, args: &[Value]) -> JsR
 
 /// `rx[Symbol.search](str)` — indice du premier match, `-1` sinon.
 pub(crate) fn re_sym_search(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
-    let s = e.to_js_string(arg(args, 0))?;
+    let s = e.to_js_jstr(arg(args, 0))?;
     let (re, _id) = as_regexp(e, this)?;
-    let m = re.exec(&s, 0);
-    e.note_re(&s, m.as_ref());
+    let (hay, _dec) = re.enc_hay(&s);
+    let m = re.exec(&hay, 0);
+    e.note_re(&hay, m.as_ref());
     match m {
         Some(m) => Ok(Value::Num(m.index as f64)),
         None => Ok(Value::Num(-1.0)),
@@ -200,7 +207,7 @@ pub(crate) fn re_sym_search(e: &mut Engine, this: Value, args: &[Value]) -> JsRe
 /// `rx[Symbol.split](str, limit)` — captures insérées entre les
 /// morceaux (délègue à `JsRegExp::split`).
 pub(crate) fn re_sym_split(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
-    let s = e.to_js_string(arg(args, 0))?;
+    let s = e.to_js_jstr(arg(args, 0))?;
     let limit = match arg(args, 1) {
         Value::Undefined => usize::MAX,
         v => e.to_number(v)? as usize,
@@ -209,11 +216,12 @@ pub(crate) fn re_sym_split(e: &mut Engine, this: Value, args: &[Value]) -> JsRes
     if limit == 0 {
         return Ok(arr_of(e, Vec::new()));
     }
+    let (hay, dec) = re.enc_hay(&s);
     let vals: Vec<Value> = re
-        .split(&s)
+        .split(&hay)
         .into_iter()
         .take(limit)
-        .map(|p| e.str_val(p))
+        .map(|p| re_str_val(e, p, dec))
         .collect();
     Ok(arr_of(e, vals))
 }

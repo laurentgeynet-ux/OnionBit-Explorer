@@ -5304,6 +5304,22 @@ impl Engine {
     /// Build a `RegExp` object: compiled pattern as `ObjKind::RegExp`
     /// plus the spec'd own props (`source`, flags, `lastIndex`).
     /// Pattern errors throw a catchable `SyntaxError`.
+    /// `new RegExp(pat)` depuis un `JsStr` — un pattern à
+    /// `units` (surrogate isolé) est encodé dans le domaine
+    /// sentinelle avant compilation (`re_encode`) ; sinon
+    /// passthrough.
+    pub(crate) fn make_regexp_jstr(
+        &mut self,
+        pattern: &crate::value::JsStr,
+        flags: &str,
+    ) -> JsResult<Value> {
+        if !pattern.has_units() {
+            return self.make_regexp(pattern.as_str(), flags);
+        }
+        let src = crate::regexp::re_encode(&pattern.units_view());
+        self.make_regexp(&src, flags)
+    }
+
     pub(crate) fn make_regexp(&mut self, pattern: &str, flags: &str) -> JsResult<Value> {
         let re = match crate::regexp::JsRegExp::compile(pattern, flags) {
             Ok(r) => r,

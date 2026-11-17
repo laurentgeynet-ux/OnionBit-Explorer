@@ -136,8 +136,17 @@ pub(crate) fn parse_js_number(s: &str) -> f64 {
     if rest.eq_ignore_ascii_case("infinity") {
         return sign * f64::INFINITY;
     }
-    if let Some(h) = rest.strip_prefix("0x").or_else(|| rest.strip_prefix("0X")) {
-        return u64::from_str_radix(h, 16).map_or(f64::NAN, |v| sign * v as f64);
+    for (p, base) in [
+        ("0x", 16),
+        ("0X", 16),
+        ("0o", 8),
+        ("0O", 8),
+        ("0b", 2),
+        ("0B", 2),
+    ] {
+        if let Some(d) = rest.strip_prefix(p) {
+            return u64::from_str_radix(d, base).map_or(f64::NAN, |v| sign * v as f64);
+        }
     }
     rest.parse::<f64>().map_or(f64::NAN, |v| sign * v)
 }

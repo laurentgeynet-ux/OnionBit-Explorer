@@ -554,7 +554,7 @@ pub(crate) fn string_iterator(e: &mut Engine, this: Value, _a: &[Value]) -> JsRe
 /// `matchAll(re)` — requires the `g` flag (spec `TypeError`); yields
 /// an iterator of match arrays.
 pub(crate) fn string_match_all(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
-    let s = this_str(e, this.clone())?;
+    let s = this_jstr(e, this.clone())?;
     // `rx[Symbol.matchAll](this)` (spec `GetMethod`).
     if let Some(v) = sym_method(e, arg(args, 0), crate::interp::SYM_MATCH_ALL, &[this])? {
         return Ok(v);
@@ -677,7 +677,15 @@ macro_rules! math1 {
 }
 
 math1!(math_trunc, f64::trunc);
-math1!(math_sign, f64::signum);
+// `Math.sign` : spec renvoie x tel quel pour ±0/NaN (signe du
+// zéro préservé) — `f64::signum` rend +1 pour -0, d'où le lambda.
+math1!(math_sign, |x: f64| {
+    if x.is_nan() || x == 0.0 {
+        x
+    } else {
+        x.signum()
+    }
+});
 math1!(math_cbrt, f64::cbrt);
 math1!(math_log2, f64::log2);
 math1!(math_log10, f64::log10);

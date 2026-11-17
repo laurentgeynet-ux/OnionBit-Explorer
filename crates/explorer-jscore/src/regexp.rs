@@ -39,11 +39,86 @@ pub struct JsRegExp {
     pub unicode_sets: bool,
     /// `d` — `exec` results carry `indices` (start/end per group).
     pub has_indices: bool,
+    /// Le pattern compilé contient des chars **sentinelle**
+    /// (`U+F0000..U+F07FF` = surrogate isolé) — le haystack doit
+    /// alors passer par `enc_hay` pour un match unit-exact.
+    pub has_sentinels: bool,
     /// Noms de groupes **synthétiques** `__eN` émis pour le
     /// backend (anonymes renommés quand `\N` cohabite avec des
     /// nommés — JS-C269). Filtrés des résultats `exec` pour ne
     /// pas fuiter dans `match.groups`/`indices.groups`.
     synth: std::collections::BTreeSet<String>,
+}
+
+/// **Domaine sentinelle regex** — même schéma que le lexer : un
+/// surrogate isolé (UTF-16 `D800..DFFF` sans paire) devient le
+/// char `U+F0000 + (u - 0xD800)` ; un vrai char de la zone
+/// `U+F0000..=U+F0800` est préfixé d'un `U+F0800` échappeur.
+/// `fancy-regex` ne peut pas voir de surrogate (UTF-8 valide
+/// seulement) : pattern **et** haystack sont encodés dans ce
+/// domaine quand l'un des deux en porte, ce qui rend le match
+/// exact par code unit (`/\uFFFD/` ne matche plus `\uD800`).
+pub(crate) fn re_encode(units: &[u16]) -> String {
+    let mut out = String::with_capacity(units.len());
+    for d in char::decode_utf16(units.iter().copied()) {
+        match d {
+            Ok(c) => {
+                if (0xF_0000..=0xF_0800).contains(&(c as u32)) {
+                    out.push('\u{F0800}');
+                }
+                out.push(c);
+            }
+            Err(e) => {
+                let v = 0xF_0000 + u32::from(e.unpaired_surrogate()) - 0xD800;
+                out.push(char::from_u32(v).unwrap_or('\u{FFFD}'));
+            }
+        }
+    }
+    out
+}
+
+/// Inverse de `re_encode` — reconstitue les code units UTF-16
+/// exacts d'un texte du domaine sentinelle.
+pub(crate) fn re_decode(s: &str) -> Vec<u16> {
+    let mut units = Vec::with_capacity(s.len());
+    let mut buf = [0u16; 2];
+    let mut esc = false;
+    for c in s.chars() {
+        let v = c as u32;
+        if esc {
+            units.extend_from_slice(c.encode_utf16(&mut buf));
+            esc = false;
+        } else if v == 0xF_0800 {
+            esc = true;
+        } else if (0xF_0000..0xF_0800).contains(&v) {
+            units.push((v - 0xF_0000 + 0xD800) as u16);
+        } else {
+            units.extend_from_slice(c.encode_utf16(&mut buf));
+        }
+    }
+    units
+}
+
+/// Fragment classe **sentinelle** pour le code unit `cp`
+/// (surrogate `D800..DFFF`) : `\x{f00xx}` — matche le surrogate
+/// isolé exact dans le haystack encodé.
+fn sent_frag(cp: u32) -> String {
+    format!("\\x{{{:x}}}", 0xF_0000 + cp - 0xD800)
+}
+
+/// Fragment de plage astrale couverte par les surrogates
+/// **leads** `D800..DBFF` de `[a_lo, a_hi]` (sémantique units
+/// non-`u` : un lead de la plage matche l'astral à sa position).
+/// `None` quand l'intersection est vide.
+fn lead_astral_frag(a_lo: u32, a_hi: u32) -> Option<String> {
+    let lo = a_lo.max(0xD800);
+    let hi = a_hi.min(0xDBFF);
+    if lo > hi {
+        return None;
+    }
+    let base = 0x1_0000 + ((lo - 0xD800) << 10);
+    let top = 0x1_0000 + ((hi - 0xD800) << 10) + 0x3FF;
+    Some(format!("\\x{{{base:x}}}-\\x{{{top:x}}}"))
 }
 
 /// One `exec` result, in *char* units (the engine's strings are
@@ -121,6 +196,12 @@ impl JsRegExp {
         let uni = unicode || unicode_sets;
         let (translated, synth) = translate_pattern(source, uni, ignore_case && !uni)?;
         pat.push_str(&translated);
+        // Domaine sentinelle : le pattern traduit porte des
+        // chars `F0000..=F0800` (surrogates du source ou d'un
+        // JsStr à units via `re_encode`) → haystack encodé.
+        let has_sentinels = pat
+            .chars()
+            .any(|c| (0xF_0000..=0xF_0800).contains(&(c as u32)));
         let re = fancy_regex::RegexBuilder::new(&pat)
             .backtrack_limit(BACKTRACK_LIMIT)
             .delegate_size_limit(DELEGATE_SIZE_LIMIT)
@@ -137,6 +218,7 @@ impl JsRegExp {
             unicode,
             unicode_sets,
             has_indices,
+            has_sentinels,
             synth,
         })
     }
@@ -170,6 +252,23 @@ impl JsRegExp {
             f.push('y');
         }
         f
+    }
+
+    /// Haystack prêt pour le moteur : **encodé** dans le domaine
+    /// sentinelle (`re_encode`) quand le pattern en porte ou que
+    /// le sujet a des `units` — sinon passthrough. Quand le
+    /// second retour est `true`, tout texte issu du match (match,
+    /// groupes, pièces de split, contexte de splice) est dans le
+    /// domaine encodé et se décode via `re_decode`.
+    pub(crate) fn enc_hay<'h>(
+        &self,
+        hay: &'h crate::value::JsStr,
+    ) -> (std::borrow::Cow<'h, str>, bool) {
+        if self.has_sentinels || hay.has_units() {
+            (std::borrow::Cow::Owned(re_encode(&hay.units_view())), true)
+        } else {
+            (std::borrow::Cow::Borrowed(hay.as_str()), false)
+        }
     }
 
     /// First match at or after `start` (char units). With `sticky`,
@@ -439,12 +538,26 @@ fn translate_pattern(
             }
             let (frag, next) = t.escape(&cs, i, src)?;
             if in_class {
-                // Surrogate : nos strings UTF-8 n'en contiennent
-                // jamais — l'atome ne peut matcher → omis (il reste
-                // compté comme borne de range éventuelle).
                 let atom = class_atom_of(&cs, i);
                 if let ClassAtom::Char(cp) = atom {
                     if is_surrogate(cp) {
+                        // Suivi de `-` → borne de range : rien
+                        // n'est émis ici, l'union sentinelle /
+                        // scalaire / astrale sort au site range.
+                        // Sinon, atome = sentinelle du code unit
+                        // (+ astrals du lead, sémantique units
+                        // non-`u`).
+                        let is_bound = cs.get(next) == Some(&'-')
+                            && !matches!(class_atom_of(&cs, next + 1), ClassAtom::End);
+                        if !is_bound {
+                            out.push_str(&sent_frag(cp));
+                            if !unicode {
+                                if let Some(f) = lead_astral_frag(cp, cp) {
+                                    out.push_str(&f);
+                                }
+                            }
+                            class_emitted = true;
+                        }
                         class_prev = Some(atom);
                         class_prev_bound = class_dash;
                         class_dash = false;
@@ -487,17 +600,12 @@ fn translate_pattern(
                 class_prev_bound = class_dash;
                 class_dash = false;
             } else {
-                // Hors classe : un atome surrogate ne peut matcher
-                // — `(?!)` (jamais) plutôt qu'un codepoint invalide
-                // pour le backend.
                 if let ClassAtom::Char(cp) = class_atom_of(&cs, i) {
                     if is_surrogate(cp) {
                         // `\uD8hi[\uDClo-\uDChi]` — idiom emoji des
                         // bundles (`\uD83C[\uDFFB-\uDFFF]` = skin
                         // tone) : surrogate haute + classe de
-                        // basses = plage astrale — sinon le couple
-                        // ne peut jamais matcher (nos strings
-                        // UTF-8 n'ont pas de surrogate isolé).
+                        // basses = plage astrale.
                         if (0xd800..0xdc00).contains(&cp) {
                             if let Some((frag, anext)) = astral_class(&cs, next, cp) {
                                 out.push_str(&frag);
@@ -506,7 +614,20 @@ fn translate_pattern(
                                 continue;
                             }
                         }
-                        out.push_str("(?!)");
+                        // Domaine sentinelle : `\x{f00xx}` matche
+                        // le code unit isolé exact ; non-`u`, un
+                        // lead couvre aussi l'astral qu'il préfixe
+                        // (sa moitié haute est présente à sa
+                        // position — sémantique units).
+                        if !unicode && (0xd800..0xdc00).contains(&cp) {
+                            if let Some(af) = lead_astral_frag(cp, cp) {
+                                out.push_str(&format!("[{}{}]", sent_frag(cp), af));
+                                last_atom = true;
+                                i = next;
+                                continue;
+                            }
+                        }
+                        out.push_str(&sent_frag(cp));
                         last_atom = true;
                         i = next;
                         continue;
@@ -592,38 +713,13 @@ fn translate_pattern(
                         if lo > hi {
                             return Err(format!("empty class range in /{src}/"));
                         }
-                        // Bornes surrogate : jamais présentes dans
-                        // nos strings UTF-8 — la plage est clampée
-                        // (`lo`→`\x{e000}`, `hi`→`\x{d7ff}`) ; une
-                        // plage entièrement surrogate n'émet rien.
-                        // Plage entièrement surrogate
-                        // `[\ud800-\udfff]` = tout atome astral
-                        // en sémantique UTF-16 (les minifieurs
-                        // l'écrivent pour « char > BMP ») → la
-                        // plage astrale UTF-8 équivalente.
-                        if is_surrogate(lo) && is_surrogate(hi) {
-                            out.push_str("\\x{10000}-\\x{10ffff}");
-                            class_emitted = true;
-                            i = if cs[i + 1] == '\\' {
-                                t.escape(&cs, i + 1, src)?.1
-                            } else {
-                                i + 2
-                            };
-                            class_prev = Some(ClassAtom::Char(hi));
-                            class_prev_bound = true;
-                            class_dash = false;
-                            continue;
-                        }
-                        let lo_c = if is_surrogate(lo) { 0xe000 } else { lo };
-                        let hi_c = if is_surrogate(hi) { 0xd7ff } else { hi };
                         // La borne haute est toujours consommée ici
                         // (fold ou non) — l'émission décalée au tour
-                        // suivant empêcherait le clamp.
+                        // suivant empêcherait la sémantique units.
                         let (hfrag, hnext) = if cs[i + 1] == '\\' {
                             // Borne haute = paire surrogates
-                            // fusionnée (`-\ud83d\ude4f`) : même
-                            // fuite que l'atome seul — émettre le
-                            // point astral, pas le `\x{d83d}` brut.
+                            // fusionnée (`-\ud83d\ude4f`) : émettre
+                            // le point astral, pas `\x{d83d}` brut.
                             if hi > 0xFFFF {
                                 if let Some((_cp, pnext)) = surrogate_pair(&cs, i + 1) {
                                     (format!("\\x{{{hi:x}}}"), pnext)
@@ -636,6 +732,8 @@ fn translate_pattern(
                         } else {
                             (cs[i + 1].to_string(), i + 2)
                         };
+                        let lo_c = if is_surrogate(lo) { 0xe000 } else { lo };
+                        let hi_c = if is_surrogate(hi) { 0xd7ff } else { hi };
                         if lo_c <= hi_c {
                             // La borne basse n'a été émise que si
                             // non-surrogate — sinon on l'émet ici
@@ -677,6 +775,29 @@ fn translate_pattern(
                                         }
                                     }
                                 }
+                            }
+                        }
+                        // Domaine sentinelle : les units surrogate
+                        // de `[lo,hi]` matchent aussi les
+                        // sentinelles encodées (surrogate isolé) —
+                        // membre-range supplémentaire de la classe.
+                        let surr_lo = lo.max(0xd800);
+                        let surr_hi = hi.min(0xdfff);
+                        if surr_lo <= surr_hi {
+                            out.push_str(&format!(
+                                "\\x{{{:x}}}-\\x{{{:x}}}",
+                                0xF_0000 + surr_lo - 0xD800,
+                                0xF_0000 + surr_hi - 0xD800
+                            ));
+                            class_emitted = true;
+                        }
+                        // Astrals dont le lead est couvert
+                        // (units non-`u`) — en `u`, l'astral est
+                        // atome indivisible hors plage surrogate.
+                        if !unicode {
+                            if let Some(af) = lead_astral_frag(lo, hi) {
+                                out.push_str(&af);
+                                class_emitted = true;
                             }
                         }
                         class_prev = Some(ClassAtom::Char(hi));
@@ -1789,8 +1910,8 @@ mod tests {
     fn surrogate_pair_atom_outside_class() {
         assert_eq!(tr(r"\uD83D\uDCA5"), "\\x{1f4a5}");
         assert_eq!(tr(r"\uD83C\uDFFB-\uD83C\uDFFF"), "\\x{1f3fb}-\\x{1f3ff}");
-        // Isolé (pas de paire) → `(?!)` inchangé.
-        assert_eq!(tr(r"\uD83Dx"), "(?!)x");
+        // Isolé (pas de paire) → sentinelle + astrals du lead.
+        assert_eq!(tr(r"\uD83Dx"), "[\\x{f003d}\\x{1f400}-\\x{1f7ff}]x");
         let probe = |src: &str, hay: &str| super::JsRegExp::compile(src, "").unwrap().exec(hay, 0);
         assert!(probe(r"\uD83D\uDCA5", "\u{1f4a5}").is_some());
         assert!(probe(r"\uD83C[\uDFFB-\uDFFF]", "\u{1f3fd}").is_some());
@@ -1840,17 +1961,30 @@ mod tests {
         );
     }
 
-    /// Surrogates : jamais présents dans nos strings UTF-8 — atome
-    /// omis/(?!), plages clampées, classe vidée → `(?!)`/`[\s\S]`.
+    /// Surrogates : domaine sentinelle — l'atome isolé est un
+    /// char sentinelle (+ astrals du lead en non-`u`), les plages
+    /// émettent l'union scalaire + sentinelles + astrals leads.
     #[test]
     fn surrogate_bounds_degrade() {
-        // Plage entièrement surrogate = « tout atome astral » en
-        // sémantique UTF-16 (minifieurs) → plage astrale UTF-8.
-        assert_eq!(tr(r"[\uD800-\uDFFF]"), "[\\x{10000}-\\x{10ffff}]");
-        assert_eq!(tr(r"[^\uD800-\uDBFF]"), "[^\\x{10000}-\\x{10ffff}]");
-        assert_eq!(tr(r"[\uD800-\uE000]"), "[\\x{e000}-\\x{e000}]");
-        assert_eq!(tr(r"[a-\uDFFF]"), "[a-\\x{d7ff}]");
-        assert_eq!(tr(r"\uD800"), "(?!)");
+        // Plage entièrement surrogate = sentinelles + « tout
+        // atome astral » en sémantique UTF-16 (minifieurs).
+        assert_eq!(
+            tr(r"[\uD800-\uDFFF]"),
+            "[\\x{f0000}-\\x{f07ff}\\x{10000}-\\x{10ffff}]"
+        );
+        assert_eq!(
+            tr(r"[^\uD800-\uDBFF]"),
+            "[^\\x{f0000}-\\x{f03ff}\\x{10000}-\\x{10ffff}]"
+        );
+        assert_eq!(
+            tr(r"[\uD800-\uE000]"),
+            "[\\x{e000}-\\x{e000}\\x{f0000}-\\x{f07ff}\\x{10000}-\\x{10ffff}]"
+        );
+        assert_eq!(
+            tr(r"[a-\uDFFF]"),
+            "[a-\\x{d7ff}\\x{f0000}-\\x{f07ff}\\x{10000}-\\x{10ffff}]"
+        );
+        assert_eq!(tr(r"\uD800"), "[\\x{f0000}\\x{10000}-\\x{103ff}]");
         // `lo > hi` brut reste une erreur (surrogate > ASCII).
         assert!(translate_pattern(r"[\uD800-z]", false, false).is_err());
         // Le pattern réel du bundle Google compile et ne matche
