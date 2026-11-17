@@ -53,6 +53,14 @@ impl Engine {
     }
 
     pub(crate) fn eval_source(&mut self, src: &str) -> JsResult<Value> {
+        self.eval_source_enc(src, false)
+    }
+
+    /// `eval_source` sur texte **pré-encodé domaine sentinelle**
+    /// (`re_encode` d'un `JsStr` à units — `eval` d'une chaîne à
+    /// surrogates isolés : les units survivent jusqu'aux littéraux
+    /// produits, test262 `literals/regexp` A2).
+    pub(crate) fn eval_source_enc(&mut self, src: &str, encoded: bool) -> JsResult<Value> {
         // `eval` direct : le texte hérite du strict appelant —
         // early errors (`01`, `delete x`) et effets runtime.
         if crate::ctx_probe() {
@@ -73,11 +81,12 @@ impl Engine {
         }
         Self::dump_eval_source(src);
         self.note_eval_src(src)?;
-        let prog = crate::parser::parse_in(
+        let prog = crate::parser::parse_in_enc(
             src,
             self.strict,
             self.nest_limit,
             Some(std::rc::Rc::from(Self::eval_src_tag(src))),
+            encoded,
         )
         .map_err(|err| {
             Thrown(self.error_value(self.protos.syntax_error, "SyntaxError", &err.to_string()))
@@ -163,16 +172,29 @@ impl Engine {
         this: Value,
         src: &str,
     ) -> JsResult<Value> {
+        self.eval_source_in_enc(env, this, src, false)
+    }
+
+    /// `eval_source_in` sur texte pré-encodé domaine sentinelle —
+    /// même cas que [`Self::eval_source_enc`] (direct eval).
+    pub(crate) fn eval_source_in_enc(
+        &mut self,
+        env: &EnvRef,
+        this: Value,
+        src: &str,
+        encoded: bool,
+    ) -> JsResult<Value> {
         if let Some(h) = &self.eval_hook {
             h(src);
         }
         Self::dump_eval_source(src);
         self.note_eval_src(src)?;
-        let prog = crate::parser::parse_in(
+        let prog = crate::parser::parse_in_enc(
             src,
             self.strict,
             self.nest_limit,
             Some(std::rc::Rc::from(Self::eval_src_tag(src))),
+            encoded,
         )
         .map_err(|err| {
             Thrown(self.error_value(self.protos.syntax_error, "SyntaxError", &err.to_string()))

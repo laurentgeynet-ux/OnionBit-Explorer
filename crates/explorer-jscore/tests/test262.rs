@@ -424,7 +424,20 @@ fn baseline_inner() {
     let root = corpus_root();
     let mut files = Vec::new();
     collect_js(&root, &mut files);
-    assert_eq!(files.len(), 1077, "corpus drifted — re-extract");
+    // `EXPLORER_TEST262_ONLY=<sous-chaîne de chemin>` — filtre
+    // diagnostic ciblé (AGENTS.md §3 : la suite complète est
+    // lourde en debug). Le mode filtré saute les assertions de
+    // couverture : le gate reste le run complet non filtré.
+    let only = std::env::var("EXPLORER_TEST262_ONLY").ok();
+    if let Some(needle) = &only {
+        files.retain(|f| {
+            f.to_string_lossy()
+                .replace('\\', "/")
+                .contains(needle.as_str())
+        });
+    } else {
+        assert_eq!(files.len(), 1077, "corpus drifted — re-extract");
+    }
 
     let mut passed = 0usize; // passes-mode réussies
     let mut skipped = 0usize; // fichiers skippés (une fois)
@@ -489,19 +502,21 @@ fn baseline_inner() {
         eprintln!("  {mode:?} {} — {msg}", f.display());
     }
 
-    assert!(
-        skipped <= BASELINE_SKIPPED_MAX,
-        "skipped {skipped} > ratchet {BASELINE_SKIPPED_MAX}"
-    );
-    // BASELINE_PASSED vaut 0 tant que la première mesure n'a
-    // pas été gravée — la comparaison est alors volontairement
-    // tautologique (cliquet non encore armé).
-    #[allow(clippy::absurd_extreme_comparisons)]
-    {
+    if only.is_none() {
         assert!(
-            passed >= BASELINE_PASSED,
-            "coverage regression: {passed} < {BASELINE_PASSED}"
+            skipped <= BASELINE_SKIPPED_MAX,
+            "skipped {skipped} > ratchet {BASELINE_SKIPPED_MAX}"
         );
+        // BASELINE_PASSED vaut 0 tant que la première mesure
+        // n'a pas été gravée — la comparaison est alors
+        // volontairement tautologique (cliquet non encore armé).
+        #[allow(clippy::absurd_extreme_comparisons)]
+        {
+            assert!(
+                passed >= BASELINE_PASSED,
+                "coverage regression: {passed} < {BASELINE_PASSED}"
+            );
+        }
     }
     // Le cliquet `passed >= BASELINE` verrouille ; la liste des
     // échecs reste lisible via `--nocapture`.

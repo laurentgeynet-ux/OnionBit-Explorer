@@ -19,8 +19,18 @@ use super::*;
 pub(crate) fn eval_fn(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
     match arg(args, 0) {
         Value::Str(id) => {
-            let src = id.to_string();
-            e.eval_source(&src)
+            if id.has_units() {
+                // La chaîne porte des surrogates isolés :
+                // `to_string` les effondrerait en U+FFFD —
+                // ré-encodage domaine sentinelle, le lexer les
+                // pousse verbatim jusqu'aux littéraux produits
+                // (test262 `literals/regexp` A2).
+                let src = crate::regexp::re_encode(&id.units_view());
+                e.eval_source_enc(&src, true)
+            } else {
+                let src = id.to_string();
+                e.eval_source(&src)
+            }
         }
         v => Ok(v),
     }

@@ -1025,7 +1025,10 @@ pub(crate) fn regexp_to_string(e: &mut Engine, this: Value, _a: &[Value]) -> JsR
     } else {
         re.escaped_source()
     };
-    Ok(e.str_val(format!("/{src}/{}", re.flag_string())))
+    // `str_val_lit` : `re.source` est en domaine sentinelle —
+    // restitue les units UTF-16 exacts (surrogate isolé
+    // verbatim — test262 `literals/regexp` A2).
+    Ok(e.str_val_lit(&format!("/{src}/{}", re.flag_string())))
 }
 
 // -- Accesseurs `RegExp.prototype` (spec) ---------------------------------
@@ -1040,9 +1043,12 @@ fn re_get(e: &mut Engine, this: Value) -> JsResult<std::rc::Rc<crate::regexp::Js
 }
 
 /// `get source` — `"(?:)"` quand le pattern est vide (spec).
+/// `str_val_lit` décode le domaine sentinelle : `.source` rend
+/// les units exacts du littéral (surrogate isolé verbatim —
+/// `EscapeRegExpPattern` n'y touche pas — test262 A2).
 pub(crate) fn re_source_get(e: &mut Engine, this: Value, _a: &[Value]) -> JsResult<Value> {
     let re = re_get(e, this)?;
-    Ok(e.str_val(if re.source.is_empty() {
+    Ok(e.str_val_lit(&if re.source.is_empty() {
         "(?:)".to_string()
     } else {
         re.escaped_source()

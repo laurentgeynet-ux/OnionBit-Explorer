@@ -207,6 +207,12 @@ pub const PROBES: &[(&str, &str)] = &[
     ("re_surr_matchidx", "'a\\uD800b'.match(/b/).index"),
     ("re_surr_split", "'a\\uD800b'.split(/\\uD800/).join('|')"),
     ("re_brace_astral", "/\\u{1F600}/u.test('😀')"),
+    // `.source`/`toString` rendent les units exacts (surrogate
+    // verbatim — test262 literals/regexp A2 ; le domaine
+    // sentinelle ne doit pas fuiter dans la chaîne exposée).
+    ("re_source_surr", "eval('/nnnn'+String.fromCharCode(0xD800)+'/').source === 'nnnn'+String.fromCharCode(0xD800)"),
+    ("re_tostr_surr", "eval('/'+String.fromCharCode(0xD800)+'/').toString() === '/'+String.fromCharCode(0xD800)+'/'"),
+    ("eval_str_surr", "eval('String.fromCharCode(0xD800)===\"'+String.fromCharCode(0xD800)+'\"')"),
     // --- itérateurs / générateurs ---
     ("iter_forof", "let s='';for(const c of 'ab')s+=c;s"),
     ("iter_break", "let n=0;for(const x of[1,2,3]){if(x===2)break;n+=x}n"),

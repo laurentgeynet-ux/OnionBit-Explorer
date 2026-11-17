@@ -284,13 +284,13 @@ pub struct Token {
 
 /// Lex `src` into a token vector terminated by a `Tok::Eof` token.
 pub fn lex(src: &str) -> Result<Vec<Token>> {
-    lex_in(src, 0)
+    lex_in(src, 0, false)
 }
 
 /// `lex` avec profondeur de substitution héritée (JS-C41) —
 /// les templates `` `${…}` `` ré-entrent le lexer pour leur
 /// contenu : la profondeur se cumule à travers les re-entrées.
-fn lex_in(src: &str, tpl_nest: u32) -> Result<Vec<Token>> {
+fn lex_in(src: &str, tpl_nest: u32, encoded: bool) -> Result<Vec<Token>> {
     Lexer {
         src,
         pos: 0,
@@ -303,8 +303,18 @@ fn lex_in(src: &str, tpl_nest: u32) -> Result<Vec<Token>> {
         clause_parens: Vec::new(),
         brace_kinds: Vec::new(),
         prev: Prev::None,
+        encoded,
     }
     .run()
+}
+
+/// `lex` sur une source **pré-encodée domaine sentinelle**
+/// (`re_encode` d'un `JsStr` à units — chemin `eval` sur chaîne
+/// à surrogate isolé, test262 `literals/regexp` A2) : les chars
+/// raw sont déjà encodés (`F0xxx` = surrogate, `F0800+` =
+/// littéral) — `push_lit` ne doit pas les re-doubler.
+pub(crate) fn lex_encoded(src: &str) -> Result<Vec<Token>> {
+    lex_in(src, 0, true)
 }
 
 /// Plafond d'emboîtement `` `${`${`…`}`}` `` — la descente est
@@ -345,6 +355,12 @@ struct Lexer<'a> {
     brace_kinds: Vec<bool>,
     /// Résumé du token précédent — pilote `(`/`{` ci-dessus.
     prev: Prev,
+    /// Source pré-encodée **domaine sentinelle** (`lex_encoded` —
+    /// `eval` d'un `JsStr` à units) : les chars raw sont déjà
+    /// encodés — `push_raw` les pousse verbatim ; `push_lit` reste
+    /// pour les chars **émis par les escapes** `\uXXXX` (frais,
+    /// doublage requis). [`re_encode`]
+    encoded: bool,
 }
 
 impl Lexer<'_> {
@@ -1078,9 +1094,9 @@ impl Lexer<'_> {
                         self.legacy_octal = true;
                         out.push(d);
                     }
-                    Some(c) => Self::push_lit(&mut out, c),
+                    Some(c) => self.push_raw(&mut out, c),
                 },
-                Some(c) => Self::push_lit(&mut out, c),
+                Some(c) => self.push_raw(&mut out, c),
             }
         }
     }
@@ -1114,10 +1130,11 @@ impl Lexer<'_> {
                     // Ré-entrée du lexer pour le contenu — profon-
                     // deur propagée + segment tas de secours (JS-C41).
                     let nest = self.tpl_nest;
+                    let enc = self.encoded;
                     let toks = stacker::maybe_grow(
                         crate::parser::STACK_RED_ZONE,
                         crate::parser::STACK_GROW,
-                        || lex_in(&src, nest),
+                        || lex_in(&src, nest, enc),
                     )?;
                     parts.push(TplPart::Expr(toks));
                     seg_start_b = self.byte_pos;
@@ -1146,9 +1163,9 @@ impl Lexer<'_> {
                         }
                     }
                     Some(c) if is_line_term(c) => {}
-                    Some(c) => Self::push_lit(&mut cur, c),
+                    Some(c) => self.push_raw(&mut cur, c),
                 },
-                Some(c) => Self::push_lit(&mut cur, c),
+                Some(c) => self.push_raw(&mut cur, c),
             }
         }
     }
@@ -1408,6 +1425,17 @@ impl Lexer<'_> {
             out.push('\u{F0800}');
         }
         out.push(c);
+    }
+
+    /// Char **lu en source** (pas un produit d'escape) : verbatim
+    /// quand `encoded` (l'input porte déjà le domaine sentinelle —
+    /// un `F0xxx` y *est* un surrogate), `push_lit` sinon.
+    fn push_raw(&self, out: &mut String, c: char) {
+        if self.encoded {
+            out.push(c);
+        } else {
+            Self::push_lit(out, c);
+        }
     }
 
     fn punct(&mut self) -> Result<P> {

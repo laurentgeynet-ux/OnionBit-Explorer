@@ -16,7 +16,7 @@ use crate::ast::{
     Stmt, SwitchCase, UnOp, VarDecl,
 };
 use crate::error::{Error, Result};
-use crate::lexer::{lex, Kw, Tok, Token, TplPart, P};
+use crate::lexer::{lex, lex_encoded, Kw, Tok, Token, TplPart, P};
 use std::cell::OnceCell;
 use std::collections::HashSet;
 use std::rc::Rc;
@@ -152,8 +152,27 @@ pub(crate) fn parse_in(
     nest_max: u32,
     src_name: Option<Rc<str>>,
 ) -> Result<Program> {
+    parse_in_enc(src, strict, nest_max, src_name, false)
+}
+
+/// `parse_in` sur source **pré-encodée domaine sentinelle**
+/// (`re_encode` d'un `JsStr` à units — `eval` d'une chaîne
+/// porteuse de surrogates isolés, test262 `literals/regexp`
+/// A2) : le lexer pousse les chars raw verbatim au lieu de
+/// re-échapper la zone sentinelle.
+pub(crate) fn parse_in_enc(
+    src: &str,
+    strict: bool,
+    nest_max: u32,
+    src_name: Option<Rc<str>>,
+    encoded: bool,
+) -> Result<Program> {
     crate::j17_parse_probe(src, false);
-    let toks = crate::j17_time(&crate::J17_LEX_NS, || lex(src))?;
+    let toks = if encoded {
+        crate::j17_time(&crate::J17_LEX_NS, || lex_encoded(src))?
+    } else {
+        crate::j17_time(&crate::J17_LEX_NS, || lex(src))?
+    };
     crate::j17_add(
         &crate::J17_LEX_TOK,
         u64::try_from(toks.len()).unwrap_or(u64::MAX),

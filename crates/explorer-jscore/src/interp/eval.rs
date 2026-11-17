@@ -683,8 +683,16 @@ impl Engine {
                         {
                             return match args.first() {
                                 Some(Value::Str(sid)) => {
-                                    let src = sid.to_string();
-                                    self.eval_source_in(env, this, &src)
+                                    if sid.has_units() {
+                                        // Units exactes (surrogates
+                                        // isolés) → domaine sentinelle,
+                                        // cf. `eval_fn`.
+                                        let src = crate::regexp::re_encode(&sid.units_view());
+                                        self.eval_source_in_enc(env, this, &src, true)
+                                    } else {
+                                        let src = sid.to_string();
+                                        self.eval_source_in(env, this, &src)
+                                    }
                                 }
                                 // Non-string → rendu tel quel (spec).
                                 Some(v) => Ok(v.clone()),
