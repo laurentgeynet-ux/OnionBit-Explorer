@@ -1,6 +1,7 @@
 // This file is part of Explorer.
 // Copyright (C) 2026 Laurent Geynet
 // SPDX-License-Identifier: MIT OR Apache-2.0
+#![forbid(unsafe_code)]
 
 //! Oracle différentiel `jscore ↔ boa` — même script dans les deux
 //! moteurs, issues canonisées puis comparées. Outil de conformité

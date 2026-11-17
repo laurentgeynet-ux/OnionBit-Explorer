@@ -23,10 +23,6 @@ const KNOWN: &[(&str, &str)] = &[
     // corrigé les positions, pas les valeurs).
     ("str_fromcc", "jscore"),
     ("str_lone_surrogate", "jscore"),
-    // `Number(undefined)` → 0 au lieu de NaN (conversion à fixer).
-    ("cvt_num_und", "jscore"),
-    // `(0.5).toFixed(0)` → 0 au lieu de 1 (demi vers le haut).
-    ("num_tofixed", "jscore"),
     // boa 0.22-dev : indexation astrale hors BMP (`'😀'[0] !==
     // '\uD800'` côté boa) — bug boa, jscore est spec-correct.
     ("str_astral_idx", "boa"),

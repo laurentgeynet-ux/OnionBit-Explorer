@@ -69,13 +69,26 @@ pub(crate) fn number_to_fixed(e: &mut Engine, this: Value, args: &[Value]) -> Js
         Value::Undefined => 0usize,
         v => (e.to_number(v)? as i64).clamp(0, 20) as usize,
     };
-    if !n.is_finite() {
+    if !n.is_finite() || n.abs() >= 1e21 {
+        // Spec : infini ou |x| ≥ 10²¹ → `ToString(x)`.
         return Ok(e.str_val(num_to_js_string(n)));
     }
-    // `-0` ne porte pas de signe (spec Number.prototype.toFixed
-    // — Acid3 t84) ; Rust formate `-0.0` avec un `-`.
-    let n = if n == 0.0 { 0.0 } else { n };
-    Ok(e.str_val(format!("{n:.d$}")))
+    // Spec : n = entier au plus près de |x|·10^d, égalité → le
+    // **plus grand** (`floor(v+0.5)`) — `format!("{:.d}")` ferait
+    // du half-even ((0.5).toFixed(0) rendait "0" au lieu de "1").
+    let scaled = n.abs() * 10f64.powi(d as i32);
+    let r = (scaled + 0.5).floor();
+    let mut digits = format!("{r:.0}");
+    if d > 0 {
+        while digits.len() <= d {
+            digits.insert(0, '0');
+        }
+        digits.insert(digits.len() - d, '.');
+    }
+    // Signe `-` iff x < 0 — `-0` lui-même ne porte pas de signe
+    // (spec Number.prototype.toFixed — Acid3 t84).
+    let neg = n.is_sign_negative() && n != 0.0;
+    Ok(e.str_val(format!("{}{}", if neg { "-" } else { "" }, digits)))
 }
 
 pub(crate) fn boolean_to_string(e: &mut Engine, this: Value, _a: &[Value]) -> JsResult<Value> {

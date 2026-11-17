@@ -222,8 +222,8 @@ crypto.subtle étendu, streams async, `DisposableStack`/
 | 9 | Oracle différentiel (BOA-01..04 à recréer) | M | mesure continue | ✅ reconstruit (`explorer-boa-diff`) |
 | 10 | Harness test262 | M | corpus élargi | ✅ reconstruit (sans oracle boa) |
 | 11 | Arités `length` des builtins (toutes 0 vs spec) | M | `fn.length === 1` checks | ouvert |
-| 12 | `Number(undefined)` → 0 au lieu de NaN | XS | conversion | ouvert — trouvé par l'oracle |
-| 13 | `(0.5).toFixed(0)` → 0 au lieu de 1 | XS | demi vers le haut | ouvert — trouvé par l'oracle |
+| 12 | `Number(undefined)` → 0 au lieu de NaN | XS | conversion | ✅ corrigé (arité, pas valeur) |
+| 13 | `(0.5).toFixed(0)` → 0 au lieu de 1 | XS | demi vers le haut | ✅ corrigé (`floor(v+.5)` + `1e21`) |
 
 Items 1–7 soldés : **~600 chemins de gap descripteur fermés**
 (8 commits, `0e7731e`→`552199d`). Item 9 livré ci-dessous ; la
@@ -261,14 +261,13 @@ features par défaut sans `intl`.
 
 ### Mesure de référence (2026-11-17, boa 0.22-dev)
 
-Corpus : **188 concordants / 5 divergences / 0 internal** —
-toutes documentées dans `KNOWN` :
+Corpus : **191 concordants / 3 divergences / 0 internal** —
+toutes documentées dans `KNOWN` (items 12–13 corrigés au
+passage — l'oracle a produit ses deux premiers fixes) :
 
 | Sonde | Fautif | Détail |
 |---|---|---|
 | `str_fromcc`, `str_lone_surrogate` | jscore | lone surrogate → U+FFFD (item 8) |
-| `cvt_num_und` | jscore | `Number(undefined)` → 0 (item 12) |
-| `num_tofixed` | jscore | `(0.5).toFixed(0)` → 0 (item 13) |
 | `str_astral_idx` | boa | `'😀'[0] !== '\uD800'` — bug boa, jscore spec-correct |
 
 Surface : **26 441 chemins jscore / 4 203 boa**, `boa-only`

@@ -122,8 +122,13 @@ pub(crate) fn string_ctor(e: &mut Engine, t: Value, args: &[Value]) -> JsResult<
 }
 
 pub(crate) fn number_ctor(e: &mut Engine, t: Value, args: &[Value]) -> JsResult<Value> {
+    // Spec : `Number()` **sans argument** → `+0`, mais
+    // `Number(undefined)` → `ToNumber(undefined)` = `NaN` — la
+    // distinction passe par l'arité, pas par la valeur de `arg`.
+    if args.is_empty() {
+        return Ok(wrap_or_prim(e, t, e.protos.number, Value::Num(0.0)));
+    }
     match arg(args, 0) {
-        Value::Undefined => Ok(wrap_or_prim(e, t, e.protos.number, Value::Num(0.0))),
         // `Number(1n)` — `ToNumeric` autorise le bigint (troncation
         // `to_f64` documentée pour |b| > 2^53).
         Value::Big(_) => {
