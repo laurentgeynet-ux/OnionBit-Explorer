@@ -1369,8 +1369,14 @@ pub enum ObjKind {
         buffer: Value,
         /// Byte offset within the buffer.
         offset: usize,
-        /// Element count.
+        /// Element count — la longueur **visible** d'une vue
+        /// `auto` se recalcule depuis le buffer (`ta_live_len`),
+        /// `len` n'est alors qu'une borne historique.
         len: usize,
+        /// `true` = vue length-tracking sur buffer resizable
+        /// (`new TA(rab, off)` sans `length`) — la longueur
+        /// visible suit les resize du buffer (JS-C606).
+        auto: bool,
     },
     /// `bigint` primitive cell — digits only (immutables : chaque
     /// op arithmétique alloue une nouvelle cellule). Référencée par
@@ -1590,10 +1596,12 @@ impl TaKind {
             TaKind::I8 => bytes[o] = (crate::value::to_int32(v) as i8) as u8,
             TaKind::U8 => bytes[o] = crate::value::to_uint32(v) as u8,
             TaKind::U8C => {
+                // Spec `SetValueInBuffer` : le clamp utilise
+                // `roundTiesToEven` (0.5→0, 1.5→2, 2.5→2).
                 bytes[o] = if v.is_nan() {
                     0
                 } else {
-                    v.round().clamp(0.0, 255.0) as u8
+                    v.round_ties_even().clamp(0.0, 255.0) as u8
                 };
             }
             TaKind::I16 => {
@@ -1648,9 +1656,9 @@ pub(crate) fn f16_to_f64(h: u16) -> f64 {
     }
 }
 
-/// `f64` → IEEE-754 binary16 — round-to-nearest approximé
-/// (mantisse arrondie via `.round()` — correct sauf égalités
-/// exactes, couverture navigateur suffisante).
+/// `f64` → IEEE-754 binary16 — roundTiesToEven (ECMAScript
+/// `ToFloat16`) : les égalités exactes arrondissent vers la
+/// mantisse paire (`2049` → `2048`, pas `2050`).
 pub(crate) fn f64_to_f16(v: f64) -> u16 {
     if v.is_nan() {
         return 0x7e00;
@@ -1671,16 +1679,19 @@ pub(crate) fn f64_to_f16(v: f64) -> u16 {
     }
     if a < 0.000_061_035_156_25 {
         // Subnormal binary16 : man = a * 2^24 arrondi (0 si < 2^-25).
-        return sign | (a * 16_777_216.0).round() as u16;
+        return sign | (a * 16_777_216.0).round_ties_even() as u16;
     }
     let mut exp = a.log2().floor() as i32;
-    let mut man = ((a / 2f64.powi(exp) - 1.0) * 1024.0).round() as u32;
+    let mut man = ((a / 2f64.powi(exp) - 1.0) * 1024.0).round_ties_even() as u32;
     if man == 1024 {
         man = 0;
         exp += 1;
     }
-    if exp >= 15 {
-        return sign | 0x7c00;
+    if exp > 15 {
+        // `a < 65504` garanti par le bras ci-dessus : un
+        // dépassement d'exposant (mantisse arrondie au-delà de
+        // 65504) sature au max fini, pas à l'infini.
+        return sign | 0x7bff;
     }
     sign | ((exp + 15) as u16) << 10 | (man as u16)
 }

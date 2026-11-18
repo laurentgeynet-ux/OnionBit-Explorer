@@ -63,6 +63,25 @@ pub(crate) fn has_own_property(e: &mut Engine, this: Value, args: &[Value]) -> J
                             .is_some_and(|i| elems.get(i).is_some_and(|v| !v.is_hole()))
                         || o.find(&key).is_some()
                 }
+                // Index canonique d'une vue typée : own ssi index
+                // **vivant** (`-0`/`-1`/`1.5`/`NaN` sont canoniques
+                // mais invalides → `false`) — borne lue sur la
+                // région réelle du buffer (détaché → vidé, RAB
+                // rétréci, spec `IsValidIntegerIndex`, JS-C606) ;
+                // clé non-canonique → prop ordinaire.
+                ObjKind::TypedArray {
+                    ta,
+                    buffer,
+                    offset,
+                    len,
+                    auto,
+                } => match crate::interp::canonical_numeric_index(&key) {
+                    Some(n) => {
+                        crate::interp::ta_live_index(&e.heap, *ta, buffer, *offset, *len, *auto, n)
+                            .is_some()
+                    }
+                    None => o.find(&key).is_some(),
+                },
                 _ => o.find(&key).is_some(),
             },
             None => false,
@@ -423,7 +442,9 @@ pub(crate) fn object_define_property(e: &mut Engine, _t: Value, args: &[Value]) 
     let Value::Obj(desc_id) = arg(args, 2) else {
         return Err(e.type_error("property descriptor must be an object"));
     };
-    define_one_prop(e, id, &key, desc_id)?;
+    if !define_one_prop(e, id, &key, desc_id)? {
+        return Err(e.type_error(format!("cannot define property `{key}`")));
+    }
     Ok(target)
 }
 
@@ -437,7 +458,7 @@ pub(crate) fn define_one_prop(
     id: ObjId,
     key: &str,
     desc_id: ObjId,
-) -> JsResult<()> {
+) -> JsResult<bool> {
     // Sonde kevlar §cran-27 : `polymerController` peut être
     // posé par `Object.defineProperty` (acc `get/set` ou
     // valeur) sans passer `set_prop_value` — la sonde `pc.set`
@@ -579,7 +600,7 @@ fn defprop_err_desc(e: &Engine, id: ObjId, key: &str, t: &crate::heap::Thrown) -
     )
 }
 
-fn define_one_prop_impl(e: &mut Engine, id: ObjId, key: &str, desc_id: ObjId) -> JsResult<()> {
+fn define_one_prop_impl(e: &mut Engine, id: ObjId, key: &str, desc_id: ObjId) -> JsResult<bool> {
     // Délégation bornée — même motif que `object_set_proto` (J2).
     let mut id = id;
     let mut depth = 0;
@@ -599,9 +620,12 @@ fn define_one_prop_impl(e: &mut Engine, id: ObjId, key: &str, desc_id: ObjId) ->
                         "proxy defineProperty: cannot add prop on non-extensible target",
                     ));
                 }
-                Ok(())
+                Ok(true)
             } else {
-                Err(e.type_error(format!("cannot define property `{key}`")))
+                // Trap `defineProperty` → false = refus : `false`
+                // pour `Reflect.defineProperty`, `TypeError` pour
+                // `Object.defineProperty` (traduit par l'appelant).
+                Ok(false)
             };
         }
         id = tid;
@@ -656,6 +680,43 @@ fn define_one_prop_impl(e: &mut Engine, id: ObjId, key: &str, desc_id: ObjId) ->
     {
         return Err(e.type_error("accessor descriptor `get`/`set` must be callable"));
     }
+    // `IntegerIndexedDefineOwnProperty` (JS-C606) — un index
+    // canonique sur une vue typée n'accepte que le descripteur
+    // intrinsèque `{w:true,e:true,c:true}` : accesseur, flag
+    // contraire (`configurable:false`/`enumerable:false`/
+    // `writable:false` demandés) ou index invalide **vivant**
+    // (`-0`, `-1`, `1.5`, `NaN`, hors-bornes, buffer détaché ou
+    // région rétrécie) → refus `false`. `[[Value]]` présent →
+    // écriture d'élément via `set_prop` (coercition
+    // `ToNumber`/`ToBigInt` incluse — abrupts propagés).
+    let ta_v = match e.heap.obj(id).map(|o| &o.kind) {
+        Some(ObjKind::TypedArray {
+            ta,
+            buffer,
+            offset,
+            len,
+            auto,
+        }) => Some((*ta, buffer.clone(), *offset, *len, *auto)),
+        _ => None,
+    };
+    if let Some((ta, buffer, offset, len, auto)) = ta_v {
+        if let Some(n) = crate::interp::canonical_numeric_index(key) {
+            if has_acc
+                || (has_configurable && !configurable)
+                || (has_enumerable && !enumerable)
+                || crate::interp::ta_live_index(&e.heap, ta, &buffer, offset, len, auto, n)
+                    .is_none()
+                || (has_writable && !writable)
+            {
+                return Ok(false);
+            }
+            if has_value {
+                let v = e.get_prop_value(desc.clone(), "value")?;
+                e.set_prop(id, key, v)?;
+            }
+            return Ok(true);
+        }
+    }
     let attrs = crate::heap::PropAttrs {
         writable,
         enumerable,
@@ -698,11 +759,11 @@ fn define_one_prop_impl(e: &mut Engine, id: ObjId, key: &str, desc_id: ObjId) ->
                         (i, l)
                     });
             if has_enumerable && enumerable || has_configurable && configurable {
-                return Err(e.type_error("cannot reconfigure array `length`"));
+                return Ok(false);
             }
             if integ & 4 != 0 {
                 if has_writable && writable {
-                    return Err(e.type_error("cannot reconfigure array `length`"));
+                    return Ok(false);
                 }
                 if has_value {
                     let n = match v {
@@ -710,10 +771,10 @@ fn define_one_prop_impl(e: &mut Engine, id: ObjId, key: &str, desc_id: ObjId) ->
                         _ => return Err(e.range_error("invalid array length")),
                     };
                     if n != len {
-                        return Err(e.type_error("cannot change locked array `length`"));
+                        return Ok(false);
                     }
                 }
-                return Ok(());
+                return Ok(true);
             }
             if has_value {
                 let n = match v {
@@ -721,7 +782,7 @@ fn define_one_prop_impl(e: &mut Engine, id: ObjId, key: &str, desc_id: ObjId) ->
                     _ => return Err(e.range_error("invalid array length")),
                 };
                 if integ & 3 != 0 && n < len {
-                    return Err(e.type_error("cannot shrink a sealed array"));
+                    return Ok(false);
                 }
                 // Garde d'alloc avant densification (JS-C55).
                 if n > len {
@@ -736,7 +797,7 @@ fn define_one_prop_impl(e: &mut Engine, id: ObjId, key: &str, desc_id: ObjId) ->
                     o.elem_integrity |= 4;
                 }
             }
-            return Ok(());
+            return Ok(true);
         }
     }
     if let Some(i) = crate::interp::array_index(key) {
@@ -755,29 +816,29 @@ fn define_one_prop_impl(e: &mut Engine, id: ObjId, key: &str, desc_id: ObjId) ->
                 .unwrap_or_default();
             let _ = cur_v;
             if has_acc {
-                return Err(e.type_error("array index cannot be an accessor"));
+                return Ok(false);
             }
             // Descripteur demandant `configurable:true` sur élément
             // sealé/gelé, `writable:true` sur gelé, ou une autre
             // valeur sur gelé → refus spec.
             if integ & 3 != 0 && has_configurable && configurable {
-                return Err(e.type_error("cannot reconfigure sealed array element"));
+                return Ok(false);
             }
             if integ & 2 != 0 && has_writable && writable {
-                return Err(e.type_error("cannot reconfigure frozen array element"));
+                return Ok(false);
             }
             if integ & 2 != 0 && has_value && !e.strict_eq(&v, &cur_v.unwrap_or(Value::Undefined)) {
-                return Err(e.type_error("cannot redefine frozen array element"));
+                return Ok(false);
             }
             // Hors-bornes → ajout interdit (cible non-extensible
             // sous seal/freeze ; sinon extension normale via set).
             if i >= len && integ & 3 != 0 {
-                return Err(e.type_error("cannot add element to sealed array"));
+                return Ok(false);
             }
             if i < len && has_value {
                 e.set_prop(id, &i.to_string(), v)?;
             }
-            return Ok(());
+            return Ok(true);
         }
     }
     // Descripteur générique (ni `value`/`writable` ni `get`/`set`)
@@ -799,9 +860,9 @@ fn define_one_prop_impl(e: &mut Engine, id: ObjId, key: &str, desc_id: ObjId) ->
         }
     });
     if !ok {
-        return Err(e.type_error(format!("cannot define property `{key}`")));
+        return Ok(false);
     }
-    Ok(())
+    Ok(true)
 }
 
 /// `Object.defineProperties(o, propsMap)` — chaque propre prop
@@ -840,7 +901,9 @@ pub(crate) fn define_props_from_map(e: &mut Engine, id: ObjId, map: Value) -> Js
             crate::defprop_note(format!("defprops #{id} `{k}` desc non-object"));
             return Err(e.type_error(format!("descriptor for `{k}` must be an object")));
         };
-        define_one_prop(e, id, &k, did)?;
+        if !define_one_prop(e, id, &k, did)? {
+            return Err(e.type_error(format!("cannot define property `{k}`")));
+        }
     }
     Ok(())
 }
@@ -993,6 +1056,10 @@ pub(crate) fn object_is_frozen(e: &mut Engine, _t: Value, args: &[Value]) -> JsR
                     .all(|(_, p)| !p.configurable() && !p.writable())
                 && match &o.kind {
                     ObjKind::Array(elems) => elems.is_empty() || o.elem_integrity & 6 == 6,
+                    // Les éléments d'une vue typée restent
+                    // `writable:true` → jamais frozen non vide
+                    // (spec `TestIntegrityLevel`, JS-C606).
+                    ObjKind::TypedArray { len, .. } => *len == 0,
                     _ => true,
                 }
         }),

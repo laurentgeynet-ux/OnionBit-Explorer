@@ -984,6 +984,7 @@ impl Engine {
                         buffer,
                         offset,
                         len,
+                        ..
                     }) => Shape::Tarr(*ta, buffer_bytes(&self.heap, buffer.clone()), *offset, *len),
                     Some(ObjKind::DataView {
                         buffer,

@@ -88,6 +88,7 @@ pub(crate) fn crypto_get_random_values(
             buffer: Value::Obj(bid),
             offset,
             len,
+            ..
         } => Some((*ta, *bid, *offset, *len)),
         _ => None,
     }) else {

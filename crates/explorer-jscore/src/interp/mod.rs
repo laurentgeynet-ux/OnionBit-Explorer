@@ -7654,7 +7654,16 @@ impl Engine {
                         buffer: Value::Obj(bid),
                         offset,
                         len,
-                    }) => (None, Some((*ta, *bid, *offset, *len))),
+                        auto,
+                    }) => (
+                        None,
+                        Some((
+                            *ta,
+                            *bid,
+                            *offset,
+                            ta_live_len(&self.heap, *ta, &Value::Obj(*bid), *offset, *len, *auto),
+                        )),
+                    ),
                     _ => (None, None),
                 };
                 if let Some(len) = arr_len {
@@ -8205,29 +8214,34 @@ impl Engine {
         if let Some(p) = self.ta_prop(&o.kind, key) {
             return Some(p);
         }
-        if let Some(p) = o.find(key) {
-            return Some(p);
-        }
-        // Kinds `BigInt` : la lecture d'un élément alloue un
-        // `Value::Big` — d'où le `&mut` de cette méthode.
-        let big = match &o.kind {
-            ObjKind::TypedArray {
-                ta,
-                buffer,
-                offset,
-                len,
-            } if ta.is_big() => Some((*ta, buffer.clone(), *offset, *len)),
+        // Index canonique d'une vue typée (JS-C606 —
+        // `CanonicalNumericIndexString`) : l'élément — ou
+        // l'absence — se décide ici, **sans** consulter `o.find` :
+        // une clé canonique invalide (`-0`, `-1`, `1.5`, `NaN`,
+        // hors-bornes) n'a ni prop own ni repli ordinaire — spec
+        // `[[GetOwnProperty]]` (`[[Set]]`/`[[DefineOwnProperty]]`
+        // avalent ces clés, jamais de prop homonyme). Kinds big :
+        // la lecture alloue un `Value::Big` — `&mut` de la méthode.
+        let ta_cn = match &o.kind {
+            ObjKind::TypedArray { .. } => canonical_numeric_index(key),
             _ => None,
         };
-        if let (Some((ta, buffer, offset, len)), Some(i)) = (big, ai) {
-            // Cle non-numerique (`name`, `@@toStringTag`...) → tomber
-            // sur la synthese ci-dessous ; cle numerique hors-bornes
-            // → `None` (proto chain).
-            if i >= len {
+        if let Some(n) = ta_cn {
+            let (ta, buffer, offset, len, auto) = (match &o.kind {
+                ObjKind::TypedArray {
+                    ta,
+                    buffer,
+                    offset,
+                    len,
+                    auto,
+                } => Some((*ta, buffer.clone(), *offset, *len, *auto)),
+                _ => None,
+            })?;
+            let i = ta_live_index(&self.heap, ta, &buffer, offset, len, auto, n)?;
+            let Value::Obj(bid) = buffer else {
                 return None;
-            }
-            let Value::Obj(bid) = buffer else { return None };
-            let b = {
+            };
+            let elem = {
                 let Some(ObjKind::ByteBuf(bytes)) = self.heap.obj(bid).map(|b| &b.kind) else {
                     return None;
                 };
@@ -8235,17 +8249,31 @@ impl Engine {
                 // (vue RAB rétrécie, JS-C591) — pas la région
                 // stockée entière : OOB → `None` → undefined.
                 bytes.get(offset..).and_then(|region| {
-                    ((i + 1) * ta.size() <= region.len()).then(|| ta.get_big(region, i))
+                    ((i + 1) * ta.size() <= region.len()).then(|| {
+                        if ta.is_big() {
+                            Err(ta.get_big(region, i))
+                        } else {
+                            Ok(ta.get(region, i))
+                        }
+                    })
                 })
             };
-            return b.map(|b| Prop::Data {
-                value: self.big_val(b),
+            let elem = elem?;
+            let value = match elem {
+                Ok(n) => Value::Num(n),
+                Err(b) => self.big_val(b),
+            };
+            return Some(Prop::Data {
+                value,
                 attrs: crate::heap::PropAttrs {
                     writable: true,
                     enumerable: true,
-                    configurable: false,
+                    configurable: true,
                 },
             });
+        }
+        if let Some(p) = o.find(key) {
+            return Some(p);
         }
         // `fn.name` — `o` est mort ici (dernier use : `big`) :
         // allocs et lectures mutables permises.
@@ -8329,9 +8357,16 @@ impl Engine {
                 buffer,
                 offset,
                 len,
+                auto,
             } => match key {
-                "length" => Some(fixed(Value::Num(*len as f64))),
-                "byteLength" => Some(fixed(Value::Num((*len * ta.size()) as f64))),
+                // `length`/`byteLength` = getters spec lus sur la
+                // longueur **vivante** (RAB auto/fixed, détaché).
+                "length" => Some(fixed(Value::Num(ta_live_len(
+                    &self.heap, *ta, buffer, *offset, *len, *auto,
+                ) as f64))),
+                "byteLength" => Some(fixed(Value::Num(
+                    (ta_live_len(&self.heap, *ta, buffer, *offset, *len, *auto) * ta.size()) as f64,
+                ))),
                 "byteOffset" => Some(fixed(Value::Num(*offset as f64))),
                 "buffer" => Some(fixed(buffer.clone())),
                 _ => {
@@ -8341,7 +8376,9 @@ impl Engine {
                         return None;
                     }
                     let i = array_index(key)?;
-                    if i >= *len {
+                    // Borne **vivante** : vue `auto` suit les
+                    // resize, vue fixed hors-bornes → 0.
+                    if i >= ta_live_len(&self.heap, *ta, buffer, *offset, *len, *auto) {
                         return None;
                     }
                     let Value::Obj(bid) = buffer else { return None };
@@ -8358,7 +8395,7 @@ impl Engine {
                         attrs: PropAttrs {
                             writable: true,
                             enumerable: true,
-                            configurable: false,
+                            configurable: true,
                         },
                     })
                 }
@@ -8476,11 +8513,13 @@ impl Engine {
             let mut slow = true;
             let mut mkey = None;
             let mut nxt = None;
+            let mut ta_link = false;
             if let Some(o) = self.heap.obj(cid) {
                 nxt = match o.proto {
                     Value::Obj(p) => Some(p),
                     _ => None,
                 };
+                ta_link = matches!(o.kind, ObjKind::TypedArray { .. });
                 if Self::ic_eligible(o, key) {
                     let mk = (o.shape(), kid);
                     mkey = Some(mk);
@@ -8503,6 +8542,14 @@ impl Engine {
             };
             if let Some(p) = found {
                 return Some((cid, p));
+            }
+            // JS-C606 — `[[GetOwnProperty]]` exotique d'un lien
+            // `TypedArray` : une clé numérique **canonique** non
+            // résolue (invalide ou hors-bornes) termine la chaîne
+            // — le proto n'est jamais consulté (spec 10.4.5.1 :
+            // `TypedArray.prototype[-1]`/`[OOB]` ne s'hérite pas).
+            if ta_link && canonical_numeric_index(key).is_some() {
+                return None;
             }
             cur = nxt;
             depth += 1;
@@ -9685,6 +9732,78 @@ impl Engine {
         v: Value,
         site: usize,
     ) -> JsResult<()> {
+        self.write_prop_full(id, recv, key, v, site, false)
+            .map(|_| ())
+    }
+
+    /// `[[Set]](P, V, Receiver)` complet rendant le booléen spec
+    /// (`Reflect.set`, JS-C606) : refus → `Ok(false)` — jamais de
+    /// `TypeError` de refus ; les abrupts (trap, setter,
+    /// coercition) restent `Err`. `write_prop_at` y délègue avec
+    /// `bool_ret = false` (refus → `write_refused` : silence
+    /// sloppy, `TypeError` strict).
+    pub(crate) fn set_prop_recv(
+        &mut self,
+        id: ObjId,
+        recv: Value,
+        key: &str,
+        v: Value,
+    ) -> JsResult<bool> {
+        self.write_prop_full(id, recv, key, v, 0, true)
+    }
+
+    /// Refus d'écriture : `Ok(false)` en mode booléen, sinon
+    /// `write_refused` (silence sloppy / `TypeError` strict).
+    fn write_refused_b(&mut self, key: &str, bool_ret: bool) -> JsResult<bool> {
+        if bool_ret {
+            Ok(false)
+        } else {
+            self.write_refused(key).map(|()| false)
+        }
+    }
+
+    /// `CreateDataProperty(receiver, P, V)` / merge
+    /// `{[[Value]]: V}` — spec `OrdinarySetWithOwnDescriptor` :
+    /// la prop va sur le receiver via **son** `[[DefineOwnProperty]]`,
+    /// jamais par un second `[[Set]]` — trap `defineProperty` de
+    /// proxy, index exotique de `TypedArray`/`Array`,
+    /// non-extensibilité s'appliquent à la lettre (JS-C606).
+    /// `Ok(false)` = refus ordinaire (l'appelant tranche
+    /// `Ok(false)` vs `TypeError`) ; abrupts propagés en `Err`.
+    fn create_data_prop_on(&mut self, rid: ObjId, key: &str, v: Value) -> JsResult<bool> {
+        // Own existante sur le receiver (spec
+        // `OrdinarySetWithOwnDescriptor`) : accesseur ou data
+        // non-writable → refus **direct** ; sinon descripteur
+        // `{value}` seul (les attrs courants priment). Absente →
+        // `CreateDataProperty` `{V,W:true,E:true,C:true}`.
+        let fresh = match self.find_own(rid, key) {
+            Some(Prop::Acc { .. }) => return Ok(false),
+            Some(Prop::Data { attrs, .. }) if !attrs.writable => return Ok(false),
+            Some(_) => false,
+            None => true,
+        };
+        let d = self.new_object();
+        self.set_own(d, "value", v, true);
+        if fresh {
+            self.set_own(d, "writable", Value::Bool(true), true);
+            self.set_own(d, "enumerable", Value::Bool(true), true);
+            self.set_own(d, "configurable", Value::Bool(true), true);
+        }
+        crate::builtins::object::define_one_prop(self, rid, key, d)
+    }
+
+    /// Corps de `[[Set]]` partagé entre `write_prop_at`
+    /// (assignations) et `set_prop_recv` (`Reflect.set`) —
+    /// `bool_ret` choisit le sort d'un refus.
+    fn write_prop_full(
+        &mut self,
+        id: ObjId,
+        recv: Value,
+        key: &str,
+        v: Value,
+        site: usize,
+        bool_ret: bool,
+    ) -> JsResult<bool> {
         // Accessors on the chain intercept the write. Le maillon
         // de tête comme les suivants passent par la même boucle
         // bornée — `own` suit le dernier non-proxy (cible réelle
@@ -9709,18 +9828,18 @@ impl Engine {
             match self.ic_hit(site, id, key) {
                 IcOut::Hit(_) | IcOut::Absent => {
                     return if self.set_prop(id, key, v)? {
-                        Ok(())
+                        Ok(true)
                     } else {
-                        self.write_refused(key)
+                        self.write_refused_b(key, bool_ret)
                     };
                 }
                 // JS-C531 — setter prouvé sur la chaîne :
                 // invocation directe du callee frais.
                 IcOut::HitAcc(Prop::Acc { set, .. }) => {
                     return if self.is_callable(set.clone()) {
-                        self.call_value(set, recv, &[v]).map(|_| ())
+                        self.call_value(set, recv, &[v]).map(|_| true)
                     } else {
-                        self.write_refused(key)
+                        self.write_refused_b(key, bool_ret)
                     };
                 }
                 IcOut::Bail => {}
@@ -9770,11 +9889,14 @@ impl Engine {
             // atteint la trap, spec `OrdinarySet` : chaque
             // maillon applique son propre `[[Set]]`).
             if let Some((tid, target, handler)) = self.proxy_th(cid)? {
-                if self
-                    .proxy_set_step(tid, target, handler, recv.clone(), key, v.clone())?
-                    .is_some()
+                if let Some(ok) =
+                    self.proxy_set_step(tid, target, handler, recv.clone(), key, v.clone())?
                 {
-                    return Ok(());
+                    return if ok {
+                        Ok(true)
+                    } else {
+                        self.write_refused_b(key, bool_ret)
+                    };
                 }
                 cur = Some(tid);
                 own = tid;
@@ -9788,6 +9910,39 @@ impl Engine {
                 }
                 complete = false; // maillons mixtes proxy — pas de learn
                 continue;
+            }
+            // JS-C606 — `[[Set]]` exotique du lien `TypedArray`
+            // (spec 10.4.5.5) : les clés **canoniques** se
+            // tranchent ici, jamais sur le maillon suivant.
+            // `SameValue(lien, receiver)` → `ElementSet` —
+            // coercition de la valeur avant borne via `set_prop`
+            // (index invalide avalé après conversion). Receiver
+            // distinct + canonique **invalide** → succès muet :
+            // aucune coercition, aucun setter
+            // `%TypedArray%.prototype` n'est atteignable.
+            // Canonique **valide** + receiver distinct →
+            // `OrdinarySet` : ownDesc = élément (data writable)
+            // — `find_own_ai` ci-dessous le rend tel quel.
+            let ta_v = match self.heap.obj(cid).map(|o| &o.kind) {
+                Some(ObjKind::TypedArray {
+                    ta,
+                    buffer,
+                    offset,
+                    len,
+                    auto,
+                }) => Some((*ta, buffer.clone(), *offset, *len, *auto)),
+                _ => None,
+            };
+            if let Some((ta, buffer, offset, len, auto)) = ta_v {
+                if let Some(n) = canonical_numeric_index(key) {
+                    if matches!(&recv, Value::Obj(r) if *r == cid) {
+                        self.set_prop(cid, key, v)?;
+                        return Ok(true);
+                    }
+                    if ta_live_index(&self.heap, ta, &buffer, offset, len, auto, n).is_none() {
+                        return Ok(true);
+                    }
+                }
             }
             if armed {
                 links.push(cid);
@@ -9843,15 +9998,15 @@ impl Engine {
                     }
                     if self.is_callable(set.clone()) {
                         self.call_value(set, recv, &[v])?;
-                        return Ok(());
+                        return Ok(true);
                     }
                     // Accessor sans setter → écriture refusée.
-                    return self.write_refused(key);
+                    return self.write_refused_b(key, bool_ret);
                 }
                 // Data prop non-writable *héritée* → l'écriture est
                 // refusée (pas de shadowing possible, spec [[Set]]).
                 Some(Prop::Data { attrs, .. }) if cid != own && !attrs.writable => {
-                    return self.write_refused(key);
+                    return self.write_refused_b(key, bool_ret);
                 }
                 Some(_) => {
                     found = true;
@@ -9869,10 +10024,37 @@ impl Engine {
         if armed && complete {
             self.ic_learn(site, key, &links, found, false);
         }
-        if self.set_prop(own, key, v)? {
-            Ok(())
+        // `OrdinarySet` écrit sur le *receiver*, pas sur `own`
+        // (spec) — même objet pour toute assignation ordinaire,
+        // distinct via `Reflect.set(cible, k, v, receiver)`
+        // (JS-C606). Receiver non-objet → `CreateDataProperty`
+        // impossible → refus.
+        let wid = match &recv {
+            Value::Obj(rid) => *rid,
+            _ => return self.write_refused_b(key, bool_ret),
+        };
+        if wid == own {
+            // Receiver = objet marché : écriture own ordinaire
+            // (gardes `args_map`/`Array`/vues de `set_prop_walk`).
+            if self.set_prop(wid, key, v)? {
+                Ok(true)
+            } else {
+                self.write_refused_b(key, bool_ret)
+            }
         } else {
-            self.write_refused(key)
+            // Receiver distinct (Reflect.set, délégation proxy) :
+            // la prop va sur le receiver via **son**
+            // `[[DefineOwnProperty]]` — `CreateDataProperty`, ou
+            // merge `{value}` si own déjà présente — jamais par
+            // un second `[[Set]]` : trap `defineProperty`,
+            // `IntegerIndexedDefineOwnProperty` d'un receiver
+            // `TypedArray` (OOB → refus), `length` d'un `Array`
+            // s'appliquent (spec `OrdinarySetWithOwnDescriptor`).
+            if self.create_data_prop_on(wid, key, v)? {
+                Ok(true)
+            } else {
+                self.write_refused_b(key, bool_ret)
+            }
         }
     }
 
@@ -9880,10 +10062,10 @@ impl Engine {
     /// `set` (`receiver` = `recv`) puis vérifie les invariants
     /// spec — data non-config non-writable → seule la *même*
     /// valeur rapporte succès ; accesseur non-config sans
-    /// setter → jamais de succès. Retourne `Some(())` quand le
-    /// sort est tranché (trap appliquée ou refus enregistré
-    /// via `write_refused`), `None` sans trap — l'appelant
-    /// poursuit alors sur la cible `tid`.
+    /// setter → jamais de succès. Retourne `Some(ok)` quand le
+    /// sort est tranché (`false` = la trap a refusé — le caller
+    /// décide `write_refused` vs booléen, JS-C606), `None` sans
+    /// trap — l'appelant poursuit alors sur la cible `tid`.
     fn proxy_set_step(
         &mut self,
         tid: ObjId,
@@ -9892,7 +10074,7 @@ impl Engine {
         recv: Value,
         key: &str,
         v: Value,
-    ) -> JsResult<Option<()>> {
+    ) -> JsResult<Option<bool>> {
         let trap = self.proxy_trap(handler.clone(), "set")?;
         if !matches!(trap, Value::Obj(_)) {
             return Ok(None);
@@ -9900,7 +10082,7 @@ impl Engine {
         let kv = self.prop_trap_key(key);
         let ok = self.call_value(trap, handler, &[target, kv, v.clone(), recv])?;
         if !self.to_boolean(ok) {
-            return self.write_refused(key).map(Some);
+            return Ok(Some(false));
         }
         match self.find_own(tid, key) {
             Some(Prop::Data { value, attrs })
@@ -9917,7 +10099,7 @@ impl Engine {
             }
             _ => {}
         }
-        Ok(Some(()))
+        Ok(Some(true))
     }
 
     /// Écriture refusée (`[[Set]]` → `false`) — `TypeError` en
@@ -10347,16 +10529,35 @@ impl Engine {
         let mut depth = 0;
         loop {
             if let Some((tid, target, handler)) = self.proxy_th(cur)? {
-                if self
-                    .proxy_set_step(tid, target, handler, recv.clone(), key, v.clone())?
-                    .is_some()
+                if let Some(ok) =
+                    self.proxy_set_step(tid, target, handler, recv.clone(), key, v.clone())?
                 {
-                    return Ok(true);
+                    return Ok(ok);
                 }
                 // Sans trap `set`, la cible poursuit la marche
                 // (ses props propres puis sa chaîne).
                 cur = tid;
             } else {
+                // JS-C606 — lien `TypedArray` : [[Set]] exotique
+                // tranche les clés canoniques — invalide → succès
+                // avalé ; valide → `OrdinarySet` → receiver
+                // primitif → `CreateDataProperty` impossible →
+                // refus. Le proto n'est jamais consulté.
+                if let Some(ObjKind::TypedArray {
+                    ta,
+                    buffer,
+                    offset,
+                    len,
+                    auto,
+                }) = self.heap.obj(cur).map(|o| &o.kind)
+                {
+                    if let Some(n) = canonical_numeric_index(key) {
+                        return Ok(
+                            ta_live_index(&self.heap, *ta, buffer, *offset, *len, *auto, n)
+                                .is_none(),
+                        );
+                    }
+                }
                 match self.find_own_ai(cur, key) {
                     Some(Prop::Acc { set, .. }) => {
                         if self.is_callable(set.clone()) {
@@ -10432,34 +10633,41 @@ impl Engine {
             }
         }
         // Élément indexé d'une vue typée : la cible est le *buffer*
-        // partagé, pas la vue ; hors-bornes canonique → ignoré
-        // (spec `IntegerIndexedElementSet` retourne `true`).
-        // Kinds big : `ToBigInt` — écrire un Number dans un
-        // `BigInt64Array` lève `TypeError` (spec), d'où le
-        // `JsResult` (les conversions échouées doivent pouvoir
-        // se propager même sloppy).
+        // partagé, pas la vue. `CanonicalNumericIndexString` —
+        // non-canonique → prop ordinaire (route générique) ;
+        // canonique → `TypedArraySetElement` : la valeur est
+        // **convertie avant** le test de borne, puis avalée si
+        // l'index est invalide (`-0`, `-1`, `1.5`, `NaN`, OOB) —
+        // `ta[-1] = {valueOf(){throw}}` propage l'erreur sans
+        // écrire (spec 10.4.5.5, JS-C606). Kinds big : `ToBigInt`
+        // — écrire un Number dans un `BigInt64Array` lève
+        // `TypeError` (spec), d'où le `JsResult` (les conversions
+        // échouées doivent pouvoir se propager même sloppy).
         let ta_t = match self.heap.obj(id).map(|o| &o.kind) {
             Some(ObjKind::TypedArray {
                 ta,
                 buffer,
                 offset,
                 len,
-            }) => ai.map(|i| (*ta, buffer.clone(), *offset, i, i < *len)),
+                auto,
+            }) => {
+                canonical_numeric_index(key).map(|n| (*ta, buffer.clone(), *offset, n, *len, *auto))
+            }
             _ => None,
         };
-        if let Some((ta, Value::Obj(bid), off, i, in_range)) = ta_t {
-            if !in_range {
-                return Ok(true);
-            }
+        if let Some((ta, Value::Obj(bid), off, n, len, auto)) = ta_t {
             if ta.is_big() {
                 let b = self.to_bigint(v)?;
-                if let Some(bo) = self.heap.obj_mut(bid) {
-                    if let ObjKind::ByteBuf(bytes) = &mut bo.kind {
-                        // Bornes **vivantes** (RAB rétréci, JS-C591)
-                        // — hors limites : ignoré, pas panic.
-                        if let Some(region) = bytes.get_mut(off..) {
-                            if (i + 1) * ta.size() <= region.len() {
-                                ta.set_big(region, i, &b);
+                if let Some(i) = ta_live_index(&self.heap, ta, &Value::Obj(bid), off, len, auto, n)
+                {
+                    if let Some(bo) = self.heap.obj_mut(bid) {
+                        if let ObjKind::ByteBuf(bytes) = &mut bo.kind {
+                            // Bornes **vivantes** (RAB rétréci, JS-C591)
+                            // — hors limites : ignoré, pas panic.
+                            if let Some(region) = bytes.get_mut(off..) {
+                                if (i + 1) * ta.size() <= region.len() {
+                                    ta.set_big(region, i, &b);
+                                }
                             }
                         }
                     }
@@ -10468,12 +10676,14 @@ impl Engine {
             }
             // `ToNumber` propage — `u8[0] = 1n` lève `TypeError`
             // (spec `SetValueInBuffer`), comme un `valueOf` qui lève.
-            let n = self.to_number(v)?;
-            if let Some(b) = self.heap.obj_mut(bid) {
-                if let ObjKind::ByteBuf(bytes) = &mut b.kind {
-                    if let Some(region) = bytes.get_mut(off..) {
-                        if (i + 1) * ta.size() <= region.len() {
-                            ta.set(region, i, n);
+            let num = self.to_number(v)?;
+            if let Some(i) = ta_live_index(&self.heap, ta, &Value::Obj(bid), off, len, auto, n) {
+                if let Some(b) = self.heap.obj_mut(bid) {
+                    if let ObjKind::ByteBuf(bytes) = &mut b.kind {
+                        if let Some(region) = bytes.get_mut(off..) {
+                            if (i + 1) * ta.size() <= region.len() {
+                                ta.set(region, i, num);
+                            }
                         }
                     }
                 }
@@ -10740,11 +10950,13 @@ impl Engine {
             let mut slow = true;
             let mut mkey = None;
             let mut nxt = None;
+            let mut ta_link = false;
             if let Some(o) = self.heap.obj(cid) {
                 nxt = match &o.proto {
                     Value::Obj(p) => Some(*p),
                     _ => None,
                 };
+                ta_link = matches!(o.kind, ObjKind::TypedArray { .. });
                 if Self::ic_eligible(o, key) {
                     let k = *kid.get_or_insert_with(|| {
                         let ki = crate::intern(key);
@@ -10766,6 +10978,13 @@ impl Engine {
                     self.rabs_learn(mk);
                 }
             }
+            // JS-C606 — `[[HasProperty]]` exotique : clé canonique
+            // non résolue sur le lien TA → `false`, le proto n'est
+            // jamais consulté (`TA.prototype[-1]`/`[OOB]` posé
+            // sciemment n'apparaît pas, spec 10.4.5.2).
+            if ta_link && canonical_numeric_index(key).is_some() {
+                return Ok(false);
+            }
             cur = nxt;
             pdepth += 1;
             if pdepth > MAX_PROTO_DEPTH {
@@ -10777,10 +10996,20 @@ impl Engine {
 
     pub(crate) fn delete_prop(&mut self, id: ObjId, key: &str) -> bool {
         // Élément de vue typée — non configurable dans la plage
-        // (spec : `delete ta[i]` → `false`, hors-bornes → `true`).
-        if let Some(ObjKind::TypedArray { len, .. }) = self.heap.obj(id).map(|o| &o.kind) {
-            if let Some(i) = array_index(key) {
-                return i >= *len;
+        // (spec [[Delete]] : index **vivant** → `false`, index
+        // canonique invalide — `-0`, `-1`, `1.5`, OOB, buffer
+        // détaché ou région rétrécie — → `true` ; non-canonique
+        // → `OrdinaryDelete`, JS-C606).
+        if let Some(ObjKind::TypedArray {
+            ta,
+            buffer,
+            offset,
+            len,
+            auto,
+        }) = self.heap.obj(id).map(|o| &o.kind)
+        {
+            if let Some(n) = canonical_numeric_index(key) {
+                return ta_live_index(&self.heap, *ta, buffer, *offset, *len, *auto, n).is_none();
             }
         }
         // Hôte « vue live » (`dataset`, storage…) — le crochet
@@ -10887,8 +11116,17 @@ impl Engine {
                         }
                     }
                 }
-                ObjKind::TypedArray { len, .. } => {
-                    for i in 0..*len {
+                ObjKind::TypedArray {
+                    ta,
+                    buffer,
+                    offset,
+                    len,
+                    auto,
+                } => {
+                    // Clés propres = index **visibles** (spec
+                    // `OwnPropertyKeys` — RAB live, JS-C606).
+                    let live = ta_live_len(&self.heap, *ta, buffer, *offset, *len, *auto);
+                    for i in 0..live {
                         out.push(i.to_string());
                     }
                 }
@@ -10914,8 +11152,15 @@ impl Engine {
                         }
                     }
                 }
-                ObjKind::TypedArray { len, .. } => {
-                    for i in 0..*len {
+                ObjKind::TypedArray {
+                    ta,
+                    buffer,
+                    offset,
+                    len,
+                    auto,
+                } => {
+                    let live = ta_live_len(&self.heap, *ta, buffer, *offset, *len, *auto);
+                    for i in 0..live {
                         out.push(i.to_string());
                     }
                 }

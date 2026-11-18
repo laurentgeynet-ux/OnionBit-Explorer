@@ -200,8 +200,16 @@ pub(crate) fn reflect_set(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult
         return Err(e.type_error("Reflect.set on non-object"));
     };
     let k = e.prop_key(arg(args, 1))?;
-    e.set_prop_value(Value::Obj(id), &k, arg(args, 2))?;
-    Ok(Value::Bool(true))
+    // `[[Set]](P, V, Receiver)` — le 3e arg est le receiver
+    // (OrdinarySet écrit sur lui, pas sur `t`) ; le booléen
+    // rendu est le résultat du `[[Set]]` — refus → `false`,
+    // jamais de `TypeError` (JS-C606).
+    let recv = if args.len() >= 4 {
+        arg(args, 3)
+    } else {
+        arg(args, 0)
+    };
+    Ok(Value::Bool(e.set_prop_recv(id, recv, &k, arg(args, 2))?))
 }
 
 pub(crate) fn reflect_has(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
@@ -290,7 +298,10 @@ pub(crate) fn reflect_define_property(
     let Value::Obj(desc) = arg(args, 2) else {
         return Err(e.type_error("Reflect.defineProperty: descriptor is not an object"));
     };
-    Ok(Value::Bool(define_one_prop(e, id, &k, desc).is_ok()))
+    // `Ok(false)` = refus `[[DefineOwnProperty]]` → `false` ;
+    // `Err` = abrupt (trap, getter, coercition) → propagé (spec —
+    // l'ancien `.is_ok()` les avalait tous en `false`, JS-C606).
+    Ok(Value::Bool(define_one_prop(e, id, &k, desc)?))
 }
 
 /// `Reflect.deleteProperty(t, k)` — `false` si la prop refuse,

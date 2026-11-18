@@ -239,6 +239,12 @@ fn modes(m: &Meta) -> &'static [Mode] {
     }
 }
 
+/// Shim `$262` — l'objet hôte test262 : seul
+/// `detachArrayBuffer` est requis par le sous-ensemble courant
+/// (`internals/*detached*`) ; `transfer(0)` détache le buffer
+/// in-place dans le modèle du moteur (`detached` + bytes vidés).
+const D262_SHIM: &str = "var $262 = { detachArrayBuffer: function(b) { b.transfer(0); } };\n";
+
 /// Shim `$DONE` (les tests `flags: async`) — le `doneprintHandle`
 /// officiel dépend d'un `print` hôte ; la sentinelle porte
 /// `globalThis.__t262_done` relue après `run_microtasks`.
@@ -256,6 +262,7 @@ fn build_source(m: &Meta, body: &str, mode: Mode) -> Option<String> {
         src.push_str("\"use strict\";\n");
     }
     if !m.flags.iter().any(|f| f == "raw") {
+        src.push_str(D262_SHIM);
         src.push_str(&harness_src("sta.js")?);
         src.push('\n');
         src.push_str(&harness_src("assert.js")?);

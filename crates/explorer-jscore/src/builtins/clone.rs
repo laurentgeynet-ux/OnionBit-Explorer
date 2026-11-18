@@ -77,6 +77,7 @@ pub(crate) fn clone_deep(
             buffer: Value::Obj(bid),
             offset,
             len,
+            ..
         }) => CloneShape::Ta(*ta, *bid, *offset, *len),
         Some(ObjKind::RegExp(re)) => CloneShape::Re(re.source.clone(), re.flag_string()),
         Some(ObjKind::Fun(_)) => CloneShape::Err("function"),

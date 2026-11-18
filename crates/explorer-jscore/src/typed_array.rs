@@ -42,7 +42,15 @@ fn ta_view(e: &mut Engine, this: Value) -> JsResult<(TaKind, ObjId, usize, usize
             buffer: Value::Obj(bid),
             offset,
             len,
-        }) => Ok((*ta, *bid, *offset, *len)),
+            auto,
+        }) => Ok((
+            *ta,
+            *bid,
+            *offset,
+            // Longueur **vivante** — vues `auto` sur RAB et
+            // vues fixed hors-bornes (spec `TypedArrayLength`).
+            crate::interp::ta_live_len(&e.heap, *ta, &Value::Obj(*bid), *offset, *len, *auto),
+        )),
         _ => Err(e.type_error("not a typed array")),
     }
 }
@@ -145,6 +153,19 @@ fn is_detached(e: &Engine, id: ObjId) -> bool {
 /// New typed view `ta` over `bid` (`offset` bytes, `len` éléments),
 /// proto = le proto du ctor correspondant.
 pub(crate) fn new_ta(e: &mut Engine, ta: TaKind, bid: ObjId, offset: usize, len: usize) -> Value {
+    new_ta_auto(e, ta, bid, offset, len, false)
+}
+
+/// [`new_ta`] + drapeau length-tracking (`auto`) — vues sur
+/// buffer resizable construites sans `length` (JS-C606).
+pub(crate) fn new_ta_auto(
+    e: &mut Engine,
+    ta: TaKind,
+    bid: ObjId,
+    offset: usize,
+    len: usize,
+    auto: bool,
+) -> Value {
     let proto = match e.get_prop(e.global, ta.name()).and_then(|c| match c {
         Value::Obj(cid) => e.get_prop(cid, "prototype"),
         _ => None,
@@ -162,6 +183,7 @@ pub(crate) fn new_ta(e: &mut Engine, ta: TaKind, bid: ObjId, offset: usize, len:
             buffer: Value::Obj(bid),
             offset,
             len,
+            auto,
         },
         extensible: true,
         elem_integrity: 0,
@@ -228,7 +250,14 @@ pub(crate) fn bytes_of_value(e: &Engine, v: Value) -> Option<Vec<u8>> {
             buffer: Value::Obj(bid),
             offset,
             len,
-        } => buf_region(e, *bid, *offset, *len * ta.size()),
+            auto,
+        } => buf_region(
+            e,
+            *bid,
+            *offset,
+            crate::interp::ta_live_len(&e.heap, *ta, &Value::Obj(*bid), *offset, *len, *auto)
+                * ta.size(),
+        ),
         _ => None,
     }
 }
@@ -368,7 +397,13 @@ pub(crate) fn src_vals(e: &mut Engine, src: Value) -> JsResult<Vec<Value>> {
                 buffer: Value::Obj(bid),
                 offset,
                 len,
-            }) => Some((*ta, *bid, *offset, *len)),
+                auto,
+            }) => Some((
+                *ta,
+                *bid,
+                *offset,
+                crate::interp::ta_live_len(&e.heap, *ta, &Value::Obj(*bid), *offset, *len, *auto),
+            )),
             _ => None,
         };
         if let Some((ta, bid, off, len)) = view {
@@ -735,6 +770,22 @@ pub(crate) fn install(e: &mut Engine) {
         e.set_const(proto, "BYTES_PER_ELEMENT", Value::Num(ta.size() as f64));
         let ctor = e.bound_native(ta.name(), ta_ctor, vec![Value::Num(ta.index() as f64)]);
         let cid = c_id(ctor.clone());
+        // `bound_native` nomme « bound X » — le nom spec du
+        // constructeur est `ta.name()` (`Float16Array` n'a pas
+        // de `name.js` au pin test262 : la table `NAMES`
+        // post-install ne le corrige pas, d'où le poser ici,
+        // attrs spec `{w:false,e:false,c:true}`).
+        let ctor_name = e.str_val(ta.name());
+        e.set_own_attrs(
+            cid,
+            "name",
+            ctor_name,
+            crate::heap::PropAttrs {
+                writable: false,
+                enumerable: false,
+                configurable: true,
+            },
+        );
         // `Ctor.[[Prototype]] = %TypedArray%` (spec) — hérite les
         // génériques ; les props propres bound ci-dessous masquent.
         if let Some(o) = e.heap.obj_mut(cid) {
@@ -1269,19 +1320,24 @@ fn ta_ctor(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
             if off % size != 0 || off > blen {
                 return Err(e.range_error("byteOffset out of bounds"));
             }
-            let len = if matches!(arg(args, 3), Value::Undefined) {
-                if (blen - off) % size != 0 {
+            // Buffer resizable → `length` omise = vue
+            // length-tracking (`auto`), sans exigence de
+            // multiple (spec `InitializeTypedArrayFromArrayBuffer`
+            // — le suivi tronque à l'entier inférieur).
+            let rab = matches!(e.get_prop(id, "resizable"), Some(Value::Bool(true)));
+            let (len, auto) = if matches!(arg(args, 3), Value::Undefined) {
+                if !rab && (blen - off) % size != 0 {
                     return Err(e.range_error("buffer length not a multiple of element size"));
                 }
-                (blen - off) / size
+                ((blen - off) / size, rab)
             } else {
                 let n = to_index(e, arg(args, 3))?;
                 if off + n * size > blen {
                     return Err(e.range_error("typed array length out of bounds"));
                 }
-                n
+                (n, false)
             };
-            Ok(new_ta(e, ta, id, off, len))
+            Ok(new_ta_auto(e, ta, id, off, len, auto))
         }
         // `new TA(src)` — iterable / array-like / autre view.
         Value::Obj(_) => {
@@ -1383,6 +1439,9 @@ fn ta_subarray(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
             buffer: Value::Obj(bid),
             offset: off + s * ta.size(),
             len: en - s,
+            // `subarray`/`slice` = vue fixed (spec — la portion
+            // capturée ne suit pas les resize, JS-C606).
+            auto: false,
         },
         extensible: true,
         elem_integrity: 0,

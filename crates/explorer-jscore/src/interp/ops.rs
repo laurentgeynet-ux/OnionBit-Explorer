@@ -166,6 +166,78 @@ pub(crate) fn array_index(key: &str) -> Option<usize> {
     key.parse::<usize>().ok()
 }
 
+/// Spec `CanonicalNumericIndexString` (JS-C606) : `key` est la
+/// forme canonique de sa valeur numérique — `ToString(ToNumber(P))
+/// == P` — `"-0"` étant canonique (index −0, jamais valide).
+/// `Some` pour `"0"`, `"1.5"`, `"NaN"`, `"Infinity"`, `"-1"` ;
+/// `None` pour `"01"`, `"+1"`, `" 1"`, `"1e1"`, `"0x10"` — ces
+/// clés relèvent des props ordinaires d'une vue typée.
+#[track_caller]
+pub(crate) fn canonical_numeric_index(key: &str) -> Option<f64> {
+    crate::j17_arridx_probe(std::panic::Location::caller());
+    // Gate premier octet : la forme canonique d'un nombre ne peut
+    // commencer que par chiffre | '-' | '+' | '.' | 'I' | 'N'.
+    let b = *key.as_bytes().first()?;
+    if !(b.is_ascii_digit() || matches!(b, b'-' | b'+' | b'.' | b'I' | b'N')) {
+        return None;
+    }
+    if key == "-0" {
+        return Some(-0.0);
+    }
+    let n = parse_js_number(key);
+    if crate::value::num_to_js_string(n) == key {
+        Some(n)
+    } else {
+        None
+    }
+}
+
+/// `TypedArrayLength` spec (JS-C606) — nombre d'éléments
+/// **visibles** d'une vue, recalculé sur la longueur courante
+/// du buffer : vue `auto` → `(bufLen − offset)/size` ; vue
+/// fixed → `len`, sauf si la région déclarée déborde le buffer
+/// (rétréci ou détaché) → vue hors-bornes → `0`.
+pub(crate) fn ta_live_len(
+    heap: &Heap,
+    ta: crate::heap::TaKind,
+    buffer: &Value,
+    offset: usize,
+    len: usize,
+    auto: bool,
+) -> usize {
+    let Value::Obj(bid) = buffer else { return 0 };
+    let Some(ObjKind::ByteBuf(bytes)) = heap.obj(*bid).map(|b| &b.kind) else {
+        return 0;
+    };
+    let avail = bytes.len().saturating_sub(offset);
+    if auto {
+        avail / ta.size()
+    } else if len.saturating_mul(ta.size()) <= avail {
+        len
+    } else {
+        0
+    }
+}
+
+/// `IsValidIntegerIndex` **vivant** (spec — buffer détaché ou
+/// RAB rétréci rend l'index invalide même s'il reste `< len`) :
+/// entier canonique ≥ +0 strictement sous [`ta_live_len`].
+pub(crate) fn ta_live_index(
+    heap: &Heap,
+    ta: crate::heap::TaKind,
+    buffer: &Value,
+    offset: usize,
+    len: usize,
+    auto: bool,
+    n: f64,
+) -> Option<usize> {
+    if n.fract() != 0.0 || n.is_sign_negative() {
+        return None;
+    }
+    let i = n as usize;
+    (i < ta_live_len(heap, ta, buffer, offset, len, auto)).then_some(i)
+}
+
 /// Convert an lhs expression to a [`Pat`] for destructuring
 /// assignments (`[a] = x`, `({p: q} = o)`). `None` when the
 /// expression isn't a valid pattern — the caller falls back to a

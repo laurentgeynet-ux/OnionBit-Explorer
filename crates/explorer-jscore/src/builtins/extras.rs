@@ -26,6 +26,25 @@ pub(crate) fn has_own(e: &Engine, id: ObjId, key: &str) -> bool {
                     || crate::interp::array_index(key).is_some_and(|i| i < elems.len())
                     || o.find(key).is_some()
             }
+            // Index canonique d'une vue typée : own ssi index
+            // **vivant** — la borne se mesure sur la région
+            // réelle du buffer (détaché → vidé, RAB rétréci →
+            // indices invalides, spec `IsValidIntegerIndex`,
+            // JS-C606). Les clés non-canoniques relèvent des
+            // props ordinaires.
+            ObjKind::TypedArray {
+                ta,
+                buffer,
+                offset,
+                len,
+                auto,
+            } => match crate::interp::canonical_numeric_index(key) {
+                Some(n) => {
+                    crate::interp::ta_live_index(&e.heap, *ta, buffer, *offset, *len, *auto, n)
+                        .is_some()
+                }
+                None => o.find(key).is_some(),
+            },
             _ => o.find(key).is_some(),
         },
         None => false,

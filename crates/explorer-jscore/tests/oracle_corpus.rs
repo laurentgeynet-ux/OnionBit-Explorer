@@ -865,4 +865,12 @@ pub const PROBES: &[(&str, &str)] = &[
     ("c605_names", "Array.prototype.push.name+'|'+Iterator.prototype[Symbol.iterator].name+'|'+Array.prototype[Symbol.iterator].name"),
     ("c605_accessors", "var g=Object.getOwnPropertyDescriptor(Map.prototype,'size').get;g.length+'|'+g.name"),
     ("c605_gen_proto", "(function*(){})().next.length+'|'+[].keys().next.length+'|'+Array.prototype.push.bind(null,1,2).length+'|'+parseInt.bind(null).name"),
+    // --- JS-C606 : index canoniques des TypedArrays ---
+    ("c606_has_in", "var t=new Uint8Array(2);Object.hasOwn(t,'0')+'|'+Object.hasOwn(t,'-0')+'|'+('1' in t)+'|'+('5' in t)+'|'+t.hasOwnProperty('1.0')"),
+    ("c606_set_swallow", "var t=new Uint8Array(2);t['-0']=7;t['-1']=8;t['1.5']=9;t[0]+'|'+t['-0']+'|'+Object.hasOwn(t,'-1')"),
+    ("c606_noncanon", "var t=new Uint8Array(2);t['01']=5;t['1.0']=6;Object.hasOwn(t,'01')+'|'+t['01']+'|'+t['1.0']"),
+    ("c606_define", "var t=new Uint8Array(2);try{Object.defineProperty(t,'9',{value:1})}catch(e){'T'};Object.defineProperty(t,'0',{value:5});t[0]+'|'+Reflect.defineProperty(t,'1',{value:6})+'|'+t[1]"),
+    ("c606_reflect_set", "var t=new Uint8Array(2);var r={};Reflect.set(t,'0',9,r)+'|'+t[0]+'|'+r[0]+'|'+Reflect.set(t,'-1',5)+'|'+delete t[0]"),
+    ("c606_desc", "var t=new Uint8Array(2);var d=Object.getOwnPropertyDescriptor(t,'0');d.writable+'|'+d.enumerable+'|'+d.configurable+'|'+Object.getOwnPropertyNames(t).join(',')"),
+    ("c606_big", "var t=new BigInt64Array(1);t[0]=5n;t['-1']=9n;t[0]+'|'+Object.hasOwn(t,'-1')+'|'+Object.hasOwn(t,'0')"),
 ];

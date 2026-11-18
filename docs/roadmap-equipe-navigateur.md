@@ -14742,6 +14742,29 @@ chaque gain rapporté contre les **deux** archétypes.
   ×510, noms des natives ×~80 (métadonnées builtins,
   chantier propre), priorités/Temporal divers.
 
+- [x] **JS-C606 — internal methods des objets
+  Integer-Indexed : `CanonicalNumericIndexString`,
+  `Reflect.set` receiver-aware, `[[DefineOwnProperty]]`
+  spec, vues RAB length-tracking — filtre `internals`
+  test262 : 178 → 444/456 (+266, échecs −95 %)**
+  (`interp/{mod,ops}.rs` + `heap.rs` + `typed_array.rs`
+  + `builtins/{object,extras}.rs`). `canonical_numeric_index`
+  (`-0`/`NaN`/`Infinity` canoniques-invalides, `01`/`1.0`
+  ordinaires) + `ta_live_len`/`ta_live_index` =
+  `TypedArrayLength`/`IsValidIntegerIndex` vivants (champ
+  `auto` length-tracking sur les vues RAB) partagés par
+  tous les chemins indexés. `[[Set]]` coercition avant
+  borne, receiver distinct → `CreateDataProperty` via son
+  `[[DefineOwnProperty]]` (traps proxy, non-extensible,
+  accesseurs honorés) ; `[[DefineOwnProperty]]` rend
+  `Ok(false)` vs abrupt (`defineProperty`→`TypeError`,
+  `Reflect.defineProperty`→`false`). Conversions `Float16`/
+  `Uint8Clamped` → `roundTiesToEven`. Gate `typed_index.rs`
+  **12/12** + 7 sondes (golden **750**). Lib 54/54, dom
+  277/277, ratchet vert. **Reste** : `$262.createRealm`
+  (4 modes), clusters `Construct`/`setPrototypeOf` hors
+  scope.
+
 - [x] **JS-C605 — métadonnées `name`/`length` des builtins :
   table `arities.rs` régénérée depuis test262 (602 arités +
   614 noms + 49 accesseurs) — +586 passes-mode combinés sur
