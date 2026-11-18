@@ -111,6 +111,45 @@ fn restore_ctx_sur_throw() {
     );
 }
 
+/// JS-C610 — `GetFunctionRealm` : les natives exécutent dans
+/// leur realm de création (champ `realm` capturé à `install`),
+/// `Bound`/`Proxy` descendent, le repli proto de
+/// `OrdinaryCreateFromConstructor` lit les intrinsèques du
+/// realm de `newTarget`.
+#[test]
+fn get_function_realm() {
+    // `new otherRealm.Function()` minte la fn dans SON realm —
+    // proto `otherRealm`'s `%Function.prototype%`, corps compilé
+    // sous l'env `otherRealm`.
+    assert_eq!(
+        ev("var r=$262.createRealm();var F=r.evalScript('Function');var f=new F('return 40+2');(f instanceof F)+'|'+(f()===42)+'|'+(f instanceof Function)"),
+        "Str(\"true|true|false\")"
+    );
+    // `%ThrowTypeError%` distinct par realm (spec intrinsèque).
+    assert_eq!(
+        ev("var r=$262.createRealm();var t1=Object.getOwnPropertyDescriptor(Function.prototype,'caller').get;var t2=r.evalScript('Object.getOwnPropertyDescriptor(Function.prototype,\"caller\").get');t1===t2"),
+        "Bool(false)"
+    );
+    // Native ctor d'un autre realm : l'objet minté porte les
+    // intrinsèques du realm du ctor, pas de l'appelant.
+    assert_eq!(
+        ev("var r=$262.createRealm();var OA=r.evalScript('Array');var a=new OA();(a instanceof OA)+'|'+(a instanceof Array)"),
+        "Str(\"true|false\")"
+    );
+    // `Reflect.construct` avec `newTarget` cross-realm : proto
+    // lu sur `newTarget` (realm distant).
+    assert_eq!(
+        ev("var r=$262.createRealm();var OA=r.evalScript('Array');var o=Reflect.construct(Array,[],OA);(o instanceof OA)+'|'+(o instanceof Array)"),
+        "Str(\"true|false\")"
+    );
+    // Erreur mintée par une native realm-distante : intrinsèque
+    // étranger → `instanceof` local faux.
+    assert_eq!(
+        ev("var r=$262.createRealm();var OT=r.evalScript('TypeError');var e;try{new OT('x')}catch(x){e=x};e instanceof TypeError"),
+        "Bool(false)"
+    );
+}
+
 /// `destroy()` : `evalScript` ultérieur refuse `TypeError`,
 /// `global` du realm mort reste un objet (même heap, GC).
 #[test]

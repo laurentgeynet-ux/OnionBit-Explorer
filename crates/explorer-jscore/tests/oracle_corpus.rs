@@ -889,4 +889,6 @@ pub const PROBES: &[(&str, &str)] = &[
     ("c609_dispose", "var p=Object.getPrototypeOf(Object.getPrototypeOf([][Symbol.iterator]()));var it=Object.create(p);var n=0;it.return=function(){n++};it[Symbol.dispose]()+'|'+n"),
     ("c609_fp_desc", "var d=Object.getOwnPropertyDescriptor(Function.prototype,'caller');d.enumerable+'|'+d.configurable+'|'+delete Function.prototype.caller"),
     ("c609_ctor", "var out=[];[Array.prototype.map,()=>{},function*(){},{m(){}}.m].forEach(function(f){try{new f();out.push('ok')}catch(e){out.push('T')}});out.join(',')+'|'+(()=>{try{Reflect.construct(function(){},[],Array.prototype.map);return 'ok'}catch(e){return 'T'}})()+'|'+(()=>{try{return new Map() instanceof Map}catch(e){return 'T'}})()"),
+    ("c610_fn_realm", "var r=$262.createRealm();var F=r.evalScript('Function');var f=new F('return 1');(f instanceof F)+'|'+(f instanceof Function)+'|'+(Object.getOwnPropertyDescriptor(Function.prototype,'caller').get===r.evalScript('Object.getOwnPropertyDescriptor(Function.prototype,\"caller\").get'))"),
+    ("c610_ctor_realm", "var r=$262.createRealm();var OA=r.evalScript('Array');var a=new OA();var b=Reflect.construct(Array,[],OA);(a instanceof OA)+'|'+(a instanceof Array)+'|'+(b instanceof OA)+'|'+(b instanceof Array)"),
 ];

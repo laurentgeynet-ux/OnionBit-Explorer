@@ -14912,3 +14912,35 @@ chaque gain rapporté contre les **deux** archétypes.
   rejet async, ctor-realm AsyncDisposableStack), noms des fns
   d'adoption thenable étranger ×8 (déviation `promise_then`
   sur non-Promise documentée).
+
+- [x] **JS-C610 — `GetFunctionRealm` : `[[Realm]]` sur les
+  natives + `fn_realm` (Bound/Proxy) + proto fallback du
+  realm de `newTarget` — filtre `realm` 104 → 153/356,
+  `distinct-cross-realm` soldé** (`heap.rs` + `interp/mod.rs`
+  + `interp/lazy.rs` + `tests/t262_realm.rs`). `Fun::Native`
+  et `Fun::BoundNative` portent `realm: CtxId` capturé à la
+  création (`native_fn`/`bound_native` → `cur_ctx` ; le
+  `%Function.prototype%` noop = ctx 0 ; `bound_resume` await).
+  **`context_spawn` avance `cur_ctx = id` avant `install`** —
+  sinon les natives du nouveau realm se créaient avec le realm
+  parent (`restore_ctx_sur_throw` le détectait). `call_native_ctx`
+  : le realm stocké est la cible de switch (uniforme — spec
+  `OrdinaryCreateFromConstructor` n'a pas de tri par native),
+  repli historique `this`-global si `realm == cur_ctx`.
+  `fn_realm` bornée (16) : Native/BoundNative → champ, Script
+  → `ctx_of_env`, Bound/Proxy → cible, proxy révoqué → `None`.
+  `construct_nt` : repli `GetPrototypeFromConstructor` =
+  `%Object.prototype%` du realm de `newTarget` (`realm_object_proto`
+  lit `parked` sans swap) ; et si la native-ctor minte son objet
+  avec son intrinsèque propre (`Reflect.construct(main, [],
+  otherCtor)`), le proto résultant est réécrit à `nt.prototype`
+  — seulement quand le proto retourné = `.prototype` du callee.
+  Gate `t262_realm` **9/9** (+`get_function_realm` ×5 sondes).
+  Sondes oracle `c610_fn_realm`/`c610_ctor_realm` (golden **766**).
+  Lib 54/54, dom 277/277, c609 9/9, c463 3/3, c78 21/21,
+  baseline 11/11, clippy/fmt propres. **Reste** : minting
+  par-ctor (TA/`WeakMap`/`WeakRef` allouent leur proto hors
+  `nt.prototype` — ~56 fichiers `proto-from-ctor-realm`),
+  brand-check privés cross-realm, protos des fns eval'd
+  (`eval-body-proto-realm`), fallback `%Ctor.prototype%` par
+  type au-delà d'`Object.prototype`.

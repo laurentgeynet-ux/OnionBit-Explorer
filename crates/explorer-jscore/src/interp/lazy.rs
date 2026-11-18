@@ -2317,6 +2317,7 @@ fn bound_resume(e: &mut Engine, gen: Value, outer: Option<ObjId>, ok: bool) -> V
             name: "async_resume",
             f,
             bound,
+            realm: e.cur_ctx,
         }),
         extensible: true,
         elem_integrity: 0,

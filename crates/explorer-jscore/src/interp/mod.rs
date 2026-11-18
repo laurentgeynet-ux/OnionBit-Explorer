@@ -1601,6 +1601,7 @@ impl Engine {
             Fun::Native {
                 name: "",
                 f: Self::function_proto_noop,
+                realm: 0,
             },
             Value::Obj(object),
         ));
@@ -2211,6 +2212,12 @@ impl Engine {
         // prototypes — `frame.Array !== parent.Array`).
         let mut fresh = crate::context::BrowsingContext::blank(&mut self.heap);
         self.swap_ctx_fields(&mut fresh);
+        // JS-C610 — `cur_ctx` bascule AVANT les installs :
+        // `native_fn`/`bound_native` capturent `cur_ctx` en
+        // `[[Realm]]` — les natives du nouveau realm doivent
+        // y appartenir (sinon `GetFunctionRealm` renvoie le
+        // parent et les intrinsics mintés sont les siens).
+        self.cur_ctx = id;
         // II.4-ter (vol 648) — capacité média plateforme-globale :
         // le realm enfant hérite la table `declared_codecs` du
         // parent au spawn — sinon `isTypeSupported`/`canPlayType`
@@ -2240,7 +2247,6 @@ impl Engine {
             self.delete_prop(g, "self");
         }
         self.parked.insert(parent, fresh);
-        self.cur_ctx = id;
         self.ctxs[id as usize].global = Some(self.global);
         if !windowed {
             return id;
@@ -3340,6 +3346,48 @@ impl Engine {
     /// aux `global_env` des contextes vivants. Une fonction
     /// définie dans un contexte appelée depuis un autre est
     /// ainsi exécutée dans SON realm (spec).
+    /// Spec `GetFunctionRealm` — `[[Realm]]` de la fonction :
+    /// champ `realm` des natives (`native_fn`/`bound_native`
+    /// capturent `cur_ctx` à la création), `ctx_of_env` pour
+    /// les scripts, descente bornée à travers `Bound` et
+    /// `Proxy` (`[[ProxyTarget]]`). `None` = pas un realm
+    /// (non-fonction, proxy révoqué, chaîne > 16 — hostile).
+    pub(crate) fn fn_realm(&self, v: &Value) -> Option<crate::context::CtxId> {
+        let mut cur = v.clone();
+        for _ in 0..16 {
+            let Value::Obj(id) = cur.clone() else {
+                return None;
+            };
+            let o = self.heap.obj(id)?;
+            match &o.kind {
+                ObjKind::Fun(Fun::Native { realm, .. } | Fun::BoundNative { realm, .. }) => {
+                    return Some(*realm)
+                }
+                ObjKind::Fun(Fun::Script { env, .. }) => return self.ctx_of_env(env),
+                ObjKind::Fun(Fun::Bound { target, .. })
+                | ObjKind::Proxy {
+                    target,
+                    handler: Some(_),
+                } => cur = target.clone(),
+                _ => return None,
+            }
+        }
+        None
+    }
+
+    /// `%Object.prototype%` du realm `r` — intrinsèque lu
+    /// dans `parked` quand `r` n'est pas le ctx courant
+    /// (spec `GetFunctionRealm(nt).[[Intrinsics]]`, JS-C610).
+    pub(crate) fn realm_object_proto(&self, r: crate::context::CtxId) -> ObjId {
+        if r == self.cur_ctx {
+            self.protos.object
+        } else {
+            self.parked
+                .get(&r)
+                .map_or(self.protos.object, |c| c.protos.object)
+        }
+    }
+
     pub(crate) fn ctx_of_env(&self, env: &EnvRef) -> Option<crate::context::CtxId> {
         let mut cur = env.clone();
         let root = loop {
@@ -4981,9 +5029,10 @@ impl Engine {
     /// New native function value.
     pub(crate) fn native_fn(&mut self, name: &'static str, f: crate::heap::NativeFn) -> Value {
         let proto = Value::Obj(self.protos.function);
+        let realm = self.cur_ctx;
         let id = self
             .heap
-            .alloc_obj(Object::fun(Fun::Native { name, f }, proto));
+            .alloc_obj(Object::fun(Fun::Native { name, f, realm }, proto));
         // `fn.length` — `Fun::Native` ne porte pas d'arité
         // déclarée : 0 en own prop (les builtins dont la spec
         // fixe une arité la posent eux-mêmes après — prop own
@@ -5030,9 +5079,16 @@ impl Engine {
         bound: Vec<Value>,
     ) -> Value {
         let proto = Value::Obj(self.protos.function);
-        let id = self
-            .heap
-            .alloc_obj(Object::fun(Fun::BoundNative { name, f, bound }, proto));
+        let realm = self.cur_ctx;
+        let id = self.heap.alloc_obj(Object::fun(
+            Fun::BoundNative {
+                name,
+                f,
+                bound,
+                realm,
+            },
+            proto,
+        ));
         // Spec BoundFunctionCreate : `name` = "bound "+cible,
         // `length` = max(0, cible.length − args liés) — la cible
         // est toujours native (length 0) → 0.
@@ -12232,18 +12288,23 @@ impl Engine {
             None => return Err(self.type_error("value is not a function")),
         };
         match fun {
-            Fun::Native { name, f } => {
+            Fun::Native { name, f, realm } => {
                 crate::j17_tick(&crate::J17_CALL_NAT);
                 self.nat_trace_tick(name);
-                self.call_native_ctx(name, f, this, args_ref)
+                self.call_native_ctx(name, f, realm, this, args_ref)
             }
-            Fun::BoundNative { name, f, bound } => {
+            Fun::BoundNative {
+                name,
+                f,
+                bound,
+                realm,
+            } => {
                 crate::j17_tick(&crate::J17_CALL_NAT);
                 self.nat_trace_tick(name);
                 let mut a = Vec::with_capacity(bound.len() + args_ref.len());
                 a.extend_from_slice(&bound);
                 a.extend_from_slice(args_ref);
-                self.call_native_ctx(name, f, this, &a)
+                self.call_native_ctx(name, f, realm, this, &a)
             }
             Fun::Bound { .. } => {
                 // Déroulé par la boucle ci-dessus — repli
@@ -12322,6 +12383,7 @@ impl Engine {
         &mut self,
         name: &'static str,
         f: crate::heap::NativeFn,
+        realm: crate::context::CtxId,
         this: Value,
         args: &[Value],
     ) -> JsResult<Value> {
@@ -12381,10 +12443,17 @@ impl Engine {
                     n = n, name = name, argc = args.len(), from = %from);
             }
         }
-        let target = match this {
-            Value::Obj(id) => self.ctx_of_objid(id),
-            _ => None,
-        };
+        // JS-C610 — `GetFunctionRealm` : la native s'exécute dans
+        // SON realm stocké à la création (uniforme — `realm.Array.of`,
+        // `new otherRealm.Function()` mintent dans l'autre ctx).
+        // Repli historique conservé quand `realm == cur_ctx` :
+        // `this` = global d'un autre ctx (JS-C78 `frame.eval`).
+        let target = (realm != self.cur_ctx)
+            .then_some(realm)
+            .or_else(|| match this {
+                Value::Obj(id) => self.ctx_of_objid(id),
+                _ => None,
+            });
         let Some(t) = target else {
             return self.call_native(name, f, this, args);
         };
@@ -12963,11 +13032,19 @@ impl Engine {
                 _ => Value::Undefined,
             };
         }
-        let proto = match proto {
-            p @ Value::Obj(_) => p,
-            _ => Value::Obj(self.protos.object),
+        let proto = if let p @ Value::Obj(_) = proto {
+            p
+        } else {
+            // Spec `GetPrototypeFromConstructor` : le repli
+            // est l'intrinsèque du realm de `newTarget`, pas
+            // du ctx appelant (`Reflect.construct(f, [],
+            // otherCtor)` — JS-C610).
+            let p = self
+                .fn_realm(&nt)
+                .map_or(self.protos.object, |r| self.realm_object_proto(r));
+            Value::Obj(p)
         };
-        let obj = Value::Obj(self.heap.alloc_obj(Object::ordinary(proto)));
+        let obj = Value::Obj(self.heap.alloc_obj(Object::ordinary(proto.clone())));
         // Champs d'instance d'une classe de base : installés à
         // l'entrée du corps (spec `DefineField` en tête de ctor).
         self.install_class_fields(fid, FLD_FIELDS, obj.clone(), nt.clone())?;
@@ -12980,9 +13057,31 @@ impl Engine {
             Value::Obj(id) => Some(id),
             _ => None,
         };
-        let r = self.call_value_ctor(f, obj.clone(), args, nt);
+        let r = self.call_value_ctor(f.clone(), obj.clone(), args, nt);
         self.ctor_fresh = prev_fresh;
         let r = r?;
+        // Spec `OrdinaryCreateFromConstructor` : el proto del
+        // objeto creado sale de `newTarget` (`GetPrototypeFromConstructor`),
+        // no del ctor llamado. Las natives-ctor que mintan con su
+        // intrinsèque propio (Array/TypedArray/…) dejan el proto
+        // del realm del ctor — si `nt` dista, el proto resultante
+        // es el default del ctor y se reescribe al de `newTarget`
+        // (JS-C610 — `Reflect.construct(mainCtor, [], otherCtor)`).
+        if let Value::Obj(rid) = r.clone() {
+            let f_default = self
+                .get_prop_value(f.clone(), "prototype")
+                .ok()
+                .filter(|p| matches!(p, Value::Obj(_)));
+            if let Some(default_proto) = f_default {
+                if default_proto != proto {
+                    if let Some(ro) = self.heap.obj_mut(rid) {
+                        if ro.proto == default_proto {
+                            ro.proto = proto.clone();
+                        }
+                    }
+                }
+            }
+        }
         Ok(if r.is_object() { r } else { obj })
     }
 

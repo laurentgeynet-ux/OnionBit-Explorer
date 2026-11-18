@@ -2326,6 +2326,11 @@ pub enum Fun {
         name: &'static str,
         /// The function pointer.
         f: NativeFn,
+        /// `[[Realm]]` — contexte de création (JS-C610) : la
+        /// native s'exécute dans SON realm (spec
+        /// `GetFunctionRealm` — `new otherRealm.Function()`
+        /// minte dans `otherRealm`).
+        realm: crate::context::CtxId,
     },
     /// Builtin with prepended bound args (promise resolve/reject,
     /// `Promise.all` slots…): call args become `bound ++ args`.
@@ -2336,6 +2341,8 @@ pub enum Fun {
         f: NativeFn,
         /// Args prepended to every call.
         bound: Vec<Value>,
+        /// `[[Realm]]` — cf. `Native::realm`.
+        realm: crate::context::CtxId,
     },
     /// `Function.prototype.bind` product — receiver + args are
     /// captured; the call forwards to `target`.

@@ -527,24 +527,58 @@ fn full_corpus_gate(len: usize) -> bool {
     true
 }
 
-fn baseline_inner() {
-    let root = corpus_root();
+/// Recolección del corpus con filtros `EXPLORER_TEST262_ONLY` /
+/// `EXPLORER_TEST262_LIST` — `None` = el gate de corpus completo
+/// pidió saltar el run.
+fn collect_corpus_files(root: &Path) -> Option<Vec<PathBuf>> {
     let mut files = Vec::new();
-    collect_js(&root, &mut files);
+    collect_js(root, &mut files);
     // `EXPLORER_TEST262_ONLY=<sous-chaîne de chemin>` — filtre
     // diagnostic ciblé (AGENTS.md §3 : la suite complète est
     // lourde en debug). Le mode filtré saute les assertions de
     // couverture : le gate reste le run complet non filtré.
     let only = std::env::var("EXPLORER_TEST262_ONLY").ok();
+    // `EXPLORER_TEST262_LIST=<fichier liste>` — un chemin par
+    // ligne (absolu, ou relatif au corpus) : diagnostic sur un
+    // sous-ensemble arbitraire (groupage par règle — les filtres
+    // substring d'`ONLY` ne suffisent pas). Assertions de
+    // couverture sautées comme le filtre substring.
+    let list = std::env::var("EXPLORER_TEST262_LIST").ok();
     if let Some(needle) = &only {
         files.retain(|f| {
             f.to_string_lossy()
                 .replace('\\', "/")
                 .contains(needle.as_str())
         });
+    } else if let Some(list_path) = &list {
+        let norm = |p: &Path| p.to_string_lossy().replace('\\', "/");
+        let wanted: std::collections::HashSet<String> = fs::read_to_string(list_path)
+            .unwrap_or_else(|e| panic!("TEST262_LIST illisible {list_path}: {e}"))
+            .lines()
+            .map(str::trim)
+            .filter(|l| !l.is_empty() && !l.starts_with('#'))
+            .map(|l| {
+                let l = l.trim_start_matches("./");
+                let p = Path::new(l);
+                if p.is_absolute() {
+                    norm(p)
+                } else {
+                    norm(&root.join(l))
+                }
+            })
+            .collect();
+        files.retain(|f| wanted.contains(&norm(f)));
     } else if files.len() > FULL_CORPUS_MIN && !full_corpus_gate(files.len()) {
-        return;
+        return None;
     }
+    Some(files)
+}
+
+fn baseline_inner() {
+    let root = corpus_root();
+    let Some(files) = collect_corpus_files(&root) else {
+        return;
+    };
 
     let mut passed = 0usize; // passes-mode réussies
     let mut skipped = 0usize; // fichiers skippés (une fois)
@@ -616,7 +650,9 @@ fn baseline_inner() {
         eprintln!("  {mode:?} {} — {msg}", f.display());
     }
 
-    if only.is_none() {
+    if std::env::var("EXPLORER_TEST262_ONLY").is_err()
+        && std::env::var("EXPLORER_TEST262_LIST").is_err()
+    {
         let (base_passed, base_skipped) = if files.len() > FULL_CORPUS_MIN {
             (FULL_PASSED, FULL_SKIPPED_MAX)
         } else {
