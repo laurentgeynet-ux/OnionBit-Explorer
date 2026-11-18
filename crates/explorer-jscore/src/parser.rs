@@ -124,6 +124,13 @@ pub(crate) fn materialize_body(d: &DeferredBody, is_gen: bool) -> Result<(Vec<St
         src_name: d.src_name.clone(),
         src_text: d.src_text.clone(),
         close_of: d.close.clone(),
+        // Corps de fonction par construction — `return` légal,
+        // `iter`/`sw` repartent à zéro comme les labels (la
+        // frontière coupe les break/continue nus).
+        fn_depth: 1,
+        iter_depth: 0,
+        sw_depth: 0,
+        blk_depth: 1,
     };
     crate::j17_time(&crate::J17_STMT_NS, || sub.fn_body())
 }
@@ -192,6 +199,10 @@ pub(crate) fn parse_in_enc(
         src_name,
         src_text: Some(Rc::from(src)),
         close_of,
+        fn_depth: 0,
+        iter_depth: 0,
+        sw_depth: 0,
+        blk_depth: 0,
     };
     let body = crate::j17_time(&crate::J17_STMT_NS, || -> Result<Vec<Stmt>> {
         p.scan_directives();
@@ -201,6 +212,7 @@ pub(crate) fn parse_in_enc(
         }
         Ok(body)
     })?;
+    p.check_scope(&body, false)?;
     crate::j17_add(
         &crate::J17_AST_STMT,
         u64::try_from(body.len()).unwrap_or(u64::MAX),
@@ -247,6 +259,10 @@ pub(crate) fn parse_module_in(
         src_name,
         src_text: Some(Rc::from(src)),
         close_of,
+        fn_depth: 0,
+        iter_depth: 0,
+        sw_depth: 0,
+        blk_depth: 0,
     };
     let body = crate::j17_time(&crate::J17_STMT_NS, || -> Result<Vec<Stmt>> {
         p.scan_directives();
@@ -256,6 +272,7 @@ pub(crate) fn parse_module_in(
         }
         Ok(body)
     })?;
+    p.check_scope(&body, false)?;
     crate::j17_add(
         &crate::J17_AST_STMT,
         u64::try_from(body.len()).unwrap_or(u64::MAX),
@@ -340,6 +357,24 @@ struct Parser {
     /// les sous-parses de corps différés la partagent — repère
     /// `pos` global, aucune reconstruction ni rebase.
     close_of: Rc<Vec<usize>>,
+    /// Profondeur fonction — `return` n'est légal qu'à
+    /// l'intérieur (early error, JS-C611). Incrémentée dans
+    /// `fn_body`/`arrow_body`/blocs statiques, restaurée ensuite
+    /// (comme `labels` — les frontières fonction coupent tout).
+    fn_depth: u32,
+    /// Profondeur itération (`for`/`while`/`do` bodies) — le
+    /// `continue` nu n'existe que dedans ; sauvegardée à chaque
+    /// frontière fonction comme `labels`.
+    iter_depth: u32,
+    /// Profondeur `switch` — le `break` nu existe aussi dans un
+    /// `case`/`default` (spec : `switch` est une cible breakable
+    /// sans label).
+    sw_depth: u32,
+    /// Profondeur de portée lexicale — `stmt_list` (blocs, corps,
+    /// blocs statiques) et les corps de `case` l'incrémentent.
+    /// `using` est interdit au niveau script top-level (spec —
+    /// seules les portées bloc/fonction/module l'acceptent).
+    blk_depth: u32,
 }
 
 impl Parser {
@@ -572,6 +607,12 @@ impl Parser {
         let Tok::Ident(name) = self.peek_clone() else {
             return Err(self.err("expected label name"));
         };
+        // Noms réservés comme label : strict (`yield`, `eval`…)
+        // et `await` en module (early errors spec).
+        self.check_strict_binding(name.as_ref())?;
+        if self.module && &*name == "await" {
+            return Err(self.err("`await` is reserved as a label in modules"));
+        }
         let mut i = self.pos + 2;
         let is_loop = loop {
             match self.toks.get(i).map(|t| &t.tok) {
@@ -590,7 +631,7 @@ impl Parser {
             return Err(self.err(format!("duplicate label `{name}`")));
         }
         self.labels.push((name.clone(), is_loop));
-        let body = self.stmt()?;
+        let body = self.stmt_body(true, true)?;
         self.labels.pop();
         Ok(Stmt::Labeled {
             name,
@@ -613,7 +654,9 @@ impl Parser {
             }
             Tok::P(P::LBrace) => {
                 self.next();
-                Ok(Stmt::Block(self.stmt_list()?))
+                let ss = self.stmt_list()?;
+                self.check_scope(&ss, true)?;
+                Ok(Stmt::Block(ss))
             }
             Tok::Kw(Kw::Var) => {
                 self.next();
@@ -624,6 +667,14 @@ impl Parser {
             Tok::Kw(Kw::Const) => {
                 self.next();
                 let decls = self.var_decls(false)?;
+                // `const` exige un initialiser (`for-in/of` passent
+                // par une autre branche — ici c'est toujours requis).
+                if decls.iter().any(|d| d.init.is_none()) {
+                    return Err(self.err("`const` declarations must be initialized"));
+                }
+                for d in &decls {
+                    self.check_no_let_bound(&d.pat)?;
+                }
                 self.expect_semi()?;
                 Ok(Stmt::Lexical {
                     decls,
@@ -632,11 +683,23 @@ impl Parser {
             }
             Tok::Kw(Kw::Let) => {
                 // `let` is contextual: a decl only before ident/`[`/`{`
-                // (destructuring) — otherwise it's a sloppy identifier.
-                let decl = matches!(
-                    self.toks.get(self.pos + 1).map(|t| &t.tok),
-                    Some(Tok::Ident(_) | Tok::P(P::LBracket | P::LBrace))
-                );
+                // (destructuring). **Newline** : `let\n{`/`let\nx`
+                // sont un identifiant suivi d'ASI — mais le
+                // lookahead `let [` bannit l'ExpressionStatement
+                // sans exception de ligne (`let\n[a]` reste une
+                // déclaration destructurante), et les mots-clés
+                // contextuels `let`/`await`/`yield` restent des
+                // candidats de binding après newline
+                // (`let\nawait 0` → `let await` + `0` inattendu).
+                let next = self.toks.get(self.pos + 1);
+                let decl = match next.map(|t| &t.tok) {
+                    Some(Tok::P(P::LBracket) | Tok::Kw(Kw::Let)) => true,
+                    Some(Tok::Ident(s)) if matches!(&**s, "let" | "await" | "yield") => true,
+                    Some(Tok::Ident(_) | Tok::P(P::LBrace)) => {
+                        !next.is_some_and(|t| t.newline_before)
+                    }
+                    _ => false,
+                };
                 if !decl {
                     let e = self.expr(false)?;
                     self.expect_semi()?;
@@ -644,6 +707,9 @@ impl Parser {
                 }
                 self.next();
                 let decls = self.var_decls(false)?;
+                for d in &decls {
+                    self.check_no_let_bound(&d.pat)?;
+                }
                 self.expect_semi()?;
                 Ok(Stmt::Lexical {
                     decls,
@@ -675,10 +741,15 @@ impl Parser {
                     && matches!(
                         self.toks.get(self.pos + 1).map(|t| &t.tok),
                         Some(Tok::Ident(_) | Tok::P(P::LBracket | P::LBrace))
-                    ) =>
+                    )
+                    && !self
+                        .toks
+                        .get(self.pos + 1)
+                        .is_some_and(|t| t.newline_before) =>
             {
                 self.next(); // `using`
                 let decls = self.var_decls(false)?;
+                self.check_using_decls(&decls, false)?;
                 self.expect_semi()?;
                 Ok(Stmt::Using {
                     decls,
@@ -692,6 +763,10 @@ impl Parser {
                         self.toks.get(self.pos + 1).map(|t| &t.tok),
                         Some(Tok::Ident(u)) if &**u == "using"
                     )
+                    && !self
+                        .toks
+                        .get(self.pos + 1)
+                        .is_some_and(|t| t.newline_before)
                     && matches!(
                         self.toks.get(self.pos + 2).map(|t| &t.tok),
                         Some(Tok::Ident(_) | Tok::P(P::LBracket | P::LBrace))
@@ -700,6 +775,7 @@ impl Parser {
                 self.next(); // `await`
                 self.next(); // `using`
                 let decls = self.var_decls(false)?;
+                self.check_using_decls(&decls, true)?;
                 self.expect_semi()?;
                 Ok(Stmt::Using {
                     decls,
@@ -716,7 +792,7 @@ impl Parser {
                 self.expect_p(P::LParen, "`(`")?;
                 let obj = self.expr(false)?;
                 self.expect_p(P::RParen, "`)`")?;
-                let body = Box::new(self.stmt()?);
+                let body = Box::new(self.stmt_body(false, false)?);
                 Ok(Stmt::With { obj, body })
             }
             Tok::Kw(Kw::While) => {
@@ -724,12 +800,16 @@ impl Parser {
                 self.expect_p(P::LParen, "`(`")?;
                 let cond = self.expr(false)?;
                 self.expect_p(P::RParen, "`)`")?;
-                let body = Box::new(self.stmt()?);
+                self.iter_depth += 1;
+                let body = Box::new(self.stmt_body(false, false)?);
+                self.iter_depth -= 1;
                 Ok(Stmt::While { cond, body })
             }
             Tok::Kw(Kw::Do) => {
                 self.next();
-                let body = Box::new(self.stmt()?);
+                self.iter_depth += 1;
+                let body = Box::new(self.stmt_body(false, false)?);
+                self.iter_depth -= 1;
                 self.expect_kw(Kw::While, "`while`")?;
                 self.expect_p(P::LParen, "`(`")?;
                 let cond = self.expr(false)?;
@@ -739,6 +819,12 @@ impl Parser {
             }
             Tok::Kw(Kw::For) => self.for_stmt(),
             Tok::Kw(Kw::Return) => {
+                // Early error spec : `return` n'existe que dans un
+                // corps de fonction (blocs statiques inclus dans le
+                // compte via `fn_depth` — ils n'y restent pas).
+                if self.fn_depth == 0 {
+                    return Err(self.err("`return` outside of function"));
+                }
                 self.next();
                 let arg = if self.at_eof()
                     || self.check_p(P::Semi)
@@ -768,6 +854,9 @@ impl Parser {
                     if !self.labels.iter().any(|(l, _)| l == n) {
                         return Err(self.err(format!("undefined label `{n}`")));
                     }
+                } else if self.iter_depth == 0 && self.sw_depth == 0 {
+                    // `break` nu : boucle ou `switch` seulement.
+                    return Err(self.err("`break` outside of iteration or switch"));
                 }
                 self.expect_semi()?;
                 Ok(Stmt::Break(label))
@@ -784,6 +873,8 @@ impl Parser {
                             return Err(self.err(format!("`continue` target `{n}` is not a loop")));
                         }
                     }
+                } else if self.iter_depth == 0 {
+                    return Err(self.err("`continue` outside of iteration"));
                 }
                 self.expect_semi()?;
                 Ok(Stmt::Continue(label))
@@ -1071,10 +1162,12 @@ impl Parser {
     }
 
     fn stmt_list(&mut self) -> Result<Vec<Stmt>> {
+        self.blk_depth += 1;
         let mut out = Vec::new();
         while !self.at_eof() && !self.check_p(P::RBrace) {
             out.push(self.stmt()?);
         }
+        self.blk_depth -= 1;
         self.expect_p(P::RBrace, "`}`")?;
         Ok(out)
     }
@@ -1131,14 +1224,393 @@ impl Parser {
         Ok(())
     }
 
+    // -- early errors de portée (JS-C611) ------------------------
+    // `BoundNames` / `LexicallyDeclaredNames` / `VarDeclaredNames`
+    // de la spec, matérialisés sur l'AST à la fermeture de chaque
+    // portée. Seules les règles spec sont appliquées — le moteur
+    // reste tolérant partout où la spec l'est.
+
+    /// `BoundNames` d'un motif de liaison.
+    fn bound_names_of(p: &Pat, out: &mut Vec<Rc<str>>) {
+        match p {
+            Pat::Ident(n) => out.push(n.clone()),
+            Pat::Lvalue(_) => {}
+            Pat::Rest(p) | Pat::Default(p, _) => Self::bound_names_of(p, out),
+            Pat::Array(items) => {
+                for it in items.iter().flatten() {
+                    Self::bound_names_of(it, out);
+                }
+            }
+            Pat::Object { props, rest } => {
+                for (_, p) in props {
+                    Self::bound_names_of(p, out);
+                }
+                if let Some(r) = rest {
+                    Self::bound_names_of(r, out);
+                }
+            }
+        }
+    }
+
+    /// Noms déclarés par `s` pour le scope vérifié —
+    /// `at_level` = statement direct de la liste scopée (les
+    /// déclarations des blocs internes ne sont pas lexicales à ce
+    /// niveau, mais leurs `var`/functions annexe B remontent).
+    /// `lex` = `(nom, est_plain_function)` ; `var` = noms var.
+    fn decl_names(
+        &self,
+        s: &Stmt,
+        at_level: bool,
+        block_scope: bool,
+        lex: &mut Vec<(Rc<str>, bool)>,
+        var: &mut Vec<Rc<str>>,
+    ) {
+        let decls_to_lex = |decls: &[VarDecl], lex: &mut Vec<(Rc<str>, bool)>| {
+            for d in decls {
+                let mut n = Vec::new();
+                Self::bound_names_of(&d.pat, &mut n);
+                lex.extend(n.into_iter().map(|x| (x, false)));
+            }
+        };
+        match s {
+            Stmt::Var(ds) => {
+                for d in ds {
+                    Self::bound_names_of(&d.pat, var);
+                }
+            }
+            Stmt::Lexical { decls, .. } | Stmt::Using { decls, .. } if at_level => {
+                decls_to_lex(decls, lex);
+            }
+            Stmt::ClassDecl(c) if at_level => {
+                if let Some(n) = &c.name {
+                    lex.push((n.clone(), false));
+                }
+            }
+            Stmt::FunctionDecl(f) => {
+                let plain = !f.is_gen && !f.is_async;
+                if !plain {
+                    // `function*`/`async function` : toujours
+                    // lexicales, jamais propagées (pas d'annexe B).
+                    if at_level {
+                        if let Some(n) = &f.name {
+                            lex.push((n.clone(), false));
+                        }
+                    }
+                } else if at_level {
+                    if let Some(n) = &f.name {
+                        // Bloc/CaseBlock/catch : `function` est
+                        // lexicale ; top-level : var-scopée.
+                        if block_scope {
+                            lex.push((n.clone(), true));
+                        } else {
+                            var.push(n.clone());
+                        }
+                    }
+                } else if !self.strict {
+                    // Annexe B : les `function` nichées remontent au
+                    // var-scope de la fonction englobante (sloppy).
+                    if let Some(n) = &f.name {
+                        var.push(n.clone());
+                    }
+                }
+            }
+            Stmt::Import { binds, .. } if at_level => {
+                for b in binds {
+                    let n = match b {
+                        ImportBind::Default(n)
+                        | ImportBind::Namespace(n)
+                        | ImportBind::Named(_, n) => n,
+                    };
+                    lex.push((n.clone(), false));
+                }
+            }
+            Stmt::Export(ExportDecl::Decl(inner)) => {
+                self.decl_names(inner, at_level, block_scope, lex, var);
+            }
+            Stmt::Labeled { body, .. } => {
+                self.decl_names(body, at_level, block_scope, lex, var);
+            }
+            Stmt::Block(ss) => {
+                for s in ss {
+                    self.decl_names(s, false, block_scope, lex, var);
+                }
+            }
+            Stmt::If { then, else_, .. } => {
+                self.decl_names(then, false, block_scope, lex, var);
+                if let Some(e) = else_ {
+                    self.decl_names(e, false, block_scope, lex, var);
+                }
+            }
+            Stmt::While { body, .. } | Stmt::DoWhile { body, .. } | Stmt::With { body, .. } => {
+                self.decl_names(body, false, block_scope, lex, var);
+            }
+            Stmt::For { init, body, .. } => {
+                if let Some(ForInit::Var(ds)) = init {
+                    for d in ds {
+                        Self::bound_names_of(&d.pat, var);
+                    }
+                }
+                self.decl_names(body, false, block_scope, lex, var);
+            }
+            Stmt::ForIn { target, body, .. } | Stmt::ForOf { target, body, .. } => {
+                if let ForTarget::Var(p) = target {
+                    Self::bound_names_of(p, var);
+                }
+                self.decl_names(body, false, block_scope, lex, var);
+            }
+            Stmt::Try {
+                block,
+                catch,
+                finally,
+            } => {
+                for s in block {
+                    self.decl_names(s, false, block_scope, lex, var);
+                }
+                if let Some((_, ss)) = catch {
+                    for s in ss {
+                        self.decl_names(s, false, block_scope, lex, var);
+                    }
+                }
+                if let Some(ss) = finally {
+                    for s in ss {
+                        self.decl_names(s, false, block_scope, lex, var);
+                    }
+                }
+            }
+            Stmt::Switch { cases, .. } => {
+                for c in cases {
+                    for s in &c.body {
+                        self.decl_names(s, false, block_scope, lex, var);
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+
+    /// Early errors d'une portée (`StatementList`) : doublons dans
+    /// `LexicallyDeclaredNames` (annexe B : la paire
+    /// `function`-`function` est tolérée en sloppy) et intersection
+    /// `Lexical ∩ Var` interdite. `block_scope` = Block/CaseBlock/
+    /// catch (`function` y est lexicale) vs top-level/corps.
+    fn check_scope(&self, stmts: &[Stmt], block_scope: bool) -> Result<()> {
+        let mut lex: Vec<(Rc<str>, bool)> = Vec::new();
+        let mut var: Vec<Rc<str>> = Vec::new();
+        for s in stmts {
+            self.decl_names(s, true, block_scope, &mut lex, &mut var);
+        }
+        for i in 0..lex.len() {
+            for j in (i + 1)..lex.len() {
+                if lex[i].0 == lex[j].0 && !(lex[i].1 && lex[j].1 && !self.strict) {
+                    return Err(self.err(format!(
+                        "identifier `{}` has already been declared",
+                        lex[i].0
+                    )));
+                }
+            }
+        }
+        for (n, _) in &lex {
+            if var.iter().any(|v| v == n) {
+                return Err(self.err(format!("identifier `{n}` has already been declared")));
+            }
+        }
+        Ok(())
+    }
+
+    /// `LexicallyDeclaredNames` + `VarDeclaredNames` d'un statement
+    /// unique (corps de `for`/`catch` — traité comme son propre
+    /// niveau quand c'est un `Block`).
+    fn names_of_stmt(&self, body: &Stmt, lex: &mut Vec<(Rc<str>, bool)>, var: &mut Vec<Rc<str>>) {
+        if let Stmt::Block(ss) = body {
+            for s in ss {
+                self.decl_names(s, true, true, lex, var);
+            }
+        } else {
+            self.decl_names(body, true, true, lex, var);
+        }
+    }
+
+    /// `for (let/const/using …) body` : les `BoundNames` de la tête
+    /// forment une portée avec le corps — doublons internes, et
+    /// conflit avec les `var` du corps (spec : head ∩
+    /// `VarDeclaredNames` seulement — le `let x` d'un bloc interne
+    /// *ombre* la tête, `for (let n;;) { let n }` est légal).
+    fn check_for_head(&self, head: &[Rc<str>], body: &Stmt) -> Result<()> {
+        for i in 0..head.len() {
+            for j in (i + 1)..head.len() {
+                if head[i] == head[j] {
+                    return Err(self.err(format!(
+                        "identifier `{}` has already been declared",
+                        head[i]
+                    )));
+                }
+            }
+        }
+        let mut lex = Vec::new();
+        let mut var = Vec::new();
+        self.names_of_stmt(body, &mut lex, &mut var);
+        for n in head {
+            if var.iter().any(|v| v == n) {
+                return Err(self.err(format!("identifier `{n}` has already been declared")));
+            }
+        }
+        Ok(())
+    }
+
+    /// `catch (pat) body` — spec : doublons du param, param ∩
+    /// `LexicallyDeclaredNames`, param ∩ `VarDeclaredNames` —
+    /// sauf l'exemption annexe B (`catch(e){var e}` sloppy quand
+    /// le param est un identifiant simple).
+    fn check_catch(&self, pat: &Pat, body: &[Stmt]) -> Result<()> {
+        let mut names = Vec::new();
+        Self::bound_names_of(pat, &mut names);
+        for i in 0..names.len() {
+            for j in (i + 1)..names.len() {
+                if names[i] == names[j] {
+                    return Err(self.err(format!(
+                        "identifier `{}` has already been declared",
+                        names[i]
+                    )));
+                }
+            }
+        }
+        let mut lex = Vec::new();
+        let mut var = Vec::new();
+        for s in body {
+            self.decl_names(s, true, true, &mut lex, &mut var);
+        }
+        let var_check = self.strict || !matches!(pat, Pat::Ident(_));
+        for n in &names {
+            if lex.iter().any(|(l, _)| l == n) || (var_check && var.iter().any(|v| v == n)) {
+                return Err(self.err(format!("identifier `{n}` has already been declared")));
+            }
+        }
+        Ok(())
+    }
+
+    /// `using`/`await using` : bindings `BindingIdentifier` avec
+    /// initialiser obligatoire ; interdit au top-level d'un
+    /// *script* (portées bloc/fonction/module seulement — spec
+    /// `using` exige une portée qui supporte les ressources).
+    fn check_using_decls(&self, decls: &[VarDecl], _is_await: bool) -> Result<()> {
+        if self.blk_depth == 0 && !self.module {
+            return Err(self.err("`using` is not allowed at the top level of a script"));
+        }
+        for d in decls {
+            if !matches!(d.pat, Pat::Ident(_)) || d.init.is_none() {
+                return Err(self.err("`using` declarations must be `using x = e`"));
+            }
+            self.check_no_let_bound(&d.pat)?;
+        }
+        Ok(())
+    }
+
+    /// `let` ne peut jamais être un nom de liaison *lexicale*
+    /// (`let let`, `const let`, `let [let]`, `class let`…) —
+    /// les deux modes (`var let` sloppy reste légal).
+    fn check_no_let_bound(&self, p: &Pat) -> Result<()> {
+        let mut names = Vec::new();
+        Self::bound_names_of(p, &mut names);
+        if names.iter().any(|n| &**n == "let") {
+            return Err(self.err("`let` is disallowed as a lexically bound name"));
+        }
+        Ok(())
+    }
+
+    /// `label: label2: … function f` — `IsLabelledFunction` spec :
+    /// banni en position de statement unique (`if`/boucle/`with`),
+    /// admis comme item d'un label (annexe B sloppy).
+    fn is_labelled_fn(s: &Stmt) -> bool {
+        match s {
+            Stmt::Labeled { body, .. } => Self::is_labelled_fn(body),
+            Stmt::FunctionDecl(_) => true,
+            _ => false,
+        }
+    }
+
+    /// Corps nu d'`if`/`else`/boucle/`with`/`label` — la grammaire
+    /// n'y accepte qu'un `Statement`, jamais une `Declaration`.
+    /// Tolérance annexe B : `function` ordinaire en sloppy et
+    /// seulement sous `if`/`else`/`label` (jamais boucle/`with`).
+    /// `labelled_item` = la position est l'item d'un `label:` —
+    /// là, `a: function f` reste admis (B.3.2).
+    fn stmt_body(&mut self, annexb_fn: bool, labelled_item: bool) -> Result<Stmt> {
+        let s = self.stmt()?;
+        let bad = match &s {
+            Stmt::FunctionDecl(f) => f.is_gen || f.is_async || self.strict || !annexb_fn,
+            Stmt::Labeled { .. } if !labelled_item && Self::is_labelled_fn(&s) => true,
+            Stmt::Lexical { .. }
+            | Stmt::ClassDecl(_)
+            | Stmt::Using { .. }
+            | Stmt::Import { .. }
+            | Stmt::Export(_) => true,
+            _ => false,
+        };
+        if bad {
+            return Err(self.err("declaration is not allowed in this position"));
+        }
+        Ok(s)
+    }
+
+    /// Early errors des paramètres de fonction : doublons si le
+    /// corps est strict ou les params non-simples, nom de
+    /// function-expression ∩ params (`function f(f)`), et params
+    /// ∩ `LexicallyDeclaredNames` du corps (corps éager). Pour un
+    /// corps différé la vérification est différée à sa
+    /// matérialisation — déviation documentée (V-5a).
+    fn check_fn_params(
+        &self,
+        params: &[Param],
+        body: Option<&[Stmt]>,
+        strict_eff: bool,
+        expr_name: Option<&str>,
+    ) -> Result<()> {
+        let mut names: Vec<Rc<str>> = Vec::new();
+        for p in params {
+            Self::bound_names_of(&p.pat, &mut names);
+        }
+        let simple = params
+            .iter()
+            .all(|p| !p.rest && matches!(p.pat, Pat::Ident(_)));
+        if strict_eff || !simple {
+            for i in 0..names.len() {
+                for j in (i + 1)..names.len() {
+                    if names[i] == names[j] {
+                        return Err(self.err(format!("duplicate parameter name `{}`", names[i])));
+                    }
+                }
+            }
+        }
+        if let Some(n) = expr_name {
+            if names.iter().any(|p| &**p == n) {
+                return Err(self.err(format!(
+                    "function name `{n}` may not be used as a parameter name"
+                )));
+            }
+        }
+        if let Some(b) = body {
+            let mut lex = Vec::new();
+            let mut var = Vec::new();
+            for s in b {
+                self.decl_names(s, true, false, &mut lex, &mut var);
+            }
+            for n in &names {
+                if lex.iter().any(|(l, _)| l == n) {
+                    return Err(self.err(format!("identifier `{n}` has already been declared")));
+                }
+            }
+        }
+        Ok(())
+    }
+
     fn if_stmt(&mut self) -> Result<Stmt> {
         self.expect_kw(Kw::If, "`if`")?;
         self.expect_p(P::LParen, "`(`")?;
         let cond = self.expr(false)?;
         self.expect_p(P::RParen, "`)`")?;
-        let then = Box::new(self.stmt()?);
+        let then = Box::new(self.stmt_body(true, false)?);
         let else_ = if self.eat_kw(Kw::Else) {
-            Some(Box::new(self.stmt()?))
+            Some(Box::new(self.stmt_body(true, false)?))
         } else {
             None
         };
@@ -1187,7 +1659,13 @@ impl Parser {
         let mut pat = match self.peek_clone() {
             Tok::P(P::Ellipsis) => {
                 self.next();
-                Pat::Rest(Box::new(self.pattern()?))
+                let inner = self.pattern()?;
+                // `......x` : l'élément rest n'est pas lui-même
+                // un rest (spec `RestElement`).
+                if matches!(inner, Pat::Rest(_)) {
+                    return Err(self.err("rest element cannot be a rest element"));
+                }
+                Pat::Rest(Box::new(inner))
             }
             Tok::P(P::LBracket) => {
                 self.next();
@@ -1200,7 +1678,15 @@ impl Parser {
                         elems.push(None); // hole
                         continue;
                     }
-                    elems.push(Some(self.pattern()?));
+                    let elem = self.pattern()?;
+                    // Spec : le rest termine la liste — `[...r, x]`
+                    // et même `[...r,]` sont des erreurs de parse.
+                    if matches!(elem, Pat::Rest(_)) {
+                        self.expect_p(P::RBracket, "rest element must be last")?;
+                        elems.push(Some(elem));
+                        break;
+                    }
+                    elems.push(Some(elem));
                     if self.eat_p(P::Comma) {
                         continue;
                     }
@@ -1261,6 +1747,11 @@ impl Parser {
             }
             _ => return Err(self.err("expected binding name or pattern")),
         };
+        // `[...rest = d]` / `{...rest = d}` : l'initialiseur est
+        // interdit sur un rest (early error spec).
+        if matches!(pat, Pat::Rest(_)) && self.check_p(P::Assign) {
+            return Err(self.err("rest element cannot have an initializer"));
+        }
         // `= default` — params/nested/catch only (tolerant: the spec
         // rejects it in `for-in`/`for-of` targets; we allow it like
         // decls). Decl sites use `pattern_decl` — their `=` is the
@@ -1325,7 +1816,10 @@ impl Parser {
         if self.eat_of() {
             let iter = self.expr(false)?;
             self.expect_p(P::RParen, "`)`")?;
-            let body = Box::new(self.stmt()?);
+            self.iter_depth += 1;
+            let body = Box::new(self.stmt_body(false, false)?);
+            self.iter_depth -= 1;
+            self.check_for_target(&var_target, &body)?;
             return Ok(Stmt::ForOf {
                 target: var_target,
                 iter,
@@ -1339,7 +1833,10 @@ impl Parser {
         if self.eat_kw(Kw::In) {
             let obj = self.expr(false)?;
             self.expect_p(P::RParen, "`)`")?;
-            let body = Box::new(self.stmt()?);
+            self.iter_depth += 1;
+            let body = Box::new(self.stmt_body(false, false)?);
+            self.iter_depth -= 1;
+            self.check_for_target(&var_target, &body)?;
             return Ok(Stmt::ForIn {
                 target: var_target,
                 obj,
@@ -1348,6 +1845,29 @@ impl Parser {
             });
         }
         Err(self.err("expected `in` or `of`"))
+    }
+
+    /// Tête lexicale `for (let|const|using p …)` : `let` banni
+    /// comme nom lié, `using` exige un identifiant simple, et le
+    /// scope tête+corps interdit les redeclarations.
+    fn check_for_target(&self, target: &ForTarget, body: &Stmt) -> Result<()> {
+        let pat = match target {
+            ForTarget::Lexical { pat, .. } => pat,
+            ForTarget::Using { pat, .. } => {
+                if !matches!(pat, Pat::Ident(_)) {
+                    return Err(self.err("`using` requires a simple binding identifier"));
+                }
+                if self.blk_depth == 0 && !self.module {
+                    return Err(self.err("`using` is not allowed at the top level of a script"));
+                }
+                pat
+            }
+            ForTarget::Var(_) | ForTarget::Expr(_) => return Ok(()),
+        };
+        self.check_no_let_bound(pat)?;
+        let mut head = Vec::new();
+        Self::bound_names_of(pat, &mut head);
+        self.check_for_head(&head, body)
     }
 
     fn for_stmt(&mut self) -> Result<Stmt> {
@@ -1471,7 +1991,19 @@ impl Parser {
             Some(self.expr(false)?)
         };
         self.expect_p(P::RParen, "`)`")?;
-        let body = Box::new(self.stmt()?);
+        self.iter_depth += 1;
+        let body = Box::new(self.stmt_body(false, false)?);
+        self.iter_depth -= 1;
+        if let Some(ForInit::Lexical { decls, .. }) = &init {
+            for d in decls {
+                self.check_no_let_bound(&d.pat)?;
+            }
+            let mut head = Vec::new();
+            for d in decls {
+                Self::bound_names_of(&d.pat, &mut head);
+            }
+            self.check_for_head(&head, &body)?;
+        }
         Ok(Stmt::For {
             init,
             test,
@@ -1484,48 +2016,25 @@ impl Parser {
         self.expect_kw(Kw::Try, "`try`")?;
         self.expect_p(P::LBrace, "`{`")?;
         let block = self.stmt_list()?;
+        self.check_scope(&block, true)?;
         let catch = if self.eat_kw(Kw::Catch) {
             // `try {} catch {}` (optional binding) or `catch (pat)`.
             if self.check_p(P::LBrace) {
                 self.expect_p(P::LBrace, "`{`")?;
-                Some((Pat::Ident(Rc::from("")), self.stmt_list()?))
+                let body = self.stmt_list()?;
+                self.check_scope(&body, true)?;
+                Some((Pat::Ident(Rc::from("")), body))
             } else {
                 self.expect_p(P::LParen, "`(`")?;
                 let pat = self.pattern()?;
                 self.expect_p(P::RParen, "`)`")?;
                 self.expect_p(P::LBrace, "`{`")?;
                 let body = self.stmt_list()?;
-                // Spec `Catch` early errors : un nom lié par le
-                // param ne peut pas être redéclaré par un
-                // `let`/`const`/`var`/`function`/`class` au
-                // niveau du bloc (`catch(e){let e}` → SyntaxError).
-                let mut bound = Vec::new();
-                crate::interp::Engine::lex_pat_names(&pat, true, &mut bound);
-                let clash = |s: &Stmt| -> bool {
-                    let mut names = Vec::new();
-                    match s {
-                        Stmt::Lexical { decls, .. } | Stmt::Var(decls) => {
-                            for d in decls {
-                                crate::interp::Engine::lex_pat_names(&d.pat, true, &mut names);
-                            }
-                        }
-                        Stmt::FunctionDecl(f) => {
-                            if let Some(n) = &f.name {
-                                names.push((n.clone(), true));
-                            }
-                        }
-                        Stmt::ClassDecl(c) => {
-                            if let Some(n) = &c.name {
-                                names.push((n.clone(), true));
-                            }
-                        }
-                        _ => {}
-                    }
-                    names.iter().any(|(n, _)| bound.iter().any(|(b, _)| b == n))
-                };
-                if body.iter().any(clash) {
-                    return Err(self.err("catch parameter identifier declared in catch body"));
-                }
+                self.check_scope(&body, true)?;
+                // Spec `Catch` early errors — doublons du param,
+                // param ∩ lexicales/var du bloc, avec l'exemption
+                // annexe B (`catch(e){var e}` sloppy).
+                self.check_catch(&pat, &body)?;
                 Some((pat, body))
             }
         } else {
@@ -1533,7 +2042,9 @@ impl Parser {
         };
         let finally = if self.eat_kw(Kw::Finally) {
             self.expect_p(P::LBrace, "`{`")?;
-            Some(self.stmt_list()?)
+            let body = self.stmt_list()?;
+            self.check_scope(&body, true)?;
+            Some(body)
         } else {
             None
         };
@@ -1554,8 +2065,15 @@ impl Parser {
         self.expect_p(P::RParen, "`)`")?;
         self.expect_p(P::LBrace, "`{`")?;
         let mut cases = Vec::new();
+        // Le `CaseBlock` est une portée unique (`break` nu légal,
+        // `using` admis) — les compteurs s'ouvrent une fois pour
+        // tous les cases.
+        self.sw_depth += 1;
+        self.blk_depth += 1;
         while !self.check_p(P::RBrace) {
             if self.at_eof() {
+                self.sw_depth -= 1;
+                self.blk_depth -= 1;
                 return Err(self.err("unterminated `switch`"));
             }
             let test = if self.eat_kw(Kw::Case) {
@@ -1564,6 +2082,8 @@ impl Parser {
             } else if self.eat_kw(Kw::Default) {
                 None
             } else {
+                self.sw_depth -= 1;
+                self.blk_depth -= 1;
                 return Err(self.err("expected `case` or `default`"));
             };
             self.expect_p(P::Colon, "`:`")?;
@@ -1573,13 +2093,42 @@ impl Parser {
                 && self.peek() != &Tok::Kw(Kw::Default)
             {
                 if self.at_eof() {
+                    self.sw_depth -= 1;
+                    self.blk_depth -= 1;
                     return Err(self.err("unterminated `switch`"));
                 }
                 body.push(self.stmt()?);
             }
             cases.push(SwitchCase { test, body });
         }
+        self.sw_depth -= 1;
+        self.blk_depth -= 1;
         self.expect_p(P::RBrace, "`}`")?;
+        // Early errors `CaseBlock` : doublons lexicaux et
+        // lex∩var à travers *tous* les cases (spec
+        // `LexicallyDeclaredNames`/`VarDeclaredNames` du bloc).
+        let mut lex = Vec::new();
+        let mut var = Vec::new();
+        for c in &cases {
+            for s in &c.body {
+                self.decl_names(s, true, true, &mut lex, &mut var);
+            }
+        }
+        for i in 0..lex.len() {
+            for j in (i + 1)..lex.len() {
+                if lex[i].0 == lex[j].0 && !(lex[i].1 && lex[j].1 && !self.strict) {
+                    return Err(self.err(format!(
+                        "identifier `{}` has already been declared",
+                        lex[i].0
+                    )));
+                }
+            }
+        }
+        for (n, _) in &lex {
+            if var.iter().any(|v| v == n) {
+                return Err(self.err(format!("identifier `{n}` has already been declared")));
+            }
+        }
         Ok(Stmt::Switch { disc, cases })
     }
 
@@ -1699,13 +2248,17 @@ impl Parser {
                 self.next();
                 self.next();
                 let (body, strict) = self.arrow_body(no_in)?;
+                let params = vec![Param {
+                    pat: Pat::Ident(name),
+                    rest: false,
+                }];
+                if let FnBody::Parsed(b) = &body {
+                    self.check_fn_params(&params, Some(b), true, None)?;
+                }
                 let eoff = self.off_prev_end();
                 return Ok(Some(Expr::Function(Rc::new(FnLit {
                     name: None,
-                    params: vec![Param {
-                        pat: Pat::Ident(name),
-                        rest: false,
-                    }],
+                    params,
                     body,
                     is_arrow: true,
                     is_method: false,
@@ -1739,6 +2292,9 @@ impl Parser {
                 // cursor is on `=>`
                 self.next();
                 let (body, strict) = self.arrow_body(no_in)?;
+                if let FnBody::Parsed(b) = &body {
+                    self.check_fn_params(&params, Some(b), true, None)?;
+                }
                 let eoff = self.off_prev_end();
                 return Ok(Some(Expr::Function(Rc::new(FnLit {
                     name: None,
@@ -1777,13 +2333,17 @@ impl Parser {
                 self.next();
                 self.next();
                 let (body, strict) = self.arrow_body(no_in)?;
+                let params = vec![Param {
+                    pat: Pat::Ident(name),
+                    rest: false,
+                }];
+                if let FnBody::Parsed(b) = &body {
+                    self.check_fn_params(&params, Some(b), true, None)?;
+                }
                 let eoff = self.off_prev_end();
                 return Ok(Some(Expr::Function(Rc::new(FnLit {
                     name: None,
-                    params: vec![Param {
-                        pat: Pat::Ident(name),
-                        rest: false,
-                    }],
+                    params,
                     body,
                     is_arrow: true,
                     is_method: false,
@@ -1812,6 +2372,9 @@ impl Parser {
                 if self.check_p(P::Arrow) {
                     self.next();
                     let (body, strict) = self.arrow_body(no_in)?;
+                    if let FnBody::Parsed(b) = &body {
+                        self.check_fn_params(&params, Some(b), true, None)?;
+                    }
                     let eoff = self.off_prev_end();
                     return Ok(Some(Expr::Function(Rc::new(FnLit {
                         name: None,
@@ -1861,12 +2424,21 @@ impl Parser {
             }
             let outer_strict = self.strict;
             let outer_gen = self.in_gen;
+            let outer_labels = std::mem::take(&mut self.labels);
+            let outer_iter = std::mem::replace(&mut self.iter_depth, 0);
+            let outer_sw = std::mem::replace(&mut self.sw_depth, 0);
             self.in_gen = false; // les flèches ne sont jamais génératrices
+            self.fn_depth += 1;
             self.scan_directives();
             let body = self.stmt_list();
+            self.fn_depth -= 1;
             let strict = self.strict;
+            let body = body.and_then(|b| self.check_scope(&b, false).map(|()| b));
             self.strict = outer_strict;
             self.in_gen = outer_gen;
+            self.labels = outer_labels;
+            self.iter_depth = outer_iter;
+            self.sw_depth = outer_sw;
             return body.map(|b| (FnBody::Parsed(Rc::new(b)), strict));
         }
         let e = self.assign(no_in)?;
@@ -2426,6 +2998,9 @@ impl Parser {
                         let outer_gen = self.in_gen;
                         self.in_gen = false; // get/set : jamais générateurs
                         let (body, strict) = self.fn_body_or_deferred()?;
+                        if let FnBody::Parsed(b) = &body {
+                            self.check_fn_params(&params, Some(b), strict, None)?;
+                        }
                         self.in_gen = outer_gen;
                         let fun = Rc::new(FnLit {
                             name: None,
@@ -2455,6 +3030,9 @@ impl Parser {
                         let outer_gen = self.in_gen;
                         self.in_gen = gen;
                         let (body, strict) = self.fn_body_or_deferred()?;
+                        if let FnBody::Parsed(b) = &body {
+                            self.check_fn_params(&params, Some(b), strict, None)?;
+                        }
                         self.in_gen = outer_gen;
                         props.push(ObjProp::Prop(
                             key,
@@ -2571,6 +3149,12 @@ impl Parser {
                         // complète → toString repli `[code]`.
                         src_text: None,
                         close_of,
+                        // La substitution `${…}` vit dans le même
+                        // contexte — compteurs hérités.
+                        fn_depth: self.fn_depth,
+                        iter_depth: self.iter_depth,
+                        sw_depth: self.sw_depth,
+                        blk_depth: self.blk_depth,
                     };
                     let e = sub.expr(no_in)?;
                     self.priv_seq = self.priv_seq.max(sub.priv_seq);
@@ -2624,6 +3208,18 @@ impl Parser {
         let outer_gen = self.in_gen;
         self.in_gen = gen;
         let (body, strict) = self.fn_body_or_deferred()?;
+        // Early errors params↔corps : doublons (strict ou
+        // non-simples), nom d'expression ∩ params, params ∩
+        // lexicales du corps — corps différé : la part `corps`
+        // attend la matérialisation (déviation V-5a).
+        {
+            let body_stmts = match &body {
+                FnBody::Parsed(b) => Some(&b[..]),
+                FnBody::Deferred(_) => None,
+            };
+            let expr_name = if decl { None } else { name.as_deref() };
+            self.check_fn_params(&params, body_stmts, strict, expr_name)?;
+        }
         // `fn_body` restaure la valeur **posée juste avant** —
         // sans ce second restore, un `function(){}` non-générateur
         // imbriqué dans un `function*(){}` masque les `yield`
@@ -2706,13 +3302,45 @@ impl Parser {
         let outer_gen = self.in_gen;
         // Les labels ne traversent pas la frontière fonction.
         let outer_labels = std::mem::take(&mut self.labels);
+        let outer_iter = std::mem::replace(&mut self.iter_depth, 0);
+        let outer_sw = std::mem::replace(&mut self.sw_depth, 0);
+        self.fn_depth += 1;
         self.scan_directives();
         let body = self.stmt_list();
+        self.fn_depth -= 1;
         let strict = self.strict;
+        // `check_scope` avec le strict *effectif* du corps (avant
+        // le restore) — c'est lui qui décide des tolérances sloppy.
+        let body = body.and_then(|b| self.check_scope(&b, false).map(|()| b));
         self.strict = outer_strict;
         self.in_gen = outer_gen;
         self.labels = outer_labels;
+        self.iter_depth = outer_iter;
+        self.sw_depth = outer_sw;
         body.map(|b| (b, strict))
+    }
+
+    /// Corps `{…}` parsé comme frontière fonction — labels et
+    /// compteurs `iter`/`sw` réinitialisés (les break/continue/
+    /// labels ne traversent pas), `fn_depth` incrémenté si
+    /// `is_fn` (un bloc statique de classe reste interdit de
+    /// `return`). `check_scope` appliqué à la sortie.
+    fn scoped_fn_body(&mut self, is_fn: bool) -> Result<Vec<Stmt>> {
+        let outer_labels = std::mem::take(&mut self.labels);
+        let outer_iter = std::mem::replace(&mut self.iter_depth, 0);
+        let outer_sw = std::mem::replace(&mut self.sw_depth, 0);
+        if is_fn {
+            self.fn_depth += 1;
+        }
+        let body = self.stmt_list();
+        if is_fn {
+            self.fn_depth -= 1;
+        }
+        let body = body.and_then(|b| self.check_scope(&b, false).map(|()| b));
+        self.labels = outer_labels;
+        self.iter_depth = outer_iter;
+        self.sw_depth = outer_sw;
+        body
     }
 
     /// `pat (= default)? (, …)*` with a possible trailing `...rest`
@@ -2809,7 +3437,7 @@ impl Parser {
                 self.strict = true;
                 let body = match self.try_defer_body(self.pos - 1) {
                     Some((b, _)) => b,
-                    None => FnBody::Parsed(Rc::new(self.stmt_list()?)),
+                    None => FnBody::Parsed(Rc::new(self.scoped_fn_body(false)?)),
                 };
                 self.strict = outer_strict;
                 members.push(ClassMember {
@@ -2924,9 +3552,12 @@ impl Parser {
             // get/set ne sont jamais générateurs ; `*m` oui.
             self.in_gen = gen && kind == ClassMemberKind::Method;
             let is_gen = self.in_gen;
-            let body = match self.try_defer_body(self.pos - 1) {
-                Some((b, _)) => b,
-                None => FnBody::Parsed(Rc::new(self.stmt_list()?)),
+            let body = if let Some((b, _)) = self.try_defer_body(self.pos - 1) {
+                b
+            } else {
+                let b = self.scoped_fn_body(true)?;
+                self.check_fn_params(&params, Some(&b), true, None)?;
+                FnBody::Parsed(Rc::new(b))
             };
             self.strict = outer_strict;
             self.in_gen = outer_gen;

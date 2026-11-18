@@ -14944,3 +14944,27 @@ chaque gain rapporté contre les **deux** archétypes.
   brand-check privés cross-realm, protos des fns eval'd
   (`eval-body-proto-realm`), fallback `%Ctor.prototype%` par
   type au-delà d'`Object.prototype`.
+
+- [x] **JS-C611 — early errors de portée : redeclarations
+  lexicales/lex∩var par bloc/`CaseBlock`/corps, déclarations
+  hors position statement, `const`/`using` sans initialiser,
+  `return`/`break`/`continue` hors contexte — corpus
+  `phase:parse` 3 282 → 4 069/7 575 (+787)** (`parser.rs` +
+  `tests/{test262,c611_early}.rs`). `decl_names` matérialise
+  les jeux spec `BoundNames`/`LexicallyDeclaredNames`/
+  `VarDeclaredNames` ; `check_scope` applique à chaque portée
+  doublons-lex (annexB : `function`×2 tolérée sloppy) et
+  `Lexical ∩ Var`. `stmt_body` bannit les déclarations en corps
+  nu — annexB sloppy `function` sous `if`/`else`/`label` seul,
+  `IsLabelledFunction` banni en position unique. Compteurs
+  `fn_depth`/`iter_depth`/`sw_depth`/`blk_depth` (frontières
+  fonction) pour `return`/`break`/`continue`/`using` top-level.
+  `let` = decl devant ident/`{` même ligne ou `[` ; rest
+  pattern obligatoirement final sans init. Harness :
+  `set_defer_min(MAX)` dans test262 (les early errors sont des
+  erreurs de parse) + filtre `EXPLORER_TEST262_LIST`. Gate
+  `c611_early` **8/8** ; diff : **426 fichiers réparés,
+  0 régression nette**. Lib 54/54, clippy/fmt propres.
+  **Reste** : `await`/`yield` par contexte async/générateur,
+  paramètres ∩ lex des corps différés (déviation V-5a),
+  `with` runtime (chaîne de portée objet — cluster séparé).

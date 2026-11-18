@@ -579,6 +579,11 @@ fn baseline_inner() {
     let Some(files) = collect_corpus_files(&root) else {
         return;
     };
+    // Early errors *de parse* : les corps différés ne peuvent pas
+    // reporter leur validation au premier appel — la spec les
+    // exige au parse du script (`negative: phase: parse`). Le
+    // gate mesure donc la conformité de parse en mode éager.
+    explorer_jscore::set_defer_min(usize::MAX);
 
     let mut passed = 0usize; // passes-mode réussies
     let mut skipped = 0usize; // fichiers skippés (une fois)
