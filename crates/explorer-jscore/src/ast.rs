@@ -455,6 +455,7 @@ impl std::fmt::Debug for FnLit {
             .field("is_arrow", &self.is_arrow)
             .field("is_async", &self.is_async)
             .field("is_gen", &self.is_gen)
+            .field("is_method", &self.is_method)
             .field("strict", &self.strict)
             .field("pos", &self.pos)
             .field("src", &self.src)
@@ -502,6 +503,15 @@ pub struct FnLit {
     /// documentée ; `next(v)` ignore `v`, les générateurs
     /// infinis butent sur le budget d'opérations).
     pub is_gen: bool,
+    /// `true` quand le littéral est une `MethodDefinition` ou un
+    /// membre de classe (`constructor`/`get`/`set`/méthode,
+    /// `static {}`, field-thunk) plutôt qu'une déclaration ou une
+    /// expression `function` ordinaire. Consommé par C609
+    /// (Forbidden Extensions) : seules les fonctions sloppy
+    /// ordinaires portent des `caller`/`arguments` propres — les
+    /// méthodes, flèches, générateurs, asyncs, classes et fns
+    /// strictes n'en ont **aucun** (test262 `forbidden-ext`).
+    pub is_method: bool,
     /// Corps en mode strict — hérité du contexte OU activé par un
     /// prologue `"use strict"` dans le corps. `true` pour tous les
     /// membres de classe (les corps de classe sont stricts par spec).

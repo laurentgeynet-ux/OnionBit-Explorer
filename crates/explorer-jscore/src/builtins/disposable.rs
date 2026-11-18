@@ -75,12 +75,15 @@ pub(crate) fn ds_use(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Va
     if matches!(v, Value::Null | Value::Undefined) {
         return Ok(v);
     }
+    // `GetDisposeMethod` spec (JS-C609) : `GetV` — un getter
+    // `@@dispose` doit être invoqué (`get_prop` data-only le
+    // manquait → `use` refusait les resources à accesseur).
     let m = match v {
-        Value::Obj(vid) => e.get_prop(vid, crate::interp::SYM_DISPOSE),
-        _ => None,
+        Value::Obj(_) => e.get_prop_value(v.clone(), crate::interp::SYM_DISPOSE)?,
+        _ => Value::Undefined,
     };
     match m {
-        Some(f) if e.is_callable(f.clone()) => {
+        f if e.is_callable(f.clone()) => {
             // `v[@@dispose]()` — `this` = la ressource, pas d'arg.
             ds_push(e, id, f, v.clone(), Value::Undefined);
             Ok(v)
@@ -200,14 +203,23 @@ pub(crate) fn ads_use(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<V
     if matches!(v, Value::Null | Value::Undefined) {
         return Ok(v);
     }
+    // `GetDisposeMethod(async)` spec (JS-C609) : `GetV` sur
+    // `@@asyncDispose` **puis** `@@dispose` si null/undefined —
+    // accessor-aware (un `@@asyncDispose` présent non-callable
+    // est un `TypeError`, jamais de repli sur `@@dispose`).
     let m = match v {
-        Value::Obj(vid) => e
-            .get_prop(vid, crate::interp::SYM_ASYNC_DISPOSE)
-            .or_else(|| e.get_prop(vid, crate::interp::SYM_DISPOSE)),
-        _ => None,
+        Value::Obj(_) => {
+            let a = e.get_prop_value(v.clone(), crate::interp::SYM_ASYNC_DISPOSE)?;
+            if matches!(a, Value::Undefined | Value::Null) {
+                e.get_prop_value(v.clone(), crate::interp::SYM_DISPOSE)?
+            } else {
+                a
+            }
+        }
+        _ => Value::Undefined,
     };
     match m {
-        Some(f) if e.is_callable(f.clone()) => {
+        f if e.is_callable(f.clone()) => {
             ds_push(e, id, f, v.clone(), Value::Undefined);
             Ok(v)
         }

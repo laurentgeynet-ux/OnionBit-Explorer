@@ -428,6 +428,8 @@ impl BrowsingContext {
                 url_params,
                 weak_map,
                 weak_set,
+                tte: 0,
+                sloppy_fn_acc: 0,
             },
             gen_ctor: Value::Undefined,
             async_gen_ctor: Value::Undefined,

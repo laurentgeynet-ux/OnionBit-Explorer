@@ -334,8 +334,8 @@ impl Engine {
             flags: std::cell::Cell::new(0),
             args_map: None,
         });
-        let resolve = self.bound_native("resolve", promise_resolve, vec![Value::Obj(id)]);
-        let reject = self.bound_native("reject", promise_reject, vec![Value::Obj(id)]);
+        let resolve = bound_anon(self, "resolve", promise_resolve, vec![Value::Obj(id)]);
+        let reject = bound_anon(self, "reject", promise_reject, vec![Value::Obj(id)]);
         if let Some(o) = self.heap.obj_mut(id) {
             if let ObjKind::Promise(p) = &mut o.kind {
                 p.resolve_fn = resolve;
@@ -462,7 +462,8 @@ impl Engine {
             return Ok((Value::Obj(id), ThenSink::Native(id)));
         }
         let slot = self.new_array(vec![Value::Undefined; 2]);
-        let exec = self.bound_native(
+        let exec = bound_anon(
+            self,
             "promise capability executor",
             promise_cap_executor,
             vec![slot.clone()],
@@ -1288,6 +1289,34 @@ impl Engine {
 }
 
 /// `ev.preventDefault()` — pose `defaultPrevented`.
+/// `name = ""` own `{w:false,e:false,c:true}` — les fonctions
+/// internes spec (capability `resolve`/`reject`, executor,
+/// réactions `all`/`allSettled`/`allKeyed`/`any`, `finally`,
+/// `try`) sont **anonymes** ; `bound_native` poserait sinon
+/// `"bound …"` (test262 `*-function-name.js`, JS-C609).
+fn bound_anon(
+    e: &mut Engine,
+    name: &'static str,
+    f: crate::heap::NativeFn,
+    bound: Vec<Value>,
+) -> Value {
+    let v = e.bound_native(name, f, bound);
+    if let Value::Obj(id) = v {
+        let n = e.str_val("");
+        e.set_own_attrs(
+            id,
+            "name",
+            n,
+            crate::heap::PropAttrs {
+                writable: false,
+                enumerable: false,
+                configurable: true,
+            },
+        );
+    }
+    v
+}
+
 fn rejection_prevent_default(e: &mut Engine, this: Value, _a: &[Value]) -> JsResult<Value> {
     if let Value::Obj(id) = this {
         e.set_prop_value(Value::Obj(id), "defaultPrevented", Value::Bool(true))?;
@@ -1385,48 +1414,59 @@ fn promise_then(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> 
     // `finally` — vol 577 dailymotion).
     let c = e.species_ctor(this)?;
     let (cap_promise, next) = e.new_promise_capability(c)?;
-    let (state, result) = {
-        let Some(o) = e.heap.obj_mut(id) else {
-            return Err(e.type_error("then called on non-promise"));
+    e.attach_then(id, on_f, on_r, next);
+    e.probe_prom_then(id);
+    Ok(cap_promise)
+}
+
+impl Engine {
+    /// Attache une [`Reaction`] à la promesse `id` : push sur
+    /// `reactions` si pendante, `Job::Reaction` enfilé sinon —
+    /// cœur partagé de `then` et des souscriptions internes
+    /// (`@@asyncDispose`, JS-C609). Marque `handled` (spec
+    /// `[[PromiseIsHandled]]`).
+    pub(crate) fn attach_then(&mut self, id: ObjId, on_f: Value, on_r: Value, next: ThenSink) {
+        let (state, result) = {
+            let Some(o) = self.heap.obj_mut(id) else {
+                return;
+            };
+            let ObjKind::Promise(p) = &mut o.kind else {
+                return;
+            };
+            // Spec `[[PromiseIsHandled]]` : tout `then` marque la
+            // promesse (même sans handler — le rejet propage à la
+            // chaîne) ; coupe `unhandledrejection` sur `.then` tardif.
+            p.handled = true;
+            (p.state, p.result.clone())
         };
-        let ObjKind::Promise(p) = &mut o.kind else {
-            return Err(e.type_error("then called on non-promise"));
-        };
-        // Spec `[[PromiseIsHandled]]` : tout `then` marque la
-        // promesse (même sans handler — le rejet propage à la
-        // chaîne) ; coupe `unhandledrejection` sur `.then` tardif.
-        p.handled = true;
-        (p.state, p.result.clone())
-    };
-    match state {
-        PromiseState::Pending => {
-            e.sched_tick("then");
-            if let Some(o) = e.heap.obj_mut(id) {
-                if let ObjKind::Promise(p) = &mut o.kind {
-                    p.reactions.push(Reaction {
-                        on_fulfilled: on_f,
-                        on_rejected: on_r,
-                        next,
-                    });
+        match state {
+            PromiseState::Pending => {
+                self.sched_tick("then");
+                if let Some(o) = self.heap.obj_mut(id) {
+                    if let ObjKind::Promise(p) = &mut o.kind {
+                        p.reactions.push(Reaction {
+                            on_fulfilled: on_f,
+                            on_rejected: on_r,
+                            next,
+                        });
+                    }
                 }
             }
-            e.probe_prom_then(id);
-        }
-        PromiseState::Fulfilled | PromiseState::Rejected => {
-            let rejected = state == PromiseState::Rejected;
-            e.sched_tick("post.reaction");
-            e.microtasks.push_back((
-                e.cur_ctx,
-                Job::Reaction {
-                    cb: if rejected { on_r } else { on_f },
-                    arg: result,
-                    rejected,
-                    next,
-                },
-            ));
+            PromiseState::Fulfilled | PromiseState::Rejected => {
+                let rejected = state == PromiseState::Rejected;
+                self.sched_tick("post.reaction");
+                self.microtasks.push_back((
+                    self.cur_ctx,
+                    Job::Reaction {
+                        cb: if rejected { on_r } else { on_f },
+                        arg: result,
+                        rejected,
+                        next,
+                    },
+                ));
+            }
         }
     }
-    Ok(cap_promise)
 }
 
 /// `p.catch(onR)` ≡ `then(undefined, onR)`.
@@ -1458,8 +1498,8 @@ fn promise_finally_err(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<
 /// `p.finally(cb)`.
 fn promise_finally(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
     let cb = arg(args, 0);
-    let ok = e.bound_native("finally", promise_finally_ok, vec![cb.clone()]);
-    let err = e.bound_native("finally", promise_finally_err, vec![cb]);
+    let ok = bound_anon(e, "finally", promise_finally_ok, vec![cb.clone()]);
+    let err = bound_anon(e, "finally", promise_finally_err, vec![cb]);
     promise_then(e, this, &[ok, err])
 }
 
@@ -1548,7 +1588,8 @@ fn promise_all(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
             e.resolve_promise(pid, v);
             Value::Obj(pid)
         };
-        let on_f = e.bound_native(
+        let on_f = bound_anon(
+            e,
             "all",
             promise_all_fulfill,
             vec![Value::Obj(state), Value::Num(i as f64)],
@@ -1630,7 +1671,8 @@ fn promise_all_keyed(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Valu
             Value::Obj(pid)
         };
         let key_v = e.str_val(k);
-        let on_f = e.bound_native(
+        let on_f = bound_anon(
+            e,
             "allKeyed",
             promise_all_keyed_fulfill,
             vec![Value::Obj(state), key_v],
@@ -1700,12 +1742,14 @@ fn promise_all_settled_keyed(e: &mut Engine, _t: Value, args: &[Value]) -> JsRes
             Value::Obj(pid)
         };
         let k_v = e.str_val(k);
-        let on_f = e.bound_native(
+        let on_f = bound_anon(
+            e,
             "allSettledKeyed",
             promise_all_settled_keyed_ok,
             vec![Value::Obj(state), k_v.clone()],
         );
-        let on_r = e.bound_native(
+        let on_r = bound_anon(
+            e,
             "allSettledKeyed",
             promise_all_settled_keyed_err,
             vec![Value::Obj(state), k_v],
@@ -1807,12 +1851,14 @@ fn promise_all_settled(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Va
             e.resolve_promise(pid, v);
             Value::Obj(pid)
         };
-        let on_f = e.bound_native(
+        let on_f = bound_anon(
+            e,
             "allSettled",
             promise_all_settled_ok,
             vec![Value::Obj(state), Value::Num(i as f64)],
         );
-        let on_r = e.bound_native(
+        let on_r = bound_anon(
+            e,
             "allSettled",
             promise_all_settled_err,
             vec![Value::Obj(state), Value::Num(i as f64)],
@@ -1903,7 +1949,8 @@ fn promise_any(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
             };
             p.resolve_fn.clone()
         };
-        let on_r = e.bound_native(
+        let on_r = bound_anon(
+            e,
             "any",
             promise_any_reject,
             vec![Value::Obj(state), Value::Num(i as f64)],
@@ -1997,7 +2044,7 @@ fn promise_try(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
     }
     // Bound = `[f, ...extras]` ; le dernier arg reçu à l'appel est
     // la valeur `then` (ignorée).
-    let cb = e.bound_native("try", promise_try_call, args.to_vec());
+    let cb = bound_anon(e, "try", promise_try_call, args.to_vec());
     let pid = e.new_promise();
     e.resolve_promise(pid, Value::Undefined);
     promise_then(e, Value::Obj(pid), &[cb, Value::Undefined])

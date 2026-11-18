@@ -418,15 +418,22 @@ impl Engine {
     pub(crate) fn register_using(&mut self, v: Value, is_await: bool) -> JsResult<()> {
         match v {
             Value::Undefined | Value::Null => Ok(()),
-            Value::Obj(id) => {
+            Value::Obj(_) => {
+                // `GetDisposeMethod` spec (JS-C609) : `GetV` —
+                // accessor-aware (un `@@dispose` en getter est
+                // invoqué, pas sauté).
                 let m = if is_await {
-                    self.get_prop(id, crate::interp::SYM_ASYNC_DISPOSE)
-                        .or_else(|| self.get_prop(id, crate::interp::SYM_DISPOSE))
+                    let a = self.get_prop_value(v.clone(), crate::interp::SYM_ASYNC_DISPOSE)?;
+                    if matches!(a, Value::Undefined | Value::Null) {
+                        self.get_prop_value(v.clone(), crate::interp::SYM_DISPOSE)?
+                    } else {
+                        a
+                    }
                 } else {
-                    self.get_prop(id, crate::interp::SYM_DISPOSE)
+                    self.get_prop_value(v.clone(), crate::interp::SYM_DISPOSE)?
                 };
                 match m {
-                    Some(f) if self.is_callable(f.clone()) => {
+                    f if self.is_callable(f.clone()) => {
                         if let Some(frame) = self.using_stack.last_mut() {
                             frame.push((f, v, is_await));
                         }

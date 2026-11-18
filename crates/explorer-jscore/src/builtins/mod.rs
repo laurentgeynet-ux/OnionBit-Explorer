@@ -318,6 +318,12 @@ pub(crate) fn install(e: &mut Engine) {
             o.set_accessor("constructor", cg, cs, false);
             o.set_accessor(crate::interp::SYM_TO_STRING_TAG, tg, ts, false);
         }
+        // `Iterator.prototype[Symbol.dispose]` (explicit-resource-
+        // management, JS-C609) : `return()` invoqué, `undefined`
+        // rendu. `name` spec = `"[Symbol.dispose]"` (la clé est la
+        // sentinelle — `add_method` nommerait la fn `\u{f130}…`).
+        let sd = e.native_fn("[Symbol.dispose]", iterator_dispose);
+        e.set_own(e.protos.iterator, crate::interp::SYM_DISPOSE, sd, false);
         e.set_own(g, "Iterator", iter, false);
     }
 
@@ -367,9 +373,13 @@ pub(crate) fn install(e: &mut Engine) {
         e.add_method(ds_p, "use", ds_use);
         e.add_method(ds_p, "adopt", ds_adopt);
         e.add_method(ds_p, "defer", ds_defer);
-        e.add_method(ds_p, "dispose", ds_dispose);
         e.add_method(ds_p, "move", ds_move);
-        e.add_method(ds_p, crate::interp::SYM_DISPOSE, ds_dispose);
+        // Spec : `[Symbol.dispose]` **est** `dispose` — même
+        // objet fn (identité test262 `Symbol.dispose.js`), pas
+        // une seconde native au nom-sentinelle.
+        let dsp = e.native_fn("dispose", ds_dispose);
+        e.set_own(ds_p, "dispose", dsp.clone(), false);
+        e.set_own(ds_p, crate::interp::SYM_DISPOSE, dsp, false);
         let tag = e.str_val("DisposableStack");
         e.set_own_attrs(
             ds_p,
@@ -401,9 +411,12 @@ pub(crate) fn install(e: &mut Engine) {
         e.add_method(ads_p, "use", ads_use);
         e.add_method(ads_p, "adopt", ads_adopt);
         e.add_method(ads_p, "defer", ads_defer);
-        e.add_method(ads_p, "disposeAsync", ads_dispose_async);
         e.add_method(ads_p, "move", ads_move);
-        e.add_method(ads_p, crate::interp::SYM_ASYNC_DISPOSE, ads_dispose_async);
+        // Spec : `[Symbol.asyncDispose]` **est** `disposeAsync`
+        // (même identité — test262 `Symbol.asyncDispose.js`).
+        let adp = e.native_fn("disposeAsync", ads_dispose_async);
+        e.set_own(ads_p, "disposeAsync", adp.clone(), false);
+        e.set_own(ads_p, crate::interp::SYM_ASYNC_DISPOSE, adp, false);
         let tag = e.str_val("AsyncDisposableStack");
         e.set_own_attrs(
             ads_p,
@@ -651,6 +664,11 @@ pub(crate) fn install(e: &mut Engine) {
             .alloc_obj(crate::heap::Object::ordinary(Value::Obj(e.protos.object)));
         let sf = e.native_fn("[Symbol.asyncIterator]", crate::collections::iter_self);
         e.set_own(p, crate::interp::SYM_ASYNC_ITERATOR, sf, false);
+        // `[Symbol.asyncDispose]` (explicit-resource-management,
+        // JS-C609) : `return()` awaité, `undefined` résolu —
+        // `name` spec = `"[Symbol.asyncDispose]"`.
+        let ad = e.native_fn("[Symbol.asyncDispose]", aiter_async_dispose);
+        e.set_own(p, crate::interp::SYM_ASYNC_DISPOSE, ad, false);
         Value::Obj(p)
     };
     let fn_proto = Value::Obj(e.protos.function);
@@ -1090,18 +1108,52 @@ pub(crate) fn install(e: &mut Engine) {
     e.add_method(fp, "apply", function_apply);
     e.add_method(fp, "bind", function_bind);
     e.add_method(fp, "toString", function_to_string);
-    // JS-C463 (§B-125, vol 734) — `caller`/`arguments` sur
-    // `Function.prototype` : V8 rend `null` pour les
-    // fonctions **sloppy** (l'accès remonte la chaîne des
-    // protos jusqu'ici) ; les fonctions strictes/génératrices/
-    // async portent leur propre accesseur poison
-    // (`AddRestrictedFunctionProperties`, interp `fn_obj`) qui
-    // masque celui-ci — le `TypeError` spec est préservé.
+    // JS-C609 — `%ThrowTypeError%` : intrinsèque unique du
+    // realm, get/set partagé par TOUS les accesseurs
+    // restreints (spec `AddRestrictedFunctionProperties` +
+    // `CreateUnmappedArgumentsObject` — `distinct-cross-realm`
+    // test262 exige une identité par realm). Figé :
+    // `{Extensible:false}` + `length`/`name` `{c:false}`
+    // (`native_fn` insère déjà `length` puis `name` —
+    // `property-order` spec respecté). Pas de propre
+    // `caller`/`arguments` (`forbidden-*`).
+    let tte = e.native_fn("", crate::builtins::throw_type_error);
+    if let Value::Obj(tte_id) = tte.clone() {
+        let locked = crate::heap::PropAttrs {
+            writable: false,
+            enumerable: false,
+            configurable: false,
+        };
+        e.set_own_attrs(tte_id, "length", Value::Num(0.0), locked);
+        let empty = e.str_val("");
+        e.set_own_attrs(tte_id, "name", empty, locked);
+        if let Some(o) = e.heap.obj_mut(tte_id) {
+            o.extensible = false;
+        }
+        e.protos.tte = tte_id;
+    }
+    // §B-125 (vol 734) — accesseur « fonction sloppy » :
+    // `f.caller`/`f.arguments` → `null` (approximation de
+    // l'interceptor V8 — le vrai appelant n'est pas tracké).
+    // Posé en propre sur chaque fn sloppy par `fn_obj` —
+    // masque le `%ThrowTypeError%` hérité d'ici.
+    let sloppy = e.native_fn("", crate::builtins::restricted_null_prop);
+    if let Value::Obj(sid) = sloppy {
+        e.protos.sloppy_fn_acc = sid;
+    }
+    // `Function.prototype.{caller,arguments}` = `%ThrowTypeError%`
+    // get/set, `{e:false, c:false}` spec — JS-C463 devient
+    // spec-pur : les fns sloppy portent l'accesseur `null`
+    // ci-dessus en propre, tout le reste jette.
     {
-        let na = e.native_fn("restricted_null", crate::builtins::restricted_null_prop);
+        let acc = crate::heap::PropAttrs {
+            writable: false,
+            enumerable: false,
+            configurable: false,
+        };
         if let Some(o) = e.heap.obj_mut(fp) {
-            o.set_accessor("caller", na.clone(), na.clone(), false);
-            o.set_accessor("arguments", na.clone(), na, false);
+            o.define_accessor("caller", tte.clone(), tte.clone(), acc);
+            o.define_accessor("arguments", tte.clone(), tte.clone(), acc);
         }
     }
     // `%Function.prototype%` est un callable no-op (`Engine::new`)

@@ -1498,11 +1498,24 @@ pub(crate) struct Protos {
     pub weak_map: ObjId,
     /// `WeakSet.prototype` (proto `Object.prototype` — spec).
     pub weak_set: ObjId,
+    /// `%ThrowTypeError%` — intrinsèque **unique du realm** (spec
+    /// `AddRestrictedFunctionProperties` +
+    /// `CreateUnmappedArgumentsObject`, JS-C609) : même identité
+    /// en get **et** set de tous les accesseurs restreints
+    /// (`Function.prototype.{caller,arguments}`, fns strictes/
+    /// gen/async/flèches/bound, `callee`/`caller` des
+    /// `arguments` non-mappés). `0` avant `builtins::install`.
+    pub tte: ObjId,
+    /// Accesseur « fonction sloppy » (§B-125, approximation de
+    /// l'interceptor V8) : `f.caller`/`f.arguments` → `null`
+    /// sur une fn sloppy — prop **own** qui masque le
+    /// `%ThrowTypeError%` hérité de `%Function.prototype%`.
+    pub sloppy_fn_acc: ObjId,
 }
 
 impl Protos {
     /// Tous les prototypes — racines GC permanentes.
-    pub(crate) fn all(&self) -> [ObjId; 38] {
+    pub(crate) fn all(&self) -> [ObjId; 40] {
         [
             self.object,
             self.function,
@@ -1542,6 +1555,8 @@ impl Protos {
             self.regexp_iter,
             self.usp_iter,
             self.iter_helper,
+            self.tte,
+            self.sloppy_fn_acc,
         ]
     }
 }
@@ -1692,6 +1707,10 @@ impl Engine {
                 url_params,
                 weak_map,
                 weak_set,
+                // Posés par `builtins::install` (comme
+                // `promise_ctor`).
+                tte: 0,
+                sloppy_fn_acc: 0,
             },
             rng: seed | 1,
             t0: Instant::now(),
@@ -6809,14 +6828,21 @@ impl Engine {
             if let Some(o) = self.heap.obj_mut(aid) {
                 o.args_map = Some((env.clone(), std::rc::Rc::new(map)));
             }
-            if la.lit.strict {
-                // Spec : `arguments.callee` strict = accesseur
-                // empoisonné — get/set → TypeError (même modèle
-                // que les `caller`/`arguments` restreints).
-                let g = self.native_fn("get callee", crate::builtins::restricted_caller);
-                let s = self.native_fn("set callee", crate::builtins::restricted_caller);
+            if la.lit.strict || !simple {
+                // Spec `CreateUnmappedArgumentsObject` (strict OU
+                // paramètres non-simples — JS-C609) : `callee` ET
+                // `caller` = accesseurs `{get,set: %ThrowTypeError%,
+                // e:false, c:false}` — même identité `protos.tte`
+                // que les poisons de fonctions.
+                let tte = Value::Obj(self.protos.tte);
+                let attrs = crate::heap::PropAttrs {
+                    writable: false,
+                    enumerable: false,
+                    configurable: false,
+                };
                 if let Some(o) = self.heap.obj_mut(aid) {
-                    o.set_accessor("callee", g, s, false);
+                    o.define_accessor("callee", tte.clone(), tte.clone(), attrs);
+                    o.define_accessor("caller", tte.clone(), tte, attrs);
                 }
             } else {
                 self.set_own(aid, "callee", la.f.clone(), false);
@@ -7955,6 +7981,7 @@ impl Engine {
                             Vec::new()
                         })),
                         is_arrow: false,
+                        is_method: false, // ctor — `[[Construct]]`
                         is_async: false,
                         is_gen: false,
                         strict: true, // corps de classe
@@ -12816,6 +12843,41 @@ impl Engine {
         self.construct_nt(f.clone(), args, f)
     }
 
+    /// Spec `IsConstructor` : présence de `[[Construct]]`.
+    /// - script : ni flèche, ni async, ni générateur, ni
+    ///   méthode (le ctor de classe a `is_method = false`) ;
+    /// - natives : `prototype` own — posée non-configurable par
+    ///   `ctor()` et les installs de constructeurs DOM ;
+    /// - bound/proxy : délègue à la cible.
+    pub(crate) fn is_constructor(&mut self, f: Value) -> bool {
+        let mut cur = f;
+        // Chaîne bound/proxy bornée — le code hostile peut
+        // emboîter des `bind`/`Proxy` à profondeur arbitraire.
+        for _ in 0..32 {
+            let Value::Obj(fid) = cur else { return false };
+            if let Ok(Some((_, target, _))) = self.proxy_th(fid) {
+                cur = target;
+                continue;
+            }
+            let Some(o) = self.heap.obj(fid) else {
+                return false;
+            };
+            match &o.kind {
+                ObjKind::Fun(Fun::Script { lit, .. }) => {
+                    return !(lit.is_arrow || lit.is_async || lit.is_gen || lit.is_method);
+                }
+                ObjKind::Fun(Fun::Native { .. } | Fun::BoundNative { .. }) => {
+                    return o.find("prototype").is_some();
+                }
+                ObjKind::Fun(Fun::Bound { target, .. }) => {
+                    cur = target.clone();
+                }
+                _ => return false,
+            }
+        }
+        false
+    }
+
     /// `Reflect.construct(F, args, newTarget)` — `new.target`
     /// explicite, partagé avec les sous-constructions.
     pub(crate) fn construct_nt(&mut self, f: Value, args: &[Value], nt: Value) -> JsResult<Value> {
@@ -12849,17 +12911,22 @@ impl Engine {
                 return self.construct_nt(target, &a, nt);
             }
         }
-        // `new (() => {})`/`new (async f)` — ni flèches ni async
-        // ne sont des constructeurs (spec `IsConstructor`).
-        if let Some(o) = self.heap.obj(fid) {
-            if let ObjKind::Fun(Fun::Script { lit, .. }) = &o.kind {
-                if lit.is_arrow {
-                    return Err(self.type_error("arrow function is not a constructor"));
-                }
-                if lit.is_async {
-                    return Err(self.type_error("async function is not a constructor"));
-                }
-            }
+        // `IsConstructor` spec (JS-C609) : `new (() => {})`/
+        // `new (async f)`/`new m()`/`new g*()`/`new m.native()`
+        // — flèches, asyncs, méthodes et générateurs script,
+        // builtins sans `prototype` own (le marqueur posé par
+        // `ctor()`). Le ctor de classe échappe : `is_method` est
+        // `false` pour lui seul (test262 `not-a-constructor`
+        // ×515 fichiers).
+        if !self.is_constructor(f.clone()) {
+            let d = self.describe(f);
+            return Err(self.type_error(format!("{d} is not a constructor")));
+        }
+        // Spec `Reflect.construct` étape 2 : `newTarget` aussi
+        // doit porter `[[Construct]]` — test262 `isConstructor`
+        // sonde précisément ce chemin.
+        if !self.is_constructor(nt.clone()) {
+            return Err(self.type_error("newTarget is not a constructor"));
         }
         // Le [[Prototype]] de l'instance vient de
         // `newTarget.prototype` — spec `OrdinaryCreateFromConstructor`
@@ -12983,23 +13050,39 @@ impl Engine {
         self.set_own_attrs(id, "length", Value::Num(arity as f64), Self::FN_META_ATTRS);
         let fn_name = self.str_val(lit.name.as_deref().unwrap_or(""));
         self.set_own_attrs(id, "name", fn_name, Self::FN_META_ATTRS);
-        // Spec `AddRestrictedFunctionProperties` : `caller` et
-        // `arguments` sont des accesseurs poison sur les fonctions
-        // strictes, les générateurs et l'async (sloppy : absents —
-        // `f.caller` → `undefined`, déviation vs le `null` de V8).
-        if lit.strict || lit.is_gen || lit.is_async {
-            // JS-C463 — natives sondées par prop : le site
-            // de l'accès est nommé (`fn.restricted`) pour
-            // trancher §B-125 (strict juste vs lecture
-            // bénigne) sans changer la sémantique.
-            let tc = self.native_fn("restricted.caller", crate::builtins::restricted_caller);
-            let ta = self.native_fn(
-                "restricted.arguments",
-                crate::builtins::restricted_arguments,
-            );
+        // JS-C609 — Forbidden Extensions (spec + test262
+        // `forbidden-ext`) : **aucune** fn ne porte de props
+        // `caller`/`arguments` propres — strictes, flèches,
+        // méthodes, générateurs, asyncs, classes, `bind`,
+        // `new Function` ; l'accès jette `TypeError` via les
+        // accesseurs `%ThrowTypeError%` hérités de
+        // `Function.prototype`.
+        // Seule survivante : la fn **sloppy ordinaire**
+        // (déclaration/expression), qui reçoit l'accesseur
+        // `null` own `protos.sloppy_fn_acc` (§B-125 —
+        // approximation de l'interceptor V8 qui rend
+        // l'appelant réel), masquant le TTE hérité.
+        let sloppy_plain = !lit.strict
+            && !lit.is_gen
+            && !lit.is_async
+            && !lit.is_arrow
+            && !lit.is_method
+            && lit.src.as_deref() != Some("<Function>");
+        let acc_id = if sloppy_plain {
+            self.protos.sloppy_fn_acc
+        } else {
+            0
+        };
+        if acc_id != 0 {
+            let acc = Value::Obj(acc_id);
+            let attrs = crate::heap::PropAttrs {
+                writable: false,
+                enumerable: false,
+                configurable: false,
+            };
             if let Some(o) = self.heap.obj_mut(id) {
-                o.set_accessor("caller", tc.clone(), tc, false);
-                o.set_accessor("arguments", ta.clone(), ta, false);
+                o.define_accessor("caller", acc.clone(), acc.clone(), attrs);
+                o.define_accessor("arguments", acc.clone(), acc, attrs);
             }
         }
         Value::Obj(id)

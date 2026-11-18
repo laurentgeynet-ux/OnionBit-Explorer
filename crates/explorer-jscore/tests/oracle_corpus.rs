@@ -880,4 +880,13 @@ pub const PROBES: &[(&str, &str)] = &[
     ("c607_throw", "var r=$262.createRealm();try{r.evalScript('throw 7')}catch(e){e+'|'+Array.isArray([])+'|'+(e instanceof TypeError)}"),
     ("c607_destroy", "var r=$262.createRealm();r.destroy();try{r.evalScript('1')}catch(e){e.constructor.name}"),
     ("c607_detach", "var b=new ArrayBuffer(8);$262.detachArrayBuffer(b);$262.detachArrayBuffer(b);b.byteLength+'|'+b.detached"),
+    // --- JS-C609 : %ThrowTypeError% / @@dispose ---
+    ("c609_tte_id", "var d=Object.getOwnPropertyDescriptor.bind(Object);var T=d(function(){'use strict';return arguments}(),'callee').get;(T===d(Function.prototype,'caller').get)+'|'+(T===d(Function.prototype,'arguments').set)+'|'+(T===d(Function.prototype,'caller').set)"),
+    ("c609_tte_surface", "var T=Object.getOwnPropertyDescriptor(function(){'use strict';return arguments}(),'callee').get;typeof T+'|'+Object.isFrozen(T)+'|'+Object.getOwnPropertyNames(T).join(',')+'|'+(Object.getPrototypeOf(T)===Function.prototype)"),
+    ("c609_sloppy", "function f(){};var g=function(){'use strict'};f.caller+'|'+(()=>{try{g.caller}catch(e){return e.constructor.name}})()"),
+    ("c609_args_ns", "var T=Object.getOwnPropertyDescriptor(function(){'use strict';return arguments}(),'callee').get;var a=function(x={}){return arguments}();(T===Object.getOwnPropertyDescriptor(a,'callee').get)+'|'+(T===Object.getOwnPropertyDescriptor(a,'caller').set)"),
+    ("c609_bound", "var b=function(){}.bind(null);b.hasOwnProperty('caller')+'|'+(()=>{try{b.caller}catch(e){return e.constructor.name}})()"),
+    ("c609_dispose", "var p=Object.getPrototypeOf(Object.getPrototypeOf([][Symbol.iterator]()));var it=Object.create(p);var n=0;it.return=function(){n++};it[Symbol.dispose]()+'|'+n"),
+    ("c609_fp_desc", "var d=Object.getOwnPropertyDescriptor(Function.prototype,'caller');d.enumerable+'|'+d.configurable+'|'+delete Function.prototype.caller"),
+    ("c609_ctor", "var out=[];[Array.prototype.map,()=>{},function*(){},{m(){}}.m].forEach(function(f){try{new f();out.push('ok')}catch(e){out.push('T')}});out.join(',')+'|'+(()=>{try{Reflect.construct(function(){},[],Array.prototype.map);return 'ok'}catch(e){return 'T'}})()+'|'+(()=>{try{return new Map() instanceof Map}catch(e){return 'T'}})()"),
 ];

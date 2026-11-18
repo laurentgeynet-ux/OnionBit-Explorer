@@ -5769,10 +5769,17 @@ fn idl_accessors_descriptor_surface() {
             i.value='zz';seen+'|'+i.value+'|'+i.getAttribute('value')"),
         "S:zz|zz|zz"
     );
-    // `new HTMLInputElement()` — illegal constructor (spec).
+    // `new document.getElementById('inp').constructor()` — la
+    // parse spec est `new (document.getElementById)('inp')` puis
+    // `.constructor()` : `new` d'une **méthode** n'a pas de
+    // `[[Construct]]` → TypeError « not a constructor » (JS-C609,
+    // V8 : « is not a constructor »). Avant : le `new` traversait
+    // par accident et l'appel `.constructor()` rendait le ctor
+    // illégal attendu — l'erreur monte un cran plus tôt, même
+    // verdict TypeError.
     assert_eq!(
         ev("try{new document.getElementById('inp').constructor()}catch(e){e.message}"),
-        "illegal constructor (HTMLInputElement)"
+        "function document.method() { [native code] } is not a constructor"
     );
 }
 

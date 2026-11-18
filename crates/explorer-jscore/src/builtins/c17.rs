@@ -257,6 +257,72 @@ pub(crate) fn iterator_concat(e: &mut Engine, _t: Value, args: &[Value]) -> JsRe
     Ok(crate::collections::it_concat(e, recs))
 }
 
+/// `Iterator.prototype[Symbol.dispose]` (explicit-resource-
+/// management, JS-C609) : `GetMethod(O, "return")` — `Call` si
+/// présent, `undefined` rendu dans tous les cas (le résultat de
+/// `return` n'est **pas** propagé).
+pub(crate) fn iterator_dispose(e: &mut Engine, this: Value, _a: &[Value]) -> JsResult<Value> {
+    match e.get_prop_value(this.clone(), "return")? {
+        Value::Undefined | Value::Null => {}
+        r if e.is_callable(r.clone()) => {
+            e.call_value(r, this, &[])?;
+        }
+        _ => return Err(e.type_error("return is not a function")),
+    }
+    Ok(Value::Undefined)
+}
+
+/// `%AsyncIteratorPrototype%[Symbol.asyncDispose]` (explicit-
+/// resource-management, JS-C609) : `GetMethod(O, "return")` →
+/// `PromiseResolve(%Promise%, result)` puis unwrap → `undefined`.
+/// Toute complétion abrupte **rejette la promesse rendue**
+/// (`IfAbruptRejectPromise`) — jamais de propagation synchrone.
+pub(crate) fn aiter_async_dispose(e: &mut Engine, this: Value, _a: &[Value]) -> JsResult<Value> {
+    use crate::promise::ThenSink;
+    let p = e.new_promise();
+    let ret = match e.get_prop_value(this.clone(), "return") {
+        Ok(v) => v,
+        Err(Thrown(t)) => {
+            e.reject_promise(p, t);
+            return Ok(Value::Obj(p));
+        }
+    };
+    match ret {
+        Value::Undefined | Value::Null => e.resolve_promise(p, Value::Undefined),
+        r if e.is_callable(r.clone()) => match e.call_value(r, this, &[]) {
+            Err(Thrown(t)) => e.reject_promise(p, t),
+            Ok(res) => {
+                // `PromiseResolve(%Promise%, res)` : promesse
+                // moteur réutilisée telle quelle, thenable/valeur
+                // adoptés par `resolve_promise`.
+                let inner = match res {
+                    Value::Obj(iid) if e.is_promise(res.clone()) => iid,
+                    res => {
+                        let ip = e.new_promise();
+                        e.resolve_promise(ip, res);
+                        ip
+                    }
+                };
+                // `PerformPromiseThen(inner, →undefined,
+                // undefined, p)` — la promesse rendue settle à
+                // `undefined` une fois `return()` résolu.
+                let unwrap = e.native_fn("", aiter_ad_unwrap);
+                e.attach_then(inner, unwrap, Value::Undefined, ThenSink::Native(p));
+            }
+        },
+        _ => {
+            let t = e.error_value(e.protos.type_error, "TypeError", "return is not a function");
+            e.reject_promise(p, t);
+        }
+    }
+    Ok(Value::Obj(p))
+}
+
+/// Handler unwrap de `@@asyncDispose` — `(result) -> undefined`.
+fn aiter_ad_unwrap(_e: &mut Engine, _t: Value, _a: &[Value]) -> JsResult<Value> {
+    Ok(Value::Undefined)
+}
+
 /// `SuppressedError(error, suppressed, message?)` — ES2026.
 pub(crate) fn suppressed_error_ctor(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
     let msg = match arg(args, 2) {

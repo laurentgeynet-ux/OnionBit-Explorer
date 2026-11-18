@@ -14866,3 +14866,49 @@ chaque gain rapporté contre les **deux** archétypes.
   (gaps partagés, non-zip) : `basic-*` ×3 (`arr.length =
   2³²−1` — array sparse length), `non-constructible` ×2
   (natives toutes constructibles — cluster `[[Construct]]`).
+
+- [x] **JS-C609 — `%ThrowTypeError%` intrinsèque par realm +
+  props interdites spec + `@@dispose`/`@@asyncDispose` +
+  constructibilité natives + noms Promise** (`interp/mod.rs` +
+  `builtins/{mod,c17,disposable,eval_misc}.rs` + `ast.rs` +
+  `parser.rs` + `promise.rs` + `tests/c609_tte.rs`).
+  Intrinsèque `protos.tte` (racine GC, swap ctx) créé à
+  `builtins::install` — fn figée proto `Function.prototype`,
+  `length`/`name` own `{w:false,e:false,c:false}`,
+  non-extensible. **Identité unique par realm** : le MÊME
+  objet sert `Function.prototype.{caller,arguments}`
+  (accesseur `c:false`), `arguments.{callee,caller}` non-mappé
+  (`materialize_arguments`) — `assert.sameValue` tient.
+  **Modèle own-props spec (b1)** : AUCUNE fn n'a de
+  `caller`/`arguments` propres sauf les fns sloppy ordinaires
+  (accesseur `sloppy_fn_acc` null-compat §B-125) — strictes,
+  `new Function`, flèches, asyncs, générateurs, **méthodes**
+  (nouveau flag `FnLit::is_method` — objets littéraux,
+  classes ctor exclu, membres/classes static) et bound fns
+  (`AddRestrictedFunctionProperties` retiré) n'ont rien : le
+  proto TTE fait le travail. Filtre `forbidden` test262 :
+  **164/164**. **ERM** : `Iterator.prototype[Symbol.dispose]`
+  (`this.return()` sans arg → `undefined`), `%AsyncIteratorPrototype%[Symbol.asyncDispose]`
+  (await `return()` → `undefined` via `attach_then` mutualisé) ;
+  `DisposableStack.dispose` = **même identité** que
+  `[Symbol.dispose]` ; `use`/`register_using` lisent
+  `@@dispose` accessor-aware (`GetV`). Filtre `DisposableStack` :
+  334→354/394. **`IsConstructor`** (`is_constructor`) : bornée
+  — flèches/gens/asyncs/méthodes rejetés, natives sans own
+  `prototype` rejetées (les ctors `ctor()` gardent le leur),
+  newTarget chaîné `Reflect.construct` vérifié — corpus
+  `not-a-constructor` **0 → 1000/1036**. **Noms Promise** :
+  `bound_anon` (`name:""`, `c:true`) sur les fns internes —
+  capability resolve/reject/executor, `finally`, `all`/
+  `allKeyed`/`allSettled`/`any`/`try` — filtre `Promise`
+  760→766/1466 (executor-function-name ×6 soldés).
+  Gate `tests/c609_tte.rs` **9/9** (identité TTE, frozen,
+  sloppy vs restreint, forbidden-ext, bound, ctor, dispose).
+  Lib 54/54, dom 277/277, c463 3/3 (attendu corrigé —
+  `arrow.caller` jette désormais via proto TTE, spec), golden
+  764, baseline versionnée 11/11, clippy/fmt/doc propres.
+  **Reste** : `distinct-cross-realm` (GetFunctionRealm des
+  natives — cluster catalogué), ERM 40 échecs (ordre await/
+  rejet async, ctor-realm AsyncDisposableStack), noms des fns
+  d'adoption thenable étranger ×8 (déviation `promise_then`
+  sur non-Promise documentée).

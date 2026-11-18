@@ -42,13 +42,18 @@ fn c463_sloppy_fn_caller_arguments_null() {
         ),
         "true|true|function"
     );
-    // En lecture héritée aussi : arrow sloppy → proto.
+    // JS-C609 — Forbidden Extensions : les flèches n'ont **pas**
+    // de props propres ; `.caller`/`.arguments` tombent sur les
+    // accesseurs `%ThrowTypeError%` de `Function.prototype` et
+    // jettent — comme V8 (test262 `forbidden-ext` ×164).
     assert_eq!(
         ev(
             &mut e,
-            "var g=()=>1; (g.caller===null)+'|'+(g.arguments===null)"
+            "var g=()=>1; var out='';\
+             try{g.caller}catch(e){out+='T'}\
+             try{g.arguments}catch(e){out+='|T'}out"
         ),
-        "true|true"
+        "T|T"
     );
 }
 

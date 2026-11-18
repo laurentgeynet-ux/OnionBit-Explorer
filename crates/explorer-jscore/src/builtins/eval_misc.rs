@@ -150,6 +150,12 @@ pub(crate) fn function_bind(e: &mut Engine, this: Value, args: &[Value]) -> JsRe
     };
     e.set_own_attrs(id, "length", Value::Num(len), attrs);
     e.set_own_attrs(id, "name", nm, attrs);
+    // Spec Forbidden Extensions (JS-C609) : **pas** de props
+    // `caller`/`arguments` propres sur une bound fn — l'accès
+    // jette via le `%ThrowTypeError%` hérité de
+    // `Function.prototype` (test262
+    // `BoundFunction_restricted-properties` : `hasOwnProperty`
+    // → false).
     Ok(Value::Obj(id))
 }
 
@@ -194,20 +200,6 @@ pub(crate) fn math_sum_precise(e: &mut Engine, _t: Value, args: &[Value]) -> JsR
     Ok(Value::Num(hi + lo))
 }
 
-/// Accesseurs poison `caller`/`arguments` sondés (spec
-/// `AddRestrictedFunctionProperties` — get/set → `TypeError`)
-/// ; §B-125 vol 734 : `uncaught TypeError` ×8+ persistant
-/// post-JS-C463 — strict flaggé juste ou lecture bénigne ?
-/// La sonde nomme la fonction source de l'accès pour trancher.
-pub(crate) fn restricted_caller(e: &mut Engine, _t: Value, _a: &[Value]) -> JsResult<Value> {
-    restricted_probe(e, "caller")
-}
-
-/// Voir `restricted_caller` — variante `arguments`.
-pub(crate) fn restricted_arguments(e: &mut Engine, _t: Value, _a: &[Value]) -> JsResult<Value> {
-    restricted_probe(e, "arguments")
-}
-
 /// Sonde commune : `dom_probe site=fn.restricted` nomme le
 /// frame script le plus proche (l'appelant de l'accesseur),
 /// puis sert le `TypeError` spec inchangé. `d` = profondeur
@@ -226,6 +218,19 @@ fn restricted_probe(e: &mut Engine, prop: &'static str) -> JsResult<Value> {
 /// (`restricted_prop`) qui masque celui-ci.
 pub(crate) fn restricted_null_prop(_e: &mut Engine, _t: Value, _a: &[Value]) -> JsResult<Value> {
     Ok(Value::Null)
+}
+
+/// `%ThrowTypeError%` (JS-C609) — intrinsèque **unique du
+/// realm** (`protos.tte`), get/set de tous les accesseurs
+/// restreints : `Function.prototype.{caller,arguments}`, les
+/// own props `AddRestrictedFunctionProperties` des fns
+/// strictes/gen/async/flèches/bound, `callee`/`caller` des
+/// `arguments` non-mappés. Corps = un `TypeError` spec ;
+/// la fonction elle-même est figée (`{Extensible:false}`,
+/// `length`/`name` `{w:false,e:false,c:false}`) — installée
+/// dans `builtins::install`.
+pub(crate) fn throw_type_error(e: &mut Engine, _t: Value, _a: &[Value]) -> JsResult<Value> {
+    restricted_probe(e, "tte")
 }
 
 // -- Symbol ---------------------------------------------------------
