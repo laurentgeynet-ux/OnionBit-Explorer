@@ -6713,6 +6713,13 @@ impl Engine {
             "FontFaceSet",
             "Animation",
             "KeyframeEffect",
+            // JS-C600 / §B-165 — `CSSAnimation`/
+            // `CSSTransition` : classes filles WebIDL de
+            // `Animation` (squareup `CSSAnimation is not
+            // defined`) — installées APRES le parent pour
+            // la chaîne de protos.
+            "CSSAnimation",
+            "CSSTransition",
             "DocumentTimeline",
             "PerformanceEntry",
             "PerformanceMark",
@@ -6793,6 +6800,12 @@ impl Engine {
             let f = match name {
                 "Animation" => self.native_fn(name, crate::misc_apis::animation_ctor),
                 "KeyframeEffect" => self.native_fn(name, crate::misc_apis::keyframe_effect_ctor),
+                // JS-C600 / §B-165 — `CSSAnimation`/
+                // `CSSTransition` n'ont PAS de
+                // `[Constructor]` WebIDL (spec) : le
+                // bouchon `illegal_ctor` suffit —
+                // `illegal_ctor_bound` rend le bon `name`
+                // depuis JS-C599.
                 _ => self.illegal_ctor_bound(name),
             };
             if let Value::Obj(fid) = f {
@@ -6803,6 +6816,32 @@ impl Engine {
                 match name {
                     "Animation" => self.misc.anim_proto = Some(p),
                     "KeyframeEffect" => self.misc.kfe_proto = Some(p),
+                    // JS-C600 / §B-165 — `X.prototype` fille
+                    // de `Animation.prototype` (chaîne
+                    // `instanceof` spec : une `CSSAnimation`
+                    // EST une `Animation`) + `constructor`
+                    // propre (spec WebIDL).
+                    "CSSAnimation" | "CSSTransition" => {
+                        if let Some(Value::Obj(cid)) = self.get_prop(g, "Animation") {
+                            if let Some(pp @ Value::Obj(_)) = self.get_prop(cid, "prototype") {
+                                if let Some(o) = self.heap.obj_mut(p) {
+                                    o.set_proto(pp);
+                                }
+                            }
+                        }
+                        if name == "CSSAnimation" {
+                            self.misc.css_anim_proto = Some(p);
+                        } else {
+                            self.misc.css_trans_proto = Some(p);
+                            // IDL `transitionProperty` vit
+                            // sur `CSSTransition.prototype`
+                            // (spec) — surface seule :
+                            // aucune transition CSS n'est
+                            // remontée par le miroir.
+                            self.set_own(p, "transitionProperty", Value::Undefined, true);
+                        }
+                        self.set_own(p, "constructor", f.clone(), false);
+                    }
                     "CanvasRenderingContext2D" | "OffscreenCanvasRenderingContext2D" => {
                         // JS-C560 — proto complet de l'interface
                         // (BCD `api` ~73 membres) : méthodes

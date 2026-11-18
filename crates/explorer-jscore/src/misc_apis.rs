@@ -75,6 +75,12 @@ pub(crate) struct MiscState {
     /// `pub(crate)` : le proto du **ctor** est adopté à
     /// l'install (JS-C461 — identité `instanceof`).
     pub(crate) anim_proto: Option<ObjId>,
+    /// `CSSAnimation.prototype`/`CSSTransition.prototype`
+    /// (JS-C600, §B-165) — classes filles d'`Animation`
+    /// (Web Animations spec) : adoptés à l'install comme
+    /// `anim_proto`, héritent `Animation.prototype`.
+    pub(crate) css_anim_proto: Option<ObjId>,
+    pub(crate) css_trans_proto: Option<ObjId>,
     /// `KeyframeEffect.prototype` paresseux + singleton
     /// `document.timeline` (JS-C461 — WAAPI constructible).
     pub(crate) kfe_proto: Option<ObjId>,
@@ -109,6 +115,8 @@ impl MiscState {
             self.abstract_range_proto,
             self.static_range_proto,
             self.anim_proto,
+            self.css_anim_proto,
+            self.css_trans_proto,
             self.kfe_proto,
             self.doc_timeline,
             self.vt_proto,
@@ -2884,6 +2892,14 @@ struct AnimData {
     /// marque `data-explorer-anim` du miroir ; `None` pour
     /// les `Animation` nées du script (`el.animate`, ctor).
     css_name: Option<String>,
+    /// Classe `WebIDL` du wrapper (JS-C600, §B-165) —
+    /// `"Animation"` née du script, `"CSSAnimation"` pour
+    /// les animations CSS déclaratives (les filles n'ont
+    /// pas de `[Constructor]` — surfaces globales +
+    /// chaîne de protos seulement). Pilote le proto du
+    /// wrapper (`instanceof`) et `class_name`
+    /// (`toString`).
+    class_tag: &'static str,
 }
 
 struct AnimHost {
@@ -2911,6 +2927,47 @@ fn anim_proto(e: &mut Engine) -> ObjId {
     p
 }
 
+/// `CSSAnimation.prototype`/`CSSTransition.prototype`
+/// paresseux (JS-C600, §B-165) — proto = `Animation.
+/// prototype` (chaîne `instanceof` spec : une
+/// `CSSAnimation` EST une `Animation`).
+fn css_anim_proto(e: &mut Engine) -> ObjId {
+    if let Some(p) = e.misc.css_anim_proto {
+        return p;
+    }
+    css_child_proto(e, "CSSAnimation", true)
+}
+fn css_trans_proto(e: &mut Engine) -> ObjId {
+    if let Some(p) = e.misc.css_trans_proto {
+        return p;
+    }
+    css_child_proto(e, "CSSTransition", false)
+}
+fn css_child_proto(e: &mut Engine, tag: &str, anim: bool) -> ObjId {
+    let p = e.new_object();
+    let tag = e.str_val(tag);
+    e.set_own_attrs(
+        p,
+        crate::interp::SYM_TO_STRING_TAG,
+        tag,
+        crate::heap::PropAttrs {
+            writable: false,
+            enumerable: false,
+            configurable: true,
+        },
+    );
+    let parent = anim_proto(e);
+    if let Some(o) = e.heap.obj_mut(p) {
+        o.set_proto(Value::Obj(parent));
+    }
+    if anim {
+        e.misc.css_anim_proto = Some(p);
+    } else {
+        e.misc.css_trans_proto = Some(p);
+    }
+    p
+}
+
 /// Wrapper `Animation` pour une donnée (créé une fois —
 /// `getAnimations` rend le même objet).
 fn anim_wrapper(e: &mut Engine, data: &Rc<RefCell<AnimData>>) -> Value {
@@ -2921,7 +2978,11 @@ fn anim_wrapper(e: &mut Engine, data: &Rc<RefCell<AnimData>>) -> Value {
         return Value::Null;
     }
     let v = e.new_host_object(Rc::new(AnimHost { data: data.clone() }));
-    let p = anim_proto(e);
+    let p = match data.borrow().class_tag {
+        "CSSAnimation" => css_anim_proto(e),
+        "CSSTransition" => css_trans_proto(e),
+        _ => anim_proto(e),
+    };
     if let Value::Obj(id) = v {
         if let Some(o) = e.heap.obj_mut(id) {
             o.set_proto(Value::Obj(p));
@@ -3083,6 +3144,7 @@ pub(crate) fn animation_ctor(e: &mut Engine, _t: Value, args: &[Value]) -> JsRes
         effect,
         timeline: tl,
         css_name: None,
+        class_tag: "Animation",
     }));
     e.misc.anims.push(data.clone());
     Ok(anim_wrapper(e, &data))
@@ -3131,6 +3193,7 @@ pub(crate) fn animate(e: &mut Engine, t: Value, args: &[Value]) -> JsResult<Valu
         effect: kfe,
         timeline: Value::Obj(document_timeline(e)),
         css_name: None,
+        class_tag: "Animation",
     }));
     e.misc.anims.push(data.clone());
     Ok(anim_wrapper(e, &data))
@@ -3212,6 +3275,7 @@ fn sync_css_anims(e: &mut Engine) -> Vec<(crate::dom::NodeId, String, bool)> {
             effect: Value::Null,
             timeline: Value::Obj(document_timeline(e)),
             css_name: Some(name.clone()),
+            class_tag: "CSSAnimation",
         }));
         e.misc.anims.push(data);
     }
@@ -3244,7 +3308,7 @@ pub(crate) fn get_animations(e: &mut Engine, this: Value, _a: &[Value]) -> JsRes
 
 impl Host for AnimHost {
     fn class_name(&self) -> &'static str {
-        "Animation"
+        self.data.borrow().class_tag
     }
 
     fn as_any(&self) -> &dyn std::any::Any {

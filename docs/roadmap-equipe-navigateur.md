@@ -14600,3 +14600,29 @@ chaque gain rapporté contre les **deux** archétypes.
   `tests/b119_location.rs` (assignation, delete, identité,
   descripteur, `new URL` résolu). Dom 277/277, lib 54/54,
   ratchet vert, clippy propre.
+
+- [x] **JS-C600 — §B-165 : `CSSAnimation`/`CSSTransition`
+  globales — classes filles WebIDL d'`Animation`
+  installées** (`dom_host.rs`, `misc_apis.rs`). Verbatim vol
+  874 squareup `Bnhti4GK.js:2:4767` : `ReferenceError:
+  CSSAnimation is not defined` — les filles étaient
+  absentes alors qu'`Animation`/`KeyframeEffect` existent
+  (JS-C461) et `AnimHost.animationName` déjà servi
+  (JS-C475). Spec : pas de `[Constructor]` →
+  `illegal_ctor_bound` (le `name` spec fait honneur au
+  feature-detect, bonus JS-C599) ; `X.prototype` chaînée
+  sur `Animation.prototype` (`instanceof` traversant) +
+  `constructor` propre + IDL `transitionProperty` surface
+  sur `CSSTransition.prototype` (pas de transition
+  remontée par le miroir — borné). `AnimData.class_tag`
+  pilote le proto du wrapper : marques
+  `data-explorer-anim` → `CSSAnimation`, script-born →
+  `Animation` ; `class_name` suit. Verrou
+  `tests/b165_css_animation.rs` ×9 (globales, chaîne,
+  illegal-ctor `TypeError`, `el.animate` mère, identité,
+  `animationName` marque CSS, `transitionProperty`). Dom
+  277/277, lib 54/54, ratchet vert, clippy propre.
+  **Reste** : remonter les `CSSTransition` réelles (marque
+  `data-explorer-transition` côté session) quand un site
+  l'exigera — surface proto déjà posée.
+
