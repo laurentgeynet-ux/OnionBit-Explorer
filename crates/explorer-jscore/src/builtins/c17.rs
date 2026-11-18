@@ -145,8 +145,27 @@ pub(crate) fn crypto_random_uuid(e: &mut Engine, _t: Value, _a: &[Value]) -> JsR
     )))
 }
 
-/// `new Iterator()` — constructeur abstrait (spec `TypeError`).
-pub(crate) fn iterator_ctor(e: &mut Engine, _t: Value, _a: &[Value]) -> JsResult<Value> {
+/// `new Iterator()` — constructeur abstrait : la spec ne jette
+/// `TypeError` que si `NewTarget === %Iterator%` (ou appel sans
+/// `new`) ; une sous-classe (`class X extends Iterator`,
+/// `Reflect.construct(Iterator, …, X)`) DOIT construire — les
+/// helpers `Iterator.prototype.map/take/…` en vivent.
+/// Les natives ne voient pas `NewTarget` : le discriminateur est
+/// `this` frais (`ctor_fresh`) dont le proto est
+/// `%Iterator.prototype%` — `construct_nt` alloue sous
+/// `newTarget.prototype`, donc `X.prototype` en sous-classe.
+/// (`ctor_fresh` seul ne discrimine pas : frais en sous-classe
+/// aussi.)
+pub(crate) fn iterator_ctor(e: &mut Engine, t: Value, _a: &[Value]) -> JsResult<Value> {
+    if let Value::Obj(id) = t.clone() {
+        let proto_is_iter = matches!(
+            e.heap.obj(id).map(|o| o.proto.clone()),
+            Some(Value::Obj(p)) if p == e.protos.iterator
+        );
+        if !(e.ctor_fresh == Some(id) && proto_is_iter) {
+            return Ok(t);
+        }
+    }
     Err(e.type_error("The Iterator constructor is abstract"))
 }
 

@@ -14651,3 +14651,19 @@ chaque gain rapporté contre les **deux** archétypes.
   itérateur async ; delta mesuré au prochain run
   `EXPLORER_TEST262_FULL`.
 
+- [x] **JS-C602 — `Iterator` constructeur abstrait :
+  `NewTarget === %Iterator%` jette, sous-classe construit**
+  (`builtins/c17.rs` — cluster ~342 fichiers test262 :
+  sous-classes + helpers `map`/`take`/`WrapForValidIterator`).
+  `iterator_ctor` jetait inconditionnellement ; la spec ne
+  jette que si `NewTarget` est `%Iterator%` (ou appel sans
+  `new`). Discriminateur sans accès à `NewTarget` : `this`
+  frais (`ctor_fresh`) + `proto === %Iterator.prototype%` —
+  `construct_nt` alloue sous `newTarget.prototype`. Sondes
+  oracle ×4 (golden 722) : direct/call/`Reflect.construct
+  (Iterator,[],Iterator)` → `TypeError`, `class X extends
+  Iterator` construit (`instanceof` double-face, proto
+  `X.prototype`), `Reflect.construct` sous-classe autorisé,
+  helpers visibles. Delta au filtre
+  `EXPLORER_TEST262_ONLY=Iterator`.
+
