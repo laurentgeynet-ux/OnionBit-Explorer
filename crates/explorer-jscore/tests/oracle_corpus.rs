@@ -520,6 +520,8 @@ pub const PROBES: &[(&str, &str)] = &[
     ("sym_iterator_str", "typeof Symbol.iterator==='symbol'+'|'+typeof Symbol.asyncIterator"),
     // --- WeakRef / FinalizationRegistry ---
     ("weakref_deref", "typeof WeakRef==='function'&&typeof FinalizationRegistry==='function'"),
+    ("finreg_held_eq", "var r=new FinalizationRegistry(function(){}),t={};try{r.register(t,t,{});'no-throw'}catch(e){e.name}"),
+    ("finreg_tok_eq", "var r2=new FinalizationRegistry(function(){}),t2={};try{r2.register(t2,{},t2);r2.unregister(t2)}catch(e){e.name}"),
     // --- Generators profond ---
     ("gen_throw_caught", "function*g(){try{yield 1}catch(e){yield e+1}}let it=g();it.next().value+'|'+it.throw(5).value"),
     ("gen_delegate_ret", "function*inner(){return 42}function*outer(){let r=yield*inner();yield r}let it=outer();it.next();it.next().value"),
