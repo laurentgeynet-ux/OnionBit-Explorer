@@ -14803,3 +14803,37 @@ chaque gain rapporté contre les **deux** archétypes.
   `NamedEvaluation`), semantiques TypedArray/index
   hors-scope.
 
+- [x] **JS-C607 — hôte `$262` : `createRealm`/`evalScript`/
+  `destroy`/`detachArrayBuffer` natifs + `context_new_bare`
+  (realm nu) — les 182 fichiers `cross-realm` désormais
+  exécutés, 104/356 passes-mode filtre `realm`, les 14
+  `detached-buffer-*-realm` soldés** (`interp/mod.rs` +
+  `t262.rs` + `tests/test262.rs`). `context_new` refactoré en
+  `context_spawn(url, bare)` : le realm nu saute
+  `install_ctx_window_props`, le `window[n]` énumérable du
+  parent et l'insertion dans `children` (observable —
+  `Object.keys(globalThis)` aurait vu `"0"`), et `window`/
+  `self`/`globalThis` ne sont plus posés par `install_builtins`
+  hors contexte iframe. `$262` = objet hôte opt-in
+  (`install_t262` — jamais sur les pages réelles) : `global`,
+  `evalScript` (évaluation **script**, pas d'héritage strict,
+  restore du ctx appelant inconditionnel — succès, throw,
+  syntaxe), `createRealm` → `{global, evalScript, destroy}`
+  (méthodes `bound_native` à `CtxId` capturé), `destroy` →
+  `context_destroy`, `detachArrayBuffer` idempotent (spec
+  `DetachArrayBuffer` — `transfer` jetait au 2e appel).
+  Microtâches déjà engine-globales taguées `CtxId` — routage
+  au realm enregistreur gratuit. Gate `tests/t262_realm.rs`
+  **8/8** + 6 sondes oracle (golden **756**, `eval_jscore`
+  installe `$262`). Lib 54/54, typed_index 12/12, c78 21/21,
+  baseline test262 11/11, clippy/fmt/doc propres. **Mesuré**
+  corpus 45k debug, filtre `realm` : 196 fichiers → **104/356**
+  passes-mode (182 fichiers ex-skips `cross-realm`, dont
+  `detached-buffer-*-realm` ×14 passes — résidus C606 soldés).
+  **Reste** : `GetFunctionRealm`/`Construct` sur callable
+  cross-realm (~116 modes `proto-from-ctor-realm` —
+  `new other.Function()` tourne dans le ctx appelant, cluster
+  distinct), brand-check privé cross-realm (~13 modes),
+  `$262.agent` (1 321 usages — workers/`Atomics.waitAsync`),
+  `ShadowRealm` propre (11 skips), `eval-realm-indirect`,
+  `super` realm.

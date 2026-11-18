@@ -18,6 +18,10 @@
 //! - `flags: [module]` → `eval_module` (imports → skip `loader`) ;
 //! - `flags: [async]` → shim `$DONE` + `run_microtasks` : le test
 //!   échoue si `$DONE` reste non réglé ou reçoit une erreur ;
+//! - l'objet hôte `$262` est installé par le moteur
+//!   (`Engine::install_t262`, JS-C607) pour toutes les passes,
+//!   `raw` compris : `global`, `evalScript` (script dans le
+//!   realm courant), `createRealm` (realm nu), `detachArrayBuffer` ;
 //! - `negative.phase` ∈ {`parse`, `early`, `resolution`} → erreur
 //!   de syntaxe attendue ; `runtime` → throw attendu **et `type`
 //!   vérifié** (`Uncaught` porte `Name: message` — le préfixe fait
@@ -68,7 +72,6 @@ const UNSUPPORTED: &[&str] = &[
     // Jamais implémentés (hors périmètre ou inobservables).
     "hashbang",               // pas de commentaire `#!` ligne 1
     "IsHTMLDDA",              // `document.all` (Annex B host)
-    "cross-realm",            // un seul realm par Engine
     "tail-call-optimization", // tree-walker sans PTC
     // Whitelist JS-C30 — absences vérifiées dans le moteur (le tag
     // test262 exige la feature ; un moteur qui ne l'a pas doit la
@@ -239,12 +242,6 @@ fn modes(m: &Meta) -> &'static [Mode] {
     }
 }
 
-/// Shim `$262` — l'objet hôte test262 : seul
-/// `detachArrayBuffer` est requis par le sous-ensemble courant
-/// (`internals/*detached*`) ; `transfer(0)` détache le buffer
-/// in-place dans le modèle du moteur (`detached` + bytes vidés).
-const D262_SHIM: &str = "var $262 = { detachArrayBuffer: function(b) { b.transfer(0); } };\n";
-
 /// Shim `$DONE` (les tests `flags: async`) — le `doneprintHandle`
 /// officiel dépend d'un `print` hôte ; la sentinelle porte
 /// `globalThis.__t262_done` relue après `run_microtasks`.
@@ -262,7 +259,6 @@ fn build_source(m: &Meta, body: &str, mode: Mode) -> Option<String> {
         src.push_str("\"use strict\";\n");
     }
     if !m.flags.iter().any(|f| f == "raw") {
-        src.push_str(D262_SHIM);
         src.push_str(&harness_src("sta.js")?);
         src.push('\n');
         src.push_str(&harness_src("assert.js")?);
@@ -422,6 +418,11 @@ fn run_pass(path: &Path, m: &Meta, body: &str, mode: Mode) -> Result<(), String>
         return Err("SKIP harness-missing".to_string());
     };
     let mut e = Engine::new();
+    // Objet hôte `$262` (JS-C607) — installé au niveau moteur,
+    // présent y compris en `raw` (host-defined, sémantique
+    // officielle : `global`/`evalScript`/`createRealm`/
+    // `detachArrayBuffer`).
+    e.install_t262();
     let out = match mode {
         Mode::Module => e.eval_module(&src, &path.to_string_lossy()),
         Mode::Sloppy | Mode::Strict => e.eval(&src),

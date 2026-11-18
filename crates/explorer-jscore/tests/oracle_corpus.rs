@@ -873,4 +873,11 @@ pub const PROBES: &[(&str, &str)] = &[
     ("c606_reflect_set", "var t=new Uint8Array(2);var r={};Reflect.set(t,'0',9,r)+'|'+t[0]+'|'+r[0]+'|'+Reflect.set(t,'-1',5)+'|'+delete t[0]"),
     ("c606_desc", "var t=new Uint8Array(2);var d=Object.getOwnPropertyDescriptor(t,'0');d.writable+'|'+d.enumerable+'|'+d.configurable+'|'+Object.getOwnPropertyNames(t).join(',')"),
     ("c606_big", "var t=new BigInt64Array(1);t[0]=5n;t['-1']=9n;t[0]+'|'+Object.hasOwn(t,'-1')+'|'+Object.hasOwn(t,'0')"),
+    // --- JS-C607 : hôte $262 / realms nus ---
+    ("c607_eval", "var r=$262.createRealm();r.evalScript('40+2')+'|'+r.evalScript('var q=1;q+1')"),
+    ("c607_intr", "var r=$262.createRealm();(r.evalScript('Array')===Array)+'|'+r.evalScript('Array===globalThis.Array')"),
+    ("c607_nu", "var r=$262.createRealm();r.evalScript('typeof window+\\'|\\'+typeof self')+'|'+('0' in globalThis)"),
+    ("c607_throw", "var r=$262.createRealm();try{r.evalScript('throw 7')}catch(e){e+'|'+Array.isArray([])+'|'+(e instanceof TypeError)}"),
+    ("c607_destroy", "var r=$262.createRealm();r.destroy();try{r.evalScript('1')}catch(e){e.constructor.name}"),
+    ("c607_detach", "var b=new ArrayBuffer(8);$262.detachArrayBuffer(b);$262.detachArrayBuffer(b);b.byteLength+'|'+b.detached"),
 ];

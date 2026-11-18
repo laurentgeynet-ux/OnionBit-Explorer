@@ -2142,6 +2142,31 @@ impl Engine {
                 return existing;
             }
         }
+        self.context_spawn(url, frame_node, true)
+    }
+
+    /// Realm **nu** (JS-C607 — `$262.createRealm` du harness
+    /// test262, ADR-0010) : même mécanisme que [`Self::context_new`]
+    /// — intrinsics frais, même heap — mais aucune surface
+    /// `Window` : pas de `parent`/`top`/`postMessage`, pas
+    /// d'accessor `window[n]` sur le global parent (la prop
+    /// énumérable `"0"` serait observable via
+    /// `Object.keys(globalThis)`), `window`/`self` retirés du
+    /// global frais — les tests realm-nu sondent leur absence.
+    pub fn context_new_bare(&mut self, url: &str) -> u32 {
+        self.context_spawn(url, None, false)
+    }
+
+    /// Corps partagé de [`Self::context_new`] /
+    /// [`Self::context_new_bare`] — `windowed` = vrai contexte de
+    /// navigation (props `Window`, `window[n]` parent), `false` =
+    /// realm nu.
+    fn context_spawn(
+        &mut self,
+        url: &str,
+        frame_node: Option<(usize, crate::dom::NodeId)>,
+        windowed: bool,
+    ) -> u32 {
         let parent = self.cur_ctx;
         let id = self.ctxs.len() as u32;
         self.ctxs.push(crate::context::CtxMeta {
@@ -2156,8 +2181,12 @@ impl Engine {
             boot_phase: crate::context::BootPhase::Idle,
             boot_grace_until: None,
         });
-        if let Some(m) = self.ctxs.get_mut(parent as usize) {
-            m.children.push(id);
+        // `children` pilote `window.length`/`frames[n]`/`window[n]`
+        // — un realm nu n'y figure pas (n'est pas un cadre).
+        if windowed {
+            if let Some(m) = self.ctxs.get_mut(parent as usize) {
+                m.children.push(id);
+            }
         }
         // Intrinsics frais par realm (spec : chaque global a ses
         // prototypes — `frame.Array !== parent.Array`).
@@ -2180,10 +2209,23 @@ impl Engine {
         crate::typed_array::install(self);
         crate::builtins::install_arities(self);
         self.hooks.page_url = url.to_string();
-        crate::context::install_ctx_window_props(self);
+        if windowed {
+            crate::context::install_ctx_window_props(self);
+        } else {
+            // Realm nu — `builtins::install` pose `window`/`self`
+            // auto-référencés sur tout global ; un realm test262
+            // nu doit sonder leur absence (`globalThis` reste,
+            // spec).
+            let g = self.global;
+            self.delete_prop(g, "window");
+            self.delete_prop(g, "self");
+        }
         self.parked.insert(parent, fresh);
         self.cur_ctx = id;
         self.ctxs[id as usize].global = Some(self.global);
+        if !windowed {
+            return id;
+        }
         // `window[n]` sur la fenêtre parente — accessor index
         // DYNAMIQUE (l'enfant résolu à la lecture : `destroy`
         // et réordonnancement restent honnêtes — jamais une

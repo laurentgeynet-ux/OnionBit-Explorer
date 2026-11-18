@@ -84,6 +84,7 @@ mod sha2;
 mod storage;
 mod streams;
 mod svg_path;
+mod t262;
 mod temporal;
 mod timers;
 mod typed_array;

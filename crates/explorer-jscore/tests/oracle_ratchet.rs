@@ -36,6 +36,10 @@ enum Outcome {
 
 fn eval_jscore(src: &str) -> Outcome {
     let mut e = explorer_jscore::Engine::new();
+    // `$262` hôte (JS-C607) : opt-in du moteur, posé ici pour que
+    // les sondes `c607_*` exercent les realms — aucune sonde
+    // existante n'énumère le global ni ne référence `$262`.
+    e.install_t262();
     match e.eval(src) {
         Ok(v) => Outcome::Value(e.describe(v)),
         Err(explorer_jscore::Error::Syntax { message, .. }) => Outcome::Syntax(message),
