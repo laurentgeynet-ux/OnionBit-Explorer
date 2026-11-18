@@ -607,7 +607,7 @@ pub const PROBES: &[(&str, &str)] = &[
     ("iter_take_drop", "[...Iterator.from([1,2,3,4]).drop(1).take(2)].join(',')"),
     ("iter_reduce_find", "Iterator.from([5,6,7]).find(x=>x>5)+'|'+Iterator.from([1]).reduce((a,b)=>a+b,10)"),
     ("iter_some_flat", "Iterator.from([[1],[2]]).flatMap(x=>x).toArray().join(',')"),
-    ("iter_ctor_abstract", "try{new Iterator()}catch(e){e.constructor.name}"),
+    ("iter_ctor_abstract", "(function(){let r='';try{new Iterator()}catch(e){r=e.constructor.name}try{Iterator.call({})}catch(e){r+='|'+e.constructor.name}try{Reflect.apply(Iterator,{},[])}catch(e){r+='|'+e.constructor.name}return r})()"),
     ("iter_ctor_subclass", "class X extends Iterator{};let x=new X();(x instanceof Iterator)+'|'+(Object.getPrototypeOf(x)===X.prototype)"),
     ("iter_ctor_reflect", "(function(){let r='ok';try{Reflect.construct(Iterator,[],class{})}catch(e){r='ERR:'+e}try{Reflect.construct(Iterator,[],Iterator)}catch(e){return r+'|'+e.constructor.name}return r+'|no-throw'})()"),
     ("iter_ctor_helpers", "class Z extends Iterator{};let z=new Z();typeof z.map+'|'+typeof z.take"),
