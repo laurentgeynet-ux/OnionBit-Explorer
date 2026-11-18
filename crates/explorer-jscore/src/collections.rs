@@ -580,7 +580,7 @@ fn set_is_disjoint(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Valu
 // Iterator prototype — `next()` on ObjKind::Iter
 // ------------------------------------------------------------------
 
-fn iter_next(e: &mut Engine, this: Value, a: &[Value]) -> JsResult<Value> {
+pub(crate) fn iter_next(e: &mut Engine, this: Value, a: &[Value]) -> JsResult<Value> {
     let Value::Obj(id) = this else {
         return Err(e.type_error("next on non-iterator"));
     };
@@ -649,7 +649,7 @@ pub(crate) fn iter_self(_e: &mut Engine, this: Value, _a: &[Value]) -> JsResult<
 /// `gen.return(v)` — termine l'itérateur (le corps a déjà tourné
 /// en mode eager : pas de `finally` à rejouer) → `{value: v,
 /// done: true}`.
-fn iter_return(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
+pub(crate) fn iter_return(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
     let Value::Obj(id) = this else {
         return Err(e.type_error("return on non-iterator"));
     };
@@ -701,7 +701,7 @@ fn iter_return(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
 /// `gen.throw(e)` — lazy (JS-C34) : jeté *au site* suspendu
 /// (un `try/catch` interne peut rattraper) ; eager : levée
 /// directe à l'appelant.
-fn iter_throw(e: &mut Engine, t: Value, args: &[Value]) -> JsResult<Value> {
+pub(crate) fn iter_throw(e: &mut Engine, t: Value, args: &[Value]) -> JsResult<Value> {
     if let Value::Obj(id) = t {
         if let Some(o) = e.heap.obj(id) {
             if let ObjKind::GenLive { exec } = &o.kind {

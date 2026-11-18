@@ -8168,33 +8168,20 @@ impl Engine {
                     });
             }
         }
-        if let ObjKind::Fun(Fun::Script { lit, .. }) = &o.kind {
-            if key == "length" {
-                // `fn.length` — params before the first rest/default.
-                let n = lit
-                    .params
-                    .iter()
-                    .take_while(|p| !p.rest && !matches!(p.pat, Pat::Default(..)))
-                    .count();
-                return Some(Prop::Data {
-                    value: Value::Num(n as f64),
-                    attrs: crate::heap::PropAttrs {
-                        writable: false,
-                        enumerable: false,
-                        configurable: true,
-                    },
-                });
-            }
-        }
+        // `fn.length`/`fn.name` script — props own **réelles**
+        // matérialisées par `make_function` (JS-C604) : plus de
+        // synthèse ici — `o.find` les sert, un `delete` réel rend
+        // la prop absente et la marche proto livre le repli spec
+        // (`Function.prototype.length` = 0). La synthèse
+        // pré-`o.find` masquait le delete (échec
+        // `isConfigurable` des `*/length.js` générateurs,
+        // JS-C605).
         // `fn.name` — extraction pure pendant que `o` vit ;
         // matérialisation après le bloc `big` (borrow mort) :
-        // `lit.name`, nom natif, ou `bound <cible>` — une vraie
-        // prop own `name` (`o.find` ci-dessous) prime, spec
-        // configurable:true.
+        // nom natif ou `bound <cible>` (les `Fun::Script` ont
+        // déjà leur prop own) — une vraie prop own `name`
+        // (`o.find` ci-dessous) prime, spec configurable:true.
         let (fname, ftgt) = match &o.kind {
-            ObjKind::Fun(Fun::Script { lit, .. }) => {
-                (Some(lit.name.clone().unwrap_or_default()), None)
-            }
             ObjKind::Fun(Fun::Native { name, .. } | Fun::BoundNative { name, .. }) => {
                 (Some(crate::intern(name)), None)
             }

@@ -14742,3 +14742,41 @@ chaque gain rapporté contre les **deux** archétypes.
   ×510, noms des natives ×~80 (métadonnées builtins,
   chantier propre), priorités/Temporal divers.
 
+- [x] **JS-C605 — métadonnées `name`/`length` des builtins :
+  table `arities.rs` régénérée depuis test262 (602 arités +
+  614 noms + 49 accesseurs) — +586 passes-mode combinés sur
+  les filtres `length.js`/`name.js`**
+  (`builtins/{mod,arities}.rs` + `object.rs` +
+  `eval_misc.rs` + `interp/mod.rs` + `collections.rs`).
+  Avant : `native_fn` posait `length = 0` pour **toutes**
+  les natives et `install_arities` ne corrigeait que ~190
+  chemins boa (ctors/statics, zéro `prototype.*`) ; les
+  accesseurs (`get size`…) et méthodes `@@x` échappaient.
+  Mécanisme : `arities.rs` extrait du corpus piné
+  (`verifyProperty`/`sameValue` des `*/length.js` et
+  `*/name.js` — spec > boa en cas de conflit) —
+  `ARITIES`/`NAMES` par chemin `globalThis`-relatif
+  (segment `Symbol.x` → sentinelle `\u{f130}…`, racines
+  `%XxxProto%` → intrinsèques `e.protos`/`gen_proto`…),
+  `ACC_*` par `(hôte, clé, get|set)` — appliqués par
+  `install_arities` après tous les installs aux attrs spec.
+  **Collatéraux spec réparés** : `%GeneratorPrototype%`
+  porte désormais ses propres `next`/`return`/`throw`
+  (arité 1, natives `iter_*` partagées — le `next` concret
+  hérité restait à 0) ; `hasOwnProperty`/`find_prop` ne
+  synthétisent plus `length`/`name` des `Fun::Script`
+  (un `delete` réel restait masqué — `isConfigurable` des
+  `*/length.js` générateurs) ; `Function.prototype.bind`
+  applique `BoundFunctionCreate` (`length` own-only +
+  `ToIntegerOrInfinity` — `∞` propagé, héritage ignoré).
+  Gate `tests/builtin_meta.rs` **7/7** + 4 sondes oracle
+  (golden **743**). Lib 54/54, iter_lazy 25/25,
+  agen_queue 12/12, ratchet vert. **Mesuré** corpus 45k
+  release : `length.js` **844 → 1 350/1 492** (+506,
+  échecs −78 %), `name.js` **1 511 → 1 591/1 708** (+80,
+  échecs −41 %). **Reste** : `%ThrowTypeError%` absent,
+  `@@dispose`/`@@asyncDispose` non installés, fns internes
+  Promise sans own `name`, `static #f = fn` (site
+  `NamedEvaluation`), semantiques TypedArray/index
+  hors-scope.
+

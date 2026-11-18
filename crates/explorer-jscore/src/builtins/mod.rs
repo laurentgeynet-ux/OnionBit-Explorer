@@ -710,6 +710,14 @@ pub(crate) fn install(e: &mut Engine) {
             if tag == "Generator" {
                 e.gen_fn_proto = gfp_v;
                 e.gen_proto = gp_v;
+                // JS-C605 — `%GeneratorPrototype%` porte ses
+                // **propres** `next`/`return`/`throw` (spec —
+                // arité 1, distincte du proto d'itérateur
+                // concret). Même native : `iter_next` dispatche
+                // sur `ObjKind::GenLive` comme avant.
+                e.add_method(gp, "next", crate::collections::iter_next);
+                e.add_method(gp, "return", crate::collections::iter_return);
+                e.add_method(gp, "throw", crate::collections::iter_throw);
             } else {
                 e.async_gen_fn_proto = gfp_v;
                 e.async_gen_proto = gp_v;
@@ -1530,42 +1538,107 @@ pub(crate) fn install(e: &mut Engine) {
     e.set_own(g, "Math", Value::Obj(math), false);
 }
 
-/// Arités spec (`fn.length`) — table générée depuis boa
-/// (`arities::ARITIES`, chemins `globalThis`-relatifs). Une passe
-/// **après tous les installs** (`builtins`/`collections`/`intl`/
-/// `temporal`/`json`/`typed_array`) : résout chaque chemin et
-/// réécrit le `length` own de la fonction (flags spec
-/// `{w:false,e:false,c:true}` posés par `native_fn` — on ne
-/// corrige que la valeur). Un chemin non résolu (hôte non
-/// installé, builtin absent) est ignoré.
+/// Métadonnées spec des fonctions builtin (`fn.length` /
+/// `fn.name`) — tables `arities.rs` extraites de test262 ∪ boa.
+/// Une passe **après tous les installs** (`builtins`/`collections`/
+/// `intl`/`temporal`/`json`/`typed_array`) : résout chaque chemin
+/// `globalThis`-relatif et réécrit le `length`/`name` own de la
+/// fonction (flags spec `{w:false,e:false,c:true}` posés par
+/// `native_fn` — on ne corrige que la valeur). Les accesseurs
+/// (`ACC_*`) sont atteints via le `Prop::Acc` de l'hôte. Un chemin
+/// non résolu (hôte non installé, builtin absent, cible non
+/// appelable — `Symbol.x` renvoie un symbole, pas une fonction)
+/// est ignoré.
 pub(crate) fn install_arities(e: &mut Engine) {
+    const A: crate::heap::PropAttrs = crate::heap::PropAttrs {
+        writable: false,
+        enumerable: false,
+        configurable: true,
+    };
     for &(path, arity) in arities::ARITIES {
-        let mut cur = Value::Obj(e.global);
-        let mut ok = true;
-        for seg in path.split('.') {
-            let Value::Obj(id) = cur else {
-                ok = false;
-                break;
-            };
-            if let Some(v) = e.get_prop(id, seg) {
-                cur = v;
-            } else {
-                ok = false;
-                break;
+        if let Some(Value::Obj(fid)) = resolve_meta_path(e, path) {
+            e.set_own_attrs(fid, "length", Value::Num(f64::from(arity)), A);
+        }
+    }
+    for &(path, name) in arities::NAMES {
+        if let Some(v @ Value::Obj(fid)) = resolve_meta_path(e, path) {
+            if e.is_callable(v) {
+                let nm = e.str_val(name);
+                e.set_own_attrs(fid, "name", nm, A);
             }
         }
-        if let (true, Value::Obj(fid)) = (ok, cur) {
-            e.set_own_attrs(
-                fid,
-                "length",
-                Value::Num(f64::from(arity)),
-                crate::heap::PropAttrs {
-                    writable: false,
-                    enumerable: false,
-                    configurable: true,
-                },
-            );
+    }
+    for &(host, key, which, arity) in arities::ACC_ARITIES {
+        if let Some(fid) = resolve_accessor(e, host, key, which) {
+            e.set_own_attrs(fid, "length", Value::Num(f64::from(arity)), A);
         }
+    }
+    for &(host, key, which, name) in arities::ACC_NAMES {
+        if let Some(fid) = resolve_accessor(e, host, key, which) {
+            let nm = e.str_val(name);
+            e.set_own_attrs(fid, "name", nm, A);
+        }
+    }
+}
+
+/// Résout `a.b.c` depuis `globalThis` ; un segment `Symbol` suivi
+/// de `x` désigne la clé sentinelle `\u{f130}Symbol.x`. Données
+/// propres seulement (`get_prop` — jamais d'appel d'accesseur).
+/// Le premier segment peut aussi nommer un **intrinsèque**
+/// (`%XxxProto%`) non exposé en global — alias vers `e.protos` /
+/// les protos générateurs (`GeneratorPrototype.next` →
+/// `%GeneratorPrototype%.next`…).
+fn resolve_meta_path(e: &mut Engine, path: &str) -> Option<Value> {
+    let mut segs = path.split('.');
+    let first = segs.next()?;
+    let mut cur = match first {
+        "ArrayIteratorProto" => Value::Obj(e.protos.array_iter),
+        "MapIteratorProto" => Value::Obj(e.protos.map_iter),
+        "SetIteratorProto" => Value::Obj(e.protos.set_iter),
+        "StringIteratorProto" => Value::Obj(e.protos.string_iter),
+        "RegExpStringIteratorProto" => Value::Obj(e.protos.regexp_iter),
+        "IteratorHelperPrototype" => Value::Obj(e.protos.iter_helper),
+        "GeneratorPrototype" => e.gen_proto.clone(),
+        "AsyncGeneratorPrototype" => e.async_gen_proto.clone(),
+        "GeneratorFunction" => e.gen_ctor.clone(),
+        "AsyncGeneratorFunction" => e.async_gen_ctor.clone(),
+        _ => e.get_prop(e.global, first)?,
+    };
+    while let Some(seg) = segs.next() {
+        let Value::Obj(id) = cur else { return None };
+        let key;
+        let seg = if seg == "Symbol" {
+            key = format!("\u{f130}Symbol.{}", segs.next()?);
+            &key
+        } else {
+            seg
+        };
+        cur = e.get_prop(id, seg)?;
+    }
+    Some(cur)
+}
+
+/// `get`/`set` d'un accesseur own sur `hôte.clé` → `ObjId` de la
+/// fonction (`None` si hôte/clé absent ou prop non-accesseur).
+fn resolve_accessor(e: &mut Engine, host: &str, key: &str, which: &str) -> Option<crate::ObjId> {
+    let Value::Obj(hid) = resolve_meta_path(e, host)? else {
+        return None;
+    };
+    let key = if let Some(rest) = key.strip_prefix("Symbol.") {
+        format!("\u{f130}Symbol.{rest}")
+    } else {
+        key.to_string()
+    };
+    let prop = e.heap.obj(hid)?.find(&key)?;
+    let crate::heap::Prop::Acc { get, set, .. } = prop else {
+        return None;
+    };
+    let v = if which == "set" { set } else { get };
+    let Value::Obj(fid) = v else { return None };
+    if e.is_callable(Value::Obj(fid)) {
+        Some(fid)
+    } else {
+        None
     }
 }
 

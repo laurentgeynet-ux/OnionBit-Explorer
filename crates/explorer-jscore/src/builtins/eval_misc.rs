@@ -120,13 +120,24 @@ pub(crate) fn function_bind(e: &mut Engine, this: Value, args: &[Value]) -> JsRe
         proto,
     ));
     // Spec `BoundFunctionCreate` : `length` =
-    // max(0, target.length − nArgs liés), `name` =
-    // "bound " + target.name — props `{w:false, c:true}`.
-    let tl = match e.get_prop_value(this.clone(), "length")? {
-        Value::Num(n) if n.is_finite() => n.max(0.0) as usize,
-        _ => 0,
+    // max(0, ToIntegerOrInfinity(target.[[Own]]length) − nArgs
+    // liés) — la lecture est **own-only** (`HasOwnProperty` :
+    // un `length` hérité ne compte pas), `+∞` se propage ;
+    // `name` = "bound " + target.name — props
+    // `{w:false, c:true}`.
+    let tl = match this {
+        Value::Obj(tid) => e
+            .heap
+            .obj(tid)
+            .and_then(|o| o.find("length"))
+            .and_then(|p| p.data_value()),
+        _ => None,
     };
-    let len = tl.saturating_sub(bound.len());
+    let tl = match tl {
+        Some(Value::Num(n)) if !n.is_nan() => n.trunc(),
+        _ => 0.0,
+    };
+    let len = (tl - bound.len() as f64).max(0.0);
     let tname = match e.get_prop_value(this, "name")? {
         v @ Value::Str(_) => e.to_js_string(v)?,
         _ => String::new(),
@@ -137,7 +148,7 @@ pub(crate) fn function_bind(e: &mut Engine, this: Value, args: &[Value]) -> JsRe
         enumerable: false,
         configurable: true,
     };
-    e.set_own_attrs(id, "length", Value::Num(len as f64), attrs);
+    e.set_own_attrs(id, "length", Value::Num(len), attrs);
     e.set_own_attrs(id, "name", nm, attrs);
     Ok(Value::Obj(id))
 }

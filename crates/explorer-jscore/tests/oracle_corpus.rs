@@ -860,4 +860,9 @@ pub const PROBES: &[(&str, &str)] = &[
     ("c604_defaults", "function d(x=function(){}){return x.name}var{w=()=>0}={};d()+'|'+w.name"),
     ("c604_member_assign", "var f;f=function(){};var t={};t.k=function(){};f.name+'|'+t.k.name"),
     ("c604_attrs", "var f=()=>0;var d=Object.getOwnPropertyDescriptor(f,'name');f.name='x';f.name+'|'+d.writable+','+d.enumerable+','+d.configurable"),
+    // --- JS-C605 : métadonnées name/length des builtins ---
+    ("c605_arities", "Array.prototype.push.length+'|'+Map.prototype.set.length+'|'+parseInt.length+'|'+JSON.stringify.length"),
+    ("c605_names", "Array.prototype.push.name+'|'+Iterator.prototype[Symbol.iterator].name+'|'+Array.prototype[Symbol.iterator].name"),
+    ("c605_accessors", "var g=Object.getOwnPropertyDescriptor(Map.prototype,'size').get;g.length+'|'+g.name"),
+    ("c605_gen_proto", "(function*(){})().next.length+'|'+[].keys().next.length+'|'+Array.prototype.push.bind(null,1,2).length+'|'+parseInt.bind(null).name"),
 ];
